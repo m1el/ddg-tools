@@ -480,3 +480,64 @@ fn invalid_factor_once_options_are_rejected() {
         ));
     }
 }
+
+/// A closed mesh whose angle sum no single site can carry (every angle capped far below `4π`,
+/// and, with a prescribed cone, a negative sum): the method starts with several sites clamped
+/// at their bounds. Both signs, against the reference method.
+#[test]
+fn closed_mesh_with_every_site_capped() {
+    let g = ddg_core::generators::icosphere(2).unwrap();
+    let mut p = g.positions.clone();
+    ddg_core::generators::perturb(&mut p, [0.02; 3], 5);
+    let mesh = TestMesh::from_positions("capped-sphere", p, g.faces);
+    let nv = mesh.mesh.n_vertices();
+    let mut compared = 0;
+    for (cap_lo, cap_hi, prescribed, lambda) in [
+        (0.0, 1.0, None, 0.1),
+        (0.0, 1.0, None, 0.01),
+        (-1.0, 1.0, Some(15.0), 0.1),
+        (-0.8, 0.8, Some(15.0), 0.02),
+        (-f64::INFINITY, 0.5, None, 0.05),
+    ] {
+        let mut f = Features::plain(lambda);
+        f.lower_bounds = Some(vec![cap_lo; nv]);
+        f.upper_bounds = Some(vec![cap_hi; nv]);
+        if let Some(angle) = prescribed {
+            f.prescribed_cones = vec![ddg_optimal_cones::Cone { vertex: 3, angle }];
+        }
+        let problem = f.problem(&mesh);
+        let reference = solve_with_boundary(
+            &problem,
+            BoundaryTreatment::Fixed,
+            &with_method(SolveMethod::Reference),
+        );
+        let reference = match reference {
+            Ok(r) => r,
+            Err(ConeError::Infeasible { .. }) => continue,
+            Err(e) => panic!("{e}"),
+        };
+        assert_eq!(reference.report.status, Status::Converged);
+        assert_eq!(
+            factor_once_support(&problem, BoundaryTreatment::Fixed).unwrap(),
+            None,
+            "{cap_lo} {cap_hi} {prescribed:?}"
+        );
+        let fast = solve_with_boundary(
+            &problem,
+            BoundaryTreatment::Fixed,
+            &with_method(SolveMethod::FactorOnce),
+        )
+        .unwrap();
+        assert_eq!(
+            fast.report.status,
+            Status::Converged,
+            "{cap_lo} {cap_hi} {prescribed:?}: {:?}",
+            fast.report.method.fallback
+        );
+        let d = compare(&mesh, &f, BoundaryTreatment::Fixed, &reference, &fast);
+        assert!(d.u_ratio <= 1.0 + 1e-6 && d.mu_ratio <= 1.0 + 1e-6, "{d:?}");
+        assert!(d.objective <= d.objective_allowed + 1e-12, "{d:?}");
+        compared += 1;
+    }
+    assert_eq!(compared, 5, "all five problems are feasible");
+}

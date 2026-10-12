@@ -38,6 +38,8 @@ const CLAMPED: u8 = 2;
 
 pub(super) struct Dense {
     sum: Option<f64>,
+    /// Starting value of the pin.
+    pin_start: f64,
     dim: usize,
     cap: usize,
     h: Vec<f64>,
@@ -85,10 +87,11 @@ pub(super) fn violation_at_zero(t: f64, lo: f64, hi: f64, v: f64) -> Option<(f64
 
 impl Dense {
     /// `sum`: `Some(c)` for the constraint `Σ µ = c`, then the first variable added by
-    /// [`Dense::extend`] is the pin, which starts free with the value `c`.
-    pub fn new(sum: Option<f64>) -> Dense {
+    /// [`Dense::extend`] is the pin, which starts free with the value `pin_start`.
+    pub fn new(sum: Option<f64>, pin_start: f64) -> Dense {
         Dense {
             sum,
+            pin_start,
             dim: 0,
             cap: 0,
             h: vec![],
@@ -186,8 +189,9 @@ impl Dense {
         self.hi.extend_from_slice(hi);
         self.blocked.extend(std::iter::repeat_n(false, k));
         self.dim = new;
-        if let (0, Some(c)) = (old, self.sum) {
-            // The pin starts free with the whole sum (the caller checked that it may).
+        if let (0, Some(_)) = (old, self.sum) {
+            // The pin starts free with the value the caller chose (within its bounds).
+            let c = self.pin_start;
             self.mu[0] = c;
             self.sign[0] = if c > 0.0 || (c == 0.0 && self.hi[0] > 0.0) {
                 1.0
@@ -196,6 +200,14 @@ impl Dense {
             };
             self.state[0] = FREE;
         }
+    }
+
+    /// Starts variable `j` clamped at the nonzero bound `bound` (a feasible starting point for a
+    /// sum that no single variable can carry).
+    pub fn clamp(&mut self, j: usize, bound: f64) {
+        self.state[j] = CLAMPED;
+        self.mu[j] = bound;
+        self.clamped.push(j);
     }
 
     #[inline]

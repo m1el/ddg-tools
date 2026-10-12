@@ -27,6 +27,18 @@ use faer::{Accum, MatMut, MatRef, Par};
 use super::{FallbackReason, Unsupported};
 use crate::problem::Discrete;
 
+/// How a singular `A` is started: the pin, the required sum, and a feasible starting point.
+pub(super) struct PinPlan {
+    pub pin: usize,
+    /// `Σ_S µ = sum`.
+    pub sum: f64,
+    /// Starting value of the pin.
+    pub pin_value: f64,
+    /// Sites that start clamped at a bound (unknown index, bound), when no single site can
+    /// carry the whole sum: the largest curvatures first, until the pin can carry the rest.
+    pub clamped: Vec<(usize, f64)>,
+}
+
 pub(super) struct Reduced<'a> {
     pub d: &'a Discrete,
     pub n: usize,
@@ -42,6 +54,9 @@ pub(super) struct Reduced<'a> {
     pub slots: Vec<u32>,
     /// `Σ_S µ = c` on a singular `A`.
     pub sum: Option<f64>,
+    pub plan: Option<PinPlan>,
+    /// Slot of each unknown (`u32::MAX` for a fixed site).
+    pub slot_of: Vec<u32>,
     pub w_sum: f64,
     /// `w0` (projected), `W w0`.
     pub w0: Vec<f64>,
@@ -56,7 +71,7 @@ pub(super) struct Reduced<'a> {
 impl<'a> Reduced<'a> {
     /// Whether the problem is within what the method supports; on a singular `A` the pin and
     /// the required sum of the free cone angles.
-    pub fn check(d: &Discrete, lambda: f64) -> Result<Option<(usize, f64)>, Unsupported> {
+    pub fn check(d: &Discrete, lambda: f64) -> Result<Option<PinPlan>, Unsupported> {
         let n = d.n;
         if n == 0 {
             return Err(Unsupported::NoUnknowns);
@@ -78,14 +93,55 @@ impl<'a> Reduced<'a> {
             .zip(&d.sites)
             .map(|(o, s)| o - if s.fixed { s.lo } else { 0.0 })
             .sum();
-        let pin = (0..n).find(|&i| {
+        let single = (0..n).find(|&i| {
             let s = &d.sites[i];
             !s.fixed && s.lo <= c && c <= s.hi
         });
-        match pin {
-            Some(p) => Ok(Some((p, c))),
-            None => Err(Unsupported::NoFeasiblePin),
+        if let Some(pin) = single {
+            return Ok(Some(PinPlan {
+                pin,
+                sum: c,
+                pin_value: c,
+                clamped: Vec::new(),
+            }));
         }
+        // No single site can carry the sum: clamp the sites of largest curvature at their bounds
+        // until the pin can carry the rest.
+        let mut candidates: Vec<usize> = (0..n)
+            .filter(|&i| {
+                let s = &d.sites[i];
+                !s.fixed && if c > 0.0 { s.hi > 0.0 } else { s.lo < 0.0 }
+            })
+            .collect();
+        candidates.sort_by(|&a, &b| {
+            if c > 0.0 {
+                d.omega[b].total_cmp(&d.omega[a])
+            } else {
+                d.omega[a].total_cmp(&d.omega[b])
+            }
+        });
+        let mut rest = c;
+        let mut clamped = Vec::new();
+        for j in candidates {
+            let s = &d.sites[j];
+            let bound = if c > 0.0 { s.hi } else { s.lo };
+            let fits = if c > 0.0 {
+                rest <= bound
+            } else {
+                rest >= bound
+            };
+            if fits {
+                return Ok(Some(PinPlan {
+                    pin: j,
+                    sum: c,
+                    pin_value: rest,
+                    clamped,
+                }));
+            }
+            clamped.push((j, bound));
+            rest -= bound;
+        }
+        Err(Unsupported::NoFeasiblePin)
     }
 
     /// Checks that the problem is within what the method supports, factors, and computes `w0`.
@@ -94,9 +150,9 @@ impl<'a> Reduced<'a> {
     /// [formula: reduced-sum-constraint-pin]
     pub fn new(d: &'a Discrete, lambda: f64) -> Result<Reduced<'a>, FallbackReason> {
         let n = d.n;
-        let pin_sum = Self::check(d, lambda)?;
-        let (pin, sum) = match pin_sum {
-            Some((p, c)) => (Some(p), Some(c)),
+        let plan = Self::check(d, lambda)?;
+        let (pin, sum) = match &plan {
+            Some(p) => (Some(p.pin), Some(p.sum)),
             None => (None, None),
         };
         let mu_fixed: Vec<f64> = d
@@ -129,6 +185,10 @@ impl<'a> Reduced<'a> {
             (0..n as u32).filter(|&i| !d.sites[i as usize].fixed && Some(i as usize) != pin),
         );
         let w_sum = d.w.iter().sum();
+        let mut slot_of = vec![u32::MAX; n];
+        for (k, &i) in slots.iter().enumerate() {
+            slot_of[i as usize] = k as u32;
+        }
         let mut red = Reduced {
             d,
             n,
@@ -139,6 +199,8 @@ impl<'a> Reduced<'a> {
             fac,
             slots,
             sum,
+            plan,
+            slot_of,
             w_sum,
             w0: Vec::new(),
             ww0: Vec::new(),

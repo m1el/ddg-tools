@@ -72,9 +72,9 @@ pub enum Unsupported {
         /// The vertex.
         vertex: u32,
     },
-    /// A mesh whose Laplacian block is singular (closed, or an optimized boundary) where no free
-    /// site can carry the whole required angle sum within its bounds, so there is no starting
-    /// point for the method.
+    /// A mesh whose Laplacian block is singular (closed, or an optimized boundary) where the
+    /// bounds of the free sites do not add up to the required angle sum (only possible within the
+    /// feasibility tolerance of the problem), so there is no feasible starting point.
     NoFeasiblePin,
     /// Nothing is unknown.
     NoUnknowns,
@@ -90,7 +90,7 @@ impl std::fmt::Display for Unsupported {
             ),
             Unsupported::NoFeasiblePin => write!(
                 f,
-                "no free cone site can carry the total curvature within its bounds"
+                "the bounds of the free cone sites do not add up to the total curvature"
             ),
             Unsupported::NoUnknowns => write!(f, "the problem has no unknowns"),
         }
@@ -388,7 +388,7 @@ impl<'a> Run<'a> {
         let limit = options
             .max_working_set
             .unwrap_or_else(|| automatic_working_set_limit(ns, threads));
-        let mut dense = Dense::new(red.sum);
+        let mut dense = Dense::new(red.sum, red.plan.as_ref().map_or(0.0, |p| p.pin_value));
         let mut w_slots = Vec::new();
         let mut in_w = vec![usize::MAX; ns];
         if red.pin.is_some() {
@@ -433,6 +433,21 @@ impl<'a> Run<'a> {
         let tol = self.options.tolerance * self.lambda;
         let mut cap_hits = 0;
         let mut refinements = 0;
+        // No single site can carry the sum: start with the sites of largest curvature clamped.
+        if let Some(plan) = &red.plan {
+            if !plan.clamped.is_empty() {
+                let slots: Vec<usize> = plan
+                    .clamped
+                    .iter()
+                    .map(|&(i, _)| red.slot_of[i] as usize)
+                    .collect();
+                self.add_columns(&slots)?;
+                for &(i, bound) in &plan.clamped {
+                    let j = self.in_w[red.slot_of[i] as usize];
+                    self.dense.clamp(j, bound);
+                }
+            }
+        }
         loop {
             if self.report.rounds >= self.options.max_rounds {
                 return Err(FallbackReason::IterationLimit {
@@ -561,47 +576,55 @@ impl<'a> Run<'a> {
                     frontier = next;
                 }
             }
-            let new_size = self.w_slots.len() + chosen.len();
-            if new_size > self.limit {
-                return Err(FallbackReason::WorkingSetLimit {
-                    working_set: new_size,
-                    limit: self.limit,
-                });
-            }
-            let bytes = 8 * red.n * (new_size - self.offset) + Dense::bytes_for(new_size);
-            self.report.peak_bytes = self.report.peak_bytes.max(bytes);
-            if bytes > self.options.memory_limit_bytes {
-                return Err(FallbackReason::MemoryLimit {
-                    required_bytes: bytes,
-                    limit_bytes: self.options.memory_limit_bytes,
-                });
-            }
-            let t = Instant::now();
-            let zn = red
-                .columns(&chosen, self.pool, self.chunk)
-                .map_err(Self::fail)?;
-            self.report.seconds.columns += t.elapsed().as_secs_f64();
-            self.report.column_solves += chosen.len();
-            let t = Instant::now();
-            let (cross, q) = red.gram_cross(
-                &self.blocks,
-                self.offset,
-                &zn,
-                chosen.len(),
-                self.pool,
-                self.threads,
-            );
-            self.report.seconds.gram += t.elapsed().as_secs_f64();
-            let ts: Vec<f64> = chosen.iter().map(|&s| self.site(s).t).collect();
-            let los: Vec<f64> = chosen.iter().map(|&s| self.site(s).lo).collect();
-            let his: Vec<f64> = chosen.iter().map(|&s| self.site(s).hi).collect();
-            self.dense.extend(&cross, chosen.len(), &q, &ts, &los, &his);
-            for &s in &chosen {
-                self.in_w[s] = self.w_slots.len();
-                self.w_slots.push(s);
-            }
-            self.blocks.push((zn, chosen.len()));
+            self.add_columns(&chosen)?;
         }
+    }
+
+    /// Computes the columns of the given slots and adds them to the working set. Gives up if
+    /// the working set or the memory would exceed the limits.
+    fn add_columns(&mut self, chosen: &[usize]) -> Result<(), FallbackReason> {
+        let red = self.red;
+        let new_size = self.w_slots.len() + chosen.len();
+        if new_size > self.limit {
+            return Err(FallbackReason::WorkingSetLimit {
+                working_set: new_size,
+                limit: self.limit,
+            });
+        }
+        let bytes = 8 * red.n * (new_size - self.offset) + Dense::bytes_for(new_size);
+        self.report.peak_bytes = self.report.peak_bytes.max(bytes);
+        if bytes > self.options.memory_limit_bytes {
+            return Err(FallbackReason::MemoryLimit {
+                required_bytes: bytes,
+                limit_bytes: self.options.memory_limit_bytes,
+            });
+        }
+        let t = Instant::now();
+        let zn = red
+            .columns(chosen, self.pool, self.chunk)
+            .map_err(Self::fail)?;
+        self.report.seconds.columns += t.elapsed().as_secs_f64();
+        self.report.column_solves += chosen.len();
+        let t = Instant::now();
+        let (cross, q) = red.gram_cross(
+            &self.blocks,
+            self.offset,
+            &zn,
+            chosen.len(),
+            self.pool,
+            self.threads,
+        );
+        self.report.seconds.gram += t.elapsed().as_secs_f64();
+        let ts: Vec<f64> = chosen.iter().map(|&s| self.site(s).t).collect();
+        let los: Vec<f64> = chosen.iter().map(|&s| self.site(s).lo).collect();
+        let his: Vec<f64> = chosen.iter().map(|&s| self.site(s).hi).collect();
+        self.dense.extend(&cross, chosen.len(), &q, &ts, &los, &his);
+        for &s in chosen {
+            self.in_w[s] = self.w_slots.len();
+            self.w_slots.push(s);
+        }
+        self.blocks.push((zn, chosen.len()));
+        Ok(())
     }
 
     /// The iterate (accurate `u`, adjoint, cone angles over the unknowns) of the current point.

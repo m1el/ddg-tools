@@ -190,8 +190,8 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 pub fn solve_with_boundary(problem, boundary: BoundaryTreatment, options) -> Result<Solution, ConeError>;
 pub enum BoundaryTreatment { Fixed /* default: u = 0 */, Free, Penalized, Convex }   // see "The boundary"
 pub struct SolveOptions<'a> {
-    pub regularization: Vec<f64>,                // γ of Stage I (reference method); default 1e-2, 1e-6, 1e-10
-                                                 // (SolveOptions::paper_regularization(): 1, 1e-1, …, 1e-10)
+    pub regularization: Vec<f64>,                // γ of Stage I (reference method); default 1, 1e-1, …, 1e-10 (paper_regularization());
+                                                 // short_regularization(): 1e-2, 1e-6, 1e-10
     pub regularization_metric: RegularizationMetric,  // Unweighted (default) | Mass
     pub max_regularized_iterations: usize,       // 50
     pub max_exact_iterations: usize,             // 50
@@ -409,9 +409,9 @@ most `tolerance · max(1, |J|)`. Nothing else decides the status.
 
 ## Algorithm
 
-The paper's (Fig. 12). **Stage I** solves the regularized problems for the schedule `γ = 10⁻², 10⁻⁶, 10⁻¹⁰`
-(the paper's `1, 10⁻¹, …, 10⁻¹⁰` is `SolveOptions::paper_regularization()`; see
-[the schedule](#the-regularization-schedule)), each started from the previous solution; **Stage II** solves the exact optimality system
+The paper's (Fig. 12). **Stage I** solves the regularized problems for `γ = 1, 10⁻¹, …, 10⁻¹⁰` (a shorter schedule
+is selectable; see [the schedule](#the-regularization-schedule)),
+each started from the previous solution; **Stage II** solves the exact optimality system
 started from the last regularized solution. Both are semismooth Newton iterations in which a
 step chooses a *piece* for every vertex (no cone, positive cone, negative cone, at the lower
 bound, at the upper bound, fixed) and solves the linear optimality system of these pieces.
@@ -427,6 +427,167 @@ W u + A φ = 0                         W = diag(wE m), A = L on the unknown vert
 and is solved by a sparse `LDLᵀ` factorization of the symmetric `2n × 2n` matrix (unknown `u_i`
 eliminated immediately before `φ_i`), with iterative refinement on the componentwise backward
 error, and by `LU` where a distortion weight is zero or `LDLᵀ` is not accurate enough.
+
+## The factor-once method
+
+The reference method refactorizes a `2n × 2n` saddle-point matrix at every Newton step (12 to 57
+times per solve). The Laplacian never changes, and
+the optimum has few cones, so a second method factorizes it once. It is the default
+([`SolveMethod::Auto`](#choosing-the-method)); the reference method is the fallback.
+
+**The reduced problem.** Let `A` be the Laplacian block of the unknowns, `W = diag(wE m)` (all
+`> 0`), `S` the free cone sites, `F` the sites with a fixed angle (prescribed, or forbidden:
+angle 0) with angles `a_F`, `Z` the columns `z_j = A⁻¹ e_j` of the free sites and
+`w0 = A⁻¹ (Ω − a_F)`. Then `u = Z µ_S − w0`, and the canonical problem is
+
+```
+minimize   ½ µ_Sᵀ G µ_S + qᵀ µ_S + Σ_j t_j |µ_j|     subject to  lo_j ≤ µ_j ≤ hi_j   [and Σ µ_S = c]
+G = Zᵀ W Z,    q = −Zᵀ W w0,    t_j = λ wR_j                                [formula: reduced-lasso-problem, reduced-gram-matrix]
+```
+
+(`G` is positive definite when all weights are positive; the bracket is for a singular `A`, below.)
+With `y = A⁻¹ W u`, the gradient of the distortion is `∂/∂µ_j = y_j`, and `µ` is optimal iff for
+every free site `j` (and the multiplier `ν` of the sum constraint, `0` without it)
+`−(y_j + ν) ∈ ∂g_j(µ_j)`; the adjoint is `φ = −(y + ν)`
+[formula: reduced-optimality-conditions]. So one solve for `u` and one for `y` check the
+optimality conditions of **all** sites.
+
+**The loop.** Keep a *working set* of sites whose columns `z_j` have been computed (one solve
+each; independent, so they run on the thread pool in chunks of 4 to 16 right-hand sides) and the
+Gram matrix `G_WW` (a product of the stored columns, row-chunked over the pool). A round:
+
+1. solve the problem restricted to the working set with a dense active-set method (an ℓ¹
+   method of Osborne, Presnell and Turlach, extended here to box constraints: every variable is
+   zero, free with a sign, or clamped at a bound; a Cholesky factor of `G_BB` of the free ones
+   is extended and shrunk in `O(a²)`);
+2. compute `u` (from the stored columns, or one solve) and `y` (one solve) and re-anchor the
+   dense gradient to the exact one (one step of iterative refinement; without it the clustered
+   cones of a noisy mesh leave residuals of `10⁻⁷` in the Gram matrix's badly conditioned
+   directions);
+3. every site that violates its optimality condition by more than `tolerance · λ` joins the
+   working set: the worst ones, but at most one per neighbourhood of 3 edges, up to half the
+   number of nonzero angles (at least 16) per round, because neighbouring sites have nearly
+   dependent columns and adding both is wasted.
+
+It ends when no site outside the working set violates its condition. There is no convergence
+proof and no bound on the number of rounds; the certificate is what makes the result safe, and
+the method gives up (below) rather than iterate forever.
+
+**Closed meshes, and all the boundary treatments.** `A = L` is singular exactly when every
+vertex is an unknown (a closed mesh, or a boundary treatment other than `Fixed`: then the
+problem *is* the closed-mesh problem with one site per vertex, so this path serves them all).
+One free site, the *pin* `p`, loses its equation and its `u` is set to zero before shifting:
+`A_p` (without row and column `p`) is positive definite, `z_j = P A_p⁻¹ e_j` (zero for `j = p`),
+`w0 = P A_p⁻¹ (Ω − a_F)_p̂`, where `P x = x − (Σ w_i x_i / Σ w_i) 1` chooses the additive constant of
+`u` that minimizes the distortion. The equation of the pin is the sum constraint
+`Σ_S µ = Σ (Ω − a_F)` [formula: reduced-sum-constraint-pin], which the dense method keeps with a
+multiplier `ν`; the pin has a zero row and column in `G` and starts free with the whole sum.
+The pin is any free site whose bounds allow the whole sum; if there is none (every angle capped
+below the sum, as the UV pipeline does on a sphere: `0 ≤ µ ≤ 0.95·2π`, sum `4π`) the method
+starts from a feasible point with the sites of largest curvature clamped at their bounds, as many as
+needed (three there), and the pin carrying the rest.
+
+**What is supported.** Everything in the canonical problem with *positive* distortion weights:
+per-vertex cone costs (free sites `wR = 0` and forbidden ones `wR = ∞` included), bounds `lo`
+and `hi` (finite or not, positive-only and negative-only angles), prescribed cones (they move
+to the right-hand side), meshes with boundary (`u = 0` there), closed meshes, and the boundary
+treatments of `solve_with_boundary`. Each was checked against the reference method
+(`tests/factor_once.rs`: 962 random problems of every topology, steering and treatment) and the
+rest of the suite was run with the method forced.
+
+**What falls back** (`MethodReport::fallback = Unsupported(..)`, nothing is lost but the
+speed-up):
+
+| situation | why |
+|---|---|
+| a distortion weight `wE_i m_i = 0` at an unknown (boundary vertices excluded with `Fixed`) | `G` is singular and the minimizer may not be unique; I have no treatment that is shown to be correct |
+| `λ = 0` | every site is free, there is nothing sparse; the tolerance is relative to `λ` |
+| a singular `A` and the bounds of the free sites do not add up to the required sum `Σ (Ω − a_F)` (up to the feasibility tolerance of the problem) | no feasible starting point |
+| an unknown set that is empty | nothing to solve |
+
+**Giving up.** In [`SolveMethod::Auto`] the method stops and the reference method solves the
+problem when one of these happens, and the report says which
+([`FallbackReason`]; the failed attempt's counters stay in `report.method.factor_once`):
+
+| reason | limit | default |
+|---|---|---|
+| `WorkingSetLimit` | the working set would exceed `max_working_set` | `1300 (n/15000)^0.2 · (1 + (threads−1)/7)`, threads ≤ 8 (justified under [performance](#performance-of-the-factor-once-method)) |
+| `MemoryLimit` | the stored columns (`8 n` bytes each) and the dense matrices would exceed `memory_limit_bytes` | 4 GiB (`brain` needs 0.8 GB at `λ = ½`) |
+| `IterationLimit` | `max_rounds` rounds, or the dense method hit its iteration cap three rounds in a row | 200 |
+| `CertificateFailed` | the result does not satisfy `certificate.holds(certificate_tolerance)` (the failed certificate is in the reason) | `10⁻⁹` |
+| `FactorizationFailed` | the factorization or a solve failed | – |
+
+With `SolveMethod::FactorOnce` there is no fallback: a problem outside the support is
+`Err(ConeError::InvalidOptions)`; the other reasons give a result with `status = NotConverged`
+whose `report.message` and `report.method.fallback` say why. `SolveMethod::Reference` never tries
+the fast method. In every case the result carries the certificate computed by `certify`, exactly
+as for the reference method; the factor-once method has no say in whether it is `Converged`.
+
+**Choosing the method.** `SolveOptions::method` (`Auto`, `Reference`, `FactorOnce`),
+`SolveOptions::factor_once` (the limits above, and `tolerance`), and `factor_once_support(problem,
+boundary)` to ask whether a problem is supported. `report.method` says what happened:
+`used` (the method that produced the result), `fallback` (why the factor-once method did not,
+or why it ended without a certified result), `factor_once` (rounds, solves, working set, nonzero
+angles at the end and at the peak, memory estimate, counters of the dense method, times by phase).
+`report.stages` is empty when the factor-once method produced the result (there are no Newton
+stages), and `report.timings.factor_once` is its time.
+
+**Threads.** `SolveOptions::parallelism` with a pool is used for the column solves (chunks of
+right-hand sides), the Gram product (row blocks) and the evaluation of `u` from the stored
+columns, through `ThreadPool::map` of `ddg-core`; the factorization and single solves run on the
+calling thread (threads do not help them, see the `ddg-core` README), faer is called with
+`Par::Seq`, and nothing touches the global `rayon` pool.
+
+**Tolerance.** `FactorOnceOptions::tolerance = 10⁻¹²` (relative to `λ`) is not negotiable:
+in the prototype a looser `10⁻⁸` left cone residuals of `5·10⁻⁹` on `camelshotnoise` (452 cones,
+many nearly zero) and failed the certificate at `10⁻⁹`, `10⁻¹⁰` missed one near-zero cone.
+`10⁻¹²` costs nothing. (`tests/factor_once.rs` shows a loose `10⁻⁴` failing the certificate on a
+noisy sphere and the reference method taking over.)
+
+**Not the same bits.** The two methods return the same optimum up to what their certificates
+allow, not the same bits. `tests/factor_once.rs` compares them with *derived* tolerances: the
+certificate's `suboptimality_bound g` bounds `J − J*`; the objective is `½ ‖u − u*‖²_W`-strongly
+convex in `u`, so `‖u_a − u_b‖_W ≤ √(2 g_a) + √(2 g_b)`, and `µ = L u + Ω` gives
+`|Δµ_i| ≤ Σ_j |L_ij| |Δu_j|`. On 962 problems the largest observed ratio to the allowed
+difference was `1.8·10⁻⁷`, the largest `|Δµ|` `2.8·10⁻¹¹`. On the dataset at `λ = ½` (below)
+`|Δµ| ≤ 4·10⁻⁸` (`camelshotnoise`; `4·10⁻⁷` on `brain` with 8 threads), `|Δu| ≤ 9·10⁻⁹`
+(`8·10⁻⁸` on `brain` with 8 threads), relative difference of the objective `≤ 3·10⁻¹²`.
+
+## The regularization schedule
+
+The default stays the paper's `γ = 1, 10⁻¹, …, 10⁻¹⁰` (`SolveOptions::paper_regularization()`).
+The shorter `γ = 10⁻², 10⁻⁶, 10⁻¹⁰` (`SolveOptions::short_regularization()`) was evaluated as a
+replacement and **rejected**. Stage I only initializes Stage II, so the optimum does not depend on
+the schedule, and the evidence is that it does not: with the reference method on every dataset file
+at `λ = ½` (23 files, `brain` included) and on 17 meshes at `λ = 0.1, 0.02, 0.005`
+(`cargo run --release -p ddg-optimal-cones --example speedup -- --schedules`), both schedules
+converged, certified, to **bit-identical** `µ` and `u` (largest difference `0`: the exact stage
+ends on the same active sets, hence on the same linear system). Factorizations fell in all but one
+of these cases, `1.2×` on `brain` (50 → 41, 32.8 → 27.0 s) to `3.9×`. The whole test suite also
+passed with the short schedule as the default (reference method forced, debug and release,
+including the release dataset tests; and in automatic mode).
+
+What decided against it is the benchmark of `ddg-uv` (`cargo bench -p ddg-uv`, before and after),
+which asks for positive-only cone angles capped below `2π` (`lo = 0`, `hi = 0.95·2π`), and no test
+or dataset run above has such bounds. On that problem the short schedule needs more
+factorizations, not fewer (`--schedules --cap 5.969 --lambda 0.1`, reference method):
+
+| mesh | paper schedule | short schedule `10⁻², 10⁻⁶, 10⁻¹⁰` |
+|---|---:|---:|
+| bunny | 68 factorizations, 3.1 s | 171, 7.6 s (0.40×) |
+| chair | 43, 0.50 s | 67, 0.80 s (0.63×) |
+| camel | 49, 1.45 s | 48, 1.44 s |
+| hand | 58, 0.46 s | 32, 0.26 s (1.8×) |
+
+and the end-to-end `unwrap/brain` of the benchmark went from 35.1 s to 98.7 s, `unwrap/bunny`
+from 3.1 s to 7.5 s. Two other schedules tried on the same four problems (`1, 10⁻², 10⁻⁴, …,
+10⁻¹⁰` and `1, 10⁻¹, 10⁻³, 10⁻⁵, 10⁻⁷, 10⁻¹⁰`) were no better than the default overall (bunny 73 and
+96 factorizations, chair 59 and 70, camel 61 and 51). Without bounds the exact stage ends on the
+same active sets whatever Stage I did, so the schedule is only speed; with bounds the last
+regularized solution is a worse start for it. Nothing here explains why, and I did not look into
+the safeguard rounds that the extra factorizations are. The schedule stays the paper's, and the
+short one is available for unbounded problems, where it is up to `3.9×` fewer factorizations
+(`camelshotnoise` at `λ = 0.02` is the exception: 62 → 81).
 
 ## Deviations from the paper
 
@@ -828,7 +989,9 @@ the ids with `lean/proofs`. Ids taken from there: `soft-threshold-fixed-point`,
 
 Ids introduced by this crate, with the statement the function implements. `lean/proofs` has
 theorems for them by now (`DdgProofs/Solver.lean`, `DdgProofs/Certificate.lean`; one is cited
-in `CITED.md`), and `scripts/check-formulas.sh` reports no missing id. The last column says
+in `CITED.md`), except for the four `reduced-…` ids of the factor-once method, which are new and
+have neither a theorem nor an entry in `CITED.md` yet (`lean/` was not touched when they were
+added, so `scripts/check-formulas.sh` reports them as missing). The last column says
 what the theorems cover, which is not always the whole statement.
 
 | id | function | statement | in `lean/proofs` |
@@ -840,6 +1003,10 @@ what the theorems cover, which is not always the whole statement.
 | `adjoint-constant-interval` | `adjoint_constant_interval` | With `∂g_i(µ_i) = [a_i, b_i]`: `{c : φ_i + c ∈ ∂g_i(µ_i) for all i} = [max_i (a_i − φ_i), min_i (b_i − φ_i)]`. | `kkt_add_const_iff`, `Site.stationary_iff_mem_subdiff` |
 | `regularized-dual-objective` | `DualSlope` | For `w > 0`, stiffness `k_i > 0`, centre `µ̄`, with `Φ(φ) = ½ Σ w_i u_i² − Σ Ω_i φ_i + Σ e_i(φ_i)`, `W u = −A φ`, `e_i'(p) = clamp(k_i P_{t_i}(p + µ̄_i/k_i), lo_i, hi_i)` (the intended reading: `Φ` is the convex dual objective of `minimize J(u, µ) + Σ (µ_i − µ̄_i)²/(2 k_i)`, `∇Φ = −(A u − µ + Ω)`; this reading is not claimed as proved). Along `(du, dφ)` with `W du = −A dφ`: `d/dα Φ = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i`, nondecreasing and piecewise linear in `α`. | the slope along a direction and its monotonicity (`dualSlope_eq`, `dualSlope_monotone`); `Φ` itself is not formalized |
 | `cone-cluster-frechet-mean` | `frechet_order` | For a set of cone vertices connected through edges between its members, with angles `µ_k`: the member `v` that minimizes `Σ_k \|µ_k\| dist(v, c_k)²`, `dist` the length of the shortest path along edges with both ends in the set; ties go to the smaller index. | existence of a minimizer, and that merging at any member keeps `Σ µ` and does not increase `Σ \|µ\|` (`exists_frechetMean`, `sum_mergeCones`, `sum_abs_mergeCones_le`) |
+| `reduced-lasso-problem` | `Reduced::new`, `factor_once::attempt` | Let `A` be positive definite (the Laplacian block of the unknowns, or `L` without the row and column of the pin), `w_i > 0`, `S` the free sites with `z_j = A⁻¹ e_j`, `F` the sites with a fixed angle `a_F`, `w0 = A⁻¹ (Ω − a_F)`. Then `u = Z µ_S − w0` solves `A u = µ − Ω` (with `µ_F = a_F`), and the canonical problem is equivalent to `minimize ½ µ_Sᵀ G µ_S + qᵀ µ_S + Σ_{j∈S} t_j \|µ_j\|` subject to `lo_j ≤ µ_j ≤ hi_j` (and, for a pin, `Σ_S µ = Σ (Ω − a_F)`), with `G = Zᵀ W Z`, `q = −Zᵀ W w0`, up to the constant `½ w0ᵀ W w0`. | not in `lean/proofs` (see below) |
+| `reduced-gram-matrix` | `Reduced::gram_cross` | `G_jk = z_jᵀ W z_k` and `q_j = −z_jᵀ W w0` with `z_j = P A_p⁻¹ e_j` (`A_p⁻¹` padded with a zero at the pin `p`, `P x = x − (Σ w_i x_i / Σ w_i) 1`; without a pin `P = I`); `z_p = 0`. `G` is positive semidefinite, positive definite on every set of linearly independent columns. | not in `lean/proofs` |
+| `reduced-optimality-conditions` | `Reduced::gradient`, `violation_at_zero`, `Dense::exact_violation` | With `u = Z µ_S − w0` (so `Σ w u = 0` with a pin) and `y = A⁻¹ (W u)` (zero at the pin): `∂/∂µ_j (½ uᵀ W u) = z_jᵀ W u = y_j`. `µ_S` minimizes the reduced problem iff there is `ν ∈ R` (`ν = 0` without the sum constraint) with `−(y_j + ν) ∈ ∂g_j(µ_j)` for every `j ∈ S`, `g_j(m) = t_j\|m\| + ι_[lo_j, hi_j](m)`; then `φ = −(y + ν)` satisfies `L φ = −W u` and `φ_j ∈ ∂g_j(µ_j)`. At `µ_j = 0` the condition is `\|y_j + ν\| ≤ t_j` (restricted to the allowed signs); at `µ_j = hi_j > 0` it is `y_j + ν + t_j ≤ 0`; at `µ_j = lo_j < 0` it is `y_j + ν − t_j ≥ 0`. | not in `lean/proofs` (it is `optimality-system-sufficient` for the reduced variables) |
+| `reduced-sum-constraint-pin` | `Reduced::new`, `Reduced::project` | If `A` is positive semidefinite with kernel exactly the constants, `p` an index, `A_p` positive definite, and `Σ b = 0`, then `x = P pad(A_p⁻¹ b_p̂)` solves `A x = b` (the equation of `p` follows from the others because `1ᵀ A = 0` and `Σ b = 0`) and, among `x + c 1`, `x` is the one with `Σ w x = 0`, which minimizes `½ Σ w (x + c)²`. For `b = µ − Ω` the condition is `Σ µ = Σ Ω`, i.e. `Σ_S µ_S = Σ (Ω − a_F)`. | not in `lean/proofs` |
 | `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. | `IsProxMinimizer.isMinimizer_of_fixedPoint`; also that a proximal step does not increase the objective (`IsProxMinimizer.objective_add_le`) |
 | `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). | `oettli_prager` |
 | `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). | cited in `CITED.md` (a choice of input data, not a derived formula) |
@@ -850,7 +1017,8 @@ what the theorems cover, which is not always the whole statement.
 cargo test --release -p ddg-optimal-cones            # everything; the dataset tests need --release
 cargo test --release -p ddg-optimal-cones --test dataset -- --nocapture
 cargo run  --release -p ddg-optimal-cones --example published -- refit     # or facts, adjoint, sweep, iterate
-cargo run  --release -p ddg-optimal-cones --example baseline -- --merge --repeat 3
+cargo run  --release -p ddg-optimal-cones --example baseline -- --merge --repeat 3   # the reference method
+cargo run  --release -p ddg-optimal-cones --example speedup -- --repeat 3               # factor-once vs reference table
 cargo run  --release -p ddg-optimal-cones --example boundary -- table     # or spikes
 cargo run  --release -p ddg-optimal-cones --example fingerprint            # bit hashes of default-mode solves
 ```
@@ -864,9 +1032,27 @@ cargo run  --release -p ddg-optimal-cones --example fingerprint            # bit
 | `tests/api.rs` | errors, options, tiny meshes, extraction and merging, the certificate identity, non-converged status |
 | `tests/dataset.rs` | the published dataset: every mesh solved to a certified optimum, the findings above, the boundary modes against the double and the published refits |
 | `tests/boundary.rs` | the boundary treatments against the double of the mesh, orderings (free ≤ the others), reporting, certificate, extraction |
+| `tests/factor_once.rs` | the factor-once method against the reference method on random problems of every topology, steering and boundary treatment, with tolerances derived from the certificates; every fallback reason forced; what falls back |
 | `tests/enclosure.rs` | `optimum_enclosure` against the generic convex solver on perturbed triples; when it is withheld |
 
 The dataset is not part of the repository; without it the dataset tests print a notice and pass.
+
+**Which method the tests use.** Everything runs in automatic mode by default (so the factor-once
+method on all small meshes). The files that compare with an independent solver (`convex_reference`,
+`oracle`, `properties`, `enclosure`, `dataset`) solve through `tests/common::solve_t`, which reads
+`DDG_CONES_METHOD`: `reference` forces the reference method, `fast` forces the factor-once
+method wherever `factor_once_support` allows it (with the limits for giving up lifted, so that
+the test checks correctness and not thresholds; the problems it does not support go to the
+reference method), anything else leaves the options alone:
+
+```
+DDG_CONES_METHOD=fast      cargo test --release -p ddg-optimal-cones
+DDG_CONES_METHOD=reference cargo test --release -p ddg-optimal-cones
+```
+
+The tests in `api.rs` that read the reference method's stages, counters and options
+(`report_counts_what_was_done`, `starved_solver_reports_not_converged`,
+`every_configuration_finds_the_same_optimum`) force `SolveMethod::Reference` themselves.
 
 ## Not implemented
 
@@ -878,5 +1064,11 @@ The dataset is not part of the repository; without it the dataset tests print a 
   boundary treatment other than `Fixed`.
 * A function that re-optimizes the angles of given cones; it is a call of `solve` with
   `cone_costs` of `0` and `+∞`.
-* Multiresolution (Sec. 6.3), and a solver that factorizes the Laplacian once.
+* Multiresolution (Sec. 6.3).
+* The factor-once method does not handle zero distortion weights (the Gram matrix is singular),
+  `λ = 0`, and it has no proof of convergence (the certificate and the fallback replace it); the
+  re-optimization of the boundary for extracted cones (`with_fixed_interior`) uses the reference
+  method; the dense part is sequential and `O(a²)` per iteration, which is why it loses to the
+  reference method above about 5 % of the vertices being cones; there is no GPU path (assessed,
+  not worth it).
 * Disconnected meshes, non-manifold meshes, intrinsic Delaunay refinement.

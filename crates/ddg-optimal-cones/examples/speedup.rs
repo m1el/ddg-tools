@@ -12,6 +12,9 @@
 //!   --ref-repeat N      the same for the reference method (default: --repeat)
 //!   --skip-reference    do not run the reference method (no agreement columns)
 //!   --old-schedule      the reference method with the paper's schedule 1, 1e-1, ..., 1e-10
+//!   --cap X             positive cone angles only, at most X at every vertex (what the UV pipeline
+//!                       asks for: lower bound 0, upper bound X), in every run
+//!   --gammas a,b,c      with --schedules: the second schedule (default 1e-2,1e-6,1e-10)
 //!   --schedules         instead of the table: the reference method with the schedule 1, 1e-1, ...,
 //!                       1e-10 against the schedule 1e-2, 1e-6, 1e-10 (factorizations, times,
 //!                       agreement of the optimum, certificate)
@@ -64,6 +67,8 @@ fn main() {
     let mut skip_reference = false;
     let mut old_schedule = false;
     let mut schedules = false;
+    let mut cap: Option<f64> = None;
+    let mut gammas = SolveOptions::short_regularization();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = |what: &str| {
@@ -90,6 +95,13 @@ fn main() {
             "--skip-reference" => skip_reference = true,
             "--old-schedule" => old_schedule = true,
             "--schedules" => schedules = true,
+            "--cap" => cap = Some(value("--cap").parse().expect("--cap: a number")),
+            "--gammas" => {
+                gammas = value("--gammas")
+                    .split(',')
+                    .map(|s| s.parse().expect("--gammas: numbers"))
+                    .collect()
+            }
             name => names.push(name.to_string()),
         }
     }
@@ -117,7 +129,7 @@ fn main() {
         .map_or(Parallelism::Sequential, Parallelism::Pool);
 
     if schedules {
-        schedule_study(&dir, &names, &lambdas, ref_repeat);
+        schedule_study(&dir, &names, &lambdas, ref_repeat, cap, &gammas);
         return;
     }
     println!(
@@ -238,7 +250,14 @@ fn main() {
     }
 }
 
-fn schedule_study(dir: &std::path::Path, names: &[String], lambdas: &[f64], repeat: usize) {
+fn schedule_study(
+    dir: &std::path::Path,
+    names: &[String],
+    lambdas: &[f64],
+    repeat: usize,
+    cap: Option<f64>,
+    gammas: &[f64],
+) {
     println!(
         "reference method, sequential, best of {repeat}; old = 1, 1e-1, ..., 1e-10; new = 1e-2, 1e-6, 1e-10"
     );
@@ -270,7 +289,11 @@ fn schedule_study(dir: &std::path::Path, names: &[String], lambdas: &[f64], repe
         let geometry = Geometry::from_positions(&mesh, &obj.positions)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         for &lambda in lambdas {
-            let problem = ConeProblem::new(&mesh, &geometry, lambda);
+            let mut problem = ConeProblem::new(&mesh, &geometry, lambda);
+            if let Some(c) = cap {
+                problem.lower_bounds = Some(vec![0.0; mesh.n_vertices()]);
+                problem.upper_bounds = Some(vec![c; mesh.n_vertices()]);
+            }
             let old = SolveOptions {
                 method: SolveMethod::Reference,
                 regularization: SolveOptions::paper_regularization(),
@@ -278,7 +301,7 @@ fn schedule_study(dir: &std::path::Path, names: &[String], lambdas: &[f64], repe
             };
             let new = SolveOptions {
                 method: SolveMethod::Reference,
-                regularization: vec![1e-2, 1e-6, 1e-10],
+                regularization: gammas.to_vec(),
                 ..SolveOptions::default()
             };
             let a = best_of(repeat, &problem, &old);

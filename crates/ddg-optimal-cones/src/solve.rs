@@ -46,9 +46,12 @@ pub struct SolveOptions<'a> {
     /// Stage I: the regularization parameters `γ`, strictly decreasing and positive. One
     /// regularized problem is solved for each, starting from the solution of the previous one.
     /// Empty skips Stage I, which leaves the plain semismooth Newton method started from zero.
-    /// Default: `10⁻², 10⁻⁶, 10⁻¹⁰`, which reaches the same optimum as the paper's schedule
-    /// ([`SolveOptions::paper_regularization`]: `1, 10⁻¹, …, 10⁻¹⁰`, Fig. 12 with `N = 10`)
-    /// with 1.2 to 3 times fewer factorizations (measured on the dataset, see the README).
+    /// Default: `1, 10⁻¹, …, 10⁻¹⁰` (paper Fig. 12 with `N = 10`;
+    /// [`SolveOptions::paper_regularization`]). The shorter `10⁻², 10⁻⁶, 10⁻¹⁰`
+    /// ([`SolveOptions::short_regularization`]) reaches the same optimum with 1.2 to 3.9 times
+    /// fewer factorizations on the unbounded dataset problems, but needs up to 2.5 times more
+    /// on problems with positive-only capped angles (what the UV pipeline asks for), which is
+    /// why it is not the default (README, "The regularization schedule").
     pub regularization: Vec<f64>,
     /// What the regularization measures. Default: [`RegularizationMetric::Unweighted`].
     pub regularization_metric: RegularizationMetric,
@@ -111,7 +114,7 @@ pub struct SolveOptions<'a> {
 impl Default for SolveOptions<'_> {
     fn default() -> Self {
         SolveOptions {
-            regularization: vec![1e-2, 1e-6, 1e-10],
+            regularization: SolveOptions::paper_regularization(),
             regularization_metric: RegularizationMetric::default(),
             max_regularized_iterations: 50,
             max_exact_iterations: 50,
@@ -131,10 +134,17 @@ impl Default for SolveOptions<'_> {
 }
 
 impl SolveOptions<'_> {
-    /// The paper's schedule of Stage I (Fig. 12 with `N = 10`): `γ = 1, 10⁻¹, …, 10⁻¹⁰`. It was
-    /// the default of this crate before the shorter schedule `10⁻², 10⁻⁶, 10⁻¹⁰` replaced it.
+    /// The paper's schedule of Stage I (Fig. 12 with `N = 10`): `γ = 1, 10⁻¹, …, 10⁻¹⁰`. The
+    /// default.
     pub fn paper_regularization() -> Vec<f64> {
         (0..=10).map(|k| 10f64.powi(-k)).collect()
+    }
+
+    /// The short schedule `γ = 10⁻², 10⁻⁶, 10⁻¹⁰`: the same optimum with fewer factorizations
+    /// on problems without bounds, more on problems with positive-only capped angles (see
+    /// [`SolveOptions::regularization`]).
+    pub fn short_regularization() -> Vec<f64> {
+        vec![1e-2, 1e-6, 1e-10]
     }
 
     fn validate(&self) -> Result<(), ConeError> {
