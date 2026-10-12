@@ -33,7 +33,7 @@ fn a_bumpy_disk_is_unwrapped() {
     );
     // The quasi-conformal error is discretization error of this coarse, steep grid. Measured
     // mean (max): 1.269 (1.979) with 16 x 16 cells, 1.091 (1.257) with 48 x 48, 1.045 (1.123)
-    // with 96 x 96 (`examples/scratch.rs`).
+    // with 96 x 96 (measured once with a scratch program that is not kept).
     assert!(chart.flatten.quasi_conformal_mean < 1.35);
     // The README measure of the map is about twice the solver's `½ Σ m u²` (measured 0.1336
     // against 2 x 0.0841 here; 0.1720 against 2 x 0.0871 with 96 x 96 cells).

@@ -138,7 +138,9 @@ the scale has to be taken out. It is about twice the solver's `½ Σ m u²`.
 
 ### Closed surfaces without seams
 
-`evaluate closed`: positive cones, merging without size limit. Cells are
+`evaluate closed`: positive cones, merging without size limit and with the stricter guard the
+example hard-codes (factor 2, +0.01; because of it two cells, cube and cone primitive with the
+slit at `λ = 0.02`, show unmerged optima). Cells are
 cones / distortion / overlap % / mirrored triangles / cut edges / fill of the unit square.
 
 | mesh | (a) raw optimum, merged | (b) 1 free site, `µ ≤ 0.95·2π` | (b) 8 free sites, none elsewhere, `µ ≤ π` | (c) slit, full diameter, λ 0.5 | (c) same, λ 0.1 | (c) same, λ 0.02 | (c) slit of 2 edges at the largest curvature, λ 0.5 |
@@ -267,6 +269,10 @@ that; the pipeline does not set it, for lack of data on a good value.
 | rhino | 0 / 2.228 | 0 / 2.228 | 1 / 1.158 | 4 / 0.850 | 7 / 0.587 | 9 / 0.381 | 9 / 0.307 | 9 / 0.290 | 9 / 0.280 |
 | tree | 0 / 1.033 | 0 / 1.033 | 4 / 0.929 | 4 / 0.278 | 4 / 0.159 | 4 / 0.118 | 4 / 0.0998 | 4 / 0.0949 | 4 / 0.0912 |
 | closed, genus 0: 7 primitives, axes, bunny, chair | the same at every λ | | | | | | | | |
+
+The `lambda` and `signs` runs were made before the merge guard got its final default (they
+used factor 2, +0.01). The only rows this changes are the mannequin's below `λ = 0.1` and the
+voxel slabs, which are quoted from a rerun.
 
 Total cone angle of the camel: 0, 0.22, 3.48, 6.66, 8.09, 8.80, 9.23, 9.37, 9.49 for
 `λ = 2 … 0.002`. (The mannequin and camelshotnoise rows are in the log: the first has a ring of
