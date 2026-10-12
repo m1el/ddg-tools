@@ -292,6 +292,10 @@ def unwrap_object(obj, *, lambda_=0.5, use_seams=True, pinned_group="", forbidde
     mesh = obj.data
     if mesh.is_editmode:
         raise UnwrapFailed("Internal error: the mesh is in Edit mode")
+    if mesh.library is not None:
+        raise UnwrapFailed(
+            "Mesh '{}' is linked from another file ({}) and cannot be changed here".format(
+                mesh.name, mesh.library.filepath))
 
     start = perf_counter()
     positions, corner_vertices, polygon_starts, triangles = mesh_buffers(mesh)

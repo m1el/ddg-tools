@@ -56,8 +56,8 @@ Element types:
   Values must be non-negative and below 2³² − 1.
 - **raw bytes** (`bytes`, `bytearray`, any buffer of one-byte items): read as native-endian
   float32 where a real is expected and as native-endian int32 where an index is expected. A
-  one-byte buffer is never read as a list of small numbers, so a `uint8` index array is rejected
-  or misread as raw int32; use a wider type.
+  one-byte buffer is never read as a list of small numbers: do not pass a `uint8` array of
+  indices, its bytes would be taken as int32 data. Use a 16-bit or wider type.
 - A byte-order prefix `@`, `=` or the machine's own (`<` on x86-64 and ARM64) is accepted; data in
   the other byte order is rejected.
 

@@ -652,6 +652,26 @@ def mesh_without_faces_is_an_error_message():
 
 
 @test
+def linked_mesh_is_an_error_message():
+    # A mesh linked from another .blend file is read-only.
+    path = os.path.join(bpy.app.tempdir, "ddg_linked_source.blend")
+    source = bpy.data.meshes.new("LinkedSource")
+    source.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
+    bpy.data.libraries.write(path, {source})
+    bpy.data.meshes.remove(source)
+    with bpy.data.libraries.load(path, link=True) as (_data_from, data_to):
+        data_to.meshes = ["LinkedSource"]
+    linked = data_to.meshes[0]
+    assert linked.library is not None
+    obj = bpy.data.objects.new("uses linked mesh", linked)
+    bpy.context.collection.objects.link(obj)
+    activate(obj)
+    message = expect_error(r"Mesh 'LinkedSource' is linked from another file")
+    print("  reported:", message.strip())
+    assert len(linked.uv_layers) == 0
+
+
+@test
 def vertex_groups_reach_the_native_module():
     import ddg_tools
     core = importlib.import_module(ARGS.module + ".core")
