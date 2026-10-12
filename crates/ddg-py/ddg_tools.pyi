@@ -14,7 +14,8 @@ PIPELINE: Final[str]
 """Name of the unwrap pipeline in this build, ``"ddg-uv"``."""
 
 IS_PLACEHOLDER: Final[bool]
-"""False: the pipeline is the real conformal unwrap (kept for builds that link a stand-in)."""
+"""False: the pipeline is the real unwrap (``ddg-uv``). The flag exists so that a build that
+links a stand-in pipeline would say so; no build does."""
 
 class DdgError(Exception):
     """Base class of the errors raised by ddg_tools."""
@@ -26,13 +27,16 @@ class MeshError(DdgError):
     """The mesh cannot be unwrapped as it is (non-manifold, inconsistently oriented, ...)."""
 
 class SolveError(DdgError):
-    """The mesh was accepted but no valid UV map could be produced."""
+    """The mesh was accepted but no valid UV map could be produced (the cone solver or the
+    flattening failed, or a result did not pass the pipeline's own checks)."""
 
 @final
 class UnwrapResult:
     @property
     def uvs(self) -> array[float]:
-        """``array('f')``, 2 per polygon corner in corner ("loop") order. Not packed."""
+        """``array('f')``, 2 per polygon corner in corner ("loop") order. Not packed: the
+        charts are laid out where the flattening put them and overlap each other until
+        ``pack_charts``."""
     @property
     def polygon_charts(self) -> array[int]:
         """``array('i')``, the chart of every polygon."""
@@ -44,10 +48,13 @@ class UnwrapResult:
         """``array('d')``, cone angles in radians, parallel to ``cone_vertices``."""
     @property
     def cut_edges(self) -> array[int]:
-        """``array('i')``, 2 vertex indices per edge the surface was cut along."""
+        """``array('i')``, 2 vertex indices per edge the surface was cut along (seams
+        included), sorted, ``min, max`` within an edge."""
     @property
     def report(self) -> dict[str, bool | int | float | str | list[str]]:
-        """Counts, timings (``seconds_*``), measured distortion and ``warnings``."""
+        """The pipeline's report: counts, cone statistics, ``area_distortion``, timings
+        (``seconds_*``), the distortion measured by the binding (``measured_*``) and
+        ``warnings`` (``list[str]``). Keys are listed in the crate README."""
 
 def unwrap(
     positions: Buffer,

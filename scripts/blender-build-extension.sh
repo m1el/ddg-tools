@@ -32,7 +32,8 @@ if [ "${#wheels[@]}" -eq 0 ]; then
     exit 1
 fi
 
-# Ask a wheel that runs on this machine whether it contains the stand-in pipeline. `-I` and a
+# Ask a wheel that runs on this machine whether it reports a stand-in pipeline (the current
+# wheel never does: ddg_tools.IS_PLACEHOLDER is False). `-I` and a
 # neutral working directory keep the repository out of the import path.
 placeholder_flag=()
 is_placeholder="$(cd "$root/runs_tmp" && uv run --quiet --no-project --python '>=3.11' --with "${wheels[0]}" \

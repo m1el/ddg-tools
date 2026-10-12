@@ -16,8 +16,8 @@ Every unwrap goes through `run_checked`, which asserts that
 * the active UV map has one finite UV per face corner, inside the unit square;
 * a second run gives bit-identical UVs.
 
-Tests whose expectations depend on the stand-in pipeline (planar projection) are marked
-`placeholder only` and are skipped once the real pipeline is wired in.
+The pipeline behind the operator is the real one (`ddg-uv`); `ddg_tools.IS_PLACEHOLDER` is
+asserted to be False, so no test is conditional on a stand-in.
 """
 
 import argparse
@@ -402,21 +402,18 @@ def ngons_cylinder_caps_and_concave_faces():
 @test
 def face_with_a_zero_area_triangle():
     # Vertices 1 and 2 are at the same place, so whichever way Blender splits the quad, one
-    # triangle has no area. That must never crash: the stand-in unwraps the mesh and counts the
-    # triangle; the real pipeline may instead refuse the mesh with a message.
+    # triangle has no area. That must never crash: the pipeline mollifies the edge lengths (and
+    # says so) and unwraps the mesh.
     import ddg_tools
+    assert ddg_tools.IS_PLACEHOLDER is False
     vertices = [(0, 0, 0), (1, 0, 0), (1, 0, 0), (0, 1, 0), (0, 2, 0), (1, 2, 0)]
     shape = new_object("degenerate", vertices, [(0, 1, 2, 3), (3, 2, 5, 4)])
-    if ddg_tools.IS_PLACEHOLDER:
+    with CaptureOutput() as output:
         run_checked(shape)
-        core = importlib.import_module(ARGS.module + ".core")
-        assert core.unwrap_object(shape)["report"]["n_degenerate_triangles"] == 1
-    else:
-        try:
-            run_checked(shape)
-        except RuntimeError as ex:
-            assert "Traceback" not in str(ex), str(ex)
-            print("  reported:", str(ex).strip())
+    assert "no area" in output.text and "mollification" in output.text, output.text
+    core = importlib.import_module(ARGS.module + ".core")
+    report = core.unwrap_object(shape)["report"]
+    assert report["n_zero_area_triangles"] == 1 and report["mollified"] is True, report
 
 
 @test
@@ -709,11 +706,9 @@ def vertex_groups_reach_the_native_module():
     report = core.unwrap_object(grid, pinned_group="pin", forbidden_group="no cone")["report"]
     assert (report["n_pinned"], report["n_forbidden"]) == (3, 3), report
     assert core.unwrap_object(grid)["report"]["n_pinned"] == 0
-    if ddg_tools.IS_PLACEHOLDER:
-        # The stand-in echoes pinned vertices as cones, so the indices can be seen coming back.
-        result = ddg_tools.unwrap(*core.mesh_buffers(grid.data),
-                                  pinned_vertices=core.group_vertices(grid, "pin"))
-        assert list(result.cone_vertices) == [1, 5, 12]
+    # Steering acts on interior vertices only: of the pinned 1, 5 and 12 only the centre of the
+    # 5 x 5 grid is one, and all three forbidden vertices (0, 2, 24) are on the boundary.
+    assert (report["n_pinned_applied"], report["n_forbidden_applied"]) == (1, 0), report
 
     # The same from Edit mode.
     bpy.ops.object.mode_set(mode='EDIT')
@@ -735,9 +730,8 @@ def vertex_groups_reach_the_native_module():
 
 @test
 def loose_vertices_and_wire_seams_do_not_stop_the_unwrap():
-    import ddg_tools
-    if not ddg_tools.IS_PLACEHOLDER:
-        raise Skip("placeholder only: how loose geometry is treated is the pipeline's decision")
+    """The pipeline ignores vertices that no face uses (and counts them), and a seam that is not
+    an edge of a face (here a wire edge) is ignored with a warning."""
     core = importlib.import_module(ARGS.module + ".core")
     vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (5, 5, 5), (6, 5, 5), (7, 7, 7)]
     shape = new_object("loose", vertices, [(0, 1, 2, 3)], edges=[(4, 5)])
@@ -746,9 +740,18 @@ def loose_vertices_and_wire_seams_do_not_stop_the_unwrap():
     wire.use_seam = True
     with CaptureOutput() as output:
         run_checked(shape)
-    assert "1 seam edge is not on any face and was ignored" in output.text, output.text
-    report = core.unwrap_object(shape)["report"]
-    assert report["n_unreferenced_vertices"] == 3 and report["n_seam_edges_ignored"] == 1
+    assert "1 seam edges are not edges of a face and were ignored" in output.text, output.text
+    result = core.unwrap_object(shape)
+    report = result["report"]
+    assert report["n_unreferenced_vertices"] == 3, report
+    assert report["n_seam_edges"] == 1 and report["n_seam_edges_ignored"] == 1, report
+    assert report["n_seam_edges_cut"] == 0 and result["n_cut_edges"] == 0, report
+    assert report["n_charts"] == 1 and result["n_cones"] == 0, report
+
+    # With seams switched off the wire edge is not passed on at all.
+    report = core.unwrap_object(shape, use_seams=False)["report"]
+    assert report["n_seam_edges"] == 0 and report["n_seam_edges_ignored"] == 0, report
+    assert report["n_unreferenced_vertices"] == 3, report
 
 
 @test
@@ -764,19 +767,16 @@ def status_line_reports_charts_cones_distortion_and_timing():
                r"mean [\d.]+° \| scale [\d.]+x to [\d.]+x of the mean .*"
                r"\| [\d.]+ s \(native [\d.]+ s, Blender side [\d.]+ s\)")
     assert re.search(pattern, line), line
-    if ddg_tools.IS_PLACEHOLDER:
-        assert line.startswith("Warning: PLACEHOLDER BUILD"), line
-    else:
-        assert line.startswith("Info: "), line
+    assert ddg_tools.IS_PLACEHOLDER is False
+    assert line.startswith("Info: "), line
 
 
 @test
 def flat_grid_maps_every_corner_to_its_own_vertex():
-    """Corner order, end to end: on a flat sheet the stand-in's UVs are the x and y of each
-    corner's vertex, scaled into the unit square, so a UV written to the wrong corner shows."""
-    import ddg_tools
-    if not ddg_tools.IS_PLACEHOLDER:
-        raise Skip("placeholder only: relies on the planar projection being the identity")
+    """Corner order and distortion, end to end: a flat sheet needs no cones and must come out
+    undistorted, i.e. every corner's UV is the same similarity transform (rotation, uniform
+    scale, translation; no mirroring) of the x and y of its vertex. A UV written to the wrong
+    corner, or any distortion, shows as a residual."""
     core = importlib.import_module(ARGS.module + ".core")
     xs = [0.0, 0.3, 1.1, 2.0, 2.4]
     ys = [0.0, 0.5, 0.6, 1.5]
@@ -793,20 +793,30 @@ def flat_grid_maps_every_corner_to_its_own_vertex():
     faces += [(a, b, c), (c, d, a)]
     sheet = new_object("sheet", vertices, faces)
     uvs = run_checked(sheet)
-    check_flat_sheet(sheet.data, uvs, core.PACK_MARGIN)
+    check_flat_sheet(sheet.data, uvs)
+    stats = core.unwrap_object(sheet)
+    assert stats["n_cones"] == 0 and stats["n_cut_edges"] == 0 and stats["report"]["n_charts"] == 1
 
 
-def check_flat_sheet(mesh, uvs, margin):
-    xs = [v.co.x for v in mesh.vertices]
-    ys = [v.co.y for v in mesh.vertices]
-    scale = (1.0 - 2.0 * margin) / max(max(xs) - min(xs), max(ys) - min(ys))
-    for loop in mesh.loops:
-        position = mesh.vertices[loop.vertex_index].co
-        expected = ((position.x - min(xs)) * scale + margin, (position.y - min(ys)) * scale + margin)
-        got = (uvs[2 * loop.index], uvs[2 * loop.index + 1])
-        assert abs(got[0] - expected[0]) < 1e-6 and abs(got[1] - expected[1]) < 1e-6, (
-            "corner {} (vertex {}): UV {} but expected {}".format(
-                loop.index, loop.vertex_index, got, expected))
+def check_flat_sheet(mesh, uvs, tolerance=1e-5):
+    """Asserts that the UV of every corner is `a * (x + iy) + b` for one complex `a` (rotation
+    and uniform scale) and one `b`: the least squares fit over all corners must leave a residual
+    below `tolerance` (the UVs are float32 values in the unit square)."""
+    z = [complex(mesh.vertices[loop.vertex_index].co.x, mesh.vertices[loop.vertex_index].co.y)
+         for loop in mesh.loops]
+    w = [complex(uvs[2 * loop.index], uvs[2 * loop.index + 1]) for loop in mesh.loops]
+    z_mean, w_mean = sum(z) / len(z), sum(w) / len(w)
+    spread = sum(abs(q - z_mean) ** 2 for q in z)
+    a = sum((q - z_mean).conjugate() * (r - w_mean) for q, r in zip(z, w)) / spread
+    assert abs(a) > 0.0, "the UVs collapsed to a point"
+    b = w_mean - a * z_mean
+    worst = max(range(len(z)), key=lambda i: abs(w[i] - (a * z[i] + b)))
+    residual = abs(w[worst] - (a * z[worst] + b))
+    assert residual < tolerance, (
+        "corner {} (vertex {}): UV {} is {:.2e} away from the best similarity transform of "
+        "the sheet (scale {:.4f})".format(
+            worst, mesh.loops[worst].vertex_index, (w[worst].real, w[worst].imag), residual,
+            abs(a)))
 
 
 @test
@@ -861,18 +871,23 @@ def the_checks_themselves_catch_violations():
     layer.uv.foreach_set("vector", good)
     assert_valid_uvs(cube)
 
-    # Corner order: UVs shifted by one corner on a flat sheet.
-    if ddg_tools.IS_PLACEHOLDER:
-        core = importlib.import_module(ARGS.module + ".core")
-        sheet = new_object(
-            "control", [(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0), (3, 0, 0), (3, 1, 0)],
-            [(0, 1, 2, 3), (1, 4, 5, 2)])
-        assert op() == {'FINISHED'}
-        uvs = uv_values(sheet)
-        check_flat_sheet(sheet.data, uvs, core.PACK_MARGIN)
-        shifted = array.array('f', uvs[2:] + uvs[:2])
-        must_fail("UVs shifted by one corner",
-                  lambda: check_flat_sheet(sheet.data, shifted, core.PACK_MARGIN))
+    # Corner order and distortion: UVs shifted by one corner, or squeezed, on a flat sheet.
+    sheet = new_object(
+        "control", [(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0), (3, 0, 0), (3, 1, 0)],
+        [(0, 1, 2, 3), (1, 4, 5, 2)])
+    assert op() == {'FINISHED'}
+    uvs = uv_values(sheet)
+    check_flat_sheet(sheet.data, uvs)
+    shifted = array.array('f', uvs[2:] + uvs[:2])
+    must_fail("UVs shifted by one corner", lambda: check_flat_sheet(sheet.data, shifted))
+    squeezed = array.array('f', uvs)
+    for i in range(1, len(squeezed), 2):
+        squeezed[i] *= 0.5
+    must_fail("UVs squeezed in v", lambda: check_flat_sheet(sheet.data, squeezed))
+    mirrored = array.array('f', uvs)
+    for i in range(1, len(mirrored), 2):
+        mirrored[i] = 1.0 - mirrored[i]
+    must_fail("UVs mirrored", lambda: check_flat_sheet(sheet.data, mirrored))
 
     # Cut edges that are not edges of the mesh are counted, not marked.
     core = importlib.import_module(ARGS.module + ".core")

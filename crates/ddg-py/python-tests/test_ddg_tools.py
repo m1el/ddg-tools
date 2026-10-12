@@ -82,13 +82,13 @@ class ModuleTest(unittest.TestCase):
         self.assertIn("lambda_=0.1", ddg_tools.unwrap.__text_signature__)
         self.assertIn("polygon corner", ddg_tools.unwrap.__doc__)
 
-    def test_placeholder_is_announced(self):
+    def test_pipeline_is_announced(self):
         result = ddg_tools.unwrap(*as_arrays(cube()))
         self.assertEqual(result.report["pipeline"], ddg_tools.PIPELINE)
         self.assertIs(result.report["placeholder"], ddg_tools.IS_PLACEHOLDER)
-        if ddg_tools.IS_PLACEHOLDER:
-            self.assertIn("placeholder", ddg_tools.PIPELINE)
-            self.assertTrue(any("stand-in" in w for w in result.report["warnings"]))
+        # The real pipeline is linked; the flag exists so that a stand-in could say so.
+        self.assertIs(ddg_tools.IS_PLACEHOLDER, False)
+        self.assertEqual(ddg_tools.PIPELINE, "ddg-uv")
 
 
 class OutputTest(unittest.TestCase):
@@ -350,10 +350,12 @@ class ShapeAndValueTest(unittest.TestCase):
         report = result.report
         self.assertEqual(
             (report["n_pinned"], report["n_prescribed"], report["n_forbidden"]), (2, 1, 2))
-        if ddg_tools.IS_PLACEHOLDER:
-            # The stand-in echoes the steering as "cones".
-            self.assertEqual(list(result.cone_vertices), [2, 4, 6])
-            self.assertEqual(list(result.cone_angles), [0.0, 1.25, 0.0])
+        # Every prescribed cone is either imposed or reported as not applicable (it lies on a
+        # boundary or a seam); the pipeline does not drop it silently.
+        self.assertEqual(
+            report["n_prescribed_applied"] + report["n_prescribed_not_applied"], 1)
+        self.assertLessEqual(report["n_pinned_applied"], 2)
+        self.assertLessEqual(report["n_forbidden_applied"], 2)
         with self.assertRaisesRegex(ddg_tools.InputError, "vertex 5 is both pinned and forbidden"):
             ddg_tools.unwrap(*arrays, pinned_vertices=array.array('i', [1, 5]),
                              forbidden_vertices=array.array('i', [5]))

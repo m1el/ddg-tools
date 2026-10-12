@@ -390,7 +390,7 @@ fn pack_charts<'py>(
 ///
 /// PIPELINE          name of the unwrap pipeline this build contains
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
-///                   and not the real conformal unwrap
+///                   (the flag exists so that a build with a stand-in would label itself)
 ///
 /// Errors: DdgError, with subclasses InputError, MeshError and SolveError.
 #[pymodule(name = "ddg_tools")]

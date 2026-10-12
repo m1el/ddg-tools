@@ -5,9 +5,9 @@ native module `ddg_tools` (`crates/ddg-py`), bundled with the extension as a Pyt
 
 > The native module runs the real pipeline (`crates/ddg-uv`): marked seams are cut, optimal cone
 > singularities are computed, the surface is cut through the cones and flattened conformally.
-> Defaults: lambda 0.1 and positive cones only. Passages below that mention a "placeholder build"
-> describe the state before the pipeline was wired in; a build only labels itself that way if its
-> wheel reports `ddg_tools.IS_PLACEHOLDER`, which the current one does not.
+> Defaults: lambda 0.1 and positive cones only. What the pipeline does with a mesh, and why
+> those defaults, is in `crates/ddg-uv/README.md`; the Python interface is in
+> `crates/ddg-py/README.md`.
 
 ## The operator
 
@@ -25,8 +25,8 @@ native module `ddg_tools` (`crates/ddg-py`), bundled with the extension as a Pyt
 
 | property | Python name | default | meaning |
 |----------|-------------|---------|---------|
-| Lambda | `lambda_` | 0.5 | trade-off between area distortion and cones; larger gives fewer cones (useful range 0.1 to 1) |
-| Positive Cones Only | `positive_cones_only` | off | allow only cone tips, no saddle cones |
+| Lambda | `lambda_` | 0.1 | trade-off between area distortion and cones; larger gives fewer cones. The default is the largest value at which the cone set of the clean test meshes stops growing; the soft range of the slider is 0.01 to 1 |
+| Positive Cones Only | `positive_cones_only` | on | allow only cone tips, no saddle cones. Negative cones lower the distortion but make the map overlap itself. A closed surface of genus 2 or more cannot be flattened with positive cones only: it gets cones of either sign and a warning |
 | Cut Marked Seams | `use_seams` | on | cut the surface along edges marked as seams before placing cones |
 | Pinned Cones | `pinned_group` | (none) | vertex group; its vertices are cone sites that cost nothing |
 | No Cones | `forbidden_group` | (none) | vertex group; no cone is placed on its vertices |
@@ -45,7 +45,8 @@ The native module returns every chart at the scale the flattening gave it, all c
 each other. The add-on lays them out in the unit square with `ddg_tools.pack_charts`:
 
 1. Every chart gets the axis-aligned bounding box of its UVs. Charts are moved and scaled by one
-   common factor; they are not rotated, so relative chart sizes (texel density) are preserved.
+   common factor; they are not rotated or mirrored, so relative chart sizes (texel density) are
+   preserved.
 2. Every box is padded by 1/256 of the UV square on each side: charts stay 1/128 apart and 1/256
    away from the border.
 3. Boxes are placed on shelves: tallest first, left to right from the lower left corner, a new
@@ -54,21 +55,26 @@ each other. The add-on lays them out in the unit square with `ddg_tools.pack_cha
 
 A single chart ends up with its longer side spanning the square (minus the padding), anchored at
 the lower left. The layout is deterministic and not space-efficient; run Blender's
-*UV > Pack Islands* afterwards for a tight one. The pipeline crate may take packing over later.
+*UV > Pack Islands* afterwards for a tight one. `crates/ddg-uv` has a packer of its own (it
+rotates each chart into its smallest bounding box); the add-on does not use it, because
+`ddg_tools.unwrap` is called with packing off and `pack_charts` does the layout.
 
 ### Feedback
 
-After a run the status bar and the Info editor show one line, for example (placeholder build):
+After a run the status bar and the Info editor show one line, for example (Suzanne, defaults):
 
 ```
-PLACEHOLDER BUILD (planar projection, not the conformal unwrap): 3 charts, 0 cones, 194 cut
-edges | angle error max 133.20°, mean 19.12° | scale 0.12x to 1.59x of the mean | 618 flipped,
-4 collapsed triangles | 0.001 s (native 0.001 s, Blender side 0.001 s)
+3 charts, 3 cones, 48 cut edges | angle error max 75.67°, mean 7.35° | scale 0.06x to 2.09x
+of the mean | 2 flipped, 0 collapsed triangles | 0.024 s (native 0.024 s, Blender side 0.000 s)
 ```
 
-Charts, cones and cut edges are counts. The distortion figures are measured on the UVs that were
+(one line in Blender; the line breaks are added here). For a cube it is `1 chart, 8 cones, 7 cut
+edges | angle error max 0.00°, mean 0.00° | scale 1.00x to 1.00x of the mean | ...`: eight cones
+of 90° unfold a cube without distortion.
+
+Charts, cones and cut edges are counts (a chart is a connected piece of the surface after the seams are cut; cuts through the cones stay inside a chart). The distortion figures are measured on the UVs that were
 written: the largest and the area-weighted mean difference between a triangle corner's angle in
-3D and in UV (0 for a conformal map), and the range of local length scale relative to its mean
+3D and in UV (0 when angles are preserved exactly, as for an isometry; a conformal map with cones keeps them only approximately), and the range of local length scale relative to its mean
 (1.00x to 1.00x for an isometry). Flipped and collapsed triangles are mentioned when there are
 any. Warnings from the native module are shown as separate warning lines.
 
@@ -129,8 +135,8 @@ one needs glibc 2.28, which is what official Blender builds for Linux require.
 2. `scripts/blender_stage_extension.py` copies `blender/ddg_uv_unwrap/` to
    `dist/blender/stage/ddg_uv_unwrap/`, adds the wheel under `wheels/`, the repository's
    `LICENSE`, and completes `blender_manifest.toml` with the `wheels` and `platforms` lines for
-   exactly the wheels it bundled. If the wheel reports `ddg_tools.IS_PLACEHOLDER`, the extension
-   name and tagline are marked as a placeholder build.
+   exactly the wheels it bundled. If the wheel reports `ddg_tools.IS_PLACEHOLDER` (the current one never does: it is `False`),
+   the extension name and tagline are marked as a placeholder build.
 3. `blender --command extension validate` and `... extension build` make the zip.
 
 ### Tests
@@ -140,12 +146,12 @@ one needs glibc 2.28, which is what official Blender builds for Linux require.
 its bundled wheel, the way a user gets them.
 
 - `blender/tests/test_addon.py` (headless, 23 tests): cube (quads), n-gons (cylinder caps, a
-  concave hexagon, a non-planar pentagon), a face with a zero-area triangle, Suzanne (three
+  concave hexagon, a non-planar pentagon), a face with a zero-area triangle (mollified, with a warning), Suzanne (three
   components that must not overlap in UV), torus, UV sphere, marked seams, marking cuts as
   seams, Edit mode (on a mesh edited after entering Edit mode), non-manifold meshes (three faces
   on an edge, a face inside a cube, a bow-tie vertex), a flipped face, a mesh without faces, a
-  linked mesh, a native module that fails to load, vertex groups, loose vertices and wire edges,
-  the status line, and the corner order on a flat sheet. Every unwrap runs twice and asserts that vertex, edge, face and corner
+  linked mesh, a native module that fails to load, vertex groups (including which pinned and forbidden vertices took effect), loose vertices and a wire edge marked as a seam (both ignored and counted),
+  the status line, and a flat sheet that must come out as a similarity transform of its own x and y at every corner (which also checks the corner order). Every unwrap runs twice and asserts that vertex, edge, face and corner
   counts, vertex positions, edge vertices, the corner order of every face and the seam flags are
   bit-for-bit unchanged, that the active UV map has one finite UV per corner inside the unit
   square, and that both runs give identical UVs. One test feeds the checks deliberately broken
@@ -160,11 +166,8 @@ its bundled wheel, the way a user gets them.
   (the `bpy` package the Blender Foundation publishes on PyPI, fetched by `uv`), with numpy
   installed, which is what official builds look like from the inside.
 
-Tests whose expectations only hold for the stand-in pipeline are guarded by
-`ddg_tools.IS_PLACEHOLDER` and are skipped or relaxed once the real pipeline is in.
-
-Observed on the development machine on 2026-10-12, all with the same zip and the same wheel
-(built with `DDG_WHEEL_PORTABLE=1`):
+Observed on the development machine on 2026-10-12, all with the same zip and the same wheel (built without
+`DDG_WHEEL_PORTABLE`):
 
 | Blender | Python | numpy | headless tests | UI checks |
 |---------|--------|-------|----------------|-----------|

@@ -213,7 +213,7 @@ def main():
 
     bpy.ops.mesh.primitive_grid_add(x_subdivisions=388, y_subdivisions=388, size=2.0)
     grid = bpy.context.view_layer.objects.active
-    # Not flat, so that the stand-in's projection has something to measure.
+    # Not flat, so that the unwrap has some curvature to work with.
     positions = array.array('f', bytes(12 * len(grid.data.vertices)))
     grid.data.vertices.foreach_get("co", positions)
     import math

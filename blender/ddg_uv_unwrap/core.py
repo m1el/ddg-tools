@@ -37,8 +37,10 @@ def native():
 
 
 def is_placeholder():
-    """True when the bundled native module contains the stand-in pipeline, not the real unwrap.
-    False when it cannot be loaded (the operator reports that when it runs)."""
+    """True when the bundled native module reports ``IS_PLACEHOLDER``, i.e. contains a stand-in
+    pipeline instead of the real unwrap (``ddg-uv``). Today's module never does, so this is
+    False; it is also False when the module cannot be loaded (the operator reports that when it
+    runs). The operator and the menu label a placeholder build as such."""
     try:
         return bool(native().IS_PLACEHOLDER)
     except UnwrapFailed:
@@ -132,8 +134,8 @@ def mesh_buffers(mesh):
       ("loop");
     * ``polygon_starts``: ``array('I')``, the first corner of every face;
     * ``triangles``: ``array('I')``, 3 corner indices per triangle of Blender's own
-      tessellation (``mesh.loop_triangles``), so the native side triangulates n-gons exactly
-      like Blender does.
+      tessellation (``mesh.loop_triangles``): the native side does not triangulate, so n-gons
+      are split exactly as Blender splits them and the UVs come back per original face corner.
     """
     paths = _attribute_paths()
     positions = _zeros('f', 3 * len(mesh.vertices))

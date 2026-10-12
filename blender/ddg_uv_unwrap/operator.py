@@ -52,7 +52,9 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         name="Positive Cones Only",
         description=(
             "Allow only cones with a positive angle (cone tips, no saddles). "
-            "Negative cones lower distortion but make the UV map overlap itself"
+            "Negative cones lower distortion but make the UV map overlap itself. "
+            "A closed surface of genus 2 or more cannot be flattened with positive cones "
+            "only: it gets cones of either sign, with a warning"
         ),
         default=True,
     )
@@ -117,7 +119,8 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         report = stats["report"]
         placeholder_warning = bool(report.get("placeholder"))
         for warning in report.get("warnings", ()):
-            # The stand-in pipeline's own warning is already part of the summary line.
+            # A placeholder build's own warning is already part of the summary line. (The
+            # shipped native module is never a placeholder; see core.is_placeholder.)
             if not (placeholder_warning and "stand-in" in warning):
                 self.report({'WARNING'}, warning)
         if stats["cut_edges_not_found"]:

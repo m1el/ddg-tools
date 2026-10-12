@@ -21,8 +21,9 @@
 //! is capped at `1 / (4 · ⌈√n⌉)` for `n` charts: a quarter of the cell width of a `⌈√n⌉ × ⌈√n⌉`
 //! grid. The margin that was used is in [`PackReport::margin`].
 //!
-//! The layout wastes space compared with a real packer. That is accepted for now; the pipeline
-//! crate may take packing over later.
+//! The layout wastes space compared with a real packer. `ddg-uv` has a better one (it rotates
+//! charts into their smallest bounding box), but `ddg_tools.unwrap` switches it off so that the
+//! result stays "not packed", and the Blender add-on packs with this function instead.
 
 use crate::error::InputError;
 
