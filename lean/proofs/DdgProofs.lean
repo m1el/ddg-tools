@@ -4,3 +4,5 @@ import DdgProofs.Optimality
 import DdgProofs.Duality
 import DdgProofs.Newton
 import DdgProofs.Closed
+import DdgProofs.Triangle
+import DdgProofs.Cotan
