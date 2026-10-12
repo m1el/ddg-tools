@@ -9,14 +9,17 @@ conformally with the least area distortion for the total cone angle spent. An im
 
 ("the paper"). The method, the optimality system and the two-stage semismooth Newton algorithm
 are theirs. What this crate adds is listed under [Deviations from the paper](#deviations-from-the-paper):
-a certificate on every solve, safeguards, closed meshes, angle bounds, prescribed cones.
+a certificate on every solve, safeguards, closed meshes, angle bounds, prescribed cones, and
+[a second method](#the-factor-once-method) that factorizes the Laplacian once and is 3 to 50 times
+faster (the default whenever it applies; the paper's method is the fallback and can be forced).
 
 Contents: [example](#example) · [the problem](#the-problem) · [the boundary](#the-boundary) · [interface](#interface) ·
 [steering](#steering) · [what comes back](#what-comes-back) · [the certificate](#the-certificate) ·
-[algorithm](#algorithm) · [deviations from the paper](#deviations-from-the-paper) ·
+[algorithm](#algorithm) · [the factor-once method](#the-factor-once-method) ·
+[deviations from the paper](#deviations-from-the-paper) ·
 [the published dataset](#the-published-dataset) · [choosing λ](#choosing-λ) ·
 [closed meshes](#closed-meshes) · [needle-like spikes](#needle-like-spikes) ·
-[performance baseline](#performance-baseline) · [formula tags](#formula-tags) · [tests](#tests) ·
+[performance baseline](#performance-baseline) · [performance of the factor-once method](#performance-of-the-factor-once-method) · [formula tags](#formula-tags) · [tests](#tests) ·
 [not implemented](#not-implemented)
 
 ## Example
@@ -187,7 +190,8 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 pub fn solve_with_boundary(problem, boundary: BoundaryTreatment, options) -> Result<Solution, ConeError>;
 pub enum BoundaryTreatment { Fixed /* default: u = 0 */, Free, Penalized, Convex }   // see "The boundary"
 pub struct SolveOptions<'a> {
-    pub regularization: Vec<f64>,                // γ of Stage I; default 1, 1e-1, …, 1e-10
+    pub regularization: Vec<f64>,                // γ of Stage I (reference method); default 1e-2, 1e-6, 1e-10
+                                                 // (SolveOptions::paper_regularization(): 1, 1e-1, …, 1e-10)
     pub regularization_metric: RegularizationMetric,  // Unweighted (default) | Mass
     pub max_regularized_iterations: usize,       // 50
     pub max_exact_iterations: usize,             // 50
@@ -200,7 +204,10 @@ pub struct SolveOptions<'a> {
     pub max_merge_cluster_diameter: f64,         // +∞ (a length)
     pub linear_solver: LinearSolver,             // Auto | SaddleLdlt | SaddleLu
     pub parallelism: Parallelism<'a>,            // Sequential | Pool(&ThreadPool)
+    pub method: SolveMethod,                     // Auto (default) | Reference | FactorOnce
+    pub factor_once: FactorOnceOptions,          // tolerance 1e-12, max_working_set None, memory_limit_bytes 4 GiB, max_rounds 200
 }
+pub fn factor_once_support(problem, boundary) -> Result<Option<Unsupported>, ConeError>;  // None = supported
 pub struct Solution {
     // the optimum of the problem (this is what the certificate is about)
     pub measure: Vec<f64>,            // µ per vertex, exactly 0 where there is no cone
@@ -218,12 +225,15 @@ pub struct Solution {
 }
 pub struct SolveReport {
     pub status: Status,               // Converged | NotConverged | LinearSolverFailed
-    pub stages: Vec<StageReport>,     // kind, safeguard, newton_iterations, damped_steps,
+    pub stages: Vec<StageReport>,     // reference method only (empty for the factor-once method):
+                                      // kind, safeguard, newton_iterations, damped_steps,
                                       // constant_shifts, stop: StageStop, seconds
     pub regularized_iterations: usize, pub exact_iterations: usize,
     pub safeguard_rounds: usize, pub safeguard_iterations: usize,
     pub linear_solver: LinearSolverReport,   // factorizations, solves, refinement, times
-    pub timings: Timings,                    // setup, regularized, exact, certificate, extraction, total
+    pub method: MethodReport,                // requested, used: MethodUsed, fallback: Option<FallbackReason>,
+                                             // factor_once: Option<FactorOnceReport>
+    pub timings: Timings,                    // setup, regularized, exact, factor_once, certificate, extraction, total
     pub bound_correction: f64, pub zeroed_angles: usize, pub largest_zeroed_angle: f64,
     pub certificate: Certificate,
     pub message: Option<String>,
@@ -399,8 +409,9 @@ most `tolerance · max(1, |J|)`. Nothing else decides the status.
 
 ## Algorithm
 
-The paper's (Fig. 12). **Stage I** solves the regularized problems for `γ = 1, 10⁻¹, …, 10⁻¹⁰`,
-each started from the previous solution; **Stage II** solves the exact optimality system
+The paper's (Fig. 12). **Stage I** solves the regularized problems for the schedule `γ = 10⁻², 10⁻⁶, 10⁻¹⁰`
+(the paper's `1, 10⁻¹, …, 10⁻¹⁰` is `SolveOptions::paper_regularization()`; see
+[the schedule](#the-regularization-schedule)), each started from the previous solution; **Stage II** solves the exact optimality system
 started from the last regularized solution. Both are semismooth Newton iterations in which a
 step chooses a *piece* for every vertex (no cone, positive cone, negative cone, at the lower
 bound, at the upper bound, fixed) and solves the linear optimality system of these pieces.

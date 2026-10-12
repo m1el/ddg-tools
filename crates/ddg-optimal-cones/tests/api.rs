@@ -552,8 +552,8 @@ fn report_counts_what_was_done() {
         .sum();
     assert_eq!(
         r.stages.len(),
-        12,
-        "eleven regularized stages and the exact one"
+        SolveOptions::default().regularization.len() + 1,
+        "one stage per regularization parameter and the exact one"
     );
     assert_eq!(regularized, r.regularized_iterations);
     assert_eq!(r.stages.last().unwrap().kind, StageKind::Exact);

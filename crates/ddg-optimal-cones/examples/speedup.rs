@@ -11,7 +11,7 @@
 //!   --repeat N          solve N times and keep the fastest (default 3)
 //!   --ref-repeat N      the same for the reference method (default: --repeat)
 //!   --skip-reference    do not run the reference method (no agreement columns)
-//!   --old-schedule      the reference method with the old default schedule 1, 1e-1, ..., 1e-10
+//!   --old-schedule      the reference method with the paper's schedule 1, 1e-1, ..., 1e-10
 //!   --schedules         instead of the table: the reference method with the schedule 1, 1e-1, ...,
 //!                       1e-10 against the schedule 1e-2, 1e-6, 1e-10 (factorizations, times,
 //!                       agreement of the optimum, certificate)
@@ -160,7 +160,7 @@ fn main() {
                 ..SolveOptions::default()
             };
             if old_schedule {
-                reference_options.regularization = (0..=10).map(|k| 10f64.powi(-k)).collect();
+                reference_options.regularization = SolveOptions::paper_regularization();
             }
             let reference =
                 (!skip_reference).then(|| best_of(ref_repeat, &problem, &reference_options));
@@ -273,7 +273,7 @@ fn schedule_study(dir: &std::path::Path, names: &[String], lambdas: &[f64], repe
             let problem = ConeProblem::new(&mesh, &geometry, lambda);
             let old = SolveOptions {
                 method: SolveMethod::Reference,
-                regularization: (0..=10).map(|k| 10f64.powi(-k)).collect(),
+                regularization: SolveOptions::paper_regularization(),
                 ..SolveOptions::default()
             };
             let new = SolveOptions {

@@ -46,7 +46,9 @@ pub struct SolveOptions<'a> {
     /// Stage I: the regularization parameters `γ`, strictly decreasing and positive. One
     /// regularized problem is solved for each, starting from the solution of the previous one.
     /// Empty skips Stage I, which leaves the plain semismooth Newton method started from zero.
-    /// Default: `1, 10⁻¹, …, 10⁻¹⁰` (paper Fig. 12 with `N = 10`).
+    /// Default: `10⁻², 10⁻⁶, 10⁻¹⁰`, which reaches the same optimum as the paper's schedule
+    /// ([`SolveOptions::paper_regularization`]: `1, 10⁻¹, …, 10⁻¹⁰`, Fig. 12 with `N = 10`)
+    /// with 1.2 to 3 times fewer factorizations (measured on the dataset, see the README).
     pub regularization: Vec<f64>,
     /// What the regularization measures. Default: [`RegularizationMetric::Unweighted`].
     pub regularization_metric: RegularizationMetric,
@@ -109,7 +111,7 @@ pub struct SolveOptions<'a> {
 impl Default for SolveOptions<'_> {
     fn default() -> Self {
         SolveOptions {
-            regularization: (0..=10).map(|k| 10f64.powi(-k)).collect(),
+            regularization: vec![1e-2, 1e-6, 1e-10],
             regularization_metric: RegularizationMetric::default(),
             max_regularized_iterations: 50,
             max_exact_iterations: 50,
@@ -129,6 +131,12 @@ impl Default for SolveOptions<'_> {
 }
 
 impl SolveOptions<'_> {
+    /// The paper's schedule of Stage I (Fig. 12 with `N = 10`): `γ = 1, 10⁻¹, …, 10⁻¹⁰`. It was
+    /// the default of this crate before the shorter schedule `10⁻², 10⁻⁶, 10⁻¹⁰` replaced it.
+    pub fn paper_regularization() -> Vec<f64> {
+        (0..=10).map(|k| 10f64.powi(-k)).collect()
+    }
+
     fn validate(&self) -> Result<(), ConeError> {
         let bad = |reason: String| Err(ConeError::InvalidOptions { reason });
         for (i, &gamma) in self.regularization.iter().enumerate() {

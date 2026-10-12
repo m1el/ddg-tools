@@ -190,7 +190,7 @@ pub struct FactorOnceOptions {
     /// Give up when the working set (the sites whose columns are stored) would exceed this
     /// size. `None` (the default) uses the crossover with the reference method, measured on
     /// meshes of 11 000 to 153 000 vertices on one thread (README, "The factor-once method"):
-    /// about `1200 · (n / 15000)^0.2` sites for `n` free sites, and up to twice that when the
+    /// about `1300 · (n / 15000)^0.2` sites for `n` free sites, and up to twice that when the
     /// pool has 8 or more threads (`1 + (threads − 1)/7`, at most 2): the dense active-set part
     /// and the Gram product dominate beyond it, and they do not parallelize as well as the
     /// column solves. A result that needs more is left to the reference method.
@@ -335,13 +335,14 @@ pub(crate) fn attempt(
 }
 
 /// The working-set size at which the factor-once method stops being faster than the reference
-/// method: `1200 · (n / 15000)^0.2`, times `1 + (threads − 1)/7` (at most 2).
+/// method: `1300 · (n / 15000)^0.2`, times `1 + (threads − 1)/7` (at most 2).
 ///
-/// Measured crossovers (README): one thread, `cow1` (15 049 vertices) 1 200 sites, `brain`
-/// (152 893) about 1 900; with 8 threads `cow1` 1 900 and `brain` beyond 3 000.
+/// Measured crossovers (README): one thread, `cow1` (15 049 vertices) 1 200 sites, `rhino` and
+/// `bunny` 1 300 to 1 400, `brain` (152 893) about 1 900; with 8 threads `cow1` 1 900 and `brain`
+/// beyond 3 000. The constant is the round figure between them.
 pub(crate) fn automatic_working_set_limit(n: usize, threads: usize) -> usize {
     let thread_factor = 1.0 + (threads.clamp(1, 8) - 1) as f64 / 7.0;
-    (1200.0 * (n as f64 / 15000.0).powf(0.2) * thread_factor).round() as usize
+    (1300.0 * (n as f64 / 15000.0).powf(0.2) * thread_factor).round() as usize
 }
 
 struct Run<'a> {
