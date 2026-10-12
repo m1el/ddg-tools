@@ -1,13 +1,23 @@
 # lean/proofs — machine-checked derivations of the formulas
 
-Lean 4 / Mathlib proofs of the discrete formulas used by the `ddg-tools` implementation of
-*Optimal Cone Singularities for Conformal Flattening* (Soliman, Slepčev, Crane, ACM TOG 2018;
-"the paper"). The ground truth is the **canonical discrete problem** and the math conventions of
-the repository's `CLAUDE.md`; where the paper is silent or inconsistent the statements here are
-derived from that problem (see [Discrepancies](#discrepancies-with-the-paper-as-printed)).
+Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
 
-Results that are used but not proved here (the paper's smooth theory, convergence of the Newton
-method, …) are listed with exact references in [`CITED.md`](CITED.md).
+* the canonical cone problem and its solver, `crates/ddg-optimal-cones` — *Optimal Cone
+  Singularities for Conformal Flattening* (Soliman, Slepčev, Crane, ACM TOG 2018; "the paper");
+* the flattener, `crates/ddg-bff` — *Boundary First Flattening* (Sawhney, Crane, ACM TOG 2017;
+  "BFF");
+* the operators of `crates/ddg-core` both use.
+
+The ground truth is the **canonical discrete problem** and the math conventions of the
+repository's `CLAUDE.md`; where a paper is silent or inconsistent the statements here are derived
+from that problem (see [Discrepancies](#discrepancies-with-the-papers-as-printed)).
+
+**Scope in one paragraph.** Every theorem is a statement in exact real arithmetic about a formula;
+rounding is not covered anywhere, and the Rust code is tied to the statements by reading, by the
+`[formula: id]` tags and by differential tests, not mechanically. Results that are used but not
+proved here (the smooth theory, convergence of the Newton method, three topological facts, …) are
+listed with exact references in [`CITED.md`](CITED.md), which also states precisely what a
+run-time certificate of the cone solver does and does not establish.
 
 ## Pins and how to check
 
@@ -27,8 +37,13 @@ lake env lean DdgProofs/Audit.lean      # prints the axioms each main theorem de
 ```
 
 There is no `sorry` and no `axiom` declaration in this package. `DdgProofs/Audit.lean` runs
-`#print axioms` on 89 theorems (all the main ones); every one reports exactly
-`[propext, Classical.choice, Quot.sound]`.
+`#print axioms` on the main theorems, by name (the count is printed by `check-formulas.sh --build`);
+every one reports exactly `[propext, Classical.choice, Quot.sound]`.
+`lake env lean DdgProofs/AuditAll.lean` (several minutes) collects the axioms of *every*
+declaration of the package and of the oracle's formula modules and reports any other axiom.
+
+The lakefile sets `autoImplicit = false`; `lake env lean File.lean` on a single file does **not**
+apply that option (pass `-DautoImplicit=false`), `lake build` does.
 
 ## Layout
 
@@ -38,15 +53,21 @@ There is no `sorry` and no `axiom` declaration in this package. `DdgProofs/Audit
 | `DdgProofs/Problem.lean` | the canonical discrete problem: `Site`, `ConeProblem`, objective, feasibility, optimality system |
 | `DdgProofs/Optimality.lean` | sufficiency, quadratic growth, uniqueness, necessity (invertible `L`), guarantee of paper Sec. 4.5 (A.2, A.3) |
 | `DdgProofs/Duality.lean` | discrete dual, Fenchel–Young, weak/strong duality, duality-gap certificate (A.4) |
+| `DdgProofs/Certificate.lean` | the certificate for inexact data: gap identity for arbitrary points, clipped dual lower bound, repaired upper bound, enclosure, backward statements, counterexamples (A.4′) |
 | `DdgProofs/Newton.lean` | residual maps, semismooth differentials, stopping rule, regularized problem (A.5) |
+| `DdgProofs/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
 | `DdgProofs/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
 | `DdgProofs/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
 | `DdgProofs/Cotan.lean` | cotan formula, cotan Laplacian, lumped mass (B.9, B.10) |
 | `DdgProofs/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
 | `DdgProofs/Yamabe.lean` | linearized discrete Yamabe equation (B.12) |
 | `DdgProofs/Evaluated.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
-| `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions |
-| `DdgProofs/Audit.lean` | axiom audit (not imported by the library) |
+| `DdgProofs/Bff/Laplace.lean` | BFF: Poisson solves, Dirichlet-to-Neumann, Neumann problem, exterior-angle sum, first-order Cherrier formula (D) |
+| `DdgProofs/Bff/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
+| `DdgProofs/Bff/Curve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
+| `DdgProofs/Bff/Quality.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
+| `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
+| `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
 ## Conventions
 
@@ -119,12 +140,48 @@ All statements are for exact real arithmetic. Ids listed in [`CITED.md`](CITED.m
 | `minimizer-unique` | If all `w_i > 0`, two minimizers have equal `u` and equal `µ` (any `L`). | `ConeProblem.IsMinimizer.unique` |
 | `least-distortion-guarantee` | For a minimizer `(u, µ)` and feasible `(v, ν)`: `E(u) ≤ E(v) + λ(R(ν) − R(µ))`, `E = ½Σ w u²`, `R = Σ wR\|·\|`; so `E(u) ≤ E(v)` whenever `R(ν) ≤ R(µ)`. | `ConeProblem.IsMinimizer.distortion_le_add`, `distortion_le` |
 | `duality-gap-certificate` | Dual value `D(ũ, φ) = −½Σ w_i ũ_i² + Σ φ_i Ω_i − Σ c_i(φ_i)`, where `Lᵀφ = −w∘ũ`, `c_i(p) = hi_i·max(0, p − t_i) + lo_i·min(0, p + t_i)` (a term with an infinite bound is dropped and then `p ≤ t_i`, resp. `−t_i ≤ p`, is required), `c_i(p) = a_i p` at a fixed vertex. For `L u = µ − Ω`: `J(u, µ) − D(ũ, φ) = ½Σ w_i(u_i − ũ_i)² + Σ_i (t_i\|µ_i\| + c_i(φ_i) − φ_i µ_i)`, every summand `≥ 0` at feasible points; hence `D ≤ J(v, ν)` for all feasible `(v, ν)`, and `J(u, µ) ≤ J(v, ν) + gap` whenever `J(u, µ) − D ≤ gap`. If all `w_i > 0`: `ũ_i = −(Lᵀφ)_i/w_i`, `D = −½Σ (Lᵀφ)_i²/w_i + Σ φ_i Ω_i − Σ c_i(φ_i)`. At a solution of the optimality system `D = J`. | `ConeProblem.gap_identity`, `weak_duality`, `duality_gap_certificate`, `adjoint_gap_certificate`, `KKT.dualObjective_eq` |
+| `duality-gap-inexact` | For **arbitrary** `u, ũ, φ, µ` with `r = L u − µ + Ω`, `s = Lᵀφ + w∘ũ`: `J(u, µ) − D(ũ, φ) = ½Σ w_i(u_i − ũ_i)² + Σ_i (t_i\|µ_i\| + c_i(φ_i) − φ_i µ_i) − Σ φ_i r_i + Σ s_i u_i`. With `ũ_i = −(Lᵀφ)_i/w_i` (`0` where `w_i = 0`): `J(u, µ) − D = G − Σ φ_i r_i + Σ_{w_i=0} (Lᵀφ)_i u_i`, `G` the first two sums (the "complementarity gap"). | `ConeProblem.gap_identity_general`, `objective_sub_dualObjectiveOfAdjoint` |
+| `duality-gap-certificate` (inexact data) | `φ̂ = dualClip φ` (`φ_i` clamped to `[−t_i` if `lo_i = −∞`, `t_i` if `hi_i = +∞]`), `D = −½Σ_{w_i>0} (Lᵀφ̂)_i²/w_i + Σ φ̂_i Ω_i − Σ c_i(φ̂_i)`. If `(Lᵀφ̂)_i = 0` wherever `w_i = 0`: `D ≤ J(v, ν)` for all feasible `(v, ν)`. If moreover `µ_i + r_i` is admissible for all `i`: `(u, µ + r)` is feasible, `J(u, µ + r) ≤ J(u, µ) + Σ t_i\|r_i\|` (sum over penalized vertices), and `J(u, µ + r) ≤ J(v, ν) + (J(u, µ) − D + Σ t_i\|r_i\|)` for all feasible `(v, ν)`. Always (for admissible `µ`): `(u, µ)` is feasible for the problem with `Ω − r` and within `G` of its optimum. | `ConeProblem.dual_lower_bound_of_clip`, `certificate_enclosure`, `certificate_of_computed`, `IsMinimizer.weighted_sq_sub_le_width`, `repaired_certificate`, `backward_certificate`, `KKT.objective_add_le_of_residual` |
 | `newton-stopping-rule` | Stage II: `F(u, φ, µ) = (L u − µ + Ω, Lᵀφ + w∘u, µ − clamp(P_t(φ + µ)))`, `DF·(v, q, ν) = (L v − ν, Lᵀq + w∘v, ν − D(q + ν))` with `D_i` the slope of the piece of `φ_i + µ_i`. If `DF·(v, q, ν) = −F(u, φ, µ)` and every `φ_i + q_i + µ_i + ν_i` lies on the same piece as `φ_i + µ_i`, then `F(u + v, φ + q, µ + ν) = 0` and `(u + v, µ + ν)` is a global minimizer. Stage I: the same for `F_γ(u, φ) = (L u + Ω − clamp((m/γ)P_t(φ)), Lᵀφ + w∘u)`, `DF_γ·(v, q) = (L v − D_γ q, Lᵀq + w∘v)`, pieces of `φ_i`. | `paper_stageII_stopping_rule`, `paper_stageI_stopping_rule`, `ConeProblem.isMinimizer_of_newton_step`, `isRegMinimizer_of_newton_step`, `Ddg.Problem.Fimp_eq_zero_of_newton_step` |
 | `regularized-optimality-sufficient` | If `L u = µ − Ω`, `Lᵀφ = −w∘u` and `φ_i − γ_i µ_i ∈ ∂(t_i\|·\| + ι)(µ_i)` (`γ_i ≥ 0`), then `(u, µ)` minimizes `J(u, µ) + Σ (γ_i/2) µ_i²` over all feasible pairs. (`γ_i = γ/m_i` is the mass-consistent regularization.) | `ConeProblem.isRegMinimizer_of_stationary`, `isRegMinimizer_of_residualReg_eq_zero` |
 | `regularized-suboptimality` | If `(u_γ, µ_γ)` minimizes the regularized objective and `(u, µ)` is feasible: `J(u_γ, µ_γ) ≤ J(u, µ) + Σ (γ_i/2) µ_i²`. | `ConeProblem.IsRegMinimizer.objective_le` |
 | `closed-mesh-cone-sum` | If `1ᵀL = 0` and `L u = µ − Ω` then `Σ µ_i = Σ Ω_i`; on a closed valid manifold mesh this is `2πχ`. | `ConeProblem.sum_cone_eq_sum_defect`, `TriMesh.sum_cone_eq_two_pi_eulerChar` |
 | `closed-mesh-optimal-constant` | `E(u + c) = E(u) + c·Σ w_i u_i + (c²/2)·Σ w_i`; if `Σ w_i > 0` the unique minimizing constant is `c₀ = −Σ w_i u_i / Σ w_i`. If `L·1 = 0`, every minimizer (and every solution of the optimality system) has `Σ w_i u_i = 0`. | `ConeProblem.distortion_add_const`, `distortion_add_const_eq`, `KKT.weighted_mean_eq_zero`, `IsMinimizer.weighted_mean_eq_zero` |
-| `lambda-area-normalization` | For `c > 0`: the minimizers with masses `c·m` and parameter `λ` are the minimizers with masses `m` and parameter `λ/c`. With masses divided by their sum the problem is unchanged by `m ↦ c·m`. | `ConeProblem.isMinimizer_scaleMass_iff`, `normalizeMass_scaleMass` |
+| `lambda-area-normalization` | For `c > 0`: the minimizers with masses `c·m` and parameter `λ` are the minimizers with masses `m` and parameter `λ/c`. With masses divided by the total area `A` the problem is unchanged by `(m, A) ↦ (c·m, c·A)`; dividing the masses by `A` is `λ ↦ λ·A`. | `ConeProblem.isMinimizer_scaleMass_iff`, `normalizeMass_scaleMass`, `isMinimizer_normalizeMass_iff` |
+
+### The cone solver (`crates/ddg-optimal-cones`)
+
+`A` is the Laplacian block of the unknowns, `w_i = wE_i m_i`, `g_i = t_i|·| + ι_[lo_i,hi_i]`.
+
+| id | exact statement | theorems |
+|---|---|---|
+| `saddle-point-newton-system` | A Newton system has one row per vertex: *flat* `(A u)_i = µ_i − Ω_i`, *sloped* `(A u)_i − k_i(φ_i − o_i) = b_i − Ω_i`, *pinned* `φ_i = p_i`; plus `w∘u + A φ = 0`. `(u, φ)` solves it ⟺ `A φ = −w∘u` and `µ := A u + Ω` satisfies `µ_i` given / `µ_i = b_i + k_i(φ_i − o_i)` / `φ_i = p_i`. The assembled matrix form (unknown `ψ_i = φ_i − o_i` on sloped rows, pinned columns removed, known values on the right) has the same solutions. If `A` is symmetric and `φ_i ∈ ∂g_i(µ_i)` for all `i`, the solution is a solution of the optimality system, hence a global minimizer; with `φ_i − (µ_i − µ̄_i)/k_i ∈ ∂g_i(µ_i)` it minimizes `J + Σ(µ_i − µ̄_i)²/(2k_i)`. | `Solver.isSolution_iff`, `Solver.isAssembledSolution_iff`, `ConeProblem.kkt_of_isSolution`, `isMinimizer_of_isSolution`, `isProxMinimizer_of_isSolution` |
+| `soft-threshold-active-sets` (rows) | "The vertex is on the piece of its row": positive cone `g = t`, `0 ≤ µ ≤ hi`; negative cone `g = −t`, `lo ≤ µ ≤ 0`; no cone `µ = 0`, `g ≤ t` unless `hi = 0`, `−t ≤ g` unless `lo = 0`; upper bound `µ = hi`, `t ≤ g` (`−t ≤ g` if `hi = 0`); lower bound symmetric; fixed `µ = a`. Each implies `g ∈ ∂g_i(µ)`. | `Site.stationary_of_pos`, `…_neg`, `…_zero`, `…_upper`, `…_lower`, `Site.stationary_fixed_iff` |
+| `proximal-fixed-point` | If `(u, µ)` minimizes `J(v, ν) + Σ(ν_i − µ_i)²/(2k_i)` (`k_i > 0`) over the feasible pairs, it minimizes `J`. If `(u, µ)` minimizes the problem with centre `µ̄` and `(ū, µ̄)` is feasible: `J(u, µ) + Σ(µ_i − µ̄_i)²/(2k_i) ≤ J(ū, µ̄)`. | `ConeProblem.IsProxMinimizer.isMinimizer_of_fixedPoint`, `IsProxMinimizer.objective_add_le` |
+| `regularized-cone-update` (proximal form) | For `k > 0`: `φ − (µ − µ̄)/k ∈ ∂g(µ)` ⟺ `µ = clamp(k·P_t(φ + µ̄/k))`. | `ConeProblem.stationary_prox_iff` |
+| `adjoint-constant-interval` | If `Lᵀ·1 = 0` and `(u, φ, µ)` satisfies the state and adjoint equations, then `(u, φ + c, µ)` solves the optimality system ⟺ `a_i ≤ φ_i + c ≤ b_i` for all `i`, `[a_i, b_i] = ∂g_i(µ_i)` (`a_i = −∞` at the lower bound and at a fixed vertex, else `t_i` if `µ_i > 0`, else `−t_i`; `b_i = +∞` at the upper bound and at a fixed vertex, else `t_i` if `µ_i ≥ 0`, else `−t_i`). | `ConeProblem.kkt_add_const_iff`, `kkt_add_const_iff_interval`, `Site.stationary_iff_mem_subdiff` |
+| `gauss-bonnet-adjoint-shift` | `c ↦ Σ_i clamp(k_i·P_{t_i}(x_i + c))` is nondecreasing. If `1ᵀA = 0`, `Σ b = 0` and `(A u)_i = b_i` for `i ≠ i₀`, then `(A u)_{i₀} = b_{i₀}`: once the flat cone angles sum to `Σ Ω`, the system with one adjoint value pinned and that vertex's state equation dropped is the full system. | `ConeProblem.sum_proxReg_add_monotone`, `Solver.mulVec_eq_of_sum_eq`, `Solver.isSolution_of_pinned_of_sum_eq` |
+| `regularized-dual-objective` | For symmetric `A` and a direction with `w∘du + A dφ = 0`: `g(α) := Σ w_i du_i(u_i + α du_i) − Σ Ω_i dφ_i + Σ m_i(x_i + α dφ_i) dφ_i = −Σ dφ_i·((A(u + α du))_i − m_i(x_i + α dφ_i) + Ω_i)`; `g` is nondecreasing if `w ≥ 0` and every `m_i` is. | `ConeProblem.dualSlope_eq`, `dualSlope_monotone` |
+| `componentwise-backward-error` | (Oettli–Prager) `\|b − Kx\|_i ≤ ε(\|K\|\|x\| + \|b\|)_i` for all `i` ⟺ `(K + δK)x = b + δb` for some `\|δK_ij\| ≤ ε\|K_ij\|`, `\|δb_i\| ≤ ε\|b_i\|`. | `oettli_prager`, `residual_eq_zero_of_magnitude_eq_zero` |
+| `cone-cluster-frechet-mean` | Merging a cluster `C` into one cone at any `v ∈ C` (`µ'_v = Σ_C µ`, `µ' = 0` on `C∖{v}`): `Σ µ' = Σ µ`, `Σ\|µ'\| ≤ Σ\|µ\|`, and `µ'` is admissible ⟺ `Σ_C µ` is admissible at `v` and `0` is admissible on `C∖{v}`. A vertex of least Fréchet variance exists. | `sum_mergeCones`, `sum_abs_mergeCones_le`, `mergeCones_mem_feasible_iff`, `exists_frechetMean` |
+| `closed-mesh-cone-sum` (evaluation) | `Σ_i (µ_i − Ω_i − (Σµ − ΣΩ)·m_i/Σm) = 0`. | `sum_sub_defect_eq_zero` |
+| `closed-mesh-optimal-constant` (solver) | If `1ᵀA = 0`, every solution of a Newton system has `Σ w_i u_i = 0`. | `Solver.IsSolution.sum_weighted_eq_zero` |
+
+### Boundary First Flattening (`crates/ddg-bff`)
+
+`L` is the cotan Laplacian of a mesh, `I` its interior and `B` its boundary vertices; boundary
+loops are indexed with the surface on the left, edge `j` from boundary vertex `j` to `j+1`.
+
+| id | exact statement | theorems |
+|---|---|---|
+| `bff-harmonic-extension` | Connected valid mesh, `F` the free vertices, at least one vertex prescribed: for every source `φ` and prescribed values `g` there is exactly one `a` with `a = g` off `F` and `(L a)_v = φ_v` on `F` (`L_FF a_F = φ_F − L_FX a_X`). | `TriMesh.existsUnique_poisson` |
+| `bff-dirichlet-to-neumann` | If `(L a)_v = φ_v` on `F`, then with `h_v := φ_v − (L a)_v` off `F` (`0` on `F`): `L a = φ − h` everywhere and `Σ h = Σ φ`. | `TriMesh.neumannData_spec`, `sum_neumannData` |
+| `bff-neumann-to-dirichlet` | Connected valid mesh: `L a = b` is solvable ⟺ `Σ b = 0`; then for each vertex `v₀` exactly one solution has `a(v₀) = 0`, any two solutions differ by a constant, and for weights with `Σ m ≠ 0` exactly one solution has `Σ m a = 0`. | `TriMesh.exists_laplacian_mulVec_eq_iff`, `existsUnique_pinned`, `sub_const_of_laplacian_mulVec_eq`, `existsUnique_neumann` |
+| `bff-cherrier-boundary-curvature` | Under `ℓ̃_ij = e^{t(v_i+v_j)/2}ℓ_ij`: `d/dt k_i = (L v)_i` at `t = 0` for `k_i = π − Σθ` (any vertex). The code's `k̃ = k − h`, `h = −(L u)_B`, is `k̃ = k + (L u)_B`. | `TriMesh.hasDerivAt_geodesicCurvature_conformalScale` |
+| `bff-exterior-angle-sum` | Valid manifold mesh, any `u`: `Σ_I (Ω + L u) + Σ_B (k + L u) = 2πχ`. If `(L u)_I = −Ω_I`: `Σ_B (k + L u) = 2πχ` (`= 2π` for a disk). If `(L u)_I = µ_I − Ω_I`: `= 2πχ − Σ_I µ`. | `TriMesh.gauss_bonnet_conformal`, `sum_exteriorAngle`, `sum_exteriorAngle_cones` |
+| `bff-cone-angle-sum` | `M'` a cut of the valid mesh `M` (same faces, vertex copies, `ρ` copy ↦ original), `u` on `M`: `Σ_{p : ρ p = v} (π − (k'_p + (L'(u∘ρ))_p)) = 2π − (Ω_v + (L u)_v)`; `= 2π − µ_v` if `(L u)_v = µ_v − Ω_v`. At a vertex with one copy `Ω' + L'(u∘ρ) = Ω + L u`. | `TriMesh.sum_fiber_interior_angle`, `sum_fiber_interior_angle_cone`, `curvature_copy_eq`, `sum_fiber_angleSum`, `sum_fiber_laplacian` |
+| `cut-euler-characteristic` | `χ(M') = χ(M) + Σ_v (s_v − 1) − Σ_e (c_e − 1)`, `s_v` copies of vertex `v`, `c_e` copies of edge `e`; `c_e ≤` number of faces at `e` (so `c_e − 1 ∈ {0, 1}` on a manifold mesh, and the last sum is the number of cut edges). | `TriMesh.cut_euler_characteristic`, `card_vertices_cut`, `card_edges_cut`, `card_edge_copies_le` |
+<!-- BFF-CURVE-QUALITY-ROWS -->
 
 ## Theorems
 
@@ -189,6 +246,34 @@ Necessity on closed meshes is **not** proved (see `CITED.md`, `optimality-system
 | — | `Site.fenchel_young`, `Site.exists_conj_eq`, `Site.Stationary.fenchel_young_eq` | Fenchel–Young for the per-vertex cost, attainment, and equality at a stationary pair. | Prop. A.3 | own |
 | `duality-gap-certificate` | `Ddg.Problem.objective_le_add_gap` | The certificate for the oracle's problem (finite bounds: every `φ` is dual feasible). | — | oracle (dual value: own formula `dualValue`) |
 
+### A.4′ The certificate for inexact data (`DdgProofs/Certificate.lean`)
+
+No assumption on `(u, φ, µ)` unless stated. `r = L u − µ + Ω` (`stateResidual`),
+`φ̂ = dualClip φ`, `D(φ) = dualObjectiveOfAdjoint φ`, `G = complementarityGap`,
+`cost_i(x) = wR_i|x|` (`0` at a fixed vertex). "Admissible" = in `[lo_i, hi_i]`, resp. equal to the
+fixed angle.
+
+| id | theorem | statement | Def. |
+|---|---|---|---|
+| `duality-gap-inexact` | `ConeProblem.gap_identity_general` | `J(u,µ) − D(ũ,φ) = ½Σw(u−ũ)² + Σ(λcost_i(µ_i) + conj_i(φ_i) − φ_iµ_i) − Σφ_i r_i + Σ s_i u_i` for arbitrary `u, ũ, φ, µ`. | own |
+| `duality-gap-inexact` | `ConeProblem.objective_sub_dualObjectiveOfAdjoint` | `J(u,µ) − D(φ) = G(u,φ,µ) − Σφ_i r_i + Σ_{w_i=0}(Lᵀφ)_i u_i` (the relation between the code's `duality_gap` and `complementarity_gap`). | own |
+| `duality-gap-certificate` | `ConeProblem.dualObjectiveOfAdjoint_add_le` | `D(φ) + Σ_{w_i=0}(Lᵀφ)_i v_i ≤ J(v,ν)` for dual-feasible `φ` and feasible `(v,ν)`. | own |
+| `duality-gap-certificate` | `ConeProblem.dual_lower_bound`, `dual_lower_bound_of_clip` | `D(φ̂) ≤ J(v,ν)` for every feasible `(v,ν)`, for **any** `φ`, if `(Lᵀφ̂)_i = 0` wherever `w_i = 0`. | own |
+| — | `ConeProblem.feasible_iff_eq_inducedCone` | `(u,ν)` is feasible ⟺ `ν = L u + Ω` and `L u + Ω` is admissible: `µ + r` is the only repair that keeps `u`. | own |
+| `duality-gap-certificate` | `ConeProblem.objective_add_stateResidual_le`, `repairCost_le_of_abs_le` | `J(u, µ+r) ≤ J(u,µ) + λΣcost_i(r_i) ≤ J(u,µ) + ε·λΣ_i wR_i` if `\|r_i\| ≤ ε`. | own |
+| `duality-gap-certificate` | `ConeProblem.certificate_enclosure` | If `φ` is dual feasible, `(Lᵀφ)_i = 0` wherever `w_i = 0`, and `µ + r` is admissible: `(u, µ+r)` is feasible; `D(φ) ≤ J(v,ν)` for all feasible `(v,ν)`; `J(u,µ+r) ≤ J(u,µ) + λΣcost_i(r_i) =: U`; `J(u,µ+r) ≤ J(v,ν) + (U − D(φ))`; `0 ≤ U − D(φ)`. | own |
+| `duality-gap-certificate` | `ConeProblem.certificate_of_computed` | The same from a computed triple, all `w_i > 0`: with `J(u,µ) − D(φ̂) ≤ gap` and `λΣcost_i(r_i) ≤ ε`, `(u, µ+r)` is within `gap + ε` of the optimum. | own |
+| `duality-gap-certificate` | `ConeProblem.IsMinimizer.objective_mem_enclosure`, `IsMinimizer.weighted_sq_sub_le_width` | Every minimizer `(u*,µ*)` has `D(φ) ≤ J(u*,µ*) ≤ U` and `¼Σw(u−u*)² ≤ U − D(φ)`. | own |
+| `duality-gap-certificate` | `ConeProblem.repaired_certificate` | For admissible `µ`: with `µ̄` the admissible vector nearest to `µ+r` and `ρ = µ+r−µ̄`, `(u,µ̄)` is feasible for the problem with defects `Ω − ρ` and within `J(u,µ) + λΣcost_i(r_i) − D(φ) + Σφ_iρ_i` of its optimum. | own |
+| `duality-gap-certificate` | `ConeProblem.backward_certificate` | For admissible `µ`: `(u,µ)` is feasible for the problem with defects `Ω − r` and within `G(u,φ,µ) ≥ 0` of its optimum. | own |
+| `duality-gap-certificate` | `ConeProblem.KKT.objective_add_le_of_residual` | If `(u*,φ*,µ*)` solves the optimality system: `J(u*,µ*) + ½Σw(u−u*)² ≤ J(u,µ) + Σφ*_i r_i` for admissible `µ`. | own |
+| `minimizer-unique` | `ConeProblem.IsMinimizer.weighted_sq_sub_le` | `¼Σw(u−v)² ≤ J(u,µ) − J(v,ν)` for a minimizer `(v,ν)` and feasible `(u,µ)`. | own |
+
+Five `example`s at the end of the file: the hypotheses of `certificate_of_computed` hold with
+nonzero residuals in a case where `J(u,µ) − D < 0`; `J(u,µ)` can lie below the optimum; the
+enclosure is false at a forbidden vertex with `r ≠ 0` and at a vertex on its bound; the lower
+bound is false when `w_i = 0` and `(Lᵀφ)_i ≠ 0`.
+
 ### A.5 Semismooth Newton method (paper Sec. 5.3)
 
 | id | theorem | statement | paper | Def. |
@@ -201,8 +286,10 @@ Necessity on closed meshes is **not** proved (see `CITED.md`, `optimality-system
 | `newton-stopping-rule` | `ConeProblem.residual_eq_zero_of_newton_step` | Stage II for the canonical problem with all vertex kinds. | Sec. 5.3.3 | own |
 | `newton-stopping-rule` | `ConeProblem.isMinimizer_of_newton_step` | … and then the new iterate is a global minimizer. | Sec. 5.3.3 | own |
 | `newton-stopping-rule` | `ConeProblem.residualReg_eq_zero_of_newton_step`, `ConeProblem.isRegMinimizer_of_newton_step` | Stage I for the canonical problem; the new iterate minimizes the regularized objective. | Sec. 5.3.3 | own |
-| `newton-stopping-rule` | `Ddg.Problem.F_eq_zero_of_newton_step`, `Ddg.Problem.objective_le_of_newton_step` | Stage II on the oracle's `stateResidual`, `adjointResidual`, `coneResidual`, `state`. | Sec. 5.3.3 | oracle |
-| `newton-stopping-rule` | `Ddg.Problem.Freg_eq_zero_of_newton_step` | Stage I on the oracle's `Freg`, `regState`. | Sec. 5.3.3 | oracle |
+| `newton-stopping-rule` | `Ddg.Problem.F_eq_zero_of_newton_step`, `Ddg.Problem.objective_le_of_newton_step` | Stage II on the oracle's `stateResidual`, `adjointResidual`, `coneResidual`, `state`: a step that keeps the **canonical** state (`ConeState.canon`) of every vertex lands on a zero of `F`. (Raw states flip at a prescribed vertex without any change of the equation; an `example` shows it.) | Sec. 5.3.3 | oracle |
+| `newton-stopping-rule` | `Ddg.Problem.Freg_eq_zero_of_newton_step` | Stage I on the oracle's `Freg`, `regState`, canonical states, for `γ > 0`. | Sec. 5.3.3 | oracle |
+| `soft-threshold-active-sets` | `Oracle.regularizedMeasure_affine_of_canon_eq` | `clamp(k·P_t(·))` is affine between two points whose pieces have the same canonical name. | — | oracle |
+| `newton-stopping-rule` | `Ddg.Problem.zero_off_of_Fpiece_eq_zero` | The oracle's piecewise linear system with absent bounds (see below). | — | oracle |
 | `newton-stopping-rule` | `Ddg.Problem.Fimp_eq_zero_of_Fpiece_eq_zero`, `Ddg.Problem.Fimp_eq_zero_of_newton_step` | The oracle's own iteration: a solution of `DFpiece γ σ · y = −Fpiece γ σ` whose new point lies on the pieces `σ` is a zero of `Fimp γ`. | — | oracle |
 | — | `Ddg.Problem.Fpiece_add`, `Ddg.Problem.DFpiece_mulVec` | `DFpiece` is the Jacobian of the affine map `Fpiece`. | — | oracle |
 | — | `Ddg.Problem.Fimp_zero_eq_F` | `Fimp 0 = F`. | — | oracle |
@@ -221,7 +308,8 @@ Convergence of the iteration is not proved (`CITED.md`, `semismooth-newton-conve
 | `closed-mesh-optimal-constant` | `ConeProblem.distortion_add_const`, `distortion_add_const_eq` | `E(u + c)` is a parabola in `c`; its unique minimizer is `c₀ = −Σ wE m u / Σ wE m`. | — | own |
 | `closed-mesh-optimal-constant` | `ConeProblem.KKT.weighted_mean_eq_zero`, `IsMinimizer.weighted_mean_eq_zero` | At the optimum on a closed mesh `Σ wE m u = 0`. | — | own |
 | `lambda-area-normalization` | `ConeProblem.isMinimizer_scaleMass_iff` | Multiplying all masses by `c > 0` equals replacing `λ` by `λ/c`. | Sec. 6.2 | own |
-| `lambda-area-normalization` | `ConeProblem.normalizeMass_scaleMass` | With masses normalized to sum 1 the problem does not change under scaling. | Sec. 6.2 | own |
+| `lambda-area-normalization` | `ConeProblem.normalizeMass_scaleMass` | `normalizeMass P A` divides the masses by `A`, to be taken as the **total area** (the sum of the lumped masses over *all* vertices, boundary included — not the sum over the unknowns). If masses and `A` are multiplied by the same `c ≠ 0`, the normalized problem is unchanged. | Sec. 6.2 | own |
+| `lambda-area-normalization` | `ConeProblem.isMinimizer_normalizeMass_iff` | Dividing the masses by `A > 0` is the same as replacing `λ` by `λ·A`. | Sec. 6.2 | own |
 | `scale-invariance` | `cornerAngle_smul`, `cornerCot_smul`, `triArea_smul` | Angles and cotangents are scale invariant; areas scale by `s²`. | Sec. 6.2 | own |
 | `scale-invariance` | `TriMesh.laplacian_scale`, `TriMesh.mass_scale`, `TriMesh.angleDefect_scale` | `L` and `Ω` are scale invariant; masses scale by `s²`. | Sec. 6.2 | own |
 
@@ -275,17 +363,20 @@ theorem carrying their ids is the one that ties them together.
 |---|---|---|---|---|
 | `discrete-yamabe-linearization` | `hasDerivAt_cornerAngle_conformal` | Under `ℓ̃_ij = e^{t(v_i+v_j)/2} ℓ_ij` the angle at `i` of a triangle `ijk` has derivative `½cot θ_k (v_j − v_i) + ½cot θ_j (v_k − v_i)` at `t = 0`. | (Springborn et al. 2008; BFF) | own |
 | `discrete-yamabe-linearization` | `TriMesh.hasDerivAt_angleSum_conformalScale` | The derivative of the angle sum at a vertex is `−(L v)_i`. | Sec. 5.2.1 | own |
-| `discrete-yamabe-linearization` | `TriMesh.hasDerivAt_angleDefect_conformalScale`, `…_add` | The angle defect of the scaled metric is `Ω + L u + o(u)`; the same at any `u` with the Laplacian of the scaled metric. | Eq. 17 | own |
+| `discrete-yamabe-linearization` | `TriMesh.hasDerivAt_angleDefect_conformalScale`, `…_add` | Along the ray `t ↦ t·v` the angle defect of the scaled metric has derivative `(L v)_i` at `t = 0`; the same at any base point `u` with the Laplacian of the scaled metric. (A derivative along each ray; no expansion `Ω + L u + o(‖u‖)` uniform in the direction is proved.) | Eq. 17 | own |
 
 This confirms the sign convention of `CLAUDE.md` by proof: with a positive semidefinite `L` and
-`u` the true log scale factor, the curvature after scaling is `Ω + L u`, so prescribing `µ` gives
-`L u = µ − Ω`, not the paper's `L u = Ω − µ`.
+`u` the true log scale factor, the curvature after scaling by `t·v` is `Ω + t·L v` to first order
+in `t`, so prescribing `µ` gives the linearized equation `L u = µ − Ω`, not the paper's
+`L u = Ω − µ`.
 
 ## Which definitions are shared with the code that runs
 
 The oracle (`lean/oracle`, `DdgOracle/Formulas/*`) defines the formulas once for a generic scalar;
-`DdgProofs/Oracle/Scalar.lean` provides `instance : Ddg.Scalar ℝ`. Theorems **about the oracle's
-definitions** (at `ℝ`, i.e. exact arithmetic):
+`DdgProofs/Oracle/Scalar.lean` provides the instance `Ddg.Scalar ℝ` (every field the genuine real
+operation). The instance is `scoped`: it is active inside `namespace DdgProofs.Oracle` and after
+`open DdgProofs.Oracle`, and does not affect how arithmetic on `ℝ` is elaborated elsewhere.
+Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
 
 - scalar: `softThreshold`, `clamp`, `boundedThreshold`, `regularizedMeasure`, `InSubdiff`,
   `coneState`, `ConeState.value/indicator/canon`, `cornerAngle`, `triArea`, `cornerCot`, `dist`;
@@ -300,9 +391,28 @@ theorems are stated block by block; only `DFpiece`, of which `DFimp` is an insta
 is identified with a Jacobian); `nextState`/`toward` (the safeguard is covered only through the
 hypothesis "the new point lies on the pieces `σ`"); the bordered linear system used on closed
 meshes; everything outside `DdgOracle/Formulas` (solver, certificate code, topology).
-At `ℝ` the oracle's bounds are finite numbers, so its unbounded default (`±∞` in `Float`) is not
-an instance of these statements; the unbounded problem is covered by the **own** theorems
-(`Site.penalized wR ⊥ ⊤`).
+**Absent bounds.** At `ℝ` the oracle's bounds `lo_i`, `hi_i` are finite numbers, while the
+executable's default is `lo_i = −∞`, `hi_i = +∞`. `DdgProofs/Oracle/Unbounded.lean` extends the
+oracle-side theorems to that case: two predicates `Lo`, `Hi` mark the vertices whose lower resp.
+upper bound is absent, the cone map there is `clampOff ∘ P_t` (`clampOff` leaves out the absent
+side of `min hi (max lo ·)`), and
+
+| theorem | statement |
+|---|---|
+| `Ddg.Problem.objective_le_of_zero_off` | zero state, adjoint and cone residuals (`µ_i − clampOff(P_{t_i}(φ_i + µ_i))`) ⟹ `(u, µ)` is feasible and minimizes the oracle's `objective` over all pairs feasible with the same bounds absent |
+| `Ddg.Problem.unique_of_minimizers_off` | uniqueness when all `wE_i·mass_i > 0` |
+| `Ddg.Problem.objective_le_add_gap_off` | the duality-gap certificate; at an absent bound the dual point must satisfy `φ_i ≤ t_i` resp. `−t_i ≤ φ_i` and the conjugate loses that term |
+| `Ddg.Problem.regObjective_le_of_zero_off` | a zero of the regularized residuals minimizes the regularized objective |
+| `Ddg.Problem.zero_off_of_Fpiece_eq_zero` | a solution of the oracle's piecewise linear system `Fpiece γ σ = 0` whose vertices lie on their pieces is a zero of the residuals |
+| `Oracle.clamp_box_eq`, `Oracle.clampOff_eq_value` | the reduction: a finite bound that is out of the way acts like an absent one; the pieces `stateOff` are correct |
+
+The proofs reduce to the finite theorems: the points that occur in a statement lie in a finite
+box (`Ddg.Problem.boxed`), on which the oracle's own `coneResidual`, `Feasible`, `objective`,
+`dualValue` for the boxed problem agree with the unbounded ones. What is **not** machine-checked
+is the remark that, in IEEE arithmetic, the oracle's `clamp lo hi y = min hi (max lo y)` with
+`lo = −∞` and/or `hi = +∞` evaluates to `clampOff` at a number `y` (nothing here is about
+`Float`). The stopping rule for absent bounds takes the hypothesis "the affine function of `σ_i`
+has the value of the point's piece" rather than an equality of canonical names.
 
 Everything else (all of `ConeProblem`, `Site`, `TriMesh`, the dual objective, Gauss–Bonnet's
 combinatorics, the Yamabe linearization) is about this package's own definitions.
@@ -310,10 +420,30 @@ combinatorics, the Yamabe linearization) is about this package's own definitions
 The Rust code is not connected to Lean mechanically. For `crates/ddg-core`,
 `DdgProofs/Evaluated.lean` transcribes the expressions the Rust functions evaluate
 (`kahanArea`, `kahanCornerAngle`, `kahanCornerCot`, `angleDefectField`, `geodesicCurvatureField`)
-and proves them equal to the math-level quantities; that the transcription matches the Rust source
-is checked by reading, and by the differential tests against the oracle.
+and proves them equal to the math-level quantities; `DdgProofs/Bff/Quality.lean` and
+`DdgProofs/Bff/Curve.lean` do the same for the per-triangle and per-loop expressions of
+`crates/ddg-bff`, and `DdgProofs/Solver.lean` transcribes the rows of the cone solver's linear
+systems. That a transcription matches the Rust source is checked by reading, and by the
+differential tests against the oracle.
 
-## Discrepancies with the paper as printed
+### Where the hypotheses of the theorems come from in the Rust code
+
+| hypothesis (Lean) | guaranteed by |
+|---|---|
+| `TriMesh.Valid.ab/bc/ca` (three distinct vertices per face) | `ddg_core::TriMesh::new` (`MeshError::RepeatedVertexInFace`) |
+| `TriMesh.Valid.tri` (strict triangle inequalities of the stored lengths) | `ddg_core::Geometry::from_edge_lengths` / `from_positions` (`GeometryError::DegenerateFaces`), **not** `TriMesh::new`; the test `z − (x − y) > 0` on sorted sides is exact for the stored `f64` values (`kahanArea_of_sorted_rearrangement`) |
+| `TriMesh.Manifold.edge_le_two` | `TriMesh::new` (`MeshError::NonManifoldEdge`) |
+| `TriMesh.Manifold.boundary_two` | `TriMesh::new` (one fan per vertex, `MeshError::NonManifoldVertex`) |
+| `TriMesh.Connected` (kernel of `L`, positive definiteness of `L_II`, existence/uniqueness of the Poisson solves) | **not** `TriMesh::new`, which only counts components; `crates/ddg-optimal-cones` requires one component (`ConeError::NotConnected`), `crates/ddg-bff` works per connected component / chart. (Lean's `Connected` also requires every vertex to lie in a face.) |
+| `ConeProblem.WellFormed` (`wE, m, λ, wR ≥ 0`, `lo ≤ 0 ≤ hi`) | `ddg_optimal_cones::problem::validate` |
+| `P.Lᵀ = P.L`, `1ᵀL = 0` on a closed mesh | `TriMesh.laplacian_isSymm`, `laplacian_vecMul_one` (proved) |
+| `IsCutOf M' M ρ` (same faces, copies of vertices, lengths pulled back) | the construction in `ddg_bff::cut::cut_mesh` (by reading; `CutMesh::vertex_to_original` is `ρ`) |
+| disk topology of a chart | checked at run time by counting (`ComponentTopology::is_disk`), which rests on the cited `genus-from-euler` |
+
+## Discrepancies with the papers as printed
+
+Items 1–10 and 14 concern the cone paper, 11–13 BFF. (BFF Proposition 1 is stated for a disk;
+`TriMesh.sum_exteriorAngle` gives `2πχ` for any valid manifold mesh.)
 
 1. **Sign of the state equation.** Eq. 17 / B.2 print `L u = Ω − µ` with a positive semidefinite
    `L` (Sec. 5.1.3). By `TriMesh.hasDerivAt_angleDefect_conformalScale` the curvature of
@@ -344,15 +474,44 @@ is checked by reading, and by the differential tests against the oracle.
     should be `µ − P(·)`, since `Proj(v) = v − P(v)`); Eq. (5.8), third row, prints
     `[0, 1_{|Rᵀp+µ|>λw}, 1 − 1_{|Rᵀp|>λw}]` for `[0, −D(p+µ), I − D(p+µ)]`.
 
+11. **BFF, sign of the source term.** BFF Eq. 11 prints `A u = Ω − Ω̃` and the proofs of its
+    Propositions 1 and 2 use `(A u)_i + h_i = Ω_i` and `Δu = Ω − Θ`, with the positive
+    semidefinite cotan matrix `A` of its Sec. 4.1. Its Alg. 1 (lines 6, 8) and the reference
+    implementation pass the source term `−Ω`, i.e. `A u = Ω̃ − Ω` in the interior. The latter is
+    what `CLAUDE.md` fixes (`L u = µ − Ω`) and what is proved (item 1). The boundary relation
+    `k̃ = k − h = k + (A u)_B` and both propositions are unaffected
+    (`TriMesh.sum_exteriorAngle`, `TriMesh.sum_fiber_interior_angle_cone`).
+12. **BFF, weights of the closing problem.** Eq. 19 and the text after it weight the length change
+    of a boundary *edge* by `1/ℓ_ij` (`N_ii = 1/ℓ_ij`); Alg. 5 line 7 comments "`ℓ_i` are dual
+    lengths". The reference implementation and `crates/ddg-bff` use the edge lengths
+    (`N_d = Σ 1/ℓ` over the one or two sides of a length degree of freedom).
+13. **BFF, orientation in the Hilbert transform.** Eq. 17 / Alg. 6 print `h_j = ½(a_{j+1} − a_{j−1})`;
+    `crates/ddg-bff` walks the boundary with the surface on the left and uses
+    `½(a_{j−1} − a_{j+1})`, which is the gradient of the counter-clockwise area with respect to
+    `b_j` (proved in `Bff/Curve.lean`). The two agree after reversing the direction of the walk.
+14. **Cone paper, Sec. 8.1** prints `r_i := 1/(|Ω_i|/M_ii + ε)` and describes it as "small in flat
+    regions and large in highly curved regions"; the printed formula is the opposite. See
+    `feature-size-weights` in `CITED.md`.
+
 ## Caveats on faithfulness
 
-- All statements are about exact real arithmetic. The certificate theorems assume exact primal
-  feasibility (`L u = µ − Ω`) and an exact adjoint equation; nothing is proved about rounding. A
-  dual point that satisfies the adjoint equation by construction is `ũ := −Lᵀφ/(wE m)`
-  (`adjoint_gap_certificate`).
-- At a vertex with an infinite bound the dual point must satisfy `φ_i ≤ λ wR_i` (no upper bound) /
-  `−λ wR_i ≤ φ_i` (no lower bound) exactly; a computed `φ` generally needs to be scaled or clipped
-  first.
+- All statements are about exact real arithmetic; nothing is proved about rounding.
+- **The certificate.** `duality_gap_certificate` and `adjoint_gap_certificate` assume an exactly
+  feasible primal point. For a computed triple the statements of section A.4′ apply instead; they
+  need (a) the clipped `φ̂` (a comparison and a `min`/`max`, exact in floating point), (b) where
+  `wE_i m_i = 0`, `(Lᵀφ̂)_i = 0` exactly, (c) for the forward enclosure, `µ + r` admissible, which
+  at a forbidden or prescribed vertex means `r_i = 0` exactly and at a vertex on a bound that the
+  residual points inward. When (c) fails only the backward statements hold
+  (`backward_certificate`, `repaired_certificate`). The quantities `r`, `D`, `J` themselves are
+  evaluated in floating point by the Rust code, and that evaluation is outside every theorem.
+- The theorems of `DdgProofs/Solver.lean` say what an *exact* solution of the solver's linear
+  system is. The solver accepts a computed solution by its componentwise backward error
+  (`oettli_prager` says what that number means); the effect of that error on the iterate is not
+  analysed. The solver's final answer is judged by the certificate, not by these theorems.
+- The Rust classifier `Site::piece` (pieces closed at their kinks, a free site labelled `Pos`
+  throughout) is not transcribed; what is proved is, for each kind of row, the test under which a
+  vertex lies on the piece of its row (`Site.stationary_of_pos` …), and the package's own
+  classifier `Site.pieceReg`.
 - A forbidden vertex (`wR = +∞`) is modelled as the constraint `µ_i = 0` (`Site.fixed 0`), not
   as an infinite weight.
 - The Dirichlet energy of an affine function on a triangle is taken to be `Area·‖∇f‖²`; the
@@ -361,6 +520,14 @@ is checked by reading, and by the differential tests against the oracle.
   vertices that belong to no face count as interior (with `Ω = 2π`) and contribute to `χ`.
 - The Newton theorems say that a step which keeps the active sets yields an exact solution; they
   do not say that such a step occurs.
+- BFF: the theorems cover the linear algebra and the bookkeeping (existence and uniqueness of the
+  solves, angle sums, closing of the curve, Euler characteristic). They do not say that the
+  result is conformal, injective or close to the smooth map: quality is measured by the
+  distortion formulas (whose definitions are proved to be what they are called) and reported.
+  The rank-deficient branch of the closing problem (dropped directions), the optional diagonal
+  shift of the reference implementation, and all tolerances are not covered.
+- `IsCutOf` describes a cut by its result (same faces, vertex copies); that `cut_mesh` produces
+  such a mesh, and that the copies are the sectors around each vertex, is by reading the code.
 - `atan2 y x` is defined as the argument of the complex number `x + iy`; the Kahan arrangements of
   `DdgProofs/Evaluated.lean` are proved equal to the plain formulas as real numbers, which says
   nothing about their (better) rounding behaviour.
