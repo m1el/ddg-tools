@@ -1,0 +1,567 @@
+//! The solver: options, result, report, and the two-stage driver.
+
+use std::time::Instant;
+
+use ddg_core::io::Cone;
+use ddg_core::sparse::Parallelism;
+
+use crate::certificate::{Certificate, certify};
+use crate::error::ConeError;
+use crate::evaluate::{LaplaceSolver, cones_to_measure, log_scale_of_measure};
+use crate::extract::{ExtractOptions, ExtractionReport, extract_cones};
+use crate::linsys::{LinearSolver, LinearSolverReport, NewtonLinearSolver, SaddleSolver};
+use crate::newton::{Iterate, NewtonOutcome, StageStop, solve_exact, solve_regularized};
+use crate::problem::{ConeProblem, Discrete, validate};
+
+/// The quantity whose square the regularized problems of Stage I penalize.
+///
+/// Stage I only initializes Stage II, so this choice affects the number of Newton steps and
+/// nothing else: both variants lead to the same solution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RegularizationMetric {
+    /// `(γ/2) Σ µ_i²`: the regularized cone angle is `µ_i = clamp(P_t(φ_i)/γ)`, the update the
+    /// paper prints (Eqs. 21–22), which has no mass factor. With area-normalized masses
+    /// (`m_i ≈ 1/n`) this is about `n` times stiffer than `Mass` at the same `γ`, so the last
+    /// regularized solution has its cones on single vertices and the exact iteration that
+    /// follows typically needs one step. The default, because it needs fewer Newton steps
+    /// (measured on the dataset, see the crate README).
+    #[default]
+    Unweighted,
+    /// `(γ/2) Σ µ_i² / m_i`: the squared `L²` norm of the curvature *density* `µ_i / m_i`,
+    /// which is what paper Eq. 12 discretizes to. The regularized cone angle is
+    /// `µ_i = clamp((m_i/γ)·P_t(φ_i))`.
+    Mass,
+}
+
+/// Options of [`solve`]. `SolveOptions::default()` is the configuration the crate is tested
+/// with.
+#[derive(Debug, Clone)]
+pub struct SolveOptions<'a> {
+    /// Stage I: the regularization parameters `γ`, strictly decreasing and positive. One
+    /// regularized problem is solved for each, starting from the solution of the previous one.
+    /// Empty skips Stage I, which leaves the plain semismooth Newton method started from zero.
+    /// Default: `1, 10⁻¹, …, 10⁻¹⁰` (paper Fig. 12 with `N = 10`).
+    pub regularization: Vec<f64>,
+    /// What the regularization measures. Default: [`RegularizationMetric::Unweighted`].
+    pub regularization_metric: RegularizationMetric,
+    /// Limit on the Newton steps of one regularized problem. A regularized problem that hits
+    /// the limit is not an error (its result only initializes what follows); the stage report
+    /// records it. Default 50.
+    pub max_regularized_iterations: usize,
+    /// Limit on the Newton steps of one run of the exact iteration (Stage II). Default 50.
+    pub max_exact_iterations: usize,
+    /// Safeguard: how many extra regularized problems the solver may solve when the paper's
+    /// two stages do not finish. If the exact iteration cycles, hits its limit or meets a
+    /// singular system, a *proximal step* follows (the regularized problem with `γ` ten times
+    /// smaller, its penalty centred at the current cone angles instead of zero) and the exact
+    /// iteration is retried. If a regularized problem itself hits its iteration limit, it is
+    /// continued before anything else. `0` disables the safeguard. Default 12.
+    pub max_safeguard_rounds: usize,
+    /// The exact iteration also stops when the cone residual
+    /// `max_i |µ_i − clamp(P_t(φ_i + µ_i))|` of a solved step is at most this (paper
+    /// Sec. 5.3.3, "norm of the residual below a small tolerance"). This only matters when two
+    /// pieces tie at rounding level. Default `10⁻¹²`.
+    pub newton_tolerance: f64,
+    /// The result is reported as [`Status::Converged`] iff its [`Certificate`] holds with this
+    /// tolerance ([`Certificate::holds`]). Default `10⁻⁹`.
+    pub certificate_tolerance: f64,
+    /// A vertex is a cone if `|µ_i|` exceeds this. Default `10⁻¹²` (paper Sec. 6.1).
+    pub cone_threshold: f64,
+    /// Whether to replace each edge-connected cluster of cones by a single cone (paper
+    /// Sec. 6.1). Default `false`: the returned cones are the optimal measure.
+    pub merge_cone_clusters: bool,
+    /// Clusters with more cones than this are never merged. The paper merges "tiny clusters";
+    /// for very small `λ` the cones cover whole regions, and merging such a region into one
+    /// vertex would be meaningless. Default 8.
+    pub max_merge_cluster_size: usize,
+    /// How the Newton systems are solved. Default [`LinearSolver::Auto`].
+    pub linear_solver: LinearSolver,
+    /// Where factorizations and solves run. Default: on the calling thread. Threads gain
+    /// little for these factorizations (see the `ddg-core` README).
+    pub parallelism: Parallelism<'a>,
+}
+
+impl Default for SolveOptions<'_> {
+    fn default() -> Self {
+        SolveOptions {
+            regularization: (0..=10).map(|k| 10f64.powi(-k)).collect(),
+            regularization_metric: RegularizationMetric::default(),
+            max_regularized_iterations: 50,
+            max_exact_iterations: 50,
+            max_safeguard_rounds: 12,
+            newton_tolerance: 1e-12,
+            certificate_tolerance: 1e-9,
+            cone_threshold: 1e-12,
+            merge_cone_clusters: false,
+            max_merge_cluster_size: 8,
+            linear_solver: LinearSolver::default(),
+            parallelism: Parallelism::Sequential,
+        }
+    }
+}
+
+impl SolveOptions<'_> {
+    fn validate(&self) -> Result<(), ConeError> {
+        let bad = |reason: String| Err(ConeError::InvalidOptions { reason });
+        for (i, &gamma) in self.regularization.iter().enumerate() {
+            if !(gamma.is_finite() && gamma > 0.0) {
+                return bad(format!(
+                    "regularization[{i}] is {gamma}; every entry must be positive and finite"
+                ));
+            }
+            if i > 0 && !(gamma < self.regularization[i - 1]) {
+                return bad(format!(
+                    "regularization must be strictly decreasing, but entry {i} ({gamma}) is not \
+                     below entry {} ({})",
+                    i - 1,
+                    self.regularization[i - 1]
+                ));
+            }
+        }
+        if self.max_exact_iterations == 0 {
+            return bad("max_exact_iterations must be at least 1".to_string());
+        }
+        if !self.regularization.is_empty() && self.max_regularized_iterations == 0 {
+            return bad("max_regularized_iterations must be at least 1".to_string());
+        }
+        for (name, value) in [
+            ("newton_tolerance", self.newton_tolerance),
+            ("certificate_tolerance", self.certificate_tolerance),
+            ("cone_threshold", self.cone_threshold),
+        ] {
+            if !(value.is_finite() && value >= 0.0) {
+                return bad(format!(
+                    "{name} is {value}; it must be finite and non-negative"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Whether the result is a certified optimum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// The optimality certificate holds within
+    /// [`certificate_tolerance`](SolveOptions::certificate_tolerance): the returned measure is
+    /// optimal up to the certified duality gap.
+    Converged,
+    /// The iterations ended at their limits without a point whose certificate holds. The
+    /// returned measure is the best available iterate and **is not** known to be optimal; its
+    /// [`Certificate`] says how far off it is.
+    NotConverged,
+    /// A Newton system could not be solved accurately by any available factorization, and the
+    /// certificate of the last iterate does not hold. See [`SolveReport::message`].
+    LinearSolverFailed,
+}
+
+/// Which problem a stage solved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StageKind {
+    /// Stage I: the regularized problem with parameter `gamma`.
+    Regularized {
+        /// The regularization parameter `γ`.
+        gamma: f64,
+    },
+    /// Stage II: the exact problem.
+    Exact,
+    /// Safeguard: a proximal step, i.e. the regularized problem with parameter `gamma` whose
+    /// penalty is centred at the current cone angles instead of zero.
+    Proximal {
+        /// The regularization parameter `γ`.
+        gamma: f64,
+    },
+}
+
+/// What one stage of the solve did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StageReport {
+    /// Which problem.
+    pub kind: StageKind,
+    /// Newton steps. Each is one factorization of the Newton matrix and one linear solve
+    /// (plus refinement).
+    pub newton_iterations: usize,
+    /// Steps that the line search shortened (regularized and proximal stages only).
+    pub damped_steps: usize,
+    /// Closed meshes: how often the constant of `φ` was shifted to restore Gauss–Bonnet.
+    pub constant_shifts: usize,
+    /// Why the stage stopped.
+    pub stop: StageStop,
+    /// Wall time of the stage in seconds.
+    pub seconds: f64,
+}
+
+/// Wall times of a solve, in seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Timings {
+    /// Validation and assembly of the operators.
+    pub setup: f64,
+    /// Stage I.
+    pub regularized: f64,
+    /// Stage II including safeguard rounds.
+    pub exact: f64,
+    /// The certificate.
+    pub certificate: f64,
+    /// Cone extraction, including the recomputation of `u` when the cones changed.
+    pub extraction: f64,
+    /// Everything.
+    pub total: f64,
+}
+
+/// What a solve did and how good its result is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SolveReport {
+    /// Whether the result is a certified optimum.
+    pub status: Status,
+    /// The stages in the order they ran.
+    pub stages: Vec<StageReport>,
+    /// Total Newton steps of Stage I.
+    pub regularized_iterations: usize,
+    /// Total Newton steps of the exact iteration (all runs).
+    pub exact_iterations: usize,
+    /// Number of safeguard rounds that were needed (0 when the paper's two stages sufficed).
+    pub safeguard_rounds: usize,
+    /// Factorization and solve counts and times of the linear solver.
+    pub linear_solver: LinearSolverReport,
+    /// Wall times.
+    pub timings: Timings,
+    /// The optimality certificate of `(u, φ, µ)` as returned.
+    pub certificate: Certificate,
+    /// Explanation when something did not go to plan (a linear solver failure, or why the
+    /// result is not converged).
+    pub message: Option<String>,
+}
+
+/// The result of [`solve`].
+///
+/// `measure`, `log_scale_optimal` and `adjoint` are the solution of the canonical problem.
+/// `cones`, `log_scale` and `distortion` describe the cones that were extracted from it; they
+/// differ from the optimum only if [`ExtractionReport::cones_differ_from_measure`] says so.
+/// Every per-vertex vector has one entry per mesh vertex and is zero at boundary vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Solution {
+    /// The optimal measure `µ`: the cone angle at every vertex, exactly zero where there is no
+    /// cone.
+    pub measure: Vec<f64>,
+    /// The log scale factor `u` of the optimal measure: `(L u)_i = µ_i − Ω_i`.
+    pub log_scale_optimal: Vec<f64>,
+    /// The adjoint state `φ`: `(L φ)_i = −wE_i m_i u_i`, with `φ_i = ±λ wR_i` at cones strictly
+    /// inside their bounds and `|φ_i| ≤ λ wR_i` at unbounded vertices without a cone.
+    pub adjoint: Vec<f64>,
+    /// Closed meshes: the interval of constants that may be added to `adjoint` without
+    /// violating the optimality system. It is `(0, 0)` whenever some vertex is active (a cone
+    /// strictly inside its bounds, or a free site), and always on meshes with boundary.
+    pub adjoint_shift: (f64, f64),
+    /// The objective `½ Σ wE m u² + λ Σ wR |µ|` of the optimal measure.
+    pub objective: f64,
+    /// The distortion `½ Σ wE m u²` of the optimal measure.
+    pub distortion_optimal: f64,
+    /// The cone cost `λ Σ wR |µ|` of the optimal measure (prescribed cones cost nothing).
+    pub cone_cost: f64,
+    /// The cones: vertex and angle, by ascending vertex.
+    pub cones: Vec<Cone>,
+    /// The log scale factor `u` of the returned `cones`. Equal to `log_scale_optimal` unless
+    /// extraction changed the cones.
+    pub log_scale: Vec<f64>,
+    /// The distortion `½ Σ wE m u²` of the returned `cones`.
+    pub distortion: f64,
+    /// The total cone angle `Σ |angle|` of the returned `cones`.
+    pub total_cone_angle: f64,
+    /// What cone extraction did.
+    pub extraction: ExtractionReport,
+    /// What the solver did, and the certificate.
+    pub report: SolveReport,
+}
+
+/// Largest stiffness `k_i` of a proximal step. Beyond this the regularized cone angle
+/// `k (φ − t)` cannot be evaluated from `φ` to useful accuracy.
+const MAX_PROXIMAL_STIFFNESS: f64 = 1e12;
+
+fn stiffness(d: &Discrete, metric: RegularizationMetric, gamma: f64, cap: f64) -> Vec<f64> {
+    d.mass
+        .iter()
+        .map(|&m| {
+            let weight = match metric {
+                RegularizationMetric::Mass => m,
+                RegularizationMetric::Unweighted => 1.0,
+            };
+            (weight / gamma).min(cap)
+        })
+        .collect()
+}
+
+fn stage(kind: StageKind, outcome: &NewtonOutcome, start: Instant) -> StageReport {
+    StageReport {
+        kind,
+        newton_iterations: outcome.iterations,
+        damped_steps: outcome.damped_steps,
+        constant_shifts: outcome.constant_shifts,
+        stop: outcome.stop,
+        seconds: start.elapsed().as_secs_f64(),
+    }
+}
+
+fn failed_stage(kind: StageKind, start: Instant) -> StageReport {
+    StageReport {
+        kind,
+        newton_iterations: 0,
+        damped_steps: 0,
+        constant_shifts: 0,
+        stop: StageStop::LinearSolverFailure,
+        seconds: start.elapsed().as_secs_f64(),
+    }
+}
+
+/// Computes optimal cone singularities: solves the canonical problem and extracts the cones.
+///
+/// The method is the paper's (Fig. 12): Stage I solves a sequence of regularized problems by a
+/// semismooth Newton method, Stage II solves the exact optimality system by the same method
+/// started from the last regularized solution. If Stage II does not terminate, proximal steps
+/// are inserted ([`SolveOptions::max_safeguard_rounds`]). The result always carries its
+/// optimality [`Certificate`], and [`SolveReport::status`] is [`Status::Converged`] only if the
+/// certificate holds.
+///
+/// # Errors
+/// [`ConeError`] if the problem or the options are invalid, or the problem is infeasible. A
+/// solve that does not converge is **not** an error; check `report.status`.
+pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError> {
+    let total_start = Instant::now();
+    options.validate()?;
+    let par = options.parallelism;
+    let d = Discrete::new(problem)?;
+    let n = d.n;
+    let mut timings = Timings {
+        setup: total_start.elapsed().as_secs_f64(),
+        ..Timings::default()
+    };
+
+    let mut x = Iterate::zeros(n);
+    let mut stages: Vec<StageReport> = Vec::new();
+    let mut message: Option<String> = None;
+    let mut linear_failure = false;
+    let mut safeguard_rounds = 0;
+    let mut adjoint_shift = (0.0, 0.0);
+    let mut linear_report = LinearSolverReport::default();
+
+    if n > 0 {
+        let mut solver = SaddleSolver::new(&d, options.linear_solver)?;
+
+        // Stage I: the regularized problems.
+        let stage_start = Instant::now();
+        // The regularized problem that was solved last: its stiffness and centre, and whether
+        // its Newton iteration finished.
+        let mut gamma = 1.0;
+        let mut k: Vec<f64> = Vec::new();
+        let mut center = vec![0.0; n];
+        let mut solved = true;
+        for &next in &options.regularization {
+            gamma = next;
+            k = stiffness(&d, options.regularization_metric, gamma, f64::INFINITY);
+            let kind = StageKind::Regularized { gamma };
+            let start = Instant::now();
+            match solve_regularized(
+                &d,
+                &mut solver,
+                &k,
+                &center,
+                &mut x,
+                options.max_regularized_iterations,
+                par,
+            ) {
+                Ok(outcome) => {
+                    solved = outcome.stop.is_success();
+                    stages.push(stage(kind, &outcome, start));
+                }
+                Err(failure) => {
+                    stages.push(failed_stage(kind, start));
+                    message = Some(failure.message);
+                    linear_failure = true;
+                    break;
+                }
+            }
+        }
+        timings.regularized = stage_start.elapsed().as_secs_f64();
+
+        // Stage II: the exact problem, with further regularized problems as a safeguard.
+        let stage_start = Instant::now();
+        while !linear_failure {
+            // The exact iteration is only worth starting from a solved regularized problem.
+            if solved {
+                let start = Instant::now();
+                match solve_exact(
+                    &d,
+                    &mut solver,
+                    &mut x,
+                    options.max_exact_iterations,
+                    options.newton_tolerance,
+                    par,
+                ) {
+                    Ok(outcome) => {
+                        stages.push(stage(StageKind::Exact, &outcome, start));
+                        if outcome.stop.is_success() {
+                            adjoint_shift = outcome.adjoint_shift;
+                            message = None;
+                            break;
+                        }
+                        message = Some(
+                            match outcome.stop {
+                                StageStop::Cycle => {
+                                    "the exact Newton iteration returned to active sets it had \
+                                     already tried"
+                                }
+                                _ => "the exact Newton iteration reached its iteration limit",
+                            }
+                            .to_string(),
+                        );
+                    }
+                    Err(failure) => {
+                        stages.push(failed_stage(StageKind::Exact, start));
+                        message = Some(format!(
+                            "a Newton system of the exact problem could not be solved (the \
+                             minimizer may not be unique): {}",
+                            failure.message
+                        ));
+                    }
+                }
+            } else {
+                message = Some(
+                    "a regularized problem reached its iteration limit before it was solved"
+                        .to_string(),
+                );
+            }
+            if safeguard_rounds == options.max_safeguard_rounds {
+                break;
+            }
+            safeguard_rounds += 1;
+            if solved || k.is_empty() {
+                // A proximal step: ten times stiffer, centred at the current cone angles.
+                gamma *= 0.1;
+                k = stiffness(
+                    &d,
+                    options.regularization_metric,
+                    gamma,
+                    MAX_PROXIMAL_STIFFNESS,
+                );
+                center.copy_from_slice(&x.mu);
+            }
+            // Otherwise: continue the regularized problem that ran out of iterations.
+            let kind = if center.iter().all(|&c| c == 0.0) {
+                StageKind::Regularized { gamma }
+            } else {
+                StageKind::Proximal { gamma }
+            };
+            let start = Instant::now();
+            match solve_regularized(
+                &d,
+                &mut solver,
+                &k,
+                &center,
+                &mut x,
+                options.max_regularized_iterations.max(1),
+                par,
+            ) {
+                Ok(outcome) => {
+                    solved = outcome.stop.is_success();
+                    stages.push(stage(kind, &outcome, start));
+                }
+                Err(failure) => {
+                    stages.push(failed_stage(kind, start));
+                    message = Some(failure.message);
+                    linear_failure = true;
+                }
+            }
+        }
+        timings.exact = stage_start.elapsed().as_secs_f64();
+        linear_report = solver.report();
+    }
+
+    // The optimum, per vertex.
+    let measure = d.to_vertices(&x.mu);
+    let log_scale_optimal = d.to_vertices(&x.u);
+    let adjoint = d.to_vertices(&x.phi);
+    let distortion_optimal = d.distortion(&x.u);
+    let cone_cost = d.cone_cost(&x.mu);
+
+    let start = Instant::now();
+    let certificate = certify(problem, &log_scale_optimal, &adjoint, &measure)?;
+    timings.certificate = start.elapsed().as_secs_f64();
+    let status = if certificate.holds(options.certificate_tolerance) {
+        Status::Converged
+    } else if linear_failure {
+        Status::LinearSolverFailed
+    } else {
+        Status::NotConverged
+    };
+    if status == Status::Converged && safeguard_rounds == 0 {
+        message = None;
+    }
+
+    // Cone extraction.
+    let start = Instant::now();
+    let data = validate(problem)?;
+    let (cones, mut extraction) = extract_cones(
+        problem.mesh,
+        problem.geometry,
+        &data,
+        &problem.prescribed_cones,
+        &measure,
+        &ExtractOptions {
+            threshold: options.cone_threshold,
+            merge: options.merge_cone_clusters,
+            max_cluster_size: options.max_merge_cluster_size,
+        },
+    );
+    let total_cone_angle: f64 = cones.iter().map(|c| c.angle.abs()).sum();
+    let (log_scale, distortion) = if extraction.cones_differ_from_measure {
+        let mu = cones_to_measure(&d, &cones)?;
+        let laplace = LaplaceSolver::new(&d, par)?;
+        let (u, _) = log_scale_of_measure(&d, &laplace, &mu, par)?;
+        (d.to_vertices(&u), d.distortion(&u))
+    } else {
+        (log_scale_optimal.clone(), distortion_optimal)
+    };
+    extraction.distortion_change = distortion - distortion_optimal;
+    extraction.total_angle_change = if extraction.cones_differ_from_measure {
+        total_cone_angle - measure.iter().map(|m| m.abs()).sum::<f64>()
+    } else {
+        0.0
+    };
+    timings.extraction = start.elapsed().as_secs_f64();
+    timings.total = total_start.elapsed().as_secs_f64();
+
+    let regularized_iterations = stages
+        .iter()
+        .filter(|s| matches!(s.kind, StageKind::Regularized { .. }))
+        .map(|s| s.newton_iterations)
+        .sum();
+    let exact_iterations = stages
+        .iter()
+        .filter(|s| matches!(s.kind, StageKind::Exact))
+        .map(|s| s.newton_iterations)
+        .sum();
+    Ok(Solution {
+        measure,
+        log_scale_optimal,
+        adjoint,
+        adjoint_shift,
+        objective: distortion_optimal + cone_cost,
+        distortion_optimal,
+        cone_cost,
+        cones,
+        log_scale,
+        distortion,
+        total_cone_angle,
+        extraction,
+        report: SolveReport {
+            status,
+            stages,
+            regularized_iterations,
+            exact_iterations,
+            safeguard_rounds,
+            linear_solver: linear_report,
+            timings,
+            certificate,
+            message,
+        },
+    })
+}

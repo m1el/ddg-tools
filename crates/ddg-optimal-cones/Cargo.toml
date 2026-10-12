@@ -1,0 +1,20 @@
+[package]
+name = "ddg-optimal-cones"
+description = "Optimal cone singularities for conformal flattening (Soliman, Slepčev, Crane 2018): a certified two-stage semismooth Newton solver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Without default features: the default feature of ddg-core compiles GPL-derived triangulation
+# code, which this MIT crate must not link.
+ddg-core = { path = "../ddg-core", default-features = false }
+
+[dev-dependencies]
+proptest = "1"
+# Generic convex solver (pure Rust, Apache-2.0), used only by the tests as an independent
+# check of the derivation. Its default feature (serde) is needed: 0.11.1 does not compile
+# without it.
+clarabel = "0.11"
