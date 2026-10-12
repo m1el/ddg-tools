@@ -98,6 +98,8 @@ open DdgProofs
 #print axioms Ddg.Problem.Fimp_zero_eq_F
 #print axioms Ddg.Problem.Fimp_eq_zero_of_Fpiece_eq_zero
 #print axioms Ddg.Problem.regObjective_le_of_Fimp_eq_zero
+#print axioms Ddg.Problem.Fpiece_add
+#print axioms Ddg.Problem.Fimp_eq_zero_of_newton_step
 #print axioms Oracle.laplacian_symm
 #print axioms Oracle.laplacian_quadratic_nonneg
 #print axioms Oracle.gauss_bonnet

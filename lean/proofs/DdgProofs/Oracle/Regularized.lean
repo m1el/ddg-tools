@@ -243,3 +243,172 @@ theorem regObjective_le_of_Fimp_eq_zero (hp : p.Admissible)
   exact this
 
 end Ddg.Problem
+
+/-! ## The Newton step in the oracle's flattened form -/
+
+namespace Ddg.Problem
+
+open DdgProofs DdgProofs.Oracle Matrix
+
+variable {p : Ddg.Problem ℝ}
+
+/-- A step `(v, q, ν)` as one vector of length `3n`, in the oracle's order `(u, φ, μ)`. -/
+def flat (n : ℕ) (v q ν : ℕ → ℝ) : ℕ → ℝ :=
+  fun c => if c < n then v c else if c < 2 * n then q (c - n) else ν (c - 2 * n)
+
+private theorem sumTo_three (n : ℕ) (g : ℕ → ℝ) :
+    Ddg.sumTo (3 * n) g =
+      (∑ c : Fin n, g c) + (∑ c : Fin n, g (n + c)) + (∑ c : Fin n, g (2 * n + c)) := by
+  rw [sumTo_eq, Fin.sum_univ_eq_sum_range (fun c => g c) (3 * n),
+    show 3 * n = n + (n + n) by ring, Finset.sum_range_add, Finset.sum_range_add,
+    Fin.sum_univ_eq_sum_range (fun c => g c) n, Fin.sum_univ_eq_sum_range (fun c => g (n + c)) n,
+    Fin.sum_univ_eq_sum_range (fun c => g (2 * n + c)) n]
+  have : ∀ x, n + (n + x) = 2 * n + x := fun x => by ring
+  simp only [this]
+  ring
+
+/-- **Rows of the oracle's Jacobian `DFpiece γ σ`, applied to a step.** -/
+theorem DFpiece_mulVec (p : Ddg.Problem ℝ) (γ : ℝ) (σ : ℕ → Ddg.ConeState) (v q ν : ℕ → ℝ)
+    {r : ℕ} (hr : r < 3 * p.n) :
+    Ddg.sumTo (3 * p.n) (fun c => p.DFpiece γ σ r c * flat p.n v q ν c) =
+      if r < p.n then p.applyL v r - ν r
+      else if r < 2 * p.n then
+        p.wE (r - p.n) * p.mass (r - p.n) * v (r - p.n) + p.applyL q (r - p.n)
+      else
+        -(p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator) * q (r - 2 * p.n) +
+          (1 - p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator) * ν (r - 2 * p.n) := by
+  rw [sumTo_three]
+  have ind : ∀ (i : ℕ) (hi : i < p.n) (a : ℝ) (w : ℕ → ℝ),
+      ∑ c : Fin p.n, (if (c : ℕ) = i then a else 0) * w c = a * w i := by
+    intro i hi a w
+    have : ∀ c : Fin p.n, (if (c : ℕ) = i then a else 0) * w c =
+        if c = ⟨i, hi⟩ then a * w i else 0 := by
+      intro c
+      by_cases h : c = ⟨i, hi⟩
+      · subst h; simp
+      · have h' : (c : ℕ) ≠ i := fun h'' => h (Fin.ext h'')
+        simp [h, h']
+    simp only [this, Finset.sum_ite_eq', Finset.mem_univ, ite_true]
+  by_cases h1 : r < p.n
+  · rw [ite_eq_left h1]
+    have s1 : ∑ c : Fin p.n, p.DFpiece γ σ r c * flat p.n v q ν c = p.applyL v r := by
+      rw [applyL, sumTo_eq]
+      refine Finset.sum_congr rfl fun c _ => ?_
+      simp [DFpiece, flat, h1, c.2]
+    have s2 : ∑ c : Fin p.n, p.DFpiece γ σ r (p.n + c) * flat p.n v q ν (p.n + c) = 0 := by
+      refine Finset.sum_eq_zero fun c _ => ?_
+      have hc := c.2
+      have a1 : ¬(p.n + (c : ℕ) < p.n) := by omega
+      have a2 : p.n + (c : ℕ) < 2 * p.n := by omega
+      simp [DFpiece, h1, a1, a2]
+    have s3 : ∑ c : Fin p.n, p.DFpiece γ σ r (2 * p.n + c) * flat p.n v q ν (2 * p.n + c) =
+        -ν r := by
+      have e : ∀ c : Fin p.n, p.DFpiece γ σ r (2 * p.n + c) * flat p.n v q ν (2 * p.n + c) =
+          (if (c : ℕ) = r then (-1 : ℝ) else 0) * ν c := by
+        intro c
+        have a1 : ¬(2 * p.n + (c : ℕ) < p.n) := by omega
+        have a2 : ¬(2 * p.n + (c : ℕ) < 2 * p.n) := by omega
+        simp [DFpiece, flat, h1, a1, a2]
+      rw [Finset.sum_congr rfl fun c _ => e c, ind r h1]
+      ring
+    rw [s1, s2, s3]
+    ring
+  · rw [ite_eq_right h1]
+    by_cases h2 : r < 2 * p.n
+    · rw [ite_eq_left h2]
+      have hi : r - p.n < p.n := by omega
+      have s1 : ∑ c : Fin p.n, p.DFpiece γ σ r c * flat p.n v q ν c =
+          p.wE (r - p.n) * p.mass (r - p.n) * v (r - p.n) := by
+        have e : ∀ c : Fin p.n, p.DFpiece γ σ r c * flat p.n v q ν c =
+            (if (c : ℕ) = r - p.n then p.wE (r - p.n) * p.mass (r - p.n) else 0) * v c := by
+          intro c
+          simp [DFpiece, flat, h1, h2, c.2]
+        rw [Finset.sum_congr rfl fun c _ => e c, ind (r - p.n) hi]
+      have s2 : ∑ c : Fin p.n, p.DFpiece γ σ r (p.n + c) * flat p.n v q ν (p.n + c) =
+          p.applyL q (r - p.n) := by
+        rw [applyL, sumTo_eq]
+        refine Finset.sum_congr rfl fun c _ => ?_
+        have hc := c.2
+        have a1 : ¬(p.n + (c : ℕ) < p.n) := by omega
+        have a2 : p.n + (c : ℕ) < 2 * p.n := by omega
+        simp [DFpiece, flat, h1, h2, a1, a2]
+      have s3 : ∑ c : Fin p.n, p.DFpiece γ σ r (2 * p.n + c) * flat p.n v q ν (2 * p.n + c) =
+          0 := by
+        refine Finset.sum_eq_zero fun c _ => ?_
+        have a1 : ¬(2 * p.n + (c : ℕ) < p.n) := by omega
+        have a2 : ¬(2 * p.n + (c : ℕ) < 2 * p.n) := by omega
+        simp [DFpiece, h1, h2, a1, a2]
+      rw [s1, s2, s3]
+      ring
+    · rw [ite_eq_right h2]
+      have hi : r - 2 * p.n < p.n := by omega
+      have s1 : ∑ c : Fin p.n, p.DFpiece γ σ r c * flat p.n v q ν c = 0 := by
+        refine Finset.sum_eq_zero fun c _ => ?_
+        simp [DFpiece, h1, h2, c.2]
+      have s2 : ∑ c : Fin p.n, p.DFpiece γ σ r (p.n + c) * flat p.n v q ν (p.n + c) =
+          -(p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator) * q (r - 2 * p.n) := by
+        have e : ∀ c : Fin p.n, p.DFpiece γ σ r (p.n + c) * flat p.n v q ν (p.n + c) =
+            (if (c : ℕ) = r - 2 * p.n then
+              -(p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator) else 0) * q c := by
+          intro c
+          have hc := c.2
+          have a1 : ¬(p.n + (c : ℕ) < p.n) := by omega
+          have a2 : p.n + (c : ℕ) < 2 * p.n := by omega
+          simp [DFpiece, flat, h1, h2, a1, a2]
+        rw [Finset.sum_congr rfl fun c _ => e c, ind (r - 2 * p.n) hi]
+      have s3 : ∑ c : Fin p.n, p.DFpiece γ σ r (2 * p.n + c) * flat p.n v q ν (2 * p.n + c) =
+          (1 - p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator) * ν (r - 2 * p.n) := by
+        have e : ∀ c : Fin p.n, p.DFpiece γ σ r (2 * p.n + c) * flat p.n v q ν (2 * p.n + c) =
+            (if (c : ℕ) = r - 2 * p.n then
+              1 - p.coneScale γ (r - 2 * p.n) * (σ (r - 2 * p.n)).indicator else 0) * ν c := by
+          intro c
+          have a1 : ¬(2 * p.n + (c : ℕ) < p.n) := by omega
+          have a2 : ¬(2 * p.n + (c : ℕ) < 2 * p.n) := by omega
+          simp [DFpiece, flat, h1, h2, a1, a2]
+        rw [Finset.sum_congr rfl fun c _ => e c, ind (r - 2 * p.n) hi]
+      rw [s1, s2, s3]
+      ring
+
+/-- **`DFpiece γ σ` is the Jacobian of the affine map `Fpiece γ σ`**:
+`Fpiece(x + y) = Fpiece(x) + DFpiece·y`, row by row. -/
+theorem Fpiece_add (p : Ddg.Problem ℝ) (γ : ℝ) (σ : ℕ → Ddg.ConeState) (u φ μ v q ν : ℕ → ℝ)
+    {r : ℕ} (hr : r < 3 * p.n) :
+    p.Fpiece γ σ (fun j => u j + v j) (fun j => φ j + q j) (fun j => μ j + ν j) r =
+      p.Fpiece γ σ u φ μ r +
+        Ddg.sumTo (3 * p.n) (fun c => p.DFpiece γ σ r c * flat p.n v q ν c) := by
+  rw [DFpiece_mulVec p γ σ v q ν hr]
+  unfold Fpiece
+  split_ifs with h1 h2
+  · simp only [stateResidual, applyL_add]
+    ring
+  · simp only [adjointResidual, applyL_add]
+    ring
+  · simp only [pieceConeResidual]
+    rw [value_affine _ _ _ _ (φ (r - 2 * p.n) + μ (r - 2 * p.n))
+      (φ (r - 2 * p.n) + q (r - 2 * p.n) + (μ (r - 2 * p.n) + ν (r - 2 * p.n)))]
+    ring
+
+/-- **Stopping rule of the oracle's Newton iteration, in its own matrices.** Let the data be
+admissible. Let `y = (v, q, ν)` solve the linear system `DFpiece γ σ · y = −Fpiece γ σ (u, φ, μ)`
+that the oracle assembles for the pieces `σ`, and let every vertex of the new iterate lie on its
+piece (`σ_i` is the state of the new point, or its canonical name). Then the new iterate is a zero
+of the residual map `Fimp γ`; for `γ = 0` and nonzero masses it is a zero of `F`.
+(This is the unbordered system; on a closed mesh the oracle borders it.)
+
+[formula: newton-stopping-rule] -/
+theorem Fimp_eq_zero_of_newton_step (hp : p.Admissible) {γ : ℝ} {σ : ℕ → Ddg.ConeState}
+    {u φ μ v q ν : ℕ → ℝ}
+    (hstep : ∀ r, r < 3 * p.n →
+      Ddg.sumTo (3 * p.n) (fun c => p.DFpiece γ σ r c * flat p.n v q ν c) =
+        -p.Fpiece γ σ u φ μ r)
+    (hσ : ∀ i, i < p.n →
+      σ i = p.impState γ (fun j => φ j + q j) (fun j => μ j + ν j) i ∨
+      σ i = (p.impState γ (fun j => φ j + q j) (fun j => μ j + ν j) i).canon
+        (p.t i) (p.lo i) (p.hi i)) :
+    ∀ r, r < 3 * p.n →
+      p.Fimp γ (fun j => u j + v j) (fun j => φ j + q j) (fun j => μ j + ν j) r = 0 := by
+  refine Fimp_eq_zero_of_Fpiece_eq_zero hp (fun r hr => ?_) hσ
+  rw [Fpiece_add p γ σ u φ μ v q ν hr, hstep r hr]
+  ring
+
+end Ddg.Problem
