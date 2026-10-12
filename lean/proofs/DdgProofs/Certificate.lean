@@ -255,7 +255,8 @@ state residual `r = L u − μ + Ω` and the adjoint residual `s = Lᵀφ + wE m
 
 `gap_identity` is the case `r = 0`, `s = 0`. The two residual terms have no sign.
 
-[formula: duality-gap-certificate] -/
+[formula: duality-gap-certificate]
+[formula: duality-gap-inexact] -/
 theorem gap_identity_general (P : ConeProblem ι) (u ũ φ μ : ι → ℝ) :
     P.objective u μ - P.dualObjective ũ φ =
       1 / 2 * ∑ i, P.wE i * P.m i * (u i - ũ i) ^ 2 +
@@ -318,9 +319,12 @@ theorem dualObjective_dualState (P : ConeProblem ι) (φ : ι → ℝ) :
    = complementarityGap u φ μ − Σ_i φ_i r_i + Σ_{i : wE_i m_i = 0} (Lᵀφ)_i u_i`,
 
 `r = L u − μ + Ω`. This is the relation between the two forms of the gap that the Rust
-certificate reports (`duality_gap` on the left, `complementarity_gap` on the right).
+certificate reports (`duality_gap` on the left, `complementarity_gap` on the right): it is the
+identity the documentation of `Certificate` in `crates/ddg-optimal-cones/src/certificate.rs`
+states, term by term.
 
-[formula: duality-gap-certificate] -/
+[formula: duality-gap-certificate]
+[formula: duality-gap-inexact] -/
 theorem objective_sub_dualObjectiveOfAdjoint (P : ConeProblem ι) (u φ μ : ι → ℝ) :
     P.objective u μ - P.dualObjectiveOfAdjoint φ =
       P.complementarityGap u φ μ - ∑ i, φ i * P.stateResidual u μ i + P.adjointDefect φ u := by
