@@ -111,6 +111,12 @@ pub struct Prepared {
     pub(crate) seam_cut_edges: Vec<[u32; 2]>,
     /// The polygon edges as sorted vertex pairs of the caller (for the final checks).
     pub(crate) polygon_edges: Vec<[u32; 2]>,
+    /// Per vertex of the caller: 1 = pinned, 2 = prescribed, 4 = forbidden, 0 = none.
+    pub(crate) steering_role: Vec<u8>,
+    /// Per vertex of the caller: the prescribed cone angle (0 where none is prescribed).
+    pub(crate) prescribed_angle: Vec<f64>,
+    /// Per vertex of the caller: whether a polygon uses it.
+    pub(crate) vertex_used: Vec<bool>,
     /// What validation found and did.
     pub validation: ValidationReport,
     /// Warnings raised so far.
@@ -244,6 +250,7 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
         .map_err(|e| internal(format!("compacting the vertices failed: {e}")))?;
     let vertex_input = compact.new_to_old;
     let input_vertex = compact.old_to_new;
+    let vertex_used: Vec<bool> = input_vertex.iter().map(|&v| v != NONE).collect();
     let n_vertices = vertex_input.len();
     let n_loose_vertices = n_input_vertices - n_vertices;
 
@@ -539,6 +546,19 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
     pieces.sort_by_key(|piece| piece.first_polygon);
     seams.n_pieces = pieces.len();
 
+    let mut steering_role = vec![0u8; n_input_vertices];
+    let mut prescribed_angle = vec![0.0; n_input_vertices];
+    for &v in input.pinned_vertices {
+        steering_role[v as usize] |= 1;
+    }
+    for cone in input.prescribed_cones {
+        steering_role[cone.vertex as usize] |= 2;
+        prescribed_angle[cone.vertex as usize] = cone.angle;
+    }
+    for &v in input.forbidden_vertices {
+        steering_role[v as usize] |= 4;
+    }
+
     Ok(Prepared {
         n_input_vertices,
         n_polygons,
@@ -548,6 +568,9 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
         pieces,
         seam_cut_edges,
         polygon_edges,
+        steering_role,
+        prescribed_angle,
+        vertex_used,
         validation: ValidationReport {
             n_loose_vertices,
             n_flipped_polygons,

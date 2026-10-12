@@ -1,0 +1,263 @@
+//! The pipeline: the stages in order, the final checks and the report.
+
+use std::time::Instant;
+
+use ddg_core::io::Cone;
+
+use crate::cones::{ConeStage, solve_cones};
+use crate::error::{UvError, internal};
+use crate::flatten::{FlatStage, flatten};
+use crate::input::MeshInput;
+use crate::measure::Accumulator;
+use crate::options::UnwrapOptions;
+use crate::pack::pack_in_place;
+use crate::prepare::{Prepared, prepare};
+use crate::report::{ChartReport, ConeStats, Report, SteeringReport, Timings};
+
+/// A UV map of a polygon mesh.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UvMap {
+    /// One UV per polygon corner, in corner order. Packed into the unit square unless
+    /// [`UnwrapOptions::packing`] is `None`.
+    pub uvs: Vec<[f64; 2]>,
+    /// The chart of every polygon. A chart is a connected piece of the surface after the seams
+    /// were cut; charts are numbered in order of their lowest polygon.
+    pub polygon_charts: Vec<u32>,
+    /// The cones that were used, as vertices of the caller's mesh, ascending.
+    pub cones: Vec<Cone>,
+    /// The edges the surface was cut along, as vertex pairs `[min, max]`, ascending, each
+    /// once: the seams (and what was added to one-edge seams), automatic slits, and the cuts
+    /// through the cones and around handles. Every one is an edge of a polygon.
+    pub cut_edges: Vec<[u32; 2]>,
+    /// What happened.
+    pub report: Report,
+}
+
+/// Unwraps a polygon mesh: see the [crate documentation](crate) for the stages.
+///
+/// # Errors
+/// [`UvError`]; `kind()` says whether the arguments are malformed, the mesh cannot be
+/// unwrapped as it is, or the solve failed. Nothing panics and the input is not modified.
+pub fn unwrap(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<UvMap, UvError> {
+    let start = Instant::now();
+    let prepared = prepare(input, options)?;
+    let cones = solve_cones(&prepared, options)?;
+    let flat = flatten(&prepared, &cones, options)?;
+    let mut map = assemble(input, &prepared, &cones, &flat, options)?;
+    map.report.timings.total = start.elapsed().as_secs_f64();
+    Ok(map)
+}
+
+/// Stage 4 and the final checks: collects the UVs per polygon corner, verifies them, packs
+/// the charts and writes the report. `input` must be the input the stages were computed from.
+///
+/// The report's total time is the sum of the stage times; [`unwrap`] replaces it by the
+/// measured total.
+///
+/// # Errors
+/// [`UvError::Internal`] if a final check fails.
+pub fn assemble(
+    input: &MeshInput<'_>,
+    prepared: &Prepared,
+    cones: &ConeStage,
+    flat: &FlatStage,
+    options: &UnwrapOptions,
+) -> Result<UvMap, UvError> {
+    let start = Instant::now();
+    let n_corners = prepared.n_corners;
+    if input.n_corners() != n_corners
+        || input.n_polygons() != prepared.n_polygons
+        || input.positions.len() != prepared.n_input_vertices
+        || cones.pieces.len() != prepared.pieces.len()
+        || flat.pieces.len() != prepared.pieces.len()
+    {
+        return Err(internal(
+            "the stages passed to assemble were not computed from this input",
+        ));
+    }
+
+    // One UV per polygon corner; all triangle corners of a polygon corner must agree.
+    let mut uvs = vec![[f64::NAN; 2]; n_corners];
+    let mut corner_set = vec![false; n_corners];
+    let mut polygon_charts = vec![u32::MAX; prepared.n_polygons];
+    let mut all = Accumulator::default();
+    let mut cone_list: Vec<Cone> = Vec::new();
+    let mut cut_edges: Vec<[u32; 2]> = prepared.seam_cut_edges.clone();
+    let mut charts: Vec<ChartReport> = Vec::with_capacity(prepared.pieces.len());
+    let (mut overlapped, mut covered, mut any_coverage) = (0.0, 0.0, false);
+    for (chart, piece) in prepared.pieces.iter().enumerate() {
+        let (piece_cones, piece_flat) = (&cones.pieces[chart], &flat.pieces[chart]);
+        let on = piece_cones.slit_piece.as_ref().unwrap_or(piece);
+        if piece_flat.corner_uvs.len() != 3 * on.mesh.n_faces() {
+            return Err(internal("a flattening has the wrong number of corners"));
+        }
+        for (f, &t) in on.face_triangle.iter().enumerate() {
+            let polygon = prepared.triangle_polygon[t as usize];
+            polygon_charts[polygon as usize] = chart as u32;
+            let q = &piece_flat.corner_uvs[3 * f..3 * f + 3];
+            for k in 0..3 {
+                let c = prepared.triangle_corners[t as usize][k] as usize;
+                if !(q[k][0].is_finite() && q[k][1].is_finite()) {
+                    return Err(internal(format!(
+                        "the UV ({}, {}) of corner {c} (face {polygon}) is not finite",
+                        q[k][0], q[k][1]
+                    )));
+                }
+                if corner_set[c] && uvs[c] != q[k] {
+                    return Err(internal(format!(
+                        "corner {c} of face {polygon} received two different UVs, \
+                         ({}, {}) and ({}, {}): a cut runs through the face",
+                        uvs[c][0], uvs[c][1], q[k][0], q[k][1]
+                    )));
+                }
+                uvs[c] = q[k];
+                corner_set[c] = true;
+            }
+            all.add(
+                on.geometry.face_areas()[f],
+                0.5 * ddg_bff::quality::signed_double_area(q[0], q[1], q[2]),
+            );
+        }
+        for cone in &piece_cones.cones {
+            cone_list.push(Cone {
+                vertex: on.vertex_input[cone.vertex as usize],
+                angle: cone.angle,
+            });
+        }
+        cut_edges.extend_from_slice(&piece_cones.slit_edges);
+        cut_edges.extend_from_slice(&piece_flat.cut_edges);
+        if let Some((o, c)) = piece_flat.coverage {
+            overlapped += o;
+            covered += c;
+            any_coverage = true;
+        }
+        charts.push(ChartReport {
+            first_polygon: piece.first_polygon,
+            n_polygons: piece.n_polygons,
+            n_triangles: piece.mesh.n_faces(),
+            genus: piece.genus(),
+            n_boundary_loops: piece.mesh.boundary_loops().len(),
+            closed: piece_cones.closed,
+            positive_cones_only: piece_cones.positive_only,
+            solve: piece_cones.solve.clone(),
+            cones: ConeStats::of(piece_cones.cones.iter().map(|c| c.angle)),
+            flatten: piece_flat.report,
+        });
+    }
+    if let Some(c) = corner_set.iter().position(|&set| !set) {
+        return Err(internal(format!("corner {c} received no UV")));
+    }
+    if let Some(p) = polygon_charts.iter().position(|&c| c == u32::MAX) {
+        return Err(internal(format!("face {p} is in no chart")));
+    }
+    cone_list.sort_by_key(|c| c.vertex);
+    if let Some(w) = cone_list.windows(2).find(|w| w[0].vertex == w[1].vertex) {
+        return Err(internal(format!(
+            "vertex {} carries two cones",
+            w[0].vertex
+        )));
+    }
+    cut_edges.sort_unstable();
+    cut_edges.dedup();
+    if let Some(&[a, b]) = cut_edges
+        .iter()
+        .find(|e| prepared.polygon_edges.binary_search(e).is_err())
+    {
+        return Err(internal(format!(
+            "the cut edge ({a}, {b}) is not an edge of a face"
+        )));
+    }
+    if let Some(&[a, b]) = prepared
+        .seam_cut_edges
+        .iter()
+        .find(|e| cut_edges.binary_search(e).is_err())
+    {
+        return Err(internal(format!("the seam ({a}, {b}) was not cut")));
+    }
+    let seconds_verify = start.elapsed().as_secs_f64();
+
+    // Packing.
+    let pack_start = Instant::now();
+    let packing = options.packing.map(|pack| {
+        let mut corner_chart = vec![0u32; n_corners];
+        for (p, w) in input.polygon_offsets.windows(2).enumerate() {
+            corner_chart[w[0] as usize..w[1] as usize].fill(polygon_charts[p]);
+        }
+        pack_in_place(&mut uvs, &corner_chart, input.polygon_offsets, &pack)
+    });
+    if let Some(c) = uvs.iter().position(|q| !(q[0].is_finite() && q[1].is_finite())) {
+        return Err(internal(format!("packing made the UV of corner {c} non-finite")));
+    }
+    let seconds_pack = pack_start.elapsed().as_secs_f64();
+
+    // Steering.
+    let mut steering = SteeringReport::default();
+    for (v, &role) in prepared.steering_role.iter().enumerate() {
+        let applied = prepared.vertex_used[v] && cones.steering_applied[v];
+        match (role, applied) {
+            (1, true) => steering.n_pinned_applied += 1,
+            (1, false) => steering.n_pinned_without_effect += 1,
+            (2, true) => steering.n_prescribed_applied += 1,
+            (2, false) => steering.prescribed_not_applied.push(v as u32),
+            (4, true) => steering.n_forbidden_applied += 1,
+            (4, false) => steering.n_forbidden_without_effect += 1,
+            _ => {}
+        }
+    }
+    let mut warnings = prepared.warnings.clone();
+    warnings.extend(cones.warnings.iter().cloned());
+    warnings.extend(flat.warnings.iter().cloned());
+    if let Some(&first) = steering.prescribed_not_applied.first() {
+        warnings.push(format!(
+            "{} prescribed cones could not be imposed because their vertex lies on a boundary, \
+             a seam or a slit, or is used by no face (the first is vertex {first})",
+            steering.prescribed_not_applied.len()
+        ));
+    }
+
+    let timings = Timings {
+        validate: prepared.seconds_validate,
+        seams: prepared.seconds_seams,
+        cones: cones.seconds,
+        cone_solver: cones.seconds_solver,
+        flatten: flat.seconds,
+        pack: seconds_pack,
+        verify: seconds_verify,
+        total: prepared.seconds_validate
+            + prepared.seconds_seams
+            + cones.seconds
+            + flat.seconds
+            + seconds_pack
+            + seconds_verify,
+    };
+    let max_overlapped_fraction = charts
+        .iter()
+        .filter_map(|c| c.flatten.overlapped_fraction)
+        .fold(None, |best: Option<f64>, x| Some(best.map_or(x, |b| b.max(x))));
+    let report = Report {
+        n_vertices: prepared.n_input_vertices,
+        n_polygons: prepared.n_polygons,
+        n_corners,
+        n_triangles: input.triangles.len(),
+        validation: prepared.validation,
+        steering,
+        cones: ConeStats::of(cone_list.iter().map(|c| c.angle)),
+        n_cut_edges: cut_edges.len(),
+        area_distortion: all.finish(),
+        flipped_triangles: charts.iter().map(|c| c.flatten.flipped_triangles).sum(),
+        degenerate_triangles: charts.iter().map(|c| c.flatten.degenerate_triangles).sum(),
+        max_overlapped_fraction,
+        overlapped_fraction: (any_coverage && covered > 0.0).then(|| overlapped / covered),
+        charts,
+        packing,
+        timings,
+        warnings,
+    };
+    Ok(UvMap {
+        uvs,
+        polygon_charts,
+        cones: cone_list,
+        cut_edges,
+        report,
+    })
+}
