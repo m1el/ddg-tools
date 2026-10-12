@@ -1,0 +1,9 @@
+/target*/
+/data/
+/runs_tmp/
+*.log
+__pycache__/
+.venv/
+.lake/
+/dist/
+*.whl
