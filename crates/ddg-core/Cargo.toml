@@ -7,6 +7,13 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["blender-tessellation"]
+# Polygon triangulation that reproduces Blender's tessellation. The implementation
+# (src/triangulate/blender.rs) is a port of GPL-2.0-or-later Blender code; disable this feature
+# for a build that contains MIT-licensed code only.
+blender-tessellation = []
+
 [dependencies]
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
 

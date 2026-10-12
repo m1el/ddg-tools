@@ -3,6 +3,8 @@
 //!
 //! * [`topology`] — a validated, oriented, manifold triangle mesh ([`TriMesh`]) with halfedge
 //!   connectivity, boundary loops, components, and explicit repair helpers.
+//! * [`triangulate`] — polygon triangulation that matches Blender's, with a map from triangle
+//!   corners back to the original polygon corners (cargo feature `blender-tessellation`).
 //! * [`geometry`] — intrinsic triangle geometry (corner angles, areas, cotangents) computed from
 //!   edge lengths ([`Geometry`]).
 //! * [`operators`] — the cotan Laplacian, lumped mass, angle defects and boundary geodesic
@@ -35,6 +37,8 @@ pub mod io;
 pub mod operators;
 pub mod sparse;
 pub mod topology;
+#[cfg(feature = "blender-tessellation")]
+pub mod triangulate;
 
 pub use geometry::{Geometry, GeometryError};
 pub use sparse::{Factorization, Method, Parallelism, SparseError, SparseMatrix, Symbolic, SymbolicInfo};
