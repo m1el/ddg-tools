@@ -6,9 +6,9 @@
 //!
 //! ```text
 //! W u + A φ = 0                                    (adjoint equation, every vertex)
-//! (A u)_i           = µ_i − Ω_i                    row i is Flat:    µ_i is a given number
-//! (A u)_i − k_i φ_i = c_i − Ω_i                    row i is Sloped:  µ_i = k_i φ_i + c_i
-//! φ_i               = p_i                          row i is Pinned:  µ_i is free, φ_i given
+//! (A u)_i                   = µ_i − Ω_i            row i is Flat:    µ_i is a given number
+//! (A u)_i − k_i (φ_i − o_i) = b_i − Ω_i            row i is Sloped:  µ_i = b_i + k_i (φ_i − o_i)
+//! φ_i                       = p_i                  row i is Pinned:  µ_i is free, φ_i given
 //! ```
 //!
 //! A *flat* row is a vertex whose cone angle is fixed by its piece (no cone, an active bound,
@@ -21,6 +21,11 @@
 //! symmetric `2n × 2n` matrix `[[W, A], [A, −K]]` (pinned rows and columns replaced by the
 //! identity). A solver that factorizes `A` once and works on the active set alone can be added
 //! as a second implementation.
+//!
+//! The unknown of a sloped row is the excess `ψ_i = φ_i − o_i` over the threshold `o_i = ±t_i`,
+//! not `φ_i` itself. The stiffness `k_i` reaches `10¹⁰`; with `φ_i` as unknown the right-hand
+//! side would contain `k_i o_i` and every equation would lose that many digits, while
+//! `k_i ψ_i = µ_i − b_i` is of order one.
 
 use std::time::{Duration, Instant};
 
@@ -40,12 +45,14 @@ pub(crate) enum Row {
         /// The cone angle `µ_i`.
         mu: f64,
     },
-    /// The cone angle is the affine function `k φ_i + c` of the adjoint.
+    /// The cone angle is the affine function `base + k (φ_i − offset)` of the adjoint.
     Sloped {
         /// The slope `k > 0`.
         k: f64,
-        /// The constant `c`.
-        c: f64,
+        /// The adjoint value at which the cone angle equals `base` (the threshold `±t_i`).
+        offset: f64,
+        /// The cone angle at `φ_i = offset`.
+        base: f64,
     },
     /// The adjoint is the given number and the cone angle is free.
     Pinned {
@@ -57,9 +64,10 @@ pub(crate) enum Row {
 /// Which factorization the reference solver uses for the saddle-point matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LinearSolver {
-    /// `LDLᵀ` in the paired elimination order; `LU` for a system on which `LDLᵀ` breaks down
-    /// (which happens when some distortion weight is zero) or is not accurate enough. Once
-    /// `LU` was needed it is used for the rest of the solve.
+    /// `LDLᵀ` in the paired elimination order if all distortion weights are positive, `LU`
+    /// otherwise; and `LU` for any system on which `LDLᵀ` breaks down or is not accurate
+    /// enough after iterative refinement. Once `LU` was needed it is used for the rest of the
+    /// solve.
     #[default]
     Auto,
     /// `LDLᵀ` without pivoting, eliminating `u_i` immediately before `φ_i`, the pairs in a
@@ -113,8 +121,9 @@ pub(crate) trait NewtonLinearSolver {
     fn report(&self) -> LinearSolverReport;
 }
 
-/// Relative residual up to which a solution is accepted.
-const ACCEPT_RESIDUAL: f64 = 1e-9;
+/// Relative residual up to which a solution is accepted. It has to be well below the tolerance
+/// of the optimality certificate, because the solution is used as it is.
+const ACCEPT_RESIDUAL: f64 = 1e-12;
 /// Target of the iterative refinement.
 const REFINE: RefineOptions = RefineOptions {
     max_steps: 4,
@@ -187,7 +196,10 @@ impl<'d> SaddleSolver<'d> {
             ldlt: None,
             lu_symbolic: None,
             lu: None,
-            use_lu: strategy == LinearSolver::SaddleLu,
+            // With a zero distortion weight the paired order meets a zero pivot (or one that
+            // is non-zero only through fill, which is inaccurate): use LU from the start.
+            use_lu: strategy == LinearSolver::SaddleLu
+                || (strategy == LinearSolver::Auto && d.w.iter().any(|&w| w == 0.0)),
             report,
         })
     }
@@ -238,13 +250,16 @@ impl<'d> SaddleSolver<'d> {
                     values[q] = 0.0;
                     rhs[n + j] = mu - d.omega[j];
                 }
-                Row::Sloped { k, c } => {
+                Row::Sloped { k, offset, base } => {
+                    // Unknown ψ_j = φ_j − offset: the offset moves to the right-hand side of
+                    // the adjoint equation, like a pinned value.
                     for p in range {
                         values[q] = a_vals[p];
                         q += 1;
+                        rhs[a_rows[p] as usize] -= a_vals[p] * offset;
                     }
                     values[q] = -k;
-                    rhs[n + j] = c - d.omega[j];
+                    rhs[n + j] = base - d.omega[j];
                 }
             }
             q += 1;
@@ -346,8 +361,10 @@ impl NewtonLinearSolver for SaddleSolver<'_> {
         };
         let mut phi = x.split_off(n);
         for (value, row) in phi.iter_mut().zip(rows) {
-            if let Row::Pinned { phi } = *row {
-                *value = phi;
+            match *row {
+                Row::Pinned { phi } => *value = phi,
+                Row::Sloped { offset, .. } => *value += offset,
+                Row::Flat { .. } => {}
             }
         }
         Ok((x, phi))

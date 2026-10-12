@@ -52,10 +52,12 @@ pub struct SolveOptions<'a> {
     pub max_exact_iterations: usize,
     /// Safeguard: how many extra regularized problems the solver may solve when the paper's
     /// two stages do not finish. If the exact iteration cycles, hits its limit or meets a
-    /// singular system, a *proximal step* follows (the regularized problem with `γ` ten times
-    /// smaller, its penalty centred at the current cone angles instead of zero) and the exact
-    /// iteration is retried. If a regularized problem itself hits its iteration limit, it is
-    /// continued before anything else. `0` disables the safeguard. Default 12.
+    /// singular system, a *proximal step* follows (a regularized problem whose penalty is
+    /// centred at the current cone angles instead of zero) and the exact iteration is retried.
+    /// Proximal steps converge to a minimizer whether or not it is unique; once a step no
+    /// longer moves the cone angles the iterate is accepted as it is. If a regularized problem
+    /// itself hits its iteration limit, it is continued before anything else. `0` disables
+    /// the safeguard. Default 12.
     pub max_safeguard_rounds: usize,
     /// The exact iteration also stops when the cone residual
     /// `max_i |µ_i − clamp(P_t(φ_i + µ_i))|` of a solved step is at most this (paper
@@ -225,6 +227,11 @@ pub struct SolveReport {
     pub linear_solver: LinearSolverReport,
     /// Wall times.
     pub timings: Timings,
+    /// The largest amount by which a cone angle was moved onto its bound at the very end.
+    /// Zero whenever the last Newton step left the active sets unchanged; otherwise at most
+    /// of the order of [`SolveOptions::newton_tolerance`]. The certificate is computed after
+    /// this correction.
+    pub bound_correction: f64,
     /// The optimality certificate of `(u, φ, µ)` as returned.
     pub certificate: Certificate,
     /// Explanation when something did not go to plan (a linear solver failure, or why the
@@ -273,9 +280,15 @@ pub struct Solution {
     pub report: SolveReport,
 }
 
-/// Largest stiffness `k_i` of a proximal step. Beyond this the regularized cone angle
-/// `k (φ − t)` cannot be evaluated from `φ` to useful accuracy.
-const MAX_PROXIMAL_STIFFNESS: f64 = 1e12;
+/// Largest stiffness `k_i` of a proximal step. Stiffer problems converge in fewer proximal
+/// steps but their Newton systems are worse conditioned, and the regularized cone angle
+/// `k (φ − t)` is evaluated from `φ` with an error of about `k · 10⁻¹⁶`.
+const MAX_PROXIMAL_STIFFNESS: f64 = 1e8;
+/// The stiffness cap is never lowered below this.
+const MIN_PROXIMAL_STIFFNESS: f64 = 1e2;
+/// A proximal step that moves no cone angle by more than this (relative to the largest angle,
+/// at least 1) is a fixed point: its cone angles solve the exact problem.
+const FIXED_POINT_TOLERANCE: f64 = 1e-10;
 
 fn stiffness(d: &Discrete, metric: RegularizationMetric, gamma: f64, cap: f64) -> Vec<f64> {
     d.mass
@@ -348,12 +361,12 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 
         // Stage I: the regularized problems.
         let stage_start = Instant::now();
-        // The regularized problem that was solved last: its stiffness and centre, and whether
-        // its Newton iteration finished.
+        // The regularized problem that was solved last: its stiffness and centre, and how its
+        // Newton iteration ended.
         let mut gamma = 1.0;
         let mut k: Vec<f64> = Vec::new();
         let mut center = vec![0.0; n];
-        let mut solved = true;
+        let mut last_stop = StageStop::ActiveSetsUnchanged;
         for &next in &options.regularization {
             gamma = next;
             k = stiffness(&d, options.regularization_metric, gamma, f64::INFINITY);
@@ -369,7 +382,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 par,
             ) {
                 Ok(outcome) => {
-                    solved = outcome.stop.is_success();
+                    last_stop = outcome.stop;
                     stages.push(stage(kind, &outcome, start));
                 }
                 Err(failure) => {
@@ -384,9 +397,13 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 
         // Stage II: the exact problem, with further regularized problems as a safeguard.
         let stage_start = Instant::now();
+        let mut stiffness_cap = MAX_PROXIMAL_STIFFNESS;
+        // Whether the last proximal step did not move the cone angles: then they solve the
+        // exact problem.
+        let mut fixed_point = false;
         while !linear_failure {
             // The exact iteration is only worth starting from a solved regularized problem.
-            if solved {
+            if last_stop.is_success() {
                 let start = Instant::now();
                 match solve_exact(
                     &d,
@@ -423,28 +440,45 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                         ));
                     }
                 }
+                if fixed_point {
+                    // The proximal iteration has converged: the iterate is a minimizer even
+                    // though the exact iteration cannot confirm it. The certificate decides.
+                    break;
+                }
             } else {
                 message = Some(
-                    "a regularized problem reached its iteration limit before it was solved"
-                        .to_string(),
+                    match last_stop {
+                        StageStop::Stalled => {
+                            "a regularized problem could not be solved: its Newton systems are too \
+                         ill-conditioned"
+                        }
+                        _ => {
+                            "a regularized problem reached its iteration limit before it was solved"
+                        }
+                    }
+                    .to_string(),
                 );
             }
             if safeguard_rounds == options.max_safeguard_rounds {
                 break;
             }
             safeguard_rounds += 1;
-            if solved || k.is_empty() {
-                // A proximal step: ten times stiffer, centred at the current cone angles.
-                gamma *= 0.1;
-                k = stiffness(
-                    &d,
-                    options.regularization_metric,
-                    gamma,
-                    MAX_PROXIMAL_STIFFNESS,
-                );
-                center.copy_from_slice(&x.mu);
+            match last_stop {
+                // Out of iterations: continue the same regularized problem.
+                StageStop::IterationLimit if !k.is_empty() => {}
+                // Too ill-conditioned: a proximal step with a hundred times less stiffness.
+                StageStop::Stalled => {
+                    stiffness_cap = (stiffness_cap * 1e-2).max(MIN_PROXIMAL_STIFFNESS);
+                    k = stiffness(&d, options.regularization_metric, gamma, stiffness_cap);
+                    center.copy_from_slice(&x.mu);
+                }
+                // Solved, but the exact iteration failed: a proximal step, ten times stiffer.
+                _ => {
+                    gamma *= 0.1;
+                    k = stiffness(&d, options.regularization_metric, gamma, stiffness_cap);
+                    center.copy_from_slice(&x.mu);
+                }
             }
-            // Otherwise: continue the regularized problem that ran out of iterations.
             let kind = if center.iter().all(|&c| c == 0.0) {
                 StageKind::Regularized { gamma }
             } else {
@@ -461,7 +495,15 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 par,
             ) {
                 Ok(outcome) => {
-                    solved = outcome.stop.is_success();
+                    last_stop = outcome.stop;
+                    let moved =
+                        x.mu.iter()
+                            .zip(&center)
+                            .map(|(a, b)| (a - b).abs())
+                            .fold(0.0, f64::max);
+                    let size = x.mu.iter().fold(1.0f64, |m, v| m.max(v.abs()));
+                    fixed_point =
+                        outcome.stop.is_success() && moved <= FIXED_POINT_TOLERANCE * size;
                     stages.push(stage(kind, &outcome, start));
                 }
                 Err(failure) => {
@@ -473,6 +515,15 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         }
         timings.exact = stage_start.elapsed().as_secs_f64();
         linear_report = solver.report();
+    }
+
+    // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
+    // its bound by rounding is moved onto it. (The certificate is computed afterwards.)
+    let mut bound_correction = 0.0f64;
+    for (mu, site) in x.mu.iter_mut().zip(&d.sites) {
+        let clamped = mu.clamp(site.lo, site.hi);
+        bound_correction = bound_correction.max((clamped - *mu).abs());
+        *mu = clamped;
     }
 
     // The optimum, per vertex.
@@ -560,6 +611,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             safeguard_rounds,
             linear_solver: linear_report,
             timings,
+            bound_correction,
             certificate,
             message,
         },

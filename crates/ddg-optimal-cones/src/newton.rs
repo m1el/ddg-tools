@@ -46,10 +46,13 @@ pub enum StageStop {
     /// A full Newton step left every vertex on its piece (the active sets did not change), so
     /// the new iterate solves the stage's optimality system exactly (paper Sec. 5.3.3).
     ActiveSetsUnchanged,
-    /// The residual of the stage's optimality system (Stage II), or the Newton step (Stage I),
-    /// fell below the tolerance.
+    /// The residual of the stage's optimality system is at rounding level (regularized
+    /// problems: a step changed pieces only within the rounding error of `φ`) or below the
+    /// requested tolerance (exact problem).
     Tolerance,
-    /// The line search could not decrease the dual objective any further (rounding level).
+    /// The line search of a regularized problem found no descent along the Newton direction
+    /// although the residual is not small: the Newton system is too ill-conditioned. This
+    /// happens when the minimizer is (nearly) not unique, e.g. with zero distortion weights.
     Stalled,
     /// The iteration limit was reached.
     IterationLimit,
@@ -62,10 +65,7 @@ pub enum StageStop {
 impl StageStop {
     /// Whether the stage solved its problem.
     pub fn is_success(self) -> bool {
-        matches!(
-            self,
-            StageStop::ActiveSetsUnchanged | StageStop::Tolerance | StageStop::Stalled
-        )
+        matches!(self, StageStop::ActiveSetsUnchanged | StageStop::Tolerance)
     }
 }
 
@@ -85,8 +85,12 @@ pub(crate) struct NewtonOutcome {
     pub adjoint_shift: (f64, f64),
 }
 
-/// A Newton step counts as negligible below this relative size.
-const STEP_TOLERANCE: f64 = 1e-13;
+/// Relative rounding error assumed for an adjoint value when deciding whether a vertex with a
+/// fixed cone angle has really left its piece (64 machine epsilons).
+const PIECE_NOISE: f64 = 64.0 * f64::EPSILON;
+/// A regularized iteration whose line search finds no descent counts as solved if the residual
+/// of the state equation is at most this, relative to the size of its terms.
+const STALL_TOLERANCE: f64 = 1e-9;
 
 fn max_abs(x: &[f64]) -> f64 {
     x.iter().fold(0.0, |m, v| m.max(v.abs()))
@@ -350,11 +354,13 @@ pub(crate) fn solve_regularized(
         rows.extend((0..n).map(|i| match pieces[i] {
             Piece::Pos => Row::Sloped {
                 k: k[i],
-                c: center[i] - k[i] * sites[i].t,
+                offset: sites[i].t,
+                base: center[i],
             },
             Piece::Neg => Row::Sloped {
                 k: k[i],
-                c: center[i] + k[i] * sites[i].t,
+                offset: -sites[i].t,
+                base: center[i],
             },
             piece => Row::Flat {
                 mu: sites[i].value_on(piece, k[i], args[i]),
@@ -387,15 +393,23 @@ pub(crate) fn solve_regularized(
             outcome.stop = StageStop::ActiveSetsUnchanged;
             return Ok(outcome);
         }
-        let du: Vec<f64> = u.iter().zip(&x.u).map(|(a, b)| a - b).collect();
-        let dphi: Vec<f64> = phi.iter().zip(&x.phi).map(|(a, b)| a - b).collect();
-        if max_abs(&du) <= STEP_TOLERANCE * (1.0 + max_abs(&x.u))
-            && max_abs(&dphi) <= STEP_TOLERANCE * (1.0 + max_abs(&x.phi))
-        {
+        // Pieces that changed only within rounding do not count. An active vertex is judged
+        // by its cone angle, which the step determines accurately, so its change is real. A
+        // vertex with a fixed cone angle is judged by `φ_i`, and a rounding error `ε` of `φ_i`
+        // looks like a change `k_i ε` of the cone angle its piece asks for.
+        let within_rounding = (0..n).all(|i| {
+            new_pieces[i] == pieces[i]
+                || (!pieces[i].is_active()
+                    && (sites[i].measure(k[i], new_args[i]) - mu[i]).abs()
+                        <= PIECE_NOISE * k[i] * (new_args[i].abs() + sites[i].t))
+        });
+        if within_rounding {
             *x = Iterate { u, phi, mu };
             outcome.stop = StageStop::Tolerance;
             return Ok(outcome);
         }
+        let du: Vec<f64> = u.iter().zip(&x.u).map(|(a, b)| a - b).collect();
+        let dphi: Vec<f64> = phi.iter().zip(&x.phi).map(|(a, b)| a - b).collect();
         let slope = DualSlope {
             sites,
             k,
@@ -412,7 +426,19 @@ pub(crate) fn solve_regularized(
             pieces = new_pieces;
             std::mem::swap(&mut args, &mut new_args);
         } else if alpha <= 0.0 {
-            outcome.stop = StageStop::Stalled;
+            // The dual objective cannot be decreased along the Newton direction. At rounding
+            // level that means the iterate is optimal; otherwise the direction is not accurate
+            // enough to be a descent direction (an ill-conditioned system).
+            d.a.mul_vec(&x.u, &mut au).expect("dimensions match");
+            let residual = (0..n)
+                .map(|i| (au[i] - x.mu[i] + d.omega[i]).abs())
+                .fold(0.0, f64::max);
+            let scale = 1.0 + max_abs(&d.omega) + max_abs(&x.mu);
+            outcome.stop = if residual <= STALL_TOLERANCE * scale {
+                StageStop::Tolerance
+            } else {
+                StageStop::Stalled
+            };
             return Ok(outcome);
         } else {
             outcome.damped_steps += 1;
