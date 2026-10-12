@@ -52,7 +52,8 @@ theorem quadratic_growth_of_stationary (A : Matrix ι ι ℝ) (w : ι → ℝ) (
     exact Finset.sum_le_sum fun i _ => (hincl i).2 (ν i) (hν i)
   linarith
 
-private theorem nonneg_of_forall_small {a C : ℝ}
+/-- If `θ·a + θ²·C ≥ 0` for all small `θ > 0` then `a ≥ 0` (first-order optimality along a ray). -/
+theorem nonneg_of_forall_small {a C : ℝ}
     (h : ∀ θ : ℝ, 0 < θ → θ ≤ 1 → 0 ≤ θ * a + θ ^ 2 * C) : 0 ≤ a := by
   by_contra ha
   push Not at ha
