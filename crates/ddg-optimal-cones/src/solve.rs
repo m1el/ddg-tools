@@ -745,7 +745,8 @@ pub fn solve_with_boundary(
     let cone_cost = d.cone_cost(&x.mu);
 
     let start = Instant::now();
-    let certificate = certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
+    let certificate =
+        certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
     timings.certificate = start.elapsed().as_secs_f64();
     let status = if certificate.holds(options.certificate_tolerance) {
         Status::Converged

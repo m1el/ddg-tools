@@ -12,9 +12,9 @@ mod common;
 
 use common::{
     FeatureMask, Features, N_KINDS, Reference, TestMesh, max_abs_diff, random_features,
-    random_mesh, reference_solve, summary,
+    random_mesh, reference_solve_with_boundary, summary,
 };
-use ddg_optimal_cones::{ConeError, SolveOptions, Status, solve};
+use ddg_optimal_cones::{BoundaryTreatment, ConeError, SolveOptions, Status, solve_with_boundary};
 use proptest::prelude::*;
 
 /// Agreement required of the objective, relative to `max(1, |objective|)`.
@@ -48,11 +48,38 @@ struct Tally {
 
 /// Compares one case; returns an error text on disagreement.
 fn compare(mesh: &TestMesh, f: &Features, tally: &mut Tally) -> Result<(), String> {
+    compare_with_boundary(mesh, f, BoundaryTreatment::Fixed, tally)
+}
+
+/// With free boundary curvatures a boundary vertex of zero distortion weight has a free site and
+/// no weight: its scale factor is determined by nothing, the Newton systems are singular and the
+/// minimum need not be attained (see `zero_weight_free_boundary_is_never_reported_as_optimal`).
+/// The sweeps therefore keep the boundary vertices weighted when the boundary is `Free`.
+fn weight_free_boundary(mesh: &TestMesh, f: &mut Features, boundary: BoundaryTreatment) {
+    if boundary != BoundaryTreatment::Free {
+        return;
+    }
+    if let Some(w) = f.distortion_weights.as_mut() {
+        for (v, x) in w.iter_mut().enumerate() {
+            if mesh.mesh.is_boundary_vertex(v) && *x == 0.0 {
+                *x = 1.0;
+            }
+        }
+    }
+}
+
+/// [`compare`] for a boundary treatment.
+fn compare_with_boundary(
+    mesh: &TestMesh,
+    f: &Features,
+    boundary: BoundaryTreatment,
+    tally: &mut Tally,
+) -> Result<(), String> {
     let problem = f.problem(mesh);
-    let reference = reference_solve(mesh, f);
-    let result = solve(&problem, &SolveOptions::default());
+    let reference = reference_solve_with_boundary(mesh, f, boundary);
+    let result = solve_with_boundary(&problem, boundary, &SolveOptions::default());
     tally.cases += 1;
-    let describe = || format!("{} with {f:.3?}", mesh.name);
+    let describe = || format!("{} with {f:.3?} and boundary {boundary:?}", mesh.name);
     match (result, reference) {
         (Err(ConeError::Infeasible { .. }), Reference::Infeasible) => {
             tally.infeasible += 1;
@@ -127,7 +154,16 @@ fn compare(mesh: &TestMesh, f: &Features, tally: &mut Tally) -> Result<(), Strin
                     describe()
                 ));
             }
-            if f.strictly_weighted(mesh) {
+            // The minimizer is unique where every unknown vertex has a positive weight (all
+            // vertices when the boundary values are unknowns).
+            let unique = if boundary == BoundaryTreatment::Fixed {
+                f.strictly_weighted(mesh)
+            } else {
+                f.distortion_weights
+                    .as_ref()
+                    .is_none_or(|w| w.iter().all(|&x| x > 0.0))
+            };
+            if unique {
                 tally.unique += 1;
                 let measure_error = max_abs_diff(&solution.measure, &measure);
                 let u_scale = log_scale.iter().fold(1.0f64, |m, u| m.max(u.abs()));
@@ -152,6 +188,51 @@ fn compare(mesh: &TestMesh, f: &Features, tally: &mut Tally) -> Result<(), Strin
 /// disagreements.
 #[test]
 fn sweep_against_generic_convex_solver() {
+    sweep(BoundaryTreatment::Fixed);
+}
+
+/// The same sweep with the boundary values as unknowns, for each treatment. On the closed
+/// topologies (sphere, torus) the treatment makes no difference and they are skipped.
+#[test]
+fn sweep_against_generic_convex_solver_with_boundary_unknowns() {
+    let mut failures = Vec::new();
+    for boundary in [
+        BoundaryTreatment::Free,
+        BoundaryTreatment::Penalized,
+        BoundaryTreatment::Convex,
+    ] {
+        failures.extend(sweep_failures(boundary));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} disagreements, first ones:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+fn sweep(boundary: BoundaryTreatment) {
+    let failures = sweep_failures(boundary);
+    assert!(
+        failures.is_empty(),
+        "{} disagreements, first ones:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+fn sweep_failures(boundary: BoundaryTreatment) -> Vec<String> {
+    println!("boundary treatment: {boundary:?}");
     let kinds = ["disk", "annulus", "cylinder", "sphere", "torus"];
     let masks: [(&str, FeatureMask); 3] = [
         (
@@ -184,12 +265,16 @@ fn sweep_against_generic_convex_solver() {
     );
     let mut failures = Vec::new();
     for (kind, kind_name) in kinds.iter().enumerate() {
+        if boundary != BoundaryTreatment::Fixed && kind >= 3 {
+            continue;
+        }
         for (mask_name, mask) in &masks {
             let mut tally = Tally::default();
             for seed in 0..60u64 {
                 let mesh = random_mesh(kind, seed);
-                let features = random_features(&mesh, 1000 * kind as u64 + seed, *mask);
-                if let Err(e) = compare(&mesh, &features, &mut tally) {
+                let mut features = random_features(&mesh, 1000 * kind as u64 + seed, *mask);
+                weight_free_boundary(&mesh, &mut features, boundary);
+                if let Err(e) = compare_with_boundary(&mesh, &features, boundary, &mut tally) {
                     failures.push(e);
                 }
             }
@@ -209,17 +294,7 @@ fn sweep_against_generic_convex_solver() {
             );
         }
     }
-    assert!(
-        failures.is_empty(),
-        "{} disagreements, first ones:\n{}",
-        failures.len(),
-        failures
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    failures
 }
 
 proptest! {
@@ -242,6 +317,64 @@ proptest! {
             return Err(TestCaseError::fail(e));
         }
     }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 200, failure_persistence: None, ..ProptestConfig::default() })]
+
+    /// The same with the boundary values as unknowns, on meshes with boundary.
+    #[test]
+    fn solver_agrees_with_generic_convex_solver_with_boundary_unknowns(
+        kind in 0..3usize,
+        mesh_seed in 0..100_000u64,
+        feature_seed in 0..100_000u64,
+        unique in any::<bool>(),
+        treatment in 0..3usize,
+    ) {
+        let boundary = [
+            BoundaryTreatment::Free,
+            BoundaryTreatment::Penalized,
+            BoundaryTreatment::Convex,
+        ][treatment];
+        let mesh = random_mesh(kind, mesh_seed);
+        let mask = if unique { FeatureMask::UNIQUE } else { FeatureMask::ALL };
+        let mut features = random_features(&mesh, feature_seed, mask);
+        weight_free_boundary(&mesh, &mut features, boundary);
+        let mut tally = Tally::default();
+        if let Err(e) = compare_with_boundary(&mesh, &features, boundary, &mut tally) {
+            return Err(TestCaseError::fail(e));
+        }
+    }
+}
+
+/// The one random case (`disk-21`, free boundary, many zero distortion weights, among them at
+/// free boundary vertices) in which the minimum is not attained or not reachable: Clarabel
+/// returns an objective of `3·10⁻¹⁴` with scale factors of order 200 at the unweighted
+/// vertices, and the solver's proximal iterates creep towards it along a ray (objective
+/// `9·10⁻⁶` after 12 safeguard rounds, `5·10⁻⁷` after 300). The solver must say so: its status
+/// is not `Converged` and the certificate does not hold.
+#[test]
+fn zero_weight_free_boundary_is_never_reported_as_optimal() {
+    let mesh = random_mesh(0, 21);
+    let features = random_features(&mesh, 21, FeatureMask::ALL);
+    let solution = solve_with_boundary(
+        &features.problem(&mesh),
+        BoundaryTreatment::Free,
+        &SolveOptions::default(),
+    )
+    .unwrap();
+    assert_ne!(solution.report.status, Status::Converged);
+    assert!(!solution.report.certificate.holds(1e-9));
+    let Reference::Solved { objective, .. } =
+        reference_solve_with_boundary(&mesh, &features, BoundaryTreatment::Free)
+    else {
+        panic!("the reference solves it");
+    };
+    assert!(
+        solution.objective > objective + 1e-7,
+        "{}",
+        solution.objective
+    );
 }
 
 /// Reruns one case of the property test and prints everything about it:
@@ -267,8 +400,23 @@ fn debug_case() {
         mesh.name,
         mesh.mesh.n_vertices()
     );
-    let solution = solve(&features.problem(&mesh), &SolveOptions::default());
-    let reference = reference_solve(&mesh, &features);
+    // BOUNDARY=free|penalized|convex selects a treatment with unknown boundary values.
+    let boundary = match std::env::var("BOUNDARY").as_deref() {
+        Ok("free") => BoundaryTreatment::Free,
+        Ok("penalized") => BoundaryTreatment::Penalized,
+        Ok("convex") => BoundaryTreatment::Convex,
+        _ => BoundaryTreatment::Fixed,
+    };
+    let rounds: usize = std::env::var("ROUNDS")
+        .ok()
+        .and_then(|r| r.parse().ok())
+        .unwrap_or(12);
+    let options = SolveOptions {
+        max_safeguard_rounds: rounds,
+        ..SolveOptions::default()
+    };
+    let solution = solve_with_boundary(&features.problem(&mesh), boundary, &options);
+    let reference = reference_solve_with_boundary(&mesh, &features, boundary);
     match (&solution, &reference) {
         (
             Ok(solution),

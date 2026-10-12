@@ -192,7 +192,13 @@ pub fn certify(
     adjoint: &[f64],
     measure: &[f64],
 ) -> Result<Certificate, ConeError> {
-    certify_with_boundary(problem, BoundaryTreatment::Fixed, log_scale, adjoint, measure)
+    certify_with_boundary(
+        problem,
+        BoundaryTreatment::Fixed,
+        log_scale,
+        adjoint,
+        measure,
+    )
 }
 
 /// [`certify`] for a boundary treatment: the certificate of a triple for the problem that

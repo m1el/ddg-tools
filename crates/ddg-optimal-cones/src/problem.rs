@@ -211,9 +211,7 @@ pub(crate) fn validate_with(
                     f64::NEG_INFINITY,
                     f64::INFINITY,
                 )),
-                BoundaryTreatment::Convex => {
-                    sites.push(Site::penalized(0.0, 0.0, f64::INFINITY))
-                }
+                BoundaryTreatment::Convex => sites.push(Site::penalized(0.0, 0.0, f64::INFINITY)),
             }
         } else if cost == f64::INFINITY {
             n_forbidden += 1;
@@ -384,7 +382,10 @@ impl Discrete {
         }
         let mut angle = vec![0.0; self.n];
         for (index, cone) in cones.iter().enumerate() {
-            let i = unknown_of.get(cone.vertex as usize).copied().unwrap_or(u32::MAX);
+            let i = unknown_of
+                .get(cone.vertex as usize)
+                .copied()
+                .unwrap_or(u32::MAX);
             if i == u32::MAX || self.is_boundary[i as usize] || !cone.angle.is_finite() {
                 return Err(ConeError::InvalidCone {
                     index,

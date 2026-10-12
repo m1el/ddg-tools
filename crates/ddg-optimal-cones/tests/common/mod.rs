@@ -7,9 +7,11 @@ use clarabel::solver::{DefaultSettings, DefaultSolver, IPSolver, SolverStatus, S
 use ddg_core::generators::{
     GeneratedMesh, SplitMix64, annulus, bumpy_grid_disk, icosphere, open_cylinder, perturb, torus,
 };
-use ddg_core::operators::{angle_defects, cotan_laplacian, lumped_mass_normalized};
+use ddg_core::operators::{
+    angle_defects, boundary_geodesic_curvatures, cotan_laplacian, lumped_mass_normalized,
+};
 use ddg_core::{Geometry, TriMesh};
-use ddg_optimal_cones::{Cone, ConeProblem};
+use ddg_optimal_cones::{BoundaryTreatment, Cone, ConeProblem};
 
 /// A mesh with its geometry.
 pub struct TestMesh {
@@ -303,8 +305,26 @@ pub enum Reference {
 /// Nothing of the solver under test is used: the operators come from `ddg-core`, the problem
 /// data straight from the public problem description.
 pub fn reference_solve(mesh: &TestMesh, f: &Features) -> Reference {
+    reference_solve_with_boundary(mesh, f, BoundaryTreatment::Fixed)
+}
+
+/// [`reference_solve`] with the boundary values as unknowns. At a boundary vertex `b` the
+/// state equation is `(L u)_b − ν_b = −k_b` (`k_b = π −` angle sum), and `ν_b` is
+/// `Free`: unconstrained at no cost; `Penalized`: charged `λ wR_b |ν_b|` (`+∞` forces
+/// `ν_b = 0`); `Convex`: `ν_b ≥ 0` at no cost. Everything is written out here from the problem
+/// statement, not taken from the solver.
+pub fn reference_solve_with_boundary(
+    mesh: &TestMesh,
+    f: &Features,
+    boundary: BoundaryTreatment,
+) -> Reference {
     let nv = mesh.mesh.n_vertices();
-    let unknowns: Vec<usize> = mesh.interior();
+    let unknowns: Vec<usize> = if boundary == BoundaryTreatment::Fixed {
+        mesh.interior()
+    } else {
+        (0..nv).collect()
+    };
+    let on_boundary = |v: usize| mesh.mesh.is_boundary_vertex(v);
     let n = unknowns.len();
     if n == 0 {
         return Reference::Solved {
@@ -318,12 +338,43 @@ pub fn reference_solve(mesh: &TestMesh, f: &Features) -> Reference {
         index[v] = i;
     }
     let laplacian = cotan_laplacian(&mesh.mesh, &mesh.geometry).unwrap();
-    let omega = angle_defects(&mesh.mesh, &mesh.geometry).unwrap();
+    let mut omega = angle_defects(&mesh.mesh, &mesh.geometry).unwrap();
+    if boundary != BoundaryTreatment::Fixed {
+        let k = boundary_geodesic_curvatures(&mesh.mesh, &mesh.geometry).unwrap();
+        for (o, k) in omega.iter_mut().zip(k) {
+            *o += k;
+        }
+    }
     let mass = lumped_mass_normalized(&mesh.mesh, &mesh.geometry).unwrap();
     let w_e = |v: usize| f.distortion_weights.as_ref().map_or(1.0, |w| w[v]);
-    let w_r = |v: usize| f.cone_costs.as_ref().map_or(1.0, |w| w[v]);
-    let lo = |v: usize| f.lower_bounds.as_ref().map_or(f64::NEG_INFINITY, |b| b[v]);
-    let hi = |v: usize| f.upper_bounds.as_ref().map_or(f64::INFINITY, |b| b[v]);
+    let w_r = |v: usize| {
+        if on_boundary(v) {
+            match boundary {
+                BoundaryTreatment::Penalized => f.cone_costs.as_ref().map_or(1.0, |w| w[v]),
+                _ => 0.0,
+            }
+        } else {
+            f.cone_costs.as_ref().map_or(1.0, |w| w[v])
+        }
+    };
+    let lo = |v: usize| {
+        if on_boundary(v) {
+            if boundary == BoundaryTreatment::Convex {
+                0.0
+            } else {
+                f64::NEG_INFINITY
+            }
+        } else {
+            f.lower_bounds.as_ref().map_or(f64::NEG_INFINITY, |b| b[v])
+        }
+    };
+    let hi = |v: usize| {
+        if on_boundary(v) {
+            f64::INFINITY
+        } else {
+            f.upper_bounds.as_ref().map_or(f64::INFINITY, |b| b[v])
+        }
+    };
     let mut fixed: Vec<Option<f64>> = unknowns
         .iter()
         .map(|&v| (w_r(v) == f64::INFINITY).then_some(0.0))
