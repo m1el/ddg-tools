@@ -165,7 +165,8 @@ impl<'a> DiskBff<'a> {
     /// # Errors
     /// [`BffError::Geometry`] if the geometry does not belong to the mesh;
     /// [`BffError::NotADisk`] unless the mesh is connected with Euler characteristic 1 and one
-    /// boundary loop; [`BffError::StartNotOnBoundary`] for a bad `boundary_start`.
+    /// boundary loop; [`BffError::StartNotOnBoundary`] for a bad `boundary_start`;
+    /// [`BffError::NonFiniteInput`] for options that are negative or not numbers.
     pub fn new(
         mesh: &'a TriMesh,
         geometry: &'a Geometry,
@@ -537,7 +538,7 @@ impl<'a> DiskBff<'a> {
     ///
     /// # Errors
     /// [`BffError::LengthMismatch`], [`BffError::NonFiniteInput`], [`BffError::Solve`],
-    /// [`BffError::NonFiniteResult`].
+    /// [`BffError::NonFiniteResult`], [`BffError::DegenerateLayout`].
     pub fn flatten_with_boundary_data(
         &mut self,
         boundary_scale_factors: &[f64],

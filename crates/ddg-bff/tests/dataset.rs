@@ -9,10 +9,10 @@
 //!    not, up to one global scale.
 //!
 //! How well they can agree is limited by the files, not by the port: positions, angles and
-//! UVs are stored with six digits, and for seven meshes the stored map is not what the public
-//! reference code computes from the published cones (the reference, run today, misses the
-//! stored map by exactly as much as this crate does; see the README). The bounds below are a
-//! few times the measured values. The port itself agrees with the reference C++ code to
+//! UVs are stored with six digits, and the stored maps are not exactly what the public
+//! reference code computes from the published cones (the reference, run today, misses each
+//! stored map by as much as this crate does; see the README). The bounds below are a few
+//! times the measured values. The port itself agrees with the reference C++ code to
 //! rounding error when both get the same input (`examples/reference_diff.rs`,
 //! `reference/run.sh`).
 //!

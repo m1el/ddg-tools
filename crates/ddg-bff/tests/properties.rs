@@ -409,6 +409,119 @@ proptest! {
         prop_assert_eq!(flat.charts[0].distortion.flipped_triangles, 0);
     }
 
+    /// Whatever is thrown at it — cones of any angle and sign, on any vertex, repeated or out
+    /// of range, random masks, seams and anchors, every Gauss–Bonnet policy, with and without
+    /// the diagonal shift — the flattening returns a finite result or an error with a
+    /// message. It never panics and never returns NaN. (Of 20 000 cases run once, about a
+    /// quarter ended in a layout and three quarters in an error.)
+    #[test]
+    fn nothing_panics_and_nothing_is_nan(
+        (g, _) in arbitrary_mesh(),
+        doubled in any::<bool>(),
+        seed in any::<u64>(),
+        n_cones in 0usize..7,
+        policy in 0usize..3,
+        shifted in any::<bool>(),
+        wild in any::<bool>(),
+    ) {
+        // Half of the time the connected sum with the mirror image: twice the genus. (Where
+        // the removed face touches the boundary the sum can be pinched; then the mesh itself.)
+        let (mut positions, mut faces) = (g.positions.clone(), g.faces.clone());
+        if doubled {
+            let (p, f) = common::mirror_double(&g.positions, &g.faces, 0);
+            if TriMesh::new(p.len(), f.clone()).is_ok() {
+                (positions, faces) = (p, f);
+            }
+        }
+        let mesh = TriMesh::new(positions.len(), faces).unwrap();
+        let geometry = Geometry::from_positions(&mesh, &positions).unwrap();
+        let mut rng = SplitMix64::new(seed);
+        let n = mesh.n_vertices() as u64;
+        // Tame input: distinct interior vertices. Wild input: any vertex, boundary or not,
+        // repeated or (rarely) one that does not exist.
+        let tame = pick_interior(&mesh, n_cones, &mut rng);
+        let cones: Vec<Cone> = (0..n_cones.min(if wild { n_cones } else { tame.len() }))
+            .map(|k| Cone {
+                vertex: if wild { (rng.next_u64() % (n + 1)) as u32 } else { tame[k] },
+                angle: match rng.next_u64() % 8 {
+                    0 if wild => f64::NAN,
+                    1 if wild => 7.0,
+                    2 => rng.uniform(-12.0, -3.0),
+                    3 => rng.uniform(5.0, 2.0 * PI - 1e-3),
+                    _ => rng.uniform(-2.0, 3.0),
+                },
+            })
+            .collect();
+        let forbid = if rng.next_u64().is_multiple_of(2) { 0.0 } else { rng.uniform(0.0, 0.4) };
+        let may: Vec<bool> = (0..mesh.n_edges()).map(|_| rng.next_f64() >= forbid).collect();
+        let require = if rng.next_u64().is_multiple_of(2) { 0.0 } else { rng.uniform(0.0, 0.2) };
+        let must: Vec<u32> = (0..mesh.n_edges() as u32)
+            .filter(|&e| rng.next_f64() < require && (wild || may[e as usize]))
+            .collect();
+        let anchors: Vec<u32> = (0..rng.next_u64() % 3)
+            .map(|_| (rng.next_u64() % (mesh.n_halfedges() as u64 + u64::from(wild))) as u32)
+            .collect();
+        let options = ConeFlattenOptions {
+            scale_factors: ddg_bff::ScaleFactorOptions {
+                gauss_bonnet: [
+                    ddg_bff::GaussBonnetPolicy::Reject,
+                    ddg_bff::GaussBonnetPolicy::DistributeOverCones,
+                    ddg_bff::GaussBonnetPolicy::SpreadOverVertices,
+                ][policy],
+                diagonal_shift: if shifted { 1e-8 } else { 0.0 },
+                ..ddg_bff::ScaleFactorOptions::default()
+            },
+            ..ConeFlattenOptions::default()
+        };
+        let result = flatten_with_cones(
+            &ConeFlattenInput {
+                mesh: &mesh,
+                geometry: &geometry,
+                cones: &cones,
+                scale_factors: None,
+                cut: CutSource::Plan { may_cut: Some(&may), must_cut: &must },
+                anchors: &anchors,
+            },
+            &options,
+        );
+        match result {
+            Err(error) => prop_assert!(!error.to_string().is_empty()),
+            Ok(flat) => {
+                prop_assert!(flat.corner_uvs.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+                prop_assert!(flat.scale_factors.iter().all(|u| u.is_finite()));
+                prop_assert!(flat.max_interior_curvature.is_finite());
+                prop_assert!(flat.extension_residual.is_finite());
+                prop_assert!(flat.seams.max_length_mismatch.is_finite());
+                for chart in &flat.charts {
+                    let (c, d) = (&chart.closure, &chart.distortion);
+                    for x in [
+                        c.turning_error, c.gap_before, c.gap_after, c.max_length_change,
+                        c.min_length_ratio, d.surface_area, d.plane_area, d.quasi_conformal.min,
+                        d.quasi_conformal.max, d.quasi_conformal.mean, d.log_scale.min,
+                        d.log_scale.max, d.log_scale.mean, d.log_scale_deviation, d.flipped_area,
+                    ] {
+                        prop_assert!(x.is_finite(), "{:?}", chart);
+                    }
+                    if let Some(coverage) = chart.overlap.coverage {
+                        prop_assert!(coverage.overlapped_fraction().is_finite());
+                        prop_assert!(coverage.overlapped_area <= coverage.covered_area);
+                    }
+                }
+                for cone in &flat.cones {
+                    prop_assert!(
+                        cone.angle.is_finite()
+                            && cone.implied_angle.is_finite()
+                            && cone.realized_angle.is_finite()
+                            && cone.max_wedge_angle.is_finite(),
+                        "{:?}", cone
+                    );
+                }
+                // A result is always made of disks with the cones on their boundaries.
+                check_structure(&mesh, &flat)?;
+            }
+        }
+    }
+
     /// Random seams that split the surface into several charts: every chart is flattened and
     /// lengths agree across all seams.
     #[test]

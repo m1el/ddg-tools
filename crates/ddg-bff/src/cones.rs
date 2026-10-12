@@ -190,7 +190,9 @@ fn cone_angles_per_vertex(
 ///
 /// # Errors
 /// [`BffError::ConeVertexOutOfRange`], [`BffError::DuplicateCone`],
-/// [`BffError::ConeOnBoundary`], [`BffError::InvalidConeAngle`],
+/// [`BffError::ConeOnBoundary`], [`BffError::InvalidConeAngle`] (also for an angle that
+/// [`GaussBonnetPolicy::DistributeOverCones`] would push to `2π`), [`BffError::NonFiniteInput`]
+/// for options that are negative or not numbers,
 /// [`BffError::GaussBonnetViolated`], [`BffError::NoConesToAdjust`], [`BffError::Geometry`],
 /// [`BffError::Solve`].
 ///
@@ -594,8 +596,12 @@ impl ConeFlattening {
 /// Those of [`solve_scale_factors`], [`crate::plan::plan_cut`] and [`crate::cut::cut_mesh`];
 /// [`BffError::ChartNotDisk`] and [`BffError::ConeNotOnCut`] for explicit cuts that do not
 /// work; [`BffError::AnchorOutOfRange`], [`BffError::AnchorNotOnBoundary`] and
-/// [`BffError::DuplicateAnchor`] for bad anchors; [`BffError::ScaleFactorsNotFlat`] for scale factors that are not flat away from the
-/// cut; [`BffError::Solve`]; [`BffError::NonFiniteResult`] instead of returning NaN.
+/// [`BffError::DuplicateAnchor`] for bad anchors; [`BffError::LengthMismatch`],
+/// [`BffError::NonFiniteInput`] for scale factors of the wrong length or not finite, and for
+/// options that are negative or not numbers; [`BffError::ScaleFactorsNotFlat`] for scale
+/// factors that are not flat away from the cut; [`BffError::Solve`];
+/// [`BffError::NonFiniteResult`] and [`BffError::DegenerateLayout`] instead of returning NaN
+/// or a layout without area.
 pub fn flatten_with_cones(
     input: &ConeFlattenInput<'_>,
     options: &ConeFlattenOptions,
