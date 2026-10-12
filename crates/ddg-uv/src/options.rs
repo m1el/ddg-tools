@@ -139,9 +139,9 @@ pub enum MergeClusters {
 
 impl Default for MergeClusters {
     fn default() -> Self {
-        // Measured on the dataset (84 solves): merging multiplies the distortion by 1.000 to
-        // 1.10 at λ = 0.5 and by at most 2.62 at λ = 0.02; the failure this guards against
-        // multiplied it by 3000.
+        // Measured on the dataset (84 solves, 59 with merges): merging multiplies the solver's
+        // distortion by 1.000 to 1.10 at λ = 0.5 and by at most 2.62 at λ = 0.02; the failure
+        // this guards against multiplied it by 3000.
         MergeClusters::Guarded {
             max_cluster_size: usize::MAX,
             max_factor: 10.0,
@@ -227,8 +227,8 @@ pub struct UnwrapOptions {
     ///
     /// Default `0.1`. Measured on the dataset's meshes with boundary, with positive cones:
     /// from `0.5` to `0.1` the cones go from 1–4 to 4–8 and the area distortion falls by a
-    /// factor 1.4 to 4.4; below `0.1` the cones of the clean meshes stay the same and only
-    /// their angles grow, while noisy meshes get 25–60 % more cones.
+    /// factor 1.4 to 5.8; below `0.1` the cones of most clean meshes stay the same and only
+    /// their angles grow, while noisy meshes get more cones (see the crate README).
     pub lambda: f64,
     /// Which signs cone angles may have.
     pub cone_signs: ConeSigns,

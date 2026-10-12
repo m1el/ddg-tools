@@ -218,8 +218,7 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
     {
         let mut seen_in = vec![NONE; n_input_vertices];
         for p in 0..n_polygons {
-            for c in offsets[p] as usize..offsets[p + 1] as usize {
-                let v = corner_vertices[c];
+            for &v in &corner_vertices[offsets[p] as usize..offsets[p + 1] as usize] {
                 if seen_in[v as usize] == p as u32 {
                     return Err(UvError::RepeatedVertexInPolygon {
                         polygon: p as u32,

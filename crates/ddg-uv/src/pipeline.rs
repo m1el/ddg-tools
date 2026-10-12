@@ -95,22 +95,22 @@ pub fn assemble(
             let polygon = prepared.triangle_polygon[t as usize];
             polygon_charts[polygon as usize] = chart as u32;
             let q = &piece_flat.corner_uvs[3 * f..3 * f + 3];
-            for k in 0..3 {
-                let c = prepared.triangle_corners[t as usize][k] as usize;
-                if !(q[k][0].is_finite() && q[k][1].is_finite()) {
+            for (&uv, &corner) in q.iter().zip(&prepared.triangle_corners[t as usize]) {
+                let c = corner as usize;
+                if !(uv[0].is_finite() && uv[1].is_finite()) {
                     return Err(internal(format!(
                         "the UV ({}, {}) of corner {c} (face {polygon}) is not finite",
-                        q[k][0], q[k][1]
+                        uv[0], uv[1]
                     )));
                 }
-                if corner_set[c] && uvs[c] != q[k] {
+                if corner_set[c] && uvs[c] != uv {
                     return Err(internal(format!(
                         "corner {c} of face {polygon} received two different UVs, \
                          ({}, {}) and ({}, {}): a cut runs through the face",
-                        uvs[c][0], uvs[c][1], q[k][0], q[k][1]
+                        uvs[c][0], uvs[c][1], uv[0], uv[1]
                     )));
                 }
-                uvs[c] = q[k];
+                uvs[c] = uv;
                 corner_set[c] = true;
             }
             all.add(

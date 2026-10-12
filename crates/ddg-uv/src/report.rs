@@ -340,6 +340,12 @@ impl Report {
     /// dictionaries. Per-chart details are reduced to totals and extremes; keys that start
     /// with `seconds_` are wall-clock times. Warnings are not included (see
     /// [`Report::warnings`]).
+    ///
+    /// The keys are chosen not to collide with those the Python binding adds itself
+    /// (`n_vertices`, `n_charts`, `n_cones`, `n_cut_edges`, `n_degenerate_triangles`,
+    /// `n_flipped_uv_triangles`, `measured_*`, `seconds_pipeline`, …); `n_unreferenced_vertices`
+    /// and `n_seam_edges_ignored` keep the names the binding's stand-in pipeline used. The
+    /// two overlap figures are `NaN` when the estimate is switched off.
     pub fn summary(&self) -> Vec<(&'static str, Value)> {
         let int = |n: usize| Value::Int(n as i64);
         let v = &self.validation;
@@ -347,10 +353,10 @@ impl Report {
             self.charts.iter().filter_map(|c| c.solve.as_ref()).collect();
         let fold_max = |values: &mut dyn Iterator<Item = f64>| values.fold(0.0f64, f64::max);
         let mut out = vec![
-            ("n_loose_vertices", int(v.n_loose_vertices)),
+            ("n_unreferenced_vertices", int(v.n_loose_vertices)),
             ("n_flipped_faces", int(v.n_flipped_polygons)),
             (
-                "n_degenerate_triangles",
+                "n_zero_area_triangles",
                 int(v.degenerate.n_degenerate_triangles),
             ),
             ("mollified", Value::Bool(v.degenerate.mollified)),
@@ -413,8 +419,8 @@ impl Report {
                 "area_distortion_unscaled",
                 Value::Float(self.area_distortion.raw),
             ),
-            ("n_flipped_triangles", int(self.flipped_triangles)),
-            ("n_collapsed_triangles", int(self.degenerate_triangles)),
+            ("flatten_flipped_triangles", int(self.flipped_triangles)),
+            ("flatten_collapsed_triangles", int(self.degenerate_triangles)),
             (
                 "overlapped_fraction",
                 Value::Float(self.overlapped_fraction.unwrap_or(f64::NAN)),

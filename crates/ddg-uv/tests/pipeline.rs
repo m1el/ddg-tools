@@ -264,3 +264,117 @@ fn steering_is_respected_where_it_can_be() {
     assert_eq!(steering.n_forbidden_applied, 4);
     assert!(map.report.warnings.iter().any(|w| w.contains("1 prescribed cones could not")));
 }
+
+#[test]
+fn loose_vertices_are_ignored() {
+    let g = bumpy_grid_disk(3, 3, 0.1).unwrap();
+    let mut positions = g.positions.clone();
+    // Two vertices that no face uses, one of them steered.
+    positions.push([5.0, 5.0, 5.0]);
+    positions.push([6.0, 6.0, 6.0]);
+    let loose = positions.len() as u32 - 1;
+    let mesh = PolygonMesh::from_triangles(positions, &g.faces);
+    let input = MeshInput {
+        pinned_vertices: &[loose],
+        seam_edges: &[[loose, 0]],
+        ..mesh.input()
+    };
+    let options = UnwrapOptions::default();
+    let map = unwrap(&input, &options).unwrap();
+    check(&mesh, &input, &map, &options);
+    assert_eq!(map.report.validation.n_loose_vertices, 2);
+    assert_eq!(map.report.steering.n_pinned_without_effect, 1);
+    assert_eq!(map.report.validation.seams.n_not_edges, 1);
+    // The same map as without them.
+    let plain = PolygonMesh::from_triangles(g.positions.clone(), &g.faces);
+    assert_eq!(map.uvs, unwrap(&plain.input(), &options).unwrap().uvs);
+}
+
+#[test]
+fn the_merge_guard_falls_back_to_the_unmerged_cones() {
+    use ddg_uv::{ClosedSurfaces, MergeClusters, MergeOutcome, SlitPlacement};
+    // A cube with a slit across it at a small λ: the optimum has neighbouring cones.
+    let mesh = cube(2.0);
+    let base = UnwrapOptions {
+        lambda: 0.02,
+        closed_surfaces: ClosedSurfaces::Slit {
+            placement: SlitPlacement::DiameterMiddle,
+            relative_length: 1.0,
+        },
+        ..UnwrapOptions::default()
+    };
+    let run = |merge| {
+        let options = UnwrapOptions { merge, ..base };
+        let map = unwrap(&mesh.input(), &options).unwrap();
+        check(&mesh, &mesh.input(), &map, &options);
+        map
+    };
+    let always = run(MergeClusters::Always {
+        max_cluster_size: usize::MAX,
+    });
+    let solve = always.report.charts[0].solve.as_ref().unwrap();
+    assert_eq!(solve.merge, MergeOutcome::Merged);
+    assert!(always.cones.len() < solve.n_cones_optimal);
+    assert!(solve.distortion_merged > solve.distortion_optimal);
+    assert_eq!(solve.distortion, solve.distortion_merged);
+
+    // A guard that accepts no increase at all rejects that merge.
+    let strict = run(MergeClusters::Guarded {
+        max_cluster_size: usize::MAX,
+        max_factor: 1.0,
+        max_increase: 0.0,
+    });
+    let solve = strict.report.charts[0].solve.as_ref().unwrap();
+    assert_eq!(solve.merge, MergeOutcome::Rejected);
+    assert_eq!(strict.cones.len(), solve.n_cones_optimal);
+    assert_eq!(solve.distortion, solve.distortion_optimal);
+    assert!(
+        strict.report.warnings.iter().any(|w| w.contains("merging the cone clusters")),
+        "{:?}",
+        strict.report.warnings
+    );
+    // Without merging the same cones come out, without the warning.
+    let never = run(MergeClusters::Never);
+    assert_eq!(never.cones, strict.cones);
+    assert_eq!(
+        never.report.charts[0].solve.as_ref().unwrap().merge,
+        MergeOutcome::NotRequested
+    );
+    assert!(never.report.warnings.is_empty());
+}
+
+#[test]
+fn closed_round_shapes_fall_back_to_free_sites_and_reoptimization_is_reported() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let options = UnwrapOptions::default();
+    let map = unwrap(&mesh.input(), &options).unwrap();
+    // The raw optimum is a cone at every one of the 114 vertices.
+    assert_eq!(
+        map.report.charts[0].closed,
+        ClosedHandling::FreeSites {
+            n_automatic: 8,
+            n_pinned: 0,
+            fallback_from_cones: Some(114)
+        }
+    );
+    assert_eq!(map.cones.len(), 8);
+    let sum: f64 = map.cones.iter().map(|c| c.angle).sum();
+    assert!((sum - 2.0 * std::f64::consts::TAU).abs() < 1e-9, "{sum}");
+    assert_eq!(map.report.flipped_triangles, 0);
+    assert_eq!(map.report.overlapped_fraction, Some(0.0));
+
+    // Re-optimized angles on a disk: reported, and not worse in the solver's measure.
+    let g = bumpy_grid_disk(16, 16, 0.4).unwrap();
+    let disk = PolygonMesh::from_triangles(g.positions.clone(), &g.faces);
+    let reoptimized = UnwrapOptions {
+        lambda: 0.02,
+        reoptimize_angles: true,
+        ..UnwrapOptions::default()
+    };
+    let map = unwrap(&disk.input(), &reoptimized).unwrap();
+    check(&disk, &disk.input(), &map, &reoptimized);
+    let solve = map.report.charts[0].solve.as_ref().unwrap();
+    let (before, n_before) = solve.before_reoptimization.unwrap();
+    assert!(solve.distortion <= before, "{} > {before}", solve.distortion);
+    assert!(map.cones.len() <= n_before);
+}

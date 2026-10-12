@@ -63,7 +63,7 @@ fn mesh_of(kind: usize, rng: &mut SplitMix64) -> PolygonMesh {
     let mut t = 0;
     for p in 0..mesh.n_polygons() {
         let corners = mesh.polygon_corners(p);
-        if corners.len() == 4 && rng.next_u64() % 2 == 0 {
+        if corners.len() == 4 && rng.next_u64().is_multiple_of(2) {
             let c = corners.start as u32;
             mesh.triangles[t] = [c, c + 1, c + 3];
             mesh.triangles[t + 1] = [c + 1, c + 2, c + 3];
@@ -139,12 +139,16 @@ fn case_of(kind: usize, seed: u64) -> Case {
     let mut seams: Vec<[u32; 2]> = Vec::new();
     for _ in 0..rng.next_u64() % 7 {
         let e = edges[(rng.next_u64() % edges.len() as u64) as usize];
-        seams.push(if rng.next_u64() % 2 == 0 { e } else { [e[1], e[0]] });
+        seams.push(if rng.next_u64().is_multiple_of(2) {
+            e
+        } else {
+            [e[1], e[0]]
+        });
     }
     if let Some(&first) = seams.first() {
         seams.push(first);
     }
-    if rng.next_u64() % 4 == 0 {
+    if rng.next_u64().is_multiple_of(4) {
         seams.push([0, n_vertices - 1]);
     }
     // Steering: disjoint random vertices.
@@ -273,7 +277,12 @@ fn run_case(kind: usize, seed: u64) -> Result<(Outcome, usize, usize, usize), St
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+    // A failure prints its kind and seed, which reproduce it; no regression file is kept.
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    })]
 
     #[test]
     fn random_meshes_seams_and_steering(kind in 0usize..10, seed in any::<u64>()) {

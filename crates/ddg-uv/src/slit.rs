@@ -224,9 +224,9 @@ fn slit_avoiding(
     };
     let mut edges = Vec::with_capacity(last - first);
     let mut length = 0.0;
-    for i in first..last {
+    for (i, edge_length) in edge_lengths.iter().enumerate().take(last).skip(first) {
         edges.push(edge_of(i)? as u32);
-        length += edge_lengths[i];
+        length += edge_length;
     }
     edges.sort_unstable();
     Some(Slit { edges, length })

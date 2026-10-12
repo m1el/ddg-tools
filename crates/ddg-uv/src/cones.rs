@@ -437,8 +437,14 @@ fn solve_on(
                 max_factor,
                 max_increase,
                 ..
-            } if !(after <= (max_factor * before).max(before + max_increase)) => {
-                MergeOutcome::Rejected
+            } => {
+                // A distortion that is not a number fails the comparison and is rejected.
+                let limit = (max_factor * before).max(before + max_increase);
+                if after.partial_cmp(&limit).is_some_and(|o| o.is_le()) {
+                    MergeOutcome::Merged
+                } else {
+                    MergeOutcome::Rejected
+                }
             }
             _ => MergeOutcome::Merged,
         }
