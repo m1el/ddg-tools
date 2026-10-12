@@ -614,12 +614,13 @@ impl<'a> Run<'a> {
         }
         // At a cone strictly inside its bounds the optimality condition is φ = ±t exactly (as
         // in the reference method); the adjoint computed from the gradient is that up to
-        // rounding. Anything further off is left as it is for the certificate to judge.
+        // rounding (64 ulp at most: a larger change would show in `L φ`, whose entries can be
+        // large on needle-like triangles). Anything further off is left for the certificate.
         for (i, site) in red.d.sites.iter().enumerate() {
             let m = mu[i];
             if !site.fixed && site.t > 0.0 && m != 0.0 && site.lo < m && m < site.hi {
                 let target = site.t.copysign(m);
-                if (phi[i] - target).abs() <= 1e-10 * site.t {
+                if (phi[i] - target).abs() <= 64.0 * f64::EPSILON * site.t {
                     phi[i] = target;
                 }
             }
