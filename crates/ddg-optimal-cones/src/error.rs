@@ -99,14 +99,6 @@ pub enum ConeError {
         /// What is wrong with it.
         reason: PrescribedConeIssue,
     },
-    /// On a closed mesh the cone angles handed to [`evaluate_cones`](crate::evaluate_cones)
-    /// do not sum to `2πχ`, so no scale factor exists for them.
-    ConeSumMismatch {
-        /// The required sum `2πχ`.
-        required: f64,
-        /// The sum of the given angles.
-        got: f64,
-    },
     /// A value handed to a function is out of its documented range.
     InvalidArgument {
         /// Which argument and why.
@@ -209,11 +201,6 @@ impl fmt::Display for ConeError {
                 angle,
                 reason,
             } => write!(f, "cone {index} (vertex {vertex}, angle {angle}): {reason}"),
-            ConeError::ConeSumMismatch { required, got } => write!(
-                f,
-                "on a closed mesh the cone angles must sum to 2 pi chi = {required}, but the \
-                 given angles sum to {got}"
-            ),
             ConeError::InvalidArgument { reason } => write!(f, "invalid argument: {reason}"),
             ConeError::InvalidOptions { reason } => write!(f, "invalid options: {reason}"),
             ConeError::Sparse(e) => write!(f, "sparse linear algebra failed during set-up: {e}"),

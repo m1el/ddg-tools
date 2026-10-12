@@ -83,9 +83,20 @@ impl Site {
 
     /// The piece of `x ↦ clamp(k·P_t(x), lo, hi)` that `x` lies on (`k > 0`).
     ///
-    /// The two sloped pieces are closed intervals, so a point exactly on a kink counts as
-    /// active; a sloped piece of zero width (`hi = 0` resp. `lo = 0`) does not exist. In
-    /// particular a free site (`t = 0`) is active at `x = 0`.
+    /// **Tie convention.** The two sloped pieces are *closed* intervals,
+    /// `Pos = [t, t + hi/k]` and `Neg = [−t + lo/k, −t]`: a point exactly on a kink counts as
+    /// active. A sloped piece of zero width (`hi = 0` resp. `lo = 0`) does not exist. In
+    /// particular a free site (`t = 0`) is active at `x = 0`, hence always.
+    ///
+    /// The paper (Eq. 24) and `Site.pieceReg` of `lean/proofs` use strict inequalities at the
+    /// thresholds (`Pos = (t, t + hi/k]`), the Lean oracle's `coneState` gives both kinks to
+    /// the flat pieces (`Pos = (t, t + hi/k)`). The three classifiers differ only on the
+    /// kinks, where the two adjacent affine formulas have the same value; each satisfies
+    /// "the formula of the piece of `x` gives the value at `x`" ([`Site::value_on`] of
+    /// `piece(k, x)` is [`Site::measure`]), which is all the stopping rule "pieces unchanged ⟹
+    /// exact solution" needs. For this classifier that property is checked by the unit test
+    /// `measure_is_the_clamped_soft_threshold` on a grid that contains the kinks; it is not
+    /// machine-checked (the Lean instances are for the other two classifiers).
     ///
     /// [formula: soft-threshold-active-sets]
     #[inline]

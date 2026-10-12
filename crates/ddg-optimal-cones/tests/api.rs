@@ -931,6 +931,158 @@ fn certify_measures_what_is_wrong_with_a_triple() {
     ));
 }
 
+/// The identity behind the certificate (`duality-gap-inexact`), for triples that are **not**
+/// solutions: with `r = L u − µ + Ω`, `φ̂` the clipped adjoint and `w = wE m`,
+///
+/// ```text
+/// duality_gap − complementarity_gap = Σ_{w_i=0} (L φ̂)_i u_i − Σ φ̂_i r_i
+/// ```
+///
+/// and `gap_uncertainty` is the sum of the magnitudes of these terms. Everything on the right
+/// is recomputed here from the assembled Laplacian of `ddg-core`.
+#[test]
+fn certificate_gap_identity_holds_for_arbitrary_triples() {
+    use ddg_core::generators::SplitMix64;
+    let mut rng = SplitMix64::new(2018);
+    let mut with_zero_weight = 0;
+    for case in 0..60u64 {
+        let mesh = random_mesh((case % 5) as usize, 100 + case);
+        let features = random_features(&mesh, 300 + case, FeatureMask::ALL);
+        let problem = features.problem(&mesh);
+        let nv = mesh.mesh.n_vertices();
+        let interior = mesh.interior();
+        if interior.is_empty() {
+            continue;
+        }
+        let mut u = vec![0.0; nv];
+        let mut phi = vec![0.0; nv];
+        let mut mu = vec![0.0; nv];
+        for &v in &interior {
+            u[v] = rng.uniform(-1.0, 1.0);
+            phi[v] = rng.uniform(-1.5, 1.5) * features.lambda.max(0.05);
+            mu[v] = if rng.next_f64() < 0.5 { rng.uniform(-2.0, 2.0) } else { 0.0 };
+        }
+        let Ok(c) = certify(&problem, &u, &phi, &mu) else {
+            // An infeasible closed problem: nothing to certify.
+            continue;
+        };
+        // The right-hand side, from the problem data.
+        let laplacian = cotan_laplacian(&mesh.mesh, &mesh.geometry).unwrap();
+        let omega = angle_defects(&mesh.mesh, &mesh.geometry).unwrap();
+        let mass = lumped_mass_normalized(&mesh.mesh, &mesh.geometry).unwrap();
+        let mut fixed = vec![false; nv];
+        for cone in &features.prescribed_cones {
+            fixed[cone.vertex as usize] = true;
+        }
+        let phi_hat: Vec<f64> = (0..nv)
+            .map(|v| {
+                let cost = features.cone_costs.as_ref().map_or(1.0, |c| c[v]);
+                if fixed[v] || cost == f64::INFINITY || mesh.mesh.is_boundary_vertex(v) {
+                    return phi[v];
+                }
+                let t = features.lambda * cost;
+                let lo = features.lower_bounds.as_ref().map_or(f64::NEG_INFINITY, |b| b[v]);
+                let hi = features.upper_bounds.as_ref().map_or(f64::INFINITY, |b| b[v]);
+                let mut p = phi[v];
+                if hi == f64::INFINITY {
+                    p = p.min(t);
+                }
+                if lo == f64::NEG_INFINITY {
+                    p = p.max(-t);
+                }
+                p
+            })
+            .collect();
+        let mut l_u = vec![0.0; nv];
+        let mut l_phi_hat = vec![0.0; nv];
+        laplacian.mul_vec(&u, &mut l_u).unwrap();
+        laplacian.mul_vec(&phi_hat, &mut l_phi_hat).unwrap();
+        let (mut extra, mut magnitude) = (0.0, 0.0);
+        let mut any_zero = false;
+        for &v in &interior {
+            let r = l_u[v] - mu[v] + omega[v];
+            extra -= phi_hat[v] * r;
+            magnitude += (phi_hat[v] * r).abs();
+            let w = features.distortion_weights.as_ref().map_or(1.0, |w| w[v]) * mass[v];
+            if w == 0.0 {
+                any_zero = true;
+                extra += l_phi_hat[v] * u[v];
+                magnitude += (l_phi_hat[v] * u[v]).abs();
+            }
+        }
+        with_zero_weight += usize::from(any_zero);
+        let scale = 1.0 + c.primal_objective.abs() + c.dual_objective.abs() + magnitude;
+        assert!(
+            (c.duality_gap - c.complementarity_gap - extra).abs() <= 1e-11 * scale,
+            "case {case}: gap {} = complementarity {} + {extra}?",
+            c.duality_gap,
+            c.complementarity_gap
+        );
+        assert!((c.gap_uncertainty - magnitude).abs() <= 1e-11 * scale, "case {case}");
+        assert!((c.duality_gap - c.complementarity_gap).abs() <= c.gap_uncertainty + 1e-11 * scale);
+        // A random triple is far from feasible: the certificate must not hold, and the gap
+        // alone would be misleading (it can have either sign).
+        assert!(c.state_residual > 1e-3 && !c.holds(1e-9), "case {case}");
+    }
+    assert!(with_zero_weight >= 3, "zero distortion weights were exercised {with_zero_weight} times");
+}
+
+/// The certificate in the report belongs to the returned optimum `(log_scale_optimal, adjoint,
+/// measure)` exactly as returned (after the rounding-level clean-up of `µ`), and never to the
+/// cones that extraction made out of it.
+#[test]
+fn certificate_is_of_the_returned_optimum_not_of_the_extracted_cones() {
+    // A closed mesh, where an active vertex absorbs the rounding of Σ Ω and may be zeroed.
+    for (mesh, lambda) in [(ellipsoid(), 0.5), (random_mesh(4, 9), 0.02), (random_mesh(0, 21), 0.001)] {
+        let features = Features::plain(lambda);
+        let problem = features.problem(&mesh);
+        let nv = mesh.mesh.n_vertices();
+        let plain = solve_default(&mesh, &features);
+        let merged = solve(
+            &problem,
+            &SolveOptions {
+                merge_cone_clusters: true,
+                max_merge_cluster_size: nv,
+                cone_threshold: 0.05,
+                ..SolveOptions::default()
+            },
+        )
+        .unwrap();
+        // Extraction changes the cones and their scale factor, and nothing of the optimum.
+        assert_eq!(merged.measure, plain.measure);
+        assert_eq!(merged.log_scale_optimal, plain.log_scale_optimal);
+        assert_eq!(merged.adjoint, plain.adjoint);
+        assert_eq!(merged.objective, plain.objective);
+        assert_eq!(merged.report.certificate, plain.report.certificate);
+        for solution in [&plain, &merged] {
+            let again = certify(
+                &problem,
+                &solution.log_scale_optimal,
+                &solution.adjoint,
+                &solution.measure,
+            )
+            .unwrap();
+            assert_eq!(again, solution.report.certificate, "{}", mesh.name);
+            assert!(again.holds(1e-9));
+            assert_eq!(again.primal_objective, {
+                let c = &solution.report.certificate;
+                c.primal_objective
+            });
+        }
+        if merged.extraction.cones_differ_from_measure {
+            // The extracted cones are deliberately not the optimum: certified as a triple of
+            // their own (with the optimum's adjoint) they do not pass.
+            let mut from_cones = vec![0.0; nv];
+            for cone in &merged.cones {
+                from_cones[cone.vertex as usize] = cone.angle;
+            }
+            let c = certify(&problem, &merged.log_scale, &merged.adjoint, &from_cones).unwrap();
+            assert!(!c.holds(1e-9), "{}", mesh.name);
+            assert!(merged.distortion >= merged.distortion_optimal);
+        }
+    }
+}
+
 #[test]
 fn intrinsic_geometry_is_enough() {
     // The solver never sees positions: a geometry built from edge lengths gives the same result.

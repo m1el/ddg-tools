@@ -262,11 +262,21 @@ pub struct SolveReport {
     pub message: Option<String>,
 }
 
-/// The result of [`solve`].
+/// The result of [`solve`]. It holds two things that must not be confused:
 ///
-/// `measure`, `log_scale_optimal` and `adjoint` are the solution of the canonical problem.
-/// `cones`, `log_scale` and `distortion` describe the cones that were extracted from it; they
-/// differ from the optimum only if [`ExtractionReport::cones_differ_from_measure`] says so.
+/// * **The optimum** of the canonical problem: `measure`, `log_scale_optimal`, `adjoint`,
+///   `objective`, `distortion_optimal`, `cone_cost`. The [`Certificate`] in `report` is
+///   computed for exactly this triple, as returned: after the rounding-level clean-up of the
+///   cone angles ([`SolveReport::bound_correction`], [`SolveReport::zeroed_angles`]) and after
+///   the adjoint constant of a closed mesh was chosen. `certify(problem, &log_scale_optimal,
+///   &adjoint, &measure)` reproduces it bit for bit. The scale factor is not recomputed after
+///   the clean-up, so what the clean-up changed is visible in the certificate's
+///   `state_residual`.
+/// * **The extracted cones**: `cones`, `log_scale`, `distortion`, `total_cone_angle`. They
+///   are the optimum unless [`ExtractionReport::cones_differ_from_measure`] is set (a
+///   threshold dropped small angles, or clusters were merged). Then they are deliberately
+///   *not* optimal, nothing certifies them, and `extraction` lists every difference.
+///
 /// Every per-vertex vector has one entry per mesh vertex and is zero at boundary vertices.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solution {

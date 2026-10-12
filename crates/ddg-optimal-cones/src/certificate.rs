@@ -22,24 +22,60 @@ use crate::problem::{ConeProblem, validate};
 /// ```
 ///
 /// with `u = φ = µ = 0` on the boundary. A triple that satisfies it is a global minimizer
-/// (machine-checked: `optimality-system-sufficient` in `lean/proofs`).
+/// (machine-checked: `optimality-system-sufficient` in `lean/proofs`). The first six fields
+/// measure how far the triple is from satisfying it.
 ///
-/// The **duality gap** makes this quantitative. Let `φ̂` be `φ` clipped to the domain of the
-/// conjugates (`φ̂_i ≤ t_i` where `hi_i = +∞`, `φ̂_i ≥ −t_i` where `lo_i = −∞`), and
-/// `ũ_i = −(L φ̂)_i / w_i`. Then `(ũ, φ̂)` is a feasible point of the dual problem, its value
+/// # The duality gap, and exactly what is computed
+///
+/// The gap makes "how far" quantitative. From the triple the following are formed, with
+/// sums over the unknown (interior, or all on a closed mesh) vertices:
 ///
 /// ```text
-/// D = −½ Σ (L φ̂)_i² / w_i + Σ φ̂_i Ω_i − Σ g_i*(φ̂_i)
+/// r_i  = (L u)_i − µ_i + Ω_i                         the residual of the state equation
+/// φ̂_i  = φ_i clipped to the domain of g_i*:          φ̂_i ≤ t_i if hi_i = +∞,  φ̂_i ≥ −t_i if lo_i = −∞
+/// ũ_i  = −(L φ̂)_i / w_i                              where w_i > 0
+/// J    = ½ Σ w_i u_i² + Σ t_i |µ_i|                   primal_objective
+/// D    = −½ Σ_{w_i>0} (L φ̂)_i² / w_i + Σ φ̂_i Ω_i − Σ g_i*(φ̂_i)        dual_objective
 /// ```
 ///
-/// is a lower bound for the objective of every feasible point, and so
-/// `objective(u, µ) − optimum ≤ primal_objective − dual_objective = duality_gap` provided
-/// `(u, µ)` is feasible, i.e. up to `state_residual` and `bound_violation`
-/// (`duality-gap-certificate` in `lean/proofs`, theorems `duality_gap_certificate` and
-/// `adjoint_gap_certificate`). At a vertex with `w_i = 0` the dual point needs `(L φ̂)_i = 0`,
-/// which cannot be enforced by construction; there the bound holds up to `adjoint_residual`.
+/// (`g_i*(p) = hi_i·max(0, p − t_i) + lo_i·min(0, p + t_i)`, a term with an infinite bound
+/// absent; `a·p` at a vertex whose angle is fixed to `a`, where also `t_i |µ_i|` is zero.) The
+/// dual point `(ũ, φ̂)` is built so that the adjoint equation `L φ̂ = −w ũ` holds **by
+/// construction** and `φ̂` is dual feasible **exactly**; nothing about it relies on the
+/// residuals of the triple. For any numbers `u, φ, µ` whatsoever (zero on the boundary) the
+/// following is an algebraic identity (`duality-gap-inexact`):
 ///
-/// All statements about bounds are for exact arithmetic; the values are computed in `f64`.
+/// ```text
+/// J − D  =  ½ Σ_{w_i>0} w_i (u_i − ũ_i)²  +  Σ (t_i|µ_i| + g_i*(φ̂_i) − φ̂_i µ_i)
+///           +  Σ_{w_i=0} (L φ̂)_i u_i  −  Σ φ̂_i r_i
+/// ```
+///
+/// `duality_gap` is the left side. `complementarity_gap` is the first line of the right side;
+/// each of its summands is nonnegative when `µ` respects its bounds (Fenchel–Young).
+/// `gap_uncertainty` is `Σ_{w_i=0} |(L φ̂)_i u_i| + Σ |φ̂_i r_i|`, a bound for the magnitude of
+/// the second line.
+///
+/// # What this proves
+///
+/// For exact arithmetic and **all `w_i > 0`**: `D ≤ objective(v, ν)` for every feasible pair
+/// `(v, ν)`, whatever the residuals of the triple are (weak duality;
+/// `duality-gap-certificate` in `lean/proofs`, theorem `adjoint_gap_certificate`). So `D` is a
+/// lower bound of the optimal value. If moreover `(u, µ)` is feasible (`r = 0`, no bound
+/// violation), then `objective(u, µ) − optimum ≤ duality_gap = complementarity_gap`.
+///
+/// What it does **not** prove:
+///
+/// * The returned `(u, µ)` satisfies the state equation only up to `state_residual`. A pair
+///   that is not feasible can have an objective *below* the optimum, so `duality_gap` can be
+///   negative; it is `complementarity_gap` (which cannot) shifted by at most
+///   `gap_uncertainty`. Read the gap as "`complementarity_gap`, give or take
+///   `gap_uncertainty`", for a pair that is feasible up to `state_residual` and
+///   `bound_violation`.
+/// * Where `w_i = 0` the dual problem requires `(L φ̂)_i = 0` exactly, which cannot be
+///   enforced by construction. The vertex contributes nothing to `D`, and its violation
+///   `(L φ̂)_i` is in `adjoint_residual` and, times `u_i`, in `gap_uncertainty`. With some
+///   `w_i = 0`, `D` is a lower bound of the optimum only up to that term.
+/// * All of this is about exact arithmetic; the values are computed in `f64`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Certificate {
     /// `max |(L u)_i − µ_i + Ω_i|` over interior vertices (and `|u_i|` over boundary vertices).
@@ -58,21 +94,28 @@ pub struct Certificate {
     /// Closed meshes: `|Σ µ_i − Σ Ω_i|`, the violation of Gauss–Bonnet. Zero on meshes with
     /// boundary.
     pub gauss_bonnet_residual: f64,
-    /// The objective `½ Σ wE m u² + λ Σ wR |µ|` of `(u, µ)`.
+    /// The objective `J = ½ Σ wE m u² + λ Σ wR |µ|` of `(u, µ)`.
     pub primal_objective: f64,
-    /// The dual value `D` of `(ũ, φ̂)`: a lower bound of the optimal objective.
+    /// The dual value `D` of `(ũ, φ̂)`: a lower bound of the optimal objective (exact
+    /// arithmetic, all `wE_i m_i > 0`).
     pub dual_objective: f64,
-    /// `primal_objective − dual_objective`: the bound on the suboptimality of `(u, µ)`.
+    /// `primal_objective − dual_objective`. A bound on the suboptimality of `(u, µ)` if that
+    /// pair is exactly feasible; otherwise see `gap_uncertainty`.
     pub duality_gap: f64,
-    /// The same gap evaluated without cancellation, as the sum of the nonnegative terms
-    /// `½ Σ w_i (u_i − ũ_i)² + Σ (g_i(µ_i) + g_i*(φ̂_i) − φ̂_i µ_i)`. It differs from
-    /// `duality_gap` by `Σ φ̂_i · (state residual)_i` and by rounding.
+    /// `½ Σ_{w_i>0} w_i (u_i − ũ_i)² + Σ (t_i|µ_i| + g_i*(φ̂_i) − φ̂_i µ_i)`: the gap as a sum
+    /// of terms that are nonnegative when `µ` respects its bounds. It differs from
+    /// `duality_gap` by at most `gap_uncertainty` (and rounding).
     pub complementarity_gap: f64,
+    /// `Σ_{w_i=0} |(L φ̂)_i u_i| + Σ |φ̂_i r_i|` with `r` the residual of the state equation:
+    /// how much of `duality_gap` is due to the triple not satisfying the state equation
+    /// exactly (and to dual infeasibility at vertices of zero distortion weight) rather than
+    /// to suboptimality.
+    pub gap_uncertainty: f64,
 }
 
 impl Certificate {
-    /// Whether every residual is at most `tolerance` and both forms of the gap are at most
-    /// `tolerance · max(1, |primal_objective|)`.
+    /// Whether every residual is at most `tolerance` and both forms of the gap and the gap
+    /// uncertainty are at most `tolerance · max(1, |primal_objective|)`.
     pub fn holds(&self, tolerance: f64) -> bool {
         let gap_tolerance = tolerance * self.primal_objective.abs().max(1.0);
         // Written so that a NaN fails.
@@ -84,6 +127,7 @@ impl Certificate {
             && self.gauss_bonnet_residual <= tolerance
             && self.duality_gap.abs() <= gap_tolerance
             && self.complementarity_gap.abs() <= gap_tolerance
+            && self.gap_uncertainty <= gap_tolerance
     }
 }
 
@@ -127,6 +171,7 @@ fn check_len(what: &'static str, x: &[f64], n: usize) -> Result<(), ConeError> {
 ///
 /// [formula: optimality-system-sufficient]
 /// [formula: duality-gap-certificate]
+/// [formula: duality-gap-inexact]
 /// [formula: cone-fixed-point-bounded]
 pub fn certify(
     problem: &ConeProblem<'_>,
@@ -173,6 +218,7 @@ pub fn certify(
         dual_objective: 0.0,
         duality_gap: 0.0,
         complementarity_gap: 0.0,
+        gap_uncertainty: 0.0,
     };
     let mut distortion = 0.0;
     let mut cone_cost = 0.0;
@@ -192,7 +238,9 @@ pub fn certify(
             continue;
         }
         let w = data.w_e[v] * mass[v];
-        c.state_residual = c.state_residual.max((l_u[v] - mu[v] + omega[v]).abs());
+        let state = l_u[v] - mu[v] + omega[v];
+        c.state_residual = c.state_residual.max(state.abs());
+        c.gap_uncertainty += (phi_hat[v] * state).abs();
         c.adjoint_residual = c.adjoint_residual.max((l_phi[v] + w * u[v]).abs());
         c.cone_residual = c
             .cone_residual
@@ -208,6 +256,8 @@ pub fn certify(
             dual_quadratic += l_phi_hat[v] * l_phi_hat[v] / w;
             let u_tilde = -l_phi_hat[v] / w;
             mismatch += w * (u[v] - u_tilde) * (u[v] - u_tilde);
+        } else {
+            c.gap_uncertainty += (l_phi_hat[v] * u[v]).abs();
         }
         dual_linear += phi_hat[v] * omega[v];
         let conjugate = site.conjugate(phi_hat[v]);
