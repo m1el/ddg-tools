@@ -367,6 +367,8 @@ impl<'d> SaddleSolver<'d> {
 /// the smallest relative perturbation of the entries of `K` and `b` for which `x` is an exact
 /// solution. Unlike a residual norm it does not depend on how the equations are scaled.
 /// `residual` receives `b − K x`. Returns NaN if the residual is not finite.
+///
+/// [formula: componentwise-backward-error]
 fn backward_error(k: &SparseMatrix, x: &[f64], b: &[f64], residual: &mut [f64]) -> f64 {
     residual.copy_from_slice(b);
     let mut magnitude: Vec<f64> = b.iter().map(|v| v.abs()).collect();

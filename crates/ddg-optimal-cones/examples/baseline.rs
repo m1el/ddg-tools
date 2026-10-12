@@ -9,16 +9,17 @@
 //!   --gammas a,b,c      regularization schedule (default: the solver's default)
 //!   --threads N         size of the thread pool (default 1: sequential)
 //!   --lu                force LU for the Newton systems
-//!   --merge             merge cone clusters
+//!   --merge             merge cone clusters (without a limit on the cluster size)
+//!   --repeat N          solve N times and report the fastest (default 1)
 //!   --stages            print one line per stage
 //! ```
 //!
 //! Without mesh names every `*.obj` of the directory is run. One line per mesh is printed:
-//! size, status, Newton iterations of Stage I and Stage II, safeguard rounds, factorizations,
-//! solves, wall times, and the certificate.
+//! size, status, wall times (total, numeric factorization, triangular solves, symbolic
+//! analysis, set-up, rest), Newton iterations of Stage I and Stage II, safeguard rounds,
+//! factorizations, solves, cones before and after merging, and the certificate.
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
@@ -34,6 +35,7 @@ fn main() {
     let mut options = SolveOptions::default();
     let mut threads = 1usize;
     let mut print_stages = false;
+    let mut repeat = 1usize;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = |what: &str| {
@@ -59,7 +61,11 @@ fn main() {
             }
             "--threads" => threads = value("--threads").parse().expect("--threads: an integer"),
             "--lu" => options.linear_solver = LinearSolver::SaddleLu,
-            "--merge" => options.merge_cone_clusters = true,
+            "--merge" => {
+                options.merge_cone_clusters = true;
+                options.max_merge_cluster_size = usize::MAX;
+            }
+            "--repeat" => repeat = value("--repeat").parse().expect("--repeat: an integer"),
             "--stages" => print_stages = true,
             name => names.push(name.to_string()),
         }
@@ -87,33 +93,42 @@ fn main() {
     }
 
     println!(
-        "lambda = {lambda}, metric = {:?}, gammas = {:?}, threads = {threads}",
-        options.regularization_metric, options.regularization
+        "lambda = {lambda}, metric = {:?}, gammas = {:?}, threads = {threads}, best of {repeat}, \
+         merging {}",
+        options.regularization_metric,
+        options.regularization,
+        if options.merge_cone_clusters {
+            "on (no size limit)"
+        } else {
+            "off"
+        }
     );
     println!(
-        "{:<20} {:>7} {:>7} {:>13} {:>4} {:>4} {:>3} {:>5} {:>3} {:>6} {:>7} {:>7} {:>7} {:>6} {:>9} {:>10} {:>8} {:>8} {:>8}",
+        "{:<19} {:>6} {:>6} {:>9} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} | {:>7} {:>7}  Newton steps per regularized problem",
         "mesh",
         "V",
         "F",
         "status",
+        "total",
+        "factor",
+        "solves",
+        "symbol",
+        "setup",
+        "rest",
         "itI",
         "itII",
         "sg",
-        "ldlt",
-        "lu",
+        "fact",
         "solves",
-        "load[s]",
-        "solve[s]",
-        "fact[s]",
+        "refi",
         "cones",
-        "angle/pi",
-        "distortion",
+        "clus",
+        "merge8",
+        "merged",
         "state",
-        "cone",
         "gap"
     );
     for name in &names {
-        let start = Instant::now();
         let obj = read_obj(dir.join(format!("{name}.obj"))).unwrap_or_else(|e| panic!("{e}"));
         let faces = obj
             .triangles()
@@ -122,38 +137,88 @@ fn main() {
             TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
         let geometry = Geometry::from_positions(&mesh, &obj.positions)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let load = start.elapsed().as_secs_f64();
         let problem = ConeProblem::new(&mesh, &geometry, lambda);
-        let solution = match solve(&problem, &options) {
-            Ok(s) => s,
-            Err(e) => {
-                println!("{name:<20} ERROR {e}");
-                continue;
+        // The fastest of the runs; everything but the times is the same in each.
+        let mut best: Option<ddg_optimal_cones::Solution> = None;
+        let mut failed = false;
+        for _ in 0..repeat {
+            match solve(&problem, &options) {
+                Ok(s) => {
+                    if best
+                        .as_ref()
+                        .is_none_or(|b| s.report.timings.total < b.report.timings.total)
+                    {
+                        best = Some(s);
+                    }
+                }
+                Err(e) => {
+                    println!("{name:<19} ERROR {e}");
+                    failed = true;
+                    break;
+                }
             }
-        };
+        }
+        if failed {
+            continue;
+        }
+        let solution = best.expect("at least one run");
         let r = &solution.report;
         let c = &r.certificate;
+        let l = &r.linear_solver;
+        let (factor, solves, symbolic) = (
+            l.factorization_time.as_secs_f64(),
+            l.solve_time.as_secs_f64(),
+            l.symbolic_time.as_secs_f64(),
+        );
+        let raw = solution.measure.iter().filter(|m| **m != 0.0).count();
+        // What the default limit of 8 cones per cluster would have merged.
+        let merged_small = raw
+            - solution
+                .extraction
+                .merged
+                .iter()
+                .filter(|cluster| cluster.members.len() <= 8)
+                .map(|cluster| cluster.members.len() - usize::from(cluster.cone.is_some()))
+                .sum::<usize>();
+        let per_stage: Vec<String> = r
+            .stages
+            .iter()
+            .filter(|s| !s.safeguard && s.kind != ddg_optimal_cones::StageKind::Exact)
+            .map(|s| s.newton_iterations.to_string())
+            .collect();
         println!(
-            "{:<20} {:>7} {:>7} {:>13} {:>4} {:>4} {:>3} {:>5} {:>3} {:>6} {:>7.3} {:>7.3} {:>7.3} {:>6} {:>9.4} {:>10.4e} {:>8.1e} {:>8.1e} {:>8.1e}",
+            "{:<19} {:>6} {:>6} {:>9} | {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.3} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} | {:>7.0e} {:>7.0e}  {}",
             name,
             mesh.n_vertices(),
             mesh.n_faces(),
             format!("{:?}", r.status),
+            r.timings.total,
+            factor,
+            solves,
+            symbolic,
+            r.timings.setup,
+            r.timings.total - factor - solves - symbolic - r.timings.setup,
             r.regularized_iterations,
             r.exact_iterations,
             r.safeguard_rounds,
-            r.linear_solver.ldlt_factorizations,
-            r.linear_solver.lu_factorizations,
-            r.linear_solver.solves,
-            load,
-            r.timings.total,
-            r.linear_solver.factorization_time.as_secs_f64(),
-            solution.cones.len(),
-            solution.total_cone_angle / std::f64::consts::PI,
-            solution.distortion,
+            l.ldlt_factorizations + l.lu_factorizations,
+            l.solves,
+            l.refinement_steps,
+            raw,
+            solution.extraction.n_clusters,
+            if options.merge_cone_clusters {
+                merged_small.to_string()
+            } else {
+                "-".to_string()
+            },
+            if options.merge_cone_clusters {
+                solution.cones.len().to_string()
+            } else {
+                "-".to_string()
+            },
             c.state_residual,
-            c.cone_residual,
             c.duality_gap,
+            per_stage.join(",")
         );
         if print_stages {
             for s in &r.stages {
@@ -171,9 +236,19 @@ fn main() {
                 println!("    message: {m}");
             }
             println!(
-                "    certificate: {c:?}\n    extraction: clusters {} dropped {}",
-                solution.extraction.n_clusters, solution.extraction.n_dropped
+                "    timings: {:?}\n    certificate: {c:?}\n    extraction: clusters {} dropped {}",
+                r.timings, solution.extraction.n_clusters, solution.extraction.n_dropped
             );
         }
     }
+    println!(
+        "\ntimes in seconds, wall clock: total = everything inside solve(); factor = numeric \
+         factorizations of the Newton matrix; solves = triangular solves and refinement;\nsymbol = \
+         symbolic analysis and ordering; setup = validation and assembly of the operators; rest = \
+         Newton bookkeeping, line searches, certificate, extraction.\nitI / itII: Newton steps of \
+         Stage I (all regularized problems) and Stage II; sg: safeguard rounds; fact: numeric \
+         factorizations; solves: triangular solve pairs,\nof which refi are refinement steps. \
+         cones: cones of the optimal measure; clus: edge-connected clusters; merge8 / merged: \
+         cones after merging the clusters of at most 8 cones / all clusters."
+    );
 }

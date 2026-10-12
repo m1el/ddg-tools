@@ -532,8 +532,7 @@ fn every_dataset_mesh_is_solved_at_the_default_lambda() {
         // A certified optimum cannot be beaten: the published cones, evaluated in the same
         // problem with the same λ, have an objective that is not smaller. (Meshes with
         // boundary only: on a closed mesh the file's rounded angles do not sum to 2πχ, so
-        // they are not feasible. camelshotnoise is left out as well: with its spikes the
-        // distortion of the file's cones is about 10⁵.)
+        // they are not feasible. cow00001 with its 13 836 cones is left out.)
         if !data.mesh.boundary_loops().is_empty() && data.cones.len() < 1000 {
             let file = evaluate_cones(
                 &ConeProblem::new(&data.mesh, &data.geometry, 0.5),
@@ -603,7 +602,10 @@ fn published_angles_minimize_the_distortion_at_the_published_positions() {
     if !solves_enabled("published_angles_minimize_the_distortion_at_the_published_positions") {
         return;
     }
-    println!("{:<12} {:>5} {:>12} {:>14} {:>14}", "mesh", "cones", "max |d|", "max |phi| S", "max |phi| N");
+    println!(
+        "{:<12} {:>5} {:>12} {:>14} {:>14}",
+        "mesh", "cones", "max |d|", "max |phi| S", "max |phi| N"
+    );
     for (name, bound) in [
         ("bump", 5e-4),
         ("face", 2e-4),
@@ -625,13 +627,18 @@ fn published_angles_minimize_the_distortion_at_the_published_positions() {
         )
         .unwrap();
         let closed = data.mesh.boundary_loops().is_empty();
-        let at_cones: Vec<f64> = vertices.iter().map(|&v| evaluation.adjoint[v as usize]).collect();
+        let at_cones: Vec<f64> = vertices
+            .iter()
+            .map(|&v| evaluation.adjoint[v as usize])
+            .collect();
         let offset = if closed {
             at_cones.iter().sum::<f64>() / at_cones.len() as f64
         } else {
             0.0
         };
-        let on_cones = at_cones.iter().fold(0.0f64, |m, p| m.max((p - offset).abs()));
+        let on_cones = at_cones
+            .iter()
+            .fold(0.0f64, |m, p| m.max((p - offset).abs()));
         let mut is_cone = vec![false; data.mesh.n_vertices()];
         for &v in &vertices {
             is_cone[v as usize] = true;
@@ -649,7 +656,10 @@ fn published_angles_minimize_the_distortion_at_the_published_positions() {
             elsewhere
         );
         assert!(worst < bound, "{name}: {worst}");
-        assert!(on_cones < 0.05 * elsewhere, "{name}: {on_cones} vs {elsewhere}");
+        assert!(
+            on_cones < 0.05 * elsewhere,
+            "{name}: {on_cones} vs {elsewhere}"
+        );
     }
     // body: the same holds for six of its ten cones; the other four are off by up to 0.09.
     let data = load(&dir, "body");
@@ -661,7 +671,10 @@ fn published_angles_minimize_the_distortion_at_the_published_positions() {
         .filter(|c| (refit.measure[c.vertex as usize] - c.angle).abs() < 6e-3)
         .count();
     let worst = worst_difference(&refit, &data.cones);
-    println!("{:<12} {:>5} {:>12.2e}   ({close} of 10 within 6e-3)", "body", 10, worst);
+    println!(
+        "{:<12} {:>5} {:>12.2e}   ({close} of 10 within 6e-3)",
+        "body", 10, worst
+    );
     assert_eq!(close, 6);
     assert!(worst < 0.1);
 }
@@ -685,12 +698,15 @@ fn double(data: &Dataset) -> (TriMesh, Geometry, Vec<u32>) {
         }
     }
     let mut faces = mesh.faces().to_vec();
-    faces.extend(
-        mesh.faces()
-            .iter()
-            .map(|f| [copy[f[0] as usize], copy[f[2] as usize], copy[f[1] as usize]]),
-    );
-    let doubled = TriMesh::new(next as usize, faces).unwrap_or_else(|e| panic!("{}: {e}", data.name));
+    faces.extend(mesh.faces().iter().map(|f| {
+        [
+            copy[f[0] as usize],
+            copy[f[2] as usize],
+            copy[f[1] as usize],
+        ]
+    }));
+    let doubled =
+        TriMesh::new(next as usize, faces).unwrap_or_else(|e| panic!("{}: {e}", data.name));
     let mut original = vec![0u32; next as usize];
     for v in 0..nv {
         original[v] = v as u32;
@@ -721,8 +737,19 @@ fn half_of_the_published_files_used_optimized_boundary_values() {
     if !solves_enabled("half_of_the_published_files_used_optimized_boundary_values") {
         return;
     }
-    println!("{:<10} {:>5} {:>16} {:>16}", "mesh", "cones", "free boundary", "u = 0");
-    for name in ["cow1", "cow75e-2", "cow5e-1", "camel", "camel_noise1", "camelbad", "rhino"] {
+    println!(
+        "{:<10} {:>5} {:>16} {:>16}",
+        "mesh", "cones", "free boundary", "u = 0"
+    );
+    for name in [
+        "cow1",
+        "cow75e-2",
+        "cow5e-1",
+        "camel",
+        "camel_noise1",
+        "camelbad",
+        "rhino",
+    ] {
         let data = load(&dir, name);
         let nv = data.mesh.n_vertices();
         let (doubled, geometry, copy) = double(&data);
@@ -733,13 +760,22 @@ fn half_of_the_published_files_used_optimized_boundary_values() {
             sites.push(c.vertex);
             sites.push(copy[c.vertex as usize]);
         }
-        let free = worst_difference(&least_distortion_angles(&doubled, &geometry, &sites), &data.cones);
+        let free = worst_difference(
+            &least_distortion_angles(&doubled, &geometry, &sites),
+            &data.cones,
+        );
         let vertices: Vec<u32> = data.cones.iter().map(|c| c.vertex).collect();
         let fixed = worst_difference(
             &least_distortion_angles(&data.mesh, &data.geometry, &vertices),
             &data.cones,
         );
-        println!("{:<10} {:>5} {:>16.2e} {:>16.2e}", name, data.cones.len(), free, fixed);
+        println!(
+            "{:<10} {:>5} {:>16.2e} {:>16.2e}",
+            name,
+            data.cones.len(),
+            free,
+            fixed
+        );
         assert!(free < 1.2e-2, "{name}: {free}");
         assert!(fixed > 0.2, "{name}: {fixed}");
     }
@@ -784,8 +820,10 @@ fn bump_is_reproduced_by_penalty_merging_and_reoptimized_angles() {
     // Re-optimized angles at the merged positions: the file.
     let refit = least_distortion_angles(&data.mesh, &data.geometry, &ours);
     let worst = worst_difference(&refit, &data.cones);
-    println!("  total angle: penalized and merged {shrunk:.4}, re-optimized {:.4}, file {published:.4}; largest angle difference {worst:.2e}",
-        refit.measure.iter().sum::<f64>());
+    println!(
+        "  total angle: penalized and merged {shrunk:.4}, re-optimized {:.4}, file {published:.4}; largest angle difference {worst:.2e}",
+        refit.measure.iter().sum::<f64>()
+    );
     assert!(worst < 5e-4, "{worst}");
 }
 
@@ -821,7 +859,9 @@ fn published_positions_that_are_supports_of_the_canonical_optimum() {
         // Same positions, different angles: ours carry the penalty, the file's do not.
         let total_ours: f64 = solution.cones.iter().map(|c| c.angle.abs()).sum();
         let total_file: f64 = data.cones.iter().map(|c| c.angle.abs()).sum();
-        assert!(total_file > total_ours + 1.0, "{name}: {total_ours} vs {total_file}");
+        assert!(
+            total_file > total_ours + 1.0,
+            "{name}: {total_ours} vs {total_file}"
+        );
     }
 }
-

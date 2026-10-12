@@ -139,8 +139,25 @@ fn main() {
 fn facts(dir: &Path, names: &[String]) {
     println!(
         "{:<20} {:>6} {:>6} {:>3} {:>5} {:>3} {:>8} {:>9} {:>9} {:>5} {:>4} {:>4} {:>9} {:>9} | {:>8} {:>8} {:>8} {:>8} {:>8}",
-        "mesh", "V", "F", "bl", "bE", "chi", "area", "sum Omega", "sum k", "cones", "pos", "neg",
-        "sum mu", "sum |mu|", "uB min", "uB max", "u mean", "E", "E var"
+        "mesh",
+        "V",
+        "F",
+        "bl",
+        "bE",
+        "chi",
+        "area",
+        "sum Omega",
+        "sum k",
+        "cones",
+        "pos",
+        "neg",
+        "sum mu",
+        "sum |mu|",
+        "uB min",
+        "uB max",
+        "u mean",
+        "E",
+        "E var"
     );
     for name in names {
         let data = load(dir, name);
@@ -215,7 +232,10 @@ fn facts(dir: &Path, names: &[String]) {
             energy,
             energy - 0.5 * mean * mean,
             if flipped > 0 || finite.len() < nf {
-                format!("   ({flipped} flipped, {} degenerate UV triangles)", nf - finite.len())
+                format!(
+                    "   ({flipped} flipped, {} degenerate UV triangles)",
+                    nf - finite.len()
+                )
             } else {
                 String::new()
             }
@@ -240,7 +260,10 @@ fn iterate(dir: &Path, names: &[String], lambdas: &[f64]) {
         let data = load(dir, name);
         let nv = data.mesh.n_vertices();
         let area = data.geometry.total_area();
-        println!("{name}: file has {} cones; area {area:.4}", data.cones.len());
+        println!(
+            "{name}: file has {} cones; area {area:.4}",
+            data.cones.len()
+        );
         for &lambda in lambdas {
             let mut sites: Vec<u32> = Vec::new();
             let mut history = Vec::new();
@@ -458,7 +481,10 @@ impl Model {
         let saddle = SparseMatrix::from_triplets(n + m, n + m, &triplets).unwrap();
         let mut phi = vec![0.0; n];
         for &(i, value) in pinned {
-            assert!(local[i] == u32::MAX, "a vertex is both prescribed and pinned");
+            assert!(
+                local[i] == u32::MAX,
+                "a vertex is both prescribed and pinned"
+            );
             phi[i] = value;
         }
         let mut rhs = vec![0.0; n + m];
@@ -510,7 +536,11 @@ impl Model {
     }
 
     fn distortion(&self, u: &[f64]) -> f64 {
-        0.5 * u.iter().zip(&self.mass).map(|(u, m)| m * u * u).sum::<f64>()
+        0.5 * u
+            .iter()
+            .zip(&self.mass)
+            .map(|(u, m)| m * u * u)
+            .sum::<f64>()
     }
 }
 
@@ -549,13 +579,21 @@ fn refit_one(data: &Dataset, boundary: Boundary) -> Refit {
         .collect();
     // λ = 0 on the support: the cones are free sites.
     let (u, phi, l_u) = model.solve(&plain, &[], false);
-    let angles: Vec<f64> = cone_index.iter().map(|&i| model.kappa[i] + l_u[i]).collect();
+    let angles: Vec<f64> = cone_index
+        .iter()
+        .map(|&i| model.kappa[i] + l_u[i])
+        .collect();
     let closed = data.mesh.boundary_loops().is_empty();
     let file = if closed {
         None
     } else {
         let mut with_cones = plain.clone();
-        with_cones.extend(cone_index.iter().zip(&data.cones).map(|(&i, c)| (i, c.angle)));
+        with_cones.extend(
+            cone_index
+                .iter()
+                .zip(&data.cones)
+                .map(|(&i, c)| (i, c.angle)),
+        );
         let (u_file, phi_file, _) = model.solve(&with_cones, &[], false);
         Some((
             cone_index.iter().map(|&i| phi_file[i]).collect(),
@@ -602,7 +640,10 @@ fn refit_one(data: &Dataset, boundary: Boundary) -> Refit {
     let lower_vertex = lower_at.and_then(|i| {
         let vertex = (0..data.mesh.n_vertices()).find(|&v| model.index[v] == i)? as u32;
         let probe = [Cone { vertex, angle: 0.0 }];
-        Some((vertex, ring_distances(&data.mesh, &probe, &data.cones, 3)[0]))
+        Some((
+            vertex,
+            ring_distances(&data.mesh, &probe, &data.cones, 3)[0],
+        ))
     });
     Refit {
         angles,
@@ -634,7 +675,10 @@ fn refit(dir: &Path, names: &[String]) {
     for name in names {
         let data = load(dir, name);
         if data.cones.len() > 500 {
-            println!("{name:<20} {:>5} skipped (the cones cover the mesh)", data.cones.len());
+            println!(
+                "{name:<20} {:>5} skipped (the cones cover the mesh)",
+                data.cones.len()
+            );
             continue;
         }
         let closed = data.mesh.boundary_loops().is_empty();
@@ -654,9 +698,8 @@ fn refit(dir: &Path, names: &[String]) {
                 .map(|(a, c)| a - c.angle)
                 .collect();
             let worst = differences.iter().fold(0.0f64, |m, d| m.max(d.abs()));
-            let rms = (differences.iter().map(|d| d * d).sum::<f64>()
-                / differences.len() as f64)
-                .sqrt();
+            let rms =
+                (differences.iter().map(|d| d * d).sum::<f64>() / differences.len() as f64).sqrt();
             let (phi_s, e_file) = match &r.file {
                 Some((phi, e)) => (
                     format!("{:>10.3e}", phi.iter().fold(0.0f64, |m, p| m.max(p.abs()))),
@@ -765,7 +808,9 @@ fn ring_distances(mesh: &TriMesh, file: &[Cone], ours: &[Cone], cap: usize) -> V
         }
         frontier = next;
     }
-    file.iter().map(|c| distance[c.vertex as usize].min(cap + 1)).collect()
+    file.iter()
+        .map(|c| distance[c.vertex as usize].min(cap + 1))
+        .collect()
 }
 
 /// The mesh glued to a mirror copy of itself along its boundary: a closed mesh. Vertex `v` of
@@ -798,11 +843,13 @@ fn double(data: &Dataset) -> Option<(TriMesh, Geometry)> {
         }
     }
     let mut faces = mesh.faces().to_vec();
-    faces.extend(
-        mesh.faces()
-            .iter()
-            .map(|f| [copy[f[0] as usize], copy[f[2] as usize], copy[f[1] as usize]]),
-    );
+    faces.extend(mesh.faces().iter().map(|f| {
+        [
+            copy[f[0] as usize],
+            copy[f[2] as usize],
+            copy[f[1] as usize],
+        ]
+    }));
     let doubled = TriMesh::new(next as usize, faces).expect("the double is a valid mesh");
     // Intrinsic geometry: every edge of the double has the length of the edge it copies.
     let mut original = vec![0u32; next as usize];
@@ -922,8 +969,14 @@ fn refit_positions(data: &Dataset, boundary: Boundary, positions: &[Cone]) -> (V
 }
 
 fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
-    let default: Vec<f64> = (0..=12).map(|k| 10f64.powf(-3.0 + 0.25 * k as f64)).collect();
-    let lambdas = if lambdas.is_empty() { &default[..] } else { lambdas };
+    let default: Vec<f64> = (0..=12)
+        .map(|k| 10f64.powf(-3.0 + 0.25 * k as f64))
+        .collect();
+    let lambdas = if lambdas.is_empty() {
+        &default[..]
+    } else {
+        lambdas
+    };
     for name in names {
         let data = load(dir, name);
         let nv = data.mesh.n_vertices();
@@ -946,9 +999,23 @@ fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
         );
         println!(
             "  {:>10} {:>10} {:>5} {:>9} {:>28} | {:>6} {:>4} {:>5} {:>9} {:>9} {:>9} | {:>6} {:>4} {:>5} {:>9} {:>9} {:>9}",
-            "lambda", "lambda*A", "raw", "sum |mu|", "E   | common   max |d|",
-            "merged", "same", "ring1", "sum refit", "E refit", "max |d|",
-            "signed", "same", "ring1", "sum refit", "E refit", "max |d|"
+            "lambda",
+            "lambda*A",
+            "raw",
+            "sum |mu|",
+            "E   | common   max |d|",
+            "merged",
+            "same",
+            "ring1",
+            "sum refit",
+            "E refit",
+            "max |d|",
+            "signed",
+            "same",
+            "ring1",
+            "sum refit",
+            "E refit",
+            "max |d|"
         );
         println!(
             "  {:>238}",
@@ -987,7 +1054,10 @@ fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
             }
             .expect("valid problem");
             if solution.report.status != Status::Converged {
-                println!("  {lambda:>10.4e} not converged: {:?}", solution.report.message);
+                println!(
+                    "  {lambda:>10.4e} not converged: {:?}",
+                    solution.report.message
+                );
                 continue;
             }
             // The measure on the interior vertices of the original mesh.
@@ -1030,7 +1100,8 @@ fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
                 let merged = merge(&data, &mu, by_sign);
                 let distances = ring_distances(&data.mesh, &data.cones, &merged, 1);
                 let count = |d: usize| distances.iter().filter(|&&x| x <= d).count();
-                let refitted = if merged.len() <= 3 * data.cones.len().max(4) && !merged.is_empty() {
+                let refitted = if merged.len() <= 3 * data.cones.len().max(4) && !merged.is_empty()
+                {
                     let (cones, distortion) = refit_positions(&data, boundary, &merged);
                     let ours: BTreeMap<u32, f64> =
                         cones.iter().map(|c| (c.vertex, c.angle)).collect();
@@ -1067,7 +1138,9 @@ fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
                         (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f64>().sqrt()
                     };
                     let nearest = (0..data.cones.len())
-                        .min_by(|&a, &b| distance(&data.cones[a]).total_cmp(&distance(&data.cones[b])))
+                        .min_by(|&a, &b| {
+                            distance(&data.cones[a]).total_cmp(&distance(&data.cones[b]))
+                        })
                         .expect("the file has cones");
                     sums[nearest] += mu[v];
                     farthest = farthest.max(distance(&data.cones[nearest]));
@@ -1095,8 +1168,7 @@ fn sweep(dir: &Path, names: &[String], lambdas: &[f64], boundary: Boundary) {
                 }
                 let merged = merge(&data, &refitted, false);
                 let distances = ring_distances(&data.mesh, &data.cones, &merged, 1);
-                let ours: BTreeMap<u32, f64> =
-                    merged.iter().map(|c| (c.vertex, c.angle)).collect();
+                let ours: BTreeMap<u32, f64> = merged.iter().map(|c| (c.vertex, c.angle)).collect();
                 let worst = data
                     .cones
                     .iter()

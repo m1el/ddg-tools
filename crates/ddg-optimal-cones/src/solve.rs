@@ -326,6 +326,11 @@ const MIN_PROXIMAL_STIFFNESS: f64 = 1e2;
 /// at least 1) is a fixed point: its cone angles solve the exact problem.
 const FIXED_POINT_TOLERANCE: f64 = 1e-10;
 
+/// The stiffness `k_i` of a regularized problem, i.e. the slope of its cone angle
+/// `µ_i = clamp(k_i · P_{t_i}(φ_i))` in the adjoint: `m_i/γ` for the mass metric, `1/γ` for the
+/// unweighted one, at most `cap`.
+///
+/// [formula: regularized-cone-update]
 fn stiffness(d: &Discrete, metric: RegularizationMetric, gamma: f64, cap: f64) -> Vec<f64> {
     d.mass
         .iter()
@@ -422,9 +427,17 @@ fn failed_stage(kind: StageKind, safeguard: bool, start: Instant) -> StageReport
 /// optimality [`Certificate`], and [`SolveReport::status`] is [`Status::Converged`] only if the
 /// certificate holds.
 ///
+/// The safeguard rests on one fact: a minimizer `(u, µ)` of
+/// `objective + Σ (µ_i − µ̄_i)² / (2 k_i)` with `µ = µ̄` is a minimizer of the objective itself
+/// (the penalty and its derivative vanish there), and the iteration `µ̄ ← µ` decreases the
+/// objective. It is used only to reach a point; whether that point is optimal is decided by the
+/// certificate.
+///
 /// # Errors
 /// [`ConeError`] if the problem or the options are invalid, or the problem is infeasible. A
 /// solve that does not converge is **not** an error; check `report.status`.
+///
+/// [formula: proximal-fixed-point]
 pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError> {
     let total_start = Instant::now();
     options.validate()?;

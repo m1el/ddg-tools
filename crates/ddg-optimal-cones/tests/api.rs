@@ -8,7 +8,9 @@ mod common;
 
 use std::f64::consts::PI;
 
-use common::{Features, TestMesh, max_abs_diff, random_features, random_mesh, summary, FeatureMask};
+use common::{
+    FeatureMask, Features, TestMesh, max_abs_diff, random_features, random_mesh, summary,
+};
 use ddg_core::generators::{bumpy_grid_disk, icosphere, torus};
 use ddg_core::operators::{angle_defects, cotan_laplacian, lumped_mass_normalized};
 use ddg_core::{Geometry, TriMesh};
@@ -36,7 +38,12 @@ fn ellipsoid() -> TestMesh {
 
 fn solve_default(mesh: &TestMesh, f: &Features) -> ddg_optimal_cones::Solution {
     let solution = solve(&f.problem(mesh), &SolveOptions::default()).unwrap();
-    assert_eq!(solution.report.status, Status::Converged, "{}", summary(&solution));
+    assert_eq!(
+        solution.report.status,
+        Status::Converged,
+        "{}",
+        summary(&solution)
+    );
     solution
 }
 
@@ -69,7 +76,10 @@ fn invalid_input_is_reported_not_panicked() {
     );
     assert_eq!(
         e.to_string(),
-        format!("distortion_weights has {} entries, but the mesh has {nv} vertices", nv - 1)
+        format!(
+            "distortion_weights has {} entries, but the mesh has {nv} vertices",
+            nv - 1
+        )
     );
     for bad in [-0.5, f64::NAN, f64::INFINITY] {
         let mut w = vec![1.0; nv];
@@ -90,7 +100,10 @@ fn invalid_input_is_reported_not_panicked() {
             cone_costs: Some(w),
             ..Features::plain(0.5)
         });
-        assert!(matches!(e, ConeError::InvalidConeCost { vertex: 4, .. }), "{e}");
+        assert!(
+            matches!(e, ConeError::InvalidConeCost { vertex: 4, .. }),
+            "{e}"
+        );
     }
     // Bounds must enclose zero.
     for (lower, upper) in [(0.1, 1.0), (-1.0, -0.1), (f64::NAN, 1.0), (-1.0, f64::NAN)] {
@@ -103,7 +116,10 @@ fn invalid_input_is_reported_not_panicked() {
             upper_bounds: Some(hi),
             ..Features::plain(0.5)
         });
-        assert!(matches!(e, ConeError::InvalidBounds { vertex: 5, .. }), "{e}");
+        assert!(
+            matches!(e, ConeError::InvalidBounds { vertex: 5, .. }),
+            "{e}"
+        );
     }
     // Prescribed cones.
     let prescribed = |cones: Vec<Cone>| {
@@ -137,7 +153,10 @@ fn invalid_input_is_reported_not_panicked() {
         PrescribedConeIssue::DuplicateVertex
     );
     let message = prescribed(vec![cone(boundary, 1.0)]).to_string();
-    assert!(message.contains("boundary") && message.contains(&boundary.to_string()), "{message}");
+    assert!(
+        message.contains("boundary") && message.contains(&boundary.to_string()),
+        "{message}"
+    );
 }
 
 #[test]
@@ -163,7 +182,11 @@ fn disconnected_mesh_is_rejected() {
         [5.0, 1.0, 0.0],
     ];
     let mesh = TestMesh::from_positions("two", positions, vec![[0, 1, 2], [3, 4, 5]]);
-    let e = solve(&Features::plain(0.5).problem(&mesh), &SolveOptions::default()).unwrap_err();
+    let e = solve(
+        &Features::plain(0.5).problem(&mesh),
+        &SolveOptions::default(),
+    )
+    .unwrap_err();
     assert_eq!(e, ConeError::NotConnected { components: 2 });
     assert!(e.to_string().contains("2 connected components"));
 }
@@ -202,7 +225,10 @@ fn infeasible_closed_problems_say_why() {
     let e = solve(&small.problem(&mesh), &options).unwrap_err();
     assert!(matches!(e, ConeError::Infeasible { .. }));
     let text = e.to_string();
-    assert!(text.contains("2 pi chi") && text.contains("[-inf,"), "{text}");
+    assert!(
+        text.contains("2 pi chi") && text.contains("[-inf,"),
+        "{text}"
+    );
     // Negative cones only.
     let negative = Features {
         upper_bounds: Some(vec![0.0; nv]),
@@ -216,8 +242,14 @@ fn infeasible_closed_problems_say_why() {
     let too_much = Features {
         lower_bounds: Some(vec![0.0; nv]),
         prescribed_cones: vec![
-            Cone { vertex: 0, angle: 7.0 },
-            Cone { vertex: 1, angle: 7.0 },
+            Cone {
+                vertex: 0,
+                angle: 7.0,
+            },
+            Cone {
+                vertex: 1,
+                angle: 7.0,
+            },
         ],
         ..Features::plain(0.5)
     };
@@ -259,8 +291,18 @@ fn exactly_feasible_bounds_are_accepted() {
         .map(|i| [(i & 1) as f64, ((i >> 1) & 1) as f64, ((i >> 2) & 1) as f64])
         .collect();
     let faces = vec![
-        [0, 2, 3], [0, 3, 1], [4, 5, 7], [4, 7, 6], [0, 1, 5], [0, 5, 4],
-        [2, 6, 7], [2, 7, 3], [0, 4, 6], [0, 6, 2], [1, 3, 7], [1, 7, 5],
+        [0, 2, 3],
+        [0, 3, 1],
+        [4, 5, 7],
+        [4, 7, 6],
+        [0, 1, 5],
+        [0, 5, 4],
+        [2, 6, 7],
+        [2, 7, 3],
+        [0, 4, 6],
+        [0, 6, 2],
+        [1, 3, 7],
+        [1, 7, 5],
     ];
     let mesh = TestMesh::from_positions("cube", positions, faces);
     let features = Features {
@@ -297,7 +339,10 @@ fn invalid_options_are_reported() {
         regularization: vec![1.0, 0.1, 0.1],
         ..SolveOptions::default()
     });
-    assert!(reason.contains("strictly decreasing") && reason.contains("entry 2"), "{reason}");
+    assert!(
+        reason.contains("strictly decreasing") && reason.contains("entry 2"),
+        "{reason}"
+    );
     assert!(
         bad(SolveOptions {
             regularization: vec![1.0, 0.0],
@@ -352,7 +397,9 @@ fn fan_has_the_closed_form_solution() {
     let faces = (0..6).map(|k| [0, 1 + k, 1 + (k + 1) % 6]).collect();
     let mesh = TestMesh::from_positions("fan", positions, faces);
     let omega = angle_defects(&mesh.mesh, &mesh.geometry).unwrap()[0];
-    let a = cotan_laplacian(&mesh.mesh, &mesh.geometry).unwrap().get(0, 0);
+    let a = cotan_laplacian(&mesh.mesh, &mesh.geometry)
+        .unwrap()
+        .get(0, 0);
     let m = lumped_mass_normalized(&mesh.mesh, &mesh.geometry).unwrap()[0];
     assert!(omega > 0.5);
     // minimize ½ m ((µ − Ω)/a)² + λ|µ|   ⟹   µ = P_{λ a²/m}(Ω),   φ = −m u / a.
@@ -457,7 +504,11 @@ fn every_configuration_finds_the_same_optimum() {
                     let r = &solution.report;
                     assert_eq!(r.regularized_iterations, 0);
                     assert_eq!(r.stages[0].kind, StageKind::Exact);
-                    assert!(r.stages.iter().all(|s| s.safeguard || s.kind == StageKind::Exact));
+                    assert!(
+                        r.stages
+                            .iter()
+                            .all(|s| s.safeguard || s.kind == StageKind::Exact)
+                    );
                     assert_eq!(r.safeguard_rounds == 0, r.safeguard_iterations == 0);
                     assert_eq!(
                         r.linear_solver.ldlt_factorizations + r.linear_solver.lu_factorizations,
@@ -481,10 +532,17 @@ fn report_counts_what_was_done() {
         .filter(|s| matches!(s.kind, StageKind::Regularized { .. }))
         .map(|s| s.newton_iterations)
         .sum();
-    assert_eq!(r.stages.len(), 12, "eleven regularized stages and the exact one");
+    assert_eq!(
+        r.stages.len(),
+        12,
+        "eleven regularized stages and the exact one"
+    );
     assert_eq!(regularized, r.regularized_iterations);
     assert_eq!(r.stages.last().unwrap().kind, StageKind::Exact);
-    assert_eq!(r.stages.last().unwrap().stop, StageStop::ActiveSetsUnchanged);
+    assert_eq!(
+        r.stages.last().unwrap().stop,
+        StageStop::ActiveSetsUnchanged
+    );
     assert_eq!(r.safeguard_rounds, 0);
     // One factorization per Newton step, at least one solve each.
     let steps = r.regularized_iterations + r.exact_iterations;
@@ -531,7 +589,11 @@ fn starved_solver_reports_not_converged() {
     let reference = solve_default(&mesh, &features);
     assert!(reference.cones.len() >= 2, "{}", summary(&reference));
     assert!(
-        reference.report.stages.iter().any(|s| s.newton_iterations > 1),
+        reference
+            .report
+            .stages
+            .iter()
+            .any(|s| s.newton_iterations > 1),
         "the premise of this test: the default solve needs more than one step in some stage"
     );
     let options = SolveOptions {
@@ -542,7 +604,12 @@ fn starved_solver_reports_not_converged() {
         ..SolveOptions::default()
     };
     let solution = solve(&features.problem(&mesh), &options).unwrap();
-    assert_eq!(solution.report.status, Status::NotConverged, "{}", summary(&solution));
+    assert_eq!(
+        solution.report.status,
+        Status::NotConverged,
+        "{}",
+        summary(&solution)
+    );
     assert!(!solution.report.certificate.holds(1e-9));
     assert!(solution.report.message.is_some());
     assert!(
@@ -560,7 +627,12 @@ fn starved_solver_reports_not_converged() {
         ..options
     };
     let solution = solve(&features.problem(&mesh), &options).unwrap();
-    assert_eq!(solution.report.status, Status::Converged, "{}", summary(&solution));
+    assert_eq!(
+        solution.report.status,
+        Status::Converged,
+        "{}",
+        summary(&solution)
+    );
     assert!(solution.report.safeguard_rounds > 0);
     assert!(solution.report.safeguard_iterations > 0);
     assert!(solution.report.stages.iter().any(|s| s.safeguard));
@@ -589,7 +661,10 @@ fn threshold_drops_small_cones_and_recomputes_the_scale_factor() {
         ..SolveOptions::default()
     };
     let cut = solve(&problem, &options).unwrap();
-    assert_eq!(cut.measure, all.measure, "the optimal measure does not depend on extraction");
+    assert_eq!(
+        cut.measure, all.measure,
+        "the optimal measure does not depend on extraction"
+    );
     assert_eq!(cut.cones.len(), all.cones.len() - 1);
     assert_eq!(cut.extraction.n_dropped, 1);
     assert!((cut.extraction.dropped_angle.abs() - sizes[0]).abs() < 1e-15);
@@ -605,8 +680,7 @@ fn threshold_drops_small_cones_and_recomputes_the_scale_factor() {
     );
     assert!((cut.extraction.total_angle_change + sizes[0]).abs() < 1e-12);
     assert!(
-        (cut.total_cone_angle - cut.cones.iter().map(|c| c.angle.abs()).sum::<f64>()).abs()
-            < 1e-15
+        (cut.total_cone_angle - cut.cones.iter().map(|c| c.angle.abs()).sum::<f64>()).abs() < 1e-15
     );
 }
 
@@ -633,7 +707,10 @@ fn clusters_are_merged_at_their_frechet_mean() {
     .unwrap();
     assert_eq!(limited.cones.len(), nv);
     assert_eq!(limited.extraction.unmerged.len(), 1);
-    assert_eq!(limited.extraction.unmerged[0].reason, UnmergedReason::TooLarge);
+    assert_eq!(
+        limited.extraction.unmerged[0].reason,
+        UnmergedReason::TooLarge
+    );
     assert_eq!(limited.extraction.unmerged[0].vertices.len(), nv);
     assert!(!limited.extraction.cones_differ_from_measure);
 
@@ -647,7 +724,10 @@ fn clusters_are_merged_at_their_frechet_mean() {
     assert_eq!(merged.report.status, Status::Converged);
     assert_eq!(merged.measure, plain.measure);
     assert_eq!(merged.cones.len(), 1);
-    assert!((merged.cones[0].angle - 4.0 * PI).abs() < 1e-12, "the total angle is kept");
+    assert!(
+        (merged.cones[0].angle - 4.0 * PI).abs() < 1e-12,
+        "the total angle is kept"
+    );
     assert_eq!(merged.extraction.merged.len(), 1);
     assert_eq!(merged.extraction.merged[0].members.len(), nv);
     assert_eq!(merged.extraction.merged[0].cone, Some(merged.cones[0]));
@@ -699,7 +779,10 @@ fn clusters_are_merged_at_their_frechet_mean() {
     };
     let kept = solve(&bounded.problem(&mesh), &merge_all).unwrap();
     assert_eq!(kept.cones.len(), nv);
-    assert_eq!(kept.extraction.unmerged[0].reason, UnmergedReason::BoundsViolated);
+    assert_eq!(
+        kept.extraction.unmerged[0].reason,
+        UnmergedReason::BoundsViolated
+    );
     assert!((kept.extraction.unmerged[0].angle - 4.0 * PI).abs() < 1e-12);
     // If only the mean vertex forbids it, the next best member takes the cone.
     let mut upper = vec![f64::INFINITY; nv];
@@ -782,12 +865,20 @@ fn feature_size_weights_follow_the_chosen_convention() {
     let omega = angle_defects(&mesh.mesh, &mesh.geometry).unwrap();
     let mass = lumped_mass_normalized(&mesh.mesh, &mesh.geometry).unwrap();
     let eps = 0.5;
-    let described =
-        feature_size_weights(&mesh.mesh, &mesh.geometry, eps, FeatureSizeConvention::AsDescribed)
-            .unwrap();
-    let printed =
-        feature_size_weights(&mesh.mesh, &mesh.geometry, eps, FeatureSizeConvention::AsPrinted)
-            .unwrap();
+    let described = feature_size_weights(
+        &mesh.mesh,
+        &mesh.geometry,
+        eps,
+        FeatureSizeConvention::AsDescribed,
+    )
+    .unwrap();
+    let printed = feature_size_weights(
+        &mesh.mesh,
+        &mesh.geometry,
+        eps,
+        FeatureSizeConvention::AsPrinted,
+    )
+    .unwrap();
     for v in 0..mesh.mesh.n_vertices() {
         let density = omega[v].abs() / mass[v] + eps;
         assert_eq!(described.feature_size[v], density);
@@ -812,9 +903,13 @@ fn feature_size_weights_follow_the_chosen_convention() {
         mesh.positions.iter().map(|p| p.map(|x| 8.0 * x)).collect(),
         mesh.mesh.faces().to_vec(),
     );
-    let again =
-        feature_size_weights(&scaled.mesh, &scaled.geometry, eps, FeatureSizeConvention::AsDescribed)
-            .unwrap();
+    let again = feature_size_weights(
+        &scaled.mesh,
+        &scaled.geometry,
+        eps,
+        FeatureSizeConvention::AsDescribed,
+    )
+    .unwrap();
     assert!(max_abs_diff(&again.feature_size, &described.feature_size) < 1e-9);
     // The weights are usable as they are.
     let features = Features {
@@ -825,13 +920,23 @@ fn feature_size_weights_follow_the_chosen_convention() {
     solve_default(&mesh, &features);
     // Bad arguments.
     for eps in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-        let e = feature_size_weights(&mesh.mesh, &mesh.geometry, eps, FeatureSizeConvention::AsPrinted)
-            .unwrap_err();
+        let e = feature_size_weights(
+            &mesh.mesh,
+            &mesh.geometry,
+            eps,
+            FeatureSizeConvention::AsPrinted,
+        )
+        .unwrap_err();
         assert!(matches!(e, ConeError::InvalidArgument { .. }), "{e}");
     }
     let other = disk();
     assert!(matches!(
-        feature_size_weights(&mesh.mesh, &other.geometry, 1.0, FeatureSizeConvention::AsPrinted),
+        feature_size_weights(
+            &mesh.mesh,
+            &other.geometry,
+            1.0,
+            FeatureSizeConvention::AsPrinted
+        ),
         Err(ConeError::Geometry(_))
     ));
 }
@@ -848,9 +953,18 @@ fn evaluate_cones_validates_its_cones() {
         other => panic!("{other:?}"),
     };
     let cone = |vertex: u32, angle: f64| Cone { vertex, angle };
-    assert_eq!(issue(&[cone(nv as u32, 1.0)]), PrescribedConeIssue::VertexOutOfRange);
-    assert_eq!(issue(&[cone(boundary, 1.0)]), PrescribedConeIssue::BoundaryVertex);
-    assert_eq!(issue(&[cone(interior, f64::INFINITY)]), PrescribedConeIssue::NonFiniteAngle);
+    assert_eq!(
+        issue(&[cone(nv as u32, 1.0)]),
+        PrescribedConeIssue::VertexOutOfRange
+    );
+    assert_eq!(
+        issue(&[cone(boundary, 1.0)]),
+        PrescribedConeIssue::BoundaryVertex
+    );
+    assert_eq!(
+        issue(&[cone(interior, f64::INFINITY)]),
+        PrescribedConeIssue::NonFiniteAngle
+    );
     assert_eq!(
         issue(&[cone(interior, 1.0), cone(interior, 1.0)]),
         PrescribedConeIssue::DuplicateVertex
@@ -864,7 +978,12 @@ fn evaluate_cones_validates_its_cones() {
     // On a closed mesh a cone sum other than 2πχ is reported, not hidden.
     let closed = ellipsoid();
     let problem = Features::plain(0.5).problem(&closed);
-    let one = evaluate_cones(&problem, &[cone(0, 4.0 * PI + 0.5)], Parallelism::Sequential).unwrap();
+    let one = evaluate_cones(
+        &problem,
+        &[cone(0, 4.0 * PI + 0.5)],
+        Parallelism::Sequential,
+    )
+    .unwrap();
     assert!((one.gauss_bonnet_defect - 0.5).abs() < 1e-10);
     let exact = evaluate_cones(&problem, &[cone(0, 4.0 * PI)], Parallelism::Sequential).unwrap();
     assert!(exact.gauss_bonnet_defect.abs() < 1e-10);
@@ -887,14 +1006,22 @@ fn certify_measures_what_is_wrong_with_a_triple() {
     )
     .unwrap();
     let largest = cone_free.adjoint.iter().fold(0.0f64, |m, p| m.max(p.abs()));
-    assert!(largest > 1e-4, "the mesh is too flat for this test: {largest}");
+    assert!(
+        largest > 1e-4,
+        "the mesh is too flat for this test: {largest}"
+    );
     let features = Features::plain(0.5 * largest);
     let problem = features.problem(&mesh);
     let solution = solve_default(&mesh, &features);
     assert!(!solution.cones.is_empty());
     let nv = mesh.mesh.n_vertices();
-    let good = certify(&problem, &solution.log_scale_optimal, &solution.adjoint, &solution.measure)
-        .unwrap();
+    let good = certify(
+        &problem,
+        &solution.log_scale_optimal,
+        &solution.adjoint,
+        &solution.measure,
+    )
+    .unwrap();
     assert!(good.holds(1e-10));
     assert!(good.dual_objective <= good.primal_objective + 1e-12);
     // A perturbed u breaks the state equation and the gap, nothing else.
@@ -908,7 +1035,13 @@ fn certify_measures_what_is_wrong_with_a_triple() {
     let mut phi = solution.adjoint.clone();
     let cone = solution.cones[0].vertex as usize;
     phi[cone] *= 1.5;
-    let c = certify(&problem, &solution.log_scale_optimal, &phi, &solution.measure).unwrap();
+    let c = certify(
+        &problem,
+        &solution.log_scale_optimal,
+        &phi,
+        &solution.measure,
+    )
+    .unwrap();
     assert!((c.dual_infeasibility - 0.5 * features.lambda).abs() < 1e-12);
     assert!(c.adjoint_residual > 1e-6);
     // A suboptimal but feasible pair has a positive gap that bounds its suboptimality.
@@ -917,17 +1050,30 @@ fn certify_measures_what_is_wrong_with_a_triple() {
     assert!(c.state_residual < 1e-12 && c.adjoint_residual < 1e-12);
     let suboptimality = c.primal_objective - solution.objective;
     assert!(suboptimality > 0.0);
-    assert!(c.duality_gap >= suboptimality - 1e-12, "{} < {suboptimality}", c.duality_gap);
+    assert!(
+        c.duality_gap >= suboptimality - 1e-12,
+        "{} < {suboptimality}",
+        c.duality_gap
+    );
     assert!((c.duality_gap - c.complementarity_gap).abs() < 1e-10 * c.primal_objective.max(1.0));
     // Values on the boundary and wrong lengths.
     let boundary = (0..nv).find(|&b| mesh.mesh.is_boundary_vertex(b)).unwrap();
     let mut mu = solution.measure.clone();
     mu[boundary] = 0.25;
-    let c = certify(&problem, &solution.log_scale_optimal, &solution.adjoint, &mu).unwrap();
+    let c = certify(
+        &problem,
+        &solution.log_scale_optimal,
+        &solution.adjoint,
+        &mu,
+    )
+    .unwrap();
     assert_eq!(c.bound_violation, 0.25);
     assert!(matches!(
         certify(&problem, &u[1..], &solution.adjoint, &solution.measure),
-        Err(ConeError::WrongLength { what: "log_scale", .. })
+        Err(ConeError::WrongLength {
+            what: "log_scale",
+            ..
+        })
     ));
 }
 
@@ -960,7 +1106,11 @@ fn certificate_gap_identity_holds_for_arbitrary_triples() {
         for &v in &interior {
             u[v] = rng.uniform(-1.0, 1.0);
             phi[v] = rng.uniform(-1.5, 1.5) * features.lambda.max(0.05);
-            mu[v] = if rng.next_f64() < 0.5 { rng.uniform(-2.0, 2.0) } else { 0.0 };
+            mu[v] = if rng.next_f64() < 0.5 {
+                rng.uniform(-2.0, 2.0)
+            } else {
+                0.0
+            };
         }
         let Ok(c) = certify(&problem, &u, &phi, &mu) else {
             // An infeasible closed problem: nothing to certify.
@@ -981,8 +1131,14 @@ fn certificate_gap_identity_holds_for_arbitrary_triples() {
                     return phi[v];
                 }
                 let t = features.lambda * cost;
-                let lo = features.lower_bounds.as_ref().map_or(f64::NEG_INFINITY, |b| b[v]);
-                let hi = features.upper_bounds.as_ref().map_or(f64::INFINITY, |b| b[v]);
+                let lo = features
+                    .lower_bounds
+                    .as_ref()
+                    .map_or(f64::NEG_INFINITY, |b| b[v]);
+                let hi = features
+                    .upper_bounds
+                    .as_ref()
+                    .map_or(f64::INFINITY, |b| b[v]);
                 let mut p = phi[v];
                 if hi == f64::INFINITY {
                     p = p.min(t);
@@ -1018,13 +1174,19 @@ fn certificate_gap_identity_holds_for_arbitrary_triples() {
             c.duality_gap,
             c.complementarity_gap
         );
-        assert!((c.gap_uncertainty - magnitude).abs() <= 1e-11 * scale, "case {case}");
+        assert!(
+            (c.gap_uncertainty - magnitude).abs() <= 1e-11 * scale,
+            "case {case}"
+        );
         assert!((c.duality_gap - c.complementarity_gap).abs() <= c.gap_uncertainty + 1e-11 * scale);
         // A random triple is far from feasible: the certificate must not hold, and the gap
         // alone would be misleading (it can have either sign).
         assert!(c.state_residual > 1e-3 && !c.holds(1e-9), "case {case}");
     }
-    assert!(with_zero_weight >= 3, "zero distortion weights were exercised {with_zero_weight} times");
+    assert!(
+        with_zero_weight >= 3,
+        "zero distortion weights were exercised {with_zero_weight} times"
+    );
 }
 
 /// The certificate in the report belongs to the returned optimum `(log_scale_optimal, adjoint,
@@ -1033,7 +1195,11 @@ fn certificate_gap_identity_holds_for_arbitrary_triples() {
 #[test]
 fn certificate_is_of_the_returned_optimum_not_of_the_extracted_cones() {
     // A closed mesh, where an active vertex absorbs the rounding of Σ Ω and may be zeroed.
-    for (mesh, lambda) in [(ellipsoid(), 0.5), (random_mesh(4, 9), 0.02), (random_mesh(0, 21), 0.001)] {
+    for (mesh, lambda) in [
+        (ellipsoid(), 0.5),
+        (random_mesh(4, 9), 0.02),
+        (random_mesh(0, 21), 0.001),
+    ] {
         let features = Features::plain(lambda);
         let problem = features.problem(&mesh);
         let nv = mesh.mesh.n_vertices();

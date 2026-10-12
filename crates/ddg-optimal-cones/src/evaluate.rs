@@ -115,6 +115,7 @@ pub(crate) fn cones_to_measure(d: &Discrete, cones: &[Cone]) -> Result<Vec<f64>,
 /// Solves `A u = µ − Ω` for a cone measure on the unknowns and returns `u` (with the
 /// distortion-minimizing constant on a closed mesh) and the Gauss–Bonnet defect.
 ///
+/// [formula: discrete-yamabe-linearization]
 /// [formula: closed-mesh-optimal-constant]
 pub(crate) fn log_scale_of_measure(
     d: &Discrete,
