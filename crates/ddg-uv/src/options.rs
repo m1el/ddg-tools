@@ -216,6 +216,35 @@ impl Default for PackOptions {
     }
 }
 
+/// The spike check: whether a handful of vertices carry almost all of the distortion that a
+/// piece would have without cones. See [`crate::spikes`] for the criterion and its reason.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpikeCheck {
+    /// The share of the cone-free distortion (`0 < share ≤ 1`) that the spikes must carry.
+    /// Default `0.99`.
+    pub share: f64,
+    /// The most vertices that may be called a handful. Default `64`.
+    pub max_vertices: usize,
+    /// The largest fraction of the vertices of the piece that may be called a handful.
+    /// Default `0.01`. Together with the previous limit this means that a piece of fewer than
+    /// 100 vertices never has spikes.
+    pub max_fraction: f64,
+    /// Pieces whose cone-free distortion `½ Σ m u²` (area normalized to 1) is below this have
+    /// none: their scale factors are rounding noise. Default `1e-9`.
+    pub min_distortion: f64,
+}
+
+impl Default for SpikeCheck {
+    fn default() -> Self {
+        SpikeCheck {
+            share: 0.99,
+            max_vertices: 64,
+            max_fraction: 0.01,
+            min_distortion: 1e-9,
+        }
+    }
+}
+
 /// The options of [`crate::unwrap`]. `UnwrapOptions::default()` is the configuration the crate
 /// is tested with; the crate README gives the measurements behind every default.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -259,6 +288,10 @@ pub struct UnwrapOptions {
     /// Whether cones that the solver could not certify as optimal are an error
     /// ([`UvError::ConesNotCertified`]). With `false` they are used and the report warns.
     pub require_certified_cones: bool,
+    /// Whether to look for thin spikes before the cone solve, and with which limits; `None`
+    /// switches the check off. A spike is reported in [`crate::Report`] and as a warning.
+    /// Costs one factorization of the Laplacian per piece.
+    pub spike_check: Option<SpikeCheck>,
 }
 
 impl Default for UnwrapOptions {
@@ -275,6 +308,7 @@ impl Default for UnwrapOptions {
             overlap_samples_per_triangle: ddg_bff::DEFAULT_OVERLAP_SAMPLES,
             reoptimize_angles: false,
             require_certified_cones: false,
+            spike_check: Some(SpikeCheck::default()),
         }
     }
 }
@@ -427,6 +461,29 @@ impl UnwrapOptions {
                 self.overlap_samples_per_triangle,
                 "must be finite and not negative",
             ));
+        }
+        if let Some(check) = self.spike_check {
+            if !(check.share > 0.0 && check.share <= 1.0) {
+                return Err(invalid(
+                    "spike_check.share",
+                    check.share,
+                    "must be above 0 and at most 1",
+                ));
+            }
+            if !(0.0..=1.0).contains(&check.max_fraction) {
+                return Err(invalid(
+                    "spike_check.max_fraction",
+                    check.max_fraction,
+                    "must be between 0 and 1",
+                ));
+            }
+            if !(check.min_distortion.is_finite() && check.min_distortion >= 0.0) {
+                return Err(invalid(
+                    "spike_check.min_distortion",
+                    check.min_distortion,
+                    "must be finite and not negative",
+                ));
+            }
         }
         Ok(())
     }

@@ -72,6 +72,45 @@ fn every_dataset_mesh_is_unwrapped() {
             "{name}: {:?}",
             report.warnings
         );
+        // The spike check fires on that mesh and on no other; its warning names the needles.
+        let check = chart.spikes.as_ref().expect("the spike check ran");
+        assert_eq!(!check.vertices.is_empty(), spiked, "{name}: {check:?}");
+        assert_eq!(
+            report.warnings.iter().any(|w| w.contains("thin spike")),
+            spiked,
+            "{name}: {:?}",
+            report.warnings
+        );
+        if spiked {
+            // The spikes are the vertices at the end of the long needles: the ends of the
+            // edges that are more than ten times longer than the median edge.
+            let mut lengths: Vec<f64> = Vec::new();
+            let mut long_ends = std::collections::BTreeSet::new();
+            let length = |a: u32, b: u32| {
+                let (p, q) = (mesh.positions[a as usize], mesh.positions[b as usize]);
+                ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+            };
+            for t in &mesh.triangles {
+                for k in 0..3 {
+                    let (a, b) = (mesh.corner_vertices[t[k] as usize], mesh.corner_vertices[t[(k + 1) % 3] as usize]);
+                    lengths.push(length(a, b));
+                }
+            }
+            lengths.sort_by(f64::total_cmp);
+            let median = lengths[lengths.len() / 2];
+            for t in &mesh.triangles {
+                for k in 0..3 {
+                    let (a, b) = (mesh.corner_vertices[t[k] as usize], mesh.corner_vertices[t[(k + 1) % 3] as usize]);
+                    if length(a, b) > 10.0 * median {
+                        long_ends.insert(a);
+                        long_ends.insert(b);
+                    }
+                }
+            }
+            println!("camelshotnoise: {} spikes reported, {} vertices on edges longer than 10 median edges", check.vertices.len(), long_ends.len());
+            assert!(check.vertices.iter().all(|v| long_ends.contains(v)), "{check:?}");
+            assert_eq!(check.vertices.len(), 22);
+        }
         if !spiked {
             // Measured with the defaults: at most 0.028 % of a footprint overlaps
             // (camel_noise2) and at most 0.48 % of the triangles are mirrored (camel_noise2:
@@ -87,13 +126,18 @@ fn every_dataset_mesh_is_unwrapped() {
                 .scale_free
         });
         println!(
-            "{name}: {} cones, distortion {:.5} (published {:?}), overlap {:?}, flipped {}, {:.2} s",
+            "{name}: {} cones, distortion {:.5} (published {:?}), overlap {:?}, flipped {}, {:.2} s \
+             (spike check {:.3} s: {} of {} vertices carry 99 % of {:.3e})",
             report.cones.n_cones,
             report.area_distortion.scale_free,
             published,
             report.overlapped_fraction,
             report.flipped_triangles,
-            report.timings.total
+            report.timings.total,
+            report.timings.spike_check,
+            check.n_carrying,
+            mesh.positions.len(),
+            check.cone_free_distortion
         );
     }
 }

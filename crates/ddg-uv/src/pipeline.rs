@@ -140,6 +140,7 @@ pub fn assemble(
             closed: piece_cones.closed,
             positive_cones_only: piece_cones.positive_only,
             solve: piece_cones.solve.clone(),
+            spikes: piece_cones.spikes.clone(),
             cones: ConeStats::of(piece_cones.cones.iter().map(|c| c.angle)),
             flatten: piece_flat.report,
         });
@@ -256,6 +257,7 @@ pub fn assemble(
         seams: prepared.seconds_seams,
         cones: cones.seconds,
         cone_solver: cones.seconds_solver,
+        spike_check: cones.seconds_spikes,
         flatten: flat.seconds,
         pack: seconds_pack,
         verify: seconds_verify,

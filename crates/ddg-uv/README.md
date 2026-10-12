@@ -54,12 +54,12 @@ let map = unwrap(&input, &UnwrapOptions::default())?;
 | `unwrap(&MeshInput, &UnwrapOptions) -> Result<UvMap, UvError>` | the whole pipeline |
 | `MeshInput { positions, corner_vertices, polygon_offsets, triangles, seam_edges, pinned_vertices, prescribed_cones, forbidden_vertices }` | borrowed input; `triangles` are triples of polygon-**corner** indices; `MeshInput::new`, `validate` |
 | `UvMap { uvs, polygon_charts, cones, cut_edges, report }` | the result |
-| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, require_certified_cones }` | every policy, see below; `validate` |
-| `ConeSigns`, `ClosedSurfaces`, `SlitPlacement`, `MergeClusters`, `Orientation`, `Degenerate`, `PackOptions` | the policy types |
+| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, require_certified_cones, spike_check }` | every policy, see below; `validate` |
+| `ConeSigns`, `ClosedSurfaces`, `SlitPlacement`, `MergeClusters`, `Orientation`, `Degenerate`, `PackOptions`, `SpikeCheck` | the policy types |
 | `prepare`, `solve_cones`, `flatten`, `assemble` (`Prepared`, `Piece`, `ConeStage`, `PieceCones`, `FlatStage`, `PieceFlat`) | the stages as separate functions |
 | `pack_charts(&mut uvs, polygon_offsets, polygon_charts, &PackOptions) -> Result<PackReport, UvError>` | the packer on its own |
 | `area_distortion(positions, corner_vertices, triangles, uvs) -> AreaDistortion` | the dataset README's distortion measure of any UV map |
-| `Report` (`ValidationReport`, `SeamReport`, `DegenerateReport`, `SteeringReport`, `ChartReport`, `ConeSolveReport`, `FlattenReport`, `ConeStats`, `ClosedHandling`, `MergeOutcome`, `Timings`, `PackReport`), `Report::summary() -> Vec<(&str, Value)>` | the report, typed and as a flat key–value list for bindings |
+| `Report` (`ValidationReport`, `SeamReport`, `DegenerateReport`, `SteeringReport`, `ChartReport`, `ConeSolveReport`, `FlattenReport`, `ConeStats`, `ClosedHandling`, `MergeOutcome`, `Timings`, `PackReport`, `SpikeReport`), `Report::summary() -> Vec<(&str, Value)>` | the report, typed and as a flat key–value list for bindings |
 | `UvError`, `UvError::kind() -> ErrorKind { Input, Mesh, Solve }` | every refusal, in the caller's vertex and polygon numbers |
 | `PolygonMesh` (`from_triangles`, `from_polygons`, `input`, `edges`), `fan_triangulation` | an owned mesh, for tests and callers without their own arrays |
 | `primitives::{uv_sphere, capsule, cylinder, cone, torus, cube, grid_cube, holed_slab, voxel_surface, revolution, jittered}` | Blender-like polygon meshes for tests and benchmarks |
@@ -96,7 +96,8 @@ lowest polygon.
   sides in an indexed mesh. It is extended by the shortest neighbouring polygon edge, counted
   (`n_extension_edges`) and warned about.
 
-**3. Cones, then flattening, per piece.** Steering is translated at the vertices that are
+**3. Spike check, cones, then flattening, per piece.** Before the cone solve, the
+[spike check](#the-spike-check) looks at the piece without cones. Steering is translated at the vertices that are
 interior to their piece: pinned → cone cost 0 (free cone site), forbidden → cost `+∞`,
 prescribed → fixed angle. On a boundary, seam or slit there are no cones: pinned and forbidden
 vertices have no effect there (counted), a prescribed cone is listed in
@@ -124,7 +125,8 @@ smallest bounding box (rigid, never mirrored), all charts get **one** scale, box
 tallest first, the scale is found by bisection. `packing: None` leaves the charts where the
 flattener put them.
 
-**Warnings** are raised, besides the cases above, when cones sit at `max_cone_angle`, when
+**Warnings** are raised, besides the cases above, when thin spikes dominate the distortion
+(next section), when cones sit at `max_cone_angle`, when
 more than 1 % of the triangles of a chart are mirrored, and when more than 1 % of a chart's
 footprint is covered twice.
 
@@ -316,6 +318,59 @@ map worse by the scale-free measure (camel at 0.5, bump at 0.02): the solver's e
 `u = 0` on the boundary, contains a scale offset that the measure ignores. Hence **off by
 default**.
 
+## The spike check
+
+**Why.** A vertex pulled far out of the surface dominates the distortion measure of this
+method (`ddg-optimal-cones` README, "Needle-like spikes"): a spike of height `h` over a base of
+radius `ρ` adds about `h³/ρ` to `½ Σ m u²` without cones, and the optimum then spends its cones
+on the spike tips. On `camelshotnoise` the result is unusable (22 cones at the angle bound,
+distortion 53, 17.9 % overlap, 14 742 of 22 968 triangles mirrored). Mirroring and overlap show
+that afterwards; the check says what the cause is, before the solve, with the vertices.
+
+**Criterion** (`src/spikes.rs`, options `UnwrapOptions::spike_check = Some(SpikeCheck { .. })`).
+Per piece, evaluate the state with no cones (`ddg_optimal_cones::evaluate_cones` with an empty
+list; cones the caller prescribed are kept, since the solver cannot change them): the log scale
+`u_i` and `E0 = ½ Σ m_i u_i²`, masses normalized to sum 1. Sort `c_i = m_i u_i²` in decreasing
+order and let `k` be the smallest number whose `c_i` add up to at least a share `s = 0.99` of
+`Σ c_i`. The piece **has spikes** if `E0 ≥ 1e-9` (below that the `u_i` are rounding noise: a
+flat grid has `E0 = 2·10⁻³¹`), `k ≤ 64`, and `k ≤ 1 %` of the piece's vertices (so a piece of
+fewer than 100 vertices never has any). The spikes are those `k` vertices.
+
+**Output.** `ChartReport::spikes: Option<SpikeReport { cone_free_distortion, n_carrying,
+vertices, share }>` with the vertices in the caller's numbering, ascending (empty unless the
+criterion holds); in `Report::summary()` the keys `cone_free_distortion` (largest over the
+charts), `n_spike_vertices`, `spike_vertices` (text, at most 64 numbers; only if there are
+spikes) and `seconds_spike_check`; and a warning per piece with spikes that names up to 16 of
+the vertices, says that the map is likely to be poor and suggests repairing the mesh (moving the
+vertices back onto the surface or removing them). `spike_check: None` switches it off; the map
+does not depend on it (tested). If the evaluation itself fails (the Laplacian cannot be
+factorized) the check is skipped with a warning.
+
+**Measured** (`cargo run --release -p ddg-uv --example spikes`; `tests/dataset.rs`,
+`tests/spikes.rs`). `k` for 99 % against the number of vertices of the piece:
+
+| mesh | vertices | `E0` | `k` (99 %) | `k / vertices` |
+|---|---:|---:|---:|---:|
+| **camelshotnoise** | 11 513 | 8.48·10⁴ | **22** | **0.19 %** |
+| the 22 other dataset meshes | 2 349 to 152 893 | 0.0196 to 21.1 | 1 599 (airplane) to 108 942 (brain) | 67 % to 88 % |
+| generated: UV sphere 32×16, icosphere, cube, cube 8×8, cylinder, cone, capsule, quad torus, triangle torus, genus-2 slab, bumpy disk | 8 to 625 | 8·10⁻⁸ to 0.22 | 8 to 467 | 63 % to 100 % |
+
+The flat disk and the flat open cylinder (no curvature, `E0` at most 10⁻³¹) have no spikes by the
+`E0` rule. The camel's 22 spike tips are the 22 vertices reported, and every one of them lies on an edge
+more than ten times longer than the median edge (the test checks this). Between the smallest
+fraction of any other mesh with 100 or more vertices (63 %) and the largest of the spiked one (0.19 %) there is a factor
+over 300, against the limit of 1 %; the limits are not tuned further. Cost, from the report's
+own timer in the release run of `tests/dataset.rs`: 0.004 to 0.061 s per mesh, 0.72 s on the
+brain (152 893 vertices), 1.3 s of the 70 s for all 23 meshes (1.9 %); 1 % to 6 % of one mesh's
+time (6 % on `bump` and 5 % on `face`, which have 0 cones and so no long cone solve).
+
+**What it does not do.** It fires only when the spikes carry 99 % of the distortion: a
+mesh with a few spikes on top of a rough surface whose own cone-free distortion is more than 1 %
+of theirs is not flagged. It does not repair anything, and does not set the distortion weight of
+the spike tips to zero (the remedy of the solver's README, which would make the map ignore them).
+A thin spike that is a real feature (a very thin horn) is flagged too: for this method it is the
+same thing.
+
 ## The dataset
 
 `cargo run --release -p ddg-uv --example evaluate -- dataset` (`tests/dataset.rs` runs the same
@@ -369,9 +424,10 @@ seams takes at most 1 ms here and is left out; there are none).
   published cones, and traces them to the triangulation.
 - **`camelshotnoise`** (132 one-vertex spikes) is the one result that is not usable: 22 cones,
   all at the angle bound, distortion 53, 17.9 % overlap, 14 742 of 22 968 triangles mirrored.
-  The report carries three warnings saying so. The solver's README explains the cause (the
-  distortion of a spike in the linearized model) and a remedy the pipeline does not apply
-  (zero distortion weight at the spike tips).
+  The report carries four warnings saying so, the first of them the [spike
+  check](#the-spike-check), which names the 22 spike tips before the solve. The solver's README
+  explains the cause (the distortion of a spike in the linearized model) and a remedy the
+  pipeline does not apply (zero distortion weight at the spike tips).
 - **Time**: the cone stage is 96.6 % of the total over the 23 meshes (60.6 of 62.7 s); the
   brain takes 33.2 of its 34.1 s there.
 
@@ -443,9 +499,9 @@ Four error variants are not triggered by any test input, only their wording is c
 
 ## Not done, not verified
 
-- No warning yet for "a few vertices carry almost all of the distortion of the cone-free
-  map" (spikes). What exists instead: the warnings for cones at the angle bound, mirrored
-  triangles and overlap, which fire on `camelshotnoise`; the result there is not usable.
+- The spike check flags only meshes where a handful of vertices carry 99 % of the cone-free
+  distortion; weaker spikes are not flagged (see its section), and the map is not changed by
+  a spike, only the warning is added.
 - Closed surfaces of genus ≥ 2 without seams: a map comes back, its quality is not
   controlled, and it was tried on two voxel slabs only.
 - The `Auto` criterion (32 cones and 1 % of the vertices) separates the cases measured, which

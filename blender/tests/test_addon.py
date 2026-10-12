@@ -755,6 +755,31 @@ def loose_vertices_and_wire_seams_do_not_stop_the_unwrap():
 
 
 @test
+def thin_spikes_are_reported_by_blender_vertex_index():
+    """Two vertices pulled far out of a flat sheet dominate its distortion: the operator warns
+    and names them by their index in the mesh."""
+    core = importlib.import_module(ARGS.module + ".core")
+    n = 20
+    spikes = {10 * (n + 1) + 10: 2.0, 15 * (n + 1) + 4: 2.0}
+    vertices = [(i / n, j / n, spikes.get(j * (n + 1) + i, 0.0))
+                for j in range(n + 1) for i in range(n + 1)]
+    faces = [(j * (n + 1) + i, j * (n + 1) + i + 1, (j + 1) * (n + 1) + i + 1,
+              (j + 1) * (n + 1) + i) for j in range(n) for i in range(n)]
+    sheet = new_object("spiked", vertices, faces)
+    with CaptureOutput() as output:
+        run_checked(sheet)
+    names = ", ".join(str(v) for v in sorted(spikes))
+    assert "vertices " + names in output.text and "Repair the mesh" in output.text, output.text
+    report = core.unwrap_object(sheet)["report"]
+    assert report["n_spike_vertices"] == 2 and report["spike_vertices"] == names, report
+    # A flat sheet has none.
+    flat = new_object("flat", [(x, y, 0.0) for (x, y, _) in vertices], faces)
+    with CaptureOutput() as output:
+        run_checked(flat)
+    assert "thin spike" not in output.text, output.text
+
+
+@test
 def status_line_reports_charts_cones_distortion_and_timing():
     import ddg_tools
     primitive("monkey")

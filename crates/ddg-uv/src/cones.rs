@@ -12,6 +12,7 @@ use crate::options::{ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, Un
 use crate::prepare::{Piece, Prepared};
 use crate::report::{ClosedHandling, ConeSolveReport, MergeOutcome};
 use crate::slit::{choose_slit, distances};
+use crate::spikes::{self, SpikeReport};
 
 /// The cones of one piece.
 #[derive(Debug, Clone)]
@@ -32,6 +33,8 @@ pub struct PieceCones {
     pub positive_only: bool,
     /// The cone solve, if it ran.
     pub solve: Option<ConeSolveReport>,
+    /// The spike check of the piece, if it ran (see [`crate::spikes`]).
+    pub spikes: Option<SpikeReport>,
 }
 
 /// The result of stage 3a.
@@ -45,6 +48,7 @@ pub struct ConeStage {
     pub(crate) warnings: Vec<String>,
     pub(crate) seconds: f64,
     pub(crate) seconds_solver: f64,
+    pub(crate) seconds_spikes: f64,
 }
 
 /// What one solve on one mesh gave.
@@ -73,6 +77,7 @@ pub fn solve_cones(prepared: &Prepared, options: &UnwrapOptions) -> Result<ConeS
         warnings: Vec::new(),
         seconds: 0.0,
         seconds_solver: 0.0,
+        seconds_spikes: 0.0,
     };
     for piece in &prepared.pieces {
         let cones = piece_cones(prepared, piece, options, &mut stage)?;
@@ -104,6 +109,27 @@ fn piece_cones(
         });
     }
     let sphere = closed && genus == 0;
+
+    // Thin spikes dominate the distortion measure: look for them before solving.
+    let mut spike_report = None;
+    if let Some(check) = &options.spike_check {
+        let start = Instant::now();
+        match spikes::check_piece(prepared, piece, check) {
+            Ok(found) => {
+                if let Some(found) = &found
+                    && !found.vertices.is_empty()
+                {
+                    stage.warnings.push(spikes::warning(piece, found));
+                }
+                spike_report = found;
+            }
+            Err(message) => stage.warnings.push(format!(
+                "the spike check of the piece of the surface that contains face {} failed ({});                  it was skipped",
+                piece.first_polygon, message
+            )),
+        }
+        stage.seconds_spikes += start.elapsed().as_secs_f64();
+    }
     let slit_of = |placement: SlitPlacement, relative_length: f64| {
         // Keep the slit away from prescribed cones: a vertex on the slit is on the boundary.
         let avoid: Vec<bool> = piece
@@ -211,6 +237,7 @@ fn piece_cones(
         });
     }
     result.cones.sort_by_key(|c| c.vertex);
+    result.spikes = spike_report;
     stage.warnings.append(&mut warnings);
     Ok(result)
 }
@@ -229,6 +256,7 @@ fn finish(
         closed,
         positive_only: solved.positive_only,
         solve: solved.report,
+        spikes: None,
     }
 }
 

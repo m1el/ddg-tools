@@ -76,7 +76,7 @@ Charts, cones and cut edges are counts (a chart is a connected piece of the surf
 written: the largest and the area-weighted mean difference between a triangle corner's angle in
 3D and in UV (0 when angles are preserved exactly, as for an isometry; a conformal map with cones keeps them only approximately), and the range of local length scale relative to its mean
 (1.00x to 1.00x for an isometry). Flipped and collapsed triangles are mentioned when there are
-any. Warnings from the native module are shown as separate warning lines.
+any. Warnings from the native module are shown as separate warning lines. One of them tells you that a handful of vertices (thin spikes: vertices pulled far out of the surface) dominate the distortion, names them by their Blender vertex index, and suggests repairing the mesh first; on such a mesh the map is likely to be poor.
 
 ### Errors
 
@@ -145,13 +145,13 @@ one needs glibc 2.28, which is what official Blender builds for Linux require.
 `blender --command extension install-file`, so the tests exercise the installed extension and
 its bundled wheel, the way a user gets them.
 
-- `blender/tests/test_addon.py` (headless, 23 tests): cube (quads), n-gons (cylinder caps, a
+- `blender/tests/test_addon.py` (headless, 24 tests): cube (quads), n-gons (cylinder caps, a
   concave hexagon, a non-planar pentagon), a face with a zero-area triangle (mollified, with a warning), Suzanne (three
   components that must not overlap in UV), torus, UV sphere, marked seams, marking cuts as
   seams, Edit mode (on a mesh edited after entering Edit mode), non-manifold meshes (three faces
   on an edge, a face inside a cube, a bow-tie vertex), a flipped face, a mesh without faces, a
   linked mesh, a native module that fails to load, vertex groups (including which pinned and forbidden vertices took effect), loose vertices and a wire edge marked as a seam (both ignored and counted),
-  the status line, and a flat sheet that must come out as a similarity transform of its own x and y at every corner (which also checks the corner order). Every unwrap runs twice and asserts that vertex, edge, face and corner
+  the status line, and thin spikes named by vertex index, a flat sheet that must come out as a similarity transform of its own x and y at every corner (which also checks the corner order). Every unwrap runs twice and asserts that vertex, edge, face and corner
   counts, vertex positions, edge vertices, the corner order of every face and the seam flags are
   bit-for-bit unchanged, that the active UV map has one finite UV per corner inside the unit
   square, and that both runs give identical UVs. One test feeds the checks deliberately broken
@@ -171,9 +171,9 @@ Observed on the development machine on 2026-10-12, all with the same zip and the
 
 | Blender | Python | numpy | headless tests | UI checks |
 |---------|--------|-------|----------------|-----------|
-| 5.0.1, Ubuntu's build | 3.14.4 (system) | absent | 23 of 23 | 27 of 27 |
-| 5.0.1, official (`bpy` from PyPI) | 3.11.15 | 1.26.4 | 23 of 23 | not run |
-| 5.2.2 LTS, official (`bpy` from PyPI) | 3.13.14 | 2.5.4 | 23 of 23 | not run |
+| 5.0.1, Ubuntu's build | 3.14.4 (system) | absent | 24 of 24 | 27 of 27 |
+| 5.0.1, official (`bpy` from PyPI) | 3.11.15 | 1.26.4 | 24 of 24 | not run |
+| 5.2.2 LTS, official (`bpy` from PyPI) | 3.13.14 | 2.5.4 | 24 of 24 | not run |
 
 ## Cost of the Blender side
 

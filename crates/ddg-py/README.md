@@ -149,9 +149,10 @@ estimated (it is, by default).
 | `n_merges_rejected` | cone clusters whose merge the guard rejected |
 | `area_distortion`, `area_distortion_unscaled` | the dataset README's distortion measure `Σ A u²` of the map, with and without taking the scale out |
 | `flatten_flipped_triangles`, `flatten_collapsed_triangles`, `max_quasi_conformal_error` | the flattener's own checks |
+| `cone_free_distortion`, `n_spike_vertices`, `spike_vertices` | the spike check: the distortion the surface would have without cones (largest over the charts, area normalized to 1), the number of spike vertices, and their numbers in your mesh, as text (`"11491, 11492, ..."`, at most 64; only present if there are spikes). A thin spike (a vertex pulled far out of the surface) dominates the distortion measure of this method and the map is then poor; the check fires when a handful of vertices (at most 64 and 1 % of the piece) carry 99 % of the distortion without cones, and adds a warning that suggests repairing the mesh. Measured: it fires on the dataset's `camelshotnoise` and on none of 22 other meshes (`crates/ddg-uv/README.md`). |
 | `overlapped_fraction`, `max_chart_overlapped_fraction` | estimated share of the footprint that is covered twice, over all charts and for the worst chart |
 | `packed` | `False`: the binding switches the pipeline's packer off; use `pack_charts` |
-| `seconds_stage_validate`, `seconds_stage_seams`, `seconds_stage_cones`, `seconds_cone_solver`, `seconds_stage_flatten`, `seconds_stage_pack`, `seconds_stage_verify`, `seconds_unwrap` | the pipeline's wall-clock times per stage (`seconds_cone_solver` is part of `seconds_stage_cones`) |
+| `seconds_stage_validate`, `seconds_stage_seams`, `seconds_stage_cones`, `seconds_cone_solver`, `seconds_spike_check`, `seconds_stage_flatten`, `seconds_stage_pack`, `seconds_stage_verify`, `seconds_unwrap` | the pipeline's wall-clock times per stage (`seconds_cone_solver` and `seconds_spike_check` are parts of `seconds_stage_cones`) |
 | `n_degenerate_triangles` | triangles with no area in 3D (left out of the measurements) |
 | `n_collapsed_uv_triangles` | triangles with area in 3D but none in UV |
 | `n_flipped_uv_triangles` | triangles whose UV image is mirrored |
@@ -204,7 +205,7 @@ other policy is `ddg-uv`'s default. In short (details and the measurements behin
 
 1. Validation and repair as listed under *Inputs*.
 2. Seams are cut first; the connected pieces are the charts.
-3. Per piece: optimal cones (`ddg-optimal-cones`), then the piece is cut through its cones along
+3. Per piece: the spike check (see the report keys), optimal cones (`ddg-optimal-cones`), then the piece is cut through its cones along
    polygon edges and flattened conformally (`ddg-bff`). A closed piece of genus 0 uses the raw
    optimum unless it is dense (more than 32 cones and more than 1 % of the vertices); then it
    is solved again with 8 free cone sites.

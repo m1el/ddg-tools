@@ -4,6 +4,7 @@ use ddg_optimal_cones::Status;
 
 use crate::measure::AreaDistortion;
 use crate::pack::PackReport;
+use crate::spikes::SpikeReport;
 
 /// What was done about triangles without area.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -233,6 +234,9 @@ pub struct ChartReport {
     /// The cone solve, or `None` if the piece has no interior vertex or no cone was possible
     /// (a closed piece of genus 1 with positive cones only).
     pub solve: Option<ConeSolveReport>,
+    /// The spike check, or `None` if it was switched off, skipped, or the chart has no interior
+    /// vertex.
+    pub spikes: Option<SpikeReport>,
     /// The cones of the chart.
     pub cones: ConeStats,
     /// The flattening.
@@ -251,6 +255,8 @@ pub struct Timings {
     pub cones: f64,
     /// Of that, inside the cone solver.
     pub cone_solver: f64,
+    /// Of that, the spike check.
+    pub spike_check: f64,
     /// Stage 3b: cutting through the cones and flattening.
     pub flatten: f64,
     /// Stage 4: packing.
@@ -430,6 +436,24 @@ impl Report {
                 )),
             ),
         ];
+        // Present only if the spike check ran.
+        let checks: Vec<&SpikeReport> = self.charts.iter().filter_map(|c| c.spikes.as_ref()).collect();
+        if !checks.is_empty() {
+            let spikes: Vec<u32> = {
+                let mut all: Vec<u32> =
+                    checks.iter().flat_map(|s| s.vertices.iter().copied()).collect();
+                all.sort_unstable();
+                all
+            };
+            out.push(("n_spike_vertices", int(spikes.len())));
+            out.push((
+                "cone_free_distortion",
+                Value::Float(fold_max(&mut checks.iter().map(|s| s.cone_free_distortion))),
+            ));
+            if !spikes.is_empty() {
+                out.push(("spike_vertices", Value::Text(spike_list(&spikes))));
+            }
+        }
         // Present only if the overlap was estimated: a NaN would break comparisons of reports.
         if let Some(fraction) = self.overlapped_fraction {
             out.push(("overlapped_fraction", Value::Float(fraction)));
@@ -451,6 +475,7 @@ impl Report {
             ("seconds_stage_seams", Value::Float(t.seams)),
             ("seconds_stage_cones", Value::Float(t.cones)),
             ("seconds_cone_solver", Value::Float(t.cone_solver)),
+            ("seconds_spike_check", Value::Float(t.spike_check)),
             ("seconds_stage_flatten", Value::Float(t.flatten)),
             ("seconds_stage_pack", Value::Float(t.pack)),
             ("seconds_stage_verify", Value::Float(t.verify)),
@@ -474,4 +499,19 @@ impl Report {
             .filter(|c| matches!(c.closed, ClosedHandling::Slit { .. }))
             .count()
     }
+}
+
+/// At most 64 vertex numbers, comma separated, then the number of those left out.
+fn spike_list(vertices: &[u32]) -> String {
+    const LISTED: usize = 64;
+    let mut text = vertices
+        .iter()
+        .take(LISTED)
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if vertices.len() > LISTED {
+        text.push_str(&format!(", and {} more", vertices.len() - LISTED));
+    }
+    text
 }

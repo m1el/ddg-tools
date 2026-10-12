@@ -66,8 +66,10 @@
 //!    length. The connected pieces that result are the charts. A seam that is not an edge of a
 //!    polygon is ignored with a warning; a seam of a single edge between two interior vertices
 //!    is extended by one edge, because a slit of one edge has no two sides.
-//! 3. **Cones, then flattening**, per piece ([`solve_cones`], [`flatten`]). The cone problem
-//!    is solved with the steering translated into its terms (pinned vertices are free cone
+//! 3. **Cones, then flattening**, per piece ([`solve_cones`], [`flatten`]). First the spike
+//!    check ([`spikes`], [`SpikeCheck`]): if a handful of vertices carry almost all of the
+//!    distortion the piece would have without cones (thin spikes, which wreck the result), the
+//!    report names them and warns. The cone problem is solved with the steering translated into its terms (pinned vertices are free cone
 //!    sites, prescribed cones fixed angles, forbidden vertices excluded) and with the policies
 //!    of [`UnwrapOptions`]: [`ConeSigns`], [`ClosedSurfaces`], [`MergeClusters`]. The piece is
 //!    then cut through its cones **along polygon edges only** and flattened. Because cuts never
@@ -111,6 +113,7 @@ pub mod prepare;
 pub mod primitives;
 pub mod report;
 mod slit;
+pub mod spikes;
 
 pub use ddg_core::io::Cone;
 
@@ -121,8 +124,9 @@ pub use input::{MeshInput, PolygonMesh, fan_triangulation};
 pub use measure::{AreaDistortion, area_distortion};
 pub use options::{
     ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
-    SlitPlacement, UnwrapOptions,
+    SlitPlacement, SpikeCheck, UnwrapOptions,
 };
+pub use spikes::SpikeReport;
 pub use pack::{PackReport, pack_charts};
 pub use pipeline::{UvMap, assemble, unwrap};
 pub use prepare::{Piece, Prepared, prepare};

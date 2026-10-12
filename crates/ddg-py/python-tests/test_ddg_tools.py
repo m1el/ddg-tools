@@ -482,6 +482,50 @@ class LargerMeshTest(unittest.TestCase):
         self.assertLessEqual(max(uvs), 1.0)
 
 
+def grid(n, spikes=()):
+    """An n x n grid of quads in the unit square, as list buffers; `spikes` is a list of
+    (i, j, height): vertices pulled out of the sheet."""
+    positions = []
+    for j in range(n + 1):
+        for i in range(n + 1):
+            height = sum(h for (si, sj, h) in spikes if (si, sj) == (i, j))
+            positions += [i / n, j / n, height]
+    corner_vertices = []
+    for j in range(n):
+        for i in range(n):
+            v = j * (n + 1) + i
+            corner_vertices += [v, v + 1, v + n + 2, v + n + 1]
+    polygon_starts = list(range(0, 4 * n * n, 4))
+    triangles = []
+    for start in polygon_starts:
+        triangles += [start, start + 1, start + 2, start, start + 2, start + 3]
+    return positions, corner_vertices, polygon_starts, triangles
+
+
+class SpikeTest(unittest.TestCase):
+    def test_thin_spikes_are_named_in_the_callers_numbering(self):
+        n = 20
+        vertex = lambda i, j: j * (n + 1) + i
+        result = ddg_tools.unwrap(*as_arrays(grid(n, [(10, 10, 2.0), (4, 15, 2.0)])))
+        report = result.report
+        expected = sorted([vertex(10, 10), vertex(4, 15)])
+        self.assertEqual(report["n_spike_vertices"], 2)
+        self.assertEqual(report["spike_vertices"], ", ".join(map(str, expected)))
+        self.assertGreater(report["cone_free_distortion"], 1.0)
+        self.assertIn("seconds_spike_check", report)
+        warnings = [w for w in report["warnings"] if "thin spike" in w]
+        self.assertEqual(len(warnings), 1, report["warnings"])
+        self.assertIn("vertices " + report["spike_vertices"], warnings[0])
+        self.assertIn("Repair the mesh", warnings[0])
+
+    def test_a_flat_and_a_bumpy_sheet_have_none(self):
+        for spikes in ([], [(10, 10, 0.05)]):
+            report = ddg_tools.unwrap(*as_arrays(grid(20, spikes))).report
+            self.assertEqual(report["n_spike_vertices"], 0, spikes)
+            self.assertNotIn("spike_vertices", report)
+            self.assertTrue(all("thin spike" not in w for w in report["warnings"]))
+
+
 @unittest.skipIf(numpy is None, "numpy is not installed")
 class NumpyTest(unittest.TestCase):
     def setUp(self):
