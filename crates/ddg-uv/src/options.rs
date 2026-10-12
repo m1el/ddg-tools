@@ -139,10 +139,13 @@ pub enum MergeClusters {
 
 impl Default for MergeClusters {
     fn default() -> Self {
+        // Measured on the dataset (84 solves): merging multiplies the distortion by 1.000 to
+        // 1.10 at λ = 0.5 and by at most 2.62 at λ = 0.02; the failure this guards against
+        // multiplied it by 3000.
         MergeClusters::Guarded {
             max_cluster_size: usize::MAX,
-            max_factor: 2.0,
-            max_increase: 0.01,
+            max_factor: 10.0,
+            max_increase: 0.05,
         }
     }
 }

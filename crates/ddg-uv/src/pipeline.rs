@@ -215,6 +215,41 @@ pub fn assemble(
         ));
     }
 
+    // Results that are formally a map but that nobody should use without looking.
+    for (chart, piece_cones) in charts.iter().zip(&cones.pieces) {
+        let at_bound = piece_cones
+            .cones
+            .iter()
+            .filter(|c| c.angle >= options.max_cone_angle * (1.0 - 1e-9))
+            .count();
+        if at_bound > 0 {
+            warnings.push(format!(
+                "{at_bound} cones of the chart that contains face {} sit at the upper bound \
+                 {:.4} of the cone angle: the surface has spikes or needles there that no cone \
+                 can flatten; expect flipped triangles and overlap",
+                chart.first_polygon, options.max_cone_angle
+            ));
+        }
+        let flipped = chart.flatten.flipped_triangles;
+        if 100 * flipped > chart.n_triangles {
+            warnings.push(format!(
+                "{flipped} of the {} triangles of the chart that contains face {} are mirrored \
+                 in the UV map",
+                chart.n_triangles, chart.first_polygon
+            ));
+        }
+        if let Some(fraction) = chart.flatten.overlapped_fraction
+            && fraction > 0.01
+        {
+            warnings.push(format!(
+                "the chart that contains face {} overlaps itself: {:.1} % of its footprint is \
+                 covered more than once",
+                chart.first_polygon,
+                100.0 * fraction
+            ));
+        }
+    }
+
     let timings = Timings {
         validate: prepared.seconds_validate,
         seams: prepared.seconds_seams,
