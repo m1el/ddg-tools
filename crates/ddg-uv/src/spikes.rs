@@ -31,10 +31,7 @@
 
 use ddg_core::io::Cone;
 use ddg_core::operators::lumped_mass_normalized;
-use ddg_optimal_cones::{
-    BoundaryTreatment, ConeProblem, Parallelism, SolveOptions, Status, evaluate_cones,
-    solve_with_boundary,
-};
+use ddg_optimal_cones::{ConeProblem, Parallelism, evaluate_cones};
 
 use crate::options::SpikeCheck;
 use crate::prepare::{Piece, Prepared};
@@ -60,10 +57,7 @@ pub struct SpikeReport {
     pub not_excluded_boundary: Vec<u32>,
 }
 
-/// Runs the check on one piece. With `optimized_boundary` the cone-free state is the one the
-/// cone solver would have with optimized boundary values and every cone forbidden (a solve of
-/// the cone problem with `BoundaryTreatment::Free`; the solver has no evaluation for it),
-/// otherwise the one with `u = 0` on the boundary.
+/// Runs the check on one piece (cone-free state with `u = 0` on the boundary).
 ///
 /// # Errors
 /// The message of the error of the Laplacian solve; the caller reports it as a warning and
@@ -72,7 +66,6 @@ pub(crate) fn check_piece(
     prepared: &Prepared,
     piece: &Piece,
     check: &SpikeCheck,
-    optimized_boundary: bool,
 ) -> Result<Option<SpikeReport>, String> {
     let mesh = &piece.mesh;
     let n = mesh.n_vertices();
@@ -89,25 +82,13 @@ pub(crate) fn check_piece(
         return Ok(None);
     }
     let problem = ConeProblem::new(mesh, &piece.geometry, 0.0);
-    let log_scale = if optimized_boundary {
-        let mut forbidden = problem;
-        forbidden.cone_costs = Some(vec![f64::INFINITY; n]);
-        forbidden.prescribed_cones = prescribed;
-        let solution =
-            solve_with_boundary(&forbidden, BoundaryTreatment::Free, &SolveOptions::default())
-                .map_err(|e| e.to_string())?;
-        if solution.report.status != Status::Converged {
-            return Err(format!(
-                "the solve for the cone-free state did not converge (status {:?})",
-                solution.report.status
-            ));
-        }
-        solution.log_scale_optimal
-    } else {
-        evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
-            .map_err(|e| e.to_string())?
-            .log_scale
-    };
+    // Always with `u = 0` on the boundary, also when the pipeline optimizes the boundary
+    // values: the cone-free state with free boundary spreads the curvature of a needle over
+    // the whole piece (measured: on a disk with two needles 317 of 625 vertices carry 99 %
+    // of it), whereas the local, fixed-boundary state is what identifies the needle.
+    let log_scale = evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
+        .map_err(|e| e.to_string())?
+        .log_scale;
     let mass = lumped_mass_normalized(mesh, &piece.geometry).map_err(|e| e.to_string())?;
     let mut parts: Vec<(f64, usize)> = (0..n)
         .map(|v| (mass[v] * log_scale[v] * log_scale[v], v))

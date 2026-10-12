@@ -8,7 +8,7 @@ use ddg_core::generators::{bumpy_grid_disk, icosphere, open_cylinder, torus};
 use ddg_uv::primitives::{
     capsule, cone, cube, cylinder, grid_cube, holed_slab, torus as quad_torus, uv_sphere,
 };
-use ddg_uv::{ErrorKind, PolygonMesh, SpikeCheck, UnwrapOptions, Value, unwrap};
+use ddg_uv::{ErrorKind, PolygonMesh, SpikeAction, SpikeCheck, UnwrapOptions, Value, unwrap};
 
 /// A 24 x 24 grid with two vertices pulled 2.0 out of a sheet of side 1, behind three loose
 /// vertices (so that the numbers of the caller differ from those of the pipeline's meshes).
@@ -60,9 +60,17 @@ fn spikes_are_reported_in_the_callers_numbering() {
 }
 
 #[test]
-fn the_check_can_be_switched_off_and_does_not_change_the_map() {
+fn the_check_can_be_switched_off_and_warn_only_does_not_change_the_map() {
     let (mesh, _) = spiked_disk();
-    let on = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
+    let warn = UnwrapOptions {
+        spike_check: Some(SpikeCheck {
+            action: SpikeAction::WarnOnly,
+            ..SpikeCheck::default()
+        }),
+        ..UnwrapOptions::default()
+    };
+    let on = unwrap(&mesh.input(), &warn).unwrap();
+    assert!(on.report.charts[0].spikes.as_ref().unwrap().excluded.is_empty());
     let options = UnwrapOptions {
         spike_check: None,
         ..UnwrapOptions::default()
@@ -155,4 +163,34 @@ fn generated_meshes_have_no_spikes() {
             }
         }
     }
+}
+
+#[test]
+fn spike_tips_are_excluded_from_the_distortion_by_default_and_the_report_says_which() {
+    let (mesh, spikes) = spiked_disk();
+    let default = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
+    let found = default.report.charts[0].spikes.as_ref().unwrap();
+    let mut expected = spikes;
+    expected.sort_unstable();
+    assert_eq!(found.excluded, expected);
+    assert!(found.not_excluded_boundary.is_empty());
+    assert!(default.report.warnings.iter().any(|w| w.contains("excluded from the distortion")));
+    let warn = UnwrapOptions {
+        spike_check: Some(SpikeCheck {
+            action: SpikeAction::WarnOnly,
+            ..SpikeCheck::default()
+        }),
+        ..UnwrapOptions::default()
+    };
+    let only = unwrap(&mesh.input(), &warn).unwrap();
+    assert!(only.cones != default.cones || only.uvs != default.uvs, "the exclusion had no effect");
+    // Also with optimized boundary values; interior tips are excluded, the result is valid.
+    let free = UnwrapOptions {
+        boundary: ddg_uv::BoundaryValues::Optimized,
+        ..UnwrapOptions::default()
+    };
+    let map = unwrap(&mesh.input(), &free).unwrap();
+    check(&mesh, &mesh.input(), &map, &free);
+    let found = map.report.charts[0].spikes.as_ref().unwrap();
+    assert_eq!(found.excluded, expected, "{found:?} {:?}", map.report.warnings);
 }

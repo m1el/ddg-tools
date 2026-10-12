@@ -9,7 +9,7 @@ use ddg_uv::primitives::{
     End, cone, cylinder, grid_cube, holed_slab, jittered, revolution, torus, uv_sphere,
 };
 use ddg_uv::{
-    ClosedSurfaces, Cone, ConeSigns, MeshInput, MergeClusters, PackOptions, PolygonMesh,
+    BoundaryValues, ClosedSurfaces, Cone, ConeSigns, MeshInput, MergeClusters, PackOptions, PolygonMesh,
     SlitPlacement, UnwrapOptions, UvError, unwrap,
 };
 use proptest::prelude::*;
@@ -115,6 +115,7 @@ fn options_of(rng: &mut SplitMix64) -> UnwrapOptions {
             None,
         ][pick(rng, 3)],
         reoptimize_angles: pick(rng, 3) == 0,
+        boundary: [BoundaryValues::Zero, BoundaryValues::Optimized][pick(rng, 2)],
         ..UnwrapOptions::default()
     }
 }

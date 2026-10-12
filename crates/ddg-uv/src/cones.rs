@@ -130,7 +130,7 @@ fn piece_cones(
     let mut excluded: Vec<u32> = Vec::new();
     if let Some(check) = &options.spike_check {
         let start = Instant::now();
-        match spikes::check_piece(prepared, piece, check, options.boundary == BoundaryValues::Optimized && !closed) {
+        match spikes::check_piece(prepared, piece, check) {
             Ok(found) => {
                 spike_report = found;
                 if let Some(found) = &mut spike_report
