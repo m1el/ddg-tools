@@ -314,6 +314,56 @@ fn stage(kind: StageKind, outcome: &NewtonOutcome, start: Instant) -> StageRepor
     }
 }
 
+fn max_difference(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f64::max)
+}
+
+/// Runs one regularized problem, records its stage, and returns how it ended
+/// ([`StageStop::LinearSolverFailure`] if a Newton system could not be solved accurately).
+#[allow(clippy::too_many_arguments)]
+fn run_regularized(
+    d: &Discrete,
+    solver: &mut dyn NewtonLinearSolver,
+    kind: StageKind,
+    (k, center): (&[f64], &[f64]),
+    x: &mut Iterate,
+    max_iterations: usize,
+    par: Parallelism<'_>,
+    (stages, message): (&mut Vec<StageReport>, &mut Option<String>),
+) -> StageStop {
+    let start = Instant::now();
+    match solve_regularized(d, solver, k, center, x, max_iterations, par) {
+        Ok(outcome) => {
+            match outcome.stop {
+                StageStop::Stalled => {
+                    *message = Some(
+                        "a regularized problem could not be solved: its Newton systems are too \
+                         ill-conditioned"
+                            .to_string(),
+                    )
+                }
+                StageStop::IterationLimit => {
+                    *message = Some(
+                        "a regularized problem reached its iteration limit before it was solved"
+                            .to_string(),
+                    )
+                }
+                _ => {}
+            }
+            stages.push(stage(kind, &outcome, start));
+            outcome.stop
+        }
+        Err(failure) => {
+            *message = Some(failure.message);
+            stages.push(failed_stage(kind, start));
+            StageStop::LinearSolverFailure
+        }
+    }
+}
+
 fn failed_stage(kind: StageKind, start: Instant) -> StageReport {
     StageReport {
         kind,
@@ -358,39 +408,31 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 
     if n > 0 {
         let mut solver = SaddleSolver::new(&d, options.linear_solver)?;
-
-        // Stage I: the regularized problems.
-        let stage_start = Instant::now();
-        // The regularized problem that was solved last: its stiffness and centre, and how its
-        // Newton iteration ended.
+        // The regularized problem that ran last: its parameter, stiffness and centre, and how
+        // its Newton iteration ended.
         let mut gamma = 1.0;
         let mut k: Vec<f64> = Vec::new();
         let mut center = vec![0.0; n];
         let mut last_stop = StageStop::ActiveSetsUnchanged;
+
+        // Stage I: the regularized problems.
+        let stage_start = Instant::now();
         for &next in &options.regularization {
             gamma = next;
             k = stiffness(&d, options.regularization_metric, gamma, f64::INFINITY);
-            let kind = StageKind::Regularized { gamma };
-            let start = Instant::now();
-            match solve_regularized(
+            last_stop = run_regularized(
                 &d,
                 &mut solver,
-                &k,
-                &center,
+                StageKind::Regularized { gamma },
+                (&k, &center),
                 &mut x,
                 options.max_regularized_iterations,
                 par,
-            ) {
-                Ok(outcome) => {
-                    last_stop = outcome.stop;
-                    stages.push(stage(kind, &outcome, start));
-                }
-                Err(failure) => {
-                    stages.push(failed_stage(kind, start));
-                    message = Some(failure.message);
-                    linear_failure = true;
-                    break;
-                }
+                (&mut stages, &mut message),
+            );
+            if last_stop == StageStop::LinearSolverFailure {
+                // Too stiff for an accurate solve: the safeguard below lowers the stiffness.
+                break;
             }
         }
         timings.regularized = stage_start.elapsed().as_secs_f64();
@@ -401,7 +443,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         // Whether the last proximal step did not move the cone angles: then they solve the
         // exact problem.
         let mut fixed_point = false;
-        while !linear_failure {
+        loop {
             // The exact iteration is only worth starting from a solved regularized problem.
             if last_stop.is_success() {
                 let start = Instant::now();
@@ -420,16 +462,11 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                             message = None;
                             break;
                         }
-                        message = Some(
-                            match outcome.stop {
-                                StageStop::Cycle => {
-                                    "the exact Newton iteration returned to active sets it had \
-                                     already tried"
-                                }
-                                _ => "the exact Newton iteration reached its iteration limit",
-                            }
-                            .to_string(),
-                        );
+                        let what = match outcome.stop {
+                            StageStop::Cycle => "returned to active sets it had already tried",
+                            _ => "reached its iteration limit",
+                        };
+                        message = Some(format!("the exact Newton iteration {what}"));
                     }
                     Err(failure) => {
                         stages.push(failed_stage(StageKind::Exact, start));
@@ -445,21 +482,15 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                     // though the exact iteration cannot confirm it. The certificate decides.
                     break;
                 }
-            } else {
-                message = Some(
-                    match last_stop {
-                        StageStop::Stalled => {
-                            "a regularized problem could not be solved: its Newton systems are too \
-                         ill-conditioned"
-                        }
-                        _ => {
-                            "a regularized problem reached its iteration limit before it was solved"
-                        }
-                    }
-                    .to_string(),
-                );
             }
-            if safeguard_rounds == options.max_safeguard_rounds {
+            let ill_conditioned = matches!(
+                last_stop,
+                StageStop::Stalled | StageStop::LinearSolverFailure
+            );
+            if safeguard_rounds == options.max_safeguard_rounds
+                || (ill_conditioned && stiffness_cap <= MIN_PROXIMAL_STIFFNESS)
+            {
+                linear_failure = last_stop == StageStop::LinearSolverFailure;
                 break;
             }
             safeguard_rounds += 1;
@@ -467,7 +498,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 // Out of iterations: continue the same regularized problem.
                 StageStop::IterationLimit if !k.is_empty() => {}
                 // Too ill-conditioned: a proximal step with a hundred times less stiffness.
-                StageStop::Stalled => {
+                StageStop::Stalled | StageStop::LinearSolverFailure => {
                     stiffness_cap = (stiffness_cap * 1e-2).max(MIN_PROXIMAL_STIFFNESS);
                     k = stiffness(&d, options.regularization_metric, gamma, stiffness_cap);
                     center.copy_from_slice(&x.mu);
@@ -484,34 +515,19 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             } else {
                 StageKind::Proximal { gamma }
             };
-            let start = Instant::now();
-            match solve_regularized(
+            last_stop = run_regularized(
                 &d,
                 &mut solver,
-                &k,
-                &center,
+                kind,
+                (&k, &center),
                 &mut x,
                 options.max_regularized_iterations.max(1),
                 par,
-            ) {
-                Ok(outcome) => {
-                    last_stop = outcome.stop;
-                    let moved =
-                        x.mu.iter()
-                            .zip(&center)
-                            .map(|(a, b)| (a - b).abs())
-                            .fold(0.0, f64::max);
-                    let size = x.mu.iter().fold(1.0f64, |m, v| m.max(v.abs()));
-                    fixed_point =
-                        outcome.stop.is_success() && moved <= FIXED_POINT_TOLERANCE * size;
-                    stages.push(stage(kind, &outcome, start));
-                }
-                Err(failure) => {
-                    stages.push(failed_stage(kind, start));
-                    message = Some(failure.message);
-                    linear_failure = true;
-                }
-            }
+                (&mut stages, &mut message),
+            );
+            let moved = max_difference(&x.mu, &center);
+            let size = x.mu.iter().fold(1.0f64, |m, v| m.max(v.abs()));
+            fixed_point = last_stop.is_success() && moved <= FIXED_POINT_TOLERANCE * size;
         }
         timings.exact = stage_start.elapsed().as_secs_f64();
         linear_report = solver.report();

@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use ddg_core::SparseMatrix;
 use ddg_core::sparse::{
-    EliminationOrder, Factorization, Method, Parallelism, RefineOptions, SparseError, Symbolic,
+    EliminationOrder, Factorization, Method, Parallelism, SparseError, Symbolic,
     fill_reducing_ordering,
 };
 
@@ -125,11 +125,10 @@ pub(crate) trait NewtonLinearSolver {
 /// Componentwise backward error up to which a solution is accepted: every equation must hold
 /// up to this fraction of the magnitude of its own terms.
 const ACCEPT_BACKWARD_ERROR: f64 = 1e-11;
-/// Target of the iterative refinement.
-const REFINE: RefineOptions = RefineOptions {
-    max_steps: 4,
-    tolerance: 1e-14,
-};
+/// Iterative refinement stops once the componentwise backward error is at most this.
+const TARGET_BACKWARD_ERROR: f64 = 1e-14;
+/// Limit on the refinement steps of one solve.
+const MAX_REFINEMENT_STEPS: usize = 4;
 
 /// Reference implementation: sparse factorization of the symmetric saddle-point matrix
 /// `[[W, A], [A, −K]]` in the unknowns `(u, φ)`.
@@ -314,20 +313,49 @@ impl<'d> SaddleSolver<'d> {
             .map_err(|e| format!("{name} factorization failed: {e}"))?;
         let factorization = if lu { &self.lu } else { &self.ldlt };
         let factorization = factorization.as_ref().expect("factorized above");
-        let mut x = vec![0.0; rhs.len()];
+        // Solve, then refine until every equation holds to rounding level relative to its own
+        // terms. A step that does not improve the solution ends the refinement.
         let start = Instant::now();
-        let outcome = factorization.solve_refined(&self.k, rhs, &mut x, REFINE, par);
+        let mut x = rhs.to_vec();
+        let outcome = factorization
+            .solve_in_place(&mut x, par)
+            .map_err(|e| format!("{name} solve failed: {e}"));
+        let mut solves = 1;
+        let mut residual = vec![0.0; rhs.len()];
+        let mut error = f64::NAN;
+        if outcome.is_ok() {
+            error = backward_error(&self.k, &x, rhs, &mut residual);
+            let mut candidate = vec![0.0; rhs.len()];
+            let mut candidate_residual = vec![0.0; rhs.len()];
+            while error > TARGET_BACKWARD_ERROR && solves <= MAX_REFINEMENT_STEPS {
+                let mut correction = residual.clone();
+                if factorization.solve_in_place(&mut correction, par).is_err() {
+                    break;
+                }
+                solves += 1;
+                for i in 0..x.len() {
+                    candidate[i] = x[i] + correction[i];
+                }
+                let refined = backward_error(&self.k, &candidate, rhs, &mut candidate_residual);
+                // Written so that a NaN counts as no improvement.
+                if !(refined < error) {
+                    break;
+                }
+                std::mem::swap(&mut x, &mut candidate);
+                std::mem::swap(&mut residual, &mut candidate_residual);
+                error = refined;
+            }
+        }
         self.report.solve_time += start.elapsed();
-        let refined = outcome.map_err(|e| format!("{name} solve failed: {e}"))?;
-        self.report.solves += 1 + refined.steps;
-        self.report.refinement_steps += refined.steps;
-        let error = componentwise_backward_error(&self.k, &x, rhs);
+        self.report.solves += solves;
+        self.report.refinement_steps += solves - 1;
+        outcome?;
         // Written so that a NaN is rejected.
         if !(error <= ACCEPT_BACKWARD_ERROR) {
             return Err(format!(
                 "{name} solve is inaccurate: componentwise backward error {error:.3e} after {} \
                  refinement steps",
-                refined.steps
+                solves - 1
             ));
         }
         self.report.worst_backward_error = self.report.worst_backward_error.max(error);
@@ -335,17 +363,18 @@ impl<'d> SaddleSolver<'d> {
     }
 }
 
-/// The componentwise backward error `max_i |K x − b|_i / (|K| |x| + |b|)_i` (Oettli–Prager):
+/// The componentwise backward error `max_i |b − K x|_i / (|K| |x| + |b|)_i` (Oettli–Prager):
 /// the smallest relative perturbation of the entries of `K` and `b` for which `x` is an exact
 /// solution. Unlike a residual norm it does not depend on how the equations are scaled.
-fn componentwise_backward_error(k: &SparseMatrix, x: &[f64], b: &[f64]) -> f64 {
-    let mut residual: Vec<f64> = b.iter().map(|v| -v).collect();
+/// `residual` receives `b − K x`. Returns NaN if the residual is not finite.
+fn backward_error(k: &SparseMatrix, x: &[f64], b: &[f64], residual: &mut [f64]) -> f64 {
+    residual.copy_from_slice(b);
     let mut magnitude: Vec<f64> = b.iter().map(|v| v.abs()).collect();
     let (col_ptr, row_idx, values) = (k.col_ptr(), k.row_idx(), k.values());
     for (j, &xj) in x.iter().enumerate() {
         for p in col_ptr[j]..col_ptr[j + 1] {
             let term = values[p] * xj;
-            residual[row_idx[p] as usize] += term;
+            residual[row_idx[p] as usize] -= term;
             magnitude[row_idx[p] as usize] += term.abs();
         }
     }
