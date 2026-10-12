@@ -100,8 +100,9 @@
 //! leaves all of it in one wedge the layout overlaps itself there, and the report says so
 //! (see [`plan`], *Negative cones*).
 //!
-//! Functions that implement a formula carry a line of the form `[formula: id]` in their
-//! documentation; the ids are listed with their statements in the crate README.
+//! Functions that implement a formula carry a tag in their documentation, the word
+//! `formula:` followed by an id, in square brackets; the ids are listed with their statements
+//! in the crate README.
 //!
 //! # Differences from the reference implementation
 //!
