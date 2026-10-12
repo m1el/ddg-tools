@@ -23,6 +23,7 @@ ddg_tools.unwrap(
     forbidden_vertices=None,
     lambda_=0.1,
     positive_cones_only=True,
+    optimize_boundary=False,
 ) -> ddg_tools.UnwrapResult
 
 ddg_tools.pack_charts(uvs, polygon_starts, polygon_charts, *, margin=0.0)
@@ -87,6 +88,14 @@ Rules for the mesh arrays (violations raise `InputError`):
   (the angles must sum to `2πχ < 0`); it gets cones of either sign and a warning.
   `False` allows both signs everywhere; negative cones lower the distortion and can make the
   map overlap itself.
+- `optimize_boundary=False` (default): the scale factor is zero along the boundary of every piece
+  (the mesh's boundary and the seams), so boundary lengths, and the two sides of a seam, keep
+  their lengths. `True` lets the cone solver optimize it (paper Sec. 8.3): lower distortion on
+  some meshes, but the two sides of a seam get different lengths (`max_seam_length_mismatch`),
+  and where the optimized values are large the flattening does not realize them
+  (`max_boundary_length_error`) and the map can overlap itself or have mirrored triangles; on
+  8 of 19 dataset meshes with boundary it does (`crates/ddg-uv/README.md`, "The boundary").
+  Closed pieces are not affected.
 - Steering acts on vertices that are interior to their piece: a pinned vertex is a cone site
   that costs nothing, a forbidden vertex gets no cone, a prescribed vertex gets exactly the given
   angle. On a mesh boundary or along a seam there are no cones: pinned and forbidden vertices
@@ -136,7 +145,7 @@ estimated (it is, by default).
 | `pipeline`, `placeholder` | which pipeline ran (`"ddg-uv"`), and whether it is a stand-in (`False`) |
 | `n_vertices`, `n_polygons`, `n_corners`, `n_triangles` | size of the input |
 | `n_seam_edges`, `n_pinned`, `n_prescribed`, `n_forbidden` | the steering as the Rust side received it (after removing duplicates) |
-| `lambda`, `positive_cones_only` | the options as received |
+| `lambda`, `positive_cones_only`, `optimize_boundary` | the options as received |
 | `n_charts`, `n_cones`, `n_cut_edges` | size of the result |
 | `n_unreferenced_vertices` | vertices that no polygon uses (ignored) |
 | `n_flipped_faces` | polygons whose winding was repaired |
@@ -146,6 +155,8 @@ estimated (it is, by default).
 | `n_closed_pieces`, `n_slits` | closed pieces after the seams, and automatic slits made in them |
 | `n_negative_cones`, `total_cone_angle`, `max_cone_angle`, `min_cone_angle` | cone statistics (radians) |
 | `cones_certified`, `cone_solver_max_residual`, `cone_solver_max_gap`, `cone_solver_factorizations` | the solver's optimality certificate and effort |
+| `boundary_values_optimized`, `max_boundary_length_error` | whether any chart used optimized boundary values, and the largest relative difference between a boundary edge's length in the layout and the length the scale factors ask for |
+| `max_seam_length_mismatch`, `mean_seam_length_mismatch`, `max_other_cut_length_mismatch` | relative difference of the lengths of the two images of a seam edge (largest, mean), and of the other cut edges (largest); about 1e-13 for `optimize_boundary=False` away from cones at the angle bound |
 | `n_merges_rejected` | cone clusters whose merge the guard rejected |
 | `area_distortion`, `area_distortion_unscaled` | the dataset README's distortion measure `Σ A u²` of the map, with and without taking the scale out |
 | `flatten_flipped_triangles`, `flatten_collapsed_triangles`, `max_quasi_conformal_error` | the flattener's own checks |

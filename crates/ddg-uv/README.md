@@ -25,7 +25,7 @@ triangulation, seams, steering, policies for what the papers leave open, packing
 not computed here (Blender triangulates; `PolygonMesh::from_polygons` fans convex polygons).
 
 Contents: [example](#example) · [API](#api) · [stages and policies](#stages-and-policies) ·
-[the four decisions](#the-four-decisions) · [the dataset](#the-dataset) ·
+[the four decisions](#the-four-decisions) · [the dataset](#the-dataset) · [the boundary](#the-boundary) ·
 [benchmarks](#benchmarks) · [tests](#tests) · [not done, not verified](#not-done-not-verified)
 
 ## Example
@@ -54,12 +54,12 @@ let map = unwrap(&input, &UnwrapOptions::default())?;
 | `unwrap(&MeshInput, &UnwrapOptions) -> Result<UvMap, UvError>` | the whole pipeline |
 | `MeshInput { positions, corner_vertices, polygon_offsets, triangles, seam_edges, pinned_vertices, prescribed_cones, forbidden_vertices }` | borrowed input; `triangles` are triples of polygon-**corner** indices; `MeshInput::new`, `validate` |
 | `UvMap { uvs, polygon_charts, cones, cut_edges, report }` | the result |
-| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, require_certified_cones, spike_check }` | every policy, see below; `validate` |
-| `ConeSigns`, `ClosedSurfaces`, `SlitPlacement`, `MergeClusters`, `Orientation`, `Degenerate`, `PackOptions`, `SpikeCheck` | the policy types |
+| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, boundary, require_certified_cones, spike_check }` | every policy, see below; `validate` |
+| `ConeSigns`, `ClosedSurfaces`, `SlitPlacement`, `MergeClusters`, `Orientation`, `Degenerate`, `PackOptions`, `SpikeCheck`, `SpikeAction`, `BoundaryValues` | the policy types |
 | `prepare`, `solve_cones`, `flatten`, `assemble` (`Prepared`, `Piece`, `ConeStage`, `PieceCones`, `FlatStage`, `PieceFlat`) | the stages as separate functions |
 | `pack_charts(&mut uvs, polygon_offsets, polygon_charts, &PackOptions) -> Result<PackReport, UvError>` | the packer on its own |
 | `area_distortion(positions, corner_vertices, triangles, uvs) -> AreaDistortion` | the dataset README's distortion measure of any UV map |
-| `Report` (`ValidationReport`, `SeamReport`, `DegenerateReport`, `SteeringReport`, `ChartReport`, `ConeSolveReport`, `FlattenReport`, `ConeStats`, `ClosedHandling`, `MergeOutcome`, `Timings`, `PackReport`, `SpikeReport`), `Report::summary() -> Vec<(&str, Value)>` | the report, typed and as a flat key–value list for bindings |
+| `Report` (`ValidationReport`, `SeamReport`, `DegenerateReport`, `SteeringReport`, `ChartReport`, `ConeSolveReport`, `FlattenReport`, `ConeStats`, `SeamLengths`, `ClosedHandling`, `MergeOutcome`, `Timings`, `PackReport`, `SpikeReport`), `Report::summary() -> Vec<(&str, Value)>` | the report, typed and as a flat key–value list for bindings |
 | `UvError`, `UvError::kind() -> ErrorKind { Input, Mesh, Solve }` | every refusal, in the caller's vertex and polygon numbers |
 | `PolygonMesh` (`from_triangles`, `from_polygons`, `input`, `edges`), `fan_triangulation` | an owned mesh, for tests and callers without their own arrays |
 | `primitives::{uv_sphere, capsule, cylinder, cone, torus, cube, grid_cube, holed_slab, voxel_surface, revolution, jittered}` | Blender-like polygon meshes for tests and benchmarks |
@@ -87,7 +87,8 @@ surface that cannot be oriented.
 
 **2. Seams first.** Seams are cut before anything else (`ddg_bff::cut_mesh`), so the cone
 solver and the flattener see the same seam-cut surface: seams are boundary, `u = 0` along
-them, both sides keep their length. The connected pieces are the charts, numbered by their
+them, both sides keep their length (with the default `BoundaryValues::Zero`; with
+`Optimized` they do not, see [the boundary](#the-boundary)). The connected pieces are the charts, numbered by their
 lowest polygon.
 
 - A seam that is not an edge of a polygon (a diagonal, two unrelated vertices, a loose vertex)
@@ -112,6 +113,8 @@ normalized to 1.
 | `closed_surfaces` (closed pieces of genus 0) | `Auto { max_cones: 32, max_cone_fraction: 0.01, fallback_sites: 8 }`: the raw optimum, unless it is dense | `RawOptimum`, `FreeSites { count, max_angle, forbid_elsewhere }`, `Slit { placement, relative_length }`, `Refuse` (any closed piece is an error) |
 | `merge` | `Guarded { max_cluster_size: ∞, max_factor: 10, max_increase: 0.05 }` | `Never`, `Always { max_cluster_size }` |
 | `reoptimize_angles` | `false` | `true`: a second solve for the best angles at the chosen positions |
+| `boundary` | `Zero`: `u = 0` on the boundary of every piece, boundary lengths (and so the two sides of a seam) preserved | `Optimized`: the solver chooses `u` on the boundary, [see below](#the-boundary) |
+| `spike_check.action` | `ExcludeFromDistortion`: spike tips get zero distortion weight, see [the spike check](#the-spike-check) | `WarnOnly` |
 | `require_certified_cones` | `false`: uncertified cones are used with a warning | `true`: an error |
 
 Then the piece is cut through its cones by `ddg-bff`'s planner with a mask that allows
@@ -337,13 +340,13 @@ flat grid has `E0 = 2·10⁻³¹`), `k ≤ 64`, and `k ≤ 1 %` of the piece's v
 fewer than 100 vertices never has any). The spikes are those `k` vertices.
 
 **Output.** `ChartReport::spikes: Option<SpikeReport { cone_free_distortion, n_carrying,
-vertices, share }>` with the vertices in the caller's numbering, ascending (empty unless the
+vertices, share, excluded, not_excluded_boundary }>` with the vertices in the caller's numbering, ascending (empty unless the
 criterion holds); in `Report::summary()` the keys `cone_free_distortion` (largest over the
 charts), `n_spike_vertices`, `spike_vertices` (text, at most 64 numbers; only if there are
 spikes) and `seconds_spike_check`; and a warning per piece with spikes that names up to 16 of
 the vertices, says that the map is likely to be poor and suggests repairing the mesh (moving the
-vertices back onto the surface or removing them). `spike_check: None` switches it off; the map
-does not depend on it (tested). If the evaluation itself fails (the Laplacian cannot be
+vertices back onto the surface or removing them). `spike_check: None` switches it off; with `action: WarnOnly` the map does not depend on it
+(tested). If the evaluation itself fails (the Laplacian cannot be
 factorized) the check is skipped with a warning.
 
 **Measured** (`cargo run --release -p ddg-uv --example spikes`; `tests/dataset.rs`,
@@ -366,10 +369,40 @@ time (6 % on `bump` and 5 % on `face`, which have 0 cones and so no long cone so
 
 **What it does not do.** It fires only when the spikes carry 99 % of the distortion: a
 mesh with a few spikes on top of a rough surface whose own cone-free distortion is more than 1 %
-of theirs is not flagged. It does not repair anything, and does not set the distortion weight of
-the spike tips to zero (the remedy of the solver's README, which would make the map ignore them).
+of theirs is not flagged. It does not repair anything, and (with `WarnOnly`) does not set the distortion weight of
+the spike tips to zero.
 A thin spike that is a real feature (a very thin horn) is flagged too: for this method it is the
 same thing.
+
+**Exclusion** (`SpikeCheck::action`, default `SpikeAction::ExcludeFromDistortion`). The solver's
+energy gives a one-vertex needle a log scale factor of about -15 000 on `camelshotnoise`, while in
+the realized map the needle triangles come out at about -4 (the flattener places the tip by
+interpolating between its neighbours) on 0.26 % of the area: the energy overstates their cost by
+orders of magnitude and the optimum spends cones on them. With the default the detected tips
+get `distortion_weights = 0` in the cone problem (the remedy of the solver's README) and the
+warning says how many were excluded. `WarnOnly` keeps the old behaviour. Only vertices that are
+interior to their piece are excluded; a tip on the boundary is listed in
+`SpikeReport::not_excluded_boundary` (with optimized boundary values a zero weight at a free
+boundary vertex makes the problem ill-posed). If the weights would all be zero the piece is left
+alone (the detector's limits make that impossible: at most 1 % of the vertices). The detection
+itself always uses the state with `u = 0` on the boundary: with a free boundary the cone-free
+state spreads a needle's curvature over the piece (on a disk with two needles 317 of 625
+vertices then carry 99 %), which is no longer a local signature.
+
+`camelshotnoise` (release, all other settings default; `evaluate spikeaction`):
+
+| boundary | spikes | cones | distortion | published | overlap % | mirrored | seconds |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `Zero` | `WarnOnly` | 22 | 52.967 | 0.0953 | 17.883 | 14 742 | 0.63 |
+| `Zero` | `ExcludeFromDistortion` (default) | 4 | 0.2595 | 0.0953 | 0.001 | 116 | 4.5 |
+| `Optimized` | `WarnOnly` | 22 | 29.287 | 0.0953 | 19.832 | 10 908 | 0.50 |
+| `Optimized` | `ExcludeFromDistortion` | 2 | 0.9612 | 0.0953 | 13.123 | 20 804 | 5.95 |
+
+The other 22 dataset meshes and the generated meshes are unchanged (the detector does not fire
+on them; `tests/dataset.rs` still asserts their warning-free results). The cone solve is slower
+with the exclusion on `camelshotnoise` (4.5 s instead of 0.5 s). Excluded tips still count in the
+distortion of the realized map, so the pipeline's measured distortion (0.26) stays above the
+published map's 0.095.
 
 ## The dataset
 
@@ -422,14 +455,242 @@ seams takes at most 1 ms here and is left out; there are none).
 - **Mirrored triangles** occur on four more meshes: brain 38, camel_noise1 19, camel_noise2
   108, mannequin 2. The flattener's README has 38, 19, 113 and 2 on these meshes with the
   published cones, and traces them to the triangulation.
-- **`camelshotnoise`** (132 one-vertex spikes) is the one result that is not usable: 22 cones,
-  all at the angle bound, distortion 53, 17.9 % overlap, 14 742 of 22 968 triangles mirrored.
-  The report carries four warnings saying so, the first of them the [spike
-  check](#the-spike-check), which names the 22 spike tips before the solve. The solver's README
-  explains the cause (the distortion of a spike in the linearized model) and a remedy the
-  pipeline does not apply (zero distortion weight at the spike tips).
+- **`camelshotnoise`** (22 one-vertex spikes): with `SpikeAction::WarnOnly` the result is not
+  usable (22 cones, all at the angle bound, distortion 53, 17.9 % overlap, 14 742 of 22 968
+  triangles mirrored); the table row above is that run. The default excludes the spike tips from
+  the distortion measure of the cone problem ([the spike check](#the-spike-check)): 4 cones
+  (Σ|µ| 7.669), distortion 0.2595 against the published 0.0953, 0.001 % overlap, 116 mirrored
+  triangles, 4.7 s; the report keeps one warning (the spike warning).
 - **Time**: the cone stage is 96.6 % of the total over the 23 meshes (60.6 of 62.7 s); the
   brain takes 33.2 of its 34.1 s there.
+
+## The boundary
+
+`UnwrapOptions::boundary` chooses the scale factor `u` on the boundary of every piece (the
+mesh's own boundary and the seams; closed pieces are untouched).
+
+* `BoundaryValues::Zero` (default): `u = 0`, the cone solver's `Fixed` treatment (paper Fig. 10 b).
+  Boundary lengths are preserved, so the two sides of a seam, which belong to different pieces,
+  have the same length.
+* `BoundaryValues::Optimized`: `u` on the boundary is a variable of the cone problem
+  (`BoundaryTreatment::Free`, paper Sec. 8.3, Fig. 10 c); the geodesic curvature of the flattened
+  boundary is free. The solver's `log_scale` (nonzero on the boundary) is handed to
+  `ddg_bff::flatten_with_cones` as `scale_factors`; the flattener checks that it is flat away from
+  the cut, takes the boundary lengths `e^{(u_i+u_j)/2} l_ij` and exterior angles from it, and
+  closes the boundary curve. If the flatness check fails the flattener solves for its own scale
+  factors again (with `u = 0` on the boundary); the warning says that the optimized values of the
+  piece were dropped and `ChartReport::boundary_optimized` is `false` for it.
+
+What changes in the pipeline with `Optimized` (the rest was checked to be indifferent to `u` on
+the boundary): the solver's `measure` holds the boundary curvature at boundary vertices, so cones
+are taken from interior vertices only (also when a cluster merge is rejected); the angle
+re-optimization solves with the same treatment; the solver's distortion includes the boundary
+vertices (cluster merging and its guard compare two such numbers, which is consistent); the
+closed-surface logic, including the automatic slit, runs with `Fixed` (the slit's two sides keep
+their lengths), so a closed piece gives exactly the same map as before (tested); the spike check
+measures the state with `u = 0` (see its section).
+
+**The report.**
+
+* `Report::seam_lengths: SeamLengths`: for every cut edge that has a polygon on each side, the
+  relative difference `|a - b| / max(a, b)` of the lengths of its two images in the layout (taken
+  before packing, which scales all charts alike). `max_seam_mismatch`, `mean_seam_mismatch` and
+  `worst_seam_edge` are over the seam edges (given ones and extension edges),
+  `max_other_mismatch` over the other cut edges (slits, cuts through cones). In `summary()`:
+  `max_seam_length_mismatch`, `mean_seam_length_mismatch`, `max_other_cut_length_mismatch`. A
+  texture painted across a seam is stretched by this much differently on its two sides. With
+  `Zero` it is what closing the boundary curve changed (about 1e-13 on benign meshes, 5 % to 28 %
+  where a cone sits at the angle bound).
+* `FlattenReport::boundary_length_error`: the largest `|l' - l*| / l*` over the boundary edges of
+  a piece, `l'` the length in the layout, `l* = e^{(u_i+u_j)/2} l` the length the scale factors
+  ask for. In `summary()`: `max_boundary_length_error`, and `boundary_values_optimized`.
+* `ChartReport::boundary_optimized`.
+
+**Does the flattening realize the solver's values?** Measured independently of the flattener's
+own bookkeeping (`evaluate verify`, `tests/boundary.rs`: the solver's `log_scale` and the 3D
+lengths against the corner UVs of the layout):
+
+| mesh | boundary edges | solver `u` on the boundary (min to max) | largest relative error of a boundary length |
+|---|---:|---|---:|
+| tree | 240 | 1.150 to 41.3 | 1.9e-5 (but every triangle is mirrored) |
+| bump | 128 | 0.420 to 0.634 | 7.4e-5 |
+| body | 48 | -1.145 to -0.154 | 9.6e-4 |
+| face | 340 | 0 to 0.511 | 4.2e-3 |
+| cow (all five) | 97 | 0.199 to 2.673 | 8.2e-3 |
+| airplane | 40 | -0.968 to -0.293 | 1.0e-2 |
+| hand | 82 | -0.737 to 2.845 | 1.1e-2 |
+| rhino | 104 | 0.268 to 3.607 | 9.5e-3 |
+| mannequin | 63 | 0 to 5.536 | 0.135 |
+| camel_noise2 | 56 | -2.697 to 8.152 | 0.166 |
+| camel, camelbad, camelbadnonuniform, camel_noise1 | 56 to 57 | -0.13 to 6.2 | 0.48 to 0.55 |
+| camelshotnoise (before the spike exclusion) | 56 | -122 to 1.9 | 1.9 |
+| generated: vase with seams, sphere caps, torus | 64 to 120 | up to 1.25 | at most 1.7e-4 |
+
+Where the solver's boundary values are large (a boundary vertex with `u` of 3 to 8 is common: the
+objective weights a vertex by its mass, and a boundary vertex has little), the flattening does
+not follow them. The likely cause, read from `ddg-bff` and not tested by changing it: the exterior
+angles come from the *linearized* relation between `u` and the boundary curvature, so the curve
+built from the target lengths does not close; the closing step changes lengths where it can
+(reported by the flattener as `closure_length_change`, 0 on all of these meshes) and spreads what
+is left of the gap linearly along the curve, which changes edge lengths without any report. The
+figure above is the only place where that shows. `ddg-bff` would have to report the length change
+after that spreading, or close the curve with exact angles; that is not done here.
+
+**Evidence for the default.** All 19 dataset meshes with boundary, default `lambda = 0.1`,
+positive cones, default spike handling, release build (`evaluate boundary`). "u=0" is the
+default, "optimized" the option, "reopt" is `reoptimize_angles`. Distortion is the dataset
+README's measure on our UVs, "published" the same measure on the UV map in the OBJ file (whose
+`lambda` is that of the file name, e.g. `cow01` 0.1); overlap and mirrored triangles are of the
+final map; seconds are for the whole `unwrap`.
+
+| mesh | config | cones | distortion | published | overlap % | mirrored | seconds | boundary length error |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| airplane | u=0 | 4 | 1.66445 | 0.12701 | 0.000 | 0 | 0.25 | 9.8e-3 |
+| airplane | u=0 + reopt | 4 | 1.54561 | 0.12701 | 0.000 | 0 | 0.36 | 3.4e-2 |
+| airplane | optimized | 5 | 1.42606 | 0.12701 | 0.000 | 0 | 0.36 | 1.0e-2 |
+| airplane | optimized + reopt | 5 | 1.08638 | 0.12701 | 0.000 | 0 | 0.56 | 3.0e-1 |
+| body | u=0 | 8 | 1.32411 | 0.39335 | 0.000 | 0 | 2.20 | 5.6e-4 |
+| body | u=0 + reopt | 8 | 1.13532 | 0.39335 | 0.000 | 0 | 3.62 | 6.7e-4 |
+| body | optimized | 8 | 0.96929 | 0.39335 | 0.000 | 0 | 2.81 | 9.6e-4 |
+| body | optimized + reopt | 8 | 0.66832 | 0.39335 | 0.000 | 0 | 4.60 | 5.0e-2 |
+| bump | u=0 | 0 | 0.12501 | 0.01969 | 0.000 | 0 | 0.09 | 3.4e-5 |
+| bump | u=0 + reopt | 0 | 0.12501 | 0.01969 | 0.000 | 0 | 0.09 | 3.4e-5 |
+| bump | optimized | 0 | 0.12496 | 0.01969 | 0.000 | 0 | 0.15 | 7.4e-5 |
+| bump | optimized + reopt | 0 | 0.12496 | 0.01969 | 0.000 | 0 | 0.14 | 7.4e-5 |
+| camel | u=0 | 4 | 0.16874 | 0.03740 | 0.000 | 0 | 1.56 | 1.1e-3 |
+| camel | u=0 + reopt | 4 | 0.09082 | 0.03740 | 0.000 | 0 | 2.75 | 1.3e-3 |
+| camel | optimized | 2 | 1.04995 | 0.03740 | 21.438 | 21388 | 1.82 | 4.8e-1 |
+| camel | optimized + reopt | 2 | 0.59655 | 0.03740 | 1.465 | 10 | 2.64 | 2.2e-1 |
+| camel_noise1 | u=0 | 12 | 0.18690 | 0.05123 | 0.001 | 19 | 1.69 | 6.6e-3 |
+| camel_noise1 | u=0 + reopt | 11 | 0.10786 | 0.05123 | 0.001 | 20 | 2.97 | 1.0e-2 |
+| camel_noise1 | optimized | 2 | 0.93399 | 0.05123 | 25.637 | 20379 | 2.78 | 5.5e-1 |
+| camel_noise1 | optimized + reopt | 2 | 0.65170 | 0.05123 | 2.376 | 40 | 3.33 | 3.1e-1 |
+| camel_noise2 | u=0 | 16 | 0.30481 | 0.18262 | 0.028 | 108 | 1.71 | 6.2e-2 |
+| camel_noise2 | u=0 + reopt | 14 | 0.20711 | 0.18262 | 0.030 | 108 | 3.16 | 8.9e-2 |
+| camel_noise2 | optimized | 1 | 1.18063 | 0.18262 | 60.189 | 6466 | 1.39 | 1.7e-1 |
+| camel_noise2 | optimized + reopt | 1 | 0.83843 | 0.18262 | 1.362 | 147 | 2.02 | 2.5e-1 |
+| camelbad | u=0 | 4 | 0.16894 | 0.03681 | 0.000 | 0 | 1.29 | 1.6e-3 |
+| camelbad | u=0 + reopt | 4 | 0.09101 | 0.03681 | 0.000 | 1 | 2.20 | 5.1e-4 |
+| camelbad | optimized | 2 | 0.92531 | 0.03681 | 10.717 | 20401 | 1.57 | 5.2e-1 |
+| camelbad | optimized + reopt | 2 | 0.60986 | 0.03681 | 3.093 | 39 | 2.25 | 2.4e-1 |
+| camelbadnonuniform | u=0 | 4 | 0.16391 | 0.03593 | 0.000 | 0 | 0.96 | 2.5e-3 |
+| camelbadnonuniform | u=0 + reopt | 4 | 0.08723 | 0.03593 | 0.000 | 1 | 1.54 | 6.1e-3 |
+| camelbadnonuniform | optimized | 2 | 0.86746 | 0.03593 | 14.575 | 15783 | 1.04 | 5.0e-1 |
+| camelbadnonuniform | optimized + reopt | 2 | 0.57271 | 0.03593 | 0.711 | 15 | 1.49 | 1.8e-1 |
+| camelshotnoise | u=0 | 4 | 0.25945 | 0.09531 | 0.001 | 116 | 4.39 | 5.6e-2 |
+| camelshotnoise | u=0 + reopt | 4 | 0.16974 | 0.09531 | 0.000 | 73 | 7.68 | 5.8e-2 |
+| camelshotnoise | optimized | 2 | 0.96115 | 0.09531 | 13.123 | 20804 | 6.18 | 4.8e-1 |
+| camelshotnoise | optimized + reopt | 2 | 0.64656 | 0.09531 | 2.237 | 85 | 8.11 | 2.7e-1 |
+| cow00001 | u=0 | 5 | 0.65469 | 0.00000 | 0.000 | 0 | 1.58 | 3.6e-4 |
+| cow00001 | u=0 + reopt | 5 | 0.51448 | 0.00000 | 0.000 | 0 | 2.62 | 6.7e-4 |
+| cow00001 | optimized | 2 | 1.26973 | 0.00000 | 0.000 | 0 | 1.72 | 8.2e-3 |
+| cow00001 | optimized + reopt | 2 | 0.89933 | 0.00000 | 0.000 | 0 | 2.35 | 2.4e-2 |
+| cow01 | u=0 | 5 | 0.65469 | 0.03008 | 0.000 | 0 | 1.56 | 3.6e-4 |
+| cow01 | u=0 + reopt | 5 | 0.51448 | 0.03008 | 0.000 | 0 | 2.48 | 6.7e-4 |
+| cow01 | optimized | 2 | 1.26973 | 0.03008 | 0.000 | 0 | 1.60 | 8.2e-3 |
+| cow01 | optimized + reopt | 2 | 0.89933 | 0.03008 | 0.000 | 0 | 2.25 | 2.4e-2 |
+| cow1 | u=0 | 5 | 0.65469 | 0.90993 | 0.000 | 0 | 1.56 | 3.6e-4 |
+| cow1 | u=0 + reopt | 5 | 0.51448 | 0.90993 | 0.000 | 0 | 2.47 | 6.7e-4 |
+| cow1 | optimized | 2 | 1.26973 | 0.90993 | 0.000 | 0 | 1.63 | 8.2e-3 |
+| cow1 | optimized + reopt | 2 | 0.89933 | 0.90993 | 0.000 | 0 | 2.27 | 2.4e-2 |
+| cow5e-1 | u=0 | 5 | 0.65469 | 0.42601 | 0.000 | 0 | 1.62 | 3.6e-4 |
+| cow5e-1 | u=0 + reopt | 5 | 0.51448 | 0.42601 | 0.000 | 0 | 2.49 | 6.7e-4 |
+| cow5e-1 | optimized | 2 | 1.26973 | 0.42601 | 0.000 | 0 | 1.69 | 8.2e-3 |
+| cow5e-1 | optimized + reopt | 2 | 0.89933 | 0.42601 | 0.000 | 0 | 2.26 | 2.4e-2 |
+| cow75e-2 | u=0 | 5 | 0.65469 | 0.72038 | 0.000 | 0 | 1.59 | 3.6e-4 |
+| cow75e-2 | u=0 + reopt | 5 | 0.51448 | 0.72038 | 0.000 | 0 | 2.50 | 6.7e-4 |
+| cow75e-2 | optimized | 2 | 1.26973 | 0.72038 | 0.000 | 0 | 1.61 | 8.2e-3 |
+| cow75e-2 | optimized + reopt | 2 | 0.89933 | 0.72038 | 0.000 | 0 | 2.27 | 2.4e-2 |
+| face | u=0 | 0 | 0.02030 | 0.00381 | 0.000 | 0 | 0.49 | 4.2e-3 |
+| face | u=0 + reopt | 0 | 0.02030 | 0.00381 | 0.000 | 0 | 0.49 | 4.2e-3 |
+| face | optimized | 0 | 0.01886 | 0.00381 | 0.000 | 0 | 0.95 | 4.2e-3 |
+| face | optimized + reopt | 0 | 0.01886 | 0.00381 | 0.000 | 0 | 0.94 | 4.2e-3 |
+| hand | u=0 | 5 | 1.46453 | 0.01050 | 0.000 | 0 | 0.50 | 1.1e-2 |
+| hand | u=0 + reopt | 5 | 1.28487 | 0.01050 | 0.000 | 0 | 0.76 | 1.1e-2 |
+| hand | optimized | 5 | 1.60215 | 0.01050 | 0.011 | 35 | 0.80 | 1.1e-2 |
+| hand | optimized + reopt | 5 | 0.98333 | 0.01050 | 0.004 | 6 | 1.14 | 2.8e-1 |
+| mannequin | u=0 | 1 | 0.11059 | 0.01757 | 0.000 | 2 | 0.46 | 1.8e-1 |
+| mannequin | u=0 + reopt | 1 | 0.10722 | 0.01757 | 0.000 | 2 | 0.64 | 2.0e-1 |
+| mannequin | optimized | 1 | 0.42475 | 0.01757 | 2.261 | 19 | 0.72 | 1.3e-1 |
+| mannequin | optimized + reopt | 1 | 0.10243 | 0.01757 | 0.008 | 4 | 1.03 | 1.7e-1 |
+| rhino | u=0 | 7 | 0.58652 | 0.03754 | 0.000 | 0 | 3.07 | 3.4e-3 |
+| rhino | u=0 + reopt | 7 | 0.27787 | 0.03754 | 0.000 | 0 | 4.34 | 3.7e-3 |
+| rhino | optimized | 3 | 0.87693 | 0.03754 | 0.000 | 0 | 3.70 | 9.5e-3 |
+| rhino | optimized + reopt | 3 | 0.65078 | 0.03754 | 0.000 | 0 | 5.39 | 1.5e-1 |
+| tree | u=0 | 4 | 0.15879 | 0.04316 | 0.000 | 0 | 2.17 | 9.8e-13 |
+| tree | u=0 + reopt | 4 | 0.09308 | 0.04316 | 0.000 | 0 | 3.11 | 1.1e-12 |
+| tree | optimized | 0 | 1.03477 | 0.04316 | 0.000 | 33296 | 1.80 | 1.9e-5 |
+| tree | optimized + reopt | 0 | 1.03477 | 0.04316 | 0.000 | 33296 | 1.90 | 1.9e-5 |
+
+Reading the table:
+
+* Without angle re-optimization `Optimized` has the lower distortion on `airplane` (1.426 against
+  1.664), `body` (0.969 against 1.324), and marginally on `bump` and `face`; with re-optimization
+  also on `hand` (0.983 against 1.285) and `mannequin`. On the five `cow` files (2 cones against 5)
+  and `rhino` (3 against 7) the distortion is higher: it uses fewer cones, which is the trade the
+  solver's objective makes (a lower objective, not a lower distortion).
+* It breaks the map on the meshes where the boundary values are large: `tree` (0 cones, 33 296 of
+  33 592 triangles mirrored), the camels (10 % to 60 % overlap and 6 000 to 21 000 mirrored
+  triangles without re-optimization; 0.7 % to 3.1 % overlap with it) and `mannequin` (2.3 %
+  overlap, 19 mirrored). The pipeline's warnings fire on them.
+* The gap to the published maps is not closed: on every mesh with boundary the distortion stays
+  several times the published one (`cow01`: 0.030 published, 0.65 ours with `u=0`, 1.27 with
+  `Optimized`; `cow1` and `cow75e-2`, published with 2 and 3 cones: 0.91 and 0.72 against 1.27
+  with 2 cones).
+* Time: `Optimized` costs 1.0 to 1.9 times as much as `u=0` on these meshes.
+
+Generated meshes with seams (`evaluate boundary`): a UV sphere cut by a latitude ring into two
+unequal caps, an open vase (profile `1 + 0.6 sin 3t + 0.3 t`) without seam, with a straight seam
+(one piece cut open) and cut by a ring into two tubes, and a torus cut along a meridian and a
+longitude.
+
+| mesh | config | cones | distortion | overlap % | mirrored | boundary length error | seam edges | max seam mismatch |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| uv_sphere 32x16, ring 3 seam (two unequal caps) | u=0 | 1 | 0.06831 | 0.000 | 0 | 4.9e-2 | 32 | 4.95e-2 |
+| uv_sphere 32x16, ring 3 seam (two unequal caps) | u=0 + reopt | 1 | 0.07024 | 0.000 | 0 | 2.8e-1 | 32 | 2.82e-1 |
+| uv_sphere 32x16, ring 3 seam (two unequal caps) | optimized | 0 | 0.21599 | 0.000 | 0 | 3.3e-14 | 32 | 6.89e-1 |
+| uv_sphere 32x16, ring 3 seam (two unequal caps) | optimized + reopt | 0 | 0.21599 | 0.000 | 0 | 3.3e-14 | 32 | 6.89e-1 |
+| uv_sphere 32x16, ring 5 seam (two unequal caps) | u=0 | 1 | 0.07789 | 0.000 | 0 | 6.1e-4 | 32 | 6.13e-4 |
+| uv_sphere 32x16, ring 5 seam (two unequal caps) | u=0 + reopt | 1 | 0.02682 | 0.000 | 0 | 1.0e-1 | 32 | 1.05e-1 |
+| uv_sphere 32x16, ring 5 seam (two unequal caps) | optimized | 0 | 0.07612 | 0.000 | 0 | 2.5e-14 | 32 | 3.96e-1 |
+| uv_sphere 32x16, ring 5 seam (two unequal caps) | optimized + reopt | 0 | 0.07612 | 0.000 | 0 | 2.5e-14 | 32 | 3.96e-1 |
+| open vase 32x16, no seam | u=0 | 0 | 0.01165 | 0.000 | 0 | 7.5e-5 | 0 | 0.00e0 |
+| open vase 32x16, no seam | u=0 + reopt | 0 | 0.01165 | 0.000 | 0 | 7.5e-5 | 0 | 0.00e0 |
+| open vase 32x16, no seam | optimized | 0 | 0.01163 | 0.000 | 0 | 5.7e-5 | 0 | 0.00e0 |
+| open vase 32x16, no seam | optimized + reopt | 0 | 0.01163 | 0.000 | 0 | 5.7e-5 | 0 | 0.00e0 |
+| open vase 32x16, straight seam | u=0 | 0 | 0.01234 | 0.000 | 0 | 1.2e-4 | 15 | 1.21e-13 |
+| open vase 32x16, straight seam | u=0 + reopt | 0 | 0.01234 | 0.000 | 0 | 1.2e-4 | 15 | 1.21e-13 |
+| open vase 32x16, straight seam | optimized | 0 | 0.00964 | 0.000 | 0 | 1.7e-4 | 15 | 2.20e-3 |
+| open vase 32x16, straight seam | optimized + reopt | 0 | 0.00964 | 0.000 | 0 | 1.7e-4 | 15 | 2.20e-3 |
+| open vase 32x16, ring 4 seam (two tubes) | u=0 | 0 | 0.00528 | 0.000 | 0 | 2.7e-6 | 32 | 3.73e-6 |
+| open vase 32x16, ring 4 seam (two tubes) | u=0 + reopt | 0 | 0.00528 | 0.000 | 0 | 2.7e-6 | 32 | 3.73e-6 |
+| open vase 32x16, ring 4 seam (two tubes) | optimized | 0 | 0.00241 | 0.000 | 0 | 1.4e-5 | 32 | 1.23e-1 |
+| open vase 32x16, ring 4 seam (two tubes) | optimized + reopt | 0 | 0.00241 | 0.000 | 0 | 1.4e-5 | 32 | 1.23e-1 |
+| torus 48x12, meridian + longitude seams | u=0 | 0 | 0.02568 | 0.000 | 0 | 1.7e-13 | 60 | 3.39e-13 |
+| torus 48x12, meridian + longitude seams | u=0 + reopt | 0 | 0.02568 | 0.000 | 0 | 1.7e-13 | 60 | 3.39e-13 |
+| torus 48x12, meridian + longitude seams | optimized | 0 | 0.02288 | 0.000 | 0 | 2.3e-13 | 60 | 8.79e-3 |
+| torus 48x12, meridian + longitude seams | optimized + reopt | 0 | 0.02288 | 0.000 | 0 | 2.3e-13 | 60 | 8.79e-3 |
+
+The seam mismatch with `Optimized` is 0.2 % (straight seam on the vase), 0.9 % (torus), 12 %
+(vase cut into two tubes), 40 % and 69 % (sphere caps). The distortion falls on the vase
+(0.0053 to 0.0024 for the two tubes) and the torus (0.0257 to 0.0229) and, on the sphere caps,
+the optimized map has no cone where `u=0` has one, with higher distortion at ring 3 (0.216 against
+0.068) and about equal at ring 5. With `u=0` the mismatch is at most 6e-4 here, except where a cone
+sits at the angle bound (sphere with `reopt`: 10 % to 28 %, an effect of the closing step that
+exists without the option and is visible now that it is measured).
+
+**Recommendation.** Keep `Zero` as the default of the pipeline and of the add-on, which is how
+they ship. `Optimized` lowers the distortion only on some meshes (`airplane`, `body`, and `hand`
+and `mannequin` with re-optimization, and simple open surfaces), produces overlap or mirrored
+triangles on eight of the nineteen dataset meshes, does not match the published maps either, and
+costs equal seam lengths. What keeping `Zero` costs: on meshes with boundary the distortion stays
+at 1.5 to 140 times the published one (the table in [the dataset](#the-dataset)), and the lower
+objective the solver finds for the free boundary stays unused. It would become a reasonable
+default for the add-on if `ddg-bff` closed the boundary curve with exact angles (so that large
+`u` is realized) or if the solver bounded `u` on the boundary; both are changes outside this
+crate. Until then the option is for pieces whose boundary values are small and for users who
+accept unequal seams; the report says which of the two happened (`max_boundary_length_error`,
+`max_seam_length_mismatch`, the warnings).
 
 ## Benchmarks
 
@@ -500,8 +761,12 @@ Four error variants are not triggered by any test input, only their wording is c
 ## Not done, not verified
 
 - The spike check flags only meshes where a handful of vertices carry 99 % of the cone-free
-  distortion; weaker spikes are not flagged (see its section), and the map is not changed by
-  a spike, only the warning is added.
+  distortion; weaker spikes are not flagged (see its section). Spike tips on the boundary are
+  not excluded.
+- Optimized boundary values (`boundary: Optimized`) are not recommended as a default, see [the
+  boundary](#the-boundary): the flattening does not realize them on several dataset meshes,
+  and the result then has overlap and mirrored triangles. Closed pieces, also those with an
+  automatic slit, never use them; with a slit the optimized values were not tried.
 - Closed surfaces of genus ≥ 2 without seams: a map comes back, its quality is not
   controlled, and it was tried on two voxel slabs only.
 - The `Auto` criterion (32 cones and 1 % of the vertices) separates the cases measured, which
@@ -517,7 +782,9 @@ Four error variants are not triggered by any test input, only their wording is c
   which the pipeline treats like any other geometry.
 - Polygons that were flipped to repair the orientation have mirrored UVs with respect to
   their own winding; the report counts them, the UVs are not post-processed.
-- Nothing here was run inside Blender or through the Python binding.
+- The Python binding and the Blender add-on expose the boundary option (`optimize_boundary`);
+  their tests (`scripts/py-test.sh`, `scripts/blender-test.sh`) only check that it reaches the
+  pipeline and is reported, not its quality on meshes from Blender.
 
 ## License
 

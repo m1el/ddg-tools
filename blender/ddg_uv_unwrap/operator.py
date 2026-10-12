@@ -13,7 +13,9 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
     bl_description = (
         "Generate a UV map for the whole active mesh: place cone singularities that minimize "
         "area distortion, cut the surface open through them, and flatten it conformally. "
-        "The mesh itself is not changed"
+        "The mesh itself is not changed. "
+        "Methods: Soliman, Slepcev, Crane, Optimal Cone Singularities for Conformal Flattening "
+        "(2018); Sawhney, Crane, Boundary First Flattening (2017)"
     )
     bl_options = {'REGISTER', 'UNDO'}
 
