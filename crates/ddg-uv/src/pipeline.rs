@@ -225,8 +225,9 @@ pub fn assemble(
         if at_bound > 0 {
             warnings.push(format!(
                 "{at_bound} cones of the chart that contains face {} sit at the upper bound \
-                 {:.4} of the cone angle: the surface has spikes or needles there that no cone \
-                 can flatten; expect flipped triangles and overlap",
+                 {:.4} of the cone angle (max_cone_angle): the surface has spikes there, or a \
+                 wide cluster of cones was merged into one; expect strong distortion, mirrored \
+                 triangles or overlap around them",
                 chart.first_polygon, options.max_cone_angle
             ));
         }

@@ -222,7 +222,13 @@ impl Default for PackOptions {
 pub struct UnwrapOptions {
     /// The trade-off `λ ≥ 0` between area distortion and total cone angle, in the cone
     /// solver's convention: the area of **every piece** (connected part of the surface after
-    /// the seams were cut) is normalized to 1. Larger means fewer cones.
+    /// the seams were cut) is normalized to 1. Larger means fewer cones. It has no effect on
+    /// closed pieces of genus 0 with positive cones, whose cone cost is the constant `4πλ`.
+    ///
+    /// Default `0.1`. Measured on the dataset's meshes with boundary, with positive cones:
+    /// from `0.5` to `0.1` the cones go from 1–4 to 4–8 and the area distortion falls by a
+    /// factor 1.4 to 4.4; below `0.1` the cones of the clean meshes stay the same and only
+    /// their angles grow, while noisy meshes get 25–60 % more cones.
     pub lambda: f64,
     /// Which signs cone angles may have.
     pub cone_signs: ConeSigns,
@@ -258,7 +264,7 @@ pub struct UnwrapOptions {
 impl Default for UnwrapOptions {
     fn default() -> Self {
         UnwrapOptions {
-            lambda: 0.5,
+            lambda: 0.1,
             cone_signs: ConeSigns::default(),
             max_cone_angle: 0.95 * TAU,
             closed_surfaces: ClosedSurfaces::default(),
