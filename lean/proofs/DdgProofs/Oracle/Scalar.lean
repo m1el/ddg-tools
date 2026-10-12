@@ -13,21 +13,25 @@ per-vertex definitions (namespace `Ddg`) with the math-level definitions of this
 The identifications hold for exact real arithmetic; nothing is claimed about rounding.
 -/
 
+noncomputable section
+
+namespace DdgProofs
+
+namespace Oracle
+
 /-- The real numbers as a `Ddg.Scalar`: the obvious instance (`sqrt = Real.sqrt`,
-`atan = Real.arctan`, `pi = Real.pi`, order and lattice operations those of `ℝ`). -/
-noncomputable instance instScalarReal : Ddg.Scalar ℝ where
+`atan = Real.arctan`, `pi = Real.pi`, order and lattice operations those of `ℝ`).
+
+The instance is `scoped`: it is active inside `namespace DdgProofs.Oracle` and after
+`open DdgProofs.Oracle`, and nowhere else, so importing this package does not change how
+`+`, `/`, `<`, `max` on `ℝ` are elaborated in a downstream file. -/
+scoped instance instScalarReal : Ddg.Scalar ℝ where
   ofNat := fun n => (n : ℝ)
   sqrt := Real.sqrt
   atan := Real.arctan
   pi := Real.pi
   decLt := fun a b => Classical.dec (a < b)
   decLe := fun a b => Classical.dec (a ≤ b)
-
-noncomputable section
-
-namespace DdgProofs
-
-namespace Oracle
 
 /-! ## Numerals and elementary functions -/
 

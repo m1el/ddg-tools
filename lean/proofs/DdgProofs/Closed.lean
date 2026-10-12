@@ -15,7 +15,8 @@ On a closed mesh the cotan Laplacian has zero row and column sums (`L·1 = 0`, `
 Scaling:
 
 * `isMinimizer_scaleMass_iff`: multiplying all masses by `c > 0` is the same as dividing `λ`
-  by `c`; `normalizeMass_scaleMass`: the mass-normalized problem does not see the factor at all.
+  by `c`; `normalizeMass_scaleMass`: the problem with masses divided by the total area does not see
+  the factor at all; `isMinimizer_normalizeMass_iff`: dividing the masses by `A` is `λ ↦ λ·A`.
 -/
 
 noncomputable section
@@ -134,9 +135,15 @@ def scaleMass (P : ConeProblem ι) (c : ℝ) : ConeProblem ι :=
 /-- The same problem with a different `λ`. -/
 def withLam (P : ConeProblem ι) (lam : ℝ) : ConeProblem ι := { P with lam := lam }
 
-/-- The same problem with masses divided by the total mass (= total area), so `Σ m = 1`. -/
-def normalizeMass (P : ConeProblem ι) : ConeProblem ι :=
-  { P with m := fun i => P.m i / ∑ j, P.m j }
+/-- The same problem with all masses divided by `A`.
+
+With `A` the **total area of the mesh** — the sum of the lumped masses over *all* vertices,
+boundary vertices included (`TriMesh.sum_mass`) — this is the area normalization of `CLAUDE.md`
+(`Σ_V m = 1`). The index type `ι` holds the unknowns only, so on a mesh with boundary `A` is
+*not* `Σ_{i ∈ ι} m_i` (the boundary masses are missing from that sum); on a closed mesh it is
+(`sum_normalizeMass_closed`). -/
+def normalizeMass (P : ConeProblem ι) (A : ℝ) : ConeProblem ι :=
+  { P with m := fun i => P.m i / A }
 
 theorem objective_scaleMass (P : ConeProblem ι) {c : ℝ} (hc : c ≠ 0) (u μ : ι → ℝ) :
     (P.scaleMass c).objective u μ = c * (P.withLam (P.lam / c)).objective u μ := by
@@ -166,21 +173,40 @@ theorem isMinimizer_scaleMass_iff (P : ConeProblem ι) {c : ℝ} (hc : 0 < c) (u
     rw [hobj, hobj]
     exact mul_le_mul_of_nonneg_left (hmin v ν hv) hc.le
 
-/-- **The area-normalized problem is scale invariant**: normalizing the masses by their sum
-erases a common factor `c ≠ 0`, so with `Σ m = 1` the same `λ` gives the same problem on a
-uniformly scaled mesh.
+omit [Fintype ι] in
+/-- **The area-normalized problem is scale invariant**: if the masses are multiplied by `c ≠ 0`
+and the total area `A` with them (a uniform scaling of the mesh by `√c`), the normalized problem
+does not change. So with `Σ_V m = 1` the same `λ` gives the same problem on a scaled mesh.
 
 [formula: lambda-area-normalization] -/
-theorem normalizeMass_scaleMass (P : ConeProblem ι) {c : ℝ} (hc : c ≠ 0) :
-    (P.scaleMass c).normalizeMass = P.normalizeMass := by
-  simp only [normalizeMass, scaleMass, ← Finset.mul_sum]
+theorem normalizeMass_scaleMass (P : ConeProblem ι) {c : ℝ} (hc : c ≠ 0) (A : ℝ) :
+    (P.scaleMass c).normalizeMass (c * A) = P.normalizeMass A := by
+  simp only [normalizeMass, scaleMass]
   congr 1
   funext i
   rw [mul_div_mul_left _ _ hc]
 
-/-- After normalization the masses sum to one (when the total mass is nonzero). -/
-theorem sum_normalizeMass (P : ConeProblem ι) (h : ∑ j, P.m j ≠ 0) :
-    ∑ i, P.normalizeMass.m i = 1 := by
+/-- **What the normalization does to `λ`**: dividing the masses by `A > 0` with `λ` kept gives
+the same minimizers as keeping the masses and replacing `λ` by `λ·A`. In particular, normalizing
+by anything other than the total area (for instance by the sum of the interior masses of a mesh
+with boundary) is the problem of `CLAUDE.md` with a different `λ`.
+
+[formula: lambda-area-normalization] -/
+theorem isMinimizer_normalizeMass_iff (P : ConeProblem ι) {A : ℝ} (hA : 0 < A) (u μ : ι → ℝ) :
+    (P.normalizeMass A).IsMinimizer u μ ↔ (P.withLam (P.lam * A)).IsMinimizer u μ := by
+  have e : P.normalizeMass A = P.scaleMass (1 / A) := by
+    simp only [normalizeMass, scaleMass]
+    congr 1
+    funext i
+    ring
+  rw [e, isMinimizer_scaleMass_iff P (one_div_pos.mpr hA)]
+  have : P.lam / (1 / A) = P.lam * A := by field_simp
+  rw [this]
+
+/-- On a closed mesh (`ι` = all vertices) the total area is the sum of the masses of the
+unknowns, and after normalization the masses sum to one. -/
+theorem sum_normalizeMass_closed (P : ConeProblem ι) (h : ∑ j, P.m j ≠ 0) :
+    ∑ i, (P.normalizeMass (∑ j, P.m j)).m i = 1 := by
   simp only [normalizeMass, ← Finset.sum_div]
   exact div_self h
 
