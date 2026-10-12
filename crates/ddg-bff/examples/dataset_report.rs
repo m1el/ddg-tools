@@ -102,8 +102,13 @@ fn report(name: &str) -> Row {
                 &exact.corner_uvs,
                 &data.reference_uvs,
             );
-            let shifted = flatten(&data, &data.geometry, reference_cut, REFERENCE_DIAGONAL_SHIFT)
-                .expect("the shifted solve works where the exact one does");
+            let shifted = flatten(
+                &data,
+                &data.geometry,
+                reference_cut,
+                REFERENCE_DIAGONAL_SHIFT,
+            )
+            .expect("the shifted solve works where the exact one does");
             let b = compare_layouts(
                 &shifted.face_chart,
                 shifted.n_charts(),
@@ -137,8 +142,14 @@ fn report(name: &str) -> Row {
             let mut sensitivity = (0.0f64, 0.0f64);
             for seed in 1..=3 {
                 let (geometry, cones) = common::perturbed_like_file_rounding(&data, seed);
-                let p = flatten_cones(&data, &geometry, &cones, reference_cut, REFERENCE_DIAGONAL_SHIFT)
-                    .expect("perturbed input flattens");
+                let p = flatten_cones(
+                    &data,
+                    &geometry,
+                    &cones,
+                    reference_cut,
+                    REFERENCE_DIAGONAL_SHIFT,
+                )
+                .expect("perturbed input flattens");
                 let d = compare_layouts(
                     &p.face_chart,
                     p.n_charts(),
@@ -190,7 +201,10 @@ fn report(name: &str) -> Row {
                 };
             }
             Ok(r) => {
-                if best.as_ref().is_none_or(|b| r.timings.total < b.timings.total) {
+                if best
+                    .as_ref()
+                    .is_none_or(|b| r.timings.total < b.timings.total)
+                {
                     best = Some(r);
                 }
             }
@@ -211,7 +225,10 @@ fn report(name: &str) -> Row {
         q[3],
         q[4],
         own.seams.max_length_mismatch,
-        own.charts.iter().map(|c| c.closure.gap_before).fold(0.0, f64::max),
+        own.charts
+            .iter()
+            .map(|c| c.closure.gap_before)
+            .fold(0.0, f64::max),
         own.charts
             .iter()
             .map(|c| c.closure.max_length_change)
@@ -226,9 +243,18 @@ fn report(name: &str) -> Row {
         let negative: Vec<_> = r.cones.iter().filter(|c| c.angle < 0.0).collect();
         format!(
             "{:5} {:5} {:5} {:5} {:5}",
-            r.charts.iter().map(|c| c.distortion.flipped_triangles).sum::<usize>(),
-            r.charts.iter().map(|c| c.overlap.wedges_over_2pi).sum::<usize>(),
-            r.charts.iter().map(|c| c.overlap.boundary_crossings).sum::<usize>(),
+            r.charts
+                .iter()
+                .map(|c| c.distortion.flipped_triangles)
+                .sum::<usize>(),
+            r.charts
+                .iter()
+                .map(|c| c.overlap.wedges_over_2pi)
+                .sum::<usize>(),
+            r.charts
+                .iter()
+                .map(|c| c.overlap.boundary_crossings)
+                .sum::<usize>(),
             negative.iter().filter(|c| c.n_wedges == 1).count(),
             negative
                 .iter()
@@ -282,35 +308,68 @@ fn main() {
     let rows: Vec<Row> = names.iter().map(|n| report(n)).collect();
 
     println!("## 1. Same cut, same map");
-    println!("Flattened with the cut recovered from the stored UV map; per chart the best similarity is");
-    println!("fitted; residuals (rms, max) are relative to the diagonal of the chart's bounding box in the");
-    println!("stored map. 'input rounding': change of our result when positions and cone angles are");
-    println!("perturbed by half a unit in the sixth digit (worst of 3 samples), i.e. what the six-digit");
+    println!(
+        "Flattened with the cut recovered from the stored UV map; per chart the best similarity is"
+    );
+    println!(
+        "fitted; residuals (rms, max) are relative to the diagonal of the chart's bounding box in the"
+    );
+    println!(
+        "stored map. 'input rounding': change of our result when positions and cone angles are"
+    );
+    println!(
+        "perturbed by half a unit in the sixth digit (worst of 3 samples), i.e. what the six-digit"
+    );
     println!("files can cost.");
     println!(
         "{:<20} {:>6} {:>9} {:>2} {:>9} | {:>17} | {:>17} | {:>17} | {:>17} | {:>17}",
-        "mesh", "cones", "cutE+add", "ch", "GB discr",
-        "exact: rms, max", "shift 1e-8", "shift+mollify", "input rounding", "seam mism, max adj"
+        "mesh",
+        "cones",
+        "cutE+add",
+        "ch",
+        "GB discr",
+        "exact: rms, max",
+        "shift 1e-8",
+        "shift+mollify",
+        "input rounding",
+        "seam mism, max adj"
     );
     for r in &rows {
         println!("{:<20} {}", r.name, r.same_cut);
     }
 
     println!("\n## 2. Own cut, same metric");
-    println!("Flattened with the planner's cut (exact solves). Ratio of UV edge lengths ours / stored, per");
+    println!(
+        "Flattened with the planner's cut (exact solves). Ratio of UV edge lengths ours / stored, per"
+    );
     println!("triangle edge, divided by its median: minimum, 1 %, 99 %, maximum.");
     println!(
         "{:<20} {:>6} {:>6} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>8} {:>8} {:>8} | {:>6} {:>7}",
-        "mesh", "refE", "ownE", "len/ref", "min", "p1", "p99", "max",
-        "seam", "gap", "max adj", "Qmean", "Qmax"
+        "mesh",
+        "refE",
+        "ownE",
+        "len/ref",
+        "min",
+        "p1",
+        "p99",
+        "max",
+        "seam",
+        "gap",
+        "max adj",
+        "Qmean",
+        "Qmax"
     );
     for r in &rows {
         println!("{:<20} {}", r.name, r.own_cut);
     }
 
     println!("\n## 3. Flipped triangles and overlap");
-    println!("flip = triangles with negative orientation; w>2pi = boundary vertices with more than a full");
-    println!("turn around them; cross = pairs of crossing boundary edges; leaf- = negative cones at the end");
+    println!(
+        "flip = triangles with negative orientation; w>2pi = boundary vertices with more than a full"
+    );
+    println!(
+        "turn around them; cross = pairs of crossing boundary edges; leaf- = negative cones at the end"
+    );
     println!("of a cut; ovl- = negative cones with a wedge over 2 pi.");
     println!(
         "{:<20} {:>6} {:>6} | {:>5} | {:>29} | {:>29}",
@@ -318,14 +377,29 @@ fn main() {
     );
     println!(
         "{:<20} {:>6} {:>6} | {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5}",
-        "", "", "", "flip", "flip", "w>2pi", "cross", "leaf-", "ovl-", "flip", "w>2pi", "cross", "leaf-", "ovl-"
+        "",
+        "",
+        "",
+        "flip",
+        "flip",
+        "w>2pi",
+        "cross",
+        "leaf-",
+        "ovl-",
+        "flip",
+        "w>2pi",
+        "cross",
+        "leaf-",
+        "ovl-"
     );
     for r in &rows {
         println!("{:<20} {}", r.name, r.overlap);
     }
 
     println!("\n## 4. Timing (milliseconds, one thread, best of 3)");
-    println!("flatten_with_cones with the planner's cut: scale factors, cut, curves, extension, report.");
+    println!(
+        "flatten_with_cones with the planner's cut: scale factors, cut, curves, extension, report."
+    );
     println!(
         "{:<20} {:>7} {:>6} | {:>8} | {:>7} {:>7} {:>7} {:>7} {:>7} | {:>8}",
         "mesh", "faces", "cones", "total", "scale", "cut", "curves", "extend", "report", "load"

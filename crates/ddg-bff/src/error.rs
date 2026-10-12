@@ -291,10 +291,7 @@ impl fmt::Display for BffError {
                 vertex,
                 first,
                 second,
-            } => write!(
-                f,
-                "cones {first} and {second} are both at vertex {vertex}"
-            ),
+            } => write!(f, "cones {first} and {second} are both at vertex {vertex}"),
             BffError::ConeOnBoundary { position, vertex } => write!(
                 f,
                 "cone {position} is at boundary vertex {vertex}: cone angles can only be \

@@ -95,9 +95,9 @@ pub mod quality;
 
 pub use chart::{ChartReport, OverlapReport};
 pub use cones::{
-    ClosedComponentReport, Cone, ConeFlattenInput, ConeFlattenOptions, ConeFlattening,
-    ConeReport, CutSource, GaussBonnetPolicy, ScaleFactorOptions, ScaleFactors, SeamReport,
-    Timings, flatten_with_cones, solve_scale_factors,
+    ClosedComponentReport, Cone, ConeFlattenInput, ConeFlattenOptions, ConeFlattening, ConeReport,
+    CutSource, GaussBonnetPolicy, ScaleFactorOptions, ScaleFactors, SeamReport, Timings,
+    flatten_with_cones, solve_scale_factors,
 };
 pub use curve::ClosureReport;
 pub use cut::{

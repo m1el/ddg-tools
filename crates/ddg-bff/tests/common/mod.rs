@@ -74,13 +74,17 @@ impl DatasetMesh {
 pub fn load(name: &str) -> DatasetMesh {
     let dir = dataset_dir();
     let obj = read_obj(dir.join(format!("{name}.obj"))).unwrap_or_else(|e| panic!("{e}"));
-    let faces = obj.triangles().unwrap_or_else(|| panic!("{name}: not triangles"));
+    let faces = obj
+        .triangles()
+        .unwrap_or_else(|| panic!("{name}: not triangles"));
     let mesh = TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
     let geometry =
         Geometry::from_positions(&mesh, &obj.positions).unwrap_or_else(|e| panic!("{name}: {e}"));
     let cones = read_cones(dir.join(format!("{name}-cones.txt")), mesh.n_vertices())
         .unwrap_or_else(|e| panic!("{e}"));
-    let reference_uvs = obj.corner_uvs().unwrap_or_else(|| panic!("{name}: corners without UV"));
+    let reference_uvs = obj
+        .corner_uvs()
+        .unwrap_or_else(|| panic!("{name}: corners without UV"));
     let reference_cut = discontinuous_edges(&mesh, &reference_uvs).unwrap();
     DatasetMesh {
         name: name.to_string(),
@@ -164,7 +168,10 @@ pub fn length_ratio_quantiles(mine: &[[f64; 2]], reference: &[[f64; 2]]) -> [f64
 
 /// Total length of a set of edges.
 pub fn total_length(geometry: &Geometry, edges: &[u32]) -> f64 {
-    edges.iter().map(|&e| geometry.edge_lengths()[e as usize]).sum()
+    edges
+        .iter()
+        .map(|&e| geometry.edge_lengths()[e as usize])
+        .sum()
 }
 
 /// Number of triangles with negative orientation in a per-corner layout.
@@ -210,7 +217,11 @@ pub fn subdivide(positions: &[[f64; 3]], faces: &[[u32; 3]]) -> (Vec<[f64; 3]>, 
     let mut mid = |a: u32, b: u32, positions: &mut Vec<[f64; 3]>| {
         *midpoint.entry((a.min(b), a.max(b))).or_insert_with(|| {
             let (p, q) = (positions[a as usize], positions[b as usize]);
-            positions.push([0.5 * (p[0] + q[0]), 0.5 * (p[1] + q[1]), 0.5 * (p[2] + q[2])]);
+            positions.push([
+                0.5 * (p[0] + q[0]),
+                0.5 * (p[1] + q[1]),
+                0.5 * (p[2] + q[2]),
+            ]);
             positions.len() as u32 - 1
         })
     };
@@ -231,7 +242,12 @@ pub fn subdivide(positions: &[[f64; 3]], faces: &[[u32; 3]]) -> (Vec<[f64; 3]>, 
 pub fn flat_polyhedron(n_faces: usize, level: usize) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
     let (mut positions, mut faces): (Vec<[f64; 3]>, Vec<[u32; 3]>) = match n_faces {
         4 => (
-            vec![[1.0, 1.0, 1.0], [1.0, -1.0, -1.0], [-1.0, 1.0, -1.0], [-1.0, -1.0, 1.0]],
+            vec![
+                [1.0, 1.0, 1.0],
+                [1.0, -1.0, -1.0],
+                [-1.0, 1.0, -1.0],
+                [-1.0, -1.0, 1.0],
+            ],
             vec![[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
         ),
         8 => (
@@ -271,7 +287,11 @@ pub fn layout_angle_sums(mesh: &TriMesh, uv: &[[f64; 2]]) -> Vec<f64> {
     let mut sums = vec![0.0; mesh.n_vertices()];
     for (f, face) in mesh.faces().iter().enumerate() {
         for k in 0..3 {
-            let (a, b, c) = (uv[3 * f + k], uv[3 * f + (k + 1) % 3], uv[3 * f + (k + 2) % 3]);
+            let (a, b, c) = (
+                uv[3 * f + k],
+                uv[3 * f + (k + 1) % 3],
+                uv[3 * f + (k + 2) % 3],
+            );
             let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - a[0], c[1] - a[1]);
             sums[face[k] as usize] += (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
         }
@@ -289,4 +309,46 @@ pub fn max_length_deviation(mesh: &TriMesh, geometry: &Geometry, uv: &[[f64; 2]]
             ((b[0] - a[0]).hypot(b[1] - a[1]) / l - 1.0).abs()
         })
         .fold(0.0, f64::max)
+}
+
+/// The cone angle that the stored UV map realizes at every listed cone, measured on the
+/// boundary polygon of the cut map alone (so that flipped or degenerate triangles do not
+/// matter): at the copies of a cone vertex the interior angles of the polygon sum to
+/// `2π − µ` modulo `2π`. Returned is the representative closest to the listed angle.
+pub fn stored_cone_angles(data: &DatasetMesh) -> Vec<f64> {
+    let cut = ddg_bff::cut_mesh(&data.mesh, &data.reference_cut).expect("stored cut");
+    let mut vertex_uv = vec![[0.0; 2]; cut.mesh.n_vertices()];
+    for (f, face) in cut.mesh.faces().iter().enumerate() {
+        for k in 0..3 {
+            vertex_uv[face[k] as usize] = data.reference_uvs[3 * f + k];
+        }
+    }
+    let mut interior = vec![0.0; data.mesh.n_vertices()];
+    for boundary in cut.mesh.boundary_loops() {
+        let n = boundary.len();
+        for i in 0..n {
+            let (a, b, c) = (
+                vertex_uv[boundary[(i + n - 1) % n] as usize],
+                vertex_uv[boundary[i] as usize],
+                vertex_uv[boundary[(i + 1) % n] as usize],
+            );
+            let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - b[0], c[1] - b[1]);
+            let turn = (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
+            interior[cut.vertex_to_original[boundary[i] as usize] as usize] +=
+                std::f64::consts::PI - turn;
+        }
+    }
+    let tau = std::f64::consts::TAU;
+    data.cones
+        .iter()
+        .map(|c| {
+            let difference = (tau - interior[c.vertex as usize] - c.angle).rem_euclid(tau);
+            c.angle
+                + if difference > tau / 2.0 {
+                    difference - tau
+                } else {
+                    difference
+                }
+        })
+        .collect()
 }

@@ -414,7 +414,10 @@ mod tests {
         );
         // A single edge is a slit whose sides cannot be told apart.
         let err = cut_mesh(&mesh, &[e0]).unwrap_err();
-        assert!(matches!(err, BffError::IsolatedCutEdge { edge, .. } if edge == e0), "{err}");
+        assert!(
+            matches!(err, BffError::IsolatedCutEdge { edge, .. } if edge == e0),
+            "{err}"
+        );
     }
 
     #[test]
@@ -493,11 +496,7 @@ mod tests {
         assert_eq!(cut.copies_per_vertex()[3], 2);
         assert!(component_topology(&cut.mesh).iter().all(|t| t.is_disk()));
         // Both sides of the cut map to the same original edge.
-        let sides = cut
-            .edge_to_original
-            .iter()
-            .filter(|&&o| o == e)
-            .count();
+        let sides = cut.edge_to_original.iter().filter(|&&o| o == e).count();
         assert_eq!(sides, 2);
     }
 }

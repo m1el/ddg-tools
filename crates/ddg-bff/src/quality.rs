@@ -178,8 +178,9 @@ impl DistortionAccumulator {
             let mean_u = self.u_sum / self.weight;
             self.report.quasi_conformal.mean = self.q_sum / self.weight;
             self.report.log_scale.mean = mean_u;
-            self.report.log_scale_deviation =
-                (self.u_square_sum / self.weight - mean_u * mean_u).max(0.0).sqrt();
+            self.report.log_scale_deviation = (self.u_square_sum / self.weight - mean_u * mean_u)
+                .max(0.0)
+                .sqrt();
         }
         self.report
     }
@@ -218,7 +219,11 @@ fn proper_crossing(a0: [f64; 2], a1: [f64; 2], b0: [f64; 2], b1: [f64; 2]) -> Op
 /// edges of comparable length.
 pub fn polygon_self_crossings(polygon: &[[f64; 2]]) -> usize {
     let n = polygon.len();
-    if n < 4 || polygon.iter().any(|p| !(p[0].is_finite() && p[1].is_finite())) {
+    if n < 4
+        || polygon
+            .iter()
+            .any(|p| !(p[0].is_finite() && p[1].is_finite()))
+    {
         return 0;
     }
     let segment = |i: usize| (polygon[i], polygon[(i + 1) % n]);
@@ -307,7 +312,10 @@ pub struct Similarity {
 impl Similarity {
     /// Applies the similarity to a point.
     pub fn apply(&self, p: [f64; 2]) -> [f64; 2] {
-        let (c, s) = (self.scale * self.rotation.cos(), self.scale * self.rotation.sin());
+        let (c, s) = (
+            self.scale * self.rotation.cos(),
+            self.scale * self.rotation.sin(),
+        );
         [
             c * p[0] - s * p[1] + self.translation[0],
             s * p[0] + c * p[1] + self.translation[1],
@@ -342,7 +350,7 @@ pub fn fit_similarity(p: &[[f64; 2]], q: &[[f64; 2]]) -> Option<Similarity> {
         im += qy * px - qx * py;
         norm += px * px + py * py;
     }
-    if !(norm > 0.0) {
+    if norm.is_nan() || norm <= 0.0 {
         return None;
     }
     let (ar, ai) = (re / norm, im / norm);
@@ -406,7 +414,10 @@ mod tests {
         acc.add(lengths, 0.5, flipped);
         acc.add(lengths, 0.5, [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]);
         let r = acc.finish();
-        assert_eq!((r.n_faces, r.flipped_triangles, r.degenerate_triangles), (3, 1, 1));
+        assert_eq!(
+            (r.n_faces, r.flipped_triangles, r.degenerate_triangles),
+            (3, 1, 1)
+        );
         assert!((r.flipped_area - 1.5).abs() < 1e-15);
         assert!((r.quasi_conformal.mean - 3.0).abs() < 1e-14);
         assert!((r.log_scale.mean - 0.5 * 3.0f64.ln()).abs() < 1e-14);

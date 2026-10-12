@@ -181,7 +181,10 @@ pub(crate) fn best_fit_curves(loops: &[LoopData], options: &CurveOptions) -> Vec
         for (i, &d) in l.dof.iter().enumerate() {
             let slot = &mut sides[d as usize];
             let k = usize::from(slot[0].0 != u32::MAX);
-            debug_assert!(k == 0 || slot[1].0 == u32::MAX, "a length is shared by 3 edges");
+            debug_assert!(
+                k == 0 || slot[1].0 == u32::MAX,
+                "a length is shared by 3 edges"
+            );
             slot[k] = (c as u32, i as u32);
         }
     }
@@ -337,13 +340,13 @@ fn close_group(
         let mut values = [0.0; 4];
         let mut n = 0;
         for &(block, t, _, _) in &dof.sides[..dof.n_sides] {
-            for axis in 0..2 {
+            for (axis, &component) in t.iter().enumerate() {
                 let row = 2 * block as usize + axis;
                 match rows[..n].iter().position(|&x| x == row) {
-                    Some(k) => values[k] += t[axis],
+                    Some(k) => values[k] += component,
                     None => {
                         rows[n] = row;
-                        values[n] = t[axis];
+                        values[n] = component;
                         n += 1;
                     }
                 }
@@ -403,10 +406,14 @@ fn solve_semidefinite(s: &[f64], r: &[f64], n: usize, threshold: f64) -> (Vec<f6
     // In-place factorization of the permuted matrix: row/column k of `a` belongs to unknown
     // order[k]; the lower triangle holds L.
     for k in 0..n {
-        let (pivot, value) = (k..n)
-            .map(|i| (i, a[i * n + i]))
-            .fold((k, f64::NEG_INFINITY), |best, x| if x.1 > best.1 { x } else { best });
-        if !(value > threshold) {
+        let (pivot, value) =
+            (k..n)
+                .map(|i| (i, a[i * n + i]))
+                .fold(
+                    (k, f64::NEG_INFINITY),
+                    |best, x| if x.1 > best.1 { x } else { best },
+                );
+        if value.is_nan() || value <= threshold {
             break;
         }
         if pivot != k {
@@ -527,7 +534,10 @@ mod tests {
         let p = &curve.positions;
         assert!((p[1][0] - 1.1).abs() < 1e-14, "{p:?}");
         assert!((p[2][1] - 2.0).abs() < 1e-14, "{p:?}");
-        assert!((p[3][0]).abs() < 1e-14 && (p[3][1] - 2.0).abs() < 1e-14, "{p:?}");
+        assert!(
+            (p[3][0]).abs() < 1e-14 && (p[3][1] - 2.0).abs() < 1e-14,
+            "{p:?}"
+        );
         assert!(curve.report.gap_before > 0.03);
         assert!(curve.report.gap_after < 1e-15);
         assert!((curve.report.max_length_change - 0.1).abs() < 1e-14);
@@ -653,7 +663,12 @@ mod tests {
         assert!(curve.report.dropped_directions >= 1);
         assert!(curve.report.gap_after > 1e-3);
         assert!(curve.report.max_length_change <= 0.1);
-        assert!(curve.positions.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+        assert!(
+            curve
+                .positions
+                .iter()
+                .all(|p| p[0].is_finite() && p[1].is_finite())
+        );
     }
 
     #[test]

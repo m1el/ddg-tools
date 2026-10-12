@@ -199,11 +199,13 @@ pub(crate) fn plan_and_cut(input: &CutPlanInput<'_>) -> Result<(CutPlan, CutMesh
     let mut n_extension_edges = 0usize;
     if n_required > 0 {
         let before = required.clone();
-        n_extension_edges = extend_isolated_slits(mesh, &mut required, &cuttable, input.edge_lengths)
-            .map_err(|e| BffError::IsolatedCutEdge {
-                edge: e,
-                vertices: mesh.edges()[e as usize],
-            })?;
+        n_extension_edges =
+            extend_isolated_slits(mesh, &mut required, &cuttable, input.edge_lengths).map_err(
+                |e| BffError::IsolatedCutEdge {
+                    edge: e,
+                    vertices: mesh.edges()[e as usize],
+                },
+            )?;
         for e in 0..n_edges {
             extension[e] = required[e] && !before[e];
         }
@@ -665,10 +667,7 @@ fn plan_pieces(
         if degree[v] != 1 {
             continue;
         }
-        let Some(h) = mesh
-            .outgoing_halfedges(v)
-            .find(|&h| is_cut[mesh.edge(h)])
-        else {
+        let Some(h) = mesh.outgoing_halfedges(v).find(|&h| is_cut[mesh.edge(h)]) else {
             continue;
         };
         let w = mesh.to_vertex(h);
@@ -882,7 +881,10 @@ mod tests {
             must_cut: &[free.cut_edges[0]],
         })
         .unwrap_err();
-        assert!(matches!(err, BffError::RequiredEdgeForbidden { .. }), "{err}");
+        assert!(
+            matches!(err, BffError::RequiredEdgeForbidden { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -928,6 +930,9 @@ mod tests {
             must_cut: &[],
         })
         .unwrap_err();
-        assert!(matches!(err, BffError::UncuttableRegionNotDisk { .. }), "{err}");
+        assert!(
+            matches!(err, BffError::UncuttableRegionNotDisk { .. }),
+            "{err}"
+        );
     }
 }

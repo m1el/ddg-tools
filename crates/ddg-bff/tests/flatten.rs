@@ -94,14 +94,23 @@ fn flat_polyhedra_unfold_isometrically() {
                 angle: omega[v],
             })
             .collect();
-        assert_eq!(cones.len(), [4, 6, 12][[4, 8, 20].iter().position(|&n| n == n_faces).unwrap()]);
+        assert_eq!(
+            cones.len(),
+            [4, 6, 12][[4, 8, 20].iter().position(|&n| n == n_faces).unwrap()]
+        );
         let flat = flatten(&mesh, &geometry, &cones, PLAN).unwrap();
         assert_disk_charts(&flat);
         assert_eq!(flat.n_charts(), 1);
-        let u_max = flat.scale_factors.iter().fold(0.0f64, |m, u| m.max(u.abs()));
+        let u_max = flat
+            .scale_factors
+            .iter()
+            .fold(0.0f64, |m, u| m.max(u.abs()));
         assert!(u_max < 1e-10, "{n_faces} faces: |u| up to {u_max}");
         let deviation = max_length_deviation(&mesh, &geometry, &flat.corner_uvs);
-        assert!(deviation < 1e-9, "{n_faces} faces: lengths off by {deviation}");
+        assert!(
+            deviation < 1e-9,
+            "{n_faces} faces: lengths off by {deviation}"
+        );
         let report = &flat.charts[0];
         assert_eq!(report.distortion.flipped_triangles, 0);
         assert!(report.distortion.quasi_conformal.max < 1.0 + 1e-9);
@@ -181,11 +190,16 @@ fn a_negative_cone_at_the_end_of_a_cut_overlaps_and_seams_can_fix_it() {
     let flat = flatten(&mesh, &geometry, &cones, PLAN).unwrap();
     assert_disk_charts(&flat);
     let negative = &flat.cones[1];
-    assert!((negative.realized_angle - negative.angle).abs() < 1e-9 || {
-        // With overlap the signed sum can be off by a full turn only if triangles flip.
-        flat.charts[0].distortion.flipped_triangles > 0
-    });
-    assert_eq!(negative.n_wedges, 1, "the planner joins each cone to the boundary");
+    assert!(
+        (negative.realized_angle - negative.angle).abs() < 1e-9 || {
+            // With overlap the signed sum can be off by a full turn only if triangles flip.
+            flat.charts[0].distortion.flipped_triangles > 0
+        }
+    );
+    assert_eq!(
+        negative.n_wedges, 1,
+        "the planner joins each cone to the boundary"
+    );
     // One wedge has to hold 2π + π/2: the layout overlaps itself around the cone.
     assert!(negative.max_wedge_angle > 2.0 * PI);
     assert!(flat.charts[0].overlap.wedges_over_2pi >= 1);
@@ -197,7 +211,10 @@ fn a_negative_cone_at_the_end_of_a_cut_overlaps_and_seams_can_fix_it() {
     // The caller's remedy: a seam straight through the negative cone, from boundary to
     // boundary. The cone then has two wedges of 5π/4 each.
     let seam: Vec<u32> = (0..12)
-        .map(|i| mesh.find_edge(at(i, 8) as usize, at(i + 1, 8) as usize).unwrap() as u32)
+        .map(|i| {
+            mesh.find_edge(at(i, 8) as usize, at(i + 1, 8) as usize)
+                .unwrap() as u32
+        })
         .collect();
     let flat = flatten(
         &mesh,
@@ -216,7 +233,10 @@ fn a_negative_cone_at_the_end_of_a_cut_overlaps_and_seams_can_fix_it() {
     assert!((negative.realized_angle - negative.angle).abs() < 1e-9);
     assert!(negative.max_wedge_angle < 2.0 * PI);
     assert_eq!(
-        flat.charts.iter().map(|c| c.overlap.wedges_over_2pi).sum::<usize>(),
+        flat.charts
+            .iter()
+            .map(|c| c.overlap.wedges_over_2pi)
+            .sum::<usize>(),
         0
     );
     assert_eq!(flat.seams.n_between_charts, 12);
@@ -306,7 +326,11 @@ fn tori_without_cones() {
         flat.seams.max_length_mismatch,
         report.closure.gap_after
     );
-    assert!(flat.corner_uvs.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+    assert!(
+        flat.corner_uvs
+            .iter()
+            .all(|p| p[0].is_finite() && p[1].is_finite())
+    );
 }
 
 #[test]
@@ -343,9 +367,10 @@ fn seams_split_the_surface_into_charts_with_matching_lengths() {
     assert!(agreement.max < 1e-10, "{agreement:?}");
     // Each chart starts at the origin: nothing is packed.
     for chart in 0..2 {
-        let start = flat.cut.mesh.boundary_loops().iter().find(|l| {
-            flat.face_chart[flat.cut.mesh.outgoing_halfedge(l[0] as usize) / 3] == chart
-        });
+        let start =
+            flat.cut.mesh.boundary_loops().iter().find(|l| {
+                flat.face_chart[flat.cut.mesh.outgoing_halfedge(l[0] as usize) / 3] == chart
+            });
         let v = start.unwrap()[0] as usize;
         assert_eq!(flat.vertex_uvs[v], [0.0, 0.0]);
     }
@@ -461,8 +486,16 @@ fn precomputed_scale_factors_and_explicit_cuts() {
     )
     .unwrap();
     assert_eq!(anchored.corner_uvs[corner as usize], [0.0, 0.0]);
-    let agreement = compare_layouts(&anchored.face_chart, 1, &anchored.corner_uvs, &planned.corner_uvs);
-    assert!(agreement.max < 1e-10 && (agreement.scale - 1.0).abs() < 1e-10, "{agreement:?}");
+    let agreement = compare_layouts(
+        &anchored.face_chart,
+        1,
+        &anchored.corner_uvs,
+        &planned.corner_uvs,
+    );
+    assert!(
+        agreement.max < 1e-10 && (agreement.scale - 1.0).abs() < 1e-10,
+        "{agreement:?}"
+    );
 }
 
 #[test]
@@ -551,7 +584,12 @@ fn gauss_bonnet_is_checked_on_closed_surfaces() {
         PLAN,
     )
     .unwrap();
-    assert!(flat.scale_factor_solve.unwrap().closed_components.is_empty());
+    assert!(
+        flat.scale_factor_solve
+            .unwrap()
+            .closed_components
+            .is_empty()
+    );
 }
 
 #[test]
@@ -572,7 +610,17 @@ fn bad_input_gives_descriptive_errors() {
     );
     assert!(err.to_string().contains("vertex 1000"), "{err}");
     let err = flatten(&mesh, &geometry, &[cone(1, 1.0), cone(1, 2.0)], PLAN).unwrap_err();
-    assert!(matches!(err, BffError::DuplicateCone { vertex: 1, first: 0, second: 1 }), "{err}");
+    assert!(
+        matches!(
+            err,
+            BffError::DuplicateCone {
+                vertex: 1,
+                first: 0,
+                second: 1
+            }
+        ),
+        "{err}"
+    );
     let err = flatten(&mesh, &geometry, &[cone(1, 2.0 * PI)], PLAN).unwrap_err();
     assert!(matches!(err, BffError::InvalidConeAngle { .. }), "{err}");
     let err = flatten(&mesh, &geometry, &[cone(1, f64::NAN)], PLAN).unwrap_err();
@@ -582,7 +630,17 @@ fn bad_input_gives_descriptive_errors() {
     assert!(matches!(err, BffError::GaussBonnetViolated { .. }), "{err}");
     // An explicit cut that does not make a disk, or misses a cone.
     let err = flatten(&mesh, &geometry, &four, CutSource::Edges(&[])).unwrap_err();
-    assert!(matches!(err, BffError::ChartNotDisk { genus: 0, boundary_loops: 0, .. }), "{err}");
+    assert!(
+        matches!(
+            err,
+            BffError::ChartNotDisk {
+                genus: 0,
+                boundary_loops: 0,
+                ..
+            }
+        ),
+        "{err}"
+    );
     let planned = flatten(&mesh, &geometry, &four[..3], PLAN);
     assert!(matches!(planned, Err(BffError::GaussBonnetViolated { .. })));
     let cut_through_three = ddg_bff::plan_cut(&ddg_bff::CutPlanInput {
@@ -601,11 +659,16 @@ fn bad_input_gives_descriptive_errors() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, BffError::ConeNotOnCut { vertex: 9, chart: 0 })
-            || cut_through_three
-                .cut_edges
-                .iter()
-                .any(|&e| mesh.edge_vertices(e as usize).contains(&9)),
+        matches!(
+            err,
+            BffError::ConeNotOnCut {
+                vertex: 9,
+                chart: 0
+            }
+        ) || cut_through_three
+            .cut_edges
+            .iter()
+            .any(|&e| mesh.edge_vertices(e as usize).contains(&9)),
         "{err}"
     );
     let err = flatten(&mesh, &geometry, &four, CutSource::Edges(&[100_000])).unwrap_err();
@@ -658,7 +721,11 @@ fn bad_input_gives_descriptive_errors() {
     let err = anchored(&[interior_corner]).unwrap_err();
     assert!(matches!(err, BffError::AnchorNotOnBoundary { .. }), "{err}");
     let on_cut: Vec<u32> = (0..mesh.n_halfedges() as u32)
-        .filter(|&h| ok.cut.mesh.is_boundary_vertex(ok.cut.mesh.from_vertex(h as usize)))
+        .filter(|&h| {
+            ok.cut
+                .mesh
+                .is_boundary_vertex(ok.cut.mesh.from_vertex(h as usize))
+        })
         .take(2)
         .collect();
     let err = anchored(&on_cut).unwrap_err();
@@ -667,7 +734,10 @@ fn bad_input_gives_descriptive_errors() {
     let g = generators::grid_disk(4, 4).unwrap();
     let (mesh, geometry) = setup(&g.positions, &g.faces);
     let err = flatten(&mesh, &geometry, &[cone(0, 0.5)], PLAN).unwrap_err();
-    assert!(matches!(err, BffError::ConeOnBoundary { vertex: 0, .. }), "{err}");
+    assert!(
+        matches!(err, BffError::ConeOnBoundary { vertex: 0, .. }),
+        "{err}"
+    );
 }
 
 #[test]

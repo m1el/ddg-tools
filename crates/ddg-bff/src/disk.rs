@@ -523,11 +523,11 @@ impl<'a> DiskBff<'a> {
                     values[n + v as usize] = p[1];
                 }
                 let surface = self.surface();
-                solve_residual = self
-                    .dirichlet
-                    .as_ref()
-                    .expect("factorized above")
-                    .solve(&surface, &mut values, 2)?;
+                solve_residual = self.dirichlet.as_ref().expect("factorized above").solve(
+                    &surface,
+                    &mut values,
+                    2,
+                )?;
                 (0..n).map(|v| [values[v], values[n + v]]).collect()
             }
             Extension::Conjugate => {
@@ -692,7 +692,9 @@ mod tests {
             .iter()
             .map(|v| if corners.contains(v) { PI / 2.0 } else { 0.0 })
             .collect();
-        let result = bff.flatten_with_exterior_angles(&k, Extension::Harmonic).unwrap();
+        let result = bff
+            .flatten_with_exterior_angles(&k, Extension::Harmonic)
+            .unwrap();
         let boundary = bff.boundary().to_vec();
         for i in 0..n {
             let (a, b, c) = (
@@ -738,7 +740,11 @@ mod tests {
         let (mesh, geometry) = setup(&g);
         let mut bff = DiskBff::new(&mesh, &geometry, DiskOptions::default()).unwrap();
         let result = bff.flatten_to_disk(10).unwrap();
-        let boundary: Vec<[f64; 2]> = bff.boundary().iter().map(|&v| result.uv[v as usize]).collect();
+        let boundary: Vec<[f64; 2]> = bff
+            .boundary()
+            .iter()
+            .map(|&v| result.uv[v as usize])
+            .collect();
         let n = boundary.len() as f64;
         let centre = boundary
             .iter()
@@ -759,7 +765,16 @@ mod tests {
         let g = generators::annulus(8, 2, 1.0, 2.0).unwrap();
         let (mesh, geometry) = setup(&g);
         let err = DiskBff::new(&mesh, &geometry, DiskOptions::default()).unwrap_err();
-        assert!(matches!(err, BffError::NotADisk { boundary_loops: 2, .. }), "{err}");
+        assert!(
+            matches!(
+                err,
+                BffError::NotADisk {
+                    boundary_loops: 2,
+                    ..
+                }
+            ),
+            "{err}"
+        );
 
         let g = generators::grid_disk(3, 3).unwrap();
         let (mesh, geometry) = setup(&g);
@@ -774,10 +789,16 @@ mod tests {
         let err = bff
             .flatten_with_scale_factors(&u, Extension::Harmonic)
             .unwrap_err();
-        assert!(matches!(err, BffError::NonFiniteInput { index: 2, .. }), "{err}");
+        assert!(
+            matches!(err, BffError::NonFiniteInput { index: 2, .. }),
+            "{err}"
+        );
         let err = bff
             .flatten_with_exterior_angles(&vec![0.5; n], Extension::Harmonic)
             .unwrap_err();
-        assert!(matches!(err, BffError::ExteriorAnglesDoNotClose { .. }), "{err}");
+        assert!(
+            matches!(err, BffError::ExteriorAnglesDoNotClose { .. }),
+            "{err}"
+        );
     }
 }

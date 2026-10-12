@@ -240,8 +240,10 @@ pub fn solve_scale_factors(
         match options.gauss_bonnet {
             GaussBonnetPolicy::Reject if violated => {
                 return Err(BffError::GaussBonnetViolated {
-                    component: closed_index.iter().position(|&x| x == k as u32).unwrap_or(0)
-                        as u32,
+                    component: closed_index
+                        .iter()
+                        .position(|&x| x == k as u32)
+                        .unwrap_or(0) as u32,
                     first_face: report.topology.first_face,
                     euler_characteristic: report.topology.euler_characteristic,
                     n_cones: report.n_cones,
@@ -252,8 +254,10 @@ pub fn solve_scale_factors(
             }
             GaussBonnetPolicy::DistributeOverCones if absolute_sum[k] == 0.0 && violated => {
                 return Err(BffError::NoConesToAdjust {
-                    component: closed_index.iter().position(|&x| x == k as u32).unwrap_or(0)
-                        as u32,
+                    component: closed_index
+                        .iter()
+                        .position(|&x| x == k as u32)
+                        .unwrap_or(0) as u32,
                     discrepancy: report.discrepancy,
                 });
             }
@@ -272,7 +276,13 @@ pub fn solve_scale_factors(
     // Right-hand side µ − Ω; on closed components made exactly compatible by removing its
     // mean (the uniformly spread remainder).
     let mut rhs: Vec<f64> = (0..n)
-        .map(|v| if is_boundary[v] { 0.0 } else { mu[v] - omega[v] })
+        .map(|v| {
+            if is_boundary[v] {
+                0.0
+            } else {
+                mu[v] - omega[v]
+            }
+        })
         .collect();
     let exact = options.diagonal_shift == 0.0;
     if exact {
@@ -630,7 +640,9 @@ pub fn flatten_with_cones(
             worst_vertex = v;
         }
     }
-    if input.scale_factors.is_some() && !(max_interior_curvature <= options.flatness_tolerance) {
+    let not_flat =
+        max_interior_curvature.is_nan() || max_interior_curvature > options.flatness_tolerance;
+    if input.scale_factors.is_some() && not_flat {
         return Err(BffError::ScaleFactorsNotFlat {
             vertex: cut.vertex_to_original[worst_vertex],
             curvature: 2.0 * PI - angle_sums[worst_vertex] + laplacian_u[worst_vertex],
@@ -801,12 +813,14 @@ fn anchored_loops(
             continue;
         }
         let vertex = cut.mesh.from_vertex(corner as usize) as u32;
-        let position = boundary.iter().position(|&v| v == vertex).ok_or(
-            BffError::AnchorNotOnBoundary {
-                corner,
-                vertex: cut.vertex_to_original[vertex as usize],
-            },
-        )?;
+        let position =
+            boundary
+                .iter()
+                .position(|&v| v == vertex)
+                .ok_or(BffError::AnchorNotOnBoundary {
+                    corner,
+                    vertex: cut.vertex_to_original[vertex as usize],
+                })?;
         boundary.rotate_left(position);
     }
     Ok(loops)

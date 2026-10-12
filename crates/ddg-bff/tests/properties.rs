@@ -9,9 +9,8 @@ use std::f64::consts::PI;
 
 use common::{layout_angle_sums, max_length_deviation};
 use ddg_bff::{
-    BffError, Cone, ConeFlattenInput, ConeFlattenOptions, ConeFlattening, CutPlanInput,
-    CutSource, component_topology, cut_euler_characteristic, cut_mesh, flatten_with_cones,
-    plan_cut,
+    BffError, Cone, ConeFlattenInput, ConeFlattenOptions, ConeFlattening, CutPlanInput, CutSource,
+    component_topology, cut_euler_characteristic, cut_mesh, flatten_with_cones, plan_cut,
 };
 use ddg_core::generators::{self, GeneratedMesh, SplitMix64};
 use ddg_core::{Geometry, TriMesh};
@@ -75,11 +74,18 @@ fn check_structure(mesh: &TriMesh, flat: &ConeFlattening) -> Result<(), TestCase
         prop_assert_eq!(t.boundary_loops, 1);
     }
     prop_assert_eq!(flat.corner_uvs.len(), 3 * mesh.n_faces());
-    prop_assert!(flat.corner_uvs.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+    prop_assert!(
+        flat.corner_uvs
+            .iter()
+            .all(|p| p[0].is_finite() && p[1].is_finite())
+    );
     // Corner UVs are the vertex UVs of the cut mesh, whose faces are the input faces.
     for (f, face) in flat.cut.mesh.faces().iter().enumerate() {
         for k in 0..3 {
-            prop_assert_eq!(flat.corner_uvs[3 * f + k], flat.vertex_uvs[face[k] as usize]);
+            prop_assert_eq!(
+                flat.corner_uvs[3 * f + k],
+                flat.vertex_uvs[face[k] as usize]
+            );
             prop_assert_eq!(
                 flat.cut.vertex_to_original[face[k] as usize],
                 mesh.faces()[f][k]
@@ -96,7 +102,11 @@ fn check_structure(mesh: &TriMesh, flat: &ConeFlattening) -> Result<(), TestCase
         }
     }
     // Lengths agree across the cut whenever closing did not have to give up.
-    if flat.charts.iter().all(|c| c.closure.dropped_directions == 0) {
+    if flat
+        .charts
+        .iter()
+        .all(|c| c.closure.dropped_directions == 0)
+    {
         prop_assert!(
             flat.seams.max_length_mismatch < 1e-9,
             "seam mismatch {}",
@@ -109,8 +119,16 @@ fn check_structure(mesh: &TriMesh, flat: &ConeFlattening) -> Result<(), TestCase
     Ok(())
 }
 
+/// Number of cases per property: 48, or `PROPTEST_CASES` from the environment.
+fn cases() -> u32 {
+    std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(48)
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig::with_cases(cases()))]
 
     /// Cutting along any edge set keeps faces and corners, and changes the Euler
     /// characteristic by (added vertices) − (cut edges).

@@ -98,7 +98,8 @@ impl PoissonSystem {
         let factorization = if n_free == 0 {
             None
         } else {
-            let block = laplacian_block(surface.mesh.faces(), surface.cotans, &index, n_free, shift);
+            let block =
+                laplacian_block(surface.mesh.faces(), surface.cotans, &index, n_free, shift);
             Some(factor_spd(name, &block)?)
         };
         Ok(PoissonSystem {
@@ -139,7 +140,11 @@ impl PoissonSystem {
         for c in 0..nrhs {
             let column = &values[c * n..(c + 1) * n];
             for v in 0..n {
-                lifted[v] = if self.index[v] == NONE { column[v] } else { 0.0 };
+                lifted[v] = if self.index[v] == NONE {
+                    column[v]
+                } else {
+                    0.0
+                };
             }
             surface.apply_laplacian(&lifted, &mut product);
             for v in 0..n {
@@ -278,11 +283,11 @@ pub(crate) fn layout_quality(
 }
 
 /// Checks that every coordinate of a layout is finite.
-pub(crate) fn check_finite_layout(
-    mesh: &TriMesh,
-    uv: &[[f64; 2]],
-) -> Result<(), BffError> {
-    match uv.iter().position(|p| !(p[0].is_finite() && p[1].is_finite())) {
+pub(crate) fn check_finite_layout(mesh: &TriMesh, uv: &[[f64; 2]]) -> Result<(), BffError> {
+    match uv
+        .iter()
+        .position(|p| !(p[0].is_finite() && p[1].is_finite()))
+    {
         None => Ok(()),
         Some(v) => Err(BffError::NonFiniteResult {
             what: "the layout",

@@ -50,13 +50,19 @@ fn parse(path: &str) -> Reference {
     for line in text.lines() {
         let mut tokens = line.split_ascii_whitespace();
         let numbers = |tokens: std::str::SplitAsciiWhitespace<'_>| -> Vec<f64> {
-            tokens.map(|t| t.parse().unwrap_or_else(|_| panic!("{path}: bad number {t}"))).collect()
+            tokens
+                .map(|t| {
+                    t.parse()
+                        .unwrap_or_else(|_| panic!("{path}: bad number {t}"))
+                })
+                .collect()
         };
         match tokens.next() {
             Some("f") => {
                 let x = numbers(tokens);
                 r.faces.push([x[0] as u32, x[1] as u32, x[2] as u32]);
-                r.corner_uvs.extend([[x[3], x[4]], [x[5], x[6]], [x[7], x[8]]]);
+                r.corner_uvs
+                    .extend([[x[3], x[4]], [x[5], x[6]], [x[7], x[8]]]);
             }
             Some("c") => {
                 let x = numbers(tokens);
@@ -103,8 +109,20 @@ fn main() {
     }
     println!(
         "{:<20} {:>7} {:>7} {:>6} {:>6} {:>8} | {:>8} {:>8} | {:>8} {:>8} | {:>8} | {:>8} {:>8} {:>8}",
-        "case", "V", "F", "cones", "cutE", "mollify", "exact", "max", "shifted", "max", "scale",
-        "same cut", "ref-file", "max"
+        "case",
+        "V",
+        "F",
+        "cones",
+        "cutE",
+        "mollify",
+        "exact",
+        "max",
+        "shifted",
+        "max",
+        "scale",
+        "same cut",
+        "ref-file",
+        "max"
     );
     for case in args[1..].chunks(step) {
         let reference = parse(&case[0]);
@@ -127,7 +145,8 @@ fn main() {
         let mut n_cones = 0;
         for shift in [0.0, REFERENCE_DIAGONAL_SHIFT] {
             let (uvs, face_chart, n_charts) = if mode == "cones" {
-                let cones = read_cones(&case[1], mesh.n_vertices()).unwrap_or_else(|e| panic!("{e}"));
+                let cones =
+                    read_cones(&case[1], mesh.n_vertices()).unwrap_or_else(|e| panic!("{e}"));
                 n_cones = cones.len();
                 let cut: Vec<u32> = reference
                     .cut
@@ -166,7 +185,11 @@ fn main() {
                     },
                 )
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-                (flat.corner_uvs.clone(), flat.face_chart.clone(), flat.n_charts())
+                (
+                    flat.corner_uvs.clone(),
+                    flat.face_chart.clone(),
+                    flat.n_charts(),
+                )
             } else {
                 let mut bff = DiskBff::new(
                     &mesh,
@@ -192,7 +215,12 @@ fn main() {
                     .collect();
                 (corner, vec![0u32; mesh.n_faces()], 1)
             };
-            results.push(compare_layouts(&face_chart, n_charts, &uvs, &reference.corner_uvs));
+            results.push(compare_layouts(
+                &face_chart,
+                n_charts,
+                &uvs,
+                &reference.corner_uvs,
+            ));
         }
         line += &format!(
             " {:>6} {:>6} {:>8.1e} | {:8.1e} {:8.1e} | {:8.1e} {:8.1e} | {:8.2e}",
@@ -227,7 +255,10 @@ fn main() {
                 );
                 line += &format!(" | {:>8} {:8.1e} {:8.1e}", "yes", a.rms, a.max);
             } else {
-                let common = stored_cut.iter().filter(|e| driver_cut.binary_search(e).is_ok()).count();
+                let common = stored_cut
+                    .iter()
+                    .filter(|e| driver_cut.binary_search(e).is_ok())
+                    .count();
                 line += &format!(
                     " | {:>8} ({} of {} stored cut edges)",
                     "NO",

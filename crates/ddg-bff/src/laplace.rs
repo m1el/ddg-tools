@@ -17,12 +17,7 @@ use crate::error::BffError;
 /// opposite that corner. `L` is symmetric positive semidefinite.
 ///
 /// [formula: cotan-laplacian]
-pub(crate) fn laplacian_apply(
-    faces: &[[u32; 3]],
-    cotans: &[[f64; 3]],
-    x: &[f64],
-    out: &mut [f64],
-) {
+pub(crate) fn laplacian_apply(faces: &[[u32; 3]], cotans: &[[f64; 3]], x: &[f64], out: &mut [f64]) {
     out.fill(0.0);
     for (face, cot) in faces.iter().zip(cotans) {
         for k in 0..3 {
