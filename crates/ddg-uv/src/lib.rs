@@ -13,6 +13,7 @@ pub mod options;
 pub mod pack;
 pub mod pipeline;
 pub mod prepare;
+pub mod primitives;
 pub mod report;
 mod slit;
 
