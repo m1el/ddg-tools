@@ -84,6 +84,15 @@ open DdgProofs
 #print axioms TriMesh.hasDerivAt_angleSum_conformalScale
 #print axioms TriMesh.hasDerivAt_angleDefect_conformalScale
 #print axioms TriMesh.hasDerivAt_angleDefect_conformalScale_add
+-- The forms crates/ddg-core evaluates
+#print axioms atan2_eq_arctan
+#print axioms kahanArea_of_sorted_rearrangement
+#print axioms two_mul_atan2_sqrt_eq_cornerAngle
+#print axioms kahanCornerAngle_eq_cornerAngle
+#print axioms kahanCornerCot_eq_cornerCot
+#print axioms TriMesh.gauss_bonnet_fields
+#print axioms TriMesh.laplacian_apply_of_ne
+#print axioms TriMesh.laplacian_apply_self
 -- Statements about the oracle's definitions
 #print axioms Oracle.inSubdiff_iff_eq_boundedThreshold
 #print axioms Oracle.inSubdiff_sub_div_iff_eq_regularizedMeasure

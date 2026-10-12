@@ -4,7 +4,7 @@
 #   Every Rust function that implements a formula carries a doc line  [formula: <kebab-id>].
 #   Each such id must be either
 #     * on a Lean theorem (or lemma) in lean/proofs  -> status "proved", or
-#     * listed in lean/proofs/CITED.md               -> status "cited".
+#     * the id of a heading in lean/proofs/CITED.md  -> status "cited".
 #   Anything else is "MISSING" and makes the script fail.
 #
 #   The script also fails if `sorry`, `admit` or an `axiom` declaration appears in the Lean
@@ -78,8 +78,10 @@ fi
 # ---------------------------------------------------------------------------------------------
 : > "$tmp/cited.tsv"
 if [ -f "$cited" ]; then
-  grep -n -o '\[formula: [a-z0-9-]*\]' "$cited" 2>/dev/null \
-    | sed -E 's/^([0-9]+):\[formula: ([a-z0-9-]+)\]$/\2\tlean\/proofs\/CITED.md:\1/' \
+  # An id is cited where it appears in a heading of CITED.md; mentions in the running text are
+  # cross-references to proved results and do not count.
+  grep -n -E '^#{1,6} .*\[formula: [a-z0-9-]+\]' "$cited" 2>/dev/null \
+    | sed -E 's/^([0-9]+):.*\[formula: ([a-z0-9-]+)\].*$/\2\tlean\/proofs\/CITED.md:\1/' \
     | sort -u -t "$(printf '\t')" -k1,1 > "$tmp/cited.tsv"
 fi
 
