@@ -1,0 +1,14 @@
+[package]
+name = "ddg-core"
+description = "Mesh topology, Blender-compatible triangulation, intrinsic geometry, cotan operators, sparse solvers and OBJ I/O for the ddg-tools workspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
+
+[dev-dependencies]
+proptest = "1"
