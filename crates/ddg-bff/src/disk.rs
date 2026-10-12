@@ -71,6 +71,11 @@ pub struct DiskOptions {
     /// curve. If closing needs more, the curve is closed as far as this bound allows and the
     /// remaining gap is spread along it; see [`crate::curve::ClosureReport`].
     pub max_length_adjustment: f64,
+    /// The boundary vertex at which the boundary loop starts: it becomes
+    /// [`DiskBff::boundary`]`[0]` and is placed at the origin. `None` (the default) starts
+    /// where `TriMesh::boundary_loops` does. For exact solves the layout depends on this
+    /// choice only by a rigid motion.
+    pub boundary_start: Option<u32>,
 }
 
 impl Default for DiskOptions {
@@ -79,6 +84,7 @@ impl Default for DiskOptions {
             diagonal_shift: 0.0,
             angle_sum_tolerance: 1e-8,
             max_length_adjustment: 0.5,
+            boundary_start: None,
         }
     }
 }
@@ -141,7 +147,7 @@ impl<'a> DiskBff<'a> {
     /// # Errors
     /// [`BffError::Geometry`] if the geometry does not belong to the mesh;
     /// [`BffError::NotADisk`] unless the mesh is connected with Euler characteristic 1 and one
-    /// boundary loop.
+    /// boundary loop; [`BffError::StartNotOnBoundary`] for a bad `boundary_start`.
     pub fn new(
         mesh: &'a TriMesh,
         geometry: &'a Geometry,
@@ -165,7 +171,14 @@ impl<'a> DiskBff<'a> {
                 value: options.diagonal_shift,
             });
         }
-        let boundary = mesh.boundary_loops()[0].clone();
+        let mut boundary = mesh.boundary_loops()[0].clone();
+        if let Some(start) = options.boundary_start {
+            let position = boundary
+                .iter()
+                .position(|&v| v == start)
+                .ok_or(BffError::StartNotOnBoundary { vertex: start })?;
+            boundary.rotate_left(position);
+        }
         let mut is_boundary = vec![false; mesh.n_vertices()];
         for &v in &boundary {
             is_boundary[v as usize] = true;

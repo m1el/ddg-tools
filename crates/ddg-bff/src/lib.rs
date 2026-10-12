@@ -46,6 +46,7 @@
 //!         cones: &cones,
 //!         scale_factors: None,
 //!         cut: CutSource::Plan { may_cut: None, must_cut: &[] },
+//!         anchors: &[],
 //!     },
 //!     &ConeFlattenOptions::default(),
 //! )?;
@@ -99,7 +100,10 @@ pub use cones::{
     Timings, flatten_with_cones, solve_scale_factors,
 };
 pub use curve::ClosureReport;
-pub use cut::{ComponentTopology, CutMesh, component_topology, cut_mesh};
+pub use cut::{
+    ComponentTopology, CutMesh, component_topology, cut_euler_characteristic, cut_mesh,
+    discontinuous_edges,
+};
 pub use disk::{DiskBff, DiskFlattening, DiskOptions, Extension, REFERENCE_DIAGONAL_SHIFT};
 pub use error::BffError;
 pub use mollify::{Mollified, REFERENCE_MOLLIFY_DELTA, mollify_edge_lengths};

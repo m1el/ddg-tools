@@ -254,6 +254,44 @@ fn cut_mesh_impl(
     })
 }
 
+/// The interior edges across which a per-corner attribute is discontinuous: edge `ab` with
+/// faces `f` and `g` is listed if the value at the corner of `f` at `a` differs from the value
+/// at the corner of `g` at `a`, or likewise at `b`. `corner_values[3 f + k]` belongs to the
+/// corner of face `f` at `faces[f][k]`.
+///
+/// Applied to per-corner UV coordinates this recovers the seams of an existing UV map. A cut
+/// edge both of whose end points carry a single value on both sides (an isolated slit) cannot
+/// be detected this way.
+///
+/// # Errors
+/// [`BffError::LengthMismatch`] if there is not one value per corner.
+pub fn discontinuous_edges<T: PartialEq>(
+    mesh: &TriMesh,
+    corner_values: &[T],
+) -> Result<Vec<u32>, BffError> {
+    if corner_values.len() != mesh.n_halfedges() {
+        return Err(BffError::LengthMismatch {
+            what: "corner values",
+            expected: mesh.n_halfedges(),
+            got: corner_values.len(),
+        });
+    }
+    let mut edges = Vec::new();
+    for e in 0..mesh.n_edges() {
+        let h = mesh.edge_halfedge(e);
+        let Some(t) = mesh.twin(h) else {
+            continue;
+        };
+        // h runs a -> b in one face, t runs b -> a in the other.
+        if corner_values[h] != corner_values[mesh.next(t)]
+            || corner_values[mesh.next(h)] != corner_values[t]
+        {
+            edges.push(e as u32);
+        }
+    }
+    Ok(edges)
+}
+
 /// Topology of one connected component of a mesh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentTopology {
@@ -415,6 +453,30 @@ mod tests {
         assert_eq!(cut.mesh, mesh);
         let err = cut_mesh(&mesh, &[mesh.n_edges() as u32]).unwrap_err();
         assert!(matches!(err, BffError::EdgeOutOfRange { .. }), "{err}");
+    }
+
+    #[test]
+    fn cuts_are_recovered_from_per_corner_values() {
+        let g = generators::icosphere(2).unwrap();
+        let mesh = g.topology().unwrap();
+        // A path of three edges starting at vertex 0.
+        let mut path = Vec::new();
+        let mut v = 0usize;
+        for _ in 0..3 {
+            let h = mesh
+                .outgoing_halfedges(v)
+                .find(|&h| !path.contains(&(mesh.edge(h) as u32)))
+                .unwrap();
+            path.push(mesh.edge(h) as u32);
+            v = mesh.to_vertex(h);
+        }
+        path.sort_unstable();
+        let cut = cut_mesh(&mesh, &path).unwrap();
+        // The vertex of the cut mesh at every corner is a per-corner value that is
+        // discontinuous exactly across the cut.
+        let corner_vertex: Vec<u32> = cut.mesh.faces().iter().flatten().copied().collect();
+        assert_eq!(discontinuous_edges(&mesh, &corner_vertex).unwrap(), path);
+        assert!(discontinuous_edges(&mesh, &corner_vertex[1..]).is_err());
     }
 
     #[test]

@@ -190,6 +190,37 @@ pub enum BffError {
         /// Number of boundary loops (a disk has 1).
         boundary_loops: usize,
     },
+    /// An anchor is not a corner of the mesh.
+    AnchorOutOfRange {
+        /// Position in the anchor list.
+        position: usize,
+        /// The offending corner id.
+        corner: u32,
+        /// Number of corners of the mesh (three per face).
+        n_corners: usize,
+    },
+    /// An anchor corner lies at a vertex that is not on the boundary of its chart, so no
+    /// boundary curve can start there.
+    AnchorNotOnBoundary {
+        /// The corner.
+        corner: u32,
+        /// Its vertex.
+        vertex: u32,
+    },
+    /// Two anchors lie in the same chart.
+    DuplicateAnchor {
+        /// The chart.
+        chart: u32,
+        /// The first anchor corner in that chart.
+        first: u32,
+        /// The second one.
+        second: u32,
+    },
+    /// The vertex at which the boundary of a disk should start is not a boundary vertex.
+    StartNotOnBoundary {
+        /// The vertex.
+        vertex: u32,
+    },
     /// Prescribed exterior angles of a disk do not sum to `2π`.
     ExteriorAnglesDoNotClose {
         /// Their sum.
@@ -365,6 +396,32 @@ impl fmt::Display for BffError {
                  (a disk has 1, 1 and 1)",
                 if *components == 1 { "" } else { "s" },
                 if *boundary_loops == 1 { "" } else { "s" }
+            ),
+            BffError::AnchorOutOfRange {
+                position,
+                corner,
+                n_corners,
+            } => write!(
+                f,
+                "anchor {position} is corner {corner}, but the mesh has {n_corners} corners"
+            ),
+            BffError::AnchorNotOnBoundary { corner, vertex } => write!(
+                f,
+                "anchor corner {corner} is at vertex {vertex}, which is not on the boundary of \
+                 its chart after cutting"
+            ),
+            BffError::DuplicateAnchor {
+                chart,
+                first,
+                second,
+            } => write!(
+                f,
+                "anchor corners {first} and {second} are both in chart {chart}; a chart can \
+                 have one anchor"
+            ),
+            BffError::StartNotOnBoundary { vertex } => write!(
+                f,
+                "vertex {vertex} is not on the boundary, so the boundary cannot start there"
             ),
             BffError::ExteriorAnglesDoNotClose { sum, tolerance } => write!(
                 f,

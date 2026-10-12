@@ -51,6 +51,10 @@ pub enum GaussBonnetPolicy {
     /// component (each gets the same small curvature). This is the least-squares solution of
     /// the inconsistent system, and what the reference implementation computes when it is
     /// handed such angles, because of the diagonal shift in its Laplacian.
+    ///
+    /// With a non-zero [`ScaleFactorOptions::diagonal_shift`] the shifted system is solved as
+    /// it stands, exactly like the reference: the discrepancy `d` then also shows up as a
+    /// constant `d / (shift · n_vertices)` in `u`, which scales the whole layout.
     SpreadOverVertices,
 }
 
@@ -63,8 +67,11 @@ pub struct ScaleFactorOptions {
     /// within the tolerance is spread uniformly over the vertices of the component.
     pub gauss_bonnet_tolerance: f64,
     /// A constant added to the diagonal of the Laplacian, see
-    /// [`crate::disk::DiskOptions::diagonal_shift`]. With `0.0` (the default) one vertex of
-    /// every closed component is pinned instead.
+    /// [`crate::disk::DiskOptions::diagonal_shift`]. With `0.0` (the default) the system is
+    /// solved exactly: on a closed component the right-hand side is made compatible, one
+    /// vertex is pinned, and the solution is shifted to an area-weighted mean of zero. With a
+    /// positive shift the regularized system `(L + shift · I) u = µ − Ω` is solved as it
+    /// stands, which is what the reference implementation does; `u` is then not normalized.
     pub diagonal_shift: f64,
 }
 
@@ -94,7 +101,8 @@ pub struct ClosedComponentReport {
     /// What was done about the discrepancy.
     pub applied: GaussBonnetPolicy,
     /// The constant that was added to the pinned solution on this component to give `u` an
-    /// area-weighted mean of zero. It only sets the overall size of the layout.
+    /// area-weighted mean of zero. It only sets the overall size of the layout. Zero when a
+    /// diagonal shift is used (nothing is added then).
     pub additive_constant: f64,
 }
 
@@ -102,7 +110,7 @@ pub struct ClosedComponentReport {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScaleFactors {
     /// The log scale factor `u` per vertex: zero on the boundary; on a closed component its
-    /// area-weighted mean is zero.
+    /// area-weighted mean is zero (unless a diagonal shift is used).
     pub u: Vec<f64>,
     /// The cone angle `µ` per vertex that was used (zero away from the cones). Differs from
     /// the input only under [`GaussBonnetPolicy::DistributeOverCones`].
@@ -111,8 +119,9 @@ pub struct ScaleFactors {
     pub closed_components: Vec<ClosedComponentReport>,
     /// Number of unknowns of the linear system.
     pub n_unknowns: usize,
-    /// `max_i |(L u)_i − (µ_i − Ω_i − s_i)|` over the interior vertices, where `s_i` is the
-    /// uniformly spread discrepancy of the component (zero unless reported otherwise).
+    /// `max_i |(L u)_i + shift · u_i − (µ_i − Ω_i − s_i)|` over the interior vertices, where
+    /// `s_i` is the uniformly spread discrepancy of the component (zero with a diagonal shift
+    /// and for compatible cone angles).
     pub max_residual: f64,
     /// Relative residual of the linear solve.
     pub relative_residual: f64,
@@ -265,24 +274,27 @@ pub fn solve_scale_factors(
     let mut rhs: Vec<f64> = (0..n)
         .map(|v| if is_boundary[v] { 0.0 } else { mu[v] - omega[v] })
         .collect();
-    let mut sums = vec![0.0; closed.len()];
-    for v in 0..n {
-        let k = closed_index[component[v] as usize];
-        if k != NONE {
-            sums[k as usize] += rhs[v];
+    let exact = options.diagonal_shift == 0.0;
+    if exact {
+        let mut sums = vec![0.0; closed.len()];
+        for v in 0..n {
+            let k = closed_index[component[v] as usize];
+            if k != NONE {
+                sums[k as usize] += rhs[v];
+            }
         }
-    }
-    for v in 0..n {
-        let k = closed_index[component[v] as usize];
-        if k != NONE {
-            rhs[v] -= sums[k as usize] / closed[k as usize].topology.n_vertices as f64;
+        for v in 0..n {
+            let k = closed_index[component[v] as usize];
+            if k != NONE {
+                rhs[v] -= sums[k as usize] / closed[k as usize].topology.n_vertices as f64;
+            }
         }
     }
 
     // Unknowns: interior vertices; without a diagonal shift one vertex per closed component
     // is pinned to make the matrix definite.
     let mut fixed = is_boundary.clone();
-    if options.diagonal_shift == 0.0 {
+    if exact {
         let mut pinned = vec![false; closed.len()];
         for v in 0..n {
             let k = closed_index[component[v] as usize];
@@ -315,7 +327,9 @@ pub fn solve_scale_factors(
         }
     }
     for (k, report) in closed.iter_mut().enumerate() {
-        report.additive_constant = -weighted[k] / total[k];
+        if exact {
+            report.additive_constant = -weighted[k] / total[k];
+        }
     }
     for v in 0..n {
         let k = closed_index[component[v] as usize];
@@ -328,7 +342,7 @@ pub fn solve_scale_factors(
     surface.apply_laplacian(&u, &mut product);
     let max_residual = (0..n)
         .filter(|&v| !is_boundary[v])
-        .map(|v| (product[v] - rhs[v]).abs())
+        .map(|v| (product[v] + options.diagonal_shift * u[v] - rhs[v]).abs())
         .fold(0.0, f64::max);
     if !max_residual.is_finite() {
         return Err(BffError::NonFiniteResult {
@@ -376,6 +390,14 @@ pub struct ConeFlattenInput<'a> {
     pub scale_factors: Option<&'a [f64]>,
     /// The cuts.
     pub cut: CutSource<'a>,
+    /// Optional anchors, as corner ids `3 f + k` of the input mesh, at most one per chart: the
+    /// boundary curve of the chart that contains face `f` starts at the copy of vertex
+    /// `faces[f][k]` that this corner belongs to, which must lie on the cut or on the
+    /// boundary. That vertex is placed at the origin and the boundary edge leaving it (chart
+    /// on the left) points along `+x`. A chart without anchor starts at the first vertex of
+    /// its boundary loop in the cut mesh. For exact solves the choice changes the layout of a
+    /// chart only by a rigid motion.
+    pub anchors: &'a [u32],
 }
 
 /// Options of [`flatten_with_cones`].
@@ -469,8 +491,8 @@ pub struct ConeFlattening {
     /// different positions in different corners.
     ///
     /// Each chart is placed with the first vertex of its boundary loop (see
-    /// `TriMesh::boundary_loops` of `cut.mesh`) at the origin and its first boundary edge
-    /// along `+x`. Charts are not packed, recentred or rescaled: lengths in the plane are
+    /// `TriMesh::boundary_loops` of `cut.mesh`, or its anchor) at the origin and its first
+    /// boundary edge along `+x`. Charts are not packed, recentred or rescaled: lengths in the plane are
     /// about `e^u` times the lengths on the surface in every chart alike, so charts lie on
     /// top of each other and their relative size is meaningful.
     pub corner_uvs: Vec<[f64; 2]>,
@@ -520,7 +542,8 @@ impl ConeFlattening {
 /// # Errors
 /// Those of [`solve_scale_factors`], [`crate::plan::plan_cut`] and [`crate::cut::cut_mesh`];
 /// [`BffError::ChartNotDisk`] and [`BffError::ConeNotOnCut`] for explicit cuts that do not
-/// work; [`BffError::ScaleFactorsNotFlat`] for scale factors that are not flat away from the
+/// work; [`BffError::AnchorOutOfRange`], [`BffError::AnchorNotOnBoundary`] and
+/// [`BffError::DuplicateAnchor`] for bad anchors; [`BffError::ScaleFactorsNotFlat`] for scale factors that are not flat away from the
 /// cut; [`BffError::Solve`]; [`BffError::NonFiniteResult`] instead of returning NaN.
 pub fn flatten_with_cones(
     input: &ConeFlattenInput<'_>,
@@ -617,7 +640,7 @@ pub fn flatten_with_cones(
 
     let face_chart = cut.mesh.face_components().to_vec();
     let n_charts = cut.mesh.n_components();
-    let boundary_loops = cut.mesh.boundary_loops();
+    let boundary_loops = anchored_loops(mesh, &cut, &face_chart, input.anchors)?;
     let mut loop_of_chart = vec![NONE; n_charts];
     let mut loops: Vec<LoopData> = Vec::with_capacity(boundary_loops.len());
     for (index, boundary) in boundary_loops.iter().enumerate() {
@@ -737,6 +760,56 @@ pub fn flatten_with_cones(
         seams,
         timings,
     })
+}
+
+/// The boundary loops of the cut surface, each rotated to start at its chart's anchor.
+fn anchored_loops(
+    mesh: &TriMesh,
+    cut: &CutMesh,
+    face_chart: &[u32],
+    anchors: &[u32],
+) -> Result<Vec<Vec<u32>>, BffError> {
+    let mut loops: Vec<Vec<u32>> = cut.mesh.boundary_loops().to_vec();
+    if anchors.is_empty() {
+        return Ok(loops);
+    }
+    let n_charts = cut.mesh.n_components();
+    let mut anchor_of_chart = vec![NONE; n_charts];
+    for (position, &corner) in anchors.iter().enumerate() {
+        if corner as usize >= mesh.n_halfedges() {
+            return Err(BffError::AnchorOutOfRange {
+                position,
+                corner,
+                n_corners: mesh.n_halfedges(),
+            });
+        }
+        let chart = face_chart[corner as usize / 3];
+        let previous = anchor_of_chart[chart as usize];
+        if previous != NONE {
+            return Err(BffError::DuplicateAnchor {
+                chart,
+                first: previous,
+                second: corner,
+            });
+        }
+        anchor_of_chart[chart as usize] = corner;
+    }
+    for boundary in &mut loops {
+        let chart = face_chart[cut.mesh.outgoing_halfedge(boundary[0] as usize) / 3];
+        let corner = anchor_of_chart[chart as usize];
+        if corner == NONE {
+            continue;
+        }
+        let vertex = cut.mesh.from_vertex(corner as usize) as u32;
+        let position = boundary.iter().position(|&v| v == vertex).ok_or(
+            BffError::AnchorNotOnBoundary {
+                corner,
+                vertex: cut.vertex_to_original[vertex as usize],
+            },
+        )?;
+        boundary.rotate_left(position);
+    }
+    Ok(loops)
 }
 
 /// The boundary data of one loop of the cut surface.

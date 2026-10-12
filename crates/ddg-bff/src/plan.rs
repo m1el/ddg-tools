@@ -33,9 +33,9 @@
 //!
 //!    A cut that is a single edge between two interior vertices (two adjacent cones on a
 //!    sphere, or a required seam of one edge) cannot be represented by an indexed mesh: its
-//!    two sides would have the same end points. Such a slit is extended by its shortest
-//!    cuttable neighbouring edge that ends at an untouched interior vertex
-//!    ([`CutPlan::n_extension_edges`]).
+//!    two sides would have the same end points. Such a slit is extended by a cuttable
+//!    neighbouring edge, the shortest one that ends at an untouched interior vertex if there
+//!    is one ([`CutPlan::n_extension_edges`]).
 //! 6. **Verification.** The mesh is actually cut and every chart is checked to be a disk with
 //!    all cones on its boundary. Failures are reported with their cause.
 //!
@@ -377,10 +377,12 @@ fn diagnose(
 }
 
 /// Extends every isolated slit of a cut by one edge: a cut edge whose two end points are
-/// interior vertices without another cut edge gets its shortest usable neighbouring edge that
-/// ends at an interior vertex without cut edges. Adding such an edge keeps every disk a disk
-/// (it is the reverse of pruning). Returns the number of added edges, or the slit that has no
-/// usable neighbour.
+/// interior vertices without another cut edge gets a usable neighbouring edge, preferably the
+/// shortest one that ends at an interior vertex without cut edges. Adding such an edge keeps
+/// every disk a disk (it is the reverse of pruning). If there is none, the shortest usable
+/// neighbouring edge of any kind is taken; it ends on the boundary or on another part of the
+/// cut, which joins two boundary loops and cannot disconnect anything. Returns the number of
+/// added edges, or the slit that has no usable neighbour at all.
 ///
 /// [formula: cut-leaf-pruning]
 fn extend_isolated_slits(
@@ -407,23 +409,20 @@ fn extend_isolated_slits(
         if !isolated {
             continue;
         }
-        let mut best: Option<(Dist, usize, usize, usize)> = None;
+        let mut best: Option<(bool, Dist, usize, usize, usize)> = None;
         for x in [a, b] {
             for h in mesh.outgoing_halfedges(x) {
                 let (candidate, c) = (mesh.edge(h), mesh.to_vertex(h));
-                if usable[candidate]
-                    && !is_cut[candidate]
-                    && degree[c] == 0
-                    && !mesh.is_boundary_vertex(c)
-                {
-                    let key = (Dist(lengths[candidate]), candidate, x, c);
-                    if best.is_none_or(|b| (key.0, key.1) < (b.0, b.1)) {
+                if usable[candidate] && !is_cut[candidate] {
+                    let touched = degree[c] != 0 || mesh.is_boundary_vertex(c);
+                    let key = (touched, Dist(lengths[candidate]), candidate, x, c);
+                    if best.is_none_or(|b| (key.0, key.1, key.2) < (b.0, b.1, b.2)) {
                         best = Some(key);
                     }
                 }
             }
         }
-        let Some((_, candidate, x, c)) = best else {
+        let Some((_, _, candidate, x, c)) = best else {
             return Err(e as u32);
         };
         is_cut[candidate] = true;

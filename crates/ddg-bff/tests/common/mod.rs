@@ -1,0 +1,292 @@
+//! Helpers shared by the dataset test and the dataset report example: loading the meshes of
+//! the optimal-cones dataset and comparing a layout with the UV map stored in them.
+
+#![allow(dead_code)]
+
+use std::path::PathBuf;
+
+use ddg_bff::quality::fit_similarity;
+use ddg_bff::{Cone, discontinuous_edges};
+use ddg_core::io::{read_cones, read_obj};
+use ddg_core::{Geometry, TriMesh};
+
+/// The directory of the dataset (it is not part of the repository).
+pub fn dataset_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../data/optimal-cones/optimal-cones-data/data")
+}
+
+/// The names of the dataset meshes, sorted, or `None` if the dataset is absent.
+pub fn dataset_names() -> Option<Vec<String>> {
+    let dir = dataset_dir();
+    if !dir.is_dir() {
+        return None;
+    }
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|n| n.strip_suffix(".obj"))
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    Some(names)
+}
+
+/// One mesh of the dataset.
+pub struct DatasetMesh {
+    pub name: String,
+    pub positions: Vec<[f64; 3]>,
+    pub mesh: TriMesh,
+    pub geometry: Geometry,
+    pub cones: Vec<Cone>,
+    /// The UV of every corner as stored in the OBJ file (output of the reference BFF).
+    pub reference_uvs: Vec<[f64; 2]>,
+    /// The edges across which the stored UV map is discontinuous: the reference's cut, as far
+    /// as it can be seen. Where both sides of a cut edge have the same UVs to the six digits of
+    /// the file (cones of nearly zero angle), the edge is missing here.
+    pub reference_cut: Vec<u32>,
+}
+
+impl DatasetMesh {
+    /// The reference's cut, completed where it could not be recovered from the stored UVs:
+    /// if the recovered edges do not cut the mesh into disks through all cones, the planner
+    /// adds the missing edges (keeping all recovered ones). Returns the edges and how many
+    /// were added.
+    pub fn completed_reference_cut(&self) -> (Vec<u32>, usize) {
+        let cone_vertices: Vec<u32> = self.cones.iter().map(|c| c.vertex).collect();
+        let plan = ddg_bff::plan_cut(&ddg_bff::CutPlanInput {
+            mesh: &self.mesh,
+            edge_lengths: self.geometry.edge_lengths(),
+            cone_vertices: &cone_vertices,
+            may_cut: None,
+            must_cut: &self.reference_cut,
+        })
+        .unwrap_or_else(|e| panic!("{}: completing the stored cut: {e}", self.name));
+        let added = plan.cut_edges.len() - self.reference_cut.len();
+        (plan.cut_edges, added)
+    }
+}
+
+pub fn load(name: &str) -> DatasetMesh {
+    let dir = dataset_dir();
+    let obj = read_obj(dir.join(format!("{name}.obj"))).unwrap_or_else(|e| panic!("{e}"));
+    let faces = obj.triangles().unwrap_or_else(|| panic!("{name}: not triangles"));
+    let mesh = TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let geometry =
+        Geometry::from_positions(&mesh, &obj.positions).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let cones = read_cones(dir.join(format!("{name}-cones.txt")), mesh.n_vertices())
+        .unwrap_or_else(|e| panic!("{e}"));
+    let reference_uvs = obj.corner_uvs().unwrap_or_else(|| panic!("{name}: corners without UV"));
+    let reference_cut = discontinuous_edges(&mesh, &reference_uvs).unwrap();
+    DatasetMesh {
+        name: name.to_string(),
+        positions: obj.positions,
+        mesh,
+        geometry,
+        cones,
+        reference_uvs,
+        reference_cut,
+    }
+}
+
+/// How well one layout matches another after the best similarity per chart.
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutAgreement {
+    /// Largest over the charts: root mean square distance / diagonal of the chart's bounding
+    /// box in the reference.
+    pub rms: f64,
+    /// Largest over the charts: maximum distance / diagonal of the bounding box.
+    pub max: f64,
+    /// Scale of the similarity of the first chart (reference size / own size).
+    pub scale: f64,
+}
+
+/// Fits, for every chart, the similarity that maps `mine` onto `reference` (both per corner)
+/// and returns the worst relative residuals.
+pub fn compare_layouts(
+    face_chart: &[u32],
+    n_charts: usize,
+    mine: &[[f64; 2]],
+    reference: &[[f64; 2]],
+) -> LayoutAgreement {
+    let mut corners: Vec<Vec<usize>> = vec![Vec::new(); n_charts];
+    for (f, &c) in face_chart.iter().enumerate() {
+        corners[c as usize].extend([3 * f, 3 * f + 1, 3 * f + 2]);
+    }
+    let mut out = LayoutAgreement {
+        rms: 0.0,
+        max: 0.0,
+        scale: f64::NAN,
+    };
+    for (chart, list) in corners.iter().enumerate() {
+        let p: Vec<[f64; 2]> = list.iter().map(|&c| mine[c]).collect();
+        let q: Vec<[f64; 2]> = list.iter().map(|&c| reference[c]).collect();
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for point in &q {
+            for k in 0..2 {
+                lo[k] = lo[k].min(point[k]);
+                hi[k] = hi[k].max(point[k]);
+            }
+        }
+        let diagonal = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+        let fit = fit_similarity(&p, &q).expect("a chart has corners");
+        out.rms = out.rms.max(fit.rms / diagonal);
+        out.max = out.max.max(fit.max / diagonal);
+        if chart == 0 {
+            out.scale = fit.scale;
+        }
+    }
+    out
+}
+
+/// Quantiles (minimum, 1 %, median, 99 %, maximum) of the ratio of corresponding edge lengths
+/// of two per-corner layouts, after dividing by the median ratio.
+pub fn length_ratio_quantiles(mine: &[[f64; 2]], reference: &[[f64; 2]]) -> [f64; 5] {
+    let length = |uv: &[[f64; 2]], f: usize, k: usize| {
+        let (a, b) = (uv[3 * f + k], uv[3 * f + (k + 1) % 3]);
+        (b[0] - a[0]).hypot(b[1] - a[1])
+    };
+    let mut ratios: Vec<f64> = (0..mine.len() / 3)
+        .flat_map(|f| (0..3).map(move |k| (f, k)))
+        .map(|(f, k)| length(mine, f, k) / length(reference, f, k))
+        .filter(|r| r.is_finite())
+        .collect();
+    ratios.sort_by(|a, b| a.total_cmp(b));
+    let n = ratios.len();
+    let at = |q: f64| ratios[((n - 1) as f64 * q).round() as usize];
+    let median = at(0.5);
+    [at(0.0), at(0.01), median, at(0.99), at(1.0)].map(|r| r / median)
+}
+
+/// Total length of a set of edges.
+pub fn total_length(geometry: &Geometry, edges: &[u32]) -> f64 {
+    edges.iter().map(|&e| geometry.edge_lengths()[e as usize]).sum()
+}
+
+/// Number of triangles with negative orientation in a per-corner layout.
+pub fn count_flipped(uv: &[[f64; 2]]) -> usize {
+    (0..uv.len() / 3)
+        .filter(|&f| {
+            ddg_bff::quality::signed_double_area(uv[3 * f], uv[3 * f + 1], uv[3 * f + 2]) < 0.0
+        })
+        .count()
+}
+
+/// A copy of the mesh data with every position coordinate and every cone angle moved by a
+/// uniformly random amount of up to half a unit in its sixth significant digit: the size of
+/// the rounding that writing six digits to a file causes.
+pub fn perturbed_like_file_rounding(data: &DatasetMesh, seed: u64) -> (Geometry, Vec<Cone>) {
+    let mut rng = ddg_core::generators::SplitMix64::new(seed);
+    let mut jitter = |x: f64| {
+        if x == 0.0 {
+            return x;
+        }
+        let unit = 10f64.powi(x.abs().log10().floor() as i32 - 5);
+        x + unit * rng.uniform(-0.5, 0.5)
+    };
+    let positions: Vec<[f64; 3]> = data.positions.iter().map(|p| p.map(&mut jitter)).collect();
+    let cones: Vec<Cone> = data
+        .cones
+        .iter()
+        .map(|c| Cone {
+            vertex: c.vertex,
+            angle: jitter(c.angle),
+        })
+        .collect();
+    let geometry = Geometry::from_positions(&data.mesh, &positions)
+        .unwrap_or_else(|e| panic!("{}: perturbed geometry: {e}", data.name));
+    (geometry, cones)
+}
+
+/// Splits every triangle into four by its edge midpoints, without moving any vertex: the
+/// surface stays the same polyhedron.
+pub fn subdivide(positions: &[[f64; 3]], faces: &[[u32; 3]]) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let mut positions = positions.to_vec();
+    let mut midpoint: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    let mut mid = |a: u32, b: u32, positions: &mut Vec<[f64; 3]>| {
+        *midpoint.entry((a.min(b), a.max(b))).or_insert_with(|| {
+            let (p, q) = (positions[a as usize], positions[b as usize]);
+            positions.push([0.5 * (p[0] + q[0]), 0.5 * (p[1] + q[1]), 0.5 * (p[2] + q[2])]);
+            positions.len() as u32 - 1
+        })
+    };
+    let mut out = Vec::with_capacity(4 * faces.len());
+    for &[a, b, c] in faces {
+        let (ab, bc, ca) = (
+            mid(a, b, &mut positions),
+            mid(b, c, &mut positions),
+            mid(c, a, &mut positions),
+        );
+        out.extend([[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
+    }
+    (positions, out)
+}
+
+/// A regular tetrahedron, octahedron or icosahedron (`n_faces` = 4, 8 or 20), subdivided
+/// `level` times with flat faces. Its only curvature is at the original vertices.
+pub fn flat_polyhedron(n_faces: usize, level: usize) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let (mut positions, mut faces): (Vec<[f64; 3]>, Vec<[u32; 3]>) = match n_faces {
+        4 => (
+            vec![[1.0, 1.0, 1.0], [1.0, -1.0, -1.0], [-1.0, 1.0, -1.0], [-1.0, -1.0, 1.0]],
+            vec![[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+        ),
+        8 => (
+            vec![
+                [1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, -1.0],
+            ],
+            vec![
+                [0, 2, 4],
+                [2, 1, 4],
+                [1, 3, 4],
+                [3, 0, 4],
+                [2, 0, 5],
+                [1, 2, 5],
+                [3, 1, 5],
+                [0, 3, 5],
+            ],
+        ),
+        20 => {
+            let g = ddg_core::generators::icosphere(0).unwrap();
+            (g.positions, g.faces)
+        }
+        _ => panic!("no such polyhedron"),
+    };
+    for _ in 0..level {
+        (positions, faces) = subdivide(&positions, &faces);
+    }
+    (positions, faces)
+}
+
+/// Per vertex of the input mesh, the sum of the signed corner angles of a per-corner layout.
+pub fn layout_angle_sums(mesh: &TriMesh, uv: &[[f64; 2]]) -> Vec<f64> {
+    let mut sums = vec![0.0; mesh.n_vertices()];
+    for (f, face) in mesh.faces().iter().enumerate() {
+        for k in 0..3 {
+            let (a, b, c) = (uv[3 * f + k], uv[3 * f + (k + 1) % 3], uv[3 * f + (k + 2) % 3]);
+            let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - a[0], c[1] - a[1]);
+            sums[face[k] as usize] += (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
+        }
+    }
+    sums
+}
+
+/// The largest relative difference between the length of an edge in a per-corner layout and
+/// its length on the surface.
+pub fn max_length_deviation(mesh: &TriMesh, geometry: &Geometry, uv: &[[f64; 2]]) -> f64 {
+    (0..mesh.n_halfedges())
+        .map(|h| {
+            let (a, b) = (uv[h], uv[mesh.next(h)]);
+            let l = geometry.edge_lengths()[mesh.edge(h)];
+            ((b[0] - a[0]).hypot(b[1] - a[1]) / l - 1.0).abs()
+        })
+        .fold(0.0, f64::max)
+}
