@@ -1268,3 +1268,61 @@ fn the_holomorphic_extension_depends_on_the_direction_of_the_curve() {
     let change = fit.max / diagonal(&conjugate);
     assert!(change > 1e-7 && change < 2e-2, "change {change}");
 }
+
+#[test]
+fn extreme_scale_factors_give_finite_reports_or_errors() {
+    // Mapping a long strip to the unit disk squeezes its ends exponentially: the scale factor
+    // spans hundreds of units of the logarithm, more than double precision can resolve in
+    // one layout. Whatever comes out must be a finite report or an error that says why.
+    for length in [12usize, 60, 150, 400, 1000] {
+        let g = generators::grid_disk(length, 1).unwrap();
+        let (mesh, geometry) = setup(&g.positions, &g.faces);
+        let mut bff = DiskBff::new(&mesh, &geometry, DiskOptions::default()).unwrap();
+        match bff.flatten_to_disk(10) {
+            Ok(flat) => {
+                let spread = flat
+                    .boundary_scale_factors
+                    .iter()
+                    .fold(0.0f64, |m, u| m.max(u.abs()));
+                assert!(flat.uv.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
+                let d = &flat.report.distortion;
+                assert!(d.degenerate_triangles < d.n_faces);
+                let closure = &flat.report.closure;
+                for x in [
+                    d.plane_area,
+                    d.quasi_conformal.min,
+                    d.quasi_conformal.max,
+                    d.quasi_conformal.mean,
+                    d.log_scale.min,
+                    d.log_scale.max,
+                    d.log_scale.mean,
+                    d.log_scale_deviation,
+                    closure.gap_before,
+                    closure.gap_after,
+                    closure.max_length_change,
+                ] {
+                    assert!(
+                        x.is_finite(),
+                        "strip of {length} (|u| up to {spread:.0}): {:?}",
+                        flat.report
+                    );
+                }
+                println!(
+                    "strip of {length}: |u| up to {spread:.0}, {} of {} faces degenerate",
+                    d.degenerate_triangles, d.n_faces
+                );
+            }
+            Err(error) => {
+                println!("strip of {length}: {error}");
+                assert!(length >= 150, "strip of {length}: {error}");
+                assert!(
+                    matches!(
+                        error,
+                        BffError::NonFiniteResult { .. } | BffError::DegenerateLayout { .. }
+                    ),
+                    "strip of {length}: {error}"
+                );
+            }
+        }
+    }
+}

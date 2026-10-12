@@ -38,16 +38,40 @@ pub fn signed_double_area(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
 /// `σ² = ½ (a + c ± √((a − c)² + 4b²))` (Sander et al. 2001). `σ_min` is evaluated as
 /// `|det J| / σ_max` to avoid cancellation.
 ///
+/// The singular values are computed for the Jacobian divided by its largest entry and scaled
+/// back, so they are finite whenever they are representable (a layout can be `10¹⁰⁰` times
+/// larger or smaller than the surface: flattening a maze to a disk does that). The
+/// determinant, a product of two of them, may still overflow to infinity or underflow to
+/// zero. A degenerate triangle on the surface (`ℓ_01 = 0` or `area = 0`) gives values that
+/// are not finite.
+///
 /// [formula: quasi-conformal-error]
 pub fn singular_values(lengths: [f64; 3], area: f64, uv: [[f64; 2]; 3]) -> (f64, f64, f64) {
+    let (sigma_max, sigma_min, det, scale) = scaled_singular_values(lengths, area, uv);
+    (sigma_max * scale, sigma_min * scale, det * scale * scale)
+}
+
+/// [`singular_values`] of the Jacobian divided by `scale`, its largest entry in absolute
+/// value: `(σ_max / scale, σ_min / scale, det / scale², scale)`. All zero if the Jacobian is.
+fn scaled_singular_values(lengths: [f64; 3], area: f64, uv: [[f64; 2]; 3]) -> (f64, f64, f64, f64) {
     let [l01, l12, l20] = lengths;
     let x = (l01 * l01 + (l20 - l12) * (l20 + l12)) / (2.0 * l01);
     let y = 2.0 * area / l01;
-    let js = [(uv[1][0] - uv[0][0]) / l01, (uv[1][1] - uv[0][1]) / l01];
-    let jt = [
+    let mut js = [(uv[1][0] - uv[0][0]) / l01, (uv[1][1] - uv[0][1]) / l01];
+    let mut jt = [
         ((uv[2][0] - uv[0][0]) - x * js[0]) / y,
         ((uv[2][1] - uv[0][1]) - x * js[1]) / y,
     ];
+    let scale = js[0]
+        .abs()
+        .max(js[1].abs())
+        .max(jt[0].abs())
+        .max(jt[1].abs());
+    if scale == 0.0 {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    js = js.map(|v| v / scale);
+    jt = jt.map(|v| v / scale);
     let a = js[0] * js[0] + js[1] * js[1];
     let b = js[0] * jt[0] + js[1] * jt[1];
     let c = jt[0] * jt[0] + jt[1] * jt[1];
@@ -58,7 +82,7 @@ pub fn singular_values(lengths: [f64; 3], area: f64, uv: [[f64; 2]; 3]) -> (f64,
     } else {
         0.0
     };
-    (sigma_max, sigma_min, det)
+    (sigma_max, sigma_min, det, scale)
 }
 
 /// The quasi-conformal error `Q = σ_max / σ_min ≥ 1` of a triangle map (paper Sec. 7.4): the
@@ -67,7 +91,8 @@ pub fn singular_values(lengths: [f64; 3], area: f64, uv: [[f64; 2]; 3]) -> (f64,
 ///
 /// [formula: quasi-conformal-error]
 pub fn quasi_conformal_error(lengths: [f64; 3], area: f64, uv: [[f64; 2]; 3]) -> f64 {
-    let (sigma_max, sigma_min, _) = singular_values(lengths, area, uv);
+    // A ratio: the scale of the Jacobian cancels.
+    let (sigma_max, sigma_min, _, _) = scaled_singular_values(lengths, area, uv);
     if sigma_min > 0.0 {
         sigma_max / sigma_min
     } else {
@@ -105,7 +130,8 @@ pub struct DistortionReport {
     pub flipped_triangles: usize,
     /// Total plane area (as a positive number) of the flipped faces.
     pub flipped_area: f64,
-    /// Number of faces whose image has zero area.
+    /// Number of faces whose image has zero area, or whose distortion cannot be represented
+    /// (an area in the plane that overflows). They are left out of the statistics above.
     pub degenerate_triangles: usize,
 }
 
@@ -156,13 +182,12 @@ impl DistortionAccumulator {
             r.flipped_triangles += 1;
             r.flipped_area -= plane;
         }
-        let (sigma_max, sigma_min, _) = singular_values(lengths, area, uv);
-        if !(plane != 0.0 && sigma_min > 0.0 && sigma_max.is_finite()) {
+        let q = quasi_conformal_error(lengths, area, uv);
+        let u = log_scale_factor(area, plane.abs());
+        if !(plane != 0.0 && q.is_finite() && u.is_finite()) {
             r.degenerate_triangles += 1;
             return;
         }
-        let q = sigma_max / sigma_min;
-        let u = log_scale_factor(area, plane.abs());
         r.quasi_conformal.min = r.quasi_conformal.min.min(q);
         r.quasi_conformal.max = r.quasi_conformal.max.max(q);
         r.log_scale.min = r.log_scale.min.min(u);
@@ -548,6 +573,28 @@ mod tests {
         assert!((det - 4.0).abs() < 1e-14);
         assert!((quasi_conformal_error(lengths, 6.0, uv) - 1.0).abs() < 1e-14);
         assert!((log_scale_factor(6.0, 24.0) - 2.0f64.ln()).abs() < 1e-15);
+        // The same at sizes whose squares are not representable.
+        for factor in [1e-170, 1e120, 1e170] {
+            let big = uv.map(|p| p.map(|x| x * factor));
+            let (smax, smin, _) = singular_values(lengths, 6.0, big);
+            assert!(
+                (smax / (2.0 * factor) - 1.0).abs() < 1e-13,
+                "{factor}: {smax}"
+            );
+            assert!(
+                (smin / (2.0 * factor) - 1.0).abs() < 1e-13,
+                "{factor}: {smin}"
+            );
+            assert!((quasi_conformal_error(lengths, 6.0, big) - 1.0).abs() < 1e-13);
+        }
+        assert_eq!(
+            singular_values(lengths, 6.0, [[1.0, 1.0]; 3]),
+            (0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            quasi_conformal_error(lengths, 6.0, [[1.0, 1.0]; 3]),
+            f64::INFINITY
+        );
     }
 
     #[test]

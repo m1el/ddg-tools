@@ -488,7 +488,19 @@ impl<'a> DiskBff<'a> {
     /// Flattens onto a disk that is as round as possible (paper Sec. 6.5, `BFF::flattenToDisk`):
     /// starting from `u = 0`, the exterior angles are repeatedly set proportional to the
     /// current dual boundary lengths, `k̃_i = 2π ℓ̃_i / Σ ℓ̃`, and the compatible scale factors
-    /// recomputed. The reference implementation uses 10 iterations.
+    /// recomputed. The reference implementation uses 10 iterations. (The paper also averages
+    /// each iterate with the previous one; the reference code does not, and neither does this
+    /// port.)
+    ///
+    /// A domain that is far from round needs scale factors that vary enormously — for a strip
+    /// 150 times as long as wide, `|u|` exceeds 100, lengths differ by `e^200` — and the
+    /// layout then resolves only part of the surface: the rest collapses to points
+    /// ([`crate::DistortionReport::degenerate_triangles`]). Beyond `e^700` the lengths are not
+    /// representable.
+    ///
+    /// # Errors
+    /// [`BffError::Solve`]; [`BffError::NonFiniteResult`] if the scale factors overflow;
+    /// [`BffError::DegenerateLayout`] if every face collapses.
     ///
     /// [formula: bff-uniformization-angles]
     pub fn flatten_to_disk(&mut self, iterations: usize) -> Result<DiskFlattening, BffError> {
@@ -499,6 +511,14 @@ impl<'a> DiskBff<'a> {
             let target = target_boundary_lengths(&u, &self.boundary_lengths);
             let dual = dual_boundary_lengths(&target);
             let total: f64 = dual.iter().sum();
+            if !(total > 0.0 && total.is_finite()) {
+                // e^u has overflowed or vanished: the disk asks for more variation of scale
+                // than double precision holds.
+                return Err(BffError::NonFiniteResult {
+                    what: "the length of the boundary curve",
+                    chart: Some(0),
+                });
+            }
             for (k, &l) in k_tilde.iter_mut().zip(&dual) {
                 *k = 2.0 * PI * l / total;
             }

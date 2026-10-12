@@ -347,6 +347,13 @@ pub(crate) fn layout_quality(
                 n_faces: d.n_faces,
             });
         }
+        if !d.plane_area.is_finite() {
+            // Coordinates beyond about 1e154: finite, but their products are not.
+            return Err(BffError::NonFiniteResult {
+                what: "the area of the layout",
+                chart: Some(chart as u32),
+            });
+        }
         reports.push((d, o));
     }
     Ok(LayoutQuality {
