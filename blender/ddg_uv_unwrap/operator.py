@@ -58,6 +58,17 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         ),
         default=True,
     )
+    optimize_boundary: BoolProperty(
+        name="Optimize Boundary",
+        description=(
+            "Let the solver stretch or shrink the border of the mesh and of every seam to "
+            "lower the distortion. The two sides of a seam can then have different lengths "
+            "(a texture is stretched differently on them), and on some meshes the result "
+            "overlaps itself or contains mirrored triangles; the warnings say so. "
+            "Off keeps every border edge at its length"
+        ),
+        default=False,
+    )
     mark_seams: BoolProperty(
         name="Mark Cuts as Seams",
         description="Mark the edges the surface was cut along as seams",
@@ -79,6 +90,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
             column.label(text="Planar projection, not the conformal unwrap")
         layout.prop(self, "lambda_")
         layout.prop(self, "positive_cones_only")
+        layout.prop(self, "optimize_boundary")
         layout.prop(self, "use_seams")
         obj = context.active_object
         if obj is not None and obj.type == 'MESH':
@@ -107,6 +119,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
                 pinned_group=self.pinned_group,
                 forbidden_group=self.forbidden_group,
                 positive_cones_only=self.positive_cones_only,
+                optimize_boundary=self.optimize_boundary,
                 mark_cuts_as_seams=self.mark_seams,
             )
         except core.UnwrapFailed as ex:

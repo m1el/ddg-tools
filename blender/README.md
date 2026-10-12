@@ -27,6 +27,7 @@ native module `ddg_tools` (`crates/ddg-py`), bundled with the extension as a Pyt
 |----------|-------------|---------|---------|
 | Lambda | `lambda_` | 0.1 | trade-off between area distortion and cones; larger gives fewer cones. The default is the largest value at which the cone set of the clean test meshes stops growing; the soft range of the slider is 0.01 to 1 |
 | Positive Cones Only | `positive_cones_only` | on | allow only cone tips, no saddle cones. Negative cones lower the distortion but make the map overlap itself. A closed surface of genus 2 or more cannot be flattened with positive cones only: it gets cones of either sign and a warning |
+| Optimize Boundary | `optimize_boundary` | off | let the solver choose how much to stretch the border of the mesh and of every seam: lower distortion (measured below), but the two sides of a seam get different lengths, and on some meshes the result overlaps itself or has mirrored triangles. Off keeps every border edge at its length. The status line and the warnings report the largest seam length difference |
 | Cut Marked Seams | `use_seams` | on | cut the surface along edges marked as seams before placing cones |
 | Pinned Cones | `pinned_group` | (none) | vertex group; its vertices are cone sites that cost nothing |
 | No Cones | `forbidden_group` | (none) | vertex group; no cone is placed on its vertices |

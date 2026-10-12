@@ -133,7 +133,7 @@ class OutputTest(unittest.TestCase):
             "pipeline": str, "placeholder": bool,
             "n_vertices": int, "n_polygons": int, "n_corners": int, "n_triangles": int,
             "n_seam_edges": int, "n_pinned": int, "n_prescribed": int, "n_forbidden": int,
-            "lambda": float, "positive_cones_only": bool,
+            "lambda": float, "positive_cones_only": bool, "optimize_boundary": bool,
             "n_charts": int, "n_cones": int, "n_cut_edges": int,
             "n_degenerate_triangles": int, "n_collapsed_uv_triangles": int,
             "n_flipped_uv_triangles": int, "measured_triangles": int,
@@ -316,6 +316,29 @@ class ShapeAndValueTest(unittest.TestCase):
         defaults = ddg_tools.unwrap(*arrays).report
         self.assertEqual(defaults["lambda"], 0.1)
         self.assertIs(defaults["positive_cones_only"], True)
+        self.assertIs(defaults["optimize_boundary"], False)
+
+    def test_optimize_boundary(self):
+        # A cube with the top face cut off by seams: two pieces with a boundary.
+        arrays = as_arrays(self.mesh)
+        seams = array.array('i', [4, 5, 7, 5, 7, 6, 6, 4])
+        fixed = ddg_tools.unwrap(*arrays, seam_edges=seams)
+        free = ddg_tools.unwrap(*arrays, seam_edges=seams, optimize_boundary=True)
+        self.assertIs(fixed.report["boundary_values_optimized"], False)
+        self.assertIs(free.report["boundary_values_optimized"], True)
+        self.assertIs(free.report["optimize_boundary"], True)
+        for report in (fixed.report, free.report):
+            for key in ("max_seam_length_mismatch", "max_boundary_length_error"):
+                self.assertIs(type(report[key]), float, key)
+                self.assertTrue(0.0 <= report[key] < math.inf, key)
+        # Without the option the sides of a seam keep their lengths.
+        self.assertLess(fixed.report["max_seam_length_mismatch"], 1e-6)
+        self.assertEqual(list(free.polygon_charts), list(fixed.polygon_charts))
+        # A closed mesh is not affected.
+        closed = ddg_tools.unwrap(*arrays, optimize_boundary=True)
+        plain = ddg_tools.unwrap(*arrays)
+        self.assertEqual(list(closed.uvs), list(plain.uvs))
+        self.assertIs(closed.report["boundary_values_optimized"], False)
 
     def test_seams(self):
         arrays = as_arrays(self.mesh)

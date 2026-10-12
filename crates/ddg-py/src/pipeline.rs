@@ -60,6 +60,11 @@ pub fn run_pipeline(
         } else {
             ddg_uv::ConeSigns::Any
         },
+        boundary: if options.optimize_boundary {
+            ddg_uv::BoundaryValues::Optimized
+        } else {
+            ddg_uv::BoundaryValues::Zero
+        },
         // The contract of `ddg_tools.unwrap` is "not packed": `ddg_tools.pack_charts` packs.
         packing: None,
         ..ddg_uv::UnwrapOptions::default()
@@ -113,7 +118,7 @@ pub fn run_pipeline(
 /// The returned report contains, in this order: `pipeline`, `placeholder`; the sizes of the
 /// input (`n_vertices`, `n_polygons`, `n_corners`, `n_triangles`); the steering as received
 /// (`n_seam_edges`, `n_pinned`, `n_prescribed`, `n_forbidden`, `lambda`,
-/// `positive_cones_only`); the result counts (`n_charts`, `n_cones`, `n_cut_edges`); whatever
+/// `positive_cones_only`, `optimize_boundary`); the result counts (`n_charts`, `n_cones`, `n_cut_edges`); whatever
 /// the pipeline reported; the measured distortion (see [`crate::measure`]); and the timings
 /// `seconds_pipeline` and `seconds_measure`.
 ///
@@ -148,6 +153,7 @@ pub fn unwrap(input: &UnwrapInput, options: &UnwrapOptions) -> Result<UnwrapOutp
     report.set("n_forbidden", input.forbidden_vertices().len());
     report.set("lambda", options.lambda);
     report.set("positive_cones_only", options.positive_cones_only);
+    report.set("optimize_boundary", options.optimize_boundary);
     report.set("n_charts", charts.len());
     report.set("n_cones", output.cones.len());
     report.set("n_cut_edges", output.cut_edges.len());
@@ -166,7 +172,7 @@ mod tests {
     use crate::contract::test_meshes::*;
 
     /// Keys the binding itself writes, in order: before and after whatever the pipeline reports.
-    const LEADING: [&str; 15] = [
+    const LEADING: [&str; 16] = [
         "pipeline",
         "placeholder",
         "n_vertices",
@@ -179,6 +185,7 @@ mod tests {
         "n_forbidden",
         "lambda",
         "positive_cones_only",
+        "optimize_boundary",
         "n_charts",
         "n_cones",
         "n_cut_edges",

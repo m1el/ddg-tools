@@ -64,14 +64,18 @@ fn every_dataset_mesh_is_unwrapped() {
                 report.cones.angle_sum
             );
         }
-        // The spiked camel is the one mesh on which the result is not usable; it must say so.
+        // The spiked camel: its needles are excluded from the distortion measure by default,
+        // which keeps the cones off the needles (no cone sits at the upper bound any more).
         let spiked = name == "camelshotnoise";
-        assert_eq!(
-            report.warnings.iter().any(|w| w.contains("upper bound")),
-            spiked,
+        assert!(
+            !report.warnings.iter().any(|w| w.contains("upper bound")),
             "{name}: {:?}",
             report.warnings
         );
+        if spiked {
+            assert_eq!(chart.spikes.as_ref().unwrap().excluded.len(), 22);
+            assert!(report.cones.n_cones < 10, "{}", report.cones.n_cones);
+        }
         // The spike check fires on that mesh and on no other; its warning names the needles.
         let check = chart.spikes.as_ref().expect("the spike check ran");
         assert_eq!(!check.vertices.is_empty(), spiked, "{name}: {check:?}");

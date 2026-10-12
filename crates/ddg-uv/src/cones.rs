@@ -11,7 +11,8 @@ use ddg_optimal_cones::{
 
 use crate::error::{UvError, internal};
 use crate::options::{
-    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, UnwrapOptions,
+    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, SpikeAction,
+    UnwrapOptions,
 };
 use crate::prepare::{Piece, Prepared};
 use crate::report::{ClosedHandling, ConeSolveReport, MergeOutcome};
@@ -126,16 +127,31 @@ fn piece_cones(
 
     // Thin spikes dominate the distortion measure: look for them before solving.
     let mut spike_report = None;
+    let mut excluded: Vec<u32> = Vec::new();
     if let Some(check) = &options.spike_check {
         let start = Instant::now();
         match spikes::check_piece(prepared, piece, check, options.boundary == BoundaryValues::Optimized && !closed) {
             Ok(found) => {
-                if let Some(found) = &found
+                spike_report = found;
+                if let Some(found) = &mut spike_report
                     && !found.vertices.is_empty()
                 {
+                    if check.action == SpikeAction::ExcludeFromDistortion {
+                        let on_boundary = |v: u32| {
+                            piece
+                                .vertex_input
+                                .iter()
+                                .position(|&x| x == v)
+                                .is_some_and(|p| piece.mesh.is_boundary_vertex(p))
+                        };
+                        let (boundary, interior): (Vec<u32>, Vec<u32>) =
+                            found.vertices.iter().copied().partition(|&v| on_boundary(v));
+                        found.excluded = interior;
+                        found.not_excluded_boundary = boundary;
+                        excluded = found.excluded.clone();
+                    }
                     stage.warnings.push(spikes::warning(piece, found));
                 }
-                spike_report = found;
             }
             Err(message) => stage.warnings.push(format!(
                 "the spike check of the piece of the surface that contains face {} failed ({});                  it was skipped",
@@ -173,7 +189,7 @@ fn piece_cones(
             relative_length,
         }) => {
             let (cut, edges, length) = slit_of(placement, relative_length)?;
-            let solved = solve_on(prepared, &cut, options, None, optimize_boundary, &mut warnings)?;
+            let solved = solve_on(prepared, &cut, options, None, optimize_boundary, &excluded, &mut warnings)?;
             finish(
                 solved,
                 Some(cut),
@@ -190,7 +206,7 @@ fn piece_cones(
             fallback_sites,
         }) => {
             let mut raw_warnings = Vec::new();
-            let raw = solve_on(prepared, piece, options, None, optimize_boundary, &mut raw_warnings)?;
+            let raw = solve_on(prepared, piece, options, None, optimize_boundary, &excluded, &mut raw_warnings)?;
             let sparse = raw.cones.len() as f64
                 <= max_cone_fraction * piece.mesh.n_vertices() as f64;
             if raw.cones.len() <= max_cones || sparse {
@@ -200,7 +216,7 @@ fn piece_cones(
                 let n_raw = raw.cones.len();
                 let raw_seconds = raw.report.as_ref().map_or(0.0, |r| r.seconds);
                 let sites = Some((fallback_sites, options.max_cone_angle, true));
-                let mut solved = solve_on(prepared, piece, options, sites, optimize_boundary, &mut warnings)?;
+                let mut solved = solve_on(prepared, piece, options, sites, optimize_boundary, &excluded, &mut warnings)?;
                 if let Some(report) = &mut solved.report {
                     report.seconds += raw_seconds;
                 }
@@ -218,7 +234,7 @@ fn piece_cones(
             forbid_elsewhere,
         }) => {
             let sites = Some((count, max_angle, forbid_elsewhere));
-            let solved = solve_on(prepared, piece, options, sites, optimize_boundary, &mut warnings)?;
+            let solved = solve_on(prepared, piece, options, sites, optimize_boundary, &excluded, &mut warnings)?;
             let handling = ClosedHandling::FreeSites {
                 n_automatic: solved.n_free_sites,
                 n_pinned: solved.n_pinned_sites,
@@ -227,7 +243,7 @@ fn piece_cones(
             finish(solved, None, Vec::new(), handling)
         }
         (true, _) | (false, _) => {
-            let solved = solve_on(prepared, piece, options, None, optimize_boundary, &mut warnings)?;
+            let solved = solve_on(prepared, piece, options, None, optimize_boundary, &excluded, &mut warnings)?;
             let handling = if closed {
                 ClosedHandling::RawOptimum
             } else {
@@ -283,6 +299,7 @@ fn solve_on(
     options: &UnwrapOptions,
     free_sites: Option<(usize, f64, bool)>,
     optimize_boundary: bool,
+    excluded: &[u32],
     warnings: &mut Vec<String>,
 ) -> Result<Solved, UvError> {
     let treatment = if optimize_boundary {
@@ -417,16 +434,23 @@ fn solve_on(
             max_cluster_size, ..
         } => (true, max_cluster_size),
     };
-    let problem = ConeProblem {
-        mesh,
-        geometry: &piece.geometry,
-        lambda: options.lambda,
-        distortion_weights: None,
-        cone_costs: any_cost.then(|| costs.clone()),
-        lower_bounds: positive_only.then(|| vec![0.0; n]),
-        upper_bounds: Some(upper),
-        prescribed_cones: prescribed,
-    };
+    let mut problem = ConeProblem::new(mesh, &piece.geometry, options.lambda);
+    problem.cone_costs = any_cost.then(|| costs.clone());
+    problem.lower_bounds = positive_only.then(|| vec![0.0; n]);
+    problem.upper_bounds = Some(upper);
+    problem.prescribed_cones = prescribed;
+    // Spike tips (excluded vertices, caller's numbering): zero distortion weight. A piece
+    // where that would remove every weight is left alone.
+    if !excluded.is_empty() {
+        let weights: Vec<f64> = (0..n)
+            .map(|v| {
+                if excluded.binary_search(&piece.vertex_input[v]).is_ok() { 0.0 } else { 1.0 }
+            })
+            .collect();
+        if weights.iter().any(|&w| w > 0.0) {
+            problem.distortion_weights = Some(weights);
+        }
+    }
     let defaults = SolveOptions::default();
     let cone_threshold = defaults.cone_threshold;
     let solve_options = SolveOptions {
@@ -576,10 +600,8 @@ fn solve_on(
         for v in (0..n).filter(|&v| interior[v] && costs[v] == 0.0) {
             free[v] = 0.0;
         }
-        let again = ConeProblem {
-            cone_costs: Some(free),
-            ..problem.clone()
-        };
+        let mut again = problem.clone();
+        again.cone_costs = Some(free);
         match solve_with_boundary(&again, treatment, &SolveOptions::default()) {
             Ok(second) if second.report.status == Status::Converged => {
                 let report = solved.report.as_mut().expect("set above");

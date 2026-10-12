@@ -27,16 +27,7 @@ fn probe(name: &str, mesh: &PolygonMesh) {
     for (pi, piece) in prepared.pieces.iter().enumerate() {
         let n = piece.mesh.n_vertices();
         let t = Instant::now();
-        let problem = ConeProblem {
-            mesh: &piece.mesh,
-            geometry: &piece.geometry,
-            lambda: 0.1,
-            distortion_weights: None,
-            cone_costs: None,
-            lower_bounds: None,
-            upper_bounds: None,
-            prescribed_cones: Vec::new(),
-        };
+        let problem = ConeProblem::new(&piece.mesh, &piece.geometry, 0.1);
         let Ok(ev) = evaluate_cones(&problem, &[], Parallelism::Sequential) else {
             println!("{name}: eval failed");
             continue;

@@ -324,10 +324,11 @@ def operator_is_registered_with_exactly_the_agreed_properties():
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {
         "lambda_", "use_seams", "pinned_group", "forbidden_group", "positive_cones_only",
-        "mark_seams"}, sorted(properties)
+        "optimize_boundary", "mark_seams"}, sorted(properties)
     assert abs(properties["lambda_"].default - 0.1) < 1e-6
     assert properties["use_seams"].default is True
     assert properties["positive_cones_only"].default is True
+    assert properties["optimize_boundary"].default is False
     assert properties["mark_seams"].default is False
     assert properties["pinned_group"].default == "" and properties["forbidden_group"].default == ""
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
@@ -497,6 +498,32 @@ def marked_seams_are_cut_and_can_be_ignored():
     components = face_components(mesh, skip_edges=frozenset(top))
     assert len(set(components)) == 2
     assert_boxes_disjoint(chart_boxes(mesh, cut, components), 2 * core.PACK_MARGIN)
+
+
+@test
+def optimize_boundary_is_off_by_default_and_reaches_the_native_module():
+    cube = primitive("cube")
+    mesh = cube.data
+    for e in mesh.edges:
+        if all(mesh.vertices[v].co.z > 0 for v in e.vertices):
+            e.use_seam = True
+    core = importlib.import_module(ARGS.module + ".core")
+    plain = core.unwrap_object(cube)["report"]
+    assert plain["optimize_boundary"] is False and plain["boundary_values_optimized"] is False
+    assert plain["max_seam_length_mismatch"] < 1e-6, plain["max_seam_length_mismatch"]
+    free = core.unwrap_object(cube, optimize_boundary=True)
+    report = free["report"]
+    assert report["optimize_boundary"] is True and report["boundary_values_optimized"] is True
+    assert 0.0 <= report["max_seam_length_mismatch"] < float("inf")
+    # The operator passes it on, and the result is a valid, deterministic UV map.
+    run_checked(cube, optimize_boundary=True)
+    with CaptureOutput() as output:
+        assert op(optimize_boundary=True) == {'FINISHED'}
+    if report["max_seam_length_mismatch"] > 0.0:
+        assert "seam lengths differ by up to" in output.text, output.text
+    # A closed mesh without seams has no boundary: the option changes nothing.
+    sphere = primitive("uv_sphere")
+    assert run_checked(sphere).tobytes() == run_checked(sphere, optimize_boundary=True).tobytes()
 
 
 @test

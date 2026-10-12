@@ -24,7 +24,7 @@ use ddg_uv::primitives::{
     End, capsule, cone, cube, cylinder, grid_cube, holed_slab, revolution, torus, uv_sphere,
 };
 use ddg_uv::{
-    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh, SlitPlacement,
+    BoundaryValues, ClosedSurfaces, SpikeAction, SpikeCheck, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh, SlitPlacement,
     UnwrapOptions, area_distortion, unwrap,
 };
 
@@ -543,6 +543,109 @@ fn boundary(filter: &str) {
     }
 }
 
+/// Does the layout realize the solver's boundary values? Runs the stages one by one and compares,
+/// for every boundary edge of every piece, the length in the layout with `e^{(u_i+u_j)/2} ℓ_ij`
+/// where `u` is the cone solver's own output and `ℓ` the length from the 3D positions (nothing
+/// of the flattener's own bookkeeping is used).
+fn verify(filter: &str) {
+    println!(
+        "| mesh | piece | boundary edges | solver u on boundary: min | max | edges with target/ℓ off by > 1e-3 | worst target/ℓ | max rel. error layout vs target | mean rel. error | closure change (flattener) | used |"
+    );
+    println!("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|");
+    let mut meshes: Vec<(String, PolygonMesh, Vec<[u32; 2]>)> = Vec::new();
+    for name in dataset_names().iter().filter(|n| n.contains(filter)) {
+        if let Some((mesh, _)) = load(name) {
+            meshes.push((name.clone(), mesh, Vec::new()));
+        }
+    }
+    meshes.extend(seamed().into_iter().filter(|(n, _, _)| n.contains(filter)));
+    for (name, mesh, seams) in meshes {
+        let options = UnwrapOptions {
+            boundary: BoundaryValues::Optimized,
+            ..UnwrapOptions::default()
+        };
+        let input = ddg_uv::MeshInput { seam_edges: &seams, ..mesh.input() };
+        let Ok(prepared) = ddg_uv::prepare(&input, &options) else { continue };
+        let Ok(cones) = ddg_uv::solve_cones(&prepared, &options) else { continue };
+        let Ok(flat) = ddg_uv::flatten(&prepared, &cones, &options) else { continue };
+        for (k, piece) in prepared.pieces.iter().enumerate() {
+            let (pc, pf) = (&cones.pieces[k], &flat.pieces[k]);
+            if !pc.boundary_optimized {
+                continue;
+            }
+            let on = pc.slit_piece.as_ref().unwrap_or(piece);
+            let u = pc.log_scale.as_ref().unwrap();
+            let (mut n, mut off, mut worst, mut max_err, mut sum_err) = (0usize, 0usize, 0.0f64, 0.0f64, 0.0);
+            let (mut umin, mut umax) = (f64::INFINITY, f64::NEG_INFINITY);
+            for h in (0..on.mesh.n_halfedges()).filter(|&h| on.mesh.twin(h).is_none()) {
+                let (a, b) = (on.mesh.from_vertex(h), on.mesh.to_vertex(h));
+                let (pa, pb) = (
+                    mesh.positions[on.vertex_input[a] as usize],
+                    mesh.positions[on.vertex_input[b] as usize],
+                );
+                let len = ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2)).sqrt();
+                let ratio = (0.5 * (u[a] + u[b])).exp();
+                let target = ratio * len;
+                let (p, q) = (pf.corner_uvs[h], pf.corner_uvs[on.mesh.next(h)]);
+                let got = (p[0] - q[0]).hypot(p[1] - q[1]);
+                let err = (got - target).abs() / target;
+                n += 1;
+                off += usize::from((ratio - 1.0).abs() > 1e-3);
+                if (ratio - 1.0).abs() > (worst - 1.0).abs() {
+                    worst = ratio;
+                }
+                umin = umin.min(u[a]);
+                umax = umax.max(u[a]);
+                max_err = max_err.max(err);
+                sum_err += err;
+                if std::env::var_os("DDG_VERBOSE").is_some() {
+                    println!("  edge {h}: u {:.4} {:.4}  len {len:.5}  target {target:.5}  layout {got:.5}  err {err:.2e}", u[a], u[b]);
+                }
+            }
+            println!(
+                "| {name} | {k} | {n} | {umin:.3} | {umax:.3} | {off} | {worst:.3} | {max_err:.2e} | {:.2e} | {:.2e} | {} |",
+                sum_err / n.max(1) as f64,
+                pf.report.closure_length_change,
+                pf.boundary_values_used,
+            );
+        }
+    }
+}
+
+/// Spike tips excluded from the distortion measure or not, for both boundary treatments.
+fn spike_action(filter: &str) {
+    println!("| mesh | boundary | spikes | cones | distortion | published | overlap % | flipped | seconds | excluded | warnings |\n|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+    for name in dataset_names().iter().filter(|n| n.contains(filter)) {
+        let Some((mesh, published)) = load(name) else { continue };
+        for boundary in [BoundaryValues::Zero, BoundaryValues::Optimized] {
+            for action in [SpikeAction::WarnOnly, SpikeAction::ExcludeFromDistortion] {
+                let options = UnwrapOptions {
+                    boundary,
+                    spike_check: Some(SpikeCheck { action, ..SpikeCheck::default() }),
+                    ..UnwrapOptions::default()
+                };
+                match unwrap(&mesh.input(), &options) {
+                    Err(e) => println!("| {name} | {boundary:?} | {action:?} | FAILED {e} |"),
+                    Ok(map) => {
+                        let r = &map.report;
+                        let ex: usize = r.charts.iter().filter_map(|c| c.spikes.as_ref()).map(|s| s.excluded.len()).sum();
+                        println!(
+                            "| {name} | {boundary:?} | {action:?} | {} | {:.5} | {} | {:.3} | {} | {:.2} | {ex} | {} |",
+                            r.cones.n_cones,
+                            r.area_distortion.scale_free,
+                            published.map_or("-".to_string(), |d| format!("{d:.5}")),
+                            100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
+                            r.flipped_triangles,
+                            r.timings.total,
+                            r.warnings.len(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let filter = args.get(1).map_or("", String::as_str);
@@ -554,6 +657,8 @@ fn main() {
         Some("dataset") => dataset(filter),
         Some("reopt") => reopt(filter),
         Some("boundary") => boundary(filter),
+        Some("verify") => verify(filter),
+        Some("spikeaction") => spike_action(filter),
         _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset|reopt|boundary [name filter]"),
     }
 }

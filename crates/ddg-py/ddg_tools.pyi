@@ -69,6 +69,7 @@ def unwrap(
     forbidden_vertices: Buffer | None = None,
     lambda_: float = 0.1,
     positive_cones_only: bool = True,
+    optimize_boundary: bool = False,
 ) -> UnwrapResult: ...
 def pack_charts(
     uvs: Buffer,

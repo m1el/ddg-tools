@@ -543,6 +543,11 @@ pub struct UnwrapOptions {
     pub lambda: f64,
     /// Allow only cones with a positive angle (cone tips, no saddles).
     pub positive_cones_only: bool,
+    /// Optimize the scale factor along the boundary of every piece (the mesh's own boundary
+    /// and the seams) instead of holding it at zero: lower distortion, but lengths along the
+    /// two sides of a seam may differ (`max_seam_length_mismatch` in the report). Default
+    /// `false`.
+    pub optimize_boundary: bool,
 }
 
 impl Default for UnwrapOptions {
@@ -550,6 +555,7 @@ impl Default for UnwrapOptions {
         UnwrapOptions {
             lambda: 0.1,
             positive_cones_only: true,
+            optimize_boundary: false,
         }
     }
 }
@@ -1091,6 +1097,7 @@ mod tests {
         assert!(UnwrapOptions::default().validate().is_ok());
         assert_eq!(UnwrapOptions::default().lambda, 0.1);
         assert!(UnwrapOptions::default().positive_cones_only);
+        assert!(!UnwrapOptions::default().optimize_boundary);
         let bad = UnwrapOptions {
             lambda: -1.0,
             ..UnwrapOptions::default()

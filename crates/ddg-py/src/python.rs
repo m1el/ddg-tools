@@ -217,6 +217,12 @@ impl UnwrapResult {
 /// forbidden_vertices  vertices where no cone may be placed.
 /// lambda_           trade-off between distortion and cones, >= 0; larger means fewer cones.
 /// positive_cones_only  allow only cones with a positive angle.
+/// optimize_boundary  let the solver choose the scale factor along the boundary of every piece
+///                   (the mesh's boundary and the seams) instead of keeping boundary lengths:
+///                   lower distortion, but the two sides of a seam may get different lengths
+///                   (report["max_seam_length_mismatch"]), and the flattening can fall short of
+///                   the optimized values on some meshes (report["max_boundary_length_error"]).
+///                   Default False.
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that cannot be unwrapped
 /// (for example "edge (12, 57) is shared by 3 faces: 4, 9, 31"), SolveError when no valid map
@@ -235,6 +241,7 @@ impl UnwrapResult {
     forbidden_vertices = None,
     lambda_ = 0.1,
     positive_cones_only = true,
+    optimize_boundary = false,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn unwrap<'py>(
@@ -250,6 +257,7 @@ fn unwrap<'py>(
     forbidden_vertices: Option<&Bound<'py, PyAny>>,
     lambda_: f64,
     positive_cones_only: bool,
+    optimize_boundary: bool,
 ) -> PyResult<UnwrapResult> {
     let start = Instant::now();
     let optional_indices = |name, obj: Option<&Bound<'py, PyAny>>, width, row| match obj {
@@ -283,6 +291,7 @@ fn unwrap<'py>(
     let options = UnwrapOptions {
         lambda: lambda_,
         positive_cones_only,
+        optimize_boundary,
     };
     let seconds_decode = start.elapsed().as_secs_f64();
 

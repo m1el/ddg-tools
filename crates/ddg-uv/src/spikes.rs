@@ -52,6 +52,12 @@ pub struct SpikeReport {
     pub vertices: Vec<u32>,
     /// The share of the cone-free distortion that the spikes carry (0 if there are none).
     pub share: f64,
+    /// The spike vertices that were given zero distortion weight in the cone problem, as
+    /// vertices of the caller's mesh, ascending. Empty if the action is warn only, or the
+    /// piece has no spikes.
+    pub excluded: Vec<u32>,
+    /// Spike vertices that were not excluded because they lie on the boundary of the piece.
+    pub not_excluded_boundary: Vec<u32>,
 }
 
 /// Runs the check on one piece. With `optimized_boundary` the cone-free state is the one the
@@ -82,22 +88,11 @@ pub(crate) fn check_piece(
     if (0..n).all(|v| mesh.is_boundary_vertex(v)) {
         return Ok(None);
     }
-    let problem = ConeProblem {
-        mesh,
-        geometry: &piece.geometry,
-        lambda: 0.0,
-        distortion_weights: None,
-        cone_costs: None,
-        lower_bounds: None,
-        upper_bounds: None,
-        prescribed_cones: Vec::new(),
-    };
+    let problem = ConeProblem::new(mesh, &piece.geometry, 0.0);
     let log_scale = if optimized_boundary {
-        let forbidden = ConeProblem {
-            cone_costs: Some(vec![f64::INFINITY; n]),
-            prescribed_cones: prescribed,
-            ..problem
-        };
+        let mut forbidden = problem;
+        forbidden.cone_costs = Some(vec![f64::INFINITY; n]);
+        forbidden.prescribed_cones = prescribed;
         let solution =
             solve_with_boundary(&forbidden, BoundaryTreatment::Free, &SolveOptions::default())
                 .map_err(|e| e.to_string())?;
@@ -126,6 +121,8 @@ pub(crate) fn check_piece(
         n_carrying: 0,
         vertices: Vec::new(),
         share: 0.0,
+        excluded: Vec::new(),
+        not_excluded_boundary: Vec::new(),
     };
     if total <= 0.0 {
         return Ok(Some(report));
@@ -155,6 +152,23 @@ pub(crate) fn check_piece(
 
 /// The warning for a piece with spikes.
 pub(crate) fn warning(piece: &Piece, spikes: &SpikeReport) -> String {
+    let handled = if spikes.excluded.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ". {} of them were excluded from the distortion measure of the cone problem \
+             (zero distortion weight){}",
+            spikes.excluded.len(),
+            if spikes.not_excluded_boundary.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; {} on the boundary were not",
+                    spikes.not_excluded_boundary.len()
+                )
+            }
+        )
+    };
     const LISTED: usize = 16;
     let mut list: Vec<String> = spikes
         .vertices
@@ -171,12 +185,13 @@ pub(crate) fn warning(piece: &Piece, spikes: &SpikeReport) -> String {
          spike (a vertex pulled far out of the surface) looks like to this method; the spikes \
          dominate the distortion measure and the map is likely to be poor, with many cones at \
          the largest allowed angle and a UV map that overlaps itself. Repair the mesh first: \
-         move these vertices back onto the surface or remove them",
+         move these vertices back onto the surface or remove them{}",
         spikes.vertices.len(),
         piece.mesh.n_vertices(),
         piece.first_polygon,
         100.0 * spikes.share,
         spikes.cone_free_distortion,
-        list.join(", ")
+        list.join(", "),
+        handled
     )
 }

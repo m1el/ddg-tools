@@ -124,7 +124,7 @@ pub use input::{MeshInput, PolygonMesh, fan_triangulation};
 pub use measure::{AreaDistortion, area_distortion};
 pub use options::{
     BoundaryValues, ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
-    SlitPlacement, SpikeCheck, UnwrapOptions,
+    SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions,
 };
 pub use spikes::SpikeReport;
 pub use pack::{PackReport, pack_charts};

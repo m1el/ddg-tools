@@ -238,6 +238,22 @@ impl Default for PackOptions {
     }
 }
 
+/// What to do with the spikes the check finds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpikeAction {
+    /// Warn only; the cone problem is solved as it stands.
+    WarnOnly,
+    /// Warn, and give the spike vertices zero distortion weight in the cone problem. The
+    /// cone solver's energy assigns a one-vertex needle a log scale factor of order `-10^4`,
+    /// while the realized map places the tip by interpolating between its neighbours (about
+    /// `-4`, on 0.26 % of the area on the dataset's `camelshotnoise`); without the exclusion
+    /// the solver spends hundreds of cones on the needles. Vertices on the boundary of the
+    /// piece are never excluded (with optimized boundary values a zero weight there makes the
+    /// problem ill-posed); the report lists what was and was not excluded. The default.
+    #[default]
+    ExcludeFromDistortion,
+}
+
 /// The spike check: whether a handful of vertices carry almost all of the distortion that a
 /// piece would have without cones. See [`crate::spikes`] for the criterion and its reason.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -254,6 +270,9 @@ pub struct SpikeCheck {
     /// Pieces whose cone-free distortion `½ Σ m u²` (area normalized to 1) is below this have
     /// none: their scale factors are rounding noise. Default `1e-9`.
     pub min_distortion: f64,
+    /// What to do with spikes that are found. Default
+    /// [`SpikeAction::ExcludeFromDistortion`].
+    pub action: SpikeAction,
 }
 
 impl Default for SpikeCheck {
@@ -263,6 +282,7 @@ impl Default for SpikeCheck {
             max_vertices: 64,
             max_fraction: 0.01,
             min_distortion: 1e-9,
+            action: SpikeAction::ExcludeFromDistortion,
         }
     }
 }
