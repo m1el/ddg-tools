@@ -71,6 +71,8 @@ fn kinked(t: f64, lo: f64, hi: f64) -> bool {
 /// How much the optimality condition of a variable that is at zero is violated, and the sign it
 /// would take: with `v = ∂(distortion)/∂µ_j + ν`, positive values need `v < −t` (and
 /// `hi > 0`), negative ones `v > t` (and `lo < 0`).
+///
+/// [formula: reduced-optimality-conditions]
 pub(super) fn violation_at_zero(t: f64, lo: f64, hi: f64, v: f64) -> Option<(f64, f64)> {
     let pos = if hi > 0.0 { -v - t } else { f64::NEG_INFINITY };
     let neg = if lo < 0.0 { v - t } else { f64::NEG_INFINITY };
@@ -348,7 +350,11 @@ impl Dense {
     }
 
     /// How much the optimality condition of variable `j` is violated, given the exact value
-    /// `v = ∂(distortion)/∂µ_j + ν` (free variables satisfy theirs by construction).
+    /// `v = ∂(distortion)/∂µ_j + ν` (free variables satisfy theirs by construction): at zero as
+    /// [`violation_at_zero`]; clamped at `hi > 0` the slope `v + t` must be `≤ 0`, clamped at
+    /// `lo < 0` the slope `v − t` must be `≥ 0`.
+    ///
+    /// [formula: reduced-optimality-conditions]
     pub fn exact_violation(&self, j: usize, v: f64) -> Option<(f64, f64)> {
         match self.state[j] {
             FREE => None,

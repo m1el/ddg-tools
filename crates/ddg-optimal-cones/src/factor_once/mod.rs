@@ -288,6 +288,7 @@ pub(crate) fn check_support(d: &Discrete, lambda: f64) -> Result<(), Unsupported
 ///
 /// [formula: reduced-lasso-problem]
 /// [formula: reduced-optimality-conditions]
+/// [formula: reduced-sum-constraint-pin]
 pub(crate) fn attempt(
     d: &Discrete,
     lambda: f64,
@@ -610,6 +611,18 @@ impl<'a> Run<'a> {
         }
         if let Some(p) = red.pin {
             phi[p] = -self.nu;
+        }
+        // At a cone strictly inside its bounds the optimality condition is φ = ±t exactly (as
+        // in the reference method); the adjoint computed from the gradient is that up to
+        // rounding. Anything further off is left as it is for the certificate to judge.
+        for (i, site) in red.d.sites.iter().enumerate() {
+            let m = mu[i];
+            if !site.fixed && site.t > 0.0 && m != 0.0 && site.lo < m && m < site.hi {
+                let target = site.t.copysign(m);
+                if (phi[i] - target).abs() <= 1e-10 * site.t {
+                    phi[i] = target;
+                }
+            }
         }
         self.report.seconds.finish = t.elapsed().as_secs_f64();
         Ok(Iterate { u, phi, mu })

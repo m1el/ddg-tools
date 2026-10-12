@@ -12,6 +12,7 @@
 //!   --merge             merge cone clusters (without a limit on the cluster size)
 //!   --repeat N          solve N times and report the fastest (default 1)
 //!   --stages            print one line per stage
+//!   --method M          reference (default: this is the baseline of the reference method), auto, fast
 //! ```
 //!
 //! Without mesh names every `*.obj` of the directory is run. One line per mesh is printed:
@@ -24,7 +25,8 @@ use std::path::PathBuf;
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{
-    ConeProblem, LinearSolver, Parallelism, RegularizationMetric, SolveOptions, ThreadPool, solve,
+    ConeProblem, LinearSolver, Parallelism, RegularizationMetric, SolveMethod, SolveOptions,
+    ThreadPool, solve,
 };
 
 fn main() {
@@ -32,7 +34,10 @@ fn main() {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../data/optimal-cones/optimal-cones-data/data");
     let mut names: Vec<String> = Vec::new();
-    let mut options = SolveOptions::default();
+    let mut options = SolveOptions {
+        method: SolveMethod::Reference,
+        ..SolveOptions::default()
+    };
     let mut threads = 1usize;
     let mut print_stages = false;
     let mut repeat = 1usize;
@@ -67,6 +72,14 @@ fn main() {
             }
             "--repeat" => repeat = value("--repeat").parse().expect("--repeat: an integer"),
             "--stages" => print_stages = true,
+            "--method" => {
+                options.method = match value("--method").as_str() {
+                    "reference" => SolveMethod::Reference,
+                    "auto" => SolveMethod::Auto,
+                    "fast" => SolveMethod::FactorOnce,
+                    other => panic!("--method: expected reference, auto or fast, got {other}"),
+                }
+            }
             name => names.push(name.to_string()),
         }
     }

@@ -1,7 +1,8 @@
 //! Prints a hash of every bit of the results of default-mode solves (44 solves: synthetic meshes and
 //! dataset meshes, with free sites, bounds, weights and merging), to compare two commits:
 //! `cargo run --release -p ddg-optimal-cones --example fingerprint > a.log`, then `diff`.
-//! Used to check that adding the boundary treatments left `solve` bit for bit unchanged.
+//! Used to check that adding the boundary treatments left `solve` bit for bit unchanged; it runs the
+//! reference method (`SolveMethod::Reference`), the factor-once method is not bit-reproducible against it.
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 use ddg_core::generators::{
     SplitMix64, annulus, bumpy_grid_disk, icosphere, open_cylinder, perturb, torus,
@@ -90,6 +91,7 @@ fn run(name: &str, mesh: &TriMesh, geometry: &Geometry) {
             _ => {}
         }
         let options = SolveOptions {
+            method: SolveMethod::Reference,
             merge_cone_clusters: merge,
             ..SolveOptions::default()
         };

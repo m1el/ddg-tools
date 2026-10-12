@@ -14,12 +14,13 @@ use common::{
 use ddg_core::generators::{SplitMix64, bumpy_grid_disk, icosphere};
 use ddg_core::operators::angle_defects;
 use ddg_optimal_cones::{
-    Cone, ConeError, Parallelism, Solution, SolveOptions, Status, certify, evaluate_cones, solve,
+    BoundaryTreatment, Cone, ConeError, Parallelism, Solution, SolveOptions, Status, certify,
+    evaluate_cones,
 };
 use proptest::prelude::*;
 
 fn solve_ok(mesh: &TestMesh, f: &Features) -> Option<Solution> {
-    match solve(&f.problem(mesh), &SolveOptions::default()) {
+    match common::solve_t(&f.problem(mesh), BoundaryTreatment::Fixed, &SolveOptions::default()) {
         Ok(solution) => {
             assert_eq!(
                 solution.report.status,
@@ -65,8 +66,8 @@ proptest! {
         );
         let (Some(a), Some(b)) = (solve_ok(&mesh, &features), solve_ok(&scaled, &features)) else {
             // Infeasibility does not depend on the scale either.
-            prop_assert!(solve(&features.problem(&mesh), &SolveOptions::default()).is_err());
-            prop_assert!(solve(&features.problem(&scaled), &SolveOptions::default()).is_err());
+            prop_assert!(common::solve_t(&features.problem(&mesh), BoundaryTreatment::Fixed, &SolveOptions::default()).is_err());
+            prop_assert!(common::solve_t(&features.problem(&scaled), BoundaryTreatment::Fixed, &SolveOptions::default()).is_err());
             return Ok(());
         };
         let tolerance = 1e-8;

@@ -11,7 +11,45 @@ use ddg_core::operators::{
     angle_defects, boundary_geodesic_curvatures, cotan_laplacian, lumped_mass_normalized,
 };
 use ddg_core::{Geometry, TriMesh};
-use ddg_optimal_cones::{BoundaryTreatment, Cone, ConeProblem};
+use ddg_optimal_cones::{
+    BoundaryTreatment, Cone, ConeError, ConeProblem, MethodUsed, Solution, SolveMethod,
+    SolveOptions, factor_once_support, solve_with_boundary,
+};
+
+/// [`solve_with_boundary`] with the method chosen by the environment variable
+/// `DDG_CONES_METHOD`: unset or `auto` leaves `options` alone; `reference` forces the reference
+/// method; `fast` forces the factor-once method wherever it supports the problem (with the
+/// limits for giving up lifted, so that the test measures correctness, not thresholds) and
+/// leaves the problems it does not support to the reference method.
+pub fn solve_t(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    options: &SolveOptions<'_>,
+) -> Result<Solution, ConeError> {
+    let mut options = options.clone();
+    let mode = std::env::var("DDG_CONES_METHOD").unwrap_or_default();
+    let mut forced_fast = false;
+    match mode.as_str() {
+        "reference" => options.method = SolveMethod::Reference,
+        "fast" => {
+            if factor_once_support(problem, boundary)?.is_none() {
+                options.method = SolveMethod::FactorOnce;
+                options.factor_once.max_working_set_fraction = 1e9;
+                options.factor_once.min_working_set = usize::MAX / 2;
+                options.factor_once.memory_limit_bytes = usize::MAX;
+                forced_fast = true;
+            } else {
+                options.method = SolveMethod::Reference;
+            }
+        }
+        _ => {}
+    }
+    let result = solve_with_boundary(problem, boundary, &options);
+    if let (true, Ok(s)) = (forced_fast, &result) {
+        assert_eq!(s.report.method.used, MethodUsed::FactorOnce);
+    }
+    result
+}
 
 /// A mesh with its geometry.
 pub struct TestMesh {

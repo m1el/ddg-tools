@@ -22,7 +22,7 @@ use ddg_core::io::{read_cones, read_obj};
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{
     BoundaryTreatment, Cone, ConeProblem, Parallelism, Solution, SolveOptions, Status,
-    evaluate_cones, solve, solve_with_boundary,
+    evaluate_cones,
 };
 
 fn dataset_dir() -> Option<PathBuf> {
@@ -315,7 +315,8 @@ fn compare_cones(ours: &[Cone], file: &[Cone]) -> Comparison {
 
 fn solve_plain(data: &Dataset, lambda: f64, options: &SolveOptions<'_>) -> Solution {
     let problem = ConeProblem::new(&data.mesh, &data.geometry, lambda);
-    let solution = solve(&problem, options).unwrap_or_else(|e| panic!("{}: {e}", data.name));
+    let solution = common::solve_t(&problem, BoundaryTreatment::Fixed, options)
+        .unwrap_or_else(|e| panic!("{}: {e}", data.name));
     assert_eq!(
         solution.report.status,
         Status::Converged,
@@ -577,7 +578,8 @@ fn least_distortion_angles(mesh: &TriMesh, geometry: &Geometry, vertices: &[u32]
         cone_costs: Some(costs),
         ..ConeProblem::new(mesh, geometry, 1.0)
     };
-    let solution = solve(&problem, &SolveOptions::default()).unwrap_or_else(|e| panic!("{e}"));
+    let solution = common::solve_t(&problem, BoundaryTreatment::Fixed, &SolveOptions::default())
+        .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         solution.report.status,
         Status::Converged,
@@ -808,7 +810,7 @@ fn optimized_boundary_agrees_with_the_double_on_the_dataset() {
         }
         let problem = ConeProblem::new(&data.mesh, &data.geometry, 0.5);
         let options = SolveOptions::default();
-        let free = solve_with_boundary(&problem, BoundaryTreatment::Free, &options)
+        let free = common::solve_t(&problem, BoundaryTreatment::Free, &options)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(
             free.report.status,
@@ -839,7 +841,8 @@ fn optimized_boundary_agrees_with_the_double_on_the_dataset() {
             cone_costs: Some(costs),
             ..ConeProblem::new(&doubled, &geometry, 0.25)
         };
-        let theirs = solve(&double_problem, &options).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let theirs = common::solve_t(&double_problem, BoundaryTreatment::Fixed, &options)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(theirs.report.status, Status::Converged, "{name} double");
         let nv = data.mesh.n_vertices();
         let u_scale = free
@@ -909,7 +912,7 @@ fn published_cones_with_optimized_boundary_values() {
         };
         let options = SolveOptions::default();
         let run = |boundary| {
-            let s = solve_with_boundary(&problem, boundary, &options)
+            let s = common::solve_t(&problem, boundary, &options)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(s.report.status, Status::Converged, "{name} {boundary:?}");
             s

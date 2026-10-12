@@ -89,6 +89,9 @@ impl<'a> Reduced<'a> {
     }
 
     /// Checks that the problem is within what the method supports, factors, and computes `w0`.
+    ///
+    /// [formula: reduced-lasso-problem]
+    /// [formula: reduced-sum-constraint-pin]
     pub fn new(d: &'a Discrete, lambda: f64) -> Result<Reduced<'a>, FallbackReason> {
         let n = d.n;
         let pin_sum = Self::check(d, lambda)?;
@@ -171,7 +174,10 @@ impl<'a> Reduced<'a> {
         out
     }
 
-    /// Removes the `w`-weighted mean (singular `A` only).
+    /// Removes the `w`-weighted mean (singular `A` only): the additive constant of `u` that
+    /// minimizes the distortion.
+    ///
+    /// [formula: reduced-sum-constraint-pin]
     pub fn project(&self, x: &mut [f64]) {
         if self.pin.is_some() {
             let mean: f64 = x.iter().zip(&self.d.w).map(|(a, b)| a * b).sum::<f64>() / self.w_sum;
@@ -218,6 +224,8 @@ impl<'a> Reduced<'a> {
 
     /// `y = A⁻¹ (W u)` as a row vector (zero at the pin): the gradient of the distortion with
     /// respect to the cone angles of the free sites; one solve.
+    ///
+    /// [formula: reduced-optimality-conditions]
     pub fn gradient(
         &self,
         u: &[f64],

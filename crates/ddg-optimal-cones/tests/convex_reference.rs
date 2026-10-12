@@ -14,7 +14,7 @@ use common::{
     FeatureMask, Features, N_KINDS, Reference, TestMesh, max_abs_diff, random_features,
     random_mesh, reference_solve_with_boundary, summary,
 };
-use ddg_optimal_cones::{BoundaryTreatment, ConeError, SolveOptions, Status, solve_with_boundary};
+use ddg_optimal_cones::{BoundaryTreatment, ConeError, SolveOptions, Status};
 use proptest::prelude::*;
 
 /// Agreement required of the objective, relative to `max(1, |objective|)`.
@@ -77,7 +77,7 @@ fn compare_with_boundary(
 ) -> Result<(), String> {
     let problem = f.problem(mesh);
     let reference = reference_solve_with_boundary(mesh, f, boundary);
-    let result = solve_with_boundary(&problem, boundary, &SolveOptions::default());
+    let result = common::solve_t(&problem, boundary, &SolveOptions::default());
     tally.cases += 1;
     let describe = || format!("{} with {f:.3?} and boundary {boundary:?}", mesh.name);
     match (result, reference) {
@@ -357,7 +357,7 @@ proptest! {
 fn zero_weight_free_boundary_is_never_reported_as_optimal() {
     let mesh = random_mesh(0, 21);
     let features = random_features(&mesh, 21, FeatureMask::ALL);
-    let solution = solve_with_boundary(
+    let solution = common::solve_t(
         &features.problem(&mesh),
         BoundaryTreatment::Free,
         &SolveOptions::default(),
@@ -415,7 +415,7 @@ fn debug_case() {
         max_safeguard_rounds: rounds,
         ..SolveOptions::default()
     };
-    let solution = solve_with_boundary(&features.problem(&mesh), boundary, &options);
+    let solution = common::solve_t(&features.problem(&mesh), boundary, &options);
     let reference = reference_solve_with_boundary(&mesh, &features, boundary);
     match (&solution, &reference) {
         (

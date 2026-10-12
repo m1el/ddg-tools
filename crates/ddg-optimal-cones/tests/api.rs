@@ -47,6 +47,17 @@ fn solve_default(mesh: &TestMesh, f: &Features) -> ddg_optimal_cones::Solution {
     solution
 }
 
+/// The reference method, forced: for the tests of its stages, counters and options.
+fn solve_reference(mesh: &TestMesh, f: &Features) -> ddg_optimal_cones::Solution {
+    let options = SolveOptions {
+        method: ddg_optimal_cones::SolveMethod::Reference,
+        ..SolveOptions::default()
+    };
+    let solution = solve(&f.problem(mesh), &options).unwrap();
+    assert_eq!(solution.report.status, Status::Converged, "{}", summary(&solution));
+    solution
+}
+
 // ----- input errors -----
 
 #[test]
@@ -474,7 +485,9 @@ fn every_configuration_finds_the_same_optimum() {
                 },
             ),
         ];
-        for (name, options) in variants {
+        for (name, mut options) in variants {
+            // these variants are options of the reference method
+            options.method = ddg_optimal_cones::SolveMethod::Reference;
             let solution = solve(&problem, &options).unwrap();
             assert_eq!(
                 solution.report.status,
@@ -524,7 +537,7 @@ fn every_configuration_finds_the_same_optimum() {
 #[test]
 fn report_counts_what_was_done() {
     let mesh = random_mesh(0, 12);
-    let solution = solve_default(&mesh, &Features::plain(0.01));
+    let solution = solve_reference(&mesh, &Features::plain(0.01));
     let r = &solution.report;
     let regularized: usize = r
         .stages
@@ -586,7 +599,7 @@ fn report_counts_what_was_done() {
 fn starved_solver_reports_not_converged() {
     let mesh = random_mesh(0, 21);
     let features = Features::plain(0.001);
-    let reference = solve_default(&mesh, &features);
+    let reference = solve_reference(&mesh, &features);
     assert!(reference.cones.len() >= 2, "{}", summary(&reference));
     assert!(
         reference
@@ -601,6 +614,7 @@ fn starved_solver_reports_not_converged() {
         max_regularized_iterations: 1,
         max_exact_iterations: 1,
         max_safeguard_rounds: 0,
+        method: ddg_optimal_cones::SolveMethod::Reference,
         ..SolveOptions::default()
     };
     let solution = solve(&features.problem(&mesh), &options).unwrap();
