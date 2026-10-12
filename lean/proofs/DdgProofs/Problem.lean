@@ -22,7 +22,7 @@ paper's own PSD `L` its `u` is the negative of ours.
 
 noncomputable section
 
-namespace Ddg
+namespace DdgProofs
 
 open Matrix
 
@@ -243,4 +243,4 @@ theorem kkt_iff_fixedPoint (hP : P.WellFormed) (u φ μ : ι → ℝ) :
 
 end ConeProblem
 
-end Ddg
+end DdgProofs

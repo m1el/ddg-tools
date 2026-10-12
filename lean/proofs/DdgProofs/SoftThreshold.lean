@@ -14,7 +14,7 @@ The subdifferential is spelled out: `IsSubgradientWithinAt f K g x` says
 `g ∈ ∂(f + ι_K)(x)`, i.e. `x ∈ K` and `f x + g (y − x) ≤ f y` for every `y ∈ K`.
 -/
 
-namespace Ddg
+namespace DdgProofs
 
 /-- The soft threshold of paper Eq. 18: `P_t(v) = max(0, v − t) + min(0, v + t)`.
 The threshold `t` is `λ` in the unweighted problem and `λ·wR_i` in the weighted one. -/
@@ -539,4 +539,4 @@ theorem minimizes_reg_iff_eq_clampE {t γ : ℝ} (ht : 0 ≤ t) (hγ : 0 < γ)
     have h0 : 0 ≤ γ / 2 * (y - μ) ^ 2 := by positivity
     linarith
 
-end Ddg
+end DdgProofs

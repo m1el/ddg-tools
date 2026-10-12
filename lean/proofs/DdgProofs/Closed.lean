@@ -20,7 +20,7 @@ Scaling:
 
 noncomputable section
 
-namespace Ddg
+namespace DdgProofs
 
 open Matrix
 
@@ -186,4 +186,4 @@ theorem sum_normalizeMass (P : ConeProblem ι) (h : ∑ j, P.m j ≠ 0) :
 
 end ConeProblem
 
-end Ddg
+end DdgProofs

@@ -19,7 +19,7 @@ For the canonical discrete problem (`DdgProofs.Problem`):
 
 noncomputable section
 
-namespace Ddg
+namespace DdgProofs
 
 open Matrix
 
@@ -403,4 +403,4 @@ example : ∃ (P : ConeProblem (Fin 2)) (u φ μ : Fin 2 → ℝ),
     rw [Site.stationary_plain_iff zero_le_one]
     rw [softThreshold_of_gt zero_le_one (by norm_num)]; norm_num
 
-end Ddg
+end DdgProofs
