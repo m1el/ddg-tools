@@ -191,7 +191,7 @@ if [ "$do_build" = 1 ]; then
     if grep -q "sorryAx" "$log"; then
       echo "FAIL: the axiom audit mentions sorryAx" >&2; fail=1
     fi
-    extra="$(grep "depends on axioms" "$log" | sed -E 's/.*depends on axioms: \[(.*)\]/\1/' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort -u | grep -v -x -E 'propext|Classical\.choice|Quot\.sound' || true)"
+    extra="$(tr '\n' ' ' < "$log" | grep -o 'depends on axioms: \[[^]]*\]' | sed -E 's/depends on axioms: \[(.*)\]/\1/' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | sort -u | grep -v -x -E 'propext|Classical\.choice|Quot\.sound|' || true)"
     if [ -n "$extra" ]; then
       echo "FAIL: non-standard axioms in use: $extra" >&2; fail=1
     else
