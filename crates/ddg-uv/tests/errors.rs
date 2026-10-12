@@ -498,12 +498,24 @@ fn hostile_geometry_is_refused_without_a_panic() {
     huge.positions[0] = [-1e308, 1e308, -1e308];
     let e = unwrap(&huge.input(), &d).unwrap_err();
     assert_ne!(e.kind(), ErrorKind::Solve, "{e}");
-    // The summary of a report never contains a NaN.
+    // The summary of a report never contains a NaN, no key twice, and none of the keys the
+    // Python binding sets itself.
     let map = unwrap(&two_triangles().input(), &d).unwrap();
-    for (key, value) in map.report.summary() {
+    let summary = map.report.summary();
+    let reserved = [
+        "pipeline", "placeholder", "n_vertices", "n_polygons", "n_corners", "n_triangles",
+        "n_seam_edges", "n_pinned", "n_prescribed", "n_forbidden", "lambda",
+        "positive_cones_only", "n_charts", "n_cones", "n_cut_edges", "n_degenerate_triangles",
+        "n_collapsed_uv_triangles", "n_flipped_uv_triangles", "measured_triangles",
+        "seconds_pipeline", "seconds_measure", "seconds_decode", "seconds_validate",
+        "seconds_encode", "seconds_total", "warnings",
+    ];
+    for (i, (key, value)) in summary.iter().enumerate() {
         if let ddg_uv::Value::Float(x) = value {
             assert!(!x.is_nan(), "{key}");
         }
+        assert!(!reserved.contains(key) && !key.starts_with("measured_"), "{key}");
+        assert!(summary[..i].iter().all(|(other, _)| other != key), "{key} twice");
     }
 }
 

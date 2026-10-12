@@ -343,7 +343,8 @@ impl Report {
     ///
     /// The keys are chosen not to collide with those the Python binding adds itself
     /// (`n_vertices`, `n_charts`, `n_cones`, `n_cut_edges`, `n_degenerate_triangles`,
-    /// `n_flipped_uv_triangles`, `measured_*`, `seconds_pipeline`, …); `n_unreferenced_vertices`
+    /// `n_flipped_uv_triangles`, `measured_*`, `seconds_pipeline`, `seconds_validate`, …);
+    /// `n_unreferenced_vertices`
     /// and `n_seam_edges_ignored` keep the names the binding's stand-in pipeline used. The
     /// two overlap figures are left out when the estimate is switched off, and the packing
     /// figures when packing is. No value is NaN.
@@ -446,13 +447,13 @@ impl Report {
         }
         let t = &self.timings;
         out.extend([
-            ("seconds_validate", Value::Float(t.validate)),
-            ("seconds_seams", Value::Float(t.seams)),
-            ("seconds_cones", Value::Float(t.cones)),
+            ("seconds_stage_validate", Value::Float(t.validate)),
+            ("seconds_stage_seams", Value::Float(t.seams)),
+            ("seconds_stage_cones", Value::Float(t.cones)),
             ("seconds_cone_solver", Value::Float(t.cone_solver)),
-            ("seconds_flatten", Value::Float(t.flatten)),
-            ("seconds_pack", Value::Float(t.pack)),
-            ("seconds_verify", Value::Float(t.verify)),
+            ("seconds_stage_flatten", Value::Float(t.flatten)),
+            ("seconds_stage_pack", Value::Float(t.pack)),
+            ("seconds_stage_verify", Value::Float(t.verify)),
             ("seconds_unwrap", Value::Float(t.total)),
         ]);
         out
