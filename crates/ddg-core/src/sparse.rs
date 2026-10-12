@@ -126,8 +126,11 @@ pub enum SparseError {
         /// Index of the first non-finite entry (row + n · column).
         index: usize,
     },
+    /// A solve was requested from a [`Factorization`] whose last
+    /// [`refactor`](Factorization::refactor) failed.
+    NotFactorized,
     /// A custom elimination order is not a permutation of `0..n`.
-    InvalidOrdering {
+    InvalidEliminationOrder {
         /// What is wrong with it.
         reason: String,
     },
@@ -218,7 +221,11 @@ impl fmt::Display for SparseError {
                 "solve produced a non-finite value at entry {index}: the matrix is singular or too \
                  ill-conditioned for this factorization, or the right-hand side is not finite"
             ),
-            SparseError::InvalidOrdering { reason } => {
+            SparseError::NotFactorized => write!(
+                f,
+                "the factorization holds no valid factor: its last refactorization failed"
+            ),
+            SparseError::InvalidEliminationOrder { reason } => {
                 write!(f, "invalid elimination order: {reason}")
             }
             SparseError::Unsupported { what } => write!(f, "not supported: {what}"),
@@ -722,14 +729,21 @@ pub enum Method {
     /// Cholesky `A = L Lᵀ` for symmetric positive definite matrices. Fails with
     /// [`SparseError::NotPositiveDefinite`] otherwise.
     Llt,
-    /// `A = L D Lᵀ` with diagonal `D` and **no pivoting**. Backward stable for symmetric
-    /// quasi-definite matrices (`[[−E, Bᵀ], [B, F]]` with `E`, `F` positive definite) under any
-    /// ordering; on other indefinite matrices it can break down ([`SparseError::ZeroPivot`]) or
-    /// lose accuracy without notice, so check residuals.
+    /// `A = L D Lᵀ` with diagonal `D` and **no pivoting**. For a symmetric quasi-definite matrix
+    /// (`[[−E, Bᵀ], [B, F]]` with `E`, `F` positive definite) the factorization exists under
+    /// every elimination order. For other indefinite matrices it exists only for suitable
+    /// orders ([`EliminationOrder::Custom`]) and otherwise breaks down with
+    /// [`SparseError::ZeroPivot`]. In both cases there is no pivoting to limit element growth,
+    /// so the solution can be less accurate than the residual of a pivoted method (measured on
+    /// this workspace's saddle-point systems: relative residual around 1e-8, back to 1e-15
+    /// after one step of [`Factorization::solve_refined`]). Check residuals.
     Ldlt,
     /// `A = L B Lᵀ` with 1×1 and 2×2 pivots chosen by Bunch–Kaufman pivoting inside each
-    /// supernode. More robust than [`Method::Ldlt`] on indefinite matrices, but pivoting cannot
-    /// leave a supernode, so it is not as robust as a fully pivoted method.
+    /// supernode. Pivoting cannot leave a supernode, so a matrix whose zero diagonal entries
+    /// are eliminated early can still defeat it: the factorization then "succeeds" and the
+    /// solve reports [`SparseError::NonFiniteSolution`]. On this workspace's saddle-point
+    /// systems exactly that happens, and the method also slows down sharply with more threads;
+    /// prefer [`Method::Ldlt`] with a suitable order, or [`Method::Lu`].
     Lblt,
     /// `A = L U` with partial (row) pivoting and a COLAMD column ordering, for general square
     /// matrices. The most robust and the slowest.
@@ -745,7 +759,7 @@ impl Method {
 
 /// The order in which a symmetric factorization eliminates the unknowns.
 #[derive(Debug, Clone, Copy, Default)]
-pub enum Ordering<'a> {
+pub enum EliminationOrder<'a> {
     /// A fill-reducing order computed by the backend: AMD for the symmetric methods, COLAMD
     /// (columns) for `LU`. The default.
     #[default]
@@ -766,8 +780,8 @@ pub enum Ordering<'a> {
 
 /// The approximate minimum degree (AMD) elimination order for the sparsity pattern of
 /// `A + Aᵀ`: `order[k]` is the index of the unknown to eliminate in step `k`. This is the order
-/// [`Ordering::FillReducing`] uses for the symmetric methods; it is exposed so that callers can
-/// build structured orders from it (see [`Ordering::Custom`]).
+/// [`EliminationOrder::FillReducing`] uses for the symmetric methods; it is exposed so that callers can
+/// build structured orders from it (see [`EliminationOrder::Custom`]).
 ///
 /// # Errors
 /// [`SparseError::NotSquare`], or a resource error.
@@ -847,7 +861,7 @@ pub struct SymbolicInfo {
 
 impl Symbolic {
     /// Analyses the sparsity pattern of `a` for the given method, with the backend's
-    /// fill-reducing ordering ([`Ordering::FillReducing`]).
+    /// fill-reducing ordering ([`EliminationOrder::FillReducing`]).
     ///
     /// For the symmetric methods only the lower triangle of `a` (entries with `row >= col`) is
     /// read, here and in every later numeric factorization; whether `a` stores the upper
@@ -856,19 +870,19 @@ impl Symbolic {
     /// # Errors
     /// [`SparseError::NotSquare`], [`SparseError::IndexOverflow`], [`SparseError::OutOfMemory`].
     pub fn analyze(a: &SparseMatrix, method: Method) -> Result<Symbolic, SparseError> {
-        Symbolic::analyze_with_ordering(a, method, Ordering::FillReducing)
+        Symbolic::analyze_with_order(a, method, EliminationOrder::FillReducing)
     }
 
     /// Like [`Symbolic::analyze`], with an explicit elimination order.
     ///
     /// # Errors
-    /// As for [`Symbolic::analyze`], plus [`SparseError::InvalidOrdering`] if a custom order is
+    /// As for [`Symbolic::analyze`], plus [`SparseError::InvalidEliminationOrder`] if a custom order is
     /// not a permutation of `0..n`, and [`SparseError::Unsupported`] for `LU` with any order
-    /// other than [`Ordering::FillReducing`].
-    pub fn analyze_with_ordering(
+    /// other than [`EliminationOrder::FillReducing`].
+    pub fn analyze_with_order(
         a: &SparseMatrix,
         method: Method,
-        ordering: Ordering<'_>,
+        ordering: EliminationOrder<'_>,
     ) -> Result<Symbolic, SparseError> {
         if a.nrows != a.ncols {
             return Err(SparseError::NotSquare {
@@ -877,15 +891,15 @@ impl Symbolic {
             });
         }
         let n = a.nrows;
-        if method == Method::Lu && !matches!(ordering, Ordering::FillReducing) {
+        if method == Method::Lu && !matches!(ordering, EliminationOrder::FillReducing) {
             return Err(SparseError::Unsupported {
                 what: "LU with a natural or custom ordering",
             });
         }
         // Forward and inverse permutation of a custom order, validated.
         let custom: Option<(Vec<usize>, Vec<usize>)> = match ordering {
-            Ordering::Custom(order) => {
-                let invalid = |reason: String| Err(SparseError::InvalidOrdering { reason });
+            EliminationOrder::Custom(order) => {
+                let invalid = |reason: String| Err(SparseError::InvalidEliminationOrder { reason });
                 if order.len() != n {
                     return invalid(format!(
                         "it has {} entries, but the matrix has dimension {n}",
@@ -926,16 +940,16 @@ impl Symbolic {
                     params.supernodal_flop_ratio_threshold = SupernodalThreshold::FORCE_SUPERNODAL;
                 }
                 let ordering = match (&ordering, &custom) {
-                    (Ordering::FillReducing, _) => fchol::SymmetricOrdering::Amd,
-                    (Ordering::Natural, _) => fchol::SymmetricOrdering::Identity,
+                    (EliminationOrder::FillReducing, _) => fchol::SymmetricOrdering::Amd,
+                    (EliminationOrder::Natural, _) => fchol::SymmetricOrdering::Identity,
                     // SAFETY: validated above: both arrays are permutations of 0..n and
                     // inverse to each other.
-                    (Ordering::Custom(_), Some((forward, inverse))) => {
+                    (EliminationOrder::Custom(_), Some((forward, inverse))) => {
                         fchol::SymmetricOrdering::Custom(unsafe {
                             faer::perm::PermRef::new_unchecked(forward, inverse, n)
                         })
                     }
-                    (Ordering::Custom(_), None) => {
+                    (EliminationOrder::Custom(_), None) => {
                         unreachable!("custom permutation was built above")
                     }
                 };
@@ -1021,6 +1035,7 @@ impl Symbolic {
         let mut factorization = Factorization {
             symbolic: self.clone(),
             numeric,
+            valid: false,
         };
         factorization.refactor(a, par)?;
         Ok(factorization)
@@ -1051,6 +1066,8 @@ enum Numeric {
 pub struct Factorization {
     symbolic: Symbolic,
     numeric: Numeric,
+    /// False after a failed [`Factorization::refactor`], until one succeeds.
+    valid: bool,
 }
 
 impl fmt::Debug for Factorization {
@@ -1075,14 +1092,18 @@ impl Factorization {
     /// Recomputes the numeric factorization for new values on the same pattern, reusing the
     /// symbolic analysis and the factor's memory.
     ///
-    /// If this returns an error the factorization holds no valid factor; do not solve with it
-    /// before a later `refactor` succeeds.
+    /// If this returns an error the factorization holds no valid factor: solves fail with
+    /// [`SparseError::NotFactorized`] until a later `refactor` succeeds. (A pattern mismatch is
+    /// detected before anything is touched and leaves the previous factor usable.)
     ///
     /// # Errors
     /// As for [`Symbolic::factor`].
     pub fn refactor(&mut self, a: &SparseMatrix, par: Parallelism<'_>) -> Result<(), SparseError> {
         check_pattern(&self.symbolic.inner, a)?;
-        par.run(|par| self.refactor_with(a, par))
+        self.valid = false;
+        par.run(|par| self.refactor_with(a, par))?;
+        self.valid = true;
+        Ok(())
     }
 
     fn refactor_with(&mut self, a: &SparseMatrix, par: Par) -> Result<(), SparseError> {
@@ -1212,6 +1233,9 @@ impl Factorization {
         nrhs: usize,
         par: Parallelism<'_>,
     ) -> Result<(), SparseError> {
+        if !self.valid {
+            return Err(SparseError::NotFactorized);
+        }
         let n = self.symbolic.inner.n;
         let expected = n.checked_mul(nrhs).ok_or(SparseError::IndexOverflow)?;
         if rhs.len() != expected {
@@ -1821,7 +1845,8 @@ mod tests {
         .unwrap();
         let seq = Parallelism::Sequential;
         // Natural order starts with the zero pivot.
-        let natural = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Natural).unwrap();
+        let natural =
+            Symbolic::analyze_with_order(&a, Method::Ldlt, EliminationOrder::Natural).unwrap();
         let e = natural.factor(&a, seq).unwrap_err();
         assert!(matches!(e, SparseError::ZeroPivot { .. }), "{e:?}");
         assert!(
@@ -1830,22 +1855,24 @@ mod tests {
         );
         // Eliminating 1, 2, 0 works: pivots 1, 1, -2. (The inverse permutation 2, 0, 1 would
         // meet a zero pivot in its second step, so this also pins down the convention.)
-        let good = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&[1, 2, 0]))
-            .unwrap();
+        let good =
+            Symbolic::analyze_with_order(&a, Method::Ldlt, EliminationOrder::Custom(&[1, 2, 0]))
+                .unwrap();
         let f = good.factor(&a, seq).unwrap();
         let b = [1.0, 2.0, 3.0];
         let mut x = b;
         f.solve_in_place(&mut x, seq).unwrap();
         assert!(relative_residual(&a, &x, &b).unwrap() < 1e-15);
-        let bad = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&[2, 0, 1]))
-            .unwrap();
+        let bad =
+            Symbolic::analyze_with_order(&a, Method::Ldlt, EliminationOrder::Custom(&[2, 0, 1]))
+                .unwrap();
         assert!(matches!(
             bad.factor(&a, seq).unwrap_err(),
             SparseError::ZeroPivot { .. }
         ));
 
         let err = |order: &[u32]| {
-            Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(order))
+            Symbolic::analyze_with_order(&a, Method::Ldlt, EliminationOrder::Custom(order))
                 .unwrap_err()
                 .to_string()
         };
@@ -1862,7 +1889,7 @@ mod tests {
             "invalid elimination order: index 0 appears twice (entries 0 and 2)"
         );
         assert_eq!(
-            Symbolic::analyze_with_ordering(&a, Method::Lu, Ordering::Natural)
+            Symbolic::analyze_with_order(&a, Method::Lu, EliminationOrder::Natural)
                 .unwrap_err()
                 .to_string(),
             "not supported: LU with a natural or custom ordering"
@@ -1881,8 +1908,8 @@ mod tests {
         sorted.sort_unstable();
         assert_eq!(sorted, (0..n as u32).collect::<Vec<_>>());
         let paired: Vec<u32> = order_l.iter().flat_map(|&i| [i, n as u32 + i]).collect();
-        let s =
-            Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&paired)).unwrap();
+        let s = Symbolic::analyze_with_order(&a, Method::Ldlt, EliminationOrder::Custom(&paired))
+            .unwrap();
         let x_true: Vec<f64> = (0..2 * n).map(|i| (i as f64 * 0.3).sin()).collect();
         let mut b = vec![0.0; 2 * n];
         a.mul_vec(&x_true, &mut b).unwrap();
@@ -1975,6 +2002,63 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(e.to_string(), "length of b: expected 40, got 39");
+    }
+
+    #[test]
+    fn failed_refactorization_invalidates_the_factor() {
+        let good = path_laplacian(10, 1.0);
+        let seq = Parallelism::Sequential;
+        let mut f = Symbolic::analyze(&good, Method::Llt)
+            .unwrap()
+            .factor(&good, seq)
+            .unwrap();
+        let mut x = vec![1.0; 10];
+        f.solve_in_place(&mut x, seq).unwrap();
+        // A pattern mismatch is detected up front and leaves the factor usable.
+        assert!(matches!(
+            f.refactor(&SparseMatrix::from_diagonal(&[1.0; 10]).unwrap(), seq),
+            Err(SparseError::PatternMismatch { .. })
+        ));
+        f.solve_in_place(&mut x, seq).unwrap();
+        // A numeric failure does not.
+        let indefinite = path_laplacian(10, -0.5);
+        assert!(matches!(
+            f.refactor(&indefinite, seq),
+            Err(SparseError::NotPositiveDefinite { .. })
+        ));
+        let e = f.solve_in_place(&mut x, seq).unwrap_err();
+        assert_eq!(e, SparseError::NotFactorized);
+        assert_eq!(
+            e.to_string(),
+            "the factorization holds no valid factor: its last refactorization failed"
+        );
+        f.refactor(&good, seq).unwrap();
+        f.solve_in_place(&mut x, seq).unwrap();
+    }
+
+    #[test]
+    fn empty_matrices_do_not_panic() {
+        let empty = SparseMatrix::from_triplets(0, 0, &[]).unwrap();
+        assert_eq!((empty.nrows(), empty.ncols(), empty.nnz()), (0, 0, 0));
+        assert_eq!(fill_reducing_ordering(&empty).unwrap(), Vec::<u32>::new());
+        for method in [Method::Llt, Method::Ldlt, Method::Lblt, Method::Lu] {
+            let f = Symbolic::analyze(&empty, method)
+                .unwrap()
+                .factor(&empty, Parallelism::Sequential)
+                .unwrap();
+            assert_eq!(f.dim(), 0);
+            f.solve_in_place(&mut [], Parallelism::Sequential).unwrap();
+        }
+    }
+
+    #[test]
+    fn solver_types_are_send_and_sync() {
+        fn check<T: Send + Sync>() {}
+        check::<SparseMatrix>();
+        check::<Symbolic>();
+        check::<Factorization>();
+        check::<ThreadPool>();
+        check::<SparseError>();
     }
 
     #[test]

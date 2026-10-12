@@ -29,7 +29,7 @@ use ddg_core::geometry::Geometry;
 use ddg_core::io::read_obj;
 use ddg_core::operators::{cotan_laplacian, lumped_mass_normalized};
 use ddg_core::sparse::{
-    Method, Ordering, Parallelism, RefineOptions, SparseMatrix, Symbolic, ThreadPool,
+    EliminationOrder, Method, Parallelism, RefineOptions, SparseMatrix, Symbolic, ThreadPool,
     fill_reducing_ordering, relative_residual,
 };
 use ddg_core::topology::TriMesh;
@@ -198,8 +198,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "|{:-<28}|{:-<8}|{:-<9}|{:-<13}|{:-<12}|{:-<12}|{:-<10}|{:-<12}|{:-<11}|",
         "", "", "", "", "", "", "", "", ""
     );
-    let default = Ordering::FillReducing;
-    let cases: [(&str, &SparseMatrix, Method, Ordering<'_>); 8] = [
+    let default = EliminationOrder::FillReducing;
+    let cases: [(&str, &SparseMatrix, Method, EliminationOrder<'_>); 8] = [
         ("L + 1e-8 I", &shifted, Method::Llt, default),
         ("L, vertex 0 pinned", &pinned, Method::Llt, default),
         ("K = [[-M, L], [L, D]]", &saddle, Method::Ldlt, default),
@@ -207,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "K, paired order",
             &saddle,
             Method::Ldlt,
-            Ordering::Custom(&paired),
+            EliminationOrder::Custom(&paired),
         ),
         ("K = [[-M, L], [L, D]]", &saddle, Method::Lblt, default),
         ("K = [[-M, L], [L, D]]", &saddle, Method::Lu, default),
@@ -232,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         matrix.mul_vec(&x_true, &mut b)?;
 
         let t = Instant::now();
-        let symbolic = match Symbolic::analyze_with_ordering(matrix, method, ordering) {
+        let symbolic = match Symbolic::analyze_with_order(matrix, method, ordering) {
             Ok(s) => s,
             Err(e) => {
                 println!("| {name:<26} | {method_name:<6} | symbolic analysis FAILED: {e}");

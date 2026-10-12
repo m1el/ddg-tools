@@ -627,6 +627,14 @@ f 1 2 \\
     }
 
     #[test]
+    fn windows_line_endings_and_tabs() {
+        let m = parse_obj("v 0 0 0\r\nv\t1 0 0\r\nv 0 1 0\r\nf 1 2 3\r\n").unwrap();
+        assert_eq!(m.positions[1], [1.0, 0.0, 0.0]);
+        assert_eq!(m.triangles(), Some(vec![[0, 1, 2]]));
+        assert_eq!(parse_cones("2 0.5\r\n1\t-0.25\r\n", 2).unwrap().len(), 2);
+    }
+
+    #[test]
     fn positive_indices_may_refer_forward() {
         let m = parse_obj("f 1 2 3\nv 0 0 0\nv 1 0 0\nv 0 1 0\n").unwrap();
         assert_eq!(m.triangles(), Some(vec![[0, 1, 2]]));

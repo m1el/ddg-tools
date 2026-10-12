@@ -80,8 +80,9 @@ Known limits of that statement:
   expressions; a Blender compiled with fused multiply-add contraction (possible on ARM64) can
   decide exact ties differently from this code, which never fuses.
 - Blender answers "is a reflex corner inside this ear" with a k-d tree; this crate scans the
-  reflex corners. The result is the same, but a concave n-gon with many thousands of corners is
-  slower here.
+  reflex corners. The result is the same; only the running time for huge concave n-gons
+  differs. Measured here: a star-shaped polygon with 10 000 corners takes 28 ms, one with
+  50 000 corners 0.6 s; a million quads take 90 ms.
 - Positions are converted to `f32` for the decision, as Blender stores them. Positions that are
   not exactly representable in `f32` are rounded first.
 
@@ -125,7 +126,7 @@ What the numbers say:
   also gets slower with every added thread (41 s at 32 threads).
 - `K` does factorize by plain `LDLᵀ` when unknown `i` of the first block is eliminated
   immediately before unknown `n + i` of the second, with the pairs in the AMD order of `L`
-  (`Ordering::Custom`, `fill_reducing_ordering`). No pivot can vanish in that order. Without
+  (`EliminationOrder::Custom`, `fill_reducing_ordering`). No pivot can vanish in that order. Without
   pivoting the solve is accurate to about 1e-8; one step of iterative refinement
   (`Factorization::solve_refined`) restores full accuracy. Cost: 0.23 s once, 0.5 s per
   refactorization, 0.06 s per solve.

@@ -16,6 +16,8 @@
 //!   a boundary loop is traversed with the surface on its left.
 //!
 //! Ids are passed to and returned from methods as `usize`; stored arrays use `u32`.
+//! Accessors index like slices: an id that is out of range for the mesh panics. Everything that
+//! takes data from outside (constructors and repair helpers) validates and returns an error.
 //!
 //! # What a `TriMesh` guarantees
 //!

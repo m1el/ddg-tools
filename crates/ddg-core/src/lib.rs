@@ -13,6 +13,32 @@
 //! * [`io`] — Wavefront OBJ reading and writing, and the cone files of the optimal-cones dataset.
 //! * [`generators`] — small procedural test meshes.
 //!
+//! # Example
+//!
+//! ```
+//! use ddg_core::generators::icosphere;
+//! use ddg_core::operators::{angle_defects, cotan_laplacian, lumped_mass_normalized};
+//! use ddg_core::sparse::{Method, Parallelism, Symbolic};
+//! use ddg_core::{Geometry, TriMesh};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let sphere = icosphere(2)?;
+//! let mesh = TriMesh::new(sphere.positions.len(), sphere.faces.clone())?;
+//! assert_eq!((mesh.euler_characteristic(), mesh.genus()), (2, 0));
+//!
+//! let geometry = Geometry::from_positions(&mesh, &sphere.positions)?;
+//! let mut a = cotan_laplacian(&mesh, &geometry)?; // symmetric PSD, constants in the kernel
+//! let mass = lumped_mass_normalized(&mesh, &geometry)?; // sums to 1
+//! a.add_to_diagonal(&mass)?; // L + M is positive definite
+//!
+//! let symbolic = Symbolic::analyze(&a, Method::Llt)?; // reusable for this sparsity pattern
+//! let factorization = symbolic.factor(&a, Parallelism::Sequential)?;
+//! let mut x = angle_defects(&mesh, &geometry)?; // right-hand side, overwritten by the solution
+//! factorization.solve_in_place(&mut x, Parallelism::Sequential)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # References
 //!
 //! The discrete operators are those of Sec. 5.1 of
@@ -20,14 +46,24 @@
 //! Flattening*, ACM Transactions on Graphics 37(4), 2018,
 //! <https://doi.org/10.1145/3197517.3201367>. The cotan operator goes back to MacNeal (1949).
 //! The numerically careful triangle area and angle formulas are from W. Kahan, *Miscalculating
-//! Area and Angles of a Needle-like Triangle* (2014).
+//! Area and Angles of a Needle-like Triangle* (2014). Polygon triangulation is a port of
+//! Blender's face tessellation (<https://www.blender.org>), and the sparse factorizations are
+//! those of the `faer` crate.
 //!
 //! # Conventions
 //!
-//! `f64` everywhere, stored indices are `u32`, ids at function boundaries are `usize`. Invalid
-//! input is reported through error enums and never panics. Nothing is normalized, clamped or
-//! repaired silently. Functions that implement a mathematical formula carry a
-//! `[formula: <id>]` line in their documentation.
+//! `f64` everywhere, stored indices are `u32`, ids at function boundaries are `usize`. Data from
+//! outside (face lists, positions, lengths, files, matrices) is validated and rejected through
+//! error enums whose messages say what is wrong and where; it never causes a panic. Accessors
+//! that take an element id index like slices. Nothing is normalized, clamped or repaired
+//! silently. Functions that implement a mathematical formula carry a `[formula: <id>]` line in
+//! their documentation.
+//!
+//! # License
+//!
+//! MIT, except for the private module `triangulate::blender`, which is ported from Blender and
+//! licensed under the GNU GPL, version 2 or later. It is compiled only with the cargo feature
+//! `blender-tessellation` (on by default); see the crate README.
 
 #![warn(missing_docs)]
 
@@ -41,11 +77,5 @@ pub mod topology;
 pub mod triangulate;
 
 pub use geometry::{Geometry, GeometryError};
-pub use sparse::{
-    Factorization, Method, Ordering, Parallelism, RefineOptions, RefineReport, SparseError,
-    SparseMatrix, Symbolic, SymbolicInfo, ThreadPool,
-};
-pub use topology::{
-    CompactedVertices, MeshError, NONE, OrientedFaces, SubMesh, TriMesh, compact_vertices,
-    orient_faces,
-};
+pub use sparse::{SparseError, SparseMatrix};
+pub use topology::{MeshError, TriMesh};

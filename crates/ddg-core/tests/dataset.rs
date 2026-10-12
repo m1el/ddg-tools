@@ -11,7 +11,7 @@ use ddg_core::geometry::Geometry;
 use ddg_core::io::{read_cones, read_obj};
 use ddg_core::operators::{cotan_laplacian, gauss_bonnet_residual, lumped_mass_normalized};
 use ddg_core::sparse::{
-    Method, Ordering, Parallelism, RefineOptions, SparseMatrix, Symbolic, ThreadPool,
+    EliminationOrder, Method, Parallelism, RefineOptions, SparseMatrix, Symbolic, ThreadPool,
     fill_reducing_ordering, relative_residual,
 };
 use ddg_core::topology::TriMesh;
@@ -137,13 +137,10 @@ fn sparse_solvers_work_on_dataset_meshes() {
 
         // K = [[-M, L], [L, D]] with a sparse non-negative D, by LDLt in the paired order.
         let mut triplets = Vec::new();
-        for i in 0..n {
-            triplets.push((i as u32, i as u32, -mass[i]));
-            triplets.push((
-                (n + i) as u32,
-                (n + i) as u32,
-                if i % 50 == 0 { 1.0 } else { 0.0 },
-            ));
+        for (i, &m) in mass.iter().enumerate() {
+            triplets.push((i as u32, i as u32, -m));
+            let d = if i % 50 == 0 { 1.0 } else { 0.0 };
+            triplets.push(((n + i) as u32, (n + i) as u32, d));
         }
         for (i, j, v) in laplacian.triplets() {
             triplets.push((n as u32 + i, j, v));
@@ -156,7 +153,8 @@ fn sparse_solvers_work_on_dataset_meshes() {
             .flat_map(|&i| [i, n as u32 + i])
             .collect();
         let symbolic =
-            Symbolic::analyze_with_ordering(&k, Method::Ldlt, Ordering::Custom(&paired)).unwrap();
+            Symbolic::analyze_with_order(&k, Method::Ldlt, EliminationOrder::Custom(&paired))
+                .unwrap();
         let factorization = symbolic.factor(&k, Parallelism::Sequential).unwrap();
         let x_true: Vec<f64> = (0..2 * n).map(|i| (0.02 * i as f64).cos()).collect();
         let mut b = vec![0.0; 2 * n];

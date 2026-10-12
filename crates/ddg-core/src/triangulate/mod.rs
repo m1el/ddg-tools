@@ -180,6 +180,9 @@ impl Triangulation {
     /// data that is continuous across a polygon's diagonals (per-vertex data, or UVs when no
     /// seam runs along a diagonal) all of them agree. A corner that no triangle uses keeps
     /// `fill` (this happens only if `n_corners` exceeds the triangulated corner count).
+    ///
+    /// Returns `None` if `values` does not have one entry per triangle or if `n_corners` is
+    /// smaller than the number of corners that were triangulated.
     pub fn to_polygon_corners<T: Copy>(
         &self,
         values: &[[T; 3]],
