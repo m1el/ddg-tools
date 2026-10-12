@@ -83,23 +83,30 @@ pub enum ClosedSurfaces {
         /// [`SlitPlacement`]), between 0 and 1. The slit always has at least two edges.
         relative_length: f64,
     },
-    /// [`ClosedSurfaces::RawOptimum`], and if its result is not usable — more than `max_cones`
-    /// cones are left after merging — a slit instead (a second solve).
+    /// [`ClosedSurfaces::RawOptimum`], unless its result is dense: if, after merging, more than
+    /// `max_cones` cones are left **and** they are more than the fraction `max_cone_fraction`
+    /// of the vertices of the piece (on a smooth round shape the optimum is a cone at every
+    /// vertex), the piece is solved again as [`ClosedSurfaces::FreeSites`] with
+    /// `fallback_sites` sites, cones forbidden elsewhere and the angle bound
+    /// [`UnwrapOptions::max_cone_angle`]. The default, with 32 cones, 1 % and 8 sites.
     Auto {
-        /// The largest number of cones accepted from the raw optimum.
+        /// A raw optimum with at most this many cones is always accepted.
         max_cones: usize,
-        /// Placement of the fallback slit.
-        placement: SlitPlacement,
-        /// Length of the fallback slit, see [`ClosedSurfaces::Slit`].
-        relative_length: f64,
+        /// A raw optimum whose cones are at most this fraction of the vertices is always
+        /// accepted, however many they are (the 55 cones of the dataset's `brain` are
+        /// 0.04 % of its vertices).
+        max_cone_fraction: f64,
+        /// Number of free sites of the fallback.
+        fallback_sites: usize,
     },
 }
 
 impl Default for ClosedSurfaces {
     fn default() -> Self {
-        ClosedSurfaces::Slit {
-            placement: SlitPlacement::DiameterMiddle,
-            relative_length: 0.5,
+        ClosedSurfaces::Auto {
+            max_cones: 32,
+            max_cone_fraction: 0.01,
+            fallback_sites: 8,
         }
     }
 }
@@ -337,8 +344,26 @@ impl UnwrapOptions {
                 relative_length, ..
             } => check_slit(relative_length)?,
             ClosedSurfaces::Auto {
-                relative_length, ..
-            } => check_slit(relative_length)?,
+                fallback_sites,
+                max_cone_fraction,
+                ..
+            } => {
+                if !(0.0..=1.0).contains(&max_cone_fraction) {
+                    return Err(invalid(
+                        "closed_surfaces.max_cone_fraction",
+                        max_cone_fraction,
+                        "must be between 0 and 1",
+                    ));
+                }
+                if (fallback_sites as f64) * self.max_cone_angle < 2.0 * TAU {
+                    return Err(invalid(
+                        "closed_surfaces.fallback_sites",
+                        fallback_sites,
+                        "fallback_sites times max_cone_angle must be at least 4π, the sum of \
+                         the cone angles of a closed surface of genus 0",
+                    ));
+                }
+            }
         }
         match self.merge {
             MergeClusters::Never | MergeClusters::Always { .. } => {}

@@ -141,38 +141,35 @@ fn piece_cones(
                 ClosedHandling::Slit {
                     n_edges: edges.len(),
                     length,
-                    fallback_from_cones: None,
                 },
             )
         }
         (true, ClosedSurfaces::Auto {
             max_cones,
-            placement,
-            relative_length,
+            max_cone_fraction,
+            fallback_sites,
         }) => {
             let mut raw_warnings = Vec::new();
             let raw = solve_on(prepared, piece, options, None, &mut raw_warnings)?;
-            if raw.cones.len() <= max_cones {
+            let sparse = raw.cones.len() as f64
+                <= max_cone_fraction * piece.mesh.n_vertices() as f64;
+            if raw.cones.len() <= max_cones || sparse {
                 warnings.append(&mut raw_warnings);
                 finish(raw, None, Vec::new(), ClosedHandling::RawOptimum)
             } else {
                 let n_raw = raw.cones.len();
                 let raw_seconds = raw.report.as_ref().map_or(0.0, |r| r.seconds);
-                let (cut, edges, length) = slit_of(placement, relative_length)?;
-                let mut solved = solve_on(prepared, &cut, options, None, &mut warnings)?;
+                let sites = Some((fallback_sites, options.max_cone_angle, true));
+                let mut solved = solve_on(prepared, piece, options, sites, &mut warnings)?;
                 if let Some(report) = &mut solved.report {
                     report.seconds += raw_seconds;
                 }
-                finish(
-                    solved,
-                    Some(cut),
-                    edges.clone(),
-                    ClosedHandling::Slit {
-                        n_edges: edges.len(),
-                        length,
-                        fallback_from_cones: Some(n_raw),
-                    },
-                )
+                let handling = ClosedHandling::FreeSites {
+                    n_automatic: solved.n_free_sites,
+                    n_pinned: solved.n_pinned_sites,
+                    fallback_from_cones: Some(n_raw),
+                };
+                finish(solved, None, Vec::new(), handling)
             }
         }
         (true, ClosedSurfaces::FreeSites {
@@ -185,6 +182,7 @@ fn piece_cones(
             let handling = ClosedHandling::FreeSites {
                 n_automatic: solved.n_free_sites,
                 n_pinned: solved.n_pinned_sites,
+                fallback_from_cones: None,
             };
             finish(solved, None, Vec::new(), handling)
         }

@@ -68,6 +68,9 @@ pub enum ClosedHandling {
         n_automatic: usize,
         /// Number of pinned vertices of the caller that served as sites.
         n_pinned: usize,
+        /// Whether this is the fallback of [`crate::ClosedSurfaces::Auto`]: the number of
+        /// cones of the raw optimum that was discarded.
+        fallback_from_cones: Option<usize>,
     },
     /// A slit was cut.
     Slit {
@@ -75,9 +78,6 @@ pub enum ClosedHandling {
         n_edges: usize,
         /// Its length on the surface.
         length: f64,
-        /// Whether the slit is the fallback of [`crate::ClosedSurfaces::Auto`], and the
-        /// number of cones of the raw optimum that was discarded.
-        fallback_from_cones: Option<usize>,
     },
 }
 
