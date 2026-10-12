@@ -31,6 +31,7 @@
 
 pub mod generators;
 pub mod geometry;
+pub mod io;
 pub mod operators;
 pub mod sparse;
 pub mod topology;
