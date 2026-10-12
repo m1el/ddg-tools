@@ -341,7 +341,8 @@ measures. Cited:
 ### [formula: bff-conformal-energy] Conformal energy and harmonic conjugation
 
 - **Statement.** The least-squares conformal energy of `f = a + ib` is the Dirichlet energy
-  minus the signed area of the image, `E_C(a, b) = ½(aᵀAa + bᵀAb) − 𝒜(a, b)`; it vanishes exactly
+  minus the signed area of the image, `E_C(a, b) = ½(aᵀAa + bᵀAb) − 𝒜(a, b)` (BFF Eq. 15 is twice
+  this, with `aᵀUb = −𝒜(a, b)` of its Eq. 16); it vanishes exactly
   for (discrete) conformal maps, and for fixed `a` its minimizer `b` is the "most conjugate"
   harmonic function.
 - **Reference.** BFF Sec. 4.3.3, Eqs. 15–17; Hutchinson, *Computing conformal maps and minimal
@@ -352,9 +353,10 @@ measures. Cited:
 - **Does correctness depend on it?** No. Proved: the Neumann data `h_j = ½(a_{j−1} − a_{j+1})`
   is the gradient of the area of the boundary polygon with respect to `b`, it sums to zero, and a
   solution of `A b = h` minimizes `½ bᵀAb − 𝒜(a, b)` (`[formula: bff-hilbert-transform]`). The
-  quality of the result is measured (`[formula: quasi-conformal-error]`), not assumed. Orientation:
-  the code walks the boundary with the surface on the left, which gives `½(a_{j−1} − a_{j+1})`;
-  BFF Eq. 17 / Alg. 6 print `½(a_{j+1} − a_{j−1})` for the opposite orientation.
+  quality of the result is measured (`[formula: quasi-conformal-error]`), not assumed. Sign: BFF
+  Sec. 4.3.3 solves `A b = −Uᵀa` with `(Uᵀa)_j = ½(a_{j+1} − a_{j−1})` (its Eq. 17 calls this
+  `h_j`), so the right-hand side is `½(a_{j−1} − a_{j+1})`, as in the code; its Alg. 6 writes
+  `A b = h` with the same `h`, which matches only for the opposite direction of the boundary walk.
 
 ### [formula: bff-disk-uniformization] Flattening to a round disk
 

@@ -33,7 +33,8 @@ lake exe cache get                      # prebuilt Mathlib; do not compile Mathl
 lake build > ../../runs_tmp/lean-proofs-build.log 2>&1
 lake env lean DdgProofs/Audit.lean      # prints the axioms each main theorem depends on
 ../../scripts/check-formulas.sh         # formula ids: Rust <-> Lean theorem / CITED.md; no sorry/axiom
-../../scripts/check-formulas.sh --build # the same, plus build and axiom audit
+../../scripts/check-formulas.sh --build # the same, plus build and axiom audit of the main theorems
+../../scripts/check-formulas.sh --audit-all   # the same, plus the axioms of every declaration (minutes)
 ```
 
 There is no `sorry` and no `axiom` declaration in this package. `DdgProofs/Audit.lean` runs
@@ -62,6 +63,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
 | `DdgProofs/Yamabe.lean` | linearized discrete Yamabe equation (B.12) |
 | `DdgProofs/Evaluated.lean` | the same formulas in the arrangements `crates/ddg-core` evaluates (Kahan's area, `atan2` corner angle, curvature fields, Laplacian entries) |
+| `DdgProofs/MeshProblem.lean` | the canonical problem of a mesh (`TriMesh.coneProblem`) and the translation between vectors on the unknowns and per-vertex vectors that vanish on the boundary |
 | `DdgProofs/Bff/Laplace.lean` | BFF: Poisson solves, Dirichlet-to-Neumann, Neumann problem, exterior-angle sum, first-order Cherrier formula (D) |
 | `DdgProofs/Bff/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
 | `DdgProofs/Bff/Curve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
@@ -88,6 +90,14 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
   (`L = L_II`, `u = 0` on the boundary already eliminated, see `laplacian_mulVec_of_zero_off`), or
   all vertices on a closed mesh. On a closed mesh the competitors in `IsMinimizer` are *all*
   solutions of `L v = ν − Ω`, so the additive constant of `u` is optimized.
+  `TriMesh.coneProblem M p wE λ site` (`DdgProofs/MeshProblem.lean`) is this problem for a mesh
+  `M` with unknowns `p`, with the masses divided by the total area. For per-vertex vectors that
+  vanish off the unknowns (as the Rust arrays do; an exact test), its state residual is
+  `(L u)_v − µ_v + Ω_v` with the full Laplacian (`coneProblem_stateResidual`), its adjoint product
+  is `(L φ)_v` (`coneProblem_adjoint`), feasibility is the constraint set of `CLAUDE.md`
+  (`coneProblem_feasible_iff`), and the objective is the per-vertex sum (`coneProblem_objective`);
+  the matrix is symmetric, positive definite in the Dirichlet case and annihilates constants on
+  a closed mesh (`coneProblem_transpose`, `coneProblem_posDef`, `coneProblem_mulVec_one`).
 - `Site` is the per-vertex data: `penalized wR lo hi` (cost `λ·wR·|µ|`, `µ ∈ [lo, hi]`,
   `lo, hi : EReal` with `⊥/⊤` = unbounded, `wR = 0` = free site) or `fixed a` (`µ = a` at no cost:
   `fixed 0` is a forbidden vertex, i.e. `wR = +∞`; `fixed a` a prescribed cone).
@@ -276,12 +286,14 @@ fixed angle.
 |---|---|---|---|
 | `duality-gap-inexact` | `ConeProblem.gap_identity_general` | `J(u,µ) − D(ũ,φ) = ½Σw(u−ũ)² + Σ(λcost_i(µ_i) + conj_i(φ_i) − φ_iµ_i) − Σφ_i r_i + Σ s_i u_i` for arbitrary `u, ũ, φ, µ`. | own |
 | `duality-gap-inexact` | `ConeProblem.objective_sub_dualObjectiveOfAdjoint` | `J(u,µ) − D(φ) = G(u,φ,µ) − Σφ_i r_i + Σ_{w_i=0}(Lᵀφ)_i u_i` (the relation between the code's `duality_gap` and `complementarity_gap`). | own |
+| `duality-gap-inexact` | `ConeProblem.abs_gap_sub_complementarityGap_le` | `\|J(u,µ) − D(φ) − G(u,φ,µ)\| ≤ Σ\|φ_i r_i\| + Σ_{w_i=0}\|(Lᵀφ)_i u_i\|` (the code's `gap_uncertainty`; it bounds the difference of the two forms of the gap, not the suboptimality). | own |
 | `duality-gap-certificate` | `ConeProblem.dualObjectiveOfAdjoint_add_le` | `D(φ) + Σ_{w_i=0}(Lᵀφ)_i v_i ≤ J(v,ν)` for dual-feasible `φ` and feasible `(v,ν)`. | own |
 | `duality-gap-certificate` | `ConeProblem.dual_lower_bound`, `dual_lower_bound_of_clip` | `D(φ̂) ≤ J(v,ν)` for every feasible `(v,ν)`, for **any** `φ`, if `(Lᵀφ̂)_i = 0` wherever `w_i = 0`. | own |
 | — | `ConeProblem.feasible_iff_eq_inducedCone` | `(u,ν)` is feasible ⟺ `ν = L u + Ω` and `L u + Ω` is admissible: `µ + r` is the only repair that keeps `u`. | own |
 | `duality-gap-certificate` | `ConeProblem.objective_add_stateResidual_le`, `repairCost_le_of_abs_le` | `J(u, µ+r) ≤ J(u,µ) + λΣcost_i(r_i) ≤ J(u,µ) + ε·λΣ_i wR_i` if `\|r_i\| ≤ ε`. | own |
 | `duality-gap-certificate` | `ConeProblem.certificate_enclosure` | If `φ` is dual feasible, `(Lᵀφ)_i = 0` wherever `w_i = 0`, and `µ + r` is admissible: `(u, µ+r)` is feasible; `D(φ) ≤ J(v,ν)` for all feasible `(v,ν)`; `J(u,µ+r) ≤ J(u,µ) + λΣcost_i(r_i) =: U`; `J(u,µ+r) ≤ J(v,ν) + (U − D(φ))`; `0 ≤ U − D(φ)`. | own |
 | `duality-gap-certificate` | `ConeProblem.certificate_of_computed` | The same from a computed triple, all `w_i > 0`: with `J(u,µ) − D(φ̂) ≤ gap` and `λΣcost_i(r_i) ≤ ε`, `(u, µ+r)` is within `gap + ε` of the optimum. | own |
+| `duality-gap-certificate` | `ConeProblem.certificate_of_computed_unbounded` | If no vertex has a bound or a fixed angle (the default problem), `µ + r` is always admissible: the previous statement holds for **every** triple. | own |
 | `duality-gap-certificate` | `ConeProblem.IsMinimizer.objective_mem_enclosure`, `IsMinimizer.weighted_sq_sub_le_width` | Every minimizer `(u*,µ*)` has `D(φ) ≤ J(u*,µ*) ≤ U` and `¼Σw(u−u*)² ≤ U − D(φ)`. | own |
 | `duality-gap-certificate` | `ConeProblem.repaired_certificate` | For admissible `µ`: with `µ̄` the admissible vector nearest to `µ+r` and `ρ = µ+r−µ̄`, `(u,µ̄)` is feasible for the problem with defects `Ω − ρ` and within `J(u,µ) + λΣcost_i(r_i) − D(φ) + Σφ_iρ_i` of its optimum. | own |
 | `duality-gap-certificate` | `ConeProblem.backward_certificate` | For admissible `µ`: `(u,µ)` is feasible for the problem with defects `Ω − r` and within `G(u,φ,µ) ≥ 0` of its optimum. | own |
@@ -504,13 +516,17 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF. (BFF Proposition 1 is s
     of a boundary *edge* by `1/ℓ_ij` (`N_ii = 1/ℓ_ij`); Alg. 5 line 7 comments "`ℓ_i` are dual
     lengths". The reference implementation and `crates/ddg-bff` use the edge lengths
     (`N_d = Σ 1/ℓ` over the one or two sides of a length degree of freedom).
-13. **BFF, orientation in the Hilbert transform.** Eq. 17 / Alg. 6 print `h_j = ½(a_{j+1} − a_{j−1})`;
-    `crates/ddg-bff` walks the boundary with the surface on the left and uses
-    `½(a_{j−1} − a_{j+1})`, which is the gradient of the counter-clockwise area with respect to
-    `b_j` (proved in `Bff/Curve.lean`). The two agree after reversing the direction of the walk.
-    Also: Sec. 4.5.1 prints `φ_p := Σ_{i=1}^{p−1} k̃_i` for the direction of the edge leaving
-    vertex `p`, which omits the turn at `p`; Alg. 5 (lines 2–4) accumulates
-    `φ_{i,i+1} = φ_{i−1,i} + k̃_i`, which is what the code does (`boundaryTangent_succ`).
+13. **BFF, sign in the Hilbert transform; index of the tangent angles.** Sec. 4.3.3 defines
+    `h := Uᵀa`, `h_j = ½(a_k − a_i)` for consecutive boundary vertices `i, j, k` (Eq. 17), and
+    solves `A b = −Uᵀa`, i.e. `(A b)_j = ½(a_i − a_k)`. That right-hand side, `½(a_{j−1} − a_{j+1})`
+    with the surface on the left, is what `hilbert_transform` in `crates/ddg-bff` returns, and it
+    is the gradient of the counter-clockwise area of the boundary polygon with respect to `b_j`
+    (proved in `Bff/Curve.lean`; the paper's `aᵀUb` of Eq. 16 is minus that area). Alg. 6
+    (lines 2–3) instead writes `h_i ← ½(a_{i+1} − a_{i−1})` and solves `A b = h`, which is the
+    same system only for the opposite direction of the walk. Separately, Sec. 4.5.1 prints
+    `φ_p := Σ_{i=1}^{p−1} k̃_i` for the direction of the edge leaving vertex `p`, which omits the
+    turn at `p`; Alg. 5 (lines 2–4) accumulates `φ_{i,i+1} = φ_{i−1,i} + k̃_i`, which is what the
+    code does (`boundaryTangent_succ`).
 14. **Cone paper, Sec. 8.1** prints `r_i := 1/(|Ω_i|/M_ii + ε)` and describes it as "small in flat
     regions and large in highly curved regions"; the printed formula is the opposite. See
     `feature-size-weights` in `CITED.md`.

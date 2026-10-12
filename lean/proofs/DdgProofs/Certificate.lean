@@ -335,6 +335,35 @@ theorem objective_sub_dualObjectiveOfAdjoint (P : ConeProblem ι) (u φ μ : ι 
   rw [adjointResidual_dualState]
   split_ifs <;> simp
 
+/-- **How far the computed gap can be from the complementarity gap**: for arbitrary `u, φ, μ`,
+
+`|J(u, μ) − dualObjectiveOfAdjoint φ − complementarityGap u φ μ|
+   ≤ Σ_i |φ_i r_i| + Σ_{i : wE_i m_i = 0} |(Lᵀφ)_i u_i|`.
+
+The right-hand side is the `gap_uncertainty` of the Rust certificate. It bounds the difference of
+the two forms of the gap; it does **not** bound the suboptimality of `(u, μ)`
+(`certificate_enclosure` and `backward_certificate` say what can be concluded).
+
+[formula: duality-gap-inexact] -/
+theorem abs_gap_sub_complementarityGap_le (P : ConeProblem ι) (u φ μ : ι → ℝ) :
+    |P.objective u μ - P.dualObjectiveOfAdjoint φ - P.complementarityGap u φ μ| ≤
+      ∑ i, |φ i * P.stateResidual u μ i| +
+        ∑ i, (if P.wE i * P.m i = 0 then |(P.Lᵀ *ᵥ φ) i * u i| else 0) := by
+  have h := P.objective_sub_dualObjectiveOfAdjoint u φ μ
+  have e : P.objective u μ - P.dualObjectiveOfAdjoint φ - P.complementarityGap u φ μ =
+      -∑ i, φ i * P.stateResidual u μ i + P.adjointDefect φ u := by linarith
+  rw [e]
+  have h1 : |∑ i, φ i * P.stateResidual u μ i| ≤ ∑ i, |φ i * P.stateResidual u μ i| :=
+    Finset.abs_sum_le_sum_abs _ _
+  have h2 : |P.adjointDefect φ u| ≤
+      ∑ i, (if P.wE i * P.m i = 0 then |(P.Lᵀ *ᵥ φ) i * u i| else 0) := by
+    unfold adjointDefect
+    refine le_trans (Finset.abs_sum_le_sum_abs _ _) (Finset.sum_le_sum fun i _ => ?_)
+    split_ifs <;> simp
+  calc |-∑ i, φ i * P.stateResidual u μ i + P.adjointDefect φ u|
+      ≤ |-∑ i, φ i * P.stateResidual u μ i| + |P.adjointDefect φ u| := abs_add_le _ _
+    _ ≤ _ := by rw [abs_neg]; exact add_le_add h1 h2
+
 /-- The complementarity gap is a sum of nonnegative terms when `μ` is admissible and `φ` lies in
 the domains of the conjugates (no equation is needed). -/
 theorem complementarityGap_nonneg (hP : P.WellFormed)
@@ -521,6 +550,24 @@ theorem certificate_of_computed (hP : P.WellFormed) (hpos : ∀ i, 0 < P.wE i * 
   refine ⟨h1, by linarith, fun v ν hv => ?_⟩
   have := h4 v ν hv
   linarith
+
+/-- **The default problem needs no condition on the residual.** If no vertex has a bound or a
+fixed angle (every site is `penalized wR ⊥ ⊤`, the default of `CLAUDE.md`), then `μ + r` is
+admissible whatever `r` is, and the conclusion of `certificate_of_computed` holds for *every*
+triple `(u, φ, μ)`: `(u, μ + r)` is feasible and within `gap + ε` of the optimum.
+
+[formula: duality-gap-certificate] -/
+theorem certificate_of_computed_unbounded (hP : P.WellFormed) (hpos : ∀ i, 0 < P.wE i * P.m i)
+    (hsite : ∀ i, ∃ wR, P.site i = Site.penalized wR ⊥ ⊤) (u φ μ : ι → ℝ)
+    {gap ε : ℝ} (hgap : P.objective u μ - P.dualObjectiveOfAdjoint (P.dualClip φ) ≤ gap)
+    (hres : P.lam * ∑ i, (P.site i).cost (P.stateResidual u μ i) ≤ ε) :
+    P.Feasible u (fun i => μ i + P.stateResidual u μ i) ∧ 0 ≤ gap + ε ∧
+      ∀ v ν, P.Feasible v ν →
+        P.objective u (fun i => μ i + P.stateResidual u μ i) ≤ P.objective v ν + (gap + ε) := by
+  refine certificate_of_computed hP hpos u φ μ (fun i => ?_) hgap hres
+  obtain ⟨wR, hw⟩ := hsite i
+  rw [hw]
+  exact ⟨bot_le, le_top⟩
 
 /-- The enclosure for a minimizer: under the hypotheses of `certificate_enclosure`, the optimal
 value `J(u*, μ*)` of any minimizer lies between `dualObjectiveOfAdjoint φ` and

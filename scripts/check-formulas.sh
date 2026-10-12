@@ -10,9 +10,13 @@
 #   The script also fails if `sorry`, `admit` or an `axiom` declaration appears in the Lean
 #   sources of lean/proofs.
 #
-# Usage:  scripts/check-formulas.sh [--build]
-#   --build   additionally run `lake build` in lean/proofs and check that the axiom audit
-#             (DdgProofs/Audit.lean) reports only propext, Classical.choice and Quot.sound.
+# Usage:  scripts/check-formulas.sh [--build] [--audit-all]
+#   --build       additionally run `lake build` in lean/proofs and check that the axiom audit
+#                 (DdgProofs/Audit.lean, the main theorems by name) reports only propext,
+#                 Classical.choice and Quot.sound.
+#   --audit-all   additionally (implies --build) run DdgProofs/AuditAll.lean, which collects the
+#                 axioms of every declaration of lean/proofs and of the oracle's formula modules.
+#                 Takes several minutes.
 #
 # Works with no Rust sources present (the table then lists the Lean and cited ids only).
 
@@ -25,10 +29,12 @@ proofs="$root/lean/proofs"
 cited="$proofs/CITED.md"
 crates="$root/crates"
 do_build=0
+do_audit_all=0
 for arg in "$@"; do
   case "$arg" in
     --build) do_build=1 ;;
-    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --audit-all) do_build=1; do_audit_all=1 ;;
+    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -201,6 +207,20 @@ if [ "$do_build" = 1 ]; then
     fi
   else
     echo "FAIL: lake build failed, see $log" >&2; fail=1
+  fi
+fi
+
+# ---------------------------------------------------------------------------------------------
+# 7. Optional: axioms of every declaration
+# ---------------------------------------------------------------------------------------------
+if [ "$do_audit_all" = 1 ]; then
+  log_all="$root/runs_tmp/check-formulas-audit-all.log"
+  echo "auditing every declaration (log: runs_tmp/check-formulas-audit-all.log) ..."
+  if (cd "$proofs" && lake env lean DdgProofs/AuditAll.lean > "$log_all" 2>&1) \
+     && grep -q 'offenders: 0' "$log_all"; then
+    echo "audit of all declarations ok: $(grep -o 'declarations checked: [0-9]*' "$log_all")"
+  else
+    echo "FAIL: the audit of all declarations failed or found other axioms, see $log_all" >&2; fail=1
   fi
 fi
 

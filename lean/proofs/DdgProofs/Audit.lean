@@ -42,6 +42,7 @@ open DdgProofs
 -- A.4' certificate for inexact data
 #print axioms ConeProblem.gap_identity_general
 #print axioms ConeProblem.objective_sub_dualObjectiveOfAdjoint
+#print axioms ConeProblem.abs_gap_sub_complementarityGap_le
 #print axioms ConeProblem.dualObjectiveOfAdjoint_add_le
 #print axioms ConeProblem.dual_lower_bound
 #print axioms ConeProblem.dual_lower_bound_of_clip
@@ -50,6 +51,7 @@ open DdgProofs
 #print axioms ConeProblem.repairCost_le_of_abs_le
 #print axioms ConeProblem.certificate_enclosure
 #print axioms ConeProblem.certificate_of_computed
+#print axioms ConeProblem.certificate_of_computed_unbounded
 #print axioms ConeProblem.IsMinimizer.objective_mem_enclosure
 #print axioms ConeProblem.IsMinimizer.weighted_sq_sub_le
 #print axioms ConeProblem.IsMinimizer.weighted_sq_sub_le_width
@@ -289,3 +291,11 @@ open DdgProofs
 #print axioms fitNorm_eq_zero_iff
 #print axioms fit_similarity_optimal
 #print axioms fit_similarity_unique
+-- The canonical problem of a mesh (MeshProblem.lean)
+#print axioms TriMesh.coneProblem_stateResidual
+#print axioms TriMesh.coneProblem_adjoint
+#print axioms TriMesh.coneProblem_feasible_iff
+#print axioms TriMesh.coneProblem_objective
+#print axioms TriMesh.coneProblem_posDef
+#print axioms TriMesh.coneProblem_mulVec_one
+#print axioms TriMesh.coneProblem_wellFormed
