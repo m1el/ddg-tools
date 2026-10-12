@@ -858,11 +858,13 @@ def main():
     parser.add_argument("--module", required=True, help="module name of the installed add-on")
     parser.add_argument("--zip", default="", help="the extension zip that was installed")
     parser.add_argument("-k", dest="only", default="", help="run only tests whose name contains this")
+    parser.add_argument("--bpy-module", action="store_true",
+                        help="running in Blender-as-a-Python-module, which has no --factory-startup")
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     ARGS = parser.parse_args(argv)
 
     assert bpy.app.background, "run with -b"
-    assert bpy.app.factory_startup, "run with --factory-startup"
+    assert bpy.app.factory_startup or ARGS.bpy_module, "run with --factory-startup"
     # --factory-startup ignores the saved preferences, so the add-on is enabled here.
     assert ARGS.module not in bpy.context.preferences.addons.keys()
     assert bpy.ops.preferences.addon_enable(module=ARGS.module) == {'FINISHED'}

@@ -226,6 +226,23 @@ def mark_seams(mesh, cut_edges):
     return len(new), len(wanted) - len(found)
 
 
+def _write_uvs(mesh, uv_layer, uvs):
+    """Writes ``uvs`` (2 floats per face corner) into a UV map.
+
+    Deliberately not through ``uv_layer.uv``: in Blender 5.0 that collection writes into the
+    layer's array in place even while the array is still shared with an undo step, which
+    rewrites history: Undo then "restores" the new UVs. The attribute of the same name, and
+    ``uv_layer.data``, make the array private before writing. The attribute is a plain array
+    (memory copy); ``uv_layer.data`` converts item by item and is the fallback.
+    """
+    attribute = mesh.attributes.get(uv_layer.name)
+    if attribute is not None and attribute.domain == 'CORNER' \
+            and attribute.data_type == 'FLOAT2' and 2 * len(attribute.data) == len(uvs):
+        attribute.data.foreach_set("vector", uvs)
+    else:
+        uv_layer.data.foreach_set("uv", uvs)
+
+
 def groups_vertices(obj, group_names):
     """For each name in ``group_names``: the vertices of ``obj`` that are in that vertex group
     with a weight above zero, as ``array('i')`` in ascending order. One pass over the vertices
@@ -310,7 +327,7 @@ def unwrap_object(obj, *, lambda_=0.5, use_seams=True, pinned_group="", forbidde
         uv_layer = mesh.uv_layers.new(name=DEFAULT_UV_NAME, do_init=False)
         if uv_layer is None:
             raise UnwrapFailed("Could not create a UV map on mesh '{}'".format(mesh.name))
-    uv_layer.uv.foreach_set("vector", uvs)
+    _write_uvs(mesh, uv_layer, uvs)
     written = perf_counter()
 
     seams_marked = not_found = 0

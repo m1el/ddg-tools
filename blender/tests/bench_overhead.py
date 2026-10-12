@@ -13,7 +13,7 @@ steps of `core.unwrap_object` are timed separately, best and median of `--repeat
 * native: `ddg_tools.unwrap`, with the binding's own share (decoding and validating the
   buffers, measuring distortion, building the result arrays) split from the pipeline's;
 * pack: `ddg_tools.pack_charts`;
-* write: `foreach_set` of the UVs and `mesh.update()`;
+* write: `foreach_set` of the UVs (through the UV map's attribute) and `mesh.update()`;
 * mark seams: mapping cut edges back to edge indices;
 
 and the whole operator from Object mode and from Edit mode (which adds leaving and re-entering
@@ -125,17 +125,22 @@ def bench(name, obj, core, ddg, repeat):
     layer = mesh.uv_layers.active or mesh.uv_layers.new(name="UVMap", do_init=False)
 
     def write():
-        mesh.uv_layers.active.uv.foreach_set("vector", uvs)
+        core._write_uvs(mesh, mesh.uv_layers.active, uvs)
         mesh.update()
 
     best, median, _ = timed(write, repeat)
-    row("write: foreach_set + mesh.update()", best, median)
+    row("write: UV attribute foreach_set + update", best, median)
     write_cost = best
+    few = max(2, repeat // 3)
+    best, median, _ = timed(
+        lambda: mesh.uv_layers.active.data.foreach_set("uv", uvs), few)
+    row("  for comparison: uv_layer.data 'uv'", best, median, "(element API)")
     as_double = array.array('d', uvs)
     best, median, _ = timed(
-        lambda: mesh.uv_layers.active.uv.foreach_set("vector", as_double), max(2, repeat // 3))
-    row("  for comparison: foreach_set of array('d')", best, median,
-        "(type mismatch, Blender converts item by item)")
+        lambda: mesh.attributes[mesh.uv_layers.active.name].data.foreach_set(
+            "vector", as_double), few)
+    row("  for comparison: the same from array('d')", best, median,
+        "(type mismatch, converted item by item)")
 
     # Clearing the seams between runs is not part of what is measured.
     clear = memoryview(bytearray(len(mesh.edges))).cast('?')
