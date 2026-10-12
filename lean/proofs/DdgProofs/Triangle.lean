@@ -99,7 +99,7 @@ theorem triArea_swap (a b c : ℝ) : triArea a c b = triArea a b c := by
   congr 2
   ring
 
-private theorem cos_arg_bounds (h : IsTriangle a b c) :
+theorem cos_arg_bounds (h : IsTriangle a b c) :
     -1 < (b ^ 2 + c ^ 2 - a ^ 2) / (2 * b * c) ∧ (b ^ 2 + c ^ 2 - a ^ 2) / (2 * b * c) < 1 := by
   have hb := h.pos_b
   have hc := h.pos_c

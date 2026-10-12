@@ -78,6 +78,11 @@ open DdgProofs
 -- B.11 Gauss–Bonnet
 #print axioms TriMesh.gauss_bonnet
 #print axioms TriMesh.sum_cone_eq_two_pi_eulerChar
+-- B.12 linearized discrete Yamabe equation
+#print axioms hasDerivAt_cornerAngle_conformal
+#print axioms TriMesh.hasDerivAt_angleSum_conformalScale
+#print axioms TriMesh.hasDerivAt_angleDefect_conformalScale
+#print axioms TriMesh.hasDerivAt_angleDefect_conformalScale_add
 -- Statements about the oracle's definitions
 #print axioms Oracle.inSubdiff_iff_eq_boundedThreshold
 #print axioms Oracle.inSubdiff_sub_div_iff_eq_regularizedMeasure

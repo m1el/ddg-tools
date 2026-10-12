@@ -7,6 +7,7 @@ import DdgProofs.Closed
 import DdgProofs.Triangle
 import DdgProofs.Cotan
 import DdgProofs.GaussBonnet
+import DdgProofs.Yamabe
 import DdgProofs.Oracle.Scalar
 import DdgProofs.Oracle.Problem
 import DdgProofs.Oracle.Mesh

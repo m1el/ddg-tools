@@ -316,7 +316,7 @@ theorem dotProduct_laplacian_mulVec (u : V → ℝ) :
 
 omit [Fintype F] [Fintype V] in
 /-- With three distinct vertices, `cotOpp` is a sum of six indicator terms. -/
-private theorem cotOpp_eq (hM : M.Valid) (f : F) (i j : V) :
+theorem cotOpp_eq (hM : M.Valid) (f : F) (i j : V) :
     M.cotOpp f i j =
       M.cotC f * ((if i = M.a f then 1 else 0) * (if j = M.b f then 1 else 0) +
         (if i = M.b f then 1 else 0) * (if j = M.a f then 1 else 0)) +
