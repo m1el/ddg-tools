@@ -613,7 +613,7 @@ private def checkFormat (tally : IO.Ref Tally) : IO Unit := do
     ((out.splitOn "status error directed edge (0, 1) occurs in faces 0 and 2").length == 2)
 
 /-- Random sweep over meshes of every topology and parameters with every feature. -/
-private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
+private def checkSweep (tally : IO.Ref Tally) (count maxSize : Nat) : IO Unit := do
   let mut converged := 0
   let mut infeasible := 0
   let mut failed : Array String := #[]
@@ -623,7 +623,7 @@ private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
   let mut seed := 0
   while used < count do
     seed := seed + 1
-    let (kind, m) := randomMesh (12 + seed % 30) seed
+    let (kind, m) := randomMesh (12 + seed % (maxSize - 11)) seed
     let p := randomParams m seed
     used := used + 1
     match solveCase { name := "", mesh := m, params := p } with
@@ -639,14 +639,15 @@ private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
           if g > worstGain then worstGain := g
       | .infeasible _ => infeasible := infeasible + 1
       | .notConverged why => failed := failed.push s!"{kind}#{seed}: {why}"
-  check tally s!"sweep: {count} random cases (all topologies, weights incl. wE = 0, free sites, forbidden regions, bounds, prescribed cones)"
+  check tally s!"sweep: {count} random cases of 12 to about {maxSize} vertices (all topologies, weights incl. wE = 0, free sites, forbidden regions, bounds, prescribed cones)"
     (failed.size == 0 && worstGain ≤ 1e-12)
     s!"converged={converged} infeasible={infeasible} failed={failed.size} mean Newton steps={steps / (if converged == 0 then 1 else converged)} best perturbation decrease={sci worstGain}"
   for f in failed do
     IO.println s!"      {f}"
 
-/-- Run all checks; returns the number of failures. -/
-def selftest (sweep : Nat := 300) : IO Nat := do
+/-- Run all checks; returns the number of failures. The sweep solves `sweep` random cases with
+between 12 and about `maxSize` vertices. -/
+def selftest (sweep : Nat := 300) (maxSize : Nat := 41) : IO Nat := do
   let tally ← IO.mkRef ({} : Tally)
   checkFormulas tally
   checkOperators tally
@@ -654,7 +655,7 @@ def selftest (sweep : Nat := 300) : IO Nat := do
   checkClaims tally
   checkInvariance tally
   checkFormat tally
-  checkSweep tally sweep
+  checkSweep tally sweep (if maxSize < 12 then 12 else maxSize)
   let t ← tally.get
   IO.println s!"selftest: {t.passed} passed, {t.failed} failed"
   return t.failed

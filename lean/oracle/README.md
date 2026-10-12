@@ -34,7 +34,7 @@ lake build                      # Lean 4.34.1 (lean-toolchain), no dependencies
 | `ddg-oracle operators [IN [OUT]]` | curvatures, masses, cotan Laplacian of every case in `IN` |
 | `ddg-oracle solve [IN [OUT]]` | solve the canonical problem for every case in `IN` |
 | `ddg-oracle batch [IN [OUT]]` | the same, each case naming its task in a `task` line |
-| `ddg-oracle selftest [N]` | internal checks, with a sweep over `N` random cases (default 300) |
+| `ddg-oracle selftest [N [SIZE]]` | internal checks, with a sweep over `N` random cases (default 300) of up to about `SIZE` vertices (default 41) |
 | `ddg-oracle fixtures write DIR` / `check DIR` | regenerate / verify the golden fixtures |
 | `ddg-oracle bench` | throughput |
 
@@ -134,8 +134,10 @@ end
 ```
 
 * `s` lines: the log scale factor `u_I`, the adjoint `φ_I` and the cone angle `µ_I` of every
-  vertex; all three are exactly `0` at boundary vertices. `µ_I` is exactly `0` where there is
-  no cone and exactly `LO`/`HI`/the prescribed angle where a bound is attained.
+  vertex; all three are exactly `0` at boundary vertices. Where the cone equation fixes `µ_I`
+  (no cone, a bound attained, a prescribed or forbidden cone) the value is exactly `0`, `LO`,
+  `HI` or the prescribed angle, not a rounded version of it; where it fixes `φ_I` (a cone
+  strictly inside its bounds) `φ_I` is exactly `±λ·wR_I`.
 * `objective`: `TOTAL = DISTORTION + CONE_COST`, `DISTORTION = ½ Σ wE m u²`,
   `CONE_COST = λ Σ wR |µ|` over the vertices that are neither forbidden nor prescribed.
 * `residuals`: the [certificate](#certificate), all computed from the `s` lines.
@@ -251,25 +253,27 @@ pieces exactly, and adds the step. It stops when all residuals are at rounding l
 same LU factorization (iterative refinement), and the values that the cone equation fixes
 (`µ_i ∈ {0, lo_i, hi_i}` off the active sets, `φ_i = ±t_i` on them) are assigned exactly.
 
-Plain semismooth Newton takes the piece each vertex currently lies on. That iteration cycles on
-ordinary inputs: with bounds, `clamp((m/γ) P(φ))` jumps from `0` to `hi` over an interval of
-width `γ·hi/m`, and vertices flip between "no cone" and "cone at the bound" forever; without
-bounds, a vertex with a large angle of the wrong sign flips between `pos` and `neg`. Three
-safeguards, in this order:
+Plain semismooth Newton takes the piece each vertex currently lies on. That iteration was
+observed to cycle on ordinary random inputs in both forms of the regularized problem: in the
+eliminated form with bounds, `clamp((m/γ) P(φ))` jumps from `0` to `hi` over an interval of
+width `γ·hi/m`, and vertices flip between "no cone" and "cone at the bound" forever; in the form
+with `µ` kept, a vertex with a large angle of the wrong sign flips between `pos` and `neg`.
+Three safeguards, in this order:
 
 1. **Adjacent pieces only** (always on). A vertex moves from the piece of the previous step to
    a neighbouring piece of the graph above, never further: not from `zero` to `upper`, not from
    `pos` to `neg`. The next piece equals the previous one exactly when the point lies on it, so
-   "pieces unchanged" still means "solved". Whenever no vertex wants to skip a piece this is the
-   paper's iteration, and with this rule the eliminated form (Eq. 22) and the form with `µ` kept
-   generate the same pieces and the same linear systems.
+   "pieces unchanged" still means "solved". With this rule the eliminated form (Eq. 22) and the
+   form with `µ` kept choose the same pieces and solve the same linear systems (in exact
+   arithmetic), and whenever no vertex would skip a piece the iteration is the paper's.
 2. **Single change** (after 60 steps for a regularized problem, 100 for the exact one). The
    problem is restarted with only one vertex changing its piece per step, the one whose piece is
    most wrong; at most 400 such steps.
-3. **Singular exact system.** If the Stage II matrix is singular, the minimizer is not unique
-   (possible only if some `wE_i = 0`). The oracle then solves the regularized problems for
-   `γ = 10⁻¹¹, 10⁻¹², 10⁻¹³` and returns the last one (`STOP = regularized`); these converge
-   to the minimizer with the smallest `Σ µ_i²/m_i`.
+3. **Singular exact system.** A Stage II matrix with an active vertex can be singular only if
+   some `wE_i = 0`; it typically means that the minimizer is not unique. The oracle then solves
+   the regularized problems for `γ = 10⁻¹¹, 10⁻¹², 10⁻¹³`, which are strictly convex in `µ`,
+   and returns the last one that converged (`STOP = regularized`); as `γ → 0` their minimizers
+   tend to the minimizer of the exact problem with the smallest `Σ µ_i²/m_i`.
 
 None of this decides the status: the result is `converged` if and only if the
 [certificate](#certificate) holds, whatever path led to it. If it does not hold the status is
@@ -328,15 +332,18 @@ Fenchel–Young the gap of an exactly feasible pair is `Σ (g_i(µ_i) + g_i*(φ_
 and vanishes exactly at the optimum.
 
 The status is `converged` iff the first four residuals are `≤ 10⁻⁹` and
-`|GAP| ≤ 10⁻⁹ · max(1, |objective|)`. On the fixtures the residuals are below `2·10⁻¹⁴`.
+`|GAP| ≤ 10⁻⁹ · max(1, |objective|)`. On the fixtures all five are below `2·10⁻¹⁴`, except on
+the one returned by the regularized fallback (`3·10⁻¹²` in `INCLUSION`, `2·10⁻¹¹` in `GAP`).
 
 ## How to compare against it
 
 * **`u`, `µ`, objective**: unique whenever all `wE_i > 0` at interior vertices; compare with an
-  absolute tolerance (the fixtures reproduce to `10⁻⁹` across platforms; the oracle's own error
-  is typically `10⁻¹³`). Compare `µ` numerically, not as a set of cone vertices: at a
-  degenerate vertex (`µ_i = 0` and `|φ_i| = t_i`) one correct solver may report `0` and
-  another `10⁻¹⁷`.
+  absolute tolerance. As a guide to the oracle's own error: on the tiny problems of `selftest`
+  it differs from the brute-force enumeration by less than `10⁻¹³`, and rescaling or relabeling
+  a mesh changes its results by about `10⁻¹⁴`; `fixtures check` uses `10⁻⁹`. Compare `µ`
+  numerically, not as a set of cone vertices: at a degenerate vertex (`µ_i = 0` and
+  `|φ_i| = t_i`), and at a free site whose optimal angle is `0`, one correct solver may report
+  `0` and another `10⁻¹⁷`.
 * **`φ`**: unique on meshes with boundary. On closed meshes compare modulo a constant in
   `[phi_shift LO, phi_shift HI]`; the interval is `[0, 0]` up to rounding when some vertex is
   active.
@@ -345,11 +352,11 @@ The status is `converged` iff the first four residuals are `≤ 10⁻⁹` and
   non-uniqueness).
 * **Iteration counts** are informational.
 * **Operators**: angles, cotangents and areas are functions of the *rounded edge lengths*
-  (`CLAUDE.md`: "corner angles come from edge lengths"). For well-shaped triangles the results
-  are accurate to a few ulp. For nearly degenerate triangles they are ill-conditioned functions
-  of the lengths, so two correct implementations may differ by about
-  `ε · (longest edge / shortest altitude)` in a cotangent and by `ε / sin(angle)` in an angle
-  close to `π`.
+  (`CLAUDE.md`: "corner angles come from edge lengths"). For well-shaped triangles these are
+  well-conditioned. For nearly degenerate triangles they are ill-conditioned functions of the
+  lengths, however accurately the formulas are evaluated: expect two correct implementations
+  to differ by roughly `ε · (longest edge / shortest altitude)` in a cotangent and by roughly
+  `ε / sin(angle)` in an angle close to `π` (an estimate, not a measured bound).
 
 ## Code map
 
@@ -359,11 +366,11 @@ Scalar-generic definitions (`Ddg.Scalar`: arithmetic, order with decidability, `
 
 | module | definitions |
 |---|---|
-| `DdgOracle.Scalar` | `Scalar`, `Scalar.abs`, the `Float` instance |
+| `DdgOracle.Scalar` | `Scalar`, `Scalar.abs`, the `Float` instance (`floatPi`, `floatOfNat`) |
 | `DdgOracle.Formulas.Sum` | `sumTo`, `sumList` |
 | `DdgOracle.Formulas.Triangle` | `Point`, `dist`, `cornerAngle`, `cornerCot`, `triArea` |
 | `DdgOracle.Formulas.Mesh` | `Face` (`angleAt`, `cotOpposite`, `area`, …), `angleSum`, `angleDefect`, `geodesicCurvature`, `laplacianOffDiag`, `laplacianDiag`, `laplacian`, `areaAt`, `totalArea`, `massOf`, `lumpedMass` |
-| `DdgOracle.Formulas.Threshold` | `softThreshold` (Eq. 18), `clamp`, `boundedThreshold`, `regularizedMeasure`, `ActivePos`/`ActiveNeg` (Eq. 24), `ConeState` (`coneState`, `value`, `indicator`, `canon`, `toward`), `nextState`, `InSubdiff`, `subdiffViolation`, `subdiffViolationTol`, `boundViolation` |
+| `DdgOracle.Formulas.Threshold` | `softThreshold` (Eq. 18), `clamp`, `boundedThreshold`, `regularizedMeasure`, `ActivePos`/`ActiveNeg` (Eq. 24), `ConeState` (`coneState`, `value`, `indicator`, `isActive`, `canon`, `toward`), `nextState`, `InSubdiff`, `subdiffViolation`, `subdiffViolationTol`, `boundViolation` |
 | `DdgOracle.Formulas.Optimality` | `Problem`, `applyL`, `stateResidual`, `adjointResidual`, `coneResidual`, `F` and `DF` (Eqs. 20, 26), `regMeasure`, `Freg` and `DFreg` (Eqs. 22, 25, with the mass factor), `coneScale`, `Fimp`, `DFimp`, `Fpiece`, `DFpiece`, `distortion`, `coneCost`, `objective` |
 
 `Float` only:
@@ -388,7 +395,7 @@ for the proofs only; `selftest` checks that they describe the same solutions.
 
 ## Tests, fixtures, throughput
 
-`ddg-oracle selftest` (about 15 s) checks, without any external reference:
+`ddg-oracle selftest` (under 10 s) checks, without any external reference:
 
 * hex round trips; triangle formulas against closed forms; the proximal identities
   (`µ = P(φ+µ) ⟺ φ ∈ ∂g(µ)`, pieces, eliminated vs. implicit regularization) on exact grids
@@ -421,14 +428,24 @@ compares with tolerance `10⁻⁹` (the C library's `atan` may differ in the las
 platforms, so the files are not expected to be bit-identical everywhere).
 
 Throughput of the whole text pipeline (parse, operators, solve, certificate, print) on one
-thread, measured with `ddg-oracle bench`: about 30–220 cases/s at 50 vertices and 1.2–6 cases/s
-at 200 vertices; closed meshes are the slow end because all their vertices are unknowns.
-`operators` alone: about 800 cases/s at 50 vertices, 150 cases/s at 200. The process is
-single-threaded; a fuzzer can run several.
+thread of an AMD Threadripper 3970X, measured with `ddg-oracle bench`:
+
+| mesh | 50 vertices | 200 vertices |
+|---|---|---|
+| closed, sphere-like (all vertices unknown) | 33 cases/s | 1.3 cases/s |
+| torus | 78 cases/s | 3.8 cases/s |
+| disk (25 / 144 interior vertices) | 230 cases/s | 5.1 cases/s |
+| annulus (30 / 160 interior vertices) | 190 cases/s | 6.1 cases/s |
+| `operators` only | about 800 cases/s | about 160 cases/s |
+
+The process is single-threaded; a fuzzer can run several.
 
 ## Limitations
 
 * Dense: `O(n³)` per Newton step, at most 2000 vertices; meant for a few hundred.
+* If some `wE_i = 0` the minimizer need not be unique; the oracle returns one certified
+  minimizer and cannot say whether another solver's different one is wrong. On a closed mesh at
+  least one `wE_i` must be positive.
 * Connected meshes only.
 * Positions only (no intrinsic edge-length input), although all formulas are intrinsic.
 * Boundary conditions are `u = 0`; the paper's boundary optimization (Sec. 8.3) is not
