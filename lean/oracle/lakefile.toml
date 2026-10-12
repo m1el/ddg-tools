@@ -1,0 +1,16 @@
+name = "ddgOracle"
+version = "0.1.0"
+description = "Dense Float reference implementation (differential-testing oracle) of 'Optimal Cone Singularities for Conformal Flattening' (Soliman, Slepčev, Crane 2018)."
+license = "MIT"
+defaultTargets = ["DdgOracle", "ddg-oracle"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "DdgOracle"
+
+[[lean_exe]]
+name = "ddg-oracle"
+root = "Main"
