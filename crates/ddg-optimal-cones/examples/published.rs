@@ -8,8 +8,10 @@
 //!            about the scale factor on the boundary (no solve)
 //!   refit    the angles that minimize the distortion at the file's cone POSITIONS, with no
 //!            cone penalty, under three boundary models; compared with the file's angles
+//!            [--free-spikes RINGS: spike tips and their surroundings are free sites too]
 //!   adjoint  the adjoint state of the file's cones in the canonical problem, at the cones
 //!            and elsewhere
+//!   spikes   distortion carried by needle-like spikes: a synthetic check and the meshes given
 //!   iterate  penalized problem, merge, make the cones free sites, repeat  [--lambdas a,b,c]
 //!   sweep    solves the penalized problem for a range of λ, merges clusters, re-optimizes the
 //!            angles, and compares positions and angles with the file
@@ -79,10 +81,11 @@ fn main() {
     let mut names: Vec<String> = Vec::new();
     let mut lambdas: Vec<f64> = Vec::new();
     let mut boundary = Boundary::Fixed;
+    let mut free_spikes: Option<usize> = None;
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_else(|| {
         eprintln!(
-            "usage: published facts|refit|adjoint|iterate|sweep [--data DIR] [--lambdas a,b,c] \
+            "usage: published facts|refit|adjoint|spikes|iterate|sweep [--data DIR] [--lambdas a,b,c] \
              [--boundary fixed|free] [mesh names...]"
         );
         std::process::exit(2);
@@ -90,6 +93,14 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data" => dir = PathBuf::from(args.next().expect("--data needs a value")),
+            "--free-spikes" => {
+                free_spikes = Some(
+                    args.next()
+                        .expect("--free-spikes needs a value")
+                        .parse()
+                        .expect("--free-spikes: a number of rings"),
+                )
+            }
             "--boundary" => {
                 boundary = match args.next().expect("--boundary needs a value").as_str() {
                     "fixed" => Boundary::Fixed,
@@ -123,9 +134,10 @@ fn main() {
     }
     match command.as_str() {
         "facts" => facts(&dir, &names),
-        "refit" => refit(&dir, &names),
+        "refit" => refit(&dir, &names, free_spikes),
         "sweep" => sweep(&dir, &names, &lambdas, boundary),
         "adjoint" => adjoint(&dir, &names),
+        "spikes" => spikes(&dir, &names),
         "iterate" => iterate(&dir, &names, &lambdas),
         other => {
             eprintln!("unknown command {other}");
@@ -247,6 +259,154 @@ fn facts(dir: &Path, names: &[String]) {
          ½ mean(u)²: area-weighted over the faces, of u_f = ½ log(UV area / area) with the scale \
          fixed by u = 0 on the boundary\n(closed meshes: by mean u = 0)."
     );
+}
+
+// ----- spikes -----
+
+/// How much distortion a needle-like spike carries in the linearized problem.
+///
+/// Estimate: a vertex lifted by `h` over a base of radius `ρ` has cotan weights of order `ρ/h`
+/// per edge, so the cone-free scale factor at its tip is of order `−2π·h/(k ρ)·…`, i.e.
+/// `u_tip ∼ −h/ρ`; its lumped mass is of order `ρ h`; its contribution to `½ Σ m u²` therefore
+/// grows like `h³/ρ` (over the total area, with normalized masses). First a synthetic check on
+/// a flat grid with one lifted vertex, then the spikes of the given meshes.
+fn spikes(dir: &Path, names: &[String]) {
+    println!("flat unit grid, one interior vertex lifted by h (rho = grid spacing):");
+    println!(
+        "  {:>4} {:>8} {:>8} {:>8} {:>11} {:>11} {:>11} {:>13} {:>13}",
+        "n", "rho", "h", "h/rho", "Omega tip", "u tip", "E", "E rho / h^3", "u tip rho / h"
+    );
+    for (n, h) in [
+        (20usize, 0.05),
+        (20, 0.1),
+        (20, 0.2),
+        (20, 0.4),
+        (20, 0.8),
+        (20, 1.6),
+        (10, 0.4),
+        (40, 0.4),
+        (80, 0.4),
+    ] {
+        let mut shape = ddg_core::generators::grid_disk(n, n).expect("a grid");
+        let centre = (n / 2) * (n + 1) + n / 2;
+        shape.positions[centre][2] = h;
+        let mesh = TriMesh::new(shape.positions.len(), shape.faces.clone()).expect("valid");
+        let geometry = Geometry::from_positions(&mesh, &shape.positions).expect("valid");
+        let evaluation = evaluate_cones(
+            &ConeProblem::new(&mesh, &geometry, 0.0),
+            &[],
+            Parallelism::Sequential,
+        )
+        .expect("valid");
+        let omega = angle_defects(&mesh, &geometry).unwrap();
+        let rho = 1.0 / n as f64;
+        println!(
+            "  {:>4} {:>8.4} {:>8.4} {:>8.2} {:>11.5} {:>11.4} {:>11.4e} {:>13.4} {:>13.4}",
+            n,
+            rho,
+            h,
+            h / rho,
+            omega[centre],
+            evaluation.log_scale[centre],
+            evaluation.distortion,
+            evaluation.distortion * rho / h.powi(3),
+            evaluation.log_scale[centre] * rho / h
+        );
+    }
+    for name in names {
+        let data = load(dir, name);
+        let (mesh, geometry) = (&data.mesh, &data.geometry);
+        let omega = angle_defects(mesh, geometry).unwrap();
+        let mass = lumped_mass_normalized(mesh, geometry).unwrap();
+        let laplacian = cotan_laplacian(mesh, geometry).unwrap();
+        let cone_free = evaluate_cones(
+            &ConeProblem::new(mesh, geometry, 0.0),
+            &[],
+            Parallelism::Sequential,
+        )
+        .expect("valid");
+        let lengths = geometry.edge_lengths();
+        let area = geometry.total_area();
+        // A spike: an interior vertex whose angle sum is below π/2 (angle defect above 3π/2).
+        let tips: Vec<usize> = (0..mesh.n_vertices())
+            .filter(|&v| !mesh.is_boundary_vertex(v) && omega[v] > 1.5 * std::f64::consts::PI)
+            .collect();
+        println!(
+            "{name}: {} vertices with angle defect above 3 pi / 2; cone-free distortion {:.4e}",
+            tips.len(),
+            cone_free.distortion
+        );
+        if tips.is_empty() {
+            continue;
+        }
+        let mut rows: Vec<[f64; 6]> = Vec::new();
+        for &v in &tips {
+            let ring: Vec<usize> = mesh.vertex_neighbors(v).collect();
+            let slant = ring
+                .iter()
+                .map(|&w| lengths[mesh.find_edge(v, w).unwrap()])
+                .sum::<f64>()
+                / ring.len() as f64;
+            // Base radius from the perimeter of the link.
+            let perimeter: f64 = (0..ring.len())
+                .filter_map(|k| mesh.find_edge(ring[k], ring[(k + 1) % ring.len()]))
+                .map(|e| lengths[e])
+                .sum();
+            let rho = perimeter / (2.0 * std::f64::consts::PI);
+            let u = cone_free.log_scale[v];
+            rows.push([
+                slant,
+                rho,
+                omega[v],
+                laplacian.get(v, v),
+                u,
+                0.5 * mass[v] * u * u,
+            ]);
+        }
+        let column = |k: usize| -> (f64, f64, f64) {
+            let mut x: Vec<f64> = rows.iter().map(|r| r[k]).collect();
+            x.sort_by(f64::total_cmp);
+            (x[0], x[x.len() / 2], x[x.len() - 1])
+        };
+        let ratio = {
+            let mut x: Vec<f64> = rows.iter().map(|r| r[0] / r[1]).collect();
+            x.sort_by(f64::total_cmp);
+            (x[0], x[x.len() / 2], x[x.len() - 1])
+        };
+        let estimate: f64 = rows.iter().map(|r| r[0].powi(3) / r[1] / area).sum();
+        let at_tips: f64 = rows.iter().map(|r| r[5]).sum();
+        println!(
+            "  min / median / max over the spikes: slant height h {:.4} / {:.4} / {:.4}; base \
+             radius rho {:.5} / {:.5} / {:.5}; h/rho {:.1} / {:.1} / {:.1}",
+            column(0).0,
+            column(0).1,
+            column(0).2,
+            column(1).0,
+            column(1).1,
+            column(1).2,
+            ratio.0,
+            ratio.1,
+            ratio.2
+        );
+        println!(
+            "  angle defect {:.3} / {:.3} / {:.3}; Laplacian diagonal {:.4} / {:.4} / {:.4}; \
+             cone-free u at the tip {:.1} / {:.1} / {:.1}",
+            column(2).0,
+            column(2).1,
+            column(2).2,
+            column(3).0,
+            column(3).1,
+            column(3).2,
+            column(4).0,
+            column(4).1,
+            column(4).2
+        );
+        println!(
+            "  distortion carried by the tips alone, sum of m u^2 / 2: {:.4e} of {:.4e} in \
+             total; sum of h^3 / (rho area): {:.4e}",
+            at_tips, cone_free.distortion, estimate
+        );
+    }
 }
 
 // ----- iterate -----
@@ -562,7 +722,34 @@ struct Refit {
     lower_vertex: Option<(u32, usize)>,
 }
 
-fn refit_one(data: &Dataset, boundary: Boundary) -> Refit {
+/// The vertices within `rings` edges of a spike tip (an interior vertex whose angle defect
+/// exceeds `3π/2`).
+fn spike_vertices(data: &Dataset, rings: usize) -> Vec<usize> {
+    let omega = angle_defects(&data.mesh, &data.geometry).unwrap();
+    let nv = data.mesh.n_vertices();
+    let mut depth = vec![usize::MAX; nv];
+    let mut frontier: Vec<usize> = (0..nv)
+        .filter(|&v| !data.mesh.is_boundary_vertex(v) && omega[v] > 1.5 * std::f64::consts::PI)
+        .collect();
+    for &v in &frontier {
+        depth[v] = 0;
+    }
+    for d in 1..=rings {
+        let mut next = Vec::new();
+        for &v in &frontier {
+            for w in data.mesh.vertex_neighbors(v) {
+                if depth[w] == usize::MAX && !data.mesh.is_boundary_vertex(w) {
+                    depth[w] = d;
+                    next.push(w);
+                }
+            }
+        }
+        frontier = next;
+    }
+    (0..nv).filter(|&v| depth[v] != usize::MAX).collect()
+}
+
+fn refit_one(data: &Dataset, boundary: Boundary, free_spikes: Option<usize>) -> Refit {
     let model = Model::new(data, boundary);
     let cone_index: Vec<usize> = data
         .cones
@@ -572,6 +759,12 @@ fn refit_one(data: &Dataset, boundary: Boundary) -> Refit {
     let mut is_cone = vec![false; model.n];
     for &i in &cone_index {
         is_cone[i] = true;
+    }
+    // Optionally the spikes are free cone sites as well (their angles are not reported).
+    if let Some(rings) = free_spikes {
+        for v in spike_vertices(data, rings) {
+            is_cone[model.index[v]] = true;
+        }
     }
     let plain: Vec<(usize, f64)> = (0..model.n)
         .filter(|&i| model.interior[i] && !is_cone[i])
@@ -655,7 +848,13 @@ fn refit_one(data: &Dataset, boundary: Boundary) -> Refit {
     }
 }
 
-fn refit(dir: &Path, names: &[String]) {
+fn refit(dir: &Path, names: &[String], free_spikes: Option<usize>) {
+    if let Some(rings) = free_spikes {
+        println!(
+            "with every vertex within {rings} edge(s) of a spike tip (angle defect above 3 pi / 2) \
+             as an additional free cone site"
+        );
+    }
     println!(
         "{:<20} {:>5} {:<9} {:>9} {:>9} {:>10} {:>10} {:>10} {:>10} | {:>10} {:>10} {:>10} {:>10}  lower end set by",
         "mesh",
@@ -690,7 +889,7 @@ fn refit(dir: &Path, names: &[String]) {
         let area = data.geometry.total_area();
         let mut best: Option<(f64, Boundary, Refit)> = None;
         for &boundary in models {
-            let r = refit_one(&data, boundary);
+            let r = refit_one(&data, boundary, free_spikes);
             let differences: Vec<f64> = r
                 .angles
                 .iter()

@@ -57,24 +57,37 @@ use crate::problem::{ConeProblem, validate};
 ///
 /// # What this proves
 ///
-/// For exact arithmetic and **all `w_i > 0`**: `D ≤ objective(v, ν)` for every feasible pair
-/// `(v, ν)`, whatever the residuals of the triple are (weak duality;
-/// `duality-gap-certificate` in `lean/proofs`, theorem `adjoint_gap_certificate`). So `D` is a
-/// lower bound of the optimal value. If moreover `(u, µ)` is feasible (`r = 0`, no bound
-/// violation), then `objective(u, µ) − optimum ≤ duality_gap = complementarity_gap`.
+/// The statements are machine-checked in `lean/proofs` (`DdgProofs/Certificate.lean`,
+/// `DdgProofs/Duality.lean`) for exact real arithmetic; `φ̂` is dual feasible by construction.
+///
+/// * The identity above is `objective_sub_dualObjectiveOfAdjoint`.
+/// * **Lower bound** (`dual_lower_bound_of_clip`): if `(L φ̂)_i = 0` wherever `w_i = 0` (no
+///   condition if all `w_i > 0`), then `D ≤ objective(v, ν)` for every feasible pair `(v, ν)`,
+///   whatever the residuals of the triple are. So `D` is a lower bound of the optimal value.
+/// * **Backward statement** (`backward_certificate`): if in addition `µ` respects its bounds
+///   (`bound_violation = 0`), then `(u, µ)` is exactly feasible for the problem whose angle
+///   defects are `Ω − r` instead of `Ω`, and its objective exceeds the optimum *of that
+///   problem* by at most `complementarity_gap ≥ 0`. `|r_i| ≤ state_residual`.
+/// * **Exactly feasible triples**: if `r = 0`, then
+///   `objective(u, µ) − optimum ≤ duality_gap = complementarity_gap`
+///   (`adjoint_gap_certificate`).
 ///
 /// What it does **not** prove:
 ///
-/// * The returned `(u, µ)` satisfies the state equation only up to `state_residual`. A pair
-///   that is not feasible can have an objective *below* the optimum, so `duality_gap` can be
-///   negative; it is `complementarity_gap` (which cannot) shifted by at most
+/// * Nothing bounds the suboptimality of the returned `(u, µ)` in the *given* problem,
+///   because that pair satisfies the state equation only up to `state_residual` and a pair
+///   that is not feasible can have an objective *below* the optimum. `duality_gap` can
+///   therefore be negative; it is `complementarity_gap` (which cannot) shifted by at most
 ///   `gap_uncertainty`. Read the gap as "`complementarity_gap`, give or take
-///   `gap_uncertainty`", for a pair that is feasible up to `state_residual` and
-///   `bound_violation`.
+///   `gap_uncertainty`". (An enclosure of the optimal value of the given problem,
+///   `D ≤ optimum ≤ J + Σ t_i |r_i|`, holds if `µ + r` is admissible at every vertex,
+///   `certificate_enclosure`; that fails as soon as a forbidden or prescribed vertex has a
+///   nonzero residual, so the code does not evaluate it.)
 /// * Where `w_i = 0` the dual problem requires `(L φ̂)_i = 0` exactly, which cannot be
 ///   enforced by construction. The vertex contributes nothing to `D`, and its violation
 ///   `(L φ̂)_i` is in `adjoint_residual` and, times `u_i`, in `gap_uncertainty`. With some
-///   `w_i = 0`, `D` is a lower bound of the optimum only up to that term.
+///   `w_i = 0`, `D` is a lower bound of the optimum only up to `Σ_{w_i=0} (L φ̂)_i v_i`,
+///   which depends on the competitor `v` (`dualObjectiveOfAdjoint_add_le`).
 /// * All of this is about exact arithmetic; the values are computed in `f64`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Certificate {

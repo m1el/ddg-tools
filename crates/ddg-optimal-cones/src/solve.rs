@@ -72,13 +72,23 @@ pub struct SolveOptions<'a> {
     pub certificate_tolerance: f64,
     /// A vertex is a cone if `|µ_i|` exceeds this. Default `10⁻¹²` (paper Sec. 6.1).
     pub cone_threshold: f64,
-    /// Whether to replace each edge-connected cluster of cones by a single cone (paper
-    /// Sec. 6.1). Default `false`: the returned cones are the optimal measure.
+    /// Whether to replace each cluster of cones by a single cone (paper Sec. 6.1). A cluster
+    /// is a set of cones **of the same sign** connected through mesh edges between its
+    /// members; a positive and a negative cone are never merged, because summing them cancels
+    /// cone angle that the optimum needs. Default `false`: the returned cones are the optimal
+    /// measure. What merging cost in distortion is reported
+    /// ([`ExtractionReport::distortion_change`]; `distortion_optimal` against `distortion`).
     pub merge_cone_clusters: bool,
     /// Clusters with more cones than this are never merged. The paper merges "tiny clusters";
-    /// for very small `λ` the cones cover whole regions, and merging such a region into one
-    /// vertex would be meaningless. Default 8.
+    /// for very small `λ`, and on convex parts of closed meshes, the cones cover whole
+    /// regions, and merging such a region into one vertex would be meaningless. Default 8.
     pub max_merge_cluster_size: usize,
+    /// Clusters whose diameter exceeds this are never merged. The diameter is the largest
+    /// distance between two cones of the cluster along mesh edges inside the cluster, in the
+    /// length unit of the geometry ([`MergedCluster::diameter`](crate::MergedCluster)); a few
+    /// edge lengths is what "tiny" means in the paper. Default `f64::INFINITY`: only the
+    /// number of cones limits merging.
+    pub max_merge_cluster_diameter: f64,
     /// How the Newton systems are solved. Default [`LinearSolver::Auto`].
     pub linear_solver: LinearSolver,
     /// Where factorizations and solves run. Default: on the calling thread. Threads gain
@@ -99,6 +109,7 @@ impl Default for SolveOptions<'_> {
             cone_threshold: 1e-12,
             merge_cone_clusters: false,
             max_merge_cluster_size: 8,
+            max_merge_cluster_diameter: f64::INFINITY,
             linear_solver: LinearSolver::default(),
             parallelism: Parallelism::Sequential,
         }
@@ -123,6 +134,13 @@ impl SolveOptions<'_> {
                     self.regularization[i - 1]
                 ));
             }
+        }
+        // `+∞` is allowed; NaN and negative values are not.
+        if self.max_merge_cluster_diameter.is_nan() || self.max_merge_cluster_diameter < 0.0 {
+            return bad(format!(
+                "max_merge_cluster_diameter is {}; it must be non-negative",
+                self.max_merge_cluster_diameter
+            ));
         }
         if self.max_exact_iterations == 0 {
             return bad("max_exact_iterations must be at least 1".to_string());
@@ -302,6 +320,13 @@ pub struct Solution {
     /// The cone cost `λ Σ wR |µ|` of the optimal measure (prescribed cones cost nothing).
     pub cone_cost: f64,
     /// The cones: vertex and angle, by ascending vertex.
+    ///
+    /// Range of the angles: every angle lies within the bounds given for its vertex
+    /// ([`ConeProblem::lower_bounds`], [`ConeProblem::upper_bounds`]), exactly, also after
+    /// merging. Without bounds nothing limits an angle. In particular the linearized problem
+    /// does not know that a cone angle must be below `2π`: a free cone site on a closed convex
+    /// mesh takes up to `4π`, and a merged cone carries the sum of its cluster.
+    /// [`ExtractionReport::n_beyond_two_pi`] counts the returned angles outside `(−2π, 2π)`.
     pub cones: Vec<Cone>,
     /// The log scale factor `u` of the returned `cones`. Equal to `log_scale_optimal` unless
     /// extraction changed the cones.
@@ -657,6 +682,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             threshold: options.cone_threshold,
             merge: options.merge_cone_clusters,
             max_cluster_size: options.max_merge_cluster_size,
+            max_cluster_diameter: options.max_merge_cluster_diameter,
         },
     );
     let total_cone_angle: f64 = cones.iter().map(|c| c.angle.abs()).sum();

@@ -104,7 +104,7 @@ fn main() {
         }
     );
     println!(
-        "{:<19} {:>6} {:>6} {:>9} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} | {:>7} {:>7}  Newton steps per regularized problem",
+        "{:<19} {:>6} {:>6} {:>9} | {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} {:>10} {:>10} | {:>7} {:>7}  Newton steps per regularized problem",
         "mesh",
         "V",
         "F",
@@ -125,6 +125,8 @@ fn main() {
         "clus",
         "merge8",
         "merged",
+        "E",
+        "E merged",
         "state",
         "gap"
     );
@@ -178,7 +180,7 @@ fn main() {
                 .merged
                 .iter()
                 .filter(|cluster| cluster.members.len() <= 8)
-                .map(|cluster| cluster.members.len() - usize::from(cluster.cone.is_some()))
+                .map(|cluster| cluster.members.len() - 1)
                 .sum::<usize>();
         let per_stage: Vec<String> = r
             .stages
@@ -187,7 +189,7 @@ fn main() {
             .map(|s| s.newton_iterations.to_string())
             .collect();
         println!(
-            "{:<19} {:>6} {:>6} {:>9} | {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.3} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} | {:>7.0e} {:>7.0e}  {}",
+            "{:<19} {:>6} {:>6} {:>9} | {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.3} | {:>4} {:>4} {:>2} {:>4} {:>6} {:>4} | {:>5} {:>4} {:>6} {:>6} {:>10.4e} {:>10.4e} | {:>7.0e} {:>7.0e}  {}",
             name,
             mesh.n_vertices(),
             mesh.n_faces(),
@@ -216,6 +218,8 @@ fn main() {
             } else {
                 "-".to_string()
             },
+            solution.distortion_optimal,
+            solution.distortion,
             c.state_residual,
             c.duality_gap,
             per_stage.join(",")
@@ -248,7 +252,8 @@ fn main() {
          Newton bookkeeping, line searches, certificate, extraction.\nitI / itII: Newton steps of \
          Stage I (all regularized problems) and Stage II; sg: safeguard rounds; fact: numeric \
          factorizations; solves: triangular solve pairs,\nof which refi are refinement steps. \
-         cones: cones of the optimal measure; clus: edge-connected clusters; merge8 / merged: \
-         cones after merging the clusters of at most 8 cones / all clusters."
+         cones: cones of the optimal measure; clus: clusters (edge-connected cones of one sign); \
+         merge8 / merged: cones after merging the clusters of at most 8 cones / all clusters; \
+         E / E merged: distortion of the optimum / of the cones as returned."
     );
 }

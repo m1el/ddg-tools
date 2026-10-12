@@ -730,7 +730,7 @@ fn clusters_are_merged_at_their_frechet_mean() {
     );
     assert_eq!(merged.extraction.merged.len(), 1);
     assert_eq!(merged.extraction.merged[0].members.len(), nv);
-    assert_eq!(merged.extraction.merged[0].cone, Some(merged.cones[0]));
+    assert_eq!(merged.extraction.merged[0].cone, merged.cones[0]);
     // The scale factor belongs to the single cone, and the distortion went up from zero.
     let evaluation = evaluate_cones(&problem, &merged.cones, Parallelism::Sequential).unwrap();
     assert!(max_abs_diff(&merged.log_scale, &evaluation.log_scale) < 1e-10);
@@ -823,8 +823,11 @@ fn clusters_are_merged_at_their_frechet_mean() {
     assert!((other.angle - (4.0 * PI - 0.25)).abs() < 1e-10);
 }
 
+/// A positive and a negative cone next to each other are a feature of the surface, not one
+/// smeared-out cone: they are never merged with each other (summing them would cancel cone
+/// angle that the optimum needs).
 #[test]
-fn merging_a_cluster_of_opposite_signs_can_cancel() {
+fn cones_of_opposite_sign_are_never_merged() {
     // On a torus with a small λ, positive and negative cones sit next to each other.
     let base = torus(8, 6, 1.0, 0.45).unwrap();
     let mesh = TestMesh::from_positions("torus", base.positions.clone(), base.faces.clone());
@@ -837,24 +840,114 @@ fn merging_a_cluster_of_opposite_signs_can_cancel() {
     };
     let solution = solve(&features.problem(&mesh), &options).unwrap();
     assert_eq!(solution.report.status, Status::Converged);
-    let raw_cones = solution.measure.iter().filter(|m| m.abs() > 1e-12).count();
-    assert!(raw_cones > 4);
+    let raw: Vec<usize> = (0..nv).filter(|&v| solution.measure[v] != 0.0).collect();
+    // The premise: some positive cone has a negative cone as a neighbour.
+    let mixed_neighbours = raw.iter().any(|&v| {
+        mesh.mesh
+            .vertex_neighbors(v)
+            .any(|w| solution.measure[v] * solution.measure[w] < 0.0)
+    });
+    assert!(
+        mixed_neighbours,
+        "the test needs adjacent cones of opposite sign"
+    );
     assert!(!solution.extraction.merged.is_empty());
-    // The total angle is kept (zero on a torus), the total |angle| can only shrink.
+    for cluster in &solution.extraction.merged {
+        // One sign per cluster; the merged cone is the sum, at one of the members.
+        let positive = cluster.members[0].angle > 0.0;
+        assert!(cluster.members.len() >= 2);
+        assert!(cluster.members.iter().all(|m| (m.angle > 0.0) == positive));
+        let total: f64 = cluster.members.iter().map(|m| m.angle).sum();
+        assert!((cluster.cone.angle - total).abs() < 1e-14);
+        assert!(
+            cluster
+                .members
+                .iter()
+                .any(|m| m.vertex == cluster.cone.vertex)
+        );
+        assert!(cluster.diameter > 0.0 && cluster.diameter.is_finite());
+    }
+    // Neither the total angle (zero on a torus) nor the total |angle| changes.
     let sum: f64 = solution.cones.iter().map(|c| c.angle).sum();
     assert!(sum.abs() < 1e-9);
-    assert!(solution.extraction.total_angle_change <= 1e-12);
-    for cluster in &solution.extraction.merged {
-        let total: f64 = cluster.members.iter().map(|m| m.angle).sum();
-        match cluster.cone {
-            Some(cone) => {
-                assert!((cone.angle - total).abs() < 1e-14);
-                assert!(cluster.members.iter().any(|m| m.vertex == cone.vertex));
-            }
-            None => assert!(total.abs() <= 1e-12),
-        }
-    }
+    assert!(solution.extraction.total_angle_change.abs() < 1e-12);
+    let positive_before: f64 = solution.measure.iter().filter(|m| **m > 0.0).sum();
+    let positive_after: f64 = solution
+        .cones
+        .iter()
+        .map(|c| c.angle)
+        .filter(|a| *a > 0.0)
+        .sum();
+    assert!((positive_before - positive_after).abs() < 1e-12);
+    // What merging cost is in the report.
     assert!(solution.distortion >= solution.distortion_optimal);
+    assert!(
+        (solution.extraction.distortion_change
+            - (solution.distortion - solution.distortion_optimal))
+            .abs()
+            < 1e-16
+    );
+}
+
+/// The diameter limit, and the count of angles that no flattening can realize.
+#[test]
+fn wide_clusters_can_be_left_alone_and_impossible_angles_are_counted() {
+    // A closed convex mesh: every vertex is a positive cone, all of them one cluster.
+    let mesh = ellipsoid();
+    let nv = mesh.mesh.n_vertices();
+    let problem = Features::plain(0.5).problem(&mesh);
+    let merge_all = SolveOptions {
+        merge_cone_clusters: true,
+        max_merge_cluster_size: nv,
+        ..SolveOptions::default()
+    };
+    let merged = solve(&problem, &merge_all).unwrap();
+    assert_eq!(merged.cones.len(), 1);
+    let diameter = merged.extraction.merged[0].diameter;
+    assert!(
+        diameter > 1.0,
+        "the cluster spans the ellipsoid: {diameter}"
+    );
+    // One cone of 4π: not a cone that exists.
+    assert_eq!(merged.extraction.n_beyond_two_pi, 1);
+    // With a diameter limit below that the cluster stays, and says why.
+    let limited = solve(
+        &problem,
+        &SolveOptions {
+            max_merge_cluster_diameter: 0.5 * diameter,
+            ..merge_all.clone()
+        },
+    )
+    .unwrap();
+    assert_eq!(limited.cones.len(), nv);
+    assert_eq!(limited.extraction.unmerged.len(), 1);
+    assert_eq!(
+        limited.extraction.unmerged[0].reason,
+        UnmergedReason::TooWide
+    );
+    assert_eq!(limited.extraction.unmerged[0].diameter, diameter);
+    assert_eq!(limited.extraction.n_beyond_two_pi, 0);
+    assert!(!limited.extraction.cones_differ_from_measure);
+    // Bounds inside (−2π, 2π) exclude impossible angles, also for merged cones.
+    let bounded = Features {
+        upper_bounds: Some(vec![6.0; nv]),
+        ..Features::plain(0.5)
+    };
+    let kept = solve(&bounded.problem(&mesh), &merge_all).unwrap();
+    assert_eq!(kept.extraction.n_beyond_two_pi, 0);
+    assert!(kept.cones.iter().all(|c| c.angle <= 6.0));
+    // The option is validated.
+    for bad in [-1.0, f64::NAN] {
+        let e = solve(
+            &problem,
+            &SolveOptions {
+                max_merge_cluster_diameter: bad,
+                ..SolveOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("max_merge_cluster_diameter"), "{e}");
+    }
 }
 
 // ----- helpers -----

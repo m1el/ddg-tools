@@ -15,6 +15,7 @@ Contents: [example](#example) · [the problem](#the-problem) · [interface](#int
 [steering](#steering) · [what comes back](#what-comes-back) · [the certificate](#the-certificate) ·
 [algorithm](#algorithm) · [deviations from the paper](#deviations-from-the-paper) ·
 [the published dataset](#the-published-dataset) · [choosing λ](#choosing-λ) ·
+[closed meshes](#closed-meshes) · [needle-like spikes](#needle-like-spikes) ·
 [performance baseline](#performance-baseline) · [formula tags](#formula-tags) · [tests](#tests) ·
 [not implemented](#not-implemented)
 
@@ -88,6 +89,7 @@ pub struct SolveOptions<'a> {
     pub cone_threshold: f64,                     // 1e-12
     pub merge_cone_clusters: bool,               // false
     pub max_merge_cluster_size: usize,           // 8
+    pub max_merge_cluster_diameter: f64,         // +∞ (a length)
     pub linear_solver: LinearSolver,             // Auto | SaddleLdlt | SaddleLu
     pub parallelism: Parallelism<'a>,            // Sequential | Pool(&ThreadPool)
 }
@@ -136,8 +138,9 @@ pub struct ConeEvaluation { log_scale, adjoint, distortion, total_cone_angle, ga
 
 // extract.rs: what extraction did
 pub struct ExtractionReport { threshold, n_dropped, dropped_angle, merge_requested, n_clusters,
-    merged: Vec<MergedCluster>, unmerged: Vec<UnmergedCluster>, cones_differ_from_measure,
-    distortion_change, total_angle_change }
+    merged: Vec<MergedCluster>,       // members, cone, diameter
+    unmerged: Vec<UnmergedCluster>,   // vertices, angle, diameter, reason: TooLarge | TooWide | BoundsViolated
+    cones_differ_from_measure, distortion_change, total_angle_change, n_beyond_two_pi }
 
 // weights.rs: the curvature-adapted weights of the paper's Sec. 8.1
 pub fn feature_size_weights(mesh, geometry, epsilon: f64, convention: FeatureSizeConvention)
@@ -165,6 +168,9 @@ says what is wrong and where; a solve that runs but does not reach a certified o
 | positive cones only | `lower_bounds = Some(vec![0.0; nv])` |
 | angles in `[−π/2, π/2]` | both bounds |
 | re-optimize the angles of a given set of cones | `cone_costs = 0` at those vertices and `+∞` elsewhere ([the published dataset](#the-published-dataset)) |
+| keep every angle realizable | bounds inside `(−2π, 2π)`; `extraction.n_beyond_two_pi` counts what is outside |
+| ignore needle-like spikes | `distortion_weights[v] = 0.0` at their tips ([needle-like spikes](#needle-like-spikes)) |
+| a closed convex mesh | several free sites, cones forbidden elsewhere, bounds ([closed meshes](#closed-meshes)) |
 
 Every array has one entry per mesh vertex; entries of boundary vertices are validated and have
 no effect. On a closed mesh the constraints must allow `Σ µ = 2πχ`; otherwise
@@ -185,12 +191,24 @@ A `Solution` holds two things that must not be confused.
   shows in the certificate's `state_residual`. `certify(problem, &log_scale_optimal, &adjoint,
   &measure)` reproduces the report's certificate bit for bit (tested).
 * **The extracted cones**: `cones`, `log_scale`, `distortion`, `total_cone_angle`. A vertex is
-  a cone if `|µ_i| > cone_threshold`. With `merge_cone_clusters` every edge-connected cluster of
-  cones (of at most `max_merge_cluster_size` cones) is replaced by one cone with the summed
-  angle at the cluster's Fréchet mean vertex. If extraction changed anything
+  a cone if `|µ_i| > cone_threshold`. With `merge_cone_clusters` every cluster of cones is
+  replaced by one cone with the summed angle at the cluster's Fréchet mean vertex. A cluster
+  is a set of cones **of the same sign** connected through mesh edges between its members; it
+  is left alone if it has more than `max_merge_cluster_size` cones or is wider than
+  `max_merge_cluster_diameter`. If extraction changed anything
   (`extraction.cones_differ_from_measure`), the cones are deliberately not optimal, `log_scale`
   and `distortion` are recomputed for them, nothing certifies them, and `extraction` lists every
-  difference including the cost in distortion.
+  difference. What merging cost is always visible: `distortion_optimal` is the distortion
+  before, `distortion` after, `extraction.distortion_change` the difference.
+
+**The range of the returned angles.** Every angle lies within the bounds given for its vertex,
+exactly, also after merging (a merged cone is only placed at a vertex whose bounds admit it).
+Without bounds nothing limits an angle, and the linearized problem does not know that a cone
+angle must be below `2π`: a free cone site on a closed convex mesh takes up to `4π`, the base
+of a needle-like spike gets angles below `−2π`, and a merged cone carries the sum of its
+cluster. `extraction.n_beyond_two_pi` counts the returned angles that are `≥ 2π` (no such cone
+exists) or `≤ −2π` (an angle sum of `4π` or more, which no layout realizes without overlap).
+Bounds inside `(−2π, 2π)` exclude both.
 
 ## The certificate
 
@@ -214,17 +232,31 @@ The last two lines are an algebraic identity for any numbers `u, φ, µ` that va
 boundary (`duality-gap-inexact`; checked on random non-solutions in `tests/api.rs`). The dual
 point `(ũ, φ̂)` satisfies the adjoint equation by construction and is dual feasible exactly.
 
-* **Proved** (exact arithmetic, all `wE_i m_i > 0`): `D` is a lower bound of the optimal value
-  whatever the residuals are (`duality-gap-certificate`, theorem `adjoint_gap_certificate`). If
-  `(u, µ)` is exactly feasible, `objective − optimum ≤ duality_gap = complementarity_gap`.
-* **Not proved**: the returned pair satisfies the state equation only up to `state_residual`, and
-  an infeasible pair can have an objective below the optimum, so `duality_gap` can be negative.
-  It is `complementarity_gap` (a sum of nonnegative terms) shifted by at most
+What is proved, in `lean/proofs` (`DdgProofs/Certificate.lean`), for exact real arithmetic:
+
+* The identity above (`objective_sub_dualObjectiveOfAdjoint`).
+* **Lower bound** (`dual_lower_bound_of_clip`): if all `wE_i m_i > 0`, `D` is at most the
+  objective of every feasible pair, whatever the residuals of the triple are.
+* **Backward statement** (`backward_certificate`): if moreover `µ` respects its bounds, then
+  `(u, µ)` is exactly feasible for the problem whose angle defects are `Ω − r` instead of `Ω`
+  (`|r_i| ≤ state_residual`) and is suboptimal *there* by at most `complementarity_gap ≥ 0`.
+* If `r = 0`: `objective − optimum ≤ duality_gap = complementarity_gap`.
+
+What is not:
+
+* Nothing bounds the suboptimality of the returned pair in the *given* problem: it satisfies
+  the state equation only up to `state_residual`, and an infeasible pair can have an objective
+  below the optimum, so `duality_gap` can be negative. It is `complementarity_gap` (a sum of
+  nonnegative terms) shifted by at most
   `gap_uncertainty = Σ_{w_i=0} |(L φ̂)_i u_i| + Σ |φ̂_i r_i|`. Read the gap as
-  "`complementarity_gap`, give or take `gap_uncertainty`".
+  "`complementarity_gap`, give or take `gap_uncertainty`". (The proved enclosure
+  `D ≤ optimum ≤ J + λ Σ wR_i |r_i|` needs `µ + r` to be admissible at every vertex, which
+  fails as soon as a forbidden or prescribed vertex has a nonzero residual; the code does not
+  evaluate it.)
 * **Where `wE_i = 0`** the dual problem requires `(L φ̂)_i = 0` exactly, which is not enforced by
   construction. Such a vertex contributes nothing to `D`; its violation is in `adjoint_residual`
-  and, times `u_i`, in `gap_uncertainty`. `D` is then a lower bound only up to that term.
+  and, times `u_i`, in `gap_uncertainty`. `D` is then a lower bound only up to
+  `Σ_{w_i=0} (L φ̂)_i v_i`, which depends on the competitor `v`.
 * Everything is evaluated in `f64`; no statement is made about rounding.
 
 `Status::Converged` means `certificate.holds(certificate_tolerance)`: the six residuals are at
@@ -309,11 +341,19 @@ independent implementation is `lean/oracle`.
 13. **Rounding-level clean-up** of the cone angles before the certificate (see
     [what comes back](#what-comes-back)).
 14. **Cone extraction.** Threshold `10⁻¹²` as in the paper. Merging (Sec. 6.1) is off by
-    default, leaves clusters of more than `max_merge_cluster_size` cones alone, never moves a
-    prescribed cone, and keeps the merged cone within the angle bounds of its vertex. The
-    Fréchet mean is the member minimizing `Σ_k |µ_k| dist(v, c_k)²` with distances along edges
-    inside the cluster; the paper does not define it (on `axes` one of four merged cones lands
-    on a different vertex of its cluster than the authors').
+    default, and differs from the paper's one sentence in four ways. (a) Only cones **of the
+    same sign** form a cluster. The paper's reason for merging is that one cone of the smooth
+    optimum shows up as a tiny ring of cones; a positive cone next to a negative one is a
+    feature of the surface (the tip and the base of a spike), and summing them cancels cone
+    angle that the optimum needs. On `camelshotnoise` at `λ = 0.5` merging clusters of any sign
+    (of at most 8 cones) raises the distortion from 3.49 to 1.1·10⁴; merging by sign leaves it
+    at 3.49. (b) Clusters of more than `max_merge_cluster_size` cones (default 8) or wider than
+    `max_merge_cluster_diameter` (default: no limit) are left alone: on convex parts of closed
+    meshes the cones cover whole regions. (c) A prescribed cone is never moved, and a merged
+    cone must respect the angle bounds of its vertex. (d) The Fréchet mean, which the paper
+    does not define, is the member minimizing `Σ_k |µ_k| dist(v, c_k)²` with distances along
+    edges inside the cluster (on `axes` one of four merged cones lands on a different vertex of
+    its cluster than the authors').
 15. **Feature-size weights** (Sec. 8.1): the printed formula `r = 1/(|Ω|/M + ε)` contradicts the
     sentence after it; `feature_size_weights` offers both readings and never applies either on
     its own.
@@ -364,8 +404,9 @@ which this crate does not implement; the agreement there is `10⁻²`, not `10�
 of the authors' boundary treatment is not captured (uniform instead of lumped masses, and
 other weights of the boundary mass, were tried and are worse or no better).
 
-Not explained by re-optimized angles: `bunny`; `camelshotnoise` (with our operators its
-spikes dominate the energy, the distortion of the file's cones is about `10⁵`); and the two
+Not explained by re-optimized angles: `bunny`; `camelshotnoise` (its 6 cones are the plain
+camel's, while in this crate's problem its spikes dominate everything, see
+[needle-like spikes](#needle-like-spikes)); and the two
 dense cow files, which are plain optima: `cow01` (439 cones) is the optimum of this crate's
 problem for `λ = 0.01 / area` to `8·10⁻⁴` rad, 439 of 439 vertices, and `cow00001` (13 836
 cones) is essentially `µ = Ω` (our optimum for `λ = 10⁻⁹ / area` has 14 725 cones, 13 832 of
@@ -429,22 +470,111 @@ reproduce the published positions, where any do, span three orders of magnitude.
 | mannequin | 8 (9.68) | none | | 4 (1) |
 | airplane | 13 (32.2) | none | | 6 (4) |
 | camel, camel_noise1/2, camelbad, camelbadnonuniform | 6 – 7 (13.7 – 21.0) | none | | 1 – 8 (1 – 6) |
-| camelshotnoise | 6 (20.1) | none | | 452 (43) |
+| camelshotnoise | 6 (20.1) | none | | 452 (51) |
 | hand | 29 (52.5) | none | | 6 (3) |
 | rhino | 36 (65.4) | none | | 2 (1) |
 
 Remarks for choosing a default:
 
 * `λ = 0.5`, the paper's stated default, gives few cones here: 0 to 8 on the meshes with
-  boundary (452 on `camelshotnoise`, one at every spike). On nearly developable disks (`bump`, `face`) it gives none, and cones appear only
+  boundary (452 on `camelshotnoise`, at and around its 22 spikes). On nearly developable disks (`bump`, `face`) it gives none, and cones appear only
   below `λ ≈ 0.1` and `0.03`.
 * On a closed genus-0 mesh the optimum does not depend on `λ` above a mesh-dependent value
   (`axes` 0.045, `bunny` 0.016, `chair` 0.003, `brain` 0.002): all cones are then positive, the
   cone cost is `4πλ` whatever the configuration, and the problem is the search for the best
   positive measure. That optimum is not sparse: it comes in clusters (`bunny` 254 cones in 12
   clusters, `brain` 123, `chair` 73) and needs merging, with a cluster limit above the default
-  8 (`bunny`: 228 cones are left with the limit, 15 without).
+  8 (`bunny`: 228 cones are left with the limit, 15 without). See
+  [closed meshes](#closed-meshes).
 * The distortion-minimizing angles for a set of positions do not depend on `λ` at all.
+
+## Closed meshes
+
+On a closed mesh `Σ µ = 2πχ`. On a genus-0 mesh whose optimum has only positive cones (above
+a mesh-dependent `λ`, or with `µ ≥ 0` imposed) the cone cost is the constant `4πλ`: **`λ` steers
+nothing**, and the optimum is the best positive measure, which is not sparse.
+`examples/steering.rs` measures what the options of this crate give on an icosphere, an
+ellipsoid and a capped cylinder (642, 642 and 314 vertices; `closed`), and on the dataset's
+closed meshes (`closed-dataset`). Logs: `runs_tmp/cones-steering-*.log`.
+
+| setting | icosphere | ellipsoid | capped cylinder |
+|---|---|---|---|
+| plain, or `µ ≥ 0`, or `µ ≤ π` | a cone at every vertex, `µ = Ω`, any `λ`; merged: one cone of `4π` | the same | 48 cones on the two rims; merged: two cones of `2π` |
+| one free site (with or without `µ ≥ 0`), `λ ≥ 0.3` | the free site alone, with `4π` | the same | the same (`λ = 1`) |
+| the same, `λ = 0.1` | 8 cones; merged: `3.50π` (the free site) and `0.50π` | 24 cones; merged `2.69π`, `1.31π` | 26 cones; merged `2.57π`, `1.43π` |
+| the same, `λ = 0.03` | 143 cones; merged `2.10π`, `1.90π` | 166; merged `2.02π`, `1.98π` | 27; merged 3, largest `2.08π` |
+| the same, `λ = 0.01` | 316 cones; merged `1.27π`, `2.73π` | 334; merged `1.52π`, `2.48π` | 39; merged `0.72π`, `1.32π`, `1.97π` |
+| one free site and `µ ≤ π` everywhere | 388 cones, any `λ ≥ 0.01` | 496 | 45 |
+| 8 free sites spread over the surface, cones forbidden elsewhere, `0 ≤ µ ≤ π` | 8 cones, `0.24π … 0.59π`, distortion 0.0084 | 8 cones, `0.27π … π`, 0.0091 | 7 cones, `0.01π … 0.93π`, 0.0155 |
+
+What this says:
+
+* A single free cone site (paper Sec. 8.1) acts as a puncture: it holds more than `2π`, which
+  is not a cone, unless `λ` is small, and then the rest of the curvature sits in one cluster
+  opposite to it whose sum again exceeds `2π` or nearly does. Two cones on a sphere must have
+  `2π` each. Only the cylinder at `λ ≤ 0.01` gave a configuration that exists (three cones).
+  Bounding the free site as well just spreads the remainder over hundreds of vertices.
+* A sparse configuration that can be flattened needs at least three cones below `2π`. On a
+  round shape nothing in the geometry singles out positions, so the caller has to: several
+  free sites, cones forbidden elsewhere, and bounds `0 ≤ µ ≤ hi` with `hi < 2π` and
+  `hi · (number of sites) ≥ 4π`. The solver then returns the least-distortion angles for these
+  sites. `λ` is not involved.
+* On closed meshes that are not round the positive optimum comes in a few clusters, and
+  merging them is enough. With `µ ≥ 0`, merging without a size limit:
+
+| mesh | cones of the optimum | clusters | after merging | largest angle | distortion before → after | angles re-optimized at the merged positions, `0 ≤ µ ≤ 1.9π` |
+|---|---:|---:|---:|---:|---|---|
+| axes | 14 | 4 | 4 | `1.02π` | 0.39866 → 0.39901 | 4 cones, `0.99π … 1.02π`, 0.39901 |
+| bunny | 254 | 12 | 15 | `1.09π` | 0.11061 → 0.11119 | 15 cones, up to `1.09π`, 0.11102 |
+| chair | 73 | 7 | 7 | `0.87π` | 0.012171 → 0.012435 | 7 cones, `0.18π … 0.87π`, 0.012431 |
+| brain | 123 | 31 | 55 | `0.31π` | 0.024134 → 0.024136 | 55 cones, up to `0.31π`, 0.024135 |
+
+  The number of cones is then set by the geometry, not by a parameter; fewer cones means
+  choosing a subset of the merged positions and re-optimizing the angles there.
+
+## Needle-like spikes
+
+`camelshotnoise` is the camel with 22 needles: slant height 0.52, base radius `8·10⁻⁵`
+(`examples/published.rs spikes`). The paper (Sec. 7.2, Fig. 20) says such outliers are ignored
+because they carry almost no area. In the linearized problem they are not negligible. For a
+vertex lifted by `h` over a base of radius `ρ` the cotan weights at the tip are of order `ρ/h`,
+so the cone-free scale factor there is of order `−h/ρ`, on a mass of order `ρh`: a distortion of
+order `h³/ρ`, growing as the needle gets thinner. (The smooth problem agrees: a cone of tip
+angle `θ` flattens with `u = (2π/θ − 1) log r`.) Measured on a flat unit grid with one vertex
+lifted:
+
+| `h/ρ` | 1 | 2 | 4 | 8 | 16 | 32 |
+|---|---:|---:|---:|---:|---:|---:|
+| `E · ρ / h³` (`ρ = 0.05`) | 0.40 | 0.75 | 1.13 | 1.40 | 1.49 | 1.42 |
+| `u_tip · ρ / h` | −0.71 | −1.10 | −1.41 | −1.61 | −1.72 | −1.78 |
+
+and at fixed `h = 0.4`, halving `ρ` from 0.1 to 0.0125 multiplies `E` by 2.7, 2.3 and 2.2. On
+`camelshotnoise` (`h/ρ ≈ 6200`) the cone-free scale factor at the tips is `−1.3·10⁴` to
+`−1.7·10⁴`, and the 22 tips carry `8.4822·10⁴` of the `8.4826·10⁴` cone-free distortion. What
+the solver does with that, at `λ = 0.5` (0.1 and 0.02 behave alike):
+
+| | cones | negative | angles | distortion |
+|---|---:|---:|---|---:|
+| the optimum | 452 | 430 | −6.84 … 6.28 | 3.49 |
+| merged by sign, clusters ≤ 8 (this crate's default limit) | 417 | 395 | −6.84 … 6.28 | 3.49 |
+| merged by sign, all clusters | 51 | 29 | −34.8 … 6.28 | 3.85 |
+| merged regardless of sign, clusters ≤ 8 (not what this crate does) | 420 | 399 | −4.28 … 6.28 | 1.1·10⁴ |
+| merged regardless of sign, all clusters | 43 | 24 | −28.5 … 6.28 | 1.3·10⁵ |
+| `µ ≥ 0` | 22 | 0 | 6.19 … 6.27 | 493 |
+| `wE = 0` at the 22 tips | 2 | 0 | 0.31, 2.79 | 1.37 (weighted) |
+
+The certified optimum is to put a cone of almost `2π` on every tip and negative cones around
+its base; cancelling the two by merging restores the distortion of the bare spikes, which is
+why this crate never merges cones of opposite sign. With positive cones only the base cannot
+be compensated and the distortion stays at 493 whatever `λ` is. To have the solver ignore the
+spikes, as the paper describes, exclude their tips from the distortion measure
+(`distortion_weights = 0` there): the result is then that of the plain camel (2 cones at
+`λ = 0.5`, 9 at `0.1`, 10 at `0.02`, all positive).
+
+The published file has 6 cones at the positions of the plain camel's, with nearly its angles.
+How the authors arrived there on this mesh was not found: re-optimizing the angles at the 6
+positions gives nonsense (the spikes dominate), with the tips and their rings as additional
+free sites the angles are off by 0.1 to 1.0, and with zero weight at the tips by 0.35.
 
 ## Performance baseline
 
@@ -452,33 +582,37 @@ Remarks for choosing a default:
 dataset mesh at `λ = 0.5`, default options, one thread, fastest of three runs. AMD Ryzen
 Threadripper 3970X; wall-clock seconds inside `solve`.
 
-| mesh | triangles | total | numeric factorization | triangular solves | rest | Newton steps I / II | factorizations | solves | cones | merged |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| airplane | 4 656 | 0.12 | 0.09 | 0.02 | 0.01 | 31 / 1 | 32 | 64 | 6 | 4 |
-| axes | 7 466 | 0.39 | 0.33 | 0.04 | 0.02 | 31 / 1 | 32 | 64 | 14 | 4 |
-| body | 23 892 | 1.26 | 1.08 | 0.14 | 0.05 | 32 / 1 | 33 | 66 | 4 | 4 |
-| brain | 305 782 | 33.3 | 25.8 | 6.3 | 1.2 | 49 / 1 | 50 | 100 | 123 | 55 |
-| bump | 6 528 | 0.06 | 0.05 | 0.01 | 0.01 | 11 / 1 | 12 | 24 | 0 | 0 |
-| bunny | 28 576 | 1.94 | 1.41 | 0.46 | 0.08 | 43 / 1 | 44 | 88 | 254 | 15 |
-| camel | 22 704 | 1.02 | 0.76 | 0.21 | 0.05 | 35 / 1 | 36 | 73 | 2 | 1 |
-| camel_noise1 | 22 704 | 1.00 | 0.74 | 0.22 | 0.05 | 34 / 1 | 35 | 70 | 5 | 1 |
-| camel_noise2 | 22 704 | 1.03 | 0.75 | 0.22 | 0.05 | 33 / 1 | 34 | 68 | 8 | 6 |
-| camelbad | 22 725 | 0.86 | 0.58 | 0.25 | 0.03 | 34 / 1 | 35 | 105 | 2 | 2 |
-| camelbadnonuniform | 18 125 | 0.64 | 0.43 | 0.18 | 0.03 | 35 / 1 | 36 | 108 | 1 | 1 |
-| camelshotnoise | 22 968 | 1.79 | 1.24 | 0.48 | 0.07 | 56 / 1 | 57 | 148 | 452 | 43 |
-| chair | 11 448 | 0.46 | 0.36 | 0.08 | 0.03 | 38 / 1 | 39 | 78 | 73 | 7 |
-| cow (5 files, one mesh) | 29 999 | 0.87 – 0.91 | 0.61 – 0.63 | 0.21 – 0.24 | 0.04 | 27 / 1 | 28 | 56 | 2 | 2 |
-| face | 27 150 | 0.41 | 0.29 | 0.09 | 0.02 | 11 / 1 | 12 | 24 | 0 | 0 |
-| hand | 6 660 | 0.23 | 0.19 | 0.03 | 0.01 | 32 / 1 | 33 | 66 | 6 | 3 |
-| mannequin | 12 195 | 0.39 | 0.30 | 0.07 | 0.03 | 30 / 1 | 31 | 62 | 4 | 1 |
-| rhino | 40 304 | 1.69 | 1.16 | 0.43 | 0.10 | 32 / 1 | 33 | 66 | 2 | 1 |
-| tree | 33 592 | 1.39 | 0.96 | 0.39 | 0.05 | 25 / 1 | 26 | 62 | 4 | 4 |
+| mesh | triangles | total | numeric factorization | triangular solves | rest | Newton steps I / II | factorizations | solves | cones | merged (≤ 8) | merged (all) | distortion | after merging all |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| airplane | 4 656 | 0.12 | 0.09 | 0.01 | 0.01 | 31 / 1 | 32 | 64 | 6 | 4 | 4 | 1.499 | 1.499 |
+| axes | 7 466 | 0.40 | 0.34 | 0.04 | 0.02 | 31 / 1 | 32 | 64 | 14 | 4 | 4 | 0.3987 | 0.3990 |
+| body | 23 892 | 1.28 | 1.10 | 0.14 | 0.04 | 32 / 1 | 33 | 66 | 4 | 4 | 4 | 1.249 | 1.249 |
+| brain | 305 782 | 33.5 | 25.9 | 6.20 | 1.35 | 49 / 1 | 50 | 100 | 123 | 63 | 55 | 0.02413 | 0.02414 |
+| bump | 6 528 | 0.06 | 0.04 | 0.01 | 0.01 | 11 / 1 | 12 | 24 | 0 | 0 | 0 | 0.1785 | 0.1785 |
+| bunny | 28 576 | 2.00 | 1.43 | 0.49 | 0.08 | 43 / 1 | 44 | 88 | 254 | 228 | 15 | 0.1106 | 0.1112 |
+| camel | 22 704 | 1.08 | 0.77 | 0.27 | 0.05 | 35 / 1 | 36 | 73 | 2 | 1 | 1 | 1.361 | 1.361 |
+| camel_noise1 | 22 704 | 1.06 | 0.76 | 0.26 | 0.05 | 34 / 1 | 35 | 70 | 5 | 1 | 1 | 1.399 | 1.399 |
+| camel_noise2 | 22 704 | 1.03 | 0.73 | 0.26 | 0.05 | 33 / 1 | 34 | 68 | 8 | 6 | 6 | 1.607 | 1.607 |
+| camelbad | 22 725 | 0.96 | 0.60 | 0.32 | 0.03 | 34 / 1 | 35 | 105 | 2 | 2 | 2 | 1.360 | 1.360 |
+| camelbadnonuniform | 18 125 | 0.62 | 0.41 | 0.18 | 0.03 | 35 / 1 | 36 | 108 | 1 | 1 | 1 | 1.348 | 1.348 |
+| camelshotnoise | 22 968 | 1.82 | 1.22 | 0.52 | 0.08 | 56 / 1 | 57 | 148 | 452 | 417 | 51 | 3.493 | 3.847 |
+| chair | 11 448 | 0.49 | 0.36 | 0.09 | 0.03 | 38 / 1 | 39 | 78 | 73 | 69 | 7 | 0.01217 | 0.01243 |
+| cow (5 files, one mesh) | 29 999 | 0.91 | 0.62 | 0.25 | 0.04 | 27 / 1 | 28 | 56 | 2 | 2 | 2 | 1.890 | 1.890 |
+| face | 27 150 | 0.42 | 0.29 | 0.11 | 0.02 | 11 / 1 | 12 | 24 | 0 | 0 | 0 | 0.01957 | 0.01957 |
+| hand | 6 660 | 0.24 | 0.20 | 0.03 | 0.01 | 32 / 1 | 33 | 66 | 6 | 3 | 3 | 1.576 | 1.576 |
+| mannequin | 12 195 | 0.43 | 0.32 | 0.09 | 0.03 | 30 / 1 | 31 | 62 | 4 | 1 | 1 | 0.8287 | 0.8288 |
+| rhino | 40 304 | 1.74 | 1.18 | 0.47 | 0.10 | 32 / 1 | 33 | 66 | 2 | 1 | 1 | 1.323 | 1.323 |
+| tree | 33 592 | 1.34 | 0.91 | 0.39 | 0.04 | 25 / 1 | 26 | 62 | 4 | 4 | 4 | 2.017 | 2.017 |
 
-("rest" includes symbolic analysis, assembly, line searches, certificate, extraction. "merged":
-all clusters, no size limit.) All 23 solves are certified optima reached without a safeguard
-round; state residuals are `10⁻¹⁵` to `2·10⁻¹¹`.
+("rest" includes symbolic analysis, assembly, line searches, certificate, extraction.
+"merged (≤ 8)": clusters of at most 8 cones, the default limit; "merged (all)": no limit. The
+last two columns are the distortion of the optimum and of the cones after merging all
+clusters; merging costs 0.1 % on `axes`, 0.5 % on `bunny`, 2 % on `chair`, 10 % on
+`camelshotnoise`, and less than 0.01 % elsewhere.) All 23 solves are certified optima reached
+without a safeguard round; state residuals are `10⁻¹⁵` to `2·10⁻¹¹`. `brain` took 33.3 and
+33.5 s in two runs of this table.
 
-Where the time goes: two thirds to 86 % is numeric factorization. Every Newton step
+Where the time goes: 63 to 85 % is numeric factorization. Every Newton step
 refactorizes the `2n × 2n` saddle-point matrix (about 0.5 s on `brain`), and there are 12 to 57
 steps, all but one in Stage I: 3 to 8 per regularized problem for the first six or seven values
 of `γ`, usually one for the last ones. The paper
@@ -489,25 +623,29 @@ and could be factorized once; that path is not implemented.
 
 ## Formula tags
 
-Functions that implement a formula carry `[formula: <id>]`. Ids that `lean/proofs` proves:
-`soft-threshold-fixed-point`, `soft-threshold-active-sets`, `abs-subdifferential-bounded`,
-`cone-fixed-point-bounded`, `regularized-cone-update`, `optimality-system-sufficient`,
-`duality-gap-certificate`, `newton-stopping-rule`, `closed-mesh-cone-sum`,
-`closed-mesh-optimal-constant`, `lambda-area-normalization`, `cotan-laplacian`,
-`discrete-yamabe-linearization`. Ids introduced here, with their statements (not yet in
-`lean/proofs` or its `CITED.md`, so `scripts/check-formulas.sh` lists them as missing):
+Functions that implement a formula carry `[formula: <id>]`; `scripts/check-formulas.sh` matches
+the ids with `lean/proofs`. Ids taken from there: `soft-threshold-fixed-point`,
+`soft-threshold-active-sets`, `abs-subdifferential-bounded`, `cone-fixed-point-bounded`,
+`regularized-cone-update`, `optimality-system-sufficient`, `duality-gap-certificate`,
+`newton-stopping-rule`, `closed-mesh-cone-sum`, `closed-mesh-optimal-constant`,
+`lambda-area-normalization`, `cotan-laplacian`, `discrete-yamabe-linearization`.
 
-| id | function | statement |
-|---|---|---|
-| `duality-gap-inexact` | `certify` | For any `u, φ, µ` vanishing on the boundary, with `r = L u − µ + Ω`, `φ̂` in the domain of every `g_i*`, `ũ_i = −(L φ̂)_i/w_i` where `w_i > 0`, `J = ½ Σ w_i u_i² + Σ t_i\|µ_i\|` and `D = −½ Σ_{w_i>0} (L φ̂)_i²/w_i + Σ φ̂_i Ω_i − Σ g_i*(φ̂_i)`: `J − D = ½ Σ_{w_i>0} w_i (u_i − ũ_i)² + Σ (t_i\|µ_i\| + g_i*(φ̂_i) − φ̂_i µ_i) + Σ_{w_i=0} (L φ̂)_i u_i − Σ φ̂_i r_i`. (At a vertex with fixed angle `a`: `t_i\|µ_i\|` is `0` and `g_i*(p) = a p`.) |
-| `gauss-bonnet-adjoint-shift` | `gauss_bonnet_shift` | For `k_i > 0`, `h(c) = Σ_i clamp(k_i P_{t_i}(x_i + c), lo_i, hi_i)` is continuous, nondecreasing and piecewise linear, with breakpoints among `κ − x_i` for the kinks `κ ∈ {t_i, t_i + hi_i/k_i, −t_i, −t_i + lo_i/k_i}`. The function returns the `c` of smallest magnitude with `h(c) = target`, or, if the target is not attained, the `c` of smallest magnitude at which `h` is nearest to it. |
-| `adjoint-constant-interval` | `adjoint_constant_interval` | With `∂g_i(µ_i) = [a_i, b_i]`: `{c : φ_i + c ∈ ∂g_i(µ_i) for all i} = [max_i (a_i − φ_i), min_i (b_i − φ_i)]`. |
-| `regularized-dual-objective` | `DualSlope` | For `w > 0`, stiffness `k_i > 0`, centre `µ̄`: `Φ(φ) = ½ Σ w_i u_i² − Σ Ω_i φ_i + Σ e_i(φ_i)` with `W u = −A φ` and `e_i'(p) = clamp(k_i P_{t_i}(p + µ̄_i/k_i), lo_i, hi_i)` is convex and continuously differentiable, `∇Φ = −(A u − µ + Ω)` with `µ_i = e_i'(φ_i)`, and its minimizers are the adjoint states of the problem `minimize J(u, µ) + Σ (µ_i − µ̄_i)²/(2 k_i)`. Along `(du, dφ)` with `W du = −A dφ`: `d/dα Φ = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i`, nondecreasing and piecewise linear in `α`. |
-| `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. |
-| `saddle-point-newton-system` | `SaddleSolver` | The linear system of a choice of pieces is `W u + A φ = 0` together with, per vertex, `(A u)_i = µ_i − Ω_i` (angle fixed), `(A u)_i − k_i (φ_i − o_i) = b_i − Ω_i` (angle `b_i + k_i(φ_i − o_i)`), or `φ_i = p_i` (angle free); in the unknowns `(u, φ)` its matrix is the symmetric `[[W, A], [A, −K]]` with the rows and columns of the pinned `φ_i` replaced by the identity. |
-| `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). |
-| `cone-cluster-frechet-mean` | `frechet_order` | For a set of cone vertices connected through edges between its members, with angles `µ_k`: the member `v` that minimizes `Σ_k \|µ_k\| dist(v, c_k)²`, `dist` the length of the shortest path along edges with both ends in the set; ties go to the smaller index. |
-| `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). |
+Ids introduced by this crate, with the statement the function implements. `lean/proofs` has
+theorems for them by now (`DdgProofs/Solver.lean`, `DdgProofs/Certificate.lean`; one is cited
+in `CITED.md`), and `scripts/check-formulas.sh` reports no missing id. The last column says
+what the theorems cover, which is not always the whole statement.
+
+| id | function | statement | in `lean/proofs` |
+|---|---|---|---|
+| `duality-gap-inexact` | `certify` | For any `u, φ, µ` vanishing on the boundary, with `r = L u − µ + Ω`, `φ̂` in the domain of every `g_i*`, `ũ_i = −(L φ̂)_i/w_i` where `w_i > 0`, `J = ½ Σ w_i u_i² + Σ t_i\|µ_i\|` and `D = −½ Σ_{w_i>0} (L φ̂)_i²/w_i + Σ φ̂_i Ω_i − Σ g_i*(φ̂_i)`: `J − D = ½ Σ_{w_i>0} w_i (u_i − ũ_i)² + Σ (t_i\|µ_i\| + g_i*(φ̂_i) − φ̂_i µ_i) + Σ_{w_i=0} (L φ̂)_i u_i − Σ φ̂_i r_i`. (At a vertex with fixed angle `a`: `t_i\|µ_i\|` is `0` and `g_i*(p) = a p`.) | the identity: `gap_identity_general`, `objective_sub_dualObjectiveOfAdjoint` |
+| `saddle-point-newton-system` | `SaddleSolver` | The linear system of a choice of pieces is `W u + A φ = 0` together with, per vertex, `(A u)_i = µ_i − Ω_i` (angle fixed), `(A u)_i − k_i (φ_i − o_i) = b_i − Ω_i` (angle `b_i + k_i(φ_i − o_i)`), or `φ_i = p_i` (angle free); in the unknowns `(u, φ)` its matrix is the symmetric `[[W, A], [A, −K]]` with the rows and columns of the pinned `φ_i` replaced by the identity. | `isSolution_iff`, `isAssembledSolution_iff`; a solution with every vertex on its piece is a minimizer (`isMinimizer_of_isSolution`, `isProxMinimizer_of_isSolution`) |
+| `gauss-bonnet-adjoint-shift` | `gauss_bonnet_shift` | For `k_i > 0`, `h(c) = Σ_i clamp(k_i P_{t_i}(x_i + c), lo_i, hi_i)` is continuous, nondecreasing and piecewise linear, with breakpoints among `κ − x_i` for the kinks `κ ∈ {t_i, t_i + hi_i/k_i, −t_i, −t_i + lo_i/k_i}`. The function returns the `c` of smallest magnitude with `h(c) = target`, or, if the target is not attained, the `c` of smallest magnitude at which `h` is nearest to it. | monotonicity (`sum_proxReg_add_monotone`) and that the pinned system is the full one once `h(c) = Σ Ω` (`isSolution_of_pinned_of_sum_eq`); not the search on the breakpoints |
+| `adjoint-constant-interval` | `adjoint_constant_interval` | With `∂g_i(µ_i) = [a_i, b_i]`: `{c : φ_i + c ∈ ∂g_i(µ_i) for all i} = [max_i (a_i − φ_i), min_i (b_i − φ_i)]`. | `kkt_add_const_iff`, `Site.stationary_iff_mem_subdiff` |
+| `regularized-dual-objective` | `DualSlope` | For `w > 0`, stiffness `k_i > 0`, centre `µ̄`: `Φ(φ) = ½ Σ w_i u_i² − Σ Ω_i φ_i + Σ e_i(φ_i)` with `W u = −A φ` and `e_i'(p) = clamp(k_i P_{t_i}(p + µ̄_i/k_i), lo_i, hi_i)` is convex and continuously differentiable, `∇Φ = −(A u − µ + Ω)` with `µ_i = e_i'(φ_i)`, and its minimizers are the adjoint states of the problem `minimize J(u, µ) + Σ (µ_i − µ̄_i)²/(2 k_i)`. Along `(du, dφ)` with `W du = −A dφ`: `d/dα Φ = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i`, nondecreasing and piecewise linear in `α`. | the slope along a direction and its monotonicity (`dualSlope_eq`, `dualSlope_monotone`); `Φ` itself is not formalized |
+| `cone-cluster-frechet-mean` | `frechet_order` | For a set of cone vertices connected through edges between its members, with angles `µ_k`: the member `v` that minimizes `Σ_k \|µ_k\| dist(v, c_k)²`, `dist` the length of the shortest path along edges with both ends in the set; ties go to the smaller index. | existence of a minimizer, and that merging at any member keeps `Σ µ` and does not increase `Σ \|µ\|` (`exists_frechetMean`, `sum_mergeCones`, `sum_abs_mergeCones_le`) |
+| `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. | `IsProxMinimizer.isMinimizer_of_fixedPoint`; also that a proximal step does not increase the objective (`IsProxMinimizer.objective_add_le`) |
+| `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). | `oettli_prager` |
+| `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). | cited in `CITED.md` (a choice of input data, not a derived formula) |
 
 ## Tests
 
