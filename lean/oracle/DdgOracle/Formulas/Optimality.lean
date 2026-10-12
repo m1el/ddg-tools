@@ -139,6 +139,97 @@ def DFreg (p : Problem α) (gamma : α) (phi : Nat → α) (r c : Nat) : α :=
     if c < p.n then (if c = r - p.n then p.wE (r - p.n) * p.mass (r - p.n) else 0)
     else p.L (r - p.n) (c - p.n)
 
+/-! ## The regularized problem with `µ` kept as an unknown
+
+The paper eliminates `µ = µ_γ(φ)` (Eq. 21) and applies Newton's method to `F_γ(u, φ)`. That form
+has a defect once cone angles are bounded: `µ_γ` rises from `0` to `hi` over the interval
+`t ≤ φ ≤ t + γ·hi/m`, which shrinks to a point as `γ → 0`, so a vertex jumps between "no cone"
+and "cone at the bound" without the linearization ever seeing the values in between, and the
+iteration falls into two-cycles. The optimality condition of the regularized problem,
+`φ − (γ/m) µ ∈ ∂g(µ)`, is a fixed-point equation of a proximal map for every step size; with
+the step size `c = m/(m + γ)` it reads
+
+  `µ = clamp(c · P_t(φ + µ))`,   `c = m / (m + γ) ∈ (0, 1]`,
+
+where the linear piece has the width `hi/c ≥ hi` for every `γ`. On that piece it says
+`µ = (m/γ)(φ − t)`, the same relation as `µ = µ_γ(φ)`. For `γ = 0` it is the exact cone
+condition, so the exact system `F` is the member `γ = 0` of the family `Fimp γ`.
+-/
+
+/-- `c_i = m_i / (m_i + γ)`. -/
+def coneScale (p : Problem α) (gamma : α) (i : Nat) : α :=
+  p.mass i / (p.mass i + gamma)
+
+/-- Cone residual of the regularized problem, `µ_i − clamp(c_i · P_{t_i}(φ_i + µ_i))`. -/
+def regConeResidual (p : Problem α) (gamma : α) (phi mu : Nat → α) (i : Nat) : α :=
+  mu i - regularizedMeasure (p.coneScale gamma i) (p.t i) (p.lo i) (p.hi i) (phi i + mu i)
+
+/-- State of vertex `i` for the regularized problem with `µ` kept: the piece of
+`x ↦ clamp(c_i · P_{t_i}(x))` at `x = φ_i + µ_i`. -/
+def impState (p : Problem α) (gamma : α) (phi mu : Nat → α) (i : Nat) : ConeState :=
+  coneState (p.coneScale gamma i) (p.t i) (p.lo i) (p.hi i) (phi i + mu i)
+
+/-- Residual map `F^γ(u, φ, µ) ∈ α^{3n}` of the regularized problem with `µ` kept as an unknown:
+rows `[0, n)` state, `[n, 2n)` adjoint, `[2n, 3n)` cone. Its zeros are the zeros of `Freg`
+together with `µ = µ_γ(φ)`, and `Fimp 0 = F`. -/
+def Fimp (p : Problem α) (gamma : α) (u phi mu : Nat → α) (r : Nat) : α :=
+  if r < p.n then p.stateResidual u mu r
+  else if r < 2 * p.n then p.adjointResidual u phi (r - p.n)
+  else p.regConeResidual gamma phi mu (r - 2 * p.n)
+
+/-! ## The linear system of a given choice of pieces
+
+`Fimp γ` is piecewise affine. Given a piece `σ_i` for every vertex, `Fpiece γ σ` is the affine map
+that agrees with `Fimp γ` wherever the point lies on those pieces, and `DFpiece γ σ` is its
+(constant) Jacobian. A Newton step with these is the exact solution of the linear optimality
+system of the pieces `σ`. With `σ = impState` (the pieces the current point lies on) this is the
+semismooth Newton step of the paper; the executable passes the safeguarded states
+(`nextState`), which differ from `impState` only when a vertex would skip a piece.
+-/
+
+/-- Cone residual on the piece `σ_i`: `µ_i − (value of the piece at φ_i + µ_i)`. -/
+def pieceConeResidual (p : Problem α) (gamma : α) (sigma : Nat → ConeState) (phi mu : Nat → α)
+    (i : Nat) : α :=
+  mu i - (sigma i).value (p.coneScale gamma i) (p.t i) (p.lo i) (p.hi i) (phi i + mu i)
+
+/-- The affine map that agrees with `Fimp γ` on the pieces `σ`. -/
+def Fpiece (p : Problem α) (gamma : α) (sigma : Nat → ConeState) (u phi mu : Nat → α)
+    (r : Nat) : α :=
+  if r < p.n then p.stateResidual u mu r
+  else if r < 2 * p.n then p.adjointResidual u phi (r - p.n)
+  else p.pieceConeResidual gamma sigma phi mu (r - 2 * p.n)
+
+/-- Entry `(r, c)` of the Jacobian of `Fpiece γ σ`, columns ordered `(u, φ, µ)`:
+```
+  [ L     0        −I    ]
+  [ W     L         0    ]      C = diag(c_i),  D = diag(indicator of σ_i ∈ {pos, neg})
+  [ 0   −C D     I − C D ]
+``` -/
+def DFpiece (p : Problem α) (gamma : α) (sigma : Nat → ConeState) (r c : Nat) : α :=
+  if r < p.n then
+    if c < p.n then p.L r c
+    else if c < 2 * p.n then 0
+    else if c - 2 * p.n = r then -1 else 0
+  else if r < 2 * p.n then
+    if c < p.n then (if c = r - p.n then p.wE (r - p.n) * p.mass (r - p.n) else 0)
+    else if c < 2 * p.n then p.L (r - p.n) (c - p.n)
+    else 0
+  else
+    if c < p.n then 0
+    else if c < 2 * p.n then
+      (if c - p.n = r - 2 * p.n then
+        -(p.coneScale gamma (r - 2 * p.n) * (sigma (r - 2 * p.n)).indicator)
+       else 0)
+    else
+      (if c - 2 * p.n = r - 2 * p.n then
+        1 - p.coneScale gamma (r - 2 * p.n) * (sigma (r - 2 * p.n)).indicator
+       else 0)
+
+/-- The semismooth differential of `Fimp γ`: the Jacobian of the pieces the point lies on.
+For `γ = 0` it is `DF` (paper Eq. 26). -/
+def DFimp (p : Problem α) (gamma : α) (phi mu : Nat → α) (r c : Nat) : α :=
+  p.DFpiece gamma (p.impState gamma phi mu) r c
+
 /-! ## Objective -/
 
 /-- Distortion energy `½ Σ wE_i m_i u_i²`. -/

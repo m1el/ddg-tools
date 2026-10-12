@@ -94,7 +94,53 @@ def value (k t lo hi x : α) : ConeState → α
   | .lower => lo
   | .upper => hi
 
+/-- Canonical name of a piece at a vertex with data `(t, lo, hi)`: pieces that impose the same
+equation are identified. A vertex with `lo = hi` has the single piece `upper` (`µ = hi`);
+a bound equal to `0` is the piece `zero` (`µ = 0`); and at a free site (`t = 0`) the pieces
+`pos` and `neg` are the same line `µ = k x`. -/
+def canon (t lo hi : α) (s : ConeState) : ConeState :=
+  if lo < hi then
+    match s with
+    | .upper => if 0 < hi ∨ hi < 0 then .upper else .zero
+    | .lower => if 0 < lo ∨ lo < 0 then .lower else .zero
+    | .neg => if 0 < t then .neg else .pos
+    | .zero => .zero
+    | .pos => .pos
+  else .upper
+
+/-- One move along the graph of `∂g`, whose pieces are ordered
+`lower – neg – zero – pos – upper`: starting from the piece `prev`, go toward the piece `target`
+and stop at the first piece met. Both arguments are canonical; `free` says that `t = 0`, in which
+case `neg` has been merged into `pos` and the order is `lower – pos – upper`. -/
+def toward (free : Bool) : ConeState → ConeState → ConeState
+  | .zero, .upper => .pos
+  | .zero, .lower => if free then .pos else .neg
+  | .zero, s => s
+  | .upper, .upper => .upper
+  | .upper, _ => .pos
+  | .lower, .lower => .lower
+  | .lower, _ => if free then .pos else .neg
+  | .pos, .pos => .pos
+  | .pos, .upper => .upper
+  | .pos, .lower => if free then .lower else .zero
+  | .pos, _ => .zero
+  | .neg, .neg => .neg
+  | .neg, .lower => .lower
+  | .neg, _ => .zero
+
 end ConeState
+
+/-- The safeguarded active-set update. `target` is the piece the current point lies on
+(`coneState`), `prev` the piece used in the previous Newton step, if any. A vertex moves to an
+adjacent piece only: it cannot jump from "no cone" to "cone at the bound", or from a positive to
+a negative cone, in one step. Without this rule the iteration has two-cycles (a vertex and the
+linear system disagree about a piece they never visit); with it, the next state equals the
+previous one exactly when the current point lies on the previous piece, so "active sets
+unchanged" still certifies a solution. -/
+def nextState (t lo hi : α) (prev : Option ConeState) (target : ConeState) : ConeState :=
+  match prev with
+  | none => target.canon t lo hi
+  | some s => ConeState.toward (if 0 < t then false else true) s (target.canon t lo hi)
 
 /-! ## The subdifferential inclusion itself -/
 
@@ -111,6 +157,13 @@ def InSubdiff (t lo hi mu phi : α) : Prop :=
 def subdiffViolation (t lo hi mu phi : α) : α :=
   max (if mu < hi then max 0 (phi - (if mu < 0 then -t else t)) else 0)
       (if lo < mu then max 0 ((if 0 < mu then t else -t) - phi) else 0)
+
+/-- `subdiffViolation` with a tolerance `δ ≥ 0` on `µ`: a cone angle within `δ` of `0`, `lo` or
+`hi` is treated as equal to it, so that the result does not depend on the sign of a rounding
+error in `µ`. For `δ = 0` it is `subdiffViolation`. -/
+def subdiffViolationTol (delta t lo hi mu phi : α) : α :=
+  max (if mu < hi - delta then max 0 (phi - (if mu < -delta then -t else t)) else 0)
+      (if lo + delta < mu then max 0 ((if delta < mu then t else -t) - phi) else 0)
 
 /-- Distance from `µ` to the interval `[lo, hi]`. -/
 def boundViolation (lo hi mu : α) : α := max (max 0 (lo - mu)) (mu - hi)
