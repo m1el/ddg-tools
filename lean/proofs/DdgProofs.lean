@@ -13,4 +13,5 @@ import DdgProofs.Evaluated
 import DdgProofs.Oracle.Scalar
 import DdgProofs.Oracle.Problem
 import DdgProofs.Oracle.Regularized
+import DdgProofs.Oracle.Unbounded
 import DdgProofs.Oracle.Mesh

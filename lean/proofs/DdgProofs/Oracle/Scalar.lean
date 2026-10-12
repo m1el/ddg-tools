@@ -193,6 +193,112 @@ theorem regularizedMeasure_isPiecewiseAffine {t lo hi : ℝ} (ht : 0 ≤ t) (hlh
   rw [regularizedMeasure_eq_value ht hlh, regularizedMeasure_eq_value ht hlh, h]
   exact value_affine k t lo hi x x' _
 
+/-- When `lo < hi`, a piece and its canonical name have the same value everywhere. -/
+theorem value_canon_of_lt {t lo hi : ℝ} (ht : 0 ≤ t) (h : lo < hi) (k x : ℝ)
+    (σ : Ddg.ConeState) : (σ.canon t lo hi).value k t lo hi x = σ.value k t lo hi x := by
+  unfold Ddg.ConeState.canon
+  rw [ite_eq_left h]
+  cases σ with
+  | zero => rfl
+  | pos => rfl
+  | neg =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs with h2
+    · rfl
+    · have ht0 : t = 0 := le_antisymm (not_lt.mp h2) ht
+      simp [Ddg.ConeState.value, ht0]
+  | lower =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs with h2
+    · rfl
+    · push Not at h2
+      have h0 : lo = 0 := le_antisymm h2.1 h2.2
+      simp [Ddg.ConeState.value, h0]
+  | upper =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs with h2
+    · rfl
+    · push Not at h2
+      have h0 : hi = 0 := le_antisymm h2.1 h2.2
+      simp [Ddg.ConeState.value, h0]
+
+/-- The canonical name of the piece a point lies on has the same value at that point. -/
+theorem value_canon_coneState {t lo hi : ℝ} (ht : 0 ≤ t) (hlh : lo ≤ hi) (k x : ℝ) :
+    ((Ddg.coneState k t lo hi x).canon t lo hi).value k t lo hi x =
+      (Ddg.coneState k t lo hi x).value k t lo hi x := by
+  by_cases h1 : lo < hi
+  · exact value_canon_of_lt ht h1 k x _
+  · have heq : lo = hi := le_antisymm hlh (not_lt.mp h1)
+    unfold Ddg.ConeState.canon
+    rw [ite_eq_right h1]
+    unfold Ddg.coneState
+    by_cases h2 : hi ≤ k * Ddg.softThreshold t x
+    · rw [ite_eq_left h2]
+    · have h3 : k * Ddg.softThreshold t x ≤ lo := by rw [heq]; exact le_of_not_ge h2
+      rw [ite_eq_right h2, ite_eq_left h3]
+      simp [Ddg.ConeState.value, heq]
+
+/-- When `lo < hi`, a piece and its canonical name have the same slope indicator. -/
+theorem indicator_canon_of_lt {t lo hi : ℝ} (h : lo < hi) (σ : Ddg.ConeState) :
+    ((σ.canon t lo hi).indicator : ℝ) = σ.indicator := by
+  unfold Ddg.ConeState.canon
+  rw [ite_eq_left h]
+  cases σ with
+  | zero => rfl
+  | pos => rfl
+  | neg =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs <;> rfl
+  | lower =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs <;> rfl
+  | upper =>
+    dsimp only
+    simp only [zero_eq]
+    split_ifs <;> rfl
+
+/-- At a vertex with `lo = hi` (the oracle's encoding of a forbidden or prescribed vertex) the
+map `x ↦ clamp lo hi (k·P_t(x))` is the constant `hi`, and the piece of every point is one of the
+two clamped ones, with slope indicator `0`. -/
+theorem regularizedMeasure_of_eq {t lo hi : ℝ} (h : lo = hi) (k x : ℝ) :
+    Ddg.regularizedMeasure k t lo hi x = hi ∧
+      ((Ddg.coneState k t lo hi x).indicator : ℝ) = 0 := by
+  subst h
+  constructor
+  · unfold Ddg.regularizedMeasure Ddg.clamp
+    exact min_eq_left (le_max_left _ _)
+  · unfold Ddg.coneState
+    by_cases h2 : lo ≤ k * Ddg.softThreshold t x
+    · rw [ite_eq_left h2]; simp [Ddg.ConeState.indicator]
+    · rw [ite_eq_right h2, ite_eq_left (le_of_not_ge h2)]; simp [Ddg.ConeState.indicator]
+
+/-- **The oracle's map `x ↦ clamp lo hi (k·P_t(x))` is affine between two points whose pieces
+have the same canonical name** (`ConeState.canon`), with slope `k·indicator` of the piece of the
+first point. Canonical names identify pieces that impose the same equation: the two clamped
+pieces of a vertex with `lo = hi`, a clamped piece whose bound is `0` and the piece `zero`, and
+the pieces `pos`, `neg` of a free site (`t = 0`). Equality of the raw pieces is a special case.
+
+[formula: soft-threshold-active-sets] -/
+theorem regularizedMeasure_affine_of_canon_eq {t lo hi : ℝ} (ht : 0 ≤ t) (hlh : lo ≤ hi)
+    (k x x' : ℝ)
+    (h : (Ddg.coneState k t lo hi x').canon t lo hi = (Ddg.coneState k t lo hi x).canon t lo hi) :
+    Ddg.regularizedMeasure k t lo hi x' =
+      Ddg.regularizedMeasure k t lo hi x +
+        k * (Ddg.coneState k t lo hi x).indicator * (x' - x) := by
+  by_cases hlt : lo < hi
+  · rw [regularizedMeasure_eq_value ht hlh k x', ← value_canon_coneState ht hlh k x', h,
+      value_canon_of_lt ht hlt k x' _, value_affine k t lo hi x x' _,
+      ← regularizedMeasure_eq_value ht hlh k x]
+  · have heq : lo = hi := le_antisymm hlh (not_lt.mp hlt)
+    rw [(regularizedMeasure_of_eq heq k x').1, (regularizedMeasure_of_eq heq k x).1,
+      (regularizedMeasure_of_eq heq k x).2]
+    ring
+
 /-- `boundedThreshold` is `regularizedMeasure` with `k = 1`. -/
 theorem boundedThreshold_eq_regularizedMeasure (t lo hi x : ℝ) :
     Ddg.boundedThreshold t lo hi x = Ddg.regularizedMeasure 1 t lo hi x := by

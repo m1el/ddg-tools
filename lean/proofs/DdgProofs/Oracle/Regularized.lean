@@ -23,54 +23,6 @@ namespace DdgProofs
 
 namespace Oracle
 
-/-- When `lo < hi`, a piece and its canonical name have the same value everywhere. -/
-theorem value_canon_of_lt {t lo hi : ℝ} (ht : 0 ≤ t) (h : lo < hi) (k x : ℝ)
-    (σ : Ddg.ConeState) : (σ.canon t lo hi).value k t lo hi x = σ.value k t lo hi x := by
-  unfold Ddg.ConeState.canon
-  rw [ite_eq_left h]
-  cases σ with
-  | zero => rfl
-  | pos => rfl
-  | neg =>
-    dsimp only
-    simp only [zero_eq]
-    split_ifs with h2
-    · rfl
-    · have ht0 : t = 0 := le_antisymm (not_lt.mp h2) ht
-      simp [Ddg.ConeState.value, ht0]
-  | lower =>
-    dsimp only
-    simp only [zero_eq]
-    split_ifs with h2
-    · rfl
-    · push Not at h2
-      have h0 : lo = 0 := le_antisymm h2.1 h2.2
-      simp [Ddg.ConeState.value, h0]
-  | upper =>
-    dsimp only
-    simp only [zero_eq]
-    split_ifs with h2
-    · rfl
-    · push Not at h2
-      have h0 : hi = 0 := le_antisymm h2.1 h2.2
-      simp [Ddg.ConeState.value, h0]
-
-/-- The canonical name of the piece a point lies on has the same value at that point. -/
-theorem value_canon_coneState {t lo hi : ℝ} (ht : 0 ≤ t) (hlh : lo ≤ hi) (k x : ℝ) :
-    ((Ddg.coneState k t lo hi x).canon t lo hi).value k t lo hi x =
-      (Ddg.coneState k t lo hi x).value k t lo hi x := by
-  by_cases h1 : lo < hi
-  · exact value_canon_of_lt ht h1 k x _
-  · have heq : lo = hi := le_antisymm hlh (not_lt.mp h1)
-    unfold Ddg.ConeState.canon
-    rw [ite_eq_right h1]
-    unfold Ddg.coneState
-    by_cases h2 : hi ≤ k * Ddg.softThreshold t x
-    · rw [ite_eq_left h2]
-    · have h3 : k * Ddg.softThreshold t x ≤ lo := by rw [heq]; exact le_of_not_ge h2
-      rw [ite_eq_right h2, ite_eq_left h3]
-      simp [Ddg.ConeState.value, heq]
-
 /-- A vertex whose cone angle is the regularized fixed point is stationary for the regularized
 problem. -/
 theorem stationary_siteOf_of_eq_regularizedMeasure {t lo hi m γ : ℝ}

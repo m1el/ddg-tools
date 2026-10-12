@@ -315,8 +315,15 @@ theorem unique_of_minimizers (hp : p.Admissible) (hpos : ∀ i, i < p.n → 0 < 
 * `ν_i − D_i (q_i + ν_i) = −coneResidual_i`, `D_i` the indicator of the active set
   `state φ μ i` (rows of the oracle's `DF`),
 
-and suppose the step does not change the state (active set) of any vertex. Then the residual
-map `F` vanishes at the new iterate.
+and suppose the step does not change the **canonical** state (`ConeState.canon`: the name of
+the active set up to pieces that impose the same equation) of any vertex. Then the residual map
+`F` vanishes at the new iterate.
+
+The canonical state is what the oracle's solver compares. The raw state `state φ μ i` is not
+suitable: at a forbidden or prescribed vertex (`lo = hi`) it flips between `upper` and `lower`
+with the sign of `φ_i + μ_i − lo_i` although the equation `μ_i = lo_i` does not change (instance
+below). A step that keeps the raw states keeps the canonical ones, so this statement contains
+the one with raw states.
 
 [formula: newton-stopping-rule] -/
 theorem F_eq_zero_of_newton_step (hp : p.Admissible) {u φ μ v q ν : ℕ → ℝ}
@@ -325,7 +332,8 @@ theorem F_eq_zero_of_newton_step (hp : p.Admissible) {u φ μ v q ν : ℕ → �
     (h3 : ∀ i, i < p.n →
       ν i - (p.state φ μ i).indicator * (q i + ν i) = -p.coneResidual φ μ i)
     (hact : ∀ i, i < p.n →
-      p.state (fun j => φ j + q j) (fun j => μ j + ν j) i = p.state φ μ i) :
+      (p.state (fun j => φ j + q j) (fun j => μ j + ν j) i).canon (p.t i) (p.lo i) (p.hi i) =
+        (p.state φ μ i).canon (p.t i) (p.lo i) (p.hi i)) :
     ∀ r, r < 3 * p.n →
       p.F (fun j => u j + v j) (fun j => φ j + q j) (fun j => μ j + ν j) r = 0 := by
   rw [F_eq_zero_iff]
@@ -342,7 +350,7 @@ theorem F_eq_zero_of_newton_step (hp : p.Admissible) {u φ μ v q ν : ℕ → �
     have hv := hp.vertex i hi
     simp only [state, one_eq] at ha h
     simp only [coneResidual, boundedThreshold_eq_regularizedMeasure] at h ⊢
-    have hq := regularizedMeasure_isPiecewiseAffine hv.1 hv.le 1 (φ i + μ i)
+    have hq := regularizedMeasure_affine_of_canon_eq hv.1 hv.le 1 (φ i + μ i)
       ((φ i + q i) + (μ i + ν i)) ha
     rw [hq]
     simp only [one_mul] at h ⊢
@@ -358,28 +366,76 @@ theorem objective_le_of_newton_step (hp : p.Admissible) {u φ μ v q ν w ω : �
     (h3 : ∀ i, i < p.n →
       ν i - (p.state φ μ i).indicator * (q i + ν i) = -p.coneResidual φ μ i)
     (hact : ∀ i, i < p.n →
-      p.state (fun j => φ j + q j) (fun j => μ j + ν j) i = p.state φ μ i)
+      (p.state (fun j => φ j + q j) (fun j => μ j + ν j) i).canon (p.t i) (p.lo i) (p.hi i) =
+        (p.state φ μ i).canon (p.t i) (p.lo i) (p.hi i))
     (hw : p.Feasible w ω) :
     p.objective (fun j => u j + v j) (fun j => μ j + ν j) ≤ p.objective w ω :=
   (objective_le_of_F_eq_zero hp (F_eq_zero_of_newton_step hp h1 h2 h3 hact) hw).2
 
+/-- The hypotheses of `F_eq_zero_of_newton_step` hold in a case where the raw state changes:
+one prescribed vertex (`t = 0`, `lo = hi = 2`), `L = [1]`, `m = wE = Ω = 1`. The step from
+`(u, φ, μ) = (0, 5, 2)` by `(v, q, ν) = (1, −6, 0)` solves the Newton system; the raw state goes
+from `upper` to `lower`, the canonical state stays `upper`, and the new point `(1, −1, 2)` is an
+exact zero of `F`. -/
+example : ∃ (p : Ddg.Problem ℝ) (u φ μ v q ν : ℕ → ℝ), p.Admissible ∧ p.n = 1 ∧
+    (∀ i, i < p.n → p.applyL v i - ν i = -p.stateResidual u μ i) ∧
+    (∀ i, i < p.n → p.applyL q i + p.wE i * p.mass i * v i = -p.adjointResidual u φ i) ∧
+    (∀ i, i < p.n →
+      ν i - (p.state φ μ i).indicator * (q i + ν i) = -p.coneResidual φ μ i) ∧
+    (∀ i, i < p.n →
+      (p.state (fun j => φ j + q j) (fun j => μ j + ν j) i).canon (p.t i) (p.lo i) (p.hi i) =
+        (p.state φ μ i).canon (p.t i) (p.lo i) (p.hi i)) ∧
+    p.state (fun j => φ j + q j) (fun j => μ j + ν j) 0 ≠ p.state φ μ 0 := by
+  refine ⟨Ddg.Problem.mk 1 (fun _ _ => 1) (fun _ => 1) (fun _ => 1) (fun _ => 1) (fun _ => 0)
+      (fun _ => 2) (fun _ => 2),
+    fun _ => 0, fun _ => 5, fun _ => 2, fun _ => 1, fun _ => -6, fun _ => 0,
+    ⟨fun _ _ _ _ => rfl, fun _ _ => zero_le_one, fun _ _ => zero_le_one,
+      fun _ _ => ⟨le_rfl, Or.inr ⟨rfl, rfl⟩⟩⟩, rfl, ?_, ?_, ?_, ?_, ?_⟩
+  · intro i _
+    simp [stateResidual, applyL, Ddg.sumTo]; norm_num
+  · intro i _
+    simp [adjointResidual, applyL, Ddg.sumTo]; norm_num
+  · intro i _
+    have h1 : Ddg.coneState (1 : ℝ) 0 2 2 (5 + 2) = Ddg.ConeState.upper := by
+      simp only [Ddg.coneState, softThreshold_eq, softThreshold_zero, one_mul]
+      rw [ite_eq_left (by norm_num)]
+    simp only [state, coneResidual, one_eq, h1, Ddg.boundedThreshold, Ddg.clamp]
+    simp [Ddg.ConeState.indicator]
+  · intro i _
+    simp only [Ddg.ConeState.canon, lt_irrefl, ite_false]
+  · have h1 : Ddg.coneState (1 : ℝ) 0 2 2 (5 + 2) = Ddg.ConeState.upper := by
+      simp only [Ddg.coneState, softThreshold_eq, softThreshold_zero, one_mul]
+      rw [ite_eq_left (by norm_num)]
+    have h2 : Ddg.coneState (1 : ℝ) 0 2 2 (5 + -6 + (2 + 0)) = Ddg.ConeState.lower := by
+      simp only [Ddg.coneState, softThreshold_eq, softThreshold_zero, one_mul]
+      rw [ite_eq_right (by norm_num), ite_eq_left (by norm_num)]
+    simp only [state, one_eq, h1, h2]
+    decide
+
 /-- **Stopping rule of the Newton method, Stage I, on the oracle's definitions** (regularized
-residual `Freg`, with the mass factor `m_i/γ`). Let `(v, q)` solve the linearized system at
-`(u, φ)`,
+residual `Freg` with `γ > 0`, with the mass factor `m_i/γ`). Let `(v, q)` solve the linearized
+system at `(u, φ)`,
 
 * `(L v)_i − (m_i/γ) D_i q_i = −regStateResidual_i`, `D_i` the indicator of `regState γ φ i`,
 * `(L q)_i + wE_i m_i v_i = −adjointResidual_i`,
 
-and suppose the step does not change `regState` at any vertex. Then `Freg` vanishes at the new
-iterate.
+and suppose the step does not change the canonical name of `regState` at any vertex. Then `Freg`
+vanishes at the new iterate.
+
+(`γ > 0` is the range in which `Freg` is the residual of the regularized problem. The algebra
+also goes through at `γ = 0`, but only because `m/0 = 0` in Lean's real numbers, where `Freg 0`
+is not the residual of anything; that case is excluded.)
 
 [formula: newton-stopping-rule] -/
-theorem Freg_eq_zero_of_newton_step (hp : p.Admissible) (γ : ℝ) {u φ v q : ℕ → ℝ}
+theorem Freg_eq_zero_of_newton_step (hp : p.Admissible) {γ : ℝ} (_hγ : 0 < γ)
+    {u φ v q : ℕ → ℝ}
     (h1 : ∀ i, i < p.n →
       p.applyL v i - p.mass i / γ * (p.regState γ φ i).indicator * q i =
         -p.regStateResidual γ u φ i)
     (h2 : ∀ i, i < p.n → p.applyL q i + p.wE i * p.mass i * v i = -p.adjointResidual u φ i)
-    (hact : ∀ i, i < p.n → p.regState γ (fun j => φ j + q j) i = p.regState γ φ i) :
+    (hact : ∀ i, i < p.n →
+      (p.regState γ (fun j => φ j + q j) i).canon (p.t i) (p.lo i) (p.hi i) =
+        (p.regState γ φ i).canon (p.t i) (p.lo i) (p.hi i)) :
     ∀ r, r < 2 * p.n → p.Freg γ (fun j => u j + v j) (fun j => φ j + q j) r = 0 := by
   intro r hr
   unfold Freg
@@ -389,7 +445,7 @@ theorem Freg_eq_zero_of_newton_step (hp : p.Admissible) (γ : ℝ) {u φ v q : �
     have hv := hp.vertex r hrn
     simp only [regState] at ha h
     simp only [regStateResidual, regMeasure, applyL_add] at h ⊢
-    have hq := regularizedMeasure_isPiecewiseAffine hv.1 hv.le (p.mass r / γ) (φ r)
+    have hq := regularizedMeasure_affine_of_canon_eq hv.1 hv.le (p.mass r / γ) (φ r)
       (φ r + q r) ha
     rw [hq]
     linarith
