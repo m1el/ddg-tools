@@ -8,6 +8,7 @@ fn main() {
     match cmd {
         "compare" => compare(&args[1..]),
         "table" => table(&args[1..]),
+        "scale" => scale(&args[1..]),
         _ => eprintln!("usage: lab compare MESH [--lambda X] [--threads N] [--no-ref] ..."),
     }
 }
@@ -105,5 +106,81 @@ fn compare(args: &[String]) {
         let sdiff = supp.iter().zip(&supp_ref).filter(|(a, b)| a != b).count();
         println!("  diff: max|dmu| {dmu:.2e} max|du| {du:.2e} (max|u| {umax:.2e}) objective rel {:.2e} support differs at {sdiff}", (s.objective - r.objective).abs() / r.objective.abs());
         println!("  speedup (lab incl. setup / ref): {:.2}x", rw / (wall + prep.setup_seconds));
+    }
+}
+
+/// Thread scaling of the pieces the factor-once method is made of.
+fn scale(args: &[String]) {
+    let spec = &args[0];
+    let case = meshes::load(spec).unwrap_or_else(|e| panic!("{e}"));
+    let prep = Prepared::new(&case).unwrap();
+    let ns = prep.n_slots();
+    println!("{spec}: V={} setup {:.3}s (factor {:.3}s)", case.mesh.n_vertices(), prep.setup_seconds, prep.factor_seconds);
+    let reps = 3;
+    // (a) multi-rhs solves on one thread
+    let slots: Vec<usize> = (0..ns).step_by((ns / 256).max(1)).take(256).collect();
+    println!("(a) one thread, time per right-hand side vs rhs per call (best of {reps})");
+    for nrhs in [1usize, 2, 4, 8, 16, 32] {
+        let mut best = f64::MAX;
+        for _ in 0..reps {
+            let t = Instant::now();
+            let cols = &slots[..(nrhs * (32 / nrhs).max(1)).min(slots.len())];
+            let _ = prep.columns(cols, None, nrhs);
+            best = best.min(t.elapsed().as_secs_f64() / cols.len() as f64);
+        }
+        println!("  nrhs {nrhs:>2}: {:.2} ms per rhs", best * 1e3);
+    }
+    // (b) independent solves on a pool
+    println!("(b) 256 right-hand sides, chunks of 4 per call, one call per task (best of {reps})");
+    let mut t1 = 0.0;
+    for threads in [1usize, 2, 4, 8, 16, 32, 64] {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+        let mut best = f64::MAX;
+        for _ in 0..reps {
+            let t = Instant::now();
+            let _ = prep.columns(&slots, Some(&pool), 4);
+            best = best.min(t.elapsed().as_secs_f64());
+        }
+        if threads == 1 { t1 = best; }
+        println!("  threads {threads:>2}: {:.3} s, speedup {:.2}x, {:.2} ms per rhs", best, t1 / best, best / slots.len() as f64 * 1e3);
+    }
+    // (c) Gram cross product: 192 old columns, 64 new
+    println!("(c) Gram cross terms, 64 new columns against 192 old (own row-chunked product; best of {reps})");
+    let pool1 = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let old = prep.columns(&slots[..192], Some(&pool1), 4);
+    let new = prep.columns(&slots[192..256], Some(&pool1), 4);
+    let blocks = vec![(old, 192usize)];
+    let mut t1 = 0.0;
+    for threads in [1usize, 2, 4, 8, 16, 32, 64] {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+        let mut best = f64::MAX;
+        for _ in 0..reps {
+            let t = Instant::now();
+            let _ = prep.gram_cross(&blocks, &new, 64, Some(&pool), threads);
+            best = best.min(t.elapsed().as_secs_f64());
+        }
+        if threads == 1 { t1 = best; }
+        println!("  threads {threads:>2}: {:.4} s, speedup {:.2}x", best, t1 / best);
+    }
+    // (d) numeric Cholesky of the Laplacian with the library's pool
+    println!("(d) ddg-core numeric Cholesky of the restricted Laplacian with a ThreadPool of n threads (best of {reps})");
+    {
+        use ddg_core::sparse::{Method, Parallelism, Symbolic, ThreadPool};
+        let l = ddg_core::operators::cotan_laplacian(&case.mesh, &case.geometry).unwrap();
+        let unk: Vec<u32> = if prep.closed { (1..case.mesh.n_vertices() as u32).collect() } else { case.mesh.interior_vertices() };
+        let a = l.submatrix(&unk, &unk).unwrap();
+        let sym = Symbolic::analyze(&a, Method::Llt).unwrap();
+        println!("  factor values {:?}", sym.info().factor_values);
+        for threads in [1usize, 2, 4, 8, 16] {
+            let pool = ThreadPool::new(threads).unwrap();
+            let par = if threads == 1 { Parallelism::Sequential } else { Parallelism::Pool(&pool) };
+            let mut best = f64::MAX;
+            for _ in 0..reps {
+                let t = Instant::now();
+                let _ = sym.factor(&a, par).unwrap();
+                best = best.min(t.elapsed().as_secs_f64());
+            }
+            println!("  threads {threads:>2}: {:.3} s", best);
+        }
     }
 }
