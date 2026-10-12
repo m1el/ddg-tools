@@ -352,3 +352,117 @@ pub fn stored_cone_angles(data: &DatasetMesh) -> Vec<f64> {
         })
         .collect()
 }
+
+/// The connected sum of a surface with its mirror image: face `f` is removed from the surface
+/// and from a copy reflected in the plane of that face, and the two are glued along the three
+/// edges of the hole. The copy has the same intrinsic geometry with the opposite orientation,
+/// so the result is a consistently oriented surface with exact positions; its genus is twice
+/// the genus of the input (a torus gives a surface of genus 2), and it has twice the boundary
+/// loops. The copy may pass through the original in space, which no intrinsic method notices.
+pub fn mirror_double(
+    positions: &[[f64; 3]],
+    faces: &[[u32; 3]],
+    f: usize,
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+    let n = positions.len() as u32;
+    let hole = faces[f];
+    let [p0, p1, p2] = hole.map(|v| positions[v as usize]);
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let (e1, e2) = (sub(p1, p0), sub(p2, p0));
+    let mut normal = [
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    let norm = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+    normal = normal.map(|x| x / norm);
+    // The copy of vertex v: itself on the hole, a new vertex elsewhere.
+    let mut copy = vec![0u32; positions.len()];
+    let mut out_positions = positions.to_vec();
+    for v in 0..n {
+        if hole.contains(&v) {
+            copy[v as usize] = v;
+        } else {
+            copy[v as usize] = out_positions.len() as u32;
+            let d = sub(positions[v as usize], p0);
+            let height = d[0] * normal[0] + d[1] * normal[1] + d[2] * normal[2];
+            let p = positions[v as usize];
+            out_positions.push([
+                p[0] - 2.0 * height * normal[0],
+                p[1] - 2.0 * height * normal[1],
+                p[2] - 2.0 * height * normal[2],
+            ]);
+        }
+    }
+    let mut out_faces = Vec::with_capacity(2 * faces.len() - 2);
+    for (g, face) in faces.iter().enumerate() {
+        if g != f {
+            out_faces.push(*face);
+        }
+    }
+    for (g, face) in faces.iter().enumerate() {
+        if g != f {
+            let [a, b, c] = face.map(|v| copy[v as usize]);
+            out_faces.push([a, c, b]);
+        }
+    }
+    (out_positions, out_faces)
+}
+
+/// Removes `k` faces whose vertices are interior and pairwise different, chosen by a seeded
+/// shuffle: every removed face becomes a boundary loop of three edges. Returns the remaining
+/// faces (vertices keep their ids), or `None` if fewer than `k` such faces exist.
+pub fn punch_holes(
+    n_vertices: usize,
+    faces: &[[u32; 3]],
+    k: usize,
+    seed: u64,
+) -> Option<Vec<[u32; 3]>> {
+    let mesh = TriMesh::new(n_vertices, faces.to_vec()).ok()?;
+    let mut rng = ddg_core::generators::SplitMix64::new(seed);
+    let mut order: Vec<usize> = (0..faces.len()).collect();
+    for i in (1..order.len()).rev() {
+        order.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
+    }
+    // A vertex is blocked if it is on the boundary or next to a vertex of a removed face:
+    // the holes then do not touch each other or the boundary.
+    let mut blocked: Vec<bool> = (0..n_vertices)
+        .map(|v| mesh.is_boundary_vertex(v))
+        .collect();
+    for v in 0..n_vertices {
+        if mesh.is_boundary_vertex(v) {
+            for w in mesh.vertex_neighbors(v) {
+                blocked[w] = true;
+            }
+        }
+    }
+    let mut removed = vec![false; faces.len()];
+    let mut n_removed = 0;
+    for f in order {
+        if n_removed == k {
+            break;
+        }
+        if faces[f].iter().any(|&v| blocked[v as usize]) {
+            continue;
+        }
+        removed[f] = true;
+        n_removed += 1;
+        for &v in &faces[f] {
+            blocked[v as usize] = true;
+            for w in mesh.vertex_neighbors(v as usize) {
+                blocked[w] = true;
+                for x in mesh.vertex_neighbors(w) {
+                    blocked[x] = true;
+                }
+            }
+        }
+    }
+    (n_removed == k).then(|| {
+        faces
+            .iter()
+            .zip(&removed)
+            .filter(|&(_, &r)| !r)
+            .map(|(f, _)| *f)
+            .collect()
+    })
+}

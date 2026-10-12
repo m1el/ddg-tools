@@ -1,25 +1,44 @@
 //! Differential test against the reference C++ implementation.
 //!
-//! Reads the output of the driver `bff_ref` (a small program around the reference library
-//! that dumps, with full precision, the positions it used, the UV of every corner and the cut
-//! it chose) and flattens the same mesh with the same cones and the same cut.
+//! Reads the output of the driver `bff_ref` (`reference/bff_ref.cpp`: a small program around
+//! the reference library that dumps, with full precision, the positions it used, the UV of
+//! every corner, the cut it chose and where it started the boundary) and flattens the same
+//! mesh with the same cones and the same cut. `reference/run.sh` runs everything.
 //!
 //! ```text
-//! reference_diff cones out.txt cones.txt stored.obj [more triples ...]
+//! reference_diff cones out.txt cones.txt stored.obj|- [more triples ...]
 //! reference_diff auto  out.txt [more ...]
 //! reference_diff disk  out.txt [more ...]
 //! ```
 //!
-//! For every case one line: sizes, and the residual after the best similarity per chart,
-//! relative to the diagonal of the bounding box, for exact solves and for the reference's
-//! diagonal shift. In mode `cones`, `stored.obj` is a file with a UV map to compare the
-//! driver's output with (`-` for none): the last columns say whether the driver chose the cut
-//! of the stored map, and how far its UVs are from the stored ones.
+//! One line per case. All residuals are after the best similarity per chart, relative to the
+//! diagonal of the chart's bounding box in the reference layout.
+//!
+//! * `V`, `F`, `cones`, `cutE` — sizes; `cutE` is the number of edges of the driver's cut.
+//! * `mollify` — the amount the reference adds to every edge length (zero unless a triangle
+//!   is degenerate to within `1e-6` of the mean edge length). The geometry used here is
+//!   mollified in the same way.
+//! * `exact: rms, max` — this crate with its default exact solves against the driver.
+//! * `shifted: rms, max` — this crate with the reference's diagonal shift of `1e-8` against
+//!   the driver: the two programs then compute the same thing, and this is rounding error.
+//! * `scale` — scale of the fitted similarity in the shifted run (driver size / our size).
+//!
+//! In mode `cones`, `stored.obj` is a file with a UV map of the same mesh to compare the
+//! *driver's* output with (`-` for none); this says how well today's reference reproduces
+//! that file, and nothing about this crate:
+//!
+//! * `stored cut` — `same` if the driver chose exactly the cut that is visible in the stored
+//!   UV map, otherwise `common/stored` edge counts; a line below the table then describes
+//!   the difference.
+//! * `ref-file: rms, max` — the driver's layout against the stored one (same cut only).
+//! * `metric p1, p99` — the ratio of the lengths of every triangle edge in the driver's
+//!   layout and in the stored one, divided by its median: 1st and 99th percentile. The flat
+//!   metric does not depend on the cut, so this compares maps with different cuts too.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-use common::compare_layouts;
+use common::{compare_layouts, length_ratio_quantiles};
 use ddg_bff::{
     ConeFlattenInput, ConeFlattenOptions, CutSource, DiskBff, DiskOptions, Extension,
     GaussBonnetPolicy, REFERENCE_DIAGONAL_SHIFT, REFERENCE_MOLLIFY_DELTA, ScaleFactorOptions,
@@ -108,7 +127,7 @@ fn main() {
         std::process::exit(2);
     }
     println!(
-        "{:<20} {:>7} {:>7} {:>6} {:>6} {:>8} | {:>8} {:>8} | {:>8} {:>8} | {:>8} | {:>8} {:>8} {:>8}",
+        "{:<20} {:>7} {:>7} {:>6} {:>6} {:>8} | {:>8} {:>8} | {:>8} {:>8} | {:>8}{}",
         "case",
         "V",
         "F",
@@ -120,10 +139,16 @@ fn main() {
         "shifted",
         "max",
         "scale",
-        "same cut",
-        "ref-file",
-        "max"
+        if mode == "cones" {
+            format!(
+                " | {:>11} {:>8} {:>8} | {:>7} {:>7}",
+                "stored cut", "ref-file", "max", "met p1", "p99"
+            )
+        } else {
+            String::new()
+        }
     );
+    let mut notes: Vec<String> = Vec::new();
     for case in args[1..].chunks(step) {
         let reference = parse(&case[0]);
         let name = std::path::Path::new(&case[0])
@@ -181,6 +206,7 @@ fn main() {
                             diagonal_shift: shift,
                             ..ScaleFactorOptions::default()
                         },
+                        max_length_adjustment: f64::INFINITY,
                         ..ConeFlattenOptions::default()
                     },
                 )
@@ -197,6 +223,8 @@ fn main() {
                     DiskOptions {
                         diagonal_shift: shift,
                         boundary_start: reference.start.map(|(v, _)| v),
+                        // The reference closes its curves whatever it takes.
+                        max_length_adjustment: f64::INFINITY,
                         ..DiskOptions::default()
                     },
                 )
@@ -245,6 +273,7 @@ fn main() {
                 .collect();
             stored_cut.sort_unstable();
             driver_cut.sort_unstable();
+            let q = length_ratio_quantiles(&reference.corner_uvs, &stored);
             if stored_cut == driver_cut {
                 let cut = ddg_bff::cut_mesh(&mesh, &driver_cut).unwrap();
                 let a = compare_layouts(
@@ -253,20 +282,63 @@ fn main() {
                     &reference.corner_uvs,
                     &stored,
                 );
-                line += &format!(" | {:>8} {:8.1e} {:8.1e}", "yes", a.rms, a.max);
+                line += &format!(" | {:>11} {:8.1e} {:8.1e}", "same", a.rms, a.max);
             } else {
-                let common = stored_cut
+                let only_stored: Vec<u32> = stored_cut
                     .iter()
-                    .filter(|e| driver_cut.binary_search(e).is_ok())
-                    .count();
+                    .copied()
+                    .filter(|e| driver_cut.binary_search(e).is_err())
+                    .collect();
+                let only_driver: Vec<u32> = driver_cut
+                    .iter()
+                    .copied()
+                    .filter(|e| stored_cut.binary_search(e).is_err())
+                    .collect();
                 line += &format!(
-                    " | {:>8} ({} of {} stored cut edges)",
-                    "NO",
-                    common,
-                    stored_cut.len()
+                    " | {:>11} {:>8} {:>8}",
+                    format!(
+                        "{}/{}",
+                        stored_cut.len() - only_stored.len(),
+                        stored_cut.len()
+                    ),
+                    "-",
+                    "-"
                 );
+                let length = |edges: &[u32]| {
+                    edges
+                        .iter()
+                        .map(|&e| geometry.edge_lengths()[e as usize])
+                        .sum::<f64>()
+                };
+                let list = |edges: &[u32]| {
+                    if edges.len() > 6 {
+                        String::new()
+                    } else {
+                        format!(
+                            " {:?}",
+                            edges
+                                .iter()
+                                .map(|&e| mesh.edges()[e as usize])
+                                .collect::<Vec<_>>()
+                        )
+                    }
+                };
+                notes.push(format!(
+                    "{name}: {} edges only in the stored cut (total length {:.6}){}, {} only in \
+                     the driver's (total length {:.6}){}",
+                    only_stored.len(),
+                    length(&only_stored),
+                    list(&only_stored),
+                    only_driver.len(),
+                    length(&only_driver),
+                    list(&only_driver),
+                ));
             }
+            line += &format!(" | {:7.4} {:7.4}", q[1], q[3]);
         }
         println!("{line}");
+    }
+    for note in &notes {
+        println!("{note}");
     }
 }
