@@ -10,4 +10,5 @@ import DdgProofs.GaussBonnet
 import DdgProofs.Yamabe
 import DdgProofs.Oracle.Scalar
 import DdgProofs.Oracle.Problem
+import DdgProofs.Oracle.Regularized
 import DdgProofs.Oracle.Mesh

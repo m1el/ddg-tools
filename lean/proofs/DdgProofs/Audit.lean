@@ -46,6 +46,7 @@ open DdgProofs
 #print axioms ConeProblem.isMinimizer_of_newton_step
 #print axioms ConeProblem.residualReg_eq_zero_of_newton_step
 #print axioms ConeProblem.isRegMinimizer_of_newton_step
+#print axioms ConeProblem.isRegMinimizer_of_stationary
 #print axioms ConeProblem.IsRegMinimizer.objective_le
 -- A.6, A.7 closed meshes, scaling
 #print axioms ConeProblem.sum_cone_eq_sum_defect
@@ -94,6 +95,9 @@ open DdgProofs
 #print axioms Ddg.Problem.F_eq_zero_of_newton_step
 #print axioms Ddg.Problem.Freg_eq_zero_of_newton_step
 #print axioms Ddg.Problem.objective_le_add_gap
+#print axioms Ddg.Problem.Fimp_zero_eq_F
+#print axioms Ddg.Problem.Fimp_eq_zero_of_Fpiece_eq_zero
+#print axioms Ddg.Problem.regObjective_le_of_Fimp_eq_zero
 #print axioms Oracle.laplacian_symm
 #print axioms Oracle.laplacian_quadratic_nonneg
 #print axioms Oracle.gauss_bonnet

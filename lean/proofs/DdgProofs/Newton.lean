@@ -495,6 +495,34 @@ theorem residualReg_eq_zero_of_newton_step (hP : P.WellFormed) {γ : ι → ℝ}
   simp only [Pi.add_apply, Pi.zero_apply]
   exact g1 i
 
+/-- **Sufficiency for the regularized problem.** If `L u = μ − Ω`, `Lᵀφ = −wE m u` and
+`φ_i − γ_i μ_i ∈ ∂(λ·cost_i + ι_feasible_i)(μ_i)` at every vertex (`γ_i ≥ 0`), then `(u, μ)` is a
+global minimizer of the regularized objective `J(u, μ) + Σ (γ_i/2) μ_i²`. For `γ = 0` this is the
+sufficiency theorem of the unregularized problem.
+
+[formula: regularized-optimality-sufficient] -/
+theorem isRegMinimizer_of_stationary (hP : P.WellFormed) {γ : ι → ℝ} (hγ : ∀ i, 0 ≤ γ i)
+    (hstate : P.L *ᵥ u = μ - P.Ω) (hadj : P.Lᵀ *ᵥ φ = fun i => -(P.wE i * P.m i * u i))
+    (hst : ∀ i, (P.site i).Stationary P.lam (φ i - γ i * μ i) (μ i)) :
+    P.IsRegMinimizer γ u μ := by
+  have hincl : ∀ i, IsSubgradientWithinAt
+      (fun x => P.lam * (P.site i).cost x + γ i / 2 * x ^ 2) (P.site i).feasible (φ i) (μ i) := by
+    intro i
+    refine ⟨(hst i).1, fun y hy => ?_⟩
+    have := (hst i).2 y hy
+    simp only at this ⊢
+    nlinarith [sq_nonneg (y - μ i), hγ i, mul_nonneg (hγ i) (sq_nonneg (y - μ i))]
+  refine ⟨⟨hstate, fun i => (hst i).1⟩, fun v ν hv => ?_⟩
+  have := quadratic_growth_of_stationary P.L (fun i => P.wE i * P.m i)
+    (fun i x => P.lam * (P.site i).cost x + γ i / 2 * x ^ 2) (fun i => (P.site i).feasible)
+    P.Ω u φ μ v ν hstate hadj hincl hv.1 hv.2
+  have hnn : 0 ≤ ∑ i, 1 / 2 * (P.wE i * P.m i * (v i - u i) ^ 2) :=
+    Finset.sum_nonneg fun i _ => mul_nonneg (by norm_num)
+      (mul_nonneg (mul_nonneg (hP.wE_nonneg i) (hP.m_nonneg i)) (sq_nonneg _))
+  simp only [regObjective, objective, distortion, coneCost, Finset.mul_sum,
+    Finset.sum_add_distrib] at this ⊢
+  linarith
+
 /-- **A zero of the Stage I residual solves the regularized problem.** If `F_γ(u, φ) = 0` then,
 with `μ_i := proxReg_γ(φ_i)` (for a default vertex `μ_i = P_λ(φ_i)/γ_i`), the pair `(u, μ)` is a
 global minimizer of the regularized objective `J(u, μ) + Σ (γ_i/2) μ_i²`.
@@ -516,25 +544,8 @@ theorem isRegMinimizer_of_residualReg_eq_zero (hP : P.WellFormed) {γ : ι → �
     have := congrFun h2 i
     simp only [Pi.add_apply, Pi.zero_apply] at this ⊢
     linarith
-  have hst : ∀ i, (P.site i).Stationary P.lam (φ i - γ i * μ i) (μ i) := fun i =>
+  exact isRegMinimizer_of_stationary hP (fun i => (hγ i).le) hstate hadj fun i =>
     (Site.stationary_sub_iff_eq_proxReg hP.lam_nonneg (hγ i) (hP.site i) _ _).mpr rfl
-  have hincl : ∀ i, IsSubgradientWithinAt
-      (fun x => P.lam * (P.site i).cost x + γ i / 2 * x ^ 2) (P.site i).feasible (φ i) (μ i) := by
-    intro i
-    refine ⟨(hst i).1, fun y hy => ?_⟩
-    have := (hst i).2 y hy
-    simp only at this ⊢
-    nlinarith [sq_nonneg (y - μ i), (hγ i).le, mul_nonneg (hγ i).le (sq_nonneg (y - μ i))]
-  refine ⟨⟨hstate, fun i => (hst i).1⟩, fun v ν hv => ?_⟩
-  have := quadratic_growth_of_stationary P.L (fun i => P.wE i * P.m i)
-    (fun i x => P.lam * (P.site i).cost x + γ i / 2 * x ^ 2) (fun i => (P.site i).feasible)
-    P.Ω u φ μ v ν hstate hadj hincl hv.1 hv.2
-  have hnn : 0 ≤ ∑ i, 1 / 2 * (P.wE i * P.m i * (v i - u i) ^ 2) :=
-    Finset.sum_nonneg fun i _ => mul_nonneg (by norm_num)
-      (mul_nonneg (mul_nonneg (hP.wE_nonneg i) (hP.m_nonneg i)) (sq_nonneg _))
-  simp only [regObjective, objective, distortion, coneCost, Finset.mul_sum,
-    Finset.sum_add_distrib] at this ⊢
-  linarith
 
 /-- **Stopping rule, Stage I: the result is optimal for the regularized problem.**
 
