@@ -1,20 +1,11 @@
 [package]
 name = "ddg-core"
-description = "Mesh topology, Blender-compatible triangulation, intrinsic geometry, cotan operators, sparse solvers and OBJ I/O for the ddg-tools workspace"
+description = "Mesh topology, intrinsic geometry, cotan operators, sparse solvers and OBJ I/O for the ddg-tools workspace"
 version.workspace = true
 edition.workspace = true
-# MIT for everything except src/triangulate/blender.rs, which is a port of Blender code and
-# GPL-2.0-or-later (cargo feature `blender-tessellation`, on by default). See README.md.
-license = "MIT AND GPL-2.0-or-later"
+license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-
-[features]
-default = ["blender-tessellation"]
-# Polygon triangulation that reproduces Blender's tessellation. The implementation
-# (src/triangulate/blender.rs) is a port of GPL-2.0-or-later Blender code; disable this feature
-# for a build that contains MIT-licensed code only.
-blender-tessellation = []
 
 [dependencies]
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }

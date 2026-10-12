@@ -21,8 +21,7 @@ faster approximation algorithm for the Steiner problem in graphs*, IPL 27 (1988)
 *Dynamic generators of topologically embedded graphs*, SODA 2003, and J. Erickson and
 K. Whittlesey, *Greedy optimal homotopy and homology generators*, SODA 2005.
 
-It depends on `ddg-core` without default features (the default feature of `ddg-core` links
-GPL-derived code) and on nothing else; it does not depend on the cone solver.
+It depends on `ddg-core` and on nothing else; it does not depend on the cone solver.
 
 ## Example
 

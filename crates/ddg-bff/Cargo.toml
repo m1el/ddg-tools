@@ -10,9 +10,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Without default features: the default feature of ddg-core compiles GPL-licensed code
-# (Blender's tessellation), which this crate must not link.
-ddg-core = { path = "../ddg-core", default-features = false }
+ddg-core = { path = "../ddg-core" }
 
 [dev-dependencies]
 proptest = "1"

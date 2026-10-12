@@ -21,8 +21,8 @@ N. Sharp and K. Crane, *A Laplacian for Nonmanifold Triangle Meshes*, SGP 2020, 
 `ddg-bff`. What is new here: validation in the caller's numbering, polygons with a supplied
 triangulation, seams, steering, policies for what the papers leave open, packing, the report.
 
-`ddg-core` is used with `default-features = false`: nothing GPL-derived is linked, which is
-why the triangulation of the polygons is an input and not computed here.
+`ddg-core` has no triangulator, which is why the triangulation of the polygons is an input and
+not computed here (Blender triangulates; `PolygonMesh::from_polygons` fans convex polygons).
 
 Contents: [example](#example) · [API](#api) · [stages and policies](#stages-and-policies) ·
 [the four decisions](#the-four-decisions) · [the dataset](#the-dataset) ·

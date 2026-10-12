@@ -246,10 +246,7 @@ marking seams.
 ## License
 
 MIT, like the rest of the repository. Blender asks add-ons to be licensed compatibly with the
-GNU GPL; MIT is. The bundled native module is built from MIT-licensed code only: `crates/ddg-py`
-uses ddg-core without its `blender-tessellation` feature, the one part of the workspace that is
-ported from Blender and GPL-licensed. It statically links third-party Rust crates under
+GNU GPL; MIT is. The bundled native module is built from MIT-licensed code only; no part of the workspace is
+derived from Blender. It statically links third-party Rust crates under
 permissive licences (MIT, Apache-2.0, BSD-2-Clause and similar). maturin puts a CycloneDX list
-of the whole dependency tree into the wheel (`ddg_tools-<version>.dist-info/sboms/`); that list
-shows ddg-core as "MIT AND GPL-2.0-or-later", which is the licence the crate declares for all
-of its features together, not what is compiled into the wheel.
+of the whole dependency tree into the wheel (`ddg_tools-<version>.dist-info/sboms/`).

@@ -1,9 +1,8 @@
 //! Reading and writing Wavefront OBJ meshes, and reading the cone files of the optimal-cones
 //! dataset.
 //!
-//! [`ObjMesh`] keeps faces as polygons in the same layout Blender uses (and
-//! `ddg_core::triangulate` consumes): one vertex index per polygon corner plus the start offset
-//! of every polygon.
+//! [`ObjMesh`] keeps faces as polygons in the layout Blender uses: one vertex index per polygon
+//! corner plus the start offset of every polygon.
 
 use std::fmt;
 use std::fmt::Write as _;

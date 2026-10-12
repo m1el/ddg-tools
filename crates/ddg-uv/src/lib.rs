@@ -93,8 +93,7 @@
 //!
 //! Those of the repository's `CLAUDE.md`: a cone angle is `µ = 2π − (angle sum around the
 //! vertex in the plane)`, positive for a cone tip; `λ` is taken with the area of every piece
-//! normalized to 1. `ddg-core` is used without its default feature, so nothing GPL-derived is
-//! linked; that is why the triangulation is an input.
+//! normalized to 1. `ddg-core` has no triangulator; that is why the triangulation is an input.
 //!
 //! The crate README holds the measurements behind every default.
 

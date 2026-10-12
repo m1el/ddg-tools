@@ -227,11 +227,7 @@ link against. `maturin` turns the feature on through `pyproject.toml`
 (`[tool.maturin] features = ["python"]`). All logic lives in the pure-Rust part; `src/python.rs`
 only converts.
 
-ddg-core is used with `default-features = false`, which leaves its GPL-licensed
-`blender-tessellation` module out. Note that cargo unifies features across the packages of one
-build: `cargo build` at the workspace root compiles ddg-core with its default features for
-everyone. The wheel is built by maturin for this package alone, so it gets ddg-core without that
-module.
+The wheel contains MIT-licensed code only: ddg-core has no triangulator (Blender triangulates).
 
 ## Build and test
 

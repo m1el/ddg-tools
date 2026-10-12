@@ -8,10 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Without default features: the default feature of ddg-core compiles GPL-derived triangulation
-# code (Blender's tessellation), which this MIT crate must not link. The triangulation of the
-# caller's polygons is an input of the pipeline.
-ddg-core = { path = "../ddg-core", default-features = false }
+# The triangulation of the caller's polygons is an input of the pipeline; ddg-core has no triangulator.
+ddg-core = { path = "../ddg-core" }
 ddg-bff = { path = "../ddg-bff" }
 ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 

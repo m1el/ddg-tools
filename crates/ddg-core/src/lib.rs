@@ -3,8 +3,6 @@
 //!
 //! * [`topology`] — a validated, oriented, manifold triangle mesh ([`TriMesh`]) with halfedge
 //!   connectivity, boundary loops, components, and explicit repair helpers.
-//! * `triangulate` — polygon triangulation that matches Blender's, with a map from triangle
-//!   corners back to the original polygon corners (cargo feature `blender-tessellation`).
 //! * [`geometry`] — intrinsic triangle geometry (corner angles, areas, cotangents) computed from
 //!   edge lengths ([`Geometry`]).
 //! * [`operators`] — the cotan Laplacian, lumped mass, angle defects and boundary geodesic
@@ -46,8 +44,7 @@
 //! Flattening*, ACM Transactions on Graphics 37(4), 2018,
 //! <https://doi.org/10.1145/3197517.3201367>. The cotan operator goes back to MacNeal (1949).
 //! The numerically careful triangle area and angle formulas are from W. Kahan, *Miscalculating
-//! Area and Angles of a Needle-like Triangle* (2014). Polygon triangulation is a port of
-//! Blender's face tessellation (<https://www.blender.org>), and the sparse factorizations are
+//! Area and Angles of a Needle-like Triangle* (2014). The sparse factorizations are
 //! those of the `faer` crate.
 //!
 //! # Conventions
@@ -61,9 +58,8 @@
 //!
 //! # License
 //!
-//! MIT, except for the private module `triangulate::blender`, which is ported from Blender and
-//! licensed under the GNU GPL, version 2 or later. It is compiled only with the cargo feature
-//! `blender-tessellation` (on by default); see the crate README.
+//! MIT. The crate contains no triangulator: callers supply triangles (Blender triangulates before
+//! the data reaches this workspace; `ddg-uv` has a fan helper for convex polygons).
 
 #![warn(missing_docs)]
 
@@ -73,8 +69,6 @@ pub mod io;
 pub mod operators;
 pub mod sparse;
 pub mod topology;
-#[cfg(feature = "blender-tessellation")]
-pub mod triangulate;
 
 pub use geometry::{Geometry, GeometryError};
 pub use sparse::{SparseError, SparseMatrix};

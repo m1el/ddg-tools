@@ -12,7 +12,7 @@ Its cones are turned into UV maps with "Boundary First Flattening", Sawhney & Cr
 ## Layout
 
 ```
-crates/ddg-core            mesh topology + validation, triangulation, geometry, cotan operators,
+crates/ddg-core            mesh topology + validation, geometry, cotan operators,
                            sparse linear algebra wrappers, OBJ I/O, test-mesh generators
 crates/ddg-optimal-cones   the optimal-cones solver (the paper)
 crates/ddg-bff             boundary first flattening + cutting

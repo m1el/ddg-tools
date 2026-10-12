@@ -6,7 +6,6 @@ algorithm here needs before it can start.
 | module        | contents |
 |---------------|----------|
 | `topology`    | `TriMesh`: validated, oriented, manifold triangle mesh with halfedge connectivity, unique edges, boundary loops, components, Euler characteristic and genus; explicit repair helpers `orient_faces` and `compact_vertices` |
-| `triangulate` | `triangulate_polygons`: splits polygons exactly like Blender and maps every triangle corner back to its polygon corner (cargo feature `blender-tessellation`, on by default) |
 | `geometry`    | `Geometry`: corner angles, areas and cotangents from edge lengths (from positions, or intrinsic) |
 | `operators`   | cotan Laplacian, lumped mass (raw and area normalized), angle defect, boundary geodesic curvature, Gauss–Bonnet residual |
 | `sparse`      | `SparseMatrix` (CSC) and direct solvers `LLᵀ`, `LDLᵀ`, `LBLᵀ`, `LU` with reusable symbolic analysis, explicit orderings and an explicit thread pool |
@@ -33,8 +32,6 @@ A mesh with a vertex that no face uses is rejected (it would give the Laplacian 
   Networks.* PhD thesis, Caltech, 1949 — the cotan operator.
 - W. Kahan. *Miscalculating Area and Angles of a Needle-like Triangle.* 2014 — the numerically
   stable area and angle formulas used in `geometry`.
-- Blender, <https://www.blender.org> — `triangulate` is a port of its face tessellation
-  (see License). Its 2D polygon fill is in turn based on libGDX's `EarClippingTriangulator`.
 - faer, <https://codeberg.org/sarah-quinones/faer> — the sparse factorizations behind `sparse`.
 
 ## Formula tags
@@ -54,37 +51,6 @@ Functions that implement a mathematical formula carry a `[formula: <id>]` line i
 | `angle-defect` | `operators::angle_defects` | `Ω_i = 2π − Σ θ` over the corners at interior vertex `i` |
 | `boundary-geodesic-curvature` | `operators::boundary_geodesic_curvatures` | `k_i = π − Σ θ` over the corners at boundary vertex `i` |
 | `gauss-bonnet` | `operators::gauss_bonnet_residual` | `Σ_I Ω_i + Σ_B k_i = 2πχ` (the function returns left minus right) |
-
-## Agreement with Blender's triangulation
-
-`scripts/blender-tessellation-diff.sh [SEED] [SCALE]` lets a headless Blender triangulate random
-polygons, then compares its `loop_triangles` with `triangulate_polygons`, triangle by triangle
-and corner by corner. Measured with Blender 5.0.1 on Linux x86-64, seeds 1, 2, 3, 11, 12, 13 at
-scale 1.0 (87 000 comparisons each):
-
-| polygons | compared | identical |
-|----------|---------:|----------:|
-| non-degenerate quads (convex, concave, non-planar, random in 3D) | 99 000 | 100 % |
-| non-degenerate n-gons, 5 to 400 corners (convex, star-shaped, combs, spirals, non-planar, self-intersecting, random in 3D) | 309 000 | 100 % |
-| degenerate quads and n-gons (collinear, coincident or all-collinear corners; rectilinear grid polygons; polygons quantized by single precision) | 114 000 | 100 % |
-
-"Identical" means the same triangles in the same order with the same corner order. Every n-gon
-is counted twice, once for each of Blender's two code paths (with and without cached face
-normals). A recorded sample of 523 polygons is committed as a test fixture
-(`tests/data/blender_tessellation_5.0.1.txt`), so `cargo test` checks the agreement without
-Blender.
-
-Known limits of that statement:
-
-- It was measured against one Blender build. The split depends on the signs of single precision
-  expressions; a Blender compiled with fused multiply-add contraction (possible on ARM64) can
-  decide exact ties differently from this code, which never fuses.
-- Blender answers "is a reflex corner inside this ear" with a k-d tree; this crate scans the
-  reflex corners. The result is the same; only the running time for huge concave n-gons
-  differs. Measured here: a star-shaped polygon with 10 000 corners takes 28 ms, one with
-  50 000 corners 0.6 s; a million quads take 90 ms.
-- Positions are converted to `f32` for the decision, as Blender stores them. Positions that are
-  not exactly representable in `f32` are rounded first.
 
 ## Sparse solver timings
 
@@ -139,20 +105,20 @@ What the numbers say:
 ## Tests
 
 ```
-cargo test -p ddg-core                        # unit, property, dataset and Blender-fixture tests
+cargo test -p ddg-core                        # unit, property and dataset tests
 cargo test -p ddg-core --test dataset -- --nocapture   # prints the dataset topology table
-scripts/blender-tessellation-diff.sh 1 1.0    # differential test against an installed Blender
 ```
 
 The dataset tests read `data/optimal-cones/optimal-cones-data/data` and are skipped, with a
 notice, when that directory is absent.
 
+## Triangulation
+
+This crate does not triangulate polygons: `TriMesh` takes triangles. Callers supply the
+triangulation. Blender does it before the data reaches the workspace (`mesh.calc_loop_triangles()`
+in the add-on), and the results are mapped back to the original polygon corners by the caller.
+`ddg-uv` has a fan helper for convex polygons (`PolygonMesh::from_polygons`).
+
 ## License
 
-MIT, with one exception: `src/triangulate/blender.rs` is a port of Blender source code
-(`mesh_tessellate.cc`, `polyfill_2d.cc` and a few `blenlib` math helpers, Blender v5.0.1) and is
-licensed, like its original, under the **GNU General Public License, version 2 or later**
-(`LICENSES/GPL-2.0-or-later.txt`). It is compiled only with the cargo feature
-`blender-tessellation`, which is enabled by default; a binary built with that feature is a
-combined work that must be distributed under the GPL. `--no-default-features` builds the crate
-from MIT-licensed code only, without the `triangulate` module.
+MIT, like the rest of the workspace. The crate contains no code derived from Blender.
