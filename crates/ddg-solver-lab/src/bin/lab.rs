@@ -26,6 +26,7 @@ fn opts_from(args: &[String]) -> lasso::Options {
     if let Some(v) = flag(args, "--batch-frac") { o.batch_frac = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--nms") { o.nms_radius = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--tol") { o.tol = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--multi-add") { o.multi_add = v.parse().unwrap(); }
     o
 }
 
@@ -71,15 +72,7 @@ fn table(args: &[String]) {
 fn compare(args: &[String]) {
     let spec = &args[0];
     let lambda: f64 = flag(args, "--lambda").map(|v| v.parse().unwrap()).unwrap_or(0.5);
-    let mut o = lasso::Options::default();
-    if let Some(v) = flag(args, "--threads") { o.threads = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--chunk") { o.chunk = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--steps") { o.cont_steps = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--factor") { o.cont_factor = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--batch-min") { o.batch_min = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--batch-frac") { o.batch_frac = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--nms") { o.nms_radius = v.parse().unwrap(); }
-    if let Some(v) = flag(args, "--tol") { o.tol = v.parse().unwrap(); }
+    let o = opts_from(args);
     let no_ref = args.iter().any(|a| a == "--no-ref");
     let case = meshes::load(spec).unwrap_or_else(|e| panic!("{e}"));
     let prep = Prepared::new(&case).unwrap();

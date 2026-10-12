@@ -38,6 +38,8 @@ pub struct Dense {
     chol_ld: usize,
     pin_active: bool,
     pub nu: f64,
+    /// add up to this fraction of the active set per iteration (at least one)
+    pub multi_add: f64,
     pub stats: DenseStats,
 }
 
@@ -58,6 +60,7 @@ impl Dense {
             chol_ld: 0,
             pin_active: false,
             nu: 0.0,
+            multi_add: 0.0,
             stats: DenseStats::default(),
         };
         if let Some(c) = sum {
@@ -294,7 +297,6 @@ impl Dense {
             }
             self.nu = nu;
             // violations
-            let mut best: Option<(usize, f64)> = None;
             let mut g = self.q.clone();
             for &i in &b {
                 let m = self.mu[i];
@@ -304,33 +306,36 @@ impl Dense {
                     }
                 }
             }
+            let mut viol: Vec<(usize, f64)> = Vec::new();
             for j in 0..self.dim {
                 if self.sign[j] != 0.0 || self.blocked[j] {
                     continue;
                 }
                 let ex = (g[j] + nu).abs() - lam;
-                if ex > tol * lam && best.is_none_or(|(_, e)| ex > e) {
-                    best = Some((j, ex));
+                if ex > tol * lam {
+                    viol.push((j, ex));
                 }
             }
-            match best {
-                None => return true,
-                Some((j, _)) => {
-                    let s = -(g[j] + nu).signum();
-                    if self.sum.is_some() && j == 0 {
-                        self.pin_active = true;
-                        self.sign[0] = s;
-                        self.stats.adds += 1;
-                    } else if self.chol_append(j) {
-                        self.sign[j] = s;
-                        self.stats.adds += 1;
-                    } else {
-                        self.blocked[j] = true;
-                        self.stats.failed_adds += 1;
-                    }
-                    self.stats.peak_active = self.stats.peak_active.max(self.n_active());
+            if viol.is_empty() {
+                return true;
+            }
+            viol.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            let m = ((self.multi_add * self.n_active() as f64) as usize).max(1);
+            for &(j, _) in viol.iter().take(m) {
+                let s = -(g[j] + nu).signum();
+                if self.sum.is_some() && j == 0 {
+                    self.pin_active = true;
+                    self.sign[0] = s;
+                    self.stats.adds += 1;
+                } else if self.chol_append(j) {
+                    self.sign[j] = s;
+                    self.stats.adds += 1;
+                } else {
+                    self.blocked[j] = true;
+                    self.stats.failed_adds += 1;
                 }
             }
+            self.stats.peak_active = self.stats.peak_active.max(self.n_active());
         }
         false
     }

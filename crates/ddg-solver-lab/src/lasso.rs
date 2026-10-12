@@ -21,6 +21,7 @@ pub struct Options {
     pub batch_min: usize,
     pub batch_frac: f64,
     pub nms_radius: usize,
+    pub multi_add: f64,
     pub tol: f64,
     pub max_rounds: usize,
 }
@@ -35,6 +36,7 @@ impl Default for Options {
             batch_min: 16,
             batch_frac: 0.5,
             nms_radius: 3,
+            multi_add: 0.1,
             tol: 1e-10,
             max_rounds: 500,
         }
@@ -87,6 +89,7 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
     st.t_setup = prep.setup_seconds;
 
     let mut dense = Dense::new(lambda, prep.sum);
+    dense.multi_add = opts.multi_add;
     let mut w_slots: Vec<usize> = Vec::new();
     let mut in_w = vec![usize::MAX; ns];
     let mut blocks: Vec<(Vec<f64>, usize)> = Vec::new();
