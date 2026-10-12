@@ -302,6 +302,20 @@ theorem IsMinimizer.weighted_sq_sub_eq_zero (hP : P.WellFormed) (h₁ : P.IsMini
     le_antisymm (by linarith) (Finset.sum_nonneg hnn)
   exact (Finset.sum_eq_zero_iff_of_nonneg hnn).mp hsum i (Finset.mem_univ i)
 
+/-- **Distance to a minimizer from the objective gap.** If `(v, ν)` is a minimizer of a
+well-formed problem and `(u, μ)` is feasible, then
+`¼ Σ_i wE_i m_i (u_i − v_i)² ≤ J(u, μ) − J(v, ν)`: a feasible point whose objective is within `ε`
+of the optimum has a scale factor within `2√ε` of the optimal one in the `wE·m`-weighted norm.
+(No optimality system is assumed; with one, `KKT.objective_add_le` gives the constant `½`.)
+
+[formula: minimizer-unique] -/
+theorem IsMinimizer.weighted_sq_sub_le (hP : P.WellFormed) (h : P.IsMinimizer v ν)
+    (hf : P.Feasible u μ) :
+    1 / 4 * ∑ i, P.wE i * P.m i * (u i - v i) ^ 2 ≤ P.objective u μ - P.objective v ν := by
+  obtain ⟨hmid, hle⟩ := midpoint_objective_le hP hf h.1
+  have := h.2 _ _ hmid
+  linarith
+
 /-- **Uniqueness.** If every vertex has `wE_i m_i > 0`, the minimizer is unique: any two
 minimizers have the same `u` and the same `μ`. (Holds for every `L`, so also on closed meshes,
 where it says in particular that the optimal additive constant is unique.)

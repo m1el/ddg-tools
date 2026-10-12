@@ -2,6 +2,7 @@ import DdgProofs.SoftThreshold
 import DdgProofs.Problem
 import DdgProofs.Optimality
 import DdgProofs.Duality
+import DdgProofs.Certificate
 import DdgProofs.Newton
 import DdgProofs.Closed
 import DdgProofs.Triangle
