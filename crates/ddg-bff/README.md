@@ -356,27 +356,28 @@ How to read it:
 ## Timings
 
 `flatten_with_cones` with the planner's cut, one thread, best of three, milliseconds (AMD
-Threadripper 3970X). `report` includes about 100 ms per 300 000 faces for the overlap estimate,
-which `overlap_samples_per_triangle: 0.0` switches off.
+Threadripper 3970X; `examples/dataset_report.rs`). Between runs of the table the totals vary
+by about 10 % (brain: 1.00 to 1.24 s over five runs). `report` includes about 100 ms per
+300 000 faces for the overlap estimate, which `overlap_samples_per_triangle: 0.0` switches off.
 
 | mesh | faces | cones | total | scale factors | cut | curves | extension | report |
 |------|------:|------:|------:|--------------:|----:|-------:|----------:|-------:|
-| airplane | 4656 | 13 | 12 | 3.9 | 2.0 | 0.1 | 3.0 | 3.0 |
-| bump | 6528 | 5 | 14 | 5.2 | 2.1 | 0.1 | 4.1 | 2.7 |
-| hand | 6660 | 29 | 15 | 5.1 | 2.3 | 0.1 | 4.0 | 2.9 |
-| axes | 7466 | 4 | 24 | 9.0 | 3.2 | 0.2 | 7.4 | 4.0 |
-| chair | 11448 | 14 | 30 | 12 | 3.9 | 0.2 | 8.1 | 5.0 |
-| mannequin | 12195 | 8 | 31 | 13 | 4.1 | 0.2 | 8.5 | 5.6 |
-| camelbadnonuniform | 18125 | 6 | 46 | 17 | 6.5 | 0.3 | 15 | 8.4 |
-| camel, camel_noise1, camel_noise2, camelbad, camelshotnoise | 22704–22968 | 6–7 | 61–64 | 20–24 | 7.9–8.2 | 0.3–0.4 | 20–24 | 11–12 |
-| body | 23892 | 10 | 56 | 20 | 8.6 | 0.4 | 17 | 10 |
-| face | 27150 | 2 | 66 | 22 | 8.8 | 0.4 | 25 | 9.8 |
-| bunny | 28576 | 4 | 80 | 29 | 11 | 0.5 | 27 | 12 |
-| cow1, cow5e-1, cow75e-2, cow01 | 29999 | 2–439 | 85–87 | 32–33 | 12–13 | 0.5–0.6 | 25–30 | 13–15 |
-| cow00001 | 29999 | 13836 | 85 | 33 | 16 | 2.9 | 1.7 | 31 |
-| tree | 33592 | 8 | 92 | 32 | 13 | 0.6 | 32 | 15 |
-| rhino | 40304 | 36 | 116 | 49 | 15 | 0.7 | 33 | 19 |
-| brain | 305782 | 45 | 1237 | 459 | 159 | 5.9 | 471 | 142 |
+| airplane | 4656 | 13 | 9.5 | 2.9 | 1.6 | 0.1 | 2.4 | 2.6 |
+| bump | 6528 | 5 | 14 | 5.1 | 2.1 | 0.1 | 4.0 | 2.7 |
+| hand | 6660 | 29 | 15 | 5.3 | 2.5 | 0.1 | 4.3 | 3.2 |
+| axes | 7466 | 4 | 18 | 6.4 | 2.6 | 0.1 | 5.3 | 3.4 |
+| chair | 11448 | 14 | 29 | 12 | 3.9 | 0.2 | 8.0 | 5.0 |
+| mannequin | 12195 | 8 | 32 | 13 | 4.3 | 0.2 | 8.6 | 5.9 |
+| camelbadnonuniform | 18125 | 6 | 45 | 16 | 6.3 | 0.2 | 14 | 8.4 |
+| camel, camel_noise1, camel_noise2, camelbad, camelshotnoise | 22704–22968 | 6–7 | 59–61 | 19–22 | 7.7–8.1 | 0.3 | 19–22 | 11–12 |
+| body | 23892 | 10 | 59 | 22 | 8.7 | 0.4 | 17 | 11 |
+| face | 27150 | 2 | 70 | 23 | 9.4 | 0.4 | 26 | 11 |
+| bunny | 28576 | 4 | 79 | 29 | 11 | 0.5 | 27 | 12 |
+| cow01, cow1, cow5e-1, cow75e-2 | 29999 | 2–439 | 82–97 | 31–37 | 11–14 | 0.4–0.5 | 23–31 | 13–15 |
+| cow00001 | 29999 | 13836 | 79 | 31 | 15 | 2.6 | 1.7 | 29 |
+| tree | 33592 | 8 | 90 | 32 | 13 | 0.6 | 30 | 15 |
+| rhino | 40304 | 36 | 111 | 46 | 15 | 0.6 | 31 | 19 |
+| brain | 305782 | 45 | 1139 | 433 | 134 | 4.8 | 412 | 155 |
 
 Two factorizations dominate: the Laplacian of the surface (scale factors) and the Dirichlet
 Laplacian of the cut surface (extension). Passing `scale_factors` from a cone solver saves the
