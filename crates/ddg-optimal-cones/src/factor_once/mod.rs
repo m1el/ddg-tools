@@ -434,18 +434,16 @@ impl<'a> Run<'a> {
         let mut cap_hits = 0;
         let mut refinements = 0;
         // No single site can carry the sum: start with the sites of largest curvature clamped.
-        if let Some(plan) = &red.plan {
-            if !plan.clamped.is_empty() {
-                let slots: Vec<usize> = plan
-                    .clamped
-                    .iter()
-                    .map(|&(i, _)| red.slot_of[i] as usize)
-                    .collect();
-                self.add_columns(&slots)?;
-                for &(i, bound) in &plan.clamped {
-                    let j = self.in_w[red.slot_of[i] as usize];
-                    self.dense.clamp(j, bound);
-                }
+        if let Some(plan) = red.plan.as_ref().filter(|p| !p.clamped.is_empty()) {
+            let slots: Vec<usize> = plan
+                .clamped
+                .iter()
+                .map(|&(i, _)| red.slot_of[i] as usize)
+                .collect();
+            self.add_columns(&slots)?;
+            for &(i, bound) in &plan.clamped {
+                let j = self.in_w[red.slot_of[i] as usize];
+                self.dense.clamp(j, bound);
             }
         }
         loop {
