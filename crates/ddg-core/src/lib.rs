@@ -30,8 +30,13 @@
 #![warn(missing_docs)]
 
 pub mod generators;
+pub mod geometry;
+pub mod operators;
+pub mod sparse;
 pub mod topology;
 
+pub use geometry::{Geometry, GeometryError};
+pub use sparse::{Factorization, Method, Parallelism, SparseError, SparseMatrix, Symbolic, SymbolicInfo};
 pub use topology::{
     CompactedVertices, MeshError, NONE, OrientedFaces, SubMesh, TriMesh, compact_vertices, orient_faces,
 };
