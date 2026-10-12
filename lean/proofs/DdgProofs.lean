@@ -21,3 +21,4 @@ import DdgProofs.Bff.Cut
 import DdgProofs.Bff.Curve
 import DdgProofs.Bff.Quality
 import DdgProofs.MeshProblem
+import DdgProofs.BoundaryProblem

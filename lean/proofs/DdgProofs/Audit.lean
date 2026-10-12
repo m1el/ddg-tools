@@ -299,3 +299,18 @@ open DdgProofs
 #print axioms TriMesh.coneProblem_posDef
 #print axioms TriMesh.coneProblem_mulVec_one
 #print axioms TriMesh.coneProblem_wellFormed
+-- The mesh problem with boundary unknowns (BoundaryProblem.lean)
+#print axioms Site.stationary_boundary_free_iff
+#print axioms Site.stationary_penalized_iff
+#print axioms Site.stationary_convex_iff
+#print axioms Site.convex_wellFormed
+#print axioms Site.convex_feasible
+#print axioms TriMesh.boundaryProblem_wellFormed
+#print axioms TriMesh.boundaryProblem_feasible_iff
+#print axioms TriMesh.boundaryProblem_objective
+#print axioms TriMesh.boundaryProblem_isMinimizer
+#print axioms TriMesh.sum_hatCurvature
+#print axioms TriMesh.sum_eq_of_feasible
+#print axioms TriMesh.hasDerivAt_hatCurvature_conformalScale
+#print axioms TriMesh.boundaryProblem_firstOrder_boundary
+#print axioms TriMesh.boundaryProblem_firstOrder_interior
