@@ -330,6 +330,15 @@ theorem half_mul_sin_angle_eq_triArea (p₁ p₂ p₃ : P) :
   rw [key, sqrt_sq (by positivity)]
   ring
 
+/-- **Edge length from vertex positions**: the Euclidean distance of two points of `ℝ³` is
+`√(Δx² + Δy² + Δz²)`.
+
+[formula: edge-length-euclidean] -/
+theorem dist_eq_sqrt_sum_sq (p q : EuclideanSpace ℝ (Fin 3)) :
+    dist p q = √((p 0 - q 0) ^ 2 + (p 1 - q 1) ^ 2 + (p 2 - q 2) ^ 2) := by
+  rw [EuclideanSpace.dist_eq, Fin.sum_univ_three]
+  simp only [Real.dist_eq, sq_abs]
+
 end Euclidean
 
 end DdgProofs

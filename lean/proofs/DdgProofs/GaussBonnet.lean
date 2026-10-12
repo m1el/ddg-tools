@@ -210,7 +210,12 @@ theorem card_boundaryEdges_eq (hM : M.Valid) (hman : M.Manifold) :
 /-- **Discrete Gauss–Bonnet.** For a valid manifold triangle mesh,
 `Σ_{v interior} Ω_v + Σ_{v boundary} k_v = 2π·χ`, with `χ = |V| − |E| + |F|`.
 
-[formula: gauss-bonnet] -/
+The angle defect `Ω_v = 2π − Σθ`, the boundary curvature `k_v = π − Σθ` and the Euler
+characteristic are definitions (`angleDefect`, `geodesicCurvature`, `eulerChar`); this theorem is
+the statement that ties the three together, so it also carries their ids.
+
+[formula: gauss-bonnet] [formula: angle-defect] [formula: boundary-geodesic-curvature]
+[formula: euler-characteristic] -/
 theorem gauss_bonnet (hM : M.Valid) (hman : M.Manifold) :
     ∑ v ∈ M.boundaryVerticesᶜ, M.angleDefect v + ∑ v ∈ M.boundaryVertices, M.geodesicCurvature v =
       2 * π * (M.eulerChar : ℝ) := by
