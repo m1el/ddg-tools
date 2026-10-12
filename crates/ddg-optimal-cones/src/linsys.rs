@@ -90,8 +90,9 @@ pub struct LinearSolverReport {
     pub refinement_steps: usize,
     /// Number of systems on which `LDLᵀ` failed or was too inaccurate and `LU` took over.
     pub ldlt_fallbacks: usize,
-    /// The largest relative residual `‖K x − b‖₂ / ‖b‖₂` of any accepted solution.
-    pub worst_relative_residual: f64,
+    /// The largest componentwise backward error `max_i |K x − b|_i / (|K| |x| + |b|)_i` of any
+    /// accepted solution: how well each equation holds relative to the size of its terms.
+    pub worst_backward_error: f64,
     /// Time spent in symbolic analysis.
     pub symbolic_time: Duration,
     /// Time spent in numeric factorization.
@@ -121,9 +122,9 @@ pub(crate) trait NewtonLinearSolver {
     fn report(&self) -> LinearSolverReport;
 }
 
-/// Relative residual up to which a solution is accepted. It has to be well below the tolerance
-/// of the optimality certificate, because the solution is used as it is.
-const ACCEPT_RESIDUAL: f64 = 1e-12;
+/// Componentwise backward error up to which a solution is accepted: every equation must hold
+/// up to this fraction of the magnitude of its own terms.
+const ACCEPT_BACKWARD_ERROR: f64 = 1e-11;
 /// Target of the iterative refinement.
 const REFINE: RefineOptions = RefineOptions {
     max_steps: 4,
@@ -320,17 +321,44 @@ impl<'d> SaddleSolver<'d> {
         let refined = outcome.map_err(|e| format!("{name} solve failed: {e}"))?;
         self.report.solves += 1 + refined.steps;
         self.report.refinement_steps += refined.steps;
-        // Written so that a NaN residual is rejected.
-        if !(refined.residual <= ACCEPT_RESIDUAL) {
+        let error = componentwise_backward_error(&self.k, &x, rhs);
+        // Written so that a NaN is rejected.
+        if !(error <= ACCEPT_BACKWARD_ERROR) {
             return Err(format!(
-                "{name} solve is inaccurate: relative residual {:.3e} after {} refinement steps",
-                refined.residual, refined.steps
+                "{name} solve is inaccurate: componentwise backward error {error:.3e} after {} \
+                 refinement steps",
+                refined.steps
             ));
         }
-        self.report.worst_relative_residual =
-            self.report.worst_relative_residual.max(refined.residual);
+        self.report.worst_backward_error = self.report.worst_backward_error.max(error);
         Ok(x)
     }
+}
+
+/// The componentwise backward error `max_i |K x − b|_i / (|K| |x| + |b|)_i` (Oettli–Prager):
+/// the smallest relative perturbation of the entries of `K` and `b` for which `x` is an exact
+/// solution. Unlike a residual norm it does not depend on how the equations are scaled.
+fn componentwise_backward_error(k: &SparseMatrix, x: &[f64], b: &[f64]) -> f64 {
+    let mut residual: Vec<f64> = b.iter().map(|v| -v).collect();
+    let mut magnitude: Vec<f64> = b.iter().map(|v| v.abs()).collect();
+    let (col_ptr, row_idx, values) = (k.col_ptr(), k.row_idx(), k.values());
+    for (j, &xj) in x.iter().enumerate() {
+        for p in col_ptr[j]..col_ptr[j + 1] {
+            let term = values[p] * xj;
+            residual[row_idx[p] as usize] += term;
+            magnitude[row_idx[p] as usize] += term.abs();
+        }
+    }
+    let mut worst = 0.0f64;
+    for (r, m) in residual.iter().zip(&magnitude) {
+        if !r.is_finite() {
+            return f64::NAN;
+        }
+        if *m > 0.0 {
+            worst = worst.max(r.abs() / m);
+        }
+    }
+    worst
 }
 
 impl NewtonLinearSolver for SaddleSolver<'_> {
