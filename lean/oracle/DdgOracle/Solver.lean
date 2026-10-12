@@ -149,14 +149,6 @@ def buildSetup (ops : Operators) (p : Params) : Setup := Id.run do
 /-- A `FloatArray` as a function. -/
 def vecFn (a : FloatArray) : Nat → Float := fun i => a.get! i
 
-/-- Row-major `N × N` matrix with entries `entry r c`. -/
-def assemble (N : Nat) (entry : Nat → Nat → Float) : FloatArray := Id.run do
-  let mut a := FloatArray.emptyWithCapacity (N * N)
-  for r in [0:N] do
-    for c in [0:N] do
-      a := a.push (entry r c)
-  return a
-
 /-- `[f 0, …, f (n-1)]`. -/
 def arrayOf {β : Type} (n : Nat) (f : Nat → β) : Array β := Id.run do
   let mut a := Array.mkEmpty n
