@@ -76,6 +76,11 @@ fn dijkstra(piece: &Piece, blocked: &[bool], source: usize) -> (Vec<f64>, Vec<u3
     (distance, parent)
 }
 
+/// Distances from `source` along the polygon edges of the piece, avoiding blocked vertices.
+pub(crate) fn distances(piece: &Piece, blocked: &[bool], source: usize) -> Vec<f64> {
+    dijkstra(piece, blocked, source).0
+}
+
 /// The reachable vertex farthest from the source (ties: lowest index).
 fn farthest(distance: &[f64]) -> usize {
     let mut best = 0usize;

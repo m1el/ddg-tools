@@ -11,7 +11,7 @@ use crate::error::{UvError, internal};
 use crate::options::{ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, UnwrapOptions};
 use crate::prepare::{Piece, Prepared};
 use crate::report::{ClosedHandling, ConeSolveReport, MergeOutcome};
-use crate::slit::choose_slit;
+use crate::slit::{choose_slit, distances};
 
 /// The cones of one piece.
 #[derive(Debug, Clone)]
@@ -53,8 +53,8 @@ struct Solved {
     log_scale: Option<Vec<f64>>,
     report: Option<ConeSolveReport>,
     positive_only: bool,
-    /// The free site that was added, as a vertex of the piece.
-    free_site: Option<u32>,
+    /// Number of free sites the pipeline added.
+    n_free_sites: usize,
     n_pinned_sites: usize,
 }
 
@@ -175,15 +175,16 @@ fn piece_cones(
                 )
             }
         }
-        (true, ClosedSurfaces::FreeSite { max_angle }) => {
-            let solved = solve_on(prepared, piece, options, Some(max_angle), &mut warnings)?;
-            let handling = match solved.free_site {
-                Some(v) => ClosedHandling::FreeSite {
-                    vertex: piece.vertex_input[v as usize],
-                },
-                None => ClosedHandling::PinnedSites {
-                    count: solved.n_pinned_sites,
-                },
+        (true, ClosedSurfaces::FreeSites {
+            count,
+            max_angle,
+            forbid_elsewhere,
+        }) => {
+            let sites = Some((count, max_angle, forbid_elsewhere));
+            let solved = solve_on(prepared, piece, options, sites, &mut warnings)?;
+            let handling = ClosedHandling::FreeSites {
+                n_automatic: solved.n_free_sites,
+                n_pinned: solved.n_pinned_sites,
             };
             finish(solved, None, Vec::new(), handling)
         }
@@ -233,13 +234,13 @@ fn finish(
     }
 }
 
-/// Solves the cone problem of one mesh (a piece, or a piece with its slit). `free_site` is the
-/// angle bound of an automatic free cone site, if the policy asks for one.
+/// Solves the cone problem of one mesh (a piece, or a piece with its slit). `free_sites` is
+/// `(count, angle bound, forbid cones elsewhere)` if the policy asks for free cone sites.
 fn solve_on(
     prepared: &Prepared,
     piece: &Piece,
     options: &UnwrapOptions,
-    free_site: Option<f64>,
+    free_sites: Option<(usize, f64, bool)>,
     warnings: &mut Vec<String>,
 ) -> Result<Solved, UvError> {
     let mesh = &piece.mesh;
@@ -276,7 +277,7 @@ fn solve_on(
         log_scale: None,
         report: None,
         positive_only,
-        free_site: None,
+        n_free_sites: 0,
         n_pinned_sites: 0,
     };
     let interior: Vec<bool> = (0..n).map(|v| !mesh.is_boundary_vertex(v)).collect();
@@ -313,22 +314,51 @@ fn solve_on(
         return Ok(solved);
     }
     let mut upper = vec![options.max_cone_angle; n];
-    if let Some(max_angle) = free_site
-        && solved.n_pinned_sites == 0
-    {
-        let defects = angle_defects(mesh, &piece.geometry)
-            .map_err(|e| internal(format!("angle defects of a piece: {e}")))?;
-        let mut site: Option<usize> = None;
-        for v in (0..n).filter(|&v| interior[v] && role(v) == 0) {
-            if site.is_none_or(|s| defects[v].abs() > defects[s].abs()) {
-                site = Some(v);
+    if let Some((count, max_angle, forbid_elsewhere)) = free_sites {
+        // The pinned vertices are sites already; more are added by farthest-point sampling,
+        // starting at the vertex of largest absolute angle defect.
+        let mut is_site: Vec<bool> = (0..n).map(|v| interior[v] && role(v) == 1).collect();
+        let mut nearest = vec![f64::INFINITY; n];
+        let nothing_blocked = vec![false; n];
+        for v in (0..n).filter(|&v| is_site[v]) {
+            for (d, x) in nearest.iter_mut().zip(distances(piece, &nothing_blocked, v)) {
+                *d = d.min(x);
             }
         }
-        if let Some(site) = site {
-            costs[site] = 0.0;
-            any_cost = true;
-            upper[site] = max_angle;
-            solved.free_site = Some(site as u32);
+        let defects = angle_defects(mesh, &piece.geometry)
+            .map_err(|e| internal(format!("angle defects of a piece: {e}")))?;
+        while solved.n_pinned_sites + solved.n_free_sites < count {
+            let candidates = (0..n).filter(|&v| interior[v] && role(v) == 0 && !is_site[v]);
+            let mut site: Option<usize> = None;
+            for v in candidates {
+                let better = match site {
+                    None => true,
+                    // The first site: largest curvature. Later ones: farthest from all sites.
+                    Some(s) if nearest[s].is_infinite() && nearest[v].is_infinite() => {
+                        defects[v].abs() > defects[s].abs()
+                    }
+                    Some(s) => nearest[v] > nearest[s],
+                };
+                if better {
+                    site = Some(v);
+                }
+            }
+            let Some(site) = site else { break };
+            is_site[site] = true;
+            solved.n_free_sites += 1;
+            for (d, x) in nearest.iter_mut().zip(distances(piece, &nothing_blocked, site)) {
+                *d = d.min(x);
+            }
+        }
+        for v in (0..n).filter(|&v| interior[v]) {
+            if is_site[v] {
+                costs[v] = 0.0;
+                upper[v] = max_angle;
+                any_cost = true;
+            } else if forbid_elsewhere && role(v) != 2 {
+                costs[v] = f64::INFINITY;
+                any_cost = true;
+            }
         }
     }
 
@@ -344,7 +374,7 @@ fn solve_on(
         geometry: &piece.geometry,
         lambda: options.lambda,
         distortion_weights: None,
-        cone_costs: any_cost.then_some(costs),
+        cone_costs: any_cost.then(|| costs.clone()),
         lower_bounds: positive_only.then(|| vec![0.0; n]),
         upper_bounds: Some(upper),
         prescribed_cones: prescribed,
@@ -473,8 +503,46 @@ fn solve_on(
         } else {
             after
         },
+        before_reoptimization: None,
         seconds: solution.report.timings.total,
         message: solution.report.message.clone(),
     });
+
+    // Optionally: the best angles for these cone positions, without the penalty.
+    if options.reoptimize_angles && !solved.cones.is_empty() {
+        let mut free = vec![f64::INFINITY; n];
+        for cone in &solved.cones {
+            free[cone.vertex as usize] = 0.0;
+        }
+        for v in (0..n).filter(|&v| interior[v] && costs[v] == 0.0) {
+            free[v] = 0.0;
+        }
+        let again = ConeProblem {
+            cone_costs: Some(free),
+            ..problem.clone()
+        };
+        match solve(&again, &SolveOptions::default()) {
+            Ok(second) if second.report.status == Status::Converged => {
+                let report = solved.report.as_mut().expect("set above");
+                report.before_reoptimization = Some((report.distortion, solved.cones.len()));
+                report.distortion = second.distortion;
+                report.seconds += second.report.timings.total;
+                report.factorizations += second.report.linear_solver.ldlt_factorizations
+                    + second.report.linear_solver.lu_factorizations;
+                solved.cones = second.cones;
+                solved.log_scale = Some(second.log_scale);
+            }
+            Ok(second) => warnings.push(format!(
+                "re-optimizing the cone angles of the piece of the surface that contains face \
+                 {} did not converge (status {:?}); the angles of the penalized solve are used",
+                piece.first_polygon, second.report.status
+            )),
+            Err(e) => warnings.push(format!(
+                "re-optimizing the cone angles of the piece of the surface that contains face \
+                 {} failed ({e}); the angles of the penalized solve are used",
+                piece.first_polygon
+            )),
+        }
+    }
     Ok(solved)
 }

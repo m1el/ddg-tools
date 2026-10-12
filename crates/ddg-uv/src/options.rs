@@ -55,15 +55,22 @@ pub enum ClosedSurfaces {
     /// Solve the closed problem as it stands and use its optimum (with cluster merging as
     /// [`MergeClusters`] says).
     RawOptimum,
-    /// One free cone site (paper Sec. 8.1): a vertex where a cone costs nothing. The site is
-    /// the vertex of largest absolute angle defect, unless the caller pinned vertices on the
-    /// piece (pinned vertices are free sites already; no further site is added then).
-    FreeSite {
-        /// Upper bound of the cone angle at the site. In the solver's linear model a free site
-        /// can take `2π` or more, which no cone can have; such a result is an error
-        /// ([`UvError::UnrealizableCone`]). The bound of all other vertices is
-        /// [`UnwrapOptions::max_cone_angle`].
+    /// Free cone sites (paper Sec. 8.1): vertices where a cone costs nothing. The sites are the
+    /// caller's pinned vertices on the piece, completed to `count` sites by farthest-point
+    /// sampling along polygon edges, starting at the vertex of largest absolute angle defect.
+    ///
+    /// `count: 1, forbid_elsewhere: false` is the paper's single free site. In the solver's
+    /// linear model one site takes `2π` or more on convex shapes, which no cone can have
+    /// ([`UvError::UnrealizableCone`]). Several sites with `max_angle < 2π`,
+    /// `count · max_angle ≥ 4π` and cones forbidden elsewhere give at most `count` cones whose
+    /// positions are not optimized, only their angles.
+    FreeSites {
+        /// Number of sites.
+        count: usize,
+        /// Upper bound of the cone angle at a site (may be infinite).
         max_angle: f64,
+        /// Whether cones are forbidden at all other vertices.
+        forbid_elsewhere: bool,
     },
     /// Cut a slit along polygon edges, so that the piece gets a small boundary. The scale factor
     /// is zero along it, the two sides of the slit keep their lengths, and `λ` trades cones
@@ -227,6 +234,12 @@ pub struct UnwrapOptions {
     /// Resolution of the overlap estimate of every chart: about this many sample points per
     /// triangle of average size. `0.0` switches the estimate off.
     pub overlap_samples_per_triangle: f64,
+    /// Whether the cone angles are optimized once more after the cones were chosen: a second
+    /// solve in which a cone costs nothing at the chosen vertices (and at pinned vertices) and
+    /// is forbidden everywhere else. This is the step the authors of the cone paper evidently
+    /// applied to their published cones; it removes the shrinkage that the penalty `λ` puts on
+    /// the angles. It costs a second solve per piece with cones.
+    pub reoptimize_angles: bool,
     /// Whether cones that the solver could not certify as optimal are an error
     /// ([`UvError::ConesNotCertified`]). With `false` they are used and the report warns.
     pub require_certified_cones: bool,
@@ -244,6 +257,7 @@ impl Default for UnwrapOptions {
             degenerate: Degenerate::default(),
             packing: Some(PackOptions::default()),
             overlap_samples_per_triangle: ddg_bff::DEFAULT_OVERLAP_SAMPLES,
+            reoptimize_angles: false,
             require_certified_cones: false,
         }
     }
@@ -290,13 +304,32 @@ impl UnwrapOptions {
         };
         match self.closed_surfaces {
             ClosedSurfaces::Refuse | ClosedSurfaces::RawOptimum => {}
-            ClosedSurfaces::FreeSite { max_angle } => {
+            ClosedSurfaces::FreeSites {
+                count,
+                max_angle,
+                forbid_elsewhere,
+            } => {
                 // Infinity is allowed: it is the paper's free site as it stands.
                 if max_angle.is_nan() || max_angle <= 0.0 {
                     return Err(invalid(
                         "closed_surfaces.max_angle",
                         max_angle,
                         "must be positive",
+                    ));
+                }
+                if count == 0 {
+                    return Err(invalid(
+                        "closed_surfaces.count",
+                        count,
+                        "must be at least 1",
+                    ));
+                }
+                if forbid_elsewhere && count as f64 * max_angle < 2.0 * TAU {
+                    return Err(invalid(
+                        "closed_surfaces.count",
+                        count,
+                        "with cones forbidden elsewhere, count times max_angle must be at \
+                         least 4π, the sum of the cone angles of a closed surface of genus 0",
                     ));
                 }
             }

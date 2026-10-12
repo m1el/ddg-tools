@@ -62,15 +62,12 @@ pub enum ClosedHandling {
     NotClosed,
     /// The closed problem was solved as it stands.
     RawOptimum,
-    /// A free cone site was added at this vertex of the caller's mesh.
-    FreeSite {
-        /// The site.
-        vertex: u32,
-    },
-    /// The caller's pinned vertices on the piece served as free cone sites.
-    PinnedSites {
-        /// How many of them.
-        count: usize,
+    /// Free cone sites were used.
+    FreeSites {
+        /// Number of sites the pipeline chose.
+        n_automatic: usize,
+        /// Number of pinned vertices of the caller that served as sites.
+        n_pinned: usize,
     },
     /// A slit was cut.
     Slit {
@@ -130,6 +127,9 @@ pub struct ConeSolveReport {
     pub distortion_merged: f64,
     /// The solver's distortion of the cones that are used.
     pub distortion: f64,
+    /// If the angles were re-optimized: the distortion before that step, and the number of
+    /// cones before it (cones whose angle became zero are dropped).
+    pub before_reoptimization: Option<(f64, usize)>,
     /// Wall-clock seconds inside the solver (both solves under
     /// [`crate::ClosedSurfaces::Auto`] with fallback).
     pub seconds: f64,
