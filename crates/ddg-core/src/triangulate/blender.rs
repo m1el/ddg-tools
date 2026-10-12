@@ -44,7 +44,11 @@ fn sub_v3(a: V3, b: V3) -> V3 {
 
 #[inline]
 fn cross_v3(a: V3, b: V3) -> V3 {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 #[inline]
@@ -101,7 +105,10 @@ fn projection_axes(corner_positions: &[V3]) -> [V3; 2] {
         [n1, n2]
     } else {
         // Degenerate case: the normal is (anti)parallel to Z.
-        [[if n[2] < 0.0 { -1.0 } else { 1.0 }, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        [
+            [if n[2] < 0.0 { -1.0 } else { 1.0 }, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
     }
 }
 
@@ -244,7 +251,11 @@ impl PolyFill<'_> {
         if tip.sign != sign_accept {
             return false;
         }
-        let ind = [tip.index, self.indices[tip.next as usize].index, self.indices[tip.prev as usize].index];
+        let ind = [
+            tip.index,
+            self.indices[tip.next as usize].index,
+            self.indices[tip.prev as usize].index,
+        ];
         !self.reflex_isect_tri(ind)
     }
 
@@ -278,7 +289,11 @@ impl PolyFill<'_> {
     /// `pf_ear_tip_cut` and `pf_coord_remove`.
     fn ear_tip_cut(&mut self, pi_ear_tip: u32) {
         let tip = self.indices[pi_ear_tip as usize];
-        self.tris.push([self.indices[tip.prev as usize].index, tip.index, self.indices[tip.next as usize].index]);
+        self.tris.push([
+            self.indices[tip.prev as usize].index,
+            tip.index,
+            self.indices[tip.next as usize].index,
+        ]);
 
         if !self.reflex.is_empty() {
             self.reflex_remove(tip.index);
@@ -401,7 +416,11 @@ fn polyfill_calc(
 /// and with Blender's corner order.
 ///
 /// `corner_positions.len()` must be at least 3.
-pub(super) fn tessellate_face(corner_positions: &[V3], scratch: &mut PolyFillScratch, tris: &mut Vec<[u32; 3]>) {
+pub(super) fn tessellate_face(
+    corner_positions: &[V3],
+    scratch: &mut PolyFillScratch,
+    tris: &mut Vec<[u32; 3]>,
+) {
     match corner_positions.len() {
         3 => tris.push([0, 1, 2]),
         4 => {
@@ -417,7 +436,12 @@ pub(super) fn tessellate_face(corner_positions: &[V3], scratch: &mut PolyFillScr
         }
         _ => {
             let axes = projection_axes(corner_positions);
-            let PolyFillScratch { projected, indices, reflex, reflex_slot } = scratch;
+            let PolyFillScratch {
+                projected,
+                indices,
+                reflex,
+                reflex_slot,
+            } = scratch;
             projected.clear();
             projected.extend(corner_positions.iter().map(|&p| project(&axes, p)));
             polyfill_calc(projected, indices, reflex, reflex_slot, tris);

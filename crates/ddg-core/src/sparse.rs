@@ -11,8 +11,9 @@
 //! restricted to supernodes for general symmetric indefinite ones, and `LU` with partial pivoting
 //! for everything else.
 //!
-//! Parallelism is an explicit argument of every numeric call ([`Parallelism`]); nothing reads
-//! global settings.
+//! Parallelism is an explicit argument of every numeric call ([`Parallelism`]): either the
+//! calling thread, or a [`ThreadPool`] that the caller owns. Nothing reads global settings and
+//! the global `rayon` pool is never used.
 //!
 //! # Backend
 //!
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::cholesky::ldlt::factor::LdltRegularization;
 use faer::linalg::cholesky::llt::factor::LltRegularization;
-use faer::sparse::linalg::{SupernodalThreshold, cholesky as fchol, lu as flu};
+use faer::sparse::linalg::{SupernodalThreshold, amd as famd, cholesky as fchol, lu as flu};
 use faer::sparse::{FaerError, SparseColMatRef, SymbolicSparseColMatRef};
 use faer::{Conj, MatMut, Par, Side};
 
@@ -104,17 +105,19 @@ pub enum SparseError {
     },
     /// `LLᵀ` met a non-positive pivot: the matrix is not (numerically) positive definite.
     NotPositiveDefinite {
-        /// Elimination step, in the permuted order.
+        /// Where the backend noticed it. This refers to the permuted matrix and its exact
+        /// meaning depends on the backend's code path; it is a diagnostic hint only.
         step: usize,
     },
-    /// `LDLᵀ` met an exactly zero pivot.
+    /// `LDLᵀ` met an exactly zero (or non-finite) pivot.
     ZeroPivot {
-        /// Elimination step, in the permuted order.
+        /// Where the backend noticed it; a diagnostic hint only, as for
+        /// [`SparseError::NotPositiveDefinite`].
         step: usize,
     },
     /// `LU` found no pivot: the matrix is structurally singular.
     StructurallySingular {
-        /// Elimination step at which no pivot was available.
+        /// Where the backend noticed it; a diagnostic hint only.
         step: usize,
     },
     /// A solve produced a non-finite value, which means the factorized matrix is singular or
@@ -122,6 +125,21 @@ pub enum SparseError {
     NonFiniteSolution {
         /// Index of the first non-finite entry (row + n · column).
         index: usize,
+    },
+    /// A custom elimination order is not a permutation of `0..n`.
+    InvalidOrdering {
+        /// What is wrong with it.
+        reason: String,
+    },
+    /// The requested combination of options is not available.
+    Unsupported {
+        /// What was requested.
+        what: &'static str,
+    },
+    /// A [`ThreadPool`] could not be created.
+    ThreadPool {
+        /// Why.
+        reason: String,
     },
     /// The factor would need more entries than the index type can address.
     IndexOverflow,
@@ -132,46 +150,82 @@ pub enum SparseError {
 impl fmt::Display for SparseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SparseError::TripletOutOfRange { index, row, col, nrows, ncols } => write!(
+            SparseError::TripletOutOfRange {
+                index,
+                row,
+                col,
+                nrows,
+                ncols,
+            } => write!(
                 f,
                 "triplet {index} at (row {row}, column {col}) is outside the {nrows} x {ncols} matrix"
             ),
-            SparseError::InvalidStructure { reason } => write!(f, "invalid sparse structure: {reason}"),
+            SparseError::InvalidStructure { reason } => {
+                write!(f, "invalid sparse structure: {reason}")
+            }
             SparseError::TooLarge { nrows, ncols } => {
                 write!(f, "{nrows} x {ncols} matrix exceeds the 32-bit index range")
             }
-            SparseError::DimensionMismatch { what, expected, got } => {
+            SparseError::DimensionMismatch {
+                what,
+                expected,
+                got,
+            } => {
                 write!(f, "{what}: expected {expected}, got {got}")
             }
             SparseError::IndexOutOfRange { what, index, bound } => {
-                write!(f, "{what} index {index} is out of range (must be < {bound})")
+                write!(
+                    f,
+                    "{what} index {index} is out of range (must be < {bound})"
+                )
             }
-            SparseError::DuplicateIndex { what, index } => write!(f, "{what} {index} is listed more than once"),
+            SparseError::DuplicateIndex { what, index } => {
+                write!(f, "{what} {index} is listed more than once")
+            }
             SparseError::NotSquare { nrows, ncols } => {
                 write!(f, "a square matrix is required, got {nrows} x {ncols}")
             }
             SparseError::PatternMismatch { reason } => {
-                write!(f, "matrix does not have the analysed sparsity pattern: {reason}")
+                write!(
+                    f,
+                    "matrix does not have the analysed sparsity pattern: {reason}"
+                )
             }
             SparseError::MissingDiagonal { index } => {
-                write!(f, "diagonal entry ({index}, {index}) is not stored in the sparsity pattern")
+                write!(
+                    f,
+                    "diagonal entry ({index}, {index}) is not stored in the sparsity pattern"
+                )
             }
             SparseError::NotPositiveDefinite { step } => write!(
                 f,
                 "matrix is not positive definite: non-positive pivot at elimination step {step}"
             ),
             SparseError::ZeroPivot { step } => {
-                write!(f, "LDLt factorization failed: zero pivot at elimination step {step}")
+                write!(
+                    f,
+                    "LDLt factorization failed: zero pivot at elimination step {step}"
+                )
             }
             SparseError::StructurallySingular { step } => {
-                write!(f, "matrix is structurally singular: no pivot at elimination step {step}")
+                write!(
+                    f,
+                    "matrix is structurally singular: no pivot at elimination step {step}"
+                )
             }
             SparseError::NonFiniteSolution { index } => write!(
                 f,
                 "solve produced a non-finite value at entry {index}: the matrix is singular or too \
                  ill-conditioned for this factorization, or the right-hand side is not finite"
             ),
-            SparseError::IndexOverflow => write!(f, "sparse factor is too large for the index type"),
+            SparseError::InvalidOrdering { reason } => {
+                write!(f, "invalid elimination order: {reason}")
+            }
+            SparseError::Unsupported { what } => write!(f, "not supported: {what}"),
+            SparseError::ThreadPool { reason } => write!(f, "cannot create thread pool: {reason}"),
+            SparseError::IndexOverflow => {
+                write!(f, "sparse factor is too large for the index type")
+            }
             SparseError::OutOfMemory => write!(f, "out of memory in sparse factorization"),
         }
     }
@@ -222,7 +276,13 @@ impl SparseMatrix {
         let mut counts = vec![0usize; ncols + 1];
         for (index, &(row, col, _)) in triplets.iter().enumerate() {
             if row as usize >= nrows || col as usize >= ncols {
-                return Err(SparseError::TripletOutOfRange { index, row, col, nrows, ncols });
+                return Err(SparseError::TripletOutOfRange {
+                    index,
+                    row,
+                    col,
+                    nrows,
+                    ncols,
+                });
             }
             counts[col as usize + 1] += 1;
         }
@@ -261,7 +321,13 @@ impl SparseMatrix {
             }
             col_ptr.push(row_idx.len());
         }
-        Ok(SparseMatrix { nrows, ncols, col_ptr, row_idx, values })
+        Ok(SparseMatrix {
+            nrows,
+            ncols,
+            col_ptr,
+            row_idx,
+            values,
+        })
     }
 
     /// Wraps raw CSC arrays after checking every invariant.
@@ -281,13 +347,21 @@ impl SparseMatrix {
         }
         let invalid = |reason: String| Err(SparseError::InvalidStructure { reason });
         if col_ptr.len() != ncols + 1 {
-            return invalid(format!("col_ptr has {} entries, expected ncols + 1 = {}", col_ptr.len(), ncols + 1));
+            return invalid(format!(
+                "col_ptr has {} entries, expected ncols + 1 = {}",
+                col_ptr.len(),
+                ncols + 1
+            ));
         }
         if col_ptr[0] != 0 {
             return invalid(format!("col_ptr[0] is {}, expected 0", col_ptr[0]));
         }
         if row_idx.len() != values.len() {
-            return invalid(format!("{} row indices but {} values", row_idx.len(), values.len()));
+            return invalid(format!(
+                "{} row indices but {} values",
+                row_idx.len(),
+                values.len()
+            ));
         }
         if col_ptr[ncols] != row_idx.len() {
             return invalid(format!(
@@ -304,7 +378,9 @@ impl SparseMatrix {
         for j in 0..ncols {
             let rows = &row_idx[col_ptr[j]..col_ptr[j + 1]];
             if let Some(&r) = rows.iter().find(|&&r| r as usize >= nrows) {
-                return invalid(format!("column {j} has row index {r}, but there are {nrows} rows"));
+                return invalid(format!(
+                    "column {j} has row index {r}, but there are {nrows} rows"
+                ));
             }
             if let Some(w) = rows.windows(2).find(|w| w[0] >= w[1]) {
                 return invalid(format!(
@@ -313,7 +389,13 @@ impl SparseMatrix {
                 ));
             }
         }
-        Ok(SparseMatrix { nrows, ncols, col_ptr, row_idx, values })
+        Ok(SparseMatrix {
+            nrows,
+            ncols,
+            col_ptr,
+            row_idx,
+            values,
+        })
     }
 
     /// The square diagonal matrix with the given diagonal (every diagonal entry is stored).
@@ -379,7 +461,10 @@ impl SparseMatrix {
             return None;
         }
         let (lo, hi) = (self.col_ptr[col], self.col_ptr[col + 1]);
-        self.row_idx[lo..hi].binary_search(&(row as u32)).ok().map(|k| lo + k)
+        self.row_idx[lo..hi]
+            .binary_search(&(row as u32))
+            .ok()
+            .map(|k| lo + k)
     }
 
     /// The value at `(row, col)`; `0.0` if the entry is not stored or out of range.
@@ -390,13 +475,16 @@ impl SparseMatrix {
     /// All stored entries as `(row, column, value)`, column by column.
     pub fn triplets(&self) -> impl Iterator<Item = (u32, u32, f64)> + '_ {
         (0..self.ncols).flat_map(move |j| {
-            (self.col_ptr[j]..self.col_ptr[j + 1]).map(move |k| (self.row_idx[k], j as u32, self.values[k]))
+            (self.col_ptr[j]..self.col_ptr[j + 1])
+                .map(move |k| (self.row_idx[k], j as u32, self.values[k]))
         })
     }
 
     /// The main diagonal (`0.0` where no entry is stored).
     pub fn diagonal(&self) -> Vec<f64> {
-        (0..self.nrows.min(self.ncols)).map(|i| self.get(i, i)).collect()
+        (0..self.nrows.min(self.ncols))
+            .map(|i| self.get(i, i))
+            .collect()
     }
 
     /// Adds `d[i]` to the stored diagonal entry `(i, i)` for every `i`. The pattern is unchanged.
@@ -407,11 +495,18 @@ impl SparseMatrix {
     pub fn add_to_diagonal(&mut self, d: &[f64]) -> Result<(), SparseError> {
         let n = self.nrows.min(self.ncols);
         if d.len() != n {
-            return Err(SparseError::DimensionMismatch { what: "diagonal length", expected: n, got: d.len() });
+            return Err(SparseError::DimensionMismatch {
+                what: "diagonal length",
+                expected: n,
+                got: d.len(),
+            });
         }
         let mut slots = Vec::with_capacity(n);
         for i in 0..n {
-            slots.push(self.find(i, i).ok_or(SparseError::MissingDiagonal { index: i })?);
+            slots.push(
+                self.find(i, i)
+                    .ok_or(SparseError::MissingDiagonal { index: i })?,
+            );
         }
         for (slot, &x) in slots.into_iter().zip(d) {
             self.values[slot] += x;
@@ -425,10 +520,18 @@ impl SparseMatrix {
     /// [`SparseError::DimensionMismatch`] if `x.len() != ncols` or `y.len() != nrows`.
     pub fn mul_vec(&self, x: &[f64], y: &mut [f64]) -> Result<(), SparseError> {
         if x.len() != self.ncols {
-            return Err(SparseError::DimensionMismatch { what: "length of x", expected: self.ncols, got: x.len() });
+            return Err(SparseError::DimensionMismatch {
+                what: "length of x",
+                expected: self.ncols,
+                got: x.len(),
+            });
         }
         if y.len() != self.nrows {
-            return Err(SparseError::DimensionMismatch { what: "length of y", expected: self.nrows, got: y.len() });
+            return Err(SparseError::DimensionMismatch {
+                what: "length of y",
+                expected: self.nrows,
+                got: y.len(),
+            });
         }
         y.fill(0.0);
         for (j, &xj) in x.iter().enumerate() {
@@ -459,7 +562,13 @@ impl SparseMatrix {
                 *slot += 1;
             }
         }
-        SparseMatrix { nrows: self.ncols, ncols: self.nrows, col_ptr, row_idx, values }
+        SparseMatrix {
+            nrows: self.ncols,
+            ncols: self.nrows,
+            col_ptr,
+            row_idx,
+            values,
+        }
     }
 
     /// The largest `|A_ij − A_ji|` over all entries; `0.0` for an exactly symmetric matrix.
@@ -468,7 +577,10 @@ impl SparseMatrix {
     /// [`SparseError::NotSquare`].
     pub fn symmetry_defect(&self) -> Result<f64, SparseError> {
         if self.nrows != self.ncols {
-            return Err(SparseError::NotSquare { nrows: self.nrows, ncols: self.ncols });
+            return Err(SparseError::NotSquare {
+                nrows: self.nrows,
+                ncols: self.ncols,
+            });
         }
         let mut worst = 0.0f64;
         for (i, j, v) in self.triplets() {
@@ -488,10 +600,17 @@ impl SparseMatrix {
         let mut row_map = vec![UNUSED; self.nrows];
         for (new, &old) in rows.iter().enumerate() {
             if old as usize >= self.nrows {
-                return Err(SparseError::IndexOutOfRange { what: "row", index: old as usize, bound: self.nrows });
+                return Err(SparseError::IndexOutOfRange {
+                    what: "row",
+                    index: old as usize,
+                    bound: self.nrows,
+                });
             }
             if row_map[old as usize] != UNUSED {
-                return Err(SparseError::DuplicateIndex { what: "row", index: old as usize });
+                return Err(SparseError::DuplicateIndex {
+                    what: "row",
+                    index: old as usize,
+                });
             }
             row_map[old as usize] = new as u32;
         }
@@ -502,7 +621,11 @@ impl SparseMatrix {
         col_ptr.push(0);
         for &j in cols {
             if j as usize >= self.ncols {
-                return Err(SparseError::IndexOutOfRange { what: "column", index: j as usize, bound: self.ncols });
+                return Err(SparseError::IndexOutOfRange {
+                    what: "column",
+                    index: j as usize,
+                    bound: self.ncols,
+                });
             }
             column.clear();
             for k in self.col_ptr[j as usize]..self.col_ptr[j as usize + 1] {
@@ -518,24 +641,77 @@ impl SparseMatrix {
             }
             col_ptr.push(row_idx.len());
         }
-        Ok(SparseMatrix { nrows: rows.len(), ncols: cols.len(), col_ptr, row_idx, values })
+        Ok(SparseMatrix {
+            nrows: rows.len(),
+            ncols: cols.len(),
+            col_ptr,
+            row_idx,
+            values,
+        })
     }
 }
 
-/// How many threads a numeric factorization or solve may use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Parallelism {
-    /// Run on the calling thread only.
-    Sequential,
-    /// Use up to this many threads of the global `rayon` pool; `Threads(0)` means all of them.
-    Threads(usize),
+/// A private pool of worker threads for numeric factorizations and solves.
+///
+/// The pool is owned by the caller and passed explicitly ([`Parallelism::Pool`]); the global
+/// `rayon` pool is never used. This matters for speed as well as for hygiene: handing the
+/// backend a pool with many more threads than the factorization can use makes it dramatically
+/// slower (see the timings in the crate README), so size the pool deliberately.
+pub struct ThreadPool {
+    pool: rayon::ThreadPool,
+    n_threads: usize,
 }
 
-impl Parallelism {
-    fn to_faer(self) -> Par {
+impl fmt::Debug for ThreadPool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ThreadPool")
+            .field("n_threads", &self.n_threads)
+            .finish()
+    }
+}
+
+impl ThreadPool {
+    /// Starts a pool with exactly `n_threads` worker threads.
+    ///
+    /// # Errors
+    /// [`SparseError::ThreadPool`] if `n_threads` is 0 or the threads cannot be started.
+    pub fn new(n_threads: usize) -> Result<ThreadPool, SparseError> {
+        if n_threads == 0 {
+            return Err(SparseError::ThreadPool {
+                reason: "a thread pool needs at least 1 thread".to_string(),
+            });
+        }
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(n_threads)
+            .thread_name(|i| format!("ddg-sparse-{i}"))
+            .build()
+            .map_err(|e| SparseError::ThreadPool {
+                reason: e.to_string(),
+            })?;
+        Ok(ThreadPool { pool, n_threads })
+    }
+
+    /// Number of worker threads.
+    pub fn n_threads(&self) -> usize {
+        self.n_threads
+    }
+}
+
+/// Where a numeric factorization or solve runs.
+#[derive(Debug, Clone, Copy)]
+pub enum Parallelism<'a> {
+    /// On the calling thread only.
+    Sequential,
+    /// On the given pool, using all of its threads.
+    Pool(&'a ThreadPool),
+}
+
+impl Parallelism<'_> {
+    /// Runs `f` with the backend's parallelism setting, inside the pool if there is one.
+    fn run<R: Send>(self, f: impl FnOnce(Par) -> R + Send) -> R {
         match self {
-            Parallelism::Sequential => Par::Seq,
-            Parallelism::Threads(n) => Par::rayon(n),
+            Parallelism::Sequential => f(Par::Seq),
+            Parallelism::Pool(pool) => pool.pool.install(|| f(Par::rayon(pool.n_threads))),
         }
     }
 }
@@ -567,6 +743,61 @@ impl Method {
     }
 }
 
+/// The order in which a symmetric factorization eliminates the unknowns.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Ordering<'a> {
+    /// A fill-reducing order computed by the backend: AMD for the symmetric methods, COLAMD
+    /// (columns) for `LU`. The default.
+    #[default]
+    FillReducing,
+    /// The order of the matrix as given. Symmetric methods only.
+    Natural,
+    /// `order[k]` is the index of the unknown eliminated in step `k`; must be a permutation of
+    /// `0..n`. Symmetric methods only.
+    ///
+    /// This is how an indefinite matrix can be factorized by [`Method::Ldlt`] without pivoting:
+    /// choose an order in which every pivot is guaranteed to be non-zero. For a saddle-point
+    /// matrix `[[−M, L], [L, D]]` with `M` positive diagonal and `D` non-negative diagonal,
+    /// eliminating unknown `i` of the first block immediately before unknown `n + i` of the
+    /// second (with the pairs in a fill-reducing order of `L`, see [`fill_reducing_ordering`])
+    /// is such an order.
+    Custom(&'a [u32]),
+}
+
+/// The approximate minimum degree (AMD) elimination order for the sparsity pattern of
+/// `A + Aᵀ`: `order[k]` is the index of the unknown to eliminate in step `k`. This is the order
+/// [`Ordering::FillReducing`] uses for the symmetric methods; it is exposed so that callers can
+/// build structured orders from it (see [`Ordering::Custom`]).
+///
+/// # Errors
+/// [`SparseError::NotSquare`], or a resource error.
+pub fn fill_reducing_ordering(a: &SparseMatrix) -> Result<Vec<u32>, SparseError> {
+    if a.nrows != a.ncols {
+        return Err(SparseError::NotSquare {
+            nrows: a.nrows,
+            ncols: a.ncols,
+        });
+    }
+    let n = a.nrows;
+    let row_idx: Vec<usize> = a.row_idx.iter().map(|&r| r as usize).collect();
+    // SAFETY: `SparseMatrix` upholds the invariants faer requires.
+    let pattern = unsafe {
+        SymbolicSparseColMatRef::<usize>::new_unchecked(n, n, &a.col_ptr, None, &row_idx)
+    };
+    let mut perm: Vec<usize> = try_zeroed(n)?;
+    let mut perm_inv: Vec<usize> = try_zeroed(n)?;
+    let mut mem = MemBuffer::try_new(famd::order_scratch::<usize>(n, a.nnz()))
+        .map_err(|_| SparseError::OutOfMemory)?;
+    famd::order(
+        &mut perm,
+        &mut perm_inv,
+        pattern,
+        famd::Control::default(),
+        MemStack::new(&mut mem),
+    )?;
+    Ok(perm.into_iter().map(|p| p as u32).collect())
+}
+
 enum SymbolicKind {
     Cholesky(fchol::SymbolicCholesky<usize>),
     Lu(flu::SymbolicLu<usize>),
@@ -591,7 +822,9 @@ pub struct Symbolic {
 
 impl fmt::Debug for Symbolic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Symbolic").field("info", &self.info()).finish()
+        f.debug_struct("Symbolic")
+            .field("info", &self.info())
+            .finish()
     }
 }
 
@@ -613,7 +846,8 @@ pub struct SymbolicInfo {
 }
 
 impl Symbolic {
-    /// Analyses the sparsity pattern of `a` for the given method.
+    /// Analyses the sparsity pattern of `a` for the given method, with the backend's
+    /// fill-reducing ordering ([`Ordering::FillReducing`]).
     ///
     /// For the symmetric methods only the lower triangle of `a` (entries with `row >= col`) is
     /// read, here and in every later numeric factorization; whether `a` stores the upper
@@ -622,15 +856,68 @@ impl Symbolic {
     /// # Errors
     /// [`SparseError::NotSquare`], [`SparseError::IndexOverflow`], [`SparseError::OutOfMemory`].
     pub fn analyze(a: &SparseMatrix, method: Method) -> Result<Symbolic, SparseError> {
+        Symbolic::analyze_with_ordering(a, method, Ordering::FillReducing)
+    }
+
+    /// Like [`Symbolic::analyze`], with an explicit elimination order.
+    ///
+    /// # Errors
+    /// As for [`Symbolic::analyze`], plus [`SparseError::InvalidOrdering`] if a custom order is
+    /// not a permutation of `0..n`, and [`SparseError::Unsupported`] for `LU` with any order
+    /// other than [`Ordering::FillReducing`].
+    pub fn analyze_with_ordering(
+        a: &SparseMatrix,
+        method: Method,
+        ordering: Ordering<'_>,
+    ) -> Result<Symbolic, SparseError> {
         if a.nrows != a.ncols {
-            return Err(SparseError::NotSquare { nrows: a.nrows, ncols: a.ncols });
+            return Err(SparseError::NotSquare {
+                nrows: a.nrows,
+                ncols: a.ncols,
+            });
         }
         let n = a.nrows;
+        if method == Method::Lu && !matches!(ordering, Ordering::FillReducing) {
+            return Err(SparseError::Unsupported {
+                what: "LU with a natural or custom ordering",
+            });
+        }
+        // Forward and inverse permutation of a custom order, validated.
+        let custom: Option<(Vec<usize>, Vec<usize>)> = match ordering {
+            Ordering::Custom(order) => {
+                let invalid = |reason: String| Err(SparseError::InvalidOrdering { reason });
+                if order.len() != n {
+                    return invalid(format!(
+                        "it has {} entries, but the matrix has dimension {n}",
+                        order.len()
+                    ));
+                }
+                let mut inverse = vec![usize::MAX; n];
+                for (step, &index) in order.iter().enumerate() {
+                    if index as usize >= n {
+                        return invalid(format!(
+                            "entry {step} is {index}, which is not below the dimension {n}"
+                        ));
+                    }
+                    if inverse[index as usize] != usize::MAX {
+                        return invalid(format!(
+                            "index {index} appears twice (entries {} and {step})",
+                            inverse[index as usize]
+                        ));
+                    }
+                    inverse[index as usize] = step;
+                }
+                Some((order.iter().map(|&i| i as usize).collect(), inverse))
+            }
+            _ => None,
+        };
         let col_ptr = a.col_ptr.clone();
         let row_idx: Vec<usize> = a.row_idx.iter().map(|&r| r as usize).collect();
         // SAFETY: `SparseMatrix` upholds exactly the invariants faer requires (monotone column
         // pointers starting at 0, in-range, sorted, duplicate-free row indices).
-        let pattern = unsafe { SymbolicSparseColMatRef::<usize>::new_unchecked(n, n, &col_ptr, None, &row_idx) };
+        let pattern = unsafe {
+            SymbolicSparseColMatRef::<usize>::new_unchecked(n, n, &col_ptr, None, &row_idx)
+        };
         let kind = match method {
             Method::Llt | Method::Ldlt | Method::Lblt => {
                 let mut params = fchol::CholeskySymbolicParams::default();
@@ -638,16 +925,40 @@ impl Symbolic {
                     // Pivoting only exists in the supernodal code path.
                     params.supernodal_flop_ratio_threshold = SupernodalThreshold::FORCE_SUPERNODAL;
                 }
+                let ordering = match (&ordering, &custom) {
+                    (Ordering::FillReducing, _) => fchol::SymmetricOrdering::Amd,
+                    (Ordering::Natural, _) => fchol::SymmetricOrdering::Identity,
+                    // SAFETY: validated above: both arrays are permutations of 0..n and
+                    // inverse to each other.
+                    (Ordering::Custom(_), Some((forward, inverse))) => {
+                        fchol::SymmetricOrdering::Custom(unsafe {
+                            faer::perm::PermRef::new_unchecked(forward, inverse, n)
+                        })
+                    }
+                    (Ordering::Custom(_), None) => {
+                        unreachable!("custom permutation was built above")
+                    }
+                };
                 SymbolicKind::Cholesky(fchol::factorize_symbolic_cholesky(
                     pattern,
                     Side::Lower,
-                    fchol::SymmetricOrdering::Amd,
+                    ordering,
                     params,
                 )?)
             }
-            Method::Lu => SymbolicKind::Lu(flu::factorize_symbolic_lu(pattern, Default::default())?),
+            Method::Lu => {
+                SymbolicKind::Lu(flu::factorize_symbolic_lu(pattern, Default::default())?)
+            }
         };
-        Ok(Symbolic { inner: Arc::new(SymbolicInner { method, n, col_ptr, row_idx, kind }) })
+        Ok(Symbolic {
+            inner: Arc::new(SymbolicInner {
+                method,
+                n,
+                col_ptr,
+                row_idx,
+                kind,
+            }),
+        })
     }
 
     /// The method this analysis was made for.
@@ -664,12 +975,19 @@ impl Symbolic {
     pub fn info(&self) -> SymbolicInfo {
         let inner = &*self.inner;
         let (factor_values, supernodal) = match &inner.kind {
-            SymbolicKind::Cholesky(s) => {
-                (Some(s.len_val()), Some(matches!(s.raw(), fchol::SymbolicCholeskyRaw::Supernodal(_))))
-            }
+            SymbolicKind::Cholesky(s) => (
+                Some(s.len_val()),
+                Some(matches!(s.raw(), fchol::SymbolicCholeskyRaw::Supernodal(_))),
+            ),
             SymbolicKind::Lu(_) => (None, None),
         };
-        SymbolicInfo { method: inner.method, n: inner.n, matrix_nnz: inner.row_idx.len(), factor_values, supernodal }
+        SymbolicInfo {
+            method: inner.method,
+            n: inner.n,
+            matrix_nnz: inner.row_idx.len(),
+            factor_values,
+            supernodal,
+        }
     }
 
     /// Computes the numeric factorization of `a`, which must have exactly the analysed pattern.
@@ -678,11 +996,19 @@ impl Symbolic {
     /// [`SparseError::PatternMismatch`] if the pattern differs; otherwise the failure of the
     /// method: [`SparseError::NotPositiveDefinite`] (`Llt`), [`SparseError::ZeroPivot`]
     /// (`Ldlt`), [`SparseError::StructurallySingular`] (`Lu`), or a resource error.
-    pub fn factor(&self, a: &SparseMatrix, par: Parallelism) -> Result<Factorization, SparseError> {
+    pub fn factor(
+        &self,
+        a: &SparseMatrix,
+        par: Parallelism<'_>,
+    ) -> Result<Factorization, SparseError> {
         let numeric = match &self.inner.kind {
             SymbolicKind::Cholesky(s) => {
                 let n = self.inner.n;
-                let (pivots, n_perm) = if self.inner.method == Method::Lblt { (n, n) } else { (0, 0) };
+                let (pivots, n_perm) = if self.inner.method == Method::Lblt {
+                    (n, n)
+                } else {
+                    (0, 0)
+                };
                 Numeric::Cholesky {
                     values: try_zeroed(s.len_val())?,
                     subdiag: try_zeroed(pivots)?,
@@ -692,7 +1018,10 @@ impl Symbolic {
             }
             SymbolicKind::Lu(_) => Numeric::Lu(Box::new(flu::NumericLu::new())),
         };
-        let mut factorization = Factorization { symbolic: self.clone(), numeric };
+        let mut factorization = Factorization {
+            symbolic: self.clone(),
+            numeric,
+        };
         factorization.refactor(a, par)?;
         Ok(factorization)
     }
@@ -700,7 +1029,8 @@ impl Symbolic {
 
 fn try_zeroed<T: Clone + Default>(len: usize) -> Result<Vec<T>, SparseError> {
     let mut v = Vec::new();
-    v.try_reserve_exact(len).map_err(|_| SparseError::OutOfMemory)?;
+    v.try_reserve_exact(len)
+        .map_err(|_| SparseError::OutOfMemory)?;
     v.resize(len, T::default());
     Ok(v)
 }
@@ -725,7 +1055,9 @@ pub struct Factorization {
 
 impl fmt::Debug for Factorization {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Factorization").field("symbolic", &self.symbolic.info()).finish()
+        f.debug_struct("Factorization")
+            .field("symbolic", &self.symbolic.info())
+            .finish()
     }
 }
 
@@ -748,22 +1080,39 @@ impl Factorization {
     ///
     /// # Errors
     /// As for [`Symbolic::factor`].
-    pub fn refactor(&mut self, a: &SparseMatrix, par: Parallelism) -> Result<(), SparseError> {
+    pub fn refactor(&mut self, a: &SparseMatrix, par: Parallelism<'_>) -> Result<(), SparseError> {
+        check_pattern(&self.symbolic.inner, a)?;
+        par.run(|par| self.refactor_with(a, par))
+    }
+
+    fn refactor_with(&mut self, a: &SparseMatrix, par: Par) -> Result<(), SparseError> {
         let inner = &*self.symbolic.inner;
-        check_pattern(inner, a)?;
-        let par = par.to_faer();
         // SAFETY: the pattern was validated when `Symbolic` was built from a `SparseMatrix`.
         let pattern = unsafe {
-            SymbolicSparseColMatRef::<usize>::new_unchecked(inner.n, inner.n, &inner.col_ptr, None, &inner.row_idx)
+            SymbolicSparseColMatRef::<usize>::new_unchecked(
+                inner.n,
+                inner.n,
+                &inner.col_ptr,
+                None,
+                &inner.row_idx,
+            )
         };
         let matrix = SparseColMatRef::<usize, f64>::new(pattern, &a.values);
         match (&inner.kind, &mut self.numeric) {
-            (SymbolicKind::Cholesky(s), Numeric::Cholesky { values, subdiag, perm_fwd, perm_inv }) => match inner
-                .method
-            {
+            (
+                SymbolicKind::Cholesky(s),
+                Numeric::Cholesky {
+                    values,
+                    subdiag,
+                    perm_fwd,
+                    perm_inv,
+                },
+            ) => match inner.method {
                 Method::Llt => {
-                    let mut mem = MemBuffer::try_new(s.factorize_numeric_llt_scratch::<f64>(par, Default::default()))
-                        .map_err(|_| SparseError::OutOfMemory)?;
+                    let mut mem = MemBuffer::try_new(
+                        s.factorize_numeric_llt_scratch::<f64>(par, Default::default()),
+                    )
+                    .map_err(|_| SparseError::OutOfMemory)?;
                     s.factorize_numeric_llt::<f64>(
                         values,
                         matrix,
@@ -774,14 +1123,16 @@ impl Factorization {
                         Default::default(),
                     )
                     .map_err(|e| match e {
-                        faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot { index } => {
-                            SparseError::NotPositiveDefinite { step: index }
-                        }
+                        faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot {
+                            index,
+                        } => SparseError::NotPositiveDefinite { step: index },
                     })?;
                 }
                 Method::Ldlt => {
-                    let mut mem = MemBuffer::try_new(s.factorize_numeric_ldlt_scratch::<f64>(par, Default::default()))
-                        .map_err(|_| SparseError::OutOfMemory)?;
+                    let mut mem = MemBuffer::try_new(
+                        s.factorize_numeric_ldlt_scratch::<f64>(par, Default::default()),
+                    )
+                    .map_err(|_| SparseError::OutOfMemory)?;
                     s.factorize_numeric_ldlt::<f64>(
                         values,
                         matrix,
@@ -817,15 +1168,23 @@ impl Factorization {
                 Method::Lu => unreachable!("LU analysis never has a Cholesky symbolic"),
             },
             (SymbolicKind::Lu(s), Numeric::Lu(numeric)) => {
-                let mut mem = MemBuffer::try_new(s.factorize_numeric_lu_scratch::<f64>(par, Default::default()))
-                    .map_err(|_| SparseError::OutOfMemory)?;
-                s.factorize_numeric_lu::<f64>(numeric, matrix, par, MemStack::new(&mut mem), Default::default())
-                    .map_err(|e| match e {
-                        faer::sparse::linalg::LuError::SymbolicSingular { index } => {
-                            SparseError::StructurallySingular { step: index }
-                        }
-                        faer::sparse::linalg::LuError::Generic(g) => g.into(),
-                    })?;
+                let mut mem = MemBuffer::try_new(
+                    s.factorize_numeric_lu_scratch::<f64>(par, Default::default()),
+                )
+                .map_err(|_| SparseError::OutOfMemory)?;
+                s.factorize_numeric_lu::<f64>(
+                    numeric,
+                    matrix,
+                    par,
+                    MemStack::new(&mut mem),
+                    Default::default(),
+                )
+                .map_err(|e| match e {
+                    faer::sparse::linalg::LuError::SymbolicSingular { index } => {
+                        SparseError::StructurallySingular { step: index }
+                    }
+                    faer::sparse::linalg::LuError::Generic(g) => g.into(),
+                })?;
             }
             _ => unreachable!("numeric storage always matches the symbolic kind"),
         }
@@ -837,7 +1196,7 @@ impl Factorization {
     /// # Errors
     /// [`SparseError::DimensionMismatch`] if `rhs.len() != dim()`;
     /// [`SparseError::NonFiniteSolution`] if the result is not finite (then `rhs` holds garbage).
-    pub fn solve_in_place(&self, rhs: &mut [f64], par: Parallelism) -> Result<(), SparseError> {
+    pub fn solve_in_place(&self, rhs: &mut [f64], par: Parallelism<'_>) -> Result<(), SparseError> {
         self.solve_many_in_place(rhs, 1, par)
     }
 
@@ -847,9 +1206,13 @@ impl Factorization {
     /// # Errors
     /// [`SparseError::DimensionMismatch`] if `rhs.len() != dim() · nrhs`;
     /// [`SparseError::NonFiniteSolution`] if the result is not finite (then `rhs` holds garbage).
-    pub fn solve_many_in_place(&self, rhs: &mut [f64], nrhs: usize, par: Parallelism) -> Result<(), SparseError> {
-        let inner = &*self.symbolic.inner;
-        let n = inner.n;
+    pub fn solve_many_in_place(
+        &self,
+        rhs: &mut [f64],
+        nrhs: usize,
+        par: Parallelism<'_>,
+    ) -> Result<(), SparseError> {
+        let n = self.symbolic.inner.n;
         let expected = n.checked_mul(nrhs).ok_or(SparseError::IndexOverflow)?;
         if rhs.len() != expected {
             return Err(SparseError::DimensionMismatch {
@@ -861,24 +1224,38 @@ impl Factorization {
         if expected == 0 {
             return Ok(());
         }
-        let par = par.to_faer();
+        par.run(|par| self.solve_with(rhs, nrhs, par))
+    }
+
+    fn solve_with(&self, rhs: &mut [f64], nrhs: usize, par: Par) -> Result<(), SparseError> {
+        let inner = &*self.symbolic.inner;
+        let n = inner.n;
         {
             let rhs = MatMut::from_column_major_slice_mut(rhs, n, nrhs);
             match (&inner.kind, &self.numeric) {
-                (SymbolicKind::Cholesky(s), Numeric::Cholesky { values, subdiag, perm_fwd, perm_inv }) => {
+                (
+                    SymbolicKind::Cholesky(s),
+                    Numeric::Cholesky {
+                        values,
+                        subdiag,
+                        perm_fwd,
+                        perm_inv,
+                    },
+                ) => {
                     let mut mem = MemBuffer::try_new(s.solve_in_place_scratch::<f64>(nrhs, par))
                         .map_err(|_| SparseError::OutOfMemory)?;
                     let stack = MemStack::new(&mut mem);
                     match inner.method {
-                        Method::Llt => {
-                            fchol::LltRef::<usize, f64>::new(s, values).solve_in_place_with_conj(Conj::No, rhs, par, stack)
-                        }
+                        Method::Llt => fchol::LltRef::<usize, f64>::new(s, values)
+                            .solve_in_place_with_conj(Conj::No, rhs, par, stack),
                         Method::Ldlt => fchol::LdltRef::<usize, f64>::new(s, values)
                             .solve_in_place_with_conj(Conj::No, rhs, par, stack),
                         Method::Lblt => {
                             // SAFETY: both arrays were filled by the factorization with a
                             // permutation of 0..n and its inverse.
-                            let perm = unsafe { faer::perm::PermRef::new_unchecked(perm_fwd, perm_inv, n) };
+                            let perm = unsafe {
+                                faer::perm::PermRef::new_unchecked(perm_fwd, perm_inv, n)
+                            };
                             fchol::IntranodeLbltRef::<usize, f64>::new(s, values, subdiag, perm)
                                 .solve_in_place_with_conj(Conj::No, rhs, par, stack)
                         }
@@ -905,19 +1282,143 @@ impl Factorization {
     }
 }
 
+/// Controls [`Factorization::solve_refined`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RefineOptions {
+    /// Maximum number of refinement steps after the initial solve. `0` gives a plain solve with
+    /// a residual check.
+    pub max_steps: usize,
+    /// Stop as soon as the relative residual `‖A x − b‖₂ / ‖b‖₂` is at most this.
+    pub tolerance: f64,
+}
+
+/// What [`Factorization::solve_refined`] did.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RefineReport {
+    /// Whether the final relative residual is at most the requested tolerance.
+    pub converged: bool,
+    /// Number of refinement steps that were applied (each costs one solve and one product).
+    pub steps: usize,
+    /// Relative residual of the plain solve, before any refinement.
+    pub initial_residual: f64,
+    /// Relative residual of the returned solution.
+    pub residual: f64,
+}
+
+impl Factorization {
+    /// Solves `A x = b` and improves the solution by iterative refinement against the matrix
+    /// `a`: repeat `x ← x + A⁻¹ (b − a x)` with the factorization as the approximate inverse.
+    ///
+    /// `a` is the matrix whose solution is wanted. It is normally the matrix that was
+    /// factorized, in which case refinement removes the error of an unpivoted or otherwise
+    /// inaccurate factorization; it may also differ slightly from it (for example the
+    /// factorization of a regularized matrix can be used to solve the unregularized system).
+    /// A step that does not reduce the residual is discarded and ends the iteration, so the
+    /// returned `x` is always the best iterate seen.
+    ///
+    /// # Errors
+    /// [`SparseError::DimensionMismatch`] if `a`, `b` or `x` do not have dimension [`dim`](Self::dim);
+    /// [`SparseError::NonFiniteSolution`] if the initial solve fails.
+    pub fn solve_refined(
+        &self,
+        a: &SparseMatrix,
+        b: &[f64],
+        x: &mut [f64],
+        options: RefineOptions,
+        par: Parallelism<'_>,
+    ) -> Result<RefineReport, SparseError> {
+        let n = self.dim();
+        for (what, got) in [
+            ("rows of a", a.nrows),
+            ("columns of a", a.ncols),
+            ("length of b", b.len()),
+            ("length of x", x.len()),
+        ] {
+            if got != n {
+                return Err(SparseError::DimensionMismatch {
+                    what,
+                    expected: n,
+                    got,
+                });
+            }
+        }
+        let b_norm = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let scale = if b_norm == 0.0 { 1.0 } else { b_norm };
+        // r = b - a x, returning its relative norm.
+        let residual = |x: &[f64], r: &mut [f64]| -> Result<f64, SparseError> {
+            a.mul_vec(x, r)?;
+            let mut sum = 0.0;
+            for (ri, bi) in r.iter_mut().zip(b) {
+                *ri = bi - *ri;
+                sum += *ri * *ri;
+            }
+            Ok(sum.sqrt() / scale)
+        };
+
+        x.copy_from_slice(b);
+        self.solve_in_place(x, par)?;
+        let mut r = vec![0.0; n];
+        let initial_residual = residual(x, &mut r)?;
+        let mut best = initial_residual;
+        let mut steps = 0;
+        let mut candidate = vec![0.0; n];
+        let mut correction = vec![0.0; n];
+        // Written so that a NaN residual counts as "not converged" and "not improved".
+        let converged = |residual: f64| residual <= options.tolerance;
+        while steps < options.max_steps && !converged(best) {
+            correction.copy_from_slice(&r);
+            if self.solve_in_place(&mut correction, par).is_err() {
+                break;
+            }
+            for i in 0..n {
+                candidate[i] = x[i] + correction[i];
+            }
+            let mut r_new = vec![0.0; n];
+            let res = residual(&candidate, &mut r_new)?;
+            let improved = res < best;
+            if !improved {
+                break;
+            }
+            x.copy_from_slice(&candidate);
+            r = r_new;
+            best = res;
+            steps += 1;
+        }
+        Ok(RefineReport {
+            converged: converged(best),
+            steps,
+            initial_residual,
+            residual: best,
+        })
+    }
+}
+
 fn check_pattern(inner: &SymbolicInner, a: &SparseMatrix) -> Result<(), SparseError> {
     let mismatch = |reason: String| Err(SparseError::PatternMismatch { reason });
     if a.nrows != inner.n || a.ncols != inner.n {
-        return mismatch(format!("analysed {} x {}, got {} x {}", inner.n, inner.n, a.nrows, a.ncols));
+        return mismatch(format!(
+            "analysed {} x {}, got {} x {}",
+            inner.n, inner.n, a.nrows, a.ncols
+        ));
     }
     if a.nnz() != inner.row_idx.len() {
-        return mismatch(format!("analysed {} stored entries, got {}", inner.row_idx.len(), a.nnz()));
+        return mismatch(format!(
+            "analysed {} stored entries, got {}",
+            inner.row_idx.len(),
+            a.nnz()
+        ));
     }
     if let Some(j) = (0..=inner.n).find(|&j| a.col_ptr[j] != inner.col_ptr[j]) {
-        return mismatch(format!("column {} has a different number of entries", j.saturating_sub(1)));
+        return mismatch(format!(
+            "column {} has a different number of entries",
+            j.saturating_sub(1)
+        ));
     }
     if let Some(k) = (0..a.nnz()).find(|&k| a.row_idx[k] as usize != inner.row_idx[k]) {
-        return mismatch(format!("stored entry {k} is in row {}, analysed row {}", a.row_idx[k], inner.row_idx[k]));
+        return mismatch(format!(
+            "stored entry {k} is in row {}, analysed row {}",
+            a.row_idx[k], inner.row_idx[k]
+        ));
     }
     Ok(())
 }
@@ -929,7 +1430,11 @@ fn check_pattern(inner: &SymbolicInner, a: &SparseMatrix) -> Result<(), SparseEr
 /// [`SparseError::DimensionMismatch`] if the lengths do not match the matrix.
 pub fn relative_residual(a: &SparseMatrix, x: &[f64], b: &[f64]) -> Result<f64, SparseError> {
     if b.len() != a.nrows {
-        return Err(SparseError::DimensionMismatch { what: "length of b", expected: a.nrows, got: b.len() });
+        return Err(SparseError::DimensionMismatch {
+            what: "length of b",
+            expected: a.nrows,
+            got: b.len(),
+        });
     }
     let mut r = vec![0.0; a.nrows];
     a.mul_vec(x, &mut r)?;
@@ -939,20 +1444,43 @@ pub fn relative_residual(a: &SparseMatrix, x: &[f64], b: &[f64]) -> Result<f64, 
         rr += (ri - bi) * (ri - bi);
         bb += bi * bi;
     }
-    Ok(if bb == 0.0 { rr.sqrt() } else { (rr / bb).sqrt() })
+    Ok(if bb == 0.0 {
+        rr.sqrt()
+    } else {
+        (rr / bb).sqrt()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const PARS: [Parallelism; 2] = [Parallelism::Sequential, Parallelism::Threads(2)];
+    /// Runs `body` sequentially and on a two-thread pool.
+    fn for_each_parallelism(mut body: impl FnMut(Parallelism<'_>)) {
+        let pool = ThreadPool::new(2).unwrap();
+        assert_eq!(pool.n_threads(), 2);
+        body(Parallelism::Sequential);
+        body(Parallelism::Pool(&pool));
+    }
+
+    #[test]
+    fn thread_pool_needs_a_thread() {
+        let e = ThreadPool::new(0).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "cannot create thread pool: a thread pool needs at least 1 thread"
+        );
+    }
 
     /// Second-difference matrix on a path with `n` nodes plus `shift` on the diagonal.
     fn path_laplacian(n: usize, shift: f64) -> SparseMatrix {
         let mut t = Vec::new();
         for i in 0..n as u32 {
-            let deg = if i == 0 || i as usize == n - 1 { 1.0 } else { 2.0 };
+            let deg = if i == 0 || i as usize == n - 1 {
+                1.0
+            } else {
+                2.0
+            };
             t.push((i, i, deg + shift));
             if (i as usize) < n - 1 {
                 t.push((i, i + 1, -1.0));
@@ -964,8 +1492,18 @@ mod tests {
 
     #[test]
     fn triplets_are_sorted_and_summed() {
-        let a = SparseMatrix::from_triplets(3, 2, &[(2, 1, 1.0), (0, 1, 2.0), (2, 1, 0.5), (1, 0, 4.0), (0, 0, 0.0)])
-            .unwrap();
+        let a = SparseMatrix::from_triplets(
+            3,
+            2,
+            &[
+                (2, 1, 1.0),
+                (0, 1, 2.0),
+                (2, 1, 0.5),
+                (1, 0, 4.0),
+                (0, 0, 0.0),
+            ],
+        )
+        .unwrap();
         assert_eq!(a.col_ptr(), &[0, 2, 4]);
         assert_eq!(a.row_idx(), &[0, 1, 0, 2]);
         assert_eq!(a.values(), &[0.0, 4.0, 2.0, 1.5]);
@@ -987,7 +1525,10 @@ mod tests {
         assert_eq!(at.transpose(), a);
 
         let e = SparseMatrix::from_triplets(3, 2, &[(0, 0, 1.0), (3, 1, 1.0)]).unwrap_err();
-        assert_eq!(e.to_string(), "triplet 1 at (row 3, column 1) is outside the 3 x 2 matrix");
+        assert_eq!(
+            e.to_string(),
+            "triplet 1 at (row 3, column 1) is outside the 3 x 2 matrix"
+        );
     }
 
     #[test]
@@ -1000,19 +1541,43 @@ mod tests {
             "invalid sparse structure: col_ptr has 2 entries, expected ncols + 1 = 3"
         );
         assert_eq!(
-            msg(SparseMatrix::from_csc(2, 2, vec![0, 2, 2], vec![1, 0], vec![1.0, 2.0])),
+            msg(SparseMatrix::from_csc(
+                2,
+                2,
+                vec![0, 2, 2],
+                vec![1, 0],
+                vec![1.0, 2.0]
+            )),
             "invalid sparse structure: column 0 is not strictly increasing: row 1 is followed by row 0"
         );
         assert_eq!(
-            msg(SparseMatrix::from_csc(2, 2, vec![0, 1, 2], vec![0, 2], vec![1.0, 2.0])),
+            msg(SparseMatrix::from_csc(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 2],
+                vec![1.0, 2.0]
+            )),
             "invalid sparse structure: column 1 has row index 2, but there are 2 rows"
         );
         assert_eq!(
-            msg(SparseMatrix::from_csc(2, 2, vec![0, 2, 1], vec![0], vec![1.0])),
+            msg(SparseMatrix::from_csc(
+                2,
+                2,
+                vec![0, 2, 1],
+                vec![0],
+                vec![1.0]
+            )),
             "invalid sparse structure: col_ptr decreases at column 1"
         );
         assert_eq!(
-            msg(SparseMatrix::from_csc(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0])),
+            msg(SparseMatrix::from_csc(
+                2,
+                2,
+                vec![0, 1, 2],
+                vec![0, 1],
+                vec![1.0]
+            )),
             "invalid sparse structure: 2 row indices but 1 values"
         );
     }
@@ -1039,14 +1604,27 @@ mod tests {
                 assert_eq!(s.get(i, j), a.get(r, c));
             }
         }
-        assert_eq!(a.submatrix(&[0, 0], &[0]).unwrap_err().to_string(), "row 0 is listed more than once");
-        assert_eq!(a.submatrix(&[4], &[0]).unwrap_err().to_string(), "row index 4 is out of range (must be < 4)");
-        assert_eq!(a.submatrix(&[0], &[9]).unwrap_err().to_string(), "column index 9 is out of range (must be < 4)");
+        assert_eq!(
+            a.submatrix(&[0, 0], &[0]).unwrap_err().to_string(),
+            "row 0 is listed more than once"
+        );
+        assert_eq!(
+            a.submatrix(&[4], &[0]).unwrap_err().to_string(),
+            "row index 4 is out of range (must be < 4)"
+        );
+        assert_eq!(
+            a.submatrix(&[0], &[9]).unwrap_err().to_string(),
+            "column index 9 is out of range (must be < 4)"
+        );
 
-        let off = SparseMatrix::from_triplets(2, 2, &[(0, 1, 1.0), (1, 0, 3.0), (1, 1, 1.0)]).unwrap();
+        let off =
+            SparseMatrix::from_triplets(2, 2, &[(0, 1, 1.0), (1, 0, 3.0), (1, 1, 1.0)]).unwrap();
         assert_eq!(off.symmetry_defect().unwrap(), 2.0);
         let mut off2 = off.clone();
-        assert_eq!(off2.add_to_diagonal(&[1.0, 1.0]).unwrap_err(), SparseError::MissingDiagonal { index: 0 });
+        assert_eq!(
+            off2.add_to_diagonal(&[1.0, 1.0]).unwrap_err(),
+            SparseError::MissingDiagonal { index: 0 }
+        );
         assert_eq!(off2, off);
     }
 
@@ -1062,7 +1640,7 @@ mod tests {
         let x_true: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).sin()).collect();
         let mut b = vec![0.0; n];
         a.mul_vec(&x_true, &mut b).unwrap();
-        for par in PARS {
+        for_each_parallelism(|par| {
             let mut f = symbolic.factor(&a, par).unwrap();
             let mut x = b.clone();
             f.solve_in_place(&mut x, par).unwrap();
@@ -1081,17 +1659,23 @@ mod tests {
             assert!(relative_residual(&a2, &x2, &b2).unwrap() < 1e-14);
 
             // Two right-hand sides at once.
-            let mut rhs: Vec<f64> = b2.iter().copied().chain(b2.iter().map(|v| 2.0 * v)).collect();
+            let mut rhs: Vec<f64> = b2
+                .iter()
+                .copied()
+                .chain(b2.iter().map(|v| 2.0 * v))
+                .collect();
             f.solve_many_in_place(&mut rhs, 2, par).unwrap();
             for i in 0..n {
                 assert!((rhs[i] - x_true[i]).abs() < 1e-12);
                 assert!((rhs[n + i] - 2.0 * x_true[i]).abs() < 1e-12);
             }
             assert_eq!(
-                f.solve_in_place(&mut [0.0; 3], par).unwrap_err().to_string(),
+                f.solve_in_place(&mut [0.0; 3], par)
+                    .unwrap_err()
+                    .to_string(),
                 "length of right-hand side (dim * nrhs): expected 50, got 3"
             );
-        }
+        });
     }
 
     #[test]
@@ -1102,7 +1686,10 @@ mod tests {
         let lower = SparseMatrix::from_triplets(n, n, &lower).unwrap();
         let mut b: Vec<f64> = (0..n).map(|i| 1.0 + i as f64).collect();
         let b0 = b.clone();
-        let f = Symbolic::analyze(&lower, Method::Llt).unwrap().factor(&lower, Parallelism::Sequential).unwrap();
+        let f = Symbolic::analyze(&lower, Method::Llt)
+            .unwrap()
+            .factor(&lower, Parallelism::Sequential)
+            .unwrap();
         f.solve_in_place(&mut b, Parallelism::Sequential).unwrap();
         assert!(relative_residual(&full, &b, &b0).unwrap() < 1e-14);
     }
@@ -1112,8 +1699,14 @@ mod tests {
         let a = path_laplacian(10, -0.5);
         let s = Symbolic::analyze(&a, Method::Llt).unwrap();
         let e = s.factor(&a, Parallelism::Sequential).unwrap_err();
-        assert!(matches!(e, SparseError::NotPositiveDefinite { .. }), "{e:?}");
-        assert!(e.to_string().starts_with("matrix is not positive definite: non-positive pivot"));
+        assert!(
+            matches!(e, SparseError::NotPositiveDefinite { .. }),
+            "{e:?}"
+        );
+        assert!(
+            e.to_string()
+                .starts_with("matrix is not positive definite: non-positive pivot")
+        );
     }
 
     #[test]
@@ -1126,14 +1719,18 @@ mod tests {
             e.to_string(),
             "matrix does not have the analysed sparsity pattern: analysed 28 stored entries, got 10"
         );
-        let e = s.factor(&path_laplacian(11, 1.0), Parallelism::Sequential).unwrap_err();
+        let e = s
+            .factor(&path_laplacian(11, 1.0), Parallelism::Sequential)
+            .unwrap_err();
         assert_eq!(
             e.to_string(),
             "matrix does not have the analysed sparsity pattern: analysed 10 x 10, got 11 x 11"
         );
         let rect = SparseMatrix::from_triplets(2, 3, &[(0, 0, 1.0)]).unwrap();
         assert_eq!(
-            Symbolic::analyze(&rect, Method::Lu).unwrap_err().to_string(),
+            Symbolic::analyze(&rect, Method::Lu)
+                .unwrap_err()
+                .to_string(),
             "a square matrix is required, got 2 x 3"
         );
     }
@@ -1164,11 +1761,14 @@ mod tests {
         let mut b = vec![0.0; 2 * n];
         a.mul_vec(&x_true, &mut b).unwrap();
         // LLt must refuse this matrix.
-        let e = Symbolic::analyze(&a, Method::Llt).unwrap().factor(&a, Parallelism::Sequential).unwrap_err();
+        let e = Symbolic::analyze(&a, Method::Llt)
+            .unwrap()
+            .factor(&a, Parallelism::Sequential)
+            .unwrap_err();
         assert!(matches!(e, SparseError::NotPositiveDefinite { .. }));
         for method in [Method::Lblt, Method::Lu] {
             let s = Symbolic::analyze(&a, method).unwrap();
-            for par in PARS {
+            for_each_parallelism(|par| {
                 let mut f = s.factor(&a, par).unwrap();
                 let mut x = b.clone();
                 f.solve_in_place(&mut x, par).unwrap();
@@ -1178,7 +1778,7 @@ mod tests {
                 let mut x = b.clone();
                 f.solve_in_place(&mut x, par).unwrap();
                 assert!(relative_residual(&a, &x, &b).unwrap() < 1e-11);
-            }
+            });
         }
     }
 
@@ -1194,12 +1794,187 @@ mod tests {
         let mut b = vec![0.0; 2 * n];
         a.mul_vec(&x_true, &mut b).unwrap();
         let s = Symbolic::analyze(&a, Method::Ldlt).unwrap();
-        for par in PARS {
+        for_each_parallelism(|par| {
             let f = s.factor(&a, par).unwrap();
             let mut x = b.clone();
             f.solve_in_place(&mut x, par).unwrap();
             assert!(relative_residual(&a, &x, &b).unwrap() < 1e-12);
-        }
+        });
+    }
+
+    #[test]
+    fn custom_ordering_decides_which_pivots_ldlt_meets() {
+        // A = [[0, 1, 0], [1, 1, 1], [0, 1, 2]] is nonsingular with a zero first diagonal entry.
+        let a = SparseMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 0.0),
+                (1, 0, 1.0),
+                (0, 1, 1.0),
+                (1, 1, 1.0),
+                (2, 1, 1.0),
+                (1, 2, 1.0),
+                (2, 2, 2.0),
+            ],
+        )
+        .unwrap();
+        let seq = Parallelism::Sequential;
+        // Natural order starts with the zero pivot.
+        let natural = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Natural).unwrap();
+        let e = natural.factor(&a, seq).unwrap_err();
+        assert!(matches!(e, SparseError::ZeroPivot { .. }), "{e:?}");
+        assert!(
+            e.to_string()
+                .starts_with("LDLt factorization failed: zero pivot")
+        );
+        // Eliminating 1, 2, 0 works: pivots 1, 1, -2. (The inverse permutation 2, 0, 1 would
+        // meet a zero pivot in its second step, so this also pins down the convention.)
+        let good = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&[1, 2, 0]))
+            .unwrap();
+        let f = good.factor(&a, seq).unwrap();
+        let b = [1.0, 2.0, 3.0];
+        let mut x = b;
+        f.solve_in_place(&mut x, seq).unwrap();
+        assert!(relative_residual(&a, &x, &b).unwrap() < 1e-15);
+        let bad = Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&[2, 0, 1]))
+            .unwrap();
+        assert!(matches!(
+            bad.factor(&a, seq).unwrap_err(),
+            SparseError::ZeroPivot { .. }
+        ));
+
+        let err = |order: &[u32]| {
+            Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(order))
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            err(&[0, 1]),
+            "invalid elimination order: it has 2 entries, but the matrix has dimension 3"
+        );
+        assert_eq!(
+            err(&[0, 1, 3]),
+            "invalid elimination order: entry 2 is 3, which is not below the dimension 3"
+        );
+        assert_eq!(
+            err(&[0, 1, 0]),
+            "invalid elimination order: index 0 appears twice (entries 0 and 2)"
+        );
+        assert_eq!(
+            Symbolic::analyze_with_ordering(&a, Method::Lu, Ordering::Natural)
+                .unwrap_err()
+                .to_string(),
+            "not supported: LU with a natural or custom ordering"
+        );
+    }
+
+    #[test]
+    fn paired_ordering_makes_ldlt_work_on_a_semidefinite_saddle_system() {
+        // D has zeros, so the matrix is not quasi-definite and a generic order may hit a zero
+        // pivot; eliminating (i, n + i) in pairs cannot.
+        let n = 60;
+        let a = saddle(n);
+        let l = path_laplacian(n, 0.0);
+        let order_l = fill_reducing_ordering(&l).unwrap();
+        let mut sorted = order_l.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..n as u32).collect::<Vec<_>>());
+        let paired: Vec<u32> = order_l.iter().flat_map(|&i| [i, n as u32 + i]).collect();
+        let s =
+            Symbolic::analyze_with_ordering(&a, Method::Ldlt, Ordering::Custom(&paired)).unwrap();
+        let x_true: Vec<f64> = (0..2 * n).map(|i| (i as f64 * 0.3).sin()).collect();
+        let mut b = vec![0.0; 2 * n];
+        a.mul_vec(&x_true, &mut b).unwrap();
+        for_each_parallelism(|par| {
+            let f = s.factor(&a, par).unwrap();
+            let mut x = b.clone();
+            f.solve_in_place(&mut x, par).unwrap();
+            assert!(relative_residual(&a, &x, &b).unwrap() < 1e-12);
+        });
+        assert_eq!(
+            fill_reducing_ordering(&SparseMatrix::from_triplets(2, 3, &[]).unwrap()).unwrap_err(),
+            SparseError::NotSquare { nrows: 2, ncols: 3 }
+        );
+    }
+
+    #[test]
+    fn refinement_recovers_the_solution_of_a_perturbed_factorization() {
+        let n = 40;
+        let a = path_laplacian(n, 0.01);
+        // Factorize a slightly different matrix, then solve with the true one.
+        let f = {
+            let nearby = path_laplacian(n, 0.011);
+            Symbolic::analyze(&nearby, Method::Llt)
+                .unwrap()
+                .factor(&nearby, Parallelism::Sequential)
+                .unwrap()
+        };
+        let x_true: Vec<f64> = (0..n).map(|i| (i as f64).cos()).collect();
+        let mut b = vec![0.0; n];
+        a.mul_vec(&x_true, &mut b).unwrap();
+        let mut x = vec![0.0; n];
+        let seq = Parallelism::Sequential;
+        let plain = f
+            .solve_refined(
+                &a,
+                &b,
+                &mut x,
+                RefineOptions {
+                    max_steps: 0,
+                    tolerance: 1e-12,
+                },
+                seq,
+            )
+            .unwrap();
+        assert!(!plain.converged && plain.steps == 0 && plain.residual == plain.initial_residual);
+        assert!(plain.residual > 1e-6);
+        let report = f
+            .solve_refined(
+                &a,
+                &b,
+                &mut x,
+                RefineOptions {
+                    max_steps: 200,
+                    tolerance: 1e-12,
+                },
+                seq,
+            )
+            .unwrap();
+        assert!(report.converged, "{report:?}");
+        assert!(
+            report.steps > 0
+                && report.residual <= 1e-12
+                && report.initial_residual == plain.initial_residual
+        );
+        assert!((relative_residual(&a, &x, &b).unwrap() - report.residual).abs() < 1e-15);
+        // A budget that is too small reports non-convergence but still returns its best iterate.
+        let short = f
+            .solve_refined(
+                &a,
+                &b,
+                &mut x,
+                RefineOptions {
+                    max_steps: 1,
+                    tolerance: 1e-12,
+                },
+                seq,
+            )
+            .unwrap();
+        assert!(!short.converged && short.steps == 1 && short.residual < short.initial_residual);
+        let e = f
+            .solve_refined(
+                &a,
+                &b[1..],
+                &mut x,
+                RefineOptions {
+                    max_steps: 1,
+                    tolerance: 0.0,
+                },
+                seq,
+            )
+            .unwrap_err();
+        assert_eq!(e.to_string(), "length of b: expected 40, got 39");
     }
 
     #[test]
@@ -1216,19 +1991,26 @@ mod tests {
         t.push((n as u32 - 1, 0, 0.3));
         let a = SparseMatrix::from_triplets(n, n, &t).unwrap();
         let b: Vec<f64> = (0..n).map(|i| i as f64 - 3.0).collect();
-        let f = Symbolic::analyze(&a, Method::Lu).unwrap().factor(&a, Parallelism::Sequential).unwrap();
+        let f = Symbolic::analyze(&a, Method::Lu)
+            .unwrap()
+            .factor(&a, Parallelism::Sequential)
+            .unwrap();
         let mut x = b.clone();
         f.solve_in_place(&mut x, Parallelism::Sequential).unwrap();
         assert!(relative_residual(&a, &x, &b).unwrap() < 1e-13);
 
         // A matrix with an empty column is structurally singular.
-        let sing = SparseMatrix::from_triplets(3, 3, &[(0, 0, 1.0), (1, 0, 1.0), (2, 2, 1.0)]).unwrap();
-        let r = Symbolic::analyze(&sing, Method::Lu).and_then(|s| s.factor(&sing, Parallelism::Sequential));
+        let sing =
+            SparseMatrix::from_triplets(3, 3, &[(0, 0, 1.0), (1, 0, 1.0), (2, 2, 1.0)]).unwrap();
+        let r = Symbolic::analyze(&sing, Method::Lu)
+            .and_then(|s| s.factor(&sing, Parallelism::Sequential));
         match r {
             Err(SparseError::StructurallySingular { .. }) => {}
             Ok(f) => {
                 let mut x = vec![1.0; 3];
-                let e = f.solve_in_place(&mut x, Parallelism::Sequential).unwrap_err();
+                let e = f
+                    .solve_in_place(&mut x, Parallelism::Sequential)
+                    .unwrap_err();
                 assert!(matches!(e, SparseError::NonFiniteSolution { .. }), "{e:?}");
             }
             Err(e) => panic!("unexpected error {e:?}"),
@@ -1239,7 +2021,10 @@ mod tests {
     fn singular_lblt_solve_is_reported_not_silent() {
         // The pure path Laplacian is singular (constants in the kernel).
         let a = path_laplacian(12, 0.0);
-        let f = Symbolic::analyze(&a, Method::Lblt).unwrap().factor(&a, Parallelism::Sequential).unwrap();
+        let f = Symbolic::analyze(&a, Method::Lblt)
+            .unwrap()
+            .factor(&a, Parallelism::Sequential)
+            .unwrap();
         let mut x = vec![1.0; 12];
         match f.solve_in_place(&mut x, Parallelism::Sequential) {
             Err(SparseError::NonFiniteSolution { .. }) => {}

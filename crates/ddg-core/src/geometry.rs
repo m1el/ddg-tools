@@ -98,11 +98,18 @@ impl fmt::Display for DegenerateFace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let [a, b, c] = self.vertices;
         let [l0, l1, l2] = self.lengths;
-        write!(f, "face {} (vertices {a}, {b}, {c}; edge lengths {l0}, {l1}, {l2}) ", self.face)?;
+        write!(
+            f,
+            "face {} (vertices {a}, {b}, {c}; edge lengths {l0}, {l1}, {l2}) ",
+            self.face
+        )?;
         match self.reason {
             DegenerateReason::ZeroArea => write!(f, "has zero area"),
             DegenerateReason::TriangleInequality => write!(f, "violates the triangle inequality"),
-            DegenerateReason::OutOfRange => write!(f, "has lengths outside the range where its area is computable"),
+            DegenerateReason::OutOfRange => write!(
+                f,
+                "has lengths outside the range where its area is computable"
+            ),
         }
     }
 }
@@ -111,15 +118,32 @@ impl fmt::Display for GeometryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GeometryError::PositionCountMismatch { expected, got } => {
-                write!(f, "the mesh has {expected} vertices but {got} positions were given")
+                write!(
+                    f,
+                    "the mesh has {expected} vertices but {got} positions were given"
+                )
             }
-            GeometryError::NonFinitePosition { vertex, position: [x, y, z] } => {
-                write!(f, "vertex {vertex} has a non-finite position ({x}, {y}, {z})")
+            GeometryError::NonFinitePosition {
+                vertex,
+                position: [x, y, z],
+            } => {
+                write!(
+                    f,
+                    "vertex {vertex} has a non-finite position ({x}, {y}, {z})"
+                )
             }
             GeometryError::EdgeLengthCountMismatch { expected, got } => {
-                write!(f, "the mesh has {expected} edges but {got} edge lengths were given")
+                write!(
+                    f,
+                    "the mesh has {expected} edges but {got} edge lengths were given"
+                )
             }
-            GeometryError::InvalidEdgeLength { edge, vertices: [a, b], length, count } => {
+            GeometryError::InvalidEdgeLength {
+                edge,
+                vertices: [a, b],
+                length,
+                count,
+            } => {
                 write!(f, "edge {edge} = ({a}, {b}) has invalid length {length}")?;
                 if *count > 1 {
                     write!(f, " ({count} edges have a negative or non-finite length)")?;
@@ -129,7 +153,11 @@ impl fmt::Display for GeometryError {
             GeometryError::DegenerateFaces { faces } => {
                 const MAX: usize = 8;
                 let n = faces.len();
-                write!(f, "{n} degenerate {}: ", if n == 1 { "face" } else { "faces" })?;
+                write!(
+                    f,
+                    "{n} degenerate {}: ",
+                    if n == 1 { "face" } else { "faces" }
+                )?;
                 for (i, face) in faces.iter().take(MAX).enumerate() {
                     if i > 0 {
                         write!(f, "; ")?;
@@ -199,7 +227,7 @@ fn sorted_valid(a: f64, b: f64, c: f64) -> Result<[f64; 3], DegenerateReason> {
 /// Returns `None` unless the lengths are positive, finite, satisfy the strict triangle
 /// inequality, and give a positive finite area.
 ///
-/// [formula: triangle-area-heron]
+/// [formula: triangle-area]
 pub fn triangle_area(a: f64, b: f64, c: f64) -> Option<f64> {
     let [x, y, z] = sorted_valid(a, b, c).ok()?;
     let area = 0.25 * ((x + (y + z)) * (z - (x - y)) * (z + (x - y)) * (x + (y - z))).sqrt();
@@ -214,12 +242,16 @@ pub fn triangle_area(a: f64, b: f64, c: f64) -> Option<f64> {
 /// Returns `None` unless the three lengths form a triangle of positive area
 /// (see [`triangle_area`]).
 ///
-/// [formula: corner-angle-from-lengths]
+/// [formula: corner-angle]
 pub fn corner_angle(opposite: f64, side1: f64, side2: f64) -> Option<f64> {
     sorted_valid(opposite, side1, side2).ok()?;
     // Kahan's notation: the angle C is opposite c and lies between a >= b.
     let c = opposite;
-    let (a, b) = if side1 >= side2 { (side1, side2) } else { (side2, side1) };
+    let (a, b) = if side1 >= side2 {
+        (side1, side2)
+    } else {
+        (side2, side1)
+    };
     let mu = if b >= c { c - (a - b) } else { b - (a - c) };
     let num = ((a - b) + c) * mu;
     let den = (a + (b + c)) * ((a - c) + b);
@@ -235,10 +267,14 @@ pub fn corner_angle(opposite: f64, side1: f64, side2: f64) -> Option<f64> {
 /// Returns `None` unless the three lengths form a triangle of positive area and the result is
 /// finite.
 ///
-/// [formula: cotan-from-lengths]
+/// [formula: corner-cot]
 pub fn corner_cotan(opposite: f64, side1: f64, side2: f64) -> Option<f64> {
     let area = triangle_area(opposite, side1, side2)?;
-    let (b, c) = if side1 >= side2 { (side1, side2) } else { (side2, side1) };
+    let (b, c) = if side1 >= side2 {
+        (side1, side2)
+    } else {
+        (side2, side1)
+    };
     let cot = (c * c + (b - opposite) * (b + opposite)) / (4.0 * area);
     cot.is_finite().then_some(cot)
 }
@@ -263,12 +299,24 @@ impl Geometry {
     /// [`GeometryError::InvalidEdgeLength`] (only if a coordinate difference overflows), and
     /// [`GeometryError::DegenerateFaces`] naming every face without positive area — in
     /// particular faces with coincident or collinear vertices.
-    pub fn from_positions(mesh: &TriMesh, positions: &[[f64; 3]]) -> Result<Geometry, GeometryError> {
+    pub fn from_positions(
+        mesh: &TriMesh,
+        positions: &[[f64; 3]],
+    ) -> Result<Geometry, GeometryError> {
         if positions.len() != mesh.n_vertices() {
-            return Err(GeometryError::PositionCountMismatch { expected: mesh.n_vertices(), got: positions.len() });
+            return Err(GeometryError::PositionCountMismatch {
+                expected: mesh.n_vertices(),
+                got: positions.len(),
+            });
         }
-        if let Some(v) = positions.iter().position(|p| !p.iter().all(|x| x.is_finite())) {
-            return Err(GeometryError::NonFinitePosition { vertex: v as u32, position: positions[v] });
+        if let Some(v) = positions
+            .iter()
+            .position(|p| !p.iter().all(|x| x.is_finite()))
+        {
+            return Err(GeometryError::NonFinitePosition {
+                vertex: v as u32,
+                position: positions[v],
+            });
         }
         let lengths = mesh
             .edges()
@@ -286,9 +334,15 @@ impl Geometry {
     /// negative, NaN or infinite length; [`GeometryError::DegenerateFaces`] naming every face
     /// whose lengths do not form a triangle of positive area (a zero length makes its faces
     /// degenerate and is reported this way).
-    pub fn from_edge_lengths(mesh: &TriMesh, edge_lengths: Vec<f64>) -> Result<Geometry, GeometryError> {
+    pub fn from_edge_lengths(
+        mesh: &TriMesh,
+        edge_lengths: Vec<f64>,
+    ) -> Result<Geometry, GeometryError> {
         if edge_lengths.len() != mesh.n_edges() {
-            return Err(GeometryError::EdgeLengthCountMismatch { expected: mesh.n_edges(), got: edge_lengths.len() });
+            return Err(GeometryError::EdgeLengthCountMismatch {
+                expected: mesh.n_edges(),
+                got: edge_lengths.len(),
+            });
         }
         let invalid = |l: &f64| !(l.is_finite() && *l >= 0.0);
         if let Some(e) = edge_lengths.iter().position(invalid) {
@@ -315,15 +369,23 @@ impl Geometry {
                     corner_angles.push(angles);
                     corner_cotans.push(cotans);
                 }
-                Err(reason) => {
-                    degenerate.push(DegenerateFace { face: f as u32, vertices: mesh.faces()[f], lengths: l, reason })
-                }
+                Err(reason) => degenerate.push(DegenerateFace {
+                    face: f as u32,
+                    vertices: mesh.faces()[f],
+                    lengths: l,
+                    reason,
+                }),
             }
         }
         if !degenerate.is_empty() {
             return Err(GeometryError::DegenerateFaces { faces: degenerate });
         }
-        Ok(Geometry { edge_lengths, corner_angles, corner_cotans, face_areas })
+        Ok(Geometry {
+            edge_lengths,
+            corner_angles,
+            corner_cotans,
+            face_areas,
+        })
     }
 
     /// Length of every edge, indexed by edge id.
@@ -471,9 +533,18 @@ mod tests {
         assert_eq!(sorted_valid(1.0, 2.0, 3.0), Err(DegenerateReason::ZeroArea));
         assert_eq!(sorted_valid(1.0, 1.0, 0.0), Err(DegenerateReason::ZeroArea));
         assert_eq!(sorted_valid(0.0, 0.0, 0.0), Err(DegenerateReason::ZeroArea));
-        assert_eq!(sorted_valid(1.0, 2.0, 0.0), Err(DegenerateReason::TriangleInequality));
-        assert_eq!(sorted_valid(1.0, 2.0, 3.5), Err(DegenerateReason::TriangleInequality));
-        assert_eq!(sorted_valid(1.0, f64::NAN, 3.5), Err(DegenerateReason::OutOfRange));
+        assert_eq!(
+            sorted_valid(1.0, 2.0, 0.0),
+            Err(DegenerateReason::TriangleInequality)
+        );
+        assert_eq!(
+            sorted_valid(1.0, 2.0, 3.5),
+            Err(DegenerateReason::TriangleInequality)
+        );
+        assert_eq!(
+            sorted_valid(1.0, f64::NAN, 3.5),
+            Err(DegenerateReason::OutOfRange)
+        );
     }
 
     fn two_triangles() -> TriMesh {
@@ -481,7 +552,12 @@ mod tests {
         TriMesh::new(4, vec![[0, 1, 2], [0, 2, 3]]).unwrap()
     }
 
-    const SQUARE: [[f64; 3]; 4] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+    const SQUARE: [[f64; 3]; 4] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ];
 
     #[test]
     fn geometry_of_a_square() {
@@ -498,7 +574,11 @@ mod tests {
         assert!((g.total_area() - 1.0).abs() < 1e-15);
         // Face 0 = (0, 1, 2): right angle at vertex 1.
         let a = g.corner_angles()[0];
-        assert!((a[0] - PI / 4.0).abs() < 1e-15 && (a[1] - PI / 2.0).abs() < 1e-15 && (a[2] - PI / 4.0).abs() < 1e-15);
+        assert!(
+            (a[0] - PI / 4.0).abs() < 1e-15
+                && (a[1] - PI / 2.0).abs() < 1e-15
+                && (a[2] - PI / 4.0).abs() < 1e-15
+        );
         let c = g.corner_cotans()[0];
         assert!((c[0] - 1.0).abs() < 1e-15 && c[1].abs() < 1e-15 && (c[2] - 1.0).abs() < 1e-15);
         // Face 1 = (0, 2, 3): right angle at vertex 3.
@@ -514,14 +594,24 @@ mod tests {
     fn error_counts_and_non_finite_input() {
         let mesh = two_triangles();
         let e = Geometry::from_positions(&mesh, &SQUARE[..3]).unwrap_err();
-        assert_eq!(e.to_string(), "the mesh has 4 vertices but 3 positions were given");
+        assert_eq!(
+            e.to_string(),
+            "the mesh has 4 vertices but 3 positions were given"
+        );
         let mut p = SQUARE;
         p[2][1] = f64::NAN;
         let e = Geometry::from_positions(&mesh, &p).unwrap_err();
-        assert_eq!(e.to_string(), "vertex 2 has a non-finite position (1, NaN, 0)");
+        assert_eq!(
+            e.to_string(),
+            "vertex 2 has a non-finite position (1, NaN, 0)"
+        );
         let e = Geometry::from_edge_lengths(&mesh, vec![1.0; 4]).unwrap_err();
-        assert_eq!(e.to_string(), "the mesh has 5 edges but 4 edge lengths were given");
-        let e = Geometry::from_edge_lengths(&mesh, vec![1.0, 1.0, -2.0, 1.0, f64::INFINITY]).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "the mesh has 5 edges but 4 edge lengths were given"
+        );
+        let e = Geometry::from_edge_lengths(&mesh, vec![1.0, 1.0, -2.0, 1.0, f64::INFINITY])
+            .unwrap_err();
         assert_eq!(
             e.to_string(),
             "edge 2 = (0, 3) has invalid length -2 (2 edges have a negative or non-finite length)"

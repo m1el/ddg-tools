@@ -129,14 +129,22 @@ impl fmt::Display for MeshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MeshError::NoFaces => write!(f, "the mesh has no faces"),
-            MeshError::TooLarge { n_vertices, n_faces } => write!(
+            MeshError::TooLarge {
+                n_vertices,
+                n_faces,
+            } => write!(
                 f,
                 "mesh too large for 32-bit ids: {n_vertices} vertices, {n_faces} faces \
                  (limits: {} vertices, {} faces)",
                 NONE - 1,
                 (NONE - 1) / 3
             ),
-            MeshError::VertexIndexOutOfRange { face, corner, index, n_vertices } => {
+            MeshError::VertexIndexOutOfRange {
+                face,
+                corner,
+                index,
+                n_vertices,
+            } => {
                 if *n_vertices == 0 {
                     write!(
                         f,
@@ -151,19 +159,32 @@ impl fmt::Display for MeshError {
                     )
                 }
             }
-            MeshError::RepeatedVertexInFace { face, vertices: [a, b, c] } => {
+            MeshError::RepeatedVertexInFace {
+                face,
+                vertices: [a, b, c],
+            } => {
                 let repeated = if a == b || a == c { a } else { b };
                 write!(f, "face {face} = ({a}, {b}, {c}) repeats vertex {repeated}")
             }
-            MeshError::DuplicateFace { first, second, vertices: [a, b, c] } => write!(
+            MeshError::DuplicateFace {
+                first,
+                second,
+                vertices: [a, b, c],
+            } => write!(
                 f,
                 "faces {first} and {second} are duplicates: both have the vertices ({a}, {b}, {c})"
             ),
-            MeshError::NonManifoldEdge { edge: [a, b], faces } => {
+            MeshError::NonManifoldEdge {
+                edge: [a, b],
+                faces,
+            } => {
                 write!(f, "edge ({a}, {b}) is shared by {} faces: ", faces.len())?;
                 write_list(f, faces)
             }
-            MeshError::InconsistentOrientation { edge: [a, b], faces: [f0, f1] } => write!(
+            MeshError::InconsistentOrientation {
+                edge: [a, b],
+                faces: [f0, f1],
+            } => write!(
                 f,
                 "faces {f0} and {f1} traverse their shared edge ({a}, {b}) in the same direction: \
                  the mesh is not consistently oriented (orient_faces can repair this)"
@@ -178,14 +199,25 @@ impl fmt::Display for MeshError {
                  {} in total; compact_vertices removes them)",
                 if *count == 1 { "vertex" } else { "vertices" }
             ),
-            MeshError::NonOrientable { component, edge: [a, b], faces: [f0, f1] } => write!(
+            MeshError::NonOrientable {
+                component,
+                edge: [a, b],
+                faces: [f0, f1],
+            } => write!(
                 f,
                 "connected component {component} is not orientable: faces {f0} and {f1} cannot be \
                  oriented consistently across edge ({a}, {b})"
             ),
-            MeshError::BadFaceSelection { position, face, n_faces } => {
+            MeshError::BadFaceSelection {
+                position,
+                face,
+                n_faces,
+            } => {
                 if (*face as usize) < *n_faces {
-                    write!(f, "face selection entry {position} lists face {face} a second time")
+                    write!(
+                        f,
+                        "face selection entry {position} lists face {face} a second time"
+                    )
                 } else {
                     write!(
                         f,
@@ -289,7 +321,10 @@ fn key_edge(key: u64) -> [u32; 2] {
 /// Checks size limits, index ranges and repeated vertices.
 fn check_faces_basic(n_vertices: usize, faces: &[[u32; 3]]) -> Result<(), MeshError> {
     if n_vertices >= NONE as usize || faces.len() > ((NONE - 1) / 3) as usize {
-        return Err(MeshError::TooLarge { n_vertices, n_faces: faces.len() });
+        return Err(MeshError::TooLarge {
+            n_vertices,
+            n_faces: faces.len(),
+        });
     }
     for (f, face) in faces.iter().enumerate() {
         for (k, &v) in face.iter().enumerate() {
@@ -303,7 +338,10 @@ fn check_faces_basic(n_vertices: usize, faces: &[[u32; 3]]) -> Result<(), MeshEr
             }
         }
         if face[0] == face[1] || face[1] == face[2] || face[0] == face[2] {
-            return Err(MeshError::RepeatedVertexInFace { face: f as u32, vertices: *face });
+            return Err(MeshError::RepeatedVertexInFace {
+                face: f as u32,
+                vertices: *face,
+            });
         }
     }
     Ok(())
@@ -350,9 +388,15 @@ fn check_edge_manifold(keys: &[(u64, u32)]) -> Result<(), MeshError> {
 /// # Errors
 /// [`MeshError::VertexIndexOutOfRange`] if a face references an index `>= n_vertices`, and
 /// [`MeshError::TooLarge`] if the counts exceed the `u32` id range.
-pub fn compact_vertices(n_vertices: usize, faces: &[[u32; 3]]) -> Result<CompactedVertices, MeshError> {
+pub fn compact_vertices(
+    n_vertices: usize,
+    faces: &[[u32; 3]],
+) -> Result<CompactedVertices, MeshError> {
     if n_vertices >= NONE as usize {
-        return Err(MeshError::TooLarge { n_vertices, n_faces: faces.len() });
+        return Err(MeshError::TooLarge {
+            n_vertices,
+            n_faces: faces.len(),
+        });
     }
     let mut old_to_new = vec![NONE; n_vertices];
     for (f, face) in faces.iter().enumerate() {
@@ -379,7 +423,11 @@ pub fn compact_vertices(n_vertices: usize, faces: &[[u32; 3]]) -> Result<Compact
         .iter()
         .map(|face| face.map(|v| old_to_new[v as usize]))
         .collect();
-    Ok(CompactedVertices { faces, new_to_old, old_to_new })
+    Ok(CompactedVertices {
+        faces,
+        new_to_old,
+        old_to_new,
+    })
 }
 
 /// Re-orients faces so that every connected component is consistently oriented.
@@ -475,7 +523,12 @@ pub fn orient_faces(n_vertices: usize, faces: &[[u32; 3]]) -> Result<OrientedFac
         .zip(&flipped)
         .map(|(&[a, b, c], &flip)| if flip { [a, c, b] } else { [a, b, c] })
         .collect();
-    Ok(OrientedFaces { faces, flipped, n_flipped, n_components })
+    Ok(OrientedFaces {
+        faces,
+        flipped,
+        n_flipped,
+        n_components,
+    })
 }
 
 impl TriMesh {
@@ -508,7 +561,11 @@ impl TriMesh {
                 .collect();
             sorted.sort_unstable();
             if let Some(w) = sorted.windows(2).find(|w| w[0].0 == w[1].0) {
-                return Err(MeshError::DuplicateFace { first: w[0].1, second: w[1].1, vertices: w[0].0 });
+                return Err(MeshError::DuplicateFace {
+                    first: w[0].1,
+                    second: w[1].1,
+                    vertices: w[0].0,
+                });
             }
         }
 
@@ -550,7 +607,7 @@ impl TriMesh {
         // Fans around vertices. The rotation h -> twin(prev(h)) maps an outgoing halfedge of a
         // vertex to the next outgoing halfedge counter-clockwise. Its orbits are the fans:
         // chains that start at a halfedge without twin (open fans), or cycles (closed fans).
-        let prev = |h: u32| if h % 3 == 0 { h + 2 } else { h - 1 };
+        let prev = |h: u32| if h.is_multiple_of(3) { h + 2 } else { h - 1 };
         let mut fans = vec![0u32; n_vertices];
         let mut vertex_halfedge = vec![NONE; n_vertices];
         let mut visited = vec![false; n_halfedges];
@@ -594,7 +651,10 @@ impl TriMesh {
         }
         for (v, &count) in fans.iter().enumerate() {
             if count > 1 {
-                return Err(MeshError::NonManifoldVertex { vertex: v as u32, fans: count });
+                return Err(MeshError::NonManifoldVertex {
+                    vertex: v as u32,
+                    fans: count,
+                });
             }
             if count == 0 {
                 return Err(MeshError::UnreferencedVertex {
@@ -727,7 +787,7 @@ impl TriMesh {
     /// The previous halfedge in the same face.
     #[inline]
     pub fn prev(&self, h: usize) -> usize {
-        if h % 3 == 0 { h + 2 } else { h - 1 }
+        if h.is_multiple_of(3) { h + 2 } else { h - 1 }
     }
 
     /// The oppositely directed halfedge in the neighbouring face, or `None` on the boundary.
@@ -802,7 +862,11 @@ impl TriMesh {
         if a >= self.n_vertices || b >= self.n_vertices {
             return None;
         }
-        let key = if a < b { [a as u32, b as u32] } else { [b as u32, a as u32] };
+        let key = if a < b {
+            [a as u32, b as u32]
+        } else {
+            [b as u32, a as u32]
+        };
         self.edges.binary_search(&key).ok()
     }
 
@@ -827,14 +891,21 @@ impl TriMesh {
     /// the iteration starts with the boundary halfedge leaving `v`; note that the last boundary
     /// neighbour is then reached only by an incoming halfedge, see [`TriMesh::vertex_neighbors`].
     pub fn outgoing_halfedges(&self, v: usize) -> OutgoingHalfedges<'_> {
-        OutgoingHalfedges { mesh: self, start: self.vertex_halfedge[v], current: self.vertex_halfedge[v] }
+        OutgoingHalfedges {
+            mesh: self,
+            start: self.vertex_halfedge[v],
+            current: self.vertex_halfedge[v],
+        }
     }
 
     /// The vertices adjacent to `v` in counter-clockwise order: `k` of them at an interior
     /// vertex with `k` incident faces, `k + 1` at a boundary vertex (from the boundary neighbour
     /// reached by the outgoing boundary halfedge to the one reached by the incoming one).
     pub fn vertex_neighbors(&self, v: usize) -> VertexNeighbors<'_> {
-        VertexNeighbors { halfedges: self.outgoing_halfedges(v), last: None }
+        VertexNeighbors {
+            halfedges: self.outgoing_halfedges(v),
+            last: None,
+        }
     }
 
     /// Number of faces incident to `v`.
@@ -844,12 +915,18 @@ impl TriMesh {
 
     /// All boundary vertices, ascending.
     pub fn boundary_vertices(&self) -> Vec<u32> {
-        (0..self.n_vertices).filter(|&v| self.is_boundary_vertex(v)).map(|v| v as u32).collect()
+        (0..self.n_vertices)
+            .filter(|&v| self.is_boundary_vertex(v))
+            .map(|v| v as u32)
+            .collect()
     }
 
     /// All interior (non-boundary) vertices, ascending.
     pub fn interior_vertices(&self) -> Vec<u32> {
-        (0..self.n_vertices).filter(|&v| !self.is_boundary_vertex(v)).map(|v| v as u32).collect()
+        (0..self.n_vertices)
+            .filter(|&v| !self.is_boundary_vertex(v))
+            .map(|v| v as u32)
+            .collect()
     }
 
     // ----- boundary -----
@@ -879,8 +956,13 @@ impl TriMesh {
     ///
     /// [formula: genus-from-euler]
     pub fn genus(&self) -> usize {
-        let twice = 2 * self.n_components as i64 - self.boundary_loops.len() as i64 - self.euler_characteristic();
-        debug_assert!(twice >= 0 && twice % 2 == 0, "orientable manifold has integer genus");
+        let twice = 2 * self.n_components as i64
+            - self.boundary_loops.len() as i64
+            - self.euler_characteristic();
+        debug_assert!(
+            twice >= 0 && twice % 2 == 0,
+            "orientable manifold has integer genus"
+        );
         (twice / 2) as usize
     }
 
@@ -912,14 +994,22 @@ impl TriMesh {
         let mut seen = vec![false; self.faces.len()];
         for (position, &f) in faces.iter().enumerate() {
             if f as usize >= self.faces.len() || seen[f as usize] {
-                return Err(MeshError::BadFaceSelection { position, face: f, n_faces: self.faces.len() });
+                return Err(MeshError::BadFaceSelection {
+                    position,
+                    face: f,
+                    n_faces: self.faces.len(),
+                });
             }
             seen[f as usize] = true;
         }
         let selected: Vec<[u32; 3]> = faces.iter().map(|&f| self.faces[f as usize]).collect();
         let compact = compact_vertices(self.n_vertices, &selected)?;
         let mesh = TriMesh::new(compact.new_to_old.len(), compact.faces)?;
-        Ok(SubMesh { mesh, vertex_to_parent: compact.new_to_old, face_to_parent: faces.to_vec() })
+        Ok(SubMesh {
+            mesh,
+            vertex_to_parent: compact.new_to_old,
+            face_to_parent: faces.to_vec(),
+        })
     }
 
     /// Splits the mesh into its connected components, in component order. Within each
@@ -1049,7 +1139,10 @@ mod tests {
         let faces: Vec<[u32; 3]> = (0..6).map(|i| [0, 1 + i, 1 + (i + 1) % 6]).collect();
         let m = TriMesh::new(7, faces).unwrap();
         assert!(!m.is_boundary_vertex(0));
-        assert_eq!(m.vertex_neighbors(0).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            m.vertex_neighbors(0).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
         // Vertex 1 is on the boundary: faces (0,1,2) and (0,6,1). Counter-clockwise around 1
         // starting at the boundary halfedge 1 -> 2.
         assert!(m.is_boundary_vertex(1));
@@ -1071,7 +1164,15 @@ mod tests {
     #[test]
     fn error_index_out_of_range() {
         let e = TriMesh::new(4, vec![[0, 1, 2], [1, 0, 4]]).unwrap_err();
-        assert_eq!(e, MeshError::VertexIndexOutOfRange { face: 1, corner: 2, index: 4, n_vertices: 4 });
+        assert_eq!(
+            e,
+            MeshError::VertexIndexOutOfRange {
+                face: 1,
+                corner: 2,
+                index: 4,
+                n_vertices: 4
+            }
+        );
         assert_eq!(
             e.to_string(),
             "face 1 corner 2 references vertex 4, but the mesh has 4 vertices (valid indices 0..=3)"
@@ -1081,7 +1182,13 @@ mod tests {
     #[test]
     fn error_repeated_vertex() {
         let e = TriMesh::new(4, vec![[0, 1, 2], [3, 1, 3]]).unwrap_err();
-        assert_eq!(e, MeshError::RepeatedVertexInFace { face: 1, vertices: [3, 1, 3] });
+        assert_eq!(
+            e,
+            MeshError::RepeatedVertexInFace {
+                face: 1,
+                vertices: [3, 1, 3]
+            }
+        );
         assert_eq!(e.to_string(), "face 1 = (3, 1, 3) repeats vertex 3");
     }
 
@@ -1090,22 +1197,44 @@ mod tests {
         // Same orientation and opposite orientation are both duplicates.
         for second in [[1, 2, 0], [2, 1, 0]] {
             let e = TriMesh::new(4, vec![[0, 1, 2], [0, 3, 1], second]).unwrap_err();
-            assert_eq!(e, MeshError::DuplicateFace { first: 0, second: 2, vertices: [0, 1, 2] });
-            assert_eq!(e.to_string(), "faces 0 and 2 are duplicates: both have the vertices (0, 1, 2)");
+            assert_eq!(
+                e,
+                MeshError::DuplicateFace {
+                    first: 0,
+                    second: 2,
+                    vertices: [0, 1, 2]
+                }
+            );
+            assert_eq!(
+                e.to_string(),
+                "faces 0 and 2 are duplicates: both have the vertices (0, 1, 2)"
+            );
         }
     }
 
     #[test]
     fn error_edge_with_three_faces() {
         let e = TriMesh::new(5, vec![[0, 1, 2], [1, 0, 3], [0, 1, 4]]).unwrap_err();
-        assert_eq!(e, MeshError::NonManifoldEdge { edge: [0, 1], faces: vec![0, 1, 2] });
+        assert_eq!(
+            e,
+            MeshError::NonManifoldEdge {
+                edge: [0, 1],
+                faces: vec![0, 1, 2]
+            }
+        );
         assert_eq!(e.to_string(), "edge (0, 1) is shared by 3 faces: 0, 1, 2");
     }
 
     #[test]
     fn error_inconsistent_orientation() {
         let e = TriMesh::new(4, vec![[0, 1, 2], [0, 1, 3]]).unwrap_err();
-        assert_eq!(e, MeshError::InconsistentOrientation { edge: [0, 1], faces: [0, 1] });
+        assert_eq!(
+            e,
+            MeshError::InconsistentOrientation {
+                edge: [0, 1],
+                faces: [0, 1]
+            }
+        );
         assert_eq!(
             e.to_string(),
             "faces 0 and 1 traverse their shared edge (0, 1) in the same direction: the mesh is \
@@ -1118,11 +1247,18 @@ mod tests {
         // Two triangles touching only at vertex 2 (a bow tie).
         let e = TriMesh::new(5, vec![[0, 1, 2], [2, 3, 4]]).unwrap_err();
         assert_eq!(e, MeshError::NonManifoldVertex { vertex: 2, fans: 2 });
-        assert_eq!(e.to_string(), "vertex 2 is non-manifold: its incident faces form 2 separate fans");
+        assert_eq!(
+            e.to_string(),
+            "vertex 2 is non-manifold: its incident faces form 2 separate fans"
+        );
 
         // Two tetrahedra sharing one vertex: two closed fans.
         let mut faces = tetrahedron();
-        faces.extend(tetrahedron().iter().map(|f| f.map(|v| if v == 0 { 0 } else { v + 3 })));
+        faces.extend(
+            tetrahedron()
+                .iter()
+                .map(|f| f.map(|v| if v == 0 { 0 } else { v + 3 })),
+        );
         let e = TriMesh::new(7, faces).unwrap_err();
         assert_eq!(e, MeshError::NonManifoldVertex { vertex: 0, fans: 2 });
 
@@ -1137,7 +1273,13 @@ mod tests {
     fn error_unreferenced_vertex_and_compaction() {
         let faces = vec![[0, 2, 5]];
         let e = TriMesh::new(6, faces.clone()).unwrap_err();
-        assert_eq!(e, MeshError::UnreferencedVertex { vertex: 1, count: 3 });
+        assert_eq!(
+            e,
+            MeshError::UnreferencedVertex {
+                vertex: 1,
+                count: 3
+            }
+        );
         assert_eq!(
             e.to_string(),
             "vertex 1 is not referenced by any face (3 unreferenced vertices in total; \
@@ -1149,14 +1291,25 @@ mod tests {
         assert_eq!(c.old_to_new, vec![0, NONE, 1, NONE, NONE, 2]);
         TriMesh::new(c.new_to_old.len(), c.faces).unwrap();
         let e = compact_vertices(2, &faces).unwrap_err();
-        assert_eq!(e, MeshError::VertexIndexOutOfRange { face: 0, corner: 1, index: 2, n_vertices: 2 });
+        assert_eq!(
+            e,
+            MeshError::VertexIndexOutOfRange {
+                face: 0,
+                corner: 1,
+                index: 2,
+                n_vertices: 2
+            }
+        );
     }
 
     #[test]
     fn orient_repairs_flipped_faces() {
         let mut faces = tetrahedron();
         faces[2] = [faces[2][0], faces[2][2], faces[2][1]];
-        assert!(matches!(TriMesh::new(4, faces.clone()), Err(MeshError::InconsistentOrientation { .. })));
+        assert!(matches!(
+            TriMesh::new(4, faces.clone()),
+            Err(MeshError::InconsistentOrientation { .. })
+        ));
         let o = orient_faces(4, &faces).unwrap();
         assert_eq!(o.flipped, vec![false, false, true, false]);
         assert_eq!(o.n_flipped, 1);
@@ -1185,14 +1338,26 @@ mod tests {
             other => panic!("unexpected error {other:?}"),
         }
         let msg = e.to_string();
-        assert!(msg.starts_with("connected component 0 is not orientable: faces "), "{msg}");
-        assert!(msg.contains("cannot be oriented consistently across edge ("), "{msg}");
+        assert!(
+            msg.starts_with("connected component 0 is not orientable: faces "),
+            "{msg}"
+        );
+        assert!(
+            msg.contains("cannot be oriented consistently across edge ("),
+            "{msg}"
+        );
     }
 
     #[test]
     fn orient_reports_three_faces_on_an_edge() {
         let e = orient_faces(5, &[[0, 1, 2], [1, 0, 3], [0, 1, 4]]).unwrap_err();
-        assert_eq!(e, MeshError::NonManifoldEdge { edge: [0, 1], faces: vec![0, 1, 2] });
+        assert_eq!(
+            e,
+            MeshError::NonManifoldEdge {
+                edge: [0, 1],
+                faces: vec![0, 1, 2]
+            }
+        );
     }
 
     #[test]
@@ -1216,9 +1381,15 @@ mod tests {
         assert_eq!(parts[1].mesh.faces(), &[[0, 1, 2]]);
 
         let e = m.submesh(&[0, 9]).unwrap_err();
-        assert_eq!(e.to_string(), "face selection entry 1 is face 9, but the mesh has 5 faces");
+        assert_eq!(
+            e.to_string(),
+            "face selection entry 1 is face 9, but the mesh has 5 faces"
+        );
         let e = m.submesh(&[2, 2]).unwrap_err();
-        assert_eq!(e.to_string(), "face selection entry 1 lists face 2 a second time");
+        assert_eq!(
+            e.to_string(),
+            "face selection entry 1 lists face 2 a second time"
+        );
         // Two faces of the tetrahedron that share an edge form a valid disk.
         let s = m.submesh(&[2, 0]).unwrap();
         assert_eq!(s.vertex_to_parent, vec![0, 1, 2, 3]);

@@ -49,7 +49,9 @@ fn check_positive(name: &str, value: f64) -> Result<(), GeneratorError> {
     if value.is_finite() && value > 0.0 {
         Ok(())
     } else {
-        Err(bad(format!("{name} must be positive and finite, got {value}")))
+        Err(bad(format!(
+            "{name} must be positive and finite, got {value}"
+        )))
     }
 }
 
@@ -105,7 +107,9 @@ pub fn perturb(positions: &mut [[f64; 3]], amplitude: [f64; 3], seed: u64) {
 /// `level > 9` (more than 2.6 million vertices) is rejected.
 pub fn icosphere(level: u32) -> Result<GeneratedMesh, GeneratorError> {
     if level > 9 {
-        return Err(bad(format!("icosphere level must be at most 9, got {level}")));
+        return Err(bad(format!(
+            "icosphere level must be at most 9, got {level}"
+        )));
     }
     let t = (1.0 + 5.0_f64.sqrt()) / 2.0;
     let mut positions: Vec<[f64; 3]> = vec![
@@ -206,7 +210,11 @@ pub fn torus(
         for j in 0..n_minor {
             let phi = 2.0 * PI * j as f64 / n_minor as f64;
             let ring = major_radius + minor_radius * phi.cos();
-            positions.push([ring * theta.cos(), ring * theta.sin(), minor_radius * phi.sin()]);
+            positions.push([
+                ring * theta.cos(),
+                ring * theta.sin(),
+                minor_radius * phi.sin(),
+            ]);
         }
     }
     let faces = quad_grid_faces(n_major, n_minor, true, true);
@@ -229,20 +237,33 @@ pub fn grid_disk(nx: usize, ny: usize) -> Result<GeneratedMesh, GeneratorError> 
 ///
 /// # Errors
 /// `nx` and `ny` must be at least 1 and `amplitude` finite.
-pub fn bumpy_grid_disk(nx: usize, ny: usize, amplitude: f64) -> Result<GeneratedMesh, GeneratorError> {
+pub fn bumpy_grid_disk(
+    nx: usize,
+    ny: usize,
+    amplitude: f64,
+) -> Result<GeneratedMesh, GeneratorError> {
     if nx < 1 || ny < 1 {
-        return Err(bad(format!("grid needs at least 1 cell in each direction, got ({nx}, {ny})")));
+        return Err(bad(format!(
+            "grid needs at least 1 cell in each direction, got ({nx}, {ny})"
+        )));
     }
     if !amplitude.is_finite() {
         return Err(bad(format!("amplitude must be finite, got {amplitude}")));
     }
-    check_count(nx.checked_add(1).and_then(|a| ny.checked_add(1).and_then(|b| a.checked_mul(b))))?;
+    check_count(
+        nx.checked_add(1)
+            .and_then(|a| ny.checked_add(1).and_then(|b| a.checked_mul(b))),
+    )?;
     let h = 1.0 / nx.max(ny) as f64;
     let mut positions = Vec::with_capacity((nx + 1) * (ny + 1));
     for i in 0..=nx {
         for j in 0..=ny {
             let (x, y) = (i as f64 * h, j as f64 * h);
-            let z = if amplitude == 0.0 { 0.0 } else { amplitude * (3.0 * PI * x).sin() * (2.0 * PI * y).cos() };
+            let z = if amplitude == 0.0 {
+                0.0
+            } else {
+                amplitude * (3.0 * PI * x).sin() * (2.0 * PI * y).cos()
+            };
             positions.push([x, y, z]);
         }
     }
@@ -266,7 +287,9 @@ pub fn annulus(
     check_positive("r_inner", r_inner)?;
     check_positive("r_outer", r_outer)?;
     if r_inner >= r_outer {
-        return Err(bad(format!("annulus needs r_inner < r_outer, got {r_inner} >= {r_outer}")));
+        return Err(bad(format!(
+            "annulus needs r_inner < r_outer, got {r_inner} >= {r_outer}"
+        )));
     }
     let mut positions = Vec::with_capacity(n_around * (n_radial + 1));
     for i in 0..n_around {
@@ -300,7 +323,11 @@ pub fn open_cylinder(
     for i in 0..n_around {
         let theta = 2.0 * PI * i as f64 / n_around as f64;
         for j in 0..=n_height {
-            positions.push([radius * theta.cos(), radius * theta.sin(), height * j as f64 / n_height as f64]);
+            positions.push([
+                radius * theta.cos(),
+                radius * theta.sin(),
+                height * j as f64 / n_height as f64,
+            ]);
         }
     }
     let faces = quad_grid_faces(n_around, n_height + 1, true, false);
@@ -313,13 +340,19 @@ fn check_ring_counts(what: &str, n_around: usize, n_across: usize) -> Result<(),
             "{what} needs at least 3 segments around and 1 across, got ({n_around}, {n_across})"
         )));
     }
-    check_count(n_across.checked_add(1).and_then(|a| a.checked_mul(n_around)))
+    check_count(
+        n_across
+            .checked_add(1)
+            .and_then(|a| a.checked_mul(n_around)),
+    )
 }
 
 fn check_count(n_vertices: Option<usize>) -> Result<(), GeneratorError> {
     match n_vertices {
         Some(n) if n <= (1 << 28) => Ok(()),
-        _ => Err(bad("requested mesh is too large (more than 2^28 vertices)".to_string())),
+        _ => Err(bad(
+            "requested mesh is too large (more than 2^28 vertices)".to_string()
+        )),
     }
 }
 
@@ -333,7 +366,12 @@ fn quad_grid_faces(ni: usize, nj: usize, wrap_i: bool, wrap_j: bool) -> Vec<[u32
     let mut faces = Vec::with_capacity(2 * cells_i * cells_j);
     for i in 0..cells_i {
         for j in 0..cells_j {
-            let (a, b, c, d) = (index(i, j), index(i + 1, j), index(i + 1, j + 1), index(i, j + 1));
+            let (a, b, c, d) = (
+                index(i, j),
+                index(i + 1, j),
+                index(i + 1, j + 1),
+                index(i, j + 1),
+            );
             faces.push([a, b, c]);
             faces.push([a, c, d]);
         }
@@ -400,7 +438,10 @@ mod tests {
         assert!(t.boundary_loops().is_empty());
         assert!(signed_volume(&m) > 0.0);
         let e = torus(2, 5, 2.0, 0.5).unwrap_err();
-        assert_eq!(e.to_string(), "torus needs at least 3 segments in each direction, got (2, 5)");
+        assert_eq!(
+            e.to_string(),
+            "torus needs at least 3 segments in each direction, got (2, 5)"
+        );
         assert!(torus(5, 5, 1.0, 1.0).is_err());
         assert!(torus(5, 5, 1.0, f64::NAN).is_err());
     }

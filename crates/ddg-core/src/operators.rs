@@ -50,7 +50,8 @@ pub fn cotan_laplacian(mesh: &TriMesh, geometry: &Geometry) -> Result<SparseMatr
             triplets.push((j, i, -w));
         }
     }
-    let mut l = SparseMatrix::from_triplets(n, n, &triplets).expect("vertex indices of a valid mesh are in range");
+    let mut l = SparseMatrix::from_triplets(n, n, &triplets)
+        .expect("vertex indices of a valid mesh are in range");
     // Diagonal: minus the sum of the off-diagonal entries of the column (= row, by symmetry).
     let col_ptr = l.col_ptr().to_vec();
     for j in 0..n {
@@ -88,8 +89,11 @@ pub fn lumped_mass(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>, Geom
 /// not depend on the length unit. This is the normalization under which the cone-count
 /// parameter `λ` of the optimal cones paper is dimensionless.
 ///
-/// [formula: lumped-mass-area-normalized]
-pub fn lumped_mass_normalized(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>, GeometryError> {
+/// [formula: lumped-mass]
+pub fn lumped_mass_normalized(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+) -> Result<Vec<f64>, GeometryError> {
     let mut mass = lumped_mass(mesh, geometry)?;
     let total = geometry.total_area();
     for m in &mut mass {
@@ -117,7 +121,11 @@ pub fn vertex_angle_sums(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>
 pub fn angle_defects(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>, GeometryError> {
     let mut out = vertex_angle_sums(mesh, geometry)?;
     for (v, x) in out.iter_mut().enumerate() {
-        *x = if mesh.is_boundary_vertex(v) { 0.0 } else { 2.0 * PI - *x };
+        *x = if mesh.is_boundary_vertex(v) {
+            0.0
+        } else {
+            2.0 * PI - *x
+        };
     }
     Ok(out)
 }
@@ -126,10 +134,17 @@ pub fn angle_defects(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>, Ge
 /// sum runs over the corner angles at `i`. Entries of interior vertices are `0.0`.
 ///
 /// [formula: boundary-geodesic-curvature]
-pub fn boundary_geodesic_curvatures(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<f64>, GeometryError> {
+pub fn boundary_geodesic_curvatures(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+) -> Result<Vec<f64>, GeometryError> {
     let mut out = vertex_angle_sums(mesh, geometry)?;
     for (v, x) in out.iter_mut().enumerate() {
-        *x = if mesh.is_boundary_vertex(v) { PI - *x } else { 0.0 };
+        *x = if mesh.is_boundary_vertex(v) {
+            PI - *x
+        } else {
+            0.0
+        };
     }
     Ok(out)
 }
@@ -151,7 +166,12 @@ mod tests {
 
     fn square() -> (TriMesh, Geometry) {
         let mesh = TriMesh::new(4, vec![[0, 1, 2], [0, 2, 3]]).unwrap();
-        let p = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
         let g = Geometry::from_positions(&mesh, &p).unwrap();
         (mesh, g)
     }
@@ -162,10 +182,19 @@ mod tests {
         let l = cotan_laplacian(&mesh, &g).unwrap();
         // Right triangles: the diagonal 0-2 is opposite two right angles (weight 0), each side
         // is opposite one 45 degree angle (weight 1/2).
-        let expect = [[1.0, -0.5, 0.0, -0.5], [-0.5, 1.0, -0.5, 0.0], [0.0, -0.5, 1.0, -0.5], [-0.5, 0.0, -0.5, 1.0]];
-        for i in 0..4 {
-            for j in 0..4 {
-                assert!((l.get(i, j) - expect[i][j]).abs() < 1e-15, "L[{i}][{j}] = {}", l.get(i, j));
+        let expect = [
+            [1.0, -0.5, 0.0, -0.5],
+            [-0.5, 1.0, -0.5, 0.0],
+            [0.0, -0.5, 1.0, -0.5],
+            [-0.5, 0.0, -0.5, 1.0],
+        ];
+        for (i, row) in expect.iter().enumerate() {
+            for (j, &value) in row.iter().enumerate() {
+                assert!(
+                    (l.get(i, j) - value).abs() < 1e-15,
+                    "L[{i}][{j}] = {}",
+                    l.get(i, j)
+                );
             }
         }
         // Pattern: adjacency plus diagonal. 0-2 is an edge (stored, ~0); 1-3 is not.
@@ -206,7 +235,10 @@ mod tests {
         for omega in angle_defects(&mesh, &g).unwrap() {
             assert!((omega - (2.0 * PI - 5.0 * PI / 3.0)).abs() < 1e-14);
         }
-        assert_eq!(boundary_geodesic_curvatures(&mesh, &g).unwrap(), vec![0.0; 12]);
+        assert_eq!(
+            boundary_geodesic_curvatures(&mesh, &g).unwrap(),
+            vec![0.0; 12]
+        );
         assert!(gauss_bonnet_residual(&mesh, &g).unwrap().abs() < 1e-13);
         // Each edge has two opposite 60 degree angles: weight cot(60°) = 1/√3, degree 5.
         let l = cotan_laplacian(&mesh, &g).unwrap();
@@ -227,10 +259,22 @@ mod tests {
         let s = 8.0; // a power of two: scaling is exact in floating point
         let scaled: Vec<[f64; 3]> = base.positions.iter().map(|p| p.map(|x| s * x)).collect();
         let g2 = Geometry::from_positions(&mesh, &scaled).unwrap();
-        assert_eq!(cotan_laplacian(&mesh, &g1).unwrap(), cotan_laplacian(&mesh, &g2).unwrap());
-        assert_eq!(angle_defects(&mesh, &g1).unwrap(), angle_defects(&mesh, &g2).unwrap());
-        assert_eq!(lumped_mass_normalized(&mesh, &g1).unwrap(), lumped_mass_normalized(&mesh, &g2).unwrap());
-        let (m1, m2) = (lumped_mass(&mesh, &g1).unwrap(), lumped_mass(&mesh, &g2).unwrap());
+        assert_eq!(
+            cotan_laplacian(&mesh, &g1).unwrap(),
+            cotan_laplacian(&mesh, &g2).unwrap()
+        );
+        assert_eq!(
+            angle_defects(&mesh, &g1).unwrap(),
+            angle_defects(&mesh, &g2).unwrap()
+        );
+        assert_eq!(
+            lumped_mass_normalized(&mesh, &g1).unwrap(),
+            lumped_mass_normalized(&mesh, &g2).unwrap()
+        );
+        let (m1, m2) = (
+            lumped_mass(&mesh, &g1).unwrap(),
+            lumped_mass(&mesh, &g2).unwrap(),
+        );
         for (a, b) in m1.iter().zip(&m2) {
             assert_eq!(a * s * s, *b);
         }

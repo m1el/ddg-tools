@@ -87,13 +87,27 @@ impl fmt::Display for TriangulateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TriangulateError::BadCounts { n_corners, n_faces } => {
-                write!(f, "invalid polygon soup: {n_corners} corners in {n_faces} polygons")
+                write!(
+                    f,
+                    "invalid polygon soup: {n_corners} corners in {n_faces} polygons"
+                )
             }
-            TriangulateError::BadFaceStart { face, start, previous_start, n_corners } => {
+            TriangulateError::BadFaceStart {
+                face,
+                start,
+                previous_start,
+                n_corners,
+            } => {
                 if *face == 0 {
-                    write!(f, "polygon 0 starts at corner {start}, but the first polygon must start at corner 0")
+                    write!(
+                        f,
+                        "polygon 0 starts at corner {start}, but the first polygon must start at corner 0"
+                    )
                 } else if (*start as usize) > *n_corners {
-                    write!(f, "polygon {face} starts at corner {start}, but there are only {n_corners} corners")
+                    write!(
+                        f,
+                        "polygon {face} starts at corner {start}, but there are only {n_corners} corners"
+                    )
                 } else {
                     write!(
                         f,
@@ -104,13 +118,24 @@ impl fmt::Display for TriangulateError {
                 }
             }
             TriangulateError::FaceTooSmall { face, size } => {
-                write!(f, "polygon {face} has {size} corners, at least 3 are required")
+                write!(
+                    f,
+                    "polygon {face} has {size} corners, at least 3 are required"
+                )
             }
-            TriangulateError::VertexIndexOutOfRange { face, corner, index, n_vertices } => write!(
+            TriangulateError::VertexIndexOutOfRange {
+                face,
+                corner,
+                index,
+                n_vertices,
+            } => write!(
                 f,
                 "corner {corner} (polygon {face}) references vertex {index}, but there are {n_vertices} positions"
             ),
-            TriangulateError::NonFinitePosition { vertex, position: [x, y, z] } => write!(
+            TriangulateError::NonFinitePosition {
+                vertex,
+                position: [x, y, z],
+            } => write!(
                 f,
                 "vertex {vertex} has position ({x}, {y}, {z}), which is not finite in single precision"
             ),
@@ -155,7 +180,12 @@ impl Triangulation {
     /// data that is continuous across a polygon's diagonals (per-vertex data, or UVs when no
     /// seam runs along a diagonal) all of them agree. A corner that no triangle uses keeps
     /// `fill` (this happens only if `n_corners` exceeds the triangulated corner count).
-    pub fn to_polygon_corners<T: Copy>(&self, values: &[[T; 3]], n_corners: usize, fill: T) -> Option<Vec<T>> {
+    pub fn to_polygon_corners<T: Copy>(
+        &self,
+        values: &[[T; 3]],
+        n_corners: usize,
+        fill: T,
+    ) -> Option<Vec<T>> {
         if values.len() != self.triangles.len() {
             return None;
         }
@@ -211,17 +241,20 @@ pub fn triangulate_polygons(
         let end = face_starts.get(f + 1).map_or(n_corners, |&e| e as usize);
         let size = end - start as usize;
         if size < 3 {
-            return Err(TriangulateError::FaceTooSmall { face: f as u32, size: size as u32 });
+            return Err(TriangulateError::FaceTooSmall {
+                face: f as u32,
+                size: size as u32,
+            });
         }
     }
     for (f, &start) in face_starts.iter().enumerate() {
         let end = face_starts.get(f + 1).map_or(n_corners, |&e| e as usize);
-        for c in start as usize..end {
-            if corner_verts[c] as usize >= positions.len() {
+        for (offset, &index) in corner_verts[start as usize..end].iter().enumerate() {
+            if index as usize >= positions.len() {
                 return Err(TriangulateError::VertexIndexOutOfRange {
                     face: f as u32,
-                    corner: c as u32,
-                    index: corner_verts[c],
+                    corner: start + offset as u32,
+                    index,
                     n_vertices: positions.len(),
                 });
             }
@@ -231,7 +264,10 @@ pub fn triangulate_polygons(
     let single: Vec<[f32; 3]> = positions.iter().map(|p| p.map(|x| x as f32)).collect();
     for &v in corner_verts {
         if !single[v as usize].iter().all(|x| x.is_finite()) {
-            return Err(TriangulateError::NonFinitePosition { vertex: v, position: positions[v as usize] });
+            return Err(TriangulateError::NonFinitePosition {
+                vertex: v,
+                position: positions[v as usize],
+            });
         }
     }
 
@@ -249,13 +285,18 @@ pub fn triangulate_polygons(
         let end = face_starts.get(f + 1).map_or(n_corners, |&e| e as usize);
         let size = (end - start as usize) as u32;
         corner_positions.clear();
-        corner_positions.extend(corner_verts[start as usize..end].iter().map(|&v| single[v as usize]));
+        corner_positions.extend(
+            corner_verts[start as usize..end]
+                .iter()
+                .map(|&v| single[v as usize]),
+        );
         local.clear();
         blender::tessellate_face(&corner_positions, &mut scratch, &mut local);
         debug_assert_eq!(local.len() as u32, size - 2);
         for tri in &local {
             let corners = tri.map(|i| start + i);
-            out.triangles.push(corners.map(|c| corner_verts[c as usize]));
+            out.triangles
+                .push(corners.map(|c| corner_verts[c as usize]));
             out.triangle_corners.push(corners);
             out.triangle_polygons.push(f as u32);
             out.is_diagonal.push([0, 1, 2].map(|k| {
@@ -278,7 +319,12 @@ mod tests {
 
     #[test]
     fn triangles_pass_through() {
-        let p = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ];
         let t = triangulate_polygons(&p, &[0, 1, 2, 2, 1, 3], &[0, 3]).unwrap();
         assert_eq!(t.triangles, vec![[0, 1, 2], [2, 1, 3]]);
         assert_eq!(t.triangle_corners, vec![[0, 1, 2], [3, 4, 5]]);
@@ -289,17 +335,30 @@ mod tests {
 
     #[test]
     fn convex_quad_uses_first_third_diagonal() {
-        let p = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
         let t = triangulate_polygons(&p, &[0, 1, 2, 3], &[0]).unwrap();
         assert_eq!(tri_set(&t), vec![[0, 1, 2], [0, 2, 3]]);
         // Sides: (0,1) edge, (1,2) edge, (2,0) diagonal; (0,2) diagonal, (2,3) edge, (3,0) edge.
-        assert_eq!(t.is_diagonal, vec![[false, false, true], [true, false, false]]);
+        assert_eq!(
+            t.is_diagonal,
+            vec![[false, false, true], [true, false, false]]
+        );
     }
 
     #[test]
     fn concave_quad_flips_the_diagonal() {
         // A dart whose reflex corner is corner 2: the diagonal 0-2 lies inside, no flip.
-        let p = [[0.0, 0.0, 0.0], [2.0, -1.0, 0.0], [0.5, 0.0, 0.0], [2.0, 1.0, 0.0]];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [2.0, -1.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+        ];
         let t = triangulate_polygons(&p, &[0, 1, 2, 3], &[0]).unwrap();
         assert_eq!(tri_set(&t), vec![[0, 1, 2], [0, 2, 3]]);
         // The same dart starting one corner later: reflex corner is now corner 1, and the
@@ -307,7 +366,10 @@ mod tests {
         let t = triangulate_polygons(&p, &[1, 2, 3, 0], &[0]).unwrap();
         assert_eq!(tri_set(&t), vec![[0, 1, 3], [1, 2, 3]]);
         assert_eq!(t.triangles, vec![[1, 2, 0], [2, 3, 0]]);
-        assert_eq!(t.is_diagonal, vec![[false, true, false], [false, false, true]]);
+        assert_eq!(
+            t.is_diagonal,
+            vec![[false, true, false], [false, false, true]]
+        );
     }
 
     #[test]
@@ -326,22 +388,39 @@ mod tests {
         assert_eq!(t.triangle_polygons, vec![0, 0, 0]);
         assert_eq!(
             t.is_diagonal,
-            vec![[false, false, true], [false, false, true], [true, false, true]]
+            vec![
+                [false, false, true],
+                [false, false, true],
+                [true, false, true]
+            ]
         );
     }
 
     #[test]
     fn validation_errors() {
         let p = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
-        let err = |cv: &[u32], fs: &[u32]| triangulate_polygons(&p, cv, fs).unwrap_err().to_string();
-        assert_eq!(err(&[0, 1, 2], &[]), "invalid polygon soup: 3 corners in 0 polygons");
+        let err =
+            |cv: &[u32], fs: &[u32]| triangulate_polygons(&p, cv, fs).unwrap_err().to_string();
+        assert_eq!(
+            err(&[0, 1, 2], &[]),
+            "invalid polygon soup: 3 corners in 0 polygons"
+        );
         assert_eq!(
             err(&[0, 1, 2], &[1]),
             "polygon 0 starts at corner 1, but the first polygon must start at corner 0"
         );
-        assert_eq!(err(&[0, 1], &[0]), "polygon 0 has 2 corners, at least 3 are required");
-        assert_eq!(err(&[0, 1, 2, 0, 1], &[0, 3]), "polygon 1 has 2 corners, at least 3 are required");
-        assert_eq!(err(&[0, 1, 2, 0, 1, 2], &[0, 2]), "polygon 0 has 2 corners, at least 3 are required");
+        assert_eq!(
+            err(&[0, 1], &[0]),
+            "polygon 0 has 2 corners, at least 3 are required"
+        );
+        assert_eq!(
+            err(&[0, 1, 2, 0, 1], &[0, 3]),
+            "polygon 1 has 2 corners, at least 3 are required"
+        );
+        assert_eq!(
+            err(&[0, 1, 2, 0, 1, 2], &[0, 2]),
+            "polygon 0 has 2 corners, at least 3 are required"
+        );
         assert_eq!(
             err(&[0, 1, 2, 0, 1, 2], &[0, 9]),
             "polygon 1 starts at corner 9, but there are only 6 corners"
@@ -355,27 +434,51 @@ mod tests {
             err(&[0, 1, 3], &[0]),
             "corner 2 (polygon 0) references vertex 3, but there are 3 positions"
         );
-        let bad = [[0.0, 0.0, 0.0], [1.0, f64::NAN, 0.0], [0.0, 1.0, 0.0], [1e300, 0.0, 0.0]];
+        let bad = [
+            [0.0, 0.0, 0.0],
+            [1.0, f64::NAN, 0.0],
+            [0.0, 1.0, 0.0],
+            [1e300, 0.0, 0.0],
+        ];
         assert_eq!(
-            triangulate_polygons(&bad, &[0, 1, 2], &[0]).unwrap_err().to_string(),
+            triangulate_polygons(&bad, &[0, 1, 2], &[0])
+                .unwrap_err()
+                .to_string(),
             "vertex 1 has position (1, NaN, 0), which is not finite in single precision"
         );
         let e = triangulate_polygons(&bad, &[0, 3, 2], &[0]).unwrap_err();
-        assert!(matches!(e, TriangulateError::NonFinitePosition { vertex: 3, .. }), "{e:?}");
-        assert!(e.to_string().ends_with("which is not finite in single precision"));
+        assert!(
+            matches!(e, TriangulateError::NonFinitePosition { vertex: 3, .. }),
+            "{e:?}"
+        );
+        assert!(
+            e.to_string()
+                .ends_with("which is not finite in single precision")
+        );
         // An unused bad vertex does not matter.
         assert!(triangulate_polygons(&bad, &[0, 2, 0], &[0]).is_ok());
         // The empty soup is fine.
-        assert_eq!(triangulate_polygons(&p, &[], &[]).unwrap(), Triangulation::default());
+        assert_eq!(
+            triangulate_polygons(&p, &[], &[]).unwrap(),
+            Triangulation::default()
+        );
     }
 
     #[test]
     fn to_polygon_corners_maps_back() {
-        let p = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
         let t = triangulate_polygons(&p, &[0, 1, 2, 3], &[0]).unwrap();
         // Per-triangle-corner values that are really per-vertex: 10 * vertex.
         let values: Vec<[u32; 3]> = t.triangles.iter().map(|tri| tri.map(|v| 10 * v)).collect();
-        assert_eq!(t.to_polygon_corners(&values, 4, u32::MAX), Some(vec![0, 10, 20, 30]));
+        assert_eq!(
+            t.to_polygon_corners(&values, 4, u32::MAX),
+            Some(vec![0, 10, 20, 30])
+        );
         assert_eq!(t.to_polygon_corners(&values[..1], 4, 0), None);
         assert_eq!(t.to_polygon_corners(&values, 3, 0), None);
     }
