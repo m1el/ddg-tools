@@ -8,3 +8,5 @@ import DdgOracle.Certificate
 import DdgOracle.Generators
 import DdgOracle.BruteForce
 import DdgOracle.Cases
+import DdgOracle.Format
+import DdgOracle.Selftest

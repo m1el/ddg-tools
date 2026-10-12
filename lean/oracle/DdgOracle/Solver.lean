@@ -509,6 +509,14 @@ def newton (s : Setup) (opts : Options := {}) : NewtonResult := Id.run do
       mu := r.mu
       sigma := r.sigma
   let r := newtonStage s 0.0 opts.maxIterTwo opts.refineLimit u phi mu sigma
-  return { u := r.u, phi := r.phi, mu := r.mu, itersOne, itersTwo := r.iters, stop := r.stop }
+  -- Enforce the cone equation `µ = P(φ + µ)` exactly on the returned point: on the pieces it
+  -- lies on, `µ_i ∈ {0, lo_i, hi_i}` or `φ_i = ±t_i`. This changes values by rounding errors
+  -- only (the iteration stops when the residual is at rounding level) and removes them.
+  let pieces := arrayOf n fun i =>
+    (s.problem.state (vecFn r.phi) (vecFn r.mu) i).canon (s.t.get! i) (s.lo.get! i) (s.hi.get! i)
+  let (phi2, mu2) :=
+    if r.stop == .residual || r.stop == .states then snap s true pieces r.phi r.mu
+    else (r.phi, r.mu)
+  return { u := r.u, phi := phi2, mu := mu2, itersOne, itersTwo := r.iters, stop := r.stop }
 
 end Ddg

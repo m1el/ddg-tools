@@ -1,42 +1,48 @@
 import DdgOracle
 open Ddg
 
-def describe (p : Params) : String := Id.run do
-  let nv := p.wE.size
-  let mut free := 0
-  let mut forb := 0
-  let mut zeroE := 0
-  for v in [0:nv] do
-    if p.wR.get! v == 0.0 then free := free + 1
-    if p.wR.get! v == posInf then forb := forb + 1
-    if p.wE.get! v == 0.0 then zeroE := zeroE + 1
-  return s!"lambda={p.lambda} lo={p.lo.get! 0} hi={p.hi.get! 0} free={free} forb={forb} zeroE={zeroE} cones={p.cones.size} wR0={p.wR.get! 0}"
+def usage : String :=
+"ddg-oracle: dense Float reference implementation of
+  'Optimal Cone Singularities for Conformal Flattening' (Soliman, Slepcev, Crane 2018)
 
-def report (name : String) (m : RawMesh) (p : Params) (verbose := true) : IO Bool := do
-  match m.operators with
-  | .error e => IO.println s!"{name}: ERROR {e}"; return false
-  | .ok ops =>
-    let t0 ← IO.monoMsNow
-    match solve ops p with
-    | .error e => IO.println s!"{name}: PARAM ERROR {e}"; return false
-    | .ok r =>
-      let t1 ← IO.monoMsNow
-      let cones := (List.range ops.nv).filter (fun v => r.mu.get! v != 0.0) |>.length
-      let good := match r.status with | .converged => true | .infeasible _ => true | _ => false
-      let slow := r.itersOne.any (· ≥ 60)
-      if verbose || !good || slow then
-        IO.println s!"{name}: nv={ops.nv} n={r.nInterior} chi={ops.topo.chi} {describe p} status={repr r.status} stop={repr r.stop} it1={r.itersOne} it2={r.itersTwo} cones={cones} obj={r.cert.objective} resP={r.cert.resPrimal} resA={r.cert.resAdjoint} resI={r.cert.resInclusion} resB={r.cert.resBounds} gap={r.cert.gap} shift=[{r.cert.shiftLo},{r.cert.shiftHi}] ms={t1 - t0}"
-      return good
+usage:
+  ddg-oracle operators [IN [OUT]]   curvatures, masses and cotan Laplacian of every case
+  ddg-oracle solve     [IN [OUT]]   solve the canonical problem for every case
+  ddg-oracle batch     [IN [OUT]]   like the above; each case names its task in a 'task' line
+  ddg-oracle selftest  [SWEEP]      internal consistency checks (SWEEP random cases, default 300)
+  ddg-oracle version
+
+IN and OUT default to standard input and output ('-'). All three processing commands read any
+number of cases from one stream and flush after every case, so one process can serve a fuzzer.
+The text format is specified in README.md."
+
+def openInput (path : String) : IO IO.FS.Stream := do
+  if path == "-" then IO.getStdin
+  else return IO.FS.Stream.ofHandle (← IO.FS.Handle.mk path .read)
+
+def openOutput (path : String) : IO IO.FS.Stream := do
+  if path == "-" then IO.getStdout
+  else return IO.FS.Stream.ofHandle (← IO.FS.Handle.mk path .write)
+
+def process (fixed : Option Task) (rest : List String) : IO UInt32 := do
+  if rest.length > 2 then
+    IO.eprintln usage
+    return 2
+  let input ← openInput (rest.getD 0 "-")
+  let output ← openOutput (rest.getD 1 "-")
+  let _ ← runStream input output fixed
+  output.flush
+  return 0
 
 def main (args : List String) : IO UInt32 := do
-  let count := (args.head? >>= String.toNat?).getD 50
-  let size := (args[1]? >>= String.toNat?).getD 30
-  let verbose := args.length > 2
-  let mut bad := 0
-  for seed in [0:count] do
-    let (kind, m) := randomMesh size seed
-    let p := randomParams m seed
-    let ok ← report s!"{kind}#{seed}" m p verbose
-    if !ok then bad := bad + 1
-  IO.println s!"stress: {count} cases, {bad} bad"
-  return 0
+  match args with
+  | "operators" :: rest => process (some .operators) rest
+  | "solve" :: rest => process (some .solve) rest
+  | "batch" :: rest => process none rest
+  | ["selftest"] => return if (← selftest) == 0 then 0 else 1
+  | ["selftest", n] =>
+    match n.toNat? with
+    | some k => return if (← selftest k) == 0 then 0 else 1
+    | none => IO.eprintln usage; return 2
+  | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
+  | _ => IO.eprintln usage; return 2
