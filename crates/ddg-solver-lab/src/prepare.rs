@@ -225,12 +225,14 @@ impl<'a> Prepared<'a> {
             }
         }
         let mut cross = vec![0.0; dim * k];
-        let mut run = || {
-            let par = if nthreads > 1 { Par::rayon(nthreads) } else { Par::Seq };
-            let rhs = MatRef::from_column_major_slice(&mzn, nr, k);
+        // partial products over a range of rows, all blocks sequentially
+        let partial = |r0: usize, r1: usize| -> Vec<f64> {
+            let m = r1 - r0;
+            let rhs = MatRef::from_column_major_slice(&mzn[..], nr, k).subrows(r0, m);
+            let mut part = vec![0.0; dim * k];
             let mut off = 0;
-            let put = |zb: &[f64], kb: usize, off: usize, cross: &mut Vec<f64>| {
-                let lhs = MatRef::from_column_major_slice(zb, nr, kb);
+            let mut put = |zb: &[f64], kb: usize, off: usize| {
+                let lhs = MatRef::from_column_major_slice(zb, nr, kb).subrows(r0, m);
                 let mut out = vec![0.0; kb * k];
                 matmul(
                     MatMut::from_column_major_slice_mut(&mut out, kb, k),
@@ -238,23 +240,35 @@ impl<'a> Prepared<'a> {
                     lhs.transpose(),
                     rhs,
                     1.0,
-                    par,
+                    Par::Seq,
                 );
                 for t in 0..k {
                     for i in 0..kb {
-                        cross[t * dim + off + i] = out[t * kb + i];
+                        part[t * dim + off + i] = out[t * kb + i];
                     }
                 }
             };
             for (zb, kb) in blocks {
-                put(zb, *kb, off, &mut cross);
+                put(zb, *kb, off);
                 off += kb;
             }
-            put(zn, k, off, &mut cross);
+            put(zn, k, off);
+            part
         };
-        match pool {
-            Some(p) if nthreads > 1 => p.install(&mut run),
-            _ => run(),
+        let nchunks = if pool.is_some() && nthreads > 1 { nthreads.min(nr / 2048).max(1) } else { 1 };
+        let parts: Vec<Vec<f64>> = match pool {
+            Some(p) if nchunks > 1 => p.install(|| {
+                (0..nchunks)
+                    .into_par_iter()
+                    .map(|c| partial(c * nr / nchunks, (c + 1) * nr / nchunks))
+                    .collect()
+            }),
+            _ => vec![partial(0, nr)],
+        };
+        for part in parts {
+            for (c, p) in cross.iter_mut().zip(part) {
+                *c += p;
+            }
         }
         let q: Vec<f64> = (0..k)
             .map(|t| -zn[t * nr..(t + 1) * nr].iter().zip(&self.mw0).map(|(a, b)| a * b).sum::<f64>())

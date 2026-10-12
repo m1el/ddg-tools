@@ -33,8 +33,8 @@ impl Default for Options {
             cont_factor: 2.0,
             cont_steps: 0,
             batch_min: 16,
-            batch_frac: 1.0,
-            nms_radius: 0,
+            batch_frac: 0.5,
+            nms_radius: 3,
             tol: 1e-10,
             max_rounds: 500,
         }

@@ -7,12 +7,65 @@ fn main() {
     let cmd = args.first().map(String::as_str).unwrap_or("");
     match cmd {
         "compare" => compare(&args[1..]),
+        "table" => table(&args[1..]),
         _ => eprintln!("usage: lab compare MESH [--lambda X] [--threads N] [--no-ref] ..."),
     }
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).map(|i| args[i + 1].clone())
+}
+
+fn opts_from(args: &[String]) -> lasso::Options {
+    let mut o = lasso::Options::default();
+    if let Some(v) = flag(args, "--threads") { o.threads = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--chunk") { o.chunk = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--steps") { o.cont_steps = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--factor") { o.cont_factor = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--batch-min") { o.batch_min = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--batch-frac") { o.batch_frac = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--nms") { o.nms_radius = v.parse().unwrap(); }
+    if let Some(v) = flag(args, "--tol") { o.tol = v.parse().unwrap(); }
+    o
+}
+
+/// One line per mesh: fastest of `--repeat` runs of the lab solver and of the reference.
+fn table(args: &[String]) {
+    let lambda: f64 = flag(args, "--lambda").map(|v| v.parse().unwrap()).unwrap_or(0.5);
+    let repeat: usize = flag(args, "--repeat").map(|v| v.parse().unwrap()).unwrap_or(3);
+    let ref_repeat: usize = flag(args, "--ref-repeat").map(|v| v.parse().unwrap()).unwrap_or(repeat);
+    let o = opts_from(args);
+    let names: Vec<String> = args.iter().take_while(|a| !a.starts_with("--")).cloned().collect();
+    println!("lambda {lambda}, lab threads {}, lab best of {repeat}, ref best of {ref_repeat} (1 thread)", o.threads);
+    println!("{:<18} {:>6} {:>7} {:>5} | {:>7} {:>7} {:>5} {:>5} {:>5} {:>5} | {:>7} {:>4} {:>5} | {:>6} | {:>9} {:>9} {:>9} {:>5}",
+        "mesh", "V", "F", "cones", "lab s", "setup", "cols", "grad", "peakA", "W", "ref s", "fact", "slv", "x", "max dmu", "max du", "obj rel", "cert");
+    for spec in names {
+        let case = meshes::load(&spec).unwrap_or_else(|e| panic!("{e}"));
+        let prep = Prepared::new(&case).unwrap();
+        let mut best: Option<lasso::Solution> = None;
+        for _ in 0..repeat {
+            let s = lasso::solve(&prep, lambda, &o);
+            if best.as_ref().is_none_or(|b| s.stats.t_total < b.stats.t_total) { best = Some(s); }
+        }
+        let s = best.unwrap();
+        let problem = ConeProblem::new(&case.mesh, &case.geometry, lambda);
+        let cert = ddg_optimal_cones::certify(&problem, &s.u, &s.phi, &s.mu).map(|c| c.holds(1e-9)).unwrap_or(false);
+        let mut rbest: Option<ddg_optimal_cones::Solution> = None;
+        for _ in 0..ref_repeat {
+            let r = solve(&problem, &SolveOptions::default()).unwrap();
+            if rbest.as_ref().is_none_or(|b| r.report.timings.total < b.report.timings.total) { rbest = Some(r); }
+        }
+        let r = rbest.unwrap();
+        let st = &s.stats;
+        let dmu = s.mu.iter().zip(&r.measure).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        let du = s.u.iter().zip(&r.log_scale_optimal).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        let rl = &r.report.linear_solver;
+        println!("{:<18} {:>6} {:>7} {:>5} | {:>7.3} {:>7.3} {:>5} {:>5} {:>5} {:>5} | {:>7.3} {:>4} {:>5} | {:>5.1}x | {:>9.1e} {:>9.1e} {:>9.1e} {:>5}",
+            spec, case.mesh.n_vertices(), case.mesh.n_faces(), s.mu.iter().filter(|m| m.abs() > 1e-12).count(),
+            st.t_total, st.t_setup, st.column_solves, st.gradient_solves, st.peak_active, st.working_set,
+            r.report.timings.total, rl.ldlt_factorizations + rl.lu_factorizations, rl.solves,
+            r.report.timings.total / st.t_total, dmu, du, (s.objective - r.objective).abs() / r.objective.abs(), cert);
+    }
 }
 
 fn compare(args: &[String]) {
