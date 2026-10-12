@@ -1,3 +1,5 @@
+import DdgOracle.Scalar
+
 /-!
 # Dense linear algebra
 
@@ -11,7 +13,7 @@ namespace Ddg
 def zeros (n : Nat) : FloatArray := Id.run do
   let mut a := FloatArray.emptyWithCapacity n
   for _ in [0:n] do
-    a := a.push 0.0
+    a := a.push fzero
   return a
 
 /-- `FloatArray` with entries `f 0, …, f (n-1)`. -/
@@ -23,7 +25,7 @@ def FloatArray.ofFn' (n : Nat) (f : Nat → Float) : FloatArray := Id.run do
 
 /-- Largest absolute value of the entries. -/
 def maxAbs (a : FloatArray) : Float := Id.run do
-  let mut m := 0.0
+  let mut m := fzero
   for i in [0:a.size] do
     let v := (a.get! i).abs
     if v > m || v.isNaN then m := v
@@ -50,7 +52,7 @@ def luFactor (n : Nat) (a0 : FloatArray) : Option LU := Id.run do
       if v > best then
         best := v
         p := i
-    if !(best > 0.0 && best.isFinite) then return none
+    if !(best > fzero && best.isFinite) then return none
     if p != k then
       for j in [0:n] do
         let x := a.get! (k * n + j)
@@ -63,7 +65,7 @@ def luFactor (n : Nat) (a0 : FloatArray) : Option LU := Id.run do
     for i in [k+1:n] do
       let ri := i * n
       let f := a.get! (ri + k) / piv
-      if f != 0.0 then
+      if f != fzero then
         a := a.set! (ri + k) f
         for j in [k+1:n] do
           a := a.set! (ri + j) (a.get! (ri + j) - f * a.get! (rk + j))
@@ -97,14 +99,14 @@ def gaussJordanSolve (n : Nat) (a0 b0 : FloatArray) (tol : Float := 1e-11) : Opt
   let mut a := a0
   let mut b := b0
   let scale := maxAbs a0
-  if !(scale > 0.0 && scale.isFinite) then return none
+  if !(scale > fzero && scale.isFinite) then return none
   -- `col[k]` is the column eliminated at step `k`, `row[k]` the pivot row
   let mut rowUsed : Array Bool := Array.replicate n false
   let mut colUsed : Array Bool := Array.replicate n false
   let mut pivRow : Array Nat := Array.replicate n 0
   let mut pivCol : Array Nat := Array.replicate n 0
   for k in [0:n] do
-    let mut best := 0.0
+    let mut best := fzero
     let mut pr := n
     let mut pc := n
     for i in [0:n] do
@@ -125,7 +127,7 @@ def gaussJordanSolve (n : Nat) (a0 b0 : FloatArray) (tol : Float := 1e-11) : Opt
     for i in [0:n] do
       if i != pr then
         let f := a.get! (i * n + pc) / piv
-        if f != 0.0 then
+        if f != fzero then
           for j in [0:n] do
             a := a.set! (i * n + j) (a.get! (i * n + j) - f * a.get! (pr * n + j))
           b := b.set! i (b.get! i - f * b.get! pr)

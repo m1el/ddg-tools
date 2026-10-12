@@ -56,12 +56,24 @@ def Scalar.abs {α : Type} [Scalar α] (x : α) : α := max x (-x)
 /-- The IEEE-754 double nearest to `π`. -/
 def floatPi : Float := Float.ofBits 0x400921FB54442D18
 
+/-- `Float.ofNat`, computed by the machine conversion whenever `n < 2⁶⁴` (both round to
+nearest). `Float.ofNat` itself goes through arbitrary-precision arithmetic on every call, which
+dominates the run time when the numerals `0`, `1`, `2` of the generic formulas are evaluated
+millions of times. -/
+def floatOfNat (n : Nat) : Float :=
+  let k := n.toUInt64
+  if k.toNat = n then k.toFloat else Float.ofNat n
+
+/-- `0.0`. A `Float` literal inside a loop is evaluated anew, and slowly, in every iteration;
+hot loops use this constant instead. -/
+def fzero : Float := 0.0
+
 /-- The executable instance. `max a b = if a ≤ b then b else a` and
 `min a b = if a ≤ b then a else b`; `atan`, `sqrt` are the C library functions. -/
 instance : Scalar Float where
   max := fun a b => if a ≤ b then b else a
   min := fun a b => if a ≤ b then a else b
-  ofNat := Float.ofNat
+  ofNat := floatOfNat
   sqrt := Float.sqrt
   atan := Float.atan
   pi := floatPi

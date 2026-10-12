@@ -1,0 +1,4 @@
+case error-degenerate-triangle
+task solve
+status error face 0 = (0, 1, 2) is degenerate: its edge lengths violate the strict triangle inequality
+end

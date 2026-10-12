@@ -1,0 +1,4 @@
+case cube-infeasible-bounds
+task solve
+status infeasible the cone angle bounds are incompatible with Gauss-Bonnet (sum of mu must equal 2 pi chi)
+end

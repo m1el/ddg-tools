@@ -10,3 +10,5 @@ import DdgOracle.BruteForce
 import DdgOracle.Cases
 import DdgOracle.Format
 import DdgOracle.Selftest
+import DdgOracle.Bench
+import DdgOracle.Fixtures

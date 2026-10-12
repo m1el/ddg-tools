@@ -408,6 +408,26 @@ private def checkSolver (tally : IO.Ref Tally) : IO Unit := do
       let res := FloatArray.ofFn' (3 * s.n) (pr.F (vecFn (gather s r.u)) (vecFn (gather s r.phi)) (vecFn mu))
       check tally s!"residual[{c.name}]: F(u, phi, mu) = 0 (Eq. 20)" (maxAbs res ≤ 1e-11)
         s!"max |F|={sci (maxAbs res)}"
+      -- the regularized problems as solved (µ kept) are zeros of the paper's eliminated F_γ
+      -- (Eq. 22 with the mass factor), with µ = µ_γ(φ)
+      let n := s.n
+      let mut u := zeros n
+      let mut phi := zeros n
+      let mut m := zeros n
+      let mut sigma : Option (Array ConeState) := none
+      let mut worst := 0.0
+      for gamma in #[1.0, 0.1, 0.01, 0.001] do
+        let st := newtonStage s gamma 60 2 u phi m sigma
+        u := st.u
+        phi := st.phi
+        m := st.mu
+        sigma := st.sigma
+        let eliminated := FloatArray.ofFn' (2 * n) (pr.Freg gamma (vecFn u) (vecFn phi))
+        let measure := FloatArray.ofFn' n (pr.regMeasure gamma (vecFn phi))
+        let d := maxAbs eliminated + maxDiff measure m
+        if d > worst || d.isNaN then worst := d
+      check tally s!"residual[{c.name}]: Stage I solutions satisfy F_gamma(u, phi) = 0 and mu = mu_gamma(phi) (Eq. 21, 22)"
+        (worst ≤ 1e-9) s!"gamma=1..0.001 worst={sci worst}"
 
 private def checkClaims (tally : IO.Ref Tally) : IO Unit := do
   -- large λ on a disk: no cones, u is the cone-free flattening
@@ -592,8 +612,7 @@ private def checkFormat (tally : IO.Ref Tally) : IO Unit := do
   check tally "format: an invalid mesh is an error with a precise message"
     ((out.splitOn "status error directed edge (0, 1) occurs in faces 0 and 2").length == 2)
 
-/-- Random sweep over meshes of every topology and parameters with every feature. Problems
-with `wE = 0` somewhere are left out here: their minimizer need not be unique. -/
+/-- Random sweep over meshes of every topology and parameters with every feature. -/
 private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
   let mut converged := 0
   let mut infeasible := 0
@@ -606,7 +625,6 @@ private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
     seed := seed + 1
     let (kind, m) := randomMesh (12 + seed % 30) seed
     let p := randomParams m seed
-    if (List.range p.wE.size).any (fun v => p.wE.get! v == 0.0) then continue
     used := used + 1
     match solveCase { name := "", mesh := m, params := p } with
     | none => failed := failed.push s!"{kind}#{seed}: invalid"
@@ -621,7 +639,7 @@ private def checkSweep (tally : IO.Ref Tally) (count : Nat) : IO Unit := do
           if g > worstGain then worstGain := g
       | .infeasible _ => infeasible := infeasible + 1
       | .notConverged why => failed := failed.push s!"{kind}#{seed}: {why}"
-  check tally s!"sweep: {count} random cases (all topologies, weights, free sites, forbidden regions, bounds, prescribed cones)"
+  check tally s!"sweep: {count} random cases (all topologies, weights incl. wE = 0, free sites, forbidden regions, bounds, prescribed cones)"
     (failed.size == 0 && worstGain ≤ 1e-12)
     s!"converged={converged} infeasible={infeasible} failed={failed.size} mean Newton steps={steps / (if converged == 0 then 1 else converged)} best perturbation decrease={sci worstGain}"
   for f in failed do

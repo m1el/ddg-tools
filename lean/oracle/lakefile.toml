@@ -14,7 +14,3 @@ name = "DdgOracle"
 [[lean_exe]]
 name = "ddg-oracle"
 root = "Main"
-
-[[lean_exe]]
-name = "dbg"
-root = "Dbg"

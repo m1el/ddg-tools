@@ -6,16 +6,19 @@ import DdgOracle.Hex
 /-!
 # The two-stage semismooth Newton solver (paper Fig. 12), dense
 
-Stage I solves the regularized systems `F_γ(u, φ) = 0` for `γ = 1, 10⁻¹, …, 10⁻¹⁰`; Stage II
-solves the exact system `F(u, φ, µ) = 0` starting from the last regularized solution. Residuals
-and Newton matrices are the scalar-generic `Problem.F`, `Problem.Freg`, `Problem.DF`,
-`Problem.DFreg` of `DdgOracle.Formulas.Optimality`, evaluated at `Float`.
+Stage I solves the regularized problems for `γ = 1, 10⁻¹, …, 10⁻¹⁰`, Stage II the exact problem
+(`γ = 0`), each started from the previous solution. All of them are solved by the same routine,
+`newtonStage`, as zeros of `Problem.Fimp γ` in the unknowns `(u, φ, µ)`; residuals and Newton
+matrices are the scalar-generic definitions of `DdgOracle.Formulas.Optimality`, evaluated at
+`Float`.
 
 What is added to the paper, and why, is documented where it happens:
 
 * `normalizeSite`: forbidden and prescribed cones as degenerate bounds;
-* `balanceShift`, the bordered systems and `inclusionShift`: closed meshes;
-* `refineLimit`, `snap`: accuracy of the final iterate.
+* `nextState` (in `Formulas.Threshold`), the single-change mode of `newtonStage` and the
+  regularized fallback in `newton`: safeguards against cycling and non-uniqueness;
+* `balanceShift`, `newtonMatrix` (bordering) and `inclusionShift`: closed meshes;
+* `snap` and the refinement steps: accuracy of the final iterate.
 
 The solver never judges its own result: `DdgOracle.Certificate` does.
 -/
@@ -166,7 +169,7 @@ def noneActive (states : Array ConeState) : Bool := states.all fun s => !s.isAct
 
 /-- `(|L| |v|)_i`, the magnitude of the terms of `(L v)_i`. -/
 def absApply (s : Setup) (v : FloatArray) (i : Nat) : Float := Id.run do
-  let mut acc := 0.0
+  let mut acc := fzero
   for j in [0:s.n] do
     acc := acc + (s.L.get! (i * s.n + j)).abs * (v.get! j).abs
   return acc
@@ -300,12 +303,12 @@ def newtonMatrix (s : Setup) (entry : Nat → Nat → Float) (bordered : Bool) :
     let ro := blockPerm n r
     for c in [0:N] do
       a := a.push (entry ro (blockPerm n c))
-    if bordered then a := a.push (if ro < n then s.mass.get! ro else 0.0)
+    if bordered then a := a.push (if ro < n then s.mass.get! ro else fzero)
   if bordered then
     for c in [0:N] do
       let co := blockPerm n c
-      a := a.push (if n ≤ co && co < 2 * n then s.mass.get! (co - n) else 0.0)
-    a := a.push 0.0
+      a := a.push (if n ≤ co && co < 2 * n then s.mass.get! (co - n) else fzero)
+    a := a.push fzero
   return a
 
 /-! ## Newton iterations -/
@@ -322,7 +325,19 @@ inductive Stop where
   | singular
   /-- closed mesh: the bounds are incompatible with Gauss–Bonnet -/
   | infeasible
+  /-- the exact Newton system is singular (the minimizer is not unique); the result is the
+  minimizer of a regularized problem with `γ ≤ 10⁻¹¹` -/
+  | regularized
   deriving Repr, BEq, Inhabited
+
+/-- Name of a stop reason in the text format. -/
+def Stop.name : Stop → String
+  | .residual => "residual"
+  | .states => "active_sets"
+  | .cap => "cap"
+  | .singular => "singular"
+  | .infeasible => "infeasible"
+  | .regularized => "regularized"
 
 /-- Iteration caps and the regularization sequence. -/
 structure Options where
@@ -331,7 +346,11 @@ structure Options where
   /-- Newton steps per regularized problem -/
   maxIterOne : Nat := 60
   /-- Newton steps for the exact problem -/
-  maxIterTwo : Nat := 200
+  maxIterTwo : Nat := 100
+  /-- steps of the single-change fallback, per problem -/
+  maxIterSingle : Nat := 400
+  /-- regularization parameters tried when the exact Newton system is singular -/
+  gammasSingular : Array Float := #[1e-11, 1e-12, 1e-13]
   /-- extra Newton steps of Stage II on unchanged active sets (iterative refinement, reusing
   the LU factorization) -/
   refineLimit : Nat := 2
@@ -346,7 +365,7 @@ def snap (s : Setup) (exact : Bool) (states : Array ConeState) (phi mu : FloatAr
   let mut mu := mu
   for i in [0:s.n] do
     match states[i]! with
-    | .zero => mu := mu.set! i 0.0
+    | .zero => mu := mu.set! i fzero
     | .lower => mu := mu.set! i (s.lo.get! i)
     | .upper => mu := mu.set! i (s.hi.get! i)
     | .pos => if exact then phi := phi.set! i (s.t.get! i)
@@ -371,14 +390,16 @@ structure StageResult where
 /-- Semismooth Newton for `Fimp γ (u, φ, µ) = 0`; `γ = 0` is the exact system `F = 0`
 (`ComputeOptimalMeasure` of Fig. 12), `γ > 0` a regularized problem
 (`ComputeRegularizedMeasure`). `sigma0` are the pieces of the last Newton step that produced the
-starting point, if any.
+starting point, if any. With `single` only one vertex changes its piece per step (the one whose
+piece is most wrong): slow, but it breaks the cycles the simultaneous update can run into.
 
 Each step: determine the pieces `σ` (`nextState`), solve the linear system
 `DFpiece γ σ · y = −Fpiece γ σ (u, φ, µ)`, add `y`. Stop when the residual of `Fimp γ` is at
 rounding level, or when the pieces did not change (then, for `refineLimit` more steps, the same
 factorization is reused for iterative refinement). -/
 def newtonStage (s : Setup) (gamma : Float) (maxIter refineLimit : Nat)
-    (u0 phi0 mu0 : FloatArray) (sigma0 : Option (Array ConeState)) : StageResult := Id.run do
+    (u0 phi0 mu0 : FloatArray) (sigma0 : Option (Array ConeState)) (single : Bool := false) :
+    StageResult := Id.run do
   let p := s.problem
   let n := s.n
   let exact := gamma == 0.0
@@ -396,11 +417,30 @@ def newtonStage (s : Setup) (gamma : Float) (maxIter refineLimit : Nat)
     let targetOf := fun (phi mu : FloatArray) =>
       arrayOf n fun i =>
         (p.impState gamma (vecFn phi) (vecFn mu) i).canon (s.t.get! i) (s.lo.get! i) (s.hi.get! i)
-    let chooseFrom := fun (prev : Option (Array ConeState)) (target : Array ConeState) =>
-      arrayOf n fun i =>
+    let chooseFrom := fun (prev : Option (Array ConeState)) (target : Array ConeState)
+        (phi mu : FloatArray) => Id.run do
+      let all := arrayOf n fun i =>
         nextState (s.t.get! i) (s.lo.get! i) (s.hi.get! i) (prev.map fun a => a[i]!) target[i]!
+      match single, prev with
+      | true, some old =>
+        -- single-change mode: only the vertex whose piece is most wrong moves
+        let mut worst := fzero
+        let mut which := n
+        for i in [0:n] do
+          if all[i]! != old[i]! then
+            let x := phi.get! i + mu.get! i
+            let k := scale i
+            let t := s.t.get! i
+            let lo := s.lo.get! i
+            let hi := s.hi.get! i
+            let d := (old[i]!.value k t lo hi x - regularizedMeasure k t lo hi x).abs
+            if which == n || d > worst then
+              worst := d
+              which := i
+        return if which == n then all else old.set! which all[which]!
+      | _, _ => return all
     let mut target := targetOf phi mu
-    let mut sigma := chooseFrom sigmaPrev target
+    let mut sigma := chooseFrom sigmaPrev target phi mu
     let mut shifted := false
     let mut bordered := false
     if s.closed && noneActive sigma then
@@ -413,7 +453,7 @@ def newtonStage (s : Setup) (gamma : Float) (maxIter refineLimit : Nat)
         | some c =>
           phi := FloatArray.ofFn' n fun i => phi.get! i + c
           target := targetOf phi mu
-          sigma := chooseFrom sigmaPrev target
+          sigma := chooseFrom sigmaPrev target phi mu
           shifted := true
           if noneActive sigma && (fixedSum sigma phi mu - s.target).abs > gaussBonnetTol then
             -- the safeguard kept every vertex on a fixed piece: take the balanced pieces
@@ -457,7 +497,7 @@ def newtonStage (s : Setup) (gamma : Float) (maxIter refineLimit : Nat)
     | some lu =>
       cache := some lu
       let rhs := FloatArray.ofFn' lu.n fun r =>
-        if r < 3 * n then -(rhsResidual.get! (blockPerm n r)) else 0.0
+        if r < 3 * n then -(rhsResidual.get! (blockPerm n r)) else fzero
       let y := lu.solve rhs
       -- natural index `x` sits at position `x + n` (u, φ) or `x − 2n` (µ)
       u := FloatArray.ofFn' n fun i => u.get! i + y.get! (n + i)
@@ -498,7 +538,10 @@ def newton (s : Setup) (opts : Options := {}) : NewtonResult := Id.run do
   let mut sigma : Option (Array ConeState) := none
   let mut itersOne : Array Nat := #[]
   for gamma in opts.gammas do
-    let r := newtonStage s gamma opts.maxIterOne 0 u phi mu sigma
+    let mut r := newtonStage s gamma opts.maxIterOne 0 u phi mu sigma
+    if r.stop == .cap then
+      let r' := newtonStage s gamma opts.maxIterSingle 0 u phi mu sigma true
+      r := { r' with iters := r.iters + r'.iters }
     itersOne := itersOne.push r.iters
     if r.stop == .infeasible then
       return { u, phi, mu, itersOne, itersTwo := 0, stop := .infeasible }
@@ -508,7 +551,25 @@ def newton (s : Setup) (opts : Options := {}) : NewtonResult := Id.run do
       phi := r.phi
       mu := r.mu
       sigma := r.sigma
-  let r := newtonStage s 0.0 opts.maxIterTwo opts.refineLimit u phi mu sigma
+  let mut r := newtonStage s 0.0 opts.maxIterTwo opts.refineLimit u phi mu sigma
+  if r.stop == .cap then
+    let r' := newtonStage s 0.0 opts.maxIterSingle opts.refineLimit u phi mu sigma true
+    r := { r' with iters := r.iters + r'.iters }
+  if r.stop == .singular then
+    -- The exact system has no unique solution: the minimizer is not unique (this needs
+    -- `wE_i = 0` somewhere). The regularized problems are strictly convex in `µ`; their
+    -- minimizers converge to the minimizer of the exact problem with the smallest `Σ µ_i²/m_i`.
+    let mut found := false
+    for gamma in opts.gammasSingular do
+      let rr := newtonStage s gamma opts.maxIterOne 0 u phi mu sigma
+      if rr.stop == .residual || rr.stop == .states then
+        u := rr.u
+        phi := rr.phi
+        mu := rr.mu
+        sigma := rr.sigma
+        found := true
+    if found then
+      return { u, phi, mu, itersOne, itersTwo := r.iters, stop := .regularized }
   -- Enforce the cone equation `µ = P(φ + µ)` exactly on the returned point: on the pieces it
   -- lies on, `µ_i ∈ {0, lo_i, hi_i}` or `φ_i = ±t_i`. This changes values by rounding errors
   -- only (the iteration stops when the residual is at rounding level) and removes them.

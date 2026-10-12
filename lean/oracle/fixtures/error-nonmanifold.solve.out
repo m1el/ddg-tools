@@ -1,0 +1,4 @@
+case error-nonmanifold
+task solve
+status error directed edge (0, 1) occurs in faces 0 and 2: the mesh is non-manifold or not consistently oriented
+end

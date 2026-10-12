@@ -10,6 +10,9 @@ usage:
   ddg-oracle solve     [IN [OUT]]   solve the canonical problem for every case
   ddg-oracle batch     [IN [OUT]]   like the above; each case names its task in a 'task' line
   ddg-oracle selftest  [SWEEP]      internal consistency checks (SWEEP random cases, default 300)
+  ddg-oracle fixtures write DIR     regenerate the golden fixtures
+  ddg-oracle fixtures check DIR     recompute the fixtures and compare with the files (tolerance 1e-9)
+  ddg-oracle bench                  throughput on meshes of about 50 and 200 vertices
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -44,5 +47,8 @@ def main (args : List String) : IO UInt32 := do
     match n.toNat? with
     | some k => return if (← selftest k) == 0 then 0 else 1
     | none => IO.eprintln usage; return 2
+  | ["fixtures", "write", dir] => writeFixtures dir; return 0
+  | ["fixtures", "check", dir] => return if (← checkFixtures dir) == 0 then 0 else 1
+  | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

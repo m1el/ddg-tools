@@ -1,0 +1,57 @@
+fan-uniform	ok/converged	disk with one interior vertex, lambda = 0.02: closed form mu = P(Omega)
+grid-lambda-0.5	ok/converged	disk (grid), uniform, lambda = 0.5 (paper default): no cones
+grid-lambda-0.01	ok/converged	disk (grid), uniform, lambda = 0.01
+grid-lambda-0.002	ok/converged	disk (grid), uniform, lambda = 0.002: several cones of both signs
+grid-lambda-0	ok/converged	disk (grid), lambda = 0: mu = Omega everywhere, u = 0
+disk-lambda-0.01	ok/converged	disk (polar), uniform, lambda = 0.01
+disk-lambda-0.1	ok/converged	disk (polar), uniform, lambda = 0.1: no cones
+annulus-lambda-0.005	ok/converged	annulus, uniform, lambda = 0.005
+annulus-lambda-0.0005	ok/converged	annulus, uniform, lambda = 0.0005
+ellipsoid-lambda-0.5	ok/converged	closed convex (ellipsoid), uniform: a cone at every vertex, mu = Omega, u = 0
+knob-lambda-0.5	ok/converged	closed non-convex, lambda = 0.5: positive cones only (the same for every lambda down to about 0.001)
+knob-lambda-0.0003	ok/converged	closed non-convex, lambda = 0.0003: cones of both signs
+knob-lambda-0.0001	ok/converged	closed non-convex, lambda = 0.0001: many cones of both signs
+torus-lambda-0.5	ok/converged	torus, uniform, lambda = 0.5: no cones, constant of phi is an interval
+torus-lambda-0.01	ok/converged	torus, uniform, lambda = 0.01: cones of both signs summing to 0
+torus-lambda-0.001	ok/converged	torus, uniform, lambda = 0.001
+tetrahedron-uniform	ok/converged	regular tetrahedron: mu = pi at every vertex
+cube-uniform	ok/converged	cube: mu = pi/2 at every vertex
+grid-weighted	ok/converged	disk, random wE and wR in [1/3, 3]
+annulus-weighted	ok/converged	annulus, random wE and wR in [1/3, 3]
+knob-weighted	ok/converged	closed non-convex, random wE and wR in [1/4, 4]
+torus-weighted	ok/converged	torus, random wE and wR in [1/3, 3]
+knob-curvature-weights	ok/converged	closed non-convex, curvature-adapted weights of Sec. 8.1 (wE = r, wR = 1/r)
+grid-curvature-weights	ok/converged	disk, curvature-adapted weights of Sec. 8.1 (wE = r, wR = 1/r)
+ellipsoid-free-site	ok/converged	closed convex with one free site (wR = 0): far fewer cones
+knob-free-site-lambda-0.5	ok/converged	closed non-convex, one free site, lambda = 0.5: the free site takes all of 4 pi
+knob-free-site-lambda-0.05	ok/converged	closed non-convex, one free site, lambda = 0.05
+knob-two-free-sites	ok/converged	closed non-convex, two free sites
+disk-free-site	ok/converged	disk with a free site at the centre
+torus-free-site	ok/converged	torus with one free site
+grid-forbidden-half	ok/converged	disk, cones forbidden (wR = +inf) where x < 0.5
+knob-forbidden-north	ok/converged	closed non-convex, cones forbidden on the upper half
+torus-forbidden-all	ok/converged	torus, cones forbidden everywhere: the cone-free flattening
+grid-visibility	ok/converged	disk, Sec. 8.1 visibility: wE = 0 where x < 0.5, cones forbidden where x >= 0.5 (u, mu need not be unique where wE = 0)
+grid-positive-only	ok/converged	disk, mu >= 0
+knob-positive-only	ok/converged	closed non-convex, lambda = 0.0001 and mu >= 0 (Sec. 8.2): compare knob-lambda-0.0001
+torus-positive-only	ok/converged	torus, mu >= 0: forces mu = 0 (chi = 0)
+grid-half-pi	ok/converged	disk, -pi/2 <= mu <= pi/2, small lambda
+knob-half-pi	ok/converged	closed non-convex, lambda = 0.0001 and -pi/2 <= mu <= pi/2 (Sec. 8.2): some cones at pi/2
+knob-free-sites-half-pi	ok/converged	closed non-convex, two free sites whose angles are capped at pi/2
+cigar-zero-to-half-pi	ok/converged	closed convex (elongated), 0 <= mu <= pi/2 (Fig. 23): the two tips are capped
+cube-zero-to-half-pi	ok/converged	cube, 0 <= mu <= pi/2: eight cones of pi/2, no vertex strictly inside its bounds, constant of phi is an interval
+disk-tight-bounds	ok/converged	disk, -0.05 <= mu <= 0.08: many cones at their bounds
+disk-prescribed	ok/converged	disk, two prescribed cones
+knob-prescribed	ok/converged	closed non-convex, three prescribed cones (pi, pi/2, -pi/2)
+cube-all-prescribed	ok/converged	cube, every cone prescribed (total 4 pi): nothing left to optimize
+grid-mixed	ok/converged	disk: weights, a free site, a forbidden strip, bounds and a prescribed cone
+knob-mixed	ok/converged	closed: weights, a free site, a forbidden cap, bounds and a prescribed cone
+big-disk	ok/converged	disk with 132 vertices, lambda = 0.003
+big-sphere	ok/converged	closed with 128 vertices, lambda = 0.1
+big-sphere-weighted-bounded	ok/converged	closed with 128 vertices, weights and -pi/2 <= mu <= pi/2
+ellipsoid-zero-distortion-cap	ok/converged	closed convex, wE = 0 where z > 0.3: the minimizer is not unique (u is free where wE = 0), the exact Newton system is singular; compare the objective only
+bipyramid-active-set-cycle	ok/converged	closed bipyramid, random weights, bounds -pi/2..pi/2, forbidden vertices, one prescribed cone: the simultaneous active-set update cycles on this input
+cube-infeasible-bounds	ok/infeasible	cube, 0 <= mu <= 0.1: Gauss-Bonnet cannot hold, status infeasible
+error-nonmanifold	error/error	three triangles on one edge: status error
+error-degenerate-triangle	error/error	a triangle with collinear vertices: status error
+error-negative-weight	ok/error	wE < 0 at a vertex: operators succeed, solve reports status error

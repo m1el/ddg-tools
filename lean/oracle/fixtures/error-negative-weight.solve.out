@@ -1,0 +1,4 @@
+case error-negative-weight
+task solve
+status error vertex 0: wE must be finite and nonnegative
+end

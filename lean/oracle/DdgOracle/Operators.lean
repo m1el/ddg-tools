@@ -1,5 +1,6 @@
 import DdgOracle.Formulas
 import DdgOracle.Topology
+import DdgOracle.Dense
 
 /-!
 # The discrete operators of a mesh, at `Float`
@@ -104,7 +105,7 @@ def buildOperators (topo : Topology) (pos : Array (Point Float)) : Except String
   -- Laplacian: off-diagonal entries on edges, then the diagonal from the rows
   let mut lap : FloatArray := FloatArray.emptyWithCapacity (nv * nv)
   for _ in [0:nv * nv] do
-    lap := lap.push 0.0
+    lap := lap.push fzero
   for i in [0:nv] do
     let star := topo.facesAt i
     for j in topo.neighbors[i]! do

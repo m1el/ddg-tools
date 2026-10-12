@@ -226,9 +226,20 @@ def solve (ops : Operators) (p : Params) (opts : Options := {}) : Except String 
         itersOne := #[], itersTwo := 0, stop := .infeasible, cert := certify ops p z z z }
   let r := newton s opts
   let u := scatter s nv r.u
-  let phi := scatter s nv r.phi
   let mu := scatter s nv r.mu
-  let cert := certify ops p u phi mu
+  let mut phi := scatter s nv r.phi
+  let mut cert := certify ops p u phi mu
+  if s.closed && cert.ok && cert.shiftHi - cert.shiftLo > snapTol then
+    -- No vertex pins the constant of φ. Of the admissible constants take the one that brings
+    -- the mean `Σ m_i φ_i` closest to zero, so that the reported φ does not depend on the path
+    -- the iteration took.
+    let mean := sumTo nv fun v => ops.mass.get! v * phi.get! v
+    let c := if -mean < cert.shiftLo then cert.shiftLo else if -mean > cert.shiftHi then cert.shiftHi else -mean
+    let shifted := FloatArray.ofFn' nv fun v => phi.get! v + c
+    let cert' := certify ops p u shifted mu
+    if cert'.ok then
+      phi := shifted
+      cert := cert'
   let status : Status :=
     if r.stop == .infeasible then
       .infeasible "the cone angle bounds are incompatible with Gauss-Bonnet (sum of mu must equal 2 pi chi)"
@@ -236,7 +247,8 @@ def solve (ops : Operators) (p : Params) (opts : Options := {}) : Except String 
     else
       let how := match r.stop with
         | .cap => "iteration cap reached"
-        | .singular => "singular Newton system"
+        | .singular => "singular Newton system (the minimizer is not unique)"
+        | .regularized => "singular Newton system (the minimizer is not unique), regularized solution not accurate enough"
         | _ => "Newton iteration stopped"
       .notConverged s!"{how}; {cert.failure}"
   return {
