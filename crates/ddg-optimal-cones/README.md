@@ -38,7 +38,6 @@ for cone in &solution.cones {
 ```
 
 The crate documentation has this example and a steering example as tested doctests.
-`ddg-core` is used with `default-features = false`, so nothing GPL-derived is linked.
 
 ## The problem
 

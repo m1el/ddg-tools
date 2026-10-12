@@ -8,9 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# Without default features: the default feature of ddg-core compiles GPL-derived triangulation
-# code, which this MIT crate must not link.
-ddg-core = { path = "../ddg-core", default-features = false }
+ddg-core = { path = "../ddg-core" }
 
 [dev-dependencies]
 proptest = "1"
