@@ -702,6 +702,17 @@ impl ThreadPool {
     pub fn n_threads(&self) -> usize {
         self.n_threads
     }
+
+    /// Calls `f(0), …, f(n − 1)` on the pool's threads, one index at a time to whichever thread
+    /// is free, and returns the results in index order. Nothing runs on the global `rayon`
+    /// pool. This is for callers that have independent jobs of their own (for instance
+    /// right-hand sides to solve with one factorization) and want them on the same explicit
+    /// pool as the factorization; `f` may itself be called from several threads at once.
+    pub fn map<R: Send>(&self, n: usize, f: impl Fn(usize) -> R + Sync + Send) -> Vec<R> {
+        use rayon::prelude::*;
+        self.pool
+            .install(|| (0..n).into_par_iter().with_max_len(1).map(f).collect())
+    }
 }
 
 /// Where a numeric factorization or solve runs.
@@ -1478,6 +1489,21 @@ pub fn relative_residual(a: &SparseMatrix, x: &[f64], b: &[f64]) -> Result<f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pool_map_runs_in_order_on_the_pools_own_threads() {
+        let pool = ThreadPool::new(3).unwrap();
+        let out = pool.map(200, |i| {
+            let name = std::thread::current().name().map(str::to_string);
+            (i * i, name)
+        });
+        assert_eq!(out.len(), 200);
+        for (i, (sq, name)) in out.iter().enumerate() {
+            assert_eq!(*sq, i * i);
+            assert!(name.as_deref().is_some_and(|n| n.starts_with("ddg-sparse-")), "{name:?}");
+        }
+        assert!(pool.map(0, |i| i).is_empty());
+    }
 
     /// Runs `body` sequentially and on a two-thread pool.
     fn for_each_parallelism(mut body: impl FnMut(Parallelism<'_>)) {
