@@ -73,10 +73,13 @@ fn every_dataset_mesh_is_unwrapped() {
             report.warnings
         );
         if !spiked {
-            // Measured: at most 0.03 % of a footprint overlaps and at most 0.5 % of the
-            // triangles are mirrored (camel_noise2: 106 of 22 704 at λ = 0.5).
+            // Measured with the defaults: at most 0.028 % of a footprint overlaps
+            // (camel_noise2) and at most 0.48 % of the triangles are mirrored (camel_noise2:
+            // 108 of 22 704; brain 38, camel_noise1 19, mannequin 2, all others none). The
+            // bounds are the thresholds of the pipeline's own warnings.
             assert!(report.overlapped_fraction.unwrap() < 0.01, "{name}");
-            assert!(200 * report.flipped_triangles < mesh.n_polygons(), "{name}");
+            assert!(100 * report.flipped_triangles < mesh.n_polygons(), "{name}");
+            assert!(report.warnings.is_empty(), "{name}: {:?}", report.warnings);
         }
         // The published map, by the same measure, for the record.
         let published = obj.corner_uvs().map(|uvs| {

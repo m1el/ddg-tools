@@ -478,6 +478,36 @@ fn degenerate_triangles() {
 }
 
 #[test]
+fn hostile_geometry_is_refused_without_a_panic() {
+    let d = UnwrapOptions::default();
+    // Every vertex in the same place: mollification cannot help (the mean edge length is 0).
+    let mut collapsed = two_triangles();
+    collapsed.positions = vec![[1.0, 2.0, 3.0]; 4];
+    assert_eq!(
+        message(&collapsed, &d),
+        (
+            ErrorKind::Mesh,
+            "2 triangles of the triangulation have no area even after mollifying the edge \
+             lengths; the first is in face 0 (vertices 0, 1, 2; edge lengths 0, 0, 0)"
+                .into()
+        )
+    );
+    // Coordinates whose differences overflow.
+    let mut huge = two_triangles();
+    huge.positions[3] = [1e308, -1e308, 1e308];
+    huge.positions[0] = [-1e308, 1e308, -1e308];
+    let e = unwrap(&huge.input(), &d).unwrap_err();
+    assert_ne!(e.kind(), ErrorKind::Solve, "{e}");
+    // The summary of a report never contains a NaN.
+    let map = unwrap(&two_triangles().input(), &d).unwrap();
+    for (key, value) in map.report.summary() {
+        if let ddg_uv::Value::Float(x) = value {
+            assert!(!x.is_nan(), "{key}");
+        }
+    }
+}
+
+#[test]
 fn closed_surfaces_and_infeasible_cones() {
     let d = UnwrapOptions::default();
     let refuse = UnwrapOptions {

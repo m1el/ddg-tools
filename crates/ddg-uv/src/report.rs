@@ -345,7 +345,8 @@ impl Report {
     /// (`n_vertices`, `n_charts`, `n_cones`, `n_cut_edges`, `n_degenerate_triangles`,
     /// `n_flipped_uv_triangles`, `measured_*`, `seconds_pipeline`, …); `n_unreferenced_vertices`
     /// and `n_seam_edges_ignored` keep the names the binding's stand-in pipeline used. The
-    /// two overlap figures are `NaN` when the estimate is switched off.
+    /// two overlap figures are left out when the estimate is switched off, and the packing
+    /// figures when packing is. No value is NaN.
     pub fn summary(&self) -> Vec<(&'static str, Value)> {
         let int = |n: usize| Value::Int(n as i64);
         let v = &self.validation;
@@ -422,20 +423,19 @@ impl Report {
             ("flatten_flipped_triangles", int(self.flipped_triangles)),
             ("flatten_collapsed_triangles", int(self.degenerate_triangles)),
             (
-                "overlapped_fraction",
-                Value::Float(self.overlapped_fraction.unwrap_or(f64::NAN)),
-            ),
-            (
-                "max_chart_overlapped_fraction",
-                Value::Float(self.max_overlapped_fraction.unwrap_or(f64::NAN)),
-            ),
-            (
                 "max_quasi_conformal_error",
                 Value::Float(fold_max(
                     &mut self.charts.iter().map(|c| c.flatten.quasi_conformal_max),
                 )),
             ),
         ];
+        // Present only if the overlap was estimated: a NaN would break comparisons of reports.
+        if let Some(fraction) = self.overlapped_fraction {
+            out.push(("overlapped_fraction", Value::Float(fraction)));
+        }
+        if let Some(fraction) = self.max_overlapped_fraction {
+            out.push(("max_chart_overlapped_fraction", Value::Float(fraction)));
+        }
         if let Some(pack) = &self.packing {
             out.push(("packed", Value::Bool(true)));
             out.push(("pack_scale", Value::Float(pack.scale)));
