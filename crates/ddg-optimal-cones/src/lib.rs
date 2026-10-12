@@ -102,6 +102,10 @@
 //!   sum to `2πχ`; constraints that do not allow that are reported as
 //!   [`ConeError::Infeasible`].
 //!
+//! * By default `u = 0` on the boundary. [`solve_with_boundary`] with a [`BoundaryTreatment`]
+//!   optimizes the boundary values too (paper Sec. 8.3): `Free`, `Penalized`, `Convex`; see the
+//!   crate's `README.md`, section "The boundary".
+//!
 //! A cone angle is the curvature of the flattened metric at the vertex,
 //! `µ_i = 2π − (angle sum around i after flattening)`: positive for a cone tip.
 //!

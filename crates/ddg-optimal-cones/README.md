@@ -11,7 +11,7 @@ conformally with the least area distortion for the total cone angle spent. An im
 are theirs. What this crate adds is listed under [Deviations from the paper](#deviations-from-the-paper):
 a certificate on every solve, safeguards, closed meshes, angle bounds, prescribed cones.
 
-Contents: [example](#example) · [the problem](#the-problem) · [interface](#interface) ·
+Contents: [example](#example) · [the problem](#the-problem) · [the boundary](#the-boundary) · [interface](#interface) ·
 [steering](#steering) · [what comes back](#what-comes-back) · [the certificate](#the-certificate) ·
 [algorithm](#algorithm) · [deviations from the paper](#deviations-from-the-paper) ·
 [the published dataset](#the-published-dataset) · [choosing λ](#choosing-λ) ·
@@ -60,6 +60,113 @@ On a closed mesh `u` is defined up to a constant, which is optimized too, and `�
 `λ` is dimensionless here. If masses are left as they are (not divided by the area), the same
 problem has `λ_raw = λ · area` ([choosing λ](#choosing-λ)).
 
+## The boundary
+
+By default `u = 0` at the boundary vertices (paper Fig. 10 b). [`solve_with_boundary`] also
+optimizes the boundary (paper Sec. 8.3, Fig. 10 c–e); the treatment is an argument
+(`BoundaryTreatment`), not a field of `ConeProblem`, so that existing struct literals of
+`ConeProblem` keep compiling (`solve` is `solve_with_boundary(.., Fixed, ..)`, bit for bit).
+
+The model. Let `B` be the boundary vertices, `I` the interior ones, `k_i = π − Σ(corner angles at i)`
+the geodesic curvature of the boundary of the mesh at `i ∈ B`, and `ν_i` the geodesic curvature
+of the flattened boundary there. The boundary vertices become unknowns:
+
+```
+minimize     ½ Σ_{i∈V} wE_i m_i u_i²  +  λ Σ_{i∈I} wR_i |µ_i|  +  Σ_{i∈B} cost_i(ν_i)
+subject to   (L u)_i = µ_i − Ω_i   (i ∈ I),      (L u)_i = ν_i − k_i   (i ∈ B)
+```
+
+so every boundary vertex has a *site* for `ν_i`, as every interior vertex has one for `µ_i`:
+
+| `BoundaryTreatment` | paper | `cost_i(ν_i)` |
+|---|---|---|
+| `Fixed` (default) | Fig. 10 b | not a variable: `u_i = 0` |
+| `Free` | Fig. 10 c | `0`, `ν_i` unconstrained (optimized boundary values) |
+| `Penalized` | Fig. 10 d | `λ wR_i \|ν_i\|`, `wR_i` from `cone_costs` (`+∞`: `ν_i = 0`); a polygonal boundary |
+| `Convex` | Fig. 10 e | `0` with `ν_i ≥ 0` |
+
+The distortion runs over all vertices (their masses and `wE`). With no vertex pinned `u` is
+defined up to a constant that is optimized too (`Σ wE m u = 0`), as on a closed mesh, and
+`Σ_I µ + Σ_B ν = 2πχ` holds automatically. In the other treatments the arrays `lower_bounds`,
+`upper_bounds` have no effect at boundary vertices, `prescribed_cones` there is still an error.
+
+**Optimality conditions** (derived from the statement above; the same as the closed-mesh system with
+`Ω̂ = (Ω on I, k on B)` and a site per vertex): `(L u)_i = s_i − Ω̂_i`, `(L φ)_i = −wE_i m_i u_i`
+for all vertices, `φ_i ∈ ∂g_i(s_i)` with `s = (µ, ν)`. At a boundary vertex: `Free` gives `φ_i = 0`
+(a natural boundary condition: the adjoint vanishes on the boundary), `Penalized` gives
+`φ_i ∈ λ wR_i ∂|ν_i|`, `Convex` gives `φ_i ≤ 0` with `φ_i ν_i = 0`. This is
+`optimality-system-sufficient` for these data, hence sufficient for a global minimum; the solver is the
+closed-mesh solver of the other sections (nothing new is iterated), so the Newton systems, the
+safeguards and the certificate are the same. The modelling statement `ν_i = (L u)_i + k_i` (the
+first-order change of the boundary geodesic curvature) is not proved here; it is checked
+against two routes that do not share the boundary code: the generic convex solver, and the
+double of the mesh (below).
+
+**What comes back.** `Solution::log_scale_optimal` holds `u` at the boundary vertices,
+`Solution::measure` holds `ν` at the boundary vertices (and `µ` at the interior ones), and
+`Solution::boundary_curvature` holds `ν` at the boundary vertices in every treatment (for `Fixed`
+it is `(L u)_i + k_i` with `u_B = 0`, which is not a variable there). `objective`,
+`distortion_optimal` and `cone_cost` include the boundary vertices, and the penalty of `ν` for
+`Penalized`. `cones` lists interior vertices only. `certify_with_boundary` certifies a triple
+for the treatment (`gauss_bonnet_residual` is `|Σ_I µ + Σ_B ν − 2πχ|`). If extraction changes the
+cones (a threshold, merging), `log_scale` and `distortion` are those of the new interior cones
+with the boundary optimized again for them (same treatment).
+
+**Verified against.**
+
+* The generic convex solver Clarabel, with the problem written out again from the statement
+  above (`tests/convex_reference.rs`): 60 random meshes per row (disk, annulus, cylinder) with
+  all steering features, with and without zero distortion weights, for `Free`, `Penalized`,
+  `Convex`, and 200 random cases of a property test. Every case agrees (objective to `10⁻¹¹`,
+  `µ` and `ν` to `10⁻⁵` and better, the limit is Clarabel's), and the verdicts on infeasibility
+  (`Convex` with the other constraints) agree. One degenerate case does not: a `Free` boundary
+  vertex with zero distortion weight has a free site and no weight, its `u` is determined by
+  nothing, and the minimum need not be attained (Clarabel returns an objective of `3·10⁻¹⁴` with
+  `u` of order 200). The solver reports `NotConverged` (objective `9·10⁻⁶` after 12 safeguard
+  rounds, `5·10⁻⁷` after 300); the sweeps keep boundary vertices weighted for `Free`, and a
+  test pins down that this case is never reported as optimal.
+* The double of the mesh (`tests/boundary.rs`, `tests/dataset.rs`): the mesh glued to a mirror
+  copy along the boundary is a closed mesh, on which the closed-mesh path (the seam vertices free
+  sites, `λ/2`) solves the same problem. Random meshes: agreement to `10⁻¹³` for the three
+  treatments (objective, `µ`, `u`, `ν` = half the seam angle). Dataset, the 16 meshes with boundary
+  at `λ = 0.5` that have a double (`face`, `hand`, `mannequin` have a triangle with three boundary
+  vertices, whose double is not a mesh): relative objective to `10⁻¹¹` (`camelbad`; `10⁻¹³` or
+  better on the others), `u` to `10⁻¹¹`, `ν` to `2·10⁻¹⁰`, `µ` to `10⁻¹²` except
+  `camelshotnoise` (`3·10⁻⁹`).
+* The optimized boundary is never worse than the others (the fixed-boundary optimum is feasible
+  for it at no cost), tested on random meshes (strictly better, by more than `10⁻⁶`, in 93 of 120 cases) and on the dataset.
+
+**Distortion with `u = 0` on the boundary against optimized boundary values**
+(`cargo run --release -p ddg-optimal-cones --example boundary -- table`; `λ = 0.5`, the optimum of
+each problem; `D = ½ Σ wE m u²`, objective `= D +` cone cost; the optimized boundary uses fewer
+cones, so `D` alone can be larger):
+
+| mesh | cones `u = 0` | `D`, `u = 0` | objective, `u = 0` | cones free | `D`, free | objective, free |
+|---|---:|---:|---:|---:|---:|---:|
+| body | 4 | 1.249 | 6.027 | 4 | 1.695 | 5.635 |
+| bump | 0 | 0.1785 | 0.1785 | 0 | 0.06192 | 0.06192 |
+| camel | 2 | 1.361 | 3.1 | 0 | 0.7725 | 0.7725 |
+| camel_noise1 | 5 | 1.399 | 3.251 | 0 | 0.76 | 0.76 |
+| camel_noise2 | 8 | 1.607 | 3.837 | 0 | 0.6146 | 0.6146 |
+| camelbad | 2 | 1.36 | 3.098 | 0 | 0.768 | 0.768 |
+| camelbadnonuniform | 1 | 1.348 | 3.082 | 0 | 0.7731 | 0.7731 |
+| camelshotnoise | 452 | 3.493 | 122.6 | 63 | 14.69 | 102.2 |
+| cow (5 files) | 2 | 1.89 | 3.525 | 0 | 1.321 | 1.321 |
+| face | 0 | 0.01957 | 0.01957 | 0 | 0.00991 | 0.00991 |
+| hand | 6 | 1.576 | 5.085 | 4 | 2.811 | 3.63 |
+| mannequin | 4 | 0.8287 | 2.442 | 0 | 0.606 | 0.606 |
+| rhino | 2 | 1.323 | 2.721 | 0 | 1.063 | 1.063 |
+| tree | 4 | 2.017 | 2.29 | 0 | 0.5162 | 0.5162 |
+
+The optimized boundary lowers the objective on every mesh with boundary (it can only), by a factor
+of 1.07 (`body`) to 4.4 (`tree`). It lowers `D` too except on `airplane`, `body`, `hand` and
+`camelshotnoise`, where it trades distortion for fewer cones. At `λ = 0.5` it places no cone at all
+on most meshes: the curvature is absorbed by the boundary values. The example also prints
+`Penalized` and `Convex` at the same `λ`. `Penalized` puts hundreds of cones on `bump` (833),
+`mannequin` (529) and `camelshotnoise` (870) at `λ = 0.5`; I did not investigate why (the solver
+agrees with Clarabel on small meshes, so it is the problem, not an error of the solver that I
+know of).
+
 ## Interface
 
 ```rust
@@ -78,6 +185,8 @@ impl ConeProblem<'_> { pub fn new(mesh, geometry, lambda) -> ConeProblem }
 
 // solve.rs
 pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError>;
+pub fn solve_with_boundary(problem, boundary: BoundaryTreatment, options) -> Result<Solution, ConeError>;
+pub enum BoundaryTreatment { Fixed /* default: u = 0 */, Free, Penalized, Convex }   // see "The boundary"
 pub struct SolveOptions<'a> {
     pub regularization: Vec<f64>,                // γ of Stage I; default 1, 1e-1, …, 1e-10
     pub regularization_metric: RegularizationMetric,  // Unweighted (default) | Mass
@@ -97,6 +206,7 @@ pub struct Solution {
     // the optimum of the problem (this is what the certificate is about)
     pub measure: Vec<f64>,            // µ per vertex, exactly 0 where there is no cone
     pub log_scale_optimal: Vec<f64>,  // u per vertex
+    pub boundary_curvature: Vec<f64>, // ν at boundary vertices, 0 elsewhere (every treatment)
     pub adjoint: Vec<f64>,            // φ per vertex
     pub adjoint_shift: (f64, f64),    // closed meshes: constants that may be added to φ
     pub objective: f64, pub distortion_optimal: f64, pub cone_cost: f64,
@@ -124,13 +234,19 @@ pub enum StageStop { ActiveSetsUnchanged, Tolerance, Stalled, IterationLimit, Cy
 
 // certificate.rs
 pub fn certify(problem, log_scale: &[f64], adjoint: &[f64], measure: &[f64]) -> Result<Certificate, ConeError>;
+pub fn certify_with_boundary(problem, boundary, log_scale, adjoint, measure) -> Result<Certificate, ConeError>;
 pub struct Certificate {
     pub state_residual: f64, pub adjoint_residual: f64, pub cone_residual: f64,
     pub bound_violation: f64, pub dual_infeasibility: f64, pub gauss_bonnet_residual: f64,
     pub primal_objective: f64, pub dual_objective: f64,
     pub duality_gap: f64, pub complementarity_gap: f64, pub gap_uncertainty: f64,
+    pub repair_cost: f64, pub repair_bound_violation: f64, pub weights_positive: bool,
 }
-impl Certificate { pub fn holds(&self, tolerance: f64) -> bool }
+impl Certificate {
+    pub fn holds(&self, tolerance: f64) -> bool;
+    pub fn optimum_enclosure(&self) -> Option<(f64, f64)>;   // proved [D, J + repair_cost], or None
+    pub fn suboptimality_bound(&self) -> Option<f64>;        // duality_gap + repair_cost, or None
+}
 
 // evaluate.rs: scale factor and adjoint of a given cone configuration
 pub fn evaluate_cones(problem, cones: &[Cone], par: Parallelism<'_>) -> Result<ConeEvaluation, ConeError>;
@@ -241,6 +357,26 @@ What is proved, in `lean/proofs` (`DdgProofs/Certificate.lean`), for exact real 
   `(u, µ)` is exactly feasible for the problem whose angle defects are `Ω − r` instead of `Ω`
   (`|r_i| ≤ state_residual`) and is suboptimal *there* by at most `complementarity_gap ≥ 0`.
 * If `r = 0`: `objective − optimum ≤ duality_gap = complementarity_gap`.
+* **Enclosure from a computed triple** (`certificate_enclosure`, `certificate_of_computed`): if all
+  `wE_i m_i > 0` and `µ_i + r_i` is admissible at every vertex (inside `[lo_i, hi_i]`; equal to the
+  fixed angle at a forbidden or prescribed vertex), then `(u, µ + r)` is exactly feasible and
+  `D ≤ optimum ≤ J(u, µ + r) ≤ J(u, µ) + λ Σ wR_i |r_i|`; its objective exceeds the optimum by at
+  most `duality_gap + repair_cost`. The certificate reports the numbers this needs:
+  `repair_cost = λ Σ wR_i |r_i|` (penalized unknown vertices; a fixed vertex and a free site
+  cost nothing), `repair_bound_violation` (the largest distance of `µ_i + r_i` from the
+  admissible set, and `max(|u|, |µ|)` at vertices that are not unknowns, which must be exactly
+  `0`) and `weights_positive`. `optimum_enclosure()` returns `Some((D, J + repair_cost))` exactly
+  when `weights_positive` and `repair_bound_violation == 0` (and the values are finite), else
+  `None`; `suboptimality_bound()` is then `duality_gap + repair_cost`. In particular: at a
+  penalized vertex without bounds every residual is admissible; at a forbidden or prescribed
+  vertex the residual must be exactly `0`, which a computed solution has only by luck (it is
+  rounding noise: on problems with such features even a converged solve usually gets `None`,
+  215 of 366 in `tests/enclosure.rs`), and then nothing is proved from above; likewise for an
+  angle at its bound with a residual pushing it out. Without positive weights the lower bound is
+  not proved. Tested: on 339 deliberately perturbed triples (`u`, `µ`, `φ` moved by up to 0.1)
+  the enclosure contained the optimal value of the generic convex solver every time. All of this
+  is about exact arithmetic on the `f64` values of the triple; rounding in `D`, `J`, `r` is not
+  covered.
 
 What is not:
 
@@ -250,9 +386,8 @@ What is not:
   nonnegative terms) shifted by at most
   `gap_uncertainty = Σ_{w_i=0} |(L φ̂)_i u_i| + Σ |φ̂_i r_i|`. Read the gap as
   "`complementarity_gap`, give or take `gap_uncertainty`". (The proved enclosure
-  `D ≤ optimum ≤ J + λ Σ wR_i |r_i|` needs `µ + r` to be admissible at every vertex, which
-  fails as soon as a forbidden or prescribed vertex has a nonzero residual; the code does not
-  evaluate it.)
+  `D ≤ optimum ≤ J + λ Σ wR_i |r_i|` needs `µ + r` to be admissible at every vertex; see the
+  next item and `Certificate::optimum_enclosure`.)
 * **Where `wE_i = 0`** the dual problem requires `(L φ̂)_i = 0` exactly, which is not enforced by
   construction. Such a vertex contributes nothing to `D`; its violation is in `adjoint_residual`
   and, times `u_i`, in `gap_uncertainty`. `D` is then a lower bound only up to
@@ -400,7 +535,8 @@ step. Largest difference between the re-optimized and the published angle, in ra
 So the files fall into two families. One treats the boundary as this crate does (`u = 0`,
 paper Fig. 10 b); for it the agreement is at the level that the six-digit positions of the OBJ
 files allow. The other evidently used **optimized boundary values** (paper Sec. 8.3, Fig. 10 c),
-which this crate does not implement; the agreement there is `10⁻²`, not `10⁻⁴`, so some detail
+which `BoundaryTreatment::Free` implements (see [the boundary](#the-boundary)); the agreement
+there is `10⁻²`, not `10⁻⁴`, so some detail
 of the authors' boundary treatment is not captured (uniform instead of lumped masses, and
 other weights of the boundary mass, were tried and are worse or no better).
 
@@ -439,6 +575,29 @@ them the file's, within `2.5·10⁻³` rad), not the optimum for `10⁻⁵ / are
 A certified optimum cannot be beaten in its own problem: for every mesh with boundary the
 file's cones, evaluated with `evaluate_cones`, have an objective at `λ = 0.5` that is not
 below ours (asserted in `tests/dataset.rs`).
+
+**Published cones with optimized boundary values, re-run with `BoundaryTreatment::Free`**
+(`tests/dataset.rs::published_cones_with_optimized_boundary_values`; largest difference between the
+re-optimized and the published angle, radians). The numbers are the same as the doubled mesh gave,
+to `10⁻¹¹` (the two routes were compared cone by cone; `hand` has no double): it does **not**
+get closer than the `10⁻²` the doubled mesh gave. Best agreement `3.3·10⁻³`, worst `1.0·10⁻²`.
+
+| file | `u = 0` | optimized (this mode) | doubled mesh |
+|---|---|---|---|
+| camel (6) | 3.6e-1 | 3.43e-3 | 3.43e-3 |
+| camel_noise1 (7) | 3.9e-1 | 5.75e-3 | 5.75e-3 |
+| camel_noise2 (7) | 6.4e-1 | 9.40e-3 | 9.40e-3 |
+| camelbad (6) | 3.5e-1 | 4.56e-3 | 4.56e-3 |
+| camelbadnonuniform (6) | 3.6e-1 | 9.80e-3 | 9.80e-3 |
+| cow1 (2) | 4.1e-1 | 4.93e-3 | 4.93e-3 |
+| cow75e-2 (3) | 4.1e-1 | 3.27e-3 | 3.27e-3 |
+| cow5e-1 (5) | 1.0e0 | 1.02e-2 | 1.02e-2 |
+| hand (29) | 1.2e-1 | 3.85e-3 | (no double) |
+| rhino (36) | 2.2e-1 | 8.24e-3 | 8.24e-3 |
+
+The residual `3·10⁻³ … 10⁻²` is thus not due to the way the boundary was optimized here; it is
+still an unknown detail of the authors' computation (it was not removed by the mass variants
+mentioned above).
 
 What this means for a user: to get cones like the authors', solve, merge the clusters, and
 re-optimize the angles at the merged vertices (the last row of the [steering](#steering)
@@ -576,6 +735,33 @@ How the authors arrived there on this mesh was not found: re-optimizing the angl
 positions gives nonsense (the spikes dominate), with the tips and their rings as additional
 free sites the angles are off by 0.1 to 1.0, and with zero weight at the tips by 0.35.
 
+**The hypothesis that the authors' weights made the tips weightless, tested with optimized boundary
+values.** The first of those experiments used a constant boundary value, under which even the plain
+`camel` is off by 0.36. Redone with both boundary models (`example boundary -- spikes`, log
+`runs_tmp/boundary-spikes*.log`): the angles at the 6 published positions re-optimized (free
+sites there, no cones elsewhere, so independent of `λ` and of the overall scale of the weights),
+largest difference from the file:
+
+| distortion weights | `camel` `u = 0` | `camel` optimized | `camelshotnoise` `u = 0` | `camelshotnoise` optimized |
+|---|---:|---:|---:|---:|
+| uniform | 0.36 | **3.4e-3** | 39 | 44 |
+| zero at the 22 tips | | | 1.04 | **0.55** |
+| zero at the tips and their 1-rings | | | 1.04 | **0.55** |
+| feature size as printed, `ε` = 0.01, 1, 100, 10⁴ × median `\|Ω\|/M`, and at the maximum | 0.37 – 0.45 | 5.7e-3 – 0.30 | 1.3 – 31 | 0.87 – 34 |
+| feature size as described, same `ε` | 0.26 – 0.98 | 1.4e-3 – 1.4 | 49 – 1.1e4 (not converged, so unreliable) | 57 – 6.8e3 (not converged) |
+
+(`\|Ω\|/M` on `camelshotnoise`: median 56, 99 % 2.8·10⁴, max 2.5·10⁵.) On the control `camel`,
+feature-size weights with `ε` of the order of the maximum make the weights nearly uniform and
+give about the uniform value (the best, 1.4·10⁻³ at `ε` = 5·10⁵, is as good as uniform, 3.4·10⁻³);
+smaller `ε` is worse. On `camelshotnoise` nothing matches: the best is zero weight at the tips, 0.55 with
+optimized boundary values (and rings make no difference), against 3.4·10⁻³ for the plain camel.
+Penalized solves with zero weight at the tips (and with the rings, the same), `λ` from 2 to 0.001:
+with `u = 0`: no cone for `λ ≥ 1`; for `λ ≤ 0.5`, 1 to 3 of the 6 published vertices
+and 1 to 245 other cones, one cone next to a tip (at `λ = 0.002`); with optimized boundary values: no
+cone for `λ ≥ 0.2`, for `λ ≤ 0.1` 0 to 3 of the 6 and 2 to 231 other cones, none at a tip. The
+as-described feature-size weights were not solved penalized, since their refit does not converge. So this
+hypothesis is **not** confirmed: the weights do not reproduce the published angles on this mesh.
+
 ## Performance baseline
 
 `cargo run --release -p ddg-optimal-cones --example baseline -- --merge --repeat 3`: every
@@ -638,10 +824,11 @@ what the theorems cover, which is not always the whole statement.
 | id | function | statement | in `lean/proofs` |
 |---|---|---|---|
 | `duality-gap-inexact` | `certify` | For any `u, φ, µ` vanishing on the boundary, with `r = L u − µ + Ω`, `φ̂` in the domain of every `g_i*`, `ũ_i = −(L φ̂)_i/w_i` where `w_i > 0`, `J = ½ Σ w_i u_i² + Σ t_i\|µ_i\|` and `D = −½ Σ_{w_i>0} (L φ̂)_i²/w_i + Σ φ̂_i Ω_i − Σ g_i*(φ̂_i)`: `J − D = ½ Σ_{w_i>0} w_i (u_i − ũ_i)² + Σ (t_i\|µ_i\| + g_i*(φ̂_i) − φ̂_i µ_i) + Σ_{w_i=0} (L φ̂)_i u_i − Σ φ̂_i r_i`. (At a vertex with fixed angle `a`: `t_i\|µ_i\|` is `0` and `g_i*(p) = a p`.) | the identity: `gap_identity_general`, `objective_sub_dualObjectiveOfAdjoint` |
+| `boundary-optimality-system` | `Discrete::with_boundary`, `solve_with_boundary`, `certify_with_boundary` | With `Ω̂_i = Ω_i` (`i ∈ I`), `Ω̂_i = k_i = π − Σ corner angles` (`i ∈ B`), unknowns `u ∈ R^V`, `s = (µ, ν)` and one site `g_i` per vertex (`t_i\|·\|` with bounds): `minimize ½ Σ_V wE_i m_i u_i² + Σ_V g_i(s_i)` subject to `(L u)_i = s_i − Ω̂_i` for all `i`. Its optimality system is `(L u)_i = s_i − Ω̂_i`, `(L φ)_i = −wE_i m_i u_i`, `φ_i ∈ ∂g_i(s_i)`; it is sufficient for a global minimum, and `Σ s = Σ Ω̂ = 2πχ`. Sites on `B`: `Free` `g = 0` (so `φ_i = 0`), `Penalized` `g = λ wR_i\|·\|`, `Convex` `g = ι_[0,∞)`. | the sufficiency is `optimality-system-sufficient` for these data (a `ConeProblem` with this `Ω̂` and sites); that `ν_i = (L u)_i + k_i` is the geodesic curvature of the flattened boundary (paper Sec. 8.3) is a modelling statement, checked numerically, not proved |
 | `saddle-point-newton-system` | `SaddleSolver` | The linear system of a choice of pieces is `W u + A φ = 0` together with, per vertex, `(A u)_i = µ_i − Ω_i` (angle fixed), `(A u)_i − k_i (φ_i − o_i) = b_i − Ω_i` (angle `b_i + k_i(φ_i − o_i)`), or `φ_i = p_i` (angle free); in the unknowns `(u, φ)` its matrix is the symmetric `[[W, A], [A, −K]]` with the rows and columns of the pinned `φ_i` replaced by the identity. | `isSolution_iff`, `isAssembledSolution_iff`; a solution with every vertex on its piece is a minimizer (`isMinimizer_of_isSolution`, `isProxMinimizer_of_isSolution`) |
 | `gauss-bonnet-adjoint-shift` | `gauss_bonnet_shift` | For `k_i > 0`, `h(c) = Σ_i clamp(k_i P_{t_i}(x_i + c), lo_i, hi_i)` is continuous, nondecreasing and piecewise linear, with breakpoints among `κ − x_i` for the kinks `κ ∈ {t_i, t_i + hi_i/k_i, −t_i, −t_i + lo_i/k_i}`. The function returns the `c` of smallest magnitude with `h(c) = target`, or, if the target is not attained, the `c` of smallest magnitude at which `h` is nearest to it. | monotonicity (`sum_proxReg_add_monotone`) and that the pinned system is the full one once `h(c) = Σ Ω` (`isSolution_of_pinned_of_sum_eq`); not the search on the breakpoints |
 | `adjoint-constant-interval` | `adjoint_constant_interval` | With `∂g_i(µ_i) = [a_i, b_i]`: `{c : φ_i + c ∈ ∂g_i(µ_i) for all i} = [max_i (a_i − φ_i), min_i (b_i − φ_i)]`. | `kkt_add_const_iff`, `Site.stationary_iff_mem_subdiff` |
-| `regularized-dual-objective` | `DualSlope` | For `w > 0`, stiffness `k_i > 0`, centre `µ̄`: `Φ(φ) = ½ Σ w_i u_i² − Σ Ω_i φ_i + Σ e_i(φ_i)` with `W u = −A φ` and `e_i'(p) = clamp(k_i P_{t_i}(p + µ̄_i/k_i), lo_i, hi_i)` is convex and continuously differentiable, `∇Φ = −(A u − µ + Ω)` with `µ_i = e_i'(φ_i)`, and its minimizers are the adjoint states of the problem `minimize J(u, µ) + Σ (µ_i − µ̄_i)²/(2 k_i)`. Along `(du, dφ)` with `W du = −A dφ`: `d/dα Φ = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i`, nondecreasing and piecewise linear in `α`. | the slope along a direction and its monotonicity (`dualSlope_eq`, `dualSlope_monotone`); `Φ` itself is not formalized |
+| `regularized-dual-objective` | `DualSlope` | For `w > 0`, stiffness `k_i > 0`, centre `µ̄`, with `Φ(φ) = ½ Σ w_i u_i² − Σ Ω_i φ_i + Σ e_i(φ_i)`, `W u = −A φ`, `e_i'(p) = clamp(k_i P_{t_i}(p + µ̄_i/k_i), lo_i, hi_i)` (the intended reading: `Φ` is the convex dual objective of `minimize J(u, µ) + Σ (µ_i − µ̄_i)²/(2 k_i)`, `∇Φ = −(A u − µ + Ω)`; this reading is not claimed as proved). Along `(du, dφ)` with `W du = −A dφ`: `d/dα Φ = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i`, nondecreasing and piecewise linear in `α`. | the slope along a direction and its monotonicity (`dualSlope_eq`, `dualSlope_monotone`); `Φ` itself is not formalized |
 | `cone-cluster-frechet-mean` | `frechet_order` | For a set of cone vertices connected through edges between its members, with angles `µ_k`: the member `v` that minimizes `Σ_k \|µ_k\| dist(v, c_k)²`, `dist` the length of the shortest path along edges with both ends in the set; ties go to the smaller index. | existence of a minimizer, and that merging at any member keeps `Σ µ` and does not increase `Σ \|µ\|` (`exists_frechetMean`, `sum_mergeCones`, `sum_abs_mergeCones_le`) |
 | `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. | `IsProxMinimizer.isMinimizer_of_fixedPoint`; also that a proximal step does not increase the objective (`IsProxMinimizer.objective_add_le`) |
 | `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). | `oettli_prager` |
@@ -654,6 +841,8 @@ cargo test --release -p ddg-optimal-cones            # everything; the dataset t
 cargo test --release -p ddg-optimal-cones --test dataset -- --nocapture
 cargo run  --release -p ddg-optimal-cones --example published -- refit     # or facts, adjoint, sweep, iterate
 cargo run  --release -p ddg-optimal-cones --example baseline -- --merge --repeat 3
+cargo run  --release -p ddg-optimal-cones --example boundary -- table     # or spikes
+cargo run  --release -p ddg-optimal-cones --example fingerprint            # bit hashes of default-mode solves
 ```
 
 | file | what it checks |
@@ -663,16 +852,20 @@ cargo run  --release -p ddg-optimal-cones --example baseline -- --merge --repeat
 | `tests/oracle.rs` | replay of the Lean oracle's golden fixtures and live differential fuzzing against its executable (skipped with a notice if it is not built) |
 | `tests/properties.rs` | invariance under scaling and relabeling, monotonicity in `λ`, the guarantee of Sec. 4.5, exact constraints, the certificate of the returned triple |
 | `tests/api.rs` | errors, options, tiny meshes, extraction and merging, the certificate identity, non-converged status |
-| `tests/dataset.rs` | the published dataset: every mesh solved to a certified optimum, and the findings above |
+| `tests/dataset.rs` | the published dataset: every mesh solved to a certified optimum, the findings above, the boundary modes against the double and the published refits |
+| `tests/boundary.rs` | the boundary treatments against the double of the mesh, orderings (free ≤ the others), reporting, certificate, extraction |
+| `tests/enclosure.rs` | `optimum_enclosure` against the generic convex solver on perturbed triples; when it is withheld |
 
 The dataset is not part of the repository; without it the dataset tests print a notice and pass.
 
 ## Not implemented
 
-* Optimized boundary values, boundary curvature penalties, convex boundaries (paper Sec. 8.3).
-  Half of the published files used the first. In the terms of this crate it is the same
-  problem with the boundary vertices as unknowns that carry their geodesic curvature and are
-  free cone sites; `tests/dataset.rs` evaluates it on the double of the mesh.
+* The boundary treatment is not a field of `ConeProblem` (that would break struct literals in
+  other crates); `evaluate_cones` has no boundary variant (use `solve_with_boundary` with
+  `cone_costs` of `0` and `+∞`); `Penalized` and `Convex` have no per-vertex bounds of their own;
+  a zero distortion weight at a `Free` boundary vertex can make the problem ill posed (the solver
+  then says `NotConverged`); the `Infeasible` error text speaks of a "closed mesh" also for a
+  boundary treatment other than `Fixed`.
 * A function that re-optimizes the angles of given cones; it is a call of `solve` with
   `cone_costs` of `0` and `+∞`.
 * Multiresolution (Sec. 6.3), and a solver that factorizes the Laplacian once.

@@ -595,7 +595,7 @@ pub fn double_mesh(mesh: &TriMesh, geometry: &Geometry) -> Option<(TriMesh, Geom
         .map(|e| {
             let [a, b] = doubled.edge_vertices(e);
             let edge = mesh
-                .find_edge(original[a as usize] as usize, original[b as usize] as usize)
+                .find_edge(original[a] as usize, original[b] as usize)
                 .expect("the copy of an edge");
             geometry.edge_lengths()[edge]
         })

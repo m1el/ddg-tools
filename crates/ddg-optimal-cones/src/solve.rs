@@ -765,9 +765,9 @@ pub fn solve_with_boundary(
     let data = validate_with(problem, boundary)?;
     let mut cone_measure = measure.clone();
     if boundary != BoundaryTreatment::Fixed {
-        for v in 0..d.n_vertices {
+        for (v, m) in cone_measure.iter_mut().enumerate() {
             if problem.mesh.is_boundary_vertex(v) {
-                cone_measure[v] = 0.0;
+                *m = 0.0;
             }
         }
     }

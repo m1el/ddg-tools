@@ -11,6 +11,8 @@
 //!
 //! What the tests establish is summarized in the crate README ("The published dataset").
 
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use std::collections::BTreeMap;

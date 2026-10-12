@@ -2,6 +2,7 @@
 //! dataset meshes, with free sites, bounds, weights and merging), to compare two commits:
 //! `cargo run --release -p ddg-optimal-cones --example fingerprint > a.log`, then `diff`.
 //! Used to check that adding the boundary treatments left `solve` bit for bit unchanged.
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
 use ddg_core::generators::{
     SplitMix64, annulus, bumpy_grid_disk, icosphere, open_cylinder, perturb, torus,
 };

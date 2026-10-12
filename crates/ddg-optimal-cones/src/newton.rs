@@ -109,9 +109,14 @@ fn classify(sites: &[Site], k: &[f64], args: &[f64], out: &mut Vec<Piece>) {
 ///
 /// On a closed mesh the cone angles must sum to `Σ Ω = 2πχ`. The left side is the sum of the
 /// cone angles that the adjoint `φ + c` asks for; it is continuous, nondecreasing and piecewise
-/// linear in `c`, so the equation is solved exactly on its breakpoints. For a regularized
-/// problem this is the exact minimization of the dual objective along the constants, the null
-/// direction of the Laplacian.
+/// linear in `c`, so the equation is solved exactly on its breakpoints. What is proved
+/// (`lean/proofs`) is the monotonicity of the sum in `c` and that, once the sum equals `Σ Ω`, the
+/// system pinned at the constant is the full optimality system. (For a regularized problem, `c`
+/// is the null direction of the Laplacian, and this choice of `c` is expected to be the
+/// minimizer of the dual objective along the constants, since the derivative along the
+/// constants is the difference of the two sums. That is not part of what is proved, and the
+/// solver does not rely on it: a regularized problem is accepted only by its residuals, and the
+/// result by the certificate.)
 ///
 /// Returns `0` if the sum already matches up to rounding (`target_rounding` is the rounding
 /// error of the target itself: `Σ Ω` is a sum of many angles, and is for example not exactly
@@ -205,15 +210,17 @@ pub(crate) fn gauss_bonnet_shift(
 /// e_i'(φ) = clamp(k_i · P_{t_i}(φ + µ̄_i / k_i), lo_i, hi_i)
 /// ```
 ///
-/// which is convex and continuously differentiable; its minimizers are the adjoint states of
-/// the regularized problem, and `∇Φ = −(A u − µ + Ω)`. Along a direction `(du, dφ)` with
-/// `W du = −A dφ` its derivative at step length `α` is
+/// (`Φ` itself is not formalized, and nothing here relies on `Φ` being convex or `C¹`; the
+/// identity `∇Φ = −(A u − µ + Ω)` and the minimizers being the adjoint states of the regularized
+/// problem are the intended reading, not proved statements.) What is proved is the slope: along
+/// a direction `(du, dφ)` with `W du = −A dφ` the derivative at step length `α` is
 ///
 /// ```text
 /// g(α) = Σ w_i du_i (u_i + α du_i) − Σ Ω_i dφ_i + Σ e_i'(φ_i + α dφ_i) dφ_i
 /// ```
 ///
-/// which is nondecreasing and piecewise linear in `α`.
+/// which is nondecreasing and piecewise linear in `α` (`dualSlope_eq`, `dualSlope_monotone`). The
+/// line search uses only this: it finds the zero of a monotone piecewise linear function.
 ///
 /// [formula: regularized-dual-objective]
 struct DualSlope<'a> {

@@ -10,6 +10,8 @@
 //!   the fixed one, never worse than a penalized or a convex one.
 //! * Reporting: `u` and `ν` on the boundary, the certificate, extraction.
 
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use common::{

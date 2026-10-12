@@ -304,7 +304,6 @@ impl Discrete {
     /// boundary vertices are unknowns whose "angle defect" is the boundary geodesic curvature
     /// `k`, so that one formula covers `µ` and `ν`.
     ///
-    /// [formula: lambda-area-normalization]
     /// [formula: boundary-optimality-system]
     pub fn with_boundary(
         problem: &ConeProblem<'_>,
@@ -397,9 +396,9 @@ impl Discrete {
             angle[i as usize] = cone.angle;
         }
         let mut out = self.clone();
-        for i in 0..self.n {
-            if !self.is_boundary[i] {
-                out.sites[i] = Site::fixed(angle[i]);
+        for ((site, &boundary), &a) in out.sites.iter_mut().zip(&self.is_boundary).zip(&angle) {
+            if !boundary {
+                *site = Site::fixed(a);
             }
         }
         Ok(out)

@@ -124,9 +124,75 @@ pub struct Certificate {
     /// exactly (and to dual infeasibility at vertices of zero distortion weight) rather than
     /// to suboptimality.
     pub gap_uncertainty: f64,
+    /// The repair cost `ε = λ Σ wR_i |r_i|` of absorbing the state residual `r = L u − µ + Ω`
+    /// into the cone angles, over the penalized unknown vertices (a vertex with a fixed angle
+    /// and a free cone site cost nothing). See [`Certificate::optimum_enclosure`].
+    pub repair_cost: f64,
+    /// How far `µ + r` is from being admissible: the largest, over the unknown vertices, distance
+    /// of `µ_i + r_i` from `[lo_i, hi_i]` (from the fixed angle at a forbidden or prescribed
+    /// vertex, from `0` at a forbidden one), and `max(|u_i|, |µ_i|)` over the vertices that are
+    /// not unknowns (boundary vertices with `u = 0`), which must be exactly `0`. It is `0` when
+    /// `µ + r` is admissible everywhere. With a forbidden or prescribed vertex and a nonzero
+    /// residual there it is positive, and nothing is proved about the optimum (see
+    /// [`Certificate::optimum_enclosure`]).
+    pub repair_bound_violation: f64,
+    /// Whether `wE_i m_i > 0` at every unknown vertex, which the lower bound `D ≤ optimum`
+    /// needs.
+    pub weights_positive: bool,
 }
 
 impl Certificate {
+    /// An enclosure `(lower, upper)` of the optimal objective value of the **given** problem, or
+    /// `None` when none is proved.
+    ///
+    /// * `lower = dual_objective = D`. Proved (`dual_lower_bound_of_clip`) when
+    ///   [`weights_positive`](Certificate::weights_positive): `D` is at most the objective of every
+    ///   feasible pair, whatever the residuals of the triple are.
+    /// * `upper = primal_objective + repair_cost`. Proved (`certificate_enclosure`) when
+    ///   `repair_bound_violation == 0`: then `µ + r` is admissible, `(u, µ + r)` is exactly
+    ///   feasible, and its objective is at most `J(u, µ) + λ Σ wR_i |r_i|`.
+    ///
+    /// Both statements are about exact real arithmetic applied to the `f64` values of the
+    /// triple and of `Ω`, `L`, `m`; rounding in evaluating `D`, `J`, `r` is not covered.
+    ///
+    /// When is `repair_bound_violation` zero? Always at a penalized vertex without bounds. At a
+    /// vertex with a bound it needs `µ_i + r_i` inside the bounds, and at a forbidden or
+    /// prescribed vertex it needs `r_i = 0` exactly (the angle must stay the fixed one). So with a
+    /// forbidden or prescribed vertex and a nonzero residual there, or an angle at its bound
+    /// with a residual pushing it out, the result is `None`: `(u, µ + r)` is then not feasible,
+    /// no feasible point with this `u` exists, and nothing bounds the optimum from above. (The
+    /// lower bound is still valid; see [`Certificate::dual_objective`].) Not finite values give
+    /// `None` too.
+    ///
+    /// When it is `Some((lower, upper))`, the optimal value lies in it, the pair `(u, µ + r)`
+    /// is feasible, and its objective exceeds the optimum by at most
+    /// `duality_gap + repair_cost` (`certificate_of_computed`).
+    ///
+    /// [formula: duality-gap-certificate]
+    pub fn optimum_enclosure(&self) -> Option<(f64, f64)> {
+        // Written so that a NaN fails.
+        let finite = self.dual_objective.is_finite()
+            && self.primal_objective.is_finite()
+            && self.repair_cost.is_finite()
+            && self.duality_gap.is_finite();
+        if finite && self.weights_positive && self.repair_bound_violation == 0.0 {
+            Some((
+                self.dual_objective,
+                self.primal_objective + self.repair_cost,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// The proved bound `duality_gap + repair_cost` on how much the objective of the feasible
+    /// pair `(u, µ + r)` exceeds the optimum, under the conditions of
+    /// [`Certificate::optimum_enclosure`] (`None` otherwise).
+    pub fn suboptimality_bound(&self) -> Option<f64> {
+        self.optimum_enclosure()
+            .map(|_| self.duality_gap + self.repair_cost)
+    }
+
     /// Whether every residual is at most `tolerance` and both forms of the gap and the gap
     /// uncertainty are at most `tolerance · max(1, |primal_objective|)`.
     pub fn holds(&self, tolerance: f64) -> bool {
@@ -263,6 +329,9 @@ pub fn certify_with_boundary(
         duality_gap: 0.0,
         complementarity_gap: 0.0,
         gap_uncertainty: 0.0,
+        repair_cost: 0.0,
+        repair_bound_violation: 0.0,
+        weights_positive: true,
     };
     let mut distortion = 0.0;
     let mut cone_cost = 0.0;
@@ -279,12 +348,18 @@ pub fn certify_with_boundary(
             c.state_residual = c.state_residual.max(u[v].abs());
             c.adjoint_residual = c.adjoint_residual.max(phi[v].abs());
             c.bound_violation = c.bound_violation.max(mu[v].abs());
+            c.repair_bound_violation = c.repair_bound_violation.max(u[v].abs()).max(mu[v].abs());
             continue;
         }
         let w = data.w_e[v] * mass[v];
         let state = l_u[v] - mu[v] + omega[v];
         c.state_residual = c.state_residual.max(state.abs());
         c.gap_uncertainty += (phi_hat[v] * state).abs();
+        c.repair_cost += site.cost(state);
+        c.repair_bound_violation = c
+            .repair_bound_violation
+            .max(site.bound_violation(mu[v] + state));
+        c.weights_positive &= w > 0.0;
         c.adjoint_residual = c.adjoint_residual.max((l_phi[v] + w * u[v]).abs());
         c.cone_residual = c
             .cone_residual
