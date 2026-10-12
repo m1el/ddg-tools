@@ -24,11 +24,11 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
             "Trade-off between area distortion and cones. "
             "Larger values give fewer cones and more distortion"
         ),
-        default=0.5,
+        default=0.1,
         min=0.0,
-        soft_min=0.05,
-        soft_max=2.0,
-        step=5,
+        soft_min=0.01,
+        soft_max=1.0,
+        step=1,
         precision=3,
     )
     use_seams: BoolProperty(
@@ -50,8 +50,11 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
     )
     positive_cones_only: BoolProperty(
         name="Positive Cones Only",
-        description="Allow only cones with a positive angle (cone tips, no saddles)",
-        default=False,
+        description=(
+            "Allow only cones with a positive angle (cone tips, no saddles). "
+            "Negative cones lower distortion but make the UV map overlap itself"
+        ),
+        default=True,
     )
     mark_seams: BoolProperty(
         name="Mark Cuts as Seams",

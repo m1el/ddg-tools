@@ -233,8 +233,8 @@ impl UnwrapResult {
     prescribed_vertices = None,
     prescribed_angles = None,
     forbidden_vertices = None,
-    lambda_ = 0.5,
-    positive_cones_only = false,
+    lambda_ = 0.1,
+    positive_cones_only = true,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn unwrap<'py>(
@@ -389,7 +389,7 @@ fn pack_charts<'py>(
 /// pack_charts(...)  lay the charts of a UV map out in the unit square
 ///
 /// PIPELINE          name of the unwrap pipeline this build contains
-/// IS_PLACEHOLDER    True while that pipeline is the stand-in (a planar projection per chart)
+/// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
 ///                   and not the real conformal unwrap
 ///
 /// Errors: DdgError, with subclasses InputError, MeshError and SolveError.

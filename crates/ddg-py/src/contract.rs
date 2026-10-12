@@ -548,8 +548,8 @@ pub struct UnwrapOptions {
 impl Default for UnwrapOptions {
     fn default() -> Self {
         UnwrapOptions {
-            lambda: 0.5,
-            positive_cones_only: false,
+            lambda: 0.1,
+            positive_cones_only: true,
         }
     }
 }
@@ -1089,7 +1089,8 @@ mod tests {
     #[test]
     fn options_are_checked() {
         assert!(UnwrapOptions::default().validate().is_ok());
-        assert_eq!(UnwrapOptions::default().lambda, 0.5);
+        assert_eq!(UnwrapOptions::default().lambda, 0.1);
+        assert!(UnwrapOptions::default().positive_cones_only);
         let bad = UnwrapOptions {
             lambda: -1.0,
             ..UnwrapOptions::default()

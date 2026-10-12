@@ -4,10 +4,9 @@
 //! corner comes out as an array Blender takes back (`foreach_set`). No numpy is needed on either
 //! side: arguments are read through the buffer protocol, results are `array.array` objects.
 //!
-//! **The unwrap pipeline behind this binding is currently a stand-in** (a planar projection per
-//! chart, see [`placeholder`]). The real one — optimal cone singularities, cutting, conformal
-//! flattening — will be the `ddg-uv` crate; [`pipeline::run_pipeline`] is the single place
-//! where it gets wired in.
+//! The unwrap pipeline behind this binding is the `ddg-uv` crate: seams, optimal cone
+//! singularities, cutting, conformal flattening. [`pipeline::run_pipeline`] is the single place
+//! that calls it.
 //!
 //! # Layout
 //!
@@ -17,7 +16,6 @@
 //!   validated.
 //! * [`error`] — [`error::InputError`] and [`error::UnwrapError`].
 //! * [`pipeline`] — the seam to the pipeline and the driver around it.
-//! * [`placeholder`] — the stand-in pipeline.
 //! * [`measure`] — distortion measured on the resulting UV map.
 //! * [`pack`] — packing charts into the unit square.
 //! * `python` (cargo feature `python`) — the PyO3 glue. It contains no logic of its own:
@@ -45,7 +43,6 @@ pub mod error;
 pub mod measure;
 pub mod pack;
 pub mod pipeline;
-pub mod placeholder;
 
 #[cfg(feature = "python")]
 mod python;

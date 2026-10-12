@@ -5,12 +5,12 @@ It is the bridge between Blender (`blender/` in this repository) and the Rust cr
 workspace, built with [PyO3](https://pyo3.rs) for the stable ABI, so one binary loads in every
 Python from 3.11 on. It never needs numpy.
 
-> **The unwrap behind this module is currently a stand-in.** `ddg_tools.unwrap` validates the
-> mesh and then projects every chart onto a plane. There is no cone optimization and no conformal
-> flattening yet; those live in the crates `ddg-optimal-cones`, `ddg-bff` and (to be written)
-> `ddg-uv`. `ddg_tools.IS_PLACEHOLDER` is `True`, `ddg_tools.PIPELINE` is
-> `"placeholder-planar-projection"`, and every result carries `report["placeholder"] == True` and
-> a warning. See [Wiring in the real pipeline](#wiring-in-the-real-pipeline).
+> `ddg_tools.unwrap` runs the real pipeline, `crates/ddg-uv`: marked seams are cut, optimal cone
+> singularities are computed per piece (`crates/ddg-optimal-cones`), the surface is cut through
+> the cones and flattened conformally (`crates/ddg-bff`). `ddg_tools.PIPELINE` is `"ddg-uv"` and
+> `ddg_tools.IS_PLACEHOLDER` is `False`. Sections below that still describe a stand-in planar
+> projection are from before the pipeline was wired in and need rewriting; the signature, buffer
+> formats and error types they describe are current.
 
 ## Python API
 
@@ -21,8 +21,8 @@ ddg_tools.unwrap(
     pinned_vertices=None,
     prescribed_vertices=None, prescribed_angles=None,
     forbidden_vertices=None,
-    lambda_=0.5,
-    positive_cones_only=False,
+    lambda_=0.1,
+    positive_cones_only=True,
 ) -> ddg_tools.UnwrapResult
 
 ddg_tools.pack_charts(uvs, polygon_starts, polygon_charts, *, margin=0.0)

@@ -11,10 +11,10 @@ from typing import Final, final
 __version__: Final[str]
 
 PIPELINE: Final[str]
-"""Name of the unwrap pipeline in this build, e.g. ``"placeholder-planar-projection"``."""
+"""Name of the unwrap pipeline in this build, ``"ddg-uv"``."""
 
 IS_PLACEHOLDER: Final[bool]
-"""True while the pipeline is the stand-in and not the real conformal unwrap."""
+"""False: the pipeline is the real conformal unwrap (kept for builds that link a stand-in)."""
 
 class DdgError(Exception):
     """Base class of the errors raised by ddg_tools."""
@@ -60,8 +60,8 @@ def unwrap(
     prescribed_vertices: Buffer | None = None,
     prescribed_angles: Buffer | None = None,
     forbidden_vertices: Buffer | None = None,
-    lambda_: float = 0.5,
-    positive_cones_only: bool = False,
+    lambda_: float = 0.1,
+    positive_cones_only: bool = True,
 ) -> UnwrapResult: ...
 def pack_charts(
     uvs: Buffer,

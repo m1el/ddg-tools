@@ -3,14 +3,11 @@
 One operator: take the active mesh and generate a UV map for it. The work is done in Rust by the
 native module `ddg_tools` (`crates/ddg-py`), bundled with the extension as a Python wheel.
 
-> **This is a placeholder build.** The native module currently contains a stand-in pipeline:
-> the mesh is validated and every connected piece is projected onto a plane. The real pipeline
-> (optimal cone singularities, cutting, conformal flattening) is not wired in yet. A placeholder
-> build says so everywhere: the extension is named "... [placeholder build]", the menu entry
-> ends in "[placeholder build]", the operator panel shows a warning, and every run reports
-> "PLACEHOLDER BUILD (planar projection, not the conformal unwrap)" as a warning. See
-> `crates/ddg-py/README.md` for how the real pipeline gets wired in; nothing in this directory
-> has to change for that.
+> The native module runs the real pipeline (`crates/ddg-uv`): marked seams are cut, optimal cone
+> singularities are computed, the surface is cut through the cones and flattened conformally.
+> Defaults: lambda 0.1 and positive cones only. Passages below that mention a "placeholder build"
+> describe the state before the pipeline was wired in; a build only labels itself that way if its
+> wheel reports `ddg_tools.IS_PLACEHOLDER`, which the current one does not.
 
 ## The operator
 

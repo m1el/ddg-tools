@@ -270,8 +270,8 @@ def group_vertices(obj, group_name):
     return groups_vertices(obj, [group_name])[0]
 
 
-def unwrap_object(obj, *, lambda_=0.5, use_seams=True, pinned_group="", forbidden_group="",
-                  positive_cones_only=False, mark_cuts_as_seams=False):
+def unwrap_object(obj, *, lambda_=0.1, use_seams=True, pinned_group="", forbidden_group="",
+                  positive_cones_only=True, mark_cuts_as_seams=False):
     """Generates a UV map for the mesh of ``obj`` and writes it to the active UV map, creating
     one if the mesh has none. Vertices, edges and faces are not touched.
 

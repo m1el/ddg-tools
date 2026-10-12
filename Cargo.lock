@@ -423,6 +423,7 @@ name = "ddg-py"
 version = "0.1.0"
 dependencies = [
  "ddg-core",
+ "ddg-uv",
  "pyo3",
 ]
 

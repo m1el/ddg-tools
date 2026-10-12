@@ -79,7 +79,7 @@ class ModuleTest(unittest.TestCase):
             self.assertTrue(issubclass(error, ddg_tools.DdgError), name)
             self.assertEqual(error.__module__, "ddg_tools")
         self.assertTrue(issubclass(ddg_tools.DdgError, Exception))
-        self.assertIn("lambda_=0.5", ddg_tools.unwrap.__text_signature__)
+        self.assertIn("lambda_=0.1", ddg_tools.unwrap.__text_signature__)
         self.assertIn("polygon corner", ddg_tools.unwrap.__doc__)
 
     def test_placeholder_is_announced(self):
@@ -313,7 +313,9 @@ class ShapeAndValueTest(unittest.TestCase):
         result = ddg_tools.unwrap(*arrays, lambda_=0.25, positive_cones_only=True)
         self.assertEqual(result.report["lambda"], 0.25)
         self.assertIs(result.report["positive_cones_only"], True)
-        self.assertEqual(ddg_tools.unwrap(*arrays).report["lambda"], 0.5)
+        defaults = ddg_tools.unwrap(*arrays).report
+        self.assertEqual(defaults["lambda"], 0.1)
+        self.assertIs(defaults["positive_cones_only"], True)
 
     def test_seams(self):
         arrays = as_arrays(self.mesh)
@@ -378,12 +380,15 @@ class MeshErrorTest(unittest.TestCase):
 
     def test_flipped_face(self):
         # Two triangles of a square; the second is wound the other way round.
+        # The pipeline repairs the winding per connected piece and says so; it is not an error.
         positions = [0.0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]
-        with self.assertRaisesRegex(
-                ddg_tools.MeshError,
-                r"faces 0 and 1 traverse their shared edge \(0, 2\) in the same direction"):
-            ddg_tools.unwrap(array.array('f', positions), array.array('i', [0, 1, 2, 3, 2, 0]),
-                             array.array('i', [0, 3]), array.array('i', range(6)))
+        result = ddg_tools.unwrap(array.array('f', positions),
+                                  array.array('i', [0, 1, 2, 3, 2, 0]),
+                                  array.array('i', [0, 3]), array.array('i', range(6)))
+        self.assertEqual(result.report["n_flipped_faces"], 1)
+        self.assertTrue(result.report["warnings"])
+        self.assertEqual(len(result.uvs), 12)
+        self.assertTrue(all(math.isfinite(x) for x in result.uvs))
 
     def test_bow_tie_vertex(self):
         positions = [-1.0, -1, 0, 0, 0, 0, -1, 1, 0, 1, -1, 0, 1, 1, 0]
@@ -404,7 +409,8 @@ class PackTest(unittest.TestCase):
         self.assertIs(type(info), dict)
         self.assertEqual(info["n_charts"], 1)
         self.assertEqual(info["margin"], 0.125)
-        self.assertEqual(info["scale"], 0.75)
+        # The cube unfolds without distortion into a net four unit squares long.
+        self.assertEqual(info["scale"], 0.75 / 4)
         # The input is not modified.
         self.assertNotEqual(uvs, result.uvs)
 

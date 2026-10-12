@@ -325,9 +325,9 @@ def operator_is_registered_with_exactly_the_agreed_properties():
     assert set(properties) == {
         "lambda_", "use_seams", "pinned_group", "forbidden_group", "positive_cones_only",
         "mark_seams"}, sorted(properties)
-    assert properties["lambda_"].default == 0.5
+    assert abs(properties["lambda_"].default - 0.1) < 1e-6
     assert properties["use_seams"].default is True
-    assert properties["positive_cones_only"].default is False
+    assert properties["positive_cones_only"].default is True
     assert properties["mark_seams"].default is False
     assert properties["pinned_group"].default == "" and properties["forbidden_group"].default == ""
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
@@ -628,9 +628,9 @@ def non_manifold_mesh_is_an_error_message_not_a_crash():
 
 
 @test
-def flipped_face_is_reported():
-    # Policy of ddg-core's validation, which the stand-in uses: inconsistent orientation is an
-    # error. The message must name the faces and the edge.
+def flipped_face_is_repaired():
+    # Policy of the pipeline: inconsistent winding is repaired per connected piece (with a
+    # warning), not refused. The mesh itself must stay as it is, flipped face included.
     cube = primitive("cube")
     edit_mesh = bmesh.new()
     edit_mesh.from_mesh(cube.data)
@@ -638,9 +638,10 @@ def flipped_face_is_reported():
     bmesh.ops.reverse_faces(edit_mesh, faces=[edit_mesh.faces[2]])
     edit_mesh.to_mesh(cube.data)
     edit_mesh.free()
-    message = expect_error(r"faces (2 and \d+|\d+ and 2) traverse their shared edge "
-                           r"\(\d+, \d+\) in the same direction")
-    print("  reported:", message.strip())
+    before = snapshot(current_mesh(cube))
+    assert op() == {'FINISHED'}
+    assert_same_mesh(before, snapshot(current_mesh(cube)))
+    assert_valid_uvs(cube)
 
 
 @test
