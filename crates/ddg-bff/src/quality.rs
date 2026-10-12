@@ -187,7 +187,10 @@ impl DistortionAccumulator {
 }
 
 /// The interior angle at `apex` of the plane triangle `(apex, b, c)`, signed: positive if
-/// `apex, b, c` are in counter-clockwise order. In `(−π, π]`.
+/// `apex, b, c` are in counter-clockwise order. In `(−π, π]`: `atan2(u × v, u · v)` with
+/// `u = b − apex`, `v = c − apex`.
+///
+/// [formula: signed-angle-2d]
 #[inline]
 pub(crate) fn signed_corner_angle(apex: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
     let (ux, uy) = (b[0] - apex[0], b[1] - apex[1]);
@@ -195,15 +198,33 @@ pub(crate) fn signed_corner_angle(apex: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f
     (ux * vy - uy * vx).atan2(ux * vx + uy * vy)
 }
 
+/// An end point of one segment that is closer to the line of the other than this fraction of
+/// the longer of the two segments counts as lying on it.
+const TOUCH_TOLERANCE: f64 = 1e-9;
+
 /// Whether the open segments `a0 a1` and `b0 b1` cross in a single interior point, and if so
-/// that point. Touching and collinear overlap do not count.
+/// that point. Touching and collinear overlap do not count, and neither do segments that
+/// coincide up to rounding (see [`TOUCH_TOLERANCE`]): the two sides of a cut through a flat
+/// region are laid on top of each other, which is contact, not a crossing.
+///
+/// The segments cross properly iff `b0`, `b1` lie strictly on opposite sides of the line
+/// `a0 a1` and `a0`, `a1` strictly on opposite sides of the line `b0 b1`.
+///
+/// [formula: segment-proper-crossing]
 fn proper_crossing(a0: [f64; 2], a1: [f64; 2], b0: [f64; 2], b1: [f64; 2]) -> Option<[f64; 2]> {
     let d1 = signed_double_area(a0, a1, b0);
     let d2 = signed_double_area(a0, a1, b1);
     let d3 = signed_double_area(b0, b1, a0);
     let d4 = signed_double_area(b0, b1, a1);
-    let opposite = |x: f64, y: f64| (x > 0.0 && y < 0.0) || (x < 0.0 && y > 0.0);
-    if opposite(d1, d2) && opposite(d3, d4) {
+    let length_a = (a1[0] - a0[0]).hypot(a1[1] - a0[1]);
+    let length_b = (b1[0] - b0[0]).hypot(b1[1] - b0[1]);
+    let reach = TOUCH_TOLERANCE * length_a.max(length_b);
+    // d / length is the signed distance from the line.
+    let opposite = |x: f64, y: f64, length: f64| {
+        let margin = reach * length;
+        (x > margin && y < -margin) || (x < -margin && y > margin)
+    };
+    if opposite(d1, d2, length_a) && opposite(d3, d4, length_b) {
         let t = d3 / (d3 - d4);
         Some([a0[0] + t * (a1[0] - a0[0]), a0[1] + t * (a1[1] - a0[1])])
     } else {
@@ -213,7 +234,8 @@ fn proper_crossing(a0: [f64; 2], a1: [f64; 2], b0: [f64; 2], b1: [f64; 2]) -> Op
 
 /// Counts the pairs of non-adjacent edges of a closed polygon that cross each other in a
 /// single interior point. A simple polygon has none. Edges that only touch, or overlap along a
-/// line, are not counted.
+/// line, are not counted, also when they do so only up to rounding (an end point within
+/// `1e-9` of the length of the longer edge from the other edge's line counts as on it).
 ///
 /// Uses a uniform grid; the expected cost is linear in the number of edges for polygons with
 /// edges of comparable length.
@@ -289,6 +311,135 @@ pub fn polygon_self_crossings(polygon: &[[f64; 2]]) -> usize {
         }
     }
     count
+}
+
+/// How much of the plane a layout covers, and how much of that it covers more than once:
+/// an estimate by point sampling on a regular grid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Coverage {
+    /// Area covered by at least one triangle.
+    pub covered_area: f64,
+    /// Area covered by two or more triangles (counted once, however many lie on top of each
+    /// other). Zero for an injective layout. Flipped triangles lie on top of their neighbours
+    /// and are included.
+    pub overlapped_area: f64,
+    /// Distance between neighbouring sample points. Features of the layout smaller than this
+    /// are not resolved; the two areas are multiples of its square.
+    pub sample_spacing: f64,
+    /// Number of sample points covered by at least one triangle.
+    pub n_samples: usize,
+}
+
+impl Coverage {
+    /// `overlapped_area / covered_area`: the fraction of the footprint of the layout in which
+    /// two or more points of the surface share a place in the plane. Zero if nothing is
+    /// covered.
+    pub fn overlapped_fraction(&self) -> f64 {
+        if self.covered_area > 0.0 {
+            self.overlapped_area / self.covered_area
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Largest number of grid cells [`coverage`] uses.
+const MAX_COVERAGE_CELLS: f64 = 16_777_216.0;
+
+/// Estimates [`Coverage`] of a set of plane triangles by counting, for every point of a
+/// regular grid, the triangles that contain it.
+///
+/// The grid spacing is chosen such that a triangle of average area contains about
+/// `samples_per_triangle` points, but not finer than a grid of 2²⁴ cells over the bounding box.
+/// A point on an edge shared by two triangles is counted for one of them (top-left rule), so
+/// a triangulation without overlap has `overlapped_area == 0` exactly.
+///
+/// Returns `None` if there is nothing to measure: no triangles, `samples_per_triangle` not
+/// positive, a coordinate that is not finite, or zero total area.
+pub fn coverage(triangles: &[[[f64; 2]; 3]], samples_per_triangle: f64) -> Option<Coverage> {
+    if triangles.is_empty() || samples_per_triangle.is_nan() || samples_per_triangle <= 0.0 {
+        return None;
+    }
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    let mut total = 0.0;
+    for t in triangles {
+        for p in t {
+            if !(p[0].is_finite() && p[1].is_finite()) {
+                return None;
+            }
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        total += 0.5 * signed_double_area(t[0], t[1], t[2]).abs();
+    }
+    let (width, height) = (hi[0] - lo[0], hi[1] - lo[1]);
+    if !(total > 0.0 && total.is_finite() && width > 0.0 && height > 0.0) {
+        return None;
+    }
+    let mut h = (total / (samples_per_triangle * triangles.len() as f64)).sqrt();
+    h = h.max((width * height / MAX_COVERAGE_CELLS).sqrt());
+    if !(h > 0.0 && h.is_finite()) {
+        return None;
+    }
+    // Sample (i, j) sits at lo + (i + ½, j + ½) h.
+    let nx = (width / h).ceil().max(1.0) as usize;
+    let ny = (height / h).ceil().max(1.0) as usize;
+    let mut count = vec![0u8; nx * ny];
+    // Whether an edge with direction (dx, dy) of a counter-clockwise triangle owns the points
+    // on it: left edges and horizontal top edges do.
+    let owns = |dx: f64, dy: f64| dy < 0.0 || (dy == 0.0 && dx < 0.0);
+    for t in triangles {
+        let double_area = signed_double_area(t[0], t[1], t[2]);
+        if double_area == 0.0 {
+            continue;
+        }
+        // Counter-clockwise order.
+        let [a, b, c] = if double_area > 0.0 {
+            *t
+        } else {
+            [t[0], t[2], t[1]]
+        };
+        // The samples lo + (i + ½) h with first <= i < end lie in [min, max].
+        let first = |min: f64, origin: f64, n: usize| {
+            (((min - origin) / h - 0.5).ceil().max(0.0) as usize).min(n)
+        };
+        let end = |max: f64, origin: f64, n: usize| {
+            ((((max - origin) / h - 0.5).floor() + 1.0).max(0.0) as usize).min(n)
+        };
+        let (x0, x1) = (
+            first(a[0].min(b[0]).min(c[0]), lo[0], nx),
+            end(a[0].max(b[0]).max(c[0]), lo[0], nx),
+        );
+        let (y0, y1) = (
+            first(a[1].min(b[1]).min(c[1]), lo[1], ny),
+            end(a[1].max(b[1]).max(c[1]), lo[1], ny),
+        );
+        let edges = [(a, b), (b, c), (c, a)];
+        for j in y0..y1 {
+            let y = lo[1] + (j as f64 + 0.5) * h;
+            for i in x0..x1 {
+                let p = [lo[0] + (i as f64 + 0.5) * h, y];
+                let inside = edges.iter().all(|&(u, v)| {
+                    let side = signed_double_area(u, v, p);
+                    side > 0.0 || (side == 0.0 && owns(v[0] - u[0], v[1] - u[1]))
+                });
+                if inside {
+                    let slot = &mut count[j * nx + i];
+                    *slot = slot.saturating_add(1);
+                }
+            }
+        }
+    }
+    let covered = count.iter().filter(|&&c| c >= 1).count();
+    let overlapped = count.iter().filter(|&&c| c >= 2).count();
+    Some(Coverage {
+        covered_area: covered as f64 * h * h,
+        overlapped_area: overlapped as f64 * h * h,
+        sample_spacing: h,
+        n_samples: covered,
+    })
 }
 
 /// The orientation-preserving similarity `z ↦ a z + b` (complex `a`, `b`) that best maps one
@@ -448,6 +599,68 @@ mod tests {
         // The closing chord from (-1, 0) back to the first point does not cross anything, the
         // chord from (3, 0) to (-1, 0) crosses all 199 teeth.
         assert_eq!(polygon_self_crossings(&zigzag), 199);
+        // A slit: a path walked out and back, the way back off by rounding to either side.
+        // Contact, not a crossing.
+        let mut slit: Vec<[f64; 2]> = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [2.0, 3.0]];
+        let out = [[2.0, 2.0], [2.3, 1.4], [1.9, 1.0]];
+        slit.extend(out);
+        slit.push([2.1, 0.5]);
+        slit.extend(
+            out.iter()
+                .rev()
+                .enumerate()
+                .map(|(k, p)| [p[0] + 1e-15 * (k as f64 - 1.0), p[1] - 2e-16]),
+        );
+        slit.extend([[2.0 - 1e-16, 3.0], [0.0, 3.0]]);
+        assert_eq!(polygon_self_crossings(&slit), 0);
+    }
+
+    #[test]
+    fn coverage_measures_overlap() {
+        // Two triangles that make the unit square: no overlap, area 1, also when the sample
+        // points fall on the shared diagonal and on the outer edges.
+        let square = [
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        ];
+        for samples in [2.0, 8.0, 50.0, 4096.0] {
+            let c = coverage(&square, samples).unwrap();
+            assert_eq!(c.overlapped_area, 0.0, "{samples}: {c:?}");
+            // The covered area is right up to the samples along the perimeter.
+            assert!(
+                (c.covered_area - 1.0).abs() <= 4.0 * c.sample_spacing,
+                "{samples}: {c:?}"
+            );
+            assert_eq!(c.overlapped_fraction(), 0.0);
+        }
+        // The second triangle folded over onto the first (a flip): everything is covered
+        // twice, and the footprint is half the square.
+        let folded = [
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0]],
+        ];
+        let c = coverage(&folded, 4096.0).unwrap();
+        assert!((c.covered_area - 0.5).abs() < 0.02, "{c:?}");
+        assert!((c.overlapped_fraction() - 1.0).abs() < 1e-12, "{c:?}");
+        // Two unit squares that share a quarter of their area: 0.25 of 1.75.
+        let shifted = |d: f64| {
+            [
+                [[d, d], [1.0 + d, d], [1.0 + d, 1.0 + d]],
+                [[d, d], [1.0 + d, 1.0 + d], [d, 1.0 + d]],
+            ]
+        };
+        let mut both = square.to_vec();
+        both.extend(shifted(0.5));
+        let c = coverage(&both, 10_000.0).unwrap();
+        assert!((c.covered_area - 1.75).abs() < 0.01, "{c:?}");
+        assert!((c.overlapped_area - 0.25).abs() < 0.01, "{c:?}");
+        assert!((c.overlapped_fraction() - 0.25 / 1.75).abs() < 0.01);
+        assert!(c.sample_spacing > 0.0 && c.n_samples > 10_000);
+        // Nothing to measure.
+        assert!(coverage(&[], 16.0).is_none());
+        assert!(coverage(&square, 0.0).is_none());
+        assert!(coverage(&[[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]], 16.0).is_none());
+        assert!(coverage(&[[[0.0, f64::NAN], [1.0, 0.0], [2.0, 1.0]]], 16.0).is_none());
     }
 
     #[test]

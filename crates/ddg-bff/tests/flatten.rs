@@ -261,6 +261,16 @@ fn flat_annulus_and_cylinder_are_unfolded_isometrically() {
     assert!((agreement.scale - 1.0).abs() < 1e-10);
     assert!(flat.seams.max_length_mismatch < 1e-12);
     assert_eq!(flat.charts[0].distortion.flipped_triangles, 0);
+    // The two sides of the cut coincide in the plane: contact, which is not overlap.
+    assert!(
+        flat.charts[0].is_injective(),
+        "{:?}",
+        flat.charts[0].overlap
+    );
+    assert_eq!(
+        flat.charts[0].overlap.coverage.unwrap().overlapped_area,
+        0.0
+    );
 
     // A cylinder is flat intrinsically: it unrolls to a rectangle without stretch.
     let g = generators::open_cylinder(16, 5, 1.0, 2.0).unwrap();
@@ -762,4 +772,499 @@ fn a_degenerate_mesh_is_flattened_after_mollification() {
     let flat = bff.flatten_automatic().unwrap();
     assert!(flat.uv.iter().all(|p| p[0].is_finite() && p[1].is_finite()));
     assert_eq!(flat.report.distortion.n_faces, mesh.n_faces());
+}
+
+/// The structural facts of a flattening that hold whatever the surface: disks, finite
+/// coordinates, cones on the cut, flat charts, a full turn along every boundary curve, and
+/// equal lengths on the two sides of every cut edge unless closing had to give up.
+fn assert_sound(name: &str, mesh: &TriMesh, flat: &ConeFlattening) {
+    assert_disk_charts(flat);
+    assert_eq!(flat.corner_uvs.len(), 3 * mesh.n_faces(), "{name}");
+    assert!(
+        flat.corner_uvs
+            .iter()
+            .all(|p| p[0].is_finite() && p[1].is_finite()),
+        "{name}"
+    );
+    for (v, &original) in flat.cut.vertex_to_original.iter().enumerate() {
+        if flat.cones.iter().any(|c| c.vertex == original) {
+            assert!(
+                flat.cut.mesh.is_boundary_vertex(v),
+                "{name}: cone {original}"
+            );
+        }
+    }
+    assert!(flat.max_interior_curvature < 1e-9, "{name}");
+    assert!(flat.extension_residual < 1e-9, "{name}");
+    for (chart, report) in flat.charts.iter().enumerate() {
+        let c = &report.closure;
+        assert!(c.turning_error.abs() < 1e-8, "{name}: chart {chart}: {c:?}");
+        assert!(report.distortion.n_faces > 0);
+        for x in [
+            c.gap_before,
+            c.gap_after,
+            c.max_length_change,
+            c.min_length_ratio,
+            report.distortion.quasi_conformal.min,
+            report.distortion.quasi_conformal.mean,
+            report.distortion.log_scale.mean,
+            report.distortion.log_scale_deviation,
+            report.distortion.plane_area,
+        ] {
+            assert!(
+                !x.is_nan(),
+                "{name}: chart {chart}: NaN in the report: {report:?}"
+            );
+        }
+    }
+    if flat
+        .charts
+        .iter()
+        .all(|c| c.closure.dropped_directions == 0)
+    {
+        assert!(
+            flat.seams.max_length_mismatch < 1e-9,
+            "{name}: seam mismatch {}",
+            flat.seams.max_length_mismatch
+        );
+    }
+    for cone in &flat.cones {
+        assert!(cone.n_wedges >= 1, "{name}");
+        assert!(
+            (cone.implied_angle - cone.angle).abs() < 1e-8,
+            "{name}: {cone:?}"
+        );
+    }
+}
+
+#[test]
+fn surfaces_of_higher_genus_and_with_several_boundary_loops() {
+    use common::{mirror_double, punch_holes};
+    let torus = generators::torus(12, 8, 2.0, 0.7).unwrap();
+    let (p2, f2) = mirror_double(&torus.positions, &torus.faces, 0);
+
+    // Closed, genus 2: the cone angles must sum to 2πχ = −4π. Four cones of −π.
+    let (mesh, geometry) = setup(&p2, &f2);
+    assert_eq!((mesh.genus(), mesh.boundary_loops().len()), (2, 0));
+    let cones: Vec<Cone> = [3u32, 40, 110, 150]
+        .iter()
+        .map(|&vertex| Cone { vertex, angle: -PI })
+        .collect();
+    let flat = flatten(&mesh, &geometry, &cones, PLAN).unwrap();
+    assert_sound("genus 2", &mesh, &flat);
+    assert_eq!(flat.n_charts(), 1);
+    assert_eq!(flat.plan.as_ref().unwrap().n_loop_edges, 4);
+    let closed = &flat.scale_factor_solve.as_ref().unwrap().closed_components[0];
+    assert_eq!(closed.topology.genus, 2);
+    assert!((closed.expected + 4.0 * PI).abs() < 1e-12 && closed.discrepancy.abs() < 1e-12);
+    for cone in &flat.cones {
+        // 3π around every cone, modulo a full turn where triangles are flipped.
+        let off = (cone.realized_angle - cone.angle) / (2.0 * PI);
+        assert!((off - off.round()).abs() < 1e-7, "{cone:?}");
+    }
+    // Without cones the angles sum to 0 instead of −4π: refused, with the numbers.
+    let err = flatten(&mesh, &geometry, &[], PLAN).unwrap_err();
+    match err {
+        BffError::GaussBonnetViolated {
+            euler_characteristic,
+            n_cones,
+            ..
+        } => assert_eq!((euler_characteristic, n_cones), (-2, 0)),
+        other => panic!("{other}"),
+    }
+
+    // Genus 2 with two holes, a torus with three holes, a sphere with four: surfaces with
+    // boundary need no particular angle sum. A few cones of either sign.
+    let sphere = generators::icosphere(3).unwrap();
+    // Name, positions, faces, genus, boundary loops.
+    type Case = (&'static str, Vec<[f64; 3]>, Vec<[u32; 3]>, usize, usize);
+    let cases: Vec<Case> = vec![
+        (
+            "genus 2 with 2 holes",
+            p2.clone(),
+            punch_holes(p2.len(), &f2, 2, 5).unwrap(),
+            2,
+            2,
+        ),
+        (
+            "torus with 3 holes",
+            torus.positions.clone(),
+            punch_holes(torus.positions.len(), &torus.faces, 3, 3).unwrap(),
+            1,
+            3,
+        ),
+        (
+            "sphere with 4 holes",
+            sphere.positions.clone(),
+            punch_holes(sphere.positions.len(), &sphere.faces, 4, 7).unwrap(),
+            0,
+            4,
+        ),
+    ];
+    for (name, positions, faces, genus, loops) in &cases {
+        let (mesh, geometry) = setup(positions, faces);
+        assert_eq!(
+            (mesh.genus(), mesh.boundary_loops().len()),
+            (*genus, *loops),
+            "{name}"
+        );
+        let interior = mesh.interior_vertices();
+        for n_cones in [0usize, 3] {
+            let cones: Vec<Cone> = (0..n_cones)
+                .map(|k| Cone {
+                    vertex: interior[(k * 37 + 11) % interior.len()],
+                    angle: [0.9, -0.4, 0.5][k % 3],
+                })
+                .collect();
+            let flat = flatten(&mesh, &geometry, &cones, PLAN)
+                .unwrap_or_else(|e| panic!("{name} with {n_cones} cones: {e}"));
+            assert_sound(name, &mesh, &flat);
+            assert_eq!(flat.n_charts(), 1, "{name}");
+            assert_eq!(
+                flat.plan.as_ref().unwrap().n_loop_edges,
+                2 * genus,
+                "{name}"
+            );
+            // u = 0 on the original boundary.
+            for v in 0..mesh.n_vertices() {
+                if mesh.is_boundary_vertex(v) {
+                    assert_eq!(flat.scale_factors[v], 0.0, "{name}");
+                }
+            }
+        }
+    }
+
+    // A flat disk with three holes is unfolded isometrically, without overlap.
+    let grid = generators::grid_disk(12, 10).unwrap();
+    let faces = punch_holes(grid.positions.len(), &grid.faces, 3, 2).unwrap();
+    let (mesh, geometry) = setup(&grid.positions, &faces);
+    assert_eq!(mesh.boundary_loops().len(), 4);
+    let flat = flatten(&mesh, &geometry, &[], PLAN).unwrap();
+    assert_sound("flat disk with 3 holes", &mesh, &flat);
+    assert_eq!(flat.n_charts(), 1);
+    assert!(max_length_deviation(&mesh, &geometry, &flat.corner_uvs) < 1e-9);
+    assert!(flat.charts[0].is_injective());
+    let coverage = flat.charts[0].overlap.coverage.unwrap();
+    assert_eq!(coverage.overlapped_area, 0.0);
+    let area = geometry.total_area();
+    assert!(
+        (coverage.covered_area / area - 1.0).abs() < 0.02,
+        "{coverage:?}"
+    );
+
+    // Two components in one mesh: a chart each, both starting at the origin.
+    let mut positions = torus.positions.clone();
+    let mut both = punch_holes(torus.positions.len(), &torus.faces, 1, 4).unwrap();
+    let offset = positions.len() as u32;
+    positions.extend(grid.positions.iter().map(|p| [p[0] + 9.0, p[1], p[2]]));
+    both.extend(grid.faces.iter().map(|f| f.map(|v| v + offset)));
+    let (mesh, geometry) = setup(&positions, &both);
+    assert_eq!(mesh.n_components(), 2);
+    let flat = flatten(&mesh, &geometry, &[], PLAN).unwrap();
+    assert_sound("two components", &mesh, &flat);
+    assert_eq!(flat.n_charts(), 2);
+    assert_eq!(flat.seams.n_between_charts, 0);
+    for boundary in flat.cut.mesh.boundary_loops() {
+        assert_eq!(flat.vertex_uvs[boundary[0] as usize], [0.0, 0.0]);
+    }
+    // An anchor in each chart is honoured; the layouts move rigidly.
+    let anchor_of = |chart: u32| {
+        (0..mesh.n_halfedges() as u32)
+            .find(|&h| {
+                flat.face_chart[h as usize / 3] == chart
+                    && flat
+                        .cut
+                        .mesh
+                        .is_boundary_vertex(flat.cut.mesh.from_vertex(h as usize))
+                    && flat.corner_uvs[h as usize] != [0.0, 0.0]
+            })
+            .unwrap()
+    };
+    let anchors = [anchor_of(0), anchor_of(1)];
+    let anchored = flatten_with_cones(
+        &ConeFlattenInput {
+            mesh: &mesh,
+            geometry: &geometry,
+            cones: &[],
+            scale_factors: None,
+            cut: CutSource::Edges(flat.cut_edges()),
+            anchors: &anchors,
+        },
+        &ConeFlattenOptions::default(),
+    )
+    .unwrap();
+    for &a in &anchors {
+        assert_eq!(anchored.corner_uvs[a as usize], [0.0, 0.0]);
+    }
+    let agreement = compare_layouts(&flat.face_chart, 2, &anchored.corner_uvs, &flat.corner_uvs);
+    assert!(agreement.max < 1e-9, "{agreement:?}");
+}
+
+#[test]
+fn overlap_is_measured_and_only_reported_where_there_is_some() {
+    // Positive cones on a sphere: no overlap, by the exact criteria and by area.
+    let g = generators::icosphere(3).unwrap();
+    let (mesh, geometry) = setup(&g.positions, &g.faces);
+    let cones: Vec<Cone> = (0..12)
+        .map(|vertex| Cone {
+            vertex,
+            angle: PI / 3.0,
+        })
+        .collect();
+    let flat = flatten(&mesh, &geometry, &cones, PLAN).unwrap();
+    let report = &flat.charts[0];
+    assert!(report.is_injective());
+    let coverage = report.overlap.coverage.unwrap();
+    assert_eq!(coverage.overlapped_area, 0.0, "{coverage:?}");
+    assert_eq!(report.overlap.overlapped_fraction(), Some(0.0));
+    assert!(
+        (coverage.covered_area / report.distortion.plane_area - 1.0).abs() < 0.03,
+        "{coverage:?} vs {}",
+        report.distortion.plane_area
+    );
+
+    // A negative cone at the end of a cut: one wedge of 5π/2, and the quarter turn of excess
+    // lies on top of the rest. A larger |µ| overlaps more.
+    let g = generators::grid_disk(16, 16).unwrap();
+    let (mesh, geometry) = setup(&g.positions, &g.faces);
+    let centre = (8 * 17 + 8) as u32;
+    let mut previous = 0.0;
+    for angle in [-0.5 * PI, -PI, -1.5 * PI] {
+        let flat = flatten(
+            &mesh,
+            &geometry,
+            &[Cone {
+                vertex: centre,
+                angle,
+            }],
+            PLAN,
+        )
+        .unwrap();
+        let report = &flat.charts[0];
+        assert_eq!(flat.cones[0].n_wedges, 1);
+        assert!(flat.cones[0].max_wedge_angle > 2.0 * PI);
+        assert!(!report.is_injective());
+        assert!(report.overlap.wedges_over_2pi == 1);
+        let fraction = report.overlap.overlapped_fraction().unwrap();
+        assert!(
+            fraction > previous + 0.02,
+            "{angle}: {fraction} after {previous}"
+        );
+        previous = fraction;
+    }
+    assert!(previous < 0.6);
+
+    // Switched off: no estimate, and the exact criteria are unaffected.
+    let off = flatten_with_cones(
+        &ConeFlattenInput {
+            mesh: &mesh,
+            geometry: &geometry,
+            cones: &[Cone {
+                vertex: centre,
+                angle: -PI,
+            }],
+            scale_factors: None,
+            cut: PLAN,
+            anchors: &[],
+        },
+        &ConeFlattenOptions {
+            overlap_samples_per_triangle: 0.0,
+            ..ConeFlattenOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(off.charts[0].overlap.coverage.is_none());
+    assert_eq!(off.charts[0].overlap.overlapped_fraction(), None);
+    assert_eq!(off.charts[0].overlap.wedges_over_2pi, 1);
+}
+
+#[test]
+fn results_are_never_nan_and_options_are_validated() {
+    let g = generators::grid_disk(5, 5).unwrap();
+    let (mesh, geometry) = setup(&g.positions, &g.faces);
+    let with_u = |u: f64| {
+        let u = vec![u; mesh.n_vertices()];
+        flatten_with_cones(
+            &ConeFlattenInput {
+                mesh: &mesh,
+                geometry: &geometry,
+                cones: &[],
+                scale_factors: Some(&u),
+                cut: PLAN,
+                anchors: &[],
+            },
+            &ConeFlattenOptions::default(),
+        )
+    };
+    // A constant scale factor on a flat disk is a similarity ...
+    let flat = with_u(2.0f64.ln()).unwrap();
+    assert!((flat.charts[0].distortion.log_scale.mean - 2.0f64.ln()).abs() < 1e-12);
+    // ... but e^u can underflow to nothing or overflow: reported, not returned as zeros or NaN.
+    let err = with_u(-800.0).unwrap_err();
+    assert_eq!(
+        err,
+        BffError::DegenerateLayout {
+            chart: 0,
+            n_faces: 50
+        }
+    );
+    assert!(err.to_string().contains("degenerate"), "{err}");
+    let err = with_u(800.0).unwrap_err();
+    assert!(matches!(err, BffError::NonFiniteResult { .. }), "{err}");
+
+    // Options that are not numbers, or negative.
+    let options = |f: &dyn Fn(&mut ConeFlattenOptions)| {
+        let mut o = ConeFlattenOptions::default();
+        f(&mut o);
+        flatten_with_cones(
+            &ConeFlattenInput {
+                mesh: &mesh,
+                geometry: &geometry,
+                cones: &[],
+                scale_factors: None,
+                cut: PLAN,
+                anchors: &[],
+            },
+            &o,
+        )
+    };
+    for (what, result) in [
+        ("shift", options(&|o| o.scale_factors.diagonal_shift = -1.0)),
+        (
+            "shift",
+            options(&|o| o.scale_factors.diagonal_shift = f64::NAN),
+        ),
+        (
+            "tolerance",
+            options(&|o| o.scale_factors.gauss_bonnet_tolerance = f64::NAN),
+        ),
+        ("flatness", options(&|o| o.flatness_tolerance = f64::NAN)),
+        (
+            "adjustment",
+            options(&|o| o.max_length_adjustment = f64::NAN),
+        ),
+        ("adjustment", options(&|o| o.max_length_adjustment = -0.1)),
+        (
+            "samples",
+            options(&|o| o.overlap_samples_per_triangle = f64::INFINITY),
+        ),
+    ] {
+        let err = result.err().unwrap_or_else(|| panic!("{what}: accepted"));
+        assert!(
+            matches!(err, BffError::NonFiniteInput { .. }),
+            "{what}: {err}"
+        );
+    }
+    // An unlimited closing adjustment is a legitimate request.
+    options(&|o| o.max_length_adjustment = f64::INFINITY).unwrap();
+    let err = DiskBff::new(
+        &mesh,
+        &geometry,
+        DiskOptions {
+            angle_sum_tolerance: f64::NAN,
+            ..DiskOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, BffError::NonFiniteInput { .. }), "{err}");
+
+    // Per-vertex values of the wrong length are refused, not indexed out of bounds.
+    let cut = ddg_bff::cut_mesh(&mesh, &[]).unwrap();
+    assert!(cut.lift_vertex_values(&[0.0; 3]).is_err());
+    assert_eq!(
+        cut.lift_vertex_values(&vec![1u8; mesh.n_vertices()])
+            .unwrap()
+            .len(),
+        36
+    );
+
+    // Distributing a Gauss-Bonnet discrepancy must not push a cone angle to 2π.
+    let g = generators::icosphere(1).unwrap();
+    let (mesh, geometry) = setup(&g.positions, &g.faces);
+    let cones = [
+        Cone {
+            vertex: 0,
+            angle: 6.2,
+        },
+        Cone {
+            vertex: 5,
+            angle: 0.1,
+        },
+        Cone {
+            vertex: 9,
+            angle: 0.1,
+        },
+    ];
+    let err = flatten_with_cones(
+        &ConeFlattenInput {
+            mesh: &mesh,
+            geometry: &geometry,
+            cones: &cones,
+            scale_factors: None,
+            cut: PLAN,
+            anchors: &[],
+        },
+        &ConeFlattenOptions {
+            scale_factors: ScaleFactorOptions {
+                gauss_bonnet: GaussBonnetPolicy::DistributeOverCones,
+                ..ScaleFactorOptions::default()
+            },
+            ..ConeFlattenOptions::default()
+        },
+    )
+    .unwrap_err();
+    match err {
+        BffError::InvalidConeAngle { vertex, angle, .. } => {
+            assert_eq!(vertex, 0);
+            assert!(angle >= 2.0 * PI, "{angle}");
+        }
+        other => panic!("{other}"),
+    }
+}
+
+#[test]
+fn the_holomorphic_extension_depends_on_the_direction_of_the_curve() {
+    // Harmonic extension: both coordinates interpolate the curve, so starting the boundary
+    // elsewhere moves the layout rigidly. Conjugate extension: one coordinate is extended and
+    // the other conjugated, which is not invariant under rotating the curve; the difference
+    // is a discretization error, small but far above rounding.
+    let g = generators::bumpy_grid_disk(20, 16, 0.2).unwrap();
+    let (mesh, geometry) = setup(&g.positions, &g.faces);
+    let boundary = mesh.boundary_loops()[0].clone();
+    let run = |start: Option<u32>, extension| {
+        let mut bff = DiskBff::new(
+            &mesh,
+            &geometry,
+            DiskOptions {
+                boundary_start: start,
+                ..DiskOptions::default()
+            },
+        )
+        .unwrap();
+        let zero = vec![0.0; bff.boundary().len()];
+        bff.flatten_with_scale_factors(&zero, extension).unwrap().uv
+    };
+    let diagonal = |uv: &[[f64; 2]]| {
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for p in uv {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        (hi[0] - lo[0]).hypot(hi[1] - lo[1])
+    };
+    // A quarter of the way around: the curve is turned by about a right angle.
+    let elsewhere = Some(boundary[boundary.len() / 4]);
+    let harmonic = run(None, ddg_bff::Extension::Harmonic);
+    let moved = run(elsewhere, ddg_bff::Extension::Harmonic);
+    let fit = ddg_bff::fit_similarity(&moved, &harmonic).unwrap();
+    assert!(fit.max / diagonal(&harmonic) < 1e-11, "{fit:?}");
+    assert!((fit.scale - 1.0).abs() < 1e-11 && fit.rotation.abs() > 0.5);
+
+    let conjugate = run(None, ddg_bff::Extension::Conjugate);
+    let moved = run(elsewhere, ddg_bff::Extension::Conjugate);
+    let fit = ddg_bff::fit_similarity(&moved, &conjugate).unwrap();
+    let change = fit.max / diagonal(&conjugate);
+    assert!(change > 1e-7 && change < 2e-2, "change {change}");
 }

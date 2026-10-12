@@ -70,7 +70,101 @@ struct Row {
     same_cut: String,
     own_cut: String,
     overlap: String,
+    drivers: String,
     timing: String,
+}
+
+/// Classifies the flipped triangles of a layout by what they touch, and summarizes the
+/// negative cones.
+fn flip_drivers(data: &DatasetMesh, r: &ConeFlattening) -> String {
+    let mesh = &data.mesh;
+    let cut = &r.cut.mesh;
+    let tau = std::f64::consts::TAU;
+    // Edges whose two opposite angles sum to more than π have a negative cotan weight: the
+    // discrete Laplacian has no maximum principle there (non-Delaunay edges).
+    let cotans = data.geometry.corner_cotans();
+    let mut negative_weight = vec![false; mesh.n_edges()];
+    let mut n_negative_weight = 0usize;
+    for (e, negative) in negative_weight.iter_mut().enumerate() {
+        let h = mesh.edge_halfedge(e);
+        // The corner opposite halfedge h = 3f + k is corner (k + 2) % 3 of face f.
+        let opposite = |h: usize| cotans[h / 3][(h % 3 + 2) % 3];
+        let weight = opposite(h) + mesh.twin(h).map_or(0.0, opposite);
+        if weight < 0.0 {
+            *negative = true;
+            n_negative_weight += 1;
+        }
+    }
+    // Vertices of the cut mesh with more than a full turn around them, from the report.
+    let mut angle_sum = vec![0.0; cut.n_vertices()];
+    for (f, face) in cut.faces().iter().enumerate() {
+        for k in 0..3 {
+            let (a, b, c) = (
+                r.corner_uvs[3 * f + k],
+                r.corner_uvs[3 * f + (k + 1) % 3],
+                r.corner_uvs[3 * f + (k + 2) % 3],
+            );
+            let (ux, uy, vx, vy) = (b[0] - a[0], b[1] - a[1], c[0] - a[0], c[1] - a[1]);
+            angle_sum[face[k] as usize] += (ux * vy - uy * vx).atan2(ux * vx + uy * vy);
+        }
+    }
+    let is_cone: std::collections::HashSet<u32> = data.cones.iter().map(|c| c.vertex).collect();
+    let (mut flips, mut at_bad_edge, mut at_cone, mut at_overfull, mut other) = (0, 0, 0, 0, 0);
+    let mut flipped_area = 0.0;
+    let mut total_area = 0.0;
+    for (f, face) in cut.faces().iter().enumerate() {
+        let (a, b, c) = (
+            r.corner_uvs[3 * f],
+            r.corner_uvs[3 * f + 1],
+            r.corner_uvs[3 * f + 2],
+        );
+        let area = 0.5 * ddg_bff::quality::signed_double_area(a, b, c);
+        total_area += area.abs();
+        if area >= 0.0 {
+            continue;
+        }
+        flips += 1;
+        flipped_area -= area;
+        let bad_edge = (0..3).any(|k| negative_weight[mesh.edge(3 * f + k)]);
+        let overfull = face
+            .iter()
+            .any(|&v| angle_sum[v as usize] > tau * (1.0 + 1e-9));
+        let cone = face
+            .iter()
+            .any(|&v| is_cone.contains(&r.cut.vertex_to_original[v as usize]));
+        if overfull {
+            at_overfull += 1;
+        } else if cone {
+            at_cone += 1;
+        } else if bad_edge {
+            at_bad_edge += 1;
+        } else {
+            other += 1;
+        }
+    }
+    let negative: Vec<_> = r.cones.iter().filter(|c| c.angle < 0.0).collect();
+    let leaves = negative.iter().filter(|c| c.n_wedges == 1).count();
+    let over = |leaf: bool| {
+        negative
+            .iter()
+            .filter(|c| (c.n_wedges == 1) == leaf && c.max_wedge_angle > tau)
+            .count()
+    };
+    format!(
+        "{:7} {:6.2} | {:5} {:8.1e} | {:5} {:5} {:5} {:5} | {:5} {:5} {:5} {:5}",
+        n_negative_weight,
+        100.0 * n_negative_weight as f64 / mesh.n_edges() as f64,
+        flips,
+        flipped_area / total_area,
+        at_overfull,
+        at_cone,
+        at_bad_edge,
+        other,
+        negative.len(),
+        leaves,
+        over(true),
+        over(false),
+    )
 }
 
 fn report(name: &str) -> Row {
@@ -197,6 +291,7 @@ fn report(name: &str) -> Row {
                     same_cut,
                     own_cut: format!("FAILED: {e}"),
                     overlap: String::new(),
+                    drivers: String::new(),
                     timing: String::new(),
                 };
             }
@@ -212,11 +307,16 @@ fn report(name: &str) -> Row {
     }
     let own = best.expect("three runs");
     let q = length_ratio_quantiles(&own.corner_uvs, &data.reference_uvs);
+    // The same comparison between our own two layouts (own cut, stored cut): how much the
+    // metric of a layout depends on the cut at all.
+    let floor = flatten(&data, &data.geometry, reference_cut, 0.0)
+        .map(|other| length_ratio_quantiles(&own.corner_uvs, &other.corner_uvs))
+        .unwrap_or([f64::NAN; 5]);
     let plan = own.plan.as_ref().expect("planned");
     let own_length = total_length(&data.geometry, &plan.cut_edges);
     let reference_length = total_length(&data.geometry, &data.reference_cut);
     let own_cut_text = format!(
-        "{:6} {:6} {:7.3} | {:7.4} {:7.4} {:7.4} {:7.4} | {:8.1e} {:8.1e} {:8.1e} | {:6.4} {:7.4}",
+        "{:6} {:6} {:7.3} | {:7.4} {:7.4} {:7.4} {:7.4} | {:7.4} {:7.4} | {:8.1e} {:8.1e} {:8.1e} | {:6.4} {:7.4}",
         data.reference_cut.len(),
         plan.cut_edges.len(),
         own_length / reference_length,
@@ -224,6 +324,8 @@ fn report(name: &str) -> Row {
         q[1],
         q[3],
         q[4],
+        floor[1],
+        floor[3],
         own.seams.max_length_mismatch,
         own.charts
             .iter()
@@ -239,10 +341,27 @@ fn report(name: &str) -> Row {
 
     // Overlap and flips: the stored map, ours with the reference's cut, ours with our cut.
     let with_reference_cut = flatten(&data, &data.geometry, reference_cut, 0.0).ok();
+    let percent = |fraction: Option<f64>| match fraction {
+        Some(x) => format!("{:6.2}", 100.0 * x),
+        None => "     -".to_string(),
+    };
     let describe = |r: &ConeFlattening| {
         let negative: Vec<_> = r.cones.iter().filter(|c| c.angle < 0.0).collect();
+        // All charts together (one chart for every mesh of the dataset).
+        let covered: f64 = r
+            .charts
+            .iter()
+            .filter_map(|c| c.overlap.coverage)
+            .map(|c| c.covered_area)
+            .sum();
+        let overlapped: f64 = r
+            .charts
+            .iter()
+            .filter_map(|c| c.overlap.coverage)
+            .map(|c| c.overlapped_area)
+            .sum();
         format!(
-            "{:5} {:5} {:5} {:5} {:5}",
+            "{:5} {:5} {:5} {:5} {:5} {}",
             r.charts
                 .iter()
                 .map(|c| c.distortion.flipped_triangles)
@@ -260,19 +379,32 @@ fn report(name: &str) -> Row {
                 .iter()
                 .filter(|c| c.max_wedge_angle > 2.0 * std::f64::consts::PI)
                 .count(),
+            percent((covered > 0.0).then(|| overlapped / covered)),
         )
     };
     let negative = data.cones.iter().filter(|c| c.angle < 0.0).count();
+    let most_negative = data.cones.iter().map(|c| c.angle).fold(0.0, f64::min);
+    let stored_triangles: Vec<[[f64; 2]; 3]> = data
+        .reference_uvs
+        .chunks_exact(3)
+        .map(|t| [t[0], t[1], t[2]])
+        .collect();
+    let stored_coverage = ddg_bff::coverage(&stored_triangles, ddg_bff::DEFAULT_OVERLAP_SAMPLES);
     let overlap = format!(
-        "{:6} {:6} | {:5} | {} | {}",
+        "{:6} {:6} {:6.2} | {:5} {} | {} | {}",
         data.cones.len(),
         negative,
+        most_negative,
         count_flipped(&data.reference_uvs),
+        percent(stored_coverage.map(|c| c.overlapped_fraction())),
         with_reference_cut
             .as_ref()
             .map_or("FAILED".to_string(), describe),
         describe(&own),
     );
+
+    // What the flipped triangles of the own-cut layout are next to.
+    let drivers = flip_drivers(&data, &own);
 
     let t = own.timings;
     let timing = format!(
@@ -292,6 +424,7 @@ fn report(name: &str) -> Row {
         same_cut,
         own_cut: own_cut_text,
         overlap,
+        drivers,
         timing,
     }
 }
@@ -342,9 +475,15 @@ fn main() {
     println!(
         "Flattened with the planner's cut (exact solves). Ratio of UV edge lengths ours / stored, per"
     );
-    println!("triangle edge, divided by its median: minimum, 1 %, 99 %, maximum.");
     println!(
-        "{:<20} {:>6} {:>6} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>8} {:>8} {:>8} | {:>6} {:>7}",
+        "triangle edge, divided by its median: minimum, 1 %, 99 %, maximum. 'own/own': the same ratio"
+    );
+    println!(
+        "(1 %, 99 %) between our layout with our cut and our layout with the stored cut, i.e. how much"
+    );
+    println!("the metric of a layout depends on the cut alone.");
+    println!(
+        "{:<20} {:>6} {:>6} {:>7} | {:>7} {:>7} {:>7} {:>7} | {:>7} {:>7} | {:>8} {:>8} {:>8} | {:>6} {:>7}",
         "mesh",
         "refE",
         "ownE",
@@ -353,6 +492,8 @@ fn main() {
         "p1",
         "p99",
         "max",
+        "own p1",
+        "own p99",
         "seam",
         "gap",
         "max adj",
@@ -365,35 +506,87 @@ fn main() {
 
     println!("\n## 3. Flipped triangles and overlap");
     println!(
-        "flip = triangles with negative orientation; w>2pi = boundary vertices with more than a full"
+        "neg = cones of negative angle, min = the most negative cone angle; flip = triangles with"
     );
     println!(
-        "turn around them; cross = pairs of crossing boundary edges; leaf- = negative cones at the end"
-    );
-    println!("of a cut; ovl- = negative cones with a wedge over 2 pi.");
-    println!(
-        "{:<20} {:>6} {:>6} | {:>5} | {:>29} | {:>29}",
-        "mesh", "cones", "neg", "ref", "reference cut", "own cut"
+        "negative orientation; w>2pi = boundary vertices of the chart with more than a full turn"
     );
     println!(
-        "{:<20} {:>6} {:>6} | {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} {:>5} {:>5}",
+        "around them; cross = pairs of crossing boundary edges; leaf- = negative cones at the end of"
+    );
+    println!(
+        "a cut; ovl- = negative cones with a wedge over 2 pi; ovl% = estimated percentage of the"
+    );
+    println!("footprint of the layout that is covered more than once (16 samples per triangle).");
+    println!(
+        "{:<20} {:>6} {:>6} {:>6} | {:>12} | {:>36} | {:>36}",
+        "mesh",
+        "cones",
+        "neg",
+        "min",
+        "stored map",
+        "our layout, stored cut",
+        "our layout, own cut"
+    );
+    println!(
+        "{:<20} {:>6} {:>6} {:>6} | {:>5} {:>6} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>6} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>6}",
+        "",
         "",
         "",
         "",
         "flip",
+        "ovl%",
         "flip",
         "w>2pi",
         "cross",
         "leaf-",
         "ovl-",
+        "ovl%",
         "flip",
         "w>2pi",
         "cross",
         "leaf-",
-        "ovl-"
+        "ovl-",
+        "ovl%"
     );
     for r in &rows {
         println!("{:<20} {}", r.name, r.overlap);
+    }
+
+    println!("\n## 3b. What the flips and the overfull wedges are next to (own cut)");
+    println!(
+        "w<0 = edges with a negative cotan weight (the two opposite angles sum to more than pi), and"
+    );
+    println!(
+        "their share of all edges; flipA = flipped area / layout area. Each flipped triangle is"
+    );
+    println!(
+        "counted once: at a vertex with more than a full turn (>2pi), else at another copy of a"
+    );
+    println!(
+        "cone, else at an edge of negative weight, else other. Negative cones: how many, how many"
+    );
+    println!(
+        "end a cut (leaf), and how many have a wedge over 2 pi among the leaves and among the rest."
+    );
+    println!(
+        "{:<20} {:>7} {:>6} | {:>5} {:>8} | {:>5} {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} {:>5}",
+        "mesh",
+        "w<0",
+        "%",
+        "flip",
+        "flipA",
+        ">2pi",
+        "cone",
+        "w<0",
+        "other",
+        "neg",
+        "leaf",
+        "leaf>",
+        "rest>"
+    );
+    for r in &rows {
+        println!("{:<20} {}", r.name, r.drivers);
     }
 
     println!("\n## 4. Timing (milliseconds, one thread, best of 3)");

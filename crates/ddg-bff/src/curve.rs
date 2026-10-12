@@ -12,12 +12,14 @@
 
 use std::f64::consts::PI;
 
+use crate::error::{BffError, check_values};
+
 /// Target lengths of the boundary edges: `ℓ*_i = e^{(u_i + u_{i+1}) / 2} ℓ_i` for edge `i` from
 /// boundary vertex `i` to `i + 1 (mod n)`, with `u` the log scale factors at the boundary
 /// vertices and `ℓ` the edge lengths in the input metric (paper Alg. 1, line 9).
 ///
 /// [formula: bff-target-boundary-length]
-pub fn target_boundary_lengths(scale_factors: &[f64], lengths: &[f64]) -> Vec<f64> {
+pub(crate) fn target_boundary_lengths(scale_factors: &[f64], lengths: &[f64]) -> Vec<f64> {
     let n = lengths.len();
     (0..n)
         .map(|i| (0.5 * (scale_factors[i] + scale_factors[(i + 1) % n])).exp() * lengths[i])
@@ -28,7 +30,7 @@ pub fn target_boundary_lengths(scale_factors: &[f64], lengths: &[f64]) -> Vec<f6
 /// edges at vertex `j` (paper Sec. 3.3).
 ///
 /// [formula: bff-dual-boundary-length]
-pub fn dual_boundary_lengths(lengths: &[f64]) -> Vec<f64> {
+pub(crate) fn dual_boundary_lengths(lengths: &[f64]) -> Vec<f64> {
     let n = lengths.len();
     (0..n)
         .map(|j| 0.5 * (lengths[(j + n - 1) % n] + lengths[j]))
@@ -41,7 +43,7 @@ pub fn dual_boundary_lengths(lengths: &[f64]) -> Vec<f64> {
 /// turn left.
 ///
 /// [formula: bff-boundary-tangents]
-pub fn boundary_tangents(exterior_angles: &[f64]) -> Vec<[f64; 2]> {
+pub(crate) fn boundary_tangents(exterior_angles: &[f64]) -> Vec<[f64; 2]> {
     let mut phi = 0.0;
     exterior_angles
         .iter()
@@ -58,16 +60,42 @@ pub fn boundary_tangents(exterior_angles: &[f64]) -> Vec<[f64; 2]> {
 /// Adds to each exterior angle its share of the defect `2π − Σ k̃`, in proportion to the dual
 /// boundary lengths: `k̃_j ← k̃_j + (ℓ_j / Σ ℓ)(2π − Σ k̃)`. Afterwards the angles sum to `2π`
 /// (`BFF::closeCurvatures` of the reference implementation). Returns the defect that was
-/// distributed.
+/// distributed. Use it to make hand-made angles acceptable to
+/// [`crate::DiskBff::flatten_with_exterior_angles`]; `dual_lengths[j]` is half the sum of the
+/// lengths of the two boundary edges at boundary vertex `j`.
+///
+/// # Errors
+/// [`BffError::LengthMismatch`] if the two arrays differ in length;
+/// [`BffError::NonFiniteInput`] for an angle or length that is not finite, a negative length,
+/// or lengths that sum to zero.
 ///
 /// [formula: bff-close-exterior-angles]
-pub fn close_exterior_angles(exterior_angles: &mut [f64], dual_lengths: &[f64]) -> f64 {
+pub fn close_exterior_angles(
+    exterior_angles: &mut [f64],
+    dual_lengths: &[f64],
+) -> Result<f64, BffError> {
+    check_values("dual lengths", dual_lengths, exterior_angles.len())?;
+    check_values("exterior angles", exterior_angles, dual_lengths.len())?;
+    if let Some(index) = dual_lengths.iter().position(|&l| l < 0.0) {
+        return Err(BffError::NonFiniteInput {
+            what: "dual lengths (must be non-negative)",
+            index,
+            value: dual_lengths[index],
+        });
+    }
     let total_length: f64 = dual_lengths.iter().sum();
+    if !(total_length > 0.0 && total_length.is_finite()) {
+        return Err(BffError::NonFiniteInput {
+            what: "sum of the dual lengths (must be positive and finite)",
+            index: 0,
+            value: total_length,
+        });
+    }
     let defect = 2.0 * PI - exterior_angles.iter().sum::<f64>();
     for (k, &l) in exterior_angles.iter_mut().zip(dual_lengths) {
         *k += l / total_length * defect;
     }
-    defect
+    Ok(defect)
 }
 
 /// Vertex positions of a boundary polygon from edge lengths and tangents:
@@ -75,7 +103,7 @@ pub fn close_exterior_angles(exterior_angles: &mut [f64], dual_lengths: &[f64]) 
 /// the `n` vertices and the end point `γ_n`, which equals `γ_0 = 0` for a closed curve.
 ///
 /// [formula: bff-boundary-curve]
-pub fn integrate_curve(lengths: &[f64], tangents: &[[f64; 2]]) -> (Vec<[f64; 2]>, [f64; 2]) {
+pub(crate) fn integrate_curve(lengths: &[f64], tangents: &[[f64; 2]]) -> (Vec<[f64; 2]>, [f64; 2]) {
     let mut position = [0.0, 0.0];
     let mut out = Vec::with_capacity(lengths.len());
     for (&l, t) in lengths.iter().zip(tangents) {
@@ -678,9 +706,17 @@ mod tests {
         assert!((l[0] - 2.0f64.sqrt()).abs() < 1e-15);
         assert!((l[2] - 3.0).abs() < 1e-15);
         let mut k = vec![1.0, 2.0, 3.0];
-        let defect = close_exterior_angles(&mut k, &[1.0, 1.0, 2.0]);
+        let defect = close_exterior_angles(&mut k, &[1.0, 1.0, 2.0]).unwrap();
         assert!((defect - (2.0 * PI - 6.0)).abs() < 1e-15);
         assert!((k.iter().sum::<f64>() - 2.0 * PI).abs() < 1e-15);
         assert!((k[2] - 3.0 - 0.5 * defect).abs() < 1e-15);
+        assert!(close_exterior_angles(&mut k, &[1.0, 1.0]).is_err());
+        assert!(close_exterior_angles(&mut k, &[0.0, 0.0, 0.0]).is_err());
+        assert!(close_exterior_angles(&mut k, &[1.0, -1.0, 2.0]).is_err());
+        assert!(close_exterior_angles(&mut k, &[1.0, f64::NAN, 2.0]).is_err());
+        assert!(
+            (k.iter().sum::<f64>() - 2.0 * PI).abs() < 1e-15,
+            "untouched on error"
+        );
     }
 }

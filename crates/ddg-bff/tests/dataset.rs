@@ -9,10 +9,12 @@
 //!    not, up to one global scale.
 //!
 //! How well they can agree is limited by the files, not by the port: positions, angles and
-//! UVs are stored with six digits, and for some meshes the stored map was computed from cone
-//! data that differs from the published list (see the README). The bounds below are a few
-//! times the measured values; the port itself agrees with the reference C++ code to rounding
-//! error when both get the same input (`examples/reference_diff.rs`).
+//! UVs are stored with six digits, and for seven meshes the stored map is not what the public
+//! reference code computes from the published cones (the reference, run today, misses the
+//! stored map by exactly as much as this crate does; see the README). The bounds below are a
+//! few times the measured values. The port itself agrees with the reference C++ code to
+//! rounding error when both get the same input (`examples/reference_diff.rs`,
+//! `reference/run.sh`).
 //!
 //! The dataset is not part of the repository; without it the tests print a notice and pass.
 //! A debug build checks a few small meshes, a release build all 23:
@@ -75,13 +77,21 @@ fn same_cut_bound(name: &str) -> f64 {
         // The stored map has a cone angle that is not the published one (see below).
         "airplane" => 1.5e-2,
         "camelshotnoise" => 1.2e-2,
-        // The stored cut is not the one the published cones give, and carries curvature.
+        // The stored map is not reproduced on any cut, by this crate or by the reference; it
+        // turns by 0.105 more than the published cones allow (summed over the vertices of its
+        // cut that are not cones). The stored cut itself is a valid cut through the published
+        // cones: the mirror image of the one the reference chooses today.
         "body" => 2e-2,
-        // Not explained.
+        // The stored map does not have a constant scale along the original boundary (the
+        // ratio of lengths there varies by 0.37 to 1.11 and 0.83 to 1.18; ours and the
+        // reference's by a few percent and a few tenths of a percent): it was computed with
+        // other boundary data. Which, is not known.
         "camel_noise1" => 5e-3,
         "rhino" => 2e-3,
+        // Closed; its published cone angles miss Gauss-Bonnet by 2.7e-3.
         "brain" => 3e-4,
-        // Its cut cannot be recovered completely from the stored UVs.
+        // One cut edge leads to a cone whose published angle is 0.0 and cannot be seen in
+        // the stored UVs; the planner completes the cut.
         "cow00001" => 5e-4,
         _ => 1e-4,
     }
@@ -220,8 +230,23 @@ fn own_cut_gives_the_same_metric() {
             q[3],
             q[4]
         );
+        // The meshes whose cones are all positive are flattened without any overlap: no
+        // flipped triangle, no crossing of the boundary, and no sample point covered twice.
+        let positive = data.cones.iter().all(|c| c.angle > 0.0);
+        if positive {
+            assert!(
+                [
+                    "axes", "bump", "bunny", "cow1", "cow5e-1", "cow75e-2", "face"
+                ]
+                .contains(&name.as_str()),
+                "{name}"
+            );
+            assert!(flat.charts[0].is_injective(), "{name}");
+            let coverage = flat.charts[0].overlap.coverage.expect("estimated");
+            assert_eq!(coverage.overlapped_area, 0.0, "{name}");
+        }
         // 98 % of all edges within these factors; wider where the stored map is known to
-        // come from other cone data, or has many flipped triangles.
+        // come from other data, or has many flipped triangles.
         let (low, high) = match name.as_str() {
             "body" => (0.9, 1.4),
             "airplane" | "camelshotnoise" | "camel_noise1" => (0.85, 1.2),

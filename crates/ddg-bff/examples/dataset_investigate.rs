@@ -1,5 +1,5 @@
 //! What do the UV maps stored in the optimal-cones dataset contain, beyond what the cone
-//! files say? Diagnostics behind the notes in the README.
+//! files say? Diagnostics behind the section "The dataset" of the README.
 //!
 //! ```text
 //! cargo run --release -p ddg-bff --example dataset_investigate [mesh ...]
@@ -18,6 +18,13 @@
 //! * `rms` — distance of our layout (same cut, published angles) from the stored one, and
 //!   `rms*` the same with the cone angles of the stored map wherever they differ from the
 //!   published ones by more than 1e-4.
+//! * `bnd stored`, `bnd ours` — for meshes with a boundary: the ratio of the length of the
+//!   original boundary edges in the plane and on the surface, largest over smallest, in the
+//!   stored map and in ours. With `u = 0` on the boundary it is 1 up to the closing
+//!   adjustment.
+//! * `min uv` — the shortest edge of the stored map, relative to the diagonal of its bounding
+//!   box. The file stores six significant digits, about `1e-6` on this scale: lengths and
+//!   angles of the stored map carry no information below that.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -38,7 +45,7 @@ fn main() {
         names.retain(|n| wanted.contains(n));
     }
     println!(
-        "{:<20} {:>8} {:>8} | {:>10} {:>7} | {:>9} {:>9} | {:>8} {:>8}",
+        "{:<20} {:>8} {:>8} | {:>10} {:>7} | {:>9} {:>9} | {:>8} {:>8} | {:>10} {:>8} | {:>8}",
         "mesh",
         "seam p50",
         "seam max",
@@ -47,7 +54,10 @@ fn main() {
         "unlisted",
         "GB discr",
         "rms",
-        "rms*"
+        "rms*",
+        "bnd stored",
+        "bnd ours",
+        "min uv"
     );
     let tau = std::f64::consts::TAU;
     for name in &names {
@@ -130,7 +140,7 @@ fn main() {
 
         // Our layout with the published and with the stored cone angles.
         let (completed, _) = data.completed_reference_cut();
-        let residual = |cones: &[Cone]| {
+        let ours = |cones: &[Cone]| {
             flatten_with_cones(
                 &ConeFlattenInput {
                     mesh,
@@ -148,10 +158,44 @@ fn main() {
                     ..ConeFlattenOptions::default()
                 },
             )
-            .map(|flat| {
+        };
+        let residual = |cones: &[Cone]| {
+            ours(cones).map(|flat| {
                 compare_layouts(&flat.face_chart, flat.n_charts(), &flat.corner_uvs, uv).rms
             })
         };
+        // Spread of the scale along the original boundary, and the shortest stored edge.
+        let boundary_halfedges: Vec<usize> = (0..mesh.n_halfedges())
+            .filter(|&h| mesh.twin(h).is_none())
+            .collect();
+        let spread = |layout: &[[f64; 2]]| {
+            if boundary_halfedges.is_empty() {
+                return "         -".to_string();
+            }
+            let (mut lo, mut hi) = (f64::INFINITY, 0.0f64);
+            for &h in &boundary_halfedges {
+                let (a, b) = (layout[h], layout[mesh.next(h)]);
+                let ratio =
+                    (b[0] - a[0]).hypot(b[1] - a[1]) / data.geometry.edge_lengths()[mesh.edge(h)];
+                lo = lo.min(ratio);
+                hi = hi.max(ratio);
+            }
+            format!("{:10.4}", hi / lo)
+        };
+        let ours_spread = ours(&data.cones)
+            .map(|flat| spread(&flat.corner_uvs))
+            .unwrap_or_else(|_| "         ?".to_string());
+        let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for p in uv.iter() {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        let shortest = (0..mesh.n_halfedges())
+            .map(length)
+            .fold(f64::INFINITY, f64::min)
+            / (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
         let published = residual(&data.cones).unwrap_or(f64::NAN);
         let corrected = if cones == data.cones {
             "       =".to_string()
@@ -159,7 +203,7 @@ fn main() {
             format!("{:8.1e}", residual(&cones).unwrap_or(f64::NAN))
         };
         println!(
-            "{:<20} {:8.1e} {:8.1e} | {:10.2e} {:>7} | {:9.1e} {} | {:8.1e} {}",
+            "{:<20} {:8.1e} {:8.1e} | {:10.2e} {:>7} | {:9.1e} {} | {:8.1e} {} | {} {:>8} | {:8.1e}",
             name,
             seams[seams.len() / 2],
             seams[seams.len() - 1],
@@ -168,7 +212,10 @@ fn main() {
             unlisted,
             discrepancy,
             published,
-            corrected
+            corrected,
+            spread(uv),
+            ours_spread.trim(),
+            shortest
         );
     }
 }

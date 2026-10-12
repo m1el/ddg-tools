@@ -72,11 +72,22 @@ impl CutMesh {
     }
 
     /// Copies a per-vertex array of the original mesh to the vertices of the cut mesh.
-    pub fn lift_vertex_values<T: Copy>(&self, original: &[T]) -> Vec<T> {
-        self.vertex_to_original
+    ///
+    /// # Errors
+    /// [`BffError::LengthMismatch`] unless `original` has one entry per original vertex.
+    pub fn lift_vertex_values<T: Copy>(&self, original: &[T]) -> Result<Vec<T>, BffError> {
+        if original.len() != self.n_original_vertices {
+            return Err(BffError::LengthMismatch {
+                what: "per-vertex values",
+                expected: self.n_original_vertices,
+                got: original.len(),
+            });
+        }
+        Ok(self
+            .vertex_to_original
             .iter()
             .map(|&v| original[v as usize])
-            .collect()
+            .collect())
     }
 }
 

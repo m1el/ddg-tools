@@ -13,7 +13,10 @@
 //! 2. **Terminals.** In each piece, every boundary loop (original boundary or required cut) and
 //!    every cone that is still an interior vertex is a terminal. A closed piece of positive
 //!    genus without cones gets its lowest-numbered vertex with a cuttable edge as the only
-//!    source of step 3.
+//!    source of step 3. A closed piece of genus 0 with fewer than two cones is refused
+//!    ([`BffError::SphereNeedsTwoCones`]): the planner does not invent the ends of a cut.
+//!    Cone angles are not looked at: a cone of negative angle is routed like any other, see
+//!    *Negative cones* below.
 //! 3. **Shortest-path forest.** One Dijkstra run over the cuttable edges, started from all
 //!    terminals at once (a boundary loop counts as a single terminal), assigns every vertex to
 //!    its nearest terminal. Neighbouring regions are then joined by their cheapest connections
@@ -42,14 +45,44 @@
 //! # Guarantees
 //!
 //! If [`plan_cut`] returns `Ok`, then cutting along [`CutPlan::cut_edges`] gives a mesh in
-//! which every connected component has Euler characteristic 1 and one boundary loop, every cone
-//! vertex lies on the boundary, no forbidden edge is cut and every required interior edge is
-//! cut. This is verified on the result, not assumed. The result is deterministic: ties are
-//! broken by vertex and edge ids.
+//! which
+//!
+//! * every connected component is a disk (Euler characteristic 1, one boundary loop) and
+//!   every copy of every cone vertex lies on the boundary. This is checked at run time on the
+//!   mesh that was actually cut, before the plan is returned;
+//! * the pieces left by the required cuts are not split further: one chart per piece (also
+//!   checked at run time);
+//! * no edge with `may_cut == false` and no boundary edge is cut, and every required interior
+//!   edge is cut. This holds by construction — the planner starts from the required edges and
+//!   only ever adds edges of the mask — and is checked by the tests, not at run time.
+//!
+//! The result is deterministic: ties are broken by vertex and edge ids, so a symmetric mesh
+//! gets one of its mirror-image cuts, always the same one.
+//!
+//! **Refusals.** Every error names a cause, and the cause is true (the tests verify each one
+//! independently). Whether the planner finds a cut *whenever* one exists is not proved. It
+//! was compared with exhaustive search over all subsets of the cuttable edges on 1440
+//! instances of nine small meshes with random masks, seams and cones
+//! (`tests/planner.rs`): it found a cut exactly when one exists, except for
+//! [`BffError::SphereNeedsTwoCones`], which is a refusal by design.
 //!
 //! The cut is short but not shortest: finding the shortest cut is NP-hard (Erickson &
 //! Har-Peled 2004). The forest of step 3 is within a factor 2 of the shortest forest through
 //! the terminals.
+//!
+//! # Negative cones
+//!
+//! A cone of angle `µ < 0` has `2π − µ > 2π` around it in the plane. The planner does nothing
+//! special about it: it receives vertices, not angles. Where such a cone ends up as the end of
+//! a cut it has a single wedge that holds more than a full turn, and the layout overlaps
+//! itself around the cone; where the cut passes through it, the turn is shared between two or
+//! more wedges, which avoids the overlap only if no wedge gets more than `2π`. Extending the
+//! cut beyond a negative cone to an ordinary vertex would not help: the two sides of a slit
+//! that ends at a flat vertex coincide in the plane, so the layout would be the same. What a
+//! caller can do: avoid negative cones (bound the cone angles from below by zero in the
+//! solver), or pass seams through them with `must_cut`, which makes more charts. The
+//! flattening reports the wedges of every cone and the overlap that results
+//! (`ConeReport::max_wedge_angle`, `OverlapReport`).
 //!
 //! # References
 //!
@@ -131,11 +164,16 @@ pub struct PlannedChart {
 /// * [`BffError::LengthMismatch`], [`BffError::NonFiniteInput`], [`BffError::EdgeOutOfRange`],
 ///   [`BffError::ConeVertexOutOfRange`] for malformed input;
 /// * [`BffError::RequiredEdgeForbidden`] if an edge is both required and not cuttable;
-/// * [`BffError::SphereNeedsTwoCones`] for a closed piece of genus 0 with fewer than two cones;
+/// * [`BffError::SphereNeedsTwoCones`] for a closed piece of genus 0 with fewer than two cones
+///   (by design: a cut is possible, but the planner does not choose its ends);
 /// * [`BffError::ConeEnclosedByUncuttableEdges`] if a cone cannot be reached;
 /// * [`BffError::IsolatedCutEdge`] if a one-edge slit cannot be extended;
-/// * [`BffError::UncuttableRegionNotDisk`] if the edges that must not be cut make a disk
-///   impossible.
+/// * [`BffError::UncuttableRegionNotDisk`] if no cut was found and the edges that must not be
+///   cut hold together a region that is not a disk.
+///
+/// [`BffError::ChartNotDisk`], [`BffError::ConeNotOnCut`] and [`BffError::Internal`] would
+/// mean that the verification of the result failed for no reason that the planner can name:
+/// a bug. None was seen in the tests.
 pub fn plan_cut(input: &CutPlanInput<'_>) -> Result<CutPlan, BffError> {
     plan_and_cut(input).map(|(plan, _)| plan)
 }
@@ -262,7 +300,13 @@ pub(crate) fn plan_and_cut(input: &CutPlanInput<'_>) -> Result<(CutPlan, CutMesh
         Ok(after) => after,
         Err(error) => return Err(diagnose(mesh, &is_cut, input.may_cut, error)),
     };
-    debug_assert_eq!(after.len(), before.len());
+    if after.len() != before.len() {
+        // The planner only removes handles and joins boundary loops; charts and pieces are
+        // numbered alike (by lowest face), which the reports below rely on.
+        return Err(BffError::Internal {
+            what: "the planned cut split a piece of the surface",
+        });
+    }
     let piece_of_vertex = pieces.vertex_components();
     let mut n_interior_cones = vec![0usize; before.len()];
     for (v, _) in terminal.iter().enumerate().filter(|&(_, &t)| t) {

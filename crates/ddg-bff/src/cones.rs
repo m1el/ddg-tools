@@ -27,7 +27,8 @@ pub use ddg_core::io::Cone;
 use ddg_core::topology::{NONE, TriMesh};
 
 use crate::chart::{
-    ChartReport, PoissonSystem, Surface, check_finite_layout, halfedge_lengths, layout_quality,
+    ChartReport, PoissonSystem, Surface, check_finite_curve, check_finite_layout, halfedge_lengths,
+    layout_quality,
 };
 use crate::curve::{CurveOptions, LoopData, best_fit_curves};
 use crate::cut::{ComponentTopology, CutMesh, component_topology, cut_mesh};
@@ -51,6 +52,13 @@ pub enum GaussBonnetPolicy {
     /// component (each gets the same small curvature). This is the least-squares solution of
     /// the inconsistent system, and what the reference implementation computes when it is
     /// handed such angles, because of the diagonal shift in its Laplacian.
+    ///
+    /// The charts are then not exactly flat inside
+    /// ([`ConeFlattening::max_interior_curvature`]), and the exterior angles of a chart's
+    /// boundary miss a full turn by the curvature inside it
+    /// ([`crate::ClosureReport::turning_error`]). The whole of that ends up at the vertex
+    /// where the boundary curve starts (the chart's anchor): the layout turns there by that
+    /// much more or less than prescribed, and by exactly the prescribed angle everywhere else.
     ///
     /// With a non-zero [`ScaleFactorOptions::diagonal_shift`] the shifted system is solved as
     /// it stands, exactly like the reference: the discrepancy `d` then also shows up as a
@@ -98,7 +106,9 @@ pub struct ClosedComponentReport {
     pub expected: f64,
     /// `cone_sum − expected`.
     pub discrepancy: f64,
-    /// What was done about the discrepancy.
+    /// The policy that was in force. Under [`GaussBonnetPolicy::Reject`] a discrepancy within
+    /// the tolerance is spread uniformly over the vertices of the component, exactly as
+    /// [`GaussBonnetPolicy::SpreadOverVertices`] does with a larger one.
     pub applied: GaussBonnetPolicy,
     /// The constant that was added to the pinned solution on this component to give `u` an
     /// area-weighted mean of zero. It only sets the overall size of the layout. Zero when a
@@ -184,7 +194,7 @@ fn cone_angles_per_vertex(
 /// [`BffError::GaussBonnetViolated`], [`BffError::NoConesToAdjust`], [`BffError::Geometry`],
 /// [`BffError::Solve`].
 ///
-/// [formula: cone-scale-factor-equation]
+/// [formula: discrete-yamabe-linearization]
 /// [formula: closed-mesh-cone-sum]
 /// [formula: closed-mesh-optimal-constant]
 pub fn solve_scale_factors(
@@ -194,6 +204,16 @@ pub fn solve_scale_factors(
     options: &ScaleFactorOptions,
 ) -> Result<ScaleFactors, BffError> {
     geometry.check_mesh(mesh)?;
+    check_option(
+        "diagonal_shift (must be finite and non-negative)",
+        options.diagonal_shift,
+        true,
+    )?;
+    check_option(
+        "gauss_bonnet_tolerance (must be finite and non-negative)",
+        options.gauss_bonnet_tolerance,
+        true,
+    )?;
     let (mut mu, cone_position) = cone_angles_per_vertex(mesh, cones)?;
     let lengths = halfedge_lengths(mesh, geometry);
     let surface = Surface {
@@ -269,6 +289,14 @@ pub fn solve_scale_factors(
             let k = closed_index[component[v] as usize];
             if k != NONE && absolute_sum[k as usize] > 0.0 {
                 mu[v] -= closed[k as usize].discrepancy * mu[v].abs() / absolute_sum[k as usize];
+                // The share must not push an angle to 2π or beyond.
+                if !mu[v].is_finite() || mu[v] >= 2.0 * PI {
+                    return Err(BffError::InvalidConeAngle {
+                        position: cone_position[v] as usize,
+                        vertex: v as u32,
+                        angle: mu[v],
+                    });
+                }
             }
         }
     }
@@ -428,6 +456,10 @@ pub struct ConeFlattenOptions {
     /// are closed chart by chart instead; the two sides of such edges then differ in length
     /// by the closing adjustment (reported in [`SeamReport`]).
     pub max_coupled_charts: usize,
+    /// Resolution of the estimate of the overlapped area of every chart
+    /// ([`crate::OverlapReport::coverage`]): about this many sample points fall into a triangle
+    /// of average size. `0.0` switches the estimate off.
+    pub overlap_samples_per_triangle: f64,
 }
 
 impl Default for ConeFlattenOptions {
@@ -437,6 +469,7 @@ impl Default for ConeFlattenOptions {
             flatness_tolerance: 1e-6,
             max_length_adjustment: 0.5,
             max_coupled_charts: 512,
+            overlap_samples_per_triangle: crate::disk::DEFAULT_OVERLAP_SAMPLES,
         }
     }
 }
@@ -549,6 +582,14 @@ impl ConeFlattening {
 
 /// Flattens a surface with cone singularities. See the [module documentation](self).
 ///
+/// The report checks the result against the formulas it was built from: the cone angle
+/// implied by the scale factors, `Ω_i + (L u)_i` (zero inside the charts, `µ_i` at the cones),
+/// and the cone angle of the layout, `2π` minus the signed angles of the layout at the copies
+/// of the vertex.
+///
+/// [formula: discrete-yamabe-linearization]
+/// [formula: angle-defect]
+///
 /// # Errors
 /// Those of [`solve_scale_factors`], [`crate::plan::plan_cut`] and [`crate::cut::cut_mesh`];
 /// [`BffError::ChartNotDisk`] and [`BffError::ConeNotOnCut`] for explicit cuts that do not
@@ -565,13 +606,26 @@ pub fn flatten_with_cones(
     geometry.check_mesh(mesh)?;
     let n = mesh.n_vertices();
     let shift = options.scale_factors.diagonal_shift;
-    if !shift.is_finite() || shift < 0.0 {
-        return Err(BffError::NonFiniteInput {
-            what: "diagonal_shift (must be finite and non-negative)",
-            index: 0,
-            value: shift,
-        });
-    }
+    check_option(
+        "diagonal_shift (must be finite and non-negative)",
+        shift,
+        true,
+    )?;
+    check_option(
+        "flatness_tolerance (must be finite and non-negative)",
+        options.flatness_tolerance,
+        true,
+    )?;
+    check_option(
+        "max_length_adjustment (must be non-negative)",
+        options.max_length_adjustment,
+        false,
+    )?;
+    check_option(
+        "overlap_samples_per_triangle (must be finite and non-negative)",
+        options.overlap_samples_per_triangle,
+        true,
+    )?;
 
     // Step 1: scale factors.
     let (cone_angle, cone_position) = cone_angles_per_vertex(mesh, input.cones)?;
@@ -624,7 +678,7 @@ pub fn flatten_with_cones(
         halfedge_lengths: &lengths,
     };
     let n_cut = cut.mesh.n_vertices();
-    let u_cut = cut.lift_vertex_values(&u);
+    let u_cut = cut.lift_vertex_values(&u)?;
     let mut laplacian_u = vec![0.0; n_cut];
     surface.apply_laplacian(&u_cut, &mut laplacian_u);
     let angle_sums = surface.angle_sums();
@@ -682,6 +736,8 @@ pub fn flatten_with_cones(
     let stage = Instant::now();
     let mut values = vec![0.0; 2 * n_cut];
     for (boundary, curve) in boundary_loops.iter().zip(&curves) {
+        let chart = face_chart[cut.mesh.outgoing_halfedge(boundary[0] as usize) / 3];
+        check_finite_curve(chart, &curve.positions)?;
         for (&v, p) in boundary.iter().zip(&curve.positions) {
             values[v as usize] = p[0];
             values[n_cut + v as usize] = p[1];
@@ -706,9 +762,11 @@ pub fn flatten_with_cones(
 
     // Reports.
     let stage = Instant::now();
-    let (quality, uv_angle_sums) = layout_quality(&surface, &vertex_uvs);
+    let quality = layout_quality(&surface, &vertex_uvs, options.overlap_samples_per_triangle)?;
+    let uv_angle_sums = quality.angle_sums;
     let topology = component_topology(&cut.mesh);
     let charts: Vec<ChartReport> = quality
+        .charts
         .into_iter()
         .enumerate()
         .map(|(chart, (distortion, overlap))| {
@@ -772,6 +830,18 @@ pub fn flatten_with_cones(
         seams,
         timings,
     })
+}
+
+/// Checks an option that must be a non-negative number (finite, if `finite`).
+pub(crate) fn check_option(what: &'static str, value: f64, finite: bool) -> Result<(), BffError> {
+    if value.is_nan() || value < 0.0 || (finite && value.is_infinite()) {
+        return Err(BffError::NonFiniteInput {
+            what,
+            index: 0,
+            value,
+        });
+    }
+    Ok(())
 }
 
 /// The boundary loops of the cut surface, each rotated to start at its chart's anchor.

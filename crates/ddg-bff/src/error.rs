@@ -124,8 +124,11 @@ pub enum BffError {
         /// `Σµ − 2πχ`.
         discrepancy: f64,
     },
-    /// A closed connected component of genus 0 needs at least two cones: its cone angles sum to
-    /// `4π` while each is below `2π`, and a cut needs two end points.
+    /// A closed piece of genus 0 has fewer than two cones. This is a refusal by design, not a
+    /// topological obstruction: any path of two or more edges cuts a sphere into a disk, but
+    /// the planner only ends cuts at cones and does not invent end points. (For a flattening
+    /// the cone angles on such a piece must sum to `4π` with each below `2π`, so a valid cone
+    /// set has at least three cones anyway.)
     SphereNeedsTwoCones {
         /// The component of the mesh after the required cuts were made.
         component: u32,
@@ -147,8 +150,11 @@ pub enum BffError {
         /// The cone vertex.
         vertex: u32,
     },
-    /// The edges that may not be cut hold together a set of faces that is not a topological
-    /// disk, so no admissible cut makes the surface a disk.
+    /// No admissible cut was found, and the edges that may not be cut hold together a set of
+    /// faces that is not a topological disk even when every other edge is cut. The planner
+    /// reports this region as the cause. (A region of this kind does not always make a cut
+    /// impossible — a ring of uncuttable faces in the middle of a disk is harmless — so this
+    /// error is only returned when the cut that was actually built failed.)
     UncuttableRegionNotDisk {
         /// A face of the region (its lowest-numbered one).
         first_face: u32,
@@ -245,6 +251,20 @@ pub enum BffError {
         /// The chart, if the quantity belongs to one.
         chart: Option<u32>,
     },
+    /// The layout of a chart collapsed: none of its faces has a non-zero area in the plane, so
+    /// no distortion can be measured and the layout is useless.
+    DegenerateLayout {
+        /// The chart.
+        chart: u32,
+        /// Number of faces of the chart.
+        n_faces: usize,
+    },
+    /// An invariant of this crate does not hold. This is a bug in the crate, not bad input; it
+    /// is reported instead of panicking or returning a wrong result.
+    Internal {
+        /// Which invariant.
+        what: &'static str,
+    },
 }
 
 impl fmt::Display for BffError {
@@ -336,8 +356,9 @@ impl fmt::Display for BffError {
                 n_cones,
             } => write!(
                 f,
-                "component {component} (containing face {first_face}) is a closed surface of \
-                 genus 0 with {n_cones} cone{}: at least two cones are needed to cut it into a disk",
+                "piece {component} (containing face {first_face}) is a closed surface of genus 0 \
+                 with {n_cones} cone{}: cuts are only ended at cones, so at least two are needed \
+                 to cut it into a disk",
                 if *n_cones == 1 { "" } else { "s" }
             ),
             BffError::RequiredEdgeForbidden {
@@ -359,10 +380,11 @@ impl fmt::Display for BffError {
                 boundary_loops,
             } => write!(
                 f,
-                "the edges that may not be cut hold together {n_faces} faces (among them face \
-                 {first_face}) that do not form a disk: even with every other edge cut, the \
-                 region has Euler characteristic {euler_characteristic} and {boundary_loops} \
-                 boundary loops"
+                "no admissible cut was found: the edges that may not be cut hold together \
+                 {n_faces} faces (among them face {first_face}) that do not form a disk; even \
+                 with every other edge cut, this region has Euler characteristic \
+                 {euler_characteristic} and {boundary_loops} boundary loop{}",
+                if *boundary_loops == 1 { "" } else { "s" }
             ),
             BffError::ChartNotDisk {
                 chart,
@@ -440,6 +462,15 @@ impl fmt::Display for BffError {
                 Some(c) => write!(f, "{what} of chart {c} is not finite"),
                 None => write!(f, "{what} is not finite"),
             },
+            BffError::DegenerateLayout { chart, n_faces } => write!(
+                f,
+                "the layout of chart {chart} is degenerate: none of its {n_faces} faces has a \
+                 non-zero area in the plane"
+            ),
+            BffError::Internal { what } => write!(
+                f,
+                "internal error in ddg-bff ({what}); this is a bug, please report it"
+            ),
         }
     }
 }

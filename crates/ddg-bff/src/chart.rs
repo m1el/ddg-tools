@@ -11,7 +11,8 @@ use crate::curve::ClosureReport;
 use crate::error::BffError;
 use crate::laplace::{factor_spd, laplacian_apply, laplacian_block, relative_norm, solve_spd};
 use crate::quality::{
-    DistortionAccumulator, DistortionReport, polygon_self_crossings, signed_corner_angle,
+    Coverage, DistortionAccumulator, DistortionReport, coverage, polygon_self_crossings,
+    signed_corner_angle,
 };
 
 /// A mesh together with intrinsic data per face and corner.
@@ -184,16 +185,37 @@ impl PoissonSystem {
     }
 }
 
-/// Signs of local overlap and of global overlap of one chart's layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A boundary vertex counts as having more than a full turn around it if the angles of the
+/// layout at it sum to more than `2π` plus this (radians). A flat vertex at the end of a cut
+/// has exactly `2π`, up to the rounding of the solve.
+pub(crate) const FULL_TURN_TOLERANCE: f64 = 1e-9;
+
+/// Overlap of one chart's layout with itself: two exact signs of it, and an estimate of how
+/// much area is concerned.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OverlapReport {
     /// Number of boundary vertices of the chart around which the layout covers more than a
-    /// full turn: the signed corner angles of the layout at the vertex sum to more than `2π`.
+    /// full turn: the signed corner angles of the layout at the vertex sum to more than `2π`
+    /// (by more than `1e-9`).
     /// The triangles around such a vertex overlap each other. This is what happens at a cone
-    /// of negative angle that is the end of a cut.
+    /// of negative angle that is the end of a cut, or through which the cut passes unevenly.
     pub wedges_over_2pi: usize,
-    /// Number of pairs of non-adjacent boundary edges of the layout that cross each other.
+    /// Number of pairs of non-adjacent boundary edges of the layout that cross each other:
+    /// two parts of the chart lie on top of each other.
     pub boundary_crossings: usize,
+    /// The area of the plane that the chart covers, and the part of it that is covered more
+    /// than once, estimated by point sampling ([`crate::quality::coverage`]). `None` if the
+    /// estimate was switched off (`overlap_samples_per_triangle == 0`) or the chart has no
+    /// area in the plane.
+    pub coverage: Option<Coverage>,
+}
+
+impl OverlapReport {
+    /// The estimated fraction of the chart's footprint that is covered more than once, or
+    /// `None` if it was not estimated.
+    pub fn overlapped_fraction(&self) -> Option<f64> {
+        self.coverage.map(|c| c.overlapped_fraction())
+    }
 }
 
 /// What is reported about the layout of one chart.
@@ -216,8 +238,17 @@ pub struct ChartReport {
 impl ChartReport {
     /// Whether the layout of the chart is free of overlap: no flipped or degenerate triangle,
     /// no boundary vertex with more than a full turn around it, and a boundary polygon that
-    /// does not cross itself. Under these conditions the map is injective, except that the
-    /// boundary may touch itself.
+    /// does not cross itself.
+    ///
+    /// Why this is enough: without flipped or degenerate triangles the map preserves
+    /// orientation, so the number of times it covers a point is the winding number of the
+    /// boundary polygon around that point; a polygon without crossings and without a vertex
+    /// that turns by more than a full turn winds at most once. The boundary may still *touch*
+    /// itself — the two sides of a cut that ends at a flat vertex coincide — and coincident
+    /// boundary pieces that are traversed in the same direction are not detected; the sampled
+    /// [`OverlapReport::coverage`] is an independent check for that.
+    ///
+    /// [formula: disk-injectivity-criterion]
     pub fn is_injective(&self) -> bool {
         self.distortion.flipped_triangles == 0
             && self.distortion.degenerate_triangles == 0
@@ -226,13 +257,22 @@ impl ChartReport {
     }
 }
 
+/// What [`layout_quality`] measures.
+pub(crate) struct LayoutQuality {
+    /// Distortion and overlap of every component, in component order.
+    pub charts: Vec<(DistortionReport, OverlapReport)>,
+    /// Per vertex, the sum of the signed corner angles of the layout at that vertex.
+    pub angle_sums: Vec<f64>,
+}
+
 /// The quality of a layout `uv` (one point per vertex) of a surface whose components are
 /// disks: one report per component, in component order, without the closure part. Also
 /// returns, per vertex, the sum of the signed corner angles of the layout at that vertex.
 pub(crate) fn layout_quality(
     surface: &Surface<'_>,
     uv: &[[f64; 2]],
-) -> (Vec<(DistortionReport, OverlapReport)>, Vec<f64>) {
+    overlap_samples_per_triangle: f64,
+) -> Result<LayoutQuality, BffError> {
     let mesh = surface.mesh;
     let component = mesh.face_components();
     let mut distortion: Vec<DistortionAccumulator> = (0..mesh.n_components())
@@ -260,6 +300,7 @@ pub(crate) fn layout_quality(
         OverlapReport {
             wedges_over_2pi: 0,
             boundary_crossings: 0,
+            coverage: None,
         };
         mesh.n_components()
     ];
@@ -271,15 +312,62 @@ pub(crate) fn layout_quality(
         overlap[c].boundary_crossings += polygon_self_crossings(&polygon);
         overlap[c].wedges_over_2pi += boundary
             .iter()
-            .filter(|&&v| angle_sums[v as usize] > 2.0 * PI * (1.0 + 1e-12))
+            .filter(|&&v| angle_sums[v as usize] > 2.0 * PI + FULL_TURN_TOLERANCE)
             .count();
     }
-    let reports = distortion
-        .into_iter()
-        .zip(overlap)
-        .map(|(d, o)| (d.finish(), o))
-        .collect();
-    (reports, angle_sums)
+    if overlap_samples_per_triangle > 0.0 {
+        // The triangles of every chart, chart after chart.
+        let mut start = vec![0usize; mesh.n_components() + 1];
+        for &c in component {
+            start[c as usize + 1] += 1;
+        }
+        for c in 0..mesh.n_components() {
+            start[c + 1] += start[c];
+        }
+        let mut next = start.clone();
+        let mut triangles = vec![[[0.0; 2]; 3]; mesh.n_faces()];
+        for (f, face) in mesh.faces().iter().enumerate() {
+            let slot = &mut next[component[f] as usize];
+            triangles[*slot] = face.map(|v| uv[v as usize]);
+            *slot += 1;
+        }
+        for (c, report) in overlap.iter_mut().enumerate() {
+            report.coverage = coverage(
+                &triangles[start[c]..start[c + 1]],
+                overlap_samples_per_triangle,
+            );
+        }
+    }
+    let mut reports = Vec::with_capacity(mesh.n_components());
+    for (chart, (d, o)) in distortion.into_iter().zip(overlap).enumerate() {
+        let d = d.finish();
+        if d.degenerate_triangles == d.n_faces {
+            return Err(BffError::DegenerateLayout {
+                chart: chart as u32,
+                n_faces: d.n_faces,
+            });
+        }
+        reports.push((d, o));
+    }
+    Ok(LayoutQuality {
+        charts: reports,
+        angle_sums,
+    })
+}
+
+/// Checks that every point of the boundary curve of a chart is finite.
+pub(crate) fn check_finite_curve(chart: u32, positions: &[[f64; 2]]) -> Result<(), BffError> {
+    if positions
+        .iter()
+        .all(|p| p[0].is_finite() && p[1].is_finite())
+    {
+        Ok(())
+    } else {
+        Err(BffError::NonFiniteResult {
+            what: "the boundary curve",
+            chart: Some(chart),
+        })
+    }
 }
 
 /// Checks that every coordinate of a layout is finite.

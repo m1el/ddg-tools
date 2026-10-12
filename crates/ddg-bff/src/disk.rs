@@ -31,8 +31,10 @@ use ddg_core::geometry::Geometry;
 use ddg_core::topology::TriMesh;
 
 use crate::chart::{
-    ChartReport, PoissonSystem, Surface, check_finite_layout, halfedge_lengths, layout_quality,
+    ChartReport, PoissonSystem, Surface, check_finite_curve, check_finite_layout, halfedge_lengths,
+    layout_quality,
 };
+use crate::cones::check_option;
 use crate::curve::{
     CurveOptions, LoopData, best_fit_curves, dual_boundary_lengths, target_boundary_lengths,
 };
@@ -40,6 +42,10 @@ use crate::error::{BffError, check_values};
 
 /// The diagonal shift the reference implementation adds to its Laplacian (`1e-8`).
 pub const REFERENCE_DIAGONAL_SHIFT: f64 = 1e-8;
+
+/// Default resolution of the estimate of the overlapped area: about this many sample points
+/// per triangle of average size.
+pub const DEFAULT_OVERLAP_SAMPLES: f64 = 16.0;
 
 /// How the boundary curve is extended to the interior (paper Sec. 4.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,10 +78,21 @@ pub struct DiskOptions {
     /// remaining gap is spread along it; see [`crate::curve::ClosureReport`].
     pub max_length_adjustment: f64,
     /// The boundary vertex at which the boundary loop starts: it becomes
-    /// [`DiskBff::boundary`]`[0]` and is placed at the origin. `None` (the default) starts
-    /// where `TriMesh::boundary_loops` does. For exact solves the layout depends on this
-    /// choice only by a rigid motion.
+    /// [`DiskBff::boundary`]`[0]` and is placed at the origin, with the boundary edge that
+    /// leaves it along `+x`. `None` (the default) starts where `TriMesh::boundary_loops` does.
+    ///
+    /// With [`Extension::Harmonic`] and exact solves the layout depends on this choice only by
+    /// a rigid motion. With [`Extension::Conjugate`] it depends on it for real: the first
+    /// coordinate is extended and the second conjugated, so rotating the boundary curve
+    /// changes the map by as much as the harmonic extension of the curve fails to be
+    /// holomorphic — a discretization error, measured at `1e-4` (root mean square) to `1e-3`
+    /// (maximum) of the size of the layout on meshes of 4 to 34 thousand faces. The reference
+    /// implementation has the same dependence on where its boundary walk happens to start.
     pub boundary_start: Option<u32>,
+    /// Resolution of the estimate of the overlapped area
+    /// ([`crate::OverlapReport::coverage`]): about this many sample points fall into a triangle
+    /// of average size. `0.0` switches the estimate off.
+    pub overlap_samples_per_triangle: f64,
 }
 
 impl Default for DiskOptions {
@@ -85,6 +102,7 @@ impl Default for DiskOptions {
             angle_sum_tolerance: 1e-8,
             max_length_adjustment: 0.5,
             boundary_start: None,
+            overlap_samples_per_triangle: DEFAULT_OVERLAP_SAMPLES,
         }
     }
 }
@@ -164,13 +182,26 @@ impl<'a> DiskBff<'a> {
                 boundary_loops: mesh.boundary_loops().len(),
             });
         }
-        if !options.diagonal_shift.is_finite() || options.diagonal_shift < 0.0 {
-            return Err(BffError::NonFiniteInput {
-                what: "diagonal_shift (must be finite and non-negative)",
-                index: 0,
-                value: options.diagonal_shift,
-            });
-        }
+        check_option(
+            "diagonal_shift (must be finite and non-negative)",
+            options.diagonal_shift,
+            true,
+        )?;
+        check_option(
+            "angle_sum_tolerance (must be finite and non-negative)",
+            options.angle_sum_tolerance,
+            true,
+        )?;
+        check_option(
+            "max_length_adjustment (must be non-negative)",
+            options.max_length_adjustment,
+            false,
+        )?;
+        check_option(
+            "overlap_samples_per_triangle (must be finite and non-negative)",
+            options.overlap_samples_per_triangle,
+            true,
+        )?;
         let mut boundary = mesh.boundary_loops()[0].clone();
         if let Some(start) = options.boundary_start {
             let position = boundary
@@ -370,6 +401,7 @@ impl<'a> DiskBff<'a> {
     /// sum to `2π` up to rounding (paper Proposition 1). Also returns `u` at all vertices.
     ///
     /// [formula: bff-cherrier-boundary-curvature]
+    /// [formula: bff-exterior-angle-sum]
     pub fn compatible_exterior_angles(
         &mut self,
         boundary_scale_factors: &[f64],
@@ -510,6 +542,7 @@ impl<'a> DiskBff<'a> {
         )
         .pop()
         .expect("one loop in, one curve out");
+        check_finite_curve(0, &curve.positions)?;
 
         let n = self.mesh.n_vertices();
         self.dirichlet()?;
@@ -556,8 +589,8 @@ impl<'a> DiskBff<'a> {
         };
         check_finite_layout(self.mesh, &uv)?;
         let surface = self.surface();
-        let (mut quality, _) = layout_quality(&surface, &uv);
-        let (distortion, overlap) = quality.pop().expect("one component");
+        let mut quality = layout_quality(&surface, &uv, self.options.overlap_samples_per_triangle)?;
+        let (distortion, overlap) = quality.charts.pop().expect("one component");
         Ok(DiskFlattening {
             uv,
             boundary_scale_factors: boundary_scale_factors.to_vec(),
