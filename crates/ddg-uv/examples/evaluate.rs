@@ -6,6 +6,7 @@
 //! cargo run --release -p ddg-uv --example evaluate -- signs     # negative cones
 //! cargo run --release -p ddg-uv --example evaluate -- merge     # cluster merging and its guard
 //! cargo run --release -p ddg-uv --example evaluate -- dataset   # the 23 dataset meshes
+//! cargo run --release -p ddg-uv --example evaluate -- reopt     # re-optimized cone angles
 //! ```
 //!
 //! A further argument restricts the meshes to those whose name contains it. The dataset is
@@ -339,6 +340,46 @@ fn dataset(filter: &str) {
     }
 }
 
+/// What re-optimizing the cone angles after the penalized solve buys.
+fn reopt(filter: &str) {
+    println!(
+        "mesh | λ | cones | Σ|µ| | distortion | seconds || re-optimized: cones | Σ|µ| | distortion | \
+         overlap % | flipped | seconds"
+    );
+    let names = [
+        "airplane", "body", "bump", "bunny", "camel", "chair", "cow01", "hand", "mannequin",
+        "rhino", "tree",
+    ];
+    for name in names.iter().filter(|n| n.contains(filter)) {
+        let Some((mesh, _)) = load(name) else { continue };
+        for lambda in [0.5, 0.2, 0.1, 0.02] {
+            let run = |reoptimize_angles: bool| {
+                let options = UnwrapOptions {
+                    lambda,
+                    reoptimize_angles,
+                    ..UnwrapOptions::default()
+                };
+                match unwrap(&mesh.input(), &options) {
+                    Err(e) => format!("FAILED: {e}"),
+                    Ok(map) => {
+                        let r = &map.report;
+                        format!(
+                            "{} | {:.3} | {:.5} | {:.2} | {} | {:.3}",
+                            r.cones.n_cones,
+                            r.cones.total_angle,
+                            r.area_distortion.scale_free,
+                            100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
+                            r.flipped_triangles,
+                            r.timings.total
+                        )
+                    }
+                }
+            };
+            println!("{name} | {lambda} | {} || {}", run(false), run(true));
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let filter = args.get(1).map_or("", String::as_str);
@@ -348,6 +389,7 @@ fn main() {
         Some("signs") => signs(filter),
         Some("merge") => merge(filter),
         Some("dataset") => dataset(filter),
-        _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset [name filter]"),
+        Some("reopt") => reopt(filter),
+        _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset|reopt [name filter]"),
     }
 }
