@@ -1,0 +1,16 @@
+name = "DdgProofs"
+version = "0.1.0"
+defaultTargets = ["DdgProofs"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+pp.unicode.fun = true
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.34.1"
+
+[[lean_lib]]
+name = "DdgProofs"
