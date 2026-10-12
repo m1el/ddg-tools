@@ -449,6 +449,36 @@ def uv_sphere_with_triangle_fans_at_the_poles():
 
 
 @test
+def buffers_agree_with_the_element_api():
+    """`core` reads positions, corner vertices and seams through attributes where that is
+    faster; whatever path it takes, the values must be the ones the element API gives."""
+    core = importlib.import_module(ARGS.module + ".core")
+    paths = core._attribute_paths()
+    print("  attribute shortcuts in this Blender:", paths)
+    if bpy.app.version[:2] == (5, 0):
+        assert paths == {"position": "position", "corner_vert": ".corner_vert",
+                         "seam": "uv_seam"}, paths
+    assert not any(m.name.startswith(".ddg_uv_unwrap") for m in bpy.data.meshes), (
+        "the probe mesh was left behind")
+    for kind in ("monkey", "cylinder", "uv_sphere"):
+        obj = primitive(kind)
+        mesh = obj.data
+        for index in range(0, len(mesh.edges), 7):
+            mesh.edges[index].use_seam = True
+        positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+        assert positions.typecode == 'f'
+        assert positions.tobytes() == _get(mesh.vertices, "co", 'f', 3).tobytes()
+        assert list(corner_vertices) == [loop.vertex_index for loop in mesh.loops]
+        assert list(polygon_starts) == [polygon.loop_start for polygon in mesh.polygons]
+        mesh.calc_loop_triangles()
+        assert list(triangles) == [c for t in mesh.loop_triangles for c in t.loops]
+        expected = [v for edge in mesh.edges if edge.use_seam for v in edge.vertices]
+        assert list(core.seam_edges(mesh)) == expected and expected
+    # No seams at all: nothing is reported.
+    assert len(core.seam_edges(primitive("cube").data)) == 0
+
+
+@test
 def marked_seams_are_cut_and_can_be_ignored():
     cube = primitive("cube")
     mesh = cube.data
@@ -497,6 +527,24 @@ def cuts_can_be_marked_as_seams():
     assert marked == cut_pairs | {tuple(sorted(mesh.edges[5].vertices))}, (
         "seams after the run are not exactly the old seams plus the cut edges")
     assert len(marked) > 1
+
+    # A mesh that never had a seam (Blender stores none of the seam data yet).
+    torus = primitive("torus")
+    mesh = torus.data
+    assert not any(e.use_seam for e in mesh.edges)
+    expected = ddg_tools.unwrap(*core.mesh_buffers(mesh))
+    cut_pairs = {tuple(sorted(pair)) for pair in zip(expected.cut_edges[0::2],
+                                                      expected.cut_edges[1::2])}
+    assert cut_pairs
+    before = snapshot(mesh)
+    assert op(mark_seams=True) == {'FINISHED'}
+    assert_same_mesh(before, snapshot(mesh), ignore=("seams",))
+    assert {tuple(sorted(e.vertices)) for e in mesh.edges if e.use_seam} == cut_pairs
+    # They are real seams for Blender too: Edit mode sees them.
+    bpy.ops.object.mode_set(mode='EDIT')
+    edit_mesh = bmesh.from_edit_mesh(mesh)
+    assert {tuple(sorted(v.index for v in e.verts)) for e in edit_mesh.edges if e.seam} == cut_pairs
+    bpy.ops.object.mode_set(mode='OBJECT')
 
 
 @test
@@ -787,6 +835,13 @@ def the_checks_themselves_catch_violations():
         shifted = array.array('f', uvs[2:] + uvs[:2])
         must_fail("UVs shifted by one corner",
                   lambda: check_flat_sheet(sheet.data, shifted, core.PACK_MARGIN))
+
+    # Cut edges that are not edges of the mesh are counted, not marked.
+    core = importlib.import_module(ARGS.module + ".core")
+    quad = new_object("quad", [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [(0, 1, 2, 3)])
+    assert core.mark_seams(quad.data, array.array('i', [1, 0, 0, 2, 2, 3])) == (2, 1)
+    assert [tuple(sorted(e.vertices)) for e in quad.data.edges if e.use_seam] == [(0, 1), (2, 3)]
+    assert core.mark_seams(quad.data, array.array('i', [0, 1])) == (0, 0)
 
     # Chart separation.
     must_fail("overlapping boxes",

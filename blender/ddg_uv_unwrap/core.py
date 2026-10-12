@@ -46,8 +46,80 @@ def is_placeholder():
 
 
 def _zeros(typecode, count):
-    """A zero-filled ``array.array`` of ``count`` items of 4 bytes each ('f' or 'i')."""
+    """A zero-filled ``array.array`` of ``count`` items of 4 bytes each ('f', 'i' or 'I')."""
     return array(typecode, bytes(4 * count))
+
+
+# How mesh data is read, and why it matters: `foreach_get` copies memory only when the buffer's
+# element type is exactly the property's (float32, signed or unsigned int32, bool) *and* Blender
+# can reach the property as a plain array. Otherwise it converts item by item, which is 100 to
+# 1000 times slower (measured in blender/README.md). So:
+#
+# * face starts, loop triangles and edge vertices are unsigned properties: `array('I')`;
+# * positions, corner vertices and seam flags are stored as the attributes "position",
+#   ".corner_vert" and "uv_seam", whose `data` is a plain array; the element collections
+#   (`mesh.vertices`, `mesh.loops`, `mesh.edges`) reach the same values through functions.
+#
+# The attribute names are checked once per session against the documented element API on a
+# two-triangle mesh (`_attribute_paths`); a name that does not check out is not used, and the
+# element API, which is always correct, takes over.
+
+_ATTRIBUTE_PATHS = None
+
+
+def _attribute_paths():
+    """Which attribute shortcuts are valid in this Blender: a dict with the keys "position",
+    "corner_vert" and "seam", each an attribute name or None."""
+    global _ATTRIBUTE_PATHS
+    if _ATTRIBUTE_PATHS is not None:
+        return _ATTRIBUTE_PATHS
+    import bpy
+
+    paths = {"position": None, "corner_vert": None, "seam": None}
+    probe = bpy.data.meshes.new(".ddg_uv_unwrap_probe")
+    try:
+        probe.from_pydata(
+            [(0.5, 0.25, 0.125), (1.5, 0.0, 2.0), (1.0, 3.0, -1.0), (-2.0, 1.0, 4.0)],
+            [], [(0, 1, 2), (2, 1, 3)])
+        probe.update()
+        probe.edges[1].use_seam = True
+        expected = _zeros('f', 12)
+        probe.vertices.foreach_get("co", expected)
+        got = _zeros('f', 12)
+        if _attribute_get(probe, "position", 'POINT', 'FLOAT_VECTOR', "vector", got, 3) \
+                and got == expected:
+            paths["position"] = "position"
+        expected = _zeros('I', 6)
+        probe.loops.foreach_get("vertex_index", expected)
+        got = _zeros('i', 6)
+        if _attribute_get(probe, ".corner_vert", 'CORNER', 'INT', "value", got, 1) \
+                and list(got) == list(expected):
+            paths["corner_vert"] = ".corner_vert"
+        expected = bytearray(len(probe.edges))
+        probe.edges.foreach_get("use_seam", memoryview(expected).cast('?'))
+        got = bytearray(len(probe.edges))
+        if _attribute_get(probe, "uv_seam", 'EDGE', 'BOOLEAN', "value",
+                          memoryview(got).cast('?'), 1) and got == expected and sum(got) == 1:
+            paths["seam"] = "uv_seam"
+    except Exception:
+        # Any surprise here means: do not use shortcuts.
+        paths = {"position": None, "corner_vert": None, "seam": None}
+    finally:
+        bpy.data.meshes.remove(probe)
+    _ATTRIBUTE_PATHS = paths
+    return paths
+
+
+def _attribute_get(mesh, name, domain, data_type, field, values, width):
+    """Fills ``values`` from the attribute ``name`` if the mesh has it with the expected domain,
+    type and size. Returns whether it did."""
+    attribute = mesh.attributes.get(name)
+    if attribute is None or attribute.domain != domain or attribute.data_type != data_type:
+        return False
+    if width * len(attribute.data) != len(values):
+        return False
+    attribute.data.foreach_get(field, values)
+    return True
 
 
 def mesh_buffers(mesh):
@@ -56,41 +128,77 @@ def mesh_buffers(mesh):
     Returns ``(positions, corner_vertices, polygon_starts, triangles)``:
 
     * ``positions``: ``array('f')``, 3 per vertex (object space);
-    * ``corner_vertices``: ``array('i')``, the vertex of every face corner ("loop");
-    * ``polygon_starts``: ``array('i')``, the first corner of every face;
-    * ``triangles``: ``array('i')``, 3 corner indices per triangle of Blender's own
+    * ``corner_vertices``: ``array('i')`` or ``array('I')``, the vertex of every face corner
+      ("loop");
+    * ``polygon_starts``: ``array('I')``, the first corner of every face;
+    * ``triangles``: ``array('I')``, 3 corner indices per triangle of Blender's own
       tessellation (``mesh.loop_triangles``), so the native side triangulates n-gons exactly
       like Blender does.
     """
+    paths = _attribute_paths()
     positions = _zeros('f', 3 * len(mesh.vertices))
-    mesh.vertices.foreach_get("co", positions)
+    if not (paths["position"] and _attribute_get(
+            mesh, paths["position"], 'POINT', 'FLOAT_VECTOR', "vector", positions, 3)):
+        mesh.vertices.foreach_get("co", positions)
     corner_vertices = _zeros('i', len(mesh.loops))
-    mesh.loops.foreach_get("vertex_index", corner_vertices)
-    polygon_starts = _zeros('i', len(mesh.polygons))
+    if not (paths["corner_vert"] and _attribute_get(
+            mesh, paths["corner_vert"], 'CORNER', 'INT', "value", corner_vertices, 1)):
+        corner_vertices = _zeros('I', len(mesh.loops))
+        mesh.loops.foreach_get("vertex_index", corner_vertices)
+    polygon_starts = _zeros('I', len(mesh.polygons))
     mesh.polygons.foreach_get("loop_start", polygon_starts)
     mesh.calc_loop_triangles()
-    triangles = _zeros('i', 3 * len(mesh.loop_triangles))
+    triangles = _zeros('I', 3 * len(mesh.loop_triangles))
     mesh.loop_triangles.foreach_get("loops", triangles)
     return positions, corner_vertices, polygon_starts, triangles
 
 
-def _edge_flags(mesh, attribute):
-    """One byte (0 or 1) per edge for a boolean edge property."""
+def _edge_vertices(mesh):
+    """``array('I')`` with the 2 vertices of every edge."""
+    edge_vertices = _zeros('I', 2 * len(mesh.edges))
+    mesh.edges.foreach_get("vertices", edge_vertices)
+    return edge_vertices
+
+
+def _seam_flags(mesh):
+    """One byte (0 or 1) per edge: whether the edge is marked as a seam."""
     flags = bytearray(len(mesh.edges))
-    # A bool buffer is what `foreach_get` copies into directly; `array` has no bool typecode.
-    mesh.edges.foreach_get(attribute, memoryview(flags).cast('?'))
+    # `array` has no bool typecode; a bool view of a bytearray is what Blender copies into.
+    view = memoryview(flags).cast('?')
+    name = _attribute_paths()["seam"]
+    if name is None:
+        mesh.edges.foreach_get("use_seam", view)
+    elif mesh.attributes.get(name) is not None:
+        if not _attribute_get(mesh, name, 'EDGE', 'BOOLEAN', "value", view, 1):
+            mesh.edges.foreach_get("use_seam", view)
+    # else: the attribute only exists once an edge has been marked, so there are no seams.
     return flags
 
 
+def _set_seam_flags(mesh, flags, first_new):
+    """Writes one byte per edge to the seam flags. ``first_new`` is an edge that is being
+    marked: marking it through the element API makes Blender create the seam attribute if the
+    mesh has none yet."""
+    view = memoryview(flags).cast('?')
+    name = _attribute_paths()["seam"]
+    if name is not None:
+        mesh.edges[first_new].use_seam = True
+        attribute = mesh.attributes.get(name)
+        if attribute is not None and attribute.domain == 'EDGE' \
+                and attribute.data_type == 'BOOLEAN' and len(attribute.data) == len(flags):
+            attribute.data.foreach_set("value", view)
+            return
+    mesh.edges.foreach_set("use_seam", view)
+
+
 def seam_edges(mesh):
-    """The edges marked as seams, as ``array('i')`` with 2 vertex indices per edge."""
-    flags = _edge_flags(mesh, "use_seam")
-    out = array('i')
+    """The edges marked as seams, as ``array('I')`` with 2 vertex indices per edge."""
+    flags = _seam_flags(mesh)
+    out = array('I')
     i = flags.find(1)
     if i < 0:
         return out
-    edge_vertices = _zeros('i', 2 * len(mesh.edges))
-    mesh.edges.foreach_get("vertices", edge_vertices)
+    edge_vertices = _edge_vertices(mesh)
     while i >= 0:
         out.extend(edge_vertices[2 * i:2 * i + 2])
         i = flags.find(1, i + 1)
@@ -101,46 +209,48 @@ def mark_seams(mesh, cut_edges):
     """Marks the edges in ``cut_edges`` (2 vertex indices per edge) as seams. Existing seams are
     kept. Returns ``(newly_marked, not_found)``; ``not_found`` counts vertex pairs that are not
     an edge of the mesh."""
-    if len(cut_edges) == 0:
+    wanted = set(zip(cut_edges[0::2], cut_edges[1::2]))
+    wanted = {(min(a, b), max(a, b)) for a, b in wanted}
+    if not wanted:
         return 0, 0
-    n_edges = len(mesh.edges)
-    edge_vertices = _zeros('i', 2 * n_edges)
-    mesh.edges.foreach_get("vertices", edge_vertices)
-    lookup = dict(zip(zip(edge_vertices[0::2], edge_vertices[1::2]), range(n_edges)))
-    flags = _edge_flags(mesh, "use_seam")
-    newly_marked = not_found = 0
-    for k in range(0, len(cut_edges), 2):
-        a, b = cut_edges[k], cut_edges[k + 1]
-        edge = lookup.get((a, b))
-        if edge is None:
-            edge = lookup.get((b, a))
-        if edge is None:
-            not_found += 1
-        elif not flags[edge]:
+    both_ways = wanted | {(b, a) for a, b in wanted}
+    edge_vertices = _edge_vertices(mesh)
+    found = [edge for edge, pair in enumerate(zip(edge_vertices[0::2], edge_vertices[1::2]))
+             if pair in both_ways]
+    flags = _seam_flags(mesh)
+    new = [edge for edge in found if not flags[edge]]
+    if new:
+        for edge in new:
             flags[edge] = 1
-            newly_marked += 1
-    if newly_marked:
-        mesh.edges.foreach_set("use_seam", memoryview(flags).cast('?'))
-    return newly_marked, not_found
+        _set_seam_flags(mesh, flags, new[0])
+    return len(new), len(wanted) - len(found)
+
+
+def groups_vertices(obj, group_names):
+    """For each name in ``group_names``: the vertices of ``obj`` that are in that vertex group
+    with a weight above zero, as ``array('i')`` in ascending order. One pass over the vertices
+    for all groups together (there is no bulk access to vertex group weights)."""
+    arrays = {}
+    for name in group_names:
+        group = obj.vertex_groups.get(name)
+        if group is None:
+            raise UnwrapFailed(
+                "Vertex group '{}' does not exist on object '{}'".format(name, obj.name)
+            )
+        arrays.setdefault(group.index, array('i'))
+    if arrays:
+        lookup = arrays.get
+        for vertex in obj.data.vertices:
+            for element in vertex.groups:
+                members = lookup(element.group)
+                if members is not None and element.weight > 0.0:
+                    members.append(vertex.index)
+    return [arrays[obj.vertex_groups[name].index] for name in group_names]
 
 
 def group_vertices(obj, group_name):
-    """The vertices of ``obj`` that are in the vertex group ``group_name`` with a weight above
-    zero, as ``array('i')`` in ascending order."""
-    group = obj.vertex_groups.get(group_name)
-    if group is None:
-        raise UnwrapFailed(
-            "Vertex group '{}' does not exist on object '{}'".format(group_name, obj.name)
-        )
-    index = group.index
-    out = array('i')
-    for vertex in obj.data.vertices:
-        for element in vertex.groups:
-            if element.group == index:
-                if element.weight > 0.0:
-                    out.append(vertex.index)
-                break
-    return out
+    """The vertices in one vertex group; see ``groups_vertices``."""
+    return groups_vertices(obj, [group_name])[0]
 
 
 def unwrap_object(obj, *, lambda_=0.5, use_seams=True, pinned_group="", forbidden_group="",
@@ -171,8 +281,10 @@ def unwrap_object(obj, *, lambda_=0.5, use_seams=True, pinned_group="", forbidde
     if len(polygon_starts) == 0:
         raise UnwrapFailed("Mesh '{}' has no faces".format(mesh.name))
     seams = seam_edges(mesh) if use_seams else None
-    pinned = group_vertices(obj, pinned_group) if pinned_group else None
-    forbidden = group_vertices(obj, forbidden_group) if forbidden_group else None
+    names = [name for name in (pinned_group, forbidden_group) if name]
+    members = dict(zip(names, groups_vertices(obj, names)))
+    pinned = members.get(pinned_group) if pinned_group else None
+    forbidden = members.get(forbidden_group) if forbidden_group else None
     extracted = perf_counter()
 
     try:
