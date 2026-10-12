@@ -27,6 +27,13 @@ pub struct Options {
     pub max_rounds: usize,
 }
 
+impl Options {
+    /// Defaults for a given number of threads (right-hand sides per call: 16 / 8 / 4).
+    pub fn for_threads(threads: usize) -> Options {
+        Options { threads, chunk: if threads <= 1 { 16 } else if threads <= 4 { 8 } else { 4 }, ..Options::default() }
+    }
+}
+
 impl Default for Options {
     fn default() -> Self {
         Options {
@@ -39,7 +46,7 @@ impl Default for Options {
             nms_radius: 3,
             multi_add: 0.1,
             gemv_u: true,
-            tol: 1e-10,
+            tol: 1e-12,
             max_rounds: 500,
         }
     }

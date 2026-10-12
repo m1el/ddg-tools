@@ -53,8 +53,8 @@ fn problem_with<'a>(case: &'a meshes::Case, lambda: f64, c: &Constraints) -> Con
 }
 
 fn opts_from(args: &[String]) -> lasso::Options {
-    let mut o = lasso::Options::default();
-    if let Some(v) = flag(args, "--threads") { o.threads = v.parse().unwrap(); }
+    let threads: usize = flag(args, "--threads").map(|v| v.parse().unwrap()).unwrap_or(1);
+    let mut o = lasso::Options::for_threads(threads);
     if let Some(v) = flag(args, "--chunk") { o.chunk = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--steps") { o.cont_steps = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--factor") { o.cont_factor = v.parse().unwrap(); }
