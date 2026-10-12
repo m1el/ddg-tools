@@ -116,11 +116,18 @@ fn classify(sites: &[Site], k: &[f64], args: &[f64], out: &mut Vec<Piece>) {
 /// problem this is the exact minimization of the dual objective along the constants, the null
 /// direction of the Laplacian.
 ///
-/// Returns `0` if the sum already matches (up to rounding) and the nearest attainable value if
-/// the target is out of reach.
+/// Returns `0` if the sum already matches up to rounding (`target_rounding` is the rounding
+/// error of the target itself: `Σ Ω` is a sum of many angles, and is for example not exactly
+/// zero on a torus) and the nearest attainable value if the target is out of reach.
 ///
 /// [formula: gauss-bonnet-adjoint-shift]
-pub(crate) fn gauss_bonnet_shift(sites: &[Site], k: &[f64], x: &[f64], target: f64) -> f64 {
+pub(crate) fn gauss_bonnet_shift(
+    sites: &[Site],
+    k: &[f64],
+    x: &[f64],
+    target: f64,
+    target_rounding: f64,
+) -> f64 {
     let sum_at = |c: f64| -> f64 {
         sites
             .iter()
@@ -137,7 +144,7 @@ pub(crate) fn gauss_bonnet_shift(sites: &[Site], k: &[f64], x: &[f64], target: f
         .sum::<f64>()
         + target.abs();
     let h0 = sum_at(0.0);
-    let tolerance = 64.0 * f64::EPSILON * scale;
+    let tolerance = 64.0 * f64::EPSILON * scale + target_rounding;
     if (h0 - target).abs() <= tolerance {
         return 0.0;
     }
@@ -339,7 +346,7 @@ pub(crate) fn solve_regularized(
         let mut singular = d.closed && !pieces.iter().any(|p| p.is_active());
         if singular {
             // No vertex pins the constant of φ: choose it to satisfy Gauss–Bonnet.
-            let c = gauss_bonnet_shift(sites, k, &args, d.total_curvature);
+            let c = gauss_bonnet_shift(sites, k, &args, d.total_curvature, d.curvature_rounding);
             if c != 0.0 {
                 for phi in &mut x.phi {
                     *phi += c;
@@ -532,7 +539,7 @@ pub(crate) fn solve_exact(
         let mut singular = d.closed && !pieces.iter().any(|p| p.is_active());
         if singular {
             // No vertex pins the constant of φ: choose it to satisfy Gauss–Bonnet.
-            let c = gauss_bonnet_shift(sites, &ones, &z, d.total_curvature);
+            let c = gauss_bonnet_shift(sites, &ones, &z, d.total_curvature, d.curvature_rounding);
             if c != 0.0 {
                 for i in 0..n {
                     y.phi[i] += c;
@@ -647,7 +654,7 @@ mod tests {
                 .sum()
         };
         for target in [-3.0, -0.9, 0.0, 0.3, 0.4, 1.0, 2.5, 7.0] {
-            let c = gauss_bonnet_shift(&sites, &k, &x, target);
+            let c = gauss_bonnet_shift(&sites, &k, &x, target, 0.0);
             assert!(
                 (sum(c) - target).abs() < 1e-12,
                 "target {target}: c = {c}, sum = {}",
@@ -668,11 +675,14 @@ mod tests {
         let sites = vec![Site::penalized(0.5, -1.0, 2.0), Site::fixed(0.3)];
         let k = vec![1.0, 1.0];
         let x = vec![0.0, 0.0];
-        let c = gauss_bonnet_shift(&sites, &k, &x, 10.0);
+        let c = gauss_bonnet_shift(&sites, &k, &x, 10.0, 0.0);
         assert_eq!(sites[0].measure(1.0, c), 2.0);
         // All fixed: nothing to shift.
         let fixed = vec![Site::fixed(1.0), Site::fixed(2.0)];
-        assert_eq!(gauss_bonnet_shift(&fixed, &k, &x, 5.0), 0.0);
+        assert_eq!(gauss_bonnet_shift(&fixed, &k, &x, 5.0, 0.0), 0.0);
+        // A mismatch within the rounding error of the target is no mismatch.
+        assert_eq!(gauss_bonnet_shift(&sites, &k, &x, 0.3 + 1e-12, 1e-11), 0.0);
+        assert!(gauss_bonnet_shift(&sites, &k, &x, 0.3 + 1e-12, 0.0) > 0.0);
     }
 
     #[test]

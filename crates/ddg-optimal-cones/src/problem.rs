@@ -217,6 +217,8 @@ pub(crate) struct Discrete {
     /// `Σ Ω_i` over the unknowns; on a closed mesh this is `2πχ` up to rounding, and the cone
     /// angles must sum to it.
     pub total_curvature: f64,
+    /// A bound for the rounding error of `total_curvature`.
+    pub curvature_rounding: f64,
 }
 
 impl Discrete {
@@ -254,6 +256,13 @@ impl Discrete {
             .collect();
         let sites: Vec<Site> = unknowns.iter().map(|&v| data.sites[v as usize]).collect();
         let total_curvature: f64 = omega.iter().sum();
+        // Each angle defect is 2π minus a sum of corner angles, each good to a few ulp.
+        let curvature_rounding = 64.0
+            * f64::EPSILON
+            * omega
+                .iter()
+                .map(|o| o.abs() + 2.0 * std::f64::consts::PI)
+                .sum::<f64>();
 
         if closed {
             if w.iter().all(|&x| x == 0.0) {
@@ -272,6 +281,7 @@ impl Discrete {
             w,
             sites,
             total_curvature,
+            curvature_rounding,
         })
     }
 
