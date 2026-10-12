@@ -34,6 +34,11 @@ scale factor of a given cone configuration) and `extract.rs` (merging clusters o
   minus the pairing of the direction `dφ` with the state residual at the trial point;
   `dualSlope_monotone`: it is nondecreasing in the step length. (The dual objective `Φ` itself,
   an antiderivative, is not formalized.)
+* **`proximal-fixed-point`.** `IsProxMinimizer.isMinimizer_of_fixedPoint`: a minimizer of the
+  proximal problem whose centre is its own cone vector minimizes the objective itself;
+  `IsProxMinimizer.objective_add_le`: a proximal step does not increase the objective.
+* **`componentwise-backward-error`.** `oettli_prager`: the accepted-solve criterion of the linear
+  solver is exactly "solves a system with entries perturbed by at most the relative amount `ε`".
 * **`cone-cluster-frechet-mean`.** `sum_mergeCones`, `sum_abs_mergeCones_le`,
   `mergeCones_mem_feasible`, `exists_frechetMean`: merging a cluster into one cone at *any* of its
   vertices keeps the total angle, does not increase `Σ|μ|`, and is admissible iff the summed angle
@@ -459,6 +464,90 @@ theorem kkt_of_prox_fixedPoint {k : ι → ℝ}
   have := hst i
   simpa using this
 
+/-- `(u, μ)` is a global minimizer of the proximal problem with stiffness `k` and centre `c`:
+feasible, and no feasible pair has a smaller `J + Σ (μ_i − c_i)²/(2 k_i)`. -/
+def IsProxMinimizer (P : ConeProblem ι) (k c : ι → ℝ) (u μ : ι → ℝ) : Prop :=
+  P.Feasible u μ ∧ ∀ v ν, P.Feasible v ν → P.proxObjective k c u μ ≤ P.proxObjective k c v ν
+
+/-- The objective is convex along the segment between two pairs. -/
+private theorem objective_convex_le (hP : P.WellFormed) (u μ v ν : ι → ℝ) {θ : ℝ} (h0 : 0 ≤ θ)
+    (h1 : θ ≤ 1) :
+    P.objective (fun i => (1 - θ) * u i + θ * v i) (fun i => (1 - θ) * μ i + θ * ν i) ≤
+      (1 - θ) * P.objective u μ + θ * P.objective v ν := by
+  have hc : P.coneCost (fun i => (1 - θ) * μ i + θ * ν i) ≤
+      (1 - θ) * P.coneCost μ + θ * P.coneCost ν := by
+    unfold coneCost
+    rw [Finset.mul_sum, Finset.mul_sum, ← Finset.sum_add_distrib]
+    exact Finset.sum_le_sum fun i _ => (P.site i).cost_convex (hP.site i) (μ i) (ν i) h0 h1
+  have hd : P.distortion (fun i => (1 - θ) * u i + θ * v i) ≤
+      (1 - θ) * P.distortion u + θ * P.distortion v := by
+    unfold distortion
+    have : ∑ i, P.wE i * P.m i * ((1 - θ) * u i + θ * v i) ^ 2 ≤
+        (1 - θ) * ∑ i, P.wE i * P.m i * u i ^ 2 + θ * ∑ i, P.wE i * P.m i * v i ^ 2 := by
+      rw [Finset.mul_sum, Finset.mul_sum, ← Finset.sum_add_distrib]
+      refine Finset.sum_le_sum fun i _ => ?_
+      have hw : 0 ≤ P.wE i * P.m i := mul_nonneg (hP.wE_nonneg i) (hP.m_nonneg i)
+      have key : (1 - θ) * u i ^ 2 + θ * v i ^ 2 - ((1 - θ) * u i + θ * v i) ^ 2 =
+          θ * (1 - θ) * (u i - v i) ^ 2 := by ring
+      have hnn : 0 ≤ θ * (1 - θ) * (u i - v i) ^ 2 :=
+        mul_nonneg (mul_nonneg h0 (by linarith)) (sq_nonneg _)
+      nlinarith [mul_nonneg hw hnn]
+    linarith
+  have := mul_le_mul_of_nonneg_left hc hP.lam_nonneg
+  unfold objective
+  nlinarith
+
+/-- **A fixed point of the proximal iteration is a minimizer of the objective itself.** For a
+well-formed problem and `k_i > 0`: if `(u, μ)` minimizes `J + Σ (ν_i − μ_i)²/(2 k_i)` — the
+proximal problem whose centre is `μ` itself — then `(u, μ)` is a global minimizer of `J`.
+(No optimality system is involved: the penalty and its first-order term vanish at the centre.)
+
+[formula: proximal-fixed-point] -/
+theorem IsProxMinimizer.isMinimizer_of_fixedPoint (hP : P.WellFormed) {k : ι → ℝ}
+    (hk : ∀ i, 0 < k i) (h : P.IsProxMinimizer k μ u μ) : P.IsMinimizer u μ := by
+  refine ⟨h.1, fun v ν hv => ?_⟩
+  set C : ℝ := ∑ i, (ν i - μ i) ^ 2 / (2 * k i) with hC
+  have hCnn : 0 ≤ C := Finset.sum_nonneg fun i _ => by
+    have := hk i; positivity
+  -- along the segment from (u, μ) to (v, ν)
+  have key : ∀ θ : ℝ, 0 < θ → θ ≤ 1 →
+      0 ≤ θ * (P.objective v ν - P.objective u μ) + θ ^ 2 * C := by
+    intro θ h0 h1
+    have hfeas : P.Feasible (fun i => (1 - θ) * u i + θ * v i)
+        (fun i => (1 - θ) * μ i + θ * ν i) := by
+      refine ⟨?_, fun i => (P.site i).feasible_convex (h.1.2 i) (hv.2 i) h0.le h1⟩
+      have e : (fun i => (1 - θ) * u i + θ * v i) = (1 - θ) • u + θ • v := by ext i; simp
+      rw [e, Matrix.mulVec_add, Matrix.mulVec_smul, Matrix.mulVec_smul, h.1.1, hv.1]
+      ext i; simp; ring
+    have h2 := h.2 _ _ hfeas
+    have h3 := objective_convex_le hP u μ v ν h0.le h1
+    have e1 : P.proxObjective k μ u μ = P.objective u μ := by
+      simp [proxObjective]
+    have e2 : P.proxObjective k μ (fun i => (1 - θ) * u i + θ * v i)
+        (fun i => (1 - θ) * μ i + θ * ν i) =
+        P.objective (fun i => (1 - θ) * u i + θ * v i) (fun i => (1 - θ) * μ i + θ * ν i) +
+          θ ^ 2 * C := by
+      simp only [proxObjective, hC, Finset.mul_sum]
+      congr 1
+      refine Finset.sum_congr rfl fun i _ => ?_
+      have := (hk i).ne'
+      field_simp; ring
+    rw [e1, e2] at h2
+    nlinarith
+  have := nonneg_of_forall_small key
+  linarith
+
+/-- **A proximal step does not increase the objective**: if `(u, μ)` minimizes the proximal
+problem with centre `c` and `(u₀, c)` is feasible (the previous iterate), then
+`J(u, μ) + Σ (μ_i − c_i)²/(2 k_i) ≤ J(u₀, c)`; in particular `J(u, μ) ≤ J(u₀, c)` for `k_i > 0`.
+
+[formula: proximal-fixed-point] -/
+theorem IsProxMinimizer.objective_add_le {k c : ι → ℝ} {u₀ : ι → ℝ}
+    (h : P.IsProxMinimizer k c u μ) (h0 : P.Feasible u₀ c) :
+    P.objective u μ + ∑ i, (μ i - c i) ^ 2 / (2 * k i) ≤ P.objective u₀ c := by
+  have := h.2 _ _ h0
+  simpa [proxObjective] using this
+
 /-- **A solution of the regularized stage's linear system, with every vertex on its piece,
 solves the proximal problem.** Let `L` be symmetric, `k_i > 0`, and `(u, φ)` a solution of the
 Newton system of any rows. Put `μ = L u + Ω`. If `φ_i − (μ_i − μ̄_i)/k_i ∈ ∂g_i(μ_i)` at every
@@ -760,6 +849,114 @@ theorem dualSlope_monotone {w Ω : ι → ℝ} (hw : ∀ i, 0 ≤ w i) {m : ι �
   linarith
 
 end ConeProblem
+
+/-! ## The componentwise backward error of a linear solve (`linsys.rs`, `backward_error`) -/
+
+section BackwardError
+
+variable {κ ι : Type*} [Fintype ι]
+
+/-- **Oettli–Prager.** For a linear system `K x = b` and `ε ≥ 0`, the residual satisfies
+`|b − K x|_i ≤ ε·(|K||x| + |b|)_i` in every row iff `x` solves exactly a system whose entries
+differ from those of `K` and `b` by at most the relative amount `ε`:
+`(K + δK) x = b + δb` with `|δK_ij| ≤ ε|K_ij|`, `|δb_i| ≤ ε|b_i|`.
+
+So the number `max_i |b − K x|_i / (|K||x| + |b|)_i` that `backward_error` returns (rows with a
+zero denominator have zero residual, `residual_eq_zero_of_magnitude_eq_zero`) is the smallest such
+`ε`; the solver accepts a solution when it is at most `1e-11`.
+
+[formula: componentwise-backward-error] -/
+theorem oettli_prager (K : Matrix κ ι ℝ) (x : ι → ℝ) (b : κ → ℝ) {ε : ℝ} (hε : 0 ≤ ε) :
+    (∀ i, |b i - (K *ᵥ x) i| ≤ ε * (∑ j, |K i j| * |x j| + |b i|)) ↔
+      ∃ (δK : Matrix κ ι ℝ) (δb : κ → ℝ), (∀ i j, |δK i j| ≤ ε * |K i j|) ∧
+        (∀ i, |δb i| ≤ ε * |b i|) ∧ (K + δK) *ᵥ x = b + δb := by
+  constructor
+  · intro h
+    -- θ_i = r_i / m_i, with |θ_i| ≤ ε
+    set m : κ → ℝ := fun i => ∑ j, |K i j| * |x j| + |b i| with hm
+    have hm0 : ∀ i, 0 ≤ m i := fun i =>
+      add_nonneg (Finset.sum_nonneg fun j _ => mul_nonneg (abs_nonneg _) (abs_nonneg _))
+        (abs_nonneg _)
+    set θ : κ → ℝ := fun i => (b i - (K *ᵥ x) i) / m i with hθ
+    have hθε : ∀ i, |θ i| ≤ ε := by
+      intro i
+      rcases (hm0 i).eq_or_lt with h0 | h0
+      · simp [hθ, ← h0, hε]
+      · rw [hθ]; simp only
+        rw [abs_div, abs_of_pos h0, div_le_iff₀ h0]
+        exact h i
+    have hθm : ∀ i, θ i * m i = b i - (K *ᵥ x) i := by
+      intro i
+      rcases (hm0 i).eq_or_lt with h0 | h0
+      · have hi : |b i - (K *ᵥ x) i| ≤ ε * m i := h i
+        rw [← h0, mul_zero] at hi ⊢
+        exact (abs_eq_zero.mp (le_antisymm hi (abs_nonneg _))).symm
+      · rw [hθ]; simp only
+        field_simp
+    refine ⟨Matrix.of fun i j => θ i * |K i j| * SignType.sign (x j),
+      fun i => -(θ i * |b i|), fun i j => ?_, fun i => ?_, ?_⟩
+    · simp only [Matrix.of_apply, abs_mul, abs_abs]
+      have h1 : |((SignType.sign (x j) : SignType) : ℝ)| ≤ 1 := by
+        rcases lt_trichotomy (x j) 0 with hx | hx | hx <;> simp [hx, sign_neg, sign_pos]
+      calc |θ i| * |K i j| * |((SignType.sign (x j) : SignType) : ℝ)|
+          ≤ |θ i| * |K i j| * 1 :=
+            mul_le_mul_of_nonneg_left h1 (mul_nonneg (abs_nonneg _) (abs_nonneg _))
+        _ ≤ ε * |K i j| := by
+            rw [mul_one]; exact mul_le_mul_of_nonneg_right (hθε i) (abs_nonneg _)
+    · rw [abs_neg, abs_mul, abs_abs]
+      exact mul_le_mul_of_nonneg_right (hθε i) (abs_nonneg _)
+    · funext i
+      have hsx : ∀ j, ((SignType.sign (x j) : SignType) : ℝ) * x j = |x j| := by
+        intro j
+        rcases lt_trichotomy (x j) 0 with hx | hx | hx
+        · simp [sign_neg hx, abs_of_neg hx]
+        · simp [hx]
+        · simp [sign_pos hx, abs_of_pos hx]
+      have e : ((Matrix.of fun i j => θ i * |K i j| * SignType.sign (x j)) *ᵥ x) i =
+          θ i * ∑ j, |K i j| * |x j| := by
+        simp only [Matrix.mulVec, dotProduct, Matrix.of_apply, Finset.mul_sum]
+        refine Finset.sum_congr rfl fun j _ => ?_
+        rw [mul_assoc, mul_assoc, hsx j]
+      rw [Matrix.add_mulVec]
+      simp only [Pi.add_apply, e]
+      have := hθm i
+      simp only [hm, mul_add] at this
+      linarith
+  · rintro ⟨δK, δb, h1, h2, h3⟩ i
+    have e : b i - (K *ᵥ x) i = (δK *ᵥ x) i - δb i := by
+      have := congrFun h3 i
+      rw [Matrix.add_mulVec] at this
+      simp only [Pi.add_apply] at this
+      linarith
+    rw [e]
+    have hK : |(δK *ᵥ x) i| ≤ ε * ∑ j, |K i j| * |x j| := by
+      simp only [Matrix.mulVec, dotProduct]
+      calc |∑ j, δK i j * x j| ≤ ∑ j, |δK i j * x j| := Finset.abs_sum_le_sum_abs _ _
+        _ ≤ ∑ j, ε * (|K i j| * |x j|) := Finset.sum_le_sum fun j _ => by
+            rw [abs_mul, ← mul_assoc]
+            exact mul_le_mul_of_nonneg_right (h1 i j) (abs_nonneg _)
+        _ = ε * ∑ j, |K i j| * |x j| := by rw [Finset.mul_sum]
+    calc |(δK *ᵥ x) i - δb i| ≤ |(δK *ᵥ x) i| + |δb i| := abs_sub _ _
+      _ ≤ ε * ∑ j, |K i j| * |x j| + ε * |b i| := add_le_add hK (h2 i)
+      _ = ε * (∑ j, |K i j| * |x j| + |b i|) := by ring
+
+/-- A row whose magnitude `(|K||x| + |b|)_i` is zero has zero residual, so skipping it in the
+maximum (as `backward_error` does) loses nothing. -/
+theorem residual_eq_zero_of_magnitude_eq_zero (K : Matrix κ ι ℝ) (x : ι → ℝ) (b : κ → ℝ) (i : κ)
+    (h : ∑ j, |K i j| * |x j| + |b i| = 0) : b i - (K *ᵥ x) i = 0 := by
+  have h1 : 0 ≤ ∑ j, |K i j| * |x j| :=
+    Finset.sum_nonneg fun j _ => mul_nonneg (abs_nonneg _) (abs_nonneg _)
+  have hb : |b i| = 0 := by linarith [abs_nonneg (b i)]
+  have hs : ∑ j, |K i j| * |x j| = 0 := by linarith [abs_nonneg (b i)]
+  have hterm : ∀ j, K i j * x j = 0 := by
+    intro j
+    have := (Finset.sum_eq_zero_iff_of_nonneg
+      (fun j _ => mul_nonneg (abs_nonneg (K i j)) (abs_nonneg (x j)))).mp hs j (Finset.mem_univ j)
+    rw [← abs_mul] at this
+    exact abs_eq_zero.mp this
+  simp only [Matrix.mulVec, dotProduct, hterm, Finset.sum_const_zero, abs_eq_zero.mp hb, sub_zero]
+
+end BackwardError
 
 /-! ## Merging a cluster of cones (`extract.rs`) -/
 
