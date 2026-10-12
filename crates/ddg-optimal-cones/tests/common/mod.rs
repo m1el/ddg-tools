@@ -554,3 +554,150 @@ pub fn summary(solution: &ddg_optimal_cones::Solution) -> String {
         stages.join(" ")
     )
 }
+
+/// The mesh glued to a mirror copy of itself along its boundary: a closed mesh. Vertex `v` of
+/// the original keeps its index; `copy[v]` is its mirror image (`v` itself on the boundary).
+///
+/// Any quantity per vertex of the original is, on the double, the same at both copies; at a
+/// seam vertex the Laplacian row, the angle defect (`2k`) and the cone angle (`2ν`) are twice
+/// those of the boundary vertex of the original, and the mass is the same (the area is
+/// doubled, and so is the star of a seam vertex). That is why the double is a route to the
+/// optimized boundary values that does not use the boundary code: see
+/// [`doubled_features`].
+///
+/// `None` if the double is not a valid mesh: a triangle with three boundary vertices would be
+/// glued to a second copy of itself.
+pub fn double_mesh(mesh: &TriMesh, geometry: &Geometry) -> Option<(TriMesh, Geometry, Vec<u32>)> {
+    let nv = mesh.n_vertices();
+    let mut copy: Vec<u32> = (0..nv as u32).collect();
+    let mut next = nv as u32;
+    for (v, slot) in copy.iter_mut().enumerate() {
+        if !mesh.is_boundary_vertex(v) {
+            *slot = next;
+            next += 1;
+        }
+    }
+    let mut faces = mesh.faces().to_vec();
+    faces.extend(mesh.faces().iter().map(|f| {
+        [
+            copy[f[0] as usize],
+            copy[f[2] as usize],
+            copy[f[1] as usize],
+        ]
+    }));
+    let doubled = TriMesh::new(next as usize, faces).ok()?;
+    let mut original = vec![0u32; next as usize];
+    for v in 0..nv {
+        original[v] = v as u32;
+        original[copy[v] as usize] = v as u32;
+    }
+    let lengths: Vec<f64> = (0..doubled.n_edges())
+        .map(|e| {
+            let [a, b] = doubled.edge_vertices(e);
+            let edge = mesh
+                .find_edge(original[a as usize] as usize, original[b as usize] as usize)
+                .expect("the copy of an edge");
+            geometry.edge_lengths()[edge]
+        })
+        .collect();
+    let geometry = Geometry::from_edge_lengths(&doubled, lengths).expect("the double's geometry");
+    Some((doubled, geometry, copy))
+}
+
+/// The features of the problem on the double that corresponds to the problem `f` on the
+/// original with the boundary treatment `boundary` (`Free`, `Penalized` or `Convex`): interior
+/// features at both copies, `λ/2`, and at the seam vertices the site of the treatment (cost 0
+/// for `Free` and `Convex`, `wR` for `Penalized`; angle bound `≥ 0` for `Convex`). Every
+/// objective and every solution value of the original are those of the double (a seam cone
+/// angle is `2ν`).
+pub fn doubled_features(
+    mesh: &TriMesh,
+    copy: &[u32],
+    f: &Features,
+    boundary: BoundaryTreatment,
+) -> Features {
+    let nv = mesh.n_vertices();
+    let n2 = copy.iter().copied().max().unwrap() as usize + 1;
+    let spread = |values: &Option<Vec<f64>>, default: f64, seam: &dyn Fn(usize) -> f64| {
+        values.as_ref().map(|_| ()).map(|_| {
+            let mut out = vec![default; n2];
+            for v in 0..nv {
+                let x = if mesh.is_boundary_vertex(v) {
+                    seam(v)
+                } else {
+                    values.as_ref().unwrap()[v]
+                };
+                out[v] = x;
+                out[copy[v] as usize] = x;
+            }
+            out
+        })
+    };
+    let distortion_weights = spread(&f.distortion_weights, 1.0, &|v| {
+        f.distortion_weights.as_ref().unwrap()[v]
+    });
+    let seam_cost = |v: usize| match boundary {
+        BoundaryTreatment::Penalized => f.cone_costs.as_ref().map_or(1.0, |c| c[v]),
+        _ => 0.0,
+    };
+    // The seam cost differs from the default even if the original has no costs.
+    let costs = {
+        let mut out = vec![1.0; n2];
+        for v in 0..nv {
+            let x = if mesh.is_boundary_vertex(v) {
+                seam_cost(v)
+            } else {
+                f.cone_costs.as_ref().map_or(1.0, |c| c[v])
+            };
+            out[v] = x;
+            out[copy[v] as usize] = x;
+        }
+        Some(out)
+    };
+    let lower = {
+        let mut out = vec![f64::NEG_INFINITY; n2];
+        for v in 0..nv {
+            let x = if mesh.is_boundary_vertex(v) {
+                if boundary == BoundaryTreatment::Convex {
+                    0.0
+                } else {
+                    f64::NEG_INFINITY
+                }
+            } else {
+                f.lower_bounds.as_ref().map_or(f64::NEG_INFINITY, |b| b[v])
+            };
+            out[v] = x;
+            out[copy[v] as usize] = x;
+        }
+        Some(out)
+    };
+    let upper = {
+        let mut out = vec![f64::INFINITY; n2];
+        for v in 0..nv {
+            let x = if mesh.is_boundary_vertex(v) {
+                f64::INFINITY
+            } else {
+                f.upper_bounds.as_ref().map_or(f64::INFINITY, |b| b[v])
+            };
+            out[v] = x;
+            out[copy[v] as usize] = x;
+        }
+        Some(out)
+    };
+    let mut prescribed = Vec::new();
+    for c in &f.prescribed_cones {
+        prescribed.push(*c);
+        prescribed.push(Cone {
+            vertex: copy[c.vertex as usize],
+            angle: c.angle,
+        });
+    }
+    Features {
+        lambda: 0.5 * f.lambda,
+        distortion_weights,
+        cone_costs: costs,
+        lower_bounds: lower,
+        upper_bounds: upper,
+        prescribed_cones: prescribed,
+    }
+}

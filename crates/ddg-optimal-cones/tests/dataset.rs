@@ -11,13 +11,16 @@
 //!
 //! What the tests establish is summarized in the crate README ("The published dataset").
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use ddg_core::io::{read_cones, read_obj};
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{
-    Cone, ConeProblem, Parallelism, Solution, SolveOptions, Status, evaluate_cones, solve,
+    BoundaryTreatment, Cone, ConeProblem, Parallelism, Solution, SolveOptions, Status,
+    evaluate_cones, solve, solve_with_boundary,
 };
 
 fn dataset_dir() -> Option<PathBuf> {
@@ -778,6 +781,175 @@ fn half_of_the_published_files_used_optimized_boundary_values() {
         );
         assert!(free < 1.2e-2, "{name}: {free}");
         assert!(fixed > 0.2, "{name}: {fixed}");
+    }
+}
+
+/// The optimized boundary values of this crate (`BoundaryTreatment::Free`) against the double
+/// of the mesh solved by the closed-mesh path, which does not use the boundary code, on every
+/// dataset mesh with boundary at `λ = 0.5`; and the optimized boundary is never worse than the
+/// fixed one.
+#[test]
+fn optimized_boundary_agrees_with_the_double_on_the_dataset() {
+    let Some(dir) = dataset_dir() else { return };
+    if !solves_enabled("optimized_boundary_agrees_with_the_double_on_the_dataset") {
+        return;
+    }
+    println!(
+        "{:<20} {:>7} {:>9} {:>9} {:>10} {:>10} {:>10} {:>10}",
+        "mesh", "V", "obj free", "obj u=0", "d objective", "d mu", "d u (rel)", "d nu"
+    );
+    let mut compared = 0;
+    for name in names(&dir) {
+        let data = load(&dir, &name);
+        if data.mesh.boundary_loops().is_empty() {
+            continue;
+        }
+        let problem = ConeProblem::new(&data.mesh, &data.geometry, 0.5);
+        let options = SolveOptions::default();
+        let free = solve_with_boundary(&problem, BoundaryTreatment::Free, &options)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            free.report.status,
+            Status::Converged,
+            "{name}: {:?}",
+            free.report
+        );
+        let fixed = solve_plain(&data, 0.5, &options);
+        assert!(
+            free.objective <= fixed.objective * (1.0 + 1e-9),
+            "{name}: {} vs {}",
+            free.objective,
+            fixed.objective
+        );
+        let Some((doubled, geometry, copy)) = common::double_mesh(&data.mesh, &data.geometry)
+        else {
+            println!("{name:<20} (no double: a triangle with three boundary vertices)");
+            continue;
+        };
+        let n2 = doubled.n_vertices();
+        let mut costs = vec![1.0; n2];
+        for v in 0..data.mesh.n_vertices() {
+            if data.mesh.is_boundary_vertex(v) {
+                costs[v] = 0.0;
+            }
+        }
+        let double_problem = ConeProblem {
+            cone_costs: Some(costs),
+            ..ConeProblem::new(&doubled, &geometry, 0.25)
+        };
+        let theirs = solve(&double_problem, &options).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(theirs.report.status, Status::Converged, "{name} double");
+        let nv = data.mesh.n_vertices();
+        let u_scale = free
+            .log_scale_optimal
+            .iter()
+            .fold(1.0f64, |m, u| m.max(u.abs()));
+        let (mut d_mu, mut d_u, mut d_nu) = (0.0f64, 0.0f64, 0.0f64);
+        for v in 0..nv {
+            d_u =
+                d_u.max((free.log_scale_optimal[v] - theirs.log_scale_optimal[v]).abs() / u_scale);
+            if data.mesh.is_boundary_vertex(v) {
+                d_nu = d_nu.max((free.boundary_curvature[v] - 0.5 * theirs.measure[v]).abs());
+            } else {
+                d_mu = d_mu.max((free.measure[v] - theirs.measure[v]).abs());
+                d_mu = d_mu.max((free.measure[v] - theirs.measure[copy[v] as usize]).abs());
+            }
+        }
+        let d_obj = (free.objective - theirs.objective).abs() / free.objective.max(1e-300);
+        println!(
+            "{:<20} {:>7} {:>9.5} {:>9.5} {:>10.2e} {:>10.2e} {:>10.2e} {:>10.2e}",
+            name, nv, free.objective, fixed.objective, d_obj, d_mu, d_u, d_nu
+        );
+        assert!(
+            d_obj < 1e-8 && d_mu < 1e-6 && d_u < 1e-6 && d_nu < 1e-6,
+            "{name}"
+        );
+        compared += 1;
+    }
+    assert!(compared >= 10, "only {compared} meshes were compared");
+}
+
+/// The published-cone comparison of the README, with optimized boundary values as a mode of
+/// this crate: the least-distortion angles at the file's positions (the vertices as free
+/// cone sites, no cone elsewhere), `u = 0` on the boundary against optimized boundary values.
+/// The result is the same as that of the double (`half_of_the_published_files_...`), to
+/// rounding, and as far from the files: `10⁻²`, not `10⁻⁴`.
+#[test]
+fn published_cones_with_optimized_boundary_values() {
+    let Some(dir) = dataset_dir() else { return };
+    if !solves_enabled("published_cones_with_optimized_boundary_values") {
+        return;
+    }
+    println!(
+        "{:<10} {:>5} {:>14} {:>14} {:>14}",
+        "mesh", "cones", "u = 0", "optimized", "double"
+    );
+    for name in [
+        "camel",
+        "camel_noise1",
+        "camel_noise2",
+        "camelbad",
+        "camelbadnonuniform",
+        "cow1",
+        "cow75e-2",
+        "cow5e-1",
+        "hand",
+        "rhino",
+    ] {
+        let data = load(&dir, name);
+        let mut costs = vec![f64::INFINITY; data.mesh.n_vertices()];
+        for c in &data.cones {
+            costs[c.vertex as usize] = 0.0;
+        }
+        let problem = ConeProblem {
+            cone_costs: Some(costs),
+            ..ConeProblem::new(&data.mesh, &data.geometry, 1.0)
+        };
+        let options = SolveOptions::default();
+        let run = |boundary| {
+            let s = solve_with_boundary(&problem, boundary, &options)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(s.report.status, Status::Converged, "{name} {boundary:?}");
+            s
+        };
+        let fixed = worst_difference(&run(BoundaryTreatment::Fixed), &data.cones);
+        let free_solution = run(BoundaryTreatment::Free);
+        let free = worst_difference(&free_solution, &data.cones);
+        // The same through the double, where the double is a mesh (not for `hand`).
+        let nv = data.mesh.n_vertices();
+        let through =
+            common::double_mesh(&data.mesh, &data.geometry).map(|(doubled, geometry, copy)| {
+                let mut sites: Vec<u32> = (0..nv as u32)
+                    .filter(|&v| data.mesh.is_boundary_vertex(v as usize))
+                    .collect();
+                for c in &data.cones {
+                    sites.push(c.vertex);
+                    sites.push(copy[c.vertex as usize]);
+                }
+                least_distortion_angles(&doubled, &geometry, &sites)
+            });
+        let by_double = through
+            .as_ref()
+            .map_or(f64::NAN, |t| worst_difference(t, &data.cones));
+        let between = through.as_ref().map_or(f64::NAN, |t| {
+            data.cones
+                .iter()
+                .map(|c| {
+                    (free_solution.measure[c.vertex as usize] - t.measure[c.vertex as usize]).abs()
+                })
+                .fold(0.0, f64::max)
+        });
+        println!(
+            "{:<10} {:>5} {:>14.2e} {:>14.2e} {:>14.2e}   (this crate vs double: {between:.1e})",
+            name,
+            data.cones.len(),
+            fixed,
+            free,
+            by_double
+        );
+        assert!(between.is_nan() || between < 1e-6, "{name}: {between}");
+        assert!(free < 1.2e-2, "{name}: {free}");
+        assert!(fixed > 0.05, "{name}: {fixed}");
     }
 }
 
