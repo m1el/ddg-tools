@@ -10,6 +10,7 @@ fn main() {
         "table" => table(&args[1..]),
         "scale" => scale(&args[1..]),
         "refopts" => refopts(&args[1..]),
+        "etree" => etree(&args[1..]),
         _ => eprintln!("usage: lab compare MESH [--lambda X] [--threads N] [--no-ref] ..."),
     }
 }
@@ -265,4 +266,55 @@ fn refopts(args: &[String]) {
         println!("{:>width$} {:<34} {:>7.3} {:>5} {:>5} {:>6} {:>9.1e} {:>9.1e} {:>9}", "", sch, r.report.timings.total, rl.ldlt_factorizations + rl.lu_factorizations, rl.solves,
             format!("{:?}", r.report.status).chars().take(6).collect::<String>(), dmu, (r.objective - base.objective).abs() / base.objective.abs(), r.report.stages.len(), width = spec.len() + 14);
     }
+}
+
+/// Height of the elimination tree of the restricted Laplacian in the AMD order: the number of
+/// sequential steps (levels) of a level-scheduled triangular solve, which is what limits a GPU.
+fn etree(args: &[String]) {
+    use ddg_core::sparse::fill_reducing_ordering;
+    let case = meshes::load(&args[0]).unwrap();
+    let l = ddg_core::operators::cotan_laplacian(&case.mesh, &case.geometry).unwrap();
+    let nv = case.mesh.n_vertices();
+    let unk: Vec<u32> = if case.mesh.n_boundary_edges() == 0 { (1..nv as u32).collect() } else { case.mesh.interior_vertices() };
+    let a = l.submatrix(&unk, &unk).unwrap();
+    let n = a.nrows();
+    let perm = fill_reducing_ordering(&a).unwrap();
+    let mut inv = vec![0usize; n];
+    for (k, &v) in perm.iter().enumerate() { inv[v as usize] = k; }
+    let none = usize::MAX;
+    let mut parent = vec![none; n];
+    let mut anc = vec![none; n];
+    for j in 0..n {
+        let v = perm[j] as usize;
+        for p in a.col_ptr()[v]..a.col_ptr()[v + 1] {
+            let w = a.row_idx()[p] as usize;
+            let mut r = inv[w];
+            if r >= j { continue; }
+            while anc[r] != none && anc[r] != j {
+                let nxt = anc[r];
+                anc[r] = j;
+                r = nxt;
+            }
+            if anc[r] == none { anc[r] = j; parent[r] = j; }
+        }
+    }
+    let mut level = vec![0usize; n];
+    let mut children = vec![0usize; n];
+    for j in 0..n { if parent[j] != none { children[parent[j]] += 1; } }
+    let mut lev2 = vec![0usize; n];
+    for j in 0..n {
+        let c = if children[j] == 1 { 0 } else { 1 };
+        lev2[j] += c; // lev2[j] currently holds max over children
+        if parent[j] != none {
+            level[parent[j]] = level[parent[j]].max(level[j] + 1);
+            lev2[parent[j]] = lev2[parent[j]].max(lev2[j]);
+        }
+    }
+    let height = level.iter().max().unwrap() + 1;
+    let height2 = lev2.iter().max().unwrap() + 1;
+    let mut count = vec![0usize; height];
+    for &l in &level { count[l] += 1; }
+    let wide = count.iter().filter(|&&c| c >= 256).count();
+    let narrow = count.iter().filter(|&&c| c < 32).count();
+    println!("{}: n={n} etree height (levels) {height}; chain-compressed height {height2}; levels with >=256 nodes: {wide}; levels with <32 nodes: {narrow}; nodes in the 10 widest levels: {}", args[0], { let mut c = count.clone(); c.sort_unstable_by(|a, b| b.cmp(a)); c.iter().take(10).sum::<usize>() });
 }
