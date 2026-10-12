@@ -1,63 +1,10 @@
 //! End-to-end tests of `ddg_uv::unwrap` on small generated meshes.
 
-use ddg_core::generators::{bumpy_grid_disk, icosphere, open_cylinder, torus};
-use ddg_uv::{ErrorKind, MeshInput, PolygonMesh, UnwrapOptions, UvMap, unwrap};
+mod common;
 
-/// The checks every result must pass, whatever the input.
-fn check(mesh: &PolygonMesh, input: &MeshInput<'_>, map: &UvMap, options: &UnwrapOptions) {
-    assert_eq!(map.uvs.len(), mesh.corner_vertices.len());
-    assert!(map.uvs.iter().all(|q| q[0].is_finite() && q[1].is_finite()));
-    assert_eq!(map.polygon_charts.len(), mesh.n_polygons());
-    let n_charts = map.report.charts.len() as u32;
-    assert!(map.polygon_charts.iter().all(|&c| c < n_charts));
-    if options.packing.is_some() {
-        let eps = 1e-9;
-        assert!(
-            map.uvs
-                .iter()
-                .all(|q| q.iter().all(|&x| (-eps..=1.0 + eps).contains(&x))),
-            "packed UVs must lie in the unit square"
-        );
-    }
-    // Cuts run along polygon edges only, sorted and unique; every seam that is an interior
-    // polygon edge is cut.
-    let edges = mesh.edges();
-    assert!(map.cut_edges.windows(2).all(|w| w[0] < w[1]));
-    for e in &map.cut_edges {
-        assert!(e[0] < e[1] && edges.binary_search(e).is_ok(), "cut {e:?}");
-    }
-    // Across an edge that is not cut, the two polygons agree on the UVs of its end points.
-    let mut first_uv: std::collections::BTreeMap<[u32; 2], ([f64; 2], [f64; 2])> =
-        std::collections::BTreeMap::new();
-    for p in 0..mesh.n_polygons() {
-        let corners: Vec<usize> = mesh.polygon_corners(p).collect();
-        for (i, &c) in corners.iter().enumerate() {
-            let d = corners[(i + 1) % corners.len()];
-            let (a, b) = (mesh.corner_vertices[c], mesh.corner_vertices[d]);
-            let key = [a.min(b), a.max(b)];
-            if map.cut_edges.binary_search(&key).is_ok() {
-                continue;
-            }
-            let here = if a < b {
-                (map.uvs[c], map.uvs[d])
-            } else {
-                (map.uvs[d], map.uvs[c])
-            };
-            if let Some(there) = first_uv.insert(key, here) {
-                assert_eq!(there, here, "edge {key:?} is not cut but its UVs differ");
-            }
-        }
-    }
-    assert!(map.cones.windows(2).all(|w| w[0].vertex < w[1].vertex));
-    assert!(
-        map.cones
-            .iter()
-            .all(|c| c.angle.is_finite() && c.angle < std::f64::consts::TAU)
-    );
-    for &v in input.forbidden_vertices {
-        assert!(map.cones.iter().all(|c| c.vertex != v), "forbidden {v}");
-    }
-}
+use common::{check, without_times};
+use ddg_core::generators::{bumpy_grid_disk, icosphere, open_cylinder, torus};
+use ddg_uv::{ErrorKind, MeshInput, PolygonMesh, UnwrapOptions, unwrap};
 
 #[test]
 fn a_bumpy_disk_is_unwrapped() {
@@ -94,17 +41,8 @@ fn a_bumpy_disk_is_unwrapped() {
     assert!(map.report.area_distortion.scale_free < 2.0 * solver);
     assert!(map.report.area_distortion.scale_free > solver);
     // Identical on a second run, apart from the clock.
-    let mut again = unwrap(&input, &options).unwrap();
-    let mut first = map.clone();
-    first.report.timings = Default::default();
-    again.report.timings = Default::default();
-    for report in [&mut first.report, &mut again.report] {
-        for chart in &mut report.charts {
-            if let Some(solve) = &mut chart.solve {
-                solve.seconds = 0.0;
-            }
-        }
-    }
+    let again = without_times(unwrap(&input, &options).unwrap());
+    let first = without_times(map.clone());
     assert_eq!(first, again);
 }
 
