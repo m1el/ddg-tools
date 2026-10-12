@@ -7,6 +7,8 @@
 //! cargo run --release -p ddg-uv --example evaluate -- merge     # cluster merging and its guard
 //! cargo run --release -p ddg-uv --example evaluate -- dataset   # the 23 dataset meshes
 //! cargo run --release -p ddg-uv --example evaluate -- reopt     # re-optimized cone angles
+//! cargo run --release -p ddg-uv --example evaluate -- boundary  # u = 0 or optimized on the boundary
+//! cargo run --release -p ddg-uv --example evaluate -- verify    # does the layout realize the solver's boundary u
 //! ```
 //!
 //! A further argument restricts the meshes to those whose name contains it. The dataset is
@@ -18,9 +20,11 @@ use std::path::PathBuf;
 
 use ddg_core::generators::icosphere;
 use ddg_core::io::read_obj;
-use ddg_uv::primitives::{capsule, cone, cube, cylinder, grid_cube, holed_slab, torus, uv_sphere};
+use ddg_uv::primitives::{
+    End, capsule, cone, cube, cylinder, grid_cube, holed_slab, revolution, torus, uv_sphere,
+};
 use ddg_uv::{
-    ClosedSurfaces, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh, SlitPlacement,
+    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh, SlitPlacement,
     UnwrapOptions, area_distortion, unwrap,
 };
 
@@ -380,6 +384,165 @@ fn reopt(filter: &str) {
     }
 }
 
+/// The four configurations of the boundary study: boundary values × angle re-optimization.
+fn boundary_configs() -> [(&'static str, BoundaryValues, bool); 4] {
+    [
+        ("u=0", BoundaryValues::Zero, false),
+        ("u=0 + reopt", BoundaryValues::Zero, true),
+        ("optimized", BoundaryValues::Optimized, false),
+        ("optimized + reopt", BoundaryValues::Optimized, true),
+    ]
+}
+
+fn boundary_row(label: &str, mesh: &PolygonMesh, options: &UnwrapOptions, published: Option<f64>) {
+    match unwrap(&mesh.input(), options) {
+        Err(e) => println!("| {label} | FAILED: {e} |"),
+        Ok(map) => {
+            let r = &map.report;
+            let bl = r
+                .charts
+                .iter()
+                .map(|c| c.flatten.boundary_length_error)
+                .fold(0.0, f64::max);
+            println!(
+                "| {label} | {} | {:.5} | {} | {:.3} | {} | {:.2} | {:.1e} | {} | {:.2e} | {:.2e} | {} |",
+                r.cones.n_cones,
+                r.area_distortion.scale_free,
+                published.map_or("-".to_string(), |d| format!("{d:.5}")),
+                100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
+                r.flipped_triangles,
+                r.timings.total,
+                bl,
+                r.seam_lengths.n_seam_edges,
+                r.seam_lengths.max_seam_mismatch,
+                r.seam_lengths.max_other_mismatch,
+                r.warnings.len(),
+            );
+        }
+    }
+}
+
+const BOUNDARY_HEADER: &str = "| config | cones | distortion | published | overlap % | flipped | seconds | boundary len. err | seam edges | max seam mismatch | max other cut mismatch | warnings |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|";
+
+/// Meshes with seams (generated), as `(name, mesh, seam edges)`.
+fn seamed() -> Vec<(String, PolygonMesh, Vec<[u32; 2]>)> {
+    let ring = |i: u32, s: u32| -> Vec<[u32; 2]> {
+        (0..s).map(|j| [i * s + j, i * s + (j + 1) % s]).collect()
+    };
+    let line = |s: u32, rings: u32, j: u32| -> Vec<[u32; 2]> {
+        (0..rings - 1).map(|i| [i * s + j, (i + 1) * s + j]).collect()
+    };
+    let open_vase = |segments: usize, rings: usize| {
+        let profile: Vec<(f64, f64)> = (0..rings)
+            .map(|i| {
+                let t = i as f64 / (rings - 1) as f64;
+                (1.0 + 0.6 * (3.0 * t).sin() + 0.3 * t, 2.0 * t)
+            })
+            .collect();
+        revolution(&profile, segments, End::Open, End::Open).unwrap()
+    };
+    let mut out = Vec::new();
+    out.push((
+        "uv_sphere 32x16, ring 3 seam (two unequal caps)".to_string(),
+        uv_sphere(32, 16, 1.0).unwrap(),
+        ring(3, 32),
+    ));
+    out.push((
+        "uv_sphere 32x16, ring 5 seam (two unequal caps)".to_string(),
+        uv_sphere(32, 16, 1.0).unwrap(),
+        ring(5, 32),
+    ));
+    out.push((
+        "open vase 32x16, no seam".to_string(),
+        open_vase(32, 16),
+        Vec::new(),
+    ));
+    out.push((
+        "open vase 32x16, straight seam".to_string(),
+        open_vase(32, 16),
+        line(32, 16, 5),
+    ));
+    out.push((
+        "open vase 32x16, ring 4 seam (two tubes)".to_string(),
+        open_vase(32, 16),
+        ring(4, 32),
+    ));
+    out.push((
+        "torus 48x12, meridian + longitude seams".to_string(),
+        torus(48, 12, 1.0, 0.25).unwrap(),
+        // vertex (i, j) of the torus is 12 i + j: the minor circle i = 0 and the major circle j = 0
+        {
+            let mut e: Vec<[u32; 2]> = (0..12u32).map(|j| [j, (j + 1) % 12]).collect();
+            e.extend((0..48u32).map(|i| [12 * i, 12 * ((i + 1) % 48)]));
+            e
+        },
+    ));
+    out
+}
+
+fn boundary(filter: &str) {
+    let names = dataset_names();
+    println!("## Dataset meshes with boundary (default lambda {})\n", UnwrapOptions::default().lambda);
+    for name in names.iter().filter(|n| n.contains(filter)) {
+        let Some((mesh, published)) = load(name) else { continue };
+        let probe = unwrap(&mesh.input(), &UnwrapOptions::default());
+        let has_boundary = probe
+            .as_ref()
+            .map(|m| m.report.charts.iter().any(|c| c.n_boundary_loops > 0))
+            .unwrap_or(false);
+        if !has_boundary {
+            continue;
+        }
+        println!("\n### {name} ({} triangles)\n\n{BOUNDARY_HEADER}", mesh.n_polygons());
+        for (label, boundary, reoptimize_angles) in boundary_configs() {
+            let options = UnwrapOptions {
+                boundary,
+                reoptimize_angles,
+                ..UnwrapOptions::default()
+            };
+            boundary_row(label, &mesh, &options, published);
+        }
+    }
+    println!("\n## Generated meshes with seams\n");
+    for (name, mesh, seams) in seamed().into_iter().filter(|(n, _, _)| n.contains(filter)) {
+        println!("\n### {name}\n\n{BOUNDARY_HEADER}");
+        for (label, boundary, reoptimize_angles) in boundary_configs() {
+            let options = UnwrapOptions {
+                boundary,
+                reoptimize_angles,
+                ..UnwrapOptions::default()
+            };
+            let input = ddg_uv::MeshInput {
+                seam_edges: &seams,
+                ..mesh.input()
+            };
+            match unwrap(&input, &options) {
+                Err(e) => println!("| {label} | FAILED: {e} |"),
+                Ok(map) => {
+                    let r = &map.report;
+                    let bl = r.charts.iter().map(|c| c.flatten.boundary_length_error).fold(0.0, f64::max);
+                    println!(
+                        "| {label} | {} | {:.5} | - | {:.3} | {} | {:.2} | {:.1e} | {} | {:.2e} | {:.2e} | {} |",
+                        r.cones.n_cones,
+                        r.area_distortion.scale_free,
+                        100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
+                        r.flipped_triangles,
+                        r.timings.total,
+                        bl,
+                        r.seam_lengths.n_seam_edges,
+                        r.seam_lengths.max_seam_mismatch,
+                        r.seam_lengths.max_other_mismatch,
+                        r.warnings.len(),
+                    );
+                    for w in &r.warnings {
+                        println!("|   | warning: {w} |");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let filter = args.get(1).map_or("", String::as_str);
@@ -390,6 +553,7 @@ fn main() {
         Some("merge") => merge(filter),
         Some("dataset") => dataset(filter),
         Some("reopt") => reopt(filter),
-        _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset|reopt [name filter]"),
+        Some("boundary") => boundary(filter),
+        _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset|reopt|boundary [name filter]"),
     }
 }

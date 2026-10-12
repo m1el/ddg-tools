@@ -123,7 +123,7 @@ pub use flatten::{FlatStage, PieceFlat, flatten};
 pub use input::{MeshInput, PolygonMesh, fan_triangulation};
 pub use measure::{AreaDistortion, area_distortion};
 pub use options::{
-    ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
+    BoundaryValues, ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
     SlitPlacement, SpikeCheck, UnwrapOptions,
 };
 pub use spikes::SpikeReport;
@@ -132,5 +132,5 @@ pub use pipeline::{UvMap, assemble, unwrap};
 pub use prepare::{Piece, Prepared, prepare};
 pub use report::{
     ChartReport, ClosedHandling, ConeSolveReport, ConeStats, DegenerateReport, FlattenReport,
-    MergeOutcome, Report, SeamReport, SteeringReport, Timings, ValidationReport, Value,
+    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport, Value,
 };

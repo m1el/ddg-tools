@@ -31,7 +31,10 @@
 
 use ddg_core::io::Cone;
 use ddg_core::operators::lumped_mass_normalized;
-use ddg_optimal_cones::{ConeProblem, Parallelism, evaluate_cones};
+use ddg_optimal_cones::{
+    BoundaryTreatment, ConeProblem, Parallelism, SolveOptions, Status, evaluate_cones,
+    solve_with_boundary,
+};
 
 use crate::options::SpikeCheck;
 use crate::prepare::{Piece, Prepared};
@@ -51,7 +54,10 @@ pub struct SpikeReport {
     pub share: f64,
 }
 
-/// Runs the check on one piece.
+/// Runs the check on one piece. With `optimized_boundary` the cone-free state is the one the
+/// cone solver would have with optimized boundary values and every cone forbidden (a solve of
+/// the cone problem with `BoundaryTreatment::Free`; the solver has no evaluation for it),
+/// otherwise the one with `u = 0` on the boundary.
 ///
 /// # Errors
 /// The message of the error of the Laplacian solve; the caller reports it as a warning and
@@ -60,6 +66,7 @@ pub(crate) fn check_piece(
     prepared: &Prepared,
     piece: &Piece,
     check: &SpikeCheck,
+    optimized_boundary: bool,
 ) -> Result<Option<SpikeReport>, String> {
     let mesh = &piece.mesh;
     let n = mesh.n_vertices();
@@ -85,11 +92,30 @@ pub(crate) fn check_piece(
         upper_bounds: None,
         prescribed_cones: Vec::new(),
     };
-    let state = evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
-        .map_err(|e| e.to_string())?;
+    let log_scale = if optimized_boundary {
+        let forbidden = ConeProblem {
+            cone_costs: Some(vec![f64::INFINITY; n]),
+            prescribed_cones: prescribed,
+            ..problem
+        };
+        let solution =
+            solve_with_boundary(&forbidden, BoundaryTreatment::Free, &SolveOptions::default())
+                .map_err(|e| e.to_string())?;
+        if solution.report.status != Status::Converged {
+            return Err(format!(
+                "the solve for the cone-free state did not converge (status {:?})",
+                solution.report.status
+            ));
+        }
+        solution.log_scale_optimal
+    } else {
+        evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
+            .map_err(|e| e.to_string())?
+            .log_scale
+    };
     let mass = lumped_mass_normalized(mesh, &piece.geometry).map_err(|e| e.to_string())?;
     let mut parts: Vec<(f64, usize)> = (0..n)
-        .map(|v| (mass[v] * state.log_scale[v] * state.log_scale[v], v))
+        .map(|v| (mass[v] * log_scale[v] * log_scale[v], v))
         .collect();
     let total: f64 = parts.iter().map(|p| p.0).sum();
     if !total.is_finite() {

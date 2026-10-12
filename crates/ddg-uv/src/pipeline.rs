@@ -12,7 +12,7 @@ use crate::measure::Accumulator;
 use crate::options::UnwrapOptions;
 use crate::pack::pack_in_place;
 use crate::prepare::{Prepared, prepare};
-use crate::report::{ChartReport, ConeStats, Report, SteeringReport, Timings};
+use crate::report::{ChartReport, ConeStats, Report, SeamLengths, SteeringReport, Timings};
 
 /// A UV map of a polygon mesh.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +137,7 @@ pub fn assemble(
             n_triangles: piece.mesh.n_faces(),
             genus: piece.genus(),
             n_boundary_loops: piece.mesh.boundary_loops().len(),
+            boundary_optimized: piece_cones.boundary_optimized && piece_flat.boundary_values_used,
             closed: piece_cones.closed,
             positive_cones_only: piece_cones.positive_only,
             solve: piece_cones.solve.clone(),
@@ -175,6 +176,7 @@ pub fn assemble(
     {
         return Err(internal(format!("the seam ({a}, {b}) was not cut")));
     }
+    let seam_lengths = seam_lengths(input, &uvs, &cut_edges, &prepared.seam_cut_edges);
     let seconds_verify = start.elapsed().as_secs_f64();
 
     // Packing.
@@ -287,6 +289,7 @@ pub fn assemble(
         max_overlapped_fraction,
         overlapped_fraction: (any_coverage && covered > 0.0).then(|| overlapped / covered),
         charts,
+        seam_lengths,
         packing,
         timings,
         warnings,
@@ -298,4 +301,52 @@ pub fn assemble(
         cut_edges,
         report,
     })
+}
+
+/// The mismatch of the lengths of the two images of every cut edge that has a polygon on each
+/// side; see [`SeamLengths`]. `uvs` are per polygon corner, `cut_edges` and `seams` sorted
+/// vertex pairs `[min, max]`.
+fn seam_lengths(
+    input: &MeshInput<'_>,
+    uvs: &[[f64; 2]],
+    cut_edges: &[[u32; 2]],
+    seams: &[[u32; 2]],
+) -> SeamLengths {
+    // (edge, length of one image); each edge of a manifold mesh has at most two.
+    let mut images: Vec<([u32; 2], f64)> = Vec::new();
+    for w in input.polygon_offsets.windows(2) {
+        let (first, end) = (w[0] as usize, w[1] as usize);
+        for c in first..end {
+            let d = if c + 1 == end { first } else { c + 1 };
+            let (a, b) = (input.corner_vertices[c], input.corner_vertices[d]);
+            let key = [a.min(b), a.max(b)];
+            if cut_edges.binary_search(&key).is_ok() {
+                let (p, q) = (uvs[c], uvs[d]);
+                images.push((key, (p[0] - q[0]).hypot(p[1] - q[1])));
+            }
+        }
+    }
+    images.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)));
+    let mut out = SeamLengths::default();
+    let mut seam_sum = 0.0;
+    for pair in images.windows(2).filter(|w| w[0].0 == w[1].0) {
+        let (edge, (la, lb)) = (pair[0].0, (pair[0].1, pair[1].1));
+        let largest = la.max(lb);
+        let mismatch = if largest > 0.0 { (la - lb).abs() / largest } else { 0.0 };
+        if seams.binary_search(&edge).is_ok() {
+            out.n_seam_edges += 1;
+            seam_sum += mismatch;
+            if out.worst_seam_edge.is_none() || mismatch > out.max_seam_mismatch {
+                out.max_seam_mismatch = mismatch;
+                out.worst_seam_edge = Some(edge);
+            }
+        } else {
+            out.n_other_cut_edges += 1;
+            out.max_other_mismatch = out.max_other_mismatch.max(mismatch);
+        }
+    }
+    if out.n_seam_edges > 0 {
+        out.mean_seam_mismatch = seam_sum / out.n_seam_edges as f64;
+    }
+    out
 }

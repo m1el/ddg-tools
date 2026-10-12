@@ -24,6 +24,11 @@ pub struct PieceFlat {
     pub cut_edges: Vec<[u32; 2]>,
     /// What the flattener reported.
     pub report: FlattenReport,
+    /// Whether the layout was built from the cone solver's optimized boundary values. `false`
+    /// if the option is off, the piece has no boundary or no solve ran, and also if the
+    /// flattener had to solve for the scale factors itself (a warning says so), which sets
+    /// them to zero on the boundary.
+    pub boundary_values_used: bool,
     /// Overlapped and covered area of the chart in the plane, if estimated.
     pub(crate) coverage: Option<(f64, f64)>,
 }
@@ -80,17 +85,25 @@ pub fn flatten(
                 &flatten_options,
             )
         };
+        let mut solver_scale_factors = piece_cones.log_scale.is_some();
         let flat = match run(piece_cones.log_scale.as_deref()) {
             Err(BffError::ScaleFactorsNotFlat {
                 vertex, curvature, ..
             }) if piece_cones.log_scale.is_some() => {
                 // The solver's scale factors leave curvature inside the chart: let the
                 // flattener solve for its own.
+                solver_scale_factors = false;
                 warnings.push(format!(
                     "the cone solver's scale factors leave a curvature of {curvature:.3e} at \
                      vertex {} away from the cones; the flattener solved for the scale factors \
-                     again",
-                    on.vertex_input[vertex as usize]
+                     again{}",
+                    on.vertex_input[vertex as usize],
+                    if piece_cones.boundary_optimized {
+                        " (with zero on the boundary: the optimized boundary values of this \
+                         piece were dropped)"
+                    } else {
+                        ""
+                    }
                 ));
                 run(None)
             }
@@ -120,7 +133,25 @@ pub fn flatten(
             let q = &flat.corner_uvs[3 * f..3 * f + 3];
             accumulator.add(area, 0.5 * signed_double_area(q[0], q[1], q[2]));
         }
+        // The boundary of the piece: every boundary edge must have the length the scale
+        // factors ask for, `e^{(u_i + u_j)/2} ℓ_ij`, up to what closing the curve needed.
+        let mut boundary_length_error = 0.0f64;
+        for h in (0..on.mesh.n_halfedges()).filter(|&h| on.mesh.twin(h).is_none()) {
+            let (a, b) = (on.mesh.from_vertex(h), on.mesh.to_vertex(h));
+            let target = (0.5 * (flat.scale_factors[a] + flat.scale_factors[b])).exp()
+                * lengths[on.mesh.edge(h)];
+            let (p, q) = (flat.corner_uvs[h], flat.corner_uvs[on.mesh.next(h)]);
+            let got = (p[0] - q[0]).hypot(p[1] - q[1]);
+            let error = (got - target).abs() / target;
+            // A NaN must not be hidden by `max`.
+            boundary_length_error = if error.is_nan() {
+                f64::NAN
+            } else {
+                boundary_length_error.max(error)
+            };
+        }
         let report = FlattenReport {
+            boundary_length_error,
             n_cut_edges: cut_edges.len(),
             cut_length,
             flipped_triangles: chart.distortion.flipped_triangles,
@@ -144,6 +175,7 @@ pub fn flatten(
             corner_uvs: flat.corner_uvs,
             cut_edges,
             report,
+            boundary_values_used: piece_cones.boundary_optimized && solver_scale_factors,
         });
     }
     Ok(FlatStage {

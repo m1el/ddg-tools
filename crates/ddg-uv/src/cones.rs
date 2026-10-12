@@ -5,10 +5,14 @@ use std::time::Instant;
 
 use ddg_core::io::Cone;
 use ddg_core::operators::angle_defects;
-use ddg_optimal_cones::{ConeError, ConeProblem, SolveOptions, Status, solve};
+use ddg_optimal_cones::{
+    BoundaryTreatment, ConeError, ConeProblem, SolveOptions, Status, solve_with_boundary,
+};
 
 use crate::error::{UvError, internal};
-use crate::options::{ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, UnwrapOptions};
+use crate::options::{
+    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, UnwrapOptions,
+};
 use crate::prepare::{Piece, Prepared};
 use crate::report::{ClosedHandling, ConeSolveReport, MergeOutcome};
 use crate::slit::{choose_slit, distances};
@@ -25,8 +29,13 @@ pub struct PieceCones {
     /// The cones, as vertices of the piece's mesh, ascending.
     pub cones: Vec<Cone>,
     /// The log scale factor of these cones per vertex of the piece, or `None` if the cone
-    /// solver did not run (the flattener then solves for it).
+    /// solver did not run (the flattener then solves for it). It is zero on the boundary
+    /// unless `boundary_optimized`.
     pub log_scale: Option<Vec<f64>>,
+    /// Whether the solver optimized the scale factor on the boundary of this piece
+    /// ([`BoundaryValues::Optimized`] on a piece that has a boundary). Then `log_scale` is
+    /// nonzero there, and the flattener has to realize it.
+    pub boundary_optimized: bool,
     /// How the piece was handled if it is closed.
     pub closed: ClosedHandling,
     /// Whether cone angles were restricted to positive values.
@@ -55,6 +64,7 @@ pub struct ConeStage {
 struct Solved {
     cones: Vec<Cone>,
     log_scale: Option<Vec<f64>>,
+    boundary_optimized: bool,
     report: Option<ConeSolveReport>,
     positive_only: bool,
     /// Number of free sites the pipeline added.
@@ -109,12 +119,16 @@ fn piece_cones(
         });
     }
     let sphere = closed && genus == 0;
+    // Optimized boundary values concern pieces that have a boundary. A closed piece is solved
+    // exactly as without the option, also with an automatic slit (whose sides keep their
+    // lengths).
+    let optimize_boundary = options.boundary == BoundaryValues::Optimized && !closed;
 
     // Thin spikes dominate the distortion measure: look for them before solving.
     let mut spike_report = None;
     if let Some(check) = &options.spike_check {
         let start = Instant::now();
-        match spikes::check_piece(prepared, piece, check) {
+        match spikes::check_piece(prepared, piece, check, options.boundary == BoundaryValues::Optimized && !closed) {
             Ok(found) => {
                 if let Some(found) = &found
                     && !found.vertices.is_empty()
@@ -159,7 +173,7 @@ fn piece_cones(
             relative_length,
         }) => {
             let (cut, edges, length) = slit_of(placement, relative_length)?;
-            let solved = solve_on(prepared, &cut, options, None, &mut warnings)?;
+            let solved = solve_on(prepared, &cut, options, None, optimize_boundary, &mut warnings)?;
             finish(
                 solved,
                 Some(cut),
@@ -176,7 +190,7 @@ fn piece_cones(
             fallback_sites,
         }) => {
             let mut raw_warnings = Vec::new();
-            let raw = solve_on(prepared, piece, options, None, &mut raw_warnings)?;
+            let raw = solve_on(prepared, piece, options, None, optimize_boundary, &mut raw_warnings)?;
             let sparse = raw.cones.len() as f64
                 <= max_cone_fraction * piece.mesh.n_vertices() as f64;
             if raw.cones.len() <= max_cones || sparse {
@@ -186,7 +200,7 @@ fn piece_cones(
                 let n_raw = raw.cones.len();
                 let raw_seconds = raw.report.as_ref().map_or(0.0, |r| r.seconds);
                 let sites = Some((fallback_sites, options.max_cone_angle, true));
-                let mut solved = solve_on(prepared, piece, options, sites, &mut warnings)?;
+                let mut solved = solve_on(prepared, piece, options, sites, optimize_boundary, &mut warnings)?;
                 if let Some(report) = &mut solved.report {
                     report.seconds += raw_seconds;
                 }
@@ -204,7 +218,7 @@ fn piece_cones(
             forbid_elsewhere,
         }) => {
             let sites = Some((count, max_angle, forbid_elsewhere));
-            let solved = solve_on(prepared, piece, options, sites, &mut warnings)?;
+            let solved = solve_on(prepared, piece, options, sites, optimize_boundary, &mut warnings)?;
             let handling = ClosedHandling::FreeSites {
                 n_automatic: solved.n_free_sites,
                 n_pinned: solved.n_pinned_sites,
@@ -213,7 +227,7 @@ fn piece_cones(
             finish(solved, None, Vec::new(), handling)
         }
         (true, _) | (false, _) => {
-            let solved = solve_on(prepared, piece, options, None, &mut warnings)?;
+            let solved = solve_on(prepared, piece, options, None, optimize_boundary, &mut warnings)?;
             let handling = if closed {
                 ClosedHandling::RawOptimum
             } else {
@@ -253,6 +267,7 @@ fn finish(
         slit_edges,
         cones: solved.cones,
         log_scale: solved.log_scale,
+        boundary_optimized: solved.boundary_optimized,
         closed,
         positive_only: solved.positive_only,
         solve: solved.report,
@@ -267,8 +282,14 @@ fn solve_on(
     piece: &Piece,
     options: &UnwrapOptions,
     free_sites: Option<(usize, f64, bool)>,
+    optimize_boundary: bool,
     warnings: &mut Vec<String>,
 ) -> Result<Solved, UvError> {
+    let treatment = if optimize_boundary {
+        BoundaryTreatment::Free
+    } else {
+        BoundaryTreatment::Fixed
+    };
     let mesh = &piece.mesh;
     let n = mesh.n_vertices();
     let closed = piece.is_closed();
@@ -301,6 +322,7 @@ fn solve_on(
     let mut solved = Solved {
         cones: Vec::new(),
         log_scale: None,
+        boundary_optimized: false,
         report: None,
         positive_only,
         n_free_sites: 0,
@@ -416,7 +438,7 @@ fn solve_on(
         },
         ..defaults
     };
-    let solution = solve(&problem, &solve_options).map_err(|e| match e {
+    let solution = solve_with_boundary(&problem, treatment, &solve_options).map_err(|e| match e {
         ConeError::Infeasible { .. } => UvError::InfeasibleSteering {
             polygon: piece.first_polygon,
             message: e.to_string(),
@@ -477,10 +499,14 @@ fn solve_on(
             _ => MergeOutcome::Merged,
         }
     };
+    // `measure` holds the geodesic curvature of the flattened boundary at boundary vertices when
+    // the boundary is optimized: those entries are not cones.
+    let is_cone = |v: usize, m: f64| interior[v] && m.abs() > cone_threshold;
     let n_cones_optimal = solution
         .measure
         .iter()
-        .filter(|m| m.abs() > cone_threshold)
+        .enumerate()
+        .filter(|&(v, &m)| is_cone(v, m))
         .count();
     if outcome == MergeOutcome::Rejected {
         warnings.push(format!(
@@ -494,7 +520,7 @@ fn solve_on(
             .measure
             .iter()
             .enumerate()
-            .filter(|(_, m)| m.abs() > cone_threshold)
+            .filter(|&(v, &m)| is_cone(v, m))
             .map(|(v, &angle)| Cone {
                 vertex: v as u32,
                 angle,
@@ -505,6 +531,7 @@ fn solve_on(
         solved.cones = solution.cones.clone();
         solved.log_scale = Some(solution.log_scale.clone());
     }
+    solved.boundary_optimized = optimize_boundary;
     let linear = &solution.report.linear_solver;
     solved.report = Some(ConeSolveReport {
         status,
@@ -553,7 +580,7 @@ fn solve_on(
             cone_costs: Some(free),
             ..problem.clone()
         };
-        match solve(&again, &SolveOptions::default()) {
+        match solve_with_boundary(&again, treatment, &SolveOptions::default()) {
             Ok(second) if second.report.status == Status::Converged => {
                 let report = solved.report.as_mut().expect("set above");
                 report.before_reoptimization = Some((report.distortion, solved.cones.len()));

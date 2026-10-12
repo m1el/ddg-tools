@@ -26,6 +26,28 @@ pub enum ConeSigns {
     Any,
 }
 
+/// The scale factor `u` along the boundary of a piece (the mesh's own boundary and the seams).
+///
+/// The cone solver can hold `u = 0` there or optimize it (paper Sec. 8.3, Fig. 10 b and c).
+/// `u` is the log of the factor by which the flattening scales lengths, so `u = 0` keeps the
+/// length of every boundary edge, and in particular the two sides of a seam, which belong to
+/// different pieces, keep equal lengths. Optimized values lower the distortion (the objective
+/// is lower on every dataset mesh with boundary, usually with fewer cones) but give the two
+/// sides of a seam different lengths: [`crate::Report::seam_length_mismatch`] measures by how
+/// much. Pieces without boundary are not affected, whatever is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoundaryValues {
+    /// `u = 0` on the boundary: boundary lengths are preserved. The default.
+    #[default]
+    Zero,
+    /// `u` on the boundary is a variable of the cone problem
+    /// (`ddg_optimal_cones::BoundaryTreatment::Free`) and the flattener realizes it. Applied
+    /// to every piece that has a boundary after the seams were cut. A closed piece is solved
+    /// as before, also when it receives an automatic slit: the slit is the pipeline's own
+    /// device and its two sides should keep their lengths.
+    Optimized,
+}
+
 /// Where an automatic slit is put on a closed piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SlitPlacement {
@@ -285,6 +307,9 @@ pub struct UnwrapOptions {
     /// applied to their published cones; it removes the shrinkage that the penalty `λ` puts on
     /// the angles. It costs a second solve per piece with cones.
     pub reoptimize_angles: bool,
+    /// What `u` is on the boundary of every piece; see [`BoundaryValues`]. Default
+    /// [`BoundaryValues::Zero`].
+    pub boundary: BoundaryValues,
     /// Whether cones that the solver could not certify as optimal are an error
     /// ([`UvError::ConesNotCertified`]). With `false` they are used and the report warns.
     pub require_certified_cones: bool,
@@ -307,6 +332,7 @@ impl Default for UnwrapOptions {
             packing: Some(PackOptions::default()),
             overlap_samples_per_triangle: ddg_bff::DEFAULT_OVERLAP_SAMPLES,
             reoptimize_angles: false,
+            boundary: BoundaryValues::Zero,
             require_certified_cones: false,
             spike_check: Some(SpikeCheck::default()),
         }

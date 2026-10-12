@@ -205,6 +205,13 @@ pub struct FlattenReport {
     pub closure_length_change: f64,
     /// The largest relative difference of the lengths of the two sides of a cut edge.
     pub seam_length_mismatch: f64,
+    /// The largest `|ℓ' − ℓ*| / ℓ*` over the boundary edges of the piece (the mesh's boundary,
+    /// seams and slits), where `ℓ'` is the length of the edge in the layout and
+    /// `ℓ* = e^{(u_i + u_j)/2} ℓ` the length the scale factors ask for. With optimized
+    /// boundary values this says how well the flattening realizes the solver's values; with
+    /// `u = 0` it says how well the lengths are kept. The flattener changes boundary lengths a
+    /// little to close the boundary curve ([`FlattenReport::closure_length_change`]).
+    pub boundary_length_error: f64,
     /// Area of the chart on the surface.
     pub surface_area: f64,
     /// Signed area of the chart in the plane, before packing.
@@ -231,6 +238,11 @@ pub struct ChartReport {
     pub closed: ClosedHandling,
     /// Whether cone angles were restricted to positive values on this piece.
     pub positive_cones_only: bool,
+    /// Whether the chart was solved and flattened with optimized boundary values
+    /// ([`crate::BoundaryValues::Optimized`]): `false` if the option is off, the chart is
+    /// closed or has no interior vertex, or the flattener had to drop the values (a warning
+    /// says so).
+    pub boundary_optimized: bool,
     /// The cone solve, or `None` if the piece has no interior vertex or no cone was possible
     /// (a closed piece of genus 1 with positive cones only).
     pub solve: Option<ConeSolveReport>,
@@ -265,6 +277,39 @@ pub struct Timings {
     pub verify: f64,
     /// Everything.
     pub total: f64,
+}
+
+/// How well the two sides of the cut edges agree in length in the layout (before packing, which
+/// scales all charts alike and changes no ratio).
+///
+/// An edge that was cut has one polygon on each side, in a chart of its own or in the same
+/// chart, and each side has its own image. The relative mismatch of an edge is
+/// `|ℓ_a − ℓ_b| / max(ℓ_a, ℓ_b)` for the lengths `ℓ_a`, `ℓ_b` of the two images.
+///
+/// With [`crate::BoundaryValues::Zero`] the scale factor is zero on a seam, so both sides keep
+/// the length of the edge and the mismatch is what closing the boundary curve of each chart
+/// changed (a fraction of a percent on the dataset). With
+/// [`crate::BoundaryValues::Optimized`] the two pieces have different boundary values and the
+/// mismatch is the difference of `e^{(u_i + u_j)/2}` between them; a texture painted across the
+/// seam is stretched differently on its two sides by that much.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SeamLengths {
+    /// Number of seam edges (given by the caller, and the extension of one-edge seams) that
+    /// have a polygon on each side.
+    pub n_seam_edges: usize,
+    /// The largest mismatch over those, 0 if there are none.
+    pub max_seam_mismatch: f64,
+    /// The seam edge with the largest mismatch, as vertices of the caller's mesh `[min, max]`.
+    pub worst_seam_edge: Option<[u32; 2]>,
+    /// The mean mismatch over the seam edges, 0 if there are none.
+    pub mean_seam_mismatch: f64,
+    /// Number of the other cut edges (automatic slits, cuts through cones and around handles)
+    /// that have a polygon on each side.
+    pub n_other_cut_edges: usize,
+    /// The largest mismatch over those. The flattener gives both sides of such an edge the same
+    /// length, so this is at rounding level (but not for the slit of a closed surface, whose
+    /// boundary is closed with the same adjustments as any other).
+    pub max_other_mismatch: f64,
 }
 
 /// The report of [`crate::unwrap`].
@@ -302,6 +347,8 @@ pub struct Report {
     /// The area-weighted overlapped fraction of the whole layout, if it was estimated: the sum
     /// of the overlapped areas of the charts over the sum of their footprints.
     pub overlapped_fraction: Option<f64>,
+    /// Whether the two sides of the cut edges have the same length in the layout.
+    pub seam_lengths: SeamLengths,
     /// Packing, if it ran.
     pub packing: Option<PackReport>,
     /// Where the time went.
@@ -436,6 +483,28 @@ impl Report {
                 )),
             ),
         ];
+        out.push((
+            "boundary_values_optimized",
+            Value::Bool(self.charts.iter().any(|c| c.boundary_optimized)),
+        ));
+        out.push((
+            "max_boundary_length_error",
+            Value::Float(fold_max(
+                &mut self.charts.iter().map(|c| c.flatten.boundary_length_error),
+            )),
+        ));
+        out.push((
+            "max_seam_length_mismatch",
+            Value::Float(self.seam_lengths.max_seam_mismatch),
+        ));
+        out.push((
+            "mean_seam_length_mismatch",
+            Value::Float(self.seam_lengths.mean_seam_mismatch),
+        ));
+        out.push((
+            "max_other_cut_length_mismatch",
+            Value::Float(self.seam_lengths.max_other_mismatch),
+        ));
         // Present only if the spike check ran.
         let checks: Vec<&SpikeReport> = self.charts.iter().filter_map(|c| c.spikes.as_ref()).collect();
         if !checks.is_empty() {
