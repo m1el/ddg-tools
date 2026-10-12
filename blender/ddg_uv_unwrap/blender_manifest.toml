@@ -1,0 +1,21 @@
+schema_version = "1.0.0"
+
+id = "ddg_uv_unwrap"
+version = "0.1.0"
+name = "DDG Conformal UV Unwrap"
+tagline = "Unwrap a mesh with optimal cone singularities"
+maintainer = "ddg-tools contributors"
+type = "add-on"
+
+tags = ["UV", "Mesh"]
+
+# Developed and tested with Blender 5.0.1. See blender/README.md.
+blender_version_min = "5.0.0"
+
+# The project licence. Blender asks add-ons to be GPL-compatible, which MIT is.
+license = ["SPDX:MIT"]
+
+# `platforms` and `wheels` are not written here: the native module `ddg_tools` is built from
+# crates/ddg-py, and scripts/blender-build-extension.sh adds both lines to the staged copy of
+# this file, with the exact names of the wheels it bundles.
+# @GENERATED@
