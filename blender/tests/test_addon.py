@@ -672,6 +672,23 @@ def linked_mesh_is_an_error_message():
 
 
 @test
+def missing_native_module_is_an_error_message():
+    # What a user sees when the bundled wheel does not load on their system (for example a
+    # wheel built for a newer C library): an error report, and the add-on stays usable.
+    core = importlib.import_module(ARGS.module + ".core")
+    primitive("cube")
+    saved = sys.modules["ddg_tools"]
+    sys.modules["ddg_tools"] = None          # makes `import ddg_tools` raise ImportError
+    try:
+        assert core.is_placeholder() is False
+        message = expect_error(r"The native module 'ddg_tools' could not be loaded")
+        print("  reported:", message.strip())
+    finally:
+        sys.modules["ddg_tools"] = saved
+    assert op() == {'FINISHED'}
+
+
+@test
 def vertex_groups_reach_the_native_module():
     import ddg_tools
     core = importlib.import_module(ARGS.module + ".core")

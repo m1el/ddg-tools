@@ -142,13 +142,13 @@ one needs glibc 2.28, which is what official Blender builds for Linux require.
 `blender --command extension install-file`, so the tests exercise the installed extension and
 its bundled wheel, the way a user gets them.
 
-- `blender/tests/test_addon.py` (headless, 22 tests): cube (quads), n-gons (cylinder caps, a
+- `blender/tests/test_addon.py` (headless, 23 tests): cube (quads), n-gons (cylinder caps, a
   concave hexagon, a non-planar pentagon), a face with a zero-area triangle, Suzanne (three
   components that must not overlap in UV), torus, UV sphere, marked seams, marking cuts as
   seams, Edit mode (on a mesh edited after entering Edit mode), non-manifold meshes (three faces
   on an edge, a face inside a cube, a bow-tie vertex), a flipped face, a mesh without faces, a
-  linked mesh, vertex groups, loose vertices and wire edges, the status line, and the corner
-  order on a flat sheet. Every unwrap runs twice and asserts that vertex, edge, face and corner
+  linked mesh, a native module that fails to load, vertex groups, loose vertices and wire edges,
+  the status line, and the corner order on a flat sheet. Every unwrap runs twice and asserts that vertex, edge, face and corner
   counts, vertex positions, edge vertices, the corner order of every face and the seam flags are
   bit-for-bit unchanged, that the active UV map has one finite UV per corner inside the unit
   square, and that both runs give identical UVs. One test feeds the checks deliberately broken
@@ -171,9 +171,9 @@ Observed on the development machine on 2026-10-12, all with the same zip and the
 
 | Blender | Python | numpy | headless tests | UI checks |
 |---------|--------|-------|----------------|-----------|
-| 5.0.1, Ubuntu's build | 3.14.4 (system) | absent | 22 of 22 | 27 of 27 |
-| 5.0.1, official (`bpy` from PyPI) | 3.11.15 | 1.26.4 | 22 of 22 | not run |
-| 5.2.2 LTS, official (`bpy` from PyPI) | 3.13.14 | 2.5.4 | 22 of 22 | not run |
+| 5.0.1, Ubuntu's build | 3.14.4 (system) | absent | 23 of 23 | 27 of 27 |
+| 5.0.1, official (`bpy` from PyPI) | 3.11.15 | 1.26.4 | 23 of 23 | not run |
+| 5.2.2 LTS, official (`bpy` from PyPI) | 3.13.14 | 2.5.4 | 23 of 23 | not run |
 
 ## Cost of the Blender side
 
