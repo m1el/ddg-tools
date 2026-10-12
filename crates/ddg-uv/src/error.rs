@@ -169,9 +169,11 @@ pub enum UvError {
     },
     /// A connected component has no consistent orientation (a Möbius strip, a Klein bottle).
     NonOrientable {
-        /// The edge at which the contradiction was found, as `[min, max]`.
+        /// The edge at which the contradiction was found, as `[min, max]`. It can be a
+        /// diagonal of the triangulation.
         edge: [u32; 2],
-        /// The two polygons that cannot both be oriented consistently, ascending.
+        /// The two polygons that cannot both be oriented consistently, ascending. They are
+        /// the same polygon if the contradiction was found across one of its diagonals.
         polygons: [u32; 2],
     },
     /// Two polygons traverse their shared edge in the same direction, and the orientation
@@ -437,11 +439,23 @@ impl fmt::Display for UvError {
             NonOrientable {
                 edge: [a, b],
                 polygons: [p, q],
-            } => write!(
-                f,
-                "the surface is not orientable: faces {p} and {q} cannot be oriented \
-                 consistently across edge ({a}, {b})"
-            ),
+            } => {
+                if p == q {
+                    // The search closed its loop inside one face, across a diagonal.
+                    write!(
+                        f,
+                        "the surface is not orientable: the faces connected to face {p} have \
+                         no consistent orientation (the contradiction closes at the diagonal \
+                         ({a}, {b}) of that face)"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "the surface is not orientable: faces {p} and {q} cannot be oriented \
+                         consistently across edge ({a}, {b})"
+                    )
+                }
+            }
             InconsistentOrientation {
                 edge: [a, b],
                 polygons: [p, q],
