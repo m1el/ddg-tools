@@ -103,9 +103,8 @@ impl std::fmt::Display for Unsupported {
 pub enum FallbackReason {
     /// The problem is outside what the factor-once method supports.
     Unsupported(Unsupported),
-    /// The working set would have grown past [`FactorOnceOptions::max_working_set_fraction`]
-    /// (and [`FactorOnceOptions::min_working_set`]): the dense part and the stored columns cost
-    /// more than the reference method.
+    /// The working set would have grown past [`FactorOnceOptions::max_working_set`]: beyond it the
+    /// dense part and the stored columns cost more than the reference method.
     WorkingSetLimit {
         /// The size the working set would have reached.
         working_set: usize,
@@ -188,15 +187,14 @@ pub struct FactorOnceOptions {
     /// meshes with many near-zero cones (measured on `camelshotnoise`, see the README); the
     /// default costs nothing. Default `1e-12`.
     pub tolerance: f64,
-    /// Give up when the working set (sites whose columns are stored) would exceed this fraction
-    /// of the free sites (but see [`min_working_set`](Self::min_working_set)). The method wins
-    /// while few sites are cones; its crossover with the reference method was measured at
-    /// about 5 % of the vertices being cones on one thread (and about 10 % on 8 threads), and
-    /// the working set is somewhat larger than the number of cones. Default `0.08`.
-    pub max_working_set_fraction: f64,
-    /// The working set may always grow to this size, whatever the fraction says: on small
-    /// meshes everything is fast. Default 256.
-    pub min_working_set: usize,
+    /// Give up when the working set (the sites whose columns are stored) would exceed this
+    /// size. `None` (the default) uses the crossover with the reference method, measured on
+    /// meshes of 11 000 to 153 000 vertices on one thread (README, "The factor-once method"):
+    /// about `1200 · (n / 15000)^0.2` sites for `n` free sites, and up to twice that when the
+    /// pool has 8 or more threads (`1 + (threads − 1)/7`, at most 2): the dense active-set part
+    /// and the Gram product dominate beyond it, and they do not parallelize as well as the
+    /// column solves. A result that needs more is left to the reference method.
+    pub max_working_set: Option<usize>,
     /// Give up when the stored columns (`8 n` bytes each) and dense matrices would exceed this
     /// many bytes. Default 4 GiB.
     pub memory_limit_bytes: usize,
@@ -209,8 +207,7 @@ impl Default for FactorOnceOptions {
     fn default() -> Self {
         FactorOnceOptions {
             tolerance: 1e-12,
-            max_working_set_fraction: 0.08,
-            min_working_set: 256,
+            max_working_set: None,
             memory_limit_bytes: 4 << 30,
             max_rounds: 200,
         }
@@ -337,6 +334,16 @@ pub(crate) fn attempt(
     run.into_attempt(x, gave_up, t_start)
 }
 
+/// The working-set size at which the factor-once method stops being faster than the reference
+/// method: `1200 · (n / 15000)^0.2`, times `1 + (threads − 1)/7` (at most 2).
+///
+/// Measured crossovers (README): one thread, `cow1` (15 049 vertices) 1 200 sites, `brain`
+/// (152 893) about 1 900; with 8 threads `cow1` 1 900 and `brain` beyond 3 000.
+pub(crate) fn automatic_working_set_limit(n: usize, threads: usize) -> usize {
+    let thread_factor = 1.0 + (threads.clamp(1, 8) - 1) as f64 / 7.0;
+    (1200.0 * (n as f64 / 15000.0).powf(0.2) * thread_factor).round() as usize
+}
+
 struct Run<'a> {
     red: &'a Reduced<'a>,
     lambda: f64,
@@ -377,8 +384,9 @@ impl<'a> Run<'a> {
         };
         let ns = red.n_slots();
         report.sites = ns;
-        let limit =
-            ((options.max_working_set_fraction * ns as f64) as usize).max(options.min_working_set);
+        let limit = options
+            .max_working_set
+            .unwrap_or_else(|| automatic_working_set_limit(ns, threads));
         let mut dense = Dense::new(red.sum);
         let mut w_slots = Vec::new();
         let mut in_w = vec![usize::MAX; ns];

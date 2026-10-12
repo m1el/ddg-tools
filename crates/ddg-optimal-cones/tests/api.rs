@@ -54,7 +54,12 @@ fn solve_reference(mesh: &TestMesh, f: &Features) -> ddg_optimal_cones::Solution
         ..SolveOptions::default()
     };
     let solution = solve(&f.problem(mesh), &options).unwrap();
-    assert_eq!(solution.report.status, Status::Converged, "{}", summary(&solution));
+    assert_eq!(
+        solution.report.status,
+        Status::Converged,
+        "{}",
+        summary(&solution)
+    );
     solution
 }
 

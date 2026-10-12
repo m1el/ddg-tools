@@ -12,6 +12,9 @@
 //!   --ref-repeat N      the same for the reference method (default: --repeat)
 //!   --skip-reference    do not run the reference method (no agreement columns)
 //!   --old-schedule      the reference method with the old default schedule 1, 1e-1, ..., 1e-10
+//!   --schedules         instead of the table: the reference method with the schedule 1, 1e-1, ...,
+//!                       1e-10 against the schedule 1e-2, 1e-6, 1e-10 (factorizations, times,
+//!                       agreement of the optimum, certificate)
 //! ```
 //!
 //! For every mesh and λ one line: the reference method (`SolveMethod::Reference`), the
@@ -29,11 +32,7 @@ use ddg_optimal_cones::{
     ConeProblem, MethodUsed, Parallelism, Solution, SolveMethod, SolveOptions, ThreadPool, solve,
 };
 
-fn best_of(
-    n: usize,
-    problem: &ConeProblem<'_>,
-    options: &SolveOptions<'_>,
-) -> Solution {
+fn best_of(n: usize, problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Solution {
     let mut best: Option<Solution> = None;
     for _ in 0..n.max(1) {
         let s = solve(problem, options).unwrap_or_else(|e| panic!("{e}"));
@@ -48,7 +47,10 @@ fn best_of(
 }
 
 fn max_diff(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f64::max)
 }
 
 fn main() {
@@ -61,9 +63,13 @@ fn main() {
     let mut ref_repeat = None;
     let mut skip_reference = false;
     let mut old_schedule = false;
+    let mut schedules = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        let mut value = |what: &str| args.next().unwrap_or_else(|| panic!("{what} needs a value"));
+        let mut value = |what: &str| {
+            args.next()
+                .unwrap_or_else(|| panic!("{what} needs a value"))
+        };
         match arg.as_str() {
             "--lambda" => {
                 lambdas = value("--lambda")
@@ -75,10 +81,15 @@ fn main() {
             "--threads" => threads = value("--threads").parse().expect("--threads: an integer"),
             "--repeat" => repeat = value("--repeat").parse().expect("--repeat: an integer"),
             "--ref-repeat" => {
-                ref_repeat = Some(value("--ref-repeat").parse().expect("--ref-repeat: an integer"))
+                ref_repeat = Some(
+                    value("--ref-repeat")
+                        .parse()
+                        .expect("--ref-repeat: an integer"),
+                )
             }
             "--skip-reference" => skip_reference = true,
             "--old-schedule" => old_schedule = true,
+            "--schedules" => schedules = true,
             name => names.push(name.to_string()),
         }
     }
@@ -101,21 +112,47 @@ fn main() {
         names.sort();
     }
     let pool = (threads > 1).then(|| ThreadPool::new(threads).expect("thread pool"));
-    let parallelism = pool.as_ref().map_or(Parallelism::Sequential, Parallelism::Pool);
+    let parallelism = pool
+        .as_ref()
+        .map_or(Parallelism::Sequential, Parallelism::Pool);
 
+    if schedules {
+        schedule_study(&dir, &names, &lambdas, ref_repeat);
+        return;
+    }
     println!(
         "threads = {threads}, best of {repeat} (reference: best of {ref_repeat}, sequential), times in seconds"
     );
     println!(
         "{:<17} {:>6} {:>6} {:>6} | {:>7} {:>5} | {:>7} {:>5} {:>5} | {:>7} {:>9} {:>5} {:>7} | {:>6} | {:>9} {:>9} {:>9} {:>4}",
-        "mesh", "V", "lambda", "cones", "ref", "fact", "fast", "ws", "round", "auto", "used", "ws", "factor", "x", "max dmu", "max du", "obj rel", "cert"
+        "mesh",
+        "V",
+        "lambda",
+        "cones",
+        "ref",
+        "fact",
+        "fast",
+        "ws",
+        "setup",
+        "auto",
+        "used",
+        "ws",
+        "factor",
+        "x",
+        "max dmu",
+        "max du",
+        "obj rel",
+        "cert"
     );
     for name in &names {
         let obj = read_obj(dir.join(format!("{name}.obj"))).unwrap_or_else(|e| panic!("{e}"));
-        let faces = obj.triangles().unwrap_or_else(|| panic!("{name}: not a triangle mesh"));
-        let mesh = TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let geometry =
-            Geometry::from_positions(&mesh, &obj.positions).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let faces = obj
+            .triangles()
+            .unwrap_or_else(|| panic!("{name}: not a triangle mesh"));
+        let mesh =
+            TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let geometry = Geometry::from_positions(&mesh, &obj.positions)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         for &lambda in &lambdas {
             let problem = ConeProblem::new(&mesh, &geometry, lambda);
             let mut reference_options = SolveOptions {
@@ -125,14 +162,14 @@ fn main() {
             if old_schedule {
                 reference_options.regularization = (0..=10).map(|k| 10f64.powi(-k)).collect();
             }
-            let reference = (!skip_reference).then(|| best_of(ref_repeat, &problem, &reference_options));
+            let reference =
+                (!skip_reference).then(|| best_of(ref_repeat, &problem, &reference_options));
             let mut fast_options = SolveOptions {
                 method: SolveMethod::FactorOnce,
                 parallelism,
                 ..SolveOptions::default()
             };
-            fast_options.factor_once.max_working_set_fraction = 1e9;
-            fast_options.factor_once.min_working_set = usize::MAX / 2;
+            fast_options.factor_once.max_working_set = Some(usize::MAX / 2);
             fast_options.factor_once.memory_limit_bytes = usize::MAX;
             let fast = best_of(repeat, &problem, &fast_options);
             let auto = best_of(
@@ -161,13 +198,19 @@ fn main() {
                         (auto.objective - r.objective).abs() / r.objective.abs().max(1e-300),
                     )
                 }
-                None => ("-".to_string(), "-".to_string(), f64::NAN, f64::NAN, f64::NAN),
+                None => (
+                    "-".to_string(),
+                    "-".to_string(),
+                    f64::NAN,
+                    f64::NAN,
+                    f64::NAN,
+                ),
             };
-            let ratio = reference
-                .as_ref()
-                .map_or(f64::NAN, |r| r.report.timings.total / auto.report.timings.total);
+            let ratio = reference.as_ref().map_or(f64::NAN, |r| {
+                r.report.timings.total / auto.report.timings.total
+            });
             println!(
-                "{:<17} {:>6} {:>6} {:>6} | {:>7} {:>5} | {:>7.3} {:>5} {:>5} | {:>7.3} {:>9} {:>5} {:>7.3} | {:>5.1}x | {:>9.1e} {:>9.1e} {:>9.1e} {:>4}",
+                "{:<17} {:>6} {:>6} {:>6} | {:>7} {:>5} | {:>7.3} {:>5} {:>5.3} | {:>7.3} {:>9} {:>5} {:>7.3} | {:>5.1}x | {:>9.1e} {:>9.1e} {:>9.1e} {:>4}",
                 name,
                 mesh.n_vertices(),
                 lambda,
@@ -176,7 +219,7 @@ fn main() {
                 rf,
                 fast.report.timings.total,
                 fast_report.map_or(0, |r| r.working_set),
-                fast_report.map_or(0, |r| r.rounds),
+                fast_report.map_or(0.0, |r| r.seconds.setup),
                 auto.report.timings.total,
                 used,
                 auto_report.map_or(0, |r| r.working_set),
@@ -185,7 +228,86 @@ fn main() {
                 dmu,
                 du,
                 obj_rel,
-                if auto.report.certificate.holds(1e-9) { "ok" } else { "FAIL" }
+                if auto.report.certificate.holds(1e-9) {
+                    "ok"
+                } else {
+                    "FAIL"
+                }
+            );
+        }
+    }
+}
+
+fn schedule_study(dir: &std::path::Path, names: &[String], lambdas: &[f64], repeat: usize) {
+    println!(
+        "reference method, sequential, best of {repeat}; old = 1, 1e-1, ..., 1e-10; new = 1e-2, 1e-6, 1e-10"
+    );
+    println!(
+        "{:<17} {:>6} {:>6} {:>6} | {:>7} {:>5} {:>9} | {:>7} {:>5} {:>9} | {:>6} | {:>9} {:>9} {:>9} {:>4}",
+        "mesh",
+        "V",
+        "lambda",
+        "cones",
+        "old s",
+        "fact",
+        "status",
+        "new s",
+        "fact",
+        "status",
+        "x",
+        "max dmu",
+        "max du",
+        "obj rel",
+        "cert"
+    );
+    for name in names {
+        let obj = read_obj(dir.join(format!("{name}.obj"))).unwrap_or_else(|e| panic!("{e}"));
+        let faces = obj
+            .triangles()
+            .unwrap_or_else(|| panic!("{name}: not a triangle mesh"));
+        let mesh =
+            TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let geometry = Geometry::from_positions(&mesh, &obj.positions)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        for &lambda in lambdas {
+            let problem = ConeProblem::new(&mesh, &geometry, lambda);
+            let old = SolveOptions {
+                method: SolveMethod::Reference,
+                regularization: (0..=10).map(|k| 10f64.powi(-k)).collect(),
+                ..SolveOptions::default()
+            };
+            let new = SolveOptions {
+                method: SolveMethod::Reference,
+                regularization: vec![1e-2, 1e-6, 1e-10],
+                ..SolveOptions::default()
+            };
+            let a = best_of(repeat, &problem, &old);
+            let b = best_of(repeat, &problem, &new);
+            let fact = |s: &Solution| {
+                let l = &s.report.linear_solver;
+                l.ldlt_factorizations + l.lu_factorizations
+            };
+            println!(
+                "{:<17} {:>6} {:>6} {:>6} | {:>7.3} {:>5} {:>9} | {:>7.3} {:>5} {:>9} | {:>5.2}x | {:>9.1e} {:>9.1e} {:>9.1e} {:>4}",
+                name,
+                mesh.n_vertices(),
+                lambda,
+                a.measure.iter().filter(|m| **m != 0.0).count(),
+                a.report.timings.total,
+                fact(&a),
+                format!("{:?}", a.report.status),
+                b.report.timings.total,
+                fact(&b),
+                format!("{:?}", b.report.status),
+                a.report.timings.total / b.report.timings.total,
+                max_diff(&a.measure, &b.measure),
+                max_diff(&a.log_scale_optimal, &b.log_scale_optimal),
+                (a.objective - b.objective).abs() / a.objective.abs().max(1e-300),
+                if b.report.certificate.holds(1e-9) {
+                    "ok"
+                } else {
+                    "FAIL"
+                }
             );
         }
     }

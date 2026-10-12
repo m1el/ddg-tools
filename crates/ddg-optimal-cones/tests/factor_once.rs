@@ -311,8 +311,7 @@ fn fallback_working_set_limit() {
     let f = Features::plain(0.01);
     let options = SolveOptions {
         factor_once: FactorOnceOptions {
-            max_working_set_fraction: 0.0,
-            min_working_set: 3,
+            max_working_set: Some(3),
             ..FactorOnceOptions::default()
         },
         ..SolveOptions::default()
@@ -421,8 +420,7 @@ fn forced_give_up_returns_a_non_converged_result() {
     let options = SolveOptions {
         method: SolveMethod::FactorOnce,
         factor_once: FactorOnceOptions {
-            max_working_set_fraction: 0.0,
-            min_working_set: 3,
+            max_working_set: Some(3),
             ..FactorOnceOptions::default()
         },
         ..SolveOptions::default()
@@ -465,10 +463,6 @@ fn invalid_factor_once_options_are_rejected() {
     for bad in [
         FactorOnceOptions {
             tolerance: f64::NAN,
-            ..FactorOnceOptions::default()
-        },
-        FactorOnceOptions {
-            max_working_set_fraction: -1.0,
             ..FactorOnceOptions::default()
         },
         FactorOnceOptions {

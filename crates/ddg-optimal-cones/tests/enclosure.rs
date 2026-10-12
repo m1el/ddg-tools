@@ -10,9 +10,7 @@ use common::{
     reference_solve_with_boundary,
 };
 use ddg_core::generators::SplitMix64;
-use ddg_optimal_cones::{
-    BoundaryTreatment, Solution, SolveOptions, Status, certify_with_boundary,
-};
+use ddg_optimal_cones::{BoundaryTreatment, Solution, SolveOptions, Status, certify_with_boundary};
 
 fn solved(mesh: &TestMesh, f: &Features, b: BoundaryTreatment) -> Option<Solution> {
     let s = common::solve_t(&f.problem(mesh), b, &SolveOptions::default()).ok()?;

@@ -21,7 +21,9 @@ use ddg_core::operators::{
     angle_defects, boundary_geodesic_curvatures, cotan_laplacian, lumped_mass_normalized,
 };
 use ddg_core::{Geometry, TriMesh};
-use ddg_optimal_cones::{BoundaryTreatment, Cone, ConeError, ConeProblem, Solution, SolveOptions, Status};
+use ddg_optimal_cones::{
+    BoundaryTreatment, Cone, ConeError, ConeProblem, Solution, SolveOptions, Status,
+};
 
 /// Absolute agreement required of `u`, `φ`, `µ` and the objective (relative to
 /// `max(1, |value|)`). The oracle's fixtures reproduce to `1e-9` across platforms.
@@ -265,7 +267,11 @@ fn solve_case(case: &Case) -> Ours {
         geometry,
     };
     let features = case.features();
-    match common::solve_t(&features.problem(&mesh), BoundaryTreatment::Fixed, &SolveOptions::default()) {
+    match common::solve_t(
+        &features.problem(&mesh),
+        BoundaryTreatment::Fixed,
+        &SolveOptions::default(),
+    ) {
         Ok(solution) => Ours::Solved(Box::new((mesh, features, solution))),
         Err(ConeError::Infeasible { .. }) => Ours::Infeasible,
         Err(e) => Ours::Error(e.to_string()),

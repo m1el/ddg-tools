@@ -20,7 +20,11 @@ use ddg_optimal_cones::{
 use proptest::prelude::*;
 
 fn solve_ok(mesh: &TestMesh, f: &Features) -> Option<Solution> {
-    match common::solve_t(&f.problem(mesh), BoundaryTreatment::Fixed, &SolveOptions::default()) {
+    match common::solve_t(
+        &f.problem(mesh),
+        BoundaryTreatment::Fixed,
+        &SolveOptions::default(),
+    ) {
         Ok(solution) => {
             assert_eq!(
                 solution.report.status,

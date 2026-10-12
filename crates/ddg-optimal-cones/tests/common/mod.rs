@@ -34,8 +34,7 @@ pub fn solve_t(
         "fast" => {
             if factor_once_support(problem, boundary)?.is_none() {
                 options.method = SolveMethod::FactorOnce;
-                options.factor_once.max_working_set_fraction = 1e9;
-                options.factor_once.min_working_set = usize::MAX / 2;
+                options.factor_once.max_working_set = Some(usize::MAX / 2);
                 options.factor_once.memory_limit_bytes = usize::MAX;
                 forced_fast = true;
             } else {

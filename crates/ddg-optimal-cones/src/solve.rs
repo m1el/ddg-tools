@@ -160,13 +160,7 @@ impl SolveOptions<'_> {
         if !self.regularization.is_empty() && self.max_regularized_iterations == 0 {
             return bad("max_regularized_iterations must be at least 1".to_string());
         }
-        for (name, value) in [
-            ("factor_once.tolerance", self.factor_once.tolerance),
-            (
-                "factor_once.max_working_set_fraction",
-                self.factor_once.max_working_set_fraction,
-            ),
-        ] {
+        for (name, value) in [("factor_once.tolerance", self.factor_once.tolerance)] {
             if !(value.is_finite() && value >= 0.0) {
                 return bad(format!(
                     "{name} is {value}; it must be finite and non-negative"
