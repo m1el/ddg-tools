@@ -53,7 +53,8 @@ runs_tmp/                  gitignored; logs of long-running commands
   `git add <paths> && git commit -m "<msg>" -- <paths>`.
   Never `git add -A`, `git commit -a`, stash, reset, rebase, clean, or switch branches.
   If `.git/index.lock` exists, wait a second and retry.
-- End every commit message with: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
+- End every commit message with the `Co-Authored-By` line given in your own session instructions, so that it
+  names the model that actually made the commit.
 - Shared files (`Cargo.toml`, `Cargo.lock`, `README.md`, `CLAUDE.md`, `.gitignore`): re-read right before
   editing and keep edits minimal. Commit `Cargo.lock` together with the change that caused it.
 
