@@ -27,6 +27,7 @@ fn opts_from(args: &[String]) -> lasso::Options {
     if let Some(v) = flag(args, "--batch-frac") { o.batch_frac = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--nms") { o.nms_radius = v.parse().unwrap(); }
     if let Some(v) = flag(args, "--tol") { o.tol = v.parse().unwrap(); }
+    if args.iter().any(|a| a == "--no-gemv") { o.gemv_u = false; }
     if let Some(v) = flag(args, "--multi-add") { o.multi_add = v.parse().unwrap(); }
     o
 }

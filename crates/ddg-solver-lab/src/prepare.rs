@@ -33,6 +33,8 @@ pub struct Prepared<'a> {
     /// neighbours of each slot, as slots
     pub adj_ptr: Vec<usize>,
     pub adj_idx: Vec<u32>,
+    /// factor values per row: a solve touches about this many numbers per row
+    pub factor_per_row: f64,
     pub setup_seconds: f64,
     pub factor_seconds: f64,
     pub n_solves: std::sync::atomic::AtomicUsize,
@@ -62,6 +64,7 @@ impl<'a> Prepared<'a> {
         let a = l.submatrix(&unk, &unk).map_err(|e| e.to_string())?;
         let t1 = Instant::now();
         let sym = Symbolic::analyze(&a, Method::Llt).map_err(|e| e.to_string())?;
+        let factor_per_row = sym.info().factor_values.unwrap_or(0) as f64 / n_unk.max(1) as f64;
         let fac = sym.factor(&a, Parallelism::Sequential).map_err(|e| e.to_string())?;
         let factor_seconds = t1.elapsed().as_secs_f64();
         let mrow: Vec<f64> = rows.iter().map(|&v| mass[v as usize]).collect();
@@ -96,6 +99,7 @@ impl<'a> Prepared<'a> {
             sum,
             adj_ptr,
             adj_idx,
+            factor_per_row,
             setup_seconds: 0.0,
             factor_seconds,
             n_solves: 0.into(),
@@ -218,18 +222,26 @@ impl<'a> Prepared<'a> {
         let nr = self.rows.len();
         let dim_old: usize = blocks.iter().map(|b| b.1).sum();
         let dim = dim_old + k;
-        let mut mzn = zn.to_vec();
-        for t in 0..k {
-            for i in 0..nr {
-                mzn[t * nr + i] *= self.mrow[i];
-            }
-        }
         let mut cross = vec![0.0; dim * k];
         // partial products over a range of rows, all blocks sequentially
         let partial = |r0: usize, r1: usize| -> Vec<f64> {
             let m = r1 - r0;
-            let rhs = MatRef::from_column_major_slice(&mzn[..], nr, k).subrows(r0, m);
-            let mut part = vec![0.0; dim * k];
+            // mass-weighted copy of the new columns for this row range
+            let mut mz = vec![0.0; m * k];
+            for t in 0..k {
+                for i in 0..m {
+                    mz[t * m + i] = zn[t * nr + r0 + i] * self.mrow[r0 + i];
+                }
+            }
+            let rhs = MatRef::from_column_major_slice(&mz[..], m, k);
+            let mut part = vec![0.0; dim * k + k];
+            for t in 0..k {
+                let mut acc = 0.0;
+                for i in 0..m {
+                    acc += zn[t * nr + r0 + i] * self.mw0[r0 + i];
+                }
+                part[dim * k + t] = -acc;
+            }
             let mut off = 0;
             let mut put = |zb: &[f64], kb: usize, off: usize| {
                 let lhs = MatRef::from_column_major_slice(zb, nr, kb).subrows(r0, m);
@@ -265,14 +277,44 @@ impl<'a> Prepared<'a> {
             }),
             _ => vec![partial(0, nr)],
         };
+        let mut q = vec![0.0; k];
         for part in parts {
-            for (c, p) in cross.iter_mut().zip(part) {
+            for (c, p) in cross.iter_mut().zip(&part[..dim * k]) {
+                *c += p;
+            }
+            for (c, p) in q.iter_mut().zip(&part[dim * k..]) {
                 *c += p;
             }
         }
-        let q: Vec<f64> = (0..k)
-            .map(|t| -zn[t * nr..(t + 1) * nr].iter().zip(&self.mw0).map(|(a, b)| a * b).sum::<f64>())
-            .collect();
         (cross, q)
     }
 }
+
+impl Prepared<'_> {
+    /// `u = Σ µ_j z_j − w0` from stored columns. `terms` are `(block, column in block, µ)`.
+    pub fn u_from_columns(
+        &self,
+        blocks: &[(Vec<f64>, usize)],
+        terms: &[(usize, usize, f64)],
+        pool: Option<&rayon::ThreadPool>,
+    ) -> Vec<f64> {
+        let nr = self.rows.len();
+        let mut u: Vec<f64> = self.w0.iter().map(|w| -w).collect();
+        let body = |(ci, out): (usize, &mut [f64])| {
+            let r0 = ci * CH;
+            for &(b, c, mu) in terms {
+                let col = &blocks[b].0[c * nr + r0..c * nr + r0 + out.len()];
+                for (o, z) in out.iter_mut().zip(col) {
+                    *o += mu * z;
+                }
+            }
+        };
+        match pool {
+            Some(p) => p.install(|| u.par_chunks_mut(CH).enumerate().for_each(body)),
+            None => u.chunks_mut(CH).enumerate().for_each(body),
+        }
+        u
+    }
+}
+
+const CH: usize = 4096;

@@ -22,6 +22,7 @@ pub struct Options {
     pub batch_frac: f64,
     pub nms_radius: usize,
     pub multi_add: f64,
+    pub gemv_u: bool,
     pub tol: f64,
     pub max_rounds: usize,
 }
@@ -37,6 +38,7 @@ impl Default for Options {
             batch_frac: 0.5,
             nms_radius: 3,
             multi_add: 0.1,
+            gemv_u: true,
             tol: 1e-10,
             max_rounds: 500,
         }
@@ -126,7 +128,28 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
             let t = Instant::now();
             let mu_sparse: Vec<(usize, f64)> =
                 dense.active().into_iter().map(|j| (w_slots[j], dense.mu[j])).collect();
-            let u = prep.u_of_mu(&mu_sparse);
+            let act = dense.active();
+            let use_gemv = opts.gemv_u
+                && (act.len() as f64) <= prep.factor_per_row * if pool.is_some() { 4.0 } else { 1.0 };
+            let u = if use_gemv {
+                // locate columns by block
+                let mut starts = Vec::with_capacity(blocks.len());
+                let mut acc = 0;
+                for b in &blocks {
+                    starts.push(acc);
+                    acc += b.1;
+                }
+                let terms: Vec<(usize, usize, f64)> = act
+                    .iter()
+                    .map(|&j| {
+                        let b = starts.partition_point(|&s| s <= j) - 1;
+                        (b, j - starts[b], dense.mu[j])
+                    })
+                    .collect();
+                prep.u_from_columns(&blocks, &terms, pool)
+            } else {
+                prep.u_of_mu(&mu_sparse)
+            };
             let y = prep.gradient(&u);
             st.t_gradient += t.elapsed().as_secs_f64();
             let nu = dense.nu;
