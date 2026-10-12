@@ -1,4 +1,4 @@
-use ddg_solver_lab::{lasso, meshes, prepare::Prepared};
+use ddg_solver_lab::{lasso, meshes, prepare::{Constraints, Prepared}};
 use ddg_optimal_cones::{ConeProblem, SolveOptions, solve};
 use std::time::Instant;
 
@@ -9,12 +9,47 @@ fn main() {
         "compare" => compare(&args[1..]),
         "table" => table(&args[1..]),
         "scale" => scale(&args[1..]),
+        "refopts" => refopts(&args[1..]),
         _ => eprintln!("usage: lab compare MESH [--lambda X] [--threads N] [--no-ref] ..."),
     }
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).map(|i| args[i + 1].clone())
+}
+
+/// Steering from flags: `--nonneg`, `--free-every K` (cost 0 at every K-th vertex),
+/// `--sites K` (K free sites spread over the mesh, every other vertex forbidden), `--forbid-first F`
+/// (the first fraction F of the vertices forbidden).
+fn constraints_from(args: &[String], nv: usize) -> Constraints {
+    let mut c = Constraints::default();
+    if args.iter().any(|a| a == "--nonneg") { c.nonneg = Some(vec![true; nv]); }
+    if let Some(k) = flag(args, "--free-every") {
+        let k: usize = k.parse().unwrap();
+        let mut cost = c.cost.take().unwrap_or(vec![1.0; nv]);
+        for v in (0..nv).step_by(k) { cost[v] = 0.0; }
+        c.cost = Some(cost);
+    }
+    if let Some(k) = flag(args, "--sites") {
+        let k: usize = k.parse().unwrap();
+        let mut cost = vec![f64::INFINITY; nv];
+        for i in 0..k { cost[(i * nv) / k + nv / (2 * k)] = 0.0; }
+        c.cost = Some(cost);
+    }
+    if let Some(f) = flag(args, "--forbid-first") {
+        let f: f64 = f.parse().unwrap();
+        let mut cost = c.cost.take().unwrap_or(vec![1.0; nv]);
+        for v in 0..(f * nv as f64) as usize { cost[v] = f64::INFINITY; }
+        c.cost = Some(cost);
+    }
+    c
+}
+
+fn problem_with<'a>(case: &'a meshes::Case, lambda: f64, c: &Constraints) -> ConeProblem<'a> {
+    let mut p = ConeProblem::new(&case.mesh, &case.geometry, lambda);
+    p.cone_costs = c.cost.clone();
+    if c.nonneg.is_some() { p.lower_bounds = Some(vec![0.0; case.mesh.n_vertices()]); }
+    p
 }
 
 fn opts_from(args: &[String]) -> lasso::Options {
@@ -77,7 +112,8 @@ fn compare(args: &[String]) {
     let o = opts_from(args);
     let no_ref = args.iter().any(|a| a == "--no-ref");
     let case = meshes::load(spec).unwrap_or_else(|e| panic!("{e}"));
-    let prep = Prepared::new(&case).unwrap();
+    let cons = constraints_from(args, case.mesh.n_vertices());
+    let prep = Prepared::with_constraints(&case, &cons).unwrap();
     println!("{spec}: V={} F={} closed={} setup {:.3}s (factor {:.3}s)", case.mesh.n_vertices(), case.mesh.n_faces(), prep.closed, prep.setup_seconds, prep.factor_seconds);
     let t = Instant::now();
     let s = lasso::solve(&prep, lambda, &o);
@@ -87,7 +123,7 @@ fn compare(args: &[String]) {
     println!("lab: wall {wall:.3}s (+setup {:.3}) converged={} cones={nz} peakA={} W={} rounds={} stages={} solves: cols {} grad {} total {} excess {:.1e}",
         prep.setup_seconds, st.converged, st.peak_active, st.working_set, st.rounds, st.stages, st.column_solves, st.gradient_solves, st.total_solves, st.max_excess);
     println!("  times: columns {:.3} gram {:.3} dense {:.3} gradient {:.3}; dense iters {} adds {} drops {} failed {}", st.t_columns, st.t_gram, st.t_dense, st.t_gradient, st.dense.iterations, st.dense.adds, st.dense.drops, st.dense.failed_adds);
-    let problem = ConeProblem::new(&case.mesh, &case.geometry, lambda);
+    let problem = problem_with(&case, lambda, &cons);
     match ddg_optimal_cones::certify(&problem, &s.u, &s.phi, &s.mu) {
         Ok(c) => println!("  certificate: state {:.1e} adjoint {:.1e} cone {:.1e} dualinf {:.1e} gap {:.1e} compl {:.1e} holds(1e-9)={}", c.state_residual, c.adjoint_residual, c.cone_residual, c.dual_infeasibility, c.duality_gap, c.complementarity_gap, c.holds(1e-9)),
         Err(e) => println!("  certify error {e}"),
@@ -183,5 +219,50 @@ fn scale(args: &[String]) {
             }
             println!("  threads {threads:>2}: {:.3} s", best);
         }
+    }
+}
+
+/// Reference solver with other regularization schedules / tolerances; compares with the default.
+/// `lab refopts MESH [--lambda X] [--repeat R] SCHEDULE...` where SCHEDULE is `default`, `none`
+/// or comma separated gammas, optionally `@tol` for the Newton tolerance (e.g. `1e-3,1e-10@1e-9`).
+fn refopts(args: &[String]) {
+    let spec = &args[0];
+    let lambda: f64 = flag(args, "--lambda").map(|v| v.parse().unwrap()).unwrap_or(0.5);
+    let repeat: usize = flag(args, "--repeat").map(|v| v.parse().unwrap()).unwrap_or(2);
+    let case = meshes::load(spec).unwrap_or_else(|e| panic!("{e}"));
+    let problem = ConeProblem::new(&case.mesh, &case.geometry, lambda);
+    let scheds: Vec<&String> = {
+        let mut v = Vec::new();
+        let mut i = 1;
+        while i < args.len() {
+            if args[i].starts_with("--") { i += 2; continue; }
+            v.push(&args[i]);
+            i += 1;
+        }
+        v
+    };
+    let base = solve(&problem, &SolveOptions::default()).unwrap();
+    println!("{spec} lambda {lambda}: {:<34} {:>7} {:>5} {:>5} {:>6} {:>9} {:>9} {:>9}", "schedule", "time s", "fact", "slv", "status", "max dmu", "obj rel", "stages");
+    for sch in scheds {
+        let mut o = SolveOptions::default();
+        let (g, tol) = match sch.split_once('@') { Some((g, t)) => (g, Some(t)), None => (sch.as_str(), None) };
+        match g {
+            "default" => {}
+            "none" => o.regularization = vec![],
+            _ => o.regularization = g.split(',').map(|x| x.parse().unwrap()).collect(),
+        }
+        if let Some(t) = tol { o.newton_tolerance = t.parse().unwrap(); }
+        let mut best: Option<ddg_optimal_cones::Solution> = None;
+        for _ in 0..repeat {
+            match solve(&problem, &o) {
+                Ok(r) => if best.as_ref().is_none_or(|b| r.report.timings.total < b.report.timings.total) { best = Some(r); },
+                Err(e) => { println!("  {sch}: error {e}"); break; }
+            }
+        }
+        let Some(r) = best else { continue };
+        let rl = &r.report.linear_solver;
+        let dmu = r.measure.iter().zip(&base.measure).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        println!("{:>width$} {:<34} {:>7.3} {:>5} {:>5} {:>6} {:>9.1e} {:>9.1e} {:>9}", "", sch, r.report.timings.total, rl.ldlt_factorizations + rl.lu_factorizations, rl.solves,
+            format!("{:?}", r.report.status).chars().take(6).collect::<String>(), dmu, (r.objective - base.objective).abs() / base.objective.abs(), r.report.stages.len(), width = spec.len() + 14);
     }
 }

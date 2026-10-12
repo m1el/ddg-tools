@@ -14,6 +14,15 @@ use rayon::prelude::*;
 
 use crate::meshes::Case;
 
+/// Per-vertex steering, as in `ConeProblem`: `cost` = `wR` (0 free site, `INFINITY` forbidden),
+/// `nonneg` = `lo = 0`, `nonpos` = `hi = 0`.
+#[derive(Clone, Default)]
+pub struct Constraints {
+    pub cost: Option<Vec<f64>>,
+    pub nonneg: Option<Vec<bool>>,
+    pub nonpos: Option<Vec<bool>>,
+}
+
 pub struct Prepared<'a> {
     pub case: &'a Case,
     pub closed: bool,
@@ -30,6 +39,10 @@ pub struct Prepared<'a> {
     pub mw0: Vec<f64>,
     /// closed: `Σ Ω = 2πχ`
     pub sum: Option<f64>,
+    /// cost weight and allowed signs (bit 0 positive, bit 1 negative) of each slot
+    pub slot_w: Vec<f64>,
+    pub slot_allow: Vec<u8>,
+    slot_unk_tab: Vec<u32>,
     /// neighbours of each slot, as slots
     pub adj_ptr: Vec<usize>,
     pub adj_idx: Vec<u32>,
@@ -42,6 +55,10 @@ pub struct Prepared<'a> {
 
 impl<'a> Prepared<'a> {
     pub fn new(case: &'a Case) -> Result<Prepared<'a>, String> {
+        Prepared::with_constraints(case, &Constraints::default())
+    }
+
+    pub fn with_constraints(case: &'a Case, cons: &Constraints) -> Result<Prepared<'a>, String> {
         let t0 = Instant::now();
         let mesh = &case.mesh;
         let nv = mesh.n_vertices();
@@ -49,17 +66,37 @@ impl<'a> Prepared<'a> {
         let l = cotan_laplacian(mesh, &case.geometry).map_err(|e| e.to_string())?;
         let mass = lumped_mass_normalized(mesh, &case.geometry).map_err(|e| e.to_string())?;
         let omega = angle_defects(mesh, &case.geometry).map_err(|e| e.to_string())?;
+        let cost_of = |v: usize| cons.cost.as_ref().map_or(1.0, |c| c[v]);
+        let allow_of = |v: usize| -> u8 {
+            let mut a = 3u8;
+            if cons.nonneg.as_ref().is_some_and(|c| c[v]) { a &= !2; }
+            if cons.nonpos.as_ref().is_some_and(|c| c[v]) { a &= !1; }
+            a
+        };
+        let total_omega: f64 = omega.iter().sum();
         let (unk, rows, slot_vertex): (Vec<u32>, Vec<u32>, Vec<u32>) = if closed {
-            let unk: Vec<u32> = (1..nv as u32).collect();
+            let need = if total_omega >= 0.0 { 1u8 } else { 2u8 };
+            let pin = (0..nv)
+                .find(|&v| cost_of(v).is_finite() && allow_of(v) & need != 0)
+                .ok_or("no vertex can carry the total curvature (all forbidden or sign-restricted)")?;
+            let unk: Vec<u32> = (0..nv as u32).filter(|&v| v as usize != pin).collect();
             let mut rows = unk.clone();
-            rows.push(0);
-            let mut slots = vec![0u32];
-            slots.extend_from_slice(&unk);
+            rows.push(pin as u32);
+            let mut slots = vec![pin as u32];
+            slots.extend(unk.iter().copied().filter(|&v| cost_of(v as usize).is_finite()));
             (unk, rows, slots)
         } else {
             let unk = mesh.interior_vertices();
-            (unk.clone(), unk.clone(), unk)
+            let slots: Vec<u32> = unk.iter().copied().filter(|&v| cost_of(v as usize).is_finite()).collect();
+            (unk.clone(), unk, slots)
         };
+        let mut unk_pos = vec![u32::MAX; nv];
+        for (i, &v) in unk.iter().enumerate() {
+            unk_pos[v as usize] = i as u32;
+        }
+        let slot_unk_tab: Vec<u32> = slot_vertex.iter().map(|&v| unk_pos[v as usize]).collect();
+        let slot_w: Vec<f64> = slot_vertex.iter().map(|&v| cost_of(v as usize)).collect();
+        let slot_allow: Vec<u8> = slot_vertex.iter().map(|&v| allow_of(v as usize)).collect();
         let n_unk = unk.len();
         let a = l.submatrix(&unk, &unk).map_err(|e| e.to_string())?;
         let t1 = Instant::now();
@@ -69,7 +106,7 @@ impl<'a> Prepared<'a> {
         let factor_seconds = t1.elapsed().as_secs_f64();
         let mrow: Vec<f64> = rows.iter().map(|&v| mass[v as usize]).collect();
         let omega_rows: Vec<f64> = rows.iter().map(|&v| omega[v as usize]).collect();
-        let sum = closed.then(|| omega.iter().sum::<f64>());
+        let sum = closed.then_some(total_omega);
         // slot adjacency
         let mut slot_of = vec![u32::MAX; nv];
         for (s, &v) in slot_vertex.iter().enumerate() {
@@ -97,6 +134,9 @@ impl<'a> Prepared<'a> {
             w0: vec![],
             mw0: vec![],
             sum,
+            slot_w,
+            slot_allow,
+            slot_unk_tab,
             adj_ptr,
             adj_idx,
             factor_per_row,
@@ -119,7 +159,8 @@ impl<'a> Prepared<'a> {
     /// Position among the unknown rows of a slot, `None` for the pin.
     #[inline]
     pub fn slot_unk(&self, s: usize) -> Option<usize> {
-        if self.closed { s.checked_sub(1) } else { Some(s) }
+        let t = self.slot_unk_tab[s];
+        (t != u32::MAX).then_some(t as usize)
     }
 
     #[inline]

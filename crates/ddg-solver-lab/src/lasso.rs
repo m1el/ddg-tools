@@ -90,7 +90,7 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
     let mut st = Stats::default();
     st.t_setup = prep.setup_seconds;
 
-    let mut dense = Dense::new(lambda, prep.sum);
+    let mut dense = Dense::new(lambda, prep.sum, (prep.slot_w.first().copied().unwrap_or(1.0), prep.slot_allow.first().copied().unwrap_or(3)));
     dense.multi_add = opts.multi_add;
     let mut w_slots: Vec<usize> = Vec::new();
     let mut in_w = vec![usize::MAX; ns];
@@ -162,7 +162,9 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
                 if in_active {
                     continue;
                 }
-                let ex = (prep.grad_of_slot(&y, s) + nu).abs() - lam;
+                let Some((ex, _)) = crate::dense::violation(prep.slot_w[s], prep.slot_allow[s], prep.grad_of_slot(&y, s) + nu, lam) else {
+                    continue;
+                };
                 max_all = max_all.max(ex);
                 if ex > opts.tol * lam {
                     if in_w[s] == usize::MAX {
@@ -225,7 +227,9 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
             let t = Instant::now();
             let (cross, q) = prep.gram_cross(&blocks, &zn, chosen.len(), pool, opts.threads);
             st.t_gram += t.elapsed().as_secs_f64();
-            dense.extend(&cross, chosen.len(), &q);
+            let wc: Vec<f64> = chosen.iter().map(|&s| prep.slot_w[s]).collect();
+            let al: Vec<u8> = chosen.iter().map(|&s| prep.slot_allow[s]).collect();
+            dense.extend(&cross, chosen.len(), &q, &wc, &al);
             for &s in &chosen {
                 in_w[s] = w_slots.len();
                 w_slots.push(s);
@@ -261,7 +265,8 @@ pub fn solve(prep: &Prepared, lambda: f64, opts: &Options) -> Solution {
         }
     }
     let distortion: f64 = 0.5 * u_rows.iter().zip(&prep.mrow).map(|(u, m)| m * u * u).sum::<f64>();
-    let cost: f64 = lambda * mu.iter().map(|m| m.abs()).sum::<f64>();
+    let cost: f64 = lambda
+        * mu_sparse.iter().map(|&(s, v)| prep.slot_w[s] * v.abs()).sum::<f64>();
     st.t_total = t_start.elapsed().as_secs_f64() + prep.setup_seconds;
     st.total_solves = prep.n_solves.load(std::sync::atomic::Ordering::Relaxed) - solves_before;
     st.gradient_solves = st.total_solves - st.column_solves;

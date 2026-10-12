@@ -32,6 +32,11 @@ pub struct Dense {
     q: Vec<f64>,
     pub mu: Vec<f64>,
     sign: Vec<f64>,
+    /// cost weight w_j (threshold λ w_j); 0 = free site
+    wcost: Vec<f64>,
+    /// bit 0: positive values allowed, bit 1: negative values allowed
+    allow: Vec<u8>,
+    active: Vec<bool>,
     blocked: Vec<bool>,
     act: Vec<usize>, // B, in Cholesky order (pin excluded)
     chol: Vec<f64>,  // row-major lower triangle, leading dimension chol_ld
@@ -44,7 +49,8 @@ pub struct Dense {
 }
 
 impl Dense {
-    pub fn new(lambda: f64, sum: Option<f64>) -> Dense {
+    /// `pin`: `(cost weight, allow bits)` of the pin variable when there is a sum constraint.
+    pub fn new(lambda: f64, sum: Option<f64>, pin: (f64, u8)) -> Dense {
         let mut d = Dense {
             lambda,
             sum,
@@ -54,6 +60,9 @@ impl Dense {
             q: vec![],
             mu: vec![],
             sign: vec![],
+            wcost: vec![],
+            allow: vec![],
+            active: vec![],
             blocked: vec![],
             act: vec![],
             chol: vec![],
@@ -64,9 +73,10 @@ impl Dense {
             stats: DenseStats::default(),
         };
         if let Some(c) = sum {
-            d.extend(&[0.0; 0], 1, &[0.0]);
+            d.extend(&[0.0; 0], 1, &[0.0], &[pin.0], &[pin.1]);
             d.mu[0] = c;
             d.sign[0] = if c >= 0.0 { 1.0 } else { -1.0 };
+            d.active[0] = true;
             d.pin_active = true;
         }
         d
@@ -91,12 +101,12 @@ impl Dense {
     }
 
     pub fn is_active(&self, j: usize) -> bool {
-        self.sign[j] != 0.0
+        self.active[j]
     }
 
     /// Appends `k` variables. `cross` is `(dim + k) × k` column major: column `t` holds
     /// `H[·, dim + t]` for all rows of the enlarged matrix (rows `dim..` are the new block).
-    pub fn extend(&mut self, cross: &[f64], k: usize, q_new: &[f64]) {
+    pub fn extend(&mut self, cross: &[f64], k: usize, q_new: &[f64], wcost: &[f64], allow: &[u8]) {
         let old = self.dim;
         let new = old + k;
         if new > self.cap {
@@ -118,6 +128,9 @@ impl Dense {
         self.q.extend_from_slice(q_new);
         self.mu.extend(std::iter::repeat_n(0.0, k));
         self.sign.extend(std::iter::repeat_n(0.0, k));
+        self.active.extend(std::iter::repeat_n(false, k));
+        self.wcost.extend_from_slice(wcost);
+        self.allow.extend_from_slice(allow);
         self.blocked.extend(std::iter::repeat_n(false, k));
         self.dim = new;
     }
@@ -219,6 +232,7 @@ impl Dense {
             self.chol_delete(pos);
         }
         self.sign[j] = 0.0;
+        self.active[j] = false;
         self.mu[j] = 0.0;
     }
 
@@ -229,7 +243,7 @@ impl Dense {
         for _ in 0..max_iter {
             self.stats.iterations += 1;
             let b: Vec<usize> = self.act.clone();
-            let rhs: Vec<f64> = b.iter().map(|&j| -self.q[j] - lam * self.sign[j]).collect();
+            let rhs: Vec<f64> = b.iter().map(|&j| -self.q[j] - lam * self.wcost[j] * self.sign[j]).collect();
             let mut star = vec![0.0; self.dim];
             let nu;
             match self.sum {
@@ -242,7 +256,7 @@ impl Dense {
                 }
                 Some(c) => {
                     if self.pin_active {
-                        nu = -lam * self.sign[0];
+                        nu = -lam * self.wcost[0] * self.sign[0];
                         let r2: Vec<f64> = rhs.iter().map(|v| v - nu).collect();
                         let x = self.chol_solve(&r2);
                         let mut sum = 0.0;
@@ -271,7 +285,7 @@ impl Dense {
                 actl.push(0);
             }
             for &i in &actl {
-                if self.sign[i] * star[i] < 0.0 {
+                if (self.wcost[i] > 0.0 || self.allow[i] != 3) && self.sign[i] * star[i] < 0.0 {
                     let ti = self.mu[i] / (self.mu[i] - star[i]);
                     if ti < t {
                         t = ti;
@@ -308,12 +322,13 @@ impl Dense {
             }
             let mut viol: Vec<(usize, f64)> = Vec::new();
             for j in 0..self.dim {
-                if self.sign[j] != 0.0 || self.blocked[j] {
+                if self.active[j] || self.blocked[j] {
                     continue;
                 }
-                let ex = (g[j] + nu).abs() - lam;
-                if ex > tol * lam {
-                    viol.push((j, ex));
+                if let Some((ex, _)) = violation(self.wcost[j], self.allow[j], g[j] + nu, lam) {
+                    if ex > tol * lam {
+                        viol.push((j, ex));
+                    }
                 }
             }
             if viol.is_empty() {
@@ -322,13 +337,15 @@ impl Dense {
             viol.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             let m = ((self.multi_add * self.n_active() as f64) as usize).max(1);
             for &(j, _) in viol.iter().take(m) {
-                let s = -(g[j] + nu).signum();
+                let s = violation(self.wcost[j], self.allow[j], g[j] + nu, lam).unwrap().1;
                 if self.sum.is_some() && j == 0 {
                     self.pin_active = true;
+                    self.active[0] = true;
                     self.sign[0] = s;
                     self.stats.adds += 1;
                 } else if self.chol_append(j) {
                     self.sign[j] = s;
+                    self.active[j] = true;
                     self.stats.adds += 1;
                 } else {
                     self.blocked[j] = true;
@@ -338,5 +355,19 @@ impl Dense {
             self.stats.peak_active = self.stats.peak_active.max(self.n_active());
         }
         false
+    }
+}
+
+/// How much the optimality condition of an inactive variable is violated, and the sign it would
+/// take: with `v = ∂(distortion)/∂µ_j + ν` the condition is `−λw ≤ v ≤ λw` (restricted to the
+/// allowed signs: positive values need `v < −λw`, negative ones `v > λw`).
+pub fn violation(w: f64, allow: u8, v: f64, lam: f64) -> Option<(f64, f64)> {
+    let t = lam * w;
+    let pos = if allow & 1 != 0 { -v - t } else { f64::NEG_INFINITY };
+    let neg = if allow & 2 != 0 { v - t } else { f64::NEG_INFINITY };
+    if pos >= neg {
+        pos.is_finite().then_some((pos, 1.0))
+    } else {
+        neg.is_finite().then_some((neg, -1.0))
     }
 }
