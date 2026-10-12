@@ -80,9 +80,6 @@ pub(crate) struct NewtonOutcome {
     pub constant_shifts: usize,
     /// Why it stopped.
     pub stop: StageStop,
-    /// Stage II on a closed mesh: the interval of constants that can be added to the returned
-    /// `φ` without violating the optimality system. `(0, 0)` when `φ` is unique.
-    pub adjoint_shift: (f64, f64),
 }
 
 /// Relative rounding error assumed for an adjoint value when deciding whether a vertex with a
@@ -329,7 +326,6 @@ pub(crate) fn solve_regularized(
         damped_steps: 0,
         constant_shifts: 0,
         stop: StageStop::IterationLimit,
-        adjoint_shift: (0.0, 0.0),
     };
     let args_of = |phi: &[f64], out: &mut Vec<f64>| {
         out.clear();
@@ -523,7 +519,6 @@ pub(crate) fn solve_exact(
         damped_steps: 0,
         constant_shifts: 0,
         stop: StageStop::IterationLimit,
-        adjoint_shift: (0.0, 0.0),
     };
     let mut y = x.clone();
     let mut seen: HashSet<u64> = HashSet::new();
@@ -579,7 +574,6 @@ pub(crate) fn solve_exact(
                 _ => au[i] + d.omega[i],
             })
             .collect();
-        outcome.adjoint_shift = (0.0, 0.0);
         if singular {
             // φ is determined up to a constant. Take the admissible one whose mass-weighted
             // mean is closest to zero; if none is admissible, the one that violates the
@@ -594,9 +588,6 @@ pub(crate) fn solve_exact(
             };
             for p in &mut phi {
                 *p += c;
-            }
-            if lo <= hi {
-                outcome.adjoint_shift = (lo - c, hi - c);
             }
         }
         for i in 0..n {

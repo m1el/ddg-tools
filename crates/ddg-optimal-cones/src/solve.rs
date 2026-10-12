@@ -10,7 +10,9 @@ use crate::error::ConeError;
 use crate::evaluate::{LaplaceSolver, cones_to_measure, log_scale_of_measure};
 use crate::extract::{ExtractOptions, ExtractionReport, extract_cones};
 use crate::linsys::{LinearSolver, LinearSolverReport, NewtonLinearSolver, SaddleSolver};
-use crate::newton::{Iterate, NewtonOutcome, StageStop, solve_exact, solve_regularized};
+use crate::newton::{
+    Iterate, NewtonOutcome, StageStop, adjoint_constant_interval, solve_exact, solve_regularized,
+};
 use crate::problem::{ConeProblem, Discrete, validate};
 
 /// The quantity whose square the regularized problems of Stage I penalize.
@@ -62,7 +64,8 @@ pub struct SolveOptions<'a> {
     /// The exact iteration also stops when the cone residual
     /// `max_i |µ_i − clamp(P_t(φ_i + µ_i))|` of a solved step is at most this (paper
     /// Sec. 5.3.3, "norm of the residual below a small tolerance"). This only matters when two
-    /// pieces tie at rounding level. Default `10⁻¹²`.
+    /// pieces tie at rounding level. Cone angles of at most this magnitude are set to exactly
+    /// zero at the end ([`SolveReport::zeroed_angles`]). Default `10⁻¹²`.
     pub newton_tolerance: f64,
     /// The result is reported as [`Status::Converged`] iff its [`Certificate`] holds with this
     /// tolerance ([`Certificate::holds`]). Default `10⁻⁹`.
@@ -232,6 +235,13 @@ pub struct SolveReport {
     /// of the order of [`SolveOptions::newton_tolerance`]. The certificate is computed after
     /// this correction.
     pub bound_correction: f64,
+    /// Number of cone angles of magnitude at most [`SolveOptions::newton_tolerance`] that were
+    /// set to exactly zero at the very end. An active vertex carries such an angle when it
+    /// absorbs the rounding error of the data (for instance of `Σ Ω` on a closed mesh). The
+    /// certificate is computed after this.
+    pub zeroed_angles: usize,
+    /// The largest magnitude among them (zero if there were none).
+    pub largest_zeroed_angle: f64,
     /// The optimality certificate of `(u, φ, µ)` as returned.
     pub certificate: Certificate,
     /// Explanation when something did not go to plan (a linear solver failure, or why the
@@ -255,9 +265,12 @@ pub struct Solution {
     /// The adjoint state `φ`: `(L φ)_i = −wE_i m_i u_i`, with `φ_i = ±λ wR_i` at cones strictly
     /// inside their bounds and `|φ_i| ≤ λ wR_i` at unbounded vertices without a cone.
     pub adjoint: Vec<f64>,
-    /// Closed meshes: the interval of constants that may be added to `adjoint` without
-    /// violating the optimality system. It is `(0, 0)` whenever some vertex is active (a cone
-    /// strictly inside its bounds, or a free site), and always on meshes with boundary.
+    /// Closed meshes: the interval `(lo, hi)` of constants that may be added to `adjoint`
+    /// without violating the optimality system; `lo ≤ 0 ≤ hi`. It is `(0, 0)` whenever some
+    /// cone lies strictly inside its bounds (there `φ = ±λ wR` pins the constant) or a free
+    /// site does, and always on meshes with boundary. If the interval is not a point, the
+    /// returned `adjoint` is the admissible one whose mass-weighted mean `Σ m φ` is closest to
+    /// zero.
     pub adjoint_shift: (f64, f64),
     /// The objective `½ Σ wE m u² + λ Σ wR |µ|` of the optimal measure.
     pub objective: f64,
@@ -403,7 +416,6 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
     let mut message: Option<String> = None;
     let mut linear_failure = false;
     let mut safeguard_rounds = 0;
-    let mut adjoint_shift = (0.0, 0.0);
     let mut linear_report = LinearSolverReport::default();
 
     if n > 0 {
@@ -458,7 +470,6 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                     Ok(outcome) => {
                         stages.push(stage(StageKind::Exact, &outcome, start));
                         if outcome.stop.is_success() {
-                            adjoint_shift = outcome.adjoint_shift;
                             message = None;
                             break;
                         }
@@ -533,13 +544,40 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         linear_report = solver.report();
     }
 
+    // Rounding-level clean-up of the cone angles; the certificate is computed afterwards.
     // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
-    // its bound by rounding is moved onto it. (The certificate is computed afterwards.)
+    // its bound by rounding is moved onto it. And a cone angle below the Newton tolerance is
+    // no cone: an active vertex can carry such an angle when it absorbs the rounding error of
+    // the data, for instance of Σ Ω on a closed mesh.
     let mut bound_correction = 0.0f64;
+    let mut zeroed_angles = 0;
+    let mut largest_zeroed_angle = 0.0f64;
     for (mu, site) in x.mu.iter_mut().zip(&d.sites) {
         let clamped = mu.clamp(site.lo, site.hi);
         bound_correction = bound_correction.max((clamped - *mu).abs());
         *mu = clamped;
+        if !site.fixed && *mu != 0.0 && mu.abs() <= options.newton_tolerance {
+            zeroed_angles += 1;
+            largest_zeroed_angle = largest_zeroed_angle.max(mu.abs());
+            *mu = 0.0;
+        }
+    }
+
+    // On a closed mesh the adjoint is determined up to the constants that keep it in the
+    // subdifferentials. Return the admissible adjoint whose mass-weighted mean is closest to
+    // zero, and the interval of the others.
+    let mut adjoint_shift = (0.0, 0.0);
+    if d.closed {
+        let (lo, hi) = adjoint_constant_interval(&d.sites, &x.phi, &x.mu);
+        if lo <= hi {
+            let mean = x.phi.iter().zip(&d.mass).map(|(p, m)| p * m).sum::<f64>()
+                / d.mass.iter().sum::<f64>();
+            let c = (-mean).clamp(lo, hi);
+            for phi in &mut x.phi {
+                *phi += c;
+            }
+            adjoint_shift = (lo - c, hi - c);
+        }
     }
 
     // The optimum, per vertex.
@@ -628,6 +666,8 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             linear_solver: linear_report,
             timings,
             bound_correction,
+            zeroed_angles,
+            largest_zeroed_angle,
             certificate,
             message,
         },
