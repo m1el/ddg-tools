@@ -14,7 +14,9 @@ scale factor of a given cone configuration) and `extract.rs` (merging clusters o
   pairs for which the adjoint equation holds and the induced cone angles `μ = A u + Ω` satisfy
   the relation of each row. `isAssembledSolution_iff`: the matrix the code assembles (unknowns
   `(u, ψ)` with `ψ_i = φ_i − offset_i`, known values moved to the right-hand side, pinned rows
-  replaced by the identity) has the same solutions. `kkt_of_isSolution`, `isMinimizer_of_isSolution`:
+  replaced by the identity) has the same solutions. `newton_step_iff_isSolution`: the
+  semismooth Newton step of the residual map of `DdgProofs.Newton` is the row system of the
+  current pieces. `kkt_of_isSolution`, `isMinimizer_of_isSolution`:
   a solution all of whose vertices lie on their pieces is a solution of the optimality system,
   hence a global minimizer; `isProxMinimizer_of_isSolution`: the same for the regularized
   (proximal) stage; `Site.stationary_of_pos` … `stationary_of_lower`: the test "on its piece" for
@@ -399,6 +401,88 @@ theorem isMinimizer_of_isSolution (hP : P.WellFormed) (hsymm : P.Lᵀ = P.L) {ro
     (hincl : ∀ i, (P.site i).Stationary P.lam (φ i) (P.inducedCone u i)) :
     P.IsMinimizer u (P.inducedCone u) :=
   (kkt_of_isSolution hsymm h hincl).isMinimizer hP.wE_nonneg hP.m_nonneg
+
+/-! ### The Newton step of the residual map is the solver's linear system -/
+
+/-- The slope of the proximal map on a piece is `0` or `1` (for `γ = 1`). -/
+theorem slopeReg_one_eq_zero_or_one (lam : ℝ) (s : Site) (x : ℝ) :
+    s.slopeReg lam 1 x = 0 ∨ s.slopeReg lam 1 x = 1 := by
+  unfold Site.slopeReg
+  cases s.pieceReg lam 1 x <;> simp [Site.pieceSlope]
+
+open Classical in
+/-- The row of a vertex in the exact stage, from the current point `x = φ_i + μ_i`: where the
+proximal map has slope `0` the cone angle is fixed to its current value `prox(x)` (`0`, a bound,
+or the fixed angle); where it has slope `1` the adjoint is pinned to `x − prox(x)` (which is
+`λ wR` on the positive and `−λ wR` on the negative active piece). -/
+def newtonRow (lam : ℝ) (s : Site) (x : ℝ) : Row :=
+  if s.slopeReg lam 1 x = 0 then Row.flat (s.prox lam x) else Row.pinned (x - s.prox lam x)
+
+/-- **The semismooth Newton step of Stage II is the solver's linear system.** For symmetric `L`:
+`(v, q, ν)` solves the Newton system `DF(u, φ, μ)(v, q, ν) = −F(u, φ, μ)` of the residual map of
+`DdgProofs.Newton` (paper Eq. 26) if and only if the new iterate `(u + v, φ + q)` solves the
+solver's row system for the rows `newtonRow` of the current point, and `μ + ν` is the cone vector
+`L(u + v) + Ω` that the new `u` induces.
+
+Together with `ConeProblem.isMinimizer_of_newton_step` this is the chain: solve the row system;
+if every vertex is still on its piece, the result is a global minimizer.
+
+[formula: saddle-point-newton-system] -/
+theorem newton_step_iff_isSolution (hsymm : P.Lᵀ = P.L) (u φ μ v q ν : ι → ℝ) :
+    P.residualDeriv u φ μ (v, q, ν) = -P.residual u φ μ ↔
+      IsSolution P.L (fun i => P.wE i * P.m i) P.Ω
+          (fun i => newtonRow P.lam (P.site i) (φ i + μ i)) (u + v) (φ + q) ∧
+        μ + ν = P.inducedCone (u + v) := by
+  simp only [residualDeriv, residual, Prod.neg_mk, Prod.mk.injEq, hsymm]
+  have hLv : ∀ i, (P.L *ᵥ (u + v)) i = (P.L *ᵥ u) i + (P.L *ᵥ v) i := fun i => by
+    rw [Matrix.mulVec_add]; rfl
+  have hLq : ∀ i, (P.L *ᵥ (φ + q)) i = (P.L *ᵥ φ) i + (P.L *ᵥ q) i := fun i => by
+    rw [Matrix.mulVec_add]; rfl
+  constructor
+  · rintro ⟨h1, h2, h3⟩
+    have hμ : ∀ i, μ i + ν i = (P.L *ᵥ (u + v)) i + P.Ω i := by
+      intro i
+      have := congrFun h1 i
+      simp only [Pi.sub_apply, Pi.neg_apply, Pi.add_apply] at this
+      rw [hLv]; linarith
+    refine ⟨⟨fun i => ?_, fun i => ?_⟩, funext fun i => by simpa [inducedCone] using hμ i⟩
+    · have := congrFun h2 i
+      simp only [Pi.add_apply, Pi.neg_apply] at this
+      rw [hLq]; simp only [Pi.add_apply]; linarith
+    · have h3i := congrFun h3 i
+      simp only [Pi.neg_apply] at h3i
+      unfold newtonRow
+      rcases slopeReg_one_eq_zero_or_one P.lam (P.site i) (φ i + μ i) with hs | hs
+      · rw [ite_eq_left hs]
+        rw [hs] at h3i
+        simp only [Row.Holds]
+        have := hμ i
+        linarith
+      · rw [ite_eq_right (by rw [hs]; norm_num)]
+        rw [hs] at h3i
+        simp only [Row.Holds, Pi.add_apply]
+        linarith
+  · rintro ⟨⟨h1, h2⟩, h3⟩
+    have hμ : ∀ i, μ i + ν i = (P.L *ᵥ (u + v)) i + P.Ω i := fun i => by
+      have := congrFun h3 i; simpa [inducedCone] using this
+    refine ⟨funext fun i => ?_, funext fun i => ?_, funext fun i => ?_⟩
+    · simp only [Pi.sub_apply, Pi.neg_apply, Pi.add_apply]
+      have := hμ i; rw [hLv] at this; linarith
+    · simp only [Pi.add_apply, Pi.neg_apply]
+      have := h1 i; rw [hLq] at this; simp only [Pi.add_apply] at this; linarith
+    · simp only [Pi.neg_apply]
+      have hrow := h2 i
+      unfold newtonRow at hrow
+      rcases slopeReg_one_eq_zero_or_one P.lam (P.site i) (φ i + μ i) with hs | hs
+      · rw [ite_eq_left hs] at hrow
+        rw [hs]
+        simp only [Row.Holds] at hrow
+        have := hμ i
+        linarith
+      · rw [ite_eq_right (by rw [hs]; norm_num)] at hrow
+        rw [hs]
+        simp only [Row.Holds, Pi.add_apply] at hrow
+        linarith
 
 /-! ### The regularized (proximal) stage -/
 

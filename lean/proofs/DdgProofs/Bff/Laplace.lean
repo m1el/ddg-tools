@@ -1,5 +1,6 @@
 import DdgProofs.Yamabe
 import DdgProofs.Solver
+import DdgProofs.Bff.Curve
 
 /-!
 # The Poisson problems of Boundary First Flattening
@@ -29,6 +30,10 @@ Crane, *Boundary First Flattening*, ACM TOG 2017; "BFF"). With `F` the set of fr
   under `ℓ̃_ij = e^{t(v_i+v_j)/2} ℓ_ij` the boundary curvature `k_i = π − Σθ` has derivative
   `(L v)_i` at `t = 0`. So `k̃ = k + (L u)_B` is the first-order change of the boundary curvature;
   the code *defines* the target exterior angles by it.
+
+* **`bff-hilbert-transform`** (BFF Eq. 17): `hilbertTransform_cotan` puts the statements of
+  `DdgProofs/Bff/Curve.lean` on a mesh: the Neumann problem for the harmonic conjugate is
+  solvable and its solutions are the minimizers of the conformal energy.
 
 Signs: `L` is positive semidefinite and `u` is the log scale factor (`CLAUDE.md`); BFF's `A` is
 this `L` and its Eq. 12–14 read `A u = −(K − C)` in the interior and `h = −(A u)_B` on the
@@ -290,6 +295,30 @@ theorem hasDerivAt_geodesicCurvature_conformalScale (hM : M.Valid) (v : V → �
       ((M.laplacian *ᵥ v) i) 0 := by
   have h := (M.hasDerivAt_angleSum_conformalScale hM v i).const_sub π
   simpa [geodesicCurvature] using h
+
+/-! ## The harmonic conjugate (Hilbert transform) on a mesh -/
+
+/-- **The Neumann problem of the Hilbert transform is solvable, and its solutions are the
+minimizers of the conformal energy.** On a connected valid mesh, for a boundary loop `β` with
+successor `next`, an injective map `emb` from boundary positions to vertices, and any `a`:
+there is a `b` with `L b = h`, where `h_j = ½(a_{j−1} − a_{j+1})` at the boundary vertex `emb j`
+and `0` at every other vertex (`hilbertVector`, the vector `hilbert_transform` returns); and `b`
+solves this system iff it minimizes `b' ↦ ½(aᵀLa + b'ᵀLb') − 𝒜(a, b')`, `𝒜` the signed area of
+the image of the boundary polygon (`loopConformalEnergy`). Two solutions differ by a constant
+(`sub_const_of_laplacian_mulVec_eq`).
+
+[formula: bff-hilbert-transform] -/
+theorem hilbertTransform_cotan {β : Type*} [Fintype β] (hM : M.Valid) (hconn : M.Connected)
+    (next : Equiv.Perm β) {emb : β → V} (hemb : Function.Injective emb) (a : V → ℝ) :
+    (∃ b, M.laplacian *ᵥ b = hilbertVector next emb a) ∧
+      ∀ b, (∀ b', loopConformalEnergy next emb M.laplacian a b ≤
+            loopConformalEnergy next emb M.laplacian a b') ↔
+        M.laplacian *ᵥ b = hilbertVector next emb a := by
+  refine ⟨?_, fun b => hilbertVector_minimizes_conformalEnergy_iff next hemb
+    (M.laplacian_posSemidef hM) a b⟩
+  rw [M.exists_laplacian_mulVec_eq_iff hM hconn]
+  exact sum_hilbertRhs_vertices hemb (fun j => hilbertVector_emb next hemb a j)
+    (fun v hv => hilbertVector_of_notMem next emb a hv)
 
 end TriMesh
 

@@ -18,3 +18,5 @@ import DdgProofs.Oracle.Unbounded
 import DdgProofs.Oracle.Mesh
 import DdgProofs.Bff.Laplace
 import DdgProofs.Bff.Cut
+import DdgProofs.Bff.Curve
+import DdgProofs.Bff.Quality
