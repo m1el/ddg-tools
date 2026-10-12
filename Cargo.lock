@@ -415,6 +415,7 @@ version = "0.1.0"
 dependencies = [
  "clarabel",
  "ddg-core",
+ "faer",
  "proptest",
 ]
 

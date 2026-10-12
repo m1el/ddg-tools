@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 ddg-core = { path = "../ddg-core" }
+faer = { version = "0.24.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 proptest = "1"

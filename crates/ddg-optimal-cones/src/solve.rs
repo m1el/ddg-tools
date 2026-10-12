@@ -9,6 +9,9 @@ use crate::certificate::{Certificate, apply_laplacian, certify_with_boundary};
 use crate::error::ConeError;
 use crate::evaluate::{LaplaceSolver, cones_to_measure, log_scale_of_measure};
 use crate::extract::{ExtractOptions, ExtractionReport, extract_cones};
+use crate::factor_once::{
+    self, FactorOnceOptions, FactorOnceReport, FallbackReason, MethodUsed, SolveMethod, Unsupported,
+};
 use crate::linsys::{LinearSolver, LinearSolverReport, NewtonLinearSolver, SaddleSolver};
 use crate::newton::{
     Iterate, NewtonOutcome, StageStop, adjoint_constant_interval, solve_exact, solve_regularized,
@@ -95,6 +98,12 @@ pub struct SolveOptions<'a> {
     /// Where factorizations and solves run. Default: on the calling thread. Threads gain
     /// little for these factorizations (see the `ddg-core` README).
     pub parallelism: Parallelism<'a>,
+    /// Which method solves the problem. Default [`SolveMethod::Auto`]: the factor-once method
+    /// where it applies and is fast, the reference method otherwise. The report says which one
+    /// produced the result ([`SolveReport::method`]).
+    pub method: SolveMethod,
+    /// Options of the factor-once method (thresholds for giving up, tolerance).
+    pub factor_once: FactorOnceOptions,
 }
 
 impl Default for SolveOptions<'_> {
@@ -113,6 +122,8 @@ impl Default for SolveOptions<'_> {
             max_merge_cluster_diameter: f64::INFINITY,
             linear_solver: LinearSolver::default(),
             parallelism: Parallelism::Sequential,
+            method: SolveMethod::default(),
+            factor_once: FactorOnceOptions::default(),
         }
     }
 }
@@ -150,6 +161,22 @@ impl SolveOptions<'_> {
             return bad("max_regularized_iterations must be at least 1".to_string());
         }
         for (name, value) in [
+            ("factor_once.tolerance", self.factor_once.tolerance),
+            (
+                "factor_once.max_working_set_fraction",
+                self.factor_once.max_working_set_fraction,
+            ),
+        ] {
+            if !(value.is_finite() && value >= 0.0) {
+                return bad(format!(
+                    "{name} is {value}; it must be finite and non-negative"
+                ));
+            }
+        }
+        if self.factor_once.max_rounds == 0 {
+            return bad("factor_once.max_rounds must be at least 1".to_string());
+        }
+        for (name, value) in [
             ("newton_tolerance", self.newton_tolerance),
             ("certificate_tolerance", self.certificate_tolerance),
             ("cone_threshold", self.cone_threshold),
@@ -162,6 +189,24 @@ impl SolveOptions<'_> {
         }
         Ok(())
     }
+}
+
+/// Which method produced a result and why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MethodReport {
+    /// What [`SolveOptions::method`] asked for.
+    pub requested: SolveMethod,
+    /// The method that produced the returned result. With [`SolveMethod::FactorOnce`] this is
+    /// always the factor-once method, also when it gave up (then `fallback` says why and the
+    /// status is not [`Status::Converged`]).
+    pub used: MethodUsed,
+    /// Why the factor-once method did not produce a certified result, if it was tried or
+    /// excluded and did not. `None` when it succeeded, and when the reference method was
+    /// requested. With `requested == Auto` and `used == Reference` it is the reason for the
+    /// fallback.
+    pub fallback: Option<FallbackReason>,
+    /// What the factor-once method did, if it ran (also when it gave up).
+    pub factor_once: Option<FactorOnceReport>,
 }
 
 /// Whether the result is a certified optimum.
@@ -230,6 +275,8 @@ pub struct Timings {
     pub regularized: f64,
     /// Stage II including safeguard rounds.
     pub exact: f64,
+    /// The factor-once method (also when it gave up and the reference method followed).
+    pub factor_once: f64,
     /// The certificate.
     pub certificate: f64,
     /// Cone extraction, including the recomputation of `u` when the cones changed.
@@ -276,6 +323,8 @@ pub struct SolveReport {
     pub largest_zeroed_angle: f64,
     /// The optimality certificate of `(u, φ, µ)` as returned.
     pub certificate: Certificate,
+    /// Which method produced the result, and why.
+    pub method: MethodReport,
     /// Explanation when something did not go to plan (a linear solver failure, or why the
     /// result is not converged).
     pub message: Option<String>,
@@ -465,6 +514,110 @@ struct Driven {
     exact_seconds: f64,
 }
 
+impl Driven {
+    /// The result of the factor-once method, in the shape of a driver result.
+    fn fast(x: Iterate, message: Option<String>) -> Driven {
+        Driven {
+            x,
+            stages: Vec::new(),
+            message,
+            linear_failure: false,
+            safeguard_rounds: 0,
+            linear_report: LinearSolverReport::default(),
+            regularized_seconds: 0.0,
+            exact_seconds: 0.0,
+        }
+    }
+}
+
+/// The optimum as returned, after the rounding-level clean-up, with its certificate.
+struct Optimum {
+    /// The cleaned iterate.
+    x: Iterate,
+    measure: Vec<f64>,
+    log_scale_optimal: Vec<f64>,
+    adjoint: Vec<f64>,
+    adjoint_shift: (f64, f64),
+    distortion_optimal: f64,
+    cone_cost: f64,
+    certificate: Certificate,
+    bound_correction: f64,
+    zeroed_angles: usize,
+    largest_zeroed_angle: f64,
+    seconds: f64,
+}
+
+/// Cleans up the iterate (bounds, tiny angles, the adjoint constant of a closed mesh) and
+/// computes the certificate of what is returned.
+fn optimum(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    d: &Discrete,
+    options: &SolveOptions<'_>,
+    mut x: Iterate,
+) -> Result<Optimum, ConeError> {
+    // Rounding-level clean-up of the cone angles; the certificate is computed afterwards.
+    // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
+    // its bound by rounding is moved onto it. And a cone angle below the Newton tolerance is
+    // no cone: an active vertex can carry such an angle when it absorbs the rounding error of
+    // the data, for instance of Σ Ω on a closed mesh.
+    let mut bound_correction = 0.0f64;
+    let mut zeroed_angles = 0;
+    let mut largest_zeroed_angle = 0.0f64;
+    for (mu, site) in x.mu.iter_mut().zip(&d.sites) {
+        let clamped = mu.clamp(site.lo, site.hi);
+        bound_correction = bound_correction.max((clamped - *mu).abs());
+        *mu = clamped;
+        if !site.fixed && *mu != 0.0 && mu.abs() <= options.newton_tolerance {
+            zeroed_angles += 1;
+            largest_zeroed_angle = largest_zeroed_angle.max(mu.abs());
+            *mu = 0.0;
+        }
+    }
+
+    // On a closed mesh the adjoint is determined up to the constants that keep it in the
+    // subdifferentials. Return the admissible adjoint whose mass-weighted mean is closest to
+    // zero, and the interval of the others.
+    let mut adjoint_shift = (0.0, 0.0);
+    if d.closed {
+        let (lo, hi) = adjoint_constant_interval(&d.sites, &x.phi, &x.mu);
+        if lo <= hi {
+            let mean = x.phi.iter().zip(&d.mass).map(|(p, m)| p * m).sum::<f64>()
+                / d.mass.iter().sum::<f64>();
+            let c = (-mean).clamp(lo, hi);
+            for phi in &mut x.phi {
+                *phi += c;
+            }
+            adjoint_shift = (lo - c, hi - c);
+        }
+    }
+
+    // The optimum, per vertex.
+    let measure = d.to_vertices(&x.mu);
+    let log_scale_optimal = d.to_vertices(&x.u);
+    let adjoint = d.to_vertices(&x.phi);
+    let distortion_optimal = d.distortion(&x.u);
+    let cone_cost = d.cone_cost(&x.mu);
+
+    let start = Instant::now();
+    let certificate =
+        certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
+    Ok(Optimum {
+        x,
+        measure,
+        log_scale_optimal,
+        adjoint,
+        adjoint_shift,
+        distortion_optimal,
+        cone_cost,
+        certificate,
+        bound_correction,
+        zeroed_angles,
+        largest_zeroed_angle,
+        seconds: start.elapsed().as_secs_f64(),
+    })
+}
+
 /// Stages I and II with the safeguards, on an assembled problem.
 ///
 /// [formula: proximal-fixed-point]
@@ -622,6 +775,20 @@ fn drive(d: &Discrete, options: &SolveOptions<'_>) -> Result<Driven, ConeError> 
     })
 }
 
+/// Whether the factor-once method supports a problem: `Ok(None)` if it does, `Ok(Some(why))` if
+/// [`SolveMethod::Auto`] would use the reference method for it (and
+/// [`SolveMethod::FactorOnce`] would refuse it).
+///
+/// # Errors
+/// As [`solve_with_boundary`] for an invalid problem.
+pub fn factor_once_support(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+) -> Result<Option<Unsupported>, ConeError> {
+    let d = Discrete::with_boundary(problem, boundary)?;
+    Ok(factor_once::check_support(&d, problem.lambda).err())
+}
+
 /// Computes optimal cone singularities: solves the canonical problem and extracts the cones.
 ///
 /// The method is the paper's (Fig. 12): Stage I solves a sequence of regularized problems by a
@@ -688,8 +855,57 @@ pub fn solve_with_boundary(
         ..Timings::default()
     };
 
+    let mut method = MethodReport {
+        requested: options.method,
+        used: MethodUsed::Reference,
+        fallback: None,
+        factor_once: None,
+    };
+    // The factor-once method first, unless the reference method is forced.
+    let mut accepted: Option<(Driven, Optimum)> = None;
+    if options.method != SolveMethod::Reference {
+        let forced = options.method == SolveMethod::FactorOnce;
+        let start = Instant::now();
+        let attempt = factor_once::attempt(&d, problem.lambda, &options.factor_once, par, forced);
+        timings.factor_once = start.elapsed().as_secs_f64();
+        method.factor_once = Some(attempt.report.clone());
+        let mut message = None;
+        let mut reason = attempt.gave_up;
+        if let Some(x) = attempt.x {
+            let opt = optimum(problem, boundary, &d, options, x)?;
+            if reason.is_none() && !opt.certificate.holds(options.certificate_tolerance) {
+                reason = Some(FallbackReason::CertificateFailed {
+                    certificate: Box::new(opt.certificate),
+                });
+            }
+            if forced {
+                if let Some(r) = &reason {
+                    message = Some(format!("the factor-once method did not finish: {r}"));
+                }
+                accepted = Some((Driven::fast(opt.x.clone(), message), opt));
+                method.used = MethodUsed::FactorOnce;
+            } else if reason.is_none() {
+                accepted = Some((Driven::fast(opt.x.clone(), None), opt));
+                method.used = MethodUsed::FactorOnce;
+            }
+        } else if forced {
+            let why = reason.map_or_else(|| "no result".to_string(), |r| r.to_string());
+            return Err(ConeError::InvalidOptions {
+                reason: format!("SolveMethod::FactorOnce cannot solve this problem: {why}"),
+            });
+        }
+        method.fallback = reason;
+    }
+    let (driven, opt) = match accepted {
+        Some(pair) => pair,
+        None => {
+            let driven = drive(&d, options)?;
+            let opt = optimum(problem, boundary, &d, options, driven.x.clone())?;
+            (driven, opt)
+        }
+    };
     let Driven {
-        mut x,
+        x: _,
         stages,
         mut message,
         linear_failure,
@@ -697,57 +913,24 @@ pub fn solve_with_boundary(
         linear_report,
         regularized_seconds,
         exact_seconds,
-    } = drive(&d, options)?;
+    } = driven;
     timings.regularized = regularized_seconds;
     timings.exact = exact_seconds;
-
-    // Rounding-level clean-up of the cone angles; the certificate is computed afterwards.
-    // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
-    // its bound by rounding is moved onto it. And a cone angle below the Newton tolerance is
-    // no cone: an active vertex can carry such an angle when it absorbs the rounding error of
-    // the data, for instance of Σ Ω on a closed mesh.
-    let mut bound_correction = 0.0f64;
-    let mut zeroed_angles = 0;
-    let mut largest_zeroed_angle = 0.0f64;
-    for (mu, site) in x.mu.iter_mut().zip(&d.sites) {
-        let clamped = mu.clamp(site.lo, site.hi);
-        bound_correction = bound_correction.max((clamped - *mu).abs());
-        *mu = clamped;
-        if !site.fixed && *mu != 0.0 && mu.abs() <= options.newton_tolerance {
-            zeroed_angles += 1;
-            largest_zeroed_angle = largest_zeroed_angle.max(mu.abs());
-            *mu = 0.0;
-        }
-    }
-
-    // On a closed mesh the adjoint is determined up to the constants that keep it in the
-    // subdifferentials. Return the admissible adjoint whose mass-weighted mean is closest to
-    // zero, and the interval of the others.
-    let mut adjoint_shift = (0.0, 0.0);
-    if d.closed {
-        let (lo, hi) = adjoint_constant_interval(&d.sites, &x.phi, &x.mu);
-        if lo <= hi {
-            let mean = x.phi.iter().zip(&d.mass).map(|(p, m)| p * m).sum::<f64>()
-                / d.mass.iter().sum::<f64>();
-            let c = (-mean).clamp(lo, hi);
-            for phi in &mut x.phi {
-                *phi += c;
-            }
-            adjoint_shift = (lo - c, hi - c);
-        }
-    }
-
-    // The optimum, per vertex.
-    let measure = d.to_vertices(&x.mu);
-    let log_scale_optimal = d.to_vertices(&x.u);
-    let adjoint = d.to_vertices(&x.phi);
-    let distortion_optimal = d.distortion(&x.u);
-    let cone_cost = d.cone_cost(&x.mu);
-
-    let start = Instant::now();
-    let certificate =
-        certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
-    timings.certificate = start.elapsed().as_secs_f64();
+    let Optimum {
+        x: _,
+        measure,
+        log_scale_optimal,
+        adjoint,
+        adjoint_shift,
+        distortion_optimal,
+        cone_cost,
+        certificate,
+        bound_correction,
+        zeroed_angles,
+        largest_zeroed_angle,
+        seconds: certificate_seconds,
+    } = opt;
+    timings.certificate = certificate_seconds;
     let status = if certificate.holds(options.certificate_tolerance) {
         Status::Converged
     } else if linear_failure {
@@ -873,6 +1056,7 @@ pub fn solve_with_boundary(
             zeroed_angles,
             largest_zeroed_angle,
             certificate,
+            method,
             message,
         },
     })

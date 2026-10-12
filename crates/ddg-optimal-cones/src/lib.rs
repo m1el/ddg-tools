@@ -138,6 +138,7 @@ mod certificate;
 mod error;
 mod evaluate;
 mod extract;
+mod factor_once;
 mod linsys;
 mod newton;
 mod problem;
@@ -152,12 +153,16 @@ pub use certificate::{Certificate, certify, certify_with_boundary};
 pub use error::{ConeError, PrescribedConeIssue};
 pub use evaluate::{ConeEvaluation, evaluate_cones};
 pub use extract::{ExtractionReport, MergedCluster, UnmergedCluster, UnmergedReason};
+pub use factor_once::{
+    DenseStats, FactorOnceOptions, FactorOnceReport, FactorOnceTimings, FallbackReason, MethodUsed,
+    SolveMethod, Unsupported,
+};
 pub use linsys::{LinearSolver, LinearSolverReport};
 pub use newton::StageStop;
 pub use problem::{BoundaryTreatment, ConeProblem};
 pub use site::soft_threshold;
 pub use solve::{
-    RegularizationMetric, Solution, SolveOptions, SolveReport, StageKind, StageReport, Status,
-    Timings, solve, solve_with_boundary,
+    MethodReport, RegularizationMetric, Solution, SolveOptions, SolveReport, StageKind,
+    StageReport, Status, Timings, factor_once_support, solve, solve_with_boundary,
 };
 pub use weights::{FeatureSizeConvention, FeatureSizeWeights, feature_size_weights};
