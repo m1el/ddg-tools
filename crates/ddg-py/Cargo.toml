@@ -1,0 +1,27 @@
+[package]
+name = "ddg-py"
+description = "Python module `ddg_tools`: mesh buffers in, per-corner UVs out (PyO3 binding of the ddg-tools workspace)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+# `cdylib` is the Python extension module (built by maturin with `--features python`);
+# `rlib` lets `cargo test` and other crates use the pure-Rust part.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Nothing by default: a plain `cargo build` / `cargo test` (also at the workspace root) compiles
+# only the pure-Rust part of this crate and needs neither PyO3 nor a Python interpreter.
+default = []
+# The PyO3 glue (`src/python.rs`). maturin enables it through `pyproject.toml`.
+python = ["dep:pyo3"]
+
+[dependencies]
+# `default-features = false` keeps the GPL-licensed `blender-tessellation` module of ddg-core out
+# of the wheel: the triangulation comes from Blender itself (`mesh.loop_triangles`).
+ddg-core = { path = "../ddg-core", default-features = false }
+pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.9.4,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ddg-tools"
+description = "Mesh buffers in, per-corner UVs out: Python binding of the ddg-tools Rust workspace"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+
+[tool.maturin]
+# The importable module. The PyO3 module in src/python.rs carries the same name.
+module-name = "ddg_tools"
+# The PyO3 glue is behind a cargo feature so that plain `cargo build` / `cargo test` in the
+# workspace never need Python (see Cargo.toml).
+features = ["python"]
+strip = true
