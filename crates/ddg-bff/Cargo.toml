@@ -1,0 +1,18 @@
+[package]
+name = "ddg-bff"
+description = "Boundary First Flattening (Sawhney & Crane 2017) with cone singularities, and the mesh cutting it needs"
+version.workspace = true
+edition.workspace = true
+# MIT. The flattening code is a port of the reference implementation by Rohan Sawhney and
+# Keenan Crane (MIT, see LICENSES/BFF-MIT.txt).
+license = "MIT"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Without default features: the default feature of ddg-core compiles GPL-licensed code
+# (Blender's tessellation), which this crate must not link.
+ddg-core = { path = "../ddg-core", default-features = false }
+
+[dev-dependencies]
+proptest = "1"
