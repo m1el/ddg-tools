@@ -2,7 +2,9 @@
 //! internal form on the unknown vertices.
 
 use ddg_core::io::Cone;
-use ddg_core::operators::{angle_defects, cotan_laplacian, lumped_mass_normalized};
+use ddg_core::operators::{
+    angle_defects, boundary_geodesic_curvatures, cotan_laplacian, lumped_mass_normalized,
+};
 use ddg_core::{Geometry, SparseMatrix, TriMesh};
 
 use crate::error::{ConeError, PrescribedConeIssue};
@@ -13,6 +15,40 @@ use crate::site::Site;
 /// exactly `2πχ`, like `0 ≤ µ ≤ π/2` on a cube, are not rejected by rounding).
 pub(crate) const FEASIBILITY_TOLERANCE: f64 = 1e-9;
 
+/// What the solver does with the boundary of a mesh (paper Sec. 8.3, Fig. 10). It matters only
+/// on meshes with boundary; on a closed mesh all variants give the same problem.
+///
+/// With boundary vertices `B` and interior vertices `I`, the boundary geodesic curvature of the
+/// mesh is `k_i = π − Σ(corner angles at i)` and `ν_i` is the geodesic curvature of the
+/// flattened boundary at `i`. Every treatment but [`Fixed`](BoundaryTreatment::Fixed) makes
+/// `u_i` an unknown at the boundary vertices as well, with the constraint
+///
+/// ```text
+/// (L u)_i = ν_i − k_i                                  (i ∈ B)
+/// ```
+///
+/// next to `(L u)_i = µ_i − Ω_i` at the interior vertices, and a *site* for `ν_i` exactly like
+/// the site of a cone angle `µ_i`. The distortion `½ Σ wE_i m_i u_i²` then runs over all
+/// vertices, and `u` is defined up to a constant that is optimized too, as on a closed mesh.
+/// `Σ_I µ + Σ_B ν = 2πχ` holds (Gauss–Bonnet).
+///
+/// [formula: boundary-optimality-system]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoundaryTreatment {
+    /// `u_i = 0` at the boundary vertices (paper Fig. 10b): the canonical problem of the crate
+    /// documentation, and the behaviour of [`solve`](crate::solve).
+    #[default]
+    Fixed,
+    /// `ν_i` is free at no cost: optimized boundary values (Fig. 10c). The adjoint vanishes on
+    /// the boundary (a natural boundary condition).
+    Free,
+    /// `ν_i` costs `λ·wR_i·|ν_i|`, with `wR_i = ` [`ConeProblem::cone_costs`]`[i]` (default 1;
+    /// `+∞` makes the boundary vertex straight, `ν_i = 0`): a polygonal boundary (Fig. 10d).
+    Penalized,
+    /// `ν_i ≥ 0` at no cost: a convex boundary (Fig. 10e).
+    Convex,
+}
+
 /// The canonical discrete problem (see the [crate documentation](crate)):
 ///
 /// ```text
@@ -21,7 +57,11 @@ pub(crate) const FEASIBILITY_TOLERANCE: f64 = 1e-9;
 /// ```
 ///
 /// Every per-vertex array has one entry per mesh vertex. Entries of boundary vertices are
-/// validated like the others but have no effect: `u = 0` and `µ = 0` there.
+/// validated like the others but have no effect: `u = 0` and `µ = 0` there. (The
+/// `*_with_boundary` functions take a [`BoundaryTreatment`] that changes this; this struct
+/// does not carry it, so that it stays constructible by struct literal as before. Then
+/// `distortion_weights` apply at the boundary vertices, and for
+/// [`BoundaryTreatment::Penalized`] `cone_costs` too.)
 ///
 /// `m` is the lumped vertex mass divided by the total area, so `λ` is dimensionless and the
 /// problem does not depend on the length unit.
@@ -91,7 +131,10 @@ fn check_length(what: &'static str, array: &Option<Vec<f64>>, n: usize) -> Resul
 }
 
 /// Validates everything about a problem that does not need the geometry's values.
-pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeError> {
+pub(crate) fn validate_with(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+) -> Result<VertexData, ConeError> {
     let mesh = problem.mesh;
     problem.geometry.check_mesh(mesh)?;
     if mesh.n_components() != 1 {
@@ -109,7 +152,10 @@ pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeErro
     check_length("lower_bounds", &problem.lower_bounds, nv)?;
     check_length("upper_bounds", &problem.upper_bounds, nv)?;
 
-    let unknown: Vec<bool> = (0..nv).map(|v| !mesh.is_boundary_vertex(v)).collect();
+    let fixed_boundary = boundary == BoundaryTreatment::Fixed;
+    let unknown: Vec<bool> = (0..nv)
+        .map(|v| !fixed_boundary || !mesh.is_boundary_vertex(v))
+        .collect();
     let mut w_e = vec![1.0; nv];
     let mut sites = Vec::with_capacity(nv);
     let mut n_forbidden = 0;
@@ -149,6 +195,26 @@ pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeErro
         }
         if !unknown[v] {
             sites.push(Site::fixed(0.0));
+        } else if mesh.is_boundary_vertex(v) {
+            // A boundary vertex that is an unknown: its site is that of the treatment.
+            match boundary {
+                BoundaryTreatment::Fixed => unreachable!("boundary vertices are not unknowns"),
+                BoundaryTreatment::Free => {
+                    sites.push(Site::penalized(0.0, f64::NEG_INFINITY, f64::INFINITY))
+                }
+                BoundaryTreatment::Penalized if cost == f64::INFINITY => {
+                    n_forbidden += 1;
+                    sites.push(Site::fixed(0.0));
+                }
+                BoundaryTreatment::Penalized => sites.push(Site::penalized(
+                    lambda * cost,
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                )),
+                BoundaryTreatment::Convex => {
+                    sites.push(Site::penalized(0.0, 0.0, f64::INFINITY))
+                }
+            }
         } else if cost == f64::INFINITY {
             n_forbidden += 1;
             sites.push(Site::fixed(0.0));
@@ -172,7 +238,7 @@ pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeErro
         if !cone.angle.is_finite() {
             return Err(issue(PrescribedConeIssue::NonFiniteAngle));
         }
-        if !unknown[v] {
+        if mesh.is_boundary_vertex(v) {
             return Err(issue(PrescribedConeIssue::BoundaryVertex));
         }
         if seen[v] {
@@ -195,18 +261,23 @@ pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeErro
 
 /// The problem restricted to its unknowns: the interior vertices of a mesh with boundary
 /// (`u = 0` on the boundary eliminated), or all vertices of a closed mesh.
+#[derive(Clone)]
 pub(crate) struct Discrete {
     /// Number of unknown vertices.
     pub n: usize,
     /// Number of mesh vertices.
     pub n_vertices: usize,
-    /// Whether the mesh has no boundary (then `a` is singular: it annihilates constants).
+    /// Whether every vertex is an unknown (a closed mesh, or a boundary treatment other than
+    /// `Fixed`); then `a` is the whole Laplacian, singular: it annihilates constants.
     pub closed: bool,
+    /// Per unknown: whether its vertex is a boundary vertex (only with an unknown boundary).
+    pub is_boundary: Vec<bool>,
     /// For each unknown, its vertex (ascending).
     pub unknowns: Vec<u32>,
     /// The Laplacian block of the unknowns: `L_II`, or all of `L` on a closed mesh.
     pub a: SparseMatrix,
-    /// Angle defects `Ω` of the unknowns.
+    /// Angle defects `Ω` of the unknowns (the boundary geodesic curvature `k` at an unknown
+    /// boundary vertex).
     pub omega: Vec<f64>,
     /// Area-normalized lumped masses `m` of the unknowns.
     pub mass: Vec<f64>,
@@ -228,7 +299,20 @@ impl Discrete {
     ///
     /// [formula: lambda-area-normalization]
     pub fn new(problem: &ConeProblem<'_>) -> Result<Discrete, ConeError> {
-        let data = validate(problem)?;
+        Discrete::with_boundary(problem, BoundaryTreatment::Fixed)
+    }
+
+    /// [`Discrete::new`] for a boundary treatment. With a treatment other than `Fixed` the
+    /// boundary vertices are unknowns whose "angle defect" is the boundary geodesic curvature
+    /// `k`, so that one formula covers `µ` and `ν`.
+    ///
+    /// [formula: lambda-area-normalization]
+    /// [formula: boundary-optimality-system]
+    pub fn with_boundary(
+        problem: &ConeProblem<'_>,
+        boundary: BoundaryTreatment,
+    ) -> Result<Discrete, ConeError> {
+        let data = validate_with(problem, boundary)?;
         let mesh = problem.mesh;
         let geometry = problem.geometry;
         let nv = mesh.n_vertices();
@@ -244,7 +328,7 @@ impl Discrete {
         } else {
             laplacian.submatrix(&unknowns, &unknowns)?
         };
-        let omega_v = angle_defects(mesh, geometry)?;
+        let omega_v = curvatures(mesh, geometry, boundary)?;
         let mass_v = lumped_mass_normalized(mesh, geometry)?;
         let pick =
             |values: &[f64]| -> Vec<f64> { unknowns.iter().map(|&v| values[v as usize]).collect() };
@@ -270,10 +354,15 @@ impl Discrete {
             }
             check_gauss_bonnet_feasible(problem, &data, &sites, total_curvature)?;
         }
+        let is_boundary: Vec<bool> = unknowns
+            .iter()
+            .map(|&v| mesh.is_boundary_vertex(v as usize))
+            .collect();
         Ok(Discrete {
             n,
             n_vertices: nv,
             closed,
+            is_boundary,
             unknowns,
             a,
             omega,
@@ -283,6 +372,36 @@ impl Discrete {
             total_curvature,
             curvature_rounding,
         })
+    }
+
+    /// The same problem with the cone angle of every interior unknown fixed to that of `cones`
+    /// (zero where there is none), at no cost; the sites of the boundary vertices are kept.
+    /// With unknown boundary values this is "optimize the boundary for given cones".
+    pub fn with_fixed_interior(&self, cones: &[Cone]) -> Result<Discrete, ConeError> {
+        let mut unknown_of = vec![u32::MAX; self.n_vertices];
+        for (i, &v) in self.unknowns.iter().enumerate() {
+            unknown_of[v as usize] = i as u32;
+        }
+        let mut angle = vec![0.0; self.n];
+        for (index, cone) in cones.iter().enumerate() {
+            let i = unknown_of.get(cone.vertex as usize).copied().unwrap_or(u32::MAX);
+            if i == u32::MAX || self.is_boundary[i as usize] || !cone.angle.is_finite() {
+                return Err(ConeError::InvalidCone {
+                    index,
+                    vertex: cone.vertex,
+                    angle: cone.angle,
+                    reason: PrescribedConeIssue::BoundaryVertex,
+                });
+            }
+            angle[i as usize] = cone.angle;
+        }
+        let mut out = self.clone();
+        for i in 0..self.n {
+            if !self.is_boundary[i] {
+                out.sites[i] = Site::fixed(angle[i]);
+            }
+        }
+        Ok(out)
     }
 
     /// Spreads a vector on the unknowns to all vertices (zero on the boundary).
@@ -307,6 +426,24 @@ impl Discrete {
             .map(|(site, &mu)| site.cost(mu))
             .sum()
     }
+}
+
+/// The right-hand-side data of the state equation per vertex: the angle defect `Ω` at interior
+/// vertices, and with unknown boundary vertices the geodesic curvature `k` at those (so that
+/// the entries sum to `2πχ`). Zero at boundary vertices for [`BoundaryTreatment::Fixed`].
+pub(crate) fn curvatures(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    boundary: BoundaryTreatment,
+) -> Result<Vec<f64>, ddg_core::GeometryError> {
+    let mut out = angle_defects(mesh, geometry)?;
+    if boundary != BoundaryTreatment::Fixed {
+        let k = boundary_geodesic_curvatures(mesh, geometry)?;
+        for (o, k) in out.iter_mut().zip(k) {
+            *o += k;
+        }
+    }
+    Ok(out)
 }
 
 /// On a closed mesh, summing the state equation gives `Σ µ_i = Σ Ω_i = 2πχ`; the constraints

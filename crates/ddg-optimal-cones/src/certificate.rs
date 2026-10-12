@@ -6,11 +6,11 @@
 //! evaluated from the problem's weights and bounds (not from the solver's active sets), and the
 //! dual point is rebuilt from `φ`.
 
-use ddg_core::operators::{angle_defects, lumped_mass_normalized};
+use ddg_core::operators::lumped_mass_normalized;
 use ddg_core::{Geometry, TriMesh};
 
 use crate::error::ConeError;
-use crate::problem::{ConeProblem, validate};
+use crate::problem::{BoundaryTreatment, ConeProblem, curvatures, validate_with};
 
 /// Residuals of the optimality conditions and the duality gap of a triple `(u, φ, µ)`.
 ///
@@ -192,7 +192,32 @@ pub fn certify(
     adjoint: &[f64],
     measure: &[f64],
 ) -> Result<Certificate, ConeError> {
-    let data = validate(problem)?;
+    certify_with_boundary(problem, BoundaryTreatment::Fixed, log_scale, adjoint, measure)
+}
+
+/// [`certify`] for a boundary treatment: the certificate of a triple for the problem that
+/// [`solve_with_boundary`](crate::solve_with_boundary) solves. With a treatment other than
+/// `Fixed` the boundary vertices are unknowns: `measure` holds the curvature `ν` of the
+/// flattened boundary at them, `k_i` (the boundary geodesic curvature) plays the role of the
+/// angle defect there, and all residuals and sums run over all vertices; the Gauss–Bonnet
+/// residual is `|Σ_I µ + Σ_B ν − 2πχ|`.
+///
+/// # Errors
+/// As [`certify`].
+///
+/// [formula: optimality-system-sufficient]
+/// [formula: duality-gap-certificate]
+/// [formula: duality-gap-inexact]
+/// [formula: cone-fixed-point-bounded]
+/// [formula: boundary-optimality-system]
+pub fn certify_with_boundary(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    log_scale: &[f64],
+    adjoint: &[f64],
+    measure: &[f64],
+) -> Result<Certificate, ConeError> {
+    let data = validate_with(problem, boundary)?;
     let mesh = problem.mesh;
     let geometry = problem.geometry;
     let nv = mesh.n_vertices();
@@ -201,7 +226,7 @@ pub fn certify(
     check_len("measure", measure, nv)?;
     let (u, phi, mu) = (log_scale, adjoint, measure);
 
-    let omega = angle_defects(mesh, geometry)?;
+    let omega = curvatures(mesh, geometry, boundary)?;
     let mass = lumped_mass_normalized(mesh, geometry)?;
     let closed = data.unknown.iter().all(|&b| b);
 

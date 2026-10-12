@@ -144,16 +144,16 @@ mod weights;
 pub use ddg_core::io::Cone;
 pub use ddg_core::sparse::{Parallelism, ThreadPool};
 
-pub use certificate::{Certificate, certify};
+pub use certificate::{Certificate, certify, certify_with_boundary};
 pub use error::{ConeError, PrescribedConeIssue};
 pub use evaluate::{ConeEvaluation, evaluate_cones};
 pub use extract::{ExtractionReport, MergedCluster, UnmergedCluster, UnmergedReason};
 pub use linsys::{LinearSolver, LinearSolverReport};
 pub use newton::StageStop;
-pub use problem::ConeProblem;
+pub use problem::{BoundaryTreatment, ConeProblem};
 pub use site::soft_threshold;
 pub use solve::{
     RegularizationMetric, Solution, SolveOptions, SolveReport, StageKind, StageReport, Status,
-    Timings, solve,
+    Timings, solve, solve_with_boundary,
 };
 pub use weights::{FeatureSizeConvention, FeatureSizeWeights, feature_size_weights};

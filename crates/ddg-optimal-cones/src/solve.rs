@@ -5,7 +5,7 @@ use std::time::Instant;
 use ddg_core::io::Cone;
 use ddg_core::sparse::Parallelism;
 
-use crate::certificate::{Certificate, certify};
+use crate::certificate::{Certificate, apply_laplacian, certify_with_boundary};
 use crate::error::ConeError;
 use crate::evaluate::{LaplaceSolver, cones_to_measure, log_scale_of_measure};
 use crate::extract::{ExtractOptions, ExtractionReport, extract_cones};
@@ -13,7 +13,8 @@ use crate::linsys::{LinearSolver, LinearSolverReport, NewtonLinearSolver, Saddle
 use crate::newton::{
     Iterate, NewtonOutcome, StageStop, adjoint_constant_interval, solve_exact, solve_regularized,
 };
-use crate::problem::{ConeProblem, Discrete, validate};
+use crate::problem::{BoundaryTreatment, ConeProblem, Discrete, validate_with};
+use ddg_core::operators::boundary_geodesic_curvatures;
 
 /// The quantity whose square the regularized problems of Stage I penalize.
 ///
@@ -301,8 +302,17 @@ pub struct Solution {
     /// The optimal measure `µ`: the cone angle at every vertex, exactly zero where there is no
     /// cone.
     pub measure: Vec<f64>,
-    /// The log scale factor `u` of the optimal measure: `(L u)_i = µ_i − Ω_i`.
+    /// The log scale factor `u` of the optimal measure: `(L u)_i = µ_i − Ω_i`. Zero at the
+    /// boundary vertices for [`BoundaryTreatment::Fixed`]; with an optimized boundary it is
+    /// returned there too.
     pub log_scale_optimal: Vec<f64>,
+    /// The geodesic curvature `ν_i` of the flattened boundary at every boundary vertex, zero at
+    /// interior vertices: `ν_i = (L u)_i + k_i` with `k_i = π −` (angle sum) the boundary
+    /// curvature of the mesh. For the treatments other than `Fixed` it is the optimized
+    /// variable, a copy of `measure` at the boundary vertices; for `Fixed` it is computed from
+    /// `u` (which vanishes on the boundary), so it is what the flattening with `u = 0` has
+    /// there. All zero on a closed mesh.
+    pub boundary_curvature: Vec<f64>,
     /// The adjoint state `φ`: `(L φ)_i = −wE_i m_i u_i`, with `φ_i = ±λ wR_i` at cones strictly
     /// inside their bounds and `|φ_i| ≤ λ wR_i` at unbounded vertices without a cone.
     pub adjoint: Vec<f64>,
@@ -443,37 +453,26 @@ fn failed_stage(kind: StageKind, safeguard: bool, start: Instant) -> StageReport
     }
 }
 
-/// Computes optimal cone singularities: solves the canonical problem and extracts the cones.
-///
-/// The method is the paper's (Fig. 12): Stage I solves a sequence of regularized problems by a
-/// semismooth Newton method, Stage II solves the exact optimality system by the same method
-/// started from the last regularized solution. If Stage II does not terminate, proximal steps
-/// are inserted ([`SolveOptions::max_safeguard_rounds`]). The result always carries its
-/// optimality [`Certificate`], and [`SolveReport::status`] is [`Status::Converged`] only if the
-/// certificate holds.
-///
-/// The safeguard rests on one fact: a minimizer `(u, µ)` of
-/// `objective + Σ (µ_i − µ̄_i)² / (2 k_i)` with `µ = µ̄` is a minimizer of the objective itself
-/// (the penalty and its derivative vanish there), and the iteration `µ̄ ← µ` decreases the
-/// objective. It is used only to reach a point; whether that point is optimal is decided by the
-/// certificate.
-///
-/// # Errors
-/// [`ConeError`] if the problem or the options are invalid, or the problem is infeasible. A
-/// solve that does not converge is **not** an error; check `report.status`.
+/// What the two-stage iteration produced.
+struct Driven {
+    x: Iterate,
+    stages: Vec<StageReport>,
+    message: Option<String>,
+    linear_failure: bool,
+    safeguard_rounds: usize,
+    linear_report: LinearSolverReport,
+    regularized_seconds: f64,
+    exact_seconds: f64,
+}
+
+/// Stages I and II with the safeguards, on an assembled problem.
 ///
 /// [formula: proximal-fixed-point]
-pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError> {
-    let total_start = Instant::now();
-    options.validate()?;
-    let par = options.parallelism;
-    let d = Discrete::new(problem)?;
+fn drive(d: &Discrete, options: &SolveOptions<'_>) -> Result<Driven, ConeError> {
     let n = d.n;
-    let mut timings = Timings {
-        setup: total_start.elapsed().as_secs_f64(),
-        ..Timings::default()
-    };
-
+    let par = options.parallelism;
+    let mut regularized_seconds = 0.0;
+    let mut exact_seconds = 0.0;
     let mut x = Iterate::zeros(n);
     let mut stages: Vec<StageReport> = Vec::new();
     let mut message: Option<String> = None;
@@ -482,7 +481,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
     let mut linear_report = LinearSolverReport::default();
 
     if n > 0 {
-        let mut solver = SaddleSolver::new(&d, options.linear_solver)?;
+        let mut solver = SaddleSolver::new(d, options.linear_solver)?;
         // The regularized problem that ran last: its parameter, stiffness and centre, and how
         // its Newton iteration ended.
         let mut gamma = 1.0;
@@ -494,9 +493,9 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         let stage_start = Instant::now();
         for &next in &options.regularization {
             gamma = next;
-            k = stiffness(&d, options.regularization_metric, gamma, f64::INFINITY);
+            k = stiffness(d, options.regularization_metric, gamma, f64::INFINITY);
             last_stop = run_regularized(
-                &d,
+                d,
                 &mut solver,
                 (StageKind::Regularized { gamma }, false),
                 (&k, &center),
@@ -510,7 +509,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 break;
             }
         }
-        timings.regularized = stage_start.elapsed().as_secs_f64();
+        regularized_seconds = stage_start.elapsed().as_secs_f64();
 
         // Stage II: the exact problem, with further regularized problems as a safeguard.
         let stage_start = Instant::now();
@@ -523,7 +522,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             if last_stop.is_success() {
                 let start = Instant::now();
                 match solve_exact(
-                    &d,
+                    d,
                     &mut solver,
                     &mut x,
                     options.max_exact_iterations,
@@ -579,13 +578,13 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 // Too ill-conditioned: a proximal step with a hundred times less stiffness.
                 StageStop::Stalled | StageStop::LinearSolverFailure => {
                     stiffness_cap = (stiffness_cap * 1e-2).max(MIN_PROXIMAL_STIFFNESS);
-                    k = stiffness(&d, options.regularization_metric, gamma, stiffness_cap);
+                    k = stiffness(d, options.regularization_metric, gamma, stiffness_cap);
                     center.copy_from_slice(&x.mu);
                 }
                 // Solved, but the exact iteration failed: a proximal step, ten times stiffer.
                 _ => {
                     gamma *= 0.1;
-                    k = stiffness(&d, options.regularization_metric, gamma, stiffness_cap);
+                    k = stiffness(d, options.regularization_metric, gamma, stiffness_cap);
                     center.copy_from_slice(&x.mu);
                 }
             }
@@ -595,7 +594,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                 StageKind::Proximal { gamma }
             };
             last_stop = run_regularized(
-                &d,
+                d,
                 &mut solver,
                 (kind, true),
                 (&k, &center),
@@ -608,9 +607,99 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             let size = x.mu.iter().fold(1.0f64, |m, v| m.max(v.abs()));
             fixed_point = last_stop.is_success() && moved <= FIXED_POINT_TOLERANCE * size;
         }
-        timings.exact = stage_start.elapsed().as_secs_f64();
+        exact_seconds = stage_start.elapsed().as_secs_f64();
         linear_report = solver.report();
     }
+    Ok(Driven {
+        x,
+        stages,
+        message,
+        linear_failure,
+        safeguard_rounds,
+        linear_report,
+        regularized_seconds,
+        exact_seconds,
+    })
+}
+
+/// Computes optimal cone singularities: solves the canonical problem and extracts the cones.
+///
+/// The method is the paper's (Fig. 12): Stage I solves a sequence of regularized problems by a
+/// semismooth Newton method, Stage II solves the exact optimality system by the same method
+/// started from the last regularized solution. If Stage II does not terminate, proximal steps
+/// are inserted ([`SolveOptions::max_safeguard_rounds`]). The result always carries its
+/// optimality [`Certificate`], and [`SolveReport::status`] is [`Status::Converged`] only if the
+/// certificate holds.
+///
+/// The safeguard rests on one fact: a minimizer `(u, µ)` of
+/// `objective + Σ (µ_i − µ̄_i)² / (2 k_i)` with `µ = µ̄` is a minimizer of the objective itself
+/// (the penalty and its derivative vanish there), and the iteration `µ̄ ← µ` decreases the
+/// objective. It is used only to reach a point; whether that point is optimal is decided by the
+/// certificate.
+///
+/// # Errors
+/// [`ConeError`] if the problem or the options are invalid, or the problem is infeasible. A
+/// solve that does not converge is **not** an error; check `report.status`.
+///
+/// [formula: proximal-fixed-point]
+pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError> {
+    solve_with_boundary(problem, BoundaryTreatment::Fixed, options)
+}
+
+/// [`solve`] with a choice of what happens at the boundary: [`BoundaryTreatment::Fixed`] is
+/// `solve` itself; the other treatments make the boundary values and curvatures unknowns (paper
+/// Sec. 8.3; see [`BoundaryTreatment`]).
+///
+/// With a treatment other than `Fixed` on a mesh with boundary:
+///
+/// * `u` is returned at the boundary vertices too, and `measure[v]` at a boundary vertex `v`
+///   is the curvature `ν_v` of the flattened boundary there (the cone angles `µ` stay at the
+///   interior vertices; `cones` lists interior vertices only);
+/// * the objective, `distortion_optimal` and `cone_cost` include the boundary vertices (with
+///   their masses and distortion weights; the cost of `ν` for `Penalized`);
+/// * `u` is determined up to a constant, which is optimized (`Σ wE m u = 0`), as on a closed
+///   mesh; `adjoint` is determined up to a constant unless some boundary site pins it
+///   (`adjoint_shift`);
+/// * the certificate is that of the problem with the boundary as unknowns, and its
+///   `gauss_bonnet_residual` is `|Σ_I µ + Σ_B ν − 2πχ|`;
+/// * if extraction changes the cones (a threshold, merging), the scale factor of the returned
+///   cones, `log_scale`, is the one whose boundary values are re-optimized for the new
+///   interior cones (the same treatment of the boundary, interior angles fixed).
+///
+/// [`Solution::boundary_curvature`] reports `ν` for every treatment.
+///
+/// # Errors
+/// As [`solve`]. `ConeError::Infeasible` can occur with `Convex` (and prescribed or
+/// forbidden vertices).
+///
+/// [formula: proximal-fixed-point]
+/// [formula: boundary-optimality-system]
+pub fn solve_with_boundary(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    options: &SolveOptions<'_>,
+) -> Result<Solution, ConeError> {
+    let total_start = Instant::now();
+    options.validate()?;
+    let par = options.parallelism;
+    let d = Discrete::with_boundary(problem, boundary)?;
+    let mut timings = Timings {
+        setup: total_start.elapsed().as_secs_f64(),
+        ..Timings::default()
+    };
+
+    let Driven {
+        mut x,
+        stages,
+        mut message,
+        linear_failure,
+        safeguard_rounds,
+        linear_report,
+        regularized_seconds,
+        exact_seconds,
+    } = drive(&d, options)?;
+    timings.regularized = regularized_seconds;
+    timings.exact = exact_seconds;
 
     // Rounding-level clean-up of the cone angles; the certificate is computed afterwards.
     // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
@@ -656,7 +745,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
     let cone_cost = d.cone_cost(&x.mu);
 
     let start = Instant::now();
-    let certificate = certify(problem, &log_scale_optimal, &adjoint, &measure)?;
+    let certificate = certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
     timings.certificate = start.elapsed().as_secs_f64();
     let status = if certificate.holds(options.certificate_tolerance) {
         Status::Converged
@@ -669,15 +758,24 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         message = None;
     }
 
-    // Cone extraction.
+    // Cone extraction. Only interior vertices carry cone angles: with an optimized boundary the
+    // boundary entries of `measure` are the curvatures `ν` and are not cones.
     let start = Instant::now();
-    let data = validate(problem)?;
+    let data = validate_with(problem, boundary)?;
+    let mut cone_measure = measure.clone();
+    if boundary != BoundaryTreatment::Fixed {
+        for v in 0..d.n_vertices {
+            if problem.mesh.is_boundary_vertex(v) {
+                cone_measure[v] = 0.0;
+            }
+        }
+    }
     let (cones, mut extraction) = extract_cones(
         problem.mesh,
         problem.geometry,
         &data,
         &problem.prescribed_cones,
-        &measure,
+        &cone_measure,
         &ExtractOptions {
             threshold: options.cone_threshold,
             merge: options.merge_cone_clusters,
@@ -686,13 +784,24 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         },
     );
     let total_cone_angle: f64 = cones.iter().map(|c| c.angle.abs()).sum();
-    let (log_scale, distortion) = if extraction.cones_differ_from_measure {
+    let (log_scale, distortion) = if !extraction.cones_differ_from_measure {
+        (log_scale_optimal.clone(), distortion_optimal)
+    } else if boundary == BoundaryTreatment::Fixed || d.n < d.n_vertices {
         let mu = cones_to_measure(&d, &cones)?;
         let laplace = LaplaceSolver::new(&d, par)?;
         let (u, _) = log_scale_of_measure(&d, &laplace, &mu, par)?;
         (d.to_vertices(&u), d.distortion(&u))
     } else {
-        (log_scale_optimal.clone(), distortion_optimal)
+        // Unknown boundary: the interior angles are those of the extracted cones; the boundary
+        // values are optimized again for them, with the same treatment.
+        let fixed = d.with_fixed_interior(&cones)?;
+        let again = drive(&fixed, options)?;
+        if let Some(why) = again.message {
+            message = Some(format!(
+                "the boundary values for the extracted cones were not obtained to tolerance: {why}"
+            ));
+        }
+        (d.to_vertices(&again.x.u), d.distortion(&again.x.u))
     };
     extraction.distortion_change = distortion - distortion_optimal;
     extraction.total_angle_change = if extraction.cones_differ_from_measure {
@@ -718,9 +827,28 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
         .filter(|s| matches!(s.kind, StageKind::Exact))
         .map(|s| s.newton_iterations)
         .sum();
+    let mut boundary_curvature = vec![0.0; d.n_vertices];
+    if problem.mesh.n_boundary_edges() > 0 {
+        if boundary == BoundaryTreatment::Fixed {
+            let k = boundary_geodesic_curvatures(problem.mesh, problem.geometry)?;
+            let l_u = apply_laplacian(problem.mesh, problem.geometry, &log_scale_optimal);
+            for v in 0..d.n_vertices {
+                if problem.mesh.is_boundary_vertex(v) {
+                    boundary_curvature[v] = l_u[v] + k[v];
+                }
+            }
+        } else {
+            for v in 0..d.n_vertices {
+                if problem.mesh.is_boundary_vertex(v) {
+                    boundary_curvature[v] = measure[v];
+                }
+            }
+        }
+    }
     Ok(Solution {
         measure,
         log_scale_optimal,
+        boundary_curvature,
         adjoint,
         adjoint_shift,
         objective: distortion_optimal + cone_cost,
