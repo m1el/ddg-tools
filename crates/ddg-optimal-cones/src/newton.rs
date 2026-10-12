@@ -536,9 +536,9 @@ pub(crate) fn solve_exact(
             // No vertex pins the constant of φ: choose it to satisfy Gauss–Bonnet.
             let c = gauss_bonnet_shift(sites, &ones, &z, d.total_curvature, d.curvature_rounding);
             if c != 0.0 {
-                for i in 0..n {
-                    y.phi[i] += c;
-                    z[i] += c;
+                for (phi, z) in y.phi.iter_mut().zip(&mut z) {
+                    *phi += c;
+                    *z += c;
                 }
                 classify(sites, &ones, &z, &mut pieces);
                 outcome.constant_shifts += 1;

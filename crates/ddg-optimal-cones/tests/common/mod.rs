@@ -404,12 +404,14 @@ pub fn reference_solve(mesh: &TestMesh, f: &Features) -> Reference {
         SupportedConeT::ZeroConeT(n_equalities),
         SupportedConeT::NonnegativeConeT(b.len() - n_equalities),
     ];
-    let mut settings = DefaultSettings::default();
-    settings.verbose = false;
-    settings.max_iter = 500;
-    settings.tol_gap_abs = 1e-11;
-    settings.tol_gap_rel = 1e-11;
-    settings.tol_feas = 1e-11;
+    let settings = DefaultSettings {
+        verbose: false,
+        max_iter: 500,
+        tol_gap_abs: 1e-11,
+        tol_gap_rel: 1e-11,
+        tol_feas: 1e-11,
+        ..DefaultSettings::default()
+    };
     let mut solver = match DefaultSolver::new(&p, &q, &a, &b, &cones, settings) {
         Ok(solver) => solver,
         Err(e) => return Reference::Unreliable(format!("set-up failed: {e:?}")),

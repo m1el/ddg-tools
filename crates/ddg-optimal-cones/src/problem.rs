@@ -125,8 +125,8 @@ pub(crate) fn validate(problem: &ConeProblem<'_>) -> Result<VertexData, ConeErro
             w_e[v] = value;
         }
         let cost = problem.cone_costs.as_ref().map_or(1.0, |c| c[v]);
-        // Written so that NaN fails the test.
-        if !(cost >= 0.0) {
+        // `+∞` is allowed; NaN is not.
+        if cost.is_nan() || cost < 0.0 {
             return Err(ConeError::InvalidConeCost {
                 vertex: v as u32,
                 value: cost,

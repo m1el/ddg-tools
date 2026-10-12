@@ -391,8 +391,8 @@ fn fixtures_are_reproduced() {
         }
     };
     println!(
-        "{:<34} {:>4} {:<12} {:>10} {:>10} {:>10} {:>10}  {}",
-        "fixture", "V", "status", "objective", "measure", "u", "adjoint", "stages I/II/safeguard"
+        "{:<34} {:>4} {:<12} {:>10} {:>10} {:>10} {:>10}  stages I/II/safeguard",
+        "fixture", "V", "status", "objective", "measure", "u", "adjoint"
     );
     let mut failures = Vec::new();
     let mut checked = 0;

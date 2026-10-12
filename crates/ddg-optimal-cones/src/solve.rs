@@ -114,7 +114,8 @@ impl SolveOptions<'_> {
                     "regularization[{i}] is {gamma}; every entry must be positive and finite"
                 ));
             }
-            if i > 0 && !(gamma < self.regularization[i - 1]) {
+            // Both entries are finite here, so this is the negation of "strictly decreasing".
+            if i > 0 && gamma >= self.regularization[i - 1] {
                 return bad(format!(
                     "regularization must be strictly decreasing, but entry {i} ({gamma}) is not \
                      below entry {} ({})",
@@ -183,6 +184,11 @@ pub enum StageKind {
 pub struct StageReport {
     /// Which problem.
     pub kind: StageKind,
+    /// Whether the stage ran in a safeguard round, i.e. after the paper's two stages (Stage I,
+    /// then one run of the exact iteration) had failed to finish. A safeguard stage of kind
+    /// [`StageKind::Regularized`] is a regularized problem centred at zero that the safeguard
+    /// solved (or continued); it is not part of Stage I.
+    pub safeguard: bool,
     /// Newton steps. Each is one factorization of the Newton matrix and one linear solve
     /// (plus refinement).
     pub newton_iterations: usize,
@@ -220,12 +226,19 @@ pub struct SolveReport {
     pub status: Status,
     /// The stages in the order they ran.
     pub stages: Vec<StageReport>,
-    /// Total Newton steps of Stage I.
+    /// Total Newton steps of Stage I: the regularized problems of
+    /// [`SolveOptions::regularization`], and nothing else (zero if that list is empty).
     pub regularized_iterations: usize,
-    /// Total Newton steps of the exact iteration (all runs).
+    /// Total Newton steps of the exact iteration (all runs, including those of safeguard
+    /// rounds).
     pub exact_iterations: usize,
     /// Number of safeguard rounds that were needed (0 when the paper's two stages sufficed).
     pub safeguard_rounds: usize,
+    /// Total Newton steps of the regularized and proximal problems that the safeguard solved
+    /// (the stages with [`StageReport::safeguard`] set that are not exact). Every Newton step
+    /// of a solve is counted in exactly one of `regularized_iterations`, `exact_iterations`
+    /// and `safeguard_iterations`.
+    pub safeguard_iterations: usize,
     /// Factorization and solve counts and times of the linear solver.
     pub linear_solver: LinearSolverReport,
     /// Wall times.
@@ -316,9 +329,10 @@ fn stiffness(d: &Discrete, metric: RegularizationMetric, gamma: f64, cap: f64) -
         .collect()
 }
 
-fn stage(kind: StageKind, outcome: &NewtonOutcome, start: Instant) -> StageReport {
+fn stage(kind: StageKind, safeguard: bool, outcome: &NewtonOutcome, start: Instant) -> StageReport {
     StageReport {
         kind,
+        safeguard,
         newton_iterations: outcome.iterations,
         damped_steps: outcome.damped_steps,
         constant_shifts: outcome.constant_shifts,
@@ -340,7 +354,7 @@ fn max_difference(a: &[f64], b: &[f64]) -> f64 {
 fn run_regularized(
     d: &Discrete,
     solver: &mut dyn NewtonLinearSolver,
-    kind: StageKind,
+    (kind, safeguard): (StageKind, bool),
     (k, center): (&[f64], &[f64]),
     x: &mut Iterate,
     max_iterations: usize,
@@ -366,20 +380,21 @@ fn run_regularized(
                 }
                 _ => {}
             }
-            stages.push(stage(kind, &outcome, start));
+            stages.push(stage(kind, safeguard, &outcome, start));
             outcome.stop
         }
         Err(failure) => {
             *message = Some(failure.message);
-            stages.push(failed_stage(kind, start));
+            stages.push(failed_stage(kind, safeguard, start));
             StageStop::LinearSolverFailure
         }
     }
 }
 
-fn failed_stage(kind: StageKind, start: Instant) -> StageReport {
+fn failed_stage(kind: StageKind, safeguard: bool, start: Instant) -> StageReport {
     StageReport {
         kind,
+        safeguard,
         newton_iterations: 0,
         damped_steps: 0,
         constant_shifts: 0,
@@ -435,7 +450,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             last_stop = run_regularized(
                 &d,
                 &mut solver,
-                StageKind::Regularized { gamma },
+                (StageKind::Regularized { gamma }, false),
                 (&k, &center),
                 &mut x,
                 options.max_regularized_iterations,
@@ -468,7 +483,12 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                     par,
                 ) {
                     Ok(outcome) => {
-                        stages.push(stage(StageKind::Exact, &outcome, start));
+                        stages.push(stage(
+                            StageKind::Exact,
+                            safeguard_rounds > 0,
+                            &outcome,
+                            start,
+                        ));
                         if outcome.stop.is_success() {
                             message = None;
                             break;
@@ -480,7 +500,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
                         message = Some(format!("the exact Newton iteration {what}"));
                     }
                     Err(failure) => {
-                        stages.push(failed_stage(StageKind::Exact, start));
+                        stages.push(failed_stage(StageKind::Exact, safeguard_rounds > 0, start));
                         message = Some(format!(
                             "a Newton system of the exact problem could not be solved (the \
                              minimizer may not be unique): {}",
@@ -529,7 +549,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             last_stop = run_regularized(
                 &d,
                 &mut solver,
-                kind,
+                (kind, true),
                 (&k, &center),
                 &mut x,
                 options.max_regularized_iterations.max(1),
@@ -636,7 +656,12 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
 
     let regularized_iterations = stages
         .iter()
-        .filter(|s| matches!(s.kind, StageKind::Regularized { .. }))
+        .filter(|s| !s.safeguard && matches!(s.kind, StageKind::Regularized { .. }))
+        .map(|s| s.newton_iterations)
+        .sum();
+    let safeguard_iterations = stages
+        .iter()
+        .filter(|s| s.safeguard && !matches!(s.kind, StageKind::Exact))
         .map(|s| s.newton_iterations)
         .sum();
     let exact_iterations = stages
@@ -663,6 +688,7 @@ pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<So
             regularized_iterations,
             exact_iterations,
             safeguard_rounds,
+            safeguard_iterations,
             linear_solver: linear_report,
             timings,
             bound_correction,

@@ -199,7 +199,7 @@ impl<'d> SaddleSolver<'d> {
             // With a zero distortion weight the paired order meets a zero pivot (or one that
             // is non-zero only through fill, which is inaccurate): use LU from the start.
             use_lu: strategy == LinearSolver::SaddleLu
-                || (strategy == LinearSolver::Auto && d.w.iter().any(|&w| w == 0.0)),
+                || (strategy == LinearSolver::Auto && d.w.contains(&0.0)),
             report,
         })
     }
@@ -337,8 +337,8 @@ impl<'d> SaddleSolver<'d> {
                     candidate[i] = x[i] + correction[i];
                 }
                 let refined = backward_error(&self.k, &candidate, rhs, &mut candidate_residual);
-                // Written so that a NaN counts as no improvement.
-                if !(refined < error) {
+                // A NaN counts as no improvement.
+                if refined.is_nan() || refined >= error {
                     break;
                 }
                 std::mem::swap(&mut x, &mut candidate);
@@ -350,8 +350,8 @@ impl<'d> SaddleSolver<'d> {
         self.report.solves += solves;
         self.report.refinement_steps += solves - 1;
         outcome?;
-        // Written so that a NaN is rejected.
-        if !(error <= ACCEPT_BACKWARD_ERROR) {
+        // A NaN is rejected.
+        if error.is_nan() || error > ACCEPT_BACKWARD_ERROR {
             return Err(format!(
                 "{name} solve is inaccurate: componentwise backward error {error:.3e} after {} \
                  refinement steps",

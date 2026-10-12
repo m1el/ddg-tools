@@ -1,6 +1,9 @@
 //! Verification layer 5: properties the solution must have, on random meshes of every
 //! topology and with random features.
 
+// Per-vertex loops that index several arrays read best with the vertex index.
+#![allow(clippy::needless_range_loop)]
+
 mod common;
 
 use std::f64::consts::PI;
