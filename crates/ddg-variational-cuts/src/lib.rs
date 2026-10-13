@@ -86,6 +86,7 @@ mod cut_mesh;
 mod error;
 mod evaluate;
 mod problem;
+mod recovery;
 mod system;
 
 pub use ddg_core::sparse::{Parallelism, ThreadPool};
@@ -103,6 +104,7 @@ pub use evaluate::{
     gradient_pointwise, gradient_scaled, normal_flux, smooth_slivers,
 };
 pub use problem::{
-    CurvatureSource, CutProblem, Energy, EvalOptions, PAPER_FEATURE_SMOOTHING, PointwiseEnergy,
-    RegionWeights, SUPPORTED_REGIONS, ScaleWeight, UnitAreaScale,
+    CurvatureSource, CutProblem, Energy, EvalOptions, FluxRecovery, PAPER_FEATURE_SMOOTHING,
+    PointwiseEnergy, RegionWeights, SUPPORTED_REGIONS, ScaleWeight, UnitAreaScale,
 };
+pub use recovery::flux_smoothing_stiffness;

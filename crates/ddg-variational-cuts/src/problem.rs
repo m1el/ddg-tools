@@ -216,6 +216,42 @@ impl CutProblem {
     }
 }
 
+/// How the normal derivatives `∂u/∂n` and `∂p/∂n` at the cut vertices are obtained from the
+/// integrated normal derivatives `v`, `q` and the dual lengths `ℓ` (SPEC §3.5, D12).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FluxRecovery {
+    /// `∂u/∂n = v_p / ℓ_p` at every cut vertex on its own, as in the paper (Sec. 6.2). Where two
+    /// or more consecutive crossings lie close to one mesh vertex, `ℓ_p` is of the order of
+    /// their distance while the error of `v_p` is of the order of the mesh size, and the
+    /// quotient is wrong by a factor of up to `1/min_crossing_offset` (measured: errors of
+    /// `10⁴ %`). The paper repairs this with sliver smoothing
+    /// ([`EvalOptions::smoothing_passes`]), which does not help when the neighbours are slivers
+    /// too.
+    Nodal,
+    /// The nodal fluxes are smoothed along the cut before they are divided: in every region the
+    /// values `d_p` at its cut vertices solve
+    ///
+    /// ```text
+    /// ℓ_p d_p + Σ_{segments σ = pq at p} κ_σ (d_p − d_q) = v_p,     κ_σ = (c · h_f)² / |pq|
+    /// ```
+    ///
+    /// with `h_f²` the mean squared edge length of the face that contains `σ`. This is one
+    /// backward Euler step of the 1D heat flow on the cut with the lumped mass `ℓ`, applied to
+    /// `v/ℓ`, with the local time `(c h_f)²`: it conserves `Σ ℓ_p d_p = Σ v_p` on every piece of
+    /// the cut, keeps `d` within the range of the nodal values, and pools cut vertices that are
+    /// much closer to each other than `c h_f`. `length = 0` is [`FluxRecovery::Nodal`].
+    Smoothed {
+        /// The smoothing length `c ≥ 0` in units of the local edge length. Default `0.5`.
+        length: f64,
+    },
+}
+
+impl Default for FluxRecovery {
+    fn default() -> Self {
+        FluxRecovery::Smoothed { length: 0.5 }
+    }
+}
+
 /// Options of one evaluation.
 #[derive(Debug, Clone, Copy)]
 pub struct EvalOptions<'a> {
@@ -225,12 +261,16 @@ pub struct EvalOptions<'a> {
     /// `[0, ½)`; with 0 nothing is moved and a crossing exactly at a vertex is an error.
     /// Default `10⁻³`.
     pub min_crossing_offset: f64,
+    /// How `∂u/∂n` and `∂p/∂n` on the cut are recovered from the integrated normal derivatives
+    /// (SPEC §3.5). Default: [`FluxRecovery::Smoothed`] with length `0.5`.
+    pub flux_recovery: FluxRecovery,
     /// `ρ₀` of SPEC §3.7: a cut vertex with an incident cut-mesh triangle of aspect ratio above
-    /// this is a sliver vertex. Must be at least 1 (or `+∞` to switch smoothing off).
-    /// Default 5 (paper Sec. 6.2).
+    /// this is a sliver vertex. Must be positive (`+∞` means no vertex is a sliver; every
+    /// triangle has an aspect ratio of at least 1). Default 5 (paper Sec. 6.2).
     pub sliver_aspect_ratio: f64,
-    /// Number of smoothing rounds over the sliver vertices; 0 switches smoothing off. Default 1
-    /// (the paper does not give a number, SPEC D7).
+    /// Number of rounds of the paper's sliver smoothing of the speed (SPEC §3.7); 0 switches it
+    /// off. Default 0: with [`FluxRecovery::Smoothed`] it brings nothing measurable.
+    /// [`EvalOptions::paper`] sets 1 (the paper does not give a number, SPEC D7).
     pub smoothing_passes: usize,
     /// Where factorizations and solves run. Default: on the calling thread.
     pub parallelism: Parallelism<'a>,
@@ -240,9 +280,22 @@ impl Default for EvalOptions<'_> {
     fn default() -> Self {
         EvalOptions {
             min_crossing_offset: 1e-3,
+            flux_recovery: FluxRecovery::default(),
             sliver_aspect_ratio: 5.0,
-            smoothing_passes: 1,
+            smoothing_passes: 0,
             parallelism: Parallelism::Sequential,
+        }
+    }
+}
+
+impl EvalOptions<'_> {
+    /// The procedure of the paper (Sec. 6.2): [`FluxRecovery::Nodal`] and one round of sliver
+    /// smoothing. Not robust when the cut passes close to a mesh vertex; see [`FluxRecovery`].
+    pub fn paper() -> Self {
+        EvalOptions {
+            flux_recovery: FluxRecovery::Nodal,
+            smoothing_passes: 1,
+            ..EvalOptions::default()
         }
     }
 }
@@ -257,9 +310,19 @@ impl EvalOptions<'_> {
             });
         }
         let r = self.sliver_aspect_ratio;
-        if !(r >= 1.0) {
+        if !(r > 0.0) {
             return Err(CutError::InvalidOptions {
-                reason: format!("sliver_aspect_ratio must be at least 1, got {r}"),
+                reason: format!("sliver_aspect_ratio must be positive, got {r}"),
+            });
+        }
+        if let FluxRecovery::Smoothed { length } = self.flux_recovery
+            && !(length.is_finite() && length >= 0.0)
+        {
+            return Err(CutError::InvalidOptions {
+                reason: format!(
+                    "the smoothing length of the flux recovery must be finite and non-negative, \
+                     got {length}"
+                ),
             });
         }
         Ok(())

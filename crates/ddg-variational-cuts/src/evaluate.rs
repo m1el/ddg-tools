@@ -12,6 +12,7 @@ use crate::error::CutError;
 use crate::problem::{
     CurvatureSource, CutProblem, Energy, EvalOptions, PointwiseEnergy, ScaleWeight, UnitAreaScale,
 };
+use crate::recovery::FluxSolver;
 use crate::system::LaplaceSystem;
 
 /// The terms of the discrete energy (SPEC §6), on the unit-area surface:
@@ -24,7 +25,9 @@ pub struct EnergyTerms {
     /// The distortion `J_r` of every region, without its weight `w_r`. A closed component that
     /// the cut does not touch contributes nothing (SPEC D9c).
     pub distortion: Vec<f64>,
-    /// The area of every region; the areas sum to 1.
+    /// The area `Area(S_r)` of every region, without the closed components that the cut does
+    /// not touch (SPEC D9c; their areas are in [`EvalReport::excluded_area`]). The two together
+    /// sum to 1.
     pub area: Vec<f64>,
     /// The length `Σ |pq|` of the cut, counted once.
     pub length: f64,
@@ -50,10 +53,16 @@ pub struct EvalReport {
     pub n_sliver_points: usize,
     /// The largest aspect ratio among the triangles of cut faces (1 if no face is cut).
     pub max_aspect_ratio: f64,
+    /// Number of cut faces in which the two diagonals of the quad agree to a relative `10⁻⁹`,
+    /// so that rounding decides which one splits it (SPEC §3.3).
+    pub n_diagonal_near_ties: usize,
     /// The closed connected components of the input mesh that the cut does not touch, by
     /// component id ([`TriMesh::face_components`]). The Yamabe equation has no solution there;
-    /// `u = 0` is reported and they are left out of the distortion (SPEC §3.4, D9c).
+    /// `u = p = 0` is reported and they are left out of the energy: of the distortion and of
+    /// the area term (SPEC §3.4, D9c).
     pub uncut_closed_components: Vec<u32>,
+    /// For every region, the area of its part in [`EvalReport::uncut_closed_components`].
+    pub excluded_area: Vec<f64>,
     /// The residual `max_i |(L u)_i + g_i| / max_i |g_i|` of the Yamabe system over the
     /// interior vertices (`0` if `g = 0`).
     pub yamabe_residual: f64,
@@ -86,13 +95,21 @@ pub struct Evaluation {
     /// zero elsewhere.
     pub flux: Vec<f64>,
     /// `ℓ`: half the length of the boundary edges of the region at a boundary vertex
-    /// (SPEC §3.5); zero elsewhere. `flux / dual_length` approximates `∂u/∂n`.
+    /// (SPEC §3.5); zero elsewhere.
     pub dual_length: Vec<f64>,
+    /// `∂u/∂n`: the outward normal derivative of `u` at boundary vertices, per unit length of
+    /// the unit-area surface; zero elsewhere. At the copies of the cut points it comes from the
+    /// [`FluxRecovery`](crate::FluxRecovery) of the options (SPEC §3.5); at the vertices on the
+    /// boundary of the input mesh it is `flux / dual_length`.
+    pub normal_derivative: Vec<f64>,
     /// `p`: the adjoint state (SPEC §3.6). `None` for the Dirichlet energy, where `p = −2u`.
     pub adjoint: Option<Vec<f64>>,
     /// `q`: the integrated outward normal derivative of `p` at boundary vertices. `None` for
     /// the Dirichlet energy, where `q = −2v`.
     pub adjoint_flux: Option<Vec<f64>>,
+    /// `∂p/∂n`, obtained from `q` exactly as `normal_derivative` from `flux`. `None` for the
+    /// Dirichlet energy, where it is `−2 ∂u/∂n`.
+    pub adjoint_normal_derivative: Option<Vec<f64>>,
     /// `G_r = w_r · G + β_r`: the gradient density of the region's energy at the copies of the
     /// cut points (SPEC §1, §3.6); zero at every other vertex. Moving the boundary of the
     /// region outward with speed `σ` changes its energy at the rate `∫ G_r σ ds`.
@@ -110,16 +127,6 @@ pub struct Evaluation {
 }
 
 impl Evaluation {
-    /// The approximate outward normal derivative `∂u/∂n ≈ v/ℓ` at boundary vertex `v` of the
-    /// cut mesh, per unit length of the unit-area surface. `NaN` at a vertex that is not on the
-    /// boundary of its region.
-    ///
-    /// [formula: cut-normal-derivative]
-    #[inline]
-    pub fn normal_derivative(&self, v: usize) -> f64 {
-        self.flux[v] / self.dual_length[v]
-    }
-
     /// The cut mesh as a validated mesh with geometry (in the caller's length unit) and maps to
     /// the input mesh (SPEC §7).
     ///
@@ -374,13 +381,15 @@ impl Evaluator {
         let mut source = vec![0.0; n];
         let mut area_of_vertex = vec![0.0; n];
         let mut area = vec![0.0; n_regions];
+        let mut excluded_area = vec![0.0; n_regions];
         for (t, face) in tri.faces.iter().enumerate() {
             let face_area = tri.area[t];
-            area[tri.region[t] as usize] += face_area;
             let parent = tri.parent[t] as usize;
             if pinned[self.mesh.faces()[parent][0] as usize] {
+                excluded_area[tri.region[t] as usize] += face_area;
                 continue;
             }
+            area[tri.region[t] as usize] += face_area;
             let density = match &problem.curvature {
                 CurvatureSource::Gaussian => self.gaussian[parent],
                 CurvatureSource::Uniform(c) => *c,
@@ -416,14 +425,17 @@ impl Evaluator {
         }
         let yamabe_residual = relative(worst, largest);
         let dual_length = dual_lengths(&tri);
+        let recovery =
+            FluxSolver::new(&tri, &self.base, &dual_length, options.flux_recovery, par)?;
+        let normal_derivative = recovery.recover(&flux, &dual_length, par)?;
 
-        // §3.6: energy, adjoint, gradient density G at the boundary vertices.
-        let ratio = |x: &[f64], v: usize| x[v] / dual_length[v];
+        // §3.6: energy, adjoint, gradient density G at the copies of the cut points.
         let boundary: Vec<bool> = (0..n).map(|v| !self.system.is_unknown(v)).collect();
         let mut distortion = vec![0.0; n_regions];
         let mut density_on_cut = vec![0.0; n];
         let mut adjoint = None;
         let mut adjoint_flux = None;
+        let mut adjoint_normal_derivative = None;
         let mut adjoint_residual = None;
         match &problem.energy {
             Energy::Dirichlet => {
@@ -432,7 +444,7 @@ impl Evaluator {
                         dirichlet_energy_term(log_scale[v], source[v]);
                 }
                 for v in nv..n {
-                    density_on_cut[v] = gradient_dirichlet(ratio(&flux, v));
+                    density_on_cut[v] = gradient_dirichlet(normal_derivative[v]);
                 }
             }
             Energy::ScaledDirichlet(weight) => {
@@ -462,13 +474,14 @@ impl Evaluator {
                         largest = largest.max(rhs(v).abs());
                     }
                 }
+                let dp_dn = recovery.recover(&q, &dual_length, par)?;
                 for v in nv..n {
-                    density_on_cut[v] =
-                        gradient_scaled(weight[v], ratio(&flux, v), ratio(&q, v));
+                    density_on_cut[v] = gradient_scaled(weight[v], normal_derivative[v], dp_dn[v]);
                 }
                 adjoint_residual = Some(relative(worst, largest));
                 adjoint = Some(p);
                 adjoint_flux = Some(q);
+                adjoint_normal_derivative = Some(dp_dn);
             }
             Energy::Hencky | Energy::Pointwise(_) => {
                 let density = match &problem.energy {
@@ -511,14 +524,15 @@ impl Evaluator {
                         largest = largest.max(rhs[v].abs());
                     }
                 }
+                let dp_dn = recovery.recover(&q, &dual_length, par)?;
                 let at_zero = density.value(0.0);
                 for v in nv..n {
-                    density_on_cut[v] =
-                        gradient_pointwise(at_zero, ratio(&flux, v), ratio(&q, v));
+                    density_on_cut[v] = gradient_pointwise(at_zero, normal_derivative[v], dp_dn[v]);
                 }
                 adjoint_residual = Some(relative(worst, largest));
                 adjoint = Some(p);
                 adjoint_flux = Some(q);
+                adjoint_normal_derivative = Some(dp_dn);
             }
         }
 
@@ -570,9 +584,11 @@ impl Evaluator {
             smallest_crossing_offset: cut.smallest_offset,
             n_sliver_points: tri.sliver_point.iter().filter(|&&s| s).count(),
             max_aspect_ratio: tri.max_aspect_ratio,
+            n_diagonal_near_ties: tri.n_diagonal_near_ties,
             uncut_closed_components: (0..excluded.len() as u32)
                 .filter(|&c| excluded[c as usize])
                 .collect(),
+            excluded_area,
             yamabe_residual,
             adjoint_residual,
         };
@@ -583,8 +599,10 @@ impl Evaluator {
             log_scale,
             flux,
             dual_length,
+            normal_derivative,
             adjoint,
             adjoint_flux,
+            adjoint_normal_derivative,
             gradient,
             speed_raw,
             speed,
@@ -602,7 +620,8 @@ impl Evaluator {
 
 /// The integrated outward normal derivative of `u` at a boundary vertex `i` of a region
 /// (SPEC §3.5, D6): `v_i = (L u)_i + g_i`, from the weak form of `Δu = −K` tested with the hat
-/// function of `i`. `∂u/∂n ≈ v_i / ℓ_i` with the dual length of [`dual_lengths`].
+/// function of `i`. Summed over a stretch of the boundary it approximates `∫ ∂u/∂n ds` over
+/// that stretch; [`FluxRecovery`](crate::FluxRecovery) turns it into `∂u/∂n` per vertex.
 ///
 /// [formula: cut-normal-derivative]
 #[inline]

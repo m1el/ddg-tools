@@ -161,6 +161,10 @@ pub struct CutTriangles {
     pub sliver_point: Vec<bool>,
     /// The largest aspect ratio among the triangles of cut faces (1 if no face is cut).
     pub max_aspect_ratio: f64,
+    /// Number of cut faces in which the two diagonals of the quad agree to a relative `10⁻⁹`,
+    /// so that rounding decides which one splits it (SPEC §3.3). The result of the evaluation
+    /// depends on that choice only at the level of the discretization error.
+    pub n_diagonal_near_ties: usize,
 }
 
 /// The cut mesh as a validated mesh with geometry and maps back to the input (SPEC §7): what a
@@ -237,6 +241,7 @@ impl CutTriangles {
             segment_length: Vec::with_capacity(cut.segments.len()),
             sliver_point: vec![false; n_points],
             max_aspect_ratio: 1.0,
+            n_diagonal_near_ties: 0,
         };
         out.vertex_region.extend_from_slice(&cut.vertex_region);
         for point in &cut.points {
@@ -351,7 +356,15 @@ impl CutTriangles {
             out.segment_length.push(corner[1].sqrt());
             let d_pc = [xc[0] - xp[0], xc[1] - xp[1], xc[2] - xp[2]];
             let d_bq = [xq[0] - xb[0], xq[1] - xb[1], xq[2] - xb[2]];
-            if barycentric_dot(d_pc, d_pc, len2) <= barycentric_dot(d_bq, d_bq, len2) {
+            let (pc2, bq2) = (
+                barycentric_dot(d_pc, d_pc, len2),
+                barycentric_dot(d_bq, d_bq, len2),
+            );
+            let (pc, bq) = (pc2.sqrt(), bq2.sqrt());
+            if (pc - bq).abs() <= 1e-9 * pc.max(bq) {
+                out.n_diagonal_near_ties += 1;
+            }
+            if pc2 <= bq2 {
                 push(
                     [pb, b, c],
                     [xp, xb, xc],
