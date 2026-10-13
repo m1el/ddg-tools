@@ -311,7 +311,8 @@ impl Evaluator {
         smoothing: f64,
         par: Parallelism<'_>,
     ) -> Result<&[f64], CutError> {
-        let cached = matches!(&self.feature_weight, Some((r, c, _)) if *r == r_eps && *c == smoothing);
+        let cached =
+            matches!(&self.feature_weight, Some((r, c, _)) if *r == r_eps && *c == smoothing);
         if !cached {
             let weight = feature_size_weight(
                 &self.mesh,
@@ -410,7 +411,7 @@ impl Evaluator {
         // §3.5: v_i = (L u)_i + g_i on the boundary vertices; the same expression is the
         // residual of the system at the interior vertices.
         let mut product = vec![0.0; n];
-        tri.apply_laplacian(None, &log_scale, &mut product);
+        tri.apply_laplacian(None, &log_scale, &mut product)?;
         let mut flux = vec![0.0; n];
         let (mut worst, mut largest) = (0.0f64, 0.0f64);
         for v in 0..n {
@@ -425,8 +426,7 @@ impl Evaluator {
         }
         let yamabe_residual = relative(worst, largest);
         let dual_length = dual_lengths(&tri);
-        let recovery =
-            FluxSolver::new(&tri, &self.base, &dual_length, options.flux_recovery, par)?;
+        let recovery = FluxSolver::new(&tri, &self.base, &dual_length, options.flux_recovery, par)?;
         let normal_derivative = recovery.recover(&flux, &dual_length, par)?;
 
         // §3.6: energy, adjoint, gradient density G at the copies of the cut points.
@@ -456,14 +456,14 @@ impl Evaluator {
                 };
                 let weight = tri.extend(&self.mesh, &cut, &weight);
                 let mut weighted = vec![0.0; n];
-                tri.apply_laplacian(Some(&weight), &log_scale, &mut weighted);
+                tri.apply_laplacian(Some(&weight), &log_scale, &mut weighted)?;
                 for v in 0..nv {
                     distortion[tri.vertex_region[v] as usize] += log_scale[v] * weighted[v];
                 }
                 let rhs = |v: usize| adjoint_source_scaled(weighted[v], 0.0, 0.0);
                 let mut p = vec![0.0; n];
                 self.system.solve(rhs, &mut p, par)?;
-                tri.apply_laplacian(None, &p, &mut product);
+                tri.apply_laplacian(None, &p, &mut product)?;
                 let mut q = vec![0.0; n];
                 let (mut worst, mut largest) = (0.0f64, 0.0f64);
                 for v in 0..n {
@@ -513,7 +513,7 @@ impl Evaluator {
                 }
                 let mut p = vec![0.0; n];
                 self.system.solve(|v| rhs[v], &mut p, par)?;
-                tri.apply_laplacian(None, &p, &mut product);
+                tri.apply_laplacian(None, &p, &mut product)?;
                 let mut q = vec![0.0; n];
                 let (mut worst, mut largest) = (0.0f64, 0.0f64);
                 for v in 0..n {

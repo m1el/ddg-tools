@@ -197,7 +197,8 @@ fn screened(s: &Sphere, e: &Evaluation, c: f64, gamma: f64) -> PerSide {
     let scale = e.scale.length_scale;
     let mut out = vec![[0.0; 2]; n];
     for side in 0..2 {
-        let mut triplets: Vec<(u32, u32, f64)> = (0..n).map(|k| (k as u32, k as u32, l[k][side])).collect();
+        let mut triplets: Vec<(u32, u32, f64)> =
+            (0..n).map(|k| (k as u32, k as u32, l[k][side])).collect();
         for (seg, length) in e.cut.segments.iter().zip(&e.triangles.segment_length) {
             let f = seg.face as usize;
             let h2: f64 = (0..3)
@@ -313,9 +314,21 @@ impl Stat {
 }
 
 const METHODS: [&str; 15] = [
-    "A0 nodal v/l", "A1 +1 pass", "A3 +3 passes", "Ai +interp", "B  segment", "C  th=0.05",
-    "C  th=0.10", "C  th=0.25", "C  th=0.40", "H  c=0.25", "H  c=0.35", "H  c=0.50",
-    "H  c=1.00", "H2 c=0.25", "library default",
+    "A0 nodal v/l",
+    "A1 +1 pass",
+    "A3 +3 passes",
+    "Ai +interp",
+    "B  segment",
+    "C  th=0.05",
+    "C  th=0.10",
+    "C  th=0.25",
+    "C  th=0.40",
+    "H  c=0.25",
+    "H  c=0.35",
+    "H  c=0.50",
+    "H  c=1.00",
+    "H2 c=0.25",
+    "library default",
 ];
 
 /// For each method: stats of d (lower side), d (higher side), s.
@@ -380,7 +393,13 @@ fn print_table(title: &str, counts: &Counts, row: &Row) {
     );
     for (m, name) in METHODS.iter().enumerate() {
         let f = |st: Stat| format!("{:>10.3e} / {:>8.2e}", 100.0 * st.max, 100.0 * st.mean());
-        println!("{:<16} {} {} {}", name, f(row[m][0]), f(row[m][1]), f(row[m][2]));
+        println!(
+            "{:<16} {} {} {}",
+            name,
+            f(row[m][0]),
+            f(row[m][1]),
+            f(row[m][2])
+        );
     }
 }
 
@@ -423,13 +442,15 @@ fn sphere_study(lo: u32, hi: u32, options: &EvalOptions<'_>) {
         ));
         families.push((
             "latitude next to a vertex ring",
-            [1e-6, -1e-6, 1e-4, -1e-4, 1e-3, -1e-3, 1e-2, -1e-2, 0.1, -0.1]
-                .iter()
-                .map(|e| Case {
-                    axis: z,
-                    c: s.positions[ring][2] + e * h,
-                })
-                .collect(),
+            [
+                1e-6, -1e-6, 1e-4, -1e-4, 1e-3, -1e-3, 1e-2, -1e-2, 0.1, -0.1,
+            ]
+            .iter()
+            .map(|e| Case {
+                axis: z,
+                c: s.positions[ring][2] + e * h,
+            })
+            .collect(),
         ));
         families.push((
             "random tilted planes",
@@ -478,7 +499,10 @@ fn sphere_study(lo: u32, hi: u32, options: &EvalOptions<'_>) {
                 accumulate(&s, &e, &exact, &mut row);
             }
             print_table(
-                &format!("SPHERE level {level} ({} vertices), {name}", s.positions.len()),
+                &format!(
+                    "SPHERE level {level} ({} vertices), {name}",
+                    s.positions.len()
+                ),
                 &counts,
                 &row,
             );
@@ -543,10 +567,12 @@ fn annulus_study(lo: u32, hi: u32, options: &EvalOptions<'_>) {
             ),
             (
                 "regular polar grid, cut on / next to a ring of vertices",
-                [0.0, 1e-6, -1e-6, 1e-4, -1e-4, 1e-3, -1e-3, 1e-2, -1e-2, 0.1, -0.1]
-                    .iter()
-                    .map(|e| (build(regular.positions.clone()), ring + e * dr))
-                    .collect(),
+                [
+                    0.0, 1e-6, -1e-6, 1e-4, -1e-4, 1e-3, -1e-3, 1e-2, -1e-2, 0.1, -0.1,
+                ]
+                .iter()
+                .map(|e| (build(regular.positions.clone()), ring + e * dr))
+                .collect(),
             ),
             (
                 "perturbed grid",
@@ -568,7 +594,10 @@ fn annulus_study(lo: u32, hi: u32, options: &EvalOptions<'_>) {
                         .iter()
                         .map(|face| {
                             let c = [0, 1].map(|k| {
-                                face.iter().map(|&v| s.positions[v as usize][k]).sum::<f64>() / 3.0
+                                face.iter()
+                                    .map(|&v| s.positions[v as usize][k])
+                                    .sum::<f64>()
+                                    / 3.0
                             });
                             (k0 + kappa * (m * c[1].atan2(c[0])).cos()) / (unit * unit)
                         })

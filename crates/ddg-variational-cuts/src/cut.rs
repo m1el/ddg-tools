@@ -112,7 +112,7 @@ impl Cut {
         phi: &[f64],
         min_crossing_offset: f64,
     ) -> Result<Cut, CutError> {
-        if !(min_crossing_offset >= 0.0 && min_crossing_offset < 0.5) {
+        if !(0.0..0.5).contains(&min_crossing_offset) {
             return Err(CutError::InvalidOptions {
                 reason: format!(
                     "min_crossing_offset must lie in [0, 0.5), got {min_crossing_offset}"
@@ -290,10 +290,7 @@ mod tests {
         assert_eq!(cut.edge_point, vec![0, NONE, NONE, 1, NONE]);
         assert_eq!(
             cut.points,
-            vec![
-                CutPoint { edge: 0, t: 0.25 },
-                CutPoint { edge: 3, t: 0.75 }
-            ]
+            vec![CutPoint { edge: 0, t: 0.25 }, CutPoint { edge: 3, t: 0.75 }]
         );
         // Face 0 = (0, 1, 2): the lone vertex is 1 (region 1); p on 1 -> 2 (point 1), q on
         // 0 -> 1 (point 0). Region 1 is left of p -> q, so region 0 is left of q -> p.

@@ -73,8 +73,8 @@ impl FluxSolver {
             triplets.push((i as u32, i as u32, dual));
         }
         for (t, kinds) in tri.edge_kind.iter().enumerate() {
-            for k in 0..3 {
-                if kinds[k] != EdgeKind::Cut {
+            for (k, kind) in kinds.iter().enumerate() {
+                if *kind != EdgeKind::Cut {
                     continue;
                 }
                 let f = tri.parent[t] as usize;

@@ -304,13 +304,13 @@ impl EvalOptions<'_> {
     /// Checks the ranges documented on the fields.
     pub(crate) fn validate(&self) -> Result<(), CutError> {
         let d = self.min_crossing_offset;
-        if !(d >= 0.0 && d < 0.5) {
+        if !(0.0..0.5).contains(&d) {
             return Err(CutError::InvalidOptions {
                 reason: format!("min_crossing_offset must lie in [0, 0.5), got {d}"),
             });
         }
         let r = self.sliver_aspect_ratio;
-        if !(r > 0.0) {
+        if r.is_nan() || r <= 0.0 {
             return Err(CutError::InvalidOptions {
                 reason: format!("sliver_aspect_ratio must be positive, got {r}"),
             });

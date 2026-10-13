@@ -1,26 +1,6 @@
 //! The cut mesh (SPEC §3.3): the input mesh with every crossed face split along its cut segment,
-//! and the two sides of the cut separated.
-//!
-//! # Vertices
-//!
-//! The cut mesh is the cut *surface*: a cut point has one vertex on each side of the cut, so
-//! every vertex of the cut mesh lies in exactly one region. With `n_V` vertices in the input
-//! mesh,
-//!
-//! * vertex `i < n_V` is vertex `i` of the input mesh;
-//! * cut point `k` on the edge `[a, b]` (`a < b`) has the two copies `n_V + 2k` (in the region
-//!   of `a`) and `n_V + 2k + 1` (in the region of `b`).
-//!
-//! Use [`CutTriangles::vertex_source`] and [`CutTriangles::point_vertices`] instead of relying
-//! on this layout; it will grow when triple points are added.
-//!
-//! # Two forms
-//!
-//! [`CutTriangles`] is the raw form the evaluation works with: one record per triangle with its
-//! cotangents, area and squared edge lengths, computed in the plane of the parent face from
-//! barycentric coordinates. It is cheap to build. [`CutMesh`] is the same mesh as a validated
-//! [`TriMesh`] with a [`Geometry`], which is what a flattening consumes; it is built on demand
-//! ([`CutTriangles::to_mesh`]).
+//! and the two sides of the cut separated. [`CutTriangles`] is the raw form the evaluation works
+//! with, [`CutMesh`] the same mesh as a validated mesh with geometry.
 
 use ddg_core::{Geometry, GeometryError, TriMesh};
 
@@ -123,13 +103,39 @@ pub enum CutVertex {
     Point(u32),
 }
 
-/// The cut mesh as a list of triangles with their intrinsic geometry on the unit-area surface.
-/// See the [module documentation](self) for the vertex numbering.
+/// The cut mesh (SPEC §3.3) as a list of triangles with their intrinsic geometry on the
+/// unit-area surface: the input mesh with every crossed face split along its cut segment, and
+/// the two sides of the cut separated.
+///
+/// # Vertices
+///
+/// The cut mesh is the cut *surface*: a cut point has one vertex on each side of the cut, so
+/// every vertex of the cut mesh lies in exactly one region. With `n_V` vertices in the input
+/// mesh,
+///
+/// * vertex `i < n_V` is vertex `i` of the input mesh;
+/// * cut point `k` on the edge `[a, b]` (`a < b`) has the two copies `n_V + 2k` (in the region
+///   of `a`) and `n_V + 2k + 1` (in the region of `b`).
+///
+/// Use [`CutTriangles::vertex_source`] and [`CutTriangles::point_vertices`] instead of relying
+/// on this layout; it will grow when triple points are added.
+///
+/// # Triangles
 ///
 /// Triangles are listed in order of their parent face: an uncut face gives one triangle (the
-/// face itself, same corners), a cut face three. Corner slot `k` of triangle `t` is the corner
+/// face itself, same corners), a cut face three: with `a` the vertex that is alone on its side
+/// and `p ∈ ab`, `q ∈ ca` the cut points, `(a, p, q)`, then `(p, b, c)`, `(p, c, q)` if
+/// `|pc| ≤ |bq|`, else `(p, b, q)`, `(b, c, q)`. Corner slot `k` of triangle `t` is the corner
 /// at vertex `faces[t][k]`; edge slot `k` is the edge from corner `k` to corner `k + 1`.
 /// Orientation is inherited from the parent face.
+///
+/// # Two forms
+///
+/// This is the raw form the evaluation works with: one record per triangle with its
+/// cotangents, area and squared edge lengths, computed in the plane of the parent face from
+/// barycentric coordinates ([`barycentric_dot`], [`subtriangle_area`]). It is cheap to build.
+/// [`CutMesh`] is the same mesh as a validated [`TriMesh`] with a [`Geometry`], which is what a
+/// flattening consumes; it is built on demand ([`CutTriangles::to_mesh`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CutTriangles {
     /// Number of vertices of the input mesh.
@@ -465,13 +471,23 @@ impl CutTriangles {
     /// Laplacian `L` of the cut mesh (positive semidefinite). The two sides of the cut are not
     /// coupled.
     ///
-    /// # Panics
-    /// If `x`, `y` or `weight` do not have [`CutTriangles::n_vertices`] entries.
+    /// # Errors
+    /// [`CutError::WrongLength`] if `x`, `y` or `weight` do not have
+    /// [`CutTriangles::n_vertices`] entries.
     ///
     /// [formula: cut-weighted-laplacian]
-    pub fn apply_laplacian(&self, weight: Option<&[f64]>, x: &[f64], y: &mut [f64]) {
+    pub fn apply_laplacian(
+        &self,
+        weight: Option<&[f64]>,
+        x: &[f64],
+        y: &mut [f64],
+    ) -> Result<(), CutError> {
         let n = self.n_vertices();
-        assert!(x.len() == n && y.len() == n && weight.is_none_or(|a| a.len() == n));
+        check_length("x", "cut-mesh vertices", x.len(), n)?;
+        check_length("y", "cut-mesh vertices", y.len(), n)?;
+        if let Some(a) = weight {
+            check_length("weight", "cut-mesh vertices", a.len(), n)?;
+        }
         y.fill(0.0);
         for (face, cot) in self.faces.iter().zip(&self.cot) {
             let [i0, i1, i2] = face.map(|v| v as usize);
@@ -486,6 +502,7 @@ impl CutTriangles {
                 y[j] -= flow;
             }
         }
+        Ok(())
     }
 
     /// The cut mesh as a validated [`TriMesh`] with a [`Geometry`] whose lengths are in the
@@ -500,11 +517,11 @@ impl CutTriangles {
         let mut lengths = vec![0.0f64; mesh.n_edges()];
         let mut seen = vec![false; mesh.n_edges()];
         for (t, len2) in self.len2.iter().enumerate() {
-            for k in 0..3 {
+            for (k, squared) in len2.iter().enumerate() {
                 let e = mesh.edge(3 * t + k);
                 if !seen[e] {
                     seen[e] = true;
-                    lengths[e] = scale.length_from_unit_area(len2[k].sqrt());
+                    lengths[e] = scale.length_from_unit_area(squared.sqrt());
                 }
             }
         }

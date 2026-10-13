@@ -58,10 +58,7 @@ impl LaplaceSystem {
             triplets.push((i, i, 0.0));
         }
         for &[a, b] in mesh.edges() {
-            let (i, j) = (
-                unknown_of_vertex[a as usize],
-                unknown_of_vertex[b as usize],
-            );
+            let (i, j) = (unknown_of_vertex[a as usize], unknown_of_vertex[b as usize]);
             if i != NONE && j != NONE {
                 triplets.push((i.max(j), i.min(j), 0.0));
             }
@@ -77,10 +74,7 @@ impl LaplaceSystem {
             .edges()
             .iter()
             .map(|&[a, b]| {
-                let (i, j) = (
-                    unknown_of_vertex[a as usize],
-                    unknown_of_vertex[b as usize],
-                );
+                let (i, j) = (unknown_of_vertex[a as usize], unknown_of_vertex[b as usize]);
                 if i != NONE && j != NONE {
                     slot(i.max(j), i.min(j))
                 } else {
