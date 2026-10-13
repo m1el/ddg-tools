@@ -391,8 +391,15 @@ impl RegionFlow {
                 omega,
                 par,
             )?;
-            tau = on_cut.tau;
-            report.step_speed = on_cut.step_speed;
+            if on_cut_step {
+                tau = on_cut.tau;
+                report.step_speed = on_cut.step_speed;
+            } else {
+                // The step is split: neither the explicit part `τ s` nor the whole motion
+                // `τ (s + λ⁰)` may exceed the limit.
+                tau = tau.min(on_cut.tau);
+                report.step_speed = report.step_speed.max(on_cut.step_speed);
+            }
             if on_cut_step {
                 report.length_residual = Some(on_cut.residual);
                 report.max_length_speed = on_cut

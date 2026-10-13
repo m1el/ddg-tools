@@ -168,8 +168,9 @@ pub enum StepStatistics {
     /// the local roughening rates `ω_c`. A cut point beyond them takes a smaller step of its
     /// own ([`StepSize::local_factor`]): no cut point moves by more than `max_motion · h_c`.
     /// One spike of curvature or one short edge then does not set the step of the whole cut.
-    /// With the length step on the mesh the speed still includes the length force, computed
-    /// on the cut for this purpose only. The default.
+    /// With the length step on the mesh the step is split, and `m̂` is the larger of the
+    /// quantiles for `ρ = s` (the explicit part) and for `ρ = s + λ⁰` (the whole motion; the
+    /// length force is computed on the cut for this purpose only). The default.
     #[default]
     Robust,
     /// The largest speed and roughening rate over the cut and the shortest crossed edge,
@@ -924,7 +925,8 @@ impl Flow {
         );
         report.step_speed = speed;
         // With the length step on the mesh the length force is still computed on the cut for
-        // the robust step rule: it is part of the speed of the cut (SPEC §4).
+        // the robust step rule: it is part of the speed of the cut (SPEC §4). The step is
+        // then the smaller of the two that the speeds `s` and `s + λ⁰` allow.
         let on_cut_step = options.length_step == LengthStep::OnCut;
         let for_step_only = !on_cut_step
             && statistics == StepStatistics::Robust
@@ -949,8 +951,15 @@ impl Flow {
                 omega,
                 par,
             )?;
-            tau = on_cut.tau;
-            report.step_speed = on_cut.step_speed;
+            if on_cut_step {
+                tau = on_cut.tau;
+                report.step_speed = on_cut.step_speed;
+            } else {
+                // The step is split: neither the explicit part `τ s` nor the whole motion
+                // `τ (s + λ⁰)` may exceed the limit.
+                tau = tau.min(on_cut.tau);
+                report.step_speed = report.step_speed.max(on_cut.step_speed);
+            }
             if on_cut_step {
                 report.length_residual = Some(on_cut.residual);
                 report.max_length_speed = on_cut
