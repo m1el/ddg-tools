@@ -4,7 +4,9 @@ import DdgProofs.Cuts.Ripple
 # Cut flow: the weighted quantile, the robust step rule and the local limit
 
 `crates/ddg-variational-cuts/SPEC.md` §1 ("the roughening rate of the state"), §4 ("Step size"),
-D22, D23.
+D22–D25. The local limit here is the form at the cut points, which SPEC uses with the length
+step on the cut; the form at the vertices (the length step on the mesh, D26) is in
+`DdgProofs/Cuts/VertexLimit.lean`, the stop rule (D27) in `DdgProofs/Cuts/Stop.lean`.
 
 * **`cut-weighted-quantile`** — `quantile_q(x; ℓ)`: with the values in ascending order, the
   first value at which the weights summed so far reach `q · Σℓ`. `weightedQuantile xs q` is this
@@ -38,7 +40,7 @@ D22, D23.
   (`robustStep_extremes`, `extremesStep_motion_le`). The larger of two `m̂` gives the smaller of
   the two steps, and the step respects every speed up to `m̂` (`robustStep_max`,
   `robustStep_mul_le_of_le`).
-* **`cut-step-local`** — the oracle's `localLimitFactor max_motion h_c τ v_c`
+* **`cut-step-local`**, at the cut points — the oracle's `localLimitFactor max_motion h_c τ v_c`
   (`min(1, max_motion · h_c/(τ v_c))` where `τ v_c > 0`, else `1`) lies in `(0, 1]`, is `1` where
   `τ v_c ≤ max_motion · h_c`, and with `v_c ≥ |r_c|` the limited rate moves the cut point by at
   most `max_motion · h_c`; a limited point takes the step `max_motion · h_c/v_c`; the limit keeps
@@ -49,8 +51,11 @@ D22, D23.
   cases is `localLimitFactor` alone; the robust step satisfies `τ m̂ ≤ max_motion`; `m̂ ≥ 0`, so
   the first case covers `v_c = 0` (`localLimit_cases_agree`, `localLimit_twoCase_eq`,
   `robustStep_mul_mhat_le`, `localLimitFactor_eq_one_of_speed_le`,
-  `localLimit_first_case_of_zero`). A gradient density limited point by point is still a descent
-  direction (`firstVariation_localLimit`); the rate of the system on the cut is one
+  `localLimit_first_case_of_zero`). A gradient density scaled point by point by factors `≥ 0` is
+  a descent direction (`firstVariation_localLimit`); in the flow that is the limited rate on the
+  cut when there is no coupling along the cut (`onCut_limited_descent_of_no_coupling`: `w ≡ 0`,
+  where `r = s`). It says nothing about the length step on the mesh, where since D26 the rate is
+  not limited at all. The rate of the system on the cut is a descent direction
   (`onCut_rate_descent`) but, limited point by point, need not be
   (`limited_rate_not_descent_example`). The oracle's
   `localSpeed r_c ω_c ω = max(|r_c|, ½(ω_c − ω)₊)` is `≥ |r_c|` (`abs_le_localSpeed`,
@@ -935,9 +940,15 @@ theorem localSpeed_ge (r ωc ω : ℝ) :
   have := le_max_left (ωc - ω) 0
   linarith
 
-/-- **The limited rate is still a descent direction.** If the first variation of the energy is
-`dE(σ) = Σ_c g_c σ_c ℓ_c` and every cut point moves with `σ_c = −f_c g_c`, `f_c ≥ 0` (the flow
-`φ_t = g` limited point by point), then `dE = −Σ_c f_c g_c² ℓ_c ≤ 0`.
+/-- **A gradient density scaled point by point by factors `≥ 0` is a descent direction.** If
+the first variation of the energy is `dE(σ) = Σ_c g_c σ_c ℓ_c` and every cut point moves with
+`σ_c = −f_c g_c`, `f_c ≥ 0`, then `dE = −Σ_c f_c g_c² ℓ_c ≤ 0`.
+
+In the flow this is the local limit at the cut points when the rate on the cut is the gradient
+density itself: no coupling along the cut (SPEC §4; `onCut_limited_descent_of_no_coupling`). It
+is not a statement about the coupled rate of SPEC §3.10 (`limited_rate_not_descent_example`),
+nor about the length step on the mesh, where since D26 the rate on the cut is not limited and
+the limit acts at the vertices instead (`DdgProofs/Cuts/VertexLimit.lean`).
 
 [formula: cut-step-local] -/
 theorem firstVariation_limited {C : Type*} [Fintype C] (g f : C → ℝ) {ℓ : C → ℝ}
@@ -1173,8 +1184,10 @@ theorem localLimit_sign {mm hc : ℝ} (ha : 0 < mm * hc) (τ v r : ℝ) :
   rw [localLimitFactor_eq ha.le]
   exact limited_sign ha _ _
 
-/-- **The limited rate is still a descent direction**: with `dE(σ) = Σ_c g_c σ_c ℓ_c` and
-`σ_c = −g_c · localLimitFactor(…)_c`, `dE ≤ 0`.
+/-- **The gradient density, limited at the cut points, is a descent direction**: with
+`dE(σ) = Σ_c g_c σ_c ℓ_c` and `σ_c = −g_c · localLimitFactor(…)_c`, `dE ≤ 0`. This covers the
+limited rate when the rate on the cut is the gradient density itself (no coupling along the
+cut), and only then; see `firstVariation_limited`.
 
 [formula: cut-step-local] -/
 theorem firstVariation_localLimit {C : Type*} [Fintype C] (g : C → ℝ) {ℓ : C → ℝ}
@@ -1234,12 +1247,14 @@ theorem localLimit_first_case_of_zero {ms ls : List ℝ} (h : ∀ p ∈ ms.zip l
   rw [zero_div]
   exact oracle_weightedQuantile_nonneg h q
 
-/-! ## Is the limited rate a descent direction?
+/-! ## Is the limited rate a descent direction? (SPEC §4, D25)
 
-It is when the rate is the gradient density itself (`firstVariation_localLimit`: the length
-step on the mesh, where the rate on the cut is `s`; or no coupling). The rate `r` of the system
-on the cut (SPEC §3.10) is a descent direction too (`onCut_rate_descent`), but limited point by
-point it need not be one (`limited_rate_not_descent_example`). -/
+It is when the rate on the cut is the gradient density itself (`firstVariation_localLimit`),
+which with the length step on the cut means no coupling along the cut: `w ≡ 0`, where the
+system of SPEC §3.10 gives `r = s + λ⁰ = s` (`onCut_limited_descent_of_no_coupling`). The rate
+`r` of the system with coupling is a descent direction too (`onCut_rate_descent`), but limited
+point by point it need not be one (`limited_rate_not_descent_example`). With the length step on
+the mesh the rate on the cut is no longer limited (D26), so none of this applies there. -/
 
 section Descent
 
@@ -1269,6 +1284,19 @@ theorem onCut_rate_descent {ℓ s lam r : C → ℝ} {m : C → C → ℝ} {τ :
   rw [e, neg_nonpos]
   have := hpd.posSemidef.dotProduct_mulVec_nonneg r
   rwa [star_trivial] at this
+
+/-- **Without coupling along the cut the limited rate is a descent direction**: if the rate
+system has no coupling (`τ m ≡ 0`; in the flow `w ≡ 0`), its rate is `s + λ⁰`, the gradient
+density, and limited at the cut points it still has `dE ≤ 0`. This is what
+`firstVariation_localLimit` stands for in the flow. -/
+theorem onCut_limited_descent_of_no_coupling {ℓ s lam r : C → ℝ} (hℓ : ∀ p, 0 < ℓ p)
+    (h : fluxMatrix ℓ (fun _ _ => 0) *ᵥ r = fun p => Ddg.fluxRhs (ℓ p * (s p + lam p)))
+    (mm τ : ℝ) (hc v : C → ℝ) (ha : ∀ c, 0 ≤ mm * hc c) :
+    firstVariation (fun c => s c + lam c) ℓ
+      (fun c => -(r c * Ddg.localLimitFactor mm (hc c) τ (v c))) ≤ 0 := by
+  have hr : r = fun c => s c + lam c := funext fun p => onCut_rate_nodal hℓ h p
+  rw [hr]
+  exact firstVariation_localLimit _ (fun c => (hℓ c).le) mm τ hc v ha
 
 end Descent
 

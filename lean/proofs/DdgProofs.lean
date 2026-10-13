@@ -35,3 +35,5 @@ import DdgProofs.Cuts.OnCut
 import DdgProofs.Cuts.Ripple
 import DdgProofs.Cuts.Regions
 import DdgProofs.Cuts.Quantile
+import DdgProofs.Cuts.VertexLimit
+import DdgProofs.Cuts.Stop
