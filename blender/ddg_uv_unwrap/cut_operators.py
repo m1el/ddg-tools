@@ -67,6 +67,14 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
             ('SELECTED', "Selected Faces", "The selected faces are region 0, the rest region 1"),
             ('CIRCLE', "Geodesic Circle",
              "A geodesic disk of the given radius around a vertex is region 0"),
+            ('CLUSTERS', "Normal Clusters",
+             "The vertex normals are clustered into the given number of regions: the start "
+             "of an atlas (paper Sec. 7)"),
+            ('MATERIALS', "Material Slots",
+             "The material slot of every face is its region (one region per slot in use)"),
+            ('ATTRIBUTE', "Face Attribute",
+             "The integer face attribute chosen by name labels the regions (one region per "
+             "distinct value, in ascending order)"),
         ],
         default='SELECTED',
     )
@@ -88,9 +96,19 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
     regions: IntProperty(
         name="Regions",
         description=(
-            "Number of regions. The cut flow handles 2 so far; larger values are refused with "
-            "a message"),
-        default=2, min=2, soft_max=4,
+            "Number of regions of 'Normal Clusters' (2 to 16). The other modes take their "
+            "regions from the selection, the circle (2) or the labels"),
+        default=4, min=2, max=cut.MAX_REGIONS,
+    )
+    cluster_iterations: IntProperty(
+        name="Iterations",
+        description="The most rounds of the normal clustering",
+        default=50, min=0, soft_max=200,
+    )
+    attribute: StringProperty(
+        name="Attribute",
+        description="Name of an integer attribute on the face domain",
+        default="",
     )
 
     @classmethod
@@ -105,7 +123,15 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         if self.mode == 'CIRCLE':
             layout.prop(self, "radius")
             layout.prop(self, "vertex")
-        layout.prop(self, "regions")
+        elif self.mode == 'CLUSTERS':
+            layout.prop(self, "regions")
+            layout.prop(self, "cluster_iterations")
+        elif self.mode == 'ATTRIBUTE':
+            obj = context.active_object
+            if obj is not None and obj.type == 'MESH':
+                layout.prop_search(self, "attribute", obj.data, "attributes")
+            else:
+                layout.prop(self, "attribute")
 
     def execute(self, context):
         obj = context.active_object
@@ -118,15 +144,20 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                 stats = cut.start_cut(
                     obj, mode=self.mode, radius=self.radius, vertex=self.vertex,
                     n_regions=self.regions, active_vertex=active_vertex,
-                    selected_vertices=selected_vertices)
+                    selected_vertices=selected_vertices,
+                    cluster_iterations=self.cluster_iterations, attribute=self.attribute)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
         for warning in stats["warnings"]:
             self.report({'WARNING'}, warning)
-        if self.mode == 'SELECTED':
-            what = "the selected faces"
-        else:
+        what = {
+            'SELECTED': "the selected faces",
+            'CLUSTERS': "normal clusters",
+            'MATERIALS': "the material slots",
+            'ATTRIBUTE': "the attribute '{}'".format(self.attribute),
+        }.get(self.mode)
+        if what is None:
             what = "a geodesic circle of radius {:.4g} around vertex {}".format(
                 stats["radius"], stats["vertex"])
         self.report({'INFO'}, "Cut started from {}: {} regions on {} face corners. "
@@ -219,21 +250,28 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         name="Stages",
         description="The numerical stages of a step",
         items=[
-            ('DEFAULT', "Default", "The library's defaults (the robust variants)"),
+            ('RECOMMENDED', "Recommended",
+             "The library's recommendation: the default stages for two regions, the paper's "
+             "stages with the library's flux recovery for more"),
+            ('DEFAULT', "Default", "The library's default stages, for any number of regions"),
             ('PAPER', "Paper", "The stages as printed in the paper"),
         ],
-        default='DEFAULT',
+        default='RECOMMENDED',
     )
     penalty_group: StringProperty(
         name="Penalty Group",
         description=(
             "Vertex group whose weights (0 to 1) are a penalty on cutting there (paper Sec. "
-            "7.1): the penalty is Strength times the length weight times the weight"),
+            "7.1). The penalty of a vertex is Strength x (the length weight in force) x (its group "
+            "weight): the strength is multiplied by the length weight, so 1 means that cutting "
+            "through a vertex of weight 1 costs as much again as the length does"),
         default="",
     )
     penalty_strength: FloatProperty(
         name="Strength",
-        description="Penalty of a vertex with weight 1, in units of the length weight",
+        description=(
+            "Penalty of a vertex with weight 1, in units of the length weight: the penalty is "
+            "Strength x length weight x group weight"),
         default=1.0, min=0.0, soft_max=10.0,
     )
     hide_from_camera: BoolProperty(
@@ -241,27 +279,32 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         description=(
             "Penalize cutting where the active camera sees the surface (paper Sec. 7.1): "
             "each vertex gets a penalty if a ray from the camera reaches it, times how much "
-            "it faces the camera"),
+            "it faces the camera. The penalty is Strength x length weight x visibility x "
+            "facing term"),
         default=False,
     )
     hide_strength: FloatProperty(
         name="Strength",
-        description="Penalty of a visible vertex facing the camera, in units of the length weight",
+        description=(
+            "Penalty of a visible vertex facing the camera, in units of the length weight: "
+            "the penalty is Strength x length weight x visibility x facing term"),
         default=1.0, min=0.0, soft_max=10.0,
     )
     distortion_weights: FloatVectorProperty(
         name="Distortion Weights",
         description=(
-            "Weight of the distortion of region 0 and region 1. 0 for one region lets the "
-            "cut ignore its distortion: a one-sided patch (paper Fig. 14)"),
-        size=2, default=(1.0, 1.0), min=0.0, soft_max=10.0,
+            "Weight of the distortion of each region (the first as many as there are regions). "
+            "0 for a region lets the cut ignore its distortion: a one-sided patch (paper "
+            "Fig. 14)"),
+        size=cut.MAX_REGIONS, default=(1.0,) * cut.MAX_REGIONS, min=0.0, soft_max=10.0,
     )
     area_weights: FloatVectorProperty(
         name="Area Weights",
         description=(
-            "Weight of the area of region 0 and region 1, on the surface scaled to unit area. "
-            "Positive values make a region shrink, negative values make it grow"),
-        size=2, default=(0.0, 0.0), soft_min=-10.0, soft_max=10.0,
+            "Weight of the area of each region (the first as many as there are regions), on the "
+            "surface scaled to unit area. Positive values make a region shrink, negative "
+            "values make it grow"),
+        size=cut.MAX_REGIONS, default=(0.0,) * cut.MAX_REGIONS, soft_min=-10.0, soft_max=10.0,
     )
     symmetry: EnumProperty(
         name="Mirror Symmetry",
@@ -371,8 +414,15 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         box.prop(self, "hide_from_camera")
         if self.hide_from_camera:
             box.prop(self, "hide_strength", text="Camera Strength")
-        layout.prop(self, "distortion_weights")
-        layout.prop(self, "area_weights")
+        obj = context.active_object
+        n = len(cut.state_names(obj.data)) if obj is not None and obj.type == 'MESH' else 2
+        box = layout.box()
+        box.label(text="Region Weights (distortion, area)")
+        for k in range(min(max(n, 2), cut.MAX_REGIONS)):
+            row = box.row(align=True)
+            row.label(text="Region {}".format(k))
+            row.prop(self, "distortion_weights", index=k, text="")
+            row.prop(self, "area_weights", index=k, text="")
         layout.prop(self, "symmetry")
         if self.symmetry != 'NONE':
             layout.prop(self, "symmetry_tolerance")

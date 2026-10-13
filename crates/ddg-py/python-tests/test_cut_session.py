@@ -293,10 +293,11 @@ class SessionTest(unittest.TestCase):
 
     def test_preview(self):
         s = self.session()
-        positions, starts, closed = s.preview()
+        positions, starts, closed, regions = s.preview()
         self.assertEqual(positions.typecode, 'd')
         self.assertEqual(len(starts), len(closed) + 1)
         self.assertEqual(len(positions), 3 * starts[-1])
+        self.assertEqual(list(regions), [0, 1])
         self.assertEqual(len(closed), 1)
         self.assertTrue(closed[0])
         with self.assertRaises(ddg_tools.InputError):
@@ -367,8 +368,8 @@ class SessionTest(unittest.TestCase):
     def test_empty_cut(self):
         s = self.session()
         s.state = array.array('d', [-1.0] * s.n_corners + [1.0] * s.n_corners)
-        positions, starts, closed = s.preview()
-        self.assertEqual((len(positions), list(starts), list(closed)), (0, [0], []))
+        positions, starts, closed, regions = s.preview()
+        self.assertEqual((len(positions), list(starts), list(closed), list(regions)), (0, [0], [], []))
         cut = s.describe_cut()
         self.assertEqual((cut.n_edge_points, cut.n_paths), (0, 0))
         self.assertEqual(len(s.insert(cut).positions), 3 * self.n_vertices)
@@ -424,6 +425,117 @@ class SessionTest(unittest.TestCase):
             ddg_tools.CutSession(*bad, circle_vertex=0, circle_radius=0.1)
         with self.assertRaises(TypeError):
             ddg_tools.CutSession(1, 2, 3, 4, circle_vertex=0, circle_radius=0.1)
+
+
+class RegionsTest(unittest.TestCase):
+    """More than two regions: the normal-cluster start, N-valued labels and corner values, the
+    recommended stages, per-region weights, the network on polygons and its insertion."""
+
+    def setUp(self):
+        self.mesh = uv_sphere(32, 16)
+        self.buffers = arrays(self.mesh)
+        self.n_polygons = len(self.mesh[2])
+
+    def clusters(self, n=4, **kwargs):
+        return ddg_tools.CutSession(*self.buffers, n_regions=n, cluster_iterations=30, **kwargs)
+
+    def test_normal_clusters_start(self):
+        for n in (3, 4, 6):
+            s = self.clusters(n)
+            self.assertEqual(s.n_regions, n)
+            self.assertEqual(s.state.shape, (n, s.n_corners))
+            self.assertGreater(len(set(s.corner_regions())), 2)
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, circle_vertex=1, circle_radius=0.5,
+                                 cluster_iterations=5)
+
+    def test_labels_and_corner_values_with_n_regions(self):
+        labels = array.array('i', [p % 3 for p in range(self.n_polygons)])
+        s = ddg_tools.CutSession(*self.buffers, n_regions=3, polygon_labels=labels)
+        self.assertEqual(s.state.shape, (3, s.n_corners))
+        t = ddg_tools.CutSession(*self.buffers, n_regions=3, corner_values=s.state)
+        self.assertEqual(t.state.tolist(), s.state.tolist())
+        with self.assertRaisesRegex(ddg_tools.InputError, "label"):
+            ddg_tools.CutSession(*self.buffers, n_regions=3,
+                                 polygon_labels=array.array('i', [3] * self.n_polygons))
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, n_regions=3,
+                                 corner_values=array.array('d', [0.0] * 10))
+        # NotAvailableError is kept as a class but not raised for this any more.
+        self.assertTrue(issubclass(ddg_tools.NotAvailableError, ddg_tools.DdgError))
+
+    def test_run_reports_every_region_and_uses_recommended_stages(self):
+        s = self.clusters(4)
+        report = s.run(length_weight=0.5, max_steps=4, motion_tolerance=0.0,
+                       energy_tolerance=0.0)
+        self.assertEqual(report["steps_taken"], 4)
+        for k in range(4):
+            self.assertIn("distortion_%d" % k, report)
+            self.assertIn("area_%d" % k, report)
+        self.assertAlmostEqual(sum(report["area_%d" % k] for k in range(4)), 1.0, places=9)
+        # The recommended stages are the paper's with the flux recovery: not the default's.
+        a, b = self.clusters(4), self.clusters(4)
+        kw = dict(length_weight=0.5, max_steps=3, motion_tolerance=0.0, energy_tolerance=0.0)
+        a.run(**kw)
+        b.run(stages="default", **kw)
+        self.assertNotEqual(a.state.tolist(), b.state.tolist())
+        c = self.clusters(4)
+        c.run(stages="recommended", **kw)
+        self.assertEqual(a.state.tolist(), c.state.tolist())
+        # Individual overrides still work.
+        d = self.clusters(4)
+        d.run(flux_recovery="nodal", **kw)
+
+    def test_per_region_weights_have_length_n(self):
+        s = self.clusters(4)
+        kw = dict(length_weight=0.5, max_steps=2, motion_tolerance=0.0, energy_tolerance=0.0)
+        s.run(distortion_weights=[1.0, 2.0, 0.5, 1.0], area_weights=[0.0, 0.1, 0.0, 0.0], **kw)
+        with self.assertRaisesRegex(ddg_tools.InputError, "distortion_weights has 2 entries"):
+            s.run(distortion_weights=[1.0, 1.0], **kw)
+
+    def test_network_on_polygons_insert_and_unwrap(self):
+        s = self.clusters(4)
+        s.run(length_weight=0.5, max_steps=3, motion_tolerance=0.0, energy_tolerance=0.0)
+        positions, starts, closed, regions = s.preview()
+        self.assertEqual(len(regions), 2 * len(closed))
+        self.assertTrue(all(0 <= r < 4 for r in regions))
+        self.assertTrue(all(regions[2 * i] < regions[2 * i + 1] for i in range(len(closed))))
+        cut = s.describe_cut()
+        n_j = len(cut.junction_polygon)
+        self.assertGreater(n_j, 0)
+        self.assertEqual(len(cut.junction_positions), 3 * n_j)
+        self.assertEqual(len(cut.junction_triangle), n_j)
+        self.assertEqual(len(cut.junction_corners), 3 * n_j)
+        self.assertEqual(len(cut.junction_weights), 3 * n_j)
+        for j in range(n_j):
+            w = cut.junction_weights[3 * j:3 * j + 3]
+            self.assertAlmostEqual(sum(w), 1.0, places=9)
+            corners = cut.junction_corners[3 * j:3 * j + 3]
+            xs = [self.mesh[0][3 * self.mesh[1][c]:3 * self.mesh[1][c] + 3] for c in corners]
+            for k in range(3):
+                x = sum(w[i] * xs[i][k] for i in range(3))
+                self.assertAlmostEqual(x, cut.junction_positions[3 * j + k], places=6)
+        ends = list(cut.path_start) + list(cut.path_end)
+        for j in range(n_j):
+            self.assertEqual(ends.count(-(j + 1)), 3, j)
+        inserted = s.insert(cut)
+        self.assertEqual(len(inserted.junction_vertex), n_j)
+        kinds = [inserted.vertex_source[3 * v] for v in range(len(inserted.positions) // 3)]
+        self.assertEqual(kinds.count(3), n_j)
+        for j, v in enumerate(inserted.junction_vertex):
+            self.assertEqual(inserted.vertex_source[3 * v:3 * v + 3].tolist(), [3, j, 0])
+        result = s.unwrap()
+        self.assertTrue(all(math.isfinite(x) for x in result.uvs))
+        self.assertEqual(len(result.uvs), 2 * len(result.inserted.corner_vertices))
+        self.assertGreaterEqual(max(result.polygon_charts) + 1, 4)
+
+    def test_two_region_description_has_no_junctions(self):
+        s = ddg_tools.CutSession(*self.buffers, circle_vertex=5, circle_radius=0.9)
+        s.run(length_weight=0.05, max_steps=2, motion_tolerance=0.0, energy_tolerance=0.0)
+        cut = s.describe_cut()
+        self.assertEqual(len(cut.junction_polygon), 0)
+        self.assertEqual(len(s.insert(cut).junction_vertex), 0)
+
 
 
 if __name__ == "__main__":

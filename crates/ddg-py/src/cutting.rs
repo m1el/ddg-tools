@@ -272,8 +272,9 @@ pub struct Controls {
     pub curvature_uniform: Option<f64>,
     /// A curvature density per triangle of the triangulation.
     pub curvature_per_triangle: Option<Vec<f64>>,
-    /// The stages of the paper ([`FlowOptions::paper`]) instead of the defaults.
-    pub paper_stages: bool,
+    /// The stage set: `None` is the one the session recommends for its number of regions
+    /// (`FlowOptions::new` for two, `FlowOptions::for_regions` for more).
+    pub stages: Option<StageSet>,
     /// How the normal derivative on the cut is recovered.
     pub flux_recovery: Option<FluxChoice>,
     /// The smoothing length of the smoothed recovery.
@@ -312,6 +313,18 @@ pub struct Controls {
     pub energy_window: Option<usize>,
 }
 
+/// The stage set of the flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageSet {
+    /// `FlowOptions::new`, for any number of regions.
+    Default,
+    /// `FlowOptions::paper`.
+    Paper,
+    /// `Session::recommended_options`: `Default` for two regions, `FlowOptions::for_regions`
+    /// (the paper's stages with the flux recovery of the core crate) for more.
+    Recommended,
+}
+
 /// The recovery of the normal derivative on the cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FluxChoice {
@@ -345,7 +358,7 @@ impl Default for Controls {
             symmetry: None,
             curvature_uniform: None,
             curvature_per_triangle: None,
-            paper_stages: false,
+            stages: None,
             flux_recovery: None,
             flux_smoothing: None,
             sliver_aspect_ratio: None,
@@ -421,12 +434,18 @@ impl Controls {
     ///
     /// # Errors
     /// [`BindError::Input`] for contradictory options.
-    pub fn flow_options(&self) -> Result<FlowOptions<'static>, BindError> {
+    pub fn flow_options(&self, n_regions: usize) -> Result<FlowOptions<'static>, BindError> {
         let step = self.step_size()?;
-        let mut o = if self.paper_stages {
-            FlowOptions::paper(step)
-        } else {
-            FlowOptions::new(step)
+        let mut o = match self.stages {
+            Some(StageSet::Paper) => FlowOptions::paper(step),
+            Some(StageSet::Default) => FlowOptions::new(step),
+            Some(StageSet::Recommended) | None => {
+                if n_regions > 2 {
+                    FlowOptions::for_regions(step)
+                } else {
+                    FlowOptions::new(step)
+                }
+            }
         };
         if let Some(delta) = self.min_crossing_offset {
             o.eval.min_crossing_offset = delta;
@@ -572,6 +591,12 @@ pub enum StartSpec {
     Labels(Vec<u32>),
     /// Region functions per corner, row-major `(n_regions, n_corners)`.
     Corners(Vec<f64>),
+    /// The vertex normals clustered into `n_regions` clusters (at most `max_iterations`
+    /// rounds): the start of the atlas.
+    NormalClusters {
+        /// The most rounds of the clustering.
+        max_iterations: usize,
+    },
 }
 
 /// The options of the end-to-end unwrap.
@@ -617,6 +642,9 @@ fn start_of(spec: &StartSpec, n_regions: usize, n_corners: usize) -> Result<Star
             radius: *radius,
         },
         StartSpec::Labels(labels) => Start::PolygonLabels(labels.clone()),
+        StartSpec::NormalClusters { max_iterations } => Start::NormalClusters {
+            max_iterations: *max_iterations,
+        },
         StartSpec::Corners(flat) => {
             if flat.len() != n_regions * n_corners {
                 return Err(input_error(format!(
@@ -792,7 +820,7 @@ impl CutSession {
     /// # Errors
     /// As [`Session::roughening_rate`].
     pub fn roughening_rate(&mut self, c: &Controls) -> Result<f64, BindError> {
-        let options = c.flow_options()?;
+        let options = c.flow_options(self.n_regions)?;
         let problem = c.problem(self.n_regions, 0.0)?;
         Ok(self.inner.roughening_rate(&problem, &options.eval)?)
     }
@@ -803,7 +831,7 @@ impl CutSession {
     /// As [`Session::step`].
     pub fn step(&mut self, c: &Controls) -> Result<Dict, BindError> {
         let started = Instant::now();
-        let options = c.flow_options()?;
+        let options = c.flow_options(self.n_regions)?;
         let (alpha, omega) = self.resolve_length_weight(c, &options)?;
         let problem = c.problem(self.n_regions, alpha)?;
         let report = self.inner.step(&problem, &options)?;
@@ -823,7 +851,7 @@ impl CutSession {
     /// As [`Session::run`].
     pub fn run(&mut self, c: &Controls) -> Result<Dict, BindError> {
         let started = Instant::now();
-        let options = c.flow_options()?;
+        let options = c.flow_options(self.n_regions)?;
         let (alpha, omega) = self.resolve_length_weight(c, &options)?;
         let problem = c.problem(self.n_regions, alpha)?;
         let report = self.inner.run(&problem, &options, &c.stop_rule())?;
@@ -1020,6 +1048,8 @@ pub struct PreviewArrays {
     pub starts: Vec<u32>,
     /// Whether the polyline is closed.
     pub closed: Vec<bool>,
+    /// 2 per polyline: the two regions it separates, `[lower, higher]`.
+    pub regions: Vec<u32>,
 }
 
 impl PreviewArrays {
@@ -1033,6 +1063,7 @@ impl PreviewArrays {
             out.starts
                 .push(out.starts.last().unwrap() + line.positions.len() as u32);
             out.closed.push(line.closed);
+            out.regions.extend(line.regions);
         }
         out
     }
@@ -1067,6 +1098,14 @@ pub struct DescriptionArrays {
     pub interior_positions: Vec<f64>,
     /// 3 per junction.
     pub junction_positions: Vec<f64>,
+    /// The polygon of every junction.
+    pub junction_polygon: Vec<u32>,
+    /// The triangle of the supplied triangulation of every junction.
+    pub junction_triangle: Vec<u32>,
+    /// 3 per junction: the polygon corners of its triangle.
+    pub junction_corners: Vec<u32>,
+    /// 3 per junction: the barycentric weights of those corners.
+    pub junction_weights: Vec<f64>,
     /// The number of crossings the flow moved away from a vertex.
     pub n_clamped_crossings: usize,
 }
@@ -1106,6 +1145,10 @@ impl DescriptionArrays {
         }
         for j in &cut.junctions {
             a.junction_positions.extend(j.position);
+            a.junction_polygon.push(j.polygon);
+            a.junction_triangle.push(j.triangle);
+            a.junction_corners.extend(j.corners);
+            a.junction_weights.extend(j.barycentric);
         }
         a
     }
@@ -1126,11 +1169,13 @@ pub struct InsertedArrays {
     pub new_seams: Vec<u32>,
     /// The old polygon of every new polygon.
     pub polygon_parent: Vec<u32>,
-    /// 3 per new vertex: kind (0 old vertex, 1 edge point, 2 interior point), then the index
+    /// 3 per new vertex: kind (0 old vertex, 1 edge point, 2 interior point, 3 junction), then the index
     /// (old vertex, edge point) or the path and the position in it.
     pub vertex_source: Vec<u32>,
     /// The vertex of every edge point.
     pub edge_point_vertex: Vec<u32>,
+    /// The vertex of every junction.
+    pub junction_vertex: Vec<u32>,
     /// The number of vertices of the old mesh.
     pub n_old_vertices: usize,
 }
@@ -1157,6 +1202,7 @@ impl InsertedArrays {
                 })
                 .collect(),
             edge_point_vertex: i.edge_point_vertex.clone(),
+            junction_vertex: i.junction_vertex.clone(),
             n_old_vertices: i.n_old_vertices,
         }
     }
@@ -1453,6 +1499,49 @@ mod tests {
         assert_eq!(
             preview.positions.len(),
             3 * *preview.starts.last().unwrap() as usize
+        );
+    }
+
+    #[test]
+    fn four_regions_from_normal_clusters_run_describe_and_insert() {
+        let input = sphere();
+        let start = StartSpec::NormalClusters { max_iterations: 20 };
+        let mut s = CutSession::new(&input, 4, &start).unwrap();
+        assert_eq!(s.state().len(), 4 * s.n_corners());
+        let report = s
+            .run(&Controls {
+                length_weight: Some(0.5),
+                max_steps: Some(3),
+                motion_tolerance: Some(0.0),
+                energy_tolerance: Some(0.0),
+                ..Controls::default()
+            })
+            .unwrap();
+        assert!(report.get("distortion_3").is_some());
+        let cut = s.describe_cut(None).unwrap();
+        assert!(!cut.junctions.is_empty(), "a network has triple points");
+        let a = DescriptionArrays::from_cut(&cut);
+        assert_eq!(a.junction_weights.len(), 3 * cut.junctions.len());
+        assert_eq!(a.junction_corners.len(), 3 * cut.junctions.len());
+        let inserted = s.insert(Some(&cut), None).unwrap();
+        let flat = InsertedArrays::from_inserted(&inserted);
+        assert_eq!(flat.junction_vertex.len(), cut.junctions.len());
+        assert_eq!(
+            flat.vertex_source.chunks(3).filter(|c| c[0] == 3).count(),
+            cut.junctions.len()
+        );
+        let preview = s.preview(None).unwrap();
+        assert_eq!(preview.regions.len(), 2 * preview.closed.len());
+        // Recommended stages differ from the default ones for more than two regions.
+        assert!(
+            Controls::default().flow_options(4).unwrap().length_step
+                != Controls {
+                    stages: Some(StageSet::Default),
+                    ..Controls::default()
+                }
+                .flow_options(4)
+                .unwrap()
+                .length_step
         );
     }
 

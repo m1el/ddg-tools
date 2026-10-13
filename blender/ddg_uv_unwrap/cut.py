@@ -187,23 +187,65 @@ def start_labels_from_selection(mesh):
     return array('i', (0 if f else 1 for f in flags))
 
 
+MAX_REGIONS = 16
+"""The most regions the operators handle (the weights of the Flow operator are fixed-size
+vectors)."""
+
+
+def labels_from_values(values, what):
+    """Region labels from one integer per face: the distinct values, in ascending order, become
+    the regions 0, 1, ... Returns ``(array('i'), n_regions)``."""
+    distinct = sorted(set(values))
+    if len(distinct) < 2:
+        raise CutFailed("{} has only one value, but a cut needs at least two regions".format(what))
+    if len(distinct) > MAX_REGIONS:
+        raise CutFailed("{} has {} distinct values, but at most {} regions are handled".format(
+            what, len(distinct), MAX_REGIONS))
+    index = {v: i for i, v in enumerate(distinct)}
+    return array('i', (index[v] for v in values)), len(distinct)
+
+
 def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=None,
-              selected_vertices=()):
+              selected_vertices=(), cluster_iterations=50, attribute=""):
     """Creates the state of a cut on ``obj`` and its preview.
 
-    ``mode`` is ``'SELECTED'`` (the selected faces against the rest) or ``'CIRCLE'`` (the
-    geodesic disk of ``radius`` object units, 0: a tenth of the bounding diagonal, around ``vertex``; with ``vertex < 0`` the
-    ``active_vertex``, or the only one of ``selected_vertices``).
+    ``mode`` is ``'SELECTED'`` (the selected faces against the rest, two regions), ``'CIRCLE'``
+    (the geodesic disk of ``radius`` object units, 0: a tenth of the bounding diagonal, around
+    ``vertex``; with ``vertex < 0`` the ``active_vertex``, or the only one of
+    ``selected_vertices``; two regions), ``'CLUSTERS'`` (the vertex normals clustered into
+    ``n_regions`` regions, at most ``cluster_iterations`` rounds), ``'MATERIALS'`` (the
+    material slot of every face is its region) or ``'ATTRIBUTE'`` (the integer face attribute
+    ``attribute``; its distinct values are the regions).
 
     Returns a dict with the session's sizes and timings.
     """
     mesh = check_mesh(obj)
     if mode == 'SELECTED':
         start = {"polygon_labels": start_labels_from_selection(mesh)}
-        if n_regions != 2:
+        n_regions = 2
+    elif mode == 'CLUSTERS':
+        if not 2 <= n_regions <= MAX_REGIONS:
+            raise CutFailed("The number of regions must be between 2 and {} (it is {})".format(
+                MAX_REGIONS, n_regions))
+        start = {"cluster_iterations": cluster_iterations}
+    elif mode == 'MATERIALS':
+        values = array('i', bytes(4 * len(mesh.polygons)))
+        mesh.polygons.foreach_get("material_index", values)
+        labels, n_regions = labels_from_values(values, "The material index of the faces")
+        start = {"polygon_labels": labels}
+    elif mode == 'ATTRIBUTE':
+        attr = mesh.attributes.get(attribute) if attribute else None
+        if attr is None:
+            raise CutFailed("There is no attribute named '{}' on mesh '{}'".format(
+                attribute, mesh.name))
+        if attr.domain != 'FACE' or attr.data_type not in ('INT', 'INT8'):
             raise CutFailed(
-                "{} regions asked for, but the cut flow handles exactly 2 regions so far (N "
-                "regions are not available yet).".format(n_regions))
+                "Attribute '{}' must be an integer attribute on the face domain, but it is {} "
+                "on {}".format(attribute, attr.data_type, attr.domain))
+        values = array('i', bytes(4 * len(mesh.polygons)))
+        attr.data.foreach_get("value", values)
+        labels, n_regions = labels_from_values(values, "Attribute '{}'".format(attribute))
+        start = {"polygon_labels": labels}
     elif mode == 'CIRCLE':
         if vertex < 0:
             if active_vertex is not None:
@@ -224,6 +266,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
             if not radius > 0.0:
                 raise CutFailed("The mesh has no extent, so no default radius can be chosen")
         start = {"circle_vertex": vertex, "circle_radius": radius}
+        n_regions = 2
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
     session, seconds_extract = make_session(obj, start, n_regions)
@@ -275,7 +318,7 @@ def update_preview(obj, session):
     object."""
     ddg = native()
     try:
-        positions, starts, closed = session.preview()
+        positions, starts, closed, _regions = session.preview()
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     remove_preview(obj)
@@ -415,15 +458,15 @@ def flow_controls(obj, context, session, settings):
     info = {"warnings": []}
     energy = ENERGIES[settings["energy"]]
     controls = {"energy": energy}
-    if settings["stages"] == 'PAPER':
-        controls["stages"] = "paper"
+    controls["stages"] = settings["stages"].lower()
     if energy == "scaled_dirichlet":
         controls["feature_r_eps"] = settings["feature_r_eps"]
         controls["feature_smoothing"] = settings["feature_smoothing"]
     if settings["use_uniform_curvature"]:
         controls["curvature_uniform"] = settings["uniform_curvature"]
-    controls["distortion_weights"] = tuple(settings["distortion_weights"])
-    controls["area_weights"] = tuple(settings["area_weights"])
+    n = session.n_regions
+    controls["distortion_weights"] = tuple(settings["distortion_weights"])[:n]
+    controls["area_weights"] = tuple(settings["area_weights"])[:n]
 
     step_rule = settings["step_rule"].lower()
     controls["step_rule"] = step_rule
@@ -550,10 +593,21 @@ def run_flow(obj, context, settings):
     write_state(mesh, session)
     mesh.update()
     written = perf_counter()
+    n_patches = count_patches(mesh, session.corner_regions())
+    try:
+        n_triple_points = len(session.describe_cut().junction_polygon) if n_regions > 2 else 0
+    except ddg.DdgError as ex:
+        raise _translate(ex) from ex
     update_preview(obj, session)
     previewed = perf_counter()
     summary = {k: v for k, v in report.items() if k != "steps"}
     summary["length_scale"] = session.length_scale
+    summary["n_regions"] = n_regions
+    summary["n_patches"] = n_patches
+    summary["n_triple_points"] = n_triple_points
+    report["n_patches"] = n_patches
+    report["n_triple_points"] = n_triple_points
+    report["n_regions"] = n_regions
     if info.get("roughening_rate") is not None:
         summary["length_weight_roughening_rate"] = info["roughening_rate"]
     mesh[LAST_FLOW_KEY] = {k: v for k, v in summary.items()
@@ -568,13 +622,60 @@ def run_flow(obj, context, settings):
     return report
 
 
+def count_patches(mesh, regions):
+    """The number of patches: connected pieces of the surface that are in one region. Two
+    corners of a polygon that are next to each other and in one region are joined, and so are the
+    two corners of one vertex on the two sides of an edge that is not a seam."""
+    n = len(mesh.loops)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def join(a, b):
+        if regions[a] == regions[b]:
+            a, b = find(a), find(b)
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+
+    following = [0] * n
+    by_edge = {}
+    loops = mesh.loops
+    for polygon in mesh.polygons:
+        first = polygon.loop_start
+        count = polygon.loop_total
+        for k in range(count):
+            c = first + k
+            following[c] = first + (k + 1) % count
+            join(c, following[c])
+            by_edge.setdefault(loops[c].edge_index, []).append(c)
+    seam = {e.index for e in mesh.edges if e.use_seam}
+    for edge, cs in by_edge.items():
+        if edge in seam or len(cs) != 2:
+            continue
+        a, b = cs
+        if loops[a].vertex_index == loops[b].vertex_index:
+            join(a, b)
+            join(following[a], following[b])
+        else:
+            join(a, following[b])
+            join(following[a], b)
+    return len({find(c) for c in range(n)})
+
+
 def flow_summary(report):
     """One line for Blender's status bar."""
     reason = {"max_steps": "step limit", "converged": "converged",
               "energy_stalled": "energy stalled", "cut_vanished": "the cut vanished"}[
         report["stop_reason"]]
+    network = (" | {} regions, {} patches, {} triple points".format(
+        report["n_regions"], report["n_patches"], report["n_triple_points"])
+        if report["n_regions"] > 2 else " | {} patches".format(report["n_patches"]))
     return ("Cut flow: {} step{} ({}) | energy {:.5g} -> {:.5g} | cut length {:.5g} "
-            "(was {:.5g}) | length weight {:.4g}").format(
+            "(was {:.5g}) | length weight {:.4g}" + network).format(
         report["steps_taken"], "" if report["steps_taken"] == 1 else "s", reason,
         report["energy_before"], report["energy_after"], report["cut_length_after"],
         report["cut_length_before"], report["length_weight"])
@@ -618,12 +719,6 @@ def _set_loop_value(loop, layer, value):
         loop[layer] = value
 
 
-def _blend(a, b, t, interpolate):
-    if not interpolate:
-        return a if t < 0.5 else b
-    return a * (1.0 - t) + b * t
-
-
 def _vertex_layers(bm):
     layers = []
     for collection in (bm.verts.layers.float, bm.verts.layers.float_vector,
@@ -637,22 +732,42 @@ def _vertex_layers(bm):
     return layers
 
 
-def _interpolate_vertex(bm, new, a, b, t, layers):
-    """Vertex data of ``new``, a point at parameter ``t`` on the segment ``a``-``b``: vertex
-    group weights and the vertex layers of ``a`` and ``b`` blended."""
+def _interpolate_vertex(bm, new, sources, layers):
+    """Vertex data of ``new``, a point that is the weighted mean of vertices: ``sources`` is a
+    list of ``(vertex, weight)``, the weights add up to 1. Vertex group weights and the vertex
+    layers are blended (layers that cannot be blended are taken from the heaviest source)."""
     deform = bm.verts.layers.deform.active
     if deform is not None:
-        wa, wb = dict(a[deform].items()), dict(b[deform].items())
-        for group in set(wa) | set(wb):
-            weight = (1.0 - t) * wa.get(group, 0.0) + t * wb.get(group, 0.0)
-            if weight > 0.0:
-                new[deform][group] = weight
+        weights = {}
+        for vert, w in sources:
+            for group, value in vert[deform].items():
+                weights[group] = weights.get(group, 0.0) + w * value
+        for group, value in weights.items():
+            if value > 0.0:
+                new[deform][group] = value
+    heaviest = max(sources, key=lambda source: source[1])[0]
     for layer, interpolate in layers:
-        value = a[layer], b[layer]
-        if isinstance(value[0], (int, float, bool, bytes)):
-            new[layer] = _blend(value[0], value[1], t, interpolate)
+        if not interpolate:
+            new[layer] = heaviest[layer]
+            continue
+        values = [(vert[layer], w) for vert, w in sources]
+        if isinstance(values[0][0], (int, float, bool)):
+            new[layer] = sum(v * w for v, w in values)
         else:
-            new[layer] = _blend(Vector(value[0]), Vector(value[1]), t, interpolate)
+            total = Vector(values[0][0]) * values[0][1]
+            for v, w in values[1:]:
+                total = total + Vector(v) * w
+            new[layer] = total
+
+
+def _blend_many(values, weights, interpolate):
+    """The weighted mean of loop values (``_loop_value``), or the heaviest one."""
+    if not interpolate:
+        return values[max(range(len(values)), key=lambda i: weights[i])]
+    total = values[0] * weights[0]
+    for v, w in zip(values[1:], weights[1:]):
+        total = total + v * w
+    return total
 
 
 def insert_cut(mesh, cut, *, mark_seams=True):
@@ -737,57 +852,132 @@ def _insert_cut(bm, cut, mark_seams):
         for group in groups:
             t = edge_t[group[0]]
             fraction = (t - t_before) / (1.0 - t_before)
-            new_edge, new_vert = bmesh.utils.edge_split(current, from_vert, fraction)
+            _near, new_vert = bmesh.utils.edge_split(current, from_vert, fraction)
             for i in group:
                 point_vertex[i] = new_vert
-            current, from_vert, t_before = new_edge, new_vert, t
+            # `current` now runs from the new vertex to the far end; `new_edge` is the near part.
+            from_vert, t_before = new_vert, t
 
-    # ----- paths -----
+    # ----- paths: the network inside every polygon -----
+    # A polygon's part of the cut is a forest whose leaves are edge points (vertices already) and
+    # whose inner nodes are junctions (three paths each). It is embedded by splitting the polygon
+    # along chains of paths that run from a node that is a vertex already to another one:
+    # at first only edge points are, then also the junctions the chains passed through.
     path_start, path_end = cut.path_start, cut.path_end
     interior_starts = cut.path_interior_starts
     interior_corners, interior_t = cut.interior_corners, cut.interior_t
+    junction_corners, junction_weights = cut.junction_corners, cut.junction_weights
     pieces = {p: [old_faces[p]] for p in polygons_with_paths}
     cut_segments = []
+    junction_vertex = {}
+    paths_of_polygon = {}
     for k in range(n_paths):
-        p = path_polygon[k]
-        if path_start[k] < 0 or path_end[k] < 0:
-            raise CutFailed("Paths that end at a junction of three or more regions cannot be "
-                            "inserted yet")
-        start, end = point_vertex[path_start[k]], point_vertex[path_end[k]]
+        paths_of_polygon.setdefault(path_polygon[k], []).append(k)
+
+    def node_of(code):
+        return ("j", -code - 1) if code < 0 else ("e", code)
+
+    def vertex_of(node):
+        return junction_vertex.get(node[1]) if node[0] == "j" else point_vertex[node[1]]
+
+    for p, path_ids in paths_of_polygon.items():
         corners = old_corners[p]
-        coords, params = [], []
-        for j in range(interior_starts[k], interior_starts[k + 1]):
-            c0 = interior_corners[2 * j] - face_starts[p]
-            c1 = interior_corners[2 * j + 1] - face_starts[p]
-            t = interior_t[j]
-            coords.append(corners[c0][0].co * (1.0 - t) + corners[c1][0].co * t)
-            params.append((c0, c1, t))
-        face = next((f for f in pieces[p] if start in f.verts and end in f.verts), None)
-        if face is None:
-            raise CutFailed(
-                "Internal error: the path {} of polygon {} does not lie in one piece of it".format(
-                    k, p))
-        before = set(face.verts)
-        result = bmesh.utils.face_split(face, start, end, coords=coords)
-        if not result or result[0] is None:
-            raise CutFailed("Internal error: polygon {} could not be split along path {}".format(
-                p, k))
-        new_face = result[0]
-        pieces[p].append(new_face)
-        chain = [start]
-        if coords:
-            candidates = [v for v in new_face.verts if v not in before]
-            for (c0, c1, t), co in zip(params, coords):
-                vert = min(candidates, key=lambda v: (v.co - co).length_squared)
-                candidates.remove(vert)
-                chain.append(vert)
-                _interpolate_vertex(bm, vert, corners[c0][0], corners[c1][0], t, vertex_layers)
+        pending = set(path_ids)
+        ends = {k: (node_of(path_start[k]), node_of(path_end[k])) for k in path_ids}
+        incident = {}
+        for k, (u, v) in ends.items():
+            incident.setdefault(u, []).append(k)
+            incident.setdefault(v, []).append(k)
+
+        def junction_position(j):
+            c = [junction_corners[3 * j + i] - face_starts[p] for i in range(3)]
+            w = [junction_weights[3 * j + i] for i in range(3)]
+            return (corners[c[0]][0].co * w[0] + corners[c[1]][0].co * w[1]
+                    + corners[c[2]][0].co * w[2]), c, w
+
+        while pending:
+            start_node = next(
+                (n for n, ks in incident.items()
+                 if vertex_of(n) is not None and any(k in pending for k in ks)), None)
+            if start_node is None:
+                raise CutFailed("Internal error: the paths of polygon {} do not reach an edge "
+                                "point".format(p))
+            # Walk from the start node over paths, through junctions that are not vertices yet,
+            # until a node that is a vertex.
+            node, chain, used = start_node, [], set()
+            while True:
+                options = [k for k in incident[node] if k in pending and k not in used]
+                if not options:
+                    raise CutFailed("Internal error: a path of polygon {} dead-ends at {}".format(
+                        p, node))
+                k = options[0]
+                used.add(k)
+                u, v = ends[k]
+                forward = u == node
+                chain.append((k, forward))
+                node = v if forward else u
+                if vertex_of(node) is not None:
+                    break
+                if len(chain) > len(path_ids):
+                    raise CutFailed("Internal error: the paths of polygon {} form a cycle".format(p))
+            coords, labels = [], []        # labels: ("i", c0, c1, t) or ("j", j, corners, weights)
+            walk_nodes = [start_node]
+            for k, forward in chain:
+                items = []
+                for j in range(interior_starts[k], interior_starts[k + 1]):
+                    c0 = interior_corners[2 * j] - face_starts[p]
+                    c1 = interior_corners[2 * j + 1] - face_starts[p]
+                    t = interior_t[j]
+                    items.append((corners[c0][0].co * (1.0 - t) + corners[c1][0].co * t,
+                                  ("i", c0, c1, t)))
+                if not forward:
+                    items.reverse()
+                for co, label in items:
+                    coords.append(co)
+                    labels.append(label)
+                next_node = ends[k][1] if forward else ends[k][0]
+                walk_nodes.append(next_node)
+                if vertex_of(next_node) is None:
+                    position, c, w = junction_position(next_node[1])
+                    coords.append(position)
+                    labels.append(("j", next_node[1], c, w))
+            first, last = vertex_of(start_node), vertex_of(walk_nodes[-1])
+            face = next((f for f in pieces[p] if first in f.verts and last in f.verts), None)
+            if face is None:
+                raise CutFailed("Internal error: a chain of polygon {} does not lie in one "
+                                "piece of it".format(p))
+            before = set(face.verts)
+            result = bmesh.utils.face_split(face, first, last, coords=coords)
+            if not result or result[0] is None:
+                raise CutFailed("Internal error: polygon {} could not be split along a chain of "
+                                "paths".format(p))
+            new_face = result[0]
+            pieces[p].append(new_face)
+            made = [v for v in new_face.verts if v not in before]
+            vertices = [first]
+            for co, label in zip(coords, labels):
+                vert = min(made, key=lambda v: (v.co - co).length_squared)
+                made.remove(vert)
+                vertices.append(vert)
+                if label[0] == "i":
+                    _, c0, c1, t = label
+                    sources = [(corners[c0][0], 1.0 - t), (corners[c1][0], t)]
+                    sample = [corners[c0][1], corners[c1][1]]
+                    weights = [1.0 - t, t]
+                else:
+                    _, j, c, w = label
+                    junction_vertex[j] = vert
+                    sources = [(corners[c[i]][0], w[i]) for i in range(3)]
+                    sample = [corners[c[i]][1] for i in range(3)]
+                    weights = list(w)
+                _interpolate_vertex(bm, vert, sources, vertex_layers)
                 for loop in vert.link_loops:
                     for index, (layer, interpolate) in enumerate(loop_layers):
-                        a, b = corners[c0][1][index], corners[c1][1][index]
-                        _set_loop_value(loop, layer, _blend(a, b, t, interpolate))
-        chain.append(end)
-        cut_segments.extend(zip(chain, chain[1:]))
+                        _set_loop_value(loop, layer, _blend_many(
+                            [values[index] for values in sample], weights, interpolate))
+            vertices.append(last)
+            cut_segments.extend(zip(vertices, vertices[1:]))
+            pending -= used
 
     n_marked = 0
     if mark_seams:

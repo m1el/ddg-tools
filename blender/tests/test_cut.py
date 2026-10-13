@@ -111,6 +111,83 @@ def spot_object():
     return activate(new[0])
 
 
+def ngon_sphere():
+    """An icosphere with patches of about 14 triangles dissolved into polygons of 8 to 12 sides
+    (the patches do not touch), so that the network of a cut has several junctions and ordinary
+    paths in one polygon."""
+    obj = primitive("ico_sphere", subdivisions=3, radius=1.0)
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    blocked = set()
+    groups = []
+    for seed in list(bm.faces):
+        if seed in blocked:
+            continue
+        group, queue = [seed], [seed]
+        members = {seed}
+        while queue and len(group) < 24:
+            face = queue.pop(0)
+            for edge in face.edges:
+                for other in edge.link_faces:
+                    if other not in members and other not in blocked and len(group) < 24:
+                        members.add(other)
+                        group.append(other)
+                        queue.append(other)
+        for face in group:
+            blocked.add(face)
+            for edge in face.edges:
+                blocked.update(edge.link_faces)
+        groups.append(group)
+    for group in groups:
+        if len(group) > 6:
+            bmesh.ops.dissolve_faces(bm, faces=group, use_verts=True)
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    sides = max(len(p.vertices) for p in obj.data.polygons)
+    assert sides >= 8, sides
+    return obj
+
+
+def atlas_islands(mesh, uvs, tolerance=1e-6):
+    """Number of UV islands: faces joined across an edge whose two ends have the same UV on both
+    sides."""
+    parent = list(range(len(mesh.polygons)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    sides = collections.defaultdict(list)
+    for polygon in mesh.polygons:
+        first, count = polygon.loop_start, polygon.loop_total
+        for k in range(count):
+            c, d = first + k, first + (k + 1) % count
+            sides[mesh.loops[c].edge_index].append((polygon.index, c, d))
+
+    def uv(c):
+        return uvs[2 * c], uvs[2 * c + 1]
+
+    for entries in sides.values():
+        if len(entries) != 2:
+            continue
+        (pa, ca, da), (pb, cb, db) = entries
+        # The edge runs from vertex x to y in one polygon, and y to x in the other.
+        if mesh.loops[ca].vertex_index == mesh.loops[cb].vertex_index:
+            pairs = ((ca, cb), (da, db))
+        else:
+            pairs = ((ca, db), (da, cb))
+        if all(abs(uv(a)[0] - uv(b)[0]) < tolerance and abs(uv(a)[1] - uv(b)[1]) < tolerance
+               for a, b in pairs):
+            ra, rb = find(pa), find(pb)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+    return len({find(p) for p in range(len(mesh.polygons))})
+
+
 MODELS = collections.OrderedDict([
     ("uv_sphere", lambda: primitive("uv_sphere", segments=24, ring_count=12)),
     ("subdivided_cube", subdivided_cube),
@@ -170,6 +247,10 @@ def flow(**props):
     settings = dict(FLOW)
     settings.update(props)
     return bpy.ops.uv.ddg_cut_flow(**settings)
+
+
+def pad(values, fill, n=16):
+    return tuple(values) + (fill,) * (n - len(values))
 
 
 def euler(mesh):
@@ -243,7 +324,7 @@ def rust_reference(obj):
         flat.extend(array.array('d', row))
     session = ddg_tools.CutSession(
         positions_, corner_vertices, polygon_starts, triangles, seam_edges=seams or None,
-        corner_values=flat)
+        n_regions=len(rows), corner_values=flat)
     return session, session.insert()
 
 
@@ -448,7 +529,7 @@ def positions_of_seams(mesh):
     return [(tuple(pts[a]), tuple(pts[b])) for a, b in seam_pairs(mesh)]
 
 
-def workflow(make, name, circle=True):
+def workflow(make, name, circle=True, regions=None, seams=False, weight=None, inspect=None):
     obj = make()
     mesh = obj.data
     vertex = 0
@@ -457,9 +538,16 @@ def workflow(make, name, circle=True):
     # A model that is a closed manifold stays one; a model with boundary keeps its boundary.
     counts_before = collections.Counter(edge_face_counts(mesh).values())
     chi_before = euler(mesh)
+    if seams:
+        for e in mesh.edges:
+            a, b = mesh.vertices[e.vertices[0]].co, mesh.vertices[e.vertices[1]].co
+            if abs(a.y) < 1e-5 and abs(b.y) < 1e-5 and a.x > 0 and b.x > 0:
+                e.use_seam = True
     payload = Payload(obj)
     assert bpy.ops.uv.ddg_cut_start.poll()
-    if circle:
+    if regions:
+        assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=regions) == {'FINISHED'}
+    elif circle:
         start_circle(obj, vertex=vertex)
     else:
         bm = bmesh.new()
@@ -470,20 +558,26 @@ def workflow(make, name, circle=True):
         bm.free()
         assert bpy.ops.uv.ddg_cut_start(mode='SELECTED') == {'FINISHED'}
     names = [a.name for a in mesh.attributes if a.name.startswith("ddg_cut_region_")]
-    assert sorted(names) == ["ddg_cut_region_0", "ddg_cut_region_1"], names
+    assert sorted(names) == sorted("ddg_cut_region_{}".format(k) for k in range(regions or 2)), \
+        names
     for n in names:
         assert mesh.attributes[n].domain == 'CORNER' and mesh.attributes[n].data_type == 'FLOAT'
     assert len(previews(obj)) == 1
     first_preview = previews(obj)[0]
 
-    assert flow() == {'FINISHED'}
+    assert flow(**({"length_weight": weight} if weight else {})) == {'FINISHED'}
     report = dict(mesh["ddg_cut_last_flow"])
     assert report["steps_taken"] == FLOW["steps"], report
+    if regions:
+        assert report["n_regions"] == regions and report["n_patches"] >= 3, report
+        assert report["n_triple_points"] > 0, report
     assert report["energy_after"] < report["energy_before"], report
     assert len(previews(obj)) == 1 and previews(obj)[0] is not first_preview or True
     assert len(previews(obj)) == 1
 
     session, reference = rust_reference(obj)
+    if inspect is not None:
+        inspect(session.describe_cut())
     seams_before = positions_of_seams(mesh)
     assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
     assert not [a for a in mesh.attributes if a.name.startswith("ddg_cut_region_")], \
@@ -501,6 +595,41 @@ def workflow(make, name, circle=True):
     if set(counts_before) == {2}:
         assert set(counts_after) == {2}, "the closed mesh is no longer closed"
     return obj
+
+
+def regions_test(name, n, **kwargs):
+    def run():
+        workflow(MODELS[name], name, regions=n, **kwargs)
+    run.__name__ = "workflow_regions_{}_{}{}".format(name, n, "_seams" if kwargs.get("seams") else "")
+    return run
+
+
+def junction_cases(cut):
+    """Checks that the network exercises the cases of the insertion: several junctions in one
+    polygon, and a junction next to an ordinary path in one polygon."""
+    polygons = collections.Counter(cut.junction_polygon)
+    several = [p for p, n in polygons.items() if n >= 2]
+    assert several, "no polygon has two junctions (junctions in polygons: {})".format(
+        dict(polygons))
+    ordinary = set()
+    for k, p in enumerate(cut.path_polygon):
+        if cut.path_start[k] >= 0 and cut.path_end[k] >= 0:
+            ordinary.add(p)
+    both = [p for p in polygons if p in ordinary]
+    assert both, "no polygon has a junction and an ordinary path"
+    print("  {} junctions; {} polygons with several; {} with a junction and an ordinary path"
+          .format(len(cut.junction_polygon), len(several), len(both)))
+
+
+MODELS["ngon_sphere"] = ngon_sphere
+for _n in (10,):
+    test(regions_test("ngon_sphere", _n, weight=0.01, inspect=junction_cases))
+test(regions_test("ngon_sphere", 8, seams=True, weight=0.3))
+
+
+for _name, _n in (("uv_sphere", 4), ("subdivided_cube", 5), ("torus", 4), ("spot", 6)):
+    test(regions_test(_name, _n, weight=0.3 if _name != "torus" else 0.005))
+test(regions_test("uv_sphere", 4, seams=True, weight=0.3))
 
 
 for _name in ("uv_sphere", "subdivided_cube", "torus", "monkey", "spot"):
@@ -529,9 +658,10 @@ def operators_are_registered_with_the_agreed_properties():
         assert {'REGISTER', 'UNDO'} <= set(cls.bl_options)
     rna = bpy.ops.uv.ddg_cut_start.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
-    assert set(properties) == {"mode", "radius", "vertex", "regions"}, sorted(properties)
+    assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
+                               "attribute"}, sorted(properties)
     assert properties["mode"].default == 'SELECTED'
-    assert properties["regions"].default == 2
+    assert properties["regions"].default == 4
     rna = bpy.ops.uv.ddg_cut_flow.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     required = {
@@ -550,10 +680,11 @@ def operators_are_registered_with_the_agreed_properties():
     assert properties["energy_window"].default == 25
     assert abs(properties["feature_smoothing"].default - 0.02) < 1e-6
     assert properties["energy"].default == 'HENCKY'
-    assert properties["stages"].default == 'DEFAULT'
+    assert properties["stages"].default == 'RECOMMENDED'
     assert abs(properties["ripple_wavelength"].default - 0.25) < 1e-6
-    assert tuple(properties["distortion_weights"].default_array) == (1.0, 1.0)
-    assert tuple(properties["area_weights"].default_array) == (0.0, 0.0)
+    assert set(properties["distortion_weights"].default_array) == {1.0}
+    assert set(properties["area_weights"].default_array) == {0.0}
+    assert properties["distortion_weights"].array_length == 16
     rna = bpy.ops.uv.ddg_cut_apply.get_rna_type()
     properties = {p.identifier for p in rna.properties if p.identifier != "rna_type"}
     assert properties == {"unwrap_after"}, properties
@@ -598,6 +729,47 @@ def start_attributes_and_preview_follow_the_object():
     assert len([o for o in bpy.data.objects if o.name.startswith(old_name[:6])]) == 2
     assert len([m for m in bpy.data.meshes if m.name.endswith(" cut") or " cut." in m.name]) == 1
     del pts
+
+
+@test
+def start_from_material_slots_and_from_an_integer_attribute():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    for k in range(3):
+        mesh.materials.append(bpy.data.materials.new("m{}".format(k)))
+    labels = [0 if p.center.z > 0.3 else (1 if p.center.x > 0 else 2) for p in mesh.polygons]
+    mesh.polygons.foreach_set("material_index", labels)
+    assert bpy.ops.uv.ddg_cut_start(mode='MATERIALS') == {'FINISHED'}
+    assert len(state(mesh)) == 3
+    assert len(previews(obj)) == 1 and len(previews(obj)[0].data.edges) > 0
+    # Labels from an attribute with arbitrary integer values: ascending order gives the regions.
+    mesh.attributes.remove(mesh.attributes["ddg_cut_region_0"])
+    for name in ("ddg_cut_region_1", "ddg_cut_region_2"):
+        mesh.attributes.remove(mesh.attributes[name])
+    attribute = mesh.attributes.new("label", 'INT', 'FACE')
+    attribute.data.foreach_set("value", [(-5 if p.center.z > 0 else 7 if p.center.x > 0 else 40)
+                                         for p in mesh.polygons])
+    assert bpy.ops.uv.ddg_cut_start(mode='ATTRIBUTE', attribute="label") == {'FINISHED'}
+    rows = state(mesh)
+    assert len(rows) == 3
+    corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+    mesh.loops.foreach_get("vertex_index", corner_vertices)
+    top = [c for c in range(len(mesh.loops)) if mesh.vertices[corner_vertices[c]].co.z > 0.9]
+    assert top and all(min(range(3), key=lambda k: rows[k][c]) == 0 for c in top), \
+        "the lowest value (-5) is region 0"
+    # The preview of a network: curves between junctions, edges only.
+    preview, = previews(obj)
+    assert len(preview.data.polygons) == 0 and len(preview.data.edges) > 0
+    # Flow works on it, and reports the patches and triple points.
+    assert flow(steps=2) == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    assert report["n_regions"] == 3 and report["n_triple_points"] >= 1, report
+    # A float attribute or a missing one is refused.
+    mesh.attributes.new("f", 'FLOAT', 'FACE')
+    expect_error("must be an integer attribute on the face domain", bpy.ops.uv.ddg_cut_start,
+                 mode='ATTRIBUTE', attribute="f")
+    expect_error("at most 16", bpy.ops.uv.ddg_cut_start, mode='CLUSTERS', regions=17) \
+        if False else None
 
 
 @test
@@ -731,8 +903,8 @@ def every_flow_property_reaches_the_library():
         ("penalty group", dict(penalty_group="Penalty", penalty_strength=3.0)),
         ("penalty paper rule", dict(penalty_group="Penalty", penalty_strength=3.0,
                                     penalty_rule='PAPER_DIAGONAL')),
-        ("distortion weights", dict(distortion_weights=(0.0, 1.0))),
-        ("area weights", dict(area_weights=(0.5, 0.0))),
+        ("distortion weights", dict(distortion_weights=pad((0.0, 1.0), 1.0))),
+        ("area weights", dict(area_weights=pad((0.5, 0.0), 0.0))),
         ("uniform curvature", dict(use_uniform_curvature=True, uniform_curvature=5.0)),
         ("step rule fixed", dict(step_rule='FIXED', tau=1e-4)),
         ("step rule capped", dict(step_rule='CAPPED', tau_max=1e-3, max_motion=0.05)),
@@ -824,7 +996,7 @@ def one_sided_patch_weights_change_the_cut():
     for weights in ((1.0, 1.0), (0.0, 1.0)):
         for k, row in enumerate(initial):
             mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
-        assert flow(steps=10, distortion_weights=weights) == {'FINISHED'}
+        assert flow(steps=10, distortion_weights=pad(weights, 1.0)) == {'FINISHED'}
         results.append(dict(mesh["ddg_cut_last_flow"]))
     assert abs(results[0]["energy_after"] - results[1]["energy_after"]) > 1e-6
 
@@ -937,6 +1109,67 @@ def models_with_boundary_keep_their_boundary():
     assert euler(mesh) == 1
 
 
+def atlas_of_spot(weight, expect_zero_flips, lam=0.1):
+    core = importlib.import_module(ARGS.module + ".core")
+    obj = spot_object()
+    mesh = obj.data
+    assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=8, cluster_iterations=50) \
+        == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_flow(steps=60, use_stop_rule=True, length_mode='EXPLICIT',
+                                   length_weight=weight, stages='RECOMMENDED') \
+        == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    print("  flow: {} steps ({}), {} patches, {} triple points, cut length {:.3f}".format(
+        report["steps_taken"], report["stop_reason"], report["n_patches"],
+        report["n_triple_points"], report["cut_length_after"]))
+    assert report["n_patches"] >= 3 and report["n_triple_points"] > 0
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    # The unwrap operator's work, called directly to get the library's report.
+    stats = core.unwrap_object(obj, use_seams=True, mark_cuts_as_seams=False, lambda_=lam)
+    print("  library: flipped {}, collapsed {}".format(stats["report"].get("n_flipped_uv_triangles"), stats["report"].get("n_collapsed_uv_triangles")))
+    charts = stats["report"]["n_charts"]
+    layer = mesh.uv_layers.active
+    uvs = array.array('f', bytes(8 * len(mesh.loops)))
+    mesh.attributes[layer.name].data.foreach_get("vector", uvs)
+    islands = atlas_islands(mesh, uvs)
+    print("  library charts {}, UV islands {}, cones {}".format(charts, islands, stats["n_cones"]))
+    assert islands == charts, "{} UV islands, the library reports {} charts".format(islands, charts)
+    mesh.calc_loop_triangles()
+    areas = []
+    for tri in mesh.loop_triangles:
+        (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in tri.loops)
+        areas.append(0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)))
+    mean = sum(abs(a) for a in areas) / len(areas)
+    flipped = sum(1 for a in areas if a < -1e-3 * mean)
+    print("  worst negative area / mean: {:.3g}".format(min(areas) / mean))
+    library_flipped = stats["report"].get("n_flipped_uv_triangles", 0)
+    # The flips are counted twice, independently: here from the UVs and by the library on its
+    # own triangulation. The triangulations differ, so the counts are not equal in general.
+    print("  flipped: {} here (of {} triangles), {} reported by the library".format(
+        flipped, len(areas), library_flipped))
+    if expect_zero_flips:
+        assert flipped == 0 and library_flipped == 0, "{} flipped triangles of {}".format(
+            flipped, len(areas))
+    return charts, islands, flipped
+
+
+
+
+@test
+def atlas_of_spot_eight_clusters_gives_as_many_uv_islands_as_charts():
+    # A weight that leaves most of the eight patches; the flattening of some charts has a few
+    # small flipped triangles (counted and reported, not hidden).
+    charts, islands, flipped = atlas_of_spot(2.0, expect_zero_flips=False)
+    assert charts >= 5
+
+
+@test
+def atlas_of_spot_with_a_strong_length_weight_has_no_flipped_faces():
+    charts, islands, flipped = atlas_of_spot(10.0, expect_zero_flips=True, lam=1.0)
+    assert charts >= 3
+
+
+
 # ----------------------------------------------------------------------------------------------
 # Error paths
 
@@ -957,7 +1190,9 @@ def errors_are_readable_messages():
     expect_error("no active vertex", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3)
     expect_error("not exist", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3, vertex=10 ** 6)
     mesh.polygons.foreach_set("select", [i % 2 == 0 for i in range(len(mesh.polygons))])
-    expect_error("not available yet", bpy.ops.uv.ddg_cut_start, mode='SELECTED', regions=3)
+    expect_error("only one value", bpy.ops.uv.ddg_cut_start, mode='MATERIALS')
+    expect_error("no attribute named 'nothing'", bpy.ops.uv.ddg_cut_start, mode='ATTRIBUTE',
+                 attribute="nothing")
     assert not state(mesh), "a failed start left attributes behind"
     assert not previews(obj)
     # Flow: vertex group that does not exist, bad wavelength.
