@@ -35,9 +35,12 @@ import DdgProofs.Cuts.Dirichlet
   keeps the bounds of `r⁰` **if the off-diagonal entries of `L` are nonpositive**
   (`smoothing_ge`, `smoothing_le`); on a mesh with negative cotangent weights that is not
   guaranteed.
-* **`cut-sliver-smoothing`** (`Ddg.aspectRatio`, `Ddg.smoothedSpeed`): the aspect ratio is `1`
-  for an equilateral triangle and `≥ 1` for every triangle; the smoothed speed is the linear
-  interpolant of the two neighbours along the cut, between their values.
+* **`cut-sliver-smoothing`** (`Ddg.aspectRatio`, `Ddg.smoothedSpeed`): the smoothed speed is a
+  convex combination of the two neighbours' speeds with the weights `ℓ₂/(ℓ₁+ℓ₂)`, `ℓ₁/(ℓ₁+ℓ₂)`,
+  hence within their range, and it is exact for a speed that is linear in arclength
+  (`smoothedSpeed_eq_convex`, `smoothedSpeed_mem`, `smoothedSpeed_linear`); the aspect ratio is
+  `1` for an equilateral triangle and `≥ 1` for every triangle (`aspectRatio_equilateral`,
+  `one_le_aspectRatio`).
 -/
 
 noncomputable section
@@ -790,6 +793,109 @@ theorem smoothedFeatureSize_bounds [Nonempty V] {A : V → ℝ} (hA : ∀ i, 0 <
     featureWeight_pos h1⟩
 
 end Smoothing
+
+/-! ## Sliver smoothing -/
+
+/-- The oracle's `smoothedSpeed` at `ℝ`: `(ℓ₂ s₁ + ℓ₁ s₂)/(ℓ₁ + ℓ₂)`. -/
+theorem smoothedSpeed_eq (l1 l2 s1 s2 : ℝ) :
+    Ddg.smoothedSpeed l1 l2 s1 s2 = (l2 * s1 + l1 * s2) / (l1 + l2) := rfl
+
+/-- **The smoothed speed is a convex combination of the two neighbours' speeds**, with the
+weights `ℓ₂/(ℓ₁ + ℓ₂)` and `ℓ₁/(ℓ₁ + ℓ₂)` (the nearer neighbour weighs more).
+
+[formula: cut-sliver-smoothing] -/
+theorem smoothedSpeed_eq_convex (l1 l2 s1 s2 : ℝ) :
+    Ddg.smoothedSpeed l1 l2 s1 s2 = l2 / (l1 + l2) * s1 + l1 / (l1 + l2) * s2 := by
+  rw [smoothedSpeed_eq]
+  ring
+
+/-- The two weights are nonnegative and sum to `1` (segments of nonnegative length, not both
+zero). -/
+theorem smoothedSpeed_weights {l1 l2 : ℝ} (h1 : 0 ≤ l1) (h2 : 0 ≤ l2) (h : 0 < l1 + l2) :
+    0 ≤ l2 / (l1 + l2) ∧ 0 ≤ l1 / (l1 + l2) ∧ l2 / (l1 + l2) + l1 / (l1 + l2) = 1 := by
+  refine ⟨div_nonneg h2 h.le, div_nonneg h1 h.le, ?_⟩
+  have := h.ne'
+  field_simp
+  ring
+
+/-- **The smoothed speed lies between the two neighbours' speeds.**
+
+[formula: cut-sliver-smoothing] -/
+theorem smoothedSpeed_mem {l1 l2 : ℝ} (h1 : 0 ≤ l1) (h2 : 0 ≤ l2) (h : 0 < l1 + l2)
+    (s1 s2 : ℝ) :
+    min s1 s2 ≤ Ddg.smoothedSpeed l1 l2 s1 s2 ∧ Ddg.smoothedSpeed l1 l2 s1 s2 ≤ max s1 s2 := by
+  rw [smoothedSpeed_eq, le_div_iff₀ h, div_le_iff₀ h]
+  have a1 := mul_le_mul_of_nonneg_left (min_le_left s1 s2) h2
+  have a2 := mul_le_mul_of_nonneg_left (min_le_right s1 s2) h1
+  have b1 := mul_le_mul_of_nonneg_left (le_max_left s1 s2) h2
+  have b2 := mul_le_mul_of_nonneg_left (le_max_right s1 s2) h1
+  constructor <;> linarith
+
+/-- **The smoothing is exact for a speed that is linear in arclength**: with the neighbours at
+the arclengths `−ℓ₁` and `+ℓ₂` from the vertex and `s(x) = α + β x`, the smoothed value is
+`s(0) = α`.
+
+[formula: cut-sliver-smoothing] -/
+theorem smoothedSpeed_linear {l1 l2 : ℝ} (h : l1 + l2 ≠ 0) (α β : ℝ) :
+    Ddg.smoothedSpeed l1 l2 (α - β * l1) (α + β * l2) = α := by
+  rw [smoothedSpeed_eq, div_eq_iff h]
+  ring
+
+/-- A constant speed is not changed. -/
+theorem smoothedSpeed_const {l1 l2 : ℝ} (h : l1 + l2 ≠ 0) (s : ℝ) :
+    Ddg.smoothedSpeed l1 l2 s s = s := by
+  have := smoothedSpeed_linear h s 0
+  simpa using this
+
+/-- The value does not depend on which neighbour is called the first. -/
+theorem smoothedSpeed_swap (l1 l2 s1 s2 : ℝ) :
+    Ddg.smoothedSpeed l2 l1 s2 s1 = Ddg.smoothedSpeed l1 l2 s1 s2 := by
+  rw [smoothedSpeed_eq, smoothedSpeed_eq]
+  ring
+
+/-- The oracle's `aspectRatio` at `ℝ`: `(longest edge)² √3 / (4 · area)`. -/
+theorem aspectRatio_eq (longest area : ℝ) :
+    Ddg.aspectRatio longest area = longest * longest * √3 / (4 * area) := by
+  simp only [Ddg.aspectRatio, Oracle.sqrt_eq, Oracle.three_eq, Oracle.four_eq]
+
+/-- **The aspect ratio of an equilateral triangle is `1`.**
+
+[formula: cut-sliver-smoothing] -/
+theorem aspectRatio_equilateral {l : ℝ} (hl : 0 < l) :
+    Ddg.aspectRatio l (triArea l l l) = 1 := by
+  have h3 : (0 : ℝ) < √3 := Real.sqrt_pos.mpr (by norm_num)
+  have hT : triArea l l l = √3 * l ^ 2 / 4 := by
+    unfold triArea
+    rw [show (l + l + l) * (l - l + l) * (l - l + l) * (l - l + l) = 3 * (l ^ 2) ^ 2 by ring,
+      Real.sqrt_mul (by norm_num), Real.sqrt_sq (by positivity)]
+  rw [aspectRatio_eq, hT]
+  have := h3.ne'
+  have := hl.ne'
+  field_simp
+
+/-- **The aspect ratio of every triangle is at least `1`** (`c` the longest side): the
+threshold `ρ₀` of SPEC §3.7 is compared with a number that is `1` for the equilateral triangle
+and larger for every other shape.
+
+[formula: cut-sliver-smoothing] -/
+theorem one_le_aspectRatio {a b c : ℝ} (h : IsTriangle a b c) (ha : a ≤ c) (hb : b ≤ c) :
+    1 ≤ Ddg.aspectRatio c (triArea a b c) := by
+  have hT := triArea_pos h
+  have h16 := sixteen_mul_triArea_sq h
+  have hc := h.pos_c
+  have ha0 := h.pos_a
+  have hb0 := h.pos_b
+  have h3 : (4 * triArea a b c) ^ 2 ≤ (√3 * c ^ 2) ^ 2 := by
+    rw [mul_pow (√3) (c ^ 2) 2, Real.sq_sqrt (by norm_num : (0 : ℝ) ≤ 3)]
+    have hx : 0 ≤ c ^ 2 - a ^ 2 := by nlinarith
+    have hy : 0 ≤ c ^ 2 - b ^ 2 := by nlinarith
+    nlinarith [mul_nonneg (sq_nonneg c) hx, mul_nonneg (sq_nonneg c) hy, sq_nonneg (a ^ 2 - b ^ 2)]
+  have h4 : 4 * triArea a b c ≤ √3 * c ^ 2 :=
+    calc 4 * triArea a b c = √((4 * triArea a b c) ^ 2) := (Real.sqrt_sq (by positivity)).symm
+      _ ≤ √((√3 * c ^ 2) ^ 2) := Real.sqrt_le_sqrt h3
+      _ = √3 * c ^ 2 := Real.sqrt_sq (by positivity)
+  rw [aspectRatio_eq, le_div_iff₀ (by positivity)]
+  linarith
 
 end Cuts
 
