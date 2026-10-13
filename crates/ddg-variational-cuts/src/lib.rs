@@ -6,7 +6,8 @@
 //! > ACM Transactions on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201356>
 //!
 //! The discrete method, the sign conventions and every difference from the paper as printed are
-//! in `SPEC.md` next to this crate's `Cargo.toml`.
+//! in `SPEC.md` next to this crate's `Cargo.toml` (the differences in its §9); measurements are
+//! in the crate's `README.md`.
 //!
 //! # What is here
 //!
@@ -21,8 +22,8 @@
 //!    cut and on the boundary of the mesh (the Yamabe equation `Δu = −K`), its normal derivative
 //!    on the boundary, and for energies other than the Dirichlet energy the adjoint state;
 //! 4. the gradient density `G_r` of each region's energy on the cut and the speed
-//!    `s = G_0 − G_1` at which the level-set function must change on the cut to descend, before
-//!    and after sliver smoothing;
+//!    `s = G_0 − G_1` at which the level-set function must change on the cut to descend
+//!    (optionally with the sliver smoothing of the paper);
 //! 5. the energy
 //!    `E = Σ_r [ w_r J_r + β_r Area_r ] + ∫_γ (α_L + η) ds` with all its terms.
 //!
@@ -73,6 +74,11 @@
 //! * **Regions.** Region ids are `u32`. The cut mesh gives every cut point one vertex per
 //!   side, so each of its vertices lies in exactly one region and per-region quantities are
 //!   plain per-vertex arrays.
+//! * **Normal derivative on the cut.** The paper divides the integrated normal derivative of
+//!   each cut vertex by its dual length. That quotient is wrong by orders of magnitude where the
+//!   cut passes close to a mesh vertex, so by default the fluxes are smoothed along the cut
+//!   first ([`FluxRecovery`], SPEC §3.5 and D12). [`EvalOptions::paper`] selects the procedure
+//!   of the paper.
 //! * Bad input never panics: see [`CutError`]. Nothing is clamped or left out silently; what
 //!   was moved or excluded is counted in the [`EvalReport`].
 //!

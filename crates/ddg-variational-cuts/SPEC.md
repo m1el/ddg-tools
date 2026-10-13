@@ -104,6 +104,11 @@ Positive on a sphere (D1). Boundary vertices carry no Gaussian curvature (D9a).
 `Σ_f Ω_f = Σ_{i∉B_M} (2π − Θ_i)` `[formula: cut-face-curvature-sum]`; on a closed mesh this is `2πχ`.
 A curvature override replaces `k_f` by a caller-supplied density (`Uniform(c)` or one value per face).
 
+Because the corner angles of a Euclidean triangle sum to `π`, the same number is
+`Ω_f = Σ θ_i^f (2π − Θ_i)/Θ_i` over the interior corners `i` of `f`. Implementations may evaluate
+this form: it has no cancellation where the surface is flat, and differs from the first by rounding
+only (D13e).
+
 ### 3.2 Regions and crossings `[formula: cut-edge-crossing]`
 
 `region(i) = 0` if `φ_i ≤ 0`, else `1`. An edge `[a, b]` with `region(a) ≠ region(b)` is *crossed*;
@@ -113,8 +118,10 @@ its cut vertex sits at parameter `t` from `a` (point `(1−t)·a + t·b`):
 t = φ_a / (φ_a − φ_b),   then moved into [δ, 1−δ]
 ```
 
-`δ` is the option `min_crossing_offset` (default `1e-3`); the number of crossings that were moved is
-reported (D9b). Vertices of crossed edges are the *cut-adjacent* vertices `Adj`. A face has zero or
+`δ` is the option `min_crossing_offset` (default `1e-3`, `0 ≤ δ < ½`); the number of crossings that
+were moved (`t < δ` or `t > 1 − δ`) is reported (D9b). With `δ = 0` nothing is moved, and a crossing
+on a vertex is an error, because its triangle has no area. Vertices of crossed edges are the
+*cut-adjacent* vertices `Adj`. A face has zero or
 two crossed edges; in the second case it carries one *cut segment* joining its two cut vertices.
 The cut `γ` is the union of the segments: closed polylines, or polylines ending on `∂M`.
 
@@ -122,9 +129,13 @@ The cut `γ` is the union of the segments: closed polylines, or polylines ending
 
 Every crossed face `abc` with `a` alone on its side, cut vertices `p ∈ ab`, `q ∈ ac`, is replaced by
 the triangle `(a, p, q)` and the quad `(p, b, c, q)`; the quad is split by the shorter of its
-diagonals `p–c`, `b–q` (tie: `p–c`). Orientation is inherited. Sub-triangles get the region of their
-original vertices, the density `k_f` and (for scaled Dirichlet) linearly interpolated `a` of their
-parent.
+diagonals `p–c`, `b–q` (tie: `p–c`; in floating point `p–c` iff `|pc|² ≤ |bq|²`). The triangles of
+a crossed face are listed in the order `(a, p, q)`, then `(p, b, c)`, `(p, c, q)` or `(p, b, q)`,
+`(b, c, q)`. Orientation is inherited. Sub-triangles get the region of their original vertices, the
+density `k_f` and (for scaled Dirichlet) linearly interpolated `a` of their parent (`a` at a cut
+vertex is `(1−t) a_x + t a_y` with the moved `t`). On symmetric meshes the two diagonals can be
+equal up to rounding; the number of faces where they agree to a relative `1e-9` is reported, and
+two implementations may differ there at the level of the discretization error (D13c).
 
 Lengths inside a face come from barycentric coordinates `[formula: cut-barycentric-length]`: for two
 points with barycentric difference `d = (d_a, d_b, d_c)`, `Σ d = 0`,
@@ -135,8 +146,21 @@ points with barycentric difference `d = (d_a, d_b, d_c)`, `Σ d = 0`,
 
 and areas from `[formula: cut-subtriangle-area]`: `area = |det(barycentric coordinates)| · A_f`.
 
+The angles of a sub-triangle are computed in the plane of its face, not from its three edge
+lengths: with the inner product of two barycentric differences `d`, `e` (the polarization of the
+formula above, same id)
+
+```
+⟨d, e⟩ = −½ [ (d_a e_b + d_b e_a) ℓ_ab² + (d_b e_c + d_c e_b) ℓ_bc² + (d_c e_a + d_a e_c) ℓ_ca² ]
+```
+
+the cotangent at the corner `x` of a sub-triangle `xyz` is `⟨y − x, z − x⟩ / (2 · area)`. Nothing
+is subtracted that could cancel, and a sub-triangle is valid as soon as its determinant is positive
+(D13a). Uncut faces keep the cotangents and areas of `M`.
+
 The *submesh* `S_r` of region `r` consists of its (sub-)triangles. Its vertices are the original
-vertices of the region and the cut vertices (each cut vertex belongs to both submeshes). `B_S` =
+vertices of the region and the cut vertices (each cut vertex belongs to both submeshes; the cut
+mesh that is handed out has one copy of it per region, §7). `B_S` =
 cut vertices ∪ (`B_M` ∩ `S`); `I_S` = the rest. A submesh may have several connected components
 and any topology.
 
@@ -149,43 +173,74 @@ u_B = 0,        L_II u_I = −g_I
 ```
 
 A component of `S` with no boundary vertex has no solution; this happens only for a closed
-component of `M` that the cut does not touch. It is reported and left out of everything (D9c).
+component of `M` that the cut does not touch. It is reported and left out of everything (D9c):
+there `u = p = 0` (its rows of the system are those of the identity), `σ = 0`, it contributes
+nothing to `J`, and its area is left out of `Area(S_r)` in the energy of §6. The report lists these
+components and their area per region.
 
 Remark for implementers: `I_S` over both regions is exactly the interior vertices of `M`, and the
 pattern of the block-diagonal matrix is a subset of the pattern of `M`'s Laplacian, so one symbolic
 factorization serves the whole flow, and one numeric factorization per step serves §3.4, §3.6, §3.8.
 
-### 3.5 Integrated normal derivative `[formula: cut-normal-derivative]`
+### 3.5 Normal derivative `[formula: cut-normal-derivative]`, `[formula: cut-flux-recovery]`
 
 For `i ∈ B_S`, `v_i := ∮ ∂u/∂n · (hat function of i) ds` with `n` **outward** from `S`:
 
 ```
 v_i = (L_BI u_I)_i + g_i
 ℓ_i = ½ Σ (lengths of the boundary edges of S at i)
-(∂u/∂n)_i ≈ v_i / ℓ_i
 ```
 
 (The paper's `v` in Eq. 26, 28 has the opposite sign, D6.) At a cut vertex inside `M` both regions
 have the same `ℓ`; at a cut vertex on `∂M` the two boundary edges are a cut segment and a piece of
 the boundary edge of `M` (D9d).
 
+**Flux recovery.** The paper takes `(∂u/∂n)_i ≈ v_i/ℓ_i` at every cut vertex on its own. That is
+not robust: `v_i` is tested with a hat function that reaches one mesh width into the region, so its
+error is of the order of the mesh width whatever `ℓ_i` is, and where two or more consecutive
+crossings lie close to one mesh vertex `ℓ_i` is as small as their distance. The quotient is then
+wrong by a factor of up to `1/δ` (D12). Sums of `v` over a stretch of the cut are accurate, so the
+normal derivatives `d_p ≈ (∂u/∂n)_p` at the cut vertices `C` of `S` are computed together. For every
+cut segment `σ = pq` of `S`, lying in the face `f = abc` of `M`:
+
+```
+κ_σ = c² · h_f² / |pq|,       h_f² = (ℓ_ab² + ℓ_bc² + ℓ_ca²)/3   (scaled unit),      c = 0.5
+
+ℓ_p d_p + Σ_{σ = pq at p} κ_σ (d_p − d_q) = v_p          for every p ∈ C
+```
+
+This is one linear system per region with the matrix `diag(ℓ) + Σ_σ κ_σ [[1,−1],[−1,1]]`:
+symmetric, positive definite, an M-matrix; it decouples over the connected pieces of the cut. It is
+one backward Euler step of the 1D heat flow on the cut, with lumped mass `ℓ` and the local time
+`(c h_f)²`, applied to `v/ℓ`. Consequences: `Σ_p ℓ_p d_p = Σ_p v_p` on every piece of the cut (the
+total flux is kept), `d` stays between the smallest and the largest `v_p/ℓ_p` of the piece, and cut
+vertices much closer to each other than `c h_f` get one common value. `c` is the option
+`FluxRecovery::Smoothed { length }`; `FluxRecovery::Nodal` is the paper's `d_p = v_p/ℓ_p`, which is
+also `c = 0`.
+
+The same map applied to `q` (§3.6) gives `e_p ≈ (∂p/∂n)_p`. At vertices of `B_M` that are not cut
+vertices no derivative is needed; `v_i/ℓ_i` is reported there.
+
 ### 3.6 Energy, adjoint, gradient density
 
 ```
 Dirichlet   J = uᵀ L u = −u_I · g_I                                   [formula: cut-dirichlet-energy]
-            G_i = (v_i/ℓ_i)²                                           [formula: cut-gradient-dirichlet]
+            G_i = d_i²                                                 [formula: cut-gradient-dirichlet]
 
 scaled      J = uᵀ L_a u,   L_a = Σ_t ā_t · (cotan Laplacian of the single triangle t),
                             ā_t = (a_i + a_j + a_k)/3            [formula: cut-weighted-laplacian]
             L_II p_I = r_I,   r_i = −2 (L_a u)_i            (i ∈ I)   [formula: cut-adjoint-scaled]
             q_i = (L_BI p_I)_i − r_i,   r_i = −2 [ (L_a u)_i − a_i v_i ]   (i ∈ B)
-            G_i = −a_i (v_i/ℓ_i)² − (v_i/ℓ_i)(q_i/ℓ_i)                [formula: cut-gradient-scaled]
+            G_i = −a_i d_i² − d_i e_i                                  [formula: cut-gradient-scaled]
 
 pointwise   J = Σ_{i∈S} A_i^S b(u_i),   A_i^S = lumped vertex area within S
             L_II p_I = r_I,   r_i = −A_i^S b′(u_i)                     [formula: cut-adjoint-pointwise]
             q_i = (L_BI p_I)_i − r_i     (i ∈ B, where u_i = 0)
-            G_i = b(0) − (v_i/ℓ_i)(q_i/ℓ_i)                           [formula: cut-gradient-pointwise]
+            G_i = b(0) − d_i e_i                                       [formula: cut-gradient-pointwise]
 ```
+
+`d_i`, `e_i` are the normal derivatives of `u` and `p` at the cut vertex `i` recovered from `v` and
+`q` as in §3.5. `G` is needed at cut vertices only.
 
 `L_a` is the exact stiffness matrix of `∫ a ∇f·∇g` for piecewise linear `a, f, g`, hence positive
 semidefinite for `a ≥ 0` on every mesh (D11). `q` is the integrated outward normal derivative of
@@ -201,18 +256,22 @@ r⁰_i = 1 / ( √|K_i| + 1/r_ε )                (D5)
 a_i  = r_i³
 ```
 
-Region totals: `G_r,i = w_r · G_i + β_r`. A region with `w_r = 0` needs no solve.
+Region totals: `G_r,i = w_r · G_i + β_r`. A region with `w_r = 0` needs no solve; implementations
+may solve it anyway and report its `u` (nothing else changes, D13d).
 
 ### 3.7 Speed on the cut `[formula: cut-speed]`
 
 At every cut vertex `c`: `s_c = G_0,c − G_1,c`.
 
-Sliver smoothing `[formula: cut-sliver-smoothing]` (paper Sec. 6.2, D7): a cut vertex is a *sliver
-vertex* if an incident cut-mesh triangle has aspect ratio `> ρ₀` (default 5), where aspect ratio is
-`(longest edge)² · √3 / (4 · area)` (1 for an equilateral triangle). For `passes` rounds (default 1),
-every sliver vertex simultaneously takes the arclength-weighted mean of its two neighbours along
-the cut, `s_c ← (ℓ₂ s₁ + ℓ₁ s₂)/(ℓ₁ + ℓ₂)`, with `ℓ_k` the length of the segment to neighbour `k`.
-A cut vertex on `∂M` (one neighbour) is left alone.
+Sliver smoothing `[formula: cut-sliver-smoothing]` (paper Sec. 6.2, D7) is optional and off by
+default (`passes = 0`): with the flux recovery of §3.5 it changes nothing measurable, and without
+it, it does not repair what it was meant to repair (D12). A cut vertex is a *sliver vertex* if an
+incident cut-mesh triangle (of either region) has aspect ratio `> ρ₀` (default 5, any `ρ₀ > 0`),
+where aspect ratio is `(longest edge)² · √3 / (4 · area)` (1 for an equilateral triangle). For
+`passes` rounds, every sliver vertex simultaneously takes the arclength-weighted mean of its two
+neighbours along the cut, `s_c ← (ℓ₂ s₁ + ℓ₁ s₂)/(ℓ₁ + ℓ₂)`, with `ℓ_k` the length of the segment
+to neighbour `k`. A cut vertex on `∂M` (one neighbour) is left alone. The procedure of the paper is
+`FluxRecovery::Nodal` with `passes = 1` (`EvalOptions::paper()`).
 
 ### 3.8 Harmonic extension `[formula: cut-harmonic-extension]`
 
@@ -286,8 +345,8 @@ written in Hopf–Lax form (Bornemann, Rasch 2006) and without unfolding of obtu
 
 ```
 1  regions, crossings, cut mesh                       §3.2 §3.3
-2  u, v (and p, q) in each region                     §3.4–3.6
-3  s on the cut, sliver smoothing                     §3.7
+2  u, v, d (and p, q, e) in each region               §3.4–3.6
+3  s on the cut (optional sliver smoothing)           §3.7
 4  σ on V by harmonic extension                       §3.8
 5  φ̃ = φ + τσ                                        §3.9
 6  (W_V + τ L_w) φ′ = W_V φ̃                          §3.10, then §3.11
@@ -326,16 +385,24 @@ schedules of Sec. 7.4). The state is `φ`; a flow can be resumed from a stored `
 E(φ) = Σ_r [ w_r J_r + β_r Area(S_r) ] + Σ_segments ½ (w_p + w_q) |pq|
 ```
 
-(`w` interpolated linearly to the cut vertices). The flow is a discretization of the gradient flow
-of the smooth energy, not the exact gradient flow of `E(φ)`; tests therefore use tolerances that
-shrink under refinement.
+(`w` interpolated linearly to the cut vertices with the moved `t`; every segment once; `Area(S_r)`
+without the components of §3.4 that have no solution). The flow is a discretization of the gradient
+flow of the smooth energy, not the exact gradient flow of `E(φ)`; tests therefore use tolerances
+that shrink under refinement.
 
 1. `Σ_f Ω_f` identity (§3.1) to rounding; areas of the cut mesh sum to 1; Euler characteristics.
 2. Unit sphere scaled to unit area (`R = 1/√(4π)`), cut along the latitude circle of polar angle
    `ψ₀`: in the cap, `u = 2 ln( cos(ψ₀/2) / cos(ψ/2) )`, `∂u/∂n = tan(ψ₀/2)/R`,
    `J = −8π ln cos(ψ₀/2) − 4π sin²(ψ₀/2)`. Convergence under icosphere refinement.
 3. Finite differences: for a smooth `ψ`, `E(φ+εψ) − E(φ−εψ) ≈ −2ε ∫_γ [s + (length terms)] ψ ds`.
-   This is the test of every sign in §1.
+   This is the test of every sign in §1. For a `φ` that is not a signed distance, `−ε ψ ds` is
+   replaced by the area `dA_c` that region 0 gains at cut vertex `c`, which is exact on the cut mesh
+   (in a face of area `A_f` whose lone vertex has the crossings at the fractions `s_p`, `s_q` of
+   its two edges, the corner triangle has the area `s_p s_q A_f`): `dE ≈ Σ_c s_c dA_c` for the
+   distortion and area terms. Measured (`tests/finite_differences.rs`): the two sides agree in sign
+   for every energy, for each region alone and with `w_r`, `β_r`, and their difference, relative
+   to `Σ_c |s_c dA_c|`, falls by 3 to 4 per refinement (sphere, levels 2–6: `5·10⁻²` to
+   `3·10⁻⁴`; bumpy disk with the cut ending on `∂M`, grids 16–128: `2·10⁻¹` to `4·10⁻³`).
 4. Flat disk, circular cut of radius `ρ₀`: `u = 0`, `s = 0`, and the circle shrinks as
    `ρ(t) = √(ρ₀² − 2 α_L t)`.
 5. The energy decreases along the flow for small `τ`; the equator of a sphere is stationary;
@@ -350,7 +417,15 @@ shrink under refinement.
 * the cut as points (`edge, t`) and segments (`point, point, face`), with a helper that returns 3D
   positions when the caller has them;
 * the cut mesh as a `TriMesh` + `Geometry` with maps to parent faces, original vertices or cut
-  points, and the region of every face. This is what a flattening consumes.
+  points, and the region of every face. This is what a flattening consumes. It is the cut
+  *surface*: a cut point has one vertex per region that meets there (two for two regions), so the
+  regions are separate pieces and every vertex has one region; original vertices keep their index.
+  Its geometry is in the caller's length unit;
+* per evaluation, on the vertices of that cut mesh: `u`, `v`, `ℓ`, the recovered `∂u/∂n` (`d`),
+  `p`, `q`, `∂p/∂n` (`e`), `G_r`; per cut point `s` before and after sliver smoothing; the terms of
+  `E`; the counters (moved crossings, sliver vertices, near-ties of the quad diagonal, closed
+  components without a cut and their area) and the residuals of the solves. All in the scaled
+  unit.
 
 ## 8. N regions (milestone 2, outline; details are fixed when milestone 1 is done)
 
@@ -396,6 +471,41 @@ Losasso et al. 2006, Sec. 3.1. With `N = 2`, `φ_0 = −φ_1 = φ` must reproduc
   (Kimmel, Sethian 1998 unfold them); both are first-order approximations of the same distance.
   Ties are broken by vertex index so that two implementations agree.
 
+* **D12** Sec. 6.2 evaluates the gradient density per cut vertex from `v_i/ℓ_i` ("division by the
+  dual boundary length is needed to convert the integrated values of `v_i` to pointwise values")
+  and repairs artifacts by 1D Laplacian smoothing of the speed at the vertices of sliver triangles.
+  When two or more consecutive crossings lie close to one mesh vertex this fails: `ℓ_i` of the cut
+  vertices in between is as small as their distance, the error of `v_i` is not, and their
+  neighbours are sliver vertices too, so the smoothing averages wrong values. Measured on cuts with
+  a known solution (`examples/estimator_study.rs`; sphere caps, and a flat annulus with a source
+  that varies along the cut): with `δ = 10⁻³`, wherever crossings crowd around a vertex, the
+  paper's procedure has errors of `∂u/∂n` up to `6·10⁴ %` and of `s` up to `5·10⁷ %` at every
+  refinement level, with one or three smoothing passes as without. §3.5 instead smooths the
+  integrated fluxes along the cut, implicitly and with the mass `ℓ`, before dividing:
+  `(diag(ℓ) + S) d = v`, and likewise for `q`. With `c = 0.5` the largest error of `∂u/∂n` is
+  `0.2–5 %` and of `s` `0.1–8 %` on meshes of 8–40 thousand vertices (`1–22 %` and `3–33 %` on
+  meshes of about 600 vertices), also when `φ = 0` exactly at vertices, and it falls under
+  refinement; in the finite-difference test of §6 the error falls with the square of the mesh
+  width, where the paper's procedure stalls near `10⁻²`. Alternatives that were measured and
+  rejected (largest error of `∂u/∂n` over the same cases): replacing sliver values by
+  interpolation between non-sliver neighbours (`30–120 %` where most cut vertices are slivers, no
+  better than the paper's where all are), the gradient of `u` in the triangle on each segment
+  (bounded, `20–130 %`), pooling runs of crossings within a fraction `θ` of one vertex
+  (`θ = 0.25`: `1–90 %`), and couplings `∝ |σ|⁰` (not robust) or `|σ|⁻²` (as good, not simpler).
+  The price of smoothing is a bias where `∂u/∂n` varies along the cut over a few edges: with 5
+  edges per period the largest error is `15 %` (nodal, where it is usable: `8 %`). `c` is an
+  option; sliver smoothing stays available and is off by default. The paper's procedure is
+  `FluxRecovery::Nodal` with one pass.
+* **D13** Not stated in the paper, and not in D9: (a) how the angles of the sub-triangles are
+  computed: here from the barycentric inner product and the determinant area (§3.3), never from
+  the three edge lengths, so a thin sub-triangle cannot violate the triangle inequality by
+  rounding; (b) a closed component without a cut is left out of the area term of the energy too,
+  and `u = p = 0` there is obtained by identity rows in the one system matrix; (c) the quad
+  diagonal can tie on symmetric meshes: the rule is `p–c` iff `|pc|² ≤ |bq|²` in floating point,
+  and near-ties are counted; (d) a region with `w_r = 0` is solved and reported like any other;
+  (e) `Ω_f` is evaluated in the cancellation-free form of §3.1; (f) `min_crossing_offset = 0` is
+  allowed and makes a crossing on a vertex an error instead of moving it.
+
 Add to this list whenever something else turns up; never drop an entry.
 
 ## 10. Formula ids
@@ -403,7 +513,7 @@ Add to this list whenever something else turns up; never drop an entry.
 Rust functions carry `[formula: <id>]`; the Lean theorem or the `CITED.md` heading carries the same
 id. Discrete, to be proved in `lean/proofs`: `cut-face-curvature`, `cut-face-curvature-sum`,
 `cut-edge-crossing`, `cut-barycentric-length`, `cut-subtriangle-area`, `cut-yamabe-system`,
-`cut-normal-derivative`, `cut-dirichlet-energy`, `cut-weighted-laplacian`, `cut-gradient-dirichlet`, `cut-adjoint-scaled`,
+`cut-normal-derivative`, `cut-flux-recovery`, `cut-dirichlet-energy`, `cut-weighted-laplacian`, `cut-gradient-dirichlet`, `cut-adjoint-scaled`,
 `cut-gradient-scaled`, `cut-adjoint-pointwise`, `cut-gradient-pointwise`, `cut-feature-size`,
 `cut-speed`, `cut-sliver-smoothing`, `cut-harmonic-extension`, `cut-explicit-step`,
 `cut-length-step`, `cut-penalty-step-paper`, `cut-symmetry-projection`, `cut-redistance`,

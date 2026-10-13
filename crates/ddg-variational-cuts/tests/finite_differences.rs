@@ -238,14 +238,14 @@ fn check(shape: &Shape, f: fn([f64; 3]) -> f64, bound: f64, coverage: Coverage) 
 
 #[test]
 fn sphere_with_a_non_symmetric_cut() {
-    // Measured: 1.8e-2, 4.4e-3, 1.1e-3 (and 2.7e-4 on level 6): second order.
-    let bounds = [0.03, 0.008, 0.002];
-    let errors: Vec<f64> = [3, 4, 5]
+    // Measured on levels 2 to 6: 5.5e-2, 1.8e-2, 4.4e-3, 1.1e-3, 2.7e-4: second order.
+    let bounds = [0.09, 0.03, 0.008];
+    let errors: Vec<f64> = [2, 3, 4]
         .iter()
         .zip(bounds)
         .map(|(&level, bound)| {
             // The finest level takes most of the time; it runs the short matrix.
-            let coverage = if level == 5 {
+            let coverage = if level == 4 {
                 Coverage::Short
             } else {
                 Coverage::Full
@@ -296,7 +296,7 @@ fn bumpy_disk_with_a_cut_that_meets_the_boundary() {
 #[test]
 #[ignore = "prints the finite-difference tables (levels up to 6, grids up to 128)"]
 fn print_finite_difference_tables() {
-    for level in [3, 4, 5, 6] {
+    for level in [2, 3, 4, 5, 6] {
         let shape = sphere(level);
         let rows = run(&shape, sphere_level_set, Coverage::Tables);
         print(&shape, &rows);

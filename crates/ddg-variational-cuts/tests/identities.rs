@@ -10,9 +10,10 @@ use common::{Shape, bumpy, sphere};
 use ddg_core::generators::{annulus, icosphere, torus};
 use ddg_core::operators::cotan_laplacian;
 use ddg_core::sparse::{Method, Parallelism, Symbolic};
+use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
-    CutProblem, CutVertex, EdgeKind, Energy, EvalOptions, Evaluation, FluxRecovery, NONE,
-    face_curvature_sum_residual, face_curvatures,
+    CutProblem, CutSegment, CutVertex, EdgeKind, Energy, EvalOptions, Evaluation, Evaluator,
+    FluxRecovery, NONE, face_curvature_sum_residual, face_curvatures,
 };
 
 fn shapes() -> Vec<Shape> {
@@ -564,4 +565,143 @@ fn no_cut_on_a_disk_is_the_plain_yamabe_problem() {
     }
     let cut_mesh = e.cut_mesh().unwrap();
     assert_eq!(cut_mesh.mesh.faces(), shape.mesh.faces());
+}
+
+#[test]
+fn one_cut_face_in_detail() {
+    // An equilateral triangle with vertex 0 alone in region 0.
+    let mesh = TriMesh::new(3, vec![[0, 1, 2]]).unwrap();
+    let h = 3f64.sqrt() / 2.0;
+    let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, h, 0.0]];
+    let geometry = Geometry::from_positions(&mesh, &positions).unwrap();
+    let mut evaluator = Evaluator::new(&mesh, &geometry).unwrap();
+    let problem = CutProblem::new(Energy::Dirichlet, 1.0);
+    let options = EvalOptions::default();
+
+    // phi = (-1, 1, 3): crossings at 1/2 of the edge [0, 1] and at 1/4 of [0, 2].
+    let e = evaluator
+        .evaluate(&[-1.0, 1.0, 3.0], &problem, &options)
+        .unwrap();
+    assert_eq!(e.cut.vertex_region, vec![0, 1, 1]);
+    assert_eq!(e.cut.points.len(), 2);
+    assert_eq!((e.cut.points[0].edge, e.cut.points[0].t), (0, 0.5));
+    assert_eq!((e.cut.points[1].edge, e.cut.points[1].t), (1, 0.25));
+    // a = 0, p on 0 -> 1 (point 0), q on 2 -> 0 (point 1); region 0 is left of p -> q.
+    assert_eq!(
+        e.cut.segments,
+        vec![CutSegment {
+            points: [0, 1],
+            face: 0
+        }]
+    );
+    // Copies: point k has the vertices 3 + 2k (side of the lower end of its edge, here vertex
+    // 0) and 3 + 2k + 1. |pc|^2 = 3/4 < |bq|^2 = 13/16: the quad is split by p-c.
+    let tri = &e.triangles;
+    assert_eq!(tri.faces, vec![[0, 3, 5], [4, 1, 2], [4, 2, 6]]);
+    assert_eq!(tri.region, vec![0, 1, 1]);
+    assert_eq!(tri.vertex_region, vec![0, 1, 1, 0, 1, 0, 1]);
+    assert_eq!(e.report.n_diagonal_near_ties, 0);
+    let area = 3f64.sqrt() / 4.0;
+    let expect = [0.125, 0.5, 0.375];
+    for t in 0..3 {
+        // Areas on the unit-area surface: s_p s_q, 1 - s_p, s_p (1 - s_q).
+        assert!((tri.area[t] - expect[t]).abs() < 1e-15);
+    }
+    // The segment p q: |pq|^2 = 1/4 + 1/16 - 1/8 = 3/16 in the caller's unit.
+    let unit = e.scale.length_scale;
+    assert!((unit * unit * area - 1.0).abs() < 1e-15);
+    assert!((tri.segment_length[0] - unit * (3f64 / 16.0).sqrt()).abs() < 1e-15);
+    assert!((e.energy.length - tri.segment_length[0]).abs() < 1e-15);
+    assert_eq!(
+        tri.edge_kind[0],
+        [EdgeKind::Boundary, EdgeKind::Cut, EdgeKind::Boundary]
+    );
+    assert_eq!(
+        tri.edge_kind[2],
+        [EdgeKind::Interior, EdgeKind::Boundary, EdgeKind::Cut]
+    );
+    // Cotangents of the corner triangle (0, p, q) with sides 1/2, sqrt(3)/4, 1/4: a right
+    // angle at q, 60 degrees at 0, 30 degrees at p.
+    let cot = tri.cot[0];
+    assert!((cot[0] - 1.0 / 3f64.sqrt()).abs() < 1e-14);
+    assert!((cot[1] - 3f64.sqrt()).abs() < 1e-14);
+    assert!(cot[2].abs() < 1e-14);
+    // Dual lengths at the cut point on the boundary edge [0, 1], side of vertex 0: half of
+    // the segment and half of the piece 0-p of the boundary edge (SPEC D9d).
+    let expect = 0.5 * unit * ((3f64 / 16.0).sqrt() + 0.5);
+    assert!((e.dual_length[3] - expect).abs() < 1e-15);
+
+    // phi = (-1, 1, 1): the crossings are symmetric and the two diagonals are equal. The tie
+    // goes to p-c, and it is counted.
+    let e = evaluator
+        .evaluate(&[-1.0, 1.0, 1.0], &problem, &options)
+        .unwrap();
+    assert_eq!(e.report.n_diagonal_near_ties, 1);
+    assert_eq!(e.triangles.faces, vec![[0, 3, 5], [4, 1, 2], [4, 2, 6]]);
+    // With vertex 1 alone in region 1 the frame is (a, b, c) = (1, 2, 0).
+    let e = evaluator
+        .evaluate(&[-1.0, 1.0, -3.0], &problem, &options)
+        .unwrap();
+    assert_eq!(e.cut.vertex_region, vec![0, 1, 0]);
+    // Edges: [0, 1] -> point 0 at t = 1/2, [1, 2] -> point 1 at t = 1/4 from vertex 1.
+    // p on 1 -> 2 is point 1, q on 0 -> 1 is point 0; region 0 is left of q -> p.
+    assert_eq!(e.cut.segments[0].points, [0, 1]);
+    assert_eq!(e.triangles.faces[0], [1, 5, 4]);
+    assert_eq!(e.triangles.region, vec![1, 0, 0]);
+}
+
+/// Prints how long the stages take. Run with
+/// `cargo test --release -p ddg-variational-cuts --test identities -- --ignored --nocapture`.
+#[test]
+#[ignore = "prints timings on icospheres of level 5 to 7"]
+fn print_timings() {
+    use std::time::Instant;
+    println!(
+        "{:>5} {:>8} {:>6} | {:>9} {:>11} {:>11} {:>11} {:>9}",
+        "level", "vertices", "cut", "new (ms)", "Dirichlet", "Hencky", "scaled", "cut_mesh"
+    );
+    for level in 5..=7 {
+        let shape = sphere(level);
+        let phi = shape.sample(tilted);
+        let start = Instant::now();
+        let mut evaluator = shape.evaluator();
+        let setup = start.elapsed().as_secs_f64() * 1e3;
+        let weight =
+            ddg_variational_cuts::ScaleWeight::PerVertex(shape.sample(|p| 1.0 + 0.3 * p[0]));
+        let mut times = Vec::new();
+        let mut last = None;
+        for energy in [
+            Energy::Dirichlet,
+            Energy::Hencky,
+            Energy::ScaledDirichlet(weight),
+        ] {
+            let problem = CutProblem::new(energy, 0.1);
+            // The first evaluation allocates the factor; time the second.
+            evaluator
+                .evaluate(&phi, &problem, &EvalOptions::default())
+                .unwrap();
+            let start = Instant::now();
+            let e = evaluator
+                .evaluate(&phi, &problem, &EvalOptions::default())
+                .unwrap();
+            times.push(start.elapsed().as_secs_f64() * 1e3);
+            last = Some(e);
+        }
+        let e = last.unwrap();
+        let start = Instant::now();
+        let cut_mesh = e.cut_mesh().unwrap();
+        let mesh_time = start.elapsed().as_secs_f64() * 1e3;
+        assert_eq!(cut_mesh.mesh.n_faces(), e.triangles.n_faces());
+        println!(
+            "{:>5} {:>8} {:>6} | {:>9.1} {:>11.1} {:>11.1} {:>11.1} {:>9.1}",
+            level,
+            shape.positions.len(),
+            e.cut.points.len(),
+            setup,
+            times[0],
+            times[1],
+            times[2],
+            mesh_time
+        );
+    }
 }
