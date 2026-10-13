@@ -6,7 +6,9 @@ Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
   Singularities for Conformal Flattening* (Soliman, Slepčev, Crane, ACM TOG 2018; "the paper");
 * the flattener, `crates/ddg-bff` — *Boundary First Flattening* (Sawhney, Crane, ACM TOG 2017;
   "BFF");
-* the operators of `crates/ddg-core` both use.
+* the cut flow, `crates/ddg-variational-cuts` — *Variational Surface Cutting* (Sharp, Crane,
+  ACM TOG 2018; "the cuts paper"); its contract is `crates/ddg-variational-cuts/SPEC.md` ("SPEC");
+* the operators of `crates/ddg-core` all of them use.
 
 The ground truth is the **canonical discrete problem** and the math conventions of the
 repository's `CLAUDE.md`; where a paper is silent or inconsistent the statements here are derived
@@ -17,7 +19,10 @@ rounding is not covered anywhere, and the Rust code is tied to the statements by
 `[formula: id]` tags and by differential tests, not mechanically. Results that are used but not
 proved here (the smooth theory, convergence of the Newton method, three topological facts, …) are
 listed with exact references in [`CITED.md`](CITED.md), which also states precisely what a
-run-time certificate of the cone solver does and does not establish.
+run-time certificate of the cone solver does and does not establish. For the cut flow there is no
+discrete problem with a certifiable minimizer: the theorems cover the formulas and linear systems
+of one flow step and three closed-form solutions of the smooth problem; `CITED.md` says what that
+leaves open.
 
 ## Pins and how to check
 
@@ -70,6 +75,14 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Bff/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
 | `DdgProofs/Bff/Curve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
 | `DdgProofs/Bff/Quality.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
+| `DdgProofs/Cuts/Crossing.lean` | cut flow: crossing parameter and its clamp, barycentric length and inner product, areas and cotangents of sub-triangles (SPEC §3.2, §3.3) |
+| `DdgProofs/Cuts/Curvature.lean` | cut flow: rescaled angles, face curvature `Ω_f`, its sum and Gauss–Bonnet, own and oracle definitions (§3.1) |
+| `DdgProofs/Cuts/Weighted.lean` | cut flow: the weighted cotan Laplacian `L_w = Σ_f w̄_f L_f`, the paper's edge rule and a counterexample to its semidefiniteness (§3.6, §3.10, D11) |
+| `DdgProofs/Cuts/Dirichlet.lean` | cut flow: Dirichlet solves on an index set split into `I` and `B`: Yamabe system, boundary flux, Dirichlet energy, scaled and pointwise adjoints, gradient densities, harmonic extension (§3.4–§3.6, §3.8) |
+| `DdgProofs/Cuts/Step.lean` | cut flow: sign of the flow, explicit step, length step, the paper's penalty rule, symmetry projection, step cap, feature size, sliver smoothing (§1, §3.6–§3.11, §4) |
+| `DdgProofs/Cuts/Recovery.lean` | cut flow: recovery of the normal derivative from the integrated fluxes (§3.5, D12) |
+| `DdgProofs/Cuts/Redistance.lean` | cut flow: the Hopf–Lax triangle update in closed form is the minimum over the edge (§3.12) |
+| `DdgProofs/Cuts/Analytic.lean` | cut flow: closed-form solutions (flat disk, spherical cap, shrinking circle) and the shape derivatives of the energies on them (§1, §6) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
@@ -213,13 +226,59 @@ loops are indexed with the surface on the left, edge `j` from boundary vertex `j
 | `similarity-fit` | `a = Σ(q_i − q̄)conj(p_i − p̄)/Σ\|p_i − p̄\|²`, `b = q̄ − a p̄` is the unique minimizer of `Σ\|a p_i + b − q_i\|²` (points not all equal); the real sums the code forms are the real and imaginary parts of these. | `simFit_residual_le`, `simFit_residual_eq_iff`, `fit_similarity_optimal`, `fit_similarity_unique`, `toC_fitCoeff`, `toC_fitTranslation`, `fitNorm_eq_zero_iff` |
 | `intrinsic-mollification` | `ε* = max(0, max over faces and sides (ℓ_c − ℓ_a − ℓ_b + δ))`, computed by the code's loop, is the least `ε ≥ 0` with `(ℓ_a + ε) + (ℓ_b + ε) ≥ (ℓ_c + ε) + δ` for all sides of all faces; if `δ > 0` every mollified face satisfies the strict triangle inequalities (for `δ = 0` it need not). | `mollifyEpsilon_le_iff`, `mollifyEpsilonLoop_eq`, `mollifyEpsilon_feasible`, `mollifyEpsilon_le_of_feasible`, `isTriangle_mollified` |
 
+### Variational Surface Cutting (`crates/ddg-variational-cuts`)
+
+Notation of SPEC: `φ` the level-set function (region 0 where `φ ≤ 0`), `Θ_v` the angle sum at a
+vertex, `L` a square matrix on an index set `V` split by a predicate into the unknowns `I` and
+the rest `B` (for a mesh: the cotan Laplacian of a region, `B` = cut vertices and vertices of
+`∂M`), `u_I` the restriction to `I`, `L_II`, `L_BI` the blocks. "Oracle" names are the
+definitions of `lean/oracle/DdgOracle/Formulas/Cuts.lean` at `ℝ`; the theorems are about them
+unless a definition of this package is named. All theorems are in `namespace DdgProofs.Cuts`
+(mesh statements in `DdgProofs.TriMesh`).
+
+| id | exact statement | theorems |
+|---|---|---|
+| `cut-face-curvature` | `θ̃ = θ·2π/Θ_v` at `v ∉ B`, `θ̃ = θ` at `v ∈ B`; `Ω_f = θ̃_a + θ̃_b + θ̃_c − π`. If `Θ_v ≠ 0` and `v ∉ B`: `Σ_f θ̃_v^f = 2π`. A face with its three vertices in `B` has `Ω_f = 0`. On a valid mesh `Ω_f = Σ_{corners i ∉ B} θ_i (2π − Θ_i)/Θ_i` (the cancellation-free form, D13e), and the oracle's `Face.omegaCancellationFree` equals `Face.omega`. `k_f·A_f = Ω_f`. | `TriMesh.sum_normAngleAt_of_not_mem`, `faceCurvature_of_mem`, `faceCurvature_eq_sum_defect`, `sum_cornerNormalized`, `face_omega_eq`, `face_omegaCancellationFree_eq`, `faceCurvatureDensity_mul_area` |
+| `cut-face-curvature-sum` | Valid mesh, `Θ_v ≠ 0` at every `v ∉ B` (true if `v` lies in a face): `Σ_f Ω_f = Σ_{v ∉ B} (2π − Θ_v)`. With `B` the boundary vertices of a valid manifold mesh: `Σ_f Ω_f + Σ_B k_v = 2πχ`; closed: `Σ_f Ω_f = 2πχ`. | `TriMesh.sum_faceCurvature`, `sum_faceCurvature_eq_sum_angleDefect`, `sum_faceCurvature_add_geodesicCurvature`, `sum_faceCurvature_closed`, `sum_face_omega`, `sum_face_omega_closed` |
+| `cut-edge-crossing` | `t = φ_a/(φ_a − φ_b)` (`φ_a ≠ φ_b`): `(1−t)φ_a + tφ_b = 0`, and `t` is the only such number. `φ_a ≤ 0 < φ_b` ⟹ `0 ≤ t < 1`; `φ_b ≤ 0 < φ_a` ⟹ `0 < t ≤ 1`; `t = 0 ⟺ φ_a = 0`, `t = 1 ⟺ φ_b = 0`. Clamp `c(t) = max(δ, min(1−δ, t))`, `δ ≤ ½`: `δ ≤ c(t) ≤ 1−δ`; `c(t) = t ⟺ δ ≤ t ≤ 1−δ`; `crossingMoved δ t ⟺ c(t) ≠ t`; `\|c(t) − t\| ≤ δ` for `t ∈ [0,1]`, `δ ≥ 0`. | `interp_crossingParam`, `interp_eq_zero_iff`, `crossingParam_mem_Ico`, `crossingParam_mem_Ioc`, `crossingParam_mem_Icc`, `clampCrossing_mem`, `clampCrossing_eq_self_iff`, `crossingMoved_eq_true_iff`, `abs_clampCrossing_sub_le` |
+| `cut-barycentric-length` | Points `P_a, P_b, P_c` of a real inner product space, `d_a + d_b + d_c = 0`: `‖Σ d_i P_i‖² = −(d_a d_b ℓ_ab² + d_b d_c ℓ_bc² + d_c d_a ℓ_ca²)` (`= baryLength2`; any finite family: `‖Σ d_i P_i‖² = −½ Σ_{i,j} d_i d_j ‖P_i − P_j‖²`); for `x = Σ x_i P_i`, `y = Σ y_i P_i` with coefficient sums 1, `baryLength(ℓ; x − y) = dist(x, y)`. If `ℓ_ab, ℓ_bc, ℓ_ca` satisfy the strict triangle inequalities, `baryLength2 ≥ 0` (the floor in `baryLength` is inactive). Polarization: for sum-zero `d`, `e`, `baryInner(ℓ; d, e) = ⟨Σ d_i P_i, Σ e_i P_i⟩`; and `cotFromInner(baryInner(ℓ; y−x, z−x), \|det\|·A_f)` is `cornerCot` of the corner `x` of the sub-triangle with the `baryLength` sides (D13a). | `baryLength2_eq_norm_sq`, `norm_sq_sum_smul_of_sum_eq_zero`, `baryLength_eq_dist`, `baryLength2_nonneg`, `baryInner_eq_inner`, `cotFromInner_eq_cornerCot` |
+| `cut-subtriangle-area` | Parent side lengths with strict triangle inequalities, area `A_f` (Heron); barycentric rows `x, y, z` with sums 1: the Heron area of the triangle with sides `baryLength(x−y)`, `baryLength(y−z)`, `baryLength(z−x)` is `subTriangleArea(det3(x; y; z), A_f) = \|det\|·A_f`. For points: `triArea(dists of X, Y, Z) = \|det\|·triArea(dists of P_a, P_b, P_c)`. Cut face with `p = (1−t)a + tb`, `q = (1−s)a + sc`: the determinants of `(a,p,q)`, `(p,b,c)`, `(p,c,q)` are `ts`, `1−t`, `t(1−s)`, of `(p,b,q)`, `(b,c,q)`: `(1−t)s`, `1−s`; both triples sum to 1. | `subTriangleArea_eq_triArea`, `heronPoly_baryLength2`, `triArea_bary_points`, `cutFace_det_sum_pc`, `cutFace_det_sum_bq` |
+| `cut-weighted-laplacian` | `(L_w)_ij = −½ Σ_f w̄_f cot(corner of f opposite ij)` (`i ≠ j`), zero row sums (`TriMesh.weightedLaplacian`; the oracle's `weightedOffDiag`, `weightedDiag` are its entries). `L_w = L_wᵀ`, `L_w·1 = 0`, `xᵀL_w x = Σ_f w̄_f·(cotan energy of x on f)` on a valid mesh, hence positive semidefinite for `w̄ ≥ 0`, in particular for `w̄_f = triangleMean` of a vertex weight `≥ 0`. `w̄ ≡ c` (or a constant vertex weight `c`): `L_w = c·L`. The paper's edge rule also gives `c·L` for a constant weight; on the triangle `4, 13, 15` with vertex weights `(1,1,0)` its energy at `(1,−1,−1)` is negative. | `TriMesh.weightedLaplacian_isSymm`, `weightedLaplacian_mulVec_one`, `dotProduct_weightedLaplacian_mulVec`, `weightedLaplacian_posSemidef`, `weightedLaplacian_faceMean_posSemidef`, `weightedLaplacian_const`, `weightedLaplacian_faceMean_const`, `edgeRule_const`, `edgeRuleEnergy_neg_example`, `weightedEntry_eq`, `weighted_quadratic_nonneg`, `weighted_row_sum`, `weightedEntry_symm` |
+| `cut-yamabe-system` | `IsDirichletSolution L I f u`: `u = 0` off `I`, `(L u)_i = f_i` on `I` ⟺ `u_B = 0`, `L_II u_I = f_I`. If `det L_II ≠ 0` (e.g. `L_II` positive definite) there is exactly one such `u`, for every `f`; the Yamabe system is `f = −g`. For the cotan Laplacian of a connected valid mesh with a vertex outside `I` the hypothesis holds. | `existsUnique_isDirichletSolution`, `isDirichletSolution_iff_block`, `yamabe_existsUnique`, `yamabe_iff_block`, `isUnit_det_of_posDef`, `TriMesh.yamabe_existsUnique` |
+| `cut-normal-derivative` | For a solution of the Yamabe system, `v_i := (L u)_i + g_i` at `i ∉ I`, `0` on `I` (`boundaryFlux L I (−g) u`): at `i ∉ I`, `v_i = normalFlux((L_BI u_I)_i, g_i)`; `L u = −g + v`, and `v` is the only vector with this property. If the columns of `L` sum to zero: `Σ v = Σ g` (flux balance); on a mesh with `g = Σ_{t∋i} c_t/3`: `Σ_B v = Σ_t c_t`. `normalDerivative(v, ℓ)·ℓ = v`; `dualLength [ℓ₁, ℓ₂] = (ℓ₁+ℓ₂)/2`. | `normalFlux_apply`, `normalFlux_spec`, `sum_normalFlux`, `TriMesh.sum_lumped`, `TriMesh.sum_normalFlux_lumped`, `normalDerivative_mul`, `dualLength_pair` |
+| `cut-flux-recovery` | Cut vertices `C`, `ℓ_p > 0`, symmetric couplings `k(p,q) ≥ 0` (`κ_σ` for a segment `σ = pq`, else 0). `fluxMatrix` has the entries `fluxDiagEntry(ℓ_p, Σ_{q≠p} k(p,q))` and `fluxOffEntry(k(p,q))`; row `p` of `fluxMatrix·d` is `ℓ_p d_p + Σ_q k(p,q)(d_p − d_q)`. It is symmetric positive definite, so `fluxMatrix·d = v` has exactly one solution. For a set `S ⊆ C` that no coupling leaves (a piece of the cut; `S = C` included): `Σ_S ℓ_p d_p = Σ_S v_p`, and `m ≤ v_p/ℓ_p ≤ M` on `S` ⟹ `m ≤ d_p ≤ M` on `S`; `v_p = aℓ_p` on `S` ⟹ `d = a` on `S`. With `k ≡ 0`: `d_p = v_p/ℓ_p`. `v ↦ d` is linear. `fluxCoupling(c, h², s) = c²h²/s ≥ 0`, `= 0` for `c = 0`. | `fluxMatrix_mulVec_apply`, `fluxMatrix_isSymm`, `fluxMatrix_posDef`, `fluxRecovery_existsUnique`, `fluxRecovery_sum_piece`, `fluxRecovery_sum`, `fluxRecovery_ge_piece`, `fluxRecovery_le_piece`, `fluxRecovery_bounds`, `fluxRecovery_const_piece`, `fluxRecovery_nodal`, `fluxRecovery_smul`, `fluxRecovery_add`, `fluxCoupling_nonneg`, `fluxCoupling_zero` |
+| `cut-dirichlet-energy` | For a solution of the Yamabe system: `uᵀLu = −Σ_i u_i g_i = −u_I·g_I`; `≥ 0` if `L` is positive semidefinite; on a valid mesh `= Σ_f (cotan energy of u on f)`. | `dirichletEnergy_eq`, `dirichletEnergy_eq_interior`, `dirichletEnergy_nonneg`, `TriMesh.dirichletEnergy_eq_sum_faceEnergy` |
+| `cut-gradient-dirichlet` | `gradDirichletD(d) = d² ≥ 0`; with `d = v/ℓ` it is `gradDirichlet(v, ℓ) = (v/ℓ)²`. Closed-form instances: flat disk `d/dρ ∫₀^ρ u′² 2πr dr = gradDirichletD(u′(ρ))·2πρ`; spherical cap `d/dψ₀ ∫₀^{ψ₀} u′² 2π sin ψ dψ = gradDirichletD(u′(ψ₀))·2π sin ψ₀`. | `gradDirichletD_eq`, `gradDirichletD_nonneg`, `gradDirichletD_nodal`, `gradDirichlet_eq`, `hasDerivAt_disk_dirichletEnergy`, `hasDerivAt_disk_dirichletEnergy_density`, `hasDerivAt_capEnergy_integral`, `hasDerivAt_capEnergy_density` |
+| `cut-adjoint-scaled` | `r_i = −2(L_a u)_i` on `I`, `r_i = −2((L_a u)_i − a_i v_i)` off `I` (`scaledAdjointRhs`, from the oracle's `adjointRhsScaledInterior/Boundary`); `q = boundaryFlux L I r p`, at `i ∉ I`: `q_i = adjointFlux((L_BI p_I)_i, r_i)`. If `L_a = cL`, `a ≡ c` and `u = 0` off `I`: `p = −2c·u` solves `p_B = 0`, `L_II p_I = r_I`, it is the only solution when `det L_II ≠ 0`, and `q_i = −2c·v_i` (`c = 1`: `p = −2u`, `q = −2v`). Exactness for symmetric `L`, `L_a`: if `δu_B = 0`, `L_II δu_I = −δg_I`, `p_B = 0`, `(Lp)_i = −2(L_a u)_i` on `I`, then `(u + tδu)ᵀL_a(u + tδu) = uᵀL_a u + t·Σ_I p_i δg_i + t²·δuᵀL_aδu`. | `adjointFlux_apply`, `scaledAdjoint_const`, `scaledAdjoint_const_unique`, `scaledEnergy_perturb`, `IsDirichletSolution.reciprocity` |
+| `cut-gradient-scaled` | `gradScaledD(a, d, e) = −a d² − d e`; `gradScaledD(c, d, −2cd) = c·gradDirichletD(d)`, `gradScaledD(1, d, −2d) = gradDirichletD(d)`; with `d = v/ℓ`, `e = q/ℓ` it is `gradScaled(a, v, q, ℓ)`, and `gradScaled(1, v, −2v, ℓ) = gradDirichlet(v, ℓ)`. Flat disk, constant weight `c`, `p = −2cu`: `d/dρ [c ∫₀^ρ u′² 2πr dr] = gradScaledD(c, u′(ρ), p′(ρ))·2πρ`. | `gradScaledD_eq`, `gradScaledD_const`, `gradScaledD_one`, `gradScaledD_nodal`, `gradScaled_const`, `gradScaled_one`, `hasDerivAt_disk_scaledEnergy`, `hasDerivAt_disk_scaledEnergy_density` |
+| `cut-adjoint-pointwise` | Symmetric `L`; `b` differentiable at every `u_i` with derivative `b′(u_i)`; `δu_B = 0`, `L_II δu_I = −δg_I`; `p_B = 0`, `(L p)_i = adjointRhsPointwise(A_i, b′(u_i)) = −A_i b′(u_i)` on `I`. Then `d/dt Σ_i A_i b(u_i + tδu_i)` at `t = 0` is `Σ_I p_i δg_i`. Hencky (`b = u²`): the same with `r_i = −2A_i u_i`. | `hasDerivAt_pointwiseEnergy`, `hasDerivAt_henckyEnergy` |
+| `cut-gradient-pointwise` | `gradPointwiseD(b₀, d, e) = b₀ − d e`; with `d = v/ℓ`, `e = q/ℓ` it is `gradPointwise(b₀, v, q, ℓ)`. Flat disk, `b = u²`, adjoint `p = K r⁴/32 − Kρ²r²/8 + 3Kρ⁴/32`: `d/dρ ∫₀^ρ u² 2πr dr = gradPointwiseD(b(0), u′(ρ), p′(ρ))·2πρ = πK²ρ⁵/8`. | `gradPointwiseD_eq`, `gradPointwiseD_nodal`, `gradPointwise_eq`, `hasDerivAt_disk_henckyEnergy`, `hasDerivAt_disk_henckyEnergy_density`, `disk_hencky_derivative_value` |
+| `cut-feature-size` | `featureSizeRaw(r_ε, K) = 1/(√\|K\| + 1/r_ε)`; for `r_ε > 0`: `0 < r⁰ ≤ r_ε`, `r⁰ = r_ε` at `K = 0`, `r⁰ < 1/√\|K\|` for `K ≠ 0`, `r⁰` decreasing in `\|K\|`; `featureWeight r = r³ > 0` for `r > 0`. Smoothing `(W_V + cL) r = W_V r⁰` with positive areas, `c ≥ 0`, zero row sums and **nonpositive off-diagonal entries** of `L`: every lower (upper) bound of `r⁰` is one of `r`; hence `0 < r ≤ r_ε`, `r³ > 0`. | `featureSizeRaw_pos`, `featureSizeRaw_le`, `featureSizeRaw_zero`, `featureSizeRaw_lt_inv_sqrt`, `featureSizeRaw_antitone`, `featureWeight_pos`, `smoothing_ge`, `smoothing_le`, `smoothedFeatureSize_bounds` |
+| `cut-speed` | `cutSpeed(G₀, G₁) = G₀ − G₁`, `regionDensity(w, G, β) = wG + β`. With `dE(σ) := Σ_c g_c σ_c ℓ_c`: if `φ_t = −σ` and `φ_t = g` then `dE = −Σ g_c² ℓ_c` (`≤ 0` for `ℓ ≥ 0`, `= 0` only for `g = 0` when `ℓ > 0`); with `φ_t = −g` instead, `dE = +Σ g_c² ℓ_c`; `dE(σ) ≥ −Σ g²ℓ` for every `σ` with `Σσ²ℓ ≤ Σg²ℓ`. For `g = G₀ − G₁`, `σ = −cutSpeed(G₀, G₁)`: `dE = −Σ s_c² ℓ_c ≤ 0`. Closed forms: disk `d/dρ [wJ + βπρ²] = regionDensity(w, u′(ρ)², β)·2πρ`; two caps of a sphere `d/dψ₀ [J(ψ₀) + J(π − ψ₀)] = cutSpeed(tan²(ψ₀/2), tan²((π−ψ₀)/2))·2π sin ψ₀`. | `firstVariation_levelSet`, `firstVariation_levelSet_nonpos`, `firstVariation_levelSet_eq_zero_iff`, `firstVariation_ascent`, `firstVariation_ge`, `firstVariation_cutSpeed`, `hasDerivAt_disk_regionEnergy`, `hasDerivAt_twoCaps` |
+| `cut-sliver-smoothing` | `smoothedSpeed(ℓ₁, ℓ₂, s₁, s₂) = (ℓ₂s₁ + ℓ₁s₂)/(ℓ₁+ℓ₂) = ℓ₂/(ℓ₁+ℓ₂)·s₁ + ℓ₁/(ℓ₁+ℓ₂)·s₂`; for `ℓ₁, ℓ₂ ≥ 0`, `ℓ₁+ℓ₂ > 0` the weights are `≥ 0` with sum 1 and `min(s₁,s₂) ≤ smoothedSpeed ≤ max(s₁,s₂)`; `smoothedSpeed(ℓ₁, ℓ₂, α − βℓ₁, α + βℓ₂) = α` (exact for a speed linear in arclength). `aspectRatio(longest, area) = longest²√3/(4·area)`: `= 1` for an equilateral triangle, `≥ 1` for every triangle with `longest` its longest side. | `smoothedSpeed_eq_convex`, `smoothedSpeed_weights`, `smoothedSpeed_mem`, `smoothedSpeed_linear`, `aspectRatio_equilateral`, `one_le_aspectRatio` |
+| `cut-harmonic-extension` | If `det L_OO ≠ 0`: for all data `s` (and every source `φ`) there is exactly one `σ` with `σ = s` off `O` and `(Lσ)_i = 0` (`= φ_i`) on `O`; `(Lσ)_O = 0 ⟺ L_OO σ_O = −L_OC σ_C`. For symmetric `L`, such a `σ`, and `τ = σ` off `O`: `τᵀLτ = σᵀLσ + (τ−σ)ᵀL(τ−σ)`; so `σᵀLσ ≤ τᵀLτ` if `L` is positive semidefinite, with `<` for `τ ≠ σ` if `L_OO` is positive definite. On a connected valid mesh with a cut vertex the hypotheses hold and `σ` minimizes `Σ_f (cotan energy)`. | `existsUnique_dirichlet_data`, `existsUnique_harmonicExtension`, `harmonic_iff_block`, `harmonic_energy_identity`, `harmonicExtension_energy_le`, `harmonicExtension_energy_lt`, `TriMesh.existsUnique_harmonicExtension`, `TriMesh.harmonicExtension_faceEnergy_le` |
+| `cut-explicit-step` | `explicitStep(φ, τ, σ) = φ + τσ`, so `φ̃ − φ = τσ`. With `dE` as in `cut-speed`, the displacement `−(φ̃_c − φ_c)` of the cut for the speed `s`, `τ ≥ 0`, `ℓ ≥ 0`: `dE = −τ Σ s_c² ℓ_c ≤ 0`. | `explicitStep_sub`, `firstVariation_explicitStep` |
+| `cut-length-step` | `A_i > 0`, `L` positive semidefinite, `τ ≥ 0`: `diag(A) + τL` is positive definite (entries `lengthStepEntry`), `(diag(A) + τL)φ′ = diag(A)φ̃` has exactly one solution, and for it `φ′ᵀLφ′ ≤ φ̃ᵀLφ̃`, `ΣA_iφ′_i² ≤ ΣA_iφ̃_i²`, `ΣA_iφ′_i = ΣA_iφ̃_i` (zero column sums), and `φ′` minimizes `½ΣA_i(ψ_i − φ̃_i)² + (τ/2)ψᵀLψ` over all `ψ`. | `lengthStep_posDef`, `lengthStep_existsUnique`, `lengthStep_entry`, `lengthStep_energy_le`, `lengthStep_mass_le`, `lengthStep_sum`, `lengthStep_minimizes` |
+| `cut-penalty-step-paper` | `d_i > 0`: `(diag(A/d) + τL)φ′ = diag(A/d)φ̃ ⟺ (diag(A) + τ·diag(d)·L)φ′ = diag(A)φ̃` (entries `penaltyStepEntry`); exactly one solution for `A > 0`, `L` positive semidefinite, `τ ≥ 0`; for constant `d` it is the length step with `L_w = dL`. | `penaltyStep_iff`, `penaltyStep_entry`, `penaltyStep_existsUnique`, `penaltyStep_const_iff` |
+| `cut-symmetry-projection` | `classMean cls φ v` = mean of `φ` over `{w : cls w = cls v}` (`P`; the oracle's `classMean` of the listed class is this). `Pψ = ψ ⟺ ψ` is constant on classes; `P(Pφ) = Pφ`; `Σ(Pφ)_vχ_v = Σφ_v(Pχ)_v`; for class-constant `ψ`: `Σ(φ − Pφ)_vψ_v = 0` and `Σ(φ−ψ)² = Σ(φ−Pφ)² + Σ(Pφ−ψ)²`, so `Pφ` is the nearest class-constant vector. | `classMean_eq_self_iff`, `classMean_idem`, `classMean_selfAdjoint`, `sum_sub_classMean_mul`, `classMean_pythagoras`, `classMean_nearest`, `oracle_classMean_eq` |
+| `cut-redistance` | `hopfLaxEdge(T, ℓ) = T + ℓ`. For points `x_i, x_j, x_k` of a real inner product space (any, also `x_j = x_k`): `hopfLaxTriangle(\|x_i−x_j\|, \|x_i−x_k\|, \|x_j−x_k\|, T_j, T_k)` is the least value of `λT_j + (1−λ)T_k + ‖x_i − (λx_j + (1−λ)x_k)‖` over `λ ∈ [0,1]` (attained, and a lower bound). For side lengths with the strict triangle inequalities: the same with the distance `baryLength(ℓ_ij, ℓ_jk, ℓ_ik; 1, −λ, −(1−λ))`. Consequences: `≤ hopfLaxEdge(T_j, ℓ_ij)`, `≤ hopfLaxEdge(T_k, ℓ_ik)`, `≥ min(T_j, T_k)`. | `hopfLaxTriangle_isLeast`, `hopfLaxTriangle_le`, `hopfLaxTriangle_mem`, `hopfLaxTriangle_isLeast_intrinsic`, `hopfLaxTriangle_le_edge`, `min_le_hopfLaxTriangle`, `hl_stationary_le`, `clamp_min_of_convex`, `hopfLaxObjective_convex` |
+| `cut-step-cap` | `τ = stepCap(τ_max, c, h, m) = min(τ_max, c·h/m)`: `τ ≤ τ_max`; for `m > 0`: `τ·m ≤ c·h`, `τ\|s\| ≤ c·h` whenever `\|s\| ≤ m` (and `τ_max, c, h ≥ 0`), and every `τ′ ≤ τ_max` with `τ′m ≤ ch` has `τ′ ≤ τ`. | `stepCap_le_max`, `stepCap_mul_le`, `stepCap_mul_abs_le`, `le_stepCap`, `stepCap_nonneg` |
+| `cut-disk-radial-solution` | `u(r) = K(r² − ρ²)/4`: `u″ + u′/r = K` (`r ≠ 0`), `∂²/∂x² + ∂²/∂y²` of `K(x²+y²−ρ²)/4` is `K`, `u(ρ) = 0`, `u′(ρ)·2πρ = Kπρ²`; `∫₀^ρ u′² 2πr dr = πK²ρ⁴/8` with `ρ`-derivative `u′(ρ)²·2πρ`; `∫₀^ρ u² 2πr dr = πK²ρ⁶/48`; `p(r) = Kr⁴/32 − Kρ²r²/8 + 3Kρ⁴/32`: `p″ + p′/r = 2u`, `p(ρ) = 0`, `p′(ρ) = −Kρ³/8`; `d/dρ ∫₀^ρ u² 2πr dr = (u(ρ)² − u′(ρ)p′(ρ))·2πρ = πK²ρ⁵/8`. | `diskU_ode`, `diskU_laplacian`, `diskU_boundary`, `disk_flux_balance`, `disk_dirichletEnergy`, `hasDerivAt_disk_dirichletEnergy`, `disk_henckyEnergy`, `diskP_ode`, `diskP_boundary`, `deriv_diskP_boundary`, `hasDerivAt_disk_henckyEnergy`, `disk_hencky_derivative_value` |
+| `cut-sphere-cap-solution` | `u(ψ) = 2 ln(cos(ψ₀/2)/cos(ψ/2))`: `u(ψ₀) = 0`; `u′(ψ) = tan(ψ/2)` where `cos(ψ₀/2), cos(ψ/2) ≠ 0`; `(sin ψ·u′)′ = sin ψ` on `(−π, π)`; `tan(ψ₀/2)·2π sin ψ₀ = 2π(1 − cos ψ₀)`; for `\|ψ₀\| < π`: `∫₀^{ψ₀} u′² 2π sin ψ dψ = −8π ln cos(ψ₀/2) − 4π sin²(ψ₀/2)` with `ψ₀`-derivative `u′(ψ₀)²·2π sin ψ₀`; two caps: see `cut-speed`; `cutSpeed = 0` at `ψ₀ = π/2`. | `capU_boundary`, `hasDerivAt_capU`, `capU_ode`, `cap_flux_balance`, `capEnergy_eq`, `hasDerivAt_capEnergy`, `hasDerivAt_capEnergy_integral`, `hasDerivAt_twoCaps`, `twoCaps_equator`, `cap_integrand_scale` |
+| `cut-curve-shortening-circle` | `ρ(t) = √(ρ₀² − 2αt)`, `ρ₀² − 2αt > 0`: `ρ′(t) = −α/ρ(t)`; `ρ(0) = ρ₀` (`ρ₀ ≥ 0`); `πρ(t)² = πρ₀² − 2παt`; for `φ(t, r) = r − ρ(t)`: `φ_t = α(φ_rr + φ_r/r)` at `r = ρ(t)`; `d/dt [α·2πρ(t)] = −(α/ρ)²·2πρ`. | `hasDerivAt_shrinkRadius`, `shrinkRadius_zero`, `shrinkRadius_area`, `circle_levelSet_flow`, `hasDerivAt_circle_lengthEnergy` |
+
+Cited for the cut flow (`CITED.md`): `cut-yamabe-equation`, `cut-shape-derivative`,
+`cut-cea-method`, `cut-level-set-evolution`, `cut-weighted-fem-stiffness`,
+`cut-fast-marching-convergence`.
+
 ## Theorems
 
 Sections A and B below index the theorems about the canonical problem and the operators. The
-theorems about the cone solver (`DdgProofs/Solver.lean`) and about Boundary First Flattening
-(`DdgProofs/Bff/*.lean`) are indexed by the two id tables just above; they are all about this
-package's own definitions, which transcribe the Rust expressions where the statement says "as
-the code evaluates it".
+theorems about the cone solver (`DdgProofs/Solver.lean`), about Boundary First Flattening
+(`DdgProofs/Bff/*.lean`) and about the cut flow (`DdgProofs/Cuts/*.lean`) are indexed by the
+three id tables just above. The first two groups are about this package's own definitions, which
+transcribe the Rust expressions where the statement says "as the code evaluates it"; the cut-flow
+theorems are about the oracle's definitions wherever one exists (see below).
 
 "Def." says which definitions the statement is about: **own** = math-level definitions of this
 package, **oracle** = the definitions of `lean/oracle` at `ℝ`. Hypotheses abbreviated: *valid mesh*
@@ -422,7 +481,28 @@ Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
   `lumpedMass`;
 - problem: `Problem.applyL`, `stateResidual`, `adjointResidual`, `coneResidual`, `F`, `state`,
   `regMeasure`, `regStateResidual`, `Freg`, `regState`, `coneScale`, `regConeResidual`, `impState`,
-  `Fimp`, `pieceConeResidual`, `Fpiece`, `DFpiece`, `objective`.
+  `Fimp`, `pieceConeResidual`, `Fpiece`, `DFpiece`, `objective`;
+- cut flow (`DdgOracle/Formulas/Cuts.lean`, every definition of that file): `normalizedAngle`,
+  `cornerNormalized`, `faceCurvature`, `faceCurvatureDensity`, `Face.omega`,
+  `Face.omegaCancellationFree`, `crossingParam`, `clampCrossing`, `crossingMoved`, `baryLength2`,
+  `baryLength`, `baryInner`, `cotFromInner`, `det3`, `subTriangleArea`, `triangleMean`,
+  `weightedOffDiag`, `weightedDiag`, `lengthStepEntry`, `penaltyStepEntry`, `normalDerivative`,
+  `dualLength`, `normalFlux`, `adjointFlux`, `adjointRhsScaledInterior`,
+  `adjointRhsScaledBoundary`, `adjointRhsPointwise`, `gradDirichlet`, `gradScaled`,
+  `gradPointwise`, `gradDirichletD`, `gradScaledD`, `gradPointwiseD`, `faceMeanSquareEdge`,
+  `fluxCoupling`, `fluxDiagEntry`, `fluxOffEntry`, `fluxRhs`, `vertexCurvatureDensity`,
+  `featureSizeRaw`, `featureWeight`, `cutSpeed`, `regionDensity`, `aspectRatio`, `smoothedSpeed`,
+  `explicitStep`, `stepCap`, `classMean`, `hopfLaxEdge`, `hopfLaxTriangle`.
+
+For the cut flow the matrices are not oracle definitions (the executable assembles them from the
+entries above and solves densely), so the linear-algebra theorems are about matrices of this
+package built from those entries: `TriMesh.weightedLaplacian` (entries identified with
+`weightedOffDiag`/`weightedDiag` by `Cuts.weightedEntry_eq`), `diag(A) + τL`
+(`Cuts.lengthStep_entry`, `penaltyStep_entry`), `Cuts.fluxMatrix` (defined from `fluxDiagEntry`,
+`fluxOffEntry`), and an arbitrary matrix `L` with a predicate `I` for the Dirichlet solves
+(`Cuts.IsDirichletSolution`, `boundaryFlux`, with `normalFlux`/`adjointFlux` identified
+entrywise). The oracle's dense implementation of a flow step (`DdgOracle/Cuts/*`: cut extraction,
+cut mesh, assembly, the marching loop) is outside `DdgOracle/Formulas` and is not covered.
 
 Not covered on the oracle's side: the flattened matrices `DF` and `DFreg` (the Stage I/II
 theorems are stated block by block; only `DFpiece`, of which `DFimp` is an instance by definition,
@@ -488,10 +568,19 @@ differential tests against the oracle.
 | `Σ_S µ_S = Σ(Ω − a_F)` | `Reduced::check` (`c`), kept by the dense method with the multiplier `ν` (`Dense::solve`) |
 | `IsCutOf M' M ρ` (same faces, copies of vertices, lengths pulled back) | the construction in `ddg_bff::cut::cut_mesh` (by reading; `CutMesh::vertex_to_original` is `ρ`) |
 | disk topology of a chart | checked at run time by counting (`ComponentTopology::is_disk`), which rests on the cited `genus-from-euler` |
+| cut flow: `δ ≤ ½` (`clampCrossing_mem` …) | `0 ≤ min_crossing_offset < ½` is checked (`CutError::InvalidOptions`) |
+| cut flow: `Θ_v ≠ 0` at every `v ∉ B` (`sum_faceCurvature`) | `ddg_core::TriMesh::new` rejects a vertex that lies in no face (`MeshError::UnreferencedVertex`), and the angle sum at a vertex of a face of a valid mesh is positive (`TriMesh.angleSum_pos`) |
+| cut flow: strict triangle inequalities of the parent face (`subTriangleArea_eq_triArea`, `cotFromInner_eq_cornerCot`, `baryLength2_nonneg`) | `ddg_core::Geometry` (`GeometryError::DegenerateFaces`), as for `TriMesh.Valid.tri` |
+| cut flow: `det L_II ≠ 0` / `L_II` positive definite (`yamabe_existsUnique`, `existsUnique_harmonicExtension`) | proved for a connected valid mesh with a vertex outside `I` (`TriMesh.yamabe_existsUnique`); a component of a region without boundary vertex is detected and left out (SPEC §3.4, D9c), and the Cholesky factorization fails otherwise. The cut mesh of a region satisfying `TriMesh.Valid` (positive sub-triangle areas) is by construction (`\|det\| > 0` after the clamp with `δ > 0`), not proved here |
+| cut flow: `L` symmetric with zero column sums (`sum_normalFlux`, `reciprocity`) | `TriMesh.laplacian_isSymm`, `laplacian_vecMul_one`; for the weighted matrix `weightedLaplacian_isSymm`, `weightedLaplacian_vecMul_one` (proved) |
+| cut flow: `A_i > 0`, `L_w` positive semidefinite, `τ ≥ 0` (`lengthStep_*`) | lumped areas of a valid mesh; `w = α_L + η ≥ 0` is validated input, then `weightedLaplacian_faceMean_posSemidef` |
+| cut flow: `ℓ_p > 0`, `κ_σ ≥ 0`, symmetric couplings (`fluxMatrix_posDef` …) | dual lengths of cut segments of positive length; `fluxCoupling_nonneg`; one `κ_σ` per segment added to both of its ends (by reading `recovery.rs`) |
+| cut flow: `a = r³ ≥ 0` for the scaled energy | **not guaranteed in general**: `smoothing_ge` needs nonpositive off-diagonal entries of `L` (see the discrepancies below) |
+| cut flow: `φ_t = −σ` and `dE = Σ g σ ℓ` (`firstVariation_levelSet`) | the smooth theory (`cut-level-set-evolution`, `cut-cea-method`, cited); checked on closed forms (`hasDerivAt_twoCaps`, `circle_levelSet_flow`) and by the finite-difference test of SPEC §6.3 |
 
 ## Discrepancies with the papers as printed
 
-Items 1–10 and 14 concern the cone paper, 11–13 BFF. (BFF Proposition 1 is stated for a disk;
+Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper and its SPEC. (BFF Proposition 1 is stated for a disk;
 `TriMesh.sum_exteriorAngle` gives `2πχ` for any valid manifold mesh.)
 
 1. **Sign of the state equation.** Eq. 17 / B.2 print `L u = Ω − µ` with a positive semidefinite
@@ -549,6 +638,41 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF. (BFF Proposition 1 is s
     regions and large in highly curved regions"; the printed formula is the opposite. See
     `feature-size-weights` in `CITED.md`.
 
+15. **Cuts paper: the list of differences is SPEC §9 (D1–D13).** The ones a theorem here bears
+    on: D1 (sign of the face curvature: `Σ_f Ω_f = +2πχ` on a closed mesh,
+    `sum_faceCurvature_closed`); D2 (sign of the speed: `firstVariation_levelSet` against
+    `firstVariation_ascent`, and `hasDerivAt_twoCaps` on a closed-form example); D4 (`W_V` on the
+    left of the length step: the matrix that is positive definite and whose step is the
+    minimizing movement, `lengthStep_posDef`, `lengthStep_minimizes`); D8 (the paper's penalty
+    rule equals the default one exactly when the penalty is constant, `penaltyStep_const_iff`);
+    D11 (the edge rule is indefinite on an obtuse triangle, `edgeRuleEnergy_neg_example`); D12
+    (the recovery keeps the total flux and satisfies a maximum principle, `fluxRecovery_*`); D13a,
+    D13e (`cotFromInner_eq_cornerCot`, `face_omegaCancellationFree_eq`).
+16. **SPEC §3.1, a hypothesis that is not stated.** `Σ_f Ω_f = Σ_{i ∉ B_M} (2π − Θ_i)` needs
+    every vertex outside `B_M` to lie in a face (`Θ_i ≠ 0`). A vertex in no face adds `2π` on the
+    right and nothing on the left; with such vertices the closed-mesh value `2πχ` (they count in
+    `χ`) is also not `Σ_f Ω_f`. `ddg_core::TriMesh::new` rejects such meshes, so the identity
+    holds for every mesh the crate accepts; SPEC does not say that it relies on this.
+17. **SPEC §3.5, "the unique vector".** `v` is determined by `L u = −g + v` alone; that it
+    vanishes on `I` is the Yamabe system, not an extra condition (`normalFlux_spec`).
+18. **SPEC §3.6, positivity of the curvature-based weight.** `r⁰ > 0`, but the smoothed `r`
+    (`(W_V + cL) r = W_V r⁰`) is only proved to stay in the range of `r⁰` when the off-diagonal
+    entries of `L` are nonpositive (`smoothing_ge`); with negative cotangent weights (non-Delaunay
+    edges) the discrete maximum principle can fail, `a = r³` could then be negative at a vertex,
+    and the positive semidefiniteness of `L_a` (which needs the face means of `a` to be `≥ 0`)
+    would be lost. The flux recovery has the maximum principle by construction (its off-diagonal
+    entries are `−κ ≤ 0`).
+19. **SPEC §3.6, what the adjoint is exact for.** The discrete adjoints are the exact first
+    variation of the discrete objectives with respect to the *source* `g` at fixed mesh and fixed
+    `I` (`scaledEnergy_perturb`, `hasDerivAt_pointwiseEnergy`). The gradient density with respect
+    to the *cut* is not an exact derivative of the discrete energy; it is the discretization of
+    the cited Table 1, exact on the closed-form examples.
+20. **SPEC §3.12, the closed form.** `hopfLaxTriangle` is the minimum over `λ ∈ [0, 1]` also for a
+    degenerate edge (`x_j = x_k`) and without any acuteness assumption; "a convex function of `λ`
+    in the plane of the triangle" holds in every inner product space
+    (`hopfLaxObjective_convex`). The floors `max 0 (·)` of the oracle's definition are inactive
+    for side lengths of a Euclidean triangle (`hlQ_nonneg`, `baryLength2_nonneg`).
+
 ## Caveats on faithfulness
 
 - All statements are about exact real arithmetic; nothing is proved about rounding.
@@ -587,3 +711,19 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF. (BFF Proposition 1 is s
 - `atan2 y x` is defined as the argument of the complex number `x + iy`; the Kahan arrangements of
   `DdgProofs/Evaluated.lean` are proved equal to the plain formulas as real numbers, which says
   nothing about their (better) rounding behaviour.
+- **Cut flow.** The theorems are per formula and per linear system. They do not say that a flow
+  step decreases the discrete energy `E(φ)` of SPEC §6, that the cut converges, or that the
+  discrete gradient density is consistent on a mesh; those are tested, not proved. The
+  first-variation statements (`firstVariation_*`) take the formula `dE = Σ g σ ℓ` and the relation
+  `φ_t = −σ` as hypotheses. The closed-form theorems (`DdgProofs/Cuts/Analytic.lean`) are
+  one-variable calculus on explicit functions: they verify the smooth formulas on radially
+  symmetric examples (the Laplace–Beltrami operator of the sphere enters only as the ordinary
+  differential equation `(sin ψ·u′)′ = K sin ψ`; for the disk the planar Laplacian is also
+  computed in Cartesian coordinates), not the smooth theory.
+- **Cut flow, combinatorics.** Which faces are cut, the choice of the quad diagonal, the regions
+  and their components, the cut mesh as a `TriMesh`, and the marching order of the redistancing
+  are not modelled. The sub-triangle statements are for one face and arbitrary barycentric rows;
+  `cutFace_det_sum_*` covers the two splittings of SPEC §3.3.
+- **Cut flow, the flux recovery.** Proved: well-posedness, conservation and the maximum principle
+  for any symmetric nonnegative couplings. Not proved: any accuracy statement (SPEC D12 reports
+  measurements), and that `κ_σ = c²h_f²/|pq|` is a good choice.
