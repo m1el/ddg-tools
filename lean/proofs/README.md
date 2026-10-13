@@ -84,7 +84,9 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Cuts/Redistance.lean` | cut flow: the Hopf–Lax triangle update in closed form is the minimum over the edge (§3.12) |
 | `DdgProofs/Cuts/OnCut.lean` | cut flow, default stages: the two systems on the cut (length force, rate), the extension from the cut, `\|∇φ\|` in a crossed face and its mean, the per-step factor of a ripple, the adaptive step (§3.8–§3.10, §4, D14–D16) |
 | `DdgProofs/Cuts/Ripple.lean` | cut flow: the roughening rate `ωk − wk²`, the length weight for a cutoff wavelength, the ingredients of the linearization on closed forms, the sphere rates (§1, §4, D18) |
-| `DdgProofs/Cuts/Quantile.lean` | cut flow: the weighted quantile, the roughening rate of a state as a quantile, the robust step rule and the local limit per cut point (§1, §4, D22–D24) |
+| `DdgProofs/Cuts/Quantile.lean` | cut flow: the weighted quantile, the roughening rate of a state as a quantile, the robust step rule and the local limit per cut point (§1, §4, D22–D25) |
+| `DdgProofs/Cuts/VertexLimit.lean` | cut flow: the local limit at the vertices, on the change of the whole step, for two and for `N` regions (§4, §8.4, D26) |
+| `DdgProofs/Cuts/Stop.lean` | cut flow: the three cases of the energy criterion of the stop rule and the state of lowest energy of a run (§4, D27; no formula id) |
 | `DdgProofs/Cuts/Regions.lean` | cut flow with `N` regions: region of a vertex, crossings between regions, triple points, the projection of the redistancing, rates of the functions, the systems on the boundary of a region (§8, D20, D21) |
 | `DdgProofs/Cuts/Analytic.lean` | cut flow: closed-form solutions (flat disk, spherical cap, shrinking circle) and the shape derivatives of the energies on them (§1, §6) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
@@ -272,7 +274,7 @@ unless a definition of this package is named. All theorems are in `namespace Ddg
 | `cut-gradient-norm` | Triangle `a, p = a + e₁, q = a + e₂` (nondegenerate) in a real inner product space, `g = αe₁ + βe₂` with `⟨g, e₁⟩ = ⟨g, e₂⟩ = −φ_a` (the gradient of the affine function with value `φ_a` at `a` that vanishes at `p` and `q`): `‖g‖ = gradientNormLone(φ_a, \|pq\|, area) = \|φ_a\|·\|pq\|/(2·area)`, area by Heron. `ḡ = meanGradient(ΣL, Σ L/g)`: for `L ≥ 0`, `ΣL > 0`, `0 < lo ≤ g_σ ≤ hi`: `lo ≤ ḡ ≤ hi`; `Σ L_σ·(ḡ/g_σ) = ΣL`; `ḡ = 1` if all `g_σ = 1`. `gradientNormLone(0, \|pq\|, area) = 0`: a face whose lone vertex has `φ_a = 0` has slope 0 (SPEC §3.9, D23a leaves it out of the mean; the bounds above are for the faces that count, `g_σ > 0`). | `norm_grad_eq_gradientNormLone`, `norm_grad_eq_gradNorm`, `meanGradient_mem`, `oracle_meanGradient_mem`, `meanGradient_normalizes`, `meanGradient_one`, `gradientNormLone_zero` |
 | `cut-roughening-rate` | `rippleRate ω w k = ωk − wk²`; `roughRate(Q₀, Q₁) = 2(Q₀ + Q₁)`; for the Dirichlet energy `roughQ = w_r d²`, so `ω ≥ 0`. For `w, k > 0`: `rate > 0 ⟺ k < ω/w`; `rate ≤ ω²/(4w)`, attained at `k = ω/(2w)`. With `α_L = lengthWeightForRipples(ω, ℓ) = ωℓ/(2π)`: rate `= 0` at `k = 2π/ℓ`, `> 0` for `0 < k < 2π/ℓ`, `< 0` for `k > 2π/ℓ` (`ω, ℓ > 0`). Ingredients of the cited linearization: `d/dδ [Q₀(1−kδ)² − Q₁(1+kδ)²]` at `0` is `−roughRate·k`; `e^{−ky}cos(kx)` is harmonic and `−∂_y` at `y = 0` is `k` times its value; `sin ψ·(tan(ψ/2)^m)′ = m·tan(ψ/2)^m`, derivative `m` at `ψ = π/2`; `(tan(ψ/2))′ = 1` at `π/2`. Sphere formula `(m−1)(4/R³ − α(m+1)/R²)` (cited): `= 0` for `m = 1`; `= rippleRate(4/R², α, m/R) − (4/R³ − α/R²)`; `< 0` for all integers `m ≥ 2` ⟺ `α > 4/(3R)`; `4.72 < 4/(3R) < 4.73` for `R = 1/√(4π)`. **Rate of the state** (SPEC §1, D22): `ω = weightedQuantile 0.9 (ω_c) (ℓ_c)` (oracle), `ℓ_c ≥ 0`, `Σℓ > 0`: `ω` is one of the `ω_c`; `Σ{ℓ_c : ω_c ≤ ω} ≥ 0.9·Σℓ`; `Σ{ℓ_c : ω_c < ω} < 0.9·Σℓ`; `ω ≥ 0` if all `ω_c ≥ 0` (any weights). `rippleRate` is nondecreasing in `ω` for `k ≥ 0`. At a cut point with `ω_c ≤ ω`: `rate(ω_c, w, k) < 0` for `w, k > 0`, `k > ω/w`; with `w = lengthWeightForRipples(ω, ℓ)`, `ω, ℓ > 0`: for `k > 2π/ℓ`. At a cut point with `ω_c ≥ ω`: `rate > 0` for `0 < k < 2π/ℓ`. For any `ω_c`: `rate < 0` for `k > (ω_c/ω)·2π/ℓ`, `k > 0`. `lengthWeightForRipples(ω, ℓ) ≤ 0` for `ω ≤ 0`, `ℓ ≥ 0`; `rate(ω, w, k) < 0` for `ω < 0`, `w ≥ 0`, `k > 0`. | `rippleRate_pos_iff`, `rippleRate_le_max`, `rippleRate_cutoff`, `rippleRate_pos_of_longer`, `rippleRate_neg_of_shorter`, `roughQ_dirichlet`, `roughRate_dirichlet_nonneg`, `hasDerivAt_ripple_density`, `halfPlane_mode_harmonic`, `halfPlane_mode_dtn`, `sphere_mode_ode`, `sphere_mode_dtn`, `capU_second_derivative_equator`, `sphereRippleRate_eq_planar`, `sphere_equator_stable_iff`, `sphere_unit_area_threshold`, `roughening_quantile_spec`, `roughening_quantile_above`, `roughening_quantile_nonneg`, `rippleRate_mono_omega`, `rippleRate_neg_of_le_of_lt`, `rippleRate_neg_of_le`, `rippleRate_pos_of_ge`, `rippleRate_neg_of_lt_longer`, `lengthWeightForRipples_nonpos`, `rippleRate_neg_of_neg` |
 | `cut-weighted-quantile` | Pairs `(x_c, ℓ_c)` = `xs.zip ls`; this package's `totalWeight = Σℓ`, `weightLE v = Σ{ℓ_c : x_c ≤ v}`, `weightLT v = Σ{ℓ_c : x_c < v}`, and `IsWeightedQuantile pairs q v`: `v` is one of the `x_c`, `q·Σℓ ≤ weightLE v`, and every `x_c < v` has `weightLE x_c < q·Σℓ` (at most one `v` has this property). For `ℓ_c ≥ 0`, `Σℓ > 0`, `0 < q ≤ 1` the oracle's `weightedQuantile q xs ls` has it. Hence: it is one of the values; `lo ≤ · ≤ hi` for all bounds `lo ≤ x_c ≤ hi`; `weightLE ≥ q·Σℓ`; `weightLT < q·Σℓ`; `weightedQuantile q ≤ weightedQuantile q′` for `0 < q ≤ q′ ≤ 1`; the value `c` if all `x_c = c`; it equals `quantileScan` of **every** ascending arrangement of the pairs (the order of equal values does not matter) and this package's `Cuts.weightedQuantile` (Mathlib's insertion sort, then the scan). For `ℓ_c > 0` and a nonempty list: `weightedQuantile 1` is one of the values and `≥` every `x_c`. `weightedQuantile q [] ls = 0`. For any weights and any `q` the result is `0` or one of the values, so `≥ 0` if all `x_c ≥ 0`. Oracle's sort: `sortAscending l` is a permutation of `l`, ascending; `sortAscending [(1,10),(1,20)] = [(1,20),(1,10)]`. | `oracle_weightedQuantile_spec`, `IsWeightedQuantile.unique`, `oracle_weightedQuantile_bounds`, `oracle_le_weightLE_weightedQuantile`, `oracle_weightLT_weightedQuantile_lt`, `oracle_weightedQuantile_mono`, `oracle_weightedQuantile_const`, `isWeightedQuantile_scan`, `oracle_weightedQuantile_eq_scan`, `oracle_weightedQuantile_eq`, `oracle_weightedQuantile_one`, `oracle_weightedQuantile_nil`, `oracle_weightedQuantile_mem_or`, `oracle_weightedQuantile_nonneg`, `sortAscending_perm`, `sortAscending_pairwise`, `sortAscending_reverses_ties` |
-| `cut-step-local` | `f = localLimitFactor(max_motion, h_c, τ, v_c)` (oracle): `min(1, max_motion·h_c/(τv_c))` if `τv_c > 0`, else `1`; for `max_motion·h_c ≥ 0` it is this package's `localFactor(allowed, moved)` (`allowed/moved` if `allowed < moved`, else `1`: the form of the Rust code) at `allowed = max_motion·h_c`, `moved = τv_c`. `max_motion·h_c > 0` ⟹ `0 < f ≤ 1`. `τv_c ≤ max_motion·h_c` ⟹ `f = 1`. `max_motion·h_c ≥ 0`, `τ ≥ 0`, `\|r_c\| ≤ v_c` ⟹ `τ\|r_c f\| ≤ max_motion·h_c`; in particular for `v_c = localSpeed(r_c, ω_c, ω) = max(\|r_c\|, max(0, ω_c − ω)/2)`, which is `≥ \|r_c\|`, `≥ (ω_c − ω)/2`, and `= \|r_c\|` for `ω_c ≤ ω`. `τ > 0`, `τv_c > max_motion·h_c ≥ 0` ⟹ `τ·f = max_motion·h_c/v_c`. For `max_motion·h_c > 0`: `r f > 0 ⟺ r > 0`, `r f < 0 ⟺ r < 0`, `r f = 0 ⟺ r = 0`, `\|r f\| ≤ \|r\|`. **The two cases agree** (`τ ≥ 0`, `h_c > 0`): `τm̂ ≤ max_motion` and `v_c/h_c ≤ m̂` ⟹ `τv_c ≤ max_motion·h_c` and `f = 1`; so `(1 if v_c/h_c ≤ m̂, else f) = f`; the robust step satisfies `τm̂ ≤ max_motion` (`τ_max, time_scale, max_motion ≥ 0`); `0/h_c ≤ m̂` for a quantile `m̂` of nonnegative speeds. Descent, with `dE(σ) = Σ_c g_c σ_c ℓ_c` (`cut-speed`), `ℓ ≥ 0`: for `σ_c = −g_c f_c`, `f_c ≥ 0`: `dE = −Σ f_c g_c² ℓ_c ≤ 0`. For the rate `r` of the system on the cut (`cut-length-step-on-cut`) with `g = s + λ⁰`: `dE(−r) = −rᵀ(diag ℓ + τK)r ≤ 0`; but `dE(−r·f) > 0` in the example `ℓ = (9, 1)`, `h = (1, 31/110)`, `g = (1, −20)`, `m = 36`, `Capped{1, 1/4}` (then `m̂ = 1`, `τ = 1/4`, `r = (−10/11, −31/11)`, `f = (1, 1/10)`, `dE = −530/11` unlimited and `+28/11` limited). `\|cutSpeed(Q₀, Q₁)\| ≤ roughRate(Q₀, Q₁)/2` for `Q₀, Q₁ ≥ 0`. | `localLimitFactor_def`, `localLimitFactor_eq`, `localLimitFactor_mem_Ioc`, `localLimitFactor_eq_one`, `localLimit_motion_le`, `localLimit_motion_le_adaptive`, `abs_le_localSpeed`, `localSpeed_of_le`, `localLimit_step_eq`, `localLimit_sign`, `localLimit_cases_agree`, `localLimit_twoCase_eq`, `robustStep_mul_mhat_le`, `localLimitFactor_eq_one_of_speed_le`, `localLimit_first_case_of_zero`, `firstVariation_localLimit`, `firstVariation_limited`, `onCut_rate_descent`, `limited_rate_not_descent_example`, `abs_cutSpeed_le_half_roughRate`; on `localFactor`: `localFactor_eq_min`, `localFactor_eq_one`, `localFactor_mem_Ioc`, `limited_motion_le`, `limited_sign` |
+| `cut-step-local` | **At the cut points** (the length step on the cut). `f = localLimitFactor(max_motion, h_c, τ, v_c)` (oracle): `min(1, max_motion·h_c/(τv_c))` if `τv_c > 0`, else `1`; for `max_motion·h_c ≥ 0` it is this package's `localFactor(allowed, moved)` (`allowed/moved` if `allowed < moved`, else `1`: the form of the Rust code) at `allowed = max_motion·h_c`, `moved = τv_c`. `max_motion·h_c > 0` ⟹ `0 < f ≤ 1`. `τv_c ≤ max_motion·h_c` ⟹ `f = 1`. `max_motion·h_c ≥ 0`, `τ ≥ 0`, `\|r_c\| ≤ v_c` ⟹ `τ\|r_c f\| ≤ max_motion·h_c`; in particular for `v_c = localSpeed(r_c, ω_c, ω) = max(\|r_c\|, max(0, ω_c − ω)/2)`, which is `≥ \|r_c\|`, `≥ (ω_c − ω)/2`, and `= \|r_c\|` for `ω_c ≤ ω`. `τ > 0`, `τv_c > max_motion·h_c ≥ 0` ⟹ `τ·f = max_motion·h_c/v_c`. For `max_motion·h_c > 0`: `r f > 0 ⟺ r > 0`, `r f < 0 ⟺ r < 0`, `r f = 0 ⟺ r = 0`, `\|r f\| ≤ \|r\|`. The two cases agree (`τ ≥ 0`, `h_c > 0`): `τm̂ ≤ max_motion` and `v_c/h_c ≤ m̂` ⟹ `τv_c ≤ max_motion·h_c` and `f = 1`; so `(1 if v_c/h_c ≤ m̂, else f) = f`; the robust step satisfies `τm̂ ≤ max_motion` (`τ_max, time_scale, max_motion ≥ 0`) and is `> 0` for positive parameters; `0/h_c ≤ m̂` for a quantile `m̂` of nonnegative speeds. Descent, with `dE(σ) = Σ_c g_c σ_c ℓ_c` (`cut-speed`), `ℓ ≥ 0`: a gradient density scaled point by point, `σ_c = −g_c f_c`, `f_c ≥ 0`, has `dE = −Σ f_c g_c² ℓ_c ≤ 0`; in the flow that is the limited rate when there is no coupling along the cut (then `r = s + λ⁰`): `dE(−r·f) ≤ 0`. For the rate `r` of the system with coupling (`cut-length-step-on-cut`), `g = s + λ⁰`: `dE(−r) = −rᵀ(diag ℓ + τK)r ≤ 0`; but `dE(−r·f) > 0` in the example `ℓ = (9, 1)`, `h = (1, 31/110)`, `g = (1, −20)`, `m = 36`, `Capped{1, 1/4}` (then `m̂ = 1`, `τ = 1/4`, `r = (−10/11, −31/11)`, `f = (1, 1/10)`, `dE = −530/11` unlimited and `+28/11` limited). `\|cutSpeed(Q₀, Q₁)\| ≤ roughRate(Q₀, Q₁)/2` for `Q₀, Q₁ ≥ 0`. **At the vertices** (the length step on the mesh, D26), all about the oracle's definitions: `vertexLimitFactor = localLimitFactor`; `limitedValue(φ, φ′, f) = φ + f(φ′ − φ)`; `vertexSpeedCapped(Δ, τ) = \|Δ\|/τ = \|Δ/τ\|` and `vertexSpeedAdaptive(Δ, τ, ω_i, ω) = max(\|Δ\|/τ, max(0, ω_i − ω)/2) = localSpeed(Δ/τ, ω_i, ω)` for `τ > 0`; the adaptive speed is the capped one for `ω_i ≤ ω` (`τ ≥ 0`), and is the same for `max(ω, M)` as for `M` in place of `ω_i`. With `φ″ = limitedValue(φ, φ′, vertexLimitFactor(max_motion, h_i, τ, v_i))`: `max_motion·h_i ≥ 0`, `τ > 0`, `v_i ≥ \|φ′ − φ\|/τ` (both speeds) ⟹ `\|φ″ − φ\| ≤ max_motion·h_i`. `max_motion·h_i > 0` ⟹ `φ″ − φ > 0 ⟺ φ′ − φ > 0`, `< 0 ⟺ < 0`, `φ″ = φ ⟺ φ′ = φ`, `\|φ″ − φ\| ≤ \|φ′ − φ\|`, `min(φ, φ′) ≤ φ″ ≤ max(φ, φ′)`. `τv_i ≤ max_motion·h_i` ⟹ `φ″ = φ′`; capped (`τ > 0`): `\|φ′ − φ\| ≤ max_motion·h_i` ⟹ `φ″ = φ′`; adaptive: if also `τ(ω_i − ω)/2 ≤ max_motion·h_i`. `v_i = 0` ⟹ factor `1`. Capped rule (`max_motion·h_i ≥ 0`, `τ > 0`): `φ″ = φ + max(−max_motion·h_i, min(max_motion·h_i, φ′ − φ))`, independent of `τ`; a limited vertex changes by exactly `max_motion·h_i`. **`N` regions**: `Δ = vertexChange(φ_b′, φ_b, φ_a′, φ_a) = ½[(φ_b′ − φ_b) − (φ_a′ − φ_a)]`; with every function taking the factor `f`, `vertexChange(φ_b″, φ_b, φ_a″, φ_a) = Δ·f`, so under the hypotheses above (`v ≥ \|Δ\|/τ`, both speeds) `\|vertexChange(φ_b″, φ_b, φ_a″, φ_a)\| ≤ max_motion·h_i`, with its sign kept and `0` only if `Δ = 0`; `φ_k″ − φ_l″ = (φ_k − φ_l) + f·[(φ_k′ − φ_k) − (φ_l′ − φ_l)]`; `\|φ_k″ − φ_k\| ≤ \|φ_k′ − φ_k\|` for `0 ≤ f ≤ 1`. On `[φ, −φ]` with the whole step `[φ′, −φ′]` and `a ≠ b` in `Fin 2`: `Δ = −(φ′ − φ)` (`a = 0`) or `φ′ − φ` (`a = 1`), both speeds equal those of the two-region rule for `φ′ − φ`, and for every `f` the limited state is `[limitedValue(φ, φ′, f), −limitedValue(φ, φ′, f)]`. | at the cut points: `localLimitFactor_def`, `localLimitFactor_eq`, `localLimitFactor_mem_Ioc`, `localLimitFactor_eq_one`, `localLimit_motion_le`, `localLimit_motion_le_adaptive`, `abs_le_localSpeed`, `localSpeed_of_le`, `localLimit_step_eq`, `localLimit_sign`, `localLimit_cases_agree`, `localLimit_twoCase_eq`, `robustStep_mul_mhat_le`, `robustStep_pos`, `localLimitFactor_eq_one_of_speed_le`, `localLimit_first_case_of_zero`, `firstVariation_localLimit`, `firstVariation_limited`, `onCut_limited_descent_of_no_coupling`, `onCut_rate_descent`, `limited_rate_not_descent_example`, `abs_cutSpeed_le_half_roughRate`; on `localFactor`: `localFactor_eq_min`, `localFactor_eq_one`, `localFactor_mem_Ioc`, `limited_motion_le`, `limited_sign`; at the vertices: `vertexLimitFactor_eq`, `limitedValue_eq`, `vertexSpeedCapped_eq_abs_rate`, `vertexSpeedAdaptive_eq_localSpeed`, `vertexSpeedAdaptive_of_le`, `vertexSpeedAdaptive_max_omega`, `vertexLimit_change_le`, `vertexLimit_change_le_capped`, `vertexLimit_change_le_adaptive`, `vertexLimit_sign`, `vertexLimit_between`, `vertexLimit_unchanged`, `vertexLimit_unchanged_capped`, `vertexLimit_unchanged_adaptive`, `vertexLimitFactor_zero_speed`, `vertexLimit_capped_clamp`, `vertexLimit_capped_limited`; `N` regions: `vertexChange_limited`, `vertexLimit_regions_change_le`, `vertexLimit_regions_change_le_capped`, `vertexLimit_regions_change_le_adaptive`, `vertexLimit_regions_sign`, `limitedValue_sub_limitedValue`, `abs_limitedValue_sub_le`, `vertexChange_two_lower`, `vertexChange_two_upper`, `abs_vertexChange_two`, `vertexLimit_two_regions` |
 | `cut-edge-crossing-regions` | `IsRegion x k`: `x_k ≤ x_l` for all `l` and `x_k < x_l` for `l < k` (unique; exists). For `i` the region of `a`, `j ≠ i` the region of `b`: `ψ_a = φ_i(a) − φ_j(a) ≤ 0 ≤ ψ_b`, `ψ_b > 0` if `i < j`, `ψ_a < 0` if `j < i`, so `ψ_a ≠ ψ_b`; `t = crossingParamRegions = crossingParam(ψ_a, ψ_b)` satisfies `(1−t)φ_i(a) + tφ_i(b) = (1−t)φ_j(a) + tφ_j(b)`, `0 ≤ t ≤ 1`, `t < 1` if `i < j`, `t > 0` if `j < i`. On `[φ, −φ]`: region 0 ⟺ `φ ≤ 0`, region 1 ⟺ `φ > 0`, and `t = crossingParam(φ_a, φ_b)` for either orientation. | `IsRegion.unique`, `exists_isRegion`, `region_differences`, `crossingParamRegions_interp`, `crossingParamRegions_mem`, `isRegion_two_zero_iff`, `isRegion_two_one_iff`, `crossingParamRegions_two` |
 | `cut-triple-point` | `m_k = triplePointCoord(s_k, s_{k−1}) = ((1 − s_k) + s_{k−1})/3`: `m₀ + m₁ + m₂ = 1`; `m_k > 0` if `s_k < 1`, `s_{k−1} > 0`; `(p₀+p₁+p₂)/3 = Σ m_k c_k` for `p_k = (1−s_k)c_k + s_k c_{k+1}`. Barycentric determinants: `(c_k, p_k, m)`: `s_k m_{k+2}`; `(c_k, m, p_{k−1})`: `m_{k+1}(1 − s_{k−1})`; the six are positive for `0 < s < 1` and sum to 1. Convexity of the quad `(c_k, p_k, m, p_{k−1})`: `(c_k, p_k, p_{k−1})` has `s_k(1 − s_{k−1}) > 0` and `(p_k, m, p_{k−1})` has `((1−s₀)(1−s₁)(1−s₂) + s₀s₁s₂)/3 > 0`, a third of `det(p₀, p₁, p₂)`. | `triplePoint_coord_sum`, `triplePoint_coord_pos`, `triplePoint_eq_centroid`, `tripleFace_dets`, `tripleFace_dets_pos`, `tripleFace_convex` |
 | `cut-region-projection` | `IsTwoSmallest x i₀ i₁`: `i₀ ≠ i₁`, `x_{i₀} ≤ x_{i₁} ≤ x_k` for `k ≠ i₀` (exists for at least two functions). With `m = projectionShift(x_{i₀}, x_{i₁})`, `y_k = projectedValue(x_k, m)`, `d = (x_{i₁} − x_{i₀})/2 ≥ 0`: `y_{i₀} = −d`, `y_{i₁} = d`, `y_k ≥ d` for `k ≠ i₀`; if `x_{i₀} < x_{i₁}`: `y_k < 0 ⟺ k = i₀`; `y_k − y_l = x_k − x_l`; the region is unchanged; `crossingParamRegions` of an edge is unchanged by the shifts at its two ends; `IsTwoSmallest y i₀ i₁` and its shift is `0`. On `[φ, −φ]`: `m = 0`. | `exists_isTwoSmallest`, `projected_two_smallest`, `projected_rest`, `projected_neg_iff`, `projected_sub`, `isRegion_projected`, `crossingParamRegions_projected`, `projected_isTwoSmallest`, `projectionShift_projected`, `projectionShift_two` |
@@ -285,6 +287,30 @@ unless a definition of this package is named. All theorems are in `namespace Ddg
 Cited for the cut flow (`CITED.md`): `cut-yamabe-equation`, `cut-shape-derivative`,
 `cut-cea-method`, `cut-level-set-evolution`, `cut-ripple-linearization`,
 `cut-network-first-variation`, `cut-weighted-fem-stiffness`, `cut-fast-marching-convergence`.
+
+**The stop rule of a run** (SPEC §4 "Stopping", D27) has no formula id in SPEC and no tag in
+the Rust code (`energy_stop`, `run_outcome`), so its theorems (`DdgProofs/Cuts/Stop.lean`) carry
+none; the definitions are this package's own, written after the Rust functions. With
+`t = ε\|E_k\|`, `Eb = E_{k−W}`:
+
+- for `ε ≥ 0` exactly one of `Eb − E_k > t`, `\|Eb − E_k\| ≤ t`, `E_k − Eb > t` holds
+  (`energy_cases`); they are exhaustive for every `ε`, and for `ε < 0` the first and the third
+  can hold together (`energy_cases_exhaustive`, `energy_cases_overlap_of_neg`);
+- `energyVerdict ε Eb E_k` (the chain of comparisons of `energy_stop`) is `goesOn` iff
+  `Eb − E_k > t`, `stalled` iff `\|Eb − E_k\| ≤ t`, and for `ε ≥ 0` `rose` iff `E_k − Eb > t`; it
+  is not `goesOn` iff `Eb − E_k ≤ t`, the stop condition before D27 (`energyVerdict_goesOn_iff`,
+  `energyVerdict_stalled_iff`, `energyVerdict_rose_iff`, `energyVerdict_stops_iff`,
+  `energyVerdict_zero_stops_iff`);
+- `lowestState E n` (replace the state held only by one of strictly lower energy) returns
+  `(E_j, j)` with `j ≤ n`, `E_j ≤ E_i` for all `i ≤ n` and `E_j < E_i` for all `i < j`, and `j`
+  is the only such state (`lowestState_spec`, `lowestState_unique`);
+- `runOutcome` (`run_outcome`): without a vanished cut, after `n + 1` steps, the lowest energy
+  and its state are `lowestState E (n + 1)`, and the state returned is that one for
+  `EnergyRose` and `n + 1` otherwise; with no step it is the start state; with a vanished cut
+  the last state does not count and the run stays in it (`runOutcome_eq_lowestState`,
+  `runOutcome_rose`, `runOutcome_not_rose`, `runOutcome_no_steps`, `runOutcome_vanished`);
+- after `EnergyRose` (`ε ≥ 0`, `k ≤ n`) the lowest energy of the run is `< E_k`
+  (`lowestState_lt_of_rose`).
 
 ## Theorems
 
@@ -514,7 +540,9 @@ Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
   `lengthWeightForRipples`, `adaptiveStep`, `crossingParamRegions`, `triplePointCoord`,
   `tripleRate`, `projectionShift`, `projectedValue`; and of the revision "robust step
   statistics": `insertAscending`, `sortAscending`, `sumLeft`, `firstReaching`,
-  `weightedQuantile`, `speedInEdges`, `robustStep`, `localSpeed`, `localLimitFactor`.
+  `weightedQuantile`, `speedInEdges`, `robustStep`, `localSpeed`, `localLimitFactor`; and of
+  the revision "D26": `vertexChange`, `vertexSpeedCapped`, `vertexSpeedAdaptive`,
+  `vertexLimitFactor`, `limitedValue`.
 
 Own definitions of this package for the default stages and `N` regions (what SPEC states in
 words or as a sum over an index set, for which the oracle has only the scalar pieces):
@@ -528,7 +556,9 @@ words or as a sum over an index set, for which the oracle has only the scalar pi
 `weightedQuantile` satisfies it, `oracle_weightedQuantile_spec`), `quantileScan`,
 `Cuts.weightedQuantile` (equal to the oracle's, `oracle_weightedQuantile_eq`) and `localFactor`
 (the Rust form of the factor; equal to the oracle's `localLimitFactor` for
-`max_motion · h_c ≥ 0`, `localLimitFactor_eq`).
+`max_motion · h_c ≥ 0`, `localLimitFactor_eq`); for the stop rule `EnergyVerdict`,
+`energyVerdict`, `lowestState`, `runOutcome` (no oracle counterpart: the oracle replays single
+steps).
 
 For the cut flow the matrices are not oracle definitions (the executable assembles them from the
 entries above and solves densely), so the linear-algebra theorems are about matrices of this
@@ -619,6 +649,8 @@ differential tests against the oracle.
 | cut flow: `ℓ_c ≥ 0`, `Σℓ > 0`, `0 < q ≤ 1` (`oracle_weightedQuantile_*`, `roughening_quantile_*`) | `ℓ_c` is a sum of halves or wholes of segment lengths of the cut (`≥ 0`; positive sum for a cut of positive length), by reading `flow.rs`; `q = ROUGHENING_QUANTILE = 0.9`; a cut without points gives 0 (`oracle_weightedQuantile_nil`) |
 | cut flow: `τ_max, time_scale, max_motion ≥ 0` (`robustStep_*`, `localLimit_*`) | `FlowOptions::validate`: positive and finite (`CutError::InvalidOptions`) |
 | cut flow: `h_c > 0`, `max_motion·h_c > 0`, `\|r_c\| ≤ v_c` (`localLimit_*`) | `h_c` is the length of a crossed edge of a valid geometry (`local_edges`); `v_c` is `\|r_c\|` or `max(\|r_c\|, ½·max(excess, 0))` in `StepSize::local_factor` (`abs_le_localSpeed` for the oracle's `localSpeed`); by reading |
+| cut flow: `τ > 0`, `max_motion·h_i > 0` (`vertexLimit_*`) | `Fixed(τ)` is validated positive, and nothing is limited with it; the rule's `τ` is positive for positive parameters (`robustStep_pos`); `h_i` is the length of an edge of a valid geometry (`vertex_limits`), by reading |
+| cut flow: `ε ≥ 0` (`energy_cases`, `energyVerdict_rose_iff`) | `energy_stop` evaluates the criterion only for `energy_tolerance > 0` and more than `energy_window` steps |
 | cut flow: `φ_t = −σ` and `dE = Σ g σ ℓ` (`firstVariation_levelSet`) | the smooth theory (`cut-level-set-evolution`, `cut-cea-method`, cited); checked on closed forms (`hasDerivAt_twoCaps`, `circle_levelSet_flow`) and by the finite-difference test of SPEC §6.3 |
 
 ## Discrepancies with the papers as printed
@@ -682,7 +714,7 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     regions and large in highly curved regions"; the printed formula is the opposite. See
     `feature-size-weights` in `CITED.md`.
 
-15. **Cuts paper: the list of differences is SPEC §9 (D1–D24).** The ones a theorem here bears
+15. **Cuts paper: the list of differences is SPEC §9 (D1–D27).** The ones a theorem here bears
     on: D1 (sign of the face curvature: `Σ_f Ω_f = +2πχ` on a closed mesh,
     `sum_faceCurvature_closed`); D2 (sign of the speed: `firstVariation_levelSet` against
     `firstVariation_ascent`, and `hasDerivAt_twoCaps` on a closed-form example); D4 (`W_V` on the
@@ -699,7 +731,8 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     the robust step and the local limit: `DdgProofs/Cuts/Quantile.lean`); D23a
     (`gradientNormLone_zero`), D23c (`lengthWeightForRipples_nonpos`, `adaptiveStep_skip_omega`,
     `rippleRate_neg_of_neg`); D24a, D24e (`localLimit_cases_agree`,
-    `localLimit_first_case_of_zero`).
+    `localLimit_first_case_of_zero`); D25 (items 27–31 below, taken into SPEC); D26
+    (`DdgProofs/Cuts/VertexLimit.lean`); D27 (`DdgProofs/Cuts/Stop.lean`).
 16. **SPEC §3.1, a hypothesis that is not stated.** `Σ_f Ω_f = Σ_{i ∉ B_M} (2π − Θ_i)` needs
     every vertex outside `B_M` to lie in a face (`Θ_i ≠ 0`). A vertex in no face adds `2π` on the
     right and nothing on the left; with such vertices the closed-mesh value `2πχ` (they count in
@@ -752,7 +785,7 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     was not a weighted mean. It now divides by the sum of the weights of the zipped pairs
     (`weightedMean_eq`) and is a weighted mean of the zipped values for any two lists
     (`weightedMean_mem`).
-27. **Oracle, `sortAscending` and the order of equal values.** The docstrings say "after all
+27. **Oracle, `sortAscending` and the order of equal values** (SPEC D25e: left as it is). The docstrings say "after all
     entries with an equal key (so that equal values stay in their original order)" and "stable
     ascending sort", and SPEC §1 says "equal values in the order of the cut points". The
     function inserts the *first* element last (`sortAscending (e :: es) = insertAscending e
@@ -763,7 +796,7 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     in floating point the running sums of a group of equal values are accumulated in another
     order than in the Rust code (a stable sort), which can only matter when the threshold
     `q·Σℓ` falls within rounding of the sum at the end of such a group.
-28. **SPEC §1, "`q = 1` returns the largest value".** This needs positive weights
+28. **SPEC §1, "`q = 1` returns the largest value"** (SPEC D25b). This needs positive weights
     (`oracle_weightedQuantile_one`): a largest value of weight zero is not returned, because the
     sum reaches `Σℓ` before it (the oracle's docstring says so). The same happens in floating
     point when the weight of the largest values is absorbed by the running sum: the oracle's
@@ -771,34 +804,62 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     So "accumulated in the ascending order, so that `q = 1` returns the largest value in
     floating point too" holds when no trailing weight is lost in the sum, which is the case for
     lengths of comparable size.
-29. **SPEC §4, the factor of the local limit.** "The factor lies in `(0, 1]`" needs
+29. **SPEC §4, the factor of the local limit** (SPEC D25c). "The factor lies in `(0, 1]`" needs
     `max_motion · h_c > 0` (`localLimitFactor_mem_Ioc`). `min(1, max_motion · h_c/(τ v_c))` is
     not defined at `τ v_c = 0`; the oracle and the Rust code return `1` there, and since D24 the
     first case of the rule (`v_c/h_c ≤ m̂`) covers it, because `m̂ ≥ 0`
     (`localLimit_first_case_of_zero`). "The two cases agree" (§10) needs `τ ≥ 0` and `h_c > 0`
     in addition to the two inequalities it names (`localLimit_cases_agree`).
 30. **SPEC §4, "ripples longer than `ℓ` grow and shorter ones decay on nine tenths of the
-    cut".** Exactly: the shorter ones decay where `ω_c ≤ ω`, at least nine tenths of the length
+    cut"** (SPEC D25d). Exactly: the shorter ones decay where `ω_c ≤ ω`, at least nine tenths of the length
     (`rippleRate_neg_of_le`, `roughening_quantile_spec`); the longer ones grow where `ω_c ≥ ω`,
     which is more than one tenth of the length (`rippleRate_pos_of_ge`,
     `roughening_quantile_above`) and nine tenths only where the local rates are equal; where
     `ω_c < ω`, ripples with wavelengths between `ℓ` and `ℓ·ω/ω_c` decay as well
     (`rippleRate_neg_of_lt_longer`). §1 states it exactly ("on nine tenths of the cut, ripples
     shorter than `2πw/ω` decay").
-31. **SPEC §4, "the limited rate is still a descent direction".** Proved when the rate is the
-    gradient density itself, limited point by point by factors `≥ 0`
-    (`firstVariation_localLimit`): the length step on the mesh, where the rate on the cut is
-    `s`, or no coupling. With the default stages the limit acts on the rate `r` of the system
-    on the cut. Unlimited, that rate is a descent direction for `g = s + λ⁰`
-    (`onCut_rate_descent`: `dE = −rᵀ(diag ℓ + τK)r`); limited point by point it need not be:
-    in `limited_rate_not_descent_example` (two cut points, all quantities as the capped rule
-    with the robust statistics produces them) `dE = −530/11` without the limit and `+28/11`
-    with it. The coupling makes one point move against its own gradient density, and the limit
-    removes most of the neighbour's share that paid for it. "Rest states are unchanged" holds
-    (`localLimit_sign`: `r f = 0 ⟺ r = 0`).
+31. **SPEC §4, the limited rate as a descent direction** (SPEC D25a; §4 now words it as below).
+    A gradient density scaled point by point by factors `≥ 0` is a descent direction
+    (`firstVariation_localLimit`). In the flow this is the limit at the cut points when the
+    rate on the cut is the gradient density itself, which with the length step on the cut means
+    no coupling along the cut: `w ≡ 0`, `r = s` (`onCut_limited_descent_of_no_coupling`). With
+    coupling the unlimited rate is a descent direction for `g = s + λ⁰` (`onCut_rate_descent`:
+    `dE = −rᵀ(diag ℓ + τK)r`), the limited one need not be: in
+    `limited_rate_not_descent_example` (two cut points, all quantities as the capped rule with
+    the robust statistics produces them) `dE = −530/11` without the limit and `+28/11` with it.
+    The coupling makes one point move against its own gradient density, and the limit removes
+    most of the neighbour's share that paid for it. "Rest states are unchanged" holds
+    (`localLimit_sign`: `r f = 0 ⟺ r = 0`). Until D26 this theorem was also read as covering
+    the length step on the mesh (where the rate on the cut is `s`); since D26 the rate is not
+    limited there, the limit acts at the vertices on the whole step, and no descent statement
+    is made or proved for that form.
 32. **Oracle, tags.** `robustStep` and `speedInEdges` carry `[formula: cut-step-local]`; SPEC §4
     puts the step rule and `m_c` under `cut-step-cap`. The theorems about `robustStep` are
     tagged `cut-step-cap` here.
+33. **SPEC §4, the limit at the vertices (D26): hypotheses, and the formula in floating point.**
+    "No value changes by more than `max_motion · h_i`" needs `τ > 0` (the speed is `|Δ_i|/τ`)
+    and `max_motion · h_i ≥ 0`; "the direction is kept" needs `max_motion · h_i > 0`
+    (`vertexLimit_change_le`, `vertexLimit_sign`). Both hold for every accepted option
+    (`robustStep_pos`). For the capped rule `τ` cancels: the rule is the clamp of `Δ_i` to
+    `±max_motion · h_i` (`vertexLimit_capped_clamp`). In exact arithmetic a vertex with the
+    factor `1` keeps `φ′` (`limitedValue_one`); evaluated literally in floating point,
+    `φ + 1·(φ′ − φ)` differs from `φ′` in the last bits for most values (doubles:
+    `0.9 + (0.001 − 0.9) = 0.0010000000000000009`). The oracle evaluates the formula at every
+    vertex, the Rust code only where the factor is below `1`.
+34. **SPEC §4, §8.4, `N` regions: what the limit bounds.** Half the difference of the two
+    functions that are smallest at the vertex changes by at most `max_motion · h_i`
+    (`vertexLimit_regions_change_le`), as §10 says. The change of each single function, and of
+    its difference to a third function, is multiplied by the factor
+    (`limitedValue_sub_limitedValue`, `abs_limitedValue_sub_le`) but is not bounded by
+    `max_motion · h_i`; "no value changes by more than `max_motion · h_i`" (§4) is the
+    two-region statement.
+35. **SPEC §4, the stop rule (D27).** The three cases are exclusive only for `ε ≥ 0`
+    (`energy_cases`, `energy_cases_overlap_of_neg`). SPEC does not say what `ε = 0` means: read
+    literally the table stops every run whose energy has not strictly fallen over the window
+    (`energyVerdict_zero_stops_iff`), while the Rust code does not evaluate the criterion for
+    `ε ≤ 0`. "A caller that takes fewer than `W` steps per run is never set back" also holds
+    for exactly `W` steps (the criterion needs `E_{k−W}` with `k` the number of steps minus
+    one). The rule has no formula id.
 
 ## Caveats on faithfulness
 
@@ -870,6 +931,15 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
   rule as empirical (D20). `IsRegion`, `IsTwoSmallest` and `regionRate` are this package's
   formulations of rules that SPEC states in words. Nothing is proved about the marching per
   function of the redistancing, the numbering of nodes, or the curves between junctions.
+- **Cut flow, the limit at the vertices and the stop rule (D26, D27).** The limit is covered as
+  a function of `φ(i)`, `φ′(i)`, `h_i`, `ω_i`, `τ`; how `h_i` and `ω_i` are collected
+  (`vertex_limits`), which vertices are cut-adjacent and counted, which function is `b`, and the
+  order of the stages are not modelled. That the paper's stages keep the form `[φ, −φ]` is
+  proved stage by stage (`explicitStep_neg`, `lengthStep_neg`, `vertexLimit_two_regions`,
+  `classMean_neg`), not for the composed step. Nothing is proved about the energy after a
+  limited step. The stop rule is two functions of this package written after `energy_stop` and
+  `run_outcome`; that the run loop feeds them the energies of the states in order, and holds
+  the earliest lowest state, is by reading. NaN energies are outside the statements.
 - **Cut flow, step statistics (D22–D24).** The quantile, the step rule and the factor of the
   local limit are covered as functions of their arguments. Not modelled: which crossed edges
   `h_c` ranges over (`local_edges`) and how `ℓ_c` is assembled; which speeds enter the two `m̂`

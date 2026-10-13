@@ -1213,6 +1213,17 @@ theorem robustStep_mul_mhat_le {τmax ts mm : ℝ} (hτ : 0 ≤ τmax) (hts : 0 
   · exact (robustStep_spec τmax ts ω mm mhat).2.2.1 hpos
   · exact (mul_nonpos_of_nonneg_of_nonpos hτ0 (not_lt.mp hpos)).trans hmm
 
+/-- For positive `τ_max, time_scale, max_motion` the robust step is positive (every term that is
+not skipped is positive): the hypothesis `τ > 0` of the limit at the vertices. -/
+theorem robustStep_pos {τmax ts mm : ℝ} (hτ : 0 < τmax) (hts : 0 < ts) (hmm : 0 < mm)
+    (ω mhat : ℝ) : 0 < Ddg.robustStep τmax ts ω mm mhat := by
+  rw [robustStep_eq_adaptiveStep, adaptiveStep_eq, mul_one]
+  split_ifs with h1 h2 h2
+  · exact lt_min (lt_min hτ (div_pos hts h2)) (div_pos hmm h1)
+  · exact lt_min hτ (div_pos hmm h1)
+  · exact lt_min hτ (div_pos hts h2)
+  · exact hτ
+
 /-- **The two cases of the local limit agree**: if `τ m̂ ≤ max_motion` and `v_c/h_c ≤ m̂`
 (`τ ≥ 0`, `h_c > 0`) then `τ v_c ≤ max_motion · h_c`, so the factor of the second case is `1`
 there as well.
