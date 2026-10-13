@@ -113,7 +113,7 @@ the ignored tests, see the end).
 perturbation `φ + εψ` the cut point `c` sweeps the area `dA_c` into region 0, and SPEC §1 predicts
 `dE = Σ_c (G_0 − G_1)_c dA_c`. The central difference of the discrete energy agrees with it in
 sign and size for every energy, for each region alone, and with `w_r`, `β_r`. Largest difference
-relative to `Σ_c |s_c dA_c|` over 9 problems and 2 directions `ψ`, default options | paper options:
+relative to `Σ_c |s_c dA_c|` over 10 problems and 2 directions `ψ`, default options | paper options:
 
 | sphere, non-symmetric cut | 162 | 642 | 2562 | 10242 | 40962 vertices |
 |---|---|---|---|---|---|

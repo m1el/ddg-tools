@@ -13,7 +13,8 @@ mod common;
 
 use common::{Gradient, Shape, bumpy, check_gradient, shift_away_from_vertices, sphere};
 use ddg_variational_cuts::{
-    CutProblem, Energy, EvalOptions, PAPER_FEATURE_SMOOTHING, RegionWeights, ScaleWeight,
+    CutProblem, Energy, EvalOptions, PAPER_FEATURE_SMOOTHING, PointwiseEnergy, RegionWeights,
+    ScaleWeight,
 };
 
 /// A wobbly, non-symmetric closed curve around the north pole of the unit sphere.
@@ -110,8 +111,23 @@ fn problems(shape: &Shape) -> Vec<(&'static str, CutProblem)> {
         (
             "scaled Dirichlet, a(x), w, beta",
             CutProblem {
-                regions: weighted,
+                regions: weighted.clone(),
                 ..CutProblem::new(scaled, 0.0)
+            },
+        ),
+        (
+            // b(0) and b'(0) are not zero: the constant term of G and the boundary term of the
+            // adjoint flux q are exercised.
+            "pointwise b = 0.5 + 0.3u + u^2 + u^4, w, beta",
+            CutProblem {
+                regions: weighted,
+                ..CutProblem::new(
+                    Energy::Pointwise(PointwiseEnergy::new(
+                        |u| 0.5 + 0.3 * u + u * u + u.powi(4),
+                        |u| 0.3 + 2.0 * u + 4.0 * u.powi(3),
+                    )),
+                    0.0,
+                )
             },
         ),
     ]
