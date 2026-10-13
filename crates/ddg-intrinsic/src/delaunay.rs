@@ -148,7 +148,19 @@ impl EdgeQueue {
         }
     }
 
+    /// An empty queue for a triangulation with `n_edges` edges.
+    pub(crate) fn empty(n_edges: usize) -> EdgeQueue {
+        EdgeQueue {
+            queue: VecDeque::new(),
+            queued: vec![false; n_edges],
+        }
+    }
+
+    /// Puts an edge on the queue unless it is on it; the queue grows with the triangulation.
     pub(crate) fn push(&mut self, e: u32) {
+        if e as usize >= self.queued.len() {
+            self.queued.resize(e as usize + 1, false);
+        }
         let slot = &mut self.queued[e as usize];
         if !*slot {
             *slot = true;
@@ -227,12 +239,14 @@ impl IntrinsicTriangulation {
         (0..self.n_edges()).all(|e| !self.fails_delaunay(e, criterion))
     }
 
-    /// Flips edges from the queue until it is empty or `budget` flips were made.
+    /// Flips edges from the queue until it is empty or `budget` flips were made. The two
+    /// faces of every flipped edge are appended to `touched`, if given.
     pub(crate) fn run_flip_queue(
         &mut self,
         queue: &mut EdgeQueue,
         criterion: &DelaunayCriterion,
         budget: usize,
+        mut touched: Option<&mut Vec<u32>>,
     ) -> QueueRun {
         let mut run = QueueRun::default();
         while let Some(e) = queue.pop() {
@@ -254,6 +268,9 @@ impl IntrinsicTriangulation {
             let t = self.twin[h] as usize;
             for g in [self.next(h), self.prev(h), self.next(t), self.prev(t)] {
                 queue.push(self.halfedge_edge[g]);
+            }
+            if let Some(touched) = touched.as_deref_mut() {
+                touched.extend([(h / 3) as u32, (t / 3) as u32]);
             }
         }
         run
@@ -291,7 +308,7 @@ impl IntrinsicTriangulation {
             FlipLimit::Unlimited => usize::MAX,
         };
         let mut queue = EdgeQueue::all(self.n_edges());
-        let run = self.run_flip_queue(&mut queue, &options.criterion, budget);
+        let run = self.run_flip_queue(&mut queue, &options.criterion, budget, None);
 
         let mut n_not_delaunay = 0;
         let mut n_ties = 0;

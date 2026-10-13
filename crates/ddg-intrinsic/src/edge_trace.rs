@@ -190,7 +190,7 @@ impl IntrinsicTriangulation {
         let outcome = run(
             &*self.input,
             self.locations[a],
-            self.signposts[h],
+            self.direction_on_input(a, self.signposts[h]),
             length,
             &trace_options,
             Some(target),

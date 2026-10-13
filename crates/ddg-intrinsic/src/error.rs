@@ -41,6 +41,49 @@ pub enum IntrinsicError {
         /// Why.
         reason: FlipRefusal,
     },
+    /// A vertex insertion or an edge split was refused.
+    InsertionRefused {
+        /// Where the vertex was to be inserted, as a point of the triangulation.
+        at: SurfacePoint,
+        /// Why.
+        reason: InsertRefusal,
+    },
+    /// A straight segment inside a face of the triangulation could not be followed over the
+    /// input mesh to its end.
+    SegmentTrace {
+        /// The face of the triangulation.
+        face: u32,
+        /// The length of the segment.
+        length: f64,
+        /// The largest mismatch that would have been accepted (an absolute length).
+        tolerance: f64,
+        /// How close the path came to the place of the segment's end on the input mesh, if
+        /// that place lay in a face the path went through.
+        mismatch: Option<f64>,
+    },
+    /// The triangulation could not be turned into a simplicial complex by splitting edges.
+    ExportFailed {
+        /// Number of edges split before giving up.
+        n_splits: usize,
+        /// What is still in the way.
+        reason: String,
+    },
+    /// A state (values on the vertices of an exported mesh) does not belong to this export.
+    StaleState {
+        /// The fingerprint of the export.
+        expected: u64,
+        /// The fingerprint the state was made for.
+        got: u64,
+    },
+    /// The traces of the triangulation's edges do not fit together to a subdivision: the
+    /// crossings on the sides of a face cannot be paired. Reported instead of building a wrong
+    /// overlay.
+    InconsistentOverlay {
+        /// The face of the triangulation.
+        face: u32,
+        /// What does not fit.
+        reason: String,
+    },
     /// A point passed to a query is not a point of the surface it refers to.
     InvalidPoint {
         /// The point.
@@ -108,6 +151,61 @@ pub enum IntrinsicError {
         /// What is wrong and where.
         what: String,
     },
+}
+
+/// Why a vertex cannot be inserted at a point.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InsertRefusal {
+    /// A triangle the insertion would create is too thin to be described by its edge lengths
+    /// (its shape number is below [`FLIP_SHAPE_LIMIT`](crate::formulas::FLIP_SHAPE_LIMIT)):
+    /// the point is too close to an edge of its face, or to an end of the edge being split.
+    TooThin {
+        /// The smallest shape number of the triangles the insertion would create.
+        shape: f64,
+        /// For a point in a face: the edge of the face it is closest to, in relative terms
+        /// (the side opposite its smallest barycentric coordinate).
+        nearest_edge: Option<u32>,
+    },
+    /// Both sides of the edge to be split are the same triangle (one of its end points has
+    /// degree one). Splitting it would need another construction than joining the new vertex
+    /// to the opposite corners; no operation of this crate needs it.
+    SameFaceOnBothSides,
+    /// The place of the new vertex on the input mesh could not be found: the tracing query
+    /// did not end where the vertex is.
+    NotLocated {
+        /// What the tracing query said.
+        detail: String,
+    },
+}
+
+impl fmt::Display for InsertRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InsertRefusal::TooThin {
+                shape,
+                nearest_edge,
+            } => {
+                write!(
+                    f,
+                    "it would create a triangle too thin to be described by its edge lengths \
+                     (shape number {shape:?}, the limit is {:?})",
+                    crate::formulas::FLIP_SHAPE_LIMIT
+                )?;
+                if let Some(e) = nearest_edge {
+                    write!(f, "; the point is next to edge {e}")?;
+                }
+                Ok(())
+            }
+            InsertRefusal::SameFaceOnBothSides => write!(
+                f,
+                "both sides of the edge are the same triangle (an end point has degree one)"
+            ),
+            InsertRefusal::NotLocated { detail } => write!(
+                f,
+                "its place on the input mesh could not be found: {detail}"
+            ),
+        }
+    }
 }
 
 /// Why an edge cannot be flipped (paper Sec. 3.3.1).
@@ -296,6 +394,45 @@ impl fmt::Display for IntrinsicError {
                 vertices: [a, b],
                 reason,
             } => write!(f, "edge {edge} = ({a}, {b}) cannot be flipped: {reason}"),
+            IntrinsicError::InsertionRefused { at, reason } => {
+                write!(f, "no vertex can be inserted at {at}: {reason}")
+            }
+            IntrinsicError::SegmentTrace {
+                face,
+                length,
+                tolerance,
+                mismatch,
+            } => {
+                write!(
+                    f,
+                    "the segment of length {length:?} in face {face} of the triangulation could \
+                     not be followed over the input mesh to its end: "
+                )?;
+                match mismatch {
+                    Some(d) => write!(
+                        f,
+                        "the closest the path came is {d:?}, the tolerance is {tolerance:?}"
+                    ),
+                    None => write!(
+                        f,
+                        "the place of its end is in none of the input faces the path went through"
+                    ),
+                }
+            }
+            IntrinsicError::ExportFailed { n_splits, reason } => write!(
+                f,
+                "the triangulation is not a simplicial complex after {n_splits} edge splits: \
+                 {reason}"
+            ),
+            IntrinsicError::StaleState { expected, got } => write!(
+                f,
+                "the state was made for the export {got:016x}, this is the export {expected:016x}"
+            ),
+            IntrinsicError::InconsistentOverlay { face, reason } => write!(
+                f,
+                "the traces around face {face} of the triangulation do not form a subdivision: \
+                 {reason}"
+            ),
             IntrinsicError::InvalidPoint { point, reason } => {
                 write!(f, "{point} is not a valid point: {reason}")
             }

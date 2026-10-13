@@ -93,21 +93,35 @@
 pub mod delaunay;
 pub mod edge_trace;
 mod error;
+pub mod export;
 mod flip;
 pub mod formulas;
 mod input;
+pub mod insert;
 mod operators;
+pub mod overlay;
 mod point;
+pub mod query;
+pub mod refine;
 mod surface;
 pub mod trace;
 pub mod triangulation;
 
 pub use delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport, DelaunayStatus, FlipLimit};
 pub use edge_trace::{EdgeTrace, EdgeTraceOptions, EdgeTraceReport, EdgeTraces};
-pub use error::{EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, IntrinsicError};
+pub use error::{
+    EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, InsertRefusal, IntrinsicError,
+};
+pub use export::{ExportOptions, SimplicialExport};
 pub use flip::Flip;
 pub use input::InputSurface;
+pub use insert::Insertion;
 pub use operators::Quality;
+pub use overlay::{Overlay, OverlayVertex};
 pub use point::SurfacePoint;
+pub use query::{PathOnInput, PathsOnInput, Segment};
+pub use refine::{
+    BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineStatus,
+};
 pub use trace::{Crossing, Trace, TraceOptions, TraceStop};
 pub use triangulation::{ConsistencyReport, IntrinsicTriangulation, Irregularities};

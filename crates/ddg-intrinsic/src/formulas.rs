@@ -211,6 +211,53 @@ pub fn barycentric(q: &[[f64; 2]; 3], p: [f64; 2]) -> [f64; 3] {
     [w[0] / sum, w[1] / sum, w[2] / sum]
 }
 
+/// A triangle with halfedge lengths `l` placed in the plane in the frame of a face: corner 0
+/// at the origin, corner 1 at `(l[0], 0)`, corner 2 above the x-axis ([`unfold_apex`]).
+/// `l[k]` is the length of the side from corner `k` to corner `k + 1`.
+pub fn triangle_layout(l: [f64; 3]) -> Option<[[f64; 2]; 3]> {
+    let v1 = [l[0], 0.0];
+    let v2 = unfold_apex([0.0, 0.0], v1, l[0], l[1], l[2])?;
+    Some([[0.0, 0.0], v1, v2])
+}
+
+/// The distances from the point with barycentric coordinates `bary` of a triangle to its three
+/// corners (paper Alg. 6), evaluated in the plane: with the corners `v_k` of
+/// [`triangle_layout`] and `p = Σ bary_k v_k`, `d_k = |p − v_k|`. They are the lengths of the
+/// edges that a vertex inserted at the point gets (Alg. 7), and with a point on a side the
+/// lengths an edge split creates (Alg. 8). The paper's closed form
+/// `d² = −(ℓ₁₂² u₁u₂ + ℓ₂₃² u₂u₃ + ℓ₃₁² u₃u₁)` (`u` the difference of the barycentric
+/// coordinates) is the same number; it is not used because its three terms cancel in a thin
+/// triangle, where the coordinates in the plane add in quadrature.
+///
+/// [formula: it-point-distances]
+pub fn corner_distances(l: [f64; 3], bary: [f64; 3]) -> Option<[f64; 3]> {
+    let v = triangle_layout(l)?;
+    let p = [
+        bary[1] * v[1][0] + bary[2] * v[2][0],
+        bary[1] * v[1][1] + bary[2] * v[2][1],
+    ];
+    Some([0, 1, 2].map(|k| (p[0] - v[k][0]).hypot(p[1] - v[k][1])))
+}
+
+/// The circumcentre of a triangle in barycentric coordinates: with `a_k` the side opposite
+/// corner `k`, the weight of corner `k` is `a_k² (a_{k+1}² + a_{k+2}² − a_k²)`, divided by the
+/// sum of the three (which is `16 A²`). A coordinate is negative when the angle at that corner
+/// is obtuse: the circumcentre then lies beyond the opposite side. `l[k]` is the length of the
+/// side from corner `k` to corner `k + 1`, so `a_k = l[(k + 1) % 3]`.
+///
+/// [formula: it-circumcenter]
+pub fn circumcenter_barycentric(l: [f64; 3]) -> Option<[f64; 3]> {
+    triangle_area(l[0], l[1], l[2])?;
+    let weight = |k: usize| {
+        let (a, b, c) = (l[(k + 1) % 3], l[(k + 2) % 3], l[k]);
+        let (hi, lo) = if b >= c { (b, c) } else { (c, b) };
+        a * a * (lo * lo + (hi - a) * (hi + a))
+    };
+    let w = [weight(0), weight(1), weight(2)];
+    let sum = w[0] + w[1] + w[2];
+    (sum > 0.0 && sum.is_finite()).then(|| [w[0] / sum, w[1] / sum, w[2] / sum])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +305,28 @@ mod tests {
         let b = barycentric(&[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], [0.25, 0.5]);
         assert!((b[0] - 0.25).abs() < 1e-16 && (b[1] - 0.25).abs() < 1e-16);
         assert!((b[2] - 0.5).abs() < 1e-16);
+    }
+
+    #[test]
+    fn distances_and_circumcentre_of_a_right_triangle() {
+        // Corners (0,0), (4,0), (0,3): sides 4, 5, 3; the circumcentre is the midpoint of the
+        // hypotenuse, from corner 1 to corner 2.
+        let l = [4.0, 5.0, 3.0];
+        let c = circumcenter_barycentric(l).unwrap();
+        assert!(c[0].abs() < 1e-16 && (c[1] - 0.5).abs() < 1e-16 && (c[2] - 0.5).abs() < 1e-16);
+        let d = corner_distances(l, c).unwrap();
+        for x in d {
+            assert!((x - 2.5).abs() < 1e-15);
+        }
+        // An obtuse triangle: the coordinate of the obtuse corner is negative.
+        let obtuse = circumcenter_barycentric([1.0, 1.0, 1.9]).unwrap();
+        assert!(obtuse[1] < 0.0 && obtuse[0] > 0.0 && obtuse[2] > 0.0);
+        let r = corner_distances([1.0, 1.0, 1.9], obtuse).unwrap();
+        assert!((r[0] - r[1]).abs() < 1e-14 && (r[1] - r[2]).abs() < 1e-14);
+        // The point at a third of side 0 is 1/3 and 2/3 of it from its ends.
+        let on_side = corner_distances(l, [2.0 / 3.0, 1.0 / 3.0, 0.0]).unwrap();
+        assert!((on_side[0] - 4.0 / 3.0).abs() < 1e-15 && (on_side[1] - 8.0 / 3.0).abs() < 1e-15);
+        assert!((on_side[2] - (16.0f64 / 9.0 + 9.0).sqrt()).abs() < 1e-15);
     }
 
     #[test]
