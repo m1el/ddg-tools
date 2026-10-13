@@ -1,5 +1,6 @@
-//! Reads OBJ files, flips each to its intrinsic Delaunay triangulation, traces the intrinsic
-//! edges over the input mesh, and prints mesh quality before and after with timings.
+//! Reads OBJ files and, for each, flips to the intrinsic Delaunay triangulation, traces the
+//! intrinsic edges over the input mesh, refines to an angle bound, builds the overlay and the
+//! simplicial export, and prints mesh quality before and after with timings.
 //!
 //! ```text
 //! cargo run --release -p ddg-intrinsic --example delaunay_report -- [options] a.obj b.obj ...
@@ -8,18 +9,23 @@
 //!   --trace-tol X      tolerance of the edge traces, relative to the edge length (default 1e-6)
 //!   --repeat N         repeat each timing N times and print the fastest (default 3)
 //!   --failures N       print the first N failed edge traces of each mesh (default 3)
+//!   --refine DEG       refine to this angle bound in degrees (may be given several times;
+//!                      default 25 and 30; `--refine 0` alone: no refinement)
 //! ```
 //!
 //! Polygons are split into a fan. For every mesh one block is printed: the flip report, a
-//! quality table (before / after) and the edge-trace report.
+//! quality table (before / after flipping / after each refinement), the edge-trace report,
+//! and for each angle bound the refinement report, the overlay and the export. Lines that
+//! start with `row |` and `refine |` are for tables. Timings are single-thread: run one
+//! process at a time when they matter.
 
 use std::time::Instant;
 
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
 use ddg_intrinsic::{
-    DelaunayCriterion, DelaunayOptions, EdgeTraceOptions, IntrinsicError, IntrinsicTriangulation,
-    Quality,
+    BelowReason, DelaunayCriterion, DelaunayOptions, EdgeTraceOptions, ExportOptions,
+    IntrinsicError, IntrinsicTriangulation, Quality, RefineOptions,
 };
 
 struct Config {
@@ -27,6 +33,7 @@ struct Config {
     trace_tolerance: f64,
     repeat: usize,
     failures: usize,
+    refine: Vec<f64>,
     paths: Vec<String>,
 }
 
@@ -36,6 +43,7 @@ fn parse_args() -> Result<Config, String> {
         trace_tolerance: EdgeTraceOptions::default().tolerance,
         repeat: 3,
         failures: 3,
+        refine: Vec::new(),
         paths: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
@@ -55,6 +63,7 @@ fn parse_args() -> Result<Config, String> {
             "--trace-tol" => config.trace_tolerance = value("--trace-tol")?,
             "--repeat" => config.repeat = (value("--repeat")? as usize).max(1),
             "--failures" => config.failures = value("--failures")? as usize,
+            "--refine" => config.refine.push(value("--refine")?),
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             _ => config.paths.push(arg),
         }
@@ -62,6 +71,10 @@ fn parse_args() -> Result<Config, String> {
     if config.paths.is_empty() {
         return Err("no OBJ files given".to_string());
     }
+    if config.refine.is_empty() {
+        config.refine = vec![25.0, 30.0];
+    }
+    config.refine.retain(|&degrees| degrees > 0.0);
     Ok(config)
 }
 
@@ -261,6 +274,9 @@ fn report(path: &str, config: &Config) -> Result<(), String> {
         1e3 * t_pure,
         1e-6 * n_pure as f64 / t_pure,
     );
+    for &degrees in &config.refine {
+        refine_report(name, &mesh, &geometry, degrees, config)?;
+    }
     // One line for tables: name V F flips min-angle before/after, max angle before/after,
     // % negative weights before/after, traced, failed, times.
     println!(
@@ -285,12 +301,143 @@ fn report(path: &str, config: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// Refinement to `degrees`, then the traces, the overlay and the export of the result.
+fn refine_report(
+    name: &str,
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    degrees: f64,
+    config: &Config,
+) -> Result<(), String> {
+    let text = |e: IntrinsicError| e.to_string();
+    let options = RefineOptions {
+        min_angle: degrees.to_radians(),
+        criterion: config.criterion,
+        ..RefineOptions::default()
+    };
+    let fresh = IntrinsicTriangulation::new(mesh, geometry).map_err(text)?;
+    let (t_clone, _) = timed(config.repeat, || fresh.clone());
+    let (t_refine, result) = timed(config.repeat, || {
+        let mut tri = fresh.clone();
+        let report = tri.refine(&options);
+        (tri, report)
+    });
+    let t_refine = (t_refine - t_clone).max(1e-12);
+    let (mut tri, report) = result;
+    let report = report.map_err(text)?;
+    let quality = tri.quality(1e-12);
+    println!("{}", quality_row(&format!("ref {degrees:.0}"), &quality));
+    // What is left below the bound, by reason.
+    let mut reasons = [0usize; 4];
+    for b in &report.below_bound {
+        reasons[match b.reason {
+            BelowReason::AngleSum { .. } => 0,
+            BelowReason::NeedleVertex { .. } => 1,
+            BelowReason::NotInsertable { .. } => 2,
+            BelowReason::InsertionLimit => 3,
+        }] += 1;
+    }
+    println!(
+        "  refine {degrees:.0}: {:?}; {} inserted ({} in faces, {} on interior edges, {} on boundary edges), {} flips, {} places moved onto input edges; smallest angle {:.3} ({:.3} where the bound can be reached), largest {:.2}; below the bound: {} corners at vertices with a smaller angle sum, {} next to a needle vertex, {} not insertable, {} left by the limit; {:.2} ms",
+        report.status,
+        report.n_inserted,
+        report.n_face_insertions,
+        report.n_edge_splits,
+        report.n_boundary_splits,
+        report.n_flips,
+        report.n_snapped,
+        report.min_angle.to_degrees(),
+        report.min_angle_reachable.to_degrees(),
+        report.max_angle.to_degrees(),
+        reasons[0],
+        reasons[1],
+        reasons[2],
+        reasons[3],
+        1e3 * t_refine,
+    );
+    let trace_options = EdgeTraceOptions {
+        tolerance: config.trace_tolerance,
+        ..EdgeTraceOptions::default()
+    };
+    let (t_trace, traces) = timed(config.repeat, || tri.trace_edges(&trace_options));
+    let traces = traces.map_err(text)?;
+    let (t_overlay, overlay) = timed(config.repeat, || tri.overlay(&traces));
+    let overlay = overlay.map_err(text)?;
+    println!(
+        "    traces: {} edges, {} crossings, largest mismatch {:.2e}, {:.2} ms; overlay: {} vertices, {} faces, {:.2} ms",
+        traces.report.n_traced,
+        traces.report.n_crossings,
+        traces.report.max_relative_mismatch,
+        1e3 * t_trace,
+        overlay.vertices.len(),
+        overlay.n_faces(),
+        1e3 * t_overlay,
+    );
+    // The export, by splits and flips only, and with refinement between the rounds.
+    let irregular = tri.irregularities();
+    let mut refined_between = tri.clone();
+    let (t_export, plain) = timed(1, || tri.export_simplicial(&ExportOptions::default()));
+    let plain = plain.map_err(text)?;
+    let (t_export_refined, with) = timed(1, || {
+        refined_between.export_simplicial(&ExportOptions {
+            refine: Some(options),
+            ..ExportOptions::default()
+        })
+    });
+    let with = with.map_err(text)?;
+    println!(
+        "    export: {} self-edges, {} edges in groups; by splits and flips: {} splits, {} flips, angles {:.3} to {:.2}, {:.2} ms; with refinement between the rounds: {} rounds, {} splits, {} inserted, angles {:.3} to {:.2}, {}, {:.2} ms; fingerprint {:016x}",
+        irregular.self_edges.len(),
+        irregular.multi_edges.len(),
+        plain.n_splits,
+        plain.n_flips,
+        plain.min_angle.to_degrees(),
+        plain.max_angle.to_degrees(),
+        1e3 * t_export,
+        with.n_refine_rounds,
+        with.n_splits,
+        with.n_refined,
+        with.min_angle.to_degrees(),
+        with.max_angle.to_degrees(),
+        if with.refinement.is_some() {
+            "ended refined"
+        } else {
+            "not ended refined"
+        },
+        1e3 * t_export_refined,
+        with.fingerprint,
+    );
+    // One line for tables: name bound V inserted min reachable max below-by-reason time,
+    // overlay faces, export splits and angles (plain, then with refinement).
+    println!(
+        "  refine | {name} | {degrees:.0} | {} | {} | {:.3} | {:.3} | {:.2} | {} | {} | {} | {} | {:.2} | {} | {} | {:.3} | {:.2} | {} | {:.3} | {:.2}",
+        mesh.n_vertices(),
+        report.n_inserted,
+        report.min_angle.to_degrees(),
+        report.min_angle_reachable.to_degrees(),
+        report.max_angle.to_degrees(),
+        reasons[0],
+        reasons[1],
+        reasons[2],
+        reasons[3],
+        1e3 * t_refine,
+        overlay.n_faces(),
+        plain.n_splits,
+        plain.min_angle.to_degrees(),
+        plain.max_angle.to_degrees(),
+        with.n_splits,
+        with.min_angle.to_degrees(),
+        with.max_angle.to_degrees(),
+    );
+    Ok(())
+}
+
 fn main() {
     let config = match parse_args() {
         Ok(config) => config,
         Err(message) => {
             eprintln!(
-                "{message}\nusage: delaunay_report [--reference] [--angle-tol X] [--trace-tol X] [--repeat N] [--failures N] mesh.obj ..."
+                "{message}\nusage: delaunay_report [--reference] [--angle-tol X] [--trace-tol X] [--repeat N] [--failures N] [--refine DEG]... mesh.obj ..."
             );
             std::process::exit(2);
         }
