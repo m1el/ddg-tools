@@ -22,7 +22,7 @@ use crate::flow::{
     Extension, Flow, FlowOptions, LengthStep, PenaltyRule, ROUGHENING_QUANTILE, Redistance,
     RunReport, SpeedScaling, StepReport, StepSize, StepStatistics, StepTimings, StopReason,
     StopRule, cut_dual_lengths, explicit_step, gradient_norms, length_weights, local_edges,
-    roughening_rate, roughening_rates, rule_step, solve_on_cut, symmetry_projection,
+    roughening_rate, roughening_rates, rule_step, solve_on_cut, symmetry_projection, vertex_limits,
     weighted_quantile,
 };
 use crate::problem::{CutProblem, EvalOptions, UnitAreaScale};
@@ -104,6 +104,16 @@ pub struct RegionStages {
     /// Per function, per vertex: after the length step on the mesh (equal to `explicit`
     /// without one).
     pub length: Vec<Vec<f64>>,
+    /// Per vertex: the factor of the local limit at the vertices (SPEC §4, D26), which with
+    /// the length step on the mesh and [`StepStatistics::Robust`] limits the change of the
+    /// whole step. Empty where that limit is not in use.
+    pub vertex_factor: Vec<f64>,
+    /// Per vertex: `h_i` for that limit, the shortest crossed edge at a cut-adjacent vertex and
+    /// the shortest edge at any other one. Empty as `vertex_factor`.
+    pub vertex_edge: Vec<f64>,
+    /// Per function, per vertex: after the local limit at the vertices (equal to `length`
+    /// where there is none).
+    pub limited: Vec<Vec<f64>>,
     /// Per function, per vertex: after the first symmetry projection.
     pub symmetric: Vec<Vec<f64>>,
     /// Per function, per vertex: after the projection of Losasso et al. at the cut-adjacent
@@ -448,7 +458,9 @@ impl RegionFlow {
         let n_points = cut.points.len();
         let mut limited = vec![false; n_points + cut.triple_points.len()];
         let mut factors = vec![1.0; tri.n_vertices() - nv];
-        if statistics == StepStatistics::Robust {
+        // With the length step on the mesh the limit acts at the vertices instead, on the
+        // whole change of the step (below; SPEC §4, D26).
+        if statistics == StepStatistics::Robust && !for_step_only {
             for (i, r) in rate[nv..].iter_mut().enumerate() {
                 let (point, excess) = if i < 2 * n_points {
                     (i / 2, local_rates[i / 2] - omega)
@@ -578,6 +590,49 @@ impl RegionFlow {
         if let Some(stages) = stages.as_deref_mut() {
             stages.length = new.clone();
         }
+        let mesh = self.core.evaluator.mesh();
+        let adjacent_before = cut.cut_adjacent_vertices(mesh);
+        // The local limit at the vertices: the change of the whole step, both parts together.
+        // Half the difference of the two smallest functions at the vertex plays the role of
+        // φ; all functions at the vertex take its factor.
+        if for_step_only {
+            let (vertex_edges, vertex_rates) =
+                vertex_limits(mesh, &self.core.geometry, cut, &local_rates);
+            let mut vertex_factor = vec![1.0; nv];
+            for v in 0..nv {
+                let first = cut.vertex_region[v] as usize;
+                let mut second = usize::MAX;
+                for k in (0..n_regions).filter(|&k| k != first) {
+                    if second == usize::MAX || self.phis[k][v] < self.phis[second][v] {
+                        second = k;
+                    }
+                }
+                let change = 0.5
+                    * ((new[second][v] - self.phis[second][v])
+                        - (new[first][v] - self.phis[first][v]));
+                let factor = options.step_size.local_factor(
+                    tau,
+                    0.0,
+                    vertex_edges[v],
+                    change / tau,
+                    vertex_rates[v] - omega,
+                );
+                if factor < 1.0 {
+                    for (phi, old) in new.iter_mut().zip(&self.phis) {
+                        phi[v] = old[v] + factor * (phi[v] - old[v]);
+                    }
+                    vertex_factor[v] = factor;
+                    report.n_limited += usize::from(adjacent_before[v]);
+                }
+            }
+            if let Some(stages) = stages.as_deref_mut() {
+                stages.vertex_factor = vertex_factor;
+                stages.vertex_edge = vertex_edges;
+            }
+        }
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.limited = new.clone();
+        }
         if let Some(classes) = &options.symmetry {
             for phi in &mut new {
                 symmetry_projection(classes, phi);
@@ -588,8 +643,6 @@ impl RegionFlow {
         }
 
         // Redistancing (SPEC §8.4), then the symmetry projection again.
-        let mesh = self.core.evaluator.mesh();
-        let adjacent_before = cut.cut_adjacent_vertices(mesh);
         let adjacent_after = match options.redistance {
             Redistance::KeepAdjacent => {
                 let (phis, unreached, adjacent) =

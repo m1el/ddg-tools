@@ -510,9 +510,9 @@ option (`FlowOptions::step_statistics`, D22):
   edge of `c`: all crossed edges of the cut at its two ends, its own included, also those that
   carry a cut point of another piece of the cut. A change of `φ` at a vertex moves the crossings
   of all its edges. `m_c = |ρ_c| / h_c` is the speed in such edges per unit time,
-  `m̂ = quantile_0.9 (m_c ; ℓ_c)`, and `ω` is the roughening rate of the state. After `τ` and the
-  rate `r` are known (`r` of §3.10, or `s` with the length step on the mesh), every cut point is
-  limited on its own `[formula: cut-step-local]`:
+  `m̂ = quantile_0.9 (m_c ; ℓ_c)`, and `ω` is the roughening rate of the state. With the length
+  step on the cut, after `τ` and the rate `r` of §3.10 are known, every cut point is limited on
+  its own `[formula: cut-step-local]`:
 
   ```
   v_c = |r_c|                       (Capped)
@@ -525,17 +525,34 @@ option (`FlowOptions::step_statistics`, D22):
   rate exceeds that of the state is treated as if it had the speed `½ (ω_c − ω)`, which is what a
   cut can reach within the face of a spike (`|s| ≤ Q_0 + Q_1`). The first case says nothing new
   in exact arithmetic (`τ ≤ max_motion / m̂`), and it covers `v_c = 0`. It is stated because the
-  cut point of the quantile lies on the limit exactly wherever `r = ρ` (no length term; or the
-  length step on the mesh, when the `m̂` for `ρ = s` is the larger one): `v_c / h_c`, evaluated
-  like `m_c`, is `m̂` to the last bit, while `τ · v_c > max_motion · h_c` there is decided by the
-  rounding of `τ` (D24). The limited rate is
+  cut point of the quantile lies on the limit exactly wherever `r = ρ` (no length term):
+  `v_c / h_c`, evaluated like `m_c`, is `m̂` to the last bit, while `τ · v_c > max_motion · h_c`
+  there is decided by the rounding of `τ` (D24). The limited rate is
   what `ḡ` multiplies and what is extended. The number of limited cut points (factor below 1) is
   reported. This is a step of its own for the outliers. Rest states are unchanged, and the sign of
   every rate is kept. The limited rate is a descent direction when the rate on the cut is the
-  gradient density itself (length step on the mesh, or no coupling along the cut); with the
-  length step on the cut it need not be, because the coupled rate of a point can go against its
-  own density and the limit can remove the neighbour's share that paid for it (D25). With `Fixed`
-  nothing is limited.
+  gradient density itself (no coupling along the cut); with the coupling of §3.10 it need not
+  be, because the coupled rate of a point can go against its own density and the limit can
+  remove the neighbour's share that paid for it (D25). With `Fixed` nothing is limited.
+
+  With the length step on the mesh the rate on the cut is only the explicit part of the motion,
+  and the limit acts instead at the vertices, on the change of the whole step, after the length
+  step (D26). The rate `s` is extended as it is, `φ̃ = φ + τσ`, `φ′` is the result of the length
+  step (`φ̃` if there is none), and at every vertex `i`
+
+  ```
+  Δ_i = φ′(i) − φ(i)
+  h_i = the shortest crossed edge at i; at a vertex without a crossed edge the shortest of its edges
+  ω_i = the largest ω_c of the cut points on the edges at i (no such cut point: the term is absent)
+  v_i = |Δ_i| / τ                         (Capped)
+  v_i = max(|Δ_i| / τ, ½ (ω_i − ω)₊)      (Adaptive)
+  φ″(i) = φ(i) + min(1, max_motion · h_i / (τ · v_i)) · Δ_i        (v_i = 0: the factor is 1)
+  ```
+
+  the same formula `[formula: cut-step-local]` with the rate `Δ_i/τ` and without the first case.
+  Symmetry and redistancing follow on `φ″`. No value changes by more than `max_motion · h_i`;
+  the direction of the whole step is kept at every vertex. The number of cut-adjacent vertices
+  with a factor below 1 is reported.
 * **Extremes**. `m̂ = max_c |ρ_c| / min_c h` with `h` the shortest crossed edge, `ω = max_c ω_c`,
   no local limit: the paper's remark taken literally, and the rule before D22.
 
@@ -552,10 +569,20 @@ On a network (§8): `ω` and the `m̂` for `ρ = s` are taken over the cut point
 `m_v = |s_v + λ⁰_v| / h_v` with the weights `ℓ_v` of §8.5 (ties as in §1). A copy of a cut point
 has the `h_c` and the `ω_c` of its cut point; a copy of a triple point has the shortest `h_c` of
 the three cut points of its face and no `ω_c` (`v = |r|`). The default stages use the second `m̂`,
-the paper's stages the larger of the two. The local limit acts on every boundary node: with the
-paper's stages on `s_v`, before the harmonic extension (§8.4), with the default stages on the
-rate `ρ_v` of the second system of §8.5, before `ḡ`. The report counts the cut points and the
-triple points with a limited copy, each once.
+the paper's stages the larger of the two. With the default stages the local limit acts on every
+boundary node, on the rate `ρ_v` of the second system of §8.5, before `ḡ`, and the report counts
+the cut points and the triple points with a limited copy, each once. With the paper's stages it
+acts at the vertices as above, with half the difference of the two functions that are smallest at
+the vertex in place of `φ` (as in §8.5 for `ḡ`), and all functions at the vertex take the factor:
+
+```
+Δ_i = ½ [ (φ_b′(i) − φ_b(i)) − (φ_a′(i) − φ_a(i)) ]      a = region(i), b the function that is smallest
+                                                        at i among the others (ties: lowest index),
+                                                        both in the state before the step
+φ_k″(i) = φ_k(i) + min(1, max_motion · h_i / (τ · v_i)) · (φ_k′(i) − φ_k(i))      for every k
+```
+
+For `N = 2` this is the rule for two regions.
 
 The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Why:
 
@@ -836,10 +863,11 @@ s_v = ( |m p′| s_{p} + |m p| s_{p′} ) / (|m p| + |m p′|)   at the copy of 
 * **Explicit step.** `φ̃_k = φ_k + τ φ̇_k` for every `k`; `τ` from the step rule of §4: with the
   extremes `ρ = s` over the cut points; with the robust statistics the larger of the two `m̂`,
   for `ρ = s` over the cut points and for `ρ_v = s_v + λ⁰_v` over the boundary nodes (`λ⁰` being
-  that of §8.5, computed for the step rule only), and the local limit acts on `s_v` before the
-  extension.
+  that of §8.5, computed for the step rule only).
 * **Length step.** `(W_V + τ L_w) φ_k′ = W_V φ̃_k` for every `k`: one factorization, `N` right-hand
   sides.
+* **Local limit.** With the robust statistics: at the vertices, on the change of the whole step
+  (§4), before the symmetry projection.
 * **Symmetry.** The class mean of §3.11 for every `φ_k`. The regions must be invariant under the
   symmetry; a symmetry that permutes regions is not supported.
 * **Redistancing** `[formula: cut-region-projection]`. Regions are recomputed. `Adj_k` are the
@@ -1221,6 +1249,27 @@ region of every face.
   grow only where `ω_c ≥ ω`; (e) the oracle's sort for the quantile puts equal values in reverse
   order, against §1; the quantile is the same, only the order of the running sum inside a group
   of equal values differs from the crate's, and it is left as it is (a theorem states it).
+* **D26** The local limit of D22 scaled the rate on the cut before the extension, for every stage
+  set. With the length step on the mesh that rate is only the explicit part of the motion: the
+  length step is implicit, has no rate on the cut, and was left in full. Where the two parts
+  oppose each other and one of them is cut back, the cut moves uphill. Measured on spot (Hencky,
+  `α_L = 7.4·10⁻⁴`, 8 clusters of normals, 59 patches, the paper's stages with the flux recovery
+  of §3.5, `τ ≈ 0.13`): the energy fell from `1.1955·10⁻²` to `1.104·10⁻²` in 8 steps and then
+  rose in every step, to `1.8155·10⁻²` after 26 and `4.35·10⁻²` after 60 steps, with a fifth of
+  the cut points limited in every step. Evaluating the states between the stages: over those 60
+  steps the explicit step changed the energy by `−4.5·10⁻²`, the length step by `+7.6·10⁻²`,
+  the projection and the redistancing by nothing. One thing changed at a time: with a fixed
+  `τ = 0.13` (no limit) the same stages descend (`1.02·10⁻²` at the same flow time, and
+  `9.51·10⁻³`, `9.52·10⁻³`, `9.49·10⁻³`, `9.48·10⁻³` for `τ = 0.03, 0.01, 0.003, 0.001`: they
+  are a descent method here, and converge in `τ`); with the extremes they descend and crawl (60
+  steps cover the flow time 0.16); with the length step on the cut and everything else as before
+  they descend (`9.68·10⁻³` after 60 steps); a smaller `max_motion` (0.1, 0.05) or `time_scale`
+  (0.005) changes the step and not the outcome (`4.3·10⁻²` at the flow time 8.7). So the limit
+  now acts on the whole step (§4): with the length step on the mesh at the vertices, after the
+  length step. The same run then falls to `8.73·10⁻³` in 200 steps (lowest `8.68·10⁻³`; single
+  steps raise it by at most 2.2 %; the default stages reach `9.20·10⁻³`). A limit on the rate
+  alone with a matching local factor in the length step was considered and rejected: one vertex
+  serves several cut points, and no factor per vertex matches all of them.
 
 Add to this list whenever something else turns up; never drop an entry.
 
@@ -1240,7 +1289,9 @@ kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matric
 result is one of the values; monotone in `q`; `q = 1` gives the maximum; at least the fraction `q`
 of the weight lies at or below it), `cut-step-local` (the factor lies in `(0, 1]`; the limited
 motion is at most `max_motion · h_c`; the sign of the rate is kept; the two cases agree: if
-`τ m̂ ≤ max_motion` and `v_c/h_c ≤ m̂` then `max_motion · h_c ≥ τ v_c`), and for `N` regions `cut-edge-crossing-regions` (equals
+`τ m̂ ≤ max_motion` and `v_c/h_c ≤ m̂` then `max_motion · h_c ≥ τ v_c`; at a vertex, with the rate
+`Δ_i/τ`: `|φ″(i) − φ(i)| ≤ max_motion · h_i`, and for `N` regions the limited change of half the
+difference of the two functions is bounded likewise and `N = 2` gives the two-region rule), and for `N` regions `cut-edge-crossing-regions` (equals
 `cut-edge-crossing` for `φ, −φ`; lies in `[0, 1]`), `cut-triple-point` (inside the triangle of the
 three cut points; the three quads are convex), `cut-region-extension`, `cut-region-projection`
 (differences kept, hence no crossing moves; smallest `−d`, second `+d`; identity for `N = 2`),

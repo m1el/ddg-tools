@@ -281,6 +281,8 @@ struct Report {
     problems: Vec<String>,
     worst: f64,
     compared: usize,
+    /// While set, nothing is compared: for what a fixture has from a rule that SPEC replaced.
+    muted: bool,
 }
 
 impl Report {
@@ -290,6 +292,7 @@ impl Report {
             problems: Vec::new(),
             worst: 0.0,
             compared: 0,
+            muted: false,
         }
     }
 
@@ -302,6 +305,9 @@ impl Report {
     }
 
     fn close(&mut self, what: impl Fn() -> String, ours: f64, oracle: f64) {
+        if self.muted {
+            return;
+        }
         let error = (ours - oracle).abs() / oracle.abs().max(1.0);
         self.compared += 1;
         if error.is_nan() || error > self.tolerance {
@@ -320,6 +326,9 @@ impl Report {
         ours: T,
         oracle: T,
     ) {
+        if self.muted {
+            return;
+        }
         if ours != oracle {
             self.note(format!("{}: {ours:?} vs oracle {oracle:?}", what()));
         }
@@ -615,6 +624,10 @@ struct StepOutcome {
     differs: bool,
     /// Cut points (two regions) or boundary nodes (`N` regions) slowed down by the local limit.
     limited: usize,
+    /// The fixture has the local limit of SPEC D22 for the length step on the mesh (on the
+    /// explicit rate at the cut points), which D26 replaced by a limit at the vertices on the
+    /// whole step, and the two differ in this case: what follows the limit is not compared.
+    replaced_rule: bool,
 }
 
 /// One step of the flow with the stages and the statistics that the fixture names.
@@ -635,6 +648,14 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
     let tau = &out["tau"][0];
     report.close(|| "tau".into(), step.tau, float(&tau[0]));
     let robust = case.statistics == StepStatistics::Robust;
+    // The local limit with the length step on the mesh (SPEC D26): the fixtures have the rule
+    // before it. Where that rule limited a cut point, or the present one limits a vertex, the
+    // step is compared up to the limit only.
+    let replaced_rule = robust
+        && options.length_step == LengthStep::OnMesh
+        && !matches!(case.step_size, StepSize::Fixed(_))
+        && (out.get("limited").is_some_and(|l| int(&l[0][0]) > 0)
+            || stages.vertex_factor.iter().any(|f| *f < 1.0));
     if case.stages.is_none() {
         report.close(|| "largest speed".into(), step.max_speed, float(&tau[2]));
     } else {
@@ -733,6 +754,7 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
                     weighted_quantile(&stages.roughening, ell, ROUGHENING_QUANTILE),
                 );
             }
+            report.muted = replaced_rule;
             report.same(
                 || "limited cut points".into(),
                 step.n_limited,
@@ -743,6 +765,7 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
                 stages.limit_factor.iter().filter(|f| **f < 1.0).count(),
                 int(&out["limited"][0][0]),
             );
+            report.muted = false;
             for w in &out["h"] {
                 let k = int(&w[0]);
                 report.close(|| format!("h_c of cut point {k}"), h[k], float(&w[1]));
@@ -758,6 +781,7 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
                         float(&w[3]),
                     );
                 }
+                report.muted = replaced_rule;
                 report.close(
                     || format!("factor of the local limit at cut point {k}"),
                     stages.limit_factor[k],
@@ -774,16 +798,19 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
                     stages.limit_factor[k] < 1.0,
                     float(&w[4]) < 1.0,
                 );
+                report.muted = false;
                 report.close(
                     || format!("rate before the limit at cut point {k}"),
                     stages.unscaled_rate[k],
                     float(&w[5]),
                 );
+                report.muted = replaced_rule;
                 report.close(
                     || format!("rate after the limit at cut point {k}"),
                     stages.unscaled_rate[k] * stages.limit_factor[k],
                     float(&w[6]),
                 );
+                report.muted = false;
             }
         }
         let scaled = options.speed_scaling == SpeedScaling::MeanGradient;
@@ -820,17 +847,20 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
                     float(&w[8]),
                 );
             }
+            report.muted = replaced_rule;
             report.close(
                 || format!("scaled rate at cut point {k}"),
                 stages.rate[k],
                 float(&w[9]),
             );
+            report.muted = false;
             report.close(
                 || format!("roughening rate at cut point {k}"),
                 stages.roughening[k],
                 float(&w[11]),
             );
         }
+        report.muted = replaced_rule;
         for w in &out["m"] {
             let i = int(&w[0]);
             report.close(
@@ -911,6 +941,7 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
         e.cut.points.len(),
         int(&out["cuts_new"][0][0]),
     );
+    report.muted = false;
     let other_statistics = FlowOptions {
         step_statistics: StepStatistics::Robust,
         ..options
@@ -920,7 +951,9 @@ fn compare_step(case: &Case, out: &Lines, report: &mut Report) -> StepOutcome {
     StepOutcome {
         robust,
         differs: !robust && (again.tau != step.tau || again.n_limited > 0),
-        limited: stages.limit_factor.iter().filter(|f| **f < 1.0).count(),
+        limited: stages.limit_factor.iter().filter(|f| **f < 1.0).count()
+            + stages.vertex_factor.iter().filter(|f| **f < 1.0).count(),
+        replaced_rule,
     }
 }
 
@@ -939,6 +972,9 @@ struct SetSummary {
     /// Fixtures that ask for the robust statistics, and those of them with a limited point.
     robust: usize,
     limited: usize,
+    /// Fixtures compared up to the local limit only, because they have the rule that SPEC D26
+    /// replaced.
+    replaced_rule: Vec<String>,
 }
 
 fn fixture_names(set: &str, at_least: usize) -> (PathBuf, Vec<String>) {
@@ -966,6 +1002,7 @@ fn fixture_names(set: &str, at_least: usize) -> (PathBuf, Vec<String>) {
 fn fixtures_of_the_oracle_are_reproduced() {
     let set = replay_two_regions("cuts", 20);
     assert!(set.stepped >= 20 && set.nodal > 0 && set.smoothed > 0 && set.compared > 20_000);
+    assert!(set.replaced_rule.is_empty());
 }
 
 /// The fixtures of the default stages and of mixed stage sets (format 2 of the oracle's input):
@@ -979,6 +1016,7 @@ fn fixtures_of_the_default_stages_are_reproduced() {
     // same matrix on its mesh, which has no negative edge weight, so it agrees like the rest.
     let set = replay_two_regions("cuts-default", 20);
     assert!(set.stepped >= 20 && set.nodal > 0 && set.smoothed > 0 && set.compared > 20_000);
+    assert!(set.replaced_rule.is_empty());
 }
 
 /// The fixtures of the robust step rule (format 3 of the oracle's input, SPEC §1, §4, D22):
@@ -989,6 +1027,14 @@ fn fixtures_of_the_default_stages_are_reproduced() {
 fn fixtures_of_the_robust_step_rule_are_reproduced() {
     let set = replay_two_regions("cuts-robust", 9);
     assert!(set.stepped >= 9 && set.robust >= 8 && set.limited >= 3 && set.compared > 20_000);
+    // The fixtures with the robust statistics and the length step on the mesh have the local
+    // limit on the explicit rate at the cut points. SPEC D26 replaced it by a limit at the
+    // vertices on the whole step; until the oracle follows, these are compared up to the
+    // limit (everything of the evaluation, `τ`, `ω`, both `m̂`, `h_c`, the rates before it).
+    assert_eq!(
+        set.replaced_rule,
+        ["rb-ico2-cap-paper-adaptive", "rb-spike-paper"]
+    );
 }
 
 /// Replays the two-region fixtures of `lean/oracle/fixtures/<set>`.
@@ -1027,6 +1073,9 @@ fn replay_two_regions(set: &str, at_least: usize) -> SetSummary {
             summary.stepped += 1;
             summary.robust += usize::from(outcome.robust);
             summary.limited += usize::from(outcome.robust && outcome.limited > 0);
+            if outcome.replaced_rule {
+                summary.replaced_rule.push(name.clone());
+            }
         }
         let problems: Vec<String> = reports
             .iter()
@@ -1077,6 +1126,12 @@ fn replay_two_regions(set: &str, at_least: usize) -> SetSummary {
         robust_differs.len(),
         robust_differs.join(" ")
     );
+    println!(
+        "{set}: compared up to the local limit only, because the fixture has the limit on the \
+         explicit rate that SPEC D26 replaced for the length step on the mesh: {} ({})",
+        summary.replaced_rule.len(),
+        summary.replaced_rule.join(" ")
+    );
     summary
 }
 
@@ -1088,6 +1143,7 @@ fn replay_two_regions(set: &str, at_least: usize) -> SetSummary {
 fn fixtures_for_several_regions_are_reproduced() {
     let set = replay_region_set("regions", 15);
     assert!(set.with_triples >= 10 && set.default_stages >= 5 && set.compared > 50_000);
+    assert!(set.replaced_rule.is_empty());
 }
 
 /// The fixtures of the robust step rule for `N` regions (format 2 of the oracle's `regions`
@@ -1099,6 +1155,17 @@ fn fixtures_of_the_robust_step_rule_for_several_regions_are_reproduced() {
     let set = replay_region_set("regions-robust", 5);
     assert!(set.robust >= 5 && set.limited >= 2 && set.default_stages >= 2);
     assert!(set.with_triples >= 5 && set.compared > 20_000);
+    // As for two regions: the paper's stages with the robust statistics are compared up to the
+    // local limit, which SPEC D26 moved to the vertices.
+    assert_eq!(
+        set.replaced_rule,
+        [
+            "rr-disk4-paper",
+            "rr-sphere3-spike-paper",
+            "rr-sphere4-paper",
+            "triple-chain-paper"
+        ]
+    );
 }
 
 /// Replays the fixtures for `N` regions of `lean/oracle/fixtures/<set>`.
@@ -1125,6 +1192,9 @@ fn replay_region_set(set: &str, at_least: usize) -> SetSummary {
         summary.default_stages += usize::from(default);
         summary.robust += usize::from(outcome.robust);
         summary.limited += usize::from(outcome.robust && outcome.limited > 0);
+        if outcome.replaced_rule {
+            summary.replaced_rule.push(name.clone());
+        }
         if report.problems.is_empty() {
             worst = worst.max(report.worst);
             summary.compared += report.compared;
@@ -1155,6 +1225,12 @@ fn replay_region_set(set: &str, at_least: usize) -> SetSummary {
          D22) give another step in {}: {}",
         robust_differs.len(),
         robust_differs.join(" ")
+    );
+    println!(
+        "{set}: compared up to the local limit only, because the fixture has the limit on the \
+         explicit rate that SPEC D26 replaced for the length step on the mesh: {} ({})",
+        summary.replaced_rule.len(),
+        summary.replaced_rule.join(" ")
     );
     summary
 }
@@ -1309,6 +1385,7 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
             robust,
             differs: false,
             limited: 0,
+            replaced_rule: false,
         };
         return (cut.triple_points.len(), default, outcome);
     }
@@ -1494,6 +1571,14 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
         step.shortest_crossed_edge,
         float(&tau[1]),
     );
+    // The local limit with the length step on the mesh (SPEC D26): the fixtures have the rule
+    // before it. Where that rule limited a boundary node, or the present one limits a vertex,
+    // the step is compared up to the limit only.
+    let replaced_rule = robust
+        && !default
+        && !matches!(options.step_size, StepSize::Fixed(_))
+        && (out.get("limited").is_some_and(|l| int(&l[0][0]) > 0)
+            || stages.vertex_factor.iter().any(|f| *f < 1.0));
     // ρ: `s` at the cut points for the paper's stages, `s_v + λ⁰_v` at the boundary nodes for
     // the default ones.
     let with_force: Option<Vec<f64>> = (!stages.length_speed.is_empty()).then(|| {
@@ -1596,12 +1681,15 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
                 weighted_quantile(&stages.roughening, &stages.cut_length, ROUGHENING_QUANTILE),
             );
         }
+        report.muted = replaced_rule;
         report.same(
             || "limited boundary nodes".into(),
             stages.limit_factor.iter().filter(|f| **f < 1.0).count(),
             int(&out["limited"][0][0]),
         );
-        // The report counts the cut points and triple points with a limited copy.
+        // The report counts the cut points and triple points with a limited copy (with the
+        // length step on the cut; on the mesh the limit acts at the vertices).
+        report.muted = !default;
         let n_triples = cut.triple_points.len();
         let mut limited = vec![false; n_points + n_triples];
         for (i, factor) in stages.limit_factor.iter().enumerate() {
@@ -1619,6 +1707,7 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
             step.n_limited,
             limited.iter().filter(|l| **l).count(),
         );
+        report.muted = false;
         for w in &out["hc"] {
             let node = int(&w[1]);
             report.close(
@@ -1626,6 +1715,7 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
                 stages.node_edge[node - nv],
                 float(&w[2]),
             );
+            report.muted = replaced_rule;
             report.close(
                 || format!("factor of the local limit at node {node}"),
                 stages.limit_factor[node - nv],
@@ -1643,16 +1733,19 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
                 stages.limit_factor[node - nv] < 1.0,
                 float(&w[3]) < 1.0,
             );
+            report.muted = false;
             report.close(
                 || format!("rate before the limit at node {node}"),
                 stages.unlimited_rate[node],
                 float(&w[4]),
             );
+            report.muted = replaced_rule;
             report.close(
                 || format!("rate after the limit at node {node}"),
                 stages.rate[node],
                 float(&w[5]),
             );
+            report.muted = false;
         }
     }
     for w in &out["sn"] {
@@ -1706,7 +1799,9 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
             float(&w[1]),
         );
     }
-    for w in &out["pd"] {
+    // From here on everything follows the local limit.
+    report.muted = replaced_rule;
+    for w in out["pd"].iter().filter(|_| !replaced_rule) {
         let (k, i) = (int(&w[0]), int(&w[1]));
         // The rate is recovered from the explicit step, so it carries the rounding of phi/tau.
         let (ours, theirs) = (stages.function_rates[k][i], float(&w[2]));
@@ -1794,10 +1889,13 @@ fn replay_regions(input: &Lines, out: &Lines, report: &mut Report) -> (usize, bo
     };
     let mut other = ddg_variational_cuts::RegionFlow::new(&mesh, &geometry, &phis).unwrap();
     let again = other.step(&problem, &other_statistics).unwrap();
+    report.muted = false;
     let outcome = StepOutcome {
         robust,
         differs: !robust && (again.tau != step.tau || again.n_limited > 0),
-        limited: stages.limit_factor.iter().filter(|f| **f < 1.0).count(),
+        limited: stages.limit_factor.iter().filter(|f| **f < 1.0).count()
+            + stages.vertex_factor.iter().filter(|f| **f < 1.0).count(),
+        replaced_rule,
     };
     (cut.triple_points.len(), default, outcome)
 }

@@ -214,6 +214,47 @@ pub(crate) fn local_edges(mesh: &TriMesh, geometry: &Geometry, cut: &Cut) -> Vec
         .collect()
 }
 
+/// For the local limit at the vertices (SPEC §4, D26): the edge length `h_i` of every vertex,
+/// the shortest crossed edge at a cut-adjacent vertex and the shortest edge at any other one,
+/// and the largest local roughening rate `ω_c` of the cut points on the edges at the vertex
+/// (`−∞` where there is none).
+///
+/// [formula: cut-step-cap]
+pub(crate) fn vertex_limits(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    cut: &Cut,
+    local_rates: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let lengths = geometry.edge_lengths();
+    let nv = mesh.n_vertices();
+    let mut crossed = vec![f64::INFINITY; nv];
+    let mut rate = vec![f64::NEG_INFINITY; nv];
+    for (point, omega) in cut.points.iter().zip(local_rates) {
+        let length = lengths[point.edge as usize];
+        for v in mesh.edge_vertices(point.edge as usize) {
+            crossed[v] = crossed[v].min(length);
+            rate[v] = rate[v].max(*omega);
+        }
+    }
+    let mut any = vec![f64::INFINITY; nv];
+    for (edge, length) in mesh.edges().iter().zip(lengths) {
+        for v in edge {
+            any[*v as usize] = any[*v as usize].min(*length);
+        }
+    }
+    let edges = (0..nv)
+        .map(|v| {
+            if crossed[v].is_finite() {
+                crossed[v]
+            } else {
+                any[v]
+            }
+        })
+        .collect();
+    (edges, rate)
+}
+
 /// The step of SPEC §4 for the speeds `speed` at the cut points (or boundary nodes) with the
 /// lengths `weights` of the cut and the crossed edges `edges`, and the roughening rate
 /// `roughening_rate` of the same statistics. Returns `τ` and the speed statistic that was
@@ -616,7 +657,17 @@ pub struct StepStages {
     pub explicit: Vec<f64>,
     /// `φ′` after the length step (stage 6; equal to `explicit` if there is none).
     pub length: Vec<f64>,
-    /// After the first symmetry projection (equal to `length` without symmetry classes).
+    /// The factor of the local limit at every vertex (SPEC §4, D26): with
+    /// [`LengthStep::OnMesh`] and [`StepStatistics::Robust`] the change `φ′ − φ` of the whole
+    /// step is limited at the vertices. Empty where that limit is not in use.
+    pub vertex_factor: Vec<f64>,
+    /// `h_i` at every vertex for that limit: the shortest crossed edge at a cut-adjacent
+    /// vertex, the shortest edge at any other one. Empty as `vertex_factor`.
+    pub vertex_edge: Vec<f64>,
+    /// `φ + vertex_factor · (φ′ − φ)`: after the local limit at the vertices (equal to `length`
+    /// where there is none).
+    pub limited: Vec<f64>,
+    /// After the first symmetry projection (equal to `limited` without symmetry classes).
     pub symmetric: Vec<f64>,
     /// Whether the vertex is cut-adjacent in the function that was redistanced.
     pub adjacent: Vec<bool>,
@@ -1004,9 +1055,12 @@ impl Flow {
             stages.unscaled_rate = rate.clone();
         }
         // The local limit of the step rule: cut points beyond the quantile take a smaller
-        // step of their own.
+        // step of their own. With the length step on the mesh the rate on the cut is only the
+        // explicit part of the motion: limiting it alone would leave the length step, which
+        // opposes it, in full, and the cut would move uphill. There the limit acts on the
+        // whole change at the vertices, after the length step (SPEC §4, D26).
         let mut factors = vec![1.0; rate.len()];
-        if statistics == StepStatistics::Robust {
+        if statistics == StepStatistics::Robust && !for_step_only {
             for (p, r) in rate.iter_mut().enumerate() {
                 let factor = options.step_size.local_factor(
                     tau,
@@ -1065,6 +1119,35 @@ impl Flow {
         if let Some(stages) = stages.as_deref_mut() {
             stages.length = phi.clone();
         }
+        let adjacent_before = e.cut.cut_adjacent_vertices(self.evaluator.mesh());
+        // The local limit at the vertices: the change of the whole step, both parts together.
+        if for_step_only {
+            let (vertex_edges, vertex_rates) =
+                vertex_limits(self.evaluator.mesh(), &self.geometry, &e.cut, &local_rates);
+            let mut vertex_factor = vec![1.0; nv];
+            for (v, (new, old)) in phi.iter_mut().zip(&self.phi).enumerate() {
+                let change = *new - old;
+                let factor = options.step_size.local_factor(
+                    tau,
+                    0.0,
+                    vertex_edges[v],
+                    change / tau,
+                    vertex_rates[v] - omega,
+                );
+                if factor < 1.0 {
+                    *new = old + factor * change;
+                    vertex_factor[v] = factor;
+                    report.n_limited += usize::from(adjacent_before[v]);
+                }
+            }
+            if let Some(stages) = stages.as_deref_mut() {
+                stages.vertex_factor = vertex_factor;
+                stages.vertex_edge = vertex_edges;
+            }
+        }
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.limited = phi.clone();
+        }
         if let Some(classes) = &options.symmetry {
             symmetry_projection(classes, &mut phi);
         }
@@ -1073,7 +1156,6 @@ impl Flow {
         }
 
         // Stage 7: redistancing, then the symmetry projection again.
-        let adjacent_before = e.cut.cut_adjacent_vertices(self.evaluator.mesh());
         let (adjacent_after, vanished) = match options.redistance {
             Redistance::KeepAdjacent => {
                 let (new, unreached, adjacent) =

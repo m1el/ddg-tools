@@ -11,7 +11,7 @@ use common::{Shape, bumpy, polar_angle, sphere};
 use ddg_core::generators::SplitMix64;
 use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
-    CurveEnd, Cut, CutError, CutProblem, Energy, EvalOptions, Flow, FlowOptions,
+    CurveEnd, Cut, CutError, CutProblem, Energy, EvalOptions, Flow, FlowOptions, LengthStep,
     PAPER_FEATURE_SMOOTHING, PointwiseEnergy, RegionFlow, RegionWeights, ScaleWeight, StepSize,
     StopRule, init,
 };
@@ -1075,6 +1075,7 @@ fn robust_step_where_a_boundary_runs_through_triple_points_only() {
             }
         }
 
+        let phis_scaled = flow.level_sets_unit_area().to_vec();
         let (report, stages) = flow.step_with_stages(&problem, &options).unwrap();
         assert!(report.tau > 0.0 && report.tau.is_finite());
         assert!(report.step_speed > 0.0 && report.roughening_rate.is_finite());
@@ -1093,27 +1094,60 @@ fn robust_step_where_a_boundary_runs_through_triple_points_only() {
                 assert_eq!(stages.node_edge[2 * n_points + 3 * m + k], shortest);
             }
         }
-        let mut limited = vec![false; n_points + n_triples];
-        for (i, &factor) in stages.limit_factor.iter().enumerate() {
-            let node = nv + i;
-            assert!(factor > 0.0 && factor <= 1.0);
-            assert_eq!(stages.rate[node], stages.unlimited_rate[node] * factor);
-            let moved = report.tau * stages.rate[node].abs();
-            assert!(
-                moved <= max_motion * stages.node_edge[i] * (1.0 + 1e-12),
-                "node {node} moves by {moved:e}, its edge is {:e}",
-                stages.node_edge[i]
-            );
-            if factor < 1.0 {
-                let point = if i < 2 * n_points {
-                    i / 2
-                } else {
-                    n_points + (i - 2 * n_points) / 3
-                };
-                limited[point] = true;
+        if options.length_step == LengthStep::OnCut {
+            // The limit acts on the rate of every boundary node.
+            assert!(stages.vertex_factor.is_empty());
+            let mut limited = vec![false; n_points + n_triples];
+            for (i, &factor) in stages.limit_factor.iter().enumerate() {
+                let node = nv + i;
+                assert!(factor > 0.0 && factor <= 1.0);
+                assert_eq!(stages.rate[node], stages.unlimited_rate[node] * factor);
+                let moved = report.tau * stages.rate[node].abs();
+                assert!(
+                    moved <= max_motion * stages.node_edge[i] * (1.0 + 1e-12),
+                    "node {node} moves by {moved:e}, its edge is {:e}",
+                    stages.node_edge[i]
+                );
+                if factor < 1.0 {
+                    let point = if i < 2 * n_points {
+                        i / 2
+                    } else {
+                        n_points + (i - 2 * n_points) / 3
+                    };
+                    limited[point] = true;
+                }
             }
+            assert_eq!(report.n_limited, limited.iter().filter(|l| **l).count());
+        } else {
+            // The limit acts at the vertices on the change of the whole step (SPEC D26): half
+            // the difference of the two smallest functions moves by at most `max_motion · h_i`.
+            assert!(stages.limit_factor.iter().all(|f| *f == 1.0));
+            assert_eq!(stages.rate, stages.unlimited_rate);
+            let adjacent = e.cut.cut_adjacent_vertices(&s.mesh);
+            let mut limited = 0;
+            for v in 0..nv {
+                let factor = stages.vertex_factor[v];
+                assert!(factor > 0.0 && factor <= 1.0);
+                let first = e.cut.vertex_region[v] as usize;
+                let second = (0..3)
+                    .filter(|&k| k != first)
+                    .min_by(|a, b| phis_scaled[*a][v].total_cmp(&phis_scaled[*b][v]))
+                    .unwrap();
+                let change = |k: usize| stages.limited[k][v] - phis_scaled[k][v];
+                let moved = 0.5 * (change(second) - change(first)).abs();
+                assert!(
+                    moved <= max_motion * stages.vertex_edge[v] * (1.0 + 1e-9),
+                    "vertex {v} moves by {moved:e}, its edge is {:e}",
+                    stages.vertex_edge[v]
+                );
+                for k in 0..3 {
+                    let full = stages.length[k][v] - phis_scaled[k][v];
+                    assert!((change(k) - factor * full).abs() <= 1e-12 * (1.0 + full.abs()));
+                }
+                limited += usize::from(factor < 1.0 && adjacent[v]);
+            }
+            assert_eq!(report.n_limited, limited);
         }
-        assert_eq!(report.n_limited, limited.iter().filter(|l| **l).count());
         let after = flow.evaluate(&problem, &options.eval).unwrap();
         assert!(after.energy.total.is_finite());
     }
