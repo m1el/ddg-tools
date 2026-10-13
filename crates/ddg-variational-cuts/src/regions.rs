@@ -21,9 +21,9 @@ use crate::evaluate::{Evaluation, Evaluator};
 use crate::flow::{
     Extension, Flow, FlowOptions, LengthStep, PenaltyRule, ROUGHENING_QUANTILE, Redistance,
     RunReport, SpeedScaling, StepReport, StepSize, StepStatistics, StepTimings, StopReason,
-    StopRule, cut_dual_lengths, energy_stop, explicit_step, gradient_norms, length_weights,
-    local_edges, roughening_rate, roughening_rates, rule_step, run_outcome, solve_on_cut,
-    symmetry_projection, vertex_limits, weighted_quantile,
+    StopRule, all_finite, cut_dual_lengths, energy_stop, explicit_step, finite, finite_evaluation,
+    gradient_norms, length_weights, local_edges, roughening_rate, roughening_rates, rule_step,
+    run_outcome, solve_on_cut, symmetry_projection, vertex_limits, weighted_quantile,
 };
 use crate::problem::{CutProblem, EvalOptions, UnitAreaScale};
 
@@ -315,6 +315,7 @@ impl RegionFlow {
             .core
             .evaluator
             .evaluate_regions(&self.phis, problem, &options.eval)?;
+        finite_evaluation(self.n_steps, &e.energy, &e.speed)?;
         let timings = StepTimings {
             evaluate: start.elapsed().as_secs_f64(),
             ..StepTimings::default()
@@ -356,6 +357,9 @@ impl RegionFlow {
         });
         report.gradient_norm = Some(gradient_norm);
         let local_rates = roughening_rates(&e, problem);
+        all_finite(self.n_steps, &local_rates, |c| {
+            format!("the roughening rate at cut point {c}")
+        })?;
         let dual = cut_dual_lengths(cut, tri);
         report.roughening_rate = weighted_quantile(&local_rates, &dual, ROUGHENING_QUANTILE);
         report.roughening_rate_max = weighted_quantile(&local_rates, &dual, 1.0);
@@ -449,6 +453,7 @@ impl RegionFlow {
             }
         }
         report.tau = tau;
+        finite(self.n_steps, tau, || "the step size".to_string())?;
         if let Some(stages) = stages.as_deref_mut() {
             stages.cut_length = dual.clone();
             stages.local_edge = edges.clone();
@@ -590,6 +595,14 @@ impl RegionFlow {
         }
         report.timings.length += start.elapsed().as_secs_f64();
         let start = Instant::now();
+        for (k, phi) in new.iter().enumerate() {
+            all_finite(self.n_steps, phi, |v| {
+                format!(
+                    "the level-set function {k} at vertex {v} after the explicit and the length \
+                     step"
+                )
+            })?;
+        }
         if let Some(stages) = stages.as_deref_mut() {
             stages.length = new.clone();
         }
@@ -688,6 +701,11 @@ impl RegionFlow {
                     .fold(0.0, f64::max)
             })
             .fold(0.0, f64::max);
+        for (k, phi) in new.iter().enumerate() {
+            all_finite(self.n_steps, phi, |v| {
+                format!("the new level-set function {k} at vertex {v}")
+            })?;
+        }
 
         self.phis = new;
         self.time += tau;
@@ -724,14 +742,16 @@ impl RegionFlow {
             if vanished {
                 break StopReason::CutVanished;
             }
-            if motion <= stop.motion_tolerance {
+            if stop.motion_tolerance > 0.0 && motion <= stop.motion_tolerance {
                 break StopReason::Converged;
             }
             if let Some(reason) = energy_stop(stop, &steps) {
                 break reason;
             }
         };
-        let mut final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let last = self.evaluate(problem, &options.eval)?;
+        finite_evaluation(self.n_steps, &last.energy, &last.speed)?;
+        let mut final_energy = last.energy;
         let last_energy = final_energy.total;
         let (lowest_energy, lowest_energy_step, returned_step) = run_outcome(
             reason,

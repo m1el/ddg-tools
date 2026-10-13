@@ -6,8 +6,8 @@ mod common;
 use common::{polar_angle, sphere};
 use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
-    CutProblem, Energy, Flow, FlowOptions, RegionFlow, RunReport, StepSize, StopReason, StopRule,
-    init,
+    CutError, CutProblem, Energy, Flow, FlowOptions, RegionFlow, RegionWeights, RunReport,
+    StepSize, StopReason, StopRule, energy_criterion, init,
 };
 
 /// The energies of the states of a run: before every step, and after the last one.
@@ -196,4 +196,182 @@ fn the_run_on_spot_that_rose_falls() {
         .map(|w| (w[1] - w[0]) / w[0])
         .fold(0.0, f64::max);
     assert!(worst < 0.05, "a step raised the energy by {worst:e}");
+}
+
+/// The three cases of the energy criterion (SPEC §4, D27): for a positive tolerance and finite
+/// energies exactly one holds; a tolerance that is not positive turns the criterion off; an
+/// energy that is not finite is never a reason to stop.
+#[test]
+fn the_three_cases_of_the_energy_criterion() {
+    let values = [
+        -3.0,
+        -1.0,
+        -1e-9,
+        0.0,
+        1e-9,
+        0.5,
+        1.0,
+        1.0 + 1e-6,
+        2.0,
+        1e12,
+    ];
+    for tolerance in [1e-12, 1e-4, 0.3, 2.0] {
+        for before in values {
+            for now in values {
+                let (fell, rose) = (before - now, now - before);
+                let limit = tolerance * f64::abs(now);
+                let cases = [fell > limit, fell.abs() <= limit, rose > limit];
+                assert_eq!(cases.iter().filter(|c| **c).count(), 1);
+                let expected = if cases[0] {
+                    None
+                } else if cases[1] {
+                    Some(StopReason::EnergyStalled)
+                } else {
+                    Some(StopReason::EnergyRose)
+                };
+                assert_eq!(energy_criterion(tolerance, before, now), expected);
+            }
+        }
+    }
+    // Off: the energy has not fallen here, and with a tolerance of 0 that is no reason to stop.
+    for tolerance in [0.0, -1.0, f64::NAN] {
+        for (before, now) in [(1.0, 1.0), (1.0, 2.0), (2.0, 1.0)] {
+            assert_eq!(energy_criterion(tolerance, before, now), None);
+        }
+    }
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(energy_criterion(1e-4, bad, 1.0), None);
+        assert_eq!(energy_criterion(1e-4, 1.0, bad), None);
+        assert_eq!(energy_criterion(1e-4, bad, bad), None);
+    }
+}
+
+/// A number of a step that is not finite is an error that names the step and the number, and
+/// the flow stays in the state before the step (SPEC §4): never a stop reason.
+#[test]
+fn a_non_finite_number_is_an_error_and_not_a_stop_reason() {
+    let s = sphere(2);
+    let phi0 = s.sample(|p| polar_angle(p) - 1.1);
+    let good = CutProblem::new(Energy::Dirichlet, 1.0);
+    let options = FlowOptions::new(StepSize::default());
+    let stop = StopRule {
+        max_steps: 40,
+        ..StopRule::default()
+    };
+    // Weights that are valid one by one and overflow in the energy.
+    let overflow = CutProblem {
+        regions: vec![
+            RegionWeights {
+                distortion: 1e308,
+                area: 0.0,
+            };
+            2
+        ],
+        ..good.clone()
+    };
+    let heavy = CutProblem::new(Energy::Dirichlet, f64::MAX);
+
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+    for bad in [&overflow, &heavy] {
+        let error = flow.run(bad, &options, &stop).unwrap_err();
+        println!("{error}");
+        assert!(
+            matches!(&error, CutError::NonFiniteStep { step: 0, value, .. } if !value.is_finite()),
+            "{error:?}"
+        );
+        assert_eq!(flow.n_steps(), 0);
+        assert_eq!(flow.time(), 0.0);
+    }
+    // After two good steps the error names step 2, and the state is the one after them.
+    flow.step(&good, &options).unwrap();
+    flow.step(&good, &options).unwrap();
+    let state = flow.level_set();
+    let error = flow.step(&overflow, &options).unwrap_err();
+    assert!(
+        matches!(error, CutError::NonFiniteStep { step: 2, .. }),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("after 2 steps"));
+    assert_eq!(flow.level_set(), state);
+    assert_eq!(flow.n_steps(), 2);
+    // The flow goes on with a valid problem.
+    flow.step(&good, &options).unwrap();
+
+    // A level-set function that leaves the range of `f64` in a step: a step size near the
+    // limit, no length term.
+    let free = CutProblem::new(Energy::Dirichlet, 0.0);
+    let huge = FlowOptions::new(StepSize::Fixed(1e308));
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+    let state = flow.level_set();
+    let error = flow.step(&free, &huge).unwrap_err();
+    println!("{error}");
+    assert!(
+        matches!(&error, CutError::NonFiniteStep { step: 0, what, .. } if what.contains("level-set")),
+        "{error:?}"
+    );
+    assert_eq!(flow.level_set(), state);
+
+    // The same through the flow for several regions.
+    let phis = vec![phi0.clone(), phi0.iter().map(|x| -x).collect()];
+    let mut regions = RegionFlow::new(&s.mesh, &s.geometry, &phis).unwrap();
+    let state = regions.level_sets();
+    for (problem, options) in [(&overflow, &options), (&heavy, &options), (&free, &huge)] {
+        let error = regions.run(problem, options, &stop).unwrap_err();
+        assert!(
+            matches!(error, CutError::NonFiniteStep { step: 0, .. }),
+            "{error:?}"
+        );
+        assert_eq!(regions.level_sets(), state);
+        assert_eq!(regions.n_steps(), 0);
+    }
+}
+
+/// A tolerance of zero turns a criterion off: a run whose steps move nothing (no distortion
+/// weight, no length weight) goes on to its last step with `motion_tolerance = 0`, and ends
+/// as converged after one step with a positive tolerance.
+#[test]
+fn a_tolerance_of_zero_turns_a_criterion_off() {
+    let s = sphere(2);
+    let phi0 = s.sample(|p| polar_angle(p) - 1.1);
+    let still = CutProblem {
+        regions: vec![
+            RegionWeights {
+                distortion: 0.0,
+                area: 0.0,
+            };
+            2
+        ],
+        ..CutProblem::new(Energy::Dirichlet, 0.0)
+    };
+    let options = FlowOptions::new(StepSize::default());
+    let off = StopRule {
+        max_steps: 3,
+        motion_tolerance: 0.0,
+        energy_tolerance: 0.0,
+        energy_window: 1,
+    };
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+    let report = flow.run(&still, &options, &off).unwrap();
+    check_report(&report);
+    assert!(report.steps.iter().all(|r| r.cut_motion == 0.0));
+    assert_eq!(report.stop, StopReason::MaxSteps);
+    assert_eq!(report.steps.len(), 3);
+
+    let on = StopRule {
+        motion_tolerance: 1e-9,
+        ..off
+    };
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+    let report = flow.run(&still, &options, &on).unwrap();
+    assert_eq!(report.stop, StopReason::Converged);
+    assert_eq!(report.steps.len(), 1);
+    // The energy criterion: the energy stands still, which a tolerance of zero does not stop.
+    let energy = StopRule {
+        energy_tolerance: 1e-4,
+        ..off
+    };
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+    let report = flow.run(&still, &options, &energy).unwrap();
+    assert_eq!(report.stop, StopReason::EnergyStalled);
+    assert_eq!(report.steps.len(), 2);
 }

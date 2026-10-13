@@ -489,7 +489,9 @@ pub struct StopRule {
     /// Stop after this many steps.
     pub max_steps: usize,
     /// Stop when the cut motion of a step ([`StepReport::cut_motion`], a length on the
-    /// unit-area surface) is at most this. `0.0` never stops for this reason.
+    /// unit-area surface) is at most this. A tolerance that is not positive turns the
+    /// criterion off: `0.0` never stops for this reason, also not after a step that moved
+    /// nothing.
     pub motion_tolerance: f64,
     /// Stop when the energy has not fallen by more than this fraction of its size over the
     /// last `energy_window` steps: `E_{k − window} − E_k ≤ energy_tolerance · |E_k|`. On an
@@ -498,7 +500,9 @@ pub struct StopRule {
     /// motion never falls below a small tolerance; the energy then stands still
     /// ([`StopReason::EnergyStalled`]). If it rose over the window by more than the tolerance,
     /// the run ends with [`StopReason::EnergyRose`] and the flow is set back to the state of
-    /// lowest energy of the run. `0.0` never stops for either reason.
+    /// lowest energy of the run. A tolerance that is not positive turns the criterion off:
+    /// `0.0` never stops for either reason ([`energy_criterion`]). A run of at most
+    /// `energy_window` steps does not end by it.
     pub energy_tolerance: f64,
     /// The number of steps the energy is compared over, `≥ 1`.
     pub energy_window: usize,
@@ -549,18 +553,72 @@ impl StopReason {
     }
 }
 
-/// The energy criterion of the stop rule (SPEC §4, D27) after the steps `steps`: with `E_k` the
-/// energy of the state before step `k`, the run ends when
-/// `E_{k − window} − E_k ≤ energy_tolerance · |E_k|` for the last `k`; because the energy rose
-/// if `E_k − E_{k − window} > energy_tolerance · |E_k|`, because it stood still otherwise.
-pub(crate) fn energy_stop(stop: &StopRule, steps: &[StepReport]) -> Option<StopReason> {
-    let window = stop.energy_window.max(1);
-    if stop.energy_tolerance <= 0.0 || steps.len() <= window {
+/// `Err(`[`CutError::NonFiniteStep`]`)` unless `value` is finite. `step` is the number of steps
+/// taken before.
+pub(crate) fn finite(
+    step: usize,
+    value: f64,
+    what: impl FnOnce() -> String,
+) -> Result<(), CutError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(CutError::NonFiniteStep {
+            step,
+            what: what(),
+            value,
+        })
+    }
+}
+
+/// [`finite`] for every entry of `values`; `what` names the entry.
+pub(crate) fn all_finite(
+    step: usize,
+    values: &[f64],
+    what: impl Fn(usize) -> String,
+) -> Result<(), CutError> {
+    match values.iter().position(|x| !x.is_finite()) {
+        Some(i) => finite(step, values[i], || what(i)),
+        None => Ok(()),
+    }
+}
+
+/// [`finite`] for every term of an energy and for the speeds at the cut points: what a step
+/// starts from.
+pub(crate) fn finite_evaluation(
+    step: usize,
+    energy: &EnergyTerms,
+    speed: &[f64],
+) -> Result<(), CutError> {
+    all_finite(step, &energy.distortion, |r| {
+        format!("the distortion of region {r}")
+    })?;
+    all_finite(step, &energy.area, |r| format!("the area of region {r}"))?;
+    finite(step, energy.length, || "the length of the cut".to_string())?;
+    finite(step, energy.penalty, || {
+        "the penalty term of the energy".to_string()
+    })?;
+    finite(step, energy.total, || {
+        "the energy (its terms are finite, their weighted sum is not)".to_string()
+    })?;
+    all_finite(step, speed, |c| format!("the speed at cut point {c}"))
+}
+
+/// The three cases of the energy criterion (SPEC §4, D27), for the energy `before` at the start
+/// of the window and `now` at its end: `None`, the run goes on, if
+/// `before − now > tolerance · |now|`; [`StopReason::EnergyRose`] if
+/// `now − before > tolerance · |now|`; [`StopReason::EnergyStalled`] otherwise. For
+/// `tolerance ≥ 0` and finite energies exactly one of the three holds. A tolerance that is
+/// not positive turns the criterion off: `None`, whatever the energies (it does *not* mean
+/// "stop unless the energy has strictly fallen"). Energies that are not finite are no reason
+/// to stop either: a step with such an energy is an error ([`CutError::NonFiniteStep`]).
+///
+/// [formula: cut-stop-energy]
+pub fn energy_criterion(tolerance: f64, before: f64, now: f64) -> Option<StopReason> {
+    if tolerance.is_nan() || tolerance <= 0.0 || !before.is_finite() || !now.is_finite() {
         return None;
     }
-    let now = steps[steps.len() - 1].energy.total;
-    let before = steps[steps.len() - 1 - window].energy.total;
-    let tolerance = stop.energy_tolerance * now.abs();
+    let tolerance = tolerance * now.abs();
     if before - now > tolerance {
         None
     } else if now - before > tolerance {
@@ -570,12 +628,30 @@ pub(crate) fn energy_stop(stop: &StopRule, steps: &[StepReport]) -> Option<StopR
     }
 }
 
+/// The energy criterion of the stop rule (SPEC §4, D27) after the steps `steps`: with `E_k` the
+/// energy of the state before step `k`, [`energy_criterion`] for `E_{k − window}` and `E_k`
+/// with the last `k`. It needs more than `window` steps: a run of at most `window` steps does
+/// not end by it.
+pub(crate) fn energy_stop(stop: &StopRule, steps: &[StepReport]) -> Option<StopReason> {
+    let window = stop.energy_window.max(1);
+    if steps.len() <= window {
+        return None;
+    }
+    energy_criterion(
+        stop.energy_tolerance,
+        steps[steps.len() - 1 - window].energy.total,
+        steps[steps.len() - 1].energy.total,
+    )
+}
+
 /// The lowest energy of a run and what the run returns (SPEC §4, D27). `lowest` is the lowest
 /// energy among the states before the steps with the number of steps taken before it;
 /// `last_energy` is the energy after the last of `n_steps` steps. Returns the lowest energy of
 /// all states, its step (the earliest of equal ones), and the step whose state the run returns:
 /// the last one, or with [`StopReason::EnergyRose`] the one of lowest energy. A last state
 /// without a cut ([`StopReason::CutVanished`]) has no energy to compare and does not count.
+///
+/// [formula: cut-run-lowest]
 pub(crate) fn run_outcome(
     reason: StopReason,
     lowest: Option<(f64, usize)>,
@@ -988,7 +1064,9 @@ impl Flow {
     /// # Errors
     /// As [`Evaluator::evaluate`]; [`CutError::InvalidOptions`] for a step size that is not
     /// positive, symmetry classes of the wrong length, or the paper's penalty rule with
-    /// `α_L + η_i = 0` at some but not all vertices.
+    /// `α_L + η_i = 0` at some but not all vertices; [`CutError::NonFiniteStep`] if a term of
+    /// the energy, a speed, the step size or a value of the new level-set function is not
+    /// finite. The state is unchanged if a step fails.
     pub fn step(
         &mut self,
         problem: &CutProblem,
@@ -1027,6 +1105,7 @@ impl Flow {
         let start = Instant::now();
         let e = self.evaluator.evaluate(&self.phi, problem, &options.eval)?;
         timings.evaluate = start.elapsed().as_secs_f64();
+        finite_evaluation(self.n_steps, &e.energy, &e.speed)?;
         let max_speed = e.speed.iter().fold(0.0f64, |m, s| m.max(s.abs()));
         let mut report = StepReport {
             time: self.time,
@@ -1058,6 +1137,9 @@ impl Flow {
             gradient_norms(&e.cut, &e.triangles, |_, a| self.phi[a].abs());
         report.gradient_norm = Some(gradient_norm);
         let local_rates = roughening_rates(&e, problem);
+        all_finite(self.n_steps, &local_rates, |c| {
+            format!("the roughening rate at cut point {c}")
+        })?;
         let dual = cut_dual_lengths(&e.cut, &e.triangles);
         report.roughening_rate = weighted_quantile(&local_rates, &dual, ROUGHENING_QUANTILE);
         report.roughening_rate_max = weighted_quantile(&local_rates, &dual, 1.0);
@@ -1134,6 +1216,7 @@ impl Flow {
             }
         }
         report.tau = tau;
+        finite(self.n_steps, tau, || "the step size".to_string())?;
         if let Some(stages) = stages.as_deref_mut() {
             stages.roughening = local_rates.clone();
             stages.cut_length = dual.clone();
@@ -1203,6 +1286,9 @@ impl Flow {
         }
         report.timings.length += start.elapsed().as_secs_f64();
         let start = Instant::now();
+        all_finite(self.n_steps, &phi, |v| {
+            format!("the level-set function at vertex {v} after the explicit and the length step")
+        })?;
         if let Some(stages) = stages.as_deref_mut() {
             stages.length = phi.clone();
         }
@@ -1271,6 +1357,9 @@ impl Flow {
             .filter(|&v| adjacent_before[v] || adjacent_after[v])
             .map(|v| (phi[v] - self.phi[v]).abs())
             .fold(0.0, f64::max);
+        all_finite(self.n_steps, &phi, |v| {
+            format!("the new level-set function at vertex {v}")
+        })?;
 
         self.phi = phi;
         self.time += tau;
@@ -1308,14 +1397,16 @@ impl Flow {
             if vanished {
                 break StopReason::CutVanished;
             }
-            if motion <= stop.motion_tolerance {
+            if stop.motion_tolerance > 0.0 && motion <= stop.motion_tolerance {
                 break StopReason::Converged;
             }
             if let Some(reason) = energy_stop(stop, &steps) {
                 break reason;
             }
         };
-        let mut final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let last = self.evaluate(problem, &options.eval)?;
+        finite_evaluation(self.n_steps, &last.energy, &last.speed)?;
+        let mut final_energy = last.energy;
         let last_energy = final_energy.total;
         let (lowest_energy, lowest_energy_step, returned_step) = run_outcome(
             reason,

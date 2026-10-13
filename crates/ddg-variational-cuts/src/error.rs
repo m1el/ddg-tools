@@ -149,6 +149,18 @@ pub enum CutError {
         /// The exclusive upper bound it violates.
         bound: usize,
     },
+    /// A number of a flow step is NaN or infinite: a term of the energy, a speed, the step
+    /// size, or a value of a level-set function after the step (weights, curvatures or step
+    /// sizes near the limits of `f64`). The step is not taken, the flow stays in the state
+    /// before it, and a run ends with this error instead of a stop reason.
+    NonFiniteStep {
+        /// The number of steps that the flow had taken before this one.
+        step: usize,
+        /// Which number.
+        what: String,
+        /// Its value.
+        value: f64,
+    },
 }
 
 impl fmt::Display for CutError {
@@ -261,6 +273,11 @@ impl fmt::Display for CutError {
             CutError::IndexOutOfRange { what, index, bound } => {
                 write!(f, "{what} {index} is out of range (must be < {bound})")
             }
+            CutError::NonFiniteStep { step, what, value } => write!(
+                f,
+                "after {step} steps of the flow {what} is {value}; it must be finite, and the \
+                 next step was not taken"
+            ),
         }
     }
 }
