@@ -348,3 +348,18 @@ The add-on is a front end for two papers:
 The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed reference
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's
 tooltip in Blender names both papers.
+
+### Cost of the cut operators
+
+`scripts/blender-test.sh --bench` (`blender/tests/bench_cut.py`), UV sphere, 32 514 vertices,
+32 768 faces, 130 560 corners; "library" is the time inside `ddg_tools.CutSession`, "add-on" the
+rest (mesh buffers, attributes, preview object, bmesh):
+
+| operator | total ms | library ms | add-on ms |
+|----------|---------:|-----------:|----------:|
+| Start | 116.6 | 91.7 | 25.0 |
+| Flow (10 steps) | 725.7 | 690.1 | 35.6 |
+| Apply | 155.6 | 83.3 | 72.3 |
+
+Each operator builds a new session (the flow's symbolic analysis and factorization are not kept
+between operator calls), so Start and Apply pay for one session each.
