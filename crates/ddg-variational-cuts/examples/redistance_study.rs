@@ -73,6 +73,10 @@ fn dist_segment(x: [f64; 3], p: [f64; 3], q: [f64; 3], clamp: bool) -> f64 {
 fn redistance(s: &Shape, phi: &[f64], mode: Mode, center: [f64; 2]) -> Vec<f64> {
     let cut = Cut::from_level_set(&s.mesh, phi, 0.0).unwrap();
     let points = cut.point_positions(&s.mesh, &s.positions).unwrap();
+    if points.is_empty() {
+        // The cut has vanished: nothing to measure distances from.
+        return phi.to_vec();
+    }
     let n = phi.len();
     let sign = |v: usize| if region_of(phi[v]) == 0 { -1.0 } else { 1.0 };
     let adjacent = cut.cut_adjacent_vertices(&s.mesh);
@@ -145,7 +149,7 @@ fn redistance(s: &Shape, phi: &[f64], mode: Mode, center: [f64; 2]) -> Vec<f64> 
 fn main() {
     let (rho0, alpha, t_end) = (0.3, 1.0, 0.03);
     let center = [0.511, 0.493];
-    let exact = (rho0 * rho0 - 2.0 * alpha * t_end as f64).sqrt();
+    let exact = f64::sqrt(rho0 * rho0 - 2.0 * alpha * t_end);
     let modes = [
         Mode::Circle,
         Mode::KeepFmm,
@@ -177,9 +181,12 @@ fn main() {
             for mode in modes {
                 let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
                 let problem = CutProblem::new(Energy::Dirichlet, alpha);
+                // The stages of the paper (the heat step on the mesh), with the flux recovery
+                // of SPEC §3.5 and the redistancing replaced by the mode under study.
                 let options = FlowOptions {
                     redistance: Redistance::Off,
-                    ..FlowOptions::new(StepSize::Fixed(tau))
+                    eval: ddg_variational_cuts::EvalOptions::default(),
+                    ..FlowOptions::paper(StepSize::Fixed(tau))
                 };
                 for _ in 0..steps {
                     flow.step(&problem, &options).unwrap();
