@@ -17,7 +17,8 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
    Delaunay variant comes later; the whole cut flow is to run on the intrinsic triangulation, the
    cut is traced back, refinement that adds vertices is allowed; no visible effect in Blender; a
    detected wrong result (a failed trace) is an error, never repaired silently. Branches: `master`
-   moves up to `variational-cuts` when item 1 lands, the work is on `intrinsic-triangulations`.
+   was moved up to `variational-cuts` when the UV-flip fix landed; the work is on
+   `intrinsic-triangulations`. The contract is `crates/ddg-intrinsic/SPEC.md`.
 
 ## Decided (2026-10-14)
 
