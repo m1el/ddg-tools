@@ -31,3 +31,6 @@ import DdgProofs.Cuts.Step
 import DdgProofs.Cuts.Recovery
 import DdgProofs.Cuts.Redistance
 import DdgProofs.Cuts.Analytic
+import DdgProofs.Cuts.OnCut
+import DdgProofs.Cuts.Ripple
+import DdgProofs.Cuts.Regions

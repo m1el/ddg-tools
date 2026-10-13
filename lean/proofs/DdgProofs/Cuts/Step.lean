@@ -33,8 +33,10 @@ import DdgProofs.Cuts.Dirichlet
   `r⁰ = r_ε` exactly at `K = 0` and `r⁰ < 1/√|K|` otherwise (`featureSizeRaw_pos`,
   `featureSizeRaw_le`, `featureSizeRaw_lt_inv_sqrt`); the smoothing `(W_V + c L) r = W_V r⁰`
   keeps the bounds of `r⁰` **if the off-diagonal entries of `L` are nonpositive**
-  (`smoothing_ge`, `smoothing_le`); on a mesh with negative cotangent weights that is not
-  guaranteed.
+  (`smoothing_ge`, `smoothing_le`); with the cotan Laplacian itself that is not guaranteed on a
+  mesh with negative cotangent weights, with the Laplacian `L⁺` of the edge weights
+  `max(w_ij, 0)` that SPEC §3.6 uses (D17) it holds on every mesh
+  (`smoothedFeatureSize_bounds_positivePart`).
 * **`cut-sliver-smoothing`** (`Ddg.aspectRatio`, `Ddg.smoothedSpeed`): the smoothed speed is a
   convex combination of the two neighbours' speeds with the weights `ℓ₂/(ℓ₁+ℓ₂)`, `ℓ₁/(ℓ₁+ℓ₂)`,
   hence within their range, and it is exact for a speed that is linear in arclength
@@ -791,6 +793,21 @@ theorem smoothedFeatureSize_bounds [Nonempty V] {A : V → ℝ} (hA : ∀ i, 0 <
       (smoothing_ge hA hoff hrow hc h (fun j => hmin j (Finset.mem_univ j)) i)
   exact ⟨h1, smoothing_le hA hoff hrow hc h (fun j => featureSizeRaw_le hr (K j)) i,
     featureWeight_pos h1⟩
+
+/-- **The smoothing of SPEC §3.6 (D17) keeps the bounds on every mesh.** `L⁺` is the Laplacian
+of the edge weights `max(w_ij, 0)`; with `o_ij = −w_ij` the off-diagonal entries of the cotan
+Laplacian its off-diagonal entries are `min(o_ij, 0) ≤ 0`, so the hypotheses of
+`smoothedFeatureSize_bounds` hold by construction: the solution of
+`(W_V + c L⁺) r = W_V r⁰` has `0 < r_i ≤ r_ε` and `a_i = r_i³ > 0`.
+
+[formula: cut-feature-size] -/
+theorem smoothedFeatureSize_bounds_positivePart [Nonempty V] {A : V → ℝ} (hA : ∀ i, 0 < A i)
+    (o : V → V → ℝ) {c : ℝ} (hc : 0 ≤ c) {rε : ℝ} (hr : 0 < rε) (K : V → ℝ) {r : V → ℝ}
+    (h : (Matrix.diagonal A + c • lapOfOffDiag (fun i j => min (o i j) 0)) *ᵥ r =
+      Matrix.diagonal A *ᵥ fun i => Ddg.featureSizeRaw rε (K i)) (i : V) :
+    0 < r i ∧ r i ≤ rε ∧ 0 < Ddg.featureWeight (r i) :=
+  smoothedFeatureSize_bounds hA (fun i j hij => by simp [lapOfOffDiag, hij])
+    (lapOfOffDiag_mulVec_one _) hc hr K h i
 
 end Smoothing
 
