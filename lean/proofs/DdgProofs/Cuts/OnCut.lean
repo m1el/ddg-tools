@@ -976,7 +976,12 @@ theorem heightOver_mul (area : ℝ) {len : ℝ} (hlen : len ≠ 0) :
   simp only [Ddg.heightOver, Oracle.two_eq]
   field_simp
 
-/-! ## The adaptive step (SPEC §4) -/
+/-! ## The adaptive step (SPEC §4)
+
+`adaptiveStep τ_max time_scale ω max_motion h ρ̂` with the statistics `ω`, `h`, `ρ̂` of the cut:
+the largest local rate, the shortest crossed edge and the largest `|ρ_c|` for the extremes;
+the quantiles `ω`, `m̂` and `h = 1` for the robust statistics (the oracle's `robustStep`,
+`DdgProofs/Cuts/Quantile.lean`, which also has the skipping of terms and the local limit). -/
 
 /-- The oracle's `adaptiveStep` at `ℝ`. -/
 theorem adaptiveStep_eq (τmax ts ω mm h ρ : ℝ) :
@@ -1011,7 +1016,8 @@ theorem adaptiveStep_mul_omega_le (τmax ts mm h ρ : ℝ) {ω : ℝ} (hω : 0 <
         mul_le_mul_of_nonneg_right h1 hω.le
     _ = ts := by field_simp
 
-/-- **The adaptive step limits the motion**: `τ · max|ρ| ≤ max_motion · h` for `max|ρ| > 0`.
+/-- **The adaptive step limits the motion**: `τ · ρ̂ ≤ max_motion · h` for a speed statistic
+`ρ̂ > 0`.
 
 [formula: cut-step-cap] -/
 theorem adaptiveStep_mul_rho_le (τmax ts ω mm h : ℝ) {ρ : ℝ} (hρ : 0 < ρ) :

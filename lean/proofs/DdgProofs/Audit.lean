@@ -710,3 +710,12 @@ open DdgProofs
 #print axioms Cuts.localLimit_motion_le_adaptive
 #print axioms Cuts.localLimit_sign
 #print axioms Cuts.firstVariation_localLimit
+#print axioms Cuts.robustStep_mul_le_edge
+#print axioms Cuts.localLimitFactor_eq_one_of_speed_le
+#print axioms Cuts.oracle_weightedQuantile_mem_or
+#print axioms Cuts.robustStep_mul_mhat_le
+#print axioms Cuts.localLimit_cases_agree
+#print axioms Cuts.localLimit_twoCase_eq
+#print axioms Cuts.localLimit_first_case_of_zero
+#print axioms Cuts.onCut_rate_descent
+#print axioms Cuts.limited_rate_not_descent_example

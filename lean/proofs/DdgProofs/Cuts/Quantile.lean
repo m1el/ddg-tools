@@ -44,8 +44,15 @@ D22, D23.
   most `max_motion · h_c`; a limited point takes the step `max_motion · h_c/v_c`; the limit keeps
   the sign of the rate, never increases its size, and keeps a vanishing rate
   (`localLimitFactor_mem_Ioc`, `localLimitFactor_eq_one`, `localLimit_motion_le`,
-  `localLimit_step_eq`, `localLimit_sign`); a rate limited point by point is still a descent
-  direction (`firstVariation_localLimit`); the oracle's
+  `localLimit_step_eq`, `localLimit_sign`). The two cases of SPEC §4 agree: if `τ m̂ ≤ max_motion`
+  and `v_c/h_c ≤ m̂` then `τ v_c ≤ max_motion · h_c` and the factor is `1`, so the rule with two
+  cases is `localLimitFactor` alone; the robust step satisfies `τ m̂ ≤ max_motion`; `m̂ ≥ 0`, so
+  the first case covers `v_c = 0` (`localLimit_cases_agree`, `localLimit_twoCase_eq`,
+  `robustStep_mul_mhat_le`, `localLimitFactor_eq_one_of_speed_le`,
+  `localLimit_first_case_of_zero`). A gradient density limited point by point is still a descent
+  direction (`firstVariation_localLimit`); the rate of the system on the cut is one
+  (`onCut_rate_descent`) but, limited point by point, need not be
+  (`limited_rate_not_descent_example`). The oracle's
   `localSpeed r_c ω_c ω = max(|r_c|, ½(ω_c − ω)₊)` is `≥ |r_c|` (`abs_le_localSpeed`,
   `localLimit_motion_le_adaptive`), and `|s_c| ≤ ω_c/2` when `Q_0, Q_1 ≥ 0`
   (`abs_cutSpeed_le_half_roughRate`).
@@ -616,13 +623,23 @@ theorem oracle_weightedQuantile_const {xs ls : List ℝ} (hw : ∀ p ∈ xs.zip 
   obtain ⟨p, hp, he⟩ := (oracle_weightedQuantile_spec hw hW hq0 hq1).mem
   rw [he, hc p hp]
 
-/-- A quantile of nonnegative values is nonnegative (nonnegative weights of positive sum, or
-the empty list). -/
-theorem oracle_weightedQuantile_nonneg {xs ls : List ℝ} (hw : ∀ p ∈ xs.zip ls, 0 ≤ p.2)
-    (hW : 0 < totalWeight (xs.zip ls)) {q : ℝ} (hq0 : 0 < q) (hq1 : q ≤ 1)
-    (h : ∀ p ∈ xs.zip ls, 0 ≤ p.1) : 0 ≤ Ddg.weightedQuantile q xs ls := by
-  rw [oracle_weightedQuantile_eq hw hW hq0 hq1]
-  exact weightedQuantile_nonneg h q
+/-- The oracle's quantile is `0` or one of the values, whatever the weights and `q`. -/
+theorem oracle_weightedQuantile_mem_or (q : ℝ) (xs ls : List ℝ) :
+    Ddg.weightedQuantile q xs ls = 0 ∨ ∃ p ∈ xs.zip ls, Ddg.weightedQuantile q xs ls = p.1 := by
+  rw [oracle_weightedQuantile_eq_scan]
+  rcases quantileScan_mem_or (Ddg.sortAscending (xs.zip ls)) 0
+    (q * totalWeight (Ddg.sortAscending (xs.zip ls))) 0 with h | ⟨p, hp, he⟩
+  · exact Or.inl h
+  · exact Or.inr ⟨p, (sortAscending_perm _).mem_iff.mp hp, he⟩
+
+/-- A quantile of nonnegative values is nonnegative (any weights, any `q`, also the empty
+list): the statistic `m̂` of the step rule is `≥ 0`. -/
+theorem oracle_weightedQuantile_nonneg {xs ls : List ℝ} (h : ∀ p ∈ xs.zip ls, 0 ≤ p.1) (q : ℝ) :
+    0 ≤ Ddg.weightedQuantile q xs ls := by
+  rcases oracle_weightedQuantile_mem_or q xs ls with h0 | ⟨p, hp, he⟩
+  · rw [h0]
+  · rw [he]
+    exact h p hp
 
 /-! ## The roughening rate of a state (SPEC §1, D22) -/
 
@@ -639,10 +656,9 @@ theorem roughening_quantile_spec {ωs ls : List ℝ} (hw : ∀ p ∈ ωs.zip ls,
     (oracle_weightedQuantile_spec hw hW (by norm_num) (by norm_num)).reach⟩
 
 /-- For the Dirichlet energy all local rates are nonnegative, and so is the rate of the state. -/
-theorem roughening_quantile_nonneg {ωs ls : List ℝ} (hw : ∀ p ∈ ωs.zip ls, 0 ≤ p.2)
-    (hW : 0 < totalWeight (ωs.zip ls)) (h : ∀ p ∈ ωs.zip ls, 0 ≤ p.1) :
+theorem roughening_quantile_nonneg {ωs ls : List ℝ} (h : ∀ p ∈ ωs.zip ls, 0 ≤ p.1) :
     0 ≤ Ddg.weightedQuantile 0.9 ωs ls :=
-  oracle_weightedQuantile_nonneg hw hW (by norm_num) (by norm_num) h
+  oracle_weightedQuantile_nonneg h _
 
 /-- The rate of a ripple increases with the roughening rate. -/
 theorem rippleRate_mono_omega {ω ω' : ℝ} (h : ω ≤ ω') (w : ℝ) {k : ℝ} (hk : 0 ≤ k) :
@@ -1098,6 +1114,35 @@ theorem localLimit_step_eq {mm hc τ v : ℝ} (ha : 0 ≤ mm * hc) (hτ : 0 < τ
   rw [localLimitFactor_def, ite_eq_left hpos, min_eq_right ((div_le_one hpos).mpr h.le),
     ← mul_div_assoc, mul_div_mul_left _ _ hτ.ne']
 
+/-- With the robust step, a speed `v` with `v/h_c ≤ m̂` moves a point by at most
+`max_motion · h_c` (`v` of either sign; `τ_max, time_scale, max_motion ≥ 0`, `h_c > 0`). -/
+theorem robustStep_mul_le_edge {τmax ts mm ω mhat hc v : ℝ} (hτ : 0 ≤ τmax) (hts : 0 ≤ ts)
+    (hmm : 0 ≤ mm) (hhc : 0 < hc) (hm : v / hc ≤ mhat) :
+    Ddg.robustStep τmax ts ω mm mhat * v ≤ mm * hc := by
+  have hmh : 0 ≤ mm * 1 := by rw [mul_one]; exact hmm
+  have hτ0 : 0 ≤ Ddg.robustStep τmax ts ω mm mhat := by
+    rw [robustStep_eq_adaptiveStep]
+    exact adaptiveStep_nonneg hτ hts hmh ω mhat
+  have hv : v ≤ mhat * hc := (div_le_iff₀ hhc).mp hm
+  by_cases hpos : 0 < mhat
+  · have h1 := (robustStep_spec τmax ts ω mm mhat).2.2.1 hpos
+    calc Ddg.robustStep τmax ts ω mm mhat * v
+        ≤ Ddg.robustStep τmax ts ω mm mhat * (mhat * hc) := mul_le_mul_of_nonneg_left hv hτ0
+      _ = Ddg.robustStep τmax ts ω mm mhat * mhat * hc := by ring
+      _ ≤ mm * hc := mul_le_mul_of_nonneg_right h1 hhc.le
+  · have h0 : v ≤ 0 := hv.trans (mul_nonpos_of_nonpos_of_nonneg (not_lt.mp hpos) hhc.le)
+    exact (mul_nonpos_of_nonneg_of_nonpos hτ0 h0).trans (mul_nonneg hmm hhc.le)
+
+/-- **A cut point whose speed in crossed edges does not exceed `m̂` is not limited**: with `τ`
+the robust step, `v_c/h_c ≤ m̂` gives the factor `1`. (The Rust code tests `v_c/h_c ≤ m̂` before
+it compares `τ v_c` with `max_motion · h_c`; in exact arithmetic that test changes nothing.)
+
+[formula: cut-step-local] -/
+theorem localLimitFactor_eq_one_of_speed_le {τmax ts mm ω mhat hc v : ℝ} (hτ : 0 ≤ τmax)
+    (hts : 0 ≤ ts) (hmm : 0 ≤ mm) (hhc : 0 < hc) (hm : v / hc ≤ mhat) :
+    Ddg.localLimitFactor mm hc (Ddg.robustStep τmax ts ω mm mhat) v = 1 :=
+  localLimitFactor_eq_one (robustStep_mul_le_edge hτ hts hmm hhc hm)
+
 /-- **No cut point moves by more than `max_motion · h_c`.** With the limited rate
 `r_c · localLimitFactor(max_motion, h_c, τ, v_c)`, `v_c ≥ |r_c|`, `τ ≥ 0`,
 `max_motion · h_c ≥ 0`: `τ |r_c| ≤ max_motion · h_c`.
@@ -1138,6 +1183,154 @@ theorem firstVariation_localLimit {C : Type*} [Fintype C] (g : C → ℝ) {ℓ :
   (firstVariation_limited g (fun c => Ddg.localLimitFactor mm (hc c) τ (v c)) hℓ fun c => by
     rw [localLimitFactor_eq (ha c)]
     exact localFactor_nonneg (ha c) _).2
+
+/-! ## The two cases of the local limit (SPEC §4, D24) -/
+
+/-- For `τ_max, time_scale, max_motion ≥ 0` the robust step is `≥ 0` and satisfies
+`τ m̂ ≤ max_motion`, whatever the sign of `m̂`. -/
+theorem robustStep_mul_mhat_le {τmax ts mm : ℝ} (hτ : 0 ≤ τmax) (hts : 0 ≤ ts) (hmm : 0 ≤ mm)
+    (ω mhat : ℝ) :
+    0 ≤ Ddg.robustStep τmax ts ω mm mhat ∧ Ddg.robustStep τmax ts ω mm mhat * mhat ≤ mm := by
+  have hmh : 0 ≤ mm * 1 := by rw [mul_one]; exact hmm
+  have hτ0 : 0 ≤ Ddg.robustStep τmax ts ω mm mhat := by
+    rw [robustStep_eq_adaptiveStep]
+    exact adaptiveStep_nonneg hτ hts hmh ω mhat
+  refine ⟨hτ0, ?_⟩
+  by_cases hpos : 0 < mhat
+  · exact (robustStep_spec τmax ts ω mm mhat).2.2.1 hpos
+  · exact (mul_nonpos_of_nonneg_of_nonpos hτ0 (not_lt.mp hpos)).trans hmm
+
+/-- **The two cases of the local limit agree**: if `τ m̂ ≤ max_motion` and `v_c/h_c ≤ m̂`
+(`τ ≥ 0`, `h_c > 0`) then `τ v_c ≤ max_motion · h_c`, so the factor of the second case is `1`
+there as well.
+
+[formula: cut-step-local] -/
+theorem localLimit_cases_agree {mm hc τ v mhat : ℝ} (hτ : 0 ≤ τ) (hhc : 0 < hc)
+    (h1 : τ * mhat ≤ mm) (h2 : v / hc ≤ mhat) :
+    τ * v ≤ mm * hc ∧ Ddg.localLimitFactor mm hc τ v = 1 := by
+  have hv : v ≤ mhat * hc := (div_le_iff₀ hhc).mp h2
+  have h : τ * v ≤ mm * hc :=
+    calc τ * v ≤ τ * (mhat * hc) := mul_le_mul_of_nonneg_left hv hτ
+      _ = τ * mhat * hc := by ring
+      _ ≤ mm * hc := mul_le_mul_of_nonneg_right h1 hhc.le
+  exact ⟨h, localLimitFactor_eq_one h⟩
+
+/-- **The rule with its two cases is the factor of the second case alone** (exact arithmetic):
+`(1 if v_c/h_c ≤ m̂, else localLimitFactor) = localLimitFactor`.
+
+[formula: cut-step-local] -/
+theorem localLimit_twoCase_eq {mm hc τ mhat : ℝ} (hτ : 0 ≤ τ) (hhc : 0 < hc)
+    (h1 : τ * mhat ≤ mm) (v : ℝ) :
+    (if v / hc ≤ mhat then 1 else Ddg.localLimitFactor mm hc τ v) =
+      Ddg.localLimitFactor mm hc τ v := by
+  by_cases h2 : v / hc ≤ mhat
+  · rw [ite_eq_left h2, (localLimit_cases_agree hτ hhc h1 h2).2]
+  · rw [ite_eq_right h2]
+
+/-- **The first case covers `v_c = 0`**, where the quotient of the second case is not defined:
+`m̂ ≥ 0` as a quantile of nonnegative speeds, so `0/h_c ≤ m̂`. -/
+theorem localLimit_first_case_of_zero {ms ls : List ℝ} (h : ∀ p ∈ ms.zip ls, 0 ≤ p.1)
+    (q hc : ℝ) : (0 : ℝ) / hc ≤ Ddg.weightedQuantile q ms ls := by
+  rw [zero_div]
+  exact oracle_weightedQuantile_nonneg h q
+
+/-! ## Is the limited rate a descent direction?
+
+It is when the rate is the gradient density itself (`firstVariation_localLimit`: the length
+step on the mesh, where the rate on the cut is `s`; or no coupling). The rate `r` of the system
+on the cut (SPEC §3.10) is a descent direction too (`onCut_rate_descent`), but limited point by
+point it need not be one (`limited_rate_not_descent_example`). -/
+
+section Descent
+
+open Matrix
+
+variable {C : Type*} [Fintype C] [DecidableEq C]
+
+/-- **The rate of the system on the cut is a descent direction**: with the gradient density
+`g = s + λ⁰`, `dE(σ) = Σ_c g_c σ_c ℓ_c` and the cut moving with `σ = −r`, where
+`ℓ_p r_p + τ Σ m_σ (r_p − r_q) = ℓ_p (s_p + λ⁰_p)`: `dE = −rᵀ(diag ℓ + τK) r ≤ 0`. -/
+theorem onCut_rate_descent {ℓ s lam r : C → ℝ} {m : C → C → ℝ} {τ : ℝ} (hℓ : ∀ p, 0 < ℓ p)
+    (hm : ∀ p q, m p q = m q p) (hm0 : ∀ p q, 0 ≤ m p q) (hτ : 0 ≤ τ)
+    (h : fluxMatrix ℓ (fun p q => τ * m p q) *ᵥ r = fun p => Ddg.fluxRhs (ℓ p * (s p + lam p))) :
+    firstVariation (fun c => s c + lam c) ℓ (fun c => -r c) =
+        -(r ⬝ᵥ (fluxMatrix ℓ (fun p q => τ * m p q) *ᵥ r)) ∧
+      firstVariation (fun c => s c + lam c) ℓ (fun c => -r c) ≤ 0 := by
+  have hpd : (fluxMatrix ℓ (fun p q => τ * m p q)).PosDef :=
+    fluxMatrix_posDef hℓ (fun p q => by rw [hm p q]) (fun p q => mul_nonneg hτ (hm0 p q))
+  have e : firstVariation (fun c => s c + lam c) ℓ (fun c => -r c) =
+      -(r ⬝ᵥ (fluxMatrix ℓ (fun p q => τ * m p q) *ᵥ r)) := by
+    rw [h]
+    unfold firstVariation
+    simp only [dotProduct, fluxRhs_eq]
+    rw [← Finset.sum_neg_distrib]
+    exact Finset.sum_congr rfl fun c _ => by ring
+  refine ⟨e, ?_⟩
+  rw [e, neg_nonpos]
+  have := hpd.posSemidef.dotProduct_mulVec_nonneg r
+  rwa [star_trivial] at this
+
+end Descent
+
+/-- **A limited rate of the system on the cut need not be a descent direction.** Two cut points
+with `ℓ = (9, 1)`, `h = (1, 31/110)`, gradient density `s + λ⁰ = (1, −20)`, coupling
+`m = 36`, and the capped rule with `τ_max = 1`, `max_motion = 1/4`: the speeds in edges are
+`(1, 2200/31)`, their `0.9`-quantile is `m̂ = 1`, the step is `τ = 1/4`; the rate of the system
+on the cut is `r = (−10/11, −31/11)`; the first point is not limited, the second by the factor
+`1/10`. Unlimited, `dE = −Σ g r ℓ = −530/11 < 0`; limited, `dE = +28/11 > 0`: the first point
+moves against its own gradient density (pulled by its neighbour through the coupling), and the
+limit removes most of the neighbour's share. -/
+theorem limited_rate_not_descent_example :
+    Ddg.speedInEdges 1 1 = (1 : ℝ) ∧ Ddg.speedInEdges (-20) (31 / 110) = (2200 / 31 : ℝ) ∧
+    Ddg.weightedQuantile (0.9 : ℝ) [1, 2200 / 31] [9, 1] = 1 ∧
+    Ddg.robustStep (1 : ℝ) 0 0 (1 / 4) 1 = 1 / 4 ∧
+    Matrix.mulVec (fluxMatrix ![9, 1] (fun _ _ => 1 / 4 * 36)) ![-10 / 11, -31 / 11] =
+      (fun p => Ddg.fluxRhs ((![9, 1] : Fin 2 → ℝ) p * (![1, -20] : Fin 2 → ℝ) p)) ∧
+    Ddg.localLimitFactor (1 / 4 : ℝ) 1 (1 / 4) (10 / 11) = 1 ∧
+    Ddg.localLimitFactor (1 / 4 : ℝ) (31 / 110) (1 / 4) (31 / 11) = 1 / 10 ∧
+    firstVariation ![1, -20] ![9, 1] (fun c => -(![-10 / 11, -31 / 11] : Fin 2 → ℝ) c) =
+      -530 / 11 ∧
+    firstVariation ![1, -20] ![9, 1]
+      (fun c => -((![-10 / 11, -31 / 11] : Fin 2 → ℝ) c * (![1, 1 / 10] : Fin 2 → ℝ) c)) =
+      28 / 11 := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [speedInEdges_eq]
+    norm_num
+  · rw [speedInEdges_eq, abs_of_neg (by norm_num)]
+    norm_num
+  · have hw : ∀ p ∈ ([1, 2200 / 31] : List ℝ).zip ([9, 1] : List ℝ), 0 ≤ p.2 := by
+      intro p hp
+      simp only [List.zip_cons_cons, List.zip_nil_right, List.mem_cons, List.not_mem_nil,
+        or_false] at hp
+      rcases hp with rfl | rfl <;> norm_num
+    have hW : 0 < totalWeight (([1, 2200 / 31] : List ℝ).zip ([9, 1] : List ℝ)) := by
+      norm_num [totalWeight]
+    have hspec := oracle_weightedQuantile_spec (xs := [1, 2200 / 31]) (ls := [9, 1])
+      (q := 0.9) hw hW (by norm_num) (by norm_num)
+    refine hspec.unique ⟨?_, ?_, ?_⟩
+    · exact ⟨(1, 9), by simp, rfl⟩
+    · norm_num [totalWeight, weightLE]
+    · intro p hp hlt
+      simp only [List.zip_cons_cons, List.zip_nil_right, List.mem_cons, List.not_mem_nil,
+        or_false] at hp
+      rcases hp with rfl | rfl <;> norm_num at hlt
+  · rw [robustStep_capped _ _ _ le_rfl, ite_eq_left one_pos, div_one, min_eq_right (by norm_num)]
+  · funext p
+    rw [fluxMatrix_mulVec_apply, fluxRhs_eq]
+    fin_cases p <;> simp [Fin.sum_univ_two] <;> norm_num
+  · rw [localLimitFactor_def, ite_eq_left (by norm_num), min_eq_left]
+    rw [le_div_iff₀ (by norm_num)]
+    norm_num
+  · rw [localLimitFactor_def, ite_eq_left (by norm_num), min_eq_right]
+    · norm_num
+    · rw [div_le_iff₀ (by norm_num)]
+      norm_num
+  · unfold firstVariation
+    simp [Fin.sum_univ_two]
+    norm_num
+  · unfold firstVariation
+    simp [Fin.sum_univ_two]
+    norm_num
 
 end Cuts
 
