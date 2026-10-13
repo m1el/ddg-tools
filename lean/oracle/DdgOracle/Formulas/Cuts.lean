@@ -256,4 +256,104 @@ def gradScaledD (a d e : α) : α := -(a * (d * d)) - d * e
 /-- [formula: cut-gradient-pointwise] -/
 def gradPointwiseD (b0 d e : α) : α := b0 - d * e
 
+/-! ## Additions for SPEC revision da35966 (default stages, N regions) -/
+
+/-- Corner angle from its cotangent: `θ = π/2 − arctan(cot θ)` (valid for `θ ∈ (0, π)`).
+[formula: cut-length-step-on-cut] -/
+def angleFromCot (cot : α) : α := Scalar.pi / 2 - Scalar.atan cot
+
+/-- Turning angle of the cut at a cut point: `π − β`, `β` the interior angle of the lower region;
+at a cut point on `∂M` the reflected cut turns by `π/2 − β`. In general `γ − β` with `γ = π`
+(cut point), `π/2` (cut point on `∂M`), `2π/3` (triple point of §8.5).
+[formula: cut-length-step-on-cut] [formula: cut-length-step-regions] -/
+def turningAngle (gamma beta : α) : α := gamma - beta
+
+/-- Derivative out of a region of a linear `w` across a segment `pq`, from the triangle of the
+region at the segment with third vertex `z`: `h` its height over `pq`, `f` the foot at the
+fraction `lam` of `pq` from `p`, `w_f = (1−lam) w_p + lam w_q`; the derivative is
+`(w_f − w_z)/h`. [formula: cut-length-step-on-cut] -/
+def normalDerivativeOfLinear (wp wq wz lam h : α) : α := ((1 - lam) * wp + lam * wq - wz) / h
+
+/-- Fraction of `pq` at which the foot of the height from the third vertex lies, from the
+cotangents of the triangle at `p` and `q`: `cot_p / (cot_p + cot_q)`.
+[formula: cut-length-step-on-cut] -/
+def footFraction (cotP cotQ : α) : α := cotP / (cotP + cotQ)
+
+/-- Height of the third vertex over the segment: `2 · area / |pq|`.
+[formula: cut-length-step-on-cut] -/
+def heightOver (area segLen : α) : α := 2 * area / segLen
+
+/-- The integrated length force at a cut point (or boundary node):
+`Θ = w (γ − β) + Σ_σ ½ |σ| (∂w/∂n)_σ`; here for the two (or one) segments, given as the list of
+`(|σ|, ∂w/∂n)`. [formula: cut-length-step-on-cut] [formula: cut-length-step-regions] -/
+def lengthForce (w gamma beta : α) (segs : List (α × α)) : α :=
+  w * turningAngle gamma beta + sumList (segs.map fun s => s.1 * s.2 / 2)
+
+/-- Mean `w̄_σ = (w_p + w_q)/2` of a segment. [formula: cut-length-step-on-cut] -/
+def segmentMeanWeight (wp wq : α) : α := (wp + wq) / 2
+
+/-- Coupling of the rate system on a segment: `τ w̄_σ / |σ|`.
+[formula: cut-length-step-on-cut] -/
+def rateCoupling (tau wbar segLen : α) : α := tau * wbar / segLen
+
+/-- Right-hand side of the rate system: `ℓ (s + λ⁰)`. [formula: cut-length-step-on-cut] -/
+def rateRhs (ell s lam : α) : α := ell * (s + lam)
+
+/-- `|∇φ|` in a crossed face whose lone vertex `a` is cut off by `pq`:
+`|φ_a| · |pq| / (2 · area(a, p, q))`. [formula: cut-gradient-norm] -/
+def gradientNormLone (phiA segLen area : α) : α := Scalar.abs phiA * segLen / (2 * area)
+
+/-- `ḡ = Σ|pq| / Σ(|pq|/|∇φ|)`. [formula: cut-gradient-norm] -/
+def meanGradient (sumLen sumLenOverGrad : α) : α := sumLen / sumLenOverGrad
+
+/-- Normalized weighted mean `Σ w v / Σ w`: the first line of the local extension (`w = ℓ_p β_ip`,
+`v = r_p`). [formula: cut-extension-local] -/
+def weightedMean (weights values : List α) : α :=
+  sumList ((weights.zip values).map fun x => x.1 * x.2) / sumList weights
+
+/-- Second line of the local extension: `Σ_j (σ_j/ℓ_ij) / Σ_j (1/ℓ_ij)` over the neighbours one ring
+closer, given as `(σ_j, ℓ_ij)`. [formula: cut-extension-local] -/
+def ringMean (nbrs : List (α × α)) : α :=
+  sumList (nbrs.map fun x => x.1 / x.2) / sumList (nbrs.map fun x => 1 / x.2)
+
+/-- Quadratic part of the gradient density `Q = G − β − w b(0)`. [formula: cut-roughening-rate] -/
+def roughQ (G beta w b0 : α) : α := G - beta - w * b0
+
+/-- Roughening rate `ω = 2 (Q_0 + Q_1)`. [formula: cut-roughening-rate] -/
+def roughRate (q0 q1 : α) : α := 2 * (q0 + q1)
+
+/-- Length weight that makes ripples longer than `ℓ` grow: `α_L = ω ℓ/(2π)`.
+[formula: cut-roughening-rate] -/
+def lengthWeightForRipples (omega ell : α) : α := omega * ell / (2 * Scalar.pi)
+
+/-- Adaptive step: `min(τ_max, time_scale/ω, max_motion · h / max|ρ|)` (each of the last two only
+if its denominator is positive). [formula: cut-step-cap] -/
+def adaptiveStep (tauMax timeScale omega maxMotion h maxRho : α) : α :=
+  let a := if 0 < omega then min tauMax (timeScale / omega) else tauMax
+  if 0 < maxRho then min a (maxMotion * h / maxRho) else a
+
+/-- Crossing parameter between regions `i = region a` and `j = region b` (paper Eq. 31):
+`ψ_a/(ψ_a − ψ_b)` with `ψ_a = φ_i(a) − φ_j(a)`, `ψ_b = φ_i(b) − φ_j(b)`.
+[formula: cut-edge-crossing-regions] -/
+def crossingParamRegions (phiIa phiJa phiIb phiJb : α) : α :=
+  (phiIa - phiJa) / ((phiIa - phiJa) - (phiIb - phiJb))
+
+/-- Barycentric coordinate of the triple point at the corner `c_k` of a face whose cut points on
+the edges leaving and arriving at `c_k` sit at the parameters `s_k` (from `c_k`) and `s_prev`
+(from `c_{k−1}`, so the point is at `1 − s_prev` from `c_k`): `((1 − s_k) + s_prev)/3`.
+[formula: cut-triple-point] -/
+def triplePointCoord (sNext sPrev : α) : α := ((1 - sNext) + sPrev) / 3
+
+/-- Rate at the copy of a triple point `m` in a region from the two cut points `p`, `p′` of the face
+on its boundary: `(|mp′| s_p + |mp| s_p′)/(|mp| + |mp′|)`. [formula: cut-region-extension] -/
+def tripleRate (lenMp lenMpPrime sp spPrime : α) : α :=
+  (lenMpPrime * sp + lenMp * spPrime) / (lenMp + lenMpPrime)
+
+/-- Mean of the two smallest values at a vertex (Losasso et al.): `m`.
+[formula: cut-region-projection] -/
+def projectionShift (smallest second : α) : α := (smallest + second) / 2
+
+/-- Projected value `φ_k(i) = φ_k′(i) − m`. [formula: cut-region-projection] -/
+def projectedValue (phi m : α) : α := phi - m
+
 end Ddg

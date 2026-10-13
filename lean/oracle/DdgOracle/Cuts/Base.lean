@@ -158,7 +158,18 @@ def buildBase (c : CutCase) : Except String Base := do
       let r0 := featureSizeRaw rEps kd
       rhs := rhs.set! i (vertArea.get! i * r0)
       for j in [0:nv] do
-        sys := sys.set! (i * nv + j) (cc * lap.get i j + (if i == j then vertArea.get! i else fzero))
+        -- D17: Laplacian of the edge weights max(w_ij, 0), w_ij = -L_ij
+        let lij := if c.featPos then
+            (if i == j then fzero else min (lap.get i j) fzero)
+          else lap.get i j
+        let lii := if c.featPos && i == j then
+            (Id.run do
+              let mut sum := fzero
+              for k in [0:nv] do
+                if k != i then sum := sum - min (lap.get i k) fzero
+              return sum)
+          else lij
+        sys := sys.set! (i * nv + j) (cc * (if i == j then lii else lij) + (if i == j then vertArea.get! i else fzero))
     match luFactor nv sys with
     | none => throw "curvature-based weight: singular system"
     | some lu =>

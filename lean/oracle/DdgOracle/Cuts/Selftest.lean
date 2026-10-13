@@ -458,6 +458,139 @@ def selftest : IO Nat := do
     ((match runOk d0 with | some r => r.ev.cm.crossings.all (fun c => !c.moved) | none => false)
       && (runOk d0z).isNone && ((runCase d0z).splitOn "\n")[2]!.startsWith "status error")
 
+  -- 11f. default stages (SPEC §3.8 - §3.10, §4)
+  let dflt := fun (c : CutCase) =>
+    { c with format := 2, lengthStep := .onCut, extension := .local, speed := .meanGradient,
+             featPos := true, step := .adaptive 0.05 0.25 1.0 }
+  -- flat disk: the length forces of a closed cut sum to 2 pi w; circle law for one small step
+  let flatD := polar 12 36 0.0 1.0 fun _ _ => 0.0
+  let sc2 := 1 / Float.sqrt floatPi
+  let rho2 := 0.3
+  let cF2 := dflt { mkCase "circ" flatD (phiOf flatD fun p => pointRadius p - rho2 / sc2) with
+    alphaL := 1.0 }
+  match runOk cF2 with
+  | none => check tally "default stages, flat disk: step runs" false
+  | some r =>
+    match r.stage2 with
+    | none => check tally "default stages: stage data present" false
+    | some st =>
+      let mut sumTheta := fzero
+      for k in [0:r.ev.cm.nc] do sumTheta := sumTheta + st.force.theta.get! k
+      let mut sumEll := fzero
+      let mut sumLam := fzero
+      let mut sumEllR := fzero
+      let mut sumEllSL := fzero
+      for k in [0:r.ev.cm.nc] do
+        sumLam := sumLam + st.force.ellC.get! k * st.lam0.get! k
+        sumEllR := sumEllR + st.force.ellC.get! k * st.rate.get! k
+        sumEllSL := sumEllSL + st.force.ellC.get! k * (r.ev.sSmooth.get! k + st.lam0.get! k)
+        sumEll := sumEll + st.force.ellC.get! k
+      -- mean radius of the new cut
+      let nvv := r.base.nv
+      let mut rad := fzero
+      let mut cnt := fzero
+      for cr in r.evNew.cm.crossings do
+        let pa := flatD.pos[cr.a]!
+        let pb := flatD.pos[cr.b]!
+        let x := (1 - cr.t) * pa.x + cr.t * pb.x
+        let y := (1 - cr.t) * pa.y + cr.t * pb.y
+        rad := rad + Float.sqrt (x * x + y * y) * sc2
+        cnt := cnt + 1
+      let radius := rad / cnt
+      let mut rad0 := fzero
+      for cr in r.ev.cm.crossings do
+        let pa := flatD.pos[cr.a]!
+        let pb := flatD.pos[cr.b]!
+        let x := (1 - cr.t) * pa.x + cr.t * pb.x
+        let y := (1 - cr.t) * pa.y + cr.t * pb.y
+        rad0 := rad0 + Float.sqrt (x * x + y * y) * sc2
+      let radius0 := rad0 / Float.ofNat r.ev.cm.nc
+      let exact := radius0 - (rho2 - Float.sqrt (rho2 * rho2 - 2 * 1.0 * r.tau))
+      check tally "default stages, flat disk: sum of length forces = 2 pi w; sums kept by both chain systems; circle law after one step"
+        ((sumTheta - 2 * floatPi * 1.0).abs ≤ 1e-12 && (sumLam - sumTheta).abs ≤ 1e-12
+          && (sumEllR - sumEllSL).abs ≤ 1e-12 && (radius - exact).abs / exact ≤ 0.01)
+        s!"sum Theta={sci sumTheta} (2 pi={sci (2 * floatPi)}); sum l lam0 - sum Theta={sci (sumLam - sumTheta)}; sum l r - sum l (s+lam0)={sci (sumEllR - sumEllSL)}; radius {sci radius} (was {sci radius0}) vs exact {sci exact} (rel {sci ((radius - exact).abs / exact)}); nv={nvv}"
+  -- chain systems: row sums, range, rest state
+  let mut rng2 : Rng := ⟨777⟩
+  let mut worstSum := fzero
+  let mut worstRange := fzero
+  let mut worstRest := fzero
+  for _ in [0:40] do
+    let n := 7
+    let mut ell := zeros n
+    let mut rhs := zeros n
+    for k in [0:n] do
+      let (x, r1) := rng2.range 0.1 2.0
+      let (y, r2) := r1.range (-3.0) 3.0
+      rng2 := r2
+      ell := ell.set! k x
+      rhs := rhs.set! k (x * y)
+    let mut edges : Array (Nat × Nat × Float) := #[]
+    for k in [0:n] do
+      let (kap, r1) := rng2.range 0.0 5.0
+      rng2 := r1
+      edges := edges.push (k, (k + 1) % n, kap)
+    match chainSolve n ell edges rhs, chainSolve n ell edges (zeros n) with
+    | .ok x, .ok z =>
+      let mut sl := fzero
+      let mut sr := fzero
+      let mut lo := posInf
+      let mut hi := negInf
+      for k in [0:n] do
+        sl := sl + ell.get! k * x.get! k
+        sr := sr + rhs.get! k
+        lo := min lo (rhs.get! k / ell.get! k)
+        hi := max hi (rhs.get! k / ell.get! k)
+      worstSum := max worstSum ((sl - sr).abs)
+      for k in [0:n] do
+        worstRange := max worstRange (max (lo - x.get! k) (x.get! k - hi))
+      worstRest := max worstRest (maxAbs z)
+    | _, _ => worstSum := 1.0
+  check tally "chain systems (flux recovery, lambda0, rate): sum l x = sum rhs, x in the range of rhs/l, zero data stays zero"
+    (worstSum ≤ 1e-12 && worstRange ≤ 1e-12 && worstRest == 0)
+    s!"sum {sci worstSum} range {sci worstRange} rest {sci worstRest}"
+  -- local extension: range and mean rate
+  for (nm, m, phi) in [("icosphere 2 geodesic cap", ico2, phiOf ico2 fun p => Float.acos p.z - 1.0),
+                       ("torus band", (torus 12 8 1.0 0.42 fun _ _ => 0.0),
+                        phiOf (torus 12 8 1.0 0.42 fun _ _ => 0.0) fun p => Float.cos (3 * Float.atan2 p.y p.x) - 0.2)] do
+    match runOk (dflt { mkCase "ext" m phi with energy := .hencky, alphaL := 0.5 }) with
+    | none => check tally s!"local extension, {nm}: step runs" false
+    | some r =>
+      let st := r.stage2.get!
+      let cm := r.ev.cm
+      let mut lo := posInf
+      let mut hi := negInf
+      for k in [0:cm.nc] do
+        lo := min lo (st.rg.get! k)
+        hi := max hi (st.rg.get! k)
+      let mut viol := fzero
+      for i in [0:cm.nv] do
+        if st.ring[i]!.isSome then
+          viol := max viol (max (lo - st.sigma.get! i) (st.sigma.get! i - hi))
+      let mut lhs := fzero
+      let mut rhs := fzero
+      for k in [0:cm.nc] do
+        let cr := cm.crossings[k]!
+        lhs := lhs + st.force.ellC.get! k * ((1 - cr.t) * st.sigma.get! cr.a + cr.t * st.sigma.get! cr.b)
+        rhs := rhs + st.force.ellC.get! k * st.rg.get! k
+      check tally s!"extension from the cut, {nm}: sigma within the range of the rates; mean rate of the cut kept"
+        (viol ≤ 1e-12 * (1 + hi.abs + lo.abs) && (lhs - rhs).abs ≤ 1e-11 * (1 + rhs.abs))
+        s!"range violation {sci viol}; sum l interp(sigma) - sum l r = {sci (lhs - rhs)}"
+  -- energy decrease for a small step, default stages; format 2 with the paper's stages equals format 1
+  match runOk (dflt { mkCase "dec2" ico2 (phiOf ico2 fun p => Float.acos p.z - 1.0) with alphaL := 2.0, step := .fixed 0.0003 }) with
+  | some r =>
+    check tally "default stages: energy decreases along one small step (icosphere 2, cap, alpha_L = 2)"
+      (r.evNew.total < r.ev.total) s!"E {sci r.ev.total} -> {sci r.evNew.total}"
+  | none => check tally "default stages: energy decrease: step runs" false
+  let cP1 := { mkCase "p1" ico2 (phiOf ico2 fun p => Float.acos p.z - 1.0) with step := .fixed 0.001 }
+  let cP2 := { cP1 with format := 2 }
+  match runOk cP1, runOk cP2 with
+  | some a, some b =>
+    let mut d := fzero
+    for i in [0:a.base.nv] do d := max d ((a.phiNew.get! i - b.phiNew.get! i).abs)
+    check tally "format 2 with the paper's stages gives the same new state as format 1" (d == 0) s!"max diff={sci d}"
+  | _, _ => check tally "format 2 vs format 1: steps run" false
+
   -- 12. text format: print / parse round trip and error blocks
   let c12 := { mkCase "rt" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with
     energy := .scaledCurv 0.5 0.02, eta := some (FloatArray.ofFn' ico2.pos.size fun i => 0.01 * Float.ofNat (i % 3)),

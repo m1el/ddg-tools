@@ -1,4 +1,4 @@
-import DdgOracle.Cuts.Region
+import DdgOracle.Cuts.Stages
 
 /-!
 # One flow step (SPEC §3.7 – §3.12, §4, §6)
@@ -249,6 +249,34 @@ def redistanceFixedPoint (b : Base) (faces : Array Face) (phiP : FloatArray) : R
           changed := true
   return redistFinish nv phiP region adj T sweeps
 
+/-- Quantities of the default stages (format 2). -/
+structure Stage2Out where
+  /-- length force data at the cut vertices -/
+  force : CutForce
+  /-- recovered length force per unit length `λ⁰` (zero for the length step on the mesh) -/
+  lam0 : FloatArray
+  /-- the rate `r` (after the length step on the cut, else `s`) -/
+  rate : FloatArray
+  /-- `ḡ` of the piece of every cut vertex and the piece label -/
+  gbar : FloatArray
+  /-- piece label (smallest cut-vertex index of the piece) -/
+  piece : Array Nat
+  /-- `ḡ · r` -/
+  rg : FloatArray
+  /-- rings of the local extension -/
+  ring : Array (Option Nat)
+  /-- the extension actually used -/
+  sigma : FloatArray
+  /-- roughening rate `ω` of every cut vertex -/
+  omegaP : FloatArray
+  /-- `ω` (largest over the cut vertices) -/
+  omega : Float
+  /-- the three limits of the step rule: `τ_max`, `time_scale/ω`, `max_motion h/max|ρ|` -/
+  limits : Float × Float × Float
+  /-- `max |λ⁰|` -/
+  lamMax : Float
+  deriving Inhabited
+
 /-- Everything of one step. -/
 structure StepResult where
   /-- scale `s` and total area of the caller's mesh -/
@@ -275,6 +303,8 @@ structure StepResult where
   phiNew : FloatArray
   /-- evaluation at `phiNew` -/
   evNew : Eval
+  /-- default-stage quantities (format 2) -/
+  stage2 : Option Stage2Out := none
 
 /-- Outcome: either a step, or the cut is absent (one region is empty). -/
 inductive Outcome where
@@ -304,11 +334,51 @@ def validateParams (c : CutCase) : Except String Unit := do
   | .capped tm mm =>
     if !(tm.isFinite && tm > 0 && mm.isFinite && mm > 0) then
       throw "tau_max and max_motion must be finite and positive"
+  | .adaptive ts mm tm =>
+    if !(ts.isFinite && ts > 0 && tm.isFinite && tm > 0 && mm.isFinite && mm > 0) then
+      throw "time_scale, max_motion and tau_max must be finite and positive"
   match c.flux with
   | .nodal => pure ()
   | .smoothed k => if !(k.isFinite && k ≥ 0) then throw "flux: c must be finite and >= 0"
   if let some cl := c.classes then
     if cl.size != nv then throw s!"classes has {cl.size} values for {nv} vertices"
+
+/-- The length and penalty step on the mesh (SPEC §3.10, the paper's). -/
+def lengthStepMesh (c : CutCase) (b : Base) (wv phiTilde : FloatArray) (tau : Float) :
+    Except String FloatArray := do
+  let nv := b.nv
+  let allZero := Id.run do
+    let mut z := true
+    for i in [0:nv] do
+      if wv.get! i != 0 then z := false
+    return z
+  if allZero then return phiTilde
+  let mut mat := zeros (nv * nv)
+  let mut rhs := zeros nv
+  match c.penalty with
+  | .gradient =>
+    let mut lw := Mat.zero nv
+    for fi in [0:c.faces.size] do
+      let f := c.faces[fi]!
+      let (c0, c1, c2) := b.cots[fi]!
+      lw := lw.addTri f.a f.b f.c c0 c1 c2
+        (triangleMean (wv.get! f.a) (wv.get! f.b) (wv.get! f.c))
+    for i in [0:nv] do
+      for j in [0:nv] do
+        mat := mat.set! (i * nv + j) (lengthStepEntry (i == j) tau (b.vertArea.get! i) (lw.get i j))
+      rhs := rhs.set! i (b.vertArea.get! i * phiTilde.get! i)
+  | .paperDiagonal =>
+    for i in [0:nv] do
+      if !(wv.get! i > 0) then
+        throw s!"the paper's penalty rule needs alpha_L + eta_i > 0; vertex {i} has {wv.get! i}"
+    for i in [0:nv] do
+      for j in [0:nv] do
+        mat := mat.set! (i * nv + j)
+          (penaltyStepEntry (i == j) tau (b.vertArea.get! i) (wv.get! i) (b.lap.get i j))
+      rhs := rhs.set! i (b.vertArea.get! i / wv.get! i * phiTilde.get! i)
+  match luFactor nv mat with
+  | none => throw "length step: singular system"
+  | some lu => return lu.solve rhs
 
 /-- One flow step of SPEC §4. -/
 def runStep (c : CutCase) : Except String Outcome := do
@@ -318,58 +388,94 @@ def runStep (c : CutCase) : Except String Outcome := do
   let phi := FloatArray.ofFn' nv fun i => b.scale * c.phi.get! i
   let ev ← evaluate c b phi
   if ev.cm.nc == 0 then return .noCut b phi ev
-  -- step size
+  let cm := ev.cm
+  let nc := cm.nc
+  -- shortest crossed edge
   let mut hMin := posInf
-  for cr in ev.cm.crossings do
+  for cr in cm.crossings do
     if cr.len < hMin then hMin := cr.len
+  let mut stage2 : Option Stage2Out := none
   let mut sMax := fzero
-  for k in [0:ev.cm.nc] do
-    let a := (ev.sSmooth.get! k).abs
-    if a > sMax then sMax := a
-  let tau := match c.step with
-    | .fixed t => t
-    | .capped tm mm => if sMax == 0 then tm else stepCap tm mm hMin sMax
+  let mut tau := fzero
+  let mut sigma := ev.sigma
+  if c.format == 1 then
+    for k in [0:nc] do
+      let a := (ev.sSmooth.get! k).abs
+      if a > sMax then sMax := a
+    tau := match c.step with
+      | .fixed t => t
+      | .capped tm mm => if sMax == 0 then tm else stepCap tm mm hMin sMax
+      | .adaptive _ _ tm => tm
+  else
+    -- default stages / mixed variants
+    let force := cutForce cm ev.wv (c.penalty == .paperDiagonal)
+    let cc := fluxC c.flux
+    let mut lam0 := zeros nc
+    let allZero := Id.run do
+      let mut z := true
+      for i in [0:nv] do
+        if ev.wv.get! i != 0 then z := false
+      return z
+    if c.lengthStep == .onCut && !allZero then
+      let mut edges : Array (Nat × Nat × Float) := #[]
+      for sg in cm.segs do
+        let f := b.topo.faces[sg.face]!
+        let h2 := faceMeanSquareEdge (b.l f.a f.b) (b.l f.b f.c) (b.l f.c f.a)
+        edges := edges.push (sg.p, sg.q, fluxCoupling cc h2 sg.len)
+      lam0 ← chainSolve nc force.ellC edges force.theta
+    let rho := FloatArray.ofFn' nc fun k => ev.sSmooth.get! k + lam0.get! k
+    let rhoMaxV := maxAbs rho
+    let mut lamMax := maxAbs lam0
+    -- roughening rate
+    let r0 := ev.regs[0]!
+    let r1 := ev.regs[1]!
+    let omegaP := FloatArray.ofFn' nc fun k =>
+      roughRate (roughQ (regionDensity c.w.1 (r0.G.get! (nv + k)) c.beta.1) c.beta.1 c.w.1 0)
+                (roughQ (regionDensity c.w.2 (r1.G.get! (nv + k)) c.beta.2) c.beta.2 c.w.2 0)
+    let mut omega := negInf
+    for k in [0:nc] do
+      if omegaP.get! k > omega then omega := omegaP.get! k
+    sMax := rhoMaxV
+    let limits : Float × Float × Float := match c.step with
+      | .fixed t => (t, posInf, posInf)
+      | .capped tm mm => (tm, posInf, if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
+      | .adaptive ts mm tm =>
+        (tm, if omega > 0 then ts / omega else posInf, if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
+    tau := match c.step with
+      | .fixed t => t
+      | .capped tm mm => if rhoMaxV == 0 then tm else stepCap tm mm hMin rhoMaxV
+      | .adaptive ts mm tm => adaptiveStep tm ts omega mm hMin rhoMaxV
+    -- the rate
+    let mut rate := ev.sSmooth
+    if c.lengthStep == .onCut && !allZero then
+      let mut edges : Array (Nat × Nat × Float) := #[]
+      for sg in cm.segs do
+        let wbar := segmentMeanWeight (force.wc.get! sg.p) (force.wc.get! sg.q)
+        edges := edges.push (sg.p, sg.q, rateCoupling tau wbar sg.len)
+      let rhs := FloatArray.ofFn' nc fun k => rateRhs (force.ellC.get! k) (ev.sSmooth.get! k) (lam0.get! k)
+      rate ← chainSolve nc force.ellC edges rhs
+    let (gbar, piece) :=
+      if c.speed == .meanGradient then meanGradients cm phi
+      else (FloatArray.ofFn' nc fun _ => 1.0, cutPieces cm)
+    let rg := FloatArray.ofFn' nc fun k => gbar.get! k * rate.get! k
+    let mut ring : Array (Option Nat) := Array.replicate nv none
+    match c.extension with
+    | .local =>
+      let (sg, rn) := localExtension b cm force.ellC rg
+      sigma := sg
+      ring := rn
+    | .harmonic => sigma ← harmonicExtension cm ev.regs rg
+    stage2 := some { force, lam0, rate, gbar, piece, rg, ring, sigma, omegaP, omega, limits, lamMax }
   -- explicit step
-  let phiTilde := FloatArray.ofFn' nv fun i => explicitStep (phi.get! i) tau (ev.sigma.get! i)
+  let phiTilde := FloatArray.ofFn' nv fun i => explicitStep (phi.get! i) tau (sigma.get! i)
   -- length and penalty step
-  let allZero := Id.run do
-    let mut z := true
-    for i in [0:nv] do
-      if ev.wv.get! i != 0 then z := false
-    return z
   let phiLen ←
-    if allZero then pure phiTilde
-    else do
-      let mut mat := zeros (nv * nv)
-      let mut rhs := zeros nv
-      match c.penalty with
-      | .gradient =>
-        let mut lw := Mat.zero nv
-        for fi in [0:c.faces.size] do
-          let f := c.faces[fi]!
-          let (c0, c1, c2) := b.cots[fi]!
-          lw := lw.addTri f.a f.b f.c c0 c1 c2
-            (triangleMean (ev.wv.get! f.a) (ev.wv.get! f.b) (ev.wv.get! f.c))
-        for i in [0:nv] do
-          for j in [0:nv] do
-            mat := mat.set! (i * nv + j) (lengthStepEntry (i == j) tau (b.vertArea.get! i) (lw.get i j))
-          rhs := rhs.set! i (b.vertArea.get! i * phiTilde.get! i)
-      | .paperDiagonal =>
-        for i in [0:nv] do
-          if !(ev.wv.get! i > 0) then
-            throw s!"the paper's penalty rule needs alpha_L + eta_i > 0; vertex {i} has {ev.wv.get! i}"
-        for i in [0:nv] do
-          for j in [0:nv] do
-            mat := mat.set! (i * nv + j)
-              (penaltyStepEntry (i == j) tau (b.vertArea.get! i) (ev.wv.get! i) (b.lap.get i j))
-          rhs := rhs.set! i (b.vertArea.get! i / ev.wv.get! i * phiTilde.get! i)
-      match luFactor nv mat with
-      | none => throw "length step: singular system"
-      | some lu => pure (lu.solve rhs)
+    if c.format == 2 && c.lengthStep == .onCut then pure phiTilde
+    else lengthStepMesh c b ev.wv phiTilde tau
   let phiSym := symmetrize c.classes phiLen
   let redist := redistance b c.faces phiSym
   let phiNew := symmetrize c.classes redist.phi
   let evNew ← evaluate c b phiNew
-  return .step { base := b, phi, ev, tau, hMin, sMax, phiTilde, phiLen, phiSym, redist, phiNew, evNew }
+  return .step { base := b, phi, ev, tau, hMin, sMax, phiTilde, phiLen, phiSym, redist, phiNew, evNew, stage2 }
 
 end Ddg.Cuts

@@ -38,6 +38,7 @@ inductive Penalty where
   | gradient
   /-- `(W_V D⁻¹ + τ L) φ′ = W_V D⁻¹ φ̃`, `D = diag(α_L + η)` -/
   | paperDiagonal
+  deriving BEq
 
 /-- How the integrated fluxes are turned into normal derivatives (SPEC §3.5). -/
 inductive FluxRule where
@@ -50,8 +51,34 @@ inductive FluxRule where
 inductive StepRule where
   /-- `τ` given -/
   | fixed (tau : Float)
-  /-- `τ = min(τ_max, c · h / max|s|)` -/
+  /-- `τ = min(τ_max, c · h / max|ρ|)` -/
   | capped (tauMax maxMotion : Float)
+  /-- `τ = min(τ_max, time_scale / ω, max_motion · h / max|ρ|)` (format 2) -/
+  | adaptive (timeScale maxMotion tauMax : Float)
+
+/-- Where the length term acts (SPEC §3.10). -/
+inductive LengthStep where
+  /-- `(W_V + τ L_w) φ′ = W_V φ̃` after the explicit step (the paper) -/
+  | onMesh
+  /-- length force and linearly implicit rate on the cut (default) -/
+  | onCut
+  deriving BEq
+
+/-- How the rate on the cut becomes a rate at the vertices (SPEC §3.8). -/
+inductive Extension where
+  /-- harmonic in each submesh (the paper) -/
+  | harmonic
+  /-- from the cut: transpose of the interpolation, then ring by ring (default) -/
+  | local
+  deriving BEq
+
+/-- Scaling of the rate by the gradient of `φ` (SPEC §3.9). -/
+inductive SpeedScaling where
+  /-- `ḡ = 1` (the paper) -/
+  | unit
+  /-- `ḡ` = mean `|∇φ|` over the piece of the cut (default) -/
+  | meanGradient
+  deriving BEq
 
 /-- One case: a mesh given by faces and edge lengths (caller's unit) and everything else of one
 flow step. All parameters refer to the surface scaled to unit total area, `φ` is in the caller's
@@ -93,5 +120,15 @@ structure CutCase where
   passes : Nat
   /-- symmetry class label of every vertex -/
   classes : Option (Array Nat)
+  /-- text format version: 1 (the stages of the paper only) or 2 -/
+  format : Nat := 1
+  /-- where the length term acts -/
+  lengthStep : LengthStep := .onMesh
+  /-- extension of the rate -/
+  extension : Extension := .harmonic
+  /-- scaling by `|∇φ|` -/
+  speed : SpeedScaling := .unit
+  /-- feature size smoothing with the positive edge weights `L⁺` (SPEC §3.6, D17) -/
+  featPos : Bool := false
 
 end Ddg.Cuts

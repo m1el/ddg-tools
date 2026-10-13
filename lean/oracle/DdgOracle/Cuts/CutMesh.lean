@@ -65,6 +65,10 @@ structure Seg where
   face : Nat
   /-- length -/
   len : Float
+  /-- index of the triangle `(a, p, q)` -/
+  tri : Nat
+  /-- the lone vertex `a` -/
+  lone : Nat
   deriving Inhabited
 
 /-- The cut mesh of a level set function. -/
@@ -175,7 +179,7 @@ def buildCutMesh (b : Base) (faces : Array Face) (phi : FloatArray) (delta : Flo
       let q := edgeNode a cc
       let t1 := mk a p q (rg k)
       tris := tris.push t1
-      segs := segs.push { p := p - nv, q := q - nv, face := fi, len := t1.l12 }
+      segs := segs.push { p := p - nv, q := q - nv, face := fi, len := t1.l12, tri := tris.size - 1, lone := a }
       let reg2 := rg (k + 1)
       -- diagonals p–c and b–q of the quad (p, b, c, q)
       let len2 := fun (x y : Nat) =>

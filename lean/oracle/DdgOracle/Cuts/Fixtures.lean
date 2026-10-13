@@ -18,7 +18,7 @@ structure Fixture where
   /-- one-line description for the manifest -/
   what : String
 
-private def polarAngleFrom (axis : Point Float) (p : Point Float) : Float :=
+def polarAngleFrom' (axis : Point Float) (p : Point Float) : Float :=
   let n := Float.sqrt (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z)
   Float.acos ((axis.x * p.x + axis.y * p.y + axis.z * p.z) / n)
 
@@ -90,7 +90,7 @@ def fixtures : Array Fixture := Id.run do
     "the same, the paper's diagonal rule (W_V D^-1 + tau L) phi' = W_V D^-1 phi~"
   fs := add fs { mkCase "ico2-region-weights" ico2 (cap ico2 1.0) with w := (2.0, 0.5), beta := (0.7, 0.2), step := .fixed 0.001 }
     "geodesic cap, w = (2, 0.5), beta = (0.7, 0.2)"
-  let tiltedCap := phiOf ico2s fun p => polarAngleFrom ⟨0.15, 0.05, 1.0⟩ p - 1.0
+  let tiltedCap := phiOf ico2s fun p => polarAngleFrom' ⟨0.15, 0.05, 1.0⟩ p - 1.0
   fs := add fs { mkCase "ico2-symmetry" ico2s tiltedCap with classes := some (mirrorClasses ico2s), step := .fixed 0.001 }
     "geodesic cap about a tilted axis (not mirror symmetric), classes = mirror x -> -x: both projections are active"
   fs := add fs { mkCase "ico1-phi-zero-vertex" ico1 (phiOf ico1 fun p => p.z) with step := capped }
@@ -128,24 +128,24 @@ def fixtures : Array Fixture := Id.run do
 def Fixture.render (f : Fixture) : String × String :=
   (printCase f.case, runCase f.case)
 
-/-- Write all fixtures to `dir`. -/
-def writeFixtures (dir : System.FilePath) : IO Unit := do
+/-- Write a list of fixtures to `dir`. -/
+def writeList (fs : Array Fixture) (dir : System.FilePath) : IO Unit := do
   IO.FS.createDirAll dir
   let mut manifest := ""
-  for f in fixtures do
+  for f in fs do
     let (input, output) := f.render
     IO.FS.writeFile (dir / s!"{f.case.name}.in") input
     IO.FS.writeFile (dir / s!"{f.case.name}.out") output
     manifest := manifest ++ s!"{f.case.name}\t{statusOf output}\t{f.what}\n"
     IO.println s!"{f.case.name}: {statusOf output}"
   IO.FS.writeFile (dir / "MANIFEST.tsv") manifest
-  IO.println s!"wrote {fixtures.size} fixtures to {dir}"
+  IO.println s!"wrote {fs.size} fixtures to {dir}"
 
-/-- Recompute all fixtures and compare with the files in `dir`; returns the number of
+/-- Recompute a list of fixtures and compare with the files in `dir`; returns the number of
 differences. -/
-def checkFixtures (dir : System.FilePath) : IO Nat := do
+def checkList (fs : Array Fixture) (dir : System.FilePath) : IO Nat := do
   let mut bad := 0
-  for f in fixtures do
+  for f in fs do
     let (input, output) := f.render
     let name := f.case.name
     let mut problems : Array String := #[]
@@ -163,7 +163,13 @@ def checkFixtures (dir : System.FilePath) : IO Nat := do
     else
       bad := bad + 1
       for p in problems do IO.println s!"FAIL  {p}"
-  IO.println s!"cuts fixtures: {fixtures.size - bad} of {fixtures.size} match"
+  IO.println s!"cuts fixtures: {fs.size - bad} of {fs.size} match"
   return bad
+
+/-- Write the fixtures of the paper's stages. -/
+def writeFixtures (dir : System.FilePath) : IO Unit := writeList fixtures dir
+
+/-- Check the fixtures of the paper's stages. -/
+def checkFixtures (dir : System.FilePath) : IO Nat := checkList fixtures dir
 
 end Ddg.Cuts

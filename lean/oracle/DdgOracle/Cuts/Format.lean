@@ -75,9 +75,17 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
     kv := kv.insert l[0]! l
     i := i + 1
   let allowed := ["phi", "energy", "curvature", "alpha", "eta", "penalty", "w", "beta", "step",
-    "delta", "flux", "rho0", "passes", "classes"]
+    "delta", "flux", "rho0", "passes", "classes", "format", "stages", "featurelap"]
   for (k, _) in kv.toList do
     if !allowed.contains k then throw s!"unknown line '{k}'"
+  let format ← match kv.get? "format" with
+    | none => pure 1
+    | some l =>
+      if l.size != 2 || l[1]! != "2" then throw "format: expected 'format 2'"
+      pure 2
+  if format == 1 then
+    for k in ["stages", "featurelap"] do
+      if kv.contains k then throw s!"line '{k}' needs 'format 2'"
   let need := fun (k : String) =>
     match kv.get? k with
     | some l => pure (f := Except String) l
@@ -136,7 +144,11 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
     | some "capped" =>
       if l.size != 4 then throw "step capped: expected two values"
       pure (StepRule.capped (← floatTok "step" l[2]!) (← floatTok "step" l[3]!))
-    | _ => throw s!"malformed line '{joinTokens l}': step is fixed <tau> | capped <tau_max> <max_motion>"
+    | some "adaptive" =>
+      if format != 2 then throw "step adaptive needs 'format 2'"
+      if l.size != 5 then throw "step adaptive: expected 'step adaptive <time_scale> <max_motion> <tau_max>'"
+      pure (StepRule.adaptive (← floatTok "step" l[2]!) (← floatTok "step" l[3]!) (← floatTok "step" l[4]!))
+    | _ => throw s!"malformed line '{joinTokens l}': step is fixed <tau> | capped <tau_max> <max_motion> | adaptive <time_scale> <max_motion> <tau_max>"
   let delta ← do
     let l ← need "delta"
     if l.size != 2 then throw "delta: expected one value"
@@ -166,8 +178,33 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
       for j in [1:nv + 1] do out := out.push (← natTok "classes" l[j]!)
       pure (some out)
     | none => pure none
+  let (lengthStep, extension, speed) ← do
+    if format == 1 then pure (LengthStep.onMesh, Extension.harmonic, SpeedScaling.unit)
+    else
+      let l ← need "stages"
+      if l.size != 4 then throw "stages: expected 'stages <onmesh|oncut> <harmonic|local> <unit|mean_gradient>'"
+      let ls ← match l[1]! with
+        | "onmesh" => pure LengthStep.onMesh
+        | "oncut" => pure LengthStep.onCut
+        | o => throw s!"stages: unknown length step '{o}'"
+      let ex ← match l[2]! with
+        | "harmonic" => pure Extension.harmonic
+        | "local" => pure Extension.local
+        | o => throw s!"stages: unknown extension '{o}'"
+      let sp ← match l[3]! with
+        | "unit" => pure SpeedScaling.unit
+        | "mean_gradient" => pure SpeedScaling.meanGradient
+        | o => throw s!"stages: unknown speed scaling '{o}'"
+      pure (ls, ex, sp)
+  let featPos ← match kv.get? "featurelap" with
+    | none => pure false
+    | some l =>
+      match l[1]? with
+      | some "cotan" => pure false
+      | some "positive" => pure true
+      | _ => throw "featurelap: expected cotan | positive"
   return { name, nv, faces, edges, phi, energy, curv, alphaL, eta, penalty, w, beta, step
-           delta, flux, rho0, passes, classes }
+           delta, flux, rho0, passes, classes, format, lengthStep, extension, speed, featPos }
 
 /-- Read the next case as raw lines: `(name, lines)`, or an error message. -/
 partial def readCaseLines (r : LineReader) :
@@ -228,8 +265,13 @@ def printCase (c : CutCase) : String := Id.run do
   match c.step with
   | .fixed t => s := s ++ s!"step fixed {hx t}\n"
   | .capped t m => s := s ++ s!"step capped {hx t} {hx m}\n"
+  | .adaptive ts m tm => s := s ++ s!"step adaptive {hx ts} {hx m} {hx tm}\n"
   s := s ++ (match c.flux with | .nodal => "flux nodal\n" | .smoothed k => s!"flux smoothed {hx k}\n")
   s := s ++ s!"delta {hx c.delta}\nrho0 {hx c.rho0}\npasses {c.passes}\n"
+  if c.format == 2 then
+    s := s ++ "format 2\n"
+    s := s ++ s!"stages {match c.lengthStep with | .onMesh => "onmesh" | .onCut => "oncut"} {match c.extension with | .harmonic => "harmonic" | .local => "local"} {match c.speed with | .unit => "unit" | .meanGradient => "mean_gradient"}\n"
+    s := s ++ s!"featurelap {if c.featPos then "positive" else "cotan"}\n"
   if let some cl := c.classes then
     s := s ++ s!"classes {" ".intercalate (cl.toList.map toString)}\n"
   return s ++ "end\n"
@@ -287,8 +329,18 @@ def printOutcome (c : CutCase) (o : Outcome) : String := Id.run do
   | .noCut b phi ev =>
     return s!"case {c.name}\ntask cuts\nstatus no_cut\n" ++ printEval c b phi ev ++ "end\n"
   | .step r =>
-    let mut s := s!"case {c.name}\ntask cuts\nstatus ok\n" ++ printEval c r.base r.phi r.ev
+    let evP := match r.stage2 with | some st => { r.ev with sigma := st.sigma } | none => r.ev
+    let mut s := s!"case {c.name}\ntask cuts\nstatus ok\n" ++ printEval c r.base r.phi evP
     s := s ++ s!"tau {hx r.tau} {hx r.hMin} {hx r.sMax}\n"
+    if let some st := r.stage2 then
+      s := s ++ s!"omega {hx st.omega}\nlimits {hx st.limits.1} {hx st.limits.2.1} {hx st.limits.2.2}\nlammax {hx st.lamMax}\n"
+      for k in [0:r.ev.cm.nc] do
+        s := s ++ s!"c {k} {hx (st.force.wc.get! k)} {hx (st.force.ellC.get! k)} {st.force.deg[k]!} {hx (st.force.beta.get! k)} {hx (st.force.theta.get! k)} {hx (st.lam0.get! k)} {hx (st.rate.get! k)} {hx (st.gbar.get! k)} {hx (st.rg.get! k)} {st.piece[k]!} {hx (st.omegaP.get! k)}\n"
+      for si in [0:r.ev.cm.segs.size] do
+        s := s ++ s!"dw {si} {hx (st.force.dwdn.get! si)}\n"
+      for i in [0:r.base.nv] do
+        let rn := match st.ring[i]! with | some n => toString n | none => "-1"
+        s := s ++ s!"m {i} {rn} {hx (st.sigma.get! i)}\n"
     let nAdj := r.redist.adj.foldl (fun n x => if x then n + 1 else n) 0
     for i in [0:r.base.nv] do
       s := s ++ s!"n {i} {hx (r.phiTilde.get! i)} {hx (r.phiLen.get! i)} {hx (r.phiSym.get! i)} {r.redist.region[i]!} {b2n r.redist.adj[i]!} {hx (r.redist.T.get! i)} {hx (r.phiNew.get! i)} {hx (r.phiNew.get! i / r.base.scale)}\n"

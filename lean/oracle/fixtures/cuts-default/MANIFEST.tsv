@@ -1,0 +1,23 @@
+d-ico1-tilted-dirichlet	ok	default stages: icosphere level 1, tilted plane, Dirichlet, alpha_L = 0.5
+d-ico2-cap-dirichlet	ok	default stages: geodesic cap on icosphere level 2, Dirichlet, alpha_L = 2
+d-ico2-tilted-hencky	ok	default stages: tilted plane, Hencky
+d-ico2-cap-scaled-curv	ok	default stages: geodesic cap, curvature-scaled Dirichlet (featurelap positive)
+d-torus-band	ok	default stages: torus, two-band level set
+d-grid-boundary-scaled-a	ok	default stages: grid disk, a straight cut ending on the boundary at both ends (boundary cut points), scaled Dirichlet
+d-annulus-radial	ok	default stages: annulus, a cut across the ring ending on both boundary circles
+d-annulus-ring-hencky	ok	default stages: annulus, closed circular cut, Hencky
+d-ico2-eta-gradient	ok	default stages with a penalty eta = 0.2 (1 + z), gradient rule (includes the dw/dn term)
+d-ico2-eta-paper	ok	the same with the paper's rule (no dw/dn term)
+d-ico2-symmetry	ok	default stages, symmetry classes (mirror x -> -x), cap about a tilted axis
+d-ico2-region-weights	ok	default stages, w = (2, 0.5), beta = (0.7, 0.2)
+d-flat-disk-circle	ok	default stages: flat disk, circular cut, Gaussian curvature: pure curve shortening
+d-two-spheres-untouched	ok	default stages: two disjoint spheres, one untouched (region 0) component
+d-ico1-phi-zero-unit-speed	ok	default stages except speed unit: phi = z exactly 0 at vertices (mean gradient would be 0 there)
+m-length-onmesh	ok	default except the length step on the mesh (extension local, mean gradient, adaptive)
+m-extension-harmonic	ok	default except the harmonic extension
+m-speed-unit	ok	default except ḡ = 1
+m-step-capped	ok	default except the capped step rule
+m-step-fixed	ok	default except a fixed step
+m-featurelap-cotan	ok	default except the cotan Laplacian in the feature size smoothing (scaled_curv)
+m-flux-nodal	ok	default except nodal flux and one sliver-smoothing pass (the paper's evaluation)
+m-paper-stages-format2	ok	format 2 with all of the paper's stages (equals the same case in format 1 up to the extra lines)
