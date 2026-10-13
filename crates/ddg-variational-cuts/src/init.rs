@@ -331,3 +331,251 @@ pub fn visibility_penalty(
         })
         .collect())
 }
+
+/// A state for `n_regions` regions (SPEC §8.1, §8.7) from vertex labels: `labels[i] = k` puts
+/// vertex `i` into region `k`. Function `k` is [`from_vertex_labels`] for the two labels "in
+/// region `k`" and "not in region `k`": negative on the vertices of the region, the signed
+/// fast-marching distance to its boundary, which crosses exactly the edges with one end in the
+/// region. At a vertex with label `k` function `k` is the only negative one, so the regions of
+/// the state are the labels. A region without vertices gets a function that is positive
+/// everywhere (`√(total area)`); it stays empty.
+///
+/// # Errors
+/// [`CutError::UnsupportedRegionCount`] for `n_regions < 2`, [`CutError::Geometry`],
+/// [`CutError::WrongLength`], and [`CutError::InvalidOptions`] for a label that is not below
+/// `n_regions`.
+pub fn regions_from_vertex_labels(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    labels: &[u32],
+    n_regions: usize,
+) -> Result<Vec<Vec<f64>>, CutError> {
+    if n_regions < 2 {
+        return Err(CutError::UnsupportedRegionCount { got: n_regions });
+    }
+    check_length("vertex labels", "vertices", labels.len(), mesh.n_vertices())?;
+    if let Some(v) = labels.iter().position(|&l| l as usize >= n_regions) {
+        return Err(CutError::InvalidOptions {
+            reason: format!(
+                "vertex {v} has the label {}; there are {n_regions} regions (labels 0 to {})",
+                labels[v],
+                n_regions - 1
+            ),
+        });
+    }
+    (0..n_regions as u32)
+        .map(|k| {
+            let outside: Vec<u32> = labels.iter().map(|&l| u32::from(l != k)).collect();
+            from_vertex_labels(mesh, geometry, &outside)
+        })
+        .collect()
+}
+
+/// Vertex labels from face labels with `n_regions` values: a vertex takes the label whose faces
+/// cover the largest angle around it. Among labels whose angles agree to a relative `10⁻⁹` the
+/// lowest wins. For two labels this is [`vertex_labels_from_faces`]; what is said there about
+/// where the cut runs and about patches that vanish holds here too.
+///
+/// # Errors
+/// As [`regions_from_vertex_labels`], for faces.
+pub fn region_labels_from_faces(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    face_labels: &[u32],
+    n_regions: usize,
+) -> Result<Vec<u32>, CutError> {
+    if n_regions < 2 {
+        return Err(CutError::UnsupportedRegionCount { got: n_regions });
+    }
+    geometry.check_mesh(mesh)?;
+    check_length("face labels", "faces", face_labels.len(), mesh.n_faces())?;
+    if let Some(f) = face_labels.iter().position(|&l| l as usize >= n_regions) {
+        return Err(CutError::InvalidOptions {
+            reason: format!(
+                "face {f} has the label {}; there are {n_regions} regions (labels 0 to {})",
+                face_labels[f],
+                n_regions - 1
+            ),
+        });
+    }
+    let mut angle = vec![0.0f64; mesh.n_vertices() * n_regions];
+    for (f, face) in mesh.faces().iter().enumerate() {
+        for k in 0..3 {
+            angle[face[k] as usize * n_regions + face_labels[f] as usize] +=
+                geometry.corner_angles()[f][k];
+        }
+    }
+    Ok(angle
+        .chunks(n_regions)
+        .map(|a| {
+            let mut best = 0;
+            for k in 1..n_regions {
+                if a[k] > a[best] * (1.0 + 1e-9) {
+                    best = k;
+                }
+            }
+            best as u32
+        })
+        .collect())
+}
+
+/// A state for `n_regions` regions from face labels: [`region_labels_from_faces`], then
+/// [`regions_from_vertex_labels`].
+///
+/// # Errors
+/// As [`region_labels_from_faces`].
+pub fn regions_from_face_labels(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    face_labels: &[u32],
+    n_regions: usize,
+) -> Result<Vec<Vec<f64>>, CutError> {
+    let labels = region_labels_from_faces(mesh, geometry, face_labels, n_regions)?;
+    regions_from_vertex_labels(mesh, geometry, &labels, n_regions)
+}
+
+/// Vertex labels from a clustering of the vertex normals into `n_clusters` clusters, as a start
+/// for [`regions_from_vertex_labels`] (the paper initializes "via greedy clustering of vertex
+/// normals", Sec. 7, without saying how; this is what is done here).
+///
+/// The normal of a vertex is the normalized sum of the area vectors of its faces, its weight a
+/// third of their area.
+///
+/// 1. The first centre is the one of the six directions `±x, ±y, ±z` that the most area faces
+///    (largest `Σ weight · max(n · direction, 0)`; ties in that order). Every further centre is
+///    the vertex normal that is farthest from the centres chosen so far (smallest largest dot
+///    product; ties: the lowest vertex index).
+/// 2. Then, at most `max_iterations` times: every vertex goes to the centre with the largest
+///    dot product (ties: the lowest cluster), and every centre becomes the normalized weighted
+///    sum of the normals of its vertices (a cluster that is empty or whose sum vanishes keeps
+///    its centre). The iteration stops when no vertex changes its cluster.
+///
+/// A cluster need not be connected on the surface, and may be empty.
+///
+/// # Errors
+/// [`CutError::WrongLength`], and [`CutError::InvalidOptions`] for `n_clusters = 0` or a
+/// position that is not finite.
+pub fn normal_clusters(
+    mesh: &TriMesh,
+    positions: &[[f64; 3]],
+    n_clusters: usize,
+    max_iterations: usize,
+) -> Result<Vec<u32>, CutError> {
+    let nv = mesh.n_vertices();
+    check_length("positions", "vertices", positions.len(), nv)?;
+    if n_clusters == 0 {
+        return Err(CutError::InvalidOptions {
+            reason: "the number of clusters must be at least 1".to_string(),
+        });
+    }
+    if let Some(v) = positions
+        .iter()
+        .position(|p| p.iter().any(|x| !x.is_finite()))
+    {
+        return Err(CutError::InvalidOptions {
+            reason: format!(
+                "the position {:?} of vertex {v} is not finite",
+                positions[v]
+            ),
+        });
+    }
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let mut normal = vec![[0.0f64; 3]; nv];
+    let mut weight = vec![0.0f64; nv];
+    for face in mesh.faces() {
+        let [a, b, c] = face.map(|v| positions[v as usize]);
+        let (u, v) = (
+            [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+            [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+        );
+        let n = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let area = 0.5 * dot(n, n).sqrt();
+        for &i in face {
+            for k in 0..3 {
+                normal[i as usize][k] += n[k];
+            }
+            weight[i as usize] += area / 3.0;
+        }
+    }
+    for n in &mut normal {
+        let length = dot(*n, *n).sqrt();
+        if length > 0.0 && length.is_finite() {
+            *n = n.map(|x| x / length);
+        } else {
+            *n = [0.0; 3];
+        }
+    }
+    // Step 1: the centres.
+    let axes = [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+    ];
+    let mut first = (axes[0], f64::NEG_INFINITY);
+    for axis in axes {
+        let faced: f64 = (0..nv)
+            .map(|v| weight[v] * dot(normal[v], axis).max(0.0))
+            .sum();
+        if faced > first.1 {
+            first = (axis, faced);
+        }
+    }
+    let mut centres = vec![first.0];
+    let mut nearest: Vec<f64> = normal.iter().map(|n| dot(*n, first.0)).collect();
+    while centres.len() < n_clusters {
+        let mut farthest = 0;
+        for v in 1..nv {
+            if nearest[v] < nearest[farthest] {
+                farthest = v;
+            }
+        }
+        let centre = normal[farthest];
+        for v in 0..nv {
+            nearest[v] = nearest[v].max(dot(normal[v], centre));
+        }
+        centres.push(centre);
+    }
+    // Step 2: Lloyd's iteration on the sphere.
+    let assign = |centres: &[[f64; 3]]| -> Vec<u32> {
+        normal
+            .iter()
+            .map(|n| {
+                let mut best = 0;
+                for k in 1..centres.len() {
+                    if dot(*n, centres[k]) > dot(*n, centres[best]) {
+                        best = k;
+                    }
+                }
+                best as u32
+            })
+            .collect()
+    };
+    let mut labels = assign(&centres);
+    for _ in 0..max_iterations {
+        let mut sums = vec![[0.0f64; 3]; n_clusters];
+        for v in 0..nv {
+            for k in 0..3 {
+                sums[labels[v] as usize][k] += weight[v] * normal[v][k];
+            }
+        }
+        for (centre, sum) in centres.iter_mut().zip(&sums) {
+            let length = dot(*sum, *sum).sqrt();
+            if length > 0.0 && length.is_finite() {
+                *centre = sum.map(|x| x / length);
+            }
+        }
+        let next = assign(&centres);
+        if next == labels {
+            break;
+        }
+        labels = next;
+    }
+    Ok(labels)
+}

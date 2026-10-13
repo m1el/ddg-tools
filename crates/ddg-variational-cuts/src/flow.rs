@@ -890,7 +890,7 @@ impl Flow {
         par: Parallelism<'_>,
     ) -> Result<(Vec<f64>, f64), CutError> {
         match rule {
-            Extension::Local => Ok((self.extend_from_cut(&e.cut, &e.triangles, rate, false), 0.0)),
+            Extension::Local => Ok((self.extend_from_cut(&e.cut, &e.triangles, rate), 0.0)),
             Extension::Harmonic => self.extend_harmonically(e, rate, par),
         }
     }
@@ -913,36 +913,34 @@ impl Flow {
     /// mean rate is kept.
     ///
     /// [formula: cut-extension-local]
-    ///
-    /// With `per_region` (SPEC §8.5) `rate` is the rate of the function of the lower region at
-    /// each cut point, and a vertex of the higher region of a cut point takes its negative: the
-    /// result at a vertex of region `k` is the extension of the rate of `φ_k`.
-    pub(crate) fn extend_from_cut(
-        &self,
-        cut: &Cut,
-        tri: &CutTriangles,
-        rate: &[f64],
-        per_region: bool,
-    ) -> Vec<f64> {
+    pub(crate) fn extend_from_cut(&self, cut: &Cut, tri: &CutTriangles, rate: &[f64]) -> Vec<f64> {
         let mesh = self.evaluator.mesh();
-        let lengths = self.geometry.edge_lengths();
         let region = &cut.vertex_region;
         let nv = region.len();
         let dual = cut_dual_lengths(cut, tri);
         let (mut sum, mut weight) = (vec![0.0; nv], vec![0.0; nv]);
         for (k, point) in cut.points.iter().enumerate() {
             let [a, b] = mesh.edge_vertices(point.edge as usize);
-            let lower = region[a].min(region[b]);
             for (v, barycentric) in [(a, 1.0 - point.t), (b, point.t)] {
-                let value = if per_region && region[v] != lower {
-                    -rate[k]
-                } else {
-                    rate[k]
-                };
-                sum[v] += dual[k] * barycentric * value;
+                sum[v] += dual[k] * barycentric * rate[k];
                 weight[v] += dual[k] * barycentric;
             }
         }
+        self.extend_from_seeds(region, sum, weight)
+    }
+
+    /// The second line of [`Extension::Local`]: `sum[i] / weight[i]` at the vertices with a
+    /// positive weight (the cut-adjacent ones), and from there ring by ring within each region.
+    ///
+    /// [formula: cut-extension-local]
+    pub(crate) fn extend_from_seeds(
+        &self,
+        region: &[u32],
+        sum: Vec<f64>,
+        weight: Vec<f64>,
+    ) -> Vec<f64> {
+        let lengths = self.geometry.edge_lengths();
+        let nv = region.len();
         const UNSEEN: u32 = u32::MAX;
         let mut ring = vec![UNSEEN; nv];
         let mut sigma = vec![0.0; nv];
@@ -1230,38 +1228,10 @@ pub(crate) fn cut_dual_lengths(cut: &Cut, tri: &CutTriangles) -> Vec<f64> {
 /// [`StepSize::Capped`] the cut moves by at most the given fraction of the shortest crossed
 /// edge, by distortion and length together.
 ///
-/// **Networks** (SPEC §8.5, D20). `r_p` is the rate of the function of the lower of the two
-/// regions at `p`, and "lower region" above means that region. The systems couple cut points
-/// through segments between two cut points only, so every curve between two junctions is a
-/// chain of its own. A segment from a cut point `p` to a triple point `m` belongs to `p`
-/// entirely (`ℓ_p` gets its whole length, its `∂w/∂n` term goes to `p`). At a triple point the
-/// three regions `X` have the *effective angles*
-///
-/// ```text
-/// β̃_X = β_m^X − Σ_{p ∈ X, face of m} c_p (π − β_p^X)
-/// ```
-///
-/// with `β_m^X`, `β_p^X` the interior angles of `X` at `m` and at its two cut points of the
-/// face, and `c_p = 1` if `p` has a segment to another cut point, `½` if both its segments end
-/// at triple points, `0` if `p` lies on `∂M`: the angle between the two curves that bound `X`
-/// as they arrive at the face (the kinks that the centroid construction puts at the cut points
-/// are taken out). The cut point `p` between the regions `i < j` of the face then gets, instead
-/// of `w_p θ_p`, the junction force
-///
-/// ```text
-/// Θ_p = (w_m / 3) (sin β̃_i − sin β̃_j)
-/// ```
-///
-/// (plus `w_p (π/2 − β_p)` if it lies on `∂M`). This is `−(1/3) (Σ_l τ_l) · n_p` with `τ_l`
-/// the unit tangents of the three curves leaving the junction and `n_p` the normal of the curve
-/// of `p` out of region `i`: minus the first variation of the length under a displacement of
-/// the junction, which the three cut points share. It vanishes iff the curves meet at 120°. A
-/// cut point both of whose segments end at triple points or on `∂M` has no neighbour to be
-/// implicit with; its row of the second system gets `τ w̄_σ / |pm|` on the diagonal for each
-/// of its segments to a triple point.
+/// This is the rule for two regions. On a network every region has rates of its own along its
+/// whole boundary (`regions::region_rates`, SPEC §8.5).
 ///
 /// [formula: cut-length-step-on-cut]
-/// [formula: cut-junction-force]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rate_on_cut(
     mesh: &TriMesh,
@@ -1277,12 +1247,10 @@ pub(crate) fn rate_on_cut(
     roughening_rate: f64,
     par: Parallelism<'_>,
 ) -> Result<RateOnCut, CutError> {
-    use std::f64::consts::PI;
     let nv = tri.n_original;
     let n = cut.points.len();
-    let w_node = cut.interpolate_nodes(mesh, weights);
-    let w_point = &w_node[..n];
-    // Interior angles at the copies of the cut points and of the triple points.
+    let w_point = cut.interpolate(mesh, weights);
+    // Interior angles at the copies of the cut points.
     let mut angle = vec![0.0; tri.n_vertices() - nv];
     for (face, cot) in tri.faces.iter().zip(&tri.cot) {
         for k in 0..3 {
@@ -1292,106 +1260,37 @@ pub(crate) fn rate_on_cut(
             }
         }
     }
-    // How many of its segments join a cut point to another cut point, and to a triple point.
-    let mut to_point = vec![0u8; n];
-    let mut to_triple = vec![0u8; n];
-    for segment in &cut.segments {
-        let [p, q] = segment.points;
-        if (q as usize) < n {
-            to_point[p as usize] += 1;
-            to_point[q as usize] += 1;
-        } else {
-            to_triple[p as usize] += 1;
-        }
-    }
-    let on_boundary = |p: usize| mesh.is_boundary_edge(cut.points[p].edge as usize);
     let mut force = vec![0.0; n];
     for (p, value) in force.iter_mut().enumerate() {
         let lower = tri.point_vertices_by_region(p)[0];
         let interior = angle[lower - nv];
-        *value = if on_boundary(p) {
-            w_point[p] * (0.5 * PI - interior)
-        } else if to_triple[p] > 0 {
-            // The turning here is part of the effective angles of the junction.
-            0.0
+        *value = if mesh.is_boundary_edge(cut.points[p].edge as usize) {
+            w_point[p] * (0.5 * std::f64::consts::PI - interior)
         } else {
-            w_point[p] * (PI - interior)
+            w_point[p] * (std::f64::consts::PI - interior)
         };
-    }
-    // The junction force (SPEC §8.5).
-    for (m, triple) in cut.triple_points.iter().enumerate() {
-        let copies = tri.triple_vertices(m);
-        let mut effective = [0.0; 3];
-        for c in 0..3 {
-            let region = tri.vertex_region[copies[c]];
-            effective[c] = angle[copies[c] - nv];
-            for p in [triple.points[c], triple.points[(c + 2) % 3]] {
-                let p = p as usize;
-                let share = if on_boundary(p) {
-                    0.0
-                } else if to_point[p] > 0 {
-                    1.0
-                } else {
-                    0.5
-                };
-                let [v0, v1] = tri.point_vertices(p);
-                let copy = if tri.vertex_region[v0] == region {
-                    v0
-                } else {
-                    v1
-                };
-                effective[c] -= share * (PI - angle[copy - nv]);
-            }
-        }
-        for k in 0..3 {
-            let (here, next) = (copies[k], copies[(k + 1) % 3]);
-            let (sin_here, sin_next) = (effective[k].sin(), effective[(k + 1) % 3].sin());
-            let difference = if tri.vertex_region[here] < tri.vertex_region[next] {
-                sin_here - sin_next
-            } else {
-                sin_next - sin_here
-            };
-            force[triple.points[k] as usize] += w_node[n + m] / 3.0 * difference;
-        }
     }
     let mut dual = vec![0.0; n];
     // Per segment: the stiffness of the recovery and that of the implicit step.
     let mut recovery = Vec::with_capacity(cut.segments.len());
     let mut implicit = Vec::with_capacity(cut.segments.len());
-    // Per cut point: what the implicit step adds to its diagonal (see the documentation).
-    let mut grounded = vec![0.0; n];
     for (i, segment) in cut.segments.iter().enumerate() {
         let t = tri.segment_triangle[i] as usize;
         let length = tri.segment_length[i];
-        // The triangle (a, p, q): the segment is its edge from corner 1 to corner 2.
+        // The corner triangle (a, p, q): the segment is its edge from corner 1 to corner 2.
         let a = tri.faces[t][0] as usize;
-        let lower_side = cut.vertex_region[a] == cut.segment_regions(mesh, i)[0];
-        let across = |w_p: f64, w_q: f64| {
-            let (cot_p, cot_q) = (tri.cot[t][1], tri.cot[t][2]);
-            let foot = w_p + cot_p / (cot_p + cot_q) * (w_q - w_p);
-            let height = 2.0 * tri.area[t] / length;
-            let across = (foot - weights[a]) / height;
-            // Out of the lower region: the segment separates a from the other side.
-            if lower_side { across } else { -across }
-        };
-        if segment.points[1] as usize >= n {
-            // To a triple point: the whole segment belongs to the cut point.
-            let p = segment.points[0] as usize;
-            let w_m = w_node[segment.points[1] as usize];
-            if rule == PenaltyRule::Gradient {
-                force[p] += length * across(w_point[p], w_m);
-            }
-            dual[p] += length;
-            recovery.push(0.0);
-            implicit.push(0.0);
-            if to_point[p] == 0 {
-                grounded[p] += 0.5 * (w_point[p] + w_m) / length;
-            }
-            continue;
-        }
         let [p, q] = [1, 2].map(|k| (tri.faces[t][k] as usize - nv) / 2);
         if rule == PenaltyRule::Gradient {
-            let outward = across(w_point[p], w_point[q]);
+            let (cot_p, cot_q) = (tri.cot[t][1], tri.cot[t][2]);
+            let foot = w_point[p] + cot_p / (cot_p + cot_q) * (w_point[q] - w_point[p]);
+            let height = 2.0 * tri.area[t] / length;
+            let across = (foot - weights[a]) / height;
+            // Out of the lower region: the segment separates a from the two other vertices.
+            let outward = if cut.vertex_region[a] == cut.segment_regions(mesh, i)[0] {
+                across
+            } else {
+                -across
+            };
             force[p] += 0.5 * length * outward;
             force[q] += 0.5 * length * outward;
         }
@@ -1402,15 +1301,15 @@ pub(crate) fn rate_on_cut(
         recovery.push(smoothing_length * smoothing_length * mean_squared_edge / length);
         implicit.push(0.5 * (w_point[p] + w_point[q]) / length);
     }
-    let none = vec![0.0; n];
-    let (length_speed, first) = solve_on_cut(cut, &dual, &recovery, &none, &force, par)?;
+    let pairs: Vec<[u32; 2]> = cut.segments.iter().map(|segment| segment.points).collect();
+    let (length_speed, first) = solve_on_cut(&pairs, &dual, &recovery, &force, par)?;
     let explicit: Vec<f64> = (0..n).map(|p| speed[p] + length_speed[p]).collect();
     let tau = step_size.step(&explicit, shortest_crossed_edge, roughening_rate);
-    for k in implicit.iter_mut().chain(&mut grounded) {
+    for k in &mut implicit {
         *k *= tau;
     }
     let rhs: Vec<f64> = (0..n).map(|p| dual[p] * explicit[p]).collect();
-    let (rate, second) = solve_on_cut(cut, &dual, &implicit, &grounded, &rhs, par)?;
+    let (rate, second) = solve_on_cut(&pairs, &dual, &implicit, &rhs, par)?;
     Ok(RateOnCut {
         length_speed,
         rate,
@@ -1419,36 +1318,25 @@ pub(crate) fn rate_on_cut(
     })
 }
 
-/// Solves `(diag(ℓ + g) + S) x = b` on the cut, with `S` the stiffness matrix of the polyline
-/// that has the stiffness `stiffness[σ]` on segment `σ` (segments to triple points do not
-/// couple anything) and `g = grounded`. Returns `x` and the largest entry of the residual
-/// relative to the largest entry of `b`.
-fn solve_on_cut(
-    cut: &Cut,
+/// Solves `(diag(ℓ) + S) x = b`, with `S` the stiffness matrix of the polylines that join the
+/// nodes `pairs[σ]` with the stiffness `stiffness[σ]`. Returns `x` and the largest entry of the
+/// residual relative to the largest entry of `b`.
+pub(crate) fn solve_on_cut(
+    pairs: &[[u32; 2]],
     dual: &[f64],
     stiffness: &[f64],
-    grounded: &[f64],
     rhs: &[f64],
     par: Parallelism<'_>,
 ) -> Result<(Vec<f64>, f64), CutError> {
     let n = dual.len();
-    let plain = grounded.iter().all(|g| *g == 0.0);
-    if plain && stiffness.iter().all(|k| *k == 0.0) {
+    if stiffness.iter().all(|k| *k == 0.0) {
         return Ok((rhs.iter().zip(dual).map(|(b, l)| b / l).collect(), 0.0));
     }
-    let coupled = |segment: &crate::cut::CutSegment| (segment.points[1] as usize) < n;
     let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(n + 3 * stiffness.len());
     for (p, &l) in dual.iter().enumerate() {
         triplets.push((p as u32, p as u32, l));
-        if !plain && grounded[p] != 0.0 {
-            triplets.push((p as u32, p as u32, grounded[p]));
-        }
     }
-    for (segment, &k) in cut.segments.iter().zip(stiffness) {
-        if !coupled(segment) {
-            continue;
-        }
-        let [p, q] = segment.points;
+    for (&[p, q], &k) in pairs.iter().zip(stiffness) {
         triplets.push((p, p, k));
         triplets.push((q, q, k));
         triplets.push((p.max(q), p.min(q), -k));
@@ -1457,17 +1345,11 @@ fn solve_on_cut(
     let factorization = Symbolic::analyze(&matrix, Method::Llt)?.factor(&matrix, par)?;
     let mut x = rhs.to_vec();
     factorization.solve_in_place(&mut x, par)?;
-    let mut residual: Vec<f64> = (0..n)
-        .map(|p| (dual[p] + grounded[p]) * x[p] - rhs[p])
-        .collect();
-    for (segment, &k) in cut.segments.iter().zip(stiffness) {
-        if !coupled(segment) {
-            continue;
-        }
-        let [p, q] = segment.points.map(|v| v as usize);
-        let flow = k * (x[p] - x[q]);
-        residual[p] += flow;
-        residual[q] -= flow;
+    let mut residual: Vec<f64> = (0..n).map(|p| dual[p] * x[p] - rhs[p]).collect();
+    for (&[p, q], &k) in pairs.iter().zip(stiffness) {
+        let flow = k * (x[p as usize] - x[q as usize]);
+        residual[p as usize] += flow;
+        residual[q as usize] -= flow;
     }
     let worst = residual.iter().fold(0.0f64, |m, r| m.max(r.abs()));
     let largest = rhs.iter().fold(0.0f64, |m, b| m.max(b.abs()));
