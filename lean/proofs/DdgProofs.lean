@@ -34,3 +34,4 @@ import DdgProofs.Cuts.Analytic
 import DdgProofs.Cuts.OnCut
 import DdgProofs.Cuts.Ripple
 import DdgProofs.Cuts.Regions
+import DdgProofs.Cuts.Quantile

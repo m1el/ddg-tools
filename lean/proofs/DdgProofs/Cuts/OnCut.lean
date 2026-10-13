@@ -698,6 +698,13 @@ theorem norm_grad_eq_gradientNormLone {E : Type*} [NormedAddCommGroup E]
   rw [gradientNormLone_eq]
   exact norm_grad_eq_gradNorm e₁ e₂ α β φa h h1 h2
 
+/-- **A zero-slope face** (SPEC §3.9, D23a): if the function vanishes at the lone vertex,
+`|∇φ| = 0` in the face. Such a face is left out of the mean `ḡ` (its term `|pq|/|∇φ|` is not
+finite); `meanGradient_mem` then applies to the faces that count, where `|∇φ| > 0`. -/
+theorem gradientNormLone_zero (len area : ℝ) : Ddg.gradientNormLone 0 len area = 0 := by
+  rw [gradientNormLone_eq]
+  simp [gradNorm]
+
 /-- The oracle's `meanGradient` of the two sums is `meanGradient`. -/
 theorem oracle_meanGradient_eq {ι : Type*} (s : Finset ι) (L g : ι → ℝ) :
     Ddg.meanGradient (∑ σ ∈ s, L σ) (∑ σ ∈ s, L σ / g σ) = meanGradient s L g := rfl
@@ -713,20 +720,62 @@ theorem oracle_meanGradient_mem {ι : Type*} {s : Finset ι} {L g : ι → ℝ}
   rw [oracle_meanGradient_eq]
   exact meanGradient_mem hL hpos hlo0 hlo hhi
 
+/-- The oracle's `weightedMean` at `ℝ`: the two lists are zipped, and the sum of the products
+is divided by the sum of the weights that are used. -/
+theorem weightedMean_eq (ws vs : List ℝ) :
+    Ddg.weightedMean ws vs =
+      ((ws.zip vs).map fun y => y.1 * y.2).sum / ((ws.zip vs).map fun y => y.1).sum := by
+  show Ddg.sumList ((ws.zip vs).map fun y => y.1 * y.2) /
+      Ddg.sumList ((ws.zip vs).map fun y => y.1) = _
+  rw [sumList_eq_sum, sumList_eq_sum]
+
+/-- **The oracle's `weightedMean` is a convex combination** of the values it uses: for
+nonnegative weights with a positive sum it lies between every lower and upper bound of the values
+(of the pairs of the two lists, whatever their lengths).
+
+[formula: cut-extension-local] -/
+theorem weightedMean_mem {ws vs : List ℝ} (hw : ∀ y ∈ ws.zip vs, 0 ≤ y.1)
+    (hpos : 0 < ((ws.zip vs).map fun y => y.1).sum) {lo hi : ℝ}
+    (hlo : ∀ y ∈ ws.zip vs, lo ≤ y.2) (hhi : ∀ y ∈ ws.zip vs, y.2 ≤ hi) :
+    lo ≤ Ddg.weightedMean ws vs ∧ Ddg.weightedMean ws vs ≤ hi := by
+  rw [weightedMean_eq]
+  generalize ws.zip vs = ps at *
+  have key : lo * (ps.map fun y => y.1).sum ≤ (ps.map fun y => y.1 * y.2).sum ∧
+      (ps.map fun y => y.1 * y.2).sum ≤ hi * (ps.map fun y => y.1).sum := by
+    clear hpos
+    induction ps with
+    | nil => simp
+    | cons y t ih =>
+      have h0 := hw y (List.mem_cons.mpr (Or.inl rfl))
+      have h1 := hlo y (List.mem_cons.mpr (Or.inl rfl))
+      have h2 := hhi y (List.mem_cons.mpr (Or.inl rfl))
+      obtain ⟨ih1, ih2⟩ := ih (fun z hz => hw z (List.mem_cons.mpr (Or.inr hz)))
+        (fun z hz => hlo z (List.mem_cons.mpr (Or.inr hz)))
+        (fun z hz => hhi z (List.mem_cons.mpr (Or.inr hz)))
+      simp only [List.map_cons, List.sum_cons]
+      constructor <;> nlinarith [mul_le_mul_of_nonneg_left h1 h0, mul_le_mul_of_nonneg_left h2 h0]
+  rw [le_div_iff₀ hpos, div_le_iff₀ hpos]
+  exact key
+
 /-- **The oracle's `weightedMean` of two lists is the weighted mean** over the (distinct) indices
 the lists are built from. -/
 theorem oracle_weightedMean_eq {ι : Type*} [DecidableEq ι] {l : List ι} (hl : l.Nodup)
     (c x : ι → ℝ) : Ddg.weightedMean (l.map c) (l.map x) = wmean l.toFinset c x := by
   have h1 : ∀ l : List ι,
-      Ddg.sumList (((l.map c).zip (l.map x)).map fun y => y.1 * y.2) =
+      (((l.map c).zip (l.map x)).map fun y => y.1 * y.2).sum =
         (l.map fun j => c j * x j).sum := by
     intro l
     induction l with
-    | nil => simp [Ddg.sumList]
-    | cons a t ih => simp [Ddg.sumList, ih]
-  unfold Ddg.weightedMean wmean
-  rw [h1, sumList_eq_sum, ← List.sum_toFinset (fun j => c j * x j) hl,
-    ← List.sum_toFinset c hl]
+    | nil => simp
+    | cons a t ih => simp [ih]
+  have h2 : ∀ l : List ι, (((l.map c).zip (l.map x)).map fun y => y.1).sum = (l.map c).sum := by
+    intro l
+    induction l with
+    | nil => simp
+    | cons a t ih => simp [ih]
+  rw [weightedMean_eq, h1, h2]
+  unfold wmean
+  rw [← List.sum_toFinset (fun j => c j * x j) hl, ← List.sum_toFinset c hl]
 
 /-- **The first line of the local extension, on the oracle's definition**: `weightedMean` of
 the weights `ℓ_p β_ip ≥ 0` and the rates `r_p` over the cut points at `i` lies between the
