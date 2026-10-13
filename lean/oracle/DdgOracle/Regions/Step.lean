@@ -381,12 +381,17 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
   let mut mhat := fzero
   if robust then
     m1 := weightedQuantile 0.9 ((List.range nP).map fun p => speedInEdges (ev.sCut.get! p) (hP.get! p)) ellP.toList
-    let mut xs : List Float := []
-    let mut ls : List Float := []
+    -- pooled over all boundary copies; equal values in the order of the node numbers of §8.2
+    let mut ents : Array (Nat × Nat × Nat) := #[]
     for X in [0:N] do
       for j in [0:nodesOf X] do
-        xs := xs ++ [speedInEdges ((ev.sNode[X]!).get! j + (lam0s[X]!).get! j) (copyH X j)]
-        ls := ls ++ [(ellCs[X]!).get! j]
+        ents := ents.push ((ev.views[X]!).toCopy[j]!, X, j)
+    ents := ents.qsort (fun a b => a.1 < b.1)
+    let mut xs : List Float := []
+    let mut ls : List Float := []
+    for (_, X, j) in ents do
+      xs := xs ++ [speedInEdges ((ev.sNode[X]!).get! j + (lam0s[X]!).get! j) (copyH X j)]
+      ls := ls ++ [(ellCs[X]!).get! j]
     m2 := weightedQuantile 0.9 xs ls
     mhat := if c.stages == .paper then max m1 m2 else m2
     tau := match c.step with
@@ -405,8 +410,10 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
     if !robust then 1.0
     else match c.step with
       | .fixed _ => 1.0
-      | .capped _ mm => localLimitFactor mm (copyH X j) tau r.abs
-      | .adaptive _ mm _ => localLimitFactor mm (copyH X j) tau (localSpeed r (copyOmega X j) omega)
+      | .capped _ mm => if r.abs / copyH X j ≤ mhat then 1.0 else localLimitFactor mm (copyH X j) tau r.abs
+      | .adaptive _ mm _ =>
+        let v := localSpeed r (copyOmega X j) omega
+        if v / copyH X j ≤ mhat then 1.0 else localLimitFactor mm (copyH X j) tau v
   let sLim : Array FloatArray := Array.ofFn (n := N) fun X =>
     FloatArray.ofFn' (nodesOf X.val) fun j => (ev.sNode[X.val]!).get! j * limitFactor X.val j ((ev.sNode[X.val]!).get! j)
   let mut factorAll : Array FloatArray := Array.ofFn (n := N) fun X =>

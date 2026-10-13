@@ -59,6 +59,42 @@ def selftestRobust : IO Nat := do
           if (r.factor[rv.X]!).get! j < 1 then nlim := nlim + 1
       check tally s!"{f.case.name}: local limit bounds the motion of every boundary copy by max_motion h_c ({nlim} limited)"
         (worst ≤ 1 + 1e-12) s!"largest motion / (max_motion h_c) = {sci worst}; omega {sci r.omega} max {sci r.omegaMax}"
+  -- a region whose boundary is a closed chain through triple-point copies only
+  for n in ["triple-chain-paper", "triple-chain-default"] do
+    let path : System.FilePath := "fixtures/regions-robust" / s!"{n}.in"
+    if !(← path.pathExists) then
+      check tally s!"{n}: input file present" false
+    else
+      let text ← IO.FS.readFile path
+      let lines := (text.splitOn "\n").filterMap fun l =>
+        let t := tokens l
+        if t.size == 0 || t[0]! == "case" || t[0]! == "end" then none else some t
+      match parseBody n lines.toArray with
+      | .error e => check tally s!"{n}: parses" false e
+      | .ok c =>
+        match runOkR c with
+        | none => check tally s!"{n}: step runs" false
+        | some r =>
+          let net := r.ev.net
+          -- regions every segment of whose boundary ends in a triple point: the chain alternates
+          -- cut-point and triple-point copies and no two cut points are joined
+          let mut tripleOnly := 0
+          for X in [0:c.phis.size] do
+            let segsX := net.segs.filter fun sg => sg.regA == X || sg.regB == X
+            if segsX.size > 0 && segsX.all (·.toTriple) then tripleOnly := tripleOnly + 1
+          let mm := match c.step with | .capped _ m => m | .adaptive _ m _ => m | .fixed _ => 1.0
+          let mut worst := fzero
+          for rv in r.ev.views do
+            for j in [0:rv.toCopy.size] do
+              let (g, _) := geoOfCopy net rv.toCopy[j]!
+              let h := if g < net.nv + net.nP then r.hP.get! (g - net.nv)
+                else
+                  let t := net.triples[g - net.nv - net.nP]!
+                  min (r.hP.get! t.p0) (min (r.hP.get! t.p1) (r.hP.get! t.p2))
+              worst := max worst (r.tau * ((r.rAfter[rv.X]!).get! j).abs / (mm * h))
+          check tally s!"{n}: {tripleOnly} region(s) whose boundary chain consists of segments to triple points only; motion bounded by max_motion h_c"
+            (tripleOnly > 0 && worst ≤ 1 + 1e-12 && r.tau > 0 && r.tau.isFinite)
+            s!"largest motion / (max_motion h_c) = {sci worst}; tau {sci r.tau}"
   let t ← tally.get
   IO.println s!"regions-selftest (robust): {t.passed} passed, {t.failed} failed"
   return t.failed

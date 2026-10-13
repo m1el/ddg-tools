@@ -3,3 +3,5 @@ rr-sphere4-default	ok	robust statistics, default stages, 4 regions
 rr-disk4-paper	ok	robust, paper's stages, 4 regions on a disk with boundary
 rr-sphere3-spike-default	ok	robust, default stages, 3 regions with a spike of curvature at one vertex
 rr-sphere3-spike-paper	ok	robust, paper's stages, 3 regions with the spike (local limit on s_v)
+triple-chain-paper	ok	a region (one vertex whose neighbours alternate between two other regions) whose boundary is a closed chain through triple-point copies only; paper's stages, robust
+triple-chain-default	ok	the same, default stages

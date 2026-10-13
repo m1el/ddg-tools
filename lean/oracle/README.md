@@ -1119,7 +1119,7 @@ A crossed face with `|grad phi| = 0` is left out of both sums of `g`; a piece (c
 `rb-ico2-cap-paper-adaptive` (paper stages: the larger of two `mhat`), `rb-spike-adaptive`, `-capped`, `-paper` (a face with a 40 times larger curvature
 density next to the cut: `omega_c` outlier `2.0e3` against `omega = 9.3e2`, 2 to 5 cut points limited), `rb-spike-extremes` (the same with the extremes
 in format 3), `rb-grid-boundary-adaptive` (cut ending on the boundary, scaled energy), `rb-torus-hencky`.
-`fixtures/regions-robust/` (5 cases, `regions-robust-fixtures check`): `rr-sphere4-paper`, `rr-sphere4-default`, `rr-disk4-paper` (6 copies limited),
+`fixtures/regions-robust/` (5 generated cases and the two adopted `triple-chain-*`, `regions-robust-fixtures check`): `rr-sphere4-paper`, `rr-sphere4-default`, `rr-disk4-paper` (6 copies limited),
 `rr-sphere3-spike-default`, `rr-sphere3-spike-paper` (a vertex pushed out to 2.4 times its radius next to a boundary between two regions: `omega_c` up to
 `1.1e2` against `omega = 41`, 6 copies limited).
 `fixtures/cuts`, `fixtures/cuts-default`, `fixtures/regions` are unchanged (byte for byte) by this revision.
@@ -1147,3 +1147,16 @@ and `mhat` to `1e-9`) and the local limit bounds the motion of every boundary co
     `v_c = |r|`).
 39. §8.4 robust: the larger of the two `mhat` uses `ELLP`-weighted cut points for `rho = s` and `ELLC`-weighted copies for `rho = s + lambda0`.
 40. D23(c): `omega <= 0` removes the time limit; `mhat <= 0` the motion limit; nothing else is done for a negative `omega`.
+
+# Revision D24 (SPEC after the replay of the robust statistics)
+
+41. *Local limit guard (D24a).* A cut point (or boundary copy) with `v_c / h_c <= mhat` (the `mhat` that `tau` was computed from) is **not** limited
+    (factor exactly 1), whatever the rounding of `tau`; both for the capped and the adaptive rule and for two regions and N regions. No fixture changed.
+42. *Ties of the quantile over the pooled boundary copies of N regions (D24b)*: equal values are taken in the order of the node numbers of the cut mesh
+    (§8.2, the copy numbers `NODE`), whatever the region (reading 35 said: region first; replaced). No fixture changed.
+43. `limited N` of the reports counts boundary copies (of `regions`) or cut vertices (of `cuts`) with `FACTOR < 1`; a cut point and its two copies are counted
+    separately, a triple point's three copies as three. Compare with the number of factors below 1 in the `hc` / `h` lines.
+44. `fixtures/regions-robust/triple-chain-paper` and `-default` (7 files with `MANIFEST.tsv`) were built by the Rust side: a region that is a single vertex whose
+    neighbours alternate between two other regions, so that every segment of its boundary ends in a triple point. They are the files that `regions`
+    produces from the stored inputs (checked byte for byte before they were adopted); `regions-robust-fixtures check` reruns them from the `.in` files, and
+    `regions-selftest` tests the configuration (the region exists, the motion of every copy is bounded by `max_motion h_c`).

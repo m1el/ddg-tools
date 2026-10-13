@@ -45,10 +45,50 @@ def robustFixtures : Array RFixture := Id.run do
     "robust, paper's stages, 3 regions with the spike (local limit on s_v)"
   return fs
 
-/-- Write the fixtures. -/
-def writeRobust (dir : System.FilePath) : IO Unit := writeListR robustFixtures dir
+/-- Fixtures that are adopted as files (inputs built elsewhere): name and description. -/
+def adoptedFixtures : Array (String × String) :=
+  #[("triple-chain-paper", "a region (one vertex whose neighbours alternate between two other regions) whose boundary is a closed chain through triple-point copies only; paper's stages, robust"),
+    ("triple-chain-default", "the same, default stages")]
 
-/-- Check the fixtures. -/
-def checkRobust (dir : System.FilePath) : IO Nat := checkListR robustFixtures dir
+/-- Run an adopted input file. -/
+def runAdopted (dir : System.FilePath) (name : String) : IO (Option String) := do
+  let path := dir / s!"{name}.in"
+  if !(← path.pathExists) then return none
+  let text ← IO.FS.readFile path
+  let lines := (text.splitOn "\n").filterMap fun l =>
+    let t := tokens l
+    if t.size == 0 || t[0]! == "case" || t[0]! == "end" then none else some t
+  match parseBody name lines.toArray with
+  | .error e => return some (printError name e)
+  | .ok c => return some (runCase c)
+
+/-- Write the fixtures (the adopted ones are only listed in the manifest and checked by `checkRobust`). -/
+def writeRobust (dir : System.FilePath) : IO Unit := do
+  writeListR robustFixtures dir
+  let mut manifest ← IO.FS.readFile (dir / "MANIFEST.tsv")
+  for (n, what) in adoptedFixtures do
+    match ← runAdopted dir n with
+    | some out =>
+      IO.FS.writeFile (dir / s!"{n}.out") out
+      manifest := manifest ++ s!"{n}\t{statusOf out}\t{what}\n"
+    | none => IO.println s!"{n}: input file missing"
+  IO.FS.writeFile (dir / "MANIFEST.tsv") manifest
+
+/-- Check the fixtures, the adopted ones included; returns the number of differences. -/
+def checkRobust (dir : System.FilePath) : IO Nat := do
+  let mut bad ← checkListR robustFixtures dir
+  for (n, _) in adoptedFixtures do
+    match ← runAdopted dir n with
+    | none =>
+      IO.println s!"FAIL  {n}.in is missing"
+      bad := bad + 1
+    | some out =>
+      let stored ← IO.FS.readFile (dir / s!"{n}.out")
+      match compareOutputs stored out with
+      | none => IO.println s!"ok    {n}"
+      | some d =>
+        IO.println s!"FAIL  {n}: {d}"
+        bad := bad + 1
+  return bad
 
 end Ddg.Regions

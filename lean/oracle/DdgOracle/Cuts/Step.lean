@@ -509,11 +509,11 @@ def runStep (c : CutCase) : Except String Outcome := do
       | .fixed _ => pure ()
       | .capped _ mm =>
         for k in [0:nc] do
-          factor := factor.set! k (localLimitFactor mm (hc.get! k) tau (rate.get! k).abs)
+          factor := factor.set! k (if (rate.get! k).abs / hc.get! k ≤ mhat then 1.0 else localLimitFactor mm (hc.get! k) tau (rate.get! k).abs)
       | .adaptive _ mm _ =>
         for k in [0:nc] do
-          factor := factor.set! k (localLimitFactor mm (hc.get! k) tau
-            (localSpeed (rate.get! k) (omegaP.get! k) omega))
+          let v := localSpeed (rate.get! k) (omegaP.get! k) omega
+          factor := factor.set! k (if v / hc.get! k ≤ mhat then 1.0 else localLimitFactor mm (hc.get! k) tau v)
     let rlim := FloatArray.ofFn' nc fun k => rate.get! k * factor.get! k
     let (gbar, piece) :=
       if c.speed == .meanGradient then meanGradients cm phi
