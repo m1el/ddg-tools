@@ -507,7 +507,7 @@ def flow_controls(obj, context, session, settings):
             raise _translate(ex) from ex
         info["seconds_visibility"] = perf_counter() - begin
         info["n_hidden"] = sum(1 for v in visibility if v == 0.0)
-        extra = [settings["hide_strength"] * alpha * f for f in facing]
+        extra = array('d', (settings["hide_strength"] * alpha * f for f in facing))
         eta = extra if eta is None else array('d', (a + b for a, b in zip(eta, extra)))
     if eta is not None:
         controls["penalty"] = eta
@@ -554,6 +554,8 @@ def run_flow(obj, context, settings):
     previewed = perf_counter()
     summary = {k: v for k, v in report.items() if k != "steps"}
     summary["length_scale"] = session.length_scale
+    if info.get("roughening_rate") is not None:
+        summary["length_weight_roughening_rate"] = info["roughening_rate"]
     mesh[LAST_FLOW_KEY] = {k: v for k, v in summary.items()
                            if isinstance(v, (int, float, str)) and not isinstance(v, bool)}
     report["info"] = info
@@ -824,9 +826,9 @@ def apply_cut(obj, *, mark_seams=True):
     n_polygons_before = len(mesh.polygons)
     n_vertices_before = len(mesh.vertices)
     seam_before = sum(core._seam_flags(mesh))
+    stats = insert_cut(mesh, cut, mark_seams=mark_seams)
     remove_state(mesh)
     remove_preview(obj)
-    stats = insert_cut(mesh, cut, mark_seams=mark_seams)
     done = perf_counter()
     stats.update({
         "n_polygons_before": n_polygons_before,
