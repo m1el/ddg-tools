@@ -60,6 +60,9 @@ runs_tmp/                  gitignored; logs of long-running commands
 - Credit every paper: each crate's README and crate-level rustdoc cite the paper it implements;
   ported code keeps the original license notice.
 - Python goes through `uv` (`uv run`, `uvx`), never `pip`.
+- This machine has 64 cores. Independent jobs (one run per mesh, parameter sweeps, studies, fixture
+  generation) run in parallel across them (`xargs -P`, a thread pool), one log per job; never one
+  after the other. Exception: timings and benches that report single-thread numbers run alone.
 - Long-running commands write to a log under `runs_tmp/` (`cmd > runs_tmp/x.log 2>&1`), then read the log.
   Never pipe a slow command into `tail`/`head`. Wait on a PID with `kill -0 $PID`, not `pgrep -f`.
 
