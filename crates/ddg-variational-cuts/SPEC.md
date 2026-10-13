@@ -88,8 +88,27 @@ with `Q_r` the part of the gradient density that is quadratic in the normal deri
 (`w_r (∂u/∂n)²` for the Dirichlet energy). The distortion term amplifies every ripple, the shorter
 the faster; the length term damps it. Ripples longer than `2π w/ω` grow, the fastest at
 `k = ω/(2w)`. With `w = 0` the flow is ill-posed (the paper's Sec. 3.2.1: the distortion alone is
-driven to zero by longer and longer cuts). `ω` has the unit of a speed, is reported by every step,
-and sets the scale of `α_L` and of the time step (§4, D18). On the sphere of unit area
+driven to zero by longer and longer cuts). `ω` has the unit of a speed and sets the scale of `α_L`
+and of the time step (§4, D18).
+
+On a cut where the normal derivatives vary, `ω` varies too. The *local* roughening rate at cut
+point `c` is `ω_c = 2 (Q_0,c + Q_1,c)` (on a network: of the two regions that meet at `c`). The
+*roughening rate of the state*, which every step reports and which §4 uses, is the quantile
+
+```
+ω = quantile_0.9 (ω_c ; ℓ_c)          [formula: cut-roughening-rate]
+quantile_q (x ; ℓ): with the x_c in ascending order (equal values in the order of the cut points),
+                    the first x_c at which the ℓ summed so far reach q · Σ ℓ   [formula: cut-weighted-quantile]
+```
+
+with `ℓ_c` the length of the cut at `c` (half the length of each of its segments to another cut
+point, the whole length of each segment to a triple point): on nine tenths of the cut, ripples
+shorter than `2π w/ω` decay (D22). "Reach" is `≥`; `Σ ℓ` and the running sum are both accumulated
+in the ascending order, so that `q = 1` returns the largest value in floating point too; a cut
+without points gives 0. The largest `ω_c` is reported next to `ω`. `ω_c ≥ 0` for the
+Dirichlet energy (`Q_r = w_r (∂u/∂n)²`); for the scaled and the pointwise energies `Q_r` is not a
+square, `ω_c` and `ω` can be negative, and a negative `ω_c` means that the distortion term damps
+ripples there. On the sphere of unit area
 (`R = 1/√(4π)`), for the Dirichlet energy, the ripple `ε cos(mθ)` of the equator grows at the rate
 `(m − 1) [ 4/R³ − α_L (m + 1)/R² ]` exactly (the DtN map of a hemisphere is `m/R`, the base
 solution contributes `u″ = K`, and the curvature of the ripple is `(m² − 1) ε/R²`); the equator is
@@ -321,8 +340,9 @@ vertex `i` at `p` (`1 − t` or `t` on the edge of `p`):
 ```
 
 The ring of a vertex is the number of uncrossed edges on the shortest path to a cut-adjacent vertex
-of its region; a vertex that no such path reaches gets `σ = 0`. No linear system. `σ` lies between
-the smallest and the largest `r`. The first line is the transpose of the interpolation
+of its region; a vertex that no such path reaches gets `σ = 0`. No linear system. At every vertex
+that a ring reaches `σ` lies between the smallest and the largest `r` (the `0` of an unreached
+vertex need not). The first line is the transpose of the interpolation
 `Σ_i β_ip σ_i` that the explicit step applies at the cut points, normalized, so
 `Σ_p ℓ_p Σ_i β_ip σ_i = Σ_p ℓ_p r_p`: the mean rate of the cut is the mean of `r`.
 
@@ -344,6 +364,9 @@ its factorization is reused.
 (`SpeedScaling::MeanGradient`, D16) `ḡ` is the mean of `|∇φ|` over the connected piece of the cut
 that the cut point lies on: in a crossed face whose lone vertex `a` is cut off by the segment `pq`,
 `|∇φ| = |φ_a| · |pq| / (2 · area(a, p, q))`, and `ḡ = Σ |pq| / Σ (|pq| / |∇φ|)` over the piece.
+A face with `|∇φ| = 0` (`φ_a = 0`: the function vanishes at the lone vertex, and the crossing was
+moved off it by `δ`) is left out of both sums: its term is infinite and would make `ḡ = 0` for the
+whole piece, which then could not move. A piece without any face that counts has `ḡ = 1` (D23).
 
 ### 3.10 Length and penalty step `[formula: cut-length-step-on-cut]`, `[formula: cut-length-step]`
 
@@ -369,7 +392,8 @@ step (then `r = s`).
   `(w_f − w_a)/h_a`, negated if `a` is in the higher region. `PenaltyRule::PaperDiagonal` drops
   this term (D8).
 
-The force per unit length `λ⁰` is recovered exactly like the normal derivative (§3.5, same `c`),
+The force per unit length `λ⁰` is recovered exactly like the normal derivative (§3.5, with the `c`
+of the flux recovery of the evaluation: `FluxRecovery::Nodal` means `c = 0`, i.e. `λ⁰ = Θ/ℓ`),
 and the rate `r` takes the length force at the end of the step and `s` at its start (moving `p`
 out by `δ` relative to its neighbours turns the cut by `Σ (δ_p − δ_q)/|pq|` more):
 
@@ -381,8 +405,11 @@ out by `δ` relative to its neighbours turns the cut by `Σ (δ_p − δ_q)/|pq|
 Both matrices are symmetric positive definite M-matrices with row sums `ℓ_p`:
 `Σ ℓ_p λ⁰_p = Σ Θ_p`, `Σ ℓ_p r_p = Σ ℓ_p (s_p + λ⁰_p)`, `r` lies between the smallest and the
 largest `s + λ⁰`, and a cut with `s + λ⁰ = 0` does not move, whatever `τ`. In the notation of §1 a
-ripple is multiplied per step by `1 + τ (ωk − wk²)/(1 + τ w k²)`, which lies in `(0, 1)` for every
-`k > ω/w` and every `τ`.
+ripple is multiplied per step by `1 + τ (ωk − wk²)/(1 + τ w k²)`, which for `ω ≥ 0` (always true
+for the Dirichlet energy, §1) lies in `(0, 1)` for every `k > ω/w` and every `τ`. For `ω < 0` the
+factor is below 1 for every `k` and can be negative for large `τ |ω| k`: the explicit distortion
+term then overshoots, and nothing in the step rule below limits `τ` by a negative `ω` (the term
+`time_scale/ω` is skipped for `ω ≤ 0`); the motion limit is what bounds the step there.
 
 **On the mesh (paper Fig. 9 step 6, `LengthStep::OnMesh`).** After the explicit step with `r = s`,
 with `L_w = Σ_f w̄_f · (cotan Laplacian of the single face f)`, `w̄_f` the mean of `w` over the
@@ -460,15 +487,53 @@ written in Hopf–Lax form (Bornemann, Rasch 2006) and without unfolding of obtu
 `FlowOptions::new` is the left column, `FlowOptions::paper` the right one; each of the choices
 (`LengthStep`, `Extension`, `SpeedScaling`, `FluxRecovery`, `PenaltyRule`) is an option of its own.
 
-**Step size** `[formula: cut-step-cap]`. `ρ` is the speed of the cut that is known before the
-step: `s + λ⁰` with the length step on the cut (it bounds `|r|`), `s` with the length step on the
-mesh. `h` is the shortest crossed edge, `ω` the roughening rate of the state (§1).
+**Step size** `[formula: cut-step-cap]`. `ρ_c` is the speed of the cut at cut point `c` that is
+known before the step: `s + λ⁰` with the length step on the cut (it bounds `|r|`). With the length
+step on the mesh the rate that is extended is `s` and the step is split. The extremes then take
+`ρ = s`. The robust statistics take the larger of the two `m̂` below, the one for `ρ = s` (the
+explicit part) and the one for `ρ = s + λ⁰` (the whole motion; `λ⁰` is computed on the cut as in
+§3.10 for this purpose only). `ω_c`, `ω`, `ℓ_c` and `quantile` are those of §1.
 
 ```
-Fixed(τ)                                    τ                                        (the paper's)
-Capped { tau_max, max_motion }              min(tau_max, max_motion · h / max|ρ|)    (paper Sec. 7.4)
-Adaptive { time_scale, max_motion, tau_max} min(tau_max, time_scale / ω, max_motion · h / max|ρ|)
+Fixed(τ)                                     τ                                   (the paper's)
+Capped { tau_max, max_motion }               min(tau_max, max_motion / m̂)        (paper Sec. 7.4)
+Adaptive { time_scale, max_motion, tau_max}  min(tau_max, time_scale / ω, max_motion / m̂)
 ```
+
+A term whose denominator is not positive is skipped. Which statistics `m̂` and `ω` are is an
+option (`FlowOptions::step_statistics`, D22):
+
+* **Robust** (default). `h_c` is the shortest of the crossed edges that share a vertex with the
+  edge of `c` (its own included): a change of `φ` at a vertex moves the crossings of all its
+  edges. `m_c = |ρ_c| / h_c` is the speed in such edges per unit time,
+  `m̂ = quantile_0.9 (m_c ; ℓ_c)`, and `ω` is the roughening rate of the state. After `τ` and the
+  rate `r` are known, every cut point is limited on its own `[formula: cut-step-local]`:
+
+  ```
+  r_c ← r_c · min(1, max_motion · h_c / (τ · v_c)),      v_c = |r_c|                       (Capped)
+                                                         v_c = max(|r_c|, ½ (ω_c − ω)₊)    (Adaptive)
+  ```
+
+  so no cut point moves by more than `max_motion · h_c`, and a cut point whose local roughening
+  rate exceeds that of the state is treated as if it had the speed `½ (ω_c − ω)`, which is what a
+  cut can reach within the face of a spike (`|s| ≤ Q_0 + Q_1`). The number of limited cut points
+  is reported. This is a step of its own for the outliers: the limited rate is still a descent
+  direction and rest states are unchanged. With `Fixed` nothing is limited.
+* **Extremes**. `m̂ = max_c |ρ_c| / min_c h` with `h` the shortest crossed edge, `ω = max_c ω_c`,
+  no local limit: the paper's remark taken literally, and the rule before D22.
+
+Why both speeds with the length step on the mesh: with `ρ = s` alone and a quantile of `ω` in
+place of its maximum nothing bounds the motion by the length term (eight clusters of normals on
+spot, `α_L = 1.49`, vanished in 17 steps). With `ρ = s + λ⁰` alone the step grows without bound
+where the two cancel, and the rest state of the paper's length step depends on `τ` (D14): the
+balanced latitude of §6 item 5 (icosphere(4), `α_L = 20`, `ψ* = 0.788`, the paper's stages with
+the flux recovery of §3.5) came to rest at `ψ* − 0.41` from both sides, against `ψ* − 0.09` and
+`ψ* − 0.06` with both speeds, which is also what the extremes give.
+
+On a network (§8) the same holds with the boundary nodes of §8.5 in place of the cut points when
+the length step is on the cut (`ρ_v = s_v + λ⁰_v`, `ℓ_v`; `ω` is always taken over the cut
+points; a copy of a cut point has its `h_c` and `ω_c`, a copy of a triple point the shortest
+`h_c` of its three cut points and no `ω_c`).
 
 The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Why:
 
@@ -485,12 +550,27 @@ The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Wh
 * `max_motion = 0.25`: in the bump experiment (README, Fig. 5; Hencky energy, three length
   weights, `Capped { 10³, max_motion }`) none of the three runs came to rest in 3000 steps with
   `0.5`, one did with `0.25`, all three with `0.1`; the energy at the end was the same to three
-  digits. A step never moves the cut by more than `max_motion · h`.
+  digits (measured with the extremes).
+* The statistics (D22). On `camelshotnoise.obj` (11 513 vertices, shot noise; Hencky energy,
+  planar start, 325 cut points) the local rates have the quantiles `11` (50 %), `44` (90 %),
+  `82` (99 %) and the maximum `4.5·10⁶`, at one cut point next to a noise spike; `|s|` likewise
+  (`8`, `29`, `115`, `2.2·10⁶`). With the extremes the automatic length weight is `1.8·10⁵` and
+  611 steps cover the flow time `1.2·10⁻⁷`: nothing moves. With the robust statistics
+  `α_L = 1.75`, 600 steps cover `7·10⁻³` and the energy falls from 5028 to 2967, with up to 89 cut
+  points limited in a step; the energy still rises in 256 of those steps (the speed there is
+  noise of the size `10⁶`). During that run the shortest crossed edge falls from `3·10⁻³` to
+  `4·10⁻⁵`, which is why `h` is local too. On the sphere `ω_c` varies by 0.8 % along the equator
+  and the two statistics agree (§6 item 5b is unchanged: it uses fixed steps); on spot (Hencky)
+  `ω` is 55 against a maximum of 147, and runs with a given `α_L` end after 150, 200 and 222
+  steps instead of 350, 708 and the limit of 1000, at the same or a lower energy.
 
 **Length weight.** No value of `α_L` is right for every energy: `E` is not homogeneous in it
 (D9f). What can be fixed is the shortest ripple that the distortion term may amplify:
 `α_L = ω ℓ/(2π)` `[formula: cut-roughening-rate]` (`length_weight_for_ripples`) makes ripples
-longer than `ℓ` grow and shorter ones decay (§1). Verified on the sphere, where the rates are known
+longer than `ℓ` grow and shorter ones decay (§1) on nine tenths of the cut; where the local rate
+is above `ω` (at a spike of curvature, by orders of magnitude) the cut is rougher than that. A
+state with `ω ≤ 0` gets no weight from this rule (the result is not positive, which is not a valid
+`α_L`). Verified on the sphere, where the rates are known
 exactly (§6 item 5). `ℓ` must be several mesh edges, or the flow amplifies the noise of the mesh at
 the rate `ω k`; with `α_L = 0` it does so at every scale, and no step size helps. The example
 program defaults to `ℓ = 0.25` with `ω` of the initial cut; a cut that starts far from the
@@ -683,7 +763,8 @@ interpolants of `φ_i` and `φ_j` are equal (paper Eq. 31), then moved into `[δ
 t = ψ_a / (ψ_a − ψ_b),      ψ_a = φ_i(a) − φ_j(a) ≤ 0,   ψ_b = φ_i(b) − φ_j(b) ≥ 0
 ```
 
-(evaluated in this form; the two differences cannot both vanish, by the tie rule of §8.1). A third
+(evaluated in this form; the two differences cannot both vanish, by the tie rule of §8.1: `t`
+lies in `[0, 1)` if `i < j` and in `(0, 1]` if `j < i`). A third
 function that is smaller in between is ignored: one cut point per edge (App. A.2).
 
 A face with two regions is cut as in §3.3. A face with the corners `c_0, c_1, c_2` in three
@@ -730,7 +811,11 @@ s_v = ( |m p′| s_{p} + |m p| s_{p′} ) / (|m p| + |m p′|)   at the copy of 
   on the boundary nodes of `R_k`. For a vertex `i` of region `k`: `φ̇_k(i) = e_i` and
   `φ̇_j(i) = −e_i` for every `j ≠ k`. This is the paper's substitution `φ̇_j := −φ̇_k` on the
   boundary of `R_k`; where `R_k` borders `R_j` it is the true rate of `φ_j`.
-* **Explicit step.** `φ̃_k = φ_k + τ φ̇_k` for every `k`; `τ` from the step rule with `ρ = s`.
+* **Explicit step.** `φ̃_k = φ_k + τ φ̇_k` for every `k`; `τ` from the step rule of §4: with the
+  extremes `ρ = s` over the cut points; with the robust statistics the larger of the two `m̂`,
+  for `ρ = s` over the cut points and for `ρ_v = s_v + λ⁰_v` over the boundary nodes (`λ⁰` being
+  that of §8.5, computed for the step rule only), and the local limit acts on `s_v` before the
+  extension.
 * **Length step.** `(W_V + τ L_w) φ_k′ = W_V φ̃_k` for every `k`: one factorization, `N` right-hand
   sides.
 * **Symmetry.** The class mean of §3.11 for every `φ_k`. The regions must be invariant under the
@@ -799,10 +884,13 @@ curve, is the rate of §3.10: (a). At a junction the three regions turn by `π �
 its curves faster than its neighbours: the junction moves into the sharp corner and opens it. In
 the difference that moves the curve between `i` and `j` near the junction this is
 `½ (β_m^j − β_m^i)` plus the turning of the curves, the linearization of `(Σ τ_l) · n` about 120°
-with the mobility of the junction left to the two 1D systems: (b) in the sense that the loads of
-a balanced junction sum to zero in every region; the kinks that the centroid construction of §8.2
-puts at the three cut points remain as loads of opposite sign within one face, which the recovery
-spreads over `c h`. (c): both systems have row sums `ℓ`, so `Σ ℓ λ⁰ = Σ Θ` on the boundary of
+with the mobility of the junction left to the two 1D systems. The three loads `2π/3 − β_m^X` of
+a triple point sum to zero at every junction whose angles sum to `2π`, balanced or not; a junction
+is balanced (120°) iff each of them vanishes. (b) holds in this sense: three straight curves
+meeting at 120° give each region the total load zero over its two cut points and the triple point
+of the face (`β̃ = 2π/3` for the angle between its two curves); the kinks that the centroid
+construction of §8.2 puts at the three cut points remain as loads of opposite sign within one
+face, which the recovery spreads over `c h`. (c): both systems have row sums `ℓ`, so `Σ ℓ λ⁰ = Σ Θ` on the boundary of
 every region. The junction is implicit: the corner node is coupled to its two neighbours by the
 same stiffness as any node.
 
@@ -826,6 +914,19 @@ six to eight times better). From a speckled start with a strong length weight (t
 Fig. 16) they come to rest with more patches and a higher energy than the paper's stages reach.
 `FlowOptions::for_regions` (the paper's stages with the flux recovery of §3.5) is therefore what
 is recommended and used for `N > 2`; `FlowOptions::new` selects the rule of this section.
+
+**After D22.** The atlas runs behind the sentence on speckled starts were made with the extremes of
+§4. With the robust statistics and the same weights (8 clusters of normals; `α_L = 1.49`, `1.39`,
+`0.86`): spot ends with 3 patches and the energy 2.37 with the default stages against 2 and 1.31
+with the paper's (before: 9 and 7.46 against 4 and 3.28); blub with 5 and 3.63 against 3 and 4.07
+(13 and 9.73 against 5 and 4.46); bob with 4 and 2.27 against 2 and 0.66 (6 and 3.79 against 2 and
+0.71). With the weight that the ripple rule gives for these starts since D22 (`ℓ = 0.5`: `0.049`,
+`0.110`, `0.015`) both stage sets end with as many patches (8 and 8, 10 and 10, 7 and 6) and the
+default stages with the lower energy on all three models (0.333 against 0.414, 0.768 against
+0.838, 0.0843 against 0.107), at a third of the distortion. Most of the stall was the step rule,
+not the junction rule. The junction tests of §8.6 use fixed steps and are unchanged.
+`FlowOptions::for_regions` still selects the paper's stages; the sentence on speckled starts no
+longer supports that by itself.
 
 ### 8.6 Tests
 
@@ -1049,6 +1150,28 @@ region of every face.
   vertices for several functions; (f) the clustering of normals (§8.7); (g) `ω` and the step rules
   of §4 on networks.
 
+* **D22** The roughening rate of a state (D18) was the largest local rate over the cut, and the
+  step rule took the largest speed and the shortest crossed edge. One spike of curvature on the
+  cut then sets the automatic length weight and the step for the whole cut (§4: on a mesh with
+  shot noise the weight came out as `1.8·10⁵` and the run froze). Now `ω` is the 0.9-quantile of
+  the local rates weighted by the length of the cut, the step rule takes the same quantile of the
+  speed measured in local crossed edges, and cut points beyond it are limited individually
+  (§1, §4). The weight rule and the step rule can share the statistic because of the local limit:
+  without it a quantile makes the explicit step unstable at the spike (the cut point there would
+  move by `τ ω_c/2`, thousands of edges), with it the spike takes the step `max_motion · h_c/v_c`
+  that the extremes would have imposed on everything. Where `ω_c` is constant along the cut (the
+  ripple rates of §1 on the sphere) nothing changes. The extremes are selectable
+  (`StepStatistics::Extremes`). What it costs: the step is larger by the ratio of the largest
+  rate to the quantile, runs need a half to a quarter of the steps, and single steps raise the
+  energy more often and by more (spot, Hencky, `α_L = 2`: 23 of 150 steps, at most `8.7·10⁻³` of
+  the energy, against 13 of 350 and `1.2·10⁻⁴`; the end energies agree to `5·10⁻⁵`). The
+  automatic weight of a speckled start falls with it (spot, 8 clusters of normals, scaled energy:
+  `ω` 0.61 against 18.7), which changes the comparison of D20 (§8.5).
+* **D23** Not stated before: (a) §3.9 with `|∇φ| = 0` in a crossed face: the face is left out of
+  the mean; (b) §3.10 "same `c`": the `c` of the flux recovery in use, 0 for the nodal one;
+  (c) §1, §3.10, §4 for `ω ≤ 0`; (d) §3.8: the range of `σ` at unreached vertices; (e) §8.2: the
+  range of the crossing parameter; (f) §8.5: when the loads at a triple point vanish.
+
 Add to this list whenever something else turns up; never drop an entry.
 
 ## 10. Formula ids
@@ -1063,12 +1186,16 @@ id. Discrete, to be proved in `lean/proofs`: `cut-face-curvature`, `cut-face-cur
 `cut-step-cap`, and for the default stages `cut-extension-local` (convex combination, mean rate
 kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matrices with row sums
 `ℓ`; totals kept; `r` within the range of `s + λ⁰`; rest state independent of `τ`),
-`cut-roughening-rate`, and for `N` regions `cut-edge-crossing-regions` (equals
+`cut-roughening-rate` (now also the quantile of the local rates), `cut-weighted-quantile` (the
+result is one of the values; monotone in `q`; `q = 1` gives the maximum; at least the fraction `q`
+of the weight lies at or below it), `cut-step-local` (the factor lies in `(0, 1]`; the limited
+motion is at most `max_motion · h_c`; the sign of the rate is kept), and for `N` regions `cut-edge-crossing-regions` (equals
 `cut-edge-crossing` for `φ, −φ`; lies in `[0, 1]`), `cut-triple-point` (inside the triangle of the
 three cut points; the three quads are convex), `cut-region-extension`, `cut-region-projection`
 (differences kept, hence no crossing moves; smallest `−d`, second `+d`; identity for `N = 2`),
 `cut-length-step-regions` (M-matrices with row sums `ℓ`; opposite rates on the two sides of a
-curve; the loads `γ − β` of a balanced junction sum to zero). Analytic instances, provable with Mathlib calculus: `cut-disk-radial-solution`,
+curve; the three loads `γ − β` at a triple point sum to zero whenever its angles sum to `2π`, and
+each vanishes iff the junction is balanced). Analytic instances, provable with Mathlib calculus: `cut-disk-radial-solution`,
 `cut-sphere-cap-solution`, `cut-curve-shortening-circle`, and the growth rate of a ripple of the
 equator of §1 (`cut-roughening-rate`). Smooth theory, cited:
 `cut-yamabe-equation` (Eq. 3), `cut-shape-derivative` (Eq. 6–8), `cut-cea-method` (Eq. 9–12,
