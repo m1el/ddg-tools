@@ -603,9 +603,9 @@ fn one_cut_face_in_detail() {
     assert_eq!(e.report.n_diagonal_near_ties, 0);
     let area = 3f64.sqrt() / 4.0;
     let expect = [0.125, 0.5, 0.375];
-    for t in 0..3 {
-        // Areas on the unit-area surface: s_p s_q, 1 - s_p, s_p (1 - s_q).
-        assert!((tri.area[t] - expect[t]).abs() < 1e-15);
+    // Areas on the unit-area surface: s_p s_q, 1 - s_p, s_p (1 - s_q).
+    for (computed, exact) in tri.area.iter().zip(expect) {
+        assert!((computed - exact).abs() < 1e-15);
     }
     // The segment p q: |pq|^2 = 1/4 + 1/16 - 1/8 = 3/16 in the caller's unit.
     let unit = e.scale.length_scale;
