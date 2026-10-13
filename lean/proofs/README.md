@@ -82,6 +82,9 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Cuts/Step.lean` | cut flow: sign of the flow, explicit step, length step, the paper's penalty rule, symmetry projection, step cap, feature size, sliver smoothing (§1, §3.6–§3.11, §4) |
 | `DdgProofs/Cuts/Recovery.lean` | cut flow: recovery of the normal derivative from the integrated fluxes (§3.5, D12) |
 | `DdgProofs/Cuts/Redistance.lean` | cut flow: the Hopf–Lax triangle update in closed form is the minimum over the edge (§3.12) |
+| `DdgProofs/Cuts/OnCut.lean` | cut flow, default stages: the two systems on the cut (length force, rate), the extension from the cut, `\|∇φ\|` in a crossed face and its mean, the per-step factor of a ripple, the adaptive step (§3.8–§3.10, §4, D14–D16) |
+| `DdgProofs/Cuts/Ripple.lean` | cut flow: the roughening rate `ωk − wk²`, the length weight for a cutoff wavelength, the ingredients of the linearization on closed forms, the sphere rates (§1, §4, D18) |
+| `DdgProofs/Cuts/Regions.lean` | cut flow with `N` regions: region of a vertex, crossings between regions, triple points, the projection of the redistancing, rates of the functions, the systems on the boundary of a region (§8, D20, D21) |
 | `DdgProofs/Cuts/Analytic.lean` | cut flow: closed-form solutions (flat disk, spherical cap, shrinking circle) and the shape derivatives of the energies on them (§1, §6) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
@@ -253,7 +256,7 @@ unless a definition of this package is named. All theorems are in `namespace Ddg
 | `cut-gradient-scaled` | `gradScaledD(a, d, e) = −a d² − d e`; `gradScaledD(c, d, −2cd) = c·gradDirichletD(d)`, `gradScaledD(1, d, −2d) = gradDirichletD(d)`; with `d = v/ℓ`, `e = q/ℓ` it is `gradScaled(a, v, q, ℓ)`, and `gradScaled(1, v, −2v, ℓ) = gradDirichlet(v, ℓ)`. Flat disk, constant weight `c`, `p = −2cu`: `d/dρ [c ∫₀^ρ u′² 2πr dr] = gradScaledD(c, u′(ρ), p′(ρ))·2πρ`. | `gradScaledD_eq`, `gradScaledD_const`, `gradScaledD_one`, `gradScaledD_nodal`, `gradScaled_const`, `gradScaled_one`, `hasDerivAt_disk_scaledEnergy`, `hasDerivAt_disk_scaledEnergy_density` |
 | `cut-adjoint-pointwise` | Symmetric `L`; `b` differentiable at every `u_i` with derivative `b′(u_i)`; `δu_B = 0`, `L_II δu_I = −δg_I`; `p_B = 0`, `(L p)_i = adjointRhsPointwise(A_i, b′(u_i)) = −A_i b′(u_i)` on `I`. Then `d/dt Σ_i A_i b(u_i + tδu_i)` at `t = 0` is `Σ_I p_i δg_i`. Hencky (`b = u²`): the same with `r_i = −2A_i u_i`. | `hasDerivAt_pointwiseEnergy`, `hasDerivAt_henckyEnergy` |
 | `cut-gradient-pointwise` | `gradPointwiseD(b₀, d, e) = b₀ − d e`; with `d = v/ℓ`, `e = q/ℓ` it is `gradPointwise(b₀, v, q, ℓ)`. Flat disk, `b = u²`, adjoint `p = K r⁴/32 − Kρ²r²/8 + 3Kρ⁴/32`: `d/dρ ∫₀^ρ u² 2πr dr = gradPointwiseD(b(0), u′(ρ), p′(ρ))·2πρ = πK²ρ⁵/8`. | `gradPointwiseD_eq`, `gradPointwiseD_nodal`, `gradPointwise_eq`, `hasDerivAt_disk_henckyEnergy`, `hasDerivAt_disk_henckyEnergy_density`, `disk_hencky_derivative_value` |
-| `cut-feature-size` | `featureSizeRaw(r_ε, K) = 1/(√\|K\| + 1/r_ε)`; for `r_ε > 0`: `0 < r⁰ ≤ r_ε`, `r⁰ = r_ε` at `K = 0`, `r⁰ < 1/√\|K\|` for `K ≠ 0`, `r⁰` decreasing in `\|K\|`; `featureWeight r = r³ > 0` for `r > 0`. Smoothing `(W_V + cL) r = W_V r⁰` with positive areas, `c ≥ 0`, zero row sums and **nonpositive off-diagonal entries** of `L`: every lower (upper) bound of `r⁰` is one of `r`; hence `0 < r ≤ r_ε`, `r³ > 0`. | `featureSizeRaw_pos`, `featureSizeRaw_le`, `featureSizeRaw_zero`, `featureSizeRaw_lt_inv_sqrt`, `featureSizeRaw_antitone`, `featureWeight_pos`, `smoothing_ge`, `smoothing_le`, `smoothedFeatureSize_bounds` |
+| `cut-feature-size` | `featureSizeRaw(r_ε, K) = 1/(√\|K\| + 1/r_ε)`; for `r_ε > 0`: `0 < r⁰ ≤ r_ε`, `r⁰ = r_ε` at `K = 0`, `r⁰ < 1/√\|K\|` for `K ≠ 0`, `r⁰` decreasing in `\|K\|`; `featureWeight r = r³ > 0` for `r > 0`. Smoothing `(W_V + cL) r = W_V r⁰` with positive areas, `c ≥ 0`, zero row sums and **nonpositive off-diagonal entries** of `L`: every lower (upper) bound of `r⁰` is one of `r`; hence `0 < r ≤ r_ε`, `r³ > 0`. | `featureSizeRaw_pos`, `featureSizeRaw_le`, `featureSizeRaw_zero`, `featureSizeRaw_lt_inv_sqrt`, `featureSizeRaw_antitone`, `featureWeight_pos`, `smoothing_ge`, `smoothing_le`, `smoothedFeatureSize_bounds`, `smoothedFeatureSize_bounds_positivePart` (the Laplacian `L⁺` of the edge weights `max(w_ij, 0)` of SPEC D17 satisfies the sign condition on every mesh) |
 | `cut-speed` | `cutSpeed(G₀, G₁) = G₀ − G₁`, `regionDensity(w, G, β) = wG + β`. With `dE(σ) := Σ_c g_c σ_c ℓ_c`: if `φ_t = −σ` and `φ_t = g` then `dE = −Σ g_c² ℓ_c` (`≤ 0` for `ℓ ≥ 0`, `= 0` only for `g = 0` when `ℓ > 0`); with `φ_t = −g` instead, `dE = +Σ g_c² ℓ_c`; `dE(σ) ≥ −Σ g²ℓ` for every `σ` with `Σσ²ℓ ≤ Σg²ℓ`. For `g = G₀ − G₁`, `σ = −cutSpeed(G₀, G₁)`: `dE = −Σ s_c² ℓ_c ≤ 0`. Closed forms: disk `d/dρ [wJ + βπρ²] = regionDensity(w, u′(ρ)², β)·2πρ`; two caps of a sphere `d/dψ₀ [J(ψ₀) + J(π − ψ₀)] = cutSpeed(tan²(ψ₀/2), tan²((π−ψ₀)/2))·2π sin ψ₀`. | `firstVariation_levelSet`, `firstVariation_levelSet_nonpos`, `firstVariation_levelSet_eq_zero_iff`, `firstVariation_ascent`, `firstVariation_ge`, `firstVariation_cutSpeed`, `hasDerivAt_disk_regionEnergy`, `hasDerivAt_twoCaps` |
 | `cut-sliver-smoothing` | `smoothedSpeed(ℓ₁, ℓ₂, s₁, s₂) = (ℓ₂s₁ + ℓ₁s₂)/(ℓ₁+ℓ₂) = ℓ₂/(ℓ₁+ℓ₂)·s₁ + ℓ₁/(ℓ₁+ℓ₂)·s₂`; for `ℓ₁, ℓ₂ ≥ 0`, `ℓ₁+ℓ₂ > 0` the weights are `≥ 0` with sum 1 and `min(s₁,s₂) ≤ smoothedSpeed ≤ max(s₁,s₂)`; `smoothedSpeed(ℓ₁, ℓ₂, α − βℓ₁, α + βℓ₂) = α` (exact for a speed linear in arclength). `aspectRatio(longest, area) = longest²√3/(4·area)`: `= 1` for an equilateral triangle, `≥ 1` for every triangle with `longest` its longest side. | `smoothedSpeed_eq_convex`, `smoothedSpeed_weights`, `smoothedSpeed_mem`, `smoothedSpeed_linear`, `aspectRatio_equilateral`, `one_le_aspectRatio` |
 | `cut-harmonic-extension` | If `det L_OO ≠ 0`: for all data `s` (and every source `φ`) there is exactly one `σ` with `σ = s` off `O` and `(Lσ)_i = 0` (`= φ_i`) on `O`; `(Lσ)_O = 0 ⟺ L_OO σ_O = −L_OC σ_C`. For symmetric `L`, such a `σ`, and `τ = σ` off `O`: `τᵀLτ = σᵀLσ + (τ−σ)ᵀL(τ−σ)`; so `σᵀLσ ≤ τᵀLτ` if `L` is positive semidefinite, with `<` for `τ ≠ σ` if `L_OO` is positive definite. On a connected valid mesh with a cut vertex the hypotheses hold and `σ` minimizes `Σ_f (cotan energy)`. | `existsUnique_dirichlet_data`, `existsUnique_harmonicExtension`, `harmonic_iff_block`, `harmonic_energy_identity`, `harmonicExtension_energy_le`, `harmonicExtension_energy_lt`, `TriMesh.existsUnique_harmonicExtension`, `TriMesh.harmonicExtension_faceEnergy_le` |
@@ -262,14 +265,23 @@ unless a definition of this package is named. All theorems are in `namespace Ddg
 | `cut-penalty-step-paper` | `d_i > 0`: `(diag(A/d) + τL)φ′ = diag(A/d)φ̃ ⟺ (diag(A) + τ·diag(d)·L)φ′ = diag(A)φ̃` (entries `penaltyStepEntry`); exactly one solution for `A > 0`, `L` positive semidefinite, `τ ≥ 0`; for constant `d` it is the length step with `L_w = dL`. | `penaltyStep_iff`, `penaltyStep_entry`, `penaltyStep_existsUnique`, `penaltyStep_const_iff` |
 | `cut-symmetry-projection` | `classMean cls φ v` = mean of `φ` over `{w : cls w = cls v}` (`P`; the oracle's `classMean` of the listed class is this). `Pψ = ψ ⟺ ψ` is constant on classes; `P(Pφ) = Pφ`; `Σ(Pφ)_vχ_v = Σφ_v(Pχ)_v`; for class-constant `ψ`: `Σ(φ − Pφ)_vψ_v = 0` and `Σ(φ−ψ)² = Σ(φ−Pφ)² + Σ(Pφ−ψ)²`, so `Pφ` is the nearest class-constant vector. | `classMean_eq_self_iff`, `classMean_idem`, `classMean_selfAdjoint`, `sum_sub_classMean_mul`, `classMean_pythagoras`, `classMean_nearest`, `oracle_classMean_eq` |
 | `cut-redistance` | `hopfLaxEdge(T, ℓ) = T + ℓ`. For points `x_i, x_j, x_k` of a real inner product space (any, also `x_j = x_k`): `hopfLaxTriangle(\|x_i−x_j\|, \|x_i−x_k\|, \|x_j−x_k\|, T_j, T_k)` is the least value of `λT_j + (1−λ)T_k + ‖x_i − (λx_j + (1−λ)x_k)‖` over `λ ∈ [0,1]` (attained, and a lower bound). For side lengths with the strict triangle inequalities: the same with the distance `baryLength(ℓ_ij, ℓ_jk, ℓ_ik; 1, −λ, −(1−λ))`. Consequences: `≤ hopfLaxEdge(T_j, ℓ_ij)`, `≤ hopfLaxEdge(T_k, ℓ_ik)`, `≥ min(T_j, T_k)`. | `hopfLaxTriangle_isLeast`, `hopfLaxTriangle_le`, `hopfLaxTriangle_mem`, `hopfLaxTriangle_isLeast_intrinsic`, `hopfLaxTriangle_le_edge`, `min_le_hopfLaxTriangle`, `hl_stationary_le`, `clamp_min_of_convex`, `hopfLaxObjective_convex` |
-| `cut-step-cap` | `τ = stepCap(τ_max, c, h, m) = min(τ_max, c·h/m)`: `τ ≤ τ_max`; for `m > 0`: `τ·m ≤ c·h`, `τ\|s\| ≤ c·h` whenever `\|s\| ≤ m` (and `τ_max, c, h ≥ 0`), and every `τ′ ≤ τ_max` with `τ′m ≤ ch` has `τ′ ≤ τ`. | `stepCap_le_max`, `stepCap_mul_le`, `stepCap_mul_abs_le`, `le_stepCap`, `stepCap_nonneg` |
+| `cut-step-cap` | `τ = stepCap(τ_max, c, h, m) = min(τ_max, c·h/m)`: `τ ≤ τ_max`; for `m > 0`: `τ·m ≤ c·h`, `τ\|s\| ≤ c·h` whenever `\|s\| ≤ m` (and `τ_max, c, h ≥ 0`), and every `τ′ ≤ τ_max` with `τ′m ≤ ch` has `τ′ ≤ τ`. | `stepCap_le_max`, `stepCap_mul_le`, `stepCap_mul_abs_le`, `le_stepCap`, `stepCap_nonneg`; `adaptiveStep(τ_max, time_scale, ω, max_motion, h, max\|ρ\|)`: `≤ τ_max`, `τ·ω ≤ time_scale` for `ω > 0`, `τ·max\|ρ\| ≤ max_motion·h` for `max\|ρ\| > 0` (`adaptiveStep_le_max`, `adaptiveStep_mul_omega_le`, `adaptiveStep_mul_rho_le`) |
+| `cut-length-step-on-cut` | Cut points `C`, `ℓ_p > 0`, symmetric couplings `≥ 0`. `fluxMatrix ℓ k` has off-diagonal entries `−k(p,q) ≤ 0`, row sums `ℓ_p`, is symmetric positive definite, and `fluxMatrix·d ≥ 0 ⟹ d ≥ 0`. Force system `fluxMatrix ℓ κ·λ⁰ = Θ` and rate system `fluxMatrix ℓ (τ·m)·r = ℓ(s + λ⁰)` (`m_σ = w̄_σ/\|σ\|`, `τ ≥ 0`; the oracle's `rateCoupling`, `rateRhs`): each has exactly one solution; `Σℓλ⁰ = ΣΘ`; `Σ_S ℓ r = Σ_S ℓ(s+λ⁰)` and `lo ≤ s+λ⁰ ≤ hi` on `S` ⟹ `lo ≤ r ≤ hi` on `S`, for every piece `S` of the cut; `s + λ⁰ = 0 ⟹ r = 0` for every `τ`; without coupling `r = s + λ⁰`. `rippleFactor = 1 + τ(ωk − wk²)/(1 + τwk²) = (1 + τωk)/(1 + τwk²)`: in `(0,1)` for `τ, w > 0`, `ω ≥ 0`, `k > ω/w`; `> 1` for `0 < k < ω/w`; `< 0` for `(τ, ω, w, k) = (1, −10, 1, 1)`. Turning: for a valid manifold mesh (the cut mesh of a region) `Σ_{v∈∂}(π − β_v) = 2πχ − Σ_{interior}Ω_v` (`β_v` the angle sum), `= 2π` for a flat disk; with `Θ_p = lengthForce(w, π, β_p, segs)` and constant `w`: `Σℓλ⁰ = w(2πχ − ΣΩ)`. `angleFromCot(cornerCot a b c) = cornerAngle a b c`; `footFraction` of the cotangents at `p`, `q` is the parameter of the foot of the height (the vector to the third vertex is orthogonal to `pq`); `normalDerivativeOfLinear` of an affine `w` is `⟨∇w, f − z⟩/h`. | `fluxMatrix_apply_of_ne_nonpos`, `fluxMatrix_row_sum`, `fluxMatrix_posDef`, `fluxMatrix_monotone`, `onCut_force_existsUnique`, `onCut_rate_existsUnique`, `onCut_force_sum`, `onCut_rate_sum_piece`, `onCut_rate_bounds_piece`, `onCut_rest`, `onCut_rate_nodal`, `onCut_rate_oracle`, `ripple_step`, `rippleFactor_eq`, `rippleFactor_mem_Ioo`, `one_lt_rippleFactor`, `rippleFactor_neg_example`, `TriMesh.sum_turningAngle`, `TriMesh.sum_turningAngle_flat_disk`, `TriMesh.onCut_lengthForce_sum`, `TriMesh.onCut_force_sum_flat_disk`, `angleFromCot_cornerCot`, `footFraction_orthogonal`, `normalDerivativeOfLinear_eq` |
+| `cut-extension-local` | `wmean s c x = Σ_s c_j x_j/Σ_s c_j` with `c ≥ 0`, `Σc > 0` lies between every lower and upper bound of the `x_j` with `c_j ≠ 0`. `σ_i = wmean(ℓ_pβ_ip; r_p)` (`localExtension`; the oracle's `weightedMean` of the two lists) lies between the smallest and largest rate at the cut points of `i`; the outward rule `Σ(σ_j/ℓ_ij)/Σ(1/ℓ_ij)` (the oracle's `ringMean`) between the smallest and largest `σ_j`; by induction over the rings every vertex **that a ring reaches** has `lo ≤ σ ≤ hi`. If `ℓ, β ≥ 0` and `Σ_i β_ip = 1` for every `p`: `Σ_p ℓ_p Σ_i β_ip σ_i = Σ_p ℓ_p r_p`. | `wmean_mem`, `localExtension_mem`, `outwardExtension_mem`, `extension_mem_of_rings`, `localExtension_conservation`, `oracle_weightedMean_eq`, `oracle_weightedMean_mem`, `oracle_ringMean_mem` |
+| `cut-gradient-norm` | Triangle `a, p = a + e₁, q = a + e₂` (nondegenerate) in a real inner product space, `g = αe₁ + βe₂` with `⟨g, e₁⟩ = ⟨g, e₂⟩ = −φ_a` (the gradient of the affine function with value `φ_a` at `a` that vanishes at `p` and `q`): `‖g‖ = gradientNormLone(φ_a, \|pq\|, area) = \|φ_a\|·\|pq\|/(2·area)`, area by Heron. `ḡ = meanGradient(ΣL, Σ L/g)`: for `L ≥ 0`, `ΣL > 0`, `0 < lo ≤ g_σ ≤ hi`: `lo ≤ ḡ ≤ hi`; `Σ L_σ·(ḡ/g_σ) = ΣL`; `ḡ = 1` if all `g_σ = 1`. | `norm_grad_eq_gradientNormLone`, `norm_grad_eq_gradNorm`, `meanGradient_mem`, `oracle_meanGradient_mem`, `meanGradient_normalizes`, `meanGradient_one` |
+| `cut-roughening-rate` | `rippleRate ω w k = ωk − wk²`; `roughRate(Q₀, Q₁) = 2(Q₀ + Q₁)`; for the Dirichlet energy `roughQ = w_r d²`, so `ω ≥ 0`. For `w, k > 0`: `rate > 0 ⟺ k < ω/w`; `rate ≤ ω²/(4w)`, attained at `k = ω/(2w)`. With `α_L = lengthWeightForRipples(ω, ℓ) = ωℓ/(2π)`: rate `= 0` at `k = 2π/ℓ`, `> 0` for `0 < k < 2π/ℓ`, `< 0` for `k > 2π/ℓ` (`ω, ℓ > 0`). Ingredients of the cited linearization: `d/dδ [Q₀(1−kδ)² − Q₁(1+kδ)²]` at `0` is `−roughRate·k`; `e^{−ky}cos(kx)` is harmonic and `−∂_y` at `y = 0` is `k` times its value; `sin ψ·(tan(ψ/2)^m)′ = m·tan(ψ/2)^m`, derivative `m` at `ψ = π/2`; `(tan(ψ/2))′ = 1` at `π/2`. Sphere formula `(m−1)(4/R³ − α(m+1)/R²)` (cited): `= 0` for `m = 1`; `= rippleRate(4/R², α, m/R) − (4/R³ − α/R²)`; `< 0` for all integers `m ≥ 2` ⟺ `α > 4/(3R)`; `4.72 < 4/(3R) < 4.73` for `R = 1/√(4π)`. | `rippleRate_pos_iff`, `rippleRate_le_max`, `rippleRate_cutoff`, `rippleRate_pos_of_longer`, `rippleRate_neg_of_shorter`, `roughQ_dirichlet`, `roughRate_dirichlet_nonneg`, `hasDerivAt_ripple_density`, `halfPlane_mode_harmonic`, `halfPlane_mode_dtn`, `sphere_mode_ode`, `sphere_mode_dtn`, `capU_second_derivative_equator`, `sphereRippleRate_eq_planar`, `sphere_equator_stable_iff`, `sphere_unit_area_threshold` |
+| `cut-edge-crossing-regions` | `IsRegion x k`: `x_k ≤ x_l` for all `l` and `x_k < x_l` for `l < k` (unique; exists). For `i` the region of `a`, `j ≠ i` the region of `b`: `ψ_a = φ_i(a) − φ_j(a) ≤ 0 ≤ ψ_b`, `ψ_b > 0` if `i < j`, `ψ_a < 0` if `j < i`, so `ψ_a ≠ ψ_b`; `t = crossingParamRegions = crossingParam(ψ_a, ψ_b)` satisfies `(1−t)φ_i(a) + tφ_i(b) = (1−t)φ_j(a) + tφ_j(b)`, `0 ≤ t ≤ 1`, `t < 1` if `i < j`, `t > 0` if `j < i`. On `[φ, −φ]`: region 0 ⟺ `φ ≤ 0`, region 1 ⟺ `φ > 0`, and `t = crossingParam(φ_a, φ_b)` for either orientation. | `IsRegion.unique`, `exists_isRegion`, `region_differences`, `crossingParamRegions_interp`, `crossingParamRegions_mem`, `isRegion_two_zero_iff`, `isRegion_two_one_iff`, `crossingParamRegions_two` |
+| `cut-triple-point` | `m_k = triplePointCoord(s_k, s_{k−1}) = ((1 − s_k) + s_{k−1})/3`: `m₀ + m₁ + m₂ = 1`; `m_k > 0` if `s_k < 1`, `s_{k−1} > 0`; `(p₀+p₁+p₂)/3 = Σ m_k c_k` for `p_k = (1−s_k)c_k + s_k c_{k+1}`. Barycentric determinants: `(c_k, p_k, m)`: `s_k m_{k+2}`; `(c_k, m, p_{k−1})`: `m_{k+1}(1 − s_{k−1})`; the six are positive for `0 < s < 1` and sum to 1. Convexity of the quad `(c_k, p_k, m, p_{k−1})`: `(c_k, p_k, p_{k−1})` has `s_k(1 − s_{k−1}) > 0` and `(p_k, m, p_{k−1})` has `((1−s₀)(1−s₁)(1−s₂) + s₀s₁s₂)/3 > 0`, a third of `det(p₀, p₁, p₂)`. | `triplePoint_coord_sum`, `triplePoint_coord_pos`, `triplePoint_eq_centroid`, `tripleFace_dets`, `tripleFace_dets_pos`, `tripleFace_convex` |
+| `cut-region-projection` | `IsTwoSmallest x i₀ i₁`: `i₀ ≠ i₁`, `x_{i₀} ≤ x_{i₁} ≤ x_k` for `k ≠ i₀` (exists for at least two functions). With `m = projectionShift(x_{i₀}, x_{i₁})`, `y_k = projectedValue(x_k, m)`, `d = (x_{i₁} − x_{i₀})/2 ≥ 0`: `y_{i₀} = −d`, `y_{i₁} = d`, `y_k ≥ d` for `k ≠ i₀`; if `x_{i₀} < x_{i₁}`: `y_k < 0 ⟺ k = i₀`; `y_k − y_l = x_k − x_l`; the region is unchanged; `crossingParamRegions` of an edge is unchanged by the shifts at its two ends; `IsTwoSmallest y i₀ i₁` and its shift is `0`. On `[φ, −φ]`: `m = 0`. | `exists_isTwoSmallest`, `projected_two_smallest`, `projected_rest`, `projected_neg_iff`, `projected_sub`, `isRegion_projected`, `crossingParamRegions_projected`, `projected_isTwoSmallest`, `projectionShift_projected`, `projectionShift_two` |
+| `cut-region-extension` | `tripleRate(\|mp\|, \|mp′\|, s_p, s_{p′}) = smoothedSpeed` of the same arguments: between `min` and `max` of the two rates, exact for a rate linear in arclength, odd. `regionRate own e`: `e` for the own function, `−e` for the others; `φ_own − φ_j` changes at `2e`, the others keep their differences. Two regions: `regionRate 0 σ = regionRate 1 (−σ) = [σ, −σ]`; if `σ` is the harmonic extension of `s` then `−σ` is that of `−s`; `explicitStep(−φ, τ, −σ) = −explicitStep(φ, τ, σ)`; if `φ′` solves the length step for `φ̃` then `−φ′` solves it for `−φ̃`; `classMean(−φ) = −classMean φ`. | `tripleRate_eq_smoothedSpeed`, `tripleRate_mem`, `tripleRate_linear`, `tripleRate_neg`, `regionRate_sub`, `regionRate_two`, `harmonicExtension_neg`, `explicitStep_neg`, `lengthStep_neg`, `classMean_neg` |
+| `cut-length-step-regions` | The two systems of `cut-length-step-on-cut` over the boundary copies of all regions: exactly one `λ⁰` and one `ρ`; for the boundary nodes `X` of one region (no coupling leaves `X`): `Σ_X ℓλ⁰ = Σ_X Θ`, `Σ_X ℓρ = Σ_X ℓ(s+λ⁰)`, `ρ` between the bounds of `s + λ⁰` on `X`. Two chains with the same `ℓ` and couplings and opposite `s`, `λ⁰` have opposite `ρ`; opposite right-hand sides give opposite solutions. If `β_i + β_j = 2π`: `turningAngle(π, β_j) = −turningAngle(π, β_i)`. If `β₀ + β₁ + β₂ = 2π`: `Σ turningAngle(2π/3, β_k) = 0`; `turningAngle(2π/3, 2π/3) = 0`; `> 0` for `β < 2π/3`. Explicit step: `explicitStep(φ_k, τ, e) − explicitStep(φ_j, τ, e − δ) = (φ_k − φ_j) + τδ`; with opposite rates on the two sides `δ = 2e`, and `explicitStep(−φ, τ, e − 2e) = −explicitStep(φ, τ, e)`. | `regionChain_existsUnique`, `regionChain_sums`, `regionChain_bounds`, `onCut_rates_opposite`, `fluxRecovery_neg`, `curve_loads_opposite`, `junction_loads_sum`, `junction_load_balanced`, `junction_load_pos`, `regionStep_difference`, `wmean_sub_neg`, `regionStep_two` |
 | `cut-disk-radial-solution` | `u(r) = K(r² − ρ²)/4`: `u″ + u′/r = K` (`r ≠ 0`), `∂²/∂x² + ∂²/∂y²` of `K(x²+y²−ρ²)/4` is `K`, `u(ρ) = 0`, `u′(ρ)·2πρ = Kπρ²`; `∫₀^ρ u′² 2πr dr = πK²ρ⁴/8` with `ρ`-derivative `u′(ρ)²·2πρ`; `∫₀^ρ u² 2πr dr = πK²ρ⁶/48`; `p(r) = Kr⁴/32 − Kρ²r²/8 + 3Kρ⁴/32`: `p″ + p′/r = 2u`, `p(ρ) = 0`, `p′(ρ) = −Kρ³/8`; `d/dρ ∫₀^ρ u² 2πr dr = (u(ρ)² − u′(ρ)p′(ρ))·2πρ = πK²ρ⁵/8`. | `diskU_ode`, `diskU_laplacian`, `diskU_boundary`, `disk_flux_balance`, `disk_dirichletEnergy`, `hasDerivAt_disk_dirichletEnergy`, `disk_henckyEnergy`, `diskP_ode`, `diskP_boundary`, `deriv_diskP_boundary`, `hasDerivAt_disk_henckyEnergy`, `disk_hencky_derivative_value` |
 | `cut-sphere-cap-solution` | `u(ψ) = 2 ln(cos(ψ₀/2)/cos(ψ/2))`: `u(ψ₀) = 0`; `u′(ψ) = tan(ψ/2)` where `cos(ψ₀/2), cos(ψ/2) ≠ 0`; `(sin ψ·u′)′ = sin ψ` on `(−π, π)`; `tan(ψ₀/2)·2π sin ψ₀ = 2π(1 − cos ψ₀)`; for `\|ψ₀\| < π`: `∫₀^{ψ₀} u′² 2π sin ψ dψ = −8π ln cos(ψ₀/2) − 4π sin²(ψ₀/2)` with `ψ₀`-derivative `u′(ψ₀)²·2π sin ψ₀`; two caps: see `cut-speed`; `cutSpeed = 0` at `ψ₀ = π/2`. | `capU_boundary`, `hasDerivAt_capU`, `capU_ode`, `cap_flux_balance`, `capEnergy_eq`, `hasDerivAt_capEnergy`, `hasDerivAt_capEnergy_integral`, `hasDerivAt_twoCaps`, `twoCaps_equator`, `cap_integrand_scale` |
 | `cut-curve-shortening-circle` | `ρ(t) = √(ρ₀² − 2αt)`, `ρ₀² − 2αt > 0`: `ρ′(t) = −α/ρ(t)`; `ρ(0) = ρ₀` (`ρ₀ ≥ 0`); `πρ(t)² = πρ₀² − 2παt`; for `φ(t, r) = r − ρ(t)`: `φ_t = α(φ_rr + φ_r/r)` at `r = ρ(t)`; `d/dt [α·2πρ(t)] = −(α/ρ)²·2πρ`. | `hasDerivAt_shrinkRadius`, `shrinkRadius_zero`, `shrinkRadius_area`, `circle_levelSet_flow`, `hasDerivAt_circle_lengthEnergy` |
 
 Cited for the cut flow (`CITED.md`): `cut-yamabe-equation`, `cut-shape-derivative`,
-`cut-cea-method`, `cut-level-set-evolution`, `cut-weighted-fem-stiffness`,
-`cut-fast-marching-convergence`.
+`cut-cea-method`, `cut-level-set-evolution`, `cut-ripple-linearization`,
+`cut-network-first-variation`, `cut-weighted-fem-stiffness`, `cut-fast-marching-convergence`.
 
 ## Theorems
 
@@ -492,7 +504,21 @@ Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
   `gradPointwise`, `gradDirichletD`, `gradScaledD`, `gradPointwiseD`, `faceMeanSquareEdge`,
   `fluxCoupling`, `fluxDiagEntry`, `fluxOffEntry`, `fluxRhs`, `vertexCurvatureDensity`,
   `featureSizeRaw`, `featureWeight`, `cutSpeed`, `regionDensity`, `aspectRatio`, `smoothedSpeed`,
-  `explicitStep`, `stepCap`, `classMean`, `hopfLaxEdge`, `hopfLaxTriangle`.
+  `explicitStep`, `stepCap`, `classMean`, `hopfLaxEdge`, `hopfLaxTriangle`; and of the revision
+  "default stages, N regions": `angleFromCot`, `turningAngle`, `normalDerivativeOfLinear`,
+  `footFraction`, `heightOver`, `lengthForce`, `segmentMeanWeight`, `rateCoupling`, `rateRhs`,
+  `gradientNormLone`, `meanGradient`, `weightedMean`, `ringMean`, `roughQ`, `roughRate`,
+  `lengthWeightForRipples`, `adaptiveStep`, `crossingParamRegions`, `triplePointCoord`,
+  `tripleRate`, `projectionShift`, `projectedValue`.
+
+Own definitions of this package for the default stages and `N` regions (what SPEC states in
+words or as a sum over an index set, for which the oracle has only the scalar pieces):
+`Cuts.wmean`, `localExtension`, `gradNorm`, `Cuts.meanGradient` (identified with the oracle's
+`gradientNormLone`, `meanGradient`, `weightedMean`, `ringMean` by `gradientNormLone_eq`,
+`oracle_meanGradient_eq`, `oracle_weightedMean_eq`, `oracle_ringMean_mem`), `rippleRate`,
+`rippleFactor`, `sphereRippleRate` (no oracle counterpart), `IsRegion`, `IsTwoSmallest`,
+`regionRate` (the argmin with its tie rule, the two smallest values, the substitution
+`φ̇_j := −φ̇_k`).
 
 For the cut flow the matrices are not oracle definitions (the executable assembles them from the
 entries above and solves densely), so the linear-algebra theorems are about matrices of this
@@ -575,12 +601,17 @@ differential tests against the oracle.
 | cut flow: `L` symmetric with zero column sums (`sum_normalFlux`, `reciprocity`) | `TriMesh.laplacian_isSymm`, `laplacian_vecMul_one`; for the weighted matrix `weightedLaplacian_isSymm`, `weightedLaplacian_vecMul_one` (proved) |
 | cut flow: `A_i > 0`, `L_w` positive semidefinite, `τ ≥ 0` (`lengthStep_*`) | lumped areas of a valid mesh; `w = α_L + η ≥ 0` is validated input, then `weightedLaplacian_faceMean_posSemidef` |
 | cut flow: `ℓ_p > 0`, `κ_σ ≥ 0`, symmetric couplings (`fluxMatrix_posDef` …) | dual lengths of cut segments of positive length; `fluxCoupling_nonneg`; one `κ_σ` per segment added to both of its ends (by reading `recovery.rs`) |
-| cut flow: `a = r³ ≥ 0` for the scaled energy | **not guaranteed in general**: `smoothing_ge` needs nonpositive off-diagonal entries of `L` (see the discrepancies below) |
+| cut flow: `a = r³ > 0` for the scaled energy | the smoothing uses the Laplacian `L⁺` of the edge weights `max(w_ij, 0)` (SPEC §3.6, D17), whose off-diagonal entries are `≤ 0`: `smoothedFeatureSize_bounds_positivePart`; a caller-supplied `a` is checked for `a_i > 0` |
+| cut flow: `ω ≥ 0` (`rippleFactor_mem_Ioo`) | proved for the Dirichlet energy (`roughRate_dirichlet_nonneg`); **not guaranteed** for the scaled and pointwise energies, where `Q_r` is not a square |
+| cut flow: the interior angles of the regions at a cut point / triple point sum to `2π` (`curve_loads_opposite`, `junction_loads_sum`) | the cut-mesh triangles around the point lie in one planar face; taken as a hypothesis, not derived from the cut mesh |
+| cut flow: `Σ_i β_ip = 1`, `β ≥ 0` (`localExtension_conservation`) | the two weights `1 − t`, `t` of a cut point with `t ∈ [δ, 1 − δ]` (`clampCrossing_mem`) |
+| cut flow: `IsRegion`, `IsTwoSmallest` | the scans of `regions_of` (`cut.rs`: a strict `<`, so the lowest index among equal values) and of `redistance_regions` (`regions.rs`: smallest and second smallest, equal values allowed), by reading |
 | cut flow: `φ_t = −σ` and `dE = Σ g σ ℓ` (`firstVariation_levelSet`) | the smooth theory (`cut-level-set-evolution`, `cut-cea-method`, cited); checked on closed forms (`hasDerivAt_twoCaps`, `circle_levelSet_flow`) and by the finite-difference test of SPEC §6.3 |
 
 ## Discrepancies with the papers as printed
 
-Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper and its SPEC. (BFF Proposition 1 is stated for a disk;
+Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–26 the cuts paper, its SPEC and the
+oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
 `TriMesh.sum_exteriorAngle` gives `2πχ` for any valid manifold mesh.)
 
 1. **Sign of the state equation.** Eq. 17 / B.2 print `L u = Ω − µ` with a positive semidefinite
@@ -638,7 +669,7 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper 
     regions and large in highly curved regions"; the printed formula is the opposite. See
     `feature-size-weights` in `CITED.md`.
 
-15. **Cuts paper: the list of differences is SPEC §9 (D1–D13).** The ones a theorem here bears
+15. **Cuts paper: the list of differences is SPEC §9 (D1–D21).** The ones a theorem here bears
     on: D1 (sign of the face curvature: `Σ_f Ω_f = +2πχ` on a closed mesh,
     `sum_faceCurvature_closed`); D2 (sign of the speed: `firstVariation_levelSet` against
     `firstVariation_ascent`, and `hasDerivAt_twoCaps` on a closed-form example); D4 (`W_V` on the
@@ -647,7 +678,11 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper 
     rule equals the default one exactly when the penalty is constant, `penaltyStep_const_iff`);
     D11 (the edge rule is indefinite on an obtuse triangle, `edgeRuleEnergy_neg_example`); D12
     (the recovery keeps the total flux and satisfies a maximum principle, `fluxRecovery_*`); D13a,
-    D13e (`cotFromInner_eq_cornerCot`, `face_omegaCancellationFree_eq`).
+    D13e (`cotFromInner_eq_cornerCot`, `face_omegaCancellationFree_eq`); D14 (the systems on the
+    cut: `onCut_*`, and the total turning by Gauss–Bonnet); D15 (the extension is a convex
+    combination that keeps the mean rate, `localExtension_*`); D16 (`norm_grad_eq_gradientNormLone`,
+    `meanGradient_normalizes`); D17 (item 18); D18 (`rippleRate_*`, `sphere_equator_stable_iff`;
+    the linearization is cited); D20, D21 (`DdgProofs/Cuts/Regions.lean`).
 16. **SPEC §3.1, a hypothesis that is not stated.** `Σ_f Ω_f = Σ_{i ∉ B_M} (2π − Θ_i)` needs
     every vertex outside `B_M` to lie in a face (`Θ_i ≠ 0`). A vertex in no face adds `2π` on the
     right and nothing on the left; with such vertices the closed-mesh value `2πχ` (they count in
@@ -655,13 +690,14 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper 
     holds for every mesh the crate accepts; SPEC does not say that it relies on this.
 17. **SPEC §3.5, "the unique vector".** `v` is determined by `L u = −g + v` alone; that it
     vanishes on `I` is the Yamabe system, not an extra condition (`normalFlux_spec`).
-18. **SPEC §3.6, positivity of the curvature-based weight.** `r⁰ > 0`, but the smoothed `r`
-    (`(W_V + cL) r = W_V r⁰`) is only proved to stay in the range of `r⁰` when the off-diagonal
-    entries of `L` are nonpositive (`smoothing_ge`); with negative cotangent weights (non-Delaunay
-    edges) the discrete maximum principle can fail, `a = r³` could then be negative at a vertex,
-    and the positive semidefiniteness of `L_a` (which needs the face means of `a` to be `≥ 0`)
-    would be lost. The flux recovery has the maximum principle by construction (its off-diagonal
-    entries are `−κ ≤ 0`).
+18. **SPEC §3.6, positivity of the curvature-based weight** (now SPEC D17). `r⁰ > 0`, but with
+    the cotan Laplacian the smoothed `r` (`(W_V + cL) r = W_V r⁰`) is only proved to stay in the
+    range of `r⁰` when the off-diagonal entries of `L` are nonpositive (`smoothing_ge`); with
+    negative cotangent weights the discrete maximum principle can fail and `a = r³` could be
+    negative. SPEC therefore smooths with the Laplacian `L⁺` of the edge weights `max(w_ij, 0)`,
+    for which the bounds hold on every mesh (`smoothedFeatureSize_bounds_positivePart`). The flux
+    recovery and the systems on the cut have the maximum principle by construction (their
+    off-diagonal entries are `−κ ≤ 0`).
 19. **SPEC §3.6, what the adjoint is exact for.** The discrete adjoints are the exact first
     variation of the discrete objectives with respect to the *source* `g` at fixed mesh and fixed
     `I` (`scaledEnergy_perturb`, `hasDerivAt_pointwiseEnergy`). The gradient density with respect
@@ -672,6 +708,32 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper 
     in the plane of the triangle" holds in every inner product space
     (`hopfLaxObjective_convex`). The floors `max 0 (·)` of the oracle's definition are inactive
     for side lengths of a Euclidean triangle (`hlQ_nonneg`, `baryLength2_nonneg`).
+
+21. **SPEC §3.10, the factor of a ripple.** `1 + τ(ωk − wk²)/(1 + τwk²)` "lies in `(0, 1)` for
+    every `k > ω/w` and every `τ`" needs `ω ≥ 0`: for `ω < 0` it is still `< 1` but can be
+    negative (`rippleFactor_neg_example`: `−4.5` for `τ = 1`, `ω = −10`, `w = k = 1`). `ω ≥ 0` is
+    proved for the Dirichlet energy only (`roughRate_dirichlet_nonneg`).
+22. **SPEC §3.8, "`σ` lies between the smallest and the largest `r`".** True for every vertex
+    that a ring reaches (`extension_mem_of_rings`); a vertex that no ring reaches gets `0`, which
+    need not lie in that range (if all rates have one sign).
+23. **SPEC §8.2, range of the crossing parameter.** `t ∈ [0, 1]`; more precisely `[0, 1)` if
+    `i < j` and `(0, 1]` if `j < i` (`crossingParamRegions_mem`): the end value is possible only
+    on the side whose region wins the tie.
+24. **SPEC §8.5, junction loads.** The loads `2π/3 − β^X` of the three regions sum to zero at
+    *every* junction whose three interior angles sum to `2π`, balanced or not
+    (`junction_loads_sum`); what characterizes a balanced junction is that each of them vanishes
+    (`junction_load_balanced`). SPEC §10 words it as "the loads of a balanced junction sum to
+    zero".
+25. **SPEC §3.10, the turning of a closed cut.** "A closed cut on a flat surface loses area at
+    the exact rate `2πw`" is `Σ ℓ λ⁰ = 2πw`; it holds because the turning angles `π − β_p` are
+    the boundary curvatures of the cut mesh of the region, by discrete Gauss–Bonnet
+    (`TriMesh.sum_turningAngle`), with the hypotheses that the region is a disk (`χ = 1`) and
+    flat; no theorem about plane polygons is needed. On a curved region the total is
+    `w(2πχ − Σ_interior Ω)`.
+26. **Oracle, `weightedMean`.** `Ddg.weightedMean weights values` zips the two lists but divides
+    by the sum of *all* weights; for lists of different lengths the numerator is truncated and
+    the result is not a weighted mean. The theorems are for lists built from one index list
+    (`oracle_weightedMean_eq`).
 
 ## Caveats on faithfulness
 
@@ -733,3 +795,13 @@ Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–20 the cuts paper 
 - **Cut flow, the flux recovery.** Proved: well-posedness, conservation and the maximum principle
   for any symmetric nonnegative couplings. Not proved: any accuracy statement (SPEC D12 reports
   measurements), and that `κ_σ = c²h_f²/|pq|` is a good choice.
+- **Cut flow, default stages and `N` regions.** The theorems about the systems on the cut are
+  for arbitrary symmetric nonnegative couplings on an index set; that the Rust code assembles
+  these couplings from the segments of the cut (one chain per region, through triple points) is
+  by reading. The length force `Θ` is taken as given, except for its total on a closed cut with
+  a constant weight. The angle sums `2π` around a cut point or a triple point are hypotheses.
+  The roughening rate and the junction rule rest on cited smooth results
+  (`cut-ripple-linearization`, `cut-network-first-variation`); SPEC itself reports the junction
+  rule as empirical (D20). `IsRegion`, `IsTwoSmallest` and `regionRate` are this package's
+  formulations of rules that SPEC states in words. Nothing is proved about the marching per
+  function of the redistancing, the numbering of nodes, or the curves between junctions.

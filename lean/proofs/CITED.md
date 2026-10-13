@@ -439,8 +439,12 @@ adjoints are exact for the discrete objectives with respect to perturbations of 
 the sign of the flow is a descent *given* the first-variation formula `dE = Σ g σ ℓ` and the
 level-set relation `φ_t = −σ`; the local Hopf–Lax update is the minimum it is meant to be; and
 the smooth formulas hold on three closed-form solutions (flat disk, spherical cap, shrinking
-circle), where the shape derivative is computed directly by one-variable calculus. **Not**
-machine-checked: the four smooth results below; that the discrete gradient density is a
+circle), where the shape derivative is computed directly by one-variable calculus; for the
+default stages (SPEC §3.8–§3.10) and for `N` regions (§8): the well-posedness, conservation and
+maximum principle of the systems on the cut, the convexity of the extension, the gradient norm,
+and the combinatorial formulas of crossings, triple points and the projection. **Not**
+machine-checked: the smooth results below (the four of the paper, the linearization behind the
+roughening rate, the first variation of a network at a junction); that the discrete gradient density is a
 consistent approximation of the shape derivative on a mesh (tested by finite differences and
 refinement in `crates/ddg-variational-cuts/tests`, SPEC §6); that the discrete energy decreases
 along the discrete flow; the accuracy claims of the flux recovery (SPEC D12 are measurements);
@@ -536,6 +540,58 @@ the marching order of the redistancing and its convergence; anything about round
   changes at the rate `(G_0 − G_1)·(length)` when the cut moves along the outward normal of
   region 0 (`hasDerivAt_twoCaps`). The harmonic extension and the implicit step are covered as
   linear algebra (`cut-harmonic-extension`, `cut-length-step`).
+
+### [formula: cut-ripple-linearization] Growth rate of a ripple of the cut
+
+- **Statement.** Linearizing the flow (★) of SPEC §1 about a straight cut between two half planes
+  with constant normal derivatives, a ripple `δ(x) = ε cos(kx)` of the cut evolves by
+  `δ_t = (ω k − w k²) δ`, `ω = 2 (Q_0 + Q_1)`, `Q_r` the part of the gradient density of region
+  `r` that is quadratic in the normal derivatives. On a sphere of radius `R` with the Dirichlet
+  energy the ripple `ε cos(mθ)` of the equator grows at the rate
+  `(m − 1) (4/R³ − α_L (m + 1)/R²)`; the equator is stable iff `α_L > 4/(3R)`.
+- **Reference.** SPEC §1 ("Roughening": the derivation, from the Dirichlet-to-Neumann map of a
+  half plane resp. hemisphere, the second normal derivative of the base solution and the
+  curvature of the ripple), §4, §6 item 5b (the rates were measured), D18. The Cuts paper states
+  only the qualitative fact (Sec. 3.2.1: distortion alone is reduced by longer and longer cuts).
+- **Why not formalized.** It is the linearization of a free-boundary problem: the derivative of
+  the solution of a Poisson problem, and of its normal derivative, with respect to a perturbation
+  of the domain. Nothing of this kind is in Mathlib.
+- **What depends on it.** The choice of the length weight (`length_weight_for_ripples`,
+  `[formula: cut-roughening-rate]`), the adaptive step (`time_scale/ω`), and the statements of
+  SPEC about which ripples grow. Proved instead (`DdgProofs/Cuts/Ripple.lean`, `OnCut.lean`): the
+  algebra of the rate (zero at the wavelength `ℓ` for `α_L = ωℓ/(2π)`, sign on either side,
+  maximum, `ω ≥ 0` for the Dirichlet energy); the per-step factor of the discrete scheme
+  (`rippleFactor_mem_Ioo`); the ingredients on closed forms: `e^{−ky} cos(kx)` is harmonic with
+  normal derivative `k` times its boundary value (`halfPlane_mode_harmonic`,
+  `halfPlane_mode_dtn`), the density difference `Q_0(1−kδ)² − Q_1(1+kδ)²` has the derivative
+  `−ωk` (`hasDerivAt_ripple_density`), the mode `tan(ψ/2)^m` of the sphere has
+  `sin ψ · h′ = m h` and the normal derivative `m` at the equator (`sphere_mode_ode`,
+  `sphere_mode_dtn`), the base solution has `u″ = 1` there (`capU_second_derivative_equator`);
+  and, from the cited formula, the stability threshold (`sphere_equator_stable_iff`,
+  `sphere_unit_area_threshold`). Not proved: that these ingredients combine to the rate (the
+  linearization), and the curvature `(m² − 1) ε/R²` of the rippled equator.
+
+### [formula: cut-network-first-variation] First variation of the length of a network at a junction
+
+- **Statement.** Minus the first variation of `∫ w ds` over a network of curves, for normal
+  displacements of the curves and a displacement of a junction, is the curvature force of SPEC
+  §3.10 on every curve and, at a junction, the sum of the unit tangents of the three curves
+  leaving it (times `w`); for a constant weight it vanishes iff the curves meet at 120°.
+- **Reference.** SPEC §8.5 ("Why"), D20; Mantegazza, Novaga, Tortorelli 2004, *Motion by
+  curvature of planar networks*, Ann. Sc. Norm. Super. Pisa Cl. Sci. (5) 3. The Cuts paper
+  (App. A) has no rule for junctions; the projection of the redistancing is from Losasso, Shinar,
+  Selle, Fedkiw 2006, *Multiple Interacting Liquids*, ACM TOG 25(3), Sec. 3.1.
+- **Why not formalized.** Calculus of variations on networks of curves on a surface.
+- **What depends on it.** The rule `γ = 2π/3` at triple points of the default stages on networks
+  (`[formula: cut-length-step-regions]`), which SPEC itself rates as no better than the paper's
+  stages (D20: `FlowOptions::for_regions` is recommended). Proved instead
+  (`DdgProofs/Cuts/Regions.lean`): the systems on the boundary of a region are well posed and
+  keep the totals (`regionChain_*`); the two sides of a curve get opposite forces and rates
+  (`curve_loads_opposite`, `onCut_rates_opposite`); the loads `2π/3 − β` of the three regions at
+  a junction sum to zero and each vanishes at 120° (`junction_loads_sum`,
+  `junction_load_balanced`). **Hypothesis of these, not derived here:** the interior angles of
+  the regions at a cut point resp. a triple point sum to `2π` (the angles around a point inside
+  a planar face).
 
 ### [formula: cut-weighted-fem-stiffness] The weighted cotan matrix as a finite element matrix
 
