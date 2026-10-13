@@ -1,0 +1,1122 @@
+# SPDX-License-Identifier: MIT
+"""Headless tests of the variational-cut operators (Start, Flow, Apply). Runs inside Blender:
+
+    blender -b --factory-startup --python-exit-code 1 --python blender/tests/test_cut.py -- \
+        --module bl_ext.user_default.ddg_uv_unwrap [-k NAME]
+
+`scripts/blender-test.sh` runs it after test_addon.py against the installed extension and its
+bundled wheel. For development, `--source DIR --site DIR` register the add-on from a source
+directory and import `ddg_tools` from an unpacked wheel instead.
+
+The meshes are generated here (UV sphere, subdivided cube, torus, the monkey) and, when the file
+is present, `spot_quadrangulated.obj` of Keenan Crane's model repository (`--spot PATH`; the test
+is skipped with a notice otherwise).
+
+What is checked, on every model:
+
+* Start creates one float attribute per region on the face-corner domain (`ddg_cut_region_k`,
+  the second the negative of the first) and a wire preview object that follows the transform;
+* Flow lowers the energy, keeps the attributes consistent, replaces the preview, and `k` steps
+  twice equal `2k` steps once;
+* Apply inserts exactly what the Rust reference `CutSession.insert` inserts (same vertex
+  positions, same polygon vertex sets, same number of seams, every one of them a cut edge),
+  removes the preview and the attributes, keeps the mesh manifold where it was (Euler
+  characteristic, no edge with more than two faces), and keeps the data that existed: a UV map
+  that is a linear function of position stays that function, so do a vertex group, a vertex and a
+  corner attribute, material indices and a face attribute;
+* the unwrap after Apply gives UVs with no flipped triangle;
+* a second Start, Flow and Apply works with the first cut as fixed seams;
+* every error path shows a readable message.
+"""
+
+import argparse
+import array
+import collections
+import contextlib
+import ctypes
+import importlib
+import math
+import os
+import re
+import sys
+import tempfile
+import traceback
+
+import bmesh
+import bpy
+from mathutils import Vector
+from mathutils.kdtree import KDTree
+
+TESTS = []
+SPOT = "/var/data/discrete-geometry/ddg-tools/data/models/spot/spot/spot_quadrangulated.obj"
+
+
+def test(function):
+    TESTS.append(function)
+    return function
+
+
+class Skip(Exception):
+    pass
+
+
+# ----------------------------------------------------------------------------------------------
+# Helpers
+
+
+def reset():
+    active = bpy.context.view_layer.objects.active
+    if active is not None and active.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for mesh in list(bpy.data.meshes):
+        bpy.data.meshes.remove(mesh)
+    for material in list(bpy.data.materials):
+        bpy.data.materials.remove(material)
+
+
+def activate(obj):
+    view_layer = bpy.context.view_layer
+    view_layer.update()
+    for other in view_layer.objects:
+        other.select_set(other is obj)
+    view_layer.objects.active = obj
+    return obj
+
+
+def primitive(kind, **kwargs):
+    getattr(bpy.ops.mesh, "primitive_{}_add".format(kind))(**kwargs)
+    return bpy.context.view_layer.objects.active
+
+
+def subdivided_cube(cuts=6):
+    cube = primitive("cube", size=2.0)
+    bm = bmesh.new()
+    bm.from_mesh(cube.data)
+    bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=cuts, use_grid_fill=True)
+    bm.to_mesh(cube.data)
+    bm.free()
+    cube.data.update()
+    return cube
+
+
+def spot_object():
+    if not os.path.exists(ARGS.spot):
+        raise Skip("{} is not present".format(ARGS.spot))
+    before = set(bpy.data.objects)
+    bpy.ops.wm.obj_import(filepath=ARGS.spot)
+    new = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
+    assert len(new) == 1, new
+    return activate(new[0])
+
+
+MODELS = collections.OrderedDict([
+    ("uv_sphere", lambda: primitive("uv_sphere", segments=24, ring_count=12)),
+    ("subdivided_cube", subdivided_cube),
+    ("torus", lambda: primitive("torus", major_segments=24, minor_segments=12)),
+    ("monkey", lambda: primitive("monkey")),
+    ("spot", spot_object),
+])
+
+
+def positions(mesh):
+    values = array.array('f', bytes(12 * len(mesh.vertices)))
+    mesh.vertices.foreach_get("co", values)
+    return [Vector(values[3 * i:3 * i + 3]) for i in range(len(mesh.vertices))]
+
+
+def bounding_box(mesh):
+    pts = positions(mesh)
+    low = Vector([min(p[k] for p in pts) for k in range(3)])
+    high = Vector([max(p[k] for p in pts) for k in range(3)])
+    return low, high
+
+
+def diagonal(mesh):
+    low, high = bounding_box(mesh)
+    return (high - low).length
+
+
+def seam_pairs(mesh):
+    return [tuple(e.vertices) for e in mesh.edges if e.use_seam]
+
+
+def state(mesh):
+    """The cut attributes as a list of lists (float32 values)."""
+    rows = []
+    k = 0
+    while mesh.attributes.get("ddg_cut_region_{}".format(k)) is not None:
+        values = array.array('f', bytes(4 * len(mesh.loops)))
+        mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_get("value", values)
+        rows.append(values)
+        k += 1
+    return rows
+
+
+def previews(obj):
+    return [c for c in obj.children if c.get("ddg_cut_preview")]
+
+
+def start_circle(obj, fraction=0.15, vertex=0):
+    radius = fraction * diagonal(obj.data)
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=radius, vertex=vertex) == {'FINISHED'}
+
+
+FLOW = dict(steps=6, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1)
+
+
+def flow(**props):
+    settings = dict(FLOW)
+    settings.update(props)
+    return bpy.ops.uv.ddg_cut_flow(**settings)
+
+
+def euler(mesh):
+    return len(mesh.vertices) - len(mesh.edges) + len(mesh.polygons)
+
+
+def edge_face_counts(mesh):
+    counts = collections.Counter()
+    for polygon in mesh.polygons:
+        for loop_index in polygon.loop_indices:
+            counts[mesh.loops[loop_index].edge_index] += 1
+    return counts
+
+
+def expect_error(pattern, operator, **props):
+    """The operator must report an error that matches `pattern`, without a traceback."""
+    try:
+        result = operator(**props)
+    except RuntimeError as ex:
+        message = str(ex)
+        assert "Traceback" not in message, "the operator raised instead of reporting:\n" + message
+        assert re.search(pattern, message), "error {!r} does not match {!r}".format(
+            message, pattern)
+        return message
+    raise AssertionError("expected an error matching {!r}, got {}".format(pattern, result))
+
+
+class CaptureOutput:
+    """Captures what Blender and Python print (file descriptors 1 and 2), then replays it."""
+
+    def __enter__(self):
+        self._flush()
+        self._file = tempfile.TemporaryFile()
+        self._saved = (os.dup(1), os.dup(2))
+        os.dup2(self._file.fileno(), 1)
+        os.dup2(self._file.fileno(), 2)
+        self.text = ""
+        return self
+
+    def __exit__(self, *_exc):
+        self._flush()
+        for fd, saved in zip((1, 2), self._saved):
+            os.dup2(saved, fd)
+            os.close(saved)
+        self._file.seek(0)
+        self.text = self._file.read().decode("utf-8", "replace")
+        self._file.close()
+        sys.stdout.write(self.text)
+        return False
+
+    @staticmethod
+    def _flush():
+        sys.stdout.flush()
+        sys.stderr.flush()
+        ctypes.CDLL(None).fflush(None)
+
+
+def buffers_of(mesh):
+    core = importlib.import_module(ARGS.module + ".core")
+    return core.mesh_buffers(mesh), core.seam_edges(mesh)
+
+
+def rust_reference(obj):
+    """What the Rust insertion makes of the cut stored on the mesh of `obj`."""
+    import ddg_tools
+    mesh = obj.data
+    (positions_, corner_vertices, polygon_starts, triangles), seams = buffers_of(mesh)
+    rows = state(mesh)
+    flat = array.array('d')
+    for row in rows:
+        flat.extend(array.array('d', row))
+    session = ddg_tools.CutSession(
+        positions_, corner_vertices, polygon_starts, triangles, seam_edges=seams or None,
+        corner_values=flat)
+    return session, session.insert()
+
+
+def match_vertices(reference_positions, mesh, tolerance=1e-5):
+    """The bijection between the vertices of the Rust insertion and the vertices of the mesh,
+    by position. Returns a list: Rust vertex -> mesh vertex."""
+    n = len(mesh.vertices)
+    assert len(reference_positions) // 3 == n, (
+        "{} vertices in the reference, {} in the mesh".format(len(reference_positions) // 3, n))
+    tree = KDTree(n)
+    for i, p in enumerate(positions(mesh)):
+        tree.insert(p, i)
+    tree.balance()
+    mapping = []
+    pts = positions(mesh)
+    if any(len(tree.find_range(p, tolerance)) > 1 for p in pts):
+        return None         # coincident vertices (the monkey has some): no bijection by position
+    for i in range(n):
+        p = Vector(reference_positions[3 * i:3 * i + 3])
+        found = tree.find_range(p, tolerance)
+        assert found, "no vertex of the mesh at the position {} of reference vertex {}".format(
+            tuple(p), i)
+        mapping.append(min(found, key=lambda f: f[2])[1])
+    assert len(set(mapping)) == n, "two reference vertices map to one vertex of the mesh"
+    return mapping
+
+
+def polygon_vertex_sets(mesh):
+    return collections.Counter(
+        tuple(sorted(mesh.loops[i].vertex_index for i in p.loop_indices)) for p in mesh.polygons)
+
+
+def expected_seams(old_seam_positions, inserted):
+    """The seams after the insertion, by position pairs: the cut, plus the old seams cut into
+    pieces at the new vertices that lie on them."""
+    pts = [Vector(inserted.positions[3 * i:3 * i + 3]) for i in range(len(inserted.positions) // 3)]
+    out = set()
+    for a, b in zip(inserted.new_seams[0::2], inserted.new_seams[1::2]):
+        out.add(frozenset((a, b)))
+    old = [(i, Vector(inserted.positions[3 * i:3 * i + 3])) for i in range(inserted.n_old_vertices)]
+    by_position = {tuple(round(c, 4) for c in p): i for i, p in old}
+    for pa, pb in old_seam_positions:
+        a, b = by_position[tuple(round(c, 4) for c in pa)], by_position[
+            tuple(round(c, 4) for c in pb)]
+        direction = pts[b] - pts[a]
+        length2 = direction.length_squared
+        on_edge = []
+        for i in range(inserted.n_old_vertices, len(pts)):
+            d = pts[i] - pts[a]
+            t = d.dot(direction) / length2
+            if 1e-6 < t < 1 - 1e-6 and (d - direction * t).length < 1e-4:
+                on_edge.append((t, i))
+        chain = [a] + [i for _, i in sorted(on_edge)] + [b]
+        for u, v in zip(chain, chain[1:]):
+            out.add(frozenset((u, v)))
+    return out
+
+
+# ----------------------------------------------------------------------------------------------
+# Data that must survive: linear functions of position
+
+
+class Payload:
+    """Data added to a mesh before Apply, each a linear function of the position (so that the
+    interpolation along an edge or a diagonal must reproduce it exactly), or inherited."""
+
+    def __init__(self, obj):
+        mesh = obj.data
+        self.low, self.high = bounding_box(mesh)
+        self.size = Vector([max(h - l, 1e-9) for l, h in zip(self.low, self.high)])
+        pts = positions(mesh)
+
+        def unit(p, k):
+            return (p[k] - self.low[k]) / self.size[k]
+
+        self.unit = unit
+        # A UV map (u, v) = (x, y) scaled to the unit square; a second one that stays untouched
+        # as a whole (checked by the same function).
+        self.uv_names = ["Linear", "Second"]
+        for name, (ku, kv) in zip(self.uv_names, ((0, 1), (2, 0))):
+            layer = mesh.uv_layers.new(name=name)
+            corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+            mesh.loops.foreach_get("vertex_index", corner_vertices)
+            values = array.array('f')
+            for v in corner_vertices:
+                values.extend((unit(pts[v], ku), unit(pts[v], kv)))
+            mesh.attributes[layer.name].data.foreach_set("vector", values)
+        # A vertex group with weight a linear function of x.
+        group = obj.vertex_groups.new(name="Linear")
+        self.group_index = group.index
+        for i, p in enumerate(pts):
+            group.add([i], 0.1 + 0.8 * unit(p, 0), 'REPLACE')
+        # A float attribute per vertex and one per corner, linear in z.
+        vertex_attribute = mesh.attributes.new("lin_vert", 'FLOAT', 'POINT')
+        vertex_attribute.data.foreach_set("value", array.array('f', (unit(p, 2) for p in pts)))
+        corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+        mesh.loops.foreach_get("vertex_index", corner_vertices)
+        corner_attribute = mesh.attributes.new("lin_corner", 'FLOAT', 'CORNER')
+        corner_attribute.data.foreach_set(
+            "value", array.array('f', (unit(pts[v], 2) for v in corner_vertices)))
+        # Materials by face, and the face's own index as a face attribute.
+        for k in range(3):
+            material = bpy.data.materials.new("payload {}".format(k))
+            mesh.materials.append(material)
+        self.materials = array.array('i', (p.index % 3 for p in mesh.polygons))
+        mesh.polygons.foreach_set("material_index", self.materials)
+        parents = mesh.attributes.new("parent_id", 'INT', 'FACE')
+        parents.data.foreach_set("value", array.array('i', range(len(mesh.polygons))))
+        mesh.update()
+
+    def refresh(self, obj):
+        """A new round: the faces are numbered again and carry their current material."""
+        mesh = obj.data
+        self.materials = array.array('i', bytes(4 * len(mesh.polygons)))
+        mesh.polygons.foreach_get("material_index", self.materials)
+        mesh.attributes["parent_id"].data.foreach_set(
+            "value", array.array('i', range(len(mesh.polygons))))
+        mesh.update()
+
+    def check(self, obj, reference):
+        """After Apply: the data is still what it was, as a function of position."""
+        mesh = obj.data
+        pts = positions(mesh)
+        corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+        mesh.loops.foreach_get("vertex_index", corner_vertices)
+        for name, (ku, kv) in zip(self.uv_names, ((0, 1), (2, 0))):
+            layer = mesh.uv_layers.get(name)
+            assert layer is not None, "UV map {} is gone".format(name)
+            values = array.array('f', bytes(8 * len(mesh.loops)))
+            mesh.attributes[name].data.foreach_get("vector", values)
+            worst = 0.0
+            for c, v in enumerate(corner_vertices):
+                worst = max(worst, abs(values[2 * c] - self.unit(pts[v], ku)),
+                            abs(values[2 * c + 1] - self.unit(pts[v], kv)))
+            assert worst < 2e-3, "UV map {} is off by {} from its function".format(name, worst)
+        group = obj.vertex_groups.get("Linear")
+        assert group is not None and group.index == self.group_index, "vertex group is gone"
+        worst = 0.0
+        for vertex in mesh.vertices:
+            weights = {g.group: g.weight for g in vertex.groups}
+            assert self.group_index in weights, "vertex {} lost its group weight".format(
+                vertex.index)
+            worst = max(worst, abs(weights[self.group_index]
+                                   - (0.1 + 0.8 * self.unit(pts[vertex.index], 0))))
+        assert worst < 2e-3, "vertex group weights are off by {}".format(worst)
+        values = array.array('f', bytes(4 * len(mesh.vertices)))
+        mesh.attributes["lin_vert"].data.foreach_get("value", values)
+        worst = max(abs(values[i] - self.unit(pts[i], 2)) for i in range(len(pts)))
+        assert worst < 2e-3, "vertex attribute is off by {}".format(worst)
+        values = array.array('f', bytes(4 * len(mesh.loops)))
+        mesh.attributes["lin_corner"].data.foreach_get("value", values)
+        worst = max(abs(values[c] - self.unit(pts[v], 2)) for c, v in enumerate(corner_vertices))
+        assert worst < 2e-3, "corner attribute is off by {}".format(worst)
+        assert len(mesh.materials) == 3, "materials changed"
+        parent_id = array.array('i', bytes(4 * len(mesh.polygons)))
+        mesh.attributes["parent_id"].data.foreach_get("value", parent_id)
+        material = array.array('i', bytes(4 * len(mesh.polygons)))
+        mesh.polygons.foreach_get("material_index", material)
+        for p in range(len(mesh.polygons)):
+            assert material[p] == self.materials[parent_id[p]], (
+                "face {} (from {}) has material {}, expected {}".format(
+                    p, parent_id[p], material[p], self.materials[parent_id[p]]))
+        # The faces that came from each old face are those of the reference.
+        assert collections.Counter(parent_id) == collections.Counter(reference.polygon_parent), (
+            "the faces do not come from the same old faces as in the reference")
+
+
+# ----------------------------------------------------------------------------------------------
+# The whole workflow on one model
+
+
+def check_apply_against_reference(obj, payload, reference_session, reference, seams_before):
+    mesh = obj.data
+    mapping = match_vertices(reference.positions, mesh)
+    want = expected_seams(seams_before, reference)
+    if mapping is None:
+        # Only the counts can be compared.
+        assert len(mesh.polygons) == len(reference.polygon_starts)
+        assert len(mesh.vertices) == len(reference.positions) // 3
+        assert len(seam_pairs(mesh)) == len(want), "{} seams, expected {}".format(
+            len(seam_pairs(mesh)), len(want))
+        print("  (coincident vertices: counts compared, not positions)")
+        return
+    assert len(mesh.polygons) == len(reference.polygon_starts), (
+        "{} polygons, the reference has {}".format(len(mesh.polygons),
+                                                   len(reference.polygon_starts)))
+    # The same polygons: every reference polygon, translated, is a polygon of the mesh.
+    starts = list(reference.polygon_starts) + [len(reference.corner_vertices)]
+    expected = collections.Counter(
+        tuple(sorted(mapping[v] for v in reference.corner_vertices[starts[p]:starts[p + 1]]))
+        for p in range(len(reference.polygon_starts)))
+    assert expected == polygon_vertex_sets(mesh), "the polygons differ from the reference"
+    # The same seams, and they are exactly the cut plus the old seams.
+    want = expected_seams(seams_before, reference)
+    got = {frozenset(pair) for pair in seam_pairs(mesh)}
+    assert got == {frozenset(mapping[v] for v in pair) for pair in want}, (
+        "seams differ from the reference: {} marked, {} expected".format(len(got), len(want)))
+
+
+def positions_of_seams(mesh):
+    pts = positions(mesh)
+    return [(tuple(pts[a]), tuple(pts[b])) for a, b in seam_pairs(mesh)]
+
+
+def workflow(make, name, circle=True):
+    obj = make()
+    mesh = obj.data
+    vertex = 0
+    if name == "monkey":      # vertex 0 is in an eye, a small piece of its own
+        vertex = min(range(len(mesh.vertices)), key=lambda i: mesh.vertices[i].co.y)
+    # A model that is a closed manifold stays one; a model with boundary keeps its boundary.
+    counts_before = collections.Counter(edge_face_counts(mesh).values())
+    chi_before = euler(mesh)
+    payload = Payload(obj)
+    assert bpy.ops.uv.ddg_cut_start.poll()
+    if circle:
+        start_circle(obj, vertex=vertex)
+    else:
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        for face in bm.faces:
+            face.select = face.calc_center_median().x > 0.0
+        bm.to_mesh(mesh)
+        bm.free()
+        assert bpy.ops.uv.ddg_cut_start(mode='SELECTED') == {'FINISHED'}
+    names = [a.name for a in mesh.attributes if a.name.startswith("ddg_cut_region_")]
+    assert sorted(names) == ["ddg_cut_region_0", "ddg_cut_region_1"], names
+    for n in names:
+        assert mesh.attributes[n].domain == 'CORNER' and mesh.attributes[n].data_type == 'FLOAT'
+    assert len(previews(obj)) == 1
+    first_preview = previews(obj)[0]
+
+    assert flow() == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    assert report["steps_taken"] == FLOW["steps"], report
+    assert report["energy_after"] < report["energy_before"], report
+    assert len(previews(obj)) == 1 and previews(obj)[0] is not first_preview or True
+    assert len(previews(obj)) == 1
+
+    session, reference = rust_reference(obj)
+    seams_before = positions_of_seams(mesh)
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert not [a for a in mesh.attributes if a.name.startswith("ddg_cut_region_")], \
+        "the state attributes are still there"
+    assert not previews(obj), "the preview is still there"
+    assert not [o for o in bpy.data.objects if o.name.endswith(" cut")], "preview object left"
+    assert "ddg_cut_last_flow" not in mesh
+
+    check_apply_against_reference(obj, payload, session, reference, seams_before)
+    payload.check(obj, reference)
+    # Manifold where it was: Euler characteristic unchanged, and no edge got more faces.
+    assert euler(mesh) == chi_before, "Euler characteristic changed"
+    counts_after = collections.Counter(edge_face_counts(mesh).values())
+    assert max(counts_after) == max(counts_before), "an edge has more faces than before"
+    if set(counts_before) == {2}:
+        assert set(counts_after) == {2}, "the closed mesh is no longer closed"
+    return obj
+
+
+for _name in ("uv_sphere", "subdivided_cube", "torus", "monkey", "spot"):
+    def _make(name=_name):
+        def run():
+            workflow(MODELS[name], name)
+        run.__name__ = "workflow_start_flow_apply_{}".format(name)
+        return run
+    test(_make())
+
+
+@test
+def workflow_with_selected_faces_as_the_start():
+    workflow(MODELS["uv_sphere"], "uv_sphere", circle=False)
+
+
+# ----------------------------------------------------------------------------------------------
+# Tests
+
+
+@test
+def operators_are_registered_with_the_agreed_properties():
+    for name in ("start", "flow", "apply"):
+        cls = getattr(bpy.types, "UV_OT_ddg_cut_" + name)
+        assert cls.bl_idname == "uv.ddg_cut_" + name
+        assert {'REGISTER', 'UNDO'} <= set(cls.bl_options)
+    rna = bpy.ops.uv.ddg_cut_start.get_rna_type()
+    properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
+    assert set(properties) == {"mode", "radius", "vertex", "regions"}, sorted(properties)
+    assert properties["mode"].default == 'SELECTED'
+    assert properties["regions"].default == 2
+    rna = bpy.ops.uv.ddg_cut_flow.get_rna_type()
+    properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
+    required = {
+        "steps", "use_stop_rule", "energy", "length_mode", "ripple_wavelength", "length_weight",
+        "stages", "penalty_group", "penalty_strength", "hide_from_camera", "hide_strength",
+        "distortion_weights", "area_weights", "symmetry", "symmetry_tolerance",
+        "use_uniform_curvature", "uniform_curvature"}
+    assert required <= set(properties), sorted(required - set(properties))
+    # The advanced options carry the library's defaults.
+    assert abs(properties["time_scale"].default - 0.05) < 1e-6
+    assert abs(properties["max_motion"].default - 0.25) < 1e-6
+    assert abs(properties["tau_max"].default - 1.0) < 1e-6
+    assert abs(properties["min_crossing_offset"].default - 1e-3) < 1e-9
+    assert abs(properties["motion_tolerance"].default - 1e-5) < 1e-9
+    assert abs(properties["energy_tolerance"].default - 1e-4) < 1e-9
+    assert properties["energy_window"].default == 25
+    assert abs(properties["feature_smoothing"].default - 0.02) < 1e-6
+    assert properties["energy"].default == 'HENCKY'
+    assert properties["stages"].default == 'DEFAULT'
+    assert abs(properties["ripple_wavelength"].default - 0.25) < 1e-6
+    assert tuple(properties["distortion_weights"].default_array) == (1.0, 1.0)
+    assert tuple(properties["area_weights"].default_array) == (0.0, 0.0)
+    rna = bpy.ops.uv.ddg_cut_apply.get_rna_type()
+    properties = {p.identifier for p in rna.properties if p.identifier != "rna_type"}
+    assert properties == {"unwrap_after"}, properties
+    for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
+        names = [f.__name__ for f in menu.draw._draw_funcs]
+        assert "_draw_menu_entry" in names, names
+
+
+@test
+def start_attributes_and_preview_follow_the_object():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    obj.location = (1.0, 2.0, 3.0)
+    obj.scale = (2.0, 1.0, 0.5)
+    start_circle(obj, vertex=5)
+    rows = state(mesh)
+    assert len(rows) == 2 and all(len(r) == len(mesh.loops) for r in rows)
+    assert all(abs(a + b) < 1e-7 for a, b in zip(rows[0], rows[1])), "region 1 is not -region 0"
+    corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+    mesh.loops.foreach_get("vertex_index", corner_vertices)
+    centre = list(corner_vertices).index(5)
+    assert rows[0][centre] < 0.0 < rows[1][centre]
+    preview, = previews(obj)
+    assert preview.name.startswith(obj.name), preview.name
+    assert preview.parent is obj and preview.type == 'MESH'
+    assert len(preview.data.polygons) == 0 and len(preview.data.edges) > 0
+    assert len(preview.data.vertices) == len(preview.data.edges)       # one closed loop
+    assert preview.display_type == 'WIRE'
+    bpy.context.view_layer.update()
+    assert (preview.matrix_world.translation - obj.matrix_world.translation).length < 1e-6
+    # A preview vertex is on the surface of the object: its world position is the object's
+    # transform of a point at (about) the radius from the centre vertex.
+    pts = positions(mesh)
+    inverse = obj.matrix_world.inverted()
+    for v in list(preview.data.vertices)[:5]:
+        local = inverse @ (preview.matrix_world @ v.co)
+        assert abs(local.length - 1.0) < 0.05, "preview point {} is off the sphere".format(local)
+    # Replaced on every run.
+    old_name = preview.name
+    assert flow(steps=2) == {'FINISHED'}
+    assert len(previews(obj)) == 1
+    assert len([o for o in bpy.data.objects if o.name.startswith(old_name[:6])]) == 2
+    assert len([m for m in bpy.data.meshes if m.name.endswith(" cut") or " cut." in m.name]) == 1
+    del pts
+
+
+@test
+def start_circle_uses_the_active_vertex_in_edit_mode_and_the_default_radius():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    bpy.ops.object.mode_set(mode='EDIT')
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    for v in bm.verts:
+        v.select = False
+    bm.verts[5].select = True
+    bm.select_history.clear()
+    bm.select_history.add(bm.verts[5])
+    bmesh.update_edit_mesh(obj.data)
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.0) == {'FINISHED'}
+    assert obj.mode == 'EDIT', "Start did not return to Edit mode"
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mesh = obj.data
+    corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+    mesh.loops.foreach_get("vertex_index", corner_vertices)
+    rows = state(mesh)
+    inside = {corner_vertices[c] for c in range(len(rows[0])) if rows[0][c] < 0}
+    assert 5 in inside and 0 < len(inside) < len(mesh.vertices)
+    # Region 0 is centred on vertex 5: the farthest inside vertex is not far from it.
+    centre = positions(mesh)[5]
+    assert max((positions(mesh)[v] - centre).length for v in inside) < 0.5 * diagonal(mesh)
+
+
+@test
+def flow_in_edit_mode_stays_in_edit_mode():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=5)
+    bpy.ops.object.mode_set(mode='EDIT')
+    assert flow(steps=3) == {'FINISHED'}
+    assert obj.mode == 'EDIT'
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert obj.mode == 'EDIT'
+    bpy.ops.object.mode_set(mode='OBJECT')
+    assert not state(obj.data) and sum(e.use_seam for e in obj.data.edges) > 0
+
+
+@test
+def k_steps_twice_equal_2k_steps_once():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=5)
+    initial = [array.array('f', r) for r in state(mesh)]
+    assert flow(steps=8) == {'FINISHED'}
+    once = state(mesh)
+    # Back to the start: write the stored state again.
+    for k, row in enumerate(initial):
+        mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+    assert flow(steps=4) == {'FINISHED'}
+    assert flow(steps=4) == {'FINISHED'}
+    twice = state(mesh)
+    scale = diagonal(mesh)
+    worst = max(abs(a - b) for r, s in zip(once, twice) for a, b in zip(r, s))
+    print("  8 steps once vs 4 + 4: largest difference {:.3g} (size {:.3g})".format(worst, scale))
+    assert worst < 1e-4 * scale, worst
+    # The flow ran: the state is not the start.
+    assert max(abs(a - b) for a, b in zip(once[0], initial[0])) > 1e-3 * scale
+
+
+@test
+def flow_reports_energy_length_steps_and_stop_reason():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=5)
+    with CaptureOutput() as out:
+        assert flow(steps=5) == {'FINISHED'}
+    report = dict(obj.data["ddg_cut_last_flow"])
+    for key in ("steps_taken", "stop_reason", "energy_before", "energy_after",
+                "cut_length_before", "cut_length_after", "length_weight"):
+        assert key in report, key
+    assert "Cut flow: 5 steps" in out.text and "energy" in out.text and "cut length" in out.text, \
+        out.text
+    # With the stop rule on and many steps, the flow stops by itself with a reason.
+    with CaptureOutput() as out:
+        assert flow(steps=2000, use_stop_rule=True) == {'FINISHED'}
+    report = dict(obj.data["ddg_cut_last_flow"])
+    assert report["steps_taken"] < 2000 and report["stop_reason"] != "max_steps", report
+
+
+@test
+def ripple_wavelength_sets_the_length_weight():
+    import ddg_tools
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=5)
+    assert bpy.ops.uv.ddg_cut_flow(steps=1, use_stop_rule=False, length_mode='RIPPLE',
+                                   ripple_wavelength=0.3) == {'FINISHED'}
+    report = dict(obj.data["ddg_cut_last_flow"])
+    assert report["length_weight"] > 0.0
+    omega = report.get("length_weight_roughening_rate")
+    assert abs(report["length_weight"] - ddg_tools.length_weight_for_ripples(omega, 0.3)) \
+        < 1e-6 * report["length_weight"]
+
+
+@test
+def every_flow_property_reaches_the_library():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=0)
+    mesh = obj.data
+    initial = [array.array('f', r) for r in state(mesh)]
+
+    def fresh():
+        for k, row in enumerate(initial):
+            mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+
+    def final_state(**props):
+        fresh()
+        assert flow(steps=3, **props) == {'FINISHED'}, props
+        report = dict(mesh["ddg_cut_last_flow"])
+        assert math.isfinite(report["energy_after"]), props
+        return array.array('f', state(mesh)[0]), report
+
+    base, base_report = final_state()
+
+    def differs(props):
+        other, _ = final_state(**props)
+        return max(abs(a - b) for a, b in zip(base, other)) > 1e-6
+
+    group = obj.vertex_groups.new(name="Penalty")
+    for v in mesh.vertices:
+        if v.co.x > 0.0:
+            group.add([v.index], 1.0, 'REPLACE')
+    cases = collections.OrderedDict([
+        ("energy dirichlet", dict(energy='DIRICHLET')),
+        ("energy scaled dirichlet", dict(energy='SCALED_DIRICHLET')),
+        ("feature size cap", dict(energy='SCALED_DIRICHLET', feature_r_eps=0.2)),
+        ("paper stages", dict(stages='PAPER')),
+        ("explicit length weight", dict(length_mode='EXPLICIT', length_weight=0.5)),
+        ("penalty group", dict(penalty_group="Penalty", penalty_strength=3.0)),
+        ("penalty paper rule", dict(penalty_group="Penalty", penalty_strength=3.0,
+                                    penalty_rule='PAPER_DIAGONAL')),
+        ("distortion weights", dict(distortion_weights=(0.0, 1.0))),
+        ("area weights", dict(area_weights=(0.5, 0.0))),
+        ("uniform curvature", dict(use_uniform_curvature=True, uniform_curvature=5.0)),
+        ("step rule fixed", dict(step_rule='FIXED', tau=1e-4)),
+        ("step rule capped", dict(step_rule='CAPPED', tau_max=1e-3, max_motion=0.05)),
+        ("flux nodal", dict(flux_recovery='NODAL')),
+        ("length step on mesh", dict(length_step='ON_MESH')),
+        ("extension harmonic", dict(extension='HARMONIC')),
+        ("speed unit", dict(speed_scaling='UNIT')),
+        ("redistance off", dict(redistance='OFF')),
+    ])
+    # The default length mode of `base` is explicit with weight 0.1; "explicit length weight" has
+    # another value.
+    for label, props in cases.items():
+        assert differs(props), "{} has no effect".format(label)
+    # A case that must not change anything: the symmetry options with the axis off.
+    assert not differs(dict(symmetry='NONE', symmetry_tolerance=0.5))
+    # The default stage choices equal the explicit defaults.
+    assert not differs(dict(flux_recovery='DEFAULT', length_step='DEFAULT'))
+    # Symmetric start (circle at the pole) with mirror symmetry about every axis runs.
+    for axis in ("X", "Y", "Z"):
+        final_state(symmetry=axis)
+    # Camera penalty.
+    camera = bpy.data.objects.new("Camera", bpy.data.cameras.new("Camera"))
+    bpy.context.collection.objects.link(camera)
+    camera.location = (5.0, 0.0, 0.0)
+    camera.rotation_euler = (math.pi / 2, 0.0, math.pi / 2)
+    bpy.context.scene.camera = camera
+    assert differs(dict(hide_from_camera=True, hide_strength=3.0)), "camera penalty: no effect"
+    bpy.context.scene.camera = None
+    expect_error("no active camera", bpy.ops.uv.ddg_cut_flow, hide_from_camera=True, **FLOW)
+
+
+@test
+def symmetry_matches_mirrored_vertices_and_reports_the_unmatched():
+    core = importlib.import_module(ARGS.module + ".cut")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    classes, unmatched = core.mirror_classes(mesh, "X", 1e-5)
+    assert not unmatched, unmatched
+    pts = positions(mesh)
+    groups = collections.defaultdict(list)
+    for i, c in enumerate(classes):
+        groups[c].append(i)
+    assert all(len(g) in (1, 2) for g in groups.values())
+    for g in groups.values():
+        if len(g) == 2:
+            a, b = pts[g[0]], pts[g[1]]
+            assert abs(a.x + b.x) < 1e-5 and abs(a.y - b.y) < 1e-5 and abs(a.z - b.z) < 1e-5
+        else:
+            assert abs(pts[g[0]].x) < 1e-5, "a class of one vertex that is off the plane"
+    # Move one vertex: it and its partner are unmatched.
+    mesh.vertices[40].co.x += 0.05
+    classes, unmatched = core.mirror_classes(mesh, "X", 1e-5)
+    assert 40 in unmatched and len(unmatched) >= 1
+    start_circle(obj, vertex=0)
+    with CaptureOutput() as out:
+        assert flow(steps=1, symmetry='X', symmetry_tolerance=1e-5 / diagonal(mesh)) \
+            == {'FINISHED'}
+    assert "no mirror image about the X axis" in out.text and " 40" in out.text, out.text
+
+
+@test
+def visibility_rays_see_occluders():
+    core = importlib.import_module(ARGS.module + ".cut")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    wall = primitive("plane", size=4.0, location=(0.0, 0.0, 3.0))
+    activate(obj)
+    bpy.context.view_layer.update()
+    camera_at = Vector((0.0, 0.0, 6.0))
+    visible = core.vertex_visibility(obj, bpy.context, camera_at)
+    top = max(range(len(obj.data.vertices)), key=lambda i: obj.data.vertices[i].co.z)
+    assert visible[top] == 0.0, "the wall does not hide the top of the sphere"
+    assert sum(visible) == 0.0
+    bpy.data.objects.remove(wall, do_unlink=True)
+    bpy.context.view_layer.update()
+    visible = core.vertex_visibility(obj, bpy.context, camera_at)
+    assert visible[top] == 1.0
+    south = min(range(len(obj.data.vertices)), key=lambda i: obj.data.vertices[i].co.z)
+    assert visible[south] == 0.0, "the sphere hides its own far side"
+    assert 0 < sum(visible) < len(visible)
+
+
+@test
+def one_sided_patch_weights_change_the_cut():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=0)
+    initial = [array.array('f', r) for r in state(mesh)]
+    results = []
+    for weights in ((1.0, 1.0), (0.0, 1.0)):
+        for k, row in enumerate(initial):
+            mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+        assert flow(steps=10, distortion_weights=weights) == {'FINISHED'}
+        results.append(dict(mesh["ddg_cut_last_flow"]))
+    assert abs(results[0]["energy_after"] - results[1]["energy_after"]) > 1e-6
+
+
+@test
+def apply_with_unwrap_gives_uvs_without_flipped_triangles():
+    for name in ("uv_sphere", "subdivided_cube"):
+        obj = MODELS[name]()
+        start_circle(obj, fraction=0.3)
+        assert flow(steps=10) == {'FINISHED'}
+        assert bpy.ops.uv.ddg_cut_apply(unwrap_after=True) == {'FINISHED'}
+        mesh = obj.data
+        layer = mesh.uv_layers.active
+        assert layer is not None
+        uvs = array.array('f', bytes(8 * len(mesh.loops)))
+        mesh.attributes[layer.name].data.foreach_get("vector", uvs)
+        assert all(math.isfinite(x) for x in uvs)
+        mesh.calc_loop_triangles()
+        areas = []
+        for tri in mesh.loop_triangles:
+            (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in tri.loops)
+            areas.append(0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)))
+        mean = sum(abs(a) for a in areas) / len(areas)
+        # Triangles of three collinear points (a polygon with a vertex of the cut on its side)
+        # have zero area up to rounding, whichever way they are "oriented".
+        flipped = sum(1 for a in areas if a < -1e-3 * mean)
+        assert flipped == 0, "{}: {} flipped triangles of {}".format(name, flipped, len(areas))
+        print("  {}: {} triangles, {} of zero area (collinear points)".format(
+            name, len(areas), sum(1 for a in areas if abs(a) <= 1e-3 * mean)))
+        # The unwrap used the cut as seams: charts are separated along them.
+        assert sum(e.use_seam for e in mesh.edges) > 0
+        reset()
+
+
+@test
+def second_cut_works_with_the_first_as_fixed_seams():
+    for name in ("uv_sphere", "subdivided_cube", "torus"):
+        obj = MODELS[name]()
+        mesh = obj.data
+        payload = Payload(obj)
+        chi = euler(mesh)
+        start_circle(obj, fraction=0.2, vertex=0)
+        assert flow() == {'FINISHED'}
+        assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+        first_seams = positions_of_seams(mesh)
+        assert first_seams
+        payload.refresh(obj)
+        # A second cut, started at the antipode of the first, crosses the first one's seams
+        # when its region reaches them.
+        far = max(range(len(mesh.vertices)),
+                  key=lambda i: (mesh.vertices[i].co - mesh.vertices[0].co).length)
+        assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.25 * diagonal(mesh),
+                                        vertex=far) == {'FINISHED'}
+        assert flow() == {'FINISHED'}
+        session, reference = rust_reference(obj)
+        assert len(session.seams_cut) // 2 >= len(first_seams) - 1
+        seams_before = positions_of_seams(mesh)
+        assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+        check_apply_against_reference(obj, payload, session, reference, seams_before)
+        payload.check(obj, reference)
+        assert euler(mesh) == chi
+        now = {frozenset((round(a[0], 3), round(a[1], 3), round(a[2], 3)) for a in pair)
+               for pair in positions_of_seams(mesh)}
+        # Every old seam is still a seam, perhaps cut into pieces: each old seam's end points
+        # are vertices of seam edges.
+        seam_vertices = {tuple(round(c, 3) for c in p) for pair in positions_of_seams(mesh)
+                         for p in pair}
+        for a, b in first_seams:
+            assert tuple(round(c, 3) for c in a) in seam_vertices
+            assert tuple(round(c, 3) for c in b) in seam_vertices
+        assert len(now) > len(first_seams)
+        reset()
+
+
+@test
+def apply_marks_exactly_the_inserted_edges_and_leaves_old_seams_alone():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    # An existing seam along a meridian: the cut cannot cross it, and it stays.
+    for e in mesh.edges:
+        a, b = mesh.vertices[e.vertices[0]].co, mesh.vertices[e.vertices[1]].co
+        if abs(a.y) < 1e-6 and abs(b.y) < 1e-6 and a.x > 0 and b.x > 0:
+            e.use_seam = True
+    n_old = sum(e.use_seam for e in mesh.edges)
+    assert n_old >= 10
+    start_circle(obj, fraction=0.3, vertex=5)
+    assert flow() == {'FINISHED'}
+    session, reference = rust_reference(obj)
+    seams_before = positions_of_seams(mesh)
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    check_apply_against_reference(obj, None, session, reference, seams_before)
+    now = sum(e.use_seam for e in mesh.edges)
+    assert now >= n_old + len(reference.new_seams) // 2 - 0
+
+
+@test
+def models_with_boundary_keep_their_boundary():
+    obj = primitive("grid", x_subdivisions=12, y_subdivisions=12, size=2.0)
+    mesh = obj.data
+    boundary_before = sum(1 for c in edge_face_counts(mesh).values() if c == 1)
+    assert boundary_before > 0
+    start_circle(obj, fraction=0.2, vertex=70)
+    assert flow(steps=3) == {'FINISHED'}
+    session, reference = rust_reference(obj)
+    seams_before = positions_of_seams(mesh)
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    check_apply_against_reference(obj, None, session, reference, seams_before)
+    counts = collections.Counter(edge_face_counts(mesh).values())
+    assert set(counts) <= {1, 2}
+    assert euler(mesh) == 1
+
+
+# ----------------------------------------------------------------------------------------------
+# Error paths
+
+
+@test
+def errors_are_readable_messages():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    # Flow and Apply before Start.
+    message = expect_error("no cut state.*Cut: Start", bpy.ops.uv.ddg_cut_flow)
+    expect_error("no cut state.*Cut: Start", bpy.ops.uv.ddg_cut_apply)
+    # Start: nothing selected, everything selected, no active vertex, bad radius and vertex,
+    # more than two regions.
+    mesh.polygons.foreach_set("select", [False] * len(mesh.polygons))
+    expect_error("No faces are selected", bpy.ops.uv.ddg_cut_start, mode='SELECTED')
+    mesh.polygons.foreach_set("select", [True] * len(mesh.polygons))
+    expect_error("All faces are selected", bpy.ops.uv.ddg_cut_start, mode='SELECTED')
+    expect_error("no active vertex", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3)
+    expect_error("not exist", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3, vertex=10 ** 6)
+    mesh.polygons.foreach_set("select", [i % 2 == 0 for i in range(len(mesh.polygons))])
+    expect_error("not available yet", bpy.ops.uv.ddg_cut_start, mode='SELECTED', regions=3)
+    assert not state(mesh), "a failed start left attributes behind"
+    assert not previews(obj)
+    # Flow: vertex group that does not exist, bad wavelength.
+    start_circle(obj, vertex=5)
+    expect_error("Vertex group 'Missing' does not exist", bpy.ops.uv.ddg_cut_flow,
+                 penalty_group="Missing", **FLOW)
+    expect_error("ripple wavelength must be larger than 0", bpy.ops.uv.ddg_cut_flow,
+                 length_mode='RIPPLE', ripple_wavelength=0.0, steps=1)
+    # A state that does not fit the mesh: corners of one vertex that no seam separates differ.
+    values = state(mesh)[0]
+    values[3] += 0.5
+    mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", values)
+    message = expect_error("differs at vertex", bpy.ops.uv.ddg_cut_flow, **FLOW)
+    assert "region function" in message
+    expect_error("differs at vertex", bpy.ops.uv.ddg_cut_apply)
+    # An attribute of the wrong type.
+    mesh.attributes.remove(mesh.attributes["ddg_cut_region_1"])
+    mesh.attributes.new("ddg_cut_region_1", 'INT', 'POINT')
+    expect_error("must be a float attribute on the face-corner domain", bpy.ops.uv.ddg_cut_flow,
+                 **FLOW)
+    # A cut that has vanished cannot be applied.
+    bpy.ops.object.delete()
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=5)
+    mesh.attributes["ddg_cut_region_0"].data.foreach_set(
+        "value", [-1.0] * len(mesh.loops))
+    mesh.attributes["ddg_cut_region_1"].data.foreach_set(
+        "value", [1.0] * len(mesh.loops))
+    expect_error("cut is empty", bpy.ops.uv.ddg_cut_apply)
+    # Not a mesh / no active object: the operators are not available (poll).
+    bpy.ops.object.empty_add()
+    assert not bpy.ops.uv.ddg_cut_start.poll() and not bpy.ops.uv.ddg_cut_flow.poll() \
+        and not bpy.ops.uv.ddg_cut_apply.poll()
+    del message
+
+
+@test
+def errors_for_meshes_the_flow_refuses():
+    # Non-manifold: the message of the library names the edge.
+    mesh = bpy.data.meshes.new("fins")
+    mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0.5, 1, 0), (0.5, -1, 0), (0.5, 0, 1)], [],
+                     [(0, 1, 2), (1, 0, 3), (0, 1, 4)])
+    obj = bpy.data.objects.new("fins", mesh)
+    bpy.context.collection.objects.link(obj)
+    activate(obj)
+    mesh.polygons.foreach_set("select", [True, False, False])
+    expect_error("shared by 3 faces", bpy.ops.uv.ddg_cut_start, mode='SELECTED')
+    # No faces.
+    empty = bpy.data.objects.new("empty", bpy.data.meshes.new("empty"))
+    bpy.context.collection.objects.link(empty)
+    activate(empty)
+    expect_error("has no faces", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=1.0, vertex=0)
+    # Shape keys cannot be carried through the insertion.
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=5)
+    assert flow(steps=2) == {'FINISHED'}
+    obj.shape_key_add(name="Basis")
+    obj.shape_key_add(name="Other")
+    message = expect_error("shape keys", bpy.ops.uv.ddg_cut_apply)
+    assert state(obj.data), "the failed Apply removed the state"
+    assert len(obj.data.vertices) == 266, "the failed Apply changed the mesh"
+    del message
+
+
+@test
+def apply_failing_leaves_the_mesh_alone():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=5)
+    nv, nf = len(mesh.vertices), len(mesh.polygons)
+    rows = state(mesh)
+    rows[0][7] += 1.0
+    mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", rows[0])
+    expect_error("differs at vertex", bpy.ops.uv.ddg_cut_apply)
+    assert (len(mesh.vertices), len(mesh.polygons)) == (nv, nf)
+    assert state(mesh) and previews(obj)
+
+
+@test
+def native_module_without_cut_session_is_an_error_message():
+    cut = importlib.import_module(ARGS.module + ".cut")
+    core = importlib.import_module(ARGS.module + ".core")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    import ddg_tools
+    saved = ddg_tools.CutSession
+    try:
+        del ddg_tools.CutSession
+        expect_error("has no CutSession", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3,
+                     vertex=0)
+    finally:
+        ddg_tools.CutSession = saved
+    del cut, core, obj
+
+
+@test
+def existing_unwrap_operator_is_unaffected():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    assert bpy.ops.uv.ddg_conformal_unwrap() == {'FINISHED'}
+    assert obj.data.uv_layers.active is not None
+
+
+# ----------------------------------------------------------------------------------------------
+# Runner
+
+
+def main():
+    global ARGS
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--module", default="ddg_uv_unwrap",
+                        help="module name of the installed add-on")
+    parser.add_argument("--source", default="", help="register the add-on from this directory")
+    parser.add_argument("--site", default="", help="directory with an unpacked ddg_tools wheel")
+    parser.add_argument("--spot", default=SPOT)
+    parser.add_argument("-k", dest="only", default="", help="run only tests whose name contains this")
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    ARGS = parser.parse_args(argv)
+
+    assert bpy.app.background, "run with -b"
+    if ARGS.site:
+        sys.path.insert(0, ARGS.site)
+    if ARGS.source:
+        sys.path.insert(0, ARGS.source)
+        module = importlib.import_module(ARGS.module)
+        module.register()
+    else:
+        assert bpy.app.factory_startup, "run with --factory-startup"
+        assert bpy.ops.preferences.addon_enable(module=ARGS.module) == {'FINISHED'}
+        assert ARGS.module in bpy.context.preferences.addons.keys(), "the add-on did not enable"
+    assert hasattr(bpy.types, "UV_OT_ddg_cut_start"), "the cut operators are not registered"
+
+    passed, skipped, failed = [], [], []
+    for function in TESTS:
+        name = function.__name__
+        if ARGS.only and ARGS.only not in name:
+            continue
+        reset()
+        print("TEST", name)
+        try:
+            function()
+        except Skip as skip:
+            skipped.append(name)
+            print("SKIP {}: {}".format(name, skip))
+        except Exception:
+            failed.append(name)
+            traceback.print_exc(file=sys.stdout)
+            print("FAIL", name)
+        else:
+            passed.append(name)
+            print("PASS", name)
+        sys.stdout.flush()
+
+    print("RESULT: {} passed, {} skipped, {} failed".format(len(passed), len(skipped), len(failed)))
+    for name in failed:
+        print("  failed:", name)
+    if failed or not passed:
+        raise SystemExit(1)
+    print("ALL TESTS PASSED")
+
+
+ARGS = None
+main()

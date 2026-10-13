@@ -39,6 +39,7 @@
 
 pub mod buffers;
 pub mod contract;
+pub mod cutting;
 pub mod error;
 pub mod measure;
 pub mod pack;

@@ -5,8 +5,8 @@ element types. Results are ``array.array`` objects.
 """
 
 from array import array
-from collections.abc import Buffer
-from typing import Final, final
+from collections.abc import Buffer, Sequence
+from typing import Final, Literal, final
 
 __version__: Final[str]
 
@@ -78,3 +78,284 @@ def pack_charts(
     *,
     margin: float = 0.0,
 ) -> tuple[array[float], dict[str, int | float]]: ...
+
+
+# ----------------------------------------------------------------------------------------------
+# The cut flow: "Variational Surface Cutting" (Sharp, Crane 2018) on a polygon mesh.
+# ----------------------------------------------------------------------------------------------
+
+class NotAvailableError(DdgError):
+    """The request is valid but not implemented yet: a cut session with more than two regions."""
+
+@final
+class CutDescription:
+    """The cut on the caller's polygons: points on polygon edges and, per polygon, the paths of
+    the cut through it. All arrays are flat; see README.md."""
+
+    @property
+    def n_edge_points(self) -> int: ...
+    @property
+    def n_paths(self) -> int: ...
+    @property
+    def edge_vertices(self) -> array[int]:
+        """``array('i')``, 2 per edge point: the vertices ``[min, max]`` of its polygon edge."""
+    @property
+    def edge_t(self) -> array[float]:
+        """``array('d')``: the point is ``(1 - t) x[min] + t x[max]``, ``0 < t < 1``."""
+    @property
+    def edge_positions(self) -> array[float]:
+        """``array('d')``, 3 per edge point."""
+    @property
+    def edge_side(self) -> array[int]:
+        """``array('i')``: on a seam, the polygon whose side of the seam the point is on, else -1."""
+    @property
+    def path_polygon(self) -> array[int]:
+        """``array('i')``: the polygon of every path, ascending."""
+    @property
+    def path_start(self) -> array[int]:
+        """``array('i')``: an edge point index, or ``-(j + 1)`` for junction ``j``."""
+    @property
+    def path_end(self) -> array[int]:
+        """``array('i')``: like ``path_start``."""
+    @property
+    def path_regions(self) -> array[int]:
+        """``array('i')``, 2 per path: the regions on its left and on its right."""
+    @property
+    def path_interior_starts(self) -> array[int]:
+        """``array('i')``, ``n_paths + 1`` offsets into the interior points."""
+    @property
+    def interior_corners(self) -> array[int]:
+        """``array('i')``, 2 per interior point: the polygon corners of the diagonal it is on."""
+    @property
+    def interior_t(self) -> array[float]:
+        """``array('d')``: parameter from the first corner."""
+    @property
+    def interior_positions(self) -> array[float]:
+        """``array('d')``, 3 per interior point."""
+    @property
+    def junction_positions(self) -> array[float]:
+        """``array('d')``, 3 per junction (empty for two regions)."""
+    @property
+    def n_clamped_crossings(self) -> int: ...
+
+@final
+class InsertedMesh:
+    """The polygon mesh with a cut inserted (the Rust reference of what an editor must produce)."""
+
+    @property
+    def positions(self) -> array[float]: ...
+    @property
+    def corner_vertices(self) -> array[int]: ...
+    @property
+    def polygon_starts(self) -> array[int]: ...
+    @property
+    def triangles(self) -> array[int]: ...
+    @property
+    def new_seams(self) -> array[int]:
+        """``array('i')``, 2 per edge of the cut, ``[min, max]``, ascending."""
+    @property
+    def polygon_parent(self) -> array[int]: ...
+    @property
+    def vertex_source(self) -> array[int]:
+        """``array('i')``, 3 per new vertex: kind (0 old, 1 edge point, 2 interior point), then
+        the old vertex / edge point / path, and for kind 2 the position in the path's points."""
+    @property
+    def edge_point_vertex(self) -> array[int]: ...
+    @property
+    def n_old_vertices(self) -> int: ...
+
+@final
+class CutUnwrapResult:
+    @property
+    def cut(self) -> CutDescription: ...
+    @property
+    def inserted(self) -> InsertedMesh: ...
+    @property
+    def seams(self) -> array[int]:
+        """``array('i')``, 2 per seam of the new mesh: the old seams and the cut."""
+    @property
+    def uvs(self) -> array[float]:
+        """``array('f')``, 2 per corner of the new mesh. Not packed."""
+    @property
+    def polygon_charts(self) -> array[int]: ...
+    @property
+    def cone_vertices(self) -> array[int]: ...
+    @property
+    def cone_angles(self) -> array[float]: ...
+    @property
+    def cut_edges(self) -> array[int]: ...
+    @property
+    def report(self) -> dict[str, bool | int | float | str | list[str]]: ...
+
+Report = dict[str, bool | int | float | str | list["Report"]]
+
+@final
+class CutSession:
+    """The cut flow on a polygon mesh. Weights, penalties, step sizes and the ripple wavelength
+    refer to the surface scaled to unit area (``length_scale``); the state and the positions are in
+    the unit of the mesh. A pointwise energy given as a callable is not offered."""
+
+    def __init__(
+        self,
+        positions: Buffer,
+        corner_vertices: Buffer,
+        polygon_starts: Buffer,
+        triangles: Buffer,
+        *,
+        n_regions: int = 2,
+        seam_edges: Buffer | None = None,
+        pinned_vertices: Buffer | None = None,
+        forbidden_vertices: Buffer | None = None,
+        prescribed_vertices: Buffer | None = None,
+        prescribed_angles: Buffer | None = None,
+        circle_vertex: int | None = None,
+        circle_radius: float | None = None,
+        polygon_labels: Buffer | None = None,
+        corner_values: Buffer | None = None,
+    ) -> None:
+        """Exactly one start: ``circle_vertex`` with ``circle_radius``, ``polygon_labels`` or
+        ``corner_values``. ``n_regions > 2`` raises ``NotAvailableError`` for now."""
+    @property
+    def n_regions(self) -> int: ...
+    @property
+    def n_vertices(self) -> int: ...
+    @property
+    def n_corners(self) -> int: ...
+    @property
+    def n_polygons(self) -> int: ...
+    @property
+    def n_triangles(self) -> int: ...
+    @property
+    def length_scale(self) -> float: ...
+    @property
+    def total_area(self) -> float: ...
+    @property
+    def time(self) -> float: ...
+    @property
+    def n_steps(self) -> int: ...
+    @property
+    def warnings(self) -> list[str]: ...
+    @property
+    def seams_cut(self) -> array[int]: ...
+    @property
+    def state(self) -> memoryview:
+        """float64, shape ``(n_regions, n_corners)``; assign any float buffer of that shape or
+        flat row-major."""
+    @state.setter
+    def state(self, value: Buffer) -> None: ...
+    def state_row(self, region: int) -> array[float]: ...
+    def corner_regions(self) -> array[int]: ...
+    def restart(
+        self,
+        *,
+        circle_vertex: int | None = None,
+        circle_radius: float | None = None,
+        polygon_labels: Buffer | None = None,
+        corner_values: Buffer | None = None,
+    ) -> None: ...
+    def roughening_rate(self, **energy_options: object) -> float:
+        """The roughening rate of the state; takes the keywords of ``step``."""
+    def step(
+        self,
+        *,
+        energy: Literal["dirichlet", "scaled_dirichlet", "hencky"] = "hencky",
+        scale_weights: Buffer | None = None,
+        feature_r_eps: float = 1.0,
+        feature_smoothing: float = 0.02,
+        length_weight: float | None = None,
+        ripple_wavelength: float | None = None,
+        penalty: Buffer | None = None,
+        penalty_rule: Literal["gradient", "paper_diagonal"] | None = None,
+        distortion_weights: Buffer | Sequence[float] | None = None,
+        area_weights: Buffer | Sequence[float] | None = None,
+        symmetry: Buffer | None = None,
+        curvature_uniform: float | None = None,
+        curvature_per_triangle: Buffer | None = None,
+        stages: Literal["default", "paper"] = "default",
+        flux_recovery: Literal["nodal", "smoothed"] | None = None,
+        flux_smoothing: float | None = None,
+        sliver_aspect_ratio: float | None = None,
+        smoothing_passes: int | None = None,
+        length_step: Literal["on_cut", "on_mesh"] | None = None,
+        extension: Literal["local", "harmonic"] | None = None,
+        speed_scaling: Literal["mean_gradient", "unit"] | None = None,
+        redistance: Literal["keep_adjacent", "off"] | None = None,
+        step_rule: Literal["adaptive", "capped", "fixed"] = "adaptive",
+        time_scale: float | None = None,
+        max_motion: float | None = None,
+        tau_max: float | None = None,
+        tau: float | None = None,
+        min_crossing_offset: float | None = None,
+    ) -> dict[str, bool | int | float | str]:
+        """One flow step. ``None`` means the library's default. Neither ``length_weight`` nor
+        ``ripple_wavelength``: ``ripple_wavelength=0.25``."""
+    def run(
+        self,
+        *,
+        energy: Literal["dirichlet", "scaled_dirichlet", "hencky"] = "hencky",
+        scale_weights: Buffer | None = None,
+        feature_r_eps: float = 1.0,
+        feature_smoothing: float = 0.02,
+        length_weight: float | None = None,
+        ripple_wavelength: float | None = None,
+        penalty: Buffer | None = None,
+        penalty_rule: Literal["gradient", "paper_diagonal"] | None = None,
+        distortion_weights: Buffer | Sequence[float] | None = None,
+        area_weights: Buffer | Sequence[float] | None = None,
+        symmetry: Buffer | None = None,
+        curvature_uniform: float | None = None,
+        curvature_per_triangle: Buffer | None = None,
+        stages: Literal["default", "paper"] = "default",
+        flux_recovery: Literal["nodal", "smoothed"] | None = None,
+        flux_smoothing: float | None = None,
+        sliver_aspect_ratio: float | None = None,
+        smoothing_passes: int | None = None,
+        length_step: Literal["on_cut", "on_mesh"] | None = None,
+        extension: Literal["local", "harmonic"] | None = None,
+        speed_scaling: Literal["mean_gradient", "unit"] | None = None,
+        redistance: Literal["keep_adjacent", "off"] | None = None,
+        step_rule: Literal["adaptive", "capped", "fixed"] = "adaptive",
+        time_scale: float | None = None,
+        max_motion: float | None = None,
+        tau_max: float | None = None,
+        tau: float | None = None,
+        min_crossing_offset: float | None = None,
+        max_steps: int = 1000,
+        motion_tolerance: float = 1e-5,
+        energy_tolerance: float = 1e-4,
+        energy_window: int = 25,
+    ) -> Report:
+        """Steps until the stop rule says so; a tolerance of 0 never stops for that reason.
+        ``steps`` in the result lists the dicts that ``step`` returns."""
+    def preview(
+        self, *, min_crossing_offset: float | None = None
+    ) -> tuple[array[float], array[int], list[bool]]:
+        """``(positions, starts, closed)``: 3 floats per point, ``n_polylines + 1`` offsets into
+        the points, and whether each polyline is closed."""
+    def describe_cut(self, *, min_crossing_offset: float | None = None) -> CutDescription: ...
+    def insert(
+        self, cut: CutDescription | None = None, *, min_crossing_offset: float | None = None
+    ) -> InsertedMesh: ...
+    def unwrap(
+        self,
+        *,
+        min_crossing_offset: float | None = None,
+        lambda_: float = 0.1,
+        positive_cones_only: bool = True,
+        optimize_boundary: bool = False,
+        cones: bool = False,
+    ) -> CutUnwrapResult: ...
+
+def visibility_penalty(
+    positions: Buffer,
+    corner_vertices: Buffer,
+    polygon_starts: Buffer,
+    triangles: Buffer,
+    camera: Sequence[float],
+    *,
+    visibility: Buffer | None = None,
+) -> array[float]:
+    """``eta_i = nu_i * max(n_i . e_i, 0)`` (paper Sec. 7.1), without a unit; no rays are cast."""
+
+def length_weight_for_ripples(roughening_rate: float, wavelength: float) -> float:
+    """``alpha_L = omega * wavelength / (2 pi)``."""

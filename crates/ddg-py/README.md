@@ -184,9 +184,10 @@ corner order.
 | `ddg_tools.InputError` | an argument is malformed. The message starts with the parameter name: `corner_vertices[3] = 8 is out of range: there are 8 vertices (valid indices 0..=7)` |
 | `ddg_tools.MeshError` | the arrays are fine but the mesh cannot be unwrapped. The message uses the caller's vertex and polygon ("face") indices: `edge (12, 57) is shared by 3 faces: 4, 9, 31` |
 | `ddg_tools.SolveError` | the mesh was accepted but no valid map came out: the cone solver or the flattening failed, a cone could not be realized, or a result failed the pipeline's own final checks. Also raised if the pipeline returns malformed data. |
+| `ddg_tools.NotAvailableError` | a valid request the library does not implement yet (`CutSession` with more than two regions) |
 | `TypeError` | an array argument has no buffer protocol, or an option has the wrong type |
 
-The three module exceptions derive from `ddg_tools.DdgError`.
+The module exceptions derive from `ddg_tools.DdgError`.
 
 ### `pack_charts`
 
@@ -204,6 +205,98 @@ A single chart ends up with its longer side spanning exactly `[margin, 1 − mar
 charts the margin is capped at `1 / (4 ⌈√n⌉)` so that padding cannot eat the whole square; the
 dict says which margin was used. The layout is deterministic and wastes space compared with a
 real packer.
+
+## The cut flow: `CutSession`
+
+`ddg_tools.CutSession` binds `ddg_uv::cutting` (`crates/ddg-uv`, README section on the cut flow):
+the cut flow of "Variational Surface Cutting" (Sharp, Crane 2018, `crates/ddg-variational-cuts`,
+implemented clean-room from the text of the paper) on a **polygon mesh with seams**. A session
+holds the state of the flow, advances it, and describes the cut on the caller's polygons. Same
+conventions as `unwrap`: buffers in (any C-contiguous buffer, flat or `(n, width)`), `array.array`
+out, reports as plain dictionaries, errors as exceptions carrying the Rust message. numpy is
+never required (the state is returned as a `memoryview` that `numpy.asarray` turns into a 2-D
+array).
+
+```python
+s = ddg_tools.CutSession(
+    positions, corner_vertices, polygon_starts, triangles, *,
+    n_regions=2, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
+    prescribed_vertices=None, prescribed_angles=None,
+    # exactly one start:
+    circle_vertex=None, circle_radius=None,     # geodesic disk around a vertex (region 0)
+    polygon_labels=None,                        # one label per polygon
+    corner_values=None,                         # (n_regions, n_corners), as `state`
+)
+s.state                       # memoryview, float64, shape (n_regions, n_corners); assignable
+s.step(**controls) -> dict    # one step
+s.run(**controls, max_steps=1000, motion_tolerance=1e-5, energy_tolerance=1e-4,
+      energy_window=25) -> dict
+s.preview() -> (positions, starts, closed)          # the cut as polylines
+s.describe_cut() -> CutDescription                  # the cut on the polygons, as arrays
+s.insert(cut=None) -> InsertedMesh                  # the Rust reference insertion
+s.unwrap(cones=False, ...) -> CutUnwrapResult       # insert, then unwrap with the cut as seams
+s.restart(...), s.roughening_rate(**controls), s.corner_regions(), s.state_row(k)
+ddg_tools.visibility_penalty(positions, corner_vertices, polygon_starts, triangles, camera,
+                             visibility=None)       # paper Sec. 7.1, no rays cast
+ddg_tools.length_weight_for_ripples(roughening_rate, wavelength)
+```
+
+**Units.** The state and the positions are in the unit of the mesh. The weights, the penalty, the
+step sizes and the ripple wavelength refer, as in the library, to the surface scaled to unit total
+area; `s.length_scale` converts a length of the mesh to that unit (`s.total_area` is the area).
+Reports give the cut length in both (`cut_length`, `cut_length_unit_area`).
+
+**The state.** One function per region and per polygon **corner**, so that the two sides of a seam
+can differ. With two regions the rows are `phi` and `-phi`; region 0 is where `phi <= 0`. Setting
+the state accepts any float buffer of that shape (or flat, row-major), resets time and step count,
+and refuses corners of one vertex that no seam separates but that carry different values (the
+error names the vertex). `n_regions > 2` raises `ddg_tools.NotAvailableError` ("... N regions are
+not available yet"); every array is already shaped for N regions.
+
+**Controls** of `step` / `run` (keyword-only; `None` is the library's default; an unknown keyword
+is a `TypeError`):
+
+| keyword | meaning | default |
+|---------|---------|---------|
+| `energy` | `"dirichlet"`, `"scaled_dirichlet"`, `"hencky"` | `"hencky"` (the example program's) |
+| `scale_weights` | per-vertex weight `a > 0` of the scaled Dirichlet energy | the curvature-based weight |
+| `feature_r_eps`, `feature_smoothing` | cap `r_eps` and smoothing `c` of the curvature-based weight | `1.0` (example program), `0.02` (paper) |
+| `length_weight` / `ripple_wavelength` | `alpha_L` explicit, or set from the roughening rate of the state so that ripples longer than the wavelength grow (`length_weight_for_ripples`); in `run` once at the start | `ripple_wavelength=0.25` (example program) |
+| `penalty`, `penalty_rule` | `eta` per vertex; `"gradient"` or `"paper_diagonal"` | none, `"gradient"` |
+| `distortion_weights`, `area_weights` | `w_k`, `beta_k` per region | all 1, all 0 |
+| `symmetry` | class per vertex (equal classes are kept at equal values; a vertex split by a seam is left out) | none |
+| `curvature_uniform` / `curvature_per_triangle` | curvature override (density per unit area of the unit-area surface) | Gaussian curvature |
+| `stages` | `"default"` or `"paper"` (stages as printed) | `"default"` |
+| `flux_recovery`, `flux_smoothing`, `sliver_aspect_ratio`, `smoothing_passes`, `length_step`, `extension`, `speed_scaling`, `redistance` | the individual stages | those of `stages` |
+| `step_rule`, `time_scale`, `max_motion`, `tau_max`, `tau` | `"adaptive"`, `"capped"` or `"fixed"` (`tau`) | adaptive, 0.05, 0.25, 1 |
+| `min_crossing_offset` | `delta`, smallest distance of a crossing from a vertex | `1e-3` |
+| `max_steps`, `motion_tolerance`, `energy_tolerance`, `energy_window` | the stop rule of `run`; a tolerance of 0 never stops for it | 1000, `1e-5`, `1e-4`, 25 |
+
+A pointwise energy given as a Python callable (`Energy::Pointwise` of the library) is **not
+offered**: the energies above cover the paper's examples, and a callable would need a call back
+into Python at every vertex of every step.
+
+**Reports.** `step` returns the energy terms of the state the step started from
+(`energy_total`, `distortion_k`, `area_k`, `cut_length`, `penalty`), `tau`, speeds,
+`roughening_rate`, `cut_motion`, counters, residuals, stage timings and the `length_weight` used.
+`run` returns `steps_taken`, `stop_reason` (`"max_steps"`, `"converged"`, `"energy_stalled"`,
+`"cut_vanished"`), `energy_before`, `energy_after`, `cut_length_before` / `cut_length_after`, the
+final `distortion_k`, `area_k`, `length_weight`, `time`, and `steps`: the list of the `step` dicts.
+
+**The cut on polygons** (`CutDescription`, all arrays flat): *edge points* (`edge_vertices` 2 per
+point `[min, max]`, `edge_t` the parameter from `edge_vertices[0]`, `edge_positions`, `edge_side`:
+on a seam the polygon whose side the point is on, else -1) and *paths*, one piece of the cut inside
+one polygon (`path_polygon`, ascending; `path_start`, `path_end`: an edge point, or `-(j+1)` for a
+junction; `path_regions` left and right; the diagonals a path crosses are `interior_corners`
+(2 polygon corners), `interior_t`, `interior_positions`, delimited by `path_interior_starts`).
+`insert` returns the reference result (`InsertedMesh`: positions, corners, polygon starts,
+triangles, `new_seams`, `polygon_parent`, `vertex_source`, `edge_point_vertex`).
+
+`unwrap(cones=False)` unwraps the inserted mesh with the old seams and the cut as seams and no
+cone besides; `cones=True` lets the cone solver place cones as well. The UVs are not packed.
+
+Errors are `InputError`, `MeshError` and `SolveError` as for `unwrap`, plus `NotAvailableError`
+(a request the library does not implement yet, such as `n_regions > 2`).
 
 ## What `unwrap` does
 
@@ -236,9 +329,10 @@ assembles the report. New options become fields of `UnwrapOptions` and keyword a
 | `src/contract.rs` | `MeshBuffers`, `UnwrapInput` (validation), `UnwrapOptions`, `UnwrapOutput`, `Report` |
 | `src/error.rs` | `InputError`, `UnwrapError` |
 | `src/pipeline.rs` | `run_pipeline` (the call into `ddg-uv`) and the driver `unwrap` |
+| `src/cutting.rs` | the cut session: controls, reports, arrays (pure Rust, tested by `cargo test`) |
 | `src/measure.rs` | distortion measured on the result |
 | `src/pack.rs` | packing charts into the unit square |
-| `src/python.rs` | the PyO3 glue (cargo feature `python`) |
+| `src/python.rs`, `src/python/cut.rs` | the PyO3 glue (cargo feature `python`) |
 | `ddg_tools.pyi` | type stubs, shipped in the wheel |
 | `python-tests/` | tests of the built wheel |
 
@@ -269,7 +363,7 @@ scripts/py-test.sh              # builds the wheel, tests it under Python 3.11+n
 ```
 
 `scripts/py-test.sh` installs the wheel into throw-away environments with `uv run`; the test
-file checks that the module it imported is the wheel that was just built.
+files `test_ddg_tools.py` and `test_cut_session.py` check that the module it imported is the wheel that was just built.
 
 The Blender side is built and tested with `scripts/blender-test.sh`; see `blender/README.md`.
 

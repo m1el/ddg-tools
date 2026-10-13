@@ -240,7 +240,10 @@ mod tests {
         let out = unwrap(&input, &UnwrapOptions::default()).unwrap();
         assert_eq!(out.cones.len(), 8);
         for cone in &out.cones {
-            assert!((cone.angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{cone:?}");
+            assert!(
+                (cone.angle - std::f64::consts::FRAC_PI_2).abs() < 1e-9,
+                "{cone:?}"
+            );
         }
         // A spanning tree of the eight corners.
         assert_eq!(out.cut_edges.len(), 7);
