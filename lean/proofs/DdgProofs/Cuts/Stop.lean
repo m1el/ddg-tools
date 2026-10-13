@@ -62,7 +62,9 @@ def energyVerdict (ε Eb Ek : ℝ) : EnergyVerdict :=
   if ε * |Ek| < Eb - Ek then .goesOn else if ε * |Ek| < Ek - Eb then .rose else .stalled
 
 /-- **The three cases of the energy criterion are exclusive and exhaustive** (`ε ≥ 0`): exactly
-one of `E_{k−W} − E_k > ε|E_k|`, `|E_{k−W} − E_k| ≤ ε|E_k|`, `E_k − E_{k−W} > ε|E_k|` holds. -/
+one of `E_{k−W} − E_k > ε|E_k|`, `|E_{k−W} − E_k| ≤ ε|E_k|`, `E_k − E_{k−W} > ε|E_k|` holds.
+
+[formula: cut-stop-energy] -/
 theorem energy_cases {ε : ℝ} (hε : 0 ≤ ε) (Eb Ek : ℝ) :
     (ε * |Ek| < Eb - Ek ∧ ¬ |Eb - Ek| ≤ ε * |Ek| ∧ ¬ ε * |Ek| < Ek - Eb) ∨
       (¬ ε * |Ek| < Eb - Ek ∧ |Eb - Ek| ≤ ε * |Ek| ∧ ¬ ε * |Ek| < Ek - Eb) ∨
@@ -241,7 +243,9 @@ theorem runOutcome_eq_lowestState (rose : Bool) (E : ℕ → ℝ) (n : ℕ) :
 /-- **After `EnergyRose` the state returned has the lowest energy of the run** (every state of
 such a run has a cut): with `j` the state returned after `n + 1` steps, `j ≤ n + 1`, the lowest
 energy reported is `E_j`, `E_j ≤ E_i` for every state `i ≤ n + 1`, and `E_j < E_i` for every
-earlier state `i < j`. -/
+earlier state `i < j`.
+
+[formula: cut-run-lowest] -/
 theorem runOutcome_rose (E : ℕ → ℝ) (n : ℕ) :
     (runOutcome true false (some (lowestState E n)) (E (n + 1)) (n + 1)).2.2 =
         (runOutcome true false (some (lowestState E n)) (E (n + 1)) (n + 1)).2.1 ∧
