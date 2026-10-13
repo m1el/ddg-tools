@@ -6,7 +6,9 @@
 //!   offending edges at their midpoints, which is an intrinsic operation: the surface does not
 //!   change. The result is the triangulation itself, handed out as a `TriMesh` with the same
 //!   vertex, face and corner ids, a `Geometry` from the intrinsic edge lengths, and the place
-//!   of every vertex on the input mesh. The number of splits is reported.
+//!   of every vertex on the input mesh. The number of splits is reported, and the smallest
+//!   and largest angle of the result: a triangulation that needed no split keeps its angles,
+//!   one that needed splits keeps the Delaunay property but not an angle bound (SPEC N15).
 //! * **The way back.** A cut on the exported mesh consists of points on its edges, points
 //!   inside its faces where three regions meet, and straight segments across its faces between
 //!   them. [`SimplicialExport::edge_point`] turns a point of an exported edge into a point of
@@ -23,6 +25,7 @@ use ddg_core::{Geometry, TriMesh};
 use crate::delaunay::DelaunayOptions;
 use crate::error::IntrinsicError;
 use crate::point::SurfacePoint;
+use crate::refine::{RefineOptions, RefineReport};
 use crate::triangulation::IntrinsicTriangulation;
 
 /// Options of [`IntrinsicTriangulation::export_simplicial`].
@@ -35,15 +38,32 @@ pub struct ExportOptions {
     /// simplicial complex that needs no flip. `None`: no flip at all, only the splits; the
     /// triangulation keeps the edges it has, Delaunay or not.
     pub delaunay: Option<DelaunayOptions>,
+    /// If given, the triangulation is refined with these options after every round of
+    /// splits, for at most [`max_refine_rounds`](Self::max_refine_rounds) rounds: splitting
+    /// does not keep an angle bound, refinement restores it, and can in turn make new edges
+    /// to split. Where the rounds end with a refinement that leaves a simplicial complex, the
+    /// export has the angle bound and carries that refinement's report
+    /// ([`SimplicialExport::refinement`]). The refinements stop, and the export ends with
+    /// splits and flips as without this option, when two in a row leave no fewer edges to
+    /// split than there were before them, or when one leaves more than twice as many (that
+    /// one is undone). The rounds end the first way on thin tubes and handles, and the second
+    /// way at a vertex whose angle sum is below three times the bound, where no simplicial
+    /// complex has the bound (SPEC N15).
+    pub refine: Option<RefineOptions>,
+    /// The largest number of refinements between rounds of splits.
+    pub max_refine_rounds: usize,
     /// The export fails when more than this many edges would have to be split.
     pub max_splits: usize,
 }
 
 impl Default for ExportOptions {
-    /// Flips with the default Delaunay options; at most 100 000 splits.
+    /// Flips with the default Delaunay options; no refinement between the rounds of splits
+    /// (at most 6 rounds if one is asked for); at most 100 000 splits.
     fn default() -> Self {
         ExportOptions {
             delaunay: Some(DelaunayOptions::default()),
+            refine: None,
+            max_refine_rounds: 6,
             max_splits: 100_000,
         }
     }
@@ -63,12 +83,29 @@ pub struct SimplicialExport {
     pub locations: Vec<SurfacePoint>,
     /// Number of edges that were split to make the triangulation a simplicial complex.
     pub n_splits: usize,
-    /// Number of flips made after splits.
+    /// Number of flips made by the export, those of its refinements included.
     pub n_flips: usize,
+    /// Number of refinements made between rounds of splits ([`ExportOptions::refine`]); one
+    /// that was undone is not counted.
+    pub n_refine_rounds: usize,
+    /// Number of vertices those refinements inserted.
+    pub n_refined: usize,
+    /// The report of the last refinement, if the export ended with it: the triangulation was
+    /// a simplicial complex after it, so what it says about the angles holds for the export.
+    /// `None` if no refinement was asked for, or if the export ended with splits after the
+    /// last one (then [`min_angle`](Self::min_angle) says what the splits left).
+    pub refinement: Option<RefineReport>,
     /// Whether every interior edge of the result passes the Delaunay test (the test of
     /// [`ExportOptions::delaunay`], or the default test if no flips were asked for). Tested on
     /// the result, not assumed.
     pub is_delaunay: bool,
+    /// The smallest corner angle of the exported mesh. **Splitting does not keep an angle
+    /// bound:** where edges were split, this can be far below the bound a refinement reached
+    /// before (SPEC N15); where nothing was split, the angles are those of the triangulation
+    /// as it was.
+    pub min_angle: f64,
+    /// The largest corner angle of the exported mesh.
+    pub max_angle: f64,
     /// What identifies this export (see the [module documentation](self)).
     pub fingerprint: u64,
     /// Per edge of `mesh`: the edge of the triangulation.
@@ -197,7 +234,17 @@ impl IntrinsicTriangulation {
     ) -> Result<SimplicialExport, IntrinsicError> {
         let mut n_splits = 0;
         let mut n_flips = 0;
+        let mut n_refine_rounds = 0;
+        let mut n_refined = 0;
+        let mut refinement = None;
+        let mut refining = options.refine.is_some();
+        let mut stalled = 0;
+        let offending = |tri: &IntrinsicTriangulation| {
+            let irregular = tri.irregularities();
+            irregular.self_edges.len() + irregular.multi_edges.len()
+        };
         loop {
+            let offending_before = offending(self);
             // Split until simplicial.
             loop {
                 let irregular = self.irregularities();
@@ -259,6 +306,37 @@ impl IntrinsicTriangulation {
                     });
                 }
             }
+            if let Some(refine) = &options.refine
+                && refining
+                && n_refine_rounds < options.max_refine_rounds
+            {
+                let before = self.clone();
+                let report = self.refine(refine)?;
+                let offending_after = offending(self);
+                if offending_after > 2 * offending_before + 16 {
+                    // Around a spike a refinement brings back the edges that were split and
+                    // adds vertices that need more: it is undone, and the export ends with
+                    // splits and flips.
+                    *self = before;
+                    refining = false;
+                } else {
+                    n_refine_rounds += 1;
+                    n_flips += report.n_flips;
+                    n_refined += report.n_inserted;
+                    if offending_after == 0 {
+                        refinement = Some(report);
+                        break;
+                    }
+                    // Two rounds in a row that leave no fewer edges to split: no more.
+                    stalled = if offending_after >= offending_before {
+                        stalled + 1
+                    } else {
+                        0
+                    };
+                    refining = stalled < 2;
+                    continue;
+                }
+            }
             let Some(delaunay) = &options.delaunay else {
                 break;
             };
@@ -268,7 +346,11 @@ impl IntrinsicTriangulation {
                 break;
             }
         }
-        let criterion = options.delaunay.map(|d| d.criterion).unwrap_or_default();
+        let criterion = match (&refinement, &options.refine, &options.delaunay) {
+            (Some(_), Some(refine), _) => refine.criterion,
+            (_, _, Some(delaunay)) => delaunay.criterion,
+            _ => Default::default(),
+        };
         let is_delaunay = self.is_delaunay(&criterion);
         let (mesh, geometry) = self
             .to_tri_mesh()
@@ -285,13 +367,25 @@ impl IntrinsicTriangulation {
             edge[mesh_edge] = e as u32;
             forward[mesh_edge] = tail < head;
         }
+        let (mut min_angle, mut max_angle) = (f64::INFINITY, 0.0f64);
+        for angles in geometry.corner_angles() {
+            for &angle in angles {
+                min_angle = min_angle.min(angle);
+                max_angle = max_angle.max(angle);
+            }
+        }
         Ok(SimplicialExport {
             mesh,
             geometry,
             locations: self.locations.clone(),
             n_splits,
             n_flips,
+            n_refine_rounds,
+            n_refined,
+            refinement,
             is_delaunay,
+            min_angle,
+            max_angle,
             fingerprint: self.fingerprint(),
             edge,
             forward,

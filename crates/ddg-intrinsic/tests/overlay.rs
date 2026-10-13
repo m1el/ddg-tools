@@ -260,6 +260,80 @@ fn the_overlay_of_a_refined_triangulation() {
     }
 }
 
+/// The same on the models and on the deliberately bad meshes (after flipping these have
+/// self-edges, double edges and faces that use a vertex twice): the overlay of the Delaunay
+/// triangulation, of the refined one, and of its simplicial export. One job per mesh, in
+/// parallel. Run with `--nocapture` for the table.
+#[test]
+fn the_overlay_of_models_and_bad_meshes() {
+    let mut shapes = common::models();
+    shapes.extend(common::bad_meshes());
+    if shapes.is_empty() {
+        eprintln!("SKIPPED: no mesh of data/ is present; nothing was checked");
+        return;
+    }
+    let lines: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = shapes
+            .iter()
+            .map(|shape| {
+                scope.spawn(move || {
+                    let mut tri = shape.triangulation();
+                    tri.flip_to_delaunay(&DelaunayOptions::default()).unwrap();
+                    let irregular = tri.irregularities();
+                    let delaunay = assert_overlay(shape, &tri, "Delaunay");
+                    let report = tri.refine(&RefineOptions::default()).unwrap();
+                    let refined = assert_overlay(shape, &tri, "refined");
+                    let before = tri.irregularities();
+                    let export = tri
+                        .export_simplicial(&ddg_intrinsic::ExportOptions::default())
+                        .unwrap();
+                    assert_eq!(export.n_splits > 0, !before.is_empty(), "{}", shape.name);
+                    let exported = assert_overlay(shape, &tri, "exported");
+                    assert!(tri.irregularities().is_empty());
+                    format!(
+                        "{:<20} {:>6} {:>6} | {:>5} {:>5} {:>5} | {:>7} {:>7} | {:>6} {:>7} {:>7} | {:>6} {:>7} {:>7}",
+                        shape.name,
+                        shape.mesh.n_vertices(),
+                        shape.mesh.n_faces(),
+                        irregular.self_edges.len(),
+                        irregular.multi_edges.len(),
+                        irregular.faces_with_repeated_vertex.len(),
+                        delaunay.vertices.len(),
+                        delaunay.n_faces(),
+                        report.n_inserted,
+                        refined.vertices.len(),
+                        refined.n_faces(),
+                        export.n_splits,
+                        exported.vertices.len(),
+                        exported.n_faces(),
+                    )
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    println!(
+        "{:<20} {:>6} {:>6} | {:>5} {:>5} {:>5} | {:>7} {:>7} | {:>6} {:>7} {:>7} | {:>6} {:>7} {:>7}",
+        "mesh",
+        "V",
+        "F",
+        "self",
+        "multi",
+        "faces",
+        "ov. V",
+        "ov. F",
+        "+V",
+        "ov. V",
+        "ov. F",
+        "splits",
+        "ov. V",
+        "ov. F"
+    );
+    for line in lines {
+        println!("{line}");
+    }
+}
+
 #[test]
 fn traces_of_another_triangulation_are_refused() {
     let shape = common::jittered_grid(4, 0.3, 8);

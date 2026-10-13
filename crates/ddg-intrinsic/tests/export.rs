@@ -79,6 +79,14 @@ fn assert_export(shape: &Shape, tri: &IntrinsicTriangulation, export: &Simplicia
             "{context}"
         );
     }
+    // The angles it reports are its own.
+    let (mut smallest, mut largest) = (f64::INFINITY, 0.0f64);
+    for h in 0..tri.n_halfedges() {
+        smallest = smallest.min(tri.corner_angle(h));
+        largest = largest.max(tri.corner_angle(h));
+    }
+    assert!((export.min_angle - smallest).abs() < 1e-12, "{context}");
+    assert!((export.max_angle - largest).abs() < 1e-12, "{context}");
     // The places of the vertices, and the state.
     assert_eq!(export.locations, tri.vertex_locations(), "{context}");
     for v in 0..shape.mesh.n_vertices() {
@@ -192,6 +200,164 @@ fn an_export_is_a_simplicial_mesh_of_the_same_surface() {
         n_irregular >= 4,
         "the shapes must include irregular triangulations"
     );
+}
+
+/// The smallest angle at a vertex where the bound can be reached (its angle sum is not below
+/// the bound), and the number of such corners below the bound.
+fn reachable_angles(tri: &IntrinsicTriangulation, bound: f64) -> (f64, usize) {
+    let (mut reachable, mut below) = (f64::INFINITY, 0usize);
+    for h in 0..tri.n_halfedges() {
+        if tri.vertex_angle_sum(tri.from_vertex(h)) >= bound {
+            let angle = tri.corner_angle(h);
+            reachable = reachable.min(angle);
+            below += usize::from(angle < bound);
+        }
+    }
+    (reachable, below)
+}
+
+/// What the export does to the angles of a refined triangulation (SPEC N15): nothing where
+/// nothing is split; where edges are split (thin tubes and handles, spikes), the result is
+/// Delaunay but the angle bound of the refinement is lost. With refinement between the rounds
+/// of splits the bound comes back on tubes and handles; at spikes it cannot. One job per mesh
+/// and bound, in parallel; `--nocapture` prints the table.
+#[test]
+fn the_export_keeps_the_angles_only_where_nothing_is_split() {
+    let mut shapes = standard_shapes();
+    shapes.extend(common::models());
+    shapes.extend(common::bad_meshes());
+    struct Row {
+        line: String,
+        n_splits: usize,
+    }
+    let rows: Vec<Row> = std::thread::scope(|scope| {
+        let handles: Vec<_> = shapes
+            .iter()
+            .flat_map(|shape| [25.0f64, 30.0].map(|degrees| (shape, degrees)))
+            .map(|(shape, degrees)| {
+                scope.spawn(move || {
+                    let bound = degrees.to_radians();
+                    let options = refine_options(degrees);
+                    let mut tri = shape.triangulation();
+                    let report = tri.refine(&options).unwrap();
+                    assert_eq!(report.status, RefineStatus::Done, "{}", shape.name);
+                    let irregular = tri.irregularities();
+                    let refined = tri.clone();
+                    // Splits and flips only.
+                    let export = tri.export_simplicial(&ExportOptions::default()).unwrap();
+                    assert!(export.is_delaunay, "{}", shape.name);
+                    assert_eq!((export.n_refine_rounds, export.n_refined), (0, 0));
+                    assert_eq!(export.refinement, None);
+                    let (reachable, below) = reachable_angles(&tri, bound);
+                    if export.n_splits == 0 {
+                        // Handed out as it was: the report of the refinement holds for it.
+                        assert_eq!(tri, refined, "{}", shape.name);
+                        assert_eq!(export.min_angle, report.min_angle, "{}", shape.name);
+                        assert_eq!(export.max_angle, report.max_angle, "{}", shape.name);
+                        assert_eq!(below, 0, "{}", shape.name);
+                    }
+                    // With refinement between the rounds of splits.
+                    let mut again = refined.clone();
+                    let start = std::time::Instant::now();
+                    let with = again
+                        .export_simplicial(&ExportOptions {
+                            refine: Some(options),
+                            ..ExportOptions::default()
+                        })
+                        .unwrap();
+                    let seconds = start.elapsed().as_secs_f64();
+                    assert_export(shape, &again, &with);
+                    assert!(with.is_delaunay, "{}", shape.name);
+                    let (reachable_with, below_with) = reachable_angles(&again, bound);
+                    match &with.refinement {
+                        // It ended with a refinement: the bound holds as that one reports.
+                        Some(last) => {
+                            assert_eq!(last.status, RefineStatus::Done, "{}", shape.name);
+                            assert_eq!(below_with, 0, "{}", shape.name);
+                            assert_eq!(with.min_angle, last.min_angle, "{}", shape.name);
+                        }
+                        None => assert!(with.n_refine_rounds <= 6, "{}", shape.name),
+                    }
+                    if export.n_splits == 0 {
+                        // Nothing to split: one refinement that finds nothing to do.
+                        assert_eq!((with.n_refine_rounds, with.n_refined), (1, 0));
+                        assert_eq!(again, refined, "{}", shape.name);
+                    }
+                    // Thin tubes and handles: the bound comes back.
+                    if ["torus", "long torus", "tube"]
+                        .iter()
+                        .any(|kind| shape.name.starts_with(kind))
+                    {
+                        assert!(with.refinement.is_some(), "{}", shape.name);
+                    }
+                    Row {
+                        line: format!(
+                            "{:<38} {:>3.0} {:>6} {:>6} | {:>4} {:>5} | {:>7.3} {:>7.2} | {:>6} {:>5} {:>7.3} {:>7.2} {:>5} | {:>2} {:>3} {:>6} {:>6} {:>7.3} {:>7.2} {:>5} {:>7.1}",
+                            shape.name,
+                            degrees,
+                            shape.mesh.n_vertices(),
+                            report.n_inserted,
+                            irregular.self_edges.len(),
+                            irregular.multi_edges.len(),
+                            report.min_angle_reachable.to_degrees(),
+                            report.max_angle.to_degrees(),
+                            export.n_splits,
+                            export.n_flips,
+                            reachable.to_degrees(),
+                            export.max_angle.to_degrees(),
+                            below,
+                            with.n_refine_rounds,
+                            if with.refinement.is_some() { "yes" } else { "no" },
+                            with.n_splits,
+                            with.n_refined,
+                            reachable_with.to_degrees(),
+                            with.max_angle.to_degrees(),
+                            below_with,
+                            1e3 * seconds,
+                        ),
+                        n_splits: export.n_splits,
+                    }
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    println!(
+        "refined: self-edges, edges in groups between two vertices, smallest reachable and largest angle;          export by splits and flips: splits, flips, angles, corners below the bound;          export with refinement between the rounds: rounds, ended refined, splits, inserted, angles, below, ms"
+    );
+    println!(
+        "{:<38} {:>3} {:>6} {:>6} | {:>4} {:>5} | {:>7} {:>7} | {:>6} {:>5} {:>7} {:>7} {:>5} | {:>2} {:>3} {:>6} {:>6} {:>7} {:>7} {:>5} {:>7}",
+        "mesh",
+        "deg",
+        "V",
+        "+V",
+        "self",
+        "multi",
+        "min",
+        "max",
+        "splits",
+        "flips",
+        "min",
+        "max",
+        "below",
+        "r",
+        "ref",
+        "splits",
+        "+V",
+        "min",
+        "max",
+        "below",
+        "ms"
+    );
+    let n_unsplit = rows.iter().filter(|r| r.n_splits == 0).count();
+    for row in rows.iter().filter(|r| r.n_splits > 0) {
+        println!("{}", row.line);
+    }
+    println!(
+        "{n_unsplit} of {} runs needed no split and kept their angles",
+        rows.len()
+    );
+    assert!(n_unsplit > rows.len() / 2);
 }
 
 #[test]

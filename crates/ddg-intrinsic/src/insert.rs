@@ -30,10 +30,15 @@ use crate::surface::Surface;
 use crate::trace::{Trace, TraceOptions, TraceStop, run};
 use crate::triangulation::IntrinsicTriangulation;
 
-/// A point of an input face counts as lying on an edge of that face when its barycentric
-/// coordinate opposite the edge is at most this (SPEC N10). The place of an inserted vertex
-/// is then stored as a point of the input edge. This is the snapping of the paper's
-/// Appendix A; it is reported in [`Insertion::snapped`].
+/// A point of an input face counts as lying on an edge of that face when its distance from
+/// the edge is at most this fraction of the longest edge of the face (SPEC N10). The place of
+/// an inserted vertex is then stored as a point of the input edge. This is the snapping of the
+/// paper's Appendix A; it is reported in [`Insertion::snapped`].
+///
+/// The measure is a distance, not a barycentric coordinate: in a needle of the input mesh
+/// (length 0.5, width 1e-4 on one of the test meshes) a point one rounding error of its
+/// position away from a long edge has the barycentric coordinate `2e-12`, and a vertex left
+/// there makes overlay pieces of the size of a rounding error.
 pub const LOCATION_SNAP: f64 = 1e-12;
 
 /// What an insertion or an edge split did.
@@ -50,8 +55,8 @@ pub struct Insertion {
     /// The new faces (two, or one for a split of a boundary edge). The face the point was in,
     /// or the faces of the split edge, keep their ids.
     pub new_faces: Vec<u32>,
-    /// The barycentric coordinate by which the traced place was moved onto an input edge
-    /// ([`LOCATION_SNAP`]); `None` if it was not.
+    /// The barycentric coordinate that the traced place had opposite the input edge it was
+    /// moved onto ([`LOCATION_SNAP`]); `None` if it was not moved.
     pub snapped: Option<f64>,
 }
 
@@ -140,10 +145,22 @@ impl IntrinsicTriangulation {
                 snapped: None,
             }),
             SurfacePoint::Face { face, bary } => {
+                let mesh = self.input.mesh();
+                let l = [0, 1, 2].map(|s| {
+                    self.input.geometry().edge_lengths()[mesh.edge(3 * face as usize + s)]
+                });
+                let v = triangle_layout(l).ok_or_else(|| {
+                    not_located(format!("input face {face} has no positive area"))
+                })?;
+                // The distance from the side opposite corner k (halfedge k + 1): the
+                // barycentric coordinate times the height over that side.
+                let double_area = v[1][0] * v[2][1];
+                let distance = [0, 1, 2].map(|k| bary[k] * double_area / l[(k + 1) % 3]);
                 let k = (0..3)
-                    .min_by(|&a, &b| bary[a].total_cmp(&bary[b]))
+                    .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
                     .unwrap_or(0);
-                if bary[k] > LOCATION_SNAP {
+                let longest = l[0].max(l[1]).max(l[2]);
+                if distance[k] > LOCATION_SNAP * longest {
                     return Ok(Placed {
                         location: trace.end,
                         back: trace.back_direction,
@@ -152,7 +169,6 @@ impl IntrinsicTriangulation {
                 }
                 // On the side opposite corner k: halfedge k + 1, from corner k + 1 to k + 2.
                 let (i, j) = ((k + 1) % 3, (k + 2) % 3);
-                let mesh = self.input.mesh();
                 let h = 3 * face as usize + i;
                 let t_halfedge = bary[j] / (bary[i] + bary[j]);
                 if !(t_halfedge > 0.0 && t_halfedge < 1.0) {
@@ -164,12 +180,6 @@ impl IntrinsicTriangulation {
                 let edge = mesh.edge(h);
                 let forward = mesh.from_vertex(h) == mesh.edge_vertices(edge)[0];
                 // The direction of the edge in the frame of the face (its halfedge 0).
-                let l = [0, 1, 2].map(|s| {
-                    self.input.geometry().edge_lengths()[mesh.edge(3 * face as usize + s)]
-                });
-                let v = triangle_layout(l).ok_or_else(|| {
-                    not_located(format!("input face {face} has no positive area"))
-                })?;
                 let d = [v[j][0] - v[i][0], v[j][1] - v[i][1]];
                 let along = d[1].atan2(d[0]) + if forward { 0.0 } else { PI };
                 Ok(Placed {

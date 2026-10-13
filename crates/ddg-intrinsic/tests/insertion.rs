@@ -279,6 +279,55 @@ fn a_place_on_an_input_edge_is_snapped_to_it() {
     assert_eq!(along, vec![diagonal as u32, diagonal as u32]);
 }
 
+/// The measure of "on an input edge" is a distance: in a needle of the input mesh a point
+/// that close to the long edge has a barycentric coordinate a few thousand times larger.
+#[test]
+fn in_a_needle_a_place_is_snapped_by_its_distance_from_the_edge() {
+    // Two needles, 0.5 long and 5e-5 wide, on either side of their common long edge.
+    let (width, half) = (5e-5, 0.25);
+    let positions = vec![
+        [0.0, -half, 0.0],
+        [width, 0.0, 0.0],
+        [0.0, half, 0.0],
+        [-width, 0.0, 0.0],
+    ];
+    let shape = Shape::new("two needles", positions, vec![[0, 1, 2], [0, 2, 3]], true);
+    let long = shape.mesh.find_edge(0, 2).unwrap();
+    for (offset, expect_snap) in [(1e-9, true), (1e-7, false)] {
+        let mut tri = shape.triangulation();
+        tri.flip_edge(long).unwrap();
+        // The flipped edge crosses the long edge at its middle; a point of it at the
+        // parameter `0.5 + offset` is `2 · offset · width` away from the long edge: 4e-13 of
+        // the longest edge of the face for the first offset (on the edge, to the accuracy of
+        // a position there), 4e-11 for the second. Its barycentric coordinate opposite the
+        // long edge is `2 · offset`, above 1e-12 both times.
+        let insertion = tri.split_edge(long, 0.5 + offset).unwrap();
+        match (insertion.location, expect_snap) {
+            (SurfacePoint::Edge { edge, t }, true) => {
+                assert_eq!(edge as usize, long);
+                assert!((t - 0.5).abs() < 1e-12, "{t}");
+                let moved = insertion.snapped.unwrap();
+                assert!((moved - 2.0 * offset).abs() < 1e-3 * offset, "{moved}");
+            }
+            (SurfacePoint::Face { bary, .. }, false) => {
+                assert_eq!(insertion.snapped, None);
+                let smallest = bary.iter().copied().fold(f64::INFINITY, f64::min);
+                assert!((smallest - 2.0 * offset).abs() < 1e-3 * offset, "{bary:?}");
+            }
+            (other, _) => panic!("offset {offset}: {other}"),
+        }
+        tri.check().unwrap();
+        // The lengths are those of the point before it was moved: the traces of the two
+        // halves see the difference, far inside their tolerance.
+        let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
+        assert!(
+            traces.report.max_relative_mismatch < 1e-8,
+            "{:?}",
+            traces.report
+        );
+    }
+}
+
 #[test]
 fn insertions_that_would_make_thin_triangles_are_refused() {
     let shape = common::jittered_grid(4, 0.2, 5);
