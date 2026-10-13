@@ -425,6 +425,7 @@ version = "0.1.0"
 dependencies = [
  "ddg-core",
  "ddg-uv",
+ "ddg-variational-cuts",
  "pyo3",
 ]
 

@@ -20,6 +20,8 @@ use crate::contract::{
 use crate::error::{InputError as RustInputError, UnwrapError};
 use crate::pipeline::{IS_PLACEHOLDER, PIPELINE_NAME};
 
+mod cut;
+
 pyo3::create_exception!(
     ddg_tools,
     DdgError,
@@ -401,13 +403,16 @@ fn pack_charts<'py>(
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
 ///                   (the flag exists so that a build with a stand-in would label itself)
 ///
-/// Errors: DdgError, with subclasses InputError, MeshError and SolveError.
+/// CutSession(...)   the cut flow on a polygon mesh (see its docstring)
+///
+/// Errors: DdgError, with subclasses InputError, MeshError, SolveError and NotAvailableError.
 #[pymodule(name = "ddg_tools")]
 fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add_function(wrap_pyfunction!(unwrap, m)?)?;
     m.add_function(wrap_pyfunction!(pack_charts, m)?)?;
     m.add_class::<UnwrapResult>()?;
+    cut::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;
     m.add("MeshError", py.get_type::<MeshError>())?;
