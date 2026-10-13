@@ -814,8 +814,9 @@ What it shows:
   approximate.
 
 Not settled: the C2 search can miss better configurations (its total angle is not monotone in
-`λ`); a cap without the 0.1 % was run but not evaluated (on closed meshes it is infeasible where
-the file's total is below `4π` by rounding); several C2 rows fail to flatten because a
+`λ`); a run with a cap without the 0.1 % was stopped before it finished and is not used (on closed
+meshes such a cap is infeasible where the file's total is below `4π` by rounding), so the two
+verdicts within 1 % are checked with the slack only; several C2 rows fail to flatten because a
 re-optimized cone angle reaches `2π`.
 
 Table A and B: the published data, and our flattening with the file's cones against it.
