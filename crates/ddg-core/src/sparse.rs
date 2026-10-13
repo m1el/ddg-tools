@@ -1500,7 +1500,11 @@ mod tests {
         assert_eq!(out.len(), 200);
         for (i, (sq, name)) in out.iter().enumerate() {
             assert_eq!(*sq, i * i);
-            assert!(name.as_deref().is_some_and(|n| n.starts_with("ddg-sparse-")), "{name:?}");
+            assert!(
+                name.as_deref()
+                    .is_some_and(|n| n.starts_with("ddg-sparse-")),
+                "{name:?}"
+            );
         }
         assert!(pool.map(0, |i| i).is_empty());
     }

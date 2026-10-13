@@ -5,8 +5,10 @@
 //!   connectivity, boundary loops, components, and explicit repair helpers.
 //! * [`geometry`] — intrinsic triangle geometry (corner angles, areas, cotangents) computed from
 //!   edge lengths ([`Geometry`]).
-//! * [`operators`] — the cotan Laplacian, lumped mass, angle defects and boundary geodesic
+//! * [`operators`] — the cotan Laplacian (also with per-vertex weights), lumped mass, angle defects and boundary geodesic
 //!   curvature, following the conventions in the repository's `CLAUDE.md`.
+//! * [`distance`] — upwind (Hopf–Lax) distance on a triangle mesh from seed values, with optional
+//!   vertex classes.
 //! * [`sparse`] — a small sparse matrix type and direct solvers with reusable symbolic analysis.
 //! * [`io`] — Wavefront OBJ reading and writing, and the cone files of the optimal-cones dataset.
 //! * [`generators`] — small procedural test meshes.
@@ -43,7 +45,8 @@
 //! Yousuf Soliman, Dejan Slepčev, Keenan Crane, *Optimal Cone Singularities for Conformal
 //! Flattening*, ACM Transactions on Graphics 37(4), 2018,
 //! <https://doi.org/10.1145/3197517.3201367>. The cotan operator goes back to MacNeal (1949).
-//! The numerically careful triangle area and angle formulas are from W. Kahan, *Miscalculating
+//! The upwind distance follows Kimmel and Sethian (PNAS 1998) and Bornemann and Rasch (2006), see
+//! [`distance`]. The numerically careful triangle area and angle formulas are from W. Kahan, *Miscalculating
 //! Area and Angles of a Needle-like Triangle* (2014). The sparse factorizations are
 //! those of the `faer` crate.
 //!
@@ -63,6 +66,7 @@
 
 #![warn(missing_docs)]
 
+pub mod distance;
 pub mod generators;
 pub mod geometry;
 pub mod io;

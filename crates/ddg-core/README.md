@@ -7,7 +7,8 @@ algorithm here needs before it can start.
 |---------------|----------|
 | `topology`    | `TriMesh`: validated, oriented, manifold triangle mesh with halfedge connectivity, unique edges, boundary loops, components, Euler characteristic and genus; explicit repair helpers `orient_faces` and `compact_vertices` |
 | `geometry`    | `Geometry`: corner angles, areas and cotangents from edge lengths (from positions, or intrinsic) |
-| `operators`   | cotan Laplacian, lumped mass (raw and area normalized), angle defect, boundary geodesic curvature, Gauss–Bonnet residual |
+| `operators`   | cotan Laplacian (also with per-vertex weights, `cotan_laplacian_weighted`), lumped mass (raw and area normalized), angle defect, boundary geodesic curvature, Gauss–Bonnet residual |
+| `distance`    | upwind (Hopf–Lax) distance on a triangle mesh from seed values, intrinsic, Dijkstra-ordered with re-opening, optional vertex classes (`upwind_distance`, local update `triangle_update`) |
 | `sparse`      | `SparseMatrix` (CSC) and direct solvers `LLᵀ`, `LDLᵀ`, `LBLᵀ`, `LU` with reusable symbolic analysis, explicit orderings and an explicit thread pool |
 | `io`          | Wavefront OBJ reader and writer (polygons, per-corner UVs), cone files of the optimal-cones dataset |
 | `generators`  | icosphere, torus, flat and bumpy grid disks, annulus, open cylinder, seeded perturbation |
@@ -32,6 +33,12 @@ A mesh with a vertex that no face uses is rejected (it would give the Laplacian 
   Networks.* PhD thesis, Caltech, 1949 — the cotan operator.
 - W. Kahan. *Miscalculating Area and Angles of a Needle-like Triangle.* 2014 — the numerically
   stable area and angle formulas used in `geometry`.
+- Ron Kimmel, James A. Sethian. *Computing geodesic paths on manifolds.* Proceedings of the
+  National Academy of Sciences 95(15), 1998. <https://doi.org/10.1073/pnas.95.15.8431> — fast
+  marching on triangle meshes, the origin of the upwind update used by `distance`.
+- Folkmar Bornemann, Christian Rasch. *Finite-element discretization of static Hamilton–Jacobi
+  equations based on a local variational principle.* Computing and Visualization in Science 9(2),
+  2006. <https://doi.org/10.1007/s00791-006-0016-y> — the Hopf–Lax form of the local update.
 - faer, <https://codeberg.org/sarah-quinones/faer> — the sparse factorizations behind `sparse`.
 
 ## Formula tags
@@ -50,7 +57,26 @@ Functions that implement a mathematical formula carry a `[formula: <id>]` line i
 | `lumped-mass` | `operators::lumped_mass`, `lumped_mass_normalized` | `m_i = ⅓ Σ A_f` over the faces at `i`; normalized: `m_i / Σ_f A_f`, which sums to 1 |
 | `angle-defect` | `operators::angle_defects` | `Ω_i = 2π − Σ θ` over the corners at interior vertex `i` |
 | `boundary-geodesic-curvature` | `operators::boundary_geodesic_curvatures` | `k_i = π − Σ θ` over the corners at boundary vertex `i` |
+| `cut-weighted-laplacian` | `operators::cotan_laplacian_weighted` | `L_w = Σ_f w̄_f L_f`, `w̄_f` the mean of the vertex weights over `f`, `L_f` the cotan stiffness matrix of the single face `f` |
+| `cut-redistance` | `distance::triangle_update` | `min_{λ∈[0,1]} λ T_j + (1−λ) T_k + d_i(λ)`, closed form from the foot of the height and the slope `(T_k − T_j)/ℓ_jk` |
 | `gauss-bonnet` | `operators::gauss_bonnet_residual` | `Σ_I Ω_i + Σ_B k_i = 2πχ` (the function returns left minus right) |
+
+## Upwind distance
+
+`distance::upwind_distance(mesh, geometry, seeds, class)` solves the first-order Hopf–Lax scheme
+for `|∇T| = 1` from seed values; see the module documentation for the scheme, the closed form of
+the local update and the algorithm. Facts worth knowing (measured with `tests/distance.rs`,
+`cargo test --release -p ddg-core --test distance -- --nocapture`):
+
+- Re-opening is needed only on obtuse triangles (none on grids of right triangles). Measured
+  on sheared unit grids with 3 seeds (re-openings per vertex): largest angle 117° about 0.1 to
+  0.3, 135° about 1 to 3, 146° 12 to 100, 153° 100 to 400, 162° thousands (the relaxation is a
+  stochastic shortest path iteration whose contraction rate tends to 1 with the obtuse angle).
+  The default budget of `1000 n + 10 000` re-openings covers all of these up to 153°; if the
+  budget is hit the result says `converged == false` and holds valid upper bounds.
+- A point source converges with observed order 0.6–0.75 (rising); with exact seeds on a disc
+  the maximum error converges with order 1 on a flat grid and the rms error with order 1 on the
+  icosphere.
 
 ## Sparse solver timings
 
@@ -105,7 +131,7 @@ What the numbers say:
 ## Tests
 
 ```
-cargo test -p ddg-core                        # unit, property and dataset tests
+cargo test -p ddg-core                        # unit, property, distance, weighted-Laplacian and dataset tests
 cargo test -p ddg-core --test dataset -- --nocapture   # prints the dataset topology table
 ```
 
