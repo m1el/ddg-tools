@@ -315,13 +315,13 @@ cone besides; `cones=True` lets the cone solver place cones as well. The UVs are
 Errors are `InputError`, `MeshError` and `SolveError` as for `unwrap`, plus `NotAvailableError`
 (a request the library does not implement yet, such as `n_regions > 2`).
 
-**Flipped triangles and the crossing offset.** `describe_cut`, `preview`, `insert` and `unwrap`
-take `min_crossing_offset` (default `1e-3`, the flow's own). `CutSession.unwrap` of an atlas of
-spot (eight clusters, several weights) reports no flipped triangle at offsets from `1e-3` to
-`0.2`, because the library's insertion keeps the surface the flow saw; an editor that
-retriangulates the split polygons (Blender) gets a few flipped slivers of the cut near vertices
-at `1e-3`, fewer at `0.2` (measurements and table in `blender/README.md`). Use a larger
-offset for the cut you insert and keep `1e-3` for the flow.
+**Keep the library's triangulation of the polygons you split.** `insert()`/`unwrap()` triangulate
+the polygons the cut splits (`InsertedMesh.triangles`, `polygon_starts`, `vertex_source`). An editor
+that inserts the cut itself and then lets its own triangulation run (Blender) gets a few flipped
+slivers after the flattening (spot, eight clusters: 2 to 5 at the crossing offset `1e-3`); passing
+the library's triangles for the split polygons removes them at every offset (the Blender add-on
+does this, `blender/README.md`, "stored triangulation"). `min_crossing_offset` of `describe_cut`,
+`preview`, `insert` and `unwrap` (default `1e-3`) only moves the cut away from vertices.
 
 ## What `unwrap` does
 

@@ -367,41 +367,47 @@ The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed re
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's
 tooltip in Blender names both papers.
 
-### Flipped triangles after the unwrap, and the cut offset
+### Flipped triangles after the unwrap: the stored triangulation
 
 On the spot quads with eight clusters the unwrap of an applied atlas had a few flipped
-triangles (2 to 5 by the library's count; none on the two-region cuts of the UV sphere, cube,
-torus and spot, nor on cube and sphere atlases). Findings: (1) the flipped triangles are slivers
-(3D area 6e-4 to 1e-3 of the mean, smallest angle 0.1 to 0.2 degrees, in 4- to 6-sided pieces
-that the cut made by passing near a vertex), not folds (their normals agree with their
-polygon's); (2) the library's own insertion and triangulation of the same cut flips nothing at
-any offset (`CutSession.unwrap`, cones allowed), although it has just as many thin triangles:
-it splits along the original triangulation, so the surface is exactly the one the flow saw,
-while Blender's polygons are retriangulated by Blender, which on warped quads changes the
-surface a little; a better choice of diagonals (best minimum angle) did not help (5, 7, 5 flips
-against 4, 2, 2). The cause is therefore not the insertion itself but how near the cut passes to
-vertices. The smallest distance of a cut point from a vertex is an argument of `describe_cut`,
-`preview` and `insert`/`unwrap`; the operators expose it as **Cut Offset** (`cut_offset`, on
-Start, Flow and Apply; the flow keeps its own `min_crossing_offset` of 1e-3) with the default
-**0.2**. Measured on three atlases of spot quads and of spot triangulated (flipped triangles by
-the library's count, summed over the six cases; the largest displacement of a cut point and the
-change of cut length are relative to 1e-3, on spot of diameter about 2):
-
-| offset | 1e-3 | 0.01 | 0.02 | 0.05 | 0.1 | 0.2 |
-|--------|-----:|-----:|-----:|-----:|----:|----:|
-| flipped triangles (6 cases) | 17 | 12 | 7 | 10 | 10 | 4 |
-| flipped, spot atlas8 weight 2 / weight 1 / atlas6 weight 0.3 | 4 / 2 / 2 | 1 / 1 / 2 | 1 / 1 / 2 | 2 / 5 / 2 | 5 / 3 / 2 | 0 / 0 / 4 |
-| largest displacement of a cut point (spot atlases; cube atlas 4x larger) | 0 | 0.0004 | 0.0005 | 0.0024 | 0.006 | 0.014 |
-| change of cut length (spot atlases; up to +2.7 % on a spot circle at 0.2) | 0 | +0.003 % | +0.01 % | +0.1 % | +0.4 % | +1.8 % to +2 % |
-| smallest triangle area / mean (weight 2) | 9e-7 | 2e-5 | 7e-5 | 3e-4 | 7e-4 | 1.2e-3 |
-
-The count is not monotone in the offset on warped quads, and 0.2 does not remove every flip
-(the 22-chart atlas6 weight 0.3 has 4 at 0.2). With 0.2 the two atlas tests (weights 2 and 10,
-eight clusters, recommended stages, then the unwrap) find none by the library's count; the
-two-region cases have none at any offset. What remains: some atlases with many small charts
-still flip a few slivers; removing that needs the insertion to keep the surface the flow saw
-(split along the original triangulation, as `ddg_uv::cutting::insert` does) or the unwrap to
-accept the triangulation the library chose; the add-on cannot give Blender's polygons that.
+triangles by the library's count (2 to 5 at the cut offset 1e-3; the two-region cuts of the UV
+sphere, cube, torus and spot and the cube and sphere atlases had none). **Diagnosis.** (1) The
+hypothesis "Blender's retriangulated polygons leave the surface the flow saw" is mostly wrong: of
+17 flipped triangles on five atlas runs (quads and triangulated spot) 15 lie inside one triangle of
+the original triangulation, on its plane to 1e-7 of an edge (normal angle 0 to 0.02 degrees);
+only 2 span an old diagonal (distance from the surface 0.013 of an edge, normal angle 11 and 43
+degrees). On the triangulated spot, which has no diagonal to span, Blender's triangulation flips
+2, 0 and 7 triangles. (2) They are thin triangles of split polygons (3D area 6e-4 to 1.8e-1 of
+the mean, mostly under 1e-2, smallest angle mostly 0.1 to 0.2 degrees) next to a cut that passes
+near a vertex. (3) Float32 positions are not the cause: unwrapping the library's own insertion
+with its positions rounded to float32 flips nothing. (4) What decides is the choice of diagonals
+in the split polygons: the library's triangulation of the same polygons flips nothing at any
+offset (`CutSession.unwrap`, and this add-on with the library's triangles, below), Blender's
+flips 1 to 5; choosing better diagonals ourselves (best smallest angle) flipped 5, 7 and 5 where
+Blender's own flipped 4, 2 and 2. **Remedy.** Apply computes the Rust insertion of the same cut
+(`CutSession.insert`), matches its polygons to the new Blender faces by vertex set and stores its
+triangles for the polygons that were split or got extra vertices in the mesh property
+`ddg_cut_triangulation` (a flat integer list: counts, then per polygon its ascending vertex
+indices and its triangles as vertex indices). `core.unwrap_object` (so the Conformal Unwrap
+operator, also after Apply with `unwrap_after`) uses these triangles for exactly those faces when
+the number of vertices and faces is still what it was at Apply and the face has the same vertex
+set; every other face, and every mesh without the property, keeps Blender's triangulation, so
+nothing changes for meshes that never had a cut applied. Nothing is triangulated in the mesh. The
+reports say what happened: Apply says how many faces have a stored triangulation, the unwrap's
+status line says "library triangulation for N faces of the applied cut", and when the stored
+triangulation does not fit any more (faces or vertices added or deleted since Apply) the operator
+warns "Used Blender's triangulation for ... (the mesh was edited since the cut was applied ...)".
+Moving vertices keeps it valid. A second Apply keeps the entries of faces it did not touch.
+**Result.** Flipped triangles by the library's count after Apply and unwrap, with the stored
+triangulation, at the offsets 1e-3, 0.01, 0.05, 0.1 and 0.2: zero in all 45 combinations of nine
+cases (spot atlases with 8 clusters at weights 2, 1 and 6 clusters at 0.3, cube atlas, sphere
+atlas, and the sphere, cube, torus and spot circles), and zero on two atlases of the triangulated spot at 1e-3. The cut
+offset therefore returned to the library's default **1e-3** (`cut_offset`, on Start, Flow and
+Apply; the flow keeps its own `min_crossing_offset`); a larger value only avoids very thin faces
+at the price of moving the cut (largest displacement of a cut point on the spot atlases 0.0004 /
+0.0024 / 0.006 / 0.014 at 0.01 / 0.05 / 0.1 / 0.2, cut length +0.003 % / +0.1 % / +0.4 % / +2 %).
+What is not covered: the viewport shows UVs in Blender's own triangulation, which can differ from
+the one the unwrap used, and a mesh edited after Apply gets Blender's triangulation back.
 
 ### Cost of the cut operators
 

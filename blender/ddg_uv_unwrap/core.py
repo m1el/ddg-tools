@@ -155,6 +155,92 @@ def mesh_buffers(mesh):
     return positions, corner_vertices, polygon_starts, triangles
 
 
+# The triangulation that the cut flow's insertion chose for the polygons it split (see
+# `cut.apply_cut`): a mesh property, so that the unwrap can use it. Layout of the array:
+# [n_vertices, n_polygons, n_entries, then per entry: k, its k vertices ascending, t, 3 t vertex
+# indices]. An entry applies to the polygon whose vertex set it is.
+TRIANGULATION_KEY = "ddg_cut_triangulation"
+
+
+def read_triangulation(mesh):
+    """The stored triangulation of ``mesh`` as ``(n_vertices, n_polygons, entries)`` with
+    ``entries`` a dict from the ascending vertex tuple of a polygon to its triangles as a flat
+    list of vertex indices; ``None`` if there is none."""
+    stored = mesh.get(TRIANGULATION_KEY)
+    if stored is None:
+        return None
+    data = list(stored)
+    entries = {}
+    i = 3
+    for _ in range(data[2]):
+        k = data[i]
+        key = tuple(data[i + 1:i + 1 + k])
+        i += 1 + k
+        t = data[i]
+        entries[key] = data[i + 1:i + 1 + 3 * t]
+        i += 1 + 3 * t
+    return data[0], data[1], entries
+
+
+def write_triangulation(mesh, n_vertices, n_polygons, entries):
+    """Stores ``entries`` (see ``read_triangulation``) as the mesh property; removes the property
+    if there are none."""
+    if not entries:
+        if TRIANGULATION_KEY in mesh:
+            del mesh[TRIANGULATION_KEY]
+        return
+    data = [n_vertices, n_polygons, len(entries)]
+    for key, triangles in entries.items():
+        data.append(len(key))
+        data.extend(key)
+        data.append(len(triangles) // 3)
+        data.extend(triangles)
+    mesh[TRIANGULATION_KEY] = data
+
+
+def stored_triangulation(mesh, corner_vertices, polygon_starts, triangles):
+    """Replaces the triangles of the polygons that have an entry in the stored triangulation.
+
+    Returns ``(triangles, note)``: ``triangles`` is an ``array('I')`` like the argument, ``note``
+    a dict ``{"used": polygons that use the stored triangulation, "stale": entries that no
+    longer fit, "reason": text or None}``, or ``None`` when the mesh has no stored triangulation.
+    An entry fits a polygon when it has the same vertices (by index); if the number of vertices
+    or polygons is not what it was at Apply, the mesh was edited and nothing is used.
+    """
+    parsed = read_triangulation(mesh)
+    if parsed is None:
+        return triangles, None
+    n_vertices, n_polygons, entries = parsed
+    n_entries = len(entries)
+    if n_vertices != len(mesh.vertices) or n_polygons != len(mesh.polygons):
+        return triangles, {"used": 0, "stale": n_entries, "reason": (
+            "the mesh was edited since the cut was applied (it had {} vertices and {} faces, "
+            "now {} and {})".format(n_vertices, n_polygons, len(mesh.vertices),
+                                    len(mesh.polygons)))}
+    n_corners = len(corner_vertices)
+    n_triangles = len(triangles) // 3
+    polygon_of_triangle = array('I', bytes(4 * n_triangles))
+    mesh.loop_triangles.foreach_get("polygon_index", polygon_of_triangle)
+    out = array('I')
+    used = 0
+    cursor = 0
+    for p in range(len(polygon_starts)):
+        first = cursor
+        while cursor < n_triangles and polygon_of_triangle[cursor] == p:
+            cursor += 1
+        start = polygon_starts[p]
+        end = polygon_starts[p + 1] if p + 1 < len(polygon_starts) else n_corners
+        vertices = corner_vertices[start:end]
+        entry = entries.get(tuple(sorted(vertices))) if end - start > 3 else None
+        if entry is None or len(entry) != 3 * (end - start - 2):
+            out.extend(triangles[3 * first:3 * cursor])
+            continue
+        corner_of = {v: start + c for c, v in enumerate(vertices)}
+        out.extend(corner_of[v] for v in entry)
+        used += 1
+    return out, {"used": used, "stale": n_entries - used, "reason": None}
+
+
 def _edge_vertices(mesh):
     """``array('I')`` with the 2 vertices of every edge."""
     edge_vertices = _zeros('I', 2 * len(mesh.edges))
@@ -273,7 +359,8 @@ def group_vertices(obj, group_name):
 
 
 def unwrap_object(obj, *, lambda_=0.1, use_seams=True, pinned_group="", forbidden_group="",
-                  positive_cones_only=True, optimize_boundary=False, mark_cuts_as_seams=False):
+                  positive_cones_only=True, optimize_boundary=False, mark_cuts_as_seams=False,
+                  use_stored_triangulation=True):
     """Generates a UV map for the mesh of ``obj`` and writes it to the active UV map, creating
     one if the mesh has none. Vertices, edges and faces are not touched.
 
@@ -303,6 +390,10 @@ def unwrap_object(obj, *, lambda_=0.1, use_seams=True, pinned_group="", forbidde
     positions, corner_vertices, polygon_starts, triangles = mesh_buffers(mesh)
     if len(polygon_starts) == 0:
         raise UnwrapFailed("Mesh '{}' has no faces".format(mesh.name))
+    triangulation_note = None
+    if use_stored_triangulation:
+        triangles, triangulation_note = stored_triangulation(
+            mesh, corner_vertices, polygon_starts, triangles)
     seams = seam_edges(mesh) if use_seams else None
     names = [name for name in (pinned_group, forbidden_group) if name]
     members = dict(zip(names, groups_vertices(obj, names)))
@@ -346,6 +437,7 @@ def unwrap_object(obj, *, lambda_=0.1, use_seams=True, pinned_group="", forbidde
     return {
         "report": result.report,
         "pack": pack_info,
+        "triangulation": triangulation_note,
         "uv_layer": uv_layer.name,
         "created_uv_layer": created,
         "n_cones": len(result.cone_vertices),
@@ -395,6 +487,9 @@ def summary(stats):
     parts.append("| {:.3f} s (native {:.3f} s, Blender side {:.3f} s)".format(
         blender_side + native_side, native_side, blender_side,
     ))
+    note = stats.get("triangulation")
+    if note and note["used"]:
+        parts.append("| library triangulation for {} faces of the applied cut".format(note["used"]))
     if stats["seams_marked"]:
         parts.append("| {} seams marked".format(stats["seams_marked"]))
     if stats["created_uv_layer"]:

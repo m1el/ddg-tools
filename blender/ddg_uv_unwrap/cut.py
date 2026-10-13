@@ -22,6 +22,7 @@ Data model.
   Blender's operations do not interpolate, are interpolated here.
 """
 
+import bisect
 import math
 from array import array
 from time import perf_counter
@@ -34,12 +35,11 @@ from mathutils.kdtree import KDTree
 from . import core
 
 # The smallest distance of a point of the cut from a vertex, as a fraction of its edge, in the
-# cut that is shown (preview) and inserted (Apply). The flow itself keeps the library's 1e-3
-# (the Flow operator's `min_crossing_offset`). A cut that passes closer than this to a vertex
-# makes slivers of the polygons it splits, and the flattening of the result can then have a few
-# flipped triangles; moving such points away from the vertices (0.2 moves the cut by at most
-# 1.5 % of the size of the model, measured, see blender/README.md) removes most of them.
-DEFAULT_CUT_OFFSET = 0.2
+# cut that is shown (preview) and inserted (Apply): the library's own default for the flow. It
+# used to be 0.2 as a mitigation of flipped UV triangles; those come from Blender triangulating
+# the split polygons again, and Apply now stores the library's triangulation instead (see
+# `insert_cut`), after which no offset flips anything (blender/README.md).
+DEFAULT_CUT_OFFSET = 1e-3
 
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
@@ -780,7 +780,7 @@ def _blend_many(values, weights, interpolate):
     return total
 
 
-def insert_cut(mesh, cut, *, mark_seams=True):
+def insert_cut(mesh, cut, *, mark_seams=True, reference=None):
     """Inserts the cut described by ``cut`` (a ``ddg_tools.CutDescription``) into ``mesh``, which
     must be the mesh the description was made on (same polygons and corners), and marks the
     edges of the cut as seams.
@@ -793,7 +793,15 @@ def insert_cut(mesh, cut, *, mark_seams=True):
     ``CutSession.insert`` (the Rust reference): the new polygons are not triangulated (only their
     shape is the same), and vertex numbers follow Blender's order of creation.
 
-    Returns a dict with ``n_vertices``, ``n_polygons``, ``n_edge_points``, ``n_seams_marked``.
+    ``reference`` is the Rust insertion of the same cut (``CutSession.insert``). If it is given,
+    the triangulation it chose for the polygons that were split is stored in the mesh property
+    ``ddg_cut_triangulation`` (``core.TRIANGULATION_KEY``) for the unwrap: the surface the flow
+    saw is made of the triangles of the original triangulation cut along the path, and this is
+    the triangulation of the pieces; triangulating the new polygons again, as Blender does,
+    gives slivers of the cut near vertices that the flattening can flip.
+
+    Returns a dict with ``n_vertices``, ``n_polygons``, ``n_edge_points``, ``n_seams_marked``,
+    ``n_triangulated`` (polygons with a stored triangulation).
     """
     if mesh.shape_keys is not None:
         raise CutFailed(
@@ -802,24 +810,36 @@ def insert_cut(mesh, cut, *, mark_seams=True):
     bm = bmesh.new()
     try:
         bm.from_mesh(mesh)
-        stats = _insert_cut(bm, cut, mark_seams)
+        old_entries = core.read_triangulation(mesh)
+        stats, entries = _insert_cut(bm, cut, mark_seams, reference)
+        if old_entries is not None:
+            # Polygons the cut did not touch keep the triangulation they had.
+            for key, triangles in old_entries[2].items():
+                entries.setdefault(key, triangles)
         bm.to_mesh(mesh)
+        if reference is not None or old_entries is not None:
+            keys = {tuple(sorted(v.index for v in f.verts)) for f in bm.faces}
+            core.write_triangulation(mesh, stats["n_vertices"], stats["n_polygons"],
+                                     {k: t for k, t in entries.items() if k in keys})
+            stats["n_triangulated"] = sum(1 for k in entries if k in keys)
     finally:
         bm.free()
     mesh.update()
     return stats
 
 
-def _insert_cut(bm, cut, mark_seams):
+def _insert_cut(bm, cut, mark_seams, reference=None):
     bm.verts.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     n_points = cut.n_edge_points
     n_paths = cut.n_paths
     face_starts = []
+    old_sizes = []
     corner = 0
     for face in bm.faces:
         face_starts.append(corner)
+        old_sizes.append(len(face.loops))
         corner += len(face.loops)
 
     loop_layers = _loop_layers(bm)
@@ -880,6 +900,7 @@ def _insert_cut(bm, cut, mark_seams):
     pieces = {p: [old_faces[p]] for p in polygons_with_paths}
     cut_segments = []
     junction_vertex = {}
+    interior_vertex = {}
     paths_of_polygon = {}
     for k in range(n_paths):
         paths_of_polygon.setdefault(path_polygon[k], []).append(k)
@@ -939,7 +960,7 @@ def _insert_cut(bm, cut, mark_seams):
                     c1 = interior_corners[2 * j + 1] - face_starts[p]
                     t = interior_t[j]
                     items.append((corners[c0][0].co * (1.0 - t) + corners[c1][0].co * t,
-                                  ("i", c0, c1, t)))
+                                  ("i", c0, c1, t, k, j - interior_starts[k])))
                 if not forward:
                     items.reverse()
                 for co, label in items:
@@ -970,7 +991,8 @@ def _insert_cut(bm, cut, mark_seams):
                 made.remove(vert)
                 vertices.append(vert)
                 if label[0] == "i":
-                    _, c0, c1, t = label
+                    _, c0, c1, t, path_k, path_j = label
+                    interior_vertex[(path_k, path_j)] = vert
                     sources = [(corners[c0][0], 1.0 - t), (corners[c1][0], t)]
                     sample = [corners[c0][1], corners[c1][1]]
                     weights = [1.0 - t, t]
@@ -998,12 +1020,61 @@ def _insert_cut(bm, cut, mark_seams):
             if not edge.seam:
                 edge.seam = True
                 n_marked += 1
-    return {
+    stats = {
         "n_vertices": len(bm.verts),
         "n_polygons": len(bm.faces),
         "n_edge_points": n_points,
         "n_seams_marked": n_marked,
+        "n_triangulated": 0,
     }
+    entries = {}
+    if reference is not None:
+        entries = _reference_triangulation(bm, reference, point_vertex, junction_vertex,
+                                           interior_vertex, old_sizes)
+    return stats, entries
+
+
+def _reference_triangulation(bm, reference, point_vertex, junction_vertex, interior_vertex,
+                             old_sizes):
+    """The triangles of the polygons of the Rust insertion that were split or got extra vertices,
+    as ``{ascending vertex tuple: flat vertex triples}`` in the numbering of ``bm``."""
+    bm.verts.index_update()
+    source = reference.vertex_source
+    vertex_of = []
+    for v in range(len(source) // 3):
+        kind, a, b = source[3 * v:3 * v + 3]
+        if kind == 0:
+            vertex_of.append(a)
+        elif kind == 1:
+            vertex_of.append(point_vertex[a].index)
+        elif kind == 2:
+            vertex_of.append(interior_vertex[(a, b)].index)
+        else:
+            vertex_of.append(junction_vertex[a].index)
+    starts = list(reference.polygon_starts)
+    corners = reference.corner_vertices
+    parents = reference.polygon_parent
+    children = {}
+    for parent in parents:
+        children[parent] = children.get(parent, 0) + 1
+    triangles = reference.triangles
+    n_polygons = len(starts)
+    by_polygon = {}
+    for t in range(len(triangles) // 3):
+        corners3 = triangles[3 * t:3 * t + 3]
+        by_polygon.setdefault(bisect.bisect_right(starts, corners3[0]) - 1, []).extend(corners3)
+    entries = {}
+    for p in range(n_polygons):
+        end = starts[p + 1] if p + 1 < n_polygons else len(corners)
+        size = end - starts[p]
+        if size <= 3:
+            continue
+        if children[parents[p]] == 1 and size == old_sizes[parents[p]]:
+            continue
+        vertices = [vertex_of[corners[c]] for c in range(starts[p], end)]
+        flat = [vertex_of[corners[c]] for c in by_polygon[p]]
+        entries[tuple(sorted(vertices))] = flat
+    return entries
 
 
 def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
@@ -1026,7 +1097,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
     n_polygons_before = len(mesh.polygons)
     n_vertices_before = len(mesh.vertices)
     seam_before = sum(core._seam_flags(mesh))
-    stats = insert_cut(mesh, cut, mark_seams=mark_seams)
+    stats = insert_cut(mesh, cut, mark_seams=mark_seams, reference=session.insert(cut))
     remove_state(mesh)
     remove_preview(obj)
     done = perf_counter()
@@ -1035,6 +1106,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
         "n_vertices_before": n_vertices_before,
         "n_paths": cut.n_paths,
         "seams_before": seam_before,
+        "n_triangulated": stats.get("n_triangulated", 0),
         "n_clamped_crossings": cut.n_clamped_crossings,
         "warnings": list(session.warnings),
         "seconds_extract": seconds_extract,
