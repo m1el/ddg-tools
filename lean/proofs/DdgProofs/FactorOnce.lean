@@ -1,4 +1,5 @@
 import DdgProofs.Solver
+import DdgProofs.MeshProblem
 
 /-!
 # The factor-once method: the reduced problem
@@ -19,17 +20,27 @@ the method are `z_j = R e_j`, and `w0 = R (Ω - a_F)`. Two solvers occur:
 * `pinnedSolver A w p = P ∘ pad ∘ A_p⁻¹ ∘ restrict` (`A` singular with kernel the constants, `p` the
   pin, `P x = x - (Σ w x / Σ w)·1`).
 
-Contents.
+Contents (namespace `DdgProofs.ConeProblem` unless said otherwise).
 
-* `reduced-lasso-problem`: `reducedU_eq`, `objective_reducedU` (the objective identity),
-  `isMinimizer_iff_reduced_dirichlet`, `isMinimizer_iff_reduced_pinned` (equivalence of the
-  canonical problem and the reduced one).
-* `reduced-gram-matrix`: `gramMatrix_posSemidef`, `gram_quadratic_pos`, `reducedGradient_*`.
+* `reduced-lasso-problem`: `reducedU_eq`, `distortion_reducedU`, `objective_reducedU` (the objective
+  identity `½ uᵀWu = ½ μ_Sᵀ G μ_S + qᵀ μ_S + ½ w0ᵀ W w0`),
+  `isMinimizer_iff_reduced_dirichlet`, `isMinimizer_iff_reduced_pinned` (the canonical problem
+  and the reduced problem have the same minimizers, `u = Z μ_S - w0`).
+* `reduced-gram-matrix`: `gramMatrix_posSemidef`, `gram_quadratic_pos` (positive definite on
+  linearly independent columns), `linearIndepOn_column_dirichlet`, `linearIndepOn_column_pinned`
+  (the columns are independent in the cases the code uses).
 * `reduced-optimality-conditions`: `kkt_of_reducedOptimal_dirichlet`,
-  `kkt_of_reducedOptimal_pinned` (the direction the code relies on), converse
-  `reducedOptimal_of_isMinimizer_dirichlet` (Dirichlet case only).
-* `reduced-sum-constraint-pin`: `pinnedSolver_solves`, `pinnedSolver_weighted_mean`,
-  `pinnedSolver_unique`, `distortion_pinned_le`.
+  `kkt_of_reducedOptimal_pinned` (a point with the reduced conditions solves the optimality system
+  `KKT`, hence is a global minimizer: `isMinimizer_of_reducedOptimal_*`), the gradient identities
+  `column_dot_dirichlet`, `column_dot_weighted_pinned`, `distortion_reducedU_update`, and the
+  converse `reducedOptimal_of_isMinimizer_dirichlet` (Dirichlet case only; the closed converse is
+  cited, `optimality-system-necessary-closed`).
+* `reduced-sum-constraint-pin`: `mulVec_pinSolve`, `mulVec_pinnedSolver`,
+  `weighted_pinnedSolver`, `pinnedSolver_unique`, `distortion_pinned`, `reducedU_closed_spec`,
+  `TriMesh.coneProblem_kernelIsConstants`.
+* `example`s at the end: the hypotheses are satisfiable (one Dirichlet and one closed instance).
+
+Greek letters: the code uses `μ` (U+03BC).
 -/
 
 set_option linter.unusedSectionVars false
@@ -151,7 +162,10 @@ def reducedObjective (μ : ι → ℝ) : ℝ :=
     + ∑ j ∈ P.freeSites, linTerm P R j * μ j
     + P.lam * ∑ j ∈ P.freeSites, (P.site j).cost (μ j)
 
-/-- **`u = Z μ_S - w0` is `R (μ_S - (Ω - a_F))`.** -/
+/-- **`u = Z μ_S - w0` is `R (μ_S - (Ω - a_F))`**: the state of the reduced problem is the solver
+applied to the right-hand side `μ - Ω` (fixed sites moved to the right).
+
+[formula: reduced-lasso-problem] -/
 theorem reducedU_eq (μ : ι → ℝ) : P.reducedU R μ = R (P.freePart μ - P.rhs0) := by
   have h1 : P.freePart μ = ∑ j, P.freePart μ j • (Pi.single j (1 : ℝ) : ι → ℝ) := by
     ext i; simp [Finset.sum_apply, Pi.single_apply]
@@ -182,7 +196,9 @@ theorem weighted_sq_combination (s : Finset ι) (x : ι → ℝ) :
 
 /-- **The distortion is a quadratic in `μ_S`**: with `u = Z μ_S - w0`,
 `½ Σ w u² = ½ μ_Sᵀ G μ_S + qᵀ μ_S + ½ Σ w w0²`. (`w_i = wE_i m_i`; `distortion` is
-`½ Σ wE m u²`.) -/
+`½ Σ wE m u²`.)
+
+[formula: reduced-lasso-problem] -/
 theorem distortion_reducedU (μ : ι → ℝ) :
     P.distortion (P.reducedU R μ) =
       1 / 2 * ∑ j ∈ P.freeSites, ∑ k ∈ P.freeSites, μ j * gramMatrix P R j k * μ k
@@ -214,7 +230,9 @@ theorem distortion_reducedU (μ : ι → ℝ) :
   ring
 
 /-- **The objective identity.** The canonical objective of `(u, μ)`, `u = Z μ_S - w0`, is the reduced objective plus the constant
-`½ w0ᵀ W w0`. -/
+`½ w0ᵀ W w0`.
+
+[formula: reduced-lasso-problem] -/
 theorem objective_reducedU (μ : ι → ℝ) :
     P.objective (P.reducedU R μ) μ =
       P.reducedObjective R μ + 1 / 2 * ∑ i, P.weight i * w0 P R i ^ 2 := by
@@ -699,6 +717,38 @@ theorem pinnedSolver_unique (h : KernelIsConstants A) {w : ι → ℝ} (hW : ∑
     exact (mul_eq_zero.1 h2.symm).resolve_right hW
   rw [hv', hc0]; ext i; simp
 
+/-- **The columns of the free sites other than the pin are linearly independent** (closed case),
+so by `gram_quadratic_pos` `G` is positive definite on `S ∖ {p}` when the weights are positive
+(the pin's row and column of `G` are zero).
+
+[formula: reduced-gram-matrix] -/
+theorem linearIndepOn_column_pinned (h : KernelIsConstants A) (w : ι → ℝ) (T : Finset ι)
+    (hp : p ∉ T) : LinearIndepOn ℝ (column (pinnedSolver A p w)) (T : Set ι) := by
+  rw [linearIndepOn_finset_iff]
+  intro f hf i hi
+  set b : ι → ℝ := ∑ j ∈ T, f j • (Pi.single j (1 : ℝ) : ι → ℝ) with hb
+  have h1 : meanProj w (pinSolve A p b) = 0 := by
+    rw [← hf]
+    simp [hb, column, pinnedSolver, map_sum, map_smul]
+  set Y := pinSolve A p b with hY
+  have hYc : ∀ k, Y k = (∑ k', w k' * Y k') / ∑ k', w k' := fun k => by
+    have := congrFun h1 k
+    rw [meanProj_apply] at this
+    simpa [sub_eq_zero] using this
+  have hY0 : Y = 0 := by
+    ext k
+    rw [hYc k, ← hYc p, hY, pinSolve_apply_pin]; rfl
+  have hr : (Matrix.mulVecLin (pinBlock A p)⁻¹) (restrictLin p b) = 0 := by
+    ext k
+    have := congrFun hY0 k.1
+    simpa [hY, pinSolve, padLin_apply, k.2] using this
+  have hr' : restrictLin p b = 0 := by
+    have := congrArg (fun x => pinBlock A p *ᵥ x) hr
+    simpa [Matrix.mulVec_mulVec, Matrix.mul_nonsing_inv _ (h.pinBlock_isUnit p)] using this
+  have hip : i ≠ p := fun e => hp (e ▸ hi)
+  have := congrFun hr' ⟨i, hip⟩
+  simpa [restrictLin_apply, hb, Finset.sum_apply, Pi.single_apply, hi] using this
+
 /-- **The gradient identity** (closed case): for symmetric `A` with `A_p` invertible and
 `Σ v = 0` (here `v = W u` and `Σ w u = 0`): `z_jᵀ v = (pad (A_p⁻¹ v_p̂))_j`, with
 `z_j = P·pad(A_p⁻¹ (e_j)_p̂)`; in particular `0` at the pin.
@@ -888,5 +938,116 @@ theorem isMinimizer_iff_reduced_pinned (hK : KernelIsConstants P.L) (hw : ∀ i,
 end Closed
 
 end ConeProblem
+
+/-! ## The closed mesh problem satisfies the hypotheses of the closed case -/
+
+namespace TriMesh
+
+variable {V F : Type*} [DecidableEq V] [Fintype V] [Fintype F] (M : TriMesh V F)
+
+/-- **The hypotheses of the closed case hold for the mesh problem when every vertex is an
+unknown** (a closed mesh, or a boundary treatment other than `Fixed`): on a connected valid mesh
+the matrix of `TriMesh.coneProblem` is positive semidefinite with kernel exactly the constants.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem coneProblem_kernelIsConstants (p : V → Prop) [DecidablePred p] (wE : V → ℝ) (lam : ℝ)
+    (site : V → Site) (hM : M.Valid) (hconn : M.Connected) (hp : ∀ v, p v) :
+    ConeProblem.KernelIsConstants (M.coneProblem p wE lam site).L where
+  posSemidef := (M.laplacian_posSemidef hM).submatrix _
+  mulVec_one := M.coneProblem_mulVec_one p wE lam site hp
+  ker := by
+    intro x hx
+    set X : V → ℝ := fun v => x ⟨v, hp v⟩ with hX
+    have h0 : M.laplacian *ᵥ X = 0 := by
+      funext i
+      rw [M.laplacian_mulVec_of_zero_off p X (fun v hv => absurd (hp v) hv) ⟨i, hp i⟩]
+      exact congrFun hx ⟨i, hp i⟩
+    have hc := (M.laplacian_mulVec_eq_zero_iff hM hconn X).1 h0
+    by_cases hne : Nonempty V
+    · obtain ⟨v₀⟩ := hne
+      refine ⟨X v₀, ?_⟩
+      funext i
+      exact hc i.1 v₀
+    · exact ⟨0, funext fun i => absurd ⟨i.1⟩ hne⟩
+
+end TriMesh
+
+/-! ## The hypotheses are satisfiable -/
+
+open ConeProblem
+
+/-- **The hypotheses of the Dirichlet theorems are satisfiable.** One unknown, `L = [1]`, `Ω = 3`,
+`m = wE = λ = 1`, the default site: `μ = 2`, `u = -1`, `y = A⁻¹ W u = -1`, so `φ = 1`, which is
+the soft-threshold fixed point `2 = P_1(1 + 2)`. -/
+example : ∃ (P : ConeProblem (Fin 1)) (μ y : Fin 1 → ℝ),
+    P.WellFormed ∧ P.L.PosDef ∧ (∀ i, 0 < P.weight i) ∧ P.ReducedOptimal μ y 0 ∧
+      y = dirichletSolver P.L (fun i => P.weight i * P.reducedU (dirichletSolver P.L) μ i) := by
+  refine ⟨⟨1, fun _ => 3, fun _ => 1, fun _ => 1, 1, fun _ => Site.plain⟩, fun _ => 2, fun _ => -1,
+    ⟨fun _ => zero_le_one, fun _ => zero_le_one, zero_le_one,
+      fun _ => ⟨zero_le_one, bot_le, le_top⟩⟩, Matrix.PosDef.one, fun _ => by simp [weight], ⟨?_, ?_⟩, ?_⟩
+  · intro i hi; simp [Site.isFixed, Site.plain] at hi
+  · intro j _
+    rw [Site.stationary_plain_iff zero_le_one]
+    simp only [add_zero, neg_neg]
+    rw [softThreshold_of_gt zero_le_one (by norm_num)]; norm_num
+  · ext i
+    fin_cases i
+    simp [dirichletSolver_apply, reducedU, column, w0, rhs0, fixedAngle, Site.plain, Site.angle, weight, freeSites, Site.isFixed]
+    norm_num
+
+/-- **The hypotheses of the closed-case theorems are satisfiable.** Two unknowns,
+`L = [[1, -1], [-1, 1]]` (positive semidefinite, kernel the constants), `Ω = (1, -1)`, `m = wE = λ = 1`,
+default sites, pin `p = 0`, `μ = 0` (so `Σ_S μ = 0 = Σ(Ω - a_F)`), `ν = 0`:
+`w0 = (½, -½)`, `u = (-½, ½)` (weighted mean zero), `y = (0, ½)`, `φ = (0, -½)`, and `|φ| ≤ λ`. -/
+example : ∃ (P : ConeProblem (Fin 2)) (p : Fin 2) (μ y : Fin 2 → ℝ) (ν : ℝ),
+    P.WellFormed ∧ KernelIsConstants P.L ∧ (∀ i, 0 < P.weight i) ∧
+      ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i ∧ P.ReducedOptimal μ y ν ∧
+      y = pinSolve P.L p (fun i => P.weight i * P.reducedU (closedSolver P p) μ i) := by
+  refine ⟨⟨!![1, -1; -1, 1], ![1, -1], fun _ => 1, fun _ => 1, 1, fun _ => Site.plain⟩, 0,
+    fun _ => 0, ![0, 1/2], 0,
+    ⟨fun _ => zero_le_one, fun _ => zero_le_one, zero_le_one,
+      fun _ => ⟨zero_le_one, bot_le, le_top⟩⟩, ⟨?_, ?_, ?_⟩, fun _ => by simp [weight], ?_,
+      ⟨?_, ?_⟩, ?_⟩
+  · refine Matrix.PosSemidef.of_dotProduct_mulVec_nonneg ?_ fun x => ?_
+    · ext i j; fin_cases i <;> fin_cases j <;> simp
+    · simp [dotProduct, Matrix.mulVec, Fin.sum_univ_two]
+      nlinarith [sq_nonneg (x 0 - x 1)]
+  · ext i; fin_cases i <;> simp [Matrix.mulVec, dotProduct, Fin.sum_univ_two]
+  · intro x hx
+    refine ⟨x 0, ?_⟩
+    have h0 := congrFun hx 0
+    simp [Matrix.mulVec, dotProduct, Fin.sum_univ_two] at h0
+    ext i; fin_cases i <;> simp; linarith
+  · simp [freeSites, rhs0, fixedAngle, Fin.sum_univ_two, Site.isFixed, Site.plain, Site.angle]
+  · intro i hi; simp [Site.isFixed, Site.plain] at hi
+  · intro j _
+    rw [Site.stationary_plain_iff zero_le_one]
+    fin_cases j
+    · simp
+      exact (softThreshold_of_abs_le (by norm_num)).symm
+    · simp
+      exact (softThreshold_of_abs_le (by norm_num)).symm
+  · ext i
+    have hAp : pinBlock (!![1, -1; -1, 1] : Matrix (Fin 2) (Fin 2) ℝ) 0 = 1 := by
+      ext a b
+      have ha : a = ⟨1, by decide⟩ := Subtype.ext (Fin.eq_one_of_ne_zero _ a.2)
+      have hb : b = ⟨1, by decide⟩ := Subtype.ext (Fin.eq_one_of_ne_zero _ b.2)
+      subst ha hb
+      simp [pinBlock]
+    have hps : ∀ b : Fin 2 → ℝ, pinSolve (!![1, -1; -1, 1] : Matrix (Fin 2) (Fin 2) ℝ) 0 b = ![0, b 1] := by
+      intro b
+      ext i
+      fin_cases i
+      · simp [pinSolve_apply_pin]
+      · simp [pinSolve, padLin_apply, restrictLin_apply, hAp]
+    have hfa : ConeProblem.fixedAngle (⟨!![1, -1; -1, 1], ![1, -1], fun _ => 1, fun _ => 1, 1,
+        fun _ => Site.plain⟩ : ConeProblem (Fin 2)) = 0 := funext fun _ => rfl
+    dsimp only
+    rw [hps]
+    fin_cases i
+    · simp
+    · simp [reducedU, w0, closedSolver, pinnedSolver, meanProj_apply, hps, rhs0, hfa,
+        Fin.sum_univ_two, weight]
+      ring
 
 end DdgProofs

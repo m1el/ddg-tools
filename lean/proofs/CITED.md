@@ -234,6 +234,11 @@ boundary).
 - **Does correctness depend on it?** No. Soundness of the solver output uses sufficiency, which
   is proved for every `L`. Necessity is only the converse ("every minimizer is found by solving
   the optimality system").
+- **Also covers** the closed-mesh converse of `reduced-optimality-conditions` (factor-once method):
+  that every minimizer of the reduced problem with the sum constraint admits a multiplier `ν` with
+  `−(y_j + ν) ∈ ∂g_j(µ_j)`. The Dirichlet converse is proved
+  (`reducedOptimal_of_isMinimizer_dirichlet`); the direction the solver relies on (reduced conditions
+  ⟹ `KKT` ⟹ minimizer) is proved in both cases.
 
 ---
 
