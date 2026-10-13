@@ -27,8 +27,21 @@
 //!   ([`IntrinsicTriangulation::cotan_laplacian`], [`IntrinsicTriangulation::lumped_mass`]),
 //!   with the conventions of `ddg_core::operators`.
 //!
-//! Vertex insertion, edge splits, Delaunay refinement, point queries, the overlay and the
-//! export as a simplicial mesh are not implemented yet.
+//! * Vertex insertion and edge split ([`IntrinsicTriangulation::insert_vertex`],
+//!   [`IntrinsicTriangulation::split_edge`]), point queries both ways
+//!   ([`IntrinsicTriangulation::point_on_input`],
+//!   [`IntrinsicTriangulation::point_on_triangulation`]).
+//! * The overlay, the common subdivision with the input mesh
+//!   ([`IntrinsicTriangulation::overlay`]), and a straight segment inside a face as its pieces
+//!   on input faces ([`IntrinsicTriangulation::segments_on_input`]).
+//! * Delaunay refinement to an angle bound ([`IntrinsicTriangulation::refine`]); the report
+//!   lists every corner left below the bound with the reason ([`RefineReport`]).
+//! * The triangulation as a simplicial `TriMesh` with a `Geometry` for code that takes one
+//!   ([`IntrinsicTriangulation::export_simplicial`]), and what identifies that state
+//!   ([`SimplicialExport::check_state`]). Splitting does not keep an angle bound; the export
+//!   reports the angles it has.
+//!
+//! Not implemented: vertex repositioning and vertex removal.
 //!
 //! # Example
 //!
