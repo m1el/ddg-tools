@@ -519,8 +519,8 @@ impl CutTriangles {
     }
 
     /// Where vertex `v` of the cut mesh comes from. A copy of triple point `m` is reported as
-    /// `CutVertex::Point(n_points + m)`: the node numbering of [`CutSegment::points`]
-    /// (crate::CutSegment::points).
+    /// `CutVertex::Point(n_points + m)`: the node numbering of
+    /// [`CutSegment::points`](crate::CutSegment::points).
     #[inline]
     pub fn vertex_source(&self, v: usize) -> CutVertex {
         let first_triple = self.n_original + 2 * self.n_points;

@@ -235,6 +235,25 @@ impl FlowOptions<'_> {
         }
     }
 
+    /// The stages for more than two regions (SPEC §8.4, D20): those of the paper (length step
+    /// on the mesh, harmonic extension per region, `φ_t = s`) with the flux recovery of SPEC
+    /// §3.5, which is what [`FlowOptions::paper`] does not have.
+    ///
+    /// [`FlowOptions::new`] works on networks too: every region then moves its own boundary by
+    /// the length force of SPEC §3.10 (§8.5). It keeps symmetric partitions of the sphere in
+    /// place six to eight times better than the stages of the paper and follows single curves
+    /// exactly, but at triple points it is no better than the paper's stages (junction angles
+    /// settle 4° to 9° off 120° at the mesh widths tested, against 3° to 5°), and from a
+    /// speckled start with a strong length weight it comes to rest with more patches and a
+    /// higher energy than the paper's stages reach. Until that is understood, these are the
+    /// stages to use for `N > 2`.
+    pub fn for_regions(step_size: StepSize) -> Self {
+        FlowOptions {
+            eval: EvalOptions::default(),
+            ..FlowOptions::paper(step_size)
+        }
+    }
+
     pub(crate) fn validate(&self, n_vertices: usize) -> Result<(), CutError> {
         let positive = |x: f64| x.is_finite() && x > 0.0;
         match self.step_size {

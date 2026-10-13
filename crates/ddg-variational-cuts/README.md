@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D19). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D21). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -28,9 +28,10 @@ level-set function `φ` (region 0 where `φ ≤ 0`, region 1 where `φ > 0`):
 | speed | §3.7 | `s = G_0 − G_1` with `w_r`, `β_r`; optional sliver smoothing of the paper |
 | energy | §6 | `E = Σ_r [w_r J_r + β_r Area_r] + ∫_γ (α_L + η) ds`, every term |
 
-Not here yet: `N` regions (SPEC §8). The types are shaped for them: region ids are `u32`,
-per-region data is per vertex of the cut mesh, the speed of a cut point is the difference of the
-gradient densities of the two regions that meet there, and the extension works region by region.
+The same for **`N` regions** (SPEC §8; section "Several regions" below): one level-set function
+per region, cut networks with triple points, [`RegionFlow`]. The two-region API is unchanged; the
+structs `Cut`, `CutTriangles` and `EvalReport` gained fields for triple points, and a copy of a
+triple point is reported as `CutVertex::Point(n_points + m)`.
 
 ## Use
 
@@ -258,6 +259,113 @@ initial cut, symmetry classes, step and stop rule, every stage choice, `--paper`
 times per step), `phi.txt`, `cut.obj` (polylines) and `cut_mesh.obj` (one group per region). The
 options are listed at the top of `examples/cut_flow.rs`.
 
+## Several regions (SPEC §8)
+
+```rust
+use ddg_variational_cuts::{CutProblem, Energy, FlowOptions, RegionFlow, StepSize, StopRule, init};
+
+let labels = init::normal_clusters(&mesh, &positions, 8, 100)?;              // or labels of your own
+let phis = init::regions_from_vertex_labels(&mesh, &geometry, &labels, 8)?;  // one function per region
+let mut flow = RegionFlow::new(&mesh, &geometry, &phis)?;
+let mut problem = CutProblem::for_regions(Energy::Hencky, 0.0, 8);            // w_k, β_k per region
+let options = FlowOptions::for_regions(StepSize::default());                 // see below
+problem.length_weight =
+    ddg_variational_cuts::length_weight_for_ripples(flow.roughening_rate(&problem, &options.eval)?, 0.5);
+let report = flow.run(&problem, &options, &StopRule::default())?;
+let network = flow.evaluate(&problem, &options.eval)?;
+let curves = network.cut.curves(&mesh, &positions)?;   // polylines between junctions, with their two regions
+let triples = &network.cut.triple_points;              // face and barycentric coordinates
+let atlas = network.cut_mesh()?;                       // one component per patch, a region per face
+```
+
+`examples/cut_flow.rs` does this from the command line (`--init clusters:8`, or a label file with
+more than two labels) and writes `network.obj`, `triples.txt`, `regions.txt`, `cut_mesh.obj`.
+
+**`N = 2` reproduces the two-region flow**: bit for bit with the paper's stages, to `3·10⁻¹⁵`
+with the default ones (sphere and disk with boundary, three energies, weights, penalty, symmetry
+classes, fixed and adaptive steps).
+
+**Which stages.** Both stage sets run on networks. The paper's (every `φ_k` diffused on the mesh,
+harmonic extension per region with the substitution of App. A.3, the projection of Losasso et
+al. 2006 and fast marching per function) are what `FlowOptions::for_regions` selects, with the
+flux recovery of SPEC §3.5. The default stages carry over as "every region moves its own
+boundary through its triple points" (SPEC §8.5); two junction forces tried before that failed.
+What was measured:
+
+| test | default stages | paper's stages |
+|---|---|---|
+| three bands, no triple point: excess length over `t = 0.004` (exact factor 0.579) | 0.598 | 0.580 |
+| honeycomb on a flat torus given by edge lengths (42 × 24), at rest, 20 steps: junctions drift by | 3.4° | 3.6° |
+| perturbed honeycomb, 160 steps: excess length `+2.74 %` → | `+0.71 %` | `+0.78 %` |
+| junction angles off 120°: `27.7°` → | `8.7°` | `5.2°` |
+| steps in which the length rose | 22 of 161, ≤ 0.18 % | 50 of 161, ≤ 0.19 % |
+| the same at 84 × 48, 320 steps: excess, angles | `+0.39 %`, 4.2° | `+0.37 %`, 2.5°–3.8° |
+| tetrahedral partition of the sphere, 30 steps: triple points move by (mesh width 0.15) | 0.013 | 0.075 |
+| cubical partition | 0.010 | 0.073 |
+| energy from a start with five regions, four energies, small steps | falls in every step | falls in every step |
+| renumbering, permuting regions, scaling | `10⁻¹⁶` | `10⁻¹⁶` |
+
+Stated plainly: neither stage set keeps the length of a relaxing honeycomb monotone, and neither
+brings the junctions to 120° better than a few degrees at these mesh widths (the triple point is
+the centroid of three cut points, and the discrete network is longer than the honeycomb by a
+multiple of the mesh width per junction). The default stages are the more accurate ones where
+there is distortion, and the worse ones for coarsening (next table). `FlowOptions::for_regions`
+is the recommendation for `N > 2`; with it, the defect of the paper's length step on single curves
+(D14) is back.
+
+**Atlas in the manner of Fig. 16** (`network_study atlas`: 8 clusters of the vertex normals,
+rescaled Dirichlet energy with `r_ε = 1`, length weight from the ripple rule with `ℓ = 0.5`,
+default step and stop rule; lengths on the unit-area surface):
+
+| model | stages | `α_L` | steps, time | patches | triple points | cut length | distortion | energy |
+|---|---|---|---|---|---|---|---|---|
+| spot, 2930 vertices | paper's | 1.49 | 778, 6.9 s | 59 → 4 | 106 → 2 | 14.67 → 1.96 | 0.0124 → 0.359 | 21.88 → 3.28 |
+| | default | | 3850, 36.8 s | 59 → 9 | 106 → 14 | → 4.85 | → 0.232 | → 7.46 |
+| blub, 7106 vertices | paper's | 1.39 | 2128, 61.9 s | 44 → 5 | 80 → 4 | 15.42 → 2.25 | 0.0153 → 1.315 | 21.52 → 4.46 |
+| | default | | 3928, 103 s | 44 → 13 | 80 → 22 | → 6.73 | → 0.345 | → 9.73 |
+| bob, 5344 vertices | paper's | 0.86 | 142, 3.6 s | 23 → 2 | 44 → 0 | 11.79 → 0.67 | 0.0073 → 0.134 | 10.13 → 0.71 |
+| | default | | 2553, 54 s | 23 → 6 | 44 → 10 | → 4.33 | → 0.0715 | → 3.79 |
+
+All runs ended by the energy criterion. The clusters of normals are speckled (23 to 59 patches
+for 8 clusters); with a strong length weight the flow removes the small patches, the cut gets
+seven times shorter and the distortion rises, as it must. The paper's stages get to fewer patches
+and a lower energy in a fifth of the steps; the default stages stall earlier. With `ℓ = 0.25` on
+spot: 5 patches, length 3.31, energy 2.73 (paper's) against 8, 4.68, 3.72. The atlases were not
+inspected visually and not flattened.
+
+**Different starts (Fig. 10)**, `network_study starts`, 6 regions, one length weight `α_L = 1`
+for every start, paper's stages:
+
+| start | sphere (icosphere(4), Dirichlet): patches, length, energy | spot (rescaled Dirichlet) |
+|---|---|---|
+| clusters of normals | 6, 4.180, 5.301 | 4, 2.62, 2.89 |
+| cells around six seed vertices | 6, 4.187, 5.312 | 5, 2.36, 2.69 |
+| the same from another first seed | 6, 4.181, 5.303 | 5, 2.62, 2.98 |
+| a random label at every vertex | 3, 2.94, 4.57 | 2, 0.50, 1.06 |
+
+The three structured starts end with the same numbers on the sphere (length and energy within
+0.2 %; 6 patches, 8 triple points and the length of the cubical partition) and with similar numbers
+on spot (length within 10 %), which is what the plots of Fig. 10 show. The cuts themselves are not
+in the same place on spot: 21 % to 41 % of the cut of one result lies within two edges of the cut
+of another. The random start (1440 and 1665 patches) coarsens to fewer patches and a lower energy
+than the structured ones: different starts do not all reach the same minimum here.
+
+**Timings**, one step, one thread, seconds (median of five; `network_study timings`):
+
+| mesh | `N` | evaluate | length | extension | redistance | step (default) | step (paper's) |
+|---|---|---|---|---|---|---|---|
+| icosphere(6), 40 962 vertices | 2 | 0.073 | 0.0014 | 0.0034 | 0.027 | 0.106 | 0.124 |
+| | 4 | 0.064 | 0.0021 | 0.0027 | 0.043 | 0.114 | 0.143 |
+| | 8 | 0.065 | 0.0030 | 0.0029 | 0.086 | 0.160 | 0.217 |
+| spot | 2 | 0.0024 | 0.0007 | 0.0002 | 0.0013 | 0.0048 | 0.0044 |
+| | 4 | 0.0028 | 0.0013 | 0.0002 | 0.0027 | 0.0072 | 0.0065 |
+| | 8 | 0.0035 | 0.0021 | 0.0002 | 0.0054 | 0.0118 | 0.0105 |
+
+The evaluation does not depend on `N` (one factorization for all regions). What grows with `N`:
+the redistancing, one fast marching over the whole mesh per function (the largest part of a step
+from `N = 8` on), and the paper's implicit step, one solve per function (0.017, 0.028, 0.058 s on
+icosphere(6)). The length systems on the cut grow with the number of cut points.
+
 ## The normal derivative on the cut (SPEC §3.5, D12)
 
 The paper divides the integrated normal derivative of each cut vertex by its dual length,
@@ -367,6 +475,9 @@ Functions that implement a formula carry `[formula: <id>]`; the ids are those of
 | `cut-symmetry-projection`, `cut-redistance` | `symmetry_projection`, `init::redistanced` |
 | `cut-step-cap` | `StepSize::step` |
 | `cut-roughening-rate` (new, D18) | `Flow::roughening_rate`, `length_weight_for_ripples` |
+| `cut-edge-crossing-regions`, `cut-triple-point` | `Cut::from_regions`, `TriplePoint` |
+| `cut-region-extension`, `cut-region-projection` | `boundary_rates`, `redistance_regions` (internal) |
+| `cut-length-step-regions` (new, D20) | `region_rates` (internal) |
 
 ## Reproducing the tables
 
@@ -377,5 +488,8 @@ cargo run  --release -p ddg-variational-cuts --example estimator_study -- 3 6
 cargo run  --release -p ddg-variational-cuts --example flow_study -- circle        # also: latitude-ode,
         # modes, balance, fig1 [LEVEL], fig5 [CELLS HEIGHT X0 MOTION], speeds MESH.obj, timings [MESH.obj]
 cargo run  --release -p ddg-variational-cuts --example redistance_study
+cargo run  --release -p ddg-variational-cuts --example network_study -- honeycomb 84 paper   # also:
+        # stripes, atlas MESH.obj [N RIPPLE ENERGY STEPS], starts MESH.obj ..., timings MESH.obj ...
+cargo test --release -p ddg-variational-cuts --test regions -- --nocapture
 cargo test --release -p ddg-variational-cuts --test flow -- --nocapture
 ```

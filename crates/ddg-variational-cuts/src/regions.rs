@@ -605,8 +605,8 @@ fn region_rates(
     let mut recovery = Vec::new();
     let mut implicit = Vec::new();
     for (t, kinds) in tri.edge_kind.iter().enumerate() {
-        for k in 0..3 {
-            if kinds[k] != EdgeKind::Cut {
+        for (k, kind) in kinds.iter().enumerate() {
+            if *kind != EdgeKind::Cut {
                 continue;
             }
             let (i, j) = (tri.faces[t][k] as usize, tri.faces[t][(k + 1) % 3] as usize);
@@ -650,6 +650,10 @@ fn region_rates(
     })
 }
 
+/// What [`redistance_regions`] returns: the functions, the number of vertices some front did not
+/// reach, and the cut-adjacent vertices.
+type Redistanced = (Vec<Vec<f64>>, usize, Vec<bool>);
+
 /// The redistancing of SPEC §8.4 on the geometry `geometry`. Regions are those of `phis`.
 /// `Adj_k` are the ends of the edges with exactly one end in region `k`.
 ///
@@ -668,9 +672,8 @@ pub(crate) fn redistance_regions(
     mesh: &TriMesh,
     geometry: &Geometry,
     phis: &[Vec<f64>],
-) -> Result<(Vec<Vec<f64>>, usize, Vec<bool>), CutError> {
+) -> Result<Redistanced, CutError> {
     let nv = mesh.n_vertices();
-    let n_regions = phis.len();
     let region = regions_of(mesh, phis)?;
     let mut adjacent = vec![false; nv];
     for &[a, b] in mesh.edges() {
@@ -699,7 +702,7 @@ pub(crate) fn redistance_regions(
     }
     // Step 2: fast marching per function.
     let mut unreached = vec![false; nv];
-    for k in 0..n_regions {
+    for (k, phi) in out.iter_mut().enumerate() {
         let mut seed = vec![false; nv];
         for &[a, b] in mesh.edges() {
             let (ra, rb) = (region[a as usize] as usize, region[b as usize] as usize);
@@ -710,7 +713,7 @@ pub(crate) fn redistance_regions(
         }
         let seeds: Vec<(u32, f64)> = (0..nv)
             .filter(|&v| seed[v])
-            .map(|v| (v as u32, out[k][v].abs()))
+            .map(|v| (v as u32, phi[v].abs()))
             .collect();
         if seeds.is_empty() {
             continue;
@@ -719,7 +722,7 @@ pub(crate) fn redistance_regions(
         let distance = upwind_distance(mesh, geometry, &seeds, Some(&class))?;
         for v in (0..nv).filter(|&v| !seed[v]) {
             if distance.values[v].is_finite() {
-                out[k][v] = if region[v] as usize == k {
+                phi[v] = if region[v] as usize == k {
                     -distance.values[v]
                 } else {
                     distance.values[v]

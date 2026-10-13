@@ -13,8 +13,12 @@
 //! --camera X,Y,Z --penalty W  visibility penalty W * max(n.e, 0), every vertex visible
 //! --penalty-rule gradient | paper
 //! --init halfspace[:NX,NY,NZ[,OFFSET]] | circle:VERTEX:RADIUS | phi:FILE | labels:FILE
-//!        | face-labels:FILE   (default: halfspace across the longest axis of the bounding box,
-//!                             through the centroid; files hold one number per line)
+//!        | face-labels:FILE | clusters:N
+//!                             (default: halfspace across the longest axis of the bounding box,
+//!                             through the centroid; files hold one number per line; clusters:N
+//!                             is N clusters of the vertex normals. clusters, and label files
+//!                             with more than two labels, run the flow for several regions,
+//!                             SPEC §8)
 //! --raw-init                  do not redistance a halfspace or phi start
 //! --symmetry FILE             one class label per vertex
 //! --step adaptive:TIME_SCALE:MOTION | capped:TAU_MAX:MOTION | fixed:TAU
@@ -35,7 +39,9 @@
 //!
 //! Output: `steps.csv` (one line per step), `phi.txt` (the final level-set function in the unit
 //! of the file), `cut.obj` (the cut as polylines), `cut_mesh.obj` (the cut mesh with one group
-//! per region).
+//! per region). With several regions: `phi.txt` has one column per region, and instead of
+//! `cut.obj` there are `network.obj` (the curves between junctions), `triples.txt` (the triple
+//! points) and `regions.txt` (the region of every vertex).
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -46,8 +52,8 @@ use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::length_weight_for_ripples;
 use ddg_variational_cuts::{
     CurvatureSource, CutProblem, Energy, EvalOptions, Extension, Flow, FlowOptions, FluxRecovery,
-    LengthStep, PAPER_FEATURE_SMOOTHING, Parallelism, PenaltyRule, ScaleWeight, SpeedScaling,
-    StepSize, StopRule, ThreadPool, init,
+    LengthStep, PAPER_FEATURE_SMOOTHING, Parallelism, PenaltyRule, RegionFlow, ScaleWeight,
+    SpeedScaling, StepSize, StopRule, ThreadPool, init,
 };
 
 type AnyError = Box<dyn std::error::Error>;
@@ -247,7 +253,38 @@ fn run() -> Result<(), AnyError> {
 
     // The initial function.
     let parts: Vec<&str> = init_spec.split(':').collect();
+    // Several regions (SPEC §8): clusters of normals, or labels with more than two values.
+    let many = |labels: &[u32]| labels.iter().max().map_or(0, |m| *m as usize + 1);
+    let region_start: Option<Vec<Vec<f64>>> = match parts.as_slice() {
+        ["clusters", n] => {
+            let n: usize = n.parse()?;
+            let labels = init::normal_clusters(&mesh, &positions, n, 100)?;
+            Some(init::regions_from_vertex_labels(
+                &mesh, &geometry, &labels, n,
+            )?)
+        }
+        ["labels", path] if many(&labels(path)?) > 2 => {
+            let labels = labels(path)?;
+            Some(init::regions_from_vertex_labels(
+                &mesh,
+                &geometry,
+                &labels,
+                many(&labels),
+            )?)
+        }
+        ["face-labels", path] if many(&labels(path)?) > 2 => {
+            let labels = labels(path)?;
+            Some(init::regions_from_face_labels(
+                &mesh,
+                &geometry,
+                &labels,
+                many(&labels),
+            )?)
+        }
+        _ => None,
+    };
     let phi0 = match parts.as_slice() {
+        _ if region_start.is_some() => Vec::new(),
         ["halfspace"] | ["halfspace", _] => {
             let n = positions.len() as f64;
             let centroid = [0, 1, 2].map(|k| positions.iter().map(|p| p[k]).sum::<f64>() / n);
@@ -349,6 +386,29 @@ fn run() -> Result<(), AnyError> {
         options.eval.min_crossing_offset = x;
     }
 
+    if let Some(phis) = region_start {
+        // More than two regions: the stages of the paper with the recovered flux, unless a
+        // stage was chosen on the command line (SPEC §8.5).
+        if !paper {
+            let own = options.clone();
+            options = FlowOptions::for_regions(step_size);
+            options.eval = own.eval;
+            options.penalty_rule = own.penalty_rule;
+            options.symmetry = own.symmetry;
+            if let Some(x) = length_step {
+                options.length_step = x;
+            }
+            if let Some(x) = extension {
+                options.extension = x;
+            }
+            if let Some(x) = speed {
+                options.speed_scaling = x;
+            }
+        }
+        return run_regions(
+            &mesh, &geometry, &positions, &phis, problem, &options, &stop, ripple, &out,
+        );
+    }
     let mut flow = Flow::new(&mesh, &geometry, &phi0)?;
     if let Some(wavelength) = ripple {
         let omega = flow.roughening_rate(&problem, &options.eval)?;
@@ -474,6 +534,163 @@ fn run() -> Result<(), AnyError> {
     println!(
         "energy {first_energy:.6} -> {:.6}   distortion {:.6} + {:.6}   areas {:.4} / {:.4}   cut length {:.5} (unit area), penalty {:.5}",
         e.total, e.distortion[0], e.distortion[1], e.area[0], e.area[1], e.length, e.penalty
+    );
+    println!("wrote {}", out.display());
+    Ok(())
+}
+
+/// The flow for several regions (SPEC §8) and its output: `steps.csv`, `phi.txt` (one column per
+/// region), `regions.txt` (the region of every vertex), `network.obj` (the curves between
+/// junctions as polylines, named after the two regions they separate), `triples.txt` (face,
+/// barycentric coordinates and position of every triple point), `cut_mesh.obj` (one group per
+/// region).
+#[allow(clippy::too_many_arguments)]
+fn run_regions(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    positions: &[[f64; 3]],
+    phis: &[Vec<f64>],
+    mut problem: CutProblem,
+    options: &FlowOptions<'_>,
+    stop: &StopRule,
+    ripple: Option<f64>,
+    out: &std::path::Path,
+) -> Result<(), AnyError> {
+    let n = phis.len();
+    problem.regions.resize(n, Default::default());
+    let mut flow = RegionFlow::new(mesh, geometry, phis)?;
+    if let Some(wavelength) = ripple {
+        let omega = flow.roughening_rate(&problem, &options.eval)?;
+        problem.length_weight = length_weight_for_ripples(omega, wavelength);
+        println!(
+            "{n} regions; roughening rate of the initial cut {omega:.4e}: alpha_L = {:.4e} (ripples longer than {wavelength} grow)",
+            problem.length_weight
+        );
+    }
+    let before = flow.evaluate(&problem, &options.eval)?;
+    let start = std::time::Instant::now();
+    let report = flow.run(&problem, options, stop)?;
+    let seconds = start.elapsed().as_secs_f64();
+    let after = flow.evaluate(&problem, &options.eval)?;
+
+    std::fs::create_dir_all(out)?;
+    let mut csv = String::from(
+        "step,time,tau,energy,distortion,length,penalty,max_speed,max_length_speed,\
+         roughening_rate,cut_motion,cut_points,clamped,unreached,t_evaluate,t_extension,\
+         t_length,t_redistance\n",
+    );
+    for (k, r) in report.steps.iter().enumerate() {
+        writeln!(
+            csv,
+            "{k},{:e},{:e},{:.12e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{},{},{},{:.3e},{:.3e},{:.3e},{:.3e}",
+            r.time,
+            r.tau,
+            r.energy.total,
+            r.energy.distortion.iter().sum::<f64>(),
+            r.energy.length,
+            r.energy.penalty,
+            r.max_speed,
+            r.max_length_speed,
+            r.roughening_rate,
+            r.cut_motion,
+            r.n_cut_points,
+            r.n_clamped_crossings,
+            r.n_unreached,
+            r.timings.evaluate,
+            r.timings.extension,
+            r.timings.length,
+            r.timings.redistance
+        )?;
+    }
+    std::fs::write(out.join("steps.csv"), csv)?;
+
+    let sets = flow.level_sets();
+    let mut text = String::new();
+    for v in 0..mesh.n_vertices() {
+        let row: Vec<String> = sets.iter().map(|phi| format!("{:e}", phi[v])).collect();
+        writeln!(text, "{}", row.join(" "))?;
+    }
+    std::fs::write(out.join("phi.txt"), text)?;
+    let mut text = String::new();
+    for region in flow.regions() {
+        writeln!(text, "{region}")?;
+    }
+    std::fs::write(out.join("regions.txt"), text)?;
+
+    let mut text = String::new();
+    let mut first = 1usize;
+    for (k, curve) in after.cut.curves(mesh, positions)?.iter().enumerate() {
+        writeln!(
+            text,
+            "o curve_{k}_regions_{}_{}",
+            curve.regions[0], curve.regions[1]
+        )?;
+        for p in &curve.positions {
+            writeln!(text, "v {} {} {}", p[0], p[1], p[2])?;
+        }
+        let count = curve.positions.len();
+        let mut indices: Vec<String> = (first..first + count).map(|i| i.to_string()).collect();
+        if curve.ends[0] == ddg_variational_cuts::CurveEnd::Closed {
+            indices.push(first.to_string());
+        }
+        writeln!(text, "l {}", indices.join(" "))?;
+        first += count;
+    }
+    std::fs::write(out.join("network.obj"), text)?;
+
+    let mut text = String::from("# face b0 b1 b2 x y z\n");
+    let at = after.cut.triple_positions(mesh, positions)?;
+    for (triple, x) in after.cut.triple_points.iter().zip(&at) {
+        let b = triple.barycentric;
+        writeln!(
+            text,
+            "{} {} {} {} {} {} {}",
+            triple.face, b[0], b[1], b[2], x[0], x[1], x[2]
+        )?;
+    }
+    std::fs::write(out.join("triples.txt"), text)?;
+
+    let cut_mesh = after.cut_mesh()?;
+    let at = cut_mesh.positions(&after.cut, mesh, positions)?;
+    let mut text = String::new();
+    for p in &at {
+        writeln!(text, "v {} {} {}", p[0], p[1], p[2])?;
+    }
+    for region in 0..n as u32 {
+        writeln!(text, "g region_{region}")?;
+        for (face, _) in cut_mesh
+            .mesh
+            .faces()
+            .iter()
+            .zip(&cut_mesh.face_region)
+            .filter(|(_, r)| **r == region)
+        {
+            writeln!(text, "f {} {} {}", face[0] + 1, face[1] + 1, face[2] + 1)?;
+        }
+    }
+    std::fs::write(out.join("cut_mesh.obj"), text)?;
+
+    let patches = |e: &ddg_variational_cuts::Evaluation| -> Result<usize, AnyError> {
+        Ok(e.cut_mesh()?.mesh.n_components())
+    };
+    println!(
+        "{} steps in {seconds:.2} s, stopped: {:?}; flow time {:.4e}",
+        report.steps.len(),
+        report.stop,
+        flow.time()
+    );
+    println!(
+        "patches {} -> {}   triple points {} -> {}   cut length {:.5} -> {:.5} (unit area)   distortion {:.6e} -> {:.6e}   energy {:.6e} -> {:.6e}",
+        patches(&before)?,
+        patches(&after)?,
+        before.report.n_triple_points,
+        after.report.n_triple_points,
+        before.energy.length,
+        after.energy.length,
+        before.energy.distortion.iter().sum::<f64>(),
+        after.energy.distortion.iter().sum::<f64>(),
+        before.energy.total,
+        after.energy.total
     );
     println!("wrote {}", out.display());
     Ok(())

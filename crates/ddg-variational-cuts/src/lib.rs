@@ -48,6 +48,49 @@
 //! [`length_weight_for_ripples`] and [`StepSize::Adaptive`] turn it into a length weight and a
 //! time step.
 //!
+//! **Several regions** (SPEC §8). [`RegionFlow`] is the same flow for `N` level-set functions,
+//! one per region (negative inside; a vertex belongs to the region whose function is smallest).
+//! The cut is then a network: [`Cut::from_regions`] and [`Evaluator::evaluate_regions`] add
+//! triple points ([`TriplePoint`]) in the faces whose corners lie in three regions, and
+//! [`Cut::curves`] returns the curves between them. [`init::regions_from_vertex_labels`],
+//! [`init::regions_from_face_labels`] and [`init::normal_clusters`] make a start. With the two
+//! functions `φ, −φ` everything reproduces the two-region code. For more than two regions use
+//! the stages of [`FlowOptions::for_regions`]; why is in its documentation and in SPEC §8.5.
+//!
+//! ```
+//! use ddg_core::generators::icosphere;
+//! use ddg_core::{Geometry, TriMesh};
+//! use ddg_variational_cuts::{
+//!     CutProblem, Energy, FlowOptions, RegionFlow, StepSize, StopRule, init,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let sphere = icosphere(2)?;
+//! let mesh = TriMesh::new(sphere.positions.len(), sphere.faces.clone())?;
+//! let geometry = Geometry::from_positions(&mesh, &sphere.positions)?;
+//!
+//! // Four clusters of the vertex normals as a start: one level-set function per region.
+//! let labels = init::normal_clusters(&mesh, &sphere.positions, 4, 50)?;
+//! let phis = init::regions_from_vertex_labels(&mesh, &geometry, &labels, 4)?;
+//! let mut flow = RegionFlow::new(&mesh, &geometry, &phis)?;
+//!
+//! let problem = CutProblem::for_regions(Energy::Dirichlet, 3.0, 4);
+//! let options = FlowOptions::for_regions(StepSize::default());
+//! let stop = StopRule { max_steps: 10, ..StopRule::default() };
+//! let report = flow.run(&problem, &options, &stop)?;
+//! assert!(report.final_energy.total < report.steps[0].energy.total);
+//!
+//! // The network: curves between triple points, each between two regions.
+//! let network = flow.evaluate(&problem, &options.eval)?;
+//! assert!(network.report.n_triple_points >= 4);
+//! let curves = network.cut.curves(&mesh, &sphere.positions)?;
+//! assert!(curves.iter().all(|curve| curve.regions[0] < curve.regions[1]));
+//! // The cut mesh has one piece per patch, and every face knows its region.
+//! assert!(network.cut_mesh()?.mesh.n_components() >= 4);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Example
 //!
 //! ```

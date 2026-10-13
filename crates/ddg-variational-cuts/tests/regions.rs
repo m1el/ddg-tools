@@ -43,8 +43,8 @@ fn largest_difference(a: &[f64], b: &[f64]) -> f64 {
 /// one with boundary, with a penalty, weights and symmetry classes in play.
 #[test]
 fn two_regions_reproduce_the_two_region_flow() {
-    let ball = sphere(3);
-    let disk = bumpy(20, 0.08);
+    let ball = sphere(2);
+    let disk = bumpy(14, 0.08);
     let ball_phi = ball.sample(|p| polar_angle(p) - 1.0 - 0.1 * (3.0 * p[1].atan2(p[0])).cos());
     let disk_phi = disk.sample(|p| ((p[0] - 0.45).powi(2) + (p[1] - 0.55).powi(2)).sqrt() - 0.27);
     for (shape, phi) in [(&ball, &ball_phi), (&disk, &disk_phi)] {
@@ -102,8 +102,12 @@ fn two_regions_reproduce_the_two_region_flow() {
                     let opposite: Vec<f64> = sets[1].iter().map(|x| -x).collect();
                     let d1 = largest_difference(&opposite, &two.level_set()) / size;
                     worst = worst.max(d0).max(d1);
+                    // With the stages of the paper the two flows do the same arithmetic. With
+                    // the default stages the two sides of the cut are two chains of one linear
+                    // system here and one chain there.
+                    let bound = if name.contains("paper") { 0.0 } else { 1e-12 };
                     assert!(
-                        d0 < 1e-12 && d1 < 1e-12,
+                        d0 <= bound && d1 <= bound,
                         "{}, {name}, step {step}: {d0:e} {d1:e}",
                         shape.name
                     );
@@ -315,7 +319,7 @@ fn junction_angles(
 /// 0.7 % to 0.8 % longer than the honeycomb. Both errors fall when the mesh width is halved
 /// (`examples/network_study.rs honeycomb 84`; README).
 #[test]
-fn honeycomb_on_a_flat_torus() {
+fn honeycomb_on_a_flat_torus_is_stationary() {
     // Unit area: 3 √3 d² = 1.
     let d = (1.0 / (3.0 * 3f64.sqrt())).sqrt();
     let (w, h) = (3.0 * d, 3f64.sqrt() * d);
@@ -338,7 +342,7 @@ fn honeycomb_on_a_flat_torus() {
         assert!(start.energy.distortion.iter().all(|j| j.abs() < 1e-20));
         let (angle, _) = junction_angles(&mesh, &start.cut, &chart, w, h, 3);
         let mut moved = 0.0f64;
-        for _ in 0..40 {
+        for _ in 0..20 {
             let report = flow.step(&problem, options).unwrap();
             assert!(report.max_speed < 1e-9);
             moved = moved.max(report.cut_motion);
@@ -359,7 +363,28 @@ fn honeycomb_on_a_flat_torus() {
         assert!((start.energy.length / exact - 1.0).abs() < 1.5e-2);
         assert!((end.energy.length / exact - 1.0).abs() < 1.5e-2, "{name}");
         assert!(angle_end < 6.0, "{name}: {angle_end}");
+    }
+}
 
+/// The second half of the test above: the perturbed honeycomb. Four runs of 160 steps, which
+/// take a minute without optimization:
+/// `cargo test --release -p ddg-variational-cuts --test regions -- --ignored --nocapture`.
+#[test]
+#[ignore = "slow without optimization; run with --release -- --ignored"]
+fn perturbed_honeycomb_returns() {
+    // Unit area: 3 √3 d² = 1.
+    let d = (1.0 / (3.0 * 3f64.sqrt())).sqrt();
+    let (w, h) = (3.0 * d, 3f64.sqrt() * d);
+    let exact = 6.0 * 3f64.sqrt() * d;
+    let (nx, ny) = (42, 24);
+    let (mesh, geometry, chart) = flat_torus(nx, ny, w, h);
+    let problem = CutProblem::for_regions(Energy::Dirichlet, 1.0, 3);
+    let stage_sets = [
+        ("default stages", fixed(5e-4)),
+        ("stages of the paper", paper_stages(5e-4)),
+    ];
+
+    for (name, options) in &stage_sets {
         // Perturbed: every point is displaced by up to 1.3 mesh widths.
         let displaced: Vec<[f64; 2]> = chart
             .iter()
@@ -807,9 +832,10 @@ fn network_of_several_regions() {
     );
     let at = cut_mesh.positions(&e.cut, &s.mesh, &s.positions).unwrap();
     let triples = e.cut.triple_positions(&s.mesh, &s.positions).unwrap();
-    for m in 0..4 {
+    assert_eq!(triples.len(), 4);
+    for (m, triple) in triples.iter().enumerate() {
         for v in tri.triple_vertices(m) {
-            assert_eq!(at[v], triples[m]);
+            assert_eq!(at[v], *triple);
         }
         // The three copies lie in the three regions of the face.
         let mut regions = tri

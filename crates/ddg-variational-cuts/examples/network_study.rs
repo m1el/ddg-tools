@@ -320,10 +320,321 @@ fn stripes_run() {
     }
 }
 
+struct Model {
+    mesh: TriMesh,
+    geometry: Geometry,
+    positions: Vec<[f64; 3]>,
+}
+
+fn load(path: &str) -> Model {
+    if let Some(level) = path.strip_prefix("icosphere:") {
+        let g = ddg_core::generators::icosphere(level.parse().unwrap()).unwrap();
+        let mesh = TriMesh::new(g.positions.len(), g.faces).unwrap();
+        let geometry = Geometry::from_positions(&mesh, &g.positions).unwrap();
+        return Model {
+            mesh,
+            geometry,
+            positions: g.positions,
+        };
+    }
+    let obj = ddg_core::io::read_obj(path).unwrap();
+    let mut faces = Vec::new();
+    for f in 0..obj.n_faces() {
+        let corners = &obj.corner_verts[obj.face_corners(f)];
+        for k in 1..corners.len().saturating_sub(1) {
+            faces.push([corners[0], corners[k], corners[k + 1]]);
+        }
+    }
+    let mesh = TriMesh::new(obj.positions.len(), faces).unwrap();
+    let geometry = Geometry::from_positions(&mesh, &obj.positions).unwrap();
+    Model {
+        mesh,
+        geometry,
+        positions: obj.positions,
+    }
+}
+
+fn energy_named(name: &str) -> Energy {
+    match name {
+        "dirichlet" => Energy::Dirichlet,
+        "hencky" => Energy::Hencky,
+        _ => Energy::ScaledDirichlet(ddg_variational_cuts::ScaleWeight::FeatureSize {
+            r_eps: 1.0,
+            smoothing: ddg_variational_cuts::PAPER_FEATURE_SMOOTHING,
+        }),
+    }
+}
+
+/// Labels from seeds: every vertex goes to the nearest of `n` seed vertices (straight-line
+/// distance). The first seed is `first`, every further one the vertex farthest from the seeds
+/// so far.
+fn voronoi_labels(positions: &[[f64; 3]], n: usize, first: usize) -> Vec<u32> {
+    let dist = |a: [f64; 3], b: [f64; 3]| (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f64>();
+    let mut nearest = vec![f64::INFINITY; positions.len()];
+    let mut labels = vec![0u32; positions.len()];
+    let mut seed = first;
+    for k in 0..n {
+        for (v, p) in positions.iter().enumerate() {
+            let d = dist(*p, positions[seed]);
+            if d < nearest[v] {
+                nearest[v] = d;
+                labels[v] = k as u32;
+            }
+        }
+        seed = (0..positions.len())
+            .max_by(|a, b| nearest[*a].total_cmp(&nearest[*b]))
+            .unwrap();
+    }
+    labels
+}
+
+/// One run from vertex labels: what came out, and the cut-adjacent vertices of the result.
+struct Outcome {
+    line: String,
+    adjacent: Vec<bool>,
+}
+
+fn run_from_labels(
+    model: &Model,
+    labels: &[u32],
+    n: usize,
+    energy: &Energy,
+    ripple: f64,
+    stages: &str,
+    max_steps: usize,
+) -> Outcome {
+    let phis = ddg_variational_cuts::init::regions_from_vertex_labels(
+        &model.mesh,
+        &model.geometry,
+        labels,
+        n,
+    )
+    .unwrap();
+    let mut flow = RegionFlow::new(&model.mesh, &model.geometry, &phis).unwrap();
+    let mut problem = CutProblem::for_regions(energy.clone(), 0.0, n);
+    // STUDY_MOTION: the largest motion per step as a fraction of an edge (default 0.25).
+    let motion: f64 = std::env::var("STUDY_MOTION").map_or(0.25, |v| v.parse().unwrap());
+    let options = options_for(
+        stages,
+        StepSize::Adaptive {
+            time_scale: 0.05,
+            max_motion: motion,
+            tau_max: 1.0,
+        },
+    );
+    let omega = flow.roughening_rate(&problem, &options.eval).unwrap();
+    // STUDY_ALPHA: one length weight for every start, instead of the ripple rule.
+    problem.length_weight = std::env::var("STUDY_ALPHA").map_or_else(
+        |_| ddg_variational_cuts::length_weight_for_ripples(omega, ripple),
+        |v| v.parse().unwrap(),
+    );
+    let start = flow.evaluate(&problem, &options.eval).unwrap();
+    let patches =
+        |e: &ddg_variational_cuts::Evaluation| e.cut_mesh().map_or(0, |m| m.mesh.n_components());
+    let clock = std::time::Instant::now();
+    let report = flow
+        .run(
+            &problem,
+            &options,
+            &ddg_variational_cuts::StopRule {
+                max_steps,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let seconds = clock.elapsed().as_secs_f64();
+    let end = flow.evaluate(&problem, &options.eval).unwrap();
+    let total = |e: &ddg_variational_cuts::Evaluation| e.energy.distortion.iter().sum::<f64>();
+    let rises = report
+        .steps
+        .windows(2)
+        .filter(|pair| pair[1].energy.total > pair[0].energy.total)
+        .count();
+    let line = format!(
+        "alpha_L {:.4e} (omega {:.3e}); {} steps, {:?}, {seconds:.1} s; patches {} -> {}; triple points {} -> {}; cut length {:.4} -> {:.4}; distortion {:.5e} -> {:.5e}; energy {:.5e} -> {:.5e} (rose in {rises} steps)",
+        problem.length_weight,
+        omega,
+        report.steps.len(),
+        report.stop,
+        patches(&start),
+        patches(&end),
+        start.report.n_triple_points,
+        end.report.n_triple_points,
+        start.energy.length,
+        end.energy.length,
+        total(&start),
+        total(&end),
+        start.energy.total,
+        end.energy.total
+    );
+    Outcome {
+        line,
+        adjacent: end.cut.cut_adjacent_vertices(&model.mesh),
+    }
+}
+
+/// `atlas MESH [N] [RIPPLE] [ENERGY] [STEPS]`: an atlas in the manner of the paper's Fig. 16:
+/// `N` clusters of normals as the start, a strong length weight, both stage sets.
+fn atlas() {
+    let arg = |k: usize, default: &str| std::env::args().nth(k).unwrap_or(default.to_string());
+    let path = arg(2, "icosphere:4");
+    let n: usize = arg(3, "8").parse().unwrap();
+    let ripple: f64 = arg(4, "0.5").parse().unwrap();
+    let energy = energy_named(&arg(5, "scaled"));
+    let steps: usize = arg(6, "1000").parse().unwrap();
+    let model = load(&path);
+    let labels =
+        ddg_variational_cuts::init::normal_clusters(&model.mesh, &model.positions, n, 100).unwrap();
+    println!(
+        "{path}: {} vertices; {n} clusters of normals, energy {}, ripples longer than {ripple} grow",
+        model.mesh.n_vertices(),
+        arg(5, "scaled")
+    );
+    for stages in ["default", "paper"] {
+        let outcome = run_from_labels(&model, &labels, n, &energy, ripple, stages, steps);
+        println!("  {stages} stages: {}", outcome.line);
+    }
+}
+
+/// `starts MESH [N] [RIPPLE] [ENERGY] [STEPS]`: the paper's Fig. 10: different starts on one
+/// shape. For every pair of results, the share of the cut-adjacent vertices of one that lie
+/// within two edges of a cut-adjacent vertex of the other.
+fn starts() {
+    let arg = |k: usize, default: &str| std::env::args().nth(k).unwrap_or(default.to_string());
+    let path = arg(2, "icosphere:4");
+    let n: usize = arg(3, "6").parse().unwrap();
+    let ripple: f64 = arg(4, "0.5").parse().unwrap();
+    let energy = energy_named(&arg(5, "scaled"));
+    let steps: usize = arg(6, "1000").parse().unwrap();
+    let model = load(&path);
+    let nv = model.mesh.n_vertices();
+    let mut rng = ddg_core::generators::SplitMix64::new(17);
+    let random: Vec<u32> = (0..nv)
+        .map(|_| (rng.next_u64() % n as u64) as u32)
+        .collect();
+    let kinds: Vec<(&str, Vec<u32>)> = vec![
+        (
+            "clusters of normals",
+            ddg_variational_cuts::init::normal_clusters(&model.mesh, &model.positions, n, 100)
+                .unwrap(),
+        ),
+        (
+            "cells of seed vertices (from vertex 0)",
+            voronoi_labels(&model.positions, n, 0),
+        ),
+        (
+            "cells of seed vertices (from the middle vertex)",
+            voronoi_labels(&model.positions, n, nv / 2),
+        ),
+        ("random label per vertex", random),
+    ];
+    let stages = arg(7, "paper");
+    println!(
+        "{path}: {nv} vertices, {n} regions, energy {}, ripples longer than {ripple} grow, {stages} stages",
+        arg(5, "scaled")
+    );
+    let mut results = Vec::new();
+    for (name, labels) in &kinds {
+        let outcome = run_from_labels(&model, labels, n, &energy, ripple, &stages, steps);
+        println!("  {name}: {}", outcome.line);
+        results.push(outcome.adjacent);
+    }
+    // Proximity: breadth-first rings from the cut-adjacent vertices.
+    let near = |adjacent: &[bool]| {
+        let mut ring: Vec<bool> = adjacent.to_vec();
+        for _ in 0..2 {
+            let mut next = ring.clone();
+            for &[a, b] in model.mesh.edges() {
+                if ring[a as usize] || ring[b as usize] {
+                    next[a as usize] = true;
+                    next[b as usize] = true;
+                }
+            }
+            ring = next;
+        }
+        ring
+    };
+    println!("  share of the cut of the row within two edges of the cut of the column:");
+    for (i, a) in results.iter().enumerate() {
+        let mut line = format!("    {:<48}", kinds[i].0);
+        for b in &results {
+            let close = near(b);
+            let (inside, all) = a
+                .iter()
+                .zip(&close)
+                .filter(|(x, _)| **x)
+                .fold((0usize, 0usize), |(i, n), (_, c)| {
+                    (i + usize::from(*c), n + 1)
+                });
+            line += &format!(" {:>5.1} %", 100.0 * inside as f64 / all.max(1) as f64);
+        }
+        println!("{line}");
+    }
+}
+
+/// `timings [MESH...]`: one step for 2, 4 and 8 regions on every mesh, one thread, seconds
+/// (median of five steps after the first).
+fn timings() {
+    let mut paths: Vec<String> = std::env::args().skip(2).collect();
+    if paths.is_empty() {
+        paths.push("icosphere:6".to_string());
+    }
+    for path in &paths {
+        let model = load(path);
+        println!("{path}: {} vertices", model.mesh.n_vertices());
+        for n in [2usize, 4, 8] {
+            let labels =
+                ddg_variational_cuts::init::normal_clusters(&model.mesh, &model.positions, n, 100)
+                    .unwrap();
+            let phis = ddg_variational_cuts::init::regions_from_vertex_labels(
+                &model.mesh,
+                &model.geometry,
+                &labels,
+                n,
+            )
+            .unwrap();
+            for stages in ["default", "paper"] {
+                let mut flow = RegionFlow::new(&model.mesh, &model.geometry, &phis).unwrap();
+                let mut problem = CutProblem::for_regions(Energy::Hencky, 0.0, n);
+                let options = options_for(stages, StepSize::Fixed(1e-7));
+                let omega = flow.roughening_rate(&problem, &options.eval).unwrap();
+                problem.length_weight =
+                    ddg_variational_cuts::length_weight_for_ripples(omega, 0.25);
+                let mut rows: Vec<[f64; 5]> = Vec::new();
+                let mut points = 0;
+                for _ in 0..6 {
+                    let clock = std::time::Instant::now();
+                    let r = flow.step(&problem, &options).unwrap();
+                    let total = clock.elapsed().as_secs_f64();
+                    let t = r.timings;
+                    rows.push([t.evaluate, t.length, t.extension, t.redistance, total]);
+                    points = r.n_cut_points;
+                }
+                let median = |k: usize| {
+                    let mut column: Vec<f64> = rows[1..].iter().map(|r| r[k]).collect();
+                    column.sort_by(f64::total_cmp);
+                    column[column.len() / 2]
+                };
+                println!(
+                    "  N = {n}, {stages} stages ({points} cut points): evaluate {:.4}  length {:.4}  extension {:.4}  redistance {:.4}  step {:.4}",
+                    median(0),
+                    median(1),
+                    median(2),
+                    median(3),
+                    median(4)
+                );
+            }
+        }
+    }
+}
+
 fn main() {
     match std::env::args().nth(1).unwrap_or_default().as_str() {
         "honeycomb" => honeycomb_run(),
         "stripes" => stripes_run(),
+        "atlas" => atlas(),
+        "starts" => starts(),
+        "timings" => timings(),
         other => eprintln!("unknown experiment {other:?}; see the top of the example"),
     }
 }
