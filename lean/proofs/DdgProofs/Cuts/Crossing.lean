@@ -22,6 +22,9 @@ scalar-generic definitions (`lean/oracle/DdgOracle/Formulas/Cuts.lean`) instanti
   `norm_sq_sum_smul_of_sum_eq_zero`). For side lengths that satisfy the triangle inequalities the
   expression is nonnegative, so the floor at `0` in `baryLength` is inactive in exact arithmetic
   (`baryLength2_nonneg`).
+  The polarization `Ddg.baryInner` is the inner product of two such vectors
+  (`baryInner_eq_inner`), and `Ddg.cotFromInner ⟨y − x, z − x⟩ area` is the cotangent of the
+  corner `x` of a sub-triangle (`cotFromInner_eq_cornerCot`; SPEC D13a).
 * **`cut-subtriangle-area`** (`Ddg.det3`, `Ddg.subTriangleArea`): the Heron area of the triangle
   whose three sides are computed by `baryLength` from three barycentric rows is
   `|det(rows)| · A_f` (`subTriangleArea_eq_triArea`; for points: `triArea_bary_points`). The
@@ -388,6 +391,83 @@ theorem triArea_bary_points {E : Type*} [NormedAddCommGroup E] [InnerProductSpac
   rw [← baryLength_eq_dist Pa Pb Pc hx hy, ← baryLength_eq_dist Pa Pb Pc hy hz,
     ← baryLength_eq_dist Pa Pb Pc hz hx, ← subTriangleArea_eq_triArea h hx hy hz,
     subTriangleArea_eq]
+
+/-! ## Inner product of barycentric differences and the cotangents of a sub-triangle -/
+
+/-- The oracle's `baryInner` at `ℝ`. -/
+theorem baryInner_eq (lab lbc lca da db dc ea eb ec : ℝ) :
+    Ddg.baryInner lab lbc lca da db dc ea eb ec =
+      -(1 / 2) * ((da * eb + db * ea) * lab ^ 2 + (db * ec + dc * eb) * lbc ^ 2 +
+        (dc * ea + da * ec) * lca ^ 2) := by
+  simp only [Ddg.baryInner, Oracle.two_eq]
+  ring
+
+/-- `baryInner` is the polarization of `baryLength2`: `⟨d, d⟩ = |d|²`. -/
+theorem baryInner_self (lab lbc lca da db dc : ℝ) :
+    Ddg.baryInner lab lbc lca da db dc da db dc = Ddg.baryLength2 lab lbc lca da db dc := by
+  rw [baryInner_eq, baryLength2_eq]
+  ring
+
+/-- **Barycentric inner product** (SPEC §3.3, D13a). For points `P_a, P_b, P_c` of a real inner
+product space and two barycentric differences `d`, `e` (each with sum `0`), the oracle's
+`baryInner` of the three side lengths is the inner product of the two vectors
+`Σ d_i P_i` and `Σ e_i P_i`.
+
+[formula: cut-barycentric-length] -/
+theorem baryInner_eq_inner {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E]
+    (Pa Pb Pc : E) {da db dc ea eb ec : ℝ} (hd : da + db + dc = 0) (he : ea + eb + ec = 0) :
+    Ddg.baryInner ‖Pa - Pb‖ ‖Pb - Pc‖ ‖Pc - Pa‖ da db dc ea eb ec =
+      inner ℝ (da • Pa + db • Pb + dc • Pc) (ea • Pa + eb • Pb + ec • Pc) := by
+  have h1 := baryLength2_eq_norm_sq Pa Pb Pc hd
+  have h2 := baryLength2_eq_norm_sq Pa Pb Pc he
+  have h3 := baryLength2_eq_norm_sq Pa Pb Pc
+    (show (da + ea) + (db + eb) + (dc + ec) = 0 by linarith)
+  have e : (da + ea) • Pa + (db + eb) • Pb + (dc + ec) • Pc =
+      (da • Pa + db • Pb + dc • Pc) + (ea • Pa + eb • Pb + ec • Pc) := by module
+  rw [e, norm_add_sq_real] at h3
+  rw [baryLength2_eq] at h1 h2 h3
+  rw [baryInner_eq]
+  linear_combination (1 / 2 : ℝ) * h3 - (1 / 2 : ℝ) * h1 - (1 / 2 : ℝ) * h2
+
+/-- **Cotangent of a corner of a sub-triangle** (SPEC §3.3, D13a). Parent face with side lengths
+`ℓ_ab, ℓ_bc, ℓ_ca` (strict triangle inequalities) and area `A_f`; sub-triangle `xyz` given by
+barycentric rows (each with sum `1`). The oracle's
+`cotFromInner ⟨y − x, z − x⟩ (|det| · A_f) = ⟨y − x, z − x⟩ / (2 · area)` is the cotangent
+`cornerCot` of the corner at `x` of the triangle whose side lengths are the `baryLength`s
+(so it is the cotangent that the three edge lengths would give, without their cancellation).
+
+[formula: cut-barycentric-length] -/
+theorem cotFromInner_eq_cornerCot {lab lbc lca : ℝ} (h : IsTriangle lab lbc lca)
+    {x0 x1 x2 y0 y1 y2 z0 z1 z2 : ℝ}
+    (hx : x0 + x1 + x2 = 1) (hy : y0 + y1 + y2 = 1) (hz : z0 + z1 + z2 = 1) :
+    Ddg.cotFromInner
+        (Ddg.baryInner lab lbc lca (y0 - x0) (y1 - x1) (y2 - x2) (z0 - x0) (z1 - x1) (z2 - x2))
+        (Ddg.subTriangleArea (Ddg.det3 x0 x1 x2 y0 y1 y2 z0 z1 z2) (triArea lab lbc lca)) =
+      cornerCot (Ddg.baryLength lab lbc lca (y0 - z0) (y1 - z1) (y2 - z2))
+        (Ddg.baryLength lab lbc lca (z0 - x0) (z1 - x1) (z2 - x2))
+        (Ddg.baryLength lab lbc lca (x0 - y0) (x1 - y1) (x2 - y2)) := by
+  have hq1 := baryLength2_nonneg h (by linarith : (x0 - y0) + (x1 - y1) + (x2 - y2) = 0)
+  have hq2 := baryLength2_nonneg h (by linarith : (y0 - z0) + (y1 - z1) + (y2 - z2) = 0)
+  have hq3 := baryLength2_nonneg h (by linarith : (z0 - x0) + (z1 - x1) + (z2 - x2) = 0)
+  have hp : ∀ da db dc : ℝ, 0 ≤ Ddg.baryLength2 lab lbc lca da db dc →
+      Ddg.baryLength lab lbc lca da db dc ^ 2 = Ddg.baryLength2 lab lbc lca da db dc := by
+    intro da db dc hq
+    rw [baryLength_eq, max_eq_right hq, Real.sq_sqrt hq]
+  have key : Ddg.baryLength2 lab lbc lca (z0 - x0) (z1 - x1) (z2 - x2) +
+      Ddg.baryLength2 lab lbc lca (x0 - y0) (x1 - y1) (x2 - y2) -
+      Ddg.baryLength2 lab lbc lca (y0 - z0) (y1 - z1) (y2 - z2) =
+      2 * Ddg.baryInner lab lbc lca (y0 - x0) (y1 - x1) (y2 - x2) (z0 - x0) (z1 - x1)
+        (z2 - x2) := by
+    rw [baryInner_eq]
+    simp only [baryLength2_eq]
+    ring
+  unfold cornerCot
+  rw [triArea_rotate (Ddg.baryLength lab lbc lca (x0 - y0) (x1 - y1) (x2 - y2))
+      (Ddg.baryLength lab lbc lca (y0 - z0) (y1 - z1) (y2 - z2))
+      (Ddg.baryLength lab lbc lca (z0 - x0) (z1 - x1) (z2 - x2)),
+    ← subTriangleArea_eq_triArea h hx hy hz, hp _ _ _ hq3, hp _ _ _ hq1, hp _ _ _ hq2, key]
+  simp only [Ddg.cotFromInner, Oracle.two_eq]
+  ring
 
 /-- **The sub-triangles of a cut face fill it**, quad split by the diagonal `p–c`. Face `abc`
 with cut vertices `p = (1 − t)a + t b`, `q = (1 − s)a + s c`: the determinants of the barycentric

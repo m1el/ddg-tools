@@ -19,7 +19,10 @@ boundary vertices of `M`):
   With `B` the boundary vertices this is the sum of the angle defects of the interior vertices,
   `2πχ − Σ_B k` by Gauss–Bonnet, and `2πχ` on a closed mesh
   (`TriMesh.sum_faceCurvature_add_geodesicCurvature`, `TriMesh.sum_faceCurvature_closed`).
-* `Cuts.face_omega_eq`, `Cuts.sum_face_omega`: the same about the oracle's `Ddg.Face.omega`.
+* `TriMesh.faceCurvature_eq_sum_defect`: the cancellation-free form
+  `Ω_f = Σ θ_i (2π − Θ_i)/Θ_i` over the corners `i ∉ B` (SPEC D13e) is the same number.
+* `Cuts.face_omega_eq`, `Cuts.sum_face_omega`: the same about the oracle's `Ddg.Face.omega`;
+  `Cuts.face_omegaCancellationFree_eq`: the oracle's `Face.omegaCancellationFree` equals it.
 
 **Hypothesis that SPEC does not state.** The identity needs `Θ_i ≠ 0` at every `i ∉ B`, i.e.
 every such vertex lies in a face (`TriMesh.angleSum_pos`). A vertex in no face contributes `2π`
@@ -121,6 +124,40 @@ theorem faceCurvature_of_mem (hM : M.Valid) {B : Finset V} {f : F} (ha : M.a f �
   have e3 : M.angleAt f (M.c f) = M.angleC f := by simp [angleAt, hM.ca f, (hM.bc f).symm]
   simp only [faceCurvature, normAngleAt, ite_eq_left ha, ite_eq_left hb, ite_eq_left hc, e1, e2, e3]
   unfold angleA angleB angleC
+  linarith
+
+omit [Fintype V] in
+/-- **Cancellation-free form of the face curvature** (SPEC §3.1, D13e). Because the three corner
+angles sum to `π`, `Ω_f = Σ θ_i (2π − Θ_i)/Θ_i` over the corners `i ∉ B` of `f`. (On a valid
+mesh the angle sums at the corners of a face are positive, so no further hypothesis is needed.)
+
+[formula: cut-face-curvature] -/
+theorem faceCurvature_eq_sum_defect (hM : M.Valid) (B : Finset V) (f : F) :
+    M.faceCurvature B f =
+      (if M.a f ∈ B then 0
+        else M.angleA f * (2 * π - M.angleSum (M.a f)) / M.angleSum (M.a f)) +
+      (if M.b f ∈ B then 0
+        else M.angleB f * (2 * π - M.angleSum (M.b f)) / M.angleSum (M.b f)) +
+      (if M.c f ∈ B then 0
+        else M.angleC f * (2 * π - M.angleSum (M.c f)) / M.angleSum (M.c f)) := by
+  have h := cornerAngle_add_cornerAngle_add_cornerAngle (hM.tri f)
+  have e1 : M.angleAt f (M.a f) = M.angleA f := by simp [angleAt]
+  have e2 : M.angleAt f (M.b f) = M.angleB f := by simp [angleAt, (hM.ab f).symm]
+  have e3 : M.angleAt f (M.c f) = M.angleC f := by simp [angleAt, hM.ca f, (hM.bc f).symm]
+  have hΘa : M.angleSum (M.a f) ≠ 0 := (M.angleSum_pos hM ⟨f, Or.inl rfl⟩).ne'
+  have hΘb : M.angleSum (M.b f) ≠ 0 := (M.angleSum_pos hM ⟨f, Or.inr (Or.inl rfl)⟩).ne'
+  have hΘc : M.angleSum (M.c f) ≠ 0 := (M.angleSum_pos hM ⟨f, Or.inr (Or.inr rfl)⟩).ne'
+  have key : ∀ (v : V) (θ : ℝ), M.angleSum v ≠ 0 →
+      (if v ∈ B then θ else θ * (2 * π) / M.angleSum v) =
+        θ + (if v ∈ B then 0 else θ * (2 * π - M.angleSum v) / M.angleSum v) := by
+    intro v θ hv
+    split_ifs
+    · ring
+    · field_simp
+      ring
+  unfold faceCurvature normAngleAt
+  rw [e1, e2, e3, key _ _ hΘa, key _ _ hΘb, key _ _ hΘc]
+  unfold angleA angleB angleC at *
   linarith
 
 /-- **Total face curvature.** On a valid mesh, if every vertex outside `B` has a nonzero angle
@@ -259,6 +296,43 @@ theorem face_omega_eq (hv : Oracle.MeshValid faces len nv) (B : Finset (Fin nv))
   unfold TriMesh.faceCurvature TriMesh.normAngleAt
   rw [ha, hb, hc]
   simp only [Oracle.pi_eq, Ddg.Face.angleA, Ddg.Face.angleB, Ddg.Face.angleC,
+    Oracle.cornerAngle_eq ht, Oracle.cornerAngle_eq ht.rotate,
+    Oracle.cornerAngle_eq ht.rotate.rotate]
+  rfl
+
+/-- **The oracle's cancellation-free form is the same number** (SPEC §3.1, D13e): on a valid
+mesh `Face.omegaCancellationFree = Face.omega` in exact arithmetic.
+
+[formula: cut-face-curvature] -/
+theorem face_omegaCancellationFree_eq (hv : Oracle.MeshValid faces len nv) (B : Finset (Fin nv))
+    (isB : ℕ → Bool) (hB : ∀ v : Fin nv, isB v = true ↔ v ∈ B) (k : Fin faces.length) :
+    (faces.get k).omegaCancellationFree len (Ddg.angleSum faces len) isB =
+      (faces.get k).omega len (Ddg.angleSum faces len) isB := by
+  have hM := Oracle.toTriMesh_valid hv
+  have ht := hv.tri _ (List.get_mem faces k)
+  have hlt := hv.lt _ (List.get_mem faces k)
+  have term : ∀ {i : ℕ} (hi : i < nv) (θ : ℝ),
+      (if isB i = true then (0 : ℝ)
+        else θ * (2 * π - Ddg.angleSum faces len i) / Ddg.angleSum faces len i) =
+      if (⟨i, hi⟩ : Fin nv) ∈ B then 0
+      else θ * (2 * π - (Oracle.toTriMesh faces len nv hv.lt).angleSum ⟨i, hi⟩) /
+        (Oracle.toTriMesh faces len nv hv.lt).angleSum ⟨i, hi⟩ := by
+    intro i hi θ
+    have h := Oracle.angleSum_eq hv ⟨i, hi⟩
+    simp only at h
+    have hB' := hB ⟨i, hi⟩
+    simp only at hB'
+    rw [h]
+    by_cases hm : (⟨i, hi⟩ : Fin nv) ∈ B
+    · rw [ite_eq_left hm, ite_eq_left (hB'.mpr hm)]
+    · have : ¬(isB i = true) := fun h' => hm (hB'.mp h')
+      rw [ite_eq_right hm, ite_eq_right this]
+  rw [face_omega_eq hv B isB hB k,
+    (Oracle.toTriMesh faces len nv hv.lt).faceCurvature_eq_sum_defect hM B k]
+  unfold Ddg.Face.omegaCancellationFree
+  simp only [Oracle.zero_eq, Oracle.two_eq, Oracle.pi_eq]
+  rw [term hlt.1, term hlt.2.1, term hlt.2.2]
+  simp only [Ddg.Face.angleA, Ddg.Face.angleB, Ddg.Face.angleC,
     Oracle.cornerAngle_eq ht, Oracle.cornerAngle_eq ht.rotate,
     Oracle.cornerAngle_eq ht.rotate.rotate]
   rfl

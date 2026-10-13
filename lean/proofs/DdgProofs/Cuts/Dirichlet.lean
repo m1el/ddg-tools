@@ -383,6 +383,71 @@ theorem gradPointwise_eq (b0 v q ℓ : ℝ) :
   unfold Ddg.gradPointwise Ddg.normalDerivative
   ring
 
+/-! ### The densities in terms of recovered normal derivatives
+
+SPEC §3.6 evaluates the densities at `d ≈ ∂u/∂n`, `e ≈ ∂p/∂n` recovered from the integrated
+fluxes (`cut-flux-recovery`, `DdgProofs/Cuts/Recovery.lean`); with the nodal recovery `d = v/ℓ`,
+`e = q/ℓ` they are the expressions above. -/
+
+/-- The oracle's `gradDirichletD` at `ℝ`: `G = d²`. -/
+theorem gradDirichletD_eq (d : ℝ) : Ddg.gradDirichletD d = d ^ 2 := by
+  unfold Ddg.gradDirichletD
+  ring
+
+/-- The oracle's `gradScaledD` at `ℝ`: `G = −a d² − d e`. -/
+theorem gradScaledD_eq (a d e : ℝ) : Ddg.gradScaledD a d e = -(a * d ^ 2) - d * e := by
+  unfold Ddg.gradScaledD
+  ring
+
+/-- The oracle's `gradPointwiseD` at `ℝ`: `G = b(0) − d e`. -/
+theorem gradPointwiseD_eq (b0 d e : ℝ) : Ddg.gradPointwiseD b0 d e = b0 - d * e := rfl
+
+/-- The Dirichlet density is nonnegative.
+
+[formula: cut-gradient-dirichlet] -/
+theorem gradDirichletD_nonneg (d : ℝ) : 0 ≤ Ddg.gradDirichletD d := by
+  rw [gradDirichletD_eq]
+  positivity
+
+/-- **With the nodal recovery `d = v/ℓ` the Dirichlet density is the paper's `(v/ℓ)²`.**
+
+[formula: cut-gradient-dirichlet] -/
+theorem gradDirichletD_nodal (v ℓ : ℝ) :
+    Ddg.gradDirichletD (Ddg.normalDerivative v ℓ) = Ddg.gradDirichlet v ℓ := by
+  rw [gradDirichletD_eq, gradDirichlet_eq]
+
+/-- **With the nodal recovery the scaled density is the paper's.**
+
+[formula: cut-gradient-scaled] -/
+theorem gradScaledD_nodal (a v q ℓ : ℝ) :
+    Ddg.gradScaledD a (Ddg.normalDerivative v ℓ) (Ddg.normalDerivative q ℓ) =
+      Ddg.gradScaled a v q ℓ := by
+  rw [gradScaledD_eq, gradScaled_eq]
+
+/-- **With the nodal recovery the pointwise density is the paper's.**
+
+[formula: cut-gradient-pointwise] -/
+theorem gradPointwiseD_nodal (b0 v q ℓ : ℝ) :
+    Ddg.gradPointwiseD b0 (Ddg.normalDerivative v ℓ) (Ddg.normalDerivative q ℓ) =
+      Ddg.gradPointwise b0 v q ℓ := by
+  rw [gradPointwiseD_eq, gradPointwise_eq]
+
+/-- **With a constant weight `c` and `e = −2c·d` the scaled density is `c` times the Dirichlet
+density** (`e = −2c·d` because `q = −2c·v`, `scaledAdjoint_const`, and the recovery is linear).
+
+[formula: cut-gradient-scaled] -/
+theorem gradScaledD_const (c d : ℝ) :
+    Ddg.gradScaledD c d (-2 * c * d) = c * Ddg.gradDirichletD d := by
+  rw [gradScaledD_eq, gradDirichletD_eq]
+  ring
+
+/-- **With `a ≡ 1`, `e = −2d`, the scaled density is the Dirichlet density.**
+
+[formula: cut-gradient-scaled] -/
+theorem gradScaledD_one (d : ℝ) : Ddg.gradScaledD 1 d (-2 * d) = Ddg.gradDirichletD d := by
+  have := gradScaledD_const 1 d
+  simpa using this
+
 /-! ## The adjoint of the scaled Dirichlet energy -/
 
 /-- Right-hand side of the adjoint of the scaled energy (SPEC §3.6), from the oracle's entries:
