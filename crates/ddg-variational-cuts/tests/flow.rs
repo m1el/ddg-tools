@@ -1225,3 +1225,135 @@ fn cut_as_polylines() {
         ddg_variational_cuts::Cut::from_level_set(&s.mesh, &vec![1.0; phi.len()], 0.0).unwrap();
     assert!(none.polylines(&s.mesh, &s.positions).unwrap().is_empty());
 }
+
+/// SPEC §4 (D22): the weighted quantile that the roughening rate and the step rule use.
+#[test]
+fn weighted_quantile_of_the_step_rule() {
+    use ddg_variational_cuts::weighted_quantile;
+    let values = [3.0, 1.0, 2.0, 1.0e6];
+    let weights = [1.0, 1.0, 1.0, 0.01];
+    // In ascending order the weights add up to 1, 2, 3, 3.01.
+    assert_eq!(weighted_quantile(&values, &weights, 1.0), 1.0e6);
+    assert_eq!(weighted_quantile(&values, &weights, 0.9), 3.0);
+    assert_eq!(weighted_quantile(&values, &weights, 0.5), 2.0);
+    assert_eq!(weighted_quantile(&values, &weights, 0.33), 1.0);
+    // Equal values keep the order of their index; a single value is every quantile.
+    assert_eq!(weighted_quantile(&[5.0, 5.0], &[1.0, 3.0], 0.2), 5.0);
+    assert_eq!(weighted_quantile(&[7.0], &[2.0], 0.9), 7.0);
+    assert_eq!(weighted_quantile(&[], &[], 0.9), 0.0);
+    // Negative values are ordered like any others.
+    assert_eq!(
+        weighted_quantile(&[-2.0, 4.0, -1.0], &[1.0, 1.0, 1.0], 0.6),
+        -1.0
+    );
+}
+
+/// SPEC §1, §4, D22: one spike of curvature on the cut does not set the roughening rate, the
+/// automatic length weight or the step. A sphere cut along a latitude circle, with the density
+/// of the curvature raised in one face next to the cut, against the same sphere without the
+/// spike.
+#[test]
+fn one_spike_does_not_set_the_length_weight_or_the_step() {
+    use ddg_variational_cuts::{CurvatureSource, StepStatistics, length_weight_for_ripples};
+    let s = sphere(3);
+    // The vertex nearest to the circle of polar angle 1.
+    let spike = (0..s.positions.len())
+        .min_by(|a, b| {
+            let d = |v: usize| (polar_angle(s.positions[v]) - 1.0).abs();
+            d(*a).total_cmp(&d(*b))
+        })
+        .unwrap() as u32;
+    let plain = vec![4.0 * PI; s.mesh.n_faces()];
+    // One face at that vertex carries 300 times the density (a fifth of the total curvature).
+    let face = s
+        .mesh
+        .faces()
+        .iter()
+        .position(|face| face.contains(&spike))
+        .unwrap();
+    let mut spiked = plain.clone();
+    spiked[face] *= 300.0;
+    let phi0 = s.sample(|p| polar_angle(p) - 1.0);
+    let step = StepSize::default();
+    let mut rows = Vec::new();
+    for (name, density) in [("sphere", plain), ("sphere with a spike", spiked)] {
+        let mut flow = Flow::new(&s.mesh, &s.geometry, &phi0).unwrap();
+        flow.redistance().unwrap();
+        let mut problem = CutProblem {
+            curvature: CurvatureSource::PerFace(density),
+            ..CutProblem::new(Energy::Dirichlet, 0.0)
+        };
+        let omega = flow
+            .roughening_rate(&problem, &EvalOptions::default())
+            .unwrap();
+        problem.length_weight = length_weight_for_ripples(omega, 0.25);
+        let start = flow.level_set();
+        let robust = flow.step(&problem, &FlowOptions::new(step)).unwrap();
+        assert_eq!(robust.roughening_rate, omega);
+        flow.set_level_set(&start).unwrap();
+        let extremes = flow
+            .step(
+                &problem,
+                &FlowOptions {
+                    step_statistics: StepStatistics::Extremes,
+                    ..FlowOptions::new(step)
+                },
+            )
+            .unwrap();
+        assert_eq!(extremes.n_limited, 0);
+        // Ten steps with the robust statistics: the energy falls.
+        flow.set_level_set(&start).unwrap();
+        let report = flow
+            .run(
+                &problem,
+                &FlowOptions::new(step),
+                &StopRule {
+                    max_steps: 10,
+                    motion_tolerance: 0.0,
+                    energy_tolerance: 0.0,
+                    energy_window: 1,
+                },
+            )
+            .unwrap();
+        println!(
+            "{name}: omega {:.3} (largest local rate {:.3e}), alpha_L {:.4}; tau {:.3e} with the robust statistics ({} cut points limited), {:.3e} with the extremes; energy over ten steps {:.5} -> {:.5}, time {:.3e}",
+            omega,
+            robust.roughening_rate_max,
+            problem.length_weight,
+            robust.tau,
+            robust.n_limited,
+            extremes.tau,
+            report.steps[0].energy.total,
+            report.final_energy.total,
+            flow.time()
+        );
+        assert!(report.final_energy.total < report.steps[0].energy.total);
+        rows.push((
+            omega,
+            robust.roughening_rate_max,
+            robust.tau,
+            extremes.tau,
+            robust.n_limited,
+        ));
+    }
+    let (plain, with_spike) = (rows[0], rows[1]);
+    // Without a spike the two statistics see the same cut: the quantile is the maximum up to
+    // the variation of the rate along a latitude circle of the icosphere.
+    assert!(plain.1 / plain.0 < 1.2, "{plain:?}");
+    // With it the largest local rate is far above the rate of the state.
+    // Measured: 1724 against 148 (and 92 without the spike).
+    assert!(with_spike.1 > 8.0 * with_spike.0, "{with_spike:?}");
+    // The step: the extremes shrink it by the spike, the robust statistics do not, and the cut
+    // points at the spike take a smaller step of their own.
+    // Measured: 2.9e-5 with the extremes, 2.8e-4 with the robust statistics (3.2e-4 without the
+    // spike), 14 of 86 cut points limited.
+    assert!(with_spike.3 < 0.2 * with_spike.2, "{rows:?}");
+    assert!(with_spike.2 > 0.5 * plain.2, "{rows:?}");
+    assert!(with_spike.4 >= 1 && with_spike.4 <= 20, "{rows:?}");
+    // The rate of the state, and with it the automatic length weight, moves by less than a
+    // factor of two (the spike adds a fifth to the total curvature).
+    assert!(
+        with_spike.0 < 2.0 * plain.0 && with_spike.0 > plain.0,
+        "{rows:?}"
+    );
+}

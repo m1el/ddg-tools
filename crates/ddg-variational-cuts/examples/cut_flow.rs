@@ -427,7 +427,7 @@ fn run() -> Result<(), AnyError> {
         "step,time,tau,energy,distortion_0,distortion_1,area_0,area_1,length,penalty,max_speed,\
          max_length_speed,roughening_rate,cut_motion,cut_points,clamped,unreached,\
          uncut_components,grad_min,grad_mean,grad_max,t_evaluate,t_extension,t_length,\
-         t_redistance\n",
+         t_redistance,roughening_rate_max,limited,step_speed,shortest_crossed_edge\n",
     );
     for (k, r) in report.steps.iter().enumerate() {
         let e = &r.energy;
@@ -440,7 +440,7 @@ fn run() -> Result<(), AnyError> {
             });
         writeln!(
             csv,
-            "{k},{:e},{:e},{:.12e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{},{},{},{},{:.4},{:.4},{:.4},{:.3e},{:.3e},{:.3e},{:.3e}",
+            "{k},{:e},{:e},{:.12e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{},{},{},{},{:.4},{:.4},{:.4},{:.3e},{:.3e},{:.3e},{:.3e},{:e},{},{:e},{:e}",
             r.time,
             r.tau,
             e.total,
@@ -464,7 +464,11 @@ fn run() -> Result<(), AnyError> {
             r.timings.evaluate,
             r.timings.extension,
             r.timings.length,
-            r.timings.redistance
+            r.timings.redistance,
+            r.roughening_rate_max,
+            r.n_limited,
+            r.step_speed,
+            r.shortest_crossed_edge
         )?;
     }
     std::fs::write(out.join("steps.csv"), csv)?;
@@ -577,12 +581,12 @@ fn run_regions(
     let mut csv = String::from(
         "step,time,tau,energy,distortion,length,penalty,max_speed,max_length_speed,\
          roughening_rate,cut_motion,cut_points,clamped,unreached,t_evaluate,t_extension,\
-         t_length,t_redistance\n",
+         t_length,t_redistance,roughening_rate_max,limited,step_speed,shortest_crossed_edge\n",
     );
     for (k, r) in report.steps.iter().enumerate() {
         writeln!(
             csv,
-            "{k},{:e},{:e},{:.12e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{},{},{},{:.3e},{:.3e},{:.3e},{:.3e}",
+            "{k},{:e},{:e},{:.12e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{},{},{},{:.3e},{:.3e},{:.3e},{:.3e},{:e},{},{:e},{:e}",
             r.time,
             r.tau,
             r.energy.total,
@@ -599,7 +603,11 @@ fn run_regions(
             r.timings.evaluate,
             r.timings.extension,
             r.timings.length,
-            r.timings.redistance
+            r.timings.redistance,
+            r.roughening_rate_max,
+            r.n_limited,
+            r.step_speed,
+            r.shortest_crossed_edge
         )?;
     }
     std::fs::write(out.join("steps.csv"), csv)?;

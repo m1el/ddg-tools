@@ -730,18 +730,23 @@ fn fig5() {
     println!("  start x = {x0}, at most {motion} of an edge per step");
     let phi0: Vec<f64> = s.positions.iter().map(|p| p[0] - x0).collect();
     for (name, energy) in [("Dirichlet", Energy::Dirichlet), ("Hencky", Energy::Hencky)] {
-        // The roughening rate of a cut through the top of the bump sets the scale of the length
-        // weight: with alpha_L = omega * l / (2 pi), ripples longer than l grow there.
+        // The local roughening rate at the top of the bump (the largest one of a cut through
+        // it) sets the scale of the length weight: with alpha_L = omega * l / (2 pi), ripples
+        // longer than l grow there. The rate of that state (the 0.9-quantile, SPEC D22) is
+        // printed next to it: most of the line is flat.
         let through: Vec<f64> = s.positions.iter().map(|p| p[0] - 0.5 - 1e-3).collect();
         let mut probe = Flow::new(&s.mesh, &s.geometry, &through).unwrap();
-        let omega_bump = probe
+        let probed = probe
             .step(
                 &CutProblem::new(energy.clone(), 0.0),
                 &FlowOptions::new(StepSize::Fixed(1e-12)),
             )
-            .unwrap()
-            .roughening_rate;
-        println!("  {name}: roughening rate of the cut x = 0.5: {omega_bump:.4}");
+            .unwrap();
+        let omega_bump = probed.roughening_rate_max;
+        println!(
+            "  {name}: largest local roughening rate of the cut x = 0.5: {omega_bump:.4} (rate of the state {:.4})",
+            probed.roughening_rate
+        );
         let wavelengths: Vec<f64> = std::env::var("STUDY_WAVELENGTHS").map_or_else(
             |_| vec![0.8, 0.4, 0.2],
             |v| v.split(',').map(|x| x.parse().unwrap()).collect(),
@@ -943,6 +948,94 @@ fn speeds() {
     }
 }
 
+/// `omega MESH.obj [ENERGY]`: how the local roughening rate `ω_c = 2 Σ_r Q_r,c` and the speed
+/// are distributed along a planar cut (the start of `cut_flow`): quantiles weighted by the
+/// length of the cut at each cut point.
+fn omega() {
+    let path = std::env::args().nth(2).unwrap();
+    let energy = match std::env::args().nth(3).as_deref() {
+        Some("dirichlet") => Energy::Dirichlet,
+        _ => Energy::Hencky,
+    };
+    let s = if let Some(level) = path.strip_prefix("icosphere:") {
+        sphere(level.parse().unwrap())
+    } else {
+        let obj = ddg_core::io::read_obj(&path).unwrap();
+        shape(obj.positions.clone(), obj.triangles().unwrap())
+    };
+    let n = s.positions.len() as f64;
+    let centroid = [0, 1, 2].map(|k| s.positions.iter().map(|p| p[k]).sum::<f64>() / n);
+    let extent = [0, 1, 2].map(|k| {
+        let (lo, hi) = s
+            .positions
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+                (lo.min(p[k]), hi.max(p[k]))
+            });
+        hi - lo
+    });
+    let axis = (0..3)
+        .max_by(|a, b| extent[*a].total_cmp(&extent[*b]))
+        .unwrap();
+    let phi: Vec<f64> = s
+        .positions
+        .iter()
+        .map(|p| p[axis] - centroid[axis])
+        .collect();
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &phi).unwrap();
+    flow.redistance().unwrap();
+    let problem = CutProblem::new(energy, 0.0);
+    let e = flow.evaluate(&problem, &EvalOptions::default()).unwrap();
+    let tri = &e.triangles;
+    let n_points = e.cut.points.len();
+    let mut dual = vec![0.0; n_points];
+    for (segment, length) in e.cut.segments.iter().zip(&tri.segment_length) {
+        for p in segment.points {
+            dual[p as usize] += 0.5 * length;
+        }
+    }
+    let local: Vec<f64> = (0..n_points)
+        .map(|p| {
+            2.0 * tri
+                .point_vertices(p)
+                .iter()
+                .map(|&v| e.gradient[v])
+                .sum::<f64>()
+        })
+        .collect();
+    let quantiles = |values: &[f64]| {
+        let mut order: Vec<usize> = (0..values.len()).collect();
+        order.sort_by(|a, b| values[*a].total_cmp(&values[*b]));
+        let total: f64 = dual.iter().sum();
+        [0.1, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0].map(|q| {
+            let mut seen = 0.0;
+            for &i in &order {
+                seen += dual[i];
+                if seen >= q * total {
+                    return values[i];
+                }
+            }
+            values[order[order.len() - 1]]
+        })
+    };
+    let total: f64 = dual.iter().sum();
+    let mean = |values: &[f64]| values.iter().zip(&dual).map(|(x, l)| x * l).sum::<f64>() / total;
+    let speed: Vec<f64> = e.speed.iter().map(|x| x.abs()).collect();
+    println!(
+        "{path}: {} vertices, {n_points} cut points, cut length {total:.4}; quantiles 10 50 75 90 95 99 100 %, weighted by length",
+        s.positions.len()
+    );
+    let row = |values: &[f64]| {
+        quantiles(values)
+            .iter()
+            .map(|x| format!("{x:>10.3e}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    println!("  omega_c: {}  mean {:.3e}", row(&local), mean(&local));
+    println!("  |s_c|:   {}  mean {:.3e}", row(&speed), mean(&speed));
+}
+
 fn main() {
     let what = std::env::args().nth(1).unwrap_or_default();
     match what.as_str() {
@@ -951,6 +1044,7 @@ fn main() {
         "latitude" => latitude(),
         "balance" => balance(),
         "modes" => modes(),
+        "omega" => omega(),
         "speeds" => speeds(),
         "timings" => timings(),
         "fig1" => fig1(),

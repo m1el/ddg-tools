@@ -46,7 +46,10 @@
 //! The distortion term roughens a cut and the length term smooths it; every step reports the
 //! rate `ω` that sets the scale of both ([`StepReport::roughening_rate`], SPEC D18), and
 //! [`length_weight_for_ripples`] and [`StepSize::Adaptive`] turn it into a length weight and a
-//! time step.
+//! time step. `ω` is the 0.9-quantile of the local rates along the cut, weighted by length, and
+//! the step rule slows down the cut points beyond it one by one, so that a spike of curvature
+//! does not set the weight or the step of the whole cut ([`StepStatistics`], SPEC D22;
+//! [`StepStatistics::Extremes`] is the rule with the largest rate and speed).
 //!
 //! **Several regions** (SPEC §8). [`RegionFlow`] is the same flow for `N` level-set functions,
 //! one per region (negative inside; a vertex belongs to the region whose function is smallest).
@@ -54,8 +57,10 @@
 //! triple points ([`TriplePoint`]) in the faces whose corners lie in three regions, and
 //! [`Cut::curves`] returns the curves between them. [`init::regions_from_vertex_labels`],
 //! [`init::regions_from_face_labels`] and [`init::normal_clusters`] make a start. With the two
-//! functions `φ, −φ` everything reproduces the two-region code. For more than two regions use
-//! the stages of [`FlowOptions::for_regions`]; why is in its documentation and in SPEC §8.5.
+//! functions `φ, −φ` everything reproduces the two-region code. [`FlowOptions::for_regions`]
+//! selects the paper's stages for more than two regions; the measurements for and against are
+//! in its documentation and in SPEC §8.5. [`RegionFlow::step_with_stages`] returns every stage
+//! of a step ([`RegionStages`]), as [`Flow::step_with_stages`] does for two regions.
 //!
 //! ```
 //! use ddg_core::generators::icosphere;
@@ -215,13 +220,14 @@ pub use evaluate::{
     gradient_pointwise, gradient_scaled, normal_flux, smooth_slivers,
 };
 pub use flow::{
-    Extension, Flow, FlowOptions, GradientNorm, LengthStep, PenaltyRule, Redistance, RunReport,
-    SpeedScaling, StepReport, StepSize, StepStages, StepTimings, StopReason, StopRule,
-    explicit_step, length_weight_for_ripples, symmetry_projection,
+    Extension, Flow, FlowOptions, GradientNorm, LengthStep, PenaltyRule, ROUGHENING_QUANTILE,
+    Redistance, RunReport, SpeedScaling, StepReport, StepSize, StepStages, StepStatistics,
+    StepTimings, StopReason, StopRule, explicit_step, length_weight_for_ripples,
+    symmetry_projection, weighted_quantile,
 };
 pub use problem::{
     CurvatureSource, CutProblem, Energy, EvalOptions, FluxRecovery, PAPER_FEATURE_SMOOTHING,
     PointwiseEnergy, RegionWeights, SUPPORTED_REGIONS, ScaleWeight, UnitAreaScale,
 };
 pub use recovery::flux_smoothing_stiffness;
-pub use regions::RegionFlow;
+pub use regions::{RegionFlow, RegionStages};

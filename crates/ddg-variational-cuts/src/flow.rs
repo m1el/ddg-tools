@@ -21,12 +21,13 @@ use crate::system::LaplaceSystem;
 pub enum StepSize {
     /// The same `τ > 0` in every step, as in the paper (Sec. 6).
     Fixed(f64),
-    /// `τ = min(tau_max, max_motion · h / max_c |ρ_c|)` with `h` the shortest crossed edge and
-    /// `ρ` the speed of the cut that is known before the step: the cut moves by at most the
-    /// fraction `max_motion` of that edge per step (the paper's remark in Sec. 7.4). With
+    /// `τ = min(tau_max, max_motion · h / ρ̂)` with `h` the shortest crossed edge and `ρ̂` the
+    /// speed of the cut that is known before the step: the cut moves by at most the fraction
+    /// `max_motion` of that edge per step (the paper's remark in Sec. 7.4). With
     /// [`LengthStep::OnCut`] `ρ = s + λ⁰`, distortion and length together; with
     /// [`LengthStep::OnMesh`] the length term never passes through the cut points and
-    /// `ρ = s`. If the speed vanishes, `τ = tau_max`.
+    /// `ρ = s`. Which `h` and which statistic of `|ρ_c|` over the cut are taken is
+    /// [`FlowOptions::step_statistics`] (SPEC D22). If the speed vanishes, `τ = tau_max`.
     Capped {
         /// The largest step, `> 0`.
         tau_max: f64,
@@ -34,9 +35,9 @@ pub enum StepSize {
         /// `> 0`.
         max_motion: f64,
     },
-    /// `τ = min(tau_max, time_scale / ω, max_motion · h / max_c |ρ_c|)`: [`StepSize::Capped`]
-    /// with a largest step that follows the state. `ω` is the roughening rate of the state
-    /// ([`StepReport::roughening_rate`]), which has the unit of a speed: a cut of the size of
+    /// `τ = min(tau_max, time_scale / ω, max_motion · h / ρ̂)`: [`StepSize::Capped`] with a
+    /// largest step that follows the state. `ω` is the roughening rate of the state (the same
+    /// quantile of the local rates), which has the unit of a speed: a cut of the size of
     /// the surface (length 1 on the unit-area surface) reacts to a displacement at rates of
     /// the order `ω` (on the sphere of unit area, without a length weight, the equator returns
     /// at the rate `ω/R = 3.5 ω` and a ripple with `m` periods grows at the rate
@@ -65,15 +66,16 @@ impl Default for StepSize {
 }
 
 impl StepSize {
-    /// The step for the speeds `speed` on the cut, the shortest crossed edge `h` and the
-    /// roughening rate `ω` of the state ([`StepReport::roughening_rate`]).
+    /// The step for the speed `ρ̂ ≥ 0` of the cut, the edge length `h` and the roughening rate
+    /// `ω`, each of them the statistic over the cut that [`StepStatistics`] names (for the
+    /// robust ones the speed is in crossed edges per unit time and `h = 1`). A speed or a rate
+    /// that is not positive does not limit the step.
     ///
     /// [formula: cut-step-cap]
-    pub fn step(&self, speed: &[f64], shortest_crossed_edge: f64, roughening_rate: f64) -> f64 {
-        let fastest = speed.iter().fold(0.0f64, |m, s| m.max(s.abs()));
+    pub fn step(&self, speed: f64, shortest_crossed_edge: f64, roughening_rate: f64) -> f64 {
         let by_motion = |max_motion: f64| {
-            if fastest > 0.0 {
-                max_motion * shortest_crossed_edge / fastest
+            if speed > 0.0 {
+                max_motion * shortest_crossed_edge / speed
             } else {
                 f64::INFINITY
             }
@@ -96,6 +98,135 @@ impl StepSize {
                 };
                 tau_max.min(by_rate).min(by_motion(max_motion))
             }
+        }
+    }
+
+    /// The local limit of SPEC §4 (D22, [`StepStatistics::Robust`]): the factor `≤ 1` by which
+    /// the rate `rate` of a cut point on a crossed edge of length `shortest_crossed_edge` is
+    /// reduced so that the point moves by at most `max_motion` of that edge in the step `tau`,
+    /// where its speed is taken to be at least half of `excess`, the amount by which its own
+    /// roughening rate exceeds that of the state ([`StepSize::Adaptive`] only; a cut reaches
+    /// the speed `ω_c/2` within the face of a spike of `ω_c`). 1 for [`StepSize::Fixed`].
+    ///
+    /// [formula: cut-step-local]
+    pub fn local_factor(
+        &self,
+        tau: f64,
+        shortest_crossed_edge: f64,
+        rate: f64,
+        excess: f64,
+    ) -> f64 {
+        let (max_motion, speed) = match *self {
+            StepSize::Fixed(_) => return 1.0,
+            StepSize::Capped { max_motion, .. } => (max_motion, rate.abs()),
+            StepSize::Adaptive { max_motion, .. } => {
+                (max_motion, rate.abs().max(0.5 * excess.max(0.0)))
+            }
+        };
+        let moved = tau * speed;
+        let allowed = max_motion * shortest_crossed_edge;
+        if moved > allowed {
+            allowed / moved
+        } else {
+            1.0
+        }
+    }
+}
+
+/// The quantile of the local roughening rates that is the roughening rate `ω` of a state
+/// (SPEC §1, D22).
+pub const ROUGHENING_QUANTILE: f64 = 0.9;
+
+/// The `q`-quantile of `values` weighted by `weights ≥ 0` (SPEC §1): with the values in
+/// ascending order (equal values in the order of their index), the first value at which the
+/// weights summed so far reach `q` times the sum of all weights (both sums taken in that
+/// order). `q = 1` gives the largest value, an empty list 0.
+///
+/// [formula: cut-weighted-quantile]
+pub fn weighted_quantile(values: &[f64], weights: &[f64], q: f64) -> f64 {
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|a, b| values[*a].total_cmp(&values[*b]));
+    let total: f64 = order.iter().map(|&i| weights[i]).sum();
+    let mut seen = 0.0;
+    for &i in &order {
+        seen += weights[i];
+        if seen >= q * total {
+            return values[i];
+        }
+    }
+    order.last().map_or(0.0, |&i| values[i])
+}
+
+/// The statistics of the cut that [`StepSize::Capped`] and [`StepSize::Adaptive`] use (SPEC §4,
+/// D22). They do not matter for [`StepSize::Fixed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StepStatistics {
+    /// Quantiles, and a local limit. The speed of a cut point is measured in units of the
+    /// shortest crossed edge `h_c` at the two ends of its own edge, `m_c = |ρ_c| / h_c`; the step is
+    /// `τ = min(tau_max, time_scale / ω, max_motion / m̂)` with `m̂` and `ω` the
+    /// [`ROUGHENING_QUANTILE`] quantiles, weighted by the length of the cut, of `m_c` and of
+    /// the local roughening rates `ω_c`. A cut point beyond them takes a smaller step of its
+    /// own ([`StepSize::local_factor`]): no cut point moves by more than `max_motion · h_c`.
+    /// One spike of curvature or one short edge then does not set the step of the whole cut.
+    /// With the length step on the mesh the speed still includes the length force, computed
+    /// on the cut for this purpose only. The default.
+    #[default]
+    Robust,
+    /// The largest speed and roughening rate over the cut and the shortest crossed edge,
+    /// `τ = min(tau_max, time_scale / max ω_c, max_motion · min h / max |ρ_c|)`, and no local
+    /// limit: the rule of the paper's remark (Sec. 7.4) taken literally, and the rule of this
+    /// crate before D22.
+    Extremes,
+}
+
+/// The edge length `h_c` of every cut point for the step rule (SPEC §4): the shortest of the
+/// crossed edges that share a vertex with its own edge (its own edge included). A change of
+/// the level-set function at a vertex moves the crossings of all its edges, so this is the
+/// length that the motion of the cut point has to be compared with.
+///
+/// [formula: cut-step-cap]
+pub(crate) fn local_edges(mesh: &TriMesh, geometry: &Geometry, cut: &Cut) -> Vec<f64> {
+    let lengths = geometry.edge_lengths();
+    let mut shortest_at = vec![f64::INFINITY; mesh.n_vertices()];
+    for point in &cut.points {
+        let length = lengths[point.edge as usize];
+        for v in mesh.edge_vertices(point.edge as usize) {
+            shortest_at[v] = shortest_at[v].min(length);
+        }
+    }
+    cut.points
+        .iter()
+        .map(|point| {
+            let [a, b] = mesh.edge_vertices(point.edge as usize);
+            shortest_at[a].min(shortest_at[b])
+        })
+        .collect()
+}
+
+/// The step of SPEC §4 for the speeds `speed` at the cut points (or boundary nodes) with the
+/// lengths `weights` of the cut and the crossed edges `edges`, and the roughening rate
+/// `roughening_rate` of the same statistics. Returns `τ` and the speed statistic that was
+/// used: `m̂` (in crossed edges per unit time) or the largest `|ρ|`.
+///
+/// [formula: cut-step-cap]
+pub(crate) fn rule_step(
+    step_size: &StepSize,
+    statistics: StepStatistics,
+    speed: &[f64],
+    edges: &[f64],
+    weights: &[f64],
+    roughening_rate: f64,
+) -> (f64, f64) {
+    match statistics {
+        StepStatistics::Robust => {
+            let in_edges: Vec<f64> = speed.iter().zip(edges).map(|(r, h)| r.abs() / h).collect();
+            let fastest = weighted_quantile(&in_edges, weights, ROUGHENING_QUANTILE);
+            (step_size.step(fastest, 1.0, roughening_rate), fastest)
+        }
+        StepStatistics::Extremes => {
+            let fastest = speed.iter().fold(0.0f64, |m, r| m.max(r.abs()));
+            let shortest = edges.iter().fold(f64::INFINITY, |m, h| m.min(*h));
+            (step_size.step(fastest, shortest, roughening_rate), fastest)
         }
     }
 }
@@ -201,6 +332,8 @@ pub struct FlowOptions<'a> {
     pub extension: Extension,
     /// The redistancing.
     pub redistance: Redistance,
+    /// Which statistics of the cut the step rule uses (SPEC §4, D22). Default: robust ones.
+    pub step_statistics: StepStatistics,
 }
 
 impl FlowOptions<'_> {
@@ -215,6 +348,7 @@ impl FlowOptions<'_> {
             speed_scaling: SpeedScaling::default(),
             extension: Extension::default(),
             redistance: Redistance::default(),
+            step_statistics: StepStatistics::default(),
         }
     }
 
@@ -232,6 +366,7 @@ impl FlowOptions<'_> {
             speed_scaling: SpeedScaling::Unit,
             extension: Extension::Harmonic,
             redistance: Redistance::KeepAdjacent,
+            step_statistics: StepStatistics::default(),
         }
     }
 
@@ -243,10 +378,15 @@ impl FlowOptions<'_> {
     /// the length force of SPEC §3.10 (§8.5). It keeps symmetric partitions of the sphere in
     /// place six to eight times better than the stages of the paper and follows single curves
     /// exactly, but at triple points it is no better than the paper's stages (junction angles
-    /// settle 4° to 9° off 120° at the mesh widths tested, against 3° to 5°), and from a
-    /// speckled start with a strong length weight it comes to rest with more patches and a
-    /// higher energy than the paper's stages reach. Until that is understood, these are the
-    /// stages to use for `N > 2`.
+    /// settle 4° to 9° off 120° at the mesh widths tested, against 3° to 5°).
+    ///
+    /// The paper's stages were chosen here when, from a speckled start with a strong length
+    /// weight, the default stages came to rest with two to three times the patches and the
+    /// energy. Most of that was the step rule of the time: with [`StepStatistics::Robust`]
+    /// (SPEC D22) the default stages end at the lower energy on the three models tested with
+    /// the automatic length weight, and on one of three with the strong one (README, "Several
+    /// regions"; SPEC §8.5). Which set to prefer for `N > 2` is open; this function is as it
+    /// was.
     pub fn for_regions(step_size: StepSize) -> Self {
         FlowOptions {
             eval: EvalOptions::default(),
@@ -375,13 +515,28 @@ pub struct StepReport {
     /// 0 for [`LengthStep::OnMesh`], where the length term does not pass through the cut
     /// points).
     pub max_length_speed: f64,
-    /// `ω = 2 · max_c Σ_r Q_r,c`, with `Q_r = G_r − β_r − w_r b(0)` the part of the gradient
-    /// density that is quadratic in the normal derivatives (`w_r (∂u/∂n)²` for the Dirichlet
-    /// energy). The distortion term amplifies a ripple of the cut of wavenumber `k` at the rate
-    /// `ω k`, the length term damps it at the rate `(α_L + η) k²` (SPEC §4, D18): ripples longer
-    /// than `2π (α_L + η)/ω` grow. If that length is below a few mesh edges, the flow amplifies
-    /// the noise of the mesh; with `α_L + η = 0` it does so at every scale.
+    /// The roughening rate `ω` of the state the step started from: the
+    /// [`ROUGHENING_QUANTILE`] quantile, weighted by the length of the cut, of the local rates
+    /// `ω_c = 2 Σ_r Q_r,c` at the cut points, with `Q_r = G_r − β_r − w_r b(0)` the part of the
+    /// gradient density that is quadratic in the normal derivatives (`w_r (∂u/∂n)²` for the
+    /// Dirichlet energy). Where the local rate is `ω_c`, the distortion term amplifies a ripple
+    /// of the cut of wavenumber `k` at the rate `ω_c k`, and the length term damps it at the
+    /// rate `(α_L + η) k²` (SPEC §1, D18, D22): on nine tenths of the cut, ripples shorter than
+    /// `2π (α_L + η)/ω` decay. If that length is below a few mesh edges, the flow amplifies
+    /// the noise of the mesh; with `α_L + η = 0` it does so at every scale. For energies other
+    /// than the Dirichlet energy `ω_c` can be negative.
     pub roughening_rate: f64,
+    /// The largest local roughening rate `ω_c` on the cut. Far above
+    /// [`StepReport::roughening_rate`] where the cut passes a spike of curvature.
+    pub roughening_rate_max: f64,
+    /// The speed of the cut that entered the step rule ([`StepStatistics`]): `m̂`, in crossed
+    /// edges per unit time, or the largest `|ρ_c|`.
+    pub step_speed: f64,
+    /// `h`: the shortest crossed edge, on the unit-area surface.
+    pub shortest_crossed_edge: f64,
+    /// Number of cut points that were slowed down in this step by the local limit of the step
+    /// rule ([`StepSize::local_factor`]).
+    pub n_limited: usize,
     /// The largest `|φ_new − φ_old|` over the vertices that are cut-adjacent before or after
     /// the step: how far the cut moved.
     pub cut_motion: f64,
@@ -414,9 +569,20 @@ pub struct StepReport {
 /// what the stages of SPEC §4 produced. For tests and for comparing implementations.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StepStages {
+    /// `ω_c` at every cut point: the local roughening rate (SPEC §1).
+    pub roughening: Vec<f64>,
+    /// `Θ` at every cut point: the integrated length force ([`LengthStep::OnCut`]; empty
+    /// otherwise).
+    pub length_force: Vec<f64>,
     /// `λ⁰` at every cut point: the length force per unit length of the cut
     /// ([`LengthStep::OnCut`]; empty otherwise).
     pub length_speed: Vec<f64>,
+    /// `ḡ` at every cut point: the mean of `|∇φ|` over its piece of the cut (as computed; it
+    /// is applied with [`SpeedScaling::MeanGradient`] only).
+    pub gradient_scale: Vec<f64>,
+    /// The rate at every cut point before the local limit of the step rule and before the
+    /// scaling: `s`, or with [`LengthStep::OnCut`] the rate `r`.
+    pub unscaled_rate: Vec<f64>,
     /// The rate at every cut point that was extended: `s` (with [`LengthStep::OnCut`] the rate
     /// `r` that is implicit in the length force), times the mean `|∇φ|` with
     /// [`SpeedScaling::MeanGradient`].
@@ -708,6 +874,10 @@ impl Flow {
             max_speed,
             max_length_speed: 0.0,
             roughening_rate: 0.0,
+            roughening_rate_max: 0.0,
+            step_speed: 0.0,
+            shortest_crossed_edge: 0.0,
+            n_limited: 0,
             cut_motion: 0.0,
             gradient_norm: None,
             n_cut_points: e.cut.points.len(),
@@ -726,23 +896,40 @@ impl Flow {
         let (gradient_norm, mean_gradient) =
             gradient_norms(&e.cut, &e.triangles, |_, a| self.phi[a].abs());
         report.gradient_norm = Some(gradient_norm);
-        report.roughening_rate = roughening_rate(&e, problem);
-        let shortest = e
-            .cut
-            .points
-            .iter()
-            .map(|p| self.geometry.edge_lengths()[p.edge as usize])
-            .fold(f64::INFINITY, f64::min);
+        let local_rates = roughening_rates(&e, problem);
+        let dual = cut_dual_lengths(&e.cut, &e.triangles);
+        report.roughening_rate = weighted_quantile(&local_rates, &dual, ROUGHENING_QUANTILE);
+        report.roughening_rate_max = weighted_quantile(&local_rates, &dual, 1.0);
+        // The statistics of the step rule (SPEC §4).
+        let statistics = options.step_statistics;
+        let omega = match statistics {
+            StepStatistics::Robust => report.roughening_rate,
+            StepStatistics::Extremes => report.roughening_rate_max,
+        };
+        let edges = local_edges(self.evaluator.mesh(), &self.geometry, &e.cut);
+        report.shortest_crossed_edge = edges.iter().fold(f64::INFINITY, |m, h| m.min(*h));
         // Stage 6 on the cut (SPEC §3.10): the length force, the step, and the rate that is
         // implicit in the length force.
         let start = Instant::now();
         let weights = length_weights(problem, nv);
         let active = weights.iter().any(|w| *w != 0.0);
         let mut rate = e.speed.clone();
-        let mut tau = options
-            .step_size
-            .step(&e.speed, shortest, report.roughening_rate);
-        if active && options.length_step == LengthStep::OnCut {
+        let (mut tau, speed) = rule_step(
+            &options.step_size,
+            statistics,
+            &e.speed,
+            &edges,
+            &dual,
+            omega,
+        );
+        report.step_speed = speed;
+        // With the length step on the mesh the length force is still computed on the cut for
+        // the robust step rule: it is part of the speed of the cut (SPEC §4).
+        let on_cut_step = options.length_step == LengthStep::OnCut;
+        let for_step_only = !on_cut_step
+            && statistics == StepStatistics::Robust
+            && !matches!(options.step_size, StepSize::Fixed(_));
+        if active && (on_cut_step || for_step_only) {
             let smoothing_length = match options.eval.flux_recovery {
                 crate::problem::FluxRecovery::Smoothed { length } => length,
                 crate::problem::FluxRecovery::Nodal => 0.0,
@@ -757,22 +944,46 @@ impl Flow {
                 options.penalty_rule,
                 smoothing_length,
                 &options.step_size,
-                shortest,
-                report.roughening_rate,
+                statistics,
+                &edges,
+                omega,
                 par,
             )?;
             tau = on_cut.tau;
-            report.length_residual = Some(on_cut.residual);
-            report.max_length_speed = on_cut
-                .length_speed
-                .iter()
-                .fold(0.0f64, |m, x| m.max(x.abs()));
-            rate = on_cut.rate;
-            if let Some(stages) = stages.as_deref_mut() {
-                stages.length_speed = on_cut.length_speed;
+            report.step_speed = on_cut.step_speed;
+            if on_cut_step {
+                report.length_residual = Some(on_cut.residual);
+                report.max_length_speed = on_cut
+                    .length_speed
+                    .iter()
+                    .fold(0.0f64, |m, x| m.max(x.abs()));
+                rate = on_cut.rate;
+                if let Some(stages) = stages.as_deref_mut() {
+                    stages.length_force = on_cut.force;
+                    stages.length_speed = on_cut.length_speed;
+                }
             }
         }
         report.tau = tau;
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.roughening = local_rates.clone();
+            stages.gradient_scale = mean_gradient.clone();
+            stages.unscaled_rate = rate.clone();
+        }
+        // The local limit of the step rule: cut points beyond the quantile take a smaller
+        // step of their own.
+        if statistics == StepStatistics::Robust {
+            for (p, r) in rate.iter_mut().enumerate() {
+                let factor =
+                    options
+                        .step_size
+                        .local_factor(tau, edges[p], *r, local_rates[p] - omega);
+                if factor < 1.0 {
+                    *r *= factor;
+                    report.n_limited += 1;
+                }
+            }
+        }
         report.timings.length = start.elapsed().as_secs_f64();
 
         // Stage 4: σ, the extension of the rate on the cut.
@@ -1166,6 +1377,8 @@ pub(crate) fn length_weights(problem: &CutProblem, n_vertices: usize) -> Vec<f64
 
 /// What [`rate_on_cut`] returns.
 pub(crate) struct RateOnCut {
+    /// `Θ` at every cut point: the integrated length force.
+    pub(crate) force: Vec<f64>,
     /// `λ⁰` at every cut point: the length force per unit length of the cut, recovered like the
     /// normal derivative.
     pub(crate) length_speed: Vec<f64>,
@@ -1173,6 +1386,8 @@ pub(crate) struct RateOnCut {
     pub(crate) rate: Vec<f64>,
     /// The step `τ`: the step size rule applied to `s + λ⁰`.
     pub(crate) tau: f64,
+    /// `ρ̂`: the quantile of `|s + λ⁰|` that entered the step rule.
+    pub(crate) step_speed: f64,
     /// The larger of the residuals of the two systems, each relative to the largest entry of
     /// its right-hand side.
     pub(crate) residual: f64,
@@ -1262,7 +1477,8 @@ pub(crate) fn rate_on_cut(
     rule: PenaltyRule,
     smoothing_length: f64,
     step_size: &StepSize,
-    shortest_crossed_edge: f64,
+    statistics: StepStatistics,
+    edges: &[f64],
     roughening_rate: f64,
     par: Parallelism<'_>,
 ) -> Result<RateOnCut, CutError> {
@@ -1323,16 +1539,25 @@ pub(crate) fn rate_on_cut(
     let pairs: Vec<[u32; 2]> = cut.segments.iter().map(|segment| segment.points).collect();
     let (length_speed, first) = solve_on_cut(&pairs, &dual, &recovery, &force, par)?;
     let explicit: Vec<f64> = (0..n).map(|p| speed[p] + length_speed[p]).collect();
-    let tau = step_size.step(&explicit, shortest_crossed_edge, roughening_rate);
+    let (tau, step_speed) = rule_step(
+        step_size,
+        statistics,
+        &explicit,
+        edges,
+        &dual,
+        roughening_rate,
+    );
     for k in &mut implicit {
         *k *= tau;
     }
     let rhs: Vec<f64> = (0..n).map(|p| dual[p] * explicit[p]).collect();
     let (rate, second) = solve_on_cut(&pairs, &dual, &implicit, &rhs, par)?;
     Ok(RateOnCut {
+        force,
         length_speed,
         rate,
         tau,
+        step_speed,
         residual: first.max(second),
     })
 }
@@ -1392,11 +1617,11 @@ pub fn length_weight_for_ripples(roughening_rate: f64, wavelength: f64) -> f64 {
     roughening_rate * wavelength / (2.0 * std::f64::consts::PI)
 }
 
-/// `ω = 2 · max_c Σ_r (G_r − β_r − w_r b(0))` over the cut points: see
-/// [`StepReport::roughening_rate`].
+/// The local roughening rate `ω_c = 2 Σ_r (G_r − β_r − w_r b(0))` at every cut point (SPEC §1):
+/// see [`StepReport::roughening_rate`].
 ///
 /// [formula: cut-roughening-rate]
-pub(crate) fn roughening_rate(e: &Evaluation, problem: &CutProblem) -> f64 {
+pub(crate) fn roughening_rates(e: &Evaluation, problem: &CutProblem) -> Vec<f64> {
     let offset = |region: usize| {
         let weights = problem.regions[region];
         let at_zero = match &problem.energy {
@@ -1408,12 +1633,25 @@ pub(crate) fn roughening_rate(e: &Evaluation, problem: &CutProblem) -> f64 {
     let tri = &e.triangles;
     (0..e.cut.points.len())
         .map(|p| {
-            tri.point_vertices(p)
+            2.0 * tri
+                .point_vertices(p)
                 .iter()
                 .map(|&v| e.gradient[v] - offset(tri.vertex_region[v] as usize))
                 .sum::<f64>()
         })
-        .fold(0.0f64, |m, x| m.max(2.0 * x))
+        .collect()
+}
+
+/// The roughening rate `ω` of a state: the [`ROUGHENING_QUANTILE`] quantile of the local rates,
+/// weighted by the length of the cut at every cut point.
+///
+/// [formula: cut-roughening-rate]
+pub(crate) fn roughening_rate(e: &Evaluation, problem: &CutProblem) -> f64 {
+    weighted_quantile(
+        &roughening_rates(e, problem),
+        &cut_dual_lengths(&e.cut, &e.triangles),
+        ROUGHENING_QUANTILE,
+    )
 }
 
 /// The explicit step `φ̃ = φ + τ σ` (SPEC §3.9).
@@ -1537,6 +1775,9 @@ fn components_without_cut(mesh: &TriMesh, region: &[u32], cut: &crate::cut::Cut)
 /// the harmonic one, `Σ |pq| / Σ (|pq| / |∇φ|)`: a rate `r · ḡ` of the function moves the
 /// segment by `r ḡ / |∇φ|` per unit time, and the mean of that over the piece is `r`.
 ///
+/// A face with `|∇φ| = 0` is left out of the mean (it is in the statistics), and a piece
+/// without any face that counts takes the mean 1.
+///
 /// `apex(σ, a)` is `|φ_a|` for segment `σ`. On a network (SPEC §8.5) it is
 /// `½ |φ_i(a) − φ_j(a)|` for the two regions `i, j` of the segment, faces with three regions
 /// are left out, and a piece is a connected piece of the network, through triple points.
@@ -1587,9 +1828,13 @@ pub(crate) fn gradient_norms(
         max = max.max(g);
         sum += g * length;
         total += length;
-        let root = find(&mut parent, segment.points[0]) as usize;
-        length_of[root] += length;
-        time_of[root] += length / g;
+        if g > 0.0 {
+            // A face in which the function has no slope (it vanishes at the lone vertex) is
+            // left out of the mean: its term would be infinite.
+            let root = find(&mut parent, segment.points[0]) as usize;
+            length_of[root] += length;
+            time_of[root] += length / g;
+        }
     }
     let mean_of_piece: Vec<f64> = (0..n_points as u32)
         .map(|p| {

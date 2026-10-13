@@ -19,9 +19,11 @@ use crate::cut::regions_of;
 use crate::error::CutError;
 use crate::evaluate::{Evaluation, Evaluator};
 use crate::flow::{
-    Extension, Flow, FlowOptions, LengthStep, PenaltyRule, Redistance, RunReport, SpeedScaling,
-    StepReport, StepSize, StepTimings, StopReason, StopRule, cut_dual_lengths, explicit_step,
-    gradient_norms, length_weights, roughening_rate, solve_on_cut, symmetry_projection,
+    Extension, Flow, FlowOptions, LengthStep, PenaltyRule, ROUGHENING_QUANTILE, Redistance,
+    RunReport, SpeedScaling, StepReport, StepSize, StepStatistics, StepTimings, StopReason,
+    StopRule, cut_dual_lengths, explicit_step, gradient_norms, length_weights, local_edges,
+    roughening_rate, roughening_rates, rule_step, solve_on_cut, symmetry_projection,
+    weighted_quantile,
 };
 use crate::problem::{CutProblem, EvalOptions, UnitAreaScale};
 
@@ -43,6 +45,51 @@ pub struct RegionFlow {
     phis: Vec<Vec<f64>>,
     time: f64,
     n_steps: usize,
+}
+
+/// What the stages of one step of [`RegionFlow`] produced (SPEC §8.3–§8.5), on the unit-area
+/// surface, for tests and for comparing implementations. "Per node" means one value per vertex
+/// of the cut mesh of the state the step started from ([`CutTriangles`](crate::CutTriangles)):
+/// zero at the vertices of the input mesh, and at every copy of a cut point or triple point
+/// the value for the region of that copy.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RegionStages {
+    /// Per cut point: the local roughening rate `ω_c` (SPEC §1).
+    pub roughening: Vec<f64>,
+    /// Per node: `s_v`, the rate of the function of the region from the distortion (SPEC
+    /// §8.3).
+    pub boundary_speed: Vec<f64>,
+    /// Per boundary node (index: node minus the number of vertices of the input mesh): the
+    /// length force `Θ_v` of SPEC §8.5. Empty unless the length step is on the cut.
+    pub length_force: Vec<f64>,
+    /// Per boundary node, as `length_force`: `λ⁰_v`.
+    pub length_speed: Vec<f64>,
+    /// Per node: the rate `ρ_v` of the function of the region after the local limit of the
+    /// step rule: `s_v` with the length step on the mesh, the solution of the second system of
+    /// SPEC §8.5 with the length step on the cut.
+    pub rate: Vec<f64>,
+    /// Per cut point: `ḡ` of its piece of the network (as computed; it is applied with
+    /// [`SpeedScaling::MeanGradient`] only).
+    pub gradient_scale: Vec<f64>,
+    /// Per node: the rate that was extended, `rate` times `ḡ` with
+    /// [`SpeedScaling::MeanGradient`].
+    pub scaled_rate: Vec<f64>,
+    /// Per vertex: `e`, the extension (at a vertex of region `k`, of the rate of `φ_k`).
+    pub extension: Vec<f64>,
+    /// Per function, per vertex: the rate of the function in the explicit step.
+    pub function_rates: Vec<Vec<f64>>,
+    /// Per function, per vertex: `φ̃_k`.
+    pub explicit: Vec<Vec<f64>>,
+    /// Per function, per vertex: after the length step on the mesh (equal to `explicit`
+    /// without one).
+    pub length: Vec<Vec<f64>>,
+    /// Per function, per vertex: after the first symmetry projection.
+    pub symmetric: Vec<Vec<f64>>,
+    /// Per function, per vertex: after the projection of Losasso et al. at the cut-adjacent
+    /// vertices (step 1 of the redistancing; empty with [`Redistance::Off`]).
+    pub projected: Vec<Vec<f64>>,
+    /// Per vertex: whether it is cut-adjacent in the functions that were redistanced.
+    pub adjacent: Vec<bool>,
 }
 
 impl RegionFlow {
@@ -201,6 +248,29 @@ impl RegionFlow {
         problem: &CutProblem,
         options: &FlowOptions<'_>,
     ) -> Result<StepReport, CutError> {
+        self.advance(problem, options, None)
+    }
+
+    /// As [`RegionFlow::step`], and also returns what every stage produced.
+    ///
+    /// # Errors
+    /// As [`RegionFlow::step`].
+    pub fn step_with_stages(
+        &mut self,
+        problem: &CutProblem,
+        options: &FlowOptions<'_>,
+    ) -> Result<(StepReport, RegionStages), CutError> {
+        let mut stages = RegionStages::default();
+        let report = self.advance(problem, options, Some(&mut stages))?;
+        Ok((report, stages))
+    }
+
+    fn advance(
+        &mut self,
+        problem: &CutProblem,
+        options: &FlowOptions<'_>,
+        mut stages: Option<&mut RegionStages>,
+    ) -> Result<StepReport, CutError> {
         let nv = self.mesh().n_vertices();
         let n_regions = self.phis.len();
         options.validate(nv)?;
@@ -223,6 +293,10 @@ impl RegionFlow {
             max_speed,
             max_length_speed: 0.0,
             roughening_rate: 0.0,
+            roughening_rate_max: 0.0,
+            step_speed: 0.0,
+            shortest_crossed_edge: 0.0,
+            n_limited: 0,
             cut_motion: 0.0,
             gradient_norm: None,
             n_cut_points: e.cut.points.len(),
@@ -247,12 +321,33 @@ impl RegionFlow {
             0.5 * (phis[i as usize][a] - phis[j as usize][a]).abs()
         });
         report.gradient_norm = Some(gradient_norm);
-        report.roughening_rate = roughening_rate(&e, problem);
-        let shortest = cut
-            .points
-            .iter()
-            .map(|p| self.core.geometry.edge_lengths()[p.edge as usize])
-            .fold(f64::INFINITY, f64::min);
+        let local_rates = roughening_rates(&e, problem);
+        let dual = cut_dual_lengths(cut, tri);
+        report.roughening_rate = weighted_quantile(&local_rates, &dual, ROUGHENING_QUANTILE);
+        report.roughening_rate_max = weighted_quantile(&local_rates, &dual, 1.0);
+        let statistics = options.step_statistics;
+        let omega = match statistics {
+            StepStatistics::Robust => report.roughening_rate,
+            StepStatistics::Extremes => report.roughening_rate_max,
+        };
+        let edges = local_edges(mesh, &self.core.geometry, cut);
+        report.shortest_crossed_edge = edges.iter().fold(f64::INFINITY, |m, h| m.min(*h));
+        // The crossed edge of every boundary node: that of its cut point; at a triple point
+        // the shortest of the three crossed edges of its face.
+        let node_edges: Vec<f64> = (0..tri.n_vertices() - nv)
+            .map(|i| {
+                if i < 2 * edges.len() {
+                    edges[i / 2]
+                } else {
+                    let triple = &cut.triple_points[(i - 2 * edges.len()) / 3];
+                    triple
+                        .points
+                        .iter()
+                        .map(|&p| edges[p as usize])
+                        .fold(f64::INFINITY, f64::min)
+                }
+            })
+            .collect();
 
         // The rate of the function of every region along the boundary of the region: at the
         // copies of the cut points and of the triple points (SPEC §8.4, §8.5).
@@ -260,10 +355,24 @@ impl RegionFlow {
         let weights = length_weights(problem, nv);
         let active = weights.iter().any(|w| *w != 0.0);
         let mut rate = boundary_rates(mesh, &e, &e.speed);
-        let mut tau = options
-            .step_size
-            .step(&e.speed, shortest, report.roughening_rate);
-        if active && options.length_step == LengthStep::OnCut {
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.roughening = local_rates.clone();
+            stages.boundary_speed = rate.clone();
+        }
+        let (mut tau, speed) = rule_step(
+            &options.step_size,
+            statistics,
+            &e.speed,
+            &edges,
+            &dual,
+            omega,
+        );
+        report.step_speed = speed;
+        let on_cut_step = options.length_step == LengthStep::OnCut;
+        let for_step_only = !on_cut_step
+            && statistics == StepStatistics::Robust
+            && !matches!(options.step_size, StepSize::Fixed(_));
+        if active && (on_cut_step || for_step_only) {
             let smoothing_length = match options.eval.flux_recovery {
                 crate::problem::FluxRecovery::Smoothed { length } => length,
                 crate::problem::FluxRecovery::Nodal => 0.0,
@@ -277,21 +386,59 @@ impl RegionFlow {
                 options.penalty_rule,
                 smoothing_length,
                 &options.step_size,
-                shortest,
-                report.roughening_rate,
+                statistics,
+                &node_edges,
+                omega,
                 par,
             )?;
             tau = on_cut.tau;
-            report.length_residual = Some(on_cut.residual);
-            report.max_length_speed = on_cut.max_length_speed;
-            rate = on_cut.rate;
+            report.step_speed = on_cut.step_speed;
+            if on_cut_step {
+                report.length_residual = Some(on_cut.residual);
+                report.max_length_speed = on_cut
+                    .length_speed
+                    .iter()
+                    .fold(0.0f64, |m, x| m.max(x.abs()));
+                rate = on_cut.rate;
+                if let Some(stages) = stages.as_deref_mut() {
+                    stages.length_force = on_cut.force;
+                    stages.length_speed = on_cut.length_speed;
+                }
+            }
         }
         report.tau = tau;
+        // The local limit of the step rule (SPEC §4): per boundary node, with the roughening
+        // rate of its cut point (none at a triple point). A cut point counts once.
+        let n_points = cut.points.len();
+        let mut limited = vec![false; n_points];
+        if statistics == StepStatistics::Robust {
+            for v in nv..tri.n_vertices() {
+                let point = (v - nv) / 2;
+                let excess = if point < n_points {
+                    local_rates[point] - omega
+                } else {
+                    0.0
+                };
+                let factor =
+                    options
+                        .step_size
+                        .local_factor(tau, node_edges[v - nv], rate[v], excess);
+                if factor < 1.0 {
+                    rate[v] *= factor;
+                    if point < n_points {
+                        limited[point] = true;
+                    }
+                }
+            }
+        }
+        report.n_limited = limited.iter().filter(|&&l| l).count();
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.rate = rate.clone();
+        }
         report.timings.length = start.elapsed().as_secs_f64();
 
         // The extension: at a vertex of region k, the extension of the rate of φ_k.
         let start = Instant::now();
-        let n_points = cut.points.len();
         if options.speed_scaling == SpeedScaling::MeanGradient {
             for (p, g) in mean_gradient.iter().enumerate() {
                 for v in tri.point_vertices(p) {
@@ -331,7 +478,11 @@ impl RegionFlow {
             }
             Extension::Harmonic => self.core.extend_harmonically_from(&e, rate.clone(), par)?,
         };
-        let _ = n_points;
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.gradient_scale = mean_gradient.clone();
+            stages.scaled_rate = rate.clone();
+            stages.extension = extension.clone();
+        }
         report.extension_residual = residual;
         report.timings.extension = start.elapsed().as_secs_f64();
 
@@ -359,6 +510,17 @@ impl RegionFlow {
             })
             .collect();
 
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.function_rates = (0..n_regions)
+                .map(|k| {
+                    (0..nv)
+                        .map(|v| (new[k][v] - self.phis[k][v]) / tau)
+                        .collect()
+                })
+                .collect();
+            stages.explicit = new.clone();
+        }
+
         // The implicit step on the mesh (the paper's): one matrix, N right-hand sides.
         let start = Instant::now();
         if active && options.length_step == LengthStep::OnMesh {
@@ -374,10 +536,16 @@ impl RegionFlow {
         }
         report.timings.length += start.elapsed().as_secs_f64();
         let start = Instant::now();
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.length = new.clone();
+        }
         if let Some(classes) = &options.symmetry {
             for phi in &mut new {
                 symmetry_projection(classes, phi);
             }
+        }
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.symmetric = new.clone();
         }
 
         // Redistancing (SPEC §8.4), then the symmetry projection again.
@@ -387,6 +555,9 @@ impl RegionFlow {
             Redistance::KeepAdjacent => {
                 let (phis, unreached, adjacent) =
                     redistance_regions(mesh, &self.core.geometry, &new)?;
+                if let Some(stages) = stages.as_deref_mut() {
+                    stages.projected = projection(mesh, &new)?.0;
+                }
                 report.n_unreached = unreached;
                 new = phis;
                 adjacent
@@ -407,6 +578,9 @@ impl RegionFlow {
             for phi in &mut new {
                 symmetry_projection(classes, phi);
             }
+        }
+        if let Some(stages) = stages {
+            stages.adjacent = adjacent_after.clone();
         }
         report.timings.redistance = start.elapsed().as_secs_f64();
         report.cut_vanished = !adjacent_after.iter().any(|&a| a);
@@ -522,8 +696,12 @@ struct RegionRates {
     /// The rate of the function of its region at every vertex of the cut mesh (zero at the
     /// vertices of the input mesh).
     rate: Vec<f64>,
-    /// The largest `|λ⁰|`.
-    max_length_speed: f64,
+    /// `Θ_v` per boundary node.
+    force: Vec<f64>,
+    /// `λ⁰_v` per boundary node.
+    length_speed: Vec<f64>,
+    /// `ρ̂`: the quantile of `|s_v + λ⁰_v|` that entered the step rule.
+    step_speed: f64,
     /// The step `τ`.
     tau: f64,
     /// The larger of the residuals of the two systems.
@@ -565,7 +743,8 @@ fn region_rates(
     rule: PenaltyRule,
     smoothing_length: f64,
     step_size: &StepSize,
-    shortest_crossed_edge: f64,
+    statistics: StepStatistics,
+    edges: &[f64],
     roughening_rate: f64,
     par: Parallelism<'_>,
 ) -> Result<RegionRates, CutError> {
@@ -634,7 +813,14 @@ fn region_rates(
     let explicit: Vec<f64> = (0..n)
         .map(|i| distortion[nv + i] + length_speed[i])
         .collect();
-    let tau = step_size.step(&explicit, shortest_crossed_edge, roughening_rate);
+    let (tau, step_speed) = rule_step(
+        step_size,
+        statistics,
+        &explicit,
+        edges,
+        &dual,
+        roughening_rate,
+    );
     for k in &mut implicit {
         *k *= tau;
     }
@@ -644,10 +830,51 @@ fn region_rates(
     rate.extend(solution);
     Ok(RegionRates {
         rate,
-        max_length_speed: length_speed.iter().fold(0.0f64, |m, x| m.max(x.abs())),
+        force,
+        length_speed,
+        step_speed,
         tau,
         residual: first.max(second),
     })
+}
+
+/// Step 1 of the redistancing of SPEC §8.4: at every cut-adjacent vertex the mean of the two
+/// smallest values is subtracted from all functions. Returns the functions, the regions and
+/// the cut-adjacent vertices.
+///
+/// [formula: cut-region-projection]
+#[allow(clippy::type_complexity)]
+fn projection(
+    mesh: &TriMesh,
+    phis: &[Vec<f64>],
+) -> Result<(Vec<Vec<f64>>, Vec<u32>, Vec<bool>), CutError> {
+    let nv = mesh.n_vertices();
+    let region = regions_of(mesh, phis)?;
+    let mut adjacent = vec![false; nv];
+    for &[a, b] in mesh.edges() {
+        if region[a as usize] != region[b as usize] {
+            adjacent[a as usize] = true;
+            adjacent[b as usize] = true;
+        }
+    }
+    let mut out: Vec<Vec<f64>> = phis.to_vec();
+    for v in (0..nv).filter(|&v| adjacent[v]) {
+        let (mut first, mut second) = (f64::INFINITY, f64::INFINITY);
+        for phi in phis {
+            let x = phi[v];
+            if x < first {
+                second = first;
+                first = x;
+            } else if x < second {
+                second = x;
+            }
+        }
+        let mean = 0.5 * (first + second);
+        for phi in &mut out {
+            phi[v] -= mean;
+        }
+    }
+    Ok((out, region, adjacent))
 }
 
 /// What [`redistance_regions`] returns: the functions, the number of vertices some front did not
@@ -674,32 +901,7 @@ pub(crate) fn redistance_regions(
     phis: &[Vec<f64>],
 ) -> Result<Redistanced, CutError> {
     let nv = mesh.n_vertices();
-    let region = regions_of(mesh, phis)?;
-    let mut adjacent = vec![false; nv];
-    for &[a, b] in mesh.edges() {
-        if region[a as usize] != region[b as usize] {
-            adjacent[a as usize] = true;
-            adjacent[b as usize] = true;
-        }
-    }
-    // Step 1: the projection.
-    let mut out: Vec<Vec<f64>> = phis.to_vec();
-    for v in (0..nv).filter(|&v| adjacent[v]) {
-        let (mut first, mut second) = (f64::INFINITY, f64::INFINITY);
-        for phi in phis {
-            let x = phi[v];
-            if x < first {
-                second = first;
-                first = x;
-            } else if x < second {
-                second = x;
-            }
-        }
-        let mean = 0.5 * (first + second);
-        for phi in &mut out {
-            phi[v] -= mean;
-        }
-    }
+    let (mut out, region, adjacent) = projection(mesh, phis)?;
     // Step 2: fast marching per function.
     let mut unreached = vec![false; nv];
     for (k, phi) in out.iter_mut().enumerate() {
