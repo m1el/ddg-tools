@@ -420,9 +420,166 @@ measures. Cited:
 
 ---
 
+## Variational Surface Cutting
+
+"Cuts paper" is Sharp, Crane, *Variational Surface Cutting*, ACM TOG 37(4), Article 156, 2018
+(<https://doi.org/10.1145/3197517.3201356>). "CEA tutorial" is N. Sharp, *Céa's Method for
+PDE-constrained shape optimization* (4/17/2018, updated 5/9/2019); "CEA derivations" is N. Sharp,
+*Céa's Method Derivations for the Variational Shape Cuts Project* (May 8, 2019); both are the
+author's notes. The contract of the implementation is `crates/ddg-variational-cuts/SPEC.md`
+("SPEC"); its signs are those of `CLAUDE.md` (`Δ` positive semidefinite, `u` the true log scale
+factor).
+
+**What the machine-checked part covers for the cut flow, and what it does not.** There is no
+canonical discrete problem here whose minimizer the code could certify: the flow is a
+discretization of the gradient flow of a smooth energy. Machine-checked (`DdgProofs/Cuts/*.lean`,
+ids `cut-*` in the README): every closed-form formula of one flow step is what SPEC says it is;
+every linear system of a step has exactly one solution under the stated hypotheses; the discrete
+adjoints are exact for the discrete objectives with respect to perturbations of the *source*;
+the sign of the flow is a descent *given* the first-variation formula `dE = Σ g σ ℓ` and the
+level-set relation `φ_t = −σ`; the local Hopf–Lax update is the minimum it is meant to be; and
+the smooth formulas hold on three closed-form solutions (flat disk, spherical cap, shrinking
+circle), where the shape derivative is computed directly by one-variable calculus. **Not**
+machine-checked: the four smooth results below; that the discrete gradient density is a
+consistent approximation of the shape derivative on a mesh (tested by finite differences and
+refinement in `crates/ddg-variational-cuts/tests`, SPEC §6); that the discrete energy decreases
+along the discrete flow; the accuracy claims of the flux recovery (SPEC D12 are measurements);
+the marching order of the redistancing and its convergence; anything about rounding.
+
+### [formula: cut-yamabe-equation] Yamabe equation with zero boundary values on the cut surface
+
+- **Statement.** For a fixed cut `γ`, the Dirichlet energy `∫ |∇u|²` of the log conformal factor
+  is minimized by a conformal flattening with `u = 0` on `∂M_γ`, and that `u` solves
+  `Δu = −K` on `M_γ`, `u = 0` on `∂M_γ` (`Δ` positive semidefinite, `K` the Gaussian curvature).
+- **Reference.** Cuts paper Sec. 3.1–3.2, Eq. 2–3; Springborn, Schröder, Pinkall 2008,
+  *Conformal equivalence of triangle meshes*, App. E; Aubin 2013, *Some Nonlinear Problems in
+  Riemannian Geometry*, Ch. 5.
+- **Why not formalized.** Mathlib has no Gaussian curvature, Laplace–Beltrami operator or
+  conformal-change formulas for Riemannian surfaces (see `smooth-yamabe-equation` above).
+- **What depends on it.** It is the modelling step behind the linear system
+  `u_B = 0`, `L_II u_I = −g_I` (SPEC §3.4). Proved instead: that system has exactly one solution
+  (`[formula: cut-yamabe-system]`); `Σ_f Ω_f` is the total curvature (`cut-face-curvature-sum`);
+  the first-order change of the discrete curvature under a conformal scaling is `L u`
+  (`discrete-yamabe-linearization`, which fixes the sign); and the equation holds for the
+  closed-form solutions on the disk and the spherical cap (`cut-disk-radial-solution`,
+  `cut-sphere-cap-solution`: `diskU_ode`, `diskU_laplacian`, `capU_ode`).
+
+### [formula: cut-shape-derivative] Shape derivatives of area and boundary integrals
+
+- **Statement.** For a subdomain `Ω′` whose boundary moves with normal speed `σ`, and a function
+  `ψ` that does not depend on `Ω′`: `D_σ ∫_{Ω′} dA = ∫_{∂Ω′} σ ds`,
+  `D_σ ∫_{∂Ω′} ds = ∫_{∂Ω′} κ σ ds` (Eq. 6), `D_σ ∫_{Ω′} ψ dA = ∫_{∂Ω′} ψ σ ds` (Eq. 7),
+  `D_σ ∫_{∂Ω′} ψ ds = ∫_{∂Ω′} (∂ψ/∂n + κψ) σ ds` (Eq. 8).
+- **Reference.** Cuts paper Sec. 3.3.1, Eq. 6–8; CEA tutorial, section "Unconstrained Shape
+  Derivative" (stated there "without derivation"); Allaire, Jouve, Toader 2004, *Structural
+  optimization using sensitivity analysis and a level-set method*, J. Comput. Phys. 194.
+- **Why not formalized.** Needs integration over moving domains of a surface (a transport
+  theorem) and the first variation of arclength; Mathlib has neither for Riemannian surfaces.
+- **What depends on it.** The term `β_r` of the region density (`Ddg.regionDensity`, Eq. 7 with
+  `ψ = β`), and the length and penalty terms `∂w/∂n + wκ` of (★) in SPEC §1 (Eq. 8; SPEC D8 is
+  the paper's omission of `∂η/∂n`), which the implicit step `(W_V + τ L_w) φ′ = W_V φ̃`
+  discretizes. Machine-checked instances: `d/dρ (πρ²) = 2πρ` and `d/dρ ∫ ψ` for the radial
+  integrands of the disk (`hasDerivAt_disk_regionEnergy`), the cap
+  (`hasDerivAt_capEnergy_integral`), and the circle `d/dt (α·2πρ) = −(ακ)²·2πρ`
+  (`hasDerivAt_circle_lengthEnergy`, `circle_levelSet_flow`).
+
+### [formula: cut-cea-method] Céa's method and the shape derivatives of the distortion energies
+
+- **Statement.** For `J(Ω′) = ∫_{Ω′} j(u)` with `Δu = f` in `Ω′`, `u = 0` on `∂Ω′` (Eq. 9–10),
+  the shape derivative of `J` is the shape derivative of the Lagrangian
+  `ℒ = ∫ j(u) + ∫ p(Δu − f) + ∫_{∂Ω′} λ u` at a critical point (Eq. 11), which gives
+  `D_σ J = ∫_{∂Ω′} (j(u) + λ ∂u/∂n) σ ds` (Eq. 12). Table 1: Dirichlet `∫|∇u|²`: `Δp = −2Δu`,
+  `λ = 0`, density `(∂u/∂n)²` (also Eq. 13); scaled Dirichlet `∫ a|∇u|²`: `Δp = −2Δ_a u`,
+  `λ = −∂p/∂n − 2a ∂u/∂n`, density `−a(∂u/∂n)² − (∂u/∂n)(∂p/∂n)` (Eq. 18); pointwise `∫ b(u)`:
+  `Δp = −b′(u)`, `λ = −∂p/∂n`, density `b(u) − (∂u/∂n)(∂p/∂n)`; `p = 0` on `∂Ω′` in all cases.
+- **Reference.** Cuts paper Sec. 3.3, Eq. 9–13, Sec. 3.5, Eq. 17–19, Table 1 (the paper states the
+  key step "which we will not justify here"); Céa 1986, *Conception optimale ou identification de
+  formes, calcul rapide de la dérivée directionnelle de la fonction coût*, RAIRO Modél. Math.
+  Anal. Numér. 20(3); CEA tutorial (the recipe); CEA derivations Sec. 1 (Dirichlet), Sec. 2
+  (scaled Dirichlet), Sec. 3 (Hencky).
+- **Why not formalized.** Shape calculus for PDE-constrained functionals (differentiability of
+  `u` with respect to the domain, Sobolev spaces on surfaces, integration by parts on a moving
+  domain); none of it is in Mathlib.
+- **What depends on it.** The gradient densities `[formula: cut-gradient-dirichlet]`,
+  `[formula: cut-gradient-scaled]`, `[formula: cut-gradient-pointwise]` and the adjoint systems
+  `[formula: cut-adjoint-scaled]`, `[formula: cut-adjoint-pointwise]` are discretizations of
+  Table 1; the direction of the flow depends on them. Proved instead: (1) the discrete adjoint
+  is the exact first variation of the discrete objective with respect to the source
+  (`scaledEnergy_perturb`, `hasDerivAt_pointwiseEnergy`); with `L_a = cL` it is `p = −2c u`,
+  `q = −2c v` and the scaled density is `c` times the Dirichlet one (`scaledAdjoint_const`,
+  `gradScaledD_const`); (2) on the flat disk and the spherical cap the derivative of the energy
+  with respect to the radius, computed directly, **is** the Table 1 density integrated over the
+  boundary, for the Dirichlet, the constant-weight scaled and the Hencky energy
+  (`hasDerivAt_disk_dirichletEnergy`, `hasDerivAt_disk_scaledEnergy`,
+  `hasDerivAt_disk_henckyEnergy` with the adjoint `diskP`, `hasDerivAt_capEnergy_integral`,
+  `hasDerivAt_twoCaps` for two regions and their sign). Not proved: Table 1 for a general region,
+  and that the discrete density converges to it (finite-difference tests, SPEC §6.3).
+
+### [formula: cut-level-set-evolution] Evolution of the cut as a level set
+
+- **Statement.** A function `φ` advected by a velocity field `X` satisfies `dφ/dt = −X·∇φ`
+  (Eq. 20); for the signed distance function of `γ` with `∇φ = n` and the velocity `−σ* n` of the
+  gradient flow this is `dφ/dt = σ*` on `γ` (Eq. 21); for curve shortening `X = −κ_φ n` it is
+  `dφ/dt = −Δφ` with `Δφ = −κ_φ` (Eq. 22). Away from `γ` the speed is extended harmonically and
+  `φ` is re-initialized to a signed distance function.
+- **Reference.** Cuts paper Sec. 4.1–4.2, Eq. 20–22, Sec. 6, Fig. 9; Allaire, Jouve, Toader 2004;
+  Osher, Sethian 1988, *Fronts propagating with curvature-dependent speed*, J. Comput. Phys. 79.
+- **Why not formalized.** Level-set equations on surfaces (transport of a level set, mean
+  curvature of level sets of a distance function) are not in Mathlib.
+- **What depends on it.** The structure of one flow step (SPEC §4) and the relation `φ_t = −σ`
+  between the change of `φ` and the normal speed of the cut, on which the sign of the flow rests.
+  Proved instead: given that relation and the first variation `dE = Σ g σ ℓ`, the flow
+  `φ_t = g` gives `dE = −Σ g² ℓ ≤ 0` and the opposite sign gives `+Σ g² ℓ`
+  (`[formula: cut-speed]`, `firstVariation_levelSet`, `firstVariation_ascent`; SPEC D2); for a
+  circle in the plane `φ = r − ρ(t)` with `ρ = √(ρ₀² − 2αt)` satisfies `φ_t = α(φ_rr + φ_r/r)` on
+  the cut (`[formula: cut-curve-shortening-circle]`); for the two caps of a sphere the energy
+  changes at the rate `(G_0 − G_1)·(length)` when the cut moves along the outward normal of
+  region 0 (`hasDerivAt_twoCaps`). The harmonic extension and the implicit step are covered as
+  linear algebra (`cut-harmonic-extension`, `cut-length-step`).
+
+### [formula: cut-weighted-fem-stiffness] The weighted cotan matrix as a finite element matrix
+
+- **Statement.** For piecewise linear `a`, `f`, `g` on a triangle mesh,
+  `∫ a ∇f·∇g = fᵀ L_a g` with `L_a = Σ_t ā_t · (cotan Laplacian of the triangle t)`,
+  `ā_t` the mean of `a` over the vertices of `t` (SPEC §3.6, D11).
+- **Reference.** Standard finite elements (the gradient is constant on a triangle and the
+  integral of a linear function is its mean times the area); the Cuts paper Sec. 5.3 uses the
+  edge rule `(a_i + a_j)/2` instead.
+- **Why not formalized.** The integral over a triangle is not formalized in this package (see
+  `cotan-fem-stiffness`).
+- **What depends on it.** Only the name "exact stiffness matrix". Proved without it:
+  `xᵀ L_a x = Σ_t ā_t · (cotan energy of x on t) ≥ 0` for `a ≥ 0`
+  (`[formula: cut-weighted-laplacian]`), `L_a = cL` for constant `a`, and the edge rule is
+  indefinite on an obtuse triangle (`edgeRuleEnergy_neg_example`).
+
+### [formula: cut-fast-marching-convergence] The redistancing computes an approximate distance
+
+- **Statement.** The values produced by the single-pass marching of SPEC §3.12 with the local
+  Hopf–Lax update are a first-order approximation of the geodesic distance to the cut; on a mesh
+  without obtuse angles the single pass is the unique solution of the fixed-point scheme
+  `T_i = min over incident triangles`.
+- **Reference.** Kimmel, Sethian 1998, *Computing geodesic paths on manifolds*, Proc. Natl. Acad.
+  Sci. 95(15) (fast marching on triangulated surfaces; causality on acute triangles); Bornemann,
+  Rasch 2006, *Finite-element discretization of static Hamilton–Jacobi equations based on a
+  local variational principle*, Comput. Vis. Sci. 9(2) (the Hopf–Lax update, monotonicity and
+  convergence); Cuts paper Sec. 6.4.
+- **Why not formalized.** The marching order is an algorithm, not a formula, and convergence
+  needs the theory of viscosity solutions of the eikonal equation.
+- **What depends on it.** Nothing in the formulas: the redistancing only re-initializes `φ` away
+  from the cut (cut-adjacent vertices keep their values). Proved: the local update is exactly
+  `min_{λ∈[0,1]} λT_j + (1−λ)T_k + |x_i − (λx_j + (1−λ)x_k)|`
+  (`[formula: cut-redistance]`, `hopfLaxTriangle_isLeast`, also from the side lengths alone),
+  never exceeds the edge terms, and is at least `min(T_j, T_k)`. On obtuse triangles the single
+  pass is the definition (SPEC D10).
+
+---
+
 ## Out of scope of this package
 
 The end-to-end pipeline (`crates/ddg-uv`: charts, packing), the Python bindings and the Blender
 add-on are not covered. For `crates/ddg-bff` and `crates/ddg-optimal-cones` the formulas listed in
 the README are covered; their control flow (iteration limits, safeguards, fallbacks, tolerances)
-is not.
+is not. For `crates/ddg-variational-cuts` the same holds: the formulas of one flow step are
+covered, the extraction of the cut and of the cut mesh (which faces are split, the choice of the
+quad diagonal, the bookkeeping of regions and components), the stopping rule, the `N`-region
+variant (SPEC §8) and the helpers for initial level sets are not.
