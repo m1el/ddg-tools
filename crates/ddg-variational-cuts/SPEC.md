@@ -258,21 +258,29 @@ class, after §3.10 and again after §3.12.
 ### 3.12 Redistancing `[formula: cut-redistance]`
 
 Regions and cut-adjacent vertices `Adj` are recomputed from `φ′`. Signs stay. Vertices in `Adj` keep
-their values (paper Sec. 6.4). For the others, `φ_i = sign_i · T_i` where `T` is the solution of the
-upwind (Hopf–Lax) scheme on `M`, restricted to each sign class:
+their values (paper Sec. 6.4). For the others, `φ_i = sign_i · T_i` where `T` is computed by fast
+marching on `M`, restricted to each sign class:
 
 ```
-T_i = |φ′_i|                                                             i ∈ Adj
-T_i = min over triangles (i,j,k) with j, k of i's sign class of
-      min_{λ∈[0,1]} [ λ T_j + (1−λ) T_k + | x_i − (λ x_j + (1−λ) x_k) | ]    otherwise
+seeds:      T_i = |φ′_i| for i ∈ Adj; all seeds are accepted from the start and never change
+tentative:  T_i = min of
+              min_{λ∈[0,1]} [ λ T_j + (1−λ) T_k + | x_i − (λ x_j + (1−λ) x_k) | ]
+                  over triangles (i,j,k) with j, k accepted and of i's sign class
+              T_j + ℓ_ij    over accepted neighbours j of i's sign class
+accept:     repeatedly the not yet accepted vertex with the smallest tentative value
+            (ties: the lower vertex index); its value is final from then on
 ```
 
-and, when only one of `j, k` is in the class, the edge term `T_j + ℓ_ij`. The inner minimum has a
-closed form (a convex function of `λ` in the plane of the triangle). The scheme is monotone and is
-solved by a Dijkstra-ordered pass that re-opens a vertex whenever its value can still decrease
-(obtuse triangles), so the result does not depend on the order of processing. A vertex that no
-front reaches (its sign class has no cut-adjacent vertex in its component) keeps `φ′_i`, and is
-counted in the report. The paper uses fast marching (Kimmel, Sethian 1998) and allows any method (D10).
+The inner minimum has a closed form (a convex function of `λ` in the plane of the triangle; the
+edge terms are `λ = 0, 1`). A vertex that no front reaches (its sign class has no cut-adjacent
+vertex in its component) keeps `φ′_i`, and is counted in the report.
+
+On a mesh without obtuse angles this is the unique solution of the scheme
+`T_i = min over all incident triangles of the same class`. On obtuse triangles the single pass and
+that fixed point differ, and iterating to the fixed point is not affordable (measured in
+`ddg_core::distance`: thousands of re-openings per vertex at an angle of 160°), so the single pass
+is the definition. It is the paper's fast marching (Kimmel, Sethian 1998) with the local update
+written in Hopf–Lax form (Bornemann, Rasch 2006) and without unfolding of obtuse triangles (D10).
 
 ## 4. One flow step
 
@@ -383,8 +391,10 @@ Losasso et al. 2006, Sec. 3.1. With `N = 2`, `φ_0 = −φ_1 = φ` must reproduc
   three vertices: this is the exact finite element matrix for piecewise linear `a`, and it stays
   positive semidefinite on obtuse triangles, which the edge rule does not guarantee. The two agree
   when `a` is constant.
-* **D10** Redistancing uses the Hopf–Lax upwind scheme (Bornemann, Rasch 2006) instead of fast
-  marching with unfolding; both are first-order approximations of the same distance.
+* **D10** Redistancing is fast marching as in the paper, but the local update is the Hopf–Lax
+  minimum over the opposite edge (Bornemann, Rasch 2006) and obtuse triangles are not unfolded
+  (Kimmel, Sethian 1998 unfold them); both are first-order approximations of the same distance.
+  Ties are broken by vertex index so that two implementations agree.
 
 Add to this list whenever something else turns up; never drop an entry.
 
