@@ -26,7 +26,7 @@ not computed here (Blender triangulates; `PolygonMesh::from_polygons` fans conve
 
 Contents: [example](#example) · [API](#api) · [stages and policies](#stages-and-policies) ·
 [the four decisions](#the-four-decisions) · [the dataset](#the-dataset) · [the boundary](#the-boundary) ·
-[benchmarks](#benchmarks) · [tests](#tests) · [not done, not verified](#not-done-not-verified)
+[the cut flow on polygon meshes](#the-cut-flow-on-polygon-meshes) · [benchmarks](#benchmarks) · [tests](#tests) · [not done, not verified](#not-done-not-verified)
 
 ## Example
 
@@ -692,6 +692,154 @@ crate. Until then the option is for pieces whose boundary values are small and f
 accept unequal seams; the report says which of the two happened (`max_boundary_length_error`,
 `max_seam_length_mismatch`, the warnings).
 
+## The cut flow on polygon meshes
+
+`ddg_uv::cutting` makes the cut flow of
+
+> Nicholas Sharp, Keenan Crane. *Variational Surface Cutting.*
+> ACM Transactions on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201356>
+
+(crate `ddg-variational-cuts`, implemented clean-room from the text of the paper) usable from
+polygon meshes as an editor provides them (polygons, a triangulation, seams), end to end to UVs.
+It is meant to sit under a thin binding. The flow itself and its options are described in that
+crate's README and `SPEC.md`.
+
+```text
+Session::new(&MeshInput, n_regions, &Start) -> Session   the flow on the triangulation cut open at the seams
+  .step / .run / .roughening_rate / .evaluate            the flow's own problem, options, stop rule and reports
+  .state() / .set_state(&regions)                        region functions per polygon corner
+  .restart(&Start)  .corner_regions()
+  .preview(delta) -> Vec<PreviewPolyline>                the cut as polylines in space
+  .describe_cut(delta) -> CutOnPolygons                  edge points and the paths through each polygon
+insert(&PolygonMesh, &CutOnPolygons) -> Inserted         the crossed polygons split along the paths
+Session::unwrap / unwrap_with_cut(&MeshInput, &CutOnPolygons, &CutUnwrapOptions) -> CutUnwrap
+                                                         insert, then `unwrap` with seams = old seams + cut
+```
+
+* **Session.** Built from the caller's `MeshInput` (positions, corners, triangulation, seams).
+  The seams are handled by `prepare` (a seam that is not an edge is ignored with a warning, a
+  seam of one edge is extended, `Session::warnings`); the triangle mesh the flow runs on is the
+  triangulation cut along them, so the seams are boundary for the flow. The session fixes two
+  policies: `Orientation::Reject` and `Degenerate::Reject`. The flow works on true geometry, and
+  a flipped or mollified mesh would no longer be the caller's. The pieces that the seams
+  separate are one mesh of several components. `flow_vertex_to_vertex`, `corner_to_flow_vertex`,
+  `flow_face_to_triangle` give the maps.
+* **State.** `state()` returns `n_regions` arrays with one `f64` per polygon corner in the
+  caller's length unit; a corner belongs to the region whose function is smallest (ties: lowest).
+  For two regions the functions are `phi` and `-phi`, and `set_state` uses `phi = (f0 - f1) / 2`.
+  Corners of one vertex that no seam separates must carry the same value (exact equality):
+  `CuttingError::CornersDisagree` names the vertex, the region and the two corners. Across a
+  seam the corners may differ; each side is its own vertex of the flow.
+* **Starts** (`Start`): `GeodesicCircle { vertex, radius }` (distance on the surface cut open
+  along the seams, from every copy of the vertex; it does not reach across a seam),
+  `PolygonLabels` (one label per polygon, below `n_regions`; the flow's `init::from_face_labels`
+  on the triangles), `Corners` (the state as above).
+* **Controls.** `problem.penalty` (`eta`) and `ScaleWeight::PerVertex` are per vertex of the
+  polygon mesh, `CurvatureSource::PerFace` per triangle of the supplied triangulation,
+  `options.symmetry` one class per polygon-mesh vertex. A vertex that a seam splits into several
+  flow vertices is left out of the symmetry (each copy is its own class). Reports are the flow's
+  (`StepReport`, `RunReport`).
+* **The cut on the polygons** (`CutOnPolygons`): `edge_points` (the polygon edge as a vertex pair
+  `[a, b]`, `a < b`, the parameter `t` from `a`, the position, and `side: Some(polygon)` on an
+  edge that is a seam, where the two sides carry separate points) and `paths` (per polygon, an
+  ordered list from one edge point to another, the crossed diagonals of the triangulation
+  in between as `InteriorPoint { corners, t, position }`, and the regions on its left and
+  right). `PathEnd::Junction` and `CutOnPolygons::junctions` are there for the day the flow has
+  three or more regions; `insert` refuses a junction with `CuttingError::Unsupported`.
+* **Insertion.** `insert` needs only the polygon mesh and the description, which is what the
+  Blender operator will do with bmesh. Every edge point becomes a vertex on its edge and **both**
+  polygons of the edge get it; on a seam the two sides' points are separate vertices, and both
+  polygons get both (so a polygon can gain collinear corners; two points at exactly the same
+  parameter are one vertex). Polygons crossed by paths are cut along them; the new polygons are
+  unions of pieces of the old triangles, and their triangulation is made of those pieces (a
+  quadrilateral piece takes the diagonal with the better worse triangle; a piece with extra
+  collinear corners is fanned). Old vertices keep their numbers; new vertices follow. The result
+  (`Inserted`) holds the new mesh with its triangulation, `new_seams` (exactly the pieces between
+  consecutive points of the paths), `polygon_parent`, `vertex_source`, `path_vertices`, and
+  `seams_after(old_seams)` (an old seam edge that received points becomes the pieces of its chain).
+* **End to end.** `Session::unwrap` / `unwrap_with_cut` insert and call `unwrap` with
+  `seams_after(old seams)`. **Cones.** The existing options have no switch for cones as such:
+  they are steered per vertex (`forbidden_vertices` gives infinite cost, `pinned_vertices` and
+  `prescribed_cones` ask for cones). `ConePlacement::Optimal` (default) leaves `unwrap` as it is
+  (the steering of the old mesh stays valid, the vertices keep their numbers);
+  `ConePlacement::Off` forbids every vertex of the new mesh and refuses pinned or prescribed
+  ones. Nothing in `unwrap` changed.
+* **Not available yet:** `n_regions > 2` is `CuttingError::RegionsNotAvailable`. Enabling it
+  needs the core crate's N-region flow (SPEC §8) and these changes here: lift the check in
+  `Session::new`; `Maps::phi_from_regions` and `Maps::regions_from_phi` (the only places that
+  know `phi = (f0 - f1) / 2` and `(phi, -phi)`) keep N arrays per flow vertex instead; the
+  start from labels takes N-valued vertex labels; `describe_cut` takes the two regions of each
+  path from the segments and emits `PathEnd::Junction` for triple points; `insert` builds the
+  rings of the triple-point triangle (three segments to the junction vertex) the way it builds
+  the ones for a single segment. `PolygonPath::regions`, `PathEnd`, `junctions` and the arrays
+  of `state()` are already shaped for it.
+
+### Tests (`tests/cutting.rs`, 17 tests)
+
+Insertion invariants on `uv_sphere`, `grid_cube`, `capsule`, `torus`, `cylinder` (cuts from the
+flow) and on 5156 paths from random states of three meshes with and without seams
+(`random_states_insert_cleanly`): total triangulated area kept to `1e-12`, no triangle without
+area, the new mesh passes `prepare` (manifold, no flipped polygon), old vertices keep position
+and number, every inserted point lies on its old edge or diagonal to `1e-12`, every cut segment
+is an edge of the new mesh and `new_seams` is exactly those, old seams are kept (as they were or
+as their chains), each new polygon lies in one region of the state, a closed cut on the sphere
+gives two charts. State round trip through corners (bit for bit), the vertex-naming error across
+no seam and its absence across a seam, every error variant, descriptions that do not fit, a cut
+that ends on a seam (edge points on the two sides of a seam), a ring of seams that splits the
+surface into two flow components, a one-edge seam, end to end with `ConePlacement::Off` and
+`Optimal` on the generated meshes, the quad model `spot_quadrangulated.obj` (`DDG_MODELS`,
+default `data/models/spot/spot`) and the dataset (`DDG_DATASET`; `bump` in a debug build, `camel`,
+`bunny`, `hand` in a release build); a missing file is skipped with a notice. The UV checks are
+the report's: no flipped triangle (asserted), every seam of the cut is a cut edge (asserted),
+the seam length mismatch (asserted below 0.5, reported), the area distortion (reported).
+Measured in a release build (30 flow steps on spot, 5 on the others, Hencky energy, default
+options; `ConePlacement::Off` / `Optimal`): no flipped triangle in any run.
+
+| mesh | polygons -> after insertion | max seam mismatch | scale-free distortion | cones |
+|---|---|---|---|---|
+| uv_sphere 24x12 | 288 -> 316 | 2.7e-3 / 5.7e-3 | 0.209 / 0.071 | 0 / 1 |
+| grid_cube 6 | 216 -> 239 | 9.2e-3 / 0.13 | 0.488 / 0.098 | 0 / 1 |
+| capsule 20x6 | 260 -> 290 | 0.45 / 1.4e-2 | 1.109 / 0.012 | 0 / 65 |
+| torus 24x10 | 240 -> 256 | 1.2e-3 / 1.2e-3 | 0.044 / 0.044 | 0 / 0 |
+| spot (quads), 30 steps | 2928 | 7.6e-3 / 4.3e-3 | 3.285 / 0.324 | 0 / 7 |
+| bump | 6528 -> 6661 | 9.4e-5 / 9.4e-5 | 0.093 / 0.093 | 0 / 0 |
+| camel | 22704 -> 22850 | 2.0e-3 / 4.7e-3 | 1.453 / 0.244 | 0 / 3 |
+| bunny | 28576 -> 28885 | 6.3e-4 / 2.7e-3 | 4.424 / 0.286 | 0 / 2 |
+| hand | 6660 -> 6759 | 2.5e-2 / 5.3e-2 | 4.942 / 0.663 | 0 / 5 |
+
+What this says: the flow was run for a handful of steps from a geodesic circle, which is not a
+cut that flattens well; with cones off the charts are flattened as they are and the distortion
+is high on everything that is not nearly developable. The numbers show that the chain works and
+what it costs, not how good the cuts are. The seam mismatch of the cones-off runs is what
+closing the boundary of a chart changes (see [the boundary](#the-boundary)); the large value on
+the capsule (0.45) is that.
+
+### Benchmarks of the cut flow (`benches/cutting.rs`)
+
+`cargo bench -p ddg-uv --bench cutting` (`-- cut/steps` for one group). Defaults everywhere, one
+thread, `DDG_MODELS` / `DDG_DATASET` as for the tests, a missing mesh is skipped with a notice.
+Every run starts as the geodesic circle of radius `0.2 sqrt(area)` around the vertex at a third
+of the vertex list and takes exactly 10 flow steps (Hencky energy, `alpha_L` from the roughening
+rate of the start at ripple length 0.25). One run on the development machine (criterion median
+of 10 samples; two runs differed by about 10 %, more for `start` on the largest meshes). The cut
+has 64 to 304 edge points after the steps, so `preview`, `describe` and `insert` are small by
+construction.
+
+| mesh (polygons / triangles) | start | 10 steps | preview | describe | insert | unwrap, cones off | unwrap, cones optimal | whole chain, cones off |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| uv_sphere 64x32 (2048 / 3968) | 4.7 ms | 23.3 ms | 15 us | 24 us | 1.0 ms | 15.5 ms | 22.4 ms | 41.7 ms |
+| grid_cube 16 (1536 / 3072) | 3.7 ms | 16.2 ms | 13 us | 21 us | 0.81 ms | 11.9 ms | 15.4 ms | 32.5 ms |
+| torus 96x24 (2304 / 4608) | 5.7 ms | 23.4 ms | 16 us | 26 us | 1.1 ms | 16.7 ms | 16.8 ms | 44.8 ms |
+| spot quads (2928 / 5856) | 8.2 ms | 31.1 ms | 21 us | 31 us | 1.4 ms | 21.6 ms | 26.5 ms | 52.8 ms |
+| spot triangles (5856 / 5856) | 8.7 ms | 39.8 ms | 21 us | 29 us | 1.9 ms | 24.5 ms | 31.1 ms | 62.8 ms |
+| camel (22704 / 22704) | 60.5 ms | 161.9 ms | 72 us | 81 us | 6.1 ms | 119.5 ms | 160.0 ms | 305.7 ms |
+| bunny (28576 / 28576) | 81.8 ms | 222.2 ms | 103 us | 121 us | 8.1 ms | 167.3 ms | 214.9 ms | 429.9 ms |
+
+`start` is `Session::new`: validation, the seam cut, the maps, the flow's symbolic analysis and
+the distance. "unwrap" is `ddg_uv::unwrap` of the inserted mesh with the cut as seams (the
+insertion is its own column). "Whole chain" is `Session::new`, 10 steps, `describe_cut`, `insert`
+and `unwrap` with cones off.
+
 ## Benchmarks
 
 `cargo bench -p ddg-uv` (Criterion; `benches/pipeline.rs`). End to end is `unwrap` from the
@@ -785,6 +933,16 @@ Four error variants are not triggered by any test input, only their wording is c
 - The Python binding and the Blender add-on expose the boundary option (`optimize_boundary`);
   their tests (`scripts/py-test.sh`, `scripts/blender-test.sh`) only check that it reaches the
   pipeline and is reported, not its quality on meshes from Blender.
+- The cut session (`ddg_uv::cutting`), see [the section](#the-cut-flow-on-polygon-meshes):
+  no Blender mesh was used (the quad model is `spot_quadrangulated.obj`, whose polygons are
+  fanned from their first corner by `PolygonMesh::from_polygons`, not Blender's tessellation),
+  and `insert` was not compared with an editor's bmesh implementation. The new polygons'
+  diagonals are not checked against the other edges of the mesh before `unwrap` does it
+  (`DiagonalOnEdge`): a diagonal that joins two vertices that another polygon also joins is
+  an error of `unwrap`, never produced in any test. A geodesic-circle start does not reach across
+  a seam. Symmetry classes ignore vertices that a seam splits. Two regions only. The cuts in
+  the tests and benchmarks come from a few steps of the flow from a circle; no claim is made on
+  how well they flatten, and the flow's convergence on these meshes was not studied here.
 
 ## License
 

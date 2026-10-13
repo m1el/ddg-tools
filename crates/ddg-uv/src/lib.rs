@@ -48,6 +48,11 @@
 //! # }
 //! ```
 //!
+//! The module [`cutting`] puts the cut flow of "Variational Surface Cutting" (Sharp, Crane 2018,
+//! crate `ddg-variational-cuts`) in front of this pipeline for polygon meshes: a session that
+//! moves a cut on the seam-cut triangulation, the cut expressed on the caller's polygons, the
+//! insertion of the cut into a polygon mesh, and `unwrap` with the cut as seams.
+//!
 //! # Stages
 //!
 //! [`unwrap`] runs these in order; [`prepare`], [`solve_cones`], [`flatten`] and [`assemble`]

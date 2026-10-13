@@ -219,7 +219,7 @@ struct Part {
     key: f64,
 }
 
-/// Inserts `cut` into `mesh`. See the [module](self) for what is built.
+/// Inserts `cut` into `mesh`. See the module documentation of `insert` (the top of this file) for what is built.
 ///
 /// # Errors
 /// [`CuttingError::Mesh`] if `mesh` is not a valid polygon mesh with a triangulation,

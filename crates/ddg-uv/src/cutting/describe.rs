@@ -86,7 +86,7 @@ pub struct PolygonPath {
     pub regions: [u32; 2],
 }
 
-/// The cut expressed on the caller's polygons. See the [module](self) for the meaning.
+/// The cut expressed on the caller's polygons. See the module documentation of `describe` (above) for the meaning.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CutOnPolygons {
     /// The points where the cut crosses polygon edges, each once.
