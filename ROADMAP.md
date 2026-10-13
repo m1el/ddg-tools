@@ -16,6 +16,13 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
    here: an intrinsic Delaunay triangulation for the stages of the cut flow that suffer on
    obtuse meshes (redistancing first, then the evaluation). Evidence:
    `crates/ddg-variational-cuts/README.md`, "Mesh quality", and `examples/bad_mesh_study.rs`.
+   Decided for it (2026-10-14): the authors' MIT demo may be used as a reference; scope is the
+   signpost data structure, flips and Delaunay flipping, vertex insertion and Delaunay refinement
+   (with boundaries, which the paper does not cover), the overlay and point queries; the optimal
+   Delaunay variant comes later; the whole cut flow is to run on the intrinsic triangulation, the
+   cut is traced back, refinement that adds vertices is allowed; no visible effect in Blender; a
+   detected wrong result (a failed trace) is an error, never repaired silently. Branches: `master`
+   moves up to `variational-cuts` when item 1 lands, the work is on `intrinsic-triangulations`.
 
 ## Decided (2026-10-14)
 
