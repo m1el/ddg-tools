@@ -69,9 +69,31 @@ Steepest descent is `σ = −[…]`, and `φ_t = −σ`, so on `γ`
 φ_t = (G_0 − G_1)  −  Δ_w φ,       w := α_L + η,     Δ_w = −∇·(w∇)                        (★)
 ```
 
-The first term is extended harmonically away from `γ` and integrated explicitly; the second is
-integrated implicitly; then `φ` is made a signed distance again. A region whose own boundary
-derivative is large **shrinks** (D2). For `N` regions (§8) every region `k` has its own `φ_k`,
+In the paper the first term is extended harmonically away from `γ` and integrated explicitly, the
+second is integrated implicitly on `M`, and then `φ` is made a signed distance again. Here both
+terms are evaluated on `γ` by default, the second implicitly, and extended together (§3.8–§3.10,
+D14–D16); the stages of the paper stay selectable. A region whose own boundary derivative is large
+**shrinks** (D2).
+
+**Roughening.** Linearizing (★) about a straight cut between two half planes with constant normal
+derivatives shows what the two terms do to a ripple `δ(x) = ε cos(kx)` of the cut: where a region
+bulges out, its `∂u/∂n` falls by the factor `1 − kδ` (its boundary values are carried by a
+harmonic function that decays like `e^{−k·distance}`), on the other side it rises by `1 + kδ`, so
+
+```
+δ_t = ( ω k − w k² ) δ,          ω := 2 (Q_0 + Q_1),   Q_r := G_r − β_r − w_r b(0)
+```
+
+with `Q_r` the part of the gradient density that is quadratic in the normal derivatives
+(`w_r (∂u/∂n)²` for the Dirichlet energy). The distortion term amplifies every ripple, the shorter
+the faster; the length term damps it. Ripples longer than `2π w/ω` grow, the fastest at
+`k = ω/(2w)`. With `w = 0` the flow is ill-posed (the paper's Sec. 3.2.1: the distortion alone is
+driven to zero by longer and longer cuts). `ω` has the unit of a speed, is reported by every step,
+and sets the scale of `α_L` and of the time step (§4, D18). On the sphere of unit area
+(`R = 1/√(4π)`), for the Dirichlet energy, the ripple `ε cos(mθ)` of the equator grows at the rate
+`(m − 1) [ 4/R³ − α_L (m + 1)/R² ]` exactly (the DtN map of a hemisphere is `m/R`, the base
+solution contributes `u″ = K`, and the curvature of the ripple is `(m² − 1) ε/R²`); the equator is
+stable iff `α_L > 4/(3R) = 4.73`. For `N` regions (§8) every region `k` has its own `φ_k`,
 negative inside, with `φ_{k,t} = G_k − G_j − Δ_w φ_k` on the part of `∂R_k` shared with region `j`.
 
 ## 2. Discrete setting
@@ -102,6 +124,7 @@ k_f   = Ω_f / A_f                                   density
 
 Positive on a sphere (D1). Boundary vertices carry no Gaussian curvature (D9a).
 `Σ_f Ω_f = Σ_{i∉B_M} (2π − Θ_i)` `[formula: cut-face-curvature-sum]`; on a closed mesh this is `2πχ`.
+The identity needs every vertex to lie in a face (`Θ_i > 0`), which `TriMesh::new` guarantees.
 A curvature override replaces `k_f` by a caller-supplied density (`Uniform(c)` or one value per face).
 
 Because the corner angles of a Euclidean triangle sum to `π`, the same number is
@@ -191,7 +214,8 @@ v_i = (L_BI u_I)_i + g_i
 ℓ_i = ½ Σ (lengths of the boundary edges of S at i)
 ```
 
-(The paper's `v` in Eq. 26, 28 has the opposite sign, D6.) At a cut vertex inside `M` both regions
+`v` is determined by `L u = −g + v` alone: it is the residual of the equation at the rows that
+were not solved. (The paper's `v` in Eq. 26, 28 has the opposite sign, D6.) At a cut vertex inside `M` both regions
 have the same `ℓ`; at a cut vertex on `∂M` the two boundary edges are a cut segment and a piece of
 the boundary edge of `M` (D9d).
 
@@ -240,7 +264,11 @@ pointwise   J = Σ_{i∈S} A_i^S b(u_i),   A_i^S = lumped vertex area within S
 ```
 
 `d_i`, `e_i` are the normal derivatives of `u` and `p` at the cut vertex `i` recovered from `v` and
-`q` as in §3.5. `G` is needed at cut vertices only.
+`q` as in §3.5. `G` is needed at cut vertices only. The discrete adjoint `p` is the exact
+derivative of the discrete objective `J` with respect to the source `g`, at a fixed mesh and a
+fixed set of interior vertices: `∂J/∂g_i = p_i` for `i ∈ I` (with `u_I = −L_II⁻¹ g_I`). It is
+not a derivative with respect to the cut, which changes the mesh and the set `I`; the step from
+`p` to `G` is the smooth formula of §1.
 
 `L_a` is the exact stiffness matrix of `∫ a ∇f·∇g` for piecewise linear `a, f, g`, hence positive
 semidefinite for `a ≥ 0` on every mesh (D11). `q` is the integrated outward normal derivative of
@@ -252,9 +280,14 @@ Curvature-based weight `[formula: cut-feature-size]` (paper Sec. 3.5.1, 5.6), co
 ```
 K_i  = (2π − Θ_i)/A_i  (interior),  0 on B_M
 r⁰_i = 1 / ( √|K_i| + 1/r_ε )                (D5)
-(W_V + c L) r = W_V r⁰,   c = 0.02
+(W_V + c L⁺) r = W_V r⁰,   c = 0.02
 a_i  = r_i³
 ```
+
+`L⁺` is the Laplacian of the edge weights `max(w_ij, 0)`, `w_ij = ½ Σ cot` over the one or two
+faces at the edge `ij` (D17). `W_V + c L⁺` is then an M-matrix on every mesh, so
+`min r⁰ ≤ r_i ≤ max r⁰`, `a_i > 0`, and `Σ A_i r_i = Σ A_i r⁰_i`. On a mesh without negative edge
+weights `L⁺ = L`. A caller-supplied `a` is checked for `a_i > 0`.
 
 Region totals: `G_r,i = w_r · G_i + β_r`. A region with `w_r = 0` needs no solve; implementations
 may solve it anyway and report its `u` (nothing else changes, D13d).
@@ -273,46 +306,113 @@ neighbours along the cut, `s_c ← (ℓ₂ s₁ + ℓ₁ s₂)/(ℓ₁ + ℓ₂)
 to neighbour `k`. A cut vertex on `∂M` (one neighbour) is left alone. The procedure of the paper is
 `FluxRecovery::Nodal` with `passes = 1` (`EvalOptions::paper()`).
 
-### 3.8 Harmonic extension `[formula: cut-harmonic-extension]`
+### 3.8 Extension `[formula: cut-extension-local]`, `[formula: cut-harmonic-extension]`
 
-In each submesh, with `s` as Dirichlet data on the cut vertices `C` and all original vertices `O`
-of the submesh unknown (so `∂M` gets the natural, zero-flux condition, D9e):
+A rate `r_p` at the cut points (§3.9, §3.10) becomes a rate `σ_i` at every vertex of `M`.
+
+**From the cut (default, `Extension::Local`, D15).** With `ℓ_p` the dual length of cut point `p`
+on the cut (half the lengths of its segments) and `β_ip` the barycentric weight of the cut-adjacent
+vertex `i` at `p` (`1 − t` or `t` on the edge of `p`):
 
 ```
-L_OO σ_O = −L_OC s_C
+σ_i = Σ_p ℓ_p β_ip r_p / Σ_p ℓ_p β_ip              over the crossed edges at i
+σ_i = Σ_j (σ_j / ℓ_ij) / Σ_j (1 / ℓ_ij)             over the neighbours j of i in its region that
+                                                    are one ring closer to the cut
 ```
 
-A component without cut vertices gets `σ = 0`. On a closed mesh `L_OO` is the matrix of §3.4.
-Every original vertex of `M` now has a value `σ_i`.
+The ring of a vertex is the number of uncrossed edges on the shortest path to a cut-adjacent vertex
+of its region; a vertex that no such path reaches gets `σ = 0`. No linear system. `σ` lies between
+the smallest and the largest `r`. The first line is the transpose of the interpolation
+`Σ_i β_ip σ_i` that the explicit step applies at the cut points, normalized, so
+`Σ_p ℓ_p Σ_i β_ip σ_i = Σ_p ℓ_p r_p`: the mean rate of the cut is the mean of `r`.
 
-### 3.9 Explicit step `[formula: cut-explicit-step]`
+**Harmonic (paper Sec. 5.3.1, `Extension::Harmonic`).** In each submesh, with `r` as Dirichlet data
+on the cut vertices `C` and all original vertices `O` of the submesh unknown (so `∂M` gets the
+natural, zero-flux condition, D9e):
 
-`φ̃_i = φ_i + τ σ_i`.
+```
+L_OO σ_O = −L_OC r_C
+```
 
-### 3.10 Length and penalty step `[formula: cut-length-step]`
+A component without cut vertices gets `σ = 0`. On a closed mesh `L_OO` is the matrix of §3.4 and
+its factorization is reused.
 
-On `M`, with `w_i = α_L + η_i ≥ 0` and `L_w = Σ_f w̄_f · (cotan Laplacian of the single face f)`,
-`w̄_f` the mean of `w` over the three vertices of `f` (the weighted Laplacian of §3.6 on `M`):
+### 3.9 Explicit step `[formula: cut-explicit-step]`, `[formula: cut-gradient-norm]`
+
+`φ̃_i = φ_i + τ σ_i`, with `σ` the extension of `ḡ · r`. `ḡ` is 1 in the paper
+(`SpeedScaling::Unit`: `φ_t = s` on the cut, exact while `|∇φ| = 1` there). By default
+(`SpeedScaling::MeanGradient`, D16) `ḡ` is the mean of `|∇φ|` over the connected piece of the cut
+that the cut point lies on: in a crossed face whose lone vertex `a` is cut off by the segment `pq`,
+`|∇φ| = |φ_a| · |pq| / (2 · area(a, p, q))`, and `ḡ = Σ |pq| / Σ (|pq| / |∇φ|)` over the piece.
+
+### 3.10 Length and penalty step `[formula: cut-length-step-on-cut]`, `[formula: cut-length-step]`
+
+`w_i = α_L + η_i ≥ 0` at the vertices, interpolated linearly to the cut points. `w ≡ 0` skips the
+step (then `r = s`).
+
+**On the cut (default, `LengthStep::OnCut`, D14).** The integrated length force at cut point `p`:
+
+```
+Θ_p = w_p · θ_p + Σ_{σ = pq at p} ½ |pq| (∂w/∂n)_σ
+```
+
+* `θ_p = π − β_p` is the turning angle of the cut at `p`, with `β_p` the interior angle of the
+  lower region at `p` (the sum of the corner angles of its cut-mesh triangles at its copy of `p`).
+  At a cut point on `∂M` the cut is reflected in the boundary (the zero-flux condition):
+  `Θ_p = w_p (π/2 − β_p)`. The angle itself is used, not `2 sin(θ_p/2)`: angles add up along the
+  cut to its change of direction, so the force on a run of cut points crowded around a mesh vertex
+  is the turning of the cut across the run, and a closed cut on a flat surface loses area at the
+  exact rate `2π w`.
+* `(∂w/∂n)_σ` is the derivative of the linear `w` of the face of `σ` across the segment, out of
+  the lower region: with `a` the lone vertex of the face, `h_a` its height over `pq` and `f` the
+  foot of that height (at the fraction `cot_p/(cot_p + cot_q)` of `pq` in the triangle `(a, p, q)`),
+  `(w_f − w_a)/h_a`, negated if `a` is in the higher region. `PenaltyRule::PaperDiagonal` drops
+  this term (D8).
+
+The force per unit length `λ⁰` is recovered exactly like the normal derivative (§3.5, same `c`),
+and the rate `r` takes the length force at the end of the step and `s` at its start (moving `p`
+out by `δ` relative to its neighbours turns the cut by `Σ (δ_p − δ_q)/|pq|` more):
+
+```
+ℓ_p λ⁰_p + Σ_{σ = pq at p} ((c h_σ)² / |pq|) (λ⁰_p − λ⁰_q) = Θ_p
+ℓ_p r_p  + τ Σ_{σ = pq at p} (w̄_σ / |pq|) (r_p − r_q)       = ℓ_p (s_p + λ⁰_p),     w̄_σ = ½ (w_p + w_q)
+```
+
+Both matrices are symmetric positive definite M-matrices with row sums `ℓ_p`:
+`Σ ℓ_p λ⁰_p = Σ Θ_p`, `Σ ℓ_p r_p = Σ ℓ_p (s_p + λ⁰_p)`, `r` lies between the smallest and the
+largest `s + λ⁰`, and a cut with `s + λ⁰ = 0` does not move, whatever `τ`. In the notation of §1 a
+ripple is multiplied per step by `1 + τ (ωk − wk²)/(1 + τ w k²)`, which lies in `(0, 1)` for every
+`k > ω/w` and every `τ`.
+
+**On the mesh (paper Fig. 9 step 6, `LengthStep::OnMesh`).** After the explicit step with `r = s`,
+with `L_w = Σ_f w̄_f · (cotan Laplacian of the single face f)`, `w̄_f` the mean of `w` over the
+three vertices of `f` (the weighted Laplacian of §3.6 on `M`):
 
 ```
 (W_V + τ L_w) φ′ = W_V φ̃
 ```
 
-This is backward Euler for the second term of (★); the matrix is symmetric positive definite.
-With `η = 0` it is the paper's step 6 of Fig. 9 (D4). The paper's own penalty rule (Sec. 7.1),
-selectable as `PenaltyRule::PaperDiagonal` `[formula: cut-penalty-step-paper]`, is
+This is backward Euler for the second term of (★); the matrix is symmetric positive definite, and
+is factorized once and reused while `τ` and `w` do not change. With `η = 0` it is the paper's step
+(D4). The paper's own penalty rule (Sec. 7.1), `PenaltyRule::PaperDiagonal`
+`[formula: cut-penalty-step-paper]`, is
 
 ```
 (W_V D⁻¹ + τ L) φ′ = W_V D⁻¹ φ̃,   D = diag(α_L + η_i) > 0
 ```
 
-which drops the `∂η/∂n` term of the gradient (D8). The default is the gradient rule above.
-`w ≡ 0` skips the step.
+which drops the `∂η/∂n` term of the gradient (D8). The default rule is the gradient rule.
 
 ### 3.11 Symmetry `[formula: cut-symmetry-projection]`
 
 If vertex classes are given (paper Sec. 7), every vertex takes the arithmetic mean of `φ′` over its
 class, after §3.10 and again after §3.12.
+
+Without classes a symmetric state stays symmetric to rounding, unless the symmetry reverses the
+orientation of the faces and the diagonals of a cut quad tie (§3.3, D13c): the tie is broken by
+the roles of the corners, the two halves are triangulated differently, and the symmetry holds to
+the discretization error only (measured `1.2·10⁻⁵` after 10 steps on icosphere(3) for two latitude
+circles about the axis of the mesh; `4·10⁻¹⁶` about a generic axis). With classes it is exact.
 
 ### 3.12 Redistancing `[formula: cut-redistance]`
 
@@ -344,26 +444,86 @@ written in Hopf–Lax form (Bornemann, Rasch 2006) and without unfolding of obtu
 ## 4. One flow step
 
 ```
-1  regions, crossings, cut mesh                       §3.2 §3.3
-2  u, v, d (and p, q, e) in each region               §3.4–3.6
-3  s on the cut (optional sliver smoothing)           §3.7
-4  σ on V by harmonic extension                       §3.8
-5  φ̃ = φ + τσ                                        §3.9
-6  (W_V + τ L_w) φ′ = W_V φ̃                          §3.10, then §3.11
-7  redistance                                         §3.12, then §3.11
+                                                      default                 paper (selectable)
+1  regions, crossings, cut mesh                       §3.2 §3.3               same
+2  u, v, d (and p, q, e) in each region               §3.4–3.6                d = v/ℓ
+3  s on the cut                                       §3.7                    + sliver smoothing
+4  length force Θ, λ⁰, the step τ, the rate r         §3.10 on the cut        r = s
+5  σ on V: extension of ḡ·r                           §3.8 from the cut, §3.9 ḡ of the piece
+                                                                              harmonic, ḡ = 1
+6  φ̃ = φ + τσ                                        §3.9                    same
+7  —                                                                          (W_V + τ L_w) φ′ = W_V φ̃
+8  symmetry                                           §3.11                   same
+9  redistance, then symmetry                          §3.12, §3.11            same
 ```
 
-**Step size.** `Fixed(τ)` is the paper's. `Capped { tau_max, max_motion }` uses
-`τ = min(tau_max, max_motion · h / max_c |s_c|)` with `h` the shortest crossed edge
-`[formula: cut-step-cap]` (the paper's remark in Sec. 7.4). The paper gives no values (D9f).
+`FlowOptions::new` is the left column, `FlowOptions::paper` the right one; each of the choices
+(`LengthStep`, `Extension`, `SpeedScaling`, `FluxRecovery`, `PenaltyRule`) is an option of its own.
 
-**Stopping.** A run stops at `max_steps`, or when the cut motion of a step (largest `|φ_new − φ_old|`
-over vertices cut-adjacent before or after the step) falls below a tolerance, or when the cut has
-vanished (one region is empty). The reason is in the report. Every step reports the energy terms of
-§6, `τ`, the cut motion and the counters named above.
+**Step size** `[formula: cut-step-cap]`. `ρ` is the speed of the cut that is known before the
+step: `s + λ⁰` with the length step on the cut (it bounds `|r|`), `s` with the length step on the
+mesh. `h` is the shortest crossed edge, `ω` the roughening rate of the state (§1).
 
-Between steps the caller may change `α_L`, `η`, the energy, `w_r`, `β_r` and the step size (the
-schedules of Sec. 7.4). The state is `φ`; a flow can be resumed from a stored `φ`.
+```
+Fixed(τ)                                    τ                                        (the paper's)
+Capped { tau_max, max_motion }              min(tau_max, max_motion · h / max|ρ|)    (paper Sec. 7.4)
+Adaptive { time_scale, max_motion, tau_max} min(tau_max, time_scale / ω, max_motion · h / max|ρ|)
+```
+
+The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Why:
+
+* The distortion term is explicit, and a cut reacts to a displacement at rates of the order `ω`
+  per unit of length of the unit-area surface (sphere: the equator returns at the rate
+  `ω/R = 3.5 ω`). `time_scale = 0.05` keeps `τ ×` that rate at `0.18`. A fixed `tau_max` cannot do
+  this: `ω` at the same cut of spot is `3.4·10³` for the Dirichlet energy, `1.5·10²` for Hencky,
+  `17` for the scaled Dirichlet energy with `r_ε = 1`.
+* The error is first order in `τ`. Circle of §6 item 4: relative error of the radius `+3.9·10⁻²`,
+  `+1.1·10⁻²`, `+2.9·10⁻³`, `+9·10⁻⁴` for 6, 24, 96, 384 steps, independent of the mesh; it is the
+  error of the explicit Euler method for the radius, `½ α_L τ ln(ρ₀/ρ)/ρ²`. Latitude circle of §6
+  item 5 with `α_L = 8`: error of `ψ` `+2.1·10⁻³` and `+5.3·10⁻⁴` for 50 and 200 steps. Equilibria
+  do not depend on `τ` (§3.10).
+* `max_motion = 0.25`: in the bump experiment (README, Fig. 5; Hencky energy, three length
+  weights, `Capped { 10³, max_motion }`) none of the three runs came to rest in 3000 steps with
+  `0.5`, one did with `0.25`, all three with `0.1`; the energy at the end was the same to three
+  digits. A step never moves the cut by more than `max_motion · h`.
+
+**Length weight.** No value of `α_L` is right for every energy: `E` is not homogeneous in it
+(D9f). What can be fixed is the shortest ripple that the distortion term may amplify:
+`α_L = ω ℓ/(2π)` `[formula: cut-roughening-rate]` (`length_weight_for_ripples`) makes ripples
+longer than `ℓ` grow and shorter ones decay (§1). Verified on the sphere, where the rates are known
+exactly (§6 item 5). `ℓ` must be several mesh edges, or the flow amplifies the noise of the mesh at
+the rate `ω k`; with `α_L = 0` it does so at every scale, and no step size helps. The example
+program defaults to `ℓ = 0.25` with `ω` of the initial cut; a cut that starts far from the
+curvature it will reach has a small `ω` there, and the weight must then be set from a state that
+matters (README, Fig. 5).
+
+**Feature size cap.** `r_ε = 1` (the size of the unit-area surface) is the default of the example
+program: on spot, the ratio of the largest to the median `|s|` over a planar cut (the unevenness
+that the rescaling is meant to remove; Dirichlet: 35 and 218 for two planes) is 34, 32, 29, 26, 21,
+16 and 212, 205, 199, 211, 211, 141 for `r_ε = 0.01, 0.03, 0.1, 0.3, 1, 10`: a small `r_ε` turns
+the rescaling off, as the formula says (D5), a large one makes `a = r_ε³` in flat regions outweigh
+everything else. The Hencky energy is more even than any of them there (23 and 14).
+
+**Stopping.** A run stops at `max_steps`; or when the cut motion of a step (largest
+`|φ_new − φ_old|` over vertices cut-adjacent before or after the step) is at most
+`motion_tolerance`; or when the energy has fallen by at most `energy_tolerance · |E|` over the last
+`energy_window` steps; or when the cut has vanished (one region is empty). The reason is in the
+report. Defaults: 1000 steps, `10⁻⁵`, `10⁻⁴` over 25 steps (D9f). The second criterion is not in
+the paper. It is needed: on an irregular mesh `s + λ⁰` has a noise floor of the size of the two
+terms that balance (the turning angles of a polyline through a triangle mesh, and `s` near
+vertices), the cut keeps moving by a few percent of an edge per step, and the motion never falls
+below a small tolerance while the energy stands still (spot, scaled Dirichlet: energy constant to
+`3·10⁻⁵` from step 150 on, cut motion `1.3·10⁻³` per step for 1350 further steps). On smooth
+meshes the first criterion ends the run (sphere, bump).
+
+Every step reports the energy terms of §6 for its start state, `τ`, the largest `|s|` and `|λ⁰|`,
+`ω`, the cut motion, `|∇φ|` in the crossed faces (minimum, mean, maximum), the number of cut
+points, moved crossings, closed components without a cut, vertices the redistancing did not reach,
+the residuals of the solves, and the time of each stage.
+
+Between steps the caller may change `α_L`, `η`, the energy, `w_r`, `β_r`, the curvature, the
+symmetry classes and every option (the schedules of Sec. 7.4). The state is `φ`; a flow can be
+resumed from a stored `φ`.
 
 ## 5. Steering: what the caller controls
 
@@ -375,8 +535,8 @@ schedules of Sec. 7.4). The state is `φ`; a flow can be resumed from a stored `
 | Sec. 7, Fig. 2, 3, 12 | symmetry classes |
 | Fig. 14 | per-region distortion weight `w_r` and area weight `β_r` |
 | Sec. 7.4, Fig. 17, 18 | curvature override: uniform or per face |
-| Sec. 6, 7.4 | step size rule, stop rule |
-| Fig. 9 input | initial `φ⁰`: any values; helpers for a geodesic circle, vertex labels, face labels, normal clusters |
+| Sec. 6, 7.4 | step size rule, stop rule; where the length step acts, how the rate is extended and scaled (§3.8–§3.10) |
+| Fig. 9 input | initial `φ⁰`: any values, as they are or redistanced; helpers (`init`) for a geodesic circle around a vertex, two-valued vertex labels, two-valued face labels (a vertex takes the label that covers more of its angle; a tie gives label 0). Clusters of normals are labels the caller computes; with more than two they belong to §8 |
 | (workspace) | fixed seams: cut the mesh along them first, they are then part of `∂M` |
 
 ## 6. Discrete energy and verification targets
@@ -404,18 +564,93 @@ that shrink under refinement.
    to `Σ_c |s_c dA_c|`, falls by 3 to 4 per refinement (sphere, levels 2–6: `5·10⁻²` to
    `3·10⁻⁴`; bumpy disk with the cut ending on `∂M`, grids 16–128: `2·10⁻¹` to `4·10⁻³`).
 4. Flat disk, circular cut of radius `ρ₀`: `u = 0`, `s = 0`, and the circle shrinks as
-   `ρ(t) = √(ρ₀² − 2 α_L t)`.
-5. The energy decreases along the flow for small `τ`; the equator of a sphere is stationary;
-   symmetric input stays symmetric; results do not depend on vertex numbering or rigid motion and
-   scale as stated in §2.
-6. One step agrees with the Lean oracle on small meshes.
+   `ρ(t) = √(ρ₀² − 2 α_L t)`. Measured (`examples/flow_study.rs circle`: unit square, cells
+   jittered by 0.3, `ρ₀ = 0.3`, `α_L = 1`, `t = 0.03`, exact radius `0.17321`), relative error of
+   the mean radius for 6, 24, 96, 384 steps:
+
+   ```
+   grid   default stages                               stages of the paper (recovered flux)
+    32    +3.8e-2  +9.6e-3  +2.0e-3  −4e-5             −16 %  −17 %  −17 %  −20 %
+    64    +3.9e-2  +1.1e-2  +2.9e-3  +8.6e-4           −12 %  −11 %  −11 %  −15 %
+   128    +3.9e-2  +1.1e-2  +3.0e-3  +9.0e-4           −9.4 % −7.5 % −6.4 % −9.1 %
+   256    +4.0e-2  +1.1e-2  +2.9e-3                    −8.3 % −5.8 % −4.0 %
+   ```
+
+   The default stages are first order in `τ` and their error does not depend on the mesh; the
+   cut stays round to `5·10⁻³` (grid 32) – `5·10⁻⁴` (grid 256) of its radius. The stages of the
+   paper do not converge to the law in `τ` and converge slowly in `h` (D14).
+5. (a) Sphere of unit area, latitude circle of polar angle `ψ`: `G_0 − G_1 = −4 cos ψ/(R² sin² ψ)`
+   and the curvature of the circle is `cot ψ/R`, so
+   `ψ′ = cos ψ/(R² sin ψ) · (4/(R sin ψ) − α_L)`; for `α_L = 0`,
+   `F(ψ(t)) = F(ψ₀) + 4t/R³` with `F(ψ) = ln(sec ψ + tan ψ) − sin ψ`. Equilibria: the equator, and
+   for `α_L R > 4` the latitude `sin ψ* = 4/(α_L R)`. Measured (`flow_study latitude-ode`), error
+   of the mean `ψ` on icosphere(3), (4), (5), with 50 and 200 steps:
+
+   ```
+   α_L  ψ₀    t       exact ψ   default stages                                   paper stages (level 5)
+    8   0.8   4e-3    1.11512   +2.4e-3 +8e-4 | +2.2e-3 +5e-4 | +2.1e-3 +5.3e-4   −2.2e-3  −7.5e-3
+    8   0.8   1.2e-2  1.35078   +4.8e-3 +9e-4 | +4.8e-3 +1.2e-3 | +4.7e-3 +1.1e-3 −5e-4    −6.0e-3
+   20   0.5   4e-3    0.73163   +5.8e-3 +4.3e-3 | +7e-4 −7e-4 | +1.7e-3 +3.7e-4   −4.5e-2  −3.0e-2
+   20   1.1   2e-2    0.79701   +2.2e-2 +2.3e-2 | +4.4e-3 +5.0e-3 | −2.7e-4 +2.8e-4 −8.5e-2 −8.5e-2
+    0   0.8   1e-3    0.98303   +1.3e-4 −5.9e-4 | +2.4e-4 −3.8e-4 | (+0.07, +0.11: noise, see below)
+   ```
+
+   With `α_L = 20` the flow from `ψ = 0.5` and from `ψ = 1.1` reaches `0.7843` and `0.7930`
+   (icosphere(5), `ψ* = 0.78805`); the stages of the paper stop at `0.7393` and `0.7409` there and
+   at `0.6535` and `0.7273` on icosphere(3). With `α_L = 0` the flow is ill-posed (§1): the test
+   is possible on a coarse mesh over a short time only (icosphere(3), `t = 10⁻³`: `10⁻⁴`–`6·10⁻⁴`);
+   on icosphere(5) the noise of the mesh has grown to a spread of `0.1`–`0.2` in `ψ` by then with
+   the default stages (`3·10⁻³` with the stages of the paper, which damp short ripples more).
+
+   (b) Ripples of the equator, `ε cos(mθ)`: growth rate `(m − 1)[4/R³ − α_L (m + 1)/R²]` (§1).
+   Measured (`flow_study modes`, `ε = 0.02`, 160 steps over the time `0.7/|rate|`), default stages,
+   icosphere(4) and (5), against the exact rate:
+
+   ```
+   α_L     m = 2                  m = 3                  m = 4                   m = 6
+   0       +172  n/a   (+178)     +343  +372  (+356)     +520  +529  (+535)      +839  +871   (+891)
+   2       +112  +101  (+103)     +156  +150  (+155)     +160  +155  (+158)      +41   +10    (+11)
+   4       +53   +19   (+27)      −10   −49   (−46)      −153  −207  (−219)      −730  −833   (−868)
+   4.726   +34   −8    (0)        −63   −113  (−119)     −273  −341  (−356)      −1016 −1144  (−1188)
+   6       +3    −52   (−48)      −157  −228  (−247)     −486  −577  (−596)      −1520 −1690  (−1748)
+   10      −78   −174  (−199)     −485  −612  (−649)     −1157 −1317 (−1350)     −3103 −3405  (−3507)
+   ```
+
+   (`n/a`: with `α_L = 0` the noise of icosphere(5) outgrows the mode `m = 2` over this time.)
+   The damping by the length term is 89 % of the exact one on icosphere(4) and 98 % on (5)
+   (`m = 4`): second order in the mesh width, about `1.1 (kh)²` low. With the stages of the paper
+   the equator turns stable at `α_L ≈ 4.0` instead of `4.73` on icosphere(5) (rate of `m = 2` at
+   `α_L = 4.726`: `−28`). A great circle in general position with `α_L = 6` stays within
+   `10⁻³` of itself over 20 steps of `2·10⁻⁴` on icosphere(4) (`|s| ≤ 0.27`, 2 % of `G_0`).
+
+   (c) The energy decreases in every step for small steps (`τ ≤ 0.02/ω`, motion `≤ 0.1 h`), in
+   each of the four energies, on a sphere and on a disk whose boundary the cut ends on. With the
+   default step it rises in up to a tenth of the steps, by at most `6·10⁻⁴` of the total drop
+   (sphere, README Fig. 1). (d) Symmetric input stays symmetric (§3.11). (e) One step does not
+   depend on the numbering of vertices and faces (`10⁻¹⁶`) and scales with the mesh as stated in
+   §2 (`10⁻¹⁵`), with the default stages and with the paper's. (f) A straight cut across a linear
+   penalty `η = A x` on a flat square moves down the penalty at the speed `A` with the gradient
+   rule (`x = 0.5000` after `t = 0.05` from `0.6` with `A = 2`; `0.5033` with the stages of the
+   paper) and stays where it is with the paper's rule (D8). (g) One-sided distortion with an area
+   reward (paper Fig. 14): a cap on the sphere gains
+   `tan²(ψ/2)/R² + β₀ + α_L cot ψ/R` per unit of area; with `α_L = 2` and `β₀ = −8.638` the stable
+   equilibrium is `ψ* = 1.2`, and caps started at `1.0` and `1.4` end at `1.165`, `1.222`
+   (icosphere(3)), `1.202`, `1.205` (4), `1.195`, `1.201` (5).
+6. One step agrees with the Lean oracle on small meshes: the oracle implements the stages of the
+   paper with the flux recovery of §3.5, and `tests/oracle.rs` replays its 26 fixtures with
+   `LengthStep::OnMesh`, `Extension::Harmonic`, `SpeedScaling::Unit`: evaluation (70907 numbers)
+   to `10⁻¹²`, `d, e, G, s` (6218) to `3.4·10⁻¹²`, every stage of the step (24444) to
+   `1.6·10⁻¹³`. The default stages of §3.8–§3.10 are not in the oracle.
 7. (Milestone 2) `N = 2` reproduces the two-region code.
 
 ## 7. Output
 
 * the state `φ` (caller's unit) and the region of every vertex;
-* the cut as points (`edge, t`) and segments (`point, point, face`), with a helper that returns 3D
-  positions when the caller has them;
+* the cut as points (`edge, t`) and segments (`point, point, face`), with helpers that return 3D
+  positions when the caller has them, per point or as ordered polylines: every connected piece
+  is closed or ends on `∂M` at both ends; open pieces come first, in the order of their
+  lower-numbered end, and start there; closed pieces follow in the order of their lowest-numbered
+  point, start there and go on to the lower-numbered of its two neighbours;
 * the cut mesh as a `TriMesh` + `Geometry` with maps to parent faces, original vertices or cut
   points, and the region of every face. This is what a flattening consumes. It is the cut
   *surface*: a cut point has one vertex per region that meets there (two for two regions), so the
@@ -506,6 +741,73 @@ Losasso et al. 2006, Sec. 3.1. With `N = 2`, `φ_0 = −φ_1 = φ` must reproduc
   (e) `Ω_f` is evaluated in the cancellation-free form of §3.1; (f) `min_crossing_offset = 0` is
   allowed and makes a crossing on a vertex an error instead of moving it.
 
+* **D14** Fig. 9 step 6 integrates the length term on the mesh, `(W_V + τ α_L L) φ′ = W_V φ̃`, after
+  redistancing that keeps the cut-adjacent values (Sec. 6.4). The curve-shortening law of §6
+  item 4 then fails: the radius is 4–20 % too small, the error does not go to zero with `τ` and
+  falls slowly with the mesh width (table in §6). Cause: the discrete Laplacian differentiates `φ`
+  twice across the boundary between the cut-adjacent vertices, which keep their values, and their
+  neighbours, which carry first-order fast-marching distances. The two differ by `O(κ h²)`, and
+  `1/h²` times that is an `O(κ)` error of the curvature speed, with a sign. Only `τ ≫ h²` averages
+  it out. Replacing the far field by exact distances to the cut polyline leaves `−9 %` (grid 32);
+  redistancing every vertex from the polyline drifts with the number of steps
+  (`examples/redistance_study.rs`). On the sphere the same step stops short of the balanced
+  latitude by 6 % and shifts the stability threshold of the equator from 4.73 to about 4.0 (§6
+  item 5). §3.10 therefore takes the length terms where the energy is defined, on the cut: the
+  turning angle of the cut polyline is the exact first variation of its length. Measured and
+  rejected on the way: the quotient of the exact gradients of length and swept area per crossing
+  (ill-conditioned where a mesh edge is tangent to the cut: blow-up); `2 sin(θ/2)` instead of `θ`
+  (not additive over crossings crowded at a vertex); no recovery of `Θ/ℓ` (kinks below the mesh
+  width give `λ ∼ ε/ℓ²` and lock); the implicit system for `λ` alone, `r = s + λ`, which ignores
+  that `s` moves the cut too (conditionally stable: `τ ω π/h ≲ 1`); taking the length force on
+  the cut of `φ̃` after the explicit step (stable, but its equilibria depend on `τ`). The paper's
+  step is `LengthStep::OnMesh`.
+* **D15** Sec. 5.3.1 extends the speed harmonically through the cut mesh. Its triangles are
+  arbitrarily thin, and through them the value at a cut-adjacent vertex is governed by cotangent
+  weights that have nothing to do with which cut points are near it: measured, a vertex whose own
+  crossings have the rates `+4`, `+16`, `+6` receives `−4` through a quad diagonal to a crossing
+  with `−8`. The two ends of a crossed edge are then pushed apart, `|∇φ|` at the cut grows to
+  10–100, and the cut zigzags; this happened with the length term on the cut, whose rate varies
+  along the cut more than `s` does (with the paper's step on the mesh the implicit solve hides
+  it). Clamping negative cotangents does not help (the weights stay unrelated to distance). An
+  inverse-distance mean over the crossings of a vertex is stable but not conservative: crossings
+  with a tiny dual length dominate, and the circle of §6 ran 0.3–2.3 % fast. The weights of §3.8
+  are the transpose of the interpolation back to the cut, which keeps the mean rate. The paper's
+  extension is `Extension::Harmonic`.
+* **D16** Eq. 21 sets `φ_t` equal to the normal speed, which needs `|∇φ| = 1` at the cut. The
+  redistancing keeps the cut-adjacent values, so `|∇φ|` in crossed faces is whatever the steps
+  made it; vertices that just became cut-adjacent carry first-order distances, and the mean is
+  0.97–0.99 on the meshes of §6 (the circle then runs about 2 % fast on grid 64 and 0.5 % on
+  grid 128).
+  §3.9 multiplies the rate by the mean of `|∇φ|` over the piece of the cut. Multiplying by the
+  local `|∇φ|` was tried first and is unstable for large steps: a vertex whose value is too large
+  gets a larger rate, which the cut leaves behind (`|∇φ|` grew from 1.05 to 9 in 15 steps on
+  icosphere(5), `α_L = 20`, `τ = 8·10⁻⁵`). The paper's rule is `SpeedScaling::Unit`.
+* **D17** Sec. 5.6 smooths the feature size with `(W_V + c L) r = W_V r⁰`. With the cotan Laplacian
+  this is not an M-matrix on obtuse triangles, and `r` can leave the range of `r⁰`, even become
+  negative, so that `a = r³` is not a weight. §3.6 uses the Laplacian of the edge weights
+  `max(w_ij, 0)`; `tests/identities.rs` checks `min r⁰ ≤ r ≤ max r⁰` on a sheared mesh for
+  `c` from 0.02 to 100.
+* **D18** Sec. 3.2.1 says that distortion alone is minimized by longer and longer cuts and adds the
+  length term. The linearization of §1 makes this quantitative, and has consequences the paper
+  does not state: (a) with `α_L = 0` the flow has no well-posed limit, so the test "a latitude
+  circle follows its ODE without length term" exists only on coarse meshes over short times, and
+  the tests of §6 use `α_L > 0` wherever a time of order one is integrated; (b) `α_L` must exceed
+  `ω h/π` times a small factor or the flow amplifies the noise of the mesh; (c) the scale of
+  `α_L` and of `τ` is `ω`, which differs by orders of magnitude between the energies and, for the
+  scaled Dirichlet energy, with `r_ε³`; hence `StepSize::Adaptive` and
+  `length_weight_for_ripples` (§4); (d) the equator of the sphere of Fig. 1 is stable iff
+  `α_L > 4/(3R)`, the tennis-ball seam is the mode `m = 2`. The rates were measured (§6 item 5b).
+* **D19** Not stated in the paper, and not in D9: (a) `Capped` and `Adaptive` limit the motion by
+  `s + λ⁰`, distortion and length together, when the length step is on the cut; (b) a run also
+  stops when the energy stands still (§4); (c) the helpers for initial cuts (§5): distances of
+  the geodesic circle are fast-marching distances and a vertex at the radius is inside; vertex
+  labels put every crossing on an edge whose ends differ, at the midpoint on congruent
+  triangles; face labels go to vertices by the larger angle, a tie to label 0; a function given
+  by the caller is divided by the mean `|∇φ|` over its cut before it is redistanced, which moves
+  no crossing; (d) the visibility penalty is `ν_i · max(n_i · e_i, 0)` with the area-weighted
+  vertex normal and no occlusion test; (e) the order of the polylines of §7; (f) without classes,
+  symmetry is kept to rounding only if no diagonal ties (§3.11).
+
 Add to this list whenever something else turns up; never drop an entry.
 
 ## 10. Formula ids
@@ -517,7 +819,11 @@ id. Discrete, to be proved in `lean/proofs`: `cut-face-curvature`, `cut-face-cur
 `cut-gradient-scaled`, `cut-adjoint-pointwise`, `cut-gradient-pointwise`, `cut-feature-size`,
 `cut-speed`, `cut-sliver-smoothing`, `cut-harmonic-extension`, `cut-explicit-step`,
 `cut-length-step`, `cut-penalty-step-paper`, `cut-symmetry-projection`, `cut-redistance`,
-`cut-step-cap`. Analytic instances, provable with Mathlib calculus: `cut-disk-radial-solution`,
-`cut-sphere-cap-solution`, `cut-curve-shortening-circle`. Smooth theory, cited:
+`cut-step-cap`, and for the default stages `cut-extension-local` (convex combination, mean rate
+kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matrices with row sums
+`ℓ`; totals kept; `r` within the range of `s + λ⁰`; rest state independent of `τ`),
+`cut-roughening-rate`. Analytic instances, provable with Mathlib calculus: `cut-disk-radial-solution`,
+`cut-sphere-cap-solution`, `cut-curve-shortening-circle`, and the growth rate of a ripple of the
+equator of §1 (`cut-roughening-rate`). Smooth theory, cited:
 `cut-yamabe-equation` (Eq. 3), `cut-shape-derivative` (Eq. 6–8), `cut-cea-method` (Eq. 9–12,
 Table 1), `cut-level-set-evolution` (Eq. 20–22).

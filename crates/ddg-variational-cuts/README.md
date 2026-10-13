@@ -8,12 +8,13 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D13). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D19). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
-## What is implemented so far
+## What is implemented
 
-The **static evaluation** of a cut (SPEC §2, §3.1–§3.7, §6, §7), for two regions described by one
+The **flow** for two regions (SPEC §3.8–§3.12, §4, §5; sections "The flow" to "Timings" below), on
+top of the **static evaluation** of a cut (SPEC §2, §3.1–§3.7, §6, §7), for two regions described by one
 level-set function `φ` (region 0 where `φ ≤ 0`, region 1 where `φ > 0`):
 
 | stage | SPEC | what |
@@ -27,10 +28,9 @@ level-set function `φ` (region 0 where `φ ≤ 0`, region 1 where `φ > 0`):
 | speed | §3.7 | `s = G_0 − G_1` with `w_r`, `β_r`; optional sliver smoothing of the paper |
 | energy | §6 | `E = Σ_r [w_r J_r + β_r Area_r] + ∫_γ (α_L + η) ds`, every term |
 
-Not here yet: the flow itself (harmonic extension, implicit length step, symmetry, redistancing;
-SPEC §3.8–§3.12, §4) and `N` regions (SPEC §8). The types are shaped for both: region ids are
-`u32`, per-region data is per vertex of the cut mesh, and the factorization of an evaluation is
-kept for the harmonic extension.
+Not here yet: `N` regions (SPEC §8). The types are shaped for them: region ids are `u32`,
+per-region data is per vertex of the cut mesh, the speed of a cut point is the difference of the
+gradient densities of the two regions that meet there, and the extension works region by region.
 
 ## Use
 
@@ -71,6 +71,192 @@ caller's unit. Only signs and ratios of `φ` matter for an evaluation.
 in one region and `u`, `v`, `ℓ`, `∂u/∂n`, `p`, `q`, `∂p/∂n`, `G_r` are plain per-vertex arrays.
 Vertices of the input keep their index; `CutTriangles::point_vertices` gives the two copies of a
 cut point.
+
+## The flow
+
+```rust
+use ddg_variational_cuts::{CutProblem, Energy, Flow, FlowOptions, StepSize, StopRule, init};
+
+let phi0 = init::geodesic_circle(&mesh, &geometry, 0, 0.3)?;        // or any numbers per vertex
+let mut flow = Flow::new(&mesh, &geometry, &phi0)?;                 // owns evaluator and state
+let mut problem = CutProblem::new(Energy::Hencky, 0.0);
+let omega = flow.roughening_rate(&problem, &Default::default())?;   // scale of α_L and of τ
+problem.length_weight = ddg_variational_cuts::length_weight_for_ripples(omega, 0.25);
+let options = FlowOptions::new(StepSize::default());                // FlowOptions::paper(..): as printed
+let report = flow.run(&problem, &options, &StopRule::default())?;   // or flow.step(..) with new controls
+let cut = flow.evaluate(&problem, &options.eval)?.cut.polylines(&mesh, &positions)?;
+```
+
+One step (SPEC §4). Each line is an option; the right column is `FlowOptions::paper`.
+
+| stage | default | paper, selectable |
+|---|---|---|
+| normal derivative | smoothed flux recovery (D12) | `v/ℓ` and sliver smoothing |
+| length and penalty term | on the cut: turning angle of the cut polyline, implicit along the cut (D14) | on the mesh: `(W_V + τ L_w) φ′ = W_V φ̃` |
+| extension of the rate | from the cut, conservative, no solve (D15) | harmonic on the cut mesh |
+| rate of `φ` | speed times the mean `|∇φ|` of the piece of the cut (D16) | speed |
+| penalty `η` | full gradient `∂η/∂n + ηκ` (D8) | `ηκ` |
+| step | `Adaptive`: `min(0.05/ω, 0.25 h/max speed)` | `Fixed(τ)`; `Capped` (Sec. 7.4) |
+| redistancing | cut-adjacent values kept, fast marching elsewhere | same |
+
+The three changes of the default were forced by the first law below; each cause and each
+alternative that was measured and rejected is in SPEC D14–D16.
+
+### Laws the flow is tested against
+
+`examples/flow_study.rs` prints the tables; `tests/flow.rs` asserts them on small meshes. Full
+tables: SPEC §6.
+
+**Curve shortening** (flat square, circle of radius 0.3, `α_L = 1`, to `t = 0.03`, where the exact
+radius is 0.17321). Relative error of the radius for 6 / 24 / 96 / 384 steps:
+
+| cells | default stages | stages of the paper |
+|---|---|---|
+| 32² | `+3.8e-2 +9.6e-3 +2.0e-3 −4e-5` | `−16 % −17 % −17 % −20 %` |
+| 64² | `+3.9e-2 +1.1e-2 +2.9e-3 +8.6e-4` | `−12 % −11 % −11 % −15 %` |
+| 128² | `+3.9e-2 +1.1e-2 +3.0e-3 +9.0e-4` | `−9.4 % −7.5 % −6.4 % −9.1 %` |
+| 256² | `+4.0e-2 +1.1e-2 +2.9e-3` | `−8.3 % −5.8 % −4.0 %` |
+
+The default stages are first order in the step with an error that does not depend on the mesh (it
+is the error of the explicit Euler method for the radius). The paper's step does not converge in
+the step and converges slowly in the mesh width.
+
+**Latitude circle on the sphere**: `ψ′ = cos ψ/(R² sin ψ) · (4/(R sin ψ) − α_L)`. Error of `ψ` with
+50 / 200 steps on icosphere(5): `α_L = 8`, from 0.8 to 1.115: `+2.1e-3 / +5.3e-4` (paper stages:
+`−2.2e-3 / −7.5e-3`); `α_L = 20`, from 0.5 to 0.732: `+1.7e-3 / +3.7e-4` (`−4.5e-2 / −3.0e-2`). The
+balanced latitude `sin ψ* = 4/(α_L R)` (0.788 for `α_L = 20`) is reached to `±0.005` from both
+sides; the paper's step stops at 0.739 and 0.741. Without a length weight the flow is ill-posed
+and the law can be followed on a coarse mesh over a short time only (icosphere(3), `t = 10⁻³`:
+`10⁻⁴`–`6·10⁻⁴`).
+
+**Ripples of the equator**: `ε cos(mθ)` grows at the rate `(m − 1)[4/R³ − α_L (m + 1)/R²]`
+(SPEC §1, D18): the distortion term roughens the cut, the length term smooths it, and the equator
+is stable iff `α_L > 4/(3R) = 4.73`. Measured on icosphere(5) (exact in brackets):
+
+| `α_L` | `m = 2` | `m = 3` | `m = 4` | `m = 6` |
+|---|---|---|---|---|
+| 2 | `+101 (+103)` | `+150 (+155)` | `+155 (+158)` | `+10 (+11)` |
+| 4 | `+19 (+27)` | `−49 (−46)` | `−207 (−219)` | `−833 (−868)` |
+| 6 | `−52 (−48)` | `−228 (−247)` | `−577 (−596)` | `−1690 (−1748)` |
+| 10 | `−174 (−199)` | `−612 (−649)` | `−1317 (−1350)` | `−3405 (−3507)` |
+
+With `α_L = 0`: `+529 (+535)` and `+871 (+891)` for `m = 4, 6`. This law is what `α_L` and the time
+step are scaled by: every step reports the roughening rate `ω`; ripples longer than `2π α_L/ω`
+grow, and `length_weight_for_ripples(ω, ℓ)` returns the weight for a given `ℓ`.
+
+Also tested: energy decrease in each of the four energies for small steps; symmetry (exact with
+classes; to rounding without, unless the diagonals of cut quads tie, SPEC §3.11); independence of
+numbering (`10⁻¹⁶`) and scaling (`10⁻¹⁵`); a straight cut across a linear penalty moves at the
+speed of the slope with the gradient rule and not at all with the paper's rule (D8); the three
+ways a run ends; resuming from a stored `φ`; changing every control between steps; bad input.
+
+### Lean oracle
+
+`tests/oracle.rs` replays the 26 fixtures of `lean/oracle` (an independent implementation of the
+stages of the paper with the flux recovery of SPEC §3.5): evaluation, 70907 numbers to `10⁻¹²`;
+`d, e, G, s`, 6218 numbers to `3.4·10⁻¹²`; every stage of the full step (`τ`, extension, `φ̃`,
+`φ′`, symmetry, adjacency, redistanced `φ`, counters, new energy and cut), 24444 numbers to
+`1.6·10⁻¹³`. No difference was found. The default stages (D14–D16), the adaptive step, the
+feature-size smoothing of D17 and the helpers are not in the oracle.
+
+### Figures of the paper, with numbers
+
+`flow_study fig1`, `fig5`, `balance`; lengths on the unit-area surface.
+
+**Fig. 1** (sphere, equator with a perturbation of `0.01` in the modes 2–8, Dirichlet energy,
+default options, icosphere(5), in brackets icosphere(4)):
+
+| `α_L` | result | cut length | distortion | steps |
+|---|---|---|---|---|
+| 6 | back to the equator (largest deviation 0.017 rad) | 1.7724 (1.7723); equator 1.7725 | 4.836 → 4.854 | 155, converged |
+| 3 | seam with two lobes, amplitude 0.71 rad | 2.2551 (2.2561) | 4.836 → 3.003 (2.997) | 357, converged |
+| 1.5 | seam with two lobes, amplitude 1.39 rad | 2.7588 (2.7612) | 4.836 → 1.883 (1.877) | 771, converged |
+
+Three cuts of three lengths, the longer the less distortion, as in the figure; both regions keep
+half of the area (`0.5000 ± 0.0001`). The linear theory predicts which: at 6 every mode decays, at
+3 the modes 2 and 3 grow, at 1.5 the modes up to 8, and the fastest is `m ≈ 5`; the end state has
+two lobes in both cases, so the ripples coarsen. The energy rose in 3 to 36 of the steps, by at
+most `6·10⁻⁴` of the total drop.
+
+**Fig. 5** (flat unit square, 64² cells, with a bump `0.15 exp(−r²/0.02)`; the cut starts as a
+straight line beside the bump):
+
+| energy | start | `α_L` | result | cut length (file units) | distortion |
+|---|---|---|---|---|---|
+| Hencky | `x = 0.2` | 0.0080, 0.0040, 0.0020 | bends into the bump, passes 0.034, 0.027, 0.021 from its top | 1.000 → 1.081, 1.090, 1.123 | 0.00446 → 0.00099, 0.00093, 0.00085 |
+| Dirichlet | `x = 0.36` | 0.74 | passes 0.004 from the top | 1.014 → 1.090 | 0.555 → 0.144 |
+| Dirichlet | `x = 0.36` | 0.18 | passes 0.004 from the top | 1.014 → 1.228 | 0.555 → 0.109 |
+| Dirichlet | `x = 0.2` or `0.36` | 3 to 12 | retreats to the flat part (`x ≈ 0.07`) | → 1.000 | unchanged |
+
+"A longer cut through the region of high curvature", as in the figure, for the Hencky energy from
+far away and for the Dirichlet energy from nearby. Honest remarks: the Dirichlet rates near the
+bump are `10⁵` times those at `x = 0.2`, so a length weight that controls the cut at the bump
+(`α_L = ω ℓ/2π` with `ω = 93` there) pulls a distant cut away from the bump before the distortion
+term is felt (the line across the foot of the bump is not a geodesic). The paper says the same of
+this energy and rescales it (Sec. 3.5.1). Two of the three Hencky runs and the Dirichlet run with
+0.18 did not come to rest within 3000 steps (the energy was flat; they were run without the
+energy criterion).
+
+**Fig. 14** (distortion on one side, area reward): on the sphere a cap with `w = (1, 0)`,
+`β = (−8.638, 0)`, `α_L = 2` has its stable size at `ψ* = 1.2`. Caps started at 1.0 and 1.4 end at
+1.202 and 1.205 (icosphere(4)), 1.195 and 1.201 (icosphere(5)): it grows, and stops.
+
+**Spot** (`data/models/spot/spot/spot_triangulated.obj`, 2930 vertices; start: the plane across
+the longest axis through the centroid, cut length 1.177; default step and stop rule):
+
+| energy | `α_L` | steps, stop, time | distortion | cut length |
+|---|---|---|---|---|
+| Hencky | 2 | 350, energy stalled, 1.2 s | 3.688 → 1.034 | 1.655 |
+| Hencky | 0.5 | 708, energy stalled, 2.4 s | 3.688 → 0.350 | 2.523 |
+| Hencky | 0.1 | 1000, step limit, 3.4 s | 3.688 → 0.112 | 3.601 |
+| Hencky | auto, `ℓ = 0.25`: 5.87 | 190, energy stalled, 0.6 s | 3.688 → 2.692 | 1.185 |
+| scaled, `r_ε = 0.1` | 0.003 | 110, energy stalled, 0.3 s | 0.02045 → 0.01774 | 1.542 |
+| scaled, `r_ε = 0.1` | 0.03 | 356, energy stalled, 1.2 s | 0.02045 → 0.02153 | 1.013 |
+| scaled, `r_ε = 1` | auto: 0.666 | 83, energy stalled, 0.3 s | 0.4070 → 0.4221 | 1.075 |
+| Dirichlet | auto: 135 | 348, energy stalled, 1.0 s | 106.7 → 111.0 | 1.012 |
+| Dirichlet | 1 | 1000, step limit, 3.3 s | 106.7 → 27.9 | 6.751, still growing |
+
+The energy fell in every run. What the numbers say: the smaller the length weight, the longer the
+cut and the lower the distortion, as it must be. No run ended by the motion criterion: on this
+mesh the rate of the cut has a noise floor (SPEC §4), the cut keeps moving by a few percent of an
+edge per step, and the energy criterion ends the run. The automatic weight is dominated by the one
+place where the starting plane meets high curvature, and with it the cut mostly shortens. The
+Dirichlet energy without rescaling is not usable on this model with a weight that lets the cut
+move (the last line: speeds up to `1.6·10⁴`, the cut grows without settling, the energy never
+rose), which is the paper's reason for the rescaled and Hencky energies. The cuts were not
+inspected visually.
+
+### Timings
+
+One step, one thread, release build, seconds (median of five steps after the first; the paper's
+implicit step factorizes once: first step 0.063 s and 0.376 s more):
+
+| mesh | vertices | evaluate | length | extension | redistance | step |
+|---|---|---|---|---|---|---|
+| icosphere(6), default | 40 962 | 0.0565 | 0.0006 | 0.0024 | 0.0098 | 0.069 |
+| icosphere(6), paper stages | | 0.0519 | 0.0066 | 0.0065 | 0.0094 | 0.075 |
+| icosphere(7), default | 163 842 | 0.308 | 0.0015 | 0.0092 | 0.043 | 0.362 |
+| icosphere(7), paper stages | | 0.315 | 0.033 | 0.034 | 0.055 | 0.438 |
+| spot, default | 2 930 | 0.0021 | 0.0002 | 0.0001 | 0.0006 | 0.0030 |
+| spot, paper stages | | 0.0021 | 0.0002 | 0.0002 | 0.0007 | 0.0031 |
+
+The evaluation (cut mesh, one numeric factorization, the solves) is 70–85 % of a step. The default
+stages need no linear solve after it except two tridiagonal-like systems on the cut. On a closed
+mesh the harmonic extension reuses the factorization of the evaluation; on a mesh with boundary it
+factorizes a second matrix. One symbolic analysis per pattern, at construction.
+
+### Example program
+
+```text
+cargo run --release -p ddg-variational-cuts --example cut_flow -- MESH.obj --energy hencky --alpha 0.5 --out DIR
+```
+
+reads an OBJ (polygons are split into fans), takes every control from the command line (energy,
+`α_L` or the ripple rule, `w_r`, `β_r`, curvature override, visibility penalty and its rule,
+initial cut, symmetry classes, step and stop rule, every stage choice, `--paper`), and writes
+`steps.csv` (energy terms, cut length, `τ`, speeds, `ω`, cut motion, counters, `|∇φ|`, stage
+times per step), `phi.txt`, `cut.obj` (polylines) and `cut_mesh.obj` (one group per region). The
+options are listed at the top of `examples/cut_flow.rs`.
 
 ## The normal derivative on the cut (SPEC §3.5, D12)
 
@@ -174,6 +360,13 @@ Functions that implement a formula carry `[formula: <id>]`; the ids are those of
 | `cut-adjoint-pointwise`, `cut-gradient-pointwise` | `adjoint_source_pointwise`, `gradient_pointwise` |
 | `cut-feature-size` | `Evaluator::feature_size_weight` |
 | `cut-speed`, `cut-sliver-smoothing` | `cut_speed`, `smooth_slivers` |
+| `cut-length-step-on-cut` (new, SPEC D14) | `rate_on_cut` (internal) |
+| `cut-extension-local` (new, D15), `cut-harmonic-extension` | `Flow::extend_from_cut`, `Flow::extend_harmonically` (internal) |
+| `cut-gradient-norm` (new, D16), `cut-explicit-step` | `gradient_norms` (internal), `explicit_step` |
+| `cut-length-step`, `cut-penalty-step-paper` | `Flow::length_step` (internal) |
+| `cut-symmetry-projection`, `cut-redistance` | `symmetry_projection`, `init::redistanced` |
+| `cut-step-cap` | `StepSize::step` |
+| `cut-roughening-rate` (new, D18) | `Flow::roughening_rate`, `length_weight_for_ripples` |
 
 ## Reproducing the tables
 
@@ -181,4 +374,8 @@ Functions that implement a formula carry `[formula: <id>]`; the ids are those of
 cargo test --release -p ddg-variational-cuts --test finite_differences -- --ignored --nocapture
 cargo test --release -p ddg-variational-cuts --test analytic -- --ignored --nocapture
 cargo run  --release -p ddg-variational-cuts --example estimator_study -- 3 6
+cargo run  --release -p ddg-variational-cuts --example flow_study -- circle        # also: latitude-ode,
+        # modes, balance, fig1 [LEVEL], fig5 [CELLS HEIGHT X0 MOTION], speeds MESH.obj, timings [MESH.obj]
+cargo run  --release -p ddg-variational-cuts --example redistance_study
+cargo test --release -p ddg-variational-cuts --test flow -- --nocapture
 ```
