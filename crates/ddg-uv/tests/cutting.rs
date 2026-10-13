@@ -1,0 +1,838 @@
+//! The cut session, the description of the cut on polygons, the insertion, and end to end.
+
+mod common;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use ddg_core::io::read_obj;
+use ddg_uv::cutting::{
+    ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
+    EdgePoint, InteriorPoint, Inserted, PathEnd, PolygonPath, Session, Start, VertexSource,
+    insert, unwrap_with_cut,
+};
+use ddg_uv::primitives::{capsule, cylinder, grid_cube, torus, uv_sphere};
+use ddg_uv::{MeshInput, PolygonMesh, UnwrapOptions, prepare};
+use ddg_variational_cuts::{
+    CutProblem, Energy, FlowOptions, StepSize, StopRule, length_weight_for_ripples,
+};
+
+// ----- helpers -----
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross_norm(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let c = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt()
+}
+
+/// Sum of the areas of the triangles of the triangulation.
+fn triangulated_area(mesh: &PolygonMesh) -> f64 {
+    mesh.triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
+            0.5 * cross_norm(sub(b, a), sub(c, a))
+        })
+        .sum()
+}
+
+fn min_triangle_area(mesh: &PolygonMesh) -> f64 {
+    mesh.triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
+            0.5 * cross_norm(sub(b, a), sub(c, a))
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Distance from `p` to the segment `a b`.
+fn segment_distance(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> f64 {
+    let ab = sub(b, a);
+    let len2: f64 = ab.iter().map(|x| x * x).sum();
+    let t = (sub(p, a).iter().zip(&ab).map(|(x, y)| x * y).sum::<f64>() / len2).clamp(0.0, 1.0);
+    let q = [a[0] + t * ab[0], a[1] + t * ab[1], a[2] + t * ab[2]];
+    sub(p, q).iter().map(|x| x * x).sum::<f64>().sqrt()
+}
+
+fn debug_build() -> bool {
+    cfg!(debug_assertions)
+}
+
+fn flow_setup(session: &mut Session, wavelength: f64) -> (CutProblem, FlowOptions<'static>) {
+    let mut problem = CutProblem::new(Energy::Hencky, 0.0);
+    let omega = session
+        .roughening_rate(&problem, &Default::default())
+        .expect("the start has a cut");
+    problem.length_weight = length_weight_for_ripples(omega, wavelength);
+    (problem, FlowOptions::new(StepSize::default()))
+}
+
+fn stop(n: usize) -> StopRule {
+    StopRule {
+        max_steps: n,
+        ..StopRule::default()
+    }
+}
+
+/// The invariants of an insertion.
+fn check_insertion(
+    old: &PolygonMesh,
+    old_seams: &[[u32; 2]],
+    cut: &CutOnPolygons,
+    ins: &Inserted,
+) {
+    let new = &ins.mesh;
+    // Total area kept (the new triangulation covers the old one exactly).
+    let (a_old, a_new) = (triangulated_area(old), triangulated_area(new));
+    assert!(
+        (a_old - a_new).abs() <= 1e-12 * a_old,
+        "area {a_old} became {a_new}"
+    );
+    assert!(min_triangle_area(new) > 0.0, "a triangle has no area");
+    // A valid manifold polygon mesh: the pipeline's own checks accept it.
+    new.input().validate().expect("valid arrays");
+    let prepared = prepare(&new.input(), &UnwrapOptions::default()).expect("manifold");
+    assert_eq!(prepared.validation.n_flipped_polygons, 0, "orientation kept");
+    // Old vertices keep their numbers and positions; new ones follow.
+    assert_eq!(&new.positions[..old.positions.len()], &old.positions[..]);
+    assert_eq!(ins.n_old_vertices, old.positions.len());
+    assert_eq!(ins.vertex_source.len(), new.positions.len());
+    assert!(ins.polygon_parent.windows(2).all(|w| w[0] <= w[1]));
+    assert_eq!(ins.polygon_parent.len(), new.n_polygons());
+    // Inserted points lie on the original surface: on their edge, or on their diagonal.
+    for (v, source) in ins.vertex_source.iter().enumerate() {
+        let x = new.positions[v];
+        match *source {
+            VertexSource::Old(o) => assert_eq!(o as usize, v),
+            VertexSource::EdgePoint(i) => {
+                let [a, b] = cut.edge_points[i as usize].edge;
+                let d = segment_distance(x, old.positions[a as usize], old.positions[b as usize]);
+                assert!(d < 1e-12, "edge point {i} is {d} off its edge");
+            }
+            VertexSource::Interior { path, index } => {
+                let point = &cut.paths[path as usize].interior[index as usize];
+                let [c0, c1] = point.corners.map(|c| old.positions[old.corner_vertices[c as usize] as usize]);
+                let d = segment_distance(x, c0, c1);
+                assert!(d < 1e-12, "interior point is {d} off its diagonal");
+            }
+        }
+    }
+    // Every cut segment is an edge of the new mesh, and those are exactly the new seams.
+    let edges: BTreeSet<[u32; 2]> = new.edges().into_iter().collect();
+    let mut from_paths = BTreeSet::new();
+    for (k, vertices) in ins.path_vertices.iter().enumerate() {
+        assert_eq!(vertices.len(), cut.paths[k].interior.len() + 2);
+        for w in vertices.windows(2) {
+            let e = [w[0].min(w[1]), w[0].max(w[1])];
+            assert!(edges.contains(&e), "cut segment {e:?} is not an edge");
+            from_paths.insert(e);
+        }
+    }
+    assert_eq!(ins.new_seams, from_paths.into_iter().collect::<Vec<_>>());
+    // Old seams are kept: as they are, or as the chain of pieces they were cut into.
+    let seams = ins.seams_after(old_seams);
+    for s in &seams {
+        assert!(edges.contains(s), "seam {s:?} is not an edge of the new mesh");
+    }
+    for &[a, b] in old_seams {
+        let key = [a.min(b), a.max(b)];
+        match ins.edge_chains.get(&key) {
+            None => assert!(seams.contains(&key)),
+            Some(chain) => {
+                assert_eq!((chain[0], *chain.last().unwrap()), (key[0], key[1]));
+                for w in chain.windows(2) {
+                    assert!(seams.contains(&[w[0].min(w[1]), w[0].max(w[1])]));
+                }
+                // The chain is the edge: its vertices lie on the old edge, in order.
+                let (xa, xb) = (old.positions[key[0] as usize], old.positions[key[1] as usize]);
+                for &v in &chain[1..chain.len() - 1] {
+                    assert!(segment_distance(new.positions[v as usize], xa, xb) < 1e-12);
+                }
+            }
+        }
+    }
+    // The seams the pipeline will see are all edges that no old seam list contained or the cut.
+    assert!(seams.len() >= ins.new_seams.len());
+}
+
+/// Number of connected groups of polygons when polygons are joined across edges that are not
+/// seams.
+fn n_charts(mesh: &PolygonMesh, seams: &[[u32; 2]]) -> usize {
+    let seams: BTreeSet<[u32; 2]> = seams.iter().copied().collect();
+    let mut parent: Vec<usize> = (0..mesh.n_polygons()).collect();
+    fn find(p: &mut Vec<usize>, x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        let mut x = x;
+        while p[x] != r {
+            let n = p[x];
+            p[x] = r;
+            x = n;
+        }
+        r
+    }
+    let mut owner: BTreeMap<[u32; 2], usize> = BTreeMap::new();
+    for p in 0..mesh.n_polygons() {
+        let poly = mesh.polygon(p);
+        for (i, &a) in poly.iter().enumerate() {
+            let b = poly[(i + 1) % poly.len()];
+            let e = [a.min(b), a.max(b)];
+            if seams.contains(&e) {
+                continue;
+            }
+            if let Some(&q) = owner.get(&e) {
+                let (rp, rq) = (find(&mut parent, p), find(&mut parent, q));
+                parent[rp] = rq;
+            } else {
+                owner.insert(e, p);
+            }
+        }
+    }
+    (0..mesh.n_polygons())
+        .filter(|&p| find(&mut parent, p) == p)
+        .count()
+}
+
+fn session_on(mesh: &PolygonMesh, seams: &[[u32; 2]], start: &Start) -> Session {
+    let input = MeshInput {
+        seam_edges: seams,
+        ..mesh.input()
+    };
+    Session::new(&input, 2, start).expect("session")
+}
+
+/// A session on `mesh`, a circle around vertex `center`, `steps` steps.
+fn cut_session(
+    mesh: &PolygonMesh,
+    seams: &[[u32; 2]],
+    center: u32,
+    radius: f64,
+    steps: usize,
+) -> Session {
+    let mut session = session_on(mesh, seams, &Start::GeodesicCircle { vertex: center, radius });
+    let (problem, options) = flow_setup(&mut session, 0.25);
+    session.run(&problem, &options, &stop(steps)).expect("flow");
+    session
+}
+
+// ----- tests -----
+
+#[test]
+fn circle_on_a_sphere_is_inserted() {
+    let mesh = uv_sphere(24, 12, 1.0).unwrap();
+    let session = cut_session(&mesh, &[], 5, 0.8, 5);
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    assert!(!cut.is_empty());
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &[], &cut, &ins);
+    // A closed cut on a closed sphere: two charts, and none without the cut.
+    assert_eq!(n_charts(&mesh, &[]), 1);
+    assert_eq!(n_charts(&ins.mesh, &ins.new_seams), 2);
+    // No seam on the sphere: every edge point is shared by two polygons.
+    assert!(cut.edge_points.iter().all(|p| p.side.is_none()));
+    // Each crossed polygon gave at least two new polygons.
+    assert!(ins.mesh.n_polygons() > mesh.n_polygons());
+}
+
+#[test]
+fn insertion_on_several_meshes() {
+    let meshes: Vec<(&str, PolygonMesh, u32, f64)> = vec![
+        ("grid_cube", grid_cube(6, 2.0), 7, 0.9),
+        ("capsule", capsule(20, 6, 0.5, 1.5).unwrap(), 30, 0.5),
+        ("torus", torus(24, 10, 1.0, 0.35).unwrap(), 12, 0.6),
+        ("cylinder", cylinder(20, 3, 0.7, 2.0).unwrap(), 9, 0.7),
+    ];
+    for (name, mesh, center, radius) in meshes {
+        let session = cut_session(&mesh, &[], center, radius, 4);
+        let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+        assert!(!cut.is_empty(), "{name}: no cut");
+        let ins = insert(&mesh, &cut).unwrap_or_else(|e| panic!("{name}: {e}"));
+        check_insertion(&mesh, &[], &cut, &ins);
+        println!(
+            "{name}: {} polygons -> {}, {} edge points, {} paths",
+            mesh.n_polygons(),
+            ins.mesh.n_polygons(),
+            cut.edge_points.len(),
+            cut.paths.len()
+        );
+    }
+}
+
+#[test]
+fn state_round_trips_through_corners() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    // A seam along a meridian from the north pole to the equator.
+    let seams: Vec<[u32; 2]> = {
+        let e = mesh.edges();
+        // The first 4 vertices of the first column: pick edges of polygon 0.. in a chain.
+        let poly = mesh.polygon(1);
+        let _ = e;
+        vec![[poly[0].min(poly[1]), poly[0].max(poly[1])]]
+    };
+    let mut session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: 3, radius: 0.9 });
+    let state = session.state();
+    assert_eq!(state.len(), 2);
+    assert_eq!(state[0].len(), mesh.corner_vertices.len());
+    assert!(state[0].iter().zip(&state[1]).all(|(a, b)| *a == -*b));
+    // Set it back: nothing changes.
+    let before = session.flow().level_set();
+    session.set_state(&state).unwrap();
+    assert_eq!(session.flow().level_set(), before);
+    assert_eq!(session.state(), state);
+    // Regions follow the sign.
+    let regions = session.corner_regions();
+    for (c, &r) in regions.iter().enumerate() {
+        assert_eq!(r, u32::from(state[0][c] > 0.0));
+    }
+    // Another representation of the same level-set: (φ0, φ1) = (2φ, 0) has the same ½(φ0 − φ1).
+    let doubled: Vec<f64> = state[0].iter().map(|x| 2.0 * x).collect();
+    let zero = vec![0.0; doubled.len()];
+    session.set_state(&[doubled, zero]).unwrap();
+    assert_eq!(session.state(), state);
+    // The state of a corner-start is the same session.
+    let session2 = session_on(&mesh, &seams, &Start::Corners(state.clone()));
+    assert_eq!(session2.state(), state);
+    // After steps the state still round-trips.
+    let (problem, options) = flow_setup(&mut session, 0.3);
+    session.run(&problem, &options, &stop(3)).unwrap();
+    let after = session.state();
+    assert_ne!(after, state);
+    let mut copy = session_on(&mesh, &seams, &Start::Corners(after.clone()));
+    assert_eq!(copy.state(), after);
+    copy.set_state(&after).unwrap();
+    assert_eq!(copy.state(), after);
+}
+
+#[test]
+fn corners_across_a_seam_may_differ_and_others_may_not() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let poly = mesh.polygon(40).to_vec();
+    // A seam of two edges, so that it is not extended.
+    let seams = [
+        [poly[0].min(poly[1]), poly[0].max(poly[1])],
+        [poly[1].min(poly[2]), poly[1].max(poly[2])],
+    ];
+    let mut session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: 3, radius: 0.9 });
+    let state = session.state();
+    // The middle vertex of the seam is split into two flow vertices: one corner can differ.
+    let v = poly[1];
+    let corners: Vec<usize> = (0..mesh.corner_vertices.len())
+        .filter(|&c| mesh.corner_vertices[c] == v)
+        .collect();
+    assert_eq!(corners.len(), 4);
+    let flow_vertices: BTreeSet<u32> = corners
+        .iter()
+        .map(|&c| session.corner_to_flow_vertex()[c])
+        .collect();
+    assert_eq!(flow_vertices.len(), 2, "the seam splits the vertex in two");
+    let c = corners
+        .iter()
+        .copied()
+        .find(|&c| session.corner_to_flow_vertex()[c] != session.corner_to_flow_vertex()[corners[0]])
+        .unwrap();
+    // Changing all corners of the second copy together is fine ...
+    let mut changed = state.clone();
+    for &cc in &corners {
+        if session.corner_to_flow_vertex()[cc] == session.corner_to_flow_vertex()[c] {
+            changed[0][cc] += 0.01;
+            changed[1][cc] -= 0.01;
+        }
+    }
+    session.set_state(&changed).unwrap();
+    // ... changing one corner of a copy that has several is not, and the message names the vertex.
+    let mut broken = state.clone();
+    broken[0][corners[0]] += 0.5;
+    let message = session.set_state(&broken).unwrap_err();
+    match &message {
+        CuttingError::CornersDisagree { vertex, region, .. } => {
+            assert_eq!((*vertex, *region), (v, 0));
+        }
+        other => panic!("{other}"),
+    }
+    assert!(message.to_string().contains(&format!("vertex {v}")), "{message}");
+    // A vertex away from the seam: the same.
+    let w = 20u32;
+    let cw = mesh.corner_vertices.iter().position(|&x| x == w).unwrap();
+    let mut broken = state.clone();
+    broken[1][cw] += 1.0;
+    match session.set_state(&broken) {
+        Err(CuttingError::CornersDisagree { vertex, region, .. }) => assert_eq!((vertex, region), (w, 1)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn every_error_names_what_is_wrong() {
+    let mesh = uv_sphere(12, 6, 1.0).unwrap();
+    let input = mesh.input();
+    let circle = Start::GeodesicCircle { vertex: 3, radius: 0.8 };
+    // Regions.
+    assert!(matches!(
+        Session::new(&input, 1, &circle),
+        Err(CuttingError::TooFewRegions { got: 1 })
+    ));
+    let e = Session::new(&input, 3, &circle).unwrap_err();
+    assert!(matches!(e, CuttingError::RegionsNotAvailable { n_regions: 3 }));
+    assert!(e.to_string().contains("not available"), "{e}");
+    // Starts.
+    let bad = |start: Start| Session::new(&input, 2, &start).unwrap_err();
+    assert!(matches!(
+        bad(Start::GeodesicCircle { vertex: 10_000, radius: 1.0 }),
+        CuttingError::VertexOutOfRange { vertex: 10_000, .. }
+    ));
+    for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let e = bad(Start::GeodesicCircle { vertex: 1, radius: r });
+        assert!(matches!(e, CuttingError::InvalidOption { name: "radius", .. }), "{e}");
+    }
+    let e = bad(Start::PolygonLabels(vec![0; 3]));
+    assert!(matches!(e, CuttingError::WrongLength { expected, got: 3, .. } if expected == mesh.n_polygons()));
+    let mut labels = vec![0u32; mesh.n_polygons()];
+    labels[7] = 2;
+    let e = bad(Start::PolygonLabels(labels));
+    assert!(matches!(e, CuttingError::LabelOutOfRange { polygon: 7, label: 2, n_regions: 2 }));
+    assert!(e.to_string().contains("polygon 7"), "{e}");
+    let n = mesh.corner_vertices.len();
+    assert!(matches!(
+        bad(Start::Corners(vec![vec![0.0; n]])),
+        CuttingError::WrongLength { expected: 2, got: 1, .. }
+    ));
+    assert!(matches!(
+        bad(Start::Corners(vec![vec![0.0; n], vec![0.0; n - 1]])),
+        CuttingError::WrongLength { .. }
+    ));
+    let mut nan = vec![0.0; n];
+    nan[4] = f64::NAN;
+    let e = bad(Start::Corners(vec![vec![0.0; n], nan]));
+    assert!(matches!(e, CuttingError::NonFinite { region: 1, position: 4, .. }));
+    // A vertex no polygon uses cannot be the center.
+    let mut loose = mesh.clone();
+    loose.positions.push([5.0, 5.0, 5.0]);
+    let e = Session::new(
+        &loose.input(),
+        2,
+        &Start::GeodesicCircle { vertex: loose.positions.len() as u32 - 1, radius: 1.0 },
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("not used"), "{e}");
+    // Problem and options.
+    let mut session = Session::new(&input, 2, &circle).unwrap();
+    let (mut problem, options) = flow_setup(&mut session, 0.3);
+    problem.penalty = Some(vec![0.0; 5]);
+    let e = session.step(&problem, &options).unwrap_err();
+    assert!(matches!(e, CuttingError::WrongLength { what: "penalty", got: 5, .. }), "{e}");
+    let mut eta = vec![0.0; mesh.positions.len()];
+    eta[9] = -1.0;
+    problem.penalty = Some(eta);
+    let e = session.step(&problem, &options).unwrap_err();
+    assert!(e.to_string().contains("vertex 9"), "{e}");
+    problem.penalty = None;
+    let mut sym = options.clone();
+    sym.symmetry = Some(vec![0; 2]);
+    let e = session.step(&problem, &sym).unwrap_err();
+    assert!(matches!(e, CuttingError::WrongLength { what: "symmetry classes", .. }), "{e}");
+    problem.regions.pop();
+    assert!(matches!(
+        session.step(&problem, &options),
+        Err(CuttingError::WrongLength { what: "problem.regions", .. })
+    ));
+    // Flow errors are passed through.
+    let (problem, mut options) = flow_setup(&mut session, 0.3);
+    options.step_size = StepSize::Fixed(-1.0);
+    assert!(matches!(session.step(&problem, &options), Err(CuttingError::Flow(_))));
+    assert!(matches!(session.preview(0.7), Err(CuttingError::Flow(_))));
+}
+
+#[test]
+fn bad_meshes_are_refused_with_the_polygon() {
+    // Inconsistent winding: the session does not repair.
+    let mut mesh = uv_sphere(12, 6, 1.0).unwrap();
+    let range = mesh.polygon_corners(10);
+    mesh.corner_vertices[range.clone()].reverse();
+    // The triangles refer to corners; reversing the corners changes their meaning, so rebuild.
+    let polygons: Vec<Vec<u32>> = (0..mesh.n_polygons()).map(|p| mesh.polygon(p).to_vec()).collect();
+    let flipped = PolygonMesh::from_polygons(mesh.positions.clone(), &polygons);
+    let e = Session::new(&flipped.input(), 2, &Start::GeodesicCircle { vertex: 3, radius: 0.5 })
+        .unwrap_err();
+    assert!(matches!(e, CuttingError::Mesh(_)), "{e}");
+    assert!(e.to_string().contains("polygon") || e.to_string().contains("face"), "{e}");
+    // A triangle without area.
+    let mut flat = PolygonMesh::from_triangles(
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        &[[0, 1, 3], [1, 2, 3], [0, 2, 1]],
+    );
+    flat.positions[2] = [1.0, 0.0, 0.0];
+    let e = Session::new(&flat.input(), 2, &Start::GeodesicCircle { vertex: 0, radius: 0.5 })
+        .unwrap_err();
+    assert!(matches!(e, CuttingError::Mesh(_)), "{e}");
+    // Non-manifold edge.
+    let tri = PolygonMesh::from_triangles(
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+        &[[0, 1, 2], [1, 0, 3], [0, 1, 4]],
+    );
+    let e = Session::new(&tri.input(), 2, &Start::GeodesicCircle { vertex: 0, radius: 0.5 })
+        .unwrap_err();
+    assert!(e.to_string().contains("(0, 1)"), "{e}");
+}
+
+#[test]
+fn insert_refuses_descriptions_that_do_not_fit() {
+    let mesh = uv_sphere(12, 6, 1.0).unwrap();
+    let session = cut_session(&mesh, &[], 5, 0.8, 2);
+    let good = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    insert(&mesh, &good).unwrap();
+    let fails = |cut: &CutOnPolygons| insert(&mesh, cut).unwrap_err();
+
+    // An edge point on something that is not an edge.
+    let mut cut = good.clone();
+    cut.edge_points[0].edge = [0, mesh.positions.len() as u32 - 1];
+    let e = fails(&cut);
+    assert!(matches!(e, CuttingError::InvalidDescription { .. }) && e.to_string().contains("not an edge"), "{e}");
+    // Parameters outside (0, 1).
+    for t in [0.0, 1.0, -0.5, f64::NAN] {
+        let mut cut = good.clone();
+        cut.edge_points[0].t = t;
+        assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    }
+    // A path in a polygon that does not exist, or that its end does not belong to.
+    let mut cut = good.clone();
+    cut.paths[0].polygon = 10_000;
+    assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    let mut cut = good.clone();
+    let other = (cut.paths[0].polygon + 20) % mesh.n_polygons() as u32;
+    cut.paths[0].polygon = other;
+    let e = fails(&cut);
+    assert!(matches!(e, CuttingError::InvalidDescription { polygon: Some(p), .. } if p == other), "{e}");
+    // A junction is not available yet.
+    let mut cut = good.clone();
+    cut.junctions.push(ddg_uv::cutting::JunctionPoint { position: [0.0; 3] });
+    cut.paths[0].end = PathEnd::Junction(0);
+    assert!(matches!(fails(&cut), CuttingError::Unsupported { .. }));
+    // An end that does not exist.
+    let mut cut = good.clone();
+    cut.paths[0].start = PathEnd::EdgePoint(99_999);
+    assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    // Two edge points at the same place.
+    let mut cut = good.clone();
+    let dup = cut.edge_points[0].clone();
+    cut.edge_points.push(dup);
+    let e = fails(&cut);
+    assert!(e.to_string().contains("same") || e.to_string().contains("both at"), "{e}");
+    // An interior point on something that is not a diagonal.
+    let mut cut = good.clone();
+    let p = cut.paths.iter().position(|p| !p.interior.is_empty());
+    if let Some(i) = p {
+        cut.paths[i].interior[0].corners = [0, 1];
+        let e = fails(&cut);
+        assert!(matches!(e, CuttingError::InvalidDescription { .. }), "{e}");
+    }
+    // A path with its middle taken out no longer fits the triangles.
+    let mut cut = good.clone();
+    if let Some(i) = cut.paths.iter().position(|p| !p.interior.is_empty()) {
+        cut.paths[i].interior.clear();
+        assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    }
+    // A mesh that is not valid.
+    let mut broken = mesh.clone();
+    broken.triangles.pop();
+    assert!(matches!(insert(&broken, &good), Err(CuttingError::Mesh(_))));
+    // A stray interior point.
+    let mut cut = good.clone();
+    cut.paths[0].interior.push(InteriorPoint { corners: [0, 2], t: 0.5, position: [0.0; 3] });
+    assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    let _ = (EdgePoint { edge: [0, 1], t: 0.5, position: [0.0; 3], side: None }, PolygonPath {
+        polygon: 0,
+        start: PathEnd::EdgePoint(0),
+        interior: vec![],
+        end: PathEnd::EdgePoint(0),
+        regions: [0, 1],
+    });
+}
+
+/// A meridian seam from the north pole down to the equator and a cut that ends on it.
+#[test]
+fn a_cut_that_ends_on_a_seam() {
+    let mesh = uv_sphere(20, 10, 1.0).unwrap();
+    // Vertices of the first meridian: the pole is vertex 0 (revolution: ring vertices first?).
+    // Find a chain of edges along one longitude by walking down from the vertex with the
+    // largest z, always taking the neighbour with the same angle around the axis.
+    let edges = mesh.edges();
+    let angle = |v: u32| mesh.positions[v as usize][1].atan2(mesh.positions[v as usize][0]);
+    let top = (0..mesh.positions.len() as u32)
+        .max_by(|&a, &b| mesh.positions[a as usize][2].total_cmp(&mesh.positions[b as usize][2]))
+        .unwrap();
+    let mut chain = vec![top];
+    let first = edges
+        .iter()
+        .filter_map(|e| if e[0] == top { Some(e[1]) } else if e[1] == top { Some(e[0]) } else { None })
+        .next()
+        .unwrap();
+    chain.push(first);
+    let theta = angle(first);
+    for _ in 0..4 {
+        let last = *chain.last().unwrap();
+        let next = edges
+            .iter()
+            .filter_map(|e| if e[0] == last { Some(e[1]) } else if e[1] == last { Some(e[0]) } else { None })
+            .find(|&w| {
+                (angle(w) - theta).abs() < 1e-9
+                    && mesh.positions[w as usize][2] < mesh.positions[last as usize][2] - 1e-9
+            })
+            .unwrap();
+        chain.push(next);
+    }
+    let seams: Vec<[u32; 2]> = chain.windows(2).map(|w| [w[0].min(w[1]), w[0].max(w[1])]).collect();
+    // A circle around a vertex next to the seam: it crosses the seam.
+    let center = chain[2];
+    let mut session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: center, radius: 0.55 });
+    // The seam is boundary for the flow: the flow mesh has more vertices than the polygon mesh.
+    assert!(session.flow_mesh().n_vertices() > mesh.positions.len());
+    let (problem, options) = flow_setup(&mut session, 0.3);
+    session.run(&problem, &options, &stop(3)).unwrap();
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    assert!(
+        cut.edge_points.iter().any(|p| p.side.is_some()),
+        "the cut should end on the seam"
+    );
+    // Two sides of a seam: points on a seam edge come in separate copies.
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &seams, &cut, &ins);
+    let all = ins.seams_after(&seams);
+    assert!(all.len() >= seams.len() + ins.new_seams.len() - 4);
+    // The preview shows open polylines ending at the seam.
+    let preview = session.preview(DEFAULT_CROSSING_OFFSET).unwrap();
+    assert!(preview.iter().any(|p| !p.closed));
+    // And the pipeline accepts it, with the seams kept in the cut edges.
+    let result = unwrap_with_cut(
+        &MeshInput { seam_edges: &seams, ..mesh.input() },
+        &cut,
+        &CutUnwrapOptions { cones: ConePlacement::Off, ..Default::default() },
+    )
+    .unwrap();
+    for s in &all {
+        assert!(result.map.cut_edges.contains(s), "seam {s:?} not cut");
+    }
+}
+
+fn models_dir() -> PathBuf {
+    std::env::var_os("DDG_MODELS").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/models/spot/spot"),
+        PathBuf::from,
+    )
+}
+
+fn load_polygons(name: &str) -> Option<PolygonMesh> {
+    let path = models_dir().join(name);
+    let Ok(obj) = read_obj(&path) else {
+        println!("model {} not found: skipped", path.display());
+        return None;
+    };
+    let polygons: Vec<Vec<u32>> = (0..obj.n_faces())
+        .map(|f| obj.corner_verts[obj.face_corners(f)].to_vec())
+        .collect();
+    Some(PolygonMesh::from_polygons(obj.positions.clone(), &polygons))
+}
+
+#[test]
+fn quad_model_end_to_end() {
+    let Some(mesh) = load_polygons("spot_quadrangulated.obj") else {
+        return;
+    };
+    let (steps, center) = if debug_build() { (3, 100) } else { (30, 100) };
+    let mut session = session_on(&mesh, &[], &Start::GeodesicCircle { vertex: center, radius: 0.2 });
+    let (problem, options) = flow_setup(&mut session, 0.25);
+    let report = session.run(&problem, &options, &stop(steps)).unwrap();
+    println!("spot: {} steps, stop {:?}", report.steps.len(), report.stop);
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    assert!(!cut.is_empty());
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &[], &cut, &ins);
+    for cones in [ConePlacement::Off, ConePlacement::Optimal] {
+        let (_, result) = session
+            .unwrap(DEFAULT_CROSSING_OFFSET, &CutUnwrapOptions { cones, ..Default::default() })
+            .unwrap();
+        let rep = &result.map.report;
+        assert_eq!(rep.flipped_triangles, 0, "{cones:?}");
+        println!(
+            "spot {cones:?}: charts {}, cones {}, flipped {}, seam mismatch {:.2e}, distortion {:?}",
+            rep.charts.len(),
+            result.map.cones.len(),
+            rep.flipped_triangles,
+            rep.seam_lengths.max_seam_mismatch,
+            rep.area_distortion
+        );
+        if cones == ConePlacement::Off {
+            assert!(result.map.cones.is_empty());
+        }
+        assert!(rep.seam_lengths.max_seam_mismatch < 0.5);
+        // Every seam of the cut is cut by the pipeline.
+        for s in &result.seams {
+            assert!(result.map.cut_edges.contains(s));
+        }
+    }
+}
+
+#[test]
+fn end_to_end_on_generated_meshes() {
+    let meshes: Vec<(&str, PolygonMesh, u32, f64)> = vec![
+        ("uv_sphere", uv_sphere(24, 12, 1.0).unwrap(), 5, 0.9),
+        ("grid_cube", grid_cube(6, 2.0), 7, 0.9),
+        ("capsule", capsule(20, 6, 0.5, 1.5).unwrap(), 30, 0.5),
+        ("torus", torus(24, 10, 1.0, 0.35).unwrap(), 12, 0.6),
+    ];
+    for (name, mesh, center, radius) in meshes {
+        let session = cut_session(&mesh, &[], center, radius, 4);
+        for cones in [ConePlacement::Off, ConePlacement::Optimal] {
+            let (cut, result) = session
+                .unwrap(DEFAULT_CROSSING_OFFSET, &CutUnwrapOptions { cones, ..Default::default() })
+                .unwrap_or_else(|e| panic!("{name} {cones:?}: {e}"));
+            let rep = &result.map.report;
+            assert_eq!(rep.flipped_triangles, 0, "{name} {cones:?}");
+            assert!(rep.seam_lengths.max_seam_mismatch < 0.5, "{name}");
+            assert_eq!(result.map.uvs.len(), result.inserted.mesh.corner_vertices.len());
+            for s in &result.seams {
+                assert!(result.map.cut_edges.contains(s), "{name}: seam {s:?}");
+            }
+            if cones == ConePlacement::Off {
+                assert!(result.map.cones.is_empty(), "{name}");
+            }
+            println!(
+                "{name} {cones:?}: {} -> {} polygons, {} charts, {} cones, seam mismatch {:.2e}, distortion {:.3}",
+                mesh.n_polygons(),
+                result.inserted.mesh.n_polygons(),
+                rep.charts.len(),
+                result.map.cones.len(),
+                rep.seam_lengths.max_seam_mismatch,
+                rep.area_distortion.scale_free
+            );
+            let _ = &cut;
+        }
+    }
+}
+
+#[test]
+fn cone_placement_off_refuses_steered_cones() {
+    let mesh = uv_sphere(12, 6, 1.0).unwrap();
+    let session = cut_session(&mesh, &[], 5, 0.8, 1);
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let pinned = [3u32];
+    let input = MeshInput { pinned_vertices: &pinned, ..mesh.input() };
+    let e = unwrap_with_cut(&input, &cut, &CutUnwrapOptions { cones: ConePlacement::Off, ..Default::default() })
+        .unwrap_err();
+    assert!(e.to_string().contains("vertex 3"), "{e}");
+    // Optimal keeps the steering of the old vertices.
+    unwrap_with_cut(&input, &cut, &CutUnwrapOptions::default()).unwrap();
+}
+
+#[test]
+fn starts_at_polygon_level() {
+    let mesh = uv_sphere(20, 10, 1.0).unwrap();
+    // Labels: the polygons around the equator.
+    let labels: Vec<u32> = (0..mesh.n_polygons())
+        .map(|p| {
+            let z: f64 = mesh.polygon(p).iter().map(|&v| mesh.positions[v as usize][2]).sum::<f64>()
+                / mesh.polygon(p).len() as f64;
+            u32::from(z.abs() < 0.3)
+        })
+        .collect();
+    let session = session_on(&mesh, &[], &Start::PolygonLabels(labels.clone()));
+    let preview = session.preview(DEFAULT_CROSSING_OFFSET).unwrap();
+    // Two latitude circles.
+    assert_eq!(preview.len(), 2);
+    assert!(preview.iter().all(|p| p.closed));
+    let regions = session.corner_regions();
+    for p in 0..mesh.n_polygons() {
+        if labels[p] == 1 && mesh.polygon(p).iter().all(|&v| mesh.positions[v as usize][2].abs() < 0.2) {
+            for c in mesh.polygon_corners(p) {
+                assert_eq!(regions[c], 1);
+            }
+        }
+    }
+    // A circle: the corners within the radius of the center are in region 0.
+    let session = session_on(&mesh, &[], &Start::GeodesicCircle { vertex: 7, radius: 0.5 });
+    let regions = session.corner_regions();
+    let c0 = (0..mesh.corner_vertices.len()).find(|&c| mesh.corner_vertices[c] == 7).unwrap();
+    assert_eq!(regions[c0], 0);
+    assert!(regions.iter().any(|&r| r == 1));
+    assert_eq!(session.preview(DEFAULT_CROSSING_OFFSET).unwrap().len(), 1);
+}
+
+#[test]
+fn eta_and_symmetry_are_mapped_per_polygon_vertex() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let mut session = session_on(&mesh, &[], &Start::GeodesicCircle { vertex: 4, radius: 0.7 });
+    let (mut problem, mut options) = flow_setup(&mut session, 0.3);
+    problem.penalty = Some(vec![0.5; mesh.positions.len()]);
+    options.symmetry = Some((0..mesh.positions.len() as u32).collect());
+    let r = session.step(&problem, &options).unwrap();
+    assert!(r.n_cut_points > 0);
+    assert!(r.energy.penalty > 0.0);
+}
+
+/// Random signs per flow vertex: many paths per polygon, ends on seams on both sides, quads and
+/// fans, polygons with extra collinear vertices from the other side of a seam.
+#[test]
+fn random_states_insert_cleanly() {
+    let mut rng = ddg_core::generators::SplitMix64::new(7);
+    let (mut paths, mut seam_sides) = (0usize, 0usize);
+    let sphere = uv_sphere(14, 7, 1.0).unwrap();
+    let cube = grid_cube(3, 2.0);
+    let tor = torus(12, 6, 1.0, 0.3).unwrap();
+    for (name, mesh) in [("sphere", sphere), ("cube", cube), ("torus", tor)] {
+        let edges = mesh.edges();
+        let seam_sets: Vec<Vec<[u32; 2]>> = vec![
+            vec![],
+            edges.iter().step_by(7).take(9).copied().collect(),
+        ];
+        for seams in seam_sets {
+            let mut session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: 1, radius: 0.5 });
+            for round in 0..12 {
+                let n_flow = session.flow_mesh().n_vertices();
+                let phi: Vec<f64> = (0..n_flow).map(|_| rng.uniform(-1.0, 1.0)).collect();
+                let c2f = session.corner_to_flow_vertex().to_vec();
+                let f0: Vec<f64> = c2f.iter().map(|&v| phi[v as usize]).collect();
+                let f1: Vec<f64> = f0.iter().map(|x| -x).collect();
+                session.set_state(&[f0, f1]).unwrap();
+                let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+                let ins = insert(&mesh, &cut)
+                    .unwrap_or_else(|e| panic!("{name} round {round}, {} seams: {e}", seams.len()));
+                check_insertion(&mesh, &seams, &cut, &ins);
+                check_regions(&session, &mesh, &ins);
+                seam_sides += cut.edge_points.iter().filter(|p| p.side.is_some()).count();
+                paths += cut.paths.len();
+            }
+        }
+    }
+    println!("{paths} paths, {seam_sides} seam-side points");
+    assert!(paths > 100 && seam_sides > 10);
+}
+
+/// Every new polygon lies in one region: the old corners of a part all have the region of the
+/// state at that corner of the parent polygon.
+fn check_regions(session: &Session, old: &PolygonMesh, ins: &Inserted) {
+    let regions = session.corner_regions();
+    for q in 0..ins.mesh.n_polygons() {
+        let parent = ins.polygon_parent[q] as usize;
+        let mut seen: Option<u32> = None;
+        for &v in ins.mesh.polygon(q) {
+            if (v as usize) >= ins.n_old_vertices {
+                continue;
+            }
+            let c = old
+                .polygon_corners(parent)
+                .find(|&c| old.corner_vertices[c] == v)
+                .expect("an old vertex of a part is a corner of the parent");
+            let r = regions[c];
+            assert_eq!(*seen.get_or_insert(r), r, "polygon {q} (part of {parent}) is in two regions");
+        }
+    }
+}
