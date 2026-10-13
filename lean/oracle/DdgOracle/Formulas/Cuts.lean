@@ -306,10 +306,12 @@ def gradientNormLone (phiA segLen area : α) : α := Scalar.abs phiA * segLen / 
 /-- `ḡ = Σ|pq| / Σ(|pq|/|∇φ|)`. [formula: cut-gradient-norm] -/
 def meanGradient (sumLen sumLenOverGrad : α) : α := sumLen / sumLenOverGrad
 
-/-- Normalized weighted mean `Σ w v / Σ w`: the first line of the local extension (`w = ℓ_p β_ip`,
-`v = r_p`). [formula: cut-extension-local] -/
+/-- Normalized weighted mean `Σ w v / Σ w` of the pairs `(w_k, v_k)` of the two lists (the longer list
+is cut to the length of the shorter one, so the denominator is the sum of the weights that are used):
+the first line of the local extension (`w = ℓ_p β_ip`, `v = r_p`). [formula: cut-extension-local] -/
 def weightedMean (weights values : List α) : α :=
-  sumList ((weights.zip values).map fun x => x.1 * x.2) / sumList weights
+  let pairs := weights.zip values
+  sumList (pairs.map fun x => x.1 * x.2) / sumList (pairs.map fun x => x.1)
 
 /-- Second line of the local extension: `Σ_j (σ_j/ℓ_ij) / Σ_j (1/ℓ_ij)` over the neighbours one ring
 closer, given as `(σ_j, ℓ_ij)`. [formula: cut-extension-local] -/
@@ -355,5 +357,55 @@ def projectionShift (smallest second : α) : α := (smallest + second) / 2
 
 /-- Projected value `φ_k(i) = φ_k′(i) − m`. [formula: cut-region-projection] -/
 def projectedValue (phi m : α) : α := phi - m
+
+/-! ## Additions for SPEC revision 36f50cc (robust step statistics) -/
+
+/-- Insertion of `(x, ℓ)` into a list sorted ascending by `x`, after all entries with an equal key
+(so that equal values stay in their original order). [formula: cut-weighted-quantile] -/
+def insertAscending (e : α × α) : List (α × α) → List (α × α)
+  | [] => [e]
+  | f :: fs => if e.1 < f.1 then e :: f :: fs else f :: insertAscending e fs
+
+/-- Stable ascending sort by the first component. [formula: cut-weighted-quantile] -/
+def sortAscending : List (α × α) → List (α × α)
+  | [] => []
+  | e :: es => insertAscending e (sortAscending es)
+
+/-- Sum from the left, `((0 + x₀) + x₁) + ⋯`, the order of SPEC §1's running sums.
+[formula: cut-weighted-quantile] -/
+def sumLeft (xs : List α) : α := xs.foldl (fun a x => a + x) 0
+
+/-- The first value of a list sorted ascending whose running weight reaches `target`; the last
+value if none does; `0` for an empty list. [formula: cut-weighted-quantile] -/
+def firstReaching (target : α) : α → List (α × α) → α
+  | _, [] => 0
+  | acc, [e] => if target ≤ acc + e.2 then e.1 else e.1
+  | acc, e :: es => if target ≤ acc + e.2 then e.1 else firstReaching target (acc + e.2) es
+
+/-- Weighted quantile of SPEC §1: the values `x_c` in ascending order (equal values in the order of the
+list), the first `x_c` at which the weights summed so far (from the left, in that order) reach
+`q · Σ ℓ`, `Σ ℓ` summed in the same order; `0` for an empty list. With `q = 1` the result is the
+largest value (a trailing zero weight excepted). [formula: cut-weighted-quantile] -/
+def weightedQuantile (q : α) (xs ls : List α) : α :=
+  let sorted := sortAscending (xs.zip ls)
+  firstReaching (q * sumLeft (sorted.map fun e => e.2)) 0 sorted
+
+/-- Speed of a cut point in crossed edges per unit time, `|ρ|/h_c`. [formula: cut-step-local] -/
+def speedInEdges (rho hc : α) : α := Scalar.abs rho / hc
+
+/-- Robust step: `min(τ_max, time_scale/ω, max_motion/m̂)` with every term whose denominator is not
+positive skipped. [formula: cut-step-local] -/
+def robustStep (tauMax timeScale omega maxMotion mhat : α) : α :=
+  let a := if 0 < omega then min tauMax (timeScale / omega) else tauMax
+  if 0 < mhat then min a (maxMotion / mhat) else a
+
+/-- Speed that the local limit of a cut point is measured with: `|r_c|` for the capped rule,
+`max(|r_c|, ½ (ω_c − ω)₊)` for the adaptive one. [formula: cut-step-local] -/
+def localSpeed (r omegaC omega : α) : α := max (Scalar.abs r) (max 0 (omegaC - omega) / 2)
+
+/-- Factor of the local limit, `min(1, max_motion · h_c / (τ v_c))`; `1` where `v_c` or `τ` is not
+positive. [formula: cut-step-local] -/
+def localLimitFactor (maxMotion hc tau v : α) : α :=
+  if 0 < tau * v then min 1 (maxMotion * hc / (tau * v)) else 1
 
 end Ddg

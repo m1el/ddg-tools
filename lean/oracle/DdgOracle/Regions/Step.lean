@@ -147,6 +147,20 @@ structure RStep where
   dflt : Array (Array (Array Float))
   /-- `dw/dn` per region per segment of its view -/
   dwdn : Array FloatArray
+  /-- largest local roughening rate -/
+  omegaMax : Float
+  /-- `m̂` for `s` over the cut points, for `s + λ⁰` over the boundary nodes, the one used -/
+  mhat : Float × Float × Float
+  /-- `h_c` of every cut point -/
+  hP : FloatArray
+  /-- weight `ℓ_c` of every cut point -/
+  ellP : FloatArray
+  /-- local-limit factor of every boundary copy of every region -/
+  factor : Array FloatArray
+  /-- rate before and after the local limit -/
+  rBefore : Array FloatArray
+  /-- see `rBefore` -/
+  rAfter : Array FloatArray
   /-- `e_i` of the default extension (at every vertex) and its ring -/
   eVert : FloatArray
   /-- ring -/
@@ -221,9 +235,29 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
   let mut hMin := posInf
   for cr in net.cps do
     if cr.len < hMin then hMin := cr.len
-  let mut omega := negInf
+  let mut omegaMaxV := negInf
   for p in [0:nP] do
-    if ev.omegaP.get! p > omega then omega := ev.omegaP.get! p
+    if ev.omegaP.get! p > omegaMaxV then omegaMaxV := ev.omegaP.get! p
+  -- weights of the cut points (half a segment to a cut point, a whole one to a triple point) and h_c
+  let mut ellP := zeros nP
+  for sg in net.segs do
+    let p := sg.g1 - nv
+    if sg.toTriple then ellP := ellP.set! p (ellP.get! p + sg.len)
+    else
+      ellP := ellP.set! p (ellP.get! p + sg.len / 2)
+      let q := sg.g2 - nv
+      ellP := ellP.set! q (ellP.get! q + sg.len / 2)
+  let hP := FloatArray.ofFn' nP fun p => Id.run do
+    let cr := net.cps[p]!
+    let mut h := posInf
+    for p2 in [0:nP] do
+      let c2 := net.cps[p2]!
+      if c2.a == cr.a || c2.a == cr.b || c2.b == cr.a || c2.b == cr.b then
+        if c2.len < h then h := c2.len
+    return h
+  let robust := c.stats == .robust
+  let omegaMax := omegaMaxV
+  let omega := if robust then weightedQuantile 0.9 ev.omegaP.toList ellP.toList else omegaMaxV
   let paperRule := c.penalty == .paperDiagonal
   let cc := fluxC c.flux
   let wGeoNode := fun (rv : RView) (node : Nat) =>
@@ -250,29 +284,15 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
     | .capped tm mm => (tm, posInf, if rm > 0 then mm * hMin / rm else posInf)
     | .adaptive ts mm tm =>
       (tm, if omega > 0 then ts / omega else posInf, if rm > 0 then mm * hMin / rm else posInf)
-  if c.stages == .paper then
-    -- §8.4
-    let mut rm := fzero
-    for p in [0:nP] do
-      if (ev.sCut.get! p).abs > rm then rm := (ev.sCut.get! p).abs
-    rhoMax := rm
-    tau := stepTau rm
-    limits := stepLimits rm
-    for X in [0:N] do
-      let rv := ev.views[X]!
-      let e ← harmonicExtension rv.cm #[rv.rd] (ev.sNode[X]!)
-      for i in [0:nv] do
-        if net.region[i]! == X then
-          for k in [0:N] do
-            rates := rates.set! k ((rates[k]!).set! i (if k == X then e.get! i else -(e.get! i)))
-  else
-    -- §8.5, per region
-    let mut lam0s : Array FloatArray := #[]
-    let mut thetas : Array FloatArray := #[]
-    let mut ellCs : Array FloatArray := #[]
-    let mut betas : Array FloatArray := #[]
-    let mut wns : Array FloatArray := #[]
-    let mut gammas : Array FloatArray := #[]
+  -- limits and rates of §8.4 / §8.5 per region
+  let needForce := c.stages == .dflt || robust
+  let mut lam0s : Array FloatArray := #[]
+  let mut thetas : Array FloatArray := #[]
+  let mut ellCs : Array FloatArray := #[]
+  let mut betas : Array FloatArray := #[]
+  let mut wns : Array FloatArray := #[]
+  let mut gammas : Array FloatArray := #[]
+  if needForce then
     for X in [0:N] do
       let rv := ev.views[X]!
       let nl := rv.toCopy.size
@@ -330,15 +350,80 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
       wns := wns.push wn
       gammas := gammas.push gamma
       dwdnAll := dwdnAll.push dwdn
-    -- step size from s + lambda0 over all boundary nodes
-    let mut rm := fzero
+  -- the local data of every boundary copy: h, local roughening rate, weight
+  let copyH := fun (X j : Nat) =>
+    let rv := ev.views[X]!
+    let (g, _) := geoOfCopy net rv.toCopy[j]!
+    if g < nv + nP then hP.get! (g - nv)
+    else
+      let t := net.triples[g - nv - nP]!
+      min (hP.get! t.p0) (min (hP.get! t.p1) (hP.get! t.p2))
+  let copyOmega := fun (X j : Nat) =>
+    let rv := ev.views[X]!
+    let (g, _) := geoOfCopy net rv.toCopy[j]!
+    if g < nv + nP then ev.omegaP.get! (g - nv) else omega
+  let nodesOf := fun (X : Nat) => (ev.views[X]!).toCopy.size
+  -- speeds for the step rule
+  let mut rmPaper := fzero
+  for p in [0:nP] do
+    if (ev.sCut.get! p).abs > rmPaper then rmPaper := (ev.sCut.get! p).abs
+  let mut rmDflt := fzero
+  if needForce then
     for X in [0:N] do
-      for j in [0:(ev.sNode[X]!).size] do
+      for j in [0:nodesOf X] do
         let a := ((ev.sNode[X]!).get! j + (lam0s[X]!).get! j).abs
-        if a > rm then rm := a
-    rhoMax := rm
+        if a > rmDflt then rmDflt := a
+  let rm := if c.stages == .paper then rmPaper else rmDflt
+  rhoMax := rm
+  -- robust statistics m-hat
+  let mut m1 := fzero
+  let mut m2 := fzero
+  let mut mhat := fzero
+  if robust then
+    m1 := weightedQuantile 0.9 ((List.range nP).map fun p => speedInEdges (ev.sCut.get! p) (hP.get! p)) ellP.toList
+    let mut xs : List Float := []
+    let mut ls : List Float := []
+    for X in [0:N] do
+      for j in [0:nodesOf X] do
+        xs := xs ++ [speedInEdges ((ev.sNode[X]!).get! j + (lam0s[X]!).get! j) (copyH X j)]
+        ls := ls ++ [(ellCs[X]!).get! j]
+    m2 := weightedQuantile 0.9 xs ls
+    mhat := if c.stages == .paper then max m1 m2 else m2
+    tau := match c.step with
+      | .fixed t => t
+      | .capped tm mm => robustStep tm posInf 0 mm mhat
+      | .adaptive ts mm tm => robustStep tm ts omega mm mhat
+    limits := match c.step with
+      | .fixed t => (t, posInf, posInf)
+      | .capped tm mm => (tm, posInf, if mhat > 0 then mm / mhat else posInf)
+      | .adaptive ts mm tm => (tm, if omega > 0 then ts / omega else posInf, if mhat > 0 then mm / mhat else posInf)
+  else
     tau := stepTau rm
     limits := stepLimits rm
+  -- the local limit
+  let limitFactor := fun (X j : Nat) (r : Float) =>
+    if !robust then 1.0
+    else match c.step with
+      | .fixed _ => 1.0
+      | .capped _ mm => localLimitFactor mm (copyH X j) tau r.abs
+      | .adaptive _ mm _ => localLimitFactor mm (copyH X j) tau (localSpeed r (copyOmega X j) omega)
+  let sLim : Array FloatArray := Array.ofFn (n := N) fun X =>
+    FloatArray.ofFn' (nodesOf X.val) fun j => (ev.sNode[X.val]!).get! j * limitFactor X.val j ((ev.sNode[X.val]!).get! j)
+  let mut factorAll : Array FloatArray := Array.ofFn (n := N) fun X =>
+    FloatArray.ofFn' (nodesOf X.val) fun j => limitFactor X.val j ((ev.sNode[X.val]!).get! j)
+  let mut rBefore : Array FloatArray := ev.sNode
+  let mut rAfter : Array FloatArray := sLim
+  if c.stages == .paper then
+    -- §8.4
+    for X in [0:N] do
+      let rv := ev.views[X]!
+      let e ← harmonicExtension rv.cm #[rv.rd] (sLim[X]!)
+      for i in [0:nv] do
+        if net.region[i]! == X then
+          for k in [0:N] do
+            rates := rates.set! k ((rates[k]!).set! i (if k == X then e.get! i else -(e.get! i)))
+  else
+    -- §8.5, per region
     -- rates per region
     let allZero := Id.run do
       let mut z := true
@@ -387,8 +472,10 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
         let dphi := (((phis[i]!).get! s.lone) - ((phis[j]!).get! s.lone)).abs / 2
         let g := gradientNormLone dphi s.len t.area
         let r := lab[gid s.g1]!
-        sumL := sumL.set! r (sumL.get! r + s.len)
-        sumLG := sumLG.set! r (sumLG.get! r + s.len / g)
+        -- a face with |grad phi| = 0 is left out of both sums (SPEC §3.9, D23)
+        if g > 0 then
+          sumL := sumL.set! r (sumL.get! r + s.len)
+          sumLG := sumLG.set! r (sumLG.get! r + s.len / g)
     let gbarOf := fun (g : Nat) =>
       let r := lab[gid g]!
       if sumL.get! r > 0 then meanGradient (sumL.get! r) (sumLG.get! r) else 1.0
@@ -397,20 +484,16 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
       let rv := ev.views[X]!
       let nl := rv.toCopy.size
       let gb := FloatArray.ofFn' nl fun j => gbarOf (geoOfCopy net rv.toCopy[j]!).1
-      let rho := FloatArray.ofFn' nl fun j => gb.get! j * (rateV[X]!).get! j
+      let fac := FloatArray.ofFn' nl fun j => limitFactor X j ((rateV[X]!).get! j)
+      factorAll := factorAll.set! X fac
+      rBefore := rBefore.set! X (rateV[X]!)
+      let rlim := FloatArray.ofFn' nl fun j => (rateV[X]!).get! j * fac.get! j
+      rAfter := rAfter.set! X rlim
+      let rho := FloatArray.ofFn' nl fun j => gb.get! j * rlim.get! j
       rhoV := rhoV.push rho
       dfl := dfl.push (Array.ofFn (n := nl) fun j =>
         #[(ellCs[X]!).get! j.val, (betas[X]!).get! j.val, (wns[X]!).get! j.val, (gammas[X]!).get! j.val,
           (thetas[X]!).get! j.val, (lam0s[X]!).get! j.val, (rateV[X]!).get! j.val, gb.get! j.val, rho.get! j.val])
-    -- weights of the cut points
-    let mut ellP := zeros nP
-    for s in net.segs do
-      let p := gid s.g1
-      if s.toTriple then ellP := ellP.set! p (ellP.get! p + s.len)
-      else
-        ellP := ellP.set! p (ellP.get! p + s.len / 2)
-        let q := gid s.g2
-        ellP := ellP.set! q (ellP.get! q + s.len / 2)
     let mut eW : Array (List Float) := Array.replicate nv []
     let mut eV : Array (List Float) := Array.replicate nv []
     let mut dW : Array (List (Nat × Float × Float)) := Array.replicate nv []
@@ -474,6 +557,7 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
         let d := ((phiNew[k]!).get! i - (phis[k]!).get! i).abs
         if d > motion then motion := d
   return { base := b, phis, ev, tau, hMin, rhoMax, omega, limits, rates, phiTilde, phiLen, phiSym
-           redist, phiNew, evNew, motion, dflt := dfl, dwdn := dwdnAll, eVert, ring, deltas }
+           redist, phiNew, evNew, motion, dflt := dfl, dwdn := dwdnAll, eVert, ring, deltas
+           omegaMax, mhat := (m1, m2, mhat), hP, ellP, factor := factorAll, rBefore, rAfter }
 
 end Ddg.Regions

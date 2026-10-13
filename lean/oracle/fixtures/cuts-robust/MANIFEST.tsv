@@ -1,0 +1,9 @@
+rb-ico2-cap-adaptive	ok	robust statistics, default stages, adaptive step (uniform-ish cut: robust and extremes nearly agree)
+rb-ico2-cap-capped	ok	robust statistics, default stages, capped step
+rb-ico2-cap-paper-adaptive	ok	robust statistics with the paper's stages (length step on the mesh: the larger of the two m-hats)
+rb-spike-adaptive	ok	robust, default stages: one face next to the cut with a 40 times larger curvature density (a spike of curvature): outlier omega_c, cut points limited
+rb-spike-capped	ok	the same with the capped step (limit |r_c|)
+rb-spike-paper	ok	robust with the paper's stages on the spike (both m-hats, limit on r = s)
+rb-spike-extremes	ok	the same spike with the extremes in format 3: pins the old statistics and the extra lines
+rb-grid-boundary-adaptive	ok	robust, default stages, cut ending on the boundary, scaled energy
+rb-torus-hencky	ok	robust, default stages, torus, Hencky

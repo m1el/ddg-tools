@@ -92,7 +92,7 @@ def fixtures : Array RFixture := Id.run do
 def RFixture.render (f : RFixture) : String × String := (printCase f.case, runCase f.case)
 
 /-- Write the fixtures. -/
-def writeFixtures (dir : System.FilePath) : IO Unit := do
+def writeListR (fixtures : Array RFixture) (dir : System.FilePath) : IO Unit := do
   IO.FS.createDirAll dir
   let mut manifest := ""
   for f in fixtures do
@@ -105,7 +105,7 @@ def writeFixtures (dir : System.FilePath) : IO Unit := do
   IO.println s!"wrote {fixtures.size} fixtures to {dir}"
 
 /-- Check the fixtures; returns the number of differences. -/
-def checkFixtures (dir : System.FilePath) : IO Nat := do
+def checkListR (fixtures : Array RFixture) (dir : System.FilePath) : IO Nat := do
   let mut bad := 0
   for f in fixtures do
     let (input, output) := f.render
@@ -127,5 +127,11 @@ def checkFixtures (dir : System.FilePath) : IO Nat := do
       for p in problems do IO.println s!"FAIL  {p}"
   IO.println s!"region fixtures: {fixtures.size - bad} of {fixtures.size} match"
   return bad
+
+/-- Write the fixtures. -/
+def writeFixtures (dir : System.FilePath) : IO Unit := writeListR fixtures dir
+
+/-- Check the fixtures. -/
+def checkFixtures (dir : System.FilePath) : IO Nat := checkListR fixtures dir
 
 end Ddg.Regions

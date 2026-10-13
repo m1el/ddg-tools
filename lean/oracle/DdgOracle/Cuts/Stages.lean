@@ -114,9 +114,12 @@ def meanGradients (cm : CutMesh) (phi : FloatArray) : FloatArray × Array Nat :=
     let t := cm.tris[sg.tri]!
     let g := gradientNormLone (phi.get! sg.lone) sg.len t.area
     let r := piece[sg.p]!
-    sumL := sumL.set! r (sumL.get! r + sg.len)
-    sumLG := sumLG.set! r (sumLG.get! r + sg.len / g)
-  return (FloatArray.ofFn' nc fun k => meanGradient (sumL.get! piece[k]!) (sumLG.get! piece[k]!), piece)
+    -- a face with |∇φ| = 0 is left out of both sums (SPEC §3.9, D23)
+    if g > 0 then
+      sumL := sumL.set! r (sumL.get! r + sg.len)
+      sumLG := sumLG.set! r (sumLG.get! r + sg.len / g)
+  return (FloatArray.ofFn' nc fun k =>
+    if sumL.get! piece[k]! > 0 then meanGradient (sumL.get! piece[k]!) (sumLG.get! piece[k]!) else 1.0, piece)
 
 /-- The extension from the cut (SPEC §3.8, default): `σ` at every original vertex and the ring of
 every vertex (`none` where unreachable). -/

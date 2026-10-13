@@ -275,6 +275,22 @@ structure Stage2Out where
   limits : Float × Float × Float
   /-- `max |λ⁰|` -/
   lamMax : Float
+  /-- largest local roughening rate -/
+  omegaMax : Float
+  /-- local crossed-edge length `h_c` -/
+  hc : FloatArray
+  /-- `|s|/h_c` -/
+  mc1 : FloatArray
+  /-- `|s + λ⁰|/h_c` -/
+  mc2 : FloatArray
+  /-- the two statistics `m̂` (for `s`, for `s + λ⁰`; the extremes put the one used in both) -/
+  mhat : Float × Float
+  /-- the `m̂` that the step rule used -/
+  mused : Float
+  /-- factor of the local limit -/
+  factor : FloatArray
+  /-- rate after the local limit -/
+  rlim : FloatArray
   deriving Inhabited
 
 /-- Everything of one step. -/
@@ -410,41 +426,73 @@ def runStep (c : CutCase) : Except String Outcome := do
     -- default stages / mixed variants
     let force := cutForce cm ev.wv (c.penalty == .paperDiagonal)
     let cc := fluxC c.flux
-    let mut lam0 := zeros nc
     let allZero := Id.run do
       let mut z := true
       for i in [0:nv] do
         if ev.wv.get! i != 0 then z := false
       return z
-    if c.lengthStep == .onCut && !allZero then
+    -- length force per unit length on the cut (used by the rate, or for the step rule only)
+    let mut lam0 := zeros nc
+    if (c.lengthStep == .onCut || c.stats == .robust) && !allZero then
       let mut edges : Array (Nat × Nat × Float) := #[]
       for sg in cm.segs do
         let f := b.topo.faces[sg.face]!
         let h2 := faceMeanSquareEdge (b.l f.a f.b) (b.l f.b f.c) (b.l f.c f.a)
         edges := edges.push (sg.p, sg.q, fluxCoupling cc h2 sg.len)
       lam0 ← chainSolve nc force.ellC edges force.theta
-    let rho := FloatArray.ofFn' nc fun k => ev.sSmooth.get! k + lam0.get! k
+    let lamUsed := if c.lengthStep == .onCut then lam0 else zeros nc
+    let rho := FloatArray.ofFn' nc fun k => ev.sSmooth.get! k + lamUsed.get! k
     let rhoMaxV := maxAbs rho
-    let mut lamMax := maxAbs lam0
-    -- roughening rate
+    let lamMax := maxAbs lamUsed
+    -- roughening rates
     let r0 := ev.regs[0]!
     let r1 := ev.regs[1]!
     let omegaP := FloatArray.ofFn' nc fun k =>
       roughRate (roughQ (regionDensity c.w.1 (r0.G.get! (nv + k)) c.beta.1) c.beta.1 c.w.1 0)
                 (roughQ (regionDensity c.w.2 (r1.G.get! (nv + k)) c.beta.2) c.beta.2 c.w.2 0)
-    let mut omega := negInf
+    let mut omegaMax := negInf
     for k in [0:nc] do
-      if omegaP.get! k > omega then omega := omegaP.get! k
+      if omegaP.get! k > omegaMax then omegaMax := omegaP.get! k
+    -- local crossed-edge lengths h_c
+    let hc := FloatArray.ofFn' nc fun k => Id.run do
+      let cr := cm.crossings[k]!
+      let mut h := posInf
+      for k2 in [0:nc] do
+        let c2 := cm.crossings[k2]!
+        if c2.a == cr.a || c2.a == cr.b || c2.b == cr.a || c2.b == cr.b then
+          if c2.len < h then h := c2.len
+      return h
+    let robust := c.stats == .robust
+    let omegaList := omegaP.toList
+    let ellList := force.ellC.toList
+    let omega := if robust then weightedQuantile 0.9 omegaList ellList else omegaMax
+    let mc1 := FloatArray.ofFn' nc fun k => speedInEdges (ev.sSmooth.get! k) (hc.get! k)
+    let mc2 := FloatArray.ofFn' nc fun k => speedInEdges (ev.sSmooth.get! k + lam0.get! k) (hc.get! k)
+    let q1 := weightedQuantile 0.9 mc1.toList ellList
+    let q2 := weightedQuantile 0.9 mc2.toList ellList
+    -- m-hat of the step rule
+    let mhat : Float :=
+      if robust then
+        (if c.lengthStep == .onCut then q2 else max q1 q2)
+      else if rhoMaxV > 0 then rhoMaxV / hMin else 0
     sMax := rhoMaxV
     let limits : Float × Float × Float := match c.step with
       | .fixed t => (t, posInf, posInf)
-      | .capped tm mm => (tm, posInf, if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
+      | .capped tm mm =>
+        (tm, posInf, if robust then (if mhat > 0 then mm / mhat else posInf)
+                     else if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
       | .adaptive ts mm tm =>
-        (tm, if omega > 0 then ts / omega else posInf, if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
+        (tm, if omega > 0 then ts / omega else posInf,
+         if robust then (if mhat > 0 then mm / mhat else posInf)
+         else if rhoMaxV > 0 then mm * hMin / rhoMaxV else posInf)
     tau := match c.step with
       | .fixed t => t
-      | .capped tm mm => if rhoMaxV == 0 then tm else stepCap tm mm hMin rhoMaxV
-      | .adaptive ts mm tm => adaptiveStep tm ts omega mm hMin rhoMaxV
+      | .capped tm mm =>
+        if robust then robustStep tm posInf 0 mm mhat
+        else if rhoMaxV == 0 then tm else stepCap tm mm hMin rhoMaxV
+      | .adaptive ts mm tm =>
+        if robust then robustStep tm ts omega mm mhat
+        else adaptiveStep tm ts omega mm hMin rhoMaxV
     -- the rate
     let mut rate := ev.sSmooth
     if c.lengthStep == .onCut && !allZero then
@@ -454,10 +502,23 @@ def runStep (c : CutCase) : Except String Outcome := do
         edges := edges.push (sg.p, sg.q, rateCoupling tau wbar sg.len)
       let rhs := FloatArray.ofFn' nc fun k => rateRhs (force.ellC.get! k) (ev.sSmooth.get! k) (lam0.get! k)
       rate ← chainSolve nc force.ellC edges rhs
+    -- local limit (robust statistics, capped and adaptive steps)
+    let mut factor := FloatArray.ofFn' nc fun _ => 1.0
+    if robust then
+      match c.step with
+      | .fixed _ => pure ()
+      | .capped _ mm =>
+        for k in [0:nc] do
+          factor := factor.set! k (localLimitFactor mm (hc.get! k) tau (rate.get! k).abs)
+      | .adaptive _ mm _ =>
+        for k in [0:nc] do
+          factor := factor.set! k (localLimitFactor mm (hc.get! k) tau
+            (localSpeed (rate.get! k) (omegaP.get! k) omega))
+    let rlim := FloatArray.ofFn' nc fun k => rate.get! k * factor.get! k
     let (gbar, piece) :=
       if c.speed == .meanGradient then meanGradients cm phi
       else (FloatArray.ofFn' nc fun _ => 1.0, cutPieces cm)
-    let rg := FloatArray.ofFn' nc fun k => gbar.get! k * rate.get! k
+    let rg := FloatArray.ofFn' nc fun k => gbar.get! k * rlim.get! k
     let mut ring : Array (Option Nat) := Array.replicate nv none
     match c.extension with
     | .local =>
@@ -465,12 +526,13 @@ def runStep (c : CutCase) : Except String Outcome := do
       sigma := sg
       ring := rn
     | .harmonic => sigma ← harmonicExtension cm ev.regs rg
-    stage2 := some { force, lam0, rate, gbar, piece, rg, ring, sigma, omegaP, omega, limits, lamMax }
+    stage2 := some { force, lam0 := lamUsed, rate, gbar, piece, rg, ring, sigma, omegaP, omega, limits
+                     lamMax, omegaMax, hc, mc1, mc2, mhat := (q1, q2), mused := mhat, factor, rlim }
   -- explicit step
   let phiTilde := FloatArray.ofFn' nv fun i => explicitStep (phi.get! i) tau (sigma.get! i)
   -- length and penalty step
   let phiLen ←
-    if c.format == 2 && c.lengthStep == .onCut then pure phiTilde
+    if c.format ≥ 2 && c.lengthStep == .onCut then pure phiTilde
     else lengthStepMesh c b ev.wv phiTilde tau
   let phiSym := symmetrize c.classes phiLen
   let redist := redistance b c.faces phiSym

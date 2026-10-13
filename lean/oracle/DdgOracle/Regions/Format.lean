@@ -92,9 +92,15 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Reg
   for k in [0:N] do
     if !seen[k]! then throw s!"missing line 'phi {k}'"
   let allowed := ["energy", "curvature", "alpha", "eta", "penalty", "w", "beta", "step",
-    "delta", "flux", "stages", "featurelap", "classes"]
+    "delta", "flux", "stages", "featurelap", "classes", "format", "statistics"]
   for (k, _) in kv.toList do
     if !allowed.contains k then throw s!"unknown line '{k}'"
+  let format ← match kv.get? "format" with
+    | none => pure 1
+    | some l =>
+      if l.size != 2 || l[1]! != "2" then throw "format: expected 'format 2'"
+      pure 2
+  if format == 1 && kv.contains "statistics" then throw "line 'statistics' needs 'format 2'"
   let need := fun (k : String) =>
     match kv.get? k with
     | some l => pure (f := Except String) l
@@ -185,8 +191,15 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Reg
       for j in [1:nv + 1] do out := out.push (← natTok "classes" l[j]!)
       pure (some out)
     | none => pure none
+  let stats ← match kv.get? "statistics" with
+    | none => pure StepStats.extremes
+    | some l =>
+      match l[1]? with
+      | some "extremes" => pure StepStats.extremes
+      | some "robust" => pure StepStats.robust
+      | _ => throw "statistics: expected extremes | robust"
   return { name, nv, faces, edges, phis, energy, curv, alphaL, eta, penalty, ws, betas, step, delta,
-           flux, stages, featPos, classes }
+           flux, stages, featPos, classes, format, stats }
 
 /-! ## Printing -/
 
@@ -223,6 +236,8 @@ def printCase (c : RegionCase) : String := Id.run do
   s := s ++ s!"delta {hx c.delta}\n"
   s := s ++ s!"stages {match c.stages with | .paper => "paper" | .dflt => "default"}\n"
   s := s ++ s!"featurelap {if c.featPos then "positive" else "cotan"}\n"
+  if c.format == 2 then
+    s := s ++ s!"format 2\nstatistics {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
   if let some cl := c.classes then
     s := s ++ s!"classes {" ".intercalate (cl.toList.map toString)}\n"
   return s ++ "end\n"
@@ -292,6 +307,23 @@ def printStep (c : RegionCase) (r : RStep) : String := Id.run do
     s := s ++ s!"er {X} {hx ev.Js[X]!} {hx ev.As[X]!}\n"
   s := s ++ s!"tau {hx r.tau} {hx r.hMin} {hx r.rhoMax}\n"
   s := s ++ s!"omega {hx r.omega}\nlimits {hx r.limits.1} {hx r.limits.2.1} {hx r.limits.2.2}\n"
+  if c.format == 2 then
+    let mut nlim := 0
+    for X in [0:N] do
+      for j in [0:(r.factor[X]!).size] do
+        if (r.factor[X]!).get! j < 1 then nlim := nlim + 1
+    s := s ++ s!"stats {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
+    s := s ++ s!"omegamax {hx r.omegaMax}\nmhat {hx r.mhat.1} {hx r.mhat.2.1} {hx r.mhat.2.2}\nlimited {nlim}\n"
+    for p in [0:nP] do
+      s := s ++ s!"hp {p} {hx (r.hP.get! p)} {hx (r.ellP.get! p)} {hx (ev.omegaP.get! p)}\n"
+    for rv in ev.views do
+      for j in [0:rv.toCopy.size] do
+        let (g, _) := geoOfCopy net rv.toCopy[j]!
+        let h := if g < nv + nP then r.hP.get! (g - nv)
+          else
+            let t := net.triples[g - nv - nP]!
+            min (r.hP.get! t.p0) (min (r.hP.get! t.p1) (r.hP.get! t.p2))
+        s := s ++ s!"hc {rv.X} {rv.toCopy[j]!} {hx h} {hx ((r.factor[rv.X]!).get! j)} {hx ((r.rBefore[rv.X]!).get! j)} {hx ((r.rAfter[rv.X]!).get! j)}\n"
   for k in [0:N] do
     for i in [0:nv] do
       s := s ++ s!"pd {k} {i} {hx ((r.rates[k]!).get! i)}\n"

@@ -55,6 +55,10 @@ structure RegionCase where
   featPos : Bool
   /-- symmetry classes -/
   classes : Option (Array Nat)
+  /-- text format version: 1, or 2 (statistics of the step rule) -/
+  format : Nat := 1
+  /-- statistics of the step rule -/
+  stats : StepStats := .extremes
 
 /-- The two-region case of the same data, for the base mesh. -/
 def RegionCase.toCut (c : RegionCase) : CutCase :=

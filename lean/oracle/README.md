@@ -828,16 +828,16 @@ numbered readings continue the list [above](#choices-where-the-spec-is-ambiguous
   `s` the speed after sliver smoothing; with the length step on the mesh, or if `alpha + eta = 0` everywhere, `r = s`.
 * `g` of a piece (connected component of the cut vertices under the segments): `sum |pq| / sum (|pq| / |grad phi|)`, with
   `|grad phi| = |phi_a| |pq| / (2 area(a, p, q))` per segment (the area of the `(a, p, q)` sub-triangle, `phi` the scaled input).
-  A segment with `phi_a = 0` has `|grad phi| = 0`, the term is `+inf` and `g = 0` (printed `-0` or `0`) for the whole piece:
-  the formula is taken literally (SPEC does not discuss it; the fixtures avoid it except `d-ico1-phi-zero-unit-speed`, which uses `speed unit`).
+  A segment with `phi_a = 0` has `|grad phi| = 0`; since SPEC 36f50cc (§3.9, D23) such a face is left out of both sums and a piece without
+  any counted face has `g = 1` (the earlier literal reading, `g = 0`, is gone; no fixture of `cuts-default` has a zero slope, so none changed).
 * the local extension: at a cut-adjacent vertex `i`, `sigma_i = sum_p l_p beta_ip (g r)_p / sum_p l_p beta_ip` over the crossed edges at `i`
   (`beta_ip = 1 - t` if `i` is the smaller end of the edge, `t` otherwise); then ring by ring (BFS by uncrossed edges),
   `sigma_i = mean of sigma_j weighted by 1/l_ij` over the neighbours `j` with ring one less (all neighbours of the
   ring below, any of them reached by an uncrossed edge); a vertex that no path reaches gets `0`.
 * the harmonic extension (paper) of `g r` is the one of format 1 with `r = g r` as data.
 * roughening rate: `omega_c = 2 (Q_0 + Q_1)` with `Q_r = G_r - beta_r - w_r b(0)` at cut vertex `c` (`G_r = w_r G + beta_r`
-  from the recovered `d, e`, `b(0) = 0` for all three energies), so `Q_r = w_r G`; `omega` is the largest over the cut
-  vertices (SPEC speaks of one number for the state and does not say how to aggregate).
+  from the recovered `d, e`, `b(0) = 0` for all three energies), so `Q_r = w_r G`; with `statistics extremes` (the only choice in format 2)
+  `omega` is the largest over the cut vertices; since SPEC 36f50cc it is a 0.9-quantile with `statistics robust` (format 3, below).
 * explicit step `phi~ = phi + tau sigma`; with the length step on the cut there is no further length step (`PHILEN = PHITILDE`);
   symmetry, redistancing and the second projection as in format 1.
 
@@ -1040,3 +1040,110 @@ regions on a sphere and 4 on a disk with boundary; on a flat mesh the loads `gam
     whole segment to a triple point; `delta` is only defined (and used) at cut-adjacent vertices; a piece that has no segment of a face with two regions
     gets `g = 1`; the explicit step for the functions of regions that `I` has no crossing to is `-e_I`; with all `w = 0` the chain systems are skipped.
 33. The step rule's `ω`, the roughening rate, uses for `N` regions the two regions of the cut point.
+
+# Robust step statistics (SPEC 36f50cc, D22, D23)
+
+SPEC §1/§4 now define the roughening rate of a state and the step size from *statistics* of the local rates: `Robust` (the SPEC
+default) and `Extremes` (what formats 1 and 2 implement: largest `omega_c`, largest speed over the shortest crossed edge, no local limit).
+Formats 1 and 2 are unchanged and behave as `extremes`.
+
+## Format 3 of `cuts` and format 2 of `regions`
+
+* `cuts`: `format 3` (instead of `format 2`) allows all lines of format 2 and the optional line `statistics extremes | robust` (absent: `extremes`).
+  A format 3 case with `statistics extremes` gives the numbers of format 2 plus the extra output lines.
+* `regions`: the optional line `format 2` allows `statistics extremes | robust` (absent: `extremes`).
+
+The statistics (two regions; `l_c` = `ELLC` the dual length on the cut, N regions: see below):
+
+```
+omega_c  = 2 (Q_0c + Q_1c)                              local roughening rate (as before)
+omega    = quantile_0.9 (omega_c ; l_c)                 robust      (extremes: max_c omega_c)
+h_c      = shortest crossed edge sharing a vertex with the edge of c (its own included)
+m_c      = |rho_c| / h_c ;   mhat = quantile_0.9 (m_c ; l_c)         (extremes: mhat = max|rho| / h_min, h_min the shortest crossed edge)
+quantile_q (x ; l): x sorted ascending (stable: equal values in the order of the cut points); the first x at which the running sum of l,
+                    accumulated left to right in that order, is >= q * (sum of l, accumulated left to right in that order); 0 for no points
+tau      = Fixed: tau;  Capped: min(tau_max, max_motion / mhat);  Adaptive: min(tau_max, time_scale / omega, max_motion / mhat)
+                    (a term whose denominator is not positive is skipped)
+```
+
+`rho_c` is `s_c + lambda0_c` with the length step on the cut. With the length step on the mesh the robust statistics take the larger of the two
+`mhat`: the one for `rho = s` and the one for `rho = s + lambda0` (`lambda0` of §3.10 computed on the cut for this purpose only); the extremes
+take `rho = s`. `s` is the speed after sliver smoothing. After `tau` and the rate `r` are known, every cut point is limited:
+`r_c <- r_c * min(1, max_motion * h_c / (tau * v_c))` with `v_c = |r_c|` (Capped) or `max(|r_c|, (omega_c - omega)_+ / 2)` (Adaptive); `Fixed` and
+`extremes` limit nothing. The limited rate is the one that `g` multiplies and that is extended. `r_c` is the rate of the systems of §3.10 (`RATE`)
+or, with the length step on the mesh, `s`.
+
+## Output (format 3 of `cuts`)
+
+After the `dw` lines of format 2:
+
+```
+stats extremes|robust
+omegamax OMEGAMAX                 the largest omega_c (OMEGA of the `omega` line is the statistic that the step rule used)
+mhat M1 M2 USED                   quantile_0.9 of |s|/h_c, of |s + lambda0|/h_c (both always computed), and the mhat that the step rule used
+limited N                         number of cut points with FACTOR < 1
+h K HC MC1 MC2 FACTOR RATE RLIM   x NC   h_c, |s|/h_c, |s + lambda0|/h_c, the factor of the local limit, the rate before and after it
+```
+
+`limits TAUMAX TIMELIMIT MOTIONLIMIT` has `MOTIONLIMIT = max_motion / mhat` for the robust statistics (as before, `max_motion * h_min / max|rho|`
+for the extremes). In the `c` lines `RATE` is the rate before the limit and `RG = GBAR * RLIM`.
+
+## Output (format 2 of `regions`)
+
+After the `limits` line:
+
+```
+stats extremes|robust
+omegamax OMEGAMAX                 largest omega_p over the cut points (OMEGA: the statistic used)
+mhat M1 M2 USED                   robust only (0 for extremes): M1 = quantile of |s_p|/h_p over the cut points (weights ELLP), M2 = quantile of
+                                  |s_v + lambda0_v|/h_v over all boundary copies of all regions (weights ELLC, order: region, then copy), USED = max(M1, M2) for
+                                  the paper's stages and M2 for the default stages
+limited N                         number of boundary copies with FACTOR < 1
+hp P HP ELLP OMEGAP               x NP   h_c of cut point P, its weight l_c (half a segment to a cut point, a whole segment to a triple point), omega_c
+hc X NODE HC FACTOR RBEFORE RAFTER      per region, per boundary copy: h (a copy of a cut point: its h_c; of a triple point: the smallest h_c of its three
+                                  cut points), the factor of the local limit, the rate before and after it
+```
+
+For the paper's stages the rate that is limited is `s_v` (`sn`) and the limited values are the data of the harmonic extension; for the default stages it
+is the rate `RATE` of the chain system and the limited value is what `g` multiplies. `omega_c` of a triple copy is not defined: its `v_c` is `|r_c|`.
+`lambda0` for the robust statistics with the paper's stages is the one of §8.5, computed for the step rule only (it appears in the `d` lines only for
+the default stages).
+
+## Zero slope (§3.9, D23)
+
+A crossed face with `|grad phi| = 0` is left out of both sums of `g`; a piece (cut or network) without any counted face has `g = 1`.
+
+## Fixtures
+
+`fixtures/cuts-robust/` (9 cases, `ddg-oracle cuts-robust-fixtures check fixtures/cuts-robust`): `rb-ico2-cap-adaptive`, `-capped` (default stages),
+`rb-ico2-cap-paper-adaptive` (paper stages: the larger of two `mhat`), `rb-spike-adaptive`, `-capped`, `-paper` (a face with a 40 times larger curvature
+density next to the cut: `omega_c` outlier `2.0e3` against `omega = 9.3e2`, 2 to 5 cut points limited), `rb-spike-extremes` (the same with the extremes
+in format 3), `rb-grid-boundary-adaptive` (cut ending on the boundary, scaled energy), `rb-torus-hencky`.
+`fixtures/regions-robust/` (5 cases, `regions-robust-fixtures check`): `rr-sphere4-paper`, `rr-sphere4-default`, `rr-disk4-paper` (6 copies limited),
+`rr-sphere3-spike-default`, `rr-sphere3-spike-paper` (a vertex pushed out to 2.4 times its radius next to a boundary between two regions: `omega_c` up to
+`1.1e2` against `omega = 41`, 6 copies limited).
+`fixtures/cuts`, `fixtures/cuts-default`, `fixtures/regions` are unchanged (byte for byte) by this revision.
+
+## Tests (`cuts-selftest`, `regions-selftest`)
+
+Weighted quantile against a brute-force definition on 300 random lists with many ties (difference 0), `q = 1` is the maximum, empty and one-element
+lists; on a uniform cut the robust and the extremes step are equal (`1e-15`); equator of icosphere 3: `tau` robust `9.85e-4`, extremes `9.81e-4`; the
+local limit bounds `tau |r_c|` by `max_motion h_c` for every cut point (largest ratio `1.000`, 4 and 2 points limited with the capped and the adaptive step on
+the curvature spike); a zero-slope case (`phi = z`, 10 crossed faces with `|grad phi| = 0`) gives positive finite `g`; `N = 2` with the robust statistics
+through the N-region code equals the two-region code (paper and default stages, capped and adaptive steps: new functions to `3e-17`, `tau`, `omega` to `0`
+and `mhat` to `1e-9`) and the local limit bounds the motion of every boundary copy on the five `regions-robust` fixtures.
+
+# Readings of SPEC 36f50cc (continuing the list above)
+
+34. Reading 1 (`omega` = largest local rate) is the `extremes` statistic; reading 25 (`g = 0` on a zero slope) is replaced by the §3.9 rule above.
+35. §1 quantile: ties of the sort key keep the order of the cut points; for the pooled boundary copies of an N-region state the order is region, then the
+    copy's local index (the copies sorted by their global number); `Sum l` and the running sum are accumulated left to right in the sorted order (the code
+    `sumLeft`), and a trailing run of zero weights would return an earlier value than the maximum for `q = 1`.
+36. §4 `h_c`: the crossed edges that share a vertex with the edge of `c` are all crossed edges of the cut (also of other pieces), including the edge itself.
+37. §4 the second `mhat` with the length step on the mesh uses the speed `s` after sliver smoothing and `lambda0` of §3.10 with the `c` of the flux rule, and
+    is computed from the same `lambda0` systems as the on-cut step.
+38. §4 local limit: `v_c = 0` or `tau = 0` gives factor 1; the factor acts on the rate that is extended (`g` multiplies the limited rate); with the length step
+    on the mesh the limited rate is `s`; for `N` regions the limit acts on the copies, with the `h` and `omega_c` of the copy (triple copy: smallest `h_c`, and
+    `v_c = |r|`).
+39. §8.4 robust: the larger of the two `mhat` uses `ELLP`-weighted cut points for `rho = s` and `ELLC`-weighted copies for `rho = s + lambda0`.
+40. D23(c): `omega <= 0` removes the time limit; `mhat <= 0` the motion limit; nothing else is done for a negative `omega`.

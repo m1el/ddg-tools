@@ -5,3 +5,5 @@ import DdgOracle.Regions.Gen
 import DdgOracle.Regions.Format
 import DdgOracle.Regions.Selftest
 import DdgOracle.Regions.Fixtures
+import DdgOracle.Regions.FixturesRobust
+import DdgOracle.Regions.SelftestRobust

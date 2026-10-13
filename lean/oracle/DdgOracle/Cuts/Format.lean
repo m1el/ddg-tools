@@ -75,17 +75,18 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
     kv := kv.insert l[0]! l
     i := i + 1
   let allowed := ["phi", "energy", "curvature", "alpha", "eta", "penalty", "w", "beta", "step",
-    "delta", "flux", "rho0", "passes", "classes", "format", "stages", "featurelap"]
+    "delta", "flux", "rho0", "passes", "classes", "format", "stages", "featurelap", "statistics"]
   for (k, _) in kv.toList do
     if !allowed.contains k then throw s!"unknown line '{k}'"
   let format ← match kv.get? "format" with
     | none => pure 1
     | some l =>
-      if l.size != 2 || l[1]! != "2" then throw "format: expected 'format 2'"
-      pure 2
+      if l.size != 2 || (l[1]! != "2" && l[1]! != "3") then throw "format: expected 'format 2' or 'format 3'"
+      pure (if l[1]! == "3" then 3 else 2)
   if format == 1 then
     for k in ["stages", "featurelap"] do
       if kv.contains k then throw s!"line '{k}' needs 'format 2'"
+  if format < 3 && kv.contains "statistics" then throw "line 'statistics' needs 'format 3'"
   let need := fun (k : String) =>
     match kv.get? k with
     | some l => pure (f := Except String) l
@@ -145,7 +146,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
       if l.size != 4 then throw "step capped: expected two values"
       pure (StepRule.capped (← floatTok "step" l[2]!) (← floatTok "step" l[3]!))
     | some "adaptive" =>
-      if format != 2 then throw "step adaptive needs 'format 2'"
+      if format < 2 then throw "step adaptive needs 'format 2'"
       if l.size != 5 then throw "step adaptive: expected 'step adaptive <time_scale> <max_motion> <tau_max>'"
       pure (StepRule.adaptive (← floatTok "step" l[2]!) (← floatTok "step" l[3]!) (← floatTok "step" l[4]!))
     | _ => throw s!"malformed line '{joinTokens l}': step is fixed <tau> | capped <tau_max> <max_motion> | adaptive <time_scale> <max_motion> <tau_max>"
@@ -203,8 +204,15 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
       | some "cotan" => pure false
       | some "positive" => pure true
       | _ => throw "featurelap: expected cotan | positive"
+  let stats ← match kv.get? "statistics" with
+    | none => pure StepStats.extremes
+    | some l =>
+      match l[1]? with
+      | some "extremes" => pure StepStats.extremes
+      | some "robust" => pure StepStats.robust
+      | _ => throw "statistics: expected extremes | robust"
   return { name, nv, faces, edges, phi, energy, curv, alphaL, eta, penalty, w, beta, step
-           delta, flux, rho0, passes, classes, format, lengthStep, extension, speed, featPos }
+           delta, flux, rho0, passes, classes, format, lengthStep, extension, speed, featPos, stats }
 
 /-- Read the next case as raw lines: `(name, lines)`, or an error message. -/
 partial def readCaseLines (r : LineReader) :
@@ -268,8 +276,10 @@ def printCase (c : CutCase) : String := Id.run do
   | .adaptive ts m tm => s := s ++ s!"step adaptive {hx ts} {hx m} {hx tm}\n"
   s := s ++ (match c.flux with | .nodal => "flux nodal\n" | .smoothed k => s!"flux smoothed {hx k}\n")
   s := s ++ s!"delta {hx c.delta}\nrho0 {hx c.rho0}\npasses {c.passes}\n"
-  if c.format == 2 then
-    s := s ++ "format 2\n"
+  if c.format ≥ 2 then
+    s := s ++ s!"format {c.format}\n"
+    if c.format == 3 then
+      s := s ++ s!"statistics {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
     s := s ++ s!"stages {match c.lengthStep with | .onMesh => "onmesh" | .onCut => "oncut"} {match c.extension with | .harmonic => "harmonic" | .local => "local"} {match c.speed with | .unit => "unit" | .meanGradient => "mean_gradient"}\n"
     s := s ++ s!"featurelap {if c.featPos then "positive" else "cotan"}\n"
   if let some cl := c.classes then
@@ -338,6 +348,14 @@ def printOutcome (c : CutCase) (o : Outcome) : String := Id.run do
         s := s ++ s!"c {k} {hx (st.force.wc.get! k)} {hx (st.force.ellC.get! k)} {st.force.deg[k]!} {hx (st.force.beta.get! k)} {hx (st.force.theta.get! k)} {hx (st.lam0.get! k)} {hx (st.rate.get! k)} {hx (st.gbar.get! k)} {hx (st.rg.get! k)} {st.piece[k]!} {hx (st.omegaP.get! k)}\n"
       for si in [0:r.ev.cm.segs.size] do
         s := s ++ s!"dw {si} {hx (st.force.dwdn.get! si)}\n"
+      if c.format == 3 then
+        let mut nlim := 0
+        for k in [0:r.ev.cm.nc] do
+          if st.factor.get! k < 1 then nlim := nlim + 1
+        s := s ++ s!"stats {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
+        s := s ++ s!"omegamax {hx st.omegaMax}\nmhat {hx st.mhat.1} {hx st.mhat.2} {hx st.mused}\nlimited {nlim}\n"
+        for k in [0:r.ev.cm.nc] do
+          s := s ++ s!"h {k} {hx (st.hc.get! k)} {hx (st.mc1.get! k)} {hx (st.mc2.get! k)} {hx (st.factor.get! k)} {hx (st.rate.get! k)} {hx (st.rlim.get! k)}\n"
       for i in [0:r.base.nv] do
         let rn := match st.ring[i]! with | some n => toString n | none => "-1"
         s := s ++ s!"m {i} {rn} {hx (st.sigma.get! i)}\n"

@@ -21,6 +21,8 @@ usage:
   ddg-oracle regions   [IN [OUT]]   one step of the cut flow for N regions (SPEC section 8)
   ddg-oracle regions-selftest       internal checks of the N-region flow
   ddg-oracle regions-fixtures write DIR | check DIR   golden fixtures (fixtures/regions)
+  ddg-oracle cuts-robust-fixtures write DIR | check DIR   fixtures of the robust statistics (fixtures/cuts-robust)
+  ddg-oracle regions-robust-fixtures write DIR | check DIR   same for N regions (fixtures/regions-robust)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -70,7 +72,7 @@ def main (args : List String) : IO UInt32 := do
     let _ ← Cuts.runStream input output
     output.flush
     return 0
-  | ["cuts-selftest"] => return if (← Cuts.selftest) == 0 then 0 else 1
+  | ["cuts-selftest"] => return if (← Cuts.selftest) + (← Cuts.selftestRobust) == 0 then 0 else 1
   | ["cuts-fixtures", "write", dir] => Cuts.writeFixtures dir; return 0
   | ["cuts-fixtures", "check", dir] => return if (← Cuts.checkFixtures dir) == 0 then 0 else 1
   | ["cuts-default-fixtures", "write", dir] => Cuts.writeList Cuts.defaultFixtures dir; return 0
@@ -87,7 +89,12 @@ def main (args : List String) : IO UInt32 := do
     return 0
   | ["regions-fixtures", "write", dir] => Regions.writeFixtures dir; return 0
   | ["regions-fixtures", "check", dir] => return if (← Regions.checkFixtures dir) == 0 then 0 else 1
-  | ["regions-selftest"] => return if (← Regions.selftest) == 0 then 0 else 1
+  | ["regions-selftest"] => return if (← Regions.selftest) + (← Regions.selftestRobust) == 0 then 0 else 1
+  | ["cuts-robust-fixtures", "write", dir] => Cuts.writeList Cuts.robustFixtures dir; return 0
+  | ["cuts-robust-fixtures", "check", dir] =>
+    return if (← Cuts.checkList Cuts.robustFixtures dir) == 0 then 0 else 1
+  | ["regions-robust-fixtures", "write", dir] => Regions.writeRobust dir; return 0
+  | ["regions-robust-fixtures", "check", dir] => return if (← Regions.checkRobust dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

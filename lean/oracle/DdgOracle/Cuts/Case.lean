@@ -80,6 +80,14 @@ inductive SpeedScaling where
   | meanGradient
   deriving BEq
 
+/-- Statistics of the step rule (SPEC §4, D22). -/
+inductive StepStats where
+  /-- largest speed, shortest crossed edge, largest `ω_c`, no local limit (before D22) -/
+  | extremes
+  /-- 0.9-quantiles weighted by the length of the cut, local `h_c`, local limit (default of SPEC) -/
+  | robust
+  deriving BEq
+
 /-- One case: a mesh given by faces and edge lengths (caller's unit) and everything else of one
 flow step. All parameters refer to the surface scaled to unit total area, `φ` is in the caller's
 unit. -/
@@ -120,7 +128,7 @@ structure CutCase where
   passes : Nat
   /-- symmetry class label of every vertex -/
   classes : Option (Array Nat)
-  /-- text format version: 1 (the stages of the paper only) or 2 -/
+  /-- text format version: 1 (the stages of the paper only), 2 (stages), 3 (and statistics) -/
   format : Nat := 1
   /-- where the length term acts -/
   lengthStep : LengthStep := .onMesh
@@ -130,5 +138,7 @@ structure CutCase where
   speed : SpeedScaling := .unit
   /-- feature size smoothing with the positive edge weights `L⁺` (SPEC §3.6, D17) -/
   featPos : Bool := false
+  /-- statistics of the step rule (format 3) -/
+  stats : StepStats := .extremes
 
 end Ddg.Cuts
