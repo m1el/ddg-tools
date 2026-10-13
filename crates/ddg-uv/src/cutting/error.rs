@@ -148,7 +148,10 @@ impl fmt::Display for CuttingError {
                 per,
                 expected,
                 got,
-            } => write!(f, "{what} has {got} entries but needs one per {per} ({expected})"),
+            } => write!(
+                f,
+                "{what} has {got} entries but needs one per {per} ({expected})"
+            ),
             NonFinite {
                 what,
                 region,

@@ -123,7 +123,9 @@ pub(super) fn unwrap_inserted(
     };
     let map = unwrap(&new_input, &options.unwrap).map_err(CuttingError::Mesh)?;
     if map.uvs.len() != inserted.mesh.corner_vertices.len() {
-        return Err(internal("the UV map does not have one UV per corner of the new mesh"));
+        return Err(internal(
+            "the UV map does not have one UV per corner of the new mesh",
+        ));
     }
     Ok(CutUnwrap {
         inserted,

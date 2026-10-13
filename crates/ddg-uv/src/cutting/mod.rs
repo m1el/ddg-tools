@@ -78,9 +78,7 @@ mod error;
 mod insert;
 mod session;
 
-pub use describe::{
-    CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath,
-};
+pub use describe::{CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath};
 pub use endtoend::{ConePlacement, CutUnwrap, CutUnwrapOptions, unwrap_with_cut};
 pub use error::CuttingError;
 pub use insert::{Inserted, VertexSource, insert};

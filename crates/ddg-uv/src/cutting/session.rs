@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
+use ddg_core::Geometry;
 use ddg_core::distance::upwind_distance;
 use ddg_core::topology::{NONE, TriMesh};
-use ddg_core::Geometry;
 use ddg_variational_cuts::{
-    Cut, CutProblem, CurvatureSource, Energy, EvalOptions, Evaluation, Flow, FlowOptions,
+    CurvatureSource, Cut, CutProblem, Energy, EvalOptions, Evaluation, Flow, FlowOptions,
     RunReport, ScaleWeight, StepReport, StopRule, init,
 };
 
@@ -137,7 +137,11 @@ impl Maps {
 
     /// The region functions of the corners from the level-set function.
     fn regions_from_phi(&self, phi: &[f64]) -> Vec<Vec<f64>> {
-        let at_corner: Vec<f64> = self.corner_vertex.iter().map(|&v| phi[v as usize]).collect();
+        let at_corner: Vec<f64> = self
+            .corner_vertex
+            .iter()
+            .map(|&v| phi[v as usize])
+            .collect();
         let negated: Vec<f64> = at_corner.iter().map(|x| -x).collect();
         vec![at_corner, negated]
     }
@@ -268,7 +272,11 @@ impl Session {
         // Flow edges: polygon corners of the first face, polygon edge or diagonal.
         let next_corner = |c: u32| {
             let p = corner_polygon[c as usize] as usize;
-            if c + 1 == offsets[p + 1] { offsets[p] } else { c + 1 }
+            if c + 1 == offsets[p + 1] {
+                offsets[p]
+            } else {
+                c + 1
+            }
         };
         let mut edge_corners = vec![(NONE, NONE); flow_mesh.n_edges()];
         let mut edge_is_polygon = vec![false; flow_mesh.n_edges()];
@@ -526,7 +534,10 @@ impl Session {
                     ),
                 });
             }
-            Ok(m.vertex_input.iter().map(|&v| values[v as usize]).collect::<Vec<f64>>())
+            Ok(m.vertex_input
+                .iter()
+                .map(|&v| values[v as usize])
+                .collect::<Vec<f64>>())
         };
         let mut out = problem.clone();
         if let Some(eta) = &problem.penalty {
@@ -598,7 +609,8 @@ impl Session {
     /// # Errors
     /// [`CuttingError::Flow`] for a `δ` outside `[0, ½)`.
     pub fn preview(&self, min_crossing_offset: f64) -> Result<Vec<PreviewPolyline>, CuttingError> {
-        let cut = Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
+        let cut =
+            Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
         Ok(cut
             .polylines(&self.flow_mesh, &self.flow_positions)?
             .into_iter()
@@ -617,7 +629,8 @@ impl Session {
     /// segments of the cut do not form paths (cannot happen for a valid flow mesh).
     pub fn describe_cut(&self, min_crossing_offset: f64) -> Result<CutOnPolygons, CuttingError> {
         let m = &self.maps;
-        let cut = Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
+        let cut =
+            Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
         let at = cut.point_positions(&self.flow_mesh, &self.flow_positions)?;
         let mut description = CutOnPolygons {
             n_clamped_crossings: cut.n_clamped,
@@ -660,8 +673,9 @@ impl Session {
             }
         }
         // Segments by polygon; a path starts where a segment starts on a polygon edge.
-        let polygon_of =
-            |seg: usize| m.triangle_polygon[m.face_triangle[cut.segments[seg].face as usize] as usize];
+        let polygon_of = |seg: usize| {
+            m.triangle_polygon[m.face_triangle[cut.segments[seg].face as usize] as usize]
+        };
         let mut order: Vec<usize> = (0..cut.segments.len()).collect();
         order.sort_by_key(|&s| (polygon_of(s), s));
         let mut by_first: HashMap<(u32, u32), usize> = HashMap::new();
@@ -683,11 +697,9 @@ impl Session {
                 if edge_point_of[last as usize] != NONE {
                     break PathEnd::EdgePoint(edge_point_of[last as usize]);
                 }
-                interior.push(
-                    interior_of[last as usize]
-                        .clone()
-                        .ok_or_else(|| internal("a cut point is neither on a polygon edge nor on a diagonal"))?,
-                );
+                interior.push(interior_of[last as usize].clone().ok_or_else(|| {
+                    internal("a cut point is neither on a polygon edge nor on a diagonal")
+                })?);
                 current = *by_first.get(&(polygon, last)).ok_or_else(|| {
                     internal(format!(
                         "the cut leaves polygon {polygon} through a diagonal point that has no \
@@ -710,7 +722,9 @@ impl Session {
             )));
         }
         description.paths.sort_by_key(|p| {
-            let PathEnd::EdgePoint(i) = p.start else { unreachable!("two regions") };
+            let PathEnd::EdgePoint(i) = p.start else {
+                unreachable!("two regions")
+            };
             (p.polygon, i)
         });
         Ok(description)
@@ -764,7 +778,8 @@ fn start_level_set(
                     reason: format!("must be positive and finite, got {radius}"),
                 });
             }
-            let seeds: Vec<(u32, f64)> = maps.copies_of(*vertex).iter().map(|&v| (v, 0.0)).collect();
+            let seeds: Vec<(u32, f64)> =
+                maps.copies_of(*vertex).iter().map(|&v| (v, 0.0)).collect();
             if seeds.is_empty() {
                 return Err(CuttingError::InvalidOption {
                     name: "center",

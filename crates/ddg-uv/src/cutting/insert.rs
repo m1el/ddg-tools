@@ -114,7 +114,11 @@ fn triangulate_ring(
     polygon: u32,
 ) -> Result<Vec<[u32; 3]>, CuttingError> {
     let quality = |a: u32, b: u32, c: u32| -> f64 {
-        let (pa, pb, pc) = (positions[a as usize], positions[b as usize], positions[c as usize]);
+        let (pa, pb, pc) = (
+            positions[a as usize],
+            positions[b as usize],
+            positions[c as usize],
+        );
         let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
         let (u, v) = (sub(pb, pa), sub(pc, pa));
         let cross = [
@@ -126,7 +130,11 @@ fn triangulate_ring(
         let dot = |x: [f64; 3]| x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
         let w = sub(pc, pb);
         let sum = dot(u) + dot(v) + dot(w);
-        if sum > 0.0 { 2.0 * 3f64.sqrt() * area2 / sum } else { 0.0 }
+        if sum > 0.0 {
+            2.0 * 3f64.sqrt() * area2 / sum
+        } else {
+            0.0
+        }
     };
     let mut rest: Vec<RingVertex> = ring.to_vec();
     let mut out = Vec::with_capacity(ring.len().saturating_sub(2));
@@ -233,10 +241,12 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         for p in 0..n_polygons {
             for &v in mesh.polygon(p) {
                 if stamp[v as usize] == p as u32 {
-                    return Err(CuttingError::Mesh(crate::UvError::RepeatedVertexInPolygon {
-                        polygon: p as u32,
-                        vertex: v,
-                    }));
+                    return Err(CuttingError::Mesh(
+                        crate::UvError::RepeatedVertexInPolygon {
+                            polygon: p as u32,
+                            vertex: v,
+                        },
+                    ));
                 }
                 stamp[v as usize] = p as u32;
             }
@@ -267,7 +277,10 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         if !(point.t > 0.0 && point.t < 1.0) {
             return Err(invalid(
                 None,
-                format!("edge point {i} on ({a}, {b}) has the parameter {}; it must be strictly between 0 and 1", point.t),
+                format!(
+                    "edge point {i} on ({a}, {b}) has the parameter {}; it must be strictly between 0 and 1",
+                    point.t
+                ),
             ));
         }
         if let Some(q) = point.side
@@ -275,7 +288,9 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         {
             return Err(invalid(
                 Some(q),
-                format!("edge point {i} on ({a}, {b}) is said to be on the side of polygon {q}, which does not have that edge"),
+                format!(
+                    "edge point {i} on ({a}, {b}) is said to be on the side of polygon {q}, which does not have that edge"
+                ),
             ));
         }
     }
@@ -284,7 +299,8 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         by_edge.entry(point.edge).or_default().push(i as u32);
     }
     let mut edge_point_vertex = vec![NONE; cut.edge_points.len()];
-    let mut vertex_source: Vec<VertexSource> = (0..n_vertices as u32).map(VertexSource::Old).collect();
+    let mut vertex_source: Vec<VertexSource> =
+        (0..n_vertices as u32).map(VertexSource::Old).collect();
     let mut chain_of_edge: HashMap<[u32; 2], Vec<u32>> = HashMap::new(); // inner vertices, ascending t
     {
         // Merge points of the two sides with the same parameter; assign ids in point order.
@@ -292,10 +308,15 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         for (edge, list) in &mut by_edge {
             list.sort_by(|&x, &y| {
                 let (tx, ty) = (cut.edge_points[x as usize].t, cut.edge_points[y as usize].t);
-                tx.partial_cmp(&ty).unwrap_or(std::cmp::Ordering::Equal).then(x.cmp(&y))
+                tx.partial_cmp(&ty)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(x.cmp(&y))
             });
             for w in list.windows(2) {
-                let (x, y) = (&cut.edge_points[w[0] as usize], &cut.edge_points[w[1] as usize]);
+                let (x, y) = (
+                    &cut.edge_points[w[0] as usize],
+                    &cut.edge_points[w[1] as usize],
+                );
                 if x.t == y.t {
                     match (x.side, y.side) {
                         (Some(s), Some(u)) if s != u => {
@@ -326,7 +347,10 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
             }
         }
         for (edge, list) in &by_edge {
-            let mut ids: Vec<u32> = list.iter().map(|&i| edge_point_vertex[i as usize]).collect();
+            let mut ids: Vec<u32> = list
+                .iter()
+                .map(|&i| edge_point_vertex[i as usize])
+                .collect();
             ids.dedup();
             chain_of_edge.insert(*edge, ids);
         }
@@ -355,7 +379,10 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
             match end {
                 PathEnd::EdgePoint(i) => {
                     let point = cut.edge_points.get(i as usize).ok_or_else(|| {
-                        invalid(Some(pol), format!("path {k} {name}s at edge point {i}, which does not exist"))
+                        invalid(
+                            Some(pol),
+                            format!("path {k} {name}s at edge point {i}, which does not exist"),
+                        )
                     })?;
                     let ok = edge_polygons
                         .get(&point.edge)
@@ -392,7 +419,11 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
     for (k, path) in cut.paths.iter().enumerate() {
         for (j, point) in path.interior.iter().enumerate() {
             let [c0, c1] = point.corners;
-            if !(c0 < c1 && (c1 as usize) < n_corners && corner_polygon[c0 as usize] == path.polygon && corner_polygon[c1 as usize] == path.polygon) {
+            if !(c0 < c1
+                && (c1 as usize) < n_corners
+                && corner_polygon[c0 as usize] == path.polygon
+                && corner_polygon[c1 as usize] == path.polygon)
+            {
                 return Err(invalid(
                     Some(path.polygon),
                     format!(
@@ -405,7 +436,10 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
             if !(point.t > 0.0 && point.t < 1.0) {
                 return Err(invalid(
                     Some(path.polygon),
-                    format!("path {k}, interior point {j} has the parameter {}; it must be strictly between 0 and 1", point.t),
+                    format!(
+                        "path {k}, interior point {j} has the parameter {}; it must be strictly between 0 and 1",
+                        point.t
+                    ),
                 ));
             }
             path_vertices[k].push(vertex_source.len() as u32);
@@ -413,7 +447,8 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
                 path: k as u32,
                 index: j as u32,
             });
-            let [xa, xb] = [c0, c1].map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
+            let [xa, xb] =
+                [c0, c1].map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
             positions.push([0, 1, 2].map(|d| (1.0 - point.t) * xa[d] + point.t * xb[d]));
         }
         if let PathEnd::EdgePoint(i) = path.end {
@@ -467,7 +502,9 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         let parts = ctx.process(
             p as u32,
             &triangles_of_polygon[p],
-            paths_of_polygon.get(&(p as u32)).map_or(&[][..], |v| &v[..]),
+            paths_of_polygon
+                .get(&(p as u32))
+                .map_or(&[][..], |v| &v[..]),
         )?;
         for part in parts {
             let start = out.corner_vertices.len() as u32;
@@ -577,7 +614,10 @@ impl PolygonContext<'_> {
         for (ti, t) in triangles.iter().enumerate() {
             for k in 0..3 {
                 let (c, d) = (t[k], t[(k + 1) % 3]);
-                tri_of_edge.entry((c.min(d), c.max(d))).or_default().push(ti);
+                tri_of_edge
+                    .entry((c.min(d), c.max(d)))
+                    .or_default()
+                    .push(ti);
             }
         }
         // The polygon edge (as corners) of an edge point.
@@ -602,7 +642,10 @@ impl PolygonContext<'_> {
                         return Err(internal("a junction reached the insertion"));
                     };
                     edge_corners(self.cut.edge_points[i as usize].edge).ok_or_else(|| {
-                        invalid(Some(p), format!("path {k}: edge point {i} is not on an edge of the polygon"))
+                        invalid(
+                            Some(p),
+                            format!("path {k}: edge point {i} is not on an edge of the polygon"),
+                        )
                     })?
                 } else {
                     let [c0, c1] = path.interior[j - 1].corners;
@@ -625,7 +668,10 @@ impl PolygonContext<'_> {
                 if x.edge == y.edge {
                     return Err(invalid(
                         Some(p),
-                        format!("path {k}: two consecutive points lie on the same edge {:?}", x.edge),
+                        format!(
+                            "path {k}: two consecutive points lie on the same edge {:?}",
+                            x.edge
+                        ),
                     ));
                 }
                 let tx = &tri_of_edge[&x.edge];
@@ -645,7 +691,10 @@ impl PolygonContext<'_> {
                 if cut_tri[ti].is_some() {
                     return Err(invalid(
                         Some(p),
-                        format!("path {k}: triangle {:?} is crossed by more than one segment", triangles[ti]),
+                        format!(
+                            "path {k}: triangle {:?} is crossed by more than one segment",
+                            triangles[ti]
+                        ),
                     ));
                 }
                 let t = triangles[ti];
@@ -699,11 +748,26 @@ impl PolygonContext<'_> {
                 Some(ct) => {
                     let [a, b, c] = ct.corners;
                     let (l0, l1, l2) = (
-                        if is_polygon_edge(a, b) { extras(a, b) } else { Vec::new() },
-                        if is_polygon_edge(b, c) { extras(b, c) } else { Vec::new() },
-                        if is_polygon_edge(c, a) { extras(c, a) } else { Vec::new() },
+                        if is_polygon_edge(a, b) {
+                            extras(a, b)
+                        } else {
+                            Vec::new()
+                        },
+                        if is_polygon_edge(b, c) {
+                            extras(b, c)
+                        } else {
+                            Vec::new()
+                        },
+                        if is_polygon_edge(c, a) {
+                            extras(c, a)
+                        } else {
+                            Vec::new()
+                        },
                     );
-                    let split = |list: &[u32], id: u32, side: &str| -> Result<usize, CuttingError> {
+                    let split = |list: &[u32],
+                                 id: u32,
+                                 side: &str|
+                     -> Result<usize, CuttingError> {
                         if list.is_empty() {
                             return Ok(usize::MAX);
                         }
@@ -716,26 +780,53 @@ impl PolygonContext<'_> {
                     };
                     let ip = split(&l0, ct.p, "first")?;
                     let iq = split(&l2, ct.q, "last")?;
-                    let (before_p, after_p): (&[u32], &[u32]) =
-                        if ip == usize::MAX { (&[], &[]) } else { (&l0[..ip], &l0[ip + 1..]) };
-                    let (before_q, after_q): (&[u32], &[u32]) =
-                        if iq == usize::MAX { (&[], &[]) } else { (&l2[..iq], &l2[iq + 1..]) };
+                    let (before_p, after_p): (&[u32], &[u32]) = if ip == usize::MAX {
+                        (&[], &[])
+                    } else {
+                        (&l0[..ip], &l0[ip + 1..])
+                    };
+                    let (before_q, after_q): (&[u32], &[u32]) = if iq == usize::MAX {
+                        (&[], &[])
+                    } else {
+                        (&l2[..iq], &l2[iq + 1..])
+                    };
                     // The part of the apex a: a, side (a,b) up to p, chord to q, side (c,a) from q.
                     let ring = &mut rings[base[ti] as usize];
-                    ring.push(RingVertex { id: corner_vertex(a), lines: 1 | 4 });
+                    ring.push(RingVertex {
+                        id: corner_vertex(a),
+                        lines: 1 | 4,
+                    });
                     ring_extras(ring, before_p, 1);
-                    ring.push(RingVertex { id: ct.p, lines: 1 | CHORD });
-                    ring.push(RingVertex { id: ct.q, lines: 4 | CHORD });
+                    ring.push(RingVertex {
+                        id: ct.p,
+                        lines: 1 | CHORD,
+                    });
+                    ring.push(RingVertex {
+                        id: ct.q,
+                        lines: 4 | CHORD,
+                    });
                     ring_extras(ring, after_q, 4);
                     // The quadrilateral: p, side to b, side (b,c), side (c,a) up to q.
                     let ring = &mut rings[base[ti] as usize + 1];
-                    ring.push(RingVertex { id: ct.p, lines: 1 | CHORD });
+                    ring.push(RingVertex {
+                        id: ct.p,
+                        lines: 1 | CHORD,
+                    });
                     ring_extras(ring, after_p, 1);
-                    ring.push(RingVertex { id: corner_vertex(b), lines: 1 | 2 });
+                    ring.push(RingVertex {
+                        id: corner_vertex(b),
+                        lines: 1 | 2,
+                    });
                     ring_extras(ring, &l1, 2);
-                    ring.push(RingVertex { id: corner_vertex(c), lines: 2 | 4 });
+                    ring.push(RingVertex {
+                        id: corner_vertex(c),
+                        lines: 2 | 4,
+                    });
                     ring_extras(ring, before_q, 4);
-                    ring.push(RingVertex { id: ct.q, lines: 4 | CHORD });
+                    ring.push(RingVertex {
+                        id: ct.q,
+                        lines: 4 | CHORD,
+                    });
                 }
             }
         }
@@ -787,7 +878,10 @@ impl PolygonContext<'_> {
                     dsu.union(node_near(t1, edge, near), node_near(t2, edge, near));
                 }
             } else if tris.len() == 1 && !is_polygon_edge(edge.0, edge.1) {
-                return Err(invalid(Some(p), format!("the diagonal {edge:?} is in one triangle only")));
+                return Err(invalid(
+                    Some(p),
+                    format!("the diagonal {edge:?} is in one triangle only"),
+                ));
             }
         }
 
@@ -805,14 +899,18 @@ impl PolygonContext<'_> {
             let list = extras(c, d);
             let m = list.len() as f64;
             for (j, id) in list.iter().enumerate() {
-                key.entry(*id).or_insert(f64::from(i) + (j as f64 + 1.0) / (m + 1.0));
+                key.entry(*id)
+                    .or_insert(f64::from(i) + (j as f64 + 1.0) / (m + 1.0));
             }
         }
 
         // The parts.
         let mut groups: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
         for node in 0..n_nodes {
-            groups.entry(dsu.find(node)).or_default().push(node as usize);
+            groups
+                .entry(dsu.find(node))
+                .or_default()
+                .push(node as usize);
         }
         let mut parts = Vec::with_capacity(groups.len());
         for nodes in groups.values() {
@@ -822,7 +920,9 @@ impl PolygonContext<'_> {
                 for i in 0..ring.len() {
                     let (u, v) = (ring[i].id, ring[(i + 1) % ring.len()].id);
                     if !directed.remove(&(v, u)) && !directed.insert((u, v)) {
-                        return Err(internal(format!("polygon {p}: the side {u} -> {v} occurs twice")));
+                        return Err(internal(format!(
+                            "polygon {p}: the side {u} -> {v} occurs twice"
+                        )));
                     }
                 }
             }
@@ -842,18 +942,24 @@ impl PolygonContext<'_> {
                         key.get(&x).copied().unwrap_or(f64::INFINITY),
                         key.get(&y).copied().unwrap_or(f64::INFINITY),
                     );
-                    kx.partial_cmp(&ky).unwrap_or(std::cmp::Ordering::Equal).then(x.cmp(&y))
+                    kx.partial_cmp(&ky)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then(x.cmp(&y))
                 })
                 .ok_or_else(|| internal(format!("polygon {p}: a part without a boundary")))?;
             let mut vertices = vec![start];
             let mut v = next_of[&start];
             while v != start {
                 vertices.push(v);
-                v = *next_of
-                    .get(&v)
-                    .ok_or_else(|| internal(format!("polygon {p}: the boundary of a part is open at vertex {v}")))?;
+                v = *next_of.get(&v).ok_or_else(|| {
+                    internal(format!(
+                        "polygon {p}: the boundary of a part is open at vertex {v}"
+                    ))
+                })?;
                 if vertices.len() > next_of.len() {
-                    return Err(internal(format!("polygon {p}: the boundary of a part does not close")));
+                    return Err(internal(format!(
+                        "polygon {p}: the boundary of a part does not close"
+                    )));
                 }
             }
             if vertices.len() != next_of.len() {
@@ -862,14 +968,25 @@ impl PolygonContext<'_> {
                     "a part of the polygon has more than one boundary loop (the paths do not cut the polygon into discs)",
                 ));
             }
-            let triangles: Vec<[u32; 3]> = nodes.iter().flat_map(|&n| node_triangles[n].iter().copied()).collect();
+            let triangles: Vec<[u32; 3]> = nodes
+                .iter()
+                .flat_map(|&n| node_triangles[n].iter().copied())
+                .collect();
             let part_key = vertices
                 .iter()
                 .map(|v| key.get(v).copied().unwrap_or(f64::INFINITY))
                 .fold(f64::INFINITY, f64::min);
-            parts.push(Part { vertices, triangles, key: part_key });
+            parts.push(Part {
+                vertices,
+                triangles,
+                key: part_key,
+            });
         }
-        parts.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap_or(std::cmp::Ordering::Equal));
+        parts.sort_by(|a, b| {
+            a.key
+                .partial_cmp(&b.key)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Ok(parts)
     }
 }

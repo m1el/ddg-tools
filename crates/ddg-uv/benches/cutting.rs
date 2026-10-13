@@ -19,14 +19,11 @@ use std::time::Duration;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use ddg_core::io::read_obj;
 use ddg_uv::cutting::{
-    ConePlacement, CutOnPolygons, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, Session, Start,
-    insert,
+    ConePlacement, CutOnPolygons, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, Session, Start, insert,
 };
 use ddg_uv::primitives::{grid_cube, torus, uv_sphere};
 use ddg_uv::{MeshInput, PolygonMesh, unwrap};
-use ddg_variational_cuts::{
-    CutProblem, Energy, FlowOptions, StepSize, length_weight_for_ripples,
-};
+use ddg_variational_cuts::{CutProblem, Energy, FlowOptions, StepSize, length_weight_for_ripples};
 
 /// Flow steps per run.
 const STEPS: usize = 10;
@@ -132,7 +129,10 @@ fn stepped(f: &Fixture, options: &FlowOptions<'_>) -> Session {
     s
 }
 
-fn group<'a>(c: &'a mut Criterion, name: &str) -> criterion::BenchmarkGroup<'a, criterion::measurement::WallTime> {
+fn group<'a>(
+    c: &'a mut Criterion,
+    name: &str,
+) -> criterion::BenchmarkGroup<'a, criterion::measurement::WallTime> {
     let mut g = c.benchmark_group(name);
     g.sample_size(10).warm_up_time(Duration::from_secs(1));
     g
@@ -207,7 +207,9 @@ fn benches(c: &mut Criterion) {
     g.finish();
     let mut g = group(c, "cut/insert");
     for (f, _, cut) in &states {
-        g.bench_function(&f.name, |b| b.iter(|| insert(&f.mesh, cut).expect("insert")));
+        g.bench_function(&f.name, |b| {
+            b.iter(|| insert(&f.mesh, cut).expect("insert"))
+        });
     }
     g.finish();
     // `unwrap` of the inserted mesh with the cut as seams (the insertion itself is timed above).
