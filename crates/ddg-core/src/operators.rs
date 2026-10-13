@@ -3,7 +3,7 @@
 //! Conformal Flattening*, 2018), with the sign and normalization conventions of the repository's
 //! `CLAUDE.md`:
 //!
-//! * the Laplacian `L` is symmetric **positive semidefinite** with zero row sums;
+//! * the Laplacian `L` (and its per-vertex weighted variant) is symmetric **positive semidefinite** with zero row sums;
 //! * the lumped mass is offered both raw ([`lumped_mass`], `Σ m_i` = total area) and area
 //!   normalized ([`lumped_mass_normalized`], `Σ m_i = 1`) — normalization is the caller's
 //!   explicit choice;
@@ -36,16 +36,81 @@ use crate::topology::TriMesh;
 /// [formula: cotan-laplacian]
 pub fn cotan_laplacian(mesh: &TriMesh, geometry: &Geometry) -> Result<SparseMatrix, GeometryError> {
     geometry.check_mesh(mesh)?;
+    Ok(assemble_cotan(mesh, geometry, |_| 1.0))
+}
+
+/// The cotan Laplacian with a per-vertex weight `w`, as the sum of the stiffness matrices of the
+/// single faces, each scaled by the mean of `w` over its three vertices:
+///
+/// ```text
+/// L_w = Σ_f w̄_f · L_f,    w̄_f = (w_i + w_j + w_k) / 3,
+/// ```
+///
+/// where `L_f` is the cotan stiffness matrix of face `f` alone (the contribution of `f` to
+/// [`cotan_laplacian`]). This is the exact finite element matrix of `∫ w ∇f · ∇g` for
+/// piecewise linear `w`, `f`, `g`: the gradients are constant on a face and the integral of
+/// the linear function `w` over a triangle is its area times the mean of its vertex values.
+/// Since each `L_f` is positive semidefinite (it is the Dirichlet form of the interpolant on
+/// one triangle), `L_w` is positive semidefinite for every `w ≥ 0`, obtuse triangles
+/// included; the rule "multiply the cotangent of edge `ij` by `(w_i + w_j)/2`" has no such
+/// guarantee. With `w ≡ c` the result is `c L`.
+///
+/// Storage, symmetry (exact), zero row sums, sparsity pattern and explicit zeros are those of
+/// [`cotan_laplacian`].
+///
+/// # Errors
+/// [`GeometryError::MeshMismatch`] for a geometry of another mesh,
+/// [`GeometryError::WeightCountMismatch`] unless `w` has one entry per vertex, and
+/// [`GeometryError::InvalidWeight`] for the first weight that is negative, NaN or infinite.
+///
+/// [formula: cut-weighted-laplacian]
+pub fn cotan_laplacian_weighted(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    w: &[f64],
+) -> Result<SparseMatrix, GeometryError> {
+    geometry.check_mesh(mesh)?;
+    if w.len() != mesh.n_vertices() {
+        return Err(GeometryError::WeightCountMismatch {
+            expected: mesh.n_vertices(),
+            got: w.len(),
+        });
+    }
+    if let Some(vertex) = w.iter().position(|x| !(x.is_finite() && *x >= 0.0)) {
+        return Err(GeometryError::InvalidWeight {
+            vertex: vertex as u32,
+            weight: w[vertex],
+        });
+    }
+    let faces = mesh.faces();
+    Ok(assemble_cotan(mesh, geometry, |f| {
+        let [a, b, c] = faces[f];
+        (w[a as usize] + w[b as usize] + w[c as usize]) / 3.0
+    }))
+}
+
+/// Assembles `Σ_f scale(f) · L_f` (see [`cotan_laplacian`]); the mesh and geometry must match.
+fn assemble_cotan(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    scale: impl Fn(usize) -> f64,
+) -> SparseMatrix {
     let n = mesh.n_vertices();
     let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(6 * mesh.n_faces() + n);
     for v in 0..n as u32 {
         triplets.push((v, v, 0.0));
     }
-    for (face, cotans) in mesh.faces().iter().zip(geometry.corner_cotans()) {
+    for (f, (face, cotans)) in mesh
+        .faces()
+        .iter()
+        .zip(geometry.corner_cotans())
+        .enumerate()
+    {
+        let s = scale(f);
         for k in 0..3 {
             // The edge opposite corner k joins corners k + 1 and k + 2.
             let (i, j) = (face[(k + 1) % 3], face[(k + 2) % 3]);
-            let w = 0.5 * cotans[k];
+            let w = 0.5 * s * cotans[k];
             triplets.push((i, j, -w));
             triplets.push((j, i, -w));
         }
@@ -67,7 +132,7 @@ pub fn cotan_laplacian(mesh: &TriMesh, geometry: &Geometry) -> Result<SparseMatr
         }
         l.values_mut()[diagonal_slot] = -sum;
     }
-    Ok(l)
+    l
 }
 
 /// The lumped (barycentric) vertex masses `m_i = ⅓ Σ A_f` over the faces `f` at vertex `i`.

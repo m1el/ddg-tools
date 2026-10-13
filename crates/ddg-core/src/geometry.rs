@@ -68,6 +68,20 @@ pub enum GeometryError {
         /// `(n_edges, n_faces)` of the geometry.
         geometry: (usize, usize),
     },
+    /// The number of per-vertex weights is not the number of mesh vertices.
+    WeightCountMismatch {
+        /// Number of vertices of the mesh.
+        expected: usize,
+        /// Number of weights passed.
+        got: usize,
+    },
+    /// A per-vertex weight is negative, NaN or infinite.
+    InvalidWeight {
+        /// The vertex.
+        vertex: u32,
+        /// Its weight.
+        weight: f64,
+    },
 }
 
 /// A face whose edge lengths do not form a triangle of positive area.
@@ -174,6 +188,14 @@ impl fmt::Display for GeometryError {
                 "geometry does not belong to this mesh: the mesh has {} edges and {} faces, the \
                  geometry {} edges and {} faces",
                 mesh.0, mesh.1, geometry.0, geometry.1
+            ),
+            GeometryError::WeightCountMismatch { expected, got } => write!(
+                f,
+                "the mesh has {expected} vertices but {got} vertex weights were given"
+            ),
+            GeometryError::InvalidWeight { vertex, weight } => write!(
+                f,
+                "vertex {vertex} has weight {weight}, which is negative or not finite"
             ),
         }
     }
