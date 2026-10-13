@@ -102,6 +102,7 @@
 #![warn(missing_docs)]
 
 pub mod cones;
+pub mod cutting;
 pub mod error;
 pub mod flatten;
 pub mod input;

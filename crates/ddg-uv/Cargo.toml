@@ -12,6 +12,8 @@ rust-version.workspace = true
 ddg-core = { path = "../ddg-core" }
 ddg-bff = { path = "../ddg-bff" }
 ddg-optimal-cones = { path = "../ddg-optimal-cones" }
+# The cut flow (Sharp, Crane 2018): src/cutting wraps it for polygon meshes.
+ddg-variational-cuts = { path = "../ddg-variational-cuts" }
 
 [dev-dependencies]
 proptest = "1"
