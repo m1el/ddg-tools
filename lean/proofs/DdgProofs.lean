@@ -23,3 +23,11 @@ import DdgProofs.Bff.Quality
 import DdgProofs.MeshProblem
 import DdgProofs.BoundaryProblem
 import DdgProofs.FactorOnce
+import DdgProofs.Cuts.Crossing
+import DdgProofs.Cuts.Curvature
+import DdgProofs.Cuts.Weighted
+import DdgProofs.Cuts.Dirichlet
+import DdgProofs.Cuts.Step
+import DdgProofs.Cuts.Recovery
+import DdgProofs.Cuts.Redistance
+import DdgProofs.Cuts.Analytic

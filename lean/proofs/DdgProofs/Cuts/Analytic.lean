@@ -540,6 +540,56 @@ theorem hasDerivAt_circle_lengthEnergy {ρ₀ α t : ℝ} (h : 0 < ρ₀ ^ 2 - 2
   refine (((hasDerivAt_shrinkRadius h).const_mul (2 * π)).const_mul α).congr_deriv ?_
   field_simp
 
+/-! ## The same shape derivatives through the oracle's densities
+
+The Rust code evaluates the gradient densities with the oracle's `gradDirichletD`, `gradScaledD`,
+`gradPointwiseD` at recovered normal derivatives `d ≈ ∂u/∂n`, `e ≈ ∂p/∂n` (SPEC §3.6). On the
+closed-form solutions, with the exact derivatives in place of the recovered ones, these densities
+integrated over the boundary are the derivatives of the energies. -/
+
+/-- Disk, Dirichlet energy: `dJ/dρ = gradDirichletD(u′(ρ)) · 2πρ`.
+
+[formula: cut-gradient-dirichlet] -/
+theorem hasDerivAt_disk_dirichletEnergy_density (K ρ : ℝ) :
+    HasDerivAt (fun ρ' : ℝ => ∫ r in (0 : ℝ)..ρ', deriv (diskU K ρ') r ^ 2 * (2 * π * r))
+      (Ddg.gradDirichletD (deriv (diskU K ρ) ρ) * (2 * π * ρ)) ρ := by
+  rw [gradDirichletD_eq]
+  exact hasDerivAt_disk_dirichletEnergy K ρ
+
+/-- Disk, scaled Dirichlet energy with a constant weight `c` (adjoint `p = −2c·u`):
+`d(cJ)/dρ = gradScaledD c u′(ρ) p′(ρ) · 2πρ`.
+
+[formula: cut-gradient-scaled] -/
+theorem hasDerivAt_disk_scaledEnergy_density (K c ρ : ℝ) :
+    HasDerivAt
+      (fun ρ' : ℝ => c * ∫ r in (0 : ℝ)..ρ', deriv (diskU K ρ') r ^ 2 * (2 * π * r))
+      (Ddg.gradScaledD c (deriv (diskU K ρ) ρ) (deriv (fun r => -2 * c * diskU K ρ r) ρ) *
+        (2 * π * ρ)) ρ := by
+  rw [gradScaledD_eq]
+  exact hasDerivAt_disk_scaledEnergy K c ρ
+
+/-- Disk, Hencky energy `b(u) = u²` (`b(0) = 0`, adjoint `diskP`):
+`dJ/dρ = gradPointwiseD b(0) u′(ρ) p′(ρ) · 2πρ`.
+
+[formula: cut-gradient-pointwise] -/
+theorem hasDerivAt_disk_henckyEnergy_density (K ρ : ℝ) :
+    HasDerivAt (fun ρ' : ℝ => ∫ r in (0 : ℝ)..ρ', diskU K ρ' r ^ 2 * (2 * π * r))
+      (Ddg.gradPointwiseD ((0 : ℝ) ^ 2) (deriv (diskU K ρ) ρ) (deriv (diskP K ρ) ρ) *
+        (2 * π * ρ)) ρ := by
+  rw [gradPointwiseD_eq]
+  have h := hasDerivAt_disk_henckyEnergy K ρ
+  rw [diskU_boundary] at h
+  exact h
+
+/-- Spherical cap, Dirichlet energy: `dJ/dψ₀ = gradDirichletD(u′(ψ₀)) · 2π sin ψ₀`.
+
+[formula: cut-gradient-dirichlet] -/
+theorem hasDerivAt_capEnergy_density {ψ₀ : ℝ} (h : ψ₀ ∈ Set.Ioo (-π) π) :
+    HasDerivAt (fun ψ₁ : ℝ => ∫ ψ in (0 : ℝ)..ψ₁, deriv (capU ψ₁) ψ ^ 2 * (2 * π * Real.sin ψ))
+      (Ddg.gradDirichletD (deriv (capU ψ₀) ψ₀) * (2 * π * Real.sin ψ₀)) ψ₀ := by
+  rw [gradDirichletD_eq]
+  exact hasDerivAt_capEnergy_integral h
+
 end Cuts
 
 end DdgProofs
