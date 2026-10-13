@@ -14,6 +14,7 @@ Rust implementations of discrete differential geometry papers, with Blender add-
   `SPEC.md` is the discrete method and lists every difference from the paper as printed).
 
 See `CLAUDE.md` for the repository layout and the mathematical conventions shared by all crates.
+`ROADMAP.md` lists what is scheduled next and the known gaps.
 
 ## License
 
