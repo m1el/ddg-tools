@@ -345,12 +345,12 @@ impl IntrinsicTriangulation {
         self.move_halfedge(3 * f + 2, 3 * f2);
         self.faces[f] = [a, b, p];
         // b → p in f and p → b in f1; c → p in f1 and p → c in f2; a → p in f2 and p → a in f.
+        let ea = self.push_edge(d[0], 3 * f2 + 1, NONE);
+        self.pair(3 * f2 + 1, (3 * f + 2) as u32, ea);
         let eb = self.push_edge(d[1], 3 * f + 1, NONE);
         self.pair(3 * f + 1, (3 * f1 + 2) as u32, eb);
         let ec = self.push_edge(d[2], 3 * f1 + 1, NONE);
         self.pair(3 * f1 + 1, (3 * f2 + 2) as u32, ec);
-        let ea = self.push_edge(d[0], 3 * f2 + 1, NONE);
-        self.pair(3 * f2 + 1, (3 * f + 2) as u32, ea);
         self.vertex_halfedge.push((3 * f + 2) as u32);
         self.angle_sums.push(TAU);
         self.locations.push(placed.location);

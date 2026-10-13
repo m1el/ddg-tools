@@ -124,7 +124,11 @@ impl IntrinsicTriangulation {
             None,
         )?
         .trace;
-        if trace.stop != TraceStop::Completed {
+        // A point of a boundary edge: the path may reach the boundary a rounding error before
+        // its full length. It has then arrived.
+        let arrived = trace.stop == TraceStop::Completed
+            || (trace.stop == TraceStop::Boundary && length - trace.length <= 1e-9 * length);
+        if !arrived {
             return Err(IntrinsicError::InvalidPoint {
                 point: what,
                 reason: "the path to the point over the input mesh left the surface or ran into \
@@ -386,7 +390,11 @@ impl IntrinsicTriangulation {
     /// must arrive at the place of the second within `options.tolerance` times its length.
     ///
     /// A node must not be an end of an edge or a corner in disguise (`t` of 0 or 1, a
-    /// barycentric coordinate of 1): use the vertex.
+    /// barycentric coordinate of 1): use the vertex. In a face that uses a vertex or an edge
+    /// twice, a node given as that vertex or as a point of that edge is taken at the first
+    /// corner or side of the face that fits; a simplicial triangulation
+    /// ([`export_simplicial`](Self::export_simplicial)) has no such faces, and
+    /// [`segment_on_input`](Self::segment_on_input) takes barycentric coordinates.
     ///
     /// # Errors
     /// [`IntrinsicError::InvalidPoint`] for a node that does not exist or does not lie in the
@@ -435,11 +443,6 @@ impl IntrinsicTriangulation {
                 }
             });
         }
-        let mesh = self.input.mesh();
-        let trace_options = TraceOptions {
-            record_crossings: true,
-            max_crossings: options.max_crossings,
-        };
         let mut paths = Vec::with_capacity(segments.len());
         let mut max_relative_mismatch = 0.0f64;
         for segment in segments {
@@ -464,78 +467,11 @@ impl IntrinsicTriangulation {
             let v = triangle_layout(self.face_lengths(f)).ok_or_else(|| self.degenerate(f))?;
             let (p, kind) = self.node_in_face(f, &v, nodes[from])?;
             let (q, _) = self.node_in_face(f, &v, nodes[to])?;
+            let path =
+                self.segment_path(f, &v, (kind, p, located[from]), (q, located[to]), options)?;
             let d = [q[0] - p[0], q[1] - p[1]];
-            let length = d[0].hypot(d[1]);
-            if length <= 0.0 || length.is_nan() {
-                return Err(IntrinsicError::InvalidLength { length });
-            }
-            // The direction of the segment in the frame of the face, then in the frame of the
-            // place of its start on the input mesh.
-            let in_face = d[1].atan2(d[0]);
-            let direction = match kind {
-                NodeKind::Corner(k) => {
-                    let vertex = self.faces[f][k] as usize;
-                    self.direction_on_input(vertex, self.direction_from_corner(f, k, &v, q))
-                }
-                NodeKind::Side { slot, forward } => {
-                    let s = [
-                        v[(slot + 1) % 3][0] - v[slot][0],
-                        v[(slot + 1) % 3][1] - v[slot][1],
-                    ];
-                    let along = s[1].atan2(s[0]) + if forward { 0.0 } else { PI };
-                    wrap(located[from].zero + in_face - along)
-                }
-                NodeKind::Inside => wrap(located[from].zero + in_face),
-            };
-            let tolerance = options.tolerance * length;
-            let target = Target {
-                point: located[to].point,
-                tolerance,
-            };
-            let outcome = run(
-                &*self.input,
-                located[from].point,
-                direction,
-                length,
-                &trace_options,
-                Some(target),
-            )?;
-            let Some(mismatch) = outcome.mismatch else {
-                return Err(IntrinsicError::SegmentTrace {
-                    face: segment.face,
-                    length,
-                    tolerance,
-                    mismatch: outcome.closest,
-                });
-            };
-            max_relative_mismatch = max_relative_mismatch.max(mismatch / length);
-            let trace = outcome.trace;
-            let mut points = Vec::with_capacity(trace.crossings.len() + 2);
-            let mut faces = Vec::with_capacity(trace.crossings.len() + 1);
-            points.push(located[from].point);
-            let mut face = match (trace.first_face, trace.along_edge) {
-                (Some(face), _) => face,
-                (None, Some(edge)) => (mesh.edge_halfedge(edge as usize) / 3) as u32,
-                (None, None) => 0,
-            };
-            for crossing in &trace.crossings {
-                faces.push(face);
-                points.push(SurfacePoint::Edge {
-                    edge: crossing.edge,
-                    t: crossing.t,
-                });
-                // The path goes on in the face on the other side of the crossed halfedge.
-                face = mesh
-                    .twin(crossing.halfedge as usize)
-                    .map_or(face, |t| (t / 3) as u32);
-            }
-            faces.push(face);
-            points.push(located[to].point);
-            paths.push(PathOnInput {
-                points,
-                faces,
-                mismatch,
-            });
+            max_relative_mismatch = max_relative_mismatch.max(path.mismatch / d[0].hypot(d[1]));
+            paths.push(path);
         }
         Ok(PathsOnInput {
             nodes: located.iter().map(|l| l.point).collect(),
@@ -544,16 +480,109 @@ impl IntrinsicTriangulation {
         })
     }
 
+    /// Traces the segment of face `f` (layout `v`) from the point `p` to the point `q` over
+    /// the input mesh, from the place of `p` to the place of `q`.
+    fn segment_path(
+        &self,
+        f: usize,
+        v: &[[f64; 2]; 3],
+        (kind, p, from): (NodeKind, [f64; 2], Located),
+        (q, to): ([f64; 2], Located),
+        options: &EdgeTraceOptions,
+    ) -> Result<PathOnInput, IntrinsicError> {
+        let mesh = self.input.mesh();
+        let d = [q[0] - p[0], q[1] - p[1]];
+        let length = d[0].hypot(d[1]);
+        if length <= 0.0 || length.is_nan() {
+            return Err(IntrinsicError::InvalidLength { length });
+        }
+        // The direction of the segment in the frame of the face, then in the frame of the
+        // place of its start on the input mesh.
+        let in_face = d[1].atan2(d[0]);
+        let direction = match kind {
+            NodeKind::Corner(k) => {
+                let vertex = self.faces[f][k] as usize;
+                self.direction_on_input(vertex, self.direction_from_corner(f, k, v, q))
+            }
+            NodeKind::Side { slot, forward } => {
+                let s = [
+                    v[(slot + 1) % 3][0] - v[slot][0],
+                    v[(slot + 1) % 3][1] - v[slot][1],
+                ];
+                let along = s[1].atan2(s[0]) + if forward { 0.0 } else { PI };
+                wrap(from.zero + in_face - along)
+            }
+            NodeKind::Inside => wrap(from.zero + in_face),
+        };
+        let tolerance = options.tolerance * length;
+        let target = Target {
+            point: to.point,
+            tolerance,
+        };
+        let trace_options = TraceOptions {
+            record_crossings: true,
+            max_crossings: options.max_crossings,
+        };
+        let outcome = run(
+            &*self.input,
+            from.point,
+            direction,
+            length,
+            &trace_options,
+            Some(target),
+        )?;
+        let Some(mismatch) = outcome.mismatch else {
+            return Err(IntrinsicError::SegmentTrace {
+                face: f as u32,
+                length,
+                tolerance,
+                mismatch: outcome.closest,
+            });
+        };
+        let trace = outcome.trace;
+        let mut points = Vec::with_capacity(trace.crossings.len() + 2);
+        let mut faces = Vec::with_capacity(trace.crossings.len() + 1);
+        points.push(from.point);
+        let mut face = match (trace.first_face, trace.along_edge) {
+            (Some(face), _) => face,
+            (None, Some(edge)) => (mesh.edge_halfedge(edge as usize) / 3) as u32,
+            (None, None) => 0,
+        };
+        for crossing in &trace.crossings {
+            faces.push(face);
+            points.push(SurfacePoint::Edge {
+                edge: crossing.edge,
+                t: crossing.t,
+            });
+            // The path goes on in the face on the other side of the crossed halfedge.
+            face = mesh
+                .twin(crossing.halfedge as usize)
+                .map_or(face, |t| (t / 3) as u32);
+        }
+        faces.push(face);
+        points.push(to.point);
+        Ok(PathOnInput {
+            points,
+            faces,
+            mismatch,
+        })
+    }
+
     /// The straight segment between two points of face `f` of the triangulation, given in
     /// barycentric coordinates, as a path over the input mesh: the ordered points where it
     /// crosses input edges, between the places of its two ends, and the input face of every
-    /// piece ([`segments_on_input`](Self::segments_on_input) for a single segment). A point
-    /// with a barycentric coordinate of exactly zero is taken as a point of that side of the
-    /// face, one with two zeros as the corner.
+    /// piece. A point with a barycentric coordinate of exactly zero is a point of that side
+    /// of the face, one with two zeros is that corner (in a face that uses a vertex twice the
+    /// coordinates say which corner is meant, which a vertex id could not).
+    ///
+    /// The path is traced over the input mesh from the place of the first point and must
+    /// arrive at the place of the second, found independently, within `options.tolerance`
+    /// times the length of the segment.
     ///
     /// # Errors
-    /// As [`segments_on_input`](Self::segments_on_input); [`IntrinsicError::InvalidLength`]
-    /// if the two points coincide.
+    /// [`IntrinsicError::InvalidPoint`], [`IntrinsicError::InvalidOptions`],
+    /// [`IntrinsicError::InvalidLength`] if the two points coincide, and
+    /// [`IntrinsicError::SegmentTrace`] if the trace does not arrive.
     pub fn segment_on_input(
         &self,
         f: usize,
@@ -561,36 +590,52 @@ impl IntrinsicTriangulation {
         to: [f64; 3],
         options: &EdgeTraceOptions,
     ) -> Result<PathOnInput, IntrinsicError> {
-        let node = |bary: [f64; 3]| -> Result<SurfacePoint, IntrinsicError> {
-            let point = SurfacePoint::Face {
+        if !(options.tolerance.is_finite() && options.tolerance >= 0.0) {
+            return Err(IntrinsicError::InvalidOptions {
+                reason: format!(
+                    "the tolerance of a segment trace must be finite and not negative, got {}",
+                    options.tolerance
+                ),
+            });
+        }
+        for bary in [from, to] {
+            self.check_point(SurfacePoint::Face {
                 face: f as u32,
                 bary,
-            };
-            self.check_point(point)?;
+            })?;
+        }
+        let v = triangle_layout(self.face_lengths(f)).ok_or_else(|| self.degenerate(f))?;
+        let end = |bary: [f64; 3]| -> Result<(NodeKind, [f64; 2], Located), IntrinsicError> {
+            let p = [
+                bary[1] * v[1][0] + bary[2] * v[2][0],
+                bary[1] * v[1][1] + bary[2] * v[2][1],
+            ];
             let zeros: Vec<usize> = (0..3).filter(|&k| bary[k] == 0.0).collect();
             Ok(match zeros[..] {
-                [i, j] => SurfacePoint::Vertex(self.faces[f][3 - i - j]),
+                [i, j] => {
+                    let k = 3 - i - j;
+                    let located = Located {
+                        point: self.locations[self.faces[f][k] as usize],
+                        zero: 0.0,
+                    };
+                    (NodeKind::Corner(k), v[k], located)
+                }
                 [k] => {
                     // On the side opposite corner k: halfedge k + 1.
-                    let h = 3 * f + (k + 1) % 3;
-                    let edge = self.halfedge_edge[h];
+                    let slot = (k + 1) % 3;
+                    let h = 3 * f + slot;
+                    let edge = self.halfedge_edge[h] as usize;
                     let th = bary[(k + 2) % 3] / (bary[(k + 1) % 3] + bary[(k + 2) % 3]);
-                    let forward = self.edge_halfedge[edge as usize] as usize == h;
-                    SurfacePoint::Edge {
-                        edge,
-                        t: if forward { th } else { 1.0 - th },
-                    }
+                    let forward = self.edge_halfedge[edge] as usize == h;
+                    let located = self.locate_on_edge(edge, if forward { th } else { 1.0 - th })?;
+                    (NodeKind::Side { slot, forward }, p, located)
                 }
-                _ => point,
+                _ => (NodeKind::Inside, p, self.locate_in_face(f, bary)?),
             })
         };
-        let nodes = [node(from)?, node(to)?];
-        let segment = Segment {
-            face: f as u32,
-            nodes: [0, 1],
-        };
-        let mut result = self.segments_on_input(&nodes, &[segment], options)?;
-        Ok(result.paths.swap_remove(0))
+        let (kind, p, from) = end(from)?;
+        let (_, q, to) = end(to)?;
+        self.segment_path(f, &v, (kind, p, from), (q, to), options)
     }
 }
 

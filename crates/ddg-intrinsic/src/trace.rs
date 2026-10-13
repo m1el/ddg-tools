@@ -137,6 +137,17 @@ fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
     [a[0] - b[0], a[1] - b[1]]
 }
 
+/// Where in its first face a path starts, for recognizing a path along an edge of that face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    /// At the corner in this slot.
+    Corner(usize),
+    /// On the side in this slot.
+    Side(usize),
+    /// Inside the face, or in a face the path has entered.
+    Elsewhere,
+}
+
 /// How the path leaves the face it is in.
 #[derive(Debug, Clone, Copy)]
 enum Exit {
@@ -319,7 +330,7 @@ impl<S: Surface> Walker<'_, S> {
             .ok_or_else(|| self.degenerate(face))?;
         q[(k + 2) % 3] = apex;
         self.first_face = Some(face as u32);
-        if let Some(done) = self.meet_target(face, &q, Some(k))? {
+        if let Some(done) = self.meet_target(face, &q, Origin::Corner(k))? {
             return Ok(done);
         }
         // Directions within rounding of a side of the corner run along that side.
@@ -383,7 +394,7 @@ impl<S: Surface> Walker<'_, S> {
             .ok_or_else(|| self.degenerate(face))?;
         q[(k + 2) % 3] = apex;
         self.first_face = Some(face as u32);
-        if let Some(done) = self.meet_target(face, &q, None)? {
+        if let Some(done) = self.meet_target(face, &q, Origin::Side(k))? {
             return Ok(done);
         }
         let exit = Self::exit_after_entry(k, apex);
@@ -414,7 +425,7 @@ impl<S: Surface> Walker<'_, S> {
             [d[0] * cos + d[1] * sin, -d[0] * sin + d[1] * cos]
         });
         self.first_face = Some(face as u32);
-        if let Some(done) = self.meet_target(face, &q, None)? {
+        if let Some(done) = self.meet_target(face, &q, Origin::Elsewhere)? {
             return Ok(done);
         }
         // The path leaves through the edge that crosses the axis upwards.
@@ -522,7 +533,7 @@ impl<S: Surface> Walker<'_, S> {
             q[k] = head;
             q[(k + 1) % 3] = tail;
             q[(k + 2) % 3] = apex;
-            if let Some(done) = self.meet_target(face, &q, None)? {
+            if let Some(done) = self.meet_target(face, &q, Origin::Elsewhere)? {
                 return Ok(done);
             }
             exit = Self::exit_after_entry(k, apex);
@@ -590,13 +601,14 @@ impl<S: Surface> Walker<'_, S> {
     }
 
     /// If the target lies in `face` within its tolerance of the end of the path, the path
-    /// ends there. `origin_slot` is the corner the path starts from, which is not a place to
-    /// arrive at.
+    /// ends there. `origin` says where the path starts if this is its first face: a corner
+    /// it starts from is not a place to arrive at, and a target on an edge of the face that
+    /// the start lies on means that the path runs along that edge.
     fn meet_target(
         &mut self,
         face: usize,
         q: &[[f64; 2]; 3],
-        origin_slot: Option<usize>,
+        origin: Origin,
     ) -> Result<Option<Outcome>, IntrinsicError> {
         let s = self.s;
         let Some(target) = self.target else {
@@ -613,7 +625,7 @@ impl<S: Surface> Walker<'_, S> {
         match target.point {
             SurfacePoint::Vertex(v) => {
                 for (k, &corner) in q.iter().enumerate() {
-                    if s.tail(3 * face + k) == v && origin_slot != Some(k) {
+                    if s.tail(3 * face + k) == v && origin != Origin::Corner(k) {
                         consider(distance(corner), k);
                     }
                 }
@@ -664,18 +676,20 @@ impl<S: Surface> Walker<'_, S> {
             }
             SurfacePoint::Face { .. } => Self::back_direction_in_face(q),
         };
-        // A target met at a corner next to the corner the path starts from lies on the edge
-        // between the two: the path runs along that edge.
-        let along_edge = origin_slot.and_then(|o| {
-            matches!(target.point, SurfacePoint::Vertex(_)).then(|| {
-                let h = if slot == (o + 1) % 3 {
-                    3 * face + o
-                } else {
-                    3 * face + slot
-                };
-                s.edge(h)
-            })
-        });
+        // A target on an edge of the face that the start lies on too: the path runs along
+        // that edge. `slot` is the corner of a vertex target, the side of an edge target.
+        let on_vertex = matches!(target.point, SurfacePoint::Vertex(_));
+        let on_edge = matches!(target.point, SurfacePoint::Edge { .. });
+        let along_edge = match origin {
+            // The sides at corner o are o (leaving) and o + 2 (arriving).
+            Origin::Corner(o) if on_vertex => Some(if slot == (o + 1) % 3 { o } else { slot }),
+            Origin::Corner(o) if on_edge && (slot == o || slot == (o + 2) % 3) => Some(slot),
+            // The ends of side k are the corners k and k + 1.
+            Origin::Side(k) if on_vertex && (slot == k || slot == (k + 1) % 3) => Some(k),
+            Origin::Side(k) if on_edge && slot == k => Some(k),
+            _ => None,
+        }
+        .map(|side| s.edge(3 * face + side));
         if along_edge.is_some() {
             self.first_face = None;
         }
