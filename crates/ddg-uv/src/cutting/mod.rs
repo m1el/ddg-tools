@@ -82,4 +82,4 @@ pub use describe::{CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathE
 pub use endtoend::{ConePlacement, CutUnwrap, CutUnwrapOptions, unwrap_with_cut};
 pub use error::CuttingError;
 pub use insert::{Inserted, VertexSource, insert};
-pub use session::{DEFAULT_CROSSING_OFFSET, PreviewPolyline, Session, Start};
+pub use session::{DEFAULT_CROSSING_OFFSET, FlowKind, PreviewPolyline, Session, Start};

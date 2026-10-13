@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use ddg_core::io::read_obj;
 use ddg_uv::cutting::{
-    ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
+    ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET, FlowKind,
     EdgePoint, Inserted, InteriorPoint, PathEnd, PolygonPath, Session, Start, VertexSource, insert,
     unwrap_with_cut,
 };
@@ -114,6 +114,19 @@ fn check_insertion(old: &PolygonMesh, old_seams: &[[u32; 2]], cut: &CutOnPolygon
                 let [a, b] = cut.edge_points[i as usize].edge;
                 let d = segment_distance(x, old.positions[a as usize], old.positions[b as usize]);
                 assert!(d < 1e-12, "edge point {i} is {d} off its edge");
+            }
+            VertexSource::Junction(j) => {
+                let junction = &cut.junctions[j as usize];
+                // Inside its triangle, at its barycentric position.
+                let c = junction
+                    .corners
+                    .map(|c| old.positions[old.corner_vertices[c as usize] as usize]);
+                let w = junction.barycentric;
+                for d in 0..3 {
+                    let expected = w[0] * c[0][d] + w[1] * c[1][d] + w[2] * c[2][d];
+                    assert!((x[d] - expected).abs() < 1e-12);
+                }
+                assert!(w.iter().all(|&b| b > 0.0));
             }
             VertexSource::Interior { path, index } => {
                 let point = &cut.paths[path as usize].interior[index as usize];
@@ -418,12 +431,13 @@ fn every_error_names_what_is_wrong() {
         Session::new(&input, 1, &circle),
         Err(CuttingError::TooFewRegions { got: 1 })
     ));
+    // Three regions are available now, but a circle starts two.
     let e = Session::new(&input, 3, &circle).unwrap_err();
+    assert!(matches!(e, CuttingError::InvalidOption { name: "start", .. }), "{e}");
     assert!(matches!(
-        e,
-        CuttingError::RegionsNotAvailable { n_regions: 3 }
+        Session::new_with(&input, 3, &Start::NormalClusters { max_iterations: 5 }, FlowKind::TwoRegion),
+        Err(CuttingError::InvalidOption { name: "kind", .. })
     ));
-    assert!(e.to_string().contains("not available"), "{e}");
     // Starts.
     let bad = |start: Start| Session::new(&input, 2, &start).unwrap_err();
     assert!(matches!(
@@ -659,12 +673,20 @@ fn insert_refuses_descriptions_that_do_not_fit() {
         matches!(e, CuttingError::InvalidDescription { polygon: Some(p), .. } if p == other),
         "{e}"
     );
-    // A junction is not available yet.
+    // A junction that does not exist, or one that is not where the path is.
     let mut cut = good.clone();
-    cut.junctions
-        .push(ddg_uv::cutting::JunctionPoint { position: [0.0; 3] });
     cut.paths[0].end = PathEnd::Junction(0);
-    assert!(matches!(fails(&cut), CuttingError::Unsupported { .. }));
+    assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    let corners = mesh.triangles[0].map(|c| c);
+    cut.junctions.push(ddg_uv::cutting::JunctionPoint {
+        position: [0.0; 3],
+        polygon: 0,
+        triangle: 0,
+        corners,
+        barycentric: [0.2, 0.3, 0.5],
+    });
+    let e = fails(&cut);
+    assert!(e.to_string().contains("junction"), "{e}");
     // An end that does not exist.
     let mut cut = good.clone();
     cut.paths[0].start = PathEnd::EdgePoint(99_999);

@@ -41,6 +41,9 @@ pub enum VertexSource {
     /// An edge point (an index into [`CutOnPolygons::edge_points`]); for a point shared by the
     /// two sides of a seam, the first of the two.
     EdgePoint(u32),
+    /// A junction (an index into [`CutOnPolygons::junctions`]): a vertex inside a triangle of
+    /// its polygon where three paths meet.
+    Junction(u32),
     /// An interior point: the `index`-th interior point of path `path`.
     Interior {
         /// The path (an index into [`CutOnPolygons::paths`]).
@@ -64,6 +67,8 @@ pub struct Inserted {
     pub vertex_source: Vec<VertexSource>,
     /// For every edge point, its vertex.
     pub edge_point_vertex: Vec<u32>,
+    /// For every junction, its vertex.
+    pub junction_vertex: Vec<u32>,
     /// For every path, the vertices of its points in order, from the start to the end.
     pub path_vertices: Vec<Vec<u32>>,
     /// Number of vertices of the old mesh.
@@ -199,8 +204,20 @@ impl Dsu {
 #[derive(Debug, Clone, Copy)]
 struct PathPointRef {
     vertex: u32,
-    /// The triangulation edge it lies on, as two polygon corners `(lower, higher)`.
-    edge: (u32, u32),
+    /// The triangulation edge it lies on, as two polygon corners `(lower, higher)`; `None` for
+    /// a junction.
+    edge: Option<(u32, u32)>,
+    /// For a junction, its triangle (an index into the polygon's triangles).
+    junction_triangle: Option<usize>,
+}
+
+/// A triangle with a junction inside: the vertex `q[k]` of the path on its side `k` (from
+/// `corners[k]` to `corners[k + 1]`) and the junction `j`.
+#[derive(Debug, Clone, Copy)]
+struct TripleTriangle {
+    corners: [u32; 3],
+    q: [u32; 3],
+    j: u32,
 }
 
 /// A triangle of the polygon that a path cuts: corners rotated so that the apex is first, the
@@ -363,6 +380,48 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         }
     }
 
+    // ----- junctions -----
+    let mut junction_vertex: Vec<u32> = Vec::with_capacity(cut.junctions.len());
+    for (j, junction) in cut.junctions.iter().enumerate() {
+        let pol = junction.polygon;
+        let bad = |problem: String| invalid(Some(pol), format!("junction {j}: {problem}"));
+        if pol as usize >= n_polygons {
+            return Err(invalid(
+                None,
+                format!("junction {j} is in polygon {pol}, but there are {n_polygons} polygons"),
+            ));
+        }
+        let Some(triangle) = mesh.triangles.get(junction.triangle as usize) else {
+            return Err(bad(format!(
+                "the triangle {} does not exist ({} triangles)",
+                junction.triangle,
+                mesh.triangles.len()
+            )));
+        };
+        if *triangle != junction.corners || corner_polygon[triangle[0] as usize] != pol {
+            return Err(bad(format!(
+                "triangle {} has the corners {:?} in polygon {}, not {:?} in polygon {pol}",
+                junction.triangle,
+                triangle,
+                corner_polygon[triangle[0] as usize],
+                junction.corners
+            )));
+        }
+        let w = junction.barycentric;
+        if !(w.iter().all(|x| x.is_finite() && *x > 0.0) && (w.iter().sum::<f64>() - 1.0).abs() <= 1e-9)
+        {
+            return Err(bad(format!(
+                "the barycentric coordinates {w:?} must be positive and sum to 1 (to 1e-9)"
+            )));
+        }
+        junction_vertex.push(vertex_source.len() as u32);
+        vertex_source.push(VertexSource::Junction(j as u32));
+        let x = junction
+            .corners
+            .map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
+        positions.push([0, 1, 2].map(|d| w[0] * x[0][d] + w[1] * x[1][d] + w[2] * x[2][d]));
+    }
+
     // ----- paths -----
     let mut path_vertices: Vec<Vec<u32>> = Vec::with_capacity(cut.paths.len());
     let mut paths_of_polygon: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
@@ -403,12 +462,24 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
                     }
                 }
                 PathEnd::Junction(i) => {
-                    return Err(CuttingError::Unsupported {
-                        what: format!(
-                            "path {k} of polygon {pol} {name}s at junction {i}; junctions of \
-                             three or more regions are not inserted yet"
-                        ),
-                    });
+                    let junction = cut.junctions.get(i as usize).ok_or_else(|| {
+                        invalid(
+                            Some(pol),
+                            format!("path {k} {name}s at junction {i}, which does not exist"),
+                        )
+                    })?;
+                    if junction.polygon != pol {
+                        return Err(invalid(
+                            Some(pol),
+                            format!(
+                                "path {k} {name}s at junction {i}, which is in polygon {}",
+                                junction.polygon
+                            ),
+                        ));
+                    }
+                    if name == "start" {
+                        ids.push(junction_vertex[i as usize]);
+                    }
                 }
             }
         }
@@ -451,8 +522,9 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
                 [c0, c1].map(|c| mesh.positions[mesh.corner_vertices[c as usize] as usize]);
             positions.push([0, 1, 2].map(|d| (1.0 - point.t) * xa[d] + point.t * xb[d]));
         }
-        if let PathEnd::EdgePoint(i) = path.end {
-            path_vertices[k].push(edge_point_vertex[i as usize]);
+        match path.end {
+            PathEnd::EdgePoint(i) => path_vertices[k].push(edge_point_vertex[i as usize]),
+            PathEnd::Junction(i) => path_vertices[k].push(junction_vertex[i as usize]),
         }
     }
 
@@ -561,6 +633,7 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         polygon_parent,
         vertex_source,
         edge_point_vertex,
+        junction_vertex,
         path_vertices,
         n_old_vertices: n_vertices,
         edge_chains,
@@ -631,22 +704,40 @@ impl PolygonContext<'_> {
 
         // Segments: which triangle each path crosses between two consecutive points.
         let mut cut_tri: Vec<Option<CutTriangle>> = vec![None; triangles.len()];
+        let mut triple_tri: Vec<Option<TripleTriangle>> = vec![None; triangles.len()];
         for &k in paths {
             let path = &self.cut.paths[k];
             let ids = &self.path_vertices[k];
             let mut points: Vec<PathPointRef> = Vec::with_capacity(ids.len());
             for (j, &vertex) in ids.iter().enumerate() {
+                let mut junction_triangle = None;
                 let edge = if j == 0 || j + 1 == ids.len() {
                     let end = if j == 0 { path.start } else { path.end };
-                    let PathEnd::EdgePoint(i) = end else {
-                        return Err(internal("a junction reached the insertion"));
-                    };
-                    edge_corners(self.cut.edge_points[i as usize].edge).ok_or_else(|| {
-                        invalid(
-                            Some(p),
-                            format!("path {k}: edge point {i} is not on an edge of the polygon"),
-                        )
-                    })?
+                    match end {
+                        PathEnd::EdgePoint(i) => Some(
+                            edge_corners(self.cut.edge_points[i as usize].edge).ok_or_else(
+                                || {
+                                    invalid(
+                                        Some(p),
+                                        format!(
+                                            "path {k}: edge point {i} is not on an edge of the polygon"
+                                        ),
+                                    )
+                                },
+                            )?,
+                        ),
+                        PathEnd::Junction(i) => {
+                            let corners = self.cut.junctions[i as usize].corners;
+                            junction_triangle = triangles.iter().position(|t| *t == corners);
+                            if junction_triangle.is_none() {
+                                return Err(invalid(
+                                    Some(p),
+                                    format!("path {k}: the triangle of junction {i} is not a triangle of the polygon"),
+                                ));
+                            }
+                            None
+                        }
+                    }
                 } else {
                     let [c0, c1] = path.interior[j - 1].corners;
                     if !tri_of_edge.contains_key(&(c0, c1)) || is_polygon_edge(c0, c1) {
@@ -659,36 +750,75 @@ impl PolygonContext<'_> {
                             ),
                         ));
                     }
-                    (c0, c1)
+                    Some((c0, c1))
                 };
-                points.push(PathPointRef { vertex, edge });
+                points.push(PathPointRef {
+                    vertex,
+                    edge,
+                    junction_triangle,
+                });
             }
             for w in points.windows(2) {
                 let (x, y) = (w[0], w[1]);
-                if x.edge == y.edge {
+                // A segment that ends at a junction: one of the three arms of its triangle.
+                if x.junction_triangle.is_some() || y.junction_triangle.is_some() {
+                    let (jp, other) = if x.junction_triangle.is_some() { (x, y) } else { (y, x) };
+                    let (Some(ti), Some(edge)) = (jp.junction_triangle, other.edge) else {
+                        return Err(invalid(
+                            Some(p),
+                            format!("path {k}: a segment joins two junctions"),
+                        ));
+                    };
+                    let t = triangles[ti];
+                    let side = (0..3).find(|&s| {
+                        let (c, d) = (t[s], t[(s + 1) % 3]);
+                        edge == (c.min(d), c.max(d))
+                    });
+                    let Some(side) = side else {
+                        return Err(invalid(
+                            Some(p),
+                            format!(
+                                "path {k}: the point next to the junction is on the edge {edge:?}, which is not a side of the junction's triangle {t:?}"
+                            ),
+                        ));
+                    };
+                    let entry = triple_tri[ti].get_or_insert(TripleTriangle {
+                        corners: t,
+                        q: [NONE; 3],
+                        j: jp.vertex,
+                    });
+                    if entry.j != jp.vertex || entry.q[side] != NONE {
+                        return Err(invalid(
+                            Some(p),
+                            format!(
+                                "path {k}: the junction's triangle {t:?} has two arms through its side {side}"
+                            ),
+                        ));
+                    }
+                    entry.q[side] = other.vertex;
+                    continue;
+                }
+                let (xe, ye) = (x.edge.expect("not a junction"), y.edge.expect("not a junction"));
+                if xe == ye {
                     return Err(invalid(
                         Some(p),
-                        format!(
-                            "path {k}: two consecutive points lie on the same edge {:?}",
-                            x.edge
-                        ),
+                        format!("path {k}: two consecutive points lie on the same edge {xe:?}"),
                     ));
                 }
-                let tx = &tri_of_edge[&x.edge];
-                let ty = &tri_of_edge[&y.edge];
+                let tx = &tri_of_edge[&xe];
+                let ty = &tri_of_edge[&ye];
                 let common: Vec<usize> = tx.iter().copied().filter(|t| ty.contains(t)).collect();
                 if common.len() != 1 {
                     return Err(invalid(
                         Some(p),
                         format!(
-                            "path {k}: consecutive points on the edges {:?} and {:?} do not \
-                             share a triangle of the triangulation",
-                            x.edge, y.edge
+                            "path {k}: consecutive points on the edges {xe:?} and {ye:?} do not \
+                             share a triangle of the triangulation"
                         ),
                     ));
                 }
                 let ti = common[0];
-                if cut_tri[ti].is_some() {
+                if cut_tri[ti].is_some() || triple_tri[ti].is_some() {
                     return Err(invalid(
                         Some(p),
                         format!(
@@ -701,17 +831,30 @@ impl PolygonContext<'_> {
                 let apex = (0..3)
                     .find(|&i| {
                         let c = t[i];
-                        [x.edge.0, x.edge.1].contains(&c) && [y.edge.0, y.edge.1].contains(&c)
+                        [xe.0, xe.1].contains(&c) && [ye.0, ye.1].contains(&c)
                     })
                     .ok_or_else(|| internal("two edges of a triangle without a common corner"))?;
                 let arr = [t[apex], t[(apex + 1) % 3], t[(apex + 2) % 3]];
                 let side_ab = (arr[0].min(arr[1]), arr[0].max(arr[1]));
-                let (px, qy) = if x.edge == side_ab { (x, y) } else { (y, x) };
+                let (px, qy) = if xe == side_ab { (x, y) } else { (y, x) };
                 cut_tri[ti] = Some(CutTriangle {
                     corners: arr,
                     p: px.vertex,
                     q: qy.vertex,
                 });
+            }
+        }
+        for (ti, entry) in triple_tri.iter().enumerate() {
+            if let Some(e) = entry
+                && (e.q.contains(&NONE) || cut_tri[ti].is_some())
+            {
+                return Err(invalid(
+                    Some(p),
+                    format!(
+                        "the junction in triangle {:?} needs three arms through its three sides and no other segment in the triangle",
+                        triangles[ti]
+                    ),
+                ));
             }
         }
 
@@ -720,7 +863,13 @@ impl PolygonContext<'_> {
         let mut n_nodes = 0u32;
         for (ti, c) in cut_tri.iter().enumerate() {
             base[ti] = n_nodes;
-            n_nodes += if c.is_some() { 2 } else { 1 };
+            n_nodes += if c.is_some() {
+                2
+            } else if triple_tri[ti].is_some() {
+                3
+            } else {
+                1
+            };
         }
         let mut rings: Vec<Vec<RingVertex>> = vec![Vec::new(); n_nodes as usize];
         let corner_vertex = |c: u32| verts[(c - lo) as usize];
@@ -730,6 +879,47 @@ impl PolygonContext<'_> {
             }
         };
         for (ti, t) in triangles.iter().enumerate() {
+            if let Some(tt) = triple_tri[ti] {
+                let sides: Vec<Vec<u32>> = (0..3)
+                    .map(|k| {
+                        let (c, d) = (tt.corners[k], tt.corners[(k + 1) % 3]);
+                        if is_polygon_edge(c, d) { extras(c, d) } else { Vec::new() }
+                    })
+                    .collect();
+                // Position of q[k] in its side's list (MAX: the side is a diagonal).
+                let mut at = [usize::MAX; 3];
+                for k in 0..3 {
+                    if !sides[k].is_empty() {
+                        at[k] = sides[k].iter().position(|&x| x == tt.q[k]).ok_or_else(|| {
+                            invalid(
+                                Some(p),
+                                format!(
+                                    "the cut point of vertex {} is not on polygon edge {k} of triangle {t:?}",
+                                    tt.q[k]
+                                ),
+                            )
+                        })?;
+                    }
+                }
+                for k in 0..3 {
+                    let prev = (k + 2) % 3;
+                    let ring = &mut rings[base[ti] as usize + k];
+                    ring.push(RingVertex {
+                        id: corner_vertex(tt.corners[k]),
+                        lines: (1 << k) | (1 << prev),
+                    });
+                    if at[k] != usize::MAX {
+                        ring_extras(ring, &sides[k][..at[k]], 1 << k);
+                    }
+                    ring.push(RingVertex { id: tt.q[k], lines: 1 << k });
+                    ring.push(RingVertex { id: tt.j, lines: 0 });
+                    ring.push(RingVertex { id: tt.q[prev], lines: 1 << prev });
+                    if at[prev] != usize::MAX {
+                        ring_extras(ring, &sides[prev][at[prev] + 1..], 1 << prev);
+                    }
+                }
+                continue;
+            }
             match cut_tri[ti] {
                 None => {
                     let node = base[ti] as usize;
@@ -833,6 +1023,14 @@ impl PolygonContext<'_> {
 
         // Which node holds the part of the triangle next to a corner of an edge.
         let node_near = |ti: usize, edge: (u32, u32), near: u32| -> u32 {
+            if let Some(tt) = triple_tri[ti] {
+                for k in 0..3 {
+                    let (c, d) = (tt.corners[k], tt.corners[(k + 1) % 3]);
+                    if edge == (c.min(d), c.max(d)) {
+                        return base[ti] + if near == c { k as u32 } else { ((k + 1) % 3) as u32 };
+                    }
+                }
+            }
             match cut_tri[ti] {
                 None => base[ti],
                 Some(ct) => {
@@ -848,6 +1046,12 @@ impl PolygonContext<'_> {
         };
         // The vertex a segment puts on an edge of a triangle, if it crosses that edge.
         let crossing = |ti: usize, edge: (u32, u32)| -> Option<u32> {
+            if let Some(tt) = triple_tri[ti] {
+                return (0..3).find_map(|k| {
+                    let (c, d) = (tt.corners[k], tt.corners[(k + 1) % 3]);
+                    (edge == (c.min(d), c.max(d))).then_some(tt.q[k])
+                });
+            }
             let ct = cut_tri[ti]?;
             let [a, b, c] = ct.corners;
             let has = |x: u32, y: u32| edge == (x.min(y), x.max(y));

@@ -6,11 +6,13 @@ use ddg_core::Geometry;
 use ddg_core::distance::upwind_distance;
 use ddg_core::topology::{NONE, TriMesh};
 use ddg_variational_cuts::{
-    CurvatureSource, Cut, CutProblem, Energy, EvalOptions, Evaluation, Flow, FlowOptions,
-    RunReport, ScaleWeight, StepReport, StopRule, init,
+    CurvatureSource, Cut, CutProblem, CurveEnd, Energy, EvalOptions, Evaluation, Flow,
+    FlowOptions, RegionFlow, RunReport, ScaleWeight, StepReport, StepSize, StopRule, init,
 };
 
-use super::describe::{CutOnPolygons, EdgePoint, InteriorPoint, PathEnd, PolygonPath};
+use super::describe::{
+    CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath,
+};
 use super::error::{CuttingError, internal};
 use crate::input::{MeshInput, PolygonMesh};
 use crate::options::{Degenerate, Orientation, UnwrapOptions};
@@ -39,6 +41,30 @@ pub enum Start {
     PolygonLabels(Vec<u32>),
     /// One region function per region and per polygon corner, as [`Session::state`] returns them.
     Corners(Vec<Vec<f64>>),
+    /// The vertex normals of the flow mesh clustered into `n_regions` clusters
+    /// (`ddg_variational_cuts::init::normal_clusters`, at most `max_iterations` rounds), the
+    /// clusters as regions: the start of the atlas of the paper (Sec. 7). Works for any number
+    /// of regions; the clusters are speckled and the flow is meant to clean them up. The
+    /// clustering runs on the flow mesh, so a vertex that a seam splits may get a different
+    /// cluster on each side.
+    NormalClusters {
+        /// The most rounds of the clustering.
+        max_iterations: usize,
+    },
+}
+
+/// Which flow a session runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlowKind {
+    /// The two-region flow for two regions, [`RegionFlow`] for more. The default of
+    /// [`Session::new`].
+    #[default]
+    Auto,
+    /// The two-region flow (`Flow`); an error for more than two regions.
+    TwoRegion,
+    /// [`RegionFlow`], also for two regions (where it takes the same steps as the two-region
+    /// flow, to rounding, see the core crate).
+    Regions,
 }
 
 /// A line of the cut for display: positions in space.
@@ -49,6 +75,8 @@ pub struct PreviewPolyline {
     /// Whether the last position is joined to the first. An open polyline ends on the boundary
     /// of the surface or on a seam (the two sides of a seam give separate polylines).
     pub closed: bool,
+    /// The two regions the line separates, `[lower id, higher id]` (`[0, 1]` for two regions).
+    pub regions: [u32; 2],
 }
 
 /// The maps between the polygon mesh and the triangle mesh the flow runs on.
@@ -86,6 +114,45 @@ impl Maps {
 
     /// The level-set function from the region functions of the corners.
     fn phi_from_regions<R: AsRef<[f64]>>(&self, regions: &[R]) -> Result<Vec<f64>, CuttingError> {
+        self.check_regions(regions)?;
+        // Two regions: the functions are φ and −φ; the level-set function is half the
+        // difference.
+        let (f0, f1) = (regions[0].as_ref(), regions[1].as_ref());
+        Ok((0..self.vertex_input.len())
+            .map(|fv| {
+                let c = self.first_corner[fv] as usize;
+                0.5 * (f0[c] - f1[c])
+            })
+            .collect())
+    }
+
+    /// The level-set functions of the flow mesh (one per region) from the region functions of
+    /// the corners.
+    fn phis_from_regions<R: AsRef<[f64]>>(
+        &self,
+        regions: &[R],
+    ) -> Result<Vec<Vec<f64>>, CuttingError> {
+        self.check_regions(regions)?;
+        Ok(regions
+            .iter()
+            .map(|f| {
+                let f = f.as_ref();
+                (0..self.vertex_input.len())
+                    .map(|fv| f[self.first_corner[fv] as usize])
+                    .collect()
+            })
+            .collect())
+    }
+
+    /// The region functions of the corners from the level-set functions of the flow mesh.
+    fn regions_from_phis(&self, phis: &[Vec<f64>]) -> Vec<Vec<f64>> {
+        phis.iter()
+            .map(|phi| self.corner_vertex.iter().map(|&v| phi[v as usize]).collect())
+            .collect()
+    }
+
+    /// Checks the region functions: count, length, finite, equal across corners of a vertex.
+    fn check_regions<R: AsRef<[f64]>>(&self, regions: &[R]) -> Result<(), CuttingError> {
         if regions.len() != self.n_regions {
             return Err(CuttingError::WrongLength {
                 what: "region functions",
@@ -124,15 +191,7 @@ impl Maps {
                 }
             }
         }
-        // Two regions: the functions are φ and −φ; the level-set function is half the
-        // difference. (N regions: the argmin of the functions, see SPEC §8.1.)
-        let (f0, f1) = (regions[0].as_ref(), regions[1].as_ref());
-        Ok((0..self.vertex_input.len())
-            .map(|fv| {
-                let c = self.first_corner[fv] as usize;
-                0.5 * (f0[c] - f1[c])
-            })
-            .collect())
+        Ok(())
     }
 
     /// The region functions of the corners from the level-set function.
@@ -170,7 +229,10 @@ pub struct Session {
     flow_mesh: TriMesh,
     flow_geometry: Geometry,
     flow_positions: Vec<[f64; 3]>,
+    /// The two-region flow; with `many` it is an unused one on the same mesh (see
+    /// [`Session::flow`]).
     flow: Flow,
+    many: Option<RegionFlow>,
     warnings: Vec<String>,
 }
 
@@ -187,12 +249,36 @@ impl Session {
         n_regions: usize,
         start: &Start,
     ) -> Result<Session, CuttingError> {
+        Session::new_with(input, n_regions, start, FlowKind::Auto)
+    }
+
+    /// [`Session::new`] with the choice of the flow ([`FlowKind`]).
+    ///
+    /// # Errors
+    /// As [`Session::new`]; [`CuttingError::InvalidOption`] for [`FlowKind::TwoRegion`] with
+    /// more than two regions, and for a geodesic circle with more than two regions.
+    pub fn new_with(
+        input: &MeshInput<'_>,
+        n_regions: usize,
+        start: &Start,
+        kind: FlowKind,
+    ) -> Result<Session, CuttingError> {
         if n_regions < 2 {
             return Err(CuttingError::TooFewRegions { got: n_regions });
         }
-        if n_regions > 2 {
-            return Err(CuttingError::RegionsNotAvailable { n_regions });
-        }
+        let many_flow = match kind {
+            FlowKind::Auto => n_regions > 2,
+            FlowKind::Regions => true,
+            FlowKind::TwoRegion => {
+                if n_regions > 2 {
+                    return Err(CuttingError::InvalidOption {
+                        name: "kind",
+                        reason: format!("the two-region flow cannot run {n_regions} regions"),
+                    });
+                }
+                false
+            }
+        };
         let options = UnwrapOptions {
             orientation: Orientation::Reject,
             degenerate: Degenerate::Reject,
@@ -314,8 +400,22 @@ impl Session {
             polygon_offsets: offsets.to_vec(),
             triangles: input.triangles.to_vec(),
         };
-        let phi = start_level_set(&maps, &flow_mesh, &flow_geometry, start)?;
-        let flow = Flow::new(&flow_mesh, &flow_geometry, &phi)?;
+        let level = start_state(
+            &maps,
+            &flow_mesh,
+            &flow_geometry,
+            &flow_positions,
+            start,
+            many_flow,
+        )?;
+        let (flow, many) = if many_flow {
+            let phis = level.into_many();
+            let aux = Flow::new(&flow_mesh, &flow_geometry, &phis[0])?;
+            (aux, Some(RegionFlow::new(&flow_mesh, &flow_geometry, &phis)?))
+        } else {
+            let phi = level.into_two();
+            (Flow::new(&flow_mesh, &flow_geometry, &phi)?, None)
+        };
         let mut seams: Vec<[u32; 2]> = input
             .seam_edges
             .iter()
@@ -334,6 +434,7 @@ impl Session {
             flow_geometry,
             flow_positions,
             flow,
+            many,
             warnings: prepared.warnings.clone(),
         })
     }
@@ -347,9 +448,54 @@ impl Session {
     /// [`CuttingError::WrongLength`], [`CuttingError::NonFinite`] and
     /// [`CuttingError::CornersDisagree`] (the vertex is named).
     pub fn restart(&mut self, start: &Start) -> Result<(), CuttingError> {
-        let phi = start_level_set(&self.maps, &self.flow_mesh, &self.flow_geometry, start)?;
-        self.flow.set_level_set(&phi)?;
+        let level = start_state(
+            &self.maps,
+            &self.flow_mesh,
+            &self.flow_geometry,
+            &self.flow_positions,
+            start,
+            self.many.is_some(),
+        )?;
+        match &mut self.many {
+            Some(f) => f.set_level_sets(&level.into_many())?,
+            None => self.flow.set_level_set(&level.into_two())?,
+        }
         Ok(())
+    }
+
+    /// Whether the session runs the N-region flow ([`RegionFlow`]).
+    pub fn uses_region_flow(&self) -> bool {
+        self.many.is_some()
+    }
+
+    /// The N-region flow, if the session runs it.
+    pub fn region_flow(&self) -> Option<&RegionFlow> {
+        self.many.as_ref()
+    }
+
+    /// The N-region flow for the calls the session does not wrap.
+    pub fn region_flow_mut(&mut self) -> Option<&mut RegionFlow> {
+        self.many.as_mut()
+    }
+
+    /// The options the core crate recommends for this session's number of regions:
+    /// `FlowOptions::new` for two regions (the default stages), `FlowOptions::for_regions` for
+    /// more (the stages of the paper with the flux recovery of the core crate, SPEC D20: on a
+    /// network the default stages come to rest with more patches and a higher energy from a
+    /// speckled start). Options built with `FlowOptions::new` are accepted for any number of
+    /// regions and are not overridden.
+    pub fn recommended_options(&self, step_size: StepSize) -> FlowOptions<'static> {
+        if self.maps.n_regions > 2 {
+            FlowOptions::for_regions(step_size)
+        } else {
+            FlowOptions::new(step_size)
+        }
+    }
+
+    /// A problem with default weights for each of this session's regions
+    /// (`CutProblem::for_regions`).
+    pub fn new_problem(&self, energy: Energy, length_weight: f64) -> CutProblem {
+        CutProblem::for_regions(energy, length_weight, self.maps.n_regions)
     }
 
     /// The number of regions.
@@ -378,13 +524,16 @@ impl Session {
         &self.warnings
     }
 
-    /// The flow.
+    /// The two-region flow. **Only the flow of a two-region session**: in a session that
+    /// [`uses_region_flow`](Session::uses_region_flow) this is an unused flow on the same mesh
+    /// whose level-set function is not the state; use [`Session::region_flow`] there.
     pub fn flow(&self) -> &Flow {
         &self.flow
     }
 
-    /// The flow, for the calls the session does not wrap (`redistance`, `roughening_rate`, ...).
-    /// Its numbering is that of [`Session::flow_mesh`].
+    /// The two-region flow, for the calls the session does not wrap (`redistance`,
+    /// `roughening_rate`, ...); see [`Session::flow`] for when it is not the state. Its
+    /// numbering is that of [`Session::flow_mesh`].
     pub fn flow_mut(&mut self) -> &mut Flow {
         &mut self.flow
     }
@@ -413,11 +562,23 @@ impl Session {
     /// For two regions they are `φ` and `−φ`; region 0 is where `φ ≤ 0`, in general a corner
     /// belongs to the region whose function is the smallest there (ties: the lowest).
     pub fn state(&self) -> Vec<Vec<f64>> {
-        self.maps.regions_from_phi(&self.flow.level_set())
+        match &self.many {
+            Some(f) => self.maps.regions_from_phis(&f.level_sets()),
+            None => self.maps.regions_from_phi(&self.flow.level_set()),
+        }
     }
 
     /// The region of every polygon corner.
     pub fn corner_regions(&self) -> Vec<u32> {
+        if let Some(f) = &self.many {
+            let regions = f.regions();
+            return self
+                .maps
+                .corner_vertex
+                .iter()
+                .map(|&v| regions[v as usize])
+                .collect();
+        }
         let phi = self.flow.level_set();
         self.maps
             .corner_vertex
@@ -434,6 +595,10 @@ impl Session {
     /// [`CuttingError::CornersDisagree`], which names the vertex whose corners carry different
     /// values although no seam separates them.
     pub fn set_state<R: AsRef<[f64]>>(&mut self, regions: &[R]) -> Result<(), CuttingError> {
+        if let Some(f) = &mut self.many {
+            f.set_level_sets(&self.maps.phis_from_regions(regions)?)?;
+            return Ok(());
+        }
         let phi = self.maps.phi_from_regions(regions)?;
         self.flow.set_level_set(&phi)?;
         Ok(())
@@ -455,7 +620,10 @@ impl Session {
     ) -> Result<StepReport, CuttingError> {
         let problem = self.flow_problem(problem)?;
         let options = self.flow_options(options)?;
-        Ok(self.flow.step(&problem, &options)?)
+        match &mut self.many {
+            Some(f) => Ok(f.step(&problem, &options)?),
+            None => Ok(self.flow.step(&problem, &options)?),
+        }
     }
 
     /// Steps until the stop rule says so. Arguments as for [`Session::step`].
@@ -470,7 +638,10 @@ impl Session {
     ) -> Result<RunReport, CuttingError> {
         let problem = self.flow_problem(problem)?;
         let options = self.flow_options(options)?;
-        Ok(self.flow.run(&problem, &options, stop)?)
+        match &mut self.many {
+            Some(f) => Ok(f.run(&problem, &options, stop)?),
+            None => Ok(self.flow.run(&problem, &options, stop)?),
+        }
     }
 
     /// The roughening rate `ω` of the current state (the scale for the length weight, see
@@ -484,7 +655,10 @@ impl Session {
         options: &EvalOptions<'_>,
     ) -> Result<f64, CuttingError> {
         let problem = self.flow_problem(problem)?;
-        Ok(self.flow.roughening_rate(&problem, options)?)
+        match &mut self.many {
+            Some(f) => Ok(f.roughening_rate(&problem, options)?),
+            None => Ok(self.flow.roughening_rate(&problem, options)?),
+        }
     }
 
     /// Evaluates the current state without changing it. The evaluation is in the numbering of
@@ -498,7 +672,10 @@ impl Session {
         options: &EvalOptions<'_>,
     ) -> Result<Evaluation, CuttingError> {
         let problem = self.flow_problem(problem)?;
-        Ok(self.flow.evaluate(&problem, options)?)
+        match &mut self.many {
+            Some(f) => Ok(f.evaluate(&problem, options)?),
+            None => Ok(self.flow.evaluate(&problem, options)?),
+        }
     }
 
     /// The problem of the flow mesh from the problem of the polygon mesh.
@@ -602,41 +779,62 @@ impl Session {
         Ok(out)
     }
 
-    /// The cut of the current state as polylines for display. Only the sign of the level-set
-    /// function matters; `min_crossing_offset` is `δ` of the flow (use
-    /// [`DEFAULT_CROSSING_OFFSET`] to see the cut the flow sees).
+    /// The cut of the current state, as the flow sees it.
+    fn current_cut(&self, min_crossing_offset: f64) -> Result<Cut, CuttingError> {
+        Ok(match &self.many {
+            Some(f) => Cut::from_regions(&self.flow_mesh, &f.level_sets(), min_crossing_offset)?,
+            None => Cut::from_level_set(
+                &self.flow_mesh,
+                &self.flow.level_set(),
+                min_crossing_offset,
+            )?,
+        })
+    }
+
+    /// The cut of the current state as polylines for display. Only the regions of the vertices
+    /// matter; `min_crossing_offset` is `δ` of the flow (use [`DEFAULT_CROSSING_OFFSET`] to
+    /// see the cut the flow sees).
+    ///
+    /// With more than two regions (or [`FlowKind::Regions`]) the lines are the curves of the
+    /// network between its junctions (`Cut::curves`): each runs from a triple point, or from
+    /// the boundary, to a triple point or the boundary, or is closed; a curve that ends at a
+    /// triple point has the position of that triple point as its end. Every line carries the
+    /// two regions it separates.
     ///
     /// # Errors
     /// [`CuttingError::Flow`] for a `δ` outside `[0, ½)`.
     pub fn preview(&self, min_crossing_offset: f64) -> Result<Vec<PreviewPolyline>, CuttingError> {
-        let cut =
-            Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
+        let cut = self.current_cut(min_crossing_offset)?;
+        if self.many.is_some() {
+            return Ok(cut
+                .curves(&self.flow_mesh, &self.flow_positions)?
+                .into_iter()
+                .map(|c| PreviewPolyline {
+                    positions: c.positions,
+                    closed: c.ends == [CurveEnd::Closed; 2],
+                    regions: c.regions,
+                })
+                .collect());
+        }
         Ok(cut
             .polylines(&self.flow_mesh, &self.flow_positions)?
             .into_iter()
             .map(|p| PreviewPolyline {
                 positions: p.positions,
                 closed: p.closed,
+                regions: [0, 1],
             })
             .collect())
     }
 
-    /// The cut of the current state expressed on the caller's polygons, for
-    /// [`insert`](super::insert).
-    ///
-    /// # Errors
-    /// [`CuttingError::Flow`] for a `δ` outside `[0, ½)`, [`CuttingError::Internal`] if the
-    /// segments of the cut do not form paths (cannot happen for a valid flow mesh).
-    pub fn describe_cut(&self, min_crossing_offset: f64) -> Result<CutOnPolygons, CuttingError> {
+    /// The cut points as edge points and interior points.
+    fn classify_points(
+        &self,
+        cut: &Cut,
+        at: &[[f64; 3]],
+    ) -> (Vec<EdgePoint>, Vec<u32>, Vec<Option<InteriorPoint>>) {
         let m = &self.maps;
-        let cut =
-            Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?;
-        let at = cut.point_positions(&self.flow_mesh, &self.flow_positions)?;
-        let mut description = CutOnPolygons {
-            n_clamped_crossings: cut.n_clamped,
-            ..CutOnPolygons::default()
-        };
-        // Cut points: on a polygon edge (an edge point) or on a diagonal (interior).
+        let mut edge_points = Vec::new();
         let mut edge_point_of = vec![NONE; cut.points.len()];
         let mut interior_of: Vec<Option<InteriorPoint>> = vec![None; cut.points.len()];
         for (k, point) in cut.points.iter().enumerate() {
@@ -650,8 +848,8 @@ impl Session {
                     let face = self.flow_mesh.face(self.flow_mesh.edge_halfedge(e));
                     m.triangle_polygon[m.face_triangle[face] as usize]
                 });
-                edge_point_of[k] = description.edge_points.len() as u32;
-                description.edge_points.push(EdgePoint {
+                edge_point_of[k] = edge_points.len() as u32;
+                edge_points.push(EdgePoint {
                     edge,
                     t,
                     position: at[k],
@@ -672,6 +870,43 @@ impl Session {
                 });
             }
         }
+        (edge_points, edge_point_of, interior_of)
+    }
+
+    /// The cut of the current state expressed on the caller's polygons, for
+    /// [`insert`](super::insert).
+    ///
+    /// With two regions on the two-region flow, every path runs between two edge points. On the
+    /// N-region flow the cut is a network: wherever three regions meet in a triangle of the
+    /// supplied triangulation there is a [`JunctionPoint`] (at the centroid of the three cut
+    /// points on the sides of that triangle, the triple point of the core crate), and three
+    /// paths end there, one through each side of the triangle. A path runs from an edge point
+    /// or a junction to an edge point or a junction, through the diagonals it crosses; it is
+    /// directed so that the region with the lower id is on its left (`regions` is
+    /// `[lower, higher]`).
+    ///
+    /// # Errors
+    /// [`CuttingError::Flow`] for a `δ` outside `[0, ½)`, [`CuttingError::Internal`] if the
+    /// segments of the cut do not form paths (cannot happen for a valid flow mesh).
+    pub fn describe_cut(&self, min_crossing_offset: f64) -> Result<CutOnPolygons, CuttingError> {
+        let cut = self.current_cut(min_crossing_offset)?;
+        if self.many.is_some() {
+            self.describe_network(&cut)
+        } else {
+            self.describe_two(&cut)
+        }
+    }
+
+    /// [`Session::describe_cut`] for the two-region flow.
+    fn describe_two(&self, cut: &Cut) -> Result<CutOnPolygons, CuttingError> {
+        let m = &self.maps;
+        let at = cut.point_positions(&self.flow_mesh, &self.flow_positions)?;
+        let (edge_points, edge_point_of, interior_of) = self.classify_points(cut, &at);
+        let mut description = CutOnPolygons {
+            n_clamped_crossings: cut.n_clamped,
+            edge_points,
+            ..CutOnPolygons::default()
+        };
         // Segments by polygon; a path starts where a segment starts on a polygon edge.
         let polygon_of = |seg: usize| {
             m.triangle_polygon[m.face_triangle[cut.segments[seg].face as usize] as usize]
@@ -729,17 +964,188 @@ impl Session {
         });
         Ok(description)
     }
+
+    /// [`Session::describe_cut`] for a network (the N-region flow).
+    fn describe_network(&self, cut: &Cut) -> Result<CutOnPolygons, CuttingError> {
+        let m = &self.maps;
+        let n_points = cut.points.len();
+        let at = cut.point_positions(&self.flow_mesh, &self.flow_positions)?;
+        let (edge_points, edge_point_of, interior_of) = self.classify_points(cut, &at);
+        let triple_at = cut.triple_positions(&self.flow_mesh, &self.flow_positions)?;
+        let mut description = CutOnPolygons {
+            n_clamped_crossings: cut.n_clamped,
+            edge_points,
+            ..CutOnPolygons::default()
+        };
+        for (mi, triple) in cut.triple_points.iter().enumerate() {
+            let triangle = m.face_triangle[triple.face as usize];
+            description.junctions.push(JunctionPoint {
+                position: triple_at[mi],
+                polygon: m.triangle_polygon[triangle as usize],
+                triangle,
+                corners: self.mesh.triangles[triangle as usize],
+                barycentric: triple.barycentric,
+            });
+        }
+        let polygon_of = |seg: usize| {
+            m.triangle_polygon[m.face_triangle[cut.segments[seg].face as usize] as usize]
+        };
+        // The segments at every node, per polygon.
+        let mut incident: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+        for (s, segment) in cut.segments.iter().enumerate() {
+            for node in segment.points {
+                incident.entry((polygon_of(s), node)).or_default().push(s);
+            }
+        }
+        // A path ends at an edge point or at a junction; diagonal points have two segments.
+        let is_terminal = |node: u32| node as usize >= n_points || edge_point_of[node as usize] != NONE;
+        let mut order: Vec<usize> = (0..cut.segments.len()).collect();
+        order.sort_by_key(|&s| (polygon_of(s), s));
+        let mut used = vec![false; cut.segments.len()];
+        for &s in &order {
+            if used[s] {
+                continue;
+            }
+            let polygon = polygon_of(s);
+            let [x, y] = cut.segments[s].points;
+            let (start, forward) = if is_terminal(x) {
+                (x, true)
+            } else if is_terminal(y) {
+                (y, false)
+            } else {
+                continue;
+            };
+            let mut nodes = vec![start];
+            let (mut current, mut from) = (s, start);
+            loop {
+                used[current] = true;
+                let [a, b] = cut.segments[current].points;
+                let to = if a == from { b } else { a };
+                nodes.push(to);
+                if is_terminal(to) {
+                    break;
+                }
+                let list = &incident[&(polygon, to)];
+                if list.len() != 2 {
+                    return Err(internal(format!(
+                        "a diagonal point of the cut in polygon {polygon} has {} segments",
+                        list.len()
+                    )));
+                }
+                current = if list[0] == current { list[1] } else { list[0] };
+                from = to;
+            }
+            // The regions on the left and on the right of the first segment, walked from
+            // `start`.
+            let [p0, p1] = cut.segments[s].points;
+            let (left, right) = if p1 as usize >= n_points {
+                let triple = &cut.triple_points[p1 as usize - n_points];
+                let k = triple.points.iter().position(|&q| q == p0).ok_or_else(|| {
+                    internal("a segment ends at a triple point that does not list its first end")
+                })?;
+                let face = self.flow_mesh.faces()[triple.face as usize];
+                (
+                    cut.vertex_region[face[k] as usize],
+                    cut.vertex_region[face[(k + 1) % 3] as usize],
+                )
+            } else {
+                let [lo, hi] = cut.segment_regions(&self.flow_mesh, s);
+                (lo, hi)
+            };
+            let (mut left, mut right) = if forward { (left, right) } else { (right, left) };
+            if left > right {
+                nodes.reverse();
+                std::mem::swap(&mut left, &mut right);
+            }
+            let end_of = |node: u32| {
+                if node as usize >= n_points {
+                    PathEnd::Junction(node - n_points as u32)
+                } else {
+                    PathEnd::EdgePoint(edge_point_of[node as usize])
+                }
+            };
+            let interior = nodes[1..nodes.len() - 1]
+                .iter()
+                .map(|&node| {
+                    interior_of[node as usize].clone().ok_or_else(|| {
+                        internal("a cut point is neither on a polygon edge nor on a diagonal")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            description.paths.push(PolygonPath {
+                polygon,
+                start: end_of(nodes[0]),
+                interior,
+                end: end_of(nodes[nodes.len() - 1]),
+                regions: [left, right],
+            });
+        }
+        if let Some(s) = used.iter().position(|u| !u) {
+            return Err(internal(format!(
+                "a segment of the cut in polygon {} is on no path from a polygon edge or a junction",
+                polygon_of(s)
+            )));
+        }
+        description.paths.sort_by_key(|p| {
+            let key = |end: PathEnd| match end {
+                PathEnd::EdgePoint(i) => (0, i),
+                PathEnd::Junction(i) => (1, i),
+            };
+            (p.polygon, key(p.start), key(p.end))
+        });
+        Ok(description)
+    }
 }
 
-/// The level-set function of the flow mesh for a start.
-fn start_level_set(
+/// A start: one level-set function (two-region flow) or one per region.
+enum Level {
+    Phi(Vec<f64>),
+    Phis(Vec<Vec<f64>>),
+}
+
+impl Level {
+    /// For the two-region flow: `φ`, or `½(φ₀ − φ₁)` of two functions.
+    fn into_two(self) -> Vec<f64> {
+        match self {
+            Level::Phi(phi) => phi,
+            Level::Phis(p) => p[0]
+                .iter()
+                .zip(&p[1])
+                .map(|(a, b)| 0.5 * (a - b))
+                .collect(),
+        }
+    }
+
+    /// For the N-region flow: the functions, or `[φ, −φ]`.
+    fn into_many(self) -> Vec<Vec<f64>> {
+        match self {
+            Level::Phi(phi) => {
+                let negated = phi.iter().map(|x| -x).collect();
+                vec![phi, negated]
+            }
+            Level::Phis(p) => p,
+        }
+    }
+}
+
+/// The state of the flow mesh for a start. `many` says whether the N-region flow will take it
+/// (labels then give one function per region).
+fn start_state(
     maps: &Maps,
     mesh: &TriMesh,
     geometry: &Geometry,
+    positions: &[[f64; 3]],
     start: &Start,
-) -> Result<Vec<f64>, CuttingError> {
+    many: bool,
+) -> Result<Level, CuttingError> {
     match start {
-        Start::Corners(regions) => maps.phi_from_regions(regions),
+        Start::Corners(regions) => {
+            if many {
+                Ok(Level::Phis(maps.phis_from_regions(regions)?))
+            } else {
+                Ok(Level::Phi(maps.phi_from_regions(regions)?))
+            }
+        }
         Start::PolygonLabels(labels) => {
             let expected = maps.n_polygons;
             if labels.len() != expected {
@@ -762,9 +1168,36 @@ fn start_level_set(
                 .iter()
                 .map(|&t| labels[maps.triangle_polygon[t as usize] as usize])
                 .collect();
-            Ok(init::from_face_labels(mesh, geometry, &face_labels)?)
+            if many {
+                Ok(Level::Phis(init::regions_from_face_labels(
+                    mesh,
+                    geometry,
+                    &face_labels,
+                    maps.n_regions,
+                )?))
+            } else {
+                Ok(Level::Phi(init::from_face_labels(
+                    mesh,
+                    geometry,
+                    &face_labels,
+                )?))
+            }
+        }
+        Start::NormalClusters { max_iterations } => {
+            let labels = init::normal_clusters(mesh, positions, maps.n_regions, *max_iterations)?;
+            let phis = init::regions_from_vertex_labels(mesh, geometry, &labels, maps.n_regions)?;
+            Ok(Level::Phis(phis))
         }
         Start::GeodesicCircle { vertex, radius } => {
+            if maps.n_regions != 2 {
+                return Err(CuttingError::InvalidOption {
+                    name: "start",
+                    reason: format!(
+                        "a geodesic circle starts two regions, but there are {}",
+                        maps.n_regions
+                    ),
+                });
+            }
             if *vertex as usize >= maps.n_vertices {
                 return Err(CuttingError::VertexOutOfRange {
                     what: "center",
@@ -800,7 +1233,7 @@ fn start_level_set(
                     *x = far;
                 }
             }
-            Ok(phi)
+            Ok(Level::Phi(phi))
         }
     }
 }

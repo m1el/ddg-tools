@@ -51,18 +51,27 @@ pub struct InteriorPoint {
 pub enum PathEnd {
     /// An edge point (an index into [`CutOnPolygons::edge_points`]).
     EdgePoint(u32),
-    /// A point inside the polygon where three or more regions meet (an index into
-    /// [`CutOnPolygons::junctions`]). Never produced for two regions;
-    /// [`crate::cutting::insert`] refuses it for now.
+    /// A point inside the polygon where three regions meet (an index into
+    /// [`CutOnPolygons::junctions`]). Never produced for two regions.
     Junction(u32),
 }
 
-/// A junction of three or more regions inside a polygon. Reserved for the flow with `N`
-/// regions; [`CutOnPolygons::junctions`] is empty for two.
+/// A junction of three regions inside a triangle of a polygon's triangulation (a *triple
+/// point* of the cut network). Three paths end here, one through each side of the triangle.
+/// [`CutOnPolygons::junctions`] is empty for two regions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JunctionPoint {
-    /// The position in space.
+    /// The position in space: `Σ barycentric[k] · x[corners[k]]`.
     pub position: [f64; 3],
+    /// The polygon it lies in.
+    pub polygon: u32,
+    /// The triangle of the supplied triangulation it lies in (an index into `triangles`).
+    pub triangle: u32,
+    /// The corners of that triangle (as in `triangles[triangle]`).
+    pub corners: [u32; 3],
+    /// Its barycentric coordinates with respect to `corners`: positive, summing to 1. They are
+    /// the weights an editor gives the three corner positions to place the vertex.
+    pub barycentric: [f64; 3],
 }
 
 /// One piece of the cut inside one polygon.
