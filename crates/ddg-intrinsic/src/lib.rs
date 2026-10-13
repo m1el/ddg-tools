@@ -90,8 +90,8 @@
 
 #![warn(missing_docs)]
 
-mod delaunay;
-mod edge_trace;
+pub mod delaunay;
+pub mod edge_trace;
 mod error;
 mod flip;
 pub mod formulas;

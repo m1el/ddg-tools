@@ -170,3 +170,114 @@ differential tests of single operations.
   perturbed.
 * **N4** Vertices with small cone angles in refinement: the paper's one-sentence rule against what
   the reference does.
+
+Entries N5 to N9 were added with the first half of the crate (data model, flips, Delaunay
+flipping, tracing); N2 and N3 were completed there. The numbers are those of
+`crates/ddg-intrinsic/README.md`.
+
+* **N2, confirmed.** geometry-central 76da12c, `signpost_intrinsic_triangulation.cpp`
+  (`updateAngleFromCWNeighor`, `vertexAngleScaling`): at a boundary vertex the first halfedge is
+  the one whose twin is exterior, its angle is 0, the boundary edge that arrives has the angle
+  `Θ`, and directions are scaled by `π/Θ` where a vector in the tangent space of the vertex is
+  needed. The reference stores the angles unscaled, in `[0, Θ)`, and scales on use. Here the
+  stored signpost is the scaled angle (paper Sec. 3.1): in `[0, 2π)` at an interior vertex, in
+  `[0, π]` at a boundary vertex. The boundary edge that arrives at a boundary vertex has no
+  halfedge leaving it (numbering of `ddg_core`, N9); its direction there is the constant `π`.
+* **N3, completed.** What the check of a trace is: N8. Appendix A's measures, one by one:
+  intersections are computed only with edges that do not contain the origin of the ray (here by
+  construction, N7); edge parameters are clamped to `[0, 1]` (not needed, N7); an end point with
+  a barycentric coordinate near zero is snapped to the edge (not done; it belongs to vertex
+  insertion); crossings after the one into the star of the target are removed and a path that
+  stops short is connected through a neighbouring triangle (neither is done, N8). What is moved
+  into its range, and reported as `Trace::clamp` instead of silently: a barycentric coordinate
+  of an end point that comes out negative, and an angle inside the corner of a vertex that comes
+  out beyond the corner. Both were zero in every run recorded in the README.
+* **N5** *Strictly convex, in floating point.* A flip is refused (§4) unless the unfolded
+  quadrilateral is strictly convex. Decided here: it is also refused when the quadrilateral is
+  convex so barely that a triangle `T` the flip would create has
+  `2 A_T < ρ · ℓ_new · ℓ_max(T)`, `ρ = 1e-6` (`formulas::FLIP_SHAPE_LIMIT`; refusal `TooThin`).
+  Reason: the new length is rounded to a double, and for a triangle with sides `a, b, c` and
+  area `A`, `∂γ/∂c = c/2A` and `|∂α/∂c| ≤ a/2A`: a relative error `ε` of the new side moves the
+  angles of `T`, as its three lengths give them, by up to `ε / shape` with
+  `shape = 2A / (ℓ_new ℓ_max)`. Below `shape ≈ √ε = 1e-8` the lengths say nothing about `T`.
+  Found by test: on a grid, flipping an edge whose quadrilateral has three collinear vertices
+  passed the sign test by rounding and left a triangle of height `1e-8 ℓ`; angle sums were off
+  by `1e-8` and edge traces missed their vertex by `3e-8 ℓ`. With the limit one flip moves an
+  angle by `2e-10` at most. Delaunay flipping is not affected on any mesh tested: the smallest
+  shape number of a Delaunay flip was `4e-4` (camelshotnoise; `1e-2` or more on the others).
+  The paper's remedy for the same loss is a Taylor expansion of the length formula for nearly
+  collinear triples (Appendix A); the reference refuses `flipEdgeIfPossible` when a new signed
+  area is below `1e-6` of the two together and tests nothing in `flipEdgeIfNotDelaunay`.
+  The length of the flipped edge is computed from the unfolded quadrilateral with heights from
+  Kahan's area formula (`it-flip-length`), not by the paper's law of cosines (Fig. 9).
+* **N6** *The Delaunay test, its tolerance, ties, the limit.* The paper's Eq. 4 has no
+  tolerance; in floating point both diagonals of a cocircular quadrilateral can fail it in turn.
+  Default (`DelaunayCriterion::AngleSum`): flip when `α + β > π + 1e-10`. The reference flips
+  when the cotan weight `½ (cot α + cot β) < −1e-6`; that test is
+  `DelaunayCriterion::REFERENCE` and is what the comparison with the reference uses. The two
+  differ only at edges whose weight lies in `(−1e-6, 0)`, which the default flips and the
+  reference's test leaves: 6 edges on `bob`, none on the other 14 inputs of the comparison.
+  The queue is the reference's: all edges in ascending order, first in first out, the four
+  neighbours of a flipped edge appended unless queued. An edge that fails the test but whose
+  flip is refused (N5) is left and counted (`n_refused`, status `Blocked`); none occurred.
+  Limit: `FlipLimit`, default 64 flips per edge of the triangulation, reported as status
+  `FlipLimit` (the reference has none).
+  *Ties* (§5 item 4): an interior edge is counted as a tie when `|α + β − π|` (or `|weight|`)
+  is within the tolerance. The result is the Delaunay triangulation up to the diagonals of
+  ties: two orders of flipping differ in at most `2 · n_ties` edges and in none where
+  `n_ties = 0`, and the Dirichlet energy of every vertex function is the same for both.
+  *Boundary.* Boundary edges are never flipped, so a boundary edge keeps the weight `½ cot` of
+  its one opposite angle, negative if that angle is obtuse: on a surface with boundary the
+  Laplacian after flipping has no positive off-diagonal entry between vertices that are not
+  both on the boundary, and can have one between two boundary vertices.
+* **N7** *Tracing.* The triangles along the path are unfolded one after the other into one
+  plane in which the path is the positive x-axis (paper Sec. 3.2.2); the edge through which the
+  path leaves a triangle is decided by the sign of the y-coordinate of the triangle's third
+  vertex (`it-unfold-apex`), and the crossing is `it-ray-edge-intersection`, whose parameter
+  lies in `[0, 1]` without clamping. The reference instead carries a direction from face to
+  face in barycentric coordinates and projects it into range (constants `1e-12` and `1e-9`,
+  not counted); nothing of that kind is done here.
+  Starts: a vertex with a normalized direction (the wedge is the outgoing halfedge with the
+  largest signpost not above the direction, Alg. 2), a point of an edge, a point of a face. A
+  query that starts at the end of an edge or the corner of a face is refused: start at the
+  vertex.
+  Paths through vertices: a path exactly along an edge is followed to a point of that edge or
+  to its end vertex; a path that reaches a vertex with length left stops there
+  (`TraceStop::Vertex`) and is not continued; a path that reaches the boundary stops there
+  (`TraceStop::Boundary`). No operation of §4 needs more.
+  Frames (paper Sec. 2.3): a vertex: N2; a point of an edge: angle zero along the edge, on the
+  input mesh from its lower-numbered vertex; a point of face `f`: angle zero along halfedge
+  `3 f`. A trace returns the direction that points back along the path in the frame of its end
+  (`back_direction`): the first signpost of a vertex inserted there (Sec. 3.2.3).
+  Limit on the crossings of one query: `100 · n_faces + 100` unless given; reaching it is an
+  error (`CrossingLimit`).
+* **N8** *The check of an edge trace.* The place of the edge's far vertex on the input mesh is
+  unfolded with every input triangle along the path that contains it. The trace succeeds when
+  that place comes within `tolerance · ℓ` of the end of the path (`EdgeTraceOptions::tolerance`,
+  default `1e-6`; `ℓ` the edge's length), and the path ends there. It fails when the path has
+  been followed for `ℓ (1 + tolerance)` without that, or left the surface, or ran along an
+  input edge into another vertex, or reached the crossing limit; the error names the edge, its
+  end points and the smallest distance reached. This is in place of Appendix A's rule (the
+  last crossing must enter the star of the target, later crossings are removed, a path that
+  stops short is connected through a neighbouring triangle), which has no metric bound; here no
+  crossing is removed or added. An edge that has not been flipped since the triangulation was
+  made lies along its input edge and is not traced (`edge_on_input`; the reference's
+  `edgeIsOriginal`). An edge flipped away and back is traced and recognized by its trace.
+* **N9** *Data model* (§3). Halfedges are numbered as in `ddg_core::TriMesh` (`h = 3 f + k`,
+  none outside the surface), so a triangulation fresh from the input mesh has its ids; the twin
+  of a halfedge may lie in the same face. Edges have ids of their own, kept under flips; the
+  direction of an edge is that of `edge_halfedge(e)`, which a flip turns counter-clockwise (as
+  the reference). A flip moves two halfedges between the two faces, so halfedge ids are not
+  stable; vertex, edge and face ids are. The input mesh is held as an immutable copy behind an
+  `Arc` (`InputSurface`: the `TriMesh`, its `Geometry`, its signposts and angle sums): no
+  lifetime parameter, and clones of a triangulation share it. `to_tri_mesh` hands out a
+  triangulation that is a simplicial complex and refuses one that is not; splitting edges to
+  make it one is §6. Open for the second half: how elements are numbered when inserted vertices
+  are removed again (the reference's refinement does that), and what identifies a state (§6).
+
+Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
+`it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
+`it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`; from `ddg-core`:
+`cotan-laplacian`, `lumped-mass`, `angle-defect`, `boundary-geodesic-curvature`. The Lean
+theorems and citations of §7 are not written yet, so `scripts/check-formulas.sh` reports the
+`it-` ids as missing.

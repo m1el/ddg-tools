@@ -534,4 +534,62 @@ mod tests {
             traces.crossings(e)
         );
     }
+    /// SPEC N8: the path is followed for the tolerance beyond the edge's length. Here the far
+    /// vertex sits just behind an input edge (a triangle with a height of 1e-4), and the edge
+    /// is made a little too short, so that its path ends before that input edge.
+    #[test]
+    fn a_vertex_just_behind_an_input_edge_is_reached_within_the_tolerance() {
+        // x below, u and w left and right, y barely above the segment u w.
+        let positions = [
+            [0.0, -1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1e-4, 0.0],
+        ];
+        let (x, u, w, y) = (0, 1, 2, 3);
+        let mesh = TriMesh::new(4, vec![[0, 2, 1], [1, 2, 3]]).unwrap();
+        let geometry = Geometry::from_positions(&mesh, &positions).unwrap();
+        let mut tri = IntrinsicTriangulation::new(&mesh, &geometry).unwrap();
+        let e = mesh.find_edge(u, w).unwrap();
+        tri.flip_edge(e).unwrap();
+        if tri.edge_vertices(e) != [x, y] {
+            // The other direction: two more flips turn the edge around.
+            tri.flip_edge(e).unwrap();
+            tri.flip_edge(e).unwrap();
+        }
+        assert_eq!(tri.edge_vertices(e), [x, y]);
+        let length = tri.edge_length(e);
+        // The triangle u w y has a height of 1e-4: its shape is known to 1e-12 only.
+        assert!((length - 1.0001).abs() < 1e-11, "{length}");
+        let options = EdgeTraceOptions {
+            tolerance: 1e-3,
+            max_crossings: None,
+        };
+        let exact = tri.trace_edge(e, &options).unwrap();
+        assert_eq!(exact.crossings.len(), 1);
+        assert!(exact.mismatch < 1e-11, "{}", exact.mismatch);
+        assert!((exact.crossings[0].t - 0.5).abs() < 1e-11);
+        assert!((exact.crossings[0].distance - 1.0).abs() < 1e-11);
+        // Too short by 2e-4: the path ends 1e-4 before the input edge u w.
+        tri.edge_lengths[e] = length - 2e-4;
+        let short = tri.trace_edge(e, &options).unwrap();
+        assert_eq!(short.crossings, exact.crossings);
+        assert!((short.mismatch - 2e-4).abs() < 1e-11, "{}", short.mismatch);
+        // With a tolerance below the error it is a failure: the path ends in the face below.
+        let strict = EdgeTraceOptions {
+            tolerance: 1e-5,
+            max_crossings: None,
+        };
+        match tri.trace_edge(e, &strict) {
+            Err(IntrinsicError::EdgeTrace(failure)) => match failure.reason {
+                EdgeTraceFailureReason::Missed {
+                    end: SurfacePoint::Face { face: 0, .. },
+                    mismatch: None,
+                    n_crossings: 0,
+                } => {}
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
 }

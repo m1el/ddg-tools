@@ -778,3 +778,179 @@ impl<S: Surface> Walker<'_, S> {
         self.outcome(end, stop, to_vertex, back_at_far, Some(edge), None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Targets that are not vertices. Vertices on input edges and inside input faces do not
+    //! exist before vertex insertion does; the kernel is written for them and tested here.
+
+    use ddg_core::Geometry;
+    use ddg_core::generators::grid_disk;
+
+    use super::*;
+    use crate::InputSurface;
+
+    /// A flat 4 × 4 grid, sheared a little so that nothing is aligned, with its positions.
+    fn surface() -> (InputSurface, Vec<[f64; 2]>) {
+        let mut shape = grid_disk(4, 4).unwrap();
+        for p in &mut shape.positions {
+            p[0] += 0.3 * p[1];
+        }
+        let mesh = shape.topology().unwrap();
+        let geometry = Geometry::from_positions(&mesh, &shape.positions).unwrap();
+        let xy = shape.positions.iter().map(|p| [p[0], p[1]]).collect();
+        (InputSurface::new(&mesh, &geometry).unwrap(), xy)
+    }
+
+    /// The position of a point of an edge or a face, and the angle in the plane of direction
+    /// zero of its frame.
+    fn place(s: &InputSurface, xy: &[[f64; 2]], p: SurfacePoint) -> ([f64; 2], f64) {
+        let towards = |a: [f64; 2], b: [f64; 2]| (b[1] - a[1]).atan2(b[0] - a[0]);
+        match p {
+            SurfacePoint::Edge { edge, t } => {
+                let [a, b] = s.mesh().edge_vertices(edge as usize).map(|v| xy[v]);
+                (
+                    [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])],
+                    towards(a, b),
+                )
+            }
+            SurfacePoint::Face { face, bary } => {
+                let q = s.mesh().faces()[face as usize].map(|v| xy[v as usize]);
+                (
+                    [0, 1].map(|k| bary[0] * q[0][k] + bary[1] * q[1][k] + bary[2] * q[2][k]),
+                    towards(q[0], q[1]),
+                )
+            }
+            SurfacePoint::Vertex(_) => unreachable!("not used here"),
+        }
+    }
+
+    fn interior_edge(s: &InputSurface, n: usize) -> u32 {
+        (0..s.mesh().n_edges())
+            .filter(|&e| !s.mesh().is_boundary_edge(e))
+            .nth(n)
+            .unwrap() as u32
+    }
+
+    #[test]
+    fn a_path_ends_at_a_target_on_an_edge_or_in_a_face() {
+        let (s, xy) = surface();
+        let options = TraceOptions {
+            record_crossings: true,
+            max_crossings: None,
+        };
+        let points = [
+            SurfacePoint::Face {
+                face: 2,
+                bary: [0.2, 0.3, 0.5],
+            },
+            SurfacePoint::Edge {
+                edge: interior_edge(&s, 3),
+                t: 0.35,
+            },
+            SurfacePoint::Face {
+                face: 27,
+                bary: [0.6, 0.1, 0.3],
+            },
+            SurfacePoint::Edge {
+                edge: interior_edge(&s, 30),
+                t: 0.8,
+            },
+            SurfacePoint::Face {
+                face: 13,
+                bary: [0.1, 0.45, 0.45],
+            },
+        ];
+        let mut with_crossings = 0;
+        for &start in &points {
+            for &end in &points {
+                if start == end {
+                    continue;
+                }
+                let ((a, zero), (b, zero_at_end)) = (place(&s, &xy, start), place(&s, &xy, end));
+                let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+                let world = (b[1] - a[1]).atan2(b[0] - a[0]);
+                let direction = wrap(world - zero);
+                let target = Target {
+                    point: end,
+                    tolerance: 1e-12,
+                };
+                let outcome = run(&s, start, direction, length, &options, Some(target)).unwrap();
+                let context = format!("{start} to {end}: {outcome:?}");
+                let mismatch = outcome.mismatch.unwrap_or_else(|| panic!("{context}"));
+                assert!(mismatch < 1e-14, "{context}");
+                assert_eq!(outcome.closest, Some(mismatch), "{context}");
+                let trace = &outcome.trace;
+                assert_eq!(trace.end, end, "{context}");
+                assert_eq!(
+                    (trace.stop, trace.length),
+                    (TraceStop::Completed, length),
+                    "{context}"
+                );
+                // The way back, in the frame of the edge or the face of the target.
+                let back = wrap(world + PI - zero_at_end);
+                let apart = (trace.back_direction - back).abs();
+                assert!(apart.min(TAU - apart) < 1e-12, "{context}: expected {back}");
+                // The same path without a target crosses the same edges, and one more if it
+                // ends on an edge and rounding puts its end just beyond.
+                let free = run(&s, start, direction, length, &options, None)
+                    .unwrap()
+                    .trace;
+                let n = trace.n_crossings;
+                assert!(
+                    free.n_crossings == n || free.n_crossings == n + 1,
+                    "{context}"
+                );
+                assert_eq!(trace.crossings[..], free.crossings[..n], "{context}");
+                if free.n_crossings > n {
+                    let SurfacePoint::Edge { edge, .. } = end else {
+                        panic!("{context}");
+                    };
+                    assert_eq!(free.crossings[n].edge, edge, "{context}");
+                }
+                with_crossings += usize::from(n > 0);
+
+                // A target that is somewhere else on the way is not met, and the path says by
+                // how much: 1e-3 too short.
+                let short = run(&s, start, direction, length - 1e-3, &options, Some(target));
+                let short = short.unwrap();
+                assert_eq!(short.mismatch, None, "{context}");
+                let closest = short.closest.unwrap();
+                assert!((closest - 1e-3).abs() < 1e-12, "{context}: {closest}");
+            }
+        }
+        assert!(with_crossings >= 15);
+    }
+
+    #[test]
+    fn a_path_along_an_edge_ends_at_a_target_on_that_edge() {
+        let (s, _) = surface();
+        let options = TraceOptions::default();
+        let mesh = s.mesh();
+        for v in [6usize, 12, 18] {
+            for h in mesh.outgoing_halfedges(v) {
+                let e = mesh.edge(h);
+                let len = s.geometry().edge_lengths()[e];
+                let forward = mesh.edge_vertices(e)[0] == v;
+                // 0.6 of the way from v, as a parameter of the edge.
+                let t = if forward { 0.6 } else { 0.4 };
+                let target = Target {
+                    point: SurfacePoint::Edge { edge: e as u32, t },
+                    tolerance: 1e-12 * len,
+                };
+                let start = SurfacePoint::Vertex(v as u32);
+                let hit = run(&s, start, s.signpost(h), 0.6 * len, &options, Some(target)).unwrap();
+                assert!(hit.mismatch.unwrap() < 1e-15, "{hit:?}");
+                assert_eq!(hit.trace.end, target.point);
+                assert_eq!(hit.trace.along_edge, Some(e as u32));
+                assert_eq!(hit.trace.back_direction, if forward { PI } else { 0.0 });
+                // Half the way only: 0.1 of the edge short of the target.
+                let miss =
+                    run(&s, start, s.signpost(h), 0.5 * len, &options, Some(target)).unwrap();
+                assert_eq!(miss.mismatch, None);
+                assert!((miss.closest.unwrap() - 0.1 * len).abs() < 1e-15);
+                assert!(matches!(miss.trace.end, SurfacePoint::Edge { .. }));
+            }
+        }
+    }
+}
