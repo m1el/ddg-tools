@@ -155,7 +155,12 @@ mod tests {
 
     #[test]
     fn a_similarity_has_no_scale_free_distortion() {
-        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
         let corner_vertices = [0, 1, 2, 0, 2, 3];
         let triangles = [[0, 1, 2], [3, 4, 5]];
         // Scaled by 3 and rotated by a quarter turn.
@@ -174,7 +179,12 @@ mod tests {
 
     #[test]
     fn unequal_scales_are_measured_and_flips_counted() {
-        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]];
+        let positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
         let corner_vertices = [0, 1, 2, 0, 2, 3];
         let triangles = [[0, 1, 2], [3, 4, 5]];
         // First triangle at scale 1, second at scale e (lengths) and mirrored.
@@ -201,7 +211,14 @@ mod tests {
         let positions = [[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         let corner_vertices = [0, 1, 2, 0, 1, 3];
         let triangles = [[0, 1, 2], [3, 4, 5], [3, 4, 9]];
-        let uvs = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
+        let uvs = [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+        ];
         let d = area_distortion(&positions, &corner_vertices, &triangles, &uvs);
         assert_eq!((d.n_measured, d.n_degenerate, d.n_collapsed), (0, 2, 1));
         assert_eq!(d.raw, 0.0);

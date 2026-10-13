@@ -122,10 +122,7 @@ pub(crate) fn check_piece(
         && (k as f64) <= check.max_fraction * n as f64
     {
         report.share = carried / total;
-        report.vertices = parts[..k]
-            .iter()
-            .map(|p| piece.vertex_input[p.1])
-            .collect();
+        report.vertices = parts[..k].iter().map(|p| piece.vertex_input[p.1]).collect();
         report.vertices.sort_unstable();
     }
     Ok(Some(report))

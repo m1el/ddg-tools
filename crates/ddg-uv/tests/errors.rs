@@ -38,7 +38,10 @@ fn malformed_polygon_arrays() {
 
     let mut m = good.clone();
     m.polygon_offsets = vec![0];
-    assert_eq!(message(&m, &d), (ErrorKind::Input, "the mesh has no faces".into()));
+    assert_eq!(
+        message(&m, &d),
+        (ErrorKind::Input, "the mesh has no faces".into())
+    );
 
     let mut m = good.clone();
     m.polygon_offsets = vec![1, 3, 6];
@@ -70,7 +73,10 @@ fn malformed_polygon_arrays() {
 
     let mut m = good.clone();
     m.positions[2][1] = f64::NAN;
-    assert_eq!(message(&m, &d).1, "positions[2] = NaN is not a finite number");
+    assert_eq!(
+        message(&m, &d).1,
+        "positions[2] = NaN is not a finite number"
+    );
 
     let mut m = good.clone();
     m.triangles[1] = [3, 4, 6];
@@ -282,7 +288,10 @@ fn options_out_of_range() {
         ),
     ];
     for (options, expected) in cases {
-        assert_eq!(message(&mesh, &options), (ErrorKind::Input, expected.to_string()));
+        assert_eq!(
+            message(&mesh, &options),
+            (ErrorKind::Input, expected.to_string())
+        );
     }
 }
 
@@ -302,7 +311,10 @@ fn meshes_that_are_not_manifold() {
     );
     assert_eq!(
         message(&fins, &d),
-        (ErrorKind::Mesh, "edge (0, 1) is shared by 3 faces: 0, 1, 2".into())
+        (
+            ErrorKind::Mesh,
+            "edge (0, 1) is shared by 3 faces: 0, 1, 2".into()
+        )
     );
 
     // Two triangles that touch in one vertex only.
@@ -335,7 +347,10 @@ fn meshes_that_are_not_manifold() {
     );
     assert_eq!(
         message(&repeated, &d),
-        (ErrorKind::Mesh, "face 0 uses vertex 1 more than once".into())
+        (
+            ErrorKind::Mesh,
+            "face 0 uses vertex 1 more than once".into()
+        )
     );
 
     // A quad split along (0, 2), and a triangle that uses (0, 2) as an edge on each side.
@@ -373,7 +388,11 @@ fn moebius(n: u32) -> PolygonMesh {
     let mut polygons = Vec::new();
     for i in 0..n {
         let (a, b) = (2 * i, 2 * i + 1);
-        let (c, d) = if i + 1 < n { (2 * i + 2, 2 * i + 3) } else { (1, 0) };
+        let (c, d) = if i + 1 < n {
+            (2 * i + 2, 2 * i + 3)
+        } else {
+            (1, 0)
+        };
         polygons.push(vec![a, c, d, b]);
     }
     PolygonMesh::from_polygons(positions, &polygons)
@@ -467,7 +486,11 @@ fn degenerate_triangles() {
     assert!(report.mollified);
     assert_eq!(report.n_degenerate_triangles, 1);
     assert_eq!(report.worst_polygon, Some(0));
-    assert!(report.epsilon > 0.0 && report.epsilon < 1e-5, "{}", report.epsilon);
+    assert!(
+        report.epsilon > 0.0 && report.epsilon < 1e-5,
+        "{}",
+        report.epsilon
+    );
     assert_eq!(map.report.warnings.len(), 1);
     assert!(map.report.warnings[0].contains("intrinsic mollification"));
     assert!(map.uvs.iter().all(|q| q[0].is_finite() && q[1].is_finite()));
@@ -503,19 +526,45 @@ fn hostile_geometry_is_refused_without_a_panic() {
     let map = unwrap(&two_triangles().input(), &d).unwrap();
     let summary = map.report.summary();
     let reserved = [
-        "pipeline", "placeholder", "n_vertices", "n_polygons", "n_corners", "n_triangles",
-        "n_seam_edges", "n_pinned", "n_prescribed", "n_forbidden", "lambda",
-        "positive_cones_only", "n_charts", "n_cones", "n_cut_edges", "n_degenerate_triangles",
-        "n_collapsed_uv_triangles", "n_flipped_uv_triangles", "measured_triangles",
-        "seconds_pipeline", "seconds_measure", "seconds_decode", "seconds_validate",
-        "seconds_encode", "seconds_total", "warnings",
+        "pipeline",
+        "placeholder",
+        "n_vertices",
+        "n_polygons",
+        "n_corners",
+        "n_triangles",
+        "n_seam_edges",
+        "n_pinned",
+        "n_prescribed",
+        "n_forbidden",
+        "lambda",
+        "positive_cones_only",
+        "n_charts",
+        "n_cones",
+        "n_cut_edges",
+        "n_degenerate_triangles",
+        "n_collapsed_uv_triangles",
+        "n_flipped_uv_triangles",
+        "measured_triangles",
+        "seconds_pipeline",
+        "seconds_measure",
+        "seconds_decode",
+        "seconds_validate",
+        "seconds_encode",
+        "seconds_total",
+        "warnings",
     ];
     for (i, (key, value)) in summary.iter().enumerate() {
         if let ddg_uv::Value::Float(x) = value {
             assert!(!x.is_nan(), "{key}");
         }
-        assert!(!reserved.contains(key) && !key.starts_with("measured_"), "{key}");
-        assert!(summary[..i].iter().all(|(other, _)| other != key), "{key} twice");
+        assert!(
+            !reserved.contains(key) && !key.starts_with("measured_"),
+            "{key}"
+        );
+        assert!(
+            summary[..i].iter().all(|(other, _)| other != key),
+            "{key} twice"
+        );
     }
 }
 
@@ -585,7 +634,10 @@ fn closed_surfaces_and_infeasible_cones() {
     };
     let e = unwrap(&mesh.input(), &one_site).unwrap_err();
     assert_eq!(e.kind(), ErrorKind::Solve);
-    assert!(matches!(e, UvError::UnrealizableCone { vertex: 0, angle } if angle > TAU), "{e}");
+    assert!(
+        matches!(e, UvError::UnrealizableCone { vertex: 0, angle } if angle > TAU),
+        "{e}"
+    );
 }
 
 #[test]

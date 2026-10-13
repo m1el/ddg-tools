@@ -24,8 +24,8 @@ use ddg_uv::primitives::{
     End, capsule, cone, cube, cylinder, grid_cube, holed_slab, revolution, torus, uv_sphere,
 };
 use ddg_uv::{
-    BoundaryValues, ClosedSurfaces, SpikeAction, SpikeCheck, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh, SlitPlacement,
-    UnwrapOptions, area_distortion, unwrap,
+    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh,
+    SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions, area_distortion, unwrap,
 };
 
 fn dataset_dir() -> PathBuf {
@@ -44,7 +44,13 @@ fn load(name: &str) -> Option<(PolygonMesh, Option<f64>)> {
     let faces = obj.triangles()?;
     let mesh = PolygonMesh::from_triangles(obj.positions.clone(), &faces);
     let published = obj.corner_uvs().map(|uvs| {
-        area_distortion(&mesh.positions, &mesh.corner_vertices, &mesh.triangles, &uvs).scale_free
+        area_distortion(
+            &mesh.positions,
+            &mesh.corner_vertices,
+            &mesh.triangles,
+            &uvs,
+        )
+        .scale_free
     });
     Some((mesh, published))
 }
@@ -68,7 +74,10 @@ fn primitives() -> Vec<(String, PolygonMesh)> {
     let ico = icosphere(2).unwrap();
     vec![
         ("uv_sphere 32x16".into(), uv_sphere(32, 16, 1.0).unwrap()),
-        ("icosphere 320".into(), PolygonMesh::from_triangles(ico.positions.clone(), &ico.faces)),
+        (
+            "icosphere 320".into(),
+            PolygonMesh::from_triangles(ico.positions.clone(), &ico.faces),
+        ),
         ("cube".into(), cube(2.0)),
         ("grid_cube 8".into(), grid_cube(8, 2.0)),
         ("cylinder 32".into(), cylinder(32, 1, 1.0, 2.0).unwrap()),
@@ -129,24 +138,96 @@ fn closed(filter: &str) {
     };
     let big = 0.95 * TAU;
     let policies: Vec<(&str, ClosedSurfaces, f64)> = vec![
-        ("(a) raw optimum, merged      λ 0.5", ClosedSurfaces::RawOptimum, 0.5),
-        ("(b) 1 free site, unbounded   λ 0.5", sites(1, f64::INFINITY, false), 0.5),
-        ("(b) 1 free site, unbounded   λ 0.05", sites(1, f64::INFINITY, false), 0.05),
-        ("(b) 1 free site, µ<=0.95·2π  λ 0.5", sites(1, big, false), 0.5),
-        ("(b) 4 sites only, µ<=0.95·2π λ 0.5", sites(4, big, true), 0.5),
-        ("(b) 8 sites only, µ<=π       λ 0.5", sites(8, PI, true), 0.5),
-        ("(b) 8 sites only, µ<=0.95·2π λ 0.5", sites(8, big, true), 0.5),
-        ("(b) 16 sites only, µ<=π      λ 0.5", sites(16, PI, true), 0.5),
-        ("(c) slit at max |Ω|, 2 edges λ 0.5", slit(SlitPlacement::AtLargestCurvature, 0.0), 0.5),
-        ("(c) slit at max |Ω|, 2 edges λ 0.1", slit(SlitPlacement::AtLargestCurvature, 0.0), 0.1),
-        ("(c) slit at max |Ω|, 2 edges λ 0.02", slit(SlitPlacement::AtLargestCurvature, 0.0), 0.02),
-        ("(c) slit mid-diameter, 0.25  λ 0.5", slit(SlitPlacement::DiameterMiddle, 0.25), 0.5),
-        ("(c) slit mid-diameter, 0.5   λ 0.5", slit(SlitPlacement::DiameterMiddle, 0.5), 0.5),
-        ("(c) slit mid-diameter, 0.5   λ 0.1", slit(SlitPlacement::DiameterMiddle, 0.5), 0.1),
-        ("(c) slit mid-diameter, 0.5   λ 0.02", slit(SlitPlacement::DiameterMiddle, 0.5), 0.02),
-        ("(c) slit mid-diameter, 1.0   λ 0.5", slit(SlitPlacement::DiameterMiddle, 1.0), 0.5),
-        ("(c) slit mid-diameter, 1.0   λ 0.1", slit(SlitPlacement::DiameterMiddle, 1.0), 0.1),
-        ("(c) slit mid-diameter, 1.0   λ 0.02", slit(SlitPlacement::DiameterMiddle, 1.0), 0.02),
+        (
+            "(a) raw optimum, merged      λ 0.5",
+            ClosedSurfaces::RawOptimum,
+            0.5,
+        ),
+        (
+            "(b) 1 free site, unbounded   λ 0.5",
+            sites(1, f64::INFINITY, false),
+            0.5,
+        ),
+        (
+            "(b) 1 free site, unbounded   λ 0.05",
+            sites(1, f64::INFINITY, false),
+            0.05,
+        ),
+        (
+            "(b) 1 free site, µ<=0.95·2π  λ 0.5",
+            sites(1, big, false),
+            0.5,
+        ),
+        (
+            "(b) 4 sites only, µ<=0.95·2π λ 0.5",
+            sites(4, big, true),
+            0.5,
+        ),
+        (
+            "(b) 8 sites only, µ<=π       λ 0.5",
+            sites(8, PI, true),
+            0.5,
+        ),
+        (
+            "(b) 8 sites only, µ<=0.95·2π λ 0.5",
+            sites(8, big, true),
+            0.5,
+        ),
+        (
+            "(b) 16 sites only, µ<=π      λ 0.5",
+            sites(16, PI, true),
+            0.5,
+        ),
+        (
+            "(c) slit at max |Ω|, 2 edges λ 0.5",
+            slit(SlitPlacement::AtLargestCurvature, 0.0),
+            0.5,
+        ),
+        (
+            "(c) slit at max |Ω|, 2 edges λ 0.1",
+            slit(SlitPlacement::AtLargestCurvature, 0.0),
+            0.1,
+        ),
+        (
+            "(c) slit at max |Ω|, 2 edges λ 0.02",
+            slit(SlitPlacement::AtLargestCurvature, 0.0),
+            0.02,
+        ),
+        (
+            "(c) slit mid-diameter, 0.25  λ 0.5",
+            slit(SlitPlacement::DiameterMiddle, 0.25),
+            0.5,
+        ),
+        (
+            "(c) slit mid-diameter, 0.5   λ 0.5",
+            slit(SlitPlacement::DiameterMiddle, 0.5),
+            0.5,
+        ),
+        (
+            "(c) slit mid-diameter, 0.5   λ 0.1",
+            slit(SlitPlacement::DiameterMiddle, 0.5),
+            0.1,
+        ),
+        (
+            "(c) slit mid-diameter, 0.5   λ 0.02",
+            slit(SlitPlacement::DiameterMiddle, 0.5),
+            0.02,
+        ),
+        (
+            "(c) slit mid-diameter, 1.0   λ 0.5",
+            slit(SlitPlacement::DiameterMiddle, 1.0),
+            0.5,
+        ),
+        (
+            "(c) slit mid-diameter, 1.0   λ 0.1",
+            slit(SlitPlacement::DiameterMiddle, 1.0),
+            0.1,
+        ),
+        (
+            "(c) slit mid-diameter, 1.0   λ 0.02",
+            slit(SlitPlacement::DiameterMiddle, 1.0),
+            0.02,
+        ),
     ];
     let mut meshes = primitives();
     for name in ["axes", "bunny", "chair", "brain"] {
@@ -209,7 +290,10 @@ fn lambda(filter: &str) {
 fn signs(filter: &str) {
     let mut meshes = vec![
         ("torus 48x12".to_string(), torus(48, 12, 1.0, 0.25).unwrap()),
-        ("torus 48x12 thick".to_string(), torus(48, 12, 1.0, 0.6).unwrap()),
+        (
+            "torus 48x12 thick".to_string(),
+            torus(48, 12, 1.0, 0.6).unwrap(),
+        ),
         ("holed_slab genus 2".to_string(), holed_slab(2, 4, 1.0)),
         ("holed_slab genus 3".to_string(), holed_slab(3, 4, 1.0)),
     ];
@@ -234,7 +318,11 @@ fn signs(filter: &str) {
                     cone_signs,
                     ..UnwrapOptions::default()
                 };
-                println!("{:<22} | {}", format!("{label}, {lambda}"), row(mesh, &options));
+                println!(
+                    "{:<22} | {}",
+                    format!("{label}, {lambda}"),
+                    row(mesh, &options)
+                );
             }
         }
     }
@@ -351,11 +439,22 @@ fn reopt(filter: &str) {
          overlap % | flipped | seconds"
     );
     let names = [
-        "airplane", "body", "bump", "bunny", "camel", "chair", "cow01", "hand", "mannequin",
-        "rhino", "tree",
+        "airplane",
+        "body",
+        "bump",
+        "bunny",
+        "camel",
+        "chair",
+        "cow01",
+        "hand",
+        "mannequin",
+        "rhino",
+        "tree",
     ];
     for name in names.iter().filter(|n| n.contains(filter)) {
-        let Some((mesh, _)) = load(name) else { continue };
+        let Some((mesh, _)) = load(name) else {
+            continue;
+        };
         for lambda in [0.5, 0.2, 0.1, 0.02] {
             let run = |reoptimize_angles: bool| {
                 let options = UnwrapOptions {
@@ -430,7 +529,9 @@ fn seamed() -> Vec<(String, PolygonMesh, Vec<[u32; 2]>)> {
         (0..s).map(|j| [i * s + j, i * s + (j + 1) % s]).collect()
     };
     let line = |s: u32, rings: u32, j: u32| -> Vec<[u32; 2]> {
-        (0..rings - 1).map(|i| [i * s + j, (i + 1) * s + j]).collect()
+        (0..rings - 1)
+            .map(|i| [i * s + j, (i + 1) * s + j])
+            .collect()
     };
     let open_vase = |segments: usize, rings: usize| {
         let profile: Vec<(f64, f64)> = (0..rings)
@@ -482,9 +583,14 @@ fn seamed() -> Vec<(String, PolygonMesh, Vec<[u32; 2]>)> {
 
 fn boundary(filter: &str) {
     let names = dataset_names();
-    println!("## Dataset meshes with boundary (default lambda {})\n", UnwrapOptions::default().lambda);
+    println!(
+        "## Dataset meshes with boundary (default lambda {})\n",
+        UnwrapOptions::default().lambda
+    );
     for name in names.iter().filter(|n| n.contains(filter)) {
-        let Some((mesh, published)) = load(name) else { continue };
+        let Some((mesh, published)) = load(name) else {
+            continue;
+        };
         let probe = unwrap(&mesh.input(), &UnwrapOptions::default());
         let has_boundary = probe
             .as_ref()
@@ -493,7 +599,10 @@ fn boundary(filter: &str) {
         if !has_boundary {
             continue;
         }
-        println!("\n### {name} ({} triangles)\n\n{BOUNDARY_HEADER}", mesh.n_polygons());
+        println!(
+            "\n### {name} ({} triangles)\n\n{BOUNDARY_HEADER}",
+            mesh.n_polygons()
+        );
         for (label, boundary, reoptimize_angles) in boundary_configs() {
             let options = UnwrapOptions {
                 boundary,
@@ -520,7 +629,11 @@ fn boundary(filter: &str) {
                 Err(e) => println!("| {label} | FAILED: {e} |"),
                 Ok(map) => {
                     let r = &map.report;
-                    let bl = r.charts.iter().map(|c| c.flatten.boundary_length_error).fold(0.0, f64::max);
+                    let bl = r
+                        .charts
+                        .iter()
+                        .map(|c| c.flatten.boundary_length_error)
+                        .fold(0.0, f64::max);
                     println!(
                         "| {label} | {} | {:.5} | - | {:.3} | {} | {:.2} | {:.1e} | {} | {:.2e} | {:.2e} | {} |",
                         r.cones.n_cones,
@@ -564,10 +677,19 @@ fn verify(filter: &str) {
             boundary: BoundaryValues::Optimized,
             ..UnwrapOptions::default()
         };
-        let input = ddg_uv::MeshInput { seam_edges: &seams, ..mesh.input() };
-        let Ok(prepared) = ddg_uv::prepare(&input, &options) else { continue };
-        let Ok(cones) = ddg_uv::solve_cones(&prepared, &options) else { continue };
-        let Ok(flat) = ddg_uv::flatten(&prepared, &cones, &options) else { continue };
+        let input = ddg_uv::MeshInput {
+            seam_edges: &seams,
+            ..mesh.input()
+        };
+        let Ok(prepared) = ddg_uv::prepare(&input, &options) else {
+            continue;
+        };
+        let Ok(cones) = ddg_uv::solve_cones(&prepared, &options) else {
+            continue;
+        };
+        let Ok(flat) = ddg_uv::flatten(&prepared, &cones, &options) else {
+            continue;
+        };
         for (k, piece) in prepared.pieces.iter().enumerate() {
             let (pc, pf) = (&cones.pieces[k], &flat.pieces[k]);
             if !pc.boundary_optimized {
@@ -575,7 +697,8 @@ fn verify(filter: &str) {
             }
             let on = pc.slit_piece.as_ref().unwrap_or(piece);
             let u = pc.log_scale.as_ref().unwrap();
-            let (mut n, mut off, mut worst, mut max_err, mut sum_err) = (0usize, 0usize, 0.0f64, 0.0f64, 0.0);
+            let (mut n, mut off, mut worst, mut max_err, mut sum_err) =
+                (0usize, 0usize, 0.0f64, 0.0f64, 0.0);
             let (mut umin, mut umax) = (f64::INFINITY, f64::NEG_INFINITY);
             for h in (0..on.mesh.n_halfedges()).filter(|&h| on.mesh.twin(h).is_none()) {
                 let (a, b) = (on.mesh.from_vertex(h), on.mesh.to_vertex(h));
@@ -583,7 +706,9 @@ fn verify(filter: &str) {
                     mesh.positions[on.vertex_input[a] as usize],
                     mesh.positions[on.vertex_input[b] as usize],
                 );
-                let len = ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2)).sqrt();
+                let len =
+                    ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2) + (pa[2] - pb[2]).powi(2))
+                        .sqrt();
                 let ratio = (0.5 * (u[a] + u[b])).exp();
                 let target = ratio * len;
                 let (p, q) = (pf.corner_uvs[h], pf.corner_uvs[on.mesh.next(h)]);
@@ -599,7 +724,10 @@ fn verify(filter: &str) {
                 max_err = max_err.max(err);
                 sum_err += err;
                 if std::env::var_os("DDG_VERBOSE").is_some() {
-                    println!("  edge {h}: u {:.4} {:.4}  len {len:.5}  target {target:.5}  layout {got:.5}  err {err:.2e}", u[a], u[b]);
+                    println!(
+                        "  edge {h}: u {:.4} {:.4}  len {len:.5}  target {target:.5}  layout {got:.5}  err {err:.2e}",
+                        u[a], u[b]
+                    );
                 }
             }
             println!(
@@ -614,21 +742,33 @@ fn verify(filter: &str) {
 
 /// Spike tips excluded from the distortion measure or not, for both boundary treatments.
 fn spike_action(filter: &str) {
-    println!("| mesh | boundary | spikes | cones | distortion | published | overlap % | flipped | seconds | excluded | warnings |\n|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+    println!(
+        "| mesh | boundary | spikes | cones | distortion | published | overlap % | flipped | seconds | excluded | warnings |\n|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+    );
     for name in dataset_names().iter().filter(|n| n.contains(filter)) {
-        let Some((mesh, published)) = load(name) else { continue };
+        let Some((mesh, published)) = load(name) else {
+            continue;
+        };
         for boundary in [BoundaryValues::Zero, BoundaryValues::Optimized] {
             for action in [SpikeAction::WarnOnly, SpikeAction::ExcludeFromDistortion] {
                 let options = UnwrapOptions {
                     boundary,
-                    spike_check: Some(SpikeCheck { action, ..SpikeCheck::default() }),
+                    spike_check: Some(SpikeCheck {
+                        action,
+                        ..SpikeCheck::default()
+                    }),
                     ..UnwrapOptions::default()
                 };
                 match unwrap(&mesh.input(), &options) {
                     Err(e) => println!("| {name} | {boundary:?} | {action:?} | FAILED {e} |"),
                     Ok(map) => {
                         let r = &map.report;
-                        let ex: usize = r.charts.iter().filter_map(|c| c.spikes.as_ref()).map(|s| s.excluded.len()).sum();
+                        let ex: usize = r
+                            .charts
+                            .iter()
+                            .filter_map(|c| c.spikes.as_ref())
+                            .map(|s| s.excluded.len())
+                            .sum();
                         println!(
                             "| {name} | {boundary:?} | {action:?} | {} | {:.5} | {} | {:.3} | {} | {:.2} | {ex} | {} |",
                             r.cones.n_cones,
@@ -659,6 +799,8 @@ fn main() {
         Some("boundary") => boundary(filter),
         Some("verify") => verify(filter),
         Some("spikeaction") => spike_action(filter),
-        _ => eprintln!("usage: evaluate closed|lambda|signs|merge|dataset|reopt|boundary [name filter]"),
+        _ => eprintln!(
+            "usage: evaluate closed|lambda|signs|merge|dataset|reopt|boundary [name filter]"
+        ),
     }
 }

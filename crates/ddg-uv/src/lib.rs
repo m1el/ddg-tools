@@ -48,6 +48,11 @@
 //! # }
 //! ```
 //!
+//! The module [`cutting`] puts the cut flow of "Variational Surface Cutting" (Sharp, Crane 2018,
+//! crate `ddg-variational-cuts`) in front of this pipeline for polygon meshes: a session that
+//! moves a cut on the seam-cut triangulation, the cut expressed on the caller's polygons, the
+//! insertion of the cut into a polygon mesh, and `unwrap` with the cut as seams.
+//!
 //! # Stages
 //!
 //! [`unwrap`] runs these in order; [`prepare`], [`solve_cones`], [`flatten`] and [`assemble`]
@@ -102,6 +107,7 @@
 #![warn(missing_docs)]
 
 pub mod cones;
+pub mod cutting;
 pub mod error;
 pub mod flatten;
 pub mod input;
@@ -126,11 +132,12 @@ pub use options::{
     BoundaryValues, ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
     SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions,
 };
-pub use spikes::SpikeReport;
 pub use pack::{PackReport, pack_charts};
 pub use pipeline::{UvMap, assemble, unwrap};
 pub use prepare::{Piece, Prepared, prepare};
 pub use report::{
     ChartReport, ClosedHandling, ConeSolveReport, ConeStats, DegenerateReport, FlattenReport,
-    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport, Value,
+    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport,
+    Value,
 };
+pub use spikes::SpikeReport;

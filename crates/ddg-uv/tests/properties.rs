@@ -9,8 +9,8 @@ use ddg_uv::primitives::{
     End, cone, cylinder, grid_cube, holed_slab, jittered, revolution, torus, uv_sphere,
 };
 use ddg_uv::{
-    BoundaryValues, ClosedSurfaces, Cone, ConeSigns, MeshInput, MergeClusters, PackOptions, PolygonMesh,
-    SlitPlacement, UnwrapOptions, UvError, unwrap,
+    BoundaryValues, ClosedSurfaces, Cone, ConeSigns, MergeClusters, MeshInput, PackOptions,
+    PolygonMesh, SlitPlacement, UnwrapOptions, UvError, unwrap,
 };
 use proptest::prelude::*;
 
@@ -53,8 +53,20 @@ fn mesh_of(kind: usize, rng: &mut SplitMix64) -> PolygonMesh {
         4 => cone(8, 1.0, 2.0).unwrap(),
         5 => torus(8, 6, 1.0, 0.4).unwrap(),
         6 => holed_slab(2, 1, 1.0),
-        7 => revolution(&[(1.0, 1.0), (1.0, 0.3), (0.8, -0.2)], 7, End::Open, End::Cap).unwrap(),
-        8 => revolution(&[(0.5, 0.3), (1.0, 0.2), (1.5, 0.0)], 9, End::Open, End::Open).unwrap(),
+        7 => revolution(
+            &[(1.0, 1.0), (1.0, 0.3), (0.8, -0.2)],
+            7,
+            End::Open,
+            End::Cap,
+        )
+        .unwrap(),
+        8 => revolution(
+            &[(0.5, 0.3), (1.0, 0.2), (1.5, 0.0)],
+            9,
+            End::Open,
+            End::Open,
+        )
+        .unwrap(),
         _ => union(&grid_cube(2, 1.0), &quad_grid(3, 3)),
     };
     let mut mesh = jittered(&base, 0.02, rng.next_u64());
@@ -247,9 +259,15 @@ fn run_case(kind: usize, seed: u64) -> Result<(Outcome, usize, usize, usize), St
     // Prescribed cones are imposed exactly, or reported as not imposable.
     for cone in &prescribed {
         let found = map.cones.iter().find(|c| c.vertex == cone.vertex);
-        let skipped = map.report.steering.prescribed_not_applied.contains(&cone.vertex);
+        let skipped = map
+            .report
+            .steering
+            .prescribed_not_applied
+            .contains(&cone.vertex);
         if skipped != found.is_none() || (!skipped && found.map(|c| c.angle) != Some(cone.angle)) {
-            return Err(format!("prescribed {cone:?} became {found:?} (skipped: {skipped})"));
+            return Err(format!(
+                "prescribed {cone:?} became {found:?} (skipped: {skipped})"
+            ));
         }
     }
     let steering = &map.report.steering;

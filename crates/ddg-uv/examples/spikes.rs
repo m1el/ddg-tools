@@ -34,7 +34,9 @@ fn probe(name: &str, mesh: &PolygonMesh) {
         };
         let secs = t.elapsed().as_secs_f64();
         let mass = lumped_mass_normalized(&piece.mesh, &piece.geometry).unwrap();
-        let mut c: Vec<(f64, usize)> = (0..n).map(|i| (mass[i] * ev.log_scale[i].powi(2), i)).collect();
+        let mut c: Vec<(f64, usize)> = (0..n)
+            .map(|i| (mass[i] * ev.log_scale[i].powi(2), i))
+            .collect();
         let total: f64 = c.iter().map(|x| x.0).sum();
         c.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         let share = |k: usize| c.iter().take(k).map(|x| x.0).sum::<f64>() / total;
@@ -52,20 +54,39 @@ fn probe(name: &str, mesh: &PolygonMesh) {
         };
         println!(
             "{name} p{pi} n={n} E0={:.4e} top1={:.4} top8={:.4} top32={:.4} k90={} k99={} mass(top8)={:.2e} t={:.3}s",
-            ev.distortion, share(1), share(8), share(32), reach(0.9), reach(0.99), mshare(8), secs
+            ev.distortion,
+            share(1),
+            share(8),
+            share(32),
+            reach(0.9),
+            reach(0.99),
+            mshare(8),
+            secs
         );
     }
 }
 
 fn main() {
     let filter = std::env::args().nth(1).unwrap_or_default();
-    let dir = std::env::var("DDG_DATASET").unwrap_or("../../data/optimal-cones/optimal-cones-data/data".into());
-    let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().into_string().ok()?.strip_suffix(".obj").map(str::to_owned)).collect();
+    let dir = std::env::var("DDG_DATASET")
+        .unwrap_or("../../data/optimal-cones/optimal-cones-data/data".into());
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            e.file_name()
+                .into_string()
+                .ok()?
+                .strip_suffix(".obj")
+                .map(str::to_owned)
+        })
+        .collect();
     names.sort();
     for name in names.iter().filter(|n| n.contains(&filter)) {
         let obj = read_obj(format!("{dir}/{name}.obj")).unwrap();
-        let Some(faces) = obj.triangles() else { continue };
+        let Some(faces) = obj.triangles() else {
+            continue;
+        };
         let mesh = PolygonMesh::from_triangles(obj.positions.clone(), &faces);
         probe(name, &mesh);
     }
@@ -73,7 +94,10 @@ fn main() {
         let ico = ddg_core::generators::icosphere(2).unwrap();
         let list: Vec<(&str, PolygonMesh)> = vec![
             ("uv_sphere", uv_sphere(32, 16, 1.0).unwrap()),
-            ("icosphere", PolygonMesh::from_triangles(ico.positions.clone(), &ico.faces)),
+            (
+                "icosphere",
+                PolygonMesh::from_triangles(ico.positions.clone(), &ico.faces),
+            ),
             ("cube", cube(2.0)),
             ("grid_cube8", grid_cube(8, 2.0)),
             ("cylinder", cylinder(32, 1, 1.0, 2.0).unwrap()),

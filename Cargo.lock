@@ -436,6 +436,7 @@ dependencies = [
  "ddg-bff",
  "ddg-core",
  "ddg-optimal-cones",
+ "ddg-variational-cuts",
  "proptest",
 ]
 

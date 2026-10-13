@@ -156,10 +156,24 @@ fn a_cylinder_cut_along_its_rims_and_one_side_edge_is_developed_exactly() {
     assert_eq!(map.cut_edges, seams);
     assert_eq!(map.report.validation.seams.n_cut, 34);
     assert_eq!(map.report.validation.seams.n_pieces, 3);
-    assert!(map.report.charts.iter().all(|c| c.closed == ClosedHandling::NotClosed));
+    assert!(
+        map.report
+            .charts
+            .iter()
+            .all(|c| c.closed == ClosedHandling::NotClosed)
+    );
     // The pieces are flat, so the map is an isometry up to the common scale of the packing.
-    assert!(map.report.area_distortion.scale_free < 1e-20, "{:?}", map.report.area_distortion);
-    assert!(map.report.charts.iter().all(|c| c.flatten.quasi_conformal_max < 1.0 + 1e-9));
+    assert!(
+        map.report.area_distortion.scale_free < 1e-20,
+        "{:?}",
+        map.report.area_distortion
+    );
+    assert!(
+        map.report
+            .charts
+            .iter()
+            .all(|c| c.flatten.quasi_conformal_max < 1.0 + 1e-9)
+    );
     assert_eq!(map.report.flipped_triangles, 0);
     assert_eq!(map.report.overlapped_fraction, Some(0.0));
     let scale = map.report.packing.unwrap().scale;
@@ -171,8 +185,8 @@ fn a_cylinder_cut_along_its_rims_and_one_side_edge_is_developed_exactly() {
                 mesh.positions[mesh.corner_vertices[c] as usize],
                 mesh.positions[mesh.corner_vertices[d] as usize],
             );
-            let length = ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2))
-                .sqrt();
+            let length =
+                ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
             let (q, r) = (map.uvs[c], map.uvs[d]);
             let flat = (q[0] - r[0]).hypot(q[1] - r[1]);
             assert!((flat - scale * length).abs() < 1e-12, "face {p}");
@@ -199,7 +213,10 @@ fn seams_that_are_not_edges_are_ignored_and_one_edge_seams_extended() {
     let map = unwrap(&input, &options).unwrap();
     check(&mesh, &input, &map, &options);
     let report = &map.report.validation.seams;
-    assert_eq!((report.n_given, report.n_cut, report.n_not_edges), (3, 1, 2));
+    assert_eq!(
+        (report.n_given, report.n_cut, report.n_not_edges),
+        (3, 1, 2)
+    );
     assert_eq!(report.n_extension_edges, 1);
     assert!(map.cut_edges.binary_search(&one).is_ok());
     assert!(map.cut_edges.binary_search(&diagonal).is_err());
@@ -219,7 +236,9 @@ fn steering_is_respected_where_it_can_be() {
     let side = |x: f64| x == 0.0 || x == 2.0;
     let seams = edges_at(&mesh, |a, b| {
         let vertical = side(a[0]) && side(a[1]) && a[0] == b[0] && a[1] == b[1];
-        let rim = a[2] == 2.0 && b[2] == 2.0 && (side(a[0]) || side(a[1]))
+        let rim = a[2] == 2.0
+            && b[2] == 2.0
+            && (side(a[0]) || side(a[1]))
             && (side(b[0]) || side(b[1]))
             && (a[0] == b[0] && side(a[0]) || a[1] == b[1] && side(a[1]));
         vertical || rim
@@ -262,7 +281,12 @@ fn steering_is_respected_where_it_can_be() {
     assert_eq!(steering.prescribed_not_applied, vec![on_seam]);
     assert_eq!(steering.n_pinned_applied, 2);
     assert_eq!(steering.n_forbidden_applied, 4);
-    assert!(map.report.warnings.iter().any(|w| w.contains("1 prescribed cones could not")));
+    assert!(
+        map.report
+            .warnings
+            .iter()
+            .any(|w| w.contains("1 prescribed cones could not"))
+    );
 }
 
 #[test]
@@ -329,7 +353,11 @@ fn the_merge_guard_falls_back_to_the_unmerged_cones() {
     assert_eq!(strict.cones.len(), solve.n_cones_optimal);
     assert_eq!(solve.distortion, solve.distortion_optimal);
     assert!(
-        strict.report.warnings.iter().any(|w| w.contains("merging the cone clusters")),
+        strict
+            .report
+            .warnings
+            .iter()
+            .any(|w| w.contains("merging the cone clusters")),
         "{:?}",
         strict.report.warnings
     );
@@ -375,6 +403,10 @@ fn closed_round_shapes_fall_back_to_free_sites_and_reoptimization_is_reported() 
     check(&disk, &disk.input(), &map, &reoptimized);
     let solve = map.report.charts[0].solve.as_ref().unwrap();
     let (before, n_before) = solve.before_reoptimization.unwrap();
-    assert!(solve.distortion <= before, "{} > {before}", solve.distortion);
+    assert!(
+        solve.distortion <= before,
+        "{} > {before}",
+        solve.distortion
+    );
     assert!(map.cones.len() <= n_before);
 }

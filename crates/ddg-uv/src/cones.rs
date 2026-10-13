@@ -184,12 +184,23 @@ fn piece_cones(
 
     let mut warnings = Vec::new();
     let mut result = match (sphere, options.closed_surfaces) {
-        (true, ClosedSurfaces::Slit {
-            placement,
-            relative_length,
-        }) => {
+        (
+            true,
+            ClosedSurfaces::Slit {
+                placement,
+                relative_length,
+            },
+        ) => {
             let (cut, edges, length) = slit_of(placement, relative_length)?;
-            let solved = solve_on(prepared, &cut, options, None, optimize_boundary, &excluded, &mut warnings)?;
+            let solved = solve_on(
+                prepared,
+                &cut,
+                options,
+                None,
+                optimize_boundary,
+                &excluded,
+                &mut warnings,
+            )?;
             finish(
                 solved,
                 Some(cut),
@@ -200,15 +211,26 @@ fn piece_cones(
                 },
             )
         }
-        (true, ClosedSurfaces::Auto {
-            max_cones,
-            max_cone_fraction,
-            fallback_sites,
-        }) => {
+        (
+            true,
+            ClosedSurfaces::Auto {
+                max_cones,
+                max_cone_fraction,
+                fallback_sites,
+            },
+        ) => {
             let mut raw_warnings = Vec::new();
-            let raw = solve_on(prepared, piece, options, None, optimize_boundary, &excluded, &mut raw_warnings)?;
-            let sparse = raw.cones.len() as f64
-                <= max_cone_fraction * piece.mesh.n_vertices() as f64;
+            let raw = solve_on(
+                prepared,
+                piece,
+                options,
+                None,
+                optimize_boundary,
+                &excluded,
+                &mut raw_warnings,
+            )?;
+            let sparse =
+                raw.cones.len() as f64 <= max_cone_fraction * piece.mesh.n_vertices() as f64;
             if raw.cones.len() <= max_cones || sparse {
                 warnings.append(&mut raw_warnings);
                 finish(raw, None, Vec::new(), ClosedHandling::RawOptimum)
@@ -216,7 +238,15 @@ fn piece_cones(
                 let n_raw = raw.cones.len();
                 let raw_seconds = raw.report.as_ref().map_or(0.0, |r| r.seconds);
                 let sites = Some((fallback_sites, options.max_cone_angle, true));
-                let mut solved = solve_on(prepared, piece, options, sites, optimize_boundary, &excluded, &mut warnings)?;
+                let mut solved = solve_on(
+                    prepared,
+                    piece,
+                    options,
+                    sites,
+                    optimize_boundary,
+                    &excluded,
+                    &mut warnings,
+                )?;
                 if let Some(report) = &mut solved.report {
                     report.seconds += raw_seconds;
                 }
@@ -228,13 +258,24 @@ fn piece_cones(
                 finish(solved, None, Vec::new(), handling)
             }
         }
-        (true, ClosedSurfaces::FreeSites {
-            count,
-            max_angle,
-            forbid_elsewhere,
-        }) => {
+        (
+            true,
+            ClosedSurfaces::FreeSites {
+                count,
+                max_angle,
+                forbid_elsewhere,
+            },
+        ) => {
             let sites = Some((count, max_angle, forbid_elsewhere));
-            let solved = solve_on(prepared, piece, options, sites, optimize_boundary, &excluded, &mut warnings)?;
+            let solved = solve_on(
+                prepared,
+                piece,
+                options,
+                sites,
+                optimize_boundary,
+                &excluded,
+                &mut warnings,
+            )?;
             let handling = ClosedHandling::FreeSites {
                 n_automatic: solved.n_free_sites,
                 n_pinned: solved.n_pinned_sites,
@@ -243,7 +284,15 @@ fn piece_cones(
             finish(solved, None, Vec::new(), handling)
         }
         (true, _) | (false, _) => {
-            let solved = solve_on(prepared, piece, options, None, optimize_boundary, &excluded, &mut warnings)?;
+            let solved = solve_on(
+                prepared,
+                piece,
+                options,
+                None,
+                optimize_boundary,
+                &excluded,
+                &mut warnings,
+            )?;
             let handling = if closed {
                 ClosedHandling::RawOptimum
             } else {
@@ -386,7 +435,10 @@ fn solve_on(
         let mut nearest = vec![f64::INFINITY; n];
         let nothing_blocked = vec![false; n];
         for v in (0..n).filter(|&v| is_site[v]) {
-            for (d, x) in nearest.iter_mut().zip(distances(piece, &nothing_blocked, v)) {
+            for (d, x) in nearest
+                .iter_mut()
+                .zip(distances(piece, &nothing_blocked, v))
+            {
                 *d = d.min(x);
             }
         }
@@ -411,7 +463,10 @@ fn solve_on(
             let Some(site) = site else { break };
             is_site[site] = true;
             solved.n_free_sites += 1;
-            for (d, x) in nearest.iter_mut().zip(distances(piece, &nothing_blocked, site)) {
+            for (d, x) in nearest
+                .iter_mut()
+                .zip(distances(piece, &nothing_blocked, site))
+            {
                 *d = d.min(x);
             }
         }
@@ -444,7 +499,11 @@ fn solve_on(
     if !excluded.is_empty() {
         let weights: Vec<f64> = (0..n)
             .map(|v| {
-                if excluded.binary_search(&piece.vertex_input[v]).is_ok() { 0.0 } else { 1.0 }
+                if excluded.binary_search(&piece.vertex_input[v]).is_ok() {
+                    0.0
+                } else {
+                    1.0
+                }
             })
             .collect();
         if weights.iter().any(|&w| w > 0.0) {
@@ -462,16 +521,17 @@ fn solve_on(
         },
         ..defaults
     };
-    let solution = solve_with_boundary(&problem, treatment, &solve_options).map_err(|e| match e {
-        ConeError::Infeasible { .. } => UvError::InfeasibleSteering {
-            polygon: piece.first_polygon,
-            message: e.to_string(),
-        },
-        other => UvError::ConeSolver {
-            polygon: piece.first_polygon,
-            message: other.to_string(),
-        },
-    })?;
+    let solution =
+        solve_with_boundary(&problem, treatment, &solve_options).map_err(|e| match e {
+            ConeError::Infeasible { .. } => UvError::InfeasibleSteering {
+                polygon: piece.first_polygon,
+                message: e.to_string(),
+            },
+            other => UvError::ConeSolver {
+                polygon: piece.first_polygon,
+                message: other.to_string(),
+            },
+        })?;
 
     let certificate = &solution.report.certificate;
     let status = solution.report.status;

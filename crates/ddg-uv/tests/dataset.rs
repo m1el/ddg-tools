@@ -54,7 +54,10 @@ fn every_dataset_mesh_is_unwrapped() {
         check(&mesh, &input, &map, &options);
         let report = &map.report;
         assert_eq!(report.charts.len(), 1, "{name}");
-        assert!(report.cones.n_negative == 0, "{name}: negative cones with the defaults");
+        assert!(
+            report.cones.n_negative == 0,
+            "{name}: negative cones with the defaults"
+        );
         let chart = &report.charts[0];
         if chart.closed != ClosedHandling::NotClosed {
             // A closed surface of genus 0: the cone angles sum to 4π.
@@ -96,7 +99,10 @@ fn every_dataset_mesh_is_unwrapped() {
             };
             for t in &mesh.triangles {
                 for k in 0..3 {
-                    let (a, b) = (mesh.corner_vertices[t[k] as usize], mesh.corner_vertices[t[(k + 1) % 3] as usize]);
+                    let (a, b) = (
+                        mesh.corner_vertices[t[k] as usize],
+                        mesh.corner_vertices[t[(k + 1) % 3] as usize],
+                    );
                     lengths.push(length(a, b));
                 }
             }
@@ -104,15 +110,25 @@ fn every_dataset_mesh_is_unwrapped() {
             let median = lengths[lengths.len() / 2];
             for t in &mesh.triangles {
                 for k in 0..3 {
-                    let (a, b) = (mesh.corner_vertices[t[k] as usize], mesh.corner_vertices[t[(k + 1) % 3] as usize]);
+                    let (a, b) = (
+                        mesh.corner_vertices[t[k] as usize],
+                        mesh.corner_vertices[t[(k + 1) % 3] as usize],
+                    );
                     if length(a, b) > 10.0 * median {
                         long_ends.insert(a);
                         long_ends.insert(b);
                     }
                 }
             }
-            println!("camelshotnoise: {} spikes reported, {} vertices on edges longer than 10 median edges", check.vertices.len(), long_ends.len());
-            assert!(check.vertices.iter().all(|v| long_ends.contains(v)), "{check:?}");
+            println!(
+                "camelshotnoise: {} spikes reported, {} vertices on edges longer than 10 median edges",
+                check.vertices.len(),
+                long_ends.len()
+            );
+            assert!(
+                check.vertices.iter().all(|v| long_ends.contains(v)),
+                "{check:?}"
+            );
             assert_eq!(check.vertices.len(), 22);
         }
         if !spiked {
@@ -126,8 +142,13 @@ fn every_dataset_mesh_is_unwrapped() {
         }
         // The published map, by the same measure, for the record.
         let published = obj.corner_uvs().map(|uvs| {
-            area_distortion(&mesh.positions, &mesh.corner_vertices, &mesh.triangles, &uvs)
-                .scale_free
+            area_distortion(
+                &mesh.positions,
+                &mesh.corner_vertices,
+                &mesh.triangles,
+                &uvs,
+            )
+            .scale_free
         });
         println!(
             "{name}: {} cones, distortion {:.5} (published {:?}), overlap {:?}, flipped {}, {:.2} s \

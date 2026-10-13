@@ -143,9 +143,7 @@ impl<'a> MeshInput<'a> {
             return Err(UvError::PolygonOffsets {
                 position: n_polygons,
                 value: offsets[n_polygons],
-                requirement: format!(
-                    "the last offset must be the number of corners, {n_corners}"
-                ),
+                requirement: format!("the last offset must be the number of corners, {n_corners}"),
             });
         }
         check_range(
@@ -328,9 +326,7 @@ fn check_triangulation(offsets: &[u32], triangles: &[[u32; 3]]) -> Result<(), Uv
             } else if next(to, p) == from {
                 return Err(bad(
                     p,
-                    format!(
-                        "triangle {t} = corners ({a}, {b}, {c}) is wound against the face"
-                    ),
+                    format!("triangle {t} = corners ({a}, {b}, {c}) is wound against the face"),
                 ));
             } else {
                 diagonals.push((from.min(to), from.max(to), from < to));

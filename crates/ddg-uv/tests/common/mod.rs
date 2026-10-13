@@ -60,7 +60,6 @@ pub fn check(mesh: &PolygonMesh, input: &MeshInput<'_>, map: &UvMap, options: &U
     }
 }
 
-
 /// The map with every wall-clock time set to zero, for comparing two runs.
 pub fn without_times(mut map: UvMap) -> UvMap {
     map.report.timings = Default::default();

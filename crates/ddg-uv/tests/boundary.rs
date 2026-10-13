@@ -130,14 +130,18 @@ fn the_flattening_realizes_the_solvers_boundary_values() {
                     mesh.positions[on.vertex_input[a] as usize],
                     mesh.positions[on.vertex_input[b] as usize],
                 );
-                let length = ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+                let length =
+                    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
                 let ratio = (0.5 * (u[a] + u[b])).exp();
                 nonzero |= (ratio - 1.0).abs() > 1e-3;
                 let (x, y) = (pf.corner_uvs[h], pf.corner_uvs[on.mesh.next(h)]);
                 let got = (x[0] - y[0]).hypot(x[1] - y[1]);
                 worst = worst.max((got - ratio * length).abs() / (ratio * length));
             }
-            assert!(nonzero, "piece {k}: the solver's boundary values are all zero");
+            assert!(
+                nonzero,
+                "piece {k}: the solver's boundary values are all zero"
+            );
             assert!(worst < 1e-3, "piece {k}: layout off by {worst}");
             // The pipeline's own figure agrees.
             assert!((pf.report.boundary_length_error - worst).abs() < 1e-9 + 0.01 * worst);
