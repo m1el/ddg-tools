@@ -144,11 +144,20 @@ def buildCutMesh (b : Base) (faces : Array Face) (phi : FloatArray) (delta : Flo
       let l12 := dist p1 p2
       let l20 := dist p2 p0
       let d := det3 p0.1 p0.2.1 p0.2.2 p1.1 p1.2.1 p1.2.2 p2.1 p2.2.1 p2.2.2
+      let area := subTriangleArea d af
+      let sub := fun (p q : Float × Float × Float) => (p.1 - q.1, p.2.1 - q.2.1, p.2.2 - q.2.2)
+      let inner := fun (o x y : Float × Float × Float) =>
+        let u := sub x o
+        let w := sub y o
+        baryInner lab lbc lca u.1 u.2.1 u.2.2 w.1 w.2.1 w.2.2
+      -- uncut faces keep the cotangents and the area of `M`
+      let uncut := n0 == f.a && n1 == f.b && n2 == f.c
+      let (k0, k1, k2) := b.cots[fi]!
       ({ n0, n1, n2, region := reg, parent := fi, l01, l12, l20
-         area := subTriangleArea d af
-         c0 := cornerCot l12 l20 l01
-         c1 := cornerCot l20 l01 l12
-         c2 := cornerCot l01 l12 l20 } : Tri)
+         area := if uncut then af else area
+         c0 := if uncut then k0 else cotFromInner (inner p0 p1 p2) area
+         c1 := if uncut then k1 else cotFromInner (inner p1 p2 p0) area
+         c2 := if uncut then k2 else cotFromInner (inner p2 p0 p1) area } : Tri)
     let vs := #[f.a, f.b, f.c]
     let rg := fun (k : Nat) => region[vs[k % 3]!]!
     if rg 0 == rg 1 && rg 1 == rg 2 then
@@ -169,10 +178,14 @@ def buildCutMesh (b : Base) (faces : Array Face) (phi : FloatArray) (delta : Flo
       segs := segs.push { p := p - nv, q := q - nv, face := fi, len := t1.l12 }
       let reg2 := rg (k + 1)
       -- diagonals p–c and b–q of the quad (p, b, c, q)
-      let dpc := (mk p cc q reg2).l01  -- |p c|
-      let dbq := (mk p bb q reg2).l12  -- |b q|
-      if (dpc - dbq).abs ≤ 1e-9 * (dpc + dbq) then nearTies := nearTies + 1
-      if dpc ≤ dbq then
+      let len2 := fun (x y : Nat) =>
+        let px := bary crossings nv f x
+        let py := bary crossings nv f y
+        baryLength2 lab lbc lca (px.1 - py.1) (px.2.1 - py.2.1) (px.2.2 - py.2.2)
+      let dpc2 := len2 p cc
+      let dbq2 := len2 bb q
+      if (dpc2 - dbq2).abs ≤ 1e-9 * (dpc2 + dbq2) then nearTies := nearTies + 1
+      if dpc2 ≤ dbq2 then
         tris := (tris.push (mk p bb cc reg2)).push (mk p cc q reg2)
       else
         tris := (tris.push (mk p bb q reg2)).push (mk bb cc q reg2)

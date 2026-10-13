@@ -204,4 +204,56 @@ def hopfLaxTriangle (lij lik ljk Tj Tk : α) : α :=
   else
     min (value 0) (value 1)
 
+/-! ## Additions for SPEC revision f1d56b5 (flux recovery, cancellation-free forms) -/
+
+/-- Cancellation-free form of `Ω_f`: `Σ θ_i (2π − Θ_i)/Θ_i` over the interior corners `i` of the
+face. Equal to `faceCurvature` of the normalized angles up to rounding, because the corner angles
+of a Euclidean triangle sum to `π`. [formula: cut-face-curvature] -/
+def Face.omegaCancellationFree (len : Nat → Nat → α) (angleSum : Nat → α) (isB : Nat → Bool)
+    (f : Face) : α :=
+  let term := fun (isBd : Bool) (theta total : α) =>
+    if isBd then (0 : α) else theta * (2 * Scalar.pi - total) / total
+  term (isB f.a) (f.angleA len) (angleSum f.a) + term (isB f.b) (f.angleB len) (angleSum f.b)
+    + term (isB f.c) (f.angleC len) (angleSum f.c)
+
+/-- Inner product of two barycentric differences `d`, `e` within a face with sides `lab lbc lca`
+(the polarization of `baryLength2`):
+`−½ [(d_a e_b + d_b e_a) ℓab² + (d_b e_c + d_c e_b) ℓbc² + (d_c e_a + d_a e_c) ℓca²]`.
+[formula: cut-barycentric-length] -/
+def baryInner (lab lbc lca da db dc ea eb ec : α) : α :=
+  -(((da * eb + db * ea) * (lab * lab) + (db * ec + dc * eb) * (lbc * lbc)
+      + (dc * ea + da * ec) * (lca * lca)) / 2)
+
+/-- Cotangent at the corner `x` of a sub-triangle `xyz` from `⟨y − x, z − x⟩` and its area:
+`⟨y − x, z − x⟩ / (2 · area)`. [formula: cut-barycentric-length] -/
+def cotFromInner (inner area : α) : α := inner / (2 * area)
+
+/-- `h_f² = (ℓab² + ℓbc² + ℓca²)/3`. [formula: cut-flux-recovery] -/
+def faceMeanSquareEdge (lab lbc lca : α) : α := (lab * lab + lbc * lbc + lca * lca) / 3
+
+/-- Coupling of a cut segment: `κ_σ = c² h_f² / |pq|`. [formula: cut-flux-recovery] -/
+def fluxCoupling (c h2 segLen : α) : α := c * c * h2 / segLen
+
+/-- Diagonal entry of the flux-recovery matrix at the cut vertex `p`:
+`ℓ_p + Σ_{σ ∋ p} κ_σ`. [formula: cut-flux-recovery] -/
+def fluxDiagEntry (ell kappaSum : α) : α := ell + kappaSum
+
+/-- Off-diagonal entry `−κ_σ` of the flux-recovery matrix for the segment `σ = pq`.
+[formula: cut-flux-recovery] -/
+def fluxOffEntry (kappa : α) : α := -kappa
+
+/-- Right-hand side of the flux-recovery system: the integrated flux (`v_p`, or `q_p` for the
+adjoint). [formula: cut-flux-recovery] -/
+def fluxRhs (flux : α) : α := flux
+
+/-- Gradient densities written with the recovered derivatives `d`, `e`.
+[formula: cut-gradient-dirichlet] -/
+def gradDirichletD (d : α) : α := d * d
+
+/-- [formula: cut-gradient-scaled] -/
+def gradScaledD (a d e : α) : α := -(a * (d * d)) - d * e
+
+/-- [formula: cut-gradient-pointwise] -/
+def gradPointwiseD (b0 d e : α) : α := b0 - d * e
+
 end Ddg

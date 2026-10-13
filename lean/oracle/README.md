@@ -468,7 +468,8 @@ The process is single-threaded; a fuzzer can run several.
 
 `ddg-oracle cuts` computes **one step of the flow** of `crates/ddg-variational-cuts/SPEC.md` (two
 regions) on a small mesh with dense linear algebra, and prints every intermediate quantity. It
-implements SPEC §2, §3, the seven stages of §4 and the energy of §6, written from SPEC.md alone
+implements SPEC §2, §3 (including the flux recovery of §3.5, D12, and D13), the seven stages of §4 and the
+energy of §6, written from SPEC.md alone; it follows SPEC.md as of commit f1d56b5
 (clean room: nothing was read from the Rust crate or from the authors' code). Every sentence of
 SPEC that was ambiguous is listed under [choices](#choices-where-the-spec-is-ambiguous).
 `ddg-oracle cuts-selftest` checks it (below); the golden cases are `fixtures/cuts/*.in|out`.
@@ -509,9 +510,11 @@ w W0 W1                           >= 0
 beta B0 B1
 step fixed TAU                    TAU > 0
 step capped TAU_MAX MAX_MOTION    tau = min(TAU_MAX, MAX_MOTION h / max|s|)
-delta DELTA                       min_crossing_offset, 0 < DELTA < 1/2
-rho0 RHO0                         sliver threshold > 0
-passes N                          smoothing passes (decimal integer)
+flux nodal                        d = v / l (the paper)
+flux smoothed C                   SPEC 3.5 flux recovery with c = C >= 0 (SPEC default C = 0.5; C = 0 equals nodal)
+delta DELTA                       min_crossing_offset, 0 <= DELTA < 1/2 (0: nothing is moved; a crossing on a vertex is an error)
+rho0 RHO0                         sliver threshold > 0 (SPEC default 5)
+passes N                          sliver-smoothing passes, decimal integer (SPEC default 0 = off)
 classes C_0 ... C_{NV-1}          optional, decimal labels; vertices with equal labels form a class
 end
 ```
@@ -548,7 +551,7 @@ t IDX PARENT REGION N0 N1 N2 L01 L12 L20 AREA   x NTRI
 g K1 K2 FACE LEN                    x NSEG
 r R NTRI NNODES NCOMP NUNSOLVED_COMP NUNSOLVED_NODES J AREA AREA_SOLVED     x 2
 u R NODE SOLVED U P                 for every node of S_R, regions 0 then 1, nodes increasing
-b R NODE V ELL Q G                  for every node of B_S_R
+b R NODE V ELL D Q E G              for every node of B_S_R
 s K SRAW SSMOOTH SLIVER             x NC
 tau TAU HMIN SMAX                   (status ok)
 energy TOTAL J0 J1 A0 A1 LENGTH     energy at the input phi
@@ -561,8 +564,8 @@ end
 
 * `counts`: `NMOVED` crossings whose `t` was moved into `[delta, 1-delta]` (strict: `t < delta` or
   `t > 1-delta`); `NSLIVERV` cut vertices that have an incident cut-mesh triangle (either region) with
-  aspect ratio `> rho0`; `NSLIVERT` such triangles; `NTIES` quads in which the two diagonals agree to a
-  relative `1e-9` (the choice `p-c` / `b-q` is then decided by rounding: the fixtures have none).
+  aspect ratio `> rho0`; `NSLIVERT` such triangles; `NTIES` quads in which the squared lengths of the two diagonals agree to a
+  relative `1e-9` (the choice `p-c` / `b-q` is then decided by rounding; the fixtures have none).
 * `v`: `REGION` of `phi` (0/1), `THETA` = `Theta_i`, `AREA` = `A_i` (lumped, on `M`), `R` the feature
   size `r_i` and `A` the weight `a_i` (both `0` unless the energy is scaled; `R` only for
   `scaled_curv`), `W` = `alpha + eta_i`, `PHI` the scaled input, `SIGMA` the harmonic extension
@@ -572,7 +575,9 @@ end
 * `t`: the triangles of the cut mesh, faces in index order. An uncrossed face gives one triangle
   `(a, b, c)` in its own order. A crossed face with corners `v0 v1 v2` and alone vertex `a = v_k`,
   `b = v_{k+1}`, `c = v_{k+2}` gives `(a, p, q)` (`p` on `ab`, `q` on `ac`), then, if `|pc| <= |bq|`,
-  `(p, b, c), (p, c, q)`, otherwise `(p, b, q), (b, c, q)`. `Lij` is the length between corner `i` and
+  `(p, b, c), (p, c, q)`, otherwise `(p, b, q), (b, c, q)`; `p-c` is chosen iff `|pc|^2 <= |bq|^2`, both squared
+  lengths computed directly from the barycentric formula. The cotangents of a sub-triangle come from the
+  barycentric inner product (SPEC §3.3), those of an uncut face are the ones of `M`. `Lij` is the length between corner `i` and
   corner `j` (`L01 = |N0 N1|`, `L12`, `L20 = |N2 N0|`), `AREA` the area (`|det| A_f`).
 * `g`: cut segments, one per crossed face (the `(a, p, q)` triangle), `K1 = p`, `K2 = q`, in face order.
 * `r`: per region: number of triangles, nodes, connected components of `S_R` (vertex-connected),
@@ -580,9 +585,11 @@ end
   that were solved.
 * `u`: `SOLVED` 0 for nodes of an unsolved component (then `U = P = 0`), the scale factor and the
   adjoint (`P = 0` for the Dirichlet energy).
-* `b`: `V` the integrated outward normal derivative, `ELL` the lumped boundary length, `Q` the integrated
-  derivative of the adjoint (`0` for Dirichlet), `G` the gradient density before `w_R` and `beta_R`
-  (SPEC §3.6). `B_S` = cut vertices and the original boundary vertices in `S_R`.
+* `b`: `V` the integrated outward normal derivative, `ELL` the lumped boundary length, `D` the recovered
+  normal derivative of `u` (SPEC §3.5: the solution of the flux-recovery system at cut vertices, `V/ELL` at
+  the other nodes of `B_S` and for `flux nodal`), `Q` the integrated derivative of the adjoint, `E` the
+  recovered normal derivative of the adjoint (`Q` and `E` are `0` for Dirichlet), `G` the gradient density
+  before `w_R` and `beta_R`, computed from `D`, `E` (SPEC §3.6). `B_S` = cut vertices and the original boundary vertices in `S_R`.
 * `s`: `SRAW = w_0 G_0 + beta_0 - w_1 G_1 - beta_1` at cut vertex `K`, `SSMOOTH` after smoothing,
   `SLIVER` 0/1.
 * `tau`: the step used, `HMIN` the shortest crossed edge, `SMAX = max_c |SSMOOTH_c|`.
@@ -603,11 +610,10 @@ end
 Everything is a deterministic function of the input; the oracle and a correct implementation
 agree to rounding **provided the discrete decisions agree** (regions, crossings, the diagonal of
 every quad, which vertices are slivers, the sign classes in the redistancing). Fixtures avoid
-near-ties (`NTIES = 0`, no `phi` within rounding of 0 except where intended). Quantities that divide
-by the lumped boundary length (`G`, `SRAW`, `SIGMA` and what follows) are ill-conditioned when a
-crossing lies very close to a vertex: in `ico1-phi-zero-vertex`, `max|s| = 10^6`. Compare with a
-relative tolerance (`1e-9` is what `cuts-fixtures check` uses) and expect an amplification of the
-rounding error by `1/delta^2` at the worst.
+near-ties (`NTIES = 0`, no `phi` within rounding of 0 except where intended). With `flux nodal`, quantities
+that divide by the lumped boundary length (`G`, `SRAW`, `SIGMA` and what follows) are ill-conditioned when a
+crossing lies very close to a vertex (`ico1-phi-zero-vertex-nodal`: `max|s| = 10^6`); the default recovery
+is not. Compare with a relative tolerance (`1e-9` is what `cuts-fixtures check` uses).
 
 ## Cut flow: choices where the SPEC is ambiguous
 
@@ -622,8 +628,8 @@ Each item quotes the sentence and states the choice made (these are also in the 
    (e.g. a disk component) has a boundary vertex and is solved.
 2. SPEC §3.6 "A region with `w_r = 0` needs no solve." The oracle solves every region anyway and
    prints `u, v, G`; the energy uses `w_r`, so nothing changes.
-3. SPEC §3.7 "a cut vertex is a sliver vertex if an incident cut-mesh triangle has aspect ratio
-   `> rho0`": any triangle of the cut mesh (either region, after the quad is split) that has the
+3. SPEC §3.7 (smoothing optional, `passes` default 0; `passes` and `rho0` are explicit input lines). "a cut
+   vertex is a sliver vertex if an incident cut-mesh triangle has aspect ratio `> rho0`": any triangle of the cut mesh (either region, after the quad is split) that has the
    cut vertex as a corner. Aspect ratio from the *area `|det| A_f`* and the barycentric lengths.
    "every sliver vertex simultaneously": every pass reads the speeds of the previous pass.
    Neighbours are the other ends of the cut segments; a vertex with fewer than two neighbours is left
@@ -641,9 +647,9 @@ Each item quotes the sentence and states the choice made (these are also in the 
    definition) is kept only as a self-test cross-check on a mesh without obtuse angles.
 7. SPEC §3.3 "Sub-triangles get ... linearly interpolated `a` of their parent": `a` at a cut vertex is
    `(1-t) a_x + t a_y` (clamped `t`) and `a_t` of a sub-triangle is the mean of the three node values.
-8. SPEC §3.3 "the quad is split by the shorter of its diagonals `p-c`, `b-q` (tie: `p-c`)": the lengths
-   are the barycentric lengths in floating point; `p-c` iff `|pc| <= |bq|` exactly. `NTIES` counts
-   near-ties.
+8. SPEC §3.3 "the quad is split by the shorter of its diagonals ... in floating point `p-c` iff
+   `|pc|^2 <= |bq|^2`": both squared lengths are `baryLength2` of the barycentric differences (no root).
+   `NTIES` counts relative gaps below `1e-9`.
 9. SPEC §6 "`w` interpolated linearly to the cut vertices": with the clamped `t`; each segment once.
 10. SPEC §3.2: `NMOVED` counts `t < delta` or `t > 1 - delta` strictly; a `t` exactly equal to
     `delta` is not counted.
@@ -659,9 +665,26 @@ Each item quotes the sentence and states the choice made (these are also in the 
 15. SPEC §2 "`E(φ)`" in `energy_new` is the same function at `PHINEW`, not part of the SPEC's one
     step; it is there for the energy-decrease check.
 
+16. SPEC §3.5 flux recovery: one linear system per region over *all* cut vertices of the cut mesh (it
+    decouples over the pieces by itself). `kappa = c^2 h_f^2 / |pq|` with `|pq|` the segment length from the
+    `(a, p, q)` sub-triangle and `h_f^2` from the scaled edge lengths of the parent face. The same
+    system, with the same `ELL`, is solved for `V` and for `Q` (scaled and Hencky energies). For
+    `flux nodal` no system is solved and `D = V/ELL` exactly; `smoothed 0` solves a diagonal system and
+    agrees with it to rounding (measured: identical).
+17. SPEC §3.6 "`G` is needed at cut vertices only": `G` is nevertheless printed at every node of `B_S`, with
+    `D = V/ELL`, `E = Q/ELL` at the original boundary vertices.
+18. SPEC §3.2 / D13f "with `delta = 0` ... a crossing on a vertex is an error": the oracle raises the error
+    when any sub-triangle has non-positive area (this is also the only check of D13a), message
+    "sub-triangle of face F has no area". With `delta > 0` crossings are moved and no such error occurs.
+19. SPEC §3.1 / D13e: `Omega_f` is evaluated in the cancellation-free form (sum over interior corners of
+    `theta (2 pi - Theta)/Theta`); it differs from the first form by rounding only.
+20. SPEC §3.4 / D13b: the "identity rows" are realized by excluding the unsolved component from the
+    systems; `u = p = 0` and `sigma = 0` there. The report is the `r` line (`NUNSOLVED_COMP`, `NUNSOLVED_NODES`,
+    `AREA - AREA_SOLVED`).
+
 ## Cut flow: tests and fixtures
 
-`ddg-oracle cuts-selftest` (about 1 s, 33 checks) runs, without external reference:
+`ddg-oracle cuts-selftest` (about 1 s, 37 checks) runs, without external reference:
 
 * icosphere generator (levels 0-3: outward, `chi = 2`, vertex counts);
 * `sum_f Omega_f` equals the sum of `2 pi - Theta_i` over interior vertices to `4e-14` on a sphere,
@@ -682,15 +705,23 @@ Each item quotes the sentence and states the choice made (these are also in the 
 * redistancing (fast marching): every value equals the update from the vertices accepted before it,
   cut-adjacent values are kept; on a flat grid with a straight cut it reproduces the exact distance
   and equals the fixed point of the scheme (`5e-17`);
+* flux recovery on three cuts (icosphere 2 tilted plane, icosphere 1 with `phi = z`, a geodesic cap): `sum l d = sum v` on
+  every piece of the cut (`1e-14` relative), `d` within the range of `v/l` of the piece, `smoothed 0` equals
+  nodal; maximal `|s|` (Hencky) nodal -> default recovery: `3.8e5 -> 0.9`, `8.7e4 -> 2.9e-3`, `7.6 -> 6.2`;
+  `delta = 0` runs when no crossing is on a vertex and is an error otherwise;
 * the closed form of the local Hopf-Lax update against a ternary search over lambda (`1e-12`);
 * a change of unit (lengths and `phi` times 3) leaves the scaled quantities unchanged;
 * energy decrease along a small step; the text format round trip; error blocks.
 
-`fixtures/cuts/` has 21 cases (`MANIFEST.tsv`): `NAME.in` and `NAME.out` (the output of `ddg-oracle cuts
+`fixtures/cuts/` has 26 cases (`MANIFEST.tsv`): `NAME.in` and `NAME.out` (the output of `ddg-oracle cuts
 NAME.in`): icosphere levels 1 and 2 with a tilted plane, geodesic caps with each energy, a torus, a grid
 disk and an annulus whose cuts meet the boundary, an annulus ring, `eta` with both penalty rules, `w_r`,
 `beta_r`, symmetry classes (both projections active), `phi = 0` exactly at vertices, `delta = 0.2` clamps,
-sliver smoothing with `rho0 = 2` and 3 passes, curvature overrides (uniform and per face), a flat disk
+most cases use the default recovery (`flux smoothed 0.5`, no sliver smoothing); the paper's procedure (`flux nodal`,
+sliver smoothing 1-3 passes) is pinned by `ico2-tilted-dirichlet`, `ico1-delta-clamp`, `ico2-sliver-smoothing`,
+`ico1-phi-zero-vertex-nodal`; also `flux smoothed 1.0`, recovery plus sliver passes, `delta = 0`; the fixtures
+`ico2-tilted-dirichlet(-recovery)` and `ico1-phi-zero-vertex(-nodal)` show the blow-up (`max |SSMOOTH|` after
+one pass: `63 -> 10` and `1.15e6 -> 1.14`), curvature overrides (uniform and per face), a flat disk
 and two disjoint spheres where one component is not touched. `ddg-oracle cuts-fixtures check
 fixtures/cuts` recomputes and compares (tolerance `1e-9`, as for the first paper).
 

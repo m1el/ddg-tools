@@ -75,7 +75,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
     kv := kv.insert l[0]! l
     i := i + 1
   let allowed := ["phi", "energy", "curvature", "alpha", "eta", "penalty", "w", "beta", "step",
-    "delta", "rho0", "passes", "classes"]
+    "delta", "flux", "rho0", "passes", "classes"]
   for (k, _) in kv.toList do
     if !allowed.contains k then throw s!"unknown line '{k}'"
   let need := fun (k : String) =>
@@ -141,6 +141,16 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
     let l ← need "delta"
     if l.size != 2 then throw "delta: expected one value"
     floatTok "delta" l[1]!
+  let flux ← do
+    let l ← need "flux"
+    match l[1]? with
+    | some "nodal" =>
+      if l.size != 2 then throw "flux nodal takes no arguments"
+      pure FluxRule.nodal
+    | some "smoothed" =>
+      if l.size != 3 then throw "flux smoothed: expected one value"
+      pure (FluxRule.smoothed (← floatTok "flux" l[2]!))
+    | _ => throw s!"malformed line '{joinTokens l}': flux is nodal | smoothed <c>"
   let rho0 ← do
     let l ← need "rho0"
     if l.size != 2 then throw "rho0: expected one value"
@@ -157,7 +167,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
       pure (some out)
     | none => pure none
   return { name, nv, faces, edges, phi, energy, curv, alphaL, eta, penalty, w, beta, step
-           delta, rho0, passes, classes }
+           delta, flux, rho0, passes, classes }
 
 /-- Read the next case as raw lines: `(name, lines)`, or an error message. -/
 partial def readCaseLines (r : LineReader) :
@@ -218,6 +228,7 @@ def printCase (c : CutCase) : String := Id.run do
   match c.step with
   | .fixed t => s := s ++ s!"step fixed {hx t}\n"
   | .capped t m => s := s ++ s!"step capped {hx t} {hx m}\n"
+  s := s ++ (match c.flux with | .nodal => "flux nodal\n" | .smoothed k => s!"flux smoothed {hx k}\n")
   s := s ++ s!"delta {hx c.delta}\nrho0 {hx c.rho0}\npasses {c.passes}\n"
   if let some cl := c.classes then
     s := s ++ s!"classes {" ".intercalate (cl.toList.map toString)}\n"
@@ -264,7 +275,7 @@ private def printEval (c : CutCase) (b : Base) (phi : FloatArray) (ev : Eval) : 
         s := s ++ s!"u {rd.r} {n} {b2n rd.solved[n]!} {hx (rd.u.get! n)} {hx (rd.p.get! n)}\n"
     for n in [0:cm.nodes] do
       if rd.isB[n]! then
-        s := s ++ s!"b {rd.r} {n} {hx (rd.v.get! n)} {hx (rd.ell.get! n)} {hx (rd.q.get! n)} {hx (rd.G.get! n)}\n"
+        s := s ++ s!"b {rd.r} {n} {hx (rd.v.get! n)} {hx (rd.ell.get! n)} {hx (rd.d.get! n)} {hx (rd.q.get! n)} {hx (rd.e.get! n)} {hx (rd.G.get! n)}\n"
   for k in [0:cm.nc] do
     s := s ++ s!"s {k} {hx (ev.sRaw.get! k)} {hx (ev.sSmooth.get! k)} {b2n ev.sliver[k]!}\n"
   s := s ++ energyLine "energy" ev

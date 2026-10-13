@@ -53,7 +53,7 @@ def RawMesh.union (m1 m2 : RawMesh) (shift : Point Float) : RawMesh :=
     faces := m1.faces ++ m2.faces.map fun f => ⟨f.a + off, f.b + off, f.c + off⟩ }
 
 /-- A case with default parameters (Dirichlet, Gaussian curvature, `α_L = 0.05`, fixed `τ = 0.02`,
-`w = (1, 1)`, `β = (0, 0)`, `δ = 10⁻³`, `ρ₀ = 5`, one smoothing pass); the edge lengths are
+`w = (1, 1)`, `β = (0, 0)`, `δ = 10⁻³`, smoothed flux recovery `c = 0.5`, `ρ₀ = 5`, no sliver smoothing); the edge lengths are
 computed from the positions. `phi` is in the caller's unit. -/
 def mkCase (name : String) (m : RawMesh) (phi : FloatArray) : CutCase := Id.run do
   let nv := m.pos.size
@@ -67,7 +67,7 @@ def mkCase (name : String) (m : RawMesh) (phi : FloatArray) : CutCase := Id.run 
   return { name, nv, faces := m.faces, edges, phi
            energy := .dirichlet, curv := .gaussian, alphaL := 0.05, eta := none
            penalty := .gradient, w := (1.0, 1.0), beta := (0.0, 0.0), step := .fixed 0.02
-           delta := 1e-3, rho0 := 5.0, passes := 1, classes := none }
+           delta := 1e-3, flux := .smoothed 0.5, rho0 := 5.0, passes := 0, classes := none }
 
 /-- `φ_i = f(position i)`. -/
 def phiOf (m : RawMesh) (f : Point Float → Float) : FloatArray :=

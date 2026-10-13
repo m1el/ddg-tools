@@ -30,6 +30,10 @@ structure RegionData where
   ell : FloatArray
   /-- integrated outward normal derivative of the adjoint -/
   q : FloatArray
+  /-- recovered normal derivative of `u` (`v/ℓ` away from the cut) -/
+  d : FloatArray
+  /-- recovered normal derivative of `p` -/
+  e : FloatArray
   /-- gradient density `G` (before `w_r`, `β_r`) -/
   G : FloatArray
   /-- distortion energy `J` -/
@@ -52,10 +56,45 @@ private partial def findRoot (par : Array Nat) (x : Nat) : Nat :=
   let p := par[x]!
   if p == x then x else findRoot par p
 
+/-- Flux recovery of SPEC §3.5: the normal derivatives from the integrated fluxes `vals` (`v` or
+`q`) at the nodes of `B_S`. At the cut vertices, `smoothed c` solves
+`(diag ℓ + Σ_σ κ_σ [[1,-1],[-1,1]]) d = vals`; everywhere else, and for `nodal`, `d = vals/ℓ`. -/
+def recoverFlux (b : Base) (cm : CutMesh) (flux : FluxRule) (isB : Array Bool) (ell vals : FloatArray) :
+    Except String FloatArray := do
+  let N := cm.nodes
+  let nv := cm.nv
+  let nc := cm.nc
+  let mut out := zeros N
+  for i in [0:N] do
+    if isB[i]! then out := out.set! i (normalDerivative (vals.get! i) (ell.get! i))
+  match flux with
+  | .nodal => return out
+  | .smoothed c =>
+    if nc == 0 then return out
+    let mut m := zeros (nc * nc)
+    let mut rhs := zeros nc
+    for k in [0:nc] do
+      m := m.set! (k * nc + k) (ell.get! (nv + k))
+      rhs := rhs.set! k (fluxRhs (vals.get! (nv + k)))
+    for sg in cm.segs do
+      let f := b.topo.faces[sg.face]!
+      let h2 := faceMeanSquareEdge (b.l f.a f.b) (b.l f.b f.c) (b.l f.c f.a)
+      let kap := fluxCoupling c h2 sg.len
+      m := m.set! (sg.p * nc + sg.p) (m.get! (sg.p * nc + sg.p) + kap)
+      m := m.set! (sg.q * nc + sg.q) (m.get! (sg.q * nc + sg.q) + kap)
+      m := m.set! (sg.p * nc + sg.q) (m.get! (sg.p * nc + sg.q) + fluxOffEntry kap)
+      m := m.set! (sg.q * nc + sg.p) (m.get! (sg.q * nc + sg.p) + fluxOffEntry kap)
+    match luFactor nc m with
+    | none => throw "flux recovery: singular system"
+    | some lu =>
+      let d := lu.solve rhs
+      for k in [0:nc] do out := out.set! (nv + k) (d.get! k)
+      return out
+
 /-- Solve region `r` for the case's energy. `aNode` is the weight `a` at every node (empty for
 unscaled energies), `kf` the curvature density per face of `M`. -/
 def computeRegion (b : Base) (cm : CutMesh) (en : Energy) (aNode : FloatArray)
-    (kf : Array Float) (r : Nat) : Except String RegionData := do
+    (kf : Array Float) (flux : FluxRule) (r : Nat) : Except String RegionData := do
   let N := cm.nodes
   let nv := cm.nv
   let tris := cm.tris.filter (·.region == r)
@@ -129,12 +168,15 @@ def computeRegion (b : Base) (cm : CutMesh) (en : Energy) (aNode : FloatArray)
   -- energy specific part
   let mut p := zeros N
   let mut q := zeros N
+  let mut d := zeros N
+  let mut e := zeros N
   let mut G := zeros N
   let mut J := fzero
   match en with
   | .dirichlet =>
     for k in [0:I.size] do J := J - uI.get! k * g.get! I[k]!
-    for i in B do G := G.set! i (gradDirichlet (v.get! i) (ell.get! i))
+    d ← recoverFlux b cm flux isB ell v
+    for i in B do G := G.set! i (gradDirichletD (d.get! i))
   | .scaledA _ | .scaledCurv _ _ =>
     let mut la := Mat.zero N
     for t in tris do
@@ -149,7 +191,9 @@ def computeRegion (b : Base) (cm : CutMesh) (en : Energy) (aNode : FloatArray)
     for i in B do
       let ri := adjointRhsScaledBoundary (lau.get! i) (aNode.get! i) (v.get! i)
       q := q.set! i (adjointFlux (lp.get! i) ri)
-      G := G.set! i (gradScaled (aNode.get! i) (v.get! i) (q.get! i) (ell.get! i))
+    d ← recoverFlux b cm flux isB ell v
+    e ← recoverFlux b cm flux isB ell q
+    for i in B do G := G.set! i (gradScaledD (aNode.get! i) (d.get! i) (e.get! i))
   | .hencky =>
     -- b(u) = u², b'(u) = 2u, b(0) = 0
     for i in [0:N] do
@@ -162,8 +206,10 @@ def computeRegion (b : Base) (cm : CutMesh) (en : Energy) (aNode : FloatArray)
     for i in B do
       let ri := adjointRhsPointwise (areaS.get! i) (2 * u.get! i)
       q := q.set! i (adjointFlux (lp.get! i) ri)
-      G := G.set! i (gradPointwise 0 (v.get! i) (q.get! i) (ell.get! i))
-  return { r, inS, isB, comp, solved, lap, u, p, v, ell, q, G, J, area, areaSolved
+    d ← recoverFlux b cm flux isB ell v
+    e ← recoverFlux b cm flux isB ell q
+    for i in B do G := G.set! i (gradPointwiseD 0 (d.get! i) (e.get! i))
+  return { r, inS, isB, comp, solved, lap, u, p, v, ell, q, d, e, G, J, area, areaSolved
            nTri := tris.size, nComp := roots.size, nUnsolvedComp, nUnsolvedNodes }
 
 end Ddg.Cuts

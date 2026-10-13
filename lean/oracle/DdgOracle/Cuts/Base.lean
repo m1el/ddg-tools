@@ -118,7 +118,7 @@ def buildBase (c : CutCase) : Except String Base := do
   let mut omega : Array Float := Array.mkEmpty nf
   let mut kGauss : Array Float := Array.mkEmpty nf
   for fi in [0:nf] do
-    let o := (c.faces[fi]!).omega lenF thetaF isB
+    let o := (c.faces[fi]!).omegaCancellationFree lenF thetaF isB
     omega := omega.push o
     kGauss := kGauss.push (faceCurvatureDensity o faceArea[fi]!)
   let kUsed ← match c.curv with

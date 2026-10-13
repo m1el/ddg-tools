@@ -393,6 +393,71 @@ def selftest : IO Nat := do
     check tally "stage equations: (L u)_I = -g_I, L_II p = -A b'(u), harmonic extension (L sigma)_O = 0 (to rounding)"
       (yam ≤ 1e-11 && adj ≤ 1e-10 && ext ≤ 1e-10) s!"yamabe={sci yam} adjoint={sci adj} extension={sci ext}"
 
+  -- 11d. flux recovery (SPEC §3.5): conservation, maximum principle, c = 0 is nodal, blow-up cases
+  let blow : List (String × RawMesh × FloatArray) :=
+    [("icosphere 2, tilted plane (nodal max|s| was 4.7e6)", ico2, tilted ico2 0.3 0.2 0.93 0.15),
+     ("icosphere 1, phi = z, zeros at vertices (nodal max|s| was 1.1e6)", icosphere 1, phiOf (icosphere 1) fun p => p.z),
+     ("icosphere 2, geodesic cap", ico2, phiOf ico2 fun p => Float.acos p.z - 1.0)]
+  for (nm, m, phi) in blow do
+    let cS := { mkCase "rec" m phi with energy := .hencky }
+    let cN := { cS with flux := .nodal }
+    let c0 := { cS with flux := .smoothed 0.0 }
+    match runOk cS, runOk cN, runOk c0 with
+    | some a, some bN, some z =>
+      let cm := a.ev.cm
+      let nv := cm.nv
+      -- pieces of the cut
+      let mut par : Array Nat := Array.range cm.nc
+      let rec find (par : Array Nat) (x : Nat) (fuel : Nat) : Nat :=
+        match fuel with
+        | 0 => x
+        | f + 1 => if par[x]! == x then x else find par par[x]! f
+      for sg in cm.segs do
+        let rp := find par sg.p cm.nc
+        let rq := find par sg.q cm.nc
+        par := par.set! rp rq
+      let mut worstCons := fzero
+      let mut worstRange := fzero
+      for rd in a.ev.regs do
+        for root in [0:cm.nc] do
+          if find par root cm.nc == root then
+            let mut sv := fzero
+            let mut sld := fzero
+            let mut lo := posInf
+            let mut hi := negInf
+            let mut scale := fzero
+            for k in [0:cm.nc] do
+              if find par k cm.nc == root then
+                let n := nv + k
+                let q := rd.v.get! n / rd.ell.get! n
+                sv := sv + rd.v.get! n
+                sld := sld + rd.ell.get! n * rd.d.get! n
+                scale := scale + (rd.v.get! n).abs
+                lo := min lo q
+                hi := max hi q
+            worstCons := max worstCons ((sv - sld).abs / (scale + 1e-300))
+            for k in [0:cm.nc] do
+              if find par k cm.nc == root then
+                let dk := rd.d.get! (nv + k)
+                let viol := max (lo - dk) (dk - hi)
+                worstRange := max worstRange (viol / (lo.abs + hi.abs + 1e-300))
+      let sMaxS := maxAbs a.ev.sRaw
+      let sMaxN := maxAbs bN.ev.sRaw
+      let mut dZero := fzero
+      for k in [0:cm.nc] do
+        dZero := max dZero ((z.ev.sRaw.get! k - bN.ev.sRaw.get! k).abs / (1 + sMaxN))
+      check tally s!"flux recovery, {nm}: sum l d = sum v per piece, d in the range of v/l, c = 0 is nodal"
+        (worstCons ≤ 1e-12 && worstRange ≤ 1e-12 && dZero ≤ 1e-12)
+        s!"conservation {sci worstCons} range {sci worstRange} c=0 vs nodal {sci dZero}; max|s| nodal {sci sMaxN} -> smoothed {sci sMaxS}"
+    | _, _, _ => check tally s!"flux recovery, {nm}: steps run" false
+
+  -- 11e. delta = 0: allowed; a crossing on a vertex is then an error
+  let d0 := { mkCase "d0" ico2 (phiOf ico2 fun p => Float.acos p.z - 1.0) with delta := 0.0 }
+  let d0z := { mkCase "d0z" (icosphere 1) (phiOf (icosphere 1) fun p => p.z) with delta := 0.0 }
+  check tally "delta = 0: runs when no crossing is on a vertex, no crossing is moved; error when one is"
+    ((match runOk d0 with | some r => r.ev.cm.crossings.all (fun c => !c.moved) | none => false)
+      && (runOk d0z).isNone && ((runCase d0z).splitOn "\n")[2]!.startsWith "status error")
+
   -- 12. text format: print / parse round trip and error blocks
   let c12 := { mkCase "rt" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with
     energy := .scaledCurv 0.5 0.02, eta := some (FloatArray.ofFn' ico2.pos.size fun i => 0.01 * Float.ofNat (i % 3)),

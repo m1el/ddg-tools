@@ -62,8 +62,10 @@ def fixtures : Array Fixture := Id.run do
   let add := fun (fs : Array Fixture) (c : CutCase) (what : String) => fs.push { case := c, what }
   fs := add fs { mkCase "ico1-tilted-dirichlet" ico1 (tilted ico1 0.3 0.2 0.93 0.1) with step := capped }
     "icosphere level 1 (42 vertices), tilted-plane level set, Dirichlet, capped step"
-  fs := add fs { mkCase "ico2-tilted-dirichlet" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with step := capped }
-    "icosphere level 2 (162 vertices), tilted-plane level set, Dirichlet, capped step (crossings near vertices give huge speeds)"
+  fs := add fs { mkCase "ico2-tilted-dirichlet" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with step := capped, flux := .nodal, passes := 1 }
+    "icosphere level 2 (162 vertices), tilted-plane level set, Dirichlet, capped step; the paper's procedure (nodal v/l, one smoothing pass)"
+  fs := add fs { mkCase "ico2-tilted-dirichlet-recovery" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with step := capped }
+    "the same with the default flux recovery (c = 0.5, no sliver smoothing): sane speeds where the nodal quotient blows up"
   fs := add fs { mkCase "ico2-cap-dirichlet" ico2 (cap ico2 1.0) with step := .fixed 0.001 }
     "icosphere level 2, geodesic cap of polar angle 1, Dirichlet, fixed tau"
   fs := add fs { mkCase "ico2-cap-hencky" ico2 (cap ico2 1.0) with energy := .hencky, step := .fixed 0.001 }
@@ -92,11 +94,19 @@ def fixtures : Array Fixture := Id.run do
   fs := add fs { mkCase "ico2-symmetry" ico2s tiltedCap with classes := some (mirrorClasses ico2s), step := .fixed 0.001 }
     "geodesic cap about a tilted axis (not mirror symmetric), classes = mirror x -> -x: both projections are active"
   fs := add fs { mkCase "ico1-phi-zero-vertex" ico1 (phiOf ico1 fun p => p.z) with step := capped }
-    "icosphere level 1, phi = z: phi is exactly 0 at 8 vertices, so crossings have t = 0 and are moved to delta; slivers"
-  fs := add fs { mkCase "ico1-delta-clamp" ico1 (phiOf ico1 fun p => p.z - 0.02) with delta := 0.2, rho0 := 2.0, passes := 2, step := capped }
-    "icosphere level 1, delta = 0.2 so several crossings hit the clamp; rho0 = 2, two smoothing passes"
-  fs := add fs { mkCase "ico2-sliver-smoothing" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with rho0 := 2.0, passes := 3, step := capped }
-    "level 2, tilted plane, rho0 = 2 with three smoothing passes"
+    "icosphere level 1, phi = z: phi is exactly 0 at 8 vertices, so crossings have t = 0 and are moved to delta; default flux recovery"
+  fs := add fs { mkCase "ico1-phi-zero-vertex-nodal" ico1 (phiOf ico1 fun p => p.z) with flux := .nodal, passes := 1, step := capped }
+    "the same with the paper's procedure (nodal, one pass): max |s| about 1e6"
+  fs := add fs { mkCase "ico1-delta-clamp" ico1 (phiOf ico1 fun p => p.z - 0.02) with delta := 0.2, flux := .nodal, rho0 := 2.0, passes := 2, step := capped }
+    "icosphere level 1, delta = 0.2 so several crossings hit the clamp; nodal, rho0 = 2, two smoothing passes"
+  fs := add fs { mkCase "ico2-sliver-smoothing" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with flux := .nodal, rho0 := 2.0, passes := 3, step := capped }
+    "level 2, tilted plane, nodal, rho0 = 2 with three smoothing passes"
+  fs := add fs { mkCase "ico2-recovery-sliver-passes" ico2 (tilted ico2 0.3 0.2 0.93 0.15) with rho0 := 2.0, passes := 2, step := capped }
+    "level 2, tilted plane, flux recovery c = 0.5 followed by two sliver-smoothing passes (rho0 = 2)"
+  fs := add fs { mkCase "ico2-cap-flux-c1" ico2 (cap ico2 1.0) with flux := .smoothed 1.0, step := .fixed 0.001 }
+    "geodesic cap, flux recovery with c = 1"
+  fs := add fs { mkCase "ico2-cap-delta-zero" ico2 (cap ico2 1.0) with delta := 0.0, step := .fixed 0.001 }
+    "geodesic cap, delta = 0: no crossing is moved"
   fs := add fs { mkCase "flat-disk-uniform-curvature" flat (phiOf flat fun p => Float.sqrt (p.x * p.x + p.y * p.y) - 0.3 * Float.sqrt Ddg.floatPi) with
       curv := .uniform 5.0, step := .fixed 0.001 }
     "flat disk with a curvature override (uniform 5) and a circular cut of scaled radius 0.3: closed forms of SPEC section 1"

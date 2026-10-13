@@ -51,6 +51,9 @@ def evaluate (c : CutCase) (b : Base) (phi : FloatArray) : Except String Eval :=
   let nv := b.nv
   let N := cm.nodes
   let nc := cm.nc
+  for t in cm.tris do
+    if !(t.area > 0) then
+      throw s!"sub-triangle of face {t.parent} has no area (a crossing on a vertex; delta = 0?)"
   let wv := FloatArray.ofFn' nv fun i =>
     c.alphaL + (match c.eta with | some e => e.get! i | none => fzero)
   -- weight a at nodes
@@ -61,8 +64,8 @@ def evaluate (c : CutCase) (b : Base) (phi : FloatArray) : Except String Eval :=
     for k in [0:nc] do
       let cr := cm.crossings[k]!
       aNode := aNode.set! (nv + k) ((1 - cr.t) * b.aVert.get! cr.a + cr.t * b.aVert.get! cr.b)
-  let r0 ← computeRegion b cm c.energy aNode b.kUsed 0
-  let r1 ← computeRegion b cm c.energy aNode b.kUsed 1
+  let r0 ← computeRegion b cm c.energy aNode b.kUsed c.flux 0
+  let r1 ← computeRegion b cm c.energy aNode b.kUsed c.flux 1
   -- speed
   let mut sRaw := zeros nc
   for k in [0:nc] do
@@ -294,13 +297,16 @@ def validateParams (c : CutCase) : Except String Unit := do
       if !pos (e.get! i) then throw s!"eta[{i}] must be finite and >= 0"
   if !(pos c.w.1 && pos c.w.2) then throw "w_0 and w_1 must be finite and >= 0"
   if !(c.beta.1.isFinite && c.beta.2.isFinite) then throw "beta_0 and beta_1 must be finite"
-  if !(c.delta > 0 && c.delta < 0.5) then throw "delta must be in (0, 1/2)"
+  if !(c.delta ≥ 0 && c.delta < 0.5) then throw "delta must be in [0, 1/2)"
   if !(c.rho0.isFinite && c.rho0 > 0) then throw "rho0 must be finite and positive"
   match c.step with
   | .fixed tau => if !(tau.isFinite && tau > 0) then throw "tau must be finite and positive"
   | .capped tm mm =>
     if !(tm.isFinite && tm > 0 && mm.isFinite && mm > 0) then
       throw "tau_max and max_motion must be finite and positive"
+  match c.flux with
+  | .nodal => pure ()
+  | .smoothed k => if !(k.isFinite && k ≥ 0) then throw "flux: c must be finite and >= 0"
   if let some cl := c.classes then
     if cl.size != nv then throw s!"classes has {cl.size} values for {nv} vertices"
 

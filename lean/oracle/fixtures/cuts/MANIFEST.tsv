@@ -1,5 +1,6 @@
 ico1-tilted-dirichlet	ok	icosphere level 1 (42 vertices), tilted-plane level set, Dirichlet, capped step
-ico2-tilted-dirichlet	ok	icosphere level 2 (162 vertices), tilted-plane level set, Dirichlet, capped step (crossings near vertices give huge speeds)
+ico2-tilted-dirichlet	ok	icosphere level 2 (162 vertices), tilted-plane level set, Dirichlet, capped step; the paper's procedure (nodal v/l, one smoothing pass)
+ico2-tilted-dirichlet-recovery	ok	the same with the default flux recovery (c = 0.5, no sliver smoothing): sane speeds where the nodal quotient blows up
 ico2-cap-dirichlet	ok	icosphere level 2, geodesic cap of polar angle 1, Dirichlet, fixed tau
 ico2-cap-hencky	ok	icosphere level 2, geodesic cap, Hencky energy
 ico2-cap-scaled-curv	ok	icosphere level 2, geodesic cap, curvature-scaled Dirichlet (r_eps = 1, c = 0.02)
@@ -11,9 +12,13 @@ ico2-eta-gradient	ok	geodesic cap with a penalty eta = 0.2 (1 + z), default (gra
 ico2-eta-paper	ok	the same, the paper's diagonal rule (W_V D^-1 + tau L) phi' = W_V D^-1 phi~
 ico2-region-weights	ok	geodesic cap, w = (2, 0.5), beta = (0.7, 0.2)
 ico2-symmetry	ok	geodesic cap about a tilted axis (not mirror symmetric), classes = mirror x -> -x: both projections are active
-ico1-phi-zero-vertex	ok	icosphere level 1, phi = z: phi is exactly 0 at 8 vertices, so crossings have t = 0 and are moved to delta; slivers
-ico1-delta-clamp	ok	icosphere level 1, delta = 0.2 so several crossings hit the clamp; rho0 = 2, two smoothing passes
-ico2-sliver-smoothing	ok	level 2, tilted plane, rho0 = 2 with three smoothing passes
+ico1-phi-zero-vertex	ok	icosphere level 1, phi = z: phi is exactly 0 at 8 vertices, so crossings have t = 0 and are moved to delta; default flux recovery
+ico1-phi-zero-vertex-nodal	ok	the same with the paper's procedure (nodal, one pass): max |s| about 1e6
+ico1-delta-clamp	ok	icosphere level 1, delta = 0.2 so several crossings hit the clamp; nodal, rho0 = 2, two smoothing passes
+ico2-sliver-smoothing	ok	level 2, tilted plane, nodal, rho0 = 2 with three smoothing passes
+ico2-recovery-sliver-passes	ok	level 2, tilted plane, flux recovery c = 0.5 followed by two sliver-smoothing passes (rho0 = 2)
+ico2-cap-flux-c1	ok	geodesic cap, flux recovery with c = 1
+ico2-cap-delta-zero	ok	geodesic cap, delta = 0: no crossing is moved
 flat-disk-uniform-curvature	ok	flat disk with a curvature override (uniform 5) and a circular cut of scaled radius 0.3: closed forms of SPEC section 1
 flat-disk-gaussian	ok	flat disk, Gaussian curvature (zero): u = 0, s = 0, pure curve shortening
 ico1-curvature-per-face	ok	icosphere level 1, per-face curvature override, Hencky

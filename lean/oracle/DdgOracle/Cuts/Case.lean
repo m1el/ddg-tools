@@ -39,6 +39,13 @@ inductive Penalty where
   /-- `(W_V D⁻¹ + τ L) φ′ = W_V D⁻¹ φ̃`, `D = diag(α_L + η)` -/
   | paperDiagonal
 
+/-- How the integrated fluxes are turned into normal derivatives (SPEC §3.5). -/
+inductive FluxRule where
+  /-- `d_p = v_p / ℓ_p` (the paper) -/
+  | nodal
+  /-- flux recovery with `c` -/
+  | smoothed (c : Float)
+
 /-- Step size rule (SPEC §4). -/
 inductive StepRule where
   /-- `τ` given -/
@@ -78,6 +85,8 @@ structure CutCase where
   step : StepRule
   /-- `min_crossing_offset` -/
   delta : Float
+  /-- flux recovery rule -/
+  flux : FluxRule
   /-- sliver threshold `ρ₀` -/
   rho0 : Float
   /-- number of smoothing passes -/
