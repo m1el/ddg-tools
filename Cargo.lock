@@ -410,6 +410,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddg-intrinsic"
+version = "0.1.0"
+dependencies = [
+ "ddg-core",
+ "proptest",
+]
+
+[[package]]
 name = "ddg-optimal-cones"
 version = "0.1.0"
 dependencies = [

@@ -16,6 +16,11 @@ download or paraphrase it (it is not in this tree; do not look for it, and do no
 `variational-surface-cutting` repository from the web). Papers that the text cites may be downloaded and cited.
 The contract for this paper is `crates/ddg-variational-cuts/SPEC.md`.
 
+Third paper: "Navigating Intrinsic Triangulations", Sharp, Soliman, Crane, ACM TOG 2019
+(`../NavigatingIntrinsicTriangulations/paper.pdf`; reference: the authors' demo in the same directory, MIT,
+which may be read and ported with its licence notice). Contract: `crates/ddg-intrinsic/SPEC.md`.
+`ROADMAP.md` lists what is scheduled and the known gaps.
+
 ## Layout
 
 ```
@@ -24,6 +29,8 @@ crates/ddg-core            mesh topology + validation, geometry, cotan operators
 crates/ddg-optimal-cones   the optimal-cones solver (the paper)
 crates/ddg-bff             boundary first flattening + cutting
 crates/ddg-variational-cuts  the cut flow of the second paper; `SPEC.md` is its contract
+crates/ddg-intrinsic       intrinsic triangulations (signposts, flips, Delaunay, refinement, overlay);
+                           `SPEC.md` is its contract; the authors' MIT demo may be used as a reference
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs;
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
