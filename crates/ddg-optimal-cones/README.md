@@ -776,6 +776,182 @@ table; `tests/dataset.rs::least_distortion_angles` is that recipe). The re-optim
 larger than the penalized ones (they are not shrunk by `λ`) and give less distortion for the
 same positions.
 
+### Published UVs: measured comparison
+
+`cargo run --release -p ddg-uv --example published_uvs` (one process per mesh is faster:
+run it with a mesh name as argument, in parallel). Measured on 2026-10-13; logs
+`runs_tmp/published-uvs/`. The measure is the dataset README's: `D = Σ_t A_t u_t²` with
+`u_t = ½ log(B_t/A_t)`, `A_t` the triangle's share of the 3D area, `B_t` its UV area; `D*` is `D`
+with the best global scale of the UV plane (the area-weighted mean of `u` removed). Flipped and
+degenerate UV triangles are counted and left out.
+
+What it shows:
+
+* **The flattening is reproduced on 11 of the 23 meshes** (our Boundary First Flattening with
+  the file's cones against the published `vt`, triangle by triangle: rms difference of `u` at
+  most about `10⁻³`, correlation at least 0.9999), approximately on 5 more (rms up to `6·10⁻³`),
+  and not on 7 (`airplane`, `body`, `camel_noise1`, `camelbadnonuniform`, `camelshotnoise`,
+  `rhino`: rms `1.2·10⁻²` to `5·10⁻²`; `cow00001`). Rounding of the published coordinates is not
+  the cause (its floor is `6·10⁻⁵`); what is, was not found.
+* **The published UVs realize the file's cone angles** to `5·10⁻⁶` rad on all 23 meshes.
+* **Every published flattening with a boundary has `u = 0` on the boundary**, also for the files
+  whose cone angles belong to the optimized-boundary family (the camels, the sparse cows, `hand`,
+  `rhino`, `airplane`): with `u = 0` our `D*` is within 0.969 to 1.006 of the published one, with
+  optimized boundary values the match is clearly worse. So in those files the angles and the
+  flattening do not use the same boundary treatment.
+* **The dataset's claim** (least distortion among all conformal flattenings with the same or
+  smaller total cone angle), tested with a cap of the published total plus 0.1 % (the file's
+  angles have six digits): our penalized optimum (C1) has a lower `D*` on 20 meshes, by 1.6 % to
+  83 %, is within 1 % on 2 (`cow01`, `face`), and is higher on `camelshotnoise` as it is (the
+  spikes, see below; lower by 20 % with zero distortion weight at the 22 tips). It gets there with
+  many small cones in clusters (254 on `camel` against 6 in the file). The authors' evident recipe
+  at our positions (C2: solve, merge, re-optimize the angles) is lower on 10, within 1 % on 5 and
+  higher on 8.
+* **At the same number of cones as the file** our merged and re-optimized cones are mostly
+  higher (`bump` +3.3 %, `body` +0.9 %, `camel` +4.4 %, `rhino` +15 %, `camelbad` +67 %), lower or
+  equal on a few (`cow5e-1` −13 %, `axes` −0.2 %, `cow75e-2` +0.1 %): the published positions are
+  better than ours for few cones. These rows are in the logs; the search for an equal count is
+  approximate.
+
+Not settled: the C2 search can miss better configurations (its total angle is not monotone in
+`λ`); a cap without the 0.1 % was run but not evaluated (on closed meshes it is infeasible where
+the file's total is below `4π` by rounding); several C2 rows fail to flatten because a
+re-optimized cone angle reaches `2π`.
+
+Table A and B: the published data, and our flattening with the file's cones against it.
+
+| mesh | cones | Σ\|angle\| | Gauss–Bonnet of the file | D | D* | flipped + degenerate | charts |
+|---|---:|---:|---|---:|---:|---:|---|
+| airplane | 13 | 32.1502 | n/a (has boundary) | 1.2502e-1 | 1.2502e-1 | 2 + 0 | one chart |
+| axes | 4 | 12.5663 | -9.06e-5 | 8.0896e-1 | 8.0892e-1 | 0 + 0 | one chart |
+| body | 10 | 27.9356 | n/a (has boundary) | 3.9685e-1 | 3.9323e-1 | 1 + 56 | one chart |
+| brain | 45 | 32.0843 | -2.71e-3 | 3.2931e-2 | 3.2843e-2 | 35 + 2 | one chart |
+| bump | 5 | 5.1347 | n/a (has boundary) | 1.9776e-2 | 1.9693e-2 | 0 + 0 | one chart |
+| bunny | 4 | 12.5656 | -7.61e-4 | 2.3244e-1 | 2.3229e-1 | 0 + 0 | one chart |
+| camel | 6 | 20.3953 | n/a (has boundary) | 3.7399e-2 | 3.7399e-2 | 0 + 0 | one chart |
+| camel_noise1 | 7 | 21.0340 | n/a (has boundary) | 5.9617e-2 | 5.0959e-2 | 19 + 0 | one chart |
+| camel_noise2 | 7 | 13.6965 | n/a (has boundary) | 3.0651e0 | 1.7762e-1 | 113 + 0 | one chart |
+| camelbad | 6 | 20.2976 | n/a (has boundary) | 4.4093e-2 | 3.6806e-2 | 1 + 0 | one chart |
+| camelbadnonuniform | 6 | 19.9219 | n/a (has boundary) | 3.5926e-2 | 3.5926e-2 | 4 + 0 | one chart |
+| camelshotnoise | 6 | 20.0649 | n/a (has boundary) | 6.8172e-2 | 6.8138e-2 | 70 + 0 | one chart |
+| chair | 14 | 20.4193 | +7.83e-4 | 1.2758e-2 | 1.2752e-2 | 0 + 0 | one chart |
+| cow00001 | 13836 | 123.9842 | n/a (has boundary) | 1.0883e-5 | 1.9331e-6 | 0 + 0 | one chart |
+| cow01 | 439 | 39.3188 | n/a (has boundary) | 3.0575e-2 | 3.0076e-2 | 0 + 0 | one chart |
+| cow1 | 2 | 8.0929 | n/a (has boundary) | 9.0993e-1 | 9.0993e-1 | 0 + 0 | one chart |
+| cow5e-1 | 5 | 14.3826 | n/a (has boundary) | 4.2601e-1 | 4.2601e-1 | 0 + 0 | one chart |
+| cow75e-2 | 3 | 10.4061 | n/a (has boundary) | 7.2186e-1 | 7.2038e-1 | 0 + 0 | one chart |
+| face | 2 | 1.4673 | n/a (has boundary) | 3.8059e-3 | 3.8059e-3 | 0 + 0 | one chart |
+| hand | 29 | 52.5442 | n/a (has boundary) | 1.1477e-2 | 1.0504e-2 | 0 + 0 | one chart |
+| mannequin | 8 | 9.6786 | n/a (has boundary) | 2.4814e0 | 1.7559e-2 | 2 + 0 | one chart |
+| rhino | 36 | 65.4459 | n/a (has boundary) | 3.7754e-2 | 3.7539e-2 | 0 + 0 | one chart |
+| tree | 8 | 19.0045 | n/a (has boundary) | 4.3301e-2 | 4.3161e-2 | 0 + 0 | one chart |
+
+| mesh | boundary that matches | D* ours / D* published | rms Δu | max \|Δu\| | corr | flipped ours / published | rms Δu, other boundary | file angle vs angle implied by the UVs | reproduces |
+|---|---|---:|---:|---:|---:|---|---:|---:|---|
+| airplane | u=0 | 1.2432e-1 / 1.2502e-1 = 0.9944 | 3.38e-2 | 1.07e0 | 0.99540 | 4 / 2 | 4.02e-2 | 4.63e-6 | no |
+| axes | closed | 8.0895e-1 / 8.0892e-1 = 1.0000 | 2.52e-4 | 3.46e-3 | 1.00000 | 0 / 0 | - | 4.94e-6 | yes (rms ≈1e-3 or less) |
+| body | u=0 | 3.9399e-1 / 3.9323e-1 = 1.0019 | 5.12e-2 | 1.06e0 | 0.99666 | 0 / 1 | 5.75e-2 | 4.72e-6 | no |
+| brain | closed | 3.2837e-2 / 3.2843e-2 = 0.9998 | 1.46e-3 | 3.82e-1 | 0.99997 | 38 / 35 | - | 4.78e-6 | approximately (rms ≤1e-2) |
+| bump | u=0 | 1.9693e-2 / 1.9693e-2 = 1.0000 | 3.58e-5 | 2.01e-4 | 1.00000 | 0 / 0 | 5.30e-3 | 4.47e-6 | yes (rms ≈1e-3 or less) |
+| bunny | closed | 2.3230e-1 / 2.3229e-1 = 1.0001 | 4.88e-4 | 1.01e-2 | 1.00000 | 0 / 0 | - | 3.95e-6 | yes (rms ≈1e-3 or less) |
+| camel | u=0 | 3.7311e-2 / 3.7399e-2 = 0.9977 | 5.57e-3 | 6.77e-1 | 0.99959 | 0 / 0 | 8.89e-2 | 4.90e-6 | approximately (rms ≤1e-2) |
+| camel_noise1 | u=0 | 5.0891e-2 / 5.0959e-2 = 0.9987 | 3.47e-2 | 8.81e-1 | 0.98820 | 19 / 19 | 8.97e-2 | 4.26e-6 | no |
+| camel_noise2 | u=0 | 1.7723e-1 / 1.7762e-1 = 0.9978 | 4.34e-3 | 1.67e-1 | 0.99995 | 113 / 113 | 6.31e-2 | 1.70e-6 | approximately (rms ≤1e-2) |
+| camelbad | u=0 | 3.7014e-2 / 3.6806e-2 = 1.0056 | 6.07e-3 | 6.29e-1 | 0.99950 | 1 / 1 | 8.82e-2 | 4.87e-6 | approximately (rms ≤1e-2) |
+| camelbadnonuniform | u=0 | 3.5782e-2 / 3.5926e-2 = 0.9960 | 1.18e-2 | 1.74e0 | 0.99806 | 1 / 4 | 8.73e-2 | 4.37e-6 | no |
+| camelshotnoise | u=0 | 6.6023e-2 / 6.8138e-2 = 0.9690 | 3.55e-2 | 7.52e-1 | 0.99045 | 72 / 70 | 2.31e0 | 4.49e-6 | no |
+| chair | closed | 1.2718e-2 / 1.2752e-2 = 0.9974 | 9.86e-4 | 2.30e-2 | 0.99996 | 0 / 0 | - | 4.18e-6 | yes (rms ≈1e-3 or less) |
+| cow00001 | optimized | 1.0436e-6 / 1.9331e-6 = 0.5398 | 6.79e-4 | 3.30e-3 | 0.88571 | 0 / 0 | 7.32e-4 | 5.00e-7 | no |
+| cow01 | u=0 | 3.0084e-2 / 3.0076e-2 = 1.0002 | 2.42e-4 | 1.20e-2 | 1.00000 | 0 / 0 | 9.37e-3 | 4.99e-7 | yes (rms ≈1e-3 or less) |
+| cow1 | u=0 | 9.0999e-1 / 9.0993e-1 = 1.0001 | 1.05e-3 | 2.73e-2 | 1.00000 | 0 / 0 | 1.05e-1 | 3.84e-6 | yes (rms ≈1e-3 or less) |
+| cow5e-1 | u=0 | 4.2604e-1 / 4.2601e-1 = 1.0001 | 3.44e-4 | 1.53e-2 | 1.00000 | 0 / 0 | 2.38e-1 | 4.52e-6 | yes (rms ≈1e-3 or less) |
+| cow75e-2 | u=0 | 7.2040e-1 / 7.2038e-1 = 1.0000 | 1.04e-3 | 2.55e-2 | 1.00000 | 0 / 0 | 5.50e-2 | 2.60e-6 | yes (rms ≈1e-3 or less) |
+| face | u=0 | 3.8056e-3 / 3.8059e-3 = 0.9999 | 1.10e-4 | 6.95e-3 | 1.00000 | 0 / 0 | 1.47e-2 | 1.50e-6 | yes (rms ≈1e-3 or less) |
+| hand | u=0 | 1.0534e-2 / 1.0504e-2 = 1.0028 | 4.87e-3 | 4.62e-2 | 0.99887 | 0 / 0 | 1.34e-2 | 4.87e-6 | approximately (rms ≤1e-2) |
+| mannequin | u=0 | 1.7538e-2 / 1.7559e-2 = 0.9988 | 7.42e-4 | 1.60e-2 | 0.99998 | 2 / 2 | 1.83e-2 | 4.50e-6 | yes (rms ≈1e-3 or less) |
+| rhino | u=0 | 3.7122e-2 / 3.7539e-2 = 0.9889 | 1.50e-2 | 1.59e-1 | 0.99700 | 0 / 0 | 3.00e-2 | 4.96e-6 | no |
+| tree | u=0 | 4.3162e-2 / 4.3161e-2 = 1.0000 | 2.61e-4 | 5.04e-2 | 1.00000 | 0 / 0 | 4.32e-3 | 4.75e-6 | yes (rms ≈1e-3 or less) |
+
+Table C: distortion at equal or smaller total cone angle (first block of each mesh: the boundary
+treatment of the file's family).
+
+| mesh (boundary of the family) | published: cones, Σ\|µ\|, solver ½Σmu², D* | C1: cones, Σ\|µ\|, λ, solver, D* | C1 vs published D* | C2: cones, Σ\|µ\|, λ, solver, D* | C2 vs published D* |
+|---|---|---|---:|---|---:|
+| airplane | 13, 32.1502, 0.06263, 1.2502e-1 | 116, 32.1823, 6.5017e-3, 0.04484, 8.8078e-2 | -29.5% | 10, 31.9137, 4.5443e-2, 0.08268, 1.6560e-1 | +32.5% |
+| axes | 4, 12.5663, 0.39905, 8.0892e-1 | 15, 12.5786, 3.4709e-2, 0.39823, 7.9630e-1 | -1.6% | 4, 12.5664, 1.0000e6, 0.39901, 8.0698e-1 | -0.2% |
+| body | 10, 27.9356, 0.20317, 3.9323e-1 | 409, 27.9635, 9.6354e-3, 0.16586, 3.2797e-1 | -16.6% | 10, 27.9207, 4.6953e-2, 0.19864, 3.9239e-1 | -0.2% |
+| brain | 45, 32.0843, 0.01715, 3.2843e-2 | 287, 32.1160, 1.8161e-4, 0.01199, 2.2696e-2 | -30.9% | 65, 26.5667, 1.1751e-3, 0.01625, 3.1045e-2 | -5.5% |
+| bump | 5, 5.1347, 0.00997, 1.9693e-2 | 40, 5.1397, 1.7724e-3, 0.00959, 1.8260e-2 | -7.3% | 5, 5.1349, 2.1288e-3, 0.00997, 1.9693e-2 | +0.0% (=) |
+| bunny | 4, 12.5656, 0.11512, 2.3229e-1 | 254, 12.5780, 1.3555e-2, 0.11045, 2.2036e-1 | -5.1% | 15, 12.5664, 1.0000e6, 0.11102, 2.2319e-1 | -3.9% |
+| camel | 6, 20.3953, 0.01491, 3.7399e-2 | 254, 20.4156, 1.0728e-3, 0.00858, 1.7116e-2 | -54.2% | 9, 17.3144, 3.3003e-3, 0.01681, 3.3497e-2 | -10.4% |
+| camel_noise1 | 7, 21.0340, 0.02157, 5.0959e-2 | 115, 21.0548, 1.2310e-3, 0.01475, 2.8397e-2 | -44.3% | 22, 18.0495, 3.0080e-3, 0.02287, 4.4215e-2 | -13.2% |
+| camel_noise2 | 7, 13.6965, 0.09698, 1.7762e-1 | 35, 13.7101, 3.3666e-3, 0.09299, 1.6565e-1 | -6.7% | 15, 13.5681, 2.4144e-2, 0.09563, 1.7269e-1 | -2.8% |
+| camelbad | 6, 20.2976, 0.01457, 3.6806e-2 | 210, 20.3179, 1.0788e-3, 0.00855, 1.7411e-2 | -52.7% | 12, 17.9253, 3.1908e-3, 0.01658, 3.3467e-2 | -9.1% |
+| camelbadnonuniform | 6, 19.9219, 0.01497, 3.5926e-2 | 140, 19.9418, 1.2510e-3, 0.00929, 1.7600e-2 | -51.0% | 9, 18.2938, 3.1623e-3, 0.01598, 3.1694e-2 | -11.8% |
+| camelshotnoise | 6, 20.0649, 84784.65243, 6.8138e-2 | 22, 20.0834, 1.0432e3, 61463.19595, 7.3762e-1 | +982.5% | 3, 18.8637, 1.3917e3, 71275.77592, no flattening | failed (cone angle ≥ 2π) |
+| camelshotnoise[wE=0 at tips] | 6, 20.0649, 0.13550, 6.8138e-2 | 151, 20.0848, 1.6352e-3, 0.01840, 5.4351e-2 | -20.2% | 10, 19.8262, 6.0566e-3, 0.02426, 6.0572e-2 | -11.1% |
+| chair | 14, 20.4193, 0.00657, 1.2752e-2 | 243, 20.4394, 4.5409e-4, 0.00305, 5.9280e-3 | -53.5% | 10, 20.3272, 5.5232e-4, 0.00456, 8.3847e-3 | -34.2% |
+| cow00001 (u=0) | 13836, 123.9842, 0.00000, 1.9331e-6 | 14236, 122.1582, 1.0000e-9, 0.00000, 8.1615e-10 | -100.0% | 337, 124.0967, 1.0698e-9, 0.00183, 5.6212e-3 | +290685.3% |
+| cow01 (u=0) | 439, 39.3188, 0.01540, 3.0076e-2 | 441, 39.3579, 2.2349e-3, 0.01531, 2.9913e-2 | -0.5% | 8, 29.3834, 1.1262e-2, 0.08028, 1.6008e-1 | +432.2% |
+| cow1 | 2, 8.0929, 0.44975, 9.0993e-1 | 5, 8.1010, 5.6065e-2, 0.35996, 7.2054e-1 | -20.8% | 1, 4.3525, 2.1500e-1, 0.85271, 1.6999e0 | +86.8% |
+| cow5e-1 | 5, 14.3826, 0.18475, 4.2601e-1 | 18, 14.3967, 1.4802e-2, 0.16941, 3.3992e-1 | -20.2% | 5, 14.3936, 3.1623e-2, 0.18360, 3.6965e-1 | -13.2% |
+| cow75e-2 | 3, 10.4061, 0.35835, 7.2038e-1 | 7, 10.4165, 3.5420e-2, 0.25405, 5.0910e-1 | -29.3% | 3, 10.1345, 8.7723e-2, 0.36031, 7.2115e-1 | +0.1% |
+| face | 2, 1.4673, 0.00220, 3.8059e-3 | 16, 1.4687, 6.4352e-4, 0.00214, 3.8153e-3 | +0.2% | 3, 1.4667, 3.1623e-3, 0.00218, 3.7996e-3 | -0.2% |
+| hand | 29, 52.5442, 0.00642, 1.0504e-2 | 536, 52.5967, 2.2657e-4, 0.00102, 1.7605e-3 | -83.2% | 22, 52.5002, 1.8455e-4, 0.01606, 7.6183e-2 | +625.2% |
+| mannequin | 8, 9.6786, 0.00916, 1.7559e-2 | 673, 9.6882, 1.4974e-3, 0.00596, 1.1463e-2 | -34.7% | 6, 9.6540, 2.8838e-3, 0.01706, 3.1095e-2 | +77.1% |
+| rhino | 36, 65.4459, 0.01858, 3.7539e-2 | 735, 65.5109, 2.4770e-4, 0.00512, 1.0011e-2 | -73.3% | 49, 65.1052, 6.3476e-4, 0.00977, 1.8595e-2 | -50.5% |
+| tree | 8, 19.0045, 0.02178, 4.3161e-2 | 482, 19.0233, 1.9094e-3, 0.01146, 2.2589e-2 | -47.7% | 5, 16.5022, 1.0000e-4, 0.02786, 5.3293e-2 | +23.5% |
+
+| mesh | other boundary: C1 vs published | C2 vs published |
+|---|---:|---:|
+| airplane | -15.6% | +54.2% |
+| body | -24.0% | -7.0% |
+| bump | -22.1% | +2.5% |
+| camel | -50.2% | -0.6% |
+| camel_noise1 | -39.4% | +9.1% |
+| camel_noise2 | +1.8% | +12.2% |
+| camelbad | -48.5% | -18.6% |
+| camelbadnonuniform | -46.8% | +55.6% |
+| camelshotnoise | +57943.7% | +7334.9% |
+| camelshotnoise[wE=0 at tips] | -27.1% | -7.8% |
+| cow00001 (u=0) | -100.0% | +289097.3% |
+| cow01 (u=0) | -17.1% | +172.2% |
+| cow1 | -20.1% | failed (cone angle ≥ 2π) |
+| cow5e-1 | -9.8% | +20.6% |
+| cow75e-2 | -27.3% | -14.2% |
+| face | -9.6% | -6.4% |
+| hand | -82.0% | +424.9% |
+| mannequin | -49.7% | +56.4% |
+| rhino | -72.1% | -46.5% |
+| tree | -53.3% | -13.5% |
+
+| mesh | C1 at n = published | C2 at n = published |
+|---|---|---|
+| airplane | n=13, Σ=14.7044, D*=9.6996e-1: +675.8% | n=13, Σ=50.0242, D*=2.5320e-1: +102.5% [Σ>cap] |
+| axes | n=14, Σ=12.5664, D*=7.9753e-1: -1.4% (n differs) | n=4, Σ=12.5664, D*=8.0698e-1: -0.2% |
+| body | n=10, Σ=12.0846, D*=1.2339e0: +213.8% | n=10, Σ=27.8317, D*=3.9688e-1: +0.9% |
+| brain | n=123, Σ=12.5664, D*=4.6882e-2: +42.8% (n differs) | n=55, Σ=12.5664, D*=4.6886e-2: +42.8% (n differs) |
+| bump | n=5, Σ=2.6444, D*=2.5621e-2: +30.1% | n=5, Σ=4.9740, D*=2.0338e-2: +3.3% |
+| bunny | n=229, Σ=15.3832, D*=1.5551e-1: -33.1% (n differs) [Σ>cap] | n=15, Σ=12.5664, D*=2.2319e-1: -3.9% (n differs) |
+| camel | n=6, Σ=4.1317, D*=6.1295e-1: +1538.9% | n=6, Σ=15.8866, D*=3.9047e-2: +4.4% |
+| camel_noise1 | n=7, Σ=3.9127, D*=2.0003e-1: +292.5% | n=7, Σ=12.0367, D*=7.5908e-2: +49.0% |
+| camel_noise2 | n=7, Σ=2.4138, D*=6.8552e-1: +285.9% | n=7, Σ=12.5917, D*=3.9050e-1: +119.9% |
+| camelbad | n=6, Σ=4.0910, D*=7.0258e-1: +1808.9% | n=6, Σ=11.1575, D*=6.1524e-2: +67.2% |
+| camelbadnonuniform | n=6, Σ=4.1362, D*=6.3507e-1: +1667.7% | n=6, Σ=11.0813, D*=5.8888e-2: +63.9% |
+| camelshotnoise | n=6, Σ=2.7520, D*=1.4323e0: +2002.1% | n=6, Σ=37.6815, D*=1.4052e0: +1962.3% [Σ>cap] |
+| camelshotnoise[wE=0 at tips] | n=6, Σ=3.7052, D*=7.4853e-1: +998.5% | n=6, Σ=15.3416, D*=9.5257e-2: +39.8% |
+| chair | n=73, Σ=12.5664, D*=2.3976e-2: +88.0% (n differs) | n=13, Σ=26.9170, D*=4.9870e-3: -60.9% (n differs) [Σ>cap] |
+| cow00001 (u=0) | n=13837, Σ=120.5789, D*=2.7875e-9: -99.9% (n differs) | n=341, Σ=124.3630, D*=5.5931e-3: +289232.9% (n differs) [Σ>cap] |
+| cow01 (u=0) | n=439, Σ=39.3030, D*=3.0153e-2: +0.2% | n=341, Σ=125.1340, D*=5.6236e-3: -81.3% (n differs) [Σ>cap] |
+| cow1 | n=2, Σ=4.3338, D*=1.2697e0: +39.5% | n=2, Σ=8.1016, D*=8.9933e-1: -1.2% [Σ>cap] |
+| cow5e-1 | n=5, Σ=8.0821, D*=7.2266e-1: +69.6% | n=5, Σ=14.3936, D*=3.6965e-1: -13.2% |
+| cow75e-2 | n=3, Σ=4.8028, D*=1.1974e0: +66.2% | n=3, Σ=10.1345, D*=7.2115e-1: +0.1% |
+| face | n=2, Σ=0.4125, D*=1.1597e-2: +204.7% | n=2, Σ=1.3444, D*=4.2932e-3: +12.8% |
+| hand | n=29, Σ=21.7938, D*=5.6625e-1: +5290.5% | n=29, Σ=55.2651, D*=8.2852e-2: +688.7% [Σ>cap] |
+| mannequin | n=8, Σ=3.9050, D*=2.5909e-1: +1375.5% | n=8, Σ=13.3909, D*=2.7356e-2: +55.8% [Σ>cap] |
+| rhino | n=36, Σ=15.4330, D*=1.5627e-1: +316.3% | n=36, Σ=56.3305, D*=4.3284e-2: +15.3% |
+| tree | n=8, Σ=6.8537, D*=1.5862e-1: +267.5% | n=7, Σ=21.2411, D*=4.2963e-2: -0.5% (n differs) [Σ>cap] |
+
 ## Choosing λ
 
 `λ` here is for masses divided by the area. For masses as they are in a file,
