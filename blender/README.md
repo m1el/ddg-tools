@@ -391,8 +391,8 @@ change of cut length are relative to 1e-3, on spot of diameter about 2):
 |--------|-----:|-----:|-----:|-----:|----:|----:|
 | flipped triangles (6 cases) | 17 | 12 | 7 | 10 | 10 | 4 |
 | flipped, spot atlas8 weight 2 / weight 1 / atlas6 weight 0.3 | 4 / 2 / 2 | 1 / 1 / 2 | 1 / 1 / 2 | 2 / 5 / 2 | 5 / 3 / 2 | 0 / 0 / 4 |
-| largest displacement of a cut point | 0 | 0.0004 | 0.0005 | 0.0024 | 0.006 | 0.014 |
-| change of cut length | 0 | +0.003 % | +0.01 % | +0.1 % | +0.4 % | +1.8 % to +2 % |
+| largest displacement of a cut point (spot atlases; cube atlas 4x larger) | 0 | 0.0004 | 0.0005 | 0.0024 | 0.006 | 0.014 |
+| change of cut length (spot atlases; up to +2.7 % on a spot circle at 0.2) | 0 | +0.003 % | +0.01 % | +0.1 % | +0.4 % | +1.8 % to +2 % |
 | smallest triangle area / mean (weight 2) | 9e-7 | 2e-5 | 7e-5 | 3e-4 | 7e-4 | 1.2e-3 |
 
 The count is not monotone in the offset on warped quads, and 0.2 does not remove every flip
