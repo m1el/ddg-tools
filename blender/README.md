@@ -1,6 +1,7 @@
 # DDG Conformal UV Unwrap (Blender extension)
 
-One operator: take the active mesh and generate a UV map for it. The work is done in Rust by the
+One operator takes the active mesh and generates a UV map for it; three more cut a mesh open
+where it flattens best (*The variational cut*, below). The work is done in Rust by the
 native module `ddg_tools` (`crates/ddg-py`), bundled with the extension as a Python wheel.
 
 > The native module runs the real pipeline (`crates/ddg-uv`): marked seams are cut, optimal cone
@@ -237,13 +238,91 @@ marking seams.
 - The system Python of this machine's Blender (3.14) has no numpy; official builds have it. The
   add-on and the native module use neither.
 
+## The variational cut: Start, Flow, Apply
+
+Three more operators, offered where the unwrap operator is (Edit mode: **UV** menu; Object mode:
+**Object** menu): `bpy.ops.uv.ddg_cut_start`, `uv.ddg_cut_flow`, `uv.ddg_cut_apply`. They cut a
+mesh open where it flattens with the least distortion, with the flow of Sharp and Crane,
+*Variational Surface Cutting* (ACM TOG 2018), implemented in `crates/ddg-variational-cuts`
+**clean-room, from the text of the paper** (the authors' code was never consulted) and bound
+through `ddg_tools.CutSession` (`crates/ddg-py/README.md`). A cut is advanced in several runs; an
+applied cut becomes seams; further cuts can be added; **existing seams are fixed cuts** (the flow
+cannot cross them and they stay seams).
+
+Typical use: select some faces (or one vertex) in Edit mode, **UV > Cut: Start**, then
+**Cut: Flow** one or more times (the cut in the wire object "<name> cut" moves), then
+**Cut: Apply**, then **Conformal Unwrap**.
+
+1. **Cut: Start** (`mode`, `radius`, `vertex`, `regions`). Creates the state as one float
+   attribute per region on the face-corner domain, `ddg_cut_region_0`, `ddg_cut_region_1`, ... (a
+   corner attribute, so that the two sides of a seam can differ; the second is the negative of
+   the first), and the preview. `SELECTED`: the selected faces are region 0, the rest region 1.
+   `CIRCLE`: the geodesic disk of `radius` (object units, scale not applied; 0: a tenth of the
+   bounding box diagonal) around `vertex` (-1: the active vertex of the edit mesh) is region 0.
+   `regions` above 2 is refused with the library's "not available yet" message.
+2. **Cut: Flow** reads the attributes, runs `steps` steps (fewer with `use_stop_rule`: the
+   library's stop rule), writes them back, replaces the preview, and reports the energy before
+   and after, the cut length, the steps taken and the reason it stopped (status line; also in the
+   mesh's custom property `ddg_cut_last_flow`). Running it again continues from the stored state.
+
+   | property | meaning | default |
+   |----------|---------|---------|
+   | `steps`, `use_stop_rule` | number of steps; stop early by the rule | 10, on |
+   | `energy` | Dirichlet, Scaled Dirichlet (curvature-based weight), Hencky | Hencky |
+   | `length_mode`, `ripple_wavelength` / `length_weight` | the length weight from a ripple wavelength (a fraction of the square root of the area; ripples longer than it grow), or explicit (on the surface scaled to unit area). Computed at the start of each run | ripple, 0.25 |
+   | `stages` | the library's default stages, or the paper's | default |
+   | `penalty_group`, `penalty_strength` | vertex group as penalty `eta` (paper Sec. 7.1): `eta = strength * length weight * group weight` | none, 1 |
+   | `hide_from_camera`, `hide_strength` | penalty where the active camera sees the surface: ray casts from the camera (anything in the scene can occlude) give the visibility, the library multiplies it by the facing term `max(n.e, 0)`; `eta += strength * length weight * that`. Perspective position of the camera, object-space normals | off, 1 |
+   | `distortion_weights`, `area_weights` | `w_k`, `beta_k` of region 0 and 1; `w = 0` for a region makes it a one-sided patch (paper Fig. 14) | (1, 1), (0, 0) |
+   | `symmetry`, `symmetry_tolerance` | mirror symmetry about the object's X, Y or Z plane; classes from mirrored vertices matched within the tolerance (fraction of the bounding box diagonal); unmatched vertices are reported | none |
+   | `use_uniform_curvature`, `uniform_curvature` | replace the Gaussian curvature by a constant density (paper Sec. 7.4) | off |
+   | *Advanced panel* | cap and smoothing of the feature size, step size rule and its numbers, crossing offset, stop tolerances and window, the individual stages (normal derivative, length step, extension, speed scaling, redistancing, penalty rule) | the library's defaults |
+
+   Not offered: a pointwise energy given by a function.
+3. **Cut: Apply** (`unwrap_after`). Inserts the cut into the mesh with bmesh, marks the new
+   edges as seams, removes the preview and the attributes, and optionally runs **Conformal
+   Unwrap** with its defaults.
+
+   *How the insertion works.* The description of the cut that the session gives (points on
+   polygon edges with a parameter, per polygon the paths with their points on diagonals of
+   Blender's triangulation) is inserted in two steps. The points on edges are made with
+   `bmesh.utils.edge_split` (the two sides of a seam can carry different points; both are put on
+   the edge), which interpolates vertex data (groups, attributes) and corner data (UVs, corner
+   attributes). Then every polygon is split along its paths with `bmesh.utils.face_split`,
+   which gives each part the data of the polygon (material, smooth flag, face attributes); the
+   points inside a polygon are created by `face_split` and get vertex-group weights, vertex
+   data and corner data interpolated here from the two corners of their diagonal. Polygons that
+   the cut does not cross (and whose edges got no point) are untouched, nothing is triangulated.
+   *Difference from `CutSession.insert`* (the Rust reference): the result has the same
+   vertices (positions), polygons (as vertex sets) and seams, but Blender numbers them in its own
+   order, and the reference also hands out a triangulation of the new polygons, which Blender
+   computes itself. Not supported: meshes with shape keys (refused with a message).
+
+Tests: `blender/tests/test_cut.py` (see *Tests*): start, flow and apply on a UV sphere, a
+subdivided cube, a torus, the monkey and, if present, `data/models/spot/spot/spot_quadrangulated.obj`;
+attributes and preview exist and are removed by Apply; the result equals the Rust insertion; the
+seams are exactly the inserted edges plus the old ones; Euler characteristic and manifoldness are
+kept; a UV map, a vertex group, vertex and corner attributes, materials and a face attribute that
+are linear functions of position or inherited are still those functions afterwards; no flipped
+UV triangle after unwrap; `k` steps twice equal `2k` once (float32 attributes, within 1e-4 of the
+size); a second cut with the first as seams; every error path has a readable message.
+`scripts/blender-test.sh --bench` also times Start, Flow and Apply against the library time
+(`blender/tests/bench_cut.py`).
+
+### Credits
+
+The cut operators are a front end for Sharp, Crane, *Variational Surface Cutting*, ACM
+Transactions on Graphics 37(4), 2018, implemented from the text of the paper. No code of the
+authors is used or was read.
+
 ## Layout
 
 | path | contents |
 |------|----------|
 | `ddg_uv_unwrap/blender_manifest.toml` | extension manifest; `wheels` and `platforms` are filled in at build time |
-| `ddg_uv_unwrap/__init__.py` | registration and the two menu entries |
+| `ddg_uv_unwrap/__init__.py` | registration and the menu entries |
 | `ddg_uv_unwrap/operator.py` | the operator: properties, panel, mode handling, reports |
+| `ddg_uv_unwrap/cut_operators.py`, `cut.py` | the three cut operators; attributes, preview, flow settings, bmesh insertion |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
 

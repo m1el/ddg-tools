@@ -3,11 +3,15 @@ schema_version = "1.0.0"
 id = "ddg_uv_unwrap"
 version = "0.1.0"
 name = "DDG Conformal UV Unwrap"
-tagline = "Unwrap a mesh with optimal cone singularities"
+tagline = "Conformal UV unwrap with optimal cones; variational cuts"
 maintainer = "ddg-tools contributors"
 type = "add-on"
 
 tags = ["UV", "Mesh"]
+
+# Credits: Soliman, Slepcev, Crane (Optimal Cone Singularities, 2018); Sawhney, Crane (Boundary
+# First Flattening, 2017); Sharp, Crane (Variational Surface Cutting, 2018, implemented
+# clean-room from the text of the paper).
 
 # Developed and tested with Blender 5.0.1. See blender/README.md.
 blender_version_min = "5.0.0"
