@@ -99,7 +99,8 @@ pub enum EdgeKind {
 pub enum CutVertex {
     /// A vertex of the input mesh.
     Original(u32),
-    /// One side of a cut point (an index into [`Cut::points`]).
+    /// One side of a node of the cut: a cut point (an index into [`Cut::points`]) or, from
+    /// `Cut::points.len()` on, a triple point (SPEC §8.2; never for two regions).
     Point(u32),
 }
 
@@ -115,15 +116,20 @@ pub enum CutVertex {
 ///
 /// * vertex `i < n_V` is vertex `i` of the input mesh;
 /// * cut point `k` on the edge `[a, b]` (`a < b`) has the two copies `n_V + 2k` (in the region
-///   of `a`) and `n_V + 2k + 1` (in the region of `b`).
+///   of `a`) and `n_V + 2k + 1` (in the region of `b`);
+/// * triple point `m` in the face with the corners `(c_0, c_1, c_2)` has, after all cut points,
+///   the three copies `n_V + 2 n_P + 3m + j` in the region of `c_j` (SPEC §8.2).
 ///
-/// Use [`CutTriangles::vertex_source`] and [`CutTriangles::point_vertices`] instead of relying
-/// on this layout; it will grow when triple points are added.
+/// Use [`CutTriangles::vertex_source`], [`CutTriangles::point_vertices`] and
+/// [`CutTriangles::triple_vertices`] instead of relying on this layout.
 ///
 /// # Triangles
 ///
 /// Triangles are listed in order of their parent face: an uncut face gives one triangle (the
-/// face itself, same corners), a cut face three: with `a` the vertex that is alone on its side
+/// face itself, same corners), a face with three regions six (for every corner `c` in turn,
+/// with `p` the cut point on the edge that leaves `c`, `p′` the one on the edge that arrives
+/// at `c` and `m` the triple point: `(c, p, m)`, then `(c, m, p′)`), a face with two regions
+/// three: with `a` the vertex that is alone on its side
 /// and `p ∈ ab`, `q ∈ ca` the cut points, `(a, p, q)`, then `(p, b, c)`, `(p, c, q)` if
 /// `|pc| ≤ |bq|`, else `(p, b, q)`, `(b, c, q)`. Corner slot `k` of triangle `t` is the corner
 /// at vertex `faces[t][k]`; edge slot `k` is the edge from corner `k` to corner `k + 1`.
@@ -142,6 +148,8 @@ pub struct CutTriangles {
     pub n_original: usize,
     /// Number of cut points.
     pub n_points: usize,
+    /// Number of triple points (SPEC §8.2); zero for two regions.
+    pub n_triples: usize,
     /// The triangles, as vertex ids of the cut mesh.
     pub faces: Vec<[u32; 3]>,
     /// The face of the input mesh each triangle is part of.
@@ -163,7 +171,9 @@ pub struct CutTriangles {
     /// surface.
     pub segment_length: Vec<f64>,
     /// For every cut segment, the triangle `(a, p, q)` that it cuts off its face: `a` is the
-    /// vertex of the face that is alone on its side, and the segment is edge slot 1.
+    /// vertex of the face that is alone on its side, and the segment is edge slot 1. For a
+    /// segment from the cut point `p` to a triple point `m`: the triangle `(c, p, m)` with `c`
+    /// the corner that the edge of `p` leaves; the segment is edge slot 1 again.
     pub segment_triangle: Vec<u32>,
     /// For every cut point, whether an incident triangle of the cut mesh has an aspect ratio
     /// above the threshold it was built with (SPEC §3.7).
@@ -236,9 +246,11 @@ impl CutTriangles {
         let nv = mesh.n_vertices();
         let n_points = cut.points.len();
         let n_triangles = mesh.n_faces() + 2 * cut.segments.len();
+        let mut next_triple = 0usize;
         let mut out = CutTriangles {
             n_original: nv,
             n_points,
+            n_triples: cut.triple_points.len(),
             faces: Vec::with_capacity(n_triangles),
             parent: Vec::with_capacity(n_triangles),
             region: Vec::with_capacity(n_triangles),
@@ -258,6 +270,11 @@ impl CutTriangles {
             let [a, b] = mesh.edge_vertices(point.edge as usize);
             out.vertex_region.push(cut.vertex_region[a]);
             out.vertex_region.push(cut.vertex_region[b]);
+        }
+        for triple in &cut.triple_points {
+            for v in mesh.faces()[triple.face as usize] {
+                out.vertex_region.push(cut.vertex_region[v as usize]);
+            }
         }
 
         let boundary_kind = |h: usize| {
@@ -283,11 +300,90 @@ impl CutTriangles {
                 }
                 Ok(Some(k)) => k,
                 Err(()) => {
-                    return Err(CutError::UnsupportedTriplePoint {
-                        face: f as u32,
-                        vertices: *face,
-                        regions,
-                    });
+                    // Three regions (SPEC §8.2): every corner keeps the quad between its two cut
+                    // points and the triple point, split by the diagonal to the triple point.
+                    let triple = next_triple;
+                    next_triple += 1;
+                    let len2 = base.len2[f];
+                    let xm = cut.triple_points[triple].barycentric;
+                    let mut on_edge = [(0u32, [0.0; 3]); 3];
+                    for (k, slot) in on_edge.iter_mut().enumerate() {
+                        let e = mesh.edge(3 * f + k);
+                        let point = cut.edge_point[e];
+                        let t = cut.points[point as usize].t;
+                        let s = if mesh.edges()[e][0] == face[k] {
+                            t
+                        } else {
+                            1.0 - t
+                        };
+                        let mut x = [0.0; 3];
+                        x[k] = 1.0 - s;
+                        x[(k + 1) % 3] = s;
+                        *slot = (point, x);
+                    }
+                    for c in 0..3 {
+                        let previous = (c + 2) % 3;
+                        let (p, xp) = on_edge[c];
+                        let (q, xq) = on_edge[previous];
+                        let copy = |point: u32| -> u32 {
+                            let lo = mesh.edges()[cut.points[point as usize].edge as usize][0];
+                            (nv + 2 * point as usize + usize::from(face[c] != lo)) as u32
+                        };
+                        let m = (nv + 2 * n_points + 3 * triple + c) as u32;
+                        let mut xc = [0.0; 3];
+                        xc[c] = 1.0;
+                        let parts = [
+                            (
+                                [face[c], copy(p), m],
+                                [xc, xp, xm],
+                                [boundary_kind(3 * f + c), EdgeKind::Cut, EdgeKind::Interior],
+                                p,
+                            ),
+                            (
+                                [face[c], m, copy(q)],
+                                [xc, xm, xq],
+                                [
+                                    EdgeKind::Interior,
+                                    EdgeKind::Cut,
+                                    boundary_kind(3 * f + previous),
+                                ],
+                                q,
+                            ),
+                        ];
+                        for (part, (ids, x, kinds, point)) in parts.into_iter().enumerate() {
+                            let Some((area, sub_len2, cot)) = subtriangle(x, len2, base.area[f])
+                            else {
+                                return Err(CutError::DegenerateCutTriangle {
+                                    face: f as u32,
+                                    vertices: *face,
+                                    detail: format!(
+                                        "three regions meet in this face, and the triangle at \
+                                         vertex {} between a cut point and the triple point has \
+                                         no area",
+                                        face[c]
+                                    ),
+                                });
+                            };
+                            let aspect = aspect_ratio(sub_len2, area);
+                            out.max_aspect_ratio = out.max_aspect_ratio.max(aspect);
+                            if aspect > sliver_aspect_ratio {
+                                out.sliver_point[point as usize] = true;
+                            }
+                            if part == 0 {
+                                // The segment from the cut point on the edge leaving c to m.
+                                out.segment_triangle.push(out.faces.len() as u32);
+                                out.segment_length.push(sub_len2[1].sqrt());
+                            }
+                            out.faces.push(ids);
+                            out.parent.push(f as u32);
+                            out.region.push(regions[c]);
+                            out.cot.push(cot);
+                            out.area.push(area);
+                            out.len2.push(sub_len2);
+                            out.edge_kind.push(kinds);
+                        }
+                    }
+                    continue;
                 }
             };
             // Rotate the face so that the lone vertex comes first: (a, b, c), with halfedges
@@ -413,7 +509,7 @@ impl CutTriangles {
     /// Number of vertices of the cut mesh.
     #[inline]
     pub fn n_vertices(&self) -> usize {
-        self.n_original + 2 * self.n_points
+        self.n_original + 2 * self.n_points + 3 * self.n_triples
     }
 
     /// Number of triangles of the cut mesh.
@@ -422,14 +518,27 @@ impl CutTriangles {
         self.faces.len()
     }
 
-    /// Where vertex `v` of the cut mesh comes from.
+    /// Where vertex `v` of the cut mesh comes from. A copy of triple point `m` is reported as
+    /// `CutVertex::Point(n_points + m)`: the node numbering of [`CutSegment::points`]
+    /// (crate::CutSegment::points).
     #[inline]
     pub fn vertex_source(&self, v: usize) -> CutVertex {
+        let first_triple = self.n_original + 2 * self.n_points;
         if v < self.n_original {
             CutVertex::Original(v as u32)
-        } else {
+        } else if v < first_triple {
             CutVertex::Point(((v - self.n_original) / 2) as u32)
+        } else {
+            CutVertex::Point((self.n_points + (v - first_triple) / 3) as u32)
         }
+    }
+
+    /// The three vertices of the cut mesh at triple point `triple`: its copies in the regions of
+    /// corner 0, 1 and 2 of its face.
+    #[inline]
+    pub fn triple_vertices(&self, triple: usize) -> [usize; 3] {
+        let v = self.n_original + 2 * self.n_points + 3 * triple;
+        [v, v + 1, v + 2]
     }
 
     /// The two vertices of the cut mesh at cut point `point`: the copy on the side of the
@@ -458,9 +567,9 @@ impl CutTriangles {
     pub(crate) fn extend(&self, mesh: &TriMesh, cut: &Cut, values: &[f64]) -> Vec<f64> {
         let mut out = Vec::with_capacity(self.n_vertices());
         out.extend_from_slice(values);
-        for value in cut.interpolate(mesh, values) {
-            out.push(value);
-            out.push(value);
+        for (node, value) in cut.interpolate_nodes(mesh, values).into_iter().enumerate() {
+            let copies = if node < self.n_points { 2 } else { 3 };
+            out.extend(std::iter::repeat_n(value, copies));
         }
         out
     }
@@ -580,7 +689,8 @@ impl CutTriangles {
 impl CutMesh {
     /// Positions of the cut-mesh vertices in space, for a caller that has positions of the input
     /// vertices: an original vertex keeps its position, both copies of a cut point get
-    /// `(1 − t)·x_a + t·x_b`.
+    /// `(1 − t)·x_a + t·x_b`, the three copies of a triple point its barycentric combination of
+    /// the corners of its face.
     ///
     /// # Errors
     /// [`CutError::WrongLength`] if `positions` does not have one entry per vertex of `mesh`, or
@@ -592,10 +702,11 @@ impl CutMesh {
         positions: &[[f64; 3]],
     ) -> Result<Vec<[f64; 3]>, CutError> {
         let points = cut.point_positions(mesh, positions)?;
+        let triples = cut.triple_positions(mesh, positions)?;
         check_length(
             "cut points and input vertices",
             "cut-mesh vertices",
-            positions.len() + 2 * points.len(),
+            positions.len() + 2 * points.len() + 3 * triples.len(),
             self.vertex_source.len(),
         )?;
         Ok(self
@@ -603,7 +714,8 @@ impl CutMesh {
             .iter()
             .map(|source| match *source {
                 CutVertex::Original(v) => positions[v as usize],
-                CutVertex::Point(k) => points[k as usize],
+                CutVertex::Point(k) if (k as usize) < points.len() => points[k as usize],
+                CutVertex::Point(k) => triples[k as usize - points.len()],
             })
             .collect())
     }

@@ -19,11 +19,61 @@ pub struct CutPoint {
 /// A straight piece of the cut across one face of the input mesh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CutSegment {
-    /// Its two end points, as indices into [`Cut::points`]. Walking from the first to the second
-    /// with the surface normal pointing up, the region with the lower id is on the left.
+    /// Its two ends, as *nodes* of the cut: a node below `Cut::points.len()` is that cut point,
+    /// a node `Cut::points.len() + m` is the triple point `m` ([`Cut::triple_points`]).
+    ///
+    /// In a face with two regions both ends are cut points; walking from the first to the
+    /// second with the surface normal pointing up, the region with the lower id is on the left.
+    /// In a face with three regions (SPEC §8.2) the first end is a cut point and the second the
+    /// triple point of the face. The two regions a segment separates are those of its first
+    /// end ([`Cut::segment_regions`]).
     pub points: [u32; 2],
     /// The face of the input mesh it crosses.
     pub face: u32,
+}
+
+/// A point where three regions meet, inside a face of the input mesh whose three vertices lie
+/// in three regions (SPEC §8.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TriplePoint {
+    /// The face.
+    pub face: u32,
+    /// The cut points on its three edges: `points[k]` lies on the edge from corner `k` to
+    /// corner `k + 1` of the face.
+    pub points: [u32; 3],
+    /// Its barycentric coordinates with respect to the three corners of the face: the centroid
+    /// of the three cut points.
+    ///
+    /// [formula: cut-triple-point]
+    pub barycentric: [f64; 3],
+}
+
+/// Where a curve of a cut network ends ([`CutCurve`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveEnd {
+    /// On the boundary of the mesh.
+    Boundary,
+    /// At this triple point (an index into [`Cut::triple_points`]).
+    Triple(u32),
+    /// Nowhere: the curve is closed, its last point is joined to its first.
+    Closed,
+}
+
+/// A curve of a cut network between two junctions, as returned by [`Cut::curves`]: a maximal
+/// chain of cut points joined by segments, ending at triple points, on the boundary of the mesh,
+/// or closed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutCurve {
+    /// The cut points of the curve, in order (indices into [`Cut::points`]).
+    pub points: Vec<u32>,
+    /// The polyline in space: the positions of the cut points, preceded by the position of the
+    /// triple point the curve starts at and followed by that of the triple point it ends at,
+    /// if any.
+    pub positions: Vec<[f64; 3]>,
+    /// The two regions it separates, `[lower id, higher id]`.
+    pub regions: [u32; 2],
+    /// Where it starts and where it ends.
+    pub ends: [CurveEnd; 2],
 }
 
 /// One connected piece of a cut, as returned by [`Cut::polylines`].
@@ -49,8 +99,11 @@ pub struct Cut {
     pub vertex_region: Vec<u32>,
     /// The points of the cut.
     pub points: Vec<CutPoint>,
-    /// The segments of the cut. A face has zero or one segment.
+    /// The segments of the cut. A face with two regions has one segment, a face with three
+    /// regions three (from its three cut points to its triple point, in the order of its edges).
     pub segments: Vec<CutSegment>,
+    /// The triple points, in order of their face id. Empty for two regions.
+    pub triple_points: Vec<TriplePoint>,
     /// For every edge of the input mesh, the index of its cut point, or
     /// [`NONE`](ddg_core::topology::NONE) if the edge is not crossed.
     pub edge_point: Vec<u32>,
@@ -87,6 +140,43 @@ pub fn edge_crossing(phi_a: f64, phi_b: f64) -> f64 {
 #[inline]
 pub fn region_of(phi: f64) -> u32 {
     u32::from(phi > 0.0)
+}
+
+/// The region of every vertex for `N ≥ 2` level-set functions (SPEC §8.1): the index of the
+/// smallest function at the vertex; ties go to the lowest index.
+///
+/// # Errors
+/// [`CutError::UnsupportedRegionCount`] for fewer than two functions,
+/// [`CutError::WrongLength`], [`CutError::NonFiniteLevelSet`].
+pub fn regions_of(mesh: &TriMesh, phis: &[Vec<f64>]) -> Result<Vec<u32>, CutError> {
+    if phis.len() < 2 {
+        return Err(CutError::UnsupportedRegionCount { got: phis.len() });
+    }
+    for phi in phis {
+        check_length(
+            "level-set function",
+            "vertices",
+            phi.len(),
+            mesh.n_vertices(),
+        )?;
+        if let Some(v) = phi.iter().position(|x| !x.is_finite()) {
+            return Err(CutError::NonFiniteLevelSet {
+                vertex: v as u32,
+                value: phi[v],
+            });
+        }
+    }
+    Ok((0..mesh.n_vertices())
+        .map(|v| {
+            let mut best = 0;
+            for k in 1..phis.len() {
+                if phis[k][v] < phis[best][v] {
+                    best = k;
+                }
+            }
+            best as u32
+        })
+        .collect())
 }
 
 /// The corner of a face that is alone in its region, given the regions of its three corners:
@@ -144,7 +234,67 @@ impl Cut {
             });
         }
         let vertex_region: Vec<u32> = phi.iter().map(|&x| region_of(x)).collect();
+        Ok(Cut::assemble(
+            mesh,
+            vertex_region,
+            |a, b| edge_crossing(phi[a], phi[b]),
+            min_crossing_offset,
+        ))
+    }
 
+    /// Extracts the cut network of `N ≥ 2` level-set functions (SPEC §8.1, §8.2): `phis[k]` has
+    /// one value per vertex and is negative inside region `k`; the region of a vertex is the
+    /// function that is smallest there (ties: the lowest `k`). An edge whose ends lie in the
+    /// regions `i ≠ j` carries one cut point, where the interpolants of `φ_i` and `φ_j` are
+    /// equal (paper Eq. 31),
+    ///
+    /// ```text
+    /// t = ψ_a / (ψ_a − ψ_b),     ψ = φ_i − φ_j,
+    /// ```
+    ///
+    /// moved into `[δ, 1 − δ]` like any crossing. A face with three regions gets a triple point
+    /// at the centroid of its three cut points and three segments to it.
+    ///
+    /// With `phis = [φ, −φ]` this is [`Cut::from_level_set`] of `φ`, bit for bit.
+    ///
+    /// # Errors
+    /// [`CutError::UnsupportedRegionCount`] for fewer than two functions,
+    /// [`CutError::WrongLength`], [`CutError::NonFiniteLevelSet`], and
+    /// [`CutError::InvalidOptions`] unless `0 ≤ min_crossing_offset < ½`.
+    ///
+    /// [formula: cut-edge-crossing-regions]
+    pub fn from_regions(
+        mesh: &TriMesh,
+        phis: &[Vec<f64>],
+        min_crossing_offset: f64,
+    ) -> Result<Cut, CutError> {
+        if !(0.0..0.5).contains(&min_crossing_offset) {
+            return Err(CutError::InvalidOptions {
+                reason: format!(
+                    "min_crossing_offset must lie in [0, 0.5), got {min_crossing_offset}"
+                ),
+            });
+        }
+        let vertex_region = regions_of(mesh, phis)?;
+        Ok(Cut::assemble(
+            mesh,
+            vertex_region.clone(),
+            |a, b| {
+                let (i, j) = (vertex_region[a] as usize, vertex_region[b] as usize);
+                edge_crossing(phis[i][a] - phis[j][a], phis[i][b] - phis[j][b])
+            },
+            min_crossing_offset,
+        ))
+    }
+
+    /// The cut for given regions of the vertices; `raw(a, b)` is the crossing parameter of the
+    /// crossed edge `[a, b]` before it is moved.
+    fn assemble(
+        mesh: &TriMesh,
+        vertex_region: Vec<u32>,
+        raw: impl Fn(usize, usize) -> f64,
+        min_crossing_offset: f64,
+    ) -> Cut {
         let (lo, hi) = (min_crossing_offset, 1.0 - min_crossing_offset);
         let mut points = Vec::new();
         let mut edge_point = vec![NONE; mesh.n_edges()];
@@ -154,7 +304,7 @@ impl Cut {
             if vertex_region[a as usize] == vertex_region[b as usize] {
                 continue;
             }
-            let raw = edge_crossing(phi[a as usize], phi[b as usize]);
+            let raw = raw(a as usize, b as usize);
             smallest_offset = smallest_offset.min(raw.min(1.0 - raw));
             let t = raw.clamp(lo, hi);
             if t != raw {
@@ -165,17 +315,40 @@ impl Cut {
         }
 
         let mut segments = Vec::new();
+        let mut triple_points: Vec<TriplePoint> = Vec::new();
         for (f, face) in mesh.faces().iter().enumerate() {
             let regions = face.map(|v| vertex_region[v as usize]);
             let k = match lone_corner(regions) {
                 Ok(None) => continue,
                 Ok(Some(k)) => k,
                 Err(()) => {
-                    return Err(CutError::UnsupportedTriplePoint {
+                    // Three regions: the triple point is the centroid of the three cut points.
+                    let on_edge = [0, 1, 2].map(|k| edge_point[mesh.edge(3 * f + k)]);
+                    let mut barycentric = [0.0; 3];
+                    for k in 0..3 {
+                        let e = mesh.edge(3 * f + k);
+                        let t = points[on_edge[k] as usize].t;
+                        let s = if mesh.edges()[e][0] == face[k] {
+                            t
+                        } else {
+                            1.0 - t
+                        };
+                        barycentric[k] += (1.0 - s) / 3.0;
+                        barycentric[(k + 1) % 3] += s / 3.0;
+                    }
+                    let node = (points.len() + triple_points.len()) as u32;
+                    for point in on_edge {
+                        segments.push(CutSegment {
+                            points: [point, node],
+                            face: f as u32,
+                        });
+                    }
+                    triple_points.push(TriplePoint {
                         face: f as u32,
-                        vertices: *face,
-                        regions,
+                        points: on_edge,
+                        barycentric,
                     });
+                    continue;
                 }
             };
             // The lone vertex a = corner k; p lies on the halfedge a -> b, q on c -> a. The
@@ -192,14 +365,140 @@ impl Cut {
                 face: f as u32,
             });
         }
-        Ok(Cut {
+        Cut {
             vertex_region,
             points,
             segments,
+            triple_points,
             edge_point,
             n_clamped,
             smallest_offset,
-        })
+        }
+    }
+
+    /// The two regions that segment `segment` separates, as `[lower id, higher id]`.
+    ///
+    /// # Panics
+    /// If `segment` is out of range (it indexes like a slice).
+    pub fn segment_regions(&self, mesh: &TriMesh, segment: usize) -> [u32; 2] {
+        self.point_regions(mesh, self.segments[segment].points[0] as usize)
+    }
+
+    /// The positions of the triple points in space, for a caller that has vertex positions.
+    ///
+    /// # Errors
+    /// As [`Cut::point_positions`].
+    pub fn triple_positions(
+        &self,
+        mesh: &TriMesh,
+        positions: &[[f64; 3]],
+    ) -> Result<Vec<[f64; 3]>, CutError> {
+        check_length("positions", "vertices", positions.len(), mesh.n_vertices())?;
+        check_length(
+            "the cut's edge map",
+            "edges",
+            self.edge_point.len(),
+            mesh.n_edges(),
+        )?;
+        Ok(self
+            .triple_points
+            .iter()
+            .map(|triple| {
+                let face = mesh.faces()[triple.face as usize];
+                [0, 1, 2].map(|k| {
+                    (0..3)
+                        .map(|c| triple.barycentric[c] * positions[face[c] as usize][k])
+                        .sum()
+                })
+            })
+            .collect())
+    }
+
+    /// The cut network as curves in space (SPEC §8.7): every maximal chain of cut points joined
+    /// by segments between two cut points, with the two regions it separates and what it ends
+    /// at. For two regions these are the pieces of [`Cut::polylines`].
+    ///
+    /// The order is fixed by the numbering of the cut points: first the curves that are not
+    /// closed, in the order of their lower-numbered end point, each starting there; then the
+    /// closed ones, in the order of their lowest-numbered point, starting there and going on to
+    /// the lower-numbered of its two neighbours. A curve that consists of one cut point between
+    /// two triple points starts at the triple point that comes first in the segments of the cut.
+    ///
+    /// # Errors
+    /// As [`Cut::point_positions`].
+    pub fn curves(
+        &self,
+        mesh: &TriMesh,
+        positions: &[[f64; 3]],
+    ) -> Result<Vec<CutCurve>, CutError> {
+        let at = self.point_positions(mesh, positions)?;
+        let triple_at = self.triple_positions(mesh, positions)?;
+        let n = self.points.len();
+        let mut neighbours = vec![[NONE; 2]; n];
+        let mut triples = vec![[NONE; 2]; n];
+        for segment in &self.segments {
+            let [p, q] = segment.points;
+            if (q as usize) < n {
+                for (a, b) in [(p, q), (q, p)] {
+                    let slot = usize::from(neighbours[a as usize][0] != NONE);
+                    neighbours[a as usize][slot] = b;
+                }
+            } else {
+                let slot = usize::from(triples[p as usize][0] != NONE);
+                triples[p as usize][slot] = q - n as u32;
+            }
+        }
+        let end_of = |triple: u32| {
+            if triple == NONE {
+                CurveEnd::Boundary
+            } else {
+                CurveEnd::Triple(triple)
+            }
+        };
+        let mut visited = vec![false; n];
+        let mut out = Vec::new();
+        for closed in [false, true] {
+            for start in 0..n {
+                let [a, b] = neighbours[start];
+                if visited[start] || (b == NONE) == closed {
+                    continue;
+                }
+                let mut points = vec![start as u32];
+                visited[start] = true;
+                let (mut previous, mut current) = (start as u32, if closed { a.min(b) } else { a });
+                while current != NONE && !visited[current as usize] {
+                    visited[current as usize] = true;
+                    points.push(current);
+                    let [x, y] = neighbours[current as usize];
+                    let next = if x == previous { y } else { x };
+                    previous = current;
+                    current = next;
+                }
+                let last = points[points.len() - 1] as usize;
+                let ends = if closed {
+                    [CurveEnd::Closed; 2]
+                } else if points.len() == 1 {
+                    [end_of(triples[start][0]), end_of(triples[start][1])]
+                } else {
+                    [end_of(triples[start][0]), end_of(triples[last][0])]
+                };
+                let mut line = Vec::with_capacity(points.len() + 2);
+                if let CurveEnd::Triple(m) = ends[0] {
+                    line.push(triple_at[m as usize]);
+                }
+                line.extend(points.iter().map(|&p| at[p as usize]));
+                if let CurveEnd::Triple(m) = ends[1] {
+                    line.push(triple_at[m as usize]);
+                }
+                out.push(CutCurve {
+                    regions: self.point_regions(mesh, start),
+                    points,
+                    positions: line,
+                    ends,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// The two regions that meet at cut point `point`, as `[lower id, higher id]`.
@@ -262,6 +561,9 @@ impl Cut {
     /// lowest-numbered point, starting there and going on to the lower-numbered of its two
     /// neighbours. A closed piece does not repeat its first point at the end.
     ///
+    /// This is for two regions. On a network with triple points the pieces stop at the last cut
+    /// point before a triple point; use [`Cut::curves`] there.
+    ///
     /// # Errors
     /// As [`Cut::point_positions`].
     pub fn polylines(
@@ -275,6 +577,10 @@ impl Cut {
         let mut neighbours = vec![[NONE; 2]; n];
         for segment in &self.segments {
             let [p, q] = segment.points;
+            if q as usize >= n {
+                // A segment to a triple point: see `Cut::curves`.
+                continue;
+            }
             for (a, b) in [(p, q), (q, p)] {
                 let slot = usize::from(neighbours[a as usize][0] != NONE);
                 neighbours[a as usize][slot] = b;
@@ -312,6 +618,19 @@ impl Cut {
             }
         }
         Ok(out)
+    }
+
+    /// Interpolates a per-vertex function of the input mesh linearly to the nodes of the cut:
+    /// the cut points, then the triple points.
+    pub(crate) fn interpolate_nodes(&self, mesh: &TriMesh, values: &[f64]) -> Vec<f64> {
+        let mut out = self.interpolate(mesh, values);
+        out.extend(self.triple_points.iter().map(|triple| {
+            let face = mesh.faces()[triple.face as usize];
+            (0..3)
+                .map(|c| triple.barycentric[c] * values[face[c] as usize])
+                .sum::<f64>()
+        }));
+        out
     }
 
     /// Interpolates a per-vertex function of the input mesh linearly to the cut points.

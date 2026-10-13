@@ -214,6 +214,14 @@ impl CutProblem {
             penalty: None,
         }
     }
+
+    /// As [`CutProblem::new`] for `n_regions` regions (SPEC §8): default weights for each.
+    pub fn for_regions(energy: Energy, length_weight: f64, n_regions: usize) -> CutProblem {
+        CutProblem {
+            regions: vec![RegionWeights::default(); n_regions],
+            ..CutProblem::new(energy, length_weight)
+        }
+    }
 }
 
 /// How the normal derivatives `∂u/∂n` and `∂p/∂n` at the cut vertices are obtained from the
@@ -350,10 +358,24 @@ pub(crate) fn check_length(
 
 impl CutProblem {
     /// Validates everything that does not depend on the level-set function.
-    pub(crate) fn validate(&self, n_vertices: usize, n_faces: usize) -> Result<(), CutError> {
-        if self.regions.len() != SUPPORTED_REGIONS {
-            return Err(CutError::UnsupportedRegionCount {
-                got: self.regions.len(),
+    pub(crate) fn validate(
+        &self,
+        n_vertices: usize,
+        n_faces: usize,
+        n_regions: usize,
+    ) -> Result<(), CutError> {
+        if self.regions.len() != n_regions {
+            return Err(if n_regions == SUPPORTED_REGIONS {
+                CutError::UnsupportedRegionCount {
+                    got: self.regions.len(),
+                }
+            } else {
+                CutError::WrongLength {
+                    what: "region weights",
+                    per: "level-set functions",
+                    expected: n_regions,
+                    got: self.regions.len(),
+                }
             });
         }
         for (r, w) in self.regions.iter().enumerate() {

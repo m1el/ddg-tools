@@ -42,7 +42,9 @@ pub struct EnergyTerms {
 pub struct EvalReport {
     /// Number of cut points (crossed edges).
     pub n_cut_points: usize,
-    /// Number of cut segments (crossed faces).
+    /// Number of triple points (faces with three regions, SPEC §8.2); zero for two regions.
+    pub n_triple_points: usize,
+    /// Number of cut segments: one per face with two regions, three per face with three.
     pub n_segments: usize,
     /// Number of crossings that were moved away from a vertex (SPEC §3.2, D9b).
     pub n_clamped_crossings: usize,
@@ -355,13 +357,58 @@ impl Evaluator {
         options: &EvalOptions<'_>,
     ) -> Result<Evaluation, CutError> {
         options.validate()?;
+        problem.validate(
+            self.mesh.n_vertices(),
+            self.mesh.n_faces(),
+            crate::problem::SUPPORTED_REGIONS,
+        )?;
+        // §3.2: regions and crossings.
+        let cut = Cut::from_level_set(&self.mesh, phi, options.min_crossing_offset)?;
+        self.evaluate_cut(cut, problem, options)
+    }
+
+    /// Evaluates the cut network of `N ≥ 2` level-set functions (SPEC §8.1–§8.3): `phis[k]` is
+    /// negative inside region `k`, and the region of a vertex is the function that is smallest
+    /// there. `problem.regions` must have one entry per function. Everything is as in
+    /// [`Evaluator::evaluate`], with these additions: a face with three regions has a triple
+    /// point, which is a boundary vertex of each of its three regions like a cut point (the
+    /// flux recovery runs through it); the speed at a cut point between the regions `i < j` is
+    /// `G_i − G_j`, the rate of `φ_i` there.
+    ///
+    /// With `phis = [φ, −φ]` the result is that of [`Evaluator::evaluate`] for `φ`, bit for
+    /// bit.
+    ///
+    /// # Errors
+    /// As [`Evaluator::evaluate`]; [`CutError::UnsupportedRegionCount`] for fewer than two
+    /// functions, [`CutError::WrongLength`] if the number of region weights differs from the
+    /// number of functions.
+    pub fn evaluate_regions(
+        &mut self,
+        phis: &[Vec<f64>],
+        problem: &CutProblem,
+        options: &EvalOptions<'_>,
+    ) -> Result<Evaluation, CutError> {
+        options.validate()?;
+        if phis.len() < 2 {
+            return Err(CutError::UnsupportedRegionCount { got: phis.len() });
+        }
+        problem.validate(self.mesh.n_vertices(), self.mesh.n_faces(), phis.len())?;
+        let cut = Cut::from_regions(&self.mesh, phis, options.min_crossing_offset)?;
+        self.evaluate_cut(cut, problem, options)
+    }
+
+    /// SPEC §3.3–§3.7 and §6 for a cut that has been extracted.
+    fn evaluate_cut(
+        &mut self,
+        cut: Cut,
+        problem: &CutProblem,
+        options: &EvalOptions<'_>,
+    ) -> Result<Evaluation, CutError> {
         let nv = self.mesh.n_vertices();
-        problem.validate(nv, self.mesh.n_faces())?;
         let par = options.parallelism;
         let n_regions = problem.regions.len();
 
-        // §3.2, §3.3: regions, crossings, cut mesh.
-        let cut = Cut::from_level_set(&self.mesh, phi, options.min_crossing_offset)?;
+        // §3.3: the cut mesh.
         let tri = CutTriangles::build(&self.mesh, &self.base, &cut, options.sliver_aspect_ratio)?;
         let n = tri.n_vertices();
 
@@ -565,7 +612,7 @@ impl Evaluator {
         let length: f64 = tri.segment_length.iter().sum();
         let penalty = match &problem.penalty {
             Some(eta) => {
-                let eta = cut.interpolate(&self.mesh, eta);
+                let eta = cut.interpolate_nodes(&self.mesh, eta);
                 cut.segments
                     .iter()
                     .zip(&tri.segment_length)
@@ -584,6 +631,7 @@ impl Evaluator {
 
         let report = EvalReport {
             n_cut_points: cut.points.len(),
+            n_triple_points: cut.triple_points.len(),
             n_segments: cut.segments.len(),
             n_clamped_crossings: cut.n_clamped,
             smallest_crossing_offset: cut.smallest_offset,
@@ -741,6 +789,11 @@ pub fn smooth_slivers(
     let mut count = vec![0u8; cut.points.len()];
     for (segment, &length) in cut.segments.iter().zip(segment_length) {
         let [p, q] = segment.points;
+        if q as usize >= cut.points.len() {
+            // A segment to a triple point: the cut point has no neighbour there and is left
+            // alone, like one on the boundary of the mesh.
+            continue;
+        }
         for (from, to) in [(p, q), (q, p)] {
             let slot = &mut count[from as usize];
             if *slot < 2 {

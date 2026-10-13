@@ -151,13 +151,17 @@ mod flow;
 pub mod init;
 mod problem;
 mod recovery;
+mod regions;
 mod system;
 
 pub use ddg_core::sparse::{Parallelism, ThreadPool};
 pub use ddg_core::topology::NONE;
 
 pub use curvature::{face_curvature_sum_residual, face_curvatures};
-pub use cut::{Cut, CutPoint, CutPolyline, CutSegment, edge_crossing, region_of};
+pub use cut::{
+    CurveEnd, Cut, CutCurve, CutPoint, CutPolyline, CutSegment, TriplePoint, edge_crossing,
+    region_of, regions_of,
+};
 pub use cut_mesh::{
     CutMesh, CutTriangles, CutVertex, EdgeKind, aspect_ratio, barycentric_dot, subtriangle_area,
 };
@@ -177,3 +181,4 @@ pub use problem::{
     PointwiseEnergy, RegionWeights, SUPPORTED_REGIONS, ScaleWeight, UnitAreaScale,
 };
 pub use recovery::flux_smoothing_stiffness;
+pub use regions::RegionFlow;

@@ -58,7 +58,7 @@ impl FluxSolver {
         par: Parallelism<'_>,
     ) -> Result<FluxSolver, CutError> {
         let nv = tri.n_original;
-        let n = 2 * tri.n_points;
+        let n = tri.n_vertices() - nv;
         let length = match recovery {
             FluxRecovery::Smoothed { length } if length > 0.0 && n > 0 => length,
             _ => {
