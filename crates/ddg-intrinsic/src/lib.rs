@@ -3,7 +3,111 @@
 //! > Nicholas Sharp, Yousuf Soliman, Keenan Crane. *Navigating Intrinsic Triangulations.*
 //! > ACM Transactions on Graphics 38(4), 2019. <https://doi.org/10.1145/3306346.3322979>
 //!
-//! What is in scope, the conventions and every decision the paper leaves open are in `SPEC.md`
-//! next to this crate's `Cargo.toml`.
+//! An *intrinsic triangulation* is another triangulation of the same polyhedral surface: its
+//! vertices are points of the input surface, its edges are straight paths on it, its triangles
+//! are flat. Flipping edges until the triangulation is Delaunay leaves the surface exactly as
+//! it is and gives non-negative cotan weights; that is what the rest of this workspace uses it
+//! for. What is in scope, the conventions and every decision the paper leaves open are in
+//! `SPEC.md` next to this crate's `Cargo.toml`.
+//!
+//! # What is here
+//!
+//! * [`IntrinsicTriangulation`]: the halfedge mesh that flips can produce (double edges,
+//!   self-edges, triangles that use a vertex twice, vertices of degree one), edge lengths,
+//!   signposts and the place of every vertex on the input mesh ([`SurfacePoint`]).
+//! * [`IntrinsicTriangulation::flip_edge`] with every refusal ([`FlipRefusal`]) and
+//!   [`IntrinsicTriangulation::flip_to_delaunay`] with a report ([`DelaunayReport`]).
+//! * Tracing queries over the input mesh ([`InputSurface::trace`]) and over the intrinsic
+//!   triangulation ([`IntrinsicTriangulation::trace`]), from a vertex, a point of an edge or a
+//!   point of a face ([`Trace`]).
+//! * The path of every intrinsic edge over the input mesh
+//!   ([`IntrinsicTriangulation::trace_edges`]), checked: a trace that does not arrive at the
+//!   edge's far vertex is an error.
+//! * The cotan Laplacian and the lumped vertex areas of the triangulation
+//!   ([`IntrinsicTriangulation::cotan_laplacian`], [`IntrinsicTriangulation::lumped_mass`]),
+//!   with the conventions of `ddg_core::operators`.
+//!
+//! Vertex insertion, edge splits, Delaunay refinement, point queries, the overlay and the
+//! export as a simplicial mesh are not implemented yet.
+//!
+//! # Example
+//!
+//! ```
+//! use ddg_core::generators::grid_disk;
+//! use ddg_core::Geometry;
+//! use ddg_intrinsic::{DelaunayOptions, DelaunayStatus, EdgeTraceOptions, IntrinsicTriangulation};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // A flat grid, sheared so that every triangle has an angle of 124 degrees.
+//! let mut shape = grid_disk(8, 8)?;
+//! for p in &mut shape.positions {
+//!     p[0] += 1.5 * p[1];
+//! }
+//! let mesh = shape.topology()?;
+//! let geometry = Geometry::from_positions(&mesh, &shape.positions)?;
+//!
+//! let mut triangulation = IntrinsicTriangulation::new(&mesh, &geometry)?;
+//! let report = triangulation.flip_to_delaunay(&DelaunayOptions::default())?;
+//! assert_eq!(report.status, DelaunayStatus::Delaunay);
+//! assert!(report.n_flips > 0);
+//! // No interior edge has a negative cotan weight any more.
+//! assert!(report.min_cotan_weight > -1e-9);
+//!
+//! // It is the same surface: same area, same cone angles.
+//! let consistency = triangulation.check()?;
+//! assert!(consistency.relative_area_error.abs() < 1e-12);
+//! assert!(consistency.max_angle_sum_error < 1e-12);
+//! let laplacian = triangulation.cotan_laplacian(); // positive semidefinite, as in ddg_core
+//! assert_eq!(laplacian.nrows(), mesh.n_vertices());
+//!
+//! // Where the flipped edges run on the input mesh: the input edges each of them crosses.
+//! let traces = triangulation.trace_edges(&EdgeTraceOptions::default())?;
+//! assert!(traces.report.n_crossings >= traces.report.n_traced);
+//! assert!(traces.report.max_relative_mismatch < 1e-12);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # The reference implementation
+//!
+//! The authors' implementation (the demo `navigating-intrinsic-triangulations-demo`, © 2019
+//! Nick Sharp, on geometry-central, © 2017–2019 Nicholas Sharp and the geometry-central
+//! contributors; both MIT, notices in this crate's `LICENSES/`) was read for the details the
+//! paper leaves out. No code was translated from it. Taken from it are conventions and
+//! constants: the normalization of angles at boundary vertices (SPEC N2), the cotan-weight
+//! form of the Delaunay test with its tolerance `1e-6`
+//! ([`DelaunayCriterion::REFERENCE`]), the order of the flip queue, and the flag for edges
+//! that still lie along an input edge. The tracing is a different algorithm (see
+//! [`trace`]), as are the length of a flipped edge and the convexity test of a flip
+//! ([`formulas`]).
+//!
+//! # Conventions
+//!
+//! Those of the workspace (`CLAUDE.md`): `f64`, stored indices `u32`, ids at function
+//! boundaries `usize`. Accessors that take an element id index like slices. Operations return
+//! error enums that name the element; an operation that can do a variable amount of work
+//! returns a report. Nothing is perturbed, repaired or normalized silently.
 
 #![warn(missing_docs)]
+
+mod delaunay;
+mod edge_trace;
+mod error;
+mod flip;
+pub mod formulas;
+mod input;
+mod operators;
+mod point;
+mod surface;
+pub mod trace;
+pub mod triangulation;
+
+pub use delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport, DelaunayStatus, FlipLimit};
+pub use edge_trace::{EdgeTrace, EdgeTraceOptions, EdgeTraceReport, EdgeTraces};
+pub use error::{EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, IntrinsicError};
+pub use flip::Flip;
+pub use input::InputSurface;
+pub use operators::Quality;
+pub use point::SurfacePoint;
+pub use trace::{Crossing, Trace, TraceOptions, TraceStop};
+pub use triangulation::{ConsistencyReport, IntrinsicTriangulation, Irregularities};
