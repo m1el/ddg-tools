@@ -24,6 +24,10 @@
 //! the mesh, harmonic extension, `φ_t = s`) and `PS` (the structure of the paper with the
 //! smoothed flux recovery, as in `redistance_study` and the `VARIANTS[0]` of `flow_study`).
 
+// Index loops follow the formulas they implement; the task table and the loader return what
+// they need.
+#![allow(clippy::needless_range_loop, clippy::type_complexity)]
+
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::panic::AssertUnwindSafe;
@@ -35,9 +39,9 @@ use ddg_core::distance::{DistanceMode, upwind_distance_with};
 use ddg_core::generators::{SplitMix64, icosphere};
 use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
-    Cut, CurvatureSource, CutProblem, Energy, EvalOptions, Evaluation, Extension, FluxRecovery,
-    Flow, FlowOptions, LengthStep, RegionWeights, SpeedScaling, StepReport, StepSize, StopReason,
-    StopRule, length_weight_for_ripples, region_of,
+    CurvatureSource, Cut, CutProblem, Energy, EvalOptions, Evaluation, Extension, Flow,
+    FlowOptions, FluxRecovery, LengthStep, RegionWeights, SpeedScaling, StepReport, StepSize,
+    StopReason, StopRule, length_weight_for_ripples, region_of,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -66,8 +70,8 @@ fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<Res
                     if k >= items.len() {
                         break;
                     }
-                    let r = std::panic::catch_unwind(AssertUnwindSafe(|| f(&items[k])))
-                        .map_err(|p| {
+                    let r =
+                        std::panic::catch_unwind(AssertUnwindSafe(|| f(&items[k]))).map_err(|p| {
                             p.downcast_ref::<String>()
                                 .cloned()
                                 .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
@@ -124,7 +128,6 @@ struct Quality {
     largest_max: f64,
     smallest: f64,
     neg_cotan: f64,
-    n_interior: usize,
     inverted: usize,
     degenerate: usize,
     h_median: f64,
@@ -172,7 +175,16 @@ fn quality(positions: &[[f64; 3]], faces: &[[u32; 3]], kind: Kind) -> Quality {
         }
         let bad = match kind {
             Kind::Flat => n[2] <= 0.0,
-            Kind::Sphere => dot(n, [p[0][0] + p[1][0] + p[2][0], p[0][1] + p[1][1] + p[2][1], p[0][2] + p[1][2] + p[2][2]]) <= 0.0,
+            Kind::Sphere => {
+                dot(
+                    n,
+                    [
+                        p[0][0] + p[1][0] + p[2][0],
+                        p[0][1] + p[1][1] + p[2][1],
+                        p[0][2] + p[1][2] + p[2][2],
+                    ],
+                ) <= 0.0
+            }
             Kind::Real => false,
         };
         if bad {
@@ -216,7 +228,6 @@ fn quality(positions: &[[f64; 3]], faces: &[[u32; 3]], kind: Kind) -> Quality {
         largest_max: at(1.0),
         smallest: smallest.to_degrees(),
         neg_cotan: neg as f64 / n_interior.max(1) as f64,
-        n_interior,
         inverted,
         degenerate,
         h_median: lengths.get(lengths.len() / 2).copied().unwrap_or(f64::NAN),
@@ -266,7 +277,6 @@ struct Shape {
     spec: Spec,
     mesh: TriMesh,
     geometry: Geometry,
-    q: Quality,
 }
 
 impl Spec {
@@ -282,7 +292,6 @@ impl Spec {
             spec: self.clone(),
             mesh,
             geometry,
-            q: self.quality(),
         })
     }
 }
@@ -315,7 +324,11 @@ fn unit_area(mut spec: Spec) -> Spec {
 
 /// Quad lattice `(nx+1) × (ny+1)`, vertex `(i, j)` at `pos(i, j)`, each cell split along the
 /// diagonal `(i, j)–(i+1, j+1)`.
-fn lattice(nx: usize, ny: usize, pos: impl Fn(usize, usize) -> [f64; 3]) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
+fn lattice(
+    nx: usize,
+    ny: usize,
+    pos: impl Fn(usize, usize) -> [f64; 3],
+) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
     let id = |i: usize, j: usize| (i * (ny + 1) + j) as u32;
     let mut positions = Vec::new();
     for i in 0..=nx {
@@ -406,7 +419,11 @@ fn prune_pinches(mut faces: Vec<[u32; 3]>) -> Vec<[u32; 3]> {
         for f in 0..nf {
             for k in 0..3 {
                 let root = find(&mut parent, 3 * f + k);
-                *comps.entry(faces[f][k]).or_default().entry(root).or_insert(0) += 1;
+                *comps
+                    .entry(faces[f][k])
+                    .or_default()
+                    .entry(root)
+                    .or_insert(0) += 1;
             }
         }
         let mut drop = vec![false; nf];
@@ -414,7 +431,11 @@ fn prune_pinches(mut faces: Vec<[u32; 3]>) -> Vec<[u32; 3]> {
         for (&v, c) in &comps {
             if c.len() > 1 {
                 any = true;
-                let best = *c.iter().max_by_key(|(r, n)| (**n, std::cmp::Reverse(**r))).unwrap().0;
+                let best = *c
+                    .iter()
+                    .max_by_key(|(r, n)| (**n, std::cmp::Reverse(**r)))
+                    .unwrap()
+                    .0;
                 for f in 0..nf {
                     if let Some(k) = faces[f].iter().position(|&x| x == v)
                         && find(&mut parent, 3 * f + k) != best
@@ -577,7 +598,11 @@ fn ico(level: u32, amplitude: f64, name: &str) -> Spec {
         for p in &mut positions {
             let n = norm(*p);
             let nrm = [p[0] / n, p[1] / n, p[2] / n];
-            let a = if nrm[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+            let a = if nrm[0].abs() < 0.9 {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
             let t1 = cross(nrm, a);
             let l1 = norm(t1);
             let t1 = [t1[0] / l1, t1[1] / l1, t1[2] / l1];
@@ -624,7 +649,12 @@ fn latlon(rings: usize, n_lon: usize, name: &str) -> Spec {
     }
     for k in 1..rings - 1 {
         for j in 0..n_lon {
-            let (a, b, c, d) = (ring(k, j), ring(k, j + 1), ring(k + 1, j + 1), ring(k + 1, j));
+            let (a, b, c, d) = (
+                ring(k, j),
+                ring(k, j + 1),
+                ring(k + 1, j + 1),
+                ring(k + 1, j),
+            );
             faces.push([a, d, c]);
             faces.push([a, c, b]);
         }
@@ -661,7 +691,12 @@ fn delaunay(spec: &Spec) -> (Spec, usize) {
         let n = cross(sub(q, p), sub(r, p));
         match spec.kind {
             Kind::Flat => n[2] > 1e-14,
-            _ => dot(n, [p[0] + q[0] + r[0], p[1] + q[1] + r[1], p[2] + q[2] + r[2]]) > 1e-14,
+            _ => {
+                dot(
+                    n,
+                    [p[0] + q[0] + r[0], p[1] + q[1] + r[1], p[2] + q[2] + r[2]],
+                ) > 1e-14
+            }
         }
     };
     let mut stack: Vec<(u32, u32)> = directed.keys().copied().collect();
@@ -713,7 +748,7 @@ fn flat_family() -> Vec<Spec> {
     let n = env_usize("FLAT_N", 32);
     maybe_delaunay(vec![
         jittered_grid(n, 0.0, 5, &format!("flat: regular grid {n}^2")),
-        jittered_grid(n, 0.3, 5, &format!("flat: jitter 0.30 (baseline)")),
+        jittered_grid(n, 0.3, 5, "flat: jitter 0.30 (baseline)"),
         jittered_grid(n, 0.33, 5, "flat: jitter 0.33"),
         sheared(n, 0.5, "flat: sheared 117"),
         sheared(n, 1.0, "flat: sheared 135"),
@@ -855,7 +890,9 @@ fn polar(p: [f64; 3]) -> f64 {
 
 fn cut_points(sh: &Shape, phi: &[f64]) -> Vec<[f64; 3]> {
     match Cut::from_level_set(&sh.mesh, phi, 1e-3) {
-        Ok(cut) => cut.point_positions(&sh.mesh, sh.positions()).unwrap_or_default(),
+        Ok(cut) => cut
+            .point_positions(&sh.mesh, sh.positions())
+            .unwrap_or_default(),
         Err(_) => Vec::new(),
     }
 }
@@ -1047,10 +1084,13 @@ fn per_side(e: &Evaluation, r: usize) -> Vec<f64> {
 fn cap_eval(sh: &Shape, opts: &EvalOptions<'_>) -> Result<EvalErr, String> {
     let psi0 = 1.0f64;
     let r = 1.0 / (4.0 * PI).sqrt();
-    let mut ev = ddg_variational_cuts::Evaluator::new(&sh.mesh, &sh.geometry).map_err(|e| e.to_string())?;
+    let mut ev =
+        ddg_variational_cuts::Evaluator::new(&sh.mesh, &sh.geometry).map_err(|e| e.to_string())?;
     let phi: Vec<f64> = sh.positions().iter().map(|p| polar(*p) - psi0).collect();
     let problem = CutProblem::new(Energy::Dirichlet, 0.0);
-    let e = ev.evaluate(&phi, &problem, opts).map_err(|e| e.to_string())?;
+    let e = ev
+        .evaluate(&phi, &problem, opts)
+        .map_err(|e| e.to_string())?;
     let exact_d = [(0.5 * psi0).tan() / r, 1.0 / ((0.5 * psi0).tan() * r)];
     let exact_s = exact_d[0] * exact_d[0] - exact_d[1] * exact_d[1];
     let mut u_max = 0.0f64;
@@ -1086,17 +1126,26 @@ fn disk_eval(sh: &Shape, opts: &EvalOptions<'_>) -> Result<EvalErr, String> {
     let (k, rho) = (5.0f64, 0.3f64);
     let c = sh.spec.center;
     let radius = |p: [f64; 3]| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt();
-    let mut ev = ddg_variational_cuts::Evaluator::new(&sh.mesh, &sh.geometry).map_err(|e| e.to_string())?;
+    let mut ev =
+        ddg_variational_cuts::Evaluator::new(&sh.mesh, &sh.geometry).map_err(|e| e.to_string())?;
     let phi: Vec<f64> = sh.positions().iter().map(|p| radius(*p) - rho).collect();
     let problem = CutProblem {
         curvature: CurvatureSource::Uniform(k),
         regions: vec![
-            RegionWeights { distortion: 1.0, area: 0.0 },
-            RegionWeights { distortion: 0.0, area: 0.0 },
+            RegionWeights {
+                distortion: 1.0,
+                area: 0.0,
+            },
+            RegionWeights {
+                distortion: 0.0,
+                area: 0.0,
+            },
         ],
         ..CutProblem::new(Energy::Dirichlet, 0.0)
     };
-    let e = ev.evaluate(&phi, &problem, opts).map_err(|e| e.to_string())?;
+    let e = ev
+        .evaluate(&phi, &problem, opts)
+        .map_err(|e| e.to_string())?;
     let mut u_max = 0.0f64;
     for (v, &p) in sh.positions().iter().enumerate() {
         if e.cut.vertex_region[v] == 0 {
@@ -1137,8 +1186,12 @@ fn eval_study() {
     println!(
         "STAGE 1: evaluation only against exact solutions. Relative errors (max / mean) of du/dn and of s, max |u-u*|, relative error of J_0."
     );
-    println!("Sphere cap psi0 = 1 (du/dn on region 0 / region 1 sides); flat disk rho = 0.3, K = 5 in region 0 (du/dn of region 0).");
-    println!("columns: u_max | du/dn max,mean (region 0) | du/dn max,mean (region 1) | s max,mean | J0 | cut pts, sliver pts, smallest offset, clamped\n");
+    println!(
+        "Sphere cap psi0 = 1 (du/dn on region 0 / region 1 sides); flat disk rho = 0.3, K = 5 in region 0 (du/dn of region 0)."
+    );
+    println!(
+        "columns: u_max | du/dn max,mean (region 0) | du/dn max,mean (region 1) | s max,mean | J0 | cut pts, sliver pts, smallest offset, clamped\n"
+    );
     for (title, specs, cap) in [
         ("SPHERE CAP", sphere_family(), true),
         ("FLAT DISK", flat_family(), false),
@@ -1164,8 +1217,20 @@ fn eval_study() {
                 match r {
                     Ok(x) => println!(
                         "{:<32} {:<16} u {:.1e} | d0 {:.1e}, {:.1e} | d1 {:.1e}, {:.1e} | s {:.1e}, {:.1e} | J0 {:.1e} | {} {} {:.1e} {}",
-                        spec.name, sets[s].0, x.u_max, x.d_max[0], x.d_mean[0], x.d_max[1], x.d_mean[1], x.s_max, x.s_mean, x.j,
-                        x.n_cut, x.n_sliver, x.smallest_offset, x.clamped
+                        spec.name,
+                        sets[s].0,
+                        x.u_max,
+                        x.d_max[0],
+                        x.d_mean[0],
+                        x.d_max[1],
+                        x.d_mean[1],
+                        x.s_max,
+                        x.s_mean,
+                        x.j,
+                        x.n_cut,
+                        x.n_sliver,
+                        x.smallest_offset,
+                        x.clamped
                     ),
                     Err(e) => println!("{:<32} {:<16} {}", spec.name, sets[s].0, short(&e)),
                 }
@@ -1192,7 +1257,6 @@ struct RedistOut {
     unreached: usize,
     crossed: (f64, f64, f64),
     near: (f64, f64, f64),
-    n_crossed: usize,
 }
 
 fn face_gradient(p: [[f64; 3]; 3], f: [f64; 3]) -> f64 {
@@ -1222,7 +1286,8 @@ fn redist_test(sh: &Shape, exact: &dyn Fn([f64; 3]) -> f64) -> Result<RedistOut,
         .map_err(|e| e.to_string())?
         .cut_adjacent_vertices(&sh.mesh);
     let stats = |phi: &[f64]| -> (f64, f64, f64, f64) {
-        let (mut sa, mut ma, mut sr, mut mr, mut na, mut nr) = (0.0, 0.0f64, 0.0, 0.0f64, 0usize, 0usize);
+        let (mut sa, mut ma, mut sr, mut mr, mut na, mut nr) =
+            (0.0, 0.0f64, 0.0, 0.0f64, 0usize, 0usize);
         for v in 0..phi.len() {
             if adjacent[v] || d[v].abs() > 0.25 {
                 continue;
@@ -1278,21 +1343,33 @@ fn redist_test(sh: &Shape, exact: &dyn Fn([f64; 3]) -> f64) -> Result<RedistOut,
         unreached,
         crossed: (crossed.0, crossed.1 / nc.max(1) as f64, crossed.2),
         near: (near.0, near.1 / nn.max(1) as f64, near.2),
-        n_crossed: nc,
     })
 }
 
 fn redist_study() {
-    println!("STAGE 2: redistancing only. Start: the exact signed distance; the cut-adjacent vertices keep it, the rest is recomputed by the single-pass fast marching of the flow (SP) and, for comparison, by the fixed point of the same scheme (FP).");
-    println!("abs = |phi - d| / h with h = sqrt(area / vertices), over non-adjacent vertices with |d| < 0.25; rel = |phi - d| / |d| for |d| > 3 h; grad = |grad phi| of the linear interpolant in crossed faces (min/mean/max) and in faces within 2 h of the cut (near).\n");
-    for (title, specs, flat) in [("FLAT", flat_family(), true), ("SPHERE", sphere_family(), false)] {
+    println!(
+        "STAGE 2: redistancing only. Start: the exact signed distance; the cut-adjacent vertices keep it, the rest is recomputed by the single-pass fast marching of the flow (SP) and, for comparison, by the fixed point of the same scheme (FP)."
+    );
+    println!(
+        "abs = |phi - d| / h with h = sqrt(area / vertices), over non-adjacent vertices with |d| < 0.25; rel = |phi - d| / |d| for |d| > 3 h; grad = |grad phi| of the linear interpolant in crossed faces (min/mean/max) and in faces within 2 h of the cut (near).\n"
+    );
+    for (title, specs, flat) in [
+        ("FLAT", flat_family(), true),
+        ("SPHERE", sphere_family(), false),
+    ] {
         let built = build_all(&specs);
-        let names: [&str; 2] = if flat { ["line", "circle"] } else { ["equator", "latitude 1.0"] };
+        let names: [&str; 2] = if flat {
+            ["line", "circle"]
+        } else {
+            ["equator", "latitude 1.0"]
+        };
         let exact_for = |s: &Shape, which: usize| -> Box<dyn Fn([f64; 3]) -> f64> {
             let c = s.spec.center;
             match (flat, which) {
                 (true, 0) => Box::new(move |p: [f64; 3]| p[0] - c[0]),
-                (true, _) => Box::new(move |p: [f64; 3]| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() - 0.3),
+                (true, _) => Box::new(move |p: [f64; 3]| {
+                    ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() - 0.3
+                }),
                 (false, 0) => Box::new(|p: [f64; 3]| polar(p) - 0.5 * PI),
                 (false, _) => Box::new(|p: [f64; 3]| polar(p) - 1.0),
             }
@@ -1317,8 +1394,24 @@ fn redist_study() {
             match flatten(res[k].clone()) {
                 Ok(r) => println!(
                     "{:<32} {:<12} | {:.3} {:.3}  {:.1e} {:.1e} | {:.3} {:.3} {:.1e} ({}, {}) | {} | {:.3}/{:.3}/{:.3} | {:.3}/{:.3}/{:.3}",
-                    name, names[s], r.abs_mean, r.abs_max, r.rel_mean, r.rel_max, r.fp_abs_mean, r.fp_abs_max, r.fp_rel_max,
-                    r.fp_reopened, r.fp_converged, r.unreached, r.crossed.0, r.crossed.1, r.crossed.2, r.near.0, r.near.1, r.near.2
+                    name,
+                    names[s],
+                    r.abs_mean,
+                    r.abs_max,
+                    r.rel_mean,
+                    r.rel_max,
+                    r.fp_abs_mean,
+                    r.fp_abs_max,
+                    r.fp_rel_max,
+                    r.fp_reopened,
+                    r.fp_converged,
+                    r.unreached,
+                    r.crossed.0,
+                    r.crossed.1,
+                    r.crossed.2,
+                    r.near.0,
+                    r.near.1,
+                    r.near.2
                 ),
                 Err(e) => println!("{:<32} {:<12} {}", name, names[s], short(&e)),
             }
@@ -1351,7 +1444,14 @@ fn circle_law(sh: &Shape, st: &Stages, steps: usize) -> Result<CircleOut, String
     let (mut unreached, mut clamped) = (0, 0);
     let mut last = None;
     for _ in 0..steps {
-        let r = do_step(&mut flow, sh, &problem, st, StepSize::Fixed(tau), Oracle::Circle(c))?;
+        let r = do_step(
+            &mut flow,
+            sh,
+            &problem,
+            st,
+            StepSize::Fixed(tau),
+            Oracle::Circle(c),
+        )?;
         unreached = unreached.max(r.n_unreached);
         clamped = clamped.max(r.n_clamped_crossings);
         last = Some(r);
@@ -1363,8 +1463,16 @@ fn circle_law(sh: &Shape, st: &Stages, steps: usize) -> Result<CircleOut, String
     let rs: Vec<f64> = pts.iter().map(|p| radius(*p)).collect();
     let mean = rs.iter().sum::<f64>() / rs.len() as f64;
     let std = (rs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / rs.len() as f64).sqrt();
-    let g = last.and_then(|r| r.gradient_norm).map_or((f64::NAN, f64::NAN, f64::NAN), |g| (g.min, g.mean, g.max));
-    Ok(CircleOut { err: mean / exact - 1.0, round: std / mean, g, unreached, clamped })
+    let g = last
+        .and_then(|r| r.gradient_norm)
+        .map_or((f64::NAN, f64::NAN, f64::NAN), |g| (g.min, g.mean, g.max));
+    Ok(CircleOut {
+        err: mean / exact - 1.0,
+        round: std / mean,
+        g,
+        unreached,
+        clamped,
+    })
 }
 
 /// Flat disk with the uniform source `K` in region 0 only (Dirichlet, `w = (1, 0)`):
@@ -1390,15 +1498,28 @@ fn disk_law(sh: &Shape, st: &Stages, steps: usize) -> Result<CircleOut, String> 
     let problem = CutProblem {
         curvature: CurvatureSource::Uniform(k),
         regions: vec![
-            RegionWeights { distortion: 1.0, area: 0.0 },
-            RegionWeights { distortion: 0.0, area: 0.0 },
+            RegionWeights {
+                distortion: 1.0,
+                area: 0.0,
+            },
+            RegionWeights {
+                distortion: 0.0,
+                area: 0.0,
+            },
         ],
         ..CutProblem::new(Energy::Dirichlet, alpha)
     };
     let (mut unreached, mut clamped) = (0, 0);
     let mut last = None;
     for _ in 0..steps {
-        let r = do_step(&mut flow, sh, &problem, st, StepSize::Fixed(t_end / steps as f64), Oracle::Circle(c))?;
+        let r = do_step(
+            &mut flow,
+            sh,
+            &problem,
+            st,
+            StepSize::Fixed(t_end / steps as f64),
+            Oracle::Circle(c),
+        )?;
         unreached = unreached.max(r.n_unreached);
         clamped = clamped.max(r.n_clamped_crossings);
         last = Some(r);
@@ -1409,8 +1530,16 @@ fn disk_law(sh: &Shape, st: &Stages, steps: usize) -> Result<CircleOut, String> 
     }
     let rs: Vec<f64> = pts.iter().map(|p| radius(*p)).collect();
     let (mean, std) = mean_std(&rs);
-    let g = last.and_then(|r| r.gradient_norm).map_or((f64::NAN, f64::NAN, f64::NAN), |g| (g.min, g.mean, g.max));
-    Ok(CircleOut { err: mean / rho - 1.0, round: std / mean, g, unreached, clamped })
+    let g = last
+        .and_then(|r| r.gradient_norm)
+        .map_or((f64::NAN, f64::NAN, f64::NAN), |g| (g.min, g.mean, g.max));
+    Ok(CircleOut {
+        err: mean / rho - 1.0,
+        round: std / mean,
+        g,
+        unreached,
+        clamped,
+    })
 }
 
 fn latitude_exact(psi0: f64, alpha: f64, t: f64) -> f64 {
@@ -1432,17 +1561,34 @@ fn latitude_exact(psi0: f64, alpha: f64, t: f64) -> f64 {
 fn mean_std(values: &[f64]) -> (f64, f64) {
     let n = values.len() as f64;
     let mean = values.iter().sum::<f64>() / n;
-    (mean, (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt())
+    (
+        mean,
+        (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt(),
+    )
 }
 
 /// Latitude circle against the ODE: (error of the mean latitude, spread).
-fn lat_ode(sh: &Shape, st: &Stages, alpha: f64, psi0: f64, t_end: f64, steps: usize) -> Result<(f64, f64), String> {
+fn lat_ode(
+    sh: &Shape,
+    st: &Stages,
+    alpha: f64,
+    psi0: f64,
+    t_end: f64,
+    steps: usize,
+) -> Result<(f64, f64), String> {
     let target = latitude_exact(psi0, alpha, t_end);
     let phi0: Vec<f64> = sh.positions().iter().map(|p| polar(*p) - psi0).collect();
     let mut flow = Flow::new(&sh.mesh, &sh.geometry, &phi0).map_err(|e| e.to_string())?;
     let problem = CutProblem::new(Energy::Dirichlet, alpha);
     for _ in 0..steps {
-        do_step(&mut flow, sh, &problem, st, StepSize::Fixed(t_end / steps as f64), Oracle::Latitude)?;
+        do_step(
+            &mut flow,
+            sh,
+            &problem,
+            st,
+            StepSize::Fixed(t_end / steps as f64),
+            Oracle::Latitude,
+        )?;
     }
     let pts = cut_points(sh, &flow.level_set());
     if pts.is_empty() {
@@ -1461,11 +1607,28 @@ fn balance(sh: &Shape, st: &Stages, psi0: f64) -> Result<(f64, f64, usize, Strin
     let phi0: Vec<f64> = sh.positions().iter().map(|p| polar(*p) - psi0).collect();
     let mut flow = Flow::new(&sh.mesh, &sh.geometry, &phi0).map_err(|e| e.to_string())?;
     let problem = CutProblem::new(Energy::Dirichlet, alpha);
-    let stop = StopRule { max_steps: 3000, motion_tolerance: 1e-7, energy_tolerance: 0.0, energy_window: 1 };
-    let out = run_loop(&mut flow, sh, &problem, st, StepSize::default(), &stop, Oracle::Latitude);
+    let stop = StopRule {
+        max_steps: 3000,
+        motion_tolerance: 1e-7,
+        energy_tolerance: 0.0,
+        energy_window: 1,
+    };
+    let out = run_loop(
+        &mut flow,
+        sh,
+        &problem,
+        st,
+        StepSize::default(),
+        &stop,
+        Oracle::Latitude,
+    );
     let pts = cut_points(sh, &flow.level_set());
     if pts.is_empty() {
-        return Err(format!("the cut vanished after {} steps ({})", out.steps.len(), out.stop));
+        return Err(format!(
+            "the cut vanished after {} steps ({})",
+            out.steps.len(),
+            out.stop
+        ));
     }
     let (mean, std) = mean_std(&pts.iter().map(|p| polar(*p)).collect::<Vec<_>>());
     Ok((mean - star, std, out.steps.len(), out.stop))
@@ -1513,7 +1676,14 @@ fn ripple(sh: &Shape, st: &Stages, alpha: f64, m: usize) -> Result<(f64, f64, f6
     let (a0, _) = mode_amplitude(&cut_points(sh, &flow.level_set()), m);
     let problem = CutProblem::new(Energy::Dirichlet, alpha);
     for _ in 0..steps {
-        do_step(&mut flow, sh, &problem, st, StepSize::Fixed(horizon / steps as f64), Oracle::None)?;
+        do_step(
+            &mut flow,
+            sh,
+            &problem,
+            st,
+            StepSize::Fixed(horizon / steps as f64),
+            Oracle::None,
+        )?;
     }
     let (a1, rest) = mode_amplitude(&cut_points(sh, &flow.level_set()), m);
     Ok(((a1 / a0).ln() / horizon, exact, rest))
@@ -1526,12 +1696,18 @@ fn ripple_cases() -> Vec<(f64, usize)> {
 fn laws_study() {
     let steps = env_usize("LAW_STEPS", 96);
     let sets = [Stages::d(), Stages::p(), Stages::ps()];
-    println!("STAGE 3: the laws, for the stage sets D (defaults), P (paper as printed), PS (paper structure, smoothed flux).");
+    println!(
+        "STAGE 3: the laws, for the stage sets D (defaults), P (paper as printed), PS (paper structure, smoothed flux)."
+    );
     println!("A cell shows the error; ERR[...] is a failed run.\n");
     // Circle law.
-    println!("CIRCLE LAW (flat, rho0 = 0.3, alpha_L = 1, t = 0.03, {steps} steps): relative error of the mean radius / roundness (std/mean) / |grad phi| min,mean,max in the crossed faces at the last step / unreached, clamped (max over steps)");
+    println!(
+        "CIRCLE LAW (flat, rho0 = 0.3, alpha_L = 1, t = 0.03, {steps} steps): relative error of the mean radius / roundness (std/mean) / |grad phi| min,mean,max in the crossed faces at the last step / unreached, clamped (max over steps)"
+    );
     let flat = build_all(&flat_family());
-    let jobs: Vec<(usize, usize)> = (0..flat.len()).flat_map(|m| (0..sets.len()).map(move |s| (m, s))).collect();
+    let jobs: Vec<(usize, usize)> = (0..flat.len())
+        .flat_map(|m| (0..sets.len()).map(move |s| (m, s)))
+        .collect();
     let res = par_map(&jobs, |&(m, s)| match &flat[m].1 {
         Ok(sh) => circle_law(sh, &sets[s], steps),
         Err(e) => Err(e.clone()),
@@ -1540,13 +1716,23 @@ fn laws_study() {
         match flatten(res[k].clone()) {
             Ok(r) => println!(
                 "{:<32} {:<3} {} / {:.1e} / {:.2}-{:.2}-{:.2} / {} {}",
-                flat[m].0.name, sets[s].name, sci(r.err), r.round, r.g.0, r.g.1, r.g.2, r.unreached, r.clamped
+                flat[m].0.name,
+                sets[s].name,
+                sci(r.err),
+                r.round,
+                r.g.0,
+                r.g.1,
+                r.g.2,
+                r.unreached,
+                r.clamped
             ),
             Err(e) => println!("{:<32} {:<3} {}", flat[m].0.name, sets[s].name, short(&e)),
         }
     }
     println!();
-    println!("DISK LAW (flat, uniform source K = 5 in region 0 only, Dirichlet, alpha_L = 0.3, rho0 = 0.3, t = 0.05, {steps} steps, rho' = -(K rho/2)^2 - alpha/rho): same columns");
+    println!(
+        "DISK LAW (flat, uniform source K = 5 in region 0 only, Dirichlet, alpha_L = 0.3, rho0 = 0.3, t = 0.05, {steps} steps, rho' = -(K rho/2)^2 - alpha/rho): same columns"
+    );
     let res = par_map(&jobs, |&(m, s)| match &flat[m].1 {
         Ok(sh) => disk_law(sh, &sets[s], steps),
         Err(e) => Err(e.clone()),
@@ -1555,7 +1741,15 @@ fn laws_study() {
         match flatten(res[k].clone()) {
             Ok(r) => println!(
                 "{:<32} {:<3} {} / {:.1e} / {:.2}-{:.2}-{:.2} / {} {}",
-                flat[m].0.name, sets[s].name, sci(r.err), r.round, r.g.0, r.g.1, r.g.2, r.unreached, r.clamped
+                flat[m].0.name,
+                sets[s].name,
+                sci(r.err),
+                r.round,
+                r.g.0,
+                r.g.1,
+                r.g.2,
+                r.unreached,
+                r.clamped
             ),
             Err(e) => println!("{:<32} {:<3} {}", flat[m].0.name, sets[s].name, short(&e)),
         }
@@ -1564,24 +1758,51 @@ fn laws_study() {
     let sph = build_all(&sphere_family());
     // Latitude ODE.
     let lat_cases = [(20.0, 0.5, 4e-3, 200usize), (8.0, 0.8, 4e-3, 200)];
-    println!("LATITUDE CIRCLE vs ODE (sphere): error of the mean latitude (spread); cases (alpha_L, psi0, t, steps)");
+    println!(
+        "LATITUDE CIRCLE vs ODE (sphere): error of the mean latitude (spread); cases (alpha_L, psi0, t, steps)"
+    );
     let jobs: Vec<(usize, usize, usize)> = (0..sph.len())
-        .flat_map(|m| (0..sets.len()).flat_map(move |s| (0..lat_cases.len()).map(move |c| (m, s, c))))
+        .flat_map(|m| {
+            (0..sets.len()).flat_map(move |s| (0..lat_cases.len()).map(move |c| (m, s, c)))
+        })
         .collect();
     let res = par_map(&jobs, |&(m, s, c)| match &sph[m].1 {
-        Ok(sh) => lat_ode(sh, &sets[s], lat_cases[c].0, lat_cases[c].1, lat_cases[c].2, lat_cases[c].3),
+        Ok(sh) => lat_ode(
+            sh,
+            &sets[s],
+            lat_cases[c].0,
+            lat_cases[c].1,
+            lat_cases[c].2,
+            lat_cases[c].3,
+        ),
         Err(e) => Err(e.clone()),
     });
     for (k, &(m, s, c)) in jobs.iter().enumerate() {
         match flatten(res[k].clone()) {
-            Ok((e, sp)) => println!("{:<32} {:<3} case {:?}: {} ({:.0e})", sph[m].0.name, sets[s].name, lat_cases[c], sci(e), sp),
-            Err(e) => println!("{:<32} {:<3} case {:?}: {}", sph[m].0.name, sets[s].name, lat_cases[c], short(&e)),
+            Ok((e, sp)) => println!(
+                "{:<32} {:<3} case {:?}: {} ({:.0e})",
+                sph[m].0.name,
+                sets[s].name,
+                lat_cases[c],
+                sci(e),
+                sp
+            ),
+            Err(e) => println!(
+                "{:<32} {:<3} case {:?}: {}",
+                sph[m].0.name,
+                sets[s].name,
+                lat_cases[c],
+                short(&e)
+            ),
         }
     }
     println!();
     // Balanced latitude.
     let r = 1.0 / (4.0 * PI).sqrt();
-    println!("BALANCED LATITUDE (alpha_L = 20, sin psi* = 4/(alpha R), psi* = {:.5}); run to rest with the adaptive step (motion <= 1e-7, <= 3000 steps): final psi - psi* (spread), steps, stop", (4.0 / (20.0 * r)).asin());
+    println!(
+        "BALANCED LATITUDE (alpha_L = 20, sin psi* = 4/(alpha R), psi* = {:.5}); run to rest with the adaptive step (motion <= 1e-7, <= 3000 steps): final psi - psi* (spread), steps, stop",
+        (4.0 / (20.0 * r)).asin()
+    );
     let starts = [0.5, 1.1];
     let jobs: Vec<(usize, usize, usize)> = (0..sph.len())
         .flat_map(|m| (0..sets.len()).flat_map(move |s| (0..2).map(move |c| (m, s, c))))
@@ -1592,19 +1813,38 @@ fn laws_study() {
     });
     for (k, &(m, s, c)) in jobs.iter().enumerate() {
         match flatten(res[k].clone()) {
-            Ok((e, sp, n, stop)) => println!("{:<32} {:<3} from {}: {} ({:.0e}) {} steps {}", sph[m].0.name, sets[s].name, starts[c], sci(e), sp, n, stop),
-            Err(e) => println!("{:<32} {:<3} from {}: {}", sph[m].0.name, sets[s].name, starts[c], short(&e)),
+            Ok((e, sp, n, stop)) => println!(
+                "{:<32} {:<3} from {}: {} ({:.0e}) {} steps {}",
+                sph[m].0.name,
+                sets[s].name,
+                starts[c],
+                sci(e),
+                sp,
+                n,
+                stop
+            ),
+            Err(e) => println!(
+                "{:<32} {:<3} from {}: {}",
+                sph[m].0.name,
+                sets[s].name,
+                starts[c],
+                short(&e)
+            ),
         }
     }
     println!();
     // Ripples.
     let cases = ripple_cases();
-    println!("RIPPLES OF THE EQUATOR: measured growth rate / exact - 1 (and the measured rate); cases (alpha_L, m)");
+    println!(
+        "RIPPLES OF THE EQUATOR: measured growth rate / exact - 1 (and the measured rate); cases (alpha_L, m)"
+    );
     let jobs: Vec<(usize, usize, usize)> = (0..sph.len())
-        .flat_map(|m| (0..sets.len()).flat_map({
-            let n = cases.len();
-            move |s| (0..n).map(move |c| (m, s, c))
-        }))
+        .flat_map(|m| {
+            (0..sets.len()).flat_map({
+                let n = cases.len();
+                move |s| (0..n).map(move |c| (m, s, c))
+            })
+        })
         .collect();
     let res = par_map(&jobs, |&(m, s, c)| match &sph[m].1 {
         Ok(sh) => ripple(sh, &sets[s], cases[c].0, cases[c].1),
@@ -1614,9 +1854,23 @@ fn laws_study() {
         match flatten(res[k].clone()) {
             Ok((meas, exact, rest)) => println!(
                 "{:<32} {:<3} (alpha {}, m {}): {:+.3} (measured {:+.1}, exact {:+.1}, rest {:.0e})",
-                sph[m].0.name, sets[s].name, cases[c].0, cases[c].1, meas / exact - 1.0, meas, exact, rest
+                sph[m].0.name,
+                sets[s].name,
+                cases[c].0,
+                cases[c].1,
+                meas / exact - 1.0,
+                meas,
+                exact,
+                rest
             ),
-            Err(e) => println!("{:<32} {:<3} (alpha {}, m {}): {}", sph[m].0.name, sets[s].name, cases[c].0, cases[c].1, short(&e)),
+            Err(e) => println!(
+                "{:<32} {:<3} (alpha {}, m {}): {}",
+                sph[m].0.name,
+                sets[s].name,
+                cases[c].0,
+                cases[c].1,
+                short(&e)
+            ),
         }
     }
 }
@@ -1645,15 +1899,26 @@ fn summarize(out: &RunOut, flow_scale: f64, mean_edge: f64) -> EnergySummary {
     if let Some(f) = out.final_energy {
         e.push(f);
     }
-    let (e0, e_end) = (e.first().copied().unwrap_or(f64::NAN), e.last().copied().unwrap_or(f64::NAN));
+    let (e0, e_end) = (
+        e.first().copied().unwrap_or(f64::NAN),
+        e.last().copied().unwrap_or(f64::NAN),
+    );
     let drop = e0 - e_end;
-    let rises: Vec<f64> = e.windows(2).map(|w| w[1] - w[0]).filter(|d| *d > 0.0).collect();
+    let rises: Vec<f64> = e
+        .windows(2)
+        .map(|w| w[1] - w[0])
+        .filter(|d| *d > 0.0)
+        .collect();
     let max_rise = rises.iter().cloned().fold(0.0, f64::max);
     let n = out.steps.len();
     let tail = (n / 4).clamp(1, 50).min(n);
     let mut motions: Vec<f64> = out.steps[n - tail..].iter().map(|r| r.cut_motion).collect();
     motions.sort_by(f64::total_cmp);
-    let floor = if motions.is_empty() { f64::NAN } else { motions[motions.len() / 2] } / (flow_scale * mean_edge);
+    let floor = if motions.is_empty() {
+        f64::NAN
+    } else {
+        motions[motions.len() / 2]
+    } / (flow_scale * mean_edge);
     EnergySummary {
         steps: n,
         stop: out.stop.clone(),
@@ -1661,10 +1926,24 @@ fn summarize(out: &RunOut, flow_scale: f64, mean_edge: f64) -> EnergySummary {
         e_end,
         rises: rises.len(),
         max_rise,
-        max_rise_frac: if drop > 0.0 { max_rise / drop } else { f64::NAN },
+        max_rise_frac: if drop > 0.0 {
+            max_rise / drop
+        } else {
+            f64::NAN
+        },
         unreached_max: out.steps.iter().map(|r| r.n_unreached).max().unwrap_or(0),
-        clamped_mean: out.steps.iter().map(|r| r.n_clamped_crossings as f64).sum::<f64>() / n.max(1) as f64,
-        clamped_max: out.steps.iter().map(|r| r.n_clamped_crossings).max().unwrap_or(0),
+        clamped_mean: out
+            .steps
+            .iter()
+            .map(|r| r.n_clamped_crossings as f64)
+            .sum::<f64>()
+            / n.max(1) as f64,
+        clamped_max: out
+            .steps
+            .iter()
+            .map(|r| r.n_clamped_crossings)
+            .max()
+            .unwrap_or(0),
         floor,
         secs_per_step: out.seconds / n.max(1) as f64,
         motion_last: out.steps.last().map_or(f64::NAN, |r| r.cut_motion),
@@ -1679,7 +1958,21 @@ fn mean_edge(sh: &Shape) -> f64 {
 fn energy_line(name: &str, st: &str, s: &EnergySummary) -> String {
     format!(
         "{:<32} {:<3} steps {:>4} stop {:<14} E {:.5e} -> {:.5e} | rises {:>3} (max {:.1e} = {:.1e} of drop) | unreached max {} | clamped mean {:.1} max {} | floor {:.2e} edge | last motion {:.1e} | {:.1} ms/step",
-        name, st, s.steps, s.stop, s.e0, s.e_end, s.rises, s.max_rise, s.max_rise_frac, s.unreached_max, s.clamped_mean, s.clamped_max, s.floor, s.motion_last, 1e3 * s.secs_per_step
+        name,
+        st,
+        s.steps,
+        s.stop,
+        s.e0,
+        s.e_end,
+        s.rises,
+        s.max_rise,
+        s.max_rise_frac,
+        s.unreached_max,
+        s.clamped_mean,
+        s.clamped_max,
+        s.floor,
+        s.motion_last,
+        1e3 * s.secs_per_step
     )
 }
 
@@ -1698,10 +1991,27 @@ fn flat_energy_run(spec: &Spec, st: &Stages) -> Result<String, String> {
     let problem = CutProblem::new(Energy::Hencky, 0.004);
     // The cut starts far from the bump and the energy hardly changes for many steps there, so the
     // energy criterion would stop the run at once: only the motion criterion is used.
-    let stop = StopRule { max_steps: 1000, motion_tolerance: 1e-5, energy_tolerance: 0.0, energy_window: 1 };
-    let out = run_loop(&mut flow, &sh, &problem, st, StepSize::default(), &stop, Oracle::None);
+    let stop = StopRule {
+        max_steps: 1000,
+        motion_tolerance: 1e-5,
+        energy_tolerance: 0.0,
+        energy_window: 1,
+    };
+    let out = run_loop(
+        &mut flow,
+        &sh,
+        &problem,
+        st,
+        StepSize::default(),
+        &stop,
+        Oracle::None,
+    );
     let scale = flow.scale().length_scale;
-    Ok(energy_line(&spec.name, &st.name, &summarize(&out, scale, mean_edge(&sh))))
+    Ok(energy_line(
+        &spec.name,
+        &st.name,
+        &summarize(&out, scale, mean_edge(&sh)),
+    ))
 }
 
 /// Sphere: the equator with the perturbation of Fig. 1 (0.01 in the modes 2..8), Dirichlet.
@@ -1713,25 +2023,45 @@ fn sphere_energy_run(sh: &Shape, st: &Stages, alpha: f64) -> Result<String, Stri
         .iter()
         .map(|p| {
             let theta = p[1].atan2(p[0]);
-            let bump: f64 = (2..=8).map(|m| 0.01 * (m as f64 * theta + phases[m]).cos()).sum();
+            let bump: f64 = (2..=8)
+                .map(|m| 0.01 * (m as f64 * theta + phases[m]).cos())
+                .sum();
             polar(*p) - 0.5 * PI - bump
         })
         .collect();
     let mut flow = Flow::new(&sh.mesh, &sh.geometry, &phi0).map_err(|e| e.to_string())?;
     flow.redistance().map_err(|e| e.to_string())?;
     let problem = CutProblem::new(Energy::Dirichlet, alpha);
-    let out = run_loop(&mut flow, sh, &problem, st, StepSize::default(), &StopRule::default(), Oracle::None);
+    let out = run_loop(
+        &mut flow,
+        sh,
+        &problem,
+        st,
+        StepSize::default(),
+        &StopRule::default(),
+        Oracle::None,
+    );
     let scale = flow.scale().length_scale;
-    let line = energy_line(&sh.spec.name, &format!("{}", st.name), &summarize(&out, scale, mean_edge(sh)));
+    let line = energy_line(
+        &sh.spec.name,
+        &st.name.to_string(),
+        &summarize(&out, scale, mean_edge(sh)),
+    );
     Ok(format!("alpha {alpha}: {line}"))
 }
 
 fn energy_study() {
     let sets = [Stages::d(), Stages::p()];
-    println!("STAGE 4: energy history of whole runs, adaptive step. Flat: motion <= 1e-5 only, <= 1000 steps. Sphere: the default StopRule (<= 1000 steps, motion <= 1e-5 or energy fall < 1e-4 over 25 steps).");
-    println!("Flat: bump 0.15 exp(-r^2/0.02), Hencky, alpha_L = 0.004, straight cut 0.3 left of the bump. Sphere: equator + Fig. 1 perturbation, Dirichlet.\n");
+    println!(
+        "STAGE 4: energy history of whole runs, adaptive step. Flat: motion <= 1e-5 only, <= 1000 steps. Sphere: the default StopRule (<= 1000 steps, motion <= 1e-5 or energy fall < 1e-4 over 25 steps)."
+    );
+    println!(
+        "Flat: bump 0.15 exp(-r^2/0.02), Hencky, alpha_L = 0.004, straight cut 0.3 left of the bump. Sphere: equator + Fig. 1 perturbation, Dirichlet.\n"
+    );
     let flat = flat_family();
-    let jobs: Vec<(usize, usize)> = (0..flat.len()).flat_map(|m| (0..sets.len()).map(move |s| (m, s))).collect();
+    let jobs: Vec<(usize, usize)> = (0..flat.len())
+        .flat_map(|m| (0..sets.len()).map(move |s| (m, s)))
+        .collect();
     let res = par_map(&jobs, |&(m, s)| flat_energy_run(&flat[m], &sets[s]));
     for (k, &(m, s)) in jobs.iter().enumerate() {
         match flatten(res[k].clone()) {
@@ -1752,7 +2082,13 @@ fn energy_study() {
     for (k, &(m, s, a)) in jobs.iter().enumerate() {
         match flatten(res[k].clone()) {
             Ok(l) => println!("{l}"),
-            Err(e) => println!("{:<32} {:<3} alpha {}: {}", sph[m].0.name, sets[s].name, alphas[a], short(&e)),
+            Err(e) => println!(
+                "{:<32} {:<3} alpha {}: {}",
+                sph[m].0.name,
+                sets[s].name,
+                alphas[a],
+                short(&e)
+            ),
         }
     }
 }
@@ -1768,8 +2104,12 @@ fn variants() -> Vec<Stages> {
             s.flux = FluxRecovery::Nodal;
             s.passes = 1;
         }),
-        Stages::d().with("flux:c=0.25", |s| s.flux = FluxRecovery::Smoothed { length: 0.25 }),
-        Stages::d().with("flux:c=1", |s| s.flux = FluxRecovery::Smoothed { length: 1.0 }),
+        Stages::d().with("flux:c=0.25", |s| {
+            s.flux = FluxRecovery::Smoothed { length: 0.25 }
+        }),
+        Stages::d().with("flux:c=1", |s| {
+            s.flux = FluxRecovery::Smoothed { length: 1.0 }
+        }),
         Stages::d().with("len:OnMesh", |s| s.length = LengthStep::OnMesh),
         Stages::d().with("ext:Harmonic", |s| s.ext = Extension::Harmonic),
         Stages::d().with("speed:Unit", |s| s.speed = SpeedScaling::Unit),
@@ -1784,11 +2124,17 @@ fn variants() -> Vec<Stages> {
 fn attr_study() {
     let vars = variants();
     let steps = env_usize("LAW_STEPS", 96);
-    println!("ATTRIBUTION: the default stages with one option changed at a time (PS = all structural options of the paper, P = the paper as printed).");
-    println!("redist:Off = no redistancing; FixedPt = cut-adjacent values kept, the rest by the fixed point of the upwind scheme; Oracle = cut-adjacent values kept, every other vertex gets the exact distance to the circle / latitude through the mean position of the cut (ideal far field).\n");
+    println!(
+        "ATTRIBUTION: the default stages with one option changed at a time (PS = all structural options of the paper, P = the paper as printed)."
+    );
+    println!(
+        "redist:Off = no redistancing; FixedPt = cut-adjacent values kept, the rest by the fixed point of the upwind scheme; Oracle = cut-adjacent values kept, every other vertex gets the exact distance to the circle / latitude through the mean position of the cut (ideal far field).\n"
+    );
     println!("CIRCLE LAW (relative error of the radius; roundness in brackets)");
     let flat = build_all(&flat_family());
-    let jobs: Vec<(usize, usize)> = (0..flat.len()).flat_map(|m| (0..vars.len()).map(move |v| (m, v))).collect();
+    let jobs: Vec<(usize, usize)> = (0..flat.len())
+        .flat_map(|m| (0..vars.len()).map(move |v| (m, v)))
+        .collect();
     let res = par_map(&jobs, |&(m, v)| match &flat[m].1 {
         Ok(sh) => circle_law(sh, &vars[v], steps),
         Err(e) => Err(e.clone()),
@@ -1809,7 +2155,9 @@ fn attr_study() {
         println!();
     }
     println!();
-    println!("DISK LAW (flat, uniform source K = 5 in region 0, alpha_L = 0.3; relative error of the radius; roundness in brackets)");
+    println!(
+        "DISK LAW (flat, uniform source K = 5 in region 0, alpha_L = 0.3; relative error of the radius; roundness in brackets)"
+    );
     let res = par_map(&jobs, |&(m, v)| match &flat[m].1 {
         Ok(sh) => disk_law(sh, &vars[v], steps),
         Err(e) => Err(e.clone()),
@@ -1831,15 +2179,38 @@ fn attr_study() {
     }
     println!();
     let sph = build_all(&sphere_family());
-    let tasks: Vec<(&str, Box<dyn Fn(&Shape, &Stages) -> Result<String, String> + Sync>)> = vec![
-        ("LATITUDE vs ODE alpha 20, psi0 0.5, t 4e-3, 200 steps: error of psi (spread)", Box::new(|sh, st| lat_ode(sh, st, 20.0, 0.5, 4e-3, 200).map(|(e, s)| format!("{}({:.0e})", sci(e), s)))),
-        ("BALANCED LATITUDE alpha 20 from 0.5: psi - psi* (steps)", Box::new(|sh, st| balance(sh, st, 0.5).map(|(e, _, n, _)| format!("{}({n})", sci(e))))),
-        ("RIPPLE alpha 0, m 4 (distortion term only): measured/exact - 1", Box::new(|sh, st| ripple(sh, st, 0.0, 4).map(|(m, e, _)| format!("{:+.3}", m / e - 1.0)))),
-        ("RIPPLE alpha 10, m 4 (length term dominates): measured/exact - 1", Box::new(|sh, st| ripple(sh, st, 10.0, 4).map(|(m, e, _)| format!("{:+.3}", m / e - 1.0)))),
+    let tasks: Vec<(
+        &str,
+        Box<dyn Fn(&Shape, &Stages) -> Result<String, String> + Sync>,
+    )> = vec![
+        (
+            "LATITUDE vs ODE alpha 20, psi0 0.5, t 4e-3, 200 steps: error of psi (spread)",
+            Box::new(|sh, st| {
+                lat_ode(sh, st, 20.0, 0.5, 4e-3, 200).map(|(e, s)| format!("{}({:.0e})", sci(e), s))
+            }),
+        ),
+        (
+            "BALANCED LATITUDE alpha 20 from 0.5: psi - psi* (steps)",
+            Box::new(|sh, st| balance(sh, st, 0.5).map(|(e, _, n, _)| format!("{}({n})", sci(e)))),
+        ),
+        (
+            "RIPPLE alpha 0, m 4 (distortion term only): measured/exact - 1",
+            Box::new(|sh, st| {
+                ripple(sh, st, 0.0, 4).map(|(m, e, _)| format!("{:+.3}", m / e - 1.0))
+            }),
+        ),
+        (
+            "RIPPLE alpha 10, m 4 (length term dominates): measured/exact - 1",
+            Box::new(|sh, st| {
+                ripple(sh, st, 10.0, 4).map(|(m, e, _)| format!("{:+.3}", m / e - 1.0))
+            }),
+        ),
     ];
     for (title, f) in &tasks {
         println!("{title}");
-        let jobs: Vec<(usize, usize)> = (0..sph.len()).flat_map(|m| (0..vars.len()).map(move |v| (m, v))).collect();
+        let jobs: Vec<(usize, usize)> = (0..sph.len())
+            .flat_map(|m| (0..vars.len()).map(move |v| (m, v)))
+            .collect();
         let res = par_map(&jobs, |&(m, v)| match &sph[m].1 {
             Ok(sh) => f(sh, &vars[v]),
             Err(e) => Err(e.clone()),
@@ -1895,7 +2266,10 @@ fn plane_of(positions: &[[f64; 3]]) -> (usize, f64) {
     let mut best = (0, 0.0, 0.0);
     for a in 0..3 {
         let lo = positions.iter().map(|p| p[a]).fold(f64::INFINITY, f64::min);
-        let hi = positions.iter().map(|p| p[a]).fold(f64::NEG_INFINITY, f64::max);
+        let hi = positions
+            .iter()
+            .map(|p| p[a])
+            .fold(f64::NEG_INFINITY, f64::max);
         if hi - lo > best.1 {
             best = (a, hi - lo, positions.iter().map(|p| p[a]).sum::<f64>() / n);
         }
@@ -1903,16 +2277,38 @@ fn plane_of(positions: &[[f64; 3]]) -> (usize, f64) {
     (best.0, best.2)
 }
 
-fn real_run(path: &str, plane: Option<(usize, f64)>, vars: &[Stages], alpha_rules: &[(&str, Option<f64>)]) -> Vec<String> {
+fn real_run(
+    path: &str,
+    plane: Option<(usize, f64)>,
+    vars: &[Stages],
+    alpha_rules: &[(&str, Option<f64>)],
+) -> Vec<String> {
     let mut lines = Vec::new();
     let (positions, faces, polygons) = match load_obj(path) {
         Ok(x) => x,
         Err(e) => return vec![format!("  load failed: {e}")],
     };
-    let spec = Spec { name: path.into(), kind: Kind::Real, positions: positions.clone(), faces: faces.clone(), center: [0.0; 2] };
+    let spec = Spec {
+        name: path.into(),
+        kind: Kind::Real,
+        positions: positions.clone(),
+        faces: faces.clone(),
+        center: [0.0; 2],
+    };
     let q = spec.quality();
-    lines.push(format!("  {}{}", quality_row("quality", &q), if polygons > 0 { format!("  ({polygons} polygons fan-triangulated)") } else { String::new() }));
-    lines.push(format!("  median edge {:.4e}, longest/shortest edge {:.1e}", q.h_median, q.edge_ratio));
+    lines.push(format!(
+        "  {}{}",
+        quality_row("quality", &q),
+        if polygons > 0 {
+            format!("  ({polygons} polygons fan-triangulated)")
+        } else {
+            String::new()
+        }
+    ));
+    lines.push(format!(
+        "  median edge {:.4e}, longest/shortest edge {:.1e}",
+        q.h_median, q.edge_ratio
+    ));
     let sh = match spec.build() {
         Ok(s) => s,
         Err(e) => {
@@ -1943,13 +2339,24 @@ fn real_run(path: &str, plane: Option<(usize, f64)>, vars: &[Stages], alpha_rule
                 None => match flow.roughening_rate(&problem, &st.eval_options()) {
                     Ok(w) => length_weight_for_ripples(w, 0.25),
                     Err(e) => {
-                        lines.push(format!("  {} {}: roughening_rate failed: {e}", st.name, rule_name));
+                        lines.push(format!(
+                            "  {} {}: roughening_rate failed: {e}",
+                            st.name, rule_name
+                        ));
                         continue;
                     }
                 },
             };
             problem.length_weight = alpha_value;
-            let out = run_loop(&mut flow, &sh, &problem, st, StepSize::default(), &StopRule::default(), Oracle::None);
+            let out = run_loop(
+                &mut flow,
+                &sh,
+                &problem,
+                st,
+                StepSize::default(),
+                &StopRule::default(),
+                Oracle::None,
+            );
             let scale = flow.scale().length_scale;
             let s = summarize(&out, scale, mean_edge(&sh));
             let first = out.steps.first();
@@ -1967,45 +2374,99 @@ fn real_run(path: &str, plane: Option<(usize, f64)>, vars: &[Stages], alpha_rule
 }
 
 fn real_study(attr: bool) {
-    let root = std::env::var("REAL_ROOT").unwrap_or_else(|_| "/var/data/discrete-geometry/ddg-tools/data".into());
+    let root = std::env::var("REAL_ROOT")
+        .unwrap_or_else(|_| "/var/data/discrete-geometry/ddg-tools/data".into());
     let cones = format!("{root}/optimal-cones/optimal-cones-data/data");
     let models = format!("{root}/models");
-    let camel_plane = load_obj(&format!("{cones}/camel.obj")).ok().map(|(p, _, _)| plane_of(&p));
+    let camel_plane = load_obj(&format!("{cones}/camel.obj"))
+        .ok()
+        .map(|(p, _, _)| plane_of(&p));
     let mut meshes = vec![
-        RealMesh { name: "spot (triangulated)".into(), path: format!("{models}/spot/spot/spot_triangulated.obj"), plane: None },
-        RealMesh { name: "bob (tri)".into(), path: format!("{models}/bob/bob/bob_tri.obj"), plane: None },
-        RealMesh { name: "blub (triangulated)".into(), path: format!("{models}/blub/blub/blub_triangulated.obj"), plane: None },
+        RealMesh {
+            name: "spot (triangulated)".into(),
+            path: format!("{models}/spot/spot/spot_triangulated.obj"),
+            plane: None,
+        },
+        RealMesh {
+            name: "bob (tri)".into(),
+            path: format!("{models}/bob/bob/bob_tri.obj"),
+            plane: None,
+        },
+        RealMesh {
+            name: "blub (triangulated)".into(),
+            path: format!("{models}/blub/blub/blub_triangulated.obj"),
+            plane: None,
+        },
     ];
-    for n in ["camel", "camelbad", "camelbadnonuniform", "camel_noise1", "camel_noise2", "camelshotnoise"] {
-        meshes.push(RealMesh { name: n.into(), path: format!("{cones}/{n}.obj"), plane: camel_plane });
+    for n in [
+        "camel",
+        "camelbad",
+        "camelbadnonuniform",
+        "camel_noise1",
+        "camel_noise2",
+        "camelshotnoise",
+    ] {
+        meshes.push(RealMesh {
+            name: n.into(),
+            path: format!("{cones}/{n}.obj"),
+            plane: camel_plane,
+        });
     }
     if let Ok(extra) = std::env::var("EXTRA_OBJ") {
         for p in extra.split(':').filter(|s| !s.is_empty()) {
-            meshes.push(RealMesh { name: p.rsplit('/').next().unwrap().into(), path: p.into(), plane: None });
+            meshes.push(RealMesh {
+                name: p.rsplit('/').next().unwrap().into(),
+                path: p.into(),
+                plane: None,
+            });
         }
     }
     let vars: Vec<Stages> = if attr {
         // The fixed-point redistancing is left out on real meshes: with obtuse triangles it
         // re-opens vertices millions of times per step (see `redist`, "reopened").
-        variants().into_iter().filter(|v| !matches!(v.redist, Redist::Oracle | Redist::FixedPoint)).collect()
+        variants()
+            .into_iter()
+            .filter(|v| !matches!(v.redist, Redist::Oracle | Redist::FixedPoint))
+            .collect()
     } else {
         vec![Stages::d()]
     };
-    let rules: Vec<(&str, Option<f64>)> = if attr { vec![("0.5", Some(0.5))] } else { vec![("auto", None), ("0.5", Some(0.5))] };
-    println!("REAL MESHES: Hencky, planar start (plane through the centroid across the longest axis; camel variants use the plane of camel.obj), default StopRule, adaptive step.");
-    println!("alpha 'auto' = length_weight_for_ripples(omega, 0.25) from the roughening rate of the start; floor = median cut motion of the last quarter of the steps (<= 50) in median edges of the unit-area surface.\n");
+    let rules: Vec<(&str, Option<f64>)> = if attr {
+        vec![("0.5", Some(0.5))]
+    } else {
+        vec![("auto", None), ("0.5", Some(0.5))]
+    };
+    println!(
+        "REAL MESHES: Hencky, planar start (plane through the centroid across the longest axis; camel variants use the plane of camel.obj), default StopRule, adaptive step."
+    );
+    println!(
+        "alpha 'auto' = length_weight_for_ripples(omega, 0.25) from the roughening rate of the start; floor = median cut motion of the last quarter of the steps (<= 50) in median edges of the unit-area surface.\n"
+    );
     println!("{}", quality_header());
     if attr {
         // One job per (mesh, variant).
-        let jobs: Vec<(usize, usize)> = (0..meshes.len()).flat_map(|m| (0..vars.len()).map(move |v| (m, v))).collect();
-        let res = par_map(&jobs, |&(m, v)| real_run(&meshes[m].path, meshes[m].plane, std::slice::from_ref(&vars[v]), &rules));
+        let jobs: Vec<(usize, usize)> = (0..meshes.len())
+            .flat_map(|m| (0..vars.len()).map(move |v| (m, v)))
+            .collect();
+        let res = par_map(&jobs, |&(m, v)| {
+            real_run(
+                &meshes[m].path,
+                meshes[m].plane,
+                std::slice::from_ref(&vars[v]),
+                &rules,
+            )
+        });
         for (m, mesh) in meshes.iter().enumerate() {
             println!("{} [{}]", mesh.name, mesh.path);
             for v in 0..vars.len() {
                 match &res[m * vars.len() + v] {
                     Ok(lines) => {
                         for l in lines {
-                            let keep = l.trim_start().starts_with(&vars[v].name) || (v == 0 && !l.contains("quality") && !l.contains("median edge") && !l.contains("mesh accepted"));
+                            let keep = l.trim_start().starts_with(&vars[v].name)
+                                || (v == 0
+                                    && !l.contains("quality")
+                                    && !l.contains("median edge")
+                                    && !l.contains("mesh accepted"));
                             if keep {
                                 println!("{l}");
                             }
@@ -2034,7 +2495,9 @@ fn real_study(attr: bool) {
 }
 
 fn quality_study() {
-    println!("MESH QUALITY. largest angle per triangle: median / 95% / max (degrees); min angle; fraction of interior edges with a negative cotan weight (opposite angles sum > 180 deg); flip = triangles with the wrong orientation; degen = zero-area triangles.\n");
+    println!(
+        "MESH QUALITY. largest angle per triangle: median / 95% / max (degrees); min angle; fraction of interior edges with a negative cotan weight (opposite angles sum > 180 deg); flip = triangles with the wrong orientation; degen = zero-area triangles.\n"
+    );
     println!("{}", quality_header());
     for s in flat_family().into_iter().chain(sphere_family()) {
         println!("{}", quality_row(&s.name, &s.quality()));
