@@ -21,9 +21,9 @@ use crate::evaluate::{Evaluation, Evaluator};
 use crate::flow::{
     Extension, Flow, FlowOptions, LengthStep, PenaltyRule, ROUGHENING_QUANTILE, Redistance,
     RunReport, SpeedScaling, StepReport, StepSize, StepStatistics, StepTimings, StopReason,
-    StopRule, cut_dual_lengths, explicit_step, gradient_norms, length_weights, local_edges,
-    roughening_rate, roughening_rates, rule_step, solve_on_cut, symmetry_projection, vertex_limits,
-    weighted_quantile,
+    StopRule, cut_dual_lengths, energy_stop, explicit_step, gradient_norms, length_weights,
+    local_edges, roughening_rate, roughening_rates, rule_step, run_outcome, solve_on_cut,
+    symmetry_projection, vertex_limits, weighted_quantile,
 };
 use crate::problem::{CutProblem, EvalOptions, UnitAreaScale};
 
@@ -703,11 +703,18 @@ impl RegionFlow {
         stop: &StopRule,
     ) -> Result<RunReport, CutError> {
         let mut steps: Vec<StepReport> = Vec::new();
+        // The state of lowest energy so far: its energy, the number of steps before it, the
+        // level-set functions and the time.
+        let mut lowest: Option<(f64, usize, Vec<Vec<f64>>, f64)> = None;
         let reason = loop {
             if steps.len() >= stop.max_steps {
                 break StopReason::MaxSteps;
             }
+            let (state, time) = (self.phis.clone(), self.time);
             let report = self.step(problem, options)?;
+            if lowest.as_ref().is_none_or(|l| report.energy.total < l.0) {
+                lowest = Some((report.energy.total, steps.len(), state, time));
+            }
             let (vanished, motion) = (report.cut_vanished, report.cut_motion);
             steps.push(report);
             if vanished {
@@ -716,20 +723,34 @@ impl RegionFlow {
             if motion <= stop.motion_tolerance {
                 break StopReason::Converged;
             }
-            let window = stop.energy_window.max(1);
-            if stop.energy_tolerance > 0.0 && steps.len() > window {
-                let now = steps[steps.len() - 1].energy.total;
-                let before = steps[steps.len() - 1 - window].energy.total;
-                if before - now <= stop.energy_tolerance * now.abs() {
-                    break StopReason::EnergyStalled;
-                }
+            if let Some(reason) = energy_stop(stop, &steps) {
+                break reason;
             }
         };
-        let final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let mut final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let last_energy = final_energy.total;
+        let (lowest_energy, lowest_energy_step, returned_step) = run_outcome(
+            reason,
+            lowest.as_ref().map(|l| (l.0, l.1)),
+            last_energy,
+            steps.len(),
+        );
+        if returned_step < steps.len()
+            && let Some((_, _, state, time)) = lowest
+        {
+            self.phis = state;
+            self.time = time;
+            self.n_steps -= steps.len() - returned_step;
+            final_energy = steps[returned_step].energy.clone();
+        }
         Ok(RunReport {
             steps,
             stop: reason,
             final_energy,
+            lowest_energy,
+            lowest_energy_step,
+            returned_step,
+            last_energy,
         })
     }
 }

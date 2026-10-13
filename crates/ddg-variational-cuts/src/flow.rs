@@ -494,8 +494,10 @@ pub struct StopRule {
     /// last `energy_window` steps: `E_{k − window} − E_k ≤ energy_tolerance · |E_k|`. On an
     /// irregular mesh the rate of the cut has a noise floor of the size of the speeds that
     /// balance each other, the cut keeps moving by a fraction of an edge per step, and the
-    /// motion never falls below a small tolerance; the energy then stands still. `0.0` never
-    /// stops for this reason.
+    /// motion never falls below a small tolerance; the energy then stands still
+    /// ([`StopReason::EnergyStalled`]). If it rose over the window by more than the tolerance,
+    /// the run ends with [`StopReason::EnergyRose`] and the flow is set back to the state of
+    /// lowest energy of the run. `0.0` never stops for either reason.
     pub energy_tolerance: f64,
     /// The number of steps the energy is compared over, `≥ 1`.
     pub energy_window: usize,
@@ -521,10 +523,76 @@ pub enum StopReason {
     MaxSteps,
     /// The cut motion of the last step was within the tolerance.
     Converged,
-    /// The energy stood still over the window of the stop rule.
+    /// The energy stood still over the window of the stop rule: it changed by at most the
+    /// tolerance, up or down.
     EnergyStalled,
+    /// The energy rose over the window of the stop rule by more than the tolerance: the steps
+    /// were not descent steps any more. The flow has been set back to the state of lowest
+    /// energy of the run ([`RunReport::returned_step`]).
+    EnergyRose,
     /// One region is empty: there is no cut left.
     CutVanished,
+}
+
+impl StopReason {
+    /// A name for reports and bindings: `max_steps`, `converged`, `energy_stalled`,
+    /// `energy_rose`, `cut_vanished`.
+    pub fn name(self) -> &'static str {
+        match self {
+            StopReason::MaxSteps => "max_steps",
+            StopReason::Converged => "converged",
+            StopReason::EnergyStalled => "energy_stalled",
+            StopReason::EnergyRose => "energy_rose",
+            StopReason::CutVanished => "cut_vanished",
+        }
+    }
+}
+
+/// The energy criterion of the stop rule (SPEC §4, D27) after the steps `steps`: with `E_k` the
+/// energy of the state before step `k`, the run ends when
+/// `E_{k − window} − E_k ≤ energy_tolerance · |E_k|` for the last `k`; because the energy rose
+/// if `E_k − E_{k − window} > energy_tolerance · |E_k|`, because it stood still otherwise.
+pub(crate) fn energy_stop(stop: &StopRule, steps: &[StepReport]) -> Option<StopReason> {
+    let window = stop.energy_window.max(1);
+    if stop.energy_tolerance <= 0.0 || steps.len() <= window {
+        return None;
+    }
+    let now = steps[steps.len() - 1].energy.total;
+    let before = steps[steps.len() - 1 - window].energy.total;
+    let tolerance = stop.energy_tolerance * now.abs();
+    if before - now > tolerance {
+        None
+    } else if now - before > tolerance {
+        Some(StopReason::EnergyRose)
+    } else {
+        Some(StopReason::EnergyStalled)
+    }
+}
+
+/// The lowest energy of a run and what the run returns (SPEC §4, D27). `lowest` is the lowest
+/// energy among the states before the steps with the number of steps taken before it;
+/// `last_energy` is the energy after the last of `n_steps` steps. Returns the lowest energy of
+/// all states, its step (the earliest of equal ones), and the step whose state the run returns:
+/// the last one, or with [`StopReason::EnergyRose`] the one of lowest energy. A last state
+/// without a cut ([`StopReason::CutVanished`]) has no energy to compare and does not count.
+pub(crate) fn run_outcome(
+    reason: StopReason,
+    lowest: Option<(f64, usize)>,
+    last_energy: f64,
+    n_steps: usize,
+) -> (f64, usize, usize) {
+    let (energy, step) = match lowest {
+        Some((energy, step)) if energy <= last_energy || reason == StopReason::CutVanished => {
+            (energy, step)
+        }
+        _ => (last_energy, n_steps),
+    };
+    let returned = if reason == StopReason::EnergyRose {
+        step
+    } else {
+        n_steps
+    };
+    (energy, step, returned)
 }
 
 /// `|∇φ|` of the linear interpolant in the crossed faces: 1 for a signed distance function.
@@ -680,8 +748,22 @@ pub struct RunReport {
     pub steps: Vec<StepReport>,
     /// Why the run stopped.
     pub stop: StopReason,
-    /// The energy of the final state.
+    /// The energy of the state that the flow is in after the run.
     pub final_energy: EnergyTerms,
+    /// The lowest total energy among the states of the run: the state it started from and the
+    /// state after every step. A state without a cut, in which a run that ends with
+    /// [`StopReason::CutVanished`] leaves the flow, does not count.
+    pub lowest_energy: f64,
+    /// The number of steps of this run after which the state had that energy (0: the start
+    /// state; the earliest if several states have it).
+    pub lowest_energy_step: usize,
+    /// The number of steps of this run after which the flow was in the state that it is in
+    /// now: `steps.len()`, unless the run ended with [`StopReason::EnergyRose`] and the flow was
+    /// set back to `lowest_energy_step` (its time and step count too).
+    pub returned_step: usize,
+    /// The total energy of the state after the last step: `final_energy.total` unless the flow
+    /// was set back.
+    pub last_energy: f64,
 }
 
 /// The state of the implicit step that its factorization belongs to.
@@ -1202,12 +1284,19 @@ impl Flow {
         options: &FlowOptions<'_>,
         stop: &StopRule,
     ) -> Result<RunReport, CutError> {
-        let mut steps = Vec::new();
+        let mut steps: Vec<StepReport> = Vec::new();
+        // The state of lowest energy so far: its energy, the number of steps before it, the
+        // level-set function and the time.
+        let mut lowest: Option<(f64, usize, Vec<f64>, f64)> = None;
         let reason = loop {
             if steps.len() >= stop.max_steps {
                 break StopReason::MaxSteps;
             }
+            let (state, time) = (self.phi.clone(), self.time);
             let report = self.step(problem, options)?;
+            if lowest.as_ref().is_none_or(|l| report.energy.total < l.0) {
+                lowest = Some((report.energy.total, steps.len(), state, time));
+            }
             let (vanished, motion) = (report.cut_vanished, report.cut_motion);
             steps.push(report);
             if vanished {
@@ -1216,20 +1305,34 @@ impl Flow {
             if motion <= stop.motion_tolerance {
                 break StopReason::Converged;
             }
-            let window = stop.energy_window.max(1);
-            if stop.energy_tolerance > 0.0 && steps.len() > window {
-                let now = steps[steps.len() - 1].energy.total;
-                let before = steps[steps.len() - 1 - window].energy.total;
-                if before - now <= stop.energy_tolerance * now.abs() {
-                    break StopReason::EnergyStalled;
-                }
+            if let Some(reason) = energy_stop(stop, &steps) {
+                break reason;
             }
         };
-        let final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let mut final_energy = self.evaluate(problem, &options.eval)?.energy;
+        let last_energy = final_energy.total;
+        let (lowest_energy, lowest_energy_step, returned_step) = run_outcome(
+            reason,
+            lowest.as_ref().map(|l| (l.0, l.1)),
+            last_energy,
+            steps.len(),
+        );
+        if returned_step < steps.len()
+            && let Some((_, _, state, time)) = lowest
+        {
+            self.phi = state;
+            self.time = time;
+            self.n_steps -= steps.len() - returned_step;
+            final_energy = steps[returned_step].energy.clone();
+        }
         Ok(RunReport {
             steps,
             stop: reason,
             final_energy,
+            lowest_energy,
+            lowest_energy_step,
+            returned_step,
+            last_energy,
         })
     }
 

@@ -1140,8 +1140,8 @@ fn robust_step_where_a_boundary_runs_through_triple_points_only() {
                     "vertex {v} moves by {moved:e}, its edge is {:e}",
                     stages.vertex_edge[v]
                 );
-                for k in 0..3 {
-                    let full = stages.length[k][v] - phis_scaled[k][v];
+                for (k, phi) in phis_scaled.iter().enumerate() {
+                    let full = stages.length[k][v] - phi[v];
                     assert!((change(k) - factor * full).abs() <= 1e-12 * (1.0 + full.abs()));
                 }
                 limited += usize::from(factor < 1.0 && adjacent[v]);

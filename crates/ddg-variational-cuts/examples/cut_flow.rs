@@ -536,6 +536,10 @@ fn run() -> Result<(), AnyError> {
         flow.time()
     );
     println!(
+        "lowest energy {:.6e} after {} steps; the state returned is the one after {} steps",
+        report.lowest_energy, report.lowest_energy_step, report.returned_step
+    );
+    println!(
         "energy {first_energy:.6} -> {:.6}   distortion {:.6} + {:.6}   areas {:.4} / {:.4}   cut length {:.5} (unit area), penalty {:.5}",
         e.total, e.distortion[0], e.distortion[1], e.area[0], e.area[1], e.length, e.penalty
     );
@@ -686,6 +690,10 @@ fn run_regions(
         report.steps.len(),
         report.stop,
         flow.time()
+    );
+    println!(
+        "lowest energy {:.6e} after {} steps; the state returned is the one after {} steps",
+        report.lowest_energy, report.lowest_energy_step, report.returned_step
     );
     println!(
         "patches {} -> {}   triple points {} -> {}   cut length {:.5} -> {:.5} (unit area)   distortion {:.6e} -> {:.6e}   energy {:.6e} -> {:.6e}",

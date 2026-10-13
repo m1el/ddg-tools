@@ -637,7 +637,29 @@ everything else. The Hencky energy is more even than any of them there (23 and 1
 `|φ_new − φ_old|` over vertices cut-adjacent before or after the step) is at most
 `motion_tolerance`; or when the energy has fallen by at most `energy_tolerance · |E|` over the last
 `energy_window` steps; or when the cut has vanished (one region is empty). The reason is in the
-report. Defaults: 1000 steps, `10⁻⁵`, `10⁻⁴` over 25 steps (D9f). The second criterion is not in
+report. With `E_k` the energy of the state after `k` steps, `W` the window, `ε` the tolerance, and
+`k` the number of steps taken minus one (the state after the last step is evaluated when the run
+has ended), the energy criterion is (D27)
+
+```
+E_{k−W} − E_k >  ε |E_k|        the run goes on
+|E_{k−W} − E_k| ≤ ε |E_k|       EnergyStalled: the energy stood still; the run ends in its last state
+E_k − E_{k−W} >  ε |E_k|        EnergyRose: the steps are no descent steps any more; the run ends,
+                                and the flow is set back to the state of lowest energy of the run
+                                (its level-set functions, its time and its count of steps)
+```
+
+Every run reports the lowest energy among its states (the start state and the state after every
+step; the earliest of equal ones; a state without a cut does not count), the number of steps
+after which it was reached, the number of steps after which the flow was in the state it is left
+in, and the energy after the last step. Only `EnergyRose` sets the flow back: a run that ends for
+another reason stays in its last state, whose energy can exceed the lowest by what single steps
+raise it (§4, D22); a caller that takes few steps per run (fewer than `W`) is never set back and
+must compare the two numbers itself. `EnergyRose` is also what a run reports that only
+fluctuates at its noise floor, when the fluctuation over the window exceeds `ε |E|`; how far
+the last energy is above the lowest tells the two apart.
+
+Defaults: 1000 steps, `10⁻⁵`, `10⁻⁴` over 25 steps (D9f). The second criterion is not in
 the paper. It is needed: on an irregular mesh `s + λ⁰` has a noise floor of the size of the two
 terms that balance (the turning angles of a polyline through a triangle mesh, and `s` near
 vertices), the cut keeps moving by a few percent of an edge per step, and the motion never falls
@@ -1270,6 +1292,15 @@ region of every face.
   steps raise it by at most 2.2 %; the default stages reach `9.20·10⁻³`). A limit on the rate
   alone with a matching local factor in the length step was considered and rejected: one vertex
   serves several cut points, and no factor per vertex matches all of them.
+* **D27** The stop rule called a run stalled whenever the energy had "fallen by at most
+  `ε |E|`" over the window, which is also true when it rose: the run of D26 ended as stalled
+  with an energy 64 % above its lowest and 52 % above its start. Now a rise over the window by
+  more than the tolerance is its own stop reason (`EnergyRose`), the flow is set back to the
+  state of lowest energy of the run, and every run reports the lowest energy, its step, the
+  step of the state returned and the energy after the last step (§4). When a run stops is
+  unchanged. The flow is not set back for the other stop reasons: a caller that runs one step
+  at a time would otherwise be held at a state whose next step raises the energy, although the
+  steps after it lower it (single steps do raise it, D22).
 
 Add to this list whenever something else turns up; never drop an entry.
 
