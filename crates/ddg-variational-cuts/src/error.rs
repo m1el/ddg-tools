@@ -105,9 +105,9 @@ pub enum CutError {
         /// Its value.
         value: f64,
     },
-    /// Smoothing made the feature size of a vertex non-positive (possible only on meshes whose
-    /// cotan Laplacian has strongly positive off-diagonal entries), so `a = r³` is not a valid
-    /// weight.
+    /// The smoothed feature size of a vertex is not positive and finite, so `a = r³` is not a
+    /// valid weight. The smoothing keeps `r` within the range of the unsmoothed feature sizes
+    /// (SPEC D17), so this is reported only if rounding or overflow breaks that.
     NonPositiveFeatureSize {
         /// The vertex.
         vertex: u32,

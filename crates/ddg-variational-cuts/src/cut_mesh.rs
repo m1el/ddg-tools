@@ -487,31 +487,6 @@ impl CutTriangles {
         x: &[f64],
         y: &mut [f64],
     ) -> Result<(), CutError> {
-        self.apply(weight, x, y, false)
-    }
-
-    /// Computes `y = L⁺ x`, where `L⁺` is the cotan Laplacian of the cut mesh with every
-    /// negative corner cotangent replaced by zero: all edge weights are non-negative, so `L⁺`
-    /// is an M-matrix and a function that is `L⁺`-harmonic lies between the smallest and the
-    /// largest of its boundary values. The cotan Laplacian itself has no such property on the
-    /// obtuse triangles that cutting produces. The harmonic extension of the flow uses `L⁺`
-    /// (SPEC §3.8, D15).
-    ///
-    /// # Errors
-    /// [`CutError::WrongLength`] if `x` or `y` do not have [`CutTriangles::n_vertices`] entries.
-    ///
-    /// [formula: cut-harmonic-extension]
-    pub fn apply_monotone_laplacian(&self, x: &[f64], y: &mut [f64]) -> Result<(), CutError> {
-        self.apply(None, x, y, true)
-    }
-
-    fn apply(
-        &self,
-        weight: Option<&[f64]>,
-        x: &[f64],
-        y: &mut [f64],
-        monotone: bool,
-    ) -> Result<(), CutError> {
         let n = self.n_vertices();
         check_length("x", "cut-mesh vertices", x.len(), n)?;
         check_length("y", "cut-mesh vertices", y.len(), n)?;
@@ -527,8 +502,7 @@ impl CutTriangles {
             };
             // The edge opposite corner k joins corners k + 1 and k + 2.
             for (k, (i, j)) in [(i1, i2), (i2, i0), (i0, i1)].into_iter().enumerate() {
-                let c = if monotone { cot[k].max(0.0) } else { cot[k] };
-                let flow = scale * c * (x[i] - x[j]);
+                let flow = scale * cot[k] * (x[i] - x[j]);
                 y[i] += flow;
                 y[j] -= flow;
             }

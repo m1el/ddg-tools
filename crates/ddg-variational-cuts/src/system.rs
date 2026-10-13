@@ -203,17 +203,8 @@ impl LaplaceSystem {
     /// a triangle with an unknown that is not pinned (it is used for whole components).
     ///
     ///
-    /// With `monotone` every negative corner cotangent counts as zero: the matrix is then an
-    /// M-matrix (see [`CutTriangles::apply_monotone_laplacian`]).
-    ///
     /// [formula: cut-yamabe-system]
-    pub(crate) fn assemble(
-        &mut self,
-        mesh: &TriMesh,
-        tri: &CutTriangles,
-        pinned: &[bool],
-        monotone: bool,
-    ) {
+    pub(crate) fn assemble(&mut self, mesh: &TriMesh, tri: &CutTriangles, pinned: &[bool]) {
         self.factorized = false;
         let nv = tri.n_original;
         let unknown = |v: u32| -> u32 {
@@ -232,7 +223,7 @@ impl LaplaceSystem {
                 if ui == NONE && uj == NONE {
                     continue;
                 }
-                let w = 0.5 * if monotone { cot[k].max(0.0) } else { cot[k] };
+                let w = 0.5 * cot[k];
                 if ui != NONE {
                     values[self.diagonal_slot[ui as usize] as usize] += w;
                 }

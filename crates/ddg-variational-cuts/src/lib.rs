@@ -11,9 +11,11 @@
 //!
 //! # What is here
 //!
-//! The *static evaluation* of a cut (SPEC §2, §3.1–§3.7, §6, §7), for two regions described by
-//! one level-set function `φ` (region 0 where `φ ≤ 0`, region 1 where `φ > 0`). An
-//! [`Evaluator`] is built once per mesh and maps `φ` to an [`Evaluation`]:
+//! Two regions described by one level-set function `φ` (region 0 where `φ ≤ 0`, region 1 where
+//! `φ > 0`).
+//!
+//! **The static evaluation of a cut** (SPEC §2, §3.1–§3.7, §6, §7). An [`Evaluator`] is built
+//! once per mesh and maps `φ` to an [`Evaluation`]:
 //!
 //! 1. the cut `γ = {φ = 0}` as points on edges and segments across faces ([`Cut`]);
 //! 2. the cut mesh, in which every crossed face is split and the two sides of the cut are
@@ -27,8 +29,24 @@
 //! 5. the energy
 //!    `E = Σ_r [ w_r J_r + β_r Area_r ] + ∫_γ (α_L + η) ds` with all its terms.
 //!
-//! The flow that moves the cut (harmonic extension of `s`, the implicit length step,
-//! redistancing; SPEC §3.8–§3.12, §4) builds on this and is not part of this module set yet.
+//! **The flow** (SPEC §3.8–§3.12, §4, §5). A [`Flow`] owns an evaluator and the state `φ`;
+//! [`Flow::step`] takes one step and reports it, [`Flow::run`] steps until a [`StopRule`] says
+//! so. The problem ([`CutProblem`]: energy, `α_L`, `η`, `w_r`, `β_r`, curvature) and the options
+//! ([`FlowOptions`]: step size, symmetry classes, the choice of every stage) are arguments of
+//! each step, so all of them can change between steps. [`init`] has helpers for the initial
+//! cut and the visibility penalty of the paper, [`Cut::polylines`] returns the cut as ordered
+//! polylines.
+//!
+//! The default stages differ from the paper's in three places, each of which was forced by a law
+//! the flow must obey and is selectable back ([`FlowOptions::paper`]): the length term acts on
+//! the cut instead of on the mesh ([`LengthStep`], SPEC D14), the rate is extended from the cut
+//! outward instead of harmonically ([`Extension`], D15), and it is scaled by the mean slope of
+//! the level-set function at the cut ([`SpeedScaling`], D16).
+//!
+//! The distortion term roughens a cut and the length term smooths it; every step reports the
+//! rate `ω` that sets the scale of both ([`StepReport::roughening_rate`], SPEC D18), and
+//! [`length_weight_for_ripples`] and [`StepSize::Adaptive`] turn it into a length weight and a
+//! time step.
 //!
 //! # Example
 //!
@@ -63,6 +81,44 @@
 //! # }
 //! ```
 //!
+//! The flow, started from a geodesic disk:
+//!
+//! ```
+//! use ddg_core::generators::icosphere;
+//! use ddg_core::{Geometry, TriMesh};
+//! use ddg_variational_cuts::{
+//!     CutProblem, Energy, Flow, FlowOptions, StepSize, StopRule, init,
+//!     length_weight_for_ripples,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let sphere = icosphere(2)?;
+//! let mesh = TriMesh::new(sphere.positions.len(), sphere.faces.clone())?;
+//! let geometry = Geometry::from_positions(&mesh, &sphere.positions)?;
+//!
+//! // Region 0 is the disk of geodesic radius 1 around vertex 0 (lengths in the caller's unit).
+//! let phi0 = init::geodesic_circle(&mesh, &geometry, 0, 1.0)?;
+//! let mut flow = Flow::new(&mesh, &geometry, &phi0)?;
+//!
+//! // A length weight under which ripples of the cut shorter than 0.6 (a third of the equator
+//! // of the unit-area sphere) decay.
+//! let mut problem = CutProblem::new(Energy::Dirichlet, 0.0);
+//! let omega = flow.roughening_rate(&problem, &Default::default())?;
+//! problem.length_weight = length_weight_for_ripples(omega, 0.6);
+//!
+//! let options = FlowOptions::new(StepSize::default());
+//! let stop = StopRule { max_steps: 20, ..StopRule::default() };
+//! let report = flow.run(&problem, &options, &stop)?;
+//! assert!(report.final_energy.total < report.steps[0].energy.total);
+//!
+//! // The state is the level-set function; the cut is one closed polyline.
+//! let cut = flow.evaluate(&problem, &options.eval)?.cut;
+//! assert_eq!(cut.polylines(&mesh, &sphere.positions)?.len(), 1);
+//! assert_eq!(flow.level_set().len(), mesh.n_vertices());
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Conventions
 //!
 //! * **Unit area.** The method runs on the surface scaled to unit total area
@@ -92,6 +148,7 @@ mod cut_mesh;
 mod error;
 mod evaluate;
 mod flow;
+pub mod init;
 mod problem;
 mod recovery;
 mod system;
@@ -100,7 +157,7 @@ pub use ddg_core::sparse::{Parallelism, ThreadPool};
 pub use ddg_core::topology::NONE;
 
 pub use curvature::{face_curvature_sum_residual, face_curvatures};
-pub use cut::{Cut, CutPoint, CutSegment, edge_crossing, region_of};
+pub use cut::{Cut, CutPoint, CutPolyline, CutSegment, edge_crossing, region_of};
 pub use cut_mesh::{
     CutMesh, CutTriangles, CutVertex, EdgeKind, aspect_ratio, barycentric_dot, subtriangle_area,
 };
@@ -113,7 +170,7 @@ pub use evaluate::{
 pub use flow::{
     Extension, Flow, FlowOptions, GradientNorm, LengthStep, PenaltyRule, Redistance, RunReport,
     SpeedScaling, StepReport, StepSize, StepStages, StepTimings, StopReason, StopRule,
-    explicit_step, symmetry_projection,
+    explicit_step, length_weight_for_ripples, symmetry_projection,
 };
 pub use problem::{
     CurvatureSource, CutProblem, Energy, EvalOptions, FluxRecovery, PAPER_FEATURE_SMOOTHING,

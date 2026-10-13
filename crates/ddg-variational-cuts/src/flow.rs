@@ -9,10 +9,11 @@ use ddg_core::distance::upwind_distance;
 use ddg_core::sparse::{Method, Parallelism, Symbolic};
 use ddg_core::{Geometry, SparseMatrix, TriMesh};
 
-use crate::cut::region_of;
+use crate::cut::{Cut, region_of};
+use crate::cut_mesh::CutTriangles;
 use crate::error::CutError;
 use crate::evaluate::{EnergyTerms, Evaluation, Evaluator};
-use crate::problem::{CutProblem, EvalOptions, UnitAreaScale, check_length};
+use crate::problem::{CutProblem, Energy, EvalOptions, UnitAreaScale, check_length};
 use crate::system::LaplaceSystem;
 
 /// How the time step `τ` of a flow step is chosen (SPEC §4).
@@ -20,35 +21,80 @@ use crate::system::LaplaceSystem;
 pub enum StepSize {
     /// The same `τ > 0` in every step, as in the paper (Sec. 6).
     Fixed(f64),
-    /// `τ = min(tau_max, max_motion · h / max_c |s_c|)` with `h` the shortest crossed edge: the
-    /// distortion term moves the cut by at most the fraction `max_motion` of that edge per step
-    /// (the paper's remark in Sec. 7.4). If the speed vanishes, `τ = tau_max`.
+    /// `τ = min(tau_max, max_motion · h / max_c |ρ_c|)` with `h` the shortest crossed edge and
+    /// `ρ` the speed of the cut that is known before the step: the cut moves by at most the
+    /// fraction `max_motion` of that edge per step (the paper's remark in Sec. 7.4). With
+    /// [`LengthStep::OnCut`] `ρ = s + λ⁰`, distortion and length together; with
+    /// [`LengthStep::OnMesh`] the length term never passes through the cut points and
+    /// `ρ = s`. If the speed vanishes, `τ = tau_max`.
     Capped {
         /// The largest step, `> 0`.
         tau_max: f64,
-        /// The largest motion by the distortion term, as a fraction of the shortest crossed
-        /// edge, `> 0`.
+        /// The largest motion of the cut in a step, as a fraction of the shortest crossed edge,
+        /// `> 0`.
         max_motion: f64,
+    },
+    /// `τ = min(tau_max, time_scale / ω, max_motion · h / max_c |ρ_c|)`: [`StepSize::Capped`]
+    /// with a largest step that follows the state. `ω` is the roughening rate of the state
+    /// ([`StepReport::roughening_rate`]), which has the unit of a speed: a cut of the size of
+    /// the surface (length 1 on the unit-area surface) reacts to a displacement at rates of
+    /// the order `ω` (on the sphere of unit area, without a length weight, the equator returns
+    /// at the rate `ω/R = 3.5 ω` and a ripple with `m` periods grows at the rate
+    /// `3.5 (m − 1) ω`), and the distortion term is explicit. Unlike a fixed `tau_max` this does not depend on the
+    /// energy or on the scale of its weights. The default (SPEC §4, D9f).
+    Adaptive {
+        /// The step in units of `1/ω`, `> 0`.
+        time_scale: f64,
+        /// The largest motion of the cut in a step, as a fraction of the shortest crossed edge,
+        /// `> 0`.
+        max_motion: f64,
+        /// The largest step, `> 0`; it acts where `ω` and the speed vanish.
+        tau_max: f64,
     },
 }
 
+impl Default for StepSize {
+    /// `Adaptive { time_scale: 0.05, max_motion: 0.25, tau_max: 1 }` (SPEC §4, D9f).
+    fn default() -> Self {
+        StepSize::Adaptive {
+            time_scale: 0.05,
+            max_motion: 0.25,
+            tau_max: 1.0,
+        }
+    }
+}
+
 impl StepSize {
-    /// The step for the speeds `speed` on the cut and the shortest crossed edge `h`.
+    /// The step for the speeds `speed` on the cut, the shortest crossed edge `h` and the
+    /// roughening rate `ω` of the state ([`StepReport::roughening_rate`]).
     ///
     /// [formula: cut-step-cap]
-    pub fn step(&self, speed: &[f64], shortest_crossed_edge: f64) -> f64 {
+    pub fn step(&self, speed: &[f64], shortest_crossed_edge: f64, roughening_rate: f64) -> f64 {
+        let fastest = speed.iter().fold(0.0f64, |m, s| m.max(s.abs()));
+        let by_motion = |max_motion: f64| {
+            if fastest > 0.0 {
+                max_motion * shortest_crossed_edge / fastest
+            } else {
+                f64::INFINITY
+            }
+        };
         match *self {
             StepSize::Fixed(tau) => tau,
             StepSize::Capped {
                 tau_max,
                 max_motion,
+            } => tau_max.min(by_motion(max_motion)),
+            StepSize::Adaptive {
+                time_scale,
+                max_motion,
+                tau_max,
             } => {
-                let fastest = speed.iter().fold(0.0f64, |m, s| m.max(s.abs()));
-                if fastest > 0.0 {
-                    tau_max.min(max_motion * shortest_crossed_edge / fastest)
+                let by_rate = if roughening_rate > 0.0 {
+                    time_scale / roughening_rate
                 } else {
-                    tau_max
-                }
+                    f64::INFINITY
+                };
+                tau_max.min(by_rate).min(by_motion(max_motion))
             }
         }
     }
@@ -88,28 +134,39 @@ pub enum LengthStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeedScaling {
     /// `φ_t = s` on the cut, as in the paper (Eq. 21): exact while `|∇φ| = 1` there.
-    #[default]
     Unit,
-    /// `φ_t = s · |∇φ|` on the cut, the level-set equation for a function that is not a signed
-    /// distance: the cut moves with the normal speed `−s` whatever `|∇φ|` is.
-    GradientNorm,
+    /// `φ_t = s · ḡ` on the cut, with `ḡ` the mean of `|∇φ|` over the connected piece of the
+    /// cut: the level-set equation for a function whose slope across the cut is not 1. The
+    /// default (SPEC D16): vertices that became cut-adjacent in the last step carry first-order
+    /// distances, so `|∇φ|` in crossed faces is a few percent below 1 and the cut would run
+    /// that much too fast. The mean, not the local value, is used: multiplying by the local
+    /// `|∇φ|` feeds a deviation of one vertex back into its own rate and is unstable for large
+    /// steps.
+    #[default]
+    MeanGradient,
 }
 
-/// The matrix of the harmonic extension of the rate on the cut (SPEC §3.8, D15).
+/// How the rate on the cut is extended to the vertices of the mesh (SPEC §3.8, D15).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Extension {
-    /// The cotan Laplacian of the cut mesh with negative corner cotangents replaced by zero: an
-    /// M-matrix, so the extension stays within the range of the rates on the cut. The default.
-    /// It needs a numeric factorization of its own in every step.
+    /// From the cut outward. A cut-adjacent vertex takes the mean of the rates at the cut points
+    /// on its own crossed edges, each weighted by its dual length on the cut times the
+    /// barycentric weight of the vertex at the cut point; every other vertex takes the mean,
+    /// weighted by inverse edge length, of its neighbours in the same region that are one ring
+    /// closer to the cut. No linear system. The values lie between the smallest and the largest
+    /// rate, and the weights at the cut are the transpose of the interpolation from the
+    /// vertices back to the cut points, so the mean displacement of the cut is the mean of the
+    /// rates. The default.
     #[default]
-    Monotone,
-    /// The cotan Laplacian of the cut mesh, as in the paper (Sec. 5.3.1). On a closed mesh this
-    /// is the matrix the evaluation factorized, so the extension costs two triangular solves.
-    /// On the obtuse triangles that cutting produces its weights are negative, and the
-    /// extension at the vertices next to the cut can lie far outside the range of the rates
-    /// (measured: a tenth and three times the neighbouring values on the two sides of one
-    /// edge), which drives the level-set function away from a distance function.
-    Cotan,
+    Local,
+    /// The harmonic extension with the cotan Laplacian of the cut mesh, as in the paper
+    /// (Sec. 5.3.1): `L_OO σ_O = −L_OC s_C`. On a closed mesh the matrix is the one the
+    /// evaluation factorized. The triangles that cutting produces are arbitrarily thin, and
+    /// through them the value at a cut-adjacent vertex is governed by cotangent weights that
+    /// have nothing to do with which cut points are near it (measured: a vertex whose own
+    /// crossings have the rates `+4`, `+16`, `+6` receives `−4`); the two ends of a crossed
+    /// edge are then pushed apart and the level-set function stops being a distance.
+    Harmonic,
 }
 
 /// What the redistancing does with the cut-adjacent vertices (SPEC §3.12).
@@ -140,7 +197,7 @@ pub struct FlowOptions<'a> {
     pub symmetry: Option<Vec<u32>>,
     /// How the speed becomes a rate of change of the level-set function.
     pub speed_scaling: SpeedScaling,
-    /// The matrix of the harmonic extension. Default: the monotone one.
+    /// How the rate on the cut is extended to the vertices. Default: by distance.
     pub extension: Extension,
     /// The redistancing.
     pub redistance: Redistance,
@@ -161,6 +218,23 @@ impl FlowOptions<'_> {
         }
     }
 
+    /// The stages of the paper as printed, with the given step size: nodal normal derivative
+    /// with one pass of sliver smoothing ([`EvalOptions::paper`]), harmonic extension, `φ_t = s`,
+    /// the length step on the mesh. The penalty rule stays the gradient rule; set
+    /// [`PenaltyRule::PaperDiagonal`] for the paper's.
+    pub fn paper(step_size: StepSize) -> Self {
+        FlowOptions {
+            eval: EvalOptions::paper(),
+            step_size,
+            length_step: LengthStep::OnMesh,
+            penalty_rule: PenaltyRule::default(),
+            symmetry: None,
+            speed_scaling: SpeedScaling::Unit,
+            extension: Extension::Harmonic,
+            redistance: Redistance::KeepAdjacent,
+        }
+    }
+
     fn validate(&self, n_vertices: usize) -> Result<(), CutError> {
         let positive = |x: f64| x.is_finite() && x > 0.0;
         match self.step_size {
@@ -176,6 +250,18 @@ impl FlowOptions<'_> {
                      {max_motion}"
                 ),
             }),
+            StepSize::Adaptive {
+                time_scale,
+                max_motion,
+                tau_max,
+            } if !(positive(time_scale) && positive(max_motion) && positive(tau_max)) => {
+                Err(CutError::InvalidOptions {
+                    reason: format!(
+                        "time_scale, max_motion and tau_max must be positive and finite, got \
+                         {time_scale}, {max_motion} and {tau_max}"
+                    ),
+                })
+            }
             _ => Ok(()),
         }?;
         if let Some(classes) = &self.symmetry {
@@ -193,6 +279,28 @@ pub struct StopRule {
     /// Stop when the cut motion of a step ([`StepReport::cut_motion`], a length on the
     /// unit-area surface) is at most this. `0.0` never stops for this reason.
     pub motion_tolerance: f64,
+    /// Stop when the energy has not fallen by more than this fraction of its size over the
+    /// last `energy_window` steps: `E_{k − window} − E_k ≤ energy_tolerance · |E_k|`. On an
+    /// irregular mesh the rate of the cut has a noise floor of the size of the speeds that
+    /// balance each other, the cut keeps moving by a fraction of an edge per step, and the
+    /// motion never falls below a small tolerance; the energy then stands still. `0.0` never
+    /// stops for this reason.
+    pub energy_tolerance: f64,
+    /// The number of steps the energy is compared over, `≥ 1`.
+    pub energy_window: usize,
+}
+
+impl Default for StopRule {
+    /// At most 1000 steps; stop when the cut moves by at most `10⁻⁵` in a step, or when the
+    /// energy has fallen by less than `10⁻⁴` of its size over 25 steps (SPEC §4, D9f).
+    fn default() -> Self {
+        StopRule {
+            max_steps: 1000,
+            motion_tolerance: 1e-5,
+            energy_tolerance: 1e-4,
+            energy_window: 25,
+        }
+    }
 }
 
 /// Why [`Flow::run`] stopped.
@@ -202,6 +310,8 @@ pub enum StopReason {
     MaxSteps,
     /// The cut motion of the last step was within the tolerance.
     Converged,
+    /// The energy stood still over the window of the stop rule.
+    EnergyStalled,
     /// One region is empty: there is no cut left.
     CutVanished,
 }
@@ -242,9 +352,17 @@ pub struct StepReport {
     pub energy: EnergyTerms,
     /// The largest `|s_c|` on the cut of the state the step started from.
     pub max_speed: f64,
-    /// The largest `|λ_c|`, the implicit length speed on the cut ([`LengthStep::OnCut`]; 0 for
-    /// [`LengthStep::OnMesh`], where the length term does not pass through the cut points).
+    /// The largest `|λ⁰_c|`, the length force per unit length of the cut ([`LengthStep::OnCut`];
+    /// 0 for [`LengthStep::OnMesh`], where the length term does not pass through the cut
+    /// points).
     pub max_length_speed: f64,
+    /// `ω = 2 · max_c Σ_r Q_r,c`, with `Q_r = G_r − β_r − w_r b(0)` the part of the gradient
+    /// density that is quadratic in the normal derivatives (`w_r (∂u/∂n)²` for the Dirichlet
+    /// energy). The distortion term amplifies a ripple of the cut of wavenumber `k` at the rate
+    /// `ω k`, the length term damps it at the rate `(α_L + η) k²` (SPEC §4, D18): ripples longer
+    /// than `2π (α_L + η)/ω` grow. If that length is below a few mesh edges, the flow amplifies
+    /// the noise of the mesh; with `α_L + η = 0` it does so at every scale.
+    pub roughening_rate: f64,
     /// The largest `|φ_new − φ_old|` over the vertices that are cut-adjacent before or after
     /// the step: how far the cut moved.
     pub cut_motion: f64,
@@ -277,11 +395,18 @@ pub struct StepReport {
 /// what the stages of SPEC §4 produced. For tests and for comparing implementations.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StepStages {
+    /// `λ⁰` at every cut point: the length force per unit length of the cut
+    /// ([`LengthStep::OnCut`]; empty otherwise).
+    pub length_speed: Vec<f64>,
+    /// The rate at every cut point that was extended: `s` (with [`LengthStep::OnCut`] the rate
+    /// `r` that is implicit in the length force), times the mean `|∇φ|` with
+    /// [`SpeedScaling::MeanGradient`].
+    pub rate: Vec<f64>,
     /// `σ`, the extension of the rate on the cut (stage 4).
     pub extension: Vec<f64>,
     /// `φ̃ = φ + τ σ` (stage 5).
     pub explicit: Vec<f64>,
-    /// `φ′` after the length step on the mesh (stage 6; equal to `explicit` if there is none).
+    /// `φ′` after the length step (stage 6; equal to `explicit` if there is none).
     pub length: Vec<f64>,
     /// After the first symmetry projection (equal to `length` without symmetry classes).
     pub symmetric: Vec<f64>,
@@ -323,10 +448,14 @@ pub struct Flow {
     phi: Vec<f64>,
     time: f64,
     n_steps: usize,
-    /// The Laplacian of the cut mesh on all vertices, for the extension. On a closed mesh it
-    /// shares the pattern (and the symbolic analysis) of the evaluator's system, and with
-    /// [`Extension::Cotan`] that system's factorization is used instead.
+    /// The Laplacian of the cut mesh on all vertices, for the harmonic extension on a mesh with
+    /// boundary. On a closed mesh the system of the evaluator is that matrix, and this one only
+    /// carries the pattern (shared symbolic analysis) for the length step.
     extension: LaplaceSystem,
+    /// For every vertex, where its neighbours start in `neighbours`.
+    neighbour_start: Vec<u32>,
+    /// The neighbours of every vertex with the edge that leads to them.
+    neighbours: Vec<(u32, u32)>,
     /// Whether the mesh has no boundary.
     closed: bool,
     /// The matrix of the implicit step; it shares the symbolic analysis of the pattern on all
@@ -360,6 +489,24 @@ impl Flow {
             LaplaceSystem::new(mesh, |_| true)?
         };
         let length = extension.clone_pattern();
+        // Vertex adjacency in compressed form.
+        let nv = mesh.n_vertices();
+        let mut neighbour_start = vec![0u32; nv + 1];
+        for &[a, b] in mesh.edges() {
+            neighbour_start[a as usize + 1] += 1;
+            neighbour_start[b as usize + 1] += 1;
+        }
+        for v in 0..nv {
+            neighbour_start[v + 1] += neighbour_start[v];
+        }
+        let mut next = neighbour_start.clone();
+        let mut neighbours = vec![(0u32, 0u32); 2 * mesh.n_edges()];
+        for (e, &[a, b]) in mesh.edges().iter().enumerate() {
+            for (from, to) in [(a, b), (b, a)] {
+                neighbours[next[from as usize] as usize] = (to, e as u32);
+                next[from as usize] += 1;
+            }
+        }
         let mut flow = Flow {
             evaluator,
             geometry: scaled,
@@ -367,6 +514,8 @@ impl Flow {
             time: 0.0,
             n_steps: 0,
             extension,
+            neighbour_start,
+            neighbours,
             closed,
             length,
             length_key: None,
@@ -457,6 +606,21 @@ impl Flow {
         self.evaluator.evaluate(&self.phi, problem, options)
     }
 
+    /// The roughening rate `ω` of the current state ([`StepReport::roughening_rate`]), without
+    /// taking a step: the scale for the length weight ([`length_weight_for_ripples`]) and for
+    /// the time step ([`StepSize::Adaptive`]). `0` if there is no cut.
+    ///
+    /// # Errors
+    /// As [`Evaluator::evaluate`].
+    pub fn roughening_rate(
+        &mut self,
+        problem: &CutProblem,
+        options: &EvalOptions<'_>,
+    ) -> Result<f64, CutError> {
+        let e = self.evaluator.evaluate(&self.phi, problem, options)?;
+        Ok(roughening_rate(&e, problem))
+    }
+
     /// Makes the current level-set function a signed distance to its own cut, by the
     /// redistancing of SPEC §3.12 (cut-adjacent vertices keep their values). Returns the number
     /// of vertices no front reached.
@@ -524,6 +688,7 @@ impl Flow {
             energy: e.energy.clone(),
             max_speed,
             max_length_speed: 0.0,
+            roughening_rate: 0.0,
             cut_motion: 0.0,
             gradient_norm: None,
             n_cut_points: e.cut.points.len(),
@@ -539,54 +704,64 @@ impl Flow {
         if report.cut_vanished {
             return Ok(report);
         }
-        let (gradient_norm, gradient_at_point) = gradient_norms(&e, &self.phi);
+        let (gradient_norm, mean_gradient) = gradient_norms(&e.cut, &e.triangles, &self.phi);
         report.gradient_norm = Some(gradient_norm);
+        report.roughening_rate = roughening_rate(&e, problem);
         let shortest = e
             .cut
             .points
             .iter()
             .map(|p| self.geometry.edge_lengths()[p.edge as usize])
             .fold(f64::INFINITY, f64::min);
-        let tau = options.step_size.step(&e.speed, shortest);
-        report.tau = tau;
-
-        // The length term on the cut (SPEC §3.10): an implicit speed λ next to s.
+        // Stage 6 on the cut (SPEC §3.10): the length force, the step, and the rate that is
+        // implicit in the length force.
         let start = Instant::now();
         let weights = length_weights(problem, nv);
         let active = weights.iter().any(|w| *w != 0.0);
-        let mut lambda = vec![0.0; e.speed.len()];
+        let mut rate = e.speed.clone();
+        let mut tau = options
+            .step_size
+            .step(&e.speed, shortest, report.roughening_rate);
         if active && options.length_step == LengthStep::OnCut {
             let smoothing_length = match options.eval.flux_recovery {
                 crate::problem::FluxRecovery::Smoothed { length } => length,
                 crate::problem::FluxRecovery::Nodal => 0.0,
             };
-            let (solution, residual) = length_speed_on_cut(
+            let on_cut = rate_on_cut(
                 self.evaluator.mesh(),
                 self.evaluator.base(),
-                &e,
+                &e.cut,
+                &e.triangles,
+                &e.speed,
                 &weights,
                 options.penalty_rule,
                 smoothing_length,
-                tau,
+                &options.step_size,
+                shortest,
+                report.roughening_rate,
                 par,
             )?;
-            lambda = solution;
-            report.length_residual = Some(residual);
-            report.max_length_speed = lambda.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+            tau = on_cut.tau;
+            report.length_residual = Some(on_cut.residual);
+            report.max_length_speed = on_cut
+                .length_speed
+                .iter()
+                .fold(0.0f64, |m, x| m.max(x.abs()));
+            rate = on_cut.rate;
+            if let Some(stages) = stages.as_deref_mut() {
+                stages.length_speed = on_cut.length_speed;
+            }
         }
+        report.tau = tau;
         report.timings.length = start.elapsed().as_secs_f64();
 
-        // Stage 4: σ, the harmonic extension of the rate on the cut.
+        // Stage 4: σ, the extension of the rate on the cut.
         let start = Instant::now();
-        let rate: Vec<f64> = (0..e.speed.len())
-            .map(|k| {
-                let total = e.speed[k] + lambda[k];
-                match options.speed_scaling {
-                    SpeedScaling::Unit => total,
-                    SpeedScaling::GradientNorm => total * gradient_at_point[k],
-                }
-            })
-            .collect();
+        if options.speed_scaling == SpeedScaling::MeanGradient {
+            for (r, g) in rate.iter_mut().zip(&mean_gradient) {
+                *r *= g;
+            }
+        }
         let (sigma, residual) = self.extend(&e, &rate, options.extension, par)?;
         report.extension_residual = residual;
         report.timings.extension = start.elapsed().as_secs_f64();
@@ -600,11 +775,12 @@ impl Flow {
             .collect();
 
         if let Some(stages) = stages.as_deref_mut() {
+            stages.rate = rate;
             stages.extension = sigma;
             stages.explicit = phi.clone();
         }
 
-        // Stage 6: the implicit step on the mesh (the paper's), then the symmetry projection.
+        // Stage 6 on the mesh (the paper's), then the symmetry projection.
         let start = Instant::now();
         if active && options.length_step == LengthStep::OnMesh {
             let (residual, factorized) =
@@ -686,6 +862,14 @@ impl Flow {
             if motion <= stop.motion_tolerance {
                 break StopReason::Converged;
             }
+            let window = stop.energy_window.max(1);
+            if stop.energy_tolerance > 0.0 && steps.len() > window {
+                let now = steps[steps.len() - 1].energy.total;
+                let before = steps[steps.len() - 1 - window].energy.total;
+                if before - now <= stop.energy_tolerance * now.abs() {
+                    break StopReason::EnergyStalled;
+                }
+            }
         };
         let final_energy = self.evaluate(problem, &options.eval)?.energy;
         Ok(RunReport {
@@ -695,31 +879,114 @@ impl Flow {
         })
     }
 
-    /// The harmonic extension of the rate `rate` on the cut points to every vertex of the mesh
-    /// (SPEC §3.8): in each region `L_OO σ_O = −L_OC s_C`, with all vertices of the mesh unknown
-    /// (zero flux through `∂M`) and `σ = 0` in a component without cut vertices. `L` is the
-    /// cotan Laplacian of the cut mesh, or its monotone variant. Returns `σ` and the residual of
-    /// the solve.
-    ///
-    /// [formula: cut-harmonic-extension]
+    /// The extension of the rate `rate` on the cut points to every vertex of the mesh
+    /// (SPEC §3.8), and the residual of the solve (0 if there is none).
     fn extend(
         &mut self,
         e: &Evaluation,
         rate: &[f64],
-        matrix: Extension,
+        rule: Extension,
+        par: Parallelism<'_>,
+    ) -> Result<(Vec<f64>, f64), CutError> {
+        match rule {
+            Extension::Local => Ok((self.extend_from_cut(&e.cut, &e.triangles, rate), 0.0)),
+            Extension::Harmonic => self.extend_harmonically(e, rate, par),
+        }
+    }
+
+    /// [`Extension::Local`]: with `r_p` the rate at cut point `p`, `ℓ_p` its dual length on the
+    /// cut (half the lengths of its segments) and `β_ip` the barycentric weight of the
+    /// cut-adjacent vertex `i` at `p` (`1 − t` or `t` on the edge of `p`),
+    ///
+    /// ```text
+    /// σ_i = Σ_p ℓ_p β_ip r_p / Σ_p ℓ_p β_ip               over the crossed edges at i
+    /// σ_i = Σ_j (σ_j / ℓ_ij) / Σ_j (1 / ℓ_ij)              over the neighbours j of i in its region
+    ///                                                      that are one ring closer to the cut
+    /// ```
+    ///
+    /// where the ring of a vertex is the number of uncrossed edges on the shortest path from it
+    /// to a cut-adjacent vertex of its region. A vertex that no such path reaches gets `σ = 0`.
+    ///
+    /// The first line is the transpose of the interpolation `Σ_i β_ip σ_i` that the explicit
+    /// step applies at the cut points, normalized: `Σ_p ℓ_p Σ_i β_ip σ_i = Σ_p ℓ_p r_p`, the
+    /// mean rate is kept.
+    ///
+    /// [formula: cut-extension-local]
+    fn extend_from_cut(&self, cut: &Cut, tri: &CutTriangles, rate: &[f64]) -> Vec<f64> {
+        let mesh = self.evaluator.mesh();
+        let lengths = self.geometry.edge_lengths();
+        let region = &cut.vertex_region;
+        let nv = region.len();
+        let mut dual = vec![0.0; rate.len()];
+        for (segment, length) in cut.segments.iter().zip(&tri.segment_length) {
+            for p in segment.points {
+                dual[p as usize] += 0.5 * length;
+            }
+        }
+        let (mut sum, mut weight) = (vec![0.0; nv], vec![0.0; nv]);
+        for (k, point) in cut.points.iter().enumerate() {
+            let [a, b] = mesh.edge_vertices(point.edge as usize);
+            for (v, barycentric) in [(a, 1.0 - point.t), (b, point.t)] {
+                sum[v] += dual[k] * barycentric * rate[k];
+                weight[v] += dual[k] * barycentric;
+            }
+        }
+        const UNSEEN: u32 = u32::MAX;
+        let mut ring = vec![UNSEEN; nv];
+        let mut sigma = vec![0.0; nv];
+        let mut front: Vec<u32> = Vec::new();
+        for v in 0..nv {
+            if weight[v] > 0.0 {
+                sigma[v] = sum[v] / weight[v];
+                ring[v] = 0;
+                front.push(v as u32);
+            }
+        }
+        let mut k = 0;
+        while !front.is_empty() {
+            k += 1;
+            let mut next: Vec<u32> = Vec::new();
+            for &v in &front {
+                let range = self.neighbour_start[v as usize] as usize
+                    ..self.neighbour_start[v as usize + 1] as usize;
+                for &(u, _) in &self.neighbours[range] {
+                    if ring[u as usize] == UNSEEN && region[u as usize] == region[v as usize] {
+                        ring[u as usize] = k;
+                        next.push(u);
+                    }
+                }
+            }
+            for &u in &next {
+                let range = self.neighbour_start[u as usize] as usize
+                    ..self.neighbour_start[u as usize + 1] as usize;
+                let (mut sum, mut weight) = (0.0, 0.0);
+                for &(j, edge) in &self.neighbours[range] {
+                    if ring[j as usize] == k - 1 && region[j as usize] == region[u as usize] {
+                        sum += sigma[j as usize] / lengths[edge as usize];
+                        weight += 1.0 / lengths[edge as usize];
+                    }
+                }
+                sigma[u as usize] = sum / weight;
+            }
+            front = next;
+        }
+        sigma
+    }
+
+    /// [`Extension::Harmonic`]: in each region `L_OO σ_O = −L_OC s_C` with the cotan Laplacian
+    /// of the cut mesh, all vertices of the mesh unknown (zero flux through `∂M`) and `σ = 0`
+    /// in a component without cut vertices. Returns `σ` and the residual of the solve.
+    ///
+    /// [formula: cut-harmonic-extension]
+    fn extend_harmonically(
+        &mut self,
+        e: &Evaluation,
+        rate: &[f64],
         par: Parallelism<'_>,
     ) -> Result<(Vec<f64>, f64), CutError> {
         let tri = &e.triangles;
         let nv = tri.n_original;
         let n = tri.n_vertices();
-        let monotone = matrix == Extension::Monotone;
-        let apply = |x: &[f64], y: &mut [f64]| {
-            if monotone {
-                tri.apply_monotone_laplacian(x, y)
-            } else {
-                tri.apply_laplacian(None, x, y)
-            }
-        };
         let mut sigma = vec![0.0; n];
         for (k, &s) in rate.iter().enumerate() {
             for v in tri.point_vertices(k) {
@@ -728,7 +995,7 @@ impl Flow {
         }
         // (L x)_O for x = s on the cut vertices and 0 elsewhere is L_OC s_C.
         let mut product = vec![0.0; n];
-        apply(&sigma, &mut product)?;
+        tri.apply_laplacian(None, &sigma, &mut product)?;
         let rhs = |v: usize| -product[v];
         let largest = product[..nv].iter().fold(0.0f64, |m, x| m.max(x.abs()));
         let mesh = self.evaluator.mesh();
@@ -742,16 +1009,16 @@ impl Flow {
         } else {
             components_without_cut(mesh, &e.cut.vertex_region, &e.cut)
         };
-        if self.closed && !monotone {
+        if self.closed {
             // The matrix is the one the evaluation factorized, with identity rows for the
             // closed components without a cut.
             self.evaluator.system().solve(rhs, &mut sigma, par)?;
         } else {
-            self.extension.assemble(mesh, tri, &pinned, monotone);
+            self.extension.assemble(mesh, tri, &pinned);
             self.extension.factor(par)?;
             self.extension.solve(rhs, &mut sigma, par)?;
         }
-        apply(&sigma, &mut product)?;
+        tri.apply_laplacian(None, &sigma, &mut product)?;
         let worst = (0..nv)
             .filter(|&v| !pinned[v])
             .map(|v| product[v].abs())
@@ -852,51 +1119,87 @@ fn length_weights(problem: &CutProblem, n_vertices: usize) -> Vec<f64> {
     }
 }
 
-/// The implicit length speed `λ` at every cut point ([`LengthStep::OnCut`], SPEC §3.10), and
-/// the residual of its 1D system.
+/// What [`rate_on_cut`] returns.
+struct RateOnCut {
+    /// `λ⁰` at every cut point: the length force per unit length of the cut, recovered like the
+    /// normal derivative.
+    length_speed: Vec<f64>,
+    /// `r` at every cut point: the rate of change of the level-set function.
+    rate: Vec<f64>,
+    /// The step `τ`: the step size rule applied to `s + λ⁰`.
+    tau: f64,
+    /// The larger of the residuals of the two systems, each relative to the largest entry of
+    /// its right-hand side.
+    residual: f64,
+}
+
+/// The rate `r` of the level-set function at every cut point with the length terms taken on the
+/// cut ([`LengthStep::OnCut`], SPEC §3.10, D14).
 ///
-/// The cut is a polyline; the first variation of its weighted length `∫_γ w ds` under a normal
-/// displacement `δ` (positive out of the region with the lower id) is
-/// `∫_γ (∂w/∂n + w κ) δ ds` (SPEC §1), and on a polyline the curvature sits in the vertices:
+/// **Force.** The integrated length force at cut point `p`, for the vertex weight
+/// `w = α_L + η` interpolated to the cut, is
 ///
 /// ```text
-/// Θ_p = w_p · 2 sin(θ_p / 2)  +  Σ_{σ = pq at p} ½ |pq| (∂w/∂n)_σ
+/// Θ_p = w_p · θ_p  +  Σ_{σ = pq at p} ½ |pq| (∂w/∂n)_σ
 /// ```
 ///
 /// * `θ_p = π − β_p` is the turning angle of the cut at `p`, with `β_p` the interior angle of
 ///   the lower region at `p` (the sum of the corner angles of its triangles there; the two
 ///   faces at a crossed edge unfold into a plane). At a cut point on `∂M` the cut is reflected
 ///   in the boundary, which is the zero-flux condition of the paper's step:
-///   `θ_p = π − 2 β_p`, and half of the force acts.
+///   `θ_p = π − 2 β_p`, and half of it acts. The turning angle itself is used, not
+///   `2 sin(θ_p/2)`, the derivative of the length under a displacement along the bisector:
+///   the angles add up along the cut to the change of its direction whatever happens in
+///   between, so the force on a run of cut points crowded around a mesh vertex is the turning
+///   of the cut across the run, and the area enclosed by a closed cut on a flat surface
+///   shrinks at the exact rate `2π w`.
 /// * `(∂w/∂n)_σ` is the derivative of the linear `w` of the face of `σ` across the segment, out
 ///   of the lower region: with `a` the lone vertex of the face, `h_a` its height over `pq` and
 ///   `f` the foot of that height, `(w_f − w_a)/h_a`, negated if `a` is in the higher region.
 ///   The paper's penalty rule drops this term.
 ///
-/// `λ = Θ/ℓ` taken explicitly would restrict the step to the square of the shortest segment.
-/// It is made implicit along the cut, with the lumped mass `ℓ_p = ½ Σ |pq|` and the stiffness
-/// of the polyline (moving `p` out by `δ` relative to its neighbours turns the cut by
-/// `Σ (δ_p − δ_q)/|pq|` more):
+/// **Recovery.** `Θ_p/ℓ_p` with the dual length `ℓ_p = ½ Σ |pq|` is as unusable as `v_p/ℓ_p`
+/// is for the normal derivative (SPEC D12), for the same reason. The force per unit length
+/// `λ⁰` is recovered by the same system, with the same smoothing length `c`:
 ///
 /// ```text
-/// ℓ_p λ_p + τ Σ_{σ = pq at p} (w̄_σ / |pq|) (λ_p − λ_q) = Θ_p,      w̄_σ = ½ (w_p + w_q)
+/// ℓ_p λ⁰_p + Σ_{σ = pq at p} ((c h_σ)² / |pq|) (λ⁰_p − λ⁰_q) = Θ_p
 /// ```
 ///
-/// The matrix is symmetric positive definite, an M-matrix with row sums `ℓ_p`; `Σ ℓ_p λ_p =
-/// Σ Θ_p`, and a vertex is never moved beyond the chord of its neighbours, however large `τ`.
+/// **Rate.** Moving `p` out by `δ` relative to its neighbours turns the cut by
+/// `Σ (δ_p − δ_q)/|pq|` more, so after a step in which the function changes at the rate `r` on
+/// the cut, the force per unit length is `λ⁰ − τ ℓ⁻¹ S_w r` to first order, with the stiffness
+/// `S_w` of the polyline weighted by `w̄_σ = ½ (w_p + w_q)`. Taking the length force at the end
+/// of the step and the distortion speed `s` at its start, `r = s + λ⁰ − τ ℓ⁻¹ S_w r`:
+///
+/// ```text
+/// ℓ_p r_p + τ Σ_{σ = pq at p} (w̄_σ / |pq|) (r_p − r_q) = ℓ_p (s_p + λ⁰_p)
+/// ```
+///
+/// Both matrices are symmetric positive definite M-matrices with row sums `ℓ_p`, so
+/// `Σ ℓ_p λ⁰_p = Σ Θ_p`, `Σ ℓ_p r_p = Σ ℓ_p (s_p + λ⁰_p)`, and `r` lies between the smallest
+/// and the largest `s + λ⁰`. A cut on which `s + λ⁰ = 0` does not move, whatever `τ`.
+///
+/// **Step.** `τ` is the step size rule applied to `s + λ⁰`, which bounds `|r|`: with
+/// [`StepSize::Capped`] the cut moves by at most the given fraction of the shortest crossed
+/// edge, by distortion and length together.
 ///
 /// [formula: cut-length-step-on-cut]
-fn length_speed_on_cut(
+#[allow(clippy::too_many_arguments)]
+fn rate_on_cut(
     mesh: &TriMesh,
     base: &crate::cut_mesh::BaseGeometry,
-    e: &Evaluation,
+    cut: &Cut,
+    tri: &CutTriangles,
+    speed: &[f64],
     weights: &[f64],
     rule: PenaltyRule,
     smoothing_length: f64,
-    tau: f64,
+    step_size: &StepSize,
+    shortest_crossed_edge: f64,
+    roughening_rate: f64,
     par: Parallelism<'_>,
-) -> Result<(Vec<f64>, f64), CutError> {
-    let (cut, tri) = (&e.cut, &e.triangles);
+) -> Result<RateOnCut, CutError> {
     let nv = tri.n_original;
     let n = cut.points.len();
     let w_point = cut.interpolate(mesh, weights);
@@ -915,13 +1218,15 @@ fn length_speed_on_cut(
         let lower = tri.point_vertices_by_region(p)[0];
         let interior = angle[lower - nv];
         *value = if mesh.is_boundary_edge(cut.points[p].edge as usize) {
-            w_point[p] * (0.5 * std::f64::consts::PI - interior).sin()
+            w_point[p] * (0.5 * std::f64::consts::PI - interior)
         } else {
-            w_point[p] * 2.0 * (0.5 * (std::f64::consts::PI - interior)).sin()
+            w_point[p] * (std::f64::consts::PI - interior)
         };
     }
     let mut dual = vec![0.0; n];
-    let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(4 * n);
+    // Per segment: the stiffness of the recovery and that of the implicit step.
+    let mut recovery = Vec::with_capacity(cut.segments.len());
+    let mut implicit = Vec::with_capacity(cut.segments.len());
     for (i, segment) in cut.segments.iter().enumerate() {
         let t = tri.segment_triangle[i] as usize;
         let length = tri.segment_length[i];
@@ -946,46 +1251,66 @@ fn length_speed_on_cut(
         }
         dual[p] += 0.5 * length;
         dual[q] += 0.5 * length;
-        let stiffness = segment_stiffness(
-            base,
-            segment.face,
-            smoothing_length,
-            tau,
-            w_point[p],
-            w_point[q],
-        ) / length;
-        let (p, q) = (p as u32, q as u32);
-        triplets.push((p, p, stiffness));
-        triplets.push((q, q, stiffness));
-        triplets.push((p.max(q), p.min(q), -stiffness));
+        let len2 = base.len2[segment.face as usize];
+        let mean_squared_edge = (len2[0] + len2[1] + len2[2]) / 3.0;
+        recovery.push(smoothing_length * smoothing_length * mean_squared_edge / length);
+        implicit.push(0.5 * (w_point[p] + w_point[q]) / length);
     }
+    let (length_speed, first) = solve_on_cut(cut, &dual, &recovery, &force, par)?;
+    let explicit: Vec<f64> = (0..n).map(|p| speed[p] + length_speed[p]).collect();
+    let tau = step_size.step(&explicit, shortest_crossed_edge, roughening_rate);
+    for k in &mut implicit {
+        *k *= tau;
+    }
+    let rhs: Vec<f64> = (0..n).map(|p| dual[p] * explicit[p]).collect();
+    let (rate, second) = solve_on_cut(cut, &dual, &implicit, &rhs, par)?;
+    Ok(RateOnCut {
+        length_speed,
+        rate,
+        tau,
+        residual: first.max(second),
+    })
+}
+
+/// Solves `(diag(ℓ) + S) x = b` on the cut, with `S` the stiffness matrix of the polyline that
+/// has the stiffness `stiffness[σ]` on segment `σ`. Returns `x` and the largest entry of the
+/// residual relative to the largest entry of `b`.
+fn solve_on_cut(
+    cut: &Cut,
+    dual: &[f64],
+    stiffness: &[f64],
+    rhs: &[f64],
+    par: Parallelism<'_>,
+) -> Result<(Vec<f64>, f64), CutError> {
+    let n = dual.len();
+    if stiffness.iter().all(|k| *k == 0.0) {
+        return Ok((rhs.iter().zip(dual).map(|(b, l)| b / l).collect(), 0.0));
+    }
+    let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(n + 3 * stiffness.len());
     for (p, &l) in dual.iter().enumerate() {
         triplets.push((p as u32, p as u32, l));
     }
+    for (segment, &k) in cut.segments.iter().zip(stiffness) {
+        let [p, q] = segment.points;
+        triplets.push((p, p, k));
+        triplets.push((q, q, k));
+        triplets.push((p.max(q), p.min(q), -k));
+    }
     let matrix = SparseMatrix::from_triplets(n, n, &triplets)?;
     let factorization = Symbolic::analyze(&matrix, Method::Llt)?.factor(&matrix, par)?;
-    let mut lambda = force.clone();
-    factorization.solve_in_place(&mut lambda, par)?;
-    // Residual of the system, assembled again from the segments.
-    let mut residual: Vec<f64> = (0..n).map(|p| dual[p] * lambda[p] - force[p]).collect();
-    for (i, segment) in cut.segments.iter().enumerate() {
-        let [p, q] = segment.points.map(|x| x as usize);
-        let flow = segment_stiffness(
-            base,
-            segment.face,
-            smoothing_length,
-            tau,
-            w_point[p],
-            w_point[q],
-        ) / tri.segment_length[i]
-            * (lambda[p] - lambda[q]);
+    let mut x = rhs.to_vec();
+    factorization.solve_in_place(&mut x, par)?;
+    let mut residual: Vec<f64> = (0..n).map(|p| dual[p] * x[p] - rhs[p]).collect();
+    for (segment, &k) in cut.segments.iter().zip(stiffness) {
+        let [p, q] = segment.points.map(|v| v as usize);
+        let flow = k * (x[p] - x[q]);
         residual[p] += flow;
         residual[q] -= flow;
     }
-    let worst = residual.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-    let largest = force.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+    let worst = residual.iter().fold(0.0f64, |m, r| m.max(r.abs()));
+    let largest = rhs.iter().fold(0.0f64, |m, b| m.max(b.abs()));
     Ok((
-        lambda,
+        x,
         if largest > 0.0 {
             worst / largest
         } else {
@@ -994,21 +1319,38 @@ fn length_speed_on_cut(
     ))
 }
 
-/// `(c h_f)² + τ w̄`: the stiffness of a cut segment in the system of the length speed, times
-/// its length. `c` is the smoothing length of the flux recovery (SPEC §3.5), `h_f²` the mean
-/// squared edge length of the face of the segment, `w̄` the mean weight of its two ends.
-#[inline]
-fn segment_stiffness(
-    base: &crate::cut_mesh::BaseGeometry,
-    face: u32,
-    smoothing_length: f64,
-    tau: f64,
-    w_p: f64,
-    w_q: f64,
-) -> f64 {
-    let len2 = base.len2[face as usize];
-    let mean_squared_edge = (len2[0] + len2[1] + len2[2]) / 3.0;
-    smoothing_length * smoothing_length * mean_squared_edge + tau * 0.5 * (w_p + w_q)
+/// The length weight `α_L = ω ℓ / (2π)` at which ripples of the cut longer than `wavelength`
+/// (`ℓ`, a length on the unit-area surface) grow and shorter ones decay, for the roughening
+/// rate `ω` (SPEC §1, D18): a ripple of wavenumber `k` grows at the rate `ω k − α_L k²`.
+/// On the sphere the equator is stable from a third of its length on (`ℓ = 2πR/3`).
+///
+/// [formula: cut-roughening-rate]
+pub fn length_weight_for_ripples(roughening_rate: f64, wavelength: f64) -> f64 {
+    roughening_rate * wavelength / (2.0 * std::f64::consts::PI)
+}
+
+/// `ω = 2 · max_c Σ_r (G_r − β_r − w_r b(0))` over the cut points: see
+/// [`StepReport::roughening_rate`].
+///
+/// [formula: cut-roughening-rate]
+fn roughening_rate(e: &Evaluation, problem: &CutProblem) -> f64 {
+    let offset = |region: usize| {
+        let weights = problem.regions[region];
+        let at_zero = match &problem.energy {
+            Energy::Pointwise(b) => b.value(0.0),
+            _ => 0.0,
+        };
+        weights.area + weights.distortion * at_zero
+    };
+    let tri = &e.triangles;
+    (0..e.cut.points.len())
+        .map(|p| {
+            tri.point_vertices(p)
+                .iter()
+                .map(|&v| e.gradient[v] - offset(tri.vertex_region[v] as usize))
+                .sum::<f64>()
+        })
+        .fold(0.0f64, |m, x| m.max(2.0 * x))
 }
 
 /// The explicit step `φ̃ = φ + τ σ` (SPEC §3.9).
@@ -1125,16 +1467,38 @@ fn components_without_cut(mesh: &TriMesh, region: &[u32], cut: &crate::cut::Cut)
 }
 
 /// `|∇φ|` of the linear interpolant of `phi` in every crossed face (its statistics, weighted by
-/// the lengths of the segments) and at every cut point (the length-weighted mean over its
-/// segments). In a face whose lone vertex `a` is cut off by the segment `pq`, the interpolant
-/// vanishes on the line `pq`, so `|∇φ| = |φ_a| / dist(a, pq) = |φ_a| · |pq| / (2 · area(a, p, q))`.
-fn gradient_norms(e: &Evaluation, phi: &[f64]) -> (GradientNorm, Vec<f64>) {
-    let tri = &e.triangles;
-    let n_points = e.cut.points.len();
+/// the lengths of the segments), and for every cut point the mean of `|∇φ|` over the connected
+/// piece of the cut it lies on. In a face whose lone vertex `a` is cut off by the segment `pq`,
+/// the interpolant vanishes on the line `pq`, so
+/// `|∇φ| = |φ_a| / dist(a, pq) = |φ_a| · |pq| / (2 · area(a, p, q))`. The mean over a piece is
+/// the harmonic one, `Σ |pq| / Σ (|pq| / |∇φ|)`: a rate `r · ḡ` of the function moves the
+/// segment by `r ḡ / |∇φ|` per unit time, and the mean of that over the piece is `r`.
+///
+/// [formula: cut-gradient-norm]
+fn gradient_norms(cut: &Cut, tri: &CutTriangles, phi: &[f64]) -> (GradientNorm, Vec<f64>) {
+    let n_points = cut.points.len();
+    // Connected pieces of the cut: union-find over the segments.
+    let mut parent: Vec<u32> = (0..n_points as u32).collect();
+    fn find(parent: &mut [u32], mut x: u32) -> u32 {
+        while parent[x as usize] != x {
+            parent[x as usize] = parent[parent[x as usize] as usize];
+            x = parent[x as usize];
+        }
+        x
+    }
+    for segment in &cut.segments {
+        let (a, b) = (
+            find(&mut parent, segment.points[0]),
+            find(&mut parent, segment.points[1]),
+        );
+        if a != b {
+            parent[a.max(b) as usize] = a.min(b);
+        }
+    }
     let (mut min, mut max, mut sum, mut total) = (f64::INFINITY, 0.0f64, 0.0, 0.0);
-    let mut at_point = vec![0.0; n_points];
-    let mut weight = vec![0.0; n_points];
-    for (i, segment) in e.cut.segments.iter().enumerate() {
+    let mut length_of = vec![0.0; n_points];
+    let mut time_of = vec![0.0; n_points];
+    for (i, segment) in cut.segments.iter().enumerate() {
         let t = tri.segment_triangle[i] as usize;
         let a = tri.faces[t][0] as usize;
         let length = tri.segment_length[i];
@@ -1143,20 +1507,27 @@ fn gradient_norms(e: &Evaluation, phi: &[f64]) -> (GradientNorm, Vec<f64>) {
         max = max.max(g);
         sum += g * length;
         total += length;
-        for p in segment.points {
-            at_point[p as usize] += g * length;
-            weight[p as usize] += length;
-        }
+        let root = find(&mut parent, segment.points[0]) as usize;
+        length_of[root] += length;
+        time_of[root] += length / g;
     }
-    for (g, w) in at_point.iter_mut().zip(&weight) {
-        *g = if *w > 0.0 { *g / w } else { 1.0 };
-    }
+    let mean_of_piece: Vec<f64> = (0..n_points as u32)
+        .map(|p| {
+            let root = find(&mut parent, p) as usize;
+            let mean = length_of[root] / time_of[root];
+            if mean.is_finite() && mean > 0.0 {
+                mean
+            } else {
+                1.0
+            }
+        })
+        .collect();
     (
         GradientNorm {
             min,
             max,
             mean: sum / total,
         },
-        at_point,
+        mean_of_piece,
     )
 }

@@ -175,7 +175,7 @@ fn paper_flow(case: &Case) -> FlowOptions<'static> {
         penalty_rule: case.penalty_rule,
         symmetry: case.classes.clone(),
         speed_scaling: SpeedScaling::Unit,
-        extension: Extension::Cotan,
+        extension: Extension::Harmonic,
         redistance: Redistance::KeepAdjacent,
     }
 }

@@ -408,7 +408,7 @@ impl Evaluator {
         }
 
         // §3.4: L_II u_I = −g_I, u_B = 0.
-        self.system.assemble(&self.mesh, &tri, &pinned, false);
+        self.system.assemble(&self.mesh, &tri, &pinned);
         self.system.factor(par)?;
         let mut log_scale = vec![0.0; n];
         self.system.solve(|v| -source[v], &mut log_scale, par)?;

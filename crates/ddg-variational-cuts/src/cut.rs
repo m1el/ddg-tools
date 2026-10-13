@@ -26,6 +26,18 @@ pub struct CutSegment {
     pub face: u32,
 }
 
+/// One connected piece of a cut, as returned by [`Cut::polylines`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutPolyline {
+    /// The cut points of the piece, in order (indices into [`Cut::points`]).
+    pub points: Vec<u32>,
+    /// Their positions in space.
+    pub positions: Vec<[f64; 3]>,
+    /// Whether the piece is closed (the last point is joined to the first). An open piece ends
+    /// on the boundary of the mesh at both ends.
+    pub closed: bool,
+}
+
 /// The cut `γ` of a level-set function: closed polylines, or polylines ending on the boundary of
 /// the mesh.
 ///
@@ -239,6 +251,67 @@ impl Cut {
                 [0, 1, 2].map(|k| (1.0 - point.t) * xa[k] + point.t * xb[k])
             })
             .collect())
+    }
+
+    /// The cut as polylines in space: every connected piece of the cut with its points in
+    /// order, and their positions `(1 − t)·x_a + t·x_b`.
+    ///
+    /// A piece is either closed or ends on the boundary of the mesh at both ends. The order is
+    /// fixed by the numbering of the cut points: the open pieces come first, in the order of
+    /// their lower-numbered end, and start there; then the closed pieces, in the order of their
+    /// lowest-numbered point, starting there and going on to the lower-numbered of its two
+    /// neighbours. A closed piece does not repeat its first point at the end.
+    ///
+    /// # Errors
+    /// As [`Cut::point_positions`].
+    pub fn polylines(
+        &self,
+        mesh: &TriMesh,
+        positions: &[[f64; 3]],
+    ) -> Result<Vec<CutPolyline>, CutError> {
+        let at = self.point_positions(mesh, positions)?;
+        let n = self.points.len();
+        // Every cut point lies on one or two segments.
+        let mut neighbours = vec![[NONE; 2]; n];
+        for segment in &self.segments {
+            let [p, q] = segment.points;
+            for (a, b) in [(p, q), (q, p)] {
+                let slot = usize::from(neighbours[a as usize][0] != NONE);
+                neighbours[a as usize][slot] = b;
+            }
+        }
+        let mut visited = vec![false; n];
+        let mut out = Vec::new();
+        let walk = |start: usize, first: u32, visited: &mut Vec<bool>| -> Vec<u32> {
+            let mut points = vec![start as u32];
+            visited[start] = true;
+            let (mut previous, mut current) = (start as u32, first);
+            while current != NONE && !visited[current as usize] {
+                visited[current as usize] = true;
+                points.push(current);
+                let [a, b] = neighbours[current as usize];
+                let next = if a == previous { b } else { a };
+                previous = current;
+                current = next;
+            }
+            points
+        };
+        for closed in [false, true] {
+            for start in 0..n {
+                let [a, b] = neighbours[start];
+                if visited[start] || a == NONE || (b == NONE) == closed {
+                    continue;
+                }
+                let first = if closed { a.min(b) } else { a };
+                let points = walk(start, first, &mut visited);
+                out.push(CutPolyline {
+                    positions: points.iter().map(|&p| at[p as usize]).collect(),
+                    points,
+                    closed,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Interpolates a per-vertex function of the input mesh linearly to the cut points.
