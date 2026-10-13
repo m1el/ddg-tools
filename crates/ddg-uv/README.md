@@ -764,17 +764,35 @@ Session::unwrap / unwrap_with_cut(&MeshInput, &CutOnPolygons, &CutUnwrapOptions)
   (the steering of the old mesh stays valid, the vertices keep their numbers);
   `ConePlacement::Off` forbids every vertex of the new mesh and refuses pinned or prescribed
   ones. Nothing in `unwrap` changed.
-* **Not available yet:** `n_regions > 2` is `CuttingError::RegionsNotAvailable`. Enabling it
-  needs the core crate's N-region flow (SPEC §8) and these changes here: lift the check in
-  `Session::new`; `Maps::phi_from_regions` and `Maps::regions_from_phi` (the only places that
-  know `phi = (f0 - f1) / 2` and `(phi, -phi)`) keep N arrays per flow vertex instead; the
-  start from labels takes N-valued vertex labels; `describe_cut` takes the two regions of each
-  path from the segments and emits `PathEnd::Junction` for triple points; `insert` builds the
-  rings of the triple-point triangle (three segments to the junction vertex) the way it builds
-  the ones for a single segment. `PolygonPath::regions`, `PathEnd`, `junctions` and the arrays
-  of `state()` are already shaped for it.
+* **Several regions.** `n_regions > 2` runs the core crate's `RegionFlow` (SPEC §8); `Session::new_with(.., FlowKind::Regions)` runs it for two regions too (the two-region session
+  stays on `Flow`, bit for bit the core's flow, tested). State: `n_regions` functions per corner;
+  `corner_regions` is the argmin. Starts: `PolygonLabels` (N-valued: the core's
+  `regions_from_face_labels`), `NormalClusters { max_iterations }` (the core's `normal_clusters`
+  into `n_regions` clusters, then `regions_from_vertex_labels`), `Corners`; a geodesic circle
+  starts two regions only. **Options:** `Session::recommended_options(step_size)` is
+  `FlowOptions::new` for two regions and `FlowOptions::for_regions` for more (the stages of
+  the paper with the flux recovery; the core's SPEC D20 says why: on networks the default
+  stages come to rest with more patches and a higher energy from a speckled start);
+  `Session::new_problem(energy, alpha)` is `CutProblem::for_regions`. Options built with
+  `FlowOptions::new` are accepted for any N and are not overridden. `Session::flow()` /
+  `flow_mut()` are the two-region flow; in a session that runs `RegionFlow`
+  (`uses_region_flow()`) they are an unused flow on the same mesh, and `region_flow()` is the
+  flow.
+  **The cut is a network.** `describe_cut` gives a `JunctionPoint` for every triple point
+  (`position`, `polygon`, `triangle` of the supplied triangulation, its `corners`, and the
+  `barycentric` weights of those corners: the junction is `sum(w_k * x[corners[k]])`), and three
+  paths end there, one through each side of the triangle. A path runs between edge points and
+  junctions; it is directed with the lower region id on its left, `regions` is `[lower, higher]`.
+  `preview` gives the curves between junctions (`Cut::curves`) with their two regions.
+  **`insert` with junctions** builds a vertex `J` at the weights inside the junction's triangle
+  and replaces the triangle by three quadrilaterals `(c_k, q_k, J, q_{k-1})`, one per corner,
+  where `q_k` is the vertex of the path on side `k` of the triangle; the whole construction
+  (edge vertices, pieces, parts, triangulation) is written out in the rustdoc of
+  `ddg_uv::cutting::insert`. Vertex numbers: old, edge points, junctions
+  (`VertexSource::Junction`), interior points. Every region component is a chart in
+  `unwrap_with_cut` (the network is in the seams).
 
-### Tests (`tests/cutting.rs`, 17 tests)
+### Tests (`tests/cutting.rs`, 24 tests)
 
 Insertion invariants on `uv_sphere`, `grid_cube`, `capsule`, `torus`, `cylinder` (cuts from the
 flow) and on 5156 paths from random states of three meshes with and without seams
@@ -814,6 +832,35 @@ what it costs, not how good the cuts are. The seam mismatch of the cones-off run
 closing the boundary of a chart changes (see [the boundary](#the-boundary)); the large value on
 the capsule (0.45) is that.
 
+**Networks (N regions).** `networks_insert_cleanly`: random states of 3, 4 and 6 regions on
+sphere, cube, torus and a cylinder (its caps are 12-gons, fanned), with and without seams: 6749
+junctions in 23491 paths, 1716 polygons with two or more junctions, 68 junctions in a polygon
+that also has an ordinary path, 943 junctions in a polygon next to a seam; all insertion
+invariants of the two-region tests hold, and a junction is a vertex of exactly three new
+polygons and three seam edges. `one_junction_by_hand` (a fan of six triangles, three regions),
+`n_equals_two_through_the_region_flow` (two regions on `RegionFlow` against `Flow`: energies to
+`1e-9`, same description), `two_regions_are_the_core_flow_bit_for_bit` (the two-region session
+against `ddg_variational_cuts::Flow` on the same triangle mesh: the bits of the energy, the
+step and the state are equal), `n_region_state_and_starts`. Atlas end to end
+(`atlas_end_to_end_*`: `NormalClusters` with 6 regions (8 on spot), `recommended_options`,
+rescaled Dirichlet energy with `r_eps = 1`, `alpha_L` from the ripple rule with wavelength 0.5,
+60 steps (100 on spot), release build; charts are the pieces the seams leave, equal to the
+number of charts in the report):
+
+| mesh | `alpha_L` | steps (stop) | energy | junctions, paths | charts | cones (off / optimal) | flipped | seam mismatch | distortion (scale-free) |
+|---|---|---|---|---|---|---|---|---|---|
+| uv_sphere 32x16 | 0.01 | 28 (stalled) | 0.071 to 0.064 | 8 to 8, 120 to 104 | 6 | 0 / 0 | 0 | 9.8e-6 | 0.003 |
+| grid_cube 6 | 6.48 | 60 (max) | 32.15 to 29.98 | 8 to 8, 86 to 86 | 6 | 0 / 0 | 1 | 1.3e-2 | 0.003 |
+| capsule 24x8 | 0.04 | 36 (converged) | 0.218 to 0.211 | 8 to 8, 100 to 100 | 6 | 0 / 0 | 0 | 1.3e-6 | 0.009 |
+| torus 32x12 | 0.05 | 34 (stalled) | 0.405 to 0.195 | 16 to 0, 176 to 80 | 2 | 0 / 0 | 0 | 1.0e-4 | 0.003 |
+| spot (quads) | 1.94 | 100 (max) | 30.40 to 4.91 | 120 to 2, 1152 to 182 | 3 | 0 / 2 | 0 | 3.9e-3 / 4.3e-3 | 0.348 / 0.343 |
+
+The one flipped triangle on the cube is a sliver (3D area 5.8e-6, a cell is 0.11) where the cut
+passes within `delta = 1e-3` of a vertex: its image has an area of `-6e-9`. The test accepts
+one flipped triangle per thousand. These patches are nearly developable (the cube's faces, the
+cylinder of the capsule), which is why cones off and optimal agree here; the numbers say that the
+chain works for networks, not that these atlases are good ones.
+
 ### Benchmarks of the cut flow (`benches/cutting.rs`)
 
 `cargo bench -p ddg-uv --bench cutting` (`-- cut/steps` for one group). Defaults everywhere, one
@@ -839,6 +886,20 @@ construction.
 the distance. "unwrap" is `ddg_uv::unwrap` of the inserted mesh with the cut as seams (the
 insertion is its own column). "Whole chain" is `Session::new`, 10 steps, `describe_cut`, `insert`
 and `unwrap` with cones off.
+
+### Benchmarks of the atlas (`benches/cutting.rs`, groups `regions/`)
+
+`cargo bench -p ddg-uv --bench cutting -- regions/`. 6 regions from `NormalClusters`,
+`recommended_options`, rescaled Dirichlet energy, `alpha_L` from the ripple rule (wavelength 0.5),
+10 flow steps, one thread; one run (criterion median of 10).
+
+| mesh | cut after 10 steps | start | 10 steps | preview | describe | insert | unwrap, cones off | unwrap, optimal | whole chain, cones off |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| uv_sphere 64x32 | 196 edge points, 8 junctions, 208 paths | 7.6 ms | 62.6 ms | 47 us | 128 us | 1.6 ms | 14.5 ms | 14.8 ms | 93.6 ms |
+| grid_cube 16 | 179, 6, 188 | 5.8 ms | 45.5 ms | 39 us | 113 us | 1.3 ms | 11.0 ms | 11.5 ms | 66.7 ms |
+| spot quads | 447, 26, 486 | 13.5 ms | 82.3 ms | 90 us | 267 us | 3.1 ms | 26.8 ms | 26.7 ms | 126.4 ms |
+
+`start` includes the clustering of the normals and the distance computations of the functions.
 
 ## Benchmarks
 
@@ -940,7 +1001,7 @@ Four error variants are not triggered by any test input, only their wording is c
   diagonals are not checked against the other edges of the mesh before `unwrap` does it
   (`DiagonalOnEdge`): a diagonal that joins two vertices that another polygon also joins is
   an error of `unwrap`, never produced in any test. A geodesic-circle start does not reach across
-  a seam. Symmetry classes ignore vertices that a seam splits. Two regions only. The cuts in
+  a seam. Symmetry classes ignore vertices that a seam splits. The N-region flow was run for tens of steps on the atlas tests and benches, not to convergence, and its atlases were not looked at (the core README says the same of its own); `Session::flow()` of an N-region session is a placeholder. Adding `VertexSource::Junction` is the one change to an existing public enum. The cuts in
   the tests and benchmarks come from a few steps of the flow from a circle; no claim is made on
   how well they flatten, and the flow's convergence on these meshes was not studied here.
 
