@@ -20,7 +20,7 @@
 
 use ddg_core::{Geometry, TriMesh};
 
-use crate::delaunay::{DelaunayOptions, DelaunayStatus};
+use crate::delaunay::DelaunayOptions;
 use crate::error::IntrinsicError;
 use crate::point::SurfacePoint;
 use crate::triangulation::IntrinsicTriangulation;
@@ -28,11 +28,12 @@ use crate::triangulation::IntrinsicTriangulation;
 /// Options of [`IntrinsicTriangulation::export_simplicial`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExportOptions {
-    /// Whether, and with which test, the triangulation is flipped back to Delaunay after
-    /// edges were split (a split can leave neighbouring edges that are not Delaunay). The
-    /// splits and the flips alternate until the triangulation is a simplicial complex that
-    /// needs no flip. `None`: no flips, the result may fail the Delaunay test at edges next to
-    /// the splits.
+    /// Whether, and with which options, the triangulation is flipped to Delaunay: before
+    /// anything else if it is not Delaunay yet, and again after edges were split (a split can
+    /// leave neighbouring edges that are not Delaunay, and a flip can make a new self-edge or
+    /// double edge). The splits and the flips alternate until the triangulation is a
+    /// simplicial complex that needs no flip. `None`: no flip at all, only the splits; the
+    /// triangulation keeps the edges it has, Delaunay or not.
     pub delaunay: Option<DelaunayOptions>,
     /// The export fails when more than this many edges would have to be split.
     pub max_splits: usize,
@@ -64,8 +65,9 @@ pub struct SimplicialExport {
     pub n_splits: usize,
     /// Number of flips made after splits.
     pub n_flips: usize,
-    /// Whether every interior edge passes the Delaunay test of the options (`true` without
-    /// test if none was asked for and nothing was split).
+    /// Whether every interior edge of the result passes the Delaunay test (the test of
+    /// [`ExportOptions::delaunay`], or the default test if no flips were asked for). Tested on
+    /// the result, not assumed.
     pub is_delaunay: bool,
     /// What identifies this export (see the [module documentation](self)).
     pub fingerprint: u64,
@@ -173,11 +175,16 @@ impl IntrinsicTriangulation {
     ///
     /// Every edge from a vertex to itself is split at its midpoint, and of every group of
     /// edges between the same two vertices all but one. This is repeated (a split can make a
-    /// new group) until nothing is left, then, if `options.delaunay` is set, the triangulation
-    /// is flipped to Delaunay, which can undo it; splits and flips alternate until both hold.
+    /// new group) until nothing is left. If `options.delaunay` is set, the triangulation is
+    /// then flipped to Delaunay (also when nothing had to be split: with these options the
+    /// export of a triangulation that is not Delaunay is its Delaunay triangulation), which can
+    /// make new edges to split; splits and flips alternate until both hold.
+    ///
     /// The triangulation is changed by this; the export is its state afterwards, and the way
     /// back ([`segments_on_input`](Self::segments_on_input)) must be asked of the
-    /// triangulation in that state.
+    /// triangulation in that state. If the export fails, the splits and flips made up to then
+    /// stay (the error gives the number of splits); the triangulation is still a valid one of
+    /// the same surface.
     ///
     /// # Errors
     /// [`IntrinsicError::ExportFailed`] if more than `options.max_splits` splits would be
@@ -190,7 +197,6 @@ impl IntrinsicTriangulation {
     ) -> Result<SimplicialExport, IntrinsicError> {
         let mut n_splits = 0;
         let mut n_flips = 0;
-        let mut is_delaunay = options.delaunay.is_none();
         loop {
             // Split until simplicial.
             loop {
@@ -258,11 +264,12 @@ impl IntrinsicTriangulation {
             };
             let report = self.flip_to_delaunay(delaunay)?;
             n_flips += report.n_flips;
-            is_delaunay = report.status == DelaunayStatus::Delaunay;
             if report.n_flips == 0 || self.irregularities().is_empty() {
                 break;
             }
         }
+        let criterion = options.delaunay.map(|d| d.criterion).unwrap_or_default();
+        let is_delaunay = self.is_delaunay(&criterion);
         let (mesh, geometry) = self
             .to_tri_mesh()
             .map_err(|e| IntrinsicError::ExportFailed {

@@ -127,6 +127,150 @@ pub fn sheared_parallelogram(n: usize, sigma: f64) -> Shape {
     )
 }
 
+/// Removes faces until no vertex is a pinch (its faces form one fan): at a vertex with several
+/// fans the largest is kept. As in `ddg-variational-cuts/examples/bad_mesh_study.rs`.
+fn prune_pinches(mut faces: Vec<[u32; 3]>) -> Vec<[u32; 3]> {
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    loop {
+        let nf = faces.len();
+        let mut parent: Vec<usize> = (0..3 * nf).collect();
+        let mut directed: HashMap<(u32, u32), usize> = HashMap::new();
+        for (f, face) in faces.iter().enumerate() {
+            for k in 0..3 {
+                directed.insert((face[k], face[(k + 1) % 3]), f);
+            }
+        }
+        let corner = |f: usize, v: u32| 3 * f + faces[f].iter().position(|&x| x == v).unwrap();
+        for (f, face) in faces.iter().enumerate() {
+            for k in 0..3 {
+                let (a, b) = (face[k], face[(k + 1) % 3]);
+                if let Some(&g) = directed.get(&(b, a)) {
+                    for v in [a, b] {
+                        let (rx, ry) = (
+                            find(&mut parent, corner(f, v)),
+                            find(&mut parent, corner(g, v)),
+                        );
+                        parent[rx] = ry;
+                    }
+                }
+            }
+        }
+        // The fans of every vertex, with their sizes.
+        let mut fans: HashMap<u32, HashMap<usize, usize>> = HashMap::new();
+        for (f, face) in faces.iter().enumerate() {
+            for (k, &v) in face.iter().enumerate() {
+                let root = find(&mut parent, 3 * f + k);
+                *fans.entry(v).or_default().entry(root).or_insert(0) += 1;
+            }
+        }
+        let mut drop = vec![false; nf];
+        let mut any = false;
+        for (&v, fan) in &fans {
+            if fan.len() < 2 {
+                continue;
+            }
+            any = true;
+            let best = *fan
+                .iter()
+                .max_by_key(|(root, n)| (**n, std::cmp::Reverse(**root)))
+                .unwrap()
+                .0;
+            for (f, face) in faces.iter().enumerate() {
+                if let Some(k) = face.iter().position(|&x| x == v)
+                    && find(&mut parent, 3 * f + k) != best
+                {
+                    drop[f] = true;
+                }
+            }
+        }
+        if !any {
+            return faces;
+        }
+        faces = faces
+            .into_iter()
+            .zip(drop)
+            .filter(|(_, d)| !d)
+            .map(|(f, _)| f)
+            .collect();
+    }
+}
+
+/// The lattice `x = (i + σ j) h, y = j h` clipped to the unit square, then scaled to area 1:
+/// every triangle has the largest angle `180° − atan(1/σ)` (153° for `σ = 2`), and the left
+/// and right boundaries are ragged. The `sheared` family of
+/// `ddg-variational-cuts/examples/bad_mesh_study.rs`.
+pub fn sheared_square(n: usize, sigma: f64) -> Shape {
+    let h = 1.0 / n as f64;
+    let mut index: HashMap<(i64, i64), u32> = HashMap::new();
+    let mut positions = Vec::new();
+    let eps = 1e-9;
+    for j in 0..=n as i64 {
+        let lo = (-sigma * j as f64).floor() as i64 - 1;
+        let hi = (n as f64 - sigma * j as f64).ceil() as i64 + 1;
+        for i in lo..=hi {
+            let x = (i as f64 + sigma * j as f64) * h;
+            if x >= -eps && x <= 1.0 + eps {
+                index.insert((i, j), positions.len() as u32);
+                positions.push([x, j as f64 * h, 0.0]);
+            }
+        }
+    }
+    let mut faces = Vec::new();
+    for (&(i, j), &a) in &index {
+        let (b, c, d) = (
+            index.get(&(i + 1, j)),
+            index.get(&(i + 1, j + 1)),
+            index.get(&(i, j + 1)),
+        );
+        if let (Some(&b), Some(&c), Some(&d)) = (b, c, d) {
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+    }
+    faces.sort_unstable();
+    let faces = prune_pinches(faces);
+    // Only the vertices that are used, in the order of their first use.
+    let mut map = vec![u32::MAX; positions.len()];
+    let mut used = Vec::new();
+    let faces: Vec<[u32; 3]> = faces
+        .iter()
+        .map(|f| {
+            f.map(|v| {
+                if map[v as usize] == u32::MAX {
+                    map[v as usize] = used.len() as u32;
+                    used.push(positions[v as usize]);
+                }
+                map[v as usize]
+            })
+        })
+        .collect();
+    let area: f64 = faces
+        .iter()
+        .map(|f| {
+            let p = f.map(|v| used[v as usize]);
+            0.5 * ((p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
+                - (p[1][1] - p[0][1]) * (p[2][0] - p[0][0]))
+        })
+        .sum();
+    let scale = 1.0 / area.sqrt();
+    for p in &mut used {
+        p[0] *= scale;
+        p[1] *= scale;
+    }
+    Shape::new(
+        &format!("sheared square {n} sigma {sigma}"),
+        used,
+        faces,
+        true,
+    )
+}
+
 /// Rows that alternate between thin strips (caps: one angle of 168°) and tall ones (needles:
 /// apex 19°), shifted by half a cell; the flat unit square. As in
 /// `ddg-variational-cuts/examples/bad_mesh_study.rs`.

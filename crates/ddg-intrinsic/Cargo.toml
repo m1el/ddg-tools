@@ -11,4 +11,6 @@ rust-version.workspace = true
 ddg-core = { path = "../ddg-core" }
 
 [dev-dependencies]
-proptest = "1"
+# The consumer of the simplicial export: tests/export.rs runs the cut flow on an export and
+# carries the cut back.
+ddg-variational-cuts = { path = "../ddg-variational-cuts" }

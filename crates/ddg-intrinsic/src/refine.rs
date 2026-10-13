@@ -67,10 +67,15 @@ pub struct RefineOptions {
 }
 
 impl Default for RefineOptions {
-    /// A bound of 25°, no bound on the circumradius, at most 10 insertions per vertex, the
-    /// default Delaunay test. 25° is the bound up to which the planar algorithm is known to
-    /// end (26.5° for Chew's second algorithm); the paper's 30° is reached in practice too and
-    /// costs about two and a half times as many vertices (the crate's README has the table).
+    /// A bound of 25°, no bound on the circumradius, at most 10 insertions per vertex (1000
+    /// at least), the default Delaunay test.
+    ///
+    /// Why 25° and not the paper's 30°: 30° is reached as well on every mesh tested, and
+    /// costs two to three times as many inserted vertices (the crate's README has the table);
+    /// the largest angle is then at most 120° instead of 130°. On a closed surface the
+    /// algorithm ends for every bound up to 30° by the argument of the planar one; with a
+    /// boundary the planar rule used here is proved to end up to 20.7° only, and at 25° and
+    /// 30° its end is observed, not proved (SPEC N1).
     fn default() -> Self {
         RefineOptions {
             min_angle: 25f64.to_radians(),
@@ -210,7 +215,46 @@ struct Refiner<'a> {
 /// encroached.
 const ENCROACHMENT_TOLERANCE: f64 = 1e-9;
 
-impl Refiner<'_> {
+impl<'a> Refiner<'a> {
+    fn new(tri: &'a mut IntrinsicTriangulation, options: RefineOptions, budget: usize) -> Self {
+        // Boundary vertices with a small angle between their two boundary edges: the unit of
+        // their split distances is the shorter of the two.
+        let mut shells = HashMap::new();
+        for v in 0..tri.n_vertices() {
+            if !tri.is_boundary_vertex(v) || tri.angle_sums[v] >= FRAC_PI_3 {
+                continue;
+            }
+            let first_out = tri.vertex_halfedge[v] as usize;
+            let last_out = tri.outgoing_halfedges(v).last().unwrap_or(first_out);
+            let arriving = tri.prev(last_out);
+            let unit = tri.edge_lengths[tri.halfedge_edge[first_out] as usize]
+                .min(tri.edge_lengths[tri.halfedge_edge[arriving] as usize]);
+            shells.insert(v as u32, unit);
+        }
+        let n_faces = tri.n_faces();
+        let n_edges = tri.n_edges();
+        Refiner {
+            tri,
+            options,
+            queue: EdgeQueue::empty(n_edges),
+            heap: BinaryHeap::new(),
+            stamps: vec![0; n_faces],
+            encroached: Vec::new(),
+            blocked: HashMap::new(),
+            shells,
+            touched: Vec::new(),
+            mark: Vec::new(),
+            search: 0,
+            retries: HashMap::new(),
+            budget,
+            n_face_insertions: 0,
+            n_edge_splits: 0,
+            n_boundary_splits: 0,
+            n_flips: 0,
+            n_snapped: 0,
+        }
+    }
+
     fn n_inserted(&self) -> usize {
         self.n_face_insertions + self.n_edge_splits + self.n_boundary_splits
     }
@@ -663,42 +707,9 @@ impl IntrinsicTriangulation {
             InsertionLimit::Vertices(n) => n,
             InsertionLimit::Unlimited => usize::MAX,
         };
-        // Boundary vertices with a small angle between their two boundary edges: the unit of
-        // their split distances is the shorter of the two.
-        let mut shells = HashMap::new();
-        for v in 0..self.n_vertices() {
-            if !self.is_boundary_vertex(v) || self.angle_sums[v] >= FRAC_PI_3 {
-                continue;
-            }
-            let first_out = self.vertex_halfedge[v] as usize;
-            let last_out = self.outgoing_halfedges(v).last().unwrap_or(first_out);
-            let arriving = self.prev(last_out);
-            let unit = self.edge_lengths[self.halfedge_edge[first_out] as usize]
-                .min(self.edge_lengths[self.halfedge_edge[arriving] as usize]);
-            shells.insert(v as u32, unit);
-        }
-        let n_faces = self.n_faces();
-        let n_edges = self.n_edges();
-        let mut refiner = Refiner {
-            tri: self,
-            options: *options,
-            queue: EdgeQueue::empty(n_edges),
-            heap: BinaryHeap::new(),
-            stamps: vec![0; n_faces],
-            encroached: Vec::new(),
-            blocked: HashMap::new(),
-            shells,
-            touched: Vec::new(),
-            mark: Vec::new(),
-            search: 0,
-            retries: HashMap::new(),
-            budget,
-            n_face_insertions: 0,
-            n_edge_splits: 0,
-            n_boundary_splits: 0,
-            n_flips: first.n_flips,
-            n_snapped: 0,
-        };
+        let mut refiner = Refiner::new(self, *options, budget);
+        refiner.n_flips = first.n_flips;
+        let n_faces = refiner.tri.n_faces();
         for f in 0..n_faces {
             refiner.touch(f);
         }
@@ -768,5 +779,274 @@ impl IntrinsicTriangulation {
                 .count(),
         };
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The three rules of SPEC N1 and N4 that decide whether a point is inserted, each at its
+    //! threshold.
+
+    use std::f64::consts::PI;
+
+    use ddg_core::generators::grid_disk;
+    use ddg_core::{Geometry, TriMesh};
+
+    use super::*;
+    use crate::formulas::corner_distances;
+
+    fn triangulation(positions: &[[f64; 3]], faces: Vec<[u32; 3]>) -> IntrinsicTriangulation {
+        let mesh = TriMesh::new(positions.len(), faces).unwrap();
+        let geometry = Geometry::from_positions(&mesh, positions).unwrap();
+        IntrinsicTriangulation::new(&mesh, &geometry).unwrap()
+    }
+
+    /// A tetrahedron over a base of radius 1 whose apex (vertex 3, corner 2 of faces 1 to 3)
+    /// has the given angle sum.
+    fn needle(apex_degrees: f64) -> IntrinsicTriangulation {
+        let side = 0.75f64.sqrt() / (apex_degrees / 6.0).to_radians().sin();
+        let height = (side * side - 1.0).sqrt();
+        let s = 0.75f64.sqrt();
+        triangulation(
+            &[
+                [1.0, 0.0, 0.0],
+                [-0.5, s, 0.0],
+                [-0.5, -s, 0.0],
+                [0.0, 0.0, height],
+            ],
+            vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]],
+        )
+    }
+
+    /// N4: the guard compares the shortest edge of the triangle with `2 d sin(Θ/2)`, and that
+    /// is the length of the loop from the point around the vertex: a trace of that length in
+    /// that direction comes back to the point.
+    #[test]
+    fn the_needle_guard_measures_the_loop_around_the_vertex() {
+        for apex_degrees in [12.0, 40.0, 59.0] {
+            let mut tri = needle(apex_degrees);
+            let theta = tri.angle_sums[3];
+            assert!((theta.to_degrees() - apex_degrees).abs() < 1e-9);
+            let (f, bary) = (1, [0.15, 0.25, 0.6]);
+            let l = tri.face_lengths(f);
+            let d = corner_distances(l, bary).unwrap()[2];
+            let loop_length = 2.0 * d * (0.5 * theta).sin();
+            // The loop, traced: it leaves the point at the angle π/2 − Θ/2 from the direction
+            // to the apex, to one side or the other.
+            let v = triangle_layout(l).unwrap();
+            let p = [
+                bary[1] * v[1][0] + bary[2] * v[2][0],
+                bary[1] * v[1][1] + bary[2] * v[2][1],
+            ];
+            let to_apex = (v[2][1] - p[1]).atan2(v[2][0] - p[0]);
+            let start = SurfacePoint::Face {
+                face: f as u32,
+                bary,
+            };
+            for side in [-1.0, 1.0] {
+                let direction = (to_apex + side * (0.5 * PI - 0.5 * theta)).rem_euclid(TAU);
+                let trace = tri
+                    .trace(start, direction, loop_length, &TraceOptions::default())
+                    .unwrap();
+                match trace.end {
+                    SurfacePoint::Face { face, bary: end } => {
+                        assert_eq!(face as usize, f);
+                        for k in 0..3 {
+                            assert!((end[k] - bary[k]).abs() < 1e-12, "{end:?}");
+                        }
+                    }
+                    other => panic!("the loop ended at {other}"),
+                }
+                assert!(trace.n_crossings >= 3);
+            }
+            // The verdict changes where the shortest edge equals the loop.
+            let mut refiner = Refiner::new(&mut tri, RefineOptions::default(), usize::MAX);
+            assert!(matches!(
+                refiner.examine(f, bary, loop_length * (1.0 + 1e-6)),
+                Verdict::Needle(3)
+            ));
+            assert!(matches!(
+                refiner.examine(f, bary, loop_length * (1.0 - 1e-6)),
+                Verdict::Clear
+            ));
+        }
+        // At 60° and above there is no guard: the loop is never shorter than the distance to
+        // the vertex.
+        let mut tri = needle(61.0);
+        let mut refiner = Refiner::new(&mut tri, RefineOptions::default(), usize::MAX);
+        assert!(matches!(
+            refiner.examine(1, [0.15, 0.25, 0.6], f64::INFINITY),
+            Verdict::Clear
+        ));
+    }
+
+    /// N1: a point encroaches on a boundary edge when it lies inside the circle on the edge
+    /// as diameter.
+    #[test]
+    fn a_point_inside_the_circle_on_a_boundary_edge_encroaches_on_it() {
+        let grid = grid_disk(4, 4).unwrap();
+        let mut tri = triangulation(&grid.positions, grid.faces.clone());
+        // A face with exactly one boundary edge, on halfedge `h`, whose neighbours have none.
+        let on_boundary = |f: usize| (0..3).filter(|&k| tri.twin[3 * f + k] == NONE).count();
+        let h = (0..tri.n_halfedges())
+            .find(|&h| {
+                let f = h / 3;
+                tri.twin[h] == NONE
+                    && on_boundary(f) == 1
+                    && (0..3).all(|k| {
+                        let t = tri.twin[3 * f + k];
+                        t == NONE || on_boundary(t as usize / 3) == 0
+                    })
+            })
+            .unwrap();
+        let (f, k) = (h / 3, h % 3);
+        let edge = tri.halfedge_edge[h];
+        let l = tri.face_lengths(f);
+        // The point at the fraction `s` of the way from the midpoint of the edge to the
+        // opposite corner, which is at the distance `m` from the midpoint.
+        let point = |s: f64| {
+            let mut bary = [0.0; 3];
+            bary[k] = 0.5 * (1.0 - s);
+            bary[(k + 1) % 3] = 0.5 * (1.0 - s);
+            bary[(k + 2) % 3] = s;
+            bary
+        };
+        let m = {
+            let mut from_mid = [0.0; 3];
+            from_mid[k] = 0.5;
+            from_mid[(k + 1) % 3] = 0.5;
+            let a = corner_distances(l, from_mid).unwrap();
+            a[(k + 2) % 3]
+        };
+        let threshold = 0.5 * l[k] / m;
+        assert!(threshold > 0.1 && threshold < 0.9);
+        let mut refiner = Refiner::new(&mut tri, RefineOptions::default(), usize::MAX);
+        match refiner.examine(f, point(threshold - 1e-9), 0.0) {
+            Verdict::Encroaches(e) => assert_eq!(e, edge),
+            _ => panic!("a point inside the circle must encroach"),
+        }
+        assert!(matches!(
+            refiner.examine(f, point(threshold + 1e-9), 0.0),
+            Verdict::Clear
+        ));
+        // The same for a point of a neighbouring face: the edge is found through the
+        // triangles whose circumcircles contain the point.
+        let tri = &*refiner.tri;
+        let v = triangle_layout(l).unwrap();
+        let (a, b) = (v[k], v[(k + 1) % 3]);
+        let mut found = None;
+        for j in 0..3 {
+            let t = tri.twin[3 * f + j];
+            if t == NONE {
+                continue;
+            }
+            let (g, kt) = (t as usize / 3, t as usize % 3);
+            let lg = tri.face_lengths(g);
+            let (p0, p1) = (v[j], v[(j + 1) % 3]);
+            let far = unfold_apex(p1, p0, lg[kt], lg[(kt + 1) % 3], lg[(kt + 2) % 3]).unwrap();
+            let mut corners = [[0.0; 2]; 3];
+            corners[kt] = p1;
+            corners[(kt + 1) % 3] = p0;
+            corners[(kt + 2) % 3] = far;
+            for (x, y) in [(0.45, 0.45), (0.6, 0.3), (0.3, 0.6), (0.48, 0.5)] {
+                let mut bary = [0.0; 3];
+                bary[kt] = x;
+                bary[(kt + 1) % 3] = y;
+                bary[(kt + 2) % 3] = 1.0 - x - y;
+                let p = [0, 1].map(|i| (0..3).map(|c| bary[c] * corners[c][i]).sum::<f64>());
+                let dot = (a[0] - p[0]) * (b[0] - p[0]) + (a[1] - p[1]) * (b[1] - p[1]);
+                if dot < -1e-3 * l[k] * l[k] {
+                    found = Some((g, bary));
+                }
+            }
+        }
+        let (g, bary) = found.expect("a neighbouring face reaches into the circle");
+        assert_ne!(g, f);
+        match refiner.examine(g, bary, 0.0) {
+            Verdict::Encroaches(e) => assert_eq!(e, edge),
+            _ => panic!("the point of face {g} must encroach on edge {edge}"),
+        }
+        // And an edge counts as encroached when the angle opposite it is obtuse.
+        assert!(!refiner.is_encroached(edge as usize));
+    }
+
+    /// N1: next to a boundary vertex with an angle below 60° the two boundary edges are split
+    /// at the same distances from it, powers of two times the shorter one.
+    #[test]
+    fn boundary_edges_at_a_small_angle_are_split_at_the_same_distances() {
+        let angle = 20f64.to_radians();
+        let (a, b, e, c) = (0, 1, 2, 3);
+        let positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.6, 0.25, 0.0],
+            [1.7 * angle.cos(), 1.7 * angle.sin(), 0.0],
+        ];
+        let mut tri = triangulation(&positions, vec![[a, b, c], [b, e, c]]);
+        assert!((tri.angle_sums[a as usize] - angle).abs() < 1e-12);
+        for v in [b, e, c] {
+            assert!(tri.angle_sums[v as usize] > FRAC_PI_3);
+        }
+        let mut refiner = Refiner::new(&mut tri, RefineOptions::default(), usize::MAX);
+        assert_eq!(refiner.shells.len(), 1);
+        assert_eq!(refiner.shells[&a], 1.0);
+        // The boundary edges at `a`, each with the distance from `a` at which it is split.
+        let at_a = |refiner: &Refiner| {
+            let mut out: Vec<(f64, f64)> = (0..refiner.tri.n_edges())
+                .filter(|&edge| refiner.tri.is_boundary_edge(edge))
+                .filter_map(|edge| {
+                    let [tail, head] = refiner.tri.edge_vertices(edge);
+                    let t = refiner.boundary_split_parameter(edge);
+                    let length = refiner.tri.edge_lengths[edge];
+                    if tail == a as usize {
+                        Some((length, t * length))
+                    } else if head == a as usize {
+                        Some((length, (1.0 - t) * length))
+                    } else {
+                        // Elsewhere: the midpoint.
+                        assert_eq!(t, 0.5);
+                        None
+                    }
+                })
+                .collect();
+            out.sort_by(|x, y| x.partial_cmp(y).unwrap());
+            out
+        };
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-12;
+        // Lengths 1 and 1.7: split at 1/2 and at 1.
+        let first = at_a(&refiner);
+        assert!(
+            close(first[0].0, 1.0) && close(first[0].1, 0.5),
+            "{first:?}"
+        );
+        assert!(
+            close(first[1].0, 1.7) && close(first[1].1, 1.0),
+            "{first:?}"
+        );
+        // After those splits the pieces at `a` have the lengths 1/2 and 1 and are split at
+        // 1/4 and 1/2; and so on: both edges carry vertices at the same distances.
+        for round in 1..4 {
+            let edges: Vec<usize> = (0..refiner.tri.n_edges())
+                .filter(|&edge| {
+                    refiner.tri.is_boundary_edge(edge)
+                        && refiner.tri.edge_vertices(edge).contains(&(a as usize))
+                })
+                .collect();
+            assert_eq!(edges.len(), 2);
+            for edge in edges {
+                assert!(refiner.split_boundary(edge).unwrap());
+            }
+            let now = at_a(&refiner);
+            let scale = 0.5f64.powi(round);
+            assert!(
+                close(now[0].0, scale) && close(now[0].1, 0.5 * scale),
+                "{now:?}"
+            );
+            assert!(
+                close(now[1].0, 2.0 * scale) && close(now[1].1, scale),
+                "{now:?}"
+            );
+        }
+        assert_eq!(refiner.n_boundary_splits, 6);
     }
 }

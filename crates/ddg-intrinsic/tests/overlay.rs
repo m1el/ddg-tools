@@ -163,20 +163,18 @@ fn assert_overlay(shape: &Shape, tri: &IntrinsicTriangulation, what: &str) -> Ov
     // The pieces in an input face make up that face; those in a face of the triangulation
     // make up that face; all together the surface.
     let total = shape.geometry.total_area();
-    for g in 0..mesh.n_faces() {
+    for (g, &area) in area_in_input.iter().enumerate() {
         let expected = shape.geometry.face_areas()[g];
         assert!(
-            (area_in_input[g] - expected).abs() < 1e-9 * total,
-            "{context}: the pieces in input face {g} have area {}, the face {expected}",
-            area_in_input[g]
+            (area - expected).abs() < 1e-9 * total,
+            "{context}: the pieces in input face {g} have area {area}, the face {expected}"
         );
     }
-    for t in 0..tri.n_faces() {
+    for (t, &area) in area_in_tri.iter().enumerate() {
         let expected = tri.face_area(t);
         assert!(
-            (area_in_tri[t] - expected).abs() < 1e-9 * total,
-            "{context}: the pieces in face {t} have area {}, the face {expected}",
-            area_in_tri[t]
+            (area - expected).abs() < 1e-9 * total,
+            "{context}: the pieces in face {t} have area {area}, the face {expected}"
         );
     }
     let sum: f64 = area_in_input.iter().sum();
