@@ -172,6 +172,10 @@ def flow(**props):
     return bpy.ops.uv.ddg_cut_flow(**settings)
 
 
+def pad(values, fill, n=16):
+    return tuple(values) + (fill,) * (n - len(values))
+
+
 def euler(mesh):
     return len(mesh.vertices) - len(mesh.edges) + len(mesh.polygons)
 
@@ -529,9 +533,10 @@ def operators_are_registered_with_the_agreed_properties():
         assert {'REGISTER', 'UNDO'} <= set(cls.bl_options)
     rna = bpy.ops.uv.ddg_cut_start.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
-    assert set(properties) == {"mode", "radius", "vertex", "regions"}, sorted(properties)
+    assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
+                               "attribute"}, sorted(properties)
     assert properties["mode"].default == 'SELECTED'
-    assert properties["regions"].default == 2
+    assert properties["regions"].default == 4
     rna = bpy.ops.uv.ddg_cut_flow.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     required = {
@@ -550,10 +555,11 @@ def operators_are_registered_with_the_agreed_properties():
     assert properties["energy_window"].default == 25
     assert abs(properties["feature_smoothing"].default - 0.02) < 1e-6
     assert properties["energy"].default == 'HENCKY'
-    assert properties["stages"].default == 'DEFAULT'
+    assert properties["stages"].default == 'RECOMMENDED'
     assert abs(properties["ripple_wavelength"].default - 0.25) < 1e-6
-    assert tuple(properties["distortion_weights"].default_array) == (1.0, 1.0)
-    assert tuple(properties["area_weights"].default_array) == (0.0, 0.0)
+    assert set(properties["distortion_weights"].default_array) == {1.0}
+    assert set(properties["area_weights"].default_array) == {0.0}
+    assert properties["distortion_weights"].array_length == 16
     rna = bpy.ops.uv.ddg_cut_apply.get_rna_type()
     properties = {p.identifier for p in rna.properties if p.identifier != "rna_type"}
     assert properties == {"unwrap_after"}, properties
@@ -731,8 +737,8 @@ def every_flow_property_reaches_the_library():
         ("penalty group", dict(penalty_group="Penalty", penalty_strength=3.0)),
         ("penalty paper rule", dict(penalty_group="Penalty", penalty_strength=3.0,
                                     penalty_rule='PAPER_DIAGONAL')),
-        ("distortion weights", dict(distortion_weights=(0.0, 1.0))),
-        ("area weights", dict(area_weights=(0.5, 0.0))),
+        ("distortion weights", dict(distortion_weights=pad((0.0, 1.0), 1.0))),
+        ("area weights", dict(area_weights=pad((0.5, 0.0), 0.0))),
         ("uniform curvature", dict(use_uniform_curvature=True, uniform_curvature=5.0)),
         ("step rule fixed", dict(step_rule='FIXED', tau=1e-4)),
         ("step rule capped", dict(step_rule='CAPPED', tau_max=1e-3, max_motion=0.05)),
@@ -824,7 +830,7 @@ def one_sided_patch_weights_change_the_cut():
     for weights in ((1.0, 1.0), (0.0, 1.0)):
         for k, row in enumerate(initial):
             mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
-        assert flow(steps=10, distortion_weights=weights) == {'FINISHED'}
+        assert flow(steps=10, distortion_weights=pad(weights, 1.0)) == {'FINISHED'}
         results.append(dict(mesh["ddg_cut_last_flow"]))
     assert abs(results[0]["energy_after"] - results[1]["energy_after"]) > 1e-6
 
@@ -957,7 +963,9 @@ def errors_are_readable_messages():
     expect_error("no active vertex", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3)
     expect_error("not exist", bpy.ops.uv.ddg_cut_start, mode='CIRCLE', radius=0.3, vertex=10 ** 6)
     mesh.polygons.foreach_set("select", [i % 2 == 0 for i in range(len(mesh.polygons))])
-    expect_error("not available yet", bpy.ops.uv.ddg_cut_start, mode='SELECTED', regions=3)
+    expect_error("only one value", bpy.ops.uv.ddg_cut_start, mode='MATERIALS')
+    expect_error("no attribute named 'nothing'", bpy.ops.uv.ddg_cut_start, mode='ATTRIBUTE',
+                 attribute="nothing")
     assert not state(mesh), "a failed start left attributes behind"
     assert not previews(obj)
     # Flow: vertex group that does not exist, bad wavelength.
