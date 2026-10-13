@@ -6,12 +6,7 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
 ## Scheduled
 
-1. **Flipped UV triangles after the Blender Apply** (`ddg-uv`, bindings, add-on). For the same
-   cut the library's own insertion and triangulation flip nothing; Blender's triangulation of the
-   split polygons flips 1 to 5 thin triangles on the spot atlases. The cut offset of the operators
-   (default 0.2) is a mitigation, not a fix. Evidence: `blender/README.md`, "Flipped triangles
-   after the unwrap, and the cut offset". In progress.
-2. **Intrinsic triangulations**: "Navigating Intrinsic Triangulations", Sharp, Soliman, Crane,
+1. **Intrinsic triangulations**: "Navigating Intrinsic Triangulations", Sharp, Soliman, Crane,
    ACM TOG 2019 (`../NavigatingIntrinsicTriangulations/paper.pdf`). The next paper. Its first use
    here: an intrinsic Delaunay triangulation for the stages of the cut flow that suffer on
    obtuse meshes (redistancing first, then the evaluation). Evidence:
@@ -76,7 +71,10 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
 
 ## Known gaps: pipeline, bindings, Blender
 
-* See "Scheduled" item 1.
+* The Blender add-on keeps the library's triangulation of the polygons an applied cut split in a
+  mesh property; a mesh whose vertices or faces were added or deleted since falls back to
+  Blender's triangulation (with a warning), which can flip a few thin UV triangles again
+  (`blender/README.md`, "stored triangulation").
 * The geodesic-circle start is two-region only and does not reach across a seam; symmetry
   classes skip vertices that a seam splits (`crates/ddg-uv/README.md`).
 * Polygons with many collinear boundary vertices are rejected ("a diagonal of a face coincides

@@ -764,6 +764,13 @@ Session::unwrap / unwrap_with_cut(&MeshInput, &CutOnPolygons, &CutUnwrapOptions)
   (the steering of the old mesh stays valid, the vertices keep their numbers);
   `ConePlacement::Off` forbids every vertex of the new mesh and refuses pinned or prescribed
   ones. Nothing in `unwrap` changed.
+* **The triangulation of split polygons.** `Inserted::mesh.triangles` is the triangulation the
+  flattening should see: the pieces are sub-triangles of the supplied triangulation, ear-clipped
+  by shape. An editor that inserts the cut itself should hand `unwrap` these triangles for the
+  polygons that were split (the Blender add-on stores them at Apply and the unwrap reads them
+  back); letting the editor triangulate the split polygons again flipped 2 to 5 thin triangles on
+  the spot atlases (8 clusters) that the library's own triangulation does not (measurements:
+  `blender/README.md`). No change in this crate was needed.
 * **Several regions.** `n_regions > 2` runs the core crate's `RegionFlow` (SPEC §8); `Session::new_with(.., FlowKind::Regions)` runs it for two regions too (the two-region session
   stays on `Flow`, bit for bit the core's flow, tested). State: `n_regions` functions per corner;
   `corner_regions` is the argmin. Starts: `PolygonLabels` (N-valued: the core's
