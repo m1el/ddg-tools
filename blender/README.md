@@ -367,6 +367,42 @@ The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed re
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's
 tooltip in Blender names both papers.
 
+### Flipped triangles after the unwrap, and the cut offset
+
+On the spot quads with eight clusters the unwrap of an applied atlas had a few flipped
+triangles (2 to 5 by the library's count; none on the two-region cuts of the UV sphere, cube,
+torus and spot, nor on cube and sphere atlases). Findings: (1) the flipped triangles are slivers
+(3D area 6e-4 to 1e-3 of the mean, smallest angle 0.1 to 0.2 degrees, in 4- to 6-sided pieces
+that the cut made by passing near a vertex), not folds (their normals agree with their
+polygon's); (2) the library's own insertion and triangulation of the same cut flips nothing at
+any offset (`CutSession.unwrap`, cones allowed), although it has just as many thin triangles:
+it splits along the original triangulation, so the surface is exactly the one the flow saw,
+while Blender's polygons are retriangulated by Blender, which on warped quads changes the
+surface a little; a better choice of diagonals (best minimum angle) did not help (5, 7, 5 flips
+against 4, 2, 2). The cause is therefore not the insertion itself but how near the cut passes to
+vertices. The smallest distance of a cut point from a vertex is an argument of `describe_cut`,
+`preview` and `insert`/`unwrap`; the operators expose it as **Cut Offset** (`cut_offset`, on
+Start, Flow and Apply; the flow keeps its own `min_crossing_offset` of 1e-3) with the default
+**0.2**. Measured on three atlases of spot quads and of spot triangulated (flipped triangles by
+the library's count, summed over the six cases; the largest displacement of a cut point and the
+change of cut length are relative to 1e-3, on spot of diameter about 2):
+
+| offset | 1e-3 | 0.01 | 0.02 | 0.05 | 0.1 | 0.2 |
+|--------|-----:|-----:|-----:|-----:|----:|----:|
+| flipped triangles (6 cases) | 17 | 12 | 7 | 10 | 10 | 4 |
+| flipped, spot atlas8 weight 2 / weight 1 / atlas6 weight 0.3 | 4 / 2 / 2 | 1 / 1 / 2 | 1 / 1 / 2 | 2 / 5 / 2 | 5 / 3 / 2 | 0 / 0 / 4 |
+| largest displacement of a cut point | 0 | 0.0004 | 0.0005 | 0.0024 | 0.006 | 0.014 |
+| change of cut length | 0 | +0.003 % | +0.01 % | +0.1 % | +0.4 % | +1.8 % to +2 % |
+| smallest triangle area / mean (weight 2) | 9e-7 | 2e-5 | 7e-5 | 3e-4 | 7e-4 | 1.2e-3 |
+
+The count is not monotone in the offset on warped quads, and 0.2 does not remove every flip
+(the 22-chart atlas6 weight 0.3 has 4 at 0.2). With 0.2 the two atlas tests (weights 2 and 10,
+eight clusters, recommended stages, then the unwrap) find none by the library's count; the
+two-region cases have none at any offset. What remains: some atlases with many small charts
+still flip a few slivers; removing that needs the insertion to keep the surface the flow saw
+(split along the original triangulation, as `ddg_uv::cutting::insert` does) or the unwrap to
+accept the triangulation the library chose; the add-on cannot give Blender's polygons that.
+
 ### Cost of the cut operators
 
 `scripts/blender-test.sh --bench` (`blender/tests/bench_cut.py`), UV sphere, 32 514 vertices,

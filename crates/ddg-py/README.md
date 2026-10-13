@@ -315,6 +315,14 @@ cone besides; `cones=True` lets the cone solver place cones as well. The UVs are
 Errors are `InputError`, `MeshError` and `SolveError` as for `unwrap`, plus `NotAvailableError`
 (a request the library does not implement yet, such as `n_regions > 2`).
 
+**Flipped triangles and the crossing offset.** `describe_cut`, `preview`, `insert` and `unwrap`
+take `min_crossing_offset` (default `1e-3`, the flow's own). `CutSession.unwrap` of an atlas of
+spot (eight clusters, several weights) reports no flipped triangle at offsets from `1e-3` to
+`0.2`, because the library's insertion keeps the surface the flow saw; an editor that
+retriangulates the split polygons (Blender) gets a few flipped slivers of the cut near vertices
+at `1e-3`, fewer at `0.2` (measurements and table in `blender/README.md`). Use a larger
+offset for the cut you insert and keep `1e-3` for the flow.
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the
