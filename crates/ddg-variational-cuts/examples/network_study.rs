@@ -628,6 +628,125 @@ fn timings() {
     }
 }
 
+/// `compare MESH ENERGY WEIGHT STAGES [N] [STEPS]`: one run from `N` clusters of normals
+/// (default 8) with the default step and stop rule, at most `STEPS` steps (default 4000), and
+/// one line with what a table of stage sets needs. `WEIGHT` is a number, `auto` (the ripple
+/// rule with `ℓ = 0.5` and the roughening rate of the start), or `strong` (the same rule with
+/// the largest local rate of the start in place of the rate of the state). `STAGES` is `paper`
+/// (`FlowOptions::for_regions`) or `default` (`FlowOptions::new`).
+fn compare() {
+    let arg = |k: usize, default: &str| std::env::args().nth(k).unwrap_or(default.to_string());
+    let (path, energy_name, weight, stages) = (arg(2, ""), arg(3, ""), arg(4, ""), arg(5, ""));
+    let n: usize = arg(6, "8").parse().unwrap();
+    let max_steps: usize = arg(7, "4000").parse().unwrap();
+    let model = load(&path);
+    let labels =
+        ddg_variational_cuts::init::normal_clusters(&model.mesh, &model.positions, n, 100).unwrap();
+    let phis = ddg_variational_cuts::init::regions_from_vertex_labels(
+        &model.mesh,
+        &model.geometry,
+        &labels,
+        n,
+    )
+    .unwrap();
+    let options = match stages.as_str() {
+        "paper" => FlowOptions::for_regions(StepSize::default()),
+        "default" => FlowOptions::new(StepSize::default()),
+        other => panic!("unknown stage set {other}"),
+    };
+    let mut problem = CutProblem::for_regions(energy_named(&energy_name), 0.0, n);
+    let mut flow = RegionFlow::new(&model.mesh, &model.geometry, &phis).unwrap();
+    problem.length_weight = match weight.as_str() {
+        "auto" => ddg_variational_cuts::length_weight_for_ripples(
+            flow.roughening_rate(&problem, &options.eval).unwrap(),
+            0.5,
+        ),
+        "strong" => {
+            let mut probe = RegionFlow::new(&model.mesh, &model.geometry, &phis).unwrap();
+            let largest = probe
+                .step(&problem, &FlowOptions::new(StepSize::Fixed(1e-12)))
+                .unwrap()
+                .roughening_rate_max;
+            ddg_variational_cuts::length_weight_for_ripples(largest, 0.5)
+        }
+        number => number.parse().unwrap(),
+    };
+    let patches =
+        |e: &ddg_variational_cuts::Evaluation| e.cut_mesh().map_or(0, |m| m.mesh.n_components());
+    let total = |e: &ddg_variational_cuts::Evaluation| e.energy.distortion.iter().sum::<f64>();
+    let start = flow.evaluate(&problem, &options.eval).unwrap();
+    let clock = std::time::Instant::now();
+    let report = flow
+        .run(
+            &problem,
+            &options,
+            &ddg_variational_cuts::StopRule {
+                max_steps,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let seconds = clock.elapsed().as_secs_f64();
+    let end = flow.evaluate(&problem, &options.eval).unwrap();
+    // The energies of the states of the run, and the steps that raised the energy.
+    let energies: Vec<f64> = report
+        .steps
+        .iter()
+        .map(|r| r.energy.total)
+        .chain([report.last_energy])
+        .collect();
+    let rises: Vec<f64> = energies
+        .windows(2)
+        .filter(|w| w[1] > w[0])
+        .map(|w| (w[1] - w[0]) / w[0].abs())
+        .collect();
+    // STUDY_TRACE: one line per step.
+    if std::env::var("STUDY_TRACE").is_ok() {
+        for (k, r) in report.steps.iter().enumerate() {
+            println!(
+                "  step {k}: E {:.6e} -> {:.6e} ({:+.2e}) tau {:.3e} max|s| {:.3e} omega {:.3e} omega_max {:.3e} limited {} cut points {} length {:.4} motion {:.2e}",
+                energies[k],
+                energies[k + 1],
+                (energies[k + 1] - energies[k]) / energies[k].abs(),
+                r.tau,
+                r.max_speed,
+                r.roughening_rate,
+                r.roughening_rate_max,
+                r.n_limited,
+                r.n_cut_points,
+                r.energy.length,
+                r.cut_motion
+            );
+        }
+    }
+    println!(
+        "model={path} vertices={} energy={energy_name} weight={weight} alpha={:.4e} stages={stages} \
+         steps={} stop={} seconds={seconds:.2} energy_start={:.6e} energy_final={:.6e} \
+         energy_lowest={:.6e} lowest_step={} returned_step={} energy_last={:.6e} rises={} \
+         largest_rise={:.2e} patches_start={} patches_final={} length_start={:.4} \
+         length_final={:.4} distortion_start={:.4e} distortion_final={:.4e} triples_final={}",
+        model.mesh.n_vertices(),
+        problem.length_weight,
+        report.steps.len(),
+        report.stop.name(),
+        start.energy.total,
+        end.energy.total,
+        report.lowest_energy,
+        report.lowest_energy_step,
+        report.returned_step,
+        report.last_energy,
+        rises.len(),
+        rises.iter().fold(0.0f64, |m, r| m.max(*r)),
+        patches(&start),
+        patches(&end),
+        start.energy.length,
+        end.energy.length,
+        total(&start),
+        total(&end),
+        end.report.n_triple_points,
+    );
+}
+
 fn main() {
     match std::env::args().nth(1).unwrap_or_default().as_str() {
         "honeycomb" => honeycomb_run(),
@@ -635,6 +754,7 @@ fn main() {
         "atlas" => atlas(),
         "starts" => starts(),
         "timings" => timings(),
+        "compare" => compare(),
         other => eprintln!("unknown experiment {other:?}; see the top of the example"),
     }
 }
