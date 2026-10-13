@@ -111,6 +111,9 @@ pub struct RegionStages {
     /// Per vertex: `h_i` for that limit, the shortest crossed edge at a cut-adjacent vertex and
     /// the shortest edge at any other one. Empty as `vertex_factor`.
     pub vertex_edge: Vec<f64>,
+    /// Per vertex: `ω_i` for that limit, the largest local roughening rate of the cut points
+    /// on the edges at the vertex, `−∞` at a vertex without one. Empty as `vertex_factor`.
+    pub vertex_roughening: Vec<f64>,
     /// Per function, per vertex: after the local limit at the vertices (equal to `length`
     /// where there is none).
     pub limited: Vec<Vec<f64>>,
@@ -628,6 +631,7 @@ impl RegionFlow {
             if let Some(stages) = stages.as_deref_mut() {
                 stages.vertex_factor = vertex_factor;
                 stages.vertex_edge = vertex_edges;
+                stages.vertex_roughening = vertex_rates;
             }
         }
         if let Some(stages) = stages.as_deref_mut() {

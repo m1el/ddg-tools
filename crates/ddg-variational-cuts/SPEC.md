@@ -542,8 +542,10 @@ option (`FlowOptions::step_statistics`, D22):
 
   ```
   Δ_i = φ′(i) − φ(i)
-  h_i = the shortest crossed edge at i; at a vertex without a crossed edge the shortest of its edges
-  ω_i = the largest ω_c of the cut points on the edges at i (no such cut point: the term is absent)
+  h_i = the shortest of the crossed edges that have i as an end (not the wider neighbourhood of
+        h_c); at a vertex without a crossed edge the shortest of its edges
+  ω_i = the largest ω_c of the cut points on the edges that have i as an end (no such cut point:
+        the term is absent; only the excess (ω_i − ω)₊ enters)
   v_i = |Δ_i| / τ                         (Capped)
   v_i = max(|Δ_i| / τ, ½ (ω_i − ω)₊)      (Adaptive)
   φ″(i) = φ(i) + min(1, max_motion · h_i / (τ · v_i)) · Δ_i        (v_i = 0: the factor is 1)
@@ -1344,6 +1346,10 @@ region of every face.
   unchanged. The flow is not set back for the other stop reasons: a caller that runs one step
   at a time would otherwise be held at a state whose next step raises the energy, although the
   steps after it lower it (single steps do raise it, D22).
+* **D28** After the oracle's implementation of D26 was replayed (six fixtures, no difference in the
+  rule): §4 now says that `h_i` and `ω_i` of the limit at the vertices range over the edges that
+  have `i` as an end, and that only the excess of `ω_i` over `ω` enters (the oracle prints
+  `max(ω_i, ω)` for it).
 
 Add to this list whenever something else turns up; never drop an entry.
 

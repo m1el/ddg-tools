@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D27). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D28). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -175,8 +175,8 @@ rule that the fixture names:
 | `cuts`: the paper's stages with the flux recovery of SPEC §3.5 | 26 | evaluation 70907; `d, e, G, s` 6218; step 24444 | `1.0·10⁻¹²`; `3.4·10⁻¹²`; `1.6·10⁻¹³` |
 | `cuts-default`: the default stages (D14–D16), each stage choice, the three step rules | 23 | 67349; 5691; 32391 | `1.0·10⁻¹²`; `8.1·10⁻¹⁴`; `7.2·10⁻¹³` |
 | `regions`: `N` regions, both stage sets, 15 fixtures with triple points | 19 | 125667 | `3.9·10⁻¹¹` |
-| `cuts-robust`: the robust step rule (D22), both stage sets, 8 robust and 1 with the extremes | 9 | 28211; 2573; 13275 | `8.2·10⁻¹⁴`; `1.7·10⁻¹⁴`; `4.5·10⁻¹⁴` |
-| `regions-robust`: the same for `N` regions | 7 | 31438 | `8.2·10⁻¹⁴` |
+| `cuts-robust`: the robust step rule (D22, D26), both stage sets, 8 robust and 1 with the extremes | 9 | 28211; 2573; 17065 | `8.2·10⁻¹⁴`; `1.7·10⁻¹⁴`; `4.5·10⁻¹⁴` |
+| `regions-robust`: the same for `N` regions | 7 | 48514 | `8.2·10⁻¹⁴` |
 
 The first three sets have the step rule with the extremes (`StepStatistics::Extremes`, the rule
 before D22); with the robust statistics, which are the default, `τ` or the limited cut points
@@ -185,14 +185,12 @@ differ in every one of their fixtures whose step is not fixed (9 of `cuts`, 21 o
 speeds `m̂` of the step rule, `h_c` and `ℓ_c`, and at every cut point or boundary node the factor
 of the local limit and the rate before and after it.
 
-Six of the fixtures of the last two sets (those with the robust statistics and the length step
-on the mesh: `rb-ico2-cap-paper-adaptive`, `rb-spike-paper`, `rr-disk4-paper`,
-`rr-sphere3-spike-paper`, `rr-sphere4-paper`, `triple-chain-paper`) have the local limit on the
-explicit rate that SPEC D26 replaced by a limit at the vertices on the whole step. Until the
-oracle follows, they are compared up to the limit: the evaluation, `τ`, `ω`, both `m̂`, `h_c`,
-`ℓ_c` and the rates before it; the test pins their names.
+Six of the fixtures of the last two sets have the robust statistics with the length step on the
+mesh, where the local limit acts at the vertices on the whole step (SPEC D26). The oracle
+implemented that rule after the crate; they replay in full, with `h_i`, `ω_i` and the factor at
+every vertex and the limited function, and no difference was found.
 
-One difference was found before that, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
+One difference was found earlier, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
 quantile were limited by the factor `1 − 2·10⁻¹⁶` here and not at all in the oracle. That cut
 point lies on the limit exactly, and the rounding of `τ` decided. SPEC §4 now says that a cut
 point at or below the quantile is not limited (D24), the crate does that, and the five sets
