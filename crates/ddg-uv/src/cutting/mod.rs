@@ -15,7 +15,43 @@
 //! unwrap_with_cut(..)                                  insert, then `unwrap` with seams = old seams + cut
 //! ```
 //!
-//! The pieces:
+//! # Example
+//!
+//! ```
+//! use ddg_uv::cutting::{ConePlacement, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, Session, Start};
+//! use ddg_uv::primitives::uv_sphere;
+//! use ddg_variational_cuts::{CutProblem, Energy, FlowOptions, StepSize};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mesh = uv_sphere(24, 12, 1.0).expect("valid parameters");
+//! // Two regions, started as the geodesic disk of radius 0.9 around vertex 5.
+//! let start = Start::GeodesicCircle { vertex: 5, radius: 0.9 };
+//! let mut session = Session::new(&mesh.input(), 2, &start)?;
+//!
+//! let problem = CutProblem::new(Energy::Hencky, 0.05);
+//! let options = FlowOptions::new(StepSize::default());
+//! for _ in 0..3 {
+//!     session.step(&problem, &options)?;
+//! }
+//!
+//! // The state: one function per region and per polygon corner.
+//! let state = session.state();
+//! assert_eq!((state.len(), state[0].len()), (2, mesh.corner_vertices.len()));
+//! // The cut on the caller's polygons, and the polygons split along it.
+//! let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET)?;
+//! let inserted = ddg_uv::cutting::insert(&mesh, &cut)?;
+//! assert!(inserted.mesh.n_polygons() > mesh.n_polygons());
+//! // The UVs: insert, then unwrap with the cut as seams.
+//! let (_, result) = session.unwrap(
+//!     DEFAULT_CROSSING_OFFSET,
+//!     &CutUnwrapOptions { cones: ConePlacement::Off, ..Default::default() },
+//! )?;
+//! assert_eq!(result.map.uvs.len(), result.inserted.mesh.corner_vertices.len());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # The pieces
 //!
 //! * [`Session`] owns the polygon mesh, the triangle mesh the flow runs on (the triangulation
 //!   cut along the seams, so the seams are boundary for the flow, as `prepare` cuts them), the

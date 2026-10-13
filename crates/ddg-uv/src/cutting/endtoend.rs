@@ -135,7 +135,9 @@ pub(super) fn unwrap_inserted(
 impl Session {
     /// Describes the cut of the current state ([`Session::describe_cut`]), inserts it into the
     /// session's polygon mesh and unwraps the result: [`unwrap_with_cut`] on the session's
-    /// mesh, seams and steering. Returns the description too.
+    /// mesh, the seams that the flow cut ([`Session::seams_cut`], so that an extended one-edge
+    /// seam is the same on both sides of the insertion) and the session's steering. Returns the
+    /// description too.
     ///
     /// # Errors
     /// As [`Session::describe_cut`] and [`unwrap_with_cut`].
@@ -147,7 +149,7 @@ impl Session {
         let cut = self.describe_cut(min_crossing_offset)?;
         let result = unwrap_inserted(
             self.mesh(),
-            self.seams(),
+            self.seams_cut(),
             &self.pinned,
             &self.prescribed,
             &self.forbidden,

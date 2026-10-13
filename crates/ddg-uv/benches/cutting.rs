@@ -176,8 +176,18 @@ fn benches(c: &mut Criterion) {
     let states: Vec<(&Fixture, Session, CutOnPolygons)> = fixtures
         .iter()
         .map(|f| {
+            let start_cut = session(f).describe_cut(DEFAULT_CROSSING_OFFSET).expect("cut");
             let s = stepped(f, &options);
             let cut = s.describe_cut(DEFAULT_CROSSING_OFFSET).expect("cut");
+            eprintln!(
+                "{}: {} polygons, {} triangles; cut at the start {} edge points, after {STEPS} steps {} edge points in {} paths",
+                f.name,
+                f.mesh.n_polygons(),
+                f.mesh.triangles.len(),
+                start_cut.edge_points.len(),
+                cut.edge_points.len(),
+                cut.paths.len()
+            );
             (f, s, cut)
         })
         .collect();

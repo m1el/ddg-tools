@@ -836,3 +836,102 @@ fn check_regions(session: &Session, old: &PolygonMesh, ins: &Inserted) {
         }
     }
 }
+
+/// A closed ring of seams splits the surface: the flow runs on two components.
+#[test]
+fn a_ring_of_seams_gives_two_components() {
+    let mesh = uv_sphere(20, 10, 1.0).unwrap();
+    let on_equator = |v: u32| mesh.positions[v as usize][2].abs() < 1e-9;
+    let seams: Vec<[u32; 2]> = mesh
+        .edges()
+        .into_iter()
+        .filter(|e| on_equator(e[0]) && on_equator(e[1]))
+        .collect();
+    assert_eq!(seams.len(), 20);
+    let center = (0..mesh.positions.len() as u32)
+        .find(|&v| mesh.positions[v as usize][2] > 0.5)
+        .unwrap();
+    let mut session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: center, radius: 0.5 });
+    assert_eq!(session.flow_mesh().n_components(), 2);
+    let (problem, options) = flow_setup(&mut session, 0.3);
+    session.run(&problem, &options, &stop(5)).unwrap();
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &seams, &cut, &ins);
+    // Three charts: the lower half, the cap, the rest of the upper half.
+    assert_eq!(n_charts(&ins.mesh, &ins.seams_after(&seams)), 3);
+    let (_, result) = session
+        .unwrap(DEFAULT_CROSSING_OFFSET, &CutUnwrapOptions::default())
+        .unwrap();
+    assert_eq!(result.map.report.flipped_triangles, 0);
+    assert_eq!(result.map.report.charts.len(), 3);
+}
+
+/// A seam of one edge is extended by `prepare`; the session reports it and uses the extension.
+#[test]
+fn a_one_edge_seam_is_extended_and_reported() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let poly = mesh.polygon(40);
+    let seams = [[poly[0].min(poly[1]), poly[0].max(poly[1])]];
+    let session = session_on(&mesh, &seams, &Start::GeodesicCircle { vertex: 3, radius: 0.9 });
+    assert_eq!(session.seams().len(), 1);
+    assert_eq!(session.seams_cut().len(), 2);
+    assert!(session.warnings().iter().any(|w| w.contains("single edge")), "{:?}", session.warnings());
+    // A seam that is not an edge is ignored with a warning, not cut.
+    let session = session_on(&mesh, &[[0, 5]], &Start::GeodesicCircle { vertex: 3, radius: 0.9 });
+    assert!(session.seams_cut().is_empty());
+    assert!(!session.warnings().is_empty());
+    assert_eq!(session.flow_mesh().n_vertices(), mesh.positions.len());
+}
+
+fn dataset_dir() -> PathBuf {
+    std::env::var_os("DDG_DATASET").map_or_else(
+        || {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../data/optimal-cones/optimal-cones-data/data")
+        },
+        PathBuf::from,
+    )
+}
+
+/// Meshes of the cones dataset: `bump` (a disk) in a debug build; `camel` (boundary), `bunny`
+/// (closed) and `hand` too in a release build. Skipped with a notice without the data.
+#[test]
+fn dataset_meshes_end_to_end() {
+    let names: &[&str] = if debug_build() {
+        &["bump"]
+    } else {
+        &["bump", "camel", "bunny", "hand"]
+    };
+    for name in names {
+        let path = dataset_dir().join(format!("{name}.obj"));
+        let Ok(obj) = read_obj(&path) else {
+            println!("dataset mesh {} not found: skipped", path.display());
+            continue;
+        };
+        let mesh = PolygonMesh::from_triangles(obj.positions.clone(), &obj.triangles().unwrap());
+        let area = triangulated_area(&mesh);
+        let center = (mesh.positions.len() / 3) as u32;
+        let session = cut_session(&mesh, &[], center, 0.2 * area.sqrt(), 5);
+        let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+        assert!(!cut.is_empty(), "{name}: no cut");
+        let ins = insert(&mesh, &cut).unwrap();
+        check_insertion(&mesh, &[], &cut, &ins);
+        for cones in [ConePlacement::Off, ConePlacement::Optimal] {
+            let (_, result) = session
+                .unwrap(DEFAULT_CROSSING_OFFSET, &CutUnwrapOptions { cones, ..Default::default() })
+                .unwrap_or_else(|e| panic!("{name} {cones:?}: {e}"));
+            let rep = &result.map.report;
+            assert_eq!(rep.flipped_triangles, 0, "{name} {cones:?}");
+            println!(
+                "{name} {cones:?}: {} -> {} polygons, {} charts, {} cones, seam mismatch {:.2e}, distortion {:.3}",
+                mesh.n_polygons(),
+                ins.mesh.n_polygons(),
+                rep.charts.len(),
+                result.map.cones.len(),
+                rep.seam_lengths.max_seam_mismatch,
+                rep.area_distortion.scale_free
+            );
+        }
+    }
+}
