@@ -240,7 +240,7 @@ def start_circle(obj, fraction=0.15, vertex=0):
     assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=radius, vertex=vertex) == {'FINISHED'}
 
 
-CUT_OFFSET = 0.2     # the default of the cut operators (cut.DEFAULT_CUT_OFFSET)
+CUT_OFFSET = 1e-3    # the default of the cut operators (cut.DEFAULT_CUT_OFFSET)
 FLOW = dict(steps=6, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1)
 
 
@@ -1110,23 +1110,26 @@ def models_with_boundary_keep_their_boundary():
     assert euler(mesh) == 1
 
 
-def atlas_of_spot(weight, expect_zero_flips, lam=0.1):
+def atlas_of_spot(weight, expect_zero_flips, lam=0.1, offset=CUT_OFFSET):
     core = importlib.import_module(ARGS.module + ".core")
     obj = spot_object()
     mesh = obj.data
-    assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=8, cluster_iterations=50) \
-        == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=8, cluster_iterations=50,
+                                    cut_offset=offset) == {'FINISHED'}
     assert bpy.ops.uv.ddg_cut_flow(steps=60, use_stop_rule=True, length_mode='EXPLICIT',
-                                   length_weight=weight, stages='RECOMMENDED') \
-        == {'FINISHED'}
+                                   length_weight=weight, stages='RECOMMENDED',
+                                   cut_offset=offset) == {'FINISHED'}
     report = dict(mesh["ddg_cut_last_flow"])
     print("  flow: {} steps ({}), {} patches, {} triple points, cut length {:.3f}".format(
         report["steps_taken"], report["stop_reason"], report["n_patches"],
         report["n_triple_points"], report["cut_length_after"]))
     assert report["n_patches"] >= 3 and report["n_triple_points"] > 0
-    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply(cut_offset=offset) == {'FINISHED'}
+    assert mesh.get("ddg_cut_triangulation") is not None, "Apply stored no triangulation"
     # The unwrap operator's work, called directly to get the library's report.
     stats = core.unwrap_object(obj, use_seams=True, mark_cuts_as_seams=False, lambda_=lam)
+    note = stats["triangulation"]
+    assert note and note["used"] > 0 and note["stale"] == 0, note
     print("  library: flipped {}, collapsed {}".format(stats["report"].get("n_flipped_uv_triangles"), stats["report"].get("n_collapsed_uv_triangles")))
     charts = stats["report"]["n_charts"]
     layer = mesh.uv_layers.active
@@ -1135,10 +1138,13 @@ def atlas_of_spot(weight, expect_zero_flips, lam=0.1):
     islands = atlas_islands(mesh, uvs)
     print("  library charts {}, UV islands {}, cones {}".format(charts, islands, stats["n_cones"]))
     assert islands == charts, "{} UV islands, the library reports {} charts".format(islands, charts)
-    mesh.calc_loop_triangles()
+    # Our own count, on the triangulation the unwrap used (the stored one for the split
+    # polygons, Blender's for the others).
+    _, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+    triangles, _ = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
     areas = []
-    for tri in mesh.loop_triangles:
-        (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in tri.loops)
+    for k in range(0, len(triangles), 3):
+        (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in triangles[k:k + 3])
         areas.append(0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)))
     mean = sum(abs(a) for a in areas) / len(areas)
     flipped = sum(1 for a in areas if a < -1e-3 * mean)
@@ -1158,17 +1164,83 @@ def atlas_of_spot(weight, expect_zero_flips, lam=0.1):
 
 @test
 def atlas_of_spot_eight_clusters_gives_as_many_uv_islands_as_charts_and_no_flipped_faces():
-    # A weight that leaves most of the eight patches. With the default cut offset (0.2) neither
-    # the library's count nor ours finds a flipped triangle; with 1e-3 the same atlas has four
-    # (see blender/README.md).
-    charts, islands, flipped = atlas_of_spot(2.0, expect_zero_flips=True)
-    assert charts >= 5
+    # The library's triangulation of the split polygons is stored by Apply and used by the
+    # unwrap: no flipped triangle by the library's count or ours, at the default offset (1e-3)
+    # and at a large one (0.2). With Blender's own triangulation the same atlas has four at 1e-3.
+    for offset in (CUT_OFFSET, 0.2):
+        reset()
+        charts, islands, flipped = atlas_of_spot(2.0, expect_zero_flips=True, offset=offset)
+        assert charts >= 5
 
 
 @test
 def atlas_of_spot_with_a_strong_length_weight_has_no_flipped_faces():
-    charts, islands, flipped = atlas_of_spot(10.0, expect_zero_flips=True)
-    assert charts >= 3
+    for offset in (CUT_OFFSET, 0.2):
+        reset()
+        charts, islands, flipped = atlas_of_spot(10.0, expect_zero_flips=True, offset=offset)
+        assert charts >= 3
+
+
+@test
+def blender_triangulation_of_the_split_polygons_would_flip_triangles():
+    # The evidence for the stored triangulation: the same atlas unwrapped with Blender's own
+    # triangulation of the split polygons has flipped triangles at 1e-3.
+    core = importlib.import_module(ARGS.module + ".core")
+    obj = spot_object()
+    mesh = obj.data
+    assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=8, cluster_iterations=50) \
+        == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_flow(steps=60, use_stop_rule=True, length_mode='EXPLICIT',
+                                   length_weight=2.0) == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    flips = {}
+    for stored in (True, False):
+        stats = core.unwrap_object(obj, use_seams=True, use_stored_triangulation=stored)
+        flips[stored] = stats["report"].get("n_flipped_uv_triangles")
+    print("  flipped triangles: {} with the stored triangulation, {} with Blender's".format(
+        flips[True], flips[False]))
+    assert flips[True] == 0
+    if flips[False] == 0:
+        raise Skip("this atlas no longer flips with Blender's triangulation")
+
+
+@test
+def unwrap_falls_back_to_blenders_triangulation_when_the_mesh_was_edited():
+    core = importlib.import_module(ARGS.module + ".core")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    # A mesh that never had a cut applied has no stored triangulation: nothing changes.
+    stats = core.unwrap_object(obj)
+    assert stats["triangulation"] is None
+    reference = array.array('f', bytes(8 * len(mesh.loops)))
+    mesh.attributes[mesh.uv_layers.active.name].data.foreach_get("vector", reference)
+    start_circle(obj, fraction=0.3, vertex=5)
+    assert flow() == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert mesh.get("ddg_cut_triangulation") is not None
+    with CaptureOutput() as out:
+        assert bpy.ops.uv.ddg_conformal_unwrap() == {'FINISHED'}
+    assert "library triangulation for" in out.text and "Used Blender's triangulation" not in out.text
+    stats = core.unwrap_object(obj)
+    assert stats["triangulation"]["used"] > 0 and stats["triangulation"]["stale"] == 0
+    # Moving a vertex keeps the stored triangulation valid (same faces, same vertices).
+    mesh.vertices[3].co.x += 0.001
+    stats = core.unwrap_object(obj)
+    assert stats["triangulation"]["used"] > 0
+    # Deleting a face changes the number of faces: the stored triangulation is not used, the
+    # operator says so, and the unwrap still works.
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bm.faces.ensure_lookup_table()
+    bmesh.ops.delete(bm, geom=[bm.faces[0]], context='FACES_ONLY')
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    with CaptureOutput() as out:
+        assert bpy.ops.uv.ddg_conformal_unwrap() == {'FINISHED'}
+    assert "Used Blender's triangulation for" in out.text and "edited since" in out.text, out.text
+    assert "library triangulation for" not in out.text
+    del reference
 
 
 @test

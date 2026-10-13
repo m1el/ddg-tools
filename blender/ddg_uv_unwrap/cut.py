@@ -35,12 +35,11 @@ from mathutils.kdtree import KDTree
 from . import core
 
 # The smallest distance of a point of the cut from a vertex, as a fraction of its edge, in the
-# cut that is shown (preview) and inserted (Apply). The flow itself keeps the library's 1e-3
-# (the Flow operator's `min_crossing_offset`). A cut that passes closer than this to a vertex
-# makes slivers of the polygons it splits, and the flattening of the result can then have a few
-# flipped triangles; moving such points away from the vertices (0.2 moves the cut by at most
-# 1.5 % of the size of the model, measured, see blender/README.md) removes most of them.
-DEFAULT_CUT_OFFSET = 0.2
+# cut that is shown (preview) and inserted (Apply): the library's own default for the flow. It
+# used to be 0.2 as a mitigation of flipped UV triangles; those come from Blender triangulating
+# the split polygons again, and Apply now stores the library's triangulation instead (see
+# `insert_cut`), after which no offset flips anything (blender/README.md).
+DEFAULT_CUT_OFFSET = 1e-3
 
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
@@ -1107,6 +1106,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
         "n_vertices_before": n_vertices_before,
         "n_paths": cut.n_paths,
         "seams_before": seam_before,
+        "n_triangulated": stats.get("n_triangulated", 0),
         "n_clamped_crossings": cut.n_clamped_crossings,
         "warnings": list(session.warnings),
         "seconds_extract": seconds_extract,

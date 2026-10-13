@@ -116,10 +116,9 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         description=(
             "The smallest distance of a point of the cut from a vertex, as a fraction of its "
             "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
-            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
-            "the faces it splits, and the unwrap can then flip a few triangles; points are "
-            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
-            "size and its length by about 2% (measured on the test models)"),
+            "Offset' under Advanced). Points closer to a vertex are moved to this distance: a "
+            "larger value avoids very thin faces, at the price of moving the cut by up to "
+            "this fraction of an edge. 0.001 is the library's default"),
         default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
     )
 
@@ -404,10 +403,9 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         description=(
             "The smallest distance of a point of the cut from a vertex, as a fraction of its "
             "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
-            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
-            "the faces it splits, and the unwrap can then flip a few triangles; points are "
-            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
-            "size and its length by about 2% (measured on the test models)"),
+            "Offset' under Advanced). Points closer to a vertex are moved to this distance: a "
+            "larger value avoids very thin faces, at the price of moving the cut by up to "
+            "this fraction of an edge. 0.001 is the library's default"),
         default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
     )
 
@@ -529,10 +527,9 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         description=(
             "The smallest distance of a point of the cut from a vertex, as a fraction of its "
             "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
-            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
-            "the faces it splits, and the unwrap can then flip a few triangles; points are "
-            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
-            "size and its length by about 2% (measured on the test models)"),
+            "Offset' under Advanced). Points closer to a vertex are moved to this distance: a "
+            "larger value avoids very thin faces, at the price of moving the cut by up to "
+            "this fraction of an edge. 0.001 is the library's default"),
         default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
     )
 
@@ -568,11 +565,12 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
             self.report({'WARNING'}, warning)
         self.report({'INFO'}, (
             "Cut applied: {} vertices and {} faces added, {} edges marked as seams "
-            "({} -> {} vertices, {} -> {} faces)").format(
+            "({} -> {} vertices, {} -> {} faces); the library's triangulation of {} split faces "
+            "is stored for the unwrap").format(
             stats["n_vertices"] - stats["n_vertices_before"],
             stats["n_polygons"] - stats["n_polygons_before"], stats["n_seams_marked"],
             stats["n_vertices_before"], stats["n_vertices"], stats["n_polygons_before"],
-            stats["n_polygons"]))
+            stats["n_polygons"], stats["n_triangulated"]))
         if unwrap_error is not None:
             self.report({'ERROR'}, "The cut was applied, but the unwrap failed: " + unwrap_error)
         return {'FINISHED'}
