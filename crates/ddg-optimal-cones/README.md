@@ -492,7 +492,7 @@ per-vertex cone costs (free sites `wR = 0` and forbidden ones `wR = ∞` include
 and `hi` (finite or not, positive-only and negative-only angles), prescribed cones (they move
 to the right-hand side), meshes with boundary (`u = 0` there), closed meshes, and the boundary
 treatments of `solve_with_boundary`. Each was checked against the reference method
-(`tests/factor_once.rs`: 962 random problems of every topology, steering and treatment) and the
+(`tests/factor_once.rs`: 969 random problems of every topology, steering and boundary treatment, and 5 closed spheres whose angles are all capped) and the
 rest of the suite was run with the method forced.
 
 **What falls back** (`MethodReport::fallback = Unsupported(..)`, nothing is lost but the
@@ -512,7 +512,7 @@ problem when one of these happens, and the report says which
 | reason | limit | default |
 |---|---|---|
 | `WorkingSetLimit` | the working set would exceed `max_working_set` | `1300 (n/15000)^0.2 · (1 + (threads−1)/7)`, threads ≤ 8 (justified under [performance](#performance-of-the-factor-once-method)) |
-| `MemoryLimit` | the stored columns (`8 n` bytes each) and the dense matrices would exceed `memory_limit_bytes` | 4 GiB (`brain` needs 0.8 GB at `λ = ½`) |
+| `MemoryLimit` | the stored columns (`8 n` bytes each) and the dense matrices would exceed `memory_limit_bytes` | 4 GiB (`brain` needs 0.7 GB at `λ = ½`) |
 | `IterationLimit` | `max_rounds` rounds, or the dense method hit its iteration cap three rounds in a row | 200 |
 | `CertificateFailed` | the result does not satisfy `certificate.holds(certificate_tolerance)` (the failed certificate is in the reason) | `10⁻⁹` |
 | `FactorizationFailed` | the factorization or a solve failed | – |
@@ -548,8 +548,8 @@ noisy sphere and the reference method taking over.)
 allow, not the same bits. `tests/factor_once.rs` compares them with *derived* tolerances: the
 certificate's `suboptimality_bound g` bounds `J − J*`; the objective is `½ ‖u − u*‖²_W`-strongly
 convex in `u`, so `‖u_a − u_b‖_W ≤ √(2 g_a) + √(2 g_b)`, and `µ = L u + Ω` gives
-`|Δµ_i| ≤ Σ_j |L_ij| |Δu_j|`. On 962 problems the largest observed ratio to the allowed
-difference was `1.8·10⁻⁷`, the largest `|Δµ|` `2.8·10⁻¹¹`. On the dataset at `λ = ½` (below)
+`|Δµ_i| ≤ Σ_j |L_ij| |Δu_j|`. On those 969 problems the largest observed ratio to the allowed
+difference was `1.8·10⁻⁷`, the largest `|Δµ|` `2.2·10⁻¹¹`. On the dataset at `λ = ½` (below)
 `|Δµ| ≤ 4·10⁻⁸` (`camelshotnoise`; `4·10⁻⁷` on `brain` with 8 threads), `|Δu| ≤ 9·10⁻⁹`
 (`8·10⁻⁸` on `brain` with 8 threads), relative difference of the objective `≤ 3·10⁻¹²`.
 
@@ -936,7 +936,7 @@ hypothesis is **not** confirmed: the weights do not reproduce the published angl
 ## Performance baseline
 
 `cargo run --release -p ddg-optimal-cones --example baseline -- --merge --repeat 3`: every
-dataset mesh at `λ = 0.5`, default options, one thread, fastest of three runs. AMD Ryzen
+dataset mesh at `λ = 0.5`, the **reference method** (`baseline` forces it) with default options, one thread, fastest of three runs. AMD Ryzen
 Threadripper 3970X; wall-clock seconds inside `solve`.
 
 | mesh | triangles | total | numeric factorization | triangular solves | rest | Newton steps I / II | factorizations | solves | cones | merged (≤ 8) | merged (all) | distortion | after merging all |
@@ -976,7 +976,117 @@ of `γ`, usually one for the last ones. The paper
 reports 20 – 25 s for 100 – 150k triangles with 50 – 100 linear solves on a 2018 laptop; the
 dataset has no mesh of that size, and on this faster machine 306k triangles take 33 s, so this
 reference implementation is in the same range, not far below it. The Laplacian never changes
-and could be factorized once; that path is not implemented.
+and can be factorized once; that is [the factor-once method](#the-factor-once-method), which is
+the default when it applies.
+
+## Performance of the factor-once method
+
+`cargo run --release -p ddg-optimal-cones --example speedup -- --repeat 3 [--threads 8]`: every
+dataset mesh at `λ = ½`, fastest of three runs, wall-clock seconds inside `solve`
+(`report.timings.total`); AMD Ryzen Threadripper 3970X, shared with other jobs (load about 2 during
+the runs). *Before* is `SolveMethod::Reference` with the schedule of the table above (the
+default); *after* is `SolveMethod::Auto` with default options, which used the factor-once method
+on every row. The reference method runs on one thread (threads do not help it: `rhino` 1.77 s on
+one thread, 2.73 s on 16, prototype measurement). "Working set" is the number of columns the method computed.
+
+| mesh | vertices | cones | working set | before: reference (s) | factorizations | after, 1 thread (s) | speedup | after, 8 threads (s) | speedup | max abs diff µ | max abs diff u | certificate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| airplane | 2349 | 6 | 34 | 0.117 | 32 | 0.005 | 23.4x | 0.005 | 22.8x | 7.2e-12 | 2.6e-12 | ok |
+| axes | 3735 | 14 | 32 | 0.404 | 32 | 0.012 | 33.7x | 0.011 | 33.4x | 3.3e-11 | 9.2e-12 | ok |
+| body | 11971 | 4 | 16 | 1.341 | 33 | 0.026 | 51.6x | 0.026 | 48.7x | 3.4e-12 | 6.6e-12 | ok |
+| brain | 152893 | 123 | 546 | 32.882 | 50 | 7.162 | 4.6x | 3.563 | 9.1x | 1.8e-9 | 4.8e-10 | ok |
+| bump | 3329 | 0 | 0 | 0.061 | 12 | 0.006 | 10.2x | 0.006 | 10.2x | 0.0e0 | 1.2e-14 | ok |
+| bunny | 14290 | 254 | 365 | 1.852 | 44 | 0.333 | 5.6x | 0.212 | 8.9x | 1.9e-10 | 4.7e-11 | ok |
+| camel | 11381 | 2 | 17 | 1.017 | 36 | 0.031 | 32.8x | 0.035 | 29.1x | 1.1e-9 | 1.5e-10 | ok |
+| camel_noise1 | 11381 | 5 | 22 | 0.990 | 35 | 0.042 | 23.6x | 0.045 | 21.8x | 2.6e-9 | 3.7e-10 | ok |
+| camel_noise2 | 11381 | 8 | 35 | 0.980 | 34 | 0.044 | 22.3x | 0.043 | 22.0x | 1.0e-10 | 3.8e-11 | ok |
+| camelbad | 11392 | 2 | 17 | 0.859 | 35 | 0.032 | 26.8x | 0.034 | 25.5x | 1.8e-10 | 6.1e-11 | ok |
+| camelbadnonuniform | 9092 | 1 | 16 | 0.596 | 36 | 0.023 | 25.9x | 0.026 | 22.9x | 1.2e-11 | 1.9e-11 | ok |
+| camelshotnoise | 11513 | 452 | 651 | 1.690 | 57 | 0.482 | 3.5x | 0.270 | 6.5x | 4.2e-8 | 8.7e-9 | ok |
+| chair | 5726 | 73 | 156 | 0.426 | 39 | 0.055 | 7.7x | 0.040 | 10.8x | 3.6e-10 | 5.1e-11 | ok |
+| cow1 | 15049 | 2 | 16 | 0.863 | 28 | 0.043 | 20.1x | 0.045 | 19.1x | 4.1e-13 | 7.3e-13 | ok |
+| face | 13746 | 0 | 0 | 0.409 | 12 | 0.030 | 13.6x | 0.030 | 14.0x | 0.0e0 | 8.7e-15 | ok |
+| hand | 3372 | 6 | 36 | 0.250 | 33 | 0.009 | 27.8x | 0.009 | 27.6x | 6.6e-9 | 1.2e-9 | ok |
+| mannequin | 6130 | 4 | 20 | 0.391 | 31 | 0.021 | 18.6x | 0.020 | 19.7x | 1.2e-11 | 4.0e-12 | ok |
+| rhino | 20205 | 2 | 17 | 1.654 | 33 | 0.069 | 24.0x | 0.065 | 26.0x | 6.8e-11 | 1.7e-11 | ok |
+| tree | 16917 | 4 | 16 | 1.329 | 26 | 0.050 | 26.6x | 0.051 | 26.3x | 4.9e-13 | 2.6e-12 | ok |
+
+"max abs diff" compares the automatic result with the reference result (one thread). All
+results are certified (`certificate.holds(1e-9)`). The speedup is `3.5×` (`camelshotnoise`, 452 cones
+and a working set of 651) to `52×` (`body`); `brain` takes 7.2 s on one thread and 3.6 s on 8
+(32.9 s before). Threads help only where there are many columns to solve (`brain`, `bunny`,
+`camelshotnoise`, `chair`: `1.4×` to `2×`); elsewhere the time is the factorization and the
+setup. The difference on `brain` at 8 threads is `|Δµ| = 4·10⁻⁷`, `|Δu| = 8·10⁻⁸` (the single-thread run
+`2·10⁻⁹` and `5·10⁻¹⁰`: the batches of columns differ, and the certificates allow differences of
+this size). Where the memory goes: `brain` stores 546 columns of 153 k doubles, 0.67 GB.
+
+**Where the method stops paying: `λ` sweep on `cow1`** (15 049 vertices), reference method, the
+factor-once method with its limits lifted, and the automatic mode, fastest of three, seconds:
+
+| λ | cones | working set | reference | factor-once only, 1 thread | automatic, 1 thread | 8 threads: factor-once only | 8 threads: automatic |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.5 | 2 | 16 | 0.88 | 0.043 | 0.049 | 0.043 | 0.045 |
+| 0.1 | 7 | 51 | 1.12 | 0.062 | 0.062 | 0.050 | 0.055 |
+| 0.03 | 8 | 51 | 1.16 | 0.065 | 0.065 | 0.057 | 0.058 |
+| 0.01 | 109 | 196 | 1.34 | 0.173 | 0.165 | 0.103 | 0.102 |
+| 0.003 | 402 | 591 | 1.36 | 0.534 | 0.555 | 0.237 | 0.249 |
+| 0.001 | 691 | 956 | 1.37 | 1.01 | 1.05 | 0.455 | 0.449 |
+| 0.0003 | 1 132 | 1 539 | 1.39 | 2.08 | **2.80** (fallback) | 0.96 | 0.95 |
+| 0.0001 | 1 682 | 2 213 | 1.47 | 4.18 | **3.05** (fallback) | 2.10 | 2.09 |
+
+On one thread the factor-once method stops winning at a working set of about 1 200 (4 % of the
+vertices are cones; the dense active-set part is `O(a²)` per iteration and sequential, the Gram
+product `O(n a²)`), on 8 threads at about 1 900 (10 % cones) at `cow1`. On one thread `rhino`
+(20 205 vertices), `bunny` (14 290) and `camelshotnoise` (11 513) were still ahead of the
+reference method at the largest working sets tried (1 148, 1 194, 1 134; extrapolated crossovers
+about 1 300 to 1 400), and `brain` (152 893) took 25 s at a working set of 1 613 and 59.5 s at
+3 008 against 32.9 s for the reference method (crossover about 1 900); `brain` at 8 threads, in an
+earlier run of the same method, took 17.5 s at 3 008, still ahead. The limit
+`1300 · (n/15000)^0.2 · (1 + (threads − 1)/7)` (at most twice) is a fit of these points, chosen so
+that the working set stops growing about where the two methods take equal time. It is **not** a
+guarantee that automatic mode is never slower than the better method: a problem whose working
+set grows just past the limit has paid for the attempt and then runs the reference method.
+Measured worst cases: automatic mode is `2.0×` to `2.1×` the reference time on one thread right
+beyond the limit (`cow1` at `λ = 3·10⁻⁴` and `10⁻⁴`: 2.80 s and 3.05 s against 1.39 s and 1.47 s;
+`brain` at `λ = 3·10⁻⁵`: 65 s against 33 s), and `1.4×` at 8 threads beyond the larger limit
+(`cow1`, `λ = 10⁻⁴`: 2.09 s against 1.53 s); one thread, working set 1 194 on `bunny`, just below
+the limit, 1.46 s against 1.80 s for the reference method. The `λ` range that the UV pipeline and the
+paper use (`0.1` to `1`) is far from the limit on every dataset mesh.
+
+Other meshes, one thread (reference / automatic, seconds), `λ = 0.01 … 0.0003`: `rhino`
+2.18 / 0.18, 2.33 / 0.86, 2.40 / 0.95, 2.55 / 1.82; `bunny` 1.88 / 0.38, 1.84 / 0.51, 1.89 / 0.82,
+1.80 / 1.46; `camelshotnoise` 1.79 / 0.81, 1.95 / 0.73, 1.81 / 0.80, 1.96 / 1.03. Automatic mode
+used the factor-once method in all twelve.
+
+**The UV pipeline** (`cargo bench -p ddg-uv`, Criterion, one thread, `DDG_BENCH_LARGE=1`; *before* is
+the tree at commit `584ddef`, i.e. this crate without the factor-once method, *after* the tree with
+it; median of 10 samples, `--save-baseline before` / `--baseline before`): the cone solves of the
+pipeline ask for positive-only angles capped at `0.95·2π`, with free sites on round shapes.
+
+| benchmark | before | after | change |
+|---|---:|---:|---:|
+| `unwrap/bumpy_disk_64` (8 192 triangles, boundary) | 87.9 ms | 27.7 ms | −69 % |
+| `unwrap/uv_sphere_64x32` (closed, round, free-site fallback) | 374.6 ms | 468.6 ms | **+25 %** |
+| `unwrap/grid_cube_16` | 125.2 ms | 12.7 ms | −90 % |
+| `unwrap/torus_96x24` (no cone solve) | 15.1 ms | 14.3 ms | −8 % |
+| `unwrap/hand` | 492 ms | 33.2 ms | −93 % |
+| `unwrap/camel` | 1.542 s | 157 ms | −90 % |
+| `unwrap/bunny` | 3.111 s | 536 ms | −83 % |
+| `unwrap/brain` (305 782 triangles) | 35.07 s | 9.74 s | −72 % |
+| `stages/camel/2_cones` | 1.413 s | 100 ms | −93 % |
+| `stages/brain/2_cones` | 34.16 s | 8.85 s | −74 % |
+
+(the other stages are unchanged within noise). The slower one is `uv_sphere_64x32`: its first cone
+solve (the penalized problem, positive angles only) has a cone at every one of its 1 986 vertices,
+the working set reaches the limit (868 for this size), the method gives up and the reference method
+runs; the attempt costs about 90 ms. The second solve there (8 free sites, cones forbidden
+elsewhere) is fast. Closed meshes in this pipeline only work because the method starts from sites
+clamped at their bounds when no single site can carry the angle sum `4π` (otherwise `bunny` and
+`brain` would have fallen back as unsupported). A caller that knows its first solve will fill the
+surface can ask for `SolveMethod::Reference` there. The default schedule matters here too: with
+the short schedule `10⁻², 10⁻⁶, 10⁻¹⁰` as the default, this benchmark's `unwrap/bunny` went from
+3.1 s to 7.5 s and `unwrap/brain` from 35 s to 99 s (the reference method, with capped positive
+angles; see [the schedule](#the-regularization-schedule)), which is why it is not the default.
 
 ## Formula tags
 
