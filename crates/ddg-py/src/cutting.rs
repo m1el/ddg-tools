@@ -1153,6 +1153,7 @@ impl InsertedArrays {
                     VertexSource::Old(v) => [0, v, 0],
                     VertexSource::EdgePoint(e) => [1, e, 0],
                     VertexSource::Interior { path, index } => [2, path, index],
+                    VertexSource::Junction(j) => [3, j, 0],
                 })
                 .collect(),
             edge_point_vertex: i.edge_point_vertex.clone(),
@@ -1397,11 +1398,13 @@ mod tests {
     }
 
     #[test]
-    fn more_than_two_regions_is_not_available() {
+    fn a_geodesic_circle_starts_two_regions_only() {
         let input = sphere();
+        // The session takes more than two regions since the core has them; the circle start
+        // does not (it has an inside and an outside).
         let e = CutSession::new(&input, 3, &circle()).unwrap_err();
-        assert!(matches!(e, BindError::NotAvailable(_)), "{e}");
-        assert!(e.message().contains("not available"), "{e}");
+        assert!(matches!(e, BindError::Input(_)), "{e}");
+        assert!(e.message().contains("two regions"), "{e}");
         let e = CutSession::new(&input, 1, &circle()).unwrap_err();
         assert!(matches!(e, BindError::Input(_)), "{e}");
     }
