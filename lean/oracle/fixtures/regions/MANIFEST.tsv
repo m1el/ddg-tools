@@ -1,0 +1,19 @@
+r-sphere3-paper	ok	paper's stages: 3 regions on a sphere (Voronoi of 3 centres, 2 triple points), Dirichlet
+r-sphere4-paper	ok	paper's stages: 4 regions (tetrahedral partition), Dirichlet
+r-sphere6-paper	ok	paper's stages: 6 regions (cubical partition), Hencky, capped step
+r-torus5-paper	ok	paper's stages: 5 regions on a torus (96... vertices), curvature-scaled Dirichlet
+r-disk4-paper	ok	paper's stages: 4 regions on a disk with boundary (cuts end on the boundary, triple points), scaled Dirichlet with an explicit a
+r-bands3-weights-paper	ok	paper's stages: 3 latitude bands (no triple point), w = (2, 0.5, 1.5), beta = (0.4, 0, 0.1)
+r-empty-region-paper	ok	paper's stages: 3 functions of which the third is positive everywhere (empty region 2); two caps
+r-sphere3-eta-paper	ok	paper's stages: 3 regions, penalty eta = 0.2 (1 + z), gradient rule
+r-sphere3-eta-paperrule	ok	paper's stages: 3 regions, penalty eta, the paper's diagonal rule
+r-sphere3-symmetry-paper	ok	paper's stages: 3 regions invariant under x -> -x on the symmetric icosphere, symmetry classes
+r-sphere4-nodal-paper	ok	paper's stages with nodal flux (the paper's evaluation), 4 regions
+r-sphere3-default	ok	default stages (8.5): 3 regions on a sphere
+r-sphere4-default	ok	default stages: 4 regions, Hencky
+r-sphere6-default	ok	default stages: 6 regions
+r-torus5-default	ok	default stages: 5 regions on a torus
+r-disk4-default	ok	default stages: 4 regions on a disk with boundary (boundary cut points, triple points)
+r-bands3-weights-default	ok	default stages: 3 bands, per-region weights
+r-sphere3-eta-default	ok	default stages: 3 regions, penalty eta (gradient rule: dw/dn term)
+r-empty-region-default	ok	default stages: an empty region

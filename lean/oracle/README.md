@@ -44,6 +44,10 @@ lake build                      # Lean 4.34.1 (lean-toolchain), no dependencies
 | `ddg-oracle cuts [IN [OUT]]` | one step of the cut flow, [see below](#cut-flow-second-paper) |
 | `ddg-oracle cuts-selftest` | checks of the cut-flow oracle |
 | `ddg-oracle cuts-fixtures write DIR` / `check DIR` | regenerate / verify `fixtures/cuts` |
+| `ddg-oracle cuts-default-fixtures write DIR` / `check DIR` | the same for `fixtures/cuts-default` (format 2) |
+| `ddg-oracle regions [IN [OUT]]` | one step of the flow for N regions, [see below](#n-regions-spec-8) |
+| `ddg-oracle regions-selftest` | checks of the N-region oracle |
+| `ddg-oracle regions-fixtures write DIR` / `check DIR` | regenerate / verify `fixtures/regions` |
 
 `IN`/`OUT` default to `-` (standard input/output). The three processing commands are all batch
 commands: they read any number of cases from one stream, write one output block per case in the
@@ -736,13 +740,303 @@ fixtures/cuts` recomputes and compares (tolerance `1e-9`, as for the first paper
 | `DdgOracle.Cuts.Region` | `u, v, ell, p, q, G, J` of one region |
 | `DdgOracle.Cuts.Step` | speed, smoothing, extension, energy, length step, symmetry, redistancing, `runStep` |
 | `DdgOracle.Cuts.Format` | parser, printers, stream driver |
-| `DdgOracle.Cuts.Gen`, `Selftest`, `Fixtures` | icosphere and test cases, checks, golden fixtures |
+| `DdgOracle.Cuts.Gen`, `Selftest`, `Fixtures`, `FixturesDefault` | icosphere and test cases, checks, golden fixtures |
+| `DdgOracle.Cuts.Stages` | default stages: chain systems, length force, mean gradient, local and harmonic extension |
+| `DdgOracle.Regions.{Case,Cut,Eval,Step,Format,Gen,Selftest,Fixtures}` | N regions: network (triple points, copies), region views and solves, stages of §8.4/§8.5, format, test states, checks, fixtures |
 
 `buildTopology` got an optional argument `connected := true`; the cut flow passes `false`.
 
 ## Cut flow: limitations
 
-* Two regions only (SPEC §8 is not implemented); `b` is Hencky only (no general `b, b'`).
+* `cuts` handles two regions (N regions: `regions`, below); `b` is Hencky only (no general `b, b'`).
 * Dense: at most 1500 vertices, practical limit a few hundred (LU of the full `n x n` systems).
 * One step; `cuts` does not iterate and has no stopping rule.
-* Not implemented: the visibility helper `eta_i = nu_i n_i . E_i`, initial-`phi` helpers.
+* Not implemented: the stopping rules of §4, the visibility helper `eta_i = nu_i n_i . E_i`, initial-`phi` helpers.
+
+# Cut flow: default stages (format 2)
+
+`crates/ddg-variational-cuts/SPEC.md` as of commit da35966 describes, besides the stages of the paper
+(§3.8 harmonic extension, §3.9 `ḡ = 1`, §3.10 length step on the mesh) that the sections above implement,
+*default* variants of the last three stages, an adaptive step rule and a positive feature-size smoothing.
+They are implemented as **format 2** of the `cuts` input. **Format 1 is unchanged**: an input without the
+line `format 2` is parsed and answered exactly as before (`fixtures/cuts` is byte-for-byte reproducible, and
+every new line below is an error without `format 2`).
+
+## Format 2: input
+
+The input of the [cut flow](#cut-flow-input) plus these lines (keyed, any order, each once):
+
+```
+format 2                          marks format 2 (required for every line below)
+stages LENGTH EXT SPEED           required in format 2
+                                    LENGTH   onmesh | oncut      length step: SPEC 3.10 on the mesh (paper) | on the cut (default)
+                                    EXT      harmonic | local    extension: SPEC 3.8 harmonic (paper) | from the cut (default)
+                                    SPEED    unit | mean_gradient   scaling: SPEC 3.9, g = 1 (paper) | mean |grad phi| of the piece (default)
+featurelap cotan | positive       optional (default cotan): the Laplacian in the feature-size smoothing
+                                    (W_V + c L) r = W_V r0 of `energy scaled_curv`: cotan, or L+ of the edge weights max(w_ij, 0) (D17, default of SPEC)
+step adaptive TIME_SCALE MAX_MOTION TAU_MAX     new step rule: tau = min(TAU_MAX, TIME_SCALE/omega, MAX_MOTION h / max|rho|)
+```
+
+The SPEC defaults are `stages oncut local mean_gradient`, `featurelap positive`, `step adaptive 0.05 0.25 1`,
+`flux smoothed 0.5`, `passes 0`; every choice is explicit in the file and any mix can be asked for. With
+`stages onmesh harmonic unit`, `featurelap cotan` and a step rule of format 1, a format 2 case gives the same
+numbers as in format 1 (plus the extra output lines). For `capped` and `adaptive`, `max|rho|` is `max_c |s_c + lambda0_c|`
+with the length step on the cut and `max_c |s_c|` (after sliver smoothing) on the mesh; a term with a zero
+denominator is skipped (`omega <= 0` removes the time limit, `max|rho| = 0` the motion limit).
+
+## Format 2: output
+
+All lines of the [output of format 1](#cut-flow-output), with these differences: the `v` line's `SIGMA` is the
+extension that was used; `tau TAU HMIN SMAX` has `SMAX = max |rho|` as just defined; and after the `tau` line
+(status `ok` only) come
+
+```
+omega OMEGA                         roughening rate: the largest omega_c over the cut vertices
+limits TAUMAX TIMELIMIT MOTIONLIMIT the three limits of the step rule (+inf = 7ff0000000000000 where absent)
+lammax X                            max |lambda0| (0 for the length step on the mesh)
+c K W ELLC DEG BETA THETA LAM0 RATE GBAR RG PIECE OMEGAP        x NC
+dw IDX DWDN                         x NSEG, in the order of the `g` lines
+m I RING SIGMA                      x NV
+```
+
+* `c`: `W` = `w` at the cut vertex (`alpha + eta` interpolated with the moved `t`); `ELLC` the dual length *on the cut*
+  (half the lengths of its segments); `DEG` the number of segments at it (1 = on `dM`); `BETA` the interior angle of
+  region 0 at it (sum of the corner angles of its region-0 cut-mesh triangles at the point); `THETA` the integrated
+  length force `Theta_p` (all of this is computed also with the length step on the mesh, where `LAM0 = 0`);
+  `LAM0` the recovered force per unit length `lambda0`; `RATE` the rate `r` (`SSMOOTH` with the length step on the mesh);
+  `GBAR` the `g` of its piece (1 for `speed unit`); `RG = GBAR * RATE`; `PIECE` the smallest cut-vertex index of its piece;
+  `OMEGAP` the roughening rate at this vertex.
+* `dw`: `(dw/dn)` out of region 0 across the segment (0 contribution for `penalty paper`: the term is printed, but is
+  not used by the paper's rule).
+* `m`: `RING` of the vertex in the local extension (0 = cut-adjacent, `-1` = no ring, i.e. not reached, or the
+  extension is harmonic), `SIGMA` the extension.
+
+## Format 2: how the stages are defined here
+
+(The formulas are those of SPEC §3.8–§3.10, §4; this is what the oracle does where the text needs a decision. The
+numbered readings continue the list [above](#choices-where-the-spec-is-ambiguous) and are collected at the end of this part.)
+
+* `w_p`: `w` interpolated linearly to the cut point with the moved `t`.
+* `Theta_p = w_p (gamma - beta_p) + sum_(sigma at p) (|sigma|/2) (dw/dn)_sigma` with `gamma = pi` (`pi/2` at a cut point
+  with one segment, i.e. on `dM`). `beta_p` is the sum, over the region-0 triangles of the cut mesh that have `p` as a
+  corner, of the corner angle `pi/2 - atan(cot)` with the cotangent `c0, c1, c2` of the `t` lines' computation. `(dw/dn)_sigma`
+  is taken in the triangle `(a, p, q)` of the face (`a` the lone vertex), `h = 2 area/|pq|`, the foot of the
+  height at the fraction `cot_p/(cot_p + cot_q)` from `p`, `(w_f - w_a)/h`, negated if `a` is in region 1.
+* `lambda0` solves `l_p lambda0_p + sum_(sigma = pq) kappa_sigma (lambda0_p - lambda0_q) = Theta_p` over the cut vertices
+  (`l` = `ELLC`, `kappa = c^2 h_f^2/|pq|`, `c` of the flux rule; `flux nodal` means `c = 0`).
+* the rate: `l_p r_p + tau sum_(sigma = pq) (wbar_sigma/|pq|)(r_p - r_q) = l_p (s_p + lambda0_p)`, `wbar = (w_p + w_q)/2`,
+  `s` the speed after sliver smoothing; with the length step on the mesh, or if `alpha + eta = 0` everywhere, `r = s`.
+* `g` of a piece (connected component of the cut vertices under the segments): `sum |pq| / sum (|pq| / |grad phi|)`, with
+  `|grad phi| = |phi_a| |pq| / (2 area(a, p, q))` per segment (the area of the `(a, p, q)` sub-triangle, `phi` the scaled input).
+  A segment with `phi_a = 0` has `|grad phi| = 0`, the term is `+inf` and `g = 0` (printed `-0` or `0`) for the whole piece:
+  the formula is taken literally (SPEC does not discuss it; the fixtures avoid it except `d-ico1-phi-zero-unit-speed`, which uses `speed unit`).
+* the local extension: at a cut-adjacent vertex `i`, `sigma_i = sum_p l_p beta_ip (g r)_p / sum_p l_p beta_ip` over the crossed edges at `i`
+  (`beta_ip = 1 - t` if `i` is the smaller end of the edge, `t` otherwise); then ring by ring (BFS by uncrossed edges),
+  `sigma_i = mean of sigma_j weighted by 1/l_ij` over the neighbours `j` with ring one less (all neighbours of the
+  ring below, any of them reached by an uncrossed edge); a vertex that no path reaches gets `0`.
+* the harmonic extension (paper) of `g r` is the one of format 1 with `r = g r` as data.
+* roughening rate: `omega_c = 2 (Q_0 + Q_1)` with `Q_r = G_r - beta_r - w_r b(0)` at cut vertex `c` (`G_r = w_r G + beta_r`
+  from the recovered `d, e`, `b(0) = 0` for all three energies), so `Q_r = w_r G`; `omega` is the largest over the cut
+  vertices (SPEC speaks of one number for the state and does not say how to aggregate).
+* explicit step `phi~ = phi + tau sigma`; with the length step on the cut there is no further length step (`PHILEN = PHITILDE`);
+  symmetry, redistancing and the second projection as in format 1.
+
+## Fixtures `fixtures/cuts-default/`
+
+`NAME.in` / `NAME.out` and `MANIFEST.tsv` (23 cases; `ddg-oracle cuts-default-fixtures check fixtures/cuts-default`):
+`d-*` are the default column on the kinds of cases of `fixtures/cuts` (sphere, torus, grid disk and annulus whose cut
+meets the boundary, an annulus ring, `eta` with both penalty rules, `w_r`/`beta_r`, symmetry classes, curvature-scaled and
+scaled energies, a flat disk circle, two disjoint spheres); `m-*` change one choice of the default at a time (length step on
+the mesh, harmonic extension, `ḡ = 1`, capped step, fixed step, cotan feature smoothing, nodal flux with one sliver pass) and
+`m-paper-stages-format2` is a format 1 case in format 2 with the paper's stages. Input format: the printed one (`printCase`),
+the lines of format 1 and the ones above.
+
+# N regions (SPEC §8)
+
+`ddg-oracle regions [IN [OUT]]` computes one step of the flow for `N` regions (`2 <= N <= 12`), with the paper's stages
+(SPEC §8.4, recommended by SPEC for `N > 2`) or the default stages of §8.5. §8.5 **could be implemented**: every sentence of it
+is exact enough to compute (the choices are in the list at the end of this part). The N-region code is independent of the
+two-region code (it builds its own cut mesh with triple points and solves every region on a view of it with the region solver
+of the two-region case); `regions-selftest` checks that `[phi, -phi]` gives what the two-region code gives, for both stage sets.
+
+## N regions: input
+
+Same lexical conventions. The mesh is intrinsic. Keyed lines after the mesh, any order, each once (`phi K` once for every `K`).
+
+```
+case NAME
+[task regions]
+mesh NV NF NE
+f A B C                         x NF
+e A B LEN                       x NE
+regions N
+phi K P_0 ... P_{NV-1}          N lines, K = 0 .. N-1: the function phi_K in the caller's unit
+energy dirichlet | hencky | scaled_a A_0 ... A_{NV-1} | scaled_curv R_EPS C
+curvature gaussian | uniform C | per_face K_0 ... K_{NF-1}
+alpha ALPHA_L
+[eta E_0 ... E_{NV-1}]
+penalty gradient | paper
+w W_0 ... W_{N-1}               distortion weight of every region
+beta B_0 ... B_{N-1}            area weight of every region
+step fixed TAU | capped TAU_MAX MAX_MOTION | adaptive TIME_SCALE MAX_MOTION TAU_MAX
+delta DELTA
+flux nodal | smoothed C
+stages paper | default          SPEC 8.4 | 8.5
+featurelap cotan | positive
+[classes C_0 ... C_{NV-1}]
+end
+```
+
+Everything is as in the two-region input; `w_k`, `beta_k` are per region, `alpha`, `eta`, the energy and the curvature are shared
+(SPEC §8.7). `phi` is multiplied by `s = 1/sqrt(area)`. There is no sliver smoothing for `N` regions. Symmetry classes must
+leave the regions invariant (not checked).
+
+## N regions: output
+
+`status ok` or `status error MESSAGE` (also if no edge is crossed: the state has a single region). Ids: a *cut point* `p`
+(number in the order of the crossed edges, sorted by `(a, b)`), a *triple point* `m` (in the order of the faces), a *geometric
+id* in the lines `g`: `p` for a cut point and `NP + m` for a triple point. A *node* of the cut mesh (a *copy*) is a vertex `v`,
+a copy of cut point `p` on `[a, b]`: `NV + 2p` (region of `a`) or `NV + 2p + 1` (region of `b`), a copy of triple point `m`:
+`NV + 2 NP + 3m + k` in the region of corner `c_k`.
+
+```
+case NAME
+task regions
+status ok
+scale S TOTAL_AREA
+mesh NV NF NE NB CHI
+regions N
+counts NP NM NSEG NTRI NMOVED NTIES
+sum_omega X
+f F OMEGA KGAUSS KUSED AREA                     x NF
+v I REGION THETA AREA R A W                     x NV   REGION = argmin_k phi_k (ties: lowest k)
+p I PHI_0 ... PHI_{N-1}                         x NV   scaled input
+x P A B TRAW T MOVED LEN LOW HIGH               x NP   LOW < HIGH the regions of A and B, in order of size
+q M FACE C0 C1 C2 P0 P1 P2 B0 B1 B2             x NM   corners, cut points on c0c1, c1c2, c2c0, barycentric coordinates in the face
+g G1 G2 FACE LEN REGA REGB TRIPLE               x NSEG segments in the order of the faces
+t IDX PARENT REGION N0 N1 N2 L01 L12 L20 AREA   x NTRI triangles of the cut mesh (nodes = copies)
+r X NTRI NNODES NCOMP NUNSOLVED_COMP NUNSOLVED_NODES J AREA AREA_SOLVED     x N
+u X NODE SOLVED U P                             per region, per node (copy) of its submesh, increasing
+b X NODE V ELL D Q E G                          per region, per boundary node (cut and triple copies, boundary vertices)
+s P S OMEGAP                                    x NP   s_p = G_LOW - G_HIGH (G_r = w_r G + beta_r), roughening rate at p
+sn X NODE SV                                    rate s_v at every cut / triple copy of region X
+energy TOTAL LENGTH
+er X J AREA_SOLVED                              x N
+tau TAU HMIN RHOMAX
+omega OMEGA
+limits TAUMAX TIMELIMIT MOTIONLIMIT
+pd K I RATE                                     x N NV   the rate of phi_K at vertex I used in the explicit step
+[default stages only:
+ d X NODE ELLC BETA W GAMMA THETA LAM0 RATE GBAR RHO    per region, per cut / triple copy (`NODE` the copy)
+ dw X IDX DWDN                                  per region, per segment of its boundary (IDX in the order of the `g` lines restricted to REGA = X or REGB = X)
+ ev I E RING                                    x NV   the extension e of SPEC 8.5 (RING -1: not reached)
+ ed I J DELTA                                   for every vertex and every region J it has crossings to: delta_I^J]
+n K I PHITILDE PHILEN PHISYM PROJ T PHINEW PHINEW_CALLER     x N NV
+a I REGION2 ADJ BITS                            x NV   region of phi', whether I is cut-adjacent, BITS: one 0/1 per function, `I in Adj_k`
+redist ACCEPTED UNREACHED
+motion M
+energy_new TOTAL LENGTH
+cuts_new NP_NEW NM_NEW
+end
+```
+
+* `counts`: `NTIES` quads of faces with two regions whose diagonals tie (relative `1e-9`; faces with three regions have none).
+* `q`: the triple point has the barycentric coordinates `B0, B1, B2` at the face's corners `a, b, c` (`c_0 = a`, ...) of SPEC §8.2.
+* `g`: `G1` is always a cut point, `G2` a cut point (`TRIPLE = 0`, a face with two regions) or a triple point (`TRIPLE = 1`); `REGA`,
+  `REGB` the regions of the smaller and the larger end of the edge of `G1`: the two regions that the segment separates.
+  Faces with two regions list `(p, q)` as in format 1, faces with three regions list `(p_0, m)`, `(p_1, m)`, `(p_2, m)`.
+* `t`: faces in index order; an uncut face gives its triangle; a face with two regions the triangles in the order `(a, p, q)`,
+  `(p, b, c), (p, c, q)` or `(p, b, q), (b, c, q)`; a face with three regions `(c_k, p_k, m), (c_k, m, p_{k-1})` for `k = 0, 1, 2`;
+  the nodes are copies in the region of the triangle, `AREA`, lengths and cotangents as for two regions.
+* `r`, `u`, `b`: as in the two-region output, for the region's own view of the cut mesh; `b` includes the recovered `D, E`; the flux
+  recovery of every region runs along its whole boundary, through its triple copies (one system).
+* `s`, `sn`: SPEC §8.3: `s_p = G_i - G_j` between the regions `i < j` of the edge, the rate at the copy in the lower region is `+s_p`,
+  in the higher `-s_p`; at the copy of triple point `m` in region `X` with the two cut points `p` (on the edge leaving corner `c_k`)
+  and `p'` (arriving) of its face: `(|m p'| s_p + |m p| s_p') / (|m p| + |m p'|)` with the values `+-s` of `X`.
+* `tau`, `omega`, `limits`: the step rule of §4. `RHOMAX` is `max_p |s_p|` for the paper's stages and `max |s_v + lambda0_v|`
+  over all copies of all regions for the default stages; `omega` is the largest `2 (Q_i + Q_j)` over the cut points (`Q_X = w_X G_X`).
+* `pd`: paper stages: `phi-dot_K(I) = e_I` if `K` is the region of `I` (`e` the harmonic extension of the region's `sn` values),
+  `-e_I` otherwise; default stages: the rate used (`e_I`, `e_I - delta_I^J`, or `-e_I`, see below).
+* `n`: `PHITILDE = phi + tau * pd`; `PHILEN` after the length step on the mesh (paper stages; equal to `PHITILDE` for the default
+  stages); `PHISYM` after the symmetry projection; `PROJ` after the projection of Losasso et al. (equal to `PHISYM` away from
+  `Adj`); `T` the fast-marching value of function `K` (`+inf` where function `K` was not marched, or not reached; the seeds have `|PROJ|`);
+  `PHINEW` the new function after fast marching and the second symmetry projection (scaled), `PHINEW_CALLER = PHINEW / S`.
+* `a`: regions of `phi'` (= `PHISYM`) and the sets `Adj_k` (the vertices of the edges with exactly one end in `R_k`; both ends of
+  such an edge belong to `Adj_k`) and `Adj`.
+* `redist`: accepted non-seed vertices summed over the functions; `UNREACHED` the number of vertices that some front did not reach.
+* `motion`: the largest `|PHINEW - phi|` over all functions and over the vertices in `Adj` before or after the step (scaled unit).
+
+## N regions: the stages as implemented
+
+* *Crossings* (Eq. 31): region of a vertex = smallest `phi_k` (ties: lowest `k`); for `[a, b]` with regions `i = region(a) != j = region(b)`,
+  `t = psi_a/(psi_a - psi_b)`, `psi = phi_i - phi_j` at the ends, clamped to `[delta, 1 - delta]`; faces with two regions as in §3.3;
+  faces with three regions: triple point with the coordinates of SPEC §8.2.
+* *Paper stages* (§8.4): the harmonic extension (§3.8) of the `sn` values in every region; `phi-dot` as in `pd`; `tau` from `max|s_p|`;
+  `(W_V + tau L_w) phi_k' = W_V phi~_k` per function (`penalty paper`: `(W_V D^-1 + tau L)`); symmetry; projection of Losasso et al.
+  at the vertices of `Adj` (`m` = mean of the two smallest `phi_k'`, subtracted from all functions); then fast marching (single pass, as
+  in §3.12) for every function with `Adj_k` non-empty, seeds `Adj_k` with `|PROJ|`, the classes "in `R_k`" / "not in `R_k`", `phi_k = -T`
+  in `R_k` and `+T` elsewhere, a vertex that no front reaches (or that is a seed) keeps its value (after the projection); a function with
+  `Adj_k` empty is left as the projection made it; symmetry again.
+* *Default stages* (§8.5), per region `X`, on its boundary copies: `ELLC` = half the lengths of the boundary cut segments of `X` at the node;
+  `BETA` the sum of the corner angles of `X`'s cut-mesh triangles at it; `W` = `w` at the node (cut point: linear on the edge, triple point:
+  barycentric); `GAMMA = pi` (cut point), `pi/2` (cut point on `dM`, i.e. on an edge with one face), `2 pi/3` (triple point);
+  `THETA = W (GAMMA - BETA) + sum_sigma (|sigma|/2) (dw/dn)_sigma` where `(dw/dn)_sigma` is the derivative of the linear `w` of the face out of `X`
+  across `sigma`, computed in the triangle of `X` that has `sigma` as an edge with third node `z` (height `h`, foot at the fraction `cot_u/(cot_u + cot_v)`),
+  `(w_f - w_z)/h` (`penalty paper` drops it); `LAM0` and the rate `RATE` from the two chain systems of §8.5 (`kappa = c^2 h_f^2/|sigma|`,
+  `tau wbar/|sigma|`, `wbar` the mean of `w` at the two nodes); `tau` from `max|s_v + lambda0_v|`; `GBAR` the `g` of the piece of the node (pieces:
+  connected components of the network over cut and triple points; `|grad phi| = (1/2)|phi_i(a) - phi_j(a)| |pq| / (2 area(a, p, q))` with `i = region(a)`,
+  `j` the other region of the face; faces with three regions are left out; a piece without such a segment has `g = 1`); `RHO = GBAR * RATE`.
+  Vertex rates: cut point `p` on `[a, b]` with `ell_p` = half the length of each segment to another cut point plus the whole length of each segment to a
+  triple point; vertex `a` gets the weight `ell_p (1 - t)` and `RHO` of the copy of `p` in `a`'s region into `e_a`, and (`RHO_a - RHO_b`) into
+  `delta_a^(region(b))`; `b` likewise with `t`; `e` and `delta` are the weighted means (in the order of the cut points); `e` is extended ring by ring
+  as in the two-region local extension; `pd_K(I)` is `e_I` for the region `K` of `I`, `e_I - delta_I^K` if `I` has crossings to region `K`, `-e_I` otherwise.
+  No length step on the mesh. Symmetry, projection, fast marching as above.
+
+## Fixtures `fixtures/regions/`
+
+19 cases (`MANIFEST.tsv`; `ddg-oracle regions-fixtures check fixtures/regions`): the paper's stages first (`r-*-paper*`: 3 / 4 / 6 regions on a sphere,
+5 on a torus, 4 on a disk with boundary where cuts end on the boundary, 3 bands with `w`, `beta` per region, an empty region, a penalty with both
+rules, symmetry classes, nodal flux), then the default stages (`r-*-default`). Voronoi partitions (faces with three regions) are used except for
+the bands (no triple point) and the empty-region cases (the third function positive everywhere); the states have been redistanced once. Every case
+is a `regions` input, as printed by the oracle. `r-sphere3-symmetry-paper` has `NTIES = 2` (the cut crosses the mirror plane in faces that are
+themselves symmetric: their two diagonals are equal); compare the others without caution, that one up to the discretization error.
+
+## N regions: tests
+
+`ddg-oracle regions-selftest` (about 3 s): `[phi, -phi]` through the N-region code equals the two-region code, for both stage sets, on seven cases
+(sphere cap with Dirichlet, Hencky with weights, `eta` with the paper's rule, `eta` with curvature-scaled energy, torus band, grid disk with a cut
+ending on the boundary, annulus): new functions to `0` (paper stages, bit for bit) and `3e-16` (default stages), `tau`, speeds and energies to `1e-14`;
+areas, Euler characteristic `sum chi(S_k) - NP - 2 NM + NSEG = chi(M)`, projection (`smallest + second = 0`, differences kept to `1e-16`) on 3, 4, 6
+regions on a sphere and 4 on a disk with boundary; on a flat mesh the loads `gamma - beta` of the regions sum to `0` at every triple point
+(`9e-16`) and at every interior cut point (`3e-15`); for three bands the two chain sums per region and the opposite rates on the two sides of a curve
+(`8e-15`); the energy decreases along a small step for 3 regions with two triple points (both stage sets); finite differences of `E` for a shift of
+`phi_0` over three latitude bands on icosphere 3 (relative difference `2.6e-2`).
+
+# Readings of SPEC da35966 (continuing the list above)
+
+21. §1 "roughening rate": one number per step: the largest over the cut vertices of `2 (Q_0 + Q_1)`, `Q_r = w_r G` (see format 2).
+22. §4 "ρ is the speed of the cut that is known before the step": `max|s + lambda0|` over the cut vertices (on-cut length step); terms of the step
+    rule with a non-positive `omega` or a zero `max|rho|` are skipped; `capped`/`adaptive` apply to both stage sets.
+23. §3.10: `beta_p` is the angle of the *lower* region = region 0; at a cut point on `dM` (one segment) `gamma = pi/2`; `dw/dn` from the lone vertex
+    as written (for `N` regions from the triangle of the region at the segment); `l_p` of the chain systems is the dual length on the cut (not the
+    region's `ELL`).
+24. §3.10: "same `c`" = the `c` of the flux rule; nodal flux means `c = 0`. `w ≡ 0` (all `alpha + eta_i = 0`) skips the system: `r = s`, `lambda0 = 0`.
+25. §3.9 `ḡ = 0` where a face has `|grad phi| = 0` (literal reading, see above).
+26. §3.8: the ring of a vertex is computed by breadth-first search over uncrossed edges from the cut-adjacent vertices; every neighbour with ring one less
+    contributes; the harmonic extension (paper) uses `ḡ r` as data.
+27. §3.6/D17: `featurelap positive` replaces the off-diagonal entries `L_ij` by `min(L_ij, 0)` and the diagonal by minus the row sum; `cotan` (the default
+    of format 1 and of an absent line) is the full cotan Laplacian.
+28. §8.1: the region of a vertex is the lowest index among equal functions; a region without vertices is allowed (its function is positive everywhere);
+    `N = 2` states are `[phi, -phi]`.
+29. §8.2: "one cut point per edge"; the cut points of a face with three regions are on its three edges; the edge parameter `s_k` from `c_k` is `t` if
+    `c_k < c_{k+1}` (the stored `t` is from the smaller index) and `1 - t` otherwise.
+30. §8.3: the rate at a triple copy uses the values `+-s` of the region of that copy at its two cut points (`pd`/`sn`); `omega` and `RHOMAX` for the paper's
+    stages use cut points only.
+31. §8.4: `Adj_k` contains both ends of every edge with exactly one end in `R_k`; the projection is applied to all functions at every vertex of `Adj`, also
+    those of a function with `Adj_k` empty; seeds of function `k` are the vertices of `Adj_k` with `|phi_k|` after the projection; fast marching is single
+    pass (§3.12) with the classes "in `R_k`" / "not"; the cut motion and the count of unreached vertices are as in the `motion`/`redist` lines.
+32. §8.5: `ell_v` at a copy on `dM` is half of its one cut segment; `gamma = pi/2` there; `(dw/dn)` in the triangle of `X` at the segment (third vertex `z`),
+    which equals the two-region formula up to rounding; `g` pieces; the weights `ell_p` for the vertex rates are half a segment to another cut point and a
+    whole segment to a triple point; `delta` is only defined (and used) at cut-adjacent vertices; a piece that has no segment of a face with two regions
+    gets `g = 1`; the explicit step for the functions of regions that `I` has no crossing to is `-e_I`; with all `w = 0` the chain systems are skipped.
+33. The step rule's `ω`, the roughening rate, uses for `N` regions the two regions of the cut point.

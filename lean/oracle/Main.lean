@@ -18,6 +18,9 @@ usage:
   ddg-oracle cuts-selftest          internal checks of the cut flow
   ddg-oracle cuts-fixtures write DIR | check DIR   golden fixtures of the cut flow (fixtures/cuts)
   ddg-oracle cuts-default-fixtures write DIR | check DIR   fixtures of the default stages (fixtures/cuts-default)
+  ddg-oracle regions   [IN [OUT]]   one step of the cut flow for N regions (SPEC section 8)
+  ddg-oracle regions-selftest       internal checks of the N-region flow
+  ddg-oracle regions-fixtures write DIR | check DIR   golden fixtures (fixtures/regions)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -73,6 +76,18 @@ def main (args : List String) : IO UInt32 := do
   | ["cuts-default-fixtures", "write", dir] => Cuts.writeList Cuts.defaultFixtures dir; return 0
   | ["cuts-default-fixtures", "check", dir] =>
     return if (← Cuts.checkList Cuts.defaultFixtures dir) == 0 then 0 else 1
+  | "regions" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← Regions.runStream input output
+    output.flush
+    return 0
+  | ["regions-fixtures", "write", dir] => Regions.writeFixtures dir; return 0
+  | ["regions-fixtures", "check", dir] => return if (← Regions.checkFixtures dir) == 0 then 0 else 1
+  | ["regions-selftest"] => return if (← Regions.selftest) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

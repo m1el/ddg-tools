@@ -87,6 +87,7 @@ structure CutMesh where
   adj : Array Bool
   /-- quads whose two diagonals agree to a relative `10⁻⁹`: the choice of diagonal is fragile -/
   nearTies : Nat
+  deriving Inhabited
 
 namespace CutMesh
 
