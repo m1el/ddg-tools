@@ -222,6 +222,32 @@ theorem objective_reducedU (μ : ι → ℝ) :
   rw [distortion_reducedU, coneCost_eq_sum_free P μ]
   ring
 
+/-- **The gradient of the distortion in a free cone angle.** For a free site `j`, moving `μ_j`
+by `t` moves `u` by `t z_j`, and the distortion changes exactly by
+`t·(z_jᵀ W u) + (t²/2)·G_jj`; so `∂/∂μ_j (½ uᵀWu) = z_jᵀ W u`.
+
+[formula: reduced-optimality-conditions] -/
+theorem distortion_reducedU_update {j : ι} (hj : j ∈ P.freeSites) (μ : ι → ℝ) (t : ℝ) :
+    P.distortion (P.reducedU R (Function.update μ j (μ j + t))) =
+      P.distortion (P.reducedU R μ)
+        + t * (column R j ⬝ᵥ (fun i => P.weight i * P.reducedU R μ i))
+        + t ^ 2 / 2 * gramMatrix P R j j := by
+  have hu : P.reducedU R (Function.update μ j (μ j + t)) =
+      fun i => P.reducedU R μ i + t * column R j i := by
+    have hf : P.freePart (Function.update μ j (μ j + t)) =
+        P.freePart μ + t • (Pi.single j (1 : ℝ) : ι → ℝ) := by
+      ext i
+      by_cases hi : i = j
+      · subst hi; simp [freePart, hj]
+      · simp [freePart, hi]
+    rw [reducedU_eq, hf, add_sub_right_comm, map_add, map_smul, ← reducedU_eq]
+    ext i
+    simp [column]
+  rw [hu]
+  unfold distortion gramMatrix dotProduct weight
+  simp only [Finset.mul_sum, ← Finset.sum_add_distrib]
+  refine Finset.sum_congr rfl fun i _ => by ring
+
 /-! ### The Gram matrix -/
 
 /-- **`G` is positive semidefinite** when the weights are nonnegative (`G = ZᵀWZ`).
@@ -460,7 +486,406 @@ theorem isMinimizer_iff_reduced_dirichlet (hL : P.L.PosDef) {u μ : ι → ℝ} 
     rw [hvu, objective_reducedU, objective_reducedU]
     linarith [hmin ν hν]
 
+/-- In the Dirichlet case the columns `z_j = A⁻¹ e_j` are linearly independent, so by
+`gram_quadratic_pos` `G` is positive definite on all of `S` when the weights are positive.
+
+[formula: reduced-gram-matrix] -/
+theorem linearIndepOn_column_dirichlet {A : Matrix ι ι ℝ} (hA : IsUnit A.det) (T : Finset ι) :
+    LinearIndepOn ℝ (column (dirichletSolver A)) (T : Set ι) := by
+  rw [linearIndepOn_finset_iff]
+  intro f hf i hi
+  have h1 : A⁻¹ *ᵥ (∑ j ∈ T, f j • (Pi.single j (1 : ℝ) : ι → ℝ)) = 0 := by
+    rw [Matrix.mulVec_sum]
+    simpa [column, dirichletSolver_apply, Matrix.mulVec_smul] using hf
+  have h2 : (∑ j ∈ T, f j • (Pi.single j (1 : ℝ) : ι → ℝ)) = 0 := by
+    have := congrArg (fun x => A *ᵥ x) h1
+    simpa [Matrix.mulVec_mulVec, Matrix.mul_nonsing_inv A hA] using this
+  have := congrFun h2 i
+  simpa [Finset.sum_apply, Pi.single_apply, hi] using this
+
 end Dirichlet
+
+
+/-! ## The closed case: a pin -/
+
+section Pinned
+
+variable (A : Matrix ι ι ℝ) (p : ι)
+
+/-- `A_p`: `A` without row and column `p`. -/
+def pinBlock : Matrix {i // i ≠ p} {i // i ≠ p} ℝ := A.submatrix Subtype.val Subtype.val
+
+/-- `pad`: a vector on the unknowns without `p`, extended by `0` at the pin. -/
+def padLin : ({i // i ≠ p} → ℝ) →ₗ[ℝ] (ι → ℝ) where
+  toFun x i := if h : i = p then 0 else x ⟨i, h⟩
+  map_add' x y := by ext i; by_cases h : i = p <;> simp [h]
+  map_smul' c x := by ext i; by_cases h : i = p <;> simp [h]
+
+/-- The entries of a vector on the unknowns without `p` (`gather`). -/
+def restrictLin : (ι → ℝ) →ₗ[ℝ] ({i // i ≠ p} → ℝ) where
+  toFun b k := b k.1
+  map_add' x y := by ext; simp
+  map_smul' c x := by ext; simp
+
+/-- The pinned solve `b ↦ pad (A_p⁻¹ b_p̂)` (`solve_rows`, `scatter`). -/
+def pinSolve : (ι → ℝ) →ₗ[ℝ] (ι → ℝ) :=
+  padLin p ∘ₗ Matrix.mulVecLin (pinBlock A p)⁻¹ ∘ₗ restrictLin p
+
+/-- The `w`-weighted mean removal `P x = x - (Σ w x / Σ w)·1` (`Reduced::project`). -/
+def meanProj (w : ι → ℝ) : (ι → ℝ) →ₗ[ℝ] (ι → ℝ) where
+  toFun x i := x i - (∑ k, w k * x k) / ∑ k, w k
+  map_add' x y := by
+    ext i
+    simp only [Pi.add_apply, mul_add, Finset.sum_add_distrib]
+    ring
+  map_smul' c x := by
+    ext i
+    have h : ∑ k, w k * (c * x k) = c * ∑ k, w k * x k := by
+      rw [Finset.mul_sum]; exact Finset.sum_congr rfl fun k _ => by ring
+    simp only [Pi.smul_apply, smul_eq_mul, RingHom.id_apply, h]
+    ring
+
+/-- The solver of the closed case, `x = P·pad(A_p⁻¹ b_p̂)`. -/
+def pinnedSolver (w : ι → ℝ) : (ι → ℝ) →ₗ[ℝ] (ι → ℝ) := meanProj w ∘ₗ pinSolve A p
+
+theorem padLin_apply (x : {i // i ≠ p} → ℝ) (i : ι) :
+    padLin p x i = if h : i = p then 0 else x ⟨i, h⟩ := rfl
+
+theorem restrictLin_apply (b : ι → ℝ) (k : {i // i ≠ p}) : restrictLin p b k = b k.1 := rfl
+
+theorem meanProj_apply (w x : ι → ℝ) (i : ι) :
+    meanProj w x i = x i - (∑ k, w k * x k) / ∑ k, w k := rfl
+
+theorem sum_dite_ne (F : {i // i ≠ p} → ℝ) :
+    ∑ i, (if h : i = p then (0 : ℝ) else F ⟨i, h⟩) = ∑ k : {i // i ≠ p}, F k := by
+  rw [Fintype.sum_eq_add_sum_subtype_ne _ p]
+  simp only [dite_true, zero_add]
+  exact Finset.sum_congr rfl fun x _ => by simp [x.2]
+
+/-- `padLin` is adjoint to `restrictLin`. -/
+theorem padLin_dot (x : {i // i ≠ p} → ℝ) (v : ι → ℝ) :
+    padLin p x ⬝ᵥ v = x ⬝ᵥ restrictLin p v := by
+  simp only [dotProduct, padLin_apply, restrictLin_apply]
+  rw [← sum_dite_ne p (fun k => x k * v k.1)]
+  exact Finset.sum_congr rfl fun i _ => by by_cases h : i = p <;> simp [h]
+
+theorem restrictLin_dot (a : ι → ℝ) (x : {i // i ≠ p} → ℝ) :
+    restrictLin p a ⬝ᵥ x = a ⬝ᵥ padLin p x := by
+  rw [dotProduct_comm, ← padLin_dot, dotProduct_comm]
+
+theorem mulVec_padLin (x : {i // i ≠ p} → ℝ) (i : ι) (hi : i ≠ p) :
+    (A *ᵥ padLin p x) i = (pinBlock A p *ᵥ x) ⟨i, hi⟩ := by
+  simp only [Matrix.mulVec, dotProduct, padLin_apply, pinBlock, Matrix.submatrix_apply]
+  rw [← sum_dite_ne p (fun k => A i k.1 * x k)]
+  exact Finset.sum_congr rfl fun j _ => by by_cases h : j = p <;> simp [h]
+
+/-- The hypotheses of a closed mesh: `A` is positive semidefinite, and its kernel is exactly the
+constants (`cotan-laplacian-psd`, `cotan-laplacian-kernel`, `laplacian_mulVec_one`). -/
+structure KernelIsConstants (A : Matrix ι ι ℝ) : Prop where
+  posSemidef : A.PosSemidef
+  mulVec_one : A *ᵥ (fun _ => (1 : ℝ)) = 0
+  ker : ∀ x, A *ᵥ x = 0 → ∃ c : ℝ, x = fun _ => c
+
+variable {A p}
+
+theorem KernelIsConstants.transpose_eq (h : KernelIsConstants A) : Aᵀ = A := by
+  simpa using h.posSemidef.isHermitian.eq
+
+theorem KernelIsConstants.vecMul_one (h : KernelIsConstants A) :
+    (fun _ => (1 : ℝ)) ᵥ* A = 0 := by
+  rw [← Matrix.mulVec_transpose, h.transpose_eq, h.mulVec_one]
+
+/-- `A_p` is invertible: a positive semidefinite `A` whose kernel is the constants stays definite
+once one row and column are removed. -/
+theorem KernelIsConstants.pinBlock_isUnit (h : KernelIsConstants A) (p : ι) :
+    IsUnit (pinBlock A p).det := by
+  rw [← Matrix.isUnit_iff_isUnit_det, ← Matrix.mulVec_injective_iff_isUnit]
+  have hinj : Function.Injective (Matrix.mulVecLin (pinBlock A p)) := by
+    rw [injective_iff_map_eq_zero]
+    intro x hx
+    have hx' : pinBlock A p *ᵥ x = 0 := hx
+    set X := padLin p x with hX
+    have hXp : X p = 0 := by simp [hX, padLin_apply]
+    have hAX : ∀ i, i ≠ p → (A *ᵥ X) i = 0 := by
+      intro i hi
+      rw [hX, mulVec_padLin A p x i hi, hx']; rfl
+    have h0 : star X ⬝ᵥ (A *ᵥ X) = 0 := by
+      simp only [star_trivial, dotProduct]
+      refine Finset.sum_eq_zero fun i _ => ?_
+      by_cases hi : i = p
+      · subst hi; rw [hXp, zero_mul]
+      · rw [hAX i hi, mul_zero]
+    have h1 : A *ᵥ X = 0 := h.posSemidef.dotProduct_mulVec_zero_iff.1 h0
+    obtain ⟨c, hc⟩ := h.ker X h1
+    have hc0 : c = 0 := by rw [← hXp, hc]
+    ext k
+    have := congrFun hc k.1
+    simp only [hc0] at this
+    have e : X k.1 = x k := by simp [hX, padLin_apply, k.2]
+    rw [← e, this]; rfl
+  exact hinj
+
+
+theorem pinSolve_apply_pin (b : ι → ℝ) : pinSolve A p b p = 0 := by
+  simp [pinSolve, padLin_apply]
+
+theorem mulVec_pinSolve_of_ne (h : KernelIsConstants A) (b : ι → ℝ) (i : ι) (hi : i ≠ p) :
+    (A *ᵥ pinSolve A p b) i = b i := by
+  unfold pinSolve
+  simp only [LinearMap.comp_apply]
+  rw [mulVec_padLin A p _ i hi, Matrix.mulVecLin_apply, Matrix.mulVec_mulVec,
+    Matrix.mul_nonsing_inv _ (h.pinBlock_isUnit p), Matrix.one_mulVec]
+  rfl
+
+/-- **The pinned solve solves the singular system** when the right-hand side sums to zero: the
+equations of all rows but the pin's hold by construction, the pin's by `1ᵀA = 0` and `Σ b = 0`.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem mulVec_pinSolve (h : KernelIsConstants A) {b : ι → ℝ} (hb : ∑ i, b i = 0) :
+    A *ᵥ pinSolve A p b = b := by
+  funext i
+  by_cases hi : i = p
+  · subst hi
+    exact Solver.mulVec_eq_of_sum_eq h.vecMul_one hb i (fun j hj => mulVec_pinSolve_of_ne h b j hj)
+  · exact mulVec_pinSolve_of_ne h b i hi
+
+theorem weighted_meanProj {w : ι → ℝ} (hW : ∑ k, w k ≠ 0) (x : ι → ℝ) :
+    ∑ k, w k * meanProj w x k = 0 := by
+  simp only [meanProj_apply, mul_sub, Finset.sum_sub_distrib, ← Finset.sum_mul]
+  field_simp
+  ring
+
+theorem mulVec_meanProj (h : KernelIsConstants A) (w x : ι → ℝ) :
+    A *ᵥ meanProj w x = A *ᵥ x := by
+  have : meanProj w x = x - ((∑ k, w k * x k) / ∑ k, w k) • (fun _ => (1 : ℝ)) := by
+    ext i; simp [meanProj_apply]
+  rw [this, Matrix.mulVec_sub, Matrix.mulVec_smul, h.mulVec_one]
+  simp
+
+/-- **`x = P·pad(A_p⁻¹ b_p̂)` solves `A x = b`** when `Σ b = 0` and `Σ w ≠ 0`.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem mulVec_pinnedSolver (h : KernelIsConstants A) (w : ι → ℝ) {b : ι → ℝ}
+    (hb : ∑ i, b i = 0) : A *ᵥ pinnedSolver A p w b = b := by
+  unfold pinnedSolver
+  rw [LinearMap.comp_apply, mulVec_meanProj h, mulVec_pinSolve h hb]
+
+/-- **… and has weighted mean zero**: `Σ w x = 0`.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem weighted_pinnedSolver {w : ι → ℝ} (hW : ∑ k, w k ≠ 0) (b : ι → ℝ) :
+    ∑ k, w k * pinnedSolver A p w b k = 0 :=
+  weighted_meanProj hW _
+
+/-- **The weighted-mean-zero representative is the only one**: if `A v = b` and `Σ w v = 0`
+then `v = P·pad(A_p⁻¹ b_p̂)`. Every solution of `A v = b` is this one plus a constant.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem pinnedSolver_unique (h : KernelIsConstants A) {w : ι → ℝ} (hW : ∑ k, w k ≠ 0)
+    {v b : ι → ℝ} (hv : A *ᵥ v = b) (hmean : ∑ k, w k * v k = 0) :
+    v = pinnedSolver A p w b := by
+  have hb : ∑ i, b i = 0 := Solver.sum_eq_zero_of_mulVec_eq h.vecMul_one hv
+  have hx := mulVec_pinnedSolver (p := p) h w hb
+  obtain ⟨c, hc⟩ := h.ker (v - pinnedSolver A p w b) (by rw [Matrix.mulVec_sub, hv, hx, sub_self])
+  have hv' : v = pinnedSolver A p w b + fun _ => c := by
+    ext i; have := congrFun hc i; simp only [Pi.sub_apply] at this; simp only [Pi.add_apply]; linarith
+  have h2 : ∑ k, w k * v k = c * ∑ k, w k := by
+    have h3 : ∀ k, w k * v k = w k * pinnedSolver A p w b k + c * w k := by
+      intro k; rw [hv']; simp only [Pi.add_apply]; ring
+    rw [Finset.sum_congr rfl fun k _ => h3 k, Finset.sum_add_distrib, weighted_pinnedSolver hW,
+      zero_add, Finset.mul_sum]
+  have hc0 : c = 0 := by
+    rw [hmean] at h2
+    exact (mul_eq_zero.1 h2.symm).resolve_right hW
+  rw [hv', hc0]; ext i; simp
+
+/-- **The gradient identity** (closed case): for symmetric `A` with `A_p` invertible and
+`Σ v = 0` (here `v = W u` and `Σ w u = 0`): `z_jᵀ v = (pad (A_p⁻¹ v_p̂))_j`, with
+`z_j = P·pad(A_p⁻¹ (e_j)_p̂)`; in particular `0` at the pin.
+
+[formula: reduced-optimality-conditions] -/
+theorem column_dot_pinned (hs : Aᵀ = A) (w : ι → ℝ) (j : ι) {v : ι → ℝ} (hv : ∑ i, v i = 0) :
+    column (pinnedSolver A p w) j ⬝ᵥ v = pinSolve A p v j := by
+  have hM : ((pinBlock A p)⁻¹)ᵀ = (pinBlock A p)⁻¹ := by
+    rw [Matrix.transpose_nonsing_inv]
+    congr 1
+    ext a b
+    simpa [pinBlock] using congrFun (congrFun hs a.1) b.1
+  have e1 : column (pinnedSolver A p w) j ⬝ᵥ v = pinSolve A p (Pi.single j 1) ⬝ᵥ v := by
+    simp only [column, pinnedSolver, LinearMap.comp_apply, dotProduct, meanProj_apply, sub_mul,
+      Finset.sum_sub_distrib, ← Finset.mul_sum, hv, mul_zero, sub_zero]
+  rw [e1]
+  unfold pinSolve
+  simp only [LinearMap.comp_apply, Matrix.mulVecLin_apply]
+  rw [padLin_dot, dotProduct_comm, Matrix.dotProduct_mulVec, ← Matrix.mulVec_transpose, hM,
+    dotProduct_comm, restrictLin_dot]
+  simp [padLin_apply]
+
+end Pinned
+
+/-! ### The closed case of the reduced problem -/
+
+section Closed
+
+variable {P}
+
+/-- The solver of the closed case for the problem `P` with pin `p`: `x = P·pad(A_p⁻¹ b_p̂)` with
+the weights `w_i = wE_i m_i`. -/
+abbrev closedSolver (P : ConeProblem ι) (p : ι) : (ι → ℝ) →ₗ[ℝ] (ι → ℝ) :=
+  pinnedSolver P.L p P.weight
+
+theorem sum_weight_ne_zero (hw : ∀ i, 0 < P.weight i) (p : ι) : ∑ k, P.weight k ≠ 0 :=
+  (Finset.sum_pos (fun i _ => hw i) ⟨p, Finset.mem_univ p⟩).ne'
+
+theorem sum_freePart_sub_rhs0 {μ : ι → ℝ} (hsum : ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i) :
+    ∑ i, (P.freePart μ - P.rhs0) i = 0 := by
+  simp only [Pi.sub_apply, Finset.sum_sub_distrib, sum_freePart, hsum, sub_self]
+
+/-- **The state equation of the closed case**: for a feasible cone vector with the sum constraint
+`Σ_S μ_S = Σ (Ω - a_F)`, `u = Z μ_S - w0` solves `L u = μ - Ω` and has `Σ w u = 0`.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem reducedU_closed_spec (hK : KernelIsConstants P.L) (hw : ∀ i, 0 < P.weight i) (p : ι)
+    {μ : ι → ℝ} (hfix : P.FixedAt μ) (hsum : ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i) :
+    P.L *ᵥ P.reducedU (closedSolver P p) μ = μ - P.Ω ∧
+      ∑ k, P.weight k * P.reducedU (closedSolver P p) μ k = 0 := by
+  rw [reducedU_eq]
+  refine ⟨?_, weighted_pinnedSolver (sum_weight_ne_zero hw p) _⟩
+  rw [mulVec_pinnedSolver hK _ (sum_freePart_sub_rhs0 hsum), P.freePart_sub_rhs0 hfix]
+
+/-- **The closed case of the link to the optimality system**
+(`reduced-optimality-conditions`; the direction the solver relies on).
+Let `A = L` be positive semidefinite with kernel the constants, `w > 0`, `p` any index, `μ` a cone
+vector with the sum constraint `Σ_S μ_S = Σ (Ω - a_F)` and the reduced optimality conditions for
+some multiplier `ν`, where `u = Z μ_S - w0` (with `Z, w0` from `P·pad(A_p⁻¹ ·)`) and
+`y = pad(A_p⁻¹ (W u)_p̂)` (so `y_p = 0`). Then `(u, φ, μ)` with `φ = -(y + ν)` solves the
+optimality system `KKT` of the canonical problem. The pin need not be a free site for this
+direction (the solver chooses a free one).
+
+[formula: reduced-optimality-conditions] -/
+theorem kkt_of_reducedOptimal_pinned (hK : KernelIsConstants P.L) (hw : ∀ i, 0 < P.weight i)
+    (p : ι) {μ y : ι → ℝ} {ν : ℝ} (hsum : ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i)
+    (h : P.ReducedOptimal μ y ν)
+    (hy : y = pinSolve P.L p (fun i => P.weight i * P.reducedU (closedSolver P p) μ i)) :
+    P.KKT (P.reducedU (closedSolver P p) μ) (fun i => -(y i + ν)) μ := by
+  obtain ⟨hst, hmean⟩ := reducedU_closed_spec hK hw p h.fixed hsum
+  refine ⟨hst, ?_, fun i => ?_⟩
+  · rw [hK.transpose_eq]
+    have e : (fun i => -(y i + ν)) = -y - ν • (fun _ => (1 : ℝ)) := by
+      ext i; simp; ring
+    rw [e, Matrix.mulVec_sub, Matrix.mulVec_neg, Matrix.mulVec_smul, hK.mulVec_one, hy,
+      mulVec_pinSolve hK (b := fun i => P.weight i * P.reducedU (closedSolver P p) μ i) hmean]
+    ext i; simp [weight]
+  · by_cases hi : (P.site i).isFixed = true
+    · exact stationary_of_fixed _ _ _ hi (h.fixed i hi)
+    · exact h.free i ((P.mem_freeSites).2 (by simpa using hi))
+
+/-- … hence `(u, μ)` is a global minimizer of the canonical problem. -/
+theorem isMinimizer_of_reducedOptimal_pinned (hP : P.WellFormed) (hK : KernelIsConstants P.L)
+    (hw : ∀ i, 0 < P.weight i) (p : ι) {μ y : ι → ℝ} {ν : ℝ}
+    (hsum : ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i) (h : P.ReducedOptimal μ y ν)
+    (hy : y = pinSolve P.L p (fun i => P.weight i * P.reducedU (closedSolver P p) μ i)) :
+    P.IsMinimizer (P.reducedU (closedSolver P p) μ) μ :=
+  (kkt_of_reducedOptimal_pinned hK hw p hsum h hy).isMinimizer hP.wE_nonneg hP.m_nonneg
+
+/-- **The gradient of the distortion** (closed case): `∂/∂μ_j (½ uᵀWu) = z_jᵀ W u = y_j`
+with `y = pad(A_p⁻¹ (W u)_p̂)`, for every `u` with `Σ w u = 0` (every `u = Z μ_S - w0`).
+
+[formula: reduced-optimality-conditions] -/
+theorem column_dot_weighted_pinned (hK : KernelIsConstants P.L) (p : ι) (j : ι) {u : ι → ℝ}
+    (hu : ∑ k, P.weight k * u k = 0) :
+    column (closedSolver P p) j ⬝ᵥ (fun i => P.weight i * u i) =
+      pinSolve P.L p (fun i => P.weight i * u i) j :=
+  column_dot_pinned hK.transpose_eq P.weight j hu
+
+/-- **The distortion as a function of the additive constant, on the solutions of `L v = b`.**
+Every solution is `x + c·1` with `x = P·pad(A_p⁻¹ b_p̂)`, and
+`E(x + c) = E(x) + ½ (Σ w) c²`: the weighted-mean-zero representative minimizes the distortion,
+uniquely.
+
+[formula: reduced-sum-constraint-pin] -/
+theorem distortion_pinned (hK : KernelIsConstants P.L) (hw : ∀ i, 0 < P.weight i) (p : ι)
+    {v b : ι → ℝ} (hv : P.L *ᵥ v = b) :
+    ∃ c : ℝ, v = (fun i => closedSolver P p b i + c) ∧
+      P.distortion v = P.distortion (closedSolver P p b) + 1 / 2 * (∑ k, P.weight k) * c ^ 2 := by
+  have hW := sum_weight_ne_zero hw p
+  have hb : ∑ i, b i = 0 := Solver.sum_eq_zero_of_mulVec_eq hK.vecMul_one hv
+  obtain ⟨c, hc⟩ := hK.ker (v - closedSolver P p b)
+    (by rw [Matrix.mulVec_sub, hv, mulVec_pinnedSolver hK _ hb, sub_self])
+  have hv' : v = fun i => closedSolver P p b i + c := by
+    ext i; have := congrFun hc i; simp only [Pi.sub_apply] at this; linarith
+  refine ⟨c, hv', ?_⟩
+  rw [hv', distortion_add_const]
+  have : ∑ i, P.wE i * P.m i * closedSolver P p b i = 0 := weighted_pinnedSolver hW b
+  rw [this]
+  simp only [weight]
+  ring
+
+/-- **`reduced-lasso-problem`, closed case.** With `A = L` positive semidefinite with kernel the
+constants and `w > 0`, `(u, μ)` is a minimizer of the canonical problem iff `μ` is feasible, has
+`Σ_S μ_S = Σ (Ω - a_F)`, `u = Z μ_S - w0`, and `μ` minimizes the reduced objective over all
+feasible cone vectors with that sum.
+
+[formula: reduced-lasso-problem] -/
+theorem isMinimizer_iff_reduced_pinned (hK : KernelIsConstants P.L) (hw : ∀ i, 0 < P.weight i)
+    (p : ι) {u μ : ι → ℝ} :
+    P.IsMinimizer u μ ↔
+      (P.RedFeasible μ ∧ ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i) ∧
+        u = P.reducedU (closedSolver P p) μ ∧
+        ∀ μ', P.RedFeasible μ' → ∑ j ∈ P.freeSites, μ' j = ∑ i, P.rhs0 i →
+          P.reducedObjective (closedSolver P p) μ ≤ P.reducedObjective (closedSolver P p) μ' := by
+  have hW := sum_weight_ne_zero hw p
+  have hfe : ∀ μ', P.RedFeasible μ' → ∑ j ∈ P.freeSites, μ' j = ∑ i, P.rhs0 i →
+      P.Feasible (P.reducedU (closedSolver P p) μ') μ' := fun μ' h' hs' =>
+    ⟨(reducedU_closed_spec hK hw p h'.1 hs').1, (P.redFeasible_iff μ').1 h'⟩
+  have hsum_of : ∀ ν, P.Feasible (P.reducedU (closedSolver P p) ν) ν →
+      ∑ j ∈ P.freeSites, ν j = ∑ i, P.rhs0 i := by
+    intro ν hf
+    have hr : P.FixedAt ν := ((P.redFeasible_iff ν).2 hf.2).1
+    rw [← sum_sub_defect_iff P hr]
+    have := Solver.sum_eq_zero_of_mulVec_eq hK.vecMul_one hf.1
+    exact this
+  constructor
+  · intro h
+    have hf := h.1
+    have hr : P.RedFeasible μ := (P.redFeasible_iff μ).2 hf.2
+    have hs : ∑ j ∈ P.freeSites, μ j = ∑ i, P.rhs0 i := by
+      rw [← sum_sub_defect_iff P hr.1]
+      exact Solver.sum_eq_zero_of_mulVec_eq hK.vecMul_one hf.1
+    have hmean : ∑ k, P.weight k * u k = 0 := h.weighted_mean_eq_zero hK.mulVec_one
+    have hu : u = P.reducedU (closedSolver P p) μ := by
+      rw [reducedU_eq, P.freePart_sub_rhs0 hr.1]
+      exact pinnedSolver_unique hK hW hf.1 hmean
+    refine ⟨⟨hr, hs⟩, hu, fun μ' h' hs' => ?_⟩
+    have := h.2 _ μ' (hfe μ' h' hs')
+    rw [hu, objective_reducedU, objective_reducedU] at this
+    linarith
+  · rintro ⟨⟨hr, hs⟩, hu, hmin⟩
+    subst hu
+    refine ⟨hfe μ hr hs, fun v ν hv => ?_⟩
+    have hν : P.RedFeasible ν := (P.redFeasible_iff ν).2 hv.2
+    have hsν : ∑ j ∈ P.freeSites, ν j = ∑ i, P.rhs0 i := by
+      rw [← sum_sub_defect_iff P hν.1]
+      exact Solver.sum_eq_zero_of_mulVec_eq hK.vecMul_one hv.1
+    obtain ⟨c, hvc, hD⟩ := distortion_pinned hK hw p hv.1
+    have hxν : closedSolver P p (ν - P.Ω) = P.reducedU (closedSolver P p) ν := by
+      rw [reducedU_eq, P.freePart_sub_rhs0 hν.1]
+    have h1 : P.reducedU (closedSolver P p) ν = closedSolver P p (ν - P.Ω) := hxν.symm
+    have hge : P.distortion (P.reducedU (closedSolver P p) ν) ≤ P.distortion v := by
+      rw [hD, h1]
+      have : 0 ≤ 1 / 2 * (∑ k, P.weight k) * c ^ 2 :=
+        mul_nonneg (mul_nonneg (by norm_num) (Finset.sum_nonneg fun i _ => (hw i).le))
+          (sq_nonneg _)
+      linarith
+    have h2 := hmin ν hν hsν
+    have h3 := objective_reducedU P (closedSolver P p) μ
+    have h4 := objective_reducedU P (closedSolver P p) ν
+    have h5 : P.objective (P.reducedU (closedSolver P p) ν) ν ≤ P.objective v ν := by
+      unfold objective
+      linarith
+    linarith
+
+end Closed
 
 end ConeProblem
 
