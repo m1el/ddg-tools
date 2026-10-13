@@ -245,8 +245,10 @@ class SessionTest(unittest.TestCase):
                    curvature_per_triangle=array.array('d', [0.0] * len(self.mesh[3])),
                    length_weight=0.1)
 
-    def test_more_than_two_regions_is_not_available(self):
-        with self.assertRaisesRegex(ddg_tools.NotAvailableError, "not available yet"):
+    def test_a_geodesic_circle_starts_two_regions_only(self):
+        # The session takes more than two regions since the core has them; the circle start
+        # does not (it has an inside and an outside).
+        with self.assertRaisesRegex(ddg_tools.InputError, "two regions"):
             self.session(n_regions=3)
         with self.assertRaises(ddg_tools.InputError):
             self.session(n_regions=1)
