@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D23). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D24). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -153,26 +153,44 @@ ways a run ends; resuming from a stored `φ`; changing every control between ste
 
 ### Lean oracle
 
-`tests/oracle.rs` replays the three fixture sets of `lean/oracle` (an independent implementation
+`tests/oracle.rs` replays the five fixture sets of `lean/oracle` (an independent implementation
 written from `SPEC.md`), reading them by the oracle's README alone. Every stage of one full step
 is compared (`τ` and what it was computed from, the length force and both rates at every cut
 point, `ḡ`, the extension, `φ̃`, `φ′`, symmetry, the projection of Losasso et al., adjacency,
-the redistanced functions, counters, the new energy and cut):
+the redistanced functions, counters, the new energy and cut), with the statistics of the step
+rule that the fixture names:
 
 | set | fixtures | numbers compared | largest difference relative to `max(1, \|value\|)` |
 |---|---|---|---|
 | `cuts`: the paper's stages with the flux recovery of SPEC §3.5 | 26 | evaluation 70907; `d, e, G, s` 6218; step 24444 | `1.0·10⁻¹²`; `3.4·10⁻¹²`; `1.6·10⁻¹³` |
-| `cuts-default`: the default stages (D14–D16), each stage choice, the three step rules | 23 | 67349; 5691; 31460 | `1.0·10⁻¹²`; `8.1·10⁻¹⁴`; `7.9·10⁻¹⁴` |
-| `regions`: `N` regions, both stage sets, 15 fixtures with triple points | 19 | 124386 | `3.9·10⁻¹¹` |
+| `cuts-default`: the default stages (D14–D16), each stage choice, the three step rules | 23 | 67349; 5691; 32391 | `1.0·10⁻¹²`; `8.1·10⁻¹⁴`; `7.2·10⁻¹³` |
+| `regions`: `N` regions, both stage sets, 15 fixtures with triple points | 19 | 125667 | `3.9·10⁻¹¹` |
+| `cuts-robust`: the robust step rule (D22), both stage sets, 8 robust and 1 with the extremes, cut points limited in 5 | 9 | 28211; 2573; 15769 | `8.2·10⁻¹⁴`; `1.7·10⁻¹⁴`; `4.5·10⁻¹⁴` |
+| `regions-robust`: the same for `N` regions, boundary nodes limited in 3 | 5 | 36532 | `8.2·10⁻¹⁴` |
 
-No difference was found in any fixture. Two things the replay has to select: the oracle's step
-rule is the one with the extremes (`StepStatistics::Extremes`, the rule before D22); with the
-robust statistics, which are the default, `τ` or the limited cut points differ in every fixture
-whose step is not fixed (9 of `cuts`, 21 of `cuts-default`, 11 of `regions`; the test prints their
-names). And the oracle can smooth the feature size with the cotan Laplacian, which the crate does
-not have (D17): `m-featurelap-cotan` has no negative edge weight and agrees as it is, for
-`r-torus5-paper` the replay takes the oracle's weight `a` per vertex. The helpers for initial cuts
-are not in the oracle.
+The first three sets have the step rule with the extremes (`StepStatistics::Extremes`, the rule
+before D22); with the robust statistics, which are the default, `τ` or the limited cut points
+differ in every one of their fixtures whose step is not fixed (9 of `cuts`, 21 of `cuts-default`,
+11 of `regions`; the test prints their names). The last two sets add the quantile `ω`, both
+speeds `m̂` of the step rule, `h_c` and `ℓ_c`, and at every cut point or boundary node the factor
+of the local limit and the rate before and after it.
+
+One difference was found, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
+quantile were limited by the factor `1 − 2·10⁻¹⁶` here and not at all in the oracle. That cut
+point lies on the limit exactly, and the rounding of `τ` decided. SPEC §4 now says that a cut
+point at or below the quantile is not limited (D24), the crate does that, and the five sets
+agree. The oracle can also smooth the feature size with the cotan Laplacian, which the crate
+does not have (D17): `m-featurelap-cotan` has no negative edge weight and agrees as it is, for
+`r-torus5-paper` the replay takes the oracle's weight `a` per vertex. The helpers for initial
+cuts are not in the oracle.
+
+One case that the oracle's fixtures do not have is written by an ignored test, answered by the
+oracle's executable and replayed like a fixture: a region that is a single vertex whose
+neighbours alternate between two other regions, so that its boundary runs through triple points
+only (robust statistics, 4 boundary nodes limited). Default stages: 5241 numbers, largest
+difference `1.6·10⁻¹⁴`; paper's stages: 4737, `1.5·10⁻¹⁴`. `tests/regions.rs` checks the same
+state without the oracle (the weights of the quantiles add up to the length of the network, no
+boundary node moves by more than `max_motion · h`).
 
 ### Figures of the paper, with numbers
 
@@ -619,4 +637,5 @@ cargo run  --release -p ddg-variational-cuts --example bad_mesh_study      # see
 cargo test --release -p ddg-variational-cuts --test regions -- --nocapture
 cargo test --release -p ddg-variational-cuts --test flow -- --nocapture
 cargo test --release -p ddg-variational-cuts --test oracle -- --nocapture
+cargo test --release -p ddg-variational-cuts --test oracle -- --ignored --nocapture   # needs lean/oracle built
 ```

@@ -105,7 +105,9 @@ with `ℓ_c` the length of the cut at `c` (half the length of each of its segmen
 point, the whole length of each segment to a triple point): on nine tenths of the cut, ripples
 shorter than `2π w/ω` decay (D22). "Reach" is `≥`; `Σ ℓ` and the running sum are both accumulated
 in the ascending order, so that `q = 1` returns the largest value in floating point too; a cut
-without points gives 0. The largest `ω_c` is reported next to `ω`. `ω_c ≥ 0` for the
+without points gives 0. Where a quantile is taken over the boundary nodes of a network (§4),
+equal values are in the order of the node numbers of the copies (§8.2), whatever their regions.
+The largest `ω_c` is reported next to `ω`. `ω_c ≥ 0` for the
 Dirichlet energy (`Q_r = w_r (∂u/∂n)²`); for the scaled and the pointwise energies `Q_r` is not a
 square, `ω_c` and `ω` can be negative, and a negative `ω_c` means that the distortion term damps
 ripples there. On the sphere of unit area
@@ -492,7 +494,8 @@ known before the step: `s + λ⁰` with the length step on the cut (it bounds `|
 step on the mesh the rate that is extended is `s` and the step is split. The extremes then take
 `ρ = s`. The robust statistics take the larger of the two `m̂` below, the one for `ρ = s` (the
 explicit part) and the one for `ρ = s + λ⁰` (the whole motion; `λ⁰` is computed on the cut as in
-§3.10 for this purpose only). `ω_c`, `ω`, `ℓ_c` and `quantile` are those of §1.
+§3.10 for this purpose only, with the `c` of the flux recovery in use). `s` is the speed of §3.7,
+after the sliver smoothing where that is on. `ω_c`, `ω`, `ℓ_c` and `quantile` are those of §1.
 
 ```
 Fixed(τ)                                     τ                                   (the paper's)
@@ -504,20 +507,30 @@ A term whose denominator is not positive is skipped. Which statistics `m̂` and 
 option (`FlowOptions::step_statistics`, D22):
 
 * **Robust** (default). `h_c` is the shortest of the crossed edges that share a vertex with the
-  edge of `c` (its own included): a change of `φ` at a vertex moves the crossings of all its
-  edges. `m_c = |ρ_c| / h_c` is the speed in such edges per unit time,
+  edge of `c`: all crossed edges of the cut at its two ends, its own included, also those that
+  carry a cut point of another piece of the cut. A change of `φ` at a vertex moves the crossings
+  of all its edges. `m_c = |ρ_c| / h_c` is the speed in such edges per unit time,
   `m̂ = quantile_0.9 (m_c ; ℓ_c)`, and `ω` is the roughening rate of the state. After `τ` and the
-  rate `r` are known, every cut point is limited on its own `[formula: cut-step-local]`:
+  rate `r` are known (`r` of §3.10, or `s` with the length step on the mesh), every cut point is
+  limited on its own `[formula: cut-step-local]`:
 
   ```
-  r_c ← r_c · min(1, max_motion · h_c / (τ · v_c)),      v_c = |r_c|                       (Capped)
-                                                         v_c = max(|r_c|, ½ (ω_c − ω)₊)    (Adaptive)
+  v_c = |r_c|                       (Capped)
+  v_c = max(|r_c|, ½ (ω_c − ω)₊)    (Adaptive)
+  r_c ← r_c                                            if v_c / h_c ≤ m̂   (m̂: the one τ was computed from)
+  r_c ← r_c · min(1, max_motion · h_c / (τ · v_c))     otherwise
   ```
 
   so no cut point moves by more than `max_motion · h_c`, and a cut point whose local roughening
   rate exceeds that of the state is treated as if it had the speed `½ (ω_c − ω)`, which is what a
-  cut can reach within the face of a spike (`|s| ≤ Q_0 + Q_1`). The number of limited cut points
-  is reported. This is a step of its own for the outliers: the limited rate is still a descent
+  cut can reach within the face of a spike (`|s| ≤ Q_0 + Q_1`). The first case says nothing new
+  in exact arithmetic (`τ ≤ max_motion / m̂`), and it covers `v_c = 0`. It is stated because the
+  cut point of the quantile lies on the limit exactly wherever `r = ρ` (no length term; or the
+  length step on the mesh, when the `m̂` for `ρ = s` is the larger one): `v_c / h_c`, evaluated
+  like `m_c`, is `m̂` to the last bit, while `τ · v_c > max_motion · h_c` there is decided by the
+  rounding of `τ` (D24). The limited rate is
+  what `ḡ` multiplies and what is extended. The number of limited cut points (factor below 1) is
+  reported. This is a step of its own for the outliers: the limited rate is still a descent
   direction and rest states are unchanged. With `Fixed` nothing is limited.
 * **Extremes**. `m̂ = max_c |ρ_c| / min_c h` with `h` the shortest crossed edge, `ω = max_c ω_c`,
   no local limit: the paper's remark taken literally, and the rule before D22.
@@ -530,10 +543,15 @@ balanced latitude of §6 item 5 (icosphere(4), `α_L = 20`, `ψ* = 0.788`, the p
 the flux recovery of §3.5) came to rest at `ψ* − 0.41` from both sides, against `ψ* − 0.09` and
 `ψ* − 0.06` with both speeds, which is also what the extremes give.
 
-On a network (§8) the same holds with the boundary nodes of §8.5 in place of the cut points when
-the length step is on the cut (`ρ_v = s_v + λ⁰_v`, `ℓ_v`; `ω` is always taken over the cut
-points; a copy of a cut point has its `h_c` and `ω_c`, a copy of a triple point the shortest
-`h_c` of its three cut points and no `ω_c`).
+On a network (§8): `ω` and the `m̂` for `ρ = s` are taken over the cut points with the weights
+`ℓ_c` of §1. The `m̂` for `ρ = s + λ⁰` is taken over the boundary nodes of all regions together,
+`m_v = |s_v + λ⁰_v| / h_v` with the weights `ℓ_v` of §8.5 (ties as in §1). A copy of a cut point
+has the `h_c` and the `ω_c` of its cut point; a copy of a triple point has the shortest `h_c` of
+the three cut points of its face and no `ω_c` (`v = |r|`). The default stages use the second `m̂`,
+the paper's stages the larger of the two. The local limit acts on every boundary node: with the
+paper's stages on `s_v`, before the harmonic extension (§8.4), with the default stages on the
+rate `ρ_v` of the second system of §8.5, before `ḡ`. The report counts the cut points and the
+triple points with a limited copy, each once.
 
 The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Why:
 
@@ -851,7 +869,8 @@ across the segment `σ` (§3.10, taken in the triangle of `X` at `σ`):
 ℓ_v ρ_v  + τ Σ_{σ = vu at v} (w̄_σ / |σ|) (ρ_v − ρ_u)       = ℓ_v (s_v + λ⁰_v)
 ```
 
-with `s_v` of §8.3 and `τ` from the step rule applied to `s_v + λ⁰_v` over all boundary nodes.
+with `s_v` of §8.3 and `τ` from the step rule applied to `s_v + λ⁰_v` over all boundary nodes
+(§4; the local limit of the robust statistics then acts on `ρ_v`, before `ḡ`).
 These are the two systems of §3.10 on the boundary of `X`, a chain through its triple points
 (one matrix over all boundary copies, the pattern of the flux recovery). `ρ_v` is the rate of
 `φ_X` at `v`.
@@ -1172,6 +1191,16 @@ region of every face.
   the mean; (b) §3.10 "same `c`": the `c` of the flux recovery in use, 0 for the nodal one;
   (c) §1, §3.10, §4 for `ω ≤ 0`; (d) §3.8: the range of `σ` at unreached vertices; (e) §8.2: the
   range of the crossing parameter; (f) §8.5: when the loads at a triple point vanish.
+* **D24** Made exact after an independent implementation of D22 (the oracle) was replayed. One
+  disagreement: (a) the cut point of the quantile lies on the local limit exactly, and whether
+  it was limited (by a factor `1 − 2·10⁻¹⁶`) was decided by the rounding of `τ`; §4 now leaves a
+  cut point with `v_c/h_c ≤ m̂` unlimited. Places where the text left a choice, and the two
+  implementations had made the same one except in (b): (b) the order of equal values in a
+  quantile over the boundary nodes of several regions (§1: node numbers); (c) which crossed
+  edges `h_c` ranges over; (d) which `s` and which `λ⁰` the second `m̂` of the length step on
+  the mesh uses; (e) `v_c = 0`; (f) on a network, the weights of the two `m̂`, the `h` and `v`
+  of a triple copy, which rate the limit acts on for each stage set, and what the report
+  counts.
 
 Add to this list whenever something else turns up; never drop an entry.
 
@@ -1190,7 +1219,8 @@ kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matric
 `cut-roughening-rate` (now also the quantile of the local rates), `cut-weighted-quantile` (the
 result is one of the values; monotone in `q`; `q = 1` gives the maximum; at least the fraction `q`
 of the weight lies at or below it), `cut-step-local` (the factor lies in `(0, 1]`; the limited
-motion is at most `max_motion · h_c`; the sign of the rate is kept), and for `N` regions `cut-edge-crossing-regions` (equals
+motion is at most `max_motion · h_c`; the sign of the rate is kept; the two cases agree: if
+`τ m̂ ≤ max_motion` and `v_c/h_c ≤ m̂` then `max_motion · h_c ≥ τ v_c`), and for `N` regions `cut-edge-crossing-regions` (equals
 `cut-edge-crossing` for `φ, −φ`; lies in `[0, 1]`), `cut-triple-point` (inside the triangle of the
 three cut points; the three quads are convex), `cut-region-extension`, `cut-region-projection`
 (differences kept, hence no crossing moves; smallest `−d`, second `+d`; identity for `N = 2`),
