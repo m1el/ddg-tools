@@ -140,6 +140,13 @@ A wrong sign of one term would give an error of 1 or 2. This confirms SPEC D2: t
 With the paper's `v/ℓ` the largest error of `s` on the same four meshes is 13 %, 930 %, 150 %,
 6700 % (and the same with one sliver pass).
 
+**Lean oracle** (`tests/oracle.rs`). The 21 committed fixtures of `lean/oracle/fixtures/cuts`, the
+output of an independent dense implementation written from `SPEC.md` alone, are replayed: the
+scaling, face curvatures, crossings, every triangle of the cut mesh (nodes, lengths, areas), the
+segments, `u`, `p`, `v`, `ℓ`, `q` at every node, `J` and the areas per region, the energy, and
+(with the nodal recovery the fixtures were generated with) `G` and `s` before and after sliver
+smoothing: 59 954 numbers, largest difference `3·10⁻¹²` relative to `max(1, |value|)`.
+
 Further tests: the flat disk with a uniform source (SPEC §1 "Checks": `u`, `J`, `∂u/∂n`, the Hencky
 adjoint `∂p/∂n = −Kρ³/8`); length and penalty terms and their derivative on a sphere; the curvature
 identity `Σ_f Ω_f = Σ (2π − Θ_i)`; areas and Euler characteristics of the cut mesh; the mesh that
