@@ -321,13 +321,25 @@ mod tests {
 
     #[test]
     fn primitives_have_the_expected_topology() {
-        assert_eq!(counts(&uv_sphere(32, 16, 1.0).unwrap()), (482, 992, 512, 0, 0));
+        assert_eq!(
+            counts(&uv_sphere(32, 16, 1.0).unwrap()),
+            (482, 992, 512, 0, 0)
+        );
         assert_eq!(counts(&cube(2.0)), (8, 12, 6, 0, 0));
         assert_eq!(counts(&grid_cube(4, 2.0)), (98, 192, 96, 0, 0));
-        assert_eq!(counts(&cylinder(32, 1, 1.0, 2.0).unwrap()), (64, 96, 34, 0, 0));
+        assert_eq!(
+            counts(&cylinder(32, 1, 1.0, 2.0).unwrap()),
+            (64, 96, 34, 0, 0)
+        );
         assert_eq!(counts(&cone(32, 1.0, 2.0).unwrap()), (33, 64, 33, 0, 0));
-        assert_eq!(counts(&capsule(32, 8, 0.5, 1.0).unwrap()), (514, 1056, 544, 0, 0));
-        assert_eq!(counts(&torus(48, 12, 1.0, 0.25).unwrap()), (576, 1152, 576, 1, 0));
+        assert_eq!(
+            counts(&capsule(32, 8, 0.5, 1.0).unwrap()),
+            (514, 1056, 544, 0, 0)
+        );
+        assert_eq!(
+            counts(&torus(48, 12, 1.0, 0.25).unwrap()),
+            (576, 1152, 576, 1, 0)
+        );
         let slab = holed_slab(2, 1, 1.0);
         assert_eq!(counts(&slab).3, 2);
         let open = revolution(&[(1.0, 1.0), (1.0, 0.0)], 8, End::Open, End::Cap).unwrap();
@@ -348,7 +360,8 @@ mod tests {
         ] {
             let mut volume = 0.0;
             for t in &mesh.triangles {
-                let [a, b, c] = t.map(|k| mesh.positions[mesh.corner_vertices[k as usize] as usize]);
+                let [a, b, c] =
+                    t.map(|k| mesh.positions[mesh.corner_vertices[k as usize] as usize]);
                 volume += a[0] * (b[1] * c[2] - b[2] * c[1])
                     + a[1] * (b[2] * c[0] - b[0] * c[2])
                     + a[2] * (b[0] * c[1] - b[1] * c[0]);

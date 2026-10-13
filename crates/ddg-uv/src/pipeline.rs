@@ -188,8 +188,13 @@ pub fn assemble(
         }
         pack_in_place(&mut uvs, &corner_chart, input.polygon_offsets, &pack)
     });
-    if let Some(c) = uvs.iter().position(|q| !(q[0].is_finite() && q[1].is_finite())) {
-        return Err(internal(format!("packing made the UV of corner {c} non-finite")));
+    if let Some(c) = uvs
+        .iter()
+        .position(|q| !(q[0].is_finite() && q[1].is_finite()))
+    {
+        return Err(internal(format!(
+            "packing made the UV of corner {c} non-finite"
+        )));
     }
     let seconds_pack = pack_start.elapsed().as_secs_f64();
 
@@ -273,7 +278,9 @@ pub fn assemble(
     let max_overlapped_fraction = charts
         .iter()
         .filter_map(|c| c.flatten.overlapped_fraction)
-        .fold(None, |best: Option<f64>, x| Some(best.map_or(x, |b| b.max(x))));
+        .fold(None, |best: Option<f64>, x| {
+            Some(best.map_or(x, |b| b.max(x)))
+        });
     let report = Report {
         n_vertices: prepared.n_input_vertices,
         n_polygons: prepared.n_polygons,
@@ -332,7 +339,11 @@ fn seam_lengths(
     for pair in images.windows(2).filter(|w| w[0].0 == w[1].0) {
         let (edge, (la, lb)) = (pair[0].0, (pair[0].1, pair[1].1));
         let largest = la.max(lb);
-        let mismatch = if largest > 0.0 { (la - lb).abs() / largest } else { 0.0 };
+        let mismatch = if largest > 0.0 {
+            (la - lb).abs() / largest
+        } else {
+            0.0
+        };
         if seams.binary_search(&edge).is_ok() {
             out.n_seam_edges += 1;
             seam_sum += mismatch;

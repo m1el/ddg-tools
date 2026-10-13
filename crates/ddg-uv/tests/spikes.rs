@@ -42,14 +42,26 @@ fn spikes_are_reported_in_the_callers_numbering() {
     assert!(found.n_carrying == 2 && found.share >= 0.99);
     assert!(found.cone_free_distortion > 1.0, "{found:?}");
 
-    let warnings: Vec<&String> = report.warnings.iter().filter(|w| w.contains("thin spike")).collect();
+    let warnings: Vec<&String> = report
+        .warnings
+        .iter()
+        .filter(|w| w.contains("thin spike"))
+        .collect();
     assert_eq!(warnings.len(), 1, "{:?}", report.warnings);
     let text = warnings[0];
-    assert!(text.contains(&format!("vertices {}, {}", expected[0], expected[1])), "{text}");
+    assert!(
+        text.contains(&format!("vertices {}, {}", expected[0], expected[1])),
+        "{text}"
+    );
     assert!(text.contains("Repair the mesh"), "{text}");
 
     let summary = report.summary();
-    let get = |key: &str| summary.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
+    let get = |key: &str| {
+        summary
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.clone())
+    };
     assert_eq!(get("n_spike_vertices"), Some(Value::Int(2)));
     assert_eq!(
         get("spike_vertices"),
@@ -70,15 +82,32 @@ fn the_check_can_be_switched_off_and_warn_only_does_not_change_the_map() {
         ..UnwrapOptions::default()
     };
     let on = unwrap(&mesh.input(), &warn).unwrap();
-    assert!(on.report.charts[0].spikes.as_ref().unwrap().excluded.is_empty());
+    assert!(
+        on.report.charts[0]
+            .spikes
+            .as_ref()
+            .unwrap()
+            .excluded
+            .is_empty()
+    );
     let options = UnwrapOptions {
         spike_check: None,
         ..UnwrapOptions::default()
     };
     let off = unwrap(&mesh.input(), &options).unwrap();
     assert!(off.report.charts[0].spikes.is_none());
-    assert!(off.report.warnings.iter().all(|w| !w.contains("thin spike")));
-    assert!(off.report.summary().iter().all(|(k, _)| !k.contains("spike_vertices")));
+    assert!(
+        off.report
+            .warnings
+            .iter()
+            .all(|w| !w.contains("thin spike"))
+    );
+    assert!(
+        off.report
+            .summary()
+            .iter()
+            .all(|(k, _)| !k.contains("spike_vertices"))
+    );
     assert_eq!(on.uvs, off.uvs);
     assert_eq!(on.cones, off.cones);
 }
@@ -95,18 +124,50 @@ fn a_looser_limit_finds_more_and_a_stricter_one_nothing() {
     };
     let map = unwrap(&mesh.input(), &strict).unwrap();
     let found = map.report.charts[0].spikes.as_ref().unwrap();
-    assert!(found.vertices.is_empty() && found.n_carrying == 2, "{found:?}");
-    assert!(map.report.warnings.iter().all(|w| !w.contains("thin spike")));
+    assert!(
+        found.vertices.is_empty() && found.n_carrying == 2,
+        "{found:?}"
+    );
+    assert!(
+        map.report
+            .warnings
+            .iter()
+            .all(|w| !w.contains("thin spike"))
+    );
 }
 
 #[test]
 fn bad_limits_are_refused() {
     let (mesh, _) = spiked_disk();
     for (name, check) in [
-        ("spike_check.share", SpikeCheck { share: 0.0, ..SpikeCheck::default() }),
-        ("spike_check.share", SpikeCheck { share: 1.5, ..SpikeCheck::default() }),
-        ("spike_check.max_fraction", SpikeCheck { max_fraction: -0.1, ..SpikeCheck::default() }),
-        ("spike_check.min_distortion", SpikeCheck { min_distortion: f64::NAN, ..SpikeCheck::default() }),
+        (
+            "spike_check.share",
+            SpikeCheck {
+                share: 0.0,
+                ..SpikeCheck::default()
+            },
+        ),
+        (
+            "spike_check.share",
+            SpikeCheck {
+                share: 1.5,
+                ..SpikeCheck::default()
+            },
+        ),
+        (
+            "spike_check.max_fraction",
+            SpikeCheck {
+                max_fraction: -0.1,
+                ..SpikeCheck::default()
+            },
+        ),
+        (
+            "spike_check.min_distortion",
+            SpikeCheck {
+                min_distortion: f64::NAN,
+                ..SpikeCheck::default()
+            },
+        ),
     ] {
         let options = UnwrapOptions {
             spike_check: Some(check),
@@ -140,14 +201,20 @@ fn generated_meshes_have_no_spikes() {
         ("bumpy disk", bumpy_grid_disk(24, 24, 0.4).unwrap()),
         ("flat disk", bumpy_grid_disk(24, 24, 0.0).unwrap()),
     ] {
-        meshes.push((name.into(), PolygonMesh::from_triangles(g.positions.clone(), &g.faces)));
+        meshes.push((
+            name.into(),
+            PolygonMesh::from_triangles(g.positions.clone(), &g.faces),
+        ));
     }
     for (name, mesh) in &meshes {
         let options = UnwrapOptions::default();
         let input = mesh.input();
         let map = unwrap(&input, &options).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(
-            map.report.warnings.iter().all(|w| !w.contains("thin spike")),
+            map.report
+                .warnings
+                .iter()
+                .all(|w| !w.contains("thin spike")),
             "{name}: {:?}",
             map.report.warnings
         );
@@ -174,7 +241,13 @@ fn spike_tips_are_excluded_from_the_distortion_by_default_and_the_report_says_wh
     expected.sort_unstable();
     assert_eq!(found.excluded, expected);
     assert!(found.not_excluded_boundary.is_empty());
-    assert!(default.report.warnings.iter().any(|w| w.contains("excluded from the distortion")));
+    assert!(
+        default
+            .report
+            .warnings
+            .iter()
+            .any(|w| w.contains("excluded from the distortion"))
+    );
     let warn = UnwrapOptions {
         spike_check: Some(SpikeCheck {
             action: SpikeAction::WarnOnly,
@@ -183,7 +256,10 @@ fn spike_tips_are_excluded_from_the_distortion_by_default_and_the_report_says_wh
         ..UnwrapOptions::default()
     };
     let only = unwrap(&mesh.input(), &warn).unwrap();
-    assert!(only.cones != default.cones || only.uvs != default.uvs, "the exclusion had no effect");
+    assert!(
+        only.cones != default.cones || only.uvs != default.uvs,
+        "the exclusion had no effect"
+    );
     // Also with optimized boundary values; interior tips are excluded, the result is valid.
     let free = UnwrapOptions {
         boundary: ddg_uv::BoundaryValues::Optimized,
@@ -192,5 +268,9 @@ fn spike_tips_are_excluded_from_the_distortion_by_default_and_the_report_says_wh
     let map = unwrap(&mesh.input(), &free).unwrap();
     check(&mesh, &mesh.input(), &map, &free);
     let found = map.report.charts[0].spikes.as_ref().unwrap();
-    assert_eq!(found.excluded, expected, "{found:?} {:?}", map.report.warnings);
+    assert_eq!(
+        found.excluded, expected,
+        "{found:?} {:?}",
+        map.report.warnings
+    );
 }

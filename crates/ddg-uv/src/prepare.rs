@@ -330,17 +330,17 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
         })
         .collect();
     let mut degenerate = DegenerateReport::default();
-    let degenerate_error =
-        |faces: &[ddg_core::geometry::DegenerateFace], after_mollification: bool| {
-            let first = &faces[0];
-            UvError::DegenerateTriangles {
-                count: faces.len(),
-                polygon: triangle_polygon[first.face as usize],
-                vertices: first.vertices.map(|v| vertex_input[v as usize]),
-                lengths: first.lengths,
-                after_mollification,
-            }
-        };
+    let degenerate_error = |faces: &[ddg_core::geometry::DegenerateFace],
+                            after_mollification: bool| {
+        let first = &faces[0];
+        UvError::DegenerateTriangles {
+            count: faces.len(),
+            polygon: triangle_polygon[first.face as usize],
+            vertices: first.vertices.map(|v| vertex_input[v as usize]),
+            lengths: first.lengths,
+            after_mollification,
+        }
+    };
     let geometry_error = |e: GeometryError, after_mollification: bool| match e {
         GeometryError::DegenerateFaces { faces } => degenerate_error(&faces, after_mollification),
         GeometryError::InvalidEdgeLength { vertices, .. } => UvError::NonFinite {
@@ -360,9 +360,7 @@ pub fn prepare(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<Prepare
         report.epsilon = mollified.epsilon;
         report.delta = mollified.delta;
         report.n_triangles_below_margin = mollified.n_faces_below_margin;
-        report.worst_polygon = mollified
-            .worst_face
-            .map(|f| triangle_polygon[f as usize]);
+        report.worst_polygon = mollified.worst_face.map(|f| triangle_polygon[f as usize]);
         Ok(mollified.edge_lengths)
     };
     let geometry = match options.degenerate {

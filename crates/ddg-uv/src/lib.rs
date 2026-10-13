@@ -127,11 +127,12 @@ pub use options::{
     BoundaryValues, ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
     SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions,
 };
-pub use spikes::SpikeReport;
 pub use pack::{PackReport, pack_charts};
 pub use pipeline::{UvMap, assemble, unwrap};
 pub use prepare::{Piece, Prepared, prepare};
 pub use report::{
     ChartReport, ClosedHandling, ConeSolveReport, ConeStats, DegenerateReport, FlattenReport,
-    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport, Value,
+    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport,
+    Value,
 };
+pub use spikes::SpikeReport;

@@ -31,7 +31,10 @@ fn dataset(name: &str) -> Option<PolygonMesh> {
         PathBuf::from,
     );
     let Ok(obj) = read_obj(dir.join(format!("{name}.obj"))) else {
-        eprintln!("dataset mesh {name} not found in {}: skipped", dir.display());
+        eprintln!(
+            "dataset mesh {name} not found in {}: skipped",
+            dir.display()
+        );
         return None;
     };
     Some(PolygonMesh::from_triangles(
@@ -51,17 +54,25 @@ fn meshes() -> Vec<(&'static str, PolygonMesh, bool)> {
             false,
         ),
         // 2 048 polygons (quads and fans), closed and round: the free-site fallback, two solves.
-        ("uv_sphere_64x32", uv_sphere(64, 32, 1.0).expect("valid"), false),
+        (
+            "uv_sphere_64x32",
+            uv_sphere(64, 32, 1.0).expect("valid"),
+            false,
+        ),
         // 1 536 quads, closed with corners: the raw optimum.
         ("grid_cube_16", grid_cube(16, 2.0), false),
         // 2 304 quads, genus 1: no cone solve, handle cuts.
-        ("torus_96x24", torus(96, 24, 1.0, 0.25).expect("valid"), false),
+        (
+            "torus_96x24",
+            torus(96, 24, 1.0, 0.25).expect("valid"),
+            false,
+        ),
     ];
     for (name, large) in [
-        ("hand", false),   // 6 660 triangles, boundary
-        ("camel", false),  // 22 704 triangles, boundary
-        ("bunny", false),  // 28 576 triangles, closed
-        ("brain", true),   // 305 782 triangles, closed
+        ("hand", false),  // 6 660 triangles, boundary
+        ("camel", false), // 22 704 triangles, boundary
+        ("bunny", false), // 28 576 triangles, closed
+        ("brain", true),  // 305 782 triangles, closed
     ] {
         if let Some(mesh) = dataset(name) {
             meshes.push((name, mesh, large));
@@ -96,7 +107,10 @@ fn stages(c: &mut Criterion) {
     let mut group = c.benchmark_group("stages");
     group.sample_size(10).warm_up_time(Duration::from_secs(1));
     for (name, mesh, large) in meshes() {
-        if !matches!(name, "bumpy_disk_64" | "uv_sphere_64x32" | "camel" | "brain") {
+        if !matches!(
+            name,
+            "bumpy_disk_64" | "uv_sphere_64x32" | "camel" | "brain"
+        ) {
             continue;
         }
         if large && !large_enabled() {

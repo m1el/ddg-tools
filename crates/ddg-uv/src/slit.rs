@@ -47,7 +47,11 @@ fn dijkstra(piece: &Piece, blocked: &[bool], source: usize) -> (Vec<f64>, Vec<u3
         distance: 0.0,
         vertex: source as u32,
     });
-    while let Some(Entry { distance: d, vertex }) = heap.pop() {
+    while let Some(Entry {
+        distance: d,
+        vertex,
+    }) = heap.pop()
+    {
         let v = vertex as usize;
         if d > distance[v] {
             continue;

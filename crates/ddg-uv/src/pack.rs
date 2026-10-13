@@ -163,8 +163,8 @@ fn fit(boxes: &[ChartBox], margin: f64) -> (f64, Vec<[f64; 2]>) {
         .fold(0.0f64, f64::max);
     if !(largest > 0.0 && largest.is_finite()) {
         // Every chart is a point: any scale will do.
-        let corners = shelve(boxes, 1.0, margin, TOLERANCE)
-            .unwrap_or_else(|| vec![[0.0, 0.0]; boxes.len()]);
+        let corners =
+            shelve(boxes, 1.0, margin, TOLERANCE).unwrap_or_else(|| vec![[0.0, 0.0]; boxes.len()]);
         return (1.0, corners);
     }
     let upper = (1.0 - 2.0 * margin) / largest;
@@ -207,7 +207,11 @@ pub(crate) fn pack_in_place(
         area += 0.5 * twice.abs();
     }
 
-    let n_ids = corner_chart.iter().map(|&c| c as usize + 1).max().unwrap_or(0);
+    let n_ids = corner_chart
+        .iter()
+        .map(|&c| c as usize + 1)
+        .max()
+        .unwrap_or(0);
     let mut points: Vec<Vec<[f64; 2]>> = vec![Vec::new(); n_ids];
     for (c, &chart) in corner_chart.iter().enumerate() {
         points[chart as usize].push(uvs[c]);
@@ -369,7 +373,10 @@ pub fn pack_charts(
             requirement: format!("the last offset must be the number of UVs, {}", uvs.len()),
         });
     }
-    if let Some(c) = uvs.iter().position(|uv| !(uv[0].is_finite() && uv[1].is_finite())) {
+    if let Some(c) = uvs
+        .iter()
+        .position(|uv| !(uv[0].is_finite() && uv[1].is_finite()))
+    {
         return Err(UvError::NonFinite {
             what: "uvs",
             position: c,
@@ -414,10 +421,15 @@ mod tests {
             .iter()
             .map(|p| [c * p[0] - s * p[1], s * p[0] + c * p[1]])
             .collect();
-        let report = pack_charts(&mut uvs, &[0, 4], &[0], &PackOptions {
-            margin: 0.0,
-            rotate: true,
-        })
+        let report = pack_charts(
+            &mut uvs,
+            &[0, 4],
+            &[0],
+            &PackOptions {
+                margin: 0.0,
+                rotate: true,
+            },
+        )
         .unwrap();
         assert_eq!(report.n_rotated, 1);
         assert!((report.scale - 0.25).abs() < 1e-12, "{}", report.scale);
@@ -506,13 +518,21 @@ mod tests {
             offsets.push(uvs.len() as u32);
             charts.push(i);
         }
-        let report = pack_charts(&mut uvs, &offsets, &charts, &PackOptions {
-            margin: 0.2,
-            rotate: true,
-        })
+        let report = pack_charts(
+            &mut uvs,
+            &offsets,
+            &charts,
+            &PackOptions {
+                margin: 0.2,
+                rotate: true,
+            },
+        )
         .unwrap();
         assert!((report.margin - 1.0 / 40.0).abs() < 1e-15);
         assert!(report.scale > 0.0);
-        assert!(uvs.iter().all(|p| p.iter().all(|x| (0.0..=1.0).contains(x))));
+        assert!(
+            uvs.iter()
+                .all(|p| p.iter().all(|x| (0.0..=1.0).contains(x)))
+        );
     }
 }

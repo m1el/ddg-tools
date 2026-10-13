@@ -367,10 +367,9 @@ impl fmt::Display for UvError {
                 f,
                 "the triangles of face {polygon} do not triangulate it: {problem}"
             ),
-            DegenerateSeamEdge { position, vertex } => write!(
-                f,
-                "seam_edges[{position}] joins vertex {vertex} to itself"
-            ),
+            DegenerateSeamEdge { position, vertex } => {
+                write!(f, "seam_edges[{position}] joins vertex {vertex} to itself")
+            }
             DuplicatePrescribed { vertex } => {
                 write!(f, "vertex {vertex} has more than one prescribed cone")
             }

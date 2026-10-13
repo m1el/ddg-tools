@@ -404,8 +404,11 @@ impl Report {
     pub fn summary(&self) -> Vec<(&'static str, Value)> {
         let int = |n: usize| Value::Int(n as i64);
         let v = &self.validation;
-        let solves: Vec<&ConeSolveReport> =
-            self.charts.iter().filter_map(|c| c.solve.as_ref()).collect();
+        let solves: Vec<&ConeSolveReport> = self
+            .charts
+            .iter()
+            .filter_map(|c| c.solve.as_ref())
+            .collect();
         let fold_max = |values: &mut dyn Iterator<Item = f64>| values.fold(0.0f64, f64::max);
         let mut out = vec![
             ("n_unreferenced_vertices", int(v.n_loose_vertices)),
@@ -475,7 +478,10 @@ impl Report {
                 Value::Float(self.area_distortion.raw),
             ),
             ("flatten_flipped_triangles", int(self.flipped_triangles)),
-            ("flatten_collapsed_triangles", int(self.degenerate_triangles)),
+            (
+                "flatten_collapsed_triangles",
+                int(self.degenerate_triangles),
+            ),
             (
                 "max_quasi_conformal_error",
                 Value::Float(fold_max(
@@ -506,11 +512,17 @@ impl Report {
             Value::Float(self.seam_lengths.max_other_mismatch),
         ));
         // Present only if the spike check ran.
-        let checks: Vec<&SpikeReport> = self.charts.iter().filter_map(|c| c.spikes.as_ref()).collect();
+        let checks: Vec<&SpikeReport> = self
+            .charts
+            .iter()
+            .filter_map(|c| c.spikes.as_ref())
+            .collect();
         if !checks.is_empty() {
             let spikes: Vec<u32> = {
-                let mut all: Vec<u32> =
-                    checks.iter().flat_map(|s| s.vertices.iter().copied()).collect();
+                let mut all: Vec<u32> = checks
+                    .iter()
+                    .flat_map(|s| s.vertices.iter().copied())
+                    .collect();
                 all.sort_unstable();
                 all
             };
