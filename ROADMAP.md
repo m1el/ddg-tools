@@ -19,6 +19,12 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
    detected wrong result (a failed trace) is an error, never repaired silently. Branches: `master`
    was moved up to `variational-cuts` when the UV-flip fix landed; the work is on
    `intrinsic-triangulations`. The contract is `crates/ddg-intrinsic/SPEC.md`.
+   Acceptance (the user, 2026-10-14: only robustness, correctness and speed count; angles up to
+   120° are fine if the numbers are): refinement bounds angles to 30°–120°, not to acute. Whether
+   that is enough is decided by measurement: rerun `bad_mesh_study` and the three exact laws on
+   the refined intrinsic triangulation of the bad meshes, and compare redistancing error, the
+   error of the speed, the circle law and whether runs settle with the well-shaped baseline.
+   Nothing beyond the paper (non-obtuse triangulations) unless those numbers fail.
 
 ## Decided (2026-10-14)
 
