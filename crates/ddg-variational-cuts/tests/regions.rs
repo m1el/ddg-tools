@@ -1019,3 +1019,102 @@ fn network_of_several_regions() {
         Err(CutError::UnsupportedRegionCount { got: 4 })
     ));
 }
+
+/// SPEC §4, §8.4, §8.5 (D22): the robust step rule where the boundary of a region is a closed
+/// chain in which every segment ends at a triple point: one vertex in region 0 whose
+/// neighbours alternate between the regions 1 and 2, so that all its faces have three
+/// regions. One step with either stage set: the weights of the two quantiles add up to the
+/// length of the network, a copy of a triple point has the shortest `h_c` of its three cut
+/// points, the local limit bounds the motion of every boundary node, and the report counts the
+/// cut points and triple points with a limited copy.
+#[test]
+fn robust_step_where_a_boundary_runs_through_triple_points_only() {
+    let s = sphere(2);
+    let nv = s.positions.len();
+    let faces = s.mesh.faces();
+    let around = |v: u32| faces.iter().filter(|f| f.contains(&v)).count();
+    let centre = (0..nv as u32).find(|&v| around(v) == 6).unwrap();
+    // The neighbours in the order around the vertex: in a face (centre, a, b), b follows a.
+    let mut next = std::collections::HashMap::new();
+    for f in faces.iter().filter(|f| f.contains(&centre)) {
+        let k = f.iter().position(|&v| v == centre).unwrap();
+        next.insert(f[(k + 1) % 3], f[(k + 2) % 3]);
+    }
+    let mut labels = vec![1u32; nv];
+    labels[centre as usize] = 0;
+    let mut v = *next.keys().min().unwrap();
+    for k in 0..6 {
+        labels[v as usize] = 1 + (k % 2);
+        v = next[&v];
+    }
+    let phis = init::regions_from_vertex_labels(&s.mesh, &s.geometry, &labels, 3).unwrap();
+    let problem = CutProblem::for_regions(Energy::Dirichlet, 1.0, 3);
+    let step_size = StepSize::default();
+    let StepSize::Adaptive { max_motion, .. } = step_size else {
+        unreachable!()
+    };
+    for options in [
+        FlowOptions::new(step_size),
+        FlowOptions::for_regions(step_size),
+    ] {
+        let mut flow = RegionFlow::new(&s.mesh, &s.geometry, &phis).unwrap();
+        let e = flow.evaluate(&problem, &options.eval).unwrap();
+        let (n_points, n_triples) = (e.cut.points.len(), e.cut.triple_points.len());
+        assert_eq!(n_triples, 6);
+        let spokes: Vec<usize> = (0..n_points)
+            .filter(|&p| {
+                s.mesh
+                    .edge_vertices(e.cut.points[p].edge as usize)
+                    .contains(&(centre as usize))
+            })
+            .collect();
+        assert_eq!(spokes.len(), 6);
+        for segment in &e.cut.segments {
+            if spokes.contains(&(segment.points[0] as usize)) {
+                assert!(segment.points[1] as usize >= n_points);
+            }
+        }
+
+        let (report, stages) = flow.step_with_stages(&problem, &options).unwrap();
+        assert!(report.tau > 0.0 && report.tau.is_finite());
+        assert!(report.step_speed > 0.0 && report.roughening_rate.is_finite());
+        // The weights of the quantile over the cut points sum to the length of the network,
+        // those over the boundary nodes to twice that: every segment bounds two regions.
+        let length = e.energy.length;
+        assert!((stages.cut_length.iter().sum::<f64>() - length).abs() < 1e-12 * length);
+        assert!((stages.node_length.iter().sum::<f64>() - 2.0 * length).abs() < 1e-12 * length);
+        for (m, triple) in e.cut.triple_points.iter().enumerate() {
+            let shortest = triple
+                .points
+                .iter()
+                .map(|&p| stages.local_edge[p as usize])
+                .fold(f64::INFINITY, f64::min);
+            for k in 0..3 {
+                assert_eq!(stages.node_edge[2 * n_points + 3 * m + k], shortest);
+            }
+        }
+        let mut limited = vec![false; n_points + n_triples];
+        for (i, &factor) in stages.limit_factor.iter().enumerate() {
+            let node = nv + i;
+            assert!(factor > 0.0 && factor <= 1.0);
+            assert_eq!(stages.rate[node], stages.unlimited_rate[node] * factor);
+            let moved = report.tau * stages.rate[node].abs();
+            assert!(
+                moved <= max_motion * stages.node_edge[i] * (1.0 + 1e-12),
+                "node {node} moves by {moved:e}, its edge is {:e}",
+                stages.node_edge[i]
+            );
+            if factor < 1.0 {
+                let point = if i < 2 * n_points {
+                    i / 2
+                } else {
+                    n_points + (i - 2 * n_points) / 3
+                };
+                limited[point] = true;
+            }
+        }
+        assert_eq!(report.n_limited, limited.iter().filter(|l| **l).count());
+        let after = flow.evaluate(&problem, &options.eval).unwrap();
+        assert!(after.energy.total.is_finite());
+    }
+}

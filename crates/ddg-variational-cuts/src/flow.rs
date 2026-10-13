@@ -108,10 +108,17 @@ impl StepSize {
     /// roughening rate exceeds that of the state ([`StepSize::Adaptive`] only; a cut reaches
     /// the speed `ω_c/2` within the face of a spike of `ω_c`). 1 for [`StepSize::Fixed`].
     ///
+    /// `speed_statistic` is the `m̂` that the step rule used. A cut point whose speed in edges
+    /// per unit time does not exceed it is not limited. In exact arithmetic that follows from
+    /// `τ ≤ max_motion / m̂`; it is tested first because the cut point of the quantile lies on
+    /// the limit exactly, and the rounding of `τ` would otherwise decide whether it counts as
+    /// limited.
+    ///
     /// [formula: cut-step-local]
     pub fn local_factor(
         &self,
         tau: f64,
+        speed_statistic: f64,
         shortest_crossed_edge: f64,
         rate: f64,
         excess: f64,
@@ -123,6 +130,9 @@ impl StepSize {
                 (max_motion, rate.abs().max(0.5 * excess.max(0.0)))
             }
         };
+        if speed / shortest_crossed_edge <= speed_statistic {
+            return 1.0;
+        }
         let moved = tau * speed;
         let allowed = max_motion * shortest_crossed_edge;
         if moved > allowed {
@@ -536,7 +546,8 @@ pub struct StepReport {
     /// `h`: the shortest crossed edge, on the unit-area surface.
     pub shortest_crossed_edge: f64,
     /// Number of cut points that were slowed down in this step by the local limit of the step
-    /// rule ([`StepSize::local_factor`]).
+    /// rule ([`StepSize::local_factor`]). On a network: the cut points and the triple points
+    /// with a copy that was slowed down, each counted once.
     pub n_limited: usize,
     /// The largest `|φ_new − φ_old|` over the vertices that are cut-adjacent before or after
     /// the step: how far the cut moved.
@@ -572,11 +583,18 @@ pub struct StepReport {
 pub struct StepStages {
     /// `ω_c` at every cut point: the local roughening rate (SPEC §1).
     pub roughening: Vec<f64>,
-    /// `Θ` at every cut point: the integrated length force ([`LengthStep::OnCut`]; empty
-    /// otherwise).
+    /// `ℓ_c` at every cut point: the length of the cut that belongs to it, the weight of the
+    /// quantiles of the step rule (SPEC §1).
+    pub cut_length: Vec<f64>,
+    /// `h_c` at every cut point: the shortest crossed edge that shares a vertex with its edge
+    /// (SPEC §4).
+    pub local_edge: Vec<f64>,
+    /// `Θ` at every cut point: the integrated length force. Computed with
+    /// [`LengthStep::OnCut`], and with [`LengthStep::OnMesh`] where the step rule needs it
+    /// ([`StepStatistics::Robust`] with a step that is not fixed); empty otherwise.
     pub length_force: Vec<f64>,
-    /// `λ⁰` at every cut point: the length force per unit length of the cut
-    /// ([`LengthStep::OnCut`]; empty otherwise).
+    /// `λ⁰` at every cut point: the length force per unit length of the cut. Computed and
+    /// empty as `length_force`.
     pub length_speed: Vec<f64>,
     /// `ḡ` at every cut point: the mean of `|∇φ|` over its piece of the cut (as computed; it
     /// is applied with [`SpeedScaling::MeanGradient`] only).
@@ -584,6 +602,10 @@ pub struct StepStages {
     /// The rate at every cut point before the local limit of the step rule and before the
     /// scaling: `s`, or with [`LengthStep::OnCut`] the rate `r`.
     pub unscaled_rate: Vec<f64>,
+    /// The factor of the local limit of the step rule at every cut point
+    /// ([`StepSize::local_factor`]): 1 where the point was not slowed down. The rate that is
+    /// scaled and extended is `unscaled_rate` times this factor.
+    pub limit_factor: Vec<f64>,
     /// The rate at every cut point that was extended: `s` (with [`LengthStep::OnCut`] the rate
     /// `r` that is implicit in the length force), times the mean `|∇φ|` with
     /// [`SpeedScaling::MeanGradient`].
@@ -967,31 +989,41 @@ impl Flow {
                     .iter()
                     .fold(0.0f64, |m, x| m.max(x.abs()));
                 rate = on_cut.rate;
-                if let Some(stages) = stages.as_deref_mut() {
-                    stages.length_force = on_cut.force;
-                    stages.length_speed = on_cut.length_speed;
-                }
+            }
+            if let Some(stages) = stages.as_deref_mut() {
+                stages.length_force = on_cut.force;
+                stages.length_speed = on_cut.length_speed;
             }
         }
         report.tau = tau;
         if let Some(stages) = stages.as_deref_mut() {
             stages.roughening = local_rates.clone();
+            stages.cut_length = dual.clone();
+            stages.local_edge = edges.clone();
             stages.gradient_scale = mean_gradient.clone();
             stages.unscaled_rate = rate.clone();
         }
         // The local limit of the step rule: cut points beyond the quantile take a smaller
         // step of their own.
+        let mut factors = vec![1.0; rate.len()];
         if statistics == StepStatistics::Robust {
             for (p, r) in rate.iter_mut().enumerate() {
-                let factor =
-                    options
-                        .step_size
-                        .local_factor(tau, edges[p], *r, local_rates[p] - omega);
+                let factor = options.step_size.local_factor(
+                    tau,
+                    report.step_speed,
+                    edges[p],
+                    *r,
+                    local_rates[p] - omega,
+                );
                 if factor < 1.0 {
                     *r *= factor;
+                    factors[p] = factor;
                     report.n_limited += 1;
                 }
             }
+        }
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.limit_factor = factors;
         }
         report.timings.length = start.elapsed().as_secs_f64();
 

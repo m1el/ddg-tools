@@ -59,14 +59,35 @@ pub struct RegionStages {
     /// Per node: `s_v`, the rate of the function of the region from the distortion (SPEC
     /// §8.3).
     pub boundary_speed: Vec<f64>,
-    /// Per boundary node (index: node minus the number of vertices of the input mesh): the
-    /// length force `Θ_v` of SPEC §8.5. Empty unless the length step is on the cut.
+    /// Per cut point: `ℓ_c`, the length of the cut that belongs to it (half of each segment
+    /// to another cut point, the whole of each segment to a triple point): the weight of the
+    /// quantiles over the cut points (SPEC §1).
+    pub cut_length: Vec<f64>,
+    /// Per cut point: `h_c`, the shortest crossed edge that shares a vertex with its edge
+    /// (SPEC §4).
+    pub local_edge: Vec<f64>,
+    /// Per boundary node (index: node minus the number of vertices of the input mesh): its
+    /// `h`, that of its cut point, or for a copy of a triple point the smallest `h_c` of the
+    /// three cut points of its face.
+    pub node_edge: Vec<f64>,
+    /// Per boundary node, as `node_edge`: `ℓ_v`, half the length of the two cut segments of
+    /// its region at the node, the weight of the quantile over the boundary nodes (SPEC
+    /// §8.5). Computed and empty as `length_force`.
+    pub node_length: Vec<f64>,
+    /// Per boundary node, as `node_edge`: the length force `Θ_v` of SPEC §8.5. Computed with
+    /// the length step on the cut, and with the length step on the mesh where the step rule
+    /// needs it ([`StepStatistics::Robust`] with a step that is not fixed); empty otherwise.
     pub length_force: Vec<f64>,
     /// Per boundary node, as `length_force`: `λ⁰_v`.
     pub length_speed: Vec<f64>,
-    /// Per node: the rate `ρ_v` of the function of the region after the local limit of the
-    /// step rule: `s_v` with the length step on the mesh, the solution of the second system of
-    /// SPEC §8.5 with the length step on the cut.
+    /// Per node: the rate of the function of the region before the local limit of the step
+    /// rule: `s_v` with the length step on the mesh, the solution `ρ_v` of the second system
+    /// of SPEC §8.5 with the length step on the cut.
+    pub unlimited_rate: Vec<f64>,
+    /// Per boundary node, as `node_edge`: the factor of the local limit of the step rule
+    /// ([`StepSize::local_factor`]), 1 where the node was not slowed down.
+    pub limit_factor: Vec<f64>,
+    /// Per node: `unlimited_rate` after the local limit of the step rule.
     pub rate: Vec<f64>,
     /// Per cut point: `ḡ` of its piece of the network (as computed; it is applied with
     /// [`SpeedScaling::MeanGradient`] only).
@@ -407,39 +428,50 @@ impl RegionFlow {
                     .iter()
                     .fold(0.0f64, |m, x| m.max(x.abs()));
                 rate = on_cut.rate;
-                if let Some(stages) = stages.as_deref_mut() {
-                    stages.length_force = on_cut.force;
-                    stages.length_speed = on_cut.length_speed;
-                }
+            }
+            if let Some(stages) = stages.as_deref_mut() {
+                stages.length_force = on_cut.force;
+                stages.length_speed = on_cut.length_speed;
+                stages.node_length = on_cut.dual;
             }
         }
         report.tau = tau;
+        if let Some(stages) = stages.as_deref_mut() {
+            stages.cut_length = dual.clone();
+            stages.local_edge = edges.clone();
+            stages.node_edge = node_edges.clone();
+            stages.unlimited_rate = rate.clone();
+        }
         // The local limit of the step rule (SPEC §4): per boundary node, with the roughening
-        // rate of its cut point (none at a triple point). A cut point counts once.
+        // rate of its cut point (none at a triple point). The report counts the cut points
+        // and the triple points with a limited copy, each once.
         let n_points = cut.points.len();
-        let mut limited = vec![false; n_points];
+        let mut limited = vec![false; n_points + cut.triple_points.len()];
+        let mut factors = vec![1.0; tri.n_vertices() - nv];
         if statistics == StepStatistics::Robust {
-            for v in nv..tri.n_vertices() {
-                let point = (v - nv) / 2;
-                let excess = if point < n_points {
-                    local_rates[point] - omega
+            for (i, r) in rate[nv..].iter_mut().enumerate() {
+                let (point, excess) = if i < 2 * n_points {
+                    (i / 2, local_rates[i / 2] - omega)
                 } else {
-                    0.0
+                    (n_points + (i - 2 * n_points) / 3, 0.0)
                 };
-                let factor =
-                    options
-                        .step_size
-                        .local_factor(tau, node_edges[v - nv], rate[v], excess);
+                let factor = options.step_size.local_factor(
+                    tau,
+                    report.step_speed,
+                    node_edges[i],
+                    *r,
+                    excess,
+                );
                 if factor < 1.0 {
-                    rate[v] *= factor;
-                    if point < n_points {
-                        limited[point] = true;
-                    }
+                    *r *= factor;
+                    factors[i] = factor;
+                    limited[point] = true;
                 }
             }
         }
         report.n_limited = limited.iter().filter(|&&l| l).count();
         if let Some(stages) = stages.as_deref_mut() {
+            stages.limit_factor = factors;
             stages.rate = rate.clone();
         }
         report.timings.length = start.elapsed().as_secs_f64();
@@ -707,6 +739,8 @@ struct RegionRates {
     force: Vec<f64>,
     /// `λ⁰_v` per boundary node.
     length_speed: Vec<f64>,
+    /// `ℓ_v` per boundary node.
+    dual: Vec<f64>,
     /// `ρ̂`: the quantile of `|s_v + λ⁰_v|` that entered the step rule.
     step_speed: f64,
     /// The step `τ`.
@@ -839,6 +873,7 @@ fn region_rates(
         rate,
         force,
         length_speed,
+        dual,
         step_speed,
         tau,
         residual: first.max(second),
