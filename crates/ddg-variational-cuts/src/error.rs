@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use ddg_core::distance::DistanceError;
 use ddg_core::{GeometryError, MeshError, SparseError};
 
 /// Why a cut could not be evaluated.
@@ -20,6 +21,9 @@ pub enum CutError {
     /// A sparse factorization or solve failed (out of memory, or a cut-mesh Laplacian that is
     /// numerically not positive definite because a cut triangle is nearly degenerate).
     Sparse(SparseError),
+    /// The redistancing was refused. This cannot happen for a finite level-set function; it is
+    /// reported instead of panicking.
+    Distance(DistanceError),
     /// The total area of the mesh is not a positive finite number (edge lengths near the limits
     /// of `f64`), so the surface cannot be scaled to unit area.
     InvalidTotalArea {
@@ -153,6 +157,7 @@ impl fmt::Display for CutError {
             CutError::Geometry(e) => write!(f, "{e}"),
             CutError::Mesh(e) => write!(f, "the cut mesh is not a valid mesh: {e}"),
             CutError::Sparse(e) => write!(f, "sparse linear algebra failed: {e}"),
+            CutError::Distance(e) => write!(f, "redistancing failed: {e}"),
             CutError::InvalidTotalArea { total_area } => write!(
                 f,
                 "the total area of the mesh is {total_area}; it must be positive and finite to \
@@ -271,6 +276,12 @@ impl From<GeometryError> for CutError {
 impl From<MeshError> for CutError {
     fn from(e: MeshError) -> Self {
         CutError::Mesh(e)
+    }
+}
+
+impl From<DistanceError> for CutError {
+    fn from(e: DistanceError) -> Self {
+        CutError::Distance(e)
     }
 }
 

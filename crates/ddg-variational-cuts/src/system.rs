@@ -99,6 +99,63 @@ impl LaplaceSystem {
         })
     }
 
+    /// A second system on the same unknowns: it shares the symbolic analysis (no new analysis is
+    /// made) and has its own values and its own factorization.
+    pub(crate) fn clone_pattern(&self) -> LaplaceSystem {
+        let mut matrix = self.matrix.clone();
+        matrix.values_mut().fill(0.0);
+        LaplaceSystem {
+            unknown_of_vertex: self.unknown_of_vertex.clone(),
+            vertex_of_unknown: self.vertex_of_unknown.clone(),
+            diagonal_slot: self.diagonal_slot.clone(),
+            edge_slot: self.edge_slot.clone(),
+            matrix,
+            symbolic: self.symbolic.clone(),
+            factorization: None,
+            factorized: false,
+        }
+    }
+
+    /// Assembles `diag(d) + Σ_f scale(f) · L_f` on the input mesh itself, restricted to the
+    /// unknowns: `L_f` is the cotan stiffness matrix of the single face `f` (corner cotangents
+    /// `face_cot[f]`), `diagonal(v)` is added at vertex `v`. With `scale(f)` the mean of a vertex
+    /// weight over the face this is the weighted Laplacian of SPEC §3.10.
+    ///
+    /// [formula: cut-weighted-laplacian]
+    pub(crate) fn assemble_on_mesh(
+        &mut self,
+        mesh: &TriMesh,
+        face_cot: &[[f64; 3]],
+        scale: impl Fn(usize) -> f64,
+        diagonal: impl Fn(usize) -> f64,
+    ) {
+        self.factorized = false;
+        let unknown = &self.unknown_of_vertex;
+        let mut values = vec![0.0f64; self.matrix.nnz()];
+        for (i, &v) in self.vertex_of_unknown.iter().enumerate() {
+            values[self.diagonal_slot[i] as usize] = diagonal(v as usize);
+        }
+        for (f, (face, cot)) in mesh.faces().iter().zip(face_cot).enumerate() {
+            let s = 0.5 * scale(f);
+            // The edge opposite corner k is halfedge 3 f + (k + 1) % 3.
+            for k in 0..3 {
+                let (i, j) = (face[(k + 1) % 3], face[(k + 2) % 3]);
+                let (ui, uj) = (unknown[i as usize], unknown[j as usize]);
+                let w = s * cot[k];
+                if ui != NONE {
+                    values[self.diagonal_slot[ui as usize] as usize] += w;
+                }
+                if uj != NONE {
+                    values[self.diagonal_slot[uj as usize] as usize] += w;
+                }
+                if ui != NONE && uj != NONE {
+                    values[self.edge_slot[mesh.edge(3 * f + (k + 1) % 3)] as usize] -= w;
+                }
+            }
+        }
+        self.matrix.values_mut().copy_from_slice(&values);
+    }
+
     /// Number of unknowns.
     #[inline]
     pub(crate) fn n_unknowns(&self) -> usize {
@@ -145,8 +202,18 @@ impl LaplaceSystem {
     /// system: its row and column become those of the identity. A pinned vertex must not share
     /// a triangle with an unknown that is not pinned (it is used for whole components).
     ///
+    ///
+    /// With `monotone` every negative corner cotangent counts as zero: the matrix is then an
+    /// M-matrix (see [`CutTriangles::apply_monotone_laplacian`]).
+    ///
     /// [formula: cut-yamabe-system]
-    pub(crate) fn assemble(&mut self, mesh: &TriMesh, tri: &CutTriangles, pinned: &[bool]) {
+    pub(crate) fn assemble(
+        &mut self,
+        mesh: &TriMesh,
+        tri: &CutTriangles,
+        pinned: &[bool],
+        monotone: bool,
+    ) {
         self.factorized = false;
         let nv = tri.n_original;
         let unknown = |v: u32| -> u32 {
@@ -165,7 +232,7 @@ impl LaplaceSystem {
                 if ui == NONE && uj == NONE {
                     continue;
                 }
-                let w = 0.5 * cot[k];
+                let w = 0.5 * if monotone { cot[k].max(0.0) } else { cot[k] };
                 if ui != NONE {
                     values[self.diagonal_slot[ui as usize] as usize] += w;
                 }

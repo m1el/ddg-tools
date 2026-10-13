@@ -162,13 +162,16 @@ pub struct CutTriangles {
     /// The length of every cut segment (aligned with [`Cut::segments`]), on the unit-area
     /// surface.
     pub segment_length: Vec<f64>,
+    /// For every cut segment, the triangle `(a, p, q)` that it cuts off its face: `a` is the
+    /// vertex of the face that is alone on its side, and the segment is edge slot 1.
+    pub segment_triangle: Vec<u32>,
     /// For every cut point, whether an incident triangle of the cut mesh has an aspect ratio
     /// above the threshold it was built with (SPEC §3.7).
     pub sliver_point: Vec<bool>,
     /// The largest aspect ratio among the triangles of cut faces (1 if no face is cut).
     pub max_aspect_ratio: f64,
-    /// Number of cut faces in which the two diagonals of the quad agree to a relative `10⁻⁹`,
-    /// so that rounding decides which one splits it (SPEC §3.3). The result of the evaluation
+    /// Number of cut faces in which the squared lengths of the two diagonals of the quad agree
+    /// to a relative `10⁻⁹`, so that rounding decides which one splits it (SPEC §3.3). The result of the evaluation
     /// depends on that choice only at the level of the discretization error.
     pub n_diagonal_near_ties: usize,
 }
@@ -245,6 +248,7 @@ impl CutTriangles {
             edge_kind: Vec::with_capacity(n_triangles),
             vertex_region: Vec::with_capacity(nv + 2 * n_points),
             segment_length: Vec::with_capacity(cut.segments.len()),
+            segment_triangle: Vec::with_capacity(cut.segments.len()),
             sliver_point: vec![false; n_points],
             max_aspect_ratio: 1.0,
             n_diagonal_near_ties: 0,
@@ -316,6 +320,8 @@ impl CutTriangles {
             let xp = [1.0 - sp, sp, 0.0];
             let xq = [1.0 - sq, 0.0, sq];
 
+            // The corner triangle (a, p, q) comes first.
+            out.segment_triangle.push(out.faces.len() as u32);
             let mut push = |ids: [u32; 3],
                             x: [[f64; 3]; 3],
                             region: u32,
@@ -366,8 +372,7 @@ impl CutTriangles {
                 barycentric_dot(d_pc, d_pc, len2),
                 barycentric_dot(d_bq, d_bq, len2),
             );
-            let (pc, bq) = (pc2.sqrt(), bq2.sqrt());
-            if (pc - bq).abs() <= 1e-9 * pc.max(bq) {
+            if (pc2 - bq2).abs() <= 1e-9 * pc2.max(bq2) {
                 out.n_diagonal_near_ties += 1;
             }
             if pc2 <= bq2 {
@@ -482,6 +487,31 @@ impl CutTriangles {
         x: &[f64],
         y: &mut [f64],
     ) -> Result<(), CutError> {
+        self.apply(weight, x, y, false)
+    }
+
+    /// Computes `y = L⁺ x`, where `L⁺` is the cotan Laplacian of the cut mesh with every
+    /// negative corner cotangent replaced by zero: all edge weights are non-negative, so `L⁺`
+    /// is an M-matrix and a function that is `L⁺`-harmonic lies between the smallest and the
+    /// largest of its boundary values. The cotan Laplacian itself has no such property on the
+    /// obtuse triangles that cutting produces. The harmonic extension of the flow uses `L⁺`
+    /// (SPEC §3.8, D15).
+    ///
+    /// # Errors
+    /// [`CutError::WrongLength`] if `x` or `y` do not have [`CutTriangles::n_vertices`] entries.
+    ///
+    /// [formula: cut-harmonic-extension]
+    pub fn apply_monotone_laplacian(&self, x: &[f64], y: &mut [f64]) -> Result<(), CutError> {
+        self.apply(None, x, y, true)
+    }
+
+    fn apply(
+        &self,
+        weight: Option<&[f64]>,
+        x: &[f64],
+        y: &mut [f64],
+        monotone: bool,
+    ) -> Result<(), CutError> {
         let n = self.n_vertices();
         check_length("x", "cut-mesh vertices", x.len(), n)?;
         check_length("y", "cut-mesh vertices", y.len(), n)?;
@@ -497,7 +527,8 @@ impl CutTriangles {
             };
             // The edge opposite corner k joins corners k + 1 and k + 2.
             for (k, (i, j)) in [(i1, i2), (i2, i0), (i0, i1)].into_iter().enumerate() {
-                let flow = scale * cot[k] * (x[i] - x[j]);
+                let c = if monotone { cot[k].max(0.0) } else { cot[k] };
+                let flow = scale * c * (x[i] - x[j]);
                 y[i] += flow;
                 y[j] -= flow;
             }

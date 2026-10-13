@@ -290,10 +290,15 @@ impl Evaluator {
     }
 
     /// The linear system on the interior vertices, for the flow step.
-    #[allow(dead_code)]
     #[inline]
     pub(crate) fn system(&self) -> &LaplaceSystem {
         &self.system
+    }
+
+    /// Per-face data of the input mesh on the unit-area surface.
+    #[inline]
+    pub(crate) fn base(&self) -> &BaseGeometry {
+        &self.base
     }
 
     /// The curvature-based weight `a = r³` of the scaled Dirichlet energy for every vertex
@@ -403,7 +408,7 @@ impl Evaluator {
         }
 
         // §3.4: L_II u_I = −g_I, u_B = 0.
-        self.system.assemble(&self.mesh, &tri, &pinned);
+        self.system.assemble(&self.mesh, &tri, &pinned, false);
         self.system.factor(par)?;
         let mut log_scale = vec![0.0; n];
         self.system.solve(|v| -source[v], &mut log_scale, par)?;

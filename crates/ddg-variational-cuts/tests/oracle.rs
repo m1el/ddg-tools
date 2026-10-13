@@ -1,25 +1,32 @@
 //! Differential test against the Lean oracle (`lean/oracle`, an independent dense implementation
 //! written from `SPEC.md` alone): the committed fixtures `lean/oracle/fixtures/cuts/*.in|out`
-//! are replayed, and everything the static evaluation computes is compared with the oracle's
-//! output: the scaling, the face curvatures, the crossings, every triangle of the cut mesh, the
-//! segments, `u`, `p`, `v`, `ℓ`, `q` at every node, `J` and the areas per region, and the energy.
+//! are replayed.
 //!
-//! The gradient density `G` and the speed `s` depend on the flux recovery (SPEC §3.5). The
-//! fixtures state none, so they are compared for both recoveries and must agree with one of
-//! them: the paper's nodal quotient (what the SPEC said when the fixtures were generated) or
-//! the smoothed default.
+//! **Evaluation** (SPEC §3.1–§3.7, §6): the scaling, the face curvatures, the crossings, every
+//! triangle of the cut mesh, the segments, `u`, `p`, `v`, `ℓ`, `q`, the recovered `d`, `e` at
+//! every node, `G`, the speed `s` before and after sliver smoothing, `J` and the areas per
+//! region, and the energy. Every case states its flux recovery (`flux nodal` or
+//! `flux smoothed C`).
 //!
-//! Lines of the flow step (`tau`, `n`, `redist`, `energy_new`, `cuts_new`, column `SIGMA`) are
-//! not read here.
+//! **One step** (SPEC §3.8–§3.12, §4), with the stages as the oracle implements them: the
+//! harmonic extension with the cotan Laplacian, the explicit step, the length step on the mesh
+//! with either penalty rule, the symmetry projection, the redistancing. These are the options
+//! [`paper_flow`] below; the defaults of this crate differ in the extension and in the length
+//! step (SPEC D14, D15) and are tested against exact solutions instead. Compared: `τ`, `σ`,
+//! `φ̃`, `φ′`, the projected `φ′`, the cut-adjacent vertices, the new level-set function, the
+//! number of unreached vertices, and the energy and number of cut points of the new state.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
-    CurvatureSource, CutProblem, Energy, EvalOptions, Evaluation, Evaluator, FluxRecovery,
-    Parallelism, RegionWeights, ScaleWeight, face_curvatures,
+    CurvatureSource, CutProblem, Energy, EvalOptions, Evaluation, Evaluator, Extension, Flow,
+    FlowOptions, FluxRecovery, LengthStep, Parallelism, PenaltyRule, Redistance, RegionWeights,
+    ScaleWeight, SpeedScaling, StepSize, face_curvatures,
 };
+
+type Lines = HashMap<String, Vec<Vec<String>>>;
 
 fn float(token: &str) -> f64 {
     f64::from_bits(u64::from_str_radix(token, 16).unwrap_or_else(|_| panic!("bad float {token}")))
@@ -32,8 +39,8 @@ fn int(token: &str) -> usize {
 }
 
 /// The lines of a block, grouped by their first word.
-fn lines_by_key(text: &str) -> HashMap<String, Vec<Vec<String>>> {
-    let mut out: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+fn lines_by_key(text: &str) -> Lines {
+    let mut out: Lines = HashMap::new();
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
         let mut words = line.split_whitespace();
@@ -53,9 +60,10 @@ struct Case {
     problem: CutProblem,
     /// `(r_eps, c)` if the energy is the curvature-scaled Dirichlet energy.
     feature: Option<(f64, f64)>,
-    delta: f64,
-    rho0: f64,
-    passes: usize,
+    eval: EvalOptions<'static>,
+    step_size: StepSize,
+    penalty_rule: PenaltyRule,
+    classes: Option<Vec<u32>>,
 }
 
 fn parse_case(text: &str) -> Case {
@@ -115,15 +123,60 @@ fn parse_case(text: &str) -> Case {
         length_weight: float(&one("alpha")[0]),
         penalty: lines.get("eta").map(|l| floats(&l[0])),
     };
+    let flux = one("flux");
+    let flux_recovery = match flux[0].as_str() {
+        "nodal" => FluxRecovery::Nodal,
+        "smoothed" => FluxRecovery::Smoothed {
+            length: float(&flux[1]),
+        },
+        other => panic!("unknown flux recovery {other}"),
+    };
+    let step = one("step");
+    let step_size = match step[0].as_str() {
+        "fixed" => StepSize::Fixed(float(&step[1])),
+        "capped" => StepSize::Capped {
+            tau_max: float(&step[1]),
+            max_motion: float(&step[2]),
+        },
+        other => panic!("unknown step rule {other}"),
+    };
+    let penalty_rule = match one("penalty")[0].as_str() {
+        "gradient" => PenaltyRule::Gradient,
+        "paper" => PenaltyRule::PaperDiagonal,
+        other => panic!("unknown penalty rule {other}"),
+    };
     Case {
         mesh,
         geometry,
         phi: floats(one("phi")),
         problem,
         feature,
-        delta: float(&one("delta")[0]),
-        rho0: float(&one("rho0")[0]),
-        passes: int(&one("passes")[0]),
+        eval: EvalOptions {
+            min_crossing_offset: float(&one("delta")[0]),
+            flux_recovery,
+            sliver_aspect_ratio: float(&one("rho0")[0]),
+            smoothing_passes: int(&one("passes")[0]),
+            parallelism: Parallelism::Sequential,
+        },
+        step_size,
+        penalty_rule,
+        classes: lines
+            .get("classes")
+            .map(|l| l[0].iter().map(|w| int(w) as u32).collect()),
+    }
+}
+
+/// The flow as SPEC §3.8–§3.12 first specified it and as the oracle implements it.
+fn paper_flow(case: &Case) -> FlowOptions<'static> {
+    FlowOptions {
+        eval: case.eval,
+        step_size: case.step_size,
+        length_step: LengthStep::OnMesh,
+        penalty_rule: case.penalty_rule,
+        symmetry: case.classes.clone(),
+        speed_scaling: SpeedScaling::Unit,
+        extension: Extension::Cotan,
+        redistance: Redistance::KeepAdjacent,
     }
 }
 
@@ -145,22 +198,25 @@ impl Report {
         }
     }
 
+    fn note(&mut self, message: String) {
+        if self.problems.len() < 8 {
+            self.problems.push(message);
+        } else if self.problems.len() == 8 {
+            self.problems.push("...".to_string());
+        }
+    }
+
     fn close(&mut self, what: impl Fn() -> String, ours: f64, oracle: f64) {
         let error = (ours - oracle).abs() / oracle.abs().max(1.0);
         self.compared += 1;
         if error.is_nan() || error > self.tolerance {
-            if self.problems.len() < 8 {
-                self.problems
-                    .push(format!("{}: {ours:e} vs oracle {oracle:e}", what()));
-            } else if self.problems.len() == 8 {
-                self.problems.push("...".to_string());
-            }
+            self.note(format!("{}: {ours:e} vs oracle {oracle:e}", what()));
         }
-        if error.is_finite() {
-            self.worst = self.worst.max(error);
+        self.worst = if error.is_finite() {
+            self.worst.max(error)
         } else {
-            self.worst = f64::INFINITY;
-        }
+            f64::INFINITY
+        };
     }
 
     fn same<T: PartialEq + std::fmt::Debug>(
@@ -169,9 +225,8 @@ impl Report {
         ours: T,
         oracle: T,
     ) {
-        if ours != oracle && self.problems.len() < 8 {
-            self.problems
-                .push(format!("{}: {ours:?} vs oracle {oracle:?}", what()));
+        if ours != oracle {
+            self.note(format!("{}: {ours:?} vs oracle {oracle:?}", what()));
         }
     }
 }
@@ -190,12 +245,12 @@ fn our_vertex(e: &Evaluation, region: u32, node: usize) -> usize {
     }
 }
 
-/// Everything that does not depend on the flux recovery.
+/// Everything of the evaluation that is well conditioned.
 fn compare_evaluation(
     case: &Case,
     evaluator: &mut Evaluator,
     e: &Evaluation,
-    out: &HashMap<String, Vec<Vec<String>>>,
+    out: &Lines,
     report: &mut Report,
 ) {
     let nv = case.mesh.n_vertices();
@@ -377,7 +432,7 @@ fn compare_evaluation(
             report.close(
                 || format!("q at node {n} of region {r}"),
                 q[v],
-                float(&w[4]),
+                float(&w[5]),
             );
         }
     }
@@ -406,25 +461,34 @@ fn compare_evaluation(
     report.close(|| "energy length term".into(), length, float(&energy[5]));
 }
 
-/// The quantities that depend on the flux recovery: `G` at the cut vertices, `s`, and the total
-/// energy (which does not depend on it, but is checked with the rest of its line).
-fn compare_gradient(
-    case: &Case,
-    e: &Evaluation,
-    out: &HashMap<String, Vec<Vec<String>>>,
-    report: &mut Report,
-) {
+/// The quantities that divide by dual lengths, which can be as small as `delta` times an edge
+/// (with the nodal recovery that amplifies rounding errors): the recovered normal derivatives,
+/// `G` at the cut vertices, `s`, and the total energy.
+fn compare_gradient(case: &Case, e: &Evaluation, out: &Lines, report: &mut Report) {
     let nv = case.mesh.n_vertices();
     for w in &out["b"] {
         let (r, n) = (int(&w[0]) as u32, int(&w[1]));
+        let v = our_vertex(e, r, n);
+        report.close(
+            || format!("d at node {n} of region {r}"),
+            e.normal_derivative[v],
+            float(&w[4]),
+        );
+        if let Some(dp) = &e.adjoint_normal_derivative {
+            report.close(
+                || format!("e at node {n} of region {r}"),
+                dp[v],
+                float(&w[6]),
+            );
+        }
         if n < nv {
             continue; // the oracle prints G on the boundary of the mesh too; we do not keep it
         }
         let weights = case.problem.regions[r as usize];
-        let oracle = weights.distortion * float(&w[5]) + weights.area;
+        let oracle = weights.distortion * float(&w[7]) + weights.area;
         report.close(
             || format!("G at node {n} of region {r}"),
-            e.gradient[our_vertex(e, r, n)],
+            e.gradient[v],
             oracle,
         );
     }
@@ -448,6 +512,95 @@ fn compare_gradient(
     );
 }
 
+/// One step of the flow with the stages of the oracle.
+fn compare_step(case: &Case, out: &Lines, report: &mut Report) {
+    let options = paper_flow(case);
+    let mut flow = Flow::new(&case.mesh, &case.geometry, &case.phi).unwrap();
+    let scale = flow.scale();
+    for (w, ours) in out["v"].iter().zip(flow.level_set_unit_area()) {
+        report.close(
+            || format!("scaled phi of vertex {}", w[0]),
+            *ours,
+            float(&w[7]),
+        );
+    }
+    let (step, stages) = flow.step_with_stages(&case.problem, &options).unwrap();
+    let tau = &out["tau"][0];
+    report.close(|| "tau".into(), step.tau, float(&tau[0]));
+    report.close(|| "largest speed".into(), step.max_speed, float(&tau[2]));
+    for w in &out["v"] {
+        let i = int(&w[0]);
+        report.close(
+            || format!("sigma of vertex {i}"),
+            stages.extension[i],
+            float(&w[8]),
+        );
+    }
+    let new = flow.level_set_unit_area().to_vec();
+    let new_caller = flow.level_set();
+    for w in &out["n"] {
+        let i = int(&w[0]);
+        report.close(
+            || format!("phi~ of vertex {i}"),
+            stages.explicit[i],
+            float(&w[1]),
+        );
+        report.close(
+            || format!("phi' of vertex {i}"),
+            stages.length[i],
+            float(&w[2]),
+        );
+        report.close(
+            || format!("projected phi' of vertex {i}"),
+            stages.symmetric[i],
+            float(&w[3]),
+        );
+        report.same(
+            || format!("cut-adjacency of vertex {i}"),
+            stages.adjacent[i],
+            int(&w[5]) == 1,
+        );
+        report.close(|| format!("new phi of vertex {i}"), new[i], float(&w[7]));
+        report.close(
+            || format!("new phi (caller's unit) of vertex {i}"),
+            new_caller[i] * scale.length_scale,
+            float(&w[8]) * scale.length_scale,
+        );
+    }
+    let redist = &out["redist"][0];
+    report.same(
+        || "unreached vertices".into(),
+        step.n_unreached,
+        int(&redist[2]),
+    );
+    report.same(
+        || "cut-adjacent vertices".into(),
+        stages.adjacent.iter().filter(|&&a| a).count(),
+        int(&redist[1]),
+    );
+    // The energy and the cut of the new state.
+    let e = flow.evaluate(&case.problem, &case.eval).unwrap();
+    let energy = &out["energy_new"][0];
+    report.close(|| "new energy".into(), e.energy.total, float(&energy[0]));
+    for r in 0..2 {
+        report.close(
+            || format!("new J{r}"),
+            e.energy.distortion[r],
+            float(&energy[1 + r]),
+        );
+        report.close(
+            || format!("new A{r}"),
+            e.energy.area[r],
+            float(&energy[3 + r]),
+        );
+    }
+    report.same(
+        || "new cut points".into(),
+        e.cut.points.len(),
+        int(&out["cuts_new"][0][0]),
+    );
+}
+
 #[test]
 fn fixtures_of_the_oracle_are_reproduced() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean/oracle/fixtures/cuts");
@@ -466,8 +619,9 @@ fn fixtures_of_the_oracle_are_reproduced() {
         dir.display()
     );
     let mut failures = Vec::new();
-    let (mut nodal, mut smoothed) = (0, 0);
-    let (mut worst, mut worst_gradient, mut compared) = (0.0f64, 0.0f64, 0usize);
+    let (mut nodal, mut smoothed, mut stepped) = (0, 0, 0);
+    let mut worst = [0.0f64; 3];
+    let mut compared = [0usize; 3];
     for name in &names {
         let case = parse_case(&std::fs::read_to_string(dir.join(format!("{name}.in"))).unwrap());
         let out = lines_by_key(&std::fs::read_to_string(dir.join(format!("{name}.out"))).unwrap());
@@ -477,58 +631,47 @@ fn fixtures_of_the_oracle_are_reproduced() {
             "{name}: status {status}"
         );
         let mut evaluator = Evaluator::new(&case.mesh, &case.geometry).unwrap();
-        let options = |flux_recovery: FluxRecovery| EvalOptions {
-            min_crossing_offset: case.delta,
-            flux_recovery,
-            sliver_aspect_ratio: case.rho0,
-            smoothing_passes: case.passes,
-            parallelism: Parallelism::Sequential,
-        };
         let e = evaluator
-            .evaluate(&case.phi, &case.problem, &options(FluxRecovery::Nodal))
+            .evaluate(&case.phi, &case.problem, &case.eval)
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(e.cut.points.is_empty(), status == "no_cut", "{name}");
-        // The well-conditioned quantities, to the tolerance the oracle uses for its own check.
-        let mut report = Report::new(1e-9);
-        compare_evaluation(&case, &mut evaluator, &e, &out, &mut report);
-        if !report.problems.is_empty() {
-            failures.push(format!("{name}:\n    {}", report.problems.join("\n    ")));
+        // Tolerance 1e-9: what the oracle uses for its own check.
+        let mut reports = [Report::new(1e-9), Report::new(1e-9), Report::new(1e-9)];
+        compare_evaluation(&case, &mut evaluator, &e, &out, &mut reports[0]);
+        compare_gradient(&case, &e, &out, &mut reports[1]);
+        if status == "ok" {
+            compare_step(&case, &out, &mut reports[2]);
+            stepped += 1;
+        }
+        let problems: Vec<String> = reports
+            .iter()
+            .flat_map(|r| r.problems.iter().cloned())
+            .collect();
+        if !problems.is_empty() {
+            failures.push(format!("{name}:\n    {}", problems.join("\n    ")));
             continue;
         }
-        worst = worst.max(report.worst);
-        compared += report.compared;
-        // G and s divide by dual lengths that can be as small as delta times an edge, which
-        // amplifies rounding errors; measured, the two implementations still agree to 3e-12.
-        let mut as_nodal = Report::new(1e-9);
-        compare_gradient(&case, &e, &out, &mut as_nodal);
-        let default = evaluator
-            .evaluate(&case.phi, &case.problem, &options(FluxRecovery::default()))
-            .unwrap();
-        let mut as_smoothed = Report::new(1e-9);
-        compare_gradient(&case, &default, &out, &mut as_smoothed);
-        if as_nodal.problems.is_empty() {
-            nodal += 1;
-            worst_gradient = worst_gradient.max(as_nodal.worst);
-            compared += as_nodal.compared;
-        } else if as_smoothed.problems.is_empty() {
-            smoothed += 1;
-            worst_gradient = worst_gradient.max(as_smoothed.worst);
-            compared += as_smoothed.compared;
-        } else {
-            failures.push(format!(
-                "{name}: G and s agree with neither recovery.\n  nodal:\n    {}\n  smoothed:\n    {}",
-                as_nodal.problems.join("\n    "),
-                as_smoothed.problems.join("\n    ")
-            ));
+        for (k, r) in reports.iter().enumerate() {
+            worst[k] = worst[k].max(r.worst);
+            compared[k] += r.compared;
+        }
+        match case.eval.flux_recovery {
+            FluxRecovery::Nodal => nodal += 1,
+            FluxRecovery::Smoothed { .. } => smoothed += 1,
         }
     }
     println!(
-        "{} fixtures, {compared} numbers compared: largest difference {worst:.1e} (relative to \
-         max(1, |value|)); G and s agree with the nodal recovery in {nodal} fixtures and with the \
-         smoothed one in {smoothed}, largest difference {worst_gradient:.1e}",
-        names.len()
+        "{} fixtures ({nodal} with the nodal flux recovery, {smoothed} with the smoothed one; \
+         {stepped} with a full step). Numbers compared and largest difference relative to \
+         max(1, |value|): evaluation {} / {:.1e}; d, e, G, s {} / {:.1e}; step {} / {:.1e}",
+        names.len(),
+        compared[0],
+        worst[0],
+        compared[1],
+        worst[1],
+        compared[2],
+        worst[2]
     );
-    assert!(compared > 20_000, "{compared} numbers compared");
     assert!(
         failures.is_empty(),
         "{} of {} fixtures disagree:\n{}",
@@ -536,9 +679,6 @@ fn fixtures_of_the_oracle_are_reproduced() {
         names.len(),
         failures.join("\n")
     );
-    // The fixtures were generated with one recovery, not a mixture.
-    assert!(
-        nodal == 0 || smoothed == 0,
-        "nodal {nodal}, smoothed {smoothed}"
-    );
+    assert!(nodal > 0 && smoothed > 0 && stepped >= 20);
+    assert!(compared.iter().sum::<usize>() > 50_000);
 }

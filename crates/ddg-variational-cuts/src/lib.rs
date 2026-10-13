@@ -91,6 +91,7 @@ mod cut;
 mod cut_mesh;
 mod error;
 mod evaluate;
+mod flow;
 mod problem;
 mod recovery;
 mod system;
@@ -108,6 +109,11 @@ pub use evaluate::{
     EnergyTerms, EvalReport, Evaluation, Evaluator, adjoint_source_pointwise,
     adjoint_source_scaled, cut_speed, dirichlet_energy_term, dual_lengths, gradient_dirichlet,
     gradient_pointwise, gradient_scaled, normal_flux, smooth_slivers,
+};
+pub use flow::{
+    Extension, Flow, FlowOptions, GradientNorm, LengthStep, PenaltyRule, Redistance, RunReport,
+    SpeedScaling, StepReport, StepSize, StepStages, StepTimings, StopReason, StopRule,
+    explicit_step, symmetry_projection,
 };
 pub use problem::{
     CurvatureSource, CutProblem, Energy, EvalOptions, FluxRecovery, PAPER_FEATURE_SMOOTHING,
