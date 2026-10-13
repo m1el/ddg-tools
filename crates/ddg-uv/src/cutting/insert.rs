@@ -17,10 +17,58 @@
 //!   each triangle of the polygon's triangulation in a straight segment; the new polygons are
 //!   unions of the resulting pieces of triangles, so their triangulation is made of those
 //!   pieces (a piece with more than three corners is split by its better diagonal).
+//! * Every [`JunctionPoint`](super::JunctionPoint) becomes a vertex inside its triangle (see
+//!   below).
 //! * Old vertices keep their numbers; new vertices follow (edge points in the order of
-//!   [`CutOnPolygons::edge_points`], then interior points in the order of the paths). Polygons
+//!   [`CutOnPolygons::edge_points`], then junctions in the order of
+//!   [`CutOnPolygons::junctions`], then interior points in the order of the paths). Polygons
 //!   are numbered in the order of their parents; the parts of one polygon follow each other,
 //!   starting with the part that has the first corner of the parent.
+//!
+//! # The construction, exactly (what an editor must mirror)
+//!
+//! Work polygon by polygon; a polygon that no path, junction or extra edge vertex touches is
+//! copied as it is (corners and triangulation).
+//!
+//! 1. **Vertices on polygon edges.** For every polygon edge `{a, b}` collect the vertices of
+//!    all edge points on it, sorted by the parameter `t` from the lower vertex (the points of
+//!    the two sides of a seam together; equal parameters from the two sides are one vertex).
+//!    Both polygons of the edge get all of them as corners between `a` and `b`.
+//! 2. **Pieces of triangles.** Take the polygon's triangles. A triangle `T = (c0, c1, c2)`
+//!    (polygon corners; side `k` runs from `c_k` to `c_{k+1}`) is
+//!    * *untouched* if no path segment crosses it: one piece, `T` itself;
+//!    * *cut by a segment* from the vertex `p` on a side to the vertex `q` on another side (the
+//!      two sides share a corner `a`; walk `T` as `(a, b, c)` with `p` on `(a, b)` and `q` on
+//!      `(c, a)`): two pieces, the corner piece `(a, p, q)` and the quadrilateral
+//!      `(p, b, c, q)`;
+//!    * *a junction triangle*: the triangle that contains a junction `J` (its position is
+//!      `Σ barycentric[k] · x[corners[k]]`). Exactly three paths end at `J`, each as the
+//!      segment from the vertex `q_k` on side `k` (from `c_k` to `c_{k+1}`) to `J`. Three
+//!      pieces, **piece `k` is the quadrilateral `(c_k, q_k, J, q_{k−1})`** (indices modulo 3),
+//!      the part of corner `c_k`. `J` is a vertex of those three pieces only.
+//!
+//!    The vertex of a path on a side is, on a polygon edge, an edge-point vertex and, on a
+//!    diagonal of the triangulation, the interior point of the path there. Every piece lists,
+//!    in order along its sides, the vertices from step 1 that lie on its polygon-edge sides
+//!    (for a side crossed at `p`: those before `p` go to the piece of the first corner, those
+//!    after `p` to the other piece).
+//! 3. **Parts.** Two pieces on the two sides of an uncrossed diagonal belong to the same part;
+//!    on a diagonal crossed at a vertex `p`, the pieces next to each end of the diagonal are
+//!    joined (the piece of the first triangle that contains the diagonal's end `c` with the
+//!    piece of the second triangle that contains `c`). A part is a connected set of pieces.
+//!    Its polygon is the boundary: the sides of its pieces that are not shared with another
+//!    piece of the part, walked in the winding of the polygon; it starts at the vertex with the
+//!    lowest position along the boundary of the parent (the parent's first corner, then the
+//!    edge vertices after it, ...), and a part without such a vertex starts at the lowest id.
+//!    Parts are ordered by that start.
+//! 4. **Triangulation of a part.** Each piece is triangulated by ear clipping (never an ear
+//!    with three collinear vertices): of the ears the one whose triangle has the best shape
+//!    (`4√3 · area / Σ squared lengths`) is clipped first; for a quadrilateral the diagonal
+//!    whose worse triangle is better. The triangles of all pieces of a part are the
+//!    triangulation of its polygon.
+//!
+//! The seams are the sides between consecutive points of each path (including the sides that
+//! end at a junction); `Inserted::seams_after` adds the old seams.
 //!
 //! Nothing is normalized: a description that does not fit the mesh is an error that names the
 //! polygon (or the edge point).

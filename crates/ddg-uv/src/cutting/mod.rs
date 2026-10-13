@@ -67,10 +67,14 @@
 //! * [`unwrap_with_cut`] inserts and unwraps; [`ConePlacement`] says whether `unwrap` may place
 //!   cones as well.
 //!
-//! More than two regions are not available yet: the core crate does not have them. The session
-//! keeps regions as an array of functions and converts to and from the flow's level-set function
-//! in two places only (`Maps::phi_from_regions`, `Maps::regions_from_phi`), and the start from
-//! labels in one; see the crate README for what enabling them takes.
+//! **Several regions.** With more than two regions the session runs the core crate's
+//! `RegionFlow` (so does `FlowKind::Regions` for two). The state is one function per region and
+//! corner; the cut is a network: where three regions meet in a triangle of the triangulation the
+//! description has a `JunctionPoint`, and three paths end there. `insert` builds a vertex
+//! inside that triangle and splits it into three quadrilaterals (the exact construction is in
+//! the documentation of `insert`). `Session::recommended_options` returns the options the
+//! core crate recommends for the number of regions (`FlowOptions::for_regions` for more than
+//! two). Every region component then becomes a chart in `unwrap_with_cut`.
 
 mod describe;
 mod endtoend;
