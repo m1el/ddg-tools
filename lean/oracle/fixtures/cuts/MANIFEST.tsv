@@ -1,0 +1,21 @@
+ico1-tilted-dirichlet	ok	icosphere level 1 (42 vertices), tilted-plane level set, Dirichlet, capped step
+ico2-tilted-dirichlet	ok	icosphere level 2 (162 vertices), tilted-plane level set, Dirichlet, capped step (crossings near vertices give huge speeds)
+ico2-cap-dirichlet	ok	icosphere level 2, geodesic cap of polar angle 1, Dirichlet, fixed tau
+ico2-cap-hencky	ok	icosphere level 2, geodesic cap, Hencky energy
+ico2-cap-scaled-curv	ok	icosphere level 2, geodesic cap, curvature-scaled Dirichlet (r_eps = 1, c = 0.02)
+torus-band-dirichlet	ok	torus (96 vertices), two-band level set, Dirichlet; cut components are loops
+grid-boundary-scaled-a	ok	grid disk (132 vertices), straight cut that meets the boundary twice, scaled Dirichlet with an explicit a
+annulus-ring-hencky	ok	annulus, circular cut between the two boundary circles, Hencky
+annulus-radial-dirichlet	ok	annulus, straight cut across the ring (meets both boundary circles), Dirichlet
+ico2-eta-gradient	ok	geodesic cap with a penalty eta = 0.2 (1 + z), default (gradient) rule (W_V + tau L_w) phi' = W_V phi~
+ico2-eta-paper	ok	the same, the paper's diagonal rule (W_V D^-1 + tau L) phi' = W_V D^-1 phi~
+ico2-region-weights	ok	geodesic cap, w = (2, 0.5), beta = (0.7, 0.2)
+ico2-symmetry	ok	geodesic cap about a tilted axis (not mirror symmetric), classes = mirror x -> -x: both projections are active
+ico1-phi-zero-vertex	ok	icosphere level 1, phi = z: phi is exactly 0 at 8 vertices, so crossings have t = 0 and are moved to delta; slivers
+ico1-delta-clamp	ok	icosphere level 1, delta = 0.2 so several crossings hit the clamp; rho0 = 2, two smoothing passes
+ico2-sliver-smoothing	ok	level 2, tilted plane, rho0 = 2 with three smoothing passes
+flat-disk-uniform-curvature	ok	flat disk with a curvature override (uniform 5) and a circular cut of scaled radius 0.3: closed forms of SPEC section 1
+flat-disk-gaussian	ok	flat disk, Gaussian curvature (zero): u = 0, s = 0, pure curve shortening
+ico1-curvature-per-face	ok	icosphere level 1, per-face curvature override, Hencky
+two-spheres-untouched-1	ok	two disjoint icospheres; the cut lies on the first, the second is entirely region 1: a closed component the cut does not touch
+two-spheres-untouched-0	ok	the same with the second sphere entirely region 0, Hencky, beta = (0.5, 0.5)

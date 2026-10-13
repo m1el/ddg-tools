@@ -45,8 +45,10 @@ end Topology
 private def insertSorted (xs : Array Nat) (x : Nat) : Array Nat :=
   if xs.contains x then xs else (xs.push x).qsort (· < ·)
 
-/-- Validate connectivity and build the adjacency tables. -/
-def buildTopology (nv : Nat) (faces : Array Face) : Except String Topology := do
+/-- Validate connectivity and build the adjacency tables. `connected := false` accepts meshes
+with several connected components (the cut flow). -/
+def buildTopology (nv : Nat) (faces : Array Face) (connected : Bool := true) :
+    Except String Topology := do
   if nv < 3 then throw s!"mesh has {nv} vertices; at least 3 are required"
   if nv > maxVertices then
     throw s!"mesh has {nv} vertices; the dense oracle accepts at most {maxVertices}"
@@ -125,7 +127,7 @@ def buildTopology (nv : Nat) (faces : Array Face) : Except String Topology := do
         seen := seen.set! w true
         reached := reached + 1
         stack := stack.push w
-  if reached != nv then
+  if connected && reached != nv then
     throw s!"mesh is not connected: only {reached} of {nv} vertices are reachable from vertex 0"
   let numEdges := (directed + boundaryEdges) / 2
   let numBoundary := (isBoundary.filter id).size

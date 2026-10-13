@@ -14,6 +14,9 @@ usage:
   ddg-oracle fixtures write DIR     regenerate the golden fixtures
   ddg-oracle fixtures check DIR     recompute the fixtures and compare with the files (tolerance 1e-9)
   ddg-oracle bench                  throughput on meshes of about 50 and 200 vertices
+  ddg-oracle cuts      [IN [OUT]]   one step of the cut flow of 'Variational Surface Cutting' (Sharp, Crane 2018)
+  ddg-oracle cuts-selftest          internal checks of the cut flow
+  ddg-oracle cuts-fixtures write DIR | check DIR   golden fixtures of the cut flow (fixtures/cuts)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -54,6 +57,18 @@ def main (args : List String) : IO UInt32 := do
     | _, _ => IO.eprintln usage; return 2
   | ["fixtures", "write", dir] => writeFixtures dir; return 0
   | ["fixtures", "check", dir] => return if (← checkFixtures dir) == 0 then 0 else 1
+  | "cuts" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← Cuts.runStream input output
+    output.flush
+    return 0
+  | ["cuts-selftest"] => return if (← Cuts.selftest) == 0 then 0 else 1
+  | ["cuts-fixtures", "write", dir] => Cuts.writeFixtures dir; return 0
+  | ["cuts-fixtures", "check", dir] => return if (← Cuts.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

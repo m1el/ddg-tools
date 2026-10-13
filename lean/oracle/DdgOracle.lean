@@ -12,3 +12,4 @@ import DdgOracle.Format
 import DdgOracle.Selftest
 import DdgOracle.Bench
 import DdgOracle.Fixtures
+import DdgOracle.Cuts

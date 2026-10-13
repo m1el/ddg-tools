@@ -16,6 +16,10 @@ minimize     ½ Σ_i wE_i m_i u_i²  +  λ Σ_i wR_i |µ_i|
 subject to   (L u)_i = µ_i − Ω_i  (i interior),   u_i = 0  (i boundary),   lo_i ≤ µ_i ≤ hi_i
 ```
 
+A second part of the package, [the cut flow](#cut-flow-second-paper) (`ddg-oracle cuts`), implements one
+step of *Variational Surface Cutting* (Sharp, Crane 2018) from `crates/ddg-variational-cuts/SPEC.md`;
+everything below up to that section is about the first paper.
+
 Contents: [build and run](#build-and-run) · [text format](#text-format) ·
 [conventions](#conventions) · [algorithm](#algorithm) · [certificate](#certificate) ·
 [how to compare against it](#how-to-compare-against-it) · [code map](#code-map) ·
@@ -37,6 +41,9 @@ lake build                      # Lean 4.34.1 (lean-toolchain), no dependencies
 | `ddg-oracle selftest [N [SIZE]]` | internal checks, with a sweep over `N` random cases (default 300) of up to about `SIZE` vertices (default 41) |
 | `ddg-oracle fixtures write DIR` / `check DIR` | regenerate / verify the golden fixtures |
 | `ddg-oracle bench` | throughput |
+| `ddg-oracle cuts [IN [OUT]]` | one step of the cut flow, [see below](#cut-flow-second-paper) |
+| `ddg-oracle cuts-selftest` | checks of the cut-flow oracle |
+| `ddg-oracle cuts-fixtures write DIR` / `check DIR` | regenerate / verify `fixtures/cuts` |
 
 `IN`/`OUT` default to `-` (standard input/output). The three processing commands are all batch
 commands: they read any number of cases from one stream, write one output block per case in the
@@ -454,3 +461,257 @@ The process is single-threaded; a fuzzer can run several.
   and are not implemented.
 * No global convergence proof for the Newton iteration; this is why every result is certified
   and uncertified results are not printed.
+
+# Cut flow (second paper)
+
+> Nicholas Sharp, Keenan Crane. *Variational Surface Cutting.* ACM Trans. Graph. 37(4), 2018.
+
+`ddg-oracle cuts` computes **one step of the flow** of `crates/ddg-variational-cuts/SPEC.md` (two
+regions) on a small mesh with dense linear algebra, and prints every intermediate quantity. It
+implements SPEC §2, §3, the seven stages of §4 and the energy of §6, written from SPEC.md alone
+(clean room: nothing was read from the Rust crate or from the authors' code). Every sentence of
+SPEC that was ambiguous is listed under [choices](#choices-where-the-spec-is-ambiguous).
+`ddg-oracle cuts-selftest` checks it (below); the golden cases are `fixtures/cuts/*.in|out`.
+
+The closed-form formulas of SPEC §10 are scalar-generic in `DdgOracle.Formulas.Cuts` (face
+curvature, edge crossing, barycentric length, sub-triangle area, weighted-Laplacian entries,
+length/penalty step entries, gradient densities, feature size, speed, aspect ratio, smoothing,
+explicit step, step cap, class mean, local Hopf-Lax update). The Hopf-Lax update needs one square
+root, `min`, `max` and `<`, all in `Ddg.Scalar`; no new operation was added to the class. What
+runs is that generic code instantiated at `Float`.
+
+## Cut flow: input
+
+One case per `case ... end` block, any number per stream, same lexical conventions as above
+(floats are 16 hex digits, indices are decimal and 0-based, `#` comments). The mesh is **intrinsic**:
+faces and edge lengths, no positions. The mesh may be disconnected, with or without boundary,
+at most 1500 vertices. All lines after the `e` lines are keyed, may come in any order, and each
+occurs once (`eta` and `classes` are optional, everything else is required).
+
+```
+case NAME
+[task cuts]                       optional; must be 'cuts'
+mesh NV NF NE
+f A B C                           x NF   oriented triangles
+e A B LEN                         x NE   every edge once, A < B, any order; LEN > 0 in the caller's unit
+phi P_0 ... P_{NV-1}              level set function in the caller's unit (floats)
+energy dirichlet
+energy hencky                     pointwise b(u) = u^2
+energy scaled_a A_0 ... A_{NV-1}  scaled Dirichlet, weight a > 0 per vertex
+energy scaled_curv R_EPS C        scaled Dirichlet, a = r^3 of SPEC 3.6 with r_eps = R_EPS, c = C
+curvature gaussian                k_f = Omega_f / A_f
+curvature uniform C               k_f = C on every face
+curvature per_face K_0 ... K_{NF-1}
+alpha ALPHA_L                     >= 0
+eta E_0 ... E_{NV-1}              optional, each >= 0 (absent = 0)
+penalty gradient | paper          SPEC 3.10: (W_V + tau L_w) rule | PenaltyRule::PaperDiagonal
+w W0 W1                           >= 0
+beta B0 B1
+step fixed TAU                    TAU > 0
+step capped TAU_MAX MAX_MOTION    tau = min(TAU_MAX, MAX_MOTION h / max|s|)
+delta DELTA                       min_crossing_offset, 0 < DELTA < 1/2
+rho0 RHO0                         sliver threshold > 0
+passes N                          smoothing passes (decimal integer)
+classes C_0 ... C_{NV-1}          optional, decimal labels; vertices with equal labels form a class
+end
+```
+
+The mesh is scaled to unit total area (SPEC §2): every length is multiplied by
+`s = 1/sqrt(total area)`. **All parameters (`alpha`, `eta`, `a`'s units (none), `R_EPS`, `C`, `delta` is
+dimensionless, curvature `uniform`/`per_face`, `step`) refer to the scaled surface, `phi` is in the
+caller's unit** and is multiplied by `s` on the way in. `a` is a dimensionless weight. Every output
+quantity is in the scaled unit, except where a column says "caller". Region 0 is `phi <= 0`.
+
+Invalid input gives `status error MESSAGE` (bad mesh or edge table, non-finite or out-of-range
+parameter, missing or repeated line, wrong number of values, the paper's penalty rule with some but
+not all `alpha + eta_i = 0`, a singular system).
+
+## Cut flow: output
+
+`status ok` (a full step), `status no_cut` (no edge is crossed: only the evaluation at the input
+is printed, from `scale` to `energy`), or `status error MESSAGE` (then nothing else but `end`).
+Lines in this order; `K` is a cut-vertex index, node number `NV + K`; **nodes** are the original
+vertices `0..NV-1` followed by the cut vertices.
+
+```
+case NAME
+task cuts
+status ok|no_cut|error MESSAGE
+scale S TOTAL_AREA                  S = 1/sqrt(TOTAL_AREA); TOTAL_AREA in the caller's unit
+mesh NV NF NE NB CHI                NB boundary vertices, CHI = NV - NE + NF
+sum_omega X                         sum_f Omega_f
+counts NC NSEG NTRI NMOVED NSLIVERV NSLIVERT NTIES
+f F OMEGA KGAUSS KUSED AREA         x NF   Omega_f, Omega_f/A_f, density used (after an override), A_f
+v I REGION THETA AREA R A W PHI SIGMA   x NV
+x K A B TRAW T MOVED LEN            x NC   crossed edges, sorted by (A, B)
+t IDX PARENT REGION N0 N1 N2 L01 L12 L20 AREA   x NTRI
+g K1 K2 FACE LEN                    x NSEG
+r R NTRI NNODES NCOMP NUNSOLVED_COMP NUNSOLVED_NODES J AREA AREA_SOLVED     x 2
+u R NODE SOLVED U P                 for every node of S_R, regions 0 then 1, nodes increasing
+b R NODE V ELL Q G                  for every node of B_S_R
+s K SRAW SSMOOTH SLIVER             x NC
+tau TAU HMIN SMAX                   (status ok)
+energy TOTAL J0 J1 A0 A1 LENGTH     energy at the input phi
+n I PHITILDE PHILEN PHISYM REGION2 ADJ T PHINEW PHINEW_CALLER    x NV
+redist SWEEPS NADJ UNREACHED
+energy_new TOTAL J0 J1 A0 A1 LENGTH energy at PHINEW
+cuts_new NC_NEW                     cut vertices of PHINEW
+end
+```
+
+* `counts`: `NMOVED` crossings whose `t` was moved into `[delta, 1-delta]` (strict: `t < delta` or
+  `t > 1-delta`); `NSLIVERV` cut vertices that have an incident cut-mesh triangle (either region) with
+  aspect ratio `> rho0`; `NSLIVERT` such triangles; `NTIES` quads in which the two diagonals agree to a
+  relative `1e-9` (the choice `p-c` / `b-q` is then decided by rounding: the fixtures have none).
+* `v`: `REGION` of `phi` (0/1), `THETA` = `Theta_i`, `AREA` = `A_i` (lumped, on `M`), `R` the feature
+  size `r_i` and `A` the weight `a_i` (both `0` unless the energy is scaled; `R` only for
+  `scaled_curv`), `W` = `alpha + eta_i`, `PHI` the scaled input, `SIGMA` the harmonic extension
+  (`0` on `no_cut`).
+* `x`: the cut vertex lies at `(1-T) x_A + T x_B`; `TRAW = phi_A/(phi_A-phi_B)`, `T` after the clamp,
+  `MOVED` 0/1, `LEN` the length of the edge.
+* `t`: the triangles of the cut mesh, faces in index order. An uncrossed face gives one triangle
+  `(a, b, c)` in its own order. A crossed face with corners `v0 v1 v2` and alone vertex `a = v_k`,
+  `b = v_{k+1}`, `c = v_{k+2}` gives `(a, p, q)` (`p` on `ab`, `q` on `ac`), then, if `|pc| <= |bq|`,
+  `(p, b, c), (p, c, q)`, otherwise `(p, b, q), (b, c, q)`. `Lij` is the length between corner `i` and
+  corner `j` (`L01 = |N0 N1|`, `L12`, `L20 = |N2 N0|`), `AREA` the area (`|det| A_f`).
+* `g`: cut segments, one per crossed face (the `(a, p, q)` triangle), `K1 = p`, `K2 = q`, in face order.
+* `r`: per region: number of triangles, nodes, connected components of `S_R` (vertex-connected),
+  components without a boundary vertex, nodes in them, `J`, area of `S_R`, area of the components
+  that were solved.
+* `u`: `SOLVED` 0 for nodes of an unsolved component (then `U = P = 0`), the scale factor and the
+  adjoint (`P = 0` for the Dirichlet energy).
+* `b`: `V` the integrated outward normal derivative, `ELL` the lumped boundary length, `Q` the integrated
+  derivative of the adjoint (`0` for Dirichlet), `G` the gradient density before `w_R` and `beta_R`
+  (SPEC §3.6). `B_S` = cut vertices and the original boundary vertices in `S_R`.
+* `s`: `SRAW = w_0 G_0 + beta_0 - w_1 G_1 - beta_1` at cut vertex `K`, `SSMOOTH` after smoothing,
+  `SLIVER` 0/1.
+* `tau`: the step used, `HMIN` the shortest crossed edge, `SMAX = max_c |SSMOOTH_c|`.
+* `energy`: SPEC §6: `TOTAL = w_0 J0 + beta_0 A0 + w_1 J1 + beta_1 A1 + LENGTH`, where `A_R` is the
+  area of the *solved* part of `S_R` (see choices) and `LENGTH = sum_segments (w_p + w_q)/2 |pq|`
+  with `w` interpolated at the cut vertices with the clamped `T`.
+* `n`: `PHITILDE = phi + tau sigma`; `PHILEN` after SPEC §3.10; `PHISYM` after the symmetry
+  projection (equal to `PHILEN` without `classes`); `REGION2`, `ADJ` (0/1) and `T` are the regions, the
+  cut-adjacent vertices and the Hopf-Lax values of the redistancing (`T = |PHISYM|` on `ADJ`,
+  `+inf` = `7ff0000000000000` where no front arrives); `PHINEW` is the new level set function after
+  redistancing and the second projection (scaled unit), `PHINEW_CALLER = PHINEW / S`.
+* `redist`: number of accepted non-seed vertices, `NADJ` cut-adjacent vertices, `UNREACHED` vertices that kept
+  `PHISYM`.
+* `energy_new`/`cuts_new`: the same evaluation at `PHINEW`.
+
+### How to compare
+
+Everything is a deterministic function of the input; the oracle and a correct implementation
+agree to rounding **provided the discrete decisions agree** (regions, crossings, the diagonal of
+every quad, which vertices are slivers, the sign classes in the redistancing). Fixtures avoid
+near-ties (`NTIES = 0`, no `phi` within rounding of 0 except where intended). Quantities that divide
+by the lumped boundary length (`G`, `SRAW`, `SIGMA` and what follows) are ill-conditioned when a
+crossing lies very close to a vertex: in `ico1-phi-zero-vertex`, `max|s| = 10^6`. Compare with a
+relative tolerance (`1e-9` is what `cuts-fixtures check` uses) and expect an amplification of the
+rounding error by `1/delta^2` at the worst.
+
+## Cut flow: choices where the SPEC is ambiguous
+
+Each item quotes the sentence and states the choice made (these are also in the delivery report).
+
+1. SPEC §3.4 "A component of `S` with no boundary vertex has no solution ... It is reported and left
+   out of everything (D9c)". *Components* are the vertex-connected components of the submesh.
+   An unsolved component gets `u = p = 0`, no `v, ell, q, G` (it has no `B_S` node), `sigma = 0`, and
+   is excluded from `J` (it would be `0` anyway), **and from `Area(S_r)` in the energy**. The `r`
+   line gives both `AREA` and `AREA_SOLVED`; `energy` uses `AREA_SOLVED`. (Reading "everything" as
+   not including the area would add `beta_r * (AREA - AREA_SOLVED)`.) A component that touches `dM`
+   (e.g. a disk component) has a boundary vertex and is solved.
+2. SPEC §3.6 "A region with `w_r = 0` needs no solve." The oracle solves every region anyway and
+   prints `u, v, G`; the energy uses `w_r`, so nothing changes.
+3. SPEC §3.7 "a cut vertex is a sliver vertex if an incident cut-mesh triangle has aspect ratio
+   `> rho0`": any triangle of the cut mesh (either region, after the quad is split) that has the
+   cut vertex as a corner. Aspect ratio from the *area `|det| A_f`* and the barycentric lengths.
+   "every sliver vertex simultaneously": every pass reads the speeds of the previous pass.
+   Neighbours are the other ends of the cut segments; a vertex with fewer than two neighbours is left
+   alone.
+4. SPEC §4 "Step size ... `max_c |s_c|`": the *smoothed* speed (the one that is extended), `h` is the
+   shortest crossed original edge in the scaled unit. If `max|s| = 0` then `tau = tau_max`.
+5. SPEC §3.10 "`w ≡ 0` skips the step": all `alpha + eta_i` exactly `0`, for both rules (then
+   `phi' = phi~`). The paper rule with `alpha + eta_i = 0` at some but not all vertices is an error.
+6. SPEC §3.12 "Vertices in `Adj` keep their values": the values of `phi'` after the symmetry projection.
+   "Signs stay": the sign class of a vertex is the region of that same `phi'` (`phi' <= 0` is class 0).
+   A vertex of class `c` ignores neighbours of the other class and neighbours whose `T` is still `+inf`.
+   Redistancing is the single-pass fast marching of the current SPEC §3.12 (commit 736f580): seeds are
+   accepted; repeatedly the unaccepted vertex with the smallest tentative value (ties: lower index) is
+   accepted, by a naive O(n^2) selection. `redistanceFixedPoint` (sweeps to the fixed point, the earlier
+   definition) is kept only as a self-test cross-check on a mesh without obtuse angles.
+7. SPEC §3.3 "Sub-triangles get ... linearly interpolated `a` of their parent": `a` at a cut vertex is
+   `(1-t) a_x + t a_y` (clamped `t`) and `a_t` of a sub-triangle is the mean of the three node values.
+8. SPEC §3.3 "the quad is split by the shorter of its diagonals `p-c`, `b-q` (tie: `p-c`)": the lengths
+   are the barycentric lengths in floating point; `p-c` iff `|pc| <= |bq|` exactly. `NTIES` counts
+   near-ties.
+9. SPEC §6 "`w` interpolated linearly to the cut vertices": with the clamped `t`; each segment once.
+10. SPEC §3.2: `NMOVED` counts `t < delta` or `t > 1 - delta` strictly; a `t` exactly equal to
+    `delta` is not counted.
+11. SPEC §3.1 "A curvature override replaces `k_f`": it replaces the density that drives the Yamabe
+    equation (`g`); `OMEGA` and `KGAUSS` in the output stay the Gaussian ones. `uniform`/`per_face` are
+    in the scaled unit (1/length^2). The curvature-based weight (SPEC §3.6) always uses the vertex
+    curvature `K_i = (2 pi - Theta_i)/A_i` of `M`, never the override.
+12. SPEC §3.6 curvature-based weight: `(W_V + c L) r = W_V r0` is solved on the whole of `M` with
+    `L` the cotan Laplacian of `M` (scale invariant) and `A_i` the scaled lumped area.
+13. SPEC §3.6 pointwise: the Hencky case has `b(0) = 0`, `b'(u) = 2u`; the adjoint right-hand side at a
+    boundary node is `-A_i^S b'(0) = -0`.
+14. SPEC §3.11: a class mean is the sum in increasing vertex index divided by the class size.
+15. SPEC §2 "`E(φ)`" in `energy_new` is the same function at `PHINEW`, not part of the SPEC's one
+    step; it is there for the energy-decrease check.
+
+## Cut flow: tests and fixtures
+
+`ddg-oracle cuts-selftest` (about 1 s, 33 checks) runs, without external reference:
+
+* icosphere generator (levels 0-3: outward, `chi = 2`, vertex counts);
+* `sum_f Omega_f` equals the sum of `2 pi - Theta_i` over interior vertices to `4e-14` on a sphere,
+  torus, bumpy disk, annulus, lumpy sphere (`2 pi chi` on the closed ones);
+* cut mesh: areas sum to 1 (`2e-15`), `chi(S_0) + chi(S_1) - chi(cut) = chi(M)` on a sphere, torus
+  and disk;
+* flat disk: `u = 0` (`2e-15`), `v = 0`, `s = 0` (`2e-28`);
+* scaled Dirichlet with `a = 1` equals Dirichlet (`J`, `s` to `2e-15`; `p = -2u`, `q = -2v`);
+* flat disk with a constant source `K = 5` and a circle of radius `0.3`: Dirichlet `J` is within `3e-4`
+  of `pi K^2 rho^4/8`, mean `G` within `1e-3` of `(K rho/2)^2`; Hencky `J` within `1.2e-2` of
+  `pi K^2 rho^6/48`, `G` within `6e-4` of `K^2 rho^4/16`; `max |u - exact| = 1e-3`;
+* sphere cap (SPEC §6.2) on the icosphere of level 3 (642 vertices), polar angle 1: `J = 0.391` against
+  `0.394` (0.55%), `du/dn = 1.9368` against `1.9370` (1e-4), `max|u - exact| = 1e-3`, and the exact
+  identity `sum_B v_i = sum_f k_f A_f` to rounding;
+* the stage equations on the output (Yamabe, Hencky adjoint, harmonic extension) to `3e-14`;
+* finite differences (SPEC §6.3): shifting `phi` by `+-e` changes `E` by `-2 e sum_c s_c l_c` within 0.5%
+  for Dirichlet, Hencky with `w = (1, 2)`, `beta = (0.5, 0.1)`, and curvature-scaled with `w_0 = 1.5`;
+* redistancing (fast marching): every value equals the update from the vertices accepted before it,
+  cut-adjacent values are kept; on a flat grid with a straight cut it reproduces the exact distance
+  and equals the fixed point of the scheme (`5e-17`);
+* the closed form of the local Hopf-Lax update against a ternary search over lambda (`1e-12`);
+* a change of unit (lengths and `phi` times 3) leaves the scaled quantities unchanged;
+* energy decrease along a small step; the text format round trip; error blocks.
+
+`fixtures/cuts/` has 21 cases (`MANIFEST.tsv`): `NAME.in` and `NAME.out` (the output of `ddg-oracle cuts
+NAME.in`): icosphere levels 1 and 2 with a tilted plane, geodesic caps with each energy, a torus, a grid
+disk and an annulus whose cuts meet the boundary, an annulus ring, `eta` with both penalty rules, `w_r`,
+`beta_r`, symmetry classes (both projections active), `phi = 0` exactly at vertices, `delta = 0.2` clamps,
+sliver smoothing with `rho0 = 2` and 3 passes, curvature overrides (uniform and per face), a flat disk
+and two disjoint spheres where one component is not touched. `ddg-oracle cuts-fixtures check
+fixtures/cuts` recomputes and compares (tolerance `1e-9`, as for the first paper).
+
+## Cut flow: code map
+
+| module | |
+|---|---|
+| `DdgOracle.Formulas.Cuts` | scalar-generic formulas of SPEC §10 (see above) |
+| `DdgOracle.Cuts.Case`, `Mat` | input data model; dense matrices with per-triangle cotan assembly and principal-subsystem solves |
+| `DdgOracle.Cuts.Base` | validation, scaling, `Theta`, `Omega_f`, vertex areas, `L`, feature size |
+| `DdgOracle.Cuts.CutMesh` | regions, crossings, cut mesh |
+| `DdgOracle.Cuts.Region` | `u, v, ell, p, q, G, J` of one region |
+| `DdgOracle.Cuts.Step` | speed, smoothing, extension, energy, length step, symmetry, redistancing, `runStep` |
+| `DdgOracle.Cuts.Format` | parser, printers, stream driver |
+| `DdgOracle.Cuts.Gen`, `Selftest`, `Fixtures` | icosphere and test cases, checks, golden fixtures |
+
+`buildTopology` got an optional argument `connected := true`; the cut flow passes `false`.
+
+## Cut flow: limitations
+
+* Two regions only (SPEC §8 is not implemented); `b` is Hencky only (no general `b, b'`).
+* Dense: at most 1500 vertices, practical limit a few hundred (LU of the full `n x n` systems).
+* One step; `cuts` does not iterate and has no stopping rule.
+* Not implemented: the visibility helper `eta_i = nu_i n_i . E_i`, initial-`phi` helpers.
