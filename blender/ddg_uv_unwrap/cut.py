@@ -33,6 +33,14 @@ from mathutils.kdtree import KDTree
 
 from . import core
 
+# The smallest distance of a point of the cut from a vertex, as a fraction of its edge, in the
+# cut that is shown (preview) and inserted (Apply). The flow itself keeps the library's 1e-3
+# (the Flow operator's `min_crossing_offset`). A cut that passes closer than this to a vertex
+# makes slivers of the polygons it splits, and the flattening of the result can then have a few
+# flipped triangles; moving such points away from the vertices (0.2 moves the cut by at most
+# 1.5 % of the size of the model, measured, see blender/README.md) removes most of them.
+DEFAULT_CUT_OFFSET = 0.2
+
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
 LAST_FLOW_KEY = "ddg_cut_last_flow"
@@ -206,7 +214,8 @@ def labels_from_values(values, what):
 
 
 def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=None,
-              selected_vertices=(), cluster_iterations=50, attribute=""):
+              selected_vertices=(), cluster_iterations=50, attribute="",
+              cut_offset=DEFAULT_CUT_OFFSET):
     """Creates the state of a cut on ``obj`` and its preview.
 
     ``mode`` is ``'SELECTED'`` (the selected faces against the rest, two regions), ``'CIRCLE'``
@@ -276,7 +285,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
         del mesh[LAST_FLOW_KEY]
     mesh.update()
     written = perf_counter()
-    update_preview(obj, session)
+    update_preview(obj, session, cut_offset)
     previewed = perf_counter()
     return {
         "n_regions": session.n_regions,
@@ -312,13 +321,13 @@ def remove_preview(obj):
     return removed
 
 
-def update_preview(obj, session):
+def update_preview(obj, session, offset=DEFAULT_CUT_OFFSET):
     """Replaces the preview of ``obj`` by the current cut of ``session``: a wire object named
     after the mesh object, parented to it (so that it follows its transform). Returns the new
     object."""
     ddg = native()
     try:
-        positions, starts, closed, _regions = session.preview()
+        positions, starts, closed, _regions = session.preview(min_crossing_offset=offset)
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     remove_preview(obj)
@@ -595,10 +604,11 @@ def run_flow(obj, context, settings):
     written = perf_counter()
     n_patches = count_patches(mesh, session.corner_regions())
     try:
-        n_triple_points = len(session.describe_cut().junction_polygon) if n_regions > 2 else 0
+        n_triple_points = (len(session.describe_cut(
+            min_crossing_offset=settings["cut_offset"]).junction_polygon) if n_regions > 2 else 0)
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
-    update_preview(obj, session)
+    update_preview(obj, session, settings["cut_offset"])
     previewed = perf_counter()
     summary = {k: v for k, v in report.items() if k != "steps"}
     summary["length_scale"] = session.length_scale
@@ -996,7 +1006,7 @@ def _insert_cut(bm, cut, mark_seams):
     }
 
 
-def apply_cut(obj, *, mark_seams=True):
+def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
     """Applies the cut stored in the state attributes of ``obj``: inserts it into the mesh
     (``insert_cut``), marks it as seams, and removes the preview and the state attributes.
     Returns a dict with the insertion's counts and the time spent."""
@@ -1006,7 +1016,7 @@ def apply_cut(obj, *, mark_seams=True):
     n_regions, flat = read_state(mesh)
     session, seconds_extract = make_session(obj, {"corner_values": flat}, n_regions)
     try:
-        cut = session.describe_cut()
+        cut = session.describe_cut(min_crossing_offset=cut_offset)
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     described = perf_counter()

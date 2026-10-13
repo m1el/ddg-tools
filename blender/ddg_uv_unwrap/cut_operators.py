@@ -111,6 +111,18 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         default="",
     )
 
+    cut_offset: FloatProperty(
+        name="Cut Offset",
+        description=(
+            "The smallest distance of a point of the cut from a vertex, as a fraction of its "
+            "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
+            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
+            "the faces it splits, and the unwrap can then flip a few triangles; points are "
+            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
+            "size and its length by about 2% (measured on the test models)"),
+        default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
+    )
+
     @classmethod
     def poll(cls, context):
         return _poll(cls, context)
@@ -120,6 +132,7 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         layout.use_property_split = True
         layout.use_property_decorate = False
         layout.prop(self, "mode")
+        layout.prop(self, "cut_offset")
         if self.mode == 'CIRCLE':
             layout.prop(self, "radius")
             layout.prop(self, "vertex")
@@ -145,7 +158,8 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                     obj, mode=self.mode, radius=self.radius, vertex=self.vertex,
                     n_regions=self.regions, active_vertex=active_vertex,
                     selected_vertices=selected_vertices,
-                    cluster_iterations=self.cluster_iterations, attribute=self.attribute)
+                    cluster_iterations=self.cluster_iterations, attribute=self.attribute,
+                    cut_offset=self.cut_offset)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
@@ -363,7 +377,8 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
                        min=1e-9, soft_max=1.0)
     min_crossing_offset: FloatProperty(
         name="Crossing Offset", description="Crossings closer than this fraction of an edge to "
-        "a vertex are moved to that distance", default=1e-3, min=0.0, max=0.499, precision=5)
+        "a vertex are moved to that distance, in the flow (the cut that is shown and applied has its "
+        "own Cut Offset)", default=1e-3, min=0.0, max=0.499, precision=5)
     motion_tolerance: FloatProperty(
         name="Motion Tolerance", description="Stop when the cut moves less than this in a step "
         "(on the surface scaled to unit area)", default=1e-5, min=0.0, precision=7)
@@ -384,6 +399,18 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
     penalty_rule: EnumProperty(name="Penalty Rule", items=_STAGE_ITEMS["penalty_rule"],
                                default='DEFAULT')
 
+    cut_offset: FloatProperty(
+        name="Cut Offset",
+        description=(
+            "The smallest distance of a point of the cut from a vertex, as a fraction of its "
+            "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
+            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
+            "the faces it splits, and the unwrap can then flip a few triangles; points are "
+            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
+            "size and its length by about 2% (measured on the test models)"),
+        default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
+    )
+
     show_advanced: BoolProperty(
         name="Advanced Options", description="Show the advanced options", default=False,
         options={'SKIP_SAVE'})
@@ -403,6 +430,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         layout.prop(self, "ripple_wavelength" if self.length_mode == 'RIPPLE'
                     else "length_weight")
         layout.prop(self, "stages")
+        layout.prop(self, "cut_offset")
         obj = context.active_object
         box = layout.box()
         box.label(text="Penalty")
@@ -457,7 +485,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
             "hide_strength", "distortion_weights", "area_weights", "symmetry",
             "symmetry_tolerance", "use_uniform_curvature", "uniform_curvature", "feature_r_eps",
             "feature_smoothing", "step_rule", "time_scale", "max_motion", "tau_max", "tau",
-            "min_crossing_offset", "motion_tolerance", "energy_tolerance", "energy_window",
+            "min_crossing_offset", "cut_offset", "motion_tolerance", "energy_tolerance", "energy_window",
             "flux_recovery", "length_step", "extension", "speed_scaling", "redistance",
             "penalty_rule")
         return {key: getattr(self, key) for key in keys}
@@ -496,6 +524,18 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         default=False,
     )
 
+    cut_offset: FloatProperty(
+        name="Cut Offset",
+        description=(
+            "The smallest distance of a point of the cut from a vertex, as a fraction of its "
+            "edge, in the cut that is shown and inserted (the flow itself uses 'Crossing "
+            "Offset' under Advanced). A cut that passes closer to a vertex makes slivers of "
+            "the faces it splits, and the unwrap can then flip a few triangles; points are "
+            "moved to this distance. 0.2 moves the cut by at most about 1.5% of the model's "
+            "size and its length by about 2% (measured on the test models)"),
+        default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
+    )
+
     @classmethod
     def poll(cls, context):
         return _poll(cls, context)
@@ -505,6 +545,7 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         layout.use_property_split = True
         layout.use_property_decorate = False
         layout.prop(self, "unwrap_after")
+        layout.prop(self, "cut_offset")
 
     def execute(self, context):
         obj = context.active_object
@@ -514,7 +555,7 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         unwrap_error = None
         try:
             with _ObjectMode(obj):
-                stats = cut.apply_cut(obj)
+                stats = cut.apply_cut(obj, cut_offset=self.cut_offset)
                 if self.unwrap_after:
                     try:
                         bpy.ops.uv.ddg_conformal_unwrap(use_seams=True)

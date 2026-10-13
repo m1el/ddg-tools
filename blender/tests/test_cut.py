@@ -240,6 +240,7 @@ def start_circle(obj, fraction=0.15, vertex=0):
     assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=radius, vertex=vertex) == {'FINISHED'}
 
 
+CUT_OFFSET = 0.2     # the default of the cut operators (cut.DEFAULT_CUT_OFFSET)
 FLOW = dict(steps=6, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1)
 
 
@@ -325,7 +326,7 @@ def rust_reference(obj):
     session = ddg_tools.CutSession(
         positions_, corner_vertices, polygon_starts, triangles, seam_edges=seams or None,
         n_regions=len(rows), corner_values=flat)
-    return session, session.insert()
+    return session, session.insert(min_crossing_offset=CUT_OFFSET)
 
 
 def match_vertices(reference_positions, mesh, tolerance=1e-5):
@@ -577,7 +578,7 @@ def workflow(make, name, circle=True, regions=None, seams=False, weight=None, in
 
     session, reference = rust_reference(obj)
     if inspect is not None:
-        inspect(session.describe_cut())
+        inspect(session.describe_cut(min_crossing_offset=CUT_OFFSET))
     seams_before = positions_of_seams(mesh)
     assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
     assert not [a for a in mesh.attributes if a.name.startswith("ddg_cut_region_")], \
@@ -659,7 +660,7 @@ def operators_are_registered_with_the_agreed_properties():
     rna = bpy.ops.uv.ddg_cut_start.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
-                               "attribute"}, sorted(properties)
+                               "attribute", "cut_offset"}, sorted(properties)
     assert properties["mode"].default == 'SELECTED'
     assert properties["regions"].default == 4
     rna = bpy.ops.uv.ddg_cut_flow.get_rna_type()
@@ -687,7 +688,7 @@ def operators_are_registered_with_the_agreed_properties():
     assert properties["distortion_weights"].array_length == 16
     rna = bpy.ops.uv.ddg_cut_apply.get_rna_type()
     properties = {p.identifier for p in rna.properties if p.identifier != "rna_type"}
-    assert properties == {"unwrap_after"}, properties
+    assert properties == {"unwrap_after", "cut_offset"}, properties
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
         names = [f.__name__ for f in menu.draw._draw_funcs]
         assert "_draw_menu_entry" in names, names
@@ -1156,18 +1157,43 @@ def atlas_of_spot(weight, expect_zero_flips, lam=0.1):
 
 
 @test
-def atlas_of_spot_eight_clusters_gives_as_many_uv_islands_as_charts():
-    # A weight that leaves most of the eight patches; the flattening of some charts has a few
-    # small flipped triangles (counted and reported, not hidden).
-    charts, islands, flipped = atlas_of_spot(2.0, expect_zero_flips=False)
+def atlas_of_spot_eight_clusters_gives_as_many_uv_islands_as_charts_and_no_flipped_faces():
+    # A weight that leaves most of the eight patches. With the default cut offset (0.2) neither
+    # the library's count nor ours finds a flipped triangle; with 1e-3 the same atlas has four
+    # (see blender/README.md).
+    charts, islands, flipped = atlas_of_spot(2.0, expect_zero_flips=True)
     assert charts >= 5
 
 
 @test
 def atlas_of_spot_with_a_strong_length_weight_has_no_flipped_faces():
-    charts, islands, flipped = atlas_of_spot(10.0, expect_zero_flips=True, lam=1.0)
+    charts, islands, flipped = atlas_of_spot(10.0, expect_zero_flips=True)
     assert charts >= 3
 
+
+@test
+def the_cut_offset_moves_points_away_from_vertices():
+    smallest = {}
+    for offset in (1e-3, 0.2):
+        reset()
+        obj = spot_object()
+        mesh = obj.data
+        assert bpy.ops.uv.ddg_cut_start(mode='CLUSTERS', regions=8, cluster_iterations=50,
+                                        cut_offset=offset) == {'FINISHED'}
+        assert bpy.ops.uv.ddg_cut_flow(steps=20, length_mode='EXPLICIT', length_weight=2.0,
+                                       cut_offset=offset) == {'FINISHED'}
+        assert bpy.ops.uv.ddg_cut_apply(cut_offset=offset) == {'FINISHED'}
+        mesh.calc_loop_triangles()
+        pts = [c for v in mesh.vertices for c in v.co]
+        areas = []
+        for tri in mesh.loop_triangles:
+            a, b, c = (Vector(pts[3 * mesh.loops[i].vertex_index:3 * mesh.loops[i].vertex_index + 3])
+                       for i in tri.loops)
+            areas.append(0.5 * (b - a).cross(c - a).length)
+        smallest[offset] = min(areas) / (sum(areas) / len(areas))
+    print("  smallest triangle area / mean: {:.3g} at 1e-3, {:.3g} at 0.2".format(
+        smallest[1e-3], smallest[0.2]))
+    assert smallest[0.2] > 20 * smallest[1e-3]
 
 
 # ----------------------------------------------------------------------------------------------
