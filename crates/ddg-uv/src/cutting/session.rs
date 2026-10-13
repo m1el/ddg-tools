@@ -6,8 +6,8 @@ use ddg_core::Geometry;
 use ddg_core::distance::upwind_distance;
 use ddg_core::topology::{NONE, TriMesh};
 use ddg_variational_cuts::{
-    CurvatureSource, Cut, CutProblem, CurveEnd, Energy, EvalOptions, Evaluation, Flow,
-    FlowOptions, RegionFlow, RunReport, ScaleWeight, StepReport, StepSize, StopRule, init,
+    CurvatureSource, CurveEnd, Cut, CutProblem, Energy, EvalOptions, Evaluation, Flow, FlowOptions,
+    RegionFlow, RunReport, ScaleWeight, StepReport, StepSize, StopRule, init,
 };
 
 use super::describe::{
@@ -147,7 +147,12 @@ impl Maps {
     /// The region functions of the corners from the level-set functions of the flow mesh.
     fn regions_from_phis(&self, phis: &[Vec<f64>]) -> Vec<Vec<f64>> {
         phis.iter()
-            .map(|phi| self.corner_vertex.iter().map(|&v| phi[v as usize]).collect())
+            .map(|phi| {
+                self.corner_vertex
+                    .iter()
+                    .map(|&v| phi[v as usize])
+                    .collect()
+            })
             .collect()
     }
 
@@ -411,7 +416,10 @@ impl Session {
         let (flow, many) = if many_flow {
             let phis = level.into_many();
             let aux = Flow::new(&flow_mesh, &flow_geometry, &phis[0])?;
-            (aux, Some(RegionFlow::new(&flow_mesh, &flow_geometry, &phis)?))
+            (
+                aux,
+                Some(RegionFlow::new(&flow_mesh, &flow_geometry, &phis)?),
+            )
         } else {
             let phi = level.into_two();
             (Flow::new(&flow_mesh, &flow_geometry, &phi)?, None)
@@ -783,11 +791,9 @@ impl Session {
     fn current_cut(&self, min_crossing_offset: f64) -> Result<Cut, CuttingError> {
         Ok(match &self.many {
             Some(f) => Cut::from_regions(&self.flow_mesh, &f.level_sets(), min_crossing_offset)?,
-            None => Cut::from_level_set(
-                &self.flow_mesh,
-                &self.flow.level_set(),
-                min_crossing_offset,
-            )?,
+            None => {
+                Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?
+            }
         })
     }
 
@@ -998,7 +1004,8 @@ impl Session {
             }
         }
         // A path ends at an edge point or at a junction; diagonal points have two segments.
-        let is_terminal = |node: u32| node as usize >= n_points || edge_point_of[node as usize] != NONE;
+        let is_terminal =
+            |node: u32| node as usize >= n_points || edge_point_of[node as usize] != NONE;
         let mut order: Vec<usize> = (0..cut.segments.len()).collect();
         order.sort_by_key(|&s| (polygon_of(s), s));
         let mut used = vec![false; cut.segments.len()];
@@ -1052,7 +1059,11 @@ impl Session {
                 let [lo, hi] = cut.segment_regions(&self.flow_mesh, s);
                 (lo, hi)
             };
-            let (mut left, mut right) = if forward { (left, right) } else { (right, left) };
+            let (mut left, mut right) = if forward {
+                (left, right)
+            } else {
+                (right, left)
+            };
             if left > right {
                 nodes.reverse();
                 std::mem::swap(&mut left, &mut right);
@@ -1108,11 +1119,7 @@ impl Level {
     fn into_two(self) -> Vec<f64> {
         match self {
             Level::Phi(phi) => phi,
-            Level::Phis(p) => p[0]
-                .iter()
-                .zip(&p[1])
-                .map(|(a, b)| 0.5 * (a - b))
-                .collect(),
+            Level::Phis(p) => p[0].iter().zip(&p[1]).map(|(a, b)| 0.5 * (a - b)).collect(),
         }
     }
 

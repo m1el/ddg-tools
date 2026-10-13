@@ -401,14 +401,12 @@ pub fn insert(mesh: &PolygonMesh, cut: &CutOnPolygons) -> Result<Inserted, Cutti
         if *triangle != junction.corners || corner_polygon[triangle[0] as usize] != pol {
             return Err(bad(format!(
                 "triangle {} has the corners {:?} in polygon {}, not {:?} in polygon {pol}",
-                junction.triangle,
-                triangle,
-                corner_polygon[triangle[0] as usize],
-                junction.corners
+                junction.triangle, triangle, corner_polygon[triangle[0] as usize], junction.corners
             )));
         }
         let w = junction.barycentric;
-        if !(w.iter().all(|x| x.is_finite() && *x > 0.0) && (w.iter().sum::<f64>() - 1.0).abs() <= 1e-9)
+        if !(w.iter().all(|x| x.is_finite() && *x > 0.0)
+            && (w.iter().sum::<f64>() - 1.0).abs() <= 1e-9)
         {
             return Err(bad(format!(
                 "the barycentric coordinates {w:?} must be positive and sum to 1 (to 1e-9)"
@@ -762,7 +760,11 @@ impl PolygonContext<'_> {
                 let (x, y) = (w[0], w[1]);
                 // A segment that ends at a junction: one of the three arms of its triangle.
                 if x.junction_triangle.is_some() || y.junction_triangle.is_some() {
-                    let (jp, other) = if x.junction_triangle.is_some() { (x, y) } else { (y, x) };
+                    let (jp, other) = if x.junction_triangle.is_some() {
+                        (x, y)
+                    } else {
+                        (y, x)
+                    };
                     let (Some(ti), Some(edge)) = (jp.junction_triangle, other.edge) else {
                         return Err(invalid(
                             Some(p),
@@ -798,7 +800,10 @@ impl PolygonContext<'_> {
                     entry.q[side] = other.vertex;
                     continue;
                 }
-                let (xe, ye) = (x.edge.expect("not a junction"), y.edge.expect("not a junction"));
+                let (xe, ye) = (
+                    x.edge.expect("not a junction"),
+                    y.edge.expect("not a junction"),
+                );
                 if xe == ye {
                     return Err(invalid(
                         Some(p),
@@ -883,7 +888,11 @@ impl PolygonContext<'_> {
                 let sides: Vec<Vec<u32>> = (0..3)
                     .map(|k| {
                         let (c, d) = (tt.corners[k], tt.corners[(k + 1) % 3]);
-                        if is_polygon_edge(c, d) { extras(c, d) } else { Vec::new() }
+                        if is_polygon_edge(c, d) {
+                            extras(c, d)
+                        } else {
+                            Vec::new()
+                        }
                     })
                     .collect();
                 // Position of q[k] in its side's list (MAX: the side is a diagonal).
@@ -911,9 +920,15 @@ impl PolygonContext<'_> {
                     if at[k] != usize::MAX {
                         ring_extras(ring, &sides[k][..at[k]], 1 << k);
                     }
-                    ring.push(RingVertex { id: tt.q[k], lines: 1 << k });
+                    ring.push(RingVertex {
+                        id: tt.q[k],
+                        lines: 1 << k,
+                    });
                     ring.push(RingVertex { id: tt.j, lines: 0 });
-                    ring.push(RingVertex { id: tt.q[prev], lines: 1 << prev });
+                    ring.push(RingVertex {
+                        id: tt.q[prev],
+                        lines: 1 << prev,
+                    });
                     if at[prev] != usize::MAX {
                         ring_extras(ring, &sides[prev][at[prev] + 1..], 1 << prev);
                     }
@@ -1027,7 +1042,12 @@ impl PolygonContext<'_> {
                 for k in 0..3 {
                     let (c, d) = (tt.corners[k], tt.corners[(k + 1) % 3]);
                     if edge == (c.min(d), c.max(d)) {
-                        return base[ti] + if near == c { k as u32 } else { ((k + 1) % 3) as u32 };
+                        return base[ti]
+                            + if near == c {
+                                k as u32
+                            } else {
+                                ((k + 1) % 3) as u32
+                            };
                     }
                 }
             }

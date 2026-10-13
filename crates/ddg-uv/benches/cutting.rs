@@ -24,6 +24,7 @@ use ddg_uv::cutting::{
 use ddg_uv::primitives::{grid_cube, torus, uv_sphere};
 use ddg_uv::{MeshInput, PolygonMesh, unwrap};
 use ddg_variational_cuts::{CutProblem, Energy, FlowOptions, StepSize, length_weight_for_ripples};
+use ddg_variational_cuts::{PAPER_FEATURE_SMOOTHING, ScaleWeight};
 
 /// Flow steps per run.
 const STEPS: usize = 10;
@@ -248,5 +249,175 @@ fn benches(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(cutting, benches);
+// ----- N regions: the atlas of the paper (Fig. 16) -----
+
+/// Regions of the atlas runs: the normals of the mesh clustered into this many.
+const ATLAS_REGIONS: usize = 6;
+
+struct AtlasFixture {
+    name: String,
+    mesh: PolygonMesh,
+    problem: CutProblem,
+    options: FlowOptions<'static>,
+}
+
+fn atlas_session(mesh: &PolygonMesh) -> Session {
+    Session::new(
+        &mesh.input(),
+        ATLAS_REGIONS,
+        &Start::NormalClusters {
+            max_iterations: 100,
+        },
+    )
+    .expect("the benchmark meshes load")
+}
+
+fn atlas_fixture(name: &str, mesh: PolygonMesh) -> AtlasFixture {
+    let mut s = atlas_session(&mesh);
+    let options = s.recommended_options(StepSize::default());
+    let mut problem = s.new_problem(
+        Energy::ScaledDirichlet(ScaleWeight::FeatureSize {
+            r_eps: 1.0,
+            smoothing: PAPER_FEATURE_SMOOTHING,
+        }),
+        0.0,
+    );
+    let omega = s
+        .roughening_rate(&problem, &options.eval)
+        .expect("a start with a cut");
+    problem.length_weight = length_weight_for_ripples(omega, 0.5);
+    AtlasFixture {
+        name: name.to_string(),
+        mesh,
+        problem,
+        options,
+    }
+}
+
+fn atlas_stepped(f: &AtlasFixture) -> Session {
+    let mut s = atlas_session(&f.mesh);
+    for _ in 0..STEPS {
+        s.step(&f.problem, &f.options).expect("step");
+    }
+    s
+}
+
+/// The same stages for `ATLAS_REGIONS` regions started from clusters of the vertex normals:
+/// `FlowOptions::for_regions`, the rescaled Dirichlet energy, the length weight of the ripple
+/// rule with wavelength 0.5, [`STEPS`] steps.
+fn region_benches(c: &mut Criterion) {
+    let models = std::env::var_os("DDG_MODELS").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/models/spot/spot"),
+        PathBuf::from,
+    );
+    let mut fixtures = vec![
+        atlas_fixture("uv_sphere_64x32", uv_sphere(64, 32, 1.0).expect("valid")),
+        atlas_fixture("grid_cube_16", grid_cube(16, 2.0)),
+    ];
+    if let Some(mesh) = polygons_of(models.join("spot_quadrangulated.obj")) {
+        fixtures.push(atlas_fixture("spot_quads", mesh));
+    }
+    let off = CutUnwrapOptions {
+        cones: ConePlacement::Off,
+        ..Default::default()
+    };
+
+    let mut g = group(c, "regions/start");
+    for f in &fixtures {
+        g.bench_function(&f.name, |b| b.iter(|| atlas_session(&f.mesh)));
+    }
+    g.finish();
+
+    let mut g = group(c, "regions/steps");
+    for f in &fixtures {
+        g.bench_function(format!("{}/{STEPS}", f.name), |b| {
+            b.iter_batched(
+                || atlas_session(&f.mesh),
+                |mut s| {
+                    for _ in 0..STEPS {
+                        s.step(&f.problem, &f.options).expect("step");
+                    }
+                    s
+                },
+                BatchSize::LargeInput,
+            )
+        });
+    }
+    g.finish();
+
+    let states: Vec<(&AtlasFixture, Session, CutOnPolygons)> = fixtures
+        .iter()
+        .map(|f| {
+            let s = atlas_stepped(f);
+            let cut = s.describe_cut(DEFAULT_CROSSING_OFFSET).expect("cut");
+            let inserted = insert(&f.mesh, &cut).expect("insert");
+            eprintln!(
+                "{}: {} regions, {} polygons; after {STEPS} steps {} edge points, {} junctions, {} paths; {} polygons after insertion",
+                f.name,
+                ATLAS_REGIONS,
+                f.mesh.n_polygons(),
+                cut.edge_points.len(),
+                cut.junctions.len(),
+                cut.paths.len(),
+                inserted.mesh.n_polygons()
+            );
+            (f, s, cut)
+        })
+        .collect();
+    let mut g = group(c, "regions/preview");
+    for (f, s, _) in &states {
+        g.bench_function(&f.name, |b| {
+            b.iter(|| s.preview(DEFAULT_CROSSING_OFFSET).expect("preview"))
+        });
+    }
+    g.finish();
+    let mut g = group(c, "regions/describe");
+    for (f, s, _) in &states {
+        g.bench_function(&f.name, |b| {
+            b.iter(|| s.describe_cut(DEFAULT_CROSSING_OFFSET).expect("describe"))
+        });
+    }
+    g.finish();
+    let mut g = group(c, "regions/insert");
+    for (f, _, cut) in &states {
+        g.bench_function(&f.name, |b| {
+            b.iter(|| insert(&f.mesh, cut).expect("insert"))
+        });
+    }
+    g.finish();
+    let mut g = group(c, "regions/unwrap");
+    for (f, _, cut) in &states {
+        let inserted = insert(&f.mesh, cut).expect("insert");
+        let seams = inserted.seams_after(&[]);
+        let all: Vec<u32> = (0..inserted.mesh.positions.len() as u32).collect();
+        let allowed = MeshInput {
+            seam_edges: &seams,
+            ..inserted.mesh.input()
+        };
+        let forbidden = MeshInput {
+            forbidden_vertices: &all,
+            ..allowed
+        };
+        g.bench_function(format!("{}/cones_off", f.name), |b| {
+            b.iter(|| unwrap(&forbidden, &off.unwrap).expect("unwrap"))
+        });
+        g.bench_function(format!("{}/cones_optimal", f.name), |b| {
+            b.iter(|| unwrap(&allowed, &ddg_uv::UnwrapOptions::default()).expect("unwrap"))
+        });
+    }
+    g.finish();
+
+    let mut g = group(c, "regions/end_to_end");
+    for f in &fixtures {
+        g.bench_function(format!("{}/{STEPS}_steps_cones_off", f.name), |b| {
+            b.iter(|| {
+                let s = atlas_stepped(f);
+                s.unwrap(DEFAULT_CROSSING_OFFSET, &off).expect("unwrap")
+            })
+        });
+    }
+    g.finish();
+}
+
+criterion_group!(cutting, benches, region_benches);
 criterion_main!(cutting);

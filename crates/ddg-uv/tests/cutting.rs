@@ -1,5 +1,6 @@
 //! The cut session, the description of the cut on polygons, the insertion, and end to end.
 
+#![allow(clippy::needless_range_loop)]
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -7,14 +8,15 @@ use std::path::PathBuf;
 
 use ddg_core::io::read_obj;
 use ddg_uv::cutting::{
-    ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET, FlowKind,
-    EdgePoint, Inserted, InteriorPoint, PathEnd, PolygonPath, Session, Start, VertexSource, insert,
-    unwrap_with_cut,
+    ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
+    EdgePoint, FlowKind, Inserted, InteriorPoint, PathEnd, PolygonPath, Session, Start,
+    VertexSource, insert, unwrap_with_cut,
 };
 use ddg_uv::primitives::{capsule, cylinder, grid_cube, torus, uv_sphere};
 use ddg_uv::{MeshInput, PolygonMesh, UnwrapOptions, prepare};
 use ddg_variational_cuts::{
-    CutProblem, Energy, FlowOptions, StepSize, StopRule, length_weight_for_ripples,
+    CutProblem, Energy, Flow, FlowOptions, PAPER_FEATURE_SMOOTHING, ScaleWeight, StepSize,
+    StopRule, init, length_weight_for_ripples,
 };
 
 // ----- helpers -----
@@ -177,6 +179,24 @@ fn check_insertion(old: &PolygonMesh, old_seams: &[[u32; 2]], cut: &CutOnPolygon
                 }
             }
         }
+    }
+    // A junction is a vertex of exactly three new polygons and of exactly three seam edges.
+    for (j, &v) in ins.junction_vertex.iter().enumerate() {
+        let incident: Vec<&[u32; 2]> = ins
+            .new_seams
+            .iter()
+            .filter(|e| e[0] == v || e[1] == v)
+            .collect();
+        assert_eq!(
+            incident.len(),
+            3,
+            "junction {j} has {} seam edges",
+            incident.len()
+        );
+        let polygons = (0..new.n_polygons())
+            .filter(|&q| new.polygon(q).contains(&v))
+            .count();
+        assert_eq!(polygons, 3, "junction {j} is in {polygons} polygons");
     }
     // The seams the pipeline will see are all edges that no old seam list contained or the cut.
     assert!(seams.len() >= ins.new_seams.len());
@@ -433,9 +453,17 @@ fn every_error_names_what_is_wrong() {
     ));
     // Three regions are available now, but a circle starts two.
     let e = Session::new(&input, 3, &circle).unwrap_err();
-    assert!(matches!(e, CuttingError::InvalidOption { name: "start", .. }), "{e}");
+    assert!(
+        matches!(e, CuttingError::InvalidOption { name: "start", .. }),
+        "{e}"
+    );
     assert!(matches!(
-        Session::new_with(&input, 3, &Start::NormalClusters { max_iterations: 5 }, FlowKind::TwoRegion),
+        Session::new_with(
+            &input,
+            3,
+            &Start::NormalClusters { max_iterations: 5 },
+            FlowKind::TwoRegion
+        ),
         Err(CuttingError::InvalidOption { name: "kind", .. })
     ));
     // Starts.
@@ -676,7 +704,10 @@ fn insert_refuses_descriptions_that_do_not_fit() {
     // A junction that does not exist, or one that is not where the path is.
     let mut cut = good.clone();
     cut.paths[0].end = PathEnd::Junction(0);
-    assert!(matches!(fails(&cut), CuttingError::InvalidDescription { .. }));
+    assert!(matches!(
+        fails(&cut),
+        CuttingError::InvalidDescription { .. }
+    ));
     let corners = mesh.triangles[0].map(|c| c);
     cut.junctions.push(ddg_uv::cutting::JunctionPoint {
         position: [0.0; 3],
@@ -1257,4 +1288,494 @@ fn dataset_meshes_end_to_end() {
             );
         }
     }
+}
+
+// ===================== N regions =====================
+
+/// A session with `n` regions started from `labels` (one per polygon).
+fn labelled_session(mesh: &PolygonMesh, seams: &[[u32; 2]], n: usize, labels: Vec<u32>) -> Session {
+    let input = MeshInput {
+        seam_edges: seams,
+        ..mesh.input()
+    };
+    Session::new(&input, n, &Start::PolygonLabels(labels)).expect("session")
+}
+
+/// A random state of `n` region functions, constant on the corners of a flow vertex.
+fn random_state(
+    session: &Session,
+    n: usize,
+    rng: &mut ddg_core::generators::SplitMix64,
+) -> Vec<Vec<f64>> {
+    let n_flow = session.flow_mesh().n_vertices();
+    let c2f = session.corner_to_flow_vertex().to_vec();
+    (0..n)
+        .map(|_| {
+            let phi: Vec<f64> = (0..n_flow).map(|_| rng.uniform(-1.0, 1.0)).collect();
+            c2f.iter().map(|&v| phi[v as usize]).collect()
+        })
+        .collect()
+}
+
+/// Statistics of the networks the insertion was run on.
+#[derive(Default, Debug)]
+struct NetworkStats {
+    paths: usize,
+    junctions: usize,
+    polygons_with_two_junctions: usize,
+    junction_with_ordinary_path: usize,
+    junction_next_to_seam: usize,
+    junction_paths: usize,
+}
+
+fn network_stats(
+    mesh: &PolygonMesh,
+    seams: &[[u32; 2]],
+    cut: &CutOnPolygons,
+    st: &mut NetworkStats,
+) {
+    st.paths += cut.paths.len();
+    st.junctions += cut.junctions.len();
+    let seams: BTreeSet<[u32; 2]> = seams.iter().copied().collect();
+    let mut per_polygon: BTreeMap<u32, usize> = BTreeMap::new();
+    for j in &cut.junctions {
+        *per_polygon.entry(j.polygon).or_default() += 1;
+        let poly = mesh.polygon(j.polygon as usize);
+        let touches_seam = poly.iter().enumerate().any(|(i, &a)| {
+            let b = poly[(i + 1) % poly.len()];
+            seams.contains(&[a.min(b), a.max(b)])
+        });
+        st.junction_next_to_seam += usize::from(touches_seam);
+    }
+    st.polygons_with_two_junctions += per_polygon.values().filter(|&&c| c >= 2).count();
+    for p in &cut.paths {
+        let at_junction =
+            matches!(p.start, PathEnd::Junction(_)) || matches!(p.end, PathEnd::Junction(_));
+        st.junction_paths += usize::from(at_junction);
+        if !at_junction && per_polygon.contains_key(&p.polygon) {
+            st.junction_with_ordinary_path += 1;
+        }
+    }
+}
+
+/// Networks: random states with 3, 4 and 6 regions on three meshes, with and without seams.
+/// The invariants of the insertion hold with triple points; junctions are vertices of three
+/// polygons and three seam edges; several junctions in a polygon, a junction in a polygon with
+/// an ordinary path, junctions next to seams all occur.
+#[test]
+fn networks_insert_cleanly() {
+    let mut rng = ddg_core::generators::SplitMix64::new(11);
+    let mut stats = NetworkStats::default();
+    let sphere = uv_sphere(14, 7, 1.0).unwrap();
+    let cube = grid_cube(3, 2.0);
+    let tor = torus(12, 6, 1.0, 0.3).unwrap();
+    // Cylinder: its caps are 12-gons, fanned: junctions and ordinary paths in one polygon.
+    let cyl = cylinder(12, 2, 0.7, 2.0).unwrap();
+    for (name, mesh) in [
+        ("sphere", sphere),
+        ("cube", cube),
+        ("torus", tor),
+        ("cylinder", cyl),
+    ] {
+        let edges = mesh.edges();
+        let seam_sets: Vec<Vec<[u32; 2]>> =
+            vec![vec![], edges.iter().step_by(7).take(9).copied().collect()];
+        for seams in seam_sets {
+            for n in [3usize, 4, 6] {
+                let labels = vec![0u32; mesh.n_polygons()];
+                let mut session = labelled_session(&mesh, &seams, n, labels);
+                for round in 0..6 {
+                    let state = random_state(&session, n, &mut rng);
+                    session.set_state(&state).unwrap();
+                    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+                    let ins = insert(&mesh, &cut).unwrap_or_else(|e| {
+                        panic!("{name} N={n} round {round}, {} seams: {e}", seams.len())
+                    });
+                    check_insertion(&mesh, &seams, &cut, &ins);
+                    check_regions(&session, &mesh, &ins);
+                    network_stats(&mesh, &seams, &cut, &mut stats);
+                    // Every path separates two regions, lower id on its left.
+                    assert!(cut.paths.iter().all(|p| p.regions[0] < p.regions[1]));
+                    assert!(cut.paths.iter().all(|p| (p.regions[1] as usize) < n));
+                }
+            }
+        }
+    }
+    println!("{stats:?}");
+    assert!(stats.junctions > 500);
+    assert!(stats.polygons_with_two_junctions > 20);
+    assert!(stats.junction_with_ordinary_path > 0);
+    assert!(stats.junction_next_to_seam > 20);
+    assert!(stats.junction_paths >= 3 * stats.junctions / 2);
+}
+
+/// Three regions around one vertex of a triangle mesh: one junction, three arms.
+#[test]
+fn one_junction_by_hand() {
+    // A fan of six triangles around vertex 0, regions by pairs of triangles.
+    let mut positions = vec![[0.0, 0.0, 0.0]];
+    for i in 0..6 {
+        let a = std::f64::consts::TAU * f64::from(i) / 6.0;
+        positions.push([a.cos(), a.sin(), 0.0]);
+    }
+    let faces: Vec<[u32; 3]> = (0..6).map(|i| [0, 1 + i, 1 + (i + 1) % 6]).collect();
+    let mesh = PolygonMesh::from_triangles(positions, &faces);
+    // Vertex 0 in region 2 and rim vertices 1,2 / 3,4 / 5,6 in regions 0, 1, 0... : make the
+    // triangle (0, 1, 2) have three regions.
+    let region_of = [2usize, 0, 1, 1, 0, 0, 1];
+    let n = 3;
+    let n_corners = mesh.corner_vertices.len();
+    let functions: Vec<Vec<f64>> = (0..n)
+        .map(|k| {
+            (0..n_corners)
+                .map(|c| {
+                    if region_of[mesh.corner_vertices[c] as usize] == k {
+                        -1.0
+                    } else {
+                        1.0
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let input = mesh.input();
+    let session = Session::new(&input, n, &Start::Corners(functions)).unwrap();
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    assert!(!cut.junctions.is_empty());
+    let j = &cut.junctions[0];
+    assert!((j.barycentric.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &[], &cut, &ins);
+    // A polygon (a triangle here) with a junction becomes three polygons.
+    let parts = ins
+        .polygon_parent
+        .iter()
+        .filter(|&&p| p == j.polygon)
+        .count();
+    assert_eq!(parts, 3);
+    // Position: the weights applied to the corners.
+    let jv = ins.junction_vertex[0] as usize;
+    for d in 0..3 {
+        let expected: f64 = (0..3)
+            .map(|k| {
+                j.barycentric[k]
+                    * mesh.positions[mesh.corner_vertices[j.corners[k] as usize] as usize][d]
+            })
+            .sum();
+        assert!((ins.mesh.positions[jv][d] - expected).abs() < 1e-12);
+    }
+}
+
+/// Two regions through the N-region flow against the two-region flow: the same steps and the
+/// same description.
+#[test]
+fn n_equals_two_through_the_region_flow() {
+    let mesh = uv_sphere(20, 10, 1.0).unwrap();
+    let seams = {
+        let poly = mesh.polygon(30);
+        vec![
+            [poly[0].min(poly[1]), poly[0].max(poly[1])],
+            [poly[1].min(poly[2]), poly[1].max(poly[2])],
+        ]
+    };
+    let input = MeshInput {
+        seam_edges: &seams,
+        ..mesh.input()
+    };
+    let start = Start::GeodesicCircle {
+        vertex: 40,
+        radius: 0.8,
+    };
+    let mut a = Session::new(&input, 2, &start).unwrap();
+    let mut b = Session::new_with(&input, 2, &start, FlowKind::Regions).unwrap();
+    assert!(!a.uses_region_flow() && b.uses_region_flow());
+    let (problem, options) = flow_setup(&mut a, 0.3);
+    for step in 0..6 {
+        let ra = a.step(&problem, &options).unwrap();
+        let rb = b.step(&problem, &options).unwrap();
+        let (ea, eb) = (ra.energy.total, rb.energy.total);
+        assert!(
+            (ea - eb).abs() <= 1e-9 * ea.abs(),
+            "step {step}: {ea} against {eb}"
+        );
+        assert_eq!(ra.n_cut_points, rb.n_cut_points);
+    }
+    let (sa, sb) = (a.state(), b.state());
+    for k in 0..2 {
+        for (x, y) in sa[k].iter().zip(&sb[k]) {
+            assert!((x - y).abs() < 1e-8, "{x} {y}");
+        }
+    }
+    let (ca, cb) = (
+        a.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap(),
+        b.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap(),
+    );
+    assert!(cb.junctions.is_empty());
+    assert_eq!(ca.edge_points.len(), cb.edge_points.len());
+    assert_eq!(ca.paths.len(), cb.paths.len());
+    for (pa, pb) in ca.paths.iter().zip(&cb.paths) {
+        assert_eq!(
+            (pa.polygon, pa.start, pa.end, pa.regions),
+            (pb.polygon, pb.start, pb.end, pb.regions)
+        );
+        assert_eq!(pa.interior.len(), pb.interior.len());
+    }
+    for (ea, eb) in ca.edge_points.iter().zip(&cb.edge_points) {
+        assert_eq!((ea.edge, ea.side), (eb.edge, eb.side));
+        assert!((ea.t - eb.t).abs() < 1e-8);
+    }
+    let (pa, pb) = (
+        a.preview(DEFAULT_CROSSING_OFFSET).unwrap(),
+        b.preview(DEFAULT_CROSSING_OFFSET).unwrap(),
+    );
+    assert_eq!(pa.len(), pb.len());
+    // Both insert and give the same new mesh combinatorics.
+    let (ia, ib) = (insert(&mesh, &ca).unwrap(), insert(&mesh, &cb).unwrap());
+    assert_eq!(ia.mesh.polygon_offsets, ib.mesh.polygon_offsets);
+    assert_eq!(ia.new_seams, ib.new_seams);
+}
+
+/// The two-region session is the core crate's flow, bit for bit: same steps, same state.
+#[test]
+fn two_regions_are_the_core_flow_bit_for_bit() {
+    let sphere = ddg_core::generators::icosphere(3).unwrap();
+    let mesh = PolygonMesh::from_triangles(sphere.positions.clone(), &sphere.faces);
+    let tri = ddg_core::TriMesh::new(sphere.positions.len(), sphere.faces.clone()).unwrap();
+    let geometry = ddg_core::Geometry::from_positions(&tri, &sphere.positions).unwrap();
+    let phi0 = init::geodesic_circle(&tri, &geometry, 3, 0.9).unwrap();
+    let corner_phi: Vec<f64> = mesh
+        .corner_vertices
+        .iter()
+        .map(|&v| phi0[v as usize])
+        .collect();
+    let negated: Vec<f64> = corner_phi.iter().map(|x| -x).collect();
+    let mut session =
+        Session::new(&mesh.input(), 2, &Start::Corners(vec![corner_phi, negated])).unwrap();
+    let mut flow = Flow::new(&tri, &geometry, &phi0).unwrap();
+    let (problem, options) = flow_setup(&mut session, 0.3);
+    for _ in 0..5 {
+        let a = session.step(&problem, &options).unwrap();
+        let b = flow.step(&problem, &options).unwrap();
+        assert_eq!(a.energy.total.to_bits(), b.energy.total.to_bits());
+        assert_eq!(a.tau.to_bits(), b.tau.to_bits());
+    }
+    let phi = flow.level_set();
+    let state = session.state();
+    for (c, &v) in mesh.corner_vertices.iter().enumerate() {
+        assert_eq!(state[0][c].to_bits(), phi[v as usize].to_bits());
+    }
+}
+
+#[test]
+fn n_region_state_and_starts() {
+    let mesh = uv_sphere(24, 12, 1.0).unwrap();
+    let n = 4;
+    // Labels: octant-like, by the sign of x and y of the centre.
+    let labels: Vec<u32> = (0..mesh.n_polygons())
+        .map(|p| {
+            let c = mesh.polygon(p).iter().fold([0.0f64; 3], |mut acc, &v| {
+                for d in 0..3 {
+                    acc[d] += mesh.positions[v as usize][d];
+                }
+                acc
+            });
+            u32::from(c[0] > 0.0) + 2 * u32::from(c[1] > 0.0)
+        })
+        .collect();
+    let mut session = labelled_session(&mesh, &[], n, labels.clone());
+    let state = session.state();
+    assert_eq!(state.len(), n);
+    // Corner regions are the argmin of the state.
+    let regions = session.corner_regions();
+    for c in 0..mesh.corner_vertices.len() {
+        let best = (0..n)
+            .min_by(|&a, &b| state[a][c].total_cmp(&state[b][c]))
+            .unwrap();
+        assert_eq!(regions[c] as usize, best);
+    }
+    // The labels of the polygons far from the interface are the regions.
+    for p in 0..mesh.n_polygons() {
+        let c = mesh.polygon(p).iter().fold([0.0f64; 3], |mut acc, &v| {
+            for d in 0..3 {
+                acc[d] += mesh.positions[v as usize][d];
+            }
+            acc
+        });
+        let far = mesh.polygon(p).iter().all(|&v| {
+            mesh.positions[v as usize][0].abs() > 0.2 && mesh.positions[v as usize][1].abs() > 0.2
+        });
+        if far {
+            let _ = c;
+            for corner in mesh.polygon_corners(p) {
+                assert_eq!(regions[corner], labels[p]);
+            }
+        }
+    }
+    // Round trip, bit for bit.
+    session.set_state(&state).unwrap();
+    assert_eq!(session.state(), state);
+    let again = Session::new(&mesh.input(), n, &Start::Corners(state.clone())).unwrap();
+    assert_eq!(again.state(), state);
+    // A corner that disagrees names the vertex and the region function.
+    let v = 17u32;
+    let c = mesh.corner_vertices.iter().position(|&x| x == v).unwrap();
+    let mut broken = state.clone();
+    broken[3][c] += 0.5;
+    match session.set_state(&broken) {
+        Err(CuttingError::CornersDisagree { vertex, region, .. }) => {
+            assert_eq!((vertex, region), (v, 3))
+        }
+        other => panic!("{other:?}"),
+    }
+    // Wrong counts and labels.
+    assert!(matches!(
+        session.set_state(&state[..3]),
+        Err(CuttingError::WrongLength {
+            expected: 4,
+            got: 3,
+            ..
+        })
+    ));
+    let mut bad = labels.clone();
+    bad[5] = 4;
+    assert!(matches!(
+        Session::new(&mesh.input(), n, &Start::PolygonLabels(bad)),
+        Err(CuttingError::LabelOutOfRange {
+            polygon: 5,
+            label: 4,
+            n_regions: 4
+        })
+    ));
+    // Normal clusters: any number of regions, deterministic, every region used.
+    let clustered = Session::new(
+        &mesh.input(),
+        6,
+        &Start::NormalClusters { max_iterations: 50 },
+    )
+    .unwrap();
+    let again = Session::new(
+        &mesh.input(),
+        6,
+        &Start::NormalClusters { max_iterations: 50 },
+    )
+    .unwrap();
+    assert_eq!(clustered.state(), again.state());
+    let used: BTreeSet<u32> = clustered.corner_regions().into_iter().collect();
+    assert_eq!(used.len(), 6);
+    // The recommended options.
+    let (p, o) = (
+        clustered.new_problem(Energy::Hencky, 0.1),
+        clustered.recommended_options(StepSize::default()),
+    );
+    assert_eq!(p.regions.len(), 6);
+    assert!(matches!(
+        o.length_step,
+        ddg_variational_cuts::LengthStep::OnMesh
+    ));
+    // A circle starts two regions.
+    assert!(matches!(
+        Session::new(
+            &mesh.input(),
+            3,
+            &Start::GeodesicCircle {
+                vertex: 1,
+                radius: 0.5
+            }
+        ),
+        Err(CuttingError::InvalidOption { name: "start", .. })
+    ));
+}
+
+/// The atlas: normal clusters, the recommended options, a strong length weight from the ripple
+/// rule and the rescaled Dirichlet energy, a fixed number of steps; then end to end.
+fn atlas(name: &str, mesh: &PolygonMesh, n: usize, steps: usize) {
+    let mut session = Session::new(
+        &mesh.input(),
+        n,
+        &Start::NormalClusters {
+            max_iterations: 100,
+        },
+    )
+    .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let options = session.recommended_options(StepSize::default());
+    let energy = Energy::ScaledDirichlet(ScaleWeight::FeatureSize {
+        r_eps: 1.0,
+        smoothing: PAPER_FEATURE_SMOOTHING,
+    });
+    let mut problem = session.new_problem(energy, 0.0);
+    let omega = session.roughening_rate(&problem, &options.eval).unwrap();
+    problem.length_weight = length_weight_for_ripples(omega, 0.5);
+    let before = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let report = session.run(&problem, &options, &stop(steps)).unwrap();
+    let after = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let first = report.steps.first().unwrap().energy.total;
+    println!(
+        "{name} N={n}: alpha_L {:.2}, {} steps ({:?}), energy {:.3} -> {:.3}, junctions {} -> {}, paths {} -> {}",
+        problem.length_weight,
+        report.steps.len(),
+        report.stop,
+        first,
+        report.final_energy.total,
+        before.junctions.len(),
+        after.junctions.len(),
+        before.paths.len(),
+        after.paths.len()
+    );
+    assert!(report.final_energy.total.is_finite());
+    let ins = insert(mesh, &after).unwrap_or_else(|e| panic!("{name}: {e}"));
+    check_insertion(mesh, &[], &after, &ins);
+    check_regions(&session, mesh, &ins);
+    let charts = n_charts(&ins.mesh, &ins.new_seams);
+    for cones in [ConePlacement::Off, ConePlacement::Optimal] {
+        let (_, result) = session
+            .unwrap(
+                DEFAULT_CROSSING_OFFSET,
+                &CutUnwrapOptions {
+                    cones,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|e| panic!("{name} {cones:?}: {e}"));
+        let rep = &result.map.report;
+        assert_eq!(rep.flipped_triangles, 0, "{name} {cones:?}");
+        assert_eq!(
+            rep.charts.len(),
+            charts,
+            "{name}: the charts are the pieces the seams leave"
+        );
+        assert!(rep.seam_lengths.max_seam_mismatch < 0.5);
+        for s in &result.seams {
+            assert!(result.map.cut_edges.contains(s), "{name}: seam {s:?}");
+        }
+        if cones == ConePlacement::Off {
+            assert!(result.map.cones.is_empty());
+        }
+        println!(
+            "  {cones:?}: {} -> {} polygons, {} charts, {} cones, flipped {}, seam mismatch {:.2e}, distortion {:.3}",
+            mesh.n_polygons(),
+            result.inserted.mesh.n_polygons(),
+            rep.charts.len(),
+            result.map.cones.len(),
+            rep.flipped_triangles,
+            rep.seam_lengths.max_seam_mismatch,
+            rep.area_distortion.scale_free
+        );
+    }
+}
+
+#[test]
+fn atlas_end_to_end_on_generated_meshes() {
+    let steps = if debug_build() { 3 } else { 60 };
+    atlas("uv_sphere", &uv_sphere(32, 16, 1.0).unwrap(), 6, steps);
+    atlas("grid_cube", &grid_cube(6, 2.0), 6, steps);
+    atlas("capsule", &capsule(24, 8, 0.5, 1.5).unwrap(), 6, steps);
+    atlas("torus", &torus(32, 12, 1.0, 0.35).unwrap(), 6, steps);
+}
+
+#[test]
+fn atlas_end_to_end_on_the_quad_model() {
+    let Some(mesh) = load_polygons("spot_quadrangulated.obj") else {
+        return;
+    };
+    atlas("spot", &mesh, 8, if debug_build() { 3 } else { 100 });
 }
