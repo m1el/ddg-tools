@@ -552,9 +552,13 @@ option (`FlowOptions::step_statistics`, D22):
   ```
 
   the same formula `[formula: cut-step-local]` with the rate `Δ_i/τ` and without the first case.
-  Symmetry and redistancing follow on `φ″`. No value changes by more than `max_motion · h_i`;
-  the direction of the whole step is kept at every vertex. The number of cut-adjacent vertices
-  with a factor below 1 is reported.
+  Symmetry and redistancing follow on `φ″`. For `τ > 0` and `max_motion · h_i ≥ 0` no value
+  changes by more than `max_motion · h_i` (two regions; for `N` regions see below), and for
+  `max_motion · h_i > 0` the factor is positive, so the direction of the whole step is kept at
+  every vertex. The number of cut-adjacent vertices with a factor below 1 is reported. The
+  formula is applied where the factor is below 1; a vertex with the factor 1 keeps `φ′(i)`.
+  (Evaluated literally at every vertex, `φ(i) + 1 · (φ′(i) − φ(i))` differs from `φ′(i)` by a
+  rounding; in exact arithmetic the two are the same.)
 * **Extremes**. `m̂ = max_c |ρ_c| / min_c h` with `h` the shortest crossed edge, `ω = max_c ω_c`,
   no local limit: the paper's remark taken literally, and the rule before D22.
 
@@ -584,7 +588,10 @@ the vertex in place of `φ` (as in §8.5 for `ḡ`), and all functions at the ve
 φ_k″(i) = φ_k(i) + min(1, max_motion · h_i / (τ · v_i)) · (φ_k′(i) − φ_k(i))      for every k
 ```
 
-For `N = 2` this is the rule for two regions.
+What is bounded for `N` regions (for `τ > 0`, `max_motion · h_i ≥ 0`) is the change of half the
+difference of these two functions, `½ |(φ_b″ − φ_a″)(i) − (φ_b − φ_a)(i)| ≤ max_motion · h_i`. The
+change of each single function, and of its difference to a third one, is multiplied by the factor
+and not bounded. For `N = 2` this is the rule for two regions.
 
 The paper gives no values (D9f). The default is `Adaptive { 0.05, 0.25, 1 }`. Why:
 
@@ -639,9 +646,12 @@ everything else. The Hencky energy is more even than any of them there (23 and 1
 `|φ_new − φ_old|` over vertices cut-adjacent before or after the step) is at most
 `motion_tolerance`; or when the energy has fallen by at most `energy_tolerance · |E|` over the last
 `energy_window` steps; or when the cut has vanished (one region is empty). The reason is in the
-report. With `E_k` the energy of the state after `k` steps, `W` the window, `ε` the tolerance, and
-`k` the number of steps taken minus one (the state after the last step is evaluated when the run
-has ended), the energy criterion is (D27)
+report. The motion criterion is evaluated only for a positive `motion_tolerance`: with `0` a run
+does not end by it, also not after a step that moved nothing. With `E_k` the energy of the state
+after `k` steps, `W` the window, `ε` the tolerance, and `k` the number of steps taken minus one
+(the state after the last step is evaluated when the run has ended), the energy criterion
+`[formula: cut-stop-energy]` is evaluated for `ε > 0` and `k ≥ W`, i.e. after more than `W`
+steps (D27):
 
 ```
 E_{k−W} − E_k >  ε |E_k|        the run goes on
@@ -651,15 +661,26 @@ E_k − E_{k−W} >  ε |E_k|        EnergyRose: the steps are no descent steps 
                                 (its level-set functions, its time and its count of steps)
 ```
 
+For `ε ≥ 0` and finite energies exactly one of the three holds. `ε = 0` (or less) turns the
+criterion off; it does not mean the table with `ε = 0`, which would end every run whose energy
+has not strictly fallen. Which state a run returns and which energy it reports as the lowest is
+`[formula: cut-run-lowest]`.
+
 Every run reports the lowest energy among its states (the start state and the state after every
 step; the earliest of equal ones; a state without a cut does not count), the number of steps
 after which it was reached, the number of steps after which the flow was in the state it is left
 in, and the energy after the last step. Only `EnergyRose` sets the flow back: a run that ends for
 another reason stays in its last state, whose energy can exceed the lowest by what single steps
-raise it (§4, D22); a caller that takes few steps per run (fewer than `W`) is never set back and
-must compare the two numbers itself. `EnergyRose` is also what a run reports that only
+raise it (§4, D22); a caller that takes at most `W` steps per run is never set back and must
+compare the two numbers itself. `EnergyRose` is also what a run reports that only
 fluctuates at its noise floor, when the fluctuation over the window exceeds `ε |E|`; how far
 the last energy is above the lowest tells the two apart.
+
+A number of a step that is not finite is an error and never a stop reason (D29): the terms of
+the energy and the speeds of the state a step starts from, the local roughening rates, the step
+size, the values of the level-set functions after the explicit and the length step and after the
+redistancing, and the energy of the state a run ends in. The error names the number and how many
+steps the flow had taken; the step is not taken and the flow stays in the state before it.
 
 Defaults: 1000 steps, `10⁻⁵`, `10⁻⁴` over 25 steps (D9f). The second criterion is not in
 the paper. It is needed: on an irregular mesh `s + λ⁰` has a noise floor of the size of the two
@@ -891,7 +912,8 @@ s_v = ( |m p′| s_{p} + |m p| s_{p′} ) / (|m p| + |m p′|)   at the copy of 
 * **Length step.** `(W_V + τ L_w) φ_k′ = W_V φ̃_k` for every `k`: one factorization, `N` right-hand
   sides.
 * **Local limit.** With the robust statistics: at the vertices, on the change of the whole step
-  (§4), before the symmetry projection.
+  (§4), before the symmetry projection. It bounds the change of half the difference of the two
+  functions that are smallest at the vertex, not the change of a single function.
 * **Symmetry.** The class mean of §3.11 for every `φ_k`. The regions must be invariant under the
   symmetry; a symmetry that permutes regions is not supported.
 * **Redistancing** `[formula: cut-region-projection]`. Regions are recomputed. `Adj_k` are the
@@ -1350,6 +1372,19 @@ region of every face.
   rule): §4 now says that `h_i` and `ω_i` of the limit at the vertices range over the edges that
   have `i` as an end, and that only the excess of `ω_i` over `ω` enters (the oracle prints
   `max(ω_i, ω)` for it).
+* **D29** From the proofs of D26 and D27. (a) An energy that is not finite failed both
+  comparisons of the energy criterion and was reported as stalled. It is an error now, with the
+  other numbers of a step that could pass unnoticed: a speed or a roughening rate that is not
+  finite was skipped by the step rule (its comparisons are false) and the step taken with
+  `tau_max`; a level-set function that overflowed in the explicit step was stored and reported
+  one step later as invalid input; the energy after the last step of a run was not looked at.
+  The linear solves already reported a solution that is not finite. (b) `energy_tolerance = 0`
+  and `motion_tolerance = 0` turn the criteria off; the code stopped a run with
+  `motion_tolerance = 0` after a step that moved nothing, against its documentation, and no
+  longer does. (c) The energy criterion needs more than `W` steps, not `W`. (d) The bound of
+  the limit at the vertices needs `τ > 0` and `max_motion · h_i ≥ 0`; for `N` regions it is a
+  bound on half the difference of the two smallest functions only. (e) The factor 1 is not
+  applied (§4).
 
 Add to this list whenever something else turns up; never drop an entry.
 
@@ -1365,6 +1400,10 @@ id. Discrete, to be proved in `lean/proofs`: `cut-face-curvature`, `cut-face-cur
 `cut-step-cap`, and for the default stages `cut-extension-local` (convex combination, mean rate
 kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matrices with row sums
 `ℓ`; totals kept; `r` within the range of `s + λ⁰`; rest state independent of `τ`),
+`cut-stop-energy` (for a non-negative tolerance and finite energies exactly one of the three
+cases of the energy criterion holds), `cut-run-lowest` (the energy reported as the lowest is the
+least over the states of the run, at the earliest state that has it; after `EnergyRose` the run
+returns that state, otherwise the last one),
 `cut-roughening-rate` (now also the quantile of the local rates), `cut-weighted-quantile` (the
 result is one of the values; monotone in `q`; `q = 1` gives the maximum; at least the fraction `q`
 of the weight lies at or below it), `cut-step-local` (the factor lies in `(0, 1]`; the limited

@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D28). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D29). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -153,7 +153,11 @@ the state of lowest energy of the run. Every `RunReport` has the lowest energy, 
 it was reached, the step of the state returned and the energy after the last step. A run that
 only fluctuates at its noise floor can end either way; how far the last energy lies above the
 lowest tells it from a run that went wrong (0.4 % in the third run of the table of "Several
-regions", 64 % in the same run before SPEC D26, which was the reason for the rule).
+regions", 64 % in the same run before SPEC D26, which was the reason for the rule). A tolerance
+of zero turns a criterion off (also the motion criterion after a step that moved nothing), and
+the energy criterion needs more than a window of steps. A number of a step that is not finite (a
+term of the energy, a speed, the step size, a level-set value) is an error that names it and the
+step, `CutError::NonFiniteStep`, never a stop reason; the flow stays in the state before.
 
 Also tested: energy decrease in each of the four energies for small steps; symmetry (exact with
 classes; to rounding without, unless the diagonals of cut quads tie, SPEC §3.11); independence of
@@ -679,6 +683,7 @@ Functions that implement a formula carry `[formula: <id>]`; the ids are those of
 | `cut-length-step`, `cut-penalty-step-paper` | `Flow::length_step` (internal) |
 | `cut-symmetry-projection`, `cut-redistance` | `symmetry_projection`, `init::redistanced` |
 | `cut-step-cap` | `StepSize::step`, `rule_step` (internal) |
+| `cut-stop-energy`, `cut-run-lowest` (new, D27) | `energy_criterion`, `run_outcome` (internal) |
 | `cut-step-local` (new, D22) | `StepSize::local_factor` |
 | `cut-weighted-quantile` (new, D22) | `weighted_quantile` |
 | `cut-roughening-rate` (new, D18; a quantile since D22) | `Flow::roughening_rate`, `length_weight_for_ripples` |
