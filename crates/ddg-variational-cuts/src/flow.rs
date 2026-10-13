@@ -432,13 +432,14 @@ impl FlowOptions<'_> {
     /// exactly, but at triple points it is no better than the paper's stages (junction angles
     /// settle 4° to 9° off 120° at the mesh widths tested, against 3° to 5°).
     ///
-    /// The paper's stages were chosen here when, from a speckled start with a strong length
-    /// weight, the default stages came to rest with two to three times the patches and the
-    /// energy. Most of that was the step rule of the time: with [`StepStatistics::Robust`]
-    /// (SPEC D22) the default stages end at the lower energy on the three models tested with
-    /// the automatic length weight, and on one of three with the strong one (README, "Several
-    /// regions"; SPEC §8.5). Which set to prefer for `N > 2` is open; this function is as it
-    /// was.
+    /// Measured with both stage sets from 8 clusters of normals on four shapes, two energies
+    /// and three length weights each (SPEC §8.5, "After D26"; the table is in the README): the
+    /// stages of this function end at the lower energy in 17 of the 24 pairs, among them all
+    /// with the Hencky energy; the default stages in 7, all with the scaled Dirichlet energy.
+    /// What these stages cost: single steps raise the energy more (by up to 7 %, once by
+    /// 57 %), so a run relies on the stop rule setting it back to its lowest state
+    /// ([`StopReason::EnergyRose`]); and on a mesh with spikes of curvature they do not
+    /// descend, where the default stages do.
     pub fn for_regions(step_size: StepSize) -> Self {
         FlowOptions {
             eval: EvalOptions::default(),

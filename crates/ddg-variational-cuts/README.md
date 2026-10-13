@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D24). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D27). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -145,6 +145,16 @@ With `α_L = 0`: `+529 (+535)` and `+871 (+891)` for `m = 4, 6`. This law is wha
 step are scaled by: every step reports the roughening rate `ω`; ripples longer than `2π α_L/ω`
 grow, and `length_weight_for_ripples(ω, ℓ)` returns the weight for a given `ℓ`.
 
+**Stopping** (SPEC §4, D27). A run ends after `max_steps`, when the cut moves by less than a
+tolerance, when it has vanished, or by the energy over a window of steps (default 25): if it
+changed by at most `10⁻⁴` of its size the run is *stalled* and stays in its last state; if it
+*rose* by more than that, the run ends with `StopReason::EnergyRose` and the flow is set back to
+the state of lowest energy of the run. Every `RunReport` has the lowest energy, the step at which
+it was reached, the step of the state returned and the energy after the last step. A run that
+only fluctuates at its noise floor can end either way; how far the last energy lies above the
+lowest tells it from a run that went wrong (0.4 % in the third run of the table of "Several
+regions", 64 % in the same run before SPEC D26, which was the reason for the rule).
+
 Also tested: energy decrease in each of the four energies for small steps; symmetry (exact with
 classes; to rounding without, unless the diagonals of cut quads tie, SPEC §3.11); independence of
 numbering (`10⁻¹⁶`) and scaling (`10⁻¹⁵`); a straight cut across a linear penalty moves at the
@@ -165,8 +175,8 @@ rule that the fixture names:
 | `cuts`: the paper's stages with the flux recovery of SPEC §3.5 | 26 | evaluation 70907; `d, e, G, s` 6218; step 24444 | `1.0·10⁻¹²`; `3.4·10⁻¹²`; `1.6·10⁻¹³` |
 | `cuts-default`: the default stages (D14–D16), each stage choice, the three step rules | 23 | 67349; 5691; 32391 | `1.0·10⁻¹²`; `8.1·10⁻¹⁴`; `7.2·10⁻¹³` |
 | `regions`: `N` regions, both stage sets, 15 fixtures with triple points | 19 | 125667 | `3.9·10⁻¹¹` |
-| `cuts-robust`: the robust step rule (D22), both stage sets, 8 robust and 1 with the extremes, cut points limited in 5 | 9 | 28211; 2573; 15769 | `8.2·10⁻¹⁴`; `1.7·10⁻¹⁴`; `4.5·10⁻¹⁴` |
-| `regions-robust`: the same for `N` regions, boundary nodes limited in 3 | 5 | 36532 | `8.2·10⁻¹⁴` |
+| `cuts-robust`: the robust step rule (D22), both stage sets, 8 robust and 1 with the extremes | 9 | 28211; 2573; 13275 | `8.2·10⁻¹⁴`; `1.7·10⁻¹⁴`; `4.5·10⁻¹⁴` |
+| `regions-robust`: the same for `N` regions | 7 | 31438 | `8.2·10⁻¹⁴` |
 
 The first three sets have the step rule with the extremes (`StepStatistics::Extremes`, the rule
 before D22); with the robust statistics, which are the default, `τ` or the limited cut points
@@ -175,7 +185,14 @@ differ in every one of their fixtures whose step is not fixed (9 of `cuts`, 21 o
 speeds `m̂` of the step rule, `h_c` and `ℓ_c`, and at every cut point or boundary node the factor
 of the local limit and the rate before and after it.
 
-One difference was found, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
+Six of the fixtures of the last two sets (those with the robust statistics and the length step
+on the mesh: `rb-ico2-cap-paper-adaptive`, `rb-spike-paper`, `rr-disk4-paper`,
+`rr-sphere3-spike-paper`, `rr-sphere4-paper`, `triple-chain-paper`) have the local limit on the
+explicit rate that SPEC D26 replaced by a limit at the vertices on the whole step. Until the
+oracle follows, they are compared up to the limit: the evaluation, `τ`, `ω`, both `m̂`, `h_c`,
+`ℓ_c` and the rates before it; the test pins their names.
+
+One difference was found before that, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
 quantile were limited by the factor `1 − 2·10⁻¹⁶` here and not at all in the oracle. That cut
 point lies on the limit exactly, and the rounding of `τ` decided. SPEC §4 now says that a cut
 point at or below the quantile is not limited (D24), the crate does that, and the five sets
@@ -184,8 +201,9 @@ does not have (D17): `m-featurelap-cotan` has no negative edge weight and agrees
 `r-torus5-paper` the replay takes the oracle's weight `a` per vertex. The helpers for initial
 cuts are not in the oracle.
 
-One case that the oracle's fixtures do not have is written by an ignored test, answered by the
-oracle's executable and replayed like a fixture: a region that is a single vertex whose
+One case that the oracle's fixtures did not have is written by an ignored test, answered by the
+oracle's executable and replayed like a fixture (the oracle has since taken the two files into
+`regions-robust`): a region that is a single vertex whose
 neighbours alternate between two other regions, so that its boundary runs through triple points
 only (robust statistics, 4 boundary nodes limited). Default stages: 5241 numbers, largest
 difference `1.6·10⁻¹⁴`; paper's stages: 4737, `1.5·10⁻¹⁴`. `tests/regions.rs` checks the same
@@ -355,68 +373,114 @@ brings the junctions to 120° better than a few degrees at these mesh widths (th
 the centroid of three cut points, and the discrete network is longer than the honeycomb by a
 multiple of the mesh width per junction). The default stages are the more accurate ones where
 there is distortion. `FlowOptions::for_regions` selects the paper's stages; with them, the defect
-of the paper's length step on single curves (D14) is back. That choice (SPEC D20) rested on the
-atlas runs below as they came out with the step rule before D22, where the default stages stalled
-with two to three times as many patches and two to five times the energy; with the step rule of
-D22 that is no longer what is measured (next tables), and the choice is open again.
+of the paper's length step on single curves (D14) is back.
 
-**Atlas in the manner of Fig. 16** (`network_study atlas`: 8 clusters of the vertex normals,
-rescaled Dirichlet energy with `r_ε = 1`, length weight from the ripple rule with `ℓ = 0.5`,
-default step and stop rule; lengths on the unit-area surface):
+**Which to use** (`network_study compare`; SPEC §8.5 "After D26"). Both stage sets from 8 clusters
+of the vertex normals on four shapes, with two energies (Hencky; rescaled Dirichlet with
+`r_ε = 1`) and three length weights each: `auto`, the ripple rule with `ℓ = 0.5`; `fixed`,
+`α_L = 7.4·10⁻⁴`; `strong`, the ripple rule with the largest local rate of the start in place of
+`ω`. Default step and stop rule, at most 4000 steps. "Final" is the state the run returns,
+"lowest" the lowest energy of the run and the number of steps after which it was reached, "rose"
+the number of steps that raised the energy and the largest such rise relative to the energy.
+Times: 48 runs at once, one thread each, on a 64-core machine that was otherwise idle (load
+average 1 before the start).
 
-| model | stages | `α_L` | steps, time | patches | triple points | cut length | distortion | energy |
-|---|---|---|---|---|---|---|---|---|
-| spot, 2930 vertices | paper's | 0.049 | 59, 0.7 s | 59 → 8 | 106 → 12 | 14.67 → 5.64 | 0.0124 → 0.140 | 0.726 → 0.414 |
-| | default | | 255, 2.8 s | 59 → 8 | 106 → 12 | → 5.92 | → 0.0447 | → 0.333 |
-| blub, 7106 vertices | paper's | 0.110 | 61, 2.5 s | 44 → 10 | 80 → 14 | 15.42 → 6.53 | 0.0153 → 0.117 | 1.715 → 0.838 |
-| | default | | 254, 6.7 s | 44 → 10 | 80 → 16 | → 6.67 | → 0.0330 | → 0.768 |
-| bob, 5344 vertices | paper's | 0.0153 | 181, 5.7 s | 23 → 6 | 44 → 10 | 11.79 → 4.00 | 0.0073 → 0.0463 | 0.1875 → 0.1075 |
-| | default | | 370, 7.7 s | 23 → 7 | 44 → 10 | → 4.24 | → 0.0196 | → 0.0843 |
+| energy | model | weight: `α_L` | stages | final energy | lowest (after steps) | steps that rose, largest | patches | cut length | steps | time, s | stop |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Hencky | spot | auto: 0.00307 | paper's | 2.6675e-02 | 2.6675e-02 (159) | 31, 0.79 % | 59 → 11 | 14.67 → 7.42 | 168 | 3.5 | rose |
+| Hencky | spot | auto: 0.00307 | default | 2.7942e-02 | 2.7942e-02 (183) | 44, 1.9 % | 59 → 18 | 14.67 → 8.13 | 183 | 2.9 | stalled |
+| Hencky | spot | fixed: 0.00074 | paper's | 8.7118e-03 | 8.7118e-03 (157) | 51, 1.5 % | 59 → 32 | 14.67 → 9.60 | 159 | 3.8 | rose |
+| Hencky | spot | fixed: 0.00074 | default | 9.2306e-03 | 9.2306e-03 (102) | 27, 0.22 % | 59 → 39 | 14.67 → 11.08 | 102 | 1.5 | stalled |
+| Hencky | spot | strong: 0.0332 | paper's | 1.7165e-01 | 1.7165e-01 (144) | 30, 57 % | 59 → 8 | 14.67 → 4.58 | 149 | 3.4 | rose |
+| Hencky | spot | strong: 0.0332 | default | 2.0501e-01 | 2.0501e-01 (179) | 32, 0.22 % | 59 → 7 | 14.67 → 5.76 | 200 | 3.4 | rose |
+| Hencky | bob | auto: 0.00308 | paper's | 2.0069e-02 | 2.0069e-02 (376) | 61, 0.67 % | 23 → 12 | 11.79 → 5.15 | 389 | 12.6 | rose |
+| Hencky | bob | auto: 0.00308 | default | 2.0616e-02 | 2.0602e-02 (323) | 38, 0.71 % | 23 → 9 | 11.79 → 5.63 | 340 | 8.8 | stalled |
+| Hencky | bob | fixed: 0.00074 | paper's | 7.0839e-03 | 7.0761e-03 (232) | 88, 0.24 % | 23 → 16 | 11.79 → 7.52 | 239 | 9.0 | stalled |
+| Hencky | bob | fixed: 0.00074 | default | 7.3579e-03 | 7.3579e-03 (190) | 32, 0.098 % | 23 → 18 | 11.79 → 8.53 | 195 | 6.1 | rose |
+| Hencky | bob | strong: 0.00946 | paper's | 4.8427e-02 | 4.8427e-02 (281) | 64, 0.73 % | 23 → 9 | 11.79 → 4.29 | 287 | 9.8 | rose |
+| Hencky | bob | strong: 0.00946 | default | 5.0758e-02 | 5.0758e-02 (317) | 23, 0.52 % | 23 → 5 | 11.79 → 4.66 | 321 | 8.1 | rose |
+| Hencky | blub | auto: 0.00183 | paper's | 1.3682e-02 | 1.3682e-02 (151) | 32, 1.7 % | 44 → 12 | 15.42 → 6.63 | 153 | 7.6 | rose |
+| Hencky | blub | auto: 0.00183 | default | 1.3705e-02 | 1.3705e-02 (324) | 78, 0.2 % | 44 → 12 | 15.42 → 6.79 | 326 | 10.6 | rose |
+| Hencky | blub | fixed: 0.00074 | paper's | 6.2927e-03 | 6.2927e-03 (183) | 77, 0.92 % | 44 → 12 | 15.42 → 7.06 | 188 | 8.7 | rose |
+| Hencky | blub | fixed: 0.00074 | default | 6.9832e-03 | 6.9832e-03 (397) | 135, 0.2 % | 44 → 14 | 15.42 → 8.40 | 407 | 13.2 | rose |
+| Hencky | blub | strong: 0.0239 | paper's | 1.3628e-01 | 1.3628e-01 (170) | 16, 2.8 % | 44 → 11 | 15.42 → 5.40 | 170 | 8.0 | rose |
+| Hencky | blub | strong: 0.0239 | default | 1.3836e-01 | 1.3793e-01 (346) | 91, 0.53 % | 44 → 11 | 15.42 → 5.49 | 362 | 10.7 | stalled |
+| Hencky | icosphere(4) | auto: 0.00786 | paper's | 4.4660e-02 | 4.4645e-02 (27) | 26, 0.027 % | 8 → 8 | 5.36 → 5.00 | 48 | 1.1 | stalled |
+| Hencky | icosphere(4) | auto: 0.00786 | default | 4.4689e-02 | 4.4689e-02 (12) | 14, 0.02 % | 8 → 8 | 5.36 → 5.00 | 36 | 0.7 | rose |
+| Hencky | icosphere(4) | fixed: 0.00074 | paper's | 6.0384e-03 | 6.0384e-03 (229) | 19, 0.58 % | 8 → 9 | 5.36 → 6.55 | 231 | 4.5 | rose |
+| Hencky | icosphere(4) | fixed: 0.00074 | default | 6.0647e-03 | 6.0612e-03 (182) | 40, 0.034 % | 8 → 8 | 5.36 → 6.84 | 199 | 3.4 | stalled |
+| Hencky | icosphere(4) | strong: 0.0115 | paper's | 6.2687e-02 | 6.2687e-02 (89) | 18, 0.037 % | 8 → 8 | 5.36 → 4.98 | 89 | 2.1 | stalled |
+| Hencky | icosphere(4) | strong: 0.0115 | default | 6.2720e-02 | 6.2713e-02 (74) | 35, 0.037 % | 8 → 8 | 5.36 → 4.98 | 91 | 1.9 | stalled |
+| scaled | spot | auto: 0.0486 | paper's | 3.1627e-01 | 3.1627e-01 (176) | 41, 0.3 % | 59 → 11 | 14.67 → 5.46 | 178 | 3.3 | rose |
+| scaled | spot | auto: 0.0486 | default | 3.3255e-01 | 3.3246e-01 (240) | 43, 0.11 % | 59 → 8 | 14.67 → 5.92 | 255 | 4.2 | stalled |
+| scaled | spot | fixed: 0.00074 | paper's | 1.8439e-02 | 1.8439e-02 (62) | 24, 1.6 % | 59 → 92 | 14.67 → 16.91 | 62 | 2.6 | rose |
+| scaled | spot | fixed: 0.00074 | default | 1.7744e-02 | 1.7744e-02 (72) | 27, 0.75 % | 59 → 133 | 14.67 → 18.56 | 82 | 1.9 | rose |
+| scaled | spot | strong: 1.49 | paper's | 3.2057e+00 | 3.2057e+00 (353) | 25, 1.7 % | 59 → 4 | 14.67 → 1.91 | 373 | 5.1 | rose |
+| scaled | spot | strong: 1.49 | default | 2.3685e+00 | 2.3685e+00 (443) | 57, 2.4 % | 59 → 3 | 14.67 → 1.26 | 443 | 5.1 | rose |
+| scaled | bob | auto: 0.0153 | paper's | 8.4213e-02 | 8.4213e-02 (263) | 56, 0.55 % | 23 → 10 | 11.79 → 4.19 | 268 | 9.6 | rose |
+| scaled | bob | auto: 0.0153 | default | 8.4329e-02 | 8.4329e-02 (370) | 38, 0.65 % | 23 → 7 | 11.79 → 4.24 | 370 | 8.6 | rose |
+| scaled | bob | fixed: 0.00074 | paper's | 1.2271e-02 | 1.2271e-02 (83) | 22, 0.43 % | 23 → 27 | 11.79 → 10.83 | 102 | 4.5 | rose |
+| scaled | bob | fixed: 0.00074 | default | 1.2235e-02 | 1.2235e-02 (146) | 40, 0.33 % | 23 → 25 | 11.79 → 11.85 | 148 | 5.0 | rose |
+| scaled | bob | strong: 0.859 | paper's | 9.2510e-01 | 9.2510e-01 (267) | 15, 0.91 % | 23 → 3 | 11.79 → 0.94 | 283 | 8.5 | rose |
+| scaled | bob | strong: 0.859 | default | 2.2729e+00 | 2.2719e+00 (430) | 23, 0.44 % | 23 → 4 | 11.79 → 2.54 | 443 | 9.1 | stalled |
+| scaled | blub | auto: 0.11 | paper's | 6.7054e-01 | 6.7054e-01 (244) | 53, 0.84 % | 44 → 9 | 15.42 → 5.66 | 264 | 10.6 | rose |
+| scaled | blub | auto: 0.11 | default | 7.6723e-01 | 7.6723e-01 (252) | 59, 0.42 % | 44 → 10 | 15.42 → 6.67 | 254 | 8.4 | rose |
+| scaled | blub | fixed: 0.00074 | paper's | 1.7879e-02 | 1.7879e-02 (47) | 13, 6.7 % | 44 → 83 | 15.42 → 15.64 | 47 | 3.6 | rose |
+| scaled | blub | fixed: 0.00074 | default | 1.7081e-02 | 1.7081e-02 (96) | 42, 1.5 % | 44 → 116 | 15.42 → 17.86 | 102 | 5.3 | rose |
+| scaled | blub | strong: 1.39 | paper's | 4.2662e+00 | 4.2662e+00 (250) | 11, 2.9 % | 44 → 6 | 15.42 → 2.25 | 253 | 10.2 | rose |
+| scaled | blub | strong: 1.39 | default | 5.0016e+00 | 5.0016e+00 (443) | 85, 3.5 % | 44 → 8 | 15.42 → 2.90 | 446 | 12.4 | rose |
+| scaled | icosphere(4) | auto: 0.00786 | paper's | 4.7704e-02 | 4.7699e-02 (28) | 9, 0.034 % | 8 → 8 | 5.36 → 4.98 | 30 | 0.7 | stalled |
+| scaled | icosphere(4) | auto: 0.00786 | default | 4.7689e-02 | 4.7683e-02 (48) | 26, 0.028 % | 8 → 8 | 5.36 → 4.98 | 64 | 1.1 | stalled |
+| scaled | icosphere(4) | fixed: 0.00074 | paper's | 8.5237e-03 | 8.5135e-03 (177) | 14, 0.041 % | 8 → 8 | 5.36 → 7.90 | 184 | 4.0 | stalled |
+| scaled | icosphere(4) | fixed: 0.00074 | default | 8.4663e-03 | 8.4636e-03 (206) | 4, 0.036 % | 8 → 8 | 5.36 → 8.13 | 208 | 3.5 | stalled |
+| scaled | icosphere(4) | strong: 0.0104 | paper's | 6.0541e-02 | 6.0484e-02 (24) | 18, 0.054 % | 8 → 8 | 5.36 → 4.95 | 45 | 1.1 | stalled |
+| scaled | icosphere(4) | strong: 0.0104 | default | 6.0419e-02 | 6.0419e-02 (38) | 23, 0.024 % | 8 → 8 | 5.36 → 4.96 | 56 | 1.1 | rose |
 
-The same with the weights that the ripple rule gave before D22, when `ω` was the largest local
-rate (set with `STUDY_ALPHA`); in brackets the result with the step rule of that time:
+All 48 runs end below the energy they started with. The paper's stages end at the lower energy
+in 17 of the 24 pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 5 with the
+scaled energy (by 0.1 % to 59 %); the default stages in 7, all with the scaled energy (by 0.03 %
+to 4.5 %, and by 26 % on spot with the strong weight). What the paper's stages cost:
 
-| model | stages | `α_L` | steps, time | patches | cut length | distortion | energy |
-|---|---|---|---|---|---|---|---|
-| spot | paper's | 1.49 | 378, 3.4 s (778) | 59 → 2 (4) | 14.67 → 0.50 (1.96) | 0.0124 → 0.560 (0.359) | 21.88 → 1.31 (3.28) |
-| | default | | 441, 3.4 s (3850) | 59 → 3 (9) | → 1.26 (4.85) | → 0.489 (0.232) | → 2.37 (7.46) |
-| blub | paper's | 1.39 | 334, 9.5 s (2128) | 44 → 3 (5) | 15.42 → 1.90 (2.25) | 0.0153 → 1.423 (1.315) | 21.52 → 4.07 (4.46) |
-| | default | | 613, 14.2 s (3928) | 44 → 5 (13) | → 1.81 (6.73) | → 1.109 (0.345) | → 3.63 (9.73) |
-| bob | paper's | 0.86 | 335, 8.3 s (142) | 23 → 2 (2) | 11.79 → 0.62 (0.67) | 0.0073 → 0.131 (0.134) | 10.13 → 0.66 (0.71) |
-| | default | | 451, 8.3 s (2553) | 23 → 4 (6) | → 2.54 (4.33) | → 0.0904 (0.0715) | → 2.27 (3.79) |
+* Single steps raise the energy more: by at most 6.7 % in 23 of their runs and by 57 % in one
+  (spot, Hencky, strong: the step before the stop, in which a patch was lost), against at most
+  3.5 % with the default stages. 18 of their 24 runs end because the energy rose over the window
+  and are set back to their lowest state (SPEC D27), against 14: they rely on that rule.
+* For one curve between two regions their length step has the defect of D14: two regions on
+  spot (Hencky, `α_L = 2` and `0.5`) end at 4.431 and 1.733 against 4.345 and 1.555.
+* On a mesh with spikes of curvature they do not descend (`camelshotnoise.obj`, two regions,
+  Hencky: the energy stays above the 5028 of the start, where the default stages reach 4525).
 
-All runs ended by the energy criterion; the energy rose in single steps (9 to 59 of them with the
-automatic weight, 27 to 107 with the strong one). The clusters of normals are speckled (23 to 59
-patches for 8 clusters). With the automatic weight the flow leaves 6 to 10 patches, about one per
-cluster, at a cut 2.3 to 3 times shorter, and the default stages end at the lower energy on all
-three models, with about a third of the distortion of the paper's stages (0.28 to 0.42) at
-nearly the same length; the paper's stages stop two to four times earlier. With the strong weight
-the flow removes nearly everything, the cut gets five to thirty times shorter and the distortion
-rises, as it must; there the paper's stages reach the lower energy on spot and bob and the default
-stages on blub. In the brackets the default stages stall with two to three times the patches and
-two to five times the energy: most of that was the step rule, which let one fast cut point slow
-down the whole network. The atlases were not inspected visually and not flattened.
+They take fewer steps (4359 against 5633 in total) in the same time (138 s against 137 s). So
+for several regions on meshes like these the paper's stages are the better choice by this table,
+and `FlowOptions::for_regions` keeps selecting them; the default stages are the choice for two
+regions, for noisy meshes, and where a run must not depend on being set back.
+
+The run that led to this table (spot, Hencky, `α_L = 7.4·10⁻⁴`, the paper's stages) used to end
+*above* its start: the energy fell from `1.1955·10⁻²` to `1.104·10⁻²` in 8 steps, rose in every
+step after that to `1.8155·10⁻²`, and the run was reported as stalled. The cause was the local
+limit of the step rule, which cut back the explicit rate and not the length step on the mesh
+(SPEC D26; `examples/rise_study.rs` prints the change of the energy by every stage). The limit
+now acts on the whole step, and the run is the third line of the table. The atlases were not
+inspected visually and not flattened.
 
 **Different starts (Fig. 10)**, `network_study starts`, 6 regions, one length weight `α_L = 1`
 for every start, paper's stages:
 
 | start | sphere (icosphere(4), Dirichlet): patches, length, energy | spot (rescaled Dirichlet) |
 |---|---|---|
-| clusters of normals | 6, 4.180, 5.301 | 2, 1.57, 1.92 |
-| cells around six seed vertices | 6, 4.187, 5.312 | 5, 2.38, 2.71 |
-| the same from another first seed | 6, 4.181, 5.303 | 5, 2.57, 2.93 |
-| a random label at every vertex | 4, 3.52, 4.94 | 2, 0.50, 1.06 |
+| clusters of normals | 6, 4.179, 5.300 | 3, 1.13, 1.43 |
+| cells around six seed vertices | 6, 4.179, 5.304 | 5, 2.38, 2.71 |
+| the same from another first seed | 6, 4.181, 5.302 | 5, 2.56, 2.92 |
+| a random label at every vertex | 4, 3.52, 4.93 | 6, 3.23, 3.49 |
 
 The three structured starts end with the same numbers on the sphere (length and energy within
-0.2 %; 6 patches, 8 triple points and the length of the cubical partition), which is what the
+0.1 %; 6 patches, 8 triple points and the length of the cubical partition), which is what the
 plots of Fig. 10 show. On spot the two starts from cells end alike (5 patches, length within 8 %),
-the clusters of normals (43 patches at the start) coarsen to 2 patches, and the cuts are not in
-the same place: 18 % to 62 % of the cut of one of these three results lies within two edges of the
-cut of another. The random start (1440 and 1665 patches) coarsens to fewer patches and a lower
-energy than the structured ones on the sphere, and to the lowest energy on spot: different starts
-do not all reach the same minimum here. (With the step rule before D22: 4, 5, 5 and 2 patches on
-spot, the lengths of the structured starts within 10 %; 3 patches for the random start on the
-sphere.)
+the clusters of normals (43 patches at the start) coarsen to 3 patches, and the cuts are not in
+the same place: 12 % to 47 % of the cut of one of these three results lies within two edges of the
+cut of another. The random start (1440 and 1665 patches) ends with fewer patches and a lower
+energy than the structured ones on the sphere, and with more patches and a higher energy on
+spot: different starts do not all reach the same minimum here.
 
 **Timings**, one step, one thread, seconds (median of five; `network_study timings`):
 
@@ -462,6 +526,11 @@ spot the same `α_L` now gives the same or a lower end energy in fewer steps (He
 150 steps instead of 350; `0.5`: 200 instead of 708). Tests: `tests/flow.rs` (a quantile test,
 and a sphere with a spike of curvature density on the cut: `ω` 148 against a largest local rate
 of 1724, the step `2.8·10⁻⁴` against `2.9·10⁻⁵` with the extremes).
+
+With the length step on the mesh (the stages of the paper) the limit does not act on the rate
+at the cut points but at the vertices, on the change of the whole step, after the length step
+(SPEC D26): the rate on the cut is only the explicit part of that step, and cutting it back alone
+made the cut move uphill (section "Several regions").
 
 What the larger step costs: single steps raise the energy more often and by more than before
 (spot, Hencky, `α_L = 2`: 23 of 150 steps, at most `8.7·10⁻³` of the energy, against 13 of 350 and
@@ -631,7 +700,10 @@ cargo run  --release -p ddg-variational-cuts --example flow_study -- circle     
 cargo run  --release -p ddg-variational-cuts --example redistance_study
 cargo run  --release -p ddg-variational-cuts --example network_study -- honeycomb 84 paper   # also:
         # stripes, atlas MESH.obj [N RIPPLE ENERGY STEPS], starts MESH.obj ..., timings MESH.obj ...
-        # (STUDY_ALPHA=A sets the length weight instead of the ripple rule)
+        # (STUDY_ALPHA=A sets the length weight instead of the ripple rule),
+        # compare MESH.obj ENERGY auto|strong|ALPHA paper|default   (one line of the table of stage sets)
+cargo run  --release -p ddg-variational-cuts --example rise_study -- MESH.obj hencky 0.00074 stages=paper
+        # the change of the energy by every stage of a step; see its header for the variants
 cargo run  --release -p ddg-variational-cuts --example cut_flow -- MESH.obj --energy hencky --alpha 2
 cargo run  --release -p ddg-variational-cuts --example bad_mesh_study      # see its header for the parts
 cargo test --release -p ddg-variational-cuts --test regions -- --nocapture

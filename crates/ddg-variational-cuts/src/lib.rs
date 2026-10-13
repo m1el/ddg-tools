@@ -31,7 +31,9 @@
 //!
 //! **The flow** (SPEC §3.8–§3.12, §4, §5). A [`Flow`] owns an evaluator and the state `φ`;
 //! [`Flow::step`] takes one step and reports it, [`Flow::run`] steps until a [`StopRule`] says
-//! so. The problem ([`CutProblem`]: energy, `α_L`, `η`, `w_r`, `β_r`, curvature) and the options
+//! so (a run whose energy rises ends with [`StopReason::EnergyRose`] and is set back to its
+//! state of lowest energy; every [`RunReport`] says where that was). The problem
+//! ([`CutProblem`]: energy, `α_L`, `η`, `w_r`, `β_r`, curvature) and the options
 //! ([`FlowOptions`]: step size, symmetry classes, the choice of every stage) are arguments of
 //! each step, so all of them can change between steps. [`init`] has helpers for the initial
 //! cut and the visibility penalty of the paper, [`Cut::polylines`] returns the cut as ordered

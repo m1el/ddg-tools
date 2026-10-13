@@ -1001,6 +1001,41 @@ not the junction rule. The junction tests of §8.6 use fixed steps and are uncha
 `FlowOptions::for_regions` still selects the paper's stages; the sentence on speckled starts no
 longer supports that by itself.
 
+**After D26.** The numbers of the paper's stages in the last paragraph were taken with the local
+limit that D26 found to be wrong for them: where they ended above the default stages, it was that
+defect. With the limit on the whole step and the stop rule of D27, both stage sets from 8 clusters
+of normals on four shapes, two energies and three length weights each (`auto`: the ripple rule
+with `ℓ = 0.5`; `strong`: the same rule with the largest local rate in place of `ω`; default step
+and stop rule; final energy, the paper's stages | the default stages; the whole table with
+steps, rises, patches and times is in the README):
+
+```
+Hencky            auto                    α_L = 7.4·10⁻⁴         strong
+spot              2.668e-2 | 2.794e-2     8.712e-3 | 9.231e-3    1.717e-1 | 2.050e-1
+bob               2.007e-2 | 2.062e-2     7.084e-3 | 7.358e-3    4.843e-2 | 5.076e-2
+blub              1.368e-2 | 1.371e-2     6.293e-3 | 6.983e-3    1.363e-1 | 1.384e-1
+icosphere(4)      4.466e-2 | 4.469e-2     6.038e-3 | 6.065e-3    6.269e-2 | 6.272e-2
+scaled Dirichlet, r_ε = 1
+spot              3.163e-1 | 3.326e-1     1.844e-2 | 1.774e-2    3.206e+0 | 2.369e+0
+bob               8.421e-2 | 8.433e-2     1.227e-2 | 1.224e-2    9.251e-1 | 2.273e+0
+blub              6.705e-1 | 7.672e-1     1.788e-2 | 1.708e-2    4.266e+0 | 5.002e+0
+icosphere(4)      4.770e-2 | 4.769e-2     8.524e-3 | 8.466e-3    6.054e-2 | 6.042e-2
+```
+
+All 48 runs end below the energy they started with. The paper's stages end lower in 17 of the 24
+pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 5 with the scaled energy (by
+0.1 % to 59 %). The default stages end lower in 7, all with the scaled energy (by 0.03 % to 4.5 %,
+and by 26 % on spot with the strong weight). The paper's stages are the less monotone ones: the
+largest rise of the energy in one step is at most 6.7 % in 23 of their runs and 57 % in one
+(spot, Hencky, strong weight: the step before the stop, when a patch was lost; the run was set
+back), against at most 3.5 % with the default stages; 18 of their 24 runs end with `EnergyRose`
+and are set back to their lowest state, against 14. They take fewer steps (4359 against 5633 in
+total) in the same time (138 s against 137 s, one run per core). So the paper's stages stay what
+`FlowOptions::for_regions` selects, with two costs: their runs rely on the stop rule of D27, and
+for one curve between two regions their length step has the defect of D14 (two regions on spot,
+Hencky, `α_L = 2` and `0.5`: 4.431 and 1.733 against 4.345 and 1.555 with the default stages). On
+a mesh with spikes of curvature neither limit makes them descend (D26).
+
 ### 8.6 Tests
 
 `tests/regions.rs`; tables for finer meshes from `examples/network_study.rs`.
@@ -1289,9 +1324,17 @@ region of every face.
   (0.005) changes the step and not the outcome (`4.3·10⁻²` at the flow time 8.7). So the limit
   now acts on the whole step (§4): with the length step on the mesh at the vertices, after the
   length step. The same run then falls to `8.73·10⁻³` in 200 steps (lowest `8.68·10⁻³`; single
-  steps raise it by at most 2.2 %; the default stages reach `9.20·10⁻³`). A limit on the rate
-  alone with a matching local factor in the length step was considered and rejected: one vertex
-  serves several cut points, and no factor per vertex matches all of them.
+  steps raise it by at most 2.2 %; the default stages reach `9.20·10⁻³`). The alternative that
+  keeps the limit on the rate and scales the result of the length step at every vertex by the
+  factors of the cut points around it (extended as in §3.8) was implemented and measured on the
+  24 runs of §8.5: it ends higher in 15 of them, lower in 5 (by 60 % and 29 % in two with the
+  strong weight), and three of its runs have a step that raises the energy by more than 10 %,
+  against one; it was not kept. What the limit at the vertices loses: the rate is extended
+  before it is limited, so one spike reaches the vertices around it. On `camelshotnoise.obj`
+  (two regions, Hencky) the paper's stages do not descend with either: the energy is 5028 at the
+  start and stays above it with the limit at the vertices (up to 5877, and 5053 after 600
+  steps); with the alternative it is 4959 after 600 steps; the default stages reach 4525 in 16
+  steps.
 * **D27** The stop rule called a run stalled whenever the energy had "fallen by at most
   `ε |E|`" over the window, which is also true when it rose: the run of D26 ended as stalled
   with an energy 64 % above its lowest and 52 % above its start. Now a rise over the window by
