@@ -275,9 +275,200 @@ flipping, tracing); N2 and N3 were completed there. The numbers are those of
   make it one is §6. Open for the second half: how elements are numbered when inserted vertices
   are removed again (the reference's refinement does that), and what identifies a state (§6).
 
+Entries N10 to N16 were added with the second half of the crate (insertion, point queries,
+overlay, refinement, export); N1 and N4 are written out there. Numbers are from the tests named
+and from `crates/ddg-intrinsic/README.md`.
+
+* **N10** *Insertion and edge split* (Alg. 7, 8). The lengths of the new edges are the
+  distances of the point from the corners in the triangle laid out in the plane
+  (`it-point-distances`; the paper's closed form cancels in thin triangles). The place of the
+  new vertex on the input mesh is found before anything is changed, by a trace over the input
+  mesh from the nearest corner of the face; a split of an edge that lies along an input edge
+  (always the case on the boundary) is placed by interpolating along that edge instead, which
+  is exact. The signposts of an inserted vertex are angles in the frame of the input element
+  it lies in (N7), not scaled, since the vertex is flat; a vertex on the boundary has, like
+  every boundary vertex, the angle 0 on the boundary halfedge that leaves it and `π` on the
+  one that arrives.
+  *Snapping (Appendix A).* A traced place whose distance from an edge of its input face is at
+  most `1e-12` of the longest edge of that face (`insert::LOCATION_SNAP`) is stored as a point
+  of that input edge, and `Insertion::snapped` says so. The measure was a barycentric
+  coordinate at first; found by test: in a needle of the input (0.5 long, 1e-4 wide,
+  camelshotnoise) a vertex one rounding error from a long edge has the coordinate `2e-12`,
+  stayed inside the face, and made an overlay piece with an area of `1e-32`.
+  *Refused* (`InsertionRefused`, nothing changed): a point that would make a triangle below
+  the shape limit of N5 (`TooThin`, with the nearest edge: split that edge instead); a split of
+  an edge with the same face on both sides (`SameFaceOnBothSides`: the edge from a vertex of
+  degree one; flip or split a neighbour first); a place that cannot be found (`NotLocated`).
+  Inserted vertices are never removed, so vertex, edge and face ids only grow (this answers the
+  question left open in N9; the reference's refinement removes vertices again).
+* **N11** *Point queries* (Alg. 11). A point of the triangulation is found on the input mesh by
+  a trace over the input mesh from a vertex of its face; a point of the input mesh is found on
+  the triangulation by a trace over the triangulation from an input vertex of its face. Both
+  are exact inverses to rounding (`point_queries_are_inverse_to_each_other`: `1e-9` of the
+  mean edge after flips, insertions and refinement). A path over the triangulation that runs
+  into an inserted vertex continues straight through it (the vertex is flat); into an input
+  vertex it cannot run, because the query starts at one and ends inside the star of one face.
+  A path to a point of a boundary edge may reach the boundary a rounding error early; that is
+  accepted when the length left is at most `1e-9` of the path, otherwise the query is an error.
+* **N12** *Overlay* (3.4.2). Built per face of the triangulation from the edge traces alone
+  (no positions): the numbers of crossings on the three sides decide which segments of input
+  edges cross the face (`overlay` module documentation: corner-cutting segments, or a fan from
+  one corner), and the input edges of the crossings that a segment joins must agree. Traces
+  that fit neither case, or whose labels disagree, are refused (`InconsistentOverlay`, naming
+  the face) instead of being paired wrongly; traces of another triangulation are refused. The
+  paper pairs crossings the same way (its cases 1 and 2) without the check.
+  Result: the vertices of the triangulation, then the crossings, each as a point of both
+  triangulations; faces as convex polygons with 3 to 6 corners, each with its input face and
+  its face of the triangulation. Invariants tested (`tests/overlay.rs`, §5 item 6): the pieces
+  in an input face have its area and those in a face of the triangulation have its area, each
+  within `1e-9` of the total area, and all together the total within `1e-11`; every corner of
+  a piece lies in the closed input face and in the closed face of the triangulation that the
+  piece names; every piece is convex and counter-clockwise (every turn strictly positive);
+  fan-triangulated, the overlay is a manifold `TriMesh` with the Euler characteristic, the
+  boundary loops and the components of the input, and no triangle of it is degenerate. Not
+  excluded in general: a piece of the size of a rounding error where a vertex lies that close
+  to an input edge without being on it (N10 removes the case that occurred).
+* **N13** *Segments, and the way back for a cut* (§4, §6). `segments_on_input` takes nodes
+  (points of the triangulation) and segments (a face and two nodes). Every node is located on
+  the input mesh once, so the paths of two segments that share a node meet in the same point,
+  bit for bit. Every segment is then traced over the input mesh from its first node towards
+  its second and must arrive there within `tolerance` times its length (the tolerance and the
+  check of N8, default `1e-6`); a segment that does not is an error naming the face
+  (`SegmentTrace`), nothing is connected or dropped. The result per segment: its points (the
+  nodes at the ends, crossings of input edges between) and the input face of every piece.
+  `segment_on_input` is the same for one segment given by barycentric coordinates, which also
+  say which corner is meant in a face that uses a vertex twice. Measured on cuts of exported
+  meshes (`tests/export.rs`): nodes located within `3e-15`, lengths of the pieces equal to the
+  segment within `7e-13`, mismatch at the far node below `7e-13`.
+* **N1, written out.** *Boundary.* Ruppert's rule with diametral circles. (a) A boundary edge
+  is *encroached* when the angle opposite it exceeds `90° + 1e-9` (in a Delaunay triangulation
+  that is the case exactly when some vertex lies inside the circle on the edge as diameter).
+  Encroached boundary edges are split before any triangle is looked at. (b) The circumcentre
+  of a triangle is not inserted when the path to it leaves the surface (the boundary edge it
+  leaves through is split), or when it lies inside the circle on a boundary edge of one of the
+  triangles its insertion would remove (those whose circumcircle contains it, found by
+  unfolding around the point; that edge is split). The triangle is then looked at again. (c) A
+  boundary edge is split at its midpoint, except an edge at a boundary vertex whose interior
+  angle is below 60°: there the split is at the distance `u · 2^k` from that vertex that is
+  nearest half the edge (`u` the shorter of the two boundary edges at the vertex when
+  refinement starts), kept within the middle half of the edge, so that the two boundary edges
+  at the vertex carry vertices at the same distances and stop encroaching on each other
+  (Ruppert's concentric shells). (d) A triangle whose circumcentre is still not insertable
+  after 64 such splits is given up and reported (`NotInsertable`); this did not occur.
+  The reference instead inserts the midpoint of the boundary edge that the path hits, tests no
+  encroachment, and removes inserted vertices near a split again; on the sheared grid it stops
+  with angles of 9.46° (25°) and 2.51° (30°) and largest angles of 153° and 164°, where this
+  rule ends with every angle at the bound except the two corners of 9.46° that the input
+  boundary has, and a largest angle of 102° and 115°.
+  *Termination.* **Closed surface, every vertex with an angle sum of 60° or more, bound up to
+  30°: argued, not proved.** The planar argument carries over: the circumdisk of a Delaunay
+  triangle is an immersed disk without vertices; a triangle with an angle below 30° has a
+  circumradius above its shortest edge; an inserted circumcentre is therefore farther from
+  every vertex than the shortest edge of its triangle, and a geodesic loop from it around one
+  vertex of angle sum `Θ ≥ 60°` at distance `d ≥ R` has the length `2 d sin(Θ/2) ≥ R`; so no
+  edge shorter than the shortest present appears, unless a loop around several cone points or
+  a handle is shorter, and the length of those is bounded below by a constant of the surface;
+  with lengths bounded below, the area bounds the number of vertices. Not proved: the bound on
+  those loops, and that the triangulation after the flips has no shorter edge than the
+  distances say. **With boundary: observed.** Ruppert's rule is proved to end in the plane for
+  bounds up to 20.7° (boundary angles of 60° or more; with shells below that); at 25° and 30°
+  its end is observed, as it is in the plane: status `Done` at 25° and 30° on every mesh tested
+  (17 generated shapes, 16 models and bad meshes; tetrahedra with a needle apex also at 20°,
+  28° and 33°). Chew's second
+  algorithm, which is proved to 26.5°, removes vertices near a split boundary edge; that is not
+  done here (N10). **The limit on insertions is the net**: reaching it is reported as status
+  `InsertionLimit` with every corner still below the bound listed.
+* **N4, written out.** *Small angle sums.* (a) A corner at a vertex whose angle sum (interior
+  angle, on the boundary) is below the bound cannot meet the bound in any triangulation. Such
+  corners do not make a triangle one to refine; the other two corners of the triangle do. They
+  are listed in the report with the reason `AngleSum` and the angle sum, and
+  `min_angle_reachable` is the smallest angle over all other corners. (b) An interior vertex
+  with an angle sum `Θ` between the bound and 60° can meet the bound only with few triangles
+  around it, in the limit one triangle with both other corners at the same vertex (a
+  self-edge); refinement ends there with such triangles (tetrahedra with apex sums from 26° to
+  59°: `tests/refinement.rs`). (c) *Needle guard.* A circumcentre at distance `d` from an
+  interior vertex with `Θ < 60°` would get an edge to itself around that vertex of length
+  `2 d sin(Θ/2)` (tested against a traced loop). If that is shorter than the shortest edge of
+  the triangle to be refined, the point is not inserted and the triangle is set aside with the
+  reason `NeedleVertex`; it is looked at again when it changes. This is what keeps (N1) the
+  shortest edge from shrinking around a needle. In the final reports it occurred once: at a
+  vertex whose angle sum equals the bound to rounding. The paper's rule ("vertices of degree
+  one are not refined further", 4.2) is the special case; the reference skips, without
+  reporting, every triangle with a vertex of angle sum below 60°, with a vertex of degree one,
+  or between two boundary edges. With (a) to (c) the bound is reached at every corner where a
+  triangulation can reach it on every mesh tested, the reference's included
+  (camelshotnoise: 22 corners of 0.042° at spikes with an angle sum of 0.042°, everything
+  else at the bound). **Termination with such vertices: observed**, not argued: the guard sees
+  only vertices of the triangles the insertion would remove.
+* **N14** *Refinement, the rest.* Departure from §4: the circumcentre is found by a trace over
+  the triangulation from the barycentre of the triangle, as the reference does, not from the
+  vertex of the obtuse angle: a trace cannot start at a corner into the face without choosing
+  a wedge, and from the barycentre the path leaves the triangle through the side it should.
+  A circumcentre within the shape limit of an edge (N5, N10) is inserted by splitting that
+  edge at the foot of the point. Order: the triangle of largest area first (a heap; a face is
+  looked at again whenever it changes), so the result is deterministic: the same input and
+  options give the same triangulation bit for bit. Default bound **25°**, not the paper's 30°:
+  both are reached on every mesh tested, 30° costs two to three times the inserted vertices of
+  25° (README table) for a largest angle of 120° instead of 130°, and the user's criterion is
+  robustness and speed. Allowed: 0 to 35°; 0 splits encroached boundary edges only. Option
+  `max_circumradius`: triangles above it are refined too. Limit: `InsertionLimit`, default 10
+  vertices per vertex and at least 1000 (a small mesh with thin triangles needs many times
+  its own vertices: needles and caps 6: 405 for 37).
+  Against the reference (§5 item 8, `tests/refinement.rs`): the inserted counts agree within
+  1 % at both bounds on 12 of the 15 inputs (identical on spot, bob, bunny, bump, the
+  icospheres and the long torus; blub 3651 against 3646 at 30°); camelshotnoise has 2.6 %
+  fewer at 30°, the thin cylinder 66 against 68 and 150 against 146, and the sheared grid 256
+  against 170 and 395 against 326, where the boundary rules differ (N1). The smallest angle is
+  never below the reference's; the largest is within 0.2° of it except on the sheared grid.
+* **N15** *Simplicial export and the identity of a state* (§6). The triangulation is made a
+  simplicial complex by splitting, at their midpoints, every edge from a vertex to itself and
+  all but one of every group of edges between the same two vertices, repeated until none is
+  left; with `ExportOptions::delaunay` (default) it is flipped to Delaunay before and after,
+  and splits and flips alternate until both hold. The export is the triangulation in that
+  state as a `TriMesh` (same vertex, face and corner ids) with a `Geometry` from the edge
+  lengths, the place of every vertex on the input mesh, the map from mesh edges to edges of
+  the triangulation, and a report: splits, flips, whether it is Delaunay (tested on the
+  result), its smallest and largest angle.
+  **Splitting does not keep an angle bound** (found by test,
+  `the_export_keeps_the_angles_only_where_nothing_is_split`): 34 of 50 refined triangulations
+  need no split and are handed out unchanged; the others lose the bound where they are split
+  (long torus at 25°: 9.6° after, 65 corners below; camel_noise2: 7.7°, 100 corners;
+  camelshotnoise: 0.014° and a largest angle of 179.96°). Two reasons. Three vertices on a
+  geodesic loop around a thin tube or a spike are almost collinear, and their Delaunay
+  triangulation has slivers. And at an interior vertex with an angle sum below three times
+  the bound no simplicial complex has the bound, because it has at least three corners there,
+  where refinement had one (N4 b). Option `ExportOptions::refine`: refine between the rounds
+  of splits. That restores the bound on thin tubes and handles in one to three rounds (long
+  torus: 25.7°, 35 more vertices). At spikes it does not converge, so the refinements stop
+  when two in a row leave no fewer edges to split, or when one leaves more than twice as many
+  (that one is undone; without this camelshotnoise grows from 17 000 to 580 000 vertices in six
+  rounds), and the export ends with splits and flips. `SimplicialExport::refinement` carries
+  the report of the last refinement exactly when the export ended with it; otherwise
+  `min_angle` and `max_angle` say what the splits left. Open: a refinement that knows the
+  result must be simplicial (corners at vertices below three times the bound exempt, new
+  vertices around a spike placed at equal distance from it instead of on the loop).
+  *State.* `fingerprint()` is an FNV-1a hash (64 bits) of the number of vertices and faces,
+  the vertices of every face in order with the bit patterns of the lengths of its sides, and
+  the place of every vertex on the input mesh (kind, element, bit patterns of the
+  coordinates). Refinement and export are deterministic (N14), so the same input mesh and the
+  same options give the same fingerprint, and any flip, insertion, split or other geometry
+  gives another (collisions of the hash are not excluded). A state of the flow is kept with
+  the fingerprint of the export it was made for; `SimplicialExport::check_state` refuses
+  another fingerprint (`StaleState`, both values in the message) and a wrong number of values.
+* **N16** *§5 item 5, "better after refinement": measured, not found as stated.* On sheared
+  lattices with known distances (`distances_after_refinement`, errors of the first-order solver
+  at the input vertices in lattice widths): on the input mesh the mean error is 1 to 7 widths,
+  on the intrinsic Delaunay triangulation 0.05 to 0.26, after refinement to 25° or 30° 0.07
+  to 0.26, with the circumradius bounded by half a width 0.05 to 0.29. Refinement is as good as
+  flipping, far better than the input, and not better than flipping: the solver's error is of
+  first order in the mesh width, which an angle bound does not reduce, and refinement leaves
+  angles up to 130°, which the Delaunay triangulation of a lattice does not have. What
+  refinement improves for the cut flow is measured in `tests/export.rs` (README, end to end).
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
-`it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`; from `ddg-core`:
-`cotan-laplacian`, `lumped-mass`, `angle-defect`, `boundary-geodesic-curvature`. The Lean
-theorems and citations of §7 are not written yet, so `scripts/check-formulas.sh` reports the
-`it-` ids as missing.
+`it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,
+`it-point-distances`, `it-circumcenter`; from `ddg-core`: `cotan-laplacian`, `lumped-mass`,
+`angle-defect`, `boundary-geodesic-curvature`. The lengths of an edge split are
+`it-point-distances` with the point on a side. The Lean theorems and citations of §7 are not
+written yet, so `scripts/check-formulas.sh` reports the `it-` ids as missing.
