@@ -1156,7 +1156,8 @@ region of every face.
   shot noise the weight came out as `1.8·10⁵` and the run froze). Now `ω` is the 0.9-quantile of
   the local rates weighted by the length of the cut, the step rule takes the same quantile of the
   speed measured in local crossed edges, and cut points beyond it are limited individually
-  (§1, §4). The weight rule and the step rule can share the statistic because of the local limit:
+  (§1, §4; with the length step on the mesh the speed is taken with and without the length
+  force and the smaller step is used). The weight rule and the step rule can share the statistic because of the local limit:
   without it a quantile makes the explicit step unstable at the spike (the cut point there would
   move by `τ ω_c/2`, thousands of edges), with it the spike takes the step `max_motion · h_c/v_c`
   that the extremes would have imposed on everything. Where `ω_c` is constant along the cut (the
