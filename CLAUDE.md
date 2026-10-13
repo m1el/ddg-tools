@@ -9,6 +9,13 @@ First paper: "Optimal Cone Singularities for Conformal Flattening", Soliman, Sle
 Its cones are turned into UV maps with "Boundary First Flattening", Sawhney & Crane, ACM TOG 2017
 (reference C++, MIT: `../ddg-course/boundary-first-flattening`).
 
+Second paper: "Variational Surface Cutting", Sharp, Crane, ACM TOG 2018 (`../VariationalCuts/paper.pdf`,
+author's derivation notes `../VariationalCuts/cea_tutorial.pdf`, `cea_derivations.pdf`).
+**Clean room:** it is implemented from the text only. The authors' code is GPL; never open, search,
+download or paraphrase it (it is not in this tree; do not look for it, and do not fetch the
+`variational-surface-cutting` repository from the web). Papers that the text cites may be downloaded and cited.
+The contract for this paper is `crates/ddg-variational-cuts/SPEC.md`.
+
 ## Layout
 
 ```
@@ -16,6 +23,7 @@ crates/ddg-core            mesh topology + validation, geometry, cotan operators
                            sparse linear algebra wrappers, OBJ I/O, test-mesh generators
 crates/ddg-optimal-cones   the optimal-cones solver (the paper)
 crates/ddg-bff             boundary first flattening + cutting
+crates/ddg-variational-cuts  the cut flow of the second paper; `SPEC.md` is its contract
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
 blender/                   Blender extension: mesh -> UV map
@@ -23,15 +31,18 @@ lean/oracle/               Lake package, no Mathlib: scalar-generic formula defi
                            executable used as a differential-testing oracle
 lean/proofs/               Lake package on Mathlib: machine-checked derivations of the formulas the Rust code uses
 scripts/                   helper scripts
-data/                      gitignored; `data/optimal-cones/optimal-cones-data/data/*.obj` + `*-cones.txt`
+data/                      gitignored; `data/optimal-cones/optimal-cones-data/data/*.obj` + `*-cones.txt`;
+                           `data/models/` for meshes unpacked from `/var/data/discrete-geometry/models/*.zip`
+                           (Keenan Crane's model repository: spot, bob, blub, ...)
 runs_tmp/                  gitignored; logs of long-running commands
 ```
 
 ## Ground rules
 
 - Rust stable (see `rust-toolchain.toml`), edition 2024, MIT license. `f64` everywhere; stored indices are `u32`.
-- Correctness first, then performance. Performance floor: at least match the paper
-  (100–150k triangles in 20–25 s on a 2018 laptop); we should be far below that.
+- Correctness first, then performance. Performance floor for the cones solver: at least match the paper
+  (100–150k triangles in 20–25 s on a 2018 laptop); we should be far below that. The cut flow has no
+  published timings: be performance aware (reuse factorizations, no quadratic loops), measure later.
 - APIs are explicit: plain option structs, no hidden global state, no silent normalization or clamping.
   Every solve returns a report (status, iteration counts, residuals).
 - Bad input never panics. Return error enums whose messages say what is wrong and where
@@ -49,7 +60,8 @@ runs_tmp/                  gitignored; logs of long-running commands
 - Stay inside the paths you were assigned. Do not edit another crate to make yours compile; report it instead.
 - Use your own build directory so builds do not block each other:
   `export CARGO_TARGET_DIR=$PWD/target-<task>` and build/test with `-p <crate>`.
-- Commit often, in small commits, on the current branch (`optimal-cones`), and only your own paths:
+- Commit often, in small commits, on the current branch (whatever is checked out; `variational-cuts`
+  for the second paper), and only your own paths:
   `git add <paths> && git commit -m "<msg>" -- <paths>`.
   Never `git add -A`, `git commit -a`, stash, reset, rebase, clean, or switch branches.
   If `.git/index.lock` exists, wait a second and retry.
@@ -59,6 +71,10 @@ runs_tmp/                  gitignored; logs of long-running commands
   editing and keep edits minimal. Commit `Cargo.lock` together with the change that caused it.
 
 ## Math conventions (the contract between all crates, the oracle and the proofs)
+
+The conventions on `L`, the masses, `u` and the angle defects hold for every paper. The canonical
+problem below is the first paper's; the second paper's contract is `crates/ddg-variational-cuts/SPEC.md`
+(same `L`, same sign of `u`; its formula ids start with `cut-`).
 
 Mesh: manifold oriented triangle mesh, vertices `V`, boundary vertices `B` (may be empty), interior `I = V \ B`.
 
@@ -108,3 +124,7 @@ with the same id, an exact reference, and the reason. `scripts/check-formulas.sh
 2. Generic convex solver on the canonical problem for small meshes (independent algorithm).
 3. Lean oracle (`lean/oracle`): independent Float implementation for differential fuzzing, plus committed golden fixtures.
 4. Lean proofs (`lean/proofs`): machine-checked derivations of the formulas.
+
+For the cut flow there is no unique minimizer to certify. Its layers are: analytic solutions (sphere
+cap, flat disk), finite differences of the discrete energy against the predicted gradient, energy
+decrease and invariances, the Lean oracle for one flow step, and the Lean proofs (SPEC.md §6, §10).
