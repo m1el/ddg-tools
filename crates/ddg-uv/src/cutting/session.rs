@@ -272,8 +272,8 @@ impl Session {
         };
         let mut edge_corners = vec![(NONE, NONE); flow_mesh.n_edges()];
         let mut edge_is_polygon = vec![false; flow_mesh.n_edges()];
-        for f in 0..flow_mesh.n_faces() {
-            let corners = prepared.triangle_corners[face_triangle[f] as usize];
+        for (f, &triangle) in face_triangle.iter().enumerate() {
+            let corners = prepared.triangle_corners[triangle as usize];
             for k in 0..3 {
                 let e = flow_mesh.edge(3 * f + k);
                 if edge_corners[e].0 == NONE {

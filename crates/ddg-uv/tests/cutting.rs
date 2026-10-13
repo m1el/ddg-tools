@@ -168,7 +168,7 @@ fn check_insertion(
 fn n_charts(mesh: &PolygonMesh, seams: &[[u32; 2]]) -> usize {
     let seams: BTreeSet<[u32; 2]> = seams.iter().copied().collect();
     let mut parent: Vec<usize> = (0..mesh.n_polygons()).collect();
-    fn find(p: &mut Vec<usize>, x: usize) -> usize {
+    fn find(p: &mut [usize], x: usize) -> usize {
         let mut r = x;
         while p[r] != r {
             r = p[r];
@@ -750,8 +750,8 @@ fn starts_at_polygon_level() {
     assert_eq!(preview.len(), 2);
     assert!(preview.iter().all(|p| p.closed));
     let regions = session.corner_regions();
-    for p in 0..mesh.n_polygons() {
-        if labels[p] == 1 && mesh.polygon(p).iter().all(|&v| mesh.positions[v as usize][2].abs() < 0.2) {
+    for (p, &label) in labels.iter().enumerate() {
+        if label == 1 && mesh.polygon(p).iter().all(|&v| mesh.positions[v as usize][2].abs() < 0.2) {
             for c in mesh.polygon_corners(p) {
                 assert_eq!(regions[c], 1);
             }
@@ -762,7 +762,7 @@ fn starts_at_polygon_level() {
     let regions = session.corner_regions();
     let c0 = (0..mesh.corner_vertices.len()).find(|&c| mesh.corner_vertices[c] == 7).unwrap();
     assert_eq!(regions[c0], 0);
-    assert!(regions.iter().any(|&r| r == 1));
+    assert!(regions.contains(&1));
     assert_eq!(session.preview(DEFAULT_CROSSING_OFFSET).unwrap().len(), 1);
 }
 
