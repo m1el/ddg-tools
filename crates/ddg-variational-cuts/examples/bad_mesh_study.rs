@@ -1985,7 +1985,9 @@ fn real_study(attr: bool) {
         }
     }
     let vars: Vec<Stages> = if attr {
-        variants().into_iter().filter(|v| v.redist != Redist::Oracle).collect()
+        // The fixed-point redistancing is left out on real meshes: with obtuse triangles it
+        // re-opens vertices millions of times per step (see `redist`, "reopened").
+        variants().into_iter().filter(|v| !matches!(v.redist, Redist::Oracle | Redist::FixedPoint)).collect()
     } else {
         vec![Stages::d()]
     };
@@ -1993,6 +1995,29 @@ fn real_study(attr: bool) {
     println!("REAL MESHES: Hencky, planar start (plane through the centroid across the longest axis; camel variants use the plane of camel.obj), default StopRule, adaptive step.");
     println!("alpha 'auto' = length_weight_for_ripples(omega, 0.25) from the roughening rate of the start; floor = median cut motion of the last quarter of the steps (<= 50) in median edges of the unit-area surface.\n");
     println!("{}", quality_header());
+    if attr {
+        // One job per (mesh, variant).
+        let jobs: Vec<(usize, usize)> = (0..meshes.len()).flat_map(|m| (0..vars.len()).map(move |v| (m, v))).collect();
+        let res = par_map(&jobs, |&(m, v)| real_run(&meshes[m].path, meshes[m].plane, std::slice::from_ref(&vars[v]), &rules));
+        for (m, mesh) in meshes.iter().enumerate() {
+            println!("{} [{}]", mesh.name, mesh.path);
+            for v in 0..vars.len() {
+                match &res[m * vars.len() + v] {
+                    Ok(lines) => {
+                        for l in lines {
+                            let keep = l.trim_start().starts_with(&vars[v].name) || (v == 0 && !l.contains("quality") && !l.contains("median edge") && !l.contains("mesh accepted"));
+                            if keep {
+                                println!("{l}");
+                            }
+                        }
+                    }
+                    Err(e) => println!("  {} PANIC: {e}", vars[v].name),
+                }
+            }
+            println!();
+        }
+        return;
+    }
     let res = par_map(&meshes, |m| real_run(&m.path, m.plane, &vars, &rules));
     for (m, r) in meshes.iter().zip(res) {
         println!("{} [{}]", m.name, m.path);
