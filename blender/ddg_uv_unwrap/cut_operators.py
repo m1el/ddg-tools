@@ -341,6 +341,10 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
     penalty_rule: EnumProperty(name="Penalty Rule", items=_STAGE_ITEMS["penalty_rule"],
                                default='DEFAULT')
 
+    show_advanced: BoolProperty(
+        name="Advanced Options", description="Show the advanced options", default=False,
+        options={'SKIP_SAVE'})
+
     @classmethod
     def poll(cls, context):
         return _poll(cls, context)
@@ -375,8 +379,8 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         layout.prop(self, "use_uniform_curvature")
         if self.use_uniform_curvature:
             layout.prop(self, "uniform_curvature")
-        header, body = layout.panel("DDG_CUT_ADVANCED", default_closed=True)
-        header.label(text="Advanced")
+        layout.prop(self, "show_advanced")
+        body = layout.box() if self.show_advanced else None
         if body is not None:
             body.prop(self, "feature_r_eps")
             body.prop(self, "feature_smoothing")

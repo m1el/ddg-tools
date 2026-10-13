@@ -276,7 +276,7 @@ Typical use: select some faces (or one vertex) in Edit mode, **UV > Cut: Start**
    | `distortion_weights`, `area_weights` | `w_k`, `beta_k` of region 0 and 1; `w = 0` for a region makes it a one-sided patch (paper Fig. 14) | (1, 1), (0, 0) |
    | `symmetry`, `symmetry_tolerance` | mirror symmetry about the object's X, Y or Z plane; classes from mirrored vertices matched within the tolerance (fraction of the bounding box diagonal); unmatched vertices are reported | none |
    | `use_uniform_curvature`, `uniform_curvature` | replace the Gaussian curvature by a constant density (paper Sec. 7.4) | off |
-   | *Advanced panel* | cap and smoothing of the feature size, step size rule and its numbers, crossing offset, stop tolerances and window, the individual stages (normal derivative, length step, extension, speed scaling, redistancing, penalty rule) | the library's defaults |
+   | *Advanced Options* (a toggle in the panel; `layout.panel` crashed Blender 5.0.1 in the redo popup) | cap and smoothing of the feature size, step size rule and its numbers, crossing offset, stop tolerances and window, the individual stages (normal derivative, length step, extension, speed scaling, redistancing, penalty rule) | the library's defaults |
 
    Not offered: a pointwise energy given by a function.
 3. **Cut: Apply** (`unwrap_after`). Inserts the cut into the mesh with bmesh, marks the new

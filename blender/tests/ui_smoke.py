@@ -177,6 +177,44 @@ def step_menu_object():
         bpy.ops.wm.call_menu(name="VIEW3D_MT_object")
         redraw()
     check(CALLS["_draw_menu_entry"] > entries, "the Object menu drew the add-on's entry")
+    return step_cut
+
+
+def step_cut():
+    """Start, Flow (redo panel, undo and redo) and Apply of the variational cut from the viewport."""
+    with bpy.context.temp_override(**viewport()):
+        bpy.ops.object.mode_set('EXEC_DEFAULT', True, mode='OBJECT')
+        bpy.ops.mesh.primitive_uv_sphere_add('EXEC_DEFAULT', True, segments=24, ring_count=12)
+        sphere = bpy.context.view_layer.objects.active
+        result = bpy.ops.uv.ddg_cut_start('INVOKE_DEFAULT', True, mode='CIRCLE', radius=0.9,
+                                          vertex=5)
+        check(result == {'FINISHED'}, "Cut: Start finished from the viewport")
+        names = [a.name for a in sphere.data.attributes if a.name.startswith("ddg_cut_region_")]
+        check(len(names) == 2, "Start made the region attributes")
+        before = [list(sphere.data.attributes[n].data[3].value for n in [names[0]])]
+        draws = CALLS["draw"]
+        result = bpy.ops.uv.ddg_cut_flow('INVOKE_DEFAULT', True, steps=3, use_stop_rule=False,
+                                         length_mode='EXPLICIT', length_weight=0.1)
+        check(result == {'FINISHED'}, "Cut: Flow finished from the viewport")
+        after = [list(sphere.data.attributes[n].data[3].value for n in [names[0]])]
+        check(after != before, "Flow moved the cut")
+        redraw()
+        bpy.ops.screen.redo_last('INVOKE_DEFAULT')
+        redraw()
+        check(CALLS["draw"] > draws, "the Flow panel was drawn")
+        check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of Flow ran")
+        sphere = bpy.context.view_layer.objects.active
+        again = [list(sphere.data.attributes[n].data[3].value for n in [names[0]])]
+        check(again == before, "undo restored the cut")
+        check(bpy.ops.ed.redo() == {'FINISHED'}, "redo of Flow ran")
+        result = bpy.ops.uv.ddg_cut_apply('INVOKE_DEFAULT', True)
+        sphere = bpy.context.view_layer.objects.active
+        check(result == {'FINISHED'} and sum(e.use_seam for e in sphere.data.edges) > 0,
+              "Cut: Apply marked seams")
+        check(not [o for o in bpy.data.objects if o.name.endswith(" cut")], "preview removed")
+        check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of Apply ran")
+        sphere = bpy.context.view_layer.objects.active
+        check(not any(e.use_seam for e in sphere.data.edges), "undo removed the seams again")
     return None
 
 
