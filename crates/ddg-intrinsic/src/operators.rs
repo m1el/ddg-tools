@@ -27,7 +27,8 @@ pub struct Quality {
     /// The median, the 90 % and the 99 % quantile and the maximum of the largest angle of a
     /// face, in radians.
     pub largest_angle_quantiles: [f64; 4],
-    /// The fractions of faces whose largest angle exceeds 90°, 120° and 150°.
+    /// The fractions of faces whose largest angle exceeds 90°, 120° and 150° by more than
+    /// `1e-9` radians (so that right triangles are not counted as obtuse by rounding).
     pub largest_angle_above: [f64; 3],
     /// Number of interior edges whose cotan weight is below minus the threshold passed to
     /// [`IntrinsicTriangulation::quality`].
@@ -199,7 +200,7 @@ impl IntrinsicTriangulation {
             largest[(((n - 1) as f64) * p).round() as usize]
         };
         let above = |degrees: f64| {
-            let limit = degrees.to_radians();
+            let limit = degrees.to_radians() + 1e-9;
             let below = largest.partition_point(|&a| a <= limit);
             (largest.len() - below) as f64 / largest.len() as f64
         };

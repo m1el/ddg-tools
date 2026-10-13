@@ -54,11 +54,11 @@ impl fmt::Display for SurfacePoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SurfacePoint::Vertex(v) => write!(f, "vertex {v}"),
-            SurfacePoint::Edge { edge, t } => write!(f, "the point t = {t} of edge {edge}"),
+            SurfacePoint::Edge { edge, t } => write!(f, "the point t = {t:?} of edge {edge}"),
             SurfacePoint::Face {
                 face,
                 bary: [a, b, c],
-            } => write!(f, "the point ({a}, {b}, {c}) of face {face}"),
+            } => write!(f, "the point ({a:?}, {b:?}, {c:?}) of face {face}"),
         }
     }
 }

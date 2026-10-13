@@ -20,6 +20,7 @@
 //! Both are bounded by a stated metric tolerance, which the paper's rule is not.
 
 use crate::error::{EdgeTraceFailure, EdgeTraceFailureReason, IntrinsicError};
+use crate::point::SurfacePoint;
 use crate::trace::{Crossing, Target, TraceOptions, TraceStop, run};
 use crate::triangulation::IntrinsicTriangulation;
 
@@ -218,10 +219,16 @@ impl IntrinsicTriangulation {
                     at: trace.end,
                     travelled: trace.length,
                 },
-                (TraceStop::Vertex, Some(vertex)) => EdgeTraceFailureReason::HitVertex {
-                    vertex,
-                    travelled: trace.length,
-                },
+                // Arriving at the far vertex itself with length left over is a mismatch of
+                // lengths, reported as such.
+                (TraceStop::Vertex, Some(vertex))
+                    if self.locations[b] != SurfacePoint::Vertex(vertex) =>
+                {
+                    EdgeTraceFailureReason::HitVertex {
+                        vertex,
+                        travelled: trace.length,
+                    }
+                }
                 _ => EdgeTraceFailureReason::Missed {
                     end: trace.end,
                     mismatch: outcome.closest,
@@ -318,5 +325,213 @@ impl IntrinsicTriangulation {
             mismatches,
             report,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The check must catch wrong data. A triangulation built through the public interface is
+    //! never wrong, so these tests damage one from inside the crate.
+
+    use ddg_core::generators::grid_disk;
+    use ddg_core::{Geometry, TriMesh};
+
+    use super::*;
+    use crate::DelaunayOptions;
+
+    /// A flat grid sheared by 1.5 cells per row, flipped to Delaunay, with its positions.
+    fn sheared() -> (IntrinsicTriangulation, TriMesh) {
+        let mut shape = grid_disk(8, 8).unwrap();
+        for p in &mut shape.positions {
+            p[0] += 1.5 * p[1];
+        }
+        let mesh = shape.topology().unwrap();
+        let geometry = Geometry::from_positions(&mesh, &shape.positions).unwrap();
+        let mut tri = IntrinsicTriangulation::new(&mesh, &geometry).unwrap();
+        tri.flip_to_delaunay(&DelaunayOptions::default()).unwrap();
+        (tri, mesh)
+    }
+
+    /// A flipped edge with at least two crossings whose end points are interior vertices.
+    fn winding_edge(tri: &IntrinsicTriangulation, traces: &EdgeTraces) -> usize {
+        (0..tri.n_edges())
+            .find(|&e| {
+                let [a, b] = tri.edge_vertices(e);
+                traces.crossings(e).len() >= 2
+                    && !tri.is_boundary_vertex(a)
+                    && !tri.is_boundary_vertex(b)
+            })
+            .expect("the sheared grid has such an edge")
+    }
+
+    fn only_failure(tri: &IntrinsicTriangulation, e: usize) -> EdgeTraceFailure {
+        let options = EdgeTraceOptions::default();
+        let single = match tri.trace_edge(e, &options) {
+            Err(IntrinsicError::EdgeTrace(failure)) => failure,
+            other => panic!("expected a failed trace, got {other:?}"),
+        };
+        match tri.trace_edges(&options) {
+            Err(IntrinsicError::EdgeTraces { n_edges, failures }) => {
+                assert_eq!(n_edges, tri.n_edges());
+                assert_eq!(failures, vec![single.clone()]);
+            }
+            other => panic!("expected failed traces, got {other:?}"),
+        }
+        assert_eq!(single.edge as usize, e);
+        assert_eq!(single.vertices.map(|v| v as usize), tri.edge_vertices(e));
+        assert_eq!(single.length, tri.edge_length(e));
+        assert_eq!(single.tolerance, 1e-6 * tri.edge_length(e));
+        single
+    }
+
+    #[test]
+    fn a_wrong_signpost_is_a_failed_trace() {
+        let (mut tri, _) = sheared();
+        let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
+        assert!(traces.report.max_relative_mismatch < 1e-13);
+        let e = winding_edge(&tri, &traces);
+        let h = tri.edge_halfedge[e] as usize;
+        // An interior vertex of a flat shape: normalized angles are angles. Turning the
+        // signpost by 1e-4 moves the end of the path by 1e-4 of its length.
+        tri.signposts[h] += 1e-4;
+        let failure = only_failure(&tri, e);
+        let length = tri.edge_length(e);
+        match failure.reason {
+            EdgeTraceFailureReason::Missed {
+                mismatch: Some(d),
+                n_crossings,
+                end: SurfacePoint::Face { .. },
+            } => {
+                assert!((d / length - 1e-4).abs() < 1e-8, "{d} {length}");
+                assert!(n_crossings >= 2);
+            }
+            ref other => panic!("{other:?}"),
+        }
+        let message = IntrinsicError::EdgeTrace(failure).to_string();
+        let [a, b] = tri.edge_vertices(e);
+        assert!(
+            message.starts_with(&format!(
+                "the trace of intrinsic edge {e} = ({a}, {b}) of length {length:?} over the input \
+                 mesh ended at the point ("
+            )),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "without reaching vertex {b}: the closest it came is"
+            )),
+            "{message}"
+        );
+        // With a tolerance that allows it the same trace is accepted and says how far off it
+        // is.
+        let loose = EdgeTraceOptions {
+            tolerance: 1e-3,
+            max_crossings: None,
+        };
+        let accepted = tri.trace_edge(e, &loose).unwrap();
+        assert!((accepted.mismatch / length - 1e-4).abs() < 1e-8);
+        assert_eq!(accepted.crossings.len(), traces.crossings(e).len());
+    }
+
+    #[test]
+    fn a_wrong_length_is_a_failed_trace() {
+        let (mut tri, _) = sheared();
+        let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
+        let e = winding_edge(&tri, &traces);
+        let length = tri.edge_length(e);
+        // Too short: the path ends before the vertex.
+        tri.edge_lengths[e] = length * (1.0 - 1e-4);
+        match only_failure(&tri, e).reason {
+            EdgeTraceFailureReason::Missed {
+                mismatch: Some(d), ..
+            } => assert!((d / length - 1e-4).abs() < 1e-8, "{d}"),
+            other => panic!("{other:?}"),
+        }
+        // Far too long: the path leaves the surface.
+        tri.edge_lengths[e] = 100.0;
+        match only_failure(&tri, e).reason {
+            EdgeTraceFailureReason::HitBoundary {
+                at: SurfacePoint::Edge { edge, .. },
+                travelled,
+            } => {
+                assert!(tri.input().mesh().is_boundary_edge(edge as usize));
+                assert!(travelled > length && travelled < 3.0);
+            }
+            other => panic!("{other:?}"),
+        }
+        let message = tri
+            .trace_edge(e, &EdgeTraceOptions::default())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("left the surface at the point t = "),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_path_into_another_vertex_is_a_failed_trace() {
+        let (mut tri, mesh) = sheared();
+        let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
+        let e = winding_edge(&tri, &traces);
+        let h = tri.edge_halfedge[e] as usize;
+        let [a, b] = tri.edge_vertices(e);
+        // Point the signpost along an input edge at the tail that does not lead to the head,
+        // and make the edge longer than that input edge.
+        let along = mesh
+            .outgoing_halfedges(a)
+            .find(|&g| mesh.to_vertex(g) != b)
+            .unwrap();
+        let other = mesh.to_vertex(along);
+        let input_length = tri.input().geometry().edge_lengths()[mesh.edge(along)];
+        tri.signposts[h] = tri.input().signpost(along);
+        tri.edge_lengths[e] = 1.5 * input_length;
+        match only_failure(&tri, e).reason {
+            EdgeTraceFailureReason::HitVertex { vertex, travelled } => {
+                assert_eq!(vertex as usize, other);
+                assert_eq!(travelled, input_length);
+            }
+            other => panic!("{other:?}"),
+        }
+        let message = tri
+            .trace_edge(e, &EdgeTraceOptions::default())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.ends_with(&format!(
+                "ran into input vertex {other} after a length of {input_length:?}"
+            )),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn the_crossing_limit_is_a_failed_trace() {
+        let (tri, _) = sheared();
+        let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
+        let e = winding_edge(&tri, &traces);
+        let n = traces.crossings(e).len();
+        let limited = EdgeTraceOptions {
+            tolerance: 1e-6,
+            max_crossings: Some(n - 1),
+        };
+        match tri.trace_edge(e, &limited) {
+            Err(IntrinsicError::EdgeTrace(failure)) => match failure.reason {
+                EdgeTraceFailureReason::CrossingLimit { limit, travelled } => {
+                    assert_eq!(limit, n - 1);
+                    assert_eq!(travelled, traces.crossings(e)[n - 1].distance);
+                }
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+        let enough = EdgeTraceOptions {
+            tolerance: 1e-6,
+            max_crossings: Some(n),
+        };
+        assert_eq!(
+            tri.trace_edge(e, &enough).unwrap().crossings,
+            traces.crossings(e)
+        );
     }
 }

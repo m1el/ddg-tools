@@ -157,13 +157,13 @@ impl fmt::Display for FlipRefusal {
             } => write!(
                 f,
                 "its two triangles do not form a strictly convex quadrilateral (twice the signed \
-                 areas of the triangles a flip would create: {area_at_tail} and {area_at_head})"
+                 areas of the triangles a flip would create: {area_at_tail:?} and {area_at_head:?})"
             ),
             FlipRefusal::TooThin { new_length, shape } => write!(
                 f,
                 "the flip would create a triangle too thin to be described by its edge lengths \
-                 (new edge of length {new_length}; twice the area is {shape:e} times the product \
-                 of the new edge and the longest side, the limit is {:e})",
+                 (new edge of length {new_length:?}; twice the area is {shape:?} times the product \
+                 of the new edge and the longest side, the limit is {:?})",
                 crate::formulas::FLIP_SHAPE_LIMIT
             ),
         }
@@ -230,7 +230,7 @@ impl fmt::Display for EdgeTraceFailure {
         let [a, b] = self.vertices;
         write!(
             f,
-            "the trace of intrinsic edge {} = ({a}, {b}) of length {} over the input mesh ",
+            "the trace of intrinsic edge {} = ({a}, {b}) of length {:?} over the input mesh ",
             self.edge, self.length
         )?;
         match &self.reason {
@@ -246,7 +246,7 @@ impl fmt::Display for EdgeTraceFailure {
                 match mismatch {
                     Some(d) => write!(
                         f,
-                        "the closest it came is {d}, the tolerance is {}",
+                        "the closest it came is {d:?}, the tolerance is {:?}",
                         self.tolerance
                     ),
                     None => write!(
@@ -256,15 +256,18 @@ impl fmt::Display for EdgeTraceFailure {
                 }
             }
             EdgeTraceFailureReason::HitBoundary { at, travelled } => {
-                write!(f, "left the surface at {at} after a length of {travelled}")
+                write!(
+                    f,
+                    "left the surface at {at} after a length of {travelled:?}"
+                )
             }
             EdgeTraceFailureReason::HitVertex { vertex, travelled } => write!(
                 f,
-                "ran into input vertex {vertex} after a length of {travelled}"
+                "ran into input vertex {vertex} after a length of {travelled:?}"
             ),
             EdgeTraceFailureReason::CrossingLimit { limit, travelled } => write!(
                 f,
-                "crossed {limit} input edges (the limit) within a length of {travelled}"
+                "crossed {limit} input edges (the limit) within a length of {travelled:?}"
             ),
             EdgeTraceFailureReason::Query(e) => write!(f, "was refused: {e}"),
         }
@@ -298,15 +301,15 @@ impl fmt::Display for IntrinsicError {
             }
             IntrinsicError::InvalidDirection { direction } => write!(
                 f,
-                "the direction {direction} of a tracing query is not a finite angle in [0, 2π)"
+                "the direction {direction:?} of a tracing query is not a finite angle in [0, 2π)"
             ),
             IntrinsicError::InvalidLength { length } => write!(
                 f,
-                "the length {length} of a tracing query is not positive and finite"
+                "the length {length:?} of a tracing query is not positive and finite"
             ),
             IntrinsicError::DirectionLeavesFace { point, direction } => write!(
                 f,
-                "the direction {direction} does not lead from {point} into its face"
+                "the direction {direction:?} does not lead from {point} into its face"
             ),
             IntrinsicError::CrossingLimit {
                 start,
@@ -315,7 +318,7 @@ impl fmt::Display for IntrinsicError {
             } => write!(
                 f,
                 "the tracing query from {start} crossed {limit} edges (the limit) within a \
-                 length of {travelled}"
+                 length of {travelled:?}"
             ),
             IntrinsicError::EdgeTrace(failure) => write!(f, "{failure}"),
             IntrinsicError::EdgeTraces { n_edges, failures } => {
@@ -343,7 +346,7 @@ impl fmt::Display for IntrinsicError {
                 lengths: [a, b, c],
             } => write!(
                 f,
-                "face {face} of the {surface} has edge lengths {a}, {b}, {c}, which do not form \
+                "face {face} of the {surface} has edge lengths {a:?}, {b:?}, {c:?}, which do not form \
                  a triangle of positive area"
             ),
             IntrinsicError::Inconsistent { what } => {
