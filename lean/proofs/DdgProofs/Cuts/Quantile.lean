@@ -13,38 +13,48 @@ D22, D23.
   weights with a positive sum and `0 < q ≤ 1` (`oracle_weightedQuantile_spec`,
   `IsWeightedQuantile`): the result is one of the values; the weight of the values not exceeding
   it is at least `q · Σℓ`; every smaller value has less than that below or at it — so it is the
-  least value with this property. Hence it lies between the smallest and the largest value, does
-  not decrease in `q`, and (positive weights) is the largest value for `q = 1`
+  least value with this property, and less than `q · Σℓ` lies strictly below it
+  (`oracle_weightLT_weightedQuantile_lt`). Hence it lies between the smallest and the largest
+  value, does not decrease in `q`, and (positive weights) is the largest value for `q = 1`
   (`oracle_weightedQuantile_bounds`, `oracle_weightedQuantile_mono`,
   `oracle_weightedQuantile_one`); an empty list gives `0` (`oracle_weightedQuantile_nil`).
-* **`cut-roughening-rate`** — the rate of the state is `ω = weightedQuantile (ω_c, ℓ_c) 0.9`: it
+* **`cut-roughening-rate`** — the rate of the state is `ω = weightedQuantile 0.9 (ω_c) (ℓ_c)`: it
   is one of the local rates, at least nine tenths of the length of the cut has `ω_c ≤ ω`, and
-  at such a cut point every ripple shorter than `ℓ` decays when `α_L = ωℓ/(2π)`, `ω > 0`
-  (`roughening_quantile_spec`, `rippleRate_neg_of_le`); `ω ≥ 0` if all `ω_c ≥ 0` (the Dirichlet
-  energy, `roughening_quantile_nonneg`); for `ω ≤ 0` the weight rule gives no positive weight, and where `ω_c < 0` every ripple
-  decays (`lengthWeightForRipples_nonpos`, `rippleRate_neg_of_neg`).
+  at such a cut point every ripple shorter than `2πw/ω` decays, that is shorter than `ℓ` when
+  `α_L = ωℓ/(2π)`, `ω > 0` (`roughening_quantile_spec`, `rippleRate_neg_of_le_of_lt`,
+  `rippleRate_neg_of_le`). Ripples longer than `ℓ` grow where `ω_c ≥ ω`, which is more than a
+  tenth of the cut; where `ω_c < ω` they decay down to the wavelength `ℓ ω/ω_c`
+  (`rippleRate_pos_of_ge`, `roughening_quantile_above`, `rippleRate_neg_of_lt_longer`).
+  `ω ≥ 0` if all `ω_c ≥ 0` (the Dirichlet energy, `roughening_quantile_nonneg`); for `ω ≤ 0` the
+  weight rule gives no positive weight, and where `ω_c < 0` every ripple decays
+  (`lengthWeightForRipples_nonpos`, `rippleRate_neg_of_neg`).
 * **`cut-step-cap`** — the oracle's `robustStep` (`= adaptiveStep` with `h = 1` and the speed
   `m̂`) and `adaptiveStep` skip a term whose denominator is not positive, satisfy the limits that
   apply and are the largest such step (`robustStep_spec`, `adaptiveStep_skip_*`,
   `le_adaptiveStep`); with `ω ≤ 0` they are the capped rule (`robustStep_capped`,
   `adaptiveStep_skip_omega`). With the robust statistics every cut point with
   `speedInEdges ρ_c h_c ≤ m̂` moves by at most `max_motion · h_c` in the step
-  (`robustStep_motion_le'`); with the extremes every cut point does (`extremesStep_motion_le`).
+  (`robustStep_motion_le'`); with the extremes, `m̂ = max|ρ_c|/min h`, every cut point does
+  (`robustStep_extremes`, `extremesStep_motion_le`). The larger of two `m̂` gives the smaller of
+  the two steps, and the step respects every speed up to `m̂` (`robustStep_max`,
+  `robustStep_mul_le_of_le`).
 * **`cut-step-local`** — the oracle's `localLimitFactor max_motion h_c τ v_c`
   (`min(1, max_motion · h_c/(τ v_c))` where `τ v_c > 0`, else `1`) lies in `(0, 1]`, is `1` where
   `τ v_c ≤ max_motion · h_c`, and with `v_c ≥ |r_c|` the limited rate moves the cut point by at
-  most `max_motion · h_c`; it keeps the sign of the rate, never increases its size, and keeps a
-  vanishing rate (`localLimitFactor_mem_Ioc`, `localLimitFactor_eq_one`, `localLimit_motion_le`,
-  `localLimit_sign`); a rate limited point by point is still a descent direction
-  (`firstVariation_localLimit`); the oracle's `localSpeed r_c ω_c ω = max(|r_c|, ½(ω_c − ω)₊)` is
-  `≥ |r_c|` (`abs_le_localSpeed`, `localLimit_motion_le_adaptive`), and `|s_c| ≤ ω_c/2` when
-  `Q_0, Q_1 ≥ 0` (`abs_cutSpeed_le_half_roughRate`).
+  most `max_motion · h_c`; a limited point takes the step `max_motion · h_c/v_c`; the limit keeps
+  the sign of the rate, never increases its size, and keeps a vanishing rate
+  (`localLimitFactor_mem_Ioc`, `localLimitFactor_eq_one`, `localLimit_motion_le`,
+  `localLimit_step_eq`, `localLimit_sign`); a rate limited point by point is still a descent
+  direction (`firstVariation_localLimit`); the oracle's
+  `localSpeed r_c ω_c ω = max(|r_c|, ½(ω_c − ω)₊)` is `≥ |r_c|` (`abs_le_localSpeed`,
+  `localLimit_motion_le_adaptive`), and `|s_c| ≤ ω_c/2` when `Q_0, Q_1 ≥ 0`
+  (`abs_cutSpeed_le_half_roughRate`).
 
 The tagged theorems are about the oracle's definitions `Ddg.weightedQuantile` (with its
 `sortAscending`, `insertAscending`, `sumLeft`, `firstReaching`), `robustStep`, `adaptiveStep`,
 `stepCap`, `speedInEdges`, `localSpeed`, `localLimitFactor`, `roughRate`, `cutSpeed`,
 `lengthWeightForRipples`. This package's own `quantileScan`, `Cuts.weightedQuantile` (Mathlib's
-insertion sort and the same scan), `totalWeight`, `weightLE`, `IsWeightedQuantile` and
+insertion sort and the same scan), `totalWeight`, `weightLE`, `weightLT`, `IsWeightedQuantile` and
 `localFactor` are the vehicle of the proofs: `IsWeightedQuantile` characterizes the quantile
 without an order, both quantiles satisfy it and are therefore equal
 (`oracle_weightedQuantile_eq`). `sortAscending_reverses_ties` records that the oracle's sort
@@ -275,6 +285,42 @@ theorem IsWeightedQuantile.unique {xs : List (ℝ × ℝ)} {q v v' : ℝ}
   · by_contra hcon
     have := h'.least p hp (not_le.mp hcon)
     linarith [h.reach]
+
+/-- The total weight of the values strictly below `v`. -/
+def weightLT (l : List (ℝ × ℝ)) (v : ℝ) : ℝ := (l.map fun p => if p.1 < v then p.2 else 0).sum
+
+/-- **Less than the fraction `q` of the weight lies strictly below the quantile**, so more than
+the fraction `1 − q` lies at or above it. -/
+theorem IsWeightedQuantile.weightLT_lt {xs : List (ℝ × ℝ)} {q v : ℝ}
+    (h : IsWeightedQuantile xs q v) (hq : 0 < q) (hW : 0 < totalWeight xs) :
+    weightLT xs v < q * totalWeight xs := by
+  classical
+  by_cases hne : ∃ p ∈ xs, p.1 < v
+  · have hs : (xs.toFinset.filter fun p => p.1 < v).Nonempty := by
+      obtain ⟨p, hp, hlt⟩ := hne
+      exact ⟨p, Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr hp, hlt⟩⟩
+    obtain ⟨m, hm, hmax⟩ := Finset.exists_max_image _ (fun p : ℝ × ℝ => p.1) hs
+    rw [Finset.mem_filter, List.mem_toFinset] at hm
+    have e : weightLT xs v = weightLE xs m.1 := by
+      unfold weightLT weightLE
+      congr 1
+      apply List.map_congr_left
+      intro p hp
+      by_cases hlt : p.1 < v
+      · have hle : p.1 ≤ m.1 := hmax p (Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr hp, hlt⟩)
+        rw [ite_eq_left hlt, ite_eq_left hle]
+      · have hnle : ¬ p.1 ≤ m.1 := fun hle => hlt (lt_of_le_of_lt hle hm.2)
+        rw [ite_eq_right hlt, ite_eq_right hnle]
+    rw [e]
+    exact h.least m hm.1 hm.2
+  · have e : weightLT xs v = 0 := by
+      unfold weightLT
+      apply List.sum_eq_zero
+      intro x hx
+      obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hx
+      exact ite_eq_right fun hlt => hne ⟨p, hp, hlt⟩
+    rw [e]
+    exact mul_pos hq hW
 
 /-- **The scan of any ascending arrangement of the pairs returns the quantile**: for
 nonnegative weights with a positive sum and `0 < q ≤ 1`. (So the result does not depend on how
@@ -526,6 +572,15 @@ theorem oracle_le_weightLE_weightedQuantile {xs ls : List ℝ} (hw : ∀ p ∈ x
     q * totalWeight (xs.zip ls) ≤ weightLE (xs.zip ls) (Ddg.weightedQuantile q xs ls) :=
   (oracle_weightedQuantile_spec hw hW hq0 hq1).reach
 
+/-- **Less than the fraction `q` of the weight lies strictly below the quantile** (more than
+`1 − q` of it lies at or above).
+
+[formula: cut-weighted-quantile] -/
+theorem oracle_weightLT_weightedQuantile_lt {xs ls : List ℝ} (hw : ∀ p ∈ xs.zip ls, 0 ≤ p.2)
+    (hW : 0 < totalWeight (xs.zip ls)) {q : ℝ} (hq0 : 0 < q) (hq1 : q ≤ 1) :
+    weightLT (xs.zip ls) (Ddg.weightedQuantile q xs ls) < q * totalWeight (xs.zip ls) :=
+  (oracle_weightedQuantile_spec hw hW hq0 hq1).weightLT_lt hq0 hW
+
 /-- **The quantile does not decrease in `q`.**
 
 [formula: cut-weighted-quantile] -/
@@ -619,6 +674,35 @@ theorem rippleRate_neg_of_le_of_lt {ωc ω w k : ℝ} (hc : ωc ≤ ω) (hw : 0 
     unfold rippleRate
     nlinarith
   exact lt_of_le_of_lt (rippleRate_mono_omega hc w hk0.le) h2
+
+/-- **Where the local rate is at least that of the state, ripples longer than `ℓ` grow**: with
+`α_L = lengthWeightForRipples ω ℓ`, `ω > 0`, a cut point with `ω_c ≥ ω` has a positive rate for
+every `0 < k < 2π/ℓ`. By `roughening_quantile_above` this is more than a tenth of the cut (not
+nine tenths, unless the rates are equal).
+
+[formula: cut-roughening-rate] -/
+theorem rippleRate_pos_of_ge {ωc ω ℓ k : ℝ} (hc : ω ≤ ωc) (hω : 0 < ω) (hℓ : 0 < ℓ)
+    (hk0 : 0 < k) (hk : k < 2 * π / ℓ) : 0 < rippleRate ωc (Ddg.lengthWeightForRipples ω ℓ) k :=
+  lt_of_lt_of_le (rippleRate_pos_of_longer hω hℓ hk0 hk) (rippleRate_mono_omega hc _ hk0.le)
+
+/-- Where the local rate is below that of the state, ripples longer than `ℓ` decay too, down to
+the wavelength `ℓ ω/ω_c`: the rate is negative for every `k > (ω_c/ω) · 2π/ℓ`, `k > 0`. -/
+theorem rippleRate_neg_of_lt_longer {ωc ω ℓ k : ℝ} (hω : 0 < ω) (hℓ : 0 < ℓ) (hk0 : 0 < k)
+    (hk : ωc / ω * (2 * π / ℓ) < k) : rippleRate ωc (Ddg.lengthWeightForRipples ω ℓ) k < 0 := by
+  have hw : 0 < Ddg.lengthWeightForRipples ω ℓ := by
+    rw [lengthWeightForRipples_eq]
+    positivity
+  refine rippleRate_neg_of_le_of_lt le_rfl hw hk0 (lt_of_eq_of_lt ?_ hk)
+  rw [lengthWeightForRipples_eq]
+  have := Real.pi_ne_zero
+  field_simp
+
+/-- **Less than nine tenths of the length of the cut have a local rate below that of the
+state**: more than a tenth has `ω_c ≥ ω`. -/
+theorem roughening_quantile_above {ωs ls : List ℝ} (hw : ∀ p ∈ ωs.zip ls, 0 ≤ p.2)
+    (hW : 0 < totalWeight (ωs.zip ls)) :
+    weightLT (ωs.zip ls) (Ddg.weightedQuantile 0.9 ωs ls) < 0.9 * totalWeight (ωs.zip ls) :=
+  oracle_weightLT_weightedQuantile_lt hw hW (by norm_num) (by norm_num)
 
 /-- **A state with `ω ≤ 0` gets no weight from the rule** `α_L = ωℓ/(2π)`: the result is not
 positive. -/
@@ -907,6 +991,31 @@ theorem robustStep_mul_le_of_le {τmax ts mm ω mhat m : ℝ} (hτ : 0 ≤ τmax
   have := adaptiveStep_mul_le_of_le (ω := ω) hτ hts hmh hpos hm
   rwa [mul_one] at this
 
+/-- **The larger of two `m̂` gives the smaller of the two steps** (`max_motion ≥ 0`): with the
+length step on the mesh, the speed is taken with and without the length force. -/
+theorem robustStep_max (τmax ts ω : ℝ) {mm : ℝ} (hmm : 0 ≤ mm) (m₁ m₂ : ℝ) :
+    Ddg.robustStep τmax ts ω mm (max m₁ m₂) =
+      min (Ddg.robustStep τmax ts ω mm m₁) (Ddg.robustStep τmax ts ω mm m₂) := by
+  obtain ⟨a1, a2, a3, a4⟩ := robustStep_spec τmax ts ω mm (max m₁ m₂)
+  obtain ⟨b1, b2, b3, b4⟩ := robustStep_spec τmax ts ω mm m₁
+  obtain ⟨c1, c2, c3, c4⟩ := robustStep_spec τmax ts ω mm m₂
+  have key : ∀ m : ℝ, m ≤ max m₁ m₂ → 0 < m →
+      Ddg.robustStep τmax ts ω mm (max m₁ m₂) * m ≤ mm := by
+    intro m hm hpos
+    have hmax : 0 < max m₁ m₂ := lt_of_lt_of_le hpos hm
+    by_cases hneg : Ddg.robustStep τmax ts ω mm (max m₁ m₂) < 0
+    · exact (mul_neg_of_neg_of_pos hneg hpos).le.trans hmm
+    · exact (mul_le_mul_of_nonneg_left hm (not_lt.mp hneg)).trans (a3 hmax)
+  apply le_antisymm
+  · exact le_min (b4 _ a1 a2 (key m₁ (le_max_left _ _))) (c4 _ a1 a2 (key m₂ (le_max_right _ _)))
+  · refine a4 _ ((min_le_left _ _).trans b1)
+      (fun hω => (mul_le_mul_of_nonneg_right (min_le_left _ _) hω.le).trans (b2 hω)) fun hmax => ?_
+    rcases le_total m₁ m₂ with h | h
+    · rw [max_eq_right h] at hmax ⊢
+      exact (mul_le_mul_of_nonneg_right (min_le_right _ _) hmax.le).trans (c3 hmax)
+    · rw [max_eq_left h] at hmax ⊢
+      exact (mul_le_mul_of_nonneg_right (min_le_left _ _) hmax.le).trans (b3 hmax)
+
 /-- The capped rule is the robust step without the term `time_scale/ω` (`ω ≤ 0`):
 `min(τ_max, max_motion/m̂)` for `m̂ > 0`, `τ_max` otherwise. -/
 theorem robustStep_capped (τmax ts mm : ℝ) {ω : ℝ} (hω : ω ≤ 0) (mhat : ℝ) :
@@ -978,6 +1087,16 @@ theorem localLimitFactor_eq_one {mm hc τ v : ℝ} (h : τ * v ≤ mm * hc) :
   by_cases hpos : 0 < τ * v
   · rw [ite_eq_left hpos, min_eq_left ((one_le_div hpos).mpr h)]
   · rw [ite_eq_right hpos]
+
+/-- **A limited cut point takes the step `max_motion · h_c / v_c`** (D22): if
+`τ v_c > max_motion · h_c ≥ 0` and `τ > 0`, then `τ · factor = max_motion · h_c / v_c`.
+
+[formula: cut-step-local] -/
+theorem localLimit_step_eq {mm hc τ v : ℝ} (ha : 0 ≤ mm * hc) (hτ : 0 < τ)
+    (h : mm * hc < τ * v) : τ * Ddg.localLimitFactor mm hc τ v = mm * hc / v := by
+  have hpos : 0 < τ * v := lt_of_le_of_lt ha h
+  rw [localLimitFactor_def, ite_eq_left hpos, min_eq_right ((div_le_one hpos).mpr h.le),
+    ← mul_div_assoc, mul_div_mul_left _ _ hτ.ne']
 
 /-- **No cut point moves by more than `max_motion · h_c`.** With the limited rate
 `r_c · localLimitFactor(max_motion, h_c, τ, v_c)`, `v_c ≥ |r_c|`, `τ ≥ 0`,
