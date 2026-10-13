@@ -530,8 +530,12 @@ option (`FlowOptions::step_statistics`, D22):
   like `m_c`, is `m̂` to the last bit, while `τ · v_c > max_motion · h_c` there is decided by the
   rounding of `τ` (D24). The limited rate is
   what `ḡ` multiplies and what is extended. The number of limited cut points (factor below 1) is
-  reported. This is a step of its own for the outliers: the limited rate is still a descent
-  direction and rest states are unchanged. With `Fixed` nothing is limited.
+  reported. This is a step of its own for the outliers. Rest states are unchanged, and the sign of
+  every rate is kept. The limited rate is a descent direction when the rate on the cut is the
+  gradient density itself (length step on the mesh, or no coupling along the cut); with the
+  length step on the cut it need not be, because the coupled rate of a point can go against its
+  own density and the limit can remove the neighbour's share that paid for it (D25). With `Fixed`
+  nothing is limited.
 * **Extremes**. `m̂ = max_c |ρ_c| / min_c h` with `h` the shortest crossed edge, `ω = max_c ω_c`,
   no local limit: the paper's remark taken literally, and the rule before D22.
 
@@ -1201,6 +1205,22 @@ region of every face.
   the mesh uses; (e) `v_c = 0`; (f) on a network, the weights of the two `m̂`, the `h` and `v`
   of a triple copy, which rate the limit acts on for each stage set, and what the report
   counts.
+
+* **D25** Corrections that the machine-checked proofs of D22–D24 forced (`lean/proofs`,
+  `DdgProofs/Cuts/Quantile.lean`): (a) the rate after the local limit is not always a descent
+  direction with the default stages. Counterexample (`limited_rate_not_descent_example`): two cut
+  points, `ℓ = (9, 1)`, `h = (1, 31/110)`, `s + λ⁰ = (1, −20)`, coupling 36, `Capped` with
+  `tau_max = 1`, `max_motion = 1/4`: the first variation is `−530/11` without the limit and
+  `+28/11` with it. Unlimited, the on-cut rate is a descent direction, and so is the limited one
+  when it is the gradient density itself. This is consistent with the energy being less monotone
+  since D22 (§4); (b) "`q = 1` gives the largest value" needs positive weights, and in floating
+  point holds only while no trailing weight is absorbed by the running sum; (c) the factor of
+  the local limit lies in `(0, 1]` when `max_motion · h_c > 0`, and the two cases of D24a agree
+  when also `τ ≥ 0` and `h_c > 0`; (d) with the ripple rule, ripples shorter than `ℓ` decay
+  wherever `ω_c ≤ ω`, which is at least nine tenths of the cut, while longer ones are certain to
+  grow only where `ω_c ≥ ω`; (e) the oracle's sort for the quantile puts equal values in reverse
+  order, against §1; the quantile is the same, only the order of the running sum inside a group
+  of equal values differs from the crate's, and it is left as it is (a theorem states it).
 
 Add to this list whenever something else turns up; never drop an entry.
 
