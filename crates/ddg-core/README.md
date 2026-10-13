@@ -63,20 +63,48 @@ Functions that implement a mathematical formula carry a `[formula: <id>]` line i
 
 ## Upwind distance
 
-`distance::upwind_distance(mesh, geometry, seeds, class)` solves the first-order Hopf–Lax scheme
-for `|∇T| = 1` from seed values; see the module documentation for the scheme, the closed form of
-the local update and the algorithm. Facts worth knowing (measured with `tests/distance.rs`,
-`cargo test --release -p ddg-core --test distance -- --nocapture`):
+`distance::upwind_distance(mesh, geometry, seeds, class)` computes the first-order Hopf–Lax
+distance from seed values; see the module documentation for the scheme and the closed form of
+the local update. Two modes (`DistanceMode`):
 
-- Re-opening is needed only on obtuse triangles (none on grids of right triangles). Measured
-  on sheared unit grids with 3 seeds (re-openings per vertex): largest angle 117° about 0.1 to
-  0.3, 135° about 1 to 3, 146° 12 to 100, 153° 100 to 400, 162° thousands (the relaxation is a
-  stochastic shortest path iteration whose contraction rate tends to 1 with the obtuse angle).
-  The default budget of `1000 n + 10 000` re-openings covers all of these up to 153°; if the
-  budget is hit the result says `converged == false` and holds valid upper bounds.
-- A point source converges with observed order 0.6–0.75 (rising); with exact seeds on a disc
-  the maximum error converges with order 1 on a flat grid and the rms error with order 1 on the
-  icosphere.
+- **`SinglePass` (default)**: fast marching with the Hopf–Lax update. Seeds are accepted at the
+  start; repeatedly the not yet accepted vertex with the smallest tentative value (ties: lower
+  index) is accepted and final; the tentative value uses only accepted vertices. No re-openings,
+  deterministic, `O(n log n)`.
+- **`FixedPoint { max_reopenings, reopen_tolerance }`**: iterate to the fixed point of
+  `T_i = min over all incident triangles`, re-opening vertices. The result carries a
+  `FixedPointReport { n_reopened, converged }` (`None` for the single pass).
+
+The modes agree to rounding on meshes without obtuse angles (grids of right triangles,
+icospheres). On obtuse triangles the single pass is larger than the fixed point, never smaller.
+Measured on sheared unit grids with three seeds (`tests/distance.rs`), the single pass minus the
+fixed point, relative, and the re-openings per vertex the fixed point needs:
+
+| largest angle | mean excess | max excess | fixed-point re-openings per vertex |
+|---:|---:|---:|---|
+| 117° | 0.2% | 2% | 0.1 to 0.3 |
+| 135° | 2% | 11% | 1 to 3 |
+| 146° | 4% | 19% | 12 to 100 |
+| 153° | 6% | 25% | 100 to 400 |
+| 162° | – | – | thousands (the default budget `1000 n + 10 000` can be exceeded) |
+
+The fixed-point relaxation is a stochastic-shortest-path iteration whose contraction rate tends
+to 1 as the obtuse angle tends to π, which is why it is not the default.
+
+Accuracy (single pass, `cargo test --release -p ddg-core --test distance -- --nocapture`): a
+point source converges with observed order 0.6 to 0.75 (rising) on the flat grid and 0.4 to 0.7
+on the icosphere; with exact seeds on a disc, order 1 on the flat grid and rms order 1 on the
+icosphere (maximum error order 0.6 to 0.7, at the antipode).
+
+Wall-clock time of the single pass, one seed, one thread, release build, AMD Threadripper 3970X
+(`cargo run --release -p ddg-core --example distance_timings`, best of 3; geometry setup
+excluded):
+
+| mesh | vertices | faces | solve |
+|------|---------:|------:|------:|
+| `icosphere(6)` | 40 962 | 81 920 | 9.1 ms |
+| `icosphere(7)` | 163 842 | 327 680 | 43.6 ms |
+| `icosphere(8)` | 655 362 | 1 310 720 | 188.4 ms |
 
 ## Sparse solver timings
 

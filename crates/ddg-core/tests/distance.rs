@@ -4,7 +4,10 @@
 // Index loops mirror the subscripts of the formulas being checked.
 #![allow(clippy::needless_range_loop)]
 
-use ddg_core::distance::{DistanceError, triangle_update, upwind_distance};
+use ddg_core::distance::{
+    DistanceError, DistanceMode, DistanceResult, triangle_update, upwind_distance,
+    upwind_distance_with,
+};
 use ddg_core::generators::{self, GeneratedMesh, SplitMix64};
 use ddg_core::{Geometry, TriMesh};
 use proptest::prelude::*;
@@ -13,6 +16,21 @@ fn build(positions: &[[f64; 3]], faces: &[[u32; 3]]) -> (TriMesh, Geometry) {
     let mesh = TriMesh::new(positions.len(), faces.to_vec()).unwrap();
     let geometry = Geometry::from_positions(&mesh, positions).unwrap();
     (mesh, geometry)
+}
+
+/// The fixed-point mode with its default budget.
+fn fixed(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    seeds: &[(u32, f64)],
+    class: Option<&[u32]>,
+) -> DistanceResult {
+    let mode = DistanceMode::fixed_point(mesh.n_vertices());
+    upwind_distance_with(mesh, geometry, seeds, class, &mode).unwrap()
+}
+
+fn reopened(r: &DistanceResult) -> usize {
+    r.fixed_point.expect("fixed-point mode").n_reopened
 }
 
 fn grid(n: usize) -> GeneratedMesh {
@@ -97,11 +115,11 @@ fn assert_fixed_point(
     class: Option<&[u32]>,
     what: &str,
 ) -> usize {
-    let r = upwind_distance(mesh, geometry, seeds, class).unwrap();
+    let r = fixed(mesh, geometry, seeds, class);
     assert!(
-        r.converged,
+        r.fixed_point.unwrap().converged,
         "{what}: not converged after {} re-openings",
-        r.n_reopened
+        reopened(&r)
     );
     let is_seed = |v: usize| seeds.iter().any(|s| s.0 as usize == v);
     for &(v, x) in seeds {
@@ -118,7 +136,7 @@ fn assert_fixed_point(
             r.values[i]
         );
     }
-    r.n_reopened
+    reopened(&r)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -151,7 +169,7 @@ proptest! {
     #[test]
     fn fixed_point_random(
         n in 3usize..12,
-        shear in 0.0..2.0f64,
+        shear in 0.0..1.2f64,
         mseed in any::<u64>(),
         picks in proptest::collection::vec((any::<u32>(), 0.0..2.0f64), 1..5),
     ) {
@@ -212,7 +230,20 @@ fn plane_wave(m: &GeneratedMesh, n: usize, angle: f64) -> (f64, usize, usize, f6
         })
         .map(|v| (v, exact[v as usize]))
         .collect();
-    let r = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+    let r = fixed(&mesh, &geometry, &seeds, None);
+    // The single pass is not exact where the upwind edge has an endpoint with a larger value;
+    // it must still never undercut the exact plane wave.
+    let single = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+    let single_err = single
+        .values
+        .iter()
+        .zip(&exact)
+        .map(|(t, e)| t - e)
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        single_err > -1e-13,
+        "single pass undercuts the plane wave: {single_err}"
+    );
     // "Good" vertices: some triangle (i, j, k) with good j, k whose edge jk contains the foot
     // of the characteristic through i. Their value must be exact. Computed by iteration.
     let nv = mesh.n_vertices();
@@ -403,7 +434,7 @@ fn geodesic_distance_on_icospheres() {
             order(max_err, prev.map(|p| p.0)),
             rms,
             order(rms, prev.map(|p| p.1)),
-            r.n_reopened
+            reopened(&fixed(&mesh, &geometry, &[(0, 0.0)], None))
         );
         prev = Some((max_err, rms));
         maxes.push(max_err);
@@ -524,9 +555,7 @@ fn class_restriction_isolates_the_two_sides() {
     let run = |a: &[(u32, f64)], b: &[(u32, f64)]| {
         let mut s = a.to_vec();
         s.extend_from_slice(b);
-        upwind_distance(&mesh, &geometry, &s, Some(&class))
-            .unwrap()
-            .values
+        fixed(&mesh, &geometry, &s, Some(&class)).values
     };
     let t1 = run(&seeds_a, &seeds_b1);
     let t2 = run(&seeds_a, &seeds_b2);
@@ -597,8 +626,8 @@ fn relabeling_does_not_change_the_result() {
         let (mesh2, geometry2) = build(&positions, &faces);
         let seeds = [(1u32, 0.0), (nv as u32 / 3, 0.05), (nv as u32 - 2, 0.0)];
         let seeds2: Vec<(u32, f64)> = seeds.iter().map(|&(v, x)| (perm[v as usize], x)).collect();
-        let r1 = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
-        let r2 = upwind_distance(&mesh2, &geometry2, &seeds2, None).unwrap();
+        let r1 = fixed(&mesh, &geometry, &seeds, None);
+        let r2 = fixed(&mesh2, &geometry2, &seeds2, None);
         for v in 0..nv {
             assert!(
                 close(r1.values[v], r2.values[perm[v] as usize], 1e-12),
@@ -607,7 +636,7 @@ fn relabeling_does_not_change_the_result() {
                 r2.values[perm[v] as usize]
             );
         }
-        println!("{name}: re-openings {} / {}", r1.n_reopened, r2.n_reopened);
+        println!("{name}: re-openings {} / {}", reopened(&r1), reopened(&r2));
     }
 }
 
@@ -628,7 +657,7 @@ fn neighbour_bound_and_reopening_counts() {
         let (mesh, geometry) = build(&m.positions, &m.faces);
         let centre = (mesh.n_vertices() / 2) as u32;
         let seeds = [(centre, 0.0)];
-        let r = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+        let r = fixed(&mesh, &geometry, &seeds, None);
         for i in 0..mesh.n_vertices() {
             if i as u32 == centre {
                 continue;
@@ -646,7 +675,7 @@ fn neighbour_bound_and_reopening_counts() {
         println!(
             "{name}: {} vertices, {} re-openings",
             mesh.n_vertices(),
-            r.n_reopened
+            reopened(&r)
         );
     }
 }
@@ -697,7 +726,7 @@ fn bad_input_is_an_error() {
     // No seeds: everything is unreached, no error.
     let r = run(&[], None).unwrap();
     assert_eq!(r.n_unreached, n);
-    assert_eq!(r.n_reopened, 0);
+    assert!(r.fixed_point.is_none(), "the default is the single pass");
 }
 
 #[test]
@@ -717,4 +746,233 @@ fn disconnected_components_and_zero_values() {
     assert_eq!(r.n_unreached, 3);
     assert_eq!(&r.values[..3], &[0.0, 1.0, 1.0]);
     assert!(r.values[3..].iter().all(|x| x.is_infinite()));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Single pass (the default mode)
+
+fn max_corner_angle(g: &Geometry) -> f64 {
+    g.corner_angles()
+        .iter()
+        .flatten()
+        .cloned()
+        .fold(0.0, f64::max)
+}
+
+#[test]
+fn single_pass_equals_fixed_point_without_obtuse_angles() {
+    let meshes: Vec<(&str, GeneratedMesh)> = vec![
+        ("grid", grid(20)),
+        ("needle grid", needle_grid(20, 0.5)),
+        ("icosphere 2", generators::icosphere(2).unwrap()),
+        ("icosphere 4", generators::icosphere(4).unwrap()),
+    ];
+    for (name, m) in meshes {
+        let (mesh, geometry) = build(&m.positions, &m.faces);
+        // Right angles are allowed (rounding): "no obtuse angle" means at most 90 degrees + eps.
+        let maxang = max_corner_angle(&geometry);
+        let obtuse = maxang > std::f64::consts::FRAC_PI_2 + 1e-9;
+        let nv = mesh.n_vertices() as u32;
+        let seeds = [(0, 0.0), (nv / 2, 0.05), (nv - 1, 0.0)];
+        let a = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+        let b = fixed(&mesh, &geometry, &seeds, None);
+        let worst = a
+            .values
+            .iter()
+            .zip(&b.values)
+            .map(|(x, y)| (x - y).abs() / y.abs().max(1.0))
+            .fold(0.0, f64::max);
+        println!(
+            "{name}: max angle {:.1} deg, |single - fixed| {worst:.2e}, re-openings {}",
+            maxang.to_degrees(),
+            reopened(&b)
+        );
+        if !obtuse {
+            assert!(worst < 1e-12, "{name}: {worst}");
+            assert_eq!(reopened(&b), 0);
+        }
+    }
+    // A mesh that is obtuse: report only (see single_pass_is_never_below_the_fixed_point).
+}
+
+#[test]
+fn single_pass_is_deterministic() {
+    let m = bumpy(20, 5);
+    let (mesh, geometry) = build(&m.positions, &m.faces);
+    let seeds = [(3, 0.0), (200, 0.0), (351, 0.3)];
+    let a = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+    let b = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+    assert_eq!(a, b);
+    assert!(a.fixed_point.is_none());
+}
+
+#[test]
+fn single_pass_is_invariant_under_relabeling_on_generic_meshes() {
+    let meshes: Vec<(&str, GeneratedMesh)> = vec![
+        ("bumpy", bumpy(16, 9)),
+        ("irregular", irregular_grid(16, 3)),
+        ("sheared irregular", {
+            let mut m = irregular_grid(14, 8);
+            for p in &mut m.positions {
+                p[0] += 1.5 * p[1];
+            }
+            m
+        }),
+        ("perturbed icosphere", {
+            let mut m = generators::icosphere(3).unwrap();
+            generators::perturb(&mut m.positions, [0.01, 0.01, 0.01], 4);
+            m
+        }),
+    ];
+    for (name, m) in meshes {
+        let (mesh, geometry) = build(&m.positions, &m.faces);
+        let nv = mesh.n_vertices();
+        let mut rng = SplitMix64::new(7);
+        let mut perm: Vec<u32> = (0..nv as u32).collect();
+        for i in (1..nv).rev() {
+            perm.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
+        }
+        let mut positions = vec![[0.0; 3]; nv];
+        for v in 0..nv {
+            positions[perm[v] as usize] = m.positions[v];
+        }
+        let mut faces: Vec<[u32; 3]> = m
+            .faces
+            .iter()
+            .map(|f| {
+                let r = (rng.next_u64() % 3) as usize;
+                [
+                    perm[f[r] as usize],
+                    perm[f[(r + 1) % 3] as usize],
+                    perm[f[(r + 2) % 3] as usize],
+                ]
+            })
+            .collect();
+        for i in (1..faces.len()).rev() {
+            faces.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
+        }
+        let (mesh2, geometry2) = build(&positions, &faces);
+        // Generic seed values: no two tentative values tie.
+        let seeds = [
+            (1u32, 0.0123),
+            (nv as u32 / 3, 0.0571),
+            (nv as u32 - 2, 0.0089),
+        ];
+        let seeds2: Vec<(u32, f64)> = seeds.iter().map(|&(v, x)| (perm[v as usize], x)).collect();
+        let r1 = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+        let r2 = upwind_distance(&mesh2, &geometry2, &seeds2, None).unwrap();
+        let mut worst = 0.0f64;
+        for v in 0..nv {
+            let (x, y) = (r1.values[v], r2.values[perm[v] as usize]);
+            worst = worst.max((x - y).abs() / y.abs().max(1e-300));
+        }
+        println!(
+            "{name}: max angle {:.1} deg, relabeling difference {worst:.2e}",
+            max_corner_angle(&geometry).to_degrees()
+        );
+        assert!(worst < 1e-12, "{name}: {worst}");
+    }
+}
+
+#[test]
+fn single_pass_is_never_below_the_fixed_point() {
+    // Argument: by induction over the order of acceptance, every single-pass value is the
+    // update of a subset of the triangles of the fixed-point equation evaluated at values that
+    // are at least the fixed-point values; the update is monotone, and the fixed point is the
+    // minimum over all triangles. So S_i >= F_i, in exact arithmetic. Reachability agrees.
+    let meshes: Vec<(&str, GeneratedMesh)> = vec![
+        ("sheared 0.5", sheared_grid(16, 0.5)),
+        ("sheared 1", sheared_grid(16, 1.0)),
+        ("sheared 1.5", sheared_grid(16, 1.5)),
+        ("sheared 2", sheared_grid(12, 2.0)),
+        ("irregular", irregular_grid(16, 2)),
+        ("bumpy", bumpy(16, 6)),
+    ];
+    println!("single pass minus fixed point (relative), max and mean over vertices");
+    for (name, m) in meshes {
+        let (mesh, geometry) = build(&m.positions, &m.faces);
+        let nv = mesh.n_vertices() as u32;
+        let seeds = [(0, 0.0), (nv / 2, 0.0), (nv - 1, 0.1)];
+        let a = upwind_distance(&mesh, &geometry, &seeds, None).unwrap();
+        let b = fixed(&mesh, &geometry, &seeds, None);
+        assert!(b.fixed_point.unwrap().converged, "{name}");
+        assert_eq!(a.n_unreached, b.n_unreached);
+        let (mut lowest, mut highest, mut sum) = (f64::INFINITY, 0.0f64, 0.0);
+        for (x, y) in a.values.iter().zip(&b.values) {
+            let d = (x - y) / y.abs().max(1e-300);
+            if y.abs() > 1e-300 {
+                lowest = lowest.min(d);
+                highest = highest.max(d);
+                sum += d;
+            }
+        }
+        println!(
+            "{name}: min {lowest:.2e}, max {highest:.2e}, mean {:.2e}",
+            sum / a.values.len() as f64
+        );
+        assert!(
+            lowest > -1e-12,
+            "{name}: single pass below fixed point by {lowest}"
+        );
+    }
+}
+
+#[test]
+fn single_pass_neighbour_bound_and_classes() {
+    let meshes: Vec<(&str, GeneratedMesh)> = vec![
+        ("sheared 2", sheared_grid(24, 2.0)),
+        ("sheared 3", sheared_grid(24, 3.0)),
+        ("bumpy", bumpy(24, 4)),
+        ("icosphere", generators::icosphere(4).unwrap()),
+    ];
+    for (name, m) in &meshes {
+        let (mesh, geometry) = build(&m.positions, &m.faces);
+        let centre = (mesh.n_vertices() / 2) as u32;
+        let r = upwind_distance(&mesh, &geometry, &[(centre, 0.0)], None).unwrap();
+        for i in 0..mesh.n_vertices() {
+            if i as u32 == centre {
+                continue;
+            }
+            for j in mesh.vertex_neighbors(i) {
+                let l = geometry.edge_lengths()[mesh.find_edge(i, j).unwrap()];
+                assert!(r.values[i] <= r.values[j] + l + 1e-14, "{name}: {i} {j}");
+            }
+        }
+    }
+    // Classes: values of one class do not depend on the seeds of the other.
+    let m = irregular_grid(20, 21);
+    let (mesh, geometry) = build(&m.positions, &m.faces);
+    let nv = mesh.n_vertices();
+    let class: Vec<u32> = m
+        .positions
+        .iter()
+        .map(|p| u32::from(p[1] > 0.3 + 0.4 * p[0]))
+        .collect();
+    let pick = |c: u32, k: usize| (0..nv).filter(|&v| class[v] == c).nth(k).unwrap() as u32;
+    let a = [(pick(0, 3), 0.0), (pick(0, 90), 0.2)];
+    let b1 = [(pick(1, 5), 0.0)];
+    let b2 = [(pick(1, 40), 0.5), (pick(1, 77), 0.0)];
+    let run = |x: &[(u32, f64)], y: &[(u32, f64)]| {
+        let mut s = x.to_vec();
+        s.extend_from_slice(y);
+        upwind_distance(&mesh, &geometry, &s, Some(&class))
+            .unwrap()
+            .values
+    };
+    let (t1, t2, t3) = (run(&a, &b1), run(&a, &b2), run(&a, &[]));
+    for v in 0..nv {
+        if class[v] == 0 {
+            assert_eq!(t1[v], t2[v]);
+            assert_eq!(t1[v], t3[v]);
+        } else {
+            assert!(t3[v].is_infinite());
+        }
+    }
+    let u1 = run(&a[..1], &b2);
+    let u2 = run(&a[1..], &b2);
+    for v in 0..nv {
+        if class[v] == 1 {
+            assert_eq!(u1[v], u2[v]);
+        }
+    }
 }

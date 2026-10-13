@@ -1,9 +1,9 @@
 //! Upwind (Hopf–Lax) distance on a triangle mesh: a first-order solver for the eikonal equation
 //! `|∇T| = 1` with prescribed values at seed vertices, computed from the edge lengths alone.
 //!
-//! The value `T_i` of a non-seed vertex is the minimum, over the triangles `(i, j, k)` at `i`,
-//! of the cheapest way to reach `i` from the opposite edge `jk`, where the value on the edge is
-//! the linear interpolant of `T_j` and `T_k`:
+//! The scheme defines the value `T_i` of a non-seed vertex as the minimum, over the triangles
+//! `(i, j, k)` at `i`, of the cheapest way to reach `i` from the opposite edge `jk`, where the
+//! value on the edge is the linear interpolant of `T_j` and `T_k`:
 //!
 //! ```text
 //! T_i = min over triangles (i, j, k) of  min_{λ ∈ [0,1]}  λ T_j + (1−λ) T_k + d_i(λ)
@@ -12,21 +12,42 @@
 //! with `d_i(λ)` the distance inside the flat triangle from `i` to the point
 //! `λ x_j + (1−λ) x_k` (see [`triangle_update`] for the closed form of the inner minimum). If
 //! only one of `j`, `k` is *usable*, the edge term `T_j + ℓ_ij` is taken instead. A neighbour is
-//! usable when its value is finite and, if a per-vertex class array is given, its class is the
-//! class of `i`: the fronts of different classes never see each other. This is the discrete
-//! Hopf–Lax formula of the local variational principle of Bornemann and Rasch; on acute
-//! triangles it is the update of the fast marching method of Kimmel and Sethian (which unfolds
-//! obtuse triangles instead of re-opening vertices).
+//! usable when its value is finite (or, in the single pass, when it is accepted) and, if a
+//! per-vertex class array is given, its class is the class of `i`: the fronts of different
+//! classes never see each other. This is the discrete Hopf–Lax formula of the local variational
+//! principle of Bornemann and Rasch; Kimmel and Sethian use the same update inside fast
+//! marching (and unfold obtuse triangles, which is not done here).
 //!
-//! # Cost on obtuse triangles
+//! # Two modes ([`DistanceMode`])
+//!
+//! * **Single pass (the default).** Fast marching: seeds are accepted at the start; the vertex
+//!   with the smallest tentative value (ties: lower vertex index) is accepted next and is final;
+//!   a tentative value is the minimum of the update over triangles whose other two vertices are
+//!   both accepted, and of the edge terms over accepted neighbours. `O(n log n)` whatever the
+//!   angles, deterministic, and independent of the vertex labeling when there are no ties.
+//! * **Fixed point.** Iterates `T_i = min over all incident triangles` to its fixed point with
+//!   a Dijkstra-ordered pass that re-opens a vertex whenever its value can still strictly
+//!   decrease. Independent of the processing order, always at most the single-pass value, but
+//!   expensive on obtuse triangles (below).
+//!
+//! The two agree (to rounding) on meshes without obtuse angles, where a vertex never needs a
+//! neighbour with a larger value. On obtuse triangles the single pass is larger: on sheared
+//! unit grids with three seeds, by a mean of 0.2% (largest angle 117°), 2% (135°), 4% (146°)
+//! and 6% (153°) of the value, with maxima 2%, 11%, 19% and 25% (`tests/distance.rs`). It is
+//! never below the fixed point (by induction over the order of acceptance: each accepted value
+//! is the update of some triangles at values at least the fixed-point values, and the update
+//! is monotone).
+//!
+//! # Cost of the fixed-point mode on obtuse triangles
 //!
 //! On a mesh of non-obtuse triangles the Dijkstra order settles every vertex once. With obtuse
 //! triangles the scheme is a stochastic-shortest-path iteration (each update is a convex
 //! combination of two neighbour values plus a positive length), and the relaxation after a
 //! re-opening converges geometrically, with a rate that tends to 1 as the obtuse angle tends
 //! to π. Measured on sheared grids: about 0.1 to 0.3 re-openings per vertex at a largest angle
-//! of 117°, 1 to 3 at 135°, 100 to 400 at 153°, and thousands at 162°. [`DistanceOptions`]
-//! bounds the work and [`DistanceResult::converged`] reports whether the bound was hit.
+//! of 117°, 1 to 3 at 135°, 100 to 400 at 153°, and thousands at 162°.
+//! [`DistanceMode::FixedPoint`] bounds the work and [`FixedPointReport::converged`] reports
+//! whether the bound was hit.
 //!
 //! With the first-order scheme the error against the exact distance on a smooth surface is
 //! `O(h)` (a front that crosses an edge sees the linear interpolant of the values at its ends).
@@ -37,7 +58,7 @@
 //!   National Academy of Sciences 95(15), 8431–8435, 1998, <https://doi.org/10.1073/pnas.95.15.8431>.
 //! * F. Bornemann, C. Rasch, *Finite-element discretization of static Hamilton–Jacobi equations
 //!   based on a local variational principle*, Computing and Visualization in Science 9(2),
-//!   57–69, 2006, <https://doi.org/10.1007/s00791-006-0016-y>.
+//!   57–69, 2006 (they solve the system by an adaptive Gauss–Seidel iteration), <https://doi.org/10.1007/s00791-006-0016-y>.
 //!
 //! # Example
 //!
@@ -161,14 +182,22 @@ pub struct DistanceResult {
     pub values: Vec<f64>,
     /// Number of vertices whose value is infinite.
     pub n_unreached: usize,
+    /// Statistics of the iteration; `Some` only in [`DistanceMode::FixedPoint`], `None` for the
+    /// single pass (which has nothing to converge and never re-opens).
+    pub fixed_point: Option<FixedPointReport>,
+}
+
+/// What the fixed-point iteration did; see [`DistanceMode::FixedPoint`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixedPointReport {
     /// How many times a vertex that had already been settled received a strictly smaller value
     /// and was put back on the heap. Zero on meshes where the Dijkstra order is already
-    /// consistent (acute triangles); positive when obtuse triangles let a later, larger value
+    /// consistent (no obtuse angles); positive when obtuse triangles let a later, larger value
     /// improve an earlier one.
     pub n_reopened: usize,
-    /// Whether the heap ran empty. `false` means [`DistanceOptions::max_reopenings`] was reached;
-    /// the values are then still valid upper bounds of the fixed point (every value is the
-    /// update of one triangle at some earlier state), but not the fixed point.
+    /// Whether the heap ran empty. `false` means `max_reopenings` was reached; the values are
+    /// then still upper bounds of the fixed point (every value is the update of one triangle at
+    /// some earlier state), but not the fixed point.
     pub converged: bool,
 }
 
@@ -246,28 +275,45 @@ fn update_core(tj: f64, tk: f64, [a, b, c]: [f64; 3], [cot_j, cot_k]: [f64; 2], 
     (tj + h * (g * cot_j + q)).min(ends)
 }
 
-/// Knobs of [`upwind_distance_with`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DistanceOptions {
-    /// A settled vertex is re-opened only if its value would drop by more than this fraction
-    /// of itself. `0.0` (the default) re-opens for every strict decrease; a small positive value
-    /// (say `1e-14`) stops the solver from chasing differences in the last bits between
-    /// triangles that agree mathematically. Must be finite and in `[0, 1)`; otherwise the
-    /// value `0.0` is used.
-    pub reopen_tolerance: f64,
-    /// Stop after this many re-openings (see [`DistanceResult::converged`]). Strongly obtuse
-    /// triangles can make the relaxation converge extremely slowly (see the module notes), and
-    /// this bounds the work.
-    pub max_reopenings: usize,
+/// Which scheme [`upwind_distance_with`] solves.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DistanceMode {
+    /// Fast marching with the Hopf–Lax update, one pass (the default). Exactly:
+    ///
+    /// * all seeds are accepted from the start and never change;
+    /// * the tentative value of a non-seed vertex `i` is the minimum of [`triangle_update`]
+    ///   over the incident triangles `(i, j, k)` whose other two vertices are both accepted and
+    ///   of `i`'s class, and of `T_j + ℓ_ij` over the accepted neighbours `j` of `i`'s class;
+    /// * repeatedly the not yet accepted vertex with the smallest tentative value is accepted,
+    ///   ties going to the lower vertex index; an accepted value is final.
+    ///
+    /// Cost: `O(n log n)`, no re-openings, whatever the angles. On a mesh without obtuse angles
+    /// it equals [`DistanceMode::FixedPoint`]; on obtuse triangles it can be larger (it never
+    /// uses a neighbour with a larger value than the vertex being accepted).
+    #[default]
+    SinglePass,
+    /// Iterate the scheme `T_i = min over all incident triangles` to its fixed point: a
+    /// Dijkstra-ordered pass that re-opens a vertex whenever its value can still strictly
+    /// decrease. Order independent, but on obtuse triangles the number of re-openings grows
+    /// without bound as the angle tends to π (see the module documentation).
+    FixedPoint {
+        /// Stop after this many re-openings (see [`FixedPointReport::converged`]).
+        max_reopenings: usize,
+        /// A settled vertex is re-opened only if its value would drop by more than this
+        /// fraction of itself. `0.0` re-opens for every strict decrease; a small positive value
+        /// (say `1e-14`) stops the solver from chasing differences in the last bits between
+        /// triangles that agree mathematically. Must be finite and in `[0, 1)`; otherwise
+        /// `0.0` is used.
+        reopen_tolerance: f64,
+    },
 }
 
-impl DistanceOptions {
-    /// The options of [`upwind_distance`] on a mesh with `n_vertices` vertices: strict
-    /// decrease, at most `1000 n + 10 000` re-openings.
-    pub fn for_vertices(n_vertices: usize) -> Self {
-        DistanceOptions {
-            reopen_tolerance: 0.0,
+impl DistanceMode {
+    /// The fixed-point mode with the budget `1000 n + 10 000` re-openings and strict decrease.
+    pub fn fixed_point(n_vertices: usize) -> Self {
+        DistanceMode::FixedPoint {
             max_reopenings: n_vertices.saturating_mul(1000).saturating_add(10_000),
+            reopen_tolerance: 0.0,
         }
     }
 }
@@ -275,28 +321,11 @@ impl DistanceOptions {
 /// Heap key: values are non-negative finite, so the bit pattern orders like the number.
 type Entry = Reverse<(u64, u32)>;
 
-/// Solves the upwind scheme of the module documentation.
+/// Solves the upwind scheme of the module documentation with [`DistanceMode::SinglePass`].
 ///
 /// `seeds` lists `(vertex, value)` pairs: seed values are kept as they are (they may differ, as
 /// when a front starts from a curve with known distances). `class`, if given, has one entry per
 /// vertex; a vertex only ever takes information from neighbours of its own class.
-///
-/// The solver is Dijkstra-ordered: a binary heap releases the vertex with the smallest value,
-/// and the two other vertices of each incident triangle are updated from it with
-/// [`triangle_update`] (or `T_j + ℓ_ij` if the third vertex is not usable). A vertex whose value
-/// can still strictly decrease is *re-opened* — it goes back on the heap, whether or not it had
-/// been released before. This matters on obtuse triangles, where a vertex can be improved by a
-/// neighbour with a larger value. The loop ends when the heap is empty.
-///
-/// **Order independence.** On termination every non-seed value is the minimum of the updates of
-/// its triangles evaluated with the final values, so the result is the fixed point of the scheme
-/// reached from above (it is unique: every update exceeds the smallest value it uses by a
-/// positive amount, so a fixed point has no cycles), and relabelling the vertices
-/// changes nothing but the order of processing. Proof sketch: a value is only ever set to the
-/// update of one triangle evaluated with values that are at least the current ones, and the
-/// update is nondecreasing in them, so a value is never below the update with the current
-/// values; conversely whenever a value `T_j` decreases, every triangle at `j` is re-evaluated,
-/// so on termination no update is below the value it feeds.
 ///
 /// # Errors
 /// [`DistanceError`] for a geometry of another mesh, a seed out of range, duplicated, negative
@@ -307,16 +336,24 @@ pub fn upwind_distance(
     seeds: &[(u32, f64)],
     class: Option<&[u32]>,
 ) -> Result<DistanceResult, DistanceError> {
-    upwind_distance_with(
-        mesh,
-        geometry,
-        seeds,
-        class,
-        &DistanceOptions::for_vertices(mesh.n_vertices()),
-    )
+    upwind_distance_with(mesh, geometry, seeds, class, &DistanceMode::SinglePass)
 }
 
-/// [`upwind_distance`] with explicit [`DistanceOptions`].
+/// [`upwind_distance`] with an explicit [`DistanceMode`].
+///
+/// **Fixed-point mode.** A binary heap releases the vertex with the smallest value, and the two
+/// other vertices of each incident triangle are updated from it with [`triangle_update`] (or
+/// `T_j + ℓ_ij` if the third vertex is not usable, i.e. infinite or of another class). A vertex
+/// whose value can still strictly decrease is *re-opened*: it goes back on the heap. On
+/// termination every non-seed value is the minimum of the updates of its triangles evaluated
+/// with the final values, so the result is the fixed point of the scheme reached from above
+/// (it is unique: every update exceeds the smallest value it uses by a positive amount, so a
+/// fixed point has no cycles) and relabelling the vertices changes nothing but the order of
+/// processing. Proof sketch: a value is only ever set to the update of one triangle evaluated
+/// with values that are at least the current ones, and the update is nondecreasing in them, so
+/// a value is never below the update with the current values; conversely whenever a value
+/// `T_j` decreases, every triangle at `j` is re-evaluated, so on termination no update is
+/// below the value it feeds.
 ///
 /// # Errors
 /// As [`upwind_distance`].
@@ -325,15 +362,9 @@ pub fn upwind_distance_with(
     geometry: &Geometry,
     seeds: &[(u32, f64)],
     class: Option<&[u32]>,
-    options: &DistanceOptions,
+    mode: &DistanceMode,
 ) -> Result<DistanceResult, DistanceError> {
     geometry.check_mesh(mesh)?;
-    let tolerance =
-        if options.reopen_tolerance.is_finite() && (0.0..1.0).contains(&options.reopen_tolerance) {
-            options.reopen_tolerance
-        } else {
-            0.0
-        };
     let n = mesh.n_vertices();
     if let Some(class) = class
         && class.len() != n
@@ -377,86 +408,152 @@ pub fn upwind_distance_with(
         .map(|f| [0, 1, 2].map(|m| geometry.edge_lengths()[mesh.edge(3 * f + m)]))
         .collect();
 
+    let same_class = |a: u32, b: u32| class.is_none_or(|c| c[a as usize] == c[b as usize]);
+    // The value offered to corner `ci` of face `f` by the accepted vertex `v` (corner `m`):
+    // the triangle update if the third vertex is usable, the edge term from `v` otherwise.
+    let offer = |values: &[f64], f: usize, ci: usize, m: usize, v: u32, other_usable: bool| {
+        // Corner i has j at ci + 1 and k at ci + 2; one of them is v.
+        let (cj, ck) = ((ci + 1) % 3, (ci + 2) % 3);
+        let l = &sides[f];
+        let (a, b, c) = (l[ci], l[ck], l[cj]); // ij, ik, jk
+        if other_usable {
+            update_core(
+                values[faces[f][cj] as usize],
+                values[faces[f][ck] as usize],
+                [a, b, c],
+                [cotans[f][cj], cotans[f][ck]],
+                2.0 * areas[f] / c,
+            )
+        } else if cj == m {
+            values[v as usize] + a
+        } else {
+            values[v as usize] + b
+        }
+    };
+
     let mut values = vec![f64::INFINITY; n];
-    let mut settled = vec![false; n];
     let mut heap: BinaryHeap<Entry> = BinaryHeap::with_capacity(seeds.len().max(16));
     for &(vertex, value) in seeds {
         values[vertex as usize] = value;
-        heap.push(Reverse((value.to_bits(), vertex)));
     }
-    let same_class = |a: u32, b: u32| class.is_none_or(|c| c[a as usize] == c[b as usize]);
-    let mut n_reopened = 0usize;
-    let mut converged = true;
 
-    // Termination: every push is caused by a strict decrease of one value, and a value only
-    // takes values from a finite set (the update of a triangle is a deterministic function of
-    // the two other values and the lengths; the values are doubles in [0, max seed + diameter]),
-    // so the number of pushes is finite. In exact arithmetic the decreases stop long before
-    // that: a vertex can only be improved through a strictly shorter polygonal path, and the
-    // paths that matter (through mesh edges and across triangles) form a finite family.
-    while let Some(Reverse((bits, v))) = heap.pop() {
-        if values[v as usize].to_bits() != bits {
-            continue; // stale entry: the vertex received a smaller value afterwards
-        }
-        if n_reopened >= options.max_reopenings {
-            converged = false;
-            break;
-        }
-        settled[v as usize] = true;
-        for h in mesh.outgoing_halfedges(v as usize) {
-            let (f, m) = (h / 3, h % 3);
-            // Update the two other corners of the face from v (corner m).
-            for ci in [(m + 1) % 3, (m + 2) % 3] {
-                let i = faces[f][ci];
-                if first_seed[i as usize] != usize::MAX || !same_class(i, v) {
-                    continue;
-                }
-                // Corner i has j at ci + 1 and k at ci + 2; one of them is v.
-                let (cj, ck) = ((ci + 1) % 3, (ci + 2) % 3);
-                let (j, k) = (faces[f][cj], faces[f][ck]);
-                let other = if cj == m { k } else { j };
-                let other_usable = values[other as usize].is_finite() && same_class(i, other);
-                let l = &sides[f];
-                let (a, b, c) = (l[ci], l[ck], l[cj]); // ij, ik, jk
-                let candidate = if other_usable {
-                    update_core(
-                        values[j as usize],
-                        values[k as usize],
-                        [a, b, c],
-                        [cotans[f][cj], cotans[f][ck]],
-                        2.0 * areas[f] / c,
-                    )
-                } else if cj == m {
-                    values[v as usize] + a
-                } else {
-                    values[v as usize] + b
-                };
-                let current = values[i as usize];
-                // A settled vertex is re-opened only for a decrease beyond rounding noise: two
-                // triangles that give the same value mathematically differ in the last bits, and
-                // chasing those differences around the front would cost many passes for nothing.
-                let improves = if settled[i as usize] {
-                    candidate < current * (1.0 - tolerance)
-                } else {
-                    candidate < current
-                };
-                if improves {
-                    values[i as usize] = candidate;
-                    if settled[i as usize] {
-                        settled[i as usize] = false;
-                        n_reopened += 1;
+    let report = match *mode {
+        DistanceMode::SinglePass => {
+            let mut accepted = vec![false; n];
+            for &(vertex, _) in seeds {
+                accepted[vertex as usize] = true;
+            }
+            // Offers `v` (just accepted) makes to the other corners of its faces.
+            let relax =
+                |v: u32, values: &mut Vec<f64>, accepted: &[bool], heap: &mut BinaryHeap<Entry>| {
+                    for h in mesh.outgoing_halfedges(v as usize) {
+                        let (f, m) = (h / 3, h % 3);
+                        for ci in [(m + 1) % 3, (m + 2) % 3] {
+                            let i = faces[f][ci];
+                            if accepted[i as usize] || !same_class(i, v) {
+                                continue;
+                            }
+                            let other = faces[f][if (ci + 1) % 3 == m {
+                                (ci + 2) % 3
+                            } else {
+                                (ci + 1) % 3
+                            }];
+                            let usable = accepted[other as usize] && same_class(i, other);
+                            let candidate = offer(values, f, ci, m, v, usable);
+                            if candidate < values[i as usize] {
+                                values[i as usize] = candidate;
+                                heap.push(Reverse((candidate.to_bits(), i)));
+                            }
+                        }
                     }
-                    heap.push(Reverse((candidate.to_bits(), i)));
+                };
+            for &(vertex, _) in seeds {
+                relax(vertex, &mut values, &accepted, &mut heap);
+            }
+            while let Some(Reverse((bits, v))) = heap.pop() {
+                if accepted[v as usize] || values[v as usize].to_bits() != bits {
+                    continue; // stale entry
+                }
+                accepted[v as usize] = true;
+                relax(v, &mut values, &accepted, &mut heap);
+            }
+            None
+        }
+        DistanceMode::FixedPoint {
+            max_reopenings,
+            reopen_tolerance,
+        } => {
+            let tolerance =
+                if reopen_tolerance.is_finite() && (0.0..1.0).contains(&reopen_tolerance) {
+                    reopen_tolerance
+                } else {
+                    0.0
+                };
+            let mut settled = vec![false; n];
+            for &(vertex, value) in seeds {
+                heap.push(Reverse((value.to_bits(), vertex)));
+            }
+            let mut n_reopened = 0usize;
+            let mut converged = true;
+
+            // Termination: every push is caused by a strict decrease of one value, and a value
+            // only takes values from a finite set (the update of a triangle is a deterministic
+            // function of the two other values and the lengths; the values are doubles in
+            // [0, max seed + diameter]), so the number of pushes is finite. In exact arithmetic
+            // the decreases stop long before that: a vertex can only be improved through a
+            // strictly shorter polygonal path, and the paths that matter (through mesh edges
+            // and across triangles) form a finite family. The budget bounds the work anyway.
+            while let Some(Reverse((bits, v))) = heap.pop() {
+                if values[v as usize].to_bits() != bits {
+                    continue; // stale entry: the vertex received a smaller value afterwards
+                }
+                if n_reopened >= max_reopenings {
+                    converged = false;
+                    break;
+                }
+                settled[v as usize] = true;
+                for h in mesh.outgoing_halfedges(v as usize) {
+                    let (f, m) = (h / 3, h % 3);
+                    // Update the two other corners of the face from v (corner m).
+                    for ci in [(m + 1) % 3, (m + 2) % 3] {
+                        let i = faces[f][ci];
+                        if first_seed[i as usize] != usize::MAX || !same_class(i, v) {
+                            continue;
+                        }
+                        let (cj, ck) = ((ci + 1) % 3, (ci + 2) % 3);
+                        let other = faces[f][if cj == m { ck } else { cj }];
+                        let usable = values[other as usize].is_finite() && same_class(i, other);
+                        let candidate = offer(&values, f, ci, m, v, usable);
+                        let current = values[i as usize];
+                        // A settled vertex is re-opened only for a decrease beyond rounding
+                        // noise (see `reopen_tolerance`).
+                        let improves = if settled[i as usize] {
+                            candidate < current * (1.0 - tolerance)
+                        } else {
+                            candidate < current
+                        };
+                        if improves {
+                            values[i as usize] = candidate;
+                            if settled[i as usize] {
+                                settled[i as usize] = false;
+                                n_reopened += 1;
+                            }
+                            heap.push(Reverse((candidate.to_bits(), i)));
+                        }
+                    }
                 }
             }
+            Some(FixedPointReport {
+                n_reopened,
+                converged,
+            })
         }
-    }
+    };
     let n_unreached = values.iter().filter(|x| x.is_infinite()).count();
     Ok(DistanceResult {
         values,
         n_unreached,
-        n_reopened,
-        converged,
+        fixed_point: report,
     })
 }
 
