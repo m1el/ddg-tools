@@ -7,9 +7,13 @@ import DdgProofs.Cuts.Recovery
 computed on the cut, the rate is carried to the vertices by weighted means, and it is scaled by
 the mean of `|∇φ|` over the piece of the cut.
 
-The definitions of this file (`wmean`, `localExtension`, `gradNorm`, `meanGradient`,
-`rippleFactor`) are **this package's own**; the two linear systems are `Cuts.fluxMatrix`, built
-from the oracle's `fluxDiagEntry`, `fluxOffEntry`, `fluxRhs` (`DdgProofs/Cuts/Recovery.lean`).
+The index-set definitions of this file (`wmean`, `localExtension`, `meanGradient`,
+`rippleFactor`, `rippleRate`) are **this package's own**; the two linear systems are
+`Cuts.fluxMatrix`, built from the oracle's `fluxDiagEntry`, `fluxOffEntry`, `fluxRhs`
+(`DdgProofs/Cuts/Recovery.lean`). The last sections restate the results about the oracle's
+scalar definitions `gradientNormLone`, `meanGradient`, `weightedMean`, `ringMean`,
+`rateCoupling`, `rateRhs`, `segmentMeanWeight`, `turningAngle`, `lengthForce`, `angleFromCot`,
+`footFraction`, `heightOver`, `normalDerivativeOfLinear`, `adaptiveStep`.
 
 * **`cut-length-step-on-cut`** — the two systems of SPEC §3.10,
   `ℓ_p λ⁰_p + Σ κ_σ (λ⁰_p − λ⁰_q) = Θ_p` and
@@ -671,6 +675,304 @@ theorem inner_add_inner_eq_norm_sq (a p q : E) :
   abel
 
 end Foot
+
+/-! ## The oracle's definitions
+
+`lean/oracle/DdgOracle/Formulas/Cuts.lean` (revision "default stages") defines the scalar
+pieces of these stages. The theorems above are restated about them here. -/
+
+/-- The oracle's `gradientNormLone` is `gradNorm`. -/
+theorem gradientNormLone_eq (φa len area : ℝ) :
+    Ddg.gradientNormLone φa len area = gradNorm φa len area := by
+  simp only [Ddg.gradientNormLone, gradNorm, Oracle.abs_eq, Oracle.two_eq]
+
+/-- **`|∇φ|` in a crossed face, on the oracle's definition**: for the gradient
+`g = α e₁ + β e₂` of an affine function with the value `φ_a` at `a` that vanishes at
+`p = a + e₁` and `q = a + e₂`, `‖g‖ = gradientNormLone φ_a |pq| area(a, p, q)`.
+
+[formula: cut-gradient-norm] -/
+theorem norm_grad_eq_gradientNormLone {E : Type*} [NormedAddCommGroup E]
+    [InnerProductSpace ℝ E] (e₁ e₂ : E) (α β φa : ℝ) (h : IsTriangle ‖e₂ - e₁‖ ‖e₂‖ ‖e₁‖)
+    (h1 : inner ℝ (α • e₁ + β • e₂) e₁ = -φa) (h2 : inner ℝ (α • e₁ + β • e₂) e₂ = -φa) :
+    ‖α • e₁ + β • e₂‖ = Ddg.gradientNormLone φa ‖e₂ - e₁‖ (triArea ‖e₂ - e₁‖ ‖e₂‖ ‖e₁‖) := by
+  rw [gradientNormLone_eq]
+  exact norm_grad_eq_gradNorm e₁ e₂ α β φa h h1 h2
+
+/-- The oracle's `meanGradient` of the two sums is `meanGradient`. -/
+theorem oracle_meanGradient_eq {ι : Type*} (s : Finset ι) (L g : ι → ℝ) :
+    Ddg.meanGradient (∑ σ ∈ s, L σ) (∑ σ ∈ s, L σ / g σ) = meanGradient s L g := rfl
+
+/-- **The oracle's `ḡ` lies between the smallest and the largest `|∇φ|` of the piece.**
+
+[formula: cut-gradient-norm] -/
+theorem oracle_meanGradient_mem {ι : Type*} {s : Finset ι} {L g : ι → ℝ}
+    (hL : ∀ σ ∈ s, 0 ≤ L σ) (hpos : 0 < ∑ σ ∈ s, L σ) {lo hi : ℝ} (hlo0 : 0 < lo)
+    (hlo : ∀ σ ∈ s, lo ≤ g σ) (hhi : ∀ σ ∈ s, g σ ≤ hi) :
+    lo ≤ Ddg.meanGradient (∑ σ ∈ s, L σ) (∑ σ ∈ s, L σ / g σ) ∧
+      Ddg.meanGradient (∑ σ ∈ s, L σ) (∑ σ ∈ s, L σ / g σ) ≤ hi := by
+  rw [oracle_meanGradient_eq]
+  exact meanGradient_mem hL hpos hlo0 hlo hhi
+
+/-- **The oracle's `weightedMean` of two lists is the weighted mean** over the (distinct) indices
+the lists are built from. -/
+theorem oracle_weightedMean_eq {ι : Type*} [DecidableEq ι] {l : List ι} (hl : l.Nodup)
+    (c x : ι → ℝ) : Ddg.weightedMean (l.map c) (l.map x) = wmean l.toFinset c x := by
+  have h1 : ∀ l : List ι,
+      Ddg.sumList (((l.map c).zip (l.map x)).map fun y => y.1 * y.2) =
+        (l.map fun j => c j * x j).sum := by
+    intro l
+    induction l with
+    | nil => simp [Ddg.sumList]
+    | cons a t ih => simp [Ddg.sumList, ih]
+  unfold Ddg.weightedMean wmean
+  rw [h1, sumList_eq_sum, ← List.sum_toFinset (fun j => c j * x j) hl,
+    ← List.sum_toFinset c hl]
+
+/-- **The first line of the local extension, on the oracle's definition**: `weightedMean` of
+the weights `ℓ_p β_ip ≥ 0` and the rates `r_p` over the cut points at `i` lies between the
+smallest and the largest of these rates.
+
+[formula: cut-extension-local] -/
+theorem oracle_weightedMean_mem {ι : Type*} [DecidableEq ι] {l : List ι} (hl : l.Nodup)
+    {c x : ι → ℝ} (hc : ∀ j ∈ l, 0 ≤ c j) (hpos : 0 < ∑ j ∈ l.toFinset, c j) {lo hi : ℝ}
+    (hlo : ∀ j ∈ l, lo ≤ x j) (hhi : ∀ j ∈ l, x j ≤ hi) :
+    lo ≤ Ddg.weightedMean (l.map c) (l.map x) ∧ Ddg.weightedMean (l.map c) (l.map x) ≤ hi := by
+  rw [oracle_weightedMean_eq hl]
+  exact wmean_mem (fun j hj => hc j (List.mem_toFinset.mp hj)) hpos
+    (fun j hj _ => hlo j (List.mem_toFinset.mp hj)) (fun j hj _ => hhi j (List.mem_toFinset.mp hj))
+
+/-- **The second line of the local extension, on the oracle's definition**: `ringMean` of the
+pairs `(σ_j, ℓ_ij)` of the neighbours one ring closer (positive edge lengths, at least one
+neighbour) lies between the smallest and the largest `σ_j`.
+
+[formula: cut-extension-local] -/
+theorem oracle_ringMean_mem {ι : Type*} [DecidableEq ι] {l : List ι} (hl : l.Nodup)
+    (hne : l ≠ []) {σ len : ι → ℝ} (hlen : ∀ j ∈ l, 0 < len j) {lo hi : ℝ}
+    (hlo : ∀ j ∈ l, lo ≤ σ j) (hhi : ∀ j ∈ l, σ j ≤ hi) :
+    lo ≤ Ddg.ringMean (l.map fun j => (σ j, len j)) ∧
+      Ddg.ringMean (l.map fun j => (σ j, len j)) ≤ hi := by
+  have e : Ddg.ringMean (l.map fun j => (σ j, len j)) =
+      (∑ j ∈ l.toFinset, σ j / len j) / ∑ j ∈ l.toFinset, 1 / len j := by
+    unfold Ddg.ringMean
+    simp only [List.map_map, sumList_eq_sum, Oracle.one_eq, Function.comp_def]
+    rw [← List.sum_toFinset (fun j => σ j / len j) hl, ← List.sum_toFinset (fun j => 1 / len j) hl]
+  rw [e]
+  have hN : l.toFinset.Nonempty := by
+    obtain ⟨a, ha⟩ := List.exists_mem_of_ne_nil l hne
+    exact ⟨a, List.mem_toFinset.mpr ha⟩
+  exact outwardExtension_mem hN (fun j hj => hlen j (List.mem_toFinset.mp hj))
+    (fun j hj => hlo j (List.mem_toFinset.mp hj)) (fun j hj => hhi j (List.mem_toFinset.mp hj))
+
+/-- The oracle's `rateCoupling`, `rateRhs`, `segmentMeanWeight` at `ℝ`. -/
+theorem rateCoupling_eq (τ wbar len : ℝ) : Ddg.rateCoupling τ wbar len = τ * (wbar / len) := by
+  unfold Ddg.rateCoupling
+  ring
+
+theorem rateRhs_eq (ℓ s lam : ℝ) : Ddg.rateRhs ℓ s lam = ℓ * (s + lam) := rfl
+
+theorem segmentMeanWeight_eq (wp wq : ℝ) : Ddg.segmentMeanWeight wp wq = (wp + wq) / 2 := by
+  simp only [Ddg.segmentMeanWeight, Oracle.two_eq]
+
+theorem segmentMeanWeight_nonneg {wp wq : ℝ} (hp : 0 ≤ wp) (hq : 0 ≤ wq) :
+    0 ≤ Ddg.segmentMeanWeight wp wq := by
+  rw [segmentMeanWeight_eq]
+  positivity
+
+/-- **The rate system on the oracle's entries** (SPEC §3.10): couplings
+`rateCoupling τ w̄_σ |σ| = τ w̄_σ/|σ|` (symmetric, `w̄ ≥ 0`, `|σ| ≥ 0`, `τ ≥ 0`), right-hand side
+`rateRhs ℓ_p s_p λ⁰_p = ℓ_p (s_p + λ⁰_p)`, positive `ℓ`. Its solution `r` satisfies
+`Σ ℓ r = Σ ℓ (s + λ⁰)`, lies between every lower and upper bound of `s + λ⁰`, and vanishes if
+`s + λ⁰ = 0`, whatever `τ`.
+
+[formula: cut-length-step-on-cut] -/
+theorem onCut_rate_oracle {C : Type*} [Fintype C] [DecidableEq C] {ℓ s lam r : C → ℝ}
+    {wbar len : C → C → ℝ} {τ : ℝ} (hℓ : ∀ p, 0 < ℓ p) (hw : ∀ p q, wbar p q = wbar q p)
+    (hw0 : ∀ p q, 0 ≤ wbar p q) (hlen : ∀ p q, len p q = len q p) (hlen0 : ∀ p q, 0 ≤ len p q)
+    (hτ : 0 ≤ τ)
+    (h : fluxMatrix ℓ (fun p q => Ddg.rateCoupling τ (wbar p q) (len p q)) *ᵥ r =
+      fun p => Ddg.rateRhs (ℓ p) (s p) (lam p)) :
+    (∑ p, ℓ p * r p = ∑ p, ℓ p * (s p + lam p)) ∧
+      (∀ lo hi : ℝ, (∀ p, lo ≤ s p + lam p) → (∀ p, s p + lam p ≤ hi) →
+        ∀ p, lo ≤ r p ∧ r p ≤ hi) ∧
+      ((∀ p, s p + lam p = 0) → ∀ p, r p = 0) := by
+  have h' : fluxMatrix ℓ (fun p q => τ * (wbar p q / len p q)) *ᵥ r =
+      fun p => Ddg.fluxRhs (ℓ p * (s p + lam p)) := by
+    simpa only [rateCoupling_eq, rateRhs_eq, fluxRhs_eq] using h
+  have hm : ∀ p q, wbar p q / len p q = wbar q p / len q p := fun p q => by
+    rw [hw p q, hlen p q]
+  have hm0 : ∀ p q, 0 ≤ wbar p q / len p q := fun p q => div_nonneg (hw0 p q) (hlen0 p q)
+  exact ⟨onCut_rate_sum hm h', fun lo hi hlo hhi p => onCut_rate_bounds hℓ hm0 hτ h' hlo hhi p,
+    fun h0 p => onCut_rest hℓ hm0 hτ h' h0 p⟩
+
+/-- The oracle's `turningAngle` and `lengthForce` at `ℝ`. -/
+theorem turningAngle_eq (γ β : ℝ) : Ddg.turningAngle γ β = γ - β := rfl
+
+theorem lengthForce_eq (w γ β : ℝ) (segs : List (ℝ × ℝ)) :
+    Ddg.lengthForce w γ β segs = w * (γ - β) + (segs.map fun x => x.1 * x.2 / 2).sum := by
+  simp only [Ddg.lengthForce, turningAngle_eq, sumList_eq_sum, Oracle.two_eq]
+
+/-- With a constant weight (`∂w/∂n = 0` on every segment) the length force is `w (γ − β)`. -/
+theorem lengthForce_of_const (w γ β : ℝ) {segs : List (ℝ × ℝ)} (h : ∀ x ∈ segs, x.2 = 0) :
+    Ddg.lengthForce w γ β segs = w * (γ - β) := by
+  rw [lengthForce_eq]
+  have : (segs.map fun x => x.1 * x.2 / 2).sum = 0 := by
+    apply List.sum_eq_zero
+    intro y hy
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp hy
+    rw [h x hx]
+    ring
+  rw [this, add_zero]
+
+/-- **The total length force of a closed cut, on the oracle's `lengthForce`**: with
+`Θ_p = lengthForce w π β_p segs_p` at the boundary vertices of the cut mesh of a region, `β_p`
+the sum of the corner angles there and a constant weight `w`,
+`Σ_p ℓ_p λ⁰_p = w (2πχ − Σ_interior Ω)`; for a flat disk this is `2πw`.
+
+[formula: cut-length-step-on-cut] -/
+theorem _root_.DdgProofs.TriMesh.onCut_lengthForce_sum {V F : Type*} [DecidableEq V] [Fintype V]
+    [Fintype F] (M : TriMesh V F) (hM : M.Valid) (hman : M.Manifold) (w : ℝ)
+    {ℓ lam : {v // v ∈ M.boundaryVertices} → ℝ}
+    {κ : {v // v ∈ M.boundaryVertices} → {v // v ∈ M.boundaryVertices} → ℝ}
+    (hκ : ∀ p q, κ p q = κ q p) (segs : {v // v ∈ M.boundaryVertices} → List (ℝ × ℝ))
+    (hsegs : ∀ p, ∀ x ∈ segs p, x.2 = 0)
+    (h : fluxMatrix ℓ κ *ᵥ lam =
+      fun p => Ddg.fluxRhs (Ddg.lengthForce w π (M.angleSum p.1) (segs p))) :
+    ∑ p, ℓ p * lam p =
+      w * (2 * π * (M.eulerChar : ℝ) - ∑ v ∈ M.boundaryVerticesᶜ, M.angleDefect v) := by
+  refine M.onCut_force_sum_const hM hman w hκ ?_
+  rw [h]
+  funext p
+  rw [lengthForce_of_const w π _ (hsegs p)]
+
+/-- The oracle's `angleFromCot` recovers an angle of `(0, π)` from its cotangent. -/
+theorem angleFromCot_cot {θ : ℝ} (h0 : 0 < θ) (hπ : θ < π) :
+    Ddg.angleFromCot (Real.cot θ) = θ := by
+  simp only [Ddg.angleFromCot, Oracle.pi_eq, Oracle.two_eq, Oracle.atan_eq]
+  have e : Real.cot θ = Real.tan (π / 2 - θ) := by
+    rw [Real.tan_pi_div_two_sub, Real.tan_eq_sin_div_cos, Real.cot_eq_cos_div_sin, inv_div]
+  rw [e, Real.arctan_tan (by linarith) (by linarith)]
+  ring
+
+/-- **The interior angle from the cotangents of the cut mesh**: `angleFromCot` of the cotangent
+of a corner of a triangle is its corner angle, so the sum of `angleFromCot` over the triangles of
+a region at a boundary node is the interior angle `β` of SPEC §3.10.
+
+[formula: cut-length-step-on-cut] -/
+theorem angleFromCot_cornerCot {a b c : ℝ} (h : IsTriangle a b c) :
+    Ddg.angleFromCot (cornerCot a b c) = cornerAngle a b c := by
+  rw [cornerCot_eq_cot h]
+  exact angleFromCot_cot (cornerAngle_pos h) (cornerAngle_lt_pi h)
+
+/-- The oracle's `footFraction` in a triangle `z p q` with side lengths `lzp`, `lzq`, `lpq`: from
+the cotangents at `p` and `q` it is `(lzp² + lpq² − lzq²)/(2 lpq²)`. -/
+theorem footFraction_eq {lzp lzq lpq : ℝ} (h : IsTriangle lzq lzp lpq) :
+    Ddg.footFraction (cornerCot lzq lzp lpq) (cornerCot lzp lpq lzq) =
+      (lzp ^ 2 + lpq ^ 2 - lzq ^ 2) / (2 * lpq ^ 2) := by
+  have hT := (triArea_pos h).ne'
+  have hpq := h.pos_c.ne'
+  unfold Ddg.footFraction cornerCot
+  rw [triArea_rotate lzq lzp lpq]
+  have hsum : (lzp ^ 2 + lpq ^ 2 - lzq ^ 2) / (4 * triArea lzq lzp lpq) +
+      (lpq ^ 2 + lzq ^ 2 - lzp ^ 2) / (4 * triArea lzq lzp lpq) =
+      2 * lpq ^ 2 / (4 * triArea lzq lzp lpq) := by ring
+  rw [hsum, div_div_div_cancel_right₀ (by positivity)]
+
+/-- **The foot of the height, from the cotangents** (SPEC §3.10): for points `z, p, q` of a real
+inner product space forming a nondegenerate triangle, the point at the oracle's `footFraction`
+of the cotangents at `p` and `q` along `pq` is the foot of the height from `z`: the vector from
+it to `z` is orthogonal to `pq`.
+
+[formula: cut-length-step-on-cut] -/
+theorem footFraction_orthogonal {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E]
+    (z p q : E) (h : IsTriangle ‖z - q‖ ‖z - p‖ ‖q - p‖) :
+    inner ℝ (z - (p + Ddg.footFraction (cornerCot ‖z - q‖ ‖z - p‖ ‖q - p‖)
+      (cornerCot ‖z - p‖ ‖q - p‖ ‖z - q‖) • (q - p))) (q - p) = 0 := by
+  have hpq : p ≠ q := by
+    intro hpq
+    have := h.pos_c
+    rw [hpq, sub_self, norm_zero] at this
+    exact lt_irrefl _ this
+  have e : Ddg.footFraction (cornerCot ‖z - q‖ ‖z - p‖ ‖q - p‖)
+      (cornerCot ‖z - p‖ ‖q - p‖ ‖z - q‖) = inner ℝ (z - p) (q - p) / ‖q - p‖ ^ 2 := by
+    rw [footFraction_eq h]
+    have h1 : z - q = (z - p) - (q - p) := by abel
+    have h2 : ‖z - q‖ ^ 2 = ‖z - p‖ ^ 2 - 2 * inner ℝ (z - p) (q - p) + ‖q - p‖ ^ 2 := by
+      rw [h1, norm_sub_sq_real]
+    have hn : ‖q - p‖ ^ 2 ≠ 0 := by
+      have := h.pos_c
+      positivity
+    rw [h2]
+    field_simp
+    ring
+  rw [e]
+  exact inner_sub_foot z p q hpq
+
+/-- The oracle's `normalDerivativeOfLinear` for an affine function `w(x) = w₀ + ⟨g, x⟩`: the
+increment of `w` from the third vertex `z` to the point `f = (1 − λ) p + λ q` of the segment,
+divided by `h`. With `λ` the foot fraction and `h = heightOver area |pq|` the height, this is the
+derivative of `w` in the direction from `z` across the segment. -/
+theorem normalDerivativeOfLinear_eq {E : Type*} [NormedAddCommGroup E] [InnerProductSpace ℝ E]
+    (g z p q : E) (w0 lam h : ℝ) :
+    Ddg.normalDerivativeOfLinear (w0 + inner ℝ g p) (w0 + inner ℝ g q) (w0 + inner ℝ g z) lam h =
+      inner ℝ g (((1 - lam) • p + lam • q) - z) / h := by
+  simp only [Ddg.normalDerivativeOfLinear, Oracle.one_eq, inner_sub_right, inner_add_right,
+    real_inner_smul_right]
+  congr 1
+  ring
+
+/-- The oracle's `heightOver`: `2·area/|pq|`, the height of the third vertex over the segment
+(`height · |pq| = 2 · area`). -/
+theorem heightOver_mul (area : ℝ) {len : ℝ} (hlen : len ≠ 0) :
+    Ddg.heightOver area len * len = 2 * area := by
+  simp only [Ddg.heightOver, Oracle.two_eq]
+  field_simp
+
+/-! ## The adaptive step (SPEC §4) -/
+
+/-- The oracle's `adaptiveStep` at `ℝ`. -/
+theorem adaptiveStep_eq (τmax ts ω mm h ρ : ℝ) :
+    Ddg.adaptiveStep τmax ts ω mm h ρ =
+      if 0 < ρ then min (if 0 < ω then min τmax (ts / ω) else τmax) (mm * h / ρ)
+      else (if 0 < ω then min τmax (ts / ω) else τmax) := by
+  simp only [Ddg.adaptiveStep, Oracle.zero_eq]
+
+/-- **The adaptive step is at most `τ_max`.**
+
+[formula: cut-step-cap] -/
+theorem adaptiveStep_le_max (τmax ts ω mm h ρ : ℝ) :
+    Ddg.adaptiveStep τmax ts ω mm h ρ ≤ τmax := by
+  rw [adaptiveStep_eq]
+  split_ifs
+  · exact (min_le_left _ _).trans (min_le_left _ _)
+  · exact min_le_left _ _
+  · exact min_le_left _ _
+  · exact le_rfl
+
+/-- **The adaptive step resolves the roughening rate**: `τ · ω ≤ time_scale` for `ω > 0`.
+
+[formula: cut-step-cap] -/
+theorem adaptiveStep_mul_omega_le (τmax ts mm h ρ : ℝ) {ω : ℝ} (hω : 0 < ω) :
+    Ddg.adaptiveStep τmax ts ω mm h ρ * ω ≤ ts := by
+  have h1 : Ddg.adaptiveStep τmax ts ω mm h ρ ≤ ts / ω := by
+    rw [adaptiveStep_eq]
+    split_ifs
+    · exact (min_le_left _ _).trans (min_le_right _ _)
+    · exact min_le_right _ _
+  calc Ddg.adaptiveStep τmax ts ω mm h ρ * ω ≤ ts / ω * ω :=
+        mul_le_mul_of_nonneg_right h1 hω.le
+    _ = ts := by field_simp
+
+/-- **The adaptive step limits the motion**: `τ · max|ρ| ≤ max_motion · h` for `max|ρ| > 0`.
+
+[formula: cut-step-cap] -/
+theorem adaptiveStep_mul_rho_le (τmax ts ω mm h : ℝ) {ρ : ℝ} (hρ : 0 < ρ) :
+    Ddg.adaptiveStep τmax ts ω mm h ρ * ρ ≤ mm * h := by
+  have h1 : Ddg.adaptiveStep τmax ts ω mm h ρ ≤ mm * h / ρ := by
+    rw [adaptiveStep_eq, ite_eq_left hρ]
+    exact min_le_right _ _
+  calc Ddg.adaptiveStep τmax ts ω mm h ρ * ρ ≤ mm * h / ρ * ρ :=
+        mul_le_mul_of_nonneg_right h1 hρ.le
+    _ = mm * h := by field_simp
 
 end Cuts
 
