@@ -297,7 +297,9 @@ into Python at every vertex of every step.
 (`energy_total`, `distortion_k`, `area_k`, `cut_length`, `penalty`), `tau`, speeds,
 `roughening_rate`, `cut_motion`, counters, residuals, stage timings and the `length_weight` used.
 `run` returns `steps_taken`, `stop_reason` (`"max_steps"`, `"converged"`, `"energy_stalled"`,
-`"cut_vanished"`), `energy_before`, `energy_after`, `cut_length_before` / `cut_length_after`, the
+`"energy_rose"`, `"cut_vanished"`), `returned_step`, `lowest_energy`, `lowest_energy_step`,
+`last_energy` (after `"energy_rose"` the session is back at the state of lowest energy, which
+has `returned_step` steps behind it), `energy_before`, `energy_after`, `cut_length_before` / `cut_length_after`, the
 final `distortion_k`, `area_k`, `length_weight`, `time`, and `steps`: the list of the `step` dicts.
 
 **The cut on polygons** (`CutDescription`, all arrays flat): *edge points* (`edge_vertices` 2 per

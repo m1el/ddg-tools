@@ -859,6 +859,12 @@ impl CutSession {
         let mut d = Dict::default();
         d.set("steps_taken", report.steps.len());
         d.set("stop_reason", stop_name(report.stop));
+        // After `energy_rose` the session is back at the state of lowest energy, which has
+        // `returned_step` steps behind it; `steps_taken` counts the steps that were run.
+        d.set("returned_step", report.returned_step);
+        d.set("lowest_energy", report.lowest_energy);
+        d.set("lowest_energy_step", report.lowest_energy_step);
+        d.set("last_energy", report.last_energy);
         let before = report.steps.first().map(|s| &s.energy);
         let after = &report.final_energy;
         let before = before.unwrap_or(after);
@@ -988,6 +994,7 @@ fn stop_name(r: StopReason) -> &'static str {
         StopReason::MaxSteps => "max_steps",
         StopReason::Converged => "converged",
         StopReason::EnergyStalled => "energy_stalled",
+        StopReason::EnergyRose => "energy_rose",
         StopReason::CutVanished => "cut_vanished",
     }
 }

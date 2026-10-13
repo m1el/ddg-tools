@@ -159,7 +159,8 @@ class SessionTest(unittest.TestCase):
         s = self.session()
         report = s.run(length_weight=0.05, max_steps=2000)
         self.assertLess(report["steps_taken"], 2000)
-        self.assertIn(report["stop_reason"], ("converged", "energy_stalled", "cut_vanished"))
+        self.assertIn(report["stop_reason"],
+                      ("converged", "energy_stalled", "energy_rose", "cut_vanished"))
 
     def test_ripple_wavelength(self):
         s = self.session()

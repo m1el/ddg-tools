@@ -679,7 +679,8 @@ def count_patches(mesh, regions):
 def flow_summary(report):
     """One line for Blender's status bar."""
     reason = {"max_steps": "step limit", "converged": "converged",
-              "energy_stalled": "energy stalled", "cut_vanished": "the cut vanished"}[
+              "energy_stalled": "energy stalled", "cut_vanished": "the cut vanished",
+              "energy_rose": "energy rose, back at the lowest-energy state"}[
         report["stop_reason"]]
     network = (" | {} regions, {} patches, {} triple points".format(
         report["n_regions"], report["n_patches"], report["n_triple_points"])
