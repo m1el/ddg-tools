@@ -40,7 +40,8 @@ Not yet: vertex insertion and edge split (Alg. 7, 8), vertex repositioning (Alg.
 queries (Alg. 11), the overlay (Sec. 3.4.2), Delaunay refinement (Sec. 4.2), the export of a
 triangulation that is not simplicial, and what the cut flow needs on top (SPEC §6). The Lean
 theorems for the formula ids below are not written either: `scripts/check-formulas.sh` reports
-the ten `it-` ids as missing.
+the ten `it-` ids as missing (run on this state: exactly these ten, exit code 1; the four ids
+shared with `ddg-core` resolve to their proofs).
 
 ## Use
 
@@ -136,15 +137,16 @@ the time of the authors' program for the same operation (`data/intrinsic-referen
 
 Every run ends with status `Delaunay`, no refused flip, and the largest angle excess below zero
 (`1.7e-15` on blub, which has 43 ties). The flip time is that of testing every edge at least once
-(about 5.8 million edge tests per second); tracing runs at 1.5 to 4 million crossings per
-second. After flipping, camel_noise1 has 1 self-edge and 5 double edges, camel_noise2 4 and 75,
+(about 5 to 6 million edge tests per second); a flip alone, measured by flipping every edge that
+can be flipped there and back, runs at 4.6 to 5.8 million flips per second; tracing at 1.5 to 4
+million crossings per second. After flipping, camel_noise1 has 1 self-edge and 5 double edges, camel_noise2 4 and 75,
 camelshotnoise 22 and 24; the others are simplicial complexes.
 
 ### Edge traces
 
 After Delaunay flipping, with the default tolerance of `1e-6` of the edge length, **no trace
 fails its check on any mesh**: 0 of the 281 to 7331 flipped edges per mesh (`tests/models.rs`),
-0 on the 25 generated shapes of `tests/common`, 0 on the 15 inputs of the reference comparison.
+0 on the 17 generated shapes of `tests/common`, 0 on the 15 inputs of the reference comparison.
 The largest mismatch between the unfolded far vertex and the end of the path is `2.1e-11` of
 the edge length on `camelshotnoise` (24 of its 6095 traced edges are above `1e-12`, none above
 `1e-10`) and `7e-14` or less on every other mesh; a tolerance of `1e-9` gives the same result.

@@ -238,14 +238,28 @@ fn report(path: &str, config: &Config) -> Result<(), String> {
         }
         Err(e) => return Err(e.to_string()),
     };
+    // The rate of the flip alone: every edge that can be flipped is flipped there and back.
+    let (t_pure, n_pure) = timed(config.repeat, || {
+        let mut scratch = triangulation.clone();
+        let mut flips = 0usize;
+        for e in 0..scratch.n_edges() {
+            if scratch.flip_edge(e).is_ok() {
+                flips += 1 + usize::from(scratch.flip_edge(e).is_ok());
+            }
+        }
+        flips
+    });
+    let t_pure = (t_pure - t_clone).max(1e-12);
     println!(
-        "  time: init {:.2} ms, flip {:.2} ms ({:.2} M flips/s, {:.2} M edge tests/s), trace {:.2} ms ({:.2} M crossings/s)",
+        "  time: init {:.2} ms, flip to Delaunay {:.2} ms ({:.2} M edge tests/s), trace {:.2} ms ({:.2} M crossings/s); flips alone: {} in {:.2} ms ({:.2} M flips/s)",
         1e3 * t_init,
         1e3 * t_flip,
-        1e-6 * flip_report.n_flips as f64 / t_flip.max(1e-12),
         1e-6 * flip_report.n_tested as f64 / t_flip.max(1e-12),
         1e3 * t_trace,
         1e-6 * n_crossings as f64 / t_trace.max(1e-12),
+        n_pure,
+        1e3 * t_pure,
+        1e-6 * n_pure as f64 / t_pure,
     );
     // One line for tables: name V F flips min-angle before/after, max angle before/after,
     // % negative weights before/after, traced, failed, times.
