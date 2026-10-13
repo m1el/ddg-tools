@@ -396,6 +396,66 @@ theorem min_le_hopfLaxTriangle (xi xj xk : E) (Tj Tk : ℝ) :
 
 end Geometry
 
+/-! ## From the side lengths alone -/
+
+/-- Three lengths that satisfy the strict triangle inequalities are the side lengths of a
+triangle in the plane (`ℂ`). -/
+theorem exists_triangle_points {lij lik ljk : ℝ} (h : IsTriangle lij lik ljk) :
+    ∃ xi xj xk : ℂ, dist xi xj = lij ∧ dist xi xk = lik ∧ dist xj xk = ljk := by
+  have hij := h.pos_a
+  have hik := h.pos_b
+  have hjk := h.pos_c
+  obtain ⟨x, hx⟩ : ∃ x : ℝ, x = (lik ^ 2 + ljk ^ 2 - lij ^ 2) / (2 * ljk) := ⟨_, rfl⟩
+  have hx' : 2 * x * ljk = lik ^ 2 + ljk ^ 2 - lij ^ 2 := by
+    rw [hx]
+    field_simp
+  have hH := h.heron_pos
+  have hy0 : 0 ≤ lik ^ 2 - x ^ 2 := by
+    have e : 4 * ljk ^ 2 * (lik ^ 2 - x ^ 2) =
+        (lij + lik + ljk) * (lik - lij + ljk) * (lij - lik + ljk) * (lij - ljk + lik) := by
+      linear_combination (-(2 * x * ljk + (lik ^ 2 + ljk ^ 2 - lij ^ 2))) * hx'
+    have h1 : 0 ≤ 4 * ljk ^ 2 * (lik ^ 2 - x ^ 2) := by
+      rw [e]
+      exact hH.le
+    exact nonneg_of_mul_nonneg_right h1 (by positivity)
+  refine ⟨(x : ℂ) + (√(lik ^ 2 - x ^ 2) : ℝ) * Complex.I, (ljk : ℂ), 0, ?_, ?_, ?_⟩
+  · have e : (x : ℂ) + (√(lik ^ 2 - x ^ 2) : ℝ) * Complex.I - (ljk : ℂ) =
+        ((x - ljk : ℝ) : ℂ) + (√(lik ^ 2 - x ^ 2) : ℝ) * Complex.I := by
+      push_cast
+      ring
+    rw [Complex.dist_eq, e, Complex.norm_add_mul_I, Real.sq_sqrt hy0,
+      show (x - ljk) ^ 2 + (lik ^ 2 - x ^ 2) = lij ^ 2 by linear_combination (-1 : ℝ) * hx',
+      Real.sqrt_sq hij.le]
+  · rw [Complex.dist_eq, sub_zero, Complex.norm_add_mul_I, Real.sq_sqrt hy0,
+      show x ^ 2 + (lik ^ 2 - x ^ 2) = lik ^ 2 by ring, Real.sqrt_sq hik.le]
+  · rw [Complex.dist_eq, sub_zero, Complex.norm_real, Real.norm_of_nonneg hjk.le]
+
+/-- **The Hopf–Lax update from the side lengths.** If `ℓ_ij, ℓ_ik, ℓ_jk` satisfy the strict
+triangle inequalities, the oracle's `hopfLaxTriangle` is the minimum over `λ ∈ [0, 1]` of
+`λ T_j + (1 − λ) T_k + (distance from the vertex i to the point λ j + (1 − λ) k)`, the distance
+being the oracle's `baryLength` in the face `i j k` (barycentric difference `(1, −λ, −(1 − λ))`).
+
+[formula: cut-redistance] -/
+theorem hopfLaxTriangle_isLeast_intrinsic {lij lik ljk : ℝ} (h : IsTriangle lij lik ljk)
+    (Tj Tk : ℝ) :
+    IsLeast ((fun lam : ℝ => lam * Tj + (1 - lam) * Tk +
+        Ddg.baryLength lij ljk lik 1 (-lam) (-(1 - lam))) '' Set.Icc 0 1)
+      (Ddg.hopfLaxTriangle lij lik ljk Tj Tk) := by
+  obtain ⟨xi, xj, xk, hij, hik, hjk⟩ := exists_triangle_points h
+  have key := hopfLaxTriangle_isLeast xi xj xk Tj Tk
+  rw [hij, hik, hjk] at key
+  have e : (fun lam : ℝ => lam * Tj + (1 - lam) * Tk +
+      Ddg.baryLength lij ljk lik 1 (-lam) (-(1 - lam))) = hopfLaxObjective xi xj xk Tj Tk := by
+    funext lam
+    unfold hopfLaxObjective
+    have hb := baryLength_eq_norm xi xj xk (da := 1) (db := -lam) (dc := -(1 - lam)) (by ring)
+    rw [← dist_eq_norm, ← dist_eq_norm, ← dist_eq_norm, hij, hjk, dist_comm xk xi, hik] at hb
+    have e2 : (1 : ℝ) • xi + (-lam) • xj + (-(1 - lam)) • xk =
+        xi - (lam • xj + (1 - lam) • xk) := by module
+    rw [hb, e2]
+  rw [e]
+  exact key
+
 end Cuts
 
 end DdgProofs
