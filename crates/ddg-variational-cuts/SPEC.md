@@ -662,15 +662,98 @@ that shrink under refinement.
   components without a cut and their area) and the residuals of the solves. All in the scaled
   unit.
 
-## 8. N regions (milestone 2, outline; details are fixed when milestone 1 is done)
+## 8. N regions (milestone 2)
 
-State `φ_k(i)`, `k < N`; `region(i) = argmin_k φ_k(i)` (ties: lowest `k`). Crossing of an edge
-`[a, b]` with regions `i ≠ j` (paper Eq. 31):
-`t = (φ_a^i − φ_a^j) / (φ_a^i − φ_a^j + φ_b^j − φ_b^i)`. A face with three regions gets a triple point
-at the centroid of its three cut vertices. Speeds per region boundary as in §1. Inside region `k`,
-`φ̇_k` is the harmonic extension of its boundary speed and `φ̇_j = −φ̇_k` for every `j ≠ k`
-(App. A.3). §3.10 and §3.12 act on every `φ_k`; cut-adjacent vertices are projected as in
-Losasso et al. 2006, Sec. 3.1. With `N = 2`, `φ_0 = −φ_1 = φ` must reproduce §3–4.
+Paper App. A. Everything in §3–§4 is the case `N = 2`; this section says what changes.
+
+### 8.1 State
+
+`φ_k(i)` for `k < N`, `N ≥ 2`: every `φ_k` is a signed distance to the boundary of region `R_k`,
+negative inside. `region(i) = argmin_k φ_k(i)` (ties: the lowest `k`). A region may be empty or
+have several components (the paper finds `N = 10` enough for any network, by colouring). A
+two-region state `φ` is the state `φ_0 = φ`, `φ_1 = −φ`; on such a state every stage below must
+give what §3–§4 give, for the default and for the paper's stages (§6 item 7).
+
+### 8.2 Crossings, triple points, cut mesh `[formula: cut-edge-crossing-regions]`, `[formula: cut-triple-point]`
+
+An edge `[a, b]` with `i = region(a) ≠ j = region(b)` carries one cut point, where the
+interpolants of `φ^i` and `φ^j` are equal (paper Eq. 31), then moved into `[δ, 1−δ]`:
+
+```
+t = (φ_a^i − φ_a^j) / (φ_a^i − φ_a^j + φ_b^j − φ_b^i)
+```
+
+A third function that is smaller in between is ignored: one cut point per edge (App. A.2).
+
+A face with two regions is cut as in §3.3. A face `abc` with three regions has three cut points
+`p_ab`, `p_bc`, `p_ca` and a *triple point* `m` at their centroid; the cut consists of the three
+segments from the cut points to `m`. The part of corner `a` is the quad `(a, p_ab, m, p_ca)`; it is
+convex (`m` lies beyond the line `p_ab p_ca` seen from `a`, because `p_bc` does) and is split by
+`a–m`. In the cut mesh a cut point has one copy per adjacent region (two), a triple point three.
+Every segment knows its two regions.
+
+### 8.3 Region solves and speed
+
+§3.4–§3.6 hold per region. A triple point is an ordinary boundary node of each of its three
+regions, with two boundary segments there; the flux recovery of §3.5 runs along the whole boundary
+of a region, through triple points.
+
+At a cut point `p` between regions `i < j`: `s_p = G_i,p − G_j,p`. It is the rate of `φ_i` there;
+`φ_j` has `−s_p`. Triple points carry no rate of their own: they follow their three cut points.
+
+### 8.4 The paper's stages (App. A.3)
+
+* **Extension.** In region `k`, `e` is the harmonic extension (§3.8) of the rate of `φ_k` on the
+  boundary of `R_k`: `±s_p` at cut points, and at a triple point the linear interpolation, in
+  arclength, between its two neighbouring cut points on that boundary (not stated in the paper).
+  For a vertex `i` of region `k`: `φ̇_k(i) = e_i` and `φ̇_j(i) = −e_i` for every `j ≠ k`. This is the
+  paper's substitution `φ̇_j := −φ̇_k` on the boundary of `R_k`; where `R_k` borders `R_j` it is the
+  true rate of `φ_j`.
+* **Length step.** `(W_V + τ L_w) φ_k′ = W_V φ̃_k` for every `k`: one factorization, `N` right-hand
+  sides.
+* **Symmetry.** The class mean of §3.11 for every `φ_k`. The regions must be invariant under the
+  symmetry; a symmetry that permutes regions is not supported.
+* **Redistancing** `[formula: cut-region-projection]`. Regions are recomputed. `Adj_k` are the
+  vertices of the edges with exactly one end in `R_k`, `Adj = ∪ Adj_k`.
+  1. At every `i ∈ Adj` (Losasso et al. 2006, Sec. 3.1): with `m` the mean of the two smallest
+     `φ_k′(i)`, `φ_k(i) = φ_k′(i) − m` for all `k`. The smallest is then `−d`, the second `+d`: one
+     negative entry, and the two zero sets coincide.
+  2. For every `k`: fast marching as in §3.12 with the seeds `Adj_k`, values `|φ_k|`, and the two
+     classes "in `R_k`" and "not in `R_k`"; `φ_k = −T` in `R_k`, `+T` elsewhere. A vertex of `Adj`
+     that is not in `Adj_k` is not a seed for `k` and is recomputed.
+  For `N = 2` step 1 changes nothing and step 2 is §3.12.
+
+### 8.5 The default stages
+
+§3.8–§3.10 (length force on the cut, extension from the cut, mean-gradient scaling) are to be
+carried over to networks. The rate at a cut point between `i < j` drives the difference
+`φ_i − φ_j` at the two ends of its edge; the functions of the other regions at a cut-adjacent
+vertex follow the substitution of §8.4, and redistancing is that of §8.4. What has to be derived is
+the length force near a triple point: it is minus the first variation of `∫_γ w ds` over the
+network, written so that (a) away from triple points it is §3.10, (b) three straight curves
+meeting at 120° exert no force, and any other junction is driven toward that, (c) the total is
+conserved by the recovery as in §3.10. The derivation goes here when it is done, with a D-entry
+(the paper diffuses every `φ_k` on the mesh and has no junction rule).
+
+### 8.6 Tests
+
+* `N = 2` against the two-region code, both stage sets, to rounding.
+* Pure length flow (`w_k = 0`): a honeycomb on a flat torus given by edge lengths alone is
+  stationary, a perturbed one returns, and the length never increases; a triple junction relaxes to
+  120°.
+* With distortion: the tetrahedral partition of the sphere (4 regions, 4 triple points) and the
+  cubical one (6 regions, 8 triple points) are stationary by symmetry; the energy decreases along
+  the flow from generic `N`-region starts for every energy.
+* Invariance under renumbering the vertices and under permuting the regions (up to the tie rules,
+  which are to be stated); scaling as in §2.
+
+### 8.7 Data and output
+
+`w_k`, `β_k` per region; `α_L`, `η`, the energy and the curvature are shared. Helpers: a state from
+`N`-valued vertex labels and from face labels; a clustering of normals as a start (the paper's
+"greedy clustering of vertex normals", Sec. 7, is not specified further: say what is done). Output:
+cut points, triple points (face and barycentric coordinates), segments with their two regions, the
+curves between junctions as polylines, and the cut mesh with the region of every face.
 
 ## 9. Differences from the paper as printed
 
