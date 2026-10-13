@@ -852,10 +852,11 @@ def _insert_cut(bm, cut, mark_seams):
         for group in groups:
             t = edge_t[group[0]]
             fraction = (t - t_before) / (1.0 - t_before)
-            new_edge, new_vert = bmesh.utils.edge_split(current, from_vert, fraction)
+            _near, new_vert = bmesh.utils.edge_split(current, from_vert, fraction)
             for i in group:
                 point_vertex[i] = new_vert
-            current, from_vert, t_before = new_edge, new_vert, t
+            # `current` now runs from the new vertex to the far end; `new_edge` is the near part.
+            from_vert, t_before = new_vert, t
 
     # ----- paths: the network inside every polygon -----
     # A polygon's part of the cut is a forest whose leaves are edge points (vertices already) and
