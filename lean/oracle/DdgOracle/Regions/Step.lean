@@ -147,6 +147,9 @@ structure RStep where
   dflt : Array (Array (Array Float))
   /-- `dw/dn` per region per segment of its view -/
   dwdn : Array FloatArray
+  /-- D26 (robust statistics, paper's stages, `Capped`/`Adaptive`): `h_i`, `ω_i` and the factor of the
+  limit at every vertex -/
+  vlimit : Option (FloatArray × FloatArray × FloatArray) := none
   /-- largest local roughening rate -/
   omegaMax : Float
   /-- `m̂` for `s` over the cut points, for `s + λ⁰` over the boundary nodes, the one used -/
@@ -407,7 +410,7 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
     limits := stepLimits rm
   -- the local limit
   let limitFactor := fun (X j : Nat) (r : Float) =>
-    if !robust then 1.0
+    if !robust || c.stages == .paper then 1.0
     else match c.step with
       | .fixed _ => 1.0
       | .capped _ mm => if r.abs / copyH X j ≤ mhat then 1.0 else localLimitFactor mm (copyH X j) tau r.abs
@@ -552,7 +555,47 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
     if c.stages == .paper then
       phiLen := phiLen.push (← lengthStepMesh c.toCut b ev.wv (phiTilde[k]!) tau)
     else phiLen := phiLen.push (phiTilde[k]!)
-  let phiSym := phiLen.map (symmetrize c.classes)
+  -- D26: the local limit of the paper's stages acts at the vertices on the whole step
+  let mut vlimit : Option (FloatArray × FloatArray × FloatArray) := none
+  let mut phiLim := phiLen
+  if robust && c.stages == .paper then
+    match c.step with
+    | .fixed _ => pure ()
+    | step =>
+      let mm := match step with | .capped _ m => m | .adaptive _ m _ => m | .fixed _ => 1.0
+      let mut hv := zeros nv
+      let mut omv := zeros nv
+      let mut fv := zeros nv
+      for i in [0:nv] do
+        let mut h := posInf
+        let mut om := omega
+        let mut anyCross := false
+        for p in [0:nP] do
+          let cr := net.cps[p]!
+          if cr.a == i || cr.b == i then
+            anyCross := true
+            if cr.len < h then h := cr.len
+            if ev.omegaP.get! p > om then om := ev.omegaP.get! p
+        if !anyCross then
+          for j in b.topo.neighbors[i]! do
+            if b.l i j < h then h := b.l i j
+        -- a = region of i, b = the smallest of the other functions (ties: lowest index), before the step
+        let a := net.region[i]!
+        let mut bb := if a == 0 then 1 else 0
+        for k in [0:N] do
+          if k != a && (phis[k]!).get! i < (phis[bb]!).get! i then bb := k
+        let delta := vertexChange ((phiLen[bb]!).get! i) ((phis[bb]!).get! i) ((phiLen[a]!).get! i) ((phis[a]!).get! i)
+        let v := match step with
+          | .capped _ _ => vertexSpeedCapped delta tau
+          | _ => vertexSpeedAdaptive delta tau om omega
+        let f := vertexLimitFactor mm h tau v
+        hv := hv.set! i h
+        omv := omv.set! i om
+        fv := fv.set! i f
+        for k in [0:N] do
+          phiLim := phiLim.set! k ((phiLim[k]!).set! i (limitedValue ((phis[k]!).get! i) ((phiLen[k]!).get! i) f))
+      vlimit := some (hv, omv, fv)
+  let phiSym := phiLim.map (symmetrize c.classes)
   let redist := redistanceN b c.faces phiSym
   let phiNew := redist.phi.map (symmetrize c.classes)
   let evNew ← evaluateNet c b phiNew
@@ -565,6 +608,6 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
         if d > motion then motion := d
   return { base := b, phis, ev, tau, hMin, rhoMax, omega, limits, rates, phiTilde, phiLen, phiSym
            redist, phiNew, evNew, motion, dflt := dfl, dwdn := dwdnAll, eVert, ring, deltas
-           omegaMax, mhat := (m1, m2, mhat), hP, ellP, factor := factorAll, rBefore, rAfter }
+           vlimit, omegaMax, mhat := (m1, m2, mhat), hP, ellP, factor := factorAll, rBefore, rAfter }
 
 end Ddg.Regions

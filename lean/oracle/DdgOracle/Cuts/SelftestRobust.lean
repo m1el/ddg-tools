@@ -92,6 +92,36 @@ def selftestRobust : IO Nat := do
         if st.factor.get! k < 1 then nlim := nlim + 1
       check tally s!"local limit ({nm}, curvature spike): motion of every cut point <= max_motion h_c; {nlim} points limited"
         (worstMove ≤ 1 + 1e-12 && nlim > 0) s!"largest motion / (max_motion h_c) = {sci worstMove}"
+  -- D26: robust statistics and the length step on the mesh: the limit acts at the vertices on the whole step
+  let mut worstV := fzero
+  let mut anyLimited := false
+  let mut energyOk := true
+  let mut worstDelta := fzero
+  for al in [0.5, 5.0, 20.0, 40.0] do
+    for (step, mm) in [(StepRule.capped 0.5 0.25, 0.25), (StepRule.adaptive 0.05 0.25 1.0, 0.25)] do
+      let c := { mkCase "d26" ico2 capPhi with format := 3, stats := .robust, curv := .perFace kf, alphaL := al, step }
+      match runOk c with
+      | none => energyOk := false
+      | some r =>
+        match r.vlimit with
+        | none => energyOk := false
+        | some (hv, _, fv, pl) =>
+          for i in [0:r.base.nv] do
+            let ch := (pl.get! i - r.phi.get! i).abs
+            worstV := max worstV (ch / (mm * hv.get! i))
+            if fv.get! i < 1 then anyLimited := true
+          if !(r.evNew.total ≤ r.ev.total) then energyOk := false
+          worstDelta := max worstDelta (r.ev.total - r.evNew.total)
+  check tally "D26 (robust, length step on the mesh, curvature spike, alpha_L 0.5 .. 40, capped and adaptive): no vertex changes by more than max_motion h_i; vertices are limited; the energy after one step is not above the energy before"
+    (worstV ≤ 1 + 1e-12 && anyLimited && energyOk) s!"largest change / (max_motion h_i) = {sci worstV}"
+  -- with the limit not active the step equals the unlimited one
+  let free := { mkCase "free" ico2 capPhi with format := 3, stats := .robust, curv := .perFace kf, alphaL := 2.0 }
+  match runOk { free with step := .capped 0.0005 1.0e6 }, runOk { free with step := .fixed 0.0005 } with
+  | some a, some b =>
+    let mut d := fzero
+    for i in [0:a.base.nv] do d := max d ((a.phiNew.get! i - b.phiNew.get! i).abs)
+    check tally "limit not active (huge max_motion): the robust step equals the step with a fixed tau" (d ≤ 1e-15 && a.tau == b.tau) s!"difference {sci d}"
+  | _, _ => check tally "limit not active: steps run" false
   -- zero slope: a face with |grad phi| = 0 is left out of the mean (D23)
   let ico1 := icosphere 1
   let zero := withDefaultStages (mkCase "zs" (ico1.mapPos fun p => ⟨p.x * (1 + 0.05 * Float.sin (5 * p.y + p.z)), p.y * (1 + 0.04 * Float.cos (4 * p.x - 2 * p.z)), p.z⟩) (phiOf ico1 fun p => p.z))

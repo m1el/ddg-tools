@@ -1160,3 +1160,54 @@ and `mhat` to `1e-9`) and the local limit bounds the motion of every boundary co
     neighbours alternate between two other regions, so that every segment of its boundary ends in a triple point. They are the files that `regions`
     produces from the stored inputs (checked byte for byte before they were adopted); `regions-robust-fixtures check` reruns them from the `.in` files, and
     `regions-selftest` tests the configuration (the region exists, the motion of every copy is bounded by `max_motion h_c`).
+
+# Revision D26 (the local limit at the vertices, SPEC d36f05f)
+
+With the robust statistics, a step size that is not `Fixed`, and the **length step on the mesh** (in `cuts`: `stages onmesh ...`; in `regions`: `stages paper`)
+the rate on the cut is *not* limited any more (all factors of the `h` / `hc` lines are 1 in this case, `RLIM = RATE`, the unlimited `s` is extended).
+Instead the change of the whole step is limited at every vertex after the length step, before the symmetry projection:
+
+```
+phi~ = phi + tau sigma ;  phi' = result of the length step (phi~ if there is none) ;  Delta_i = phi'(i) - phi(i)
+h_i  = the shortest crossed edge with an end at i; at a vertex without a crossed edge the shortest of its edges
+om_i = the largest omega_c of the cut points on the edges at i (none: the term is absent)
+v_i  = |Delta_i| / tau                       (Capped)      v_i = max(|Delta_i| / tau, (om_i - omega)_+ / 2)   (Adaptive)
+f_i  = min(1, max_motion h_i / (tau v_i))    (v_i = 0: 1)  phi''(i) = phi(i) + f_i (phi'(i) - phi(i))
+```
+
+For `N` regions `Delta_i = ((phi_b'(i) - phi_b(i)) - (phi_a'(i) - phi_a(i))) / 2` with `a` the region of `i` and `b` the smallest of the other functions
+(ties: lowest index), both in the state before the step; `phi_k''(i) = phi_k(i) + f_i (phi_k'(i) - phi_k(i))` for **every** `k`. For `N = 2` this is the
+two-region rule. There is no guard case (`v/h <= mhat`) here. The default stages (length step on the cut) are unchanged.
+
+**Output** in this case only (other inputs give the same output as before): the line `limited N` counts the *cut-adjacent vertices* with `f_i < 1`,
+and after the `h` lines (`cuts`, format 3) or before the `pd` lines (`regions`, format 2)
+
+```
+vlimit 1
+hv I HI OMEGAI FACTOR [PHILIM]      x NV   h_i, om_i (omega where absent), f_i; `cuts` also the limited value phi''(i) (scaled unit)
+```
+
+`PHILEN` of the `n` lines is the length-step result `phi'` (before the limit), `PHISYM` is taken after the limit and the symmetry projection.
+
+**Fixtures.** Exactly six outputs changed and were regenerated, nothing else (all other fixtures of the five sets are byte for byte as before):
+`cuts-robust/rb-ico2-cap-paper-adaptive`, `rb-spike-paper`; `regions-robust/rr-disk4-paper`, `rr-sphere3-spike-paper`, `rr-sphere4-paper`, `triple-chain-paper`
+(the last one an adopted file: its `.out` was regenerated from its `.in`).
+
+**Tests.** After such a step no vertex changes by more than `max_motion h_i` (largest ratio `1.000` over alpha_L 0.5 ... 40, capped and adaptive, curvature
+spike; for `N` regions the half difference, on the three paper fixtures and a 3-region spike); with `max_motion = 1e6` the step equals the step with a fixed
+`tau` (`3e-17`); `N = 2` through the N-region code equals the two-region code for the paper stages with the robust statistics (as before, `0`); and the energy
+after one step is not above the energy before for the two-region spike (the curvature spike makes the distortion force and the length force oppose at the
+limited vertices; alpha_L = 0.5, 5, 20, 40, both rules, 1 to 34 vertices limited). For 3 regions it holds for alpha_L = 0.5 and 40 and **not** for 5 and 20
+(+8% and +0.2%): it does not hold either with a fixed small `tau` and no limit (`16.31 -> 16.34` at `tau = 1e-4`), which is the non-monotone length of a network
+with junctions off 120 degrees (SPEC §8.6), not the limit.
+
+# Readings of SPEC d36f05f (continuing the list above)
+
+45. D26: the rate `s` that is extended is the one after sliver smoothing (as before); for a vertex with crossings, `om_i` is the largest `omega_c` over all cut points on
+    edges that have `i` as an end; `h_i` over the crossed edges that have `i` as an end (not over the neighbourhood used for `h_c`).
+46. D26 counts only cut-adjacent vertices in `limited`, while the factor is applied to every vertex (also far from the cut).
+47. D26, N regions: "the function that is smallest at `i` among the others" is taken in the state before the step; the factor multiplies the whole change of every
+    function at the vertex (not only of `a` and `b`).
+48. The count of the default stages' `limited` is still the number of limited copies (SPEC says: cut points and triple points with a limited copy, each once; the
+    oracle's line is unchanged so that the five sets stay byte-identical; compare with the number of factors below 1).
+49. D26 does not apply to `Fixed` steps and to `statistics extremes`.

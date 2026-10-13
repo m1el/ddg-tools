@@ -321,6 +321,9 @@ structure StepResult where
   evNew : Eval
   /-- default-stage quantities (format 2) -/
   stage2 : Option Stage2Out := none
+  /-- the local limit acted at the vertices (robust statistics, length step on the mesh, D26):
+  `h_i`, `ω_i`, factor and limited value of every vertex -/
+  vlimit : Option (FloatArray × FloatArray × FloatArray × FloatArray) := none
 
 /-- Outcome: either a step, or the cut is absent (one region is empty). -/
 inductive Outcome where
@@ -504,7 +507,7 @@ def runStep (c : CutCase) : Except String Outcome := do
       rate ← chainSolve nc force.ellC edges rhs
     -- local limit (robust statistics, capped and adaptive steps)
     let mut factor := FloatArray.ofFn' nc fun _ => 1.0
-    if robust then
+    if robust && c.lengthStep == .onCut then
       match c.step with
       | .fixed _ => pure ()
       | .capped _ mm =>
@@ -534,10 +537,46 @@ def runStep (c : CutCase) : Except String Outcome := do
   let phiLen ←
     if c.format ≥ 2 && c.lengthStep == .onCut then pure phiTilde
     else lengthStepMesh c b ev.wv phiTilde tau
-  let phiSym := symmetrize c.classes phiLen
+  -- D26: with the length step on the mesh the local limit acts at the vertices on the whole step
+  let mut vlimit : Option (FloatArray × FloatArray × FloatArray × FloatArray) := none
+  let mut phiLim := phiLen
+  if c.format ≥ 2 && c.stats == .robust && c.lengthStep == .onMesh then
+    match c.step, stage2 with
+    | .fixed _, _ => pure ()
+    | _, none => pure ()
+    | step, some st =>
+      let mm := match step with | .capped _ m => m | .adaptive _ m _ => m | .fixed _ => 1.0
+      let mut hv := zeros nv
+      let mut omv := zeros nv
+      let mut fv := zeros nv
+      for i in [0:nv] do
+        let mut h := posInf
+        let mut om := st.omega
+        let mut anyCross := false
+        for k in [0:nc] do
+          let cr := cm.crossings[k]!
+          if cr.a == i || cr.b == i then
+            anyCross := true
+            if cr.len < h then h := cr.len
+            if st.omegaP.get! k > om || om == st.omega then
+              if st.omegaP.get! k > om then om := st.omegaP.get! k
+        if !anyCross then
+          for j in b.topo.neighbors[i]! do
+            if b.l i j < h then h := b.l i j
+        let delta := phiLen.get! i - phi.get! i
+        let v := match step with
+          | .capped _ _ => vertexSpeedCapped delta tau
+          | _ => vertexSpeedAdaptive delta tau om st.omega
+        let f := vertexLimitFactor mm h tau v
+        hv := hv.set! i h
+        omv := omv.set! i om
+        fv := fv.set! i f
+        phiLim := phiLim.set! i (limitedValue (phi.get! i) (phiLen.get! i) f)
+      vlimit := some (hv, omv, fv, phiLim)
+  let phiSym := symmetrize c.classes phiLim
   let redist := redistance b c.faces phiSym
   let phiNew := symmetrize c.classes redist.phi
   let evNew ← evaluate c b phiNew
-  return .step { base := b, phi, ev, tau, hMin, sMax, phiTilde, phiLen, phiSym, redist, phiNew, evNew, stage2 }
+  return .step { base := b, phi, ev, tau, hMin, sMax, phiTilde, phiLen, phiSym, redist, phiNew, evNew, stage2, vlimit }
 
 end Ddg.Cuts

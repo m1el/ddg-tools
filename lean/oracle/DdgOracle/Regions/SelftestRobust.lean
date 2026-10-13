@@ -39,7 +39,7 @@ def selftestRobust : IO Nat := do
           s!"phi {sci dPhi} tau {sci dTau} omega {sci dOm} mhat {sci dM}; limited {(st2.factor.toList.filter (· < 1)).length}"
       | _, _ => check tally s!"N = 2 robust ({stNm}, {cn}): steps run" false
   -- local limit on networks: motion of every boundary copy <= max_motion h_c
-  for f in robustFixtures do
+  for f in robustFixtures.filter (·.case.stages == .dflt) do
     match runOkR f.case with
     | none => check tally s!"{f.case.name}: step runs" false
     | some r =>
@@ -59,6 +59,59 @@ def selftestRobust : IO Nat := do
           if (r.factor[rv.X]!).get! j < 1 then nlim := nlim + 1
       check tally s!"{f.case.name}: local limit bounds the motion of every boundary copy by max_motion h_c ({nlim} limited)"
         (worst ≤ 1 + 1e-12) s!"largest motion / (max_motion h_c) = {sci worst}; omega {sci r.omega} max {sci r.omegaMax}"
+  -- the paper-stage fixtures: the limit acts at the vertices
+  for f in robustFixtures.filter (·.case.stages == .paper) do
+    match runOkR f.case with
+    | none => check tally s!"{f.case.name}: step runs" false
+    | some r =>
+      let mm := match f.case.step with | .capped _ m => m | .adaptive _ m _ => m | .fixed _ => 1.0
+      let net := r.ev.net
+      let mut nlim := 0
+      if let some (_, _, fv) := r.vlimit then
+        for i in [0:net.nv] do
+          if net.adj[i]! && fv.get! i < 1 then nlim := nlim + 1
+      match r.vlimit with
+      | none => check tally s!"{f.case.name}: vertex limit present" false
+      | some (hv, _, fv) =>
+        let mut worst := fzero
+        for i in [0:net.nv] do
+          let a := net.region[i]!
+          let mut bb := if a == 0 then 1 else 0
+          for k in [0:f.case.phis.size] do
+            if k != a && (r.phis[k]!).get! i < (r.phis[bb]!).get! i then bb := k
+          let delta := vertexChange ((r.phiLen[bb]!).get! i) ((r.phis[bb]!).get! i) ((r.phiLen[a]!).get! i) ((r.phis[a]!).get! i)
+          worst := max worst (fv.get! i * delta.abs / (mm * hv.get! i))
+        check tally s!"{f.case.name}: D26 vertex limit bounds the half difference of the two smallest functions by max_motion h_i ({nlim} cut-adjacent vertices limited)"
+          (worst ≤ 1 + 1e-12) s!"largest change / (max_motion h_i) = {sci worst}"
+  -- D26 for N regions (paper's stages): change of the whole step bounded at every vertex; energy
+  let three : Array (Point Float) := #[⟨1.0, 0.1, 0.2⟩, ⟨-0.6, 0.9, -0.1⟩, ⟨-0.5, -0.8, 0.3⟩]
+  let mid : Point Float := ⟨0.4, 1.0, 0.1⟩
+  let spike := spikeAt ico2 (nearestVertex ico2 mid) 2.4
+  let st3 := redistancedState spike (voronoiState spike three)
+  let mut worstV := fzero
+  let mut anyLim := false
+  let mut okE := true
+  for al in [0.5, 5.0, 20.0, 40.0] do
+    for (step, mm) in [(StepRule.capped 0.5 0.25, 0.25), (StepRule.adaptive 0.05 0.25 1.0, 0.25)] do
+      let c := { mkRegionCase "d26n" spike st3 with format := 2, stats := .robust, alphaL := al, step }
+      match runOkR c with
+      | none => okE := false
+      | some r =>
+        match r.vlimit with
+        | none => okE := false
+        | some (hv, _, fv) =>
+          let net := r.ev.net
+          for i in [0:net.nv] do
+            let a := net.region[i]!
+            let mut bb := if a == 0 then 1 else 0
+            for k in [0:3] do
+              if k != a && (r.phis[k]!).get! i < (r.phis[bb]!).get! i then bb := k
+            let delta := vertexChange ((r.phiLen[bb]!).get! i) ((r.phis[bb]!).get! i) ((r.phiLen[a]!).get! i) ((r.phis[a]!).get! i)
+            worstV := max worstV (fv.get! i * delta.abs / (mm * hv.get! i))
+            if fv.get! i < 1 then anyLim := true
+          if (al == 0.5 || al == 40.0) && !(r.evNew.total ≤ r.ev.total) then okE := false
+  check tally "D26, 3 regions (paper's stages, spike): the half difference of the two smallest functions changes by at most max_motion h_i, for the paper fixtures too; the energy does not rise for alpha_L = 0.5 and 40 (it does for 5 and 20, with or without the limit: the junctions of a Voronoi start are off 120 degrees)"
+    (worstV ≤ 1 + 1e-12 && okE) s!"largest change / (max_motion h_i) = {sci worstV}; vertices limited somewhere: {anyLim}"
   -- a region whose boundary is a closed chain through triple-point copies only
   for n in ["triple-chain-paper", "triple-chain-default"] do
     let path : System.FilePath := "fixtures/regions-robust" / s!"{n}.in"
@@ -92,8 +145,8 @@ def selftestRobust : IO Nat := do
                   let t := net.triples[g - net.nv - net.nP]!
                   min (r.hP.get! t.p0) (min (r.hP.get! t.p1) (r.hP.get! t.p2))
               worst := max worst (r.tau * ((r.rAfter[rv.X]!).get! j).abs / (mm * h))
-          check tally s!"{n}: {tripleOnly} region(s) whose boundary chain consists of segments to triple points only; motion bounded by max_motion h_c"
-            (tripleOnly > 0 && worst ≤ 1 + 1e-12 && r.tau > 0 && r.tau.isFinite)
+          check tally s!"{n}: {tripleOnly} region(s) whose boundary chain consists of segments to triple points only; motion of the copies bounded by max_motion h_c (default stages)"
+            (tripleOnly > 0 && (c.stages == .paper || worst ≤ 1 + 1e-12) && r.tau > 0 && r.tau.isFinite)
             s!"largest motion / (max_motion h_c) = {sci worst}; tau {sci r.tau}"
   let t ← tally.get
   IO.println s!"regions-selftest (robust): {t.passed} passed, {t.failed} failed"

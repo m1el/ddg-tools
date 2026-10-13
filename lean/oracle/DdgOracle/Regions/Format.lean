@@ -309,9 +309,14 @@ def printStep (c : RegionCase) (r : RStep) : String := Id.run do
   s := s ++ s!"omega {hx r.omega}\nlimits {hx r.limits.1} {hx r.limits.2.1} {hx r.limits.2.2}\n"
   if c.format == 2 then
     let mut nlim := 0
-    for X in [0:N] do
-      for j in [0:(r.factor[X]!).size] do
-        if (r.factor[X]!).get! j < 1 then nlim := nlim + 1
+    match r.vlimit with
+    | some (_, _, fv) =>
+      for i in [0:nv] do
+        if net.adj[i]! && fv.get! i < 1 then nlim := nlim + 1
+    | none =>
+      for X in [0:N] do
+        for j in [0:(r.factor[X]!).size] do
+          if (r.factor[X]!).get! j < 1 then nlim := nlim + 1
     s := s ++ s!"stats {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
     s := s ++ s!"omegamax {hx r.omegaMax}\nmhat {hx r.mhat.1} {hx r.mhat.2.1} {hx r.mhat.2.2}\nlimited {nlim}\n"
     for p in [0:nP] do
@@ -324,6 +329,11 @@ def printStep (c : RegionCase) (r : RStep) : String := Id.run do
             let t := net.triples[g - nv - nP]!
             min (r.hP.get! t.p0) (min (r.hP.get! t.p1) (r.hP.get! t.p2))
         s := s ++ s!"hc {rv.X} {rv.toCopy[j]!} {hx h} {hx ((r.factor[rv.X]!).get! j)} {hx ((r.rBefore[rv.X]!).get! j)} {hx ((r.rAfter[rv.X]!).get! j)}\n"
+  if c.format == 2 then
+    if let some (hv, omv, fv) := r.vlimit then
+      s := s ++ "vlimit 1\n"
+      for i in [0:nv] do
+        s := s ++ s!"hv {i} {hx (hv.get! i)} {hx (omv.get! i)} {hx (fv.get! i)}\n"
   for k in [0:N] do
     for i in [0:nv] do
       s := s ++ s!"pd {k} {i} {hx ((r.rates[k]!).get! i)}\n"

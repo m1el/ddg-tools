@@ -408,4 +408,26 @@ positive. [formula: cut-step-local] -/
 def localLimitFactor (maxMotion hc tau v : α) : α :=
   if 0 < tau * v then min 1 (maxMotion * hc / (tau * v)) else 1
 
+/-! ## Additions for SPEC revision d36f05f (D26: the local limit at the vertices) -/
+
+/-- Change of the whole step at a vertex for `N` functions (two functions: `a` the function of the
+region of the vertex, `b` the smallest other one): `Δ = ½ [(φ_b′ − φ_b) − (φ_a′ − φ_a)]`.
+[formula: cut-step-local] -/
+def vertexChange (phiBNew phiB phiANew phiA : α) : α := ((phiBNew - phiB) - (phiANew - phiA)) / 2
+
+/-- Speed `|Δ|/τ` of the change of a vertex (capped rule). [formula: cut-step-local] -/
+def vertexSpeedCapped (delta tau : α) : α := Scalar.abs delta / tau
+
+/-- Speed of a vertex for the adaptive rule: `max(|Δ|/τ, ½ (ω_i − ω)₊)`.
+[formula: cut-step-local] -/
+def vertexSpeedAdaptive (delta tau omegaI omega : α) : α :=
+  max (Scalar.abs delta / tau) (max 0 (omegaI - omega) / 2)
+
+/-- Factor of the vertex limit, `min(1, max_motion · h_i/(τ v_i))` (`1` for `v_i = 0`): the same
+formula as `localLimitFactor`, without the guard case. [formula: cut-step-local] -/
+def vertexLimitFactor (maxMotion hi tau v : α) : α := localLimitFactor maxMotion hi tau v
+
+/-- Limited value at a vertex, `φ + factor · (φ′ − φ)`. [formula: cut-step-local] -/
+def limitedValue (phi phiNew factor : α) : α := phi + factor * (phiNew - phi)
+
 end Ddg

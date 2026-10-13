@@ -350,12 +350,21 @@ def printOutcome (c : CutCase) (o : Outcome) : String := Id.run do
         s := s ++ s!"dw {si} {hx (st.force.dwdn.get! si)}\n"
       if c.format == 3 then
         let mut nlim := 0
-        for k in [0:r.ev.cm.nc] do
-          if st.factor.get! k < 1 then nlim := nlim + 1
+        match r.vlimit with
+        | some (_, _, fv, _) =>
+          for i in [0:r.base.nv] do
+            if r.ev.cm.adj[i]! && fv.get! i < 1 then nlim := nlim + 1
+        | none =>
+          for k in [0:r.ev.cm.nc] do
+            if st.factor.get! k < 1 then nlim := nlim + 1
         s := s ++ s!"stats {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
         s := s ++ s!"omegamax {hx st.omegaMax}\nmhat {hx st.mhat.1} {hx st.mhat.2} {hx st.mused}\nlimited {nlim}\n"
         for k in [0:r.ev.cm.nc] do
           s := s ++ s!"h {k} {hx (st.hc.get! k)} {hx (st.mc1.get! k)} {hx (st.mc2.get! k)} {hx (st.factor.get! k)} {hx (st.rate.get! k)} {hx (st.rlim.get! k)}\n"
+        if let some (hv, omv, fv, pl) := r.vlimit then
+          s := s ++ "vlimit 1\n"
+          for i in [0:r.base.nv] do
+            s := s ++ s!"hv {i} {hx (hv.get! i)} {hx (omv.get! i)} {hx (fv.get! i)} {hx (pl.get! i)}\n"
       for i in [0:r.base.nv] do
         let rn := match st.ring[i]! with | some n => toString n | none => "-1"
         s := s ++ s!"m {i} {rn} {hx (st.sigma.get! i)}\n"
