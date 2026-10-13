@@ -144,5 +144,12 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
                 "{} cut edges are not edges of the mesh and could not be marked as seams".format(
                     stats["cut_edges_not_found"]),
             )
+        note = stats.get("triangulation")
+        if note and (note["stale"] or note["reason"]):
+            self.report({'WARNING'}, (
+                "Used Blender's triangulation for {} of the {} faces whose triangulation was "
+                "stored when the cut was applied{}").format(
+                note["stale"], note["used"] + note["stale"],
+                ": " + note["reason"] if note["reason"] else " (they were edited since)"))
         self.report({'WARNING'} if placeholder_warning else {'INFO'}, core.summary(stats))
         return {'FINISHED'}
