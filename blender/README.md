@@ -253,13 +253,17 @@ Typical use: select some faces (or one vertex) in Edit mode, **UV > Cut: Start**
 **Cut: Flow** one or more times (the cut in the wire object "<name> cut" moves), then
 **Cut: Apply**, then **Conformal Unwrap**.
 
-1. **Cut: Start** (`mode`, `radius`, `vertex`, `regions`). Creates the state as one float
+1. **Cut: Start** (`mode`, `radius`, `vertex`, `regions`, `cluster_iterations`, `attribute`). Creates the state as one float
    attribute per region on the face-corner domain, `ddg_cut_region_0`, `ddg_cut_region_1`, ... (a
    corner attribute, so that the two sides of a seam can differ; the second is the negative of
    the first), and the preview. `SELECTED`: the selected faces are region 0, the rest region 1.
    `CIRCLE`: the geodesic disk of `radius` (object units, scale not applied; 0: a tenth of the
    bounding box diagonal) around `vertex` (-1: the active vertex of the edit mesh) is region 0.
-   `regions` above 2 is refused with the library's "not available yet" message.
+   `CLUSTERS`: the vertex normals are clustered into `regions` regions (2 to 16, at most
+   `cluster_iterations` rounds): the start of an atlas (paper Sec. 7). `MATERIALS`: the
+   material slot of each face is its region (one region per slot in use). `ATTRIBUTE`: the
+   integer face attribute named by `attribute` labels the regions (one per distinct value,
+   ascending). `SELECTED` and `CIRCLE` have two regions, the other modes up to 16.
 2. **Cut: Flow** reads the attributes, runs `steps` steps (fewer with `use_stop_rule`: the
    library's stop rule), writes them back, replaces the preview, and reports the energy before
    and after, the cut length, the steps taken and the reason it stopped (status line; also in the
@@ -270,14 +274,16 @@ Typical use: select some faces (or one vertex) in Edit mode, **UV > Cut: Start**
    | `steps`, `use_stop_rule` | number of steps; stop early by the rule | 10, on |
    | `energy` | Dirichlet, Scaled Dirichlet (curvature-based weight), Hencky | Hencky |
    | `length_mode`, `ripple_wavelength` / `length_weight` | the length weight from a ripple wavelength (a fraction of the square root of the area; ripples longer than it grow), or explicit (on the surface scaled to unit area). Computed at the start of each run | ripple, 0.25 |
-   | `stages` | the library's default stages, or the paper's | default |
-   | `penalty_group`, `penalty_strength` | vertex group as penalty `eta` (paper Sec. 7.1): `eta = strength * length weight * group weight` | none, 1 |
+   | `stages` | recommended (the default stages for two regions, the paper's stages with the library's flux recovery for more: the core crate's SPEC D20 says why), the default stages for any N, or the paper's | recommended |
+   | `penalty_group`, `penalty_strength` | vertex group as penalty `eta` (paper Sec. 7.1): `eta = strength * length weight * group weight`: **the strength is multiplied by the length weight in force** (so it is in units of that weight), and the tooltips say so | none, 1 |
    | `hide_from_camera`, `hide_strength` | penalty where the active camera sees the surface: ray casts from the camera (anything in the scene can occlude) give the visibility, the library multiplies it by the facing term `max(n.e, 0)`; `eta += strength * length weight * that`. Perspective position of the camera, object-space normals | off, 1 |
-   | `distortion_weights`, `area_weights` | `w_k`, `beta_k` of region 0 and 1; `w = 0` for a region makes it a one-sided patch (paper Fig. 14) | (1, 1), (0, 0) |
+   | `distortion_weights`, `area_weights` | `w_k`, `beta_k` per region (16 entries, the first N are used; the panel shows one row per region); `w = 0` for a region makes it a one-sided patch (paper Fig. 14) | all 1, all 0 |
    | `symmetry`, `symmetry_tolerance` | mirror symmetry about the object's X, Y or Z plane; classes from mirrored vertices matched within the tolerance (fraction of the bounding box diagonal); unmatched vertices are reported | none |
    | `use_uniform_curvature`, `uniform_curvature` | replace the Gaussian curvature by a constant density (paper Sec. 7.4) | off |
    | *Advanced Options* (a toggle in the panel; `layout.panel` crashed Blender 5.0.1 in the redo popup) | cap and smoothing of the feature size, step size rule and its numbers, crossing offset, stop tolerances and window, the individual stages (normal derivative, length step, extension, speed scaling, redistancing, penalty rule) | the library's defaults |
 
+   For more than two regions the report adds the number of patches (connected pieces in one
+   region) and of triple points; the preview shows the network as curves between junctions.
    Not offered: a pointwise energy given by a function.
 3. **Cut: Apply** (`unwrap_after`). Inserts the cut into the mesh with bmesh, marks the new
    edges as seams, removes the preview and the attributes, and optionally runs **Conformal
@@ -293,6 +299,18 @@ Typical use: select some faces (or one vertex) in Edit mode, **UV > Cut: Start**
    points inside a polygon are created by `face_split` and get vertex-group weights, vertex
    data and corner data interpolated here from the two corners of their diagonal. Polygons that
    the cut does not cross (and whose edges got no point) are untouched, nothing is triangulated.
+   *Junctions* (more than two regions). The description has, per junction, the polygon, the
+   triangle of Blender's triangulation, its three corners and the barycentric weights; three
+   paths end at it. Inside a polygon the network is a forest whose leaves are edge points and
+   whose inner nodes are junctions. It is embedded by splitting the polygon with
+   `bmesh.utils.face_split` along chains of paths that run from a node that is a vertex already
+   (at first the edge points) to another one, through the junctions in between: `coords` of
+   the call are the interior points of the paths and the junction positions
+   (`sum(w_k x[corner_k])`); the junctions a chain passed through are vertices afterwards, and the
+   remaining arms are split the same way from them. This gives the polygons the Rust
+   construction gives (its pieces `(c_k, q_k, J, q_{k-1})` merged into parts), with the vertex
+   sets compared in the tests. A junction gets vertex-group weights, vertex data and corner data
+   blended with its three weights.
    *Difference from `CutSession.insert`* (the Rust reference): the result has the same
    vertices (positions), polygons (as vertex sets) and seams, but Blender numbers them in its own
    order, and the reference also hands out a triangulation of the new polygons, which Blender

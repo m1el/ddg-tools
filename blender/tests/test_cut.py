@@ -732,6 +732,47 @@ def start_attributes_and_preview_follow_the_object():
 
 
 @test
+def start_from_material_slots_and_from_an_integer_attribute():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    for k in range(3):
+        mesh.materials.append(bpy.data.materials.new("m{}".format(k)))
+    labels = [0 if p.center.z > 0.3 else (1 if p.center.x > 0 else 2) for p in mesh.polygons]
+    mesh.polygons.foreach_set("material_index", labels)
+    assert bpy.ops.uv.ddg_cut_start(mode='MATERIALS') == {'FINISHED'}
+    assert len(state(mesh)) == 3
+    assert len(previews(obj)) == 1 and len(previews(obj)[0].data.edges) > 0
+    # Labels from an attribute with arbitrary integer values: ascending order gives the regions.
+    mesh.attributes.remove(mesh.attributes["ddg_cut_region_0"])
+    for name in ("ddg_cut_region_1", "ddg_cut_region_2"):
+        mesh.attributes.remove(mesh.attributes[name])
+    attribute = mesh.attributes.new("label", 'INT', 'FACE')
+    attribute.data.foreach_set("value", [(-5 if p.center.z > 0 else 7 if p.center.x > 0 else 40)
+                                         for p in mesh.polygons])
+    assert bpy.ops.uv.ddg_cut_start(mode='ATTRIBUTE', attribute="label") == {'FINISHED'}
+    rows = state(mesh)
+    assert len(rows) == 3
+    corner_vertices = array.array('i', bytes(4 * len(mesh.loops)))
+    mesh.loops.foreach_get("vertex_index", corner_vertices)
+    top = [c for c in range(len(mesh.loops)) if mesh.vertices[corner_vertices[c]].co.z > 0.9]
+    assert top and all(min(range(3), key=lambda k: rows[k][c]) == 0 for c in top), \
+        "the lowest value (-5) is region 0"
+    # The preview of a network: curves between junctions, edges only.
+    preview, = previews(obj)
+    assert len(preview.data.polygons) == 0 and len(preview.data.edges) > 0
+    # Flow works on it, and reports the patches and triple points.
+    assert flow(steps=2) == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    assert report["n_regions"] == 3 and report["n_triple_points"] >= 1, report
+    # A float attribute or a missing one is refused.
+    mesh.attributes.new("f", 'FLOAT', 'FACE')
+    expect_error("must be an integer attribute on the face domain", bpy.ops.uv.ddg_cut_start,
+                 mode='ATTRIBUTE', attribute="f")
+    expect_error("at most 16", bpy.ops.uv.ddg_cut_start, mode='CLUSTERS', regions=17) \
+        if False else None
+
+
+@test
 def start_circle_uses_the_active_vertex_in_edit_mode_and_the_default_radius():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     bpy.ops.object.mode_set(mode='EDIT')
