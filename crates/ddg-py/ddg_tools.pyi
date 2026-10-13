@@ -113,7 +113,8 @@ class CutDescription:
         """``array('i')``: the polygon of every path, ascending."""
     @property
     def path_start(self) -> array[int]:
-        """``array('i')``: an edge point index, or ``-(j + 1)`` for junction ``j``."""
+        """``array('i')``: an edge point index, or ``-(j + 1)`` for junction ``j`` (three paths
+        end at every junction)."""
     @property
     def path_end(self) -> array[int]:
         """``array('i')``: like ``path_start``."""
@@ -136,6 +137,18 @@ class CutDescription:
     def junction_positions(self) -> array[float]:
         """``array('d')``, 3 per junction (empty for two regions)."""
     @property
+    def junction_polygon(self) -> array[int]:
+        """``array('i')``: the polygon of every junction (a triple point of the network)."""
+    @property
+    def junction_triangle(self) -> array[int]:
+        """``array('i')``: the triangle of the supplied triangulation that contains it."""
+    @property
+    def junction_corners(self) -> array[int]:
+        """``array('i')``, 3 per junction: the polygon corners of that triangle."""
+    @property
+    def junction_weights(self) -> array[float]:
+        """``array('d')``, 3 per junction: the junction is ``sum(w[k] * x[corner k])``."""
+    @property
     def n_clamped_crossings(self) -> int: ...
 
 @final
@@ -157,10 +170,14 @@ class InsertedMesh:
     def polygon_parent(self) -> array[int]: ...
     @property
     def vertex_source(self) -> array[int]:
-        """``array('i')``, 3 per new vertex: kind (0 old, 1 edge point, 2 interior point), then
-        the old vertex / edge point / path, and for kind 2 the position in the path's points."""
+        """``array('i')``, 3 per new vertex: kind (0 old, 1 edge point, 2 interior point,
+        3 junction), then the old vertex / edge point / path / junction, and for kind 2 the
+        position in the path's points."""
     @property
     def edge_point_vertex(self) -> array[int]: ...
+    @property
+    def junction_vertex(self) -> array[int]:
+        """``array('i')``: the vertex of every junction of the description."""
     @property
     def n_old_vertices(self) -> int: ...
 
@@ -212,9 +229,14 @@ class CutSession:
         circle_radius: float | None = None,
         polygon_labels: Buffer | None = None,
         corner_values: Buffer | None = None,
+        cluster_iterations: int | None = None,
     ) -> None:
-        """Exactly one start: ``circle_vertex`` with ``circle_radius``, ``polygon_labels`` or
-        ``corner_values``. ``n_regions > 2`` raises ``NotAvailableError`` for now."""
+        """Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
+        ``polygon_labels`` (one label per polygon below ``n_regions``), ``corner_values``
+        (``(n_regions, n_corners)``) or ``cluster_iterations`` (the vertex normals clustered into
+        ``n_regions`` clusters in at most that many rounds: the start of the atlas). Any number
+        of regions is accepted; ``NotAvailableError`` stays as a class but is not raised for
+        this."""
     @property
     def n_regions(self) -> int: ...
     @property
@@ -252,6 +274,7 @@ class CutSession:
         circle_radius: float | None = None,
         polygon_labels: Buffer | None = None,
         corner_values: Buffer | None = None,
+        cluster_iterations: int | None = None,
     ) -> None: ...
     def roughening_rate(self, **energy_options: object) -> float:
         """The roughening rate of the state; takes the keywords of ``step``."""
@@ -271,7 +294,7 @@ class CutSession:
         symmetry: Buffer | None = None,
         curvature_uniform: float | None = None,
         curvature_per_triangle: Buffer | None = None,
-        stages: Literal["default", "paper"] = "default",
+        stages: Literal["default", "paper", "recommended"] | None = None,
         flux_recovery: Literal["nodal", "smoothed"] | None = None,
         flux_smoothing: float | None = None,
         sliver_aspect_ratio: float | None = None,
@@ -305,7 +328,7 @@ class CutSession:
         symmetry: Buffer | None = None,
         curvature_uniform: float | None = None,
         curvature_per_triangle: Buffer | None = None,
-        stages: Literal["default", "paper"] = "default",
+        stages: Literal["default", "paper", "recommended"] | None = None,
         flux_recovery: Literal["nodal", "smoothed"] | None = None,
         flux_smoothing: float | None = None,
         sliver_aspect_ratio: float | None = None,
@@ -329,9 +352,11 @@ class CutSession:
         ``steps`` in the result lists the dicts that ``step`` returns."""
     def preview(
         self, *, min_crossing_offset: float | None = None
-    ) -> tuple[array[float], array[int], list[bool]]:
-        """``(positions, starts, closed)``: 3 floats per point, ``n_polylines + 1`` offsets into
-        the points, and whether each polyline is closed."""
+    ) -> tuple[array[float], array[int], list[bool], array[int]]:
+        """``(positions, starts, closed, regions)``: 3 floats per point, ``n_polylines + 1``
+        offsets into the points, whether each polyline is closed, and 2 regions per polyline
+        (``[lower, higher]``). For more than two regions the polylines are the curves of the
+        network between its junctions (a curve that ends at a junction ends at its position)."""
     def describe_cut(self, *, min_crossing_offset: float | None = None) -> CutDescription: ...
     def insert(
         self, cut: CutDescription | None = None, *, min_crossing_offset: float | None = None

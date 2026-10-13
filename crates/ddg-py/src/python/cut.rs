@@ -18,7 +18,7 @@ use crate::buffers::decode_reals;
 use crate::contract::{MeshBuffers, UnwrapInput};
 use crate::cutting::{
     BindError, Controls, CutSession as RustCutSession, DescriptionArrays, Dict, EnergyKind,
-    FluxChoice, InsertedArrays, StartSpec, StepRule, UnwrapArrays, UnwrapSettings, Value,
+    FluxChoice, InsertedArrays, StageSet, StartSpec, StepRule, UnwrapArrays, UnwrapSettings, Value,
 };
 
 pyo3::create_exception!(
@@ -257,7 +257,17 @@ fn parse_controls(
                 c.curvature_per_triangle =
                     Some(reals("curvature_per_triangle", &value, 1, "triangle")?)
             }
-            "stages" => c.paper_stages = choice(k, &value, &[("default", false), ("paper", true)])?,
+            "stages" => {
+                c.stages = Some(choice(
+                    k,
+                    &value,
+                    &[
+                        ("default", StageSet::Default),
+                        ("paper", StageSet::Paper),
+                        ("recommended", StageSet::Recommended),
+                    ],
+                )?)
+            }
             "flux_recovery" => {
                 c.flux_recovery = Some(choice(
                     k,
@@ -344,15 +354,20 @@ fn parse_start(
     circle_radius: Option<f64>,
     polygon_labels: Option<&Bound<'_, PyAny>>,
     corner_values: Option<&Bound<'_, PyAny>>,
+    cluster_iterations: Option<usize>,
 ) -> PyResult<StartSpec> {
     let n = usize::from(circle_vertex.is_some() || circle_radius.is_some())
         + usize::from(polygon_labels.is_some())
-        + usize::from(corner_values.is_some());
+        + usize::from(corner_values.is_some())
+        + usize::from(cluster_iterations.is_some());
     if n != 1 {
         return Err(InputError::new_err(
-            "give exactly one start: circle_vertex with circle_radius, polygon_labels, or \
-             corner_values",
+            "give exactly one start: circle_vertex with circle_radius, polygon_labels, \
+             corner_values, or cluster_iterations (normal clusters)",
         ));
+    }
+    if let Some(max_iterations) = cluster_iterations {
+        return Ok(StartSpec::NormalClusters { max_iterations });
     }
     if let Some(labels) = polygon_labels {
         return Ok(StartSpec::Labels(indices(
@@ -420,6 +435,19 @@ struct CutDescription {
     /// `array('d')`, 3 per junction of three or more regions (empty for two).
     #[pyo3(get)]
     junction_positions: Py<PyAny>,
+    /// `array('i')`: the polygon of every junction.
+    #[pyo3(get)]
+    junction_polygon: Py<PyAny>,
+    /// `array('i')`: the triangle of the supplied triangulation that contains each junction.
+    #[pyo3(get)]
+    junction_triangle: Py<PyAny>,
+    /// `array('i')`, 3 per junction: the polygon corners of its triangle.
+    #[pyo3(get)]
+    junction_corners: Py<PyAny>,
+    /// `array('d')`, 3 per junction: barycentric weights of those corners (the junction is
+    /// `sum(w[k] * x[corner k])`).
+    #[pyo3(get)]
+    junction_weights: Py<PyAny>,
     /// Number of crossings that were moved away from a vertex.
     #[pyo3(get)]
     n_clamped_crossings: usize,
@@ -443,6 +471,10 @@ impl CutDescription {
             interior_t: real_array(py, &a.interior_t)?.unbind(),
             interior_positions: real_array(py, &a.interior_positions)?.unbind(),
             junction_positions: real_array(py, &a.junction_positions)?.unbind(),
+            junction_polygon: u32_array(py, "junction_polygon", &a.junction_polygon)?.unbind(),
+            junction_triangle: u32_array(py, "junction_triangle", &a.junction_triangle)?.unbind(),
+            junction_corners: u32_array(py, "junction_corners", &a.junction_corners)?.unbind(),
+            junction_weights: real_array(py, &a.junction_weights)?.unbind(),
             n_clamped_crossings: a.n_clamped_crossings,
             cut,
         })
@@ -493,13 +525,16 @@ struct InsertedMesh {
     #[pyo3(get)]
     polygon_parent: Py<PyAny>,
     /// `array('i')`, 3 per new vertex: kind (0 old vertex, 1 edge point, 2 interior point of a
-    /// path), then the old vertex / the edge point / the path, and for kind 2 the position in
+    /// path, 3 junction), then the old vertex / the edge point / the path / the junction, and for kind 2 the position in
     /// the path's interior points (else 0).
     #[pyo3(get)]
     vertex_source: Py<PyAny>,
     /// `array('i')`: the vertex of every edge point of the description.
     #[pyo3(get)]
     edge_point_vertex: Py<PyAny>,
+    /// `array('i')`: the vertex of every junction of the description.
+    #[pyo3(get)]
+    junction_vertex: Py<PyAny>,
     /// Number of vertices of the old mesh (vertices below it keep their index).
     #[pyo3(get)]
     n_old_vertices: usize,
@@ -516,6 +551,7 @@ impl InsertedMesh {
             polygon_parent: u32_array(py, "polygon_parent", &a.polygon_parent)?.unbind(),
             vertex_source: u32_array(py, "vertex_source", &a.vertex_source)?.unbind(),
             edge_point_vertex: u32_array(py, "edge_point_vertex", &a.edge_point_vertex)?.unbind(),
+            junction_vertex: u32_array(py, "junction_vertex", &a.junction_vertex)?.unbind(),
             n_old_vertices: a.n_old_vertices,
         })
     }
@@ -609,6 +645,7 @@ impl CutSession {
         circle_radius = None,
         polygon_labels = None,
         corner_values = None,
+        cluster_iterations = None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new<'py>(
@@ -627,6 +664,7 @@ impl CutSession {
         circle_radius: Option<f64>,
         polygon_labels: Option<&Bound<'py, PyAny>>,
         corner_values: Option<&Bound<'py, PyAny>>,
+        cluster_iterations: Option<usize>,
     ) -> PyResult<CutSession> {
         let optional_indices = |name, obj: Option<&Bound<'py, PyAny>>, width, row| match obj {
             Some(obj) => indices(name, obj, width, row),
@@ -656,7 +694,13 @@ impl CutSession {
                 "vertex",
             )?,
         };
-        let start = parse_start(circle_vertex, circle_radius, polygon_labels, corner_values)?;
+        let start = parse_start(
+            circle_vertex,
+            circle_radius,
+            polygon_labels,
+            corner_values,
+            cluster_iterations,
+        )?;
         let session = py
             .detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
@@ -774,7 +818,7 @@ impl CutSession {
     }
 
     /// Replaces the state by a new start; the keywords are those of the constructor.
-    #[pyo3(signature = (*, circle_vertex = None, circle_radius = None, polygon_labels = None, corner_values = None))]
+    #[pyo3(signature = (*, circle_vertex = None, circle_radius = None, polygon_labels = None, corner_values = None, cluster_iterations = None))]
     fn restart(
         &self,
         py: Python<'_>,
@@ -782,8 +826,15 @@ impl CutSession {
         circle_radius: Option<f64>,
         polygon_labels: Option<&Bound<'_, PyAny>>,
         corner_values: Option<&Bound<'_, PyAny>>,
+        cluster_iterations: Option<usize>,
     ) -> PyResult<()> {
-        let start = parse_start(circle_vertex, circle_radius, polygon_labels, corner_values)?;
+        let start = parse_start(
+            circle_vertex,
+            circle_radius,
+            polygon_labels,
+            corner_values,
+            cluster_iterations,
+        )?;
         py.detach(|| self.lock()?.restart(&start).map_err(bind_error))
     }
 
@@ -859,6 +910,7 @@ impl CutSession {
                 real_array(py, &p.positions)?,
                 u32_array(py, "starts", &p.starts)?,
                 PyList::new(py, &p.closed)?.into_any(),
+                u32_array(py, "regions", &p.regions)?,
             ],
         )
     }

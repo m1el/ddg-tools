@@ -226,12 +226,13 @@ s = ddg_tools.CutSession(
     circle_vertex=None, circle_radius=None,     # geodesic disk around a vertex (region 0)
     polygon_labels=None,                        # one label per polygon
     corner_values=None,                         # (n_regions, n_corners), as `state`
+    cluster_iterations=None,                    # normal clusters, any n_regions (the atlas)
 )
 s.state                       # memoryview, float64, shape (n_regions, n_corners); assignable
 s.step(**controls) -> dict    # one step
 s.run(**controls, max_steps=1000, motion_tolerance=1e-5, energy_tolerance=1e-4,
       energy_window=25) -> dict
-s.preview() -> (positions, starts, closed)          # the cut as polylines
+s.preview() -> (positions, starts, closed, regions) # the cut as polylines, 2 regions each
 s.describe_cut() -> CutDescription                  # the cut on the polygons, as arrays
 s.insert(cut=None) -> InsertedMesh                  # the Rust reference insertion
 s.unwrap(cones=False, ...) -> CutUnwrapResult       # insert, then unwrap with the cut as seams
@@ -250,8 +251,24 @@ Reports give the cut length in both (`cut_length`, `cut_length_unit_area`).
 can differ. With two regions the rows are `phi` and `-phi`; region 0 is where `phi <= 0`. Setting
 the state accepts any float buffer of that shape (or flat, row-major), resets time and step count,
 and refuses corners of one vertex that no seam separates but that carry different values (the
-error names the vertex). `n_regions > 2` raises `ddg_tools.NotAvailableError` ("... N regions are
-not available yet"); every array is already shaped for N regions.
+error names the vertex).
+
+**More than two regions.** `n_regions` can be any number from 2. The starts: `cluster_iterations`
+(the vertex normals clustered into `n_regions` clusters, at most that many rounds: the start of
+the atlas of the paper), `polygon_labels` and `corner_values` with N values, and the geodesic circle
+for two regions only (more raise `InputError`). `stages` defaults to the recommended set: the
+default stages for two regions, the paper's stages with the flux recovery of the core crate
+(`FlowOptions::for_regions`, SPEC D20) for more; `stages="default"` and `"paper"` choose the
+others, and every individual stage option overrides as before. `distortion_weights` and
+`area_weights` have one entry per region. `step`/`run` report `distortion_k` and `area_k` for
+every region. `preview()` returns the curves of the network between its junctions, each with the
+two regions it separates. `describe_cut()` has the junctions (a triple point inside a triangle of
+Blender's triangulation): `junction_polygon`, `junction_triangle`, `junction_corners` (3 per
+junction), `junction_weights` (3 per junction; the junction is the weighted sum of the corner
+positions), `junction_positions`; three paths end at each junction (`path_start`/`path_end` of
+`-(j+1)`). `insert()` returns `junction_vertex` and marks junction vertices as kind 3 in
+`vertex_source`. The construction is in the rustdoc of `ddg_uv::cutting::insert`.
+`NotAvailableError` stays as a class for compatibility but is not raised for this.
 
 **Controls** of `step` / `run` (keyword-only; `None` is the library's default; an unknown keyword
 is a `TypeError`):
@@ -263,10 +280,10 @@ is a `TypeError`):
 | `feature_r_eps`, `feature_smoothing` | cap `r_eps` and smoothing `c` of the curvature-based weight | `1.0` (example program), `0.02` (paper) |
 | `length_weight` / `ripple_wavelength` | `alpha_L` explicit, or set from the roughening rate of the state so that ripples longer than the wavelength grow (`length_weight_for_ripples`); in `run` once at the start | `ripple_wavelength=0.25` (example program) |
 | `penalty`, `penalty_rule` | `eta` per vertex; `"gradient"` or `"paper_diagonal"` | none, `"gradient"` |
-| `distortion_weights`, `area_weights` | `w_k`, `beta_k` per region | all 1, all 0 |
+| `distortion_weights`, `area_weights` | `w_k`, `beta_k`, one per region | all 1, all 0 |
 | `symmetry` | class per vertex (equal classes are kept at equal values; a vertex split by a seam is left out) | none |
 | `curvature_uniform` / `curvature_per_triangle` | curvature override (density per unit area of the unit-area surface) | Gaussian curvature |
-| `stages` | `"default"` or `"paper"` (stages as printed) | `"default"` |
+| `stages` | `"default"`, `"paper"` (stages as printed) or `"recommended"` | recommended: `"default"` for 2 regions, the paper's stages with flux recovery for more |
 | `flux_recovery`, `flux_smoothing`, `sliver_aspect_ratio`, `smoothing_passes`, `length_step`, `extension`, `speed_scaling`, `redistance` | the individual stages | those of `stages` |
 | `step_rule`, `time_scale`, `max_motion`, `tau_max`, `tau` | `"adaptive"`, `"capped"` or `"fixed"` (`tau`) | adaptive, 0.05, 0.25, 1 |
 | `min_crossing_offset` | `delta`, smallest distance of a crossing from a vertex | `1e-3` |
