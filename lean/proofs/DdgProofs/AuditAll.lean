@@ -11,7 +11,7 @@ declarations) and reports the union and every declaration that uses an axiom oth
 The declarations are taken from the module data of this project's modules
 (`env.header.moduleData[i].constNames`), not by filtering every constant of the environment: with
 Mathlib imported that is about 785 000 constants, and classifying each of them by module took
-over six minutes in the interpreter, while the audit of the declarations found (1989 then, 2538
+over six minutes in the interpreter, while the audit of the declarations found (1989 then, about 2500
 with the cut-flow modules) takes milliseconds (this Lean version records each declaration's
 axioms when its module is compiled).
 The whole file now runs in a few seconds, nearly all of it loading Mathlib.

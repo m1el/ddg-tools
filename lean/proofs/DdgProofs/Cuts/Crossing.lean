@@ -435,6 +435,8 @@ barycentric rows (each with sum `1`). The oracle's
 `cotFromInner ⟨y − x, z − x⟩ (|det| · A_f) = ⟨y − x, z − x⟩ / (2 · area)` is the cotangent
 `cornerCot` of the corner at `x` of the triangle whose side lengths are the `baryLength`s
 (so it is the cotangent that the three edge lengths would give, without their cancellation).
+For a degenerate sub-triangle (`det = 0`) both sides are `0` only by Lean's convention `x/0 = 0`;
+the statement has content for `det ≠ 0`.
 
 [formula: cut-barycentric-length] -/
 theorem cotFromInner_eq_cornerCot {lab lbc lca : ℝ} (h : IsTriangle lab lbc lca)

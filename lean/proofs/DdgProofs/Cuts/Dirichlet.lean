@@ -288,6 +288,16 @@ theorem sum_normalFlux {g u : V → ℝ} (h : IsDirichletSolution L I (-g) u)
   rw [h.sum_boundaryFlux hL]
   simp
 
+/-- **Flux balance for a symmetric matrix with zero row sums** (the form of SPEC §3.5; for a
+matrix that is not symmetric the hypothesis that matters is zero *column* sums, `sum_normalFlux`).
+
+[formula: cut-normal-derivative] -/
+theorem sum_normalFlux_of_isSymm {g u : V → ℝ} (h : IsDirichletSolution L I (-g) u)
+    (hL : L.IsSymm) (hrow : L *ᵥ (fun _ => (1 : ℝ)) = 0) :
+    ∑ v, boundaryFlux L I (-g) u v = ∑ v, g v := by
+  refine sum_normalFlux h ?_
+  rw [← Matrix.mulVec_transpose, hL.eq, hrow]
+
 /-- **Dirichlet energy of the Yamabe solution**: `uᵀ L u = −Σ u_i g_i = −u_I · g_I`.
 
 [formula: cut-dirichlet-energy] -/

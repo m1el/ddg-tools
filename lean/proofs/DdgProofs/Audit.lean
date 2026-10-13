@@ -532,3 +532,4 @@ open DdgProofs
 #print axioms Cuts.hasDerivAt_disk_scaledEnergy_density
 #print axioms Cuts.hasDerivAt_disk_henckyEnergy_density
 #print axioms Cuts.hasDerivAt_capEnergy_density
+#print axioms Cuts.sum_normalFlux_of_isSymm
