@@ -705,3 +705,66 @@ fn print_timings() {
         );
     }
 }
+
+#[test]
+fn feature_size_stays_in_range_on_obtuse_triangles() {
+    // A bumpy grid sheared so far that many triangles are strongly obtuse: the cotan Laplacian
+    // then has negative edge weights and the smoothing with it would not be bounded by its
+    // data. The smoothing of SPEC §3.6 clamps the edge weights (D17).
+    let base = ddg_core::generators::bumpy_grid_disk(14, 10, 0.25).unwrap();
+    let positions: Vec<[f64; 3]> = base
+        .positions
+        .iter()
+        .map(|p| [p[0] + 2.5 * p[1], p[1], p[2]])
+        .collect();
+    let shape = Shape::new("sheared bumpy grid", positions, base.faces);
+    // The mesh does have negative edge weights.
+    let laplacian = cotan_laplacian(&shape.mesh, &shape.geometry).unwrap();
+    let positive_off_diagonal = laplacian
+        .triplets()
+        .filter(|&(i, j, value)| i != j && value > 1e-3)
+        .count();
+    assert!(positive_off_diagonal > 100, "{positive_off_diagonal}");
+    let largest_angle = shape
+        .geometry
+        .corner_angles()
+        .iter()
+        .flatten()
+        .fold(0.0f64, |m, a| m.max(*a));
+    assert!(largest_angle > 2.4, "{largest_angle}");
+
+    let mut evaluator = shape.evaluator();
+    let defects = ddg_core::operators::angle_defects(&shape.mesh, &shape.geometry).unwrap();
+    let areas = evaluator.vertex_areas().to_vec();
+    for r_eps in [0.05, 0.3, 5.0] {
+        let raw: Vec<f64> = (0..areas.len())
+            .map(|v| 1.0 / ((defects[v] / areas[v]).abs().sqrt() + 1.0 / r_eps))
+            .collect();
+        let (lo, hi) = raw.iter().fold((f64::INFINITY, 0.0f64), |(lo, hi), r| {
+            (lo.min(*r), hi.max(*r))
+        });
+        assert!(lo > 0.0 && hi <= r_eps && hi > 1.5 * lo);
+        for smoothing in [0.0, 0.02, 1.0, 100.0] {
+            let weight = evaluator
+                .feature_size_weight(r_eps, smoothing, Parallelism::Sequential)
+                .unwrap()
+                .to_vec();
+            for (v, a) in weight.iter().enumerate() {
+                let r = a.cbrt();
+                assert!(
+                    r >= lo * (1.0 - 1e-9) && r <= hi * (1.0 + 1e-9),
+                    "r_eps {r_eps}, c {smoothing}, vertex {v}: r = {r} outside [{lo}, {hi}]"
+                );
+                if smoothing == 0.0 {
+                    assert!((r - raw[v]).abs() < 1e-12 * raw[v]);
+                }
+            }
+            // The smoothing keeps the area-weighted mean of r.
+            let mean =
+                |x: &dyn Fn(usize) -> f64| (0..areas.len()).map(|v| areas[v] * x(v)).sum::<f64>();
+            let before = mean(&|v| raw[v]);
+            let after = mean(&|v| weight[v].cbrt());
+            assert!((before - after).abs() < 1e-10 * before);
+        }
+    }
+}

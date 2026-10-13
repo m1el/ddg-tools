@@ -78,14 +78,21 @@ pub fn face_curvature_sum_residual(
 }
 
 /// The curvature-based weight `a = r³` of the scaled Dirichlet energy (paper Sec. 3.5.1, 5.6;
-/// SPEC §3.6, D5), on the unit-area surface:
+/// SPEC §3.6, D5, D17), on the unit-area surface:
 ///
 /// ```text
 /// K_i  = (2π − Θ_i)/A_i  (interior),  0 on ∂M
 /// r⁰_i = 1 / ( √|K_i| + 1/r_ε )
-/// (W_V + c L) r = W_V r⁰
+/// (W_V + c L⁺) r = W_V r⁰
 /// a_i  = r_i³
 /// ```
+///
+/// `L⁺` is the cotan Laplacian with every negative edge weight replaced by zero
+/// (`w⁺_ij = max(w_ij, 0)` with `w_ij = ½ Σ cot` over the one or two corners opposite the edge;
+/// diagonal = row sum). The matrix `W_V + c L⁺` is then an M-matrix whose rows sum to `A_i`,
+/// so `min r⁰ ≤ r ≤ max r⁰` on every mesh: `r` and `a = r³` are positive. With the plain cotan
+/// matrix of the paper this only holds on meshes without negative edge weights (D17); on those
+/// the two agree.
 ///
 /// `vertex_area` are the lumped vertex areas `A_i` of the unit-area surface, `face_cot` the
 /// corner cotangents of every face.
@@ -113,19 +120,24 @@ pub(crate) fn feature_size_weight(
         })
         .collect();
     if smoothing > 0.0 {
-        // (W_V + c L), lower triangle; duplicates are summed by `from_triplets`.
-        let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(n + 9 * mesh.n_faces());
+        // Edge weights w_ij = ½ Σ cot over the corners opposite the edge.
+        let mut edge_weight = vec![0.0f64; mesh.n_edges()];
+        for (f, cot) in face_cot.iter().enumerate() {
+            for k in 0..3 {
+                // The edge opposite corner k is halfedge 3 f + (k + 1) % 3.
+                edge_weight[mesh.edge(3 * f + (k + 1) % 3)] += 0.5 * cot[k];
+            }
+        }
+        // (W_V + c L⁺), lower triangle; duplicates are summed by `from_triplets`.
+        let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(n + 3 * mesh.n_edges());
         for (v, &area) in vertex_area.iter().enumerate() {
             triplets.push((v as u32, v as u32, area));
         }
-        for (face, cot) in mesh.faces().iter().zip(face_cot) {
-            for k in 0..3 {
-                let (i, j) = (face[(k + 1) % 3], face[(k + 2) % 3]);
-                let w = 0.5 * smoothing * cot[k];
-                triplets.push((i, i, w));
-                triplets.push((j, j, w));
-                triplets.push((i.max(j), i.min(j), -w));
-            }
+        for (&[i, j], &w) in mesh.edges().iter().zip(&edge_weight) {
+            let w = smoothing * w.max(0.0);
+            triplets.push((i, i, w));
+            triplets.push((j, j, w));
+            triplets.push((i.max(j), i.min(j), -w));
         }
         let matrix = SparseMatrix::from_triplets(n, n, &triplets)?;
         let factorization = Symbolic::analyze(&matrix, Method::Llt)?.factor(&matrix, par)?;
