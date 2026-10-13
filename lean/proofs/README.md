@@ -34,13 +34,13 @@ lake build > ../../runs_tmp/lean-proofs-build.log 2>&1
 lake env lean DdgProofs/Audit.lean      # prints the axioms each main theorem depends on
 ../../scripts/check-formulas.sh         # formula ids: Rust <-> Lean theorem / CITED.md; no sorry/axiom
 ../../scripts/check-formulas.sh --build # the same, plus build and axiom audit of the main theorems
-../../scripts/check-formulas.sh --audit-all   # the same, plus the axioms of every declaration (minutes)
+../../scripts/check-formulas.sh --audit-all   # the same, plus the axioms of every declaration (a few seconds more)
 ```
 
 There is no `sorry` and no `axiom` declaration in this package. `DdgProofs/Audit.lean` runs
 `#print axioms` on the main theorems, by name (the count is printed by `check-formulas.sh --build`);
 every one reports exactly `[propext, Classical.choice, Quot.sound]`.
-`lake env lean DdgProofs/AuditAll.lean` (several minutes) collects the axioms of *every*
+`lake env lean DdgProofs/AuditAll.lean` (a few seconds) collects the axioms of *every*
 declaration of the package and of the oracle's formula modules and reports any other axiom.
 
 The lakefile sets `autoImplicit = false`; `lake env lean File.lean` on a single file does **not**

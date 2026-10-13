@@ -16,7 +16,7 @@
 #                 Classical.choice and Quot.sound.
 #   --audit-all   additionally (implies --build) run DdgProofs/AuditAll.lean, which collects the
 #                 axioms of every declaration of lean/proofs and of the oracle's formula modules.
-#                 Takes several minutes.
+#                 Takes a few seconds (it walks only this project's modules).
 #
 # Works with no Rust sources present (the table then lists the Lean and cited ids only).
 

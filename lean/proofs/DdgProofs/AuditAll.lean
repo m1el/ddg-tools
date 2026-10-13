@@ -4,10 +4,16 @@ import DdgProofs
 # Axiom audit of every declaration
 
 `lake env lean DdgProofs/AuditAll.lean` collects the axioms of **every** declaration defined in a
-`DdgProofs.*` or `DdgOracle.*` module (theorems, definitions, instances, auxiliary declarations)
-and reports the union and every declaration that uses an axiom other than `propext`,
-`Classical.choice`, `Quot.sound`. It takes several minutes; `Audit.lean` (the main theorems, by
-name) is the quick check that `scripts/check-formulas.sh --build` runs.
+`DdgProofs.*` or `DdgOracle.*` module (theorems, definitions, instances, auxiliary and private
+declarations) and reports the union and every declaration that uses an axiom other than `propext`,
+`Classical.choice`, `Quot.sound`. `scripts/check-formulas.sh --audit-all` runs it.
+
+The declarations are taken from the module data of this project's modules
+(`env.header.moduleData[i].constNames`), not by filtering every constant of the environment: with
+Mathlib imported that is about 785 000 constants, and classifying each of them by module took
+over six minutes in the interpreter, while the audit of the 1989 declarations found takes
+milliseconds (this Lean version records each declaration's axioms when its module is compiled).
+The whole file now runs in a few seconds, nearly all of it loading Mathlib.
 
 This file is not imported by the library.
 -/
@@ -20,12 +26,10 @@ elab "#audit_all" : command => do
   let mut cnt : Nat := 0
   let mut bad : Array (Name × Array Name) := #[]
   let mut all : Std.HashSet Name := {}
-  for (c, _) in env.constants.toList do
-    match env.getModuleIdxFor? c with
-    | none => pure ()
-    | some idx =>
-      let m := env.header.moduleNames[idx.toNat]!
-      if (`DdgProofs).isPrefixOf m || (`DdgOracle).isPrefixOf m then
+  for i in [0:env.header.moduleNames.size] do
+    let m := env.header.moduleNames[i]!
+    if (`DdgProofs).isPrefixOf m || (`DdgOracle).isPrefixOf m then
+      for c in env.header.moduleData[i]!.constNames do
         cnt := cnt + 1
         let axs ← Lean.collectAxioms c
         for a in axs do all := all.insert a
