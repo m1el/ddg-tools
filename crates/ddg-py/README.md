@@ -220,7 +220,7 @@ array).
 ```python
 s = ddg_tools.CutSession(
     positions, corner_vertices, polygon_starts, triangles, *,
-    n_regions=2, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
+    n_regions=None, triangulation="intrinsic", refine_bound=None, state=None, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
     prescribed_vertices=None, prescribed_angles=None,
     # exactly one start:
     circle_vertex=None, circle_radius=None,     # geodesic disk around a vertex (region 0)
@@ -252,6 +252,28 @@ can differ. With two regions the rows are `phi` and `-phi`; region 0 is where `p
 the state accepts any float buffer of that shape (or flat, row-major), resets time and step count,
 and refuses corners of one vertex that no seam separates but that carry different values (the
 error names the vertex).
+
+**The triangulation the flow runs on.** `triangulation="intrinsic"` (the default) runs the flow on
+an intrinsic triangulation of the surface flipped to Delaunay (`ddg-intrinsic`, after Sharp,
+Soliman, Crane, *Navigating Intrinsic Triangulations*, 2019): the flow's stages degrade on badly
+shaped triangles (on a 165 degree sheared grid the speed is off by 110 % with the paper's stages
+and the cut vanishes), flips alone restore regular-grid behaviour, and usually no vertex is added.
+`"refined"` adds refinement to `refine_bound` degrees (default 25, at most 35) and adds
+vertices; `"caller"` is the caller's triangulation, as the versions before this one. The cut
+comes back onto the caller's polygons whatever the choice. `intrinsic_report` is a dictionary
+(`n_added`, `n_initial_flips`, `n_splits`, `min_angle_degrees`, `max_angle_degrees`,
+`is_delaunay`, `seconds`, `fingerprint`, ...; `None` for `"caller"`). **State.** `state` (the
+`(n_regions, n_corners)` array) is the whole state exactly when `state_is_per_corner` is true
+(no vertex added). Otherwise keep `snapshot()` (bytes: the levels on all vertices of the
+triangulation, its fingerprint, the number of regions and the option): `CutSession(..., state=bytes)`
+rebuilds the session on the same mesh (the triangulation and `n_regions` come from the bytes) and
+`restore(bytes)` sets a live one; a state of another mesh or other seams raises
+`StaleStateError`. A curvature per triangle is refused on an intrinsic triangulation
+(`InputError`); use `"caller"` for it. The description has several points per edge, junctions of
+any degree (a bend is a junction with two paths), paths between junctions and paths with both
+ends on one polygon edge; `CutDescription.lines()` / `CutSession.lines()` give the paths joined
+for display; `InsertedMesh.polygon_region` is the region of each new polygon where known. The
+Blender operators use all of this (`blender/README.md`).
 
 **More than two regions.** `n_regions` can be any number from 2. The starts: `cluster_iterations`
 (the vertex normals clustered into `n_regions` clusters, at most that many rounds: the start of

@@ -26,7 +26,8 @@ use std::time::Instant;
 use ddg_core::TriMesh;
 use ddg_uv::cutting::{
     ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
-    Inserted, PathEnd, PreviewPolyline, Session, Start, VertexSource, insert,
+    FlowKind, Inserted, IntrinsicOptions, PathEnd, PreviewPolyline, Session, SessionState, Start,
+    Triangulation, VertexSource, insert,
 };
 use ddg_uv::{BoundaryValues, ConeSigns, ErrorKind, MeshInput, PolygonMesh};
 use ddg_variational_cuts as vc;
@@ -134,6 +135,9 @@ pub enum BindError {
     NotAvailable(String),
     /// A numerical or internal failure (`SolveError`).
     Solve(String),
+    /// A stored state belongs to another triangulation: the mesh or its seams changed since
+    /// it was made (`StaleStateError`).
+    Stale(String),
 }
 
 impl BindError {
@@ -143,6 +147,7 @@ impl BindError {
             BindError::Input(m)
             | BindError::Mesh(m)
             | BindError::NotAvailable(m)
+            | BindError::Stale(m)
             | BindError::Solve(m) => m,
         }
     }
@@ -199,8 +204,11 @@ impl From<CuttingError> for BindError {
                     BindError::Mesh(_) => BindError::Mesh(message),
                     BindError::NotAvailable(_) => BindError::NotAvailable(message),
                     BindError::Solve(_) => BindError::Solve(message),
+                    BindError::Stale(_) => BindError::Stale(message),
                 }
             }
+            CuttingError::StaleState { .. } => BindError::Stale(message),
+            CuttingError::Intrinsic(_) => BindError::Solve(message),
             CuttingError::RegionsNotAvailable { .. } | CuttingError::Unsupported { .. } => {
                 BindError::NotAvailable(message)
             }
@@ -599,6 +607,55 @@ pub enum StartSpec {
     },
 }
 
+/// The triangulation the flow runs on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TriangulationSpec {
+    /// The caller's triangulation, as before.
+    Caller,
+    /// An intrinsic triangulation flipped to Delaunay (usually no vertex is added): the default.
+    Flips,
+    /// Flips and refinement to an angle bound, in degrees.
+    Refined {
+        /// The smallest angle refinement aims for, in degrees (between 0 and 35).
+        bound_degrees: f64,
+    },
+}
+
+impl TriangulationSpec {
+    /// The library's option.
+    pub fn option(&self) -> Result<Triangulation, BindError> {
+        Ok(match self {
+            TriangulationSpec::Caller => Triangulation::Caller,
+            TriangulationSpec::Flips => Triangulation::Intrinsic(IntrinsicOptions::flips_only()),
+            TriangulationSpec::Refined { bound_degrees } => {
+                if !(bound_degrees.is_finite() && (0.0..=35.0).contains(bound_degrees)) {
+                    return Err(input_error(format!(
+                        "refine_bound must be between 0 and 35 degrees, got {bound_degrees}"
+                    )));
+                }
+                let mut o = IntrinsicOptions::refined();
+                let bound = bound_degrees.to_radians();
+                if let Some(r) = o.refine.as_mut() {
+                    r.min_angle = bound;
+                }
+                if let Some(r) = o.export.refine.as_mut() {
+                    r.min_angle = bound;
+                }
+                Triangulation::Intrinsic(o)
+            }
+        })
+    }
+
+    /// The name used in reports and by Python: `"caller"`, `"intrinsic"`, `"refined"`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            TriangulationSpec::Caller => "caller",
+            TriangulationSpec::Flips => "intrinsic",
+            TriangulationSpec::Refined { .. } => "refined",
+        }
+    }
+}
+
 /// The options of the end-to-end unwrap.
 #[derive(Debug, Clone)]
 pub struct UnwrapSettings {
@@ -693,19 +750,104 @@ impl CutSession {
         input: &UnwrapInput,
         n_regions: usize,
         start: &StartSpec,
+        triangulation: &TriangulationSpec,
     ) -> Result<CutSession, BindError> {
         let prescribed = prescribed_cones(input);
         let mesh = mesh_input(input, &prescribed);
         let start = start_of(start, n_regions, input.n_corners())?;
-        let inner = Session::new(&mesh, n_regions, &start)?;
-        Ok(CutSession {
+        let inner = Session::with_triangulation(
+            &mesh,
+            n_regions,
+            &start,
+            FlowKind::Auto,
+            &triangulation.option()?,
+        )?;
+        Ok(CutSession::wrap(input, inner, n_regions))
+    }
+
+    /// A session rebuilt from stored state bytes ([`CutSession::snapshot`]): the triangulation
+    /// and the number of regions come from the state.
+    ///
+    /// # Errors
+    /// [`BindError::Stale`] if the mesh or its seams are not the ones the state was made
+    /// for, [`BindError::Input`] for bytes that are not a state.
+    pub fn from_state(input: &UnwrapInput, bytes: &[u8]) -> Result<CutSession, BindError> {
+        let state = SessionState::from_bytes(bytes)?;
+        let prescribed = prescribed_cones(input);
+        let mesh = mesh_input(input, &prescribed);
+        let inner = Session::new_from_state(&mesh, &state)?;
+        let n_regions = inner.n_regions();
+        Ok(CutSession::wrap(input, inner, n_regions))
+    }
+
+    fn wrap(input: &UnwrapInput, inner: Session, n_regions: usize) -> CutSession {
+        CutSession {
             inner,
             n_regions,
             n_vertices: input.n_vertices(),
             n_corners: input.n_corners(),
             n_polygons: input.n_polygons(),
             n_triangles: input.n_triangles(),
-        })
+        }
+    }
+
+    /// The name of the triangulation option: `"caller"`, or `"intrinsic"` (flips only) or
+    /// `"refined"` (a refinement bound was asked for).
+    pub fn triangulation_name(&self) -> &'static str {
+        match self.inner.triangulation() {
+            Triangulation::Caller => "caller",
+            Triangulation::Intrinsic(o) if o.refine.is_some() => "refined",
+            Triangulation::Intrinsic(_) => "intrinsic",
+        }
+    }
+
+    /// Whether the per-corner view of the state is the whole state.
+    pub fn state_is_per_corner(&self) -> bool {
+        self.inner.state_is_per_corner()
+    }
+
+    /// The fingerprint of the triangulation the flow runs on, as 16 hex digits.
+    pub fn fingerprint(&self) -> String {
+        format!("{:016x}", self.inner.fingerprint())
+    }
+
+    /// The whole state as bytes (versioned, with the fingerprint).
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.inner.snapshot().to_bytes()
+    }
+
+    /// Sets the state from bytes made by [`CutSession::snapshot`].
+    ///
+    /// # Errors
+    /// [`BindError::Stale`] for a state of another triangulation (the mesh or seams changed),
+    /// [`BindError::Input`] for another number of regions or bytes that are not a state.
+    pub fn restore(&mut self, bytes: &[u8]) -> Result<(), BindError> {
+        let state = SessionState::from_bytes(bytes)?;
+        Ok(self.inner.restore(&state)?)
+    }
+
+    /// What the construction of the intrinsic triangulation did (`None` on the caller's).
+    pub fn intrinsic_report(&self) -> Option<Dict> {
+        let r = self.inner.intrinsic_report()?;
+        let mut d = Dict::default();
+        d.set("n_input_vertices", r.n_input_vertices);
+        d.set("n_vertices", r.n_vertices);
+        d.set("n_added", r.n_added);
+        d.set("n_initial_flips", r.n_initial_flips);
+        d.set("n_refined", r.n_refined);
+        d.set("n_splits", r.n_splits);
+        d.set("n_export_flips", r.n_export_flips);
+        d.set("n_refine_rounds", r.n_refine_rounds);
+        d.set("is_delaunay", r.is_delaunay);
+        d.set("min_angle_degrees", r.min_angle.to_degrees());
+        d.set("max_angle_degrees", r.max_angle.to_degrees());
+        if let Some(b) = r.bound {
+            d.set("bound_degrees", b.to_degrees());
+        }
+        d.set("n_below_bound", r.n_below_bound);
+        d.set("seconds", r.seconds);
+        d.set("fingerprint", format!("{:016x}", r.fingerprint));
+        Some(d)
     }
 
     /// The number of regions.
@@ -1076,6 +1218,22 @@ impl PreviewArrays {
     }
 }
 
+impl PreviewArrays {
+    /// The lines of a description (`CutOnPolygons::lines`).
+    pub fn from_cut(cut: &CutOnPolygons) -> PreviewArrays {
+        let lines: Vec<PreviewPolyline> = cut
+            .lines()
+            .into_iter()
+            .map(|l| PreviewPolyline {
+                positions: l.positions,
+                closed: l.closed,
+                regions: l.regions,
+            })
+            .collect();
+        PreviewArrays::from_polylines(&lines)
+    }
+}
+
 /// The cut on polygons as flat arrays (see the README for the meaning of every array).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DescriptionArrays {
@@ -1183,6 +1341,8 @@ pub struct InsertedArrays {
     pub edge_point_vertex: Vec<u32>,
     /// The vertex of every junction.
     pub junction_vertex: Vec<u32>,
+    /// The region of every new polygon where the description says so, else -1.
+    pub polygon_region: Vec<i64>,
     /// The number of vertices of the old mesh.
     pub n_old_vertices: usize,
 }
@@ -1210,6 +1370,11 @@ impl InsertedArrays {
                 .collect(),
             edge_point_vertex: i.edge_point_vertex.clone(),
             junction_vertex: i.junction_vertex.clone(),
+            polygon_region: i
+                .polygon_region
+                .iter()
+                .map(|r| r.map_or(-1, i64::from))
+                .collect(),
             n_old_vertices: i.n_old_vertices,
         }
     }
@@ -1339,7 +1504,7 @@ mod tests {
     #[test]
     fn step_changes_the_state_and_reports_energy() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         assert_eq!(s.state().len(), 2 * s.n_corners());
         let before = s.state();
         let report = s.step(&flow_controls()).unwrap();
@@ -1357,13 +1522,13 @@ mod tests {
             energy_tolerance: Some(0.0),
             ..flow_controls()
         };
-        let mut once = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut once = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         once.run(&Controls {
             max_steps: Some(8),
             ..controls.clone()
         })
         .unwrap();
-        let mut twice = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut twice = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         twice.run(&controls).unwrap();
         let mid = twice.state();
         twice.set_state(&mid).unwrap();
@@ -1380,7 +1545,7 @@ mod tests {
     #[test]
     fn run_reports_energy_before_and_after() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         let report = s
             .run(&Controls {
                 max_steps: Some(5),
@@ -1404,7 +1569,7 @@ mod tests {
     #[test]
     fn ripple_wavelength_sets_the_length_weight() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         let c = Controls {
             ripple_wavelength: Some(0.25),
             ..Controls::default()
@@ -1418,7 +1583,7 @@ mod tests {
     #[test]
     fn contradictory_options_are_input_errors() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         for c in [
             Controls {
                 length_weight: Some(0.1),
@@ -1455,17 +1620,17 @@ mod tests {
         let input = sphere();
         // The session takes more than two regions since the core has them; the circle start
         // does not (it has an inside and an outside).
-        let e = CutSession::new(&input, 3, &circle()).unwrap_err();
+        let e = CutSession::new(&input, 3, &circle(), &TriangulationSpec::Flips).unwrap_err();
         assert!(matches!(e, BindError::Input(_)), "{e}");
         assert!(e.message().contains("two regions"), "{e}");
-        let e = CutSession::new(&input, 1, &circle()).unwrap_err();
+        let e = CutSession::new(&input, 1, &circle(), &TriangulationSpec::Flips).unwrap_err();
         assert!(matches!(e, BindError::Input(_)), "{e}");
     }
 
     #[test]
     fn bad_state_is_an_input_error_naming_the_problem() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         let e = s.set_state(&[0.0; 5]).unwrap_err();
         assert!(
             matches!(e, BindError::Input(_)) && e.message().contains("n_regions"),
@@ -1482,7 +1647,7 @@ mod tests {
     #[test]
     fn cut_description_inserts_and_unwraps() {
         let input = sphere();
-        let mut s = CutSession::new(&input, 2, &circle()).unwrap();
+        let mut s = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
         s.run(&Controls {
             max_steps: Some(3),
             motion_tolerance: Some(0.0),
@@ -1513,7 +1678,7 @@ mod tests {
     fn four_regions_from_normal_clusters_run_describe_and_insert() {
         let input = sphere();
         let start = StartSpec::NormalClusters { max_iterations: 20 };
-        let mut s = CutSession::new(&input, 4, &start).unwrap();
+        let mut s = CutSession::new(&input, 4, &start, &TriangulationSpec::Flips).unwrap();
         assert_eq!(s.state().len(), 4 * s.n_corners());
         let report = s
             .run(&Controls {
@@ -1550,6 +1715,73 @@ mod tests {
                 .unwrap()
                 .length_step
         );
+    }
+
+    #[test]
+    fn triangulation_choices_and_the_state_bytes() {
+        let input = sphere();
+        let caller = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Caller).unwrap();
+        assert_eq!(caller.triangulation_name(), "caller");
+        assert!(caller.intrinsic_report().is_none() && caller.state_is_per_corner());
+        let flips = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
+        assert_eq!(flips.triangulation_name(), "intrinsic");
+        let report = flips.intrinsic_report().unwrap();
+        assert_eq!(
+            report.float("min_angle_degrees").map(|x| x > 0.0),
+            Some(true)
+        );
+        let refined = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Refined {
+                bound_degrees: 30.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(refined.triangulation_name(), "refined");
+        assert!(
+            TriangulationSpec::Refined {
+                bound_degrees: 80.0
+            }
+            .option()
+            .is_err()
+        );
+        // The bytes round-trip, also across a new session; a different mesh is stale.
+        let mut s = refined;
+        s.run(&Controls {
+            length_weight: Some(0.05),
+            max_steps: Some(2),
+            motion_tolerance: Some(0.0),
+            energy_tolerance: Some(0.0),
+            ..Controls::default()
+        })
+        .unwrap();
+        let bytes = s.snapshot();
+        let t = CutSession::from_state(&input, &bytes).unwrap();
+        assert_eq!(t.snapshot(), bytes);
+        assert_eq!(t.state(), s.state());
+        assert_eq!(t.triangulation_name(), "refined");
+        let other = {
+            let mesh = uv_sphere(20, 10, 1.0).expect("valid parameters");
+            let b = MeshBuffers {
+                positions: mesh.positions.iter().flatten().copied().collect(),
+                corner_vertices: mesh.corner_vertices.clone(),
+                polygon_starts: mesh.polygon_offsets[..mesh.polygon_offsets.len() - 1].to_vec(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                ..MeshBuffers::default()
+            };
+            UnwrapInput::from_buffers(b).unwrap()
+        };
+        let e = CutSession::from_state(&other, &bytes).unwrap_err();
+        assert!(matches!(e, BindError::Stale(_)), "{e}");
+        let e = CutSession::from_state(&input, &bytes[..10]).unwrap_err();
+        assert!(
+            matches!(e, BindError::Input(_) | BindError::Stale(_)),
+            "{e}"
+        );
+        let mut u = CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips).unwrap();
+        assert!(matches!(u.restore(&bytes), Err(BindError::Stale(_))));
     }
 
     #[test]
