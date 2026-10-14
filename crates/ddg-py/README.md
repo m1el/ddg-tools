@@ -261,8 +261,8 @@ and the cut vanishes), flips alone restore regular-grid behaviour, and usually n
 `"refined"` adds refinement to `refine_bound` degrees (default 25, at most 35) and adds
 vertices; `"caller"` is the caller's triangulation, as the versions before this one.
 `optimal_delaunay=True` adds the intrinsic optimal Delaunay triangulation (iODT, default options)
-on top of `"intrinsic"` or `"refined"`: more even triangle areas, slower (setup about 1 to 3 s on a
-22k-vertex mesh, flow steps up to about 2x); `ValueError` with `"caller"` or with `state=` (a
+on top of `"intrinsic"` or `"refined"`: more even triangle areas, much slower (setup 4.5 s at 11.7k
+vertices and 20 s at 46.9k against 0.15 s and 0.55 s without, flow steps about 2.5x); `ValueError` with `"caller"` or with `state=` (a
 state carries its flag; read it back from `CutSession.optimal_delaunay`). The report gains
 `n_optimized` and, with the flag, `optimal_delaunay_status`/`_iterations`/`_last_motion`. The cut
 comes back onto the caller's polygons whatever the choice. `intrinsic_report` is a dictionary

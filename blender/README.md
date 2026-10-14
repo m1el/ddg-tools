@@ -427,8 +427,9 @@ edge, junctions of any degree), so nothing else changes for the user.
 * **Optimal Delaunay** (`optimal_delaunay`, a checkbox next to Triangulation on Start, off by
   default) also builds the intrinsic optimal Delaunay triangulation (iODT, `crates/ddg-intrinsic`)
   on top of Intrinsic or Intrinsic, Refined: the hidden intrinsic triangulation gets more even
-  triangle areas. It costs time: the setup takes about 1 to 3 s on a mesh of 22k vertices and flow
-  steps can take up to about twice as long. It changes nothing on the mesh except through the cut
+  triangle areas. It costs time: measured on spot (4 regions, 4 runs in parallel), Start takes
+  4.5 s at 11.7k vertices and 20 s at 46.9k with it against 0.15 s and 0.55 s without, and ten flow
+  steps 1.4 s and 6.8 s against 0.57 s and 2.5 s (about 2.5 times as long). It changes nothing on the mesh except through the cut
   the flow finds; the cut is carried back to the mesh's own faces as always. It is part of the
   stored option (`ddg_cut_option` reads `intrinsic+odt` or `refined:<degrees>+odt`) and so of the
   key of the kept session: a session built without it is never reused with it. Flow and Apply have
@@ -470,10 +471,19 @@ edge, junctions of any degree), so nothing else changes for the user.
   tests compare vertices (one to one by position), polygons (as vertex sets) and seams (exactly).
 * **The flow's report** gains a line about the triangulation (vertices added, angle range) in the
   advanced view only (the `show_advanced` toggle); `ddg_cut_last_flow` always has the numbers.
-* **Tests.** `scripts/blender-test.sh` runs `test_cut.py` three times in parallel, once per
-  triangulation (`--triangulation intrinsic|caller|refined` changes the default of Start for that
-  run, so that every expectation of the earlier tests is checked on each): 44, 43 (+1 skipped: the
-  state bytes do not exist for the caller's triangulation) and 44 tests. New: the 153 degree and
+* **Tests.** `scripts/blender-test.sh` runs `test_cut.py` five times in parallel, once per
+  variant (`--triangulation intrinsic|caller|refined` changes the default of Start for that
+  run, so that every expectation of the earlier tests is checked on each; `--optimal-delaunay`
+  also turns Optimal Delaunay on by default: the variants `intrinsic-odt` and `refined-odt`):
+  49, 48 (+1 skipped: the state bytes do not exist for the caller's triangulation), 49, 48 (+1
+  skipped) and 48 (+1 skipped) tests. The skips of the two `-odt` variants are
+  `the_cut_offset_moves_points_away_from_vertices` (its ratio of 20 is measured without iODT), and
+  there the flipped UV triangles on the spot atlas are printed, not asserted: with iODT the
+  8-cluster atlas of spot (weight 2, 60 steps) has 4 of 7354 flipped triangles on the intrinsic
+  triangulation (none without; the library counts the same 4), a known open item. New tests: the
+  option string, session key and stored option of the flag; an iODT cut on a sphere (intrinsic) and a
+  subdivided cube (refined) through Start, Flow, Apply and unwrap with no flipped UV triangle;
+  the flag ignored, with a message, on Mesh's Own. New: the 153 degree and
   165 degree sheared grids and the needles-and-caps grid of `bad_mesh_study.rs` (built in the test)
   through Start, Flow, Apply and unwrap; a refined session with state bytes, the stale-state
   message and the unchanged bytes after a refused run; the triangulation line.

@@ -131,8 +131,9 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         description=(
             "Also build the intrinsic optimal Delaunay triangulation (Sharp, Soliman, Crane "
             "2019) in the hidden intrinsic triangulation the flow runs on: more even triangle "
-            "areas there. The setup is slower (about 1 to 3 s on a mesh of 22k vertices) and "
-            "flow steps can take up to about twice as long. It changes nothing on the mesh "
+            "areas there. The setup is much slower (on a mesh of 12k vertices 4 s instead of "
+            "0.15 s, on 47k vertices 20 s instead of 0.5 s) and flow steps take about 2.5 times "
+            "as long. It changes nothing on the mesh "
             "except through the cut the flow finds. Needs Intrinsic or Intrinsic, Refined; "
             "ignored with Mesh's Own. Off by default"),
         default=False,

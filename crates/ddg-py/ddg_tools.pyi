@@ -271,7 +271,8 @@ class CutSession:
         on the caller's triangulation (``"caller"``, as before). ``optimal_delaunay``: also build the
         intrinsic optimal Delaunay triangulation (the library's default options) on top of
         ``"intrinsic"`` or ``"refined"``: more even triangle areas in the intrinsic triangulation,
-        slower setup (about 1 to 3 s on a 22k-vertex mesh) and flow steps up to about twice as slow;
+        much slower setup (seconds on 10k vertices, tens of seconds on 50k) and flow steps about 2.5
+        times as slow;
         ``ValueError`` (``InputError``) with ``"caller"`` or together with ``state`` (the state
         carries its own flag). ``state``: bytes from
         ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
