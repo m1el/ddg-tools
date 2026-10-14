@@ -69,6 +69,11 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   code between 3214 and 3620 (six runs each, logs in `runs_tmp/camelshotnoise-d30/`); with the
   default stop rule both return the same state (step 16, energy 4524.7). Some README and SPEC §6
   tables carry numbers from before D30 and say so.
+* The way back of a cut from a refined triangulation failed on 2 of 900 cuts: segments that run
+  along an input edge, next to a vertex inserted on it (bob's control mesh, start plane = mirror
+  plane; reproducer `remesh_study repro bob_control ka4 dirichlet 1 1`, `ddg-intrinsic` SPEC N28).
+  Not seen with the default flips, which insert a vertex only where the export must split an
+  edge; iODT puts vertices on input edges on purpose (snapping, N24).
 * The Blender session cache (a session kept between Start, Flow and Apply) is not tested across
   file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
 * The comparison with the authors' program of the cut flow was refreshed after D22 only, not
@@ -91,7 +96,15 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   D22); the paper's stages stay selectable (`FlowOptions::paper`).
 * More than two regions: the recommended stages stay the paper's (`FlowOptions::for_regions`),
   although the evidence became mixed after D22 (SPEC §8.5, "After D22").
-* No remeshing except inserting the cut (paper Sec. 6.1 is not implemented).
+* No remeshing except inserting the cut (paper Sec. 6.1 is not implemented). Measured since
+  (`crates/ddg-intrinsic/README.md`, "Remeshing for the cut flow"; cut SPEC D32, intrinsic SPEC
+  N28; `crates/ddg-uv/examples/remesh_study.rs`, 1 260 runs on 10 meshes): uniform,
+  curvature-adaptive (the paper's rule, at matched vertex counts) and iODT refinement of the
+  intrinsic triangulation, with the curvature at the input vertices or spread from the input
+  faces, against the flips. Refinement does not make the flow converge (1.2 to 3 times the steps,
+  never by motion), costs 11 to 70 times per step, and is even or worse on spot, bob, blub and the
+  camels; only spread-curvature refinement of meshes with a few hundred vertices is better
+  (−2 to −3 % median energy on a fine yardstick). The decision stands; no option was added.
 
 ## Known gaps: the cut flow (`crates/ddg-variational-cuts`)
 

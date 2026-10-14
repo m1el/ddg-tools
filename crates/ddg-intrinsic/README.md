@@ -584,6 +584,161 @@ correctness and speed.
   it is offered as `IntrinsicOptions::optimal_delaunay` (`IntrinsicOptions::optimized()`) for
   callers who want even triangle areas.
 
+### Remeshing for the cut flow (cut paper Sec. 6.1): does more resolution help?
+
+The paper of the cut flow (Sharp, Crane 2018, Sec. 6.1, Fig. 6) optionally remeshes the input,
+finer where `|K|` is large, because the cut can be no finer than the mesh. On an intrinsic
+triangulation vertices can be added without changing the surface or the caller's mesh, and the
+cut is carried back. `crates/ddg-uv/examples/remesh_study.rs` (SPEC N28) runs the flow on
+
+| treatment | triangulation the flow runs on |
+|---|---|
+| `input`, `flip` | the caller's triangles; Delaunay flips (the default of `ddg_uv::cutting`, through its `Session`) |
+| `u2`, `u4` | every edge longer than 1/2 (1/4) of a base length split at its midpoint, flips, repeated (9 to 40 times the vertices) |
+| `ka2`, `ka4` | curvature-adaptive as in the paper: the longest edge of a face whose `\|K\| A` exceeds a bound split, flips, repeated; the bound chosen so that as many vertices are added as by `u2` (`u4`) |
+| `odt2`, `odt4` | the optimal Delaunay triangulation with target 1/2 (1/4) of the base length (through the `Session`) |
+| suffix `S` | the flow uses per face the curvature density of the input faces under it ("spread", `CurvatureSource::PerFace`) instead of the Gaussian curvature of the triangulation, which on an intrinsic triangulation sits only at the input vertices (an inserted vertex is flat) |
+
+Meshes: the control meshes of spot, bob, blub (112 to 334 vertices, "coarse"), spot, bob, blub
+("fine", 2 930 to 7 106; blub at the 1/2 level only), camel, camelbad, camelbadnonuniform,
+camelshotnoise (9 092 to 11 513, 1/2 level only; `u4` of camel has 418 000 vertices). Base
+length: the mean input edge; for the camels the side of the equilateral triangle of the mean
+face area (`TARGET=area`), because on the non-uniform camels the median edge is 0.77 to 0.91 of
+the mean and either edge statistic follows how the area is cut into slivers. Cases: Hencky and
+Dirichlet, the automatic length weight of the bindings (ripple wavelength 0.25, from the flip
+triangulation) and 1/2, 1/4 of it, two planar starts: 12 per mesh, 1 260 runs, default stop
+rule (at most 1 000 steps). Every final cut is carried back to the input faces and evaluated on
+one yardstick per mesh, the regular 1:n² subdivision of every input face (`n` odd, 9 to 33,
+up to 2 million faces): with the curvature density of the input face under each face
+("spread": the problem the caller's mesh poses, at fine resolution) and with the
+subdivision's own Gaussian curvature ("polyhedral": cones at the input vertices). A third
+measure is the energy of the final level-set function at the input vertices, evaluated on the
+input mesh (the measure of the section above; it cannot see detail between input vertices).
+Runs are deterministic (a rerun of the control meshes agreed to the last digit).
+
+**Convergence**: median steps; stops EnergyStalled / EnergyRose / MaxSteps of runs; median
+motion of the cut over the last 10 steps (input edges per step). No run of any treatment ends
+`Converged` (SPEC D31): the runs at rest end by the energy rule.
+
+| treatment | coarse | fine | camels |
+|---|---|---|---|
+| input | 70; 9/26/0 of 36; 0.066 | 216; 30/6/0 of 36; 0.089 | 259; 25/23/0 of 48; 0.124 |
+| flip | 82; 5/30/0 of 36; 0.070 | 208; 28/8/0 of 36; 0.087 | 284; 25/23/0 of 48; 0.130 |
+| flipS | 75; 8/28/0 of 36; 0.067 | 183; 29/7/0 of 36; 0.103 | 223; 34/14/0 of 48; 0.109 |
+| u2 | 95; 12/24/0 of 36; 0.071 | 476; 28/4/4 of 36; 0.069 | 579; 17/12/19 of 48; 0.084 |
+| u2S | 122; 14/21/0 of 36; 0.071 | 582; 27/3/6 of 36; 0.060 | 584; 21/10/17 of 48; 0.083 |
+| u4 | 176; 22/14/0 of 36; 0.040 | 553; 15/1/8 of 24; 0.040 | – |
+| u4S | 204; 14/22/0 of 36; 0.039 | 402; 12/5/7 of 24; 0.033 | – |
+| ka2 | 135; 10/25/0 of 35; 0.050 | 373; 26/3/7 of 36; 0.034 | 682; 19/17/12 of 48; 0.055 |
+| ka2S | 138; 16/20/0 of 36; 0.052 | 384; 25/4/7 of 36; 0.037 | 628; 15/12/21 of 48; 0.049 |
+| ka4 | 171; 22/13/0 of 35; 0.034 | 410; 17/1/6 of 24; 0.022 | – |
+| ka4S | 224; 19/17/0 of 36; 0.031 | 382; 18/1/5 of 24; 0.019 | – |
+| odt2 | 90; 13/23/0 of 36; 0.076 | 550; 28/4/4 of 36; 0.063 | 550; 21/12/15 of 48; 0.085 |
+| odt4 | 110; 15/21/0 of 36; 0.067 | 361; 19/2/3 of 24; 0.062 | – |
+
+A finer triangulation takes 1.2 to 3 times the steps, stops less often on a rising energy and
+moves less at the end (per input edge), but reaches the step limit in up to 44 % of the camel
+runs and never converges by motion: it does not make the flow converge.
+
+**Quality** against `flip` of the same case: median relative difference in %, cases lower than
+`flip` / cases, cases more than 10 % higher (spread / polyhedral yardstick / on the input mesh).
+
+| treatment | coarse | fine | camels |
+|---|---|---|---|
+| input | +0.4, 13/35, 6 / +0.1, 16/35, 7 / −0.1, 21/35, 3 | +0.0, 16/36, 0 / −0.0, 19/36, 0 / −0.0, 19/36, 0 | +0.2, 14/48, 4 / +0.8, 10/48, 7 / +0.0, 20/48, 4 |
+| flipS | +0.0, 16/35, 10 / −0.0, 18/35, 8 / +0.0, 15/35, 8 | +0.0, 13/36, 3 / +0.0, 13/36, 3 / +0.0, 10/36, 3 | +1.4, 16/48, 11 / +1.9, 13/48, 11 / +1.2, 16/48, 12 |
+| u2 | +1.1, 12/35, 14 / −6.9, 27/35, 7 / +9.1, 9/35, 17 | +0.0, 18/36, 5 / −0.0, 22/36, 5 / +0.0, 18/36, 5 | +0.2, 11/48, 7 / +0.4, 14/48, 7 / +0.2, 11/48, 8 |
+| u2S | **−2.5, 25/34, 3** / −1.8, 25/34, 3 / +0.2, 15/34, 11 | −0.1, 21/36, 4 / −0.0, 23/36, 4 / −0.0, 22/36, 4 | +0.3, 14/48, 5 / +0.2, 19/48, 5 / +0.3, 11/48, 5 |
+| u4 | +4.5, 10/35, 16 / −1.8, 25/35, 10 / +9.3, 11/35, 17 | +0.6, 4/24, 7 / +0.4, 5/24, 7 / +0.6, 3/24, 7 | – |
+| u4S | **−2.1, 29/35, 1** / −3.1, 30/35, 1 / +0.0, 16/35, 9 | +0.4, 6/24, 7 / +0.3, 4/24, 7 / +0.3, 4/24, 7 | – |
+| ka2 | +1.7, 10/34, 12 / −7.1, 27/34, 5 / +7.3, 11/34, 17 | +0.2, 10/36, 5 / +0.0, 17/36, 4 / +0.2, 12/36, 4 | +1.0, 4/48, 9 / +0.8, 9/48, 9 / +1.5, 4/48, 12 |
+| ka2S | **−2.9, 26/35, 3** / −2.5, 25/35, 5 / +0.1, 17/35, 11 | +0.0, 16/36, 4 / +0.0, 14/36, 4 / +0.0, 13/36, 5 | +0.6, 13/48, 10 / +0.6, 14/48, 9 / +0.7, 9/48, 11 |
+| ka4 | +4.9, 8/34, 16 / −6.7, 26/34, 6 / +10.7, 9/34, 17 | +0.6, 2/24, 8 / +0.5, 3/24, 8 / +0.6, 2/24, 8 | – |
+| ka4S | **−2.1, 27/35, 1** / −2.7, 26/35, 1 / +0.6, 17/35, 12 | +0.3, 4/24, 8 / +0.2, 5/24, 8 / +0.2, 3/24, 7 | – |
+| odt2 | +1.0, 9/35, 14 / −6.4, 27/35, 6 / +12.4, 9/35, 18 | −0.0, 22/36, 4 / −0.1, 22/36, 4 / −0.0, 21/36, 4 | +0.2, 15/48, 5 / +0.2, 18/48, 6 / +0.1, 20/48, 8 |
+| odt4 | +6.1, 11/35, 16 / −4.6, 24/35, 7 / +6.9, 9/35, 17 | +0.1, 7/24, 4 / +0.0, 10/24, 4 / +0.1, 8/24, 4 | – |
+
+- **Native curvature on a refined triangulation** (`u`, `ka`, `odt` without `S`) poses another
+  problem: the curvature of the input sits at its vertices as cones. It wins on the polyhedral
+  yardstick of the coarse meshes (−2 to −7 %), which is that problem, and loses on the spread one
+  with outliers up to +1 160 % (blub_control). On the camels'
+  dirichlet/α×0.25/start 0 case every refined run, with or without `S`, ends in another basin
+  (energy 55 against 14.4, a shorter cut with more distortion).
+- **Spread curvature** (`S`) removes those outliers and is the only refinement that is better
+  than `flip` on the spread yardstick of the coarse meshes (−2 to −3 %, 25 to 29 of 35 cases,
+  up to −40 % on spot_control). On the fine meshes it is even (median −0.1 to +0.4 %; the 1/4
+  level is above `flip` in 18 of 24 cases, by more than 10 % in 7, 5 of them at α×1/4 and up to
+  +171 % on bob: the finer mesh resolves the ripples of a small length weight); on the camels it is worse (+0.3 to +0.6 %,
+  13 to 14 of 48 below). `flipS`, the spread without refinement, is −10.7 % on camelshotnoise
+  (whose input has spikes) and +11 % on camelbad. Curvature-adaptive refinement is not better
+  than uniform refinement at the same vertex count.
+- On the input mesh (third measure) no refinement is clearly better than `flip` (medians −0.1
+  to +12 %).
+
+**Exact laws** (`remesh_study laws`; flat circle: radius error after 96 fixed steps, whose
+time-step error alone is about +2e-3, SPEC D30, and roundness; latitude on icosphere(4): the ODE
+after 50 steps, and the rest latitude from above and below; `ka` is left out, the curvature is
+uniform):
+
+| treatment | V (grid / ico4) | circle radius, roundness | latitude ODE | rest latitude ψ0 = 0.5, 1.1 |
+|---|---|---|---|---|
+| input | 1 089 / 2 562 | +1.8e-3, 3.7e-3 | +2.19e-3 | −1.05e-2, +1.11e-2 |
+| flip | 1 089 / 2 562 | +1.4e-3, 2.0e-3 | +2.19e-3 | −1.05e-2, +1.11e-2 |
+| u2 / u2S | 9 659 / 25 602 | +2.6e-3, 3.4e-4 | +2.13e-3 / +1.66e-3 | −8.7e-3, +8.4e-3 / −1.14e-2, +8.2e-3 |
+| u4 / u4S | 38 142 / 102 402 | +2.8e-3, 1.6e-4 | +2.11e-3 / +1.91e-3 | −5.2e-3, +6.8e-3 / −1.10e-2, +1.08e-2 |
+| odt2 | 8 884 / 25 422 | +2.6e-3, 1.8e-4 | +2.13e-3 | −8.8e-3, +8.2e-3 |
+| odt4 | 11 979 / 28 182 | +2.7e-3, 2.5e-4 | +2.15e-3 | −8.2e-3, +8.1e-3 |
+
+Every treatment meets the laws; refinement makes the circle 6 to 12 times rounder (its radius
+error is the time step's) and, with native curvature, halves the known bias of the rest latitude
+(ROADMAP); the spread keeps the bias of the input (its density is the coarse polyhedron's).
+
+**Cost** (one thread, run alone, `remesh_study speed`; build = triangulation and export, the
+whole `Session` for `flip` and `odt`; step = median of steps 5 to 25, Hencky):
+
+| treatment | spot: V, build s, ms per step | camel: V, build s, ms per step |
+|---|---|---|
+| input | 2 930, 0, 3.1 | 11 381, 0, 14.1 |
+| flip | 2 930, 0.016, 3.1 | 11 383, 0.076, 19.2 |
+| u2 | 29 635, 0.12, 42 | 118 232, 0.73, 214 |
+| u4 | 118 174, 0.56, 209 | – |
+| ka2 | 30 690, 0.62, 45 | 123 107, 5.1, 233 |
+| ka4 | 124 098, 3.2, 199 | – |
+| odt2 | 29 056, 5.3, 43 | 112 440, 25.7, 220 |
+| odt4 | 32 230, 0.32, 51 | – |
+
+A step costs 11 to 70 times the step on the flips, and the runs take 2 to 3 times the steps;
+`S` costs nothing per step. A first attempt at the 1/4 level on camel (418 000 vertices, 16
+runs at a time) was stopped at 14 GB.
+
+**Robustness.** 2 of the 900 way backs from a refined triangulation failed (`bob_control`,
+`ka4`, Dirichlet, α×1, start 1; and `ka2`, α×1/2, start 1), none on any other mesh or treatment;
+the largest relative mismatch of a segment in the other direct runs was `8e-8`. Reproducer
+(`remesh_study repro bob_control ka4 dirichlet 1 1`, deterministic): the start plane z = 0 is
+bob's mirror plane and contains input vertices and edges, the flow returns its start state, and
+two segments of the cut run *along* input edge (300, 298) (between input faces 575 and 646),
+near a vertex that the refinement inserted on that edge: both ends lie on the edge (barycentric
+coordinates 0 to 2e-16). The trace of such a segment ends on the other side of the edge than
+the place of its end; a larger tolerance (up to 0.1) does not help, because the test is which
+input face the end lies in, not a distance (ka4: segments 524 and 528 in faces 22094, 22104;
+ka2: 147 and 209 in faces 2862, 4391). Open; SPEC N28. It is not the class of the open flipped
+UV triangles of the iODT spot atlas (`blender/README.md`): there the way back succeeds, and the
+flipped triangles come after the insertion; what the two share is a finer cut on the input
+faces (from iODT with target 1/2 the cut comes back in 3 times the pieces of the flips' cut, median 1 142
+against 361, and the bend merge at 0.1 removes about 570 bends where it removes 20 from the
+flips' cut).
+
+**Conclusion.** Remeshing does not improve the convergence of the cut flow (more steps, no run
+converges by motion) and does not improve its quality on meshes that already resolve the
+surface (spot, bob, blub, the camels): there it is even or worse, at 11 to 70 times the cost
+per step. Only on very coarse meshes (a few hundred vertices) does refinement with the curvature
+spread from the input faces lower the energy, by 2 to 3 % in the median. The paper's
+curvature-adaptive refinement is no better than uniform refinement at the same vertex count,
+and refinement with the curvature at the input vertices only (what an intrinsic or a planar
+subdivision gives) solves a different problem, with large outliers. **Recommendation: no
+remeshing in `ddg_uv::cutting`** (no option was added; the default stays Delaunay flips). A
+caller with a very coarse mesh is better served by subdividing it before the flow.
+
 ## Verification
 
 - `tests/invariants.rs`: a fresh triangulation is the input mesh, bit for bit; after random
@@ -732,6 +887,18 @@ subcommand and treatment, `TREAT=input|flip|r25|r30|odt|odt15`; `speed` alone):
 cargo run --release -p ddg-intrinsic --example odt_study -- data/models/spot/spot/spot_triangulated.obj sheared165 ...
 TREAT=odt cargo run --release -p ddg-intrinsic --example flow_on_bad_meshes -- laws
 cargo bench -p ddg-intrinsic --bench retriangulation
+```
+
+For the remeshing study (one process per mesh in parallel, one log each; `blub` and the camels
+with `TREATS=input,flip,flipS,u2,u2S,ka2,ka2S,odt2`, the camels also with `TARGET=area` and
+`REF_FACES=2000000`; `speed` alone; `SKIP_FROM=<log>` resumes an interrupted mesh):
+
+```sh
+STARTS=0,1 cargo run --release -p ddg-uv --example remesh_study -- real spot_control
+cargo run --release -p ddg-uv --example remesh_study -- laws
+cargo run --release -p ddg-uv --example remesh_study -- speed spot
+cargo run --release -p ddg-uv --example remesh_study -- repro bob_control ka4 dirichlet 1 1
+uv run scripts/remesh_tables.py runs_tmp/remesh/real2/*.log
 ```
 
 The example prints, per mesh and angle bound, the refinement report, traces, overlay and
