@@ -1437,7 +1437,8 @@ the third corner at the direction `phi_h + theta` (`theta` the corner angle at `
 `movedDoubleArea (2A) d (k - j) <= 0`, `FRACTION = min 2A/(d x (k - j))` over the triangles with `d x (k - j) > 0`; new lengths
 `movedLength l |d| cos(phi_h - psi) sin(phi_h - psi)`, `psi` the direction of `d`; refused `too_thin` when a new triangle has
 `2A' < 1e-6 * max(l'_vj, l'_vk) * max(l'_vj, l'_vk, l_jk)`; the new place by a trace over the input mesh from the old place along
-`d` for `|d|` (reading 66), snapped onto an input edge within `1e-10` of the longest edge of the end face (N24); the new
+`d` for `|d|` (reading 66), snapped onto an input edge within `1e-12` of the longest edge of the end face and of the shortest
+new edge at the vertex (N24); the new
 signposts (reading 67). Lengths of edges not at `V` and all other signposts do not change.
 
 **Fixtures** (`it-move-*`, 6):
@@ -1494,9 +1495,10 @@ the energy of the star (Chen and Holst Eq. 4.5, central differences, `6e-11`).
 66. The new place: from a face point, `traceFromFace` over the input mesh; from a point of an interior input edge, a trace that
     starts on the edge in the layout of the halfedge `LO -> HI` (`DY > 0`) or `HI -> LO` (`DY < 0`, the direction turned by
     `pi`), the edge it starts on not being an exit; with `DY = 0` exactly (along the edge) and for every move of a boundary
-    vertex, interpolation `T' = T + DX/l` (`T - DX/l` on the boundary when the boundary halfedge runs from `HI` to `LO`). Snapping:
-    **`1e-10`** of the longest edge of the end face (SPEC N24's `MOVE_SNAP` for moved vertices; the brief named N10's `1e-12`),
-    distance measured in the layout of the end face, the point projected onto the nearest edge.
+    vertex, interpolation `T' = T + DX/l` (`T - DX/l` on the boundary when the boundary halfedge runs from `HI` to `LO`). Snapping
+    (SPEC N24 as of 4763a68): the distance from the nearest edge of the end face, measured in its layout, at most `1e-12` times
+    the longest edge of that face **and** at most `1e-12` times the shortest new edge at the vertex (the new lengths of
+    reading 65); the point is projected onto that edge.
 67. New signposts of the moved vertex: in the unfolded star, the direction from the new point to the far end of every outgoing
     halfedge, turned into the frame of the new place by `rho = (direction of the path at its end, in the new frame) - (direction
     of DX DY in the old frame)`; the new frame is the layout of the end face, or `LO -> HI` of the edge it was snapped onto;

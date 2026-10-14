@@ -246,8 +246,9 @@ def inputHalfedge (t0 : Tri) (a b : Nat) : Option Nat :=
   | .ok h => some h
   | .error _ => none
 
-/-- The snapping threshold of a moved vertex (SPEC N24). -/
-def moveSnap : Float := 1e-10
+/-- The snapping threshold of a moved vertex (SPEC N24): relative to the longest edge of the input face
+and to the shortest new edge at the vertex. -/
+def moveSnap : Float := 1e-12
 
 /-- The shape limit of N5, N19. -/
 def moveShapeLimit : Float := 1e-6
@@ -260,10 +261,12 @@ inductive MoveOutcome where
   /-- refused, with the reason and (for `not_in_star`) the admissible fraction -/
   | refused (reason : String) (frac : Option Float)
 
-/-- Where the end of a trace over the input mesh lies, with snapping onto an input edge (N10, N24):
-the place, the angle of the new frame in the layout of the end face (0 for a face, the direction of
-the edge from its lower-numbered end for an edge), whether it was snapped. -/
-def placeOfEnd (t0 : Tri) (f : Nat) (b : Float × Float × Float) : Loc × Float × Bool := Id.run do
+/-- Where the end of a trace over the input mesh lies, with snapping onto an input edge (N10, N24:
+within `moveSnap` of the longest edge of the face and of `minEdge`, the shortest new edge at the
+vertex): the place, the angle of the new frame in the layout of the end face (0 for a face, the
+direction of the edge from its lower-numbered end for an edge), whether it was snapped. -/
+def placeOfEnd (t0 : Tri) (f : Nat) (b : Float × Float × Float) (minEdge : Float) :
+    Loc × Float × Bool := Id.run do
   let P := layoutFace t0 t0.fh[f]!
   let hs := t0.faceHalfedges f
   let qx := b.1 * P[0]!.1 + b.2.1 * P[1]!.1 + b.2.2 * P[2]!.1
@@ -282,7 +285,7 @@ def placeOfEnd (t0 : Tri) (f : Nat) (b : Float × Float × Float) : Loc × Float
     if dist < bestD then
       bestD := dist
       best := k
-  if bestD ≤ moveSnap * longest then
+  if bestD ≤ moveSnap * longest && bestD ≤ moveSnap * minEdge then
     let A := P[best]!
     let B := P[(best + 1) % 3]!
     let ex := B.1 - A.1
@@ -324,6 +327,11 @@ def moveVertex (t0 t : Tri) (nInput v : Nat) (loc : Loc) (d : Float × Float) :
     let longer := max lvj lvk
     let longest := max longer t.len[t.next[h]!]!
     if na2 < moveShapeLimit * longer * longest then return .refused "too_thin" none
+  -- the shortest new edge at the vertex (N24)
+  let mut minEdge := posInf
+  for h in hs do minEdge := min minEdge (newLen t.len[h]! t.sign[h]!)
+  for g in [0:t.nh] do
+    if t.head g == v && !t.hasTwin g then minEdge := min minEdge (newLen t.len[g]! floatPi)
   -- the new place and the rotation `rho` from the old frame to the new one
   let mut newLoc := loc
   let mut rho := fzero
@@ -353,7 +361,7 @@ def moveVertex (t0 t : Tri) (nInput v : Nat) (loc : Loc) (d : Float × Float) :
         let res ← traceCore t0 h0 start dir r 100000 (enter0 := 0)
         if res.stop == "vertex" then return .refused "on_input_vertex" none
         if res.stop != "end" then return .refused "not_located" none
-        let (pl, frameAngle, sn) := placeOfEnd t0 res.face res.bary
+        let (pl, frameAngle, sn) := placeOfEnd t0 res.face res.bary minEdge
         newLoc := pl
         snapped := sn
         rho := angleOf res.dirEnd.1 res.dirEnd.2 - frameAngle - psi
@@ -361,7 +369,7 @@ def moveVertex (t0 t : Tri) (nInput v : Nat) (loc : Loc) (d : Float × Float) :
     let res ← traceFromFace t0 f (facePoint t0 f b) (dx / r, dy / r) r
     if res.stop == "vertex" then return .refused "on_input_vertex" none
     if res.stop != "end" then return .refused "not_located" none
-    let (pl, frameAngle, sn) := placeOfEnd t0 res.face res.bary
+    let (pl, frameAngle, sn) := placeOfEnd t0 res.face res.bary minEdge
     newLoc := pl
     snapped := sn
     rho := angleOf res.dirEnd.1 res.dirEnd.2 - frameAngle - psi
