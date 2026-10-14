@@ -48,6 +48,9 @@ lake build                      # Lean 4.34.1 (lean-toolchain), no dependencies
 | `ddg-oracle regions [IN [OUT]]` | one step of the flow for N regions, [see below](#n-regions-spec-8) |
 | `ddg-oracle regions-selftest` | checks of the N-region oracle |
 | `ddg-oracle regions-fixtures write DIR` / `check DIR` | regenerate / verify `fixtures/regions` |
+| `ddg-oracle intrinsic [IN [OUT]]` | single operations on intrinsic triangulations (third paper), [see below](#intrinsic-triangulations-third-paper) |
+| `ddg-oracle intrinsic-selftest` | checks of the intrinsic operations |
+| `ddg-oracle intrinsic-fixtures write DIR` / `check DIR` | regenerate / verify `fixtures/intrinsic` |
 
 `IN`/`OUT` default to `-` (standard input/output). The three processing commands are all batch
 commands: they read any number of cases from one stream, write one output block per case in the
@@ -1170,7 +1173,7 @@ Instead the change of the whole step is limited at every vertex after the length
 ```
 phi~ = phi + tau sigma ;  phi' = result of the length step (phi~ if there is none) ;  Delta_i = phi'(i) - phi(i)
 h_i  = the shortest crossed edge with an end at i; at a vertex without a crossed edge the shortest of its edges
-om_i = the largest omega_c of the cut points on the edges at i (none: the term is absent)
+om_i = the largest omega_c of the cut points on the edges at i, and at least omega (so (om_i - omega)_+ is 0 where there is none; this is the value printed as OMEGAI)
 v_i  = |Delta_i| / tau                       (Capped)      v_i = max(|Delta_i| / tau, (om_i - omega)_+ / 2)   (Adaptive)
 f_i  = min(1, max_motion h_i / (tau v_i))    (v_i = 0: 1)  phi''(i) = phi(i) + f_i (phi'(i) - phi(i))
 ```
@@ -1211,3 +1214,163 @@ with junctions off 120 degrees (SPEC §8.6), not the limit.
 48. The count of the default stages' `limited` is still the number of limited copies (SPEC says: cut points and triple points with a limited copy, each once; the
     oracle's line is unchanged so that the five sets stay byte-identical; compare with the number of factors below 1).
 49. D26 does not apply to `Fixed` steps and to `statistics extremes`.
+
+# Intrinsic triangulations (third paper)
+
+> Nicholas Sharp, Yousuf Soliman, Keenan Crane. *Navigating Intrinsic Triangulations.* ACM TOG 38(4), 2019.
+
+`ddg-oracle intrinsic` runs **single operations** of the signpost data structure on small meshes, written from
+`crates/ddg-intrinsic/SPEC.md` and the paper (Sec. 2, 3, 4.1, 4.2, Appendix B). The reference implementation
+(geometry-central, the demo) was **not read**; where the paper and SPEC leave something open the choice is in the
+list at the end. The closed-form formulas of the twelve ids `it-*` are scalar-generic in
+`DdgOracle.Formulas.Intrinsic` (tags `[formula: it-...]`), and the executable uses them for every number it prints:
+
+| id | definitions |
+|---|---|
+| `it-angle-normalization` | `angleScale` |
+| `it-signpost-update` | `reduceFullTurn`, `signpostUpdate` |
+| `it-unfold-diamond` | `diamondX`, `diamondH` |
+| `it-flip-length` | `flippedLength`, `flippedLengthFromLengths` |
+| `it-flip-convexity` | `flipArea1`, `flipArea2`, `flipConvex` |
+| `it-delaunay-condition` | `delaunayExcess`, `delaunayHolds`, `oppositeAngles` |
+| `it-cotan-weight` | `cotanWeight`, `cotanWeightFromLengths` |
+| `it-unfold-apex` | `unfoldApex`, `apexAboveAxis` |
+| `it-ray-edge-intersection` | `axisCrossingT`, `axisCrossingX` |
+| `it-barycentric-coordinates` | `signedArea2`, `barycentric`, `pointFromDistances` |
+| `it-point-distances` | `planeDistance`, `cornerDistances`, `edgeSplitLengths` |
+| `it-circumcenter` | `circumWeight`, `circumcenterBary` |
+
+(`triArea`, `cornerAngle`, `cornerCot` of `Formulas/Triangle.lean` are reused.) The diamond of an edge `ij`
+(length `a`) has the triangles `ijk` (`b = l_ik`, `c = l_jk`) and `jil` (`d = l_il`, `e = l_jl`); unfolded with
+`i = (0,0)`, `j = (a,0)`, `k = (x_k, h_k)`, `l = (x_l, -h_l)`.
+
+## Data model used by the executable
+
+A halfedge mesh; halfedges of the input are `h = 3 f + k` (tail = corner `k` of face `f`, head = corner `k + 1`); `twin`,
+`next`, `tail` are stored, so self-edges, double edges and triangles that use a vertex twice are possible after flips.
+A halfedge without a twin is a boundary halfedge (the surface on its left). The input is the mesh of the case (faces and
+edge lengths; no positions). Per halfedge: the edge length and the **signpost**, the normalized angle of its direction at
+its tail: in `[0, 2 pi)` at an interior vertex, `[0, pi]` at a boundary vertex (N2). `Theta_v` = sum of the corner angles of
+the input (never changed); the scale is `2 pi / Theta` (interior) or `pi / Theta` (boundary) (`it-angle-normalization`).
+**Initial signposts** (Alg. 4): the first halfedge of an interior vertex is its outgoing halfedge with the smallest id,
+its signpost is 0; of a boundary vertex it is its outgoing halfedge without a twin (signpost 0; the boundary edge that
+arrives has direction `pi` and no outgoing halfedge); the next halfedge counter-clockwise from `h` is `twin(prev h)`, its
+signpost is `signpost(h) + scale * (corner angle at the tail of h)` (`it-signpost-update`, reduced by one subtraction of
+`2 pi` at an interior vertex).
+
+## Input
+
+```
+case NAME
+task flip | delaunay | trace | edgetrace | circumcenter
+mesh NV NF NE
+f A B C                          x NF   oriented triangles (a manifold mesh, with or without boundary, not necessarily connected)
+e A B LEN                        x NE   every edge once, A < B, LEN > 0, strict triangle inequality in every face
+... task lines (any order, each at most once except where noted) ...
+end
+```
+
+Task lines:
+
+| task | lines |
+|---|---|
+| `flip` | `flip A B` (required): the edge between the vertices `A` and `B` (it must be unique); `again 0\|1`: flip the new edge a second time |
+| `delaunay` | `tolerance X` (default `1e-10`), `limit N` (flips per edge, default 64), `criterion angle\|cotan` (default `angle`) |
+| `trace` | `trace V PHI DIST` (one or more): from vertex `V` in the normalized direction `PHI` for the distance `DIST`, over the input mesh |
+| `edgetrace` | `preflip A B` (zero or more, applied in order, each pair must identify one edge of the current triangulation), `predelaunay 0\|1` (then Delaunay flipping with the lines of `delaunay`) |
+| `circumcenter` | `circumcenter F` (one or more) or `circumcenter all` |
+
+The printed form of a case (`printCase`) writes `tolerance`, `limit`, `criterion` whenever the task is `delaunay` or `predelaunay`
+is set. Floats are 16 hex digits.
+
+## Output
+
+Every successful block starts with
+
+```
+case NAME
+task TASK
+status ok | refused REASON          refused: boundary | degree_one | not_convex | too_thin  (flip only)
+mesh NV NF NE NB CHI
+vt V THETA BOUNDARY                 x NV   angle sum of the input, 1 for a boundary vertex
+```
+
+and ends with `end`; a block with `status error MESSAGE` has nothing else.
+
+**State.** `state LABEL NF NE` followed by one line per face
+
+```
+cf F V0 V1 V2 PHI0 PHI1 PHI2 L0 L1 L2
+```
+
+`V_k` the tail vertices of the three halfedges of the face in counter-clockwise order, `PHI_k` the signpost of the halfedge that
+starts at `V_k` (it points to `V_{k+1}`), `L_k` its length. The rotation printed is the one that starts at the corner with
+the smallest `(V_k, V_{k+1}, V_{k+2})` (ties: length, then signpost). **Faces are compared as a set, each up to cyclic rotation:
+face ids, halfedge ids and edge ids are not part of the contract** (SPEC N9: a flip moves halfedges between faces).
+
+**`flip`**: `state before`, then (status `ok`) `flipinfo I J K L A B C D E XK HK XL HL LNEW` (the edge `ij`, the apex `k` left of `i -> j`
+and `l` right of it, the five lengths `a = l_ij, b = l_ik, c = l_jk, d = l_il, e = l_jl`, the unfolded diamond and the new length) and
+`state after`; with `again 1` also `state again` (or `again refused REASON`). The flip is refused for a boundary edge, an end point of
+degree one (`twin(h_ki) = h_il` or `twin(h_jk) = h_lj`), a non-strictly-convex quadrilateral (`flipConvex`) and, N5, when a new
+triangle `T` has `2 A_T < 1e-6 l_new l_max(T)` (`too_thin`). Signposts of the two new halfedges (Alg. 5) are `signpostUpdate` from the signposts of
+`l -> j` (for `l -> k`) and `k -> i` (for `k -> l`); all other signposts are kept.
+
+**`delaunay`**: `state input`, `report FLIPS REFUSED TIES STATUS` (STATUS `done`, `flip_limit`, `blocked`; **FLIPS is informational**: only
+the triangulation is compared), `measures MAXEXCESS MINWEIGHT AREA` (largest `theta_k + theta_l - pi`, smallest cotan weight over interior
+edges of the result, total area), `state final`. The queue is the plain one of N6: all edges in ascending order of their
+(halfedge-based) id, first in first out, the four neighbours of a flipped edge appended unless queued; criterion `angle`: flip when
+`theta_k + theta_l > pi + tolerance`; `cotan`: flip when `1/2 (cot theta_k + cot theta_l) < -1e-6`. A tie is an interior edge with `|excess| <= tolerance` (`|weight| <= 1e-6`).
+The result is the Delaunay triangulation up to the diagonals of ties (`TIES = 0` in all fixtures).
+
+**`trace`**: for the i-th line `query I V PHI DIST`, then `trI STOP FACE B0 B1 B2 LEFT VERTEX CLAMP NCROSS` and `NCROSS` lines `trIx U V T`:
+`STOP` is `end` (the length is used up inside `FACE`), `edge` (along an edge of the face, inside it), `vertex` (a vertex was reached with
+`LEFT` length unused, `VERTEX` its number, else `-1`), `boundary` (the boundary was reached; the end point is on the crossed edge);
+`B0 B1 B2` are barycentric coordinates in the corner order of the face (the input order of its `f` line); `CLAMP` 1 if the angle was moved
+into the corner (N3). A crossing `U V T` is the input edge `{U, V}`, `U < V`, at the parameter `T` from `U`, in the order of the path.
+Algorithm (N7): the wedge is the outgoing halfedge with the largest signpost not above `PHI`; the angle inside the corner is
+`(PHI - signpost) / scale`; the triangles along the path are unfolded into a plane where the path is the positive x-axis; the exit edge of
+the first triangle is the opposite edge, afterwards the edge whose y-signs change among the two not entered through (`it-unfold-apex`); the
+crossing is `it-ray-edge-intersection`. A direction exactly equal to a signpost goes along the edge: `edge` if `DIST < l`, else `vertex`.
+
+**`edgetrace`**: `state state` (after the flips), then for every halfedge of that triangulation (halfedge-id order) a trace over the **input** mesh
+from its tail along its signpost for its length (SPEC N8): `te U W PHI LEN STOP FACE B0 B1 B2 MISS NCROSS` (`W` its head, `MISS` the
+distance of the end point from the vertex `W` in the final face, 0 when the path stopped at `W`; `posInf` if `W` is not a corner of that face)
+and `NCROSS` lines `tx U W PHI P Q T` (the crossing `{P, Q}`, `P < Q`, parameter from `P`). Rows are identified by `(U, W, PHI)`.
+
+**`circumcenter`**: for every requested face (input numbering), `cc F W0 W1 W2 R0 R1 R2 INSIDE` (barycentric coordinates of the circumcenter,
+its distances to the corners by `cornerDistances`, 1 if all weights are positive), then the trace from the **barycentre** of the face straight to the
+circumcenter (SPEC N14), `crF STOP FACE B0 B1 B2 LEFT VERTEX CLAMP NCROSS` and `crFx U V T` lines (as for `trace`).
+
+## Fixtures `fixtures/intrinsic/` and tests
+
+18 cases (`MANIFEST.tsv`): single flips (icosphere, sheared grid with boundary, thin tube torus; refused for a boundary edge and for a non-convex
+quadrilateral), Delaunay flipping on a sheared grid with boundary, a noisy icosphere, an annulus, a long twisted torus, the **thin tube torus whose
+Delaunay triangulation has edges from a vertex to itself and double edges (180 halfedges involved)**, the reference's cotan criterion; traces from
+vertices (ending inside, at the boundary); edge traces of whole Delaunay triangulations over the input (icosphere, thin tube torus) and after three
+hand flips (sheared grid); circumcenters of all faces of a mildly sheared grid (62 of 144 inside, 13 traces reach the boundary) and of a noisy icosphere.
+`ddg-oracle intrinsic-fixtures check fixtures/intrinsic` recomputes them (tolerance `1e-9`).
+
+`ddg-oracle intrinsic-selftest` (about 6 s, 38 checks): the formulas on 300 random triangles (apex unfolding `2e-15`, barycentric round trip
+`5e-15`, distances against `baryLength2` `4e-16`, circumcenter equidistant `4e-15`); on seven meshes (noisy icosphere, sheared grid, long torus,
+twisted torus, tube torus, annulus, bumpy disk): angle normalization (scaled corners sum to `2 pi` / `pi`, `3e-15`); every flippable edge flipped,
+flipping twice restores lengths and signposts (`4e-14`), area and angle sums unchanged (`4e-15`, `3e-14`), the flipped length equals the
+distance in the unfolded diamond (`8e-16`); after Delaunay flipping every interior edge satisfies the condition (excess `<= 1e-10`) with a
+non-negative cotan weight, area and angle sums unchanged; tracing the signpost of **every halfedge** of the Delaunay triangulation for its length over
+the input mesh arrives at the other end (all of them, `miss / length <= 2e-14`); the circumcenter is equidistant from the corners (`1e-15`);
+the text format round trip.
+
+## Readings and choices (intrinsic)
+
+50. SPEC N9 does not say which halfedge is first at a vertex: smallest id at an interior vertex, the boundary halfedge at a boundary vertex (above). A
+    different choice shifts all signposts of a vertex by a constant.
+51. Paper Alg. 8 writes `l_ip = l_ij b_i`, `l_jp = l_ij b_j`; with `b_i` the weight of `i` (1 at `i`), the distance from `i` to the point is `l_ij b_j`; this
+    is `edgeSplitLengths`. No operation of the executable splits an edge (SPEC lists it among the operations; only the formula is provided).
+52. The unfolding of the diamond and the heights use `triArea` (Heron's formula) in the generic definitions; SPEC N5 says the Rust code uses Kahan's formula
+    for the area: the two differ by rounding. The fixtures are compared with tolerance, and none has a flip near the shape limit.
+53. A tie in the sort of the canonical rotation of a face (a face that uses a vertex twice) is broken by the lengths, then the signposts; the Rust side should compare faces up to rotation.
+54. The Delaunay flip of an edge refused by `flipHalfedge` is counted (`REFUSED`), and the status is `blocked` unless the flip limit was hit; none occurs in the fixtures.
+55. Tracing a direction that comes out beyond the corner of its wedge by rounding is moved to just inside the corner (`CLAMP 1`); it does not occur in the fixtures.
+56. The trace of the circumcenter starts at the barycentre and goes straight to the circumcenter in the layout of the face (corner 0 at the origin, corner 1 on the x-axis); the
+    distance is the layout distance, the direction a unit vector; a circumcenter that coincides with the barycentre is reported as `end` in the same face without a trace.
+57. Nothing in the paper or SPEC covers a ray that passes exactly through a vertex of the path; the executable stops there (`vertex`) if length is left, as in SPEC N7. Other
+    degenerate directions are not handled (not generic in the fixtures).

@@ -23,6 +23,9 @@ usage:
   ddg-oracle regions-fixtures write DIR | check DIR   golden fixtures (fixtures/regions)
   ddg-oracle cuts-robust-fixtures write DIR | check DIR   fixtures of the robust statistics (fixtures/cuts-robust)
   ddg-oracle regions-robust-fixtures write DIR | check DIR   same for N regions (fixtures/regions-robust)
+  ddg-oracle intrinsic [IN [OUT]]   single operations of 'Navigating Intrinsic Triangulations' (flip, delaunay, trace, edgetrace, circumcenter)
+  ddg-oracle intrinsic-selftest     internal checks of the intrinsic operations
+  ddg-oracle intrinsic-fixtures write DIR | check DIR   golden fixtures (fixtures/intrinsic)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -95,6 +98,18 @@ def main (args : List String) : IO UInt32 := do
     return if (← Cuts.checkList Cuts.robustFixtures dir) == 0 then 0 else 1
   | ["regions-robust-fixtures", "write", dir] => Regions.writeRobust dir; return 0
   | ["regions-robust-fixtures", "check", dir] => return if (← Regions.checkRobust dir) == 0 then 0 else 1
+  | "intrinsic" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← Intrinsic.runStream input output
+    output.flush
+    return 0
+  | ["intrinsic-selftest"] => return if (← Intrinsic.selftest) == 0 then 0 else 1
+  | ["intrinsic-fixtures", "write", dir] => Intrinsic.writeFixtures dir; return 0
+  | ["intrinsic-fixtures", "check", dir] => return if (← Intrinsic.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

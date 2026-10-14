@@ -5,6 +5,7 @@ import DdgOracle.Formulas.Mesh
 import DdgOracle.Formulas.Threshold
 import DdgOracle.Formulas.Optimality
 import DdgOracle.Formulas.Cuts
+import DdgOracle.Formulas.Intrinsic
 
 /-!
 # Scalar-generic formulas

@@ -1,0 +1,18 @@
+it-flip-ico1	ok	flip one edge of an icosphere (level 1), then flip the new edge back
+it-flip-grid	ok	flip an interior edge of a sheared grid with boundary, then again
+it-flip-refused-boundary	refused	a boundary edge: refused
+it-flip-refused-not-convex	refused	an edge whose two triangles form a non-convex quadrilateral: refused
+it-flip-tube	ok	flip an edge of the thin tube torus
+it-delaunay-grid	ok	Delaunay flipping of a sheared grid with boundary
+it-delaunay-ico2	ok	Delaunay flipping of a noisy icosphere (level 2)
+it-delaunay-annulus	ok	Delaunay flipping of an annulus (two boundary loops)
+it-delaunay-tube	ok	Delaunay flipping of a thin tube torus: the result has edges from a vertex to itself and double edges
+it-delaunay-twisted	ok	Delaunay flipping of a long twisted torus
+it-delaunay-grid-cotan	ok	the reference's criterion (cotan weight < -1e-6) on the sheared grid
+it-trace-ico2	ok	traces from vertices of a noisy icosphere (several crossings)
+it-trace-grid	ok	traces on a sheared grid with boundary: ending inside, at the boundary
+it-edgetrace-ico2	ok	after Delaunay flipping, every edge traced over the input mesh for its length
+it-edgetrace-tube	ok	the same on the thin tube torus (self-edges, double edges)
+it-edgetrace-grid	ok	three flips by hand, then every edge traced over the input mesh
+it-circumcenter-grid	ok	circumcenters of all faces of a sheared grid (many outside the face), traced from the barycentre
+it-circumcenter-ico2	ok	circumcenters of all faces of a noisy icosphere (some outside their face, traced across edges)
