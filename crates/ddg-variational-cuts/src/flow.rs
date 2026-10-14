@@ -489,9 +489,11 @@ pub struct StopRule {
     /// Stop after this many steps.
     pub max_steps: usize,
     /// Stop when the cut motion of a step ([`StepReport::cut_motion`], a length on the
-    /// unit-area surface) is at most this. A tolerance that is not positive turns the
-    /// criterion off: `0.0` never stops for this reason, also not after a step that moved
-    /// nothing.
+    /// unit-area surface) is at most this, and the motion that the rate of the cut predicts
+    /// for the step ([`StepReport::predicted_motion`]) is at most this too
+    /// ([`motion_criterion`]): a step that was short because something held it back does not
+    /// end a run. A tolerance that is not positive turns the criterion off: `0.0` never stops
+    /// for this reason, also not after a step that moved nothing.
     pub motion_tolerance: f64,
     /// Stop when the energy has not fallen by more than this fraction of its size over the
     /// last `energy_window` steps: `E_{k − window} − E_k ≤ energy_tolerance · |E_k|`. On an
@@ -526,7 +528,8 @@ impl Default for StopRule {
 pub enum StopReason {
     /// The limit on the number of steps was reached.
     MaxSteps,
-    /// The cut motion of the last step was within the tolerance.
+    /// The cut motion of the last step and the motion that its rate predicted were within the
+    /// tolerance: the cut is at rest ([`motion_criterion`]).
     Converged,
     /// The energy stood still over the window of the stop rule: it changed by at most the
     /// tolerance, up or down.
@@ -602,6 +605,48 @@ pub(crate) fn finite_evaluation(
         "the energy (its terms are finite, their weighted sum is not)".to_string()
     })?;
     all_finite(step, speed, |c| format!("the speed at cut point {c}"))
+}
+
+/// The largest rate that the rates on the cut give a cut-adjacent vertex by the first line of
+/// the local extension of SPEC §3.8, in absolute value: for the vertex `i`,
+/// `Σ_p ℓ_p β_ip r_p / Σ_p ℓ_p β_ip` over the cut points `p` on the edges at `i`, with `ℓ_p`
+/// from `dual` and `β_ip = 1 − t` or `t`. `rate(p, side)` is the rate at the cut point `p` for
+/// the vertex at the start (`side = 0`) or the end (`side = 1`) of its edge. Times `τ` this is
+/// the predicted motion of SPEC §4 (D31) with the length step on the cut, when the rates are
+/// those before the local limit and before the scaling by the mean slope.
+pub(crate) fn largest_vertex_rate(
+    mesh: &TriMesh,
+    cut: &Cut,
+    dual: &[f64],
+    rate: impl Fn(usize, usize) -> f64,
+) -> f64 {
+    let nv = mesh.n_vertices();
+    let (mut sum, mut weight) = (vec![0.0; nv], vec![0.0; nv]);
+    for (p, point) in cut.points.iter().enumerate() {
+        let ends = mesh.edge_vertices(point.edge as usize);
+        for (side, beta) in [1.0 - point.t, point.t].into_iter().enumerate() {
+            sum[ends[side]] += dual[p] * beta * rate(p, side);
+            weight[ends[side]] += dual[p] * beta;
+        }
+    }
+    sum.iter()
+        .zip(&weight)
+        .filter(|(_, w)| **w > 0.0)
+        .map(|(s, w)| (s / w).abs())
+        .fold(0.0, f64::max)
+}
+
+/// The motion criterion of the stop rule (SPEC §4, D31): a run has converged after a step iff
+/// `tolerance > 0`, the step moved the cut by at most the tolerance
+/// ([`StepReport::cut_motion`]), and the rate of the cut would not have moved it by more
+/// either ([`StepReport::predicted_motion`]):
+/// `tolerance > 0 ∧ moved ≤ tolerance ∧ predicted ≤ tolerance`. The second condition alone is
+/// a statement about one step, which can be short because the local limit, the mean slope or
+/// the step size held it back; the third says that the cut is at rest.
+///
+/// [formula: cut-stop-motion]
+pub fn motion_criterion(tolerance: f64, moved: f64, predicted: f64) -> bool {
+    tolerance > 0.0 && moved <= tolerance && predicted <= tolerance
 }
 
 /// The three cases of the energy criterion (SPEC §4, D27), for the energy `before` at the start
@@ -738,7 +783,20 @@ pub struct StepReport {
     /// The largest `|φ_new − φ_old|` over the vertices that are cut-adjacent before or after
     /// the step: how far the cut moved.
     pub cut_motion: f64,
-    /// `|∇φ|` in the crossed faces of the state the step started from; `None` without a cut.
+    /// How far the rate of the cut would move the level-set function at the cut-adjacent
+    /// vertices in this step if nothing held it back (SPEC §4, D31). With the length step on
+    /// the cut: `τ` times the largest rate that the local extension of SPEC §3.8 (its first
+    /// line, a weighted mean over the cut points on the edges at the vertex) gives a
+    /// cut-adjacent vertex for the rates `r` before the local limit and before the scaling by
+    /// the mean `|∇φ|` (on a network: the rates of the copies on the side of the vertex). With
+    /// the length step on the mesh: the largest change of the level-set function by the
+    /// explicit and the length step at a vertex that is cut-adjacent before the step, before
+    /// the local limit (on a network: of half the difference of the two functions that are
+    /// smallest there). A step can move the cut by much less than this; the cut is at rest
+    /// when this is small.
+    pub predicted_motion: f64,
+    /// `|∇φ|` in the crossed faces of the state the step started from, over the faces none of
+    /// whose crossings was moved; `None` without a cut and if no face counts.
     pub gradient_norm: Option<GradientNorm>,
     /// Number of cut points before the step.
     pub n_cut_points: usize,
@@ -1119,6 +1177,7 @@ impl Flow {
             shortest_crossed_edge: 0.0,
             n_limited: 0,
             cut_motion: 0.0,
+            predicted_motion: 0.0,
             gradient_norm: None,
             n_cut_points: e.cut.points.len(),
             n_clamped_crossings: e.report.n_clamped_crossings,
@@ -1135,7 +1194,7 @@ impl Flow {
         }
         let (gradient_norm, mean_gradient) =
             gradient_norms(&e.cut, &e.triangles, |_, a| self.phi[a].abs());
-        report.gradient_norm = Some(gradient_norm);
+        report.gradient_norm = gradient_norm;
         let local_rates = roughening_rates(&e, problem);
         all_finite(self.n_steps, &local_rates, |c| {
             format!("the roughening rate at cut point {c}")
@@ -1224,6 +1283,10 @@ impl Flow {
             stages.gradient_scale = mean_gradient.clone();
             stages.unscaled_rate = rate.clone();
         }
+        if on_cut_step {
+            report.predicted_motion =
+                tau * largest_vertex_rate(self.evaluator.mesh(), &e.cut, &dual, |p, _| rate[p]);
+        }
         // The local limit of the step rule: cut points beyond the quantile take a smaller
         // step of their own. With the length step on the mesh the rate on the cut is only the
         // explicit part of the motion: limiting it alone would leave the length step, which
@@ -1293,6 +1356,12 @@ impl Flow {
             stages.length = phi.clone();
         }
         let adjacent_before = e.cut.cut_adjacent_vertices(self.evaluator.mesh());
+        if !on_cut_step {
+            report.predicted_motion = (0..nv)
+                .filter(|&v| adjacent_before[v])
+                .map(|v| (phi[v] - self.phi[v]).abs())
+                .fold(0.0, f64::max);
+        }
         // The local limit at the vertices: the change of the whole step, both parts together.
         if for_step_only {
             let (vertex_edges, vertex_rates) =
@@ -1392,12 +1461,16 @@ impl Flow {
             if lowest.as_ref().is_none_or(|l| report.energy.total < l.0) {
                 lowest = Some((report.energy.total, steps.len(), state, time));
             }
-            let (vanished, motion) = (report.cut_vanished, report.cut_motion);
+            let (vanished, motion, predicted) = (
+                report.cut_vanished,
+                report.cut_motion,
+                report.predicted_motion,
+            );
             steps.push(report);
             if vanished {
                 break StopReason::CutVanished;
             }
-            if stop.motion_tolerance > 0.0 && motion <= stop.motion_tolerance {
+            if motion_criterion(stop.motion_tolerance, motion, predicted) {
                 break StopReason::Converged;
             }
             if let Some(reason) = energy_stop(stop, &steps) {
@@ -2098,8 +2171,12 @@ fn components_without_cut(mesh: &TriMesh, region: &[u32], cut: &crate::cut::Cut)
 /// the harmonic one, `Σ |pq| / Σ (|pq| / |∇φ|)`: a rate `r · ḡ` of the function moves the
 /// segment by `r ḡ / |∇φ|` per unit time, and the mean of that over the piece is `r`.
 ///
-/// A face with `|∇φ| = 0` is left out of the mean (it is in the statistics), and a piece
-/// without any face that counts takes the mean 1.
+/// A face counts, in the mean and in the statistics, only if neither of its two crossings was
+/// moved (SPEC §3.2) and its slope is positive: where a crossing was moved into `[δ, 1 − δ]`
+/// the segment `pq` is not the zero line of the interpolant, and the formula gives a slope as
+/// small as `|φ_a|` is, down to zero. One such face would take the harmonic mean of its whole
+/// piece with it, and the piece would stand still (SPEC D30). A piece without any face that
+/// counts takes the mean 1; the statistics are `None` if no face counts at all.
 ///
 /// `apex(σ, a)` is `|φ_a|` for segment `σ`. On a network (SPEC §8.5) it is
 /// `½ |φ_i(a) − φ_j(a)|` for the two regions `i, j` of the segment, faces with three regions
@@ -2110,7 +2187,7 @@ pub(crate) fn gradient_norms(
     cut: &Cut,
     tri: &CutTriangles,
     apex: impl Fn(usize, usize) -> f64,
-) -> (GradientNorm, Vec<f64>) {
+) -> (Option<GradientNorm>, Vec<f64>) {
     let n_points = cut.points.len();
     // Connected pieces of the cut: union-find over the segments.
     let mut parent: Vec<u32> = (0..n_points as u32).collect();
@@ -2147,13 +2224,12 @@ pub(crate) fn gradient_norms(
         let a = tri.faces[t][0] as usize;
         let length = tri.segment_length[i];
         let g = apex(i, a) * length / (2.0 * tri.area[t]);
-        min = min.min(g);
-        max = max.max(g);
-        sum += g * length;
-        total += length;
-        if g > 0.0 {
-            // A face in which the function has no slope (it vanishes at the lone vertex) is
-            // left out of the mean: its term would be infinite.
+        let moved = segment.points.iter().any(|&p| cut.moved[p as usize]);
+        if !moved && g > 0.0 {
+            min = min.min(g);
+            max = max.max(g);
+            sum += g * length;
+            total += length;
             let root = find(&mut parent, segment.points[0]) as usize;
             length_of[root] += length;
             time_of[root] += length / g;
@@ -2171,11 +2247,11 @@ pub(crate) fn gradient_norms(
         })
         .collect();
     (
-        GradientNorm {
+        (total > 0.0).then(|| GradientNorm {
             min,
             max,
             mean: sum / total,
-        },
+        }),
         mean_of_piece,
     )
 }

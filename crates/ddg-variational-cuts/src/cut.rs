@@ -109,6 +109,9 @@ pub struct Cut {
     pub edge_point: Vec<u32>,
     /// Number of crossings that were moved into `[δ, 1 − δ]` (SPEC §3.2, D9b).
     pub n_clamped: usize,
+    /// For every cut point, whether its crossing was moved into `[δ, 1 − δ]`: the level-set
+    /// function does not vanish where the cut point is.
+    pub moved: Vec<bool>,
     /// The smallest `min(t, 1 − t)` over all crossings before they were moved; `0.5` if there is
     /// no crossing.
     pub smallest_offset: f64,
@@ -299,6 +302,7 @@ impl Cut {
         let mut points = Vec::new();
         let mut edge_point = vec![NONE; mesh.n_edges()];
         let mut n_clamped = 0;
+        let mut moved = Vec::new();
         let mut smallest_offset = 0.5f64;
         for (e, &[a, b]) in mesh.edges().iter().enumerate() {
             if vertex_region[a as usize] == vertex_region[b as usize] {
@@ -310,6 +314,7 @@ impl Cut {
             if t != raw {
                 n_clamped += 1;
             }
+            moved.push(t != raw);
             edge_point[e] = points.len() as u32;
             points.push(CutPoint { edge: e as u32, t });
         }
@@ -372,6 +377,7 @@ impl Cut {
             triple_points,
             edge_point,
             n_clamped,
+            moved,
             smallest_offset,
         }
     }

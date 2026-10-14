@@ -22,8 +22,9 @@ use crate::flow::{
     Extension, Flow, FlowOptions, LengthStep, PenaltyRule, ROUGHENING_QUANTILE, Redistance,
     RunReport, SpeedScaling, StepReport, StepSize, StepStatistics, StepTimings, StopReason,
     StopRule, all_finite, cut_dual_lengths, energy_stop, explicit_step, finite, finite_evaluation,
-    gradient_norms, length_weights, local_edges, roughening_rate, roughening_rates, rule_step,
-    run_outcome, solve_on_cut, symmetry_projection, vertex_limits, weighted_quantile,
+    gradient_norms, largest_vertex_rate, length_weights, local_edges, motion_criterion,
+    roughening_rate, roughening_rates, rule_step, run_outcome, solve_on_cut, symmetry_projection,
+    vertex_limits, weighted_quantile,
 };
 use crate::problem::{CutProblem, EvalOptions, UnitAreaScale};
 
@@ -333,6 +334,7 @@ impl RegionFlow {
             shortest_crossed_edge: 0.0,
             n_limited: 0,
             cut_motion: 0.0,
+            predicted_motion: 0.0,
             gradient_norm: None,
             n_cut_points: e.cut.points.len(),
             n_clamped_crossings: e.report.n_clamped_crossings,
@@ -355,7 +357,7 @@ impl RegionFlow {
             let [i, j] = cut.segment_regions(mesh, segment);
             0.5 * (phis[i as usize][a] - phis[j as usize][a]).abs()
         });
-        report.gradient_norm = Some(gradient_norm);
+        report.gradient_norm = gradient_norm;
         let local_rates = roughening_rates(&e, problem);
         all_finite(self.n_steps, &local_rates, |c| {
             format!("the roughening rate at cut point {c}")
@@ -459,6 +461,11 @@ impl RegionFlow {
             stages.local_edge = edges.clone();
             stages.node_edge = node_edges.clone();
             stages.unlimited_rate = rate.clone();
+        }
+        if on_cut_step {
+            // The copy `nv + 2p` of a cut point is in the region of the start of its edge.
+            report.predicted_motion =
+                tau * largest_vertex_rate(mesh, cut, &dual, |p, side| rate[nv + 2 * p + side]);
         }
         // The local limit of the step rule (SPEC §4): per boundary node, with the roughening
         // rate of its cut point (none at a triple point). The report counts the cut points
@@ -608,24 +615,33 @@ impl RegionFlow {
         }
         let mesh = self.core.evaluator.mesh();
         let adjacent_before = cut.cut_adjacent_vertices(mesh);
-        // The local limit at the vertices: the change of the whole step, both parts together.
-        // Half the difference of the two smallest functions at the vertex plays the role of
-        // φ; all functions at the vertex take its factor.
+        // The change, by the explicit and the length step, of half the difference of the two
+        // functions that are smallest at a vertex in the state before the step: it plays the
+        // role of φ.
+        let half_difference = |new: &[Vec<f64>], v: usize| {
+            let first = cut.vertex_region[v] as usize;
+            let mut second = usize::MAX;
+            for k in (0..n_regions).filter(|&k| k != first) {
+                if second == usize::MAX || self.phis[k][v] < self.phis[second][v] {
+                    second = k;
+                }
+            }
+            0.5 * ((new[second][v] - self.phis[second][v]) - (new[first][v] - self.phis[first][v]))
+        };
+        if !on_cut_step {
+            report.predicted_motion = (0..nv)
+                .filter(|&v| adjacent_before[v])
+                .map(|v| half_difference(&new, v).abs())
+                .fold(0.0, f64::max);
+        }
+        // The local limit at the vertices: the change of the whole step, both parts together;
+        // all functions at the vertex take its factor.
         if for_step_only {
             let (vertex_edges, vertex_rates) =
                 vertex_limits(mesh, &self.core.geometry, cut, &local_rates);
             let mut vertex_factor = vec![1.0; nv];
             for v in 0..nv {
-                let first = cut.vertex_region[v] as usize;
-                let mut second = usize::MAX;
-                for k in (0..n_regions).filter(|&k| k != first) {
-                    if second == usize::MAX || self.phis[k][v] < self.phis[second][v] {
-                        second = k;
-                    }
-                }
-                let change = 0.5
-                    * ((new[second][v] - self.phis[second][v])
-                        - (new[first][v] - self.phis[first][v]));
+                let change = half_difference(&new, v);
                 let factor = options.step_size.local_factor(
                     tau,
                     0.0,
@@ -737,12 +753,16 @@ impl RegionFlow {
             if lowest.as_ref().is_none_or(|l| report.energy.total < l.0) {
                 lowest = Some((report.energy.total, steps.len(), state, time));
             }
-            let (vanished, motion) = (report.cut_vanished, report.cut_motion);
+            let (vanished, motion, predicted) = (
+                report.cut_vanished,
+                report.cut_motion,
+                report.predicted_motion,
+            );
             steps.push(report);
             if vanished {
                 break StopReason::CutVanished;
             }
-            if stop.motion_tolerance > 0.0 && motion <= stop.motion_tolerance {
+            if motion_criterion(stop.motion_tolerance, motion, predicted) {
                 break StopReason::Converged;
             }
             if let Some(reason) = energy_stop(stop, &steps) {

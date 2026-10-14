@@ -1357,3 +1357,58 @@ fn one_spike_does_not_set_the_length_weight_or_the_step() {
         "{rows:?}"
     );
 }
+
+/// SPEC §3.9, D30: a face with a moved crossing does not count in the mean slope. A circle on
+/// the flat grid that passes a vertex at the distance `ε`: the crossings on the edges at that
+/// vertex are moved away from it by `δ`, and the slope formula of such a face gives
+/// `ε / (δ · h)`. Counted, it made the harmonic mean of the whole cut `0.5` for `ε = 10⁻⁸` and
+/// `0.01` for `10⁻¹⁰`, and the first step moved the cut by that much less. `ε = 0` was the one
+/// case that was left out before.
+#[test]
+fn a_vertex_almost_on_the_cut_does_not_scale_the_rate_of_the_whole_cut() {
+    let g = grid_disk(32, 32).unwrap();
+    let mesh = ddg_core::TriMesh::new(g.positions.len(), g.faces.clone()).unwrap();
+    let geometry = ddg_core::Geometry::from_positions(&mesh, &g.positions).unwrap();
+    let problem = CutProblem::new(Energy::Hencky, 1.0);
+    let options = FlowOptions::new(StepSize::default());
+    // The vertex (22, 16)/32 is at the distance 6/32 from the middle of the square.
+    let first_step = |eps: f64| {
+        let phi0: Vec<f64> = g
+            .positions
+            .iter()
+            .map(|p| (p[0] - 0.5).hypot(p[1] - 0.5) - (6.0 / 32.0 + eps))
+            .collect();
+        let mut flow = Flow::new(&mesh, &geometry, &phi0).unwrap();
+        let moved = flow
+            .evaluate(&problem, &options.eval)
+            .unwrap()
+            .cut
+            .moved
+            .iter()
+            .filter(|m| **m)
+            .count();
+        let (report, stages) = flow.step_with_stages(&problem, &options).unwrap();
+        assert_eq!(report.n_clamped_crossings, moved);
+        let scale = stages
+            .gradient_scale
+            .iter()
+            .fold(f64::INFINITY, |m, g| m.min(*g));
+        (report, scale, moved)
+    };
+    let (clean, scale, moved) = first_step(1e-2);
+    assert_eq!(moved, 0);
+    assert!((scale - 1.0).abs() < 0.02);
+    for eps in [1e-6, 1e-8, 1e-10, 1e-13, 0.0, -1e-10] {
+        let (report, scale, moved) = first_step(eps);
+        assert!(moved >= 8, "{eps:e}: {moved} crossings moved");
+        assert!((scale - 1.0).abs() < 0.02, "{eps:e}: mean slope {scale}");
+        let slopes = report.gradient_norm.unwrap();
+        assert!(slopes.min > 0.9 && slopes.max < 1.1, "{eps:e}: {slopes:?}");
+        assert!(
+            (report.cut_motion / clean.cut_motion - 1.0).abs() < 0.2,
+            "{eps:e}: the first step moves the cut by {:e}",
+            report.cut_motion
+        );
+        assert!((report.predicted_motion / clean.predicted_motion - 1.0).abs() < 0.2);
+    }
+}

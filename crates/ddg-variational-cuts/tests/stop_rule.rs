@@ -375,3 +375,148 @@ fn a_tolerance_of_zero_turns_a_criterion_off() {
     assert_eq!(report.stop, StopReason::EnergyStalled);
     assert_eq!(report.steps.len(), 2);
 }
+
+/// The motion criterion (SPEC §4, D31): both the motion of the step and the motion that its
+/// rate predicts must be within a positive tolerance.
+#[test]
+fn the_motion_criterion() {
+    use ddg_variational_cuts::motion_criterion;
+    assert!(motion_criterion(1e-5, 1e-6, 1e-6));
+    assert!(motion_criterion(1e-5, 1e-5, 1e-5));
+    assert!(motion_criterion(1e-5, 0.0, 0.0));
+    // A short step of a cut that is not at rest.
+    assert!(!motion_criterion(1e-5, 1e-10, 8e-3));
+    // A step that moved the function further than its rate predicts.
+    assert!(!motion_criterion(1e-5, 8e-3, 1e-10));
+    // Off.
+    for tolerance in [0.0, -1.0, f64::NAN] {
+        assert!(!motion_criterion(tolerance, 0.0, 0.0));
+    }
+    assert!(!motion_criterion(1e-5, f64::NAN, 0.0));
+    assert!(!motion_criterion(1e-5, 0.0, f64::NAN));
+}
+
+/// A mesh from a fixture: `mesh NV NF NE`, `centre V`, `f A B C`, `e A B LENGTH` with the
+/// length as the bits of an `f64` in hexadecimal.
+fn fixture_mesh(name: &str) -> (TriMesh, Geometry, usize) {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let (mut n_vertices, mut centre) = (0, 0);
+    let mut faces = Vec::new();
+    let mut edges = Vec::new();
+    for line in text.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let number = |k: usize| words[k].parse::<usize>().unwrap();
+        match words.first().copied() {
+            Some("mesh") => n_vertices = number(1),
+            Some("centre") => centre = number(1),
+            Some("f") => faces.push([number(1) as u32, number(2) as u32, number(3) as u32]),
+            Some("e") => edges.push((
+                number(1),
+                number(2),
+                f64::from_bits(u64::from_str_radix(words[3], 16).unwrap()),
+            )),
+            _ => {}
+        }
+    }
+    let mesh = TriMesh::new(n_vertices, faces).unwrap();
+    let mut lengths = vec![f64::NAN; mesh.n_edges()];
+    for (a, b, length) in edges {
+        lengths[mesh.find_edge(a, b).unwrap()] = length;
+    }
+    let geometry = Geometry::from_edge_lengths(&mesh, lengths).unwrap();
+    (mesh, geometry, centre)
+}
+
+/// The run that was reported as converged after one step (SPEC D30, D31): the needles-and-caps
+/// grid of `examples/bad_mesh_study.rs` with 16 cells, flipped to its intrinsic Delaunay
+/// triangulation and exported by `ddg-intrinsic` (the fixture has its connectivity and edge
+/// lengths), a geodesic circle around the middle vertex, Hencky energy, `α_L = 1`, default
+/// options. Six vertices lie on the circle up to rounding, their crossings are moved by `δ`,
+/// and the slope `|φ_a| / dist(a, pq)` of their faces was `2·10⁻¹²`: the mean slope of the
+/// whole cut was `2·10⁻⁸`, the first step moved the cut by `1.5·10⁻¹⁰`, and the run ended.
+#[test]
+fn a_cut_through_vertices_moves_and_is_not_called_converged() {
+    let (mesh, geometry, centre) = fixture_mesh("needles_and_caps_16_intrinsic.txt");
+    let radius = 0.2 * geometry.total_area().sqrt();
+    let phi0 = init::geodesic_circle(&mesh, &geometry, centre, radius).unwrap();
+    let problem = CutProblem::new(Energy::Hencky, 1.0);
+    let options = FlowOptions::new(StepSize::default());
+
+    let mut flow = Flow::new(&mesh, &geometry, &phi0).unwrap();
+    let start = flow.evaluate(&problem, &options.eval).unwrap();
+    assert!((start.energy.total - 1.167016).abs() < 1e-6);
+    // The crossings that were moved are flagged, and their faces do not count in the slope.
+    assert_eq!(start.cut.n_clamped, 6);
+    assert_eq!(start.cut.moved.iter().filter(|m| **m).count(), 6);
+    let (first, stages) = flow.step_with_stages(&problem, &options).unwrap();
+    assert!(stages.gradient_scale.iter().all(|g| (0.9..1.3).contains(g)));
+    let slopes = first.gradient_norm.unwrap();
+    assert!(slopes.min > 0.5, "{slopes:?}");
+    assert!(
+        first.cut_motion > 5e-3,
+        "the first step moved the cut by {:e}",
+        first.cut_motion
+    );
+    assert!(first.predicted_motion > 5e-3);
+
+    let mut flow = Flow::new(&mesh, &geometry, &phi0).unwrap();
+    let stop = StopRule {
+        max_steps: 8,
+        ..StopRule::default()
+    };
+    let report = flow.run(&problem, &options, &stop).unwrap();
+    check_report(&report);
+    assert_eq!(report.stop, StopReason::MaxSteps);
+    assert_eq!(report.steps.len(), 8);
+    // It was 1.167 after one step; with the criterion off, 0.894 after eight.
+    assert!(
+        report.final_energy.total < 0.87,
+        "{}",
+        report.final_energy.total
+    );
+}
+
+/// A run that comes to rest still ends by the motion criterion, in as many steps as the motion
+/// of its steps alone would have ended it (the rule before SPEC D31): a cap with three lobes on
+/// the sphere under a length weight that makes it round. At its last step both the motion and
+/// the predicted motion are within the tolerance, and at no earlier step.
+#[test]
+fn a_cut_at_rest_is_still_called_converged() {
+    use ddg_variational_cuts::motion_criterion;
+    let s = sphere(3);
+    let cap = s.sample(|p| polar_angle(p) - 1.2 - 0.02 * (3.0 * p[1].atan2(p[0])).cos());
+    let problem = CutProblem::new(Energy::Dirichlet, 6.0);
+    let options = FlowOptions::new(StepSize::default());
+    let stop = StopRule {
+        max_steps: 400,
+        energy_tolerance: 0.0,
+        ..StopRule::default()
+    };
+    let mut flow = Flow::new(&s.mesh, &s.geometry, &cap).unwrap();
+    let report = flow.run(&problem, &options, &stop).unwrap();
+    check_report(&report);
+    assert_eq!(report.stop, StopReason::Converged);
+    let n = report.steps.len();
+    for (k, r) in report.steps.iter().enumerate() {
+        assert_eq!(
+            motion_criterion(stop.motion_tolerance, r.cut_motion, r.predicted_motion),
+            k + 1 == n
+        );
+        // The prediction is the motion of the step where nothing holds it back.
+        assert!(r.predicted_motion.is_finite() && r.predicted_motion >= 0.0);
+    }
+    // The first step whose motion alone is within the tolerance.
+    let by_motion_alone = report
+        .steps
+        .iter()
+        .position(|r| r.cut_motion <= stop.motion_tolerance)
+        .unwrap()
+        + 1;
+    println!(
+        "sphere: converged after {n} steps; by the motion of the step alone after {by_motion_alone}"
+    );
+    assert!(n <= by_motion_alone + by_motion_alone / 10);
+}

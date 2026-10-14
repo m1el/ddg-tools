@@ -225,7 +225,7 @@ pub use flow::{
     Extension, Flow, FlowOptions, GradientNorm, LengthStep, PenaltyRule, ROUGHENING_QUANTILE,
     Redistance, RunReport, SpeedScaling, StepReport, StepSize, StepStages, StepStatistics,
     StepTimings, StopReason, StopRule, energy_criterion, explicit_step, length_weight_for_ripples,
-    symmetry_projection, weighted_quantile,
+    motion_criterion, symmetry_projection, weighted_quantile,
 };
 pub use problem::{
     CurvatureSource, CutProblem, Energy, EvalOptions, FluxRecovery, PAPER_FEATURE_SMOOTHING,
