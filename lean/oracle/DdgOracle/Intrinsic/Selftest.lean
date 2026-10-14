@@ -1,5 +1,5 @@
 import DdgOracle.Selftest
-import DdgOracle.Intrinsic.Cases
+import DdgOracle.Intrinsic.MoveCases
 
 /-!
 # `intrinsic-selftest`
@@ -8,27 +8,6 @@ import DdgOracle.Intrinsic.Cases
 namespace Ddg.Intrinsic
 
 open Ddg Ddg.Cuts
-
-/-- Do two triangulations have the same halfedges `(tail, head, length, signpost)` (halfedge ids, face
-ids and rotations are ignored)? Returns the largest deviation, or `posInf` if they do not match. -/
-def sameTriangulation (a b : Tri) : Float := Id.run do
-  if a.nh != b.nh then return posInf
-  let mut used : Array Bool := Array.replicate b.nh false
-  let mut worst := fzero
-  for h in [0:a.nh] do
-    let mut best := posInf
-    let mut bi := b.nh
-    for g in [0:b.nh] do
-      if !used[g]! && a.tail[h]! == b.tail[g]! && a.head h == b.head g then
-        let ds := (a.sign[h]! - b.sign[g]!).abs
-        let d := max (a.len[h]! - b.len[g]!).abs (min ds (2 * floatPi - ds))
-        if d < best then
-          best := d
-          bi := g
-    if bi == b.nh then return posInf
-    used := used.set! bi true
-    worst := max worst best
-  return worst
 
 def sheared (nx ny : Nat) : RawMesh :=
   ((gridDisk nx ny fun x y => 0.1 * Float.sin (4 * x) * y).mapPos fun p => ⟨p.x + 2.5 * p.y, p.y * 0.4, p.z⟩).jitter 0.01 5
@@ -210,6 +189,9 @@ def selftest : IO Nat := do
     | .ok c2 => printCase c2 == text
     | .error _ => false
   check tally "text format: print, parse, print is the identity" ok
+
+  -- moving a vertex (task move)
+  moveChecks tally
 
   let t ← tally.get
   IO.println s!"intrinsic-selftest: {t.passed} passed, {t.failed} failed"

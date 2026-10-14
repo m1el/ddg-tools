@@ -23,7 +23,8 @@ usage:
   ddg-oracle regions-fixtures write DIR | check DIR   golden fixtures (fixtures/regions)
   ddg-oracle cuts-robust-fixtures write DIR | check DIR   fixtures of the robust statistics (fixtures/cuts-robust)
   ddg-oracle regions-robust-fixtures write DIR | check DIR   same for N regions (fixtures/regions-robust)
-  ddg-oracle intrinsic [IN [OUT]]   single operations of 'Navigating Intrinsic Triangulations' (flip, delaunay, trace, edgetrace, circumcenter)
+  ddg-oracle intrinsic [IN [OUT]]   single operations of 'Navigating Intrinsic Triangulations'
+                                    (flip, delaunay, trace, edgetrace, circumcenter, move)
   ddg-oracle intrinsic-selftest     internal checks of the intrinsic operations
   ddg-oracle intrinsic-fixtures write DIR | check DIR   golden fixtures (fixtures/intrinsic)
   ddg-oracle version

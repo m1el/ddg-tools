@@ -27,6 +27,9 @@ structure TraceResult where
   crossings : Array (Nat × Float)
   /-- the direction was moved into the corner of the vertex (N3) -/
   clamp : Bool
+  /-- the unit direction of the path at its end in the layout of the end face (`layoutFace` of its
+  first halfedge); `(1, 0)` where it is not computed (traces that start along an edge) -/
+  dirEnd : Float × Float := (1.0, 0.0)
   deriving Inhabited
 
 /-- The three halfedges of the face of `h0` starting at `h0`. -/
@@ -45,10 +48,20 @@ def canonBary (t : Tri) (f : Nat) (hs : Array Nat) (b : Float × Float × Float)
   let r := if hs[0]! == t.fh[f]! then 0 else if hs[1]! == t.fh[f]! then 1 else 2
   (arr[r % 3]!, arr[(r + 1) % 3]!, arr[(r + 2) % 3]!)
 
+/-- Direction of the ray (the positive x-axis of the ray coordinates `Q` of the corners `hs` of face
+`f`) in the layout of `f` (`layoutFace t (fh f)`). -/
+def rayDirInFace (t : Tri) (f : Nat) (hs : Array Nat) (Q : Array (Float × Float)) : Float × Float :=
+  let r := if hs[0]! == t.fh[f]! then 0 else if hs[1]! == t.fh[f]! then 1 else 2
+  let ex := Q[(r + 1) % 3]!.1 - Q[r]!.1
+  let ey := Q[(r + 1) % 3]!.2 - Q[r]!.2
+  let n := Float.sqrt (ex * ex + ey * ey)
+  (ex / n, -ey / n)
+
 /-- Core of tracing: the face of `h0` laid out as `layoutFace`; the ray starts at `start` in that layout
-with the unit direction `dir`, length `dist`. -/
-def traceCore (t : Tri) (h0 : Nat) (start dir : Float × Float) (dist : Float) (maxCross : Nat) :
-    Except String TraceResult := do
+with the unit direction `dir`, length `dist`. `enter0 < 3` names the side of the first triangle that
+the start lies on (a start on an edge: that side is not an exit); `3` for a start inside the face. -/
+def traceCore (t : Tri) (h0 : Nat) (start dir : Float × Float) (dist : Float) (maxCross : Nat)
+    (enter0 : Nat := 3) : Except String TraceResult := do
   let P := layoutFace t h0
   let (dx, dy) := dir
   let toRay := fun (p : Float × Float) =>
@@ -58,7 +71,7 @@ def traceCore (t : Tri) (h0 : Nat) (start dir : Float × Float) (dist : Float) (
   let mut hs := t.hs3 h0
   let mut Q : Array (Float × Float) := P.map toRay
   let mut xcur := fzero
-  let mut entering : Nat := 3      -- no entering edge in the first triangle
+  let mut entering : Nat := enter0  -- no entering edge in the first triangle unless the start is on one
   let mut crossings : Array (Nat × Float) := #[]
   let mut result : Option TraceResult := none
   let mut count := 0
@@ -81,6 +94,7 @@ def traceCore (t : Tri) (h0 : Nat) (start dir : Float × Float) (dist : Float) (
     let f := t.face[hs[0]!]!
     let bary := fun (x : Float) =>
       canonBary t f hs (barycentric Q[0]!.1 Q[0]!.2 Q[1]!.1 Q[1]!.2 Q[2]!.1 Q[2]!.2 x 0.0)
+    let dEnd := rayDirInFace t f hs Q
     if exitK == 3 then
       -- through a vertex on the axis?
       let mut vm := 3
@@ -90,20 +104,20 @@ def traceCore (t : Tri) (h0 : Nat) (start dir : Float × Float) (dist : Float) (
         throw s!"the ray leaves face {f} through no edge and no vertex"
       let xv := Q[vm]!.1
       if dist ≤ xv then
-        result := some { stop := "end", face := f, bary := bary dist, left := 0.0, vertex := noTwin, crossings, clamp := false }
+        result := some { stop := "end", face := f, bary := bary dist, left := 0.0, vertex := noTwin, crossings, clamp := false, dirEnd := dEnd }
       else
         let bv := if vm == 0 then (1.0, 0.0, 0.0) else if vm == 1 then (0.0, 1.0, 0.0) else (0.0, 0.0, 1.0)
         result := some { stop := "vertex", face := f, bary := canonBary t f hs bv, left := dist - xv
-                         vertex := t.tail[hs[vm]!]!, crossings, clamp := false }
+                         vertex := t.tail[hs[vm]!]!, crossings, clamp := false, dirEnd := dEnd }
     else if dist ≤ xc then
-      result := some { stop := "end", face := f, bary := bary dist, left := 0.0, vertex := noTwin, crossings, clamp := false }
+      result := some { stop := "end", face := f, bary := bary dist, left := 0.0, vertex := noTwin, crossings, clamp := false, dirEnd := dEnd }
     else
       let hk := hs[exitK]!
       crossings := crossings.push (hk, tt)
       let tw := t.twin[hk]!
       if tw == noTwin then
         result := some { stop := "boundary", face := f, bary := bary xc, left := dist - xc, vertex := noTwin
-                         crossings, clamp := false }
+                         crossings, clamp := false, dirEnd := dEnd }
       else
         count := count + 1
         if count > maxCross then throw s!"more than {maxCross} crossings: the trace does not end"

@@ -16,3 +16,9 @@ it-edgetrace-tube	ok	the same on the thin tube torus (self-edges, double edges)
 it-edgetrace-grid	ok	three flips by hand, then every edge traced over the input mesh
 it-circumcenter-grid	ok	circumcenters of all faces of a sheared grid (many outside the face), traced from the barycentre
 it-circumcenter-ico2	ok	circumcenters of all faces of a noisy icosphere (some outside their face, traced across edges)
+it-move-grid-face	ok	flat grid: a vertex inserted in face 24, three flips (degree 6), moves inside the face, into the input faces 15, 14, 5 and back to the start
+it-move-grid-edge	ok	flat grid: onto the input edge 14-15 (snapped), along it, off it into face 24, onto the input edge 9-14 (snapped), along it, off it into face 15
+it-move-refused	ok	flat grid: refused moves: outside the star (not_in_star with the fraction), an input vertex, an infinite component, a move that leaves a triangle too thin; then a zero move and an accepted one
+it-move-ico	ok	noisy icosphere: a vertex inserted in a face, flips to degree >= 5, five moves in sequence across input faces
+it-move-split	ok	bumpy grid: a vertex on an interior input edge (split at 0.4), moved along it, off it to the right (into the face on the right of the edge from its lower end), and on
+it-move-boundary	ok	bumpy grid: a vertex on a boundary edge (split at 0.3) moved along the boundary both ways; refused: off the boundary, beyond its neighbour

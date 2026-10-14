@@ -1,5 +1,5 @@
 import DdgOracle.Cuts.Format
-import DdgOracle.Intrinsic.Trace
+import DdgOracle.Intrinsic.Move
 
 /-!
 # Text format of the `intrinsic` task (single operations)
@@ -15,7 +15,7 @@ open Ddg Ddg.Cuts
 structure ICase where
   /-- identifier -/
   name : String
-  /-- `flip`, `delaunay`, `trace`, `edgetrace` or `circumcenter` -/
+  /-- `flip`, `delaunay`, `trace`, `edgetrace`, `circumcenter` or `move` -/
   task : String
   /-- number of vertices -/
   nv : Nat
@@ -43,6 +43,12 @@ structure ICase where
   circ : Array Nat := #[]
   /-- `circumcenter all` -/
   circAll : Bool := false
+  /-- `insert F B0 B1 B2` (task move) -/
+  insert : Option (Nat × Float × Float × Float) := none
+  /-- `split A B T` (task move) -/
+  split : Option (Nat × Nat × Float) := none
+  /-- `move V DX DY` lines (task move) -/
+  moves : Array (Nat × Float × Float) := #[]
 
 private def natTok (ctx tok : String) : Except String Nat :=
   match tok.toNat? with
@@ -62,10 +68,10 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String ICa
   let line := fun (k : Nat) (what : String) =>
     if h : k < lines.size then pure (f := Except String) lines[k]
     else throw s!"missing line: expected {what}"
-  let l ← line i "'task <flip|delaunay|trace|edgetrace|circumcenter>'"
+  let l ← line i "'task <flip|delaunay|trace|edgetrace|circumcenter|move>'"
   if l[0]! != "task" || l.size != 2 then throw s!"malformed line '{joinTokens l}': expected 'task <name>'"
   let task := l[1]!
-  if !["flip", "delaunay", "trace", "edgetrace", "circumcenter"].contains task then
+  if !["flip", "delaunay", "trace", "edgetrace", "circumcenter", "move"].contains task then
     throw s!"unknown task '{task}'"
   i := i + 1
   let l ← line i "'mesh <nv> <nf> <ne>'"
@@ -135,12 +141,29 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String ICa
       if l.size != 2 then throw "circumcenter: expected 'circumcenter <face>' or 'circumcenter all'"
       if l[1]! == "all" then c := { c with circAll := true }
       else c := { c with circ := c.circ.push (← natTok "circumcenter" l[1]!) }
+    | "insert" =>
+      single "insert"
+      seenSingle := seenSingle.push "insert"
+      if l.size != 5 then throw "insert: expected 'insert <face> <b0> <b1> <b2>'"
+      c := { c with insert := some (← natTok "insert" l[1]!, ← floatTok "insert" l[2]!,
+        ← floatTok "insert" l[3]!, ← floatTok "insert" l[4]!) }
+    | "split" =>
+      single "split"
+      seenSingle := seenSingle.push "split"
+      if l.size != 4 then throw "split: expected 'split <a> <b> <t>'"
+      c := { c with split := some (← natTok "split" l[1]!, ← natTok "split" l[2]!, ← floatTok "split" l[3]!) }
+    | "move" =>
+      if l.size != 4 then throw "move: expected 'move <vertex> <dx> <dy>'"
+      c := { c with moves := c.moves.push (← natTok "move" l[1]!, ← floatTok "move" l[2]!, ← floatTok "move" l[3]!) }
     | other => throw s!"unknown line '{other}'"
     i := i + 1
   match task with
   | "flip" => if c.flip.isNone then throw "task flip needs a line 'flip <a> <b>'"
   | "trace" => if c.traces.isEmpty then throw "task trace needs at least one line 'trace <vertex> <phi> <distance>'"
   | "circumcenter" => if c.circ.isEmpty && !c.circAll then throw "task circumcenter needs 'circumcenter <face>' or 'circumcenter all'"
+  | "move" =>
+    if c.insert.isSome == c.split.isSome then throw "task move needs exactly one line 'insert ...' or 'split ...'"
+    if c.moves.isEmpty then throw "task move needs at least one line 'move <vertex> <dx> <dy>'"
   | _ => pure ()
   return c
 
@@ -152,6 +175,8 @@ def printCase (c : ICase) : String := Id.run do
   for (a, b, l) in c.edges do s := s ++ s!"e {a} {b} {hx l}\n"
   if let some (a, b) := c.flip then s := s ++ s!"flip {a} {b}\n"
   if c.again then s := s ++ "again 1\n"
+  if let some (f, b0, b1, b2) := c.insert then s := s ++ s!"insert {f} {hx b0} {hx b1} {hx b2}\n"
+  if let some (a, b, t) := c.split then s := s ++ s!"split {a} {b} {hx t}\n"
   for (a, b) in c.preflips do s := s ++ s!"preflip {a} {b}\n"
   if c.predelaunay then s := s ++ "predelaunay 1\n"
   if c.task == "delaunay" || c.predelaunay then
@@ -159,6 +184,7 @@ def printCase (c : ICase) : String := Id.run do
   for (v, phi, d) in c.traces do s := s ++ s!"trace {v} {hx phi} {hx d}\n"
   if c.circAll then s := s ++ "circumcenter all\n"
   for f in c.circ do s := s ++ s!"circumcenter {f}\n"
+  for (v, dx, dy) in c.moves do s := s ++ s!"move {v} {hx dx} {hx dy}\n"
   return s ++ "end\n"
 
 /-- Build the input triangulation of a case; checks the mesh. -/
@@ -255,7 +281,7 @@ private def header (c : ICase) (t : Tri) (topo : Topology) (status : String) : S
 def printError (name task msg : String) : String := s!"case {name}\ntask {task}\nstatus error {msg}\nend\n"
 
 /-- Apply `preflip` lines: each pair must identify one edge. -/
-private def applyFlips (t0 : Tri) (pairs : Array (Nat × Nat)) : Except String Tri := do
+def applyFlips (t0 : Tri) (pairs : Array (Nat × Nat)) : Except String Tri := do
   let mut t := t0
   for (a, b) in pairs do
     let h ← match findHalfedge t a b with
@@ -265,6 +291,41 @@ private def applyFlips (t0 : Tri) (pairs : Array (Nat × Nat)) : Except String T
     | .ok (t', _) => t := t'
     | .error r => throw s!"flip of {a} {b} refused: {r.name}"
   return t
+
+/-- The `odt` line of a state: the update of N21 at `v` with circumcentres, then with barycentres at
+the boundary (N23). -/
+def odtLine (label : String) (t : Tri) (v : Nat) : String :=
+  let (oc, ob) := odtTarget t v
+  s!"odt {label} {hx oc.1} {hx oc.2} {hx ob.1} {hx ob.2}\n"
+
+/-- The task `move`: insert or split, flips, then the moves of the inserted vertex. -/
+def runMove (c : ICase) (t0 : Tri) (topo : Topology) : Except String String := do
+  let (t1, loc0) ← match c.insert, c.split with
+    | some (f, b0, b1, b2), _ => insertInFace t0 f (b0, b1, b2)
+    | none, some (a, b, tt) => splitEdge t0 a b tt
+    | none, none => throw "task move needs 'insert' or 'split'"
+  let v := t0.nv
+  let mut t ← applyFlips t1 c.preflips
+  let mut loc := loc0
+  let mut s := header c t0 topo "ok"
+  s := s ++ s!"newvertex {v} {if t.isB[v]! then 1 else 0}\n"
+  s := s ++ s!"loc start {loc.print}\n" ++ printState "start" t ++ odtLine "start" t v
+  for mi in [0:c.moves.size] do
+    let (w, dx, dy) := c.moves[mi]!
+    s := s ++ s!"mq {mi} {w} {hx dx} {hx dy}\n"
+    let wl := if w == v then loc else Loc.vertex w
+    match moveVertex t0 t t0.nv w wl (dx, dy) with
+    | .error e => s := s ++ s!"mr {mi} error {e}\n"
+    | .ok (.refused reason frac) =>
+      match frac with
+      | some f => s := s ++ s!"mr {mi} refused {reason} {hx f}\n"
+      | none => s := s ++ s!"mr {mi} refused {reason}\n"
+    | .ok (.ok t' loc' snapped _) =>
+      t := t'
+      loc := loc'
+      s := s ++ s!"mr {mi} ok {if snapped then 1 else 0}\n"
+      s := s ++ s!"loc {mi} {loc.print}\n" ++ printState s!"m{mi}" t ++ odtLine s!"m{mi}" t v
+  return s ++ "end\n"
 
 /-- Run one case and print its output block. -/
 def runCase (c : ICase) : String :=
@@ -326,6 +387,7 @@ def runCase (c : ICase) : String :=
               let (p, q, tt) := crossingKey t0 cr
               s := s ++ s!"tx {u} {w} {hx phi} {p} {q} {hx tt}\n"
         return s ++ "end\n"
+      | "move" => runMove c t0 topo
       | _ =>
         let faces := if c.circAll then (List.range t0.nf).toArray else c.circ
         let mut s := header c t0 topo "ok"

@@ -65,7 +65,8 @@ def fixtures : Array (ICase × String) := Id.run do
   let mild := ((gridDisk 10 9 fun x y => 0.1 * Float.sin (4 * x) * y).mapPos fun p => ⟨p.x + 0.6 * p.y, p.y * 0.8, p.z⟩).jitter 0.04 9
   fs := add fs { mkICase "it-circumcenter-grid" "circumcenter" mild with circAll := true } "circumcenters of all faces of a sheared grid (many outside the face), traced from the barycentre"
   fs := add fs { mkICase "it-circumcenter-ico2" "circumcenter" ico2n with circAll := true } "circumcenters of all faces of a noisy icosphere (some outside their face, traced across edges)"
-  return fs
+  -- moving an inserted vertex
+  return fs ++ moveFixtures
 
 /-- Write the fixtures. -/
 def writeFixtures (dir : System.FilePath) : IO Unit := do

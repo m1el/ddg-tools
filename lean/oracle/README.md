@@ -1223,7 +1223,7 @@ with junctions off 120 degrees (SPEC §8.6), not the limit.
 `ddg-oracle intrinsic` runs **single operations** of the signpost data structure on small meshes, written from
 `crates/ddg-intrinsic/SPEC.md` and the paper (Sec. 2, 3, 4.1, 4.2, Appendix B). The reference implementation
 (geometry-central, the demo) was **not read**; where the paper and SPEC leave something open the choice is in the
-list at the end. The closed-form formulas of the twelve ids `it-*` are scalar-generic in
+list at the end. The closed-form formulas of the sixteen ids `it-*` are scalar-generic in
 `DdgOracle.Formulas.Intrinsic` (tags `[formula: it-...]`), and the executable uses them for every number it prints:
 
 | id | definitions |
@@ -1240,6 +1240,10 @@ list at the end. The closed-form formulas of the twelve ids `it-*` are scalar-ge
 | `it-barycentric-coordinates` | `signedArea2`, `barycentric`, `pointFromDistances` |
 | `it-point-distances` | `planeDistance`, `cornerDistances`, `edgeSplitLengths` |
 | `it-circumcenter` | `circumWeight`, `circumcenterBary` |
+| `it-move-length` | `movedLength` (takes `cos α`, `sin α`: the scalar interface has no trigonometric functions) |
+| `it-move-area` | `movedDoubleArea` |
+| `it-circumcenter-vector` | `weightedCircumcenter` |
+| `it-odt-update` | `weightedBarycenter`, `odtDisplacement` |
 
 (`triArea`, `cornerAngle`, `cornerCot` of `Formulas/Triangle.lean` are reused.) The diamond of an edge `ij`
 (length `a`) has the triangles `ijk` (`b = l_ik`, `c = l_jk`) and `jil` (`d = l_il`, `e = l_jl`); unfolded with
@@ -1263,7 +1267,7 @@ signpost is `signpost(h) + scale * (corner angle at the tail of h)` (`it-signpos
 
 ```
 case NAME
-task flip | delaunay | trace | edgetrace | circumcenter
+task flip | delaunay | trace | edgetrace | circumcenter | move
 mesh NV NF NE
 f A B C                          x NF   oriented triangles (a manifold mesh, with or without boundary, not necessarily connected)
 e A B LEN                        x NE   every edge once, A < B, LEN > 0, strict triangle inequality in every face
@@ -1280,6 +1284,7 @@ Task lines:
 | `trace` | `trace V PHI DIST` (one or more): from vertex `V` in the normalized direction `PHI` for the distance `DIST`, over the input mesh |
 | `edgetrace` | `preflip A B` (zero or more, applied in order, each pair must identify one edge of the current triangulation), `predelaunay 0\|1` (then Delaunay flipping with the lines of `delaunay`) |
 | `circumcenter` | `circumcenter F` (one or more) or `circumcenter all` |
+| `move` | `insert F B0 B1 B2` or `split A B T` (exactly one), `preflip A B` (zero or more), `move V DX DY` (one or more); see "Task `move`" below |
 
 The printed form of a case (`printCase`) writes `tolerance`, `limit`, `criterion` whenever the task is `delaunay` or `predelaunay`
 is set. Floats are 16 hex digits.
@@ -1344,14 +1349,14 @@ circumcenter (SPEC N14), `crF STOP FACE B0 B1 B2 LEFT VERTEX CLAMP NCROSS` and `
 
 ## Fixtures `fixtures/intrinsic/` and tests
 
-18 cases (`MANIFEST.tsv`): single flips (icosphere, sheared grid with boundary, thin tube torus; refused for a boundary edge and for a non-convex
+24 cases (`MANIFEST.tsv`; the six `it-move-*` are described under "Task `move`"): single flips (icosphere, sheared grid with boundary, thin tube torus; refused for a boundary edge and for a non-convex
 quadrilateral), Delaunay flipping on a sheared grid with boundary, a noisy icosphere, an annulus, a long twisted torus, the **thin tube torus whose
 Delaunay triangulation has edges from a vertex to itself and double edges (180 halfedges involved)**, the reference's cotan criterion; traces from
 vertices (ending inside, at the boundary); edge traces of whole Delaunay triangulations over the input (icosphere, thin tube torus) and after three
 hand flips (sheared grid); circumcenters of all faces of a mildly sheared grid (62 of 144 inside, 13 traces reach the boundary) and of a noisy icosphere.
 `ddg-oracle intrinsic-fixtures check fixtures/intrinsic` recomputes them (tolerance `1e-9`).
 
-`ddg-oracle intrinsic-selftest` (about 6 s, 38 checks): the formulas on 300 random triangles (apex unfolding `2e-15`, barycentric round trip
+`ddg-oracle intrinsic-selftest` (about 4 s, 57 checks, of which 19 are the checks of `move` listed under "Task `move`"): the formulas on 300 random triangles (apex unfolding `2e-15`, barycentric round trip
 `5e-15`, distances against `baryLength2` `4e-16`, circumcenter equidistant `4e-15`); on seven meshes (noisy icosphere, sheared grid, long torus,
 twisted torus, tube torus, annulus, bumpy disk): angle normalization (scaled corners sum to `2 pi` / `pi`, `3e-15`); every flippable edge flipped,
 flipping twice restores lengths and signposts (`4e-14`), area and angle sums unchanged (`4e-15`, `3e-14`), the flipped length equals the
@@ -1375,6 +1380,137 @@ the text format round trip.
     distance is the layout distance, the direction a unit vector; a circumcenter that coincides with the barycentre is reported as `end` in the same face without a trace.
 57. Nothing in the paper or SPEC covers a ray that passes exactly through a vertex of the path; the executable stops there (`vertex`) if length is left, as in SPEC N7. Other
     degenerate directions are not handled (not generic in the fixtures).
+
+## Task `move` (SPEC N10, N19, N21, N23, N24)
+
+Insert one vertex into the triangulation fresh from the input mesh, flip, then move that vertex
+(paper Alg. 7, 8, 10, Sec. 3.2.3, 3.3.3; Sec. 4.3 for the `odt` line). Written from the paper and SPEC
+without the crate's code; every number of a move comes from `movedDoubleArea` (star test, fraction),
+`movedLength` (new lengths, shape test), `signpostUpdate` (incoming signposts), `cornerDistances` and
+`edgeSplitLengths` (insertion, split), `weightedCircumcenter`, `weightedBarycenter`, `odtDisplacement`
+(the `odt` line), and the tracing of the other tasks (the new place).
+
+**Input** (after `mesh`, `f`, `e` as for every task):
+
+```
+insert F B0 B1 B2     a vertex in the input face F, barycentric coordinates (positive, sum 1 within 1e-12) in the
+                      corner order of F's f line; or
+split A B T           a vertex on the input edge {A, B} at the parameter T in (0, 1) from A (on a boundary edge it is
+                      a boundary vertex)
+preflip A B           zero or more, applied in order AFTER the insertion, each pair identifying one edge then
+move V DX DY          one or more, applied in order: move vertex V by (DX, DY) in its frame; V is normally the new
+                      vertex NV (= number of input vertices); another V is refused (input_vertex)
+```
+
+The printed form writes `insert`/`split`, then the `preflip` lines, then the `move` lines.
+
+**Output** (header and `vt` lines as for every task):
+
+```
+newvertex NV B                   the new vertex, B = 1 if it is on the boundary
+loc start PLACE                  its place on the input mesh after the insertion
+state start NF NE  + cf lines    the triangulation after the insertion and the flips (compared as a set of faces)
+odt start CX CY BX BY            the update of SPEC N21 at NV in its frame (see reading 68)
+then for the i-th move line (i from 0):
+mq I V DX DY                     echo of the move
+mr I ok SNAPPED                  accepted; SNAPPED = 1 if the new place was snapped onto an input edge (N24)
+mr I refused REASON [FRACTION]   refused, nothing changed; REASON is input_vertex | not_finite | self_edge |
+                                 leaves_boundary | not_in_star FRACTION | too_thin | on_input_vertex | not_located
+mr I error MESSAGE               (not in the fixtures)
+after `mr I ok`:
+loc I PLACE                      the new place
+state mI NF NE + cf lines        the new triangulation
+odt mI CX CY BX BY               the update in the new state
+```
+
+`PLACE` is `vertex V`, `edge LO HI T` (`LO < HI`, `T` from `LO`) or `face F B0 B1 B2` (corner order of the face's `f`
+line), all in input numbering. **The frame of the vertex** (the meaning of its signposts and of `DX DY`, N7, N10, N19):
+in an input face `F` the layout of `F` (angle 0 along the halfedge from corner 0 to corner 1); on an interior input edge
+the direction from `LO` to `HI`; on the boundary the boundary frame (0 along the boundary halfedge that leaves the vertex,
+`pi` along the one that arrives; directions in `[0, pi]`). Signposts of the inserted vertex are unscaled angles (`Theta = 2 pi`,
+or `pi` on the boundary). Floats are compared with tolerance `1e-9` (absolute, relative above 1); a signpost close to `0`
+or `2 pi` could wrap, which does not happen in the fixtures.
+
+**What is computed.** Insertion and split (reading 61). A move of `V` by `d = (DX, DY)`: the tests of reading 62 in order;
+the star of `V` unfolded with `V` at the origin, the far end of the outgoing halfedge `h` at `l_h (cos phi_h, sin phi_h)` and
+the third corner at the direction `phi_h + theta` (`theta` the corner angle at `V`); refused `not_in_star FRACTION` when some
+`movedDoubleArea (2A) d (k - j) <= 0`, `FRACTION = min 2A/(d x (k - j))` over the triangles with `d x (k - j) > 0`; new lengths
+`movedLength l |d| cos(phi_h - psi) sin(phi_h - psi)`, `psi` the direction of `d`; refused `too_thin` when a new triangle has
+`2A' < 1e-6 * max(l'_vj, l'_vk) * max(l'_vj, l'_vk, l_jk)`; the new place by a trace over the input mesh from the old place along
+`d` for `|d|` (reading 66), snapped onto an input edge within `1e-10` of the longest edge of the end face (N24); the new
+signposts (reading 67). Lengths of edges not at `V` and all other signposts do not change.
+
+**Fixtures** (`it-move-*`, 6):
+
+| name | what |
+|---|---|
+| `it-move-grid-face` | flat 6 x 6 grid (spacing 0.2), a vertex inserted in face 24, three flips (degree 6); moves inside the face, into the input faces 15, 14, 5 and back to the start (bit-near: the start place to `5e-16`) |
+| `it-move-grid-edge` | the same start; onto the input edge 14-15 (snapped), along it (`DY = 0`), off it into face 24, onto the input edge 9-14 (snapped), along it, off it into face 15 |
+| `it-move-refused` | the same start; refused: outside the star (`not_in_star` with the fraction), an input vertex, an infinite component, a move to `1 - 1e-9` of the admissible fraction (`too_thin`); then a zero move (`ok`, nothing changes) and an accepted one |
+| `it-move-ico` | noisy icosphere (level 2), a vertex inserted in face 17, four flips (degree 7); five moves to 50 to 90 % of the distance to the border of the star, crossing into face 28 |
+| `it-move-split` | bumpy grid with boundary, a vertex on the interior input edge {8, 14} (split at 0.4), two flips; moved along the edge, off it to the right (`DY < 0`), and on through faces 14 and 12 |
+| `it-move-boundary` | bumpy grid, a vertex on the boundary edge {2, 3} (split at 0.3); moved along the boundary both ways; refused: `DY != 0` (`leaves_boundary`), beyond its neighbour along the boundary (`not_in_star`); then accepted again |
+
+**Self-tests** (`intrinsic-selftest`, 19 checks of `move`): the text format of the six fixtures (print, parse, print); on a flat
+grid, a sheared flat grid, a noisy icosphere and a bumpy grid with boundary, 24 insertions or splits each (every fourth a split
+of a random edge, interior or boundary), flipped around the new vertex, then 6 moves each to 10 to 90 % of the distance to the
+border of the star in a random direction (144 accepted moves per mesh): the total area (`1e-14` relative) and the angle sums
+of all input vertices (`3.5e-13`) are unchanged, the angle sum at the moved vertex is `2 pi` (`pi` on the boundary, `1.8e-13`);
+every edge at the moved vertex traced over the input mesh from the vertex's place along its signpost, and from the neighbour
+along its signpost, arrives at the other end (`miss / length <= 2e-13`); moving back by the same distance in the direction of the
+old place in the new frame restores lengths and signposts (`4e-13`) and the place (`7e-16`); the admissible fraction (0.999 of it
+accepted, 1.001 refused with the fraction `1/1.001`, error `2e-15`); on the two flat grids also: the new place is the old one plus
+the displacement (`5e-16`), the new lengths are the straight distances (`4e-14` relative), the `odt` update equals the
+area-weighted mean of the circumcentres computed from plane coordinates (`4e-15`) and `-3/(2|omega|)` times the gradient of
+the energy of the star (Chen and Holst Eq. 4.5, central differences, `6e-11`).
+
+## Readings and choices (task `move`)
+
+59. `move V DX DY` names the vertex, so that the refusal of an input vertex can be tested (the brief had `move DX DY`). The flips
+    are `preflip` lines (as for `edgetrace`) and are applied after the insertion whatever their position in the case.
+60. Insertion and split act on the fresh triangulation, so the face and the edge are input elements and the place is the one
+    given (face and barycentric coordinates, edge and parameter): no trace, no snapping (N10's trace from the nearest corner and
+    its snapping give the same place to rounding).
+61. Insertion in a face: lengths `cornerDistances`; the outgoing signposts are the directions (`atan2`, in `[0, 2 pi)`) of the
+    three corners from the point in the layout of the face; the incoming one at each corner is `signpostUpdate` of the
+    halfedge before it counter-clockwise (the side of the old face that leaves the corner) by the new corner angle. Split:
+    lengths `edgeSplitLengths` and `cornerDistances` with the point on the side; on an interior edge the halfedge towards the
+    higher-numbered end has 0, towards the lower `pi`, the other two that angle plus the corner angle at the new vertex in the
+    triangle before them counter-clockwise; on a boundary edge 0 along the boundary halfedge that leaves the vertex and the
+    corner angle for the edge to the opposite vertex; incoming signposts as for a face; the halfedges from the two ends of the
+    split edge keep their signposts.
+62. The order of the tests, which SPEC does not fix: `input_vertex`, `not_finite`, `self_edge`, `leaves_boundary` (boundary vertex
+    and `DY != 0`), zero displacement (`ok`, nothing changes, not snapped), `not_in_star`, `too_thin`, then the place
+    (`on_input_vertex`: the trace stops at an input vertex; `not_located`: it leaves the surface, or a move along an edge leaves
+    the edge). SPEC calls a trace that does not complete an error (`MoveNotLocated`); here it is a refusal line. None of the
+    last two occurs in the fixtures, and no fixture has a move to which two tests apply.
+63. The star test uses twice the Heron area of the three lengths (`triArea`) as `2A` and the corners from the signposts and the
+    corner angle; `FRACTION` is printed for every `not_in_star` (`posInf` would be printed if no triangle had `d x (k - j) > 0`,
+    which cannot be refused).
+64. `too_thin` uses the new lengths of both edges at the vertex from `movedLength` (the one to `k` with the direction
+    `phi_h + theta`) and the old length of the opposite side.
+65. The boundary edge that arrives at a boundary vertex has no halfedge leaving it; its new length is `movedLength` with the
+    direction `pi` (N2).
+66. The new place: from a face point, `traceFromFace` over the input mesh; from a point of an interior input edge, a trace that
+    starts on the edge in the layout of the halfedge `LO -> HI` (`DY > 0`) or `HI -> LO` (`DY < 0`, the direction turned by
+    `pi`), the edge it starts on not being an exit; with `DY = 0` exactly (along the edge) and for every move of a boundary
+    vertex, interpolation `T' = T + DX/l` (`T - DX/l` on the boundary when the boundary halfedge runs from `HI` to `LO`). Snapping:
+    **`1e-10`** of the longest edge of the end face (SPEC N24's `MOVE_SNAP` for moved vertices; the brief named N10's `1e-12`),
+    distance measured in the layout of the end face, the point projected onto the nearest edge.
+67. New signposts of the moved vertex: in the unfolded star, the direction from the new point to the far end of every outgoing
+    halfedge, turned into the frame of the new place by `rho = (direction of the path at its end, in the new frame) - (direction
+    of DX DY in the old frame)`; the new frame is the layout of the end face, or `LO -> HI` of the edge it was snapped onto;
+    `rho = 0` for interpolation along an edge. SPEC N19 builds them from the direction of the trace back and the corner angles;
+    the two agree in exact arithmetic (selftest: traces of every edge from both ends). At a boundary vertex the boundary
+    halfedge that leaves it is set to 0 exactly. Incoming signposts: `signpostUpdate` of the side of the link that leaves the
+    neighbour by the new corner there (SPEC N19).
+68. `odt` line: `(CX, CY) = odtDisplacement (sum_h rot(phi_h) weightedCircumcenter(l_h, l_prev(h), l_next(h), A_h)) (sum_h A_h) 1`
+    over the outgoing halfedges `h` of the vertex (every corner of the vertex once), `rot(phi_h)` the rotation by its signpost,
+    `A_h` the Heron area: the target of SPEC N21 with the step 1, in the frame of the vertex. `(BX, BY)`: the same with
+    `weightedBarycenter` for every triangle that has a vertex on the boundary (N23, Chen and Holst "boundary elements"); on a closed
+    surface the two agree. Printed for boundary vertices as well (the vector is in the boundary frame; N23 moves boundary vertices
+    by its component along the boundary).
+69. A vertex with an edge to itself is refused (`self_edge`) before anything else about its star; no fixture has one.
 
 # Revision D30 (moved crossings and the mean slope, SPEC 3722546)
 
