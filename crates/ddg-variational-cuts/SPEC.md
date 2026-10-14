@@ -366,9 +366,13 @@ its factorization is reused.
 (`SpeedScaling::MeanGradient`, D16) `ḡ` is the mean of `|∇φ|` over the connected piece of the cut
 that the cut point lies on: in a crossed face whose lone vertex `a` is cut off by the segment `pq`,
 `|∇φ| = |φ_a| · |pq| / (2 · area(a, p, q))`, and `ḡ = Σ |pq| / Σ (|pq| / |∇φ|)` over the piece.
-A face with `|∇φ| = 0` (`φ_a = 0`: the function vanishes at the lone vertex, and the crossing was
-moved off it by `δ`) is left out of both sums: its term is infinite and would make `ḡ = 0` for the
-whole piece, which then could not move. A piece without any face that counts has `ḡ = 1` (D23).
+A face counts in both sums only if neither of its two crossings was moved into `[δ, 1 − δ]`
+(§3.2) and its slope is positive (D23, D30). Where a crossing was moved, the segment `pq` is not
+the zero line of the interpolant: the formula then gives `|φ_a|` over a distance that `δ` keeps
+away from zero, a slope as small as `|φ_a|` is, down to `0` for `φ_a = 0`. One such face takes
+the harmonic mean of its whole piece with it, and the piece stands still. A piece without any
+face that counts has `ḡ = 1`. The statistics of `|∇φ|` that a step reports are taken over the
+faces that count.
 
 ### 3.10 Length and penalty step `[formula: cut-length-step-on-cut]`, `[formula: cut-length-step]`
 
@@ -646,8 +650,29 @@ everything else. The Hencky energy is more even than any of them there (23 and 1
 `|φ_new − φ_old|` over vertices cut-adjacent before or after the step) is at most
 `motion_tolerance`; or when the energy has fallen by at most `energy_tolerance · |E|` over the last
 `energy_window` steps; or when the cut has vanished (one region is empty). The reason is in the
-report. The motion criterion is evaluated only for a positive `motion_tolerance`: with `0` a run
-does not end by it, also not after a step that moved nothing. With `E_k` the energy of the state
+report. The motion criterion `[formula: cut-stop-motion]` (D31) is
+
+```
+motion_tolerance > 0   ∧   cut motion ≤ motion_tolerance   ∧   predicted motion ≤ motion_tolerance
+```
+
+with the cut motion of the step as above and the *predicted motion*, how far the rate of the cut
+would move the level-set function at the cut-adjacent vertices if nothing held the step back:
+
+```
+length step on the cut    τ · max_i | Σ_p ℓ_p β_ip r_p / Σ_p ℓ_p β_ip |     over the cut-adjacent vertices i
+                          (the first line of the local extension of §3.8, whatever the extension in
+                          use; r_p the rate of §3.10 before the local limit and before ḡ; on a
+                          network r_p is the rate of the copy of p on the side of i, §8.5)
+length step on the mesh   max_i |φ′(i) − φ(i)|     over the vertices that are cut-adjacent before the
+                          step, φ′ after the explicit and the length step, before the local limit
+                          (on a network: Δ_i of the limit at the vertices)
+```
+
+The cut motion alone is a statement about one step, which can be short because the local limit,
+the mean slope `ḡ` or the level-set function held it back; the predicted motion says that the
+cut is at rest. With `motion_tolerance = 0` a run does not end by this criterion, also not after
+a step that moved nothing. With `E_k` the energy of the state
 after `k` steps, `W` the window, `ε` the tolerance, and `k` the number of steps taken minus one
 (the state after the last step is evaluated when the run has ended), the energy criterion
 `[formula: cut-stop-energy]` is evaluated for `ε > 0` and `k ≥ W`, i.e. after more than `W`
@@ -1035,29 +1060,31 @@ steps, rises, patches and times is in the README):
 
 ```
 Hencky            auto                    α_L = 7.4·10⁻⁴         strong
-spot              2.668e-2 | 2.794e-2     8.712e-3 | 9.231e-3    1.717e-1 | 2.050e-1
-bob               2.007e-2 | 2.062e-2     7.084e-3 | 7.358e-3    4.843e-2 | 5.076e-2
-blub              1.368e-2 | 1.371e-2     6.293e-3 | 6.983e-3    1.363e-1 | 1.384e-1
+spot              2.668e-2 | 2.795e-2     8.712e-3 | 9.239e-3    1.717e-1 | 2.052e-1
+bob               2.007e-2 | 2.060e-2     7.084e-3 | 7.358e-3    4.843e-2 | 5.076e-2
+blub              1.368e-2 | 1.371e-2     6.293e-3 | 6.983e-3    1.363e-1 | 1.428e-1
 icosphere(4)      4.466e-2 | 4.469e-2     6.038e-3 | 6.065e-3    6.269e-2 | 6.272e-2
 scaled Dirichlet, r_ε = 1
-spot              3.163e-1 | 3.326e-1     1.844e-2 | 1.774e-2    3.206e+0 | 2.369e+0
-bob               8.421e-2 | 8.433e-2     1.227e-2 | 1.224e-2    9.251e-1 | 2.273e+0
-blub              6.705e-1 | 7.672e-1     1.788e-2 | 1.708e-2    4.266e+0 | 5.002e+0
+spot              3.163e-1 | 3.325e-1     1.844e-2 | 1.796e-2    3.206e+0 | 2.370e+0
+bob               8.421e-2 | 8.791e-2     1.227e-2 | 1.223e-2    9.251e-1 | 2.273e+0
+blub              6.705e-1 | 7.673e-1     1.788e-2 | 1.735e-2    4.266e+0 | 3.427e+0
 icosphere(4)      4.770e-2 | 4.769e-2     8.524e-3 | 8.466e-3    6.054e-2 | 6.042e-2
 ```
 
-All 48 runs end below the energy they started with. The paper's stages end lower in 17 of the 24
-pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 5 with the scaled energy (by
-0.1 % to 59 %). The default stages end lower in 7, all with the scaled energy (by 0.03 % to 4.5 %,
-and by 26 % on spot with the strong weight). The paper's stages are the less monotone ones: the
-largest rise of the energy in one step is at most 6.7 % in 23 of their runs and 57 % in one
-(spot, Hencky, strong weight: the step before the stop, when a patch was lost; the run was set
-back), against at most 3.5 % with the default stages; 18 of their 24 runs end with `EnergyRose`
-and are set back to their lowest state, against 14. They take fewer steps (4359 against 5633 in
-total) in the same time (138 s against 137 s, one run per core). So the paper's stages stay what
+(The default stages as they are since D30; the paper's stages do not use the mean slope and are
+as before.) All 48 runs end below the energy they started with. The paper's stages end lower in
+16 of the 24 pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 4 with the scaled
+energy (by 4 % to 59 %). The default stages end lower in 8, all with the scaled energy (by 0.03 %
+to 3 % in six, by 20 % and 26 % on blub and spot with the strong weight). The paper's stages are
+the less monotone ones: the largest rise of the energy in one step is at most 6.7 % in 23 of
+their runs and 57 % in one (spot, Hencky, strong weight: the step before the stop, when a patch
+was lost; the run was set back), against at most 5.7 % with the default stages; 18 of their 24
+runs end with `EnergyRose` and are set back to their lowest state, against 13. They take fewer
+steps (4359 against 5491 in total) in about the same time (129 s against 122 s, one run per
+core). So the paper's stages stay what
 `FlowOptions::for_regions` selects, with two costs: their runs rely on the stop rule of D27, and
 for one curve between two regions their length step has the defect of D14 (two regions on spot,
-Hencky, `α_L = 2` and `0.5`: 4.431 and 1.733 against 4.345 and 1.555 with the default stages). On
+Hencky, `α_L = 2` and `0.5`: 4.431 and 1.733 against 4.345 and 1.554 with the default stages). On
 a mesh with spikes of curvature neither limit makes them descend (D26).
 
 ### 8.6 Tests
@@ -1385,6 +1412,40 @@ region of every face.
   the limit at the vertices needs `τ > 0` and `max_motion · h_i ≥ 0`; for `N` regions it is a
   bound on half the difference of the two smallest functions only. (e) The factor 1 is not
   applied (§4).
+* **D30** The mean slope `ḡ` of §3.9 counted every crossed face with a positive slope. In a face
+  with a moved crossing the formula does not give the slope of `φ` (§3.9): a vertex within
+  rounding of the cut, whose crossings `δ` moves away from it, gave its face the slope
+  `|φ_a| / (δ · h)`, and the harmonic mean made that the scale of the whole piece. Found on the
+  needles-and-caps grid of `examples/bad_mesh_study.rs` (16 cells) flipped to its intrinsic
+  Delaunay triangulation and exported: a geodesic circle around the middle vertex passes
+  through six vertices to rounding; smallest slope `2·10⁻¹²`, `ḡ = 2·10⁻⁸`, and with the rate
+  `r` up to 6.7, `τ = 1.1·10⁻³` and no cut point limited the first step moved the cut by
+  `1.5·10⁻¹⁰` (the second by `5·10⁻⁵`, the third by `8·10⁻³`: each step moved those vertices a
+  little further off the cut). The same on a regular grid with a circle `10⁻¹⁰` beside a vertex:
+  `ḡ = 0.01`. D23a had the case `φ_a = 0` only. Now a face with a moved crossing does not count:
+  first step `ḡ = 1.09`, motion `8·10⁻³`, energy 1.167 → 0.853 in 8 steps. Runs in which a
+  crossing is moved at some step change with it (the default stages only): the two-region runs
+  on spot in the fourth digit of the energy, 21 of the 24 default-stage runs of §8.5, most below
+  0.1 %, four by 1 % to 4 %, one by 31 % (README). The numbers of D22 for
+  `camelshotnoise.obj` and spot in §4 were measured before this; the README has the present
+  ones.
+* **D31** A run was called converged when one step moved the cut by at most the tolerance. That
+  is a statement about one step: the run of D30 ended after its first step with the energy
+  unchanged, far from rest. The criterion now also asks that the rate of the cut predicted no
+  more than the tolerance for that step (§4), i.e. that nothing but the smallness of the rate
+  made the step short. The first version of the prediction, `τ · max |r_p|` over the cut
+  points, was too strict: `r` has a noise floor from point to point which the extension to the
+  vertices averages out, and runs at rest took up to ten times as many steps or did not end
+  (Fig. 5, Hencky, `α_L = 0.0040`: 2930 steps instead of 254). With the rates as the vertices
+  get them the runs of the README that end by motion end as before, with two exceptions (sphere
+  of Fig. 1, icosphere(5) | icosphere(4), `α_L = 6, 3, 1.5`: 105, 196, 418 | 143, 366, 312 steps
+  against 105, 196, 344 | 143, 366, 312; bump of Fig. 5: 77, 256, 155, 168, 2581 against 77,
+  254, 157, 168, 2419). The exceptions are runs that the old criterion ended while cut points
+  were held back by the local limit: Fig. 1 with 1.5 on icosphere(5) (74 more steps, the same
+  energy to five digits), and the Dirichlet run of Fig. 5 with `α_L = 0.74`, which no longer
+  ends by motion (its energy stands still from step 381 on; with the default stop rule the
+  energy criterion ends it). A run at rest in which some cut points stay limited with rates that
+  are not small does not end by motion any more; the energy criterion is what ends it.
 
 Add to this list whenever something else turns up; never drop an entry.
 
@@ -1400,6 +1461,10 @@ id. Discrete, to be proved in `lean/proofs`: `cut-face-curvature`, `cut-face-cur
 `cut-step-cap`, and for the default stages `cut-extension-local` (convex combination, mean rate
 kept), `cut-gradient-norm`, `cut-length-step-on-cut` (both matrices are M-matrices with row sums
 `ℓ`; totals kept; `r` within the range of `s + λ⁰`; rest state independent of `τ`),
+`cut-stop-motion` (the motion criterion holds iff the tolerance is positive and both the cut
+motion and the predicted motion are at most it; it implies the criterion before D31, cut
+motion ≤ tolerance; with the length step on the cut the predicted motion is at most
+`τ · max |r_p|`, a convex combination per vertex),
 `cut-stop-energy` (for a non-negative tolerance and finite energies exactly one of the three
 cases of the energy criterion holds), `cut-run-lowest` (the energy reported as the lowest is the
 least over the states of the run, at the earliest state that has it; after `EnergyRose` the run

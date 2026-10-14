@@ -8,7 +8,7 @@ A clean-room Rust implementation, from the text of the paper only, of
 The paper moves a cut on a triangle mesh by a gradient flow so that the surface, cut open, can be
 flattened conformally with little area distortion while the cut stays short. The discrete method
 as implemented here, with its sign conventions, is specified in [`SPEC.md`](SPEC.md); every place
-where it differs from the paper as printed is listed in **SPEC §9** (D1 to D29). The authors' code
+where it differs from the paper as printed is listed in **SPEC §9** (D1 to D31). The authors' code
 was not consulted (it is GPL; this workspace is MIT).
 
 ## What is implemented
@@ -145,8 +145,15 @@ With `α_L = 0`: `+529 (+535)` and `+871 (+891)` for `m = 4, 6`. This law is wha
 step are scaled by: every step reports the roughening rate `ω`; ripples longer than `2π α_L/ω`
 grow, and `length_weight_for_ripples(ω, ℓ)` returns the weight for a given `ℓ`.
 
-**Stopping** (SPEC §4, D27). A run ends after `max_steps`, when the cut moves by less than a
-tolerance, when it has vanished, or by the energy over a window of steps (default 25): if it
+**Stopping** (SPEC §4, D27, D31). A run ends after `max_steps`, when the cut is at rest, when it
+has vanished, or by the energy over a window of steps (default 25). At rest means that a step
+moved the level-set function at the cut by at most `motion_tolerance` *and* that the rate of the
+cut predicted no more for that step (`StepReport::predicted_motion`: the motion without the
+local limit and with unit slope). The motion of one step alone can be small because something
+held the step back: a cut through vertices of an intrinsic Delaunay export moved by `1.5·10⁻¹⁰`
+in its first step, with a rate of 7, and the run was reported as converged (the cause was the
+mean slope, which counted faces whose crossing had been moved off a vertex, SPEC D30). The
+energy criterion: if the energy
 changed by at most `10⁻⁴` of its size the run is *stalled* and stays in its last state; if it
 *rose* by more than that, the run ends with `StopReason::EnergyRose` and the flow is set back to
 the state of lowest energy of the run. Every `RunReport` has the lowest energy, the step at which
@@ -223,14 +230,15 @@ default options, icosphere(5), in brackets icosphere(4)):
 |---|---|---|---|---|
 | 6 | back to the equator (largest deviation 0.017 rad) | 1.7724 (1.7723); equator 1.7725 | 4.836 → 4.854 | 105, converged |
 | 3 | seam with two lobes, amplitude 0.71 rad | 2.2552 (2.2552) | 4.836 → 3.003 (2.999) | 196, converged |
-| 1.5 | seam with two lobes, amplitude 1.49 rad | 2.7588 (2.7582) | 4.836 → 1.883 (1.881) | 344, converged |
+| 1.5 | seam with two lobes, amplitude 1.49 rad | 2.7593 (2.7582) | 4.836 → 1.883 (1.881) | 418, converged |
 
 Three cuts of three lengths, the longer the less distortion, as in the figure; both regions keep
 half of the area (`0.5000 ± 0.0001`). The linear theory predicts which: at 6 every mode decays, at
 3 the modes 2 and 3 grow, at 1.5 the modes up to 8, and the fastest is `m ≈ 5`; the end state has
 two lobes in both cases, so the ripples coarsen. The energy rose in 2 to 10 of the steps, by at
 most `5·10⁻⁴` of the total drop. (With the extremes of the step rule, before D22, the same end
-states took 155, 357 and 771 steps.)
+states took 155, 357 and 771 steps. With the motion criterion before D31 the third run ended
+after 344 steps, at the same energy to five digits.)
 
 **Fig. 5** (flat unit square, 64² cells, with a bump `0.15 exp(−r²/0.02)`; the cut starts as a
 straight line beside the bump):
@@ -238,7 +246,7 @@ straight line beside the bump):
 | energy | start | `α_L` | result | cut length (file units) | distortion |
 |---|---|---|---|---|---|
 | Hencky | `x = 0.2` | 0.0080, 0.0040, 0.0020 | bends into the bump, passes 0.034, 0.027, 0.023 from its top | 1.000 → 1.081, 1.090, 1.121 | 0.00446 → 0.00099, 0.00093, 0.00085 |
-| Dirichlet | `x = 0.36` | 0.74 | passes 0.003 from the top | 1.014 → 1.089 | 0.555 → 0.145 |
+| Dirichlet | `x = 0.36` | 0.74 | passes 0.004 from the top | 1.014 → 1.090 | 0.555 → 0.144 |
 | Dirichlet | `x = 0.36` | 0.18 | passes 0.008 from the top, in two pieces | 1.014 → 1.190 | 0.555 → 0.112 |
 | Dirichlet | `x = 0.2` or `0.36` | 3 to 12 | retreats to the flat part (`x ≈ 0.07`) | → 1.000 | unchanged |
 
@@ -250,7 +258,10 @@ state, the 0.9-quantile, is 25) pulls a distant cut away from the bump before th
 term is felt (the line across the foot of the bump is not a geodesic). The paper says the same of
 this energy and rescales it (Sec. 3.5.1). Two of the three Hencky runs and the Dirichlet run with
 0.18 did not come to rest within 3000 steps (they were run without the energy criterion; the
-others took 254 and 381 steps). The Dirichlet run with 0.18 lets ripples of three mesh edges
+third Hencky run took 256 steps). The Dirichlet run with 0.74 does not end by the motion
+criterion either: its energy stands at 0.9367 from step 381 on, where the motion of one step was
+below the tolerance, but the cut points at the top of the bump are held back by the local limit
+and their rates are not small (before D31 that step ended the run as converged). The Dirichlet run with 0.18 lets ripples of three mesh edges
 grow; its energy rose in half of the steps, by up to 1.5 % of the total drop, and the cut ended in
 two pieces (one piece, 0.004 from the top, length 1.228 with the step rule before D22).
 
@@ -263,26 +274,28 @@ the longest axis through the centroid, cut length 1.177; default step and stop r
 
 | energy | `α_L` | steps, stop, time | distortion | cut length |
 |---|---|---|---|---|
-| Hencky | 2 | 150, energy stalled, 0.5 s | 3.688 → 1.036 | 1.655 |
-| Hencky | 0.5 | 200, energy stalled, 0.8 s | 3.688 → 0.340 | 2.429 |
-| Hencky | 0.1 | 222, energy stalled, 0.8 s | 3.688 → 0.061 | 3.482 |
-| Hencky | auto, `ℓ = 0.25`: 2.17 | 152, energy stalled, 0.5 s | 3.688 → 1.085 | 1.631 |
+| Hencky | 2 | 144, energy rose, 0.5 s | 3.688 → 1.030 | 1.658 |
+| Hencky | 0.5 | 200, energy stalled, 0.7 s | 3.688 → 0.339 | 2.431 |
+| Hencky | 0.1 | 234, energy stalled, 0.9 s | 3.688 → 0.061 | 3.477 |
+| Hencky | auto, `ℓ = 0.25`: 2.17 | 151, energy stalled, 0.5 s | 3.688 → 1.116 | 1.618 |
 | scaled, `r_ε = 0.1` | 0.003 | 63, energy stalled, 0.2 s | 0.02045 → 0.01774 | 1.541 |
 | scaled, `r_ε = 0.1` | 0.03 | 132, energy stalled, 0.4 s | 0.02045 → 0.02154 | 1.012 |
-| scaled, `r_ε = 1` | auto: 0.171 | 36, energy stalled, 0.1 s | 0.4070 → 0.4085 | 1.152 |
+| scaled, `r_ε = 1` | auto: 0.171 | 35, energy stalled, 0.1 s | 0.4070 → 0.4086 | 1.151 |
 | Dirichlet | auto: 35.3 | 32, energy stalled, 0.1 s | 106.7 → 109.0 | 1.089 |
-| Dirichlet | 1 | 294, energy stalled, 1.2 s | 106.7 → 5.27 | 8.899 |
+| Dirichlet | 1 | 285, energy rose, 1.1 s | 106.7 → 5.31 | 8.851 |
 
 The energy fell over every run. What the numbers say: the smaller the length weight, the longer
 the cut and the lower the distortion, as it must be. No run ended by the motion criterion: on this
 mesh the rate of the cut has a noise floor (SPEC §4), the cut keeps moving by a few percent of an
 edge per step, and the energy criterion ends the run. With the automatic weight the Hencky run
 goes where `α_L = 2` goes; for the scaled and the Dirichlet energy the cut still mostly shortens
-and the run ends after 32 to 36 steps with the energy lower by half a percent. Single steps raise
-the energy: in 23 of 150 steps by at most 0.9 % of the energy (Hencky, 2), in 27 of 200 and 16 of
-222 by at most 0.08 % and 0.03 % (0.5, 0.1), never for the scaled energy with 0.003. The
+and the run ends after 32 to 35 steps with the energy lower by half a percent. Single steps raise
+the energy: in 23 of 144 steps by at most 0.6 % of the energy (Hencky, 2), in 27 of 200 and 17 of
+234 by at most 0.08 % and 0.03 % (0.5, 0.1), never for the scaled energy with 0.003. ("Energy
+rose": the run ended because the energy rose over the last window, and is in its state of
+lowest energy, SPEC D27.) The
 Dirichlet energy without rescaling is not usable on this model with a weight that lets the cut
-move (the last line: speeds up to `1.5·10⁶`, the cut grows to 7.6 times its length, and the run
+move (the last line: speeds up to `9·10⁶`, the cut grows to 7.5 times its length, and the run
 ends in a cycle of period two in which the energy alternates by 0.1 % and a fifth of the 1100 cut
 points are limited), which is the paper's reason for the rescaled and Hencky energies. The cuts
 were not inspected visually.
@@ -389,70 +402,71 @@ average 1 before the start).
 
 | energy | model | weight: `α_L` | stages | final energy | lowest (after steps) | steps that rose, largest | patches | cut length | steps | time, s | stop |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Hencky | spot | auto: 0.00307 | paper's | 2.6675e-02 | 2.6675e-02 (159) | 31, 0.79 % | 59 → 11 | 14.67 → 7.42 | 168 | 3.5 | rose |
-| Hencky | spot | auto: 0.00307 | default | 2.7942e-02 | 2.7942e-02 (183) | 44, 1.9 % | 59 → 18 | 14.67 → 8.13 | 183 | 2.9 | stalled |
-| Hencky | spot | fixed: 0.00074 | paper's | 8.7118e-03 | 8.7118e-03 (157) | 51, 1.5 % | 59 → 32 | 14.67 → 9.60 | 159 | 3.8 | rose |
-| Hencky | spot | fixed: 0.00074 | default | 9.2306e-03 | 9.2306e-03 (102) | 27, 0.22 % | 59 → 39 | 14.67 → 11.08 | 102 | 1.5 | stalled |
-| Hencky | spot | strong: 0.0332 | paper's | 1.7165e-01 | 1.7165e-01 (144) | 30, 57 % | 59 → 8 | 14.67 → 4.58 | 149 | 3.4 | rose |
-| Hencky | spot | strong: 0.0332 | default | 2.0501e-01 | 2.0501e-01 (179) | 32, 0.22 % | 59 → 7 | 14.67 → 5.76 | 200 | 3.4 | rose |
-| Hencky | bob | auto: 0.00308 | paper's | 2.0069e-02 | 2.0069e-02 (376) | 61, 0.67 % | 23 → 12 | 11.79 → 5.15 | 389 | 12.6 | rose |
-| Hencky | bob | auto: 0.00308 | default | 2.0616e-02 | 2.0602e-02 (323) | 38, 0.71 % | 23 → 9 | 11.79 → 5.63 | 340 | 8.8 | stalled |
-| Hencky | bob | fixed: 0.00074 | paper's | 7.0839e-03 | 7.0761e-03 (232) | 88, 0.24 % | 23 → 16 | 11.79 → 7.52 | 239 | 9.0 | stalled |
-| Hencky | bob | fixed: 0.00074 | default | 7.3579e-03 | 7.3579e-03 (190) | 32, 0.098 % | 23 → 18 | 11.79 → 8.53 | 195 | 6.1 | rose |
+| Hencky | spot | auto: 0.00307 | paper's | 2.6675e-02 | 2.6675e-02 (159) | 31, 0.79 % | 59 → 11 | 14.67 → 7.42 | 168 | 2.9 | rose |
+| Hencky | spot | auto: 0.00307 | default | 2.7951e-02 | 2.7944e-02 (173) | 43, 1.9 % | 59 → 18 | 14.67 → 8.14 | 181 | 2.7 | stalled |
+| Hencky | spot | fixed: 0.00074 | paper's | 8.7118e-03 | 8.7118e-03 (157) | 51, 1.5 % | 59 → 32 | 14.67 → 9.60 | 159 | 2.5 | rose |
+| Hencky | spot | fixed: 0.00074 | default | 9.2388e-03 | 9.2320e-03 (102) | 27, 0.2 % | 59 → 39 | 14.67 → 11.10 | 104 | 1.5 | stalled |
+| Hencky | spot | strong: 0.0332 | paper's | 1.7165e-01 | 1.7165e-01 (144) | 30, 57 % | 59 → 8 | 14.67 → 4.58 | 149 | 2.5 | rose |
+| Hencky | spot | strong: 0.0332 | default | 2.0516e-01 | 2.0500e-01 (175) | 27, 0.24 % | 59 → 7 | 14.67 → 5.76 | 188 | 2.9 | stalled |
+| Hencky | bob | auto: 0.00308 | paper's | 2.0069e-02 | 2.0069e-02 (376) | 61, 0.67 % | 23 → 12 | 11.79 → 5.15 | 389 | 13.1 | rose |
+| Hencky | bob | auto: 0.00308 | default | 2.0604e-02 | 2.0604e-02 (323) | 41, 0.13 % | 23 → 9 | 11.79 → 5.63 | 337 | 8.0 | rose |
+| Hencky | bob | fixed: 0.00074 | paper's | 7.0839e-03 | 7.0761e-03 (232) | 88, 0.24 % | 23 → 16 | 11.79 → 7.52 | 239 | 8.5 | stalled |
+| Hencky | bob | fixed: 0.00074 | default | 7.3579e-03 | 7.3579e-03 (190) | 32, 0.098 % | 23 → 18 | 11.79 → 8.53 | 195 | 5.5 | rose |
 | Hencky | bob | strong: 0.00946 | paper's | 4.8427e-02 | 4.8427e-02 (281) | 64, 0.73 % | 23 → 9 | 11.79 → 4.29 | 287 | 9.8 | rose |
-| Hencky | bob | strong: 0.00946 | default | 5.0758e-02 | 5.0758e-02 (317) | 23, 0.52 % | 23 → 5 | 11.79 → 4.66 | 321 | 8.1 | rose |
-| Hencky | blub | auto: 0.00183 | paper's | 1.3682e-02 | 1.3682e-02 (151) | 32, 1.7 % | 44 → 12 | 15.42 → 6.63 | 153 | 7.6 | rose |
-| Hencky | blub | auto: 0.00183 | default | 1.3705e-02 | 1.3705e-02 (324) | 78, 0.2 % | 44 → 12 | 15.42 → 6.79 | 326 | 10.6 | rose |
-| Hencky | blub | fixed: 0.00074 | paper's | 6.2927e-03 | 6.2927e-03 (183) | 77, 0.92 % | 44 → 12 | 15.42 → 7.06 | 188 | 8.7 | rose |
-| Hencky | blub | fixed: 0.00074 | default | 6.9832e-03 | 6.9832e-03 (397) | 135, 0.2 % | 44 → 14 | 15.42 → 8.40 | 407 | 13.2 | rose |
-| Hencky | blub | strong: 0.0239 | paper's | 1.3628e-01 | 1.3628e-01 (170) | 16, 2.8 % | 44 → 11 | 15.42 → 5.40 | 170 | 8.0 | rose |
-| Hencky | blub | strong: 0.0239 | default | 1.3836e-01 | 1.3793e-01 (346) | 91, 0.53 % | 44 → 11 | 15.42 → 5.49 | 362 | 10.7 | stalled |
-| Hencky | icosphere(4) | auto: 0.00786 | paper's | 4.4660e-02 | 4.4645e-02 (27) | 26, 0.027 % | 8 → 8 | 5.36 → 5.00 | 48 | 1.1 | stalled |
+| Hencky | bob | strong: 0.00946 | default | 5.0758e-02 | 5.0758e-02 (315) | 19, 0.76 % | 23 → 5 | 11.79 → 4.66 | 315 | 7.3 | rose |
+| Hencky | blub | auto: 0.00183 | paper's | 1.3682e-02 | 1.3682e-02 (151) | 32, 1.7 % | 44 → 12 | 15.42 → 6.63 | 153 | 6.9 | rose |
+| Hencky | blub | auto: 0.00183 | default | 1.3707e-02 | 1.3707e-02 (313) | 68, 0.23 % | 44 → 12 | 15.42 → 6.80 | 315 | 9.9 | rose |
+| Hencky | blub | fixed: 0.00074 | paper's | 6.2927e-03 | 6.2927e-03 (183) | 77, 0.92 % | 44 → 12 | 15.42 → 7.06 | 188 | 8.0 | rose |
+| Hencky | blub | fixed: 0.00074 | default | 6.9826e-03 | 6.9809e-03 (319) | 93, 0.37 % | 44 → 13 | 15.42 → 8.43 | 322 | 10.0 | stalled |
+| Hencky | blub | strong: 0.0239 | paper's | 1.3628e-01 | 1.3628e-01 (170) | 16, 2.8 % | 44 → 11 | 15.42 → 5.40 | 170 | 6.8 | rose |
+| Hencky | blub | strong: 0.0239 | default | 1.4278e-01 | 1.4278e-01 (263) | 41, 0.19 % | 44 → 9 | 15.42 → 5.77 | 275 | 8.2 | rose |
+| Hencky | icosphere(4) | auto: 0.00786 | paper's | 4.4660e-02 | 4.4645e-02 (27) | 26, 0.027 % | 8 → 8 | 5.36 → 5.00 | 48 | 1.3 | stalled |
 | Hencky | icosphere(4) | auto: 0.00786 | default | 4.4689e-02 | 4.4689e-02 (12) | 14, 0.02 % | 8 → 8 | 5.36 → 5.00 | 36 | 0.7 | rose |
-| Hencky | icosphere(4) | fixed: 0.00074 | paper's | 6.0384e-03 | 6.0384e-03 (229) | 19, 0.58 % | 8 → 9 | 5.36 → 6.55 | 231 | 4.5 | rose |
-| Hencky | icosphere(4) | fixed: 0.00074 | default | 6.0647e-03 | 6.0612e-03 (182) | 40, 0.034 % | 8 → 8 | 5.36 → 6.84 | 199 | 3.4 | stalled |
-| Hencky | icosphere(4) | strong: 0.0115 | paper's | 6.2687e-02 | 6.2687e-02 (89) | 18, 0.037 % | 8 → 8 | 5.36 → 4.98 | 89 | 2.1 | stalled |
-| Hencky | icosphere(4) | strong: 0.0115 | default | 6.2720e-02 | 6.2713e-02 (74) | 35, 0.037 % | 8 → 8 | 5.36 → 4.98 | 91 | 1.9 | stalled |
-| scaled | spot | auto: 0.0486 | paper's | 3.1627e-01 | 3.1627e-01 (176) | 41, 0.3 % | 59 → 11 | 14.67 → 5.46 | 178 | 3.3 | rose |
-| scaled | spot | auto: 0.0486 | default | 3.3255e-01 | 3.3246e-01 (240) | 43, 0.11 % | 59 → 8 | 14.67 → 5.92 | 255 | 4.2 | stalled |
-| scaled | spot | fixed: 0.00074 | paper's | 1.8439e-02 | 1.8439e-02 (62) | 24, 1.6 % | 59 → 92 | 14.67 → 16.91 | 62 | 2.6 | rose |
-| scaled | spot | fixed: 0.00074 | default | 1.7744e-02 | 1.7744e-02 (72) | 27, 0.75 % | 59 → 133 | 14.67 → 18.56 | 82 | 1.9 | rose |
-| scaled | spot | strong: 1.49 | paper's | 3.2057e+00 | 3.2057e+00 (353) | 25, 1.7 % | 59 → 4 | 14.67 → 1.91 | 373 | 5.1 | rose |
-| scaled | spot | strong: 1.49 | default | 2.3685e+00 | 2.3685e+00 (443) | 57, 2.4 % | 59 → 3 | 14.67 → 1.26 | 443 | 5.1 | rose |
+| Hencky | icosphere(4) | fixed: 0.00074 | paper's | 6.0384e-03 | 6.0384e-03 (229) | 19, 0.58 % | 8 → 9 | 5.36 → 6.55 | 231 | 4.3 | rose |
+| Hencky | icosphere(4) | fixed: 0.00074 | default | 6.0647e-03 | 6.0612e-03 (182) | 40, 0.034 % | 8 → 8 | 5.36 → 6.84 | 199 | 3.3 | stalled |
+| Hencky | icosphere(4) | strong: 0.0115 | paper's | 6.2687e-02 | 6.2687e-02 (89) | 18, 0.037 % | 8 → 8 | 5.36 → 4.98 | 89 | 2.2 | stalled |
+| Hencky | icosphere(4) | strong: 0.0115 | default | 6.2719e-02 | 6.2713e-02 (74) | 34, 0.037 % | 8 → 8 | 5.36 → 4.98 | 91 | 1.5 | stalled |
+| scaled | spot | auto: 0.0486 | paper's | 3.1627e-01 | 3.1627e-01 (176) | 41, 0.3 % | 59 → 11 | 14.67 → 5.46 | 178 | 2.5 | rose |
+| scaled | spot | auto: 0.0486 | default | 3.3247e-01 | 3.3247e-01 (251) | 40, 0.11 % | 59 → 8 | 14.67 → 5.92 | 257 | 3.0 | rose |
+| scaled | spot | fixed: 0.00074 | paper's | 1.8439e-02 | 1.8439e-02 (62) | 24, 1.6 % | 59 → 92 | 14.67 → 16.91 | 62 | 1.8 | rose |
+| scaled | spot | fixed: 0.00074 | default | 1.7958e-02 | 1.7958e-02 (50) | 16, 0.7 % | 59 → 129 | 14.67 → 18.78 | 54 | 1.1 | rose |
+| scaled | spot | strong: 1.49 | paper's | 3.2057e+00 | 3.2057e+00 (353) | 25, 1.7 % | 59 → 4 | 14.67 → 1.91 | 373 | 4.5 | rose |
+| scaled | spot | strong: 1.49 | default | 2.3699e+00 | 2.3699e+00 (443) | 59, 2.2 % | 59 → 3 | 14.67 → 1.26 | 443 | 3.6 | stalled |
 | scaled | bob | auto: 0.0153 | paper's | 8.4213e-02 | 8.4213e-02 (263) | 56, 0.55 % | 23 → 10 | 11.79 → 4.19 | 268 | 9.6 | rose |
-| scaled | bob | auto: 0.0153 | default | 8.4329e-02 | 8.4329e-02 (370) | 38, 0.65 % | 23 → 7 | 11.79 → 4.24 | 370 | 8.6 | rose |
-| scaled | bob | fixed: 0.00074 | paper's | 1.2271e-02 | 1.2271e-02 (83) | 22, 0.43 % | 23 → 27 | 11.79 → 10.83 | 102 | 4.5 | rose |
-| scaled | bob | fixed: 0.00074 | default | 1.2235e-02 | 1.2235e-02 (146) | 40, 0.33 % | 23 → 25 | 11.79 → 11.85 | 148 | 5.0 | rose |
-| scaled | bob | strong: 0.859 | paper's | 9.2510e-01 | 9.2510e-01 (267) | 15, 0.91 % | 23 → 3 | 11.79 → 0.94 | 283 | 8.5 | rose |
-| scaled | bob | strong: 0.859 | default | 2.2729e+00 | 2.2719e+00 (430) | 23, 0.44 % | 23 → 4 | 11.79 → 2.54 | 443 | 9.1 | stalled |
-| scaled | blub | auto: 0.11 | paper's | 6.7054e-01 | 6.7054e-01 (244) | 53, 0.84 % | 44 → 9 | 15.42 → 5.66 | 264 | 10.6 | rose |
-| scaled | blub | auto: 0.11 | default | 7.6723e-01 | 7.6723e-01 (252) | 59, 0.42 % | 44 → 10 | 15.42 → 6.67 | 254 | 8.4 | rose |
-| scaled | blub | fixed: 0.00074 | paper's | 1.7879e-02 | 1.7879e-02 (47) | 13, 6.7 % | 44 → 83 | 15.42 → 15.64 | 47 | 3.6 | rose |
-| scaled | blub | fixed: 0.00074 | default | 1.7081e-02 | 1.7081e-02 (96) | 42, 1.5 % | 44 → 116 | 15.42 → 17.86 | 102 | 5.3 | rose |
-| scaled | blub | strong: 1.39 | paper's | 4.2662e+00 | 4.2662e+00 (250) | 11, 2.9 % | 44 → 6 | 15.42 → 2.25 | 253 | 10.2 | rose |
-| scaled | blub | strong: 1.39 | default | 5.0016e+00 | 5.0016e+00 (443) | 85, 3.5 % | 44 → 8 | 15.42 → 2.90 | 446 | 12.4 | rose |
-| scaled | icosphere(4) | auto: 0.00786 | paper's | 4.7704e-02 | 4.7699e-02 (28) | 9, 0.034 % | 8 → 8 | 5.36 → 4.98 | 30 | 0.7 | stalled |
+| scaled | bob | auto: 0.0153 | default | 8.7910e-02 | 8.7910e-02 (292) | 22, 0.69 % | 23 → 8 | 11.79 → 4.54 | 292 | 7.0 | rose |
+| scaled | bob | fixed: 0.00074 | paper's | 1.2271e-02 | 1.2271e-02 (83) | 22, 0.43 % | 23 → 27 | 11.79 → 10.83 | 102 | 4.0 | rose |
+| scaled | bob | fixed: 0.00074 | default | 1.2232e-02 | 1.2232e-02 (146) | 34, 0.25 % | 23 → 25 | 11.79 → 11.85 | 148 | 4.8 | rose |
+| scaled | bob | strong: 0.859 | paper's | 9.2510e-01 | 9.2510e-01 (267) | 15, 0.91 % | 23 → 3 | 11.79 → 0.94 | 283 | 8.7 | rose |
+| scaled | bob | strong: 0.859 | default | 2.2731e+00 | 2.2720e+00 (433) | 35, 0.49 % | 23 → 4 | 11.79 → 2.54 | 447 | 9.4 | stalled |
+| scaled | blub | auto: 0.11 | paper's | 6.7054e-01 | 6.7054e-01 (244) | 53, 0.84 % | 44 → 9 | 15.42 → 5.66 | 264 | 10.4 | rose |
+| scaled | blub | auto: 0.11 | default | 7.6729e-01 | 7.6729e-01 (252) | 47, 0.23 % | 44 → 10 | 15.42 → 6.67 | 258 | 7.6 | rose |
+| scaled | blub | fixed: 0.00074 | paper's | 1.7879e-02 | 1.7879e-02 (47) | 13, 6.7 % | 44 → 83 | 15.42 → 15.64 | 47 | 3.3 | rose |
+| scaled | blub | fixed: 0.00074 | default | 1.7348e-02 | 1.7223e-02 (76) | 31, 1.1 % | 44 → 121 | 15.42 → 18.01 | 89 | 3.8 | stalled |
+| scaled | blub | strong: 1.39 | paper's | 4.2662e+00 | 4.2662e+00 (250) | 11, 2.9 % | 44 → 6 | 15.42 → 2.25 | 253 | 9.8 | rose |
+| scaled | blub | strong: 1.39 | default | 3.4268e+00 | 3.4268e+00 (603) | 128, 5.7 % | 44 → 6 | 15.42 → 1.82 | 617 | 15.1 | rose |
+| scaled | icosphere(4) | auto: 0.00786 | paper's | 4.7704e-02 | 4.7699e-02 (28) | 9, 0.034 % | 8 → 8 | 5.36 → 4.98 | 30 | 0.8 | stalled |
 | scaled | icosphere(4) | auto: 0.00786 | default | 4.7689e-02 | 4.7683e-02 (48) | 26, 0.028 % | 8 → 8 | 5.36 → 4.98 | 64 | 1.1 | stalled |
-| scaled | icosphere(4) | fixed: 0.00074 | paper's | 8.5237e-03 | 8.5135e-03 (177) | 14, 0.041 % | 8 → 8 | 5.36 → 7.90 | 184 | 4.0 | stalled |
-| scaled | icosphere(4) | fixed: 0.00074 | default | 8.4663e-03 | 8.4636e-03 (206) | 4, 0.036 % | 8 → 8 | 5.36 → 8.13 | 208 | 3.5 | stalled |
-| scaled | icosphere(4) | strong: 0.0104 | paper's | 6.0541e-02 | 6.0484e-02 (24) | 18, 0.054 % | 8 → 8 | 5.36 → 4.95 | 45 | 1.1 | stalled |
-| scaled | icosphere(4) | strong: 0.0104 | default | 6.0419e-02 | 6.0419e-02 (38) | 23, 0.024 % | 8 → 8 | 5.36 → 4.96 | 56 | 1.1 | rose |
+| scaled | icosphere(4) | fixed: 0.00074 | paper's | 8.5237e-03 | 8.5135e-03 (177) | 14, 0.041 % | 8 → 8 | 5.36 → 7.90 | 184 | 3.9 | stalled |
+| scaled | icosphere(4) | fixed: 0.00074 | default | 8.4662e-03 | 8.4635e-03 (206) | 4, 0.037 % | 8 → 8 | 5.36 → 8.13 | 208 | 3.3 | stalled |
+| scaled | icosphere(4) | strong: 0.0104 | paper's | 6.0541e-02 | 6.0484e-02 (24) | 18, 0.054 % | 8 → 8 | 5.36 → 4.95 | 45 | 1.2 | stalled |
+| scaled | icosphere(4) | strong: 0.0104 | default | 6.0419e-02 | 6.0419e-02 (38) | 23, 0.024 % | 8 → 8 | 5.36 → 4.96 | 56 | 1.0 | rose |
 
 All 48 runs end below the energy they started with. The paper's stages end at the lower energy
-in 17 of the 24 pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 5 with the
-scaled energy (by 0.1 % to 59 %); the default stages in 7, all with the scaled energy (by 0.03 %
-to 4.5 %, and by 26 % on spot with the strong weight). What the paper's stages cost:
+in 16 of the 24 pairs: in all 12 with the Hencky energy (by 0.05 % to 16 %) and in 4 with the
+scaled energy (by 4 % to 59 %); the default stages in 8, all with the scaled energy (by 0.03 %
+to 3 % in six of them, by 20 % and 26 % on blub and spot with the strong weight). What the
+paper's stages cost:
 
 * Single steps raise the energy more: by at most 6.7 % in 23 of their runs and by 57 % in one
   (spot, Hencky, strong: the step before the stop, in which a patch was lost), against at most
-  3.5 % with the default stages. 18 of their 24 runs end because the energy rose over the window
-  and are set back to their lowest state (SPEC D27), against 14: they rely on that rule.
+  5.7 % with the default stages. 18 of their 24 runs end because the energy rose over the window
+  and are set back to their lowest state (SPEC D27), against 13: they rely on that rule.
 * For one curve between two regions their length step has the defect of D14: two regions on
-  spot (Hencky, `α_L = 2` and `0.5`) end at 4.431 and 1.733 against 4.345 and 1.555.
+  spot (Hencky, `α_L = 2` and `0.5`) end at 4.431 and 1.733 against 4.345 and 1.554.
 * On a mesh with spikes of curvature they do not descend (`camelshotnoise.obj`, two regions,
   Hencky: the energy stays above the 5028 of the start, where the default stages reach 4525).
 
-They take fewer steps (4359 against 5633 in total) in the same time (138 s against 137 s). So
+They take fewer steps (4359 against 5491 in total) in about the same time (129 s against 122 s). So
 for several regions on meshes like these the paper's stages are the better choice by this table,
 and `FlowOptions::for_regions` keeps selecting them; the default stages are the choice for two
 regions, for noisy meshes, and where a run must not depend on being set back.
@@ -519,13 +533,14 @@ gives the smaller step.
 
 On the camel with shot noise one cut point next to a noise spike has the rate `4.5·10⁶`. With the
 extremes the run freezes (611 steps cover the flow time `1.2·10⁻⁷`). With the robust statistics
-600 steps cover `7·10⁻³` and the energy falls from 5028 to 2967 while the cut grows from 325 to
-694 cut points; up to 89 of them are limited in a step. The run is not smooth: the energy rises in
-256 of those steps (by up to 6.7 % of the energy in one step), and with the default stop rule it
-ends after 27 steps (5028 → 4828) because the total energy is dominated by the noise that no cut
-removes; at least a tenth of the cut of the camel has a negative local rate. On
+600 steps cover `5·10⁻³` and the energy falls from 5028 to 3475 while the cut grows from 325 to
+775 cut points; up to 75 of them are limited in a step. The run is not smooth: the energy rises in
+236 of those steps (by up to 6.7 % of the energy in one step), and with the default stop rule it
+ends after 27 steps, set back to the state after 16 (5028 → 4525), because the total energy is
+dominated by the noise that no cut removes; at least a tenth of the cut of the camel has a
+negative local rate. On
 spot the same `α_L` now gives the same or a lower end energy in fewer steps (Hencky, `α_L = 2`:
-150 steps instead of 350; `0.5`: 200 instead of 708). Tests: `tests/flow.rs` (a quantile test,
+144 steps instead of 350; `0.5`: 200 instead of 708). Tests: `tests/flow.rs` (a quantile test,
 and a sphere with a spike of curvature density on the cut: `ω` 148 against a largest local rate
 of 1724, the step `2.8·10⁻⁴` against `2.9·10⁻⁵` with the extremes).
 
@@ -535,7 +550,7 @@ at the cut points but at the vertices, on the change of the whole step, after th
 made the cut move uphill (section "Several regions").
 
 What the larger step costs: single steps raise the energy more often and by more than before
-(spot, Hencky, `α_L = 2`: 23 of 150 steps, at most `8.7·10⁻³` of the energy, against 13 of 350 and
+(spot, Hencky, `α_L = 2`: 23 of 144 steps, at most `5.8·10⁻³` of the energy, against 13 of 350 and
 `1.2·10⁻⁴`), and where the weight lets ripples of a few mesh edges grow the run does not settle
 (the Dirichlet runs with small weights under Fig. 5 and Spot; the latter ends in a cycle of period
 two instead of crawling). The tests of the laws use fixed steps and are unchanged; what this file
@@ -684,6 +699,7 @@ Functions that implement a formula carry `[formula: <id>]`; the ids are those of
 | `cut-symmetry-projection`, `cut-redistance` | `symmetry_projection`, `init::redistanced` |
 | `cut-step-cap` | `StepSize::step`, `rule_step` (internal) |
 | `cut-stop-energy`, `cut-run-lowest` (new, D27) | `energy_criterion`, `run_outcome` (internal) |
+| `cut-stop-motion` (new, D31) | `motion_criterion` |
 | `cut-step-local` (new, D22) | `StepSize::local_factor` |
 | `cut-weighted-quantile` (new, D22) | `weighted_quantile` |
 | `cut-roughening-rate` (new, D18; a quantile since D22) | `Flow::roughening_rate`, `length_weight_for_ripples` |
