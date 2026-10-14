@@ -269,7 +269,14 @@ triangulation, its fingerprint, the number of regions and the option): `CutSessi
 rebuilds the session on the same mesh (the triangulation and `n_regions` come from the bytes) and
 `restore(bytes)` sets a live one; a state of another mesh or other seams raises
 `StaleStateError`. A curvature per triangle is refused on an intrinsic triangulation
-(`InputError`); use `"caller"` for it. The description has several points per edge, junctions of
+(`InputError`); use `"caller"` for it. `merge_tolerance` (default 0.1, 0 keeps every bend; also settable when a session is rebuilt from
+state bytes) removes bends of the returned cut that deviate from the straight line between their
+neighbours by less than that fraction of the longest edge of their triangle:
+`CutDescription.report` has `n_merged_nodes`, `max_displacement` and `max_displacement_relative`
+(and `n_moved_points`). `CutSession.n_patches` counts the connected pieces of the surface in one
+region; `InsertedMesh.changed_polygons` (with `changed_vertex_starts`, `changed_vertices`,
+`changed_triangle_starts`, `changed_triangles`) is the library's triangulation of the polygons that
+were split or got extra vertices, which an editor should keep. The description has several points per edge, junctions of
 any degree (a bend is a junction with two paths), paths between junctions and paths with both
 ends on one polygon edge; `CutDescription.lines()` / `CutSession.lines()` give the paths joined
 for display; `InsertedMesh.polygon_region` is the region of each new polygon where known. The
