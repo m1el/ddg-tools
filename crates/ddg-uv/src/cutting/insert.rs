@@ -671,7 +671,7 @@ struct Cell {
     region: Option<u32>,
 }
 
-const EAR_EPS: f64 = 1e-12;
+const EAR_EPS: f64 = 1e-15;
 
 fn cross2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
     (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])

@@ -303,6 +303,34 @@ impl SessionState {
         self.triangulation
     }
 
+    /// The same state with other values (one function per entry of `values`, in the same
+    /// units): for editing a stored state, and for tests.
+    ///
+    /// # Errors
+    /// [`CuttingError::BadState`] if the number of functions or of values per function differs
+    /// from this state's, or a value is not finite.
+    pub fn with_values(&self, values: Vec<Vec<f64>>) -> Result<SessionState, CuttingError> {
+        if values.len() != self.values.len() || values.iter().any(|f| f.len() != self.n_values()) {
+            return Err(bad(
+                "the number of functions or of values differs from the state's",
+            ));
+        }
+        if values.iter().flatten().any(|x| !x.is_finite()) {
+            return Err(bad("a value is not finite"));
+        }
+        Ok(SessionState {
+            values,
+            ..self.clone()
+        })
+    }
+
+    /// The functions: for the two-region flow one level-set function `φ`, otherwise one per
+    /// region (negative inside the region), each with one value per vertex of the triangulation
+    /// the flow runs on, in the caller's length unit.
+    pub fn values(&self) -> &[Vec<f64>] {
+        &self.values
+    }
+
     /// The state as bytes (little endian, versioned).
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer(Vec::new());
