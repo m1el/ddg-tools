@@ -344,6 +344,103 @@ theorem meanGradient_one {ι : Type*} {s : Finset ι} {L : ι → ℝ} (hpos : �
   simp only [div_one]
   exact div_self hpos
 
+/-- **One face of small slope takes the harmonic mean of its piece with it** (SPEC D30): for a
+face `σ₀` of the piece with `L_{σ₀} > 0`, `ḡ ≤ (ΣL / L_{σ₀}) · g_{σ₀}` (lengths `≥ 0`, slopes
+`> 0`). So a slope that the formula gets wrong by a factor makes the mean wrong by that factor
+times at most the number `ΣL / L_{σ₀}`; this is why a face with a moved crossing is left out.
+
+[formula: cut-gradient-norm] -/
+theorem meanGradient_le_of_face {ι : Type*} {s : Finset ι} {L g : ι → ℝ}
+    (hL : ∀ σ ∈ s, 0 ≤ L σ) (hg : ∀ σ ∈ s, 0 < g σ) {σ₀ : ι} (h0 : σ₀ ∈ s) (hL0 : 0 < L σ₀) :
+    meanGradient s L g ≤ (∑ σ ∈ s, L σ) / L σ₀ * g σ₀ := by
+  have hsum : 0 ≤ ∑ σ ∈ s, L σ := Finset.sum_nonneg hL
+  have hg0 := hg σ₀ h0
+  have hterm : L σ₀ / g σ₀ ≤ ∑ σ ∈ s, L σ / g σ :=
+    Finset.single_le_sum (f := fun σ => L σ / g σ)
+      (fun σ hσ => div_nonneg (hL σ hσ) (hg σ hσ).le) h0
+  have hpos : 0 < L σ₀ / g σ₀ := div_pos hL0 hg0
+  have e : (∑ σ ∈ s, L σ) / L σ₀ * g σ₀ = (∑ σ ∈ s, L σ) / (L σ₀ / g σ₀) := by
+    field_simp
+  rw [e]
+  unfold meanGradient
+  exact div_le_div_of_nonneg_left hsum hpos hterm
+
+/-- The mean slope of a piece as the flow uses it (SPEC §3.9, D23, D30): the harmonic mean over
+the faces of the piece that count if that is positive, and `1` otherwise. `s` is the set of the
+faces that count: any set, in the code the crossed faces none of whose crossings was moved and
+whose slope is positive. -/
+def pieceSlope {ι : Type*} (s : Finset ι) (L g : ι → ℝ) : ℝ :=
+  if 0 < meanGradient s L g then meanGradient s L g else 1
+
+/-- The scale `ḡ` of a piece is positive, whatever counts. -/
+theorem pieceSlope_pos {ι : Type*} (s : Finset ι) (L g : ι → ℝ) : 0 < pieceSlope s L g := by
+  unfold pieceSlope
+  split_ifs with h
+  · exact h
+  · exact one_pos
+
+/-- **A piece without any face that counts has `ḡ = 1`.**
+
+[formula: cut-gradient-norm] -/
+theorem pieceSlope_empty {ι : Type*} (L g : ι → ℝ) : pieceSlope ∅ L g = 1 := by
+  unfold pieceSlope meanGradient
+  simp
+
+/-- Where faces count (lengths `≥ 0` with a positive sum, slopes `> 0`), `ḡ` is their harmonic
+mean, to which `meanGradient_mem` and `meanGradient_normalizes` apply. -/
+theorem pieceSlope_eq_meanGradient {ι : Type*} {s : Finset ι} {L g : ι → ℝ}
+    (hL : ∀ σ ∈ s, 0 ≤ L σ) (hpos : 0 < ∑ σ ∈ s, L σ) (hg : ∀ σ ∈ s, 0 < g σ) :
+    pieceSlope s L g = meanGradient s L g := by
+  obtain ⟨σ, hσ, hlt⟩ : ∃ σ ∈ s, 0 < L σ := by
+    by_contra h
+    push Not at h
+    have := Finset.sum_nonpos h
+    linarith
+  have hden : 0 < ∑ σ ∈ s, L σ / g σ :=
+    Finset.sum_pos' (fun τ hτ => div_nonneg (hL τ hτ) (hg τ hτ).le)
+      ⟨σ, hσ, div_pos hlt (hg σ hσ)⟩
+  unfold pieceSlope
+  rw [ite_eq_left]
+  unfold meanGradient
+  exact div_pos hpos hden
+
+/-- **The faces that count after D30**: of the crossed faces `s` of a piece, those without a
+moved crossing and with a positive slope. If every face has a moved crossing or the slope `0`,
+none counts and `ḡ = 1`: with D30 a piece all of whose faces have a moved crossing is one more
+way for this to happen.
+
+[formula: cut-gradient-norm] -/
+theorem pieceSlope_of_no_counted {ι : Type*} {s : Finset ι} (moved : ι → Prop)
+    [DecidablePred moved] {L g : ι → ℝ} (h : ∀ σ ∈ s, moved σ ∨ ¬ 0 < g σ) :
+    pieceSlope (s.filter fun σ => ¬ moved σ ∧ 0 < g σ) L g = 1 := by
+  have e : s.filter (fun σ => ¬ moved σ ∧ 0 < g σ) = ∅ := by
+    rw [Finset.filter_eq_empty_iff]
+    intro σ hσ hc
+    rcases h σ hσ with h1 | h1
+    · exact hc.1 h1
+    · exact h1 hc.2
+  rw [e, pieceSlope_empty]
+
+/-- On the faces that count the slopes are positive by the choice of the set, so the mean lies
+between the smallest and the largest slope of the faces that count. -/
+theorem pieceSlope_counted_mem {ι : Type*} {s : Finset ι} (moved : ι → Prop)
+    [DecidablePred moved] {L g : ι → ℝ} (hL : ∀ σ ∈ s, 0 ≤ L σ)
+    (hpos : 0 < ∑ σ ∈ s.filter (fun σ => ¬ moved σ ∧ 0 < g σ), L σ) {lo hi : ℝ} (hlo0 : 0 < lo)
+    (hlo : ∀ σ ∈ s, ¬ moved σ → 0 < g σ → lo ≤ g σ)
+    (hhi : ∀ σ ∈ s, ¬ moved σ → 0 < g σ → g σ ≤ hi) :
+    lo ≤ pieceSlope (s.filter fun σ => ¬ moved σ ∧ 0 < g σ) L g ∧
+      pieceSlope (s.filter fun σ => ¬ moved σ ∧ 0 < g σ) L g ≤ hi := by
+  have hL' : ∀ σ ∈ s.filter (fun σ => ¬ moved σ ∧ 0 < g σ), 0 ≤ L σ :=
+    fun σ hσ => hL σ (Finset.mem_filter.mp hσ).1
+  have hg' : ∀ σ ∈ s.filter (fun σ => ¬ moved σ ∧ 0 < g σ), 0 < g σ :=
+    fun σ hσ => (Finset.mem_filter.mp hσ).2.2
+  rw [pieceSlope_eq_meanGradient hL' hpos hg']
+  exact meanGradient_mem hL' hpos hlo0
+    (fun σ hσ => hlo σ (Finset.mem_filter.mp hσ).1 (Finset.mem_filter.mp hσ).2.1
+      (Finset.mem_filter.mp hσ).2.2)
+    (fun σ hσ => hhi σ (Finset.mem_filter.mp hσ).1 (Finset.mem_filter.mp hσ).2.1
+      (Finset.mem_filter.mp hσ).2.2)
+
 /-! ## The two systems on the cut (SPEC §3.10, D14) -/
 
 section OnCut

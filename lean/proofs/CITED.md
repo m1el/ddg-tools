@@ -632,7 +632,7 @@ the marching order of the redistancing and its convergence; anything about round
 
 "Signpost paper" is Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4),
 Article 55, 2019 (<https://doi.org/10.1145/3306346.3322979>). The contract of the implementation
-is `crates/ddg-intrinsic/SPEC.md` ("SPEC", decisions `N1`–`N16`). "B–S" is A. I. Bobenko,
+is `crates/ddg-intrinsic/SPEC.md` ("SPEC", decisions `N1`–`N18`). "B–S" is A. I. Bobenko,
 B. A. Springborn, *A discrete Laplace–Beltrami operator for simplicial surfaces*, Discrete &
 Computational Geometry 38(4), 740–756, 2007 (arXiv:math/0503219, which is what the Signpost paper
 cites as "Bobenko and Springborn 2005").
@@ -777,8 +777,10 @@ an earlier version with another title, were read).
   crate evaluates it. The global statement needs the previous entry.
 - **What depends on it.** Only the remark of SPEC N6 that two results of flipping that differ at
   ties have the same Dirichlet energy for every vertex function (tested). Proved here: the
-  off-diagonal entry of the cotan Laplacian at an edge with two faces is `−½ (cot θ_k + cot θ_l)`
-  and is nonpositive exactly when the edge is Delaunay (`offDiag_nonpos_iff`).
+  off-diagonal entry of the cotan Laplacian at an edge with two faces is minus half the sum of
+  the two opposite cotangents (`offDiag_eq_neg_half_cotanWeight`) and is nonpositive exactly
+  when that sum is nonnegative (`offDiag_nonpos_iff`), which for two opposite angles in
+  `(0, π)` is the Delaunay condition (`cotanWeight_nonneg_iff`).
 
 ### [formula: it-chew-second-algorithm] Chew's second algorithm in the plane
 
@@ -826,8 +828,9 @@ an earlier version with another title, were read).
   what is only *observed* (with boundary; with vertices of small angle sum, N4), and the limit on
   insertions is reported when reached. Proved here, of the planar lemma's ingredients: the
   circumcentre in barycentric coordinates is equidistant from the three corners at the distance
-  `a₀a₁a₂/4A` (`circumcenter_equidistant`), and it lies beyond a side exactly when the opposite
-  angle is obtuse (`circumcenterBary_neg_iff`).
+  `a₀a₁a₂/4A` (`circumcenter_equidistant`), it lies beyond a side exactly when the opposite
+  angle is obtuse (`circumcenterBary_neg_iff`), and an angle below `30°` is opposite a side
+  shorter than the circumradius (`circumradius_gt_of_angle_lt`).
 
 ### [formula: it-ruppert-encroachment] Ruppert's boundary rule in the plane
 

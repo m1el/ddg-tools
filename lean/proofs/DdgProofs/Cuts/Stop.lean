@@ -1,12 +1,28 @@
-import Mathlib
+import DdgProofs.Cuts.VertexLimit
 
 /-!
-# Cut flow: the energy criterion of the stop rule and the lowest state of a run
+# Cut flow: the stop rule of a run (energy criterion, lowest state, motion criterion)
 
-`crates/ddg-variational-cuts/SPEC.md` §4 ("Stopping"), D27, D29. The ids are `cut-stop-energy`
-(the Rust `energy_stop`) and `cut-run-lowest` (`run_outcome`). There is no oracle definition
-(the oracle replays single steps); the definitions below are **this package's own**, written
-after the Rust functions.
+`crates/ddg-variational-cuts/SPEC.md` §4 ("Stopping"), D27, D29, D31. The ids are
+`cut-stop-energy` (the Rust `energy_stop`), `cut-run-lowest` (`run_outcome`) and
+`cut-stop-motion` (`motion_criterion`). There is no oracle definition (the oracle replays single
+steps); the definitions below are **this package's own**, written after the Rust functions.
+
+* **`cut-stop-motion`** (D31) — `motionCriterion tol moved predicted` is
+  `tol > 0 ∧ moved ≤ tol ∧ predicted ≤ tol`. It implies the criterion before D31
+  (`moved ≤ tol`), never holds for `tol ≤ 0`, and is monotone in the predicted motion
+  (`motionCriterion_spec`, `motionCriterion_mono`). With the length step on the cut the
+  predicted motion is `τ` times the largest absolute weighted-mean rate at a cut-adjacent vertex
+  (`predictedMotionOnCut`); for `τ ≥ 0` and weights `≥ 0` with a positive sum at every such
+  vertex it is at most `τ · R` for every bound `R` of the rates, in particular at most
+  `τ · max_p |r_p|` (`predictedMotionOnCut_le`, `predictedMotionOnCut_le_max`); it is `0` when
+  all rates are `0`, for instance at a rest state `s + λ⁰ = 0`
+  (`predictedMotionOnCut_zero`, `predictedMotionOnCut_rest`), and then the criterion is the old
+  one, so a step that moved nothing converges for a positive tolerance
+  (`motionCriterion_zero_rates`, `motionCriterion_rest`). With the length step on the mesh the
+  predicted motion is the largest `|φ′ − φ|` over the cut-adjacent vertices before the local
+  limit (`predictedMotionOnMesh`); the local limit does not exceed it
+  (`limited_le_predictedMotionOnMesh`).
 
 With `E_k` the energy of the state after `k` steps, `W` the window and `ε` the tolerance:
 
@@ -282,6 +298,173 @@ theorem lowestState_lt_of_rose {ε : ℝ} (hε : 0 ≤ ε) {E : ℕ → ℝ} {k 
   have ht : 0 ≤ ε * |E k| := mul_nonneg hε (abs_nonneg _)
   have h2 := (lowestState_spec E n).2.2.1 (k - W) ((Nat.sub_le k W).trans hk)
   linarith
+
+/-! ## The motion criterion (SPEC §4, D31) -/
+
+section Motion
+
+open scoped DdgProofs.Oracle
+
+/-- The motion criterion of the stop rule as the Rust code evaluates it (`motion_criterion`):
+the tolerance is positive, the step moved the cut by at most the tolerance, and the predicted
+motion is at most the tolerance too. -/
+def motionCriterion (tol moved predicted : ℝ) : Prop := 0 < tol ∧ moved ≤ tol ∧ predicted ≤ tol
+
+/-- **The motion criterion**: it holds iff the tolerance is positive and both the cut motion
+and the predicted motion are at most it; it implies the criterion before D31 (the cut motion is
+at most the tolerance); and with a tolerance of zero or less a run never converges by motion,
+also not after a step that moved nothing.
+
+[formula: cut-stop-motion] -/
+theorem motionCriterion_spec (tol moved predicted : ℝ) :
+    (motionCriterion tol moved predicted ↔ 0 < tol ∧ moved ≤ tol ∧ predicted ≤ tol) ∧
+      (motionCriterion tol moved predicted → moved ≤ tol) ∧
+      (tol ≤ 0 → ¬ motionCriterion tol moved predicted) :=
+  ⟨Iff.rfl, fun h => h.2.1, fun h0 h => absurd h.1 (not_lt.mpr h0)⟩
+
+/-- A smaller predicted motion (and a smaller cut motion) keeps the criterion: the first version
+of the prediction in D31, `τ · max_p |r_p|`, is the stricter one (`predictedMotionOnCut_le_max`). -/
+theorem motionCriterion_mono {tol moved moved' predicted predicted' : ℝ}
+    (h : motionCriterion tol moved predicted) (hm : moved' ≤ moved)
+    (hp : predicted' ≤ predicted) : motionCriterion tol moved' predicted' :=
+  ⟨h.1, hm.trans h.2.1, hp.trans h.2.2⟩
+
+/-- The largest absolute value of `x` over a finite set, `0` over the empty set (the fold of the
+Rust code). -/
+def maxAbs {ι : Type*} (A : Finset ι) (x : ι → ℝ) : ℝ := A.fold max 0 fun i => |x i|
+
+theorem maxAbs_le_iff {ι : Type*} {A : Finset ι} {x : ι → ℝ} {B : ℝ} :
+    maxAbs A x ≤ B ↔ 0 ≤ B ∧ ∀ i ∈ A, |x i| ≤ B :=
+  Finset.fold_max_le B
+
+theorem maxAbs_nonneg {ι : Type*} (A : Finset ι) (x : ι → ℝ) : 0 ≤ maxAbs A x :=
+  (maxAbs_le_iff.mp le_rfl).1
+
+theorem abs_le_maxAbs {ι : Type*} {A : Finset ι} (x : ι → ℝ) {i : ι} (hi : i ∈ A) :
+    |x i| ≤ maxAbs A x :=
+  (maxAbs_le_iff.mp le_rfl).2 i hi
+
+theorem maxAbs_zero {ι : Type*} (A : Finset ι) : maxAbs A (fun _ => (0 : ℝ)) = 0 :=
+  le_antisymm (maxAbs_le_iff.mpr ⟨le_rfl, fun _ _ => by rw [abs_zero]⟩) (maxAbs_nonneg _ _)
+
+variable {V P : Type*} [Fintype P]
+
+/-- **The predicted motion with the length step on the cut**: `τ` times the largest absolute
+rate that a cut-adjacent vertex `i ∈ A` gets as the weighted mean of the rates of the cut points
+on its edges, `Σ_p c_ip r_ip / Σ_p c_ip` with `c_ip = ℓ_p β_ip` (the first line of the local
+extension of SPEC §3.8). `r i p` is the rate of the cut point `p` as the vertex `i` sees it (on
+a network the rate of the copy of `p` on the side of `i`; with two regions it does not depend on
+`i`). -/
+def predictedMotionOnCut (τ : ℝ) (A : Finset V) (c r : V → P → ℝ) : ℝ :=
+  τ * maxAbs A fun i => wmean Finset.univ (c i) (r i)
+
+/-- **On the cut the predicted motion is at most `τ` times any bound of the rates** (`τ ≥ 0`;
+at every cut-adjacent vertex the weights are `≥ 0` and not all zero): each vertex gets a convex
+combination of the rates of its cut points.
+
+[formula: cut-stop-motion] -/
+theorem predictedMotionOnCut_le {τ : ℝ} (hτ : 0 ≤ τ) {A : Finset V} {c r : V → P → ℝ}
+    (hc : ∀ i ∈ A, ∀ p, 0 ≤ c i p) (hpos : ∀ i ∈ A, 0 < ∑ p, c i p) {R : ℝ} (hR0 : 0 ≤ R)
+    (hR : ∀ i ∈ A, ∀ p, c i p ≠ 0 → |r i p| ≤ R) :
+    predictedMotionOnCut τ A c r ≤ τ * R := by
+  unfold predictedMotionOnCut
+  refine mul_le_mul_of_nonneg_left (maxAbs_le_iff.mpr ⟨hR0, fun i hi => ?_⟩) hτ
+  have h := wmean_mem (s := Finset.univ) (c := c i) (x := r i) (fun p _ => hc i hi p)
+    (hpos i hi) (lo := -R) (hi := R) (fun p _ hp => (abs_le.mp (hR i hi p hp)).1)
+    (fun p _ hp => (abs_le.mp (hR i hi p hp)).2)
+  exact abs_le.mpr h
+
+/-- **… in particular at most `τ · max_p |r_p|`** over the cut points (two regions: one rate
+per cut point).
+
+[formula: cut-stop-motion] -/
+theorem predictedMotionOnCut_le_max {τ : ℝ} (hτ : 0 ≤ τ) {A : Finset V} {c : V → P → ℝ}
+    (hc : ∀ i ∈ A, ∀ p, 0 ≤ c i p) (hpos : ∀ i ∈ A, 0 < ∑ p, c i p) (r : P → ℝ) :
+    predictedMotionOnCut τ A c (fun _ => r) ≤ τ * maxAbs Finset.univ r :=
+  predictedMotionOnCut_le hτ hc hpos (maxAbs_nonneg _ _)
+    fun _ _ p _ => abs_le_maxAbs r (Finset.mem_univ p)
+
+/-- The predicted motion is nonnegative for `τ ≥ 0`. -/
+theorem predictedMotionOnCut_nonneg {τ : ℝ} (hτ : 0 ≤ τ) (A : Finset V) (c r : V → P → ℝ) :
+    0 ≤ predictedMotionOnCut τ A c r :=
+  mul_nonneg hτ (maxAbs_nonneg _ _)
+
+/-- **With all rates zero the predicted motion is zero**, whatever the weights and `τ`. -/
+theorem predictedMotionOnCut_zero (τ : ℝ) (A : Finset V) (c : V → P → ℝ) :
+    predictedMotionOnCut τ A c (fun _ _ => 0) = 0 := by
+  unfold predictedMotionOnCut
+  have e : (fun i => wmean Finset.univ (c i) fun _ => (0 : ℝ)) = fun _ => (0 : ℝ) := by
+    funext i
+    unfold wmean
+    simp
+  rw [e, maxAbs_zero, mul_zero]
+
+/-- **With all rates zero the criterion is the one before D31**; in particular a step that
+moved nothing converges for every positive tolerance.
+
+[formula: cut-stop-motion] -/
+theorem motionCriterion_zero_rates (tol moved τ : ℝ) (A : Finset V) (c : V → P → ℝ) :
+    (motionCriterion tol moved (predictedMotionOnCut τ A c fun _ _ => 0) ↔
+        0 < tol ∧ moved ≤ tol) ∧
+      (0 < tol → motionCriterion tol 0 (predictedMotionOnCut τ A c fun _ _ => 0)) := by
+  rw [predictedMotionOnCut_zero]
+  exact ⟨⟨fun h => ⟨h.1, h.2.1⟩, fun h => ⟨h.1, h.2, h.1.le⟩⟩, fun h => ⟨h, h.le, h.le⟩⟩
+
+/-- **The predicted motion with the length step on the mesh**: the largest `|φ′(i) − φ(i)|` over
+the vertices `A` that are cut-adjacent before the step, `φ′` after the explicit and the length
+step and before the local limit. -/
+def predictedMotionOnMesh (A : Finset V) (φ φ' : V → ℝ) : ℝ := maxAbs A fun i => φ' i - φ i
+
+/-- If the two steps change no cut-adjacent vertex the predicted motion is zero. -/
+theorem predictedMotionOnMesh_zero {A : Finset V} {φ φ' : V → ℝ} (h : ∀ i ∈ A, φ' i = φ i) :
+    predictedMotionOnMesh A φ φ' = 0 :=
+  le_antisymm (maxAbs_le_iff.mpr ⟨le_rfl, fun i hi => by rw [h i hi, sub_self, abs_zero]⟩)
+    (maxAbs_nonneg _ _)
+
+/-- **The local limit at the vertices does not exceed the predicted motion**: with factors in
+`[0, 1]`, the largest change after the limit over the cut-adjacent vertices is at most the
+largest change before it. -/
+theorem limited_le_predictedMotionOnMesh {A : Finset V} (φ φ' : V → ℝ) {f : V → ℝ}
+    (hf0 : ∀ i ∈ A, 0 ≤ f i) (hf1 : ∀ i ∈ A, f i ≤ 1) :
+    maxAbs A (fun i => Ddg.limitedValue (φ i) (φ' i) (f i) - φ i) ≤
+      predictedMotionOnMesh A φ φ' :=
+  maxAbs_le_iff.mpr ⟨maxAbs_nonneg _ _, fun i hi =>
+    (abs_limitedValue_sub_le (hf0 i hi) (hf1 i hi) (φ i) (φ' i)).trans
+      (abs_le_maxAbs (fun i => φ' i - φ i) hi)⟩
+
+end Motion
+
+section MotionRest
+
+open Matrix
+
+variable {V C : Type*} [Fintype C] [DecidableEq C]
+
+/-- **At a rest state the predicted motion is zero, whatever the step**: if `s + λ⁰ = 0` at
+every cut point, the rate of the system on the cut (SPEC §3.10) is zero (`onCut_rest`), and so
+is the predicted motion. -/
+theorem predictedMotionOnCut_rest {ℓ s lam r : C → ℝ} {m : C → C → ℝ} {τ : ℝ}
+    (hℓ : ∀ p, 0 < ℓ p) (hm0 : ∀ p q, 0 ≤ m p q) (hτ : 0 ≤ τ)
+    (h : fluxMatrix ℓ (fun p q => τ * m p q) *ᵥ r = fun p => Ddg.fluxRhs (ℓ p * (s p + lam p)))
+    (h0 : ∀ p, s p + lam p = 0) (A : Finset V) (c : V → C → ℝ) :
+    predictedMotionOnCut τ A c (fun _ => r) = 0 := by
+  have hr : r = fun _ => 0 := funext fun p => onCut_rest hℓ hm0 hτ h h0 p
+  rw [hr]
+  exact predictedMotionOnCut_zero τ A c
+
+/-- **A run at a rest state converges by motion**: with `s + λ⁰ = 0` at every cut point, a step
+that moved nothing satisfies the criterion for every positive tolerance.
+
+[formula: cut-stop-motion] -/
+theorem motionCriterion_rest {ℓ s lam r : C → ℝ} {m : C → C → ℝ} {τ tol : ℝ}
+    (hℓ : ∀ p, 0 < ℓ p) (hm0 : ∀ p q, 0 ≤ m p q) (hτ : 0 ≤ τ)
+    (h : fluxMatrix ℓ (fun p q => τ * m p q) *ᵥ r = fun p => Ddg.fluxRhs (ℓ p * (s p + lam p)))
+    (h0 : ∀ p, s p + lam p = 0) (htol : 0 < tol) (A : Finset V) (c : V → C → ℝ) :
+    motionCriterion tol 0 (predictedMotionOnCut τ A c fun _ => r) := by
+  rw [predictedMotionOnCut_rest hℓ hm0 hτ h h0]
+  exact ⟨htol, htol.le, htol.le⟩
+
+end MotionRest
 
 end Cuts
 
