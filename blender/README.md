@@ -331,7 +331,8 @@ size); a second cut with the first as seams; every error path has a readable mes
 
 The cut operators are a front end for Sharp, Crane, *Variational Surface Cutting*, ACM
 Transactions on Graphics 37(4), 2018, implemented from the text of the paper. No code of the
-authors is used or was read.
+authors is used or was read. The flow runs by default on an intrinsic triangulation:
+Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4), 2019.
 
 ## Layout
 
@@ -409,17 +410,88 @@ at the price of moving the cut (largest displacement of a cut point on the spot 
 What is not covered: the viewport shows UVs in Blender's own triangulation, which can differ from
 the one the unwrap used, and a mesh edited after Apply gets Blender's triangulation back.
 
+### The triangulation the flow runs on
+
+Start has a **Triangulation** property (`triangulation`, `refine_bound`): **Intrinsic
+(Delaunay)** (the default), **Intrinsic, Refined** (flips and refinement to a minimum angle,
+default 25 degrees, at most 35: vertices are added) and **Mesh's Own** (Blender's triangulation,
+as the versions before). The flow's stages degrade on badly shaped triangles (measured in
+`crates/ddg-variational-cuts`: on a 165 degree sheared grid the speed is off by 110 % with the
+paper's stages and the cut vanishes); flipping the triangulation of the same surface to Delaunay
+(Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 2019, `crates/ddg-intrinsic`)
+restores regular-grid behaviour at 0.01 to 0.06 s on the real meshes and usually adds no vertex;
+refinement only helps where the input has too few vertices for thin geometry. The cut is carried
+back onto the mesh's own faces whatever the choice (bends inside faces, several points per
+edge, junctions of any degree), so nothing else changes for the user.
+
+* **State.** The per-corner attributes `ddg_cut_region_k` are the whole state when the
+  triangulation added no vertex (the usual case of the default). When it did (Refined, or an
+  export that had to split an edge) the whole state is the bytes of `CutSession.snapshot()` in the
+  mesh property `ddg_cut_state` (base64: levels on every vertex of the triangulation, its
+  fingerprint, the number of regions and the option), and the attributes stay as the view of the
+  mesh's own vertices. The property `ddg_cut_option` (`intrinsic`, `refined:<degrees>`, `caller`)
+  says which triangulation to rebuild. A stored state that does not belong to the mesh any more
+  (its fingerprint differs: the mesh or its seams changed since Start) is refused with "The mesh
+  or its seams changed since 'Cut: Start', so the stored cut no longer fits it ... Run 'Cut:
+  Start' again." and nothing is overwritten. Editing the attributes by hand only works while
+  there are no state bytes.
+* **Cut Offset** (`cut_offset`, default 1e-3) is the smallest distance of a point of the cut from
+  a vertex of the mesh's faces, as a fraction of an edge: for the intrinsic triangulations it is
+  the library's `min_offset` (set when the session is built from the stored state, so Apply can
+  use another one), for the mesh's own triangulation it is the crossing offset of the shown and
+  inserted cut.
+* **A curvature per triangle** is not offered by the operators; the binding refuses it on an
+  intrinsic triangulation (`triangulation="caller"` takes it).
+* **Apply** inserts the general cut. The description gives, per polygon, a graph whose nodes are
+  edge points and junctions (a bend is a junction with two paths; any number of points per edge)
+  and whose edges are paths through the polygon's diagonals. The graph is embedded by splitting the
+  polygon with `bmesh.utils.face_split` along chains of paths: a shortest chain (breadth first)
+  from a node that is a vertex already to another one, through the junctions in between; the
+  junctions it passes become vertices and the next chains start from them. Of the pieces that
+  contain both ends the one the chain lies in is chosen (`bmesh.geometry.intersect_face_point`);
+  the new vertices are ordered along the chain by the edges of the split. A piece along a polygon
+  edge (both ends on the same edge) only marks the sides between the two points as seams. Data
+  is transferred as before (edge points by `edge_split`, interior points, junctions and bends
+  by the barycentric weights the description gives). The Rust `insert` (rustdoc: cells in the
+  barycentric coordinates of each triangle, parts across uncut diagonals) is the reference; the
+  tests compare vertices (one to one by position), polygons (as vertex sets) and seams (exactly).
+* **The flow's report** gains a line about the triangulation (vertices added, angle range) in the
+  advanced view only (the `show_advanced` toggle); `ddg_cut_last_flow` always has the numbers.
+* **Tests.** `scripts/blender-test.sh` runs `test_cut.py` three times in parallel, once per
+  triangulation (`--triangulation intrinsic|caller|refined` changes the default of Start for that
+  run, so that every expectation of the earlier tests is checked on each): 44, 43 (+1 skipped: the
+  state bytes do not exist for the caller's triangulation) and 44 tests. New: the 153 degree and
+  165 degree sheared grids and the needles-and-caps grid of `bad_mesh_study.rs` (built in the test)
+  through Start, Flow, Apply and unwrap; a refined session with state bytes, the stale-state
+  message and the unchanged bytes after a refused run; the triangulation line.
+* **Flipped UV triangles.** Recorded, not asserted, on the intrinsic triangulations: the
+  atlas of spot (eight clusters, weights 2 and 10, offsets 1e-3 and 0.2) has after Apply and
+  unwrap, by the library's count, 1, 1, 0, 0 flipped triangles on the intrinsic triangulation and 2, 2, 0,
+  4 on the refined one (the caller's triangulation: 0 in all four, asserted). Thin slivers from
+  points of the cut that are very close to vertices; the pipeline is being changed to merge
+  negligible bends before the insertion.
+
 ### Cost of the cut operators
 
-`scripts/blender-test.sh --bench` (`blender/tests/bench_cut.py`), UV sphere, 32 514 vertices,
-32 768 faces, 130 560 corners; "library" is the time inside `ddg_tools.CutSession`, "add-on" the
-rest (mesh buffers, attributes, preview object, bmesh):
+`scripts/blender-test.sh --bench` (`blender/tests/bench_cut.py`, run alone), UV sphere, 32 514
+vertices, 32 768 faces, 130 560 corners; "library" is the time inside `ddg_tools.CutSession` (the
+intrinsic triangulation included), "add-on" the rest (mesh buffers, attributes, patch count,
+preview object, bmesh):
 
-| operator | total ms | library ms | add-on ms |
-|----------|---------:|-----------:|----------:|
-| Start | 116.6 | 91.7 | 25.0 |
-| Flow (10 steps) | 725.7 | 690.1 | 35.6 |
-| Apply | 155.6 | 83.3 | 72.3 |
+| triangulation | operator | total ms | library ms | add-on ms |
+|---------------|----------|---------:|-----------:|----------:|
+| caller | Start | 109.6 | 90.7 | 18.9 |
+| caller | Flow (10 steps) | 1107.7 | 693.1 | 414.6 |
+| caller | Apply | 330.7 | 99.0 | 231.8 |
+| intrinsic | Start | 201.4 | 182.2 | 19.2 |
+| intrinsic | Flow (10 steps) | 1125.5 | 731.3 | 394.2 |
+| intrinsic | Apply | 419.6 | 185.6 | 234.0 |
+| refined | Start | 403.6 | 382.5 | 21.0 |
+| refined | Flow (10 steps) | 1494.8 | 1116.3 | 378.4 |
+| refined | Apply | 613.6 | 372.0 | 241.6 |
 
-Each operator builds a new session (the flow's symbolic analysis and factorization are not kept
-between operator calls), so Start and Apply pay for one session each.
+The intrinsic triangulation costs about 90 ms at Start and 90 ms again at Apply here (each
+operator builds a new session); the flow steps themselves cost the same. The add-on side of Flow
+grew from 36 to about 400 ms with the patch count (a Python pass over all corners) and the
+preview; Apply's from 72 to about 230 ms with the stored triangulation and the general chains.
+(An earlier table with 726 / 156 ms totals was measured before both.)
