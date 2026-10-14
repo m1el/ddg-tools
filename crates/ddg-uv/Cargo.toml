@@ -14,6 +14,8 @@ ddg-bff = { path = "../ddg-bff" }
 ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 # The cut flow (Sharp, Crane 2018): src/cutting wraps it for polygon meshes.
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
+# The intrinsic triangulation the cut flow can run on (src/cutting/intrinsic.rs).
+ddg-intrinsic = { path = "../ddg-intrinsic" }
 
 [dev-dependencies]
 proptest = "1"

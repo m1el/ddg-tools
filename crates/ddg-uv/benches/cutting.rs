@@ -19,7 +19,8 @@ use std::time::Duration;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use ddg_core::io::read_obj;
 use ddg_uv::cutting::{
-    ConePlacement, CutOnPolygons, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, Session, Start, insert,
+    ConePlacement, CutOnPolygons, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, FlowKind, Session,
+    Start, insert,
 };
 use ddg_uv::primitives::{grid_cube, torus, uv_sphere};
 use ddg_uv::{MeshInput, PolygonMesh, unwrap};
@@ -419,5 +420,142 @@ fn region_benches(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(cutting, benches, region_benches);
+// ----- the triangulation the flow runs on -----
+
+/// A sheared grid (the largest angle 165 degrees): every triangle is badly shaped.
+fn sheared_grid(n: usize, sigma: f64) -> PolygonMesh {
+    let h = 1.0 / n as f64;
+    let mut positions = Vec::new();
+    for j in 0..=n {
+        for i in 0..=n {
+            positions.push([(i as f64 + sigma * j as f64) * h, j as f64 * h, 0.0]);
+        }
+    }
+    let at = |i: usize, j: usize| (j * (n + 1) + i) as u32;
+    let mut faces = Vec::new();
+    for j in 0..n {
+        for i in 0..n {
+            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+    }
+    PolygonMesh::from_triangles(positions, &faces)
+}
+
+/// The chain (start, 10 steps, description, insertion, unwrap with cones off) with the caller's
+/// triangulation, with Delaunay flips only and with refinement to 25 degrees.
+fn intrinsic_benches(c: &mut Criterion) {
+    use ddg_uv::cutting::{IntrinsicOptions, Triangulation};
+    let models = std::env::var_os("DDG_MODELS").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/models/spot/spot"),
+        PathBuf::from,
+    );
+    let mut meshes: Vec<(String, PolygonMesh)> = vec![
+        (
+            "uv_sphere_64x32".into(),
+            uv_sphere(64, 32, 1.0).expect("valid"),
+        ),
+        (
+            "sheared_165_64".into(),
+            sheared_grid(64, 1.0 / 15f64.to_radians().tan()),
+        ),
+    ];
+    if let Some(mesh) = polygons_of(models.join("spot_quadrangulated.obj")) {
+        meshes.push(("spot_quads".into(), mesh));
+    }
+    let off = CutUnwrapOptions {
+        cones: ConePlacement::Off,
+        ..Default::default()
+    };
+    let triangulations = [
+        ("caller", Triangulation::Caller),
+        (
+            "flips",
+            Triangulation::Intrinsic(IntrinsicOptions::flips_only()),
+        ),
+        (
+            "refined",
+            Triangulation::Intrinsic(IntrinsicOptions::refined()),
+        ),
+    ];
+    let mut g = group(c, "intrinsic");
+    for (name, mesh) in &meshes {
+        let start = Start::GeodesicCircle {
+            vertex: (mesh.positions.len() / 3) as u32,
+            radius: 0.2 * area(mesh).sqrt(),
+        };
+        for (label, tri) in &triangulations {
+            let make = || {
+                Session::with_triangulation(&mesh.input(), 2, &start, FlowKind::Auto, tri)
+                    .expect("session")
+            };
+            let mut probe = make();
+            let mut problem = CutProblem::new(Energy::Hencky, 0.0);
+            let options = FlowOptions::new(StepSize::default());
+            let omega = probe
+                .roughening_rate(&problem, &options.eval)
+                .expect("a start with a cut");
+            problem.length_weight = length_weight_for_ripples(omega, 0.25);
+            if let Some(r) = probe.intrinsic_report() {
+                eprintln!(
+                    "{name}/{label}: {} vertices ({} added), angles {:.1} to {:.1} degrees",
+                    r.n_vertices,
+                    r.n_added,
+                    r.min_angle.to_degrees(),
+                    r.max_angle.to_degrees()
+                );
+            }
+            g.bench_function(format!("{name}/{label}/start"), |b| b.iter(&make));
+            g.bench_function(format!("{name}/{label}/steps_{STEPS}"), |b| {
+                b.iter_batched(
+                    &make,
+                    |mut s| {
+                        for _ in 0..STEPS {
+                            s.step(&problem, &options).expect("step");
+                        }
+                        s
+                    },
+                    BatchSize::LargeInput,
+                )
+            });
+            let mut stepped = make();
+            for _ in 0..STEPS {
+                stepped.step(&problem, &options).expect("step");
+            }
+            g.bench_function(format!("{name}/{label}/describe"), |b| {
+                b.iter(|| {
+                    stepped
+                        .describe_cut(DEFAULT_CROSSING_OFFSET)
+                        .expect("describe")
+                })
+            });
+            let cut = stepped
+                .describe_cut(DEFAULT_CROSSING_OFFSET)
+                .expect("describe");
+            g.bench_function(format!("{name}/{label}/insert"), |b| {
+                b.iter(|| insert(mesh, &cut).expect("insert"))
+            });
+            g.bench_function(format!("{name}/{label}/unwrap_cones_off"), |b| {
+                b.iter(|| {
+                    stepped
+                        .unwrap(DEFAULT_CROSSING_OFFSET, &off)
+                        .expect("unwrap")
+                })
+            });
+            g.bench_function(format!("{name}/{label}/chain"), |b| {
+                b.iter(|| {
+                    let mut s = make();
+                    for _ in 0..STEPS {
+                        s.step(&problem, &options).expect("step");
+                    }
+                    s.unwrap(DEFAULT_CROSSING_OFFSET, &off).expect("unwrap")
+                })
+            });
+        }
+    }
+    g.finish();
+}
+
+criterion_group!(cutting, benches, region_benches, intrinsic_benches);
 criterion_main!(cutting);

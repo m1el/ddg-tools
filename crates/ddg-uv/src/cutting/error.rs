@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use ddg_intrinsic::IntrinsicError;
 use ddg_variational_cuts::CutError;
 
 use crate::error::UvError;
@@ -16,6 +17,22 @@ pub enum CuttingError {
     /// of the triangle mesh the flow runs on, which [`crate::cutting::Session`] numbers (use the
     /// maps of the session to translate).
     Flow(CutError),
+    /// The intrinsic triangulation refused something (see [`IntrinsicError`]); its messages name
+    /// the vertices, edges and faces of the seam-cut triangle mesh or of the triangulation.
+    Intrinsic(IntrinsicError),
+    /// A state was made for another triangulation than the one this session runs on.
+    StaleState {
+        /// The fingerprint of this session's triangulation.
+        expected: u64,
+        /// The fingerprint the state was made for.
+        got: u64,
+    },
+    /// Bytes or a state that cannot be used (wrong format, wrong number of regions or values,
+    /// made for a different kind of flow).
+    BadState {
+        /// What is wrong.
+        reason: String,
+    },
     /// Fewer than two regions.
     TooFewRegions {
         /// The number asked for.
@@ -112,6 +129,12 @@ impl From<UvError> for CuttingError {
     }
 }
 
+impl From<IntrinsicError> for CuttingError {
+    fn from(e: IntrinsicError) -> Self {
+        CuttingError::Intrinsic(e)
+    }
+}
+
 impl From<CutError> for CuttingError {
     fn from(e: CutError) -> Self {
         CuttingError::Flow(e)
@@ -137,6 +160,13 @@ impl fmt::Display for CuttingError {
         match self {
             Mesh(e) => write!(f, "{e}"),
             Flow(e) => write!(f, "cut flow: {e}"),
+            Intrinsic(e) => write!(f, "intrinsic triangulation: {e}"),
+            StaleState { expected, got } => write!(
+                f,
+                "the state was made for the triangulation {got:016x}, this session runs on \
+                 {expected:016x}"
+            ),
+            BadState { reason } => write!(f, "state: {reason}"),
             TooFewRegions { got } => write!(f, "{got} regions asked for; at least 2 are needed"),
             RegionsNotAvailable { n_regions } => write!(
                 f,

@@ -76,14 +76,19 @@
 //! core crate recommends for the number of regions (`FlowOptions::for_regions` for more than
 //! two). Every region component then becomes a chart in `unwrap_with_cut`.
 
+mod back;
 mod describe;
 mod endtoend;
 mod error;
 mod insert;
+mod intrinsic;
 mod session;
 
-pub use describe::{CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath};
+pub use describe::{
+    CutLine, CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath,
+};
 pub use endtoend::{ConePlacement, CutUnwrap, CutUnwrapOptions, unwrap_with_cut};
 pub use error::CuttingError;
 pub use insert::{Inserted, VertexSource, insert};
+pub use intrinsic::{IntrinsicOptions, IntrinsicReport, SessionState, Triangulation};
 pub use session::{DEFAULT_CROSSING_OFFSET, FlowKind, PreviewPolyline, Session, Start};

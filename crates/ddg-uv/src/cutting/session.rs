@@ -14,6 +14,9 @@ use super::describe::{
     CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath,
 };
 use super::error::{CuttingError, internal};
+use super::intrinsic::{
+    IntrinsicReport, IntrinsicState, SessionState, Triangulation, mesh_fingerprint,
+};
 use crate::input::{MeshInput, PolygonMesh};
 use crate::options::{Degenerate, Orientation, UnwrapOptions};
 use crate::prepare::prepare;
@@ -81,30 +84,30 @@ pub struct PreviewPolyline {
 
 /// The maps between the polygon mesh and the triangle mesh the flow runs on.
 #[derive(Debug, Clone)]
-struct Maps {
-    n_regions: usize,
-    n_vertices: usize,
-    n_corners: usize,
-    n_polygons: usize,
+pub(super) struct Maps {
+    pub(super) n_regions: usize,
+    pub(super) n_vertices: usize,
+    pub(super) n_corners: usize,
+    pub(super) n_polygons: usize,
     /// Flow vertex to vertex of the polygon mesh.
-    vertex_input: Vec<u32>,
+    pub(super) vertex_input: Vec<u32>,
     /// Flow face to triangle of the supplied triangulation.
-    face_triangle: Vec<u32>,
+    pub(super) face_triangle: Vec<u32>,
     /// Triangle to polygon.
-    triangle_polygon: Vec<u32>,
+    pub(super) triangle_polygon: Vec<u32>,
     /// Polygon corner to flow vertex.
-    corner_vertex: Vec<u32>,
+    pub(super) corner_vertex: Vec<u32>,
     /// First corner of every flow vertex.
-    first_corner: Vec<u32>,
+    pub(super) first_corner: Vec<u32>,
     /// Vertex of the polygon mesh to its flow vertices (compressed rows).
-    copy_start: Vec<u32>,
-    copies: Vec<u32>,
+    pub(super) copy_start: Vec<u32>,
+    pub(super) copies: Vec<u32>,
     /// Flow edge to the two polygon corners of its first face, as `(c, d)`.
-    edge_corners: Vec<(u32, u32)>,
+    pub(super) edge_corners: Vec<(u32, u32)>,
     /// Whether a flow edge is an edge of a polygon (and not a diagonal).
-    edge_is_polygon: Vec<bool>,
+    pub(super) edge_is_polygon: Vec<bool>,
     /// The seams that were cut (given seams and extensions of one-edge seams), `[min, max]`.
-    used_seams: Vec<[u32; 2]>,
+    pub(super) used_seams: Vec<[u32; 2]>,
 }
 
 impl Maps {
@@ -225,20 +228,23 @@ impl Maps {
 /// interior vertices is extended by one edge.
 #[derive(Debug)]
 pub struct Session {
-    mesh: PolygonMesh,
-    seams: Vec<[u32; 2]>,
+    pub(super) mesh: PolygonMesh,
+    pub(super) seams: Vec<[u32; 2]>,
     pub(super) pinned: Vec<u32>,
     pub(super) prescribed: Vec<ddg_core::io::Cone>,
     pub(super) forbidden: Vec<u32>,
-    maps: Maps,
-    flow_mesh: TriMesh,
-    flow_geometry: Geometry,
-    flow_positions: Vec<[f64; 3]>,
+    pub(super) maps: Maps,
+    pub(super) flow_mesh: TriMesh,
+    pub(super) flow_geometry: Geometry,
+    pub(super) flow_positions: Vec<[f64; 3]>,
     /// The two-region flow; with `many` it is an unused one on the same mesh (see
     /// [`Session::flow`]).
-    flow: Flow,
-    many: Option<RegionFlow>,
-    warnings: Vec<String>,
+    pub(super) flow: Flow,
+    pub(super) many: Option<RegionFlow>,
+    /// The intrinsic triangulation the flow runs on, if the session was built with one.
+    pub(super) tri: Option<IntrinsicState>,
+    pub(super) triangulation: Triangulation,
+    pub(super) warnings: Vec<String>,
 }
 
 impl Session {
@@ -267,6 +273,33 @@ impl Session {
         n_regions: usize,
         start: &Start,
         kind: FlowKind,
+    ) -> Result<Session, CuttingError> {
+        Session::with_triangulation(input, n_regions, start, kind, &Triangulation::Caller)
+    }
+
+    /// [`Session::new_with`] with the choice of the triangulation the flow runs on
+    /// ([`Triangulation`]): the caller's (bit for bit the behaviour of `new_with`), or an
+    /// intrinsic one built from the seam-cut mesh.
+    ///
+    /// **Starts on an intrinsic triangulation.** A geodesic circle is computed on the
+    /// triangulation itself, from every copy of the vertex. Corner values, labels and normal
+    /// clusters are computed on the seam-cut mesh first; the value at a vertex the
+    /// triangulation added is the linear interpolation of the mesh's piecewise linear function
+    /// at the vertex's place on the mesh (the state is then exactly that function at every
+    /// vertex, and at the caller's vertices exactly the given values). For labels and clusters
+    /// the functions are then made signed distances to their regions by the flow's
+    /// redistancing (cut-adjacent values kept, fast marching elsewhere); corner values are
+    /// left as given.
+    ///
+    /// # Errors
+    /// As [`Session::new_with`]; [`CuttingError::Intrinsic`] when the triangulation or its
+    /// export fails, [`CuttingError::InvalidOption`] for options out of range.
+    pub fn with_triangulation(
+        input: &MeshInput<'_>,
+        n_regions: usize,
+        start: &Start,
+        kind: FlowKind,
+        triangulation: &Triangulation,
     ) -> Result<Session, CuttingError> {
         if n_regions < 2 {
             return Err(CuttingError::TooFewRegions { got: n_regions });
@@ -405,25 +438,49 @@ impl Session {
             polygon_offsets: offsets.to_vec(),
             triangles: input.triangles.to_vec(),
         };
+        let tri = match triangulation {
+            Triangulation::Caller => None,
+            Triangulation::Intrinsic(o) => {
+                Some(IntrinsicState::build(&flow_mesh, &flow_geometry, o)?)
+            }
+        };
+        let (engine_mesh, engine_geometry) = match &tri {
+            Some(t) => (&t.export.mesh, &t.export.geometry),
+            None => (&flow_mesh, &flow_geometry),
+        };
         let level = start_state(
             &maps,
             &flow_mesh,
             &flow_geometry,
             &flow_positions,
+            (engine_mesh, engine_geometry),
             start,
             many_flow,
         )?;
-        let (flow, many) = if many_flow {
+        let redistance = level.redistance && tri.is_some();
+        let level = level.lift(tri.as_ref(), &flow_mesh);
+        let (flow, mut many) = if many_flow {
             let phis = level.into_many();
-            let aux = Flow::new(&flow_mesh, &flow_geometry, &phis[0])?;
+            let aux = Flow::new(engine_mesh, engine_geometry, &phis[0])?;
             (
                 aux,
-                Some(RegionFlow::new(&flow_mesh, &flow_geometry, &phis)?),
+                Some(RegionFlow::new(engine_mesh, engine_geometry, &phis)?),
             )
         } else {
             let phi = level.into_two();
-            (Flow::new(&flow_mesh, &flow_geometry, &phi)?, None)
+            (Flow::new(engine_mesh, engine_geometry, &phi)?, None)
         };
+        let mut flow = flow;
+        if redistance {
+            match &mut many {
+                Some(f) => {
+                    f.redistance()?;
+                }
+                None => {
+                    flow.redistance()?;
+                }
+            }
+        }
         let mut seams: Vec<[u32; 2]> = input
             .seam_edges
             .iter()
@@ -443,8 +500,146 @@ impl Session {
             flow_positions,
             flow,
             many,
+            tri,
+            triangulation: *triangulation,
             warnings: prepared.warnings.clone(),
         })
+    }
+
+    /// A session rebuilt from a stored state: the triangulation option comes from the state,
+    /// the session is built on `input` with it, and the state is restored (so the fingerprints
+    /// must agree).
+    ///
+    /// # Errors
+    /// As [`Session::with_triangulation`]; [`CuttingError::StaleState`] if the rebuilt
+    /// triangulation is not the one the state was made for (another mesh, other seams);
+    /// [`CuttingError::BadState`] for a state of another number of regions.
+    pub fn new_from_state(
+        input: &MeshInput<'_>,
+        state: &SessionState,
+    ) -> Result<Session, CuttingError> {
+        let zero = Start::Corners(vec![vec![0.0; input.n_corners()]; state.n_regions]);
+        let kind = if state.region_flow {
+            FlowKind::Regions
+        } else {
+            FlowKind::TwoRegion
+        };
+        let mut session =
+            Session::with_triangulation(input, state.n_regions, &zero, kind, &state.triangulation)?;
+        session.restore(state)?;
+        Ok(session)
+    }
+
+    /// Whether the state is exactly one value per vertex of the seam-cut mesh (nothing was
+    /// added by the intrinsic triangulation, or the triangulation is the caller's): then
+    /// [`Session::state`] is the whole state. [`IntrinsicReport::n_added`] is the number of
+    /// vertices added otherwise.
+    pub fn state_is_per_corner(&self) -> bool {
+        self.engine_mesh().n_vertices() == self.flow_mesh.n_vertices()
+    }
+
+    /// The triangulation option the session was built with.
+    pub fn triangulation(&self) -> Triangulation {
+        self.triangulation
+    }
+
+    /// What the construction of the intrinsic triangulation did (`None` on the caller's
+    /// triangulation).
+    pub fn intrinsic_report(&self) -> Option<&IntrinsicReport> {
+        self.tri.as_ref().map(|t| &t.report)
+    }
+
+    /// The triangle mesh the flow runs on: the export of the intrinsic triangulation, or the
+    /// seam-cut mesh ([`Session::flow_mesh`]) on the caller's triangulation. Its first
+    /// vertices are those of `flow_mesh`.
+    pub fn engine_mesh(&self) -> &TriMesh {
+        match &self.tri {
+            Some(t) => &t.export.mesh,
+            None => &self.flow_mesh,
+        }
+    }
+
+    /// The fingerprint of the triangulation the flow runs on: what a [`SessionState`] must
+    /// match.
+    pub fn fingerprint(&self) -> u64 {
+        match &self.tri {
+            Some(t) => t.export.fingerprint,
+            None => mesh_fingerprint(&self.flow_mesh, &self.flow_geometry),
+        }
+    }
+
+    /// The state with everything the flow keeps: the level-set functions on the vertices of
+    /// the triangulation the flow runs on (inserted vertices included), the fingerprint of
+    /// that triangulation and the option that reproduces it. Store it ([`SessionState::to_bytes`])
+    /// and hand it back with [`Session::restore`] or [`Session::new_from_state`].
+    pub fn snapshot(&self) -> SessionState {
+        let values = match &self.many {
+            Some(f) => f.level_sets(),
+            None => vec![self.flow.level_set()],
+        };
+        SessionState {
+            fingerprint: self.fingerprint(),
+            n_regions: self.maps.n_regions,
+            region_flow: self.many.is_some(),
+            values,
+            triangulation: self.triangulation,
+        }
+    }
+
+    /// Sets the state from a [`SessionState`] (resets time and step count).
+    ///
+    /// # Errors
+    /// [`CuttingError::StaleState`] if the state belongs to another triangulation,
+    /// [`CuttingError::BadState`] for another number of regions, another kind of flow or a
+    /// wrong number of values.
+    pub fn restore(&mut self, state: &SessionState) -> Result<(), CuttingError> {
+        let expected = self.fingerprint();
+        if state.fingerprint != expected {
+            return Err(CuttingError::StaleState {
+                expected,
+                got: state.fingerprint,
+            });
+        }
+        if state.n_regions != self.maps.n_regions || state.region_flow != self.many.is_some() {
+            return Err(CuttingError::BadState {
+                reason: format!(
+                    "the state has {} regions on the {} flow, the session {} on the {} flow",
+                    state.n_regions,
+                    if state.region_flow {
+                        "region"
+                    } else {
+                        "two-region"
+                    },
+                    self.maps.n_regions,
+                    if self.many.is_some() {
+                        "region"
+                    } else {
+                        "two-region"
+                    },
+                ),
+            });
+        }
+        let n = self.engine_mesh().n_vertices();
+        if state.values.iter().any(|f| f.len() != n) {
+            return Err(CuttingError::BadState {
+                reason: format!(
+                    "the state has {} values per function, the triangulation {n} vertices",
+                    state.n_values()
+                ),
+            });
+        }
+        match &mut self.many {
+            Some(f) => f.set_level_sets(&state.values)?,
+            None => {
+                if state.values.len() != 1 {
+                    return Err(CuttingError::BadState {
+                        reason: format!("{} functions for the two-region flow", state.values.len()),
+                    });
+                }
+                self.flow.set_level_set(&state.values[0])?
+            }
+        }
+        Ok(())
     }
 
     /// Replaces the state by a new start (and resets the flow time and step count).
@@ -456,17 +651,34 @@ impl Session {
     /// [`CuttingError::WrongLength`], [`CuttingError::NonFinite`] and
     /// [`CuttingError::CornersDisagree`] (the vertex is named).
     pub fn restart(&mut self, start: &Start) -> Result<(), CuttingError> {
+        let (engine_mesh, engine_geometry) = match &self.tri {
+            Some(t) => (&t.export.mesh, &t.export.geometry),
+            None => (&self.flow_mesh, &self.flow_geometry),
+        };
         let level = start_state(
             &self.maps,
             &self.flow_mesh,
             &self.flow_geometry,
             &self.flow_positions,
+            (engine_mesh, engine_geometry),
             start,
             self.many.is_some(),
         )?;
+        let redistance = level.redistance && self.tri.is_some();
+        let level = level.lift(self.tri.as_ref(), &self.flow_mesh);
         match &mut self.many {
-            Some(f) => f.set_level_sets(&level.into_many())?,
-            None => self.flow.set_level_set(&level.into_two())?,
+            Some(f) => {
+                f.set_level_sets(&level.into_many())?;
+                if redistance {
+                    f.redistance()?;
+                }
+            }
+            None => {
+                self.flow.set_level_set(&level.into_two())?;
+                if redistance {
+                    self.flow.redistance()?;
+                }
+            }
         }
         Ok(())
     }
@@ -604,10 +816,17 @@ impl Session {
     /// values although no seam separates them.
     pub fn set_state<R: AsRef<[f64]>>(&mut self, regions: &[R]) -> Result<(), CuttingError> {
         if let Some(f) = &mut self.many {
-            f.set_level_sets(&self.maps.phis_from_regions(regions)?)?;
+            let mut phis = self.maps.phis_from_regions(regions)?;
+            if let Some(t) = &self.tri {
+                phis = phis.iter().map(|p| t.extend(&self.flow_mesh, p)).collect();
+            }
+            f.set_level_sets(&phis)?;
             return Ok(());
         }
-        let phi = self.maps.phi_from_regions(regions)?;
+        let mut phi = self.maps.phi_from_regions(regions)?;
+        if let Some(t) = &self.tri {
+            phi = t.extend(&self.flow_mesh, &phi);
+        }
         self.flow.set_level_set(&phi)?;
         Ok(())
     }
@@ -719,10 +938,11 @@ impl Session {
                     ),
                 });
             }
-            Ok(m.vertex_input
-                .iter()
-                .map(|&v| values[v as usize])
-                .collect::<Vec<f64>>())
+            let mapped: Vec<f64> = m.vertex_input.iter().map(|&v| values[v as usize]).collect();
+            Ok(match &self.tri {
+                Some(t) => t.extend(&self.flow_mesh, &mapped),
+                None => mapped,
+            })
         };
         let mut out = problem.clone();
         if let Some(eta) = &problem.penalty {
@@ -736,6 +956,14 @@ impl Session {
             )?));
         }
         if let CurvatureSource::PerFace(k) = &problem.curvature {
+            if self.tri.is_some() {
+                return Err(CuttingError::InvalidOption {
+                    name: "curvature",
+                    reason: "a curvature per triangle of the triangulation has no meaning on an \
+                             intrinsic triangulation, whose faces overlap several triangles"
+                        .to_string(),
+                });
+            }
             if k.len() != self.mesh.triangles.len() {
                 return Err(CuttingError::WrongLength {
                     what: "curvature override",
@@ -782,18 +1010,28 @@ impl Session {
                     }
                 })
                 .collect();
+            let mut mapped = mapped;
+            if let Some(t) = &self.tri {
+                // Vertices the triangulation added are in no class.
+                for _ in mapped.len()..t.export.mesh.n_vertices() {
+                    fresh += 1;
+                    mapped.push(fresh - 1);
+                }
+            }
             out.symmetry = Some(mapped);
         }
         Ok(out)
     }
 
     /// The cut of the current state, as the flow sees it.
-    fn current_cut(&self, min_crossing_offset: f64) -> Result<Cut, CuttingError> {
+    pub(super) fn current_cut(&self, min_crossing_offset: f64) -> Result<Cut, CuttingError> {
         Ok(match &self.many {
-            Some(f) => Cut::from_regions(&self.flow_mesh, &f.level_sets(), min_crossing_offset)?,
-            None => {
-                Cut::from_level_set(&self.flow_mesh, &self.flow.level_set(), min_crossing_offset)?
-            }
+            Some(f) => Cut::from_regions(self.engine_mesh(), &f.level_sets(), min_crossing_offset)?,
+            None => Cut::from_level_set(
+                self.engine_mesh(),
+                &self.flow.level_set(),
+                min_crossing_offset,
+            )?,
         })
     }
 
@@ -811,6 +1049,9 @@ impl Session {
     /// [`CuttingError::Flow`] for a `δ` outside `[0, ½)`.
     pub fn preview(&self, min_crossing_offset: f64) -> Result<Vec<PreviewPolyline>, CuttingError> {
         let cut = self.current_cut(min_crossing_offset)?;
+        if self.tri.is_some() {
+            return self.preview_from_description(&cut);
+        }
         if self.many.is_some() {
             return Ok(cut
                 .curves(&self.flow_mesh, &self.flow_positions)?
@@ -834,7 +1075,7 @@ impl Session {
     }
 
     /// The cut points as edge points and interior points.
-    fn classify_points(
+    pub(super) fn classify_points(
         &self,
         cut: &Cut,
         at: &[[f64; 3]],
@@ -896,7 +1137,9 @@ impl Session {
     /// segments of the cut do not form paths (cannot happen for a valid flow mesh).
     pub fn describe_cut(&self, min_crossing_offset: f64) -> Result<CutOnPolygons, CuttingError> {
         let cut = self.current_cut(min_crossing_offset)?;
-        if self.many.is_some() {
+        if self.tri.is_some() {
+            self.describe_intrinsic(&cut)
+        } else if self.many.is_some() {
             self.describe_network(&cut)
         } else {
             self.describe_two(&cut)
@@ -1109,29 +1352,59 @@ impl Session {
 }
 
 /// A start: one level-set function (two-region flow) or one per region.
-enum Level {
-    Phi(Vec<f64>),
-    Phis(Vec<Vec<f64>>),
+struct Level {
+    phis: Vec<Vec<f64>>,
+    /// Whether it is one function `φ` (two-region) rather than one per region.
+    single: bool,
+    /// Whether the functions are made signed distances after they were carried to an
+    /// intrinsic triangulation.
+    redistance: bool,
 }
 
 impl Level {
+    fn phi(phi: Vec<f64>, redistance: bool) -> Level {
+        Level {
+            phis: vec![phi],
+            single: true,
+            redistance,
+        }
+    }
+
+    fn phis(phis: Vec<Vec<f64>>, redistance: bool) -> Level {
+        Level {
+            phis,
+            single: false,
+            redistance,
+        }
+    }
+
+    /// The same functions on the vertices of the triangulation the flow runs on.
+    fn lift(mut self, tri: Option<&IntrinsicState>, mesh: &TriMesh) -> Level {
+        if let Some(t) = tri
+            && self.phis[0].len() != t.export.mesh.n_vertices()
+        {
+            self.phis = self.phis.iter().map(|p| t.extend(mesh, p)).collect();
+        }
+        self
+    }
+
     /// For the two-region flow: `φ`, or `½(φ₀ − φ₁)` of two functions.
     fn into_two(self) -> Vec<f64> {
-        match self {
-            Level::Phi(phi) => phi,
-            Level::Phis(p) => p[0].iter().zip(&p[1]).map(|(a, b)| 0.5 * (a - b)).collect(),
+        if self.single {
+            return self.phis.into_iter().next().expect("one function");
         }
+        let p = self.phis;
+        p[0].iter().zip(&p[1]).map(|(a, b)| 0.5 * (a - b)).collect()
     }
 
     /// For the N-region flow: the functions, or `[φ, −φ]`.
     fn into_many(self) -> Vec<Vec<f64>> {
-        match self {
-            Level::Phi(phi) => {
-                let negated = phi.iter().map(|x| -x).collect();
-                vec![phi, negated]
-            }
-            Level::Phis(p) => p,
+        if self.single {
+            let phi = self.phis.into_iter().next().expect("one function");
+            let negated = phi.iter().map(|x| -x).collect();
+            return vec![phi, negated];
         }
+        self.phis
     }
 }
 
@@ -1142,15 +1415,16 @@ fn start_state(
     mesh: &TriMesh,
     geometry: &Geometry,
     positions: &[[f64; 3]],
+    engine: (&TriMesh, &Geometry),
     start: &Start,
     many: bool,
 ) -> Result<Level, CuttingError> {
     match start {
         Start::Corners(regions) => {
             if many {
-                Ok(Level::Phis(maps.phis_from_regions(regions)?))
+                Ok(Level::phis(maps.phis_from_regions(regions)?, false))
             } else {
-                Ok(Level::Phi(maps.phi_from_regions(regions)?))
+                Ok(Level::phi(maps.phi_from_regions(regions)?, false))
             }
         }
         Start::PolygonLabels(labels) => {
@@ -1176,24 +1450,21 @@ fn start_state(
                 .map(|&t| labels[maps.triangle_polygon[t as usize] as usize])
                 .collect();
             if many {
-                Ok(Level::Phis(init::regions_from_face_labels(
-                    mesh,
-                    geometry,
-                    &face_labels,
-                    maps.n_regions,
-                )?))
+                Ok(Level::phis(
+                    init::regions_from_face_labels(mesh, geometry, &face_labels, maps.n_regions)?,
+                    true,
+                ))
             } else {
-                Ok(Level::Phi(init::from_face_labels(
-                    mesh,
-                    geometry,
-                    &face_labels,
-                )?))
+                Ok(Level::phi(
+                    init::from_face_labels(mesh, geometry, &face_labels)?,
+                    true,
+                ))
             }
         }
         Start::NormalClusters { max_iterations } => {
             let labels = init::normal_clusters(mesh, positions, maps.n_regions, *max_iterations)?;
             let phis = init::regions_from_vertex_labels(mesh, geometry, &labels, maps.n_regions)?;
-            Ok(Level::Phis(phis))
+            Ok(Level::phis(phis, true))
         }
         Start::GeodesicCircle { vertex, radius } => {
             if maps.n_regions != 2 {
@@ -1226,7 +1497,7 @@ fn start_state(
                     reason: format!("vertex {vertex} is not used by any polygon"),
                 });
             }
-            let distance = upwind_distance(mesh, geometry, &seeds, None)
+            let distance = upwind_distance(engine.0, engine.1, &seeds, None)
                 .map_err(|e| internal(format!("the distance from vertex {vertex} failed: {e}")))?;
             let mut phi: Vec<f64> = distance.values.iter().map(|d| d - radius).collect();
             // A vertex no front reached (another component) is outside.
@@ -1240,7 +1511,7 @@ fn start_state(
                     *x = far;
                 }
             }
-            Ok(Level::Phi(phi))
+            Ok(Level::phi(phi, false))
         }
     }
 }

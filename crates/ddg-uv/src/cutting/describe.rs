@@ -121,4 +121,124 @@ impl CutOnPolygons {
         let hi = self.paths.partition_point(|x| x.polygon <= p);
         &self.paths[lo..hi]
     }
+
+    /// The cut as lines in space, for display: the paths joined at the points where exactly
+    /// two of them meet (an edge point shared by two polygons, a bend), so a line runs from a
+    /// point where the cut ends or branches to the next one, or is closed. Each line carries
+    /// the two regions it separates. A closed line does not repeat its first position.
+    pub fn lines(&self) -> Vec<CutLine> {
+        let position = |end: PathEnd| match end {
+            PathEnd::EdgePoint(i) => self.edge_points[i as usize].position,
+            PathEnd::Junction(i) => self.junctions[i as usize].position,
+        };
+        let key = |end: PathEnd| match end {
+            PathEnd::EdgePoint(i) => (0u8, i),
+            PathEnd::Junction(i) => (1u8, i),
+        };
+        let chain = |p: &PolygonPath| -> Vec<[f64; 3]> {
+            let mut v = vec![position(p.start)];
+            v.extend(p.interior.iter().map(|q| q.position));
+            v.push(position(p.end));
+            v
+        };
+        // For every node, the path ends that meet there: (path, at the end).
+        let mut at: std::collections::BTreeMap<(u8, u32), Vec<(usize, bool)>> = Default::default();
+        for (i, p) in self.paths.iter().enumerate() {
+            at.entry(key(p.start)).or_default().push((i, false));
+            at.entry(key(p.end)).or_default().push((i, true));
+        }
+        let mut used = vec![false; self.paths.len()];
+        let mut out = Vec::new();
+        // Walk from path `first`, entering it at its start (`forward`) or its end.
+        let walk = |first: usize, forward: bool, used: &mut Vec<bool>| -> (Vec<[f64; 3]>, bool) {
+            let mut line: Vec<[f64; 3]> = Vec::new();
+            let (mut current, mut forward) = (first, forward);
+            let first_node = key(if forward {
+                self.paths[first].start
+            } else {
+                self.paths[first].end
+            });
+            let mut closed = false;
+            loop {
+                used[current] = true;
+                let mut c = chain(&self.paths[current]);
+                if !forward {
+                    c.reverse();
+                }
+                if line.is_empty() {
+                    line.extend(c);
+                } else {
+                    line.extend(c.into_iter().skip(1));
+                }
+                let exit = key(if forward {
+                    self.paths[current].end
+                } else {
+                    self.paths[current].start
+                });
+                let list = &at[&exit];
+                if list.len() != 2 {
+                    break;
+                }
+                let Some(&(next, at_end)) = list.iter().find(|&&(p, _)| p != current) else {
+                    break;
+                };
+                if next == first && exit == first_node {
+                    closed = true;
+                    break;
+                }
+                if used[next] {
+                    break;
+                }
+                current = next;
+                forward = !at_end;
+            }
+            if closed {
+                line.pop();
+            }
+            (line, closed)
+        };
+        for i in 0..self.paths.len() {
+            if used[i] {
+                continue;
+            }
+            // Start at a path end that is not a pass-through point.
+            let start_forward = if at[&key(self.paths[i].start)].len() != 2 {
+                Some(true)
+            } else if at[&key(self.paths[i].end)].len() != 2 {
+                Some(false)
+            } else {
+                None
+            };
+            if let Some(f) = start_forward {
+                let (positions, closed) = walk(i, f, &mut used);
+                out.push(CutLine {
+                    positions,
+                    closed,
+                    regions: self.paths[i].regions,
+                });
+            }
+        }
+        for i in 0..self.paths.len() {
+            if !used[i] {
+                let (positions, closed) = walk(i, true, &mut used);
+                out.push(CutLine {
+                    positions,
+                    closed,
+                    regions: self.paths[i].regions,
+                });
+            }
+        }
+        out
+    }
+}
+
+/// A line of the cut for display, from [`CutOnPolygons::lines`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutLine {
+    /// The positions, in order.
+    pub positions: Vec<[f64; 3]>,
+    /// Whether the last position is joined to the first.
+    pub closed: bool,
+    /// The two regions the line separates, `[lower id, higher id]`.
+    pub regions: [u32; 2],
 }
