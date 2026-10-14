@@ -28,6 +28,7 @@ use super::error::CuttingError;
 
 /// The triangulation the cut flow runs on.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Triangulation {
     /// The triangle mesh of the caller's triangulation, cut open at the seams. The behaviour of
     /// every earlier version, bit for bit ([`Session::new`](super::Session::new) and

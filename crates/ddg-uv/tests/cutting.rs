@@ -2092,7 +2092,7 @@ fn the_intrinsic_session_is_the_direct_run() {
             .unwrap();
     let description = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
     assert!(!description.is_empty());
-    assert!(cut.points.len() > 0);
+    assert!(!cut.points.is_empty());
     // Every point of the description lies on the sphere to the accuracy of the flat faces.
     for p in &description.edge_points {
         let r = (p.position.iter().map(|x| x * x).sum::<f64>()).sqrt();
@@ -2382,6 +2382,7 @@ fn needles_and_caps(n: usize) -> PolygonMesh {
 
 /// One line of the comparison.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Row {
     label: String,
     n_vertices: usize,

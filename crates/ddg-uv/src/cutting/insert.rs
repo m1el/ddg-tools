@@ -1207,16 +1207,16 @@ impl PolygonContext<'_> {
             let mut region: Option<u32> = None;
             for &ci in members {
                 let cell = &cells[ci];
-                if let Some(r) = cell.region {
-                    if *region.get_or_insert(r) != r {
-                        return Err(invalid(
-                            Some(p),
-                            format!(
-                                "a part of the polygon lies in the regions {r} and {}",
-                                region.unwrap()
-                            ),
-                        ));
-                    }
+                if let Some(r) = cell.region
+                    && *region.get_or_insert(r) != r
+                {
+                    return Err(invalid(
+                        Some(p),
+                        format!(
+                            "a part of the polygon lies in the regions {r} and {}",
+                            region.unwrap()
+                        ),
+                    ));
                 }
                 for i in 0..cell.ids.len() {
                     let (u, v) = (cell.ids[i], cell.ids[(i + 1) % cell.ids.len()]);
