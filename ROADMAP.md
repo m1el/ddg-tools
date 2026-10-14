@@ -25,6 +25,19 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
    the refined intrinsic triangulation of the bad meshes, and compare redistancing error, the
    error of the speed, the circle law and whether runs settle with the well-shaped baseline.
    Nothing beyond the paper (non-obtuse triangulations) unless those numbers fail.
+   Measured (2026-10-14, `crates/ddg-intrinsic/examples/flow_on_bad_meshes.rs`, logs in
+   `runs_tmp/intrinsic-study/`): flipping to Delaunay alone brings the systematically obtuse
+   meshes back to regular-grid quality in the evaluation, the redistancing and the exact laws
+   (circle law on the 165° sheared grid: +2.5e-2 on the input, +1.7e-3 flipped); refinement adds
+   30 % to 140 % vertices, helps only where the input has few vertices for thin geometry (cells
+   1:16, needles and caps) and buys nothing clear at 30° over 25°; flips and export cost 0.01 to
+   0.06 s on the real meshes; the cut came back onto the input mesh in all 27 real-mesh runs. So
+   the flow runs on the Delaunay flips by default and refinement is an option. Open from that
+   study: long energy runs on flipped sheared grids still do not settle; a refined
+   latitude-longitude sphere (41x246) got worse in the evaluation and the ripple rates; the
+   energy of the same start differs between the input mesh and the flipped one on bad meshes
+   (3.5 times on the 165° grid, 3.3 times on camelshotnoise), cause not established; the
+   balanced-latitude bias on latitude-longitude spheres is unchanged by either treatment.
 
 ## Decided (2026-10-14)
 
