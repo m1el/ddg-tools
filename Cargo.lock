@@ -413,6 +413,7 @@ dependencies = [
 name = "ddg-intrinsic"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "ddg-core",
  "ddg-variational-cuts",
 ]

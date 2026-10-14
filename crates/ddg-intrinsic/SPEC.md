@@ -677,6 +677,25 @@ written from the paper and the cited papers.
   be flipped away); `Circumcenters` is the paper's rule everywhere. On a closed surface the two
   are the same.
 
+* **N24** *Snapping a moved vertex onto an input edge* (Appendix A, as N10, with another
+  threshold). A moved vertex whose traced place is within `MOVE_SNAP = 1e-10` of the longest edge
+  of its input face from an edge of that face is stored as a point of that input edge
+  (`VertexMove::snapped`, counted per iteration in `OdtIteration::n_snapped`); its lengths are not
+  changed, so the place and the lengths disagree by at most that distance, far inside the
+  tolerance of the edge traces (N8, `1e-6`). Found by the study (`examples/odt_study.rs`, blub):
+  with the threshold of an insertion (`1e-12`) two of 53 649 edge traces of the converged iODT
+  failed. A vertex made by splitting an edge along an input edge, whose star is symmetric about
+  that edge, is moved again and again along it and stays within rounding of it (1631 moves on
+  blub were snapped even at `1e-12`). After 50 iterations of moves and flips the stored data of
+  an edge from the input vertex at the end of that input edge to such a vertex and the vertex's
+  traced place had drifted apart by about `1e-11` (measured on the two failed edges: direction
+  at the input vertex `1.0e-11` and `8.8e-12` rad, length `8.5e-12` and `4.0e-12` relative), and
+  the trace of the edge ended `1e-12` beyond the input edge, in the neighbouring face, where N8
+  does not look.
+  With `1e-10` no trace failed on any mesh tested (largest relative mismatch `1.5e-9` on blub).
+  Not excluded: a drift beyond `1e-10` after still more operations; it would be a failed trace
+  (an error), not a wrong result.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,

@@ -14,3 +14,9 @@ ddg-core = { path = "../ddg-core" }
 # The consumer of the simplicial export: tests/export.rs runs the cut flow on an export and
 # carries the cut back.
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
+# Benches of the retriangulations (benches/retriangulation.rs); the same version as ddg-uv.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "retriangulation"
+harness = false

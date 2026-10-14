@@ -135,13 +135,19 @@ impl IntrinsicTriangulation {
                 trace.end, trace.length
             )));
         }
-        self.place_at_end(&trace)
+        self.place_at_end(&trace, LOCATION_SNAP)
     }
 
     /// The place on the input mesh at the end of a completed trace over the input mesh, with
-    /// the direction back along it; a point within [`LOCATION_SNAP`] of an edge of its input
+    /// the direction back along it; a point within `snap` times the longest edge of its input
+    /// face from an edge of that face ([`LOCATION_SNAP`] for an insertion,
+    /// [`MOVE_SNAP`](crate::reposition::MOVE_SNAP) for a move)
     /// face is moved onto that edge (SPEC N10). Refused if the end is an input vertex.
-    pub(crate) fn place_at_end(&self, trace: &Trace) -> Result<Placed, InsertRefusal> {
+    pub(crate) fn place_at_end(
+        &self,
+        trace: &Trace,
+        snap: f64,
+    ) -> Result<Placed, InsertRefusal> {
         let not_located = |detail: String| InsertRefusal::NotLocated { detail };
         match trace.end {
             SurfacePoint::Vertex(u) => Err(not_located(format!(
@@ -168,7 +174,7 @@ impl IntrinsicTriangulation {
                     .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
                     .unwrap_or(0);
                 let longest = l[0].max(l[1]).max(l[2]);
-                if distance[k] > LOCATION_SNAP * longest {
+                if distance[k] > snap * longest {
                     return Ok(Placed {
                         location: trace.end,
                         back: trace.back_direction,

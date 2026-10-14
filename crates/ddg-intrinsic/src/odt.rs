@@ -133,6 +133,9 @@ pub struct OdtIteration {
     pub n_halved: usize,
     /// Vertices that could not be moved even with the smallest step.
     pub n_not_moved: usize,
+    /// Moved vertices whose new place was put on an input edge
+    /// ([`MOVE_SNAP`](crate::reposition::MOVE_SNAP)).
+    pub n_snapped: usize,
     /// Vertices skipped because an edge joins them to themselves.
     pub n_skipped: usize,
     /// Flips (after the splits and after the moves).
@@ -235,6 +238,7 @@ impl IntrinsicTriangulation {
                 n_moved: 0,
                 n_halved: 0,
                 n_not_moved: 0,
+                n_snapped: 0,
                 n_skipped: 0,
                 n_flips: 0,
                 max_motion: 0.0,
@@ -300,6 +304,7 @@ impl IntrinsicTriangulation {
                 for halving in 0..=options.max_halvings {
                     match self.move_vertex(v, [alpha * goal[0], alpha * goal[1]]) {
                         Ok(m) => {
+                            it.n_snapped += usize::from(m.snapped.is_some());
                             moved = Some((m.distance, halving > 0));
                             break;
                         }

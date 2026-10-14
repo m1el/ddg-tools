@@ -2,13 +2,13 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 use std::path::PathBuf;
 
 use ddg_core::generators::{self, GeneratedMesh, SplitMix64};
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
-use ddg_intrinsic::{Crossing, IntrinsicTriangulation, SurfacePoint};
+use ddg_intrinsic::{Crossing, EdgeTraceOptions, IntrinsicTriangulation, SurfacePoint};
 
 /// A mesh with its positions.
 pub struct Shape {
@@ -644,4 +644,136 @@ pub fn edge_list_difference(
         }
     }
     unmatched + by_pair.values().map(Vec::len).sum::<usize>()
+}
+
+// ----- invariants after moves (tests/reposition.rs, tests/odt.rs) -----
+
+/// SPEC §5 items 1 to 3: the triangulation describes the input surface, every edge traces to
+/// the place of its far vertex and its path has its length in space, and on a flat surface
+/// the length is the distance of the places. Returns the largest relative mismatch of a trace.
+pub fn assert_consistent(shape: &Shape, tri: &IntrinsicTriangulation, what: &str) -> f64 {
+    let report = tri
+        .check()
+        .unwrap_or_else(|e| panic!("{} ({what}): {e}", shape.name));
+    let context = format!("{} ({what}): {report:?}", shape.name);
+    assert!(report.min_triangle_slack > 0.0, "{context}");
+    assert!(report.relative_area_error.abs() < 1e-11, "{context}");
+    assert!(report.max_angle_sum_error < 1e-9, "{context}");
+    assert!(report.max_signpost_error < 1e-9, "{context}");
+    assert!(report.gauss_bonnet_residual.abs() < 1e-9, "{context}");
+    // The angle sums at the input vertices are those of the input, computed from the lengths.
+    let sums = tri.corner_angle_sums();
+    for (v, sum) in sums.iter().enumerate().take(shape.mesh.n_vertices()) {
+        let input = tri.input().vertex_angle_sum(v);
+        assert!((sum - input).abs() < 1e-9, "{context}: vertex {v}: {sum} != {input}");
+        assert_eq!(tri.vertex_location(v), SurfacePoint::Vertex(v as u32), "{context}");
+    }
+    for v in shape.mesh.n_vertices()..tri.n_vertices() {
+        let flat = if tri.is_boundary_vertex(v) { PI } else { TAU };
+        assert_eq!(tri.vertex_angle_sum(v), flat, "{context}: vertex {v}");
+        match tri.vertex_location(v) {
+            SurfacePoint::Vertex(u) => panic!("{context}: vertex {v} is at input vertex {u}"),
+            SurfacePoint::Edge { edge, t } => {
+                assert!(t > 0.0 && t < 1.0, "{context}");
+                assert_eq!(
+                    tri.is_boundary_vertex(v),
+                    shape.mesh.is_boundary_edge(edge as usize),
+                    "{context}: vertex {v}"
+                );
+            }
+            SurfacePoint::Face { bary, .. } => {
+                assert!(bary.iter().all(|&b| b >= 0.0), "{context}: {bary:?}");
+                assert!(!tri.is_boundary_vertex(v), "{context}");
+            }
+        }
+    }
+    let traces = tri
+        .trace_edges(&EdgeTraceOptions::default())
+        .unwrap_or_else(|e| panic!("{} ({what}): {e}", shape.name));
+    assert!(
+        traces.report.max_relative_mismatch < 1e-8,
+        "{context}: {:?}",
+        traces.report
+    );
+    for e in 0..tri.n_edges() {
+        let [a, b] = tri.edge_vertices(e);
+        let length = tri.edge_length(e);
+        let in_space = path_length(
+            shape,
+            tri.vertex_location(a),
+            traces.crossings(e),
+            tri.vertex_location(b),
+        );
+        assert!(
+            (in_space - length).abs() <= 1e-8 * length,
+            "{context}: edge {e} = ({a}, {b}) has length {length}, its path {in_space}"
+        );
+        if shape.flat {
+            let straight = dist(
+                position(shape, tri.vertex_location(a)),
+                position(shape, tri.vertex_location(b)),
+            );
+            assert!((length - straight).abs() < 1e-10, "{context}: edge {e}");
+        }
+    }
+    // The overlay is a subdivision of the input with its area.
+    let overlay = tri
+        .overlay(&traces)
+        .unwrap_or_else(|e| panic!("{context}: {e}"));
+    let mut area = 0.0;
+    for f in 0..overlay.n_faces() {
+        let corners: Vec<[f64; 3]> = overlay
+            .face(f)
+            .iter()
+            .map(|&k| position(shape, overlay.vertices[k as usize].on_input))
+            .collect();
+        for k in 1..corners.len() - 1 {
+            let (u, w) = (
+                [0, 1, 2].map(|i| corners[k][i] - corners[0][i]),
+                [0, 1, 2].map(|i| corners[k + 1][i] - corners[0][i]),
+            );
+            let c = [
+                u[1] * w[2] - u[2] * w[1],
+                u[2] * w[0] - u[0] * w[2],
+                u[0] * w[1] - u[1] * w[0],
+            ];
+            area += 0.5 * (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        }
+    }
+    let total = shape.geometry.total_area();
+    assert!((area - total).abs() < 1e-9 * total, "{context}: overlay area {area}");
+    traces.report.max_relative_mismatch
+}
+
+/// Point queries are inverse to each other after moves (SPEC N11).
+pub fn assert_point_queries(shape: &Shape, tri: &IntrinsicTriangulation, rng: &mut SplitMix64) {
+    let scale = shape.geometry.edge_lengths().iter().sum::<f64>()
+        / shape.geometry.edge_lengths().len() as f64;
+    for _ in 0..40 {
+        let f = (rng.next_u64() % tri.n_faces() as u64) as usize;
+        let point = SurfacePoint::Face {
+            face: f as u32,
+            bary: inner_bary(rng),
+        };
+        let on_input = tri
+            .point_on_input(point)
+            .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
+        let back = tri
+            .point_on_triangulation(on_input)
+            .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
+        let again = tri.point_on_input(back).unwrap();
+        let d = dist(position(shape, on_input), position(shape, again));
+        assert!(d < 1e-9 * scale, "{}: {point} -> {on_input} -> {back}: {d}", shape.name);
+    }
+}
+
+
+/// Random barycentric coordinates, each at least 0.05.
+pub fn inner_bary(rng: &mut SplitMix64) -> [f64; 3] {
+    let (mut a, mut b) = (rng.next_f64(), rng.next_f64());
+    if a + b > 1.0 {
+        (a, b) = (1.0 - a, 1.0 - b);
+    }
+    let shrink = |x: f64| 0.05 + 0.85 * x;
+    [shrink(a), shrink(b), shrink(1.0 - a - b)]
 }

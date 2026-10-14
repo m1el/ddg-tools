@@ -26,9 +26,8 @@
 //! contains no other vertex). The paper's vertex update traces from a neighbour instead; in
 //! exact arithmetic it is the same point. The direction back along the trace is the
 //! direction of `−v` in the frame of the new place, which fixes the first signpost; the others
-//! follow from the new corner angles (Sec. 3.2.3). A place within
-//! [`LOCATION_SNAP`](crate::insert::LOCATION_SNAP) of an input edge is put on it, as for an
-//! insertion.
+//! follow from the new corner angles (Sec. 3.2.3). A place within [`MOVE_SNAP`] of an input
+//! edge is put on it, as for an insertion (SPEC N24).
 //!
 //! A vertex inserted on the boundary moves along the boundary only: its place is
 //! interpolated on the input edge it lies on, as for an edge split.
@@ -43,6 +42,17 @@ use crate::insert::wrap;
 use crate::point::SurfacePoint;
 use crate::trace::{TraceOptions, TraceStop, run};
 use crate::triangulation::IntrinsicTriangulation;
+
+/// A moved vertex whose traced place is within this fraction of the longest edge of its input
+/// face from an edge of that face is put on that edge, and [`VertexMove::snapped`] says so
+/// (SPEC N24). It is larger than the [`LOCATION_SNAP`](crate::insert::LOCATION_SNAP) of an
+/// insertion: a vertex that the optimal Delaunay iteration moves again and again stays within
+/// rounding of an input edge when its star is symmetric about that edge, and after many moves
+/// and flips the stored direction and length of an edge to it and its traced place disagree by
+/// about `1e-11`; at `1e-12` two edge traces on `blub` ended on the wrong side of such an input
+/// edge (in the neighbouring face, `1e-12` from the edge), at `1e-10` none did on any mesh
+/// tested.
+pub const MOVE_SNAP: f64 = 1e-10;
 
 /// What [`IntrinsicTriangulation::move_vertex`] did.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,8 +69,7 @@ pub struct VertexMove {
     /// the move: moving by `distance` in this direction undoes the move.
     pub back_direction: f64,
     /// The barycentric coordinate that the traced place had opposite the input edge it was
-    /// moved onto ([`LOCATION_SNAP`](crate::insert::LOCATION_SNAP)); `None` if it was not
-    /// moved.
+    /// moved onto ([`MOVE_SNAP`]); `None` if it was not moved.
     pub snapped: Option<f64>,
     /// Whether the displacement was shorter than the smallest height of a triangle of the star
     /// over its side opposite the vertex: the paper's conservative test for the local update.
@@ -278,7 +287,7 @@ impl IntrinsicTriangulation {
                 return Err(refused(MoveRefusal::OnInputVertex { vertex: u }));
             }
             let placed = self
-                .place_at_end(&trace)
+                .place_at_end(&trace, MOVE_SNAP)
                 .map_err(|e| not_located(e.to_string()))?;
             (placed.location, placed.back, placed.snapped)
         };
