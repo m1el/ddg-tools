@@ -60,6 +60,20 @@ pub struct IntrinsicOptions {
     /// This is the rule that keeps the parts of a polygon from degenerating when the cut passes
     /// arbitrarily close to a vertex or an edge.
     pub min_offset: f64,
+    /// Simplification of the cut that comes back, before it is inserted: a bend inside a
+    /// triangle of the caller's triangulation (a point where two pieces meet that is not at a
+    /// junction of three or more) is removed, and its two pieces replaced by one, when the
+    /// bend is no further from that piece than this fraction of the longest edge of the
+    /// triangle, and the new piece crosses no other piece and no other point of the triangle.
+    /// The cut never changes which side of a vertex of the mesh it passes (the triangle swept
+    /// by the change has no vertex of the mesh inside), is never merged across a junction, and
+    /// moves by at most this fraction of an edge. The default is `0.1`: measured on the cases of
+    /// the README, the displacement it actually reaches is below 0.1 of an edge (at most 0.07 in the
+    /// atlas runs, 0.01 and less for the single circles), and it removes the flipped triangles
+    /// of the unwrap that bends close to a vertex of the mesh caused (5 on the refined sphere,
+    /// 1 to 16 on the atlas of spot with flips or refinement, 1 on camelbad). `0` switches it off. The number of bends
+    /// removed and the largest displacement are in [`DescribeReport`](super::DescribeReport).
+    pub merge_tolerance: f64,
 }
 
 impl IntrinsicOptions {
@@ -75,6 +89,7 @@ impl IntrinsicOptions {
             },
             trace: EdgeTraceOptions::default(),
             min_offset: 1e-6,
+            merge_tolerance: 0.1,
         }
     }
 
@@ -96,6 +111,12 @@ impl IntrinsicOptions {
             return Err(CuttingError::InvalidOption {
                 name: "min_offset",
                 reason: format!("must be in [0, 0.5), got {}", self.min_offset),
+            });
+        }
+        if !(self.merge_tolerance.is_finite() && (0.0..0.5).contains(&self.merge_tolerance)) {
+            return Err(CuttingError::InvalidOption {
+                name: "merge_tolerance",
+                reason: format!("must be in [0, 0.5), got {}", self.merge_tolerance),
             });
         }
         Ok(())
@@ -295,7 +316,7 @@ pub struct SessionState {
 }
 
 const MAGIC: &[u8; 4] = b"DDGS";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 impl SessionState {
     /// The fingerprint of the triangulation the state was made for.
@@ -385,7 +406,7 @@ impl SessionState {
             ));
         }
         let version = r.u8()?;
-        if version != VERSION {
+        if version != VERSION && version != 1 {
             return Err(bad(&format!(
                 "version {version} of the format is not supported"
             )));
@@ -410,7 +431,7 @@ impl SessionState {
         let _ = total;
         let triangulation = match r.u8()? {
             0 => Triangulation::Caller,
-            1 => Triangulation::Intrinsic(r.intrinsic()?),
+            1 => Triangulation::Intrinsic(r.intrinsic(version)?),
             t => return Err(bad(&format!("unknown triangulation tag {t}"))),
         };
         if r.at != bytes.len() {
@@ -518,6 +539,7 @@ impl Writer {
             None => self.u8(0),
         }
         self.f64(o.min_offset);
+        self.f64(o.merge_tolerance);
     }
 }
 
@@ -607,7 +629,7 @@ impl Reader<'_> {
             None
         })
     }
-    fn intrinsic(&mut self) -> Result<IntrinsicOptions, CuttingError> {
+    fn intrinsic(&mut self, version: u8) -> Result<IntrinsicOptions, CuttingError> {
         let delaunay = self.delaunay()?;
         let refine = self.opt_refine()?;
         let export_delaunay = if self.u8()? == 1 {
@@ -625,6 +647,7 @@ impl Reader<'_> {
             None
         };
         let min_offset = self.f64()?;
+        let merge_tolerance = if version >= 2 { self.f64()? } else { 0.0 };
         Ok(IntrinsicOptions {
             delaunay,
             refine,
@@ -639,6 +662,7 @@ impl Reader<'_> {
                 max_crossings,
             },
             min_offset,
+            merge_tolerance,
         })
     }
 }

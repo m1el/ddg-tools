@@ -36,29 +36,15 @@ use super::describe::{
     CutLine, CutOnPolygons, EdgePoint, InteriorPoint, JunctionPoint, PathEnd, PolygonPath,
 };
 use super::error::{CuttingError, internal};
+use super::merge::{DescribeReport, Piece, Place};
 use super::session::{PreviewPolyline, Session};
-
-/// A point of the seam-cut mesh.
-#[derive(Debug, Clone, Copy)]
-enum Place {
-    Edge { edge: u32, t: f64 },
-    Face { face: u32, bary: [f64; 3] },
-}
-
-/// A straight piece of the cut inside a face of the seam-cut mesh.
-#[derive(Debug, Clone, Copy)]
-struct Piece {
-    a: u32,
-    b: u32,
-    face: u32,
-    /// The regions on the left and on the right of `a -> b`.
-    left: u32,
-    right: u32,
-}
 
 impl Session {
     /// The cut on the caller's polygons for a session on an intrinsic triangulation.
-    pub(super) fn describe_intrinsic(&self, cut: &Cut) -> Result<CutOnPolygons, CuttingError> {
+    pub(super) fn describe_intrinsic(
+        &self,
+        cut: &Cut,
+    ) -> Result<(CutOnPolygons, DescribeReport), CuttingError> {
         let t = self.tri.as_ref().expect("an intrinsic session");
         let m = &self.maps;
         let eps = t.options.min_offset;
@@ -155,9 +141,23 @@ impl Session {
                     face: path.faces[j],
                     left,
                     right,
+                    slack: 0.0,
                 });
                 previous = next;
             }
+        }
+
+        let mut report = DescribeReport {
+            n_moved_points: n_clamped - cut.n_clamped,
+            ..DescribeReport::default()
+        };
+        if t.options.merge_tolerance > 0.0 {
+            self.merge_bends(&places, &mut pieces, t.options.merge_tolerance, &mut report);
+        }
+        let mut used_node = vec![false; places.len()];
+        for p in &pieces {
+            used_node[p.a as usize] = true;
+            used_node[p.b as usize] = true;
         }
 
         // Points of the description.
@@ -170,6 +170,9 @@ impl Session {
         let mut junction_of = vec![NONE; places.len()];
         let mut interior_of: Vec<Option<InteriorPoint>> = vec![None; places.len()];
         for (g, place) in places.iter().enumerate() {
+            if !used_node[g] {
+                continue;
+            }
             match *place {
                 Place::Edge { edge, t } => {
                     let e = edge as usize;
@@ -331,7 +334,7 @@ impl Session {
             };
             (p.polygon, key(p.start), key(p.end))
         });
-        Ok(description)
+        Ok((description, report))
     }
 
     /// The cut as lines for display, from the description ([`CutOnPolygons::lines`]).
@@ -339,7 +342,7 @@ impl Session {
         &self,
         cut: &Cut,
     ) -> Result<Vec<PreviewPolyline>, CuttingError> {
-        let description = self.describe_intrinsic(cut)?;
+        let (description, _) = self.describe_intrinsic(cut)?;
         Ok(description
             .lines()
             .into_iter()

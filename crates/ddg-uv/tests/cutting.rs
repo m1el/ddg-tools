@@ -2399,6 +2399,8 @@ struct Row {
     seam_mismatch: f64,
     angles: Option<(f64, f64, usize)>,
     cut_length: f64,
+    merged: usize,
+    displacement: f64,
 }
 
 /// Starts as a circle (or, with `clusters`, as normal clusters), runs the flow on the given
@@ -2466,7 +2468,9 @@ fn run_chain(
         )
         .unwrap_or_else(|e| panic!("{name} {tri:?}: {e}"));
     let rep = &result.map.report;
-    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let (cut, described) = session
+        .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
+        .unwrap();
     let cut_length: f64 = cut
         .lines()
         .iter()
@@ -2502,6 +2506,8 @@ fn run_chain(
             .intrinsic_report()
             .map(|r| (r.min_angle, r.max_angle, r.n_below_bound)),
         cut_length,
+        merged: described.n_merged_nodes,
+        displacement: described.max_displacement_relative,
     }
 }
 
@@ -2512,7 +2518,6 @@ fn compare(
     clusters: Option<usize>,
     alpha: Option<f64>,
 ) {
-    let n_tri = mesh.triangles.len();
     for (label, tri) in [
         ("caller", Triangulation::Caller),
         ("flips", flips_only()),
@@ -2527,16 +2532,9 @@ fn compare(
             alpha,
         );
         println!("ROW {row:?}");
-        // Whatever the triangulation, the chain is consistent: the number of charts is the
-        // number of pieces the seams leave, no more than a sliver per thousand triangles
-        // flips on the intrinsic ones.
-        if label != "caller" {
-            assert!(
-                row.flipped <= 1 + n_tri / 100,
-                "{name}/{label}: {} flipped",
-                row.flipped
-            );
-        }
+        // The unwrap of the inserted mesh has no flipped triangle on any triangulation of
+        // these cases (the caller's, flips, refined; the atlas included).
+        assert_eq!(row.flipped, 0, "{name}/{label}");
         assert!(row.energy.1.is_finite());
     }
 }
@@ -2673,4 +2671,90 @@ fn the_same_cut_on_three_triangulations() {
         lengths.push(length);
     }
     assert!(lengths.iter().all(|l| l.is_finite() && *l > 0.0));
+}
+
+/// The flipped triangles of the unwrap on an intrinsic triangulation came from bends of the cut
+/// close to a vertex of the mesh (the flow's cut bends where it crosses an edge of the
+/// triangulation inside a triangle of the caller's). Without the simplification the refined
+/// sphere has exactly 5 flipped triangles (all around one vertex, each with a bend and a point
+/// of an edge as the other two corners: the study in `examples/flip_study.rs`); with it, none.
+#[test]
+fn merging_bends_removes_the_flips_and_reports_the_displacement() {
+    let mesh = uv_sphere(32, 16, 1.0).unwrap();
+    let off = Triangulation::Intrinsic(IntrinsicOptions {
+        merge_tolerance: 0.0,
+        ..IntrinsicOptions::refined()
+    });
+    assert_eq!(
+        run_chain("sphere/off", &mesh, &off, 40, None, None).flipped,
+        5
+    );
+    let on = refined();
+    assert_eq!(
+        run_chain("sphere/on", &mesh, &on, 40, None, None).flipped,
+        0
+    );
+    // The report: how many bends, how far the cut moved at most.
+    let tolerance = match on {
+        Triangulation::Intrinsic(o) => o.merge_tolerance,
+        Triangulation::Caller => unreachable!(),
+    };
+    let row = run_chain("sphere/report", &mesh, &on, 40, None, None);
+    assert!(row.merged > 0);
+    assert!(
+        row.displacement > 0.0 && row.displacement <= tolerance,
+        "{}",
+        row.displacement
+    );
+    let start = Start::GeodesicCircle {
+        vertex: 5,
+        radius: 0.9,
+    };
+    let mut session = two_session(&mesh, &[], &start, &on);
+    let (problem, options) = flow_setup(&mut session, 0.25);
+    session.run(&problem, &options, &stop(10)).unwrap();
+    let (cut, _) = session
+        .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
+        .unwrap();
+    let ins = insert(&mesh, &cut).unwrap();
+    check_insertion(&mesh, &[], &cut, &ins);
+    check_part_regions(&ins, &[]);
+    // The caller's triangulation reports nothing.
+    let plain = Session::new(&mesh.input(), 2, &start).unwrap();
+    assert_eq!(
+        plain
+            .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
+            .unwrap()
+            .1,
+        ddg_uv::cutting::DescribeReport::default()
+    );
+}
+
+/// The options survive the bytes of a state, and a tolerance out of range is refused.
+#[test]
+fn merge_tolerance_is_part_of_the_stored_options() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let start = Start::GeodesicCircle {
+        vertex: 5,
+        radius: 0.9,
+    };
+    let tri = Triangulation::Intrinsic(IntrinsicOptions {
+        merge_tolerance: 0.03,
+        ..IntrinsicOptions::flips_only()
+    });
+    let session = two_session(&mesh, &[], &start, &tri);
+    let state = session.snapshot();
+    let back = SessionState::from_bytes(&state.to_bytes()).unwrap();
+    assert_eq!(back.triangulation(), tri);
+    let bad = Triangulation::Intrinsic(IntrinsicOptions {
+        merge_tolerance: 0.7,
+        ..IntrinsicOptions::flips_only()
+    });
+    assert!(matches!(
+        Session::with_triangulation(&mesh.input(), 2, &start, FlowKind::Auto, &bad),
+        Err(CuttingError::InvalidOption {
+            name: "merge_tolerance",
+            ..
+        })
+    ));
 }
