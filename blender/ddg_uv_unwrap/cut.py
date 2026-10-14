@@ -1019,40 +1019,43 @@ def insert_cut(mesh, cut, *, mark_seams=True, reference=None):
         raise CutFailed(
             "Mesh '{}' has shape keys; applying a cut would change its vertices. Apply or remove "
             "the shape keys first.".format(mesh.name))
+    n_old = len(mesh.polygons)
+    totals = array('I', bytes(4 * n_old))
+    mesh.polygons.foreach_get("loop_total", totals)
     bm = bmesh.new()
     try:
         bm.from_mesh(mesh)
         old_entries = core.read_triangulation(mesh)
-        stats, entries = _insert_cut(bm, cut, mark_seams, reference)
-        if old_entries is not None:
-            # Polygons the cut did not touch keep the triangulation they had.
+        stats, entries = _insert_cut(bm, cut, mark_seams, reference, totals)
+        if old_entries is not None and old_entries[2]:
+            # Polygons the cut did not touch keep the triangulation they had (the others are
+            # not faces any more: their vertex sets are gone).
+            keys = {tuple(sorted(v.index for v in f.verts)) for f in bm.faces}
             for key, triangles in old_entries[2].items():
-                entries.setdefault(key, triangles)
+                if key in keys:
+                    entries.setdefault(key, triangles)
         bm.to_mesh(mesh)
         if reference is not None or old_entries is not None:
-            keys = {tuple(sorted(v.index for v in f.verts)) for f in bm.faces}
-            core.write_triangulation(mesh, stats["n_vertices"], stats["n_polygons"],
-                                     {k: t for k, t in entries.items() if k in keys})
-            stats["n_triangulated"] = sum(1 for k in entries if k in keys)
+            core.write_triangulation(mesh, stats["n_vertices"], stats["n_polygons"], entries)
+            stats["n_triangulated"] = len(entries)
     finally:
         bm.free()
     mesh.update()
     return stats
 
 
-def _insert_cut(bm, cut, mark_seams, reference=None):
+def _insert_cut(bm, cut, mark_seams, reference=None, totals=None):
     bm.verts.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     n_points = cut.n_edge_points
     n_paths = cut.n_paths
-    face_starts = []
-    old_sizes = []
+    old_sizes = list(totals)
+    face_starts = [0] * len(old_sizes)
     corner = 0
-    for face in bm.faces:
-        face_starts.append(corner)
-        old_sizes.append(len(face.loops))
-        corner += len(face.loops)
+    for i, size in enumerate(old_sizes):
+        face_starts[i] = corner
+        corner += size
 
     loop_layers = _loop_layers(bm)
     vertex_layers = _vertex_layers(bm)
@@ -1317,26 +1320,32 @@ def _reference_triangulation(bm, reference, point_vertex, junction_vertex, inter
     numbering of ``bm``."""
     bm.verts.index_update()
     source = reference.vertex_source
-    vertex_of = []
-    append = vertex_of.append
-    for v in range(len(source) // 3):
-        kind, a, b = source[3 * v:3 * v + 3]
-        if kind == 0:
-            append(a)
-        elif kind == 1:
-            append(point_vertex[a].index)
-        elif kind == 2:
-            append(interior_vertex[(a, b)].index)
-        else:
-            append(junction_vertex[a].index)
+    cache = {}
+
+    def vertex_of(v):
+        """The index in ``bm`` of vertex ``v`` of the Rust insertion (decoded when needed)."""
+        found = cache.get(v)
+        if found is None:
+            kind, a, b = source[3 * v:3 * v + 3]
+            if kind == 0:
+                found = a
+            elif kind == 1:
+                found = point_vertex[a].index
+            elif kind == 2:
+                found = interior_vertex[(a, b)].index
+            else:
+                found = junction_vertex[a].index
+            cache[v] = found
+        return found
+
     vertices = reference.changed_vertices
     vertex_starts = reference.changed_vertex_starts
     triangles = reference.changed_triangles
     triangle_starts = reference.changed_triangle_starts
     entries = {}
     for k in range(len(reference.changed_polygons)):
-        mine = [vertex_of[v] for v in vertices[vertex_starts[k]:vertex_starts[k + 1]]]
-        flat = [vertex_of[v] for v in triangles[3 * triangle_starts[k]:3 * triangle_starts[k + 1]]]
+        mine = [vertex_of(v) for v in vertices[vertex_starts[k]:vertex_starts[k + 1]]]
+        flat = [vertex_of(v) for v in triangles[3 * triangle_starts[k]:3 * triangle_starts[k + 1]]]
         entries[tuple(sorted(mine))] = flat
     return entries
 

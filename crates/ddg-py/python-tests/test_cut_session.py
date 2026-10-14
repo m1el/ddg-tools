@@ -667,6 +667,33 @@ class IntrinsicTest(unittest.TestCase):
         with self.assertRaises(ddg_tools.InputError):
             self.make(merge_tolerance=0.7)
 
+    def test_patch_count_and_the_changed_polygons_of_an_insertion(self):
+        for name in ("caller", "intrinsic", "refined"):
+            with self.subTest(triangulation=name):
+                s = self.make(triangulation=name)
+                self.assertEqual(s.n_patches, 2)
+                s.run(length_weight=0.05, max_steps=4, motion_tolerance=0.0,
+                      energy_tolerance=0.0)
+                self.assertEqual(s.n_patches, 2)
+                ins = s.insert()
+                n = len(ins.changed_polygons)
+                self.assertGreater(n, 0)
+                self.assertEqual(len(ins.changed_vertex_starts), n + 1)
+                self.assertEqual(len(ins.changed_triangle_starts), n + 1)
+                self.assertEqual(len(ins.changed_vertices), ins.changed_vertex_starts[-1])
+                self.assertEqual(len(ins.changed_triangles), 3 * ins.changed_triangle_starts[-1])
+                for k in range(n):
+                    vertices = ins.changed_vertices[ins.changed_vertex_starts[k]:
+                                                    ins.changed_vertex_starts[k + 1]]
+                    triangles = ins.changed_triangles[3 * ins.changed_triangle_starts[k]:
+                                                      3 * ins.changed_triangle_starts[k + 1]]
+                    self.assertGreater(len(vertices), 3)
+                    self.assertEqual(len(triangles), 3 * (len(vertices) - 2))
+                    self.assertTrue(set(triangles) <= set(vertices))
+        # Several regions: the clusters are more than two patches.
+        many = ddg_tools.CutSession(*self.buffers, n_regions=4, cluster_iterations=30)
+        self.assertGreaterEqual(many.n_patches, 4)
+
     def test_curvature_per_triangle_is_refused_on_an_intrinsic_triangulation(self):
         s = self.make()
         k = array.array('d', [0.0] * (len(self.mesh[3]) // 3))
