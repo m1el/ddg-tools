@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 
 use super::{
     DdgError, InputError, MeshError, SolveError, index_array, indices, new_array, reals, uv_array,
@@ -18,8 +18,17 @@ use crate::buffers::decode_reals;
 use crate::contract::{MeshBuffers, UnwrapInput};
 use crate::cutting::{
     BindError, Controls, CutSession as RustCutSession, DescriptionArrays, Dict, EnergyKind,
-    FluxChoice, InsertedArrays, StageSet, StartSpec, StepRule, UnwrapArrays, UnwrapSettings, Value,
+    FluxChoice, InsertedArrays, StageSet, StartSpec, StepRule, TriangulationSpec, UnwrapArrays,
+    UnwrapSettings, Value,
 };
+
+pyo3::create_exception!(
+    ddg_tools,
+    StaleStateError,
+    DdgError,
+    "A stored state belongs to another triangulation: the mesh or its seams changed since it \
+     was made. Start again from corner values, labels or a new start."
+);
 
 pyo3::create_exception!(
     ddg_tools,
@@ -38,6 +47,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(visibility_penalty, m)?)?;
     m.add_function(wrap_pyfunction!(length_weight_for_ripples, m)?)?;
     m.add("NotAvailableError", py.get_type::<NotAvailableError>())?;
+    m.add("StaleStateError", py.get_type::<StaleStateError>())?;
     Ok(())
 }
 
@@ -46,6 +56,7 @@ fn bind_error(e: BindError) -> PyErr {
         BindError::Input(m) => InputError::new_err(m),
         BindError::Mesh(m) => MeshError::new_err(m),
         BindError::NotAvailable(m) => NotAvailableError::new_err(m),
+        BindError::Stale(m) => StaleStateError::new_err(m),
         BindError::Solve(m) => SolveError::new_err(m),
     }
 }
@@ -483,6 +494,11 @@ impl CutDescription {
 
 #[pymethods]
 impl CutDescription {
+    /// The cut as lines for display, joined at the points where exactly two paths meet:
+    /// `(positions, starts, closed, regions)` as `CutSession.preview` returns them.
+    fn lines<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyTuple>> {
+        lines_tuple(py, &self.cut)
+    }
     /// Number of points where the cut crosses a polygon edge.
     #[getter]
     fn n_edge_points(&self) -> usize {
@@ -535,6 +551,10 @@ struct InsertedMesh {
     /// `array('i')`: the vertex of every junction of the description.
     #[pyo3(get)]
     junction_vertex: Py<PyAny>,
+    /// `array('i')`: the region of every new polygon where the description says so (a part
+    /// next to a piece of the cut), else -1.
+    #[pyo3(get)]
+    polygon_region: Py<PyAny>,
     /// Number of vertices of the old mesh (vertices below it keep their index).
     #[pyo3(get)]
     n_old_vertices: usize,
@@ -552,6 +572,8 @@ impl InsertedMesh {
             vertex_source: u32_array(py, "vertex_source", &a.vertex_source)?.unbind(),
             edge_point_vertex: u32_array(py, "edge_point_vertex", &a.edge_point_vertex)?.unbind(),
             junction_vertex: u32_array(py, "junction_vertex", &a.junction_vertex)?.unbind(),
+            polygon_region: signed_array(py, "polygon_region", a.polygon_region.iter().copied())?
+                .unbind(),
             n_old_vertices: a.n_old_vertices,
         })
     }
@@ -590,6 +612,28 @@ struct CutUnwrapResult {
     cut_edges: Py<PyAny>,
     /// `dict` of the unwrap report.
     report: Py<PyDict>,
+}
+
+fn lines_tuple<'py>(
+    py: Python<'py>,
+    cut: &ddg_uv::cutting::CutOnPolygons,
+) -> PyResult<Bound<'py, PyTuple>> {
+    let p = crate::cutting::PreviewArrays::from_cut(cut);
+    PyTuple::new(
+        py,
+        [
+            real_array(py, &p.positions)?,
+            u32_array(py, "starts", &p.starts)?,
+            PyList::new(py, &p.closed)?.into_any(),
+            u32_array(py, "regions", &p.regions)?,
+        ],
+    )
+}
+
+/// The bytes of a state: `bytes`, `bytearray`, `memoryview` of bytes.
+fn state_bytes(name: &'static str, obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    obj.extract::<Vec<u8>>()
+        .map_err(|_| InputError::new_err(format!("{name}: expected bytes (from snapshot())")))
 }
 
 fn poisoned() -> PyErr {
@@ -635,7 +679,11 @@ impl CutSession {
         polygon_starts,
         triangles,
         *,
-        n_regions = 2,
+        n_regions = None,
+        triangulation = "intrinsic",
+        refine_bound = None,
+        min_offset = None,
+        state = None,
         seam_edges = None,
         pinned_vertices = None,
         forbidden_vertices = None,
@@ -654,7 +702,11 @@ impl CutSession {
         corner_vertices: &Bound<'py, PyAny>,
         polygon_starts: &Bound<'py, PyAny>,
         triangles: &Bound<'py, PyAny>,
-        n_regions: usize,
+        n_regions: Option<usize>,
+        triangulation: &str,
+        refine_bound: Option<f64>,
+        min_offset: Option<f64>,
+        state: Option<&Bound<'py, PyAny>>,
         seam_edges: Option<&Bound<'py, PyAny>>,
         pinned_vertices: Option<&Bound<'py, PyAny>>,
         forbidden_vertices: Option<&Bound<'py, PyAny>>,
@@ -694,23 +746,108 @@ impl CutSession {
                 "vertex",
             )?,
         };
-        let start = parse_start(
-            circle_vertex,
-            circle_radius,
-            polygon_labels,
-            corner_values,
-            cluster_iterations,
-        )?;
-        let session = py
-            .detach(move || {
+        let spec = match (triangulation, refine_bound) {
+            ("caller", None) => TriangulationSpec::Caller,
+            ("intrinsic", None) => TriangulationSpec::Flips,
+            ("refined", bound) => TriangulationSpec::Refined {
+                bound_degrees: bound.unwrap_or(25.0),
+            },
+            ("caller" | "intrinsic", Some(_)) => {
+                return Err(InputError::new_err(
+                    "refine_bound only applies to triangulation=\"refined\"",
+                ));
+            }
+            (other, _) => {
+                return Err(InputError::new_err(format!(
+                    "triangulation: {other:?} is not one of \"intrinsic\", \"caller\", \
+                     \"refined\""
+                )));
+            }
+        };
+        let session = if let Some(state) = state {
+            if circle_vertex.is_some()
+                || circle_radius.is_some()
+                || polygon_labels.is_some()
+                || corner_values.is_some()
+                || cluster_iterations.is_some()
+            {
+                return Err(InputError::new_err(
+                    "state replaces the start: give no other start with it",
+                ));
+            }
+            let bytes = state_bytes("state", state)?;
+            py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                RustCutSession::new(&input, n_regions, &start)
+                let session = RustCutSession::from_state(&input, &bytes, min_offset)?;
+                if n_regions.is_some_and(|n| n != session.n_regions()) {
+                    return Err(BindError::Input(format!(
+                        "n_regions={} but the state has {} regions",
+                        n_regions.unwrap_or(0),
+                        session.n_regions()
+                    )));
+                }
+                Ok(session)
             })
-            .map_err(bind_error)?;
+            .map_err(bind_error)?
+        } else {
+            let n_regions = n_regions.unwrap_or(2);
+            let start = parse_start(
+                circle_vertex,
+                circle_radius,
+                polygon_labels,
+                corner_values,
+                cluster_iterations,
+            )?;
+            py.detach(move || {
+                let input = UnwrapInput::from_buffers(buffers)
+                    .map_err(|e| BindError::Input(e.to_string()))?;
+                RustCutSession::new(&input, n_regions, &start, &spec, min_offset)
+            })
+            .map_err(bind_error)?
+        };
         Ok(CutSession {
             inner: Mutex::new(session),
         })
+    }
+
+    /// The triangulation option the session runs on: "intrinsic" (Delaunay flips), "refined" or
+    /// "caller".
+    #[getter]
+    fn triangulation(&self) -> PyResult<&'static str> {
+        Ok(self.lock()?.triangulation_name())
+    }
+    /// Whether the per-corner `state` is the whole state (the triangulation added no vertex).
+    /// If not, keep `snapshot()` as well.
+    #[getter]
+    fn state_is_per_corner(&self) -> PyResult<bool> {
+        Ok(self.lock()?.state_is_per_corner())
+    }
+    /// Hex fingerprint of the triangulation the flow runs on (what a stored state must match).
+    #[getter]
+    fn fingerprint(&self) -> PyResult<String> {
+        Ok(self.lock()?.fingerprint())
+    }
+    /// What the construction of the intrinsic triangulation did, as a dict (n_added,
+    /// n_initial_flips, n_splits, min_angle_degrees, max_angle_degrees, is_delaunay, seconds,
+    /// ...); None on the caller's triangulation.
+    #[getter]
+    fn intrinsic_report<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let report = self.lock()?.intrinsic_report();
+        report.map(|d| dict_to_py(py, &d)).transpose()
+    }
+    /// The whole state as `bytes` (versioned, with the fingerprint of the triangulation, the
+    /// number of regions and the triangulation option). Needed when `state_is_per_corner` is
+    /// false; always valid.
+    fn snapshot<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = self.lock()?.snapshot();
+        Ok(PyBytes::new(py, &bytes))
+    }
+    /// Sets the state from `bytes` made by `snapshot()`. Raises StaleStateError if the mesh or
+    /// its seams are not the ones the state was made for.
+    fn restore(&self, py: Python<'_>, state: &Bound<'_, PyAny>) -> PyResult<()> {
+        let bytes = state_bytes("state", state)?;
+        py.detach(|| self.lock()?.restore(&bytes).map_err(bind_error))
     }
 
     /// Number of regions.
@@ -913,6 +1050,21 @@ impl CutSession {
                 u32_array(py, "regions", &p.regions)?,
             ],
         )
+    }
+
+    /// The current cut as lines for display, from the description (`CutDescription.lines()`).
+    #[pyo3(signature = (*, min_crossing_offset = None))]
+    fn lines<'py>(
+        &self,
+        py: Python<'py>,
+        min_crossing_offset: Option<f64>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        let cut = py.detach(|| {
+            self.lock()?
+                .describe_cut(min_crossing_offset)
+                .map_err(bind_error)
+        })?;
+        lines_tuple(py, &cut)
     }
 
     /// The current cut expressed on the polygons of the mesh: a CutDescription.

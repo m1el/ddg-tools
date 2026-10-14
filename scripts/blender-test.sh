@@ -9,8 +9,9 @@
 #    (runs_tmp/blender-user-test) with `blender --command extension install-file`.
 # 3. blender/tests/test_addon.py runs in that Blender, against the installed extension and its
 #    bundled wheel. `-k NAME` runs only the tests whose name contains NAME.
-# 3b. blender/tests/test_cut.py runs the same way (Start, Flow, Apply of the variational cut;
-#    log runs_tmp/blender-test-cut.log; -k applies to both files).
+# 3b. blender/tests/test_cut.py runs the same way (Start, Flow, Apply of the variational cut),
+#    three times in parallel, once per triangulation (intrinsic, caller, refined; logs
+#    runs_tmp/blender-test-cut-<name>.log; -k applies to both files).
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
@@ -72,16 +73,29 @@ if [ "$status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$log"; then
     exit 1
 fi
 
-log="$root/runs_tmp/blender-test-cut.log"
-status=0
-"$BLENDER" -b --factory-startup --python-exit-code 1 \
-    --python "$root/blender/tests/test_cut.py" -- --module "$module" "${only[@]}" \
-    > "$log" 2>&1 || status=$?
-grep -E '^(PASS|FAIL|SKIP|RESULT|ALL TESTS PASSED|  failed)' "$log" || true
-if [ "$status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$log"; then
-    echo "Blender cut tests FAILED (exit status $status); see $log" >&2
-    exit 1
-fi
+# The cut tests run once per triangulation (intrinsic, the caller's, refined), the three
+# Blender processes in parallel; one log each.
+pids=()
+for tri in intrinsic caller refined; do
+    "$BLENDER" -b --factory-startup --python-exit-code 1 \
+        --python "$root/blender/tests/test_cut.py" -- --module "$module" --triangulation "$tri" \
+        "${only[@]}" > "$root/runs_tmp/blender-test-cut-$tri.log" 2>&1 &
+    pids+=($!)
+done
+cut_failed=0
+for i in 0 1 2; do
+    tri=$(echo intrinsic caller refined | cut -d' ' -f$((i + 1)))
+    status=0
+    wait "${pids[$i]}" || status=$?
+    log="$root/runs_tmp/blender-test-cut-$tri.log"
+    echo "cut tests, triangulation $tri: $(grep -E '^RESULT' "$log")"
+    grep -E '^(FAIL|  failed)' "$log" || true
+    if [ "$status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$log"; then
+        echo "Blender cut tests FAILED for $tri (exit status $status); see $log" >&2
+        cut_failed=1
+    fi
+done
+[ "$cut_failed" = 0 ] || exit 1
 
 if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then
     if command -v xvfb-run > /dev/null; then

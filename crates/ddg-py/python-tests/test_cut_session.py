@@ -194,7 +194,8 @@ class SessionTest(unittest.TestCase):
             dict(distortion_weights=[1.0, 2.0], area_weights=[0.0, 0.5]),
             dict(symmetry=classes),
             dict(curvature_uniform=2.0),
-            dict(curvature_per_triangle=array.array('d', [4.0] * (len(self.mesh[3]) // 3))),
+            dict(curvature_per_triangle=array.array('d', [4.0] * (len(self.mesh[3]) // 3)),
+                 triangulation="caller"),
             dict(stages="paper"),
             dict(flux_recovery="nodal", sliver_aspect_ratio=4.0, smoothing_passes=1),
             dict(flux_recovery="smoothed", flux_smoothing=0.7),
@@ -209,7 +210,10 @@ class SessionTest(unittest.TestCase):
         for case in cases:
             with self.subTest(case=sorted(case)):
                 # The symmetric start is the disk around the pole.
-                s = self.session(circle_vertex=0) if "symmetry" in case else self.session()
+                kwargs = {"circle_vertex": 0} if "symmetry" in case else {}
+                if "triangulation" in case:
+                    kwargs["triangulation"] = case.pop("triangulation")
+                s = self.session(**kwargs)
                 case.setdefault("length_weight", 0.05)
                 report = s.run(max_steps=2, **stop_never(), **case)
                 self.assertEqual(report["steps_taken"], 2)
@@ -537,6 +541,117 @@ class RegionsTest(unittest.TestCase):
         self.assertEqual(len(cut.junction_polygon), 0)
         self.assertEqual(len(s.insert(cut).junction_vertex), 0)
 
+
+
+class IntrinsicTest(unittest.TestCase):
+    """The triangulation the flow runs on: intrinsic (Delaunay flips, the default), refined, the
+    caller's; the report, the state bytes, the stale-state error, the description's lines."""
+
+    def setUp(self):
+        self.mesh = uv_sphere(24, 12)
+        self.buffers = arrays(self.mesh)
+
+    def make(self, **kwargs):
+        kwargs.setdefault("circle_vertex", 5)
+        kwargs.setdefault("circle_radius", 0.9)
+        return ddg_tools.CutSession(*self.buffers, **kwargs)
+
+    @staticmethod
+    def worst(a, b):
+        return max(abs(x - y) for r, q in zip(a.state.tolist(), b.state.tolist())
+                   for x, y in zip(r, q))
+
+    def test_choices_and_report(self):
+        default = self.make()
+        self.assertEqual(default.triangulation, "intrinsic")
+        report = default.intrinsic_report
+        for key in ("n_added", "n_initial_flips", "min_angle_degrees", "max_angle_degrees",
+                    "is_delaunay", "fingerprint", "seconds"):
+            self.assertIn(key, report)
+        self.assertTrue(report["is_delaunay"])
+        self.assertEqual(report["n_added"], 0)
+        self.assertTrue(default.state_is_per_corner)
+        self.assertEqual(default.fingerprint, report["fingerprint"])
+        caller = self.make(triangulation="caller")
+        self.assertEqual((caller.triangulation, caller.intrinsic_report), ("caller", None))
+        self.assertTrue(caller.state_is_per_corner)
+        refined = self.make(triangulation="refined", refine_bound=30.0)
+        self.assertEqual(refined.triangulation, "refined")
+        self.assertGreater(refined.intrinsic_report["n_added"], 0)
+        self.assertFalse(refined.state_is_per_corner)
+        self.assertEqual(self.make(triangulation="refined").intrinsic_report["bound_degrees"],
+                         25.0)
+        for bad in (dict(triangulation="bogus"), dict(refine_bound=20.0),
+                    dict(triangulation="refined", refine_bound=80.0)):
+            with self.assertRaises(ddg_tools.InputError, msg=str(bad)):
+                self.make(**bad)
+
+    def test_the_old_expectations_hold_on_every_triangulation(self):
+        kw = dict(length_weight=0.05, max_steps=6, motion_tolerance=0.0, energy_tolerance=0.0)
+        for name in ("caller", "intrinsic", "refined"):
+            with self.subTest(triangulation=name):
+                s = self.make(triangulation=name)
+                report = s.run(**kw)
+                self.assertLess(report["energy_after"], report["energy_before"])
+                self.assertEqual(s.state.shape, (2, s.n_corners))
+                cut = s.describe_cut()
+                self.assertGreater(cut.n_paths, 0)
+                inserted = s.insert(cut)
+                self.assertGreater(len(inserted.polygon_starts), len(self.mesh[2]))
+                self.assertEqual(len(inserted.polygon_region), len(inserted.polygon_starts))
+                positions, starts, closed, regions = s.preview()
+                self.assertEqual(len(regions), 2 * len(closed))
+                positions2, starts2, closed2, regions2 = cut.lines()
+                self.assertEqual((len(closed2), sorted(regions2)), (len(closed), sorted(regions)))
+                self.assertEqual(s.lines()[1].tolist(), starts2.tolist())
+                result = s.unwrap()
+                self.assertTrue(all(math.isfinite(x) for x in result.uvs))
+
+    def test_k_steps_twice_equal_2k_steps_once_with_added_vertices(self):
+        kw = dict(length_weight=0.05, motion_tolerance=0.0, energy_tolerance=0.0)
+        once = self.make(triangulation="refined", refine_bound=30.0)
+        once.run(max_steps=6, **kw)
+        twice = self.make(triangulation="refined", refine_bound=30.0)
+        twice.run(max_steps=3, **kw)
+        bytes_ = twice.snapshot()
+        self.assertIsInstance(bytes_, bytes)
+        # Through the bytes into a new session on the same mesh, as the Blender operators do.
+        again = ddg_tools.CutSession(*self.buffers, state=bytes_)
+        self.assertEqual(again.triangulation, "refined")
+        self.assertEqual(again.snapshot(), bytes_)
+        again.run(max_steps=3, **kw)
+        self.assertLess(self.worst(once, again), 1e-12)
+        # restore() on a live session.
+        twice.run(max_steps=3, **kw)
+        other = self.make(triangulation="refined", refine_bound=30.0)
+        other.restore(twice.snapshot())
+        self.assertLess(self.worst(other, once), 1e-12)
+
+    def test_stale_state(self):
+        s = self.make(triangulation="refined", refine_bound=30.0)
+        bytes_ = s.snapshot()
+        # Another seam: the triangulation is another one.
+        seam = array.array('i', [0, 1])
+        with self.assertRaises(ddg_tools.StaleStateError):
+            ddg_tools.CutSession(*self.buffers, state=bytes_, seam_edges=seam)
+        other = ddg_tools.CutSession(*arrays(uv_sphere(20, 10)), circle_vertex=1,
+                                     circle_radius=0.5)
+        with self.assertRaises(ddg_tools.StaleStateError):
+            other.restore(bytes_)
+        self.assertTrue(issubclass(ddg_tools.StaleStateError, ddg_tools.DdgError))
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, state=b"not a state")
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, state=bytes_, circle_vertex=1, circle_radius=1.0)
+        with self.assertRaisesRegex(ddg_tools.InputError, "n_regions"):
+            ddg_tools.CutSession(*self.buffers, state=bytes_, n_regions=3)
+
+    def test_curvature_per_triangle_is_refused_on_an_intrinsic_triangulation(self):
+        s = self.make()
+        k = array.array('d', [0.0] * (len(self.mesh[3]) // 3))
+        with self.assertRaises(ddg_tools.InputError):
+            s.step(length_weight=0.1, curvature_per_triangle=k)
+        self.make(triangulation="caller").step(length_weight=0.1, curvature_per_triangle=k)
 
 
 if __name__ == "__main__":

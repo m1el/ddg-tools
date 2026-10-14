@@ -84,6 +84,10 @@ def pack_charts(
 # The cut flow: "Variational Surface Cutting" (Sharp, Crane 2018) on a polygon mesh.
 # ----------------------------------------------------------------------------------------------
 
+class StaleStateError(DdgError):
+    """A stored state (``CutSession.snapshot()``) belongs to another triangulation: the mesh or
+    its seams changed since it was made. Start again."""
+
 class NotAvailableError(DdgError):
     """The request is valid but not implemented yet: a cut session with more than two regions."""
 
@@ -148,6 +152,8 @@ class CutDescription:
     @property
     def junction_weights(self) -> array[float]:
         """``array('d')``, 3 per junction: the junction is ``sum(w[k] * x[corner k])``."""
+    def lines(self) -> tuple[array[float], array[int], list[bool], array[int]]:
+        """``(positions, starts, closed, regions)``: the paths joined where exactly two meet."""
     @property
     def n_clamped_crossings(self) -> int: ...
 
@@ -178,6 +184,10 @@ class InsertedMesh:
     @property
     def junction_vertex(self) -> array[int]:
         """``array('i')``: the vertex of every junction of the description."""
+    @property
+    def polygon_region(self) -> array[int]:
+        """``array('i')``: the region of every new polygon where the description says (a part
+        next to a piece of the cut), else -1."""
     @property
     def n_old_vertices(self) -> int: ...
 
@@ -219,7 +229,11 @@ class CutSession:
         polygon_starts: Buffer,
         triangles: Buffer,
         *,
-        n_regions: int = 2,
+        n_regions: int | None = None,
+        triangulation: Literal["intrinsic", "caller", "refined"] = "intrinsic",
+        refine_bound: float | None = None,
+        min_offset: float | None = None,
+        state: Buffer | None = None,
         seam_edges: Buffer | None = None,
         pinned_vertices: Buffer | None = None,
         forbidden_vertices: Buffer | None = None,
@@ -231,12 +245,38 @@ class CutSession:
         corner_values: Buffer | None = None,
         cluster_iterations: int | None = None,
     ) -> None:
-        """Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
+        """``triangulation``: the flow runs on an intrinsic triangulation of the surface flipped
+        to Delaunay (``"intrinsic"``, the default: usually no vertex is added), on the same with
+        refinement to ``refine_bound`` degrees (``"refined"``, default 25: vertices are added), or
+        on the caller's triangulation (``"caller"``, as before). ``state``: bytes from
+        ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
+        ``StaleStateError`` if the mesh or seams changed). ``min_offset`` (intrinsic and refined
+        only; default the library's 1e-6): every point of the cut keeps at least this fraction of
+        a side from the vertices and sides of the caller's triangle it lies in. Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
         ``polygon_labels`` (one label per polygon below ``n_regions``), ``corner_values``
         (``(n_regions, n_corners)``) or ``cluster_iterations`` (the vertex normals clustered into
         ``n_regions`` clusters in at most that many rounds: the start of the atlas). Any number
         of regions is accepted; ``NotAvailableError`` stays as a class but is not raised for
         this."""
+    @property
+    def triangulation(self) -> Literal["intrinsic", "caller", "refined"]: ...
+    @property
+    def state_is_per_corner(self) -> bool:
+        """True when ``state`` (one value per polygon corner) is the whole state; False when the
+        triangulation added vertices: keep ``snapshot()`` too."""
+    @property
+    def fingerprint(self) -> str:
+        """Hex fingerprint of the triangulation the flow runs on."""
+    @property
+    def intrinsic_report(self) -> dict[str, bool | int | float | str] | None:
+        """What the construction of the intrinsic triangulation did (``n_added``, flips,
+        ``min_angle_degrees``, ``max_angle_degrees``, ``is_delaunay``, ``seconds``, ...); ``None``
+        for ``"caller"``."""
+    def snapshot(self) -> bytes:
+        """The whole state: levels on the vertices of the triangulation, its fingerprint, the
+        number of regions, the triangulation option."""
+    def restore(self, state: Buffer) -> None:
+        """Sets the state from ``snapshot()`` bytes; ``StaleStateError`` for another mesh."""
     @property
     def n_regions(self) -> int: ...
     @property
@@ -357,6 +397,10 @@ class CutSession:
         offsets into the points, whether each polyline is closed, and 2 regions per polyline
         (``[lower, higher]``). For more than two regions the polylines are the curves of the
         network between its junctions (a curve that ends at a junction ends at its position)."""
+    def lines(
+        self, *, min_crossing_offset: float | None = None
+    ) -> tuple[array[float], array[int], list[bool], array[int]]:
+        """The cut as lines from its description (``CutDescription.lines()``)."""
     def describe_cut(self, *, min_crossing_offset: float | None = None) -> CutDescription: ...
     def insert(
         self, cut: CutDescription | None = None, *, min_crossing_offset: float | None = None
