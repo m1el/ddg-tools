@@ -8,6 +8,9 @@ Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
   "BFF");
 * the cut flow, `crates/ddg-variational-cuts` — *Variational Surface Cutting* (Sharp, Crane,
   ACM TOG 2018; "the cuts paper"); its contract is `crates/ddg-variational-cuts/SPEC.md` ("SPEC");
+* intrinsic triangulations, `crates/ddg-intrinsic` — *Navigating Intrinsic Triangulations*
+  (Sharp, Soliman, Crane, ACM TOG 2019; "the signpost paper"); its contract is
+  `crates/ddg-intrinsic/SPEC.md` ("the intrinsic SPEC", decisions `N1`–`N17`);
 * the operators of `crates/ddg-core` all of them use.
 
 The ground truth is the **canonical discrete problem** and the math conventions of the
@@ -22,7 +25,11 @@ listed with exact references in [`CITED.md`](CITED.md), which also states precis
 run-time certificate of the cone solver does and does not establish. For the cut flow there is no
 discrete problem with a certifiable minimizer: the theorems cover the formulas and linear systems
 of one flow step and three closed-form solutions of the smooth problem; `CITED.md` says what that
-leaves open.
+leaves open. For intrinsic triangulations the theorems cover the closed forms of single
+operations (unfolding, flip, Delaunay test, signposts, one tracing step, barycentric coordinates,
+circumcentre); the data structure and the algorithms built on them are not modelled, and the
+global results (existence, uniqueness and termination for the Delaunay triangulation, the
+refinement guarantees) are cited.
 
 ## Pins and how to check
 
@@ -86,9 +93,14 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Cuts/Ripple.lean` | cut flow: the roughening rate `ωk − wk²`, the length weight for a cutoff wavelength, the ingredients of the linearization on closed forms, the sphere rates (§1, §4, D18) |
 | `DdgProofs/Cuts/Quantile.lean` | cut flow: the weighted quantile, the roughening rate of a state as a quantile, the robust step rule and the local limit per cut point (§1, §4, D22–D25) |
 | `DdgProofs/Cuts/VertexLimit.lean` | cut flow: the local limit at the vertices, on the change of the whole step, for two and for `N` regions (§4, §8.4, D26) |
-| `DdgProofs/Cuts/Stop.lean` | cut flow: the three cases of the energy criterion of the stop rule and the state of lowest energy of a run (§4, D27; no formula id) |
+| `DdgProofs/Cuts/Stop.lean` | cut flow: the three cases of the energy criterion of the stop rule and the state of lowest energy of a run (§4, D27, D29; `cut-stop-energy`, `cut-run-lowest`) |
 | `DdgProofs/Cuts/Regions.lean` | cut flow with `N` regions: region of a vertex, crossings between regions, triple points, the projection of the redistancing, rates of the functions, the systems on the boundary of a region (§8, D20, D21) |
 | `DdgProofs/Cuts/Analytic.lean` | cut flow: closed-form solutions (flat disk, spherical cap, shrinking circle) and the shape derivatives of the energies on them (§1, §6) |
+| `DdgProofs/Intrinsic/Diamond.lean` | intrinsic triangulations: the layout of a triangle and of the two triangles on an edge from their lengths, uniqueness up to a rigid motion, the length of a flipped edge, strict convexity (intrinsic SPEC §4, N5) |
+| `DdgProofs/Intrinsic/Delaunay.lean` | intrinsic triangulations: the Delaunay condition and the cotan weight, the link to the cotan Laplacian, what a flip does to the angles and to the condition (§4, §5, N6, N17) |
+| `DdgProofs/Intrinsic/Signpost.lean` | intrinsic triangulations: angle normalization, the signpost update around interior and boundary vertices and under a flip (§3, N2) |
+| `DdgProofs/Intrinsic/Trace.lean` | intrinsic triangulations: one step of a tracing query: crossing of an edge with the path, choice of the exit edge, forward progress (§4, N7) |
+| `DdgProofs/Intrinsic/Barycentric.lean` | intrinsic triangulations: barycentric coordinates, distances of a point to the corners, edge split, circumcentre (§4, N10, N14, N17) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
@@ -288,9 +300,10 @@ Cited for the cut flow (`CITED.md`): `cut-yamabe-equation`, `cut-shape-derivativ
 `cut-cea-method`, `cut-level-set-evolution`, `cut-ripple-linearization`,
 `cut-network-first-variation`, `cut-weighted-fem-stiffness`, `cut-fast-marching-convergence`.
 
-**The stop rule of a run** (SPEC §4 "Stopping", D27) has no formula id in SPEC and no tag in
-the Rust code (`energy_stop`, `run_outcome`), so its theorems (`DdgProofs/Cuts/Stop.lean`) carry
-none; the definitions are this package's own, written after the Rust functions. With
+**The stop rule of a run** (SPEC §4 "Stopping", D27, D29): the ids `cut-stop-energy` (the Rust
+`energy_stop`; theorem `energy_cases`) and `cut-run-lowest` (`run_outcome`; theorem
+`runOutcome_rose`), in `DdgProofs/Cuts/Stop.lean`; the definitions are this package's own,
+written after the Rust functions. With
 `t = ε\|E_k\|`, `Eb = E_{k−W}`:
 
 - for `ε ≥ 0` exactly one of `Eb − E_k > t`, `\|Eb − E_k\| ≤ t`, `E_k − Eb > t` holds
@@ -311,6 +324,42 @@ none; the definitions are this package's own, written after the Rust functions. 
   `runOutcome_rose`, `runOutcome_not_rose`, `runOutcome_no_steps`, `runOutcome_vanished`);
 - after `EnergyRose` (`ε ≥ 0`, `k ≤ n`) the lowest energy of the run is `< E_k`
   (`lowestState_lt_of_rose`).
+
+### Navigating Intrinsic Triangulations (`crates/ddg-intrinsic`)
+
+Notation of the oracle (`lean/oracle/DdgOracle/Formulas/Intrinsic.lean`, at `ℝ`; the theorems are
+about its definitions unless a definition of this package is named). The *diamond* of an edge
+`ij` of length `a`: the triangles `ijk` (`b = ℓ_ik`, `c = ℓ_jk`) and `jil` (`d = ℓ_il`,
+`e = ℓ_jl`); `x_k = diamondX a b c`, `h_k = diamondH a b c`, `x_l = diamondX a d e`,
+`h_l = diamondH a d e`; the *standard layout* `i = (0,0)`, `j = (a,0)`, `k = (x_k, h_k)` (this
+package's `apexK a b c`), `l = (x_l, −h_l)` (`apexL a d e`); `f = flippedLengthFromLengths a b c
+d e`. `T(x,y,z)` is `IsTriangle x y z` (the strict triangle inequalities). Plane points are pairs
+of reals; `|pq| = dist2 p q` and `[p,q,r] = sda p q r` (twice the signed area) are those of
+`DdgProofs/Bff/Quality.lean`. Angles: `θ_k = cornerAngle a b c`, `θ_l = cornerAngle a d e`
+(opposite the edge); at `i`: `α_i = cornerAngle c a b`, `β_i = cornerAngle e a d`; at `j`:
+`α_j = cornerAngle b c a`, `β_j = cornerAngle d e a`. `Convex` is this package's
+`DiamondConvex a b c d e`: the oracle's `flipConvex` of the standard layout. After a flip the
+edge `kl` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`). All theorems are in
+`namespace DdgProofs.Intrinsic`.
+
+| id | exact statement | theorems |
+|---|---|---|
+| `it-unfold-diamond` | `T(a,b,c)`, `T(a,d,e)`: `h_k, h_l > 0`, and in the standard layout `\|ij\| = a`, `\|ik\| = b`, `\|jk\| = c`, `\|il\| = d`, `\|jl\| = e`; `[i,j,k] = a·h_k`, `[i,j,l] = −a·h_l` (the apexes on opposite sides). Uniqueness: for any plane points with `[i,j,k] > 0 > [i,j,l]` there are `cs, sn` with `cs² + sn² = 1` such that `i, j, k, l` are the images of `(0,0)`, `(\|ij\|, 0)`, `apexK(\|ij\|, \|ik\|, \|jk\|)`, `apexL(\|ij\|, \|il\|, \|jl\|)` under `rigid cs sn i : p ↦ i + (cs·p₁ − sn·p₂, sn·p₁ + cs·p₂)`; these maps keep `dist2` and `sda`. In every layout `diamondX(\|ij\|, \|ik\|, \|jk\|) = ⟨j−i, k−i⟩/\|ij\|` (`\|ij\| > 0`) and `diamondH(\|ij\|, \|ik\|, \|jk\|) = \|[i,j,k]\|/\|ij\|`. `diamondX a b c = layoutX a c b`, `diamondH a b c = layoutY a (triArea a c b)` (the reference layout of BFF). A plane triangle with `[p,q,r] ≠ 0` has `T(\|qr\|, \|rp\|, \|pq\|)`. | `diamond_isometric`, `diamond_sda`, `diamond_unique`, `dist2_rigid`, `sda_rigid`, `diamondX_realized`, `diamondH_realized`, `diamondX_eq_layoutX`, `diamondH_eq_layoutY`, `isTriangle_of_sda_ne` |
+| `it-unfold-apex` | `C = unfoldApex A (B − A) ℓ_ab ℓ_bc ℓ_ca`. If `\|AB\| = ℓ_ab` and `T(ℓ_ab, ℓ_bc, ℓ_ca)`: `\|AC\| = ℓ_ca`, `\|BC\| = ℓ_bc`, `[A,B,C] = 2·triArea ℓ_ab ℓ_bc ℓ_ca > 0`. With `T` alone, whatever `\|AB\|`: `\|AC\|² = (\|AB\|/ℓ_ab)²·ℓ_ca²`, `\|BC\|² = (\|AB\|/ℓ_ab)²·ℓ_bc²` (the given triangle, scaled). Uniqueness: `[A,B,C′] > 0 ⟹ unfoldApex A (B − A) \|AB\| \|BC′\| \|C′A\| = C′`. `unfoldApex (0,0) (a,0) a c b = (x_k, h_k)` for `a ≠ 0`. The exit rule: `apexAboveAxis y = true ⟺ y > 0`; with this package's `MeetsAxis p q` (the closed segment has a point with `y = 0`; `⟺` its ends are not strictly on one side) and `y_up > 0 > y_down`: `MeetsAxis down apex ⟺ y_apex ≥ 0`; `MeetsAxis apex up ⟺ y_apex ≤ 0`; one of the two holds; both hold `⟺ y_apex = 0`; `apexAboveAxis y_apex = true ⟹ MeetsAxis down apex ∧ ¬MeetsAxis apex up`. | `unfoldApex_isometric`, `unfoldApex_similar`, `unfoldApex_unique`, `apex_unique`, `unfoldApex_eq_rigid`, `unfoldApex_layout`, `apexAboveAxis_iff`, `meetsAxis_iff`, `exit_cases` |
+| `it-flip-length` | `flippedLength x_k h_k x_l h_l = \|(x_k, h_k)(x_l, −h_l)\|`. For plane points with `[i,j,k] > 0 > [i,j,l]`: `flippedLengthFromLengths \|ij\| \|ik\| \|jk\| \|il\| \|jl\| = \|kl\|`. `T(a,b,c)`, `T(a,d,e)`: `f² = b² + d² − 2bd·cos(α_i + β_i)` (the paper's Fig. 9 and Alg. 5) `= c² + e² − 2ce·cos(α_j + β_j) = b² + d² − [(a²+b²−c²)(a²+d²−e²) − 16·A_ijk·A_jil]/(2a²)`; `flippedLengthFromLengths a c b e d = f` (`a ≠ 0`; mirrored) and `flippedLengthFromLengths a d e b c = f` (the triangles exchanged). If also `Convex`: `flippedLengthFromLengths f c e b d = a` (flipping back); `T(f,b,d)` and `T(f,e,c)` (the new triangles `ilk`, `jkl`); `triArea f b d + triArea f e c = triArea a b c + triArea a d e`. | `flippedLength_eq_dist2`, `flippedLengthFromLengths_realized`, `flippedLengthFromLengths_sq`, `flippedLengthFromLengths_sq'`, `flippedLengthFromLengths_sq_lengths`, `flippedLengthFromLengths_mirror`, `flippedLengthFromLengths_comm`, `flip_back`, `flip_isTriangle`, `flip_area` |
+| `it-flip-convexity` | `flipConvex a x_k h_k x_l h_l = true ⟺ flipArea1 > 0 ∧ flipArea2 > 0`, with `flipArea1 = x_k h_l + x_l h_k = [i,l,k]` and `flipArea2 = (a − x_k) h_l + (a − x_l) h_k = [j,k,l]` in the standard layout, and in every layout with `[i,j,k] > 0 > [i,j,l]` (standard values of its five distances). For `a, h_k, h_l > 0`: `flipConvex = true ⟺ ∃ s, t ∈ (0,1): (s·a, 0) = k + t·(l − k)` (the diagonals cross in their interiors) `⟺ [i,l,j], [l,j,k], [j,k,i], [k,i,l] > 0` (the quadrilateral `i, l, j, k` is strictly convex). `T(a,b,c)`, `T(a,d,e)`: `flipArea1 = b·d·sin(α_i + β_i)`, `flipArea2 = c·e·sin(α_j + β_j)`, `Convex ⟺ α_i + β_i < π ∧ α_j + β_j < π`, and `Convex ⟹ DiamondConvex f c e b d`. | `flipConvex_iff`, `flipArea1_eq_sda`, `flipArea2_eq_sda`, `flipArea_realized`, `flipConvex_iff_diagonals_cross`, `flipConvex_iff_turns`, `flipArea1_eq_sin`, `flipArea2_eq_sin`, `diamondConvex_iff_angles`, `flip_convex` |
+| `it-delaunay-condition` | `delaunayExcess θ_k θ_l = θ_k + θ_l − π = (θ_k − π) + θ_l`; `delaunayHolds tol θ_k θ_l = true ⟺ delaunayExcess θ_k θ_l ≤ tol`; `oppositeAngles a b c d e = (θ_k, θ_l)` for `T(a,b,c)`, `T(a,d,e)`. Then: `delaunayHolds 0 (oppositeAngles a b c d e) = true ⟺ cotanWeightFromLengths a b c d e ≥ 0 ⟺ θ_k + θ_l ≤ π`, and `θ_k + θ_l > π ⟺ cotanWeightFromLengths < 0`. `θ_k + θ_l ≥ π ⟹ Convex` (a violating edge, and a tie, can be flipped). Two corners of one triangle: `delaunayExcess (cornerAngle a b c) (cornerAngle b c a) < 0`. `(α_i + β_i) + (α_j + β_j) = 2π − (θ_k + θ_l)`. `Convex ⟹ delaunayExcess (cornerAngle f c e) (cornerAngle f b d) = −delaunayExcess θ_k θ_l`. `θ_k + θ_l > π ⟹ Convex`, `delaunayExcess (oppositeAngles f c e b d) < 0` and `cotanWeightFromLengths f c e b d > 0`. `θ_k + θ_l = π ⟹ Convex` and the excess after the flip is `0`. | `delaunayExcess_eq`, `delaunayExcess_eq'`, `delaunayHolds_iff`, `oppositeAngles_eq`, `delaunay_iff_cotanWeight_nonneg`, `angle_sum_le_pi_iff_cotanWeight_nonneg`, `pi_lt_angle_sum_iff_cotanWeight_neg`, `diamondConvex_of_pi_le`, `diamondConvex_of_not_delaunay`, `delaunay_of_same_triangle`, `quad_angle_sum`, `flip_delaunayExcess`, `flip_of_not_delaunay`, `flip_of_tie` |
+| `it-cotan-weight` | `cotanWeight x y = x + y`; `cotanWeightFromLengths a b c d e = cornerCot a b c + cornerCot a d e`, which for `T(a,b,c)`, `T(a,d,e)` is `cot θ_k + cot θ_l`: **twice** the cotan weight `w = ½(cot θ_k + cot θ_l)` of the edge (intrinsic SPEC N6, N17). For `θ_k, θ_l ∈ (0, π)`: `cotanWeight (cot θ_k) (cot θ_l) = sin(θ_k + θ_l)/(sin θ_k·sin θ_l)` with a positive denominator; it is `≥ 0 ⟺ θ_k + θ_l ≤ π`, `> 0 ⟺ θ_k + θ_l < π`, `= 0 ⟺ θ_k + θ_l = π`, and the same three hold for `w = cotanWeight/2`. Link to `cotan-laplacian`: in a `TriMesh` in which only the faces `f₁ ≠ f₂` have the edge `{i,j}`, `L_ij = offDiag i j = −cotanWeight (cotOpp f₁ i j) (cotOpp f₂ i j)/2 = −w`, so `cotanWeight = −2·L_ij` and `L_ij ≤ 0 ⟺ cotanWeight ≥ 0`. `cotanWeightFromLengths a b c d e < 0 ⟹ Convex`. | `cotanWeightFromLengths_eq`, `cotanWeightFromLengths_eq_cot`, `cotanWeight_eq_sin_div`, `cotanWeight_nonneg_iff`, `cotanWeight_pos_iff`, `cotanWeight_eq_zero_iff`, `half_cotanWeight_sign`, `offDiag_eq_neg_half_cotanWeight`, `cotanWeight_eq_neg_two_mul_offDiag`, `offDiag_nonpos_iff`, `diamondConvex_of_cotanWeight_neg` |
+| `it-angle-normalization` | `angleScale false Θ = 2π/Θ`, `angleScale true Θ = π/Θ`. For corner angles `θ_n` with `Σθ ≠ 0`: `Σ_n angleScale false (Σθ)·θ_n = 2π`, `Σ_n angleScale true (Σθ)·θ_n = π`. `angleScale false (2π) = 1 = angleScale true π`; `angleScale b Θ > 0` for `Θ > 0`; `Θ/(2π)·(angleScale false Θ·θ) = θ` for `Θ ≠ 0` (the paper's Alg. 2, line 7). A flip keeps the angle sums at its four vertices (`T(a,b,c)`, `T(a,d,e)`, `Convex`): `cornerAngle f b d = α_i + β_i`, `cornerAngle f c e = α_j + β_j`, `cornerAngle e f c + cornerAngle d f b = θ_k`, `cornerAngle c e f + cornerAngle b d f = θ_l`. | `angleScale_interior`, `angleScale_boundary`, `sum_normalized_interior`, `sum_normalized_boundary`, `angleScale_flat`, `angleScale_pos`, `angleScale_undo`, `flip_angle_sums`, `flip_angle_i`, `flip_angle_j` |
+| `it-signpost-update` | `signpostUpdate false φ θ Θ = reduceFullTurn(φ + (2π/Θ)·θ)`, `reduceFullTurn x = x − 2π` if `2π ≤ x`, else `x`; `signpostUpdate true φ θ Θ = φ + (π/Θ)·θ`. `0 ≤ x < 4π ⟹ 0 ≤ reduceFullTurn x < 2π`, and it is `x` or `x − 2π`. For `0 ≤ φ < 2π`, `Θ > 0`, `0 ≤ θ ≤ Θ`: the update is in `[0, 2π)`, equals `φ + (2π/Θ)θ` or that minus `2π`, and has its cosine and sine. For `φ < 2π`, `Θ > 0`, `θ₁, θ₂ ≥ 0`, `θ₁ + θ₂ ≤ Θ`: two updates in a row are the update by `θ₁ + θ₂`. The update by `Θ ≠ 0` is the identity for `φ ≥ 0`. `List.foldl` of the update over corners `θs` (`Θ > 0`, each `≥ 0`, sum `≤ Θ`, start in `[0, 2π)`) is the update by `θs.sum`; with `θs.sum = Θ` it returns the start; if `φ ≥ 0` and `φ + (2π/Θ)·θs.sum < 2π` it is `φ + (2π/Θ)·θs.sum` (the cumulative sums of the paper's Eq. 2). Boundary vertex: the fold is `φ + (π/Θ)·θs.sum`; from `φ = 0` with `θs.sum = Θ ≠ 0` it is `π`. Under a flip (`T(a,b,c)`, `T(a,d,e)`, `Convex`, `φ < 2π`, `Θ > 0`, the old corner `≤ Θ`): the updates by `cornerAngle e f c` and then `cornerAngle d f b` give the update by `θ_k`; by `cornerAngle c e f` and then `cornerAngle b d f`, the update by `θ_l`. | `signpostUpdate_interior`, `signpostUpdate_boundary`, `reduceFullTurn_mem`, `signpostUpdate_mem`, `signpostUpdate_direction`, `signpostUpdate_add`, `signpostUpdate_full_turn`, `signpost_fold`, `signpost_around_interior`, `signpost_fold_no_wrap`, `signpost_fold_boundary`, `signpost_boundary_end`, `flip_signpost_at_k`, `flip_signpost_at_l` |
+| `it-ray-edge-intersection` | `t = axisCrossingT y_tail y_head = y_tail/(y_tail − y_head)` (the `crossingParam` of `cut-edge-crossing`), `axisCrossingX x_tail x_head t = x_tail + t·(x_head − x_tail)`. For `y_tail ≠ y_head`: `tail + t·(head − tail) = (axisCrossingX x_tail x_head t, 0)`, and `y_tail + s·(y_head − y_tail) = 0 ⟺ s = t`. For `y_tail ≤ 0 ≤ y_head`, `y_tail < y_head` (and with the roles exchanged): `0 ≤ t ≤ 1`, `t = 0 ⟺ y_tail = 0`, `t = 1 ⟺ y_head = 0`; for `y_tail < 0 < y_head`: `0 < t < 1`. Forward progress, for `y_up > 0 > y_down` and `[up, down, apex] > 0`: if `y_apex > 0`, `x_exit − x_entry = t·[up,down,apex]/(y_up − y_down) > 0` (exit on `down–apex`, `t` its parameter); if `y_apex < 0`, `x_exit − x_entry = (1 − t)·[up,down,apex]/(y_up − y_down) > 0` (exit on `apex–up`). | `axisCrossingT_eq_crossingParam`, `axisCrossing_on_axis`, `axisCrossing_unique`, `axisCrossingT_mem_Icc`, `axisCrossingT_mem_Icc'`, `axisCrossingT_mem_Ioo`, `exit_ahead_above`, `exit_ahead_below` |
+| `it-barycentric-coordinates` | `signedArea2` is `sda`; `barycentric a b c p = ([p,b,c], [a,p,c], [a,b,p])/[a,b,c]`; `[p,b,c] + [a,p,c] + [a,b,p] = [a,b,c]`. For `[a,b,c] ≠ 0`: the three coordinates sum to `1`; `b₀·a + b₁·b + b₂·c = p`; and if `u + v + w = 1`, `u·a + v·b + w·c = p` then `barycentric a b c p = (u, v, w)`. The form of the Rust code, `([p,b,c], [p,c,a], [p,a,b])` divided by their sum, is equal. `T(ℓ_ab, ℓ_bc, ℓ_ca)`: `pointFromDistances ℓ_ab ℓ_bc ℓ_ca \|v₀p\| \|v₁p\| \|v₂p\| = p` for every `p`, in the layout `v₀ = (0,0)`, `v₁ = (ℓ_ab, 0)`, `v₂ = apexK ℓ_ab ℓ_ca ℓ_bc`. | `signedArea2_eq_sda`, `barycentric_eq`, `sda_split`, `barycentric_sum`, `barycentric_reproduces`, `barycentric_unique`, `barycentric_eq_normalized`, `pointFromDistances_eq_self` |
+| `it-point-distances` | `cornerDistances ℓ₀₁ ℓ₁₂ ℓ₂₀ b₀ b₁ b₂ = (\|v₀P\|, \|v₁P\|, \|v₂P\|)` with `v₀ = (0,0)`, `v₁ = (ℓ₀₁, 0)`, `v₂ = apexK ℓ₀₁ ℓ₂₀ ℓ₁₂` and `P = b₁·v₁ + b₂·v₂` (this package's `layoutPoint`; `b₀` is not used). For `T(ℓ₀₁, ℓ₁₂, ℓ₂₀)` and `b₀ + b₁ + b₂ = 1` it is `(baryLength ℓ₀₁ ℓ₁₂ ℓ₂₀ (b₀−1) b₁ b₂, baryLength … b₀ (b₁−1) b₂, baryLength … b₀ b₁ (b₂−1))`: the paper's Alg. 6, by `baryLength_eq_dist` of `cut-barycentric-length` (used, not reproved, through `dist2 p q = dist (toC p) (toC q)`); for any plane points and coordinates `x`, `y` with sum `1`: `\|Σ y_k v_k  Σ x_k v_k\| = baryLength \|v₀v₁\| \|v₁v₂\| \|v₂v₀\| (x − y)`. Edge split: `edgeSplitLengths ℓ b_i b_j = (ℓ·b_j, ℓ·b_i)`; the two sum to `ℓ` if `b_i + b_j = 1`; they are the first two of `cornerDistances ℓ₀₁ ℓ₁₂ ℓ₂₀ b₀ b₁ 0` (`b₀, b₁ ≥ 0`, `b₀ + b₁ = 1`); `baryLength ℓ_ij · · (b_i − 1) b_j 0 = ℓ_ij·b_j` (Alg. 6 from the corner `i`); for `0 ≤ t ≤ 1` and `P = (1−t)·tail + t·head`: `edgeSplitLengths \|tail head\| (1−t) t = (\|tail P\|, \|head P\|) = (t·ℓ, (1−t)·ℓ)` (intrinsic SPEC N17). The paper's Alg. 8 as printed: `baryLength 1 · · (3/4 − 1) (1/4) 0 = 1/4`, while its line 4 gives `1·(3/4)`. | `cornerDistances_eq`, `cornerDistances_eq_baryLength`, `dist2_bary_eq_baryLength`, `dist2_eq_dist_toC`, `edgeSplitLengths_eq`, `edgeSplitLengths_sum`, `edgeSplitLengths_eq_cornerDistances`, `edgeSplitLengths_param`, `dist2_lerp_tail`, `dist2_lerp_head`, `alg6_distance_on_edge`, `alg6_distance_on_edge'`, `alg8_as_printed_differs` |
+| `it-circumcenter` | `circumWeight a_k a_{k+1} a_{k+2} = a_k²·(a_{k+1}² + a_{k+2}² − a_k²)`, `a_k` the side opposite corner `k`; `circumcenterBary a₀ a₁ a₂ = (w₀, w₁, w₂)/S`, `S = w₀ + w₁ + w₂` (this package's `circumSum`). For `T(a₀,a₁,a₂)`: `S = 16·triArea² > 0`; the coordinates sum to `1`; `cornerDistances a₂ a₀ a₁ (circumcenterBary a₀ a₁ a₂) = (R, R, R)` with `R = a₀a₁a₂/(4·triArea) = a₀/(2 sin θ₀)` (equidistant from the three corners); the coordinate of corner `k` is `< 0 ⟺` the angle there is `> π/2`, and `= 0 ⟺` it is `π/2` (angles `cornerAngle a₀ a₁ a₂`, `cornerAngle a₁ a₂ a₀`, `cornerAngle a₂ a₀ a₁`); if the coordinate of corner `0` is negative the other two are positive; `θ₀ < π/6 ⟹ a₀ < R`. | `circumWeight_sum`, `circumSum_pos`, `circumcenterBary_sum`, `circumcenter_equidistant`, `circumradius_eq_div_sin`, `circumcenterBary_neg_iff`, `circumcenterBary_eq_zero_iff`, `circumcenterBary_pos_of_neg`, `circumradius_gt_of_angle_lt` |
+
+Cited for intrinsic triangulations (`CITED.md`): `it-delaunay-existence-uniqueness`,
+`it-delaunay-flip-termination`, `it-rippa-theorem`, `it-chew-second-algorithm`,
+`it-ruppert-encroachment`, `it-straightest-geodesic`.
 
 ## Theorems
 
@@ -542,7 +591,23 @@ Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
   statistics": `insertAscending`, `sortAscending`, `sumLeft`, `firstReaching`,
   `weightedQuantile`, `speedInEdges`, `robustStep`, `localSpeed`, `localLimitFactor`; and of
   the revision "D26": `vertexChange`, `vertexSpeedCapped`, `vertexSpeedAdaptive`,
-  `vertexLimitFactor`, `limitedValue`.
+  `vertexLimitFactor`, `limitedValue`;
+- intrinsic triangulations (`DdgOracle/Formulas/Intrinsic.lean`, every definition of that file):
+  `angleScale`, `reduceFullTurn`, `signpostUpdate`, `diamondX`, `diamondH`, `flippedLength`,
+  `flippedLengthFromLengths`, `flipArea1`, `flipArea2`, `flipConvex`, `delaunayExcess`,
+  `delaunayHolds`, `cotanWeight`, `cotanWeightFromLengths`, `oppositeAngles`, `unfoldApex`,
+  `axisCrossingT`, `axisCrossingX`, `apexAboveAxis`, `signedArea2`, `barycentric`,
+  `pointFromDistances`, `planeDistance`, `cornerDistances`, `edgeSplitLengths`, `circumWeight`,
+  `circumcenterBary`; they reuse `triArea`, `cornerAngle`, `cornerCot` of the first paper
+  (`Oracle.triArea_eq`, `Oracle.cornerAngle_eq`, `Oracle.cornerCot_eq`).
+
+Own definitions of this package for intrinsic triangulations are shorthands and the vehicle of
+the proofs, never the subject of a tagged claim on their own: `Intrinsic.apexK`, `apexL` (the
+two apexes of the standard layout), `DiamondConvex` (the oracle's `flipConvex` of the standard
+layout of five lengths), `rigid` (a rotation and a translation of the plane), `MeetsAxis` (a
+closed segment has a point on the x-axis), `layoutPoint` (`b₁v₁ + b₂v₂`), `circumSum` (the sum
+of the three weights); plane points, `dist2` and `sda` are those of `DdgProofs/Bff/Quality.lean`,
+`IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `DdgProofs/Triangle.lean`.
 
 Own definitions of this package for the default stages and `N` regions (what SPEC states in
 words or as a sum over an index set, for which the oracle has only the scalar pieces):
@@ -651,6 +716,11 @@ differential tests against the oracle.
 | cut flow: `h_c > 0`, `max_motion·h_c > 0`, `\|r_c\| ≤ v_c` (`localLimit_*`) | `h_c` is the length of a crossed edge of a valid geometry (`local_edges`); `v_c` is `\|r_c\|` or `max(\|r_c\|, ½·max(excess, 0))` in `StepSize::local_factor` (`abs_le_localSpeed` for the oracle's `localSpeed`); by reading |
 | cut flow: `τ > 0`, `max_motion·h_i > 0` (`vertexLimit_*`) | `Fixed(τ)` is validated positive, and nothing is limited with it; the rule's `τ` is positive for positive parameters (`robustStep_pos`); `h_i` is the length of an edge of a valid geometry (`vertex_limits`), by reading |
 | cut flow: `ε ≥ 0` (`energy_cases`, `energyVerdict_rose_iff`) | `energy_stop` evaluates the criterion only for `energy_tolerance > 0` and more than `energy_window` steps |
+| intrinsic: `IsTriangle` of the three lengths of a face (`diamond_isometric`, `unfoldApex_isometric`, `circumcenter_equidistant`, …) | every function of `formulas.rs` that takes lengths returns `None` unless `ddg_core::geometry::triangle_area` finds a positive area; a flip keeps the property in exact arithmetic (`flip_isTriangle`), and the shape limit of intrinsic SPEC N5 guards it in floating point |
+| intrinsic: `DiamondConvex` (`flip_back`, `flip_area`, `flip_angle_sums`, …) | `Flip` is refused unless both `Diamond::flipped_areas` are positive, and above the shape limit (N5) |
+| intrinsic: `0 ≤ φ < 2π`, `Θ > 0`, `0 ≤ θ ≤ Θ` (`signpostUpdate_*`) | stored signposts of an interior vertex are reduced (N2); `θ` is a corner angle at the vertex and `Θ` its angle sum (of the input vertex; `2π` or `π` at an inserted one); by reading |
+| intrinsic: `y_up > 0 > y_down`, the apex to the left of `up → down` (`exit_cases`, `exit_ahead_*`) | `Tracer::walk` and `exit_after_entry` of `trace.rs` (the entered halfedge has its tail above and its head below the path, the apex is unfolded to its left); by reading |
+| intrinsic: `b₀ + b₁ + b₂ = 1` (`cornerDistances_eq_baryLength`), `[a,b,c] ≠ 0` (`barycentric_*`) | barycentric coordinates of a point of a face; a face of positive area laid out by `triangle_layout`; by reading |
 | cut flow: `φ_t = −σ` and `dE = Σ g σ ℓ` (`firstVariation_levelSet`) | the smooth theory (`cut-level-set-evolution`, `cut-cea-method`, cited); checked on closed forms (`hasDerivAt_twoCaps`, `circle_levelSet_flow`) and by the finite-difference test of SPEC §6.3 |
 
 ## Discrepancies with the papers as printed
@@ -859,7 +929,60 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     (`energyVerdict_zero_stops_iff`), while the Rust code does not evaluate the criterion for
     `ε ≤ 0`. "A caller that takes fewer than `W` steps per run is never set back" also holds
     for exactly `W` steps (the criterion needs `E_{k−W}` with `k` the number of steps minus
-    one). The rule has no formula id.
+    one). (Taken into SPEC as D29; the rule now has the ids `cut-stop-energy` and
+    `cut-run-lowest`.)
+36. **Signpost paper, Alg. 8 (edge split): the two lengths are exchanged.** With `b_i` the
+    barycentric weight of the corner `i`, the point on the edge is `b_i·i + b_j·j` and its
+    distance from `i` is `ℓ_ij·b_j`. That is also what the paper's own Alg. 6 gives for
+    `Distance(ℓ_ijk, i, (b_i, b_j, 0))` (`alg6_distance_on_edge`), and lines 6–7 of Alg. 8 use
+    `(b_i, b_j, 0)` in this sense; lines 4–5 print `ℓ_ip ← ℓ_ij b_i`, `ℓ_jp ← ℓ_ij b_j`
+    (`alg8_as_printed_differs`: `1/4` against `3/4`). The oracle (`edgeSplitLengths`), the Rust
+    code (`la = t·ℓ` for the parameter `t` from the tail) and the intrinsic SPEC (§3, N17) have
+    the right one (`edgeSplitLengths_param`).
+37. **Signpost paper, Alg. 1 (signpost update): no reduction.** Sec. 3.1 has `φ : H → [0, 2π)`,
+    but `φ_ik ← φ_ij + 2πθ/Θ` leaves that range whenever the two halfedges lie on different
+    sides of the reference direction (in Alg. 5 and Alg. 3; not in Alg. 4, which never passes
+    it: `signpost_fold_no_wrap`). The crate and the oracle subtract `2π` once; that is enough
+    for `0 ≤ φ < 2π` and a corner `0 ≤ θ ≤ Θ` (`signpostUpdate_mem`), and makes the updates
+    around a vertex consistent (`signpostUpdate_add`, `signpost_around_interior`).
+38. **`it-cotan-weight`: the function is `2w`, and the oracle's docstring has the sign of the
+    Laplacian wrong.** The oracle's `cotanWeight` and the Rust `opposite_cotan_sum` return
+    `cot θ_k + cot θ_l`, twice the weight `w = ½(cot θ_k + cot θ_l)` (now stated in SPEC N17 and
+    the crate's README). The oracle's docstring calls it "twice the entry of the Laplacian"; in
+    the convention of `CLAUDE.md` (`L` positive semidefinite) the entry is `L_ij = −w`, so the
+    function is `−2·L_ij` (`cotanWeight_eq_neg_two_mul_offDiag`).
+39. **Oracle and Rust, `cornerDistances`: `b₀` is not used.** The function returns the
+    distances of `b₁v₁ + b₂v₂` (the Lean build of the oracle prints "unused variable `b0`").
+    That is the point with the coordinates `(b₀, b₁, b₂)` only when they sum to `1`; the link
+    to the paper's Alg. 6 needs that hypothesis (`cornerDistances_eq_baryLength`). The README of
+    the crate states `d_k = |Σ_j b_j v_j − v_k|` without it.
+40. **`it-ray-edge-intersection`: what the formulas intersect.** `t = y_tail/(y_tail − y_head)`
+    and `x = x_tail + t(x_head − x_tail)` are the intersection of the *line* of the edge with
+    the *line* of the path. That the point is on the edge needs the ends on opposite sides
+    (`axisCrossingT_mem_Icc`); that it lies ahead on the ray is not in the formula: it follows
+    from the orientation of the unfolded triangle (`exit_ahead_above`, `exit_ahead_below`). The
+    table of the crate's README gives the two formulas without hypotheses.
+41. **`it-unfold-apex`: an edge that does not have the given length.** The rustdoc says the
+    given lengths are used "so errors of the layout are not fed back into the shape". Exactly:
+    the result is the triangle of the three given lengths scaled by `|b − a|/ℓ_ab`
+    (`unfoldApex_similar`): its angles are those of the lengths, its size follows the placed
+    edge; the two new sides have the given lengths only if `|b − a| = ℓ_ab`
+    (`unfoldApex_isometric`).
+42. **Flip: the paper's formula and its range.** The law of cosines of the paper's Fig. 9 and the
+    layout formula of the crate are the same number for every pair of nondegenerate triangles
+    (`flippedLengthFromLengths_sq`). It is the distance of the two apexes in the plane; it is
+    the length of the new edge only when the diamond is strictly convex, which is when the
+    crate flips. The paper's remark (Sec. 4.1) that an edge which needs a flip can be flipped
+    holds, ties included (`diamondConvex_of_pi_le`); in floating point the shape limit of the
+    intrinsic SPEC N5 can still refuse it (N6 counts that case).
+43. **Order of evaluation.** The Rust code evaluates the Delaunay excess as `(θ_k − π) + θ_l`
+    and normalizes barycentric coordinates by the sum of the three areas; the oracle evaluates
+    `θ_k + θ_l − π` and divides by the area of the triangle. They are equal in exact arithmetic
+    (`delaunayExcess_eq'`, `barycentric_eq_normalized`) and can differ in the last bits.
+44. **`CITED.md`, intrinsic triangulations.** The six entries give their sources at the level
+    of the work; section and statement numbers of Bobenko–Springborn, Indermitte et al., Rippa,
+    Chew, Ruppert, Shewchuk and Polthier–Schmies were not re-read (the works were not at hand),
+    and what each is cited for is stated as the signpost paper and the intrinsic SPEC use it.
 
 ## Caveats on faithfulness
 
@@ -931,6 +1054,19 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
   rule as empirical (D20). `IsRegion`, `IsTwoSmallest` and `regionRate` are this package's
   formulations of rules that SPEC states in words. Nothing is proved about the marching per
   function of the redistancing, the numbering of nodes, or the curves between junctions.
+- **Intrinsic triangulations.** The theorems are about scalar closed forms and about points of
+  the plane. Not modelled: the halfedge mesh, its signposts as stored data and their update by
+  the operations (the theorems say what one update and one flip do to the numbers); that the
+  unfolding of a path of triangles composes (each step is covered, the path is not); the
+  tracing query as a whole, edge traces and their checks, point queries, the overlay, the
+  refinement loop, the simplicial export. The Delaunay *triangulation* never appears: what is
+  proved is local (one edge and its two triangles), and the global facts are cited. Strict
+  convexity is the oracle's `flipConvex`; the shape limit of N5, the tolerance of the Delaunay
+  test and of the traces (N6, N8) and every other tolerance are outside. A corner angle is
+  `cornerAngle` of three lengths (`arccos` of the law of cosines); the oracle and the Rust code
+  evaluate it by a half-angle formula, which is the same number for a nondegenerate triangle
+  (`Oracle.cornerAngle_eq`), so theorems stated with `cornerAngle` need `IsTriangle` to be
+  about the oracle's `oppositeAngles`.
 - **Cut flow, the limit at the vertices and the stop rule (D26, D27).** The limit is covered as
   a function of `φ(i)`, `φ′(i)`, `h_i`, `ω_i`, `τ`; how `h_i` and `ω_i` are collected
   (`vertex_limits`), which vertices are cut-adjacent and counted, which function is `b`, and the
