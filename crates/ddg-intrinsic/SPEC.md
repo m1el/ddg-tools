@@ -741,6 +741,28 @@ written from the paper and the cited papers.
   costs time; the default of `ddg_uv::cutting` stays Delaunay flips, iODT is an explicit option
   (`IntrinsicOptions::optimal_delaunay`).
 
+* **N28** *Remeshing for the cut flow measured* (cut paper Sec. 6.1; README, "Remeshing for the
+  cut flow"; `crates/ddg-uv/examples/remesh_study.rs`, 1 260 runs on 10 meshes). Uniform
+  refinement by midpoint splits and flips, the paper's curvature-adaptive refinement at the same
+  vertex count, and iODT, each with the curvature of the triangulation (at the input vertices
+  only) or with the curvature density of the input faces carried over per face ("spread"),
+  against the flips, on a common yardstick (a fine subdivision of the input). Refinement does
+  not make the flow converge (1.2 to 3 times the steps, no run ends by motion), costs 11 to 70
+  times per step, and is even or worse than the flips on meshes of a few thousand vertices and
+  more; only with the spread and only on meshes of a few hundred vertices is it better (−2 to
+  −3 % in the median); without the spread it solves another problem (cones at the input
+  vertices; outliers to +1 160 %). Decision: no refinement option for the cut flow; the default
+  of `ddg_uv::cutting` stays Delaunay flips. Nothing in this crate changed.
+  *Open: a segment along an input edge.* `segments_on_input` failed on 2 of 900 cuts from
+  refined triangulations (`remesh_study repro bob_control ka4 dirichlet 1 1`, and `ka2 dirichlet
+  0.5 1`; deterministic): two segments of the cut have both ends on input edge (300, 298) of
+  bob's control mesh (its mirror plane, which is also the start plane), next to a vertex the
+  refinement inserted on that edge, so they run along the edge; the trace from the first end
+  leaves into one input face and the second end is placed in the other ("the place of its end
+  is in none of the input faces the path went through"), at every tolerance up to 0.1. A
+  segment collinear with an input edge needs its own case in the trace (follow the edge, or
+  accept an end on the shared edge from either face). Not fixed here.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,
