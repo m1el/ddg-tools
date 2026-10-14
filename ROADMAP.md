@@ -6,38 +6,57 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
 ## Scheduled
 
-1. **Intrinsic triangulations**: "Navigating Intrinsic Triangulations", Sharp, Soliman, Crane,
-   ACM TOG 2019 (`../NavigatingIntrinsicTriangulations/paper.pdf`). The next paper. Its first use
-   here: an intrinsic Delaunay triangulation for the stages of the cut flow that suffer on
-   obtuse meshes (redistancing first, then the evaluation). Evidence:
-   `crates/ddg-variational-cuts/README.md`, "Mesh quality", and `examples/bad_mesh_study.rs`.
-   Decided for it (2026-10-14): the authors' MIT demo may be used as a reference; scope is the
-   signpost data structure, flips and Delaunay flipping, vertex insertion and Delaunay refinement
-   (with boundaries, which the paper does not cover), the overlay and point queries; the optimal
-   Delaunay variant comes later; the whole cut flow is to run on the intrinsic triangulation, the
-   cut is traced back, refinement that adds vertices is allowed; no visible effect in Blender; a
-   detected wrong result (a failed trace) is an error, never repaired silently. Branches: `master`
-   was moved up to `variational-cuts` when the UV-flip fix landed; the work is on
-   `intrinsic-triangulations`. The contract is `crates/ddg-intrinsic/SPEC.md`.
-   Acceptance (the user, 2026-10-14: only robustness, correctness and speed count; angles up to
-   120° are fine if the numbers are): refinement bounds angles to 30°–120°, not to acute. Whether
-   that is enough is decided by measurement: rerun `bad_mesh_study` and the three exact laws on
-   the refined intrinsic triangulation of the bad meshes, and compare redistancing error, the
-   error of the speed, the circle law and whether runs settle with the well-shaped baseline.
-   Nothing beyond the paper (non-obtuse triangulations) unless those numbers fail.
-   Measured (2026-10-14, `crates/ddg-intrinsic/examples/flow_on_bad_meshes.rs`, logs in
-   `runs_tmp/intrinsic-study/`): flipping to Delaunay alone brings the systematically obtuse
-   meshes back to regular-grid quality in the evaluation, the redistancing and the exact laws
-   (circle law on the 165° sheared grid: +2.5e-2 on the input, +1.7e-3 flipped); refinement adds
-   30 % to 140 % vertices, helps only where the input has few vertices for thin geometry (cells
-   1:16, needles and caps) and buys nothing clear at 30° over 25°; flips and export cost 0.01 to
-   0.06 s on the real meshes; the cut came back onto the input mesh in all 27 real-mesh runs. So
-   the flow runs on the Delaunay flips by default and refinement is an option. Open from that
-   study: long energy runs on flipped sheared grids still do not settle; a refined
-   latitude-longitude sphere (41x246) got worse in the evaluation and the ripple rates; the
-   energy of the same start differs between the input mesh and the flipped one on bad meshes
-   (3.5 times on the 165° grid, 3.3 times on camelshotnoise), cause not established; the
-   balanced-latitude bias on latitude-longitude spheres is unchanged by either treatment.
+1. **The optimal Delaunay variant** of the intrinsic triangulations paper (vertex repositioning,
+   Sec. 3.3.3 and 4.3). The user: "eventually". Nothing is started; `ddg-intrinsic` leaves room for
+   `move_vertex`.
+2. **The cones solver against the dataset's own measure** (proposed 2026-10-14, not approved): a
+   feedback loop that lowers the distortion weight where the solver's scale factor is far from the
+   one the flattening realizes (needle tips), judged by the 23-mesh comparison in
+   `crates/ddg-optimal-cones/README.md`, "Published UVs: measured comparison".
+
+## Landed since the first version of this file
+
+* Flipped UV triangles after the Blender Apply: the library's triangulation of the split polygons
+  is stored and used by the unwrap (`blender/README.md`).
+* **Intrinsic triangulations** (`crates/ddg-intrinsic`, contract `SPEC.md` there): signposts,
+  flips, Delaunay flipping, insertion, refinement with boundary, overlay, simplicial export,
+  the way back for a cut; Lean oracle and proofs for its twelve formula ids. The cut flow runs on
+  the Delaunay flips by default in `ddg_uv::cutting`, the bindings and the Blender operators;
+  refinement and the mesh's own triangulation are options. Measured answer on the angle bound
+  (`crates/ddg-intrinsic/examples/flow_on_bad_meshes.rs`, logs in `runs_tmp/intrinsic-study/`,
+  not in the repository): flipping alone brings the systematically obtuse meshes back to
+  regular-grid quality in the evaluation, the redistancing and the exact laws; refinement adds
+  30 % to 140 % vertices and helps only where the input has few vertices for thin geometry; 30°
+  buys nothing clear over 25°.
+* Step and stop rule of the cut flow after the first version: SPEC D26 (the local limit with the
+  length step on the mesh), D27 (a rising energy is its own stop reason and sets the run back),
+  D29 (non-finite numbers are errors), D30 (faces with a moved crossing leave the mean slope),
+  D31 (convergence by motion needs a small predicted motion).
+
+## Open after that work (2026-10-14)
+
+* The merge of bends of a cut that comes back from an intrinsic triangulation has a default
+  tolerance of 0.1 of an edge and moves the cut by up to that; smaller values let flipped UV
+  slivers return on refined atlases. Two refined cases at cut offset 0.2 still have one flipped
+  triangle each (recorded in `blender/tests/test_cut.py`).
+* Refused, not handled, by the insertion of `ddg_uv::cutting`: a region that fits inside one
+  input triangle, a cut exactly through a vertex, a piece along a diagonal; in the add-on, a
+  loop of junctions inside one polygon that touches no edge point.
+* The simplicial export loses the angle bound where it must split edges (thin tubes: restored
+  by `ExportOptions::refine`; spikes: not), `ddg-intrinsic` SPEC N15. Termination of the
+  refinement is argued for closed surfaces and only observed with boundary and spikes (N1, N4).
+* From the study: long energy runs on flipped sheared grids still do not settle; the
+  balanced-latitude bias on latitude-longitude spheres is unchanged; one outlier of the speed on
+  1:4 cells refined to 30° is unexplained; the energy of the same start differs between the
+  input mesh and the flipped one on bad meshes (on a flat mesh this is the cut, not the
+  evaluation: the zero set of the interpolant differs; the distortion term on curved meshes was
+  not compared).
+* After D30 the 600-step run on camelshotnoise ends at 3475 where it reached 2967 before; some
+  README and SPEC §6 tables carry numbers from before D30 and say so.
+* The Blender session cache (a session kept between Start, Flow and Apply) is not tested across
+  file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
+* The comparison with the authors' program of the cut flow was refreshed after D22 only, not
+  after D26 to D31.
 
 ## Decided (2026-10-14)
 
