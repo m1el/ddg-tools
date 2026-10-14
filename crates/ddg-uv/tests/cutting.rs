@@ -2297,3 +2297,314 @@ fn random_cuts_on_intrinsic_triangulations() {
     );
     assert!(bends > 100 && multi_points > 50 && junction_paths > 100 && seam_points > 10);
 }
+
+// ===================== bad meshes: the caller's triangulation against the intrinsic one =====================
+
+/// The lattice `x = (i + σ j) h, y = j h`: every triangle has the largest angle
+/// `180° − atan(1/σ)` (the parallelogram `n × n` cells, sheared).
+fn sheared_grid(n: usize, sigma: f64) -> PolygonMesh {
+    let h = 1.0 / n as f64;
+    let mut positions = Vec::new();
+    for j in 0..=n {
+        for i in 0..=n {
+            positions.push([(i as f64 + sigma * j as f64) * h, j as f64 * h, 0.0]);
+        }
+    }
+    let at = |i: usize, j: usize| (j * (n + 1) + i) as u32;
+    let mut faces = Vec::new();
+    for j in 0..n {
+        for i in 0..n {
+            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+    }
+    PolygonMesh::from_triangles(positions, &faces)
+}
+
+/// Rows alternate between thin strips of height `0.05 d` (caps: one angle of 168 degrees) and
+/// tall ones of height `3 d` (needles: apex 19 degrees), the rows shifted by half a cell (the
+/// construction of `bad_mesh_study` in `ddg-variational-cuts`).
+fn needles_and_caps(n: usize) -> PolygonMesh {
+    let d = 1.0 / n as f64;
+    let (ha, hb) = (0.05 * d, 3.0 * d);
+    let pairs = ((1.0 / (ha + hb)).round() as usize).max(1);
+    let scale = 1.0 / (pairs as f64 * (ha + hb));
+    let rows = 2 * pairs + 1;
+    let mut y = vec![0.0f64];
+    for j in 0..2 * pairs {
+        let last = y[j];
+        y.push(last + scale * if j % 2 == 0 { ha } else { hb });
+    }
+    *y.last_mut().unwrap() = 1.0;
+    let mut positions = Vec::new();
+    let mut row_x: Vec<Vec<f64>> = Vec::new();
+    let mut start = Vec::new();
+    for j in 0..rows {
+        let xs: Vec<f64> = if j % 2 == 0 {
+            (0..=n).map(|i| i as f64 * d).collect()
+        } else {
+            std::iter::once(0.0)
+                .chain((0..n).map(|i| (i as f64 + 0.5) * d))
+                .chain(std::iter::once(1.0))
+                .collect()
+        };
+        start.push(positions.len() as u32);
+        for &x in &xs {
+            positions.push([x, y[j], 0.0]);
+        }
+        row_x.push(xs);
+    }
+    let mut faces = Vec::new();
+    for j in 0..rows - 1 {
+        let (xa, xb) = (&row_x[j], &row_x[j + 1]);
+        let (mut i, mut m) = (0usize, 0usize);
+        while i < xa.len() - 1 || m < xb.len() - 1 {
+            let bottom = if i == xa.len() - 1 {
+                false
+            } else if m == xb.len() - 1 {
+                true
+            } else {
+                xa[i + 1] <= xb[m + 1]
+            };
+            let (a, b) = (start[j] + i as u32, start[j + 1] + m as u32);
+            if bottom {
+                faces.push([a, a + 1, b]);
+                i += 1;
+            } else {
+                faces.push([a, b + 1, b]);
+                m += 1;
+            }
+        }
+    }
+    PolygonMesh::from_triangles(positions, &faces)
+}
+
+/// One line of the comparison.
+#[derive(Debug)]
+struct Row {
+    label: String,
+    n_vertices: usize,
+    seconds_start: f64,
+    seconds_steps: f64,
+    energy: (f64, f64),
+    steps: usize,
+    cut_points: usize,
+    polygons_after: usize,
+    charts: usize,
+    flipped: usize,
+    cones: usize,
+    distortion: f64,
+    seam_mismatch: f64,
+    angles: Option<(f64, f64, usize)>,
+    cut_length: f64,
+}
+
+/// Starts as a circle (or, with `clusters`, as normal clusters), runs the flow on the given
+/// triangulation, inserts the cut and unwraps it.
+fn run_chain(
+    name: &str,
+    mesh: &PolygonMesh,
+    tri: &Triangulation,
+    steps: usize,
+    clusters: Option<usize>,
+    alpha: Option<f64>,
+) -> Row {
+    let area = triangulated_area(mesh);
+    let center = {
+        // The vertex nearest to the centre of mass.
+        let mut c = [0.0f64; 3];
+        for p in &mesh.positions {
+            for d in 0..3 {
+                c[d] += p[d] / mesh.positions.len() as f64;
+            }
+        }
+        (0..mesh.positions.len())
+            .min_by(|&a, &b| {
+                let dist = |v: usize| {
+                    (0..3)
+                        .map(|d| (mesh.positions[v][d] - c[d]).powi(2))
+                        .sum::<f64>()
+                };
+                dist(a).total_cmp(&dist(b))
+            })
+            .unwrap() as u32
+    };
+    let (n, start) = match clusters {
+        Some(n) => (n, Start::NormalClusters { max_iterations: 50 }),
+        None => (
+            2,
+            Start::GeodesicCircle {
+                vertex: center,
+                radius: 0.2 * area.sqrt(),
+            },
+        ),
+    };
+    let t0 = std::time::Instant::now();
+    let mut session = Session::with_triangulation(&mesh.input(), n, &start, FlowKind::Auto, tri)
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let seconds_start = t0.elapsed().as_secs_f64();
+    let options = session.recommended_options(StepSize::default());
+    let mut problem = session.new_problem(Energy::Hencky, 0.0);
+    let omega = session.roughening_rate(&problem, &options.eval).unwrap();
+    problem.length_weight = alpha.unwrap_or_else(|| {
+        length_weight_for_ripples(omega, if clusters.is_some() { 0.5 } else { 0.25 })
+    });
+    let t1 = std::time::Instant::now();
+    let report = session
+        .run(&problem, &options, &stop(steps))
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let seconds_steps = t1.elapsed().as_secs_f64();
+    let (_, result) = session
+        .unwrap(
+            DEFAULT_CROSSING_OFFSET,
+            &CutUnwrapOptions {
+                cones: ConePlacement::Optimal,
+                ..Default::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("{name} {tri:?}: {e}"));
+    let rep = &result.map.report;
+    let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+    let cut_length: f64 = cut
+        .lines()
+        .iter()
+        .map(|l| {
+            let m = l.positions.len();
+            let n = if l.closed { m } else { m - 1 };
+            (0..n)
+                .map(|i| {
+                    let (a, b) = (l.positions[i], l.positions[(i + 1) % m]);
+                    sub(a, b).iter().map(|x| x * x).sum::<f64>().sqrt()
+                })
+                .sum::<f64>()
+        })
+        .sum();
+    Row {
+        label: name.to_string(),
+        n_vertices: session.engine_mesh().n_vertices(),
+        seconds_start,
+        seconds_steps,
+        energy: (
+            report.steps.first().map_or(0.0, |s| s.energy.total),
+            report.final_energy.total,
+        ),
+        steps: report.steps.len(),
+        cut_points: cut.edge_points.len() + cut.junctions.len(),
+        polygons_after: result.inserted.mesh.n_polygons(),
+        charts: rep.charts.len(),
+        flipped: rep.flipped_triangles,
+        cones: result.map.cones.len(),
+        distortion: rep.area_distortion.scale_free,
+        seam_mismatch: rep.seam_lengths.max_seam_mismatch,
+        angles: session
+            .intrinsic_report()
+            .map(|r| (r.min_angle, r.max_angle, r.n_below_bound)),
+        cut_length,
+    }
+}
+
+fn compare(
+    name: &str,
+    mesh: &PolygonMesh,
+    steps: usize,
+    clusters: Option<usize>,
+    alpha: Option<f64>,
+) {
+    let n_tri = mesh.triangles.len();
+    for (label, tri) in [
+        ("caller", Triangulation::Caller),
+        ("flips", flips_only()),
+        ("refined", refined()),
+    ] {
+        let row = run_chain(
+            &format!("{name}/{label}"),
+            mesh,
+            &tri,
+            steps,
+            clusters,
+            alpha,
+        );
+        println!("ROW {row:?}");
+        // Whatever the triangulation, the chain is consistent: the number of charts is the
+        // number of pieces the seams leave, no more than a sliver per thousand triangles
+        // flips on the intrinsic ones.
+        if label != "caller" {
+            assert!(
+                row.flipped <= 1 + n_tri / 1000,
+                "{name}/{label}: {} flipped",
+                row.flipped
+            );
+        }
+        assert!(row.energy.1.is_finite());
+    }
+}
+
+#[test]
+fn bad_mesh_sheared() {
+    let steps = if debug_build() { 3 } else { 8 };
+    compare(
+        "sheared 153",
+        &sheared_grid(if debug_build() { 16 } else { 32 }, 2.0),
+        steps,
+        None,
+        Some(1.0),
+    );
+}
+
+#[test]
+fn bad_mesh_needles_and_caps() {
+    let steps = if debug_build() { 3 } else { 8 };
+    compare(
+        "needles and caps",
+        &needles_and_caps(if debug_build() { 8 } else { 16 }),
+        steps,
+        None,
+        Some(1.0),
+    );
+}
+
+#[test]
+fn bad_mesh_camelbad() {
+    if debug_build() {
+        println!("camelbad: release builds only");
+        return;
+    }
+    let path = dataset_dir().join("camelbad.obj");
+    let Ok(obj) = read_obj(&path) else {
+        println!("dataset mesh {} not found: skipped", path.display());
+        return;
+    };
+    let mesh = PolygonMesh::from_triangles(obj.positions.clone(), &obj.triangles().unwrap());
+    compare("camelbad", &mesh, 20, None, None);
+}
+
+#[test]
+fn intrinsic_on_generated_meshes_and_spot() {
+    let steps = if debug_build() { 3 } else { 40 };
+    compare(
+        "uv_sphere",
+        &uv_sphere(32, 16, 1.0).unwrap(),
+        steps,
+        None,
+        None,
+    );
+    compare("grid_cube", &grid_cube(6, 2.0), steps, None, None);
+    compare(
+        "torus",
+        &torus(32, 12, 1.0, 0.35).unwrap(),
+        steps,
+        None,
+        None,
+    );
+    if let Some(mesh) = load_polygons("spot_quadrangulated.obj") {
+        compare("spot quads", &mesh, steps, None, None);
+        compare(
+            "spot atlas",
+            &mesh,
+            if debug_build() { 2 } else { 60 },
+            Some(8),
+            None,
+        );
+    }
+}
