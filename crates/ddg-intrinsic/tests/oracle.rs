@@ -7,8 +7,9 @@
 //! before and after a flip or Delaunay flipping (faces as a set, each up to rotation, with
 //! lengths and signposts), the unfolded diamond of a flip, refusals, the report and measures
 //! of Delaunay flipping, traces from vertices over the input mesh with every crossing, the
-//! trace of every halfedge of a flipped triangulation, and circumcentres with their traces
-//! from the barycentre.
+//! trace of every halfedge of a flipped triangulation, circumcentres with their traces
+//! from the barycentre, and moves of an inserted vertex (task `move`: the place, the state and
+//! the update of the optimal Delaunay triangulation after every move, and every refusal).
 //!
 //! Run with `cargo test --release -p ddg-intrinsic --test oracle -- --nocapture` for the
 //! table.
@@ -24,7 +25,8 @@ use ddg_intrinsic::formulas::{
 };
 use ddg_intrinsic::{
     DelaunayCriterion, DelaunayOptions, DelaunayStatus, EdgeTraceOptions, FlipLimit, FlipRefusal,
-    IntrinsicError, IntrinsicTriangulation, SurfacePoint, Trace, TraceOptions, TraceStop,
+    IntrinsicError, IntrinsicTriangulation, MoveRefusal, SurfacePoint, Trace, TraceOptions,
+    TraceStop,
 };
 
 /// The tolerance of the comparison: that of the oracle's own check of its fixtures. Lengths
@@ -1098,6 +1100,172 @@ fn replay_circumcenter(case: &Case, out: &Output, tally: &mut Tally) {
 
 // ----- the replay -----
 
+// ----- task move (oracle README, "Task `move`") -----
+
+/// A place on the input mesh as the oracle prints it (`vertex V`, `edge LO HI T`, `face F B0 B1
+/// B2`), against a point of the input mesh.
+fn compare_place(case: &Case, mine: SurfacePoint, theirs: &[String], what: &str, tally: &mut Tally) {
+    match (mine, theirs[0].as_str()) {
+        (SurfacePoint::Vertex(v), "vertex") => tally.equal(what, v as usize, int(&theirs[1])),
+        (SurfacePoint::Edge { edge, t }, "edge") => {
+            let (lo, hi) = (int(&theirs[1]), int(&theirs[2]));
+            let e = case.mesh.find_edge(lo, hi).expect("an input edge");
+            tally.equal(&format!("{what}: the input edge"), edge as usize, e);
+            let [a, _] = case.mesh.edge_vertices(edge as usize);
+            let from_lo = if a == lo.min(hi) { t } else { 1.0 - t };
+            tally.check(
+                &format!("{what}: the parameter"),
+                (from_lo - float(&theirs[3])).abs(),
+                |t| &mut t.parameter,
+            );
+        }
+        (SurfacePoint::Face { face, bary }, "face") => {
+            tally.equal(&format!("{what}: the input face"), face as usize, int(&theirs[1]));
+            let d = (0..3)
+                .map(|k| (bary[k] - float(&theirs[2 + k])).abs())
+                .fold(0.0, f64::max);
+            tally.check(&format!("{what}: barycentric coordinates"), d, |t| &mut t.point);
+        }
+        (mine, _) => tally
+            .findings
+            .push(format!("{what}: here {mine}, oracle {}", theirs.join(" "))),
+    }
+}
+
+/// The `odt` line: the update of SPEC N21 at the vertex, with circumcentres and with
+/// barycentres at the boundary.
+fn compare_odt(
+    tri: &IntrinsicTriangulation,
+    v: usize,
+    out: &Output,
+    label: &str,
+    tally: &mut Tally,
+) {
+    let Some(line) = out.all("odt").find(|l| l[1] == label) else {
+        tally.findings.push(format!("no odt line {label}"));
+        return;
+    };
+    for (k, barycenters) in [(2, false), (4, true)] {
+        let mine = tri
+            .odt_target(v, barycenters)
+            .unwrap_or_else(|e| panic!("odt {label}: {e}"));
+        let d = (mine[0] - float(&line[k])).hypot(mine[1] - float(&line[k + 1]));
+        tally.check(
+            &format!("odt {label} (barycentres at the boundary: {barycenters})"),
+            d,
+            |t| &mut t.other,
+        );
+    }
+}
+
+fn move_refusal_name(error: &IntrinsicError) -> (&'static str, Option<f64>) {
+    match error {
+        IntrinsicError::MoveRefused { reason, .. } => match reason {
+            MoveRefusal::InputVertex => ("input_vertex", None),
+            MoveRefusal::NotFinite => ("not_finite", None),
+            MoveRefusal::SelfEdge { .. } => ("self_edge", None),
+            MoveRefusal::LeavesBoundary { .. } => ("leaves_boundary", None),
+            MoveRefusal::NotInStar { fraction, .. } => ("not_in_star", Some(*fraction)),
+            MoveRefusal::TooThin { .. } => ("too_thin", None),
+            MoveRefusal::OnInputVertex { .. } => ("on_input_vertex", None),
+        },
+        IntrinsicError::MoveNotLocated { .. } => ("not_located", None),
+        _ => ("error", None),
+    }
+}
+
+fn replay_move(case: &Case, out: &Output, tally: &mut Tally) {
+    let mut tri = build(case);
+    compare_header(case, &tri, out, tally);
+    // The insertion or the split, on the fresh triangulation (input ids).
+    let inserted = if let Some(line) = case.lines.iter().find(|l| l[0] == "insert") {
+        let bary = [2, 3, 4].map(|k| float(&line[k]));
+        tri.insert_vertex(int(&line[1]), bary)
+    } else {
+        let line = case
+            .lines
+            .iter()
+            .find(|l| l[0] == "split")
+            .expect("an insert or a split line");
+        let (a, b, t) = (int(&line[1]), int(&line[2]), float(&line[3]));
+        let e = case.mesh.find_edge(a, b).expect("an input edge");
+        let t = if tri.edge_vertices(e)[0] == a { t } else { 1.0 - t };
+        tri.split_edge(e, t)
+    }
+    .unwrap_or_else(|e| panic!("{}: {e}", case.name));
+    let v = inserted.vertex as usize;
+    let new_line = out.first("newvertex").expect("a newvertex line");
+    tally.equal("the new vertex", v, int(&new_line[1]));
+    tally.equal(
+        "the new vertex is on the boundary",
+        tri.is_boundary_vertex(v),
+        new_line[2] == "1",
+    );
+    for line in case.lines.iter().filter(|l| l[0] == "preflip") {
+        let e = edge_between(&tri, int(&line[1]), int(&line[2]));
+        tri.flip_edge(e)
+            .unwrap_or_else(|err| panic!("{}: preflip: {err}", case.name));
+    }
+    let place = |label: &str| -> Vec<String> {
+        out.all("loc")
+            .find(|l| l[1] == label)
+            .unwrap_or_else(|| panic!("no loc {label}"))[2..]
+            .to_vec()
+    };
+    compare_place(case, tri.vertex_location(v), &place("start"), "loc start", tally);
+    compare_state(&tri, out, "start", tally);
+    compare_odt(&tri, v, out, "start", tally);
+    let moves: Vec<&Line> = case.lines.iter().filter(|l| l[0] == "move").collect();
+    tally.equal("number of mq lines", out.all("mq").count(), moves.len());
+    for (i, line) in moves.iter().enumerate() {
+        let label = i.to_string();
+        let (who, d) = (int(&line[1]), [float(&line[2]), float(&line[3])]);
+        let result = out
+            .all("mr")
+            .find(|l| l[1] == label)
+            .unwrap_or_else(|| panic!("no mr {i}"));
+        let before = tri.clone();
+        match tri.move_vertex(who, d) {
+            Ok(moved) => {
+                tally.equal(&format!("move {i}"), "ok", result[2].as_str());
+                if result[2] != "ok" {
+                    continue;
+                }
+                tally.equal(
+                    &format!("move {i}: snapped"),
+                    moved.snapped.is_some(),
+                    result[3] == "1",
+                );
+                compare_place(case, moved.to, &place(&label), &format!("loc {i}"), tally);
+                compare_state(&tri, out, &format!("m{i}"), tally);
+                compare_odt(&tri, who, out, &format!("m{i}"), tally);
+            }
+            Err(error) => {
+                let (name, fraction) = move_refusal_name(&error);
+                tally.equal(&format!("move {i}"), "refused", result[2].as_str());
+                tally.equal(
+                    &format!("move {i}: the reason"),
+                    name,
+                    result.get(3).map_or("", |s| s.as_str()),
+                );
+                if let (Some(mine), Some(theirs)) = (fraction, result.get(4)) {
+                    tally.relative(
+                        &format!("move {i}: the admissible fraction"),
+                        mine,
+                        float(theirs),
+                        |t| &mut t.other,
+                    );
+                }
+                tally.equal(
+                    &format!("move {i}: a refusal changes nothing"),
+                    tri == before,
+                    true,
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn the_oracle_s_fixtures_replay() {
     let manifest = fixtures().join("MANIFEST.tsv");
@@ -1114,7 +1282,7 @@ fn the_oracle_s_fixtures_replay() {
             )
         })
         .collect();
-    assert_eq!(cases.len(), 18, "the oracle's README lists 18 cases");
+    assert_eq!(cases.len(), 24, "the oracle's README lists 24 cases");
     // One job per case, in parallel.
     let tallies: Vec<(String, String, Tally)> = std::thread::scope(|scope| {
         let handles: Vec<_> = cases
@@ -1141,6 +1309,7 @@ fn the_oracle_s_fixtures_replay() {
                         "trace" => replay_trace(&case, &out, &mut tally),
                         "edgetrace" => replay_edgetrace(&case, &out, &mut tally),
                         "circumcenter" => replay_circumcenter(&case, &out, &mut tally),
+                        "move" => replay_move(&case, &out, &mut tally),
                         other => panic!("{name}: unknown task {other}"),
                     }
                     (name.clone(), case.task.clone(), tally)

@@ -614,7 +614,13 @@ written from the paper and the cited papers.
   interpolated on the input edge it lies on, from the parameter of its neighbour along the
   boundary, as for an edge split (N10); the boundary edges keep their input edge. Moving it off
   the boundary would change the surface.
-  *Refusals change nothing*; a zero displacement changes nothing. `VertexMove::back_direction`
+  *Order of the tests* (the first that applies is the refusal): an index out of range, an input
+  vertex, a displacement that is not finite, a boundary vertex with a second component, an edge
+  to itself; then a zero displacement is accepted and changes nothing; then the star
+  (`NotInStar`), the shapes (`TooThin`), the place (`OnInputVertex`, `MoveNotLocated`). The
+  oracle tests the edge to itself before the boundary (its reading 62); no fixture has a move to
+  which both apply.
+  *Refusals change nothing*. `VertexMove::back_direction`
   is the direction of the old place in the new frame: moving by the same distance in it undoes
   the move (lengths to `1e-12`, signposts to `1e-10` in the tests).
 * **N20** *A larger motion.* `move_vertex` never shortens a step and never moves a vertex out
@@ -635,8 +641,13 @@ written from the paper and the cited papers.
   `(|T| ℓ_ab / 2, ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²) / 8)` in the frame of the side `ab` leaving `x`
   (`it-circumcenter-vector`); the mean is `it-odt-update`. For a planar star with a fixed link
   this is `−3/(2|ω|)` times the gradient of the energy of Chen and Holst's Lemma 4.2, Eq. 4.5
-  (checked by finite differences in `tests/reposition.rs`; the planar identity is machine-checked,
-  the energy minimization is cited, `it-odt-energy`).
+  (checked by finite differences in `tests/reposition.rs` and in the oracle's selftest;
+  machine-checked as a derivative, `hasFDerivAt_odtEnergy` in
+  `lean/proofs/DdgProofs/Intrinsic/Move.lean`, which also proves that this planar energy is
+  exactly quadratic in `x`, so that the step changes it by `−3|G|²/(4|ω|) α (2 − α)`: a descent
+  for `0 < α < 2`, the minimum at `α = 1`; that the optimal Delaunay triangulation minimizes the
+  interpolation error is cited, `it-odt-energy`). Chen and Holst halve `α` to keep the elements
+  valid, not for descent; so does N21's line search.
   *One iteration*: (1) split every edge longer than the target length at its midpoint, longest
   first (ties by id; edges made by these splits wait for the next iteration); a refused split
   (N10, too thin) is counted, not an error; (2) flip to Delaunay if anything was split;
@@ -672,8 +683,8 @@ written from the paper and the cited papers.
   boundary edges) stay where the split put them, as Chen and Holst keep boundary vertices
   fixed. `AlongBoundary`: they move along the boundary by the component of their update along
   it (N19). `OdtCenters::BarycentersAtBoundary` (default): a triangle with a vertex on the
-  boundary contributes its barycentre instead of its circumcentre (Chen and Holst 2011, Sec. 4,
-  "for boundary elements, use the barycenter": a stretched triangle at a boundary edge cannot
+  boundary contributes its barycentre instead of its circumcentre (Chen and Holst 2011, Sec. 4.2.1
+  of the preprint, "for boundary elements, use the barycenter": a stretched triangle at a boundary edge cannot
   be flipped away); `Circumcenters` is the paper's rule everywhere. On a closed surface the two
   are the same.
 
@@ -704,6 +715,18 @@ written from the paper and the cited papers.
   after iODT was `1.3e-11` on blub, `1.3e-10` on camelshotnoise (spikes, where most moves are
   stopped by the bound: 1640 vertex-iterations not moved), `8e-11` on cells 1:16, otherwise
   `4e-12` or less. The iteration also converges in fewer iterations (blub: 35 instead of 50).
+
+* **N26** *The oracle's moves* (as N17). `lean/oracle` has a task `move` written from the paper and
+  N10, N19, N21, N23, N24 without this crate's code: an insertion or a split on the fresh
+  triangulation, flips, then moves of the new vertex, printing after every move its place, the
+  triangulation and the update of N21 (both centre rules), and every refusal with its reason and
+  the admissible fraction. Its new signposts are computed differently (directions in the
+  unfolded star turned into the new frame, reading 67) and its place by its own tracing.
+  `tests/oracle.rs` replays the six fixtures `it-move-*` (flat grid inside a face, across faces,
+  onto and along input edges with snapping; refusals; a noisy icosphere with a vertex of degree
+  7; a vertex on an interior input edge; a boundary vertex) from the oracle's README. What the
+  oracle reads differently is in its readings 59 to 69 (the vertex is named in `move V DX DY`; the
+  order of the tests, see N19).
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
