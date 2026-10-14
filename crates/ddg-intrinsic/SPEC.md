@@ -30,12 +30,13 @@ distances of the surface do not depend on the triangulation; that is what every 
 ## 2. Scope
 
 In: the signpost data structure (paper Sec. 3.1), signpost update, tracing queries, vertex update
-(3.2), edge flip, vertex insertion, edge split (3.3), point queries and the overlay / common
-subdivision (3.4), Delaunay flipping (4.1), Delaunay refinement (4.2) including surfaces with
-boundary (N1), and what the cut flow needs to run on an intrinsic triangulation (§6).
+(3.2), edge flip, vertex insertion, edge split, vertex repositioning (3.3), point queries and the
+overlay / common subdivision (3.4), Delaunay flipping (4.1), Delaunay refinement (4.2) including
+surfaces with boundary (N1), the intrinsic optimal Delaunay triangulation (4.3; N19 to N23), and
+what the cut flow needs to run on an intrinsic triangulation (§6).
 
-Later: vertex repositioning and the optimal Delaunay triangulation (3.3.3, 4.3). Leave room for
-`move_vertex`; do not implement it now.
+(Vertex repositioning and the optimal Delaunay triangulation were "later" in the first version
+of this file and were added on 2026-10-14.)
 
 Out: the applications of the paper's Sec. 5.
 
@@ -97,6 +98,15 @@ Each follows the paper's algorithm of the same name; the reference shows the det
   manner of the planar algorithm. The report gives the inserted vertices, the smallest and largest
   angle reached, and why it stopped.
 
+* **Move a vertex** (Alg. 10): an inserted vertex by a vector in its own frame, inside its flat
+  star: new lengths by the law of cosines, signposts by the vertex update, the place on the
+  input mesh by a trace. Input vertices never move. What happens to a larger motion, and to
+  vertices on the boundary: N19, N20.
+* **Optimal Delaunay triangulation** (4.3): split edges longer than a target length, move every
+  movable inserted vertex towards the area-weighted mean of the vectors to the circumcentres of
+  its triangles (Chen and Holst 2011, Eq. 4.13), flip to Delaunay, repeat until a limit on the
+  iterations or a tolerance on the motion. Options and report: N21 to N23.
+
 ## 5. What must hold (tests)
 
 After any sequence of operations, on closed surfaces and surfaces with boundary, on well-shaped
@@ -122,6 +132,14 @@ deliberately bad meshes of `data/optimal-cones/…/data/`):
    lengths per edge, compared as sets) on the same inputs; for refinement, comparable counts and
    angle statistics.
 9. Bad input and failed traces are errors with a message that names the element; no NaN anywhere.
+10. After moves of inserted vertices (N19): items 1 to 3, 6 and the point queries hold; on a flat
+    input the moved vertex is at its old place plus the displacement and its edges have the
+    lengths of the straight segments; a move and the move back restore lengths and signposts; a
+    refused move changes nothing; input vertices never move.
+11. The optimal Delaunay triangulation (N21): the result is Delaunay after every iteration,
+    items 1 to 3 and 6 hold, input vertices are where they were, the run is deterministic, and
+    its update at a vertex is the area-weighted mean of the circumcentres in coordinates and
+    `−3/(2|ω|)` times the gradient of the energy of Chen and Holst (finite differences).
 
 Performance: be aware of it (the paper's Fig. 10 and its timing tables are the reference points);
 benches for flipping, edge tracing and overlay extraction on the same meshes as the other crates.
@@ -543,10 +561,127 @@ and from `crates/ddg-intrinsic/README.md`.
   larger than `Θ`, a signpost of `2π` or more) one subtraction is not enough, and the crate does
   not guard against them.
 
+Entries N19 to N23 were added with vertex repositioning and the optimal Delaunay triangulation
+(2026-10-14). The reference implementation has neither (geometry-central 76da12c has
+`removeInsertedVertex`, which flips the vertex to degree three and deletes it, and an extrinsic
+`smoothByCircumcenter` in `remeshing.cpp` that is not used by the demo); everything here is
+written from the paper and the cited papers.
+
+* **N19** *Moving a vertex* (Alg. 10). `move_vertex(v, displacement)`: `displacement` is a
+  vector in the frame of `v`, the frame its signposts refer to (N10: the frame of the input face
+  or edge it lies in; at a boundary vertex the boundary frame, `0` along the boundary halfedge
+  that leaves it, `π` along the one that arrives). Only inserted vertices move; an input vertex
+  is refused (`MoveRefusal::InputVertex`).
+  *The star.* `v` is flat (angle sum `2π`, or `π` on the boundary), so its star unfolds with `v`
+  at the origin and the far end of the halfedge `h` at `ℓ_h (cos φ_h, sin φ_h)`, `φ_h` the
+  signpost; in each triangle the end of the arriving side is at the direction `φ_h + θ` (`θ` the
+  corner angle from the lengths). A vertex with an edge to itself is refused (`SelfEdge`): its
+  star is not a disk around it.
+  *When the local update applies.* Exactly when the new place lies in the kernel of the star
+  polygon, i.e. every triangle of the star keeps a positive area. For the triangle on the link
+  side `d = k − j` twice the new area is `2A − v × d` (`it-move-area`), affine in `v`, so the
+  test is exact, and the largest admissible fraction of `v` is `min 2A/(v × d)` over the
+  triangles with `v × d > 0`. A move that turns a triangle over or makes it degenerate is
+  refused with that fraction (`NotInStar { face, fraction }`); a move that keeps the areas
+  positive but leaves a triangle below the shape limit of N5 (twice the area over the product
+  of the longer new edge and the longest side, `1e-6`) is refused (`TooThin`). The paper's test
+  (`|v|` below the smallest height of a triangle of the star over its link side) is sufficient
+  and stricter; it is not required, and `VertexMove::within_height_bound` says whether it held
+  (in `tests/reposition.rs` about half of the accepted random moves are beyond it).
+  *Lengths* (`it-move-length`): `ℓ' = √(r² + ℓ² − 2rℓ cos α)` with `r = |v|` and `α` the angle
+  between `v` and the edge, evaluated as `√((ℓ − r cos α)² + (r sin α)²)`. Only the edges at
+  `v` change.
+  *The place on the input mesh* is found before anything changes, by a trace over the input
+  mesh from the old place of `v` in the direction of `v` for `|v|`. Departure from Alg. 10, whose
+  vertex update traces from the neighbour `j₀` to `v`: the segment from the old to the new place
+  lies in the star, which has no other vertex, so in exact arithmetic both give the same point;
+  this trace is shorter and needs no other frame. Snapping as for an insertion (N10,
+  `LOCATION_SNAP`, reported in `VertexMove::snapped`). A trace that does not complete although
+  the move is inside the star is an inconsistency and an error (`MoveNotLocated`), not
+  repaired; an end at an input vertex is refused (`OnInputVertex`; it cannot happen in exact
+  arithmetic, because the star contains no vertex).
+  *Signposts* (vertex update, Sec. 3.2.3). Outgoing: the first halfedge of `v` gets the
+  direction of the trace back to the old place plus the angle, in the unfolded star, from the
+  direction back to the old place to the first neighbour; the others follow corner by corner
+  from the new lengths (`it-signpost-update`). Incoming: the halfedge from each neighbour `j`
+  gets the signpost of the side of the link that leaves `j`, updated by the new corner at `j`.
+  Nothing else changes.
+  *Edges along input edges.* After a move off the boundary the edges at `v` are no longer
+  marked as lying along an input edge (`edge_on_input`); they are traced (N8) like any other.
+  *Boundary.* A vertex inserted on the boundary moves along the boundary only (the paper does
+  not consider boundaries, cf. N1): in its frame the boundary is the x-axis, so the second
+  component of the displacement must be zero (`LeavesBoundary` otherwise). Its place is
+  interpolated on the input edge it lies on, from the parameter of its neighbour along the
+  boundary, as for an edge split (N10); the boundary edges keep their input edge. Moving it off
+  the boundary would change the surface.
+  *Refusals change nothing*; a zero displacement changes nothing. `VertexMove::back_direction`
+  is the direction of the old place in the new frame: moving by the same distance in it undoes
+  the move (lengths to `1e-12`, signposts to `1e-10` in the tests).
+* **N20** *A larger motion.* `move_vertex` never shortens a step and never moves a vertex out
+  of its star; a move outside the kernel is refused with the admissible fraction, and the caller
+  decides. The paper's general route (remove the vertex, retriangulate the flat polygon, insert
+  it again at the target, Sec. 3.3.3) is **not implemented**: it would remove an inserted vertex,
+  which nothing in this crate does (N10: ids only grow), and the optimal Delaunay iteration does
+  not need it (N21: a shortened step followed by flips reaches the same region of the surface in
+  later iterations). Open: a target outside the star, reached in one operation.
+
+* **N21** *The optimal Delaunay triangulation* (Sec. 4.3). `optimal_delaunay(options)`. The
+  update at a movable vertex `x` (`odt_target`) is Chen and Holst's Eq. 4.13 with uniform density
+  and step `α`: `x_new − x = α Σ_T |T| (c_T − x) / Σ_T |T|` over the triangles `T` of the star,
+  `c_T` the circumcentre. As the paper says, the vectors to the circumcentres are averaged, each
+  computed in the planar layout of its triangle around `x` and rotated into the frame of `x` by
+  the signpost of the triangle's halfedge leaving `x`; for an inserted vertex (flat) that is
+  the unfolded star. `|T| (c_T − x)` is evaluated without division as
+  `(|T| ℓ_ab / 2, ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²) / 8)` in the frame of the side `ab` leaving `x`
+  (`it-circumcenter-vector`); the mean is `it-odt-update`. For a planar star with a fixed link
+  this is `−3/(2|ω|)` times the gradient of the energy of Chen and Holst's Lemma 4.2, Eq. 4.5
+  (checked by finite differences in `tests/reposition.rs`; the planar identity is machine-checked,
+  the energy minimization is cited, `it-odt-energy`).
+  *One iteration*: (1) split every edge longer than the target length at its midpoint, longest
+  first (ties by id; edges made by these splits wait for the next iteration); a refused split
+  (N10, too thin) is counted, not an error; (2) flip to Delaunay if anything was split;
+  (3) move every movable inserted vertex in ascending order of its id, each with the update
+  computed from the current triangulation (Gauss–Seidel; the paper does not say), with the step
+  `α` of the options; a move that would leave the star or make a triangle too thin (N19) is
+  retried with `α/2, α/4, …` at most `max_halvings` times (Chen and Holst's line search, right
+  after their Eq. 4.13: "we use α = 1, 1/2, 1/4, … as a simple line search strategy"), then
+  the vertex stays for this iteration (counted, `n_not_moved`); a vertex with an edge to itself
+  is skipped (counted); (4) flip to Delaunay. The triangulation is Delaunay (the report of the
+  flips says so) after every iteration.
+  *Stopping*: converged when an iteration split nothing and moved no vertex by more than
+  `motion_tolerance` times the mean length of its edges (before the move); otherwise at
+  `max_iterations` (status `IterationLimit`) or when the splits reach `max_insertions` (status
+  `InsertionLimit`; that iteration's moves and flips are still made). Deterministic: the same
+  input and options give the same triangulation bit for bit.
+  *Target length*: `TargetLength::Absolute(h)`, `MeanInputEdge(k)` (`k` times the mean edge
+  length of the input mesh) or `NoSplits` (only vertices already inserted move, e.g. after
+  refinement). The paper names "a user-defined target length" (after Tournois et al. 2009) and
+  no default; ours is `MeanInputEdge(1.0)`.
+  *Report*: status, iterations, vertices added, every iteration (splits, refused splits, moves,
+  halved moves, vertices not moved or skipped, flips, largest motion absolute and relative),
+  the largest motion of the last iteration, the last Delaunay report, and the angle and area
+  distribution of the result (`ShapeStatistics`: angle quantiles, fractions below 10°/20°/30°
+  and above 90°/120°/150°, area max/min and coefficient of variation).
+  *Defaults*: 50 iterations, motion tolerance `1e-3`, `α = 1` (Chen and Holst's initial step) with
+  up to 8 halvings, at most 10 insertions per vertex (1000 at least, as refinement).
+* **N22** *Moves beyond the star in the optimal Delaunay iteration* (N20): the step is halved,
+  never clamped to the border of the star, and every halved or abandoned move is counted in the
+  report. The paper's general route (removal and re-insertion) is not used.
+* **N23** *Boundary in the optimal Delaunay triangulation* (the paper does not consider it; cf.
+  N1). `BoundaryVertices::Fixed` (default): inserted boundary vertices (from splits of long
+  boundary edges) stay where the split put them, as Chen and Holst keep boundary vertices
+  fixed. `AlongBoundary`: they move along the boundary by the component of their update along
+  it (N19). `OdtCenters::BarycentersAtBoundary` (default): a triangle with a vertex on the
+  boundary contributes its barycentre instead of its circumcentre (Chen and Holst 2011, Sec. 4,
+  "for boundary elements, use the barycenter": a stretched triangle at a boundary edge cannot
+  be flipped away); `Circumcenters` is the paper's rule everywhere. On a closed surface the two
+  are the same.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,
-`it-point-distances`, `it-circumcenter`; from `ddg-core`: `cotan-laplacian`, `lumped-mass`,
+`it-point-distances`, `it-circumcenter`, `it-move-length`, `it-move-area`,
+`it-circumcenter-vector`, `it-odt-update`; from `ddg-core`: `cotan-laplacian`, `lumped-mass`,
 `angle-defect`, `boundary-geodesic-curvature`. The lengths of an edge split are
 `it-point-distances` with the point on a side. The Lean theorems of §7 are in
 `lean/proofs/DdgProofs/Intrinsic/`, the citations in `lean/proofs/CITED.md`, and the oracle's

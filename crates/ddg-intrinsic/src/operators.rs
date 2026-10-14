@@ -49,6 +49,100 @@ impl Quality {
     }
 }
 
+/// A summary of a distribution of numbers: extremes, mean and quantiles. See
+/// [`ShapeStatistics`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Summary {
+    /// Number of values.
+    pub count: usize,
+    /// The smallest value.
+    pub min: f64,
+    /// The largest value.
+    pub max: f64,
+    /// The arithmetic mean.
+    pub mean: f64,
+    /// The standard deviation (of the values themselves, divided by `count`).
+    pub std_dev: f64,
+    /// The quantiles at 1 %, 10 %, 50 %, 90 % and 99 % (nearest rank).
+    pub quantiles: [f64; 5],
+}
+
+impl Summary {
+    /// The summary of `values` (sorted in place). All zero for no values.
+    pub fn of(values: &mut [f64]) -> Summary {
+        if values.is_empty() {
+            return Summary {
+                count: 0,
+                min: 0.0,
+                max: 0.0,
+                mean: 0.0,
+                std_dev: 0.0,
+                quantiles: [0.0; 5],
+            };
+        }
+        values.sort_unstable_by(f64::total_cmp);
+        let n = values.len();
+        let mean = values.iter().sum::<f64>() / n as f64;
+        let var = values.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / n as f64;
+        let quantile = |p: f64| values[(((n - 1) as f64) * p).round() as usize];
+        Summary {
+            count: n,
+            min: values[0],
+            max: values[n - 1],
+            mean,
+            std_dev: var.sqrt(),
+            quantiles: [0.01, 0.1, 0.5, 0.9, 0.99].map(quantile),
+        }
+    }
+}
+
+/// The distribution of the corner angles and of the triangle areas of a triangulation (paper
+/// Fig. 11 and 14 show the angles; Sec. 4.3 compares the areas). See
+/// [`IntrinsicTriangulation::shape_statistics`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShapeStatistics {
+    /// All corner angles, in radians.
+    pub angles: Summary,
+    /// The fractions of corners below 10°, 20° and 30°.
+    pub angles_below: [f64; 3],
+    /// The fractions of corners above 90°, 120° and 150° (by more than `1e-9` radians).
+    pub angles_above: [f64; 3],
+    /// The face areas.
+    pub areas: Summary,
+    /// The largest area over the smallest.
+    pub area_ratio: f64,
+    /// The coefficient of variation of the areas: their standard deviation over their mean.
+    pub area_cv: f64,
+}
+
+impl IntrinsicTriangulation {
+    /// The distribution of corner angles and face areas.
+    pub fn shape_statistics(&self) -> ShapeStatistics {
+        let mut angles: Vec<f64> = (0..self.n_halfedges()).map(|h| self.corner_angle(h)).collect();
+        let mut areas: Vec<f64> = (0..self.n_faces()).map(|f| self.face_area(f)).collect();
+        let n = angles.len().max(1) as f64;
+        let below = [10.0f64, 20.0, 30.0]
+            .map(|d| angles.iter().filter(|&&a| a < d.to_radians()).count() as f64 / n);
+        let above = [90.0f64, 120.0, 150.0].map(|d| {
+            angles
+                .iter()
+                .filter(|&&a| a > d.to_radians() + 1e-9)
+                .count() as f64
+                / n
+        });
+        let angles = Summary::of(&mut angles);
+        let areas = Summary::of(&mut areas);
+        ShapeStatistics {
+            angles,
+            angles_below: below,
+            angles_above: above,
+            areas,
+            area_ratio: areas.max / areas.min,
+            area_cv: areas.std_dev / areas.mean,
+        }
+    }
+}
+
 impl IntrinsicTriangulation {
     /// The cotangent of the angle opposite halfedge `h` in its face.
     pub(crate) fn opposite_cotan(&self, h: usize) -> f64 {

@@ -41,7 +41,14 @@
 //!   ([`SimplicialExport::check_state`]). Splitting does not keep an angle bound; the export
 //!   reports the angles it has.
 //!
-//! Not implemented: vertex repositioning and vertex removal.
+//! * Vertex repositioning inside the star of an inserted vertex
+//!   ([`IntrinsicTriangulation::move_vertex`], paper Sec. 3.3.3) and the intrinsic optimal
+//!   Delaunay triangulation ([`IntrinsicTriangulation::optimal_delaunay`], Sec. 4.3, after Chen
+//!   and Holst 2011), with angle and area statistics
+//!   ([`IntrinsicTriangulation::shape_statistics`]).
+//!
+//! Not implemented: vertex removal (and with it the paper's general route for a move beyond
+//! the star, SPEC N20).
 //!
 //! # Example
 //!
@@ -111,6 +118,7 @@ mod flip;
 pub mod formulas;
 mod input;
 pub mod insert;
+pub mod odt;
 mod operators;
 pub mod overlay;
 mod point;
@@ -131,7 +139,11 @@ pub use export::{ExportOptions, SimplicialExport};
 pub use flip::Flip;
 pub use input::InputSurface;
 pub use insert::Insertion;
-pub use operators::Quality;
+pub use odt::{
+    BoundaryVertices, OdtCenters, OdtIteration, OptimalDelaunayOptions, OptimalDelaunayReport,
+    OptimalDelaunayStatus, TargetLength,
+};
+pub use operators::{Quality, ShapeStatistics, Summary};
 pub use overlay::{Overlay, OverlayVertex};
 pub use point::SurfacePoint;
 pub use query::{PathOnInput, PathsOnInput, Segment};
