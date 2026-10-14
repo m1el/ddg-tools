@@ -51,6 +51,10 @@ STATE_KEY = "ddg_cut_state"
 OPTION_KEY = "ddg_cut_option"
 DEFAULT_OPTION = "intrinsic"
 DEFAULT_REFINE_BOUND = 25.0
+# Bends of the cut that deviate from the straight line between their neighbours by less than
+# this fraction of the longest edge of their triangle are removed before the cut is inserted
+# (intrinsic triangulations; the library's default).
+DEFAULT_MERGE_TOLERANCE = 0.1
 
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
@@ -129,7 +133,7 @@ def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND):
     return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation]
 
 
-def option_keywords(option, offset=None):
+def option_keywords(option, offset=None, merge=None):
     """The keywords of ``CutSession`` for an option string; ``offset`` is the smallest distance
     of a point of the cut from a vertex of the caller's triangles (intrinsic sessions)."""
     kind, _, bound = option.partition(":")
@@ -138,6 +142,8 @@ def option_keywords(option, offset=None):
         keywords["refine_bound"] = float(bound or DEFAULT_REFINE_BOUND)
     if kind != "caller" and offset is not None:
         keywords["min_offset"] = offset
+    if kind != "caller" and merge is not None:
+        keywords["merge_tolerance"] = merge
     return keywords
 
 
@@ -147,11 +153,14 @@ def write_state(mesh, session, option=None):
     state (the triangulation added vertices) the state bytes go to the mesh property too."""
     if option is not None:
         mesh[OPTION_KEY] = option
+    state_string = None
     if session.state_is_per_corner:
         if STATE_KEY in mesh:
             del mesh[STATE_KEY]
     else:
-        mesh[STATE_KEY] = base64.b64encode(session.snapshot()).decode("ascii")
+        state_string = base64.b64encode(session.snapshot()).decode("ascii")
+        mesh[STATE_KEY] = state_string
+    rows = []
     for k in range(session.n_regions):
         name = ATTRIBUTE_PREFIX + str(k)
         attribute = mesh.attributes.get(name)
@@ -161,11 +170,14 @@ def write_state(mesh, session, option=None):
             attribute = None
         if attribute is None:
             attribute = mesh.attributes.new(name, 'FLOAT', 'CORNER')
-        attribute.data.foreach_set("value", array('f', session.state_row(k)))
+        row = array('f', session.state_row(k))
+        attribute.data.foreach_set("value", row)
+        rows.append(row.tobytes())
     k = session.n_regions
     while mesh.attributes.get(ATTRIBUTE_PREFIX + str(k)) is not None:
         mesh.attributes.remove(mesh.attributes[ATTRIBUTE_PREFIX + str(k)])
         k += 1
+    return state_string, b"".join(rows)
 
 
 def remove_state(mesh):
@@ -196,7 +208,46 @@ def check_mesh(obj):
     return mesh
 
 
-def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
+# A session is kept between two operator calls (Start, Flow, Flow, ..., Apply) when nothing that
+# it was built from changed: the mesh buffers (positions, corners, polygons, the triangulation it
+# was given, seams), the triangulation option, the offsets, and the stored state. The buffers are
+# extracted every time (a few milliseconds) and compared by hash; the state is compared with what
+# the last call wrote (the attributes as float32 bytes, or the state string); if only the
+# attributes differ (edited by hand) the session gets them with `state =`. Building a session
+# costs the intrinsic triangulation, the symbolic analysis and the factorizations: 0.1 to 0.4 s
+# on a mesh of 30k vertices.
+_CACHE = {}
+_CACHE_SIZE = 4
+
+
+def cache_key(mesh, token, option, offset, merge):
+    """The key of a kept session; the offsets come from float32 operator properties, so they are
+    rounded."""
+    def r(x):
+        return None if x is None else round(x, 8)
+    return (mesh.name_full, token, option, r(offset), r(merge))
+
+
+def clear_cache():
+    _CACHE.clear()
+
+
+def gather(obj):
+    """The buffers of the mesh of ``obj`` as ``CutSession`` takes them, and a token that changes
+    when any of them does. Returns ``((positions, corner_vertices, polygon_starts, triangles,
+    seams), token)``. Polygons that an earlier cut split keep the triangulation the library chose
+    for them: Blender's own can be refused (collinear vertices) and is worse shaped."""
+    mesh = check_mesh(obj)
+    positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+    triangles, _ = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
+    seams = core.seam_edges(mesh)
+    token = hash((positions.tobytes(), corner_vertices.tobytes(), polygon_starts.tobytes(),
+                  triangles.tobytes(), seams.tobytes()))
+    return (positions, corner_vertices, polygon_starts, triangles, seams), token
+
+
+def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None, merge=None,
+                 gathered=None):
     """A ``ddg_tools.CutSession`` on the mesh of ``obj`` (existing seams are fixed cuts).
     ``start`` is a dict of the start keywords of the constructor, ``option`` the triangulation
     (``option_keywords``). Returns ``(session, seconds)`` with the time spent extracting the
@@ -204,18 +255,19 @@ def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
-    # Polygons that an earlier cut split keep the triangulation the library chose for them:
-    # Blender's own can be refused (collinear vertices) and is worse shaped.
-    triangles, _ = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
-    seams = core.seam_edges(mesh)
+    if gathered is None:
+        gathered, _ = gather(obj)
+    positions, corner_vertices, polygon_starts, triangles, seams = gathered
     extracted = perf_counter()
     keywords = dict(start)
     if "state" not in keywords:
         keywords["n_regions"] = n_regions
-        keywords.update(option_keywords(option, offset))
-    elif offset is not None and not option.startswith("caller"):
-        keywords["min_offset"] = offset
+        keywords.update(option_keywords(option, offset, merge))
+    elif not option.startswith("caller"):
+        if offset is not None:
+            keywords["min_offset"] = offset
+        if merge is not None:
+            keywords["merge_tolerance"] = merge
     try:
         session = ddg.CutSession(
             positions, corner_vertices, polygon_starts, triangles,
@@ -229,23 +281,68 @@ def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     return session, extracted - begin
 
 
-def open_session(obj, offset=None):
-    """The session of the cut stored on the mesh of ``obj``: from the state bytes if the mesh has
-    them, else from the per-corner attributes with the triangulation option stored at Start.
-    Returns ``(session, seconds, option)``."""
+def open_session(obj, offset=None, merge=None):
+    """The session of the cut stored on the mesh of ``obj``: the kept one if nothing changed (see
+    above), else from the state bytes if the mesh has them, else from the per-corner attributes
+    with the triangulation option stored at Start. Returns ``(session, seconds, option)``."""
+    session, seconds, option, _ = open_session_cached(obj, offset, merge)
+    return session, seconds, option
+
+
+def open_session_cached(obj, offset=None, merge=None):
+    """As ``open_session``, and the key the session is kept under."""
     mesh = check_mesh(obj)
+    begin = perf_counter()
     option = mesh.get(OPTION_KEY, DEFAULT_OPTION)
-    if STATE_KEY in mesh:
+    gathered, token = gather(obj)
+    key = cache_key(mesh, token, option, offset, merge)
+    entry = _CACHE.get(key)
+    state_string = mesh.get(STATE_KEY)
+    if entry is not None:
+        session = entry["session"]
+        if state_string is not None:
+            if entry["state"] == state_string:
+                return session, perf_counter() - begin, option, key
+        else:
+            n_regions, flat = read_state(mesh)
+            rows = [array('f', flat[k * len(mesh.loops):(k + 1) * len(mesh.loops)]).tobytes()
+                    for k in range(n_regions)]
+            if n_regions == session.n_regions and b"".join(rows) == entry["rows"]:
+                return session, perf_counter() - begin, option, key
+            if n_regions == session.n_regions:
+                try:
+                    session.state = flat       # edited by hand: the session takes them
+                except native().DdgError:
+                    del _CACHE[key]            # refused: the rebuild below says why, readably
+                else:
+                    entry["rows"] = b"".join(rows)
+                    return session, perf_counter() - begin, option, key
+    if state_string is not None:
         try:
-            state = base64.b64decode(mesh[STATE_KEY])
+            state = base64.b64decode(state_string)
         except ValueError as ex:
             raise CutFailed("The stored cut state of mesh '{}' is damaged. Run 'Cut: Start' "
                             "again.".format(mesh.name)) from ex
-        session, seconds = make_session(obj, {"state": state}, option=option, offset=offset)
-        return session, seconds, option
-    n_regions, flat = read_state(mesh)
-    session, seconds = make_session(obj, {"corner_values": flat}, n_regions, option, offset)
-    return session, seconds, option
+        session, _ = make_session(obj, {"state": state}, option=option, offset=offset,
+                                  merge=merge, gathered=gathered)
+    else:
+        n_regions, flat = read_state(mesh)
+        session, _ = make_session(obj, {"corner_values": flat}, n_regions, option, offset, merge,
+                                  gathered)
+    return session, perf_counter() - begin, option, key
+
+
+def remember(key, session, state_string, rows):
+    """Keeps ``session`` under ``key``, with what was written for its state."""
+    _CACHE[key] = {"session": session, "state": state_string, "rows": rows}
+    while len(_CACHE) > _CACHE_SIZE:
+        del _CACHE[next(iter(_CACHE))]
+
+
+def forget(mesh):
+    """Drops the kept sessions of ``mesh`` (it is about to change)."""
+    for key in [k for k in _CACHE if k[0] == mesh.name_full]:
+        del _CACHE[key]
 
 
 def selected_faces(mesh):
@@ -287,7 +384,8 @@ def labels_from_values(values, what):
 
 def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=None,
               selected_vertices=(), cluster_iterations=50, attribute="",
-              cut_offset=DEFAULT_CUT_OFFSET, triangulation='INTRINSIC',
+              cut_offset=DEFAULT_CUT_OFFSET, merge_tolerance=DEFAULT_MERGE_TOLERANCE,
+              triangulation='INTRINSIC',
               refine_bound=DEFAULT_REFINE_BOUND):
     """Creates the state of a cut on ``obj`` and its preview.
 
@@ -352,9 +450,14 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
     option = option_of(triangulation, refine_bound)
-    session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset)
+    forget(mesh)
+    gathered, token = gather(obj)
+    session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset,
+                                            merge_tolerance, gathered)
     begin = perf_counter()
-    write_state(mesh, session, option)
+    state_string, rows = write_state(mesh, session, option)
+    remember(cache_key(mesh, token, option, cut_offset, merge_tolerance), session, state_string,
+             rows)
     if LAST_FLOW_KEY in mesh:
         del mesh[LAST_FLOW_KEY]
     mesh.update()
@@ -658,7 +761,8 @@ def run_flow(obj, context, settings):
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    session, seconds_extract, option = open_session(obj, settings["cut_offset"])
+    session, seconds_extract, option, key = open_session_cached(
+        obj, settings["cut_offset"], settings["merge_tolerance"])
     n_regions = session.n_regions
     state_read = perf_counter()
     controls, info = flow_controls(obj, context, session, settings)
@@ -676,15 +780,20 @@ def run_flow(obj, context, settings):
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     solved = perf_counter()
-    write_state(mesh, session, option)
+    state_string, rows = write_state(mesh, session, option)
+    remember(key, session, state_string, rows)
     mesh.update()
     written = perf_counter()
-    n_patches = count_patches(mesh, session.corner_regions())
-    try:
-        n_triple_points = (len(session.describe_cut(
-            min_crossing_offset=settings["cut_offset"]).junction_polygon) if n_regions > 2 else 0)
-    except ddg.DdgError as ex:
-        raise _translate(ex) from ex
+    n_patches = session.n_patches
+    n_triple_points = 0
+    merge = {}
+    if n_regions > 2 or settings["show_advanced"]:
+        try:
+            described = session.describe_cut(min_crossing_offset=settings["cut_offset"])
+        except ddg.DdgError as ex:
+            raise _translate(ex) from ex
+        n_triple_points = len(described.junction_polygon) if n_regions > 2 else 0
+        merge = dict(described.report)
     update_preview(obj, session, settings["cut_offset"])
     previewed = perf_counter()
     summary = {k: v for k, v in report.items() if k != "steps"}
@@ -695,6 +804,7 @@ def run_flow(obj, context, settings):
     report["n_patches"] = n_patches
     report["n_triple_points"] = n_triple_points
     report["n_regions"] = n_regions
+    report["merge"] = merge
     intrinsic = session.intrinsic_report
     report["triangulation"] = option
     report["intrinsic"] = intrinsic
@@ -766,9 +876,14 @@ def triangulation_line(report):
     intrinsic = report.get("intrinsic")
     if intrinsic is None:
         return "triangulation: the mesh's own"
-    return "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
+    line = "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
         report["triangulation"], intrinsic["n_added"], intrinsic["min_angle_degrees"],
         intrinsic["max_angle_degrees"])
+    merge = report.get("merge")
+    if merge:
+        line += " | {} bends merged, cut moved by at most {:.3g} of an edge".format(
+            merge["n_merged_nodes"], merge["max_displacement_relative"])
+    return line
 
 
 def flow_summary(report, advanced=False):
@@ -904,40 +1019,43 @@ def insert_cut(mesh, cut, *, mark_seams=True, reference=None):
         raise CutFailed(
             "Mesh '{}' has shape keys; applying a cut would change its vertices. Apply or remove "
             "the shape keys first.".format(mesh.name))
+    n_old = len(mesh.polygons)
+    totals = array('I', bytes(4 * n_old))
+    mesh.polygons.foreach_get("loop_total", totals)
     bm = bmesh.new()
     try:
         bm.from_mesh(mesh)
         old_entries = core.read_triangulation(mesh)
-        stats, entries = _insert_cut(bm, cut, mark_seams, reference)
-        if old_entries is not None:
-            # Polygons the cut did not touch keep the triangulation they had.
+        stats, entries = _insert_cut(bm, cut, mark_seams, reference, totals)
+        if old_entries is not None and old_entries[2]:
+            # Polygons the cut did not touch keep the triangulation they had (the others are
+            # not faces any more: their vertex sets are gone).
+            keys = {tuple(sorted(v.index for v in f.verts)) for f in bm.faces}
             for key, triangles in old_entries[2].items():
-                entries.setdefault(key, triangles)
+                if key in keys:
+                    entries.setdefault(key, triangles)
         bm.to_mesh(mesh)
         if reference is not None or old_entries is not None:
-            keys = {tuple(sorted(v.index for v in f.verts)) for f in bm.faces}
-            core.write_triangulation(mesh, stats["n_vertices"], stats["n_polygons"],
-                                     {k: t for k, t in entries.items() if k in keys})
-            stats["n_triangulated"] = sum(1 for k in entries if k in keys)
+            core.write_triangulation(mesh, stats["n_vertices"], stats["n_polygons"], entries)
+            stats["n_triangulated"] = len(entries)
     finally:
         bm.free()
     mesh.update()
     return stats
 
 
-def _insert_cut(bm, cut, mark_seams, reference=None):
+def _insert_cut(bm, cut, mark_seams, reference=None, totals=None):
     bm.verts.ensure_lookup_table()
     bm.edges.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     n_points = cut.n_edge_points
     n_paths = cut.n_paths
-    face_starts = []
-    old_sizes = []
+    old_sizes = list(totals)
+    face_starts = [0] * len(old_sizes)
     corner = 0
-    for face in bm.faces:
-        face_starts.append(corner)
-        old_sizes.append(len(face.loops))
-        corner += len(face.loops)
+    for i, size in enumerate(old_sizes):
+        face_starts[i] = corner
+        corner += size
 
     loop_layers = _loop_layers(bm)
     vertex_layers = _vertex_layers(bm)
@@ -1197,55 +1315,50 @@ def _ordered(first, made):
 
 def _reference_triangulation(bm, reference, point_vertex, junction_vertex, interior_vertex,
                              old_sizes):
-    """The triangles of the polygons of the Rust insertion that were split or got extra vertices,
-    as ``{ascending vertex tuple: flat vertex triples}`` in the numbering of ``bm``."""
+    """The triangles of the polygons of the Rust insertion that were split or got extra vertices
+    (``reference.changed_*``), as ``{ascending vertex tuple: flat vertex triples}`` in the
+    numbering of ``bm``."""
     bm.verts.index_update()
     source = reference.vertex_source
-    vertex_of = []
-    for v in range(len(source) // 3):
-        kind, a, b = source[3 * v:3 * v + 3]
-        if kind == 0:
-            vertex_of.append(a)
-        elif kind == 1:
-            vertex_of.append(point_vertex[a].index)
-        elif kind == 2:
-            vertex_of.append(interior_vertex[(a, b)].index)
-        else:
-            vertex_of.append(junction_vertex[a].index)
-    starts = list(reference.polygon_starts)
-    corners = reference.corner_vertices
-    parents = reference.polygon_parent
-    children = {}
-    for parent in parents:
-        children[parent] = children.get(parent, 0) + 1
-    triangles = reference.triangles
-    n_polygons = len(starts)
-    by_polygon = {}
-    for t in range(len(triangles) // 3):
-        corners3 = triangles[3 * t:3 * t + 3]
-        by_polygon.setdefault(bisect.bisect_right(starts, corners3[0]) - 1, []).extend(corners3)
+    cache = {}
+
+    def vertex_of(v):
+        """The index in ``bm`` of vertex ``v`` of the Rust insertion (decoded when needed)."""
+        found = cache.get(v)
+        if found is None:
+            kind, a, b = source[3 * v:3 * v + 3]
+            if kind == 0:
+                found = a
+            elif kind == 1:
+                found = point_vertex[a].index
+            elif kind == 2:
+                found = interior_vertex[(a, b)].index
+            else:
+                found = junction_vertex[a].index
+            cache[v] = found
+        return found
+
+    vertices = reference.changed_vertices
+    vertex_starts = reference.changed_vertex_starts
+    triangles = reference.changed_triangles
+    triangle_starts = reference.changed_triangle_starts
     entries = {}
-    for p in range(n_polygons):
-        end = starts[p + 1] if p + 1 < n_polygons else len(corners)
-        size = end - starts[p]
-        if size <= 3:
-            continue
-        if children[parents[p]] == 1 and size == old_sizes[parents[p]]:
-            continue
-        vertices = [vertex_of[corners[c]] for c in range(starts[p], end)]
-        flat = [vertex_of[corners[c]] for c in by_polygon[p]]
-        entries[tuple(sorted(vertices))] = flat
+    for k in range(len(reference.changed_polygons)):
+        mine = [vertex_of(v) for v in vertices[vertex_starts[k]:vertex_starts[k + 1]]]
+        flat = [vertex_of(v) for v in triangles[3 * triangle_starts[k]:3 * triangle_starts[k + 1]]]
+        entries[tuple(sorted(mine))] = flat
     return entries
 
 
-def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
+def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET,
+              merge_tolerance=DEFAULT_MERGE_TOLERANCE):
     """Applies the cut stored in the state attributes of ``obj``: inserts it into the mesh
     (``insert_cut``), marks it as seams, and removes the preview and the state attributes.
     Returns a dict with the insertion's counts and the time spent."""
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    session, seconds_extract, option = open_session(obj, cut_offset)
+    session, seconds_extract, option = open_session(obj, cut_offset, merge_tolerance)
     try:
         cut = session.describe_cut(min_crossing_offset=cut_offset)
     except ddg.DdgError as ex:
@@ -1258,6 +1371,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
     n_vertices_before = len(mesh.vertices)
     seam_before = sum(core._seam_flags(mesh))
     stats = insert_cut(mesh, cut, mark_seams=mark_seams, reference=session.insert(cut))
+    forget(mesh)
     remove_state(mesh)
     remove_preview(obj)
     done = perf_counter()
@@ -1268,6 +1382,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
         "seams_before": seam_before,
         "n_triangulated": stats.get("n_triangulated", 0),
         "n_clamped_crossings": cut.n_clamped_crossings,
+        "merge": dict(cut.report),
         "warnings": list(session.warnings),
         "seconds_extract": seconds_extract,
         "seconds_native": described - begin - seconds_extract,

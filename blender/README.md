@@ -464,34 +464,75 @@ edge, junctions of any degree), so nothing else changes for the user.
   165 degree sheared grids and the needles-and-caps grid of `bad_mesh_study.rs` (built in the test)
   through Start, Flow, Apply and unwrap; a refined session with state bytes, the stale-state
   message and the unchanged bytes after a refused run; the triangulation line.
-* **Flipped UV triangles.** Recorded, not asserted, on the intrinsic triangulations: the
-  atlas of spot (eight clusters, weights 2 and 10, offsets 1e-3 and 0.2) has after Apply and
-  unwrap, by the library's count, 1, 1, 0, 0 flipped triangles on the intrinsic triangulation and 2, 2, 0,
-  4 on the refined one (the caller's triangulation: 0 in all four, asserted). Thin slivers from
-  points of the cut that are very close to vertices; the pipeline is being changed to merge
-  negligible bends before the insertion.
+* **Bends and flipped UV triangles.** The cut that comes back from an intrinsic triangulation
+  has bends inside faces; a bend that deviates from the straight line between its neighbours by
+  less than **Merge Bends** (`merge_tolerance`, default 0.1, 0 keeps every bend; on Start, Flow
+  (advanced) and Apply) of the longest edge of its triangle is removed before the cut is inserted
+  (`ddg_uv`'s `IntrinsicOptions::merge_tolerance`). The inserted cut can then differ from the one
+  the flow found by up to that fraction of an edge; the advanced Flow line and the Apply message
+  say how many bends were merged and the largest displacement. Flipped UV triangles after Apply
+  and unwrap, by the library's count (our own count on the triangulation the unwrap used agrees except
+  in two refined cells before merging: 4 against 1 and 2 against 1), **before** (merge 0) and **after** (0.1), `test_cut.py`, spot atlas with 8 clusters at the
+  length weights 2 and 10, cut offsets 1e-3 and 0.2:
+
+  | case | intrinsic before / after | refined before / after | caller before / after |
+  |------|-------------------------:|-----------------------:|----------------------:|
+  | spot w2, offset 1e-3 | 1 / 0 | 2 / 0 | 0 / 0 |
+  | spot w2, offset 0.2 | 1 / 0 | 2 / **1** | 0 / 0 |
+  | spot w10, offset 1e-3 | 0 / 0 | 0 / 0 | 0 / 0 |
+  | spot w10, offset 0.2 | 0 / 0 | 4 / **1** | 0 / 0 |
+  | sphere atlas 4 regions | 0 / 0 | 4 / 0 | 0 / 0 |
+  | sphere circle, the three bad grids (153, 165 degrees, needles and caps) | 0 / 0 | 0 / 0 | 0 / 0 |
+
+  Zero is asserted for every triangulation and case but the two **bold** ones. What remains there
+  (refined triangulation, cut offset 0.2, merge tolerance 0.1): one flipped triangle, the same in
+  both weights, 3D area 0.007 of the mean triangle, smallest angle 0.6 degrees; two bends
+  that deviate by 0.103 of an edge, just over the tolerance, make it. With a tolerance of 0.2
+  (largest displacement 0.103) both cases have none, which the test checks (a tolerance of 0.05
+  leaves 2 and 4 flipped triangles on the two cases).
 
 ### Cost of the cut operators
 
 `scripts/blender-test.sh --bench` (`blender/tests/bench_cut.py`, run alone), UV sphere, 32 514
 vertices, 32 768 faces, 130 560 corners; "library" is the time inside `ddg_tools.CutSession` (the
-intrinsic triangulation included), "add-on" the rest (mesh buffers, attributes, patch count,
-preview object, bmesh):
+intrinsic triangulation included), "add-on" the rest (mesh buffers, attributes, preview object,
+bmesh):
 
 | triangulation | operator | total ms | library ms | add-on ms |
 |---------------|----------|---------:|-----------:|----------:|
-| caller | Start | 109.6 | 90.7 | 18.9 |
-| caller | Flow (10 steps) | 1107.7 | 693.1 | 414.6 |
-| caller | Apply | 330.7 | 99.0 | 231.8 |
-| intrinsic | Start | 201.4 | 182.2 | 19.2 |
-| intrinsic | Flow (10 steps) | 1125.5 | 731.3 | 394.2 |
-| intrinsic | Apply | 419.6 | 185.6 | 234.0 |
-| refined | Start | 403.6 | 382.5 | 21.0 |
-| refined | Flow (10 steps) | 1494.8 | 1116.3 | 378.4 |
-| refined | Apply | 613.6 | 372.0 | 241.6 |
+| caller | Start | 111.8 | 92.9 | 18.9 |
+| caller | Flow (10 steps) | 641.6 | 577.9 | 63.7 |
+| caller | Apply | 122.2 | 22.6 | 99.6 |
+| intrinsic | Start | 188.1 | 170.5 | 17.6 |
+| intrinsic | Flow (10 steps) | 595.0 | 527.6 | 67.4 |
+| intrinsic | Apply | 128.1 | 22.6 | 105.6 |
+| refined | Start | 386.8 | 367.4 | 19.5 |
+| refined | Flow (10 steps) | 823.0 | 788.8 | 34.2 |
+| refined | Apply | 81.4 | 21.6 | 59.9 |
 
-The intrinsic triangulation costs about 90 ms at Start and 90 ms again at Apply here (each
-operator builds a new session); the flow steps themselves cost the same. The add-on side of Flow
-grew from 36 to about 400 ms with the patch count (a Python pass over all corners) and the
-preview; Apply's from 72 to about 230 ms with the stored triangulation and the general chains.
-(An earlier table with 726 / 156 ms totals was measured before both.)
+The add-on's share was 394 to 415 ms per Flow and 230 to 240 ms per Apply before this work
+(first measurements: 36 and 72 ms). Where it went (cProfile inside Blender, 32.5k-vertex
+sphere, the profiler inflates Python): **Flow**: the patch count, a Python union-find over all
+130k corners with 261k `join` calls (0.67 s profiled, about 330 ms real); then the session built
+anew at every call (0.17 s: the intrinsic triangulation, the symbolic analysis, the factorization)
+for a state that had just been written; the mesh buffers, the attributes and the preview about
+50 ms. **Apply**: the session built anew (0.17 s), the table of the library's triangulation of the
+split faces (0.16 s: a Python decoding of every vertex of the insertion and of every triangle
+of every polygon), the `sorted` of every face's vertex tuple to validate the stored entries (62
+ms), the per-face loop for sizes and starts (15 ms), then the bmesh work itself (about 90 ms: the
+chains, the data transfer, `from_mesh`, `to_mesh`). What was changed: the patch count is
+`CutSession.n_patches` (Rust, the same union-find; its cost is inside the library time); the library
+returns the triangulation of the polygons that changed (`InsertedMesh.changed_*`) so the add-on
+decodes only the vertices of those; the validation of stored entries runs only when an older
+triangulation exists; the sizes and starts come from `foreach_get`; and **a session is kept**
+between operator calls (`cut._CACHE`, four entries): the mesh buffers are extracted every time
+and compared by hash (positions, corners, polygons, the triangulation, seams), together with the
+option and the offsets; the state is compared with what the last call wrote (attributes as float32
+bytes, or the state string). If only the attributes differ they are handed to the session
+(`session.state = ...`; a refusal rebuilds it and so gives the readable message), if anything else
+differs the session is rebuilt. Start, Flow and Apply therefore share one session and Apply's
+library time falls from 100-190 ms to 22 ms. What is left in the add-on: Flow about 65 ms (buffers
+and hash 15, reading the attributes for the comparison 16, writing them 16, the preview, the
+mesh update), Apply about 100 ms (the bmesh chains and data transfer 60 to 90, `from_mesh` and
+`to_mesh` 20, buffers and attributes 30); the refined rows are smaller in Flow because the
+library's time grows. Not removed: the chains loop of Apply is Python (a bmesh call per chain).

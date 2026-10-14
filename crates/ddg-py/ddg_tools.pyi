@@ -156,6 +156,10 @@ class CutDescription:
         """``(positions, starts, closed, regions)``: the paths joined where exactly two meet."""
     @property
     def n_clamped_crossings(self) -> int: ...
+    @property
+    def report(self) -> dict[str, int | float]:
+        """``n_merged_nodes``, ``max_displacement``, ``max_displacement_relative``,
+        ``n_moved_points`` (all zero on the caller's triangulation, empty for ``unwrap``)."""
 
 @final
 class InsertedMesh:
@@ -188,6 +192,20 @@ class InsertedMesh:
     def polygon_region(self) -> array[int]:
         """``array('i')``: the region of every new polygon where the description says (a part
         next to a piece of the cut), else -1."""
+    @property
+    def changed_polygons(self) -> array[int]:
+        """New polygons (more than three corners) that were split or got extra vertices: the
+        ones whose triangulation an editor should keep. With ``changed_vertex_starts`` /
+        ``changed_vertices`` (their vertices in order) and ``changed_triangle_starts`` /
+        ``changed_triangles`` (3 vertices per triangle)."""
+    @property
+    def changed_vertex_starts(self) -> array[int]: ...
+    @property
+    def changed_vertices(self) -> array[int]: ...
+    @property
+    def changed_triangle_starts(self) -> array[int]: ...
+    @property
+    def changed_triangles(self) -> array[int]: ...
     @property
     def n_old_vertices(self) -> int: ...
 
@@ -233,6 +251,7 @@ class CutSession:
         triangulation: Literal["intrinsic", "caller", "refined"] = "intrinsic",
         refine_bound: float | None = None,
         min_offset: float | None = None,
+        merge_tolerance: float | None = None,
         state: Buffer | None = None,
         seam_edges: Buffer | None = None,
         pinned_vertices: Buffer | None = None,
@@ -252,7 +271,11 @@ class CutSession:
         ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
         ``StaleStateError`` if the mesh or seams changed). ``min_offset`` (intrinsic and refined
         only; default the library's 1e-6): every point of the cut keeps at least this fraction of
-        a side from the vertices and sides of the caller's triangle it lies in. Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
+        a side from the vertices and sides of the caller's triangle it lies in. ``merge_tolerance`` (intrinsic and refined only; default the library's 0.1 of an edge,
+        0 switches it off): bends of the returned cut that deviate from the straight line between
+        their neighbours by less than this fraction of the longest edge of their triangle are
+        removed (the described cut can move by up to that much); ``CutDescription.report`` says
+        how many. Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
         ``polygon_labels`` (one label per polygon below ``n_regions``), ``corner_values``
         (``(n_regions, n_corners)``) or ``cluster_iterations`` (the vertex normals clustered into
         ``n_regions`` clusters in at most that many rounds: the start of the atlas). Any number
@@ -260,6 +283,10 @@ class CutSession:
         this."""
     @property
     def triangulation(self) -> Literal["intrinsic", "caller", "refined"]: ...
+    @property
+    def n_patches(self) -> int:
+        """Connected pieces of the surface in one region (corners joined along polygons and
+        across edges that are not seams)."""
     @property
     def state_is_per_corner(self) -> bool:
         """True when ``state`` (one value per polygon corner) is the whole state; False when the

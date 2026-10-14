@@ -677,10 +677,12 @@ def operators_are_registered_with_the_agreed_properties():
     rna = bpy.ops.uv.ddg_cut_start.get_rna_type()
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
-                               "attribute", "cut_offset", "triangulation", "refine_bound"}, \
+                               "attribute", "cut_offset", "triangulation", "refine_bound",
+                               "merge_tolerance"}, \
         sorted(properties)
     assert properties["triangulation"].default == ARGS.triangulation.upper()
     assert properties["refine_bound"].default == 25.0
+    assert abs(properties["merge_tolerance"].default - 0.1) < 1e-6
     assert [i.identifier for i in properties["triangulation"].enum_items] == [
         'INTRINSIC', 'REFINED', 'CALLER']
     assert properties["mode"].default == 'SELECTED'
@@ -710,7 +712,7 @@ def operators_are_registered_with_the_agreed_properties():
     assert properties["distortion_weights"].array_length == 16
     rna = bpy.ops.uv.ddg_cut_apply.get_rna_type()
     properties = {p.identifier for p in rna.properties if p.identifier != "rna_type"}
-    assert properties == {"unwrap_after", "cut_offset"}, properties
+    assert properties == {"unwrap_after", "cut_offset", "merge_tolerance"}, properties
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
         names = [f.__name__ for f in menu.draw._draw_funcs]
         assert "_draw_menu_entry" in names, names
@@ -1132,6 +1134,14 @@ def models_with_boundary_keep_their_boundary():
 FLIP_RECORD = []
 
 
+def KNOWN_FLIP(offset):
+    """The one case that is not zero today: the refined triangulation with a cut offset of 0.2 on
+    the spot atlas has one sliver (3D area 0.007 of the mean, smallest angle 0.6 degrees) from a
+    bend that deviates by 0.103 of an edge, just over the default merge tolerance of 0.1; with
+    a tolerance of 0.2 it is gone (checked in the table test below)."""
+    return ARGS.triangulation == "refined" and offset >= 0.2
+
+
 def atlas_of_spot(weight, expect_zero_flips, lam=0.1, offset=CUT_OFFSET):
     core = importlib.import_module(ARGS.module + ".core")
     obj = spot_object()
@@ -1179,11 +1189,10 @@ def atlas_of_spot(weight, expect_zero_flips, lam=0.1, offset=CUT_OFFSET):
     # On the caller's triangulation nothing flips (the stored triangulation of Apply). On an
     # intrinsic one a few slivers can still flip after the unwrap (known; the pipeline is being
     # changed): recorded, not asserted.
-    if expect_zero_flips and ARGS.triangulation == "caller":
+    FLIP_RECORD.append((ARGS.triangulation, weight, offset, flipped, library_flipped))
+    if expect_zero_flips and not KNOWN_FLIP(offset):
         assert flipped == 0 and library_flipped == 0, "{} flipped triangles of {}".format(
             flipped, len(areas))
-    else:
-        FLIP_RECORD.append((ARGS.triangulation, weight, offset, flipped, library_flipped))
     return charts, islands, flipped
 
 
@@ -1514,6 +1523,46 @@ def refined_session_keeps_its_state_in_bytes_and_notices_a_stale_one():
 
 
 @test
+def sessions_are_kept_between_calls_and_rebuilt_when_the_mesh_changes():
+    cutmod = importlib.import_module(ARGS.module + ".cut")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=5)
+    first, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert flow(steps=2) == {'FINISHED'}
+    second, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert second is first, "the session was rebuilt although nothing changed"
+    # The patch count of the library is the one of an independent pass over the corners.
+    assert second.n_patches == cutmod.count_patches(mesh, second.corner_regions())
+    # Attributes edited by hand: the kept session takes them (no state bytes then).
+    if "ddg_cut_state" not in mesh:
+        rows = state(mesh)
+        values = array.array('f', (-v for v in rows[0]))
+        mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", values)
+        mesh.attributes["ddg_cut_region_1"].data.foreach_set("value", array.array('f', rows[0]))
+        third, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        assert third is first
+        assert max(abs(a + b) for a, b in zip(third.state_row(0), rows[0])) < 1e-6
+        load_state(mesh, (rows, None, mesh.get("ddg_cut_option")))
+    # Another offset, a moved vertex, a changed seam: a new session.
+    other, _, _ = cutmod.open_session(obj, 0.05, 0.1)
+    assert other is not first
+    original_x = mesh.vertices[3].co.x
+    mesh.vertices[3].co.x += 0.01
+    if "ddg_cut_state" in mesh:
+        # The state bytes belong to the triangulation of the unmoved mesh: stale.
+        expect_error("changed since 'Cut: Start'", bpy.ops.uv.ddg_cut_flow, **FLOW)
+        mesh.vertices[3].co.x = original_x
+    else:
+        moved, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        assert moved is not first
+    assert flow(steps=1) == {'FINISHED'}
+    # Apply drops the kept sessions of the mesh.
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert not [k for k in cutmod._CACHE if k[0] == mesh.name_full]
+
+
+@test
 def flow_report_has_a_triangulation_line_in_the_advanced_view_only():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     start_circle(obj, vertex=5)
@@ -1523,6 +1572,98 @@ def flow_report_has_a_triangulation_line_in_the_advanced_view_only():
     with CaptureOutput() as out:
         assert flow(steps=1, show_advanced=True) == {'FINISHED'}
     assert "triangulation:" in out.text, out.text
+
+
+# ----------------------------------------------------------------------------------------------
+# Flipped UV triangles: before (bends kept) and after (bends merged)
+
+
+def unwrap_flips(obj):
+    """(the library's count, our count on the triangulation the unwrap used, charts)."""
+    core = importlib.import_module(ARGS.module + ".core")
+    mesh = obj.data
+    stats = core.unwrap_object(obj, use_seams=True, mark_cuts_as_seams=False)
+    layer = mesh.uv_layers.active
+    uvs = array.array('f', bytes(8 * len(mesh.loops)))
+    mesh.attributes[layer.name].data.foreach_get("vector", uvs)
+    _, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+    triangles, _ = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
+    areas = []
+    for k in range(0, len(triangles), 3):
+        (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in triangles[k:k + 3])
+        areas.append(0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)))
+    mean = sum(abs(a) for a in areas) / len(areas)
+    own = sum(1 for a in areas if a < -1e-3 * mean)
+    return stats["report"].get("n_flipped_uv_triangles", 0), own, stats["report"].get("n_charts")
+
+
+def flip_case(label, make, start, flow_props, offset, merge):
+    reset()
+    obj = make()
+    mesh = obj.data
+    props = dict(start)
+    if props.get("mode") == 'CIRCLE' and props.get("vertex") == "centre":
+        centre = Vector((0.511, 0.493, 0.0))
+        props["vertex"] = min(range(len(mesh.vertices)),
+                              key=lambda i: (mesh.vertices[i].co - centre).length)
+    assert bpy.ops.uv.ddg_cut_start(cut_offset=offset, merge_tolerance=merge, **props) \
+        == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_flow(cut_offset=offset, merge_tolerance=merge, **flow_props) \
+        == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply(cut_offset=offset, merge_tolerance=merge) == {'FINISHED'}
+    return unwrap_flips(obj)
+
+
+def flip_cases():
+    spot_flow = dict(steps=60, use_stop_rule=True, length_mode='EXPLICIT', stages='RECOMMENDED')
+    clusters8 = dict(mode='CLUSTERS', regions=8, cluster_iterations=50)
+    flat_flow = dict(steps=20, use_stop_rule=False, length_mode='RIPPLE', ripple_wavelength=0.25,
+                     use_uniform_curvature=True, uniform_curvature=5.0)
+    flat_start = dict(mode='CIRCLE', radius=0.25, vertex="centre")
+    sphere = lambda: primitive("uv_sphere", segments=24, ring_count=12)    # noqa: E731
+    cases = [
+        ("spot atlas8 w2", spot_object, clusters8, dict(spot_flow, length_weight=2.0)),
+        ("spot atlas8 w10", spot_object, clusters8, dict(spot_flow, length_weight=10.0)),
+        ("sphere atlas4", sphere, dict(mode='CLUSTERS', regions=4),
+         dict(steps=6, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.3)),
+        ("sphere circle", sphere, dict(mode='CIRCLE', radius=0.9, vertex=5),
+         dict(steps=6, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1)),
+        ("sheared 153", lambda: mesh_object("s153", *sheared_grid(32, 2.0)), flat_start, flat_flow),
+        ("needles and caps", lambda: mesh_object("nc", *needles_and_caps_grid(32)), flat_start,
+         flat_flow),
+        ("sheared 165", lambda: mesh_object(
+            "s165", *sheared_grid(32, 1.0 / math.tan(math.radians(15.0)))), flat_start, flat_flow),
+    ]
+    return cases
+
+
+@test
+def no_flipped_uv_triangle_after_apply_and_unwrap_before_and_after_merging_bends():
+    """The same cuts with the bends of the cut kept (merge 0) and merged (the default 0.1): the
+    library's count and ours, per case and offset. Asserted: zero with the bends merged."""
+    rows = []
+    for label, make, start, flow_props in flip_cases():
+        for offset in ((CUT_OFFSET, 0.2) if label.startswith("spot") else (CUT_OFFSET,)):
+            if label.startswith("spot") and not os.path.exists(ARGS.spot):
+                raise Skip("{} is not present".format(ARGS.spot))
+            before = flip_case(label, make, start, flow_props, offset, 0.0)
+            after = flip_case(label, make, start, flow_props, offset, 0.1)
+            rows.append((label, offset, before, after))
+            print("  FLIPTABLE [{}] {:<18s} offset {:<6g} before: library {} ours {} | after: "
+                  "library {} ours {} (charts {} -> {})".format(
+                      ARGS.triangulation, label, offset, before[0], before[1], after[0], after[1],
+                      before[2], after[2]))
+    bad = [r for r in rows if (r[3][0] != 0 or r[3][1] != 0) and not KNOWN_FLIP(r[1])]
+    assert not bad, "flipped triangles with the bends merged: {}".format(bad)
+    known = [r for r in rows if KNOWN_FLIP(r[1]) and (r[3][0] != 0 or r[3][1] != 0)]
+    if known:
+        # A larger merge tolerance removes them: the bend that causes it deviates by 0.103.
+        for label, offset, _, _ in known:
+            label_, make, start, flow_props = next(c for c in flip_cases() if c[0] == label)
+            again = flip_case(label, make, start, flow_props, offset, 0.2)
+            print("  FLIPTABLE [{}] {} offset {:g} with merge tolerance 0.2: library {} ours {}"
+                  .format(ARGS.triangulation, label, offset, again[0], again[1]))
+            assert again[0] == 0 and again[1] == 0, (label, offset, again)
 
 
 # ----------------------------------------------------------------------------------------------
