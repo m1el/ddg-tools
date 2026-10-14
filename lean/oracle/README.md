@@ -833,6 +833,7 @@ numbered readings continue the list [above](#choices-where-the-spec-is-ambiguous
   `|grad phi| = |phi_a| |pq| / (2 area(a, p, q))` per segment (the area of the `(a, p, q)` sub-triangle, `phi` the scaled input).
   A segment with `phi_a = 0` has `|grad phi| = 0`; since SPEC 36f50cc (§3.9, D23) such a face is left out of both sums and a piece without
   any counted face has `g = 1` (the earlier literal reading, `g = 0`, is gone; no fixture of `cuts-default` has a zero slope, so none changed).
+  Since D30 a face with a *moved* crossing is left out as well (see the last section).
 * the local extension: at a cut-adjacent vertex `i`, `sigma_i = sum_p l_p beta_ip (g r)_p / sum_p l_p beta_ip` over the crossed edges at `i`
   (`beta_ip = 1 - t` if `i` is the smaller end of the edge, `t` otherwise); then ring by ring (BFS by uncrossed edges),
   `sigma_i = mean of sigma_j weighted by 1/l_ij` over the neighbours `j` with ring one less (all neighbours of the
@@ -1374,3 +1375,27 @@ the text format round trip.
     distance is the layout distance, the direction a unit vector; a circumcenter that coincides with the barycentre is reported as `end` in the same face without a trace.
 57. Nothing in the paper or SPEC covers a ray that passes exactly through a vertex of the path; the executable stops there (`vertex`) if length is left, as in SPEC N7. Other
     degenerate directions are not handled (not generic in the fixtures).
+
+# Revision D30 (moved crossings and the mean slope, SPEC 3722546)
+
+A crossed face counts in the mean slope `g` of its piece only if **neither of its two crossings was moved** into `[delta, 1 - delta]` and its slope is
+positive (§3.9, D23, D30). A piece without a counted face has `g = 1`. The same holds for `N` regions (faces with two regions; faces with three regions
+were never counted). This changes no earlier fixture: `cmp` of every `.in` of the nine sets against its `.out` shows no difference (no existing
+fixture has a moved crossing together with `speed mean_gradient`).
+
+**Format 4 of `cuts`** (`format 4` after `format 3`; everything of format 3) and **format 3 of `regions`** add, after the `dw` lines (`cuts`, before `vlimit`/`hv`)
+or before the `vlimit` lines (`regions`):
+
+```
+gradstats N MIN MEAN MAX        over the faces that count: their number, the smallest, the arithmetic mean and the largest |grad phi| (0 0 0 if none)
+gr I LEN GRAD COUNTED           x NSEG  per segment, in the order of the `g` lines: its length, |grad phi| = |phi_a| LEN / (2 area(a, p, q)) (regions: with
+                                 (1/2)|phi_i(a) - phi_j(a)| for |phi_a|; 0 for a segment to a triple point), COUNTED 1 if the face counts
+```
+
+These lines are printed whatever the speed scaling is. New fixtures: `cuts-robust/rb-moved-some` (a flat disk, six vertices of the start circle set to `+-1e-15`, 24 of 62 faces
+have a moved crossing; `g = 0.998`, while counting them would give `2.5e-8`) and `rb-moved-all` (every vertex of the inside that touches the outside is `-1e-15`: all 56 crossings are
+moved, no face counts, `g = 1`); `regions-robust/rr-moved-default`, `rr-moved-paper` (4 regions on a sphere, six vertices with `phi_i - phi_j = -1e-15`: 14 crossings moved, 52 faces count).
+Self-tests: `g` of the piece equals the mean over the faces without a moved crossing (difference 0, an independent recomputation); with every face moved `g = 1`; three caps without a moved
+crossing give `g` to the last bit of the previous rule; `N = 2` through the N-region code equals the two-region code on both new cases (`2e-15`).
+
+Reading 58: the statistics `MIN`, `MEAN`, `MAX` are over the counted faces, the mean is arithmetic and unweighted (SPEC does not say which mean the "statistics" are).

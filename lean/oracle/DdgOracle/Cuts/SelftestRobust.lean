@@ -139,6 +139,57 @@ def selftestRobust : IO Nat := do
       if !(gradientNormLone (r.phi.get! sg.lone) sg.len t.area > 0) then nz := nz + 1
     check tally s!"zero slope (phi = z, exactly 0 at vertices): {nz} crossed faces with |grad phi| = 0 are left out, gbar is positive and finite"
       (nz > 0 && allPos) s!"gbar in {sci (st.gbar.foldl min posInf)} .. {sci (st.gbar.foldl max negInf)}"
+  -- D30: a face with a moved crossing does not count in the mean slope
+  let oldMean := fun (cm : CutMesh) (phi : FloatArray) (countMoved : Bool) => Id.run do
+    -- one piece assumed per call: sums over all segments (the closed circle / the single cut)
+    let mut sL := fzero
+    let mut sLG := fzero
+    for sg in cm.segs do
+      let t := cm.tris[sg.tri]!
+      let g := gradientNormLone (phi.get! sg.lone) sg.len t.area
+      let moved := cm.crossings[sg.p]!.moved || cm.crossings[sg.q]!.moved
+      if g > 0 && (countMoved || !moved) then
+        sL := sL + sg.len
+        sLG := sLG + sg.len / g
+    return if sL > 0 then sL / sLG else 1.0
+  for f in robustFixtures do
+    if f.case.name == "rb-moved-some" || f.case.name == "rb-moved-all" then
+      match runOk f.case with
+      | none => check tally s!"{f.case.name}: step runs" false
+      | some r =>
+        let st := r.stage2.get!
+        let cm := r.ev.cm
+        let mut nMoved := 0
+        for sg in cm.segs do
+          if cm.crossings[sg.p]!.moved || cm.crossings[sg.q]!.moved then nMoved := nMoved + 1
+        let expected := oldMean cm r.phi false
+        let withMoved := oldMean cm r.phi true
+        let mut maxDiff := fzero
+        for k in [0:cm.nc] do maxDiff := max maxDiff ((st.gbar.get! k - expected).abs)
+        if f.case.name == "rb-moved-some" then
+          check tally s!"{f.case.name}: {nMoved} of {cm.segs.size} faces have a moved crossing; gbar of the piece = mean over the other faces ({sci expected}; counting them would give {sci withMoved})"
+            (nMoved > 0 && nMoved < cm.segs.size && maxDiff ≤ 1e-15 && withMoved < 0.5 * expected) s!"difference {sci maxDiff}"
+        else
+          check tally s!"{f.case.name}: every one of the {cm.segs.size} faces has a moved crossing; gbar = 1"
+            (nMoved == cm.segs.size && maxDiff == 0 && expected == 1.0) s!"gbar {sci (st.gbar.get! 0)}"
+  -- a state without moved crossings: gbar equals the mean over all faces with a positive slope, to the last bit
+  let mut sameBits := true
+  for (nm, m, phi) in [("cap 1.0", ico2, capPhi),
+                       ("cap 0.7", ico2, phiOf ico2 fun p => Float.acos p.z - 0.7),
+                       ("cap 1.3", ico2, phiOf ico2 fun p => Float.acos p.z - 1.3)] do
+    match runOk (withRobust (mkCase nm m phi)) with
+    | none => sameBits := false
+    | some r =>
+      let cm := r.ev.cm
+      let mut anyMoved := false
+      for cr in cm.crossings do if cr.moved then anyMoved := true
+      let st := r.stage2.get!
+      let a := (st.gbar.get! 0)
+      let b := oldMean cm r.phi true
+      if anyMoved then sameBits := false
+      if a.toBits != b.toBits then sameBits := false
+  check tally "no moved crossing: gbar is unchanged to the last bit (three caps on icosphere 2)" sameBits
+
   let t ← tally.get
   IO.println s!"cuts-selftest (robust): {t.passed} passed, {t.failed} failed"
   return t.failed

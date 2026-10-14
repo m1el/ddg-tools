@@ -98,8 +98,8 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Reg
   let format ← match kv.get? "format" with
     | none => pure 1
     | some l =>
-      if l.size != 2 || l[1]! != "2" then throw "format: expected 'format 2'"
-      pure 2
+      if l.size != 2 || (l[1]! != "2" && l[1]! != "3") then throw "format: expected 'format 2' or 'format 3'"
+      pure (if l[1]! == "3" then 3 else 2)
   if format == 1 && kv.contains "statistics" then throw "line 'statistics' needs 'format 2'"
   let need := fun (k : String) =>
     match kv.get? k with
@@ -236,8 +236,8 @@ def printCase (c : RegionCase) : String := Id.run do
   s := s ++ s!"delta {hx c.delta}\n"
   s := s ++ s!"stages {match c.stages with | .paper => "paper" | .dflt => "default"}\n"
   s := s ++ s!"featurelap {if c.featPos then "positive" else "cotan"}\n"
-  if c.format == 2 then
-    s := s ++ s!"format 2\nstatistics {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
+  if c.format ≥ 2 then
+    s := s ++ s!"format {c.format}\nstatistics {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
   if let some cl := c.classes then
     s := s ++ s!"classes {" ".intercalate (cl.toList.map toString)}\n"
   return s ++ "end\n"
@@ -307,7 +307,7 @@ def printStep (c : RegionCase) (r : RStep) : String := Id.run do
     s := s ++ s!"er {X} {hx ev.Js[X]!} {hx ev.As[X]!}\n"
   s := s ++ s!"tau {hx r.tau} {hx r.hMin} {hx r.rhoMax}\n"
   s := s ++ s!"omega {hx r.omega}\nlimits {hx r.limits.1} {hx r.limits.2.1} {hx r.limits.2.2}\n"
-  if c.format == 2 then
+  if c.format ≥ 2 then
     let mut nlim := 0
     match r.vlimit with
     | some (_, _, fv) =>
@@ -329,7 +329,33 @@ def printStep (c : RegionCase) (r : RStep) : String := Id.run do
             let t := net.triples[g - nv - nP]!
             min (r.hP.get! t.p0) (min (r.hP.get! t.p1) (r.hP.get! t.p2))
         s := s ++ s!"hc {rv.X} {rv.toCopy[j]!} {hx h} {hx ((r.factor[rv.X]!).get! j)} {hx ((r.rBefore[rv.X]!).get! j)} {hx ((r.rAfter[rv.X]!).get! j)}\n"
-  if c.format == 2 then
+  if c.format == 3 then
+    let mut cnt := 0
+    for sg in net.segs do
+      if !sg.toTriple then cnt := cnt + 0
+    let gsegs := net.segs.map fun sg =>
+      if sg.toTriple then (0.0, false)
+      else
+        let t := net.tris[sg.tri]!
+        let i := net.region[sg.lone]!
+        let j := if sg.regA == i then sg.regB else sg.regA
+        let dphi := (((r.phis[i]!).get! sg.lone) - ((r.phis[j]!).get! sg.lone)).abs / 2
+        let g := gradientNormLone dphi sg.len t.area
+        (g, g > 0 && !(net.cps[sg.g1 - nv]!.moved || net.cps[sg.g2 - nv]!.moved))
+    let mut nc := 0
+    let mut gmin := posInf
+    let mut gmax := negInf
+    let mut gsum := fzero
+    for (g, ok) in gsegs do
+      if ok then
+        nc := nc + 1
+        gmin := min gmin g
+        gmax := max gmax g
+        gsum := gsum + g
+    s := s ++ s!"gradstats {nc} {hx (if nc == 0 then 0.0 else gmin)} {hx (if nc == 0 then 0.0 else gsum / Float.ofNat nc)} {hx (if nc == 0 then 0.0 else gmax)}\n"
+    for si in [0:gsegs.size] do
+      s := s ++ s!"gr {si} {hx net.segs[si]!.len} {hx gsegs[si]!.1} {if gsegs[si]!.2 then 1 else 0}\n"
+  if c.format ≥ 2 then
     if let some (hv, omv, fv) := r.vlimit then
       s := s ++ "vlimit 1\n"
       for i in [0:nv] do

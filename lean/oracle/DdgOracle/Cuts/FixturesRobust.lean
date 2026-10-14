@@ -26,6 +26,12 @@ def vertexAtPolarAngle (m : RawMesh) (psi : Float) : Nat := Id.run do
       best := i
   return best
 
+/-- Topology of a mesh (for the neighbours of a vertex). -/
+def triOfMesh (m : RawMesh) : Option Topology :=
+  match buildTopology m.pos.size m.faces (connected := false) with
+  | .ok t => some t
+  | .error _ => none
+
 /-- The vertex nearest to a point. -/
 def nearestVertex (m : RawMesh) (q : Point Float) : Nat := Id.run do
   let mut best := 0
@@ -79,6 +85,34 @@ def robustFixtures : Array Fixture := Id.run do
   fs := add fs { withRobust (mkCase "rb-torus-hencky" torusM (phiOf torusM fun p => Float.cos (3 * Float.atan2 p.y p.x) - 0.2)) with
       energy := .hencky, alphaL := 0.5 }
     "robust, default stages, torus, Hencky"
+  -- D30: vertices on the cut to rounding, so that crossings are moved by delta
+  let flat := (polar 10 28 0.0 1.0 fun _ _ => 0.0).jitter 0.004 24
+  let rho := 0.3 * Float.sqrt Ddg.floatPi
+  let radial := phiOf flat fun p => Float.sqrt (p.x * p.x + p.y * p.y) - rho
+  -- the six vertices nearest to the circle lie on it to rounding (alternating sides)
+  let order := (Array.range flat.pos.size).qsort fun i j => (radial.get! i).abs < (radial.get! j).abs
+  let snapped := Id.run do
+    let mut phi := radial
+    for k in [0:6] do
+      phi := phi.set! order[k]! (if k % 2 == 0 then 1e-15 else -1e-15)
+    return phi
+  -- every vertex of the inside that has an outside neighbour lies on the cut to rounding: every crossing is moved
+  let allMoved := Id.run do
+    let mut phi := radial
+    match triOfMesh flat with
+    | none => return phi
+    | some topo =>
+      for v in [0:flat.pos.size] do
+        if radial.get! v ≤ 0 then
+          let mut touches := false
+          for w in topo.neighbors[v]! do
+            if radial.get! w > 0 then touches := true
+          if touches then phi := phi.set! v (-1e-15)
+    return phi
+  fs := add fs { { withRobust (mkCase "rb-moved-some" flat snapped) with format := 4 } with alphaL := 1.0 }
+    "format 4: six vertices on the start circle to rounding, their crossings are moved by delta: the faces with a moved crossing do not count in the mean slope (gr lines)"
+  fs := add fs { { withRobust (mkCase "rb-moved-all" flat allMoved) with format := 4 } with alphaL := 1.0 }
+    "format 4: every crossing of the closed cut is moved: no face counts and the mean slope is 1"
   return fs
 
 end Ddg.Cuts

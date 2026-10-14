@@ -7,3 +7,5 @@ rb-spike-paper	ok	robust with the paper's stages on the spike (both m-hats, limi
 rb-spike-extremes	ok	the same spike with the extremes in format 3: pins the old statistics and the extra lines
 rb-grid-boundary-adaptive	ok	robust, default stages, cut ending on the boundary, scaled energy
 rb-torus-hencky	ok	robust, default stages, torus, Hencky
+rb-moved-some	ok	format 4: six vertices on the start circle to rounding, their crossings are moved by delta: the faces with a moved crossing do not count in the mean slope (gr lines)
+rb-moved-all	ok	format 4: every crossing of the closed cut is moved: no face counts and the mean slope is 1

@@ -482,8 +482,8 @@ def runRegionStep (c : RegionCase) : Except String RStep := do
         let dphi := (((phis[i]!).get! s.lone) - ((phis[j]!).get! s.lone)).abs / 2
         let g := gradientNormLone dphi s.len t.area
         let r := lab[gid s.g1]!
-        -- a face with |grad phi| = 0 is left out of both sums (SPEC §3.9, D23)
-        if g > 0 then
+        -- a face with |grad phi| = 0 or a moved crossing is left out of both sums (SPEC §3.9, D23, D30)
+        if g > 0 && !(net.cps[s.g1 - nv]!.moved || net.cps[s.g2 - nv]!.moved) then
           sumL := sumL.set! r (sumL.get! r + s.len)
           sumLG := sumLG.set! r (sumLG.get! r + s.len / g)
     let gbarOf := fun (g : Nat) =>

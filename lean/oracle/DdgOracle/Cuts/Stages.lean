@@ -104,18 +104,28 @@ def cutPieces (cm : CutMesh) : Array Nat := Id.run do
         changed := true
   return lab
 
-/-- `ḡ` of every cut vertex: the mean `|∇φ|` over its piece (SPEC §3.9). -/
+/-- `|∇φ|` of every crossed face (in the order of `cm.segs`) and whether the face counts in the mean
+slope: its slope is positive and neither of its two crossings was moved into `[δ, 1 − δ]` (SPEC §3.9,
+D23, D30). -/
+def segGradients (cm : CutMesh) (phi : FloatArray) : Array (Float × Bool) :=
+  cm.segs.map fun sg =>
+    let t := cm.tris[sg.tri]!
+    let g := gradientNormLone (phi.get! sg.lone) sg.len t.area
+    (g, g > 0 && !(cm.crossings[sg.p]!.moved || cm.crossings[sg.q]!.moved))
+
+/-- `ḡ` of every cut vertex: the mean `|∇φ|` over the counted faces of its piece (SPEC §3.9); a piece
+without a counted face has `ḡ = 1`. -/
 def meanGradients (cm : CutMesh) (phi : FloatArray) : FloatArray × Array Nat := Id.run do
   let piece := cutPieces cm
   let nc := cm.nc
   let mut sumL := zeros nc
   let mut sumLG := zeros nc
-  for sg in cm.segs do
-    let t := cm.tris[sg.tri]!
-    let g := gradientNormLone (phi.get! sg.lone) sg.len t.area
+  let gs := segGradients cm phi
+  for si in [0:cm.segs.size] do
+    let sg := cm.segs[si]!
+    let (g, counted) := gs[si]!
     let r := piece[sg.p]!
-    -- a face with |∇φ| = 0 is left out of both sums (SPEC §3.9, D23)
-    if g > 0 then
+    if counted then
       sumL := sumL.set! r (sumL.get! r + sg.len)
       sumLG := sumLG.set! r (sumLG.get! r + sg.len / g)
   return (FloatArray.ofFn' nc fun k =>

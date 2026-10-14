@@ -38,6 +38,16 @@ def selftestRobust : IO Nat := do
           (dPhi ≤ 1e-12 && dTau ≤ 1e-12 && dOm ≤ 1e-12 && dM ≤ 1e-9)
           s!"phi {sci dPhi} tau {sci dTau} omega {sci dOm} mhat {sci dM}; limited {(st2.factor.toList.filter (· < 1)).length}"
       | _, _ => check tally s!"N = 2 robust ({stNm}, {cn}): steps run" false
+  -- D30 through the N-region code: N = 2 with moved crossings equals the two-region code
+  for f in Ddg.Cuts.robustFixtures do
+    if f.case.name == "rb-moved-some" || f.case.name == "rb-moved-all" then
+      let c2 := { ofCut { f.case with format := 3 } .dflt with format := 3, stats := .robust }
+      match runOk { f.case with format := 3 }, runOkR c2 with
+      | some a, some b =>
+        let d := maxDiff a.phiNew (b.phiNew[0]!)
+        check tally s!"{f.case.name} through the N-region code (N = 2, default stages, moved crossings): same new state as the two-region code"
+          (d ≤ 1e-12) s!"difference {sci d}"
+      | _, _ => check tally s!"{f.case.name}: N = 2 steps run" false
   -- local limit on networks: motion of every boundary copy <= max_motion h_c
   for f in robustFixtures.filter (·.case.stages == .dflt) do
     match runOkR f.case with

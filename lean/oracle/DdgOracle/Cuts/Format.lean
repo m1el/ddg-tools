@@ -81,8 +81,8 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Cut
   let format ← match kv.get? "format" with
     | none => pure 1
     | some l =>
-      if l.size != 2 || (l[1]! != "2" && l[1]! != "3") then throw "format: expected 'format 2' or 'format 3'"
-      pure (if l[1]! == "3" then 3 else 2)
+      if l.size != 2 || (l[1]! != "2" && l[1]! != "3" && l[1]! != "4") then throw "format: expected 'format 2', 'format 3' or 'format 4'"
+      pure (if l[1]! == "4" then 4 else if l[1]! == "3" then 3 else 2)
   if format == 1 then
     for k in ["stages", "featurelap"] do
       if kv.contains k then throw s!"line '{k}' needs 'format 2'"
@@ -278,7 +278,7 @@ def printCase (c : CutCase) : String := Id.run do
   s := s ++ s!"delta {hx c.delta}\nrho0 {hx c.rho0}\npasses {c.passes}\n"
   if c.format ≥ 2 then
     s := s ++ s!"format {c.format}\n"
-    if c.format == 3 then
+    if c.format ≥ 3 then
       s := s ++ s!"statistics {match c.stats with | .extremes => "extremes" | .robust => "robust"}\n"
     s := s ++ s!"stages {match c.lengthStep with | .onMesh => "onmesh" | .onCut => "oncut"} {match c.extension with | .harmonic => "harmonic" | .local => "local"} {match c.speed with | .unit => "unit" | .meanGradient => "mean_gradient"}\n"
     s := s ++ s!"featurelap {if c.featPos then "positive" else "cotan"}\n"
@@ -348,7 +348,7 @@ def printOutcome (c : CutCase) (o : Outcome) : String := Id.run do
         s := s ++ s!"c {k} {hx (st.force.wc.get! k)} {hx (st.force.ellC.get! k)} {st.force.deg[k]!} {hx (st.force.beta.get! k)} {hx (st.force.theta.get! k)} {hx (st.lam0.get! k)} {hx (st.rate.get! k)} {hx (st.gbar.get! k)} {hx (st.rg.get! k)} {st.piece[k]!} {hx (st.omegaP.get! k)}\n"
       for si in [0:r.ev.cm.segs.size] do
         s := s ++ s!"dw {si} {hx (st.force.dwdn.get! si)}\n"
-      if c.format == 3 then
+      if c.format ≥ 3 then
         let mut nlim := 0
         match r.vlimit with
         | some (_, _, fv, _) =>
@@ -361,6 +361,21 @@ def printOutcome (c : CutCase) (o : Outcome) : String := Id.run do
         s := s ++ s!"omegamax {hx st.omegaMax}\nmhat {hx st.mhat.1} {hx st.mhat.2} {hx st.mused}\nlimited {nlim}\n"
         for k in [0:r.ev.cm.nc] do
           s := s ++ s!"h {k} {hx (st.hc.get! k)} {hx (st.mc1.get! k)} {hx (st.mc2.get! k)} {hx (st.factor.get! k)} {hx (st.rate.get! k)} {hx (st.rlim.get! k)}\n"
+        if c.format == 4 then
+          let gs := segGradients r.ev.cm r.phi
+          let mut cnt := 0
+          let mut gmin := posInf
+          let mut gmax := negInf
+          let mut gsum := fzero
+          for (g, ok) in gs do
+            if ok then
+              cnt := cnt + 1
+              gmin := min gmin g
+              gmax := max gmax g
+              gsum := gsum + g
+          s := s ++ s!"gradstats {cnt} {hx (if cnt == 0 then 0.0 else gmin)} {hx (if cnt == 0 then 0.0 else gsum / Float.ofNat cnt)} {hx (if cnt == 0 then 0.0 else gmax)}\n"
+          for si in [0:gs.size] do
+            s := s ++ s!"gr {si} {hx r.ev.cm.segs[si]!.len} {hx gs[si]!.1} {if gs[si]!.2 then 1 else 0}\n"
         if let some (hv, omv, fv, pl) := r.vlimit then
           s := s ++ "vlimit 1\n"
           for i in [0:r.base.nv] do

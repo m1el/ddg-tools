@@ -43,6 +43,35 @@ def robustFixtures : Array RFixture := Id.run do
     "robust, default stages, 3 regions with a spike of curvature at one vertex"
   fs := add fs (paperAd { mkRegionCase "rr-sphere3-spike-paper" spike (redistancedState spike (voronoiState spike three)) with format := 2, stats := .robust, alphaL := 1.0 })
     "robust, paper's stages, 3 regions with the spike (local limit on s_v)"
+  -- D30: vertices on an interface to rounding (phi_i(a) - phi_j(a) = -1e-15): their crossings are moved by delta
+  let st4 := redistancedState ico2 (voronoiState ico2 tetra)
+  let moved := Id.run do
+    let nvv := ico2.pos.size
+    let mut st := st4
+    let mut count := 0
+    match triOfMesh ico2 with
+    | none => return st
+    | some topo =>
+      for v in [0:nvv] do
+        if count < 6 then
+          let mut order : Array Nat := (Array.range st.size).qsort fun a b => (st[a]!).get! v < (st[b]!).get! v
+          let i := order[0]!
+          let j := order[1]!
+          -- the vertex has a neighbour in another region
+          let mut other := false
+          for w in topo.neighbors[v]! do
+            let mut best := 0
+            for k in [1:st.size] do
+              if (st[k]!).get! w < (st[best]!).get! w then best := k
+            if best != i then other := true
+          if other && v % 3 == 0 then
+            st := st.set! i ((st[i]!).set! v ((st[j]!).get! v - 1e-15))
+            count := count + 1
+    return st
+  fs := add fs (dflt { mkRegionCase "rr-moved-default" ico2 moved with format := 3, stats := .robust, alphaL := 1.0 })
+    "format 3: six vertices on an interface to rounding, crossings moved by delta, default stages: those faces do not count in the mean slope"
+  fs := add fs (paperAd { mkRegionCase "rr-moved-paper" ico2 moved with format := 3, stats := .robust, alphaL := 1.0 })
+    "the same with the paper's stages"
   return fs
 
 /-- Fixtures that are adopted as files (inputs built elsewhere): name and description. -/
