@@ -38,7 +38,9 @@ A mesh with a vertex that no face uses is rejected (it would give the Laplacian 
   marching on triangle meshes, the origin of the upwind update used by `distance`.
 - Folkmar Bornemann, Christian Rasch. *Finite-element discretization of static Hamilton–Jacobi
   equations based on a local variational principle.* Computing and Visualization in Science 9(2),
-  2006. <https://doi.org/10.1007/s00791-006-0016-y> — the Hopf–Lax form of the local update.
+  57–69, 2006. <https://doi.org/10.1007/s00791-006-0016-y> (arXiv:math/0403517, which lists the
+  same DOI and journal reference; DOI, volume, issue and pages confirmed against the publisher's
+  Crossref record) — the Hopf–Lax form of the local update.
 - faer, <https://codeberg.org/sarah-quinones/faer> — the sparse factorizations behind `sparse`.
 
 ## Formula tags

@@ -58,7 +58,8 @@
 //!   National Academy of Sciences 95(15), 8431–8435, 1998, <https://doi.org/10.1073/pnas.95.15.8431>.
 //! * F. Bornemann, C. Rasch, *Finite-element discretization of static Hamilton–Jacobi equations
 //!   based on a local variational principle*, Computing and Visualization in Science 9(2),
-//!   57–69, 2006 (they solve the system by an adaptive Gauss–Seidel iteration), <https://doi.org/10.1007/s00791-006-0016-y>.
+//!   57–69, 2006 (they solve the system by an adaptive Gauss–Seidel iteration), <https://doi.org/10.1007/s00791-006-0016-y>
+//!   (arXiv:math/0403517; DOI, volume, issue and pages confirmed against the Crossref record).
 //!
 //! # Example
 //!

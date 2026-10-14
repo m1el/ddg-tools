@@ -979,10 +979,15 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     and normalizes barycentric coordinates by the sum of the three areas; the oracle evaluates
     `θ_k + θ_l − π` and divides by the area of the triangle. They are equal in exact arithmetic
     (`delaunayExcess_eq'`, `barycentric_eq_normalized`) and can differ in the last bits.
-44. **`CITED.md`, intrinsic triangulations.** The six entries give their sources at the level
-    of the work; section and statement numbers of Bobenko–Springborn, Indermitte et al., Rippa,
-    Chew, Ruppert, Shewchuk and Polthier–Schmies were not re-read (the works were not at hand),
-    and what each is cited for is stated as the signpost paper and the intrinsic SPEC use it.
+44. **`CITED.md`, intrinsic triangulations.** The six entries were checked against the sources
+    (2026-10-14); each has a "Source check" line. Read: Bobenko–Springborn (arXiv v3), Indermitte
+    et al., Chew 1993, Shewchuk 1997 and 2002, Polthier–Schmies (author's preprint). Not read
+    (paywalled): Rivin, Rippa, Fortune and Ruppert's journal paper; their data are from Crossref
+    and what they are cited for is taken from the works that quote them (B–S for Rippa and
+    Rivin, the Signpost paper for Fortune, Shewchuk for Ruppert). Corrections: the termination
+    of flipping is Indermitte et al.'s (B–S give a second proof); `30°` is Chew's bound and
+    `26.5°` is Shewchuk's; the `90°` condition on input angles for Ruppert's rule is dropped
+    (only Shewchuk's `60°` was found); the pages of Fortune were added.
 
 ## Caveats on faithfulness
 

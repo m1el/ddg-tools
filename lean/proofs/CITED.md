@@ -654,30 +654,59 @@ the overlay (N12), point queries (N11), refinement and its termination (N1, N4, 
 simplicial export (N15); the shape limit of flips and every tolerance (N5, N6); anything about
 rounding.
 
-The sources below are given at the level of the work. Section and statement numbers inside
-B–S, Indermitte et al., Rippa, Chew, Ruppert, Shewchuk and Polthier–Schmies are not given: the
-works were not at hand when these entries were written (only the Signpost paper and its
-bibliography were), so a number would have been quoted from memory. For the same reason, what
-each of those works is cited for is stated as the Signpost paper and SPEC use it and as
-recalled, not as re-read: check the source before relying on a detail of a statement.
+The sources below were checked on 2026-10-14 against primary or publisher-registry records; each
+entry has a **Source check** line that says what was read, where, and what was not. "Read" means
+the text of the work was read, not a summary of it. Bibliographic data (authors, title, venue,
+volume, issue, pages, year, DOI) were taken from the Crossref record that the publisher
+deposited for the DOI, and checked against the title page where the text was read. Section,
+theorem and page numbers below refer to the copy that was read, named in the entry; where the
+printed version may number differently, the entry says so. Where a statement could not be
+checked in the work that is cited for it, the entry says that too and gives the work in which
+the statement was found instead. The works that could be read in full: B–S (arXiv v3),
+Indermitte et al. (open copy of the journal version, EPFL Infoscience), Chew 1993 (author's
+copy of the proceedings paper), Shewchuk 1997 (CMU-CS-97-137) and 2002 (the Berkeley copy of
+the 21 May 2001 manuscript of the journal article), Polthier–Schmies (the author's preprint),
+and the Signpost paper. Not read: Rivin, Rippa, Fortune and the journal paper of Ruppert (paywalled,
+no open copy found; of Ruppert only the first pages of the 1992 Berkeley technical report CSD-92-694,
+an earlier version with another title, were read).
 
 ### [formula: it-delaunay-existence-uniqueness] The intrinsic Delaunay tessellation exists and is unique
 
-- **Statement.** Every closed piecewise flat surface (a compact polyhedral surface with finitely
-  many cone points) has a Delaunay tessellation with the given vertex set, and it is unique. Its
-  cells are convex polygons inscribed in empty immersed disks; a triangulation obtained by
-  cutting every cell by diagonals
-  is a Delaunay triangulation, and a geodesic triangulation with the given vertices is a
-  Delaunay triangulation if and only if every interior edge satisfies `θ_k + θ_l ≤ π`
-  (Signpost paper Eq. 4). Two Delaunay triangulations differ only in the diagonals of the cells
-  that are not triangles, i.e. at edges with `θ_k + θ_l = π`.
-- **Reference.** I. Rivin, *Euclidean structures on simplicial surfaces and hyperbolic volume*,
-  Annals of Mathematics 139(3), 553–580, 1994; C. Indermitte, Th. M. Liebling, M. Troyanov,
-  H. Clémençon, *Voronoi diagrams on piecewise flat surfaces and an application to biological
-  growth*, Theoretical Computer Science 263(1–2), 263–274, 2001 (existence); B–S (uniqueness,
-  which its abstract names as proved there, and the characterization by the local condition).
-  Signpost paper Sec. 4, which applies the condition to the interior edges of surfaces with
-  boundary as well.
+- **Statement.** Every closed piecewise flat surface (a compact surface with a flat metric
+  except at finitely many cone points) has a Delaunay tessellation with a given vertex set
+  containing the cone points, and it is unique. Its cells are the images of the convex hulls of
+  the vertices on the boundary of an immersed empty disk. A Delaunay triangulation, obtained from
+  the tessellation by cutting every non-triangular cell by diagonals, is characterized by the
+  local condition: a geodesic triangulation is Delaunay if and only if every interior edge is
+  locally Delaunay, which is `θ_k + θ_l ≤ π` for the two angles opposite the edge
+  (Signpost paper Eq. 4). Two Delaunay triangulations differ only in edges with `θ_k + θ_l = π`
+  (vanishing cotan weight). Surfaces with boundary are reduced to the closed case by gluing
+  flat caps to the boundary components.
+- **Reference.** A. I. Bobenko, B. A. Springborn, *A discrete Laplace–Beltrami operator for
+  simplicial surfaces*, Discrete & Computational Geometry 38(4), 740–756, 2007,
+  <https://doi.org/10.1007/s00454-007-9006-1>, arXiv:math/0503219 (v3, 24 Feb 2006): Definitions
+  2 and 3 (immersed empty disk, Delaunay tessellation), Proposition 4 (it is a tessellation;
+  uniqueness is immediate from the definition, Sec. 2), Definition 8 and Lemma 9 (locally
+  Delaunay if and only if the opposite angles sum to at most `π`), Proposition 10 (a
+  triangulation is Delaunay if and only if all interior edges are locally Delaunay; the boundary
+  by caps, in its proof). Existence by the flip algorithm: C. Indermitte, Th. M. Liebling,
+  M. Troyanov, H. Clémençon, *Voronoi diagrams on piecewise flat surfaces and an application to
+  biological growth*, Theoretical Computer Science 263(1–2), 263–274, 2001,
+  <https://doi.org/10.1016/S0304-3975(00)00248-6>, Sec. 4, Theorem 1 (see the next entry).
+  The statement was first made, without a proof of existence and uniqueness, by I. Rivin,
+  *Euclidean structures on simplicial surfaces and hyperbolic volume*, Annals of Mathematics
+  139(3), 553–580, 1994, <https://doi.org/10.2307/2118572>, Sec. 10 (as reported by B–S, Sec. 2).
+  Signpost paper Sec. 4 (Eq. 4).
+- **Source check.** Read, in B–S (arXiv v3): the statements and numbers above, and that the
+  existence is "known" (B–S abstract) through the flip algorithm of Rivin and Indermitte et al.,
+  while the uniqueness is theirs. The numbering is that of the arXiv version; the journal
+  version was not compared. Read, in Indermitte et al.: Definitions 4 and 5 (legal edge, Delaunay
+  triangulation by the local condition) and Theorem 1; they treat the boundaries of compact
+  polyhedra (closed surfaces) and prove no uniqueness. Not read: Rivin (only the Crossref record:
+  title, volume, issue, first page 553; the pages 553–580 and the section number are as B–S
+  cite them). Corrected: the existence is no longer attributed to Indermitte et al. as a separate
+  theorem, uniqueness to B–S only, Rivin as the first to state it; the boundary case
+  (caps) is B–S's, not the Signpost paper's (the Signpost paper was not checked for it).
 - **Why not formalized.** It is a global statement about all geodesic triangulations of a
   surface; neither piecewise flat surfaces nor immersed disks are in Mathlib.
 - **What depends on it.** That the result of Delaunay flipping is *the* Delaunay triangulation up
@@ -689,15 +718,29 @@ recalled, not as re-read: check the source before relying on a detail of a state
 ### [formula: it-delaunay-flip-termination] Delaunay flipping terminates
 
 - **Statement.** Starting from any geodesic triangulation of a compact piecewise flat surface,
-  repeatedly flipping an interior edge with `θ_k + θ_l > π` ends after finitely many flips, in a
-  Delaunay triangulation. In the plane the number of flips is `O(n²)`; on a surface there is no
-  bound in terms of the number of vertices alone.
-- **Reference.** B–S, whose abstract names the termination of the edge flipping algorithm on
-  piecewise flat surfaces as proved there, with Rippa's theorem and Musin's harmonic index;
-  Indermitte et al. 2001 (as above) for the flip algorithm on piecewise flat surfaces. In the
-  plane: S. Fortune, *A note on
-  Delaunay diagonal flips*, Pattern Recognition Letters 14(9), 1993. The remark on the missing
-  bound: Signpost paper Sec. 4.1.
+  repeatedly flipping an interior edge that is not locally Delaunay ends after finitely many
+  flips, in a Delaunay triangulation. Every such edge can be flipped (the two triangles form a
+  convex quadrilateral, or the edge is already locally Delaunay; a topological obstruction is
+  excluded). On a surface there is no bound on the number of flips in terms of the number of
+  vertices alone. In the plane the number of flips is `O(n²)` (Signpost paper, citing Fortune).
+- **Reference.** Termination: Indermitte et al. 2001 (as above), Sec. 4, Theorem 1: the sum of
+  the areas of the circumcircles of the triangles decreases strictly with every flip and takes
+  values in a discrete set. A second proof by Musin's harmonic index and Rippa's theorem, and the
+  flipability of every non-Delaunay edge (Proposition 11): B–S (as above), Proposition 12 and
+  Theorem 15, with the remark that Indermitte et al. missed the topological obstruction to
+  flipping (B–S Sec. 2) and that Rivin's proof of termination is flawed. No bound on a surface:
+  Indermitte et al., Sec. 4, after Theorem 1; Signpost paper Sec. 4.1. Planar bound: S. Fortune,
+  *A note on Delaunay diagonal flips*, Pattern Recognition Letters 14(9), 723–726, 1993,
+  <https://doi.org/10.1016/0167-8655(93)90142-Z>, as cited by the Signpost paper Sec. 4.1.
+- **Source check.** Read: Indermitte et al. Theorem 1 and its proof (it refers to the Ph.D.
+  thesis of H. Telley, 1989, Theorem 6.1, for the decrease of the circumcircle areas), Sec. 4;
+  B–S Propositions 11 and 12, Theorem 15 (arXiv v3 numbering); Signpost Sec. 4.1. Corrected:
+  the termination theorem is Indermitte et al.'s, with B–S giving the second proof and
+  closing the gap (before: "B–S, whose abstract names the termination as proved there"); the
+  pages of Fortune are added and the DOI is that of the Crossref record. Not checked: the content
+  of Fortune's note. The `O(n²)` planar bound is quoted from the Signpost paper, which cites
+  Fortune for it; Indermitte et al. (Sec. 2) cite for the same bound a technical report of
+  H. Telley (EPFL, 1992), not Fortune. It is not used by the crate.
 - **Why not formalized.** The argument is about the set of all geodesic triangulations of a
   surface (a function on it that every flip decreases, and finiteness below a bound), which
   rests on the geometry of geodesics on a cone surface.
@@ -710,14 +753,25 @@ recalled, not as re-read: check the source before relying on a detail of a state
 
 ### [formula: it-rippa-theorem] Rippa's theorem: Delaunay flips do not increase the Dirichlet energy
 
-- **Statement.** For data at the vertices, the Dirichlet energy of the piecewise linear
-  interpolant does not increase when an edge that violates the Delaunay condition is flipped; in
-  the plane the Delaunay triangulation therefore minimizes it among all triangulations of the
-  point set. The same holds for geodesic triangulations of a piecewise flat surface, so the
-  cotan Laplacian of the Delaunay triangulation depends on the surface and its vertices only.
+- **Statement.** For data `f` at the vertices, let `f_T` be the piecewise linear interpolant on a
+  triangulation `T`. If `T₂` arises from `T₁` by flipping an edge `e` and `e` is locally
+  Delaunay in `T₂`, then the Dirichlet energy satisfies `E(f_{T₁}) ≥ E(f_{T₂})`, with equality only
+  if `f_{T₁} = f_{T₂}` or `e` was already locally Delaunay in `T₁`. Hence the minimum of the
+  energy over all triangulations is attained on the Delaunay triangulations. This holds in the
+  plane (Rippa) and, with the same proof, for geodesic triangulations of a piecewise flat surface
+  (B–S), so the cotan Laplacian of a Delaunay triangulation depends on the surface and its
+  vertices only.
 - **Reference.** S. Rippa, *Minimal roughness property of the Delaunay triangulation*, Computer
-  Aided Geometric Design 7(6), 489–497, 1990; for piecewise flat surfaces B–S. The Signpost
-  paper names the theorem in Sec. 5.5.
+  Aided Geometric Design 7(6), 489–497, 1990, <https://doi.org/10.1016/0167-8396(90)90011-F>;
+  for piecewise flat surfaces B–S (as above), the statement "Rippa's Theorem" in Sec. 2, between
+  Definition 13 and Proposition 14, and Sec. 3 (Definition 16, Proposition 17) for the Laplacian. The Signpost paper mentions
+  the theorem in Sec. 5.5 (Globally Optimal Direction Fields), as a contrast to vector fields.
+- **Source check.** Read: the statement in B–S (arXiv v3), including their remark that Rippa's
+  proof holds without change for piecewise flat surfaces, and the Signpost paper's use. Not read:
+  Rippa's paper (paywalled): its own wording, theorem number and the planar statement are taken
+  from B–S's quotation; bibliographic data from Crossref. Corrected: the statement follows
+  B–S's form (the condition is on the edge after the flip, with the case of equality) instead of
+  "an edge that violates the condition".
 - **Why not formalized.** The energy of the interpolant over the two triangulations of a
   quadrilateral could be compared from the cotan formula; it was not asked for and nothing in the
   crate evaluates it. The global statement needs the previous entry.
@@ -729,19 +783,42 @@ recalled, not as re-read: check the source before relying on a detail of a state
 ### [formula: it-chew-second-algorithm] Chew's second algorithm in the plane
 
 - **Statement.** In the plane, Delaunay refinement that inserts the circumcentre of a triangle
-  with an angle below the bound, keeps the (constrained) Delaunay triangulation, and treats the
-  boundary as Chew does (a circumcentre that would lie beyond a boundary segment is not inserted;
-  the segment is split and the free vertices inside its diametral circle are removed) terminates
-  for angle bounds up to about `26.5°` (`arcsin(1/√5)`), for inputs without small angles; without
-  boundary the argument gives `30°`: a triangle with an angle below `30°` has a circumradius
-  larger than its shortest edge, so no edge shorter than the shortest one present is created.
+  with an angle below the bound into the constrained Delaunay triangulation terminates. Chew's
+  algorithm for a bound of `30°` assumes input angles of at least `60°` (angles down to `30°` with
+  a modification, smaller ones are cut off); a circumcentre that would lie beyond a boundary
+  segment is not inserted, the segment is split instead (in halves, in thirds if its length is
+  in a short range) and the free vertices closer than the new edge length to the new vertex are
+  deleted. The argument: an angle below `30°` is opposite a side shorter than the circumradius,
+  so the circumradius of a failing triangle is larger than an existing edge and no edge shorter
+  than the shortest one present is created. Shewchuk's reanalysis of the simpler form of the
+  rule (split the encroached segment at its midpoint and delete the free vertices inside its
+  diametral circle) terminates for angle bounds up to `arcsin(1/√5) ≈ 26.56°` (circumradius to
+  shortest edge ratio `B ≥ √5/2`) when input angles are at least `60°`, and then also gives good
+  grading and size optimality.
 - **Reference.** L. P. Chew, *Guaranteed-quality mesh generation for curved surfaces*, Proc. 9th
-  Annual Symposium on Computational Geometry (SCG '93), ACM, 1993, 274–280; the analysis with
-  the bound `26.5°`: J. R. Shewchuk, *Delaunay Refinement Mesh Generation*, Ph.D. thesis,
-  Carnegie Mellon University, CMU-CS-97-137, 1997, and *Delaunay refinement algorithms for
-  triangular mesh generation*, Computational Geometry 22(1–3), 21–74, 2002. For curved surfaces
-  the Signpost paper (Sec. 4.2) quotes Shewchuk 1997, Section 5.3.2, as only suggesting that the
-  lemmas carry over.
+  Annual Symposium on Computational Geometry (SCG '93), ACM, 1993, 274–280,
+  <https://doi.org/10.1145/160985.161150>: Sec. 2 (Algorithm A, with the assumption on input
+  angles on p. 275, step 6, Lemma 2 on p. 276, Theorem 3 on p. 277: "Algorithm A halts" and all
+  angles at least `30°`). J. R. Shewchuk, *Delaunay refinement algorithms for triangular mesh
+  generation*, Computational Geometry 22(1–3), 21–74, 2002,
+  <https://doi.org/10.1016/S0925-7721(01)00047-5>: Sec. 4 (Chew's second algorithm), 4.1 (the
+  description above), 4.2 (termination for `B ≥ √5/2`, Lemma 5, `26.56°`), 4.3 (grading), 7.3
+  (Chew's own bound `B = 1`, `30°`, by range-restricted segment splitting). J. R. Shewchuk,
+  *Delaunay Refinement Mesh Generation*, Ph.D. thesis, Carnegie Mellon University, CMU-CS-97-137,
+  1997: Sec. 3.4 and 3.5.2 (the same), Sec. 5.3.2, pp. 138–139: "All of the proofs in Chapter 3
+  can be made to work with geodesic distances" for planar domains with holes and for flat
+  surfaces meeting along segments in three dimensions; this is the passage that the Signpost
+  paper (Sec. 4.2) cites as only suggesting that the lemmas carry over.
+- **Source check.** Read, as listed in the preamble: Chew 1993 Sec. 2 and the start of Sec. 3
+  (which rejects geodesic circles on curved surfaces and defines the circumcircle through
+  spheres, so the paper says nothing about cone surfaces); Shewchuk 2002 (the 2001 manuscript:
+  numbers are those of its sections) and 1997; Signpost Sec. 4.2. Corrected: `30°` is Chew's
+  bound and `26.5°` is Shewchuk's (before: Chew's algorithm "for angle bounds up to about
+  `26.5°`" with `30°` only without boundary); the boundary rule is Chew's step 6, and the
+  diametral-circle form is Shewchuk's description (Sec. 4.1) of it; the assumption on input
+  angles is added. The journal version of Shewchuk 2002 was not compared with the manuscript. In
+  the Signpost paper the claim for planar triangulations is cited to Chew 1987 (*Constrained
+  Delaunay triangulations*, SCG '87), which was not read.
 - **Why not formalized.** A termination proof for an algorithm on planar triangulations by a
   packing argument; no planar Delaunay triangulations in Mathlib.
 - **What depends on it.** Nothing that the crate claims: for intrinsic triangulations SPEC N1
@@ -755,16 +832,33 @@ recalled, not as re-read: check the source before relying on a detail of a state
 ### [formula: it-ruppert-encroachment] Ruppert's boundary rule in the plane
 
 - **Statement.** In the plane, Delaunay refinement that splits a boundary segment whenever a
-  vertex lies inside its diametral circle (the segment is *encroached*), and inserts a
-  circumcentre only if it encroaches on no segment, terminates for angle bounds up to about
-  `20.7°` (`arcsin(1/(2√2))`) when the input has no angle below `90°` (below `60°` in Shewchuk's
-  analysis); small input angles are handled by splitting the segments at an input vertex on
-  concentric circular shells (radii that are powers of two), so that the two segments at the
-  vertex do not encroach on each other for ever. In a Delaunay triangulation a boundary segment
-  is encroached exactly when the angle opposite it is obtuse.
+  vertex lies on or inside its diametral circle and is visible from it (the segment is
+  *encroached*), and inserts a circumcentre only if it encroaches on no segment (otherwise the
+  circumcentre is rejected and the encroached segments are split), terminates for angle bounds up
+  to `arcsin(1/(2√2)) ≈ 20.7°` (circumradius to shortest edge ratio `B ≥ √2`) when no two
+  input segments meet at an angle below `60°` (Shewchuk's analysis); it then creates no edge
+  shorter than the minimum local feature size of the input. For smaller input angles, splitting
+  the segments at an input vertex on concentric circular shells (radii that are powers of
+  two) prevents the two segments from encroaching on each other for ever. In a Delaunay
+  triangulation, a vertex inside the diametral circle of a boundary segment is opposite an
+  obtuse angle (a vertex on it, a right angle), by Thales' theorem.
 - **Reference.** J. Ruppert, *A Delaunay refinement algorithm for quality 2-dimensional mesh
-  generation*, Journal of Algorithms 18(3), 548–585, 1995; Shewchuk 1997 and 2002 (as above) for
-  the bounds, the weaker condition on input angles and the shells.
+  generation*, Journal of Algorithms 18(3), 548–585, 1995,
+  <https://doi.org/10.1006/jagm.1995.1021>. For the statement as given: J. R. Shewchuk, 2002
+  (as above), Sec. 3.1 (the rules), Theorem 4 in Sec. 3.3 with the remark after its proof
+  (`B = √2` gives `20.7°`), Sec. 6.2 (the concentric shells, attributed to Ruppert); J. R. Shewchuk,
+  1997 (as above), Sec. 3.3, and Sec. 5.3.2 (encroached segments are diagnosed by an obtuse
+  angle opposite them).
+- **Source check.** Read: Shewchuk 2002 and 1997 at the places given. Not read: Ruppert's
+  journal paper (paywalled). The first pages of its earlier version, the 1992 technical report
+  (UC Berkeley CSD-92-694, titled *A New and Simple Algorithm for Quality 2-Dimensional Mesh
+  Generation*), state only the aspect ratio and size guarantees of the algorithm, so the
+  `20.7°` and the condition on input angles were not seen in Ruppert's own text. Corrected:
+  before, the entry required no input angle below `90°` ("below `60°` in Shewchuk's
+  analysis"); only the `60°` of Shewchuk's Theorem 4 was found in a primary source read here (a
+  secondary source, Pav and Walkington, reports that Ruppert's analysis needs non-acute input
+  angles, which was not checked against Ruppert), so the `90°` is dropped. The encroachment
+  condition now says "on or inside".
 - **Why not formalized.** As the previous entry.
 - **What depends on it.** SPEC N1 uses the rule on surfaces with boundary and states that its end
   at `25°` and `30°` is observed, not proved, as in the plane. Proved here: nothing of the rule
@@ -773,14 +867,25 @@ recalled, not as re-read: check the source before relying on a detail of a state
 
 ### [formula: it-straightest-geodesic] Tracing by unfolding follows the straightest geodesic
 
-- **Statement.** On a polyhedral surface the curve obtained by unfolding the triangles along its
-  way into the plane and continuing as a straight line is the straightest geodesic with the
-  given start point and direction: it is the unique solution of that initial value problem, also
-  through vertices, where "straight" means equal angle sums on both sides. Away from vertices it
-  is locally shortest.
+- **Statement.** On a polyhedral surface, a *straightest geodesic* is a curve whose left and
+  right curve angles `θ_l`, `θ_r` (with `θ_l + θ_r` the total angle of the point) are equal at
+  every point. Given a point and a polyhedral tangent vector there is a unique straightest
+  geodesic with that start point and direction, and it extends to the boundary of the surface.
+  A geodesic that contains no vertex is both straightest and locally shortest, and it is the
+  straight line in the unfolding of the faces along its way; through a vertex the two notions
+  differ (a straightest geodesic through a spherical vertex is not locally shortest).
 - **Reference.** K. Polthier, M. Schmies, *Straightest geodesics on polyhedral surfaces*, in
-  H.-C. Hege, K. Polthier (eds.), Mathematical Visualization, Springer, 1998, 135–150. Signpost
-  paper Sec. 3.2.2.
+  H.-C. Hege, K. Polthier (eds.), Mathematical Visualization, Springer, 1998, 135–150,
+  <https://doi.org/10.1007/978-3-662-03567-2_11>: Definition 8 (straightest geodesic), Theorem 10
+  (discrete initial value problem), Lemma 11 (1) and its proof (unfolding the faces along the
+  curve), 11 (2)–(3). Signpost paper Sec. 3.2.2, which names the tracing query as the discrete
+  exponential map producing a straightest polyhedral geodesic in this sense.
+- **Source check.** Read: the author's preprint (18 pages, Polthier's page at FU Berlin,
+  `straightest_preprint.pdf`); the numbers above are those of the preprint, the printed chapter
+  (pages and editors from Crossref: H.-C. Hege, K. Polthier; Springer Berlin Heidelberg, 1998) was
+  not compared. The Signpost sentence was read. Corrected: the statement now says in terms of
+  the curve angles what "straight" means and gives the unfolding as Lemma 11's proof; before,
+  "unique through vertices" and "equal angle sums" were stated without a number.
 - **Why not formalized.** It is a statement about curves on a polyhedral surface, which is not
   formalized here; a path through many triangles is a composition of the steps below with the
   bookkeeping of the mesh.
