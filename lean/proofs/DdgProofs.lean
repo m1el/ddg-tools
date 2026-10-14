@@ -42,3 +42,4 @@ import DdgProofs.Intrinsic.Delaunay
 import DdgProofs.Intrinsic.Signpost
 import DdgProofs.Intrinsic.Trace
 import DdgProofs.Intrinsic.Barycentric
+import DdgProofs.Intrinsic.Move

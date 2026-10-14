@@ -168,4 +168,43 @@ def circumcenterBary (a0 a1 a2 : α) : α × α × α :=
   let s := w0 + w1 + w2
   (w0 / s, w1 / s, w2 / s)
 
+/-! ## Moving a vertex (SPEC N19, paper Sec. 3.3.3, Alg. 10) -/
+
+/-- Length of the edge `ij` after its end `i` moves by a vector of length `r` that makes the angle
+`α` with the edge, given by `cosA = cos α` and `sinA = sin α` (the scalar interface has no
+trigonometric functions): `ℓ' = √((ℓ − r cos α)² + (r sin α)²)`. This is the law of cosines
+`√(r² + ℓ² − 2 r ℓ cos α)` of the paper's Alg. 10 in a form without cancellation.
+[formula: it-move-length] -/
+def movedLength (l r cosA sinA : α) : α :=
+  Scalar.sqrt ((l - r * cosA) * (l - r * cosA) + (r * sinA) * (r * sinA))
+
+/-- Twice the signed area of a triangle of the star of a vertex after the vertex (at the origin)
+moves by `v`: `2A − v × d`, where `A2 = 2A` is twice the area before and `d = k − j` the side of the
+link (from `j` to `k`, counter-clockwise). Affine in `v`. [formula: it-move-area] -/
+def movedDoubleArea (A2 : α) (v d : α × α) : α := A2 - (v.1 * d.2 - v.2 * d.1)
+
+/-! ## The optimal Delaunay triangulation (paper Sec. 4.3; Chen and Holst 2011, Eq. 4.5, 4.13) -/
+
+/-- The area `A` of the triangle `abc` times the vector from `a` to its circumcentre, in the frame of
+`a` with `b = (ℓ_ab, 0)` on the positive x-axis and `c` above it:
+`(A ℓ_ab/2, ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²)/8)`. Divided by `A` it is the circumcentre; the product has
+no division and stays finite for a degenerate triangle. [formula: it-circumcenter-vector] -/
+def weightedCircumcenter (lab lac lbc A : α) : α × α :=
+  (A * lab / 2, lab * (lac * lac + lbc * lbc - lab * lab) / 8)
+
+/-- The area `A` of the triangle `abc` times the vector from `a` to its barycentre, in the same
+frame: `(A (ℓ_ab + c_x)/3, A h/3)` with `c = (c_x, h)`, `c_x = (ℓ_ab² + ℓ_ac² − ℓ_bc²)/2ℓ_ab`,
+`h = 2A/ℓ_ab` (Chen and Holst 2011, Sec. 4.2.1: barycentres for the triangles at the boundary).
+[formula: it-odt-update] -/
+def weightedBarycenter (lab lac lbc A : α) : α × α :=
+  let cx := diamondX lab lac lbc
+  let h := 2 * A / lab
+  (A * (lab + cx) / 3, A * h / 3)
+
+/-- The update of the optimal Delaunay triangulation at a vertex (Chen and Holst 2011, Eq. 4.13):
+the sum `w = Σ_T |T| (c_T − x)` over the triangles of the star, divided by the area `total` of the
+star and scaled by the step `step` (`α` of Eq. 4.13). [formula: it-odt-update] -/
+def odtDisplacement (w : α × α) (total step : α) : α × α :=
+  (step * w.1 / total, step * w.2 / total)
+
 end Ddg

@@ -101,6 +101,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Intrinsic/Signpost.lean` | intrinsic triangulations: angle normalization, the signpost update around interior and boundary vertices and under a flip (§3, N2) |
 | `DdgProofs/Intrinsic/Trace.lean` | intrinsic triangulations: one step of a tracing query: crossing of an edge with the path, choice of the exit edge, forward progress (§4, N7) |
 | `DdgProofs/Intrinsic/Barycentric.lean` | intrinsic triangulations: barycentric coordinates, distances of a point to the corners, edge split, circumcentre (§4, N10, N14, N17) |
+| `DdgProofs/Intrinsic/Move.lean` | intrinsic triangulations: moving a vertex (lengths, areas of its star), the circumcentre and barycentre times the area, the energy of the optimal Delaunay triangulation of a star, its gradient, the step of Chen and Holst's Eq. 4.13 (§4, N19, N21) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
@@ -379,10 +380,15 @@ edge `kl` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`). All theorems a
 | `it-barycentric-coordinates` | `signedArea2` is `sda`; `barycentric a b c p = ([p,b,c], [a,p,c], [a,b,p])/[a,b,c]`; `[p,b,c] + [a,p,c] + [a,b,p] = [a,b,c]`. For `[a,b,c] ≠ 0`: the three coordinates sum to `1`; `b₀·a + b₁·b + b₂·c = p`; and if `u + v + w = 1`, `u·a + v·b + w·c = p` then `barycentric a b c p = (u, v, w)`. The form of the Rust code, `([p,b,c], [p,c,a], [p,a,b])` divided by their sum, is equal. `T(ℓ_ab, ℓ_bc, ℓ_ca)`: `pointFromDistances ℓ_ab ℓ_bc ℓ_ca \|v₀p\| \|v₁p\| \|v₂p\| = p` for every `p`, in the layout `v₀ = (0,0)`, `v₁ = (ℓ_ab, 0)`, `v₂ = apexK ℓ_ab ℓ_ca ℓ_bc`. | `signedArea2_eq_sda`, `barycentric_eq`, `sda_split`, `barycentric_sum`, `barycentric_reproduces`, `barycentric_unique`, `barycentric_eq_normalized`, `pointFromDistances_eq_self` |
 | `it-point-distances` | `cornerDistances ℓ₀₁ ℓ₁₂ ℓ₂₀ b₀ b₁ b₂ = (\|v₀P\|, \|v₁P\|, \|v₂P\|)` with `v₀ = (0,0)`, `v₁ = (ℓ₀₁, 0)`, `v₂ = apexK ℓ₀₁ ℓ₂₀ ℓ₁₂` and `P = b₁·v₁ + b₂·v₂` (this package's `layoutPoint`; `b₀` is not used). For `T(ℓ₀₁, ℓ₁₂, ℓ₂₀)` and `b₀ + b₁ + b₂ = 1` it is `(baryLength ℓ₀₁ ℓ₁₂ ℓ₂₀ (b₀−1) b₁ b₂, baryLength … b₀ (b₁−1) b₂, baryLength … b₀ b₁ (b₂−1))`: the paper's Alg. 6, by `baryLength_eq_dist` of `cut-barycentric-length` (used, not reproved, through `dist2 p q = dist (toC p) (toC q)`); for any plane points and coordinates `x`, `y` with sum `1`: `\|Σ y_k v_k  Σ x_k v_k\| = baryLength \|v₀v₁\| \|v₁v₂\| \|v₂v₀\| (x − y)`. Edge split: `edgeSplitLengths ℓ b_i b_j = (ℓ·b_j, ℓ·b_i)`; the two sum to `ℓ` if `b_i + b_j = 1`; they are the first two of `cornerDistances ℓ₀₁ ℓ₁₂ ℓ₂₀ b₀ b₁ 0` (`b₀, b₁ ≥ 0`, `b₀ + b₁ = 1`); `baryLength ℓ_ij · · (b_i − 1) b_j 0 = ℓ_ij·b_j` (Alg. 6 from the corner `i`); for `0 ≤ t ≤ 1` and `P = (1−t)·tail + t·head`: `edgeSplitLengths \|tail head\| (1−t) t = (\|tail P\|, \|head P\|) = (t·ℓ, (1−t)·ℓ)` (intrinsic SPEC N17). The paper's Alg. 8 as printed: `baryLength 1 · · (3/4 − 1) (1/4) 0 = 1/4`, while its line 4 gives `1·(3/4)`. | `cornerDistances_eq`, `cornerDistances_eq_baryLength`, `dist2_bary_eq_baryLength`, `dist2_eq_dist_toC`, `edgeSplitLengths_eq`, `edgeSplitLengths_sum`, `edgeSplitLengths_eq_cornerDistances`, `edgeSplitLengths_param`, `dist2_lerp_tail`, `dist2_lerp_head`, `alg6_distance_on_edge`, `alg6_distance_on_edge'`, `alg8_as_printed_differs` |
 | `it-circumcenter` | `circumWeight a_k a_{k+1} a_{k+2} = a_k²·(a_{k+1}² + a_{k+2}² − a_k²)`, `a_k` the side opposite corner `k`; `circumcenterBary a₀ a₁ a₂ = (w₀, w₁, w₂)/S`, `S = w₀ + w₁ + w₂` (this package's `circumSum`). For `T(a₀,a₁,a₂)`: `S = 16·triArea² > 0`; the coordinates sum to `1`; `cornerDistances a₂ a₀ a₁ (circumcenterBary a₀ a₁ a₂) = (R, R, R)` with `R = a₀a₁a₂/(4·triArea) = a₀/(2 sin θ₀)` (equidistant from the three corners); the coordinate of corner `k` is `< 0 ⟺` the angle there is `> π/2`, and `= 0 ⟺` it is `π/2` (angles `cornerAngle a₀ a₁ a₂`, `cornerAngle a₁ a₂ a₀`, `cornerAngle a₂ a₀ a₁`); if the coordinate of corner `0` is negative the other two are positive; `θ₀ < π/6 ⟹ a₀ < R`. | `circumWeight_sum`, `circumSum_pos`, `circumcenterBary_sum`, `circumcenter_equidistant`, `circumradius_eq_div_sin`, `circumcenterBary_neg_iff`, `circumcenterBary_eq_zero_iff`, `circumcenterBary_pos_of_neg`, `circumradius_gt_of_angle_lt` |
+| `it-move-length` | `movedLength ℓ r c s = √((ℓ − r c)² + (r s)²)`; `movedLength ℓ r (cos α) (sin α) = √(r² + ℓ² − 2rℓ cos α)` (the paper's Alg. 10); `movedLength ℓ r (cos(ψ − φ)) (sin(ψ − φ)) = \|(r cos φ, r sin φ)(ℓ cos ψ, ℓ sin ψ)\|`; `movedLength ℓ 0 c s = ℓ` for `ℓ ≥ 0`. (The scalar interface has no `cos`/`sin`; the oracle passes `cos α`, `sin α`.) | `movedLength_eq`, `movedLength_eq_law_of_cosines`, `movedLength_eq_dist2`, `movedLength_zero` |
+| `it-move-area` | `movedDoubleArea A₂ v d = A₂ − (v₁d₂ − v₂d₁)`; for all plane points `[v,j,k] = movedDoubleArea [0,j,k] v (k − j)`; for `p : ℕ → ℝ²` with `p n = p 0`: `Σ_{k<n} [v, p_k, p_{k+1}] = Σ_{k<n} [w, p_k, p_{k+1}]` for all `v, w` (the star keeps its area). | `movedDoubleArea_eq`, `movedDoubleArea_eq_sda`, `sda_change_centre`, `sum_sda_closed_link` |
+| `it-circumcenter-vector` | `weightedCircumcenter ℓ_ab ℓ_ac ℓ_bc A = (A ℓ_ab/2, ℓ_ab(ℓ_ac² + ℓ_bc² − ℓ_ab²)/8)`. With `A ≠ 0`, `ℓ_ab ≠ 0`, `c_x = (ℓ_ab² + ℓ_ac² − ℓ_bc²)/(2ℓ_ab)`, `h = 2A/ℓ_ab`, `c_x² + h² = ℓ_ac²`, and `o = weightedCircumcenter … / A` (componentwise): `\|0 o\|² = \|(ℓ_ab,0) o\|² = \|(c_x,h) o\|²`. Heron form: `T(ℓ_ab, ℓ_ac, ℓ_bc)`, `A = triArea ℓ_ab ℓ_ac ℓ_bc`, `c = (diamondX ℓ_ab ℓ_ac ℓ_bc, diamondH ℓ_ab ℓ_ac ℓ_bc)`: the same. | `weightedCircumcenter_eq`, `weightedCircumcenter_equidistant`, `weightedCircumcenter_equidistant_heron` |
+| `it-odt-update` | `weightedBarycenter ℓ_ab ℓ_ac ℓ_bc A = A·⅓((0,0) + (ℓ_ab,0) + (diamondX ℓ_ab ℓ_ac ℓ_bc, 2A/ℓ_ab))`; `odtDisplacement w total α = (α/total)·w`. A triangle `(x,b,c)`: `circumVec x b c = ¼[\|x\|² rot(c−b) − \|b\|² rot(c−x) + \|c\|² rot(b−x)]`, `rot u = (−u₂, u₁)`; for `[x,b,c] ≠ 0` the point `circumVec/(½[x,b,c])` is equidistant from `x, b, c`; `circumVec (0,0) (ℓ_ab,0) (c_x,h) = weightedCircumcenter ℓ_ab ℓ_ac ℓ_bc (ℓ_ab h/2)` (`c_x` as above, `c_x² + h² = ℓ_ac²`). A closed link `p n = p 0`, `\|T_k\| = [x,p_k,p_{k+1}]/2`, `S(x) = Σ_k (\|x\|² + \|p_k\|² + \|p_{k+1}\|²)\|T_k\|/3` (`odtEnergy`), `G = ⅔ Σ_k (\|T_k\| x − circumVec x p_k p_{k+1})` (`odtGradient`), `\|ω\| = Σ_k \|T_k\|` (`starArea`): `HasFDerivAt S (v ↦ ⟨G, v⟩) x` and `t ↦ S(x + t e)` has the derivative `⟨G, e⟩` at `0` (Chen–Holst Eq. 4.5, `d = 2`); `\|ω\|` does not depend on `x`; `S(x + v) = S(x) + ⟨G,v⟩ + \|ω\|·\|v\|²/3`; with `w = Σ_k (circumVec − \|T_k\| x)`: `odtDisplacement w \|ω\| α = −(3α/(2\|ω\|))·G` and, for `\|ω\| ≠ 0`, `S(x + odtDisplacement w \|ω\| α) = S(x) − 3\|G\|²/(4\|ω\|)·α(2 − α)`; for `\|ω\| > 0`, `0 ≤ α ≤ 2` the step does not increase `S`, and `α = 1` gives the minimum of `S` over all `y`. | `weightedBarycenter_eq`, `odtDisplacement_eq`, `circumVec_fst`, `circumVec_snd`, `circumVec_equidistant`, `circumVec_layout`, `hasFDerivAt_triTerm`, `triGrad_split`, `sum_triGrad`, `hasFDerivAt_odtEnergy`, `hasDerivAt_odtEnergy_line`, `starArea_indep`, `odtEnergy_add`, `odtDisplacement_eq_gradient`, `odtEnergy_step`, `odtEnergy_step_le` |
 
 Cited for intrinsic triangulations (`CITED.md`): `it-delaunay-existence-uniqueness`,
 `it-delaunay-flip-termination`, `it-rippa-theorem`, `it-chew-second-algorithm`,
-`it-ruppert-encroachment`, `it-straightest-geodesic`.
+`it-ruppert-encroachment`, `it-straightest-geodesic`, `it-odt-energy`,
+`it-odt-target-length-splits`.
 
 ## Theorems
 
@@ -621,7 +627,8 @@ Theorems **about the oracle's definitions** (at `ℝ`, i.e. exact arithmetic):
   `delaunayHolds`, `cotanWeight`, `cotanWeightFromLengths`, `oppositeAngles`, `unfoldApex`,
   `axisCrossingT`, `axisCrossingX`, `apexAboveAxis`, `signedArea2`, `barycentric`,
   `pointFromDistances`, `planeDistance`, `cornerDistances`, `edgeSplitLengths`, `circumWeight`,
-  `circumcenterBary`; they reuse `triArea`, `cornerAngle`, `cornerCot` of the first paper
+  `circumcenterBary`, `movedLength`, `movedDoubleArea`, `weightedCircumcenter`,
+  `weightedBarycenter`, `odtDisplacement`; they reuse `triArea`, `cornerAngle`, `cornerCot` of the first paper
   (`Oracle.triArea_eq`, `Oracle.cornerAngle_eq`, `Oracle.cornerCot_eq`).
 
 Own definitions of this package for intrinsic triangulations are shorthands and the vehicle of
@@ -629,7 +636,10 @@ the proofs, never the subject of a tagged claim on their own: `Intrinsic.apexK`,
 two apexes of the standard layout), `DiamondConvex` (the oracle's `flipConvex` of the standard
 layout of five lengths), `rigid` (a rotation and a translation of the plane), `MeetsAxis` (a
 closed segment has a point on the x-axis), `layoutPoint` (`b₁v₁ + b₂v₂`), `circumSum` (the sum
-of the three weights); plane points, `dist2` and `sda` are those of `DdgProofs/Bff/Quality.lean`,
+of the three weights), `rot`, `nsq`, `toDual`, `circumVec`, `odtEnergy`, `odtGradient`,
+`starArea`, `triGrad`, `forceF` (the vehicle of Eq. 4.5: a quarter turn, the squared norm, a
+vector as a linear form, `|T| c_T` as a polynomial, the energy and the gradient of one star, one
+term of the gradient and the telescoping force of Chen and Holst's proof); plane points, `dist2` and `sda` are those of `DdgProofs/Bff/Quality.lean`,
 `IsTriangle`, `triArea`, `cornerAngle`, `cornerCot` those of `DdgProofs/Triangle.lean`.
 
 Own definitions of this package for the default stages and `N` regions (what SPEC states in
@@ -1103,7 +1113,10 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
   the operations (the theorems say what one update and one flip do to the numbers); that the
   unfolding of a path of triangles composes (each step is covered, the path is not); the
   tracing query as a whole, edge traces and their checks, point queries, the overlay, the
-  refinement loop, the simplicial export. The Delaunay *triangulation* never appears: what is
+  refinement loop, the simplicial export. Moving a vertex and the optimal Delaunay update are
+  covered for one planar star with fixed connectivity and signed areas (that the star of an
+  intrinsic vertex unfolds into one is SPEC N19); the iteration, the shortened step, the flips
+  between iterations and the interpolation-error meaning of the energy are not (cited). The Delaunay *triangulation* never appears: what is
   proved is local (one edge and its two triangles), and the global facts are cited. Strict
   convexity is the oracle's `flipConvex`; the shape limit of N5, the tolerance of the Delaunay
   test and of the traces (N6, N8) and every other tolerance are outside. A corner angle is

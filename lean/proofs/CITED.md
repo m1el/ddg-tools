@@ -632,7 +632,7 @@ the marching order of the redistancing and its convergence; anything about round
 
 "Signpost paper" is Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4),
 Article 55, 2019 (<https://doi.org/10.1145/3306346.3322979>). The contract of the implementation
-is `crates/ddg-intrinsic/SPEC.md` ("SPEC", decisions `N1`–`N18`). "B–S" is A. I. Bobenko,
+is `crates/ddg-intrinsic/SPEC.md` ("SPEC", decisions `N1`–`N23`). "B–S" is A. I. Bobenko,
 B. A. Springborn, *A discrete Laplace–Beltrami operator for simplicial surfaces*, Discrete &
 Computational Geometry 38(4), 740–756, 2007 (arXiv:math/0503219, which is what the Signpost paper
 cites as "Bobenko and Springborn 2005").
@@ -647,7 +647,11 @@ a nonnegative cotan weight; that an edge which violates the condition can be fli
 satisfies it afterwards; that a flip keeps the angle sums at its four vertices; the angle
 normalization and the signpost update around a vertex; one step of a tracing query; barycentric
 coordinates, the distances of a point to the corners and the lengths of an edge split; the
-circumcentre in barycentric coordinates. **Not** machine-checked: the six results below; the
+circumcentre in barycentric coordinates; the lengths and areas of a moved vertex's star; the
+circumcentre and barycentre of a triangle times its area; the energy of Chen and Holst of one
+star, its gradient (their Eq. 4.5, as a Fréchet derivative), that it is exactly quadratic, and
+that the update of their Eq. 4.13 is a descent step (`DdgProofs/Intrinsic/Move.lean`). **Not**
+machine-checked: the eight results below; the
 halfedge data structure and that the Rust code applies the formulas to the right elements; a
 tracing query as a whole (only one step is covered), edge traces and their checks (SPEC N7, N8),
 the overlay (N12), point queries (N11), refinement and its termination (N1, N4, N14), the
@@ -900,6 +904,100 @@ an earlier version with another title, were read).
   hits the opposite vertex (`exit_cases`), the crossing is on that edge
   (`axisCrossingT_mem_Icc`) and lies ahead (`exit_ahead_above`, `exit_ahead_below`).
 
+### [formula: it-odt-energy] The optimal Delaunay triangulation, its energy and the update of Chen and Holst
+
+- **Statement.** For a point set `V` of the plane (convex hull `Ω`) and `u(x) = |x|²`, the error
+  of the piecewise linear interpolant `u_I` on a triangulation `T`, `E(T) = ∫_Ω |u_I − u| dx`, is
+  smallest for the Delaunay triangulation of `V` among all triangulations of `V` (Chen–Holst
+  Theorem 2.3, proved in Chen–Xu; first in the plane by Rippa for `L^q`, `1 ≤ q < ∞`, and by
+  D'Azevedo–Simpson for `q = ∞`). An *optimal Delaunay triangulation* minimizes `E` over the
+  positions of the interior vertices as well. For a uniform density
+  `E = (1/(d+1)) Σ_i |x_i|² |ω_i| − ∫_Ω |x|² dx` (Lemma 4.1, `ω_i` the star of `x_i`), and for an
+  interior vertex `∂_i E = (2/(d+1)) Σ_{τ_j ∈ ω_i} (x_i − c_j) |τ_j|` (Lemma 4.2, Eq. 4.5, `c_j`
+  the circumcentre of `τ_j`), `∂_ii E = (2/(d+1)) |ω_i|` (Lemma 4.3). The local scheme moves a
+  vertex to `x_i^new = (1 − α) x_i + α Σ_j (|τ_j|/|ω_i|) c_j` (Eq. 4.13, uniform density), starting
+  with `α = 1` and halving `α` (`1, ½, ¼, …`) while the new star has a simplex of negative signed
+  volume. For *boundary elements* (simplices with at least one vertex on the boundary) the
+  circumcentre is replaced by the barycentre (Sec. 4.2.1, "For boundary elements, use the
+  barycenter"), a remedy against stretched triangles at the boundary, not a gradient. Eq. 4.5
+  was first derived by Alliez, Cohen-Steiner, Yvinec, Desbrun (as Chen–Holst state after
+  Lemma 4.2). The Signpost paper (Sec. 4.3) applies Eq. 4.13 to inserted vertices of an intrinsic
+  triangulation, averaging the *vectors* to the circumcentres in the tangent plane of the
+  vertex, followed by Delaunay flipping.
+- **Reference.** L. Chen, M. Holst, *Efficient mesh optimization schemes based on Optimal
+  Delaunay Triangulations*, Computer Methods in Applied Mechanics and Engineering 200(9–12),
+  967–984, 2011, <https://doi.org/10.1016/j.cma.2010.11.007>: Theorem 2.3, Lemmas 4.1–4.3
+  (Eq. 4.2–4.8), Eq. 4.13 and the paragraphs after it, Sec. 4.2.1 (numbering of the preprint,
+  see below). L. Chen, J. Xu, *Optimal Delaunay triangulations*, Journal of Computational
+  Mathematics 22(2), 299–308, 2004, <https://doi.org/10.4208/jcm.v22.n2.p299>. P. Alliez,
+  D. Cohen-Steiner, M. Yvinec, M. Desbrun, *Variational tetrahedral meshing*, ACM Transactions on
+  Graphics 24(3), 617–625, 2005 (SIGGRAPH 2005), <https://doi.org/10.1145/1073204.1073238>.
+  Signpost paper Sec. 4.3.
+- **Source check.** Read: the preprint of Chen–Holst (`../NavigatingIntrinsicTriangulations/cited/
+  chen-holst-2011/ChHo10a.pdf`, PDF dated 2 Nov 2010, title "Efficient Mesh Optimization Schemes
+  based on Optimal Delaunay Triangulations"): Theorem 2.3 and Remark 2.4, Sec. 4.2.1 with
+  Lemmas 4.1–4.3, the proof of Eq. 4.5, Eq. 4.13, the line search `α = 1, 1/2, 1/4, …` and the
+  boundary rule; the attribution of Eq. 4.3 to Chen's 2004 Meshing Roundtable paper and of
+  Eq. 4.5 to Alliez et al. is the preprint's. The printed version was not compared, so section
+  and equation numbers may differ there. Bibliographic data of all three works from their Crossref
+  records (authors, titles, venues, volume 200, issue 9–12, pages 967–984, February 2011;
+  volume 22, issue 2, pages 299–308, 2004; volume 24, issue 3, pages 617–625, July 2005), and the
+  volume and pages of Chen–Xu and Alliez et al. also from the preprint's reference list ([2],
+  [24]). Not read: Chen–Xu and Alliez et al. (only their Crossref records); the statements
+  attributed to them are as Chen–Holst report them. Chen–Holst do **not** claim that Eq. 4.13
+  decreases the energy for every `α`; the line search guards validity of the mesh, not descent.
+- **Proved instead, in the plane, for one star with fixed connectivity**
+  (`DdgProofs/Intrinsic/Move.lean`, `[formula: it-odt-update]`): with a closed link
+  `p_0, …, p_n = p_0` and signed areas, the star's part of the energy
+  `S(x) = Σ_k (|x|² + |p_k|² + |p_{k+1}|²) |T_k| / 3` has the Fréchet derivative
+  `(2/3) Σ_k |T_k| (x − c_k)` (Eq. 4.5 for `d = 2`, `hasFDerivAt_odtEnergy`); it is exactly
+  `S(x) + ⟨∇S, v⟩ + |ω| |v|²/3` at `x + v` (Lemma 4.3; `odtEnergy_add`); the step of Eq. 4.13
+  changes it by `−(3|∇S|²/(4|ω|)) α (2 − α)` (`odtEnergy_step`), so every `0 ≤ α ≤ 2` is a
+  descent step on a star of positive area and `α = 1` is its minimum (`odtEnergy_step_le`); the
+  circumcentre and barycentre times the area are the oracle's closed forms
+  (`circumVec_equidistant`, `circumVec_layout`, `weightedBarycenter_eq`, and
+  `[formula: it-circumcenter-vector]`).
+- **Why not formalized.** That `S` is the interpolation error (Lemma 4.1) needs the integral of
+  the hat functions and of `|x|²` over the triangulation, and the optimality of the Delaunay
+  connectivity is a statement about all triangulations of a point set (as for
+  `it-delaunay-existence-uniqueness`). The boundary rule is a heuristic, not a theorem.
+- **What depends on it.** The update of the optimal Delaunay triangulation (SPEC §4, N21) and the
+  barycentres for triangles at the boundary. That flipping to Delaunay after a move does not
+  increase `E` is Theorem 2.3 in the plane; for an intrinsic triangulation it is the intrinsic
+  analogue (`it-rippa-theorem`, Rippa's theorem being the `L^q` case). Not claimed: that the
+  intrinsic iteration converges, or that a step shortened to stay in the star (N19, N20) keeps
+  the descent beyond what `odtEnergy_step_le` states for one planar star.
+
+### [formula: it-odt-target-length-splits] Splitting edges longer than a target length between optimization steps
+
+- **Statement.** Vertex optimization alone cannot add vertices; the input vertices of an
+  intrinsic triangulation cannot move. So between iterations of the optimal Delaunay update the
+  Signpost paper inserts new vertices by splitting edges longer than a user-defined target
+  length, "à la Tournois et al. [2009]" (Sec. 4.3). Tournois et al. interleave Delaunay
+  refinement (Steiner points inserted while an element violates the criteria; an edge is *badly
+  sized* if it is longer than the sizing function at its midpoint) with passes of ODT
+  optimization, optimizing only after a refinement batch inserted points.
+- **Reference.** J. Tournois, C. Wormser, P. Alliez, M. Desbrun, *Interleaving Delaunay
+  refinement and optimization for practical isotropic tetrahedron mesh generation*, ACM
+  Transactions on Graphics 28(3), Article 75, 2009 (SIGGRAPH 2009),
+  <https://doi.org/10.1145/1531326.1531381>; research report INRIA RR-6826, 2009,
+  <https://inria.hal.science/inria-00359288>. Signpost paper Sec. 4.3.
+- **Source check.** Read: the INRIA report RR-6826 (HAL inria-00359288v1, submitted 6 Feb 2009):
+  Sec. 2 (Algorithm 1: refine, then optimize, while refinement inserted points), Sec. 2.2 and 2.4
+  (the sizing criterion: an edge longer than the sizing function at its midpoint is bad),
+  Sec. 2.5 (ODT optimization, citing Chen 2004 and Alliez et al. 2005). Bibliographic data from
+  the Crossref record (authors, title, volume 28, issue 3, July 2009; Crossref gives pages 1–9
+  and no article number); the article number 75 from the Signpost paper's reference list
+  ("28, 3 (2009), 75"). Not read: the journal version. The report treats tetrahedral meshing in
+  a domain of `ℝ³` with Delaunay refinement of bad elements, not the splitting of edges at their
+  midpoints; the Signpost paper's rule is its own adaptation, for which Tournois et al. are the
+  model, not the source of a theorem.
+- **Why not formalized.** It is a heuristic of an algorithm, with no statement to prove; what is
+  checked for a split (lengths, signposts) is `it-point-distances`.
+- **What depends on it.** The schedule of the optimal Delaunay triangulation (SPEC §4, N21, N22):
+  which edges are split, where, and how often. Nothing of correctness depends on it; the
+  vertices it adds are inserted vertices like any other (N10).
+
 ---
 
 ## Out of scope of this package
@@ -911,6 +1009,6 @@ is not. For `crates/ddg-variational-cuts` the same holds: the formulas of one fl
 covered, the extraction of the cut and of the cut mesh (which faces are split, the choice of the
 quad diagonal, the bookkeeping of regions and components), the run loop around the stop rule,
 the `N`-region variant (SPEC §8) as a whole and the helpers for initial level sets are not. For
-`crates/ddg-intrinsic` the closed forms of the twelve `it-` ids are covered; the data structure,
+`crates/ddg-intrinsic` the closed forms of the sixteen proved `it-` ids are covered; the data structure,
 the algorithms built on them (flipping, tracing, insertion, overlay, refinement, export) and
 their tolerances are not.
