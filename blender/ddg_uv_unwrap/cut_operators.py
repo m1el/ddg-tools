@@ -126,6 +126,16 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         description="The smallest angle refinement aims for, in degrees (at most 35)",
         default=cut.DEFAULT_REFINE_BOUND, min=0.0, max=35.0,
     )
+    merge_tolerance: FloatProperty(
+        name="Merge Bends",
+        description=(
+            "Bends of the cut that deviate from the straight line between their neighbours by "
+            "less than this fraction of the longest edge of their triangle are removed before the "
+            "cut is inserted (intrinsic triangulations). This removes thin slivers that the "
+            "unwrap could flip, at the price that the inserted cut can differ from the one the "
+            "flow found by up to this fraction of an edge. 0 keeps every bend"),
+        default=cut.DEFAULT_MERGE_TOLERANCE, min=0.0, max=0.499, precision=3,
+    )
     attribute: StringProperty(
         name="Attribute",
         description="Name of an integer attribute on the face domain",
@@ -153,6 +163,7 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         layout.use_property_decorate = False
         layout.prop(self, "mode")
         layout.prop(self, "cut_offset")
+        layout.prop(self, "merge_tolerance")
         layout.prop(self, "triangulation")
         if self.triangulation == 'REFINED':
             layout.prop(self, "refine_bound")
@@ -182,7 +193,8 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                     n_regions=self.regions, active_vertex=active_vertex,
                     selected_vertices=selected_vertices,
                     cluster_iterations=self.cluster_iterations, attribute=self.attribute,
-                    cut_offset=self.cut_offset, triangulation=self.triangulation,
+                    cut_offset=self.cut_offset, merge_tolerance=self.merge_tolerance,
+                    triangulation=self.triangulation,
                     refine_bound=self.refine_bound)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
@@ -434,6 +446,16 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
         default=cut.DEFAULT_CUT_OFFSET, min=0.0, max=0.499, precision=3,
     )
 
+    merge_tolerance: FloatProperty(
+        name="Merge Bends",
+        description=(
+            "Bends of the cut that deviate from the straight line between their neighbours by "
+            "less than this fraction of the longest edge of their triangle are removed before the "
+            "cut is inserted (intrinsic triangulations). This removes thin slivers that the "
+            "unwrap could flip, at the price that the inserted cut can differ from the one the "
+            "flow found by up to this fraction of an edge. 0 keeps every bend"),
+        default=cut.DEFAULT_MERGE_TOLERANCE, min=0.0, max=0.499, precision=3,
+    )
     show_advanced: BoolProperty(
         name="Advanced Options", description="Show the advanced options", default=False,
         options={'SKIP_SAVE'})
@@ -494,6 +516,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
             else:
                 body.prop(self, "tau")
             body.prop(self, "min_crossing_offset")
+            body.prop(self, "merge_tolerance")
             body.prop(self, "motion_tolerance")
             body.prop(self, "energy_tolerance")
             body.prop(self, "energy_window")
@@ -508,7 +531,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
             "hide_strength", "distortion_weights", "area_weights", "symmetry",
             "symmetry_tolerance", "use_uniform_curvature", "uniform_curvature", "feature_r_eps",
             "feature_smoothing", "step_rule", "time_scale", "max_motion", "tau_max", "tau",
-            "min_crossing_offset", "cut_offset", "show_advanced", "motion_tolerance", "energy_tolerance", "energy_window",
+            "min_crossing_offset", "cut_offset", "merge_tolerance", "show_advanced", "motion_tolerance", "energy_tolerance", "energy_window",
             "flux_recovery", "length_step", "extension", "speed_scaling", "redistance",
             "penalty_rule")
         return {key: getattr(self, key) for key in keys}
@@ -540,6 +563,16 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         "seams stay. " + _CITATION)
     bl_options = {'REGISTER', 'UNDO'}
 
+    merge_tolerance: FloatProperty(
+        name="Merge Bends",
+        description=(
+            "Bends of the cut that deviate from the straight line between their neighbours by "
+            "less than this fraction of the longest edge of their triangle are removed before the "
+            "cut is inserted (intrinsic triangulations). This removes thin slivers that the "
+            "unwrap could flip, at the price that the inserted cut can differ from the one the "
+            "flow found by up to this fraction of an edge. 0 keeps every bend"),
+        default=cut.DEFAULT_MERGE_TOLERANCE, min=0.0, max=0.499, precision=3,
+    )
     unwrap_after: BoolProperty(
         name="Unwrap Afterwards",
         description="Run Conformal Unwrap (Optimal Cones) on the result, with its default "
@@ -568,6 +601,7 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         layout.use_property_decorate = False
         layout.prop(self, "unwrap_after")
         layout.prop(self, "cut_offset")
+        layout.prop(self, "merge_tolerance")
 
     def execute(self, context):
         obj = context.active_object
@@ -577,7 +611,8 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         unwrap_error = None
         try:
             with _ObjectMode(obj):
-                stats = cut.apply_cut(obj, cut_offset=self.cut_offset)
+                stats = cut.apply_cut(obj, cut_offset=self.cut_offset,
+                                      merge_tolerance=self.merge_tolerance)
                 if self.unwrap_after:
                     try:
                         bpy.ops.uv.ddg_conformal_unwrap(use_seams=True)
@@ -591,11 +626,14 @@ class UV_OT_ddg_cut_apply(bpy.types.Operator):
         self.report({'INFO'}, (
             "Cut applied: {} vertices and {} faces added, {} edges marked as seams "
             "({} -> {} vertices, {} -> {} faces); the library's triangulation of {} split faces "
-            "is stored for the unwrap").format(
+            "is stored for the unwrap{}").format(
             stats["n_vertices"] - stats["n_vertices_before"],
             stats["n_polygons"] - stats["n_polygons_before"], stats["n_seams_marked"],
             stats["n_vertices_before"], stats["n_vertices"], stats["n_polygons_before"],
-            stats["n_polygons"], stats["n_triangulated"]))
+            stats["n_polygons"], stats["n_triangulated"],
+            "; {} bends of the cut merged, it moved by at most {:.3g} of an edge".format(
+                stats["merge"]["n_merged_nodes"], stats["merge"]["max_displacement_relative"])
+            if stats["merge"].get("n_merged_nodes") else ""))
         if unwrap_error is not None:
             self.report({'ERROR'}, "The cut was applied, but the unwrap failed: " + unwrap_error)
         return {'FINISHED'}

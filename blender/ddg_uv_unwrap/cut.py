@@ -51,6 +51,10 @@ STATE_KEY = "ddg_cut_state"
 OPTION_KEY = "ddg_cut_option"
 DEFAULT_OPTION = "intrinsic"
 DEFAULT_REFINE_BOUND = 25.0
+# Bends of the cut that deviate from the straight line between their neighbours by less than
+# this fraction of the longest edge of their triangle are removed before the cut is inserted
+# (intrinsic triangulations; the library's default).
+DEFAULT_MERGE_TOLERANCE = 0.1
 
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
@@ -129,7 +133,7 @@ def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND):
     return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation]
 
 
-def option_keywords(option, offset=None):
+def option_keywords(option, offset=None, merge=None):
     """The keywords of ``CutSession`` for an option string; ``offset`` is the smallest distance
     of a point of the cut from a vertex of the caller's triangles (intrinsic sessions)."""
     kind, _, bound = option.partition(":")
@@ -138,6 +142,8 @@ def option_keywords(option, offset=None):
         keywords["refine_bound"] = float(bound or DEFAULT_REFINE_BOUND)
     if kind != "caller" and offset is not None:
         keywords["min_offset"] = offset
+    if kind != "caller" and merge is not None:
+        keywords["merge_tolerance"] = merge
     return keywords
 
 
@@ -196,7 +202,7 @@ def check_mesh(obj):
     return mesh
 
 
-def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
+def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None, merge=None):
     """A ``ddg_tools.CutSession`` on the mesh of ``obj`` (existing seams are fixed cuts).
     ``start`` is a dict of the start keywords of the constructor, ``option`` the triangulation
     (``option_keywords``). Returns ``(session, seconds)`` with the time spent extracting the
@@ -213,9 +219,12 @@ def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     keywords = dict(start)
     if "state" not in keywords:
         keywords["n_regions"] = n_regions
-        keywords.update(option_keywords(option, offset))
-    elif offset is not None and not option.startswith("caller"):
-        keywords["min_offset"] = offset
+        keywords.update(option_keywords(option, offset, merge))
+    elif not option.startswith("caller"):
+        if offset is not None:
+            keywords["min_offset"] = offset
+        if merge is not None:
+            keywords["merge_tolerance"] = merge
     try:
         session = ddg.CutSession(
             positions, corner_vertices, polygon_starts, triangles,
@@ -229,7 +238,7 @@ def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     return session, extracted - begin
 
 
-def open_session(obj, offset=None):
+def open_session(obj, offset=None, merge=None):
     """The session of the cut stored on the mesh of ``obj``: from the state bytes if the mesh has
     them, else from the per-corner attributes with the triangulation option stored at Start.
     Returns ``(session, seconds, option)``."""
@@ -241,10 +250,11 @@ def open_session(obj, offset=None):
         except ValueError as ex:
             raise CutFailed("The stored cut state of mesh '{}' is damaged. Run 'Cut: Start' "
                             "again.".format(mesh.name)) from ex
-        session, seconds = make_session(obj, {"state": state}, option=option, offset=offset)
+        session, seconds = make_session(obj, {"state": state}, option=option, offset=offset,
+                                         merge=merge)
         return session, seconds, option
     n_regions, flat = read_state(mesh)
-    session, seconds = make_session(obj, {"corner_values": flat}, n_regions, option, offset)
+    session, seconds = make_session(obj, {"corner_values": flat}, n_regions, option, offset, merge)
     return session, seconds, option
 
 
@@ -287,7 +297,8 @@ def labels_from_values(values, what):
 
 def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=None,
               selected_vertices=(), cluster_iterations=50, attribute="",
-              cut_offset=DEFAULT_CUT_OFFSET, triangulation='INTRINSIC',
+              cut_offset=DEFAULT_CUT_OFFSET, merge_tolerance=DEFAULT_MERGE_TOLERANCE,
+              triangulation='INTRINSIC',
               refine_bound=DEFAULT_REFINE_BOUND):
     """Creates the state of a cut on ``obj`` and its preview.
 
@@ -352,7 +363,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
     option = option_of(triangulation, refine_bound)
-    session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset)
+    session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset, merge_tolerance)
     begin = perf_counter()
     write_state(mesh, session, option)
     if LAST_FLOW_KEY in mesh:
@@ -658,7 +669,7 @@ def run_flow(obj, context, settings):
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    session, seconds_extract, option = open_session(obj, settings["cut_offset"])
+    session, seconds_extract, option = open_session(obj, settings["cut_offset"], settings["merge_tolerance"])
     n_regions = session.n_regions
     state_read = perf_counter()
     controls, info = flow_controls(obj, context, session, settings)
@@ -680,11 +691,15 @@ def run_flow(obj, context, settings):
     mesh.update()
     written = perf_counter()
     n_patches = count_patches(mesh, session.corner_regions())
-    try:
-        n_triple_points = (len(session.describe_cut(
-            min_crossing_offset=settings["cut_offset"]).junction_polygon) if n_regions > 2 else 0)
-    except ddg.DdgError as ex:
-        raise _translate(ex) from ex
+    n_triple_points = 0
+    merge = {}
+    if n_regions > 2 or settings["show_advanced"]:
+        try:
+            described = session.describe_cut(min_crossing_offset=settings["cut_offset"])
+        except ddg.DdgError as ex:
+            raise _translate(ex) from ex
+        n_triple_points = len(described.junction_polygon) if n_regions > 2 else 0
+        merge = dict(described.report)
     update_preview(obj, session, settings["cut_offset"])
     previewed = perf_counter()
     summary = {k: v for k, v in report.items() if k != "steps"}
@@ -695,6 +710,7 @@ def run_flow(obj, context, settings):
     report["n_patches"] = n_patches
     report["n_triple_points"] = n_triple_points
     report["n_regions"] = n_regions
+    report["merge"] = merge
     intrinsic = session.intrinsic_report
     report["triangulation"] = option
     report["intrinsic"] = intrinsic
@@ -766,9 +782,14 @@ def triangulation_line(report):
     intrinsic = report.get("intrinsic")
     if intrinsic is None:
         return "triangulation: the mesh's own"
-    return "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
+    line = "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
         report["triangulation"], intrinsic["n_added"], intrinsic["min_angle_degrees"],
         intrinsic["max_angle_degrees"])
+    merge = report.get("merge")
+    if merge:
+        line += " | {} bends merged, cut moved by at most {:.3g} of an edge".format(
+            merge["n_merged_nodes"], merge["max_displacement_relative"])
+    return line
 
 
 def flow_summary(report, advanced=False):
@@ -1238,14 +1259,15 @@ def _reference_triangulation(bm, reference, point_vertex, junction_vertex, inter
     return entries
 
 
-def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
+def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET,
+              merge_tolerance=DEFAULT_MERGE_TOLERANCE):
     """Applies the cut stored in the state attributes of ``obj``: inserts it into the mesh
     (``insert_cut``), marks it as seams, and removes the preview and the state attributes.
     Returns a dict with the insertion's counts and the time spent."""
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    session, seconds_extract, option = open_session(obj, cut_offset)
+    session, seconds_extract, option = open_session(obj, cut_offset, merge_tolerance)
     try:
         cut = session.describe_cut(min_crossing_offset=cut_offset)
     except ddg.DdgError as ex:
@@ -1268,6 +1290,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
         "seams_before": seam_before,
         "n_triangulated": stats.get("n_triangulated", 0),
         "n_clamped_crossings": cut.n_clamped_crossings,
+        "merge": dict(cut.report),
         "warnings": list(session.warnings),
         "seconds_extract": seconds_extract,
         "seconds_native": described - begin - seconds_extract,
