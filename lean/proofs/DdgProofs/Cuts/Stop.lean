@@ -3,10 +3,10 @@ import Mathlib
 /-!
 # Cut flow: the energy criterion of the stop rule and the lowest state of a run
 
-`crates/ddg-variational-cuts/SPEC.md` §4 ("Stopping"), D27. SPEC gives this rule no formula id
-and the Rust functions (`energy_stop`, `run_outcome` in `flow.rs`) carry no tag, so the theorems
-here carry none either. There is no oracle definition (the oracle replays single steps); the
-definitions below are **this package's own**, written after the Rust functions.
+`crates/ddg-variational-cuts/SPEC.md` §4 ("Stopping"), D27, D29. The ids are `cut-stop-energy`
+(the Rust `energy_stop`) and `cut-run-lowest` (`run_outcome`). There is no oracle definition
+(the oracle replays single steps); the definitions below are **this package's own**, written
+after the Rust functions.
 
 With `E_k` the energy of the state after `k` steps, `W` the window and `ε` the tolerance:
 
