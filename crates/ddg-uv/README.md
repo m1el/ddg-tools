@@ -1068,13 +1068,16 @@ the refined atlas and camelbad refined, 0.01 to 0.04 on the single circles; the 
 option. The caller's triangulation never needed it (no bends). The cost is in `describe` (a
 few tens of microseconds more, below).
 
-**Why the needles-and-caps run with flips only seems stuck** (energy 1.167 over 8 steps): the
-stop rule. The first step of that start moves the cut by 6e-11 (`cut_motion`), below the
-`motion_tolerance` of 1e-5, and `StopRule` ends the run with `Converged` after one step. With
-`motion_tolerance = 0` the second step moves it by 2e-5 and from the third on by 8e-3 per step,
-and the energy goes 1.167, 1.167, 1.166, 1.124 and reaches 0.894 after 8 steps. The step size
-is not the limit (`tau` about 1e-3, the length speed about 8). Why the first step does nothing
-on this export was not traced further.
+**The needles-and-caps run with flips only** (the row above, energy 1.167 over 8 steps) was
+measured before a defect of the flow was fixed. Six vertices lay on the start circle to
+rounding; their crossings were moved away by the smallest offset, the slope of the level-set
+function in those faces came out as `2·10⁻¹²`, and the mean slope that scales the step became
+`2·10⁻⁸`, so the first step moved the cut by `6·10⁻¹¹` and the stop rule called the run
+converged. Faces with a moved crossing no longer count in the mean slope, and a run converges
+by motion only if the predicted motion is small as well (`ddg-variational-cuts` SPEC D30,
+D31). With that the same start moves from the first step: 1.167 to 0.853 in 8 steps, measured
+in the flow crate's test on the same exported mesh; the row above was not re-measured through
+the session.
 
 #### Benchmarks (`-- intrinsic/`)
 
