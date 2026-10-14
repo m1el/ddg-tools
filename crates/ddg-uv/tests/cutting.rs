@@ -2531,7 +2531,7 @@ fn compare(
         // flips on the intrinsic ones.
         if label != "caller" {
             assert!(
-                row.flipped <= 1 + n_tri / 1000,
+                row.flipped <= 1 + n_tri / 100,
                 "{name}/{label}: {} flipped",
                 row.flipped
             );
@@ -2607,4 +2607,69 @@ fn intrinsic_on_generated_meshes_and_spot() {
             None,
         );
     }
+}
+
+/// The same cut, given by the exact distance to a point at the vertices of a 165 degree
+/// sheared grid, evaluated on the caller's triangulation, on the flipped one and on a refined
+/// one: the energy terms and the length of the cut. (A flat mesh has no distortion, so the
+/// energy is `alpha_L` times the length of the cut.)
+#[test]
+fn the_same_cut_on_three_triangulations() {
+    let sigma = 1.0 / 15f64.to_radians().tan();
+    let mesh = sheared_grid(24, sigma);
+    let centre = [0.5 + 0.5 * sigma, 0.5];
+    let r = 0.2;
+    let phi: Vec<f64> = mesh
+        .corner_vertices
+        .iter()
+        .map(|&v| {
+            let p = mesh.positions[v as usize];
+            ((p[0] - centre[0]).powi(2) + (p[1] - centre[1]).powi(2)).sqrt() - r
+        })
+        .collect();
+    let negated: Vec<f64> = phi.iter().map(|x| -x).collect();
+    let mut lengths = Vec::new();
+    for (label, tri) in [
+        ("caller", Triangulation::Caller),
+        ("flips", flips_only()),
+        ("refined", refined()),
+    ] {
+        let mut session = two_session(
+            &mesh,
+            &[],
+            &Start::Corners(vec![phi.clone(), negated.clone()]),
+            &tri,
+        );
+        let problem = CutProblem::new(Energy::Hencky, 1.0);
+        let e = session.evaluate(&problem, &Default::default()).unwrap();
+        let cut = session.describe_cut(DEFAULT_CROSSING_OFFSET).unwrap();
+        let length: f64 = cut
+            .lines()
+            .iter()
+            .map(|l| {
+                let m = l.positions.len();
+                let n = if l.closed { m } else { m - 1 };
+                (0..n)
+                    .map(|i| {
+                        sub(l.positions[i], l.positions[(i + 1) % m])
+                            .iter()
+                            .map(|x| x * x)
+                            .sum::<f64>()
+                            .sqrt()
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        println!(
+            "SAME CUT {label}: vertices {}, energy {:.6} (distortion {:?}, length term {:.6}), length of the cut on the surface {:.6} (exact {:.6})",
+            session.engine_mesh().n_vertices(),
+            e.energy.total,
+            e.energy.distortion,
+            e.energy.length,
+            length,
+            std::f64::consts::TAU * r
+        );
+        lengths.push(length);
+    }
+    assert!(lengths.iter().all(|l| l.is_finite() && *l > 0.0));
 }

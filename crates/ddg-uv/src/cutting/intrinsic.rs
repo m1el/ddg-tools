@@ -27,11 +27,11 @@ use ddg_intrinsic::{
 use super::error::CuttingError;
 
 /// The triangulation the cut flow runs on.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Triangulation {
     /// The triangle mesh of the caller's triangulation, cut open at the seams. The behaviour of
-    /// every earlier version, bit for bit.
-    #[default]
+    /// every earlier version, bit for bit ([`Session::new`](super::Session::new) and
+    /// [`Session::new_with`](super::Session::new_with) use it).
     Caller,
     /// An intrinsic triangulation of that mesh, flipped to Delaunay and exported; see
     /// [`IntrinsicOptions`].
@@ -63,7 +63,7 @@ pub struct IntrinsicOptions {
 
 impl IntrinsicOptions {
     /// Flips to Delaunay, refines to 25 degrees (the default of `ddg-intrinsic`), exports with
-    /// the refinement kept between the rounds of splits. The default.
+    /// the refinement kept between the rounds of splits. Refinement is an explicit choice.
     pub fn refined() -> IntrinsicOptions {
         IntrinsicOptions {
             delaunay: DelaunayOptions::default(),
@@ -78,7 +78,10 @@ impl IntrinsicOptions {
     }
 
     /// Delaunay flips only: no vertex is inserted except what the export needs to make the
-    /// triangulation a simplicial complex.
+    /// triangulation a simplicial complex. The default. When the report says no vertex was
+    /// added ([`IntrinsicReport::n_added`] is 0, [`Session::state_is_per_corner`](super::Session::state_is_per_corner)),
+    /// the state has one value per vertex of the polygon mesh (per seam copy) and the per-corner
+    /// view is the whole state.
     pub fn flips_only() -> IntrinsicOptions {
         IntrinsicOptions {
             refine: None,
@@ -99,8 +102,20 @@ impl IntrinsicOptions {
 }
 
 impl Default for IntrinsicOptions {
+    /// [`IntrinsicOptions::flips_only`]: the measurements of `ddg-intrinsic` and of the cut
+    /// flow on it show that flipping to Delaunay is what makes badly shaped meshes behave, and
+    /// that refinement adds 30 % to 140 % vertices for little gain on most meshes.
     fn default() -> Self {
-        IntrinsicOptions::refined()
+        IntrinsicOptions::flips_only()
+    }
+}
+
+impl Default for Triangulation {
+    /// Intrinsic, Delaunay flips only ([`IntrinsicOptions::default`]). Note that
+    /// [`Session::new`](super::Session::new) keeps the caller's triangulation; ask for this one
+    /// with [`Session::with_triangulation`](super::Session::with_triangulation).
+    fn default() -> Self {
+        Triangulation::Intrinsic(IntrinsicOptions::default())
     }
 }
 

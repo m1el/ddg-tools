@@ -530,6 +530,14 @@ impl Session {
         Ok(session)
     }
 
+    /// Whether the state is exactly one value per vertex of the seam-cut mesh (nothing was
+    /// added by the intrinsic triangulation, or the triangulation is the caller's): then
+    /// [`Session::state`] is the whole state. [`IntrinsicReport::n_added`] is the number of
+    /// vertices added otherwise.
+    pub fn state_is_per_corner(&self) -> bool {
+        self.engine_mesh().n_vertices() == self.flow_mesh.n_vertices()
+    }
+
     /// The triangulation option the session was built with.
     pub fn triangulation(&self) -> Triangulation {
         self.triangulation
