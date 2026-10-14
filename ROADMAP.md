@@ -1,6 +1,6 @@
 # Roadmap and known gaps
 
-State of 2026-10-14, branch `variational-cuts`. Numbers and evidence are in the documents this
+State of 2026-10-14, branch `intrinsic-triangulations`. Numbers and evidence are in the documents this
 file points to; this is the list of what is scheduled, what was decided, and what is known to be
 open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
@@ -145,4 +145,5 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
   independently (authors, title, journal, volume, pages, year were).
-* Nothing is pushed; `master` points at `optimal-cones`.
+* Nothing is pushed; `master` points at `variational-cuts`, and the intrinsic-triangulations
+  work is on `intrinsic-triangulations`, not yet on `master`.
