@@ -11,10 +11,15 @@ Notation of `DdgProofs/Intrinsic/Diamond.lean`: an edge `ij` of length `a` with 
 are `θ_k = cornerAngle a b c` and `θ_l = cornerAngle a d e`. After a flip the edge `kl` of length
 `f` has the diamond `(f, c, e, b, d)` (apexes `j` and `i`).
 
-* **`it-delaunay-condition`**, **`it-cotan-weight`** — for two angles in `(0, π)`:
-  `cot θ_k + cot θ_l = sin(θ_k + θ_l)/(sin θ_k sin θ_l)`, so the cotan weight is `≥ 0`, `> 0`,
-  `= 0` exactly when `θ_k + θ_l` is `≤ π`, `< π`, `= π` (`cotanWeight_nonneg_iff`, …); the same
-  from the five lengths (`delaunay_iff_cotanWeight_nonneg`). An edge that violates the condition
+* **`it-delaunay-condition`**, **`it-cotan-weight`** — the oracle's `cotanWeight` (and the Rust
+  function with this tag) is the sum `cot θ_k + cot θ_l`: twice the cotan weight
+  `w = ½ (cot θ_k + cot θ_l)` of the edge (SPEC N6, N17), and minus twice the entry of the cotan
+  Laplacian, `L_ij = −w` (`offDiag_eq_neg_half_cotanWeight`, `cotanWeight_eq_neg_two_mul_offDiag`).
+  For two angles in `(0, π)`: `cot θ_k + cot θ_l = sin(θ_k + θ_l)/(sin θ_k sin θ_l)`, so the sum,
+  and with it `w`, is `≥ 0`, `> 0`, `= 0` exactly when `θ_k + θ_l` is `≤ π`, `< π`, `= π`
+  (`cotanWeight_nonneg_iff`, `cotanWeight_pos_iff`, `cotanWeight_eq_zero_iff`,
+  `half_cotanWeight_sign`); the same from the five lengths
+  (`delaunay_iff_cotanWeight_nonneg`). An edge that violates the condition
   has a strictly convex diamond (`diamondConvex_of_not_delaunay`); two corners of one triangle
   never violate it (`delaunay_of_same_triangle`). A flip of a strictly convex diamond negates
   the excess `θ_k + θ_l − π` (`flip_delaunayExcess`), so the flip of a violating edge gives an
@@ -94,7 +99,8 @@ theorem div_nonneg_iff_of_pos {x y : ℝ} (hy : 0 < y) : 0 ≤ x / y ↔ 0 ≤ x
     rwa [div_mul_cancel₀ _ hy.ne'] at this
   · exact fun h => div_nonneg h hy.le
 
-/-- **The cotan weight has the sign of `π − (θ_k + θ_l)`**: for angles in `(0, π)` it is
+/-- **The sum of the two cotangents has the sign of `π − (θ_k + θ_l)`**: for angles in `(0, π)`
+the oracle's `cotanWeight` (`cot θ_k + cot θ_l`, twice the weight `w` of SPEC N6) is
 `sin(θ_k + θ_l)/(sin θ_k sin θ_l)` with a positive denominator.
 
 [formula: it-cotan-weight] -/
@@ -107,7 +113,8 @@ theorem cotanWeight_eq_sin_div {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (
   exact ⟨by rw [cotanWeight_eq, cot_add_cot s1.ne' s2.ne'], mul_pos s1 s2⟩
 
 /-- **The Delaunay condition is the nonnegativity of the cotan weight**: for two angles in
-`(0, π)`, `cot θ_k + cot θ_l ≥ 0 ⟺ θ_k + θ_l ≤ π`.
+`(0, π)`, `cot θ_k + cot θ_l ≥ 0 ⟺ θ_k + θ_l ≤ π`. (The oracle's `cotanWeight` is `2w`; for the
+weight `w` itself see `half_cotanWeight_sign`.)
 
 [formula: it-cotan-weight] -/
 theorem cotanWeight_nonneg_iff {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
@@ -144,6 +151,20 @@ theorem cotanWeight_eq_zero_iff {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) 
     have a1 := h1.mpr h.le
     have a2 : ¬ 0 < Ddg.cotanWeight (cot θk) (cot θl) := fun hpos => (h2.mp hpos).ne h
     linarith [not_lt.mp a2]
+
+/-- **The weight `w = ½ (cot θ_k + cot θ_l)` of SPEC N6 is half the oracle's `cotanWeight` and
+has the same sign**: `w ≥ 0 ⟺ θ_k + θ_l ≤ π`, `w > 0 ⟺ θ_k + θ_l < π`,
+`w = 0 ⟺ θ_k + θ_l = π`, for two angles in `(0, π)`.
+
+[formula: it-cotan-weight] -/
+theorem half_cotanWeight_sign {θk θl : ℝ} (hk0 : 0 < θk) (hk : θk < π) (hl0 : 0 < θl)
+    (hl : θl < π) :
+    (0 ≤ Ddg.cotanWeight (cot θk) (cot θl) / 2 ↔ Ddg.delaunayExcess θk θl ≤ 0) ∧
+      (0 < Ddg.cotanWeight (cot θk) (cot θl) / 2 ↔ Ddg.delaunayExcess θk θl < 0) ∧
+      (Ddg.cotanWeight (cot θk) (cot θl) / 2 = 0 ↔ Ddg.delaunayExcess θk θl = 0) := by
+  rw [← cotanWeight_nonneg_iff hk0 hk hl0 hl, ← cotanWeight_pos_iff hk0 hk hl0 hl,
+    ← cotanWeight_eq_zero_iff hk0 hk hl0 hl]
+  refine ⟨?_, ?_, ?_⟩ <;> constructor <;> intro h <;> linarith
 
 /-! ## From the five lengths -/
 
@@ -396,10 +417,11 @@ section Laplacian
 
 variable {V F : Type*} [DecidableEq V] [Fintype F]
 
-/-- **The cotan weight is minus twice the entry of the cotan Laplacian** (`cotan-laplacian`,
-`DdgProofs/Cotan.lean`; `L` positive semidefinite): if only the two faces `f₁ ≠ f₂` of a mesh
-have the edge `{i, j}`, then `L_ij = −½ (cot θ_k + cot θ_l)`, with the two cotangents those of
-the corners opposite the edge.
+/-- **The entry of the cotan Laplacian is minus the cotan weight `w`, i.e. minus half the
+oracle's `cotanWeight`** (`cotan-laplacian`, `DdgProofs/Cotan.lean`; `L` positive semidefinite):
+if only the two faces `f₁ ≠ f₂` of a mesh have the edge `{i, j}`, then
+`L_ij = −½ (cot θ_k + cot θ_l) = −w`, with the two cotangents those of the corners opposite the
+edge.
 
 [formula: it-cotan-weight] -/
 theorem offDiag_eq_neg_half_cotanWeight (M : TriMesh V F) {i j : V} {f₁ f₂ : F} (hne : f₁ ≠ f₂)
@@ -408,6 +430,16 @@ theorem offDiag_eq_neg_half_cotanWeight (M : TriMesh V F) {i j : V} {f₁ f₂ :
   unfold TriMesh.offDiag
   rw [cotanWeight_eq, Finset.sum_eq_add f₁ f₂ hne (fun f _ hf => h f hf.1 hf.2)
     (fun hf => absurd (Finset.mem_univ _) hf) (fun hf => absurd (Finset.mem_univ _) hf)]
+
+/-- **The function tagged `it-cotan-weight` returns `2w = −2 L_ij`**: the sum of the two
+cotangents is twice the weight of SPEC N6 and minus twice the entry of the cotan Laplacian.
+
+[formula: it-cotan-weight] -/
+theorem cotanWeight_eq_neg_two_mul_offDiag (M : TriMesh V F) {i j : V} {f₁ f₂ : F}
+    (hne : f₁ ≠ f₂) (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j) = -2 * M.offDiag i j := by
+  rw [offDiag_eq_neg_half_cotanWeight M hne h]
+  ring
 
 /-- **The off-diagonal entry is nonpositive exactly when the cotan weight of the edge is
 nonnegative**, that is (by `cotanWeight_nonneg_iff`) when the edge satisfies the Delaunay

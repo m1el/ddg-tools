@@ -864,3 +864,8 @@ open DdgProofs
 #print axioms Intrinsic.circumcenter_equidistant
 #print axioms Intrinsic.circumradius_eq_div_sin
 #print axioms Intrinsic.circumradius_gt_of_angle_lt
+#print axioms Intrinsic.half_cotanWeight_sign
+#print axioms Intrinsic.cotanWeight_eq_neg_two_mul_offDiag
+#print axioms Intrinsic.dist2_lerp_tail
+#print axioms Intrinsic.dist2_lerp_head
+#print axioms Intrinsic.edgeSplitLengths_param

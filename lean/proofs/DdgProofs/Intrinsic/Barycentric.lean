@@ -22,9 +22,11 @@ A triangle with the sides `ℓ₀₁, ℓ₁₂, ℓ₂₀` is laid out as `v₀
   of the paper's Alg. 6, by the theorem of `cut-barycentric-length`
   (`cornerDistances_eq_baryLength`). On a side (`b₂ = 0`) the distances to its two ends are
   `ℓ₀₁ b₁` and `ℓ₀₁ b₀`, the oracle's `edgeSplitLengths`, and they sum to `ℓ₀₁`
-  (`edgeSplitLengths_eq_cornerDistances`, `edgeSplitLengths_sum`). With `b_i` the weight of
-  `i`, the distance from `i` is `ℓ_ij b_j`: the paper's Alg. 8 prints `ℓ_ip ← ℓ_ij b_i`, which
-  contradicts its Alg. 6 (`alg6_distance_on_edge`, `alg8_as_printed_differs`).
+  (`edgeSplitLengths_eq_cornerDistances`, `edgeSplitLengths_sum`); for the vertex at
+  `(1 − t)·tail + t·head` they are `t ℓ` and `(1 − t) ℓ` (`edgeSplitLengths_param`, SPEC N17).
+  With `b_i` the weight of `i`, the distance from `i` is `ℓ_ij b_j`: the paper's Alg. 8 prints
+  `ℓ_ip ← ℓ_ij b_i`, which contradicts its Alg. 6 (`alg6_distance_on_edge`,
+  `alg8_as_printed_differs`).
 * **`it-circumcenter`** — the oracle's `circumcenterBary`: the weights sum to `16 A²`, the
   coordinates to one (`circumWeight_sum`, `circumcenterBary_sum`); the point has the distance
   `a₀a₁a₂/(4A)` to all three corners (`circumcenter_equidistant`); the coordinate of a corner
@@ -272,6 +274,52 @@ theorem edgeSplitLengths_sum {bi bj : ℝ} (h : bi + bj = 1) (lij : ℝ) :
   rw [edgeSplitLengths_eq]
   dsimp only
   rw [← mul_add, add_comm, h, mul_one]
+
+/-- **The point `(1 − t)·tail + t·head` of a segment** (`t ≥ 0`) has the distance `t ℓ` from
+the tail … -/
+theorem dist2_lerp_tail (tail head : ℝ × ℝ) {t : ℝ} (ht : 0 ≤ t) :
+    dist2 tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) =
+      t * dist2 tail head := by
+  have hx := dist2_nonneg tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2)
+  have hy := mul_nonneg ht (dist2_nonneg tail head)
+  have e : dist2 tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) ^ 2 =
+      (t * dist2 tail head) ^ 2 := by
+    rw [dist2_sq', mul_pow, dist2_sq']
+    dsimp only
+    ring
+  calc _ = √(dist2 tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) ^ 2) :=
+        (sqrt_sq hx).symm
+    _ = √((t * dist2 tail head) ^ 2) := by rw [e]
+    _ = t * dist2 tail head := sqrt_sq hy
+
+/-- … and (`t ≤ 1`) the distance `(1 − t) ℓ` from the head. -/
+theorem dist2_lerp_head (tail head : ℝ × ℝ) {t : ℝ} (ht : t ≤ 1) :
+    dist2 head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) =
+      (1 - t) * dist2 tail head := by
+  have hx := dist2_nonneg head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2)
+  have hy := mul_nonneg (sub_nonneg.mpr ht) (dist2_nonneg tail head)
+  have e : dist2 head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) ^ 2 =
+      ((1 - t) * dist2 tail head) ^ 2 := by
+    rw [dist2_sq', mul_pow, dist2_sq']
+    dsimp only
+    ring
+  calc _ = √(dist2 head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2) ^ 2) :=
+        (sqrt_sq hx).symm
+    _ = √(((1 - t) * dist2 tail head) ^ 2) := by rw [e]
+    _ = (1 - t) * dist2 tail head := sqrt_sq hy
+
+/-- **The convention of an edge split** (SPEC N17): the vertex at `(1 − t)·tail + t·head`,
+`0 ≤ t ≤ 1`, has the barycentric weights `(b_tail, b_head) = (1 − t, t)`; the oracle's
+`edgeSplitLengths ℓ (1 − t) t` is `(t ℓ, (1 − t) ℓ)`, the plane distances of the point from the
+tail and from the head. So the distance from the end `i` is `ℓ_ij b_j`.
+
+[formula: it-point-distances] -/
+theorem edgeSplitLengths_param (tail head : ℝ × ℝ) {t : ℝ} (h0 : 0 ≤ t) (h1 : t ≤ 1) :
+    Ddg.edgeSplitLengths (dist2 tail head) (1 - t) t =
+      (dist2 tail ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2),
+        dist2 head ((1 - t) * tail.1 + t * head.1, (1 - t) * tail.2 + t * head.2)) := by
+  rw [edgeSplitLengths_eq, dist2_lerp_tail tail head h0, dist2_lerp_head tail head h1,
+    mul_comm (dist2 tail head) t, mul_comm (dist2 tail head) (1 - t)]
 
 /-- **The paper's Alg. 6 on an edge**: the distance from the corner `i` to the point with the
 barycentric weights `(b_i, b_j, 0)` is `ℓ_ij b_j` (`b_i + b_j = 1`, `ℓ_ij, b_j ≥ 0`): the weight
