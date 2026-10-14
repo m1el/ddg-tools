@@ -1316,7 +1316,7 @@ triangle `T` has `2 A_T < 1e-6 l_new l_max(T)` (`too_thin`). Signposts of the tw
 `l -> j` (for `l -> k`) and `k -> i` (for `k -> l`); all other signposts are kept.
 
 **`delaunay`**: `state input`, `report FLIPS REFUSED TIES STATUS` (STATUS `done`, `flip_limit`, `blocked`; **FLIPS is informational**: only
-the triangulation is compared), `measures MAXEXCESS MINWEIGHT AREA` (largest `theta_k + theta_l - pi`, smallest cotan weight over interior
+the triangulation is compared), `measures MAXEXCESS MINWEIGHT AREA` (largest `theta_k + theta_l - pi`, smallest cotan weight `w = 1/2 (cot theta_k + cot theta_l)`, the weight of SPEC N6 (not `cot theta_k + cot theta_l`, which is `2w`), over interior
 edges of the result, total area), `state final`. The queue is the plain one of N6: all edges in ascending order of their
 (halfedge-based) id, first in first out, the four neighbours of a flipped edge appended unless queued; criterion `angle`: flip when
 `theta_k + theta_l > pi + tolerance`; `cotan`: flip when `1/2 (cot theta_k + cot theta_l) < -1e-6`. A tie is an interior edge with `|excess| <= tolerance` (`|weight| <= 1e-6`).

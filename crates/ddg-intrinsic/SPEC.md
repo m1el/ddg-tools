@@ -485,9 +485,10 @@ and from `crates/ddg-intrinsic/README.md`.
   - *The weight and its tag (N6).* The cotan weight of an edge is `w = ½ (cot α + cot β)`:
     that is what `edge_cotan_weight`, `DelaunayReport::min_cotan_weight` and the tolerance of
     `DelaunayCriterion::CotanWeight` mean. The function tagged `it-cotan-weight`
-    (`formulas::opposite_cotan_sum`) returns `2w = cot α + cot β`. The oracle's `MINWEIGHT` is
-    `2w`; that is the one number in which the two sides differ, and the oracle's to change or
-    to name (the replay accepts `w` and `2w`).
+    (`formulas::opposite_cotan_sum`) returns `2w = cot α + cot β`. The oracle's `MINWEIGHT` was
+    `2w`, the one number in which the two sides differed; it now prints `w` (the six
+    `it-delaunay-*` fixtures were regenerated, only their `measures` line changed). The replay
+    still accepts `w` and `2w`.
   - *The number of flips (N6).* "All edges in ascending order" means the edge ids of the
     triangulation (for a fresh one those of `ddg_core::TriMesh`, sorted vertex pairs). The
     number of flips depends on that order and is not part of the contract: on the oracle's

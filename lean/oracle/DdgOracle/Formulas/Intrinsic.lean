@@ -75,8 +75,11 @@ def delaunayExcess (thetaK thetaL : α) : α := thetaK + thetaL - Scalar.pi
 /-- The Delaunay condition with a tolerance: `θ_k + θ_l − π ≤ tol`. [formula: it-delaunay-condition] -/
 def delaunayHolds (tol thetaK thetaL : α) : Bool := decide (delaunayExcess thetaK thetaL ≤ tol)
 
-/-- Cotan weight of an edge (twice the entry of the Laplacian): `cot θ_k + cot θ_l`; it has the sign of
-`π − (θ_k + θ_l)`. [formula: it-cotan-weight] -/
+/-- The sum `cot θ_k + cot θ_l` of the cotangents of the two angles opposite an edge. With the
+workspace's positive semidefinite cotan Laplacian this is *minus twice the off-diagonal entry*
+`L_ij = −½ (cot θ_k + cot θ_l)`, and it is *twice the cotan weight* `w = ½ (cot θ_k + cot θ_l)`
+that `crates/ddg-intrinsic/SPEC.md` (N6, N17) defines; the weight itself is `cotanWeight cotK cotL / 2`.
+It has the sign of `π − (θ_k + θ_l)`. [formula: it-cotan-weight] -/
 def cotanWeight (cotK cotL : α) : α := cotK + cotL
 
 /-- The cotan weight from the five lengths of the diamond. [formula: it-cotan-weight] -/

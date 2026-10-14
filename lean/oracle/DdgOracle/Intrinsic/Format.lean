@@ -225,7 +225,8 @@ private def printTrace (tag : String) (t : Tri) (r : TraceResult) : String := Id
     s := s ++ s!"{tag}x {u} {v} {hx tt}\n"
   return s
 
-/-- Largest Delaunay excess (angle sum minus pi) and smallest cotan weight over the interior edges. -/
+/-- Largest Delaunay excess (angle sum minus pi) and smallest cotan weight `w = ½ (cot θ_k + cot θ_l)`
+(the weight of SPEC N6, N17; `cotanWeightFromLengths` is `2w`) over the interior edges. -/
 def delaunayMeasures (t : Tri) : Float × Float := Id.run do
   let mut ex := negInf
   let mut w := posInf
@@ -239,7 +240,7 @@ def delaunayMeasures (t : Tri) : Float × Float := Id.run do
       let e := t.len[t.prev tw]!
       let (thK, thL) := oppositeAngles a b c d e
       ex := max ex (delaunayExcess thK thL)
-      w := min w (cotanWeightFromLengths a b c d e)
+      w := min w (cotanWeightFromLengths a b c d e / 2)
   return (ex, w)
 
 /-- Header lines common to every successful case. -/
