@@ -476,6 +476,354 @@ theorem unfoldApex_unique {A B C : ℝ × ℝ} (h : 0 < sda A B C) :
   rw [unfoldApex_eq_rigid A _ _ ha, dist2_comm C A]
   exact (apex_unique h).symm
 
+/-! ## The diamond in terms of the corner angles
+
+In the triangle `ijk` with `a = |ij|`, `b = |ik|`, `c = |jk|` the angle at `i` is
+`cornerAngle c a b`, at `j` it is `cornerAngle b c a`, at `k` it is `cornerAngle a b c`; in
+`jil` with `d = |il|`, `e = |jl|`: `cornerAngle e a d` at `i`, `cornerAngle d e a` at `j`,
+`cornerAngle a d e` at `l`. -/
+
+theorem diamondX_eq_cos {a b c : ℝ} (h : IsTriangle a b c) :
+    Ddg.diamondX a b c = b * cos (cornerAngle c a b) := by
+  have ha := h.pos_a
+  have hb := h.pos_b
+  rw [cos_cornerAngle h.rotate.rotate, diamondX_eq]
+  field_simp
+  ring
+
+theorem diamondH_eq_sin {a b c : ℝ} (h : IsTriangle a b c) :
+    Ddg.diamondH a b c = b * sin (cornerAngle c a b) := by
+  have ha := h.pos_a
+  have hb := h.pos_b
+  rw [sin_cornerAngle h.rotate.rotate, diamondH_eq, ← triArea_rotate c a b]
+  field_simp
+
+theorem diamondX_eq_cos' {a b c : ℝ} (h : IsTriangle a b c) :
+    a - Ddg.diamondX a b c = c * cos (cornerAngle b c a) := by
+  have ha := h.pos_a
+  have hc := h.pos_c
+  rw [cos_cornerAngle h.rotate, diamondX_eq]
+  field_simp
+  ring
+
+theorem diamondH_eq_sin' {a b c : ℝ} (h : IsTriangle a b c) :
+    Ddg.diamondH a b c = c * sin (cornerAngle b c a) := by
+  have ha := h.pos_a
+  have hc := h.pos_c
+  rw [sin_cornerAngle h.rotate, diamondH_eq, triArea_rotate a b c]
+  field_simp
+
+/-- **The first area of `flipConvex` is `ℓ_ik ℓ_il sin` of the angle of the quadrilateral at
+`i`.** -/
+theorem flipArea1_eq_sin {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
+    Ddg.flipArea1 (Ddg.diamondX a b c) (Ddg.diamondH a b c) (Ddg.diamondX a d e)
+        (Ddg.diamondH a d e) = b * d * sin (cornerAngle c a b + cornerAngle e a d) := by
+  rw [flipArea1_eq, diamondX_eq_cos hk, diamondH_eq_sin hk, diamondX_eq_cos hl,
+    diamondH_eq_sin hl, sin_add]
+  ring
+
+/-- **The second is `ℓ_jk ℓ_jl sin` of the angle of the quadrilateral at `j`.** -/
+theorem flipArea2_eq_sin {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
+    Ddg.flipArea2 a (Ddg.diamondX a b c) (Ddg.diamondH a b c) (Ddg.diamondX a d e)
+        (Ddg.diamondH a d e) = c * e * sin (cornerAngle b c a + cornerAngle d e a) := by
+  rw [flipArea2_eq, diamondX_eq_cos' hk, diamondX_eq_cos' hl, diamondH_eq_sin' hk,
+    diamondH_eq_sin' hl, sin_add]
+  ring
+
+/-- For `0 < x < 2π`: `sin x > 0 ⟺ x < π`. -/
+theorem sin_pos_iff_lt_pi {x : ℝ} (h0 : 0 < x) (h2 : x < 2 * π) : 0 < sin x ↔ x < π := by
+  constructor
+  · intro h
+    by_contra hcon
+    have h1 := Real.sin_nonneg_of_nonneg_of_le_pi (sub_nonneg.mpr (not_lt.mp hcon))
+      (by linarith : x - π ≤ π)
+    rw [Real.sin_sub_pi] at h1
+    linarith
+  · exact fun h => Real.sin_pos_of_pos_of_lt_pi h0 h
+
+/-- **Strict convexity in angles**: the diamond is strictly convex exactly when the angles of
+the quadrilateral at both ends of the edge are less than `π`.
+
+[formula: it-flip-convexity] -/
+theorem diamondConvex_iff_angles {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e) :
+    DiamondConvex a b c d e ↔
+      cornerAngle c a b + cornerAngle e a d < π ∧ cornerAngle b c a + cornerAngle d e a < π := by
+  have hb := hk.pos_b
+  have hc := hk.pos_c
+  have hd := hl.pos_b
+  have he := hl.pos_c
+  have a1 := cornerAngle_pos hk.rotate.rotate
+  have a2 := cornerAngle_lt_pi hk.rotate.rotate
+  have a3 := cornerAngle_pos hl.rotate.rotate
+  have a4 := cornerAngle_lt_pi hl.rotate.rotate
+  have b1 := cornerAngle_pos hk.rotate
+  have b2 := cornerAngle_lt_pi hk.rotate
+  have b3 := cornerAngle_pos hl.rotate
+  have b4 := cornerAngle_lt_pi hl.rotate
+  unfold DiamondConvex
+  rw [flipConvex_iff, flipArea1_eq_sin hk hl, flipArea2_eq_sin hk hl,
+    mul_pos_iff_of_pos_left (mul_pos hb hd), mul_pos_iff_of_pos_left (mul_pos hc he),
+    sin_pos_iff_lt_pi (by linarith) (by linarith), sin_pos_iff_lt_pi (by linarith) (by linarith)]
+
+/-! ## The length of the flipped edge -/
+
+/-- The distance of the two apexes of the standard layout is the oracle's flipped length. -/
+theorem dist2_apex (a b c d e : ℝ) :
+    dist2 (apexK a b c) (apexL a d e) = Ddg.flippedLengthFromLengths a b c d e := by
+  rw [flippedLengthFromLengths_eq, flippedLength_eq_dist2]
+  rfl
+
+/-- **The paper's formula for the flipped edge** (Fig. 9, Alg. 5): the law of cosines at `i`
+with the angle `θ_i^{jk} + θ_i^{lj}` between `il` and `ik`,
+`ℓ_kl² = ℓ_ik² + ℓ_il² − 2 ℓ_ik ℓ_il cos θ_i^{lk}`.
+
+[formula: it-flip-length] -/
+theorem flippedLengthFromLengths_sq {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    Ddg.flippedLengthFromLengths a b c d e ^ 2 =
+      b ^ 2 + d ^ 2 - 2 * b * d * cos (cornerAngle c a b + cornerAngle e a d) := by
+  rw [flippedLengthFromLengths_eq, flippedLength_eq, sq_sqrt (add_nonneg (mul_self_nonneg _) (mul_self_nonneg _)),
+    diamondX_eq_cos hk, diamondH_eq_sin hk, diamondX_eq_cos hl, diamondH_eq_sin hl, cos_add]
+  have h1 := sin_sq_add_cos_sq (cornerAngle c a b)
+  have h2 := sin_sq_add_cos_sq (cornerAngle e a d)
+  linear_combination b ^ 2 * h1 + d ^ 2 * h2
+
+/-- The same at `j`: `ℓ_kl² = ℓ_jk² + ℓ_jl² − 2 ℓ_jk ℓ_jl cos(θ_j^{ki} + θ_j^{il})`. -/
+theorem flippedLengthFromLengths_sq' {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    Ddg.flippedLengthFromLengths a b c d e ^ 2 =
+      c ^ 2 + e ^ 2 - 2 * c * e * cos (cornerAngle b c a + cornerAngle d e a) := by
+  have e1 := diamondX_eq_cos' hk
+  have e2 := diamondX_eq_cos' hl
+  have e3 : Ddg.diamondX a b c - Ddg.diamondX a d e =
+      e * cos (cornerAngle d e a) - c * cos (cornerAngle b c a) := by linarith
+  rw [flippedLengthFromLengths_eq, flippedLength_eq, sq_sqrt (add_nonneg (mul_self_nonneg _) (mul_self_nonneg _)), e3,
+    diamondH_eq_sin' hk, diamondH_eq_sin' hl, cos_add]
+  have h1 := sin_sq_add_cos_sq (cornerAngle b c a)
+  have h2 := sin_sq_add_cos_sq (cornerAngle d e a)
+  linear_combination c ^ 2 * h1 + e ^ 2 * h2
+
+/-- **The flipped length in the five lengths**:
+`ℓ_kl² = b² + d² − [(a² + b² − c²)(a² + d² − e²) − 16 A_ijk A_jil] / 2a²`.
+
+[formula: it-flip-length] -/
+theorem flippedLengthFromLengths_sq_lengths {a b c d e : ℝ} (hk : IsTriangle a b c)
+    (hl : IsTriangle a d e) :
+    Ddg.flippedLengthFromLengths a b c d e ^ 2 =
+      b ^ 2 + d ^ 2 - ((a ^ 2 + b ^ 2 - c ^ 2) * (a ^ 2 + d ^ 2 - e ^ 2) -
+        16 * triArea a b c * triArea a d e) / (2 * a ^ 2) := by
+  have ha := hk.pos_a
+  have h2a : 2 * a ^ 2 ≠ 0 := by positivity
+  have hA := sixteen_mul_triArea_sq hk
+  have hB := sixteen_mul_triArea_sq hl
+  have hx : Ddg.diamondX a b c * (2 * a) = a ^ 2 + b ^ 2 - c ^ 2 := by
+    rw [diamondX_eq, div_mul_cancel₀ _ (by positivity)]
+    ring
+  have hxl : Ddg.diamondX a d e * (2 * a) = a ^ 2 + d ^ 2 - e ^ 2 := by
+    rw [diamondX_eq, div_mul_cancel₀ _ (by positivity)]
+    ring
+  have hh : Ddg.diamondH a b c * a = 2 * triArea a b c := by
+    rw [diamondH_eq, div_mul_cancel₀ _ ha.ne']
+  have hhl : Ddg.diamondH a d e * a = 2 * triArea a d e := by
+    rw [diamondH_eq, div_mul_cancel₀ _ ha.ne']
+  rw [flippedLengthFromLengths_eq, flippedLength_eq, sq_sqrt (add_nonneg (mul_self_nonneg _) (mul_self_nonneg _))]
+  have key : ((Ddg.diamondX a b c - Ddg.diamondX a d e) *
+        (Ddg.diamondX a b c - Ddg.diamondX a d e) +
+      (Ddg.diamondH a b c + Ddg.diamondH a d e) * (Ddg.diamondH a b c + Ddg.diamondH a d e)) *
+        (4 * a ^ 2) =
+      (b ^ 2 + d ^ 2) * (4 * a ^ 2) - 2 * ((a ^ 2 + b ^ 2 - c ^ 2) * (a ^ 2 + d ^ 2 - e ^ 2) -
+        16 * triArea a b c * triArea a d e) := by
+    linear_combination
+      (Ddg.diamondX a b c * (2 * a) - Ddg.diamondX a d e * (2 * a) + (a ^ 2 + b ^ 2 - c ^ 2) -
+          (a ^ 2 + d ^ 2 - e ^ 2)) * hx -
+        (Ddg.diamondX a b c * (2 * a) - Ddg.diamondX a d e * (2 * a) + (a ^ 2 + b ^ 2 - c ^ 2) -
+          (a ^ 2 + d ^ 2 - e ^ 2)) * hxl +
+        4 * (Ddg.diamondH a b c * a + Ddg.diamondH a d e * a + 2 * triArea a b c +
+          2 * triArea a d e) * hh +
+        4 * (Ddg.diamondH a b c * a + Ddg.diamondH a d e * a + 2 * triArea a b c +
+          2 * triArea a d e) * hhl + hA + hB
+  have e2 : ((a ^ 2 + b ^ 2 - c ^ 2) * (a ^ 2 + d ^ 2 - e ^ 2) -
+      16 * triArea a b c * triArea a d e) / (2 * a ^ 2) =
+      b ^ 2 + d ^ 2 - ((Ddg.diamondX a b c - Ddg.diamondX a d e) *
+        (Ddg.diamondX a b c - Ddg.diamondX a d e) +
+      (Ddg.diamondH a b c + Ddg.diamondH a d e) * (Ddg.diamondH a b c + Ddg.diamondH a d e)) := by
+    rw [div_eq_iff h2a]
+    linear_combination (1 / 2 : ℝ) * key
+  linarith
+
+theorem diamondX_swap {a : ℝ} (ha : a ≠ 0) (b c : ℝ) :
+    Ddg.diamondX a c b = a - Ddg.diamondX a b c := by
+  rw [diamondX_eq, diamondX_eq]
+  field_simp
+  ring
+
+theorem diamondH_swap (a b c : ℝ) : Ddg.diamondH a c b = Ddg.diamondH a b c := by
+  rw [diamondH_eq, diamondH_eq, triArea_swap]
+
+/-- The flipped length does not change when the diamond is mirrored (`i ↔ j`). -/
+theorem flippedLengthFromLengths_mirror {a : ℝ} (ha : a ≠ 0) (b c d e : ℝ) :
+    Ddg.flippedLengthFromLengths a c b e d = Ddg.flippedLengthFromLengths a b c d e := by
+  rw [flippedLengthFromLengths_eq, flippedLengthFromLengths_eq, flippedLength_eq,
+    flippedLength_eq, diamondX_swap ha b c, diamondX_swap ha d e, diamondH_swap a b c,
+    diamondH_swap a d e]
+  congr 1
+  ring
+
+/-- … nor when the two triangles are exchanged (`k ↔ l`). -/
+theorem flippedLengthFromLengths_comm (a b c d e : ℝ) :
+    Ddg.flippedLengthFromLengths a d e b c = Ddg.flippedLengthFromLengths a b c d e := by
+  rw [flippedLengthFromLengths_eq, flippedLengthFromLengths_eq, flippedLength_eq,
+    flippedLength_eq]
+  congr 1
+  ring
+
+/-! ## The flip of a strictly convex diamond -/
+
+/-- The two conditions of `flipConvex` on the points of the standard layout. -/
+theorem diamondConvex_sda {a b c d e : ℝ} (h : DiamondConvex a b c d e) :
+    0 < sda (0, 0) (apexL a d e) (apexK a b c) ∧ 0 < sda (a, 0) (apexK a b c) (apexL a d e) := by
+  obtain ⟨c1, c2⟩ := (flipConvex_iff _ _ _ _ _).mp h
+  rw [flipArea1_eq_sda] at c1
+  rw [flipArea2_eq_sda] at c2
+  exact ⟨c1, c2⟩
+
+/-- **Flipping back gives the original length.** In the diamond of the new edge `kl` (length
+`f`, apexes `j` and `i`, sides `ℓ_kj = c`, `ℓ_lj = e`, `ℓ_ki = b`, `ℓ_li = d`) the flipped
+length is `a`.
+
+[formula: it-flip-length] -/
+theorem flip_back {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (hconv : DiamondConvex a b c d e) :
+    Ddg.flippedLengthFromLengths (Ddg.flippedLengthFromLengths a b c d e) c e b d = a := by
+  obtain ⟨-, -, e1, e2, e3, e4, e5⟩ := diamond_isometric hk hl
+  obtain ⟨c1, c2⟩ := diamondConvex_sda hconv
+  have hJ : 0 < sda (apexK a b c) (apexL a d e) (a, 0) := by
+    rw [sda_rotate]
+    exact c2
+  have hI : sda (apexK a b c) (apexL a d e) (0, 0) < 0 := by
+    rw [sda_rotate, sda_swap_right]
+    linarith
+  have h := flippedLengthFromLengths_realized hJ hI
+  rw [dist2_apex, dist2_comm (apexK a b c) (a, 0), dist2_comm (apexL a d e) (a, 0),
+    dist2_comm (apexK a b c) (0, 0), dist2_comm (apexL a d e) (0, 0),
+    dist2_comm (a, 0) (0, 0), e1, e2, e3, e4, e5] at h
+  exact h
+
+/-- **The two triangles a flip creates satisfy the strict triangle inequalities**: `ilk` with
+the sides `f, b, d` and `jkl` with the sides `f, e, c` (`f` the flipped length).
+
+[formula: it-flip-length] -/
+theorem flip_isTriangle {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (hconv : DiamondConvex a b c d e) :
+    IsTriangle (Ddg.flippedLengthFromLengths a b c d e) b d ∧
+      IsTriangle (Ddg.flippedLengthFromLengths a b c d e) e c := by
+  obtain ⟨-, -, -, e2, e3, e4, e5⟩ := diamond_isometric hk hl
+  obtain ⟨c1, c2⟩ := diamondConvex_sda hconv
+  have t1 := isTriangle_of_sda_ne c1.ne'
+  have t2 := isTriangle_of_sda_ne c2.ne'
+  rw [dist2_comm (apexL a d e) (apexK a b c), dist2_apex, dist2_comm (apexK a b c) (0, 0), e2,
+    e4] at t1
+  rw [dist2_apex, dist2_comm (apexL a d e) (a, 0), e5, e3] at t2
+  exact ⟨t1, t2⟩
+
+/-- **A flip keeps the total area**: `A_ilk + A_jkl = A_ijk + A_jil`.
+
+[formula: it-flip-length] -/
+theorem flip_area {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a d e)
+    (hconv : DiamondConvex a b c d e) :
+    triArea (Ddg.flippedLengthFromLengths a b c d e) b d +
+        triArea (Ddg.flippedLengthFromLengths a b c d e) e c =
+      triArea a b c + triArea a d e := by
+  have ha := hk.pos_a
+  obtain ⟨-, -, -, e2, e3, e4, e5⟩ := diamond_isometric hk hl
+  obtain ⟨c1, c2⟩ := diamondConvex_sda hconv
+  have t1 := abs_sda_eq_two_mul_triArea (0, 0) (apexL a d e) (apexK a b c)
+  have t2 := abs_sda_eq_two_mul_triArea (a, 0) (apexK a b c) (apexL a d e)
+  rw [abs_of_pos c1, dist2_comm (apexL a d e) (apexK a b c), dist2_apex,
+    dist2_comm (apexK a b c) (0, 0), e2, e4] at t1
+  rw [abs_of_pos c2, dist2_apex, dist2_comm (apexL a d e) (a, 0), e5, e3] at t2
+  have s1 : sda (0, 0) (apexL a d e) (apexK a b c) + sda (a, 0) (apexK a b c) (apexL a d e) =
+      a * (Ddg.diamondH a b c + Ddg.diamondH a d e) := by
+    unfold sda apexK apexL
+    dsimp only
+    ring
+  have hh : a * Ddg.diamondH a b c = 2 * triArea a b c := by
+    rw [diamondH_eq, mul_div_cancel₀ _ ha.ne']
+  have hhl : a * Ddg.diamondH a d e = 2 * triArea a d e := by
+    rw [diamondH_eq, mul_div_cancel₀ _ ha.ne']
+  linarith
+
+/-! ## Strict convexity -/
+
+/-- **`flipConvex` holds exactly when the two diagonals of the unfolded quadrilateral cross in
+their interiors**: for `a, h_k, h_l > 0`, the segments `ij` (from `(0,0)` to `(a,0)`) and `kl`
+(from `(x_k, h_k)` to `(x_l, −h_l)`) meet in a point `(s a, 0)` with `0 < s < 1` that is
+`k + t (l − k)` with `0 < t < 1`.
+
+[formula: it-flip-convexity] -/
+theorem flipConvex_iff_diagonals_cross {a xk hk xl hl : ℝ} (ha : 0 < a) (hhk : 0 < hk)
+    (hhl : 0 < hl) :
+    Ddg.flipConvex a xk hk xl hl = true ↔
+      ∃ s t : ℝ, 0 < s ∧ s < 1 ∧ 0 < t ∧ t < 1 ∧
+        (s * a, (0 : ℝ)) = (xk + t * (xl - xk), hk + t * (-hl - hk)) := by
+  rw [flipConvex_iff, flipArea1_eq, flipArea2_eq]
+  have hs : 0 < hk + hl := by linarith
+  constructor
+  · rintro ⟨h1, h2⟩
+    refine ⟨(xk * hl + xl * hk) / (a * (hk + hl)), hk / (hk + hl), by positivity, ?_,
+      by positivity, ?_, ?_⟩
+    · rw [div_lt_one (by positivity)]
+      nlinarith
+    · rw [div_lt_one hs]
+      linarith
+    · ext
+      · dsimp only
+        field_simp
+        ring
+      · dsimp only
+        field_simp
+        ring
+  · rintro ⟨s, t, hs0, hs1, ht0, ht1, heq⟩
+    obtain ⟨e1, e2⟩ := Prod.mk.inj heq
+    have ht : t * (hk + hl) = hk := by linarith
+    have f1 : xk * hl + xl * hk = (hk + hl) * (s * a) := by
+      linear_combination (-(xl - xk)) * ht - (hk + hl) * e1
+    have f2 : (a - xk) * hl + (a - xl) * hk = (hk + hl) * ((1 - s) * a) := by
+      linear_combination (-1 : ℝ) * f1
+    rw [f1, f2]
+    exact ⟨by positivity, mul_pos hs (mul_pos (by linarith) ha)⟩
+
+/-- **`flipConvex` holds exactly when the quadrilateral `i, l, j, k` is strictly convex**: all
+four turns of the counter-clockwise quadrilateral are positive (`a, h_k, h_l > 0`).
+
+[formula: it-flip-convexity] -/
+theorem flipConvex_iff_turns {a xk hk xl hl : ℝ} (ha : 0 < a) (hhk : 0 < hk) (hhl : 0 < hl) :
+    Ddg.flipConvex a xk hk xl hl = true ↔
+      0 < sda (0, 0) (xl, -hl) (a, 0) ∧ 0 < sda (xl, -hl) (a, 0) (xk, hk) ∧
+        0 < sda (a, 0) (xk, hk) (0, 0) ∧ 0 < sda (xk, hk) (0, 0) (xl, -hl) := by
+  have e1 : sda (0, 0) (xl, -hl) (a, 0) = a * hl := by
+    unfold sda
+    dsimp only
+    ring
+  have e2 : sda (xl, -hl) (a, 0) (xk, hk) = (a - xk) * hl + (a - xl) * hk := by
+    unfold sda
+    dsimp only
+    ring
+  have e3 : sda (a, 0) (xk, hk) (0, 0) = a * hk := by
+    unfold sda
+    dsimp only
+    ring
+  have e4 : sda (xk, hk) (0, 0) (xl, -hl) = xk * hl + xl * hk := by
+    unfold sda
+    dsimp only
+    ring
+  rw [flipConvex_iff, flipArea1_eq, flipArea2_eq, e1, e2, e3, e4]
+  constructor
+  · rintro ⟨h1, h2⟩
+    exact ⟨mul_pos ha hhl, h2, mul_pos ha hhk, h1⟩
+  · rintro ⟨-, h2, -, h1⟩
+    exact ⟨h1, h2⟩
+
 end Intrinsic
 
 end DdgProofs
