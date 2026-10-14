@@ -37,3 +37,8 @@ import DdgProofs.Cuts.Regions
 import DdgProofs.Cuts.Quantile
 import DdgProofs.Cuts.VertexLimit
 import DdgProofs.Cuts.Stop
+import DdgProofs.Intrinsic.Diamond
+import DdgProofs.Intrinsic.Delaunay
+import DdgProofs.Intrinsic.Signpost
+import DdgProofs.Intrinsic.Trace
+import DdgProofs.Intrinsic.Barycentric

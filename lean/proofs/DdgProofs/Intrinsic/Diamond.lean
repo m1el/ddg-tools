@@ -280,6 +280,14 @@ theorem dist2_rigid {cs sn : ℝ} (h : cs ^ 2 + sn ^ 2 = 1) (t p q : ℝ × ℝ)
   dsimp only
   linear_combination ((q.1 - p.1) ^ 2 + (q.2 - p.2) ^ 2) * h
 
+/-- Without `cs² + sn² = 1` the map is a similarity: distances are scaled by `√(cs² + sn²)`. -/
+theorem dist2_rigid_sq (cs sn : ℝ) (t p q : ℝ × ℝ) :
+    dist2 (rigid cs sn t p) (rigid cs sn t q) ^ 2 = (cs ^ 2 + sn ^ 2) * dist2 p q ^ 2 := by
+  rw [dist2_sq', dist2_sq']
+  unfold rigid
+  dsimp only
+  ring
+
 /-- A rigid motion keeps signed areas (it keeps the orientation). -/
 theorem sda_rigid {cs sn : ℝ} (h : cs ^ 2 + sn ^ 2 = 1) (t p q r : ℝ × ℝ) :
     sda (rigid cs sn t p) (rigid cs sn t q) (rigid cs sn t r) = sda p q r := by
@@ -464,6 +472,35 @@ theorem unfoldApex_isometric {A B : ℝ × ℝ} {lab lbc lca : ℝ} (hAB : dist2
     unfold apexK
     rw [hs, diamondH_eq, triArea_swap]
     field_simp
+
+/-- **If the placed edge does not have exactly the length `ℓ_ab`, the unfolded triangle is the
+given one scaled by `|b − a|/ℓ_ab`**: the angles are those of the three given lengths, the size
+follows the placed edge.
+
+[formula: it-unfold-apex] -/
+theorem unfoldApex_similar (A B : ℝ × ℝ) {lab lbc lca : ℝ} (h : IsTriangle lab lbc lca) :
+    dist2 A (Ddg.unfoldApex A.1 A.2 (B.1 - A.1) (B.2 - A.2) lab lbc lca) ^ 2 =
+        (dist2 A B / lab) ^ 2 * lca ^ 2 ∧
+      dist2 B (Ddg.unfoldApex A.1 A.2 (B.1 - A.1) (B.2 - A.2) lab lbc lca) ^ 2 =
+        (dist2 A B / lab) ^ 2 * lbc ^ 2 := by
+  have hl : lab ≠ 0 := h.pos_a.ne'
+  have hd := dist2_sq' A B
+  have hcs : ((B.1 - A.1) / lab) ^ 2 + ((B.2 - A.2) / lab) ^ 2 = (dist2 A B / lab) ^ 2 := by
+    rw [div_pow, div_pow, div_pow, hd]
+    ring
+  obtain ⟨-, -, -, k3, k4, -, -⟩ := diamond_isometric h.swap h.swap
+  rw [unfoldApex_eq_rigid A _ _ hl]
+  constructor
+  · have e : dist2 A (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (apexK lab lca lbc)) =
+        dist2 (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (0, 0))
+          (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (apexK lab lca lbc)) := by
+      rw [rigid_zero]
+    rw [e, dist2_rigid_sq, hcs, k3]
+  · have e : dist2 B (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (apexK lab lca lbc)) =
+        dist2 (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (lab, 0))
+          (rigid ((B.1 - A.1) / lab) ((B.2 - A.2) / lab) A (apexK lab lca lbc)) := by
+      rw [rigid_edge A B hl]
+    rw [e, dist2_rigid_sq, hcs, k4]
 
 /-- **Every counter-clockwise plane triangle is the one `unfoldApex` builds from its lengths**:
 if `c` lies to the left of `a → b` then

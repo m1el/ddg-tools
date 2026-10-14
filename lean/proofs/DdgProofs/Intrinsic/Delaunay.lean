@@ -55,6 +55,12 @@ theorem oppositeAngles_eq {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTria
     Ddg.oppositeAngles a b c d e = (cornerAngle a b c, cornerAngle a d e) := by
   simp only [Ddg.oppositeAngles, Oracle.cornerAngle_eq hk, Oracle.cornerAngle_eq hl]
 
+/-- The order in which the Rust code evaluates the excess, `(θ_k − π) + θ_l`, is the same
+number. -/
+theorem delaunayExcess_eq' (θk θl : ℝ) : Ddg.delaunayExcess θk θl = (θk - π) + θl := by
+  rw [delaunayExcess_eq]
+  ring
+
 /-- The corner angle does not depend on the order of the two adjacent sides. -/
 theorem cornerAngle_swap (a b c : ℝ) : cornerAngle a c b = cornerAngle a b c := by
   unfold cornerAngle
@@ -383,6 +389,37 @@ theorem flip_of_tie {a b c d e : ℝ} (hk : IsTriangle a b c) (hl : IsTriangle a
   refine ⟨hconv, ?_⟩
   rw [flip_delaunayExcess hk hl hconv, delaunayExcess_eq]
   linarith
+
+/-! ## The entry of the cotan Laplacian -/
+
+section Laplacian
+
+variable {V F : Type*} [DecidableEq V] [Fintype F]
+
+/-- **The cotan weight is minus twice the entry of the cotan Laplacian** (`cotan-laplacian`,
+`DdgProofs/Cotan.lean`; `L` positive semidefinite): if only the two faces `f₁ ≠ f₂` of a mesh
+have the edge `{i, j}`, then `L_ij = −½ (cot θ_k + cot θ_l)`, with the two cotangents those of
+the corners opposite the edge.
+
+[formula: it-cotan-weight] -/
+theorem offDiag_eq_neg_half_cotanWeight (M : TriMesh V F) {i j : V} {f₁ f₂ : F} (hne : f₁ ≠ f₂)
+    (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    M.offDiag i j = -(Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j)) / 2 := by
+  unfold TriMesh.offDiag
+  rw [cotanWeight_eq, Finset.sum_eq_add f₁ f₂ hne (fun f _ hf => h f hf.1 hf.2)
+    (fun hf => absurd (Finset.mem_univ _) hf) (fun hf => absurd (Finset.mem_univ _) hf)]
+
+/-- **The off-diagonal entry is nonpositive exactly when the cotan weight of the edge is
+nonnegative**, that is (by `cotanWeight_nonneg_iff`) when the edge satisfies the Delaunay
+condition: the Laplacian of a Delaunay triangulation has no positive off-diagonal entry
+(SPEC §5 item 4, N6). -/
+theorem offDiag_nonpos_iff (M : TriMesh V F) {i j : V} {f₁ f₂ : F} (hne : f₁ ≠ f₂)
+    (h : ∀ f, f ≠ f₁ → f ≠ f₂ → M.cotOpp f i j = 0) :
+    M.offDiag i j ≤ 0 ↔ 0 ≤ Ddg.cotanWeight (M.cotOpp f₁ i j) (M.cotOpp f₂ i j) := by
+  rw [offDiag_eq_neg_half_cotanWeight M hne h]
+  constructor <;> intro h' <;> linarith
+
+end Laplacian
 
 end Intrinsic
 
