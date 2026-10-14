@@ -602,6 +602,7 @@ impl Writer {
         self.f64(o.motion_tolerance);
         self.f64(o.step);
         self.u64(o.max_halvings as u64);
+        self.f64(o.min_shape);
         self.u8(match o.boundary {
             BoundaryVertices::Fixed => 0,
             BoundaryVertices::AlongBoundary => 1,
@@ -720,6 +721,7 @@ impl Reader<'_> {
         let motion_tolerance = self.f64()?;
         let step = self.f64()?;
         let max_halvings = self.usize()?;
+        let min_shape = self.f64()?;
         let boundary = match self.u8()? {
             0 => BoundaryVertices::Fixed,
             1 => BoundaryVertices::AlongBoundary,
@@ -745,6 +747,7 @@ impl Reader<'_> {
             motion_tolerance,
             step,
             max_halvings,
+            min_shape,
             boundary,
             centers,
             max_insertions,

@@ -52,8 +52,11 @@ fn load(path: &str) -> Result<(TriMesh, Geometry), String> {
     Ok((mesh, geometry))
 }
 
+/// Positions and triangles.
+type Soup = (Vec<[f64; 3]>, Vec<[u32; 3]>);
+
 /// Flat test meshes with the same surface (a parallelogram or rectangle) and bad triangles.
-fn generated(name: &str) -> Result<(Vec<[f64; 3]>, Vec<[u32; 3]>), String> {
+fn generated(name: &str) -> Result<Soup, String> {
     let n = 32;
     let (nx, ny) = if name == "cells1x16" { (n, 16 * n) } else { (n, n) };
     let g = grid_disk(nx, ny).map_err(|e| e.to_string())?;

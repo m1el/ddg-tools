@@ -263,7 +263,7 @@ impl IntrinsicTriangulation {
         if let Some(face) = turned {
             return Err(refused(MoveRefusal::NotInStar { face, fraction }));
         }
-        if !(thinnest.0 >= min_shape) {
+        if thinnest.0 < min_shape || thinnest.0.is_nan() {
             return Err(refused(MoveRefusal::TooThin {
                 face: thinnest.1,
                 shape: thinnest.0,
