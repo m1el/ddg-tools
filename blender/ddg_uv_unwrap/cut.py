@@ -22,6 +22,7 @@ Data model.
   Blender's operations do not interpolate, are interpolated here.
 """
 
+import base64
 import bisect
 import math
 from array import array
@@ -40,6 +41,16 @@ from . import core
 # the split polygons again, and Apply now stores the library's triangulation instead (see
 # `insert_cut`), after which no offset flips anything (blender/README.md).
 DEFAULT_CUT_OFFSET = 1e-3
+
+# The state of a cut. The per-corner attributes (below) are the whole state when the flow's
+# triangulation has no vertex that is in no polygon. Otherwise the whole state is the bytes of
+# `CutSession.snapshot()` in a mesh property (base64, as the property is a string), and the
+# attributes are the view of the mesh's own vertices. The option says which triangulation the
+# flow runs on: "intrinsic" (Delaunay flips), "refined:<degrees>" or "caller".
+STATE_KEY = "ddg_cut_state"
+OPTION_KEY = "ddg_cut_option"
+DEFAULT_OPTION = "intrinsic"
+DEFAULT_REFINE_BOUND = 25.0
 
 ATTRIBUTE_PREFIX = "ddg_cut_region_"
 PREVIEW_KEY = "ddg_cut_preview"
@@ -111,9 +122,36 @@ def read_state(mesh):
     return len(names), flat
 
 
-def write_state(mesh, session):
+def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND):
+    """The option string for the operator's enum value ('INTRINSIC', 'REFINED', 'CALLER')."""
+    if triangulation == 'REFINED':
+        return "refined:{:g}".format(refine_bound)
+    return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation]
+
+
+def option_keywords(option, offset=None):
+    """The keywords of ``CutSession`` for an option string; ``offset`` is the smallest distance
+    of a point of the cut from a vertex of the caller's triangles (intrinsic sessions)."""
+    kind, _, bound = option.partition(":")
+    keywords = {"triangulation": kind}
+    if kind == "refined":
+        keywords["refine_bound"] = float(bound or DEFAULT_REFINE_BOUND)
+    if kind != "caller" and offset is not None:
+        keywords["min_offset"] = offset
+    return keywords
+
+
+def write_state(mesh, session, option=None):
     """Writes the state of ``session`` to the region attributes, creating them as needed, and
-    removes attributes of regions the session does not have."""
+    removes attributes of regions the session does not have. If the attributes are not the whole
+    state (the triangulation added vertices) the state bytes go to the mesh property too."""
+    if option is not None:
+        mesh[OPTION_KEY] = option
+    if session.state_is_per_corner:
+        if STATE_KEY in mesh:
+            del mesh[STATE_KEY]
+    else:
+        mesh[STATE_KEY] = base64.b64encode(session.snapshot()).decode("ascii")
     for k in range(session.n_regions):
         name = ATTRIBUTE_PREFIX + str(k)
         attribute = mesh.attributes.get(name)
@@ -134,8 +172,9 @@ def remove_state(mesh):
     """Removes the region attributes (all of them, also behind a gap)."""
     for name in [a.name for a in mesh.attributes if a.name.startswith(ATTRIBUTE_PREFIX)]:
         mesh.attributes.remove(mesh.attributes[name])
-    if LAST_FLOW_KEY in mesh:
-        del mesh[LAST_FLOW_KEY]
+    for key in (LAST_FLOW_KEY, STATE_KEY, OPTION_KEY):
+        if key in mesh:
+            del mesh[key]
 
 
 # ----------------------------------------------------------------------------------------------
@@ -157,23 +196,53 @@ def check_mesh(obj):
     return mesh
 
 
-def make_session(obj, start, n_regions=2):
+def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     """A ``ddg_tools.CutSession`` on the mesh of ``obj`` (existing seams are fixed cuts).
-    ``start`` is a dict of the start keywords of the constructor. Returns ``(session, seconds)``
-    with the time spent extracting the buffers."""
+    ``start`` is a dict of the start keywords of the constructor, ``option`` the triangulation
+    (``option_keywords``). Returns ``(session, seconds)`` with the time spent extracting the
+    buffers."""
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
     positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
     seams = core.seam_edges(mesh)
     extracted = perf_counter()
+    keywords = dict(start)
+    if "state" not in keywords:
+        keywords["n_regions"] = n_regions
+        keywords.update(option_keywords(option, offset))
+    elif offset is not None and not option.startswith("caller"):
+        keywords["min_offset"] = offset
     try:
         session = ddg.CutSession(
             positions, corner_vertices, polygon_starts, triangles,
-            n_regions=n_regions, seam_edges=seams if len(seams) else None, **start)
+            seam_edges=seams if len(seams) else None, **keywords)
+    except ddg.StaleStateError as ex:
+        raise CutFailed(
+            "The mesh or its seams changed since 'Cut: Start', so the stored cut no longer fits "
+            "it ({}). Run 'Cut: Start' again.".format(ex)) from ex
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     return session, extracted - begin
+
+
+def open_session(obj, offset=None):
+    """The session of the cut stored on the mesh of ``obj``: from the state bytes if the mesh has
+    them, else from the per-corner attributes with the triangulation option stored at Start.
+    Returns ``(session, seconds, option)``."""
+    mesh = check_mesh(obj)
+    option = mesh.get(OPTION_KEY, DEFAULT_OPTION)
+    if STATE_KEY in mesh:
+        try:
+            state = base64.b64decode(mesh[STATE_KEY])
+        except ValueError as ex:
+            raise CutFailed("The stored cut state of mesh '{}' is damaged. Run 'Cut: Start' "
+                            "again.".format(mesh.name)) from ex
+        session, seconds = make_session(obj, {"state": state}, option=option, offset=offset)
+        return session, seconds, option
+    n_regions, flat = read_state(mesh)
+    session, seconds = make_session(obj, {"corner_values": flat}, n_regions, option, offset)
+    return session, seconds, option
 
 
 def selected_faces(mesh):
@@ -215,7 +284,8 @@ def labels_from_values(values, what):
 
 def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=None,
               selected_vertices=(), cluster_iterations=50, attribute="",
-              cut_offset=DEFAULT_CUT_OFFSET):
+              cut_offset=DEFAULT_CUT_OFFSET, triangulation='INTRINSIC',
+              refine_bound=DEFAULT_REFINE_BOUND):
     """Creates the state of a cut on ``obj`` and its preview.
 
     ``mode`` is ``'SELECTED'`` (the selected faces against the rest, two regions), ``'CIRCLE'``
@@ -278,9 +348,10 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
         n_regions = 2
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
-    session, seconds_extract = make_session(obj, start, n_regions)
+    option = option_of(triangulation, refine_bound)
+    session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset)
     begin = perf_counter()
-    write_state(mesh, session)
+    write_state(mesh, session, option)
     if LAST_FLOW_KEY in mesh:
         del mesh[LAST_FLOW_KEY]
     mesh.update()
@@ -289,6 +360,9 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
     previewed = perf_counter()
     return {
         "n_regions": session.n_regions,
+        "triangulation": option,
+        "intrinsic": session.intrinsic_report,
+        "state_is_per_corner": session.state_is_per_corner,
         "n_corners": session.n_corners,
         "n_polygons": session.n_polygons,
         "vertex": start.get("circle_vertex"),
@@ -581,8 +655,8 @@ def run_flow(obj, context, settings):
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    n_regions, flat = read_state(mesh)
-    session, seconds_extract = make_session(obj, {"corner_values": flat}, n_regions)
+    session, seconds_extract, option = open_session(obj, settings["cut_offset"])
+    n_regions = session.n_regions
     state_read = perf_counter()
     controls, info = flow_controls(obj, context, session, settings)
     prepared = perf_counter()
@@ -599,7 +673,7 @@ def run_flow(obj, context, settings):
     except ddg.DdgError as ex:
         raise _translate(ex) from ex
     solved = perf_counter()
-    write_state(mesh, session)
+    write_state(mesh, session, option)
     mesh.update()
     written = perf_counter()
     n_patches = count_patches(mesh, session.corner_regions())
@@ -618,6 +692,14 @@ def run_flow(obj, context, settings):
     report["n_patches"] = n_patches
     report["n_triple_points"] = n_triple_points
     report["n_regions"] = n_regions
+    intrinsic = session.intrinsic_report
+    report["triangulation"] = option
+    report["intrinsic"] = intrinsic
+    summary["triangulation"] = option
+    if intrinsic is not None:
+        summary["vertices_added"] = intrinsic["n_added"]
+        summary["min_angle_degrees"] = intrinsic["min_angle_degrees"]
+        summary["max_angle_degrees"] = intrinsic["max_angle_degrees"]
     if info.get("roughening_rate") is not None:
         summary["length_weight_roughening_rate"] = info["roughening_rate"]
     mesh[LAST_FLOW_KEY] = {k: v for k, v in summary.items()
@@ -676,7 +758,17 @@ def count_patches(mesh, regions):
     return len({find(c) for c in range(n)})
 
 
-def flow_summary(report):
+def triangulation_line(report):
+    """One short line about the triangulation of a run (the advanced view)."""
+    intrinsic = report.get("intrinsic")
+    if intrinsic is None:
+        return "triangulation: the mesh's own"
+    return "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
+        report["triangulation"], intrinsic["n_added"], intrinsic["min_angle_degrees"],
+        intrinsic["max_angle_degrees"])
+
+
+def flow_summary(report, advanced=False):
     """One line for Blender's status bar."""
     reason = {"max_steps": "step limit", "converged": "converged",
               "energy_stalled": "energy stalled", "cut_vanished": "the cut vanished",
@@ -685,8 +777,9 @@ def flow_summary(report):
     network = (" | {} regions, {} patches, {} triple points".format(
         report["n_regions"], report["n_patches"], report["n_triple_points"])
         if report["n_regions"] > 2 else " | {} patches".format(report["n_patches"]))
+    extra = " | " + triangulation_line(report) if advanced else ""
     return ("Cut flow: {} step{} ({}) | energy {:.5g} -> {:.5g} | cut length {:.5g} "
-            "(was {:.5g}) | length weight {:.4g}" + network).format(
+            "(was {:.5g}) | length weight {:.4g}" + network + extra).format(
         report["steps_taken"], "" if report["steps_taken"] == 1 else "s", reason,
         report["energy_before"], report["energy_after"], report["cut_length_after"],
         report["cut_length_before"], report["length_weight"])
@@ -864,6 +957,7 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
         key = (edge_vertices[2 * i], edge_vertices[2 * i + 1])
         by_edge.setdefault(key, []).append(i)
     point_vertex = [None] * n_points
+    edge_chain = {}
     # The index tables are outdated as soon as the first edge is split.
     ends = {key: (bm.verts[key[0]], bm.verts[key[1]]) for key in by_edge}
     for (a, b), ids in by_edge.items():
@@ -880,14 +974,17 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
             else:
                 groups.append([i])
         current, from_vert, t_before = edge, va, 0.0
+        chain_list = [va]
         for group in groups:
             t = edge_t[group[0]]
             fraction = (t - t_before) / (1.0 - t_before)
             _near, new_vert = bmesh.utils.edge_split(current, from_vert, fraction)
             for i in group:
                 point_vertex[i] = new_vert
+            chain_list.append(new_vert)
             # `current` now runs from the new vertex to the far end; `new_edge` is the near part.
             from_vert, t_before = new_vert, t
+        edge_chain[(a, b)] = chain_list + [vb]
 
     # ----- paths: the network inside every polygon -----
     # A polygon's part of the cut is a forest whose leaves are edge points (vertices already) and
@@ -927,6 +1024,19 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
             return (corners[c[0]][0].co * w[0] + corners[c[1]][0].co * w[1]
                     + corners[c[2]][0].co * w[2]), c, w
 
+        # A piece along a polygon edge: both ends are points of the same edge, nothing to split;
+        # the sides of the chain of the edge between them are seams.
+        for k in sorted(pending):
+            if path_start[k] >= 0 and path_end[k] >= 0 and interior_starts[k] == interior_starts[k + 1]:
+                a_, b_ = path_start[k], path_end[k]
+                if tuple(edge_vertices[2 * a_:2 * a_ + 2]) == tuple(edge_vertices[2 * b_:2 * b_ + 2]):
+                    chain_ = edge_chain[tuple(edge_vertices[2 * a_:2 * a_ + 2])]
+                    i_, j_ = chain_.index(point_vertex[a_]), chain_.index(point_vertex[b_])
+                    if i_ > j_:
+                        i_, j_ = j_, i_
+                    cut_segments.extend(zip(chain_[i_:j_], chain_[i_ + 1:j_ + 1]))
+                    pending.discard(k)
+
         while pending:
             start_node = next(
                 (n for n, ks in incident.items()
@@ -934,24 +1044,13 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
             if start_node is None:
                 raise CutFailed("Internal error: the paths of polygon {} do not reach an edge "
                                 "point".format(p))
-            # Walk from the start node over paths, through junctions that are not vertices yet,
-            # until a node that is a vertex.
-            node, chain, used = start_node, [], set()
-            while True:
-                options = [k for k in incident[node] if k in pending and k not in used]
-                if not options:
-                    raise CutFailed("Internal error: a path of polygon {} dead-ends at {}".format(
-                        p, node))
-                k = options[0]
-                used.add(k)
-                u, v = ends[k]
-                forward = u == node
-                chain.append((k, forward))
-                node = v if forward else u
-                if vertex_of(node) is not None:
-                    break
-                if len(chain) > len(path_ids):
-                    raise CutFailed("Internal error: the paths of polygon {} form a cycle".format(p))
+            # The shortest chain of paths from the start node, through junctions that are not
+            # vertices yet, to another node that is a vertex.
+            chain, used = _chain(start_node, incident, ends, pending, vertex_of)
+            if chain is None:
+                raise CutFailed("Internal error: the paths of polygon {} form a cycle that no "
+                                "chain of splits can open".format(p))
+            node = ends[chain[-1][0]][1] if chain[-1][1] else ends[chain[-1][0]][0]
             coords, labels = [], []        # labels: ("i", c0, c1, t) or ("j", j, corners, weights)
             walk_nodes = [start_node]
             for k, forward in chain:
@@ -974,7 +1073,13 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
                     coords.append(position)
                     labels.append(("j", next_node[1], c, w))
             first, last = vertex_of(start_node), vertex_of(walk_nodes[-1])
-            face = next((f for f in pieces[p] if first in f.verts and last in f.verts), None)
+            candidates = [f for f in pieces[p] if first in f.verts and last in f.verts]
+            if len(candidates) > 1 and coords:
+                # Both ends are on the boundary of several pieces: the one the chain lies in.
+                inside = [f for f in candidates
+                          if bmesh.geometry.intersect_face_point(f, coords[0])]
+                candidates = inside or candidates
+            face = candidates[0] if candidates else None
             if face is None:
                 raise CutFailed("Internal error: a chain of polygon {} does not lie in one "
                                 "piece of it".format(p))
@@ -986,10 +1091,16 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
             new_face = result[0]
             pieces[p].append(new_face)
             made = [v for v in new_face.verts if v not in before]
+            order = _ordered(first, made) if coords else []
+            if order is None or len(order) != len(coords):
+                # Fall back to the nearest coordinates (points that coincide may swap).
+                order = []
+                for co in coords:
+                    vert = min(made, key=lambda v: (v.co - co).length_squared)
+                    made.remove(vert)
+                    order.append(vert)
             vertices = [first]
-            for co, label in zip(coords, labels):
-                vert = min(made, key=lambda v: (v.co - co).length_squared)
-                made.remove(vert)
+            for vert, (co, label) in zip(order, zip(coords, labels)):
                 vertices.append(vert)
                 if label[0] == "i":
                     _, c0, c1, t, path_k, path_j = label
@@ -1033,6 +1144,52 @@ def _insert_cut(bm, cut, mark_seams, reference=None):
         entries = _reference_triangulation(bm, reference, point_vertex, junction_vertex,
                                            interior_vertex, old_sizes)
     return stats, entries
+
+
+def _chain(start, incident, ends, pending, vertex_of):
+    """The shortest chain of pending paths from the node ``start`` (a vertex already) to another
+    node that is a vertex, through nodes that are not (breadth first). Returns ``(chain, used)``
+    with ``chain`` a list of ``(path, forward)``, or ``(None, None)``."""
+    queue = [start]
+    came = {start: None}
+    while queue:
+        node = queue.pop(0)
+        for k in incident[node]:
+            if k not in pending:
+                continue
+            u, v = ends[k]
+            other = v if u == node else u
+            if other in came or other == start:
+                continue
+            came[other] = (node, k, u == node)
+            if vertex_of(other) is not None:
+                chain = []
+                at = other
+                while came[at] is not None:
+                    previous, path, forward = came[at]
+                    chain.append((path, forward))
+                    at = previous
+                chain.reverse()
+                return chain, {path for path, _ in chain}
+            queue.append(other)
+    return None, None
+
+
+def _ordered(first, made):
+    """The vertices ``made`` (new vertices of a chain), in order along it, starting from the
+    neighbour of ``first``."""
+    remaining = set(made)
+    order = []
+    current = first
+    while remaining:
+        following = [e.other_vert(current) for e in current.link_edges
+                     if e.other_vert(current) in remaining]
+        if len(following) != 1:
+            return None
+        current = following[0]
+        order.append(current)
+        remaining.discard(current)
+    return order
 
 
 def _reference_triangulation(bm, reference, point_vertex, junction_vertex, interior_vertex,
@@ -1085,8 +1242,7 @@ def apply_cut(obj, *, mark_seams=True, cut_offset=DEFAULT_CUT_OFFSET):
     ddg = native()
     mesh = check_mesh(obj)
     begin = perf_counter()
-    n_regions, flat = read_state(mesh)
-    session, seconds_extract = make_session(obj, {"corner_values": flat}, n_regions)
+    session, seconds_extract, option = open_session(obj, cut_offset)
     try:
         cut = session.describe_cut(min_crossing_offset=cut_offset)
     except ddg.DdgError as ex:

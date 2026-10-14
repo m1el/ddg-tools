@@ -682,6 +682,7 @@ impl CutSession {
         n_regions = None,
         triangulation = "intrinsic",
         refine_bound = None,
+        min_offset = None,
         state = None,
         seam_edges = None,
         pinned_vertices = None,
@@ -704,6 +705,7 @@ impl CutSession {
         n_regions: Option<usize>,
         triangulation: &str,
         refine_bound: Option<f64>,
+        min_offset: Option<f64>,
         state: Option<&Bound<'py, PyAny>>,
         seam_edges: Option<&Bound<'py, PyAny>>,
         pinned_vertices: Option<&Bound<'py, PyAny>>,
@@ -777,7 +779,7 @@ impl CutSession {
             py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                let session = RustCutSession::from_state(&input, &bytes)?;
+                let session = RustCutSession::from_state(&input, &bytes, min_offset)?;
                 if n_regions.is_some_and(|n| n != session.n_regions()) {
                     return Err(BindError::Input(format!(
                         "n_regions={} but the state has {} regions",
@@ -800,7 +802,7 @@ impl CutSession {
             py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                RustCutSession::new(&input, n_regions, &start, &spec)
+                RustCutSession::new(&input, n_regions, &start, &spec, min_offset)
             })
             .map_err(bind_error)?
         };

@@ -105,6 +105,27 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         description="The most rounds of the normal clustering",
         default=50, min=0, soft_max=200,
     )
+    triangulation: EnumProperty(
+        name="Triangulation",
+        description=(
+            "The triangulation of the surface the flow runs on. Badly shaped triangles make the "
+            "flow's stages inaccurate; the cut always comes back onto the mesh's own faces"),
+        items=[
+            ('INTRINSIC', "Intrinsic (Delaunay)",
+             "An intrinsic triangulation of the same surface, flipped to Delaunay: usually no "
+             "vertex is added (Navigating Intrinsic Triangulations, Sharp, Soliman, Crane 2019)"),
+            ('REFINED', "Intrinsic, Refined",
+             "Delaunay flips and refinement to a minimum angle: vertices are added, the state "
+             "is then also kept in a mesh property"),
+            ('CALLER', "Mesh's Own", "The triangulation of the mesh itself (Blender's)"),
+        ],
+        default='INTRINSIC',
+    )
+    refine_bound: FloatProperty(
+        name="Minimum Angle",
+        description="The smallest angle refinement aims for, in degrees (at most 35)",
+        default=cut.DEFAULT_REFINE_BOUND, min=0.0, max=35.0,
+    )
     attribute: StringProperty(
         name="Attribute",
         description="Name of an integer attribute on the face domain",
@@ -132,6 +153,9 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         layout.use_property_decorate = False
         layout.prop(self, "mode")
         layout.prop(self, "cut_offset")
+        layout.prop(self, "triangulation")
+        if self.triangulation == 'REFINED':
+            layout.prop(self, "refine_bound")
         if self.mode == 'CIRCLE':
             layout.prop(self, "radius")
             layout.prop(self, "vertex")
@@ -158,7 +182,8 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                     n_regions=self.regions, active_vertex=active_vertex,
                     selected_vertices=selected_vertices,
                     cluster_iterations=self.cluster_iterations, attribute=self.attribute,
-                    cut_offset=self.cut_offset)
+                    cut_offset=self.cut_offset, triangulation=self.triangulation,
+                    refine_bound=self.refine_bound)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
@@ -483,7 +508,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
             "hide_strength", "distortion_weights", "area_weights", "symmetry",
             "symmetry_tolerance", "use_uniform_curvature", "uniform_curvature", "feature_r_eps",
             "feature_smoothing", "step_rule", "time_scale", "max_motion", "tau_max", "tau",
-            "min_crossing_offset", "cut_offset", "motion_tolerance", "energy_tolerance", "energy_window",
+            "min_crossing_offset", "cut_offset", "show_advanced", "motion_tolerance", "energy_tolerance", "energy_window",
             "flux_recovery", "length_step", "extension", "speed_scaling", "redistance",
             "penalty_rule")
         return {key: getattr(self, key) for key in keys}
@@ -501,7 +526,7 @@ class UV_OT_ddg_cut_flow(bpy.types.Operator):
             return {'CANCELLED'}
         for warning in report["warnings"]:
             self.report({'WARNING'}, warning)
-        self.report({'INFO'}, cut.flow_summary(report))
+        self.report({'INFO'}, cut.flow_summary(report, self.show_advanced))
         return {'FINISHED'}
 
 

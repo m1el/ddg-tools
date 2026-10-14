@@ -232,6 +232,7 @@ class CutSession:
         n_regions: int | None = None,
         triangulation: Literal["intrinsic", "caller", "refined"] = "intrinsic",
         refine_bound: float | None = None,
+        min_offset: float | None = None,
         state: Buffer | None = None,
         seam_edges: Buffer | None = None,
         pinned_vertices: Buffer | None = None,
@@ -249,7 +250,9 @@ class CutSession:
         refinement to ``refine_bound`` degrees (``"refined"``, default 25: vertices are added), or
         on the caller's triangulation (``"caller"``, as before). ``state``: bytes from
         ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
-        ``StaleStateError`` if the mesh or seams changed). Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
+        ``StaleStateError`` if the mesh or seams changed). ``min_offset`` (intrinsic and refined
+        only; default the library's 1e-6): every point of the cut keeps at least this fraction of
+        a side from the vertices and sides of the caller's triangle it lies in. Exactly one start: ``circle_vertex`` with ``circle_radius`` (two regions only),
         ``polygon_labels`` (one label per polygon below ``n_regions``), ``corner_values``
         (``(n_regions, n_corners)``) or ``cluster_iterations`` (the vertex normals clustered into
         ``n_regions`` clusters in at most that many rounds: the start of the atlas). Any number
