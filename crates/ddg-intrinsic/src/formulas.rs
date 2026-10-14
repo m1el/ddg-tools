@@ -159,8 +159,11 @@ pub fn opposite_cotan_sum(l_ij: f64, l_jk: f64, l_ki: f64, l_il: f64, l_lj: f64)
 ///
 /// with `A` the area of the triangle. `α` is evaluated as
 /// `(ℓ_ab² + (ℓ_ca − ℓ_bc)(ℓ_ca + ℓ_bc)) / (2 ℓ_ab²)`. This is the step that unfolds the next
-/// triangle along a traced path (paper Sec. 3.2.2); the given lengths are used, not the
-/// distance of the placed points, so errors of the layout are not fed back into the shape.
+/// triangle along a traced path (paper Sec. 3.2.2). The result is the triangle with the given
+/// lengths, scaled by `|b − a| / ℓ_ab` (up to rounding): `|c − a| = (|b − a| / ℓ_ab) ℓ_ca` and
+/// `|c − b| = (|b − a| / ℓ_ab) ℓ_bc`. The angles come from the given lengths alone; the size
+/// follows the placed edge `ab`, so a placed edge that is not exactly `ℓ_ab` long scales the
+/// triangle instead of changing its shape.
 ///
 /// [formula: it-unfold-apex]
 #[inline]
@@ -228,6 +231,11 @@ pub fn triangle_layout(l: [f64; 3]) -> Option<[[f64; 2]; 3]> {
 /// `d² = −(ℓ₁₂² u₁u₂ + ℓ₂₃² u₂u₃ + ℓ₃₁² u₃u₁)` (`u` the difference of the barycentric
 /// coordinates) is the same number; it is not used because its three terms cancel in a thin
 /// triangle, where the coordinates in the plane add in quadrature.
+///
+/// The formula holds for barycentric coordinates that sum to one. The function does not read
+/// the first coordinate: it places the point at `bary[1] v₁ + bary[2] v₂` with `v₀` at the
+/// origin, which is `Σ_j b_j v_j` only if `bary[0] = 1 − bary[1] − bary[2]`. The caller must
+/// pass coordinates that sum to one; nothing is normalized here.
 ///
 /// [formula: it-point-distances]
 pub fn corner_distances(l: [f64; 3], bary: [f64; 3]) -> Option<[f64; 3]> {

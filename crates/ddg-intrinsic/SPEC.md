@@ -527,6 +527,21 @@ and from `crates/ddg-intrinsic/README.md`.
   Not covered by the oracle: insertion and split as operations, point queries, the overlay,
   refinement, the export.
 
+* **N18** *Alg. 1 has no reduction modulo 2π; the crate and the oracle subtract 2π once.* The
+  paper keeps every signpost `φ` in `[0, 2π)` (Sec. 2.3, 3.1) and updates it by `φ_ik = φ_ij +
+  (2π/Θ_i) θ_i^{jk}` (Eq. 3, Alg. 1, `UpdateSignpost`), but Alg. 1 as printed does not reduce
+  the result, so as printed the update can leave `[0, 2π)`. `formulas::signpost_update` (and the
+  oracle's `signpostUpdate`) subtract `2π` once if the sum reaches `2π`, at an interior vertex;
+  at a boundary vertex directions do not wrap and nothing is subtracted (N2). One subtraction is
+  exact, not a rounding convention, for `0 ≤ φ < 2π` and `0 ≤ θ ≤ Θ`: then `(2π/Θ) θ ∈ [0, 2π]`,
+  so the sum is in `[0, 4π)` and a single subtraction brings it into `[0, 2π)`. The Lean
+  theorems `signpostUpdate_mem` (the result is in `[0, 2π)` and equals the sum or the sum minus
+  `2π`) and `signpostUpdate_direction` (it has the same cosine and sine as the sum, so it is the
+  direction of Eq. 3) in `lean/proofs/DdgProofs/Intrinsic/Signpost.lean` state this for the
+  oracle's function, at an interior vertex. Outside the hypotheses (a negative `φ`, a corner
+  larger than `Θ`, a signpost of `2π` or more) one subtraction is not enough, and the crate does
+  not guard against them.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,
