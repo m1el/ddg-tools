@@ -266,6 +266,88 @@ pub fn circumcenter_barycentric(l: [f64; 3]) -> Option<[f64; 3]> {
     (sum > 0.0 && sum.is_finite()).then(|| [w[0] / sum, w[1] / sum, w[2] / sum])
 }
 
+/// The length of an edge `i j` after its end `i` has moved by the vector `v` of length `r`
+/// (paper Sec. 3.3.3, Alg. 10): with `α` the angle between `v` and the edge at `i`,
+/// `ℓ' = √(r² + ℓ² − 2 r ℓ cos α)`, the law of cosines in the unfolded star of `i`. It is
+/// evaluated as `√((ℓ − r cos α)² + (r sin α)²)`, the same number, which is the distance from
+/// `v` to `j = (ℓ, 0)` in a frame whose x-axis is the edge: the two squares are added without
+/// cancellation.
+///
+/// [formula: it-move-length]
+#[inline]
+pub fn moved_length(l: f64, r: f64, alpha: f64) -> f64 {
+    let (s, c) = alpha.sin_cos();
+    (l - r * c).hypot(r * s)
+}
+
+/// Twice the signed area of the triangle `(p, j, k)` when the corner `i` of the triangle
+/// `(i, j, k)` moves to `p = i + v`: with `2A` twice the area of `(i, j, k)` (counter-clockwise)
+/// and `d = k − j`, it is `2A − v × d` (`×` the cross product `v_x d_y − v_y d_x`). The area is
+/// affine in `v`; it vanishes when `p` reaches the line through `j` and `k`. Over the triangles
+/// of a closed star the vectors `d` sum to zero, so the total area does not depend on `v`.
+///
+/// [formula: it-move-area]
+#[inline]
+pub fn moved_double_area(double_area: f64, v: [f64; 2], d: [f64; 2]) -> f64 {
+    double_area - (v[0] * d[1] - v[1] * d[0])
+}
+
+/// The area of a triangle `abc` times the vector from `a` to its circumcentre, in the frame of
+/// `a` whose x-axis is the side `ab` and in which `c` lies above that axis: with `ℓ_ab`, `ℓ_ac`,
+/// `ℓ_bc` the side lengths and `A` the area,
+///
+/// ```text
+/// A · (o − a) = ( A ℓ_ab / 2,  ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²) / 8 ).
+/// ```
+///
+/// The circumcentre itself is this divided by `A`: its abscissa is half the side `ab` and its
+/// ordinate `(ℓ_ac² + ℓ_bc² − ℓ_ab²) / 4h` with `h = 2A / ℓ_ab` the height of `c`; weighted by
+/// the area, as the update of the optimal Delaunay triangulation needs it, nothing is divided.
+/// The ordinate is negative when the angle at `c` is obtuse (the circumcentre lies beyond `ab`).
+///
+/// [formula: it-circumcenter-vector]
+#[inline]
+pub fn weighted_circumcenter_vector(l_ab: f64, l_ac: f64, l_bc: f64, area: f64) -> [f64; 2] {
+    // ℓ_ac² − ℓ_ab² as a product, then + ℓ_bc².
+    let difference = (l_ac - l_ab) * (l_ac + l_ab);
+    [0.5 * area * l_ab, 0.125 * l_ab * (difference + l_bc * l_bc)]
+}
+
+/// The area of a triangle `abc` times the vector from `a` to its barycentre, in the frame of
+/// [`weighted_circumcenter_vector`]: `A (ℓ_ab + c_x, h) / 3` with `c_x = (ℓ_ab² + ℓ_ac² −
+/// ℓ_bc²) / 2 ℓ_ab` and `h = 2A / ℓ_ab`. Chen and Holst (2011, Sec. 4) use the barycentre in
+/// place of the circumcentre for the triangles that touch the boundary.
+///
+/// [formula: it-odt-update]
+#[inline]
+pub fn weighted_barycenter_vector(l_ab: f64, l_ac: f64, l_bc: f64, area: f64) -> [f64; 2] {
+    let c_x = (l_ab * l_ab + (l_ac - l_bc) * (l_ac + l_bc)) / (2.0 * l_ab);
+    let h = 2.0 * area / l_ab;
+    [area * (l_ab + c_x) / 3.0, area * h / 3.0]
+}
+
+/// The update of the optimal Delaunay triangulation at a vertex `x` (Chen and Holst 2011,
+/// Eq. 4.13 with uniform density): `x_new − x = α (Σ_T |T| c_T / Σ_T |T| − x)` over the
+/// triangles `T` of the star of `x`, `c_T` their circumcentres. In the frame of `x` (the
+/// vertex at the origin) this is `α Σ_T |T| (c_T − x) / Σ_T |T|`: the area-weighted mean of
+/// the vectors from `x` to the circumcentres, which is how the paper (Sec. 4.3) applies it on
+/// a surface. `weighted` is `Σ_T |T| (c_T − x)` ([`weighted_circumcenter_vector`] rotated into
+/// the frame of `x`), `total_area` is `Σ_T |T|`, `alpha` the step.
+///
+/// For a planar star whose outer polygon is fixed, `Σ_T |T| (x − c_T)` is `3/2` times the
+/// gradient in `x` of the energy of the optimal Delaunay triangulation (Chen and Holst 2011,
+/// Lemma 4.2, Eq. 4.5), so the update with `α = 1` moves `x` to the stationary point of the
+/// energy as a function of `x` alone.
+///
+/// [formula: it-odt-update]
+#[inline]
+pub fn odt_displacement(weighted: [f64; 2], total_area: f64, alpha: f64) -> [f64; 2] {
+    [
+        alpha * weighted[0] / total_area,
+        alpha * weighted[1] / total_area,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +427,45 @@ mod tests {
         assert_eq!(signpost_update(1.0, 1.0, 2.0, true), 1.0 + PI / 2.0);
         assert_eq!(angle_scale(TAU, false), 1.0);
         assert_eq!(angle_scale(PI, true), 1.0);
+    }
+
+    #[test]
+    fn moved_length_is_the_distance_in_the_plane() {
+        // j at (3, 4) (length 5, direction atan2(4, 3)); v = (1, -2).
+        let (l, phi_j) = (5.0, 4f64.atan2(3.0));
+        let v = [1.0f64, -2.0];
+        let (r, phi_v) = (v[0].hypot(v[1]), v[1].atan2(v[0]));
+        let d = moved_length(l, r, phi_j - phi_v);
+        assert!((d - (2.0f64 * 2.0 + 6.0 * 6.0).sqrt()).abs() < 1e-14);
+        let cosine = (r * r + l * l - 2.0 * r * l * (phi_j - phi_v).cos()).sqrt();
+        assert!((d - cosine).abs() < 1e-14);
+    }
+
+    #[test]
+    fn moved_area_against_coordinates() {
+        let (j, k) = ([2.0, -1.0], [0.5, 3.0]);
+        let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+        let v = [0.3, 0.7];
+        let new = cross([j[0] - v[0], j[1] - v[1]], [k[0] - v[0], k[1] - v[1]]);
+        let got = moved_double_area(cross(j, k), v, [k[0] - j[0], k[1] - j[1]]);
+        assert!((new - got).abs() < 1e-14);
+    }
+
+    #[test]
+    fn weighted_centres_against_coordinates() {
+        // a = (0, 0), b = (4, 0), c = (1, 3).
+        let dist = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]);
+        let (a, b, c) = ([0.0, 0.0], [4.0, 0.0], [1.0, 3.0]);
+        let area = 6.0;
+        let w = weighted_circumcenter_vector(dist(a, b), dist(a, c), dist(b, c), area);
+        let o = [w[0] / area, w[1] / area];
+        assert!((dist(o, a) - dist(o, b)).abs() < 1e-14 && (dist(o, a) - dist(o, c)).abs() < 1e-14);
+        let g = weighted_barycenter_vector(dist(a, b), dist(a, c), dist(b, c), area);
+        assert!((g[0] / area - 5.0 / 3.0).abs() < 1e-14 && (g[1] / area - 1.0).abs() < 1e-14);
+        // An obtuse angle at c: the circumcentre is below ab.
+        let c = [2.0, 0.5];
+        let w = weighted_circumcenter_vector(4.0, dist(a, c), dist(b, c), 1.0);
+        assert!(w[1] < 0.0);
+        assert_eq!(odt_displacement([2.0, -4.0], 2.0, 0.5), [0.5, -1.0]);
     }
 }

@@ -116,6 +116,7 @@ pub mod overlay;
 mod point;
 pub mod query;
 pub mod refine;
+pub mod reposition;
 mod surface;
 pub mod trace;
 pub mod triangulation;
@@ -124,6 +125,7 @@ pub use delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport, DelaunayS
 pub use edge_trace::{EdgeTrace, EdgeTraceOptions, EdgeTraceReport, EdgeTraces};
 pub use error::{
     EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, InsertRefusal, IntrinsicError,
+    MoveRefusal,
 };
 pub use export::{ExportOptions, SimplicialExport};
 pub use flip::Flip;
@@ -133,6 +135,7 @@ pub use operators::Quality;
 pub use overlay::{Overlay, OverlayVertex};
 pub use point::SurfacePoint;
 pub use query::{PathOnInput, PathsOnInput, Segment};
+pub use reposition::VertexMove;
 pub use refine::{
     BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineStatus,
 };

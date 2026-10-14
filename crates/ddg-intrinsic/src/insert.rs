@@ -62,13 +62,13 @@ pub struct Insertion {
 
 /// Where a new vertex is on the input mesh and the direction, in the frame of that place,
 /// that points from it to the vertex it was traced from.
-struct Placed {
-    location: SurfacePoint,
-    back: f64,
-    snapped: Option<f64>,
+pub(crate) struct Placed {
+    pub(crate) location: SurfacePoint,
+    pub(crate) back: f64,
+    pub(crate) snapped: Option<f64>,
 }
 
-fn wrap(angle: f64) -> f64 {
+pub(crate) fn wrap(angle: f64) -> f64 {
     let a = angle.rem_euclid(TAU);
     if a >= TAU { 0.0 } else { a }
 }
@@ -98,7 +98,7 @@ impl IntrinsicTriangulation {
     }
 
     /// The parameter of vertex `v` along input edge `input_edge`, if it lies on it.
-    fn parameter_on_input_edge(&self, v: usize, input_edge: usize) -> Option<f64> {
+    pub(crate) fn parameter_on_input_edge(&self, v: usize, input_edge: usize) -> Option<f64> {
         match self.locations[v] {
             SurfacePoint::Vertex(u) => {
                 let [a, b] = self.input.mesh().edge_vertices(input_edge);
@@ -135,6 +135,14 @@ impl IntrinsicTriangulation {
                 trace.end, trace.length
             )));
         }
+        self.place_at_end(&trace)
+    }
+
+    /// The place on the input mesh at the end of a completed trace over the input mesh, with
+    /// the direction back along it; a point within [`LOCATION_SNAP`] of an edge of its input
+    /// face is moved onto that edge (SPEC N10). Refused if the end is an input vertex.
+    pub(crate) fn place_at_end(&self, trace: &Trace) -> Result<Placed, InsertRefusal> {
+        let not_located = |detail: String| InsertRefusal::NotLocated { detail };
         match trace.end {
             SurfacePoint::Vertex(u) => Err(not_located(format!(
                 "the point is input vertex {u}, which is a vertex already"
@@ -247,7 +255,7 @@ impl IntrinsicTriangulation {
 
     /// The corner angle at the tail of halfedge `h`, which exists: the caller has checked the
     /// face.
-    fn angle_at(&self, h: usize) -> f64 {
+    pub(crate) fn angle_at(&self, h: usize) -> f64 {
         let l = self.face_lengths(h / 3);
         let k = h % 3;
         corner_angle(l[(k + 1) % 3], l[k], l[(k + 2) % 3]).unwrap_or(0.0)
@@ -255,7 +263,7 @@ impl IntrinsicTriangulation {
 
     /// The signpost of the next halfedge counter-clockwise after `h` around its tail, from
     /// the signpost of `h` and the corner angle between them.
-    fn signpost_after(&self, h: usize) -> f64 {
+    pub(crate) fn signpost_after(&self, h: usize) -> f64 {
         let v = self.from_vertex(h);
         signpost_update(
             self.signposts[h],

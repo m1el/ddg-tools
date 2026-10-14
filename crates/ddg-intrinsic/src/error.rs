@@ -48,6 +48,26 @@ pub enum IntrinsicError {
         /// Why.
         reason: InsertRefusal,
     },
+    /// A vertex cannot be moved (see
+    /// [`IntrinsicTriangulation::move_vertex`](crate::IntrinsicTriangulation::move_vertex)).
+    /// Nothing was changed.
+    MoveRefused {
+        /// The vertex.
+        vertex: u32,
+        /// Why.
+        reason: MoveRefusal,
+    },
+    /// The new place of a moved vertex on the input mesh could not be found: the straight path
+    /// over the input mesh from its old place did not complete, although the move keeps the
+    /// vertex inside its flat star. This is an inconsistency between the triangulation and the
+    /// input mesh (or a failure of floating point arithmetic), reported instead of repaired.
+    /// Nothing was changed.
+    MoveNotLocated {
+        /// The vertex.
+        vertex: u32,
+        /// What the tracing query said.
+        detail: String,
+    },
     /// A straight segment inside a face of the triangulation could not be followed over the
     /// input mesh to its end.
     SegmentTrace {
@@ -204,6 +224,84 @@ impl fmt::Display for InsertRefusal {
                 f,
                 "its place on the input mesh could not be found: {detail}"
             ),
+        }
+    }
+}
+
+/// Why a vertex cannot be moved (paper Sec. 3.3.3; SPEC N19, N20).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MoveRefusal {
+    /// The vertex is a vertex of the input mesh. Moving it would change the surface.
+    InputVertex,
+    /// The displacement is not a finite vector.
+    NotFinite,
+    /// An edge joins the vertex to itself, so its star is not a disk around it in which the
+    /// lengths could be updated locally.
+    SelfEdge {
+        /// The edge.
+        edge: u32,
+    },
+    /// The vertex lies on the boundary and the displacement has a component off the boundary
+    /// (in the frame of a boundary vertex the boundary is the x-axis, so the second component
+    /// must be zero). Moving it off the boundary would change the surface.
+    LeavesBoundary {
+        /// The component of the displacement normal to the boundary.
+        normal: f64,
+    },
+    /// The new place is not inside the flat star of the vertex: a triangle of the star would
+    /// be turned over (the local update of the paper does not apply; SPEC N20).
+    NotInStar {
+        /// The first face (in the order around the vertex) whose new area would not be
+        /// positive.
+        face: u32,
+        /// The largest fraction of the displacement for which every new triangle keeps a
+        /// positive area: `t · displacement` is in the star exactly for `0 ≤ t < fraction`.
+        fraction: f64,
+    },
+    /// The new place is inside the star, but a new triangle would be too thin to be described
+    /// by its edge lengths (shape number below
+    /// [`FLIP_SHAPE_LIMIT`](crate::formulas::FLIP_SHAPE_LIMIT), SPEC N5).
+    TooThin {
+        /// The face.
+        face: u32,
+        /// Its shape number after the move.
+        shape: f64,
+    },
+    /// The new place is a vertex of the input mesh, where an inserted vertex cannot be.
+    OnInputVertex {
+        /// The input vertex.
+        vertex: u32,
+    },
+}
+
+impl fmt::Display for MoveRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MoveRefusal::InputVertex => write!(f, "it is a vertex of the input mesh"),
+            MoveRefusal::NotFinite => write!(f, "the displacement is not finite"),
+            MoveRefusal::SelfEdge { edge } => {
+                write!(f, "edge {edge} joins it to itself")
+            }
+            MoveRefusal::LeavesBoundary { normal } => write!(
+                f,
+                "it lies on the boundary and the displacement has the component {normal:?} off \
+                 the boundary"
+            ),
+            MoveRefusal::NotInStar { face, fraction } => write!(
+                f,
+                "the new place is outside its star: face {face} would be turned over (every \
+                 triangle keeps a positive area only below the fraction {fraction:?} of the \
+                 displacement)"
+            ),
+            MoveRefusal::TooThin { face, shape } => write!(
+                f,
+                "face {face} would be too thin to be described by its edge lengths (shape number \
+                 {shape:?}, the limit is {:?})",
+                crate::formulas::FLIP_SHAPE_LIMIT
+            ),
+            MoveRefusal::OnInputVertex { vertex } => {
+                write!(f, "the new place is input vertex {vertex}")
+            }
         }
     }
 }
@@ -397,6 +495,13 @@ impl fmt::Display for IntrinsicError {
             IntrinsicError::InsertionRefused { at, reason } => {
                 write!(f, "no vertex can be inserted at {at}: {reason}")
             }
+            IntrinsicError::MoveRefused { vertex, reason } => {
+                write!(f, "vertex {vertex} cannot be moved: {reason}")
+            }
+            IntrinsicError::MoveNotLocated { vertex, detail } => write!(
+                f,
+                "the new place of vertex {vertex} on the input mesh could not be found: {detail}"
+            ),
             IntrinsicError::SegmentTrace {
                 face,
                 length,
