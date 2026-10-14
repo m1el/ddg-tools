@@ -30,7 +30,8 @@ A triangle with the sides `ℓ₀₁, ℓ₁₂, ℓ₂₀` is laid out as `v₀
   `a₀a₁a₂/(4A)` to all three corners (`circumcenter_equidistant`); the coordinate of a corner
   is negative exactly when the angle there is obtuse, zero exactly when it is right, and at
   most one is negative (`circumcenterBary_neg_iff`, `circumcenterBary_eq_zero_iff`,
-  `circumcenterBary_pos_of_neg`).
+  `circumcenterBary_pos_of_neg`); the circumradius is `a₀/(2 sin θ₀)` and exceeds `a₀` when
+  `θ₀ < 30°` (`circumradius_eq_div_sin`, `circumradius_gt_of_angle_lt`).
 
 Own definition: `layoutPoint` (the point `b₁ v₁ + b₂ v₂` of the layout).
 -/
@@ -547,6 +548,31 @@ theorem circumcenter_equidistant {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
     unfold circumSum
     simp only [circumWeight_eq]
     ring
+
+/-- The circumradius `a₀a₁a₂/(4A)` is `a₀/(2 sin θ₀)` (the law of sines). -/
+theorem circumradius_eq_div_sin {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2) :
+    a0 * a1 * a2 / (4 * triArea a0 a1 a2) = a0 / (2 * sin (cornerAngle a0 a1 a2)) := by
+  have hb := h.pos_b
+  have hc := h.pos_c
+  have hT := triArea_pos h
+  rw [sin_cornerAngle h]
+  field_simp
+  ring
+
+/-- **A triangle with an angle below `30°` has a circumradius larger than the side opposite that
+angle**: the fact behind the angle bound of Chew's algorithm (SPEC N1; the algorithm itself is
+cited, `it-chew-second-algorithm`). -/
+theorem circumradius_gt_of_angle_lt {a0 a1 a2 : ℝ} (h : IsTriangle a0 a1 a2)
+    (hθ : cornerAngle a0 a1 a2 < π / 6) : a0 < a0 * a1 * a2 / (4 * triArea a0 a1 a2) := by
+  have ha := h.pos_a
+  have h0 := cornerAngle_pos h
+  have hpos := Real.sin_pos_of_pos_of_lt_pi h0 (cornerAngle_lt_pi h)
+  have hs : sin (cornerAngle a0 a1 a2) < 1 / 2 := by
+    rw [← Real.sin_pi_div_six]
+    exact Real.sin_lt_sin_of_lt_of_le_pi_div_two (by linarith [pi_pos]) (by linarith [pi_pos]) hθ
+  rw [circumradius_eq_div_sin h, lt_div_iff₀ (by positivity)]
+  have := mul_lt_mul_of_pos_left hs ha
+  linarith
 
 end Intrinsic
 

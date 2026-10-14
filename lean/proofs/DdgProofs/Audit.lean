@@ -862,3 +862,5 @@ open DdgProofs
 #print axioms Intrinsic.circumcenterBary_eq_zero_iff
 #print axioms Intrinsic.circumcenterBary_pos_of_neg
 #print axioms Intrinsic.circumcenter_equidistant
+#print axioms Intrinsic.circumradius_eq_div_sin
+#print axioms Intrinsic.circumradius_gt_of_angle_lt
