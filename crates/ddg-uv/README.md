@@ -799,7 +799,7 @@ Session::unwrap / unwrap_with_cut(&MeshInput, &CutOnPolygons, &CutUnwrapOptions)
   (`VertexSource::Junction`), interior points. Every region component is a chart in
   `unwrap_with_cut` (the network is in the seams).
 
-### Tests (`tests/cutting.rs`, 24 tests)
+### Tests (`tests/cutting.rs`, 36 tests in all; the intrinsic ones are below)
 
 Insertion invariants on `uv_sphere`, `grid_cube`, `capsule`, `torus`, `cylinder` (cuts from the
 flow) and on 5156 paths from random states of three meshes with and without seams
@@ -908,6 +908,184 @@ and `unwrap` with cones off.
 
 `start` includes the clustering of the normals and the distance computations of the functions.
 
+### The flow on an intrinsic triangulation
+
+The cut flow is sensitive to badly shaped triangles. `Session::with_triangulation(.., &Triangulation)`
+chooses the triangulation it runs on:
+
+* `Triangulation::Caller`: the seam-cut triangle mesh of the caller's triangulation. What
+  `Session::new` and `Session::new_with` do, bit for bit as before (tested: the energies, the
+  steps and the state agree to the bit with and without the option).
+* `Triangulation::Intrinsic(IntrinsicOptions)`: from that mesh (so the seams stay boundary) an
+  intrinsic triangulation of the same surface (`ddg-intrinsic`, after Sharp, Soliman, Crane,
+  *Navigating Intrinsic Triangulations*, 2019), flipped to Delaunay, optionally refined, exported
+  as a simplicial mesh. The flow runs on the export. `Triangulation::default()` and
+  `IntrinsicOptions::default()` are **Delaunay flips only** (`IntrinsicOptions::flips_only()`):
+  the measurements of the intrinsic crate and of the flow on it say that flips are what makes
+  badly shaped meshes behave, and that refinement (`IntrinsicOptions::refined()`: 25 degrees,
+  an explicit choice, with its bound in `refine`) adds 30 % to 140 % vertices for little gain on
+  most meshes. `Session::new` keeps the caller's triangulation so that existing callers do not
+  change.
+
+`Session::intrinsic_report()` gives `IntrinsicReport`: vertices of the mesh and of the
+triangulation, **vertices added** (`n_added`), flips (first pass, export), refined, splits, the
+refinement rounds of the export, whether it is Delaunay, the smallest and largest angle reached,
+the angle bound asked for, the number of corners of the export below it, the corners the last
+refinement left below the bound with the reason (`BelowReason`), seconds, the fingerprint.
+
+**When is the per-corner view the whole state?** The vertices of the export are the vertices of
+the seam-cut mesh first, then the added ones. With flips only nothing is added unless the export
+had to split an edge to make the triangulation a simplicial complex (on the meshes of the table
+below: 0 added on all of them). `Session::state_is_per_corner()` is true exactly then
+(`IntrinsicReport::n_added == 0`, or the caller's triangulation), and `state()` / `set_state`
+carry everything. Otherwise `state()` has the values at the caller's vertices only, and the
+whole state is a `SessionState`.
+
+**`SessionState`** (opaque; `Session::snapshot()`, `restore(&state)`,
+`Session::new_from_state(&input, &state)`): the level-set functions on the vertices of the
+triangulation the flow runs on (for the two-region flow one `φ`, otherwise one per region), the
+fingerprint of that triangulation (a hash of its connectivity, lengths and places; for the
+caller's triangulation a hash of the seam-cut mesh), the number of regions, the kind of flow and
+the `Triangulation` option that reproduces the triangulation (refinement and export are
+deterministic). `to_bytes()` / `from_bytes()` is a versioned little-endian format; `with_values()`
+edits. A state of another triangulation is refused with `CuttingError::StaleState` (both
+fingerprints are in the message); another number of regions or kind of flow, a wrong number of
+values or bytes that are not a state is `CuttingError::BadState`.
+
+**Starts on an intrinsic triangulation.** A geodesic circle is computed on the triangulation
+itself, from every copy of the vertex. Corner values, polygon labels and normal clusters are
+computed on the seam-cut mesh first; the value at a vertex the triangulation added is the linear
+interpolation of the mesh's piecewise linear function at the vertex's place on the mesh. Corner
+values are left as they are (at the caller's vertices exactly as given). Labels and clusters are
+then made signed distances by the flow's redistancing (cut-adjacent values kept, fast marching
+on the triangulation elsewhere). Per-vertex controls (`penalty`, the scaled-Dirichlet weight) are
+interpolated the same way; symmetry classes leave out the added vertices (and the seam copies);
+a curvature per triangle (`CurvatureSource::PerFace`) is refused on an intrinsic triangulation.
+`Session::evaluate` returns the evaluation in the numbering of `Session::engine_mesh()`.
+
+**The cut back on the caller's polygons** (`describe_cut`, `preview`). A cut on the export
+(points on its edges, segments and triple points in its faces) is carried back by
+`segments_on_input`: every point becomes a point of the seam-cut mesh (inside a face, or on an
+edge) and every segment a chain of straight pieces that each lie in one face. In the types of
+`CutOnPolygons`: a point on a polygon edge is an `EdgePoint` (an edge can carry several), a point
+on a diagonal an `InteriorPoint`, a point inside a triangle a `JunctionPoint` **of any degree**
+(a bend has two paths, a triple point three); a path runs between edge points and junctions and
+passes through diagonal crossings; a triangle can hold several paths; consecutive points of a
+path can be in the same triangle; a path can enter and leave a triangle through the same side.
+The regions of the parts come from the sides of the oriented pieces (lower region id on the
+left of a path), not from the regions of the vertices: `Inserted::polygon_region`. The preview
+comes from the same description (`CutOnPolygons::lines`).
+The rule for near-degenerate parts: every point keeps at least `IntrinsicOptions::min_offset`
+(`1e-6`) of the side or of the barycentric coordinate from the vertices and sides of its
+triangle (moved points are counted in `n_clamped_crossings`); a point exactly at a vertex of the
+mesh is `CuttingError::Unsupported`. A cut that comes closer to a vertex than the parts can
+carry shows as sliver triangles and, in the flattening, as a few flipped triangles (below).
+Refused as unsupported: a piece along a diagonal, a closed piece of the cut inside one triangle
+(it would be a hole in a polygon).
+
+**`insert`, generally.** The construction (written out in the rustdoc of
+`ddg_uv::cutting::insert`; a bmesh implementation must mirror it): vertices on polygon edges and
+on diagonals; every triangle of a crossed polygon is subdivided by the pieces it holds into
+cells (planar graph in the barycentric coordinates of the triangle, faces walked
+counter-clockwise); cells are joined across the parts of diagonals that are not cut into parts;
+the boundary of a part is its polygon; every cell is triangulated by ear clipping in barycentric
+coordinates, the best-shaped ear first. For the old cases (a segment from side to side, a triple
+point) it makes the polygons of before; the triangulation can differ in a diagonal.
+
+#### Tests and measurements
+
+New tests (`tests/cutting.rs`, 36 in all): the general insertion by hand (a V with a bend
+inside one triangle: parts, regions, area 0.04; two parallel cuts with several points on an
+edge, one 1e-7 from a corner); 144 random level-set functions on the vertices of the
+intrinsic triangulations (flips and refined, 2, 3 and 5 regions, sphere, cube, torus and a
+cylinder whose caps are 12-gons, with and without seams) through the whole chain: 2495 bends,
+904 edges with several points, 15412 paths at junctions, 1423 points on the two sides of seams,
+none refused, every invariant of the earlier insertion tests (area kept, manifold, points on
+their edge or diagonal, every cut segment an edge, old seams kept, junctions of degree d are
+vertices of d polygons and d seams) and the regions of the parts (equal across an uncut edge,
+different across a cut one); the caller's triangulation unchanged by the option (bits); the
+intrinsic session against a direct run of `ddg-intrinsic` and the flow on the same mesh (same
+fingerprint, same energies and state to the bit); the state round trip, `restore`,
+`new_from_state`, stale state, bad bytes; end to end on the generated meshes, spot, the sheared
+grid, the needles-and-caps grid (both built as in `bad_mesh_study`) and `camelbad`.
+
+Release build, circle start of radius `0.2 sqrt(area)` (flat meshes: `alpha_L = 1`, 8 steps;
+others: ripple rule, 40 steps, camelbad 20), Hencky energy, cones optimal; "energy" is the first
+and the last step's:
+
+| mesh | triangulation | vertices | energy | charts | cones | flipped | distortion |
+|---|---|---:|---|---:|---:|---:|---:|
+| sheared 153, 32x32 | caller / flips / refined | 1089 / 1089 / 1155 | 0.992 to 0.744 / 1.216 to 0.908 / 1.216 to 0.908 | 2 | 0 | 0 | 0 |
+| needles and caps, 16 | caller / flips / refined | 192 / 192 / 830 | 1.151 to 0.797 / 1.167 to 1.167 (stalls after 1 step) / 1.200 to 0.821 | 2 | 0 | 0 | 0 |
+| uv_sphere 32x16 | caller / flips / refined | 482 / 482 / 690 | 4.78 to 4.17 / same / 4.89 to 4.32 | 2 | 1 | 0 / 0 / 5 | 0.074 / 0.074 / 0.073 |
+| grid_cube 6 | all three | 218 | 4.30 to 4.04 | 2 | 1 | 0 | 0.100 |
+| spot (quads) | caller / flips / refined | 2930 / 2930 / 3185 | 4.81 to 4.25 / 4.90 to 4.36 / 4.90 to 4.36 | 2 | 2 | 0 | 0.434 / 0.430 / 0.432 |
+| spot atlas, 8 clusters, 60 steps | caller / flips / refined | 2930 / 2930 / 3185 | 0.0618 to 0.0379 / 0.0628 to 0.0401 / 0.0626 to 0.0405 | 17 / 21 / 23 | 0 | 0 / 2 / 12 | 0.0047 / 0.0044 / 0.0042 |
+| camelbad, 22725 faces | caller / flips / refined | 11392 / 11392 / 15561 | 2.456 to 2.341 / 2.475 to 2.355 / 2.458 to 2.350 | 2 / 3 / 3 | 2 | 0 / 1 / 1 | 0.501 / 0.506 / 0.506 |
+
+(A flat mesh has no distortion: its flattening is isometric.) The needles-and-caps mesh with
+flips only is stuck (its export still has angles of 6 and 168 degrees): the cut does not move;
+refinement frees it. The flipped triangles of the refined sphere (5) and of the atlas are
+slivers where the cut passes close to a vertex of the mesh (3D areas of `1e-3` of a cell); the
+tests allow `1 + triangles / 100`.
+
+**The same cut on three triangulations** (`the_same_cut_on_three_triangulations`): the exact
+distance to a point at the vertices of a 165 degree sheared grid (24x24), circle of radius 0.2
+(exact length 1.2566), `alpha_L = 1`: the energy of the cut is 0.6853 on the caller's
+triangulation, 0.5799 flipped, 0.5774 refined; the length term equals the length of the cut's
+polyline on the surface in each (to the last digit), and the distortion is zero. The three
+cuts are three different polylines (the piecewise linear interpolant of the same function has
+a different zero set on a different triangulation, and these triangles have edges as long as the
+circle's radius), so on a flat mesh the flow's evaluation is exact for the cut it is given and
+the difference is the cut, which refutes "the evaluation is wrong on the bad mesh" for the
+length term. The 3.5 times of the study on the distortion terms of a curved mesh was not
+reproduced here (no curved bad mesh was evaluated on both); the same-start rows above start
+from different cuts (the circle from the fast-marching distance: 0.992 on the caller's
+triangulation, 1.216 flipped, against 1.2566 exact) for the same reason.
+
+#### Benchmarks (`-- intrinsic/`)
+
+`cargo bench -p ddg-uv --bench cutting -- intrinsic/`, one thread, 10 steps, circle start, one
+run alone, criterion medians. "added" is the number of vertices the intrinsic triangulation adds.
+
+| mesh | triangulation | vertices (added) | angles | start | 10 steps | describe | insert | unwrap, cones off | chain |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| uv_sphere 64x32 | caller | 1986 | | 3.9 ms | 20.5 ms | 23 us | 1.3 ms | 16.0 ms | 41.5 ms |
+| | flips | 1986 (0) | 5.6 to 92.8 | 7.4 ms | 21.5 ms | 94 us | 1.4 ms | 18.1 ms | 46.9 ms |
+| | refined | 2633 (647) | 25.0 to 119.6 | 18.1 ms | 27.4 ms | 123 us | 1.4 ms | 16.7 ms | 64.0 ms |
+| sheared 165, 64x64 | caller | 4225 | | 9.6 ms | 39.2 ms | 36 us | 2.6 ms | 38.0 ms | 87.5 ms |
+| | flips | 4225 (0) | 5.1 to 159.9 | 22.9 ms | 22.6 ms | 204 us | 3.7 ms | 39.1 ms | 85.2 ms |
+| | refined | 4865 (640) | 15.0 to 104.8 | 31.3 ms | 23.5 ms | 208 us | 3.8 ms | 36.6 ms | 93.5 ms |
+| spot quads | caller | 2930 | | 6.9 ms | 22.2 ms | 31 us | 1.8 ms | 22.9 ms | 51.0 ms |
+| | flips | 2930 (0) | 11.4 to 133.6 | 14.3 ms | 29.2 ms | 131 us | 1.8 ms | 24.0 ms | 67.6 ms |
+| | refined | 3185 (255) | 25.0 to 126.8 | 21.4 ms | 30.5 ms | 144 us | 1.8 ms | 23.8 ms | 79.7 ms |
+
+(The flow steps on the sheared grid are faster on the Delaunay triangulation, 22.6 against 39.2
+ms: a better conditioned system.) The construction of the triangulation (the start column
+minus the caller's) costs 3 to 13 ms on these meshes with flips and 14 to 22 with refinement.
+
+#### What the Python binding and the Blender operators will have to change
+
+* The state can no longer live in per-corner attributes alone: with refinement, or when the
+  export had to split edges, it has values at vertices that are in no polygon. Keep the
+  `SessionState` bytes (`snapshot().to_bytes()`) with the session (an object property, a custom
+  data layer on the mesh datablock, a file next to the .blend) and hand them back (`restore`,
+  `new_from_state`); `state_is_per_corner()` is the check that per-corner attributes suffice. A
+  state is tied to the mesh and seams (fingerprint): when the mesh or the seams change the
+  state is stale and must be restarted from corner values or labels.
+* The description has new shapes: several edge points per edge, junctions of degree two and
+  more inside triangles (`triangle`, `corners`, `barycentric`), paths that start and end at
+  junctions, paths with both ends on the same polygon edge, `VertexSource::Junction`,
+  `Inserted::polygon_region`.
+* The bmesh insertion must mirror the general construction of `insert` (rustdoc), not the
+  per-triangle cases of the earlier version: subdivide every crossed triangle by its pieces
+  (cells), join cells across uncut parts of diagonals, triangulate by ear clipping. The
+  triangulation it produces need not equal ours; the polygons, the vertices and the seams must.
+* The preview is `CutOnPolygons::lines()` / `Session::preview` (with `regions`).
+* `Session::new` is unchanged; the intrinsic triangulation is `with_triangulation`.
+  `Session::flow_mesh()` is the seam-cut mesh, `Session::engine_mesh()` the triangulation the
+  flow runs on.
+
 ## Benchmarks
 
 `cargo bench -p ddg-uv` (Criterion; `benches/pipeline.rs`). End to end is `unwrap` from the
@@ -1001,6 +1179,7 @@ Four error variants are not triggered by any test input, only their wording is c
 - The Python binding and the Blender add-on expose the boundary option (`optimize_boundary`);
   their tests (`scripts/py-test.sh`, `scripts/blender-test.sh`) only check that it reaches the
   pipeline and is reported, not its quality on meshes from Blender.
+- The intrinsic triangulation of the cut session: a circle law was not checked beyond the end-to-end rows; a cut through a vertex of the mesh exactly, a piece along a diagonal and a closed piece inside one triangle are refused; the flipped triangles near a cut close to a vertex are reported not repaired; the `3.5` times difference of energy the study saw on curved bad meshes was not reproduced (only the flat case, see above); nothing was run on Blender meshes; the flow on flipped sheared grids was run for 8 steps only.
 - The cut session (`ddg_uv::cutting`), see [the section](#the-cut-flow-on-polygon-meshes):
   no Blender mesh was used (the quad model is `spot_quadrangulated.obj`, whose polygons are
   fanned from their first corner by `PolygonMesh::from_polygons`, not Blender's tessellation),

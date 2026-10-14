@@ -34,38 +34,45 @@
 //!    all edge points on it, sorted by the parameter `t` from the lower vertex (the points of
 //!    the two sides of a seam together; equal parameters from the two sides are one vertex).
 //!    Both polygons of the edge get all of them as corners between `a` and `b`.
-//! 2. **Pieces of triangles.** Take the polygon's triangles. A triangle `T = (c0, c1, c2)`
-//!    (polygon corners; side `k` runs from `c_k` to `c_{k+1}`) is
-//!    * *untouched* if no path segment crosses it: one piece, `T` itself;
-//!    * *cut by a segment* from the vertex `p` on a side to the vertex `q` on another side (the
-//!      two sides share a corner `a`; walk `T` as `(a, b, c)` with `p` on `(a, b)` and `q` on
-//!      `(c, a)`): two pieces, the corner piece `(a, p, q)` and the quadrilateral
-//!      `(p, b, c, q)`;
-//!    * *a junction triangle*: the triangle that contains a junction `J` (its position is
-//!      `Σ barycentric[k] · x[corners[k]]`). Exactly three paths end at `J`, each as the
-//!      segment from the vertex `q_k` on side `k` (from `c_k` to `c_{k+1}`) to `J`. Three
-//!      pieces, **piece `k` is the quadrilateral `(c_k, q_k, J, q_{k−1})`** (indices modulo 3),
-//!      the part of corner `c_k`. `J` is a vertex of those three pieces only.
+//! 2. **Pieces.** A path is a chain of points: its start, the diagonals it crosses, its end.
+//!    Every two consecutive points are the ends of one straight *piece* inside one triangle `T`
+//!    of the polygon's triangulation:
+//!    * two points on two different sides of `T` (a polygon edge or a diagonal): `T` is the one
+//!      triangle that has both sides;
+//!    * a point inside `T` (a [`JunctionPoint`](super::JunctionPoint) of any degree: a bend, a
+//!      triple point, ...) and a point on a side of `T` or inside `T`;
+//!    * two points on the same polygon edge: the piece lies along that edge; nothing is
+//!      subdivided and the sides of the chain between the two points are seams (along a
+//!      diagonal is refused as unsupported).
 //!
-//!    The vertex of a path on a side is, on a polygon edge, an edge-point vertex and, on a
-//!    diagonal of the triangulation, the interior point of the path there. Every piece lists,
-//!    in order along its sides, the vertices from step 1 that lie on its polygon-edge sides
-//!    (for a side crossed at `p`: those before `p` go to the piece of the first corner, those
-//!    after `p` to the other piece).
-//! 3. **Parts.** Two pieces on the two sides of an uncrossed diagonal belong to the same part;
-//!    on a diagonal crossed at a vertex `p`, the pieces next to each end of the diagonal are
-//!    joined (the piece of the first triangle that contains the diagonal's end `c` with the
-//!    piece of the second triangle that contains `c`). A part is a connected set of pieces.
-//!    Its polygon is the boundary: the sides of its pieces that are not shared with another
-//!    piece of the part, walked in the winding of the polygon; it starts at the vertex with the
-//!    lowest position along the boundary of the parent (the parent's first corner, then the
-//!    edge vertices after it, ...), and a part without such a vertex starts at the lowest id.
-//!    Parts are ordered by that start.
-//! 4. **Triangulation of a part.** Each piece is triangulated by ear clipping (never an ear
-//!    with three collinear vertices): of the ears the one whose triangle has the best shape
-//!    (`4√3 · area / Σ squared lengths`) is clipped first; for a quadrilateral the diagonal
-//!    whose worse triangle is better. The triangles of all pieces of a part are the
-//!    triangulation of its polygon.
+//!    A triangle can hold any number of pieces; they must not cross, and each point inside a
+//!    triangle must have at least two pieces. Several points can lie on one side.
+//! 3. **Cells.** In barycentric coordinates `(b1, b2)` of `T` (corner 0 at the origin, corner 1
+//!    at `(1, 0)`, corner 2 at `(0, 1)`: counter-clockwise, straightness and orientation are
+//!    kept) build the planar graph whose vertices are the three corners, every point on a side
+//!    (the vertices of step 1 on a polygon edge, the crossings of a diagonal) and every point
+//!    inside `T`, and whose edges are the pieces and the parts of the sides between consecutive
+//!    vertices. The *cells* are its bounded faces, walked counter-clockwise (at each vertex turn
+//!    to the edge next clockwise after the way back). The graph must be connected (a closed
+//!    piece of the cut inside a triangle would make a hole and is refused). A cell has the
+//!    region of the sides of the pieces on its boundary: the cell on the left of a piece
+//!    walked in the direction of its path has the path's `regions[0]`, the one on its right
+//!    `regions[1]`.
+//! 4. **Parts.** Two cells on the two sides of a part of a diagonal between consecutive vertices
+//!    belong to the same part (the cell of the first triangle that has that part of the
+//!    diagonal on its boundary, and the cell of the second one). A part is a connected set of
+//!    cells. Its polygon is the boundary: the sides of its cells that are not shared with
+//!    another cell of the part, walked in the winding of the polygon (it must be one simple
+//!    loop); it starts at the vertex with the lowest position along the boundary of the parent
+//!    (the parent's first corner, then the edge vertices after it, ...), and a part without such
+//!    a vertex starts at the lowest id. Parts are ordered by that start. The region of a part is
+//!    the one of its cells ([`Inserted::polygon_region`]).
+//! 5. **Triangulation of a part.** Each cell is triangulated by ear clipping in its barycentric
+//!    coordinates: an ear is a corner with a positive cross product (more than `1e-15`, so
+//!    collinear vertices on a side are never ears) whose triangle contains no other vertex of the
+//!    cell; of the ears the one with the best shape in space (`4√3 · area / Σ squared
+//!    lengths`) is clipped first, and for a quadrilateral the diagonal whose worse triangle is
+//!    better is taken. The triangles of all cells of a part are the triangulation of its polygon.
 //!
 //! The seams are the sides between consecutive points of each path (including the sides that
 //! end at a junction); `Inserted::seams_after` adds the old seams.
