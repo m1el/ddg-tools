@@ -471,8 +471,8 @@ edge, junctions of any degree), so nothing else changes for the user.
   (`ddg_uv`'s `IntrinsicOptions::merge_tolerance`). The inserted cut can then differ from the one
   the flow found by up to that fraction of an edge; the advanced Flow line and the Apply message
   say how many bends were merged and the largest displacement. Flipped UV triangles after Apply
-  and unwrap, by the library's count (ours on the triangulation the unwrap used agrees except
-  once), **before** (merge 0) and **after** (0.1), `test_cut.py`, spot atlas with 8 clusters at the
+  and unwrap, by the library's count (our own count on the triangulation the unwrap used agrees except
+  in two refined cells before merging: 4 against 1 and 2 against 1), **before** (merge 0) and **after** (0.1), `test_cut.py`, spot atlas with 8 clusters at the
   length weights 2 and 10, cut offsets 1e-3 and 0.2:
 
   | case | intrinsic before / after | refined before / after | caller before / after |
@@ -488,8 +488,8 @@ edge, junctions of any degree), so nothing else changes for the user.
   (refined triangulation, cut offset 0.2, merge tolerance 0.1): one flipped triangle, the same in
   both weights, 3D area 0.007 of the mean triangle, smallest angle 0.6 degrees; two bends
   that deviate by 0.103 of an edge, just over the tolerance, make it. With a tolerance of 0.2
-  (largest displacement 0.103) both cases have none, which the test checks (a smaller one, 0.05,
-  leaves 2 and 4 of the 4 and the 2 of the before column).
+  (largest displacement 0.103) both cases have none, which the test checks (a tolerance of 0.05
+  leaves 2 and 4 flipped triangles on the two cases).
 
 ### Cost of the cut operators
 
@@ -521,7 +521,7 @@ split faces (0.16 s: a Python decoding of every vertex of the insertion and of e
 of every polygon), the `sorted` of every face's vertex tuple to validate the stored entries (62
 ms), the per-face loop for sizes and starts (15 ms), then the bmesh work itself (about 90 ms: the
 chains, the data transfer, `from_mesh`, `to_mesh`). What was changed: the patch count is
-`CutSession.n_patches` (Rust, same union-find: 10 times faster than the Python pass); the library
+`CutSession.n_patches` (Rust, the same union-find; its cost is inside the library time); the library
 returns the triangulation of the polygons that changed (`InsertedMesh.changed_*`) so the add-on
 decodes only the vertices of those; the validation of stored entries runs only when an older
 triangulation exists; the sizes and starts come from `foreach_get`; and **a session is kept**
