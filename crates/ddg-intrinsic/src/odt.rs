@@ -78,6 +78,11 @@ pub struct OptimalDelaunayOptions {
     /// How often the step of one vertex is halved when the move would leave its star (or make
     /// a triangle too thin) before the vertex is left where it is for this iteration.
     pub max_halvings: usize,
+    /// A move is also halved when it would leave a triangle of the star with a shape number
+    /// (twice the area over the product of the longer edge at the vertex and the longest side)
+    /// below this bound and below the smallest shape number the star had before the move
+    /// (SPEC N25). At least [`FLIP_SHAPE_LIMIT`](crate::formulas::FLIP_SHAPE_LIMIT).
+    pub min_shape: f64,
     /// Inserted vertices on the boundary.
     pub boundary: BoundaryVertices,
     /// The centres the update averages.
@@ -92,7 +97,8 @@ pub struct OptimalDelaunayOptions {
 impl Default for OptimalDelaunayOptions {
     /// Split edges longer than the mean edge length of the input, at most 50 iterations, a
     /// motion tolerance of `1e-3`, the full step with up to 8 halvings, boundary vertices
-    /// fixed, barycentres for the triangles at the boundary, at most 10 insertions per vertex
+    /// fixed, barycentres for the triangles at the boundary, a shape bound of `1e-2` for the
+    /// triangles a move makes, at most 10 insertions per vertex
     /// (1000 at least), the default Delaunay flips. SPEC N21 says why.
     fn default() -> Self {
         OptimalDelaunayOptions {
@@ -101,6 +107,7 @@ impl Default for OptimalDelaunayOptions {
             motion_tolerance: 1e-3,
             step: 1.0,
             max_halvings: 8,
+            min_shape: 1e-2,
             boundary: BoundaryVertices::Fixed,
             centers: OdtCenters::BarycentersAtBoundary,
             max_insertions: InsertionLimit::PerVertex(10),
@@ -213,6 +220,12 @@ impl IntrinsicTriangulation {
                 options.step
             ));
         }
+        if !(options.min_shape.is_finite() && options.min_shape >= 0.0 && options.min_shape < 1.0) {
+            return invalid(format!(
+                "the shape bound of a move must be in [0, 1), got {}",
+                options.min_shape
+            ));
+        }
         if !(options.motion_tolerance.is_finite() && options.motion_tolerance >= 0.0) {
             return invalid(format!(
                 "the motion tolerance must be finite and not negative, got {}",
@@ -299,10 +312,14 @@ impl IntrinsicTriangulation {
                     count += 1;
                 }
                 let mean_edge = sum / count as f64;
+                let floor = self
+                    .star_min_shape(v)
+                    .map_or(options.min_shape, |current| options.min_shape.min(current));
                 let mut alpha = options.step;
                 let mut moved = None;
                 for halving in 0..=options.max_halvings {
-                    match self.move_vertex(v, [alpha * goal[0], alpha * goal[1]]) {
+                    match self.move_vertex_with_shape(v, [alpha * goal[0], alpha * goal[1]], floor)
+                    {
                         Ok(m) => {
                             it.n_snapped += usize::from(m.snapped.is_some());
                             moved = Some((m.distance, halving > 0));

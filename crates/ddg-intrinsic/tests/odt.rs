@@ -247,6 +247,10 @@ fn limits_and_options() {
             motion_tolerance: f64::NAN,
             ..OptimalDelaunayOptions::default()
         },
+        OptimalDelaunayOptions {
+            min_shape: 1.0,
+            ..OptimalDelaunayOptions::default()
+        },
     ] {
         assert!(matches!(
             tri.optimal_delaunay(&bad),

@@ -44,15 +44,11 @@ use crate::trace::{TraceOptions, TraceStop, run};
 use crate::triangulation::IntrinsicTriangulation;
 
 /// A moved vertex whose traced place is within this fraction of the longest edge of its input
-/// face from an edge of that face is put on that edge, and [`VertexMove::snapped`] says so
-/// (SPEC N24). It is larger than the [`LOCATION_SNAP`](crate::insert::LOCATION_SNAP) of an
-/// insertion: a vertex that the optimal Delaunay iteration moves again and again stays within
-/// rounding of an input edge when its star is symmetric about that edge, and after many moves
-/// and flips the stored direction and length of an edge to it and its traced place disagree by
-/// about `1e-11`; at `1e-12` two edge traces on `blub` ended on the wrong side of such an input
-/// edge (in the neighbouring face, `1e-12` from the edge), at `1e-10` none did on any mesh
-/// tested.
-pub const MOVE_SNAP: f64 = 1e-10;
+/// face, and of the shortest edge at the vertex, from an edge of that input face is put on that
+/// edge, and [`VertexMove::snapped`] says so (SPEC N24). The fraction is the
+/// [`LOCATION_SNAP`](crate::insert::LOCATION_SNAP) of an insertion; the second bound keeps the
+/// mismatch it causes below this fraction of every edge at the vertex.
+pub const MOVE_SNAP: f64 = 1e-12;
 
 /// What [`IntrinsicTriangulation::move_vertex`] did.
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +135,37 @@ impl IntrinsicTriangulation {
         v: usize,
         displacement: [f64; 2],
     ) -> Result<VertexMove, IntrinsicError> {
+        self.move_vertex_with_shape(v, displacement, FLIP_SHAPE_LIMIT)
+    }
+
+    /// The smallest shape number (as in [`VertexMove::min_shape`]) of the triangles of the star
+    /// of `v` as it is, or `None` for a vertex that cannot be moved (an input vertex, an edge to
+    /// itself, an index out of range).
+    pub fn star_min_shape(&self, v: usize) -> Option<f64> {
+        if v >= self.n_vertices()
+            || v < self.n_input_vertices()
+            || self.outgoing_halfedges(v).any(|h| self.to_vertex(h) == v)
+        {
+            return None;
+        }
+        Some(
+            self.star(v)
+                .iter()
+                .map(|s| shape_number(s.double_area, s.lengths))
+                .fold(f64::INFINITY, f64::min),
+        )
+    }
+
+    /// [`move_vertex`](Self::move_vertex) with another lower bound for the shape number of the
+    /// new triangles (refusal `TooThin` below it); `min_shape` below
+    /// [`FLIP_SHAPE_LIMIT`] is raised to it.
+    pub(crate) fn move_vertex_with_shape(
+        &mut self,
+        v: usize,
+        displacement: [f64; 2],
+        min_shape: f64,
+    ) -> Result<VertexMove, IntrinsicError> {
+        let min_shape = min_shape.max(FLIP_SHAPE_LIMIT);
         if v >= self.n_vertices() {
             return Err(IntrinsicError::IndexOutOfRange {
                 what: "vertex",
@@ -229,10 +256,14 @@ impl IntrinsicTriangulation {
             leaving.push(la_new);
             arriving_last = lb_new;
         }
+        let shortest_new = leaving
+            .iter()
+            .copied()
+            .fold(if boundary { arriving_last } else { f64::INFINITY }, f64::min);
         if let Some(face) = turned {
             return Err(refused(MoveRefusal::NotInStar { face, fraction }));
         }
-        if !(thinnest.0 >= FLIP_SHAPE_LIMIT) {
+        if !(thinnest.0 >= min_shape) {
             return Err(refused(MoveRefusal::TooThin {
                 face: thinnest.1,
                 shape: thinnest.0,
@@ -287,7 +318,7 @@ impl IntrinsicTriangulation {
                 return Err(refused(MoveRefusal::OnInputVertex { vertex: u }));
             }
             let placed = self
-                .place_at_end(&trace, MOVE_SNAP)
+                .place_at_end(&trace, MOVE_SNAP, MOVE_SNAP * shortest_new)
                 .map_err(|e| not_located(e.to_string()))?;
             (placed.location, placed.back, placed.snapped)
         };

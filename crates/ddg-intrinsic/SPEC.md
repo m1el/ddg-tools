@@ -677,24 +677,33 @@ written from the paper and the cited papers.
   be flipped away); `Circumcenters` is the paper's rule everywhere. On a closed surface the two
   are the same.
 
-* **N24** *Snapping a moved vertex onto an input edge* (Appendix A, as N10, with another
-  threshold). A moved vertex whose traced place is within `MOVE_SNAP = 1e-10` of the longest edge
-  of its input face from an edge of that face is stored as a point of that input edge
-  (`VertexMove::snapped`, counted per iteration in `OdtIteration::n_snapped`); its lengths are not
-  changed, so the place and the lengths disagree by at most that distance, far inside the
-  tolerance of the edge traces (N8, `1e-6`). Found by the study (`examples/odt_study.rs`, blub):
-  with the threshold of an insertion (`1e-12`) two of 53 649 edge traces of the converged iODT
-  failed. A vertex made by splitting an edge along an input edge, whose star is symmetric about
-  that edge, is moved again and again along it and stays within rounding of it (1631 moves on
-  blub were snapped even at `1e-12`). After 50 iterations of moves and flips the stored data of
-  an edge from the input vertex at the end of that input edge to such a vertex and the vertex's
-  traced place had drifted apart by about `1e-11` (measured on the two failed edges: direction
-  at the input vertex `1.0e-11` and `8.8e-12` rad, length `8.5e-12` and `4.0e-12` relative), and
-  the trace of the edge ended `1e-12` beyond the input edge, in the neighbouring face, where N8
-  does not look.
-  With `1e-10` no trace failed on any mesh tested (largest relative mismatch `1.5e-9` on blub).
-  Not excluded: a drift beyond `1e-10` after still more operations; it would be a failed trace
-  (an error), not a wrong result.
+* **N24** *Snapping a moved vertex onto an input edge* (Appendix A, as N10). A moved vertex
+  whose traced place is within `MOVE_SNAP = 1e-12` of the longest edge of its input face, and
+  within `1e-12` of the shortest new edge at the vertex, from an edge of that input face is stored
+  as a point of that input edge (`VertexMove::snapped`, counted per iteration in
+  `OdtIteration::n_snapped`). The threshold is that of an insertion; the second bound keeps the
+  relative mismatch it causes on every edge at the vertex below `1e-12` where the input faces are
+  much longer than the edges of the triangulation. It matters for the optimal Delaunay iteration:
+  a vertex made by splitting an edge along an input edge, whose star is symmetric about that
+  edge, is moved along it again and again and stays within rounding of it (1055 moves were
+  snapped on blub in 35 iterations).
+* **N25** *The shape of the triangles a move makes, in the optimal Delaunay iteration* (found by
+  the study, blub). The line search of N21 is also used when a move would leave a triangle of
+  the star with a shape number (N5, N19) below `OptimalDelaunayOptions::min_shape` (default
+  `1e-2`) and below the smallest shape number the star had before the move; `move_vertex`
+  itself only refuses the limit of N5 (`1e-6`). Reason: the signposts at both ends of the moved
+  edges are updated through corner angles, whose rounding error is about `ε / shape`; with
+  shapes down to `1e-6` they are good to `1e-10` only. Without this bound (and with the shape
+  limit of N5 alone) the converged iODT of blub had two of 53 649 edge traces that failed N8: the
+  edge from an input vertex to a vertex that had stayed `1e-10` from an input edge (N24) had a
+  stored direction `3e-10` rad and a stored length `2e-10` (relative) away from what the
+  vertex's traced place says, and its trace ended in the face on the other side of that input
+  edge. Raising the snapping threshold to `1e-10` hid it on every mesh tested, at the price of
+  a mismatch of up to `1e-7` of an edge on cells 1:16; the shape bound removes the cause: with
+  it no trace failed on any mesh of the study and the largest relative mismatch of a trace
+  after iODT was `1.3e-11` on blub, `1.3e-10` on camelshotnoise (spikes, where most moves are
+  stopped by the bound: 1640 vertex-iterations not moved), `8e-11` on cells 1:16, otherwise
+  `4e-12` or less. The iteration also converges in fewer iterations (blub: 35 instead of 50).
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
