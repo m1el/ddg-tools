@@ -717,7 +717,10 @@ fn insert_refuses_descriptions_that_do_not_fit() {
         barycentric: [0.2, 0.3, 0.5],
     });
     let e = fails(&cut);
-    assert!(e.to_string().contains("junction"), "{e}");
+    assert!(
+        e.to_string().contains("dead end") || e.to_string().contains("junction"),
+        "{e}"
+    );
     // An end that does not exist.
     let mut cut = good.clone();
     cut.paths[0].start = PathEnd::EdgePoint(99_999);
