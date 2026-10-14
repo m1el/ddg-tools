@@ -646,10 +646,11 @@ that the rescaling is meant to remove; Dirichlet: 35 and 218 for two planes) is 
 the rescaling off, as the formula says (D5), a large one makes `a = r_ε³` in flat regions outweigh
 everything else. The Hencky energy is more even than any of them there (23 and 14).
 
-**Stopping.** A run stops at `max_steps`; or when the cut motion of a step (largest
-`|φ_new − φ_old|` over vertices cut-adjacent before or after the step) is at most
-`motion_tolerance`; or when the energy has fallen by at most `energy_tolerance · |E|` over the last
-`energy_window` steps; or when the cut has vanished (one region is empty). The reason is in the
+**Stopping.** A run stops at `max_steps`; or by the motion criterion below, for which the cut
+motion of a step (largest `|φ_new − φ_old|` over vertices cut-adjacent before or after the step)
+being at most `motion_tolerance` is necessary but not sufficient (D31); or by the energy
+criterion over the last `energy_window` steps (stalled or rose, D27); or when the cut has
+vanished (one region is empty). The reason is in the
 report. The motion criterion `[formula: cut-stop-motion]` (D31) is
 
 ```
