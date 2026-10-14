@@ -304,6 +304,13 @@ impl<S: Surface> Walker<'_, S> {
             }
             h = t as usize;
         }
+        // At a boundary vertex the direction π is the boundary edge that arrives (SPEC N2). It
+        // has no halfedge leaving the vertex, so no signpost equals it; it is the far side of
+        // the last wedge. Without this the angle inside that wedge comes out a rounding error
+        // short of the corner in half the cases, and the path runs beside the edge.
+        if boundary && self.direction == PI {
+            return Ok(self.along(prev(last.0), false, 1.0));
+        }
         // No signpost at or below the direction: the wedge is the one that contains angle
         // zero, opened by the halfedge with the largest signpost.
         let (h, base) = below.unwrap_or((last.0, last.1 - TAU));
