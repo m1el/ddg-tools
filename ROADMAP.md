@@ -168,5 +168,4 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
   independently (authors, title, journal, volume, pages, year were).
-* Nothing is pushed; `master` points at `variational-cuts`, and the intrinsic-triangulations
-  work is on `intrinsic-triangulations`, not yet on `master`.
+* Nothing is pushed; `master` includes the intrinsic-triangulations work (2026-10-14).
