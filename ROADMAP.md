@@ -51,8 +51,12 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   input mesh and the flipped one on bad meshes (on a flat mesh this is the cut, not the
   evaluation: the zero set of the interpolant differs; the distortion term on curved meshes was
   not compared).
-* After D30 the 600-step run on camelshotnoise ends at 3475 where it reached 2967 before; some
-  README and SPEC §6 tables carry numbers from before D30 and say so.
+* After D30 the 600-step run on camelshotnoise (stop rule off) ended at 3475 where it had
+  reached 2967. Not a regression: that run is chaotic. With length weights perturbed by 1e-5 to
+  1e-3 of their value, the code before D30 ends anywhere between 2967 and 3990 and the current
+  code between 3214 and 3620 (six runs each, logs in `runs_tmp/camelshotnoise-d30/`); with the
+  default stop rule both return the same state (step 16, energy 4524.7). Some README and SPEC §6
+  tables carry numbers from before D30 and say so.
 * The Blender session cache (a session kept between Start, Flow and Apply) is not tested across
   file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
 * The comparison with the authors' program of the cut flow was refreshed after D22 only, not
