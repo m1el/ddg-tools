@@ -1450,6 +1450,17 @@ region of every face.
   energy criterion ends it). A run at rest in which some cut points stay limited with rates that
   are not small does not end by motion any more; the energy criterion is what ends it.
 
+* **D32** Sec. 6.1 (remeshing to the output resolution, finer where `|K|` is large) is not
+  implemented, now by measurement (`crates/ddg-intrinsic/README.md`, "Remeshing for the cut
+  flow"; `ddg-intrinsic` SPEC N28). On an intrinsic triangulation an inserted vertex is flat, so
+  a refined mesh carries the curvature of the input as cones at its vertices, which the flow
+  sees as another problem (outliers to +1 160 % on the input's own problem); the curvature
+  density of the input faces can be carried over per face instead (`CurvatureSource::PerFace`,
+  no new formula). Even so, refinement did not make the flow converge and was better than the
+  Delaunay flips only on meshes of a few hundred vertices (−2 to −3 %), even or worse on the
+  others, at 11 to 70 times the cost of a step. The curvature-adaptive refinement of the paper was
+  no better than uniform refinement at the same vertex count.
+
 Add to this list whenever something else turns up; never drop an entry.
 
 ## 10. Formula ids
