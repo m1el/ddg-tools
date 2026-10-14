@@ -729,6 +729,7 @@ impl CutSession {
         n_regions = None,
         triangulation = "intrinsic",
         refine_bound = None,
+        optimal_delaunay = false,
         min_offset = None,
         merge_tolerance = None,
         state = None,
@@ -753,6 +754,7 @@ impl CutSession {
         n_regions: Option<usize>,
         triangulation: &str,
         refine_bound: Option<f64>,
+        optimal_delaunay: bool,
         min_offset: Option<f64>,
         merge_tolerance: Option<f64>,
         state: Option<&Bound<'py, PyAny>>,
@@ -813,6 +815,12 @@ impl CutSession {
                 )));
             }
         };
+        if state.is_some() && optimal_delaunay {
+            return Err(InputError::new_err(
+                "state carries its own triangulation, optimal_delaunay included: do not pass \
+                 optimal_delaunay with it (read CutSession.optimal_delaunay afterwards)",
+            ));
+        }
         let session = if let Some(state) = state {
             if circle_vertex.is_some()
                 || circle_radius.is_some()
@@ -857,6 +865,7 @@ impl CutSession {
                     n_regions,
                     &start,
                     &spec,
+                    optimal_delaunay,
                     min_offset,
                     merge_tolerance,
                 )
@@ -873,6 +882,12 @@ impl CutSession {
     #[getter]
     fn triangulation(&self) -> PyResult<&'static str> {
         Ok(self.lock()?.triangulation_name())
+    }
+    /// Whether the intrinsic optimal Delaunay triangulation is on (False on "caller"). After
+    /// `state=` this is the flag the state was made with.
+    #[getter]
+    fn optimal_delaunay(&self) -> PyResult<bool> {
+        Ok(self.lock()?.optimal_delaunay())
     }
     /// Number of patches of the current state: connected pieces of the surface in one region
     /// (corners joined along polygons and across edges that are not seams).

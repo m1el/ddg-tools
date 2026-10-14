@@ -586,6 +586,42 @@ class IntrinsicTest(unittest.TestCase):
             with self.assertRaises(ddg_tools.InputError, msg=str(bad)):
                 self.make(**bad)
 
+    def test_optimal_delaunay_flag(self):
+        off = self.make()
+        self.assertIs(off.optimal_delaunay, False)
+        self.assertEqual(off.intrinsic_report["n_optimized"], 0)
+        self.assertNotIn("optimal_delaunay_status", off.intrinsic_report)
+        self.assertIs(self.make(triangulation="caller").optimal_delaunay, False)
+        kw = dict(length_weight=0.05, max_steps=3, motion_tolerance=0.0, energy_tolerance=0.0)
+        for name in ("intrinsic", "refined"):
+            with self.subTest(triangulation=name):
+                s = self.make(triangulation=name, optimal_delaunay=True)
+                self.assertIs(s.optimal_delaunay, True)
+                self.assertEqual(s.triangulation, name)  # the names are unchanged
+                report = s.intrinsic_report
+                self.assertIn(report["optimal_delaunay_status"],
+                              ("Converged", "IterationLimit", "InsertionLimit"))
+                self.assertGreaterEqual(report["n_optimized"], 0)
+                self.assertGreater(report["optimal_delaunay_iterations"], 0)
+                self.assertTrue(math.isfinite(report["optimal_delaunay_last_motion"]))
+                result = s.run(**kw)
+                self.assertLess(result["energy_after"], result["energy_before"])
+                bytes_ = s.snapshot()
+                again = ddg_tools.CutSession(*self.buffers, state=bytes_)
+                self.assertIs(again.optimal_delaunay, True)
+                self.assertEqual(again.triangulation, name)
+                self.assertEqual(again.snapshot(), bytes_)
+                self.assertEqual(again.fingerprint, s.fingerprint)
+                # A state made without the flag does not carry it.
+                plain = self.make(triangulation=name)
+                self.assertIs(ddg_tools.CutSession(
+                    *self.buffers, state=plain.snapshot()).optimal_delaunay, False)
+        with self.assertRaises(ddg_tools.InputError) as ctx:
+            self.make(triangulation="caller", optimal_delaunay=True)
+        self.assertIn("intrinsic triangulation", str(ctx.exception))
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, state=off.snapshot(), optimal_delaunay=True)
+
     def test_the_old_expectations_hold_on_every_triangulation(self):
         kw = dict(length_weight=0.05, max_steps=6, motion_tolerance=0.0, energy_tolerance=0.0)
         for name in ("caller", "intrinsic", "refined"):

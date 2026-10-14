@@ -250,6 +250,7 @@ class CutSession:
         n_regions: int | None = None,
         triangulation: Literal["intrinsic", "caller", "refined"] = "intrinsic",
         refine_bound: float | None = None,
+        optimal_delaunay: bool = False,
         min_offset: float | None = None,
         merge_tolerance: float | None = None,
         state: Buffer | None = None,
@@ -267,7 +268,12 @@ class CutSession:
         """``triangulation``: the flow runs on an intrinsic triangulation of the surface flipped
         to Delaunay (``"intrinsic"``, the default: usually no vertex is added), on the same with
         refinement to ``refine_bound`` degrees (``"refined"``, default 25: vertices are added), or
-        on the caller's triangulation (``"caller"``, as before). ``state``: bytes from
+        on the caller's triangulation (``"caller"``, as before). ``optimal_delaunay``: also build the
+        intrinsic optimal Delaunay triangulation (the library's default options) on top of
+        ``"intrinsic"`` or ``"refined"``: more even triangle areas in the intrinsic triangulation,
+        slower setup (about 1 to 3 s on a 22k-vertex mesh) and flow steps up to about twice as slow;
+        ``ValueError`` (``InputError``) with ``"caller"`` or together with ``state`` (the state
+        carries its own flag). ``state``: bytes from
         ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
         ``StaleStateError`` if the mesh or seams changed). ``min_offset`` (intrinsic and refined
         only; default the library's 1e-6): every point of the cut keeps at least this fraction of
@@ -284,6 +290,10 @@ class CutSession:
     @property
     def triangulation(self) -> Literal["intrinsic", "caller", "refined"]: ...
     @property
+    def optimal_delaunay(self) -> bool:
+        """Whether the intrinsic optimal Delaunay triangulation is on (the state's flag after
+        ``state=``; always False for ``"caller"``)."""
+    @property
     def n_patches(self) -> int:
         """Connected pieces of the surface in one region (corners joined along polygons and
         across edges that are not seams)."""
@@ -297,8 +307,10 @@ class CutSession:
     @property
     def intrinsic_report(self) -> dict[str, bool | int | float | str] | None:
         """What the construction of the intrinsic triangulation did (``n_added``, flips,
-        ``min_angle_degrees``, ``max_angle_degrees``, ``is_delaunay``, ``seconds``, ...); ``None``
-        for ``"caller"``."""
+        ``min_angle_degrees``, ``max_angle_degrees``, ``is_delaunay``, ``seconds``, ``n_optimized`` (vertices inserted by the optimal Delaunay
+        triangulation, 0 if off), and with it on ``optimal_delaunay_status``,
+        ``optimal_delaunay_iterations``, ``optimal_delaunay_last_motion``, ...); ``None`` for
+        ``"caller"``."""
     def snapshot(self) -> bytes:
         """The whole state: levels on the vertices of the triangulation, its fingerprint, the
         number of regions, the triangulation option."""

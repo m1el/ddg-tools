@@ -656,6 +656,31 @@ impl TriangulationSpec {
     }
 }
 
+/// `t` with the intrinsic optimal Delaunay triangulation switched on (the default options of
+/// `ddg-intrinsic`) when `optimal_delaunay` is set.
+///
+/// # Errors
+/// [`BindError::Input`] on the caller's triangulation: the option needs an intrinsic one.
+fn with_optimal_delaunay(
+    t: Triangulation,
+    optimal_delaunay: bool,
+) -> Result<Triangulation, BindError> {
+    if !optimal_delaunay {
+        return Ok(t);
+    }
+    match t {
+        Triangulation::Intrinsic(mut o) => {
+            o.optimal_delaunay = IntrinsicOptions::optimized().optimal_delaunay;
+            Ok(Triangulation::Intrinsic(o))
+        }
+        Triangulation::Caller => Err(input_error(
+            "optimal_delaunay needs an intrinsic triangulation: use triangulation=\"intrinsic\" \
+             or \"refined\", not \"caller\""
+                .to_owned(),
+        )),
+    }
+}
+
 /// `t` with another `min_offset` (intrinsic triangulations only): how far from the vertices and
 /// sides of the caller's triangles the points of the cut are kept when it is carried back.
 fn with_min_offset(
@@ -772,9 +797,11 @@ impl CutSession {
         n_regions: usize,
         start: &StartSpec,
         triangulation: &TriangulationSpec,
+        optimal_delaunay: bool,
         min_offset: Option<f64>,
         merge_tolerance: Option<f64>,
     ) -> Result<CutSession, BindError> {
+        let triangulation = with_optimal_delaunay(triangulation.option()?, optimal_delaunay)?;
         let prescribed = prescribed_cones(input);
         let mesh = mesh_input(input, &prescribed);
         let start = start_of(start, n_regions, input.n_corners())?;
@@ -783,7 +810,7 @@ impl CutSession {
             n_regions,
             &start,
             FlowKind::Auto,
-            &with_min_offset(triangulation.option()?, min_offset, merge_tolerance),
+            &with_min_offset(triangulation, min_offset, merge_tolerance),
         )?;
         Ok(CutSession::wrap(input, inner, n_regions))
     }
@@ -846,6 +873,13 @@ impl CutSession {
         }
     }
 
+    /// Whether the intrinsic optimal Delaunay triangulation is on (always `false` on the
+    /// caller's triangulation). Read from the session, so it is the state's flag after
+    /// [`CutSession::from_state`].
+    pub fn optimal_delaunay(&self) -> bool {
+        matches!(self.inner.triangulation(), Triangulation::Intrinsic(o) if o.optimal_delaunay.is_some())
+    }
+
     /// Whether the per-corner view of the state is the whole state.
     pub fn state_is_per_corner(&self) -> bool {
         self.inner.state_is_per_corner()
@@ -880,6 +914,12 @@ impl CutSession {
         d.set("n_added", r.n_added);
         d.set("n_initial_flips", r.n_initial_flips);
         d.set("n_refined", r.n_refined);
+        d.set("n_optimized", r.n_optimized);
+        if let Some((status, iterations, motion)) = r.optimal_delaunay {
+            d.set("optimal_delaunay_status", format!("{status:?}"));
+            d.set("optimal_delaunay_iterations", iterations);
+            d.set("optimal_delaunay_last_motion", motion);
+        }
         d.set("n_splits", r.n_splits);
         d.set("n_export_flips", r.n_export_flips);
         d.set("n_refine_rounds", r.n_refine_rounds);
@@ -1691,8 +1731,16 @@ mod tests {
     #[test]
     fn step_changes_the_state_and_reports_energy() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(s.state().len(), 2 * s.n_corners());
         let before = s.state();
         let report = s.step(&flow_controls()).unwrap();
@@ -1710,15 +1758,31 @@ mod tests {
             energy_tolerance: Some(0.0),
             ..flow_controls()
         };
-        let mut once =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut once = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         once.run(&Controls {
             max_steps: Some(8),
             ..controls.clone()
         })
         .unwrap();
-        let mut twice =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut twice = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         twice.run(&controls).unwrap();
         let mid = twice.state();
         twice.set_state(&mid).unwrap();
@@ -1735,8 +1799,16 @@ mod tests {
     #[test]
     fn run_reports_energy_before_and_after() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         let report = s
             .run(&Controls {
                 max_steps: Some(5),
@@ -1760,8 +1832,16 @@ mod tests {
     #[test]
     fn ripple_wavelength_sets_the_length_weight() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         let c = Controls {
             ripple_wavelength: Some(0.25),
             ..Controls::default()
@@ -1775,8 +1855,16 @@ mod tests {
     #[test]
     fn contradictory_options_are_input_errors() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         for c in [
             Controls {
                 length_weight: Some(0.1),
@@ -1813,20 +1901,44 @@ mod tests {
         let input = sphere();
         // The session takes more than two regions since the core has them; the circle start
         // does not (it has an inside and an outside).
-        let e = CutSession::new(&input, 3, &circle(), &TriangulationSpec::Flips, None, None)
-            .unwrap_err();
+        let e = CutSession::new(
+            &input,
+            3,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(e, BindError::Input(_)), "{e}");
         assert!(e.message().contains("two regions"), "{e}");
-        let e = CutSession::new(&input, 1, &circle(), &TriangulationSpec::Flips, None, None)
-            .unwrap_err();
+        let e = CutSession::new(
+            &input,
+            1,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(e, BindError::Input(_)), "{e}");
     }
 
     #[test]
     fn bad_state_is_an_input_error_naming_the_problem() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         let e = s.set_state(&[0.0; 5]).unwrap_err();
         assert!(
             matches!(e, BindError::Input(_)) && e.message().contains("n_regions"),
@@ -1843,8 +1955,16 @@ mod tests {
     #[test]
     fn cut_description_inserts_and_unwraps() {
         let input = sphere();
-        let mut s =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         s.run(&Controls {
             max_steps: Some(3),
             motion_tolerance: Some(0.0),
@@ -1875,8 +1995,16 @@ mod tests {
     fn four_regions_from_normal_clusters_run_describe_and_insert() {
         let input = sphere();
         let start = StartSpec::NormalClusters { max_iterations: 20 };
-        let mut s =
-            CutSession::new(&input, 4, &start, &TriangulationSpec::Flips, None, None).unwrap();
+        let mut s = CutSession::new(
+            &input,
+            4,
+            &start,
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(s.state().len(), 4 * s.n_corners());
         let report = s
             .run(&Controls {
@@ -1916,14 +2044,104 @@ mod tests {
     }
 
     #[test]
+    fn optimal_delaunay_flag() {
+        let input = sphere();
+        let off = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(!off.optimal_delaunay());
+        assert!(off.intrinsic_report().unwrap().get("n_optimized").is_some());
+        assert!(
+            off.intrinsic_report()
+                .unwrap()
+                .get("optimal_delaunay_status")
+                .is_none()
+        );
+        for (spec, name) in [
+            (TriangulationSpec::Flips, "intrinsic"),
+            (
+                TriangulationSpec::Refined {
+                    bound_degrees: 25.0,
+                },
+                "refined",
+            ),
+        ] {
+            let mut on = CutSession::new(&input, 2, &circle(), &spec, true, None, None).unwrap();
+            assert!(on.optimal_delaunay());
+            assert_eq!(on.triangulation_name(), name);
+            let report = on.intrinsic_report().unwrap();
+            assert!(report.get("n_optimized").is_some());
+            assert!(report.get("optimal_delaunay_status").is_some());
+            on.run(&Controls {
+                length_weight: Some(0.05),
+                max_steps: Some(2),
+                motion_tolerance: Some(0.0),
+                energy_tolerance: Some(0.0),
+                ..Controls::default()
+            })
+            .unwrap();
+            // The flag survives the state bytes.
+            let bytes = on.snapshot();
+            let back = CutSession::from_state(&input, &bytes, None, None).unwrap();
+            assert!(back.optimal_delaunay());
+            assert_eq!(back.triangulation_name(), name);
+            assert_eq!(back.snapshot(), bytes);
+            assert_eq!(back.fingerprint(), on.fingerprint());
+        }
+        // A state made without the flag is another triangulation only if the flag changed it;
+        // the flag is read back false.
+        let bytes = off.snapshot();
+        assert!(
+            !CutSession::from_state(&input, &bytes, None, None)
+                .unwrap()
+                .optimal_delaunay()
+        );
+        let e = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Caller,
+            true,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(e, BindError::Input(_)), "{e}");
+        assert!(e.to_string().contains("intrinsic triangulation"), "{e}");
+    }
+
+    #[test]
     fn triangulation_choices_and_the_state_bytes() {
         let input = sphere();
-        let caller =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Caller, None, None).unwrap();
+        let caller = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Caller,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(caller.triangulation_name(), "caller");
         assert!(caller.intrinsic_report().is_none() && caller.state_is_per_corner());
-        let flips =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let flips = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(flips.triangulation_name(), "intrinsic");
         let report = flips.intrinsic_report().unwrap();
         assert_eq!(
@@ -1937,6 +2155,7 @@ mod tests {
             &TriangulationSpec::Refined {
                 bound_degrees: 30.0,
             },
+            false,
             Some(1e-3),
             None,
         )
@@ -1982,8 +2201,16 @@ mod tests {
             matches!(e, BindError::Input(_) | BindError::Stale(_)),
             "{e}"
         );
-        let mut u =
-            CutSession::new(&input, 2, &circle(), &TriangulationSpec::Flips, None, None).unwrap();
+        let mut u = CutSession::new(
+            &input,
+            2,
+            &circle(),
+            &TriangulationSpec::Flips,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(matches!(u.restore(&bytes), Err(BindError::Stale(_))));
     }
 

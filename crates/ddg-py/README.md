@@ -220,7 +220,7 @@ array).
 ```python
 s = ddg_tools.CutSession(
     positions, corner_vertices, polygon_starts, triangles, *,
-    n_regions=None, triangulation="intrinsic", refine_bound=None, state=None, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
+    n_regions=None, triangulation="intrinsic", refine_bound=None, optimal_delaunay=False, state=None, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
     prescribed_vertices=None, prescribed_angles=None,
     # exactly one start:
     circle_vertex=None, circle_radius=None,     # geodesic disk around a vertex (region 0)
@@ -259,7 +259,12 @@ Soliman, Crane, *Navigating Intrinsic Triangulations*, 2019): the flow's stages 
 shaped triangles (on a 165 degree sheared grid the speed is off by 110 % with the paper's stages
 and the cut vanishes), flips alone restore regular-grid behaviour, and usually no vertex is added.
 `"refined"` adds refinement to `refine_bound` degrees (default 25, at most 35) and adds
-vertices; `"caller"` is the caller's triangulation, as the versions before this one. The cut
+vertices; `"caller"` is the caller's triangulation, as the versions before this one.
+`optimal_delaunay=True` adds the intrinsic optimal Delaunay triangulation (iODT, default options)
+on top of `"intrinsic"` or `"refined"`: more even triangle areas, slower (setup about 1 to 3 s on a
+22k-vertex mesh, flow steps up to about 2x); `ValueError` with `"caller"` or with `state=` (a
+state carries its flag; read it back from `CutSession.optimal_delaunay`). The report gains
+`n_optimized` and, with the flag, `optimal_delaunay_status`/`_iterations`/`_last_motion`. The cut
 comes back onto the caller's polygons whatever the choice. `intrinsic_report` is a dictionary
 (`n_added`, `n_initial_flips`, `n_splits`, `min_angle_degrees`, `max_angle_degrees`,
 `is_delaunay`, `seconds`, `fingerprint`, ...; `None` for `"caller"`). **State.** `state` (the
