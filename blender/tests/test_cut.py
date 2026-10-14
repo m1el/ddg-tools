@@ -1523,6 +1523,46 @@ def refined_session_keeps_its_state_in_bytes_and_notices_a_stale_one():
 
 
 @test
+def sessions_are_kept_between_calls_and_rebuilt_when_the_mesh_changes():
+    cutmod = importlib.import_module(ARGS.module + ".cut")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    start_circle(obj, vertex=5)
+    first, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert flow(steps=2) == {'FINISHED'}
+    second, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert second is first, "the session was rebuilt although nothing changed"
+    # The patch count of the library is the one of an independent pass over the corners.
+    assert second.n_patches == cutmod.count_patches(mesh, second.corner_regions())
+    # Attributes edited by hand: the kept session takes them (no state bytes then).
+    if "ddg_cut_state" not in mesh:
+        rows = state(mesh)
+        values = array.array('f', (-v for v in rows[0]))
+        mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", values)
+        mesh.attributes["ddg_cut_region_1"].data.foreach_set("value", array.array('f', rows[0]))
+        third, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        assert third is first
+        assert max(abs(a + b) for a, b in zip(third.state_row(0), rows[0])) < 1e-6
+        load_state(mesh, (rows, None, mesh.get("ddg_cut_option")))
+    # Another offset, a moved vertex, a changed seam: a new session.
+    other, _, _ = cutmod.open_session(obj, 0.05, 0.1)
+    assert other is not first
+    original_x = mesh.vertices[3].co.x
+    mesh.vertices[3].co.x += 0.01
+    if "ddg_cut_state" in mesh:
+        # The state bytes belong to the triangulation of the unmoved mesh: stale.
+        expect_error("changed since 'Cut: Start'", bpy.ops.uv.ddg_cut_flow, **FLOW)
+        mesh.vertices[3].co.x = original_x
+    else:
+        moved, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        assert moved is not first
+    assert flow(steps=1) == {'FINISHED'}
+    # Apply drops the kept sessions of the mesh.
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    assert not [k for k in cutmod._CACHE if k[0] == mesh.name_full]
+
+
+@test
 def flow_report_has_a_triangulation_line_in_the_advanced_view_only():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     start_circle(obj, vertex=5)

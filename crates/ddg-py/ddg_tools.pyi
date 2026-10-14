@@ -193,6 +193,20 @@ class InsertedMesh:
         """``array('i')``: the region of every new polygon where the description says (a part
         next to a piece of the cut), else -1."""
     @property
+    def changed_polygons(self) -> array[int]:
+        """New polygons (more than three corners) that were split or got extra vertices: the
+        ones whose triangulation an editor should keep. With ``changed_vertex_starts`` /
+        ``changed_vertices`` (their vertices in order) and ``changed_triangle_starts`` /
+        ``changed_triangles`` (3 vertices per triangle)."""
+    @property
+    def changed_vertex_starts(self) -> array[int]: ...
+    @property
+    def changed_vertices(self) -> array[int]: ...
+    @property
+    def changed_triangle_starts(self) -> array[int]: ...
+    @property
+    def changed_triangles(self) -> array[int]: ...
+    @property
     def n_old_vertices(self) -> int: ...
 
 @final
@@ -269,6 +283,10 @@ class CutSession:
         this."""
     @property
     def triangulation(self) -> Literal["intrinsic", "caller", "refined"]: ...
+    @property
+    def n_patches(self) -> int:
+        """Connected pieces of the surface in one region (corners joined along polygons and
+        across edges that are not seams)."""
     @property
     def state_is_per_corner(self) -> bool:
         """True when ``state`` (one value per polygon corner) is the whole state; False when the

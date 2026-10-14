@@ -570,6 +570,23 @@ struct InsertedMesh {
     /// next to a piece of the cut), else -1.
     #[pyo3(get)]
     polygon_region: Py<PyAny>,
+    /// `array('i')`: the new polygons that were split or got extra vertices and have more than
+    /// three corners (the ones whose triangulation an editor should keep), ascending.
+    #[pyo3(get)]
+    changed_polygons: Py<PyAny>,
+    /// `array('i')`, `len + 1` offsets into `changed_vertices`.
+    #[pyo3(get)]
+    changed_vertex_starts: Py<PyAny>,
+    /// `array('i')`: the vertices of every changed polygon, in order.
+    #[pyo3(get)]
+    changed_vertices: Py<PyAny>,
+    /// `array('i')`, `len + 1` offsets, in triangles, into `changed_triangles`.
+    #[pyo3(get)]
+    changed_triangle_starts: Py<PyAny>,
+    /// `array('i')`: 3 vertices per triangle of the changed polygons (the library's
+    /// triangulation).
+    #[pyo3(get)]
+    changed_triangles: Py<PyAny>,
     /// Number of vertices of the old mesh (vertices below it keep their index).
     #[pyo3(get)]
     n_old_vertices: usize,
@@ -589,6 +606,21 @@ impl InsertedMesh {
             junction_vertex: u32_array(py, "junction_vertex", &a.junction_vertex)?.unbind(),
             polygon_region: signed_array(py, "polygon_region", a.polygon_region.iter().copied())?
                 .unbind(),
+            changed_polygons: u32_array(py, "changed_polygons", &a.changed_polygons)?.unbind(),
+            changed_vertex_starts: u32_array(
+                py,
+                "changed_vertex_starts",
+                &a.changed_vertex_starts,
+            )?
+            .unbind(),
+            changed_vertices: u32_array(py, "changed_vertices", &a.changed_vertices)?.unbind(),
+            changed_triangle_starts: u32_array(
+                py,
+                "changed_triangle_starts",
+                &a.changed_triangle_starts,
+            )?
+            .unbind(),
+            changed_triangles: u32_array(py, "changed_triangles", &a.changed_triangles)?.unbind(),
             n_old_vertices: a.n_old_vertices,
         })
     }
@@ -841,6 +873,12 @@ impl CutSession {
     #[getter]
     fn triangulation(&self) -> PyResult<&'static str> {
         Ok(self.lock()?.triangulation_name())
+    }
+    /// Number of patches of the current state: connected pieces of the surface in one region
+    /// (corners joined along polygons and across edges that are not seams).
+    #[getter]
+    fn n_patches(&self) -> PyResult<usize> {
+        Ok(self.lock()?.n_patches())
     }
     /// Whether the per-corner `state` is the whole state (the triangulation added no vertex).
     /// If not, keep `snapshot()` as well.
@@ -1122,7 +1160,11 @@ impl CutSession {
                 .insert(cut.as_ref(), min_crossing_offset)
                 .map_err(bind_error)
         })?;
-        InsertedMesh::new(py, &InsertedArrays::from_inserted(&inserted))
+        let old = self.lock()?.polygon_offsets();
+        InsertedMesh::new(
+            py,
+            &InsertedArrays::from_inserted(&inserted).with_changes(&old, &inserted),
+        )
     }
 
     /// Describes the current cut, inserts it, and unwraps the new mesh with the old seams and
