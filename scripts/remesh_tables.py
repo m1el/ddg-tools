@@ -44,7 +44,12 @@ def parse(paths):
                         k, v = tok.split("=", 1)
                         d[k] = v
                 rows.append(d)
-    return rows
+    # A resumed run (SKIP_FROM) repeats the cases of a partly done Session job; the runs are
+    # deterministic, so the last row of a (mesh, case, treatment, variant) is kept.
+    last = {}
+    for d in rows:
+        last[(d.get("mesh"), d.get("case"), d.get("treat"), d.get("variant"))] = d
+    return list(last.values())
 
 
 def num(d, k):
@@ -103,6 +108,43 @@ def rel_table(rows, key, base, title, meshes):
                          f"{100 * max(vals):+.1f}] {wins}/{len(vals)}")
         if any(cells):
             print(f"| {t} | " + " | ".join(cells) + " |")
+
+
+def group_summary(rows, base):
+    """Per treatment and mesh group: the three measures against `base`, as median in %,
+    cases lower / cases, and cases more than 10 % higher."""
+    keys = [("ref_total_exact_len", "spread yardstick"), ("poly_total", "polyhedral yardstick"),
+            ("on_input", "on the input mesh")]
+    by = {}
+    for r in rows:
+        if r.get("variant") == "cut" and "error" not in r:
+            by[(r["mesh"], r["case"], r["treat"])] = r
+    print(f"\n### Summary against `{base}` by mesh group: median in %, lower / cases, "
+          "more than 10 % higher\n")
+    print("| treatment | " + " | ".join(f"{g}: {name}" for _, name in keys for g in GROUPS) + " |")
+    print("|" + "---|" * (len(keys) * len(GROUPS) + 1))
+    for t in TREATS:
+        if t == base:
+            continue
+        cells = []
+        for key, _ in keys:
+            for g in GROUPS:
+                vals = []
+                for (m, case, tt), r in by.items():
+                    if tt != t or group(m) != g:
+                        continue
+                    b = by.get((m, case, base))
+                    if b is None:
+                        continue
+                    v, w = num(r, key), num(b, key)
+                    if v == v and w == w and v != 0 and w != 0:
+                        vals.append((v - w) / abs(w))
+                if not vals:
+                    cells.append("")
+                    continue
+                cells.append(f"{100 * med(vals):+.1f}, {sum(1 for x in vals if x < 0)}/"
+                             f"{len(vals)}, {sum(1 for x in vals if x > 0.1)}")
+        print(f"| {t} | " + " | ".join(cells) + " |")
 
 
 def convergence(rows, meshes):
@@ -230,6 +272,8 @@ def main():
     meshes = sorted({r["mesh"] for r in rows}, key=lambda m: (GROUPS.index(group(m)), m))
     checks(rows)
     convergence(rows, meshes)
+    group_summary(rows, "flip")
+    group_summary(rows, "flipS")
     for base in ["flip", "flipS"]:
         rel_table(rows, "ref_total_exact_len", base,
                   f"Quality, spread yardstick, against {base}", meshes)

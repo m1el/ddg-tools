@@ -1711,6 +1711,32 @@ fn real(name: &str) {
             }
         }
     }
+    // SKIP_FROM: logs of an interrupted run of the same mesh; a job whose cases all have a
+    // row there (variant cut, also an error row) is not run again.
+    if let Ok(paths) = std::env::var("SKIP_FROM") {
+        let mut done = std::collections::HashSet::new();
+        for path in paths.split(',') {
+            for line in std::fs::read_to_string(path).unwrap_or_default().lines() {
+                if !line.starts_with("ROW ") || !line.contains(" variant=cut") {
+                    continue;
+                }
+                let field = |k: &str| {
+                    line.split(' ')
+                        .find_map(|t| t.strip_prefix(k))
+                        .unwrap_or("")
+                        .to_string()
+                };
+                done.insert((field("case="), field("treat=")));
+            }
+        }
+        let before = jobs.len();
+        jobs.retain(|(list, t)| {
+            !list
+                .iter()
+                .all(|&c| done.contains(&(cases[c].tag(), t.tag.to_string())))
+        });
+        println!("SKIP_FROM: {} of {before} jobs already done", before - jobs.len());
+    }
     jobs.sort_by_key(|(c, t)| (cost_rank(t), !t.session, c[0]));
     let results = par_map(&jobs, threads, |(list, treat)| {
         let mut lines = Vec::new();
