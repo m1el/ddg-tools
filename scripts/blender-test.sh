@@ -10,7 +10,8 @@
 # 3. blender/tests/test_addon.py runs in that Blender, against the installed extension and its
 #    bundled wheel. `-k NAME` runs only the tests whose name contains NAME.
 # 3b. blender/tests/test_cut.py runs the same way (Start, Flow, Apply of the variational cut),
-#    three times in parallel, once per triangulation (intrinsic, caller, refined; logs
+#    in parallel, once per variant (intrinsic, caller, refined, intrinsic and refined with
+#    Optimal Delaunay on; logs
 #    runs_tmp/blender-test-cut-<name>.log; -k applies to both files).
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
@@ -73,18 +74,23 @@ if [ "$status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$log"; then
     exit 1
 fi
 
-# The cut tests run once per triangulation (intrinsic, the caller's, refined), the three
-# Blender processes in parallel; one log each.
+# The cut tests run once per variant, the Blender processes in parallel; one log each: the
+# triangulations intrinsic, caller, refined, and intrinsic and refined with Optimal Delaunay on
+# by default ("intrinsic-odt", "refined-odt").
+variants=(intrinsic caller refined intrinsic-odt refined-odt)
 pids=()
-for tri in intrinsic caller refined; do
+for tri in "${variants[@]}"; do
+    odt=()
+    case "$tri" in *-odt) odt=(--optimal-delaunay) ;; esac
     "$BLENDER" -b --factory-startup --python-exit-code 1 \
-        --python "$root/blender/tests/test_cut.py" -- --module "$module" --triangulation "$tri" \
+        --python "$root/blender/tests/test_cut.py" -- --module "$module" \
+        --triangulation "${tri%-odt}" "${odt[@]}" \
         "${only[@]}" > "$root/runs_tmp/blender-test-cut-$tri.log" 2>&1 &
     pids+=($!)
 done
 cut_failed=0
-for i in 0 1 2; do
-    tri=$(echo intrinsic caller refined | cut -d' ' -f$((i + 1)))
+for i in "${!variants[@]}"; do
+    tri="${variants[$i]}"
     status=0
     wait "${pids[$i]}" || status=$?
     log="$root/runs_tmp/blender-test-cut-$tri.log"

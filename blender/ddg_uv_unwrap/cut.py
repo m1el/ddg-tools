@@ -46,7 +46,10 @@ DEFAULT_CUT_OFFSET = 1e-3
 # triangulation has no vertex that is in no polygon. Otherwise the whole state is the bytes of
 # `CutSession.snapshot()` in a mesh property (base64, as the property is a string), and the
 # attributes are the view of the mesh's own vertices. The option says which triangulation the
-# flow runs on: "intrinsic" (Delaunay flips), "refined:<degrees>" or "caller".
+# flow runs on: "intrinsic" (Delaunay flips), "refined:<degrees>" or "caller"; "+odt" appended
+# ("intrinsic+odt", "refined:25+odt") adds the intrinsic optimal Delaunay triangulation. The
+# option is part of the key of the kept session, so a session built without it is never reused
+# with it.
 STATE_KEY = "ddg_cut_state"
 OPTION_KEY = "ddg_cut_option"
 DEFAULT_OPTION = "intrinsic"
@@ -126,20 +129,32 @@ def read_state(mesh):
     return len(names), flat
 
 
-def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND):
-    """The option string for the operator's enum value ('INTRINSIC', 'REFINED', 'CALLER')."""
+ODT_SUFFIX = "+odt"
+
+
+def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False):
+    """The option string for the operator's enum value ('INTRINSIC', 'REFINED', 'CALLER').
+    ``optimal_delaunay`` appends ``"+odt"``; it needs an intrinsic triangulation."""
+    if optimal_delaunay and triangulation == 'CALLER':
+        raise CutFailed("Optimal Delaunay needs an intrinsic triangulation, not the mesh's own")
+    suffix = ODT_SUFFIX if optimal_delaunay else ""
     if triangulation == 'REFINED':
-        return "refined:{:g}".format(refine_bound)
-    return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation]
+        return "refined:{:g}".format(refine_bound) + suffix
+    return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation] + suffix
 
 
 def option_keywords(option, offset=None, merge=None):
     """The keywords of ``CutSession`` for an option string; ``offset`` is the smallest distance
     of a point of the cut from a vertex of the caller's triangles (intrinsic sessions)."""
+    optimal = option.endswith(ODT_SUFFIX)
+    if optimal:
+        option = option[:-len(ODT_SUFFIX)]
     kind, _, bound = option.partition(":")
     keywords = {"triangulation": kind}
     if kind == "refined":
         keywords["refine_bound"] = float(bound or DEFAULT_REFINE_BOUND)
+    if optimal:
+        keywords["optimal_delaunay"] = True
     if kind != "caller" and offset is not None:
         keywords["min_offset"] = offset
     if kind != "caller" and merge is not None:
@@ -386,7 +401,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
               selected_vertices=(), cluster_iterations=50, attribute="",
               cut_offset=DEFAULT_CUT_OFFSET, merge_tolerance=DEFAULT_MERGE_TOLERANCE,
               triangulation='INTRINSIC',
-              refine_bound=DEFAULT_REFINE_BOUND):
+              refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False):
     """Creates the state of a cut on ``obj`` and its preview.
 
     ``mode`` is ``'SELECTED'`` (the selected faces against the rest, two regions), ``'CIRCLE'``
@@ -397,9 +412,20 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
     material slot of every face is its region) or ``'ATTRIBUTE'`` (the integer face attribute
     ``attribute``; its distinct values are the regions).
 
+    ``optimal_delaunay`` adds the intrinsic optimal Delaunay triangulation to the intrinsic or
+    refined triangulation: more even triangle areas in the hidden intrinsic triangulation, a
+    slower setup and slower flow steps. It is ignored, with a warning in the result, for
+    ``'CALLER'``.
+
     Returns a dict with the session's sizes and timings.
     """
     mesh = check_mesh(obj)
+    extra_warnings = []
+    if optimal_delaunay and triangulation == 'CALLER':
+        optimal_delaunay = False
+        extra_warnings.append(
+            "Optimal Delaunay needs an intrinsic triangulation and is ignored with 'Mesh's "
+            "Own': choose 'Intrinsic' or 'Intrinsic, Refined' to use it")
     if mode == 'SELECTED':
         start = {"polygon_labels": start_labels_from_selection(mesh)}
         n_regions = 2
@@ -449,7 +475,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
         n_regions = 2
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
-    option = option_of(triangulation, refine_bound)
+    option = option_of(triangulation, refine_bound, optimal_delaunay)
     forget(mesh)
     gathered, token = gather(obj)
     session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset,
@@ -473,7 +499,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
         "n_polygons": session.n_polygons,
         "vertex": start.get("circle_vertex"),
         "radius": start.get("circle_radius"),
-        "warnings": list(session.warnings),
+        "warnings": extra_warnings + list(session.warnings),
         "seconds_extract": seconds_extract,
         "seconds_write": written - begin,
         "seconds_preview": previewed - written,
@@ -879,6 +905,10 @@ def triangulation_line(report):
     line = "triangulation: {} | {} vertices added, angles {:.1f} to {:.1f} degrees".format(
         report["triangulation"], intrinsic["n_added"], intrinsic["min_angle_degrees"],
         intrinsic["max_angle_degrees"])
+    if intrinsic.get("optimal_delaunay_status") is not None:
+        line += " | optimal Delaunay: {} ({} inserted, {} iterations, {})".format(
+            "on", intrinsic["n_optimized"], intrinsic["optimal_delaunay_iterations"],
+            intrinsic["optimal_delaunay_status"])
     merge = report.get("merge")
     if merge:
         line += " | {} bends merged, cut moved by at most {:.3g} of an edge".format(

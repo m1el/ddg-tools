@@ -126,6 +126,17 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         description="The smallest angle refinement aims for, in degrees (at most 35)",
         default=cut.DEFAULT_REFINE_BOUND, min=0.0, max=35.0,
     )
+    optimal_delaunay: BoolProperty(
+        name="Optimal Delaunay",
+        description=(
+            "Also build the intrinsic optimal Delaunay triangulation (Sharp, Soliman, Crane "
+            "2019) in the hidden intrinsic triangulation the flow runs on: more even triangle "
+            "areas there. The setup is slower (about 1 to 3 s on a mesh of 22k vertices) and "
+            "flow steps can take up to about twice as long. It changes nothing on the mesh "
+            "except through the cut the flow finds. Needs Intrinsic or Intrinsic, Refined; "
+            "ignored with Mesh's Own. Off by default"),
+        default=False,
+    )
     merge_tolerance: FloatProperty(
         name="Merge Bends",
         description=(
@@ -167,6 +178,11 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         layout.prop(self, "triangulation")
         if self.triangulation == 'REFINED':
             layout.prop(self, "refine_bound")
+        row = layout.row()
+        row.active = self.triangulation != 'CALLER'
+        row.prop(self, "optimal_delaunay")
+        if self.optimal_delaunay and self.triangulation == 'CALLER':
+            layout.label(text="Optimal Delaunay is ignored with Mesh's Own", icon='INFO')
         if self.mode == 'CIRCLE':
             layout.prop(self, "radius")
             layout.prop(self, "vertex")
@@ -195,7 +211,8 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                     cluster_iterations=self.cluster_iterations, attribute=self.attribute,
                     cut_offset=self.cut_offset, merge_tolerance=self.merge_tolerance,
                     triangulation=self.triangulation,
-                    refine_bound=self.refine_bound)
+                    refine_bound=self.refine_bound,
+                    optimal_delaunay=self.optimal_delaunay)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}

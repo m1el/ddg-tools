@@ -678,10 +678,11 @@ def operators_are_registered_with_the_agreed_properties():
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
                                "attribute", "cut_offset", "triangulation", "refine_bound",
-                               "merge_tolerance"}, \
+                               "optimal_delaunay", "merge_tolerance"}, \
         sorted(properties)
     assert properties["triangulation"].default == ARGS.triangulation.upper()
     assert properties["refine_bound"].default == 25.0
+    assert properties["optimal_delaunay"].default == ARGS.optimal_delaunay
     assert abs(properties["merge_tolerance"].default - 0.1) < 1e-6
     assert [i.identifier for i in properties["triangulation"].enum_items] == [
         'INTRINSIC', 'REFINED', 'CALLER']
@@ -1494,7 +1495,8 @@ def refined_session_keeps_its_state_in_bytes_and_notices_a_stale_one():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     mesh = obj.data
     assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
-                                    triangulation='REFINED', refine_bound=30.0) == {'FINISHED'}
+                                    triangulation='REFINED', refine_bound=30.0,
+                                    optimal_delaunay=False) == {'FINISHED'}
     assert mesh["ddg_cut_option"] == "refined:30"
     assert "ddg_cut_state" in mesh, "refinement adds vertices: the state needs its bytes"
     assert flow(steps=3, show_advanced=True) == {'FINISHED'}
@@ -1513,13 +1515,110 @@ def refined_session_keeps_its_state_in_bytes_and_notices_a_stale_one():
     assert flow(steps=2) == {'FINISHED'}      # valid again
     # A new Start replaces everything; Apply removes the bytes and the option.
     assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
-                                    triangulation='INTRINSIC') == {'FINISHED'}
+                                    triangulation='INTRINSIC',
+                                    optimal_delaunay=False) == {'FINISHED'}
     assert "ddg_cut_state" not in mesh and mesh["ddg_cut_option"] == "intrinsic"
     assert flow(steps=2) == {'FINISHED'}
     assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
     for key in ("ddg_cut_state", "ddg_cut_option", "ddg_cut_last_flow"):
         assert key not in mesh, key
     del message
+
+
+def flipped_uv_triangles(mesh):
+    layer = mesh.uv_layers.active
+    assert layer is not None
+    uvs = array.array('f', bytes(8 * len(mesh.loops)))
+    mesh.attributes[layer.name].data.foreach_get("vector", uvs)
+    assert all(math.isfinite(x) for x in uvs)
+    mesh.calc_loop_triangles()
+    areas = []
+    for tri in mesh.loop_triangles:
+        (u0, v0), (u1, v1), (u2, v2) = (uvs[2 * c:2 * c + 2] for c in tri.loops)
+        areas.append(0.5 * ((u1 - u0) * (v2 - v0) - (u2 - u0) * (v1 - v0)))
+    mean = sum(abs(a) for a in areas) / len(areas)
+    return sum(1 for a in areas if a < -1e-3 * mean), len(areas)
+
+
+@test
+def optimal_delaunay_is_one_bool_that_is_part_of_the_option_and_the_session_key():
+    cutmod = importlib.import_module(ARGS.module + ".cut")
+    assert cutmod.option_of('INTRINSIC') == "intrinsic"
+    assert cutmod.option_of('INTRINSIC', optimal_delaunay=True) == "intrinsic+odt"
+    assert cutmod.option_of('REFINED', 30.0, True) == "refined:30+odt"
+    assert cutmod.option_keywords("refined:30+odt") == {
+        "triangulation": "refined", "refine_bound": 30.0, "optimal_delaunay": True}
+    assert "optimal_delaunay" not in cutmod.option_keywords("intrinsic")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    # Without the flag, then with it on the same mesh and cut: another option, another session.
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                    triangulation='INTRINSIC',
+                                    optimal_delaunay=False) == {'FINISHED'}
+    assert mesh["ddg_cut_option"] == "intrinsic"
+    plain, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert plain.optimal_delaunay is False
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                    triangulation='INTRINSIC',
+                                    optimal_delaunay=True) == {'FINISHED'}
+    assert mesh["ddg_cut_option"] == "intrinsic+odt"
+    on, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert on is not plain and on.optimal_delaunay is True
+    assert on.triangulation == "intrinsic"
+    again, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+    assert again is on, "the session with the flag was rebuilt although nothing changed"
+    # The stored option decides what Flow and Apply rebuild: a session built without the flag
+    # is not reused once the stored option says "+odt" (and the other way round).
+    mesh["ddg_cut_option"] = "intrinsic"
+    assert cutmod.open_session(obj, 1e-3, 0.1)[0].optimal_delaunay is False
+    mesh["ddg_cut_option"] = "intrinsic+odt"
+    assert cutmod.open_session(obj, 1e-3, 0.1)[0].optimal_delaunay is True
+
+
+@test
+def optimal_delaunay_cut_completes_applies_and_unwraps_without_flipped_triangles():
+    cutmod = importlib.import_module(ARGS.module + ".cut")
+    for name, triangulation, option in (
+            ("uv_sphere", 'INTRINSIC', "intrinsic+odt"),
+            ("subdivided_cube", 'REFINED', "refined:25+odt")):
+        obj = MODELS[name]()
+        mesh = obj.data
+        radius = 0.3 * diagonal(mesh)
+        assert bpy.ops.uv.ddg_cut_start(
+            mode='CIRCLE', radius=radius, vertex=0, triangulation=triangulation,
+            optimal_delaunay=True) == {'FINISHED'}
+        assert mesh["ddg_cut_option"] == option
+        assert flow(steps=10, show_advanced=True) == {'FINISHED'}
+        report = dict(mesh["ddg_cut_last_flow"])
+        assert report["triangulation"] == option, report["triangulation"]
+        assert report["energy_after"] < report["energy_before"]
+        session, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        info = session.intrinsic_report
+        assert session.optimal_delaunay and info["optimal_delaunay_status"], info
+        print("  {} {}: {} inserted by iODT, {} iterations, {}, setup {:.2f} s".format(
+            name, option, info["n_optimized"], info["optimal_delaunay_iterations"],
+            info["optimal_delaunay_status"], info["seconds"]))
+        assert bpy.ops.uv.ddg_cut_apply(unwrap_after=True) == {'FINISHED'}
+        for key in ("ddg_cut_state", "ddg_cut_option", "ddg_cut_last_flow"):
+            assert key not in mesh, key
+        flipped, n = flipped_uv_triangles(mesh)
+        assert flipped == 0, "{} {}: {} flipped triangles of {}".format(name, option, flipped, n)
+        assert sum(e.use_seam for e in mesh.edges) > 0
+        reset()
+
+
+@test
+def optimal_delaunay_with_the_meshs_own_triangulation_is_ignored_with_a_message():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    with CaptureOutput() as out:
+        assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                        triangulation='CALLER',
+                                        optimal_delaunay=True) == {'FINISHED'}
+    assert mesh["ddg_cut_option"] == "caller"
+    assert "Optimal Delaunay needs an intrinsic triangulation" in out.text, out.text
+    assert flow(steps=3) == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
 
 
 @test
@@ -1810,6 +1909,10 @@ def main():
                         choices=["intrinsic", "caller", "refined"],
                         help="the triangulation the tests start their cuts on (the default of "
                         "Start is changed for this run); the old expectations hold on all")
+    parser.add_argument("--optimal-delaunay", action="store_true",
+                        help="the tests start their cuts with Optimal Delaunay on (the default "
+                        "of that property of Start is changed for this run; ignored with the "
+                        "mesh's own triangulation)")
     parser.add_argument("-k", dest="only", default="", help="run only tests whose name contains this")
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     ARGS = parser.parse_args(argv)
@@ -1836,7 +1939,16 @@ def main():
         keywords["default"] = ARGS.triangulation.upper()
         cls.__annotations__["triangulation"] = bpy.props.EnumProperty(**keywords)
         bpy.utils.register_class(cls)
-    print("TRIANGULATION", ARGS.triangulation)
+    if ARGS.optimal_delaunay:
+        operators = importlib.import_module(ARGS.module + ".cut_operators")
+        cls = operators.UV_OT_ddg_cut_start
+        old = cls.__annotations__["optimal_delaunay"]
+        bpy.utils.unregister_class(cls)
+        keywords = dict(old.keywords)
+        keywords["default"] = True
+        cls.__annotations__["optimal_delaunay"] = bpy.props.BoolProperty(**keywords)
+        bpy.utils.register_class(cls)
+    print("TRIANGULATION", ARGS.triangulation, "OPTIMAL_DELAUNAY", ARGS.optimal_delaunay)
 
     passed, skipped, failed = [], [], []
     for function in TESTS:

@@ -424,6 +424,19 @@ refinement only helps where the input has too few vertices for thin geometry. Th
 back onto the mesh's own faces whatever the choice (bends inside faces, several points per
 edge, junctions of any degree), so nothing else changes for the user.
 
+* **Optimal Delaunay** (`optimal_delaunay`, a checkbox next to Triangulation on Start, off by
+  default) also builds the intrinsic optimal Delaunay triangulation (iODT, `crates/ddg-intrinsic`)
+  on top of Intrinsic or Intrinsic, Refined: the hidden intrinsic triangulation gets more even
+  triangle areas. It costs time: the setup takes about 1 to 3 s on a mesh of 22k vertices and flow
+  steps can take up to about twice as long. It changes nothing on the mesh except through the cut
+  the flow finds; the cut is carried back to the mesh's own faces as always. It is part of the
+  stored option (`ddg_cut_option` reads `intrinsic+odt` or `refined:<degrees>+odt`) and so of the
+  key of the kept session: a session built without it is never reused with it. Flow and Apply have
+  no property of their own: they rebuild what Start stored. The iODT inserts vertices, so the
+  state then usually lives in the bytes of `ddg_cut_state` too. With Mesh's Own the checkbox is
+  greyed out and ignored, with the warning "Optimal Delaunay needs an intrinsic triangulation and
+  is ignored with 'Mesh's Own'" (nothing is stored). The advanced Flow line reports the iODT
+  status, vertices inserted and iterations.
 * **State.** The per-corner attributes `ddg_cut_region_k` are the whole state when the
   triangulation added no vertex (the usual case of the default). When it did (Refined, or an
   export that had to split an edge) the whole state is the bytes of `CutSession.snapshot()` in the
