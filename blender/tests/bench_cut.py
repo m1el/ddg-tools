@@ -68,22 +68,35 @@ class Timed:
 
 
 ddg_tools.CutSession = Timed
+results = {}
 try:
-    rows = []
-    native["seconds"] = 0.0
-    t, _ = timed("start", lambda: bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.5, vertex=0))
-    rows.append(("Start", t, native["seconds"]))
-    native["seconds"] = 0.0
-    t, _ = timed("flow", lambda: bpy.ops.uv.ddg_cut_flow(
-        steps=ARGS.steps, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1))
-    rows.append(("Flow ({} steps)".format(ARGS.steps), t, native["seconds"]))
-    native["seconds"] = 0.0
-    t, _ = timed("apply", lambda: bpy.ops.uv.ddg_cut_apply())
-    rows.append(("Apply", t, native["seconds"]))
+    for choice in ("CALLER", "INTRINSIC", "REFINED"):
+        for old in list(bpy.data.objects):
+            bpy.data.objects.remove(old, do_unlink=True)
+        for old in list(bpy.data.meshes):
+            bpy.data.meshes.remove(old)
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=ARGS.segments, ring_count=ARGS.rings)
+        obj = bpy.context.object
+        mesh = obj.data
+        rows = []
+        native["seconds"] = 0.0
+        t, _ = timed("start", lambda: bpy.ops.uv.ddg_cut_start(
+            mode='CIRCLE', radius=0.5, vertex=0, triangulation=choice))
+        rows.append(("Start", t, native["seconds"]))
+        native["seconds"] = 0.0
+        t, _ = timed("flow", lambda: bpy.ops.uv.ddg_cut_flow(
+            steps=ARGS.steps, use_stop_rule=False, length_mode='EXPLICIT', length_weight=0.1))
+        rows.append(("Flow ({} steps)".format(ARGS.steps), t, native["seconds"]))
+        native["seconds"] = 0.0
+        t, _ = timed("apply", lambda: bpy.ops.uv.ddg_cut_apply())
+        rows.append(("Apply", t, native["seconds"]))
+        results[choice] = rows
 finally:
     ddg_tools.CutSession = original
-print("  {:<18s}{:>12s}{:>14s}{:>14s}".format("operator", "total ms", "library ms", "add-on ms"))
-for label, total, lib in rows:
-    print("  {:<18s}{:12.1f}{:14.1f}{:14.1f}".format(label, 1e3 * total, 1e3 * lib,
-                                                       1e3 * (total - lib)))
+print("  {:<12s}{:<18s}{:>12s}{:>14s}{:>14s}".format("triangulation", "operator", "total ms",
+                                                      "library ms", "add-on ms"))
+for choice, rows in results.items():
+    for label, total, lib in rows:
+        print("  {:<12s}{:<18s}{:12.1f}{:14.1f}{:14.1f}".format(
+            choice.lower(), label, 1e3 * total, 1e3 * lib, 1e3 * (total - lib)))
 print("BENCH END")
