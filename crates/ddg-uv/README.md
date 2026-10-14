@@ -978,10 +978,22 @@ comes from the same description (`CutOnPolygons::lines`).
 The rule for near-degenerate parts: every point keeps at least `IntrinsicOptions::min_offset`
 (`1e-6`) of the side or of the barycentric coordinate from the vertices and sides of its
 triangle (moved points are counted in `n_clamped_crossings`); a point exactly at a vertex of the
-mesh is `CuttingError::Unsupported`. A cut that comes closer to a vertex than the parts can
-carry shows as sliver triangles and, in the flattening, as a few flipped triangles (below).
-Refused as unsupported: a piece along a diagonal, a closed piece of the cut inside one triangle
-(it would be a hole in a polygon).
+mesh is `CuttingError::Unsupported`. Refused as unsupported: a piece along a diagonal, a closed
+piece of the cut inside one triangle (it would be a hole in a polygon; this happens on the
+refined atlas of spot at a ripple wavelength of 0.25).
+
+**Simplification of the cut (`IntrinsicOptions::merge_tolerance`, default 0.1).** The cut that
+comes back has a bend wherever one of the flow's segments crosses an edge of the intrinsic
+triangulation inside a triangle of the caller's. Such a bend is an artefact of the
+triangulation, and near a vertex of the mesh the unwrap of the inserted cut flipped triangles
+because of it. A bend inside a triangle (two pieces, never a junction of three) is removed
+when its distance from the chord of the two pieces, added to what the pieces already stand
+for, is at most `merge_tolerance` times the longest edge of the triangle, the chord is not along
+a side, no other point of the triangle is in the swept triangle and no piece crosses the
+chord; the swept triangle has no vertex of the mesh inside, so the cut keeps passing on the same
+side of every vertex. `Session::describe_cut_with_report` returns a `DescribeReport` (bends
+removed, largest displacement as a length and as a fraction of an edge, points moved by
+`min_offset`). `0` switches it off.
 
 **`insert`, generally.** The construction (written out in the rustdoc of
 `ddg_uv::cutting::insert`; a bmesh implementation must mirror it): vertices on polygon edges and
@@ -1016,32 +1028,53 @@ and the last step's:
 | mesh | triangulation | vertices | energy | charts | cones | flipped | distortion |
 |---|---|---:|---|---:|---:|---:|---:|
 | sheared 153, 32x32 | caller / flips / refined | 1089 / 1089 / 1155 | 0.992 to 0.744 / 1.216 to 0.908 / 1.216 to 0.908 | 2 | 0 | 0 | 0 |
-| needles and caps, 16 | caller / flips / refined | 192 / 192 / 830 | 1.151 to 0.797 / 1.167 to 1.167 (stalls after 1 step) / 1.200 to 0.821 | 2 | 0 | 0 | 0 |
-| uv_sphere 32x16 | caller / flips / refined | 482 / 482 / 690 | 4.78 to 4.17 / same / 4.89 to 4.32 | 2 | 1 | 0 / 0 / 5 | 0.074 / 0.074 / 0.073 |
+| needles and caps, 16 | caller / flips / refined | 192 / 192 / 830 | 1.151 to 0.797 / 1.167 to 1.167 (the stop rule ends the run after 1 step) / 1.200 to 0.821 | 2 | 0 | 0 | 0 |
+| uv_sphere 32x16 | caller / flips / refined | 482 / 482 / 690 | 4.78 to 4.17 / same / 4.89 to 4.32 | 2 | 1 | 0 / 0 / 0 (5 without the simplification) | 0.074 / 0.074 / 0.073 |
 | grid_cube 6 | all three | 218 | 4.30 to 4.04 | 2 | 1 | 0 | 0.100 |
 | spot (quads) | caller / flips / refined | 2930 / 2930 / 3185 | 4.81 to 4.25 / 4.90 to 4.36 / 4.90 to 4.36 | 2 | 2 | 0 | 0.434 / 0.430 / 0.432 |
-| spot atlas, 8 clusters, 60 steps | caller / flips / refined | 2930 / 2930 / 3185 | 0.0618 to 0.0379 / 0.0628 to 0.0401 / 0.0626 to 0.0405 | 17 / 21 / 23 | 0 | 0 / 2 / 12 | 0.0047 / 0.0044 / 0.0042 |
-| camelbad, 22725 faces | caller / flips / refined | 11392 / 11392 / 15561 | 2.456 to 2.341 / 2.475 to 2.355 / 2.458 to 2.350 | 2 / 3 / 3 | 2 | 0 / 1 / 1 | 0.501 / 0.506 / 0.506 |
+| spot atlas, 8 clusters, 60 steps | caller / flips / refined | 2930 / 2930 / 3185 | 0.0618 to 0.0379 / 0.0628 to 0.0401 / 0.0626 to 0.0405 | 17 / 21 / 23 | 0 | 0 / 0 / 0 (2 / 12 without) | 0.0047 / 0.0044 / 0.0042 |
+| camelbad, 22725 faces | caller / flips / refined | 11392 / 11392 / 15561 | 2.456 to 2.341 / 2.475 to 2.355 / 2.458 to 2.350 | 2 / 3 / 3 | 2 | 0 / 0 / 0 (1 / 1 without) | 0.501 / 0.506 / 0.506 |
 
-(A flat mesh has no distortion: its flattening is isometric.) The needles-and-caps mesh with
-flips only is stuck (its export still has angles of 6 and 168 degrees): the cut does not move;
-refinement frees it. The flipped triangles of the refined sphere (5) and of the atlas are
-slivers where the cut passes close to a vertex of the mesh (3D areas of `1e-3` of a cell); the
-tests allow `1 + triangles / 100`.
+(A flat mesh has no distortion: its flattening is isometric.) The tests assert **zero flipped
+triangles** for the end-to-end cases above, on all three triangulations.
 
-**The same cut on three triangulations** (`the_same_cut_on_three_triangulations`): the exact
-distance to a point at the vertices of a 165 degree sheared grid (24x24), circle of radius 0.2
-(exact length 1.2566), `alpha_L = 1`: the energy of the cut is 0.6853 on the caller's
-triangulation, 0.5799 flipped, 0.5774 refined; the length term equals the length of the cut's
-polyline on the surface in each (to the last digit), and the distortion is zero. The three
-cuts are three different polylines (the piecewise linear interpolant of the same function has
-a different zero set on a different triangulation, and these triangles have edges as long as the
-circle's radius), so on a flat mesh the flow's evaluation is exact for the cut it is given and
-the difference is the cut, which refutes "the evaluation is wrong on the bad mesh" for the
-length term. The 3.5 times of the study on the distortion terms of a curved mesh was not
-reproduced here (no curved bad mesh was evaluated on both); the same-start rows above start
-from different cuts (the circle from the fast-marching distance: 0.992 on the caller's
-triangulation, 1.216 flipped, against 1.2566 exact) for the same reason.
+**Why the intrinsic runs flipped triangles, and what removed them** (`examples/flip_study.rs`:
+for every flipped triangle of the unwrap its area against the mean, its smallest angle, its
+construction and how close its cut points lie to a vertex or side of the old triangle, then the
+same flow state unwrapped with `min_offset` of 1e-6, 1e-4, 1e-3, 1e-2; run in parallel over the
+cases). Without the simplification (`merge_tolerance = 0`) the flipped triangles are:
+
+| case | flipped | area / mean area | smallest angle | corners |
+|---|---:|---|---|---|
+| uv_sphere, refined | 5 | 5e-3 to 3e-2 | 1.9 to 39 degrees | all: a vertex of the mesh, a point of an edge, a bend |
+| camelbad, flips / refined | 1 / 1 | 8e-5 / 6e-5 | 0.1 / 0.3 degrees | the same |
+| spot atlas (wavelength 0.5), flips / refined | 1 / 12 | 2e-3 / 1e-5 to 4e-2 | 1.3 / 0.01 to 50 degrees | the same, a few with two bends or a diagonal point |
+| spot atlas (0.25), flips | 2 | 5e-4 to 1e-2 | 0.5 degrees | the same |
+| spot atlas (1.0), flips / refined | 4 / 16 | 2e-3 to 0.25 | 0.3 to 15 / 0.1 to 47 degrees | the same |
+| sheared, needles, cube, spot quads | 0 | | | |
+
+Every flipped triangle is a triangle of the fan around a vertex of the mesh whose other two
+corners are cut vertices, at least one of them a bend. The distance of those cut vertices from
+the vertices and sides of their old triangle is not small (`8e-3` to `0.3` of an edge, most above
+`0.05`), and raising `min_offset` to `1e-4`, `1e-3` or `1e-2` leaves the counts as they are (and
+at `1e-2` makes them a little worse): it is not a point close to a corner. The cut that comes
+back wraps around the vertex in short pieces with bends that are only there because of the
+triangulation the flow ran on, and the flattening of the chart does not keep that boundary
+embedded. With `merge_tolerance` of 0.01 the counts fall (sphere 5 to 0, camelbad 1 to 0,
+spot atlas 0.5 flips 1 to 0, refined 12 to 4); with 0.1 they are 0 in every case measured
+(atlas wavelengths 0.25, 0.5, 1.0 with flips and refined, camelbad, sphere, spot, cube, the bad
+meshes). The largest displacement it reached: 0.07 of an edge on the atlas with flips, 0.10 on
+the refined atlas and camelbad refined, 0.01 to 0.04 on the single circles; the bound is the
+option. The caller's triangulation never needed it (no bends). The cost is in `describe` (a
+few tens of microseconds more, below).
+
+**Why the needles-and-caps run with flips only seems stuck** (energy 1.167 over 8 steps): the
+stop rule. The first step of that start moves the cut by 6e-11 (`cut_motion`), below the
+`motion_tolerance` of 1e-5, and `StopRule` ends the run with `Converged` after one step. With
+`motion_tolerance = 0` the second step moves it by 2e-5 and from the third on by 8e-3 per step,
+and the energy goes 1.167, 1.167, 1.166, 1.124 and reaches 0.894 after 8 steps. The step size
+is not the limit (`tau` about 1e-3, the length speed about 8). Why the first step does nothing
+on this export was not traced further.
 
 #### Benchmarks (`-- intrinsic/`)
 
@@ -1050,19 +1083,21 @@ run alone, criterion medians. "added" is the number of vertices the intrinsic tr
 
 | mesh | triangulation | vertices (added) | angles | start | 10 steps | describe | insert | unwrap, cones off | chain |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|
-| uv_sphere 64x32 | caller | 1986 | | 3.9 ms | 20.5 ms | 23 us | 1.3 ms | 16.0 ms | 41.5 ms |
-| | flips | 1986 (0) | 5.6 to 92.8 | 7.4 ms | 21.5 ms | 94 us | 1.4 ms | 18.1 ms | 46.9 ms |
-| | refined | 2633 (647) | 25.0 to 119.6 | 18.1 ms | 27.4 ms | 123 us | 1.4 ms | 16.7 ms | 64.0 ms |
-| sheared 165, 64x64 | caller | 4225 | | 9.6 ms | 39.2 ms | 36 us | 2.6 ms | 38.0 ms | 87.5 ms |
-| | flips | 4225 (0) | 5.1 to 159.9 | 22.9 ms | 22.6 ms | 204 us | 3.7 ms | 39.1 ms | 85.2 ms |
-| | refined | 4865 (640) | 15.0 to 104.8 | 31.3 ms | 23.5 ms | 208 us | 3.8 ms | 36.6 ms | 93.5 ms |
-| spot quads | caller | 2930 | | 6.9 ms | 22.2 ms | 31 us | 1.8 ms | 22.9 ms | 51.0 ms |
-| | flips | 2930 (0) | 11.4 to 133.6 | 14.3 ms | 29.2 ms | 131 us | 1.8 ms | 24.0 ms | 67.6 ms |
-| | refined | 3185 (255) | 25.0 to 126.8 | 21.4 ms | 30.5 ms | 144 us | 1.8 ms | 23.8 ms | 79.7 ms |
+| uv_sphere 64x32 | caller | 1986 | | 4.1 ms | 21.9 ms | 25 us | 1.4 ms | 17.0 ms | 42.7 ms |
+| | flips | 1986 (0) | 5.6 to 92.8 | 8.0 ms | 22.2 ms | 90 us | 1.4 ms | 16.9 ms | 44.8 ms |
+| | refined | 2633 (647) | 25.0 to 119.6 | 17.8 ms | 29.6 ms | 149 us | 1.3 ms | 16.6 ms | 66.8 ms |
+| sheared 165, 64x64 | caller | 4225 | | 10.2 ms | 38.4 ms | 36 us | 2.6 ms | 38.5 ms | 87.8 ms |
+| | flips | 4225 (0) | 5.1 to 159.9 | 22.8 ms | 24.3 ms | 296 us | 4.0 ms | 39.2 ms | 83.9 ms |
+| | refined | 4865 (640) | 15.0 to 104.8 | 32.0 ms | 23.7 ms | 322 us | 3.8 ms | 36.2 ms | 95.4 ms |
+| spot quads | caller | 2930 | | 7.1 ms | 22.6 ms | 30 us | 1.8 ms | 23.0 ms | 58.3 ms |
+| | flips | 2930 (0) | 11.4 to 133.6 | 13.4 ms | 29.3 ms | 158 us | 1.8 ms | 23.6 ms | 66.5 ms |
+| | refined | 3185 (255) | 25.0 to 126.8 | 21.2 ms | 32.0 ms | 181 us | 1.8 ms | 23.5 ms | 75.7 ms |
 
 (The flow steps on the sheared grid are faster on the Delaunay triangulation, 22.6 against 39.2
 ms: a better conditioned system.) The construction of the triangulation (the start column
-minus the caller's) costs 3 to 13 ms on these meshes with flips and 14 to 22 with refinement.
+minus the caller's) costs 3 to 13 ms on these meshes with flips and 14 to 22 with refinement. The
+simplification of the cut is in `describe` (150 to 300 us on the intrinsic rows against 90 to 160
+before it); the chain is within the noise of the earlier run (about 10 %).
 
 #### What the Python binding and the Blender operators will have to change
 
@@ -1179,7 +1214,7 @@ Four error variants are not triggered by any test input, only their wording is c
 - The Python binding and the Blender add-on expose the boundary option (`optimize_boundary`);
   their tests (`scripts/py-test.sh`, `scripts/blender-test.sh`) only check that it reaches the
   pipeline and is reported, not its quality on meshes from Blender.
-- The intrinsic triangulation of the cut session: a circle law was not checked beyond the end-to-end rows; a cut through a vertex of the mesh exactly, a piece along a diagonal and a closed piece inside one triangle are refused; the flipped triangles near a cut close to a vertex are reported not repaired; the `3.5` times difference of energy the study saw on curved bad meshes was not reproduced (only the flat case, see above); nothing was run on Blender meshes; the flow on flipped sheared grids was run for 8 steps only.
+- The intrinsic triangulation of the cut session: a circle law was not checked beyond the end-to-end rows; a cut through a vertex of the mesh exactly, a piece along a diagonal and a closed piece inside one triangle are refused; the `3.5` times difference of energy the study saw on curved bad meshes was not reproduced (only the flat case, see above); nothing was run on Blender meshes; the flow on flipped sheared grids was run for 8 steps only.
 - The cut session (`ddg_uv::cutting`), see [the section](#the-cut-flow-on-polygon-meshes):
   no Blender mesh was used (the quad model is `spot_quadrangulated.obj`, whose polygons are
   fanned from their first corner by `PolygonMesh::from_polygons`, not Blender's tessellation),
