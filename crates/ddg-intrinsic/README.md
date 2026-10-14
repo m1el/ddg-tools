@@ -12,7 +12,7 @@ edges until it is Delaunay removes the negative cotan weights of the input witho
 single point of the surface.
 
 The contract of the crate is [`SPEC.md`](SPEC.md): scope, conventions, what must hold, and
-every decision the paper leaves open (entries `N1` to `N17`).
+every decision the paper leaves open (entries `N1` to `N25`).
 
 ## What is implemented
 
@@ -45,10 +45,19 @@ every decision the paper leaves open (entries `N1` to `N17`).
 - The cotan Laplacian (positive semidefinite) and the lumped vertex areas of the triangulation,
   angle defects, and quality numbers.
 
-Not implemented: vertex repositioning (Alg. 10) and vertex removal; a refinement that keeps
+- Vertex repositioning (Sec. 3.3.3, Alg. 10): an inserted vertex moved by a vector in its own
+  frame inside its flat star, with an exact test of the star, the place on the input mesh by a
+  trace, vertices on the boundary along the boundary (SPEC N19, N20, N24).
+- The intrinsic optimal Delaunay triangulation (Sec. 4.3, after Chen and Holst 2011): splits to
+  a target length, the area-weighted circumcentre update with a line search, Delaunay flips,
+  with a report and the angle and area distribution (SPEC N21 to N25).
+
+Not implemented: vertex removal, and with it the paper's general route for a move beyond the
+star of a vertex (SPEC N20); a refinement that keeps
 the angle bound through the export at spikes (SPEC N15: on thin tubes and handles the export
-can restore it, at vertices with a small angle sum it cannot); benches (timings are those of
-the example program). The twelve `it-` ids below have machine-checked theorems in
+can restore it, at vertices with a small angle sum it cannot). Benches: `benches/retriangulation.rs`
+(criterion: iDT, iDR, iODT and a sweep of moves); the tables' timings are those of the example
+programs. The sixteen `it-` ids below have machine-checked theorems in
 `lean/proofs/DdgProofs/Intrinsic/` (about the oracle's definitions in
 `lean/oracle/DdgOracle/Formulas/Intrinsic.lean`); what is cited instead of proved (existence,
 uniqueness and termination for the Delaunay triangulation, Rippa's theorem, the planar
@@ -132,11 +141,14 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | `segments_on_input(&nodes, &segments, &EdgeTraceOptions) -> Result<PathsOnInput, _>`, `segment_on_input(f, from, to, _)` | straight segments inside faces of the triangulation as pieces on input faces, checked like edge traces |
 | `overlay(&EdgeTraces) -> Result<Overlay, _>` | the common subdivision: `vertices` (on both triangulations), polygons `face(f)` with `face_input`, `face_triangulation`; `triangles()` |
 | `refine(&RefineOptions) -> Result<RefineReport, _>` | Delaunay refinement; `min_angle` (default 25°), `max_circumradius`, `InsertionLimit`; the report lists `below_bound` with `BelowReason` |
+| `move_vertex(v, [dx, dy]) -> Result<VertexMove, _>`, `odt_target(v, barycenters_at_boundary)`, `star_min_shape(v)` | move an inserted vertex inside its star (or the reason it is refused, `MoveRefusal`); the update of the optimal Delaunay triangulation at a vertex, in its frame |
+| `optimal_delaunay(&OptimalDelaunayOptions) -> Result<OptimalDelaunayReport, _>` | iODT; `TargetLength`, `max_iterations`, `motion_tolerance`, `step`, `max_halvings`, `min_shape`, `BoundaryVertices`, `OdtCenters`, `InsertionLimit`; the report has every `OdtIteration` and `ShapeStatistics` |
+| `shape_statistics() -> ShapeStatistics` | distribution of the corner angles and the face areas (`Summary`: min, max, mean, deviation, quantiles) |
 | `export_simplicial(&ExportOptions) -> Result<SimplicialExport, _>` | splits what is not simplicial; `mesh`, `geometry`, `locations`, `n_splits`, `min_angle`, `max_angle`, `is_delaunay`, `refinement`, `fingerprint`, `edge_point`, `triangulation_edge`, `check_state` |
 | `fingerprint()` | a hash of connectivity, lengths and places |
 | `irregularities`, `to_tri_mesh`, `check` | what is not simplicial; the triangulation as a `TriMesh` if it is; structure and identities |
 | `formulas::*` | the closed-form formulas as plain functions |
-| `IntrinsicError`, `FlipRefusal`, `EdgeTraceFailure` | every error, with the element concerned |
+| `IntrinsicError`, `FlipRefusal`, `InsertRefusal`, `MoveRefusal`, `EdgeTraceFailure` | every error, with the element concerned |
 
 What the signatures do not say:
 
@@ -162,6 +174,16 @@ What the signatures do not say:
   input mesh is a vertex-free point of an input face or of an input edge; a traced place
   within `1e-12` of the face's longest edge from an input edge is moved onto it and reported
   (`Insertion::snapped`).
+- **Moving a vertex** (`move_vertex`) never shortens the step and never leaves the star: a move
+  that would turn a triangle over is refused with the fraction that would still be inside
+  (`MoveRefusal::NotInStar`). The vector is in the frame of the vertex, which is that of the
+  input face or edge it lies in, so the frame changes when the vertex moves into another input
+  face; `VertexMove::back_direction` is the direction of the old place in the new frame. Input
+  vertices are never moved; a vertex on the boundary only along it (`displacement[1] == 0`).
+- **The optimal Delaunay triangulation** is deterministic, Delaunay after every iteration, and
+  moves only inserted vertices. With `TargetLength::MeanInputEdge(1.0)` (the default) it adds
+  1.5 to 3 times the input's vertices on most meshes; the target is the knob for the vertex
+  count. It does not improve angles at input vertices.
 - **Refinement is deterministic** and so is the export: the same input and options give the
   same triangulation bit for bit, hence the same fingerprint.
 - **`export_simplicial` changes the triangulation** (splits, and flips unless turned off); the
@@ -421,6 +443,147 @@ errors at the input vertices in lattice widths): 1 to 7 on the input mesh, 0.05 
 the Delaunay triangulation, 0.07 to 0.26 after refinement to 25° or 30°. Refinement is as
 good as flipping and not better (SPEC N16).
 
+### The optimal Delaunay triangulation (paper Sec. 4.3, Fig. 14, 17)
+
+`examples/odt_study.rs` on 12 meshes (logs in `runs_tmp/odt/`, not in the repository): flips
+alone (iDT), refinement to 25° and 30° (iDR), the optimal Delaunay triangulation with its
+target length chosen by bisection so that its vertex count is that of iDR at 25° and at 30°
+(≈, within 1 %), and with the default options (target = the mean input edge). `s`: the time of
+the operation, one thread, run alone (the bisection runs are not counted). Angles: the smallest,
+the 1 % and 99 % quantiles and the largest corner, percent of corners below 30° and above 90°.
+Areas: largest over smallest, coefficient of variation. `λ_max/λ_2`: condition number of the
+pencil of the cotan Laplacian and the lumped masses (power iteration, inverse iteration with a
+Cholesky factorization). Trace mismatch: the largest relative mismatch of an edge trace over the
+input mesh (SPEC N8; the tolerance is `1e-6`). Not shown: camelbadnonuniform and camel_noise1
+(like camelbad and camel_noise2), the sheared grid at 135° (all six are the regular grid of the
+flips: nothing is split or moved).
+
+| mesh | triangulation | V | s | min° | 1 % | 99 % | max° | < 30° | > 90° | area max/min | area cv | λ_max/λ_2 | trace mismatch |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| spot | iDT | 2930 | 0.002 | 11.428 | 19.98 | 97.66 | 132.56 | 5.13 | 4.23 | 1.840e2 | 0.644 | 1.188e5 | 7.9e-16 |
+| spot | iDR 25° | 3185 | 0.005 | 25.047 | 27.94 | 106.28 | 126.82 | 2.29 | 4.83 | 3.065e2 | 0.718 | 1.737e5 | 3.5e-11 |
+| spot | iODT ≈ iDR 25° | 3202 | 0.039 | 11.428 | 20.29 | 98.90 | 132.56 | 4.49 | 4.21 | 1.174e2 | 0.529 | 1.188e5 | 2.0e-14 |
+| spot | iDR 30° | 3757 | 0.007 | 30.031 | 31.53 | 105.35 | 119.02 | 0.00 | 4.45 | 3.838e2 | 0.817 | 1.469e5 | 3.3e-13 |
+| spot | iODT ≈ iDR 30° | 3792 | 0.064 | 11.428 | 21.28 | 99.06 | 132.56 | 3.28 | 4.34 | 8.511e1 | 0.458 | 1.189e5 | 2.1e-14 |
+| spot | iODT default | 7688 | 0.483 | 12.446 | 27.90 | 98.13 | 118.51 | 1.49 | 4.29 | 4.257e1 | 0.326 | 1.190e5 | 2.3e-12 |
+| bob | iDT | 5344 | 0.003 | 11.061 | 26.78 | 91.85 | 103.58 | 5.41 | 11.94 | 5.623e1 | 0.475 | 5.617e4 | 8.8e-16 |
+| bob | iDR 25° | 5437 | 0.007 | 25.044 | 28.32 | 91.87 | 123.11 | 4.62 | 12.21 | 8.100e1 | 0.494 | 6.644e4 | 8.0e-14 |
+| bob | iODT ≈ iDR 25° | 5402 | 0.024 | 11.061 | 26.81 | 91.86 | 111.00 | 5.35 | 11.87 | 5.087e1 | 0.446 | 5.617e4 | 5.7e-15 |
+| bob | iDR 30° | 6452 | 0.012 | 30.017 | 31.27 | 91.87 | 119.18 | 0.00 | 8.75 | 1.067e2 | 0.624 | 6.324e4 | 8.1e-13 |
+| bob | iODT ≈ iDR 30° | 6453 | 0.116 | 11.061 | 28.11 | 94.51 | 116.36 | 4.19 | 10.29 | 3.500e1 | 0.344 | 5.618e4 | 2.8e-14 |
+| bob | iODT default | 12186 | 0.731 | 14.183 | 28.34 | 95.57 | 117.31 | 2.56 | 6.25 | 1.698e1 | 0.293 | 5.618e4 | 9.3e-12 |
+| blub | iDT | 7106 | 0.004 | 6.921 | 12.10 | 97.98 | 158.97 | 11.82 | 4.64 | 8.205e2 | 0.714 | 3.783e5 | 2.3e-15 |
+| blub | iDR 25° | 8877 | 0.019 | 25.005 | 26.86 | 111.97 | 129.86 | 3.77 | 6.88 | 4.213e2 | 0.904 | 4.023e5 | 1.8e-13 |
+| blub | iODT ≈ iDR 25° | 8836 | 0.345 | 6.921 | 13.46 | 99.24 | 158.97 | 8.46 | 3.92 | 4.722e2 | 0.559 | 3.784e5 | 2.7e-13 |
+| blub | iDR 30° | 10757 | 0.027 | 30.004 | 31.17 | 107.82 | 119.84 | 0.00 | 5.49 | 4.382e2 | 1.048 | 5.256e5 | 2.3e-12 |
+| blub | iODT ≈ iDR 30° | 10768 | 0.783 | 7.682 | 15.83 | 99.16 | 158.97 | 6.49 | 3.86 | 3.914e2 | 0.483 | 3.784e5 | 3.5e-12 |
+| blub | iODT default | 17885 | 1.499 | 7.682 | 20.17 | 97.31 | 158.97 | 3.49 | 3.46 | 1.943e2 | 0.344 | 3.785e5 | 1.3e-11 |
+| camelbad | iDT | 11392 | 0.009 | 1.342 | 12.38 | 116.31 | 164.84 | 12.32 | 8.46 | 3.837e5 | 1.047 | 2.159e7 | 6.9e-14 |
+| camelbad | iDR 25° | 15561 | 0.040 | 25.000 | 26.81 | 112.23 | 129.95 | 4.04 | 7.94 | 1.437e5 | 1.236 | 5.420e7 | 1.2e-12 |
+| camelbad | iODT ≈ iDR 25° | 15692 | 0.801 | 1.497 | 15.01 | 109.54 | 164.84 | 7.32 | 6.42 | 7.093e4 | 0.535 | 2.159e7 | 2.1e-13 |
+| camelbad | iDR 30° | 22314 | 0.072 | 30.001 | 31.18 | 106.60 | 119.97 | 0.00 | 5.81 | 9.990e4 | 1.332 | 5.124e7 | 7.9e-12 |
+| camelbad | iODT ≈ iDR 30° | 22232 | 2.074 | 1.942 | 19.32 | 104.13 | 164.27 | 4.40 | 5.07 | 4.133e4 | 0.401 | 2.159e7 | 1.9e-12 |
+| camelbad | iODT default | 26712 | 3.059 | 2.313 | 22.09 | 101.88 | 162.50 | 3.20 | 4.30 | 3.146e4 | 0.357 | 2.159e7 | 1.3e-12 |
+| camel_noise2 | iDT | 11381 | 0.008 | 1.185 | 12.06 | 122.16 | 161.36 | 11.52 | 12.95 | 2.570e3 | 0.687 | 4.761e5 | 3.5e-15 |
+| camel_noise2 | iDR 25° | 19749 | 0.055 | 25.001 | 26.52 | 110.96 | 129.87 | 4.22 | 8.07 | 4.115e3 | 0.783 | 2.302e6 | 7.5e-13 |
+| camel_noise2 | iODT ≈ iDR 25° | 19589 | 0.840 | 1.558 | 19.22 | 106.88 | 158.70 | 3.72 | 5.82 | 5.263e2 | 0.352 | 4.419e5 | 1.4e-13 |
+| camel_noise2 | iDR 30° | 31613 | 0.112 | 30.000 | 31.07 | 105.61 | 119.88 | 0.00 | 5.88 | 3.737e3 | 0.857 | 2.858e6 | 2.8e-12 |
+| camel_noise2 | iODT ≈ iDR 30° | 31709 | 3.157 | 2.621 | 28.44 | 97.98 | 158.70 | 1.29 | 3.01 | 2.783e2 | 0.252 | 3.493e6 | 3.3e-12 |
+| camel_noise2 | iODT default | 25951 | 2.779 | 2.421 | 24.73 | 101.11 | 158.70 | 2.03 | 3.96 | 3.676e2 | 0.285 | 4.333e5 | 4.3e-12 |
+| camelshotnoise | iDT | 11513 | 0.008 | 0.026 | 10.40 | 117.04 | 179.71 | 13.46 | 6.23 | 1.025e7 | 0.998 | 1.792e10 | 2.1e-11 |
+| camelshotnoise | iDR 25° | 17173 | 0.044 | 0.042 | 26.83 | 111.96 | 129.73 | 4.00 | 7.31 | 5.718e5 | 1.307 | 1.879e8 | 3.8e-11 |
+| camelshotnoise | iODT ≈ iDR 25° | 17072 | 1.261 | 0.026 | 14.06 | 105.85 | 179.71 | 7.56 | 5.37 | 3.302e6 | 0.527 | 2.105e8 | 2.1e-11 |
+| camelshotnoise | iDR 30° | 27265 | 0.090 | 0.042 | 31.09 | 106.55 | 119.93 | 0.01 | 5.66 | 6.234e5 | 1.562 | 2.558e8 | 2.7e-11 |
+| camelshotnoise | iODT ≈ iDR 30° | 27257 | 3.428 | 0.026 | 20.83 | 101.49 | 179.71 | 3.96 | 4.27 | 3.302e6 | 0.399 | 9.643e8 | 1.0e-10 |
+| camelshotnoise | iODT default | 23130 | 2.593 | 0.026 | 18.17 | 102.86 | 179.71 | 5.14 | 4.77 | 3.302e6 | 0.426 | 9.684e8 | 1.3e-10 |
+| jitter 0.33 | iDT | 1089 | 0.001 | 14.730 | 22.85 | 107.73 | 125.34 | 4.52 | 7.50 | 9.204e0 | 0.342 | 1.507e3 | 7.7e-16 |
+| jitter 0.33 | iDR 25° | 1214 | 0.002 | 25.028 | 27.06 | 106.99 | 123.77 | 3.12 | 7.46 | 1.281e1 | 0.379 | 3.157e3 | 1.4e-13 |
+| jitter 0.33 | iODT ≈ iDR 25° | 1205 | 0.011 | 14.730 | 24.40 | 105.85 | 125.34 | 3.29 | 6.73 | 8.200e0 | 0.314 | 2.002e3 | 1.1e-14 |
+| jitter 0.33 | iDR 30° | 1514 | 0.003 | 30.011 | 31.45 | 105.00 | 119.48 | 0.00 | 6.19 | 1.726e1 | 0.432 | 3.395e3 | 2.5e-13 |
+| jitter 0.33 | iODT ≈ iDR 30° | 1501 | 0.032 | 17.794 | 27.35 | 103.58 | 125.34 | 1.80 | 5.57 | 7.374e0 | 0.315 | 2.369e3 | 2.0e-14 |
+| jitter 0.33 | iODT default | 2469 | 0.093 | 20.917 | 32.24 | 98.20 | 118.68 | 0.46 | 3.54 | 5.554e0 | 0.258 | 3.515e3 | 4.2e-14 |
+| sheared 165° | iDT | 1089 | 0.002 | 5.104 | 5.10 | 159.90 | 159.90 | 5.97 | 3.12 | 1.000e0 | 0.000 | 8.170e4 | 9.6e-15 |
+| sheared 165° | iDR 25° | 1409 | 0.003 | 15.000 | 26.20 | 90.00 | 104.83 | 4.45 | 0.99 | 8.000e0 | 0.306 | 1.261e5 | 9.6e-15 |
+| sheared 165° | iODT ≈ iDR 25° | 1409 | 0.010 | 15.000 | 15.00 | 95.76 | 114.91 | 3.25 | 3.45 | 4.500e0 | 0.323 | 1.098e5 | 1.2e-13 |
+| sheared 165° | iDR 30° | 2223 | 0.006 | 15.000 | 31.15 | 107.02 | 110.83 | 0.02 | 3.28 | 1.600e1 | 0.716 | 1.740e5 | 3.3e-14 |
+| sheared 165° | iODT ≈ iDR 30° | 2433 | 0.037 | 15.000 | 26.77 | 93.32 | 120.02 | 1.80 | 3.95 | 3.653e0 | 0.228 | 1.098e5 | 3.8e-12 |
+| sheared 165° | iODT default | 1153 | 0.003 | 15.000 | 15.00 | 150.00 | 150.00 | 3.80 | 3.03 | 3.000e0 | 0.177 | 5.840e4 | 9.6e-15 |
+| cells 1:16 | iDT | 16929 | 0.009 | 3.576 | 3.58 | 90.00 | 90.00 | 33.33 | 0.00 | 1.000e0 | 0.000 | 3.066e7 | 0.0e0 |
+| cells 1:16 | iDR 25° | 56865 | 0.283 | 26.096 | 26.54 | 113.96 | 115.06 | 8.10 | 12.06 | 3.202e1 | 1.152 | 5.233e7 | 3.8e-14 |
+| cells 1:16 | iODT ≈ iDR 25° | 50213 | 2.371 | 3.381 | 3.58 | 90.02 | 143.53 | 33.25 | 6.26 | 7.760e0 | 0.354 | 1.251e8 | 7.6e-11 |
+| cells 1:16 | iDR 30° | 106529 | 0.494 | 30.373 | 32.01 | 103.36 | 113.65 | 0.00 | 6.37 | 2.397e1 | 0.861 | 4.770e7 | 6.0e-14 |
+| cells 1:16 | iODT ≈ iDR 30° | 113573 | 16.310 | 9.070 | 22.90 | 110.54 | 159.57 | 3.04 | 3.49 | 1.270e1 | 0.250 | 5.782e7 | 9.6e-12 |
+| cells 1:16 | iODT default | 50209 | 3.475 | 3.381 | 3.58 | 90.02 | 141.18 | 33.25 | 6.26 | 9.502e0 | 0.354 | 1.251e8 | 8.0e-11 |
+
+**Sec. 4.3 reproduces.** At the vertex count of refinement the areas are far more even: the
+coefficient of variation is lower on every mesh but the sheared 165° grid at 25° (0.32 against
+0.31), by a factor of 1.1 (bob) to 5 (camelbadnonuniform: 0.58 against 2.9), and the largest
+area ratio is lower on 6 of the 8 curved meshes at 25° and on 7 at 30° (not on camelshotnoise,
+whose spikes keep their tiny triangles). The price is the skinny
+angles: the smallest angle stays that of the flips (an input vertex cannot move, and iODT does
+not split an edge for an angle), the 1 % quantile is 13 to 28° (3.6° on cells 1:16) where
+refinement has 26 to 32°, 1 to 8 % of the corners are below 30° (33 % on cells 1:16 at 25°), and the largest angle stays near that of the flips (159°
+on blub, 164° on the camels, where refinement has at most 130°). The 99 % quantile of the
+largest angle is lower than refinement's on most meshes. The paper's Fig. 14 shows the same:
+fewer outliers in area, a wider angle histogram than refinement.
+**Fig. 17 in part.** `λ_max/λ_2` after iODT at the count of 25° is within 10 % of that of the flips
+on 7 of the 8 curved meshes (the smallest elements are those at input vertices, which neither changes) and
+lower than refinement's at the same vertex count in 13 of 18 comparisons (camelbad 2.2e7 against
+5.4e7 and 5.1e7); it is higher on camelshotnoise (both counts), camel_noise2 at 30° and
+cells 1:16 (both): spikes and thin input faces that iODT leaves. Fig. 17 compares with extrinsic
+ODT, which is not implemented here.
+**Time.** iODT costs 3 to 40 times the time of refinement at the same vertex count (bob 25°: 0.024
+against 0.007 s; camelbad 30°: 2.1 against 0.07 s; cells 1:16 at 30°: 16 against 0.5 s), because
+every iteration flips the whole triangulation twice and it needs 6 to 50 iterations to converge
+(motion below `1e-3` of an edge). With the default target it converged on 10 of the 12 meshes;
+camelbadnonuniform and camelshotnoise keep moving near their spikes (on camelshotnoise the
+shape bound of SPEC N25 stopped 1640 vertex moves) and reached the limit of 50 iterations, as
+did two of the matched runs (camelbadnonuniform, cells 1:16 at 30°).
+**The default target length** (the mean input edge) adds 1 to 2 times the input's vertex count
+on the curved meshes and nothing on the sheared lattices; on a regular mesh it splits every
+diagonal and lowers the smallest angle (regular grid 45° to 39°, icosphere 54° to 29°,
+`flow_on_bad_meshes.rs quality`). It is the knob for the vertex count, not a quality setting.
+
+### The optimal Delaunay triangulation under the cut flow
+
+`examples/flow_on_bad_meshes.rs` with `TREAT=odt` (default options) and `TREAT=odt15` (target 1.5
+times the mean input edge), all six treatments rerun with this code (logs in
+`runs_tmp/flow/`, not in the repository), default stages. The user's criteria are robustness,
+correctness and speed.
+
+| measure | flips (default) | refined 25° | iODT, target 1.5 | iODT, default |
+|---|---|---|---|---|
+| vertices added, real meshes (9) | 0 to 133 | 93 to 8 688 | 964 to 5 155 | 4 758 to 16 686 |
+| building the triangulation, camelbad (s, alone) | 0.027 | 0.072 | 0.83 | 2.9 |
+| flow step, camelbad / camel_noise2 / bob (ms, alone) | 15 / 15 / 8 | 22 / 28 / 9 | 19 / 19 / 10 | 38 / 33 / 15 |
+| evaluation, largest relative error of the speed: sheared 165° / needles / regular grid | 0.028 / 0.061 / 0.031 | 0.028 / 0.029 / 0.031 | 0.028 / 0.020 / 0.031 | 0.028 / 0.020 / 0.022 |
+| redistancing, largest error in widths: sheared 165° / needles / cells 1:16 | 0.48 / 0.44 / 1.02 | 0.59 / 0.27 / 0.36 | 0.48 / 0.19 / 1.02 | 0.50 / 0.19 / 0.98 |
+| circle law, needles (radius error, roundness) | −0.67 %, 0.93 % | +0.20 %, 0.16 % | +0.23 %, 0.14 % | +0.22 %, 0.14 % |
+| real meshes: final energy on the input mesh, bob / blub / camelbadnonuniform | 0.942 / 0.922 / 1.482 | 0.941 / 0.937 / 1.484 | 1.022 / 0.990 / 1.479 | 0.944 / 0.921 / 1.427 |
+| way back, largest mismatch of a segment | `3e-13` (`3e-11` camelshotnoise) | `5e-12` (`2e-10`) | `5e-11` | `1.2e-10` |
+| failures | none | none | none | latlon 41×82, `α_L = 3`: the run stalls at the start energy (10.17 against 9.77) |
+
+- **Correctness.** Where flips leave a mesh well shaped (lattices, sheared grids, the
+  icospheres) the target 1.5 splits nothing and iODT is the flip triangulation; where the input
+  has long needles (needles and caps) both targets make the flow as accurate as refinement does
+  (circle law 0.2 % instead of 0.7 %, evaluation and redistancing better than refinement). The
+  default target, with 2 to 3 times the vertices, makes the evaluation on flat meshes more
+  accurate by the finer mesh alone, and on the latitude–longitude spheres less accurate than
+  flips (`s` up to 4.5e-3 against 1.1e-3), though more than refinement.
+- **Robustness.** No error, no failed trace or way back on any mesh. One stall of the default
+  target on a latitude–longitude sphere (above) that flips and refinement do not have; on the
+  real meshes the target 1.5 stopped the flow earlier, at a higher energy, on bob and blub (the
+  stop rule after a rise of the energy, SPEC D27), and the default target did better than all
+  others on camelbadnonuniform. The runs on these meshes are sensitive to the triangulation
+  (ROADMAP: "chaotic"), so single energies are not a ranking.
+- **Speed.** iODT is the slowest treatment to build (up to 4.8 s alone with the default target
+  and 1.2 s with the target 1.5, where flips take at most 0.07 s) and, with the default target,
+  makes every flow step 1.7 to 4 times as slow as on the flips; the target 1.5 adds 0 to 70 %.
+- **Recommendation: keep Delaunay flips as the default** of `ddg_uv::cutting`. iODT does not
+  improve robustness or correctness over flips where refinement does not already, and costs time;
+  it is offered as `IntrinsicOptions::optimal_delaunay` (`IntrinsicOptions::optimized()`) for
+  callers who want even triangle areas.
+
 ## Verification
 
 - `tests/invariants.rs`: a fresh triangulation is the input mesh, bit for bit; after random
@@ -467,11 +630,15 @@ good as flipping and not better (SPEC N16).
 - Unit tests of `src/refine.rs`: the three rules at their thresholds (a point just inside and
   just outside the circle on a boundary edge, also from a neighbouring face; the needle guard
   against a traced loop; split distances at a boundary vertex of 20°).
-- `tests/oracle.rs`: the 18 fixtures of the Lean oracle (`lean/oracle/fixtures/intrinsic`),
+- `tests/oracle.rs`: the 24 fixtures of the Lean oracle (`lean/oracle/fixtures/intrinsic`),
   an implementation of single operations written from the paper and `SPEC.md` without this
   crate's code: flips with the triangulation before and after, Delaunay flipping (also with
   self-edges and double edges), traces from vertices, the trace of every halfedge, and
-  circumcentres with their traces; 23 000 comparisons, largest difference `4e-14` (SPEC N17).
+  circumcentres with their traces; 23 000 comparisons, largest difference `4e-14` (SPEC N17);
+  and the six `it-move-*` fixtures (an insertion or a split, flips, moves of the new vertex: its
+  place, the triangulation and the update of the optimal Delaunay triangulation after every
+  move, every refusal with the admissible fraction; SPEC N26): 7 294 comparisons, largest
+  difference `9e-14`.
   And the oracle's readings where no fixture exists: a direction equal to a signpost, the
   first halfedge of a vertex, the lengths of an edge split.
 - `tests/export.rs`: the export is a simplicial mesh of the same surface with the same ids,
@@ -479,13 +646,30 @@ good as flipping and not better (SPEC N16).
   and after; a cut (a closed curve, and a network with a triple point) comes back as pieces
   on input faces; the end-to-end run above.
 
+- `tests/reposition.rs` (SPEC §5 item 10): random moves of every inserted vertex on the 17
+  generated shapes, 3 rounds with Delaunay flips between: items 1 to 3 (area `1e-11`, angle sums
+  and signposts `1e-9`, Gauss–Bonnet, every edge traces to its vertex with `1e-8` and has its
+  length in space), the overlay has the input's area, point queries are inverse (`1e-9` of the
+  mean edge), input vertices stay; about half of the accepted moves are beyond the paper's
+  height bound; on a flat grid the moved vertex is at its old place plus the displacement
+  (`1e-14`) and its signposts are the world angles; a move and the move back restore lengths
+  (`1e-12`) and signposts (`1e-10`); the ODT update against coordinates (`1e-14`) and against a
+  central difference of Chen and Holst's energy (`1e-7`); every refusal changes nothing.
+- `tests/odt.rs` (§5 item 11): iODT on the 17 shapes with 1, 3 and 12 iterations, both boundary
+  rules: Delaunay, items 1 to 3, overlay, point queries, input vertices stay; on the models and
+  bad meshes (8 iterations): Delaunay, consistency, traces; determinism and the prefix property
+  of the iterations; convergence and even areas on a jittered grid (area cv 0.17 against 0.29
+  for flips and 0.31 for refinement); fixed and sliding boundary vertices; limits; invalid
+  options change nothing.
+
 Not verified: termination of refinement beyond what SPEC N1 and N4 argue (it is observed);
 the export's refinement rounds on meshes other than those in the table; the way back on
 curved shapes is checked by the trace's own end-point check and by round trips, not against
 positions (the position checks are on flat shapes); cuts whose nodes fall on vertices of the
 export (the flow keeps crossings off vertices); the Lean proofs of SPEC §7; the oracle has no
-fixtures for insertion, split, point queries, overlay, refinement and export; no mutation check
-was run on the second half.
+fixtures for insertion, split (except as the start of a move), point queries, overlay, refinement,
+export and the optimal Delaunay iteration as a whole; no mutation check was run on the second
+half or on the moves.
 
 ## Formula ids
 
@@ -503,6 +687,10 @@ was run on the second half.
 | `it-barycentric-coordinates` | `formulas::barycentric` | ratios of signed areas |
 | `it-point-distances` | `formulas::corner_distances` | `d_k = |Σ_j b_j v_j − v_k|` with the triangle laid out in the plane, for barycentric coordinates that sum to one (the function does not read `b_0`: it places the point at `b_1 v_1 + b_2 v_2`, with `v_0` at the origin): the lengths of the edges of an inserted vertex, and of an edge split with the point on a side (on side `ij`: `d_i = ℓ_ij b_j`, `d_j = ℓ_ij b_i`) |
 | `it-circumcenter` | `formulas::circumcenter_barycentric` | weights `a_k² (a_{k+1}² + a_{k+2}² − a_k²)`, `a_k` the side opposite corner `k`, normalized |
+| `it-move-length` | `formulas::moved_length` | `ℓ' = √((ℓ − r cos α)² + (r sin α)²) = √(r² + ℓ² − 2rℓ cos α)` (Alg. 10) |
+| `it-move-area` | `formulas::moved_double_area` | `2A' = 2A − v × (k − j)`: the area of a triangle of the star after its vertex moved by `v`; the areas of a closed star add up to the same total |
+| `it-circumcenter-vector` | `formulas::weighted_circumcenter_vector` | `A (o − a) = (A ℓ_ab / 2, ℓ_ab (ℓ_ac² + ℓ_bc² − ℓ_ab²) / 8)` in the frame of side `ab` |
+| `it-odt-update` | `formulas::odt_displacement`, `formulas::weighted_barycenter_vector` | `α Σ |T| (c_T − x) / Σ |T|` (Chen and Holst 2011, Eq. 4.13); proved: it is `−3/(2|ω|)` times the gradient of the planar ODT energy of the star (their Eq. 4.5) |
 
 From `ddg-core`, on the triangulation: `cotan-laplacian`, `lumped-mass`, `angle-defect`,
 `boundary-geodesic-curvature`.
@@ -522,7 +710,10 @@ the circumcentre from the barycentre of the triangle, and splitting an edge when
 circumcentre lies on it. Different by design: the boundary rule (encroachment is tested,
 shells at small angles, no vertex is removed; SPEC N1), what is left below the bound is
 reported instead of skipped (SPEC N4), the overlay is built from the traces with a
-consistency check and as a mesh (the reference draws it; SPEC N12).
+consistency check and as a mesh (the reference draws it; SPEC N12). The reference has no vertex
+repositioning and no optimal Delaunay triangulation (only `removeInsertedVertex`, and an
+extrinsic `smoothByCircumcenter` in geometry-central's `remeshing.cpp`); those are written from
+the paper, Chen and Holst 2011 and SPEC N19 to N26.
 
 ## Reproducing the tables
 
@@ -531,6 +722,16 @@ export CARGO_TARGET_DIR=$PWD/target-intrinsic
 cargo run --release -p ddg-intrinsic --example delaunay_report -- data/models/spot/spot/spot_triangulated.obj ...
 cargo test --release -p ddg-intrinsic --test models --test reference --test distance -- --nocapture
 cargo test --release -p ddg-intrinsic --test refinement --test export --test overlay -- --nocapture
+```
+
+For the optimal Delaunay triangulation (one process per mesh in parallel for the table, then
+one after the other with `--no-cond` for the times) and the cut flow (one process per
+subcommand and treatment, `TREAT=input|flip|r25|r30|odt|odt15`; `speed` alone):
+
+```sh
+cargo run --release -p ddg-intrinsic --example odt_study -- data/models/spot/spot/spot_triangulated.obj sheared165 ...
+TREAT=odt cargo run --release -p ddg-intrinsic --example flow_on_bad_meshes -- laws
+cargo bench -p ddg-intrinsic --bench retriangulation
 ```
 
 The example prints, per mesh and angle bound, the refinement report, traces, overlay and

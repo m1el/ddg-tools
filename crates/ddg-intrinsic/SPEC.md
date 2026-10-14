@@ -561,7 +561,7 @@ and from `crates/ddg-intrinsic/README.md`.
   larger than `Θ`, a signpost of `2π` or more) one subtraction is not enough, and the crate does
   not guard against them.
 
-Entries N19 to N23 were added with vertex repositioning and the optimal Delaunay triangulation
+Entries N19 to N27 were added with vertex repositioning and the optimal Delaunay triangulation
 (2026-10-14). The reference implementation has neither (geometry-central 76da12c has
 `removeInsertedVertex`, which flips the vertex to degree three and deletes it, and an extrinsic
 `smoothByCircumcenter` in `remeshing.cpp` that is not used by the demo); everything here is
@@ -674,7 +674,9 @@ written from the paper and the cited papers.
   distribution of the result (`ShapeStatistics`: angle quantiles, fractions below 10°/20°/30°
   and above 90°/120°/150°, area max/min and coefficient of variation).
   *Defaults*: 50 iterations, motion tolerance `1e-3`, `α = 1` (Chen and Holst's initial step) with
-  up to 8 halvings, at most 10 insertions per vertex (1000 at least, as refinement).
+  up to 8 halvings, the shape bound `1e-2` of N25, at most 10 insertions per vertex (1000 at least,
+  as refinement). With them it converged on 10 of 12 meshes of the study (N27), in at most 50
+  iterations (spot 25, camelbad 44).
 * **N22** *Moves beyond the star in the optimal Delaunay iteration* (N20): the step is halved,
   never clamped to the border of the star, and every halved or abandoned move is counted in the
   report. The paper's general route (removal and re-insertion) is not used.
@@ -727,6 +729,17 @@ written from the paper and the cited papers.
   7; a vertex on an interior input edge; a boundary vertex) from the oracle's README. What the
   oracle reads differently is in its readings 59 to 69 (the vertex is named in `move V DX DY`; the
   order of the tests, see N19).
+
+* **N27** *Sec. 4.3 measured* (README, "The optimal Delaunay triangulation"; 12 meshes). At the
+  vertex count of refinement the paper's claim reproduces: the areas are more even (coefficient
+  of variation lower on every mesh but one, by up to a factor of 5) at the cost of skinnier
+  angles (the smallest angle stays that of the flips, since input vertices cannot move; 1 to 8 %
+  of the corners below 30° where refinement has none). The condition number of the cotan
+  Laplacian with lumped masses is lower than refinement's in 13 of 18 comparisons. iODT takes 3
+  to 40 times the time of refinement. In the cut flow (`flow_on_bad_meshes.rs`, TREAT=odt, odt15)
+  it brings no gain in robustness or correctness over flips that refinement does not bring, and
+  costs time; the default of `ddg_uv::cutting` stays Delaunay flips, iODT is an explicit option
+  (`IntrinsicOptions::optimal_delaunay`).
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,

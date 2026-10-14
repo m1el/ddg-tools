@@ -6,15 +6,27 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
 ## Scheduled
 
-1. **The optimal Delaunay variant** of the intrinsic triangulations paper (vertex repositioning,
-   Sec. 3.3.3 and 4.3). The user: "eventually". Nothing is started; `ddg-intrinsic` leaves room for
-   `move_vertex`.
-2. **The cones solver against the dataset's own measure** (proposed 2026-10-14, not approved): a
+1. **The cones solver against the dataset's own measure** (proposed 2026-10-14, not approved): a
    feedback loop that lowers the distortion weight where the solver's scale factor is far from the
    one the flattening realizes (needle tips), judged by the 23-mesh comparison in
    `crates/ddg-optimal-cones/README.md`, "Published UVs: measured comparison".
 
 ## Landed since the first version of this file
+
+* **The optimal Delaunay variant** of the intrinsic triangulations paper (2026-10-14,
+  `crates/ddg-intrinsic`, SPEC N19 to N25, README "The optimal Delaunay triangulation"):
+  `move_vertex` (Alg. 10: an inserted vertex inside its flat star, an exact test of the star
+  instead of the paper's height bound, refused beyond it; boundary vertices along the boundary)
+  and `optimal_delaunay` (target-length splits, Chen and Holst's update with their line search,
+  flips; options for the target, step, stopping, boundary and centres; a report with the
+  iterations and the angle and area distribution). Lean: four new formula ids proved or cited,
+  an oracle task for the move and its replay. Measured (12 meshes): at the vertex count of
+  refinement the areas are far more even (coefficient of variation 0.31 to 0.58 against 0.31 to
+  2.9 at 25°), the smallest angles are those of the input (an input vertex cannot move), the
+  cotan Laplacian is mostly better conditioned than after refinement; it costs 3 to 40 times
+  the time of refinement. In the cut flow (`flow_on_bad_meshes.rs`, TREAT=odt, odt15) it is an explicit
+  option of `ddg_uv::cutting::IntrinsicOptions`; the default stays Delaunay flips (see the
+  README for the comparison).
 
 * Flipped UV triangles after the Blender Apply: the library's triangulation of the split polygons
   is stored and used by the unwrap (`blender/README.md`).
@@ -61,6 +73,17 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
 * The comparison with the authors' program of the cut flow was refreshed after D22 only, not
   after D26 to D31.
+
+* From the optimal Delaunay work (2026-10-14): a move beyond the star of a vertex (the paper's
+  general route: remove the vertex, retriangulate, insert again) is not implemented (SPEC N20);
+  iODT cannot improve angles at input vertices, so on meshes whose bad angles sit there
+  (latitude-longitude poles, cells 1:16, spikes) it leaves them; its default target length (the
+  mean input edge) adds 1 to 2 times the input's vertex count on curved meshes and lowers the
+  smallest angle of an already regular mesh (grid 45° to 39°, icosphere 54° to 29°); with it the
+  flow stalled once at its start energy (latitude-longitude 41x82, `α_L = 3`), which flips and
+  refinement do not; the bindings and the
+  Blender add-on do not expose the option yet; the accuracy of signposts after many operations
+  with thin intermediate triangles (SPEC N25) is bounded by measurement, not by an argument.
 
 ## Decided (2026-10-14)
 
