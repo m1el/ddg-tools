@@ -625,6 +625,10 @@ fn replay_delaunay(case: &Case, out: &Output, tally: &mut Tally) {
 
 // ----- traces -----
 
+/// Crossings as the oracle lists them: the input edge by its vertices `U < V` and the
+/// parameter from `U`.
+type CrossingList = Vec<(usize, usize, f64)>;
+
 /// A trace as the oracle prints it.
 struct OracleTrace {
     stop: String,
@@ -885,7 +889,7 @@ fn replay_edgetrace(case: &Case, out: &Output, tally: &mut Tally) {
     // The oracle's rows, each with its crossings; a row is identified by (U, W, PHI).
     let rows: Vec<&Line> = out.all("te").collect();
     tally.equal("number of traced halfedges", rows.len(), tri.n_halfedges());
-    let mut crossings: HashMap<(usize, usize, u64), Vec<(usize, usize, f64)>> = HashMap::new();
+    let mut crossings: HashMap<(usize, usize, u64), CrossingList> = HashMap::new();
     for l in out.all("tx") {
         crossings
             .entry((int(&l[1]), int(&l[2]), float(&l[3]).to_bits()))
@@ -1262,5 +1266,97 @@ fn a_direction_equal_to_a_signpost_runs_along_the_edge() {
             }
         }
         assert_eq!(n_boundary, mesh.n_boundary_edges());
+    }
+}
+
+/// The oracle's reading 50, which SPEC N9 now states: the first halfedge of a vertex, the one
+/// with the signpost 0, is the outgoing halfedge with the smallest id at an interior vertex
+/// and the outgoing halfedge without a twin at a boundary vertex; the others follow
+/// counter-clockwise with the scaled corner angles added up.
+#[test]
+fn the_first_halfedge_of_a_vertex_has_the_signpost_zero() {
+    for name in [
+        "it-trace-grid",
+        "it-trace-ico2",
+        "it-delaunay-annulus",
+        "it-flip-tube",
+    ] {
+        let case = read_case(name);
+        let tri = build(&case);
+        let mesh = &case.mesh;
+        let mut first = vec![usize::MAX; mesh.n_vertices()];
+        for h in 0..mesh.n_halfedges() {
+            let v = mesh.from_vertex(h);
+            let better = if mesh.is_boundary_vertex(v) {
+                mesh.twin(h).is_none()
+            } else {
+                first[v] == usize::MAX
+            };
+            if better {
+                first[v] = h;
+            }
+        }
+        for (v, &h) in first.iter().enumerate() {
+            assert_eq!(tri.signpost(h), 0.0, "{name}: vertex {v}, halfedge {h}");
+            assert_eq!(tri.input().signpost(h), 0.0, "{name}: vertex {v}");
+            // Counter-clockwise from it the signposts increase, by the corner angles scaled.
+            let boundary = mesh.is_boundary_vertex(v);
+            let full = if boundary { std::f64::consts::PI } else { TAU };
+            let scale = full / tri.vertex_angle_sum(v);
+            let (mut g, mut expected) = (h, 0.0);
+            loop {
+                assert!(
+                    (tri.signpost(g) - expected).abs() < 1e-13,
+                    "{name}: vertex {v}, halfedge {g}"
+                );
+                expected += scale * case.geometry.corner_angles()[g / 3][g % 3];
+                match mesh.twin(mesh.prev(g)) {
+                    Some(next) if next != h => g = next,
+                    _ => break,
+                }
+            }
+            // All the way round: the full turn, or at the boundary the edge that arrives.
+            assert!(
+                (expected - full).abs() < 1e-12,
+                "{name}: vertex {v}: {expected}"
+            );
+        }
+    }
+}
+
+/// The oracle's reading 51 of the paper's Alg. 8: with `b_i` the weight of end `i` of the
+/// edge, the distance of the point from `i` is `ℓ_ij b_j`. The same here, in `split_edge` and
+/// in the formula tagged `it-point-distances` with the point on a side.
+#[test]
+fn the_lengths_of_an_edge_split_are_the_distances_from_the_ends() {
+    let case = read_case("it-trace-grid");
+    for e in [0, 7, 40, 101] {
+        for t in [0.25, 0.5, 0.8125] {
+            let mut tri = build(&case);
+            let [tail, head] = tri.edge_vertices(e);
+            let length = tri.edge_length(e);
+            let h = tri.edge_halfedge(e);
+            let l = tri.face_lengths(h / 3);
+            // The point (1 − t) tail + t head: the weight of the tail is 1 − t.
+            let mut bary = [0.0; 3];
+            bary[h % 3] = 1.0 - t;
+            bary[(h % 3 + 1) % 3] = t;
+            let distances = corner_distances(l, bary).unwrap();
+            let split = tri.split_edge(e, t).unwrap();
+            let p = split.vertex as usize;
+            // The half from the tail keeps the id; the other half is the first new edge.
+            assert_eq!(tri.edge_vertices(e), [tail, p]);
+            assert_eq!(tri.edge_vertices(split.new_edges[0] as usize), [p, head]);
+            assert_eq!(tri.edge_length(e), t * length);
+            assert_eq!(
+                tri.edge_length(split.new_edges[0] as usize),
+                (1.0 - t) * length
+            );
+            assert!((distances[h % 3] - t * length).abs() < 1e-15 * length);
+            assert!((distances[(h % 3 + 1) % 3] - (1.0 - t) * length).abs() < 1e-15 * length);
+            // And the new edge across the face has the third distance.
+            let across = tri.edge_length(split.new_edges[1] as usize);
+            assert!((across - distances[(h % 3 + 2) % 3]).abs() < 1e-15 * length);
+        }
     }
 }

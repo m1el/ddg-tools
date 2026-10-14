@@ -42,14 +42,27 @@ impl InputSurface {
         let angles = geometry.corner_angles();
         let mut signposts = vec![0.0; mesh.n_halfedges()];
         let mut angle_sums = vec![0.0; mesh.n_vertices()];
+        let mut fan: Vec<usize> = Vec::new();
         for (v, angle_sum) in angle_sums.iter_mut().enumerate() {
             let theta: f64 = mesh
                 .outgoing_halfedges(v)
                 .map(|h| angles[h / 3][h % 3])
                 .sum();
-            let scale = angle_scale(theta, mesh.is_boundary_vertex(v));
+            let boundary = mesh.is_boundary_vertex(v);
+            let scale = angle_scale(theta, boundary);
+            // The first halfedge, whose signpost is 0 (SPEC N9): at a boundary vertex the
+            // outgoing halfedge without a twin, where the fan starts; at an interior vertex
+            // the outgoing halfedge with the smallest id.
+            fan.clear();
+            fan.extend(mesh.outgoing_halfedges(v));
+            let first = if boundary {
+                0
+            } else {
+                (0..fan.len()).min_by_key(|&i| fan[i]).unwrap_or(0)
+            };
             let mut running = 0.0;
-            for h in mesh.outgoing_halfedges(v) {
+            for i in 0..fan.len() {
+                let h = fan[(first + i) % fan.len()];
                 signposts[h] = running * scale;
                 running += angles[h / 3][h % 3];
             }

@@ -276,7 +276,8 @@ flipping, tracing); N2 and N3 were completed there. The numbers are those of
   are removed again (the reference's refinement does that), and what identifies a state (§6).
 
 Entries N10 to N16 were added with the second half of the crate (insertion, point queries,
-overlay, refinement, export); N1 and N4 are written out there. Numbers are from the tests named
+overlay, refinement, export); N1 and N4 are written out there. N17 was added with the replay of
+the Lean oracle's fixtures. Numbers are from the tests named
 and from `crates/ddg-intrinsic/README.md`.
 
 * **N10** *Insertion and edge split* (Alg. 7, 8). The lengths of the new edges are the
@@ -464,6 +465,67 @@ and from `crates/ddg-intrinsic/README.md`.
   first order in the mesh width, which an angle bound does not reduce, and refinement leaves
   angles up to 130°, which the Delaunay triangulation of a lattice does not have. What
   refinement improves for the cut flow is measured in `tests/export.rs` (README, end to end).
+
+* **N17** *The Lean oracle's fixtures, and what they made exact.* `lean/oracle` has an
+  implementation of single operations of this paper written from the paper and this file
+  without this crate's code; `tests/oracle.rs` replays its 18 fixtures, written from the
+  oracle's README without the oracle's code, and compares everything they give (angle sums;
+  triangulations before and after a flip and after Delaunay flipping as sets of faces with
+  lengths and signposts; the unfolded diamond; refusals; report and measures; traces from
+  vertices with every crossing; the trace of every halfedge of three flipped triangulations;
+  circumcentres and their traces): 23 000 comparisons, largest difference `4e-14`, tolerance
+  `1e-9`. Sentences this file did not have, now exact:
+  - *First halfedge (N9).* The halfedge of a vertex with the signpost 0 is, at a boundary
+    vertex, its outgoing halfedge without a twin, and at an interior vertex its outgoing
+    halfedge with the smallest id (`InputSurface::new` chooses it so, whatever
+    `TriMesh::outgoing_halfedge` returns). The signpost of every other halfedge is the scale
+    of N2 times the sum of the corner angles between the first halfedge and it,
+    counter-clockwise. Any other choice shifts all signposts of a vertex by a constant; the
+    oracle chose the same (its reading 50), so signposts are compared as they are.
+  - *The weight and its tag (N6).* The cotan weight of an edge is `w = ½ (cot α + cot β)`:
+    that is what `edge_cotan_weight`, `DelaunayReport::min_cotan_weight` and the tolerance of
+    `DelaunayCriterion::CotanWeight` mean. The function tagged `it-cotan-weight`
+    (`formulas::opposite_cotan_sum`) returns `2w = cot α + cot β`. The oracle's `MINWEIGHT` is
+    `2w`; that is the one number in which the two sides differ, and the oracle's to change or
+    to name (the replay accepts `w` and `2w`).
+  - *The number of flips (N6).* "All edges in ascending order" means the edge ids of the
+    triangulation (for a fresh one those of `ddg_core::TriMesh`, sorted vertex pairs). The
+    number of flips depends on that order and is not part of the contract: on the oracle's
+    sheared grid 119 here, 121 in the oracle (edges ordered by halfedge), 119 to 124 over 600
+    random orders with no test within `1e-6` of a tie. The triangulation that results does
+    not depend on it (identical in all six fixtures, among them the tube torus with 36
+    self-edges).
+  - *A direction equal to a signpost (N7).* It runs along that edge: the path ends on the
+    edge (`Completed`, the end a point of the edge) if the length is shorter than the edge,
+    and at the far vertex otherwise (`Completed` if the two lengths are equal,
+    `TraceStop::Vertex` with the rest not travelled if length is left). At a boundary vertex
+    the direction `π` exactly is the boundary edge that arrives (N2), which has no halfedge
+    leaving the vertex; a direction above `π` leaves the surface at once (`Boundary`, length
+    0). Found by the test of this sentence: for `π` the angle inside the last wedge came out a
+    rounding error short of the corner in some cases and the path ended beside the edge,
+    inside the face; `π` is now taken as the edge.
+  - *Crossings (N7).* The boundary edge at which a path leaves the surface is its end point
+    and is not among its crossings (the oracle lists it as the last crossing). A path that
+    ends at a vertex may or may not cross an edge at that vertex within rounding; the check
+    of N8 ends the path at the target instead, so `EdgeTraces::crossings` has no such
+    crossing (46 of 216 untargeted traces on the oracle's tube torus have one on one side
+    only).
+  - *Edge split lengths (N10).* `split_edge(e, t)` puts the vertex at `(1 − t)·tail +
+    t·head`; the half from the tail keeps the id `e` and has the length `t ℓ`, the half to
+    the head `(1 − t) ℓ`. With `b_i` the barycentric weight of end `i` the distance from `i`
+    is `ℓ_ij b_j`. The paper's Alg. 8 prints `ℓ_ip = ℓ_ij b_i`; that is the same only if its
+    `b_i` is the weight of the other end, and is taken as a slip (the oracle's reading 51 is
+    the same). `it-point-distances` with the point on a side gives these two lengths and the
+    lengths of the new edges to the opposite vertices.
+  - *Areas (N5).* Heights and the unfolded diamond use Kahan's formula for the area here and
+    Heron's in the oracle; in the fixtures the two differ by `2e-16` of the edge at most. No
+    fixture has a flip near the shape limit.
+  - *The circumcentre's trace (N14).* From the barycentre of the face, in the direction and
+    over the distance that the layout of the face gives (corner 0 at the origin, corner 1 on
+    the x-axis); a circumcentre inside its face is not traced by refinement. Same in the
+    oracle (reading 56): 464 traces, end points within `2e-14`.
+  Not covered by the oracle: insertion and split as operations, point queries, the overlay,
+  refinement, the export.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,

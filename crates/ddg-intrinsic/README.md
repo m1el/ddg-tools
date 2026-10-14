@@ -12,7 +12,7 @@ edges until it is Delaunay removes the negative cotan weights of the input witho
 single point of the surface.
 
 The contract of the crate is [`SPEC.md`](SPEC.md): scope, conventions, what must hold, and
-every decision the paper leaves open (entries `N1` to `N16`).
+every decision the paper leaves open (entries `N1` to `N17`).
 
 ## What is implemented
 
@@ -464,6 +464,13 @@ good as flipping and not better (SPEC N16).
 - Unit tests of `src/refine.rs`: the three rules at their thresholds (a point just inside and
   just outside the circle on a boundary edge, also from a neighbouring face; the needle guard
   against a traced loop; split distances at a boundary vertex of 20°).
+- `tests/oracle.rs`: the 18 fixtures of the Lean oracle (`lean/oracle/fixtures/intrinsic`),
+  an implementation of single operations written from the paper and `SPEC.md` without this
+  crate's code: flips with the triangulation before and after, Delaunay flipping (also with
+  self-edges and double edges), traces from vertices, the trace of every halfedge, and
+  circumcentres with their traces; 23 000 comparisons, largest difference `4e-14` (SPEC N17).
+  And the oracle's readings where no fixture exists: a direction equal to a signpost, the
+  first halfedge of a vertex, the lengths of an edge split.
 - `tests/export.rs`: the export is a simplicial mesh of the same surface with the same ids,
   lengths and places; reproducible bit for bit; a stale state is refused; the angles before
   and after; a cut (a closed curve, and a network with a triple point) comes back as pieces
@@ -473,8 +480,9 @@ Not verified: termination of refinement beyond what SPEC N1 and N4 argue (it is 
 the export's refinement rounds on meshes other than those in the table; the way back on
 curved shapes is checked by the trace's own end-point check and by round trips, not against
 positions (the position checks are on flat shapes); cuts whose nodes fall on vertices of the
-export (the flow keeps crossings off vertices); the Lean proofs and the oracle of SPEC §7; no
-mutation check was run on the second half.
+export (the flow keeps crossings off vertices); the Lean proofs of SPEC §7; the oracle has no
+fixtures for insertion, split, point queries, overlay, refinement and export; no mutation check
+was run on the second half.
 
 ## Formula ids
 
@@ -486,11 +494,11 @@ mutation check was run on the second half.
 | `it-flip-length` | `Diamond::flipped_length` | `ℓ_kl² = (x_k − x_l)² + (h_k + h_l)²` |
 | `it-flip-convexity` | `Diamond::flipped_areas` | `x_k h_l + x_l h_k > 0` and `(a − x_k) h_l + (a − x_l) h_k > 0` |
 | `it-delaunay-condition` | `formulas::delaunay_angle_excess` | `θ_k + θ_l − π ≤ 0` |
-| `it-cotan-weight` | `formulas::opposite_cotan_sum` | `cot θ_k + cot θ_l`, with the sign of `π − (θ_k + θ_l)` |
+| `it-cotan-weight` | `formulas::opposite_cotan_sum` | `cot θ_k + cot θ_l`, with the sign of `π − (θ_k + θ_l)`; this is twice the cotan weight `w = ½ (cot θ_k + cot θ_l)` of the edge, which is what every reported weight is |
 | `it-unfold-apex` | `formulas::unfold_apex` | `c = a + α d + β d⊥`, `α = (ℓ_ab² + ℓ_ca² − ℓ_bc²)/2ℓ_ab²`, `β = 2A/ℓ_ab²` |
 | `it-ray-edge-intersection` | `formulas::axis_crossing` | `t = y_tail / (y_tail − y_head)`, `x = x_tail + t (x_head − x_tail)` |
 | `it-barycentric-coordinates` | `formulas::barycentric` | ratios of signed areas |
-| `it-point-distances` | `formulas::corner_distances` | `d_k = |Σ_j b_j v_j − v_k|` with the triangle laid out in the plane: the lengths of the edges of an inserted vertex, and of an edge split with the point on a side |
+| `it-point-distances` | `formulas::corner_distances` | `d_k = |Σ_j b_j v_j − v_k|` with the triangle laid out in the plane: the lengths of the edges of an inserted vertex, and of an edge split with the point on a side (on side `ij`: `d_i = ℓ_ij b_j`, `d_j = ℓ_ij b_i`) |
 | `it-circumcenter` | `formulas::circumcenter_barycentric` | weights `a_k² (a_{k+1}² + a_{k+2}² − a_k²)`, `a_k` the side opposite corner `k`, normalized |
 
 From `ddg-core`, on the triangulation: `cotan-laplacian`, `lumped-mass`, `angle-defect`,
