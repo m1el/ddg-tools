@@ -462,12 +462,27 @@ struct CutDescription {
     /// Number of crossings that were moved away from a vertex.
     #[pyo3(get)]
     n_clamped_crossings: usize,
+    /// What the simplification of the cut did (intrinsic triangulations; empty otherwise):
+    /// `n_merged_nodes` (bends removed), `max_displacement` (a length, an upper bound on how far
+    /// the described cut is from the flow's), `max_displacement_relative` (as a fraction of the
+    /// longest edge of the triangle), `n_moved_points`.
+    #[pyo3(get)]
+    report: Py<PyDict>,
 }
 
 impl CutDescription {
-    fn new(py: Python<'_>, cut: ddg_uv::cutting::CutOnPolygons) -> PyResult<CutDescription> {
+    fn new(
+        py: Python<'_>,
+        cut: ddg_uv::cutting::CutOnPolygons,
+        report: Option<&Dict>,
+    ) -> PyResult<CutDescription> {
         let a = DescriptionArrays::from_cut(&cut);
+        let report = match report {
+            Some(d) => dict_to_py(py, d)?,
+            None => PyDict::new(py),
+        };
         Ok(CutDescription {
+            report: report.unbind(),
             edge_vertices: u32_array(py, "edge_vertices", &a.edge_vertices)?.unbind(),
             edge_t: real_array(py, &a.edge_t)?.unbind(),
             edge_positions: real_array(py, &a.edge_positions)?.unbind(),
@@ -683,6 +698,7 @@ impl CutSession {
         triangulation = "intrinsic",
         refine_bound = None,
         min_offset = None,
+        merge_tolerance = None,
         state = None,
         seam_edges = None,
         pinned_vertices = None,
@@ -706,6 +722,7 @@ impl CutSession {
         triangulation: &str,
         refine_bound: Option<f64>,
         min_offset: Option<f64>,
+        merge_tolerance: Option<f64>,
         state: Option<&Bound<'py, PyAny>>,
         seam_edges: Option<&Bound<'py, PyAny>>,
         pinned_vertices: Option<&Bound<'py, PyAny>>,
@@ -779,7 +796,8 @@ impl CutSession {
             py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                let session = RustCutSession::from_state(&input, &bytes, min_offset)?;
+                let session =
+                    RustCutSession::from_state(&input, &bytes, min_offset, merge_tolerance)?;
                 if n_regions.is_some_and(|n| n != session.n_regions()) {
                     return Err(BindError::Input(format!(
                         "n_regions={} but the state has {} regions",
@@ -802,7 +820,14 @@ impl CutSession {
             py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                RustCutSession::new(&input, n_regions, &start, &spec, min_offset)
+                RustCutSession::new(
+                    &input,
+                    n_regions,
+                    &start,
+                    &spec,
+                    min_offset,
+                    merge_tolerance,
+                )
             })
             .map_err(bind_error)?
         };
@@ -1074,12 +1099,12 @@ impl CutSession {
         py: Python<'_>,
         min_crossing_offset: Option<f64>,
     ) -> PyResult<CutDescription> {
-        let cut = py.detach(|| {
+        let (cut, report) = py.detach(|| {
             self.lock()?
-                .describe_cut(min_crossing_offset)
+                .describe_cut_report(min_crossing_offset)
                 .map_err(bind_error)
         })?;
-        CutDescription::new(py, cut)
+        CutDescription::new(py, cut, Some(&report))
     }
 
     /// Inserts a cut into the polygon mesh (the Rust reference of what an editor must produce):
@@ -1129,7 +1154,7 @@ impl CutSession {
         let report = dict_to_py(py, &a.report)?;
         report.set_item("warnings", PyList::new(py, &a.warnings)?)?;
         Ok(CutUnwrapResult {
-            cut: Py::new(py, CutDescription::new(py, cut)?)?,
+            cut: Py::new(py, CutDescription::new(py, cut, None)?)?,
             inserted: Py::new(py, InsertedMesh::new(py, &a.inserted)?)?,
             seams: u32_array(py, "seams", &a.seams)?.unbind(),
             uvs: uv_array(py, &a.uvs)?.unbind(),

@@ -646,6 +646,27 @@ class IntrinsicTest(unittest.TestCase):
         with self.assertRaisesRegex(ddg_tools.InputError, "n_regions"):
             ddg_tools.CutSession(*self.buffers, state=bytes_, n_regions=3)
 
+    def test_merge_tolerance_and_the_description_report(self):
+        kw = dict(length_weight=0.05, max_steps=6, motion_tolerance=0.0, energy_tolerance=0.0)
+        merged = self.make()
+        merged.run(**kw)
+        report = merged.describe_cut().report
+        for key in ("n_merged_nodes", "max_displacement", "max_displacement_relative",
+                    "n_moved_points"):
+            self.assertIn(key, report)
+        self.assertLessEqual(report["max_displacement_relative"], 0.1 + 1e-12)
+        raw = self.make(merge_tolerance=0.0)
+        raw.run(**kw)
+        r0 = raw.describe_cut().report
+        self.assertEqual(r0["n_merged_nodes"], 0)
+        self.assertGreaterEqual(report["n_merged_nodes"], 0)
+        self.assertEqual(self.make(triangulation="caller").describe_cut().report["n_merged_nodes"], 0)
+        # The tolerance can be changed when a session is rebuilt from the state bytes.
+        again = ddg_tools.CutSession(*self.buffers, state=merged.snapshot(), merge_tolerance=0.0)
+        self.assertEqual(again.describe_cut().report["n_merged_nodes"], 0)
+        with self.assertRaises(ddg_tools.InputError):
+            self.make(merge_tolerance=0.7)
+
     def test_curvature_per_triangle_is_refused_on_an_intrinsic_triangulation(self):
         s = self.make()
         k = array.array('d', [0.0] * (len(self.mesh[3]) // 3))
