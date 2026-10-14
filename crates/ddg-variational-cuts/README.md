@@ -113,10 +113,10 @@ radius is 0.17321). Relative error of the radius for 6 / 24 / 96 / 384 steps:
 
 | cells | default stages | stages of the paper |
 |---|---|---|
-| 32² | `+3.8e-2 +9.6e-3 +2.0e-3 −4e-5` | `−16 % −17 % −17 % −20 %` |
-| 64² | `+3.9e-2 +1.1e-2 +2.9e-3 +8.6e-4` | `−12 % −11 % −11 % −15 %` |
-| 128² | `+3.9e-2 +1.1e-2 +3.0e-3 +9.0e-4` | `−9.4 % −7.5 % −6.4 % −9.1 %` |
-| 256² | `+4.0e-2 +1.1e-2 +2.9e-3` | `−8.3 % −5.8 % −4.0 %` |
+| 32² | `+3.7e-2 +9.6e-3 +2.0e-3 −4e-5` | `−16 % −17 % −17 % −20 %` |
+| 64² | `+3.9e-2 +1.1e-2 +2.8e-3 +8.4e-4` | `−12 % −11 % −11 % −15 %` |
+| 128² | `+3.9e-2 +1.1e-2 +2.9e-3 +8.8e-4` | `−9.4 % −7.5 % −6.4 % −9.1 %` |
+| 256² | `+4.0e-2 +1.1e-2 +2.8e-3` | `−8.3 % −5.8 % −4.0 %` |
 
 The default stages are first order in the step with an error that does not depend on the mesh (it
 is the error of the explicit Euler method for the radius). The paper's step does not converge in
@@ -200,6 +200,10 @@ Six of the fixtures of the last two sets have the robust statistics with the len
 mesh, where the local limit acts at the vertices on the whole step (SPEC D26). The oracle
 implemented that rule after the crate; they replay in full, with `h_i`, `ω_i` and the factor at
 every vertex and the limited function, and no difference was found.
+
+The oracle does not have the rule of SPEC D30 yet (a face with a moved crossing does not count
+in the mean slope); none of its fixtures has such a face with the mean-slope scaling, so the five
+sets agree as they are.
 
 One difference was found earlier, in `rr-sphere3-spike-paper`: the two copies of the cut point of the
 quantile were limited by the factor `1 − 2·10⁻¹⁶` here and not at all in the oracle. That cut
@@ -568,14 +572,14 @@ circle of radius 0.3; the circle law is the one of "Laws" above, 96 steps):
 
 | mesh | redistancing: mean relative error of the distance | circle law, default stages | circle law, paper's stages |
 |---|---|---|---|
-| regular grid | 1.2 % | `+2.4e-3` | −16 % |
+| regular grid | 1.2 % | `+2.3e-3` | −16 % |
 | vertices jittered by 0.3 cells | 1.4 % | `+2.0e-3` | −17 % |
-| sheared, largest angle 117° | 3.3 % | `+6.0e-3` | −41 % |
+| sheared, largest angle 117° | 3.3 % | `+5.9e-3` | −41 % |
 | sheared, 135° | 11 % | `+1.1e-2` | the cut vanishes |
-| sheared, 153° | 34 % | `+1.9e-2` | the cut vanishes |
+| sheared, 153° | 34 % | `+1.8e-2` | the cut vanishes |
 | sheared, 165° | 91 % | `+2.5e-2` | the cut vanishes |
-| cells 1 : 16 | 0.9 % | `+2.8e-3` | −13 % |
-| sheared 135° and 153°, edges flipped to Delaunay | | `+2.6e-3`, `+2.5e-3` | −16 % |
+| cells 1 : 16 | 0.9 % | `+2.7e-3` | −13 % |
+| sheared 135° and 153°, edges flipped to Delaunay | | `+2.5e-3`, `+2.5e-3` | −16 % |
 
 Random irregularity is harmless. Where every triangle is obtuse the fast marching degrades first
 (iterating it to its fixed point does not repair it: 16 % and 30 % largest relative error at 135°

@@ -1427,8 +1427,10 @@ region of every face.
   crossing is moved at some step change with it (the default stages only): the two-region runs
   on spot in the fourth digit of the energy, 21 of the 24 default-stage runs of §8.5, most below
   0.1 %, four by 1 % to 4 %, one by 31 % (README). The numbers of D22 for
-  `camelshotnoise.obj` and spot in §4 were measured before this; the README has the present
-  ones.
+  `camelshotnoise.obj` and spot in §4 and the tables of the default stages in §6 were measured
+  before this; the README has the present ones. The laws move in the second digit (circle of §6
+  item 4 on 32² cells: `+3.7·10⁻²`, `+9.6·10⁻³`, `+2.0·10⁻³`, `−4·10⁻⁵` for 6, 24, 96, 384 steps,
+  the first was `+3.8·10⁻²`; on 64² the last is `+8.4·10⁻⁴`, was `+8.6·10⁻⁴`).
 * **D31** A run was called converged when one step moved the cut by at most the tolerance. That
   is a statement about one step: the run of D30 ended after its first step with the energy
   unchanged, far from rest. The criterion now also asks that the rate of the cut predicted no
