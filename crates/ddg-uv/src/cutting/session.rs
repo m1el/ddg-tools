@@ -17,6 +17,7 @@ use super::error::{CuttingError, internal};
 use super::intrinsic::{
     IntrinsicReport, IntrinsicState, SessionState, Triangulation, mesh_fingerprint,
 };
+use super::merge::DescribeReport;
 use crate::input::{MeshInput, PolygonMesh};
 use crate::options::{Degenerate, Orientation, UnwrapOptions};
 use crate::prepare::prepare;
@@ -1138,11 +1139,31 @@ impl Session {
     pub fn describe_cut(&self, min_crossing_offset: f64) -> Result<CutOnPolygons, CuttingError> {
         let cut = self.current_cut(min_crossing_offset)?;
         if self.tri.is_some() {
-            self.describe_intrinsic(&cut)
+            self.describe_intrinsic(&cut).map(|(d, _)| d)
         } else if self.many.is_some() {
             self.describe_network(&cut)
         } else {
             self.describe_two(&cut)
+        }
+    }
+
+    /// [`Session::describe_cut`] with the report of the simplification of the cut and of the
+    /// rule for its points (all zero on the caller's triangulation).
+    ///
+    /// # Errors
+    /// As [`Session::describe_cut`].
+    pub fn describe_cut_with_report(
+        &self,
+        min_crossing_offset: f64,
+    ) -> Result<(CutOnPolygons, DescribeReport), CuttingError> {
+        if self.tri.is_some() {
+            let cut = self.current_cut(min_crossing_offset)?;
+            self.describe_intrinsic(&cut)
+        } else {
+            Ok((
+                self.describe_cut(min_crossing_offset)?,
+                DescribeReport::default(),
+            ))
         }
     }
 

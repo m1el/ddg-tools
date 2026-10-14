@@ -82,6 +82,7 @@ mod endtoend;
 mod error;
 mod insert;
 mod intrinsic;
+mod merge;
 mod session;
 
 pub use describe::{
@@ -91,4 +92,5 @@ pub use endtoend::{ConePlacement, CutUnwrap, CutUnwrapOptions, unwrap_with_cut};
 pub use error::CuttingError;
 pub use insert::{Inserted, VertexSource, insert};
 pub use intrinsic::{IntrinsicOptions, IntrinsicReport, SessionState, Triangulation};
+pub use merge::DescribeReport;
 pub use session::{DEFAULT_CROSSING_OFFSET, FlowKind, PreviewPolyline, Session, Start};
