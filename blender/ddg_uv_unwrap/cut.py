@@ -205,6 +205,9 @@ def make_session(obj, start, n_regions=2, option=DEFAULT_OPTION, offset=None):
     mesh = check_mesh(obj)
     begin = perf_counter()
     positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+    # Polygons that an earlier cut split keep the triangulation the library chose for them:
+    # Blender's own can be refused (collinear vertices) and is worse shaped.
+    triangles, _ = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
     seams = core.seam_edges(mesh)
     extracted = perf_counter()
     keywords = dict(start)

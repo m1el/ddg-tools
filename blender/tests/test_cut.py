@@ -231,6 +231,30 @@ def state(mesh):
     return rows
 
 
+def save_state(mesh):
+    """The whole stored cut: the attributes, the state bytes if there are any, the option."""
+    return ([array.array('f', r) for r in state(mesh)], mesh.get("ddg_cut_state"),
+            mesh.get("ddg_cut_option"))
+
+
+def load_state(mesh, saved):
+    rows, bytes_, option = saved
+    for k, row in enumerate(rows):
+        mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+    for key, value in (("ddg_cut_state", bytes_), ("ddg_cut_option", option)):
+        if value is None:
+            if key in mesh:
+                del mesh[key]
+        else:
+            mesh[key] = value
+
+
+def attributes_only(mesh):
+    """Makes the attributes the state again (drops the state bytes of a refined session)."""
+    if "ddg_cut_state" in mesh:
+        del mesh["ddg_cut_state"]
+
+
 def previews(obj):
     return [c for c in obj.children if c.get("ddg_cut_preview")]
 
@@ -815,12 +839,11 @@ def k_steps_twice_equal_2k_steps_once():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     mesh = obj.data
     start_circle(obj, vertex=5)
-    initial = [array.array('f', r) for r in state(mesh)]
+    initial = save_state(mesh)
     assert flow(steps=8) == {'FINISHED'}
     once = state(mesh)
     # Back to the start: write the stored state again.
-    for k, row in enumerate(initial):
-        mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+    load_state(mesh, initial)
     assert flow(steps=4) == {'FINISHED'}
     assert flow(steps=4) == {'FINISHED'}
     twice = state(mesh)
@@ -829,7 +852,7 @@ def k_steps_twice_equal_2k_steps_once():
     print("  8 steps once vs 4 + 4: largest difference {:.3g} (size {:.3g})".format(worst, scale))
     assert worst < 1e-4 * scale, worst
     # The flow ran: the state is not the start.
-    assert max(abs(a - b) for a, b in zip(once[0], initial[0])) > 1e-3 * scale
+    assert max(abs(a - b) for a, b in zip(once[0], initial[0][0])) > 1e-3 * scale
 
 
 @test
@@ -870,11 +893,10 @@ def every_flow_property_reaches_the_library():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     start_circle(obj, vertex=0)
     mesh = obj.data
-    initial = [array.array('f', r) for r in state(mesh)]
+    initial = save_state(mesh)
 
     def fresh():
-        for k, row in enumerate(initial):
-            mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+        load_state(mesh, initial)
 
     def final_state(**props):
         fresh()
@@ -990,11 +1012,10 @@ def one_sided_patch_weights_change_the_cut():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     mesh = obj.data
     start_circle(obj, vertex=0)
-    initial = [array.array('f', r) for r in state(mesh)]
+    initial = save_state(mesh)
     results = []
     for weights in ((1.0, 1.0), (0.0, 1.0)):
-        for k, row in enumerate(initial):
-            mesh.attributes["ddg_cut_region_{}".format(k)].data.foreach_set("value", row)
+        load_state(mesh, initial)
         assert flow(steps=10, distortion_weights=pad(weights, 1.0)) == {'FINISHED'}
         results.append(dict(mesh["ddg_cut_last_flow"]))
     assert abs(results[0]["energy_after"] - results[1]["energy_after"]) > 1e-6
@@ -1311,6 +1332,7 @@ def errors_are_readable_messages():
     expect_error("ripple wavelength must be larger than 0", bpy.ops.uv.ddg_cut_flow,
                  length_mode='RIPPLE', ripple_wavelength=0.0, steps=1)
     # A state that does not fit the mesh: corners of one vertex that no seam separates differ.
+    attributes_only(mesh)
     values = state(mesh)[0]
     values[3] += 0.5
     mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", values)
@@ -1327,6 +1349,7 @@ def errors_are_readable_messages():
     obj = primitive("uv_sphere", segments=24, ring_count=12)
     mesh = obj.data
     start_circle(obj, vertex=5)
+    attributes_only(mesh)
     mesh.attributes["ddg_cut_region_0"].data.foreach_set(
         "value", [-1.0] * len(mesh.loops))
     mesh.attributes["ddg_cut_region_1"].data.foreach_set(
@@ -1373,6 +1396,7 @@ def apply_failing_leaves_the_mesh_alone():
     mesh = obj.data
     start_circle(obj, vertex=5)
     nv, nf = len(mesh.vertices), len(mesh.polygons)
+    attributes_only(mesh)
     rows = state(mesh)
     rows[0][7] += 1.0
     mesh.attributes["ddg_cut_region_0"].data.foreach_set("value", rows[0])
