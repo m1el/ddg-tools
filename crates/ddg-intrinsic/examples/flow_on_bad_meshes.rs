@@ -4,7 +4,9 @@
 //! and on three intrinsic triangulations of it, selected by the environment variable `TREAT`:
 //! `input` (default), `flip` (intrinsic Delaunay by flips; the export splits an edge only where
 //! the result is not a simplicial complex), `r25`, `r30` (refined to 25 / 30 degrees, exported with
-//! `ExportOptions::refine`). The flow runs unchanged on the export. For the sphere, the
+//! `ExportOptions::refine`), `odt`, `odt15` (the intrinsic optimal Delaunay triangulation with the
+//! default options, target length 1 and 1.5 times the mean input edge; exported like `flip`;
+//! added 2026-10-14, the time of the iteration is in the column "refine"). The flow runs unchanged on the export. For the sphere, the
 //! intrinsic triangulation has the geometry of the POLYHEDRON; the exact law refers to the
 //! smooth sphere; a vertex that is not an input vertex is placed on the polyhedron and its polar
 //! angle is that of that point. Each treatment is compared with the input mesh, which has the
@@ -55,8 +57,8 @@ use ddg_core::distance::{DistanceMode, upwind_distance_with};
 use ddg_core::generators::{SplitMix64, icosphere};
 use ddg_core::{Geometry, TriMesh};
 use ddg_intrinsic::{
-    EdgeTraceOptions, ExportOptions, IntrinsicTriangulation, RefineOptions, Segment,
-    SimplicialExport, SurfacePoint,
+    EdgeTraceOptions, ExportOptions, IntrinsicTriangulation, OptimalDelaunayOptions, RefineOptions,
+    Segment, SimplicialExport, SurfacePoint, TargetLength,
 };
 use ddg_variational_cuts::{
     CurvatureSource, Cut, CutProblem, Energy, EvalOptions, Evaluation, Extension, Flow,
@@ -830,6 +832,8 @@ enum Treat {
     Flip,
     R25,
     R30,
+    Odt,
+    Odt15,
 }
 
 impl Treat {
@@ -838,6 +842,8 @@ impl Treat {
             Ok("flip") => Treat::Flip,
             Ok("r25") => Treat::R25,
             Ok("r30") => Treat::R30,
+            Ok("odt") => Treat::Odt,
+            Ok("odt15") => Treat::Odt15,
             _ => Treat::Input,
         }
     }
@@ -847,7 +853,20 @@ impl Treat {
             Treat::Flip => "flip",
             Treat::R25 => "r25",
             Treat::R30 => "r30",
+            Treat::Odt => "odt",
+            Treat::Odt15 => "odt15",
         }
+    }
+    fn odt(self) -> Option<OptimalDelaunayOptions> {
+        let factor = match self {
+            Treat::Odt => 1.0,
+            Treat::Odt15 => 1.5,
+            _ => return None,
+        };
+        Some(OptimalDelaunayOptions {
+            target_length: TargetLength::MeanInputEdge(factor),
+            ..OptimalDelaunayOptions::default()
+        })
     }
     fn refine(self) -> Option<RefineOptions> {
         let degrees = match self {
@@ -948,8 +967,20 @@ fn treat_full(spec: &Spec, treat: Treat) -> Result<Treated, String> {
     let mut tri = IntrinsicTriangulation::new(&input.mesh, &input.geometry)
         .map_err(|e| format!("IntrinsicTriangulation::new: {e}"))?;
     info.t_new = start.elapsed().as_secs_f64();
-    let export = match treat.refine() {
-        None => {
+    let export = match (treat.refine(), treat.odt()) {
+        (None, Some(options)) => {
+            let start = Instant::now();
+            tri.optimal_delaunay(&options)
+                .map_err(|e| format!("optimal_delaunay: {e}"))?;
+            info.t_refine = start.elapsed().as_secs_f64();
+            let start = Instant::now();
+            let e = tri
+                .export_simplicial(&ExportOptions::default())
+                .map_err(|e| format!("export_simplicial: {e}"))?;
+            info.t_export = start.elapsed().as_secs_f64();
+            e
+        }
+        (None, None) => {
             let start = Instant::now();
             tri.flip_to_delaunay(&Default::default())
                 .map_err(|e| format!("flip_to_delaunay: {e}"))?;
@@ -961,7 +992,7 @@ fn treat_full(spec: &Spec, treat: Treat) -> Result<Treated, String> {
             info.t_export = start.elapsed().as_secs_f64();
             e
         }
-        Some(options) => {
+        (Some(options), _) => {
             let start = Instant::now();
             tri.refine(&options).map_err(|e| format!("refine: {e}"))?;
             info.t_refine = start.elapsed().as_secs_f64();
@@ -3018,7 +3049,14 @@ fn speed_study() {
         } else {
             (0, 0.5)
         };
-        for treat in [Treat::Input, Treat::Flip, Treat::R25, Treat::R30] {
+        for treat in [
+            Treat::Input,
+            Treat::Flip,
+            Treat::R25,
+            Treat::R30,
+            Treat::Odt,
+            Treat::Odt15,
+        ] {
             let tr = match treat_full(spec, treat) {
                 Ok(t) => t,
                 Err(e) => {

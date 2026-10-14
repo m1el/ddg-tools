@@ -2730,6 +2730,52 @@ fn merging_bends_removes_the_flips_and_reports_the_displacement() {
     );
 }
 
+/// The optimal Delaunay triangulation as the improvement after the flips: it inserts and moves
+/// vertices, the chain runs on it and comes back, its options survive the bytes of a state, and
+/// a state of format version 2 (written before the option existed) is read with none.
+#[test]
+fn the_optimal_delaunay_option_runs_the_chain_and_is_stored() {
+    let mesh = uv_sphere(16, 8, 1.0).unwrap();
+    let tri = Triangulation::Intrinsic(IntrinsicOptions::optimized());
+    let row = run_chain("sphere/odt", &mesh, &tri, 20, None, None);
+    assert_eq!(row.flipped, 0, "{}", row.label);
+    let start = Start::GeodesicCircle {
+        vertex: 5,
+        radius: 0.9,
+    };
+    let session = two_session(&mesh, &[], &start, &tri);
+    let report = session.intrinsic_report().expect("an intrinsic session").clone();
+    assert!(report.n_optimized > 0);
+    assert!(report.n_added >= report.n_optimized);
+    let (status, iterations, _) = report.optimal_delaunay.expect("it ran");
+    assert!(iterations >= 1, "{status:?}");
+    assert!(report.is_delaunay);
+    let state = session.snapshot();
+    let bytes = state.to_bytes();
+    let back = SessionState::from_bytes(&bytes).unwrap();
+    assert_eq!(back.triangulation(), tri);
+    assert_eq!(back, state);
+    // The same state without the option, written as version 2: the optimal Delaunay block is
+    // the last byte (0: none) and the version byte follows the magic.
+    let plain = Triangulation::Intrinsic(IntrinsicOptions::flips_only());
+    let plain_session = two_session(&mesh, &[], &start, &plain);
+    let mut v2 = plain_session.snapshot().to_bytes();
+    assert_eq!(v2[4], 3);
+    assert_eq!(v2.pop(), Some(0));
+    v2[4] = 2;
+    let read = SessionState::from_bytes(&v2).unwrap();
+    assert_eq!(read.triangulation(), plain);
+    // Invalid options are refused when the session is built.
+    let bad = Triangulation::Intrinsic(IntrinsicOptions {
+        optimal_delaunay: Some(ddg_intrinsic::OptimalDelaunayOptions {
+            step: 2.0,
+            ..Default::default()
+        }),
+        ..IntrinsicOptions::flips_only()
+    });
+    assert!(Session::with_triangulation(&mesh.input(), 2, &start, FlowKind::Auto, &bad).is_err());
+}
+
 /// The options survive the bytes of a state, and a tolerance out of range is refused.
 #[test]
 fn merge_tolerance_is_part_of_the_stored_options() {

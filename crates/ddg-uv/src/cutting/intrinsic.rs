@@ -5,7 +5,8 @@
 //! makes (so the seams stay boundary), an intrinsic triangulation of the same surface
 //! (Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, 2019; crate `ddg-intrinsic`):
 //! it is flipped to Delaunay, optionally refined (vertices are inserted, also on boundary
-//! edges) and exported as a simplicial mesh with a geometry. The flow runs on that export. Its
+//! edges) and/or improved as an optimal Delaunay triangulation (edges split to a target length,
+//! inserted vertices moved), and exported as a simplicial mesh with a geometry. The flow runs on that export. Its
 //! first vertices are the vertices of the seam-cut mesh; the others lie inside faces or on
 //! edges of it.
 //!
@@ -19,9 +20,10 @@ use std::time::Instant;
 
 use ddg_core::{Geometry, TriMesh};
 use ddg_intrinsic::{
-    BelowBound, DelaunayCriterion, DelaunayOptions, EdgeTraceOptions, ExportOptions, FlipLimit,
-    InsertionLimit, IntrinsicTriangulation, RefineOptions, RefineReport, SimplicialExport,
-    SurfacePoint,
+    BelowBound, BoundaryVertices, DelaunayCriterion, DelaunayOptions, EdgeTraceOptions,
+    ExportOptions, FlipLimit, InsertionLimit, IntrinsicTriangulation, OdtCenters,
+    OptimalDelaunayOptions, OptimalDelaunayStatus, RefineOptions, RefineReport, SimplicialExport,
+    SurfacePoint, TargetLength,
 };
 
 use super::error::CuttingError;
@@ -46,6 +48,11 @@ pub struct IntrinsicOptions {
     pub delaunay: DelaunayOptions,
     /// Refinement to an angle bound after the flips (`None`: only flips).
     pub refine: Option<RefineOptions>,
+    /// The intrinsic optimal Delaunay triangulation after the flips and the refinement, if any
+    /// (`None`: none). It splits edges longer than its target length and moves the inserted
+    /// vertices (also those of a refinement before it); see
+    /// `ddg_intrinsic::IntrinsicTriangulation::optimal_delaunay`.
+    pub optimal_delaunay: Option<OptimalDelaunayOptions>,
     /// The export to a simplicial mesh: splits of what is not simplicial, flips again, and
     /// optionally refinement between rounds of splits (see `ddg_intrinsic::ExportOptions`).
     pub export: ExportOptions,
@@ -83,6 +90,7 @@ impl IntrinsicOptions {
         IntrinsicOptions {
             delaunay: DelaunayOptions::default(),
             refine: Some(RefineOptions::default()),
+            optimal_delaunay: None,
             export: ExportOptions {
                 refine: Some(RefineOptions::default()),
                 ..ExportOptions::default()
@@ -103,6 +111,17 @@ impl IntrinsicOptions {
             refine: None,
             export: ExportOptions::default(),
             ..IntrinsicOptions::refined()
+        }
+    }
+
+    /// Flips to Delaunay, then the intrinsic optimal Delaunay triangulation with the default
+    /// options of `ddg-intrinsic` (edges longer than the mean edge of the mesh are split, the
+    /// inserted vertices moved towards the weighted mean of their circumcentres, boundary
+    /// vertices fixed), exported like [`flips_only`](Self::flips_only). An explicit choice.
+    pub fn optimized() -> IntrinsicOptions {
+        IntrinsicOptions {
+            optimal_delaunay: Some(OptimalDelaunayOptions::default()),
+            ..IntrinsicOptions::flips_only()
         }
     }
 
@@ -148,12 +167,18 @@ pub struct IntrinsicReport {
     pub n_input_vertices: usize,
     /// Vertices of the triangulation the flow runs on.
     pub n_vertices: usize,
-    /// Vertices added (refinement and the export's splits): the difference.
+    /// Vertices added (refinement, the optimal Delaunay triangulation and the export's splits):
+    /// the difference.
     pub n_added: usize,
     /// Flips of the first Delaunay pass.
     pub n_initial_flips: usize,
     /// Vertices inserted by the refinement before the export.
     pub n_refined: usize,
+    /// Vertices inserted by the optimal Delaunay triangulation before the export.
+    pub n_optimized: usize,
+    /// How the optimal Delaunay triangulation ended, with its iterations and the largest motion
+    /// of its last iteration (`None` if it was not asked for).
+    pub optimal_delaunay: Option<(OptimalDelaunayStatus, usize, f64)>,
     /// Edges the export split to make the triangulation a simplicial complex.
     pub n_splits: usize,
     /// Flips made by the export (its refinements included).
@@ -206,6 +231,10 @@ impl IntrinsicState {
             None => None,
         };
         let n_refined = refinement.as_ref().map_or(0, |r| r.n_inserted);
+        let optimized = match &options.optimal_delaunay {
+            Some(o) => Some(tri.optimal_delaunay(o)?),
+            None => None,
+        };
         let export = tri.export_simplicial(&options.export)?;
         let bound = options
             .refine
@@ -232,6 +261,10 @@ impl IntrinsicState {
             n_added: export.mesh.n_vertices() - n_input_vertices,
             n_initial_flips: initial.n_flips,
             n_refined,
+            n_optimized: optimized.as_ref().map_or(0, |r| r.n_inserted),
+            optimal_delaunay: optimized
+                .as_ref()
+                .map(|r| (r.status, r.n_iterations, r.last_max_motion)),
             n_splits: export.n_splits,
             n_export_flips: export.n_flips,
             n_refine_rounds: export.n_refine_rounds,
@@ -316,7 +349,9 @@ pub struct SessionState {
 }
 
 const MAGIC: &[u8; 4] = b"DDGS";
-const VERSION: u8 = 2;
+/// Version 3 (2026-10-14) adds the options of the optimal Delaunay triangulation; versions 1 and
+/// 2 are read with none.
+const VERSION: u8 = 3;
 
 impl SessionState {
     /// The fingerprint of the triangulation the state was made for.
@@ -406,7 +441,7 @@ impl SessionState {
             ));
         }
         let version = r.u8()?;
-        if version != VERSION && version != 1 {
+        if !(1..=VERSION).contains(&version) {
             return Err(bad(&format!(
                 "version {version} of the format is not supported"
             )));
@@ -540,6 +575,49 @@ impl Writer {
         }
         self.f64(o.min_offset);
         self.f64(o.merge_tolerance);
+        match &o.optimal_delaunay {
+            Some(d) => {
+                self.u8(1);
+                self.odt(d);
+            }
+            None => self.u8(0),
+        }
+    }
+    fn odt(&mut self, o: &OptimalDelaunayOptions) {
+        match o.target_length {
+            TargetLength::NoSplits => {
+                self.u8(0);
+                self.f64(0.0);
+            }
+            TargetLength::Absolute(h) => {
+                self.u8(1);
+                self.f64(h);
+            }
+            TargetLength::MeanInputEdge(k) => {
+                self.u8(2);
+                self.f64(k);
+            }
+        }
+        self.u64(o.max_iterations as u64);
+        self.f64(o.motion_tolerance);
+        self.f64(o.step);
+        self.u64(o.max_halvings as u64);
+        self.u8(match o.boundary {
+            BoundaryVertices::Fixed => 0,
+            BoundaryVertices::AlongBoundary => 1,
+        });
+        self.u8(match o.centers {
+            OdtCenters::Circumcenters => 0,
+            OdtCenters::BarycentersAtBoundary => 1,
+        });
+        let (tag, n) = match o.max_insertions {
+            InsertionLimit::PerVertex(n) => (0, n),
+            InsertionLimit::Vertices(n) => (1, n),
+            InsertionLimit::Unlimited => (2, 0),
+        };
+        self.u8(tag);
+        self.u64(n as u64);
+        self.delaunay(&o.delaunay);
     }
 }
 
@@ -629,6 +707,50 @@ impl Reader<'_> {
             None
         })
     }
+    fn odt(&mut self) -> Result<OptimalDelaunayOptions, CuttingError> {
+        let tag = self.u8()?;
+        let x = self.f64()?;
+        let target_length = match tag {
+            0 => TargetLength::NoSplits,
+            1 => TargetLength::Absolute(x),
+            2 => TargetLength::MeanInputEdge(x),
+            t => return Err(bad(&format!("unknown target length tag {t}"))),
+        };
+        let max_iterations = self.usize()?;
+        let motion_tolerance = self.f64()?;
+        let step = self.f64()?;
+        let max_halvings = self.usize()?;
+        let boundary = match self.u8()? {
+            0 => BoundaryVertices::Fixed,
+            1 => BoundaryVertices::AlongBoundary,
+            t => return Err(bad(&format!("unknown boundary tag {t}"))),
+        };
+        let centers = match self.u8()? {
+            0 => OdtCenters::Circumcenters,
+            1 => OdtCenters::BarycentersAtBoundary,
+            t => return Err(bad(&format!("unknown centre tag {t}"))),
+        };
+        let tag = self.u8()?;
+        let n = self.usize()?;
+        let max_insertions = match tag {
+            0 => InsertionLimit::PerVertex(n),
+            1 => InsertionLimit::Vertices(n),
+            2 => InsertionLimit::Unlimited,
+            t => return Err(bad(&format!("unknown insertion limit tag {t}"))),
+        };
+        let delaunay = self.delaunay()?;
+        Ok(OptimalDelaunayOptions {
+            target_length,
+            max_iterations,
+            motion_tolerance,
+            step,
+            max_halvings,
+            boundary,
+            centers,
+            max_insertions,
+            delaunay,
+        })
+    }
     fn intrinsic(&mut self, version: u8) -> Result<IntrinsicOptions, CuttingError> {
         let delaunay = self.delaunay()?;
         let refine = self.opt_refine()?;
@@ -648,9 +770,15 @@ impl Reader<'_> {
         };
         let min_offset = self.f64()?;
         let merge_tolerance = if version >= 2 { self.f64()? } else { 0.0 };
+        let optimal_delaunay = if version >= 3 && self.u8()? == 1 {
+            Some(self.odt()?)
+        } else {
+            None
+        };
         Ok(IntrinsicOptions {
             delaunay,
             refine,
+            optimal_delaunay,
             export: ExportOptions {
                 delaunay: export_delaunay,
                 refine: export_refine,

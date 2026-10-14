@@ -925,10 +925,15 @@ chooses the triangulation it runs on:
   badly shaped meshes behave, and that refinement (`IntrinsicOptions::refined()`: 25 degrees,
   an explicit choice, with its bound in `refine`) adds 30 % to 140 % vertices for little gain on
   most meshes. `Session::new` keeps the caller's triangulation so that existing callers do not
-  change.
+  change. `IntrinsicOptions::optimal_delaunay` (`IntrinsicOptions::optimized()`: flips, then the
+  intrinsic optimal Delaunay triangulation with the defaults of `ddg-intrinsic`) is a third
+  explicit choice; the comparison with the others on the cut flow is in
+  `crates/ddg-intrinsic/README.md` ("The optimal Delaunay triangulation"). The stored options
+  are part of a `SessionState` (format version 3; versions 1 and 2 are read with none).
 
 `Session::intrinsic_report()` gives `IntrinsicReport`: vertices of the mesh and of the
-triangulation, **vertices added** (`n_added`), flips (first pass, export), refined, splits, the
+triangulation, **vertices added** (`n_added`), flips (first pass, export), refined, inserted by
+the optimal Delaunay triangulation (`n_optimized`, with its status), splits, the
 refinement rounds of the export, whether it is Delaunay, the smallest and largest angle reached,
 the angle bound asked for, the number of corners of the export below it, the corners the last
 refinement left below the bound with the reason (`BelowReason`), seconds, the fingerprint.
