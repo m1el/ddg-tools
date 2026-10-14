@@ -41,6 +41,8 @@
 // Index loops follow the formulas they implement; the task table and the loader return what
 // they need.
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
+// Parts copied from the study this one follows are kept although nothing here calls them.
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::f64::consts::PI;
@@ -49,17 +51,17 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+use ddg_core::distance::{DistanceMode, upwind_distance_with};
+use ddg_core::generators::{SplitMix64, icosphere};
+use ddg_core::{Geometry, TriMesh};
 use ddg_intrinsic::{
     EdgeTraceOptions, ExportOptions, IntrinsicTriangulation, RefineOptions, Segment,
     SimplicialExport, SurfacePoint,
 };
-use ddg_core::distance::{DistanceMode, upwind_distance_with};
-use ddg_core::generators::{SplitMix64, icosphere};
-use ddg_core::{Geometry, TriMesh};
 use ddg_variational_cuts::{
     CurvatureSource, Cut, CutProblem, Energy, EvalOptions, Evaluation, Extension, Flow,
     FlowOptions, FluxRecovery, LengthStep, RegionWeights, SpeedScaling, StepReport, StepSize,
-    StopReason, StopRule, length_weight_for_ripples, region_of,
+    StopRule, length_weight_for_ripples, region_of,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -333,7 +335,11 @@ impl Spec {
             mesh,
             geometry,
             q,
-            info: TreatInfo { tag: "in", n_input: self.positions.len(), ..TreatInfo::default() },
+            info: TreatInfo {
+                tag: "in",
+                n_input: self.positions.len(),
+                ..TreatInfo::default()
+            },
         })
     }
 }
@@ -849,7 +855,10 @@ impl Treat {
             Treat::R30 => 30.0,
             _ => return None,
         };
-        Some(RefineOptions { min_angle: degrees.to_radians(), ..RefineOptions::default() })
+        Some(RefineOptions {
+            min_angle: degrees.to_radians(),
+            ..RefineOptions::default()
+        })
     }
 }
 
@@ -895,7 +904,8 @@ fn quality_geom(mesh: &TriMesh, geometry: &Geometry) -> Quality {
         }
     }
     largest.sort_by(f64::total_cmp);
-    let at = |q: f64| largest[((q * largest.len() as f64) as usize).min(largest.len() - 1)].to_degrees();
+    let at =
+        |q: f64| largest[((q * largest.len() as f64) as usize).min(largest.len() - 1)].to_degrees();
     let mut lengths = geometry.edge_lengths().to_vec();
     lengths.sort_by(f64::total_cmp);
     Quality {
@@ -923,9 +933,17 @@ struct Treated {
 fn treat_full(spec: &Spec, treat: Treat) -> Result<Treated, String> {
     let input = spec.build()?;
     if treat == Treat::Input {
-        return Ok(Treated { shape: input, tri: None, export: None });
+        return Ok(Treated {
+            shape: input,
+            tri: None,
+            export: None,
+        });
     }
-    let mut info = TreatInfo { tag: treat.tag(), n_input: spec.positions.len(), ..TreatInfo::default() };
+    let mut info = TreatInfo {
+        tag: treat.tag(),
+        n_input: spec.positions.len(),
+        ..TreatInfo::default()
+    };
     let start = Instant::now();
     let mut tri = IntrinsicTriangulation::new(&input.mesh, &input.geometry)
         .map_err(|e| format!("IntrinsicTriangulation::new: {e}"))?;
@@ -949,7 +967,10 @@ fn treat_full(spec: &Spec, treat: Treat) -> Result<Treated, String> {
             info.t_refine = start.elapsed().as_secs_f64();
             let start = Instant::now();
             let e = tri
-                .export_simplicial(&ExportOptions { refine: Some(options), ..ExportOptions::default() })
+                .export_simplicial(&ExportOptions {
+                    refine: Some(options),
+                    ..ExportOptions::default()
+                })
                 .map_err(|e| format!("export_simplicial: {e}"))?;
             info.t_export = start.elapsed().as_secs_f64();
             e
@@ -977,7 +998,11 @@ fn treat_full(spec: &Spec, treat: Treat) -> Result<Treated, String> {
         q,
         info,
     };
-    Ok(Treated { shape, tri: Some(tri), export: Some(export) })
+    Ok(Treated {
+        shape,
+        tri: Some(tri),
+        export: Some(export),
+    })
 }
 
 /// A spec as a `Shape` under the treatment of the environment.
@@ -2716,14 +2741,26 @@ fn quality_study() {
         "MESH QUALITY (TREAT={}): largest angle per triangle: median / 95% / max (degrees), min angle, fraction of interior edges with a negative cotan weight. Angles of the intrinsic geometry. +V: vertices added; splits / flips of the export; seconds new/flip/refine/export.\n",
         Treat::from_env().tag()
     );
-    println!("{}  {:>6} {:>6} {:>6}  {}", quality_header(), "+V", "splits", "flips", "s new/flip/refine/export");
+    println!(
+        "{}  {:>6} {:>6} {:>6}  s new/flip/refine/export",
+        quality_header(),
+        "+V",
+        "splits",
+        "flips",
+    );
     let specs: Vec<Spec> = flat_family().into_iter().chain(sphere_family()).collect();
     for (s, r) in build_all(&specs) {
         match r {
             Ok(sh) => println!(
                 "{}  {:>6} {:>6} {:>6}  {:.3}/{:.3}/{:.3}/{:.3}",
-                quality_row(&s.name, &sh.q), sh.info.added, sh.info.n_splits, sh.info.n_export_flips,
-                sh.info.t_new, sh.info.t_flip, sh.info.t_refine, sh.info.t_export
+                quality_row(&s.name, &sh.q),
+                sh.info.added,
+                sh.info.n_splits,
+                sh.info.n_export_flips,
+                sh.info.t_new,
+                sh.info.t_flip,
+                sh.info.t_refine,
+                sh.info.t_export
             ),
             Err(e) => println!("{:<34} {}", s.name, short(&e)),
         }
@@ -2742,12 +2779,35 @@ fn real_list() -> Vec<RealMesh> {
         .ok()
         .map(|(p, _, _)| plane_of(&p));
     let mut meshes = vec![
-        RealMesh { name: "spot".into(), path: format!("{models}/spot/spot/spot_triangulated.obj"), plane: None },
-        RealMesh { name: "bob".into(), path: format!("{models}/bob/bob/bob_tri.obj"), plane: None },
-        RealMesh { name: "blub".into(), path: format!("{models}/blub/blub/blub_triangulated.obj"), plane: None },
+        RealMesh {
+            name: "spot".into(),
+            path: format!("{models}/spot/spot/spot_triangulated.obj"),
+            plane: None,
+        },
+        RealMesh {
+            name: "bob".into(),
+            path: format!("{models}/bob/bob/bob_tri.obj"),
+            plane: None,
+        },
+        RealMesh {
+            name: "blub".into(),
+            path: format!("{models}/blub/blub/blub_triangulated.obj"),
+            plane: None,
+        },
     ];
-    for n in ["camel", "camelbad", "camelbadnonuniform", "camel_noise1", "camel_noise2", "camelshotnoise"] {
-        meshes.push(RealMesh { name: n.into(), path: format!("{cones}/{n}.obj"), plane: camel_plane });
+    for n in [
+        "camel",
+        "camelbad",
+        "camelbadnonuniform",
+        "camel_noise1",
+        "camel_noise2",
+        "camelshotnoise",
+    ] {
+        meshes.push(RealMesh {
+            name: n.into(),
+            path: format!("{cones}/{n}.obj"),
+            plane: camel_plane,
+        });
     }
     meshes
 }
@@ -2770,7 +2830,9 @@ fn n_pieces(n_nodes: usize, segments: &[Segment]) -> usize {
         let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
         parent[ra] = rb;
     }
-    (0..n_nodes).filter(|&i| used[i] && find(&mut parent, i) == i).count()
+    (0..n_nodes)
+        .filter(|&i| used[i] && find(&mut parent, i) == i)
+        .count()
 }
 
 /// The cut of `phi` on the export, carried back to the input mesh: (nodes, segments, pieces of
@@ -2782,8 +2844,19 @@ fn way_back(
     phi: &[f64],
 ) -> Result<(usize, usize, usize, usize, f64, f64, f64), String> {
     let cut = Cut::from_level_set(&export.mesh, phi, 1e-3).map_err(|e| e.to_string())?;
-    let nodes: Vec<SurfacePoint> = cut.points.iter().map(|p| export.edge_point(p.edge as usize, p.t)).collect();
-    let segments: Vec<Segment> = cut.segments.iter().map(|s| Segment { face: s.face, nodes: s.points }).collect();
+    let nodes: Vec<SurfacePoint> = cut
+        .points
+        .iter()
+        .map(|p| export.edge_point(p.edge as usize, p.t))
+        .collect();
+    let segments: Vec<Segment> = cut
+        .segments
+        .iter()
+        .map(|s| Segment {
+            face: s.face,
+            nodes: s.points,
+        })
+        .collect();
     let start = Instant::now();
     let paths = tri
         .segments_on_input(&nodes, &segments, &EdgeTraceOptions::default())
@@ -2791,7 +2864,15 @@ fn way_back(
     let seconds = start.elapsed().as_secs_f64();
     let pieces: usize = paths.paths.iter().map(|p| p.faces.len()).sum();
     let abs = paths.paths.iter().map(|p| p.mismatch).fold(0.0, f64::max);
-    Ok((nodes.len(), segments.len(), pieces, n_pieces(nodes.len(), &segments), paths.max_relative_mismatch, abs, seconds))
+    Ok((
+        nodes.len(),
+        segments.len(),
+        pieces,
+        n_pieces(nodes.len(), &segments),
+        paths.max_relative_mismatch,
+        abs,
+        seconds,
+    ))
 }
 
 fn real_job(m: &RealMesh, treat: Treat) -> Vec<String> {
@@ -2800,7 +2881,13 @@ fn real_job(m: &RealMesh, treat: Treat) -> Vec<String> {
         Ok(x) => x,
         Err(e) => return vec![format!("  load failed: {e}")],
     };
-    let spec = Spec { name: m.name.clone(), kind: Kind::Real, positions: positions.clone(), faces, center: [0.0; 2] };
+    let spec = Spec {
+        name: m.name.clone(),
+        kind: Kind::Real,
+        positions: positions.clone(),
+        faces,
+        center: [0.0; 2],
+    };
     let input = match spec.build() {
         Ok(s) => s,
         Err(e) => return vec![format!("  input mesh REJECTED by the crate: {e}")],
@@ -2829,20 +2916,36 @@ fn real_job(m: &RealMesh, treat: Treat) -> Vec<String> {
     }
     let problem = CutProblem::new(Energy::Hencky, 0.5);
     let st = Stages::d();
-    let out = run_loop(&mut flow, sh, &problem, &st, StepSize::default(), &StopRule::default(), Oracle::None);
+    let out = run_loop(
+        &mut flow,
+        sh,
+        &problem,
+        &st,
+        StepSize::default(),
+        &StopRule::default(),
+        Oracle::None,
+    );
     let scale = flow.scale().length_scale;
     let s = summarize(&out, scale, mean_edge(sh));
     lines.push(format!(
         "  {}  returned_step {:?}, total {:.2} s",
-        energy_line("", "", &s).trim_start(), out.returned_step, out.seconds
+        energy_line("", "", &s).trim_start(),
+        out.returned_step,
+        out.seconds
     ));
     // The final cut, evaluated by the same code on the input mesh: the values at the input
     // vertices (the first vertices of the export) as a level-set function of the input mesh.
     let phi = flow.level_set();
-    let own = flow.evaluate(&problem, &st.eval_options()).map(|e| e.energy.total).unwrap_or(f64::NAN);
+    let own = flow
+        .evaluate(&problem, &st.eval_options())
+        .map(|e| e.energy.total)
+        .unwrap_or(f64::NAN);
     let on_input = (|| -> Result<f64, String> {
-        let mut ev = ddg_variational_cuts::Evaluator::new(&input.mesh, &input.geometry).map_err(|e| e.to_string())?;
-        let e = ev.evaluate(&phi[..positions.len()], &problem, &st.eval_options()).map_err(|e| e.to_string())?;
+        let mut ev = ddg_variational_cuts::Evaluator::new(&input.mesh, &input.geometry)
+            .map_err(|e| e.to_string())?;
+        let e = ev
+            .evaluate(&phi[..positions.len()], &problem, &st.eval_options())
+            .map_err(|e| e.to_string())?;
         Ok(e.energy.total)
     })();
     lines.push(format!(
@@ -2863,7 +2966,10 @@ fn real_job(m: &RealMesh, treat: Treat) -> Vec<String> {
 
 fn real_intr_study() {
     let treat = Treat::from_env();
-    println!("REAL MESHES, TREAT={}: Hencky, alpha_L = 0.5, planar start (plane of the longest axis through the centroid; camels: the plane of camel.obj), default StopRule (new rule), adaptive step, default stages.\n", treat.tag());
+    println!(
+        "REAL MESHES, TREAT={}: Hencky, alpha_L = 0.5, planar start (plane of the longest axis through the centroid; camels: the plane of camel.obj), default StopRule (new rule), adaptive step, default stages.\n",
+        treat.tag()
+    );
     let meshes = real_list();
     let res = par_map(&meshes, |m| real_job(m, treat));
     for (m, r) in meshes.iter().zip(res) {
@@ -2878,19 +2984,40 @@ fn real_intr_study() {
 
 /// Timings, run alone (one process, one thread): treatment stages, flow per step, way back.
 fn speed_study() {
-    println!("SPEED (single thread, run alone): seconds. new/flip/refine/export: the triangulation; step: median of steps 5..25 of the flow on the mesh it runs on; back: the cut of the last step carried to the input mesh.\n");
-    println!("{:<28} {:<5} {:>7} {:>7} {:>7} {:>7} {:>8} {:>9} {:>9} {:>8}", "mesh", "treat", "V", "new", "flip", "refine", "export", "step", "10 steps", "back");
+    println!(
+        "SPEED (single thread, run alone): seconds. new/flip/refine/export: the triangulation; step: median of steps 5..25 of the flow on the mesh it runs on; back: the cut of the last step carried to the input mesh.\n"
+    );
+    println!(
+        "{:<28} {:<5} {:>7} {:>7} {:>7} {:>7} {:>8} {:>9} {:>9} {:>8}",
+        "mesh", "treat", "V", "new", "flip", "refine", "export", "step", "10 steps", "back"
+    );
     let mut specs: Vec<(String, Spec)> = Vec::new();
     for m in real_list() {
         if let Ok((positions, faces, _)) = load_obj(&m.path) {
-            specs.push((m.name.clone(), Spec { name: m.name, kind: Kind::Real, positions, faces, center: [0.0; 2] }));
+            specs.push((
+                m.name.clone(),
+                Spec {
+                    name: m.name,
+                    kind: Kind::Real,
+                    positions,
+                    faces,
+                    center: [0.0; 2],
+                },
+            ));
         }
     }
-    for s in flat_family().into_iter().filter(|s| s.name.contains("165") || s.name.contains("1:16")) {
+    for s in flat_family()
+        .into_iter()
+        .filter(|s| s.name.contains("165") || s.name.contains("1:16"))
+    {
         specs.push((s.name.clone(), s));
     }
     for (name, spec) in &specs {
-        let (axis, offset) = if spec.kind == Kind::Real { plane_of(&spec.positions) } else { (0, 0.5) };
+        let (axis, offset) = if spec.kind == Kind::Real {
+            plane_of(&spec.positions)
+        } else {
+            (0, 0.5)
+        };
         for treat in [Treat::Input, Treat::Flip, Treat::R25, Treat::R30] {
             let tr = match treat_full(spec, treat) {
                 Ok(t) => t,
@@ -2908,7 +3035,14 @@ fn speed_study() {
             let mut times = Vec::new();
             for _ in 0..25 {
                 let start = Instant::now();
-                match do_step(&mut flow, sh, &problem, &st, StepSize::default(), Oracle::None) {
+                match do_step(
+                    &mut flow,
+                    sh,
+                    &problem,
+                    &st,
+                    StepSize::default(),
+                    Oracle::None,
+                ) {
                     Ok(_) => times.push(start.elapsed().as_secs_f64()),
                     Err(_) => break,
                 }
@@ -2918,11 +3052,25 @@ fn speed_study() {
             let step = mid.get(mid.len() / 2).copied().unwrap_or(f64::NAN);
             let ten: f64 = times.iter().skip(5).take(10).sum();
             let back = match (&tr.tri, &tr.export) {
-                (Some(tri), Some(export)) => way_back(tri, export, &flow.level_set()).map_or(f64::NAN, |r| r.6),
+                (Some(tri), Some(export)) => {
+                    way_back(tri, export, &flow.level_set()).map_or(f64::NAN, |r| r.6)
+                }
                 _ => 0.0,
             };
             let i = &sh.info;
-            println!("{:<28} {:<5} {:>7} {:>7.3} {:>7.3} {:>7.3} {:>8.3} {:>9.4} {:>9.3} {:>8.4}", name, treat.tag(), sh.mesh.n_vertices(), i.t_new, i.t_flip, i.t_refine, i.t_export, step, ten, back);
+            println!(
+                "{:<28} {:<5} {:>7} {:>7.3} {:>7.3} {:>7.3} {:>8.3} {:>9.4} {:>9.3} {:>8.4}",
+                name,
+                treat.tag(),
+                sh.mesh.n_vertices(),
+                i.t_new,
+                i.t_flip,
+                i.t_refine,
+                i.t_export,
+                step,
+                ten,
+                back
+            );
         }
     }
 }
