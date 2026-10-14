@@ -48,9 +48,12 @@ every decision the paper leaves open (entries `N1` to `N17`).
 Not implemented: vertex repositioning (Alg. 10) and vertex removal; a refinement that keeps
 the angle bound through the export at spikes (SPEC N15: on thin tubes and handles the export
 can restore it, at vertices with a small angle sum it cannot); benches (timings are those of
-the example program). The Lean theorems for the formula ids below are not written:
-`scripts/check-formulas.sh` reports the twelve `it-` ids as missing (the four ids shared with
-`ddg-core` resolve to their proofs).
+the example program). The twelve `it-` ids below have machine-checked theorems in
+`lean/proofs/DdgProofs/Intrinsic/` (about the oracle's definitions in
+`lean/oracle/DdgOracle/Formulas/Intrinsic.lean`); what is cited instead of proved (existence,
+uniqueness and termination for the Delaunay triangulation, Rippa's theorem, the planar
+refinement guarantees, straightest geodesics) is in `lean/proofs/CITED.md`. A whole tracing
+query, the overlay, refinement and the export have no theorem.
 
 ## Use
 

@@ -548,5 +548,6 @@ Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-d
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,
 `it-point-distances`, `it-circumcenter`; from `ddg-core`: `cotan-laplacian`, `lumped-mass`,
 `angle-defect`, `boundary-geodesic-curvature`. The lengths of an edge split are
-`it-point-distances` with the point on a side. The Lean theorems and citations of §7 are not
-written yet, so `scripts/check-formulas.sh` reports the `it-` ids as missing.
+`it-point-distances` with the point on a side. The Lean theorems of §7 are in
+`lean/proofs/DdgProofs/Intrinsic/`, the citations in `lean/proofs/CITED.md`, and the oracle's
+single operations are replayed by `tests/oracle.rs`.
