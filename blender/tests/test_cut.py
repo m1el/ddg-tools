@@ -1301,6 +1301,231 @@ def the_cut_offset_moves_points_away_from_vertices():
 
 
 # ----------------------------------------------------------------------------------------------
+# The two bad meshes of crates/ddg-variational-cuts/examples/bad_mesh_study.rs
+
+
+def pinch_free(faces):
+    """Removes faces until every vertex has one fan of faces (no pinched vertices)."""
+    while True:
+        by_vertex = collections.defaultdict(list)
+        for f, face in enumerate(faces):
+            for v in face:
+                by_vertex[v].append(f)
+        drop = set()
+        for v, around in by_vertex.items():
+            # Faces around v connected through edges (v, w).
+            edge_faces = collections.defaultdict(list)
+            for f in around:
+                for w in faces[f]:
+                    if w != v:
+                        edge_faces[w].append(f)
+            parent = {f: f for f in around}
+
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+            for fs in edge_faces.values():
+                for g in fs[1:]:
+                    parent[find(g)] = find(fs[0])
+            groups = collections.defaultdict(list)
+            for f in around:
+                groups[find(f)].append(f)
+            if len(groups) > 1:
+                keep = max(groups.values(), key=len)
+                for g in groups.values():
+                    if g is not keep:
+                        drop.update(g)
+        if not drop:
+            return faces
+        faces = [f for i, f in enumerate(faces) if i not in drop]
+
+
+def compacted(positions, faces):
+    used = sorted({v for f in faces for v in f})
+    index = {v: i for i, v in enumerate(used)}
+    return [positions[v] for v in used], [tuple(index[v] for v in f) for f in faces]
+
+
+def sheared_grid(n, sigma):
+    """The lattice (i + sigma j, j)/n clipped to the unit square, split into triangles of largest
+    angle 180 - atan(1/sigma) degrees (the study's `sheared`)."""
+    h = 1.0 / n
+    index, positions = {}, []
+    for j in range(n + 1):
+        lo = math.floor(-sigma * j) - 1
+        hi = math.ceil(n - sigma * j) + 1
+        for i in range(lo, hi + 1):
+            x = (i + sigma * j) * h
+            if -1e-9 <= x <= 1.0 + 1e-9:
+                index[(i, j)] = len(positions)
+                positions.append((x, j * h, 0.0))
+    faces = []
+    for (i, j), a in sorted(index.items()):
+        b, c, d = index.get((i + 1, j)), index.get((i + 1, j + 1)), index.get((i, j + 1))
+        if b is not None and c is not None and d is not None:
+            faces += [(a, b, c), (a, c, d)]
+    return compacted(positions, pinch_free(faces))
+
+
+def needles_and_caps_grid(n):
+    """Rows alternate between thin strips (caps: one angle of 168 degrees) and tall ones
+    (needles: apex 19 degrees), shifted by half a cell (the study's `needles_and_caps`)."""
+    d = 1.0 / n
+    ha, hb = 0.05 * d, 3.0 * d
+    pairs = max(1, round(1.0 / (ha + hb)))
+    scale = 1.0 / (pairs * (ha + hb))
+    rows = 2 * pairs + 1
+    y = [0.0]
+    for j in range(2 * pairs):
+        y.append(y[j] + scale * (ha if j % 2 == 0 else hb))
+    y[-1] = 1.0
+    positions, row_x, start = [], [], []
+    for j in range(rows):
+        xs = [i * d for i in range(n + 1)] if j % 2 == 0 else (
+            [0.0] + [(i + 0.5) * d for i in range(n)] + [1.0])
+        start.append(len(positions))
+        positions += [(x, y[j], 0.0) for x in xs]
+        row_x.append(xs)
+    faces = []
+    for j in range(rows - 1):
+        xa, xb = row_x[j], row_x[j + 1]
+        i = m = 0
+        while i < len(xa) - 1 or m < len(xb) - 1:
+            if i == len(xa) - 1:
+                bottom = False
+            elif m == len(xb) - 1:
+                bottom = True
+            else:
+                bottom = xa[i + 1] <= xb[m + 1]
+            a, b = start[j] + i, start[j + 1] + m
+            if bottom:
+                faces.append((a, a + 1, b))
+                i += 1
+            else:
+                faces.append((a, b + 1, b))
+                m += 1
+    return positions, faces
+
+
+def mesh_object(name, positions, faces):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(positions, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    return activate(obj)
+
+
+def bad_mesh_workflow(label, positions, faces):
+    obj = mesh_object(label, positions, faces)
+    mesh = obj.data
+    chi = euler(mesh)
+    # A disk around the vertex nearest to the centre of the square.
+    centre = Vector((0.511, 0.493, 0.0))
+    vertex = min(range(len(mesh.vertices)), key=lambda i: (mesh.vertices[i].co - centre).length)
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.25, vertex=vertex) == {'FINISHED'}
+    assert flow(steps=20, length_mode='RIPPLE', ripple_wavelength=0.25, use_stop_rule=False,
+                use_uniform_curvature=True, uniform_curvature=5.0) \
+        == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    alive = report["stop_reason"] != "cut_vanished" and report["cut_length_after"] > 0.0
+    print("  {} [{}]: {} steps, {}, energy {:.4g} -> {:.4g}, cut length {:.3f} (was {:.3f})".format(
+        label, ARGS.triangulation, report["steps_taken"], report["stop_reason"],
+        report["energy_before"], report["energy_after"], report["cut_length_after"],
+        report["cut_length_before"]))
+    BAD_RECORD.append((label, ARGS.triangulation, alive, report["energy_before"],
+                       report["energy_after"], report["cut_length_after"]))
+    if ARGS.triangulation != "caller":
+        assert alive, "the cut vanished on {}".format(label)
+        assert report["energy_after"] < report["energy_before"], report
+    if not alive:
+        return              # nothing to apply (caller's triangulation on a bad mesh)
+    session, reference = rust_reference(obj)
+    seams_before = positions_of_seams(mesh)
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    check_apply_against_reference(obj, None, session, reference, seams_before)
+    assert euler(mesh) == chi
+    core = importlib.import_module(ARGS.module + ".core")
+    stats = core.unwrap_object(obj, use_seams=True)
+    note = stats["triangulation"]
+    print("    unwrap: {} charts, {} flipped, stored triangulation for {} faces".format(
+        stats["report"].get("n_charts"), stats["report"].get("n_flipped_uv_triangles"),
+        note["used"] if note else 0))
+    BAD_RECORD.append((label + " unwrap", ARGS.triangulation, stats["report"].get("n_charts"),
+                       stats["report"].get("n_flipped_uv_triangles"), 0, 0))
+
+
+BAD_RECORD = []
+
+
+@test
+def bad_mesh_sheared_153_degrees_start_flow_apply_unwrap():
+    positions, faces = sheared_grid(32, 2.0)
+    bad_mesh_workflow("sheared 153", positions, faces)
+
+
+@test
+def bad_mesh_needles_and_caps_start_flow_apply_unwrap():
+    positions, faces = needles_and_caps_grid(32)
+    bad_mesh_workflow("needles and caps", positions, faces)
+
+
+@test
+def bad_mesh_sheared_165_degrees_start_flow_apply_unwrap():
+    positions, faces = sheared_grid(32, 1.0 / math.tan(math.radians(15.0)))
+    bad_mesh_workflow("sheared 165", positions, faces)
+
+
+@test
+def refined_session_keeps_its_state_in_bytes_and_notices_a_stale_one():
+    if ARGS.triangulation == "caller":
+        raise Skip("the caller's triangulation has no state bytes")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                    triangulation='REFINED', refine_bound=30.0) == {'FINISHED'}
+    assert mesh["ddg_cut_option"] == "refined:30"
+    assert "ddg_cut_state" in mesh, "refinement adds vertices: the state needs its bytes"
+    assert flow(steps=3, show_advanced=True) == {'FINISHED'}
+    report = dict(mesh["ddg_cut_last_flow"])
+    assert report["vertices_added"] > 0 and report["triangulation"] == "refined:30"
+    # The attributes stay the view of the mesh's own vertices.
+    assert len(state(mesh)) == 2
+    before = bytes(mesh["ddg_cut_state"], "ascii")
+    # Seams changed since Start: the stored state is stale, the message says so.
+    mesh.edges[0].use_seam = True
+    message = expect_error("changed since 'Cut: Start'.*Run 'Cut: Start' again",
+                           bpy.ops.uv.ddg_cut_flow, **FLOW)
+    expect_error("changed since 'Cut: Start'", bpy.ops.uv.ddg_cut_apply)
+    assert bytes(mesh["ddg_cut_state"], "ascii") == before, "a stale state was overwritten"
+    mesh.edges[0].use_seam = False
+    assert flow(steps=2) == {'FINISHED'}      # valid again
+    # A new Start replaces everything; Apply removes the bytes and the option.
+    assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                    triangulation='INTRINSIC') == {'FINISHED'}
+    assert "ddg_cut_state" not in mesh and mesh["ddg_cut_option"] == "intrinsic"
+    assert flow(steps=2) == {'FINISHED'}
+    assert bpy.ops.uv.ddg_cut_apply() == {'FINISHED'}
+    for key in ("ddg_cut_state", "ddg_cut_option", "ddg_cut_last_flow"):
+        assert key not in mesh, key
+    del message
+
+
+@test
+def flow_report_has_a_triangulation_line_in_the_advanced_view_only():
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    start_circle(obj, vertex=5)
+    with CaptureOutput() as out:
+        assert flow(steps=1) == {'FINISHED'}
+    assert "triangulation:" not in out.text
+    with CaptureOutput() as out:
+        assert flow(steps=1, show_advanced=True) == {'FINISHED'}
+    assert "triangulation:" in out.text, out.text
+
+
+# ----------------------------------------------------------------------------------------------
 # Error paths
 
 
@@ -1493,6 +1718,10 @@ def main():
             print("PASS", name)
         sys.stdout.flush()
 
+    for row in FLIP_RECORD:
+        print("FLIPS atlas of spot [{}] weight {} offset {}: {} by our count, {} by the library's".format(*row))
+    for row in BAD_RECORD:
+        print("BAD", row)
     print("RESULT: {} passed, {} skipped, {} failed".format(len(passed), len(skipped), len(failed)))
     for name in failed:
         print("  failed:", name)
