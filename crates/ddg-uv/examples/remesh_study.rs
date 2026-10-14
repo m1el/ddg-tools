@@ -178,6 +178,10 @@ struct Input {
     mesh: TriMesh,
     geometry: Geometry,
     mean_edge: f64,
+    /// The length the refinement factors multiply (`TARGET`: `mean` edge, default; `median`
+    /// edge; `area`: the side of the equilateral triangle of the mean face area, which does not
+    /// depend on how the input's area is cut into slivers).
+    base_edge: f64,
     /// `1 / √(total area)`: lengths times this are lengths on the unit-area surface.
     scale: f64,
     /// The Gaussian curvature density of every input face on the unit-area surface (SPEC §3.1
@@ -241,6 +245,13 @@ impl Input {
         let geometry = Geometry::from_positions(&mesh, &positions).map_err(|e| e.to_string())?;
         let lengths = geometry.edge_lengths();
         let mean_edge = lengths.iter().sum::<f64>() / lengths.len() as f64;
+        let base_edge = match std::env::var("TARGET").as_deref() {
+            Ok("median") => median(lengths.to_vec()),
+            Ok("area") => {
+                (4.0 * geometry.total_area() / (3f64.sqrt() * faces.len() as f64)).sqrt()
+            }
+            _ => mean_edge,
+        };
         let scale = 1.0 / geometry.total_area().sqrt();
         let density = Evaluator::new(&mesh, &geometry)
             .map_err(|e| e.to_string())?
@@ -260,6 +271,7 @@ impl Input {
             mesh,
             geometry,
             mean_edge,
+            base_edge,
             scale,
             density,
             vertex_faces,
@@ -407,6 +419,8 @@ struct BuildInfo {
     bound: f64,
     /// Attempts to match the vertex budget (adaptive).
     attempts: usize,
+    /// The uniform refinement stopped at `MAX_VERTICES`.
+    capped: bool,
 }
 
 /// A triangulation the flow runs on directly (not through the Session).
@@ -453,7 +467,12 @@ fn refine_uniform(
     h: f64,
     info: &mut BuildInfo,
 ) -> Result<(), IntrinsicError> {
+    let cap = env_usize("MAX_VERTICES", usize::MAX);
     for _ in 0..80 {
+        if tri.n_vertices() >= cap {
+            info.capped = true;
+            break;
+        }
         let mut long: Vec<(f64, u32)> = (0..tri.n_edges())
             .filter(|&e| tri.edge_length(e) > h)
             .map(|e| (tri.edge_length(e), e as u32))
@@ -463,7 +482,8 @@ fn refine_uniform(
         }
         long.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         info.rounds += 1;
-        let edges: Vec<u32> = long.into_iter().map(|x| x.1).collect();
+        let room = cap.saturating_sub(tri.n_vertices());
+        let edges: Vec<u32> = long.into_iter().map(|x| x.1).take(room).collect();
         if split_and_flip(tri, &edges, info)? == 0 {
             break;
         }
@@ -549,10 +569,7 @@ fn build(input: &Input, refine: Refine, budget: Option<usize>) -> Result<Built, 
                 ..BuildInfo::default()
             },
         })
-        .map(|b| {
-            debug_assert_eq!(b.spread.len(), n);
-            b
-        });
+        .inspect(|b| debug_assert_eq!(b.spread.len(), n));
     }
     let err = |e: IntrinsicError| e.to_string();
     let mut tri = IntrinsicTriangulation::new(&input.mesh, &input.geometry).map_err(err)?;
@@ -561,12 +578,12 @@ fn build(input: &Input, refine: Refine, budget: Option<usize>) -> Result<Built, 
     match refine {
         Refine::Caller | Refine::Flips => {}
         Refine::Uniform(factor) => {
-            refine_uniform(&mut tri, factor * input.mean_edge, &mut info).map_err(err)?;
+            refine_uniform(&mut tri, factor * input.base_edge, &mut info).map_err(err)?;
         }
         Refine::Odt(factor) => {
             let report = tri
                 .optimal_delaunay(&OptimalDelaunayOptions {
-                    target_length: TargetLength::MeanInputEdge(factor),
+                    target_length: TargetLength::Absolute(factor * input.base_edge),
                     ..OptimalDelaunayOptions::default()
                 })
                 .map_err(err)?;
@@ -1105,7 +1122,7 @@ impl Reference {
             for p in pieces {
                 for e in p.ends {
                     kinds[usize::from(e.edge.is_some())] += 1;
-                    if e.bary.iter().any(|&b| b == 1.0) {
+                    if e.bary.contains(&1.0) {
                         kinds[2] += 1;
                     }
                     if let Some((edge, t)) = e.edge {
@@ -1263,6 +1280,9 @@ struct Outcome {
     /// Pieces after the bend merge with the tolerances 0.02 and 0.1 (Session runs).
     merged: Vec<(f64, Vec<Piece>, DescribeReport)>,
     sides: Vec<bool>,
+    /// The final level-set function at the input vertices (the first vertices of every
+    /// triangulation), for the energy of the same cut restricted to the input mesh.
+    phi_input: Vec<f64>,
     report: RunReport,
     seconds: f64,
     build_seconds: f64,
@@ -1335,7 +1355,8 @@ fn run_direct(input: &Input, built: &Built, treat: &Treat, case: &Case) -> Resul
         .map_err(|e| e.to_string())?;
     let seconds = start.elapsed().as_secs_f64();
     let phi = flow.level_set();
-    let sides: Vec<bool> = phi[..input.positions.len()].iter().map(|&x| x > 0.0).collect();
+    let phi_input = phi[..input.positions.len()].to_vec();
+    let sides: Vec<bool> = phi_input.iter().map(|&x| x > 0.0).collect();
     let (pieces, mismatch) = if built.tri.is_some() {
         pieces_way_back(input, built, &phi)?
     } else {
@@ -1346,6 +1367,7 @@ fn run_direct(input: &Input, built: &Built, treat: &Treat, case: &Case) -> Resul
         pieces,
         merged: Vec::new(),
         sides,
+        phi_input,
         report,
         seconds,
         build_seconds: built.info.seconds,
@@ -1357,11 +1379,11 @@ fn run_direct(input: &Input, built: &Built, treat: &Treat, case: &Case) -> Resul
     })
 }
 
-fn session_options(refine: Refine, merge: f64) -> IntrinsicOptions {
+fn session_options(refine: Refine, merge: f64, base_edge: f64) -> IntrinsicOptions {
     let mut o = match refine {
         Refine::Odt(factor) => IntrinsicOptions {
             optimal_delaunay: Some(OptimalDelaunayOptions {
-                target_length: TargetLength::MeanInputEdge(factor),
+                target_length: TargetLength::Absolute(factor * base_edge),
                 ..OptimalDelaunayOptions::default()
             }),
             ..IntrinsicOptions::flips_only()
@@ -1393,7 +1415,7 @@ impl SessionSet {
                 2,
                 &zero,
                 FlowKind::TwoRegion,
-                &Triangulation::Intrinsic(session_options(treat.refine, merge)),
+                &Triangulation::Intrinsic(session_options(treat.refine, merge, input.base_edge)),
             )
             .map_err(|e| e.to_string())
         };
@@ -1439,7 +1461,8 @@ impl SessionSet {
                 first_corner[v as usize] = c;
             }
         }
-        let sides: Vec<bool> = first_corner.iter().map(|&c| state[0][c] > 0.0).collect();
+        let phi_input: Vec<f64> = first_corner.iter().map(|&c| state[0][c]).collect();
+        let sides: Vec<bool> = phi_input.iter().map(|&x| x > 0.0).collect();
         let (cut0, _) = session
             .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
             .map_err(|e| e.to_string())?;
@@ -1459,6 +1482,7 @@ impl SessionSet {
             pieces,
             merged,
             sides,
+            phi_input,
             report,
             seconds,
             build_seconds: self.build_seconds,
@@ -1521,6 +1545,14 @@ fn real(name: &str) {
         .zip(input.geometry.face_areas())
         .map(|(k, a)| k * a * input.scale * input.scale)
         .sum();
+    println!(
+        "TARGET {}: base length {:.4e} (mean edge {:.4e}, median {:.4e}), MAX_VERTICES {}",
+        std::env::var("TARGET").unwrap_or_else(|_| "mean".into()),
+        input.base_edge,
+        input.mean_edge,
+        median(input.geometry.edge_lengths().to_vec()),
+        env_usize("MAX_VERTICES", usize::MAX)
+    );
     println!(
         "MESH {}: V {}, F {}, mean edge {:.4e}, total curvature {:.4} (2πχ = {:.4}), Σ|k|A {:.4}",
         input.name,
@@ -1602,10 +1634,15 @@ fn real(name: &str) {
             .as_ref()
             .map_or((f64::NAN, f64::NAN), |e| (e.min_angle, e.max_angle));
         println!(
-            "BUILD {:?}: V {} (+{}), rounds {}, refused {}, {:.3} s (threads shared), bound {:.3e} after {} attempt(s), export angles {:.1}..{:.1} deg, spread Σ|k|A mismatch {:+.2e}",
+            "BUILD {:?}: V {} (+{}){}, rounds {}, refused {}, {:.3} s (threads shared), bound {:.3e} after {} attempt(s), export angles {:.1}..{:.1} deg, spread Σ|k|A mismatch {:+.2e}",
             r,
             b.mesh.n_vertices(),
             b.info.added,
+            if b.info.capped {
+                " CAPPED at MAX_VERTICES"
+            } else {
+                ""
+            },
             b.info.rounds,
             b.info.refused,
             b.info.seconds,
@@ -1739,6 +1776,20 @@ fn emit_rows(
 ) -> Vec<String> {
     let mut lines = Vec::new();
     let run = summarize_run(&o.report, input);
+    // The energy of the final level-set function restricted to the input vertices, on the
+    // input mesh with its own Gaussian curvature (the measure of flow_on_bad_meshes.rs).
+    let on_input = Evaluator::new(&input.mesh, &input.geometry)
+        .map_err(|e| e.to_string())
+        .and_then(|mut ev| {
+            ev.evaluate(
+                &o.phi_input,
+                &CutProblem::new(case.energy.clone(), case.alpha),
+                &EvalOptions::default(),
+            )
+            .map(|e| e.energy.total)
+            .map_err(|e| e.to_string())
+        })
+        .unwrap_or(f64::NAN);
     let mut variants: Vec<(String, &Vec<Piece>, Option<&DescribeReport>)> =
         vec![("cut".to_string(), &o.pieces, None)];
     for (m, p, r) in &o.merged {
@@ -1771,7 +1822,7 @@ fn emit_rows(
             )
         });
         let line = format!(
-            "ROW mesh={} case={} energy={} alpha_factor={} alpha={:.5e} start={} treat={} variant={} V={} added={} build_s={:.3} run_s={:.3} ms_step={:.2} {} ref_total={:.6e} ref_length={:.6e} ref_distortion={:.6e} exact_length={:.6e} ref_total_exact_len={:.6e} poly_total={:.6e} poly_distortion={:.6e} own_edge={:.4e} pieces={} conflicts={} wrong_sides={} mismatch={:.1e} ref_s={:.2}{}{}{}",
+            "ROW mesh={} case={} energy={} alpha_factor={} alpha={:.5e} start={} treat={} variant={} V={} added={} build_s={:.3} run_s={:.3} ms_step={:.2} {} ref_total={:.6e} ref_length={:.6e} ref_distortion={:.6e} exact_length={:.6e} ref_total_exact_len={:.6e} poly_total={:.6e} poly_distortion={:.6e} on_input={:.6e} own_edge={:.4e} pieces={} conflicts={} wrong_sides={} mismatch={:.1e} ref_s={:.2}{}{}{}",
             input.name,
             case.tag(),
             case.energy_name,
@@ -1793,6 +1844,7 @@ fn emit_rows(
             distortion + case.alpha * exact,
             poly_total,
             poly_distortion,
+            on_input,
             o.own_mean_edge,
             pieces.len(),
             conflicts,
@@ -1858,7 +1910,7 @@ fn speed(names: &[String]) {
                     2,
                     &Start::Corners(vec![values, neg]),
                     FlowKind::TwoRegion,
-                    &Triangulation::Intrinsic(session_options(treat.refine, 0.1)),
+                    &Triangulation::Intrinsic(session_options(treat.refine, 0.1, input.base_edge)),
                 ) else {
                     continue;
                 };
@@ -1988,13 +2040,24 @@ fn latitude_exact(psi0: f64, alpha: f64, t: f64) -> f64 {
     psi
 }
 
-/// The treatments of the laws: the direct ones without the adaptive refinement (the flat
-/// meshes have no curvature, the sphere a uniform one), and flips run directly.
+/// The treatments of the laws: all but the adaptive refinement (the flat meshes have no
+/// curvature, the sphere a uniform one), run directly (flips and the optimal Delaunay
+/// triangulation too, without the Session).
 fn law_treats() -> Vec<Treat> {
     let mut out: Vec<Treat> = all_treats()
         .into_iter()
-        .filter(|t| !t.session && !matches!(t.refine, Refine::Adaptive(_)))
+        .filter(|t| !matches!(t.refine, Refine::Adaptive(_) | Refine::Flips))
+        .map(|t| Treat {
+            session: false,
+            ..t
+        })
         .collect();
+    out.push(Treat {
+        tag: "flipS",
+        refine: Refine::Flips,
+        spread: true,
+        session: false,
+    });
     out.insert(
         1,
         Treat {
@@ -2136,6 +2199,143 @@ fn laws() {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// a reproducer of a failed way back
+
+/// `repro MESH TREAT ENERGY ALPHA_FACTOR START`: the run of one case of `real`, and if the way
+/// back fails, every segment that fails alone, with its nodes and their places on the input.
+fn repro(args: &[String]) {
+    let [name, tag, energy_name, factor, start] = args else {
+        eprintln!("usage: remesh_study repro MESH TREAT ENERGY ALPHA_FACTOR START");
+        return;
+    };
+    let input = Input::load(name).expect("load");
+    let treat = *all_treats()
+        .iter()
+        .find(|t| t.tag == tag)
+        .expect("unknown treatment");
+    let budget = match treat.refine {
+        Refine::Adaptive(f) => Some(
+            build(&input, Refine::Uniform(f), None)
+                .expect("uniform build")
+                .info
+                .added,
+        ),
+        _ => None,
+    };
+    let flips = build(&input, Refine::Flips, None).expect("flips");
+    let built = build(&input, treat.refine, budget).expect("build");
+    println!(
+        "REPRO mesh={name} treat={tag} V={} added={} bound={:.6e}",
+        built.mesh.n_vertices(),
+        built.info.added,
+        built.info.bound
+    );
+    let (energy, energy_name) = energy_of(energy_name);
+    let start: usize = start.parse().expect("start");
+    let factor: f64 = factor.parse().expect("alpha factor");
+    let auto = alpha_auto(&input, &flips, &energy, start).expect("alpha");
+    let case = Case {
+        energy,
+        energy_name,
+        alpha_factor: factor,
+        alpha: factor * auto,
+        start,
+    };
+    println!("REPRO case={} alpha={:.6e}", case.tag(), case.alpha);
+    let phi0: Vec<f64> = built
+        .positions
+        .iter()
+        .map(|&p| input.start(case.start, p))
+        .collect();
+    let mut flow = Flow::new(&built.mesh, &built.geometry, &phi0).expect("flow");
+    flow.redistance().expect("redistance");
+    let mut problem = CutProblem::new(case.energy.clone(), case.alpha);
+    if treat.spread {
+        problem.curvature = CurvatureSource::PerFace(built.spread.clone());
+    }
+    let report = flow
+        .run(&problem, &flow_options(), &stop_rule())
+        .expect("run");
+    println!("REPRO {}", summarize_run(&report, &input));
+    let phi = flow.level_set();
+    let Some(tri) = built.tri.as_ref() else {
+        println!("REPRO no way back for the caller's triangles");
+        return;
+    };
+    let export = built.export.as_ref().unwrap();
+    let cut = Cut::from_level_set(&export.mesh, &phi, 1e-3).expect("cut");
+    let nodes: Vec<SurfacePoint> = cut
+        .points
+        .iter()
+        .map(|p| export.edge_point(p.edge as usize, p.t))
+        .collect();
+    let segments: Vec<Segment> = cut
+        .segments
+        .iter()
+        .map(|s| Segment {
+            face: s.face,
+            nodes: s.points,
+        })
+        .collect();
+    match tri.segments_on_input(&nodes, &segments, &EdgeTraceOptions::default()) {
+        Ok(b) => {
+            println!(
+                "REPRO way back OK: {} segments, max relative mismatch {:.2e}",
+                segments.len(),
+                b.max_relative_mismatch
+            );
+            return;
+        }
+        Err(e) => println!("REPRO way back FAILED: {e}"),
+    }
+    let mut n_failed = 0;
+    for (k, seg) in segments.iter().enumerate() {
+        let one = [*seg];
+        let Err(e) = tri.segments_on_input(&nodes, &one, &EdgeTraceOptions::default()) else {
+            continue;
+        };
+        n_failed += 1;
+        println!("REPRO segment {k} in face {} of the triangulation: {e}", seg.face);
+        for &n in &seg.nodes {
+            let p = cut.points[n as usize];
+            let [a, b] = export.mesh.edge_vertices(p.edge as usize);
+            println!(
+                "  node {n}: export edge {} ({a}, {b}) t={:.17e} -> {:?} on the triangulation -> {:?} on the input",
+                p.edge,
+                p.t,
+                nodes[n as usize],
+                tri.point_on_input(nodes[n as usize])
+            );
+        }
+        let corners: Vec<String> = (0..3)
+            .map(|c| {
+                let e = tri.edge(3 * seg.face as usize + c);
+                format!("edge {e} length {:.6e}", tri.edge_length(e))
+            })
+            .collect();
+        println!("  face {} sides: {}", seg.face, corners.join(", "));
+        for tol in [1e-4, 1e-2, 1e-1] {
+            let r = tri.segments_on_input(
+                &nodes,
+                &one,
+                &EdgeTraceOptions {
+                    tolerance: tol,
+                    ..EdgeTraceOptions::default()
+                },
+            );
+            println!(
+                "  with tolerance {tol:.0e}: {}",
+                match r {
+                    Ok(b) => format!("OK, relative mismatch {:.2e}", b.max_relative_mismatch),
+                    Err(e) => format!("{e}"),
+                }
+            );
+        }
+    }
+    println!("REPRO {n_failed} of {} segments fail alone", segments.len());
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -2146,6 +2346,7 @@ fn main() {
         }
         Some("speed") => speed(&args[1..]),
         Some("laws") => laws(),
+        Some("repro") => repro(&args[1..]),
         _ => eprintln!("usage: remesh_study real MESH... | speed MESH... | laws"),
     }
 }

@@ -19,6 +19,18 @@ TREATS = ["input", "flip", "flipS", "u2", "u2S", "u4", "u4S", "ka2", "ka2S", "ka
 COARSE = {"spot_control", "bob_control", "blub_control"}
 
 
+def group(m):
+    """coarse (control meshes), camel (the camel family, base length TARGET=area), fine."""
+    if m in COARSE:
+        return "coarse"
+    if m.startswith("camel"):
+        return "camel"
+    return "fine"
+
+
+GROUPS = ["coarse", "fine", "camel"]
+
+
 def parse(paths):
     rows = []
     for path in paths:
@@ -99,11 +111,10 @@ def convergence(rows, meshes):
           " Converged / Stalled / Rose / Max / Vanished |"
           " rises (median) | rises / steps | motion at the end (input edges, median) |")
     print("|---|---|---|---|---|---|---|---|")
-    groups = [("coarse", lambda m: m in COARSE), ("fine", lambda m: m not in COARSE)]
     for t in TREATS:
-        for gname, gf in groups:
+        for gname in GROUPS:
             rs = [r for r in rows if r.get("treat") == t and r.get("variant") == "cut"
-                  and "error" not in r and gf(r["mesh"])]
+                  and "error" not in r and group(r["mesh"]) == gname]
             if not rs:
                 continue
             stops = defaultdict(int)
@@ -127,15 +138,15 @@ def by_alpha(rows, base, key):
     for r in rows:
         if r.get("variant") == "cut" and "error" not in r:
             by[(r["mesh"], r["case"], r["treat"])] = (num(r, key), r["alpha_factor"],
-                                                       r["mesh"] in COARSE)
-    print("| treatment | " + " | ".join(f"α×{f} coarse | α×{f} fine" for f in factors) + " |")
-    print("|" + "---|" * (2 * len(factors) + 1))
+                                                       group(r["mesh"]))
+    print("| treatment | " + " | ".join(f"α×{f} {g}" for f in factors for g in GROUPS) + " |")
+    print("|" + "---|" * (len(GROUPS) * len(factors) + 1))
     for t in TREATS:
         if t == base:
             continue
         cells = []
         for f in factors:
-            for coarse in (True, False):
+            for coarse in GROUPS:
                 vals = []
                 for (m, case, tt), (v, ff, c) in by.items():
                     if tt != t or ff != f or c != coarse:
@@ -216,7 +227,7 @@ def checks(rows):
 
 def main():
     rows = parse(sys.argv[1:])
-    meshes = sorted({r["mesh"] for r in rows}, key=lambda m: (m not in COARSE, m))
+    meshes = sorted({r["mesh"] for r in rows}, key=lambda m: (GROUPS.index(group(m)), m))
     checks(rows)
     convergence(rows, meshes)
     for base in ["flip", "flipS"]:
@@ -224,6 +235,9 @@ def main():
                   f"Quality, spread yardstick, against {base}", meshes)
         rel_table(rows, "poly_total", base, f"Quality, polyhedral yardstick, against {base}",
                   meshes)
+    for base in ["flip", "flipS"]:
+        rel_table(rows, "on_input", base, f"Energy of the cut restricted to the input vertices, "
+                  f"on the input mesh, against {base}", meshes)
     rel_table(rows, "e_final", "flip", "The flow's own final energy against flip (not "
               "comparable across triangulations; for orientation)", meshes)
     by_alpha(rows, "flip", "ref_total_exact_len")
