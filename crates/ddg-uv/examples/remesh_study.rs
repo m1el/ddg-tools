@@ -42,6 +42,7 @@
 //! cargo run --release -p ddg-uv --example remesh_study -- real MESH      one input mesh, all cases
 //! cargo run --release -p ddg-uv --example remesh_study -- speed MESH...  timings, run alone
 //! cargo run --release -p ddg-uv --example remesh_study -- laws           exact laws (flat circle, sphere latitude)
+//! cargo run --release -p ddg-uv --example remesh_study -- repro MESH TREAT ENERGY ALPHA_FACTOR START
 //! ```
 //!
 //! `MESH` is a name (`spot`, `bob`, `blub`, `camel`, `spot_control`, `bob_control`,
@@ -51,7 +52,11 @@
 //! `n`), `TREATS` (comma-separated subset), `ALPHAS` (factors of the
 //! automatic length weight, default `1,0.5,0.25`), `ENERGIES` (`hencky,dirichlet`), `STARTS`
 //! (`0` the plane of the longest axis, `1` of the second longest; default `0`), `CUTS_DIR`
-//! (write every final cut as an OBJ of line pieces there).
+//! (write every final cut as an OBJ of line pieces there), `TARGET` (the base length of the
+//! refinements: `mean` input edge, default; `median`; `area`, the side of the equilateral
+//! triangle of the mean face area), `MAX_VERTICES` (stops the uniform refinement, reported as
+//! `CAPPED`), `SKIP_FROM` (logs of an interrupted run: jobs with rows there are skipped).
+//! Results: `crates/ddg-intrinsic/README.md`, "Remeshing for the cut flow".
 //!
 //! Lines starting with `ROW` are one run each, as `key=value` pairs, for
 //! `scripts/remesh_tables.py`.
