@@ -1,6 +1,6 @@
 [package]
 name = "ddg-intrinsic-apps"
-description = "Applications of intrinsic triangulations (Sharp, Soliman, Crane 2019, Sec. 5): Steiner trees, finite elements, geodesic distance by the heat method"
+description = "Applications of intrinsic triangulations (Sharp, Soliman, Crane 2019, Sec. 5): Steiner trees, finite elements, the heat method, adaptive refinement, tangent vector fields"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

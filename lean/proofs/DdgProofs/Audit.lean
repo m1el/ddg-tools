@@ -927,3 +927,10 @@ open DdgProofs
 #print axioms IntrinsicApps.galerkin_form_bounds
 #print axioms IntrinsicApps.midpoint_half
 #print axioms IntrinsicApps.midline
+#print axioms Apps.transport_around_face
+#print axioms Apps.scaled_minus_sum
+#print axioms Apps.edge_energy
+#print axioms Apps.edge_entries_hermitian
+#print axioms Apps.conformal_parts_det
+#print axioms Apps.conformal_parts_frobenius
+#print axioms Apps.singular_values_from_parts

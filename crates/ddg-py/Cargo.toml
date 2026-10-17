@@ -29,7 +29,8 @@ ddg-uv = { path = "../ddg-uv" }
 ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 # The cut flow: the types of its controls (energy, step size, stages, stop rule).
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
-# Applications of intrinsic triangulations: geodesic_distance and steiner_tree.
+# Applications of intrinsic triangulations: geodesic_distance and steiner_tree (src/intrinsic_apps.rs),
+# tangent fields and adaptive refinement (src/intrinsic_vector.rs).
 ddg-intrinsic = { path = "../ddg-intrinsic" }
 ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

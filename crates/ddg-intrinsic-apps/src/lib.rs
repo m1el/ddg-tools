@@ -22,6 +22,13 @@
 //! * [`exact`]: the exact polyhedral distance from vertices (window propagation after Mitchell,
 //!   Mount and Papadimitriou 1987 and Surazhsky et al. 2005, with the vertex filter of Xin and
 //!   Wang 2009). It is the ground truth against which Sec. 5.3 is measured.
+//! * [`amr`] (Sec. 5.4): adaptive mesh refinement driven by local a posteriori error
+//!   estimates (Morin, Nochetto, Siebert 2002; Mekchay, Nochetto 2005), for the harmonic
+//!   Green's function, the short-time heat kernel and a harmonic map of a disk.
+//! * [`vector`] (Sec. 5.5): connection Laplacians on an intrinsic triangulation (finite
+//!   differences, Sharp, Soliman, Crane 2019 "The Vector Heat Method", Sec. 5.3; finite
+//!   elements, Knöppel, Crane, Pinkall, Schröder 2013, Sec. 6.1.1), harmonic vector fields
+//!   with boundary data and the vector maximum principle, smoothest `n`-direction fields.
 //!
 //! # Conventions
 //!
@@ -32,7 +39,9 @@
 
 #![warn(missing_docs)]
 
+pub mod amr;
 pub mod exact;
 pub mod fem;
 pub mod heat;
 pub mod steiner;
+pub mod vector;
