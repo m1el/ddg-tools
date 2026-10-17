@@ -432,6 +432,7 @@ dependencies = [
 name = "ddg-py"
 version = "0.1.0"
 dependencies = [
+ "ddg-bff",
  "ddg-core",
  "ddg-optimal-cones",
  "ddg-uv",

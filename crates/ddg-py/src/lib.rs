@@ -19,6 +19,7 @@
 //! * [`pipeline`] — the seam to the pipeline and the driver around it.
 //! * [`measure`] — distortion measured on the resulting UV map.
 //! * [`pack`] — packing charts into the unit square.
+//! * [`sphere`] — `map_to_sphere`: a conformal map of a closed genus-0 mesh to the unit sphere.
 //! * `python` (cargo feature `python`) — the PyO3 glue. It contains no logic of its own:
 //!   it turns Python buffers into [`buffers::BufferView`]s, calls the functions above and
 //!   turns the results into Python objects.
@@ -46,6 +47,7 @@ pub mod error;
 pub mod measure;
 pub mod pack;
 pub mod pipeline;
+pub mod sphere;
 
 #[cfg(feature = "python")]
 mod python;

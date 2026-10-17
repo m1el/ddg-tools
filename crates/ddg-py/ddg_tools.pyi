@@ -132,6 +132,35 @@ def reoptimize_cones(
     error: see ``report["status"]``."""
 
 
+@final
+class SphereResult:
+    @property
+    def positions(self) -> array[float]:
+        """``array('d')``, 3 per vertex: a point of the unit sphere."""
+    @property
+    def report(self) -> dict[str, bool | int | float | str | None]:
+        """``pole``, ``is_injective``, ``flipped_triangles``, ``degenerate_triangles``,
+        ``covering_degree``, ``quasi_conformal_mean``, ``quasi_conformal_max``,
+        ``area_distortion``, ``log_scale_min``, ``log_scale_max``, ``max_radius_error``,
+        ``centering_status`` (``"converged"``, ``"max_iterations"``, ``"stalled"``,
+        ``"singular_jacobian"`` or ``None`` without centering), ``centering_iterations``,
+        ``center_of_mass`` (``float`` or ``None``), ``seconds`` and ``seconds_total``."""
+
+def map_to_sphere(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    pole: int | None = None,
+    center: bool = True,
+) -> SphereResult:
+    """A conformal map of a connected closed genus-0 triangle mesh to the unit sphere
+    (Boundary First Flattening, Sec. 7.5: remove one vertex star, flatten the rest to a round
+    disk, project stereographically, Moebius-center). ``pole`` is the removed vertex (``None``:
+    the vertex with the most regular star); ``center=False`` leaves it at ``(0, 0, -1)``. The
+    result is determined up to a rotation of the sphere. Raises ``InputError`` (bad arguments, a
+    pole that is not a vertex) and ``MeshError`` (not a valid manifold triangle mesh, or not
+    connected, closed and of genus 0)."""
+
 # ----------------------------------------------------------------------------------------------
 # The cut flow: "Variational Surface Cutting" (Sharp, Crane 2018) on a polygon mesh.
 # ----------------------------------------------------------------------------------------------
