@@ -17,7 +17,7 @@
 //!   iteration limit; every iteration is reported.
 //!
 //! Conventions: `Δ` is the positive semidefinite Laplace–Beltrami operator and `L` its cotan
-//! matrix (the repository's `CLAUDE.md`); the PDE is `(c + Δ) u = f`. Decisions: SPEC N45 to
+//! matrix (the repository's `CLAUDE.md`); the PDE is `(c + Δ) u = f`. Decisions: SPEC N46 to
 //! N49.
 
 use std::fmt;
@@ -26,6 +26,7 @@ use std::time::Instant;
 use ddg_core::{SparseError, SparseMatrix};
 use ddg_intrinsic::{IntrinsicError, IntrinsicTriangulation, RefineOptions, RefineReport};
 
+use crate::fem::galerkin_mass_matrix;
 use crate::vector::linsolve;
 pub use crate::vector::Factorized;
 
@@ -120,25 +121,6 @@ pub struct Solution {
     pub factorization: Factorized,
     /// The largest relative residual of the linear systems.
     pub residual: f64,
-}
-
-/// The Galerkin mass matrix: per face `A/6` on the diagonal and `A/12` off it.
-///
-/// [formula: app-amr-galerkin-mass]
-pub fn galerkin_mass(tri: &IntrinsicTriangulation) -> SparseMatrix {
-    let mut t = Vec::with_capacity(9 * tri.n_faces());
-    for f in 0..tri.n_faces() {
-        let a = tri.face_area(f);
-        let v = tri.faces()[f];
-        for x in 0..3 {
-            for y in 0..3 {
-                let w = if x == y { a / 6.0 } else { a / 12.0 };
-                t.push((v[x], v[y], w));
-            }
-        }
-    }
-    SparseMatrix::from_triplets(tri.n_vertices(), tri.n_vertices(), &t)
-        .expect("vertex ids of a valid triangulation are in range")
 }
 
 fn check_connected(tri: &IntrinsicTriangulation) -> Result<(), AmrError> {
@@ -273,7 +255,7 @@ pub fn solve(tri: &IntrinsicTriangulation, problem: &Problem) -> Result<Solution
                     reason: format!("the time step must be positive and finite, got {time}"),
                 });
             }
-            let m = galerkin_mass(tri);
+            let m = galerkin_mass_matrix(tri);
             let mut t: Vec<(u32, u32, f64)> = m.triplets().collect();
             t.extend(l.triplets().map(|(i, j, v)| (i, j, time * v)));
             let a = SparseMatrix::from_triplets(n, n, &t)?;

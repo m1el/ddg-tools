@@ -1096,7 +1096,10 @@ machine-checked: the entries below, and everything about rounding and the solver
   integrands derived in SPEC N43 exactly (monomial by monomial); the unit tests compare the
   mass entry with Eq. 17, the diagonal with the formula above, the flat limit with the cotan
   matrix, and all nine entries with a quadrature of the model (basis sections in one gauge,
-  covariant derivatives by differences).
+  covariant derivatives by differences). The monomials are integrated with the area-coordinate
+  rule `∫_T b_0^a b_1^b b_2^c = 2|T| a! b! c! / (a + b + c + 2)!` (e.g. O. C. Zienkiewicz,
+  R. L. Taylor, *The Finite Element Method*, vol. 1); its case `a + b + c = 2` is the Galerkin
+  mass matrix, machine-checked as `app-fem-galerkin-mass` and used by `amr` too.
 - **Why not formalized.** Integrals of exponentials over a triangle; Mathlib has the
   integrals but the statement is about a gauge model of a line bundle that is not in Mathlib.
 - **What depends on it.** `ConnectionLaplacian::FiniteElement`: the smoothest direction fields
@@ -1124,16 +1127,6 @@ machine-checked: the entries below, and everything about rounding and the solver
 - **Why not formalized.** Immediate from the definition (and from `it-delaunay-condition`
   for the weights); the margin of SPEC N45 is a measurement, not a theorem.
 - **What depends on it.** `vector::check_maximum_principle` and the README's table.
-
-### [formula: app-amr-galerkin-mass] The Galerkin mass matrix of linear elements
-
-- **Statement.** `∫_T b_i b_j = |T|/12` for `i ≠ j`, `|T|/6` for `i = j`; generally
-  `∫_T b_0^a b_1^b b_2^c = 2|T| a! b! c! / (a + b + c + 2)!`.
-- **Reference.** Standard (e.g. O. C. Zienkiewicz, R. L. Taylor, *The Finite Element Method*,
-  vol. 1, the integration formula for area coordinates).
-- **Why not formalized.** An integral over a simplex.
-- **What depends on it.** `amr::galerkin_mass`, the heat kernel's system, the `L²` norms of the
-  estimator, and the exact integration of SPEC N43.
 
 ### [formula: app-amr-edge-flux] The flux of a linear function through a side
 
