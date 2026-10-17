@@ -18,7 +18,8 @@ Contents: [example](#example) · [the problem](#the-problem) · [the boundary](#
 [algorithm](#algorithm) · [the factor-once method](#the-factor-once-method) ·
 [deviations from the paper](#deviations-from-the-paper) ·
 [the published dataset](#the-published-dataset) · [choosing λ](#choosing-λ) ·
-[closed meshes](#closed-meshes) · [needle-like spikes](#needle-like-spikes) ·
+[closed meshes](#closed-meshes) · [disconnected meshes](#disconnected-meshes) ·
+[re-optimizing given cones](#re-optimizing-given-cones) · [needle-like spikes](#needle-like-spikes) ·
 [performance baseline](#performance-baseline) · [performance of the factor-once method](#performance-of-the-factor-once-method) · [formula tags](#formula-tags) · [tests](#tests) ·
 [not implemented](#not-implemented)
 
@@ -28,7 +29,7 @@ Contents: [example](#example) · [the problem](#the-problem) · [the boundary](#
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{ConeProblem, SolveOptions, Status, solve};
 
-let mesh = TriMesh::new(positions.len(), triangles)?;        // connected, manifold, oriented
+let mesh = TriMesh::new(positions.len(), triangles)?;        // manifold, oriented; components allowed
 let geometry = Geometry::from_positions(&mesh, &positions)?; // or Geometry::from_edge_lengths
 
 let problem = ConeProblem::new(&mesh, &geometry, 0.5);       // λ = 0.5
@@ -237,6 +238,7 @@ pub struct SolveReport {
     pub bound_correction: f64, pub zeroed_angles: usize, pub largest_zeroed_angle: f64,
     pub certificate: Certificate,
     pub message: Option<String>,
+    pub components: Vec<ComponentReport>,    // one per connected component (empty if connected)
 }
 pub enum StageKind { Regularized { gamma }, Exact, Proximal { gamma } }
 pub enum StageStop { ActiveSetsUnchanged, Tolerance, Stalled, IterationLimit, Cycle, LinearSolverFailure }
@@ -259,7 +261,12 @@ impl Certificate {
 
 // evaluate.rs: scale factor and adjoint of a given cone configuration
 pub fn evaluate_cones(problem, cones: &[Cone], par: Parallelism<'_>) -> Result<ConeEvaluation, ConeError>;
-pub struct ConeEvaluation { log_scale, adjoint, distortion, total_cone_angle, gauss_bonnet_defect }
+pub struct ConeEvaluation { log_scale, adjoint, distortion, total_cone_angle, gauss_bonnet_defect,
+    component_defects }
+
+// reoptimize.rs: the optimal angles of given cones (see "Re-optimizing given cones")
+pub fn reoptimize_cones(problem, cone_vertices: &[u32], options: &ReoptimizeOptions<'_>) -> Result<Reoptimization, ConeError>;
+pub fn reoptimization_problem(problem, cone_vertices) -> Result<ConeProblem, ConeError>;
 
 // extract.rs: what extraction did
 pub struct ExtractionReport { threshold, n_dropped, dropped_angle, merge_requested, n_clusters,
@@ -272,7 +279,7 @@ pub fn feature_size_weights(mesh, geometry, epsilon: f64, convention: FeatureSiz
     -> Result<FeatureSizeWeights, ConeError>;      // AsDescribed | AsPrinted
 
 pub fn soft_threshold(t: f64, x: f64) -> f64;      // P_t(x), paper Eq. 18
-pub enum ConeError { Geometry, NotConnected, InvalidLambda, WrongLength, InvalidDistortionWeight,
+pub enum ConeError { Geometry, NotConnected /* no longer returned */, InvalidLambda, WrongLength, InvalidDistortionWeight,
     InvalidConeCost, InvalidBounds, InvalidPrescribedCone, NoDistortionWeight, Infeasible,
     InvalidCone, InvalidArgument, InvalidOptions, Sparse }
 ```
@@ -292,7 +299,7 @@ says what is wrong and where; a solve that runs but does not reach a certified o
 | make distortion matter more in a region, or not at all | `distortion_weights[v]` larger than 1, or `0.0` |
 | positive cones only | `lower_bounds = Some(vec![0.0; nv])` |
 | angles in `[−π/2, π/2]` | both bounds |
-| re-optimize the angles of a given set of cones | `cone_costs = 0` at those vertices and `+∞` elsewhere ([the published dataset](#the-published-dataset)) |
+| re-optimize the angles of a given set of cones | `reoptimize_cones(problem, &vertices, ..)`: `cone_costs = 0` at those vertices and `+∞` elsewhere, solved directly ([re-optimizing given cones](#re-optimizing-given-cones)) |
 | keep every angle realizable | bounds inside `(−2π, 2π)`; `extraction.n_beyond_two_pi` counts what is outside |
 | ignore needle-like spikes | `distortion_weights[v] = 0.0` at their tips ([needle-like spikes](#needle-like-spikes)) |
 | a closed convex mesh | several free sites, cones forbidden elsewhere, bounds ([closed meshes](#closed-meshes)) |
@@ -406,6 +413,226 @@ What is not:
 `Status::Converged` means `certificate.holds(certificate_tolerance)`: the six residuals are at
 most the tolerance, and `|duality_gap|`, `|complementarity_gap|` and `gap_uncertainty` are at
 most `tolerance · max(1, |J|)`. Nothing else decides the status.
+
+## Disconnected meshes
+
+Every function that takes a mesh (`solve`, `solve_with_boundary`, `certify`,
+`certify_with_boundary`, `evaluate_cones`, `factor_once_support`, `reoptimize_cones`) accepts a
+mesh with several connected components and returns the **exact solution of the canonical
+problem on the whole mesh**: the masses divided by the total area `A` of the whole mesh, the
+given `λ`, one additive constant of `u` per closed component.
+
+**The problem separates.** Vertices of different components share no edge, so `L` (and its
+block on the unknowns) is block diagonal; the objective `½ Σ wE m u² + λ Σ wR |µ|` is a sum over
+the components; every constraint involves one component. So `(u, µ)` is a minimizer iff its
+restriction to every component minimizes that component's part of the objective under that
+component's constraints, and the optimality systems separate the same way
+(`isMinimizer_sum_iff`, `kkt_sum_iff` in `lean/proofs/DdgProofs/Components.lean`,
+`component-separation`). In particular every closed component has its own additive constant of
+`u` (the competitors' constants are independent), and its own Gauss–Bonnet constraint
+`Σ_C µ = 2πχ_C` (its block of `L` annihilates its constants; `sum_cone_eq_sum_defect_inl`). A
+closed component whose bounds, forbidden vertices or prescribed cones cannot sum to its `2πχ` is
+`ConeError::Infeasible { component: Some(c), .. }`, with the component's `χ` and sums; a closed
+component without distortion weight is `NoDistortionWeight { component: Some(c) }`.
+
+**Which normalization a component gets.** The part of the objective that belongs to component
+`c` has the masses of the whole problem, `a_i / A`:
+
+```
+½ Σ_C wE (a_i/A) u² + λ Σ_C wR |µ|  =  (A_c/A) · [ ½ Σ_C wE (a_i/A_c) u² + (λ A/A_c) Σ_C wR |µ| ]
+```
+
+A positive factor does not change the minimizers, so the component solved **alone**, with its
+masses normalized by its own area `A_c`, has the same `u` and `µ` exactly when it gets
+`λ_c = λ · A / A_c`, and its adjoint is then `A / A_c` times the adjoint of the whole problem
+(`isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff`; tag
+`component-lambda-rescaling`; the special case of one component is `lambda-area-normalization`).
+The solver uses the first form: each component keeps the masses of the whole mesh and the given
+`λ` (`Instance::part`), so no `λ` is rescaled and the adjoint needs no conversion;
+`ComponentReport::equivalent_lambda` reports `λ · A / A_c` for whoever wants to solve a
+component alone. The consequence is that a component's cones depend on the rest of the mesh: a
+small component counts little in the total distortion and gets fewer cones than alone (in
+`tests/components.rs` a disk and a copy scaled by 0.2: 5 cones on each when solved alone, 5 and 0
+in the union at `λ = 0.004`).
+
+**Interface.** The `Solution` is that of the whole mesh. `SolveReport::components` has one
+`ComponentReport` per component (in the order of `TriMesh::face_components`;
+`TriMesh::vertex_components` maps vertices to them) when there is more than one, and is empty
+for a connected mesh:
+
+```rust
+pub struct ComponentReport {
+    pub component: u32, pub n_vertices: usize, pub n_faces: usize, pub n_unknowns: usize,
+    pub closed: bool,                 // every vertex an unknown: own constant of u, own 2πχ
+    pub area_fraction: f64,           // A_c / A
+    pub equivalent_lambda: f64,       // λ · A / A_c: the same result when solved alone
+    pub objective: f64, pub distortion_optimal: f64, pub cone_cost: f64,   // its part
+    pub adjoint_shift: (f64, f64),    // constants admissible on this component alone
+    pub report: SolveReport,          // its status, certificate (of its part), stages, method, times
+}
+```
+
+The certificate in the top-level report is computed from the assembled triple for the whole
+problem (`certify` reproduces it bit for bit), and it alone decides `status`; its
+`gauss_bonnet_residual` is the largest over the closed components. The other top-level fields
+aggregate: stages one component after another, counts and phase times summed (`timings.total`
+is wall time), `bound_correction` and `largest_zeroed_angle` maxima, `method.used` is
+`FactorOnce` only if every component with unknowns used it, `method.fallback` the first
+component's reason, `adjoint_shift` the constants admissible on every component at once
+(`(0, 0)` unless all are closed). Extraction runs on the whole mesh (a cluster never spans two
+components); if it changes cones, `log_scale` is recomputed per component.
+`ConeEvaluation::component_defects` gives the Gauss–Bonnet defect of every component.
+
+**Solving.** Each component is a connected problem with everything of the other sections: the
+factor-once method factorizes the Laplacian block of that component (a closed component pins
+one of its own vertices), with its own working set and limits (`factor_once_support` answers per
+component, naming vertices of the whole mesh); the reference method runs per component. With
+`SolveOptions::parallelism = Pool(..)` the components run concurrently on the pool, each on one
+thread, so the result does not depend on the number of threads (tested bit for bit); a mesh with
+one large component and small ones then loses the inner threading of the large one (worth 1.4×
+to 2× only with hundreds of cones, see [performance](#performance-of-the-factor-once-method)).
+A connected mesh takes the path it took before, bit for bit (`examples/fingerprint.rs`: 44 of 44
+hashes unchanged).
+
+**Inputs at the edge.** Isolated vertices cannot reach the solver: `TriMesh::new` rejects a
+vertex that no face references (`MeshError::UnreferencedVertex`; `compact_vertices` removes
+them). A component that is a single triangle has three boundary vertices and, with `u = 0` on the
+boundary, no unknowns: it gets `u = µ = 0`, contributes nothing, and its report has
+`n_unknowns = 0` and no stages (with any `SolveMethod`, also `FactorOnce`); with an optimized
+boundary it is a problem with three unknowns like any other.
+
+**Verified against** (`tests/components.rs`): the union against separate solves with
+`λ · A / A_c` (two closed meshes, a closed one and one with boundary, three components, every
+boundary treatment; `µ`, `u` to `10⁻⁷`, the adjoint up to the factor `A_c / A`, the objective
+as the area-weighted sum, per-component reports); 40 random disconnected problems with every
+steering feature against the generic convex solver Clarabel (40 of 40 compared); steering per
+component; random relabeling of vertices, faces and corners; both methods and a thread pool;
+`evaluate_cones`, merging, `factor_once_support`.
+
+**`ddg-uv` makes a different choice.** `crates/ddg-uv/src/prepare.rs` cuts the mesh along its
+seams and splits it into pieces (its connected components after cutting), and
+`crates/ddg-uv/src/cones.rs` solves every piece as a `ConeProblem` of its own with the user's
+`λ`, i.e. with the masses normalized by the **piece's** area. By the identity above, that is the
+canonical problem of the whole (cut) mesh with `λ · A_c / A` on piece `c` instead of `λ`: every
+piece gets the cones it would get alone, independent of the other pieces, where the canonical
+problem of the whole would give a small piece fewer cones (and a large one slightly more). This
+is a defensible choice for UV charts (a trade-off per chart, unaffected by unrelated parts of the
+model), and the seams make the pieces a different problem from the uncut mesh anyway. It was
+not changed.
+
+## Re-optimizing given cones
+
+```rust
+pub fn reoptimize_cones(problem: &ConeProblem<'_>, cone_vertices: &[u32], options: &ReoptimizeOptions<'_>)
+    -> Result<Reoptimization, ConeError>;
+pub fn reoptimization_problem<'a>(problem: &ConeProblem<'a>, cone_vertices: &[u32]) -> Result<ConeProblem<'a>, ConeError>;
+pub struct ReoptimizeOptions<'a> { pub boundary: BoundaryTreatment, pub method: ReoptimizeMethod /* Auto | DirectKkt | Solve */,
+                                   pub solve: SolveOptions<'a> }
+pub struct Reoptimization { pub cones: Vec<Cone> /* the given vertices, given order, optimal angles */,
+    pub measure, pub log_scale, pub adjoint, pub boundary_curvature: Vec<f64>,
+    pub distortion: f64, pub objective: f64, pub total_cone_angle: f64, pub report: ReoptimizeReport }
+pub struct ReoptimizeReport { pub status: Status, pub method: ReoptimizeMethodUsed /* DirectKkt | Solve */,
+    pub certificate: Certificate, pub linear_solver: LinearSolverReport,
+    pub components: Vec<ReoptimizeComponentReport>, pub seconds: f64, pub message: Option<String> }
+pub const REDUCED_SITES_LIMIT: usize = 32;
+```
+
+Given the cone **positions**, it finds the cone **angles** of least distortion: the canonical
+problem with cone cost `0` at the given vertices and `+∞` at every other interior vertex
+(`reoptimization_problem` builds it; the distortion weights, bounds and prescribed cones of
+`problem` are kept, the cone costs of `problem` matter only at boundary vertices with
+`Penalized`). `λ` then plays no role (except for `Penalized`). Works with every boundary
+treatment and on disconnected meshes. Errors (`InvalidCone` with the position in the list): a
+vertex out of range, listed twice, on the boundary, or carrying a prescribed cone. An empty list
+is allowed (no cones: on a mesh with boundary `µ = 0`; on a torus too; on a sphere it is
+`Infeasible`). On a closed component the given cones must be able to carry `2πχ`: one unbounded
+cone suffices (a single cone on a sphere gets `4π`), bounds that cannot is `Infeasible` naming
+the component.
+
+**Method.** Without the `ℓ¹` term the problem is a quadratic program. If no bound is active,
+its optimality system is linear: `W u + A φ = 0`, `(A u)_i = a_i − Ω_i` at the fixed vertices,
+`φ_i = 0` at the given cones (a free site's subdifferential is `{0}`). That is the Newton system
+of the reference method with every piece known beforehand (`saddle-point-newton-system`), and a
+solution is a global minimizer (`optimality-system-sufficient`). Two ways to solve it, both
+exact:
+
+* **direct** (`DirectKkt`): one sparse `LDLᵀ` factorization of the `2n × 2n` saddle-point matrix
+  and one solve with refinement; `µ_i = (A u)_i + Ω_i` at the cones. The cost does not depend on
+  the number of cones. On a closed component the pinned rows `φ_i = 0` fix the constant of `φ`,
+  and the adjoint equation summed gives `Σ w u = 0`, the optimal constant of `u`.
+* **reduced**: the generic solver's factor-once method on `reoptimization_problem`: one Cholesky
+  factorization of the `n × n` Laplacian block, one solve per free site, and the dense system of
+  the free sites, solved exactly by its active-set method (bounds included).
+
+`Auto` takes the reduced system up to `REDUCED_SITES_LIMIT = 32` free sites per component (the
+given cones, plus the boundary vertices with an optimized boundary) and the direct solve beyond.
+The direct solution is accepted only if every angle is inside its bounds and its certificate
+holds; otherwise (an active bound), and with `Penalized` (an `ℓ¹` term remains) or a closed
+component whose angles are all fixed (a singular system), the component goes to the generic
+solver. Every component's report says which method ran and why
+(`ReoptimizeComponentReport::direct_not_used`), and the result carries the certificate of the
+whole problem of `reoptimization_problem`.
+
+Single-thread times on the dataset (`cargo run --release -p ddg-optimal-cones --example
+reoptimize -- --repeat 3`, fastest of 3, alone on the machine; "solve" is `solve` on
+`reoptimization_problem`, i.e. the factor-once method): the reduced system is 1.1 to 2.6 times
+faster than the direct solve up to 29 cones (`body` 0.025 s against 0.066 s, forced
+`DirectKkt`), the two are even at 36 (`rhino` 0.075 / 0.081 s) and 45 (`brain`, 153 k vertices,
+1.06 / 1.00 s), and the direct solve wins by 6.6 times at 439 cones (`cow01`, 0.052 / 0.342 s)
+and 34 times at 13 836 (`cow00001`, 0.051 / 1.72 s).
+
+**The published cone files** (`examples/reoptimize.rs`; asserted in
+`tests/reoptimize.rs::published_cones_reoptimized`): at the published positions, the
+re-optimized angles never give more distortion than the published angles. `D = ½ Σ m u²` with
+`λ = ½` irrelevant; "published angles" is `evaluate_cones` with the file's angles (on a closed
+mesh shifted by a common constant to sum to exactly `4π`, a change of at most `3·10⁻⁴`);
+"boundary optimized" is `BoundaryTreatment::Free` (the file's angles with the boundary
+optimized for them, against `reoptimize_cones` with `Free`).
+
+| file (cones) | D, published angles | D, re-optimized | ratio | largest angle change | D, published, boundary optimized | D, re-optimized, boundary optimized | ratio | `reoptimize_cones` (s) | method | `solve`, costs 0/∞ (s) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| airplane (13) | 2.5099e-1 | 7.6469e-2 | 0.3047 | 6.3e-1 | 6.2628e-2 | 6.2385e-2 | 0.9961 | 0.004 | Solve | 0.004 |
+| axes, closed (4) | 3.9905e-1 | 3.9905e-1 | 1.0000 | 1.3e-4 | – | – | – | 0.009 | Solve | 0.010 |
+| body (10) | 2.0317e-1 | 2.0092e-1 | 0.9889 | 8.6e-2 | 1.9649e-1 | 1.8291e-1 | 0.9309 | 0.035 | Solve | 0.030 |
+| brain, closed (45) | 1.7153e-2 | 1.7153e-2 | 1.0000 | 2.6e-3 | – | – | – | 1.134 | DirectKkt | 1.070 |
+| bump (5) | 9.9707e-3 | 9.9707e-3 | 1.0000 | 2.4e-4 | 9.9198e-3 | 9.7577e-3 | 0.9837 | 0.006 | Solve | 0.006 |
+| bunny, closed (4) | 1.1511e-1 | 1.1485e-1 | 0.9977 | 9.0e-2 | – | – | – | 0.040 | Solve | 0.038 |
+| camel (6) | 5.0121e-2 | 2.0273e-2 | 0.4045 | 3.6e-1 | 1.4915e-2 | 1.4915e-2 | 1.0000 | 0.027 | Solve | 0.027 |
+| camel_noise1 (7) | 6.6811e-2 | 2.7369e-2 | 0.4097 | 3.9e-1 | 2.1570e-2 | 2.1570e-2 | 1.0000 | 0.027 | Solve | 0.026 |
+| camel_noise2 (7) | 2.6944e-1 | 1.1042e-1 | 0.4098 | 6.4e-1 | 9.6985e-2 | 9.6983e-2 | 1.0000 | 0.025 | Solve | 0.025 |
+| camelbad (6) | 4.9319e-2 | 1.9947e-2 | 0.4044 | 3.5e-1 | 1.4574e-2 | 1.4573e-2 | 1.0000 | 0.028 | Solve | 0.028 |
+| camelbadnonuniform (6) | 4.7527e-2 | 2.0221e-2 | 0.4255 | 3.5e-1 | 1.4966e-2 | 1.4964e-2 | 0.9998 | 0.020 | Solve | 0.020 |
+| camelshotnoise (6) | 8.4785e4 | 8.4712e4 | 0.9991 | 3.9e1 | 8.4706e4 | 8.4696e4 | 0.9999 | 0.030 | Solve | 0.031 |
+| chair, closed (14) | 6.5701e-3 | 6.5701e-3 | 1.0000 | 7.8e-4 | – | – | – | 0.017 | Solve | 0.016 |
+| cow00001 (13836) | 1.6034e-6 | 5.2731e-10 | 0.0003 | 2.5e-3 | 5.2362e-7 | 4.6731e-10 | 0.0009 | 0.052 | DirectKkt | 1.791 |
+| cow01 (439) | 1.5395e-2 | 5.3820e-3 | 0.3496 | 3.5e0 | 1.5098e-2 | 5.3226e-3 | 0.3525 | 0.052 | DirectKkt | 0.342 |
+| cow1 (2) | 5.0953e-1 | 4.7997e-1 | 0.9420 | 4.1e-1 | 4.4975e-1 | 4.4975e-1 | 1.0000 | 0.038 | Solve | 0.037 |
+| cow5e-1 (5) | 7.4871e-1 | 2.6767e-1 | 0.3575 | 1.0e0 | 1.8475e-1 | 1.8475e-1 | 1.0000 | 0.040 | Solve | 0.039 |
+| cow75e-2 (3) | 3.8681e-1 | 3.6560e-1 | 0.9452 | 4.1e-1 | 3.5835e-1 | 3.5835e-1 | 1.0000 | 0.039 | Solve | 0.038 |
+| face (2) | 2.1981e-3 | 2.1981e-3 | 1.0000 | 4.6e-5 | 2.0880e-3 | 2.0824e-3 | 0.9974 | 0.030 | Solve | 0.029 |
+| hand (29) | 7.4499e-3 | 6.5589e-3 | 0.8804 | 1.2e-1 | 6.4206e-3 | 6.4205e-3 | 1.0000 | 0.008 | Solve | 0.008 |
+| mannequin (8) | 9.1555e-3 | 9.1555e-3 | 1.0000 | 3.6e-4 | 8.8263e-3 | 7.3326e-3 | 0.8308 | 0.016 | Solve | 0.015 |
+| rhino (36) | 1.9547e-2 | 1.8860e-2 | 0.9648 | 2.2e-1 | 1.8585e-2 | 1.8582e-2 | 0.9999 | 0.076 | DirectKkt | 0.085 |
+| tree (8) | 2.1784e-2 | 2.1784e-2 | 1.0000 | 2.7e-3 | 2.1765e-2 | 2.1658e-2 | 0.9950 | 0.046 | Solve | 0.045 |
+
+The ratios sort the files as [the published dataset](#the-published-dataset) did: where the
+published angles are re-optimized angles with `u = 0` on the boundary (`axes`, `brain`, `bump`,
+`chair`, `face`, `mannequin`, `tree`) the first ratio is 1.0000 (`body` 0.989 and `bunny` 0.998,
+whose angles were matched less closely there); where they belong to optimized
+boundary values (the camels, the sparse cows, `hand`, `rhino`, `airplane`) the second ratio is
+0.9961 to 1.0000 and the first 0.30 to 0.97; `cow01` and `cow00001` are penalized optima, whose
+angles are shrunk by `λ`, so re-optimizing lowers their distortion by 3 and 3 000 times;
+`camelshotnoise` is dominated by its spikes ([needle-like spikes](#needle-like-spikes)).
+
+**Verified against** (`tests/reoptimize.rs`): 164 random problems (every topology, weights,
+bounds, prescribed cones, the four boundary treatments) against `solve_with_boundary` on
+`reoptimization_problem` with both methods, and with `Auto` and `Solve` (`µ`, `u` to `10⁻⁷`,
+objective to `10⁻⁹`); 80 of them were solved directly, 84 had an active bound; 40 against the
+generic convex solver (38 compared, the rest infeasible for both); moving one cone by one vertex
+on an ellipsoid (the distortion lies between that of the cones with both vertices and that
+without the moved one, and changes by less than 25 %); the edge cases above; a disconnected mesh
+(the angles of each component equal those of the component alone, whatever its normalization);
+the dataset.
 
 ## Algorithm
 
@@ -663,7 +890,8 @@ independent implementation is `lean/oracle`.
 15. **Feature-size weights** (Sec. 8.1): the printed formula `r = 1/(|Ω|/M + ε)` contradicts the
     sentence after it; `feature_size_weights` offers both readings and never applies either on
     its own.
-16. **Connected meshes only**; split components first.
+16. **Disconnected meshes** are solved per component with the masses of the whole mesh
+    ([disconnected meshes](#disconnected-meshes)); the paper does not discuss them.
 
 ## The published dataset
 
@@ -1296,6 +1524,8 @@ what the theorems cover, which is not always the whole statement.
 | `reduced-sum-constraint-pin` | `Reduced::new`, `Reduced::project` | If `A` is positive semidefinite with kernel exactly the constants, `p` an index, `A_p` positive definite, and `Σ b = 0`, then `x = P pad(A_p⁻¹ b_p̂)` solves `A x = b` (the equation of `p` follows from the others because `1ᵀ A = 0` and `Σ b = 0`) and, among `x + c 1`, `x` is the one with `Σ w x = 0`, which minimizes `½ Σ w (x + c)²`. For `b = µ − Ω` the condition is `Σ µ = Σ Ω`, i.e. `Σ_S µ_S = Σ (Ω − a_F)`. | not in `lean/proofs` |
 | `proximal-fixed-point` | `solve` | If `(u, µ)` minimizes `J(v, ν) + Σ (ν_i − µ̄_i)²/(2 k_i)` over the feasible pairs and `µ = µ̄`, then `(u, µ)` minimizes `J`. | `IsProxMinimizer.isMinimizer_of_fixedPoint`; also that a proximal step does not increase the objective (`IsProxMinimizer.objective_add_le`) |
 | `componentwise-backward-error` | `backward_error` | `max_i \|b − K x\|_i / (\|K\| \|x\| + \|b\|)_i` is the smallest `ε` such that `(K + δK) x = b + δb` for some `\|δK\| ≤ ε\|K\|`, `\|δb\| ≤ ε\|b\|` entrywise (Oettli and Prager 1964). | `oettli_prager` |
+| `component-separation` | `Instance::part`, `Discrete::from_instance`, `certify_instance`, `solve`, `solve_part`, `evaluate_cones`, `reoptimize_cones` | On a mesh with several components `L` is block diagonal and the objective a sum: `(u, µ)` is a minimizer (a solution of the optimality system) of the whole problem iff every restriction is one of its component's part, with the masses of the whole problem; every closed component has its own constant of `u` and its own `Σ µ = 2πχ`. | `isMinimizer_sum_iff`, `kkt_sum_iff`, `objective_sum`, `feasible_sum_iff`, `isMinimizer_sum_iff_alone` (`DdgProofs/Components.lean`) |
+| `component-lambda-rescaling` | `equivalent_lambda` | A component with its masses normalized by its own area `A_c` instead of the total `A` has the same minimizers with `λ · A / A_c`, and the adjoint of its optimality system is `A / A_c` times that of the whole problem. | `isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff`, `isMinimizer_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff`, `Site.stationary_mul_iff` |
 | `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). | cited in `CITED.md` (a choice of input data, not a derived formula) |
 
 ## Tests
@@ -1321,6 +1551,8 @@ cargo run  --release -p ddg-optimal-cones --example fingerprint            # bit
 | `tests/boundary.rs` | the boundary treatments against the double of the mesh, orderings (free ≤ the others), reporting, certificate, extraction |
 | `tests/factor_once.rs` | the factor-once method against the reference method on random problems of every topology, steering and boundary treatment, with tolerances derived from the certificates; every fallback reason forced; what falls back |
 | `tests/enclosure.rs` | `optimum_enclosure` against the generic convex solver on perturbed triples; when it is withheld |
+| `tests/components.rs` | disconnected meshes: the union against separate solves with `λ · A / A_c`, against Clarabel, relabeling, steering per component, methods, threads, every entry point |
+| `tests/reoptimize.rs` | `reoptimize_cones` against `solve` on `reoptimization_problem` and against Clarabel, moving a cone, edge cases, disconnected meshes, the published cone files |
 
 The dataset is not part of the repository; without it the dataset tests print a notice and pass.
 
@@ -1349,8 +1581,6 @@ The tests in `api.rs` that read the reference method's stages, counters and opti
   a zero distortion weight at a `Free` boundary vertex can make the problem ill posed (the solver
   then says `NotConverged`); the `Infeasible` error text speaks of a "closed mesh" also for a
   boundary treatment other than `Fixed`.
-* A function that re-optimizes the angles of given cones; it is a call of `solve` with
-  `cone_costs` of `0` and `+∞`.
 * Multiresolution (Sec. 6.3).
 * The factor-once method does not handle zero distortion weights (the Gram matrix is singular),
   `λ = 0`, and it has no proof of convergence (the certificate and the fallback replace it); the
@@ -1358,4 +1588,10 @@ The tests in `api.rs` that read the reference method's stages, counters and opti
   method; the dense part is sequential and `O(a²)` per iteration, which is why it loses to the
   reference method above about 5 % of the vertices being cones; there is no GPU path (assessed,
   not worth it).
-* Disconnected meshes, non-manifold meshes, intrinsic Delaunay refinement.
+* Non-manifold meshes, intrinsic Delaunay refinement.
+* Disconnected meshes: the components are solved concurrently with one thread each; a large
+  component next to small ones does not get the pool's threads inside its own solve.
+* `reoptimize_cones` with a `Penalized` boundary has an `ℓ¹` term left and always runs the generic
+  solver; with an active bound it solves the unconstrained system first and then the generic
+  solver (the work of the direct solve is lost). The limit of 32 free sites between the reduced
+  and the direct method is a constant measured on the dataset, not adapted to the mesh.

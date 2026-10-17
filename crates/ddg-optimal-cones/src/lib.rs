@@ -118,8 +118,16 @@
 //! and factorization counts, timings, and the [`Certificate`] of the returned optimum.
 //!
 //! [`certify`] computes that certificate for any triple; [`evaluate_cones`] computes the scale
-//! factor and adjoint state of a given cone configuration; [`feature_size_weights`] builds
-//! the curvature-adapted weights of the paper's Sec. 8.1.
+//! factor and adjoint state of a given cone configuration; [`reoptimize_cones`] finds the
+//! least-distortion angles for given cone positions (by a direct solve of the linear optimality
+//! system, or the reduced system for few cones); [`feature_size_weights`] builds the
+//! curvature-adapted weights of the paper's Sec. 8.1.
+//!
+//! The mesh may have several connected components. Every function then works on the canonical
+//! problem of the whole mesh (masses divided by the total area, one constant of `u` per closed
+//! component); the problem separates, each component is solved as its part of it, and
+//! [`SolveReport::components`] reports each component (see the crate's `README.md`, section
+//! "Disconnected meshes").
 //!
 //! # Method, deviations, measurements
 //!

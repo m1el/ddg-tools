@@ -56,7 +56,7 @@ pub enum ReoptimizeMethod {
 /// Laplacian block, one solve per free site, a dense system of that size; the direct solve
 /// factorizes the `2n × 2n` saddle-point matrix instead, which costs about as much as 30 to 45
 /// extra solves. Measured on the dataset (one thread, `examples/reoptimize.rs`): the generic solver
-/// is 1.3 to 2.6 times faster up to 29 cones, the two are even at 36 (`rhino`) and 45 (`brain`),
+/// is 1.1 to 2.6 times faster up to 29 cones, the two are even at 36 (`rhino`) and 45 (`brain`),
 /// and the direct solve is 6.6 and 34 times faster at 439 and 13 836 cones.
 pub const REDUCED_SITES_LIMIT: usize = 32;
 
