@@ -37,6 +37,21 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   `tests/way_back_along_input_edges.rs` covers the class.
 * Flipped UV triangles after the Blender Apply: the library's triangulation of the split polygons
   is stored and used by the unwrap (`blender/README.md`).
+* **Flipped UV triangles with iODT at a large cut offset** (2026-10-17, `crates/ddg-uv`, README
+  "A large cut offset, and the optimal Delaunay triangulation"): the Blender spot atlas (8
+  clusters, weight 2, 60 steps, iODT, Cut Offset 0.2) had 4 of 7354 flipped UV triangles; the
+  stage is the flattening of the chart (the triangles have the orientation of their parent in
+  space; the same with cones off), the cause the order of two rules of the way back: the rule of
+  `min_offset` moved every point first, and the merge of bends measured its displacement at the
+  moved places, so bends the rule pushed off a side stayed (iODT brings about 7 times as many
+  bends as flips) and became spikes with slivers and shrunk parts next to them. The merge now
+  measures at the found places, and removes the excursions across a side whose points the rule
+  moved. `flip_study`, 44 runs per offset (spot, blub, bob, camelbad atlases and circles; flips,
+  refined, both with iODT): 123 flipped triangles at offset 0.2 before, 3 now; 55 and 57 at
+  1e-3. The same mechanism made the two refined cases at offset 0.2 of the Blender test (one
+  flipped triangle each, a bend "0.103 of an edge" from its chord: that was the rule's motion);
+  they are 0 now, and the Blender tests assert zero flips on all five variants again (`-odt`
+  included) and run `the_cut_offset_moves_points_away_from_vertices` with iODT.
 * **Intrinsic triangulations** (`crates/ddg-intrinsic`, contract `SPEC.md` there): signposts,
   flips, Delaunay flipping, insertion, refinement with boundary, overlay, simplicial export,
   the way back for a cut; Lean oracle and proofs for its twelve formula ids. The cut flow runs on
@@ -55,9 +70,25 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 ## Open after that work (2026-10-14)
 
 * The merge of bends of a cut that comes back from an intrinsic triangulation has a default
-  tolerance of 0.1 of an edge and moves the cut by up to that; smaller values let flipped UV
-  slivers return on refined atlases. Two refined cases at cut offset 0.2 still have one flipped
-  triangle each (recorded in `blender/tests/test_cut.py`).
+  tolerance of 0.1 of an edge and moves the cut by up to that (measured on the cut the flow
+  found; the rule of `min_offset` moves points by its own amount on top); smaller values let
+  flipped UV slivers return (spot atlas, weight 2, offset 0.2, iODT: 0.05 leaves none, 0.02 leaves 12 and 7).
+* The rule of `min_offset` moves every point of the cut on its own. At a large offset (0.2) it
+  still makes, after the fix of 2026-10-17: a spike of an excursion whose bend lies further than
+  the merge tolerance from its chord (blub atlas, flips with iODT: 1 flipped triangle), and of a
+  triple point close to a side with two of its pieces to that side (spot atlas at ripple
+  wavelength 1.0, flips with iODT: 1; the spot atlas after 20 steps at weights 2 and 10,
+  refined without iODT: 1 and 2; a triple point cannot be merged, it would have to move into
+  the neighbouring triangle with new crossings); and it refuses (`InvalidDescription`, "edge points ... are
+  both at t = 0.8") where two crossings of one edge close to the same vertex end at the same
+  parameter: 10 of the 44 `flip_study` runs at 0.2 (blub, camelbad and its atlas, on every
+  triangulation), with or without iODT. A rule that keeps the order of the points on an edge would
+  remove these refusals (not the spikes). Not seen in the Blender tests (spot, offset 0.2).
+* `flip_study` at the default offset: the atlases of blub and camelbad at ripple wavelength 0.5
+  (scaled Dirichlet) flip 3 to 15 UV triangles on every triangulation, iODT or not (strongly
+  shrunk charts, fans around a vertex); not studied further. The bindings do not report
+  `DescribeReport::n_removed_excursions` yet (`crates/ddg-py/src/cutting.rs`, next to
+  `n_merged_nodes`).
 * Refused, not handled, by the insertion of `ddg_uv::cutting`: a region that fits inside one
   input triangle, a cut exactly through a vertex, a piece along a diagonal; in the add-on, a
   loop of junctions inside one polygon that touches no edge point.

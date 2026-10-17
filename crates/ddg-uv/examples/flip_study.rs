@@ -28,8 +28,8 @@ use std::path::PathBuf;
 use ddg_core::io::read_obj;
 use ddg_uv::PolygonMesh;
 use ddg_uv::cutting::{
-    ConePlacement, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, FlowKind, IntrinsicOptions, Session,
-    Start, Triangulation, VertexSource,
+    ConePlacement, CutUnwrapOptions, DEFAULT_CROSSING_OFFSET, FlowKind, IntrinsicOptions, PathEnd,
+    Session, Start, Triangulation, VertexSource,
 };
 use ddg_uv::primitives::{grid_cube, uv_sphere};
 use ddg_variational_cuts::{
@@ -156,6 +156,7 @@ struct Outcome {
     merged: usize,
     excursions: usize,
     displacement: f64,
+    smallest: f64,
 }
 
 fn main() {
@@ -291,7 +292,7 @@ fn main() {
                 &problem,
                 &options,
                 &StopRule {
-                    max_steps: steps,
+                    max_steps: std::env::var("STEPS").map_or(steps, |s| s.parse().unwrap()),
                     motion_tolerance: if std::env::var_os("NOSTOP").is_some() {
                         0.0
                     } else {
@@ -385,7 +386,13 @@ fn main() {
                     VertexSource::Junction(j) => {
                         let b = cut.junctions[j as usize].barycentric;
                         let lo = b.iter().copied().fold(f64::INFINITY, f64::min);
-                        (format!("inner(bary_min={lo:.2e})"), lo)
+                        let degree = cut
+                            .paths
+                            .iter()
+                            .flat_map(|p| [p.start, p.end])
+                            .filter(|e| *e == PathEnd::Junction(j))
+                            .count();
+                        (format!("inner(bary_min={lo:.2e}, degree {degree})"), lo)
                     }
                 };
                 min_offset = min_offset.min(off);
@@ -459,14 +466,20 @@ fn main() {
             merged: rep.n_merged_nodes,
             excursions: rep.n_removed_excursions,
             displacement: rep.max_displacement_relative,
+            smallest: m
+                .triangles
+                .iter()
+                .map(|t| tri_area(m, *t))
+                .fold(f64::INFINITY, f64::min)
+                / mean,
         }
     };
     println!("CASE {case} {tri_name}");
     for (i, &o) in offsets.iter().enumerate() {
         let out = run(o, i == 0);
         println!(
-            "SWEEP {case} {tri_name} merge {merge} min_offset {o:.0e}: {} flipped, {} moved points, {} bends merged ({} excursions), displacement {:.2e} of an edge",
-            out.flipped, out.n_clamped, out.merged, out.excursions, out.displacement
+            "SWEEP {case} {tri_name} merge {merge} min_offset {o:.0e}: {} flipped, {} moved points, {} bends merged ({} excursions), displacement {:.2e} of an edge, smallest triangle {:.2e} of the mean",
+            out.flipped, out.n_clamped, out.merged, out.excursions, out.displacement, out.smallest
         );
     }
 }

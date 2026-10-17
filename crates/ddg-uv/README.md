@@ -1111,7 +1111,8 @@ At 0.2 iODT made 4 to 15 flipped triangles per spot atlas run and 4 and 9 on the
 refinement 4 on the spot atlas at wavelength 1.0; all of these are 0 now. What is left at 0.2:
 an excursion whose bend lies further than the tolerance from the chord (blub, flips with iODT,
 1), a triple point close to a side with two pieces to that side (spot at wavelength 1.0, flips
-with iODT, 1), one sliver on camelbad (refined with iODT, a run that refused before). At 1e-3
+with iODT, 1; also the spot atlas after only 20 steps, refined without iODT, weights 2 and 10: 1
+and 2), one sliver on camelbad (refined with iODT, a run that refused before). At 1e-3
 the rule moves almost nothing and the counts are those of before up to two single triangles
 that moved (the blub and camelbad atlases at ripple wavelength 0.5 flip 3 to 15 triangles on
 every triangulation, iODT or not: strongly shrunk charts, a separate open item). The largest
@@ -1119,7 +1120,8 @@ displacement stays below the tolerance in every run. Refused at 0.2 as before (t
 points independently): two crossings of one edge close to the same vertex end at the same
 parameter (blub, camelbad, the camelbad atlas, spot weight 3 refined with iODT: 10 of 44 runs, 11 before),
 and a closed piece inside one triangle (spot at wavelength 0.25 refined, also at 1e-3). Test:
-`a_large_cut_offset_with_optimal_delaunay_flips_nothing` (`tests/cutting.rs`).
+`a_large_cut_offset_with_optimal_delaunay_flips_nothing` (`tests/cutting.rs`). The counts are the same after the
+way back along an input edge (`ddg-intrinsic` SPEC N29), which removes a few pieces.
 
 **The needles-and-caps run with flips only** (the row above, energy 1.167 over 8 steps) was
 measured before a defect of the flow was fixed. Six vertices lay on the start circle to
