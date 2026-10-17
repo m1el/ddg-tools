@@ -954,6 +954,69 @@ def the_checks_themselves_catch_violations():
 
 
 # ----------------------------------------------------------------------------------------------
+# Conformal Map to Sphere
+
+
+def sphere_attribute(mesh, name="sphere"):
+    attribute = mesh.attributes[name]
+    assert attribute.domain == 'POINT' and attribute.data_type == 'FLOAT_VECTOR', attribute
+    values = array.array('f', bytes(12 * len(mesh.vertices)))
+    attribute.data.foreach_get("vector", values)
+    return values
+
+
+@test
+def map_to_sphere_writes_a_point_attribute_on_the_unit_sphere():
+    obj = primitive("ico_sphere", subdivisions=3)
+    # Squash it: a genus-0 surface that is not round, with quads would do as well.
+    obj.data.vertices.foreach_set("co", array.array('f', (
+        x * s for i, x in enumerate(_get(obj.data.vertices, "co", 'f', 3))
+        for s in [(2.0, 1.0, 0.5)[i % 3]])))
+    obj.data.update()
+    before = snapshot(obj.data)
+    assert bpy.ops.object.ddg_map_to_sphere() == {'FINISHED'}
+    mesh = current_mesh(obj)
+    assert_same_mesh(before, snapshot(mesh))
+    values = sphere_attribute(mesh)
+    for k in range(0, len(values), 3):
+        r = math.sqrt(values[k] ** 2 + values[k + 1] ** 2 + values[k + 2] ** 2)
+        assert abs(r - 1.0) < 1e-6, (k // 3, r)
+    # Every triangle keeps its orientation on the sphere (seen from outside).
+    mesh.calc_loop_triangles()
+    for tri in mesh.loop_triangles:
+        a, b, c = ([values[3 * v + i] for i in range(3)] for v in tri.vertices)
+        det = (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+               + a[2] * (b[0] * c[1] - b[1] * c[0]))
+        assert det > 0, tri.index
+    # In Edit mode, with a shape key and another attribute name; the mesh stays the same.
+    bpy.ops.object.mode_set(mode='EDIT')
+    assert bpy.ops.object.ddg_map_to_sphere(attribute_name="conformal", shape_key=True) == {
+        'FINISHED'}
+    assert obj.mode == 'EDIT'
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mesh = current_mesh(obj)
+    assert_same_mesh(before, snapshot(mesh))
+    other = sphere_attribute(mesh, "conformal")
+    assert max(abs(x - y) for x, y in zip(values, other)) < 1e-6
+    key = mesh.shape_keys.key_blocks["Conformal Sphere"]
+    assert len(key.data) == len(mesh.vertices)
+
+
+@test
+def map_to_sphere_refuses_a_torus_with_a_message():
+    obj = primitive("torus")
+    try:
+        result = bpy.ops.object.ddg_map_to_sphere()
+    except RuntimeError as ex:
+        message = str(ex)
+        assert "Traceback" not in message, message
+        assert "genus 1" in message, message
+    else:
+        raise AssertionError("expected an error, got {}".format(result))
+    assert "sphere" not in obj.data.attributes
+
+
+# ----------------------------------------------------------------------------------------------
 # Runner
 
 
