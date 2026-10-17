@@ -4,7 +4,7 @@ State of 2026-10-14, branch `intrinsic-triangulations`. Numbers and evidence are
 file points to; this is the list of what is scheduled, what was decided, and what is known to be
 open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
-## In progress (2026-10-17, paused at the usage limit)
+## Paused and finished (2026-10-17)
 
 Work started on the user's request ("2. implement mapping to the sphere. 4. implement
 applications listed in the paper"), checkpointed as unmerged branches of this repository, each
@@ -19,13 +19,8 @@ with a notes file saying what is done, what remains and how to resume:
 * Done: the `check-formulas.sh --build` failure both app branches reported ("unknown
   Ddg.movedLength" in `Intrinsic/Move.lean`) was the stale Lean cache copied into their clones;
   a build with fresh project outputs passes.
-* The agents' worktrees were created by mistake inside the authors' demo repository
-  (`NavigatingIntrinsicTriangulations/navigating-intrinsic-triangulations-demo/.claude/worktrees/`,
-  with clones of ddg-tools inside). Everything was fetched here; remove those worktrees and their
-  `worktree-agent-*` branches from the demo repository once the branches above are merged.
-
-`master` includes all of this work (moved up 2026-10-17). Waiting on the user: removing the
-three misplaced worktrees from the demo repository (29 GB).
+`master` includes all of this work (moved up 2026-10-17); the agents' worktrees and branches,
+including three misplaced in the authors' demo repository, were removed the same day.
 
 ## Scheduled
 
