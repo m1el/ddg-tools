@@ -28,6 +28,7 @@ use ddg_core::sparse::Parallelism;
 
 use crate::certificate::{Certificate, certify_instance};
 use crate::error::{ConeError, PrescribedConeIssue};
+use crate::factor_once;
 use crate::linsys::{LinearSolverReport, NewtonLinearSolver, Row, SaddleSolver};
 use crate::problem::{BoundaryTreatment, ConeProblem, Discrete, Instance, split_pieces};
 use crate::solve::{SolveOptions, SolveReport, Status, solve_part};
@@ -35,14 +36,29 @@ use crate::solve::{SolveOptions, SolveReport, Status, solve_part};
 /// How [`reoptimize_cones`] solves the problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ReoptimizeMethod {
-    /// The direct solve of the linear optimality system where it applies (no bound active, no
-    /// cone cost left), the generic solver otherwise. The default.
+    /// The faster of the two for the problem at hand: the generic solver (in practice its
+    /// factor-once method, i.e. the reduced system of the free sites) when a component has at
+    /// most [`REDUCED_SITES_LIMIT`] free sites and the factor-once method supports it; the direct
+    /// solve otherwise (and the generic solver where that does not apply). The default.
     #[default]
     Auto,
+    /// The direct solve of the linear optimality system wherever it applies (no bound active,
+    /// no cone cost left, not singular); the generic solver otherwise.
+    DirectKkt,
     /// Always the generic solver ([`solve_with_boundary`](crate::solve_with_boundary) on the
-    /// problem of [`reoptimization_problem`]), for comparison.
+    /// problem of [`reoptimization_problem`]).
     Solve,
 }
+
+/// [`ReoptimizeMethod::Auto`] uses the generic solver on a component with at most this many free
+/// sites (given cones, plus the boundary vertices with an optimized boundary). There the
+/// factor-once method solves the reduced system: one Cholesky factorization of the `n × n`
+/// Laplacian block, one solve per free site, a dense system of that size; the direct solve
+/// factorizes the `2n × 2n` saddle-point matrix instead, which costs about as much as 30 to 45
+/// extra solves. Measured on the dataset (one thread, `examples/reoptimize.rs`): the generic solver
+/// is 1.3 to 2.6 times faster up to 29 cones, the two are even at 36 (`rhino`) and 45 (`brain`),
+/// and the direct solve is 6.6 and 34 times faster at 439 and 13 836 cones.
+pub const REDUCED_SITES_LIMIT: usize = 32;
 
 /// Which method produced the result of a component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,7 +319,16 @@ fn reoptimize_part(
     let d = Discrete::from_instance(instance)?;
     let tolerance = options.solve.certificate_tolerance;
     let why;
-    if options.method == ReoptimizeMethod::Auto {
+    let n_free = d.sites.iter().filter(|s| !s.fixed).count();
+    let reduced_is_faster = options.method == ReoptimizeMethod::Auto
+        && n_free <= REDUCED_SITES_LIMIT
+        && factor_once::check_support(&d, lambda).is_ok();
+    if reduced_is_faster {
+        why = Some(format!(
+            "{n_free} free sites (at most {REDUCED_SITES_LIMIT}): the reduced system of the \
+             factor-once method is faster"
+        ));
+    } else if options.method != ReoptimizeMethod::Solve {
         match direct(&d, options)? {
             Ok((u, phi, mu, linear)) => {
                 let (u, phi, mu) = (d.to_vertices(&u), d.to_vertices(&phi), d.to_vertices(&mu));
@@ -388,12 +413,16 @@ fn reoptimize_part(
 /// saddle-point matrix `[[W, A], [A, 0]]` (the rows of the given cones replaced by `φ_i = 0`) and
 /// one solve with iterative refinement give `u` and `φ`, and `µ_i = (A u)_i + Ω_i` at the given
 /// cones ([`ReoptimizeMethodUsed::DirectKkt`]). The cost does not depend on the number of cones.
-/// If that solution violates a bound (a bound is active), or a boundary site has a cost
-/// (`Penalized`), or the system is singular (a closed component whose angles are all fixed),
-/// the generic solver ([`solve_with_boundary`](crate::solve_with_boundary) on
-/// [`reoptimization_problem`], with `options.solve`) solves the component instead
-/// ([`ReoptimizeMethodUsed::Solve`]); the report says why. Every result carries the
-/// certificate of the problem.
+/// With few free sites the reduced system is cheaper: the generic solver's factor-once method
+/// factorizes the `n × n` Laplacian block once, solves once per free site, and solves the dense
+/// system of the free sites exactly (bounds included, by its active-set method); with
+/// [`ReoptimizeMethod::Auto`] it is used up to [`REDUCED_SITES_LIMIT`] free sites per component
+/// (the crossover measured on the dataset). If the direct solution violates a bound (a bound
+/// is active), or a boundary site has a cost (`Penalized`), or the system is singular (a closed
+/// component whose angles are all fixed), the generic solver
+/// ([`solve_with_boundary`](crate::solve_with_boundary) on [`reoptimization_problem`], with
+/// `options.solve`) solves the component instead ([`ReoptimizeMethodUsed::Solve`]); the report
+/// says why. Every result carries the certificate of the problem.
 ///
 /// The mesh may have several components (each is solved on its own as part of the whole
 /// problem, as in [`solve`](crate::solve)). On a closed component the angles must sum to its
