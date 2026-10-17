@@ -625,6 +625,186 @@ The price is a bias where `∂u/∂n` varies along the cut over a few edges (ann
 vertices: 5 edges per period). `c` is the option `FluxRecovery::Smoothed { length }`;
 `FluxRecovery::Nodal` is the paper's quotient.
 
+## Comparison with the authors' program (black box)
+
+The authors' program was run as a black box, twice: on 2026-10-13 (before D22) and again on
+2026-10-17 with the code of D32 (SPEC §9). Its sources were never opened; it was only built,
+launched and driven. Outputs, scripts and pictures are in `runs_tmp/blackbox/` (not in the
+repository); the pictures of 2026-10-17 are `runs_tmp/blackbox/pics_2026-10-17/` (one
+`compare_<shape>.png` and `compare_<shape>_dirichlet.png` per shape, and `contact_sheet.png`).
+
+**Method.**
+
+* The program has a GUI only and no batch mode. It was driven under Xvfb by synthetic mouse
+  clicks and typed values, on the same OBJ files as our runs (spot, bob, blub from Keenan Crane's
+  model repository; an icosphere of 2 562 vertices). Every run: initialize by its "Normal
+  clustering" (40 patches on spot), set the weights, "Take many steps" with its default fixed
+  step size 0.01, then save "obj with injective texcoords".
+* What was used: the energies it prints after every step (length, Dirichlet, Hencky, ...), the
+  saved mesh (the surface with the cut inserted, and a UV map), screenshots, and wall-clock time.
+* Its cut is read from the saved mesh: a seam is an edge whose two sides have different UVs, a
+  chart is a UV-connected component. To evaluate it in our energy the charts are carried to the
+  input mesh as face labels (nearest face centroid) and our flow is started from those labels with
+  0 steps. That turns the cut into a staircase along mesh edges, which makes it longer (spot:
+  11.08 instead of 10.55) and adds distortion (`1.42·10⁻³` instead of `1.28·10⁻³`); where small
+  charts are lost on the way it doubles the distortion (blub: 16 charts become 14 patches,
+  `2.06·10⁻³` instead of `0.82·10⁻³`; the icosphere: 14 become 10). This evaluation favours us.
+  A second yardstick avoids the transfer: the area distortion of a
+  flattening with `u = 0` on the cut, `∫u²` with `u = ½ log(area ratio)` per triangle, on the
+  unit-area surface, plus `α_L` times the cut length; for the reference that is its own UV map
+  and its own seams, for us our unwrap (`ddg_uv`, no cones) of our cut.
+* **Length-weight correspondence**, unchanged since 2026-10-13: the reference's length term is the
+  sum of the perimeters of the regions, twice the cut length, on the surface scaled to unit area
+  (it prints `Length scale = √area`); its Hencky value is about 900 times our `J` on the same
+  cut (below). Its objective `w_L · 2ℓ + w_H · H` is then ours with
+  `α_L = 2 w_L / (900 w_H)`: `7.4·10⁻⁴` for `w_H = 3`, `2.22·10⁻³` for 1, `2.22·10⁻⁴` for 10
+  (`w_L = 1`). Its Dirichlet value is our Dirichlet `J` to within 0.86–1.05 on the same cut, so
+  `w_D = 3` corresponds to `α_L = 2/3`.
+* Ours: 8 clusters of normals, as `Session` does it (`Start::NormalClusters`), `StopRule` default
+  with at most 4000 steps, two stage sets: the regions stages (`FlowOptions::for_regions`, the
+  paper's stages with the flux recovery of §3.5, the recommended set for `N > 2`) and the default
+  stages (length step on the cut, local extension, mean-gradient speed); each on the caller's
+  triangles and on the intrinsic Delaunay triangulation (`Triangulation::default()`, flips only:
+  spot 281 flips, bob 657, blub 1 865, the icosphere none; no vertex added). Times are one
+  thread, release build, one run at a time; the reference's are wall clock, GUI included, all
+  cores available (its solver is multi-threaded).
+
+**Hencky energy, our energy of the final state** (`E = J + α_L ℓ`, ×10⁻³; patches in
+parentheses; "regions / default" are the two stage sets; the reference's cut transferred to the
+input mesh as above):
+
+| shape, `w_H` | ours 10-13, before D22 | ours 10-13, after D22 | ours now, caller | ours now, intrinsic | reference, 300 steps | reference, run to rest |
+|---|---|---|---|---|---|---|
+| spot, 3 | 9.675 (42) / – | 18.16 (33) / 9.231 (39) | **8.712** (32) / 9.239 (39) | 8.866 (34) / 9.281 (40) | 9.626 (29) | 8.963 (30) |
+| sphere, 3 | 6.072 (8) / – | 6.073 (8) / 6.045 (8) | 6.049 (8) / **6.045** (8) | 6.049 (8) / **6.045** (8) | 7.545 (10) | 7.428 (7) |
+| bob, 3 | 7.706 (20) / – | 7.140 (15) / 7.363 (18) | 7.084 (16) / 7.358 (18) | **7.073** (16) / 7.358 (18) | 8.630 (19) | 7.766 (17) |
+| blub, 3 | 7.848 (18) / – | 6.663 (10) / 6.985 (14) | **6.293** (12) / 6.983 (13) | **6.293** (13) / 6.974 (14) | 8.376 (14) | 7.022 (11) |
+| spot, 1 | | | 21.38 (19) / 21.89 (22) | **19.68** (13) / 22.09 (23) | 24.53 (21) | |
+| spot, 10 | | | 3.472 (46) / **3.424** (51) | 3.434 (48) / 3.446 (52) | 17.59 (34) | |
+
+**The same, measured by flattening** (`∫u²` of the flattening with `u = 0` on the cut, plus
+`α_L` times the cut length; ×10⁻³; nothing transferred):
+
+| shape, `w_H` | ours, caller: regions / default | ours, intrinsic: regions / default | reference, 300 steps | reference, run to rest |
+|---|---|---|---|---|
+| spot, 3 | 8.714 / 9.197 | 8.873 / 9.236 | 9.091 | **8.518** |
+| sphere, 3 | 6.037 / **6.035** | 6.037 / **6.035** | 6.535 | 6.245 |
+| bob, 3 | 7.085 / 7.360 | **7.073** / 7.360 | 7.962 | 7.232 |
+| blub, 3 | 6.177 / 6.937 | **6.170** / 6.929 | 6.880 | 6.321 |
+| spot, 1 | 21.35 / 21.86 | **19.70** / 22.05 | 22.90 | |
+| spot, 10 | 3.488 / **3.434** | 3.451 / 3.444 | 18.26 | |
+
+**Steps and times** (Hencky 3; ours: steps, stop reason, seconds):
+
+| shape | ours caller, regions | ours caller, default | ours intrinsic, regions | ours intrinsic, default | reference |
+|---|---|---|---|---|---|
+| spot | 159, rose, 2.14 | 104, stalled, 1.14 | 113, rose, 1.52 | 104, stalled, 1.15 | 300 steps in 28 s; at rest after about 5 300 |
+| sphere | 318, stalled, 4.11 | 232, stalled, 2.22 | 318, stalled, 4.17 | 232, stalled, 2.20 | 300 in 23 s; about 3 300 |
+| bob | 239, stalled, 6.96 | 195, rose, 4.19 | 268, rose, 7.63 | 199, rose, 4.17 | 300 in 37 s; about 4 300 |
+| blub | 188, rose, 6.57 | 322, stalled, 8.66 | 220, stalled, 7.77 | 238, rose, 6.19 | 300 in 45 s; about 8 300 |
+
+On 2026-10-13 the same runs took, regions stages before D22: 1161, 484, 1113, 936 steps (13.6,
+6.4, 33.0, 33.3 s); after D22, regions / default: 26 / 102 steps on spot (0.38 / 1.13 s), 300 /
+232 on the sphere, 293 / 195 on bob, 247 / 407 on blub (3.8 to 10.4 s). "rose" is `EnergyRose`
+(D27: the run returns its state of lowest energy).
+
+What the tables say:
+
+* **Against the reference after 300 steps** (the comparison of 2026-10-13) we are below it on
+  every shape and weight: by flattening by 4 % (spot) to 14 % (spot, `w_H = 1`), in our energy
+  by 9 % to 25 % (inflated by the transfer); at `w_H = 10` its cut on spot has a chart with distortion up to
+  `e^1.2` and is 5 times our energy.
+* **Against the reference run to rest** (below), by flattening, the fair yardstick, we are below
+  it on three shapes by 2–3 % (sphere 3 %, bob 2 %, blub 2 %, our best stage set), and on
+  **spot the reference at rest is 2.2 % below our best run** (8.518 against 8.714): its cut is
+  longer (9.79 against our 9.60) with less distortion (`1.27·10⁻³` against `1.61·10⁻³`) and
+  30 charts against our 32. In our energy we are below it on all four (3 % on spot, 9–19 %
+  elsewhere), but there the transfer of its cut costs it more than these differences.
+* **D22–D31.** Spot with the regions stages is the run of D26: after D22 it rose to
+  `1.82·10⁻²` in 26 steps; now it descends to `8.71·10⁻³` (−52 %) and stops by D27. The other
+  regions-stage runs end 0.4–6 % lower than after D22 (sphere 0.4 %, bob 0.8 %, blub 5.6 %); the default
+  stages moved in the fourth digit (D30). Against before D22 every run ends lower and needs
+  1.5 (sphere) to 7 (spot) times fewer steps and less time.
+* **Intrinsic triangulation.** On the icosphere it changes nothing (already Delaunay). On spot,
+  bob and blub the final energies on the two triangulations differ by −8 % (spot, `w_H = 1`) to
+  +2 % with the regions stages and by less than 1 % with the default stages, in both directions; the intrinsic run evaluated on the caller's triangles
+  (its state per input vertex, no vertex was added) differs from its own value by at most 0.3 %.
+  It is a different discretization of the same problem, not an improvement on these meshes,
+  whose triangles are reasonable (smallest angle after the flips 7–11°). Its time is the same.
+* **Speed.** Ours comes to rest in 1–9 s on one thread; the reference takes 23–45 s for 300
+  steps and 3 300 to 8 300 steps (4–17 minutes of wall clock, four instances at a time) to come
+  to rest.
+
+**Convergence of the reference.** The reference was driven in batches of 1 000 more steps until
+the mean of its objective over the last 100 steps changed by less than 0.02 % between batches
+(its fixed step makes the objective oscillate from step to step by up to 1 %). Hencky 3:
+
+| shape | objective after 300 steps | at rest | steps | charts 300 → rest | cut length 300 → rest |
+|---|---|---|---|---|---|
+| spot | 24.89 | 23.23 (−6.6 %) | about 5 300 | 29 → 30 | 10.55 → 9.79 |
+| sphere | 17.10 | 16.32 (−4.6 %) | about 3 300 | 14 → 13 | 7.43 → 7.17 |
+| bob | 21.45 | 19.33 (−9.9 %) | about 4 300 | 21 → 20 | 9.35 → 8.02 |
+| blub | 19.00 | 17.55 (−7.6 %) | about 8 300 | 16 → 12 | 8.19 → 7.49 |
+
+The final cut does change: shorter, with fewer charts on blub, and with the borders moved
+(pictures). The first 300 steps of these runs reproduce the runs of 2026-10-13 exactly; with 4
+instead of 64 threads they differ from step 43 on in the fifth digit (final objective
+24.90 against 24.89, same 29 charts): its parallel reductions are not deterministic in the
+thread count.
+
+**The factor between the Hencky values.** Black-box probes, Hencky 3:
+
+* Spot and the icosphere scaled by 2 and by 0.5: every printed value of every step and the saved
+  cut are identical to the unscaled runs (300 steps on spot, 1 on the icosphere). The program
+  normalizes the scale; the factor is not a unit.
+* Spot and the icosphere subdivided 1:4 (same surface, four times the triangles): the Hencky
+  value of the start changes by +0.2 % (spot) and −2.7 % (the icosphere, whose clustering start
+  differs), after 300 steps on spot by −0.7 %. The value is an integral, not a sum over elements.
+* The printed Hencky value divided by `∫u²` of the program's own UV map of the same state
+  (12 states: four shapes, three weights, 1 and 300 steps, subdivided): 933 to 1114, median about
+  1 010. Divided by our `J` of the transferred cut it is 441 to 1052, low exactly where the
+  transfer loses charts (blub 441, the icosphere 531): that was the spread "440 to 1010"
+  reported on 2026-10-13, an artifact of the transfer, not of the program.
+
+So its Hencky value is about 10³ times `∫u² dA` on the unit-area surface, the same for every
+shape, scale and resolution tried; the spread is the difference between its discretization and
+the flattening. Where the factor of about 10³ comes from (a fixed weight or a convention of its
+energy) cannot be told from outside. The correspondence above uses 900 (calibrated on one shape
+on 2026-10-13); with 1 000 the length weights would be 10 % smaller. Its Dirichlet value has no
+such factor.
+
+**Dirichlet energy** (`w_D = 3`, `w_L = 1`, `α_L = 2/3`; our energy of the final state, patches
+in parentheses):
+
+| shape | ours, caller: regions / default | ours, intrinsic: regions / default | reference, 300 steps | reference, after 8 300 steps |
+|---|---|---|---|---|
+| spot | 11.13 (55) / 11.04 (64) | **10.88** (57) / 11.03 (69) | 19.68 (35) | 21.95 (34) |
+| sphere | 4.127 (8) / **4.124** (8) | 4.127 (8) / **4.124** (8) | 4.312 (6) | |
+| bob | 6.702 (18) / 6.693 (18) | **6.546** (16) / 6.631 (18) | 8.045 (19) | 7.450 (14) |
+| blub | **7.735** (38) / 8.501 (40) | 7.853 (39) / 8.060 (38) | 10.32 (18) | |
+
+The reference does not come to rest with the Dirichlet energy and its fixed step: its objective
+oscillates over the whole run (spot: between 35 and 88 over 8 300 steps, 55.9 after 300; bob
+between 19 and 30), so "after 8 300 steps" is an arbitrary state. Our runs end in 0.4–11 s
+(sphere 44–46 steps, bob up to 539). We are below it on every shape, by 4 % (sphere) to 45 %
+(spot); the transfer of its cut favours us here too, and with this energy our cuts have many
+more patches on spot and blub (the reference's cut on the sphere has 6 charts against our 8).
+
+**Flattening on the same cut.** The program saves a UV map. On its own saved mesh with its
+seams, our flattening with `u = 0` on the cut gives the same distortion to within 3.2 % on
+every run (14 runs; e.g. spot `1.281·10⁻³` against `1.302·10⁻³`, bob `1.047·10⁻³` against
+`1.046·10⁻³`, blub `0.816·10⁻³` against `0.842·10⁻³`, with one flipped triangle of ours on
+blub); its UV map is evidently the flattening with the boundary lengths kept, the map whose
+distortion the energy measures. Our flattening with optimized boundary values (`BoundaryValues::
+Optimized`) has 2 to 6 times less area distortion on the same cut but flips triangles
+per atlas (11 to 87 on these 14).
+
+**Not explained or not done.** Where the factor of about 10³ comes from. Why the reference at rest
+beats us on spot by flattening; we did not start our flow from its converged cut. The reference's
+Dirichlet runs never come to rest with its default step; its line search option and other step
+sizes were not tried. Its "use local scale" options, symmetry, area and visibility terms were not
+compared. Its times are with a GUI that renders every frame in software.
+
 ## Verification
 
 `cargo test -p ddg-variational-cuts` (about half a minute in a debug build; the tables below come from
