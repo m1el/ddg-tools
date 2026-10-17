@@ -159,7 +159,7 @@ class CutDescription:
     @property
     def report(self) -> dict[str, int | float]:
         """``n_merged_nodes``, ``max_displacement``, ``max_displacement_relative``,
-        ``n_moved_points`` (all zero on the caller's triangulation, empty for ``unwrap``)."""
+        ``n_moved_points``, ``n_removed_excursions`` (all zero on the caller's triangulation, empty for ``unwrap``)."""
 
 @final
 class InsertedMesh:

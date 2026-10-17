@@ -1230,6 +1230,7 @@ impl CutSession {
         d.set("max_displacement", r.max_displacement);
         d.set("max_displacement_relative", r.max_displacement_relative);
         d.set("n_moved_points", r.n_moved_points);
+        d.set("n_removed_excursions", r.n_removed_excursions);
         Ok((cut, d))
     }
 

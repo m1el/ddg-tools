@@ -688,7 +688,7 @@ class IntrinsicTest(unittest.TestCase):
         merged.run(**kw)
         report = merged.describe_cut().report
         for key in ("n_merged_nodes", "max_displacement", "max_displacement_relative",
-                    "n_moved_points"):
+                    "n_moved_points", "n_removed_excursions"):
             self.assertIn(key, report)
         self.assertLessEqual(report["max_displacement_relative"], 0.1 + 1e-12)
         raw = self.make(merge_tolerance=0.0)

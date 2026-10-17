@@ -278,7 +278,7 @@ rebuilds the session on the same mesh (the triangulation and `n_regions` come fr
 state bytes) removes bends of the returned cut that deviate from the straight line between their
 neighbours by less than that fraction of the longest edge of their triangle:
 `CutDescription.report` has `n_merged_nodes`, `max_displacement` and `max_displacement_relative`
-(and `n_moved_points`). `CutSession.n_patches` counts the connected pieces of the surface in one
+(and `n_moved_points`, `n_removed_excursions`). `CutSession.n_patches` counts the connected pieces of the surface in one
 region; `InsertedMesh.changed_polygons` (with `changed_vertex_starts`, `changed_vertices`,
 `changed_triangle_starts`, `changed_triangles`) is the library's triangulation of the polygons that
 were split or got extra vertices, which an editor should keep. The description has several points per edge, junctions of
