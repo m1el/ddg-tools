@@ -1135,24 +1135,6 @@ def models_with_boundary_keep_their_boundary():
 FLIP_RECORD = []
 
 
-def KNOWN_FLIP(offset):
-    """The one case that is not zero today: the refined triangulation with a cut offset of 0.2 on
-    the spot atlas has one sliver (3D area 0.007 of the mean, smallest angle 0.6 degrees) from a
-    bend that deviates by 0.103 of an edge, just over the default merge tolerance of 0.1; with
-    a tolerance of 0.2 it is gone (checked in the table test below)."""
-    return ARGS.triangulation == "refined" and offset >= 0.2
-
-
-def odt_active():
-    """Optimal Delaunay is on by default in this run and takes effect (not the caller's)."""
-    return ARGS.optimal_delaunay and ARGS.triangulation != "caller"
-
-
-ODT_FLIP_NOTE = ("optimal Delaunay on the spot atlas: flipped UV triangles are recorded, not "
-                 "asserted (the plain intrinsic runs have none; see the report of "
-                 "blender/README.md)")
-
-
 def atlas_of_spot(weight, expect_zero_flips, lam=0.1, offset=CUT_OFFSET):
     core = importlib.import_module(ARGS.module + ".core")
     obj = spot_object()
@@ -1197,13 +1179,12 @@ def atlas_of_spot(weight, expect_zero_flips, lam=0.1, offset=CUT_OFFSET):
     # own triangulation. The triangulations differ, so the counts are not equal in general.
     print("  flipped: {} here (of {} triangles), {} reported by the library".format(
         flipped, len(areas), library_flipped))
-    # On the caller's triangulation nothing flips (the stored triangulation of Apply). On an
-    # intrinsic one a few slivers can still flip after the unwrap (known; the pipeline is being
-    # changed): recorded, not asserted.
+    # Nothing flips on any triangulation, Optimal Delaunay included, at either offset (the
+    # stored triangulation of Apply; on an intrinsic one the merge of bends measured at the cut
+    # the flow found, and the excursions across a side removed: crates/ddg-uv/README.md, "A large
+    # cut offset, and the optimal Delaunay triangulation").
     FLIP_RECORD.append((ARGS.triangulation, weight, offset, flipped, library_flipped))
-    if odt_active():
-        print("  " + ODT_FLIP_NOTE)
-    elif expect_zero_flips and not KNOWN_FLIP(offset):
+    if expect_zero_flips:
         assert flipped == 0 and library_flipped == 0, "{} flipped triangles of {}".format(
             flipped, len(areas))
     return charts, islands, flipped
@@ -1299,8 +1280,6 @@ def unwrap_falls_back_to_blenders_triangulation_when_the_mesh_was_edited():
 
 @test
 def the_cut_offset_moves_points_away_from_vertices():
-    if odt_active():
-        raise Skip("the ratio of 20 is measured on the plain triangulations")
     smallest = {}
     for offset in (1e-3, 0.2):
         reset()
@@ -1751,7 +1730,8 @@ def flip_cases():
 @test
 def no_flipped_uv_triangle_after_apply_and_unwrap_before_and_after_merging_bends():
     """The same cuts with the bends of the cut kept (merge 0) and merged (the default 0.1): the
-    library's count and ours, per case and offset. Asserted: zero with the bends merged."""
+    library's count and ours, per case and offset. Asserted: zero with the bends merged, on
+    every triangulation (Optimal Delaunay included) and offset."""
     rows = []
     for label, make, start, flow_props in flip_cases():
         for offset in ((CUT_OFFSET, 0.2) if label.startswith("spot") else (CUT_OFFSET,)):
@@ -1764,22 +1744,8 @@ def no_flipped_uv_triangle_after_apply_and_unwrap_before_and_after_merging_bends
                   "library {} ours {} (charts {} -> {})".format(
                       ARGS.triangulation, label, offset, before[0], before[1], after[0], after[1],
                       before[2], after[2]))
-    if odt_active():
-        for r in rows:
-            if r[0].startswith("spot") and (r[3][0] != 0 or r[3][1] != 0):
-                print("  " + ODT_FLIP_NOTE)
-        rows = [r for r in rows if not r[0].startswith("spot")]
-    bad = [r for r in rows if (r[3][0] != 0 or r[3][1] != 0) and not KNOWN_FLIP(r[1])]
+    bad = [r for r in rows if r[3][0] != 0 or r[3][1] != 0]
     assert not bad, "flipped triangles with the bends merged: {}".format(bad)
-    known = [r for r in rows if KNOWN_FLIP(r[1]) and (r[3][0] != 0 or r[3][1] != 0)]
-    if known:
-        # A larger merge tolerance removes them: the bend that causes it deviates by 0.103.
-        for label, offset, _, _ in known:
-            label_, make, start, flow_props = next(c for c in flip_cases() if c[0] == label)
-            again = flip_case(label, make, start, flow_props, offset, 0.2)
-            print("  FLIPTABLE [{}] {} offset {:g} with merge tolerance 0.2: library {} ours {}"
-                  .format(ARGS.triangulation, label, offset, again[0], again[1]))
-            assert again[0] == 0 and again[1] == 0, (label, offset, again)
 
 
 # ----------------------------------------------------------------------------------------------
