@@ -998,6 +998,49 @@ an earlier version with another title, were read).
   which edges are split, where, and how often. Nothing of correctness depends on it; the
   vertices it adds are inserted vertices like any other (N10).
 
+## Navigating Intrinsic Triangulations: applications 5.1 to 5.3
+
+The applications of the Signpost paper's Sec. 5.1 (Steiner trees), 5.2 (finite elements) and 5.3
+(geodesic distance by the heat method) are in `crates/ddg-intrinsic-apps` (contract: its `SPEC.md`,
+decisions `N30`–`N39`). Machine-checked (`DdgProofs/IntrinsicApps/HeatFem.lean`): the closed forms
+of one triangle, `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-mass` (row sums and
+the bounds against the lumped mass; that its entries are the integrals `∫ φ_i φ_j` is the
+standard formula and is not proved) and `app-fem-midpoint-subdivision`. The stiffness matrix is
+`cotan-fem-stiffness` above. Cited below: the Fermat point of a triangle. Not covered: the Steiner
+heuristic as a whole (Smith, Lee, Liebman 1981, a heuristic with no optimality statement), the
+convergence of the heat method (Crane, Weischedel, Wardetzky 2013, Sec. 3.2 and their
+Appendix A), the exact window propagation of `exact.rs` (Mitchell, Mount, Papadimitriou 1987;
+Surazhsky et al. 2005; the filter of Xin and Wang 2009, argued in its module documentation), the
+Lanczos iteration, and every tolerance.
+
+### [formula: app-steiner-fermat-point] The Fermat point of a triangle and the Steiner tree of its corners
+
+- **Statement.** In a triangle whose angles are all below `120°` (`2π/3`) the point `F` that
+  minimizes the sum of the distances to the three corners (the Fermat or Torricelli point, the
+  first isogonic centre) lies inside the triangle and sees every side under `120°`; the shortest
+  network joining the three corners is the three segments from `F` (the Steiner minimal tree of
+  three points; if an angle is `120°` or more, it is the two sides at that corner). Its
+  trilinear coordinates are `csc(A + π/3) : csc(B + π/3) : csc(C + π/3)`, so its barycentric
+  coordinates are `a csc(A + π/3) : b csc(B + π/3) : c csc(C + π/3)` (`a` the side opposite the
+  angle `A`), and the length of the tree is `S` with `S² = (a² + b² + c²)/2 + 2√3·Area`.
+- **Reference.** E. N. Gilbert, H. O. Pollak, *Steiner minimal trees*, SIAM Journal on Applied
+  Mathematics 16(1), 1–29, 1968, <https://doi.org/10.1137/0116001> (the three-point problem and
+  the `120°` condition). C. Kimberling, *Encyclopedia of Triangle Centers*, X(13) (Fermat point;
+  trilinears `csc(A + π/3)`), <https://faculty.evansville.edu/ck6/encyclopedia/ETC.html>.
+  Signpost paper Sec. 5.1, which prints "barycentric coordinates `b_i := csc(θ_i + π/3)`".
+- **Source check.** Not read: Gilbert–Pollak (paywalled) and the Encyclopedia entry; the
+  statements are the classical ones and are checked numerically instead
+  (`crates/ddg-intrinsic-apps/tests/steiner.rs`, `the_fermat_point_joins_the_corners_at_120_degrees`:
+  the three directions from the computed point meet at `120°` to `1e-12` and the length agrees
+  with the formula for `S²` to `1e-12`, on four triangles). The paper's `csc(θ_i + π/3)` used as
+  barycentric coordinates gives another point (they are the trilinear coordinates); SPEC N30.
+- **Why not formalized.** The minimality of the network is a statement about all networks
+  joining three points; the coordinates need the trigonometry of the triangle's angles, for
+  which nothing in `lean/proofs` is set up.
+- **What depends on it.** The length and the place of every Steiner point of `steiner_tree`
+  (SPEC N30). Nothing else: the tree is checked as a tree and the cut as a disk whatever the
+  points are.
+
 ---
 
 ## Out of scope of this package

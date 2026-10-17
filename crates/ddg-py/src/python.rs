@@ -22,6 +22,7 @@ use crate::error::{InputError as RustInputError, UnwrapError};
 use crate::pipeline::{IS_PLACEHOLDER, PIPELINE_NAME};
 
 mod cut;
+mod intrinsic_apps;
 
 pyo3::create_exception!(
     ddg_tools,
@@ -568,6 +569,7 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ReoptimizeResult>()?;
     m.add_class::<UnwrapResult>()?;
     cut::register(m)?;
+    intrinsic_apps::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;
     m.add("MeshError", py.get_type::<MeshError>())?;
