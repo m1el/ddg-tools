@@ -25,6 +25,8 @@ ddg-core = { path = "../ddg-core" }
 # The real pipeline: polygons -> seams -> cones -> cut -> flatten -> per-corner UVs. The triangulation
 # comes from Blender itself (`mesh.loop_triangles`).
 ddg-uv = { path = "../ddg-uv" }
+# The cone solver: `reoptimize_cones` (optimal angles for given cone positions).
+ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 # The cut flow: the types of its controls (energy, step size, stages, stop rule).
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

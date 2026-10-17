@@ -79,6 +79,58 @@ def pack_charts(
     margin: float = 0.0,
 ) -> tuple[array[float], dict[str, int | float]]: ...
 
+@final
+class ReoptimizeResult:
+    @property
+    def cone_vertices(self) -> array[int]:
+        """``array('i')``, the cone vertices as given."""
+    @property
+    def cone_angles(self) -> array[float]:
+        """``array('d')``, the optimal cone angles in radians, parallel to ``cone_vertices``.
+        An angle may be 0."""
+    @property
+    def log_scale(self) -> array[float]:
+        """``array('d')``, the log conformal scale factor ``u``, one per vertex."""
+    @property
+    def boundary_curvature(self) -> array[float]:
+        """``array('d')``, the boundary curvature of the flattened boundary, one per vertex
+        (0 away from an optimized boundary)."""
+    @property
+    def report(self) -> dict[str, bool | int | float | str | None]:
+        """``status`` (``"converged"``, ``"not_converged"``, ``"linear_solver_failed"``),
+        ``method`` (``"direct_kkt"`` or ``"solve"``), ``distortion``, ``objective``,
+        ``total_cone_angle``, ``n_components``, ``certificate_holds`` (at tolerance 1e-9),
+        ``state_residual``, ``duality_gap``, ``seconds``, ``message`` (``str`` or ``None``) and
+        ``seconds_total`` (including decoding and encoding)."""
+
+def reoptimize_cones(
+    positions: Buffer,
+    triangles: Buffer,
+    cone_vertices: Buffer,
+    *,
+    boundary: Literal["fixed", "free", "convex", "penalized"] = "fixed",
+    distortion_weights: Buffer | None = None,
+    lower_bounds: Buffer | None = None,
+    upper_bounds: Buffer | None = None,
+    prescribed_vertices: Buffer | None = None,
+    prescribed_angles: Buffer | None = None,
+    method: Literal["auto", "direct", "solve"] = "auto",
+    lambda_: float = 0.1,
+) -> ReoptimizeResult:
+    """The least-distortion cone angles for cones at the given vertices.
+
+    ``positions`` has 3 reals per vertex, ``triangles`` 3 vertex indices per triangle (a
+    manifold, consistently oriented mesh in which every vertex is used; several components are
+    allowed). Cones are placed at ``cone_vertices`` (interior vertices, each once) and nowhere
+    else; their angles are optimized. ``boundary`` says what happens at the boundary: ``"fixed"``
+    keeps ``u = 0`` there. ``distortion_weights``, ``lower_bounds`` (<= 0) and ``upper_bounds``
+    (>= 0) are per vertex; with ``"penalized"``, ``lambda_`` (finite, >= 0) is the cost of the
+    boundary curvature. ``prescribed_vertices`` and ``prescribed_angles`` fix some cone
+    angles. Raises ``InputError`` (bad arguments, a cone vertex out of range, repeated, on the
+    boundary or prescribed, a closed component whose cones cannot carry 2*pi*chi) and
+    ``MeshError`` (not a valid manifold triangle mesh). A result that did not converge is not an
+    error: see ``report["status"]``."""
+
 
 # ----------------------------------------------------------------------------------------------
 # The cut flow: "Variational Surface Cutting" (Sharp, Crane 2018) on a polygon mesh.

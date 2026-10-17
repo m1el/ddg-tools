@@ -11,6 +11,7 @@
 //! # Layout
 //!
 //! * [`buffers`] — decoding buffer-protocol memory into typed vectors.
+//! * [`cones`] — `reoptimize_cones`: the optimal angles of cones at given vertices.
 //! * [`contract`] — [`contract::UnwrapInput`], [`contract::UnwrapOptions`],
 //!   [`contract::UnwrapOutput`] and [`contract::Report`]: the data that crosses the boundary,
 //!   validated.
@@ -38,6 +39,7 @@
 #![warn(missing_docs)]
 
 pub mod buffers;
+pub mod cones;
 pub mod contract;
 pub mod cutting;
 pub mod error;

@@ -195,6 +195,13 @@ pub enum InputError {
         /// The requirement, as prose.
         requirement: &'static str,
     },
+    /// The cone solver rejected an argument; `reason` is its message about the offending entry.
+    Rejected {
+        /// Parameter name.
+        name: &'static str,
+        /// What the solver said.
+        reason: String,
+    },
     /// Two parameters that describe the same mesh disagree in length.
     LengthMismatch {
         /// Parameter name.
@@ -445,6 +452,7 @@ impl fmt::Display for InputError {
                 expected,
                 reason,
             } => write!(f, "{name}: got {got} rows, expected {expected} ({reason})"),
+            InputError::Rejected { name, reason } => write!(f, "{name}: {reason}"),
         }
     }
 }

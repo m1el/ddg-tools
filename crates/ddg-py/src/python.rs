@@ -14,6 +14,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::buffers::{BufferView, decode_indices, decode_reals};
+use crate::cones::{ConesInput, DEFAULT_LAMBDA, reoptimize};
 use crate::contract::{
     MeshBuffers, ReportValue, UnwrapInput, UnwrapOptions, polygon_offsets_from_starts,
 };
@@ -394,10 +395,162 @@ fn pack_charts<'py>(
     Ok((uv_array(py, &packed)?, info))
 }
 
+/// The result of `reoptimize_cones`. All arrays are `array.array` objects.
+#[pyclass(module = "ddg_tools", frozen, get_all)]
+struct ReoptimizeResult {
+    /// `array('i')`: the cone vertices, as given.
+    cone_vertices: Py<PyAny>,
+    /// `array('d')`: the optimal cone angles in radians, parallel to `cone_vertices`.
+    cone_angles: Py<PyAny>,
+    /// `array('d')`: the log scale factor `u`, one per vertex.
+    log_scale: Py<PyAny>,
+    /// `array('d')`: the boundary curvature, one per vertex.
+    boundary_curvature: Py<PyAny>,
+    /// `dict` of plain values (`bool`, `int`, `float`, `str`, `None`).
+    report: Py<PyDict>,
+}
+
+#[pymethods]
+impl ReoptimizeResult {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let status = match self.report.bind(py).get_item("status")? {
+            Some(status) => status.to_string(),
+            None => String::new(),
+        };
+        Ok(format!(
+            "ReoptimizeResult(cones={}, vertices={}, status={:?})",
+            self.cone_vertices.bind(py).len()?,
+            self.log_scale.bind(py).len()?,
+            status
+        ))
+    }
+}
+
+/// `array.array('d')` from reals.
+fn real_array<'py>(py: Python<'py>, values: &[f64]) -> PyResult<Bound<'py, PyAny>> {
+    let bytes: Vec<u8> = values.iter().flat_map(|x| x.to_ne_bytes()).collect();
+    new_array(py, "d", &bytes)
+}
+
+/// Find the least-distortion cone angles for given cone positions. Returns a ReoptimizeResult.
+///
+/// Array arguments are read as for `unwrap`.
+///
+/// positions         3 reals per vertex.
+/// triangles         3 vertex indices per triangle: a manifold, consistently oriented triangle
+///                   mesh in which every vertex is used. Several connected components are allowed.
+/// cone_vertices     the vertices where cones are placed; their angles are optimized. Every other
+///                   interior vertex gets no cone. Interior vertices only, each listed once.
+/// boundary          "fixed" (log scale u = 0 on the boundary, the default), "free", "convex" or
+///                   "penalized" (a cost on the boundary curvature, weight lambda_).
+/// distortion_weights  one weight >= 0 per vertex (default 1).
+/// lower_bounds, upper_bounds
+///                   one bound per vertex on the cone angles, <= 0 and >= 0 (default none).
+/// prescribed_vertices, prescribed_angles
+///                   vertices with a fixed cone angle, and those angles in radians.
+/// lambda_           cost of the boundary curvature with boundary="penalized" (finite, >= 0,
+///                   default 0.1); ignored otherwise.
+/// method            "auto" (default), "direct" (the linear optimality system wherever it
+///                   applies) or "solve" (always the generic solver).
+///
+/// The result has cone_vertices (as given), cone_angles (radians, parallel, may be 0),
+/// log_scale and boundary_curvature (one per vertex) and a report dict: status ("converged",
+/// "not_converged", "linear_solver_failed"), method, distortion, objective, total_cone_angle,
+/// n_components, certificate_holds, state_residual, duality_gap, seconds, message, seconds_total.
+///
+/// Raises InputError for malformed arguments, a cone vertex that is out of range, repeated, on
+/// the boundary or prescribed, and a closed component whose cones cannot carry 2*pi*chi;
+/// MeshError for a mesh that is not a valid manifold triangle mesh; TypeError for an argument
+/// without the buffer protocol. A result that did not converge is not an error: see
+/// report["status"].
+#[pyfunction]
+#[pyo3(signature = (
+    positions,
+    triangles,
+    cone_vertices,
+    *,
+    boundary = "fixed",
+    distortion_weights = None,
+    lower_bounds = None,
+    upper_bounds = None,
+    prescribed_vertices = None,
+    prescribed_angles = None,
+    method = "auto",
+    lambda_ = DEFAULT_LAMBDA,
+))]
+#[allow(clippy::too_many_arguments)]
+fn reoptimize_cones<'py>(
+    py: Python<'py>,
+    positions: &Bound<'py, PyAny>,
+    triangles: &Bound<'py, PyAny>,
+    cone_vertices: &Bound<'py, PyAny>,
+    boundary: &str,
+    distortion_weights: Option<&Bound<'py, PyAny>>,
+    lower_bounds: Option<&Bound<'py, PyAny>>,
+    upper_bounds: Option<&Bound<'py, PyAny>>,
+    prescribed_vertices: Option<&Bound<'py, PyAny>>,
+    prescribed_angles: Option<&Bound<'py, PyAny>>,
+    method: &str,
+    lambda_: f64,
+) -> PyResult<ReoptimizeResult> {
+    let start = Instant::now();
+    let optional_reals = |name, obj: Option<&Bound<'py, PyAny>>| match obj {
+        Some(obj) => reals(name, obj, 1, "vertex").map(Some),
+        None => Ok(None),
+    };
+    let input = ConesInput {
+        positions: reals("positions", positions, 3, "vertex")?,
+        triangles: indices("triangles", triangles, 3, "triangle")?,
+        cone_vertices: indices("cone_vertices", cone_vertices, 1, "cone")?,
+        boundary: boundary.to_owned(),
+        method: method.to_owned(),
+        lambda: lambda_,
+        distortion_weights: optional_reals("distortion_weights", distortion_weights)?,
+        lower_bounds: optional_reals("lower_bounds", lower_bounds)?,
+        upper_bounds: optional_reals("upper_bounds", upper_bounds)?,
+        prescribed_vertices: match prescribed_vertices {
+            Some(obj) => indices("prescribed_vertices", obj, 1, "cone")?,
+            None => Vec::new(),
+        },
+        prescribed_angles: match prescribed_angles {
+            Some(obj) => reals("prescribed_angles", obj, 1, "cone")?,
+            None => Vec::new(),
+        },
+    };
+    let output = py
+        .detach(move || reoptimize(&input))
+        .map_err(unwrap_error)?;
+
+    let report = PyDict::new(py);
+    let r = &output.report;
+    report.set_item("status", r.status)?;
+    report.set_item("method", r.method)?;
+    report.set_item("distortion", r.distortion)?;
+    report.set_item("objective", r.objective)?;
+    report.set_item("total_cone_angle", r.total_cone_angle)?;
+    report.set_item("n_components", r.n_components)?;
+    report.set_item("certificate_holds", r.certificate_holds)?;
+    report.set_item("state_residual", r.state_residual)?;
+    report.set_item("duality_gap", r.duality_gap)?;
+    report.set_item("seconds", r.seconds)?;
+    report.set_item("message", r.message.as_deref())?;
+    report.set_item("seconds_total", start.elapsed().as_secs_f64())?;
+
+    Ok(ReoptimizeResult {
+        cone_vertices: index_array(py, "cone_vertices", output.cone_vertices.iter().copied())?
+            .unbind(),
+        cone_angles: real_array(py, &output.cone_angles)?.unbind(),
+        log_scale: real_array(py, &output.log_scale)?.unbind(),
+        boundary_curvature: real_array(py, &output.boundary_curvature)?.unbind(),
+        report: report.unbind(),
+    })
+}
+
 /// Mesh buffers in, per-corner UVs out: the Python side of the ddg-tools Rust workspace.
 ///
 /// unwrap(...)       compute a UV map (see its docstring for the array formats)
 /// pack_charts(...)  lay the charts of a UV map out in the unit square
+/// reoptimize_cones(...)  the least-distortion angles of cones at given vertices
 ///
 /// PIPELINE          name of the unwrap pipeline this build contains
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
@@ -411,6 +564,8 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     m.add_function(wrap_pyfunction!(unwrap, m)?)?;
     m.add_function(wrap_pyfunction!(pack_charts, m)?)?;
+    m.add_function(wrap_pyfunction!(reoptimize_cones, m)?)?;
+    m.add_class::<ReoptimizeResult>()?;
     m.add_class::<UnwrapResult>()?;
     cut::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;

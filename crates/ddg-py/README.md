@@ -206,6 +206,60 @@ charts the margin is capped at `1 / (4 ⌈√n⌉)` so that padding cannot eat t
 dict says which margin was used. The layout is deterministic and wastes space compared with a
 real packer.
 
+## `reoptimize_cones`: the best angles for given cone positions
+
+```python
+ddg_tools.reoptimize_cones(
+    positions, triangles, cone_vertices, *,
+    boundary="fixed",
+    distortion_weights=None, lower_bounds=None, upper_bounds=None,
+    prescribed_vertices=None, prescribed_angles=None,
+    method="auto",
+    lambda_=0.1,
+) -> ddg_tools.ReoptimizeResult
+```
+
+Given a triangle mesh and the vertices where cones are to sit, it returns the cone angles that
+give the least distortion of a conformal flattening. This is the canonical problem of the
+optimal-cones solver with the cone cost `0` at the given vertices and `+∞` at every other
+interior vertex, so there is no `λ` and no sparsity term: only the positions are fixed. The
+method: if no angle bound is active, the optimality conditions are a linear system, which is
+solved directly with one sparse factorization (`method="direct"`); for a few cones the reduced
+system of the free sites is cheaper (`"auto"` picks); the generic solver (`"solve"`) takes over
+when a bound is active. Every result carries the optimality certificate of the problem
+(`crates/ddg-optimal-cones`). On a closed component the angles sum to `2πχ`.
+
+Arguments (arrays are read like those of `unwrap`):
+
+| argument | meaning |
+|----------|---------|
+| `positions` | 3 reals per vertex |
+| `triangles` | 3 **vertex** indices per triangle: a manifold, consistently oriented mesh in which every vertex is used. Several connected components are allowed; each is solved as part of the whole problem |
+| `cone_vertices` | the vertices where cones are placed; their angles are optimized (a result angle may be 0). Interior vertices only, each at most once, none with a prescribed cone. May be empty on a mesh with boundary |
+| `boundary` | `"fixed"` (default): `u = 0` on the boundary. `"free"`: the boundary scale factor is optimized too. `"convex"`: optimized, with a convex boundary. `"penalized"`: optimized, with a cost on the boundary curvature (weight `lambda_`) |
+| `distortion_weights` | one real `>= 0` per vertex (default 1) |
+| `lower_bounds`, `upper_bounds` | one real per vertex, `<= 0` and `>= 0` (`-inf` / `inf` allowed); they bound the cone angles |
+| `prescribed_vertices`, `prescribed_angles` | cones with a fixed angle (radians), parallel arrays |
+| `method` | `"auto"` (default), `"direct"`, `"solve"` |
+| `lambda_` | with `boundary="penalized"` the boundary curvature `ν` costs `lambda_·\|ν\|` (finite, `>= 0`, default `0.1` like `unwrap`); no effect with the other treatments |
+
+`ReoptimizeResult` (read-only; arrays are `array.array`):
+
+| attribute | contents |
+|-----------|----------|
+| `cone_vertices` | `array('i')`, as given |
+| `cone_angles` | `array('d')`, parallel to `cone_vertices`, radians (positive for a cone tip, may be 0) |
+| `log_scale` | `array('d')`, the log conformal scale factor `u`, one per vertex |
+| `boundary_curvature` | `array('d')`, one per vertex: the curvature of the flattened boundary with an optimized boundary, 0 elsewhere |
+| `report` | `dict`: `status` (`"converged"`, `"not_converged"`, `"linear_solver_failed"`), `method` (`"direct_kkt"` or `"solve"`), `distortion`, `objective`, `total_cone_angle` (sum of `|angle|`), `n_components`, `certificate_holds` (at tolerance `1e-9`), `state_residual`, `duality_gap`, `seconds` (the solver), `message` (`str` or `None`), `seconds_total` (everything, including decoding) |
+
+Errors: `InputError` (message starts with the parameter name) for malformed buffers, wrong
+lengths, an unknown `boundary` or `method`, a cone vertex out of range, repeated, on the boundary
+or carrying a prescribed cone, invalid weights or bounds, and a closed component whose cones
+cannot carry `2πχ` (no cones, or bounds that forbid the total angle). `MeshError` for a mesh
+that is not a manifold, consistently oriented triangle mesh with positive-area triangles and
+no unused vertices. A result that did not converge is not an exception: read `report["status"]`.
+
 ## The cut flow: `CutSession`
 
 `ddg_tools.CutSession` binds `ddg_uv::cutting` (`crates/ddg-uv`, README section on the cut flow):
@@ -390,6 +444,7 @@ assembles the report. New options become fields of `UnwrapOptions` and keyword a
 | `src/contract.rs` | `MeshBuffers`, `UnwrapInput` (validation), `UnwrapOptions`, `UnwrapOutput`, `Report` |
 | `src/error.rs` | `InputError`, `UnwrapError` |
 | `src/pipeline.rs` | `run_pipeline` (the call into `ddg-uv`) and the driver `unwrap` |
+| `src/cones.rs` | `reoptimize_cones`: validation and the call into `ddg-optimal-cones` (pure Rust) |
 | `src/cutting.rs` | the cut session: controls, reports, arrays (pure Rust, tested by `cargo test`) |
 | `src/measure.rs` | distortion measured on the result |
 | `src/pack.rs` | packing charts into the unit square |

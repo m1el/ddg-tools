@@ -641,6 +641,204 @@ class NumpyTest(unittest.TestCase):
                              polygon_starts, triangles)
 
 
+def octahedron(offset=(0.0, 0.0, 0.0), first=0):
+    """The unit octahedron, outward faces: (positions, triangles); indices start at `first`."""
+    corners = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    positions = [float(c + o) for p, o in zip(corners, [offset] * 6) for c, o in zip(p, o)]
+    faces = [(0, 2, 4), (2, 1, 4), (1, 3, 4), (3, 0, 4),
+             (2, 0, 5), (1, 2, 5), (3, 1, 5), (0, 3, 5)]
+    return positions, [first + v for f in faces for v in f]
+
+
+def bumpy_grid(n):
+    """An (n+1) x (n+1) grid of vertices, 2 n^2 triangles, counter-clockwise seen from +z,
+    with a smooth bump so that it has curvature. Vertex (i, j) has index i * (n + 1) + j."""
+    positions = []
+    for i in range(n + 1):
+        for j in range(n + 1):
+            x, y = i / n, j / n
+            positions += [x, y, 0.2 * math.sin(3 * x) * math.cos(2 * y)]
+    triangles = []
+    for i in range(n):
+        for j in range(n):
+            a, b = i * (n + 1) + j, (i + 1) * (n + 1) + j
+            triangles += [a, b, b + 1, a, b + 1, a + 1]
+    return positions, triangles
+
+
+class ReoptimizeConesTest(unittest.TestCase):
+    def solve(self, mesh, cones, **kwargs):
+        positions, triangles = mesh
+        return ddg_tools.reoptimize_cones(array.array('d', positions),
+                                          array.array('i', triangles),
+                                          array.array('i', cones), **kwargs)
+
+    def test_octahedron_angles_sum_to_four_pi(self):
+        result = self.solve(octahedron(), [0, 2, 4])
+        self.assertIsInstance(result, ddg_tools.ReoptimizeResult)
+        self.assertEqual(result.cone_vertices, array.array('i', [0, 2, 4]))
+        self.assertEqual(result.cone_angles.typecode, 'd')
+        self.assertEqual(len(result.cone_angles), 3)
+        self.assertAlmostEqual(sum(result.cone_angles), 4 * math.pi, places=9)
+        # By symmetry the three cones are equal.
+        for angle in result.cone_angles:
+            self.assertAlmostEqual(angle, 4 * math.pi / 3, places=9)
+        self.assertEqual(result.log_scale.typecode, 'd')
+        self.assertEqual(len(result.log_scale), 6)
+        self.assertEqual(len(result.boundary_curvature), 6)
+        self.assertIn("ReoptimizeResult", repr(result))
+        with self.assertRaises(AttributeError):
+            result.cone_angles = None
+
+    def test_report(self):
+        report = self.solve(octahedron(), [0, 2, 4]).report
+        self.assertEqual(set(report), {
+            "status", "method", "distortion", "objective", "total_cone_angle", "n_components",
+            "certificate_holds", "state_residual", "duality_gap", "seconds", "message",
+            "seconds_total"})
+        self.assertEqual(report["status"], "converged")
+        self.assertIn(report["method"], ("direct_kkt", "solve"))
+        self.assertIs(report["certificate_holds"], True)
+        self.assertEqual(report["n_components"], 1)
+        self.assertIsNone(report["message"])
+        self.assertAlmostEqual(report["total_cone_angle"], 4 * math.pi, places=9)
+        self.assertLess(report["state_residual"], 1e-9)
+        self.assertGreaterEqual(report["distortion"], 0.0)
+        self.assertGreaterEqual(report["seconds_total"], report["seconds"])
+
+    def test_one_cone_carries_everything(self):
+        result = self.solve(octahedron(), [3])
+        self.assertAlmostEqual(result.cone_angles[0], 4 * math.pi, places=9)
+
+    def test_methods_agree(self):
+        mesh = octahedron()
+        reference = self.solve(mesh, [0, 1, 4]).cone_angles
+        for method in ("direct", "solve"):
+            angles = self.solve(mesh, [0, 1, 4], method=method).cone_angles
+            for a, b in zip(angles, reference):
+                self.assertAlmostEqual(a, b, places=7)
+        result = self.solve(mesh, [0, 1, 4], method="direct")
+        self.assertEqual(result.report["method"], "direct_kkt")
+
+    def test_bounds_and_prescribed_cones(self):
+        mesh = octahedron()
+        # Prescribed 2*pi at vertex 5; the free cone at 0 takes the rest.
+        result = self.solve(mesh, [0], prescribed_vertices=array.array('i', [5]),
+                            prescribed_angles=array.array('d', [2 * math.pi]))
+        self.assertAlmostEqual(result.cone_angles[0], 2 * math.pi, places=9)
+        # An upper bound that is active: the angles are clipped and still sum to 4*pi.
+        upper = array.array('d', [2.0] * 6)
+        result = self.solve(mesh, [0, 1, 2], upper_bounds=upper,
+                            prescribed_vertices=array.array('i', [4]),
+                            prescribed_angles=array.array('d', [4 * math.pi - 6.0]))
+        self.assertAlmostEqual(sum(result.cone_angles), 6.0, places=7)
+        self.assertTrue(all(a <= 2.0 + 1e-9 for a in result.cone_angles))
+        # Weights are accepted.
+        result = self.solve(mesh, [0, 1], distortion_weights=array.array('d', [1.0] * 6))
+        self.assertAlmostEqual(sum(result.cone_angles), 4 * math.pi, places=9)
+
+    def test_disk_with_fixed_boundary(self):
+        n = 6
+        mesh = bumpy_grid(n)
+        center = (n // 2) * (n + 1) + n // 2
+        result = self.solve(mesh, [center])
+        self.assertEqual(result.report["status"], "converged")
+        self.assertEqual(len(result.log_scale), (n + 1) ** 2)
+        for i in range(n + 1):
+            for j in range(n + 1):
+                if i in (0, n) or j in (0, n):
+                    self.assertEqual(result.log_scale[i * (n + 1) + j], 0.0)
+        self.assertTrue(any(abs(u) > 1e-6 for u in result.log_scale))
+        for boundary in ("free", "convex", "penalized"):
+            other = self.solve(mesh, [center], boundary=boundary)
+            self.assertEqual(len(other.log_scale), (n + 1) ** 2, boundary)
+            self.assertEqual(len(other.boundary_curvature), (n + 1) ** 2, boundary)
+        # An optimized boundary has less distortion than the fixed one.
+        free = self.solve(mesh, [center], boundary="free")
+        self.assertLessEqual(free.report["distortion"], result.report["distortion"] + 1e-12)
+
+    def test_lambda_changes_only_the_penalized_boundary(self):
+        n = 6
+        mesh = bumpy_grid(n)
+        center = (n // 2) * (n + 1) + n // 2
+
+        def total_curvature(result):
+            return sum(abs(x) for x in result.boundary_curvature)
+
+        cheap = self.solve(mesh, [center], boundary="penalized", lambda_=1e-4)
+        dear = self.solve(mesh, [center], boundary="penalized", lambda_=10.0)
+        self.assertGreater(total_curvature(cheap), total_curvature(dear) + 1e-6)
+        self.assertNotEqual(cheap.report["objective"], dear.report["objective"])
+        free_a = self.solve(mesh, [center], boundary="free", lambda_=1e-4)
+        free_b = self.solve(mesh, [center], boundary="free", lambda_=10.0)
+        for x, y in zip(free_a.log_scale, free_b.log_scale):
+            self.assertAlmostEqual(x, y, places=9)
+
+    def test_invalid_lambda(self):
+        for bad in (-0.5, float("nan"), float("inf")):
+            with self.assertRaisesRegex(ddg_tools.InputError, r"^lambda_ = "):
+                self.solve(octahedron(), [0], lambda_=bad)
+
+    def test_disconnected_union_equals_the_parts(self):
+        first = octahedron()
+        second = octahedron(offset=(5.0, 0.0, 0.0), first=6)
+        union = (first[0] + second[0], first[1] + second[1])
+        result = self.solve(union, [0, 1, 6 + 2, 6 + 3, 6 + 4])
+        self.assertEqual(result.report["n_components"], 2)
+        alone_first = self.solve(first, [0, 1])
+        alone_second = self.solve(octahedron(), [2, 3, 4])
+        expected = list(alone_first.cone_angles) + list(alone_second.cone_angles)
+        for a, b in zip(result.cone_angles, expected):
+            self.assertAlmostEqual(a, b, places=8)
+        self.assertAlmostEqual(sum(result.cone_angles), 8 * math.pi, places=8)
+
+    def test_input_errors(self):
+        mesh = octahedron()
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^cone_vertices\[1\] = 6 is out of range"):
+            self.solve(mesh, [0, 6])
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^cone_vertices: .*more than once"):
+            self.solve(mesh, [0, 1, 0])
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^cone_vertices: .*boundary"):
+            self.solve(bumpy_grid(4), [0])
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^cone_vertices: .*prescribed"):
+            self.solve(mesh, [0], prescribed_vertices=array.array('i', [0]),
+                       prescribed_angles=array.array('d', [0.5]))
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^boundary = \"round\""):
+            self.solve(mesh, [0], boundary="round")
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^method = \"magic\""):
+            self.solve(mesh, [0], method="magic")
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^cone_vertices: .*closed"):
+            self.solve(mesh, [])
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^distortion_weights: got 5"):
+            self.solve(mesh, [0], distortion_weights=array.array('d', [1.0] * 5))
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^lower_bounds"):
+            self.solve(mesh, [0], lower_bounds=array.array('d', [1.0] * 6))
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^prescribed_vertices has 1"):
+            self.solve(mesh, [0], prescribed_vertices=array.array('i', [1]))
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^positions: 4 items is not a multiple of 3"):
+            ddg_tools.reoptimize_cones(array.array('d', [0.0] * 4), array.array('i', [0, 1, 2]),
+                                       array.array('i', [0]))
+        with self.assertRaisesRegex(ddg_tools.InputError, r"^triangles\[2\] = 9 is out of range"):
+            ddg_tools.reoptimize_cones(array.array('d', mesh[0]), array.array('i', [0, 1, 9]),
+                                       array.array('i', [0]))
+        with self.assertRaises(TypeError):
+            ddg_tools.reoptimize_cones(array.array('d', mesh[0]), array.array('i', mesh[1]), 3)
+
+    def test_mesh_errors(self):
+        positions, corner_vertices, _, _ = three_fins()
+        with self.assertRaisesRegex(ddg_tools.MeshError, "3 faces"):
+            ddg_tools.reoptimize_cones(array.array('d', positions),
+                                       array.array('i', corner_vertices),
+                                       array.array('i', []))
+        collinear = array.array('d', [0, 0, 0, 1, 0, 0, 2, 0, 0])
+        with self.assertRaises(ddg_tools.MeshError):
+            ddg_tools.reoptimize_cones(collinear, array.array('i', [0, 1, 2]), array.array('i', []))
+        positions, triangles = octahedron()
+        with self.assertRaises(ddg_tools.MeshError):
+            ddg_tools.reoptimize_cones(array.array('d', positions + [9.0, 9.0, 9.0]),
+                                       array.array('i', triangles), array.array('i', [0]))
+
+
 if __name__ == "__main__":
     print("python", sys.version.split()[0], "| numpy",
           numpy.__version__ if numpy is not None else "absent",
