@@ -2400,6 +2400,7 @@ struct Row {
     angles: Option<(f64, f64, usize)>,
     cut_length: f64,
     merged: usize,
+    excursions: usize,
     displacement: f64,
 }
 
@@ -2412,6 +2413,27 @@ fn run_chain(
     steps: usize,
     clusters: Option<usize>,
     alpha: Option<f64>,
+) -> Row {
+    run_chain_at(
+        name,
+        mesh,
+        tri,
+        steps,
+        clusters,
+        alpha,
+        DEFAULT_CROSSING_OFFSET,
+    )
+}
+
+/// [`run_chain`] with the crossing offset of the description given.
+fn run_chain_at(
+    name: &str,
+    mesh: &PolygonMesh,
+    tri: &Triangulation,
+    steps: usize,
+    clusters: Option<usize>,
+    alpha: Option<f64>,
+    crossing_offset: f64,
 ) -> Row {
     let area = triangulated_area(mesh);
     let center = {
@@ -2460,7 +2482,7 @@ fn run_chain(
     let seconds_steps = t1.elapsed().as_secs_f64();
     let (_, result) = session
         .unwrap(
-            DEFAULT_CROSSING_OFFSET,
+            crossing_offset,
             &CutUnwrapOptions {
                 cones: ConePlacement::Optimal,
                 ..Default::default()
@@ -2468,9 +2490,7 @@ fn run_chain(
         )
         .unwrap_or_else(|e| panic!("{name} {tri:?}: {e}"));
     let rep = &result.map.report;
-    let (cut, described) = session
-        .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
-        .unwrap();
+    let (cut, described) = session.describe_cut_with_report(crossing_offset).unwrap();
     let cut_length: f64 = cut
         .lines()
         .iter()
@@ -2507,6 +2527,7 @@ fn run_chain(
             .map(|r| (r.min_angle, r.max_angle, r.n_below_bound)),
         cut_length,
         merged: described.n_merged_nodes,
+        excursions: described.n_removed_excursions,
         displacement: described.max_displacement_relative,
     }
 }
@@ -2744,7 +2765,10 @@ fn the_optimal_delaunay_option_runs_the_chain_and_is_stored() {
         radius: 0.9,
     };
     let session = two_session(&mesh, &[], &start, &tri);
-    let report = session.intrinsic_report().expect("an intrinsic session").clone();
+    let report = session
+        .intrinsic_report()
+        .expect("an intrinsic session")
+        .clone();
     assert!(report.n_optimized > 0);
     assert!(report.n_added >= report.n_optimized);
     let (status, iterations, _) = report.optimal_delaunay.expect("it ran");
@@ -2774,6 +2798,77 @@ fn the_optimal_delaunay_option_runs_the_chain_and_is_stored() {
         ..IntrinsicOptions::flips_only()
     });
     assert!(Session::with_triangulation(&mesh.input(), 2, &start, FlowKind::Auto, &bad).is_err());
+}
+
+/// A large cut offset (`min_offset` and the crossing offset 0.2, as the Blender add-on's Cut
+/// Offset sets them) with the optimal Delaunay triangulation: the Blender test of the spot atlas
+/// found 4 flipped UV triangles. The cut comes back from that triangulation with many more bends
+/// than from flips, the rule of `min_offset` moves every point of it at least 0.2 from the sides
+/// of its triangle, and the merge of bends measured its displacement at the moved places: a bend
+/// the rule had pushed away from its chord counted the rule's motion as the merge's and stayed,
+/// and the unwrap inverted parts at it. Before the fix: 4 (odt) and 9 (refined and odt) on the
+/// sphere, 6, 7 and 12 on the spot atlas below. Measured at the places where the way back put
+/// the points, and with the excursions across a side that the rule moved removed (the spot
+/// atlas, weight 10, refined and odt), none.
+#[test]
+fn a_large_cut_offset_with_optimal_delaunay_flips_nothing() {
+    let offset = 0.2;
+    let odt = IntrinsicOptions {
+        min_offset: offset,
+        ..IntrinsicOptions::optimized()
+    };
+    let refined_odt = IntrinsicOptions {
+        min_offset: offset,
+        optimal_delaunay: odt.optimal_delaunay,
+        ..IntrinsicOptions::refined()
+    };
+    let mesh = uv_sphere(32, 16, 1.0).unwrap();
+    let steps = if debug_build() { 3 } else { 40 };
+    for (label, o) in [("odt", odt), ("refined+odt", refined_odt)] {
+        let tri = Triangulation::Intrinsic(o);
+        let row = run_chain_at(
+            &format!("sphere/{label}"),
+            &mesh,
+            &tri,
+            steps,
+            None,
+            None,
+            offset,
+        );
+        println!("ROW {row:?}");
+        assert_eq!(row.flipped, 0, "{}", row.label);
+        assert!(row.merged > 0, "{}", row.label);
+        assert!(row.displacement <= o.merge_tolerance, "{row:?}");
+    }
+    if debug_build() {
+        println!("the spot atlas: release builds only");
+        return;
+    }
+    let Some(spot) = load_polygons("spot_quadrangulated.obj") else {
+        return;
+    };
+    let mut excursions = 0;
+    for (label, o, alpha) in [
+        ("odt, weight 2", odt, 2.0),
+        ("refined+odt, weight 2", refined_odt, 2.0),
+        ("refined+odt, weight 10", refined_odt, 10.0),
+    ] {
+        let tri = Triangulation::Intrinsic(o);
+        let row = run_chain_at(
+            &format!("spot atlas/{label}"),
+            &spot,
+            &tri,
+            60,
+            Some(8),
+            Some(alpha),
+            offset,
+        );
+        println!("ROW {row:?}");
+        assert_eq!(row.flipped, 0, "{}", row.label);
+        assert!(row.displacement <= o.merge_tolerance, "{row:?}");
+        excursions += row.excursions;
+    }
+    assert!(excursions > 0);
 }
 
 /// The options survive the bytes of a state, and a tolerance out of range is refused.

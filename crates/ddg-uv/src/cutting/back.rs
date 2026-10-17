@@ -95,9 +95,12 @@ impl Session {
         };
 
         // Places of the nodes and of the crossings, moved off vertices and sides.
+        // `found` keeps every place where the way back put it: the merge of bends measures how
+        // far it moves the cut from there, not from the places the rule for the points moved.
         let mut n_clamped = cut.n_clamped;
         let mut places: Vec<Place> = Vec::with_capacity(back.nodes.len());
-        let mut clamp = |point: SurfacePoint, what: &str| -> Result<Place, CuttingError> {
+        let mut found: Vec<Place> = Vec::with_capacity(back.nodes.len());
+        let mut clamp = |point: SurfacePoint, what: &str| -> Result<(Place, Place), CuttingError> {
             match point {
                 SurfacePoint::Vertex(v) => Err(CuttingError::Unsupported {
                     what: format!(
@@ -109,19 +112,21 @@ impl Session {
                 SurfacePoint::Edge { edge, t } => {
                     let c = t.clamp(eps, 1.0 - eps);
                     n_clamped += usize::from(c != t);
-                    Ok(Place::Edge { edge, t: c })
+                    Ok((Place::Edge { edge, t }, Place::Edge { edge, t: c }))
                 }
                 SurfacePoint::Face { face, bary } => {
                     let raised = bary.map(|b| b.max(eps));
                     let sum: f64 = raised.iter().sum();
                     let c = raised.map(|b| b / sum);
                     n_clamped += usize::from(raised != bary);
-                    Ok(Place::Face { face, bary: c })
+                    Ok((Place::Face { face, bary }, Place::Face { face, bary: c }))
                 }
             }
         };
         for (i, &p) in back.nodes.iter().enumerate() {
-            places.push(clamp(p, &format!("node {i}"))?);
+            let (at, moved) = clamp(p, &format!("node {i}"))?;
+            found.push(at);
+            places.push(moved);
         }
         let mut pieces: Vec<Piece> = Vec::new();
         for (s, path) in back.paths.iter().enumerate() {
@@ -132,7 +137,9 @@ impl Session {
                 let next = if j + 1 == path.faces.len() {
                     last
                 } else {
-                    places.push(clamp(path.points[j + 1], "a crossing of an edge")?);
+                    let (at, moved) = clamp(path.points[j + 1], "a crossing of an edge")?;
+                    found.push(at);
+                    places.push(moved);
                     (places.len() - 1) as u32
                 };
                 pieces.push(Piece {
@@ -152,7 +159,13 @@ impl Session {
             ..DescribeReport::default()
         };
         if t.options.merge_tolerance > 0.0 {
-            self.merge_bends(&places, &mut pieces, t.options.merge_tolerance, &mut report);
+            self.merge_bends(
+                &places,
+                &found,
+                &mut pieces,
+                t.options.merge_tolerance,
+                &mut report,
+            );
         }
         let mut used_node = vec![false; places.len()];
         for p in &pieces {

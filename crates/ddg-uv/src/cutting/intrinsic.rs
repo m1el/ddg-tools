@@ -80,6 +80,15 @@ pub struct IntrinsicOptions {
     /// of the unwrap that bends close to a vertex of the mesh caused (5 on the refined sphere,
     /// 1 to 16 on the atlas of spot with flips or refinement, 1 on camelbad). `0` switches it off. The number of bends
     /// removed and the largest displacement are in [`DescribeReport`](super::DescribeReport).
+    ///
+    /// The displacement is measured on the cut as the way back found it, before the rule of
+    /// [`min_offset`](Self::min_offset) moves its points (which moves them by its own amount).
+    /// Under the same tolerance an *excursion* is removed when that rule moved one of its points:
+    /// a bend whose two pieces end on one side of its triangle (the cut crosses the side, bends
+    /// inside and crosses back) is replaced, with its two crossings, by a piece in the
+    /// neighbouring triangle. Both matter for a large `min_offset` (0.2: the rule would turn such
+    /// bends into spikes; with the optimal Delaunay triangulation, which brings many more bends,
+    /// they flipped 4 to 15 UV triangles per atlas of spot; see the crate README).
     pub merge_tolerance: f64,
 }
 
