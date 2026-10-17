@@ -305,6 +305,20 @@ open DdgProofs
 #print axioms fitNorm_eq_zero_iff
 #print axioms fit_similarity_optimal
 #print axioms fit_similarity_unique
+-- D. Boundary First Flattening: map to the sphere (Bff/Sphere.lean)
+#print axioms invStereo_mem_sphere
+#print axioms invStereo_ne_south
+#print axioms stereo_invStereo
+#print axioms invStereo_stereo
+#print axioms hasDerivAt_invStereo_X
+#print axioms hasDerivAt_invStereo_Y
+#print axioms stereoJac_orthogonal
+#print axioms stereoJac_norm
+#print axioms stereoJac_orientation
+#print axioms normSqAdd_pos
+#print axioms sphereInversion_mem_sphere
+#print axioms sphereInversion_zero
+#print axioms hasDerivAt_sphereInversion
 -- The canonical problem of a mesh (MeshProblem.lean)
 #print axioms TriMesh.coneProblem_stateResidual
 #print axioms TriMesh.coneProblem_adjoint

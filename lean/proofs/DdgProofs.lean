@@ -21,6 +21,7 @@ import DdgProofs.Bff.Laplace
 import DdgProofs.Bff.Cut
 import DdgProofs.Bff.Curve
 import DdgProofs.Bff.Quality
+import DdgProofs.Bff.Sphere
 import DdgProofs.MeshProblem
 import DdgProofs.BoundaryProblem
 import DdgProofs.FactorOnce

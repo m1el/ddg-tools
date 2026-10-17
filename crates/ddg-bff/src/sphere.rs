@@ -631,6 +631,7 @@ pub fn sphere_inversion(c: [f64; 3], x: [f64; 3]) -> [f64; 3] {
 /// [`BffError::NonFiniteInput`] for options out of their domain or a non-finite position.
 ///
 /// [formula: mobius-centering-jacobian]
+/// [formula: mobius-centering-existence]
 /// [formula: mobius-sphere-inversion]
 pub fn mobius_center(
     mesh: &TriMesh,
