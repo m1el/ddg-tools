@@ -38,7 +38,10 @@ what the cut flow needs to run on an intrinsic triangulation (§6).
 (Vertex repositioning and the optimal Delaunay triangulation were "later" in the first version
 of this file and were added on 2026-10-14.)
 
-Out: the applications of the paper's Sec. 5.
+Out: the applications of the paper's Sec. 5; they live in the crate `ddg-intrinsic-apps` (its
+`SPEC.md`, decisions N30 to N49). For its adaptive refinement (Sec. 5.4) this crate gained
+`refine_with(options, extra)` on 2026-10-17: Delaunay refinement with an extra per-face
+criterion; `refine` is `refine_with` with a criterion that is always false, bit for bit.
 
 ## 3. Data model
 
