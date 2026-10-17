@@ -13,6 +13,18 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
 ## Landed since the first version of this file
 
+* **Disconnected meshes in the cones solver** (2026-10-17, `crates/ddg-optimal-cones`, README
+  "Disconnected meshes"): every entry point accepts several components and returns the exact
+  solution of the canonical problem on the whole mesh (masses divided by the total area, one
+  constant of `u` and one Gauss–Bonnet sum per closed component), solved per component and
+  certified as a whole, with a report per component. Lean: `component-separation`,
+  `component-lambda-rescaling` (`DdgProofs/Components.lean`).
+* **`reoptimize_cones`** (2026-10-17, same crate, README "Re-optimizing given cones"; Python
+  `ddg_tools.reoptimize_cones`): the least-distortion angles for given cone positions, by a direct
+  solve of the linear optimality system or, up to 32 free sites, the reduced system of the
+  factor-once method; the generic solver when a bound is active. On the 23 published cone files
+  it never gives more distortion than the published angles.
+
 * **The optimal Delaunay variant** of the intrinsic triangulations paper (2026-10-14,
   `crates/ddg-intrinsic`, SPEC N19 to N25, README "The optimal Delaunay triangulation"):
   `move_vertex` (Alg. 10: an inserted vertex inside its flat star, an exact test of the star
@@ -221,6 +233,19 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
   `blender/tests/bench_overhead.py` does not finish within ten minutes.
 * The penalty strength of the Flow operator is multiplied by the length weight (a choice made
   here, stated in the tooltip).
+
+* `ddg-uv` solves every piece (component after cutting the seams) with its masses normalized by
+  the piece's own area and the user's `λ`, which is the whole cut mesh's canonical problem with
+  `λ · A_c / A` per piece: every chart gets the cones it would get alone. The cones solver now
+  solves disconnected meshes with the whole-area normalization; whether the pipeline should
+  switch (fewer cones on small charts) is not decided (`crates/ddg-optimal-cones/README.md`,
+  "Disconnected meshes").
+* Blender has no operator for re-optimizing given cones. The Unwrap operator's "pinned" vertex
+  group (cones at no cost) plus a "forbidden" group holding every other vertex already asks the
+  pipeline for that problem (with the pipeline's angle bounds: positive only by default, capped
+  below `2π`), and then cuts and flattens with the result; a "cones only at the pinned vertices"
+  option would build the forbidden set itself. Not added: the add-on's job is the UV map, and
+  angles alone have no place in it.
 
 ## Housekeeping
 
