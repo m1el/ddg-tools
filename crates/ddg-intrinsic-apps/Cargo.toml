@@ -1,0 +1,12 @@
+[package]
+name = "ddg-intrinsic-apps"
+description = "Applications of intrinsic triangulations (Sharp, Soliman, Crane 2019, Sec. 5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ddg-core = { path = "../ddg-core" }
+ddg-intrinsic = { path = "../ddg-intrinsic" }
