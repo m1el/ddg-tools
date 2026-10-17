@@ -24,8 +24,8 @@ with a notes file saying what is done, what remains and how to resume:
   with clones of ddg-tools inside). Everything was fetched here; remove those worktrees and their
   `worktree-agent-*` branches from the demo repository once the branches above are merged.
 
-Waiting on the user: moving `master` up (it is behind `intrinsic-triangulations` by the cone
-work).
+`master` includes all of this work (moved up 2026-10-17). Waiting on the user: removing the
+three misplaced worktrees from the demo repository (29 GB).
 
 ## Scheduled
 
