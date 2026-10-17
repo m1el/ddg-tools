@@ -7,8 +7,8 @@ Applications of intrinsic triangulations, Sec. 5 of
 
 built on `ddg-intrinsic` (the signpost data structure, Delaunay flipping, Delaunay refinement,
 the optimal Delaunay triangulation, edge traces and point queries). The contract is
-[`SPEC.md`](SPEC.md) (decisions `N30` to `N39`; sections 5.1 to 5.3 here, 5.4 and 5.5 are another
-part of the crate). The paper's Sec. 5.1 to 5.3 are:
+[`SPEC.md`](SPEC.md) (decisions `N30` to `N49`, continuing those of `ddg-intrinsic`). The paper's
+Sec. 5.1 to 5.5 are:
 
 | | module | what |
 |---|---|---|
@@ -16,6 +16,8 @@ part of the crate). The paper's Sec. 5.1 to 5.3 are:
 | 5.2 | `fem` | stiffness, Galerkin and lumped mass matrices on an intrinsic triangulation; the regular 4-1 subdivision; extreme eigenvalues and condition numbers (Lanczos) |
 | 5.3 | `heat` | geodesic distance by the heat method on an intrinsic triangulation, factored once, values at input vertices, inserted vertices and any point of the input mesh |
 | — | `exact` | the exact polyhedral distance from vertices (window propagation), the ground truth of 5.3 |
+| 5.4 | `amr` | adaptive refinement: residual error estimator, bulk marking, refinement of the marked faces (`ddg_intrinsic::refine_with`), for the harmonic Green's function, the short-time heat kernel and a harmonic disk map |
+| 5.5 | `vector` | tangent fields: transport from the signposts, finite difference and finite element connection Laplacians, harmonic fields with boundary values and the vector maximum principle, smoothest `n`-direction fields and their singularities |
 
 ## Methods and papers
 
@@ -44,9 +46,21 @@ part of the crate). The paper's Sec. 5.1 to 5.3 are:
   geodesics on meshes*, ACM TOG 24(3), 2005 (the window representation); S.-Q. Xin, G.-J. Wang,
   *Improving Chen and Han's algorithm on the discrete geodesic problem*, ACM TOG 28(4), 2009 (the
   vertex filter). Written from the papers for this crate.
+- **Adaptive refinement** (Sec. 5.4). The residual estimator and the bulk marking of
+  P. Morin, R. H. Nochetto, K. G. Siebert, *Convergence of adaptive finite element methods*,
+  SIAM Review 44(4), 2002, and K. Mekchay, R. H. Nochetto, *Convergence of adaptive finite
+  element methods for general second order linear elliptic PDEs*, SIAM J. Numer. Anal. 43(5),
+  2005, as the paper's supplement (Sec. 2) describes them (with `h_T` where the supplement
+  prints the area, SPEC N47).
+- **Tangent fields** (Sec. 5.5). The finite difference connection Laplacian and the vector
+  maximum principle of N. Sharp, Y. Soliman, K. Crane, *The Vector Heat Method*, ACM TOG 38(3),
+  2019 (Sec. 5.3, 5.4); the finite element connection Laplacian and the smoothest direction
+  fields of F. Knöppel, K. Crane, U. Pinkall, P. Schröder, *Globally Optimal Direction Fields*,
+  ACM TOG 32(4), 2013 (Sec. 6, App. D; the local matrices derived anew, SPEC N43).
 
 Downloaded copies of the cited papers that are openly available are in
-`../NavigatingIntrinsicTriangulations/cited/applications-5.1-5.3/` (outside the repository).
+`../NavigatingIntrinsicTriangulations/cited/applications-5.1-5.3/` and
+`../NavigatingIntrinsicTriangulations/cited/applications-5.4-5.5/` (outside the repository).
 
 ## Use
 
@@ -56,6 +70,8 @@ use ddg_core::Geometry;
 use ddg_intrinsic::{DelaunayOptions, IntrinsicTriangulation, RefineOptions};
 use ddg_intrinsic_apps::heat::{HeatOptions, HeatSolver, HeatSource};
 use ddg_intrinsic_apps::steiner::{SteinerOptions, cut_to_disk, steiner_tree};
+use ddg_intrinsic_apps::vector::{DirectionFieldOptions, singularities, smoothest_field};
+use ddg_intrinsic_apps::amr::{AmrOptions, Problem, adaptive_solve};
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 let sphere = icosphere(3)?;
@@ -73,17 +89,34 @@ let d = solver.distance(&[HeatSource::Vertex(0)])?; // d.distances[v], input ver
 let tree = steiner_tree(&IntrinsicTriangulation::new(&mesh, &geometry)?, &SteinerOptions::default())?;
 let cut = cut_to_disk(&tree.triangulation, &tree.edges)?;
 assert!(cut.is_disk && tree.length <= tree.report.mst_length);
+
+// 5.5: the smoothest cross field on the iDT, its singularities (indices add up to 4χ).
+let mut idt = IntrinsicTriangulation::new(&mesh, &geometry)?;
+idt.flip_to_delaunay(&DelaunayOptions::default())?;
+let options = DirectionFieldOptions { n_sym: 4, ..Default::default() };
+let (field, report) = smoothest_field(&idt, &options)?;
+let sing = singularities(&idt, &field)?;
+assert_eq!(sing.index_sum, 8);
+
+// 5.4: the heat kernel of vertex 0, refined where the estimator says.
+let mut amr_tri = IntrinsicTriangulation::new(&mesh, &geometry)?;
+let problem = Problem::HeatKernel { source: 0, time: 0.01 };
+let (solution, amr_report) = adaptive_solve(&mut amr_tri, &problem, &AmrOptions { max_vertices: 5000, ..Default::default() })?;
 # Ok(())
 # }
 ```
 
 Python (`ddg_tools`, crate `ddg-py`): `geodesic_distance(positions, triangles, sources, *,
-triangulation="refine", time_factor=1.0, boundary="neumann")` and `steiner_tree(positions,
-triangles, *, intrinsic=True, steiner_points=True)`; see `crates/ddg-py/ddg_tools.pyi`.
+triangulation="refined", time_factor=1.0, boundary="neumann")`, `steiner_tree(positions,
+triangles, *, intrinsic=True, steiner_points=True)`, `smoothest_direction_field(positions,
+triangles, *, n=1, triangulation="delaunay", laplacian="fem", min_angle_degrees=25.0)` and
+`adaptive_solve(positions, triangles, problem, *, source=0, time=None, max_vertices=20000,
+bulk=0.5, min_angle_degrees=25.0)`; see `crates/ddg-py/ddg_tools.pyi`.
 
 Blender: nothing. A natural use would be the 5.1 cut as seams for a one-chart unwrap; its
 edges are intrinsic (they cross input faces), so seams along them need the cut inserted into
-the mesh first (as `ddg_uv::cutting` does for the cut flow). Not done; see the ROADMAP.
+the mesh first (as `ddg_uv::cutting` does for the cut flow). A direction field could drive
+Blender's own tools through an attribute. Not done; see the ROADMAP.
 
 ## 5.1 Steiner tree approximation
 
@@ -224,10 +257,11 @@ vertex count from the input's on: on spot's control mesh (corners of 0.17°) `κ
 the sheared torus (176°) `4.1e6` against `2.5e4` and `2.2e4`; on blub's control mesh `1.4e6`
 against `1.8e4` and `1.3e4`. That is the figure's finding ("off the chart"). Where the input
 is well shaped (bump, the jittered icosphere) the three are within a factor of two. Between iDR
-and iODT neither is better everywhere: iODT is lower in 9 of the 14 matched comparisons of the
-Galerkin column (spot, blub, the sheared square, bob at one level, bump at one level, …), iDR on
-the sheared torus at one level, bob and bump at two levels; on the sheared square the boundary
-keeps both above `1e5` (its input corners of 14° stay).
+and iODT neither is better everywhere: iODT is lower in 11 of the 14 matched comparisons of the
+Galerkin column, iDR in 3 (bob and bump at two levels, the sheared torus at one level); on the
+sheared square the boundary keeps both above `1e5` (its input corners of 14° stay). The match
+is loose in one row: on the sheared square at one level the bisection of iODT's target length
+missed the 1089 vertices of the subdivision and ended at 865 (iDR has 1165).
 
 ## 5.3 Geodesic distance
 
@@ -307,7 +341,7 @@ Where the input has bad triangles the paper's finding reproduces: camelbad 14.6 
 1.6 % on the iDT, 0.8 % after iDR with the size bound; camelbadnonuniform 22.4 %, 4.2 %, 0.85 %;
 the sheared torus 27.6 %, 4.0 %, 2.6 %. On well-shaped meshes (spot, bob, blub, face, the
 icosphere) the input is already Delaunay or nearly so and all four are within the heat method's
-own error (1 to 2 %), which shrinks only with the mesh width: refinement to an angle bound
+own error (1 to 2.3 %), which shrinks only with the mesh width: refinement to an angle bound
 alone does not change it (it adds few vertices; cf. `ddg-intrinsic` SPEC N16), the size bound
 does. The paper's "less than 1 %" after iDR is reached here with the size bound (camelbad,
 camelbadnonuniform, face, blub), not with the angle bound alone.
@@ -317,11 +351,160 @@ the iDT barely helps (60.5 % → 52.7 %): boundary edges cannot be flipped, the 
 of slivers (angles up to 161°) along the two slanted sides, and in a sliver the gradient of the
 heat is dominated by the error across it; the divergence carries that error into the whole
 domain. Refinement splits the encroached boundary edges (`ddg-intrinsic` SPEC N1) and brings the
-error to 1.4 %. The bound of `m` matters there too: with `m = 10` the iDT's far distances were
-right (a smoother field), with `m = 0.1` far worse.
+error to 1.4 %. The time factor `m` matters there too, in a check made at the far corner of
+the square only (not a table): with `m = 10` the iDT's distance there was right (a smoother
+field), with `m = 0.1` far worse.
 
 The bench `benches/heat.rs` (criterion) measures the factorization and one query on an
-icosphere, spot and camelbad, on the input, the iDT and iDR.
+icosphere, spot and camelbad, on the input, the iDT and iDR. It has not been run alone yet (a run on
+2026-10-17 was stopped: the machine was compiling a kernel); the table above was measured one
+process at a time.
+
+## 5.4 Adaptive mesh refinement
+
+"The basic idea is to use a local a posteriori error estimate as an additional refinement
+criterion in iDR [...] adaptive refinement is 2–10 times faster than uniform refinement (taking
+all computation into account)" (Fig. 19: for the same accuracy uniform iDR needs 18× the
+vertices for the harmonic Green's function and 54× for the short-time heat kernel). Fig. 20: the
+harmonic map of a disk flips triangles on a bad input, not on the iDT, and AMR "intelligently
+reduces distortion".
+
+`adaptive_solve(tri, &problem, &AmrOptions)` refines to the angle bound, then repeats: solve
+(`solve`: cotan stiffness, Galerkin mass), estimate (`estimate`: the residual indicator `η_T`
+and the oscillation of Mekchay and Nochetto, with `h_T` the diameter; SPEC N47), mark (`mark`:
+the supplement's bulk criterion with `θ = 1/2`, or Dörfler's on squares; N48), refine the marked
+faces with `IntrinsicTriangulation::refine_with` (N48). The problems (N46): the Green's function
+`Δu = δ_s − 1/|M|`, one backward Euler step `(1 + tΔ)u = δ_s` with `t` the squared mean input
+edge length, and a harmonic map onto the unit disk.
+
+Measured by `examples/amr_study.rs` (N49): relative `L²` error against a reference of about
+700 000 vertices (adaptive, then uniformly refined; a half-size reference differs from it by
+`7e-7` to `5e-4` relative), source at vertex 0 of the control meshes. For one step of the
+adaptive run near the paper's accuracy (`7e-3`), the uniform iDR with the same error
+(interpolated log–log between uniform runs):
+
+| mesh | problem | marking | error | AMR V | AMR s | uniform V | uniform s | V ratio | time ratio |
+|---|---|---|--:|--:|--:|--:|--:|--:|--:|
+| spot_control_mesh | Green | supplement | 6.87e-3 | 3533 | 0.070 | 11648 | 0.080 | 3.3 | 1.1 |
+| bob_controlmesh | Green | supplement | 6.66e-3 | 2440 | 0.046 | 45458 | 0.411 | 18.6 | 9.0 |
+| blub_control_mesh | Green | supplement | 6.48e-3 | 5088 | 0.089 | 30739 | 0.241 | 6.0 | 2.7 |
+| spot_control_mesh | Green | squares | 7.18e-3 | 5814 | 0.403 | 10503 | 0.076 | 1.8 | 0.2 |
+| spot_control_mesh | heat | supplement | 7.08e-3 | 1740 | 0.039 | 152713 | 2.169 | 87.8 | 55.3 |
+| bob_controlmesh | heat | supplement | 1.09e-2 | 1569 | 0.030 | 94375 | 1.350 | 60.2 | 45.1 |
+| blub_control_mesh | heat | supplement | 5.87e-3 | 2624 | 0.047 | 134733 | 1.886 | 51.3 | 40.4 |
+| spot_control_mesh | heat | squares | 7.16e-3 | 1758 | 0.091 | 147999 | 2.210 | 84.2 | 24.2 |
+
+(bob's heat kernel: the last adaptive step within the range of the uniform runs. *AMR s*: all
+steps of the adaptive run including the initial refinement; *uniform s*: one uniform run,
+refinement and solve. **The times are from runs made in parallel, not alone**; a single-thread
+rerun on a quiet machine is open (ROADMAP). Vertex counts and errors do not depend on it.)
+
+The heat kernel reproduces the paper (51× to 88× the vertices, against its 54×); the Green's
+function needs 3× to 19× (the paper's 18× is the upper end), and its time ratio spans 1.1× to
+9× (paper: 2–10×). The supplement's criterion (sums of indicators) beats Dörfler's on squares
+clearly for the Green's function: the squares mark few faces per step and need many more steps
+(the spot rows: 0.40 s against 0.07 s). The study prints the full table per step.
+
+Disk maps (Fig. 20), `jittered_disk` (a jittered sheared grid, 121 vertices) and `bumpy_disk`
+(a sheared height field, 169 vertices): flipped faces of the map and the conformal distortion
+`σ₁/σ₂` (area-weighted mean and 99 % quantile), AMR at its last step:
+
+| mesh | triangulation | V | L² error | flipped | mean σ₁/σ₂ | q99 σ₁/σ₂ |
+|---|---|--:|--:|--:|--:|--:|
+| jittered_disk | input | 121 | 4.6e-2 | 1 | 8.17 | 34.6 |
+| jittered_disk | iDT | 121 | 4.4e-3 | 0 | 8.39 | 37.8 |
+| jittered_disk | AMR | 20296 | 1.1e-5 | 0 | 8.38 | 35.3 |
+| bumpy_disk | input | 169 | 1.9e-2 | 0 | 2.55 | 12.7 |
+| bumpy_disk | iDT | 169 | 1.1e-2 | 0 | 2.59 | 18.1 |
+| bumpy_disk | AMR | 17435 | 8.2e-5 | 0 | 2.44 | 7.9 |
+
+The input of the jittered disk flips a face, the iDT and every AMR step do not (injective, as
+the paper says: non-negative weights and a convex boundary polygon). AMR lowers the 99 %
+quantile of the distortion on the bumpy disk (12.7 → 7.9) but not on the jittered one, where
+the distortion is that of mapping a long parallelogram onto a disk. For the same error AMR
+needs 1.1× to 1.6× fewer vertices than uniform refinement and is not faster here (time ratio
+0.5–0.8). The largest distortion grows with refinement (to about 200–490) at the corners of the
+parallelogram, where the map is singular.
+
+## 5.5 Tangent vector fields
+
+"Since our signpost data structure already maintains tangent coordinate systems across all
+operations, it is naturally suited for problems involving tangent vector fields." Fig. 21: the
+smoothest vector field with the finite element connection Laplacian of Knöppel et al. has
+Dirichlet energy 1200.2 on the input, 123.5 on the iDT, 47.0 on the iDR. Fig. 22: with
+prescribed boundary vectors, the harmonic field with the finite difference connection
+Laplacian satisfies the vector maximum principle on the iDT (every vector in the convex cone of
+its transported neighbours) and may not on the input.
+
+`connection_matrices` builds both Laplacians from the signposts (transport
+`ρ_ij = φ_ji + π − φ_ij`, SPEC N40 to N43), `smoothest_field` the smallest eigenvector by block
+inverse iteration (N44), `singularities` the indices, `harmonic_field` and
+`check_maximum_principle` the rest (N45).
+
+Smoothest fields (`examples/vector_study.rs smoothest`): energy `λ · area` (finite elements;
+the field normalized to mean square length one) on the input, the iDT and the iDR (25°):
+
+| mesh | V input / iDR | n | input | iDT | iDR | singular faces input / iDT / iDR |
+|---|--:|--:|--:|--:|--:|--:|
+| spot_control_mesh | 188 / 533 | 1 | 44.27 | 42.25 | 42.02 | 6 / 10 / 14 |
+| spot_control_mesh | | 4 | 100.23 | 96.00 | 96.34 | 54 / 46 / 54 |
+| bob_controlmesh | 334 / 374 | 1 | 17.66 | 17.48 | 17.58 | 2 / 2 / 2 |
+| spot_triangulated | 2930 / 3185 | 1 | 30.45 | 30.42 | 30.43 | 8 / 8 / 8 |
+| bob_tri | 5344 / 5437 | 1 | 16.76 | 16.76 | 16.77 | 2 / 2 / 2 |
+| blub_triangulated | 7106 / 8877 | 1 | 30.60 | 30.59 | 30.63 | 8 / 8 / 8 |
+| bunny | 14290 / 14290 | 1 | 25.49 | 25.49 | 25.49 | 4 / 4 / 4 |
+| cow1 | 15049 / 15627 | 1 | 14.83 | 14.83 | 14.83 | 9 / 9 / 9 |
+| airplane | 2349 / 3558 | 1 | 24.66 | 24.53 | 24.29 | 9 / 9 / 9 |
+| camelbad | 11392 / 15561 | 1 | 20.99 | 20.77 | 20.78 | 1 / 1 / 1 |
+| camelbadnonuniform | 9092 / 12848 | 1 | 21.39 | 20.92 | 20.61 | 1 / 1 / 3 |
+| camelshotnoise | 11513 / 17173 | 1 | 60.85 | 58.59 | 34.55 | 111 / 100 / 39 |
+| camelshotnoise | | 4 | 86.26 | 82.93 | 50.66 | 143 / 188 / 141 |
+| camel_noise2 | 11381 / 19749 | 1 | 154.28 | 146.29 | 159.70 | 13 / 17 / 15 |
+
+On a closed surface the indices add up to `nχ` on every triangulation (spot 2, 4, 8 for
+`n = 1, 2, 4`; bob 0); on a surface with boundary the sum is not a topological invariant and
+changes with the triangulation. The block solver converged on every run (16 to 64 iterations).
+A round sphere gives `λ ≈ n` as in the smooth case (`tests/vector.rs`). Times per field were
+0.01 s (spot's control mesh) to 4.6 s (the bunny's cross field) in runs made in parallel; a
+single-thread rerun is open.
+
+Fig. 21's tenfold drop does not appear on these meshes: where the input is well shaped (spot,
+bob, blub, bunny, cow) the three energies agree within 1 %, and on the bad camels the iDT
+lowers the energy by 1–5 %. The one large drop is on the shot-noise camel at iDR (`n = 1`:
+60.9 → 58.6 → 34.6, 43 % below the input), whose spikes the refinement resolves; on
+camel_noise2 iDR raises the energy above the input (146 → 160) while adding 70 % vertices. The
+mesh of Fig. 21 is not in the data set, so its numbers were not reproduced; the paper itself
+notes that the iDT need not minimize the vector Dirichlet energy.
+
+Harmonic fields with the inward normal on the boundary (`examples/vector_study.rs harmonic`,
+finite differences as in the paper; `sheared:n:shear:jitter:seed` is an `n × n` grid of the
+unit square, jittered and sheared): negative cotan weights of the triangulation, interior
+vertices checked, vertices outside the cone of their neighbours, and the smallest margin
+(radians; N45):
+
+| mesh | triangulation | V | negative weights | checked | outside the cone | min margin |
+|---|---|--:|--:|--:|--:|--:|
+| sheared 12, shear 1.5 | input | 169 | 133 | 121 | 0 | 0.719 |
+| | iDT | 169 | 0 | 121 | 0 | 0.417 |
+| sheared 12, shear 4 | input | 169 | 131 | 121 | 10 | −0.120 |
+| | iDT | 169 | 0 | 121 | 0 | 0.000 |
+| | iDR | 454 | 1 | 257 | 0 | 0.000 |
+| sheared 16, shear 6 | input | 289 | 248 | 225 | 11 | −0.040 |
+| | iDT | 289 | 0 | 225 | 0 | 0.000 |
+| | iDR | 966 | 5 | 579 | 0 | 0.000 |
+| sheared 20, shear 8 | input | 441 | 361 | 361 | 12 | −0.016 |
+| | iDT | 441 | 0 | 361 | 0 | 0.000 |
+| | iDR | 1613 | 8 | 964 | 0 | 0.000 |
+| bump | input = iDT = iDR | 3329 | 0 | 3201 | 0 | 2.559 |
+| face | input | 13746 | 6539 | 13406 | 0 | 1.996 |
+| | iDT | 13746 | 0 | 13406 | 0 | 2.344 |
+| | iDR | 13850 | 0 | 13466 | 0 | 2.298 |
+
+The maximum principle fails on the strongly sheared inputs (10–12 vertices; 8–17 with the
+finite element Laplacian) and holds on every iDT and iDR, as Fig. 22 shows. A margin of `0.000`
+is a vector parallel to a neighbour's; the few "negative" weights of the iDR are `−1e-15` and
+smaller, rounding. It holds on the face's input too, despite 6539 negative weights: the
+condition is sufficient, not necessary.
 
 ## Verification
 
@@ -354,11 +537,35 @@ icosphere, spot and camelbad, on the input, the iDT and iDR.
   its edge (`1e-8`); on a torus the cut has Euler characteristic −1; the intrinsic trees are not
   longer than the MST of the same triangulation, which is not longer than the extrinsic MST;
   with boundary (a grid, an annulus) the cut is a disk.
+- `tests/amr.rs`: on a flat disk bounded by a regular polygon on the unit circle the harmonic
+  disk map is a rotation, reproduced exactly, and the estimator vanishes (not on a curved
+  disk); the estimator of a smooth solution decreases under uniform refinement; the Green's
+  function has mean zero and solves its system, one backward Euler step conserves the
+  integral; the marked faces carry the bulk fraction and are the largest; `refine_with` with
+  nothing marked is `refine` bit for bit, and every marked face is refined; the adaptive
+  solution converges to a fine uniform reference with fewer vertices than uniform refinement
+  on a localized problem; the disk map is injective on the iDT (Tutte) and after adaptive
+  refinement.
+- `tests/vector.rs`: on a flat mesh the transport is the change of frame, every face has
+  holonomy zero, and the harmonic vector field is the scalar harmonic function in each
+  Cartesian component; the 3D output of a flat field is the field in the plane; both connection
+  Laplacians are Hermitian, the finite element one positive semidefinite on every
+  triangulation, the finite difference one on the iDT; face holonomies add up to `2πχ` (closed)
+  or the interior defects (with boundary); smoothest `n`-fields on spheres have index sum `2n`,
+  and on a round sphere the minimal number of singularities; the vector maximum principle holds
+  on the iDT; boundary values are interpolated along the boundary (a constant field on a flat
+  domain stays constant). Unit tests of `vector/knoeppel.rs`: Knöppel's mass entry and
+  diagonal, the flat limit (cotan matrix), the nine local entries against a quadrature of the
+  model; of `vector/eigen.rs`: the Jacobi eigensolver of the Rayleigh–Ritz step.
 - Formula tags (`scripts/check-formulas.sh`): `app-heat-gradient`, `app-heat-divergence`,
   `app-fem-galerkin-mass`, `app-fem-midpoint-subdivision` are machine-checked
-  (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`); `app-steiner-fermat-point` is cited
-  (`lean/proofs/CITED.md`); the stiffness matrix is `cotan-fem-stiffness` (cited), the Laplacian
-  `cotan-laplacian`.
+  (`lean/proofs/DdgProofs/IntrinsicApps/HeatFem.lean`), as are `app-vector-face-holonomy`,
+  `app-vector-fd-connection-laplacian`, `app-amr-map-distortion`
+  (`lean/proofs/DdgProofs/Intrinsic/AppsAmrVector.lean`); `app-steiner-fermat-point`,
+  `app-vector-transport`, `app-vector-fem-connection-laplacian`, `app-vector-singularity-index`,
+  `app-vector-maximum-principle`, `app-amr-edge-flux`, `app-amr-residual-estimator`,
+  `app-amr-bulk-marking` are cited (`lean/proofs/CITED.md`); the stiffness matrix is
+  `cotan-fem-stiffness` (cited), the Laplacian `cotan-laplacian`.
 
 ## Reproducing the tables
 
@@ -368,6 +575,17 @@ B=target/release/examples/apps_study
 ls MESHES | xargs -P 16 -I{} sh -c "$B steiner {} > runs_tmp/study-steiner-\$(basename {} .obj).log"
 ls MESHES | xargs -P 16 -I{} sh -c "$B fem {} > runs_tmp/study-fem-\$(basename {} .obj).log"
 for m in MESHES; do $B heat $m > runs_tmp/study-heat-$(basename $m .obj).log; done  # alone: timings
+```
+
+Sec. 5.4 and 5.5, one process at a time (the timings are single-thread):
+
+```text
+B=target/release/examples
+$B/amr_study models/spot/spot/spot_control_mesh.obj green     # also heat, --squares; bob, blub
+$B/amr_study jittered_disk disk                                # also bumpy_disk
+$B/vector_study smoothest MESHES...
+$B/vector_study harmonic sheared:12:4:0.45:2 ... MESHES...
+cargo bench -p ddg-intrinsic-apps --bench heat
 ```
 
 The meshes: `data/models/{spot,bob,blub}/…` (triangulated and control meshes),
