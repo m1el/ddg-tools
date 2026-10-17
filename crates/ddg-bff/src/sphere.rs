@@ -894,8 +894,11 @@ mod tests {
             let p = inverse_stereographic(w);
             assert!((dot(p, p) - 1.0).abs() < 1e-15);
             let back = stereographic(p);
-            assert!((back[0] - w[0]).abs() < 1e-12 * (1.0 + w[0].abs()));
-            assert!((back[1] - w[1]).abs() < 1e-12 * (1.0 + w[1].abs()));
+            // `1 + z = 2 / (1 + |w|²)` is computed by cancellation near the south pole, so the
+            // round trip loses a factor `1 + |w|²` of the rounding error.
+            let tol = 1e-15 * (1.0 + w[0] * w[0] + w[1] * w[1]);
+            assert!((back[0] - w[0]).abs() < tol * (1.0 + w[0].abs()));
+            assert!((back[1] - w[1]).abs() < tol * (1.0 + w[1].abs()));
         }
         assert_eq!(inverse_stereographic([0.0, 0.0]), [0.0, 0.0, 1.0]);
     }
