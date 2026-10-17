@@ -184,8 +184,11 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
   Dirichlet; the reference also run to rest; its UV maps measured); tables in
   `crates/ddg-variational-cuts/README.md`, "Comparison with the authors' program". Measured by
   the flattening of each cut, we are below the reference after 300 steps everywhere (4–14 %) and
-  below the reference at rest on sphere, bob and blub (2–3 %), but **2.2 % above it on spot**
-  (its longer cut with less distortion); we did not start our flow from its converged cut.
+  below the reference at rest on sphere, bob and blub (2–3 %), but 2.2 % above it on spot.
+  Started from the reference's cut at rest, our flow ends 0.4–5 % below it (spot 3–4.5 %; spot,
+  bob, blub; both length weights, stage sets and triangulations) and 5–8 % below our own spot
+  runs: the gap was a local minimum. Open: our start from 8 clusters of normals stops in worse basins than the
+  reference's long runs; the energy is not monotone along a run (single steps rise, up to 4 %).
 * The reference's Hencky value is about 10³ times `∫u²` on the unit-area surface (930–1110
   against its own UV map; identical under scaling, unchanged under 1:4 subdivision). The factor
   itself is not explained from outside; the length-weight correspondence still uses 900 (with

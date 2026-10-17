@@ -719,7 +719,9 @@ What the tables say:
   **spot the reference at rest is 2.2 % below our best run** (8.518 against 8.714): its cut is
   longer (9.79 against our 9.60) with less distortion (`1.27·10⁻³` against `1.61·10⁻³`) and
   30 charts against our 32. In our energy we are below it on all four (3 % on spot, 9–19 %
-  elsewhere), but there the transfer of its cut costs it more than these differences.
+  elsewhere), but there the transfer of its cut costs it more than these differences. Started
+  from its cut, our flow goes 0.4–5 % below it (3–4.5 % on spot; below): the gap on spot is a
+  local minimum.
 * **D22–D31.** Spot with the regions stages is the run of D26: after D22 it rose to
   `1.82·10⁻²` in 26 steps; now it descends to `8.71·10⁻³` (−52 %) and stops by D27. The other
   regions-stage runs end 0.4–6 % lower than after D22 (sphere 0.4 %, bob 0.8 %, blub 5.6 %); the default
@@ -734,6 +736,37 @@ What the tables say:
 * **Speed.** Ours comes to rest in 1–9 s on one thread; the reference takes 23–45 s for 300
   steps and 3 300 to 8 300 steps (4–17 minutes of wall clock, four instances at a time) to come
   to rest.
+
+**Our flow started from the reference's cut at rest.** Its charts were carried to the input mesh
+as face labels (as for the evaluation above) and our flow started from them (`Start::PolygonLabels`),
+both stage sets, both triangulations, `α_L = 7.4·10⁻⁴` (factor 900) and `6.67·10⁻⁴` (factor
+1 000), the default stop rule, and also 1 000 steps with the stop rule off. Flattening yardstick,
+×10⁻³, caller's triangles / intrinsic (the start is the staircase of the transfer, which costs
+6–10 % against the reference's own UV map):
+
+| shape, `α_L` | reference at rest (its UVs) | start (transferred) | ours from it, regions | ours from it, default | regions, 1 000 steps | ours from 8 clusters, best |
+|---|---|---|---|---|---|---|
+| spot, `7.4·10⁻⁴` | 8.518 | 9.075 / 9.038 | 8.255 / 8.257 | **8.155** / 8.165 | 8.014 / 8.035 | 8.714 |
+| spot, `6.67·10⁻⁴` | 7.800 | 8.320 / 8.288 | 7.571 / 7.557 | **7.460** / 7.476 | 7.401 / 7.394 | 8.072 |
+| bob, `7.4·10⁻⁴` | 7.232 | 7.788 / 7.744 | 6.902 / 6.900 | 6.926 / **6.853** | 6.857 / 6.860 | 7.073 |
+| bob, `6.67·10⁻⁴` | 6.644 | 7.156 / 7.116 | **6.318** / 6.393 | 6.418 / 6.418 | 6.307 / 6.316 | 6.506 |
+| blub, `7.4·10⁻⁴` | 6.321 | 6.978 / 6.952 | 6.240 / **6.111** | 6.240 / 6.237 | 5.949 / 5.928 | 6.170 |
+| blub, `6.67·10⁻⁴` | 5.772 | 6.396 / 6.374 | 5.704 / 5.697 | 5.749 / **5.673** | 5.410 / 5.455 | 5.661 |
+
+From the reference's cut our flow goes below it with the stop rule, by 3–4.5 % on spot, 3.4–5.2 %
+on bob and 0.4–3.3 % on blub, and below our own runs from 8 clusters on spot (by 5–8 %) and bob
+(1.4–3 %); on blub it ends within −1 % to +1.6 % of them with the stop rule and 4 % below them
+after 1 000 steps. It stays near the reference's cut: 1.5–6 % of
+the area changes region, the cut moves by 0.2–0.5 mean edge lengths on average and by less than
+2 edges at 95 % of its points (spot: 30 charts → 27, cut length 10.29 → 9.2–9.4). So the gap on
+spot was a local minimum: our runs from clusters of normals stop in a worse basin than the
+reference's 5 000 steps find, and our energy and discretization agree with the reference that its
+basin is better. The energy is not monotone along these runs: with the stop rule 5–46 steps rise
+(most by less than 0.5 %, at most 4.4 %), and at rest about half of the steps rise slightly while the
+energy keeps creeping down (the column "regions, 1 000 steps"). The runs of 8 clusters were rerun at
+`6.67·10⁻⁴` for the last column. Pictures: `runs_tmp/blackbox/pics_2026-10-17/from_reference_<shape>.png`
+(rows: the reference at rest, the transferred start, ours with the default stages, ours with the
+regions stages after 1 000 steps).
 
 **Convergence of the reference.** The reference was driven in batches of 1 000 more steps until
 the mean of its objective over the last 100 steps changed by less than 0.02 % between batches
@@ -799,8 +832,8 @@ distortion the energy measures. Our flattening with optimized boundary values (`
 Optimized`) has 2 to 6 times less area distortion on the same cut but flips triangles
 per atlas (11 to 87 on these 14).
 
-**Not explained or not done.** Where the factor of about 10³ comes from. Why the reference at rest
-beats us on spot by flattening; we did not start our flow from its converged cut. The reference's
+**Not explained or not done.** Where the factor of about 10³ comes from. Why our runs from
+clusters of normals end in worse basins than the reference's long runs (spot). The reference's
 Dirichlet runs never come to rest with its default step; its line search option and other step
 sizes were not tried. Its "use local scale" options, symmetry, area and visibility terms were not
 compared. Its times are with a GUI that renders every frame in software.
