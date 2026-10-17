@@ -28,6 +28,13 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   option of `ddg_uv::cutting::IntrinsicOptions`; the default stays Delaunay flips (see the
   README for the comparison).
 
+* **The way back of a segment along an input edge** (`crates/ddg-intrinsic`, SPEC N29): it failed
+  on 2 of 900 cuts of the remeshing study (bob's control mesh, start plane = mirror plane;
+  `remesh_study repro bob_control ka4 dirichlet 1 1`, and `ka2 dirichlet 0.5 1`), because the
+  ends on the input edge were placed in one of its two faces by rounding. Point queries now return
+  a place within `1e-12` of an input edge as a point of that edge, and a segment along a side
+  that lies along an input edge is not traced; both reproducers come back, and
+  `tests/way_back_along_input_edges.rs` covers the class.
 * Flipped UV triangles after the Blender Apply: the library's triangulation of the split polygons
   is stored and used by the unwrap (`blender/README.md`).
 * **Intrinsic triangulations** (`crates/ddg-intrinsic`, contract `SPEC.md` there): signposts,
@@ -69,11 +76,6 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   code between 3214 and 3620 (six runs each, logs in `runs_tmp/camelshotnoise-d30/`); with the
   default stop rule both return the same state (step 16, energy 4524.7). Some README and SPEC §6
   tables carry numbers from before D30 and say so.
-* The way back of a cut from a refined triangulation failed on 2 of 900 cuts: segments that run
-  along an input edge, next to a vertex inserted on it (bob's control mesh, start plane = mirror
-  plane; reproducer `remesh_study repro bob_control ka4 dirichlet 1 1`, `ddg-intrinsic` SPEC N28).
-  Not seen with the default flips, which insert a vertex only where the export must split an
-  edge; iODT puts vertices on input edges on purpose (snapping, N24).
 * The Blender session cache (a session kept between Start, Flow and Apply) is not tested across
   file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
 * The comparison with the authors' program of the cut flow was refreshed after D22 only, not

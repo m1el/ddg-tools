@@ -721,7 +721,17 @@ near a vertex that the refinement inserted on that edge: both ends lie on the ed
 coordinates 0 to 2e-16). The trace of such a segment ends on the other side of the edge than
 the place of its end; a larger tolerance (up to 0.1) does not help, because the test is which
 input face the end lies in, not a distance (ka4: segments 524 and 528 in faces 22094, 22104;
-ka2: 147 and 209 in faces 2862, 4391). Open; SPEC N28. It is not the class of the open flipped
+ka2: 147 and 209 in faces 2862, 4391). **Fixed since** (SPEC N29): the ends were returned as
+points of whichever of the two input faces rounding chose; a point query now returns a place
+within `1e-12` of an input edge as a point of that edge, which belongs to both faces, and a
+segment along a side of the triangulation that lies along an input edge is the piece of that
+edge between its ends instead of a trace. Both reproducers now come back (largest relative
+mismatch `1.4e-11` and `7.4e-12`); `tests/way_back_along_input_edges.rs` covers the class on
+strips (interior and boundary input edges, segments between two crossings of the edge, from a
+vertex on it, along a side on it). The `ka` builds read the curvature under face centroids
+through `point_on_input`, so on bob's control mesh, whose mirror plane holds such centroids, the
+`ka4` build now has 12 452 vertices instead of 12 454; the tables above are from before. It is
+not the class of the open flipped
 UV triangles of the iODT spot atlas (`blender/README.md`): there the way back succeeds, and the
 flipped triangles come after the insertion; what the two share is a finer cut on the input
 faces (from iODT with target 1/2 the cut comes back in 3 times the pieces of the flips' cut, median 1 142

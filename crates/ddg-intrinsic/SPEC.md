@@ -329,6 +329,8 @@ and from `crates/ddg-intrinsic/README.md`.
   vertex it cannot run, because the query starts at one and ends inside the star of one face.
   A path to a point of a boundary edge may reach the boundary a rounding error early; that is
   accepted when the length left is at most `1e-9` of the path, otherwise the query is an error.
+  A place on the input mesh within `1e-12` of an input edge is returned as a point of that edge
+  (N29).
 * **N12** *Overlay* (3.4.2). Built per face of the triangulation from the edge traces alone
   (no positions): the numbers of crossings on the three sides decide which segments of input
   edges cross the face (`overlay` module documentation: corner-cutting segments, or a fan from
@@ -358,7 +360,9 @@ and from `crates/ddg-intrinsic/README.md`.
   `segment_on_input` is the same for one segment given by barycentric coordinates, which also
   say which corner is meant in a face that uses a vertex twice. Measured on cuts of exported
   meshes (`tests/export.rs`): nodes located within `3e-15`, lengths of the pieces equal to the
-  segment within `7e-13`, mismatch at the far node below `7e-13`.
+  segment within `7e-13`, mismatch at the far node below `7e-13`. A segment along a side that
+  lies along an input edge is not traced, and one along an input edge otherwise meets its end
+  as a point of that edge (N29).
 * **N1, written out.** *Boundary.* Ruppert's rule with diametral circles. (a) A boundary edge
   is *encroached* when the angle opposite it exceeds `90° + 1e-9` (in a Delaunay triangulation
   that is the case exactly when some vertex lies inside the circle on the edge as diameter).
@@ -753,15 +757,68 @@ written from the paper and the cited papers.
   −3 % in the median); without the spread it solves another problem (cones at the input
   vertices; outliers to +1 160 %). Decision: no refinement option for the cut flow; the default
   of `ddg_uv::cutting` stays Delaunay flips. Nothing in this crate changed.
-  *Open: a segment along an input edge.* `segments_on_input` failed on 2 of 900 cuts from
-  refined triangulations (`remesh_study repro bob_control ka4 dirichlet 1 1`, and `ka2 dirichlet
-  0.5 1`; deterministic): two segments of the cut have both ends on input edge (300, 298) of
-  bob's control mesh (its mirror plane, which is also the start plane), next to a vertex the
-  refinement inserted on that edge, so they run along the edge; the trace from the first end
-  leaves into one input face and the second end is placed in the other ("the place of its end
-  is in none of the input faces the path went through"), at every tolerance up to 0.1. A
-  segment collinear with an input edge needs its own case in the trace (follow the edge, or
-  accept an end on the shared edge from either face). Not fixed here.
+  *A segment along an input edge* (found by the study, fixed afterwards: N29).
+  `segments_on_input` failed on 2 of 900 cuts from refined triangulations (`remesh_study repro
+  bob_control ka4 dirichlet 1 1`, and `ka2 dirichlet 0.5 1`; deterministic): two segments of the
+  cut have both ends on input edge (300, 298) of bob's control mesh (its mirror plane, which is
+  also the start plane), next to a vertex the refinement inserted on that edge, so they run
+  along the edge; the trace from the first end leaves into one input face and the second end is
+  placed in the other ("the place of its end is in none of the input faces the path went
+  through"), at every tolerance up to 0.1.
+
+* **N29** *The way back along an input edge* (N11, N13, N28). *Cause.* A point of the
+  triangulation that lies on an input edge (on bob: where edges of the triangulation cross the
+  mirror plane, on which the symmetric start function of the flow vanishes) is found on the
+  input mesh by a trace (N11) that ends a rounding error from that edge, and was returned as a
+  point of whichever of the two input faces rounding chose (barycentric coordinate `0` or
+  `2e-16` opposite the edge). A segment between two such points runs along the edge; its trace
+  stays in one face, and the check of N8 meets a target given as a point of a face only in that
+  face (`trace.rs`, `meet_target`), so an end placed in the other face is never met, at any
+  tolerance. *Fix.* (a) A point query (`point_on_input`, and the places of the nodes of
+  `segments_on_input` and `segment_on_input`) whose end lies within `LOCATION_SNAP = 1e-12` of
+  the longest edge of its input face, and within `1e-12` of the edge of the triangulation the
+  point lies on (of the shortest side of its face, for a point inside a face), from an edge of
+  that input face returns the point of that input edge: the snapping of N10 and N24
+  (`snap_onto_input_edge`, shared with insertions and moves), applied to point queries. A point
+  of an input edge belongs to both faces of the edge: the check of N8 considers a target on an
+  edge in every face that has the edge, and a trace that starts on an edge enters the face its
+  direction points into, so the trace of a segment along the edge meets its end in the first
+  face and reports that it runs along the edge. A point exactly at a corner (two coordinates
+  exactly zero) stays a point of the face. (b) A segment whose two ends lie on one side of its
+  face, where that side lies along an input edge (`edge_on_input`), is not traced: its path is
+  the piece of the input edge between the places of its ends (both are on that edge: a vertex
+  of the side by its stored place, a point of the side by interpolation, N11), and its mismatch
+  is the difference between the length of that piece and the length of the segment, checked
+  against the tolerance as for a trace (as an edge along an input edge is not traced, N8).
+  Found by the new test on a boundary edge: the direction of such a segment from a boundary
+  vertex or a point of a boundary edge comes out up to `4e-16` beyond `π`, which points out of
+  the surface, and the trace stopped at once. Nothing is loosened: the tolerance of N8 and N13
+  is unchanged, and a mismatch beyond it is still an error.
+  *Tests* (`tests/way_back_along_input_edges.rs`): strips along a straight line of input edges,
+  flat and folded along the line (`z = fold · |y|`, mirror-symmetric as on bob), in both
+  orientations, the line inside the strip or on its boundary; vertices inserted on the line
+  edges and inside the faces, then flips; segments between two points where sides of a face
+  cross the same line edge, from a corner on the line (an inserted vertex on it, or an input
+  vertex) to such a point and back to the corner, and along sides that lie on the line (between
+  two points of the side, to and from its corners). Before the fix 18 of 142 segments of the
+  first interior strip failed with the error seen on bob, and 3 of 78 on the first boundary
+  strip; after it all pass, every end is a point of the line edge, every piece lies in the
+  input face it names, the mismatch is below `1e-12` of the strip's cells (below `5.2e-10` of
+  the segment for segments of `4e-4` in thin faces), and point queries of crossings of input
+  edges return points of those edges. Both reproducers come back (ka4: 588 segments, largest
+  relative mismatch `1.4e-11`; ka2: 283 segments, `7.4e-12`; the study's other runs on bob's
+  control mesh went to `8e-10`), on the triangulations they failed on (checked with the
+  snapping switched off in `point_on_input` alone, for the build). For the callers: a node a
+  rounding error from an input edge used to come back as a point of one face and now comes back
+  as a point of the edge; every piece still lies in the face it names. `point_on_input` changed
+  the same way, and the remeshing study reads the curvature of the input face under the centroid
+  of a face from it: on bob's control mesh centroids on the mirror plane now get the mean of
+  both faces, and the `ka4` build has 12 452 vertices instead of 12 454 (the 216 cuts of the
+  control meshes rerun with ka2, ka4, u2, u4, odt2, odt4 all come back, largest relative
+  mismatch `8e-10` as before, 1 to 10 fewer pieces per cut where nodes lay on input edges).
+  *Still possible:* a point within `1e-12` of an input vertex without being at it is moved onto
+  the nearest edge at that vertex only; a path that arrives at it from a face around the vertex
+  that does not have that edge does not meet it.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
