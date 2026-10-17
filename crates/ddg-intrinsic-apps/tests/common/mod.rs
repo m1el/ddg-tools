@@ -89,6 +89,32 @@ pub fn sheared_parallelogram(n: usize, sigma: f64) -> Shape {
     Shape::new(&format!("sheared parallelogram {n} sigma {sigma}"), positions, faces)
 }
 
+/// A torus of revolution (radii `big`, `small`) on an `nu × nv` lattice of the angles whose
+/// quads join row `j` to row `j + 1` shifted by `shift` columns: for `shift > 1` every triangle
+/// is long and thin, with an obtuse angle.
+pub fn sheared_torus(nu: usize, nv: usize, big: f64, small: f64, shift: usize) -> Shape {
+    let id = |i: usize, j: usize| ((j % nv) * nu + (i % nu)) as u32;
+    let mut positions = Vec::new();
+    for j in 0..nv {
+        let v = std::f64::consts::TAU * j as f64 / nv as f64;
+        for i in 0..nu {
+            let u = std::f64::consts::TAU * i as f64 / nu as f64;
+            let r = big + small * v.cos();
+            positions.push([r * u.cos(), r * u.sin(), small * v.sin()]);
+        }
+    }
+    let mut faces = Vec::new();
+    for j in 0..nv {
+        for i in 0..nu {
+            let (a, b) = (id(i, j), id(i + 1, j));
+            let (c, d) = (id(i + 1 + shift, j + 1), id(i + shift, j + 1));
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+    }
+    Shape::new(&format!("sheared torus {nu}x{nv} shift {shift}"), positions, faces)
+}
+
 /// The flat unit square `n × n` with interior vertices moved by up to `amplitude` cells.
 pub fn jittered_grid(n: usize, amplitude: f64, seed: u64) -> Shape {
     let g = grid_disk(n, n).unwrap();
