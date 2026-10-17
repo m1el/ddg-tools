@@ -114,3 +114,58 @@ pub fn load_data(relative: &str) -> Option<Shape> {
 pub fn dataset(name: &str) -> Option<Shape> {
     load_data(&format!("optimal-cones/optimal-cones-data/data/{name}.obj"))
 }
+
+/// A flat disk of radius 1 from concentric rings: ring `k` (radius `k/n`) has `6k` vertices,
+/// so the boundary is a regular polygon with `6n` vertices on the unit circle. `twist`
+/// rotates ring `k` by `twist · k` radians.
+pub fn polar_disk(n: usize, twist: f64) -> Shape {
+    use std::f64::consts::TAU;
+    let mut positions = vec![[0.0, 0.0, 0.0]];
+    let mut rings: Vec<Vec<(f64, u32)>> = vec![vec![(0.0, 0)]];
+    for k in 1..=n {
+        let count = 6 * k;
+        let r = k as f64 / n as f64;
+        let mut ring = Vec::with_capacity(count);
+        for i in 0..count {
+            let a = TAU * i as f64 / count as f64 + twist * k as f64;
+            ring.push((a.rem_euclid(TAU), positions.len() as u32));
+            positions.push([r * a.cos(), r * a.sin(), 0.0]);
+        }
+        ring.sort_by(|x, y| x.0.total_cmp(&y.0));
+        rings.push(ring);
+    }
+    let mut faces = Vec::new();
+    let first = &rings[1];
+    for i in 0..first.len() {
+        faces.push([0, first[i].1, first[(i + 1) % first.len()].1]);
+    }
+    for k in 2..=n {
+        let (inner, outer) = (&rings[k - 1], &rings[k]);
+        let (ni, no) = (inner.len(), outer.len());
+        let angle = |ring: &Vec<(f64, u32)>, idx: usize| {
+            ring[idx % ring.len()].0 + TAU * (idx / ring.len()) as f64
+        };
+        // Both sequences start at their smallest angle; make the outer one start no later
+        // than the inner one by unrolling the inner start if needed.
+        let (mut i, mut o) = (0usize, 0usize);
+        while i < ni || o < no {
+            let next_inner = angle(inner, i + 1);
+            let next_outer = angle(outer, o + 1);
+            if o >= no || (i < ni && next_inner < next_outer) {
+                faces.push([inner[i % ni].1, outer[o % no].1, inner[(i + 1) % ni].1]);
+                i += 1;
+            } else {
+                faces.push([inner[i % ni].1, outer[o % no].1, outer[(o + 1) % no].1]);
+                o += 1;
+            }
+        }
+    }
+    for f in &mut faces {
+        let (a, b, c) = (positions[f[0] as usize], positions[f[1] as usize], positions[f[2] as usize]);
+        let cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if cross < 0.0 {
+            f.swap(1, 2);
+        }
+    }
+    Shape::new(&format!("polar_disk_{n}"), positions, faces)
+}
