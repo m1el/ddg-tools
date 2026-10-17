@@ -4,6 +4,25 @@ State of 2026-10-14, branch `intrinsic-triangulations`. Numbers and evidence are
 file points to; this is the list of what is scheduled, what was decided, and what is known to be
 open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
+## In progress (2026-10-17, paused at the usage limit)
+
+Work started on the user's request ("2. implement mapping to the sphere. 4. implement
+applications listed in the paper"), checkpointed on unmerged worktree branches under
+`.claude/worktrees/`, each with a notes file saying what is done and what remains:
+
+* BFF mapping to the sphere (paper Sec. 7.5, port of the reference's `mapToSphere`):
+  branch `worktree-agent-af604adf9c2b21fae`, notes `crates/ddg-bff/NOTES-sphere.md`.
+* Intrinsic triangulations, applications 5.1–5.3 (Steiner tree, FEM condition numbers, heat
+  method) in a new crate `crates/ddg-intrinsic-apps`: branch `worktree-agent-a825df4ddbb500d57`,
+  notes `crates/ddg-intrinsic-apps/NOTES-apps-5.1-5.3.md`; SPEC ids N30–N39.
+* Applications 5.4–5.5 (adaptive refinement, tangent vector fields) in the same new crate:
+  branch `worktree-agent-aed156ad98b2d7138`, notes `crates/ddg-intrinsic-apps/NOTES-apps-5.4-5.5.md`;
+  SPEC ids N40–N49. The two app branches each create the crate; merge by hand.
+
+Waiting on the user: whether `ddg-uv` keeps normalizing each piece by its own area (recommended)
+or follows the whole-mesh canonical problem; moving `master` up (it is behind
+`intrinsic-triangulations` by the cone work).
+
 ## Scheduled
 
 1. **The cones solver against the dataset's own measure** (proposed 2026-10-14, not approved): a
