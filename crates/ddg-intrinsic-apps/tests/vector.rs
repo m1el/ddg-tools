@@ -329,8 +329,8 @@ fn boundary_values_are_interpolated_along_the_boundary() {
     let m = connection_matrices(&tri, 1, ConnectionLaplacian::FiniteDifference).unwrap();
     let energy = m.energy(&field.values) / m.norm_squared(&field.values);
     assert!(energy < 1e-12, "{energy}");
-    for v in 0..input.n_vertices() {
-        let global = field.values[v] * C64::from_angle(beta[v]);
+    for (v, &b) in beta.iter().enumerate().take(input.n_vertices()) {
+        let global = field.values[v] * C64::from_angle(b);
         assert!((global - constant).abs() < 1e-10);
     }
     // A missing vertex is an error naming it.

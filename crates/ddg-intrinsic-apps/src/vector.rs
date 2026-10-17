@@ -222,8 +222,7 @@ impl TangentField {
         }
         let reps = self.representative();
         let mut out = Vec::with_capacity(mesh.n_vertices());
-        for v in 0..mesh.n_vertices() {
-            let u = reps[v];
+        for (v, &u) in reps.iter().enumerate().take(mesh.n_vertices()) {
             let boundary = mesh.is_boundary_vertex(v);
             let theta = input.vertex_angle_sum(v);
             let scale = ddg_intrinsic::formulas::angle_scale(theta, boundary);

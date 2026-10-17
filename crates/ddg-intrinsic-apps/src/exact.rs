@@ -358,44 +358,44 @@ impl State<'_> {
         }
         let ray = |x: f64| [x - s[0], -s[1]];
         // Left part: onto the side from `a` to `c`.
-        if w.b0 < xc {
-            if let Some(t) = self.mesh.twin(hp) {
-                let x1 = w.b1.min(xc);
-                let u = [c[0] / l_ca, c[1] / l_ca];
-                let hit = |x: f64| cross(s, ray(x)) / cross(u, ray(x));
-                let mu0 = hit(w.b0);
-                let mu1 = if xc <= w.b1 { l_ca } else { hit(x1) };
-                let (mu0, mu1) = (self.clamp(mu0, l_ca), self.clamp(mu1, l_ca));
-                // Rotate so that `a -> c` is the x-axis; the face stays below.
-                let s2 = [u[0] * s[0] + u[1] * s[1], -u[1] * s[0] + u[0] * s[1]];
-                self.push_window(Window {
-                    h: t as u32,
-                    b0: mu0,
-                    b1: mu1,
-                    s: s2,
-                    sigma: w.sigma,
-                });
-            }
+        if w.b0 < xc
+            && let Some(t) = self.mesh.twin(hp)
+        {
+            let x1 = w.b1.min(xc);
+            let u = [c[0] / l_ca, c[1] / l_ca];
+            let hit = |x: f64| cross(s, ray(x)) / cross(u, ray(x));
+            let mu0 = hit(w.b0);
+            let mu1 = if xc <= w.b1 { l_ca } else { hit(x1) };
+            let (mu0, mu1) = (self.clamp(mu0, l_ca), self.clamp(mu1, l_ca));
+            // Rotate so that `a -> c` is the x-axis; the face stays below.
+            let s2 = [u[0] * s[0] + u[1] * s[1], -u[1] * s[0] + u[0] * s[1]];
+            self.push_window(Window {
+                h: t as u32,
+                b0: mu0,
+                b1: mu1,
+                s: s2,
+                sigma: w.sigma,
+            });
         }
         // Right part: onto the side from `c` to `b`.
-        if w.b1 > xc {
-            if let Some(t) = self.mesh.twin(hn) {
-                let x0 = w.b0.max(xc);
-                let u = [(l - c[0]) / l_bc, -c[1] / l_bc];
-                let sc = [s[0] - c[0], s[1] - c[1]];
-                let hit = |x: f64| cross(sc, ray(x)) / cross(u, ray(x));
-                let mu0 = if xc >= w.b0 { 0.0 } else { hit(x0) };
-                let mu1 = hit(w.b1);
-                let (mu0, mu1) = (self.clamp(mu0, l_bc), self.clamp(mu1, l_bc));
-                let s2 = [u[0] * sc[0] + u[1] * sc[1], -u[1] * sc[0] + u[0] * sc[1]];
-                self.push_window(Window {
-                    h: t as u32,
-                    b0: mu0,
-                    b1: mu1,
-                    s: s2,
-                    sigma: w.sigma,
-                });
-            }
+        if w.b1 > xc
+            && let Some(t) = self.mesh.twin(hn)
+        {
+            let x0 = w.b0.max(xc);
+            let u = [(l - c[0]) / l_bc, -c[1] / l_bc];
+            let sc = [s[0] - c[0], s[1] - c[1]];
+            let hit = |x: f64| cross(sc, ray(x)) / cross(u, ray(x));
+            let mu0 = if xc >= w.b0 { 0.0 } else { hit(x0) };
+            let mu1 = hit(w.b1);
+            let (mu0, mu1) = (self.clamp(mu0, l_bc), self.clamp(mu1, l_bc));
+            let s2 = [u[0] * sc[0] + u[1] * sc[1], -u[1] * sc[0] + u[0] * sc[1]];
+            self.push_window(Window {
+                h: t as u32,
+                b0: mu0,
+                b1: mu1,
+                s: s2,
+                sigma: w.sigma,
+            });
         }
     }
 }

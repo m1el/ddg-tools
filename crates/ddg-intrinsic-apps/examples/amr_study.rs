@@ -78,7 +78,6 @@ struct Run {
     vertices: usize,
     seconds: f64,
     error: f64,
-    estimate: f64,
 }
 
 fn uniform(
@@ -247,7 +246,6 @@ fn main() {
             vertices: tri.n_vertices(),
             seconds,
             error,
-            estimate: est.total,
         });
         target = (target as f64 * 1.6) as usize;
     }
@@ -290,7 +288,6 @@ fn main() {
             vertices: tri.n_vertices(),
             seconds,
             error,
-            estimate: est.total,
         });
         let evaluation = paused.elapsed();
         t += evaluation;
@@ -334,6 +331,4 @@ fn main() {
             ),
         }
     }
-    let _ = uniform_runs.iter().map(|r| r.estimate).count();
-    let _ = amr_runs.iter().map(|r| r.estimate).count();
 }

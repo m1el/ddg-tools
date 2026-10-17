@@ -614,7 +614,7 @@ pub fn adaptive_solve(
             reason: format!("the bulk fraction must be in (0, 1], got {}", options.bulk),
         });
     }
-    if !(options.tolerance >= 0.0) {
+    if options.tolerance.is_nan() || options.tolerance < 0.0 {
         return Err(AmrError::InvalidOptions {
             reason: format!("the tolerance must be non-negative, got {}", options.tolerance),
         });

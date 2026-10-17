@@ -43,7 +43,8 @@ fn m_orthonormalize(m: &SparseMatrix, y: Vec<Vec<f64>>) -> Vec<Vec<f64>> {
         }
         let mv = mul(m, &v);
         let len = dot(&v, &mv).sqrt();
-        if !(len > 1e-10 * original) {
+        let independent = len > 1e-10 * original;
+        if !independent {
             continue;
         }
         out.push(v.iter().map(|x| x / len).collect());
@@ -79,15 +80,16 @@ pub(crate) fn jacobi(mut a: Vec<Vec<f64>>) -> (Vec<f64>, Vec<Vec<f64>>) {
                 let t = if theta == 0.0 { 1.0 } else { t };
                 let c = 1.0 / (t * t + 1.0).sqrt();
                 let s = t * c;
-                for k in 0..n {
-                    let (akp, akq) = (a[k][p], a[k][q]);
-                    a[k][p] = c * akp - s * akq;
-                    a[k][q] = s * akp + c * akq;
+                for row in a.iter_mut() {
+                    let (akp, akq) = (row[p], row[q]);
+                    row[p] = c * akp - s * akq;
+                    row[q] = s * akp + c * akq;
                 }
-                for k in 0..n {
-                    let (apk, aqk) = (a[p][k], a[q][k]);
-                    a[p][k] = c * apk - s * aqk;
-                    a[q][k] = s * apk + c * aqk;
+                let (upper, lower) = a.split_at_mut(q);
+                for (x, y) in upper[p].iter_mut().zip(lower[0].iter_mut()) {
+                    let (apk, aqk) = (*x, *y);
+                    *x = c * apk - s * aqk;
+                    *y = s * apk + c * aqk;
                 }
                 for row in v.iter_mut() {
                     let (vp, vq) = (row[p], row[q]);

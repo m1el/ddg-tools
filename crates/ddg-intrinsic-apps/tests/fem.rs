@@ -39,9 +39,9 @@ fn the_stiffness_matrix_is_exact_on_linear_functions_of_a_flat_triangulation() {
                 let f: Vec<f64> = p.iter().map(|q| a * q[0] + b * q[1] + 0.25).collect();
                 let mut lf = vec![0.0; f.len()];
                 l.mul_vec(&f, &mut lf).unwrap();
-                for v in 0..tri.n_vertices() {
+                for (v, &x) in lf.iter().enumerate() {
                     if !tri.is_boundary_vertex(v) {
-                        assert!(lf[v].abs() < 1e-11, "{} {mode}: vertex {v}: {}", shape.name, lf[v]);
+                        assert!(x.abs() < 1e-11, "{} {mode}: vertex {v}: {x}", shape.name);
                     }
                 }
                 // The Dirichlet energy of a linear function is |∇f|² times the area.

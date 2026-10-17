@@ -194,13 +194,13 @@ fn pattern_components(a: &SparseMatrix) -> (Vec<u32>, usize) {
     let mut id = vec![u32::MAX; n];
     let mut component = vec![0u32; n];
     let mut count = 0;
-    for v in 0..n {
+    for (v, c) in component.iter_mut().enumerate() {
         let r = find(&mut parent, v);
         if id[r] == u32::MAX {
             id[r] = count as u32;
             count += 1;
         }
-        component[v] = id[r];
+        *c = id[r];
     }
     (component, count)
 }
@@ -239,8 +239,8 @@ impl PinnedLaplacian {
         let n = l.nrows();
         let (component, count) = pattern_components(l);
         let mut pinned = vec![u32::MAX; count];
-        for v in 0..n {
-            let c = component[v] as usize;
+        for (v, &c) in component.iter().enumerate() {
+            let c = c as usize;
             if pinned[c] == u32::MAX {
                 pinned[c] = v as u32;
             }
@@ -309,9 +309,8 @@ impl PinnedLaplacian {
         if let Some(factor) = &self.factor {
             factor.solve_in_place(&mut rhs, Parallelism::Sequential)?;
         }
-        for v in 0..self.n {
-            let r = self.reduced[v];
-            b[v] = if r == u32::MAX { 0.0 } else { rhs[r as usize] };
+        for (x, &r) in b.iter_mut().zip(&self.reduced) {
+            *x = if r == u32::MAX { 0.0 } else { rhs[r as usize] };
         }
         Ok(())
     }
@@ -406,7 +405,7 @@ pub fn condition_number(
             stiffness.ncols()
         )));
     }
-    if options.max_steps == 0 || !(options.tolerance > 0.0) {
+    if options.max_steps == 0 || options.tolerance.is_nan() || options.tolerance <= 0.0 {
         return Err(FemError::Invalid(
             "EigenOptions: max_steps must be positive and tolerance a positive number".into(),
         ));
@@ -420,7 +419,7 @@ pub fn condition_number(
                     m.len()
                 )));
             }
-            if let Some((i, x)) = m.iter().enumerate().find(|(_, x)| !(**x > 0.0)) {
+            if let Some((i, x)) = m.iter().enumerate().find(|(_, x)| x.is_nan() || **x <= 0.0) {
                 return Err(FemError::Invalid(format!(
                     "the lumped mass of vertex {i} is {x}, not positive"
                 )));
@@ -541,7 +540,7 @@ fn lanczos_largest(
     let mut q: Vec<f64> = (0..n).map(|_| rng.uniform(-1.0, 1.0)).collect();
     project(&mut q)?;
     let norm = dot(&q, &q)?.sqrt();
-    if !(norm > 0.0) {
+    if norm.is_nan() || norm <= 0.0 {
         return Err(FemError::Invalid(
             "the start vector vanishes after projection (no eigenvalue outside the kernel)"
                 .into(),

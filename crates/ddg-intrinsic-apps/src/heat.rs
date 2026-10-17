@@ -265,9 +265,9 @@ impl HeatSolver {
         let dirichlet = if options.boundary != HeatBoundary::Neumann {
             let mut row = vec![u32::MAX; n];
             let mut keep = Vec::with_capacity(n);
-            for v in 0..n {
+            for (v, r) in row.iter_mut().enumerate() {
                 if !tri.is_boundary_vertex(v) {
-                    row[v] = keep.len() as u32;
+                    *r = keep.len() as u32;
                     keep.push(v as u32);
                 }
             }

@@ -319,8 +319,7 @@ fn heat(name: &str, mesh: &TriMesh, geometry: &Geometry) -> Result<(), String> {
             query += d.report.seconds;
             let reference = &exact[k];
             let scale = reference.iter().fold(0.0f64, |m, &x| if x.is_finite() { m.max(x) } else { m });
-            for v in 0..n {
-                let e = reference[v];
+            for (v, &e) in reference.iter().enumerate().take(n) {
                 if !e.is_finite() {
                     continue;
                 }
