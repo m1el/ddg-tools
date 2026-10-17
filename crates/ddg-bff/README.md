@@ -3,7 +3,8 @@
 Boundary First Flattening with cone singularities, and the mesh cutting it needs: given a
 triangle mesh and cones (vertex, cone angle), cut the surface through the cones into disks and
 flatten every disk conformally. Output: one UV per triangle corner, the cut edges, the chart of
-every face, and a report per chart. Charts are not packed.
+every face, and a report per chart. Charts are not packed. A closed genus-0 mesh can also be
+mapped conformally to the unit sphere (`map_to_sphere`, see *Mapping to the sphere*).
 
 This crate is a Rust port of the method and the reference implementation of
 
@@ -71,6 +72,8 @@ assert!(flat.seams.max_length_mismatch < 1e-12);
 | `mollify_edge_lengths(&TriMesh, &[f64], f64) -> Result<Mollified, BffError>` | the reference's mollification as an explicit step |
 | `ChartReport { closure, distortion, overlap, .. }`, `ConeReport`, `SeamReport`, `ClosedComponentReport`, `Timings` | what a result says about itself |
 | `quality::{coverage, polygon_self_crossings, quasi_conformal_error, fit_similarity, ..}` | the measures, usable on any layout |
+| `map_to_sphere(&TriMesh, &Geometry, &SphereOptions) -> Result<SphereMap, BffError>` | closed connected genus-0 mesh to the unit sphere: `SphereMap { positions, report }`; see *Mapping to the sphere* |
+| `mobius_center`, `sphere_distortion`, `most_regular_star`, `stereographic`, `inverse_stereographic`, `sphere_inversion` | the steps of the sphere map, usable on their own |
 | `BffError` | every refusal, with the vertex, edge, face or chart concerned |
 
 Conventions are those of the repository's `CLAUDE.md`: `L` is the positive semidefinite cotan
@@ -382,6 +385,89 @@ Two factorizations dominate: the Laplacian of the surface (scale factors) and th
 Laplacian of the cut surface (extension). Passing `scale_factors` from a cone solver saves the
 first.
 
+## Mapping to the sphere
+
+`map_to_sphere` maps a closed, connected surface of genus 0 conformally to the unit sphere. It
+follows `BFF::mapToSphere` of the reference (`Bff.cpp`) and its Möbius centering `BFF::centerMobius`,
+whose algorithm is Baden, Crane and Kazhdan, *Möbius Registration*, CGF 37(5) (SGP 2018),
+Algorithm 1. The code is in `src/sphere.rs`. The method:
+
+1. Remove the star of one vertex (the pole): what is left is a disk (a submesh; the caller's mesh
+   is not touched). `SphereOptions::pole`: `MostRegularStar` (default) or `Vertex(i)`.
+2. `DiskBff::flatten_to_disk` (`disk_iterations = 10`), then normalize the disk (mean boundary
+   radius 1).
+3. Choose the radius `R` of the disk by ternary search of `ln R` in `[1, 1e4]` (tolerance
+   `1e-3`), maximizing the area-weighted mean of `ln(a_f / A_f)` (the reference's objective).
+4. Inverse stereographic projection of the disk of radius `R`, from the south pole; the pole
+   vertex is placed at `(0, 0, -1)`.
+5. Möbius centering: inversions of the sphere (Gauss–Newton step `c = -J⁻¹µ`) until the center of
+   mass `µ` of the surface's area measure on the sphere has `|µ| <= 1e-10`. A step longer than
+   `0.5` is shortened, a step that does not decrease `|µ|` is halved.
+
+`SphereMap::report` (`SphereReport`) carries the radius search and centering reports
+(`CenteringReport::converged()`), timings, and `SphereDistortion`: quasi-conformal error (mean,
+max), area distortion (rms of `u = ½ ln(a/A)`), flipped triangles (negative orientation seen from
+outside), the covering degree (signed area of the image over `4π`) and `is_injective()` (no
+flipped triangle and degree 1).
+
+What a caller should know:
+
+- **Errors, not repairs.** `NotASphere` for a mesh that is open, disconnected or of another genus
+  (map components one by one with `TriMesh::split_components`); `PoleOutOfRange`; options out of
+  their domain are `NonFiniteInput`.
+- **Orientation:** the image is oriented like the input, seen from outside.
+- **The map is determined up to a rotation** (centering fixes the inversion, not the rotation);
+  the tests compare after a best rotation fit. Rigid motions and scaling of the input do not
+  change it.
+- **The pole star is where quality is worst.** Next to the removed star the quasi-conformal error
+  is larger (icospheres: max about 1.24, mean about 1.00); the star is not refined.
+- **Flipped triangles are reported, not corrected** (brain, 153k vertices: 38, as in the
+  reference's map).
+- `radius_search: None` projects the normalized disk (`R = 1`, northern hemisphere);
+  `centering: None` leaves the pole at `(0, 0, -1)`.
+
+### Measurements
+
+`examples/sphere_report.rs`, one thread, run alone, best of 3, milliseconds (AMD Threadripper
+3970X). QC: quasi-conformal error `σ_max/σ_min` per triangle; area rms: rms of the log area scale
+factor `u`. The last column is the same with the reference's pole (vertex 0), where it differs
+from ours.
+
+| mesh | V | QC mean / max | area rms `u` | flipped | ms | pole 0: QC mean / max, flipped |
+|---|---:|---|---:|---:|---:|---|
+| icosphere 3 | 642 | 1.0096 / 1.240 | 0.006 | 0 | 4 | same |
+| icosphere 5 | 10242 | 1.0008 / 1.244 | 0.002 | 0 | 80 | same |
+| ellipsoid 2:1:0.5, noisy | 2562 | 1.0746 / 1.332 | 0.500 | 0 | 19 | 2.0658 / 28.0, 4 |
+| spot | 2930 | 1.1332 / 1.780 | 1.022 | 0 | 18 | 1.3028 / 2.451, 0 |
+| blub | 7106 | 1.1039 / 1.843 | 2.173 | 0 | 51 | 1.2364 / 2.088, 0 |
+| bob | – | refused: genus 1 | | | | |
+| bunny | 14290 | 1.0410 / 1.289 | 1.631 | 0 | 121 | 1.0500 / 1.308, 0 |
+| axes | 3735 | 1.1219 / 1.243 | 1.827 | 0 | 26 | |
+| chair | 5726 | 1.0544 / 1.653 | 0.560 | 0 | 43 | 1.2777 / 1.960, 0 |
+| brain | 152893 | 1.0529 / 71.9 | 0.459 | 38 | 1554 | 38 flips too |
+
+### Against the reference
+
+`reference/bff_ref.cpp` has a mode `sphere` (`reference/run_sphere.sh`); the driver is
+`examples/reference_sphere_diff.rs`. Not run by `cargo test`.
+
+- Our disk on the punctured mesh equals the reference's own disk mode to `2e-15` … `6e-13` rms.
+- The reference's in-place puncture inside `mapToSphere` differs from that by `2e-7` … `1e-4`
+  rms (unexplained; a property of its code).
+- With both maps centered the same way (ours), the sphere maps agree to `3e-6` (icosphere),
+  `8e-4` (bunny), `5e-3` (axes), `5e-2` (brain, where both have 38 flips).
+- The reference's own centering (image areas) leaves `|µ|` between `0.03` and `0.6` by the
+  surface measure; its area distortion is higher (axes: `u` rms 2.41 against our 1.83).
+
+### Tests and proofs
+
+`tests/sphere.rs` (9 tests): an icosphere maps to itself up to a rotation; without centering the
+pole is at the south pole; centering puts the area center at the origin; genus-0 models map
+injectively; invariance under rigid motion and scale; different poles give the same map up to a
+rotation; non-spheres and bad options are refused; the formulas below hold numerically. Lean:
+`lean/proofs/DdgProofs/Bff/Sphere.lean` (stereographic projection on the sphere, its inverse,
+conformality and orientation; inversions keep the sphere; the derivative `2(u - (u·x)x)`).
+
 ## Deviations from the reference implementation
 
 1. **Exact solves.** The reference adds `1e-8` to the diagonal of every Laplacian to make it
@@ -443,9 +529,24 @@ first.
     options that are not numbers: refused.
 15. **Area distortion** is reported as `u = ½ ln(B/A)` per face, the log scale factor; the
     reference reports `ln(B/A) = 2u`.
-16. **Not ported:** mapping to the sphere, flattening to a given target curve, cone placement
-    (the reference's own greedy cone picker), direct editing of boundary lengths, bin packing,
-    the viewer.
+16. **Not ported:** flattening to a given target curve, cone placement (the reference's own
+    greedy cone picker), direct editing of boundary lengths, bin packing, the viewer.
+17. **Mapping to the sphere** (`map_to_sphere`) differs from `BFF::mapToSphere` in:
+    - *Pole.* The reference removes vertex 0. Here the default is the vertex with the most
+      regular star (`most_regular_star`, edge lengths only); `PoleChoice::Vertex(0)` is the
+      reference's choice. *Reason:* a poor pole gives flipped triangles (noisy ellipsoid: 4 and a
+      maximum error of 28 against none and 1.33).
+    - *Puncture.* The reference punctures its mesh in place; here a submesh is built and the
+      input is untouched. The two disks differ by `2e-7` to `1e-4` (see above).
+    - *Centering.* The reference weights by the areas of the image triangles, with tolerance
+      `1e-3` and 1000 iterations. Here the weights are the surface areas (as in Baden et al.),
+      the centroids are normalized, the tolerance is `1e-10`, the step is capped at `0.5` and
+      halved when `|µ|` does not decrease. Reported as `CenteringReport`.
+    - *Radius search.* Same objective; the disk is normalized first and the search is over `ln R`,
+      so the result does not depend on the scale of the input.
+    - *Projection from the south pole*, the pole vertex at `(0, 0, -1)`.
+    - *Errors* for meshes that are not closed connected genus 0 (the reference does not check).
+    - `diagonal_shift` defaults to `0` as everywhere else in this crate.
 
 The reference code itself deviates from the paper in two places, and so does this port: the
 unit-disk iteration does not average successive iterates (paper Sec. 6.5), and the closing
@@ -490,9 +591,17 @@ left; edge `i` runs from boundary vertex `i` to `i + 1`. BFF = Sawhney and Crane
 | `segment-proper-crossing` | Open segments `a_0a_1`, `b_0b_1` cross in one interior point iff `b_0`, `b_1` are strictly on opposite sides of line `a_0a_1` and `a_0`, `a_1` strictly on opposite sides of line `b_0b_1`. | – | `proper_crossing` |
 | `disk-injectivity-criterion` | An orientation-preserving piecewise linear map of a triangulated disk to the plane covers a point as often as the image of the boundary winds around it; a boundary polygon without proper crossings and without a vertex of more than a full turn winds at most once, so the map is injective up to boundary contact. | degree of a map; for convex boundaries Floater 2003 (BFF Sec. 7.5) | `ChartReport::is_injective` |
 | `similarity-fit` | Least squares `q ≈ a p + b` over complex `a`, `b`: `a = Σ (q_i − q̄) conj(p_i − p̄) / Σ |p_i − p̄|²`, `b = q̄ − a p̄`. | – | `fit_similarity` |
+| `stereographic-projection` | `p = (2w, \|w\|² − 1) / (\|w\|² + 1)` for `w ∈ R²` (from the south pole `(0, 0, −1)`); inverse `w = (x, y) / (1 + z)`. | elementary | `inverse_stereographic`, `stereographic` |
+| `stereographic-conformal` | The projection is conformal and orientation preserving (proved in Lean). | elementary | `inverse_stereographic` |
+| `mobius-sphere-inversion` | `η_c(x) = (1 − \|c\|²)(x + c)/\|x + c\|² + c`, `\|c\| < 1`, maps the unit sphere to itself. | Baden, Crane, Kazhdan 2018, Eq. 2 | `sphere_inversion`, `mobius_center` |
+| `mobius-centering-jacobian` | The derivative of `∫ η_c(x) dA` at `c = 0` is `J = 2 Σ A_f (I − C_f C_fᵀ)`, `C_f` unit face centroids. | Baden, Crane, Kazhdan 2018, Alg. 1 | `mobius_center` |
+| `mobius-centering-existence` | A centering inversion exists, unique up to rotation. Cited, not proved. | Baden, Crane, Kazhdan 2018, Sec. 4.1 | `mobius_center` |
+| `spherical-triangle-area` | `tan(E/2) = det(a, b, c) / (1 + a·b + b·c + c·a)`. Cited. | van Oosterom, Strackee 1983 | `sphere_distortion` |
+| `sphere-injectivity-criterion` | No flipped triangle and degree 1 imply a homeomorphism. Cited. | Milnor 1965, §5 | `SphereDistortion::is_injective` |
 
-None of the new ids has a theorem in `lean/proofs` or an entry in `lean/proofs/CITED.md` yet,
-so `scripts/check-formulas.sh` lists them as missing.
+None of the BFF ids above (up to `similarity-fit`) has a theorem in `lean/proofs` or an entry in
+`lean/proofs/CITED.md` yet, so `scripts/check-formulas.sh` lists them as missing. The sphere ids
+have theorems in `DdgProofs/Bff/Sphere.lean` or entries in `CITED.md`.
 
 ## Not done, not verified
 
@@ -502,8 +611,12 @@ so `scripts/check-formulas.sh` lists them as missing.
 - `flatten_to_disk` and prescribed data on very elongated disks: the scale factors span more
   than double precision resolves in one layout (a strip 60 times as long as wide: `|u|` up to
   47, half of the faces collapse; counted in `degenerate_triangles`).
-- Mapping to the sphere, target curves, cone placement and direct length editing of the
-  reference are not ported.
+- Target curves, cone placement and direct length editing of the reference are not ported.
+- Mapping to the sphere: injectivity is reported, not guaranteed (the brain has 38 flipped
+  triangles, as the reference's map); the cited facts (existence of the centering, the
+  injectivity criterion) are not proved; the `2e-7` to `1e-4` difference between the reference's
+  in-place puncture and our submesh is not explained; the reference was run only through the
+  `sphere` mode of our `reference/bff_ref.cpp`, on the meshes of the table.
 - Why the stored maps of the dataset differ from what the public reference code computes
   from the published cones is inferred, not known; camel_noise1 is not explained at all.
 - The driver of the differential test needs the reference sources, SuiteSparse and OpenBLAS;
@@ -518,6 +631,9 @@ cargo test --release -p ddg-bff --test dataset -- --nocapture     # all 23 datas
 cargo clippy -p ddg-bff --all-targets -- -D warnings
 cargo run --release -p ddg-bff --example dataset_report           # tables of this README
 cargo run --release -p ddg-bff --example dataset_investigate      # what the stored maps contain
+cargo test --release -p ddg-bff --test sphere                     # mapping to the sphere
+cargo run --release -p ddg-bff --example sphere_report            # the sphere table
+crates/ddg-bff/reference/run_sphere.sh /tmp/bff-ref               # sphere maps against the reference
 crates/ddg-bff/reference/build.sh /tmp/bff-ref                    # needs cmake, ninja, OpenBLAS
 crates/ddg-bff/reference/run.sh /tmp/bff-ref                      # comparison with the reference
 ```

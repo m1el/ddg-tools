@@ -13,6 +13,15 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 
 ## Landed since the first version of this file
 
+* **Mapping to the sphere** (2026-10-17, `crates/ddg-bff`, README "Mapping to the sphere"):
+  `map_to_sphere` maps a closed connected genus-0 mesh conformally to the unit sphere (port of
+  `BFF::mapToSphere`: punctured disk, radius search, stereographic projection, Möbius centering
+  after Baden, Crane, Kazhdan 2018). Default pole: the most regular vertex star (the reference's
+  vertex 0 gives flipped triangles on a noisy ellipsoid). Differential test against the
+  reference's own program; Lean `DdgProofs/Bff/Sphere.lean`; Python `ddg_tools.map_to_sphere`;
+  Blender operator "Conformal Map to Sphere". Open: injectivity is reported, not guaranteed
+  (brain: 38 flips, as the reference); the 1e-4 difference of the reference's in-place puncture
+  is unexplained.
 * **Disconnected meshes in the cones solver** (2026-10-17, `crates/ddg-optimal-cones`, README
   "Disconnected meshes"): every entry point accepts several components and returns the exact
   solution of the canonical problem on the whole mesh (masses divided by the total area, one

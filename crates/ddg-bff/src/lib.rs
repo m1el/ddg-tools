@@ -23,6 +23,8 @@
 //! * [`curve`] — boundary lengths and angles to a closed plane curve.
 //! * [`quality`] — angle and area distortion, flipped triangles, overlap, similarity fit.
 //! * [`mollify`] — intrinsic mollification of degenerate edge lengths (never applied unasked).
+//! * [`sphere`] — conformal map of a closed genus-0 mesh to the unit sphere ([`map_to_sphere`]),
+//!   after `BFF::mapToSphere`, with Möbius centering (Baden, Crane, Kazhdan 2018).
 //!
 //! The mollification technique is from N. Sharp and K. Crane, *A Laplacian for Nonmanifold
 //! Triangle Meshes* (SGP 2020); the cut planner combines K. Mehlhorn's approximation of
