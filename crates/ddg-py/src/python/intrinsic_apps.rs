@@ -43,7 +43,7 @@ pub struct GeodesicDistanceResult {
 /// positions      3 reals per vertex.
 /// triangles      3 vertex indices per triangle: a manifold, consistently oriented mesh.
 /// sources        vertex indices (at least one).
-/// triangulation  "refine" (intrinsic Delaunay refinement, the default), "delaunay" (intrinsic
+/// triangulation  "refined" (intrinsic Delaunay refinement, the default), "delaunay" (intrinsic
 ///                Delaunay triangulation) or "input" (the mesh as it is).
 /// time_factor    m in the time step t = m h^2, h the mean edge length (default 1).
 /// boundary       "neumann" (default), "dirichlet" or "average": conditions of the heat step.
@@ -51,7 +51,7 @@ pub struct GeodesicDistanceResult {
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a valid
 /// manifold triangle mesh, SolveError when the triangulation or a solve fails.
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, sources, *, triangulation = "refine", time_factor = 1.0, boundary = "neumann"))]
+#[pyo3(signature = (positions, triangles, sources, *, triangulation = "refined", time_factor = 1.0, boundary = "neumann"))]
 fn geodesic_distance<'py>(
     py: Python<'py>,
     positions: &Bound<'py, PyAny>,

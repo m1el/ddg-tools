@@ -121,7 +121,7 @@ fn retriangulate(
             tri.flip_to_delaunay(&DelaunayOptions::default())
                 .map_err(solve)?;
         }
-        "refine" => {
+        "refined" => {
             tri.flip_to_delaunay(&DelaunayOptions::default())
                 .map_err(solve)?;
             tri.refine(&RefineOptions::default()).map_err(solve)?;
@@ -130,7 +130,7 @@ fn retriangulate(
             return Err(bad_option(
                 "triangulation",
                 format!("{other:?}"),
-                "expected \"input\", \"delaunay\" or \"refine\"",
+                "expected \"input\", \"delaunay\" or \"refined\"",
             ));
         }
     }
@@ -142,7 +142,7 @@ fn retriangulate(
 pub struct HeatArguments {
     /// The source vertices (input ids).
     pub sources: Vec<u32>,
-    /// `"input"`, `"delaunay"` or `"refine"`.
+    /// `"input"`, `"delaunay"` or `"refined"`.
     pub triangulation: String,
     /// `m` in `t = m h²`; finite and positive.
     pub time_factor: f64,
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn heat_distance_on_a_sphere() {
         let input = sphere();
-        for triangulation in ["input", "delaunay", "refine"] {
+        for triangulation in ["input", "delaunay", "refined"] {
             let out = geodesic_distance(
                 &input,
                 &HeatArguments {
@@ -399,7 +399,7 @@ mod tests {
         let input = sphere();
         let args = HeatArguments {
             sources: vec![1000],
-            triangulation: "refine".into(),
+            triangulation: "refined".into(),
             time_factor: 1.0,
             boundary: "neumann".into(),
         };

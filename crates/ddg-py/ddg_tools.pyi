@@ -524,7 +524,7 @@ def length_weight_for_ripples(roughening_rate: float, wavelength: float) -> floa
 
 # ----------------------------------------------------------------------------------------------
 # Applications of intrinsic triangulations: "Navigating Intrinsic Triangulations" (Sharp,
-# Soliman, Crane 2019), Sec. 5.1 and 5.3 (crate ddg-intrinsic-apps).
+# Soliman, Crane 2019), Sec. 5.1, 5.3, 5.4 and 5.5 (crate ddg-intrinsic-apps).
 
 @final
 class GeodesicDistanceResult:
@@ -541,12 +541,12 @@ def geodesic_distance(
     triangles: Buffer,
     sources: Buffer,
     *,
-    triangulation: Literal["refine", "delaunay", "input"] = "refine",
+    triangulation: Literal["refined", "delaunay", "input"] = "refined",
     time_factor: float = 1.0,
     boundary: Literal["neumann", "dirichlet", "average"] = "neumann",
 ) -> GeodesicDistanceResult:
     """Geodesic distance from the vertices ``sources`` by the heat method (Crane, Weischedel,
-    Wardetzky 2013) on the intrinsic Delaunay refinement of the mesh (``"refine"``), its
+    Wardetzky 2013) on the intrinsic Delaunay refinement of the mesh (``"refined"``), its
     intrinsic Delaunay triangulation (``"delaunay"``) or the mesh itself (``"input"``). The
     time step is ``time_factor * h**2``, ``h`` the mean edge length of that triangulation.
     Raises ``InputError`` (bad arguments; a source on the boundary with ``"dirichlet"``),
@@ -578,3 +578,71 @@ def steiner_tree(
     triangulation (``intrinsic=True``) or of the mesh's edges, shortened by Fermat points
     (``steiner_points=True``) with the heuristic of Smith, Lee and Liebman (1981). Raises
     ``InputError``, ``MeshError`` and ``SolveError``."""
+
+@final
+class DirectionFieldResult:
+    @property
+    def vectors(self) -> array[float]:
+        """``array('d')``, 3 per vertex: one of the field's ``n`` directions, a unit vector in
+        the plane of an input face at the vertex (zero where the field vanishes)."""
+    @property
+    def singularity_points(self) -> array[float]:
+        """``array('d')``, 3 per singularity: its place on the surface."""
+    @property
+    def singularity_indices(self) -> array[int]:
+        """``array('i')``, per singularity: its index in units of ``1/n``."""
+    @property
+    def report(self) -> dict[str, str | int | float]:
+        """``status`` (``"converged"`` or ``"iteration_limit"``), ``iterations``,
+        ``eigenvalue``, ``energy`` (eigenvalue times area), ``residual``,
+        ``n_triangulation_vertices``, ``index_sum`` (``n`` times the Euler characteristic on a
+        closed surface), ``euler_characteristic``, ``seconds``."""
+
+def smoothest_direction_field(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    n: int = 1,
+    triangulation: Literal["delaunay", "refined", "input"] = "delaunay",
+    laplacian: Literal["fem", "fd"] = "fem",
+    min_angle_degrees: float = 25.0,
+) -> DirectionFieldResult:
+    """The smoothest ``n``-direction field (``n`` = 1 vectors, 2 lines, 4 crosses; Knöppel,
+    Crane, Pinkall, Schröder 2013) on the intrinsic Delaunay triangulation of the mesh
+    (``"delaunay"``), its intrinsic Delaunay refinement to ``min_angle_degrees``
+    (``"refined"``) or the mesh itself (``"input"``), with the finite element (``"fem"``) or
+    finite difference (``"fd"``) connection Laplacian. Raises ``InputError``, ``MeshError``
+    and ``SolveError``."""
+
+@final
+class AdaptiveResult:
+    @property
+    def values(self) -> array[float]:
+        """``array('d')``, ``n_components`` per vertex (interleaved)."""
+    @property
+    def n_components(self) -> int:
+        """1 (``"green"``, ``"heat"``) or 2 (``"disk"``: coordinates in the unit disk)."""
+    @property
+    def report(self) -> dict[str, str | int | float]:
+        """``status`` (``"tolerance"``, ``"vertex_limit"``, ``"iteration_limit"``,
+        ``"stalled"``), ``iterations``, ``n_triangulation_vertices``, ``estimate``,
+        ``oscillation``, ``seconds``."""
+
+def adaptive_solve(
+    positions: Buffer,
+    triangles: Buffer,
+    problem: Literal["green", "heat", "disk"],
+    *,
+    source: int = 0,
+    time: float | None = None,
+    max_vertices: int = 20000,
+    bulk: float = 0.5,
+    min_angle_degrees: float = 25.0,
+) -> AdaptiveResult:
+    """Solve a model problem with adaptive refinement of an intrinsic triangulation (residual
+    error estimator, bulk marking, intrinsic Delaunay refinement): the harmonic Green's
+    function of ``source`` (``"green"``, mean zero), one backward Euler step of length ``time``
+    of the heat equation from a unit point source (``"heat"``; default time the squared mean
+    edge length), or a harmonic map of a disk-shaped mesh onto the unit disk (``"disk"``).
+    Returns the solution at the mesh's vertices. Raises ``InputError``, ``MeshError`` (also a
+    mesh that is not a disk for ``"disk"``) and ``SolveError``."""

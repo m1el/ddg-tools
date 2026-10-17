@@ -5,7 +5,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use super::{index_array, indices, real_array, reals, unwrap_error};
+use super::{indices, real_array, reals, unwrap_error};
 use crate::contract::ReportValue;
 use crate::intrinsic_vector::{
     AdaptiveOptions, FieldOptions, TriangleArrays, adaptive, direction_field,
@@ -180,7 +180,6 @@ fn adaptive_solve<'py>(
     let out = py
         .detach(move || adaptive(&mesh, &options))
         .map_err(unwrap_error)?;
-    let _ = index_array;
     Ok(AdaptiveResult {
         values: real_array(py, &out.values)?.unbind(),
         n_components: out.n_components,

@@ -36,7 +36,7 @@ def sheared_grid(n=12, shear=3.0):
 class GeodesicDistanceTest(unittest.TestCase):
     def test_octahedron(self):
         positions, triangles = octahedron()
-        for triangulation in ("refine", "delaunay", "input"):
+        for triangulation in ("refined", "delaunay", "input"):
             result = ddg_tools.geodesic_distance(positions, triangles, array.array('i', [0]),
                                                  triangulation=triangulation)
             d = result.distances
