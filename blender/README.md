@@ -475,12 +475,16 @@ edge, junctions of any degree), so nothing else changes for the user.
   variant (`--triangulation intrinsic|caller|refined` changes the default of Start for that
   run, so that every expectation of the earlier tests is checked on each; `--optimal-delaunay`
   also turns Optimal Delaunay on by default: the variants `intrinsic-odt` and `refined-odt`):
-  49, 48 (+1 skipped: the state bytes do not exist for the caller's triangulation), 49, 48 (+1
-  skipped) and 48 (+1 skipped) tests. The skips of the two `-odt` variants are
-  `the_cut_offset_moves_points_away_from_vertices` (its ratio of 20 is measured without iODT), and
-  there the flipped UV triangles on the spot atlas are printed, not asserted: with iODT the
-  8-cluster atlas of spot (weight 2, 60 steps) has 4 of 7354 flipped triangles on the intrinsic
-  triangulation (none without; the library counts the same 4), a known open item. New tests: the
+  49, 48 (+1 skipped: the state bytes do not exist for the caller's triangulation), 49, 49 and
+  49 tests, with the same assertions on every variant. (Until 2026-10-17 the `-odt` variants
+  skipped `the_cut_offset_moves_points_away_from_vertices` and only printed the flipped UV
+  triangles of the spot atlas: with iODT the 8-cluster atlas, weight 2, 60 steps, cut offset
+  0.2, had 4 of 7354 flipped triangles. The cause was the order of the merge of bends and the
+  rule of the cut offset in `ddg_uv`, see "Bends and flipped UV triangles" below; now 0 of 7262.)
+  `the_cut_offset_moves_points_away_from_vertices` measures the smallest triangle on the stored
+  triangulation (the one the unwrap uses; Blender's own triangulation of the split polygons is
+  printed: it does not follow the cut and gave a ratio of 13 instead of 20 with iODT on the
+  refined triangulation; the stored one 169, and 351 on the intrinsic one). New tests: the
   option string, session key and stored option of the flag; an iODT cut on a sphere (intrinsic) and a
   subdivided cube (refined) through Start, Flow, Apply and unwrap with no flipped UV triangle;
   the flag ignored, with a message, on Mesh's Own. New: the 153 degree and
@@ -498,21 +502,23 @@ edge, junctions of any degree), so nothing else changes for the user.
   in two refined cells before merging: 4 against 1 and 2 against 1), **before** (merge 0) and **after** (0.1), `test_cut.py`, spot atlas with 8 clusters at the
   length weights 2 and 10, cut offsets 1e-3 and 0.2:
 
-  | case | intrinsic before / after | refined before / after | caller before / after |
-  |------|-------------------------:|-----------------------:|----------------------:|
-  | spot w2, offset 1e-3 | 1 / 0 | 2 / 0 | 0 / 0 |
-  | spot w2, offset 0.2 | 1 / 0 | 2 / **1** | 0 / 0 |
-  | spot w10, offset 1e-3 | 0 / 0 | 0 / 0 | 0 / 0 |
-  | spot w10, offset 0.2 | 0 / 0 | 4 / **1** | 0 / 0 |
-  | sphere atlas 4 regions | 0 / 0 | 4 / 0 | 0 / 0 |
-  | sphere circle, the three bad grids (153, 165 degrees, needles and caps) | 0 / 0 | 0 / 0 | 0 / 0 |
+  | case | intrinsic | refined | caller | intrinsic + iODT | refined + iODT |
+  |------|----------:|--------:|-------:|-----------------:|---------------:|
+  | spot w2, offset 1e-3 | 1 / 0 | 2 / 0 | 0 / 0 | 39 / 0 | 12 / 0 |
+  | spot w2, offset 0.2 | 1 / 0 | 2 / 0 | 0 / 0 | 50 / 0 | 52 / 0 |
+  | spot w10, offset 1e-3 | 0 / 0 | 0 / 0 | 0 / 0 | 15 / 0 | 25 / 0 |
+  | spot w10, offset 0.2 | 0 / 0 | 4 / 0 | 0 / 0 | 51 / 0 | 36 / 0 |
+  | sphere atlas 4 regions | 0 / 0 | 4 / 0 | 0 / 0 | 11 / 0 | 10 / 0 |
+  | sphere circle | 0 / 0 | 0 / 0 | 0 / 0 | 17 / 0 | 19 / 0 |
+  | the three bad grids (153, 165 degrees, needles and caps) | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 
-  Zero is asserted for every triangulation and case but the two **bold** ones. What remains there
-  (refined triangulation, cut offset 0.2, merge tolerance 0.1): one flipped triangle, the same in
-  both weights, 3D area 0.007 of the mean triangle, smallest angle 0.6 degrees; two bends
-  that deviate by 0.103 of an edge, just over the tolerance, make it. With a tolerance of 0.2
-  (largest displacement 0.103) both cases have none, which the test checks (a tolerance of 0.05
-  leaves 2 and 4 flipped triangles on the two cases).
+  Zero is asserted for every triangulation and case. Until 2026-10-17 the refined cases at offset
+  0.2 kept one flipped triangle each (a bend "0.103 of an edge" from its chord) and iODT at 0.2
+  kept a few: the cut offset moved every point of the cut first, and the merge measured its
+  displacement at the moved points, so that a bend the offset had pushed off a side counted as
+  displaced and stayed. The merge now measures on the cut the flow found, and removes the
+  excursions of the cut across a side whose points the offset moved (`crates/ddg-uv/README.md`,
+  "A large cut offset, and the optimal Delaunay triangulation").
 
 ### Cost of the cut operators
 

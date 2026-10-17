@@ -1280,7 +1280,14 @@ def unwrap_falls_back_to_blenders_triangulation_when_the_mesh_was_edited():
 
 @test
 def the_cut_offset_moves_points_away_from_vertices():
-    smallest = {}
+    """The smallest triangle against the mean after Apply, at the cut offsets 1e-3 and 0.2, on
+    the triangulation the unwrap uses: the library's, stored by Apply for the split polygons.
+    Blender's own triangulation of those polygons is printed too, not asserted: it does not
+    follow the cut and can make a thin triangle at any offset (with Optimal Delaunay on the
+    refined triangulation it gave a ratio of 13; the stored one gives 169, and 351 on the
+    intrinsic one)."""
+    core = importlib.import_module(ARGS.module + ".core")
+    smallest, blender = {}, {}
     for offset in (1e-3, 0.2):
         reset()
         obj = spot_object()
@@ -1290,16 +1297,23 @@ def the_cut_offset_moves_points_away_from_vertices():
         assert bpy.ops.uv.ddg_cut_flow(steps=20, length_mode='EXPLICIT', length_weight=2.0,
                                        cut_offset=offset) == {'FINISHED'}
         assert bpy.ops.uv.ddg_cut_apply(cut_offset=offset) == {'FINISHED'}
-        mesh.calc_loop_triangles()
-        pts = [c for v in mesh.vertices for c in v.co]
-        areas = []
-        for tri in mesh.loop_triangles:
-            a, b, c = (Vector(pts[3 * mesh.loops[i].vertex_index:3 * mesh.loops[i].vertex_index + 3])
-                       for i in tri.loops)
-            areas.append(0.5 * (b - a).cross(c - a).length)
-        smallest[offset] = min(areas) / (sum(areas) / len(areas))
-    print("  smallest triangle area / mean: {:.3g} at 1e-3, {:.3g} at 0.2".format(
-        smallest[1e-3], smallest[0.2]))
+        positions, corner_vertices, polygon_starts, triangles = core.mesh_buffers(mesh)
+        stored, note = core.stored_triangulation(mesh, corner_vertices, polygon_starts, triangles)
+        assert note and note["used"] > 0 and note["stale"] == 0, note
+
+        def ratio(corners):
+            areas = []
+            for k in range(0, len(corners), 3):
+                a, b, c = (Vector(positions[3 * v:3 * v + 3])
+                           for v in (corner_vertices[i] for i in corners[k:k + 3]))
+                areas.append(0.5 * (b - a).cross(c - a).length)
+            return min(areas) / (sum(areas) / len(areas))
+
+        smallest[offset] = ratio(stored)
+        blender[offset] = ratio(triangles)
+    print("  smallest triangle area / mean: {:.3g} at 1e-3, {:.3g} at 0.2 (Blender's own "
+          "triangulation of the split polygons: {:.3g} and {:.3g})".format(
+              smallest[1e-3], smallest[0.2], blender[1e-3], blender[0.2]))
     assert smallest[0.2] > 20 * smallest[1e-3]
 
 
