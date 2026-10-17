@@ -933,3 +933,18 @@ open DdgProofs
 #print axioms Cuts.limited_le_predictedMotionOnMesh
 #print axioms Cuts.predictedMotionOnCut_rest
 #print axioms Cuts.motionCriterion_rest
+-- Applications of intrinsic triangulations (Sec. 5.2, 5.3): one triangle's formulas
+#print axioms IntrinsicApps.gradSum_linear
+#print axioms IntrinsicApps.gradSum_normalized
+#print axioms IntrinsicApps.divergence_corner
+#print axioms IntrinsicApps.divergence_sum_zero
+#print axioms IntrinsicApps.galerkin_form_bounds
+#print axioms IntrinsicApps.midpoint_half
+#print axioms IntrinsicApps.midline
+#print axioms Apps.transport_around_face
+#print axioms Apps.scaled_minus_sum
+#print axioms Apps.edge_energy
+#print axioms Apps.edge_entries_hermitian
+#print axioms Apps.conformal_parts_det
+#print axioms Apps.conformal_parts_frobenius
+#print axioms Apps.singular_values_from_parts

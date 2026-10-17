@@ -183,9 +183,17 @@ enum Verdict {
     Needle(u32),
 }
 
+/// The extra criterion of [`IntrinsicTriangulation::refine`]: none.
+fn no_extra_criterion(_: &IntrinsicTriangulation, _: usize) -> bool {
+    false
+}
+
 struct Refiner<'a> {
     tri: &'a mut IntrinsicTriangulation,
     options: RefineOptions,
+    /// An extra criterion: a face for which it returns true is refined as well
+    /// ([`IntrinsicTriangulation::refine_with`]).
+    extra: &'a dyn Fn(&IntrinsicTriangulation, usize) -> bool,
     queue: EdgeQueue,
     /// Faces to look at: (area, face, stamp of the face when it was put here).
     heap: BinaryHeap<(u64, u32, u32)>,
@@ -236,6 +244,7 @@ impl<'a> Refiner<'a> {
         Refiner {
             tri,
             options,
+            extra: &no_extra_criterion,
             queue: EdgeQueue::empty(n_edges),
             heap: BinaryHeap::new(),
             stamps: vec![0; n_faces],
@@ -293,7 +302,7 @@ impl<'a> Refiner<'a> {
     }
 
     fn needs_refinement(&self, f: usize) -> bool {
-        self.small_corner(f).is_some() || self.too_large(f)
+        self.small_corner(f).is_some() || self.too_large(f) || (self.extra)(self.tri, f)
     }
 
     fn is_encroached(&self, e: usize) -> bool {
@@ -684,6 +693,30 @@ impl IntrinsicTriangulation {
     /// circumradius bound that is not positive, or an invalid Delaunay tolerance. Reaching the
     /// insertion limit is not an error.
     pub fn refine(&mut self, options: &RefineOptions) -> Result<RefineReport, IntrinsicError> {
+        self.refine_with(options, &no_extra_criterion)
+    }
+
+    /// [`refine`](Self::refine) with an extra criterion: a face `f` for which
+    /// `extra(triangulation, f)` returns true is refined as well (its circumcentre is
+    /// inserted by the same rules as for a face below the angle bound), in addition to the
+    /// faces below the angle bound or above the circumradius bound. This is the hook for
+    /// adaptive refinement (paper Sec. 5.4): the criterion says which faces an error
+    /// estimate marked.
+    ///
+    /// The criterion is asked whenever a face is created or changed, and again before it is
+    /// refined; it must return false for every face after finitely many insertions (for
+    /// example: true only for faces that are unchanged since the estimate), or refinement
+    /// runs until the insertion limit. Faces the criterion still marks at the end are not
+    /// listed in the report. With a criterion that is always false this is
+    /// [`refine`](Self::refine), bit for bit.
+    ///
+    /// # Errors
+    /// As [`refine`](Self::refine).
+    pub fn refine_with(
+        &mut self,
+        options: &RefineOptions,
+        extra: &dyn Fn(&IntrinsicTriangulation, usize) -> bool,
+    ) -> Result<RefineReport, IntrinsicError> {
         let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
         if !(options.min_angle >= 0.0 && options.min_angle <= 35f64.to_radians()) {
             return invalid(format!(
@@ -708,6 +741,7 @@ impl IntrinsicTriangulation {
             InsertionLimit::Unlimited => usize::MAX,
         };
         let mut refiner = Refiner::new(self, *options, budget);
+        refiner.extra = extra;
         refiner.n_flips = first.n_flips;
         let n_faces = refiner.tri.n_faces();
         for f in 0..n_faces {

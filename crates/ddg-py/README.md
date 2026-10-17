@@ -446,6 +446,47 @@ the library's triangles for the split polygons removes them at every offset (the
 does this, `blender/README.md`, "stored triangulation"). `min_crossing_offset` of `describe_cut`,
 `preview`, `insert` and `unwrap` (default `1e-3`) only moves the cut away from vertices.
 
+## Applications of intrinsic triangulations
+
+Four functions over the crate `ddg-intrinsic-apps` (Sharp, Soliman, Crane, *Navigating Intrinsic
+Triangulations*, 2019, Sec. 5; measurements and decisions in `crates/ddg-intrinsic-apps/README.md`
+and `SPEC.md`). Each takes `positions` (3 floats per vertex) and `triangles` (3 indices per
+triangle, a manifold oriented mesh), works on an intrinsic triangulation of that surface, and
+returns per-vertex `array.array` results with a `report` dictionary. The triangulation is one of
+`"input"` (the mesh), `"delaunay"` (its intrinsic Delaunay triangulation) and `"refined"`
+(intrinsic Delaunay refinement, 25 degrees by default, as `CutSession`'s `"refined"`).
+
+```python
+geodesic_distance(positions, triangles, sources, *, triangulation="refined", time_factor=1.0,
+                  boundary="neumann")            # -> .distances, .report         (Sec. 5.3)
+steiner_tree(positions, triangles, *, intrinsic=True, steiner_points=True)
+                                                 # -> .points, .offsets, .report  (Sec. 5.1)
+smoothest_direction_field(positions, triangles, *, n=1, triangulation="delaunay",
+                          laplacian="fem", min_angle_degrees=25.0)
+                  # -> .vectors, .singularity_points, .singularity_indices, .report (Sec. 5.5)
+adaptive_solve(positions, triangles, problem, *, source=0, time=None, max_vertices=20000,
+               bulk=0.5, min_angle_degrees=25.0)  # -> .values, .n_components, .report (Sec. 5.4)
+```
+
+* `geodesic_distance`: the heat method, factored once; distance 0 at the source vertices.
+* `steiner_tree`: a short cut through all vertices (the MST of the iDT shortened by Fermat
+  points), as polylines on the surface (`offsets[k]` is where the polyline of tree edge `k`
+  starts in `points`); `report["is_disk"]` says whether cutting along it leaves a disk.
+* `smoothest_direction_field`: the smoothest `n`-direction field (1 vectors, 2 lines,
+  4 crosses), one unit vector per vertex in the plane of an input face, and its singularities
+  (index in units of `1/n`; on a closed surface they add up to `n` times the Euler
+  characteristic, `report["index_sum"]`).
+* `adaptive_solve`: `"green"` (harmonic Green's function of `source`), `"heat"` (one backward
+  Euler step of length `time` from a unit point source; default the squared mean edge length)
+  or `"disk"` (a harmonic map of a disk-shaped mesh onto the unit disk, 2 components per
+  vertex), solved with adaptive refinement up to `max_vertices`; values at the mesh's vertices.
+
+Errors: `InputError` (bad arguments, the message starts with the parameter), `MeshError` (not a
+manifold triangle mesh; not a disk for `"disk"`), `SolveError`. Glue: `src/python/intrinsic_apps.rs`,
+`src/python/intrinsic_vector.rs`; logic (pure Rust, tested by `cargo test`):
+`src/intrinsic_apps.rs`, `src/intrinsic_vector.rs`; tests of the wheel:
+`python-tests/test_intrinsic_apps.py`, `python-tests/test_intrinsic_vector.py`.
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the

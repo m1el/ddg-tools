@@ -31,4 +31,8 @@ ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
 # Boundary First Flattening: `map_to_sphere` (a closed genus-0 mesh to the unit sphere).
 ddg-bff = { path = "../ddg-bff" }
+# Applications of intrinsic triangulations: geodesic_distance and steiner_tree (src/intrinsic_apps.rs),
+# tangent fields and adaptive refinement (src/intrinsic_vector.rs).
+ddg-intrinsic = { path = "../ddg-intrinsic" }
+ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

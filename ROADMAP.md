@@ -12,15 +12,13 @@ with a notes file saying what is done, what remains and how to resume:
 
 * Done and merged 2026-10-17: BFF mapping to the sphere (`wip-bff-sphere`, finished in
   `44412af`; see "Landed" and `crates/ddg-bff/README.md`).
-* `wip-apps-5123` (6e59c99): intrinsic triangulations applications 5.1–5.3 (Steiner tree, FEM
-  condition numbers, heat method; own exact polyhedral distance) in a new crate
-  `crates/ddg-intrinsic-apps`, Python bindings; notes `NOTES-apps-5.1-5.3.md`; SPEC ids N30–N39.
-* `wip-apps-amr-vector` (f730a89): applications 5.4–5.5 (adaptive refinement, tangent vector
-  fields) in the same new crate, `ddg_intrinsic::refine_with` (extra per-face criterion); notes
-  `NOTES-apps-5.4-5.5.md`; SPEC ids N40–N49. ddg-py part not compiled yet.
-* Both app branches create the crate: merge by hand. Both report `check-formulas.sh --build`
-  failing in `Intrinsic/Move.lean` ("unknown Ddg.movedLength"), probably a stale Lean cache
-  copied into their clones; check on a clean build.
+* Done (2026-10-17): `wip-apps-5123` (6e59c99), applications 5.1–5.3. Merged with the next one
+  into `crates/ddg-intrinsic-apps`; see "Landed".
+* Done (2026-10-17): `wip-apps-amr-vector` (f730a89), applications 5.4–5.5 and
+  `ddg_intrinsic::refine_with`; ddg-py part compiled, registered and tested. See "Landed".
+* Done: the `check-formulas.sh --build` failure both app branches reported ("unknown
+  Ddg.movedLength" in `Intrinsic/Move.lean`) was the stale Lean cache copied into their clones;
+  a build with fresh project outputs passes.
 * The agents' worktrees were created by mistake inside the authors' demo repository
   (`NavigatingIntrinsicTriangulations/navigating-intrinsic-triangulations-demo/.claude/worktrees/`,
   with clones of ddg-tools inside). Everything was fetched here; remove those worktrees and their
@@ -47,6 +45,28 @@ work).
   Blender operator "Conformal Map to Sphere". Open: injectivity is reported, not guaranteed
   (brain: 38 flips, as the reference); the 1e-4 difference of the reference's in-place puncture
   is unexplained.
+* **Applications of intrinsic triangulations** (2026-10-17, new crate `crates/ddg-intrinsic-apps`,
+  README and SPEC N30–N49; Python `geodesic_distance`, `steiner_tree`,
+  `smoothest_direction_field`, `adaptive_solve`): 5.1 Steiner trees (1–6 % shorter than the
+  extrinsic MST), 5.2 FEM condition numbers (4-1 subdivision orders of magnitude worse than iDR
+  and iODT on bad inputs), 5.3 the heat method against an exact polyhedral distance written for
+  the crate, 5.4 adaptive refinement (residual estimator, bulk marking, `refine_with`), 5.5
+  connection Laplacians, harmonic fields and the vector maximum principle, smoothest direction
+  fields. Open:
+  * the extrinsic ODT of Fig. 17 (5.2 compares against the 4-1 subdivision only) and Fig. 16
+    (`L²` error of a Poisson problem) are not reproduced;
+  * cut graphs for genus above zero (5.1 cuts a disk only on genus-zero surfaces);
+  * Blender: nothing uses the applications; the 5.1 cut as seams needs its intrinsic edges
+    inserted into the mesh first;
+  * the vector-field study finds Fig. 21's large energy drop (input to iDT to iDR) only on the
+    shot-noise camel; the paper's mesh is not in the data set (crate README, 5.5);
+  * timings to re-run single-thread, one at a time, on a quiet machine (a run on 2026-10-17 was
+    stopped because a kernel build was loading the machine): `cargo bench -p ddg-intrinsic-apps
+    --bench heat` (never run alone), the AMR-vs-uniform study (`examples/amr_study.rs`, eight
+    problem rows and two disk maps) and the vector-field study (`examples/vector_study.rs`); the
+    README's time columns of 5.4 and 5.5 come from parallel runs. Vertex counts, errors and
+    energies are not affected.
+
 * **Disconnected meshes in the cones solver** (2026-10-17, `crates/ddg-optimal-cones`, README
   "Disconnected meshes"): every entry point accepts several components and returns the exact
   solution of the canonical problem on the whole mesh (masses divided by the total area, one

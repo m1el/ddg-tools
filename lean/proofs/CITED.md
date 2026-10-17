@@ -1051,6 +1051,176 @@ an earlier version with another title, were read).
   which edges are split, where, and how often. Nothing of correctness depends on it; the
   vertices it adds are inserted vertices like any other (N10).
 
+## Navigating Intrinsic Triangulations: applications 5.1 to 5.3
+
+The applications of the Signpost paper's Sec. 5.1 (Steiner trees), 5.2 (finite elements) and 5.3
+(geodesic distance by the heat method) are in `crates/ddg-intrinsic-apps` (contract: its `SPEC.md`,
+decisions `N30`–`N39`). Machine-checked (`DdgProofs/IntrinsicApps/HeatFem.lean`): the closed forms
+of one triangle, `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-mass` (row sums and
+the bounds against the lumped mass; that its entries are the integrals `∫ φ_i φ_j` is the
+standard formula and is not proved) and `app-fem-midpoint-subdivision`. The stiffness matrix is
+`cotan-fem-stiffness` above. Cited below: the Fermat point of a triangle. Not covered: the Steiner
+heuristic as a whole (Smith, Lee, Liebman 1981, a heuristic with no optimality statement), the
+convergence of the heat method (Crane, Weischedel, Wardetzky 2013, Sec. 3.2 and their
+Appendix A), the exact window propagation of `exact.rs` (Mitchell, Mount, Papadimitriou 1987;
+Surazhsky et al. 2005; the filter of Xin and Wang 2009, argued in its module documentation), the
+Lanczos iteration, and every tolerance.
+
+### [formula: app-steiner-fermat-point] The Fermat point of a triangle and the Steiner tree of its corners
+
+- **Statement.** In a triangle whose angles are all below `120°` (`2π/3`) the point `F` that
+  minimizes the sum of the distances to the three corners (the Fermat or Torricelli point, the
+  first isogonic centre) lies inside the triangle and sees every side under `120°`; the shortest
+  network joining the three corners is the three segments from `F` (the Steiner minimal tree of
+  three points; if an angle is `120°` or more, it is the two sides at that corner). Its
+  trilinear coordinates are `csc(A + π/3) : csc(B + π/3) : csc(C + π/3)`, so its barycentric
+  coordinates are `a csc(A + π/3) : b csc(B + π/3) : c csc(C + π/3)` (`a` the side opposite the
+  angle `A`), and the length of the tree is `S` with `S² = (a² + b² + c²)/2 + 2√3·Area`.
+- **Reference.** E. N. Gilbert, H. O. Pollak, *Steiner minimal trees*, SIAM Journal on Applied
+  Mathematics 16(1), 1–29, 1968, <https://doi.org/10.1137/0116001> (the three-point problem and
+  the `120°` condition). C. Kimberling, *Encyclopedia of Triangle Centers*, X(13) (Fermat point;
+  trilinears `csc(A + π/3)`), <https://faculty.evansville.edu/ck6/encyclopedia/ETC.html>.
+  Signpost paper Sec. 5.1, which prints "barycentric coordinates `b_i := csc(θ_i + π/3)`".
+- **Source check.** Not read: Gilbert–Pollak (paywalled) and the Encyclopedia entry; the
+  statements are the classical ones and are checked numerically instead
+  (`crates/ddg-intrinsic-apps/tests/steiner.rs`, `the_fermat_point_joins_the_corners_at_120_degrees`:
+  the three directions from the computed point meet at `120°` to `1e-12` and the length agrees
+  with the formula for `S²` to `1e-12`, on four triangles). The paper's `csc(θ_i + π/3)` used as
+  barycentric coordinates gives another point (they are the trilinear coordinates); SPEC N30.
+- **Why not formalized.** The minimality of the network is a statement about all networks
+  joining three points; the coordinates need the trigonometry of the triangle's angles, for
+  which nothing in `lean/proofs` is set up.
+- **What depends on it.** The length and the place of every Steiner point of `steiner_tree`
+  (SPEC N30). Nothing else: the tree is checked as a tree and the cut as a disk whatever the
+  points are.
+
+---
+
+## Navigating Intrinsic Triangulations, Sec. 5.4 and 5.5: adaptive refinement and tangent fields
+
+The contract is `crates/ddg-intrinsic-apps/SPEC.md` (decisions N40–N49). "VHM" is N. Sharp,
+Y. Soliman, K. Crane, *The Vector Heat Method*, ACM TOG 38(3), Article 24, 2019
+(<https://doi.org/10.1145/3243651>); "GODF" is F. Knöppel, K. Crane, U. Pinkall, P. Schröder,
+*Globally Optimal Direction Fields*, ACM TOG 32(4), Article 59, 2013
+(<https://doi.org/10.1145/2461912.2462005>); "MNS" is P. Morin, R. H. Nochetto, K. G. Siebert,
+*Convergence of adaptive finite element methods*, SIAM Review 44(4), 631–658, 2002
+(<https://doi.org/10.1137/S0036144502409093>); "MN" is K. Mekchay, R. H. Nochetto,
+*Convergence of adaptive finite element methods for general second order linear elliptic PDEs*,
+SIAM J. Numer. Anal. 43(5), 1803–1827, 2005 (<https://doi.org/10.1137/04060929X>).
+Copies read (2026-10-17), in `../NavigatingIntrinsicTriangulations/cited/applications-5.4-5.5/`:
+the authors' PDFs of VHM (19 pages) and GODF (8 pages); the preprint of MNS from Nochetto's
+web page (27 pages, numbering of the preprint; its text layer is unreadable, pages 4–6 were
+read as images); of MN only the first two pages of the authors' preprint, and in full
+Mekchay's PhD thesis (University of Maryland 2005, `hdl:1903/3216`), whose Chapter 1 is the
+paper; equation numbers below are the thesis's. Bibliographic data of the journal versions were
+not checked against Crossref (no network lookup of the DOIs was made); the DOIs are those the
+authors' pages give.
+
+**Machine-checked** (`DdgProofs/Intrinsic/AppsAmrVector.lean`): `app-vector-face-holonomy`
+(the transport angles around a face add up to `Σ (s − 1) θ` modulo full turns; the corner terms
+at an interior vertex add up to its angle defect), `app-vector-fd-connection-laplacian` (one
+edge's contribution to `u* L u` is `w |u_j − r u_i|²`; the entries are Hermitian),
+`app-amr-map-distortion` (singular values from the conformal and anticonformal parts). Not
+machine-checked: the entries below, and everything about rounding and the solvers.
+
+### [formula: app-vector-transport] Transport of tangent vectors along an edge
+
+- **Statement.** With `φ_ij` the direction of edge `ij` at `i` in the tangent frame of `i`, a
+  vector is kept parallel from `i` to `j` by turning its angle by `ρ_ij = (φ_ji + π) − φ_ij`;
+  `r_ij = e^{iρ_ij}`, and for `n`-vectors `r_ij^n`.
+- **Reference.** VHM Sec. 5.2, "Discrete Parallel Transport", Eq. 10; GODF Sec. 6, Eq. 12 (the
+  same with `θ_j(X_j, e_ij) − θ_i(X_i, e_ij)`).
+- **Why not formalized.** It is the definition of the discrete connection (the Levi-Civita
+  connection of the flat cone metric along a straight edge), not a derived formula. Its
+  consistency around a face is machine-checked (`app-vector-face-holonomy`).
+- **What depends on it.** Every matrix of `vector` (SPEC N40, N42).
+
+### [formula: app-vector-fem-connection-laplacian] The finite element connection Laplacian of Knöppel et al.
+
+- **Statement.** On a triangle with holonomy `Ω` (curvature constant per area) the piecewise
+  linear basis sections `ψ_j = b_j ξ_j` (`ξ_j` parallel along rays from vertex `j`) have
+  `⟨ψ_j, ψ_k⟩ = r̄_jk e^{iΩ b_i} b_j b_k` and the covariant derivatives of SPEC N43; their
+  integrals are the local mass and Dirichlet matrices. In closed form
+  `∫⟨ψ_j, ψ_k⟩ = r̄_jk |t| (6e^{iΩ} − 6 − 6iΩ + 3Ω² + iΩ³)/(3Ω⁴)`, `∫|ψ_i|² = |t|/6`, and the
+  Dirichlet diagonal `(1/4|t|)[|p_jk|² + Ω² (3g₁₁ − 3g₁₂ + g₂₂)/90]`.
+- **Reference.** GODF Sec. 6, "PL Finite Elements", Sec. 6.1.1 (Eq. 17, 18) and App. D.1–D.3.
+- **Source check.** Read GODF Sec. 6 and App. D in the authors' PDF. The text layer of the
+  closed forms of App. D.3 is garbled; the Rust code does not use them. It integrates the
+  integrands derived in SPEC N43 exactly (monomial by monomial); the unit tests compare the
+  mass entry with Eq. 17, the diagonal with the formula above, the flat limit with the cotan
+  matrix, and all nine entries with a quadrature of the model (basis sections in one gauge,
+  covariant derivatives by differences). The monomials are integrated with the area-coordinate
+  rule `∫_T b_0^a b_1^b b_2^c = 2|T| a! b! c! / (a + b + c + 2)!` (e.g. O. C. Zienkiewicz,
+  R. L. Taylor, *The Finite Element Method*, vol. 1); its case `a + b + c = 2` is the Galerkin
+  mass matrix, machine-checked as `app-fem-galerkin-mass` and used by `amr` too.
+- **Why not formalized.** Integrals of exponentials over a triangle; Mathlib has the
+  integrals but the statement is about a gauge model of a line bundle that is not in Mathlib.
+- **What depends on it.** `ConnectionLaplacian::FiniteElement`: the smoothest direction fields
+  and the energies of the README's Fig. 21 table.
+
+### [formula: app-vector-singularity-index] The index of a face
+
+- **Statement.** For a field `u` of unit `n`-vectors, `ω_ij ∈ (−π, π)` with
+  `u_j = e^{iω_ij} r_ij u_i`; the index of face `ijk` is `(ω_ij + ω_jk + ω_ki + Ω_ijk)/2π`, an
+  integer; the sum over a closed surface is `nχ` (discrete Poincaré–Hopf).
+- **Reference.** GODF Sec. 6.1.3, Eq. 19, and App. B.
+- **Why not formalized.** The sum over a closed surface needs the combinatorics of the mesh
+  (each interior edge's `ω` cancels with its twin's) and Gauss–Bonnet; with the unwrapped `Ω`
+  of SPEC N43 the sum is `Σ_f Ω_f / 2π = nχ`, and the per-face part is
+  `app-vector-face-holonomy`.
+- **What depends on it.** `vector::singularities` and the index sums of the README.
+
+### [formula: app-vector-maximum-principle] The vector maximum principle on an intrinsic Delaunay triangulation
+
+- **Statement.** If every cotan weight `w_ij` at an interior vertex `i` is non-negative and
+  `(L∇ u)_i = 0`, then `u_i = Σ_j w_ij r_ji u_j / Σ_j w_ij` is a positive combination of the
+  transported neighbours and lies in their convex cone; on the intrinsic Delaunay
+  triangulation every interior weight is non-negative.
+- **Reference.** VHM Sec. 5.4; the paper Sec. 5.5 ("Flip-Free Vector Fields", Fig. 22).
+- **Why not formalized.** Immediate from the definition (and from `it-delaunay-condition`
+  for the weights); the margin of SPEC N45 is a measurement, not a theorem.
+- **What depends on it.** `vector::check_maximum_principle` and the README's table.
+
+### [formula: app-amr-edge-flux] The flux of a linear function through a side
+
+- **Statement.** In a triangle with corners `i, j, k` and corner angles `θ`, the outward
+  flux of a linear `u` through the side `ij` is `ℓ_ij ∇u·ν = cot θ_j (u_i − u_k) + cot θ_i (u_j − u_k)`.
+- **Reference.** The cotan formula (`cotan-fem-stiffness`): `∇b_i · ∇b_j = −cot θ_k / 2|T|`
+  and `ℓ_ij ν = −2|T| ∇b_k`.
+- **Why not formalized.** Plane geometry of one triangle; `cotan-fem-stiffness` is cited too.
+- **What depends on it.** The jump residuals of `amr::estimate`.
+
+### [formula: app-amr-residual-estimator] The residual a posteriori error estimator and the oscillation
+
+- **Statement.** For `(c + Δ)u = f` and its linear finite element solution `u_H`, with the
+  element residual `R_T = f − c u_H` (the Laplacian of a linear function vanishes inside an
+  element) and the jump `J_S` of the normal derivative across side `S`,
+  `η_T² = H_T² ‖R_T‖²_T + Σ_{S⊂∂T} H_S ‖J_S‖²_S`, `osc_T² = H_T² ‖R_T − R̄_T‖²_T` (`R̄_T`
+  the mean), `H_T` the diameter of `T`; the energy error is bounded above by `C₁ η` and locally
+  below by `C₂ η_T² − C₃ osc²` (upper and lower bounds).
+- **Reference.** MN (thesis) Eqs. 1.3.3–1.3.8; MNS Sec. 2, Eqs. 2.5–2.8 (per side, with
+  `‖H_S^{1/2} J_S‖²_S + ‖H f‖²_{ω_S}`); the paper's supplement, Sec. 2 (which prints
+  `A_ijk²` in place of `H_T²`; SPEC N47).
+- **Why not formalized.** Sobolev spaces and Clément interpolation are not in Mathlib in the
+  needed form.
+- **What depends on it.** `amr::estimate` and the marking; nothing of correctness of a solve.
+  For a point source the estimator is not an upper bound of anything finite (SPEC N47).
+
+### [formula: app-amr-bulk-marking] Bulk (Dörfler) marking
+
+- **Statement.** Mark a set of elements carrying the fraction `θ` of the estimator
+  (`Σ_marked η_T² ≥ θ² Σ η_T²`), and enlarge it until it carries the fraction `θ̂` of the
+  oscillation; refining every marked element with an interior node reduces error plus
+  oscillation by a fixed factor.
+- **Reference.** MNS Sec. 3, Marking Strategy E (and O); MN Eqs. 1.3.9, 1.3.10 and Sec. 1.3.4
+  (Interior Node Property); the supplement prints the criterion on sums of `η` (not squared)
+  with `θ = 1/2` (SPEC N48).
+- **Why not formalized.** The contraction is a theorem about Sobolev spaces; the marking itself
+  is a greedy selection.
+- **What depends on it.** `amr::mark`, `amr::adaptive_solve`. Not claimed: that intrinsic
+  Delaunay refinement has the Interior Node Property (it inserts one circumcentre per marked
+  face, not a node in every side), so the contraction is not claimed either (SPEC N48).
+
 ---
 
 ## Out of scope of this package

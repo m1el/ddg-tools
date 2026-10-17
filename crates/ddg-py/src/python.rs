@@ -23,6 +23,8 @@ use crate::pipeline::{IS_PLACEHOLDER, PIPELINE_NAME};
 
 mod cut;
 mod sphere;
+mod intrinsic_apps;
+mod intrinsic_vector;
 
 pyo3::create_exception!(
     ddg_tools,
@@ -571,6 +573,8 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<UnwrapResult>()?;
     cut::register(m)?;
     sphere::register(m)?;
+    intrinsic_apps::register(m)?;
+    intrinsic_vector::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;
     m.add("MeshError", py.get_type::<MeshError>())?;
