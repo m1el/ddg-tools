@@ -18,6 +18,7 @@ use std::f64::consts::{PI, TAU};
 use crate::edge_trace::EdgeTraceOptions;
 use crate::error::IntrinsicError;
 use crate::formulas::{signpost_update, triangle_layout};
+use crate::insert::{EdgeSnap, LOCATION_SNAP};
 use crate::point::{SurfacePoint, point_defect};
 use crate::surface::Surface;
 use crate::trace::{Target, TraceOptions, TraceStop, run};
@@ -108,12 +109,20 @@ impl IntrinsicTriangulation {
 
     /// Follows a path over the input mesh from vertex `from` and returns its end with the
     /// direction back, or an error that says where it stopped.
+    ///
+    /// An end inside an input face within [`LOCATION_SNAP`] of the longest edge of that face,
+    /// and within `snap_distance`, from an edge of the face is returned as the point of that
+    /// input edge (SPEC N28): the end of a path to a point on an input edge comes out a
+    /// rounding error inside one of the two faces of the edge, chosen by rounding, and a
+    /// point given as a point of one face is met only by a path in that face. A point of the
+    /// edge belongs to both.
     fn trace_from_vertex(
         &self,
         from: usize,
         phi: f64,
         length: f64,
         what: SurfacePoint,
+        snap_distance: f64,
     ) -> Result<(SurfacePoint, f64), IntrinsicError> {
         let trace = run(
             &*self.input,
@@ -135,7 +144,21 @@ impl IntrinsicTriangulation {
                          a vertex",
             });
         }
-        Ok((trace.end, trace.back_direction))
+        Ok(
+            match self.snap_onto_input_edge(
+                trace.end,
+                trace.back_direction,
+                LOCATION_SNAP,
+                snap_distance,
+            ) {
+                EdgeSnap::Onto { location, back, .. } => (location, back),
+                // Exactly at a corner (two coordinates exactly zero) the point stays a point
+                // of the face; a degenerate face cannot have been traced through.
+                EdgeSnap::Far | EdgeSnap::Corner | EdgeSnap::Degenerate(_) => {
+                    (trace.end, trace.back_direction)
+                }
+            },
+        )
     }
 
     /// Places a point of an edge on the input mesh. Direction zero is along the edge.
@@ -165,8 +188,13 @@ impl IntrinsicTriangulation {
             }
         }
         let what = SurfacePoint::Edge { edge: e as u32, t };
-        let (point, back) =
-            self.trace_from_vertex(a, self.signposts[h], t * self.edge_lengths[e], what)?;
+        let (point, back) = self.trace_from_vertex(
+            a,
+            self.signposts[h],
+            t * self.edge_lengths[e],
+            what,
+            LOCATION_SNAP * self.edge_lengths[e],
+        )?;
         Ok(Located {
             point,
             zero: wrap(back + PI),
@@ -193,7 +221,14 @@ impl IntrinsicTriangulation {
             face: f as u32,
             bary,
         };
-        let (point, back) = self.trace_from_vertex(self.faces[f][k] as usize, phi, length, what)?;
+        let l = self.face_lengths(f);
+        let (point, back) = self.trace_from_vertex(
+            self.faces[f][k] as usize,
+            phi,
+            length,
+            what,
+            LOCATION_SNAP * l[0].min(l[1]).min(l[2]),
+        )?;
         // `back` points from the point to the corner; in the frame of the face that
         // direction has the angle of `to_corner`.
         Ok(Located {
@@ -205,7 +240,11 @@ impl IntrinsicTriangulation {
     /// The place on the input mesh of a point of the triangulation (paper Alg. 11): the
     /// stored place for a vertex; for a point of an edge or a face, the end of a tracing
     /// query over the input mesh, or an interpolation along the input edge for an edge that
-    /// lies along one.
+    /// lies along one. An end of a tracing query within [`LOCATION_SNAP`] of the longest edge
+    /// of its input face, and within `LOCATION_SNAP` of the edge the point lies on (of the
+    /// shortest side of the face the point lies in), from an edge of that input face is
+    /// returned as the point of that input edge, which belongs to both faces of the edge
+    /// (SPEC N29).
     ///
     /// # Errors
     /// [`IntrinsicError::InvalidPoint`], and the errors of a tracing query.
@@ -388,6 +427,9 @@ impl IntrinsicTriangulation {
     /// so that segments that share a node meet there exactly. Each segment is then traced over
     /// the input mesh from the place of its first node in the direction of its second, and
     /// must arrive at the place of the second within `options.tolerance` times its length.
+    /// A segment along a side of its face that lies along an input edge is not traced: its
+    /// path is the piece of that input edge between the places of its ends, whose length must
+    /// be its length within the same tolerance (SPEC N29).
     ///
     /// A node must not be an end of an edge or a corner in disguise (`t` of 0 or 1, a
     /// barycentric coordinate of 1): use the vertex. In a face that uses a vertex or an edge
@@ -466,9 +508,14 @@ impl IntrinsicTriangulation {
             let [from, to] = segment.nodes.map(|n| n as usize);
             let v = triangle_layout(self.face_lengths(f)).ok_or_else(|| self.degenerate(f))?;
             let (p, kind) = self.node_in_face(f, &v, nodes[from])?;
-            let (q, _) = self.node_in_face(f, &v, nodes[to])?;
-            let path =
-                self.segment_path(f, &v, (kind, p, located[from]), (q, located[to]), options)?;
+            let (q, kind_to) = self.node_in_face(f, &v, nodes[to])?;
+            let path = self.segment_path(
+                f,
+                &v,
+                (kind, p, located[from]),
+                (kind_to, q, located[to]),
+                options,
+            )?;
             let d = [q[0] - p[0], q[1] - p[1]];
             max_relative_mismatch = max_relative_mismatch.max(path.mismatch / d[0].hypot(d[1]));
             paths.push(path);
@@ -482,12 +529,18 @@ impl IntrinsicTriangulation {
 
     /// Traces the segment of face `f` (layout `v`) from the point `p` to the point `q` over
     /// the input mesh, from the place of `p` to the place of `q`.
+    ///
+    /// A segment along a side of the face that lies along an input edge
+    /// ([`edge_on_input`](Self::edge_on_input)) is not traced: it is the piece of that input
+    /// edge between the places of its ends (SPEC N28), as an edge along an input edge is not
+    /// traced (SPEC N8). The check is the same: the length of that piece must be the length
+    /// of the segment within the tolerance.
     fn segment_path(
         &self,
         f: usize,
         v: &[[f64; 2]; 3],
         (kind, p, from): (NodeKind, [f64; 2], Located),
-        (q, to): ([f64; 2], Located),
+        (kind_to, q, to): (NodeKind, [f64; 2], Located),
         options: &EdgeTraceOptions,
     ) -> Result<PathOnInput, IntrinsicError> {
         let mesh = self.input.mesh();
@@ -495,6 +548,18 @@ impl IntrinsicTriangulation {
         let length = d[0].hypot(d[1]);
         if length <= 0.0 || length.is_nan() {
             return Err(IntrinsicError::InvalidLength { length });
+        }
+        let tolerance = options.tolerance * length;
+        if let Some(path) = self.path_along_input_edge(f, (kind, from), (kind_to, to), length) {
+            if path.mismatch > tolerance {
+                return Err(IntrinsicError::SegmentTrace {
+                    face: f as u32,
+                    length,
+                    tolerance,
+                    mismatch: Some(path.mismatch),
+                });
+            }
+            return Ok(path);
         }
         // The direction of the segment in the frame of the face, then in the frame of the
         // place of its start on the input mesh.
@@ -514,7 +579,6 @@ impl IntrinsicTriangulation {
             }
             NodeKind::Inside => wrap(from.zero + in_face),
         };
-        let tolerance = options.tolerance * length;
         let target = Target {
             point: to.point,
             tolerance,
@@ -634,8 +698,53 @@ impl IntrinsicTriangulation {
             })
         };
         let (kind, p, from) = end(from)?;
-        let (_, q, to) = end(to)?;
-        self.segment_path(f, &v, (kind, p, from), (q, to), options)
+        let (kind_to, q, to) = end(to)?;
+        self.segment_path(f, &v, (kind, p, from), (kind_to, q, to), options)
+    }
+}
+
+impl IntrinsicTriangulation {
+    /// The path over the input mesh of a segment of face `f` of length `length` whose ends
+    /// lie on the same side of the face, if that side lies along an input edge and the
+    /// places of both ends are on that input edge (they are: a vertex of the side is placed
+    /// on it, a point of the side is placed by interpolation along it); `None` otherwise.
+    /// Its mismatch is the difference between the length of the piece of the input edge and
+    /// `length`.
+    fn path_along_input_edge(
+        &self,
+        f: usize,
+        (kind, from): (NodeKind, Located),
+        (kind_to, to): (NodeKind, Located),
+        length: f64,
+    ) -> Option<PathOnInput> {
+        let side = kind
+            .sides()
+            .into_iter()
+            .flatten()
+            .find(|s| kind_to.sides().contains(&Some(*s)))?;
+        let input_edge = self.edge_on_input(self.halfedge_edge[3 * f + side] as usize)?;
+        let mesh = self.input.mesh();
+        let parameter = |point: SurfacePoint| match point {
+            SurfacePoint::Vertex(u) => {
+                let [lo, hi] = mesh.edge_vertices(input_edge);
+                if u as usize == lo {
+                    Some(0.0)
+                } else if u as usize == hi {
+                    Some(1.0)
+                } else {
+                    None
+                }
+            }
+            SurfacePoint::Edge { edge, t } => (edge as usize == input_edge).then_some(t),
+            SurfacePoint::Face { .. } => None,
+        };
+        let (ta, tb) = (parameter(from.point)?, parameter(to.point)?);
+        let piece = (tb - ta).abs() * self.input.geometry().edge_lengths()[input_edge];
+        Some(PathOnInput {
+            points: vec![from.point, to.point],
+            faces: vec![(mesh.edge_halfedge(input_edge) / 3) as u32],
+            mismatch: (piece - length).abs(),
+        })
     }
 }
 
@@ -648,4 +757,16 @@ enum NodeKind {
     Side { slot: usize, forward: bool },
     /// Inside the face.
     Inside,
+}
+
+impl NodeKind {
+    /// The sides of the face the node lies on: a corner on the two at it (the side leaving it
+    /// and the side arriving at it), a point of a side on that one.
+    fn sides(self) -> [Option<usize>; 2] {
+        match self {
+            NodeKind::Corner(k) => [Some(k), Some((k + 2) % 3)],
+            NodeKind::Side { slot, .. } => [Some(slot), None],
+            NodeKind::Inside => [None, None],
+        }
+    }
 }
