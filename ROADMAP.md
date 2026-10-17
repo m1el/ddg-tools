@@ -109,8 +109,8 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
   tables carry numbers from before D30 and say so.
 * The Blender session cache (a session kept between Start, Flow and Apply) is not tested across
   file loads or object deletion; `blender/tests/bench_overhead.py` still does not finish.
-* The comparison with the authors' program of the cut flow was refreshed after D22 only, not
-  after D26 to D31.
+* The comparison with the authors' program was repeated on 2026-10-17 with the code of D32
+  (below, and `crates/ddg-variational-cuts/README.md`).
 
 * From the optimal Delaunay work (2026-10-14): a move beyond the star of a vertex (the paper's
   general route: remove the vertex, retriangulate, insert again) is not implemented (SPEC N20);
@@ -180,13 +180,22 @@ Verification
   tags and by reading.
 
 Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in the repository)
-* Done before D22; not repeated since. The reference's Hencky value is about 900 times ours on
-  the same partition (440 to 1010 across shapes), unexplained; the length-weight correspondence
-  was calibrated through it on one shape. The reference runs were not converged (300 fixed
-  steps). Only the Hencky energy was compared, only its cut in our energy, and not its
-  flattening.
-* Pictures were looked at for spot only (two regions; eight clusters; the comparison), all
-  before D22.
+* Repeated on 2026-10-17 (code of D32; caller's triangles and intrinsic Delaunay; Hencky and
+  Dirichlet; the reference also run to rest; its UV maps measured); tables in
+  `crates/ddg-variational-cuts/README.md`, "Comparison with the authors' program". Measured by
+  the flattening of each cut, we are below the reference after 300 steps everywhere (4–14 %) and
+  below the reference at rest on sphere, bob and blub (2–3 %), but **2.2 % above it on spot**
+  (its longer cut with less distortion); we did not start our flow from its converged cut.
+* The reference's Hencky value is about 10³ times `∫u²` on the unit-area surface (930–1110
+  against its own UV map; identical under scaling, unchanged under 1:4 subdivision). The factor
+  itself is not explained from outside; the length-weight correspondence still uses 900 (with
+  10³ the weights would be 10 % smaller). The old spread "440 to 1010" was the face-label
+  transfer losing small charts, which also makes the evaluation of its cuts in our energy favour
+  us; the flattening yardstick does not transfer anything.
+* The reference's Dirichlet runs do not come to rest with its default fixed step (the objective
+  oscillates by a factor 2 over 8 000 steps); its line search and other step sizes were not
+  tried, nor its local-scale, symmetry, area and visibility options.
+* Pictures: `runs_tmp/blackbox/pics_2026-10-17/contact_sheet.png` (all shapes, both energies).
 
 ## Known gaps: pipeline, bindings, Blender
 
