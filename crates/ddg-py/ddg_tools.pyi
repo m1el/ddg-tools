@@ -520,3 +520,61 @@ def visibility_penalty(
 
 def length_weight_for_ripples(roughening_rate: float, wavelength: float) -> float:
     """``alpha_L = omega * wavelength / (2 pi)``."""
+
+
+# ----------------------------------------------------------------------------------------------
+# Applications of intrinsic triangulations: "Navigating Intrinsic Triangulations" (Sharp,
+# Soliman, Crane 2019), Sec. 5.1 and 5.3 (crate ddg-intrinsic-apps).
+
+@final
+class GeodesicDistanceResult:
+    @property
+    def distances(self) -> array[float]:
+        """``array('d')``, the geodesic distance at every vertex (0 at the sources)."""
+    @property
+    def report(self) -> dict[str, int | float]:
+        """``n_triangulation_vertices``, ``time`` (the time step), ``seconds_factor``,
+        ``seconds_solve``."""
+
+def geodesic_distance(
+    positions: Buffer,
+    triangles: Buffer,
+    sources: Buffer,
+    *,
+    triangulation: Literal["refine", "delaunay", "input"] = "refine",
+    time_factor: float = 1.0,
+    boundary: Literal["neumann", "dirichlet", "average"] = "neumann",
+) -> GeodesicDistanceResult:
+    """Geodesic distance from the vertices ``sources`` by the heat method (Crane, Weischedel,
+    Wardetzky 2013) on the intrinsic Delaunay refinement of the mesh (``"refine"``), its
+    intrinsic Delaunay triangulation (``"delaunay"``) or the mesh itself (``"input"``). The
+    time step is ``time_factor * h**2``, ``h`` the mean edge length of that triangulation.
+    Raises ``InputError`` (bad arguments; a source on the boundary with ``"dirichlet"``),
+    ``MeshError`` (not a valid manifold triangle mesh) and ``SolveError``."""
+
+@final
+class SteinerTreeResult:
+    @property
+    def points(self) -> array[float]:
+        """``array('d')``, 3 per point of the polylines; every polyline lies on the surface."""
+    @property
+    def offsets(self) -> array[int]:
+        """``array('i')``, where the polyline of every edge of the tree starts in ``points``
+        (in points), and the number of points last."""
+    @property
+    def report(self) -> dict[str, bool | int | float]:
+        """``length``, ``mst_length`` (the minimal spanning tree of the same triangulation),
+        ``n_steiner_points``, ``is_disk`` (cutting along the tree and the boundary leaves one
+        disk), ``max_interior_defect`` (0 when that disk is flat and unfolds)."""
+
+def steiner_tree(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    intrinsic: bool = True,
+    steiner_points: bool = True,
+) -> SteinerTreeResult:
+    """A short cut through all vertices: the minimal spanning tree of the intrinsic Delaunay
+    triangulation (``intrinsic=True``) or of the mesh's edges, shortened by Fermat points
+    (``steiner_points=True``) with the heuristic of Smith, Lee and Liebman (1981). Raises
+    ``InputError``, ``MeshError`` and ``SolveError``."""

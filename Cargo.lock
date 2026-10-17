@@ -442,6 +442,8 @@ name = "ddg-py"
 version = "0.1.0"
 dependencies = [
  "ddg-core",
+ "ddg-intrinsic",
+ "ddg-intrinsic-apps",
  "ddg-optimal-cones",
  "ddg-uv",
  "ddg-variational-cuts",
