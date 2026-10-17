@@ -27,9 +27,8 @@ with a notes file saying what is done, what remains and how to resume:
   with clones of ddg-tools inside). Everything was fetched here; remove those worktrees and their
   `worktree-agent-*` branches from the demo repository once the branches above are merged.
 
-Waiting on the user: whether `ddg-uv` keeps normalizing each piece by its own area (recommended)
-or follows the whole-mesh canonical problem; moving `master` up (it is behind
-`intrinsic-triangulations` by the cone work).
+Waiting on the user: moving `master` up (it is behind `intrinsic-triangulations` by the cone
+work).
 
 ## Scheduled
 
@@ -264,9 +263,9 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
 * `ddg-uv` solves every piece (component after cutting the seams) with its masses normalized by
   the piece's own area and the user's `λ`, which is the whole cut mesh's canonical problem with
   `λ · A_c / A` per piece: every chart gets the cones it would get alone. The cones solver now
-  solves disconnected meshes with the whole-area normalization; whether the pipeline should
-  switch (fewer cones on small charts) is not decided (`crates/ddg-optimal-cones/README.md`,
-  "Disconnected meshes").
+  solves disconnected meshes with the whole-area normalization. Decided 2026-10-17 by the user
+  ("uv pipeline is doing good work normalizing each mesh"): the pipeline keeps the per-piece
+  normalization (`crates/ddg-optimal-cones/README.md`, "Disconnected meshes").
 * Blender has no operator for re-optimizing given cones. The Unwrap operator's "pinned" vertex
   group (cones at no cost) plus a "forbidden" group holding every other vertex already asks the
   pipeline for that problem (with the pipeline's angle bounds: positive only by default, capped
