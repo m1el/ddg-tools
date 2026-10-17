@@ -10,9 +10,8 @@ Work started on the user's request ("2. implement mapping to the sphere. 4. impl
 applications listed in the paper"), checkpointed as unmerged branches of this repository, each
 with a notes file saying what is done, what remains and how to resume:
 
-* `wip-bff-sphere` (8e78fe6): BFF mapping to the sphere (paper Sec. 7.5, port of the
-  reference's `mapToSphere`), Python binding and Blender operator; notes
-  `crates/ddg-bff/NOTES-sphere.md`. Left: README, ROADMAP, workspace tests, ddg-py clippy.
+* Done and merged 2026-10-17: BFF mapping to the sphere (`wip-bff-sphere`, finished in
+  `44412af`; see "Landed" and `crates/ddg-bff/README.md`).
 * `wip-apps-5123` (6e59c99): intrinsic triangulations applications 5.1–5.3 (Steiner tree, FEM
   condition numbers, heat method; own exact polyhedral distance) in a new crate
   `crates/ddg-intrinsic-apps`, Python bindings; notes `NOTES-apps-5.1-5.3.md`; SPEC ids N30–N39.
