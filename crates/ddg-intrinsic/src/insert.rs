@@ -68,6 +68,23 @@ pub(crate) struct Placed {
     pub(crate) snapped: Option<f64>,
 }
 
+/// What [`IntrinsicTriangulation::snap_onto_input_edge`] made of a point of an input face.
+pub(crate) enum EdgeSnap {
+    /// Not within the snapping distance of a side (or not a point of a face): unchanged.
+    Far,
+    /// Moved onto the input edge: its place there, the direction in the frame of the edge,
+    /// and the barycentric coordinate it had opposite that edge.
+    Onto {
+        location: SurfacePoint,
+        back: f64,
+        coordinate: f64,
+    },
+    /// Within the snapping distance of a side and exactly at a corner of the face.
+    Corner,
+    /// The input face has no positive area.
+    Degenerate(u32),
+}
+
 pub(crate) fn wrap(angle: f64) -> f64 {
     let a = angle.rem_euclid(TAU);
     if a >= TAU { 0.0 } else { a }
@@ -159,57 +176,90 @@ impl IntrinsicTriangulation {
                 back: trace.back_direction,
                 snapped: None,
             }),
-            SurfacePoint::Face { face, bary } => {
-                let mesh = self.input.mesh();
-                let l = [0, 1, 2].map(|s| {
-                    self.input.geometry().edge_lengths()[mesh.edge(3 * face as usize + s)]
-                });
-                let v = triangle_layout(l).ok_or_else(|| {
-                    not_located(format!("input face {face} has no positive area"))
-                })?;
-                // The distance from the side opposite corner k (halfedge k + 1): the
-                // barycentric coordinate times the height over that side.
-                let double_area = v[1][0] * v[2][1];
-                let distance = [0, 1, 2].map(|k| bary[k] * double_area / l[(k + 1) % 3]);
-                let k = (0..3)
-                    .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
-                    .unwrap_or(0);
-                let longest = l[0].max(l[1]).max(l[2]);
-                if distance[k] > (snap * longest).min(max_distance) {
-                    return Ok(Placed {
+            SurfacePoint::Face { .. } => {
+                match self.snap_onto_input_edge(trace.end, trace.back_direction, snap, max_distance)
+                {
+                    EdgeSnap::Far => Ok(Placed {
                         location: trace.end,
                         back: trace.back_direction,
                         snapped: None,
-                    });
-                }
-                // On the side opposite corner k: halfedge k + 1, from corner k + 1 to k + 2.
-                let (i, j) = ((k + 1) % 3, (k + 2) % 3);
-                let h = 3 * face as usize + i;
-                let t_halfedge = bary[j] / (bary[i] + bary[j]);
-                if !(t_halfedge > 0.0 && t_halfedge < 1.0) {
-                    return Err(not_located(format!(
+                    }),
+                    EdgeSnap::Onto {
+                        location,
+                        back,
+                        coordinate,
+                    } => Ok(Placed {
+                        location,
+                        back,
+                        snapped: Some(coordinate),
+                    }),
+                    EdgeSnap::Corner => Err(not_located(format!(
                         "the point {} is a corner of its input face",
                         trace.end
-                    )));
+                    ))),
+                    EdgeSnap::Degenerate(face) => Err(not_located(format!(
+                        "input face {face} has no positive area"
+                    ))),
                 }
-                let edge = mesh.edge(h);
-                let forward = mesh.from_vertex(h) == mesh.edge_vertices(edge)[0];
-                // The direction of the edge in the frame of the face (its halfedge 0).
-                let d = [v[j][0] - v[i][0], v[j][1] - v[i][1]];
-                let along = d[1].atan2(d[0]) + if forward { 0.0 } else { PI };
-                Ok(Placed {
-                    location: SurfacePoint::Edge {
-                        edge: edge as u32,
-                        t: if forward {
-                            t_halfedge
-                        } else {
-                            1.0 - t_halfedge
-                        },
-                    },
-                    back: wrap(trace.back_direction - along),
-                    snapped: Some(bary[k]),
-                })
             }
+        }
+    }
+
+    /// The point `end` of an input face, with the direction `back` in the frame of that face,
+    /// as a point of the input edge of the face it is nearest to, if its distance from that
+    /// edge is at most `snap` times the longest edge of the face and at most `max_distance`
+    /// (SPEC N10, N24, N28). The direction is then given in the frame of the edge. Points
+    /// that are not points of a face are [`EdgeSnap::Far`].
+    pub(crate) fn snap_onto_input_edge(
+        &self,
+        end: SurfacePoint,
+        back: f64,
+        snap: f64,
+        max_distance: f64,
+    ) -> EdgeSnap {
+        let SurfacePoint::Face { face, bary } = end else {
+            return EdgeSnap::Far;
+        };
+        let mesh = self.input.mesh();
+        let l = [0, 1, 2]
+            .map(|s| self.input.geometry().edge_lengths()[mesh.edge(3 * face as usize + s)]);
+        let Some(v) = triangle_layout(l) else {
+            return EdgeSnap::Degenerate(face);
+        };
+        // The distance from the side opposite corner k (halfedge k + 1): the barycentric
+        // coordinate times the height over that side.
+        let double_area = v[1][0] * v[2][1];
+        let distance = [0, 1, 2].map(|k| bary[k] * double_area / l[(k + 1) % 3]);
+        let k = (0..3)
+            .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
+            .unwrap_or(0);
+        let longest = l[0].max(l[1]).max(l[2]);
+        if distance[k] > (snap * longest).min(max_distance) {
+            return EdgeSnap::Far;
+        }
+        // On the side opposite corner k: halfedge k + 1, from corner k + 1 to k + 2.
+        let (i, j) = ((k + 1) % 3, (k + 2) % 3);
+        let h = 3 * face as usize + i;
+        let t_halfedge = bary[j] / (bary[i] + bary[j]);
+        if !(t_halfedge > 0.0 && t_halfedge < 1.0) {
+            return EdgeSnap::Corner;
+        }
+        let edge = mesh.edge(h);
+        let forward = mesh.from_vertex(h) == mesh.edge_vertices(edge)[0];
+        // The direction of the edge in the frame of the face (its halfedge 0).
+        let d = [v[j][0] - v[i][0], v[j][1] - v[i][1]];
+        let along = d[1].atan2(d[0]) + if forward { 0.0 } else { PI };
+        EdgeSnap::Onto {
+            location: SurfacePoint::Edge {
+                edge: edge as u32,
+                t: if forward {
+                    t_halfedge
+                } else {
+                    1.0 - t_halfedge
+                },
+            },
+            back: wrap(back - along),
+            coordinate: bary[k],
         }
     }
 
