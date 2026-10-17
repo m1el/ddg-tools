@@ -127,6 +127,7 @@ mod laplace;
 pub mod mollify;
 pub mod plan;
 pub mod quality;
+pub mod sphere;
 
 pub use chart::{ChartReport, OverlapReport};
 pub use cones::{
@@ -147,3 +148,8 @@ pub use error::BffError;
 pub use mollify::{Mollified, REFERENCE_MOLLIFY_DELTA, mollify_edge_lengths};
 pub use plan::{CutPlan, CutPlanInput, PlannedChart, plan_cut};
 pub use quality::{Coverage, DistortionReport, Similarity, Stats, coverage, fit_similarity};
+pub use sphere::{
+    CenteringOptions, CenteringReport, CenteringStatus, PoleChoice, RadiusReport, RadiusSearch,
+    SphereDistortion, SphereMap, SphereOptions, SphereReport, SphereTimings, map_to_sphere,
+    mobius_center, sphere_distortion,
+};

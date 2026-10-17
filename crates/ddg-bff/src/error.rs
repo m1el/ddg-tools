@@ -196,6 +196,22 @@ pub enum BffError {
         /// Number of boundary loops (a disk has 1).
         boundary_loops: usize,
     },
+    /// The mesh passed to a map to the sphere is not a closed surface of genus 0.
+    NotASphere {
+        /// Number of connected components (a sphere has 1).
+        components: usize,
+        /// Euler characteristic (a sphere has 2).
+        euler_characteristic: i64,
+        /// Number of boundary loops (a sphere has 0).
+        boundary_loops: usize,
+    },
+    /// The vertex asked for as the pole of a map to the sphere does not exist.
+    PoleOutOfRange {
+        /// The vertex.
+        vertex: u32,
+        /// Number of vertices of the mesh.
+        n_vertices: usize,
+    },
     /// An anchor is not a corner of the mesh.
     AnchorOutOfRange {
         /// Position in the anchor list.
@@ -415,6 +431,35 @@ impl fmt::Display for BffError {
                  (a disk has 1, 1 and 1)",
                 if *components == 1 { "" } else { "s" },
                 if *boundary_loops == 1 { "" } else { "s" }
+            ),
+            BffError::NotASphere {
+                components,
+                euler_characteristic,
+                boundary_loops,
+            } => {
+                write!(
+                    f,
+                    "the mesh is not a closed surface of genus 0: {components} connected \
+                     component{}, Euler characteristic {euler_characteristic}, {boundary_loops} \
+                     boundary loop{} (a sphere has 1, 2 and 0)",
+                    if *components == 1 { "" } else { "s" },
+                    if *boundary_loops == 1 { "" } else { "s" }
+                )?;
+                if *components > 1 {
+                    write!(f, "; map the components one by one")?;
+                } else if *boundary_loops == 0 && *euler_characteristic < 2 {
+                    write!(
+                        f,
+                        "; it is closed of genus {}, which needs cones and cuts \
+                         (flatten_with_cones)",
+                        (2 - euler_characteristic) / 2
+                    )?;
+                }
+                Ok(())
+            }
+            BffError::PoleOutOfRange { vertex, n_vertices } => write!(
+                f,
+                "the pole {vertex} is not a vertex of the mesh, which has {n_vertices} vertices"
             ),
             BffError::AnchorOutOfRange {
                 position,
