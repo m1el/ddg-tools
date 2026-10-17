@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ddg_bff::{SphereMap, SphereOptions, map_to_sphere};
+use ddg_bff::{PoleChoice, SphereMap, SphereOptions, map_to_sphere};
 use ddg_core::generators::{icosphere, perturb};
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
@@ -56,8 +56,19 @@ fn row(name: &str, mesh: &TriMesh, positions: &[[f64; 3]]) {
             let d = &r.distortion.faces;
             let c = r.centering.expect("centering is on by default");
             let t = &r.timings;
+            // The reference's pole for comparison: its first vertex.
+            let first = map_to_sphere(
+                mesh,
+                &geometry,
+                &SphereOptions {
+                    pole: PoleChoice::Vertex(0),
+                    ..SphereOptions::default()
+                },
+            )
+            .expect("the same mesh with another pole");
+            let f = &first.report.distortion.faces;
             println!(
-                "| {name} | {} | {} | {:.4} / {:.3} | {:.3} | {:.2} / {:.2} | {} | {:.9} | {} ({:.0e}) | {:.0} | {:.0} / {:.0} / {:.0} / {:.0} / {:.0} |",
+                "| {name} | {} | {} | {:.4} / {:.3} | {:.3} | {:.2} / {:.2} | {} | {} | {} | {:.0} | {:.0} / {:.0} / {:.0} / {:.0} / {:.0} | {:.4} / {:.3}, {} |",
                 mesh.n_vertices(),
                 r.pole,
                 d.quasi_conformal.mean,
@@ -66,15 +77,17 @@ fn row(name: &str, mesh: &TriMesh, positions: &[[f64; 3]]) {
                 d.log_scale.min,
                 d.log_scale.max,
                 d.flipped_triangles + d.degenerate_triangles,
-                r.distortion.covering_degree,
+                if r.is_injective() { "yes" } else { "no" },
                 c.iterations,
-                c.final_center,
                 1e3 * t.total,
                 1e3 * t.puncture,
                 1e3 * t.disk,
                 1e3 * t.projection,
                 1e3 * t.centering,
                 1e3 * t.report,
+                f.quasi_conformal.mean,
+                f.quasi_conformal.max,
+                f.flipped_triangles + f.degenerate_triangles,
             );
         }
     }
@@ -82,9 +95,9 @@ fn row(name: &str, mesh: &TriMesh, positions: &[[f64; 3]]) {
 
 fn main() {
     println!(
-        "| mesh | vertices | pole | QC mean / max | area (rms u) | u min / max | flipped | degree | centering its (|µ|) | ms | puncture / disk / projection / centering / report |"
+        "| mesh | vertices | pole | QC mean / max | area (rms u) | u min / max | flipped | injective | centering steps | ms | puncture / disk / projection / centering / report | pole 0: QC mean / max, flipped |"
     );
-    println!("|---|---:|---:|---|---:|---|---:|---:|---|---:|---|");
+    println!("|---|---:|---:|---|---:|---|---:|---|---:|---:|---|---|");
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
         for a in &args {
