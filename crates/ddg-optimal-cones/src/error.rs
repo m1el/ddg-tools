@@ -13,8 +13,10 @@ use ddg_core::{GeometryError, SparseError};
 pub enum ConeError {
     /// The geometry was not built for the mesh.
     Geometry(GeometryError),
-    /// The mesh has more than one connected component. Split it first
-    /// (`TriMesh::split_components`) and solve each component on its own.
+    /// The mesh has more than one connected component. Not returned any more: every function of
+    /// this crate accepts disconnected meshes (each component is solved as part of the whole
+    /// problem; see the crate README, "Disconnected meshes"). Kept so that existing matches
+    /// compile.
     NotConnected {
         /// Number of connected components.
         components: usize,
@@ -67,11 +69,18 @@ pub enum ConeError {
         /// What is wrong with it.
         reason: PrescribedConeIssue,
     },
-    /// On a closed mesh every distortion weight is zero: the objective no longer depends on
-    /// `u`, so its additive constant (and the solution) is undetermined.
-    NoDistortionWeight,
+    /// On a closed mesh (or a closed component of the mesh) every distortion weight is zero:
+    /// the objective no longer depends on `u` there, so its additive constant (and the
+    /// solution) is undetermined.
+    NoDistortionWeight {
+        /// The component (numbered as `TriMesh::face_components`) if the mesh has several,
+        /// `None` if it is connected.
+        component: Option<u32>,
+    },
     /// On a closed mesh the cone angles must sum to `2πχ` (Gauss–Bonnet), and the bounds,
-    /// forbidden vertices and prescribed cones do not allow that.
+    /// forbidden vertices and prescribed cones do not allow that. On a mesh with several
+    /// components this holds for every closed component on its own; then every field is about
+    /// the component named in `component`.
     Infeasible {
         /// The required sum `Σ Ω_i = 2πχ`.
         required: f64,
@@ -87,6 +96,9 @@ pub enum ConeError {
         n_prescribed: usize,
         /// Sum of the prescribed cone angles.
         prescribed_sum: f64,
+        /// The closed component (numbered as `TriMesh::face_components`) if the mesh has
+        /// several components, `None` if it is connected.
+        component: Option<u32>,
     },
     /// A cone configuration handed to [`evaluate_cones`](crate::evaluate_cones) is not usable.
     InvalidCone {
@@ -125,6 +137,9 @@ pub enum PrescribedConeIssue {
     DuplicateVertex,
     /// The angle is NaN or infinite.
     NonFiniteAngle,
+    /// The vertex carries a prescribed cone (`ConeProblem::prescribed_cones`), whose angle is
+    /// fixed; it cannot also be a cone whose angle is optimized.
+    PrescribedVertex,
 }
 
 impl fmt::Display for ConeError {
@@ -175,10 +190,11 @@ impl fmt::Display for ConeError {
                 f,
                 "prescribed cone {index} (vertex {vertex}, angle {angle}): {reason}"
             ),
-            ConeError::NoDistortionWeight => write!(
+            ConeError::NoDistortionWeight { component } => write!(
                 f,
-                "all distortion weights are zero on a closed mesh: the additive constant of the \
-                 scale factor is undetermined"
+                "all distortion weights are zero on {}: the additive constant of the scale \
+                 factor is undetermined",
+                closed_part(*component)
             ),
             ConeError::Infeasible {
                 required,
@@ -188,12 +204,14 @@ impl fmt::Display for ConeError {
                 n_forbidden,
                 n_prescribed,
                 prescribed_sum,
+                component,
             } => write!(
                 f,
-                "infeasible: on this closed mesh (Euler characteristic {euler_characteristic}) \
+                "infeasible: on {} (Euler characteristic {euler_characteristic}) \
                  the cone angles must sum to 2 pi chi = {required}, but the angle bounds, the \
                  {n_forbidden} forbidden vertices and the {n_prescribed} prescribed cones \
-                 (summing to {prescribed_sum}) only allow sums in [{min_sum}, {max_sum}]"
+                 (summing to {prescribed_sum}) only allow sums in [{min_sum}, {max_sum}]",
+                closed_part(*component)
             ),
             ConeError::InvalidCone {
                 index,
@@ -217,7 +235,18 @@ impl fmt::Display for PrescribedConeIssue {
             }
             PrescribedConeIssue::DuplicateVertex => "the vertex is listed more than once",
             PrescribedConeIssue::NonFiniteAngle => "the angle is not finite",
+            PrescribedConeIssue::PrescribedVertex => {
+                "the vertex carries a prescribed cone, whose angle is fixed"
+            }
         })
+    }
+}
+
+/// "this closed mesh" or "closed component c of the mesh".
+fn closed_part(component: Option<u32>) -> String {
+    match component {
+        Some(c) => format!("closed component {c} of the mesh"),
+        None => "this closed mesh".to_string(),
     }
 }
 

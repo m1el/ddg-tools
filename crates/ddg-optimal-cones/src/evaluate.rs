@@ -5,7 +5,7 @@ use ddg_core::io::Cone;
 use ddg_core::sparse::{Factorization, Method, Parallelism, RefineOptions, Symbolic};
 
 use crate::error::{ConeError, PrescribedConeIssue};
-use crate::problem::{ConeProblem, Discrete};
+use crate::problem::{BoundaryTreatment, ConeProblem, Discrete, Instance, split_pieces};
 
 /// A Cholesky factorization of the Laplacian block of the unknowns.
 ///
@@ -74,8 +74,14 @@ pub struct ConeEvaluation {
     /// Closed meshes: `Σ µ_i − Σ Ω_i`, which Gauss–Bonnet requires to vanish. If it does not,
     /// no scale factor exists for the cones as given; the returned `u` solves
     /// `(L u)_i = µ_i − Ω_i − defect · m_i` instead (the defect spread over the surface in
-    /// proportion to area). Zero on meshes with boundary.
+    /// proportion to area). Zero on meshes with boundary. On a mesh with several components:
+    /// the defect of largest magnitude among the closed components (each component has its own,
+    /// spread over that component; see `component_defects`).
     pub gauss_bonnet_defect: f64,
+    /// The Gauss–Bonnet defect of every connected component, in the order of
+    /// `TriMesh::face_components` (zero for a component with boundary). One entry for a
+    /// connected mesh.
+    pub component_defects: Vec<f64>,
 }
 
 pub(crate) fn cones_to_measure(d: &Discrete, cones: &[Cone]) -> Result<Vec<f64>, ConeError> {
@@ -143,6 +149,31 @@ pub(crate) fn log_scale_of_measure(
     Ok((u, defect))
 }
 
+/// `u`, `φ` (per unknown), the distortion and the Gauss–Bonnet defect of a measure on the
+/// unknowns of a connected problem.
+fn evaluate_discrete(
+    d: &Discrete,
+    mu: &[f64],
+    par: Parallelism<'_>,
+) -> Result<(Vec<f64>, Vec<f64>, f64, f64), ConeError> {
+    if d.n == 0 {
+        return Ok((Vec::new(), Vec::new(), 0.0, 0.0));
+    }
+    let laplace = LaplaceSolver::new(d, par)?;
+    let (u, defect) = log_scale_of_measure(d, &laplace, mu, par)?;
+    let rhs: Vec<f64> = d.w.iter().zip(&u).map(|(w, u)| -w * u).collect();
+    let mut phi = laplace.solve(&rhs, par)?;
+    if d.closed {
+        let total_mass: f64 = d.mass.iter().sum();
+        let mean = d.mass.iter().zip(&phi).map(|(m, p)| m * p).sum::<f64>() / total_mass;
+        for value in &mut phi {
+            *value -= mean;
+        }
+    }
+    let distortion = d.distortion(&u);
+    Ok((u, phi, distortion, defect))
+}
+
 /// Computes the log scale factor `u` and the adjoint state `φ` of a given cone configuration,
 /// for the mesh, geometry and distortion weights of `problem` (its `λ`, cone costs, bounds and
 /// prescribed cones play no role).
@@ -150,10 +181,17 @@ pub(crate) fn log_scale_of_measure(
 /// Use it to evaluate cones from another source, or to check a configuration against the
 /// optimality conditions.
 ///
+/// The mesh may have several connected components: each is evaluated on its own (its own
+/// additive constant of `u` and of `φ` if it is closed, its own Gauss–Bonnet defect), with the
+/// masses of the whole mesh (divided by the total area), so that `distortion` and `adjoint` are
+/// those of the whole problem.
+///
 /// # Errors
 /// The errors of the problem's validation; [`ConeError::InvalidCone`] for a cone at a boundary
 /// vertex, out of range, listed twice or with a non-finite angle; [`ConeError::Sparse`] if the
 /// Laplacian cannot be factorized.
+///
+/// [formula: component-separation]
 pub fn evaluate_cones(
     problem: &ConeProblem<'_>,
     cones: &[Cone],
@@ -170,34 +208,93 @@ pub fn evaluate_cones(
         upper_bounds: None,
         prescribed_cones: Vec::new(),
     };
-    let d = Discrete::new(&relaxed)?;
-    let mu = cones_to_measure(&d, cones)?;
-    let total_cone_angle = mu.iter().map(|m| m.abs()).sum();
-    if d.n == 0 {
+    let whole = Instance::new(&relaxed, BoundaryTreatment::Fixed)?;
+    if problem.mesh.n_components() == 1 {
+        let d = Discrete::from_instance(&whole)?;
+        let mu = cones_to_measure(&d, cones)?;
+        let total_cone_angle = mu.iter().map(|m| m.abs()).sum();
+        let (u, phi, distortion, defect) = evaluate_discrete(&d, &mu, par)?;
+        if d.n == 0 {
+            return Ok(ConeEvaluation {
+                log_scale: vec![0.0; d.n_vertices],
+                adjoint: vec![0.0; d.n_vertices],
+                distortion: 0.0,
+                total_cone_angle,
+                gauss_bonnet_defect: 0.0,
+                component_defects: vec![0.0],
+            });
+        }
         return Ok(ConeEvaluation {
-            log_scale: vec![0.0; d.n_vertices],
-            adjoint: vec![0.0; d.n_vertices],
-            distortion: 0.0,
+            distortion,
+            log_scale: d.to_vertices(&u),
+            adjoint: d.to_vertices(&phi),
             total_cone_angle,
-            gauss_bonnet_defect: 0.0,
+            gauss_bonnet_defect: defect,
+            component_defects: vec![defect],
         });
     }
-    let laplace = LaplaceSolver::new(&d, par)?;
-    let (u, defect) = log_scale_of_measure(&d, &laplace, &mu, par)?;
-    let rhs: Vec<f64> = d.w.iter().zip(&u).map(|(w, u)| -w * u).collect();
-    let mut phi = laplace.solve(&rhs, par)?;
-    if d.closed {
-        let total_mass: f64 = d.mass.iter().sum();
-        let mean = d.mass.iter().zip(&phi).map(|(m, p)| m * p).sum::<f64>() / total_mass;
-        for value in &mut phi {
-            *value -= mean;
+
+    // Several components: the cones are checked against the whole mesh (vertex numbers of the
+    // caller), then every component is evaluated with its part of the measure.
+    let nv = problem.mesh.n_vertices();
+    let mut angle = vec![0.0; nv];
+    let mut seen = vec![false; nv];
+    for (index, cone) in cones.iter().enumerate() {
+        let issue = |reason| ConeError::InvalidCone {
+            index,
+            vertex: cone.vertex,
+            angle: cone.angle,
+            reason,
+        };
+        let v = cone.vertex as usize;
+        if v >= nv {
+            return Err(issue(PrescribedConeIssue::VertexOutOfRange));
         }
+        if !cone.angle.is_finite() {
+            return Err(issue(PrescribedConeIssue::NonFiniteAngle));
+        }
+        if !whole.data.unknown[v] {
+            return Err(issue(PrescribedConeIssue::BoundaryVertex));
+        }
+        if seen[v] {
+            return Err(issue(PrescribedConeIssue::DuplicateVertex));
+        }
+        seen[v] = true;
+        angle[v] = cone.angle;
     }
+    let total_cone_angle = cones.iter().map(|c| c.angle.abs()).sum();
+    let pieces = split_pieces(problem.mesh, problem.geometry)?;
+    let mut log_scale = vec![0.0; nv];
+    let mut adjoint = vec![0.0; nv];
+    let mut distortion = 0.0;
+    let mut component_defects = Vec::with_capacity(pieces.len());
+    for (c, piece) in pieces.iter().enumerate() {
+        let d = Discrete::from_instance(&whole.part(piece, c as u32))?;
+        let to_parent = &piece.sub.vertex_to_parent;
+        let mu: Vec<f64> = d
+            .unknowns
+            .iter()
+            .map(|&i| angle[to_parent[i as usize] as usize])
+            .collect();
+        let (u, phi, part_distortion, defect) = evaluate_discrete(&d, &mu, par)?;
+        for (k, &i) in d.unknowns.iter().enumerate() {
+            let v = to_parent[i as usize] as usize;
+            log_scale[v] = u[k];
+            adjoint[v] = phi[k];
+        }
+        distortion += part_distortion;
+        component_defects.push(defect);
+    }
+    let gauss_bonnet_defect = component_defects
+        .iter()
+        .copied()
+        .fold(0.0f64, |a, b| if b.abs() > a.abs() { b } else { a });
     Ok(ConeEvaluation {
-        distortion: d.distortion(&u),
-        log_scale: d.to_vertices(&u),
-        adjoint: d.to_vertices(&phi),
+        log_scale,
+        adjoint,
+        distortion,
         total_cone_angle,
-        gauss_bonnet_defect: defect,
+        gauss_bonnet_defect,
+        component_defects,
     })
 }

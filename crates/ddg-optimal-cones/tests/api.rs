@@ -187,8 +187,9 @@ fn geometry_of_another_mesh_is_rejected() {
 }
 
 #[test]
-fn disconnected_mesh_is_rejected() {
-    // Two separate triangles.
+fn two_single_triangles_have_nothing_to_solve() {
+    // Two separate triangles: two components without interior vertices. Defined result: no
+    // cones, u = 0, objective 0, a report per component.
     let positions = vec![
         [0.0, 0.0, 0.0],
         [1.0, 0.0, 0.0],
@@ -198,13 +199,25 @@ fn disconnected_mesh_is_rejected() {
         [5.0, 1.0, 0.0],
     ];
     let mesh = TestMesh::from_positions("two", positions, vec![[0, 1, 2], [3, 4, 5]]);
-    let e = solve(
-        &Features::plain(0.5).problem(&mesh),
-        &SolveOptions::default(),
-    )
-    .unwrap_err();
-    assert_eq!(e, ConeError::NotConnected { components: 2 });
-    assert!(e.to_string().contains("2 connected components"));
+    for method in [
+        ddg_optimal_cones::SolveMethod::Auto,
+        ddg_optimal_cones::SolveMethod::Reference,
+        ddg_optimal_cones::SolveMethod::FactorOnce,
+    ] {
+        let options = SolveOptions {
+            method,
+            ..SolveOptions::default()
+        };
+        let s = solve(&Features::plain(0.5).problem(&mesh), &options).unwrap();
+        assert_eq!(s.report.status, Status::Converged);
+        assert!(s.cones.is_empty());
+        assert_eq!(s.objective, 0.0);
+        assert!(s.log_scale_optimal.iter().all(|&u| u == 0.0));
+        assert_eq!(s.report.components.len(), 2);
+        assert!(s.report.components.iter().all(|c| c.n_unknowns == 0
+            && c.report.stages.is_empty()
+            && c.report.status == Status::Converged));
+    }
 }
 
 #[test]
@@ -295,7 +308,7 @@ fn infeasible_closed_problems_say_why() {
     };
     assert_eq!(
         solve(&unweighted.problem(&mesh), &options).unwrap_err(),
-        ConeError::NoDistortionWeight
+        ConeError::NoDistortionWeight { component: None }
     );
 }
 

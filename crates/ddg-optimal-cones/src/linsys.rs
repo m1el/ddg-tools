@@ -101,6 +101,21 @@ pub struct LinearSolverReport {
     pub solve_time: Duration,
 }
 
+impl LinearSolverReport {
+    /// Adds the counts and times of `other`; the worst backward error is the larger one.
+    pub(crate) fn accumulate(&mut self, other: &LinearSolverReport) {
+        self.ldlt_factorizations += other.ldlt_factorizations;
+        self.lu_factorizations += other.lu_factorizations;
+        self.solves += other.solves;
+        self.refinement_steps += other.refinement_steps;
+        self.ldlt_fallbacks += other.ldlt_fallbacks;
+        self.worst_backward_error = self.worst_backward_error.max(other.worst_backward_error);
+        self.symbolic_time += other.symbolic_time;
+        self.factorization_time += other.factorization_time;
+        self.solve_time += other.solve_time;
+    }
+}
+
 /// A Newton system could not be solved.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LinearFailure {

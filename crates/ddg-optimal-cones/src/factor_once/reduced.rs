@@ -81,7 +81,7 @@ impl<'a> Reduced<'a> {
         }
         if let Some(i) = d.w.iter().position(|&w| w.is_nan() || w <= 0.0) {
             return Err(Unsupported::ZeroDistortionWeight {
-                vertex: d.unknowns[i],
+                vertex: d.labels[i],
             });
         }
         if !d.closed {

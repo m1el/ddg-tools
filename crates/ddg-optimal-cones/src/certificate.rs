@@ -6,11 +6,10 @@
 //! evaluated from the problem's weights and bounds (not from the solver's active sets), and the
 //! dual point is rebuilt from `φ`.
 
-use ddg_core::operators::lumped_mass_normalized;
 use ddg_core::{Geometry, TriMesh};
 
 use crate::error::ConeError;
-use crate::problem::{BoundaryTreatment, ConeProblem, curvatures, validate_with};
+use crate::problem::{BoundaryTreatment, ConeProblem, Instance};
 
 /// Residuals of the optimality conditions and the duality gap of a triple `(u, φ, µ)`.
 ///
@@ -105,7 +104,8 @@ pub struct Certificate {
     /// `max |φ̂_i − φ_i|`: how far `φ` had to be clipped to become dual feasible.
     pub dual_infeasibility: f64,
     /// Closed meshes: `|Σ µ_i − Σ Ω_i|`, the violation of Gauss–Bonnet. Zero on meshes with
-    /// boundary.
+    /// boundary. On a mesh with several components: the largest such violation over the
+    /// closed components (each must satisfy Gauss–Bonnet on its own), zero if none is closed.
     pub gauss_bonnet_residual: f64,
     /// The objective `J = ½ Σ wE m u² + λ Σ wR |µ|` of `(u, µ)`.
     pub primal_objective: f64,
@@ -242,6 +242,10 @@ fn check_len(what: &'static str, x: &[f64], n: usize) -> Result<(), ConeError> {
 /// Computes the [`Certificate`] of a triple `(u, φ, µ)` for a problem. Each argument has one
 /// entry per mesh vertex.
 ///
+/// The mesh may have several connected components; the certificate is then that of the whole
+/// problem (the sums run over all components, the residuals are maxima over all vertices, and
+/// the Gauss–Bonnet residual is the largest over the closed components).
+///
 /// This is the check [`solve`](crate::solve) runs on its own result; it can equally be used on
 /// a triple from any other source.
 ///
@@ -289,18 +293,39 @@ pub fn certify_with_boundary(
     adjoint: &[f64],
     measure: &[f64],
 ) -> Result<Certificate, ConeError> {
-    let data = validate_with(problem, boundary)?;
-    let mesh = problem.mesh;
-    let geometry = problem.geometry;
-    let nv = mesh.n_vertices();
+    let instance = Instance::new(problem, boundary)?;
+    let nv = problem.mesh.n_vertices();
     check_len("log_scale", log_scale, nv)?;
     check_len("adjoint", adjoint, nv)?;
     check_len("measure", measure, nv)?;
-    let (u, phi, mu) = (log_scale, adjoint, measure);
+    Ok(certify_instance(&instance, log_scale, adjoint, measure))
+}
 
-    let omega = curvatures(mesh, geometry, boundary)?;
-    let mass = lumped_mass_normalized(mesh, geometry)?;
-    let closed = data.unknown.iter().all(|&b| b);
+/// [`certify_with_boundary`] on validated data: the whole problem, or one component of it
+/// (then the certificate is that of the component's part of the problem: its share of the
+/// objective, with the masses of the whole mesh). The vectors have one entry per vertex of
+/// `instance.mesh`.
+///
+/// [formula: duality-gap-inexact]
+/// [formula: component-separation]
+pub(crate) fn certify_instance(
+    instance: &Instance<'_>,
+    log_scale: &[f64],
+    adjoint: &[f64],
+    measure: &[f64],
+) -> Certificate {
+    let data = &instance.data;
+    let mesh = instance.mesh;
+    let geometry = instance.geometry;
+    let nv = mesh.n_vertices();
+    let (u, phi, mu) = (log_scale, adjoint, measure);
+    let omega = &instance.omega;
+    let mass = &instance.mass;
+    // Gauss–Bonnet holds per closed component: the sums of µ and Ω, and whether every vertex is
+    // an unknown, per component.
+    let component: Option<Vec<u32>> = (mesh.n_components() > 1).then(|| mesh.vertex_components());
+    let n_components = mesh.n_components();
+    let mut sums = vec![(0.0f64, 0.0f64, true); n_components];
 
     // φ clipped to the domain of the conjugates: a dual-feasible point.
     let phi_hat: Vec<f64> = (0..nv)
@@ -340,11 +365,11 @@ pub fn certify_with_boundary(
     let mut dual_conjugate = 0.0;
     let mut mismatch = 0.0;
     let mut slack = 0.0;
-    let mut sum_mu = 0.0;
-    let mut sum_omega = 0.0;
     for v in 0..nv {
         let site = &data.sites[v];
+        let sum = &mut sums[component.as_ref().map_or(0, |c| c[v] as usize)];
         if !data.unknown[v] {
+            sum.2 = false;
             c.state_residual = c.state_residual.max(u[v].abs());
             c.adjoint_residual = c.adjoint_residual.max(phi[v].abs());
             c.bound_violation = c.bound_violation.max(mu[v].abs());
@@ -366,8 +391,8 @@ pub fn certify_with_boundary(
             .max((mu[v] - site.prox(phi[v] + mu[v])).abs());
         c.bound_violation = c.bound_violation.max(site.bound_violation(mu[v]));
         c.dual_infeasibility = c.dual_infeasibility.max((phi_hat[v] - phi[v]).abs());
-        sum_mu += mu[v];
-        sum_omega += omega[v];
+        sum.0 += mu[v];
+        sum.1 += omega[v];
 
         distortion += w * u[v] * u[v];
         cone_cost += site.cost(mu[v]);
@@ -383,12 +408,14 @@ pub fn certify_with_boundary(
         dual_conjugate += conjugate;
         slack += site.cost(mu[v]) + conjugate - phi_hat[v] * mu[v];
     }
-    if closed {
-        c.gauss_bonnet_residual = (sum_mu - sum_omega).abs();
+    for &(sum_mu, sum_omega, closed) in &sums {
+        if closed {
+            c.gauss_bonnet_residual = c.gauss_bonnet_residual.max((sum_mu - sum_omega).abs());
+        }
     }
     c.primal_objective = 0.5 * distortion + cone_cost;
     c.dual_objective = -0.5 * dual_quadratic + dual_linear - dual_conjugate;
     c.duality_gap = c.primal_objective - c.dual_objective;
     c.complementarity_gap = 0.5 * mismatch + slack;
-    Ok(c)
+    c
 }

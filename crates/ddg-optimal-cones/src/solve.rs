@@ -2,10 +2,11 @@
 
 use std::time::Instant;
 
+use ddg_core::TriMesh;
 use ddg_core::io::Cone;
 use ddg_core::sparse::Parallelism;
 
-use crate::certificate::{Certificate, apply_laplacian, certify_with_boundary};
+use crate::certificate::{Certificate, apply_laplacian, certify_instance};
 use crate::error::ConeError;
 use crate::evaluate::{LaplaceSolver, cones_to_measure, log_scale_of_measure};
 use crate::extract::{ExtractOptions, ExtractionReport, extract_cones};
@@ -16,7 +17,7 @@ use crate::linsys::{LinearSolver, LinearSolverReport, NewtonLinearSolver, Saddle
 use crate::newton::{
     Iterate, NewtonOutcome, StageStop, adjoint_constant_interval, solve_exact, solve_regularized,
 };
-use crate::problem::{BoundaryTreatment, ConeProblem, Discrete, validate_with};
+use crate::problem::{BoundaryTreatment, ConeProblem, Discrete, Instance, split_pieces};
 use ddg_core::operators::boundary_geodesic_curvatures;
 
 /// The quantity whose square the regularized problems of Stage I penalize.
@@ -147,7 +148,7 @@ impl SolveOptions<'_> {
         vec![1e-2, 1e-6, 1e-10]
     }
 
-    fn validate(&self) -> Result<(), ConeError> {
+    pub(crate) fn validate(&self) -> Result<(), ConeError> {
         let bad = |reason: String| Err(ConeError::InvalidOptions { reason });
         for (i, &gamma) in self.regularization.iter().enumerate() {
             if !(gamma.is_finite() && gamma > 0.0) {
@@ -338,8 +339,63 @@ pub struct SolveReport {
     /// Which method produced the result, and why.
     pub method: MethodReport,
     /// Explanation when something did not go to plan (a linear solver failure, or why the
-    /// result is not converged).
+    /// result is not converged). On a mesh with several components: the messages of the
+    /// components, each prefixed with `component <c>: `.
     pub message: Option<String>,
+    /// One report per connected component of the mesh, in the order of
+    /// `TriMesh::face_components` (`TriMesh::vertex_components` says which vertex belongs to
+    /// which), when the mesh has more than one; **empty for a connected mesh**, whose report is
+    /// this one. With several components the other fields of this report describe the whole
+    /// solve: `certificate` is the certificate of the whole problem and alone decides `status`;
+    /// `stages` are those of the components one after another; the counts and the times of the
+    /// phases are sums over the components (`timings.total` is wall time);
+    /// `bound_correction` and `largest_zeroed_angle` are maxima; `method.used` is
+    /// [`MethodUsed::FactorOnce`] only if every component with unknowns used it, `method.fallback`
+    /// is the first component's reason, `method.factor_once` is `None` (see the components).
+    pub components: Vec<ComponentReport>,
+}
+
+/// What happened on one connected component of a disconnected mesh
+/// ([`SolveReport::components`]).
+///
+/// The component is solved as its part of the whole problem: masses divided by the total area
+/// of the whole mesh, the given `λ`. Its `objective`, `distortion_optimal`, `cone_cost` and its
+/// certificate are about that part (they sum, over the components, to those of the whole).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentReport {
+    /// The number of the component (`TriMesh::face_components`).
+    pub component: u32,
+    /// Its vertices.
+    pub n_vertices: usize,
+    /// Its faces.
+    pub n_faces: usize,
+    /// Its unknowns (interior vertices; all vertices if it is closed or the boundary is
+    /// optimized). `0` for a component with nothing to solve, such as a single triangle with
+    /// `u = 0` on its boundary: it gets `u = µ = 0` and no stages.
+    pub n_unknowns: usize,
+    /// Whether every vertex of the component is an unknown (a closed component, or a boundary
+    /// treatment other than `Fixed`): then `u` has its own additive constant on it, and its
+    /// angles (and `ν`) sum to its own `2πχ`.
+    pub closed: bool,
+    /// Its share of the total area, `A_c / A` (the sum of its normalized masses).
+    pub area_fraction: f64,
+    /// The `λ` for which the component solved alone, with its masses divided by its own area,
+    /// has the same `u` and `µ`: `λ · A / A_c` (its adjoint is then `A / A_c` times the one
+    /// returned here).
+    pub equivalent_lambda: f64,
+    /// Its part of the objective.
+    pub objective: f64,
+    /// Its part of the distortion of the optimum.
+    pub distortion_optimal: f64,
+    /// Its part of the cone cost of the optimum.
+    pub cone_cost: f64,
+    /// The interval of constants that may be added to the adjoint on this component alone
+    /// (`(0, 0)` unless it is closed).
+    pub adjoint_shift: (f64, f64),
+    /// The solve of the component: status and certificate of its part of the problem, stages,
+    /// iterations, method, times (`timings.total` is its wall time; setup and extraction are
+    /// those of the whole). Its `components` is empty.
+    pub report: SolveReport,
 }
 
 /// The result of [`solve`]. It holds two things that must not be confused:
@@ -562,12 +618,11 @@ struct Optimum {
 /// Cleans up the iterate (bounds, tiny angles, the adjoint constant of a closed mesh) and
 /// computes the certificate of what is returned.
 fn optimum(
-    problem: &ConeProblem<'_>,
-    boundary: BoundaryTreatment,
+    instance: &Instance<'_>,
     d: &Discrete,
     options: &SolveOptions<'_>,
     mut x: Iterate,
-) -> Result<Optimum, ConeError> {
+) -> Optimum {
     // Rounding-level clean-up of the cone angles; the certificate is computed afterwards.
     // The bounds are constraints: a cone angle that a step ending by tolerance left beyond
     // its bound by rounding is moved onto it. And a cone angle below the Newton tolerance is
@@ -612,9 +667,8 @@ fn optimum(
     let cone_cost = d.cone_cost(&x.mu);
 
     let start = Instant::now();
-    let certificate =
-        certify_with_boundary(problem, boundary, &log_scale_optimal, &adjoint, &measure)?;
-    Ok(Optimum {
+    let certificate = certify_instance(instance, &log_scale_optimal, &adjoint, &measure);
+    Optimum {
         x,
         measure,
         log_scale_optimal,
@@ -627,7 +681,7 @@ fn optimum(
         zeroed_angles,
         largest_zeroed_angle,
         seconds: start.elapsed().as_secs_f64(),
-    })
+    }
 }
 
 /// Stages I and II with the safeguards, on an assembled problem.
@@ -791,14 +845,37 @@ fn drive(d: &Discrete, options: &SolveOptions<'_>) -> Result<Driven, ConeError> 
 /// [`SolveMethod::Auto`] would use the reference method for it (and
 /// [`SolveMethod::FactorOnce`] would refuse it).
 ///
+/// On a mesh with several components each component is a problem of its own: `Ok(None)` if the
+/// method supports every component that has unknowns, otherwise the reason of the first
+/// component (in the order of `TriMesh::face_components`) that it does not support; vertex
+/// numbers in the reason are those of the whole mesh. A component without unknowns (a single
+/// triangle with `u = 0` on its boundary) has nothing to solve and does not count;
+/// [`Unsupported::NoUnknowns`] only if no component has unknowns.
+///
 /// # Errors
 /// As [`solve_with_boundary`] for an invalid problem.
 pub fn factor_once_support(
     problem: &ConeProblem<'_>,
     boundary: BoundaryTreatment,
 ) -> Result<Option<Unsupported>, ConeError> {
-    let d = Discrete::with_boundary(problem, boundary)?;
-    Ok(factor_once::check_support(&d, problem.lambda).err())
+    let whole = Instance::new(problem, boundary)?;
+    if problem.mesh.n_components() == 1 {
+        let d = Discrete::from_instance(&whole)?;
+        return Ok(factor_once::check_support(&d, problem.lambda).err());
+    }
+    let pieces = split_pieces(problem.mesh, problem.geometry)?;
+    let mut any_unknowns = false;
+    for (c, piece) in pieces.iter().enumerate() {
+        let d = Discrete::from_instance(&whole.part(piece, c as u32))?;
+        if d.n == 0 {
+            continue;
+        }
+        any_unknowns = true;
+        if let Err(why) = factor_once::check_support(&d, problem.lambda) {
+            return Ok(Some(why));
+        }
+    }
+    Ok((!any_unknowns).then_some(Unsupported::NoUnknowns))
 }
 
 /// Computes optimal cone singularities: solves the canonical problem and extracts the cones.
@@ -816,75 +893,70 @@ pub fn factor_once_support(
 /// objective. It is used only to reach a point; whether that point is optimal is decided by the
 /// certificate.
 ///
+/// **Disconnected meshes.** The mesh may have several connected components. The result is the
+/// exact solution of the canonical problem on the whole mesh: the masses are divided by the total
+/// area of the whole mesh, `λ` is the given one, and every closed component has its own additive
+/// constant of `u` and its own Gauss–Bonnet constraint. The problem separates: each component is
+/// solved on its own with these masses (concurrently on the pool of
+/// [`SolveOptions::parallelism`], each component on one thread), and the results are assembled.
+/// [`SolveReport::components`] reports every component (status, iterations, method, and the
+/// certificate of its part of the problem); [`SolveReport::certificate`] is the certificate of the
+/// whole problem, computed from the assembled triple, and it alone decides
+/// [`SolveReport::status`]. A component solved alone with the masses normalized by its own area
+/// needs `λ · A / A_c` for the same result ([`ComponentReport::equivalent_lambda`]).
+///
 /// # Errors
 /// [`ConeError`] if the problem or the options are invalid, or the problem is infeasible. A
 /// solve that does not converge is **not** an error; check `report.status`.
 ///
 /// [formula: proximal-fixed-point]
+/// [formula: component-separation]
 pub fn solve(problem: &ConeProblem<'_>, options: &SolveOptions<'_>) -> Result<Solution, ConeError> {
     solve_with_boundary(problem, BoundaryTreatment::Fixed, options)
 }
 
-/// [`solve`] with a choice of what happens at the boundary: [`BoundaryTreatment::Fixed`] is
-/// `solve` itself; the other treatments make the boundary values and curvatures unknowns (paper
-/// Sec. 8.3; see [`BoundaryTreatment`]).
-///
-/// With a treatment other than `Fixed` on a mesh with boundary:
-///
-/// * `u` is returned at the boundary vertices too, and `measure[v]` at a boundary vertex `v`
-///   is the curvature `ν_v` of the flattened boundary there (the cone angles `µ` stay at the
-///   interior vertices; `cones` lists interior vertices only);
-/// * the objective, `distortion_optimal` and `cone_cost` include the boundary vertices (with
-///   their masses and distortion weights; the cost of `ν` for `Penalized`);
-/// * `u` is determined up to a constant, which is optimized (`Σ wE m u = 0`), as on a closed
-///   mesh; `adjoint` is determined up to a constant unless some boundary site pins it
-///   (`adjoint_shift`);
-/// * the certificate is that of the problem with the boundary as unknowns, and its
-///   `gauss_bonnet_residual` is `|Σ_I µ + Σ_B ν − 2πχ|`;
-/// * if extraction changes the cones (a threshold, merging), the scale factor of the returned
-///   cones, `log_scale`, is the one whose boundary values are re-optimized for the new
-///   interior cones (the same treatment of the boundary, interior angles fixed).
-///
-/// [`Solution::boundary_curvature`] reports `ν` for every treatment.
-///
-/// # Errors
-/// As [`solve`]. `ConeError::Infeasible` can occur with `Convex` (and prescribed or
-/// forbidden vertices).
-///
-/// [formula: proximal-fixed-point]
-/// [formula: boundary-optimality-system]
-pub fn solve_with_boundary(
-    problem: &ConeProblem<'_>,
-    boundary: BoundaryTreatment,
-    options: &SolveOptions<'_>,
-) -> Result<Solution, ConeError> {
-    let total_start = Instant::now();
-    options.validate()?;
-    let par = options.parallelism;
-    let d = Discrete::with_boundary(problem, boundary)?;
-    let mut timings = Timings {
-        setup: total_start.elapsed().as_secs_f64(),
-        ..Timings::default()
-    };
+/// What the methods produced for one problem on a connected mesh (the whole problem, or one
+/// component).
+struct Ran {
+    driven: Driven,
+    opt: Optimum,
+    method: MethodReport,
+    factor_once_seconds: f64,
+}
 
+/// Solves one problem on a connected mesh: the factor-once method first unless the reference
+/// method is forced, the reference method when that gives up.
+fn run(
+    instance: &Instance<'_>,
+    d: &Discrete,
+    lambda: f64,
+    options: &SolveOptions<'_>,
+) -> Result<Ran, ConeError> {
+    let par = options.parallelism;
     let mut method = MethodReport {
         requested: options.method,
         used: MethodUsed::Reference,
         fallback: None,
         factor_once: None,
     };
-    // The factor-once method first, unless the reference method is forced.
+    let mut factor_once_seconds = 0.0;
     let mut accepted: Option<(Driven, Optimum)> = None;
-    if options.method != SolveMethod::Reference {
+    if d.n == 0 && instance.component.is_some() {
+        // A component without unknowns (a single triangle with u = 0 on its boundary): there is
+        // nothing to solve, with either method.
+        if options.method != SolveMethod::Reference {
+            method.fallback = Some(FallbackReason::Unsupported(Unsupported::NoUnknowns));
+        }
+    } else if options.method != SolveMethod::Reference {
         let forced = options.method == SolveMethod::FactorOnce;
         let start = Instant::now();
-        let attempt = factor_once::attempt(&d, problem.lambda, &options.factor_once, par, forced);
-        timings.factor_once = start.elapsed().as_secs_f64();
+        let attempt = factor_once::attempt(d, lambda, &options.factor_once, par, forced);
+        factor_once_seconds = start.elapsed().as_secs_f64();
         method.factor_once = Some(attempt.report.clone());
         let mut message = None;
         let mut reason = attempt.gave_up;
         if let Some(x) = attempt.x {
-            let opt = optimum(problem, boundary, &d, options, x)?;
+            let opt = optimum(instance, d, options, x);
             if reason.is_none() && !opt.certificate.holds(options.certificate_tolerance) {
                 reason = Some(FallbackReason::CertificateFailed {
                     certificate: Box::new(opt.certificate),
@@ -911,11 +983,189 @@ pub fn solve_with_boundary(
     let (driven, opt) = match accepted {
         Some(pair) => pair,
         None => {
-            let driven = drive(&d, options)?;
-            let opt = optimum(problem, boundary, &d, options, driven.x.clone())?;
+            let driven = drive(d, options)?;
+            let opt = optimum(instance, d, options, driven.x.clone());
             (driven, opt)
         }
     };
+    Ok(Ran {
+        driven,
+        opt,
+        method,
+        factor_once_seconds,
+    })
+}
+
+/// The status of a result: the certificate decides.
+fn status_of(
+    certificate: &Certificate,
+    linear_failure: bool,
+    options: &SolveOptions<'_>,
+) -> Status {
+    if certificate.holds(options.certificate_tolerance) {
+        Status::Converged
+    } else if linear_failure {
+        Status::LinearSolverFailed
+    } else {
+        Status::NotConverged
+    }
+}
+
+/// `(regularized, safeguard, exact)` Newton steps of a list of stages.
+fn iteration_counts(stages: &[StageReport]) -> (usize, usize, usize) {
+    let regularized = stages
+        .iter()
+        .filter(|s| !s.safeguard && matches!(s.kind, StageKind::Regularized { .. }))
+        .map(|s| s.newton_iterations)
+        .sum();
+    let safeguard = stages
+        .iter()
+        .filter(|s| s.safeguard && !matches!(s.kind, StageKind::Exact))
+        .map(|s| s.newton_iterations)
+        .sum();
+    let exact = stages
+        .iter()
+        .filter(|s| matches!(s.kind, StageKind::Exact))
+        .map(|s| s.newton_iterations)
+        .sum();
+    (regularized, safeguard, exact)
+}
+
+fn extract_options(options: &SolveOptions<'_>) -> ExtractOptions {
+    ExtractOptions {
+        threshold: options.cone_threshold,
+        merge: options.merge_cone_clusters,
+        max_cluster_size: options.max_merge_cluster_size,
+        max_cluster_diameter: options.max_merge_cluster_diameter,
+    }
+}
+
+/// The measure with the boundary entries zeroed: only interior vertices carry cone angles (with
+/// an optimized boundary the boundary entries of `measure` are the curvatures `ν`).
+fn interior_measure(mesh: &TriMesh, boundary: BoundaryTreatment, measure: &[f64]) -> Vec<f64> {
+    let mut cone_measure = measure.to_vec();
+    if boundary != BoundaryTreatment::Fixed {
+        for (v, m) in cone_measure.iter_mut().enumerate() {
+            if mesh.is_boundary_vertex(v) {
+                *m = 0.0;
+            }
+        }
+    }
+    cone_measure
+}
+
+/// The scale factor (per vertex of `d`'s mesh) and distortion of given cones, with the boundary
+/// values optimized again for them if the boundary is unknown; and a message if that did not
+/// reach the tolerance.
+fn scale_of_cones(
+    d: &Discrete,
+    boundary: BoundaryTreatment,
+    cones: &[Cone],
+    options: &SolveOptions<'_>,
+) -> Result<(Vec<f64>, f64, Option<String>), ConeError> {
+    let par = options.parallelism;
+    if boundary == BoundaryTreatment::Fixed || d.n < d.n_vertices {
+        let mu = cones_to_measure(d, cones)?;
+        let laplace = LaplaceSolver::new(d, par)?;
+        let (u, _) = log_scale_of_measure(d, &laplace, &mu, par)?;
+        Ok((d.to_vertices(&u), d.distortion(&u), None))
+    } else {
+        // Unknown boundary: the interior angles are those of the cones; the boundary values are
+        // optimized again for them, with the same treatment.
+        let fixed = d.with_fixed_interior(cones)?;
+        let again = drive(&fixed, options)?;
+        let message = again.message.map(|why| {
+            format!(
+                "the boundary values for the extracted cones were not obtained to tolerance: {why}"
+            )
+        });
+        Ok((d.to_vertices(&again.x.u), d.distortion(&again.x.u), message))
+    }
+}
+
+/// `ν` at the boundary vertices: `(L u)_i + k_i` for `Fixed`, the optimized variable otherwise.
+pub(crate) fn boundary_curvature_of(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    log_scale_optimal: &[f64],
+    measure: &[f64],
+) -> Result<Vec<f64>, ConeError> {
+    let nv = problem.mesh.n_vertices();
+    let mut boundary_curvature = vec![0.0; nv];
+    if problem.mesh.n_boundary_edges() > 0 {
+        if boundary == BoundaryTreatment::Fixed {
+            let k = boundary_geodesic_curvatures(problem.mesh, problem.geometry)?;
+            let l_u = apply_laplacian(problem.mesh, problem.geometry, log_scale_optimal);
+            for v in 0..nv {
+                if problem.mesh.is_boundary_vertex(v) {
+                    boundary_curvature[v] = l_u[v] + k[v];
+                }
+            }
+        } else {
+            for v in 0..nv {
+                if problem.mesh.is_boundary_vertex(v) {
+                    boundary_curvature[v] = measure[v];
+                }
+            }
+        }
+    }
+    Ok(boundary_curvature)
+}
+
+/// [`solve`] with a choice of what happens at the boundary: [`BoundaryTreatment::Fixed`] is
+/// `solve` itself; the other treatments make the boundary values and curvatures unknowns (paper
+/// Sec. 8.3; see [`BoundaryTreatment`]).
+///
+/// With a treatment other than `Fixed` on a mesh with boundary:
+///
+/// * `u` is returned at the boundary vertices too, and `measure[v]` at a boundary vertex `v`
+///   is the curvature `ν_v` of the flattened boundary there (the cone angles `µ` stay at the
+///   interior vertices; `cones` lists interior vertices only);
+/// * the objective, `distortion_optimal` and `cone_cost` include the boundary vertices (with
+///   their masses and distortion weights; the cost of `ν` for `Penalized`);
+/// * `u` is determined up to a constant, which is optimized (`Σ wE m u = 0`), as on a closed
+///   mesh; `adjoint` is determined up to a constant unless some boundary site pins it
+///   (`adjoint_shift`);
+/// * the certificate is that of the problem with the boundary as unknowns, and its
+///   `gauss_bonnet_residual` is `|Σ_I µ + Σ_B ν − 2πχ|`;
+/// * if extraction changes the cones (a threshold, merging), the scale factor of the returned
+///   cones, `log_scale`, is the one whose boundary values are re-optimized for the new
+///   interior cones (the same treatment of the boundary, interior angles fixed).
+///
+/// [`Solution::boundary_curvature`] reports `ν` for every treatment. Disconnected meshes are
+/// handled as in [`solve`]: per component (with an unknown boundary every component with
+/// boundary has its own constant of `u` and its own Gauss–Bonnet sum).
+///
+/// # Errors
+/// As [`solve`]. `ConeError::Infeasible` can occur with `Convex` (and prescribed or
+/// forbidden vertices).
+///
+/// [formula: proximal-fixed-point]
+/// [formula: boundary-optimality-system]
+pub fn solve_with_boundary(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    options: &SolveOptions<'_>,
+) -> Result<Solution, ConeError> {
+    let total_start = Instant::now();
+    options.validate()?;
+    if problem.mesh.n_components() > 1 {
+        return solve_components(problem, boundary, options, total_start);
+    }
+    let instance = Instance::new(problem, boundary)?;
+    let d = Discrete::from_instance(&instance)?;
+    let mut timings = Timings {
+        setup: total_start.elapsed().as_secs_f64(),
+        ..Timings::default()
+    };
+
+    let Ran {
+        driven,
+        opt,
+        method,
+        factor_once_seconds,
+    } = run(&instance, &d, problem.lambda, options)?;
+    timings.factor_once = factor_once_seconds;
     let Driven {
         x: _,
         stages,
@@ -943,61 +1193,31 @@ pub fn solve_with_boundary(
         seconds: certificate_seconds,
     } = opt;
     timings.certificate = certificate_seconds;
-    let status = if certificate.holds(options.certificate_tolerance) {
-        Status::Converged
-    } else if linear_failure {
-        Status::LinearSolverFailed
-    } else {
-        Status::NotConverged
-    };
+    let status = status_of(&certificate, linear_failure, options);
     if status == Status::Converged && safeguard_rounds == 0 {
         message = None;
     }
 
-    // Cone extraction. Only interior vertices carry cone angles: with an optimized boundary the
-    // boundary entries of `measure` are the curvatures `ν` and are not cones.
+    // Cone extraction.
     let start = Instant::now();
-    let data = validate_with(problem, boundary)?;
-    let mut cone_measure = measure.clone();
-    if boundary != BoundaryTreatment::Fixed {
-        for (v, m) in cone_measure.iter_mut().enumerate() {
-            if problem.mesh.is_boundary_vertex(v) {
-                *m = 0.0;
-            }
-        }
-    }
+    let cone_measure = interior_measure(problem.mesh, boundary, &measure);
     let (cones, mut extraction) = extract_cones(
         problem.mesh,
         problem.geometry,
-        &data,
+        &instance.data,
         &problem.prescribed_cones,
         &cone_measure,
-        &ExtractOptions {
-            threshold: options.cone_threshold,
-            merge: options.merge_cone_clusters,
-            max_cluster_size: options.max_merge_cluster_size,
-            max_cluster_diameter: options.max_merge_cluster_diameter,
-        },
+        &extract_options(options),
     );
     let total_cone_angle: f64 = cones.iter().map(|c| c.angle.abs()).sum();
     let (log_scale, distortion) = if !extraction.cones_differ_from_measure {
         (log_scale_optimal.clone(), distortion_optimal)
-    } else if boundary == BoundaryTreatment::Fixed || d.n < d.n_vertices {
-        let mu = cones_to_measure(&d, &cones)?;
-        let laplace = LaplaceSolver::new(&d, par)?;
-        let (u, _) = log_scale_of_measure(&d, &laplace, &mu, par)?;
-        (d.to_vertices(&u), d.distortion(&u))
     } else {
-        // Unknown boundary: the interior angles are those of the extracted cones; the boundary
-        // values are optimized again for them, with the same treatment.
-        let fixed = d.with_fixed_interior(&cones)?;
-        let again = drive(&fixed, options)?;
-        if let Some(why) = again.message {
-            message = Some(format!(
-                "the boundary values for the extracted cones were not obtained to tolerance: {why}"
-            ));
+        let (u, distortion, why) = scale_of_cones(&d, boundary, &cones, options)?;
+        if why.is_some() {
+            message = why;
         }
-        (d.to_vertices(&again.x.u), d.distortion(&again.x.u))
+        (u, distortion)
     };
     extraction.distortion_change = distortion - distortion_optimal;
     extraction.total_angle_change = if extraction.cones_differ_from_measure {
@@ -1008,39 +1228,10 @@ pub fn solve_with_boundary(
     timings.extraction = start.elapsed().as_secs_f64();
     timings.total = total_start.elapsed().as_secs_f64();
 
-    let regularized_iterations = stages
-        .iter()
-        .filter(|s| !s.safeguard && matches!(s.kind, StageKind::Regularized { .. }))
-        .map(|s| s.newton_iterations)
-        .sum();
-    let safeguard_iterations = stages
-        .iter()
-        .filter(|s| s.safeguard && !matches!(s.kind, StageKind::Exact))
-        .map(|s| s.newton_iterations)
-        .sum();
-    let exact_iterations = stages
-        .iter()
-        .filter(|s| matches!(s.kind, StageKind::Exact))
-        .map(|s| s.newton_iterations)
-        .sum();
-    let mut boundary_curvature = vec![0.0; d.n_vertices];
-    if problem.mesh.n_boundary_edges() > 0 {
-        if boundary == BoundaryTreatment::Fixed {
-            let k = boundary_geodesic_curvatures(problem.mesh, problem.geometry)?;
-            let l_u = apply_laplacian(problem.mesh, problem.geometry, &log_scale_optimal);
-            for v in 0..d.n_vertices {
-                if problem.mesh.is_boundary_vertex(v) {
-                    boundary_curvature[v] = l_u[v] + k[v];
-                }
-            }
-        } else {
-            for v in 0..d.n_vertices {
-                if problem.mesh.is_boundary_vertex(v) {
-                    boundary_curvature[v] = measure[v];
-                }
-            }
-        }
-    }
+    let (regularized_iterations, safeguard_iterations, exact_iterations) =
+        iteration_counts(&stages);
+    let boundary_curvature =
+        boundary_curvature_of(problem, boundary, &log_scale_optimal, &measure)?;
     Ok(Solution {
         measure,
         log_scale_optimal,
@@ -1070,6 +1261,338 @@ pub fn solve_with_boundary(
             certificate,
             method,
             message,
+            components: Vec::new(),
         },
+    })
+}
+
+/// [`solve_with_boundary`] on a mesh with several components: each component is solved as its
+/// part of the whole problem (masses of the whole mesh, the given `λ`), then the results are
+/// assembled and the whole problem is certified.
+///
+/// [formula: component-separation]
+fn solve_components(
+    problem: &ConeProblem<'_>,
+    boundary: BoundaryTreatment,
+    options: &SolveOptions<'_>,
+    total_start: Instant,
+) -> Result<Solution, ConeError> {
+    let mesh = problem.mesh;
+    let whole = Instance::new(problem, boundary)?;
+    let pieces = split_pieces(mesh, problem.geometry)?;
+    let parts: Vec<Instance<'_>> = pieces
+        .iter()
+        .enumerate()
+        .map(|(c, piece)| whole.part(piece, c as u32))
+        .collect();
+    let discretes = parts
+        .iter()
+        .map(Discrete::from_instance)
+        .collect::<Result<Vec<_>, _>>()?;
+    let n_parts = pieces.len();
+    let mut timings = Timings {
+        setup: total_start.elapsed().as_secs_f64(),
+        ..Timings::default()
+    };
+
+    // The components are independent problems: with a pool they run concurrently, each on one
+    // thread (so the result of a component does not depend on the number of threads).
+    let part_options = SolveOptions {
+        parallelism: Parallelism::Sequential,
+        ..options.clone()
+    };
+    let solve_one = |c: usize| solve_part(&parts[c], &discretes[c], problem.lambda, &part_options);
+    let results: Vec<Result<PartSolve, ConeError>> = match options.parallelism {
+        Parallelism::Pool(pool) => pool.map(n_parts, solve_one),
+        Parallelism::Sequential => (0..n_parts).map(solve_one).collect(),
+    };
+    let mut solved = Vec::with_capacity(n_parts);
+    for result in results {
+        solved.push(result?);
+    }
+
+    // Assemble.
+    let nv = mesh.n_vertices();
+    let mut measure = vec![0.0; nv];
+    let mut log_scale_optimal = vec![0.0; nv];
+    let mut adjoint = vec![0.0; nv];
+    let mut stages = Vec::new();
+    let mut linear_report = LinearSolverReport::default();
+    let mut distortion_optimal = 0.0;
+    let mut cone_cost = 0.0;
+    // A constant added to the whole adjoint must be admissible on every component; a component
+    // that is not closed admits none.
+    let mut adjoint_shift = (f64::NEG_INFINITY, f64::INFINITY);
+    let mut bound_correction = 0.0f64;
+    let mut zeroed_angles = 0;
+    let mut largest_zeroed_angle = 0.0f64;
+    let mut safeguard_rounds = 0;
+    let mut linear_failure = false;
+    let mut messages = Vec::new();
+    let mut all_factor_once = true;
+    let mut fallback = None;
+    let mut components = Vec::with_capacity(n_parts);
+    for (c, part) in solved.into_iter().enumerate() {
+        let PartSolve {
+            measure: part_measure,
+            log_scale_optimal: part_u,
+            adjoint: part_phi,
+            linear_failure: part_failure,
+            report: component,
+        } = part;
+        for (local, &v) in pieces[c].sub.vertex_to_parent.iter().enumerate() {
+            let v = v as usize;
+            measure[v] = part_measure[local];
+            log_scale_optimal[v] = part_u[local];
+            adjoint[v] = part_phi[local];
+        }
+        let r = &component.report;
+        distortion_optimal += component.distortion_optimal;
+        cone_cost += component.cone_cost;
+        adjoint_shift = (
+            adjoint_shift.0.max(component.adjoint_shift.0),
+            adjoint_shift.1.min(component.adjoint_shift.1),
+        );
+        bound_correction = bound_correction.max(r.bound_correction);
+        zeroed_angles += r.zeroed_angles;
+        largest_zeroed_angle = largest_zeroed_angle.max(r.largest_zeroed_angle);
+        safeguard_rounds += r.safeguard_rounds;
+        linear_failure |= part_failure;
+        linear_report.accumulate(&r.linear_solver);
+        timings.regularized += r.timings.regularized;
+        timings.exact += r.timings.exact;
+        timings.factor_once += r.timings.factor_once;
+        timings.certificate += r.timings.certificate;
+        if component.n_unknowns > 0 {
+            all_factor_once &= r.method.used == MethodUsed::FactorOnce;
+            if fallback.is_none() {
+                fallback.clone_from(&r.method.fallback);
+            }
+        }
+        if let Some(m) = &r.message {
+            messages.push(format!("component {c}: {m}"));
+        }
+        stages.extend(r.stages.iter().copied());
+        components.push(component);
+    }
+
+    // The certificate of the whole problem decides the status.
+    let start = Instant::now();
+    let certificate = certify_instance(&whole, &log_scale_optimal, &adjoint, &measure);
+    timings.certificate += start.elapsed().as_secs_f64();
+    let status = status_of(&certificate, linear_failure, options);
+    let mut message = (!messages.is_empty()).then(|| messages.join("; "));
+    let method = MethodReport {
+        requested: options.method,
+        used: if all_factor_once && components.iter().any(|c| c.n_unknowns > 0) {
+            MethodUsed::FactorOnce
+        } else {
+            MethodUsed::Reference
+        },
+        fallback,
+        factor_once: None,
+    };
+
+    // Cone extraction, on the whole mesh (a cluster never spans two components); the scale factor
+    // of changed cones per component.
+    let start = Instant::now();
+    let cone_measure = interior_measure(mesh, boundary, &measure);
+    let (cones, mut extraction) = extract_cones(
+        mesh,
+        problem.geometry,
+        &whole.data,
+        &problem.prescribed_cones,
+        &cone_measure,
+        &extract_options(options),
+    );
+    let total_cone_angle: f64 = cones.iter().map(|c| c.angle.abs()).sum();
+    let (log_scale, distortion) = if !extraction.cones_differ_from_measure {
+        (log_scale_optimal.clone(), distortion_optimal)
+    } else {
+        let component_of = mesh.vertex_components();
+        let mut local = vec![0u32; nv];
+        for piece in &pieces {
+            for (l, &v) in piece.sub.vertex_to_parent.iter().enumerate() {
+                local[v as usize] = l as u32;
+            }
+        }
+        let mut per_part: Vec<Vec<Cone>> = vec![Vec::new(); n_parts];
+        let mut extracted = vec![0.0; nv];
+        for cone in &cones {
+            let v = cone.vertex as usize;
+            extracted[v] = cone.angle;
+            per_part[component_of[v] as usize].push(Cone {
+                vertex: local[v],
+                angle: cone.angle,
+            });
+        }
+        let mut u_all = log_scale_optimal.clone();
+        let mut distortion = 0.0;
+        for c in 0..n_parts {
+            let vertices = &pieces[c].sub.vertex_to_parent;
+            let unchanged = vertices
+                .iter()
+                .all(|&v| extracted[v as usize] == cone_measure[v as usize]);
+            if unchanged {
+                distortion += components[c].distortion_optimal;
+                continue;
+            }
+            let (u, part_distortion, why) =
+                scale_of_cones(&discretes[c], boundary, &per_part[c], &part_options)?;
+            for (l, &v) in vertices.iter().enumerate() {
+                u_all[v as usize] = u[l];
+            }
+            distortion += part_distortion;
+            if let Some(why) = why {
+                let why = format!("component {c}: {why}");
+                message = Some(match message {
+                    Some(m) => format!("{m}; {why}"),
+                    None => why,
+                });
+            }
+        }
+        (u_all, distortion)
+    };
+    extraction.distortion_change = distortion - distortion_optimal;
+    extraction.total_angle_change = if extraction.cones_differ_from_measure {
+        total_cone_angle - measure.iter().map(|m| m.abs()).sum::<f64>()
+    } else {
+        0.0
+    };
+    timings.extraction = start.elapsed().as_secs_f64();
+    timings.total = total_start.elapsed().as_secs_f64();
+
+    let (regularized_iterations, safeguard_iterations, exact_iterations) =
+        iteration_counts(&stages);
+    let boundary_curvature =
+        boundary_curvature_of(problem, boundary, &log_scale_optimal, &measure)?;
+    Ok(Solution {
+        measure,
+        log_scale_optimal,
+        boundary_curvature,
+        adjoint,
+        adjoint_shift,
+        objective: distortion_optimal + cone_cost,
+        distortion_optimal,
+        cone_cost,
+        cones,
+        log_scale,
+        distortion,
+        total_cone_angle,
+        extraction,
+        report: SolveReport {
+            status,
+            stages,
+            regularized_iterations,
+            exact_iterations,
+            safeguard_rounds,
+            safeguard_iterations,
+            linear_solver: linear_report,
+            timings,
+            bound_correction,
+            zeroed_angles,
+            largest_zeroed_angle,
+            certificate,
+            method,
+            message,
+            components,
+        },
+    })
+}
+
+/// The `λ` with which a component, solved alone with its masses divided by its own area, has the
+/// minimizers of its part of the whole problem: `λ · A / A_c = λ / area_fraction` (masses
+/// multiplied by `c = A / A_c` need `λ · c`).
+///
+/// [formula: component-lambda-rescaling]
+/// [formula: lambda-area-normalization]
+pub(crate) fn equivalent_lambda(lambda: f64, area_fraction: f64) -> f64 {
+    lambda / area_fraction
+}
+
+/// The solve of one component of a disconnected mesh: its optimum per vertex of the component,
+/// and its report.
+pub(crate) struct PartSolve {
+    pub measure: Vec<f64>,
+    pub log_scale_optimal: Vec<f64>,
+    pub adjoint: Vec<f64>,
+    /// Whether a linear solver failure ended the reference method.
+    pub linear_failure: bool,
+    pub report: ComponentReport,
+}
+
+/// Solves one component (an [`Instance::part`]) of a disconnected mesh, as its part of the whole
+/// problem.
+///
+/// [formula: component-separation]
+pub(crate) fn solve_part(
+    instance: &Instance<'_>,
+    d: &Discrete,
+    lambda: f64,
+    options: &SolveOptions<'_>,
+) -> Result<PartSolve, ConeError> {
+    let start = Instant::now();
+    let Ran {
+        driven,
+        opt,
+        method,
+        factor_once_seconds,
+    } = run(instance, d, lambda, options)?;
+    let status = status_of(&opt.certificate, driven.linear_failure, options);
+    let mut message = driven.message;
+    if status == Status::Converged && driven.safeguard_rounds == 0 {
+        message = None;
+    }
+    let (regularized_iterations, safeguard_iterations, exact_iterations) =
+        iteration_counts(&driven.stages);
+    let area_fraction: f64 = instance.mass.iter().sum();
+    let shift = if d.closed {
+        opt.adjoint_shift
+    } else {
+        (0.0, 0.0)
+    };
+    let report = ComponentReport {
+        component: instance.component.unwrap_or(0),
+        n_vertices: instance.mesh.n_vertices(),
+        n_faces: instance.mesh.n_faces(),
+        closed: d.closed,
+        n_unknowns: d.n,
+        area_fraction,
+        equivalent_lambda: equivalent_lambda(lambda, area_fraction),
+        objective: opt.distortion_optimal + opt.cone_cost,
+        distortion_optimal: opt.distortion_optimal,
+        cone_cost: opt.cone_cost,
+        adjoint_shift: shift,
+        report: SolveReport {
+            status,
+            stages: driven.stages,
+            regularized_iterations,
+            exact_iterations,
+            safeguard_rounds: driven.safeguard_rounds,
+            safeguard_iterations,
+            linear_solver: driven.linear_report,
+            timings: Timings {
+                regularized: driven.regularized_seconds,
+                exact: driven.exact_seconds,
+                factor_once: factor_once_seconds,
+                certificate: opt.seconds,
+                total: start.elapsed().as_secs_f64(),
+                ..Timings::default()
+            },
+            bound_correction: opt.bound_correction,
+            zeroed_angles: opt.zeroed_angles,
+            largest_zeroed_angle: opt.largest_zeroed_angle,
+            certificate: opt.certificate,
+            method,
+            message,
+            components: Vec::new(),
+        },
+    };
+    Ok(PartSolve {
+        measure: opt.measure,
+        log_scale_optimal: opt.log_scale_optimal,
+        adjoint: opt.adjoint,
+        linear_failure: driven.linear_failure,
+        report,
     })
 }

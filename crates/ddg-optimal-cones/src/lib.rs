@@ -142,6 +142,7 @@ mod factor_once;
 mod linsys;
 mod newton;
 mod problem;
+mod reoptimize;
 mod site;
 mod solve;
 mod weights;
@@ -160,9 +161,13 @@ pub use factor_once::{
 pub use linsys::{LinearSolver, LinearSolverReport};
 pub use newton::StageStop;
 pub use problem::{BoundaryTreatment, ConeProblem};
+pub use reoptimize::{
+    Reoptimization, ReoptimizeComponentReport, ReoptimizeMethod, ReoptimizeMethodUsed,
+    ReoptimizeOptions, ReoptimizeReport, reoptimization_problem, reoptimize_cones,
+};
 pub use site::soft_threshold;
 pub use solve::{
-    MethodReport, RegularizationMetric, Solution, SolveOptions, SolveReport, StageKind,
-    StageReport, Status, Timings, factor_once_support, solve, solve_with_boundary,
+    ComponentReport, MethodReport, RegularizationMetric, Solution, SolveOptions, SolveReport,
+    StageKind, StageReport, Status, Timings, factor_once_support, solve, solve_with_boundary,
 };
 pub use weights::{FeatureSizeConvention, FeatureSizeWeights, feature_size_weights};

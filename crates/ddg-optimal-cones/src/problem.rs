@@ -5,6 +5,7 @@ use ddg_core::io::Cone;
 use ddg_core::operators::{
     angle_defects, boundary_geodesic_curvatures, cotan_laplacian, lumped_mass_normalized,
 };
+use ddg_core::topology::SubMesh;
 use ddg_core::{Geometry, SparseMatrix, TriMesh};
 
 use crate::error::{ConeError, PrescribedConeIssue};
@@ -67,7 +68,8 @@ pub enum BoundaryTreatment {
 /// problem does not depend on the length unit.
 #[derive(Debug, Clone)]
 pub struct ConeProblem<'a> {
-    /// The mesh: connected, with or without boundary.
+    /// The mesh: with or without boundary, with any number of connected components (each
+    /// component is solved as its part of the whole problem).
     pub mesh: &'a TriMesh,
     /// Its intrinsic geometry (edge lengths, angles, areas).
     pub geometry: &'a Geometry,
@@ -117,6 +119,28 @@ pub(crate) struct VertexData {
     pub sites: Vec<Site>,
     /// Number of forbidden unknown vertices.
     pub n_forbidden: usize,
+    /// Whether the vertex carries a prescribed cone.
+    pub prescribed: Vec<bool>,
+}
+
+impl VertexData {
+    /// The data of the vertices `vertices` (in this order), e.g. those of one component.
+    fn restrict(&self, vertices: &[u32]) -> VertexData {
+        let pick = |v: &u32| *v as usize;
+        let unknown: Vec<bool> = vertices.iter().map(|v| self.unknown[pick(v)]).collect();
+        let sites: Vec<Site> = vertices.iter().map(|v| self.sites[pick(v)]).collect();
+        let prescribed: Vec<bool> = vertices.iter().map(|v| self.prescribed[pick(v)]).collect();
+        let n_forbidden = (0..vertices.len())
+            .filter(|&i| unknown[i] && sites[i].fixed && !prescribed[i])
+            .count();
+        VertexData {
+            unknown,
+            w_e: vertices.iter().map(|v| self.w_e[pick(v)]).collect(),
+            sites,
+            n_forbidden,
+            prescribed,
+        }
+    }
 }
 
 fn check_length(what: &'static str, array: &Option<Vec<f64>>, n: usize) -> Result<(), ConeError> {
@@ -137,11 +161,6 @@ pub(crate) fn validate_with(
 ) -> Result<VertexData, ConeError> {
     let mesh = problem.mesh;
     problem.geometry.check_mesh(mesh)?;
-    if mesh.n_components() != 1 {
-        return Err(ConeError::NotConnected {
-            components: mesh.n_components(),
-        });
-    }
     let lambda = problem.lambda;
     if !(lambda.is_finite() && lambda >= 0.0) {
         return Err(ConeError::InvalidLambda { lambda });
@@ -222,6 +241,7 @@ pub(crate) fn validate_with(
     }
 
     let mut seen = vec![false; nv];
+    let mut n_prescribed_forbidden = 0;
     for (index, cone) in problem.prescribed_cones.iter().enumerate() {
         let issue = |reason| ConeError::InvalidPrescribedCone {
             index,
@@ -245,7 +265,7 @@ pub(crate) fn validate_with(
         seen[v] = true;
         if sites[v].fixed {
             // A prescribed cone overrides "forbidden".
-            n_forbidden -= 1;
+            n_prescribed_forbidden += 1;
         }
         sites[v] = Site::fixed(cone.angle);
     }
@@ -253,12 +273,133 @@ pub(crate) fn validate_with(
         unknown,
         w_e,
         sites,
-        n_forbidden,
+        n_forbidden: n_forbidden - n_prescribed_forbidden,
+        prescribed: seen,
     })
 }
 
+/// One connected component of a mesh, as a mesh of its own (faces keep their corner slots) with
+/// the geometry of the parent's edge lengths.
+pub(crate) struct Piece {
+    /// The component, with the maps to the parent's vertices and faces.
+    pub sub: SubMesh,
+    /// Its geometry: the parent's edge lengths, so every corner angle, cotangent and face area
+    /// is bit for bit the parent's.
+    pub geometry: Geometry,
+}
+
+/// Splits a mesh into its connected components ([`TriMesh::split_components`], numbered as
+/// [`TriMesh::face_components`]: in order of their lowest face).
+pub(crate) fn split_pieces(mesh: &TriMesh, geometry: &Geometry) -> Result<Vec<Piece>, ConeError> {
+    geometry.check_mesh(mesh)?;
+    let lengths = geometry.edge_lengths();
+    mesh.split_components()
+        .into_iter()
+        .map(|sub| {
+            let mut piece_lengths = vec![0.0; sub.mesh.n_edges()];
+            for (f, &parent) in sub.face_to_parent.iter().enumerate() {
+                for k in 0..3 {
+                    piece_lengths[sub.mesh.edge(3 * f + k)] =
+                        lengths[mesh.edge(3 * parent as usize + k)];
+                }
+            }
+            let geometry = Geometry::from_edge_lengths(&sub.mesh, piece_lengths)?;
+            Ok(Piece { sub, geometry })
+        })
+        .collect()
+}
+
+/// A validated problem on one mesh, or on one connected component of the mesh of a problem: the
+/// per-vertex data the solver, the certificate and the evaluation work from.
+///
+/// For a component, every array is that of the whole problem restricted to the component's
+/// vertices; in particular the masses are those of the whole mesh, **divided by the total area
+/// of the whole mesh**, not by the component's area (see [`Discrete::from_instance`]).
+pub(crate) struct Instance<'m> {
+    /// The mesh (the whole mesh, or a component of it).
+    pub mesh: &'m TriMesh,
+    /// Its geometry.
+    pub geometry: &'m Geometry,
+    /// The boundary treatment.
+    pub boundary: BoundaryTreatment,
+    /// The validated per-vertex data.
+    pub data: VertexData,
+    /// The right-hand side `Ω` per vertex (`Ω + k` with unknown boundary vertices).
+    pub omega: Vec<f64>,
+    /// The lumped masses divided by the total area of the whole mesh.
+    pub mass: Vec<f64>,
+    /// For a component: the vertex of the whole mesh of each of its vertices.
+    pub to_parent: Option<&'m [u32]>,
+    /// For a component: its number among the components of the whole mesh.
+    pub component: Option<u32>,
+    /// Number and sum of the prescribed cones on this mesh (for the infeasibility message).
+    pub prescribed: (usize, f64),
+}
+
+impl<'m> Instance<'m> {
+    /// Validates a problem and evaluates its per-vertex data. The mesh may have several
+    /// components; then this is the data of the whole problem, and [`Instance::part`] gives
+    /// that of one component.
+    ///
+    /// [formula: lambda-area-normalization]
+    pub fn new(
+        problem: &ConeProblem<'m>,
+        boundary: BoundaryTreatment,
+    ) -> Result<Instance<'m>, ConeError> {
+        let data = validate_with(problem, boundary)?;
+        let omega = curvatures(problem.mesh, problem.geometry, boundary)?;
+        let mass = lumped_mass_normalized(problem.mesh, problem.geometry)?;
+        Ok(Instance {
+            mesh: problem.mesh,
+            geometry: problem.geometry,
+            boundary,
+            data,
+            omega,
+            mass,
+            to_parent: None,
+            component: None,
+            prescribed: (
+                problem.prescribed_cones.len(),
+                problem.prescribed_cones.iter().map(|c| c.angle).sum(),
+            ),
+        })
+    }
+
+    /// The data of component `component` of the whole problem `self`, on its own mesh `piece`.
+    /// The masses stay those of the whole mesh (divided by the whole area).
+    ///
+    /// [formula: component-separation]
+    pub fn part<'p>(&self, piece: &'p Piece, component: u32) -> Instance<'p> {
+        let vertices = &piece.sub.vertex_to_parent;
+        let pick =
+            |values: &[f64]| -> Vec<f64> { vertices.iter().map(|&v| values[v as usize]).collect() };
+        let data = self.data.restrict(vertices);
+        let prescribed = (0..vertices.len())
+            .filter(|&i| data.prescribed[i])
+            .fold((0, 0.0), |(n, s), i| (n + 1, s + data.sites[i].lo));
+        Instance {
+            mesh: &piece.sub.mesh,
+            geometry: &piece.geometry,
+            boundary: self.boundary,
+            omega: pick(&self.omega),
+            mass: pick(&self.mass),
+            data,
+            to_parent: Some(vertices),
+            component: Some(component),
+            prescribed,
+        }
+    }
+
+    /// The vertex of the caller's mesh that vertex `v` of this instance is.
+    pub fn label(&self, v: u32) -> u32 {
+        self.to_parent.map_or(v, |p| p[v as usize])
+    }
+}
+
 /// The problem restricted to its unknowns: the interior vertices of a mesh with boundary
-/// (`u = 0` on the boundary eliminated), or all vertices of a closed mesh.
+/// (`u = 0` on the boundary eliminated), or all vertices of a closed mesh. Always on a
+/// connected mesh: a problem on a mesh with several components is one of these per component
+/// ([`Discrete::from_instance`] of [`Instance::part`]).
 #[derive(Clone)]
 pub(crate) struct Discrete {
     /// Number of unknown vertices.
@@ -272,12 +413,16 @@ pub(crate) struct Discrete {
     pub is_boundary: Vec<bool>,
     /// For each unknown, its vertex (ascending).
     pub unknowns: Vec<u32>,
+    /// For each unknown, its vertex in the caller's mesh: `unknowns` itself, unless this is a
+    /// component of a larger mesh. Used in messages.
+    pub labels: Vec<u32>,
     /// The Laplacian block of the unknowns: `L_II`, or all of `L` on a closed mesh.
     pub a: SparseMatrix,
     /// Angle defects `Ω` of the unknowns (the boundary geodesic curvature `k` at an unknown
     /// boundary vertex).
     pub omega: Vec<f64>,
-    /// Area-normalized lumped masses `m` of the unknowns.
+    /// Area-normalized lumped masses `m` of the unknowns (divided by the area of the whole mesh
+    /// of the problem, also for a component).
     pub mass: Vec<f64>,
     /// Distortion weights times mass, `w_i = wE_i m_i`.
     pub w: Vec<f64>,
@@ -291,27 +436,33 @@ pub(crate) struct Discrete {
 }
 
 impl Discrete {
-    /// Validates the problem and assembles its discrete form.
+    /// Assembles the discrete form of a validated instance on a connected mesh: the whole
+    /// problem of a connected mesh, or one component of a disconnected one.
     ///
-    /// The masses are divided by the total area, which makes `λ` dimensionless.
+    /// **Why a problem on a mesh with several components is solved component by component.**
+    /// The vertices of different components share no edge, so `L` (and its block on the
+    /// unknowns) is block diagonal; the objective `½ Σ wE m u² + λ Σ wR |µ|` is a sum over the
+    /// components, and every constraint involves the vertices of one component only. So `(u, µ)`
+    /// is a minimizer iff its restriction to every component minimizes that component's part of
+    /// the objective under that component's constraints (`isMinimizer_sum_iff`; the optimality
+    /// systems separate likewise, `kkt_sum_iff`). On a closed component the additive constant of
+    /// `u` is a free variable of its own, and the cone angles of every closed component sum to
+    /// its own `2πχ`. The part of the objective that belongs to a component has the masses of
+    /// the whole problem, `a_i / A` with `A` the total area of the mesh, and that is what
+    /// [`Instance::part`] keeps: each component is solved with the given `λ` and these masses.
+    /// The equivalent alternative, a component normalized by its own area `A_c`, needs
+    /// `λ · A / A_c` for the same minimizers, and its adjoint is `A / A_c` times the adjoint of
+    /// the whole problem (`isMinimizer_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff`).
     ///
-    /// [formula: lambda-area-normalization]
-    pub fn new(problem: &ConeProblem<'_>) -> Result<Discrete, ConeError> {
-        Discrete::with_boundary(problem, BoundaryTreatment::Fixed)
-    }
-
-    /// [`Discrete::new`] for a boundary treatment. With a treatment other than `Fixed` the
-    /// boundary vertices are unknowns whose "angle defect" is the boundary geodesic curvature
-    /// `k`, so that one formula covers `µ` and `ν`.
+    /// With a treatment other than `Fixed` the boundary vertices are unknowns whose "angle
+    /// defect" is the boundary geodesic curvature `k`, so that one formula covers `µ` and `ν`.
     ///
+    /// [formula: component-separation]
     /// [formula: boundary-optimality-system]
-    pub fn with_boundary(
-        problem: &ConeProblem<'_>,
-        boundary: BoundaryTreatment,
-    ) -> Result<Discrete, ConeError> {
-        let data = validate_with(problem, boundary)?;
-        let mesh = problem.mesh;
-        let geometry = problem.geometry;
+    pub fn from_instance(instance: &Instance<'_>) -> Result<Discrete, ConeError> {
+        let data = &instance.data;
+        let mesh = instance.mesh;
+        let geometry = instance.geometry;
         let nv = mesh.n_vertices();
         let unknowns: Vec<u32> = (0..nv as u32)
             .filter(|&v| data.unknown[v as usize])
@@ -325,12 +476,12 @@ impl Discrete {
         } else {
             laplacian.submatrix(&unknowns, &unknowns)?
         };
-        let omega_v = curvatures(mesh, geometry, boundary)?;
-        let mass_v = lumped_mass_normalized(mesh, geometry)?;
+        let omega_v = &instance.omega;
+        let mass_v = &instance.mass;
         let pick =
             |values: &[f64]| -> Vec<f64> { unknowns.iter().map(|&v| values[v as usize]).collect() };
-        let omega = pick(&omega_v);
-        let mass = pick(&mass_v);
+        let omega = pick(omega_v);
+        let mass = pick(mass_v);
         let w: Vec<f64> = unknowns
             .iter()
             .map(|&v| data.w_e[v as usize] * mass_v[v as usize])
@@ -347,20 +498,24 @@ impl Discrete {
 
         if closed {
             if w.iter().all(|&x| x == 0.0) {
-                return Err(ConeError::NoDistortionWeight);
+                return Err(ConeError::NoDistortionWeight {
+                    component: instance.component,
+                });
             }
-            check_gauss_bonnet_feasible(problem, &data, &sites, total_curvature)?;
+            check_gauss_bonnet_feasible(instance, &sites, total_curvature)?;
         }
         let is_boundary: Vec<bool> = unknowns
             .iter()
             .map(|&v| mesh.is_boundary_vertex(v as usize))
             .collect();
+        let labels = unknowns.iter().map(|&v| instance.label(v)).collect();
         Ok(Discrete {
             n,
             n_vertices: nv,
             closed,
             is_boundary,
             unknowns,
+            labels,
             a,
             omega,
             mass,
@@ -447,12 +602,12 @@ pub(crate) fn curvatures(
 }
 
 /// On a closed mesh, summing the state equation gives `Σ µ_i = Σ Ω_i = 2πχ`; the constraints
-/// must allow that sum.
+/// must allow that sum. On a mesh with several components this holds for every closed
+/// component on its own (its block of `L` annihilates the constants of that component).
 ///
 /// [formula: closed-mesh-cone-sum]
 fn check_gauss_bonnet_feasible(
-    problem: &ConeProblem<'_>,
-    data: &VertexData,
+    instance: &Instance<'_>,
     sites: &[Site],
     required: f64,
 ) -> Result<(), ConeError> {
@@ -465,9 +620,10 @@ fn check_gauss_bonnet_feasible(
         required,
         min_sum,
         max_sum,
-        euler_characteristic: problem.mesh.euler_characteristic(),
-        n_forbidden: data.n_forbidden,
-        n_prescribed: problem.prescribed_cones.len(),
-        prescribed_sum: problem.prescribed_cones.iter().map(|c| c.angle).sum(),
+        euler_characteristic: instance.mesh.euler_characteristic(),
+        n_forbidden: instance.data.n_forbidden,
+        n_prescribed: instance.prescribed.0,
+        prescribed_sum: instance.prescribed.1,
+        component: instance.component,
     })
 }
