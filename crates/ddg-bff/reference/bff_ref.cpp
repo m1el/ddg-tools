@@ -10,6 +10,7 @@
 //                  BFF bff(mesh); Cutter::cut(cones, mesh); bff.flattenWithCones(C, true)
 //   MODE = auto  : DenseMatrix u(bff.data->bN); bff.flatten(u, true)
 //   MODE = disk  : bff.flattenToDisk()
+//   MODE = sphere: bff.mapToSphere() (closed genus-0 meshes)
 //
 // No HoleFiller, no Generators, no projectUvsToPcaAxis, no UV packing.
 //
@@ -18,11 +19,14 @@
 //
 //   # bff_ref MODE
 //   faces N
-//   f v0 v1 v2  u0 v0  u1 v1  u2 v2
+//   f v0 v1 v2  u0 v0  u1 v1  u2 v2          (MODE sphere: x y z per corner)
 //   cut M
 //   c a b
 //   positions V
 //   p x y z
+//   pole v                                    (MODE sphere: the removed vertex)
+//   d u0 v0 u1 v1 u2 v2                       (MODE sphere, one per face: the unit-disk
+//                                              layout of the sphere without the pole's star)
 //
 // Exit status: 0 ok, 1 usage / input rejected / reference failure,
 //              3 output written but its UVs are non-finite or all exactly zero
@@ -142,7 +146,7 @@ int main(int argc, const char *argv[])
 {
 	if (argc < 4 || argc > 5) {
 		std::fprintf(stderr, "USAGE: %s MODE in.obj out.txt [cones.txt]\n"
-							 "  MODE = cones | auto | disk  (cones.txt required for 'cones')\n",
+							 "  MODE = cones | auto | disk | sphere  (cones.txt required for 'cones')\n",
 					 argv[0]);
 		return 1;
 	}
@@ -153,7 +157,10 @@ int main(int argc, const char *argv[])
 	const bool modeCones = mode == "cones";
 	const bool modeAuto = mode == "auto";
 	const bool modeDisk = mode == "disk";
-	if (!modeCones && !modeAuto && !modeDisk) die("unknown MODE '%s' (cones|auto|disk)", mode.c_str());
+	const bool modeSphere = mode == "sphere";
+	if (!modeCones && !modeAuto && !modeDisk && !modeSphere) {
+		die("unknown MODE '%s' (cones|auto|disk|sphere)", mode.c_str());
+	}
 	if (modeCones && argc != 5) die("MODE cones needs a cones.txt argument");
 	if (!modeCones && argc != 4) die("MODE %s takes no cones.txt argument", mode.c_str());
 
@@ -326,7 +333,10 @@ int main(int argc, const char *argv[])
 		die("mesh is not genus 0 (V - E + F = %d with %d boundary loops); the reference needs "
 			"Generators for that, which this driver does not run", chi, nBoundaries);
 	}
-	if (!modeCones && nBoundaries != 1) {
+	if (modeSphere && nBoundaries != 0) {
+		die("MODE sphere needs a closed mesh; this one has %d boundary loops", nBoundaries);
+	}
+	if (!modeCones && !modeSphere && nBoundaries != 1) {
 		die("MODE %s needs a disk (exactly one boundary loop); this mesh is closed", mode.c_str());
 	}
 
@@ -336,6 +346,7 @@ int main(int argc, const char *argv[])
 	BFF bff(mesh);
 	double t2 = now(), t3 = t2;
 	int nCones = 0;
+	std::vector<double> diskUv; // MODE sphere: the unit-disk layout of the punctured sphere
 
 	if (modeCones) {
 		std::vector<ConeSpec> specs = readCones(argv[4]);
@@ -385,6 +396,53 @@ int main(int argc, const char *argv[])
 				bff.status == BFF::ErrorCode::factorizationFailed ? "factorizationFailed" : "ok");
 		}
 
+	} else if (modeSphere) {
+		// First the disk alone: remove the star of the pole and flatten the rest to the unit
+		// disk exactly as BFF::mapToSphere does, record the layout, and undo the removal.
+		{
+			VertexIter pole = mesh.vertices.end();
+			for (VertexIter v = mesh.vertices.begin(); v != mesh.vertices.end(); v++) {
+				if (!v->onBoundary()) {
+					pole = v;
+					break;
+				}
+			}
+			if (pole == mesh.vertices.end()) die("no interior vertex");
+			for (int on = 1; on >= 0; on--) {
+				if (on == 0) {
+					std::shared_ptr<BFFData> saved = bff.data;
+					bff.data = std::shared_ptr<BFFData>(new BFFData(mesh));
+					if (!bff.flattenToDisk()) die("BFF::flattenToDisk of the punctured sphere failed");
+					bff.data = saved;
+					for (int fi = 0; fi < nFaces; fi++) {
+						HalfEdgeCIter h = faceStart[fi];
+						for (int J = 0; J < 3; J++) {
+							CornerCIter c = h->next()->corner();
+							diskUv.push_back(c->uv.x);
+							diskUv.push_back(c->uv.y);
+							h = h->next();
+						}
+					}
+				}
+				pole->inNorthPoleVicinity = on;
+				HalfEdgeIter he = pole->halfEdge();
+				do {
+					he->face()->inNorthPoleVicinity = on;
+					HalfEdgeIter next = he->next();
+					next->edge()->onCut = on;
+					if (on) next->edge()->setHalfEdge(next);
+					he->wedge()->inNorthPoleVicinity = on;
+					next->wedge()->inNorthPoleVicinity = on;
+					next->next()->wedge()->inNorthPoleVicinity = on;
+					he = he->flip()->next();
+				} while (he != pole->halfEdge());
+			}
+		}
+		if (!bff.mapToSphere()) {
+			die("BFF::mapToSphere failed (status = %s)",
+				bff.status == BFF::ErrorCode::factorizationFailed ? "factorizationFailed" : "ok");
+		}
+
 	} else {
 		if (!bff.flattenToDisk()) {
 			die("BFF::flattenToDisk failed (status = %s)",
@@ -408,21 +466,31 @@ int main(int argc, const char *argv[])
 		// MeshIO::collectModelUvs read UVs.
 		HalfEdgeCIter h = faceStart[fi];
 		int idx[3];
-		double uv[3][2];
+		double uv[3][3];
 		for (int J = 0; J < 3; J++) {
 			CornerCIter c = h->next()->corner();
 			if (c->vertex()->index != h->vertex()->index) die("internal: corner/vertex mismatch in face %d", fi);
 			idx[J] = vertexToOrig[h->vertex()->index];
 			uv[J][0] = c->uv.x;
 			uv[J][1] = c->uv.y;
-			if (!std::isfinite(uv[J][0]) || !std::isfinite(uv[J][1])) nNonFinite++;
+			uv[J][2] = c->uv.z;
+			if (!std::isfinite(uv[J][0]) || !std::isfinite(uv[J][1]) || !std::isfinite(uv[J][2])) {
+				nNonFinite++;
+			}
 			if (uv[J][0] == 0.0 && uv[J][1] == 0.0) nZero++;
 			h = h->next();
 		}
 
-		std::fprintf(out, "f %d %d %d  %.17g %.17g  %.17g %.17g  %.17g %.17g\n",
-					 idx[0], idx[1], idx[2],
-					 uv[0][0], uv[0][1], uv[1][0], uv[1][1], uv[2][0], uv[2][1]);
+		if (modeSphere) {
+			std::fprintf(out, "f %d %d %d  %.17g %.17g %.17g  %.17g %.17g %.17g  %.17g %.17g %.17g\n",
+						 idx[0], idx[1], idx[2],
+						 uv[0][0], uv[0][1], uv[0][2], uv[1][0], uv[1][1], uv[1][2],
+						 uv[2][0], uv[2][1], uv[2][2]);
+		} else {
+			std::fprintf(out, "f %d %d %d  %.17g %.17g  %.17g %.17g  %.17g %.17g\n",
+						 idx[0], idx[1], idx[2],
+						 uv[0][0], uv[0][1], uv[1][0], uv[1][1], uv[2][0], uv[2][1]);
+		}
 	}
 
 	int nCut = 0;
@@ -462,6 +530,22 @@ int main(int argc, const char *argv[])
 		}
 
 		std::fprintf(out, "p %.17g %.17g %.17g\n", p.x, p.y, p.z);
+	}
+
+	if (modeSphere) {
+		// The disk layout, per corner in the order of the 'f' lines (zero in the star of the
+		// pole, which is not part of the disk).
+		for (int fi = 0; fi < nFaces; fi++) {
+			const double *d = &diskUv[6*fi];
+			std::fprintf(out, "d %.17g %.17g  %.17g %.17g  %.17g %.17g\n", d[0], d[1], d[2], d[3], d[4], d[5]);
+		}
+		// BFF::mapToSphere removes the first vertex that is not on the boundary.
+		for (VertexCIter v = mesh.vertices.begin(); v != mesh.vertices.end(); v++) {
+			if (!v->onBoundary()) {
+				std::fprintf(out, "pole %d\n", vertexToOrig[v->index]);
+				break;
+			}
+		}
 	}
 
 	if (std::fclose(out) != 0) die("error writing '%s'", outPath.c_str());
