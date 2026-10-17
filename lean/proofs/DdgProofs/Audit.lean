@@ -76,6 +76,20 @@ open DdgProofs
 #print axioms ConeProblem.isMinimizer_scaleMass_iff
 #print axioms ConeProblem.normalizeMass_scaleMass
 #print axioms ConeProblem.isMinimizer_normalizeMass_iff
+-- A.8 connected components (crates/ddg-optimal-cones: Discrete::components, solve.rs)
+#print axioms ConeProblem.objective_sum
+#print axioms ConeProblem.feasible_sum_iff
+#print axioms ConeProblem.isMinimizer_sum_iff
+#print axioms ConeProblem.kkt_sum_iff
+#print axioms ConeProblem.Feasible.sum_cone_eq_sum_defect_inl
+#print axioms ConeProblem.Feasible.sum_cone_eq_sum_defect_inr
+#print axioms Site.stationary_mul_iff
+#print axioms ConeProblem.isMinimizer_scaleMass_withLam_iff
+#print axioms ConeProblem.kkt_scaleMass_withLam_iff
+#print axioms ConeProblem.kkt_scaleMass_withLam_iff'
+#print axioms ConeProblem.isMinimizer_normalizeMass_alone_iff
+#print axioms ConeProblem.kkt_normalizeMass_alone_iff
+#print axioms ConeProblem.isMinimizer_sum_iff_alone
 -- C. the cone solver (crates/ddg-optimal-cones)
 #print axioms Solver.isSolution_iff
 #print axioms Solver.isAssembledSolution_iff

@@ -5,6 +5,7 @@ import DdgProofs.Duality
 import DdgProofs.Certificate
 import DdgProofs.Newton
 import DdgProofs.Closed
+import DdgProofs.Components
 import DdgProofs.Solver
 import DdgProofs.Triangle
 import DdgProofs.Cotan

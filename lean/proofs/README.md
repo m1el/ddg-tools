@@ -70,6 +70,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Newton.lean` | residual maps, semismooth differentials, stopping rule, regularized problem (A.5) |
 | `DdgProofs/Solver.lean` | the linear systems `crates/ddg-optimal-cones` solves, closed-mesh treatment, adjoint constant, Gauss–Bonnet shift, line-search slope, proximal stage, backward error, cone merging (C) |
 | `DdgProofs/Closed.lean` | closed meshes, optimal additive constant, area normalization of `λ` (A.6, A.7) |
+| `DdgProofs/Components.lean` | the problem of a mesh with several connected components is the sum of the problems of its components (block diagonal `L`, common `λ`, masses normalized by the total area): minimizers, optimality system and Gauss–Bonnet per component; a component solved alone with its own area normalization and `λ_c = (A/A_c)·λ` (A.8) |
 | `DdgProofs/Triangle.lean` | corner angle, cotangent, Heron area, angle sum, scaling, link to Mathlib's Euclidean geometry (B.8) |
 | `DdgProofs/Cotan.lean` | cotan formula, cotan Laplacian, lumped mass (B.9, B.10) |
 | `DdgProofs/GaussBonnet.lean` | angle defect, boundary curvature, discrete Gauss–Bonnet (B.11) |
@@ -192,6 +193,8 @@ All statements are for exact real arithmetic. Ids listed in [`CITED.md`](CITED.m
 | `closed-mesh-cone-sum` | If `1ᵀL = 0` and `L u = µ − Ω` then `Σ µ_i = Σ Ω_i`; on a closed valid manifold mesh this is `2πχ`. | `ConeProblem.sum_cone_eq_sum_defect`, `TriMesh.sum_cone_eq_two_pi_eulerChar` |
 | `closed-mesh-optimal-constant` | `E(u + c) = E(u) + c·Σ w_i u_i + (c²/2)·Σ w_i`; if `Σ w_i > 0` the unique minimizing constant is `c₀ = −Σ w_i u_i / Σ w_i`. If `L·1 = 0`, every minimizer (and every solution of the optimality system) has `Σ w_i u_i = 0`. | `ConeProblem.distortion_add_const`, `distortion_add_const_eq`, `KKT.weighted_mean_eq_zero`, `IsMinimizer.weighted_mean_eq_zero` |
 | `lambda-area-normalization` | For `c > 0`: the minimizers with masses `c·m` and parameter `λ` are the minimizers with masses `m` and parameter `λ/c`. With masses divided by the total area `A` the problem is unchanged by `(m, A) ↦ (c·m, c·A)`; dividing the masses by `A` is `λ ↦ λ·A`. | `ConeProblem.isMinimizer_scaleMass_iff`, `normalizeMass_scaleMass`, `isMinimizer_normalizeMass_iff` |
+| `component-separation` | Two problems `P` on `ι`, `Q` on `κ` with a common `λ`; `P.sum Q` on `ι ⊕ κ` has `L = [[L_P, 0], [0, L_Q]]` and the data of `P`, `Q` on the two blocks (the problem of a mesh with the two as its connected components, masses of both normalized by the same total area). Then `J(u ⊕ v, µ ⊕ ν) = J_P(u, µ) + J_Q(v, ν)`; `(u ⊕ v, µ ⊕ ν)` is feasible ⟺ `(u, µ)` and `(v, ν)` are; it is a global minimizer ⟺ `(u, µ)` minimizes `P` and `(v, ν)` minimizes `Q` (on each closed component the additive constant of `u` is a separate free variable); `(u ⊕ v, φ ⊕ ψ, µ ⊕ ν)` solves the optimality system ⟺ each part does. If `1ᵀL_P = 0`, every feasible pair has `Σ_ι µ = Σ_ι Ω`. Combined with the rescaling below: minimizer of the whole ⟺ each part minimizes its component with masses `a·m`, `λ_a = a·λ` (any `a > 0` per component). | `ConeProblem.objective_sum`, `feasible_sum_iff`, `isMinimizer_sum_iff`, `kkt_sum_iff`, `isMinimizer_sum_iff_alone` (Gauss–Bonnet: `Feasible.sum_cone_eq_sum_defect_inl`, `…_inr`, tagged `closed-mesh-cone-sum`) |
+| `component-lambda-rescaling` | For `c > 0`: `c·φ ∈ ∂(c·λ·cost + ι)(µ)` ⟺ `φ ∈ ∂(λ·cost + ι)(µ)`; masses `c·m` with `c·λ` have the minimizers of masses `m` with `λ`, and `(u, φ, µ)` solves the optimality system of the latter ⟺ `(u, c·φ, µ)` solves that of the former. With raw masses `a_i`, total area `A > 0` and component area `A_c > 0`: masses `a_i/A_c` with `λ_c = (A/A_c)·λ` have the minimizers of masses `a_i/A` with `λ`, and `φ_global = (A_c/A)·φ_alone`. | `Site.stationary_mul_iff`, `ConeProblem.isMinimizer_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff'`, `isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff` |
 
 ### The cone solver (`crates/ddg-optimal-cones`)
 
@@ -529,6 +532,24 @@ Convergence of the iteration is not proved (`CITED.md`, `semismooth-newton-conve
 | `scale-invariance` | `cornerAngle_smul`, `cornerCot_smul`, `triArea_smul` | Angles and cotangents are scale invariant; areas scale by `s²`. | Sec. 6.2 | own |
 | `scale-invariance` | `TriMesh.laplacian_scale`, `TriMesh.mass_scale`, `TriMesh.angleDefect_scale` | `L` and `Ω` are scale invariant; masses scale by `s²`. | Sec. 6.2 | own |
 
+### A.8 Connected components (`DdgProofs/Components.lean`)
+
+`P.sum Q`: block diagonal `L = fromBlocks P.L 0 0 Q.L`, `Ω, m, wE, site` by `Sum.elim`, `λ = P.lam`;
+every theorem that involves `λ` assumes `P.lam = Q.lam`. Several components: iterate.
+
+| id | theorem | statement | paper | Def. |
+|---|---|---|---|---|
+| `component-separation` | `ConeProblem.objective_sum` | `J(u ⊕ v, µ ⊕ ν) = J_P(u, µ) + J_Q(v, ν)`. | — | own |
+| `component-separation` | `ConeProblem.feasible_sum_iff` | Feasible for the sum ⟺ each part feasible (no hypothesis on `λ`). | — | own |
+| `component-separation` | `ConeProblem.isMinimizer_sum_iff` | Global minimizer of the sum ⟺ each part a global minimizer of its component (no other hypothesis; the additive constant of each closed component is free). | — | own |
+| `component-separation` | `ConeProblem.kkt_sum_iff` | Optimality system of the sum ⟺ that of each part. | — | own |
+| `component-separation` | `ConeProblem.isMinimizer_sum_iff_alone` | For `a, b > 0`: minimizer of the sum ⟺ each part minimizes its component with masses and `λ` multiplied by `a` (resp. `b`). | — | own |
+| `closed-mesh-cone-sum` | `ConeProblem.Feasible.sum_cone_eq_sum_defect_inl`, `…_inr` | A closed component (`1ᵀL_P = 0`) of a feasible pair of the sum has `Σ µ = Σ Ω` on that component. | — | own |
+| `component-lambda-rescaling` | `Site.stationary_mul_iff` | `c > 0`: `Stationary (c·λ) s (c·φ) µ ⟺ Stationary λ s φ µ`. | — | own |
+| `component-lambda-rescaling` | `ConeProblem.isMinimizer_scaleMass_withLam_iff` | `c > 0`: masses `c·m` with `c·λ` have the minimizers of `P`. | — | own |
+| `component-lambda-rescaling` | `ConeProblem.kkt_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff'` | `c > 0`: `KKT_c(u, c·φ, µ) ⟺ KKT(u, φ, µ)`; `KKT_c(u, φ, µ) ⟺ KKT(u, c⁻¹·φ, µ)`. | — | own |
+| `component-lambda-rescaling` | `ConeProblem.isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff` | `A, A_c > 0`: masses `a_i/A_c` with `(A/A_c)·λ` ⟺ masses `a_i/A` with `λ`; adjoints `φ_global = (A_c/A)·φ_alone`. | — | own |
+
 ### B.8 Triangles from edge lengths
 
 | id | theorem | statement | paper | Def. |
@@ -718,7 +739,7 @@ differential tests against the oracle.
 | `TriMesh.Valid.tri` (strict triangle inequalities of the stored lengths) | `ddg_core::Geometry::from_edge_lengths` / `from_positions` (`GeometryError::DegenerateFaces`), **not** `TriMesh::new`; the test `z − (x − y) > 0` on sorted sides is exact for the stored `f64` values (`kahanArea_of_sorted_rearrangement`) |
 | `TriMesh.Manifold.edge_le_two` | `TriMesh::new` (`MeshError::NonManifoldEdge`) |
 | `TriMesh.Manifold.boundary_two` | `TriMesh::new` (one fan per vertex, `MeshError::NonManifoldVertex`) |
-| `TriMesh.Connected` (kernel of `L`, positive definiteness of `L_II`, existence/uniqueness of the Poisson solves) | **not** `TriMesh::new`, which only counts components; `crates/ddg-optimal-cones` requires one component (`ConeError::NotConnected`), `crates/ddg-bff` works per connected component / chart. (Lean's `Connected` also requires every vertex to lie in a face.) |
+| `TriMesh.Connected` (kernel of `L`, positive definiteness of `L_II`, existence/uniqueness of the Poisson solves) | **not** `TriMesh::new`, which only counts components; `crates/ddg-optimal-cones` solves each connected component as its own problem (with the masses of the whole mesh and the common `λ`; `component-separation`, `ConeProblem.isMinimizer_sum_iff`, `kkt_sum_iff`), so the theorems that need connectedness are applied per component; `crates/ddg-bff` works per connected component / chart. (Lean's `Connected` also requires every vertex to lie in a face.) |
 | `ConeProblem.WellFormed` (`wE, m, λ, wR ≥ 0`, `lo ≤ 0 ≤ hi`) | `ddg_optimal_cones::problem::validate` |
 | `P.Lᵀ = P.L`, `1ᵀL = 0` on a closed mesh | `TriMesh.laplacian_isSymm`, `laplacian_vecMul_one` (proved) |
 | `boundaryProblem_isMinimizer` hypotheses: `(L u)_i = s_i − Ω̂_i`, `(L φ)_i = −wE_i m_i u_i`, `φ_i ∈ ∂g_i(s_i)` at all vertices (`wE ≥ 0`, valid mesh) | `ddg_optimal_cones::certify_with_boundary` (residuals of the state and adjoint equations, and the per-site inclusion with `Free` / `Penalized` / `Convex` sites); `Discrete::with_boundary` builds `Ω̂ = (Ω on I, k on B)` and `m` normalized by the total area (`curvatures`, `lumped_mass_normalized`). The solver and the certificate check these only up to tolerance; the exact statement is for exact solutions (`certificate_enclosure` and related give the inexact version for `ConeProblem`). |
@@ -729,7 +750,7 @@ differential tests against the oracle.
 | `u = Z µ_S − w0`, `y = A⁻¹(Wu)` | `Reduced::u_from_columns` / `u_of_mu` and `Reduced::gradient` (floating point; the stored `u` is checked by `certify`, not by this theorem) |
 | `∀ i, 0 < w_i` (`gram_quadratic_pos`, `sum_weight_ne_zero`) | `Reduced::check` (`Unsupported::ZeroDistortionWeight`) |
 | `P.L.PosDef` (factor-once Dirichlet) | `TriMesh.coneProblem_posDef` (connected, a non-unknown vertex); the Cholesky factorization of `Reduced::new` (`FallbackReason::FactorizationFailed`) fails otherwise |
-| `KernelIsConstants P.L` (factor-once closed) | `TriMesh.coneProblem_kernelIsConstants` (connected valid mesh, every vertex an unknown); connectedness is `ConeError::NotConnected`; `A_p` positive definite then follows (`pinBlock_isUnit`), which the Cholesky factorization of `A_p` in `Reduced::new` also detects |
+| `KernelIsConstants P.L` (factor-once closed) | `TriMesh.coneProblem_kernelIsConstants` (connected valid mesh, every vertex an unknown); connectedness: one component at a time (row `TriMesh.Connected` above); `A_p` positive definite then follows (`pinBlock_isUnit`), which the Cholesky factorization of `A_p` in `Reduced::new` also detects |
 | the pin `p` | `Reduced::check`: a free site whose bounds allow the sum, or the plan with clamped sites; the Lean theorems hold for **any** index `p` (the pin need not be a free site), the code's choice only matters for feasibility of the starting point |
 | `Σ_S µ_S = Σ(Ω − a_F)` | `Reduced::check` (`c`), kept by the dense method with the multiplier `ν` (`Dense::solve`) |
 | `IsCutOf M' M ρ` (same faces, copies of vertices, lengths pulled back) | the construction in `ddg_bff::cut::cut_mesh` (by reading; `CutMesh::vertex_to_original` is `ρ`) |
