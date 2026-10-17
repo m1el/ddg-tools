@@ -7,17 +7,25 @@ open. Add to it; move an entry to the crate's README or SPEC when it is closed.
 ## In progress (2026-10-17, paused at the usage limit)
 
 Work started on the user's request ("2. implement mapping to the sphere. 4. implement
-applications listed in the paper"), checkpointed on unmerged worktree branches under
-`.claude/worktrees/`, each with a notes file saying what is done and what remains:
+applications listed in the paper"), checkpointed as unmerged branches of this repository, each
+with a notes file saying what is done, what remains and how to resume:
 
-* BFF mapping to the sphere (paper Sec. 7.5, port of the reference's `mapToSphere`):
-  branch `worktree-agent-af604adf9c2b21fae`, notes `crates/ddg-bff/NOTES-sphere.md`.
-* Intrinsic triangulations, applications 5.1–5.3 (Steiner tree, FEM condition numbers, heat
-  method) in a new crate `crates/ddg-intrinsic-apps`: branch `worktree-agent-a825df4ddbb500d57`,
-  notes `crates/ddg-intrinsic-apps/NOTES-apps-5.1-5.3.md`; SPEC ids N30–N39.
-* Applications 5.4–5.5 (adaptive refinement, tangent vector fields) in the same new crate:
-  branch `worktree-agent-aed156ad98b2d7138`, notes `crates/ddg-intrinsic-apps/NOTES-apps-5.4-5.5.md`;
-  SPEC ids N40–N49. The two app branches each create the crate; merge by hand.
+* `wip-bff-sphere` (8e78fe6): BFF mapping to the sphere (paper Sec. 7.5, port of the
+  reference's `mapToSphere`), Python binding and Blender operator; notes
+  `crates/ddg-bff/NOTES-sphere.md`. Left: README, ROADMAP, workspace tests, ddg-py clippy.
+* `wip-apps-5123` (6e59c99): intrinsic triangulations applications 5.1–5.3 (Steiner tree, FEM
+  condition numbers, heat method; own exact polyhedral distance) in a new crate
+  `crates/ddg-intrinsic-apps`, Python bindings; notes `NOTES-apps-5.1-5.3.md`; SPEC ids N30–N39.
+* `wip-apps-amr-vector` (f730a89): applications 5.4–5.5 (adaptive refinement, tangent vector
+  fields) in the same new crate, `ddg_intrinsic::refine_with` (extra per-face criterion); notes
+  `NOTES-apps-5.4-5.5.md`; SPEC ids N40–N49. ddg-py part not compiled yet.
+* Both app branches create the crate: merge by hand. Both report `check-formulas.sh --build`
+  failing in `Intrinsic/Move.lean` ("unknown Ddg.movedLength"), probably a stale Lean cache
+  copied into their clones; check on a clean build.
+* The agents' worktrees were created by mistake inside the authors' demo repository
+  (`NavigatingIntrinsicTriangulations/navigating-intrinsic-triangulations-demo/.claude/worktrees/`,
+  with clones of ddg-tools inside). Everything was fetched here; remove those worktrees and their
+  `worktree-agent-*` branches from the demo repository once the branches above are merged.
 
 Waiting on the user: whether `ddg-uv` keeps normalizing each piece by its own area (recommended)
 or follows the whole-mesh canonical problem; moving `master` up (it is behind
