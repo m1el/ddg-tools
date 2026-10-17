@@ -83,6 +83,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Bff/Cut.lean` | BFF: cut meshes, angle sums at cones, Euler characteristic after cutting (D) |
 | `DdgProofs/Bff/Curve.lean` | BFF: boundary tangents and curve, closing lengths, exterior-angle normalizations, Hilbert-transform data (D) |
 | `DdgProofs/Bff/Quality.lean` | BFF: distortion measures, signed area and angle, segment crossing, similarity fit, mollification (D) |
+| `DdgProofs/Bff/Sphere.lean` | BFF map to the sphere: stereographic projection (on the sphere, inverse, conformal and orientation preserving), inversions of the sphere and the derivative behind the centering Jacobian (D) |
 | `DdgProofs/Cuts/Crossing.lean` | cut flow: crossing parameter and its clamp, barycentric length and inner product, areas and cotangents of sub-triangles (SPEC §3.2, §3.3) |
 | `DdgProofs/Cuts/Curvature.lean` | cut flow: rescaled angles, face curvature `Ω_f`, its sum and Gauss–Bonnet, own and oracle definitions (§3.1) |
 | `DdgProofs/Cuts/Weighted.lean` | cut flow: the weighted cotan Laplacian `L_w = Σ_f w̄_f L_f`, the paper's edge rule and a counterexample to its semidefiniteness (§3.6, §3.10, D11) |

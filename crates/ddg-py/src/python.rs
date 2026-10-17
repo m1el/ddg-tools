@@ -22,6 +22,7 @@ use crate::error::{InputError as RustInputError, UnwrapError};
 use crate::pipeline::{IS_PLACEHOLDER, PIPELINE_NAME};
 
 mod cut;
+mod sphere;
 
 pyo3::create_exception!(
     ddg_tools,
@@ -551,6 +552,7 @@ fn reoptimize_cones<'py>(
 /// unwrap(...)       compute a UV map (see its docstring for the array formats)
 /// pack_charts(...)  lay the charts of a UV map out in the unit square
 /// reoptimize_cones(...)  the least-distortion angles of cones at given vertices
+/// map_to_sphere(...)  a conformal map of a closed genus-0 mesh to the unit sphere
 ///
 /// PIPELINE          name of the unwrap pipeline this build contains
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
@@ -568,6 +570,7 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ReoptimizeResult>()?;
     m.add_class::<UnwrapResult>()?;
     cut::register(m)?;
+    sphere::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;
     m.add("MeshError", py.get_type::<MeshError>())?;

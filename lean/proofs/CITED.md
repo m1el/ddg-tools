@@ -300,8 +300,10 @@ Proved for the flattener (see the README): existence and uniqueness of the discr
 solves, the Dirichlet-to-Neumann relation and its compatibility, solvability of the Neumann
 problem, the exterior-angle sums (BFF Propositions 1 and 2), the first-order Cherrier formula,
 the closing of the boundary polygon and the optimal length adjustment, the Hilbert-transform
-right-hand side, the Euler characteristic after cutting, and the definitions of the distortion
-measures. Cited:
+right-hand side, the Euler characteristic after cutting, the definitions of the distortion
+measures, and for the map to the sphere the stereographic projection (on the sphere, inverse,
+conformal, orientation preserving), the inversions of the sphere and the derivative behind the
+centering Jacobian. Cited:
 
 ### [formula: bff-target-boundary-length] Target lengths of the boundary edges
 
@@ -398,6 +400,57 @@ measures. Cited:
   cited theorem. As the code's documentation says, boundary pieces that coincide (the two sides
   of a cut through a flat region) are contact, not crossing, and are not detected by it; the
   sampled coverage is an independent diagnostic.
+
+### [formula: mobius-centering-existence] A centering inversion exists and is unique up to rotation
+
+- **Statement.** For a conformal map `f` of a genus-0 surface `M` to the unit sphere and the area
+  measure of `M` carried to the sphere, there is an inversion `η_c(x) = (1 − |c|²)(x + c)/|x + c|²
+  + c`, `|c| < 1`, after which the center of mass `∫ η_c(x) dA` is at the origin; the composite
+  map is unique up to a rotation. The Gauss–Newton iteration `c = −J⁻¹ µ`,
+  `J = 2 Σ A_f (I − C_f C_fᵀ)`, is the algorithm that finds it.
+- **Reference.** A. Baden, K. Crane, M. Kazhdan, *Möbius Registration*, Computer Graphics Forum
+  37(5) (SGP 2018), Sec. 4 (Eq. 1–4), Sec. 4.1 (existence and uniqueness), Sec. 6.1 and
+  Algorithm 1 (the iteration, with areas `A` "from the original surface"); BFF's reference code
+  cites the same algorithm in `BFF::centerMobius`.
+- **Why not formalized.** Existence and uniqueness are a statement about all inversions of the
+  ball (a degree / convexity argument in hyperbolic space); convergence of the iteration is not
+  proved in the paper either.
+- **Does correctness depend on it?** Only the claim that the result is canonical up to a
+  rotation. What the code relies on is proved: each step maps the sphere to itself
+  (`[formula: mobius-sphere-inversion]`), the Jacobian is the derivative of the inversion at
+  `c = 0` (`[formula: mobius-centering-jacobian]`). Whether `|µ|` reached the tolerance is
+  measured and reported (`CenteringReport`); a step that does not decrease `|µ|` is halved, so
+  `|µ|` never increases.
+
+### [formula: spherical-triangle-area] Signed area of a spherical triangle
+
+- **Statement.** For unit vectors `a, b, c` the geodesic triangle they span has area `E` (its
+  spherical excess) with `tan(E/2) = det(a, b, c) / (1 + a·b + b·c + c·a)`; with `atan2`, `E` is
+  signed by the orientation of `a, b, c` seen from outside.
+- **Reference.** A. van Oosterom, J. Strackee, *The solid angle of a plane triangle*, IEEE
+  Trans. Biomed. Eng. BME-30(2), 1983, 125–126, Eq. (8).
+- **Why not formalized.** Mathlib has no spherical trigonometry (areas of geodesic triangles).
+- **Does correctness depend on it?** Only the reported `covering_degree` and the flag
+  `SphereDistortion::is_injective`; the distortion measures and the count of flipped triangles
+  (the sign of `det(a, b, c)`) do not use it.
+
+### [formula: sphere-injectivity-criterion] A map of the sphere without flipped triangles and of degree one is injective
+
+- **Statement.** A continuous map of a closed oriented surface of genus 0 to the unit sphere that
+  maps each triangle onto a geodesic triangle with positive orientation is an orientation
+  preserving branched covering; its degree is the total signed area divided by `4π`; a degree of
+  1 means it is a homeomorphism.
+- **Reference.** The degree of a map between closed oriented manifolds and its computation by
+  counting preimages with orientation: J. Milnor, *Topology from the Differentiable Viewpoint*,
+  1965, §5; branched coverings of surfaces and the Riemann–Hurwitz formula, e.g. O. Forster,
+  *Lectures on Riemann Surfaces*, 1981, Thm. 4.24 (a proper holomorphic, here: orientation
+  preserving locally injective away from finitely many points, map of degree 1 is bijective).
+  For triangle meshes: Y. Lipman, *Bijective mappings of meshes with boundary and the degree in
+  mesh processing*, SIAM J. Imaging Sci. 7(2), 2014, Sec. 3.
+- **Why not formalized.** Degree theory of maps between surfaces is not in Mathlib.
+- **Does correctness depend on it?** Only the meaning of the reported flag
+  `SphereDistortion::is_injective`; it is computed from counts and a sum that are defined by
+  `[formula: spherical-triangle-area]` and the sign of a determinant.
 
 ---
 

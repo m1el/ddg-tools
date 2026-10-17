@@ -260,6 +260,39 @@ cannot carry `2πχ` (no cones, or bounds that forbid the total angle). `MeshErr
 that is not a manifold, consistently oriented triangle mesh with positive-area triangles and
 no unused vertices. A result that did not converge is not an exception: read `report["status"]`.
 
+## `map_to_sphere`: a closed genus-0 mesh to the unit sphere
+
+```python
+ddg_tools.map_to_sphere(positions, triangles, *, pole=None, center=True) -> ddg_tools.SphereResult
+```
+
+A conformal map of a connected closed triangle mesh of genus 0 to the unit sphere, by Boundary
+First Flattening (Sawhney, Crane 2017, Sec. 7.5): one vertex star is removed, the rest is
+flattened to a round disk, projected stereographically and Möbius-centered (Baden, Crane,
+Kazhdan 2018) so that the surface's area is balanced around the origin. The result is
+determined up to a rotation of the sphere. The binding of `ddg_bff::map_to_sphere`; the crate
+README of `ddg-bff` has the method, the deviations from the reference and measurements.
+
+| argument | meaning |
+|----------|---------|
+| `positions` | 3 reals per vertex |
+| `triangles` | 3 vertex indices per triangle: a connected, closed, consistently oriented manifold mesh of genus 0 in which every vertex is used |
+| `pole` | the vertex that is removed (it lands on the sphere like every other vertex); `None` (default) picks the vertex with the most regular star |
+| `center` | Möbius-center the result (default `True`); without it the pole is at `(0, 0, −1)` |
+
+`SphereResult` (read-only):
+
+| attribute | contents |
+|-----------|----------|
+| `positions` | `array('d')`, 3 per vertex: a point of the unit sphere (up to rounding; `max_radius_error`) |
+| `report` | `dict`: `pole`, `is_injective` (no flipped or degenerate triangle and covering degree 1), `flipped_triangles`, `degenerate_triangles`, `covering_degree` (signed area of the image / `4π`), `quasi_conformal_mean`, `quasi_conformal_max` (`σ_max/σ_min` per triangle, 1 is conformal), `area_distortion` (area-weighted rms of the log area ratio about its mean, 0 when all areas scale alike), `log_scale_min`, `log_scale_max`, `max_radius_error`, `centering_status` (`"converged"`, `"max_iterations"`, `"stalled"`, `"singular_jacobian"`, or `None` without centering), `centering_iterations`, `center_of_mass` (`|µ|` at the end, or `None`), `seconds`, `seconds_total` |
+
+Errors: `InputError` for malformed buffers and a `pole` that is not a vertex (message starts with
+the parameter name); `MeshError` for a mesh that is not a valid manifold triangle mesh, has a
+triangle of zero area, has a boundary, several components or a genus other than 0 (the message
+says which; split a mesh into its components first); `SolveError` if the computation fails;
+`TypeError` for an argument without the buffer protocol.
+
 ## The cut flow: `CutSession`
 
 `ddg_tools.CutSession` binds `ddg_uv::cutting` (`crates/ddg-uv`, README section on the cut flow):
@@ -445,10 +478,11 @@ assembles the report. New options become fields of `UnwrapOptions` and keyword a
 | `src/error.rs` | `InputError`, `UnwrapError` |
 | `src/pipeline.rs` | `run_pipeline` (the call into `ddg-uv`) and the driver `unwrap` |
 | `src/cones.rs` | `reoptimize_cones`: validation and the call into `ddg-optimal-cones` (pure Rust) |
+| `src/sphere.rs` | `map_to_sphere`: validation and the call into `ddg-bff` (pure Rust) |
 | `src/cutting.rs` | the cut session: controls, reports, arrays (pure Rust, tested by `cargo test`) |
 | `src/measure.rs` | distortion measured on the result |
 | `src/pack.rs` | packing charts into the unit square |
-| `src/python.rs`, `src/python/cut.rs` | the PyO3 glue (cargo feature `python`) |
+| `src/python.rs`, `src/python/cut.rs`, `src/python/sphere.rs` | the PyO3 glue (cargo feature `python`) |
 | `ddg_tools.pyi` | type stubs, shipped in the wheel |
 | `python-tests/` | tests of the built wheel |
 
