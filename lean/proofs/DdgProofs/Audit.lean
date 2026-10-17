@@ -919,3 +919,10 @@ open DdgProofs
 #print axioms Cuts.limited_le_predictedMotionOnMesh
 #print axioms Cuts.predictedMotionOnCut_rest
 #print axioms Cuts.motionCriterion_rest
+#print axioms Apps.transport_around_face
+#print axioms Apps.scaled_minus_sum
+#print axioms Apps.edge_energy
+#print axioms Apps.edge_entries_hermitian
+#print axioms Apps.conformal_parts_det
+#print axioms Apps.conformal_parts_frobenius
+#print axioms Apps.singular_values_from_parts

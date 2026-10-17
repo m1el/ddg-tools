@@ -43,6 +43,7 @@ pub mod cones;
 pub mod contract;
 pub mod cutting;
 pub mod error;
+pub mod intrinsic_vector;
 pub mod measure;
 pub mod pack;
 pub mod pipeline;

@@ -259,7 +259,11 @@ fn smoothest_fields_on_spheres_satisfy_poincare_hopf() {
 /// in the convex cone of its transported neighbours.
 #[test]
 fn the_vector_maximum_principle_holds_on_the_intrinsic_delaunay_triangulation() {
-    let mut shapes = vec![bumpy_sheared_grid(10, 0.25, 1.5), sheared_grid(12, 1.5, 0.45, 2)];
+    let mut shapes = vec![
+        bumpy_sheared_grid(10, 0.25, 1.5),
+        sheared_grid(12, 1.5, 0.45, 2),
+        sheared_grid(12, 4.0, 0.45, 2),
+    ];
     shapes.extend(dataset("face"));
     for shape in &shapes {
         for n_sym in [1u32, 2] {
@@ -281,6 +285,13 @@ fn the_vector_maximum_principle_holds_on_the_intrinsic_delaunay_triangulation() 
                     shape.name, r_in.n_outside_cone, r_in.n_checked, r_in.min_margin, r.n_outside_cone, r.min_margin
                 );
                 assert_eq!(r.n_outside_cone, 0, "{} n {n_sym}", shape.name);
+                if shape.name == "sheared_grid_12" && n_sym == 1 && r_in.n_checked == 121 {
+                    // Strongly sheared (shear 4): the input violates the principle.
+                    let shear4 = shapes.iter().position(|x| std::ptr::eq(x, shape)) == Some(2);
+                    if shear4 {
+                        assert!(r_in.n_outside_cone > 0, "{boundary:?}");
+                    }
+                }
                 // And after refinement.
                 tri.refine(&RefineOptions::default()).unwrap();
                 let (f, _) = harmonic_field(&tri, &options).unwrap();
