@@ -1073,6 +1073,54 @@ the refined atlas and camelbad refined, 0.01 to 0.04 on the single circles; the 
 option. The caller's triangulation never needed it (no bends). The cost is in `describe` (a
 few tens of microseconds more, below).
 
+**A large cut offset, and the optimal Delaunay triangulation** (2026-10-17; found by the
+Blender test of the spot atlas, weight 2, 60 steps, with iODT and the add-on's Cut Offset 0.2:
+4 of 7354 UV triangles flipped). With iODT the cut comes back with about seven times as many
+bends (spot atlas: 813 merged against 110 with flips), because the triangulation has vertices
+inside and on the edges of the caller's triangles. The rule of `min_offset` moved every point
+first, and the merge measured its displacement at the moved places: a bend that the rule had
+pushed 0.2 of the height off a side was, measured that way, up to 0.2 off its chord, so it stayed
+(763 of 813 bends merged at `min_offset` 0.2), and the unwrap inverted the thin parts next to
+it. The inversion is in the flattening of the chart (`examples/flip_study.rs`: every flipped
+triangle has the orientation of its parent polygon in space, the same triangles flip with
+`ConePlacement::Off`; some are slivers of 0.02 to 0.6 degrees, some well shaped triangles where
+the chart is shrunk to 1 to 3 % of its area by the spike next to them). Two changes:
+
+* the merge measures the displacement at the places where the way back put the points (the cut
+  the flow found), and tests for crossings at the moved places (what is inserted);
+* an *excursion*, a bend whose two pieces end on one side of its triangle (the cut crosses the
+  side, bends just inside and crosses back), is removed together with its two crossings when
+  the rule of `min_offset` moved one of the three points: the cut then stays in the
+  neighbouring triangle (walking outwards while the crossings are on one side again), under the
+  same tolerance, region and crossing conditions (`DescribeReport::n_removed_excursions`).
+  Without it the rule turned a bend 0.001 inside the side into a spike 0.17 deep on a base of
+  0.01.
+
+Flipped UV triangles, `flip_study` (Hencky; spot atlas: 8 clusters, 60 steps at the length
+weights 2, 3 and 10 and the ripple wavelengths 0.25 and 1.0; blub and bob atlases at 0.5;
+camelbad atlas; sphere, spot and camelbad circles), triangulations flips, flips with iODT,
+refined, refined with iODT, `min_offset` = crossing offset, merge tolerance 0.1, 44 runs per
+offset, in parallel:
+
+| offset | before | displacement at the found places | and excursions |
+|---|---:|---:|---:|
+| 0.2 | 123 (in 17 runs) | 6 | 3 |
+| 1e-3 | 55 | 55 | 57 |
+
+At 0.2 iODT made 4 to 15 flipped triangles per spot atlas run and 4 and 9 on the sphere; plain
+refinement 4 on the spot atlas at wavelength 1.0; all of these are 0 now. What is left at 0.2:
+an excursion whose bend lies further than the tolerance from the chord (blub, flips with iODT,
+1), a triple point close to a side with two pieces to that side (spot at wavelength 1.0, flips
+with iODT, 1), one sliver on camelbad (refined with iODT, a run that refused before). At 1e-3
+the rule moves almost nothing and the counts are those of before up to two single triangles
+that moved (the blub and camelbad atlases at ripple wavelength 0.5 flip 3 to 15 triangles on
+every triangulation, iODT or not: strongly shrunk charts, a separate open item). The largest
+displacement stays below the tolerance in every run. Refused at 0.2 as before (the rule moves
+points independently): two crossings of one edge close to the same vertex end at the same
+parameter (blub, camelbad, the camelbad atlas, spot weight 3 refined with iODT: 10 of 44 runs, 11 before),
+and a closed piece inside one triangle (spot at wavelength 0.25 refined, also at 1e-3). Test:
+`a_large_cut_offset_with_optimal_delaunay_flips_nothing` (`tests/cutting.rs`).
+
 **The needles-and-caps run with flips only** (the row above, energy 1.167 over 8 steps) was
 measured before a defect of the flow was fixed. Six vertices lay on the start circle to
 rounding; their crossings were moved away by the smallest offset, the slope of the level-set

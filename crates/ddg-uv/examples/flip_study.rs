@@ -3,8 +3,9 @@
 //! ```text
 //! cargo run --release -p ddg-uv --example flip_study -- CASE TRIANGULATION [MIN_OFFSET ...]
 //! CASE:          sphere | cube | sheared | needles | camelbad | spot | atlas:W (spot, 8 clusters,
-//!                ripple wavelength W)
-//! TRIANGULATION: caller | flips | refined
+//!                ripple wavelength W) | atlas-blub:W | atlas-bob:W | atlas-camelbad:W
+//! TRIANGULATION: caller | flips | refined | flips-odt | refined-odt (with the optimal Delaunay
+//!                triangulation of `IntrinsicOptions::optimized`)
 //! ```
 //!
 //! Runs the chain (start, flow, `Session::unwrap`) and prints, for every flipped triangle of the
@@ -13,7 +14,14 @@
 //! close to a vertex or a side of the old triangle it is (`min(t, 1 - t)` for a point of an edge,
 //! the smallest barycentric coordinate for a point inside a triangle). Then it repeats the
 //! unwrap of the same flow state with other values of `min_offset` and prints the counts.
-//! `DDG_MODELS` and `DDG_DATASET` locate spot and camelbad.
+//! A `DETAIL` line per flipped triangle gives its parent polygon and chart, the cosine between
+//! its normal and the parent's (negative: a wrong triangulation, not the flattening), the cones
+//! at it and its UV area against its 3D area.
+//! `DDG_MODELS` (the spot directory; blub and bob are found next to it) and `DDG_DATASET` locate
+//! the meshes. Environment: `MERGE` (merge tolerance, default 0), `ALPHA` (an explicit length
+//! weight instead of the ripple rule), `ENERGY=hencky` (instead of the scaled Dirichlet energy
+//! of the atlases), `BOTH` (the offset is also the crossing offset of the description, as the
+//! Blender add-on's Cut Offset), `CONES=off`, `REPORT` (the first steps of the run), `NOSTOP`.
 #![allow(clippy::needless_range_loop)]
 use std::path::PathBuf;
 
@@ -146,6 +154,7 @@ struct Outcome {
     flipped: usize,
     n_clamped: usize,
     merged: usize,
+    excursions: usize,
     displacement: f64,
 }
 
@@ -185,6 +194,17 @@ fn main() {
             Some(8),
             60,
         ),
+        "atlas-blub" => (
+            load(models.join("../../blub/blub/blub_quadrangulated.obj"), true),
+            Some(8),
+            60,
+        ),
+        "atlas-bob" => (
+            load(models.join("../../bob/bob/bob_quad.obj"), true),
+            Some(8),
+            60,
+        ),
+        "atlas-camelbad" => (load(dataset.join("camelbad.obj"), false), Some(8), 60),
         other => panic!("unknown case {other}"),
     };
     let merge: f64 = std::env::var("MERGE").map_or(0.0, |v| v.parse().unwrap());
@@ -198,6 +218,17 @@ fn main() {
         "refined" => Triangulation::Intrinsic(IntrinsicOptions {
             min_offset: o,
             merge_tolerance: merge,
+            ..IntrinsicOptions::refined()
+        }),
+        "flips-odt" => Triangulation::Intrinsic(IntrinsicOptions {
+            min_offset: o,
+            merge_tolerance: merge,
+            ..IntrinsicOptions::optimized()
+        }),
+        "refined-odt" => Triangulation::Intrinsic(IntrinsicOptions {
+            min_offset: o,
+            merge_tolerance: merge,
+            optimal_delaunay: IntrinsicOptions::optimized().optimal_delaunay,
             ..IntrinsicOptions::refined()
         }),
         other => panic!("unknown triangulation {other}"),
@@ -236,7 +267,9 @@ fn main() {
         let mut session =
             Session::with_triangulation(&mesh.input(), n, &start, FlowKind::Auto, &tri).unwrap();
         let options = session.recommended_options(StepSize::default());
-        let energy = if clusters.is_some() {
+        let energy = if std::env::var("ENERGY").is_ok_and(|e| e == "hencky") {
+            Energy::Hencky
+        } else if clusters.is_some() {
             Energy::ScaledDirichlet(ScaleWeight::FeatureSize {
                 r_eps: 1.0,
                 smoothing: PAPER_FEATURE_SMOOTHING,
@@ -246,7 +279,9 @@ fn main() {
         };
         let mut problem = session.new_problem(energy, 0.0);
         let omega = session.roughening_rate(&problem, &options.eval).unwrap();
-        problem.length_weight = if flat {
+        problem.length_weight = if let Ok(a) = std::env::var("ALPHA") {
+            a.parse().unwrap()
+        } else if flat {
             1.0
         } else {
             length_weight_for_ripples(omega, if clusters.is_some() { wavelength } else { 0.25 })
@@ -286,11 +321,22 @@ fn main() {
                 );
             }
         }
+        // BOTH: the offset is also the crossing offset of the description, as the Blender
+        // add-on's Cut Offset does.
+        let crossing = if std::env::var_os("BOTH").is_some() {
+            offset
+        } else {
+            DEFAULT_CROSSING_OFFSET
+        };
         let (cut, result) = session
             .unwrap(
-                DEFAULT_CROSSING_OFFSET,
+                crossing,
                 &CutUnwrapOptions {
-                    cones: ConePlacement::Optimal,
+                    cones: if std::env::var("CONES").is_ok_and(|c| c == "off") {
+                        ConePlacement::Off
+                    } else {
+                        ConePlacement::Optimal
+                    },
                     ..Default::default()
                 },
             )
@@ -347,6 +393,49 @@ fn main() {
             }
             let shortest = e.iter().copied().fold(f64::INFINITY, f64::min);
             let longest = e.iter().copied().fold(0.0, f64::max);
+            // The 3D orientation of the triangle against its parent polygon (the insertion keeps
+            // the winding: a negative value is a wrong triangulation, not the flattening).
+            let normal = |q: [[f64; 3]; 3]| {
+                let (u, v) = (sub(q[1], q[0]), sub(q[2], q[0]));
+                [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ]
+            };
+            let polygon = corner_polygon(m, tri[0]);
+            let parent = result.inserted.polygon_parent[polygon] as usize;
+            let mut pn = [0.0f64; 3];
+            for pt in &mesh.triangles {
+                if corner_polygon(&mesh, pt[0]) == parent {
+                    let nn = normal(pt.map(|c| p3(&mesh, c)));
+                    for d in 0..3 {
+                        pn[d] += nn[d];
+                    }
+                }
+            }
+            let tn = normal(p);
+            let cos3d = (0..3).map(|d| tn[d] * pn[d]).sum::<f64>() / (norm(tn) * norm(pn));
+            let cones_at: Vec<String> = verts
+                .iter()
+                .filter_map(|v| {
+                    result
+                        .map
+                        .cones
+                        .iter()
+                        .find(|c| c.vertex == *v)
+                        .map(|c| format!("v{v}:{:.2}", c.angle))
+                })
+                .collect();
+            // UV area against 3D area (the scale of the map there).
+            let uv_area = 0.5 * a.abs();
+            println!(
+                "  DETAIL tri {t}: parent polygon {parent} (part {polygon}, chart {}), cos(normal, parent normal) {cos3d:.4}, cones at the triangle {:?}, n cones {}, uv area / 3d area {:.3e}",
+                result.map.polygon_charts[polygon],
+                cones_at,
+                result.map.cones.len(),
+                uv_area / tri_area(m, *tri),
+            );
             let class = if min_offset < 1e-2 && desc.iter().any(|d| d.starts_with("old")) {
                 "a point close to a corner/side with a vertex of the mesh"
             } else if shortest / longest < 0.05 {
@@ -363,13 +452,12 @@ fn main() {
                 desc.join(" "),
             );
         }
-        let (_, rep) = session
-            .describe_cut_with_report(DEFAULT_CROSSING_OFFSET)
-            .unwrap();
+        let (_, rep) = session.describe_cut_with_report(crossing).unwrap();
         Outcome {
             flipped,
             n_clamped: cut.n_clamped_crossings,
             merged: rep.n_merged_nodes,
+            excursions: rep.n_removed_excursions,
             displacement: rep.max_displacement_relative,
         }
     };
@@ -377,12 +465,16 @@ fn main() {
     for (i, &o) in offsets.iter().enumerate() {
         let out = run(o, i == 0);
         println!(
-            "SWEEP {case} {tri_name} merge {merge} min_offset {o:.0e}: {} flipped, {} moved points, {} bends merged, displacement {:.2e} of an edge",
-            out.flipped, out.n_clamped, out.merged, out.displacement
+            "SWEEP {case} {tri_name} merge {merge} min_offset {o:.0e}: {} flipped, {} moved points, {} bends merged ({} excursions), displacement {:.2e} of an edge",
+            out.flipped, out.n_clamped, out.merged, out.excursions, out.displacement
         );
     }
 }
 
 fn tri_area_m(m: &PolygonMesh, t: &[u32; 3]) -> f64 {
     tri_area(m, *t)
+}
+
+fn corner_polygon(m: &PolygonMesh, c: u32) -> usize {
+    m.polygon_offsets.partition_point(|&o| o <= c) - 1
 }
