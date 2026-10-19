@@ -339,6 +339,11 @@ pub struct MakeOptions {
     pub iterations: usize,
     /// Number of 4-1 subdivisions (rounds after the first).
     pub subdivisions: usize,
+    /// The energy of round 0 when `subdivisions > 0` (the paper's coarse phase, Sec. 5.2, D36);
+    /// the rounds after a subdivision use `energy`. `None`: `energy` in every round (the
+    /// `FlowOptions::uniform` flow). Ignored when `subdivisions` is 0 (the one round uses
+    /// `energy`).
+    pub coarse_energy: Option<Energy>,
     /// Small-angle remeshing; `None` switches it off.
     pub remesh: Option<RemeshOptions>,
     /// Step cap in mean edge lengths.
@@ -371,6 +376,7 @@ impl Default for MakeOptions {
             line_search: o.line_search,
             iterations: 500,
             subdivisions: 2,
+            coarse_energy: Some(Energy::Combinatorial),
             remesh: Some(RemeshOptions::default()),
             max_displacement: o.max_displacement,
             gradient_tolerance: o.gradient_tolerance,
@@ -418,6 +424,12 @@ pub struct RoundSummary {
     pub flips: usize,
     /// Edge collapses of all remeshing runs of the round.
     pub collapses: usize,
+    /// The energy minimized in this round (its name, see [`ENERGY_NAMES`]).
+    pub energy: &'static str,
+    /// Of `flips`, those applied as a fallback (D35).
+    pub fallback_flips: usize,
+    /// Of `collapses`, those applied as a fallback (D35).
+    pub fallback_collapses: usize,
     /// Remeshing runs of the round that the library rejected as a whole (it keeps the mesh).
     pub remesh_rejected: usize,
     /// Trial steps of the round that the admissibility floor refused (D31).
@@ -648,6 +660,11 @@ pub fn make_developable(
         threads: options.energy.threads,
         ..FlowOptions::uniform(energy.clone(), options.subdivisions, options.iterations)
     };
+    let mut fo = fo;
+    if let (Some(coarse), true) = (options.coarse_energy, options.subdivisions > 0) {
+        fo.rounds[0].energy = EnergyOptions { energy: coarse, ..energy.clone() };
+    }
+    let round_energies: Vec<&'static str> = fo.rounds.iter().map(|r| energy_name(r.energy.energy)).collect();
     let interval = options.progress_interval;
     let mut last_call: Option<Instant> = None;
     let mut cb = |p: &dev::Progress| -> dev::Control {
@@ -667,7 +684,11 @@ pub fn make_developable(
         .report
         .rounds
         .iter()
-        .map(|rr| RoundSummary {
+        .enumerate()
+        .map(|(i, rr)| RoundSummary {
+            energy: round_energies[i],
+            fallback_flips: rr.remesh.iter().map(|x| x.fallback_flips).sum(),
+            fallback_collapses: rr.remesh.iter().map(|x| x.fallback_collapses).sum(),
             n_vertices: rr.n_vertices,
             n_faces: rr.n_faces,
             energy_initial: rr.energy_after_subdivision,
@@ -1115,6 +1136,32 @@ mod tests {
         let r = o.remesh.unwrap();
         assert_eq!((r.small_angle, r.collapse_boundary_edges), (PI / 180.0, true));
         assert_eq!(EnergyParams::default().energy, Energy::Covariance);
+        assert_eq!(o.coarse_energy, Some(Energy::Combinatorial));
+        assert!(r.fallback_operations);
+    }
+
+    #[test]
+    fn the_coarse_energy_is_the_energy_of_round_zero_and_none_is_the_uniform_flow() {
+        let i = input(bump(4));
+        let mut o = MakeOptions::default();
+        o.iterations = 12;
+        o.remesh = None;
+        let names: Vec<&str> = make_developable(&i, &o, None).unwrap().report.rounds.iter().map(|r| r.energy).collect();
+        assert_eq!(names, ["combinatorial", "covariance", "covariance"]);
+        o.coarse_energy = None;
+        let uniform = make_developable(&i, &o, None).unwrap();
+        assert!(uniform.report.rounds.iter().all(|r| r.energy == "covariance"));
+        // `None` is bitwise the library's uniform flow; the coarse energy changes the result.
+        let fo = FlowOptions { remesh: None, ..FlowOptions::uniform(EnergyOptions::new(Energy::Covariance), 2, 12) };
+        let prep = prepare(&i).unwrap();
+        let lib = dev::flow(&prep.mesh, &prep.positions, &fo, None).unwrap();
+        let flat: Vec<f64> = lib.positions.iter().flatten().copied().collect();
+        assert_eq!(uniform.positions, flat);
+        o.coarse_energy = Some(Energy::Combinatorial);
+        assert_ne!(make_developable(&i, &o, None).unwrap().positions, flat);
+        // With no subdivision the one round uses `energy`.
+        o.subdivisions = 0;
+        assert_eq!(make_developable(&i, &o, None).unwrap().report.rounds[0].energy, "covariance");
     }
 
     #[test]

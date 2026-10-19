@@ -513,11 +513,11 @@ developability(positions, corner_vertices, polygon_starts, triangles, *, energy=
         # -> .vertex_energy ('d'), .counted ('B'), .energy, .report
 make_developable(..., energy=, include_boundary=, omit_valence_three=, method="lbfgs", memory=10,
                  step=1e-3, line_search="wolfe", iterations=500, subdivisions=2,
-                 max_displacement=0.5, gradient_tolerance=None, energy_tolerance=None,
+                 coarse_energy="combinatorial", max_displacement=0.5, gradient_tolerance=None, energy_tolerance=None,
                  stall_iterations=None, initial_step=None, min_face_angle=None,
                  pinned_vertices=None, remesh=True,
-                 small_angle=radians(1), collapse_boundary_edges=True, return_faces=False,
-                 threads=None, progress=None, progress_interval=0.1)
+                 small_angle=radians(1), collapse_boundary_edges=True, fallback_operations=True,
+                 return_faces=False, threads=None, progress=None, progress_interval=0.1)
         # -> .positions ('d'), .faces ('i' | None), .face_polygon ('i' | None),
         #    .vertex_source ('i'), .report
 developable_seams(..., seam_edges=None, extra_terminals=None, energy=None, epsilon=1e-3,
@@ -537,7 +537,12 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   results do not depend on `threads`.
 * **`make_developable`** runs the flow in one library call (`subdivisions + 1` rounds of `iterations`
   L-BFGS iterations, a 4-1 subdivision before every round but the first, small-angle remeshing
-  during the rounds). `method` is `lbfgs`, `gradient_descent` or `fixed_step` (`step` in units
+  during the rounds). `coarse_energy` (default `"combinatorial"`, D36) is the energy of round 0
+  when `subdivisions > 0`, as in the paper (Sec. 5.2: `E_P` on the coarse mesh, then `energy` after
+  each subdivision); `None` uses `energy` in every round (the flow of earlier versions, bitwise).
+  Start from a coarse, uniform mesh (about 1k triangles); `E_λ` alone, or a subdivision cage,
+  flattens thin parts (`crates/ddg-developability/QUALITY.md`). `fallback_operations` (D35) lets
+  the remeshing try the other flips/collapses of a triangle when the paper's is refused. `method` is `lbfgs`, `gradient_descent` or `fixed_step` (`step` in units
   of the squared mean edge length); `line_search` is `wolfe` or `backtracking` (c1 = 1e-4, shrink
   1/2); `max_displacement` caps a step in mean edge lengths; `min_face_angle`
   is the admissibility floor of the library on the smallest corner angle (D31; `None` keeps its value, 0 switches the
@@ -557,8 +562,9 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   `False` stops the flow and the state at that moment is returned (`report["cancelled"]`); an
   exception, and Ctrl-C (checked at the same moments), stop the flow and propagate. Report:
   `energy_initial/final`, `topology_changed`, `n_*`, `iterations`, `min_angle`, `rounds` (a list of
-  dicts: `status`, `iterations`, `flips`, `collapses`, `remesh_rejected`, `inadmissible_trials`,
-  ...), `bad_faces` (triangles below `small_angle` that nothing could repair),
+  dicts: `energy` (the energy of that round), `status` (also `stationary`, D34), `iterations`,
+  `flips`, `collapses`, `fallback_flips`, `fallback_collapses`, `remesh_rejected`,
+  `inadmissible_trials`, ...), `bad_faces` (triangles below `small_angle` that nothing could repair),
   `inadmissible_trials` (steps refused by `min_face_angle`), `stopped` (`None`, or a dict
   `round`, `after_subdivision`, `vertex`, `reason`: the flow ended before that round because the
   energy is undefined at its starting state; the result is the state before it; also a warning),

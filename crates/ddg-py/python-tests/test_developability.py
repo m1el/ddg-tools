@@ -176,6 +176,39 @@ class MakeDevelopableTest(unittest.TestCase):
         self.assertIsNone(r.report["nonplanarity_after"])
         self.assertTrue(all(0 <= v < nv for v in r.faces))
 
+    def test_coarse_energy_sets_the_energy_of_round_zero(self):
+        mesh = arrays(grid(4, 0.2))
+        kw = dict(subdivisions=2, iterations=12, remesh=False)
+        names = lambda r: [rd["energy"] for rd in r.report["rounds"]]
+        default = ddg_tools.make_developable(*mesh, **kw)
+        self.assertEqual(names(default), ["combinatorial", "covariance", "covariance"])
+        same = ddg_tools.make_developable(*mesh, coarse_energy=None, **kw)
+        self.assertEqual(names(same), ["covariance"] * 3)
+        explicit = ddg_tools.make_developable(*mesh, coarse_energy="covariance", **kw)
+        self.assertEqual(list(explicit.positions), list(same.positions))
+        self.assertNotEqual(list(default.positions), list(same.positions))
+        other = ddg_tools.make_developable(*mesh, energy="intrinsic", coarse_energy="covariance", **kw)
+        self.assertEqual(names(other), ["covariance", "intrinsic", "intrinsic"])
+        # Without a subdivision the one round uses `energy`.
+        one = ddg_tools.make_developable(*mesh, subdivisions=0, iterations=5, remesh=False)
+        self.assertEqual(names(one), ["covariance"])
+        with self.assertRaises(ddg_tools.InputError) as c:
+            ddg_tools.make_developable(*mesh, coarse_energy="bogus", **kw)
+        self.assertIn("coarse_energy", str(c.exception))
+
+    def test_fallback_operations_and_counts_in_the_report(self):
+        p, cv, st, tr = grid(8, 0.3)
+        p = [x * (1.0 if k % 3 else 6.0) for k, x in enumerate(p)]
+        mesh = arrays((p, cv, st, tr))
+        kw = dict(subdivisions=1, iterations=30, small_angle=0.5, min_face_angle=0.0)
+        for fb in (True, False):
+            r = ddg_tools.make_developable(*mesh, fallback_operations=fb, **kw)
+            for rd in r.report["rounds"]:
+                self.assertLessEqual(rd["fallback_flips"], rd["flips"])
+                self.assertLessEqual(rd["fallback_collapses"], rd["collapses"])
+                if not fb:
+                    self.assertEqual((rd["fallback_flips"], rd["fallback_collapses"]), (0, 0))
+
     def test_face_polygon_is_exact_over_two_rounds(self):
         mesh = arrays(grid(4, 0.2))
         r = ddg_tools.make_developable(*mesh, subdivisions=2, iterations=10, remesh=False)

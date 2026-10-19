@@ -266,6 +266,12 @@ impl MakeDevelopableResult {
 ///                   ignored by "fixed_step".
 /// iterations        iterations per round (default 500), over restarts after remeshing.
 /// subdivisions      number of 4-1 subdivisions; the flow has subdivisions + 1 rounds (default 2).
+/// coarse_energy     energy of round 0 when subdivisions > 0 (default "combinatorial"; one of the
+///                   energy names, or None for `energy` in every round, the flow of earlier
+///                   versions). The paper minimizes E_P on the coarse input and E_lambda after
+///                   each subdivision (Sec. 5.2, Figs. 23-24; SPEC D36): E_lambda alone keeps
+///                   flattening the shape. Rounds after a subdivision use `energy`. Ignored when
+///                   subdivisions is 0. Meant for a coarse, uniform input (about 1k triangles).
 /// max_displacement  step cap in mean edge lengths (default 0.5).
 /// gradient_tolerance, energy_tolerance, stall_iterations, initial_step
 ///                   stopping rules and first trial step; None keeps the library's value.
@@ -279,6 +285,8 @@ impl MakeDevelopableResult {
 /// remesh            small-angle remeshing on (default True).
 /// small_angle       a triangle with a corner angle below this (radians, 0 < x < pi/3) is
 ///                   repaired (default 1 degree).
+/// fallback_operations  when the paper's operation for a small-angle triangle is refused, try the
+///                   other flips/collapses of that triangle (default True; SPEC D35).
 /// collapse_boundary_edges  boundary edges may be collapsed (default True).
 /// Output
 /// return_faces      return `faces` and `face_polygon` even if the topology did not change (the
@@ -300,8 +308,11 @@ impl MakeDevelopableResult {
 /// The report has energy_initial, energy_final, cancelled, topology_changed, n_input_vertices,
 /// n_input_triangles, n_vertices, n_triangles, iterations, max_displacement (last round, in
 /// mean edge lengths), mean_edge_length, nonplanarity_* (above), rounds (a list of dicts with
-/// n_vertices, n_faces, energy_initial, energy_final, iterations, status, flips, collapses,
-/// remesh_rejected, inadmissible_trials, seconds), min_angle (smallest corner angle of the result,
+/// energy (name of the energy minimized in that round; energy_initial and energy_final are in it),
+/// n_vertices, n_faces, energy_initial, energy_final, iterations, status (gradient_tolerance,
+/// energy_stalled, max_iterations, line_search_failed, stationary, cancelled, non_descent),
+/// flips, collapses, fallback_flips, fallback_collapses (of the flips and collapses, those applied
+/// as a fallback), remesh_rejected, inadmissible_trials, seconds), min_angle (smallest corner angle of the result,
 /// radians), bad_faces (triangles of the result below small_angle that nothing could repair),
 /// inadmissible_trials (trial steps refused by min_face_angle, all rounds), stopped (None, or a
 /// dict round/after_subdivision/vertex/reason: the flow ended before that round because the
@@ -332,6 +343,7 @@ impl MakeDevelopableResult {
     line_search = "wolfe",
     iterations = 500,
     subdivisions = 2,
+    coarse_energy = Some("combinatorial"),
     max_displacement = 0.5,
     gradient_tolerance = None,
     energy_tolerance = None,
@@ -342,6 +354,7 @@ impl MakeDevelopableResult {
     remesh = true,
     small_angle = std::f64::consts::PI / 180.0,
     collapse_boundary_edges = true,
+    fallback_operations = true,
     return_faces = false,
     threads = None,
     progress = None,
@@ -363,6 +376,7 @@ fn make_developable<'py>(
     line_search: &str,
     iterations: i64,
     subdivisions: i64,
+    coarse_energy: Option<&str>,
     max_displacement: f64,
     gradient_tolerance: Option<f64>,
     energy_tolerance: Option<f64>,
@@ -373,6 +387,7 @@ fn make_developable<'py>(
     remesh: bool,
     small_angle: f64,
     collapse_boundary_edges: bool,
+    fallback_operations: bool,
     return_faces: bool,
     threads: Option<i64>,
     progress: Option<Bound<'py, PyAny>>,
@@ -403,6 +418,9 @@ fn make_developable<'py>(
     };
     o.iterations = count("iterations", iterations, 1)?;
     o.subdivisions = count("subdivisions", subdivisions, 0)?;
+    o.coarse_energy = coarse_energy
+        .map(|name| dv::parse_energy("coarse_energy", name).map_err(unwrap_error))
+        .transpose()?;
     o.max_displacement = max_displacement;
     if let Some(x) = gradient_tolerance {
         o.gradient_tolerance = x;
@@ -424,6 +442,7 @@ fn make_developable<'py>(
     o.remesh = remesh.then(|| RemeshOptions {
         small_angle,
         collapse_boundary_edges,
+        fallback_operations,
         min_face_angle: o.min_face_angle,
         ..RemeshOptions::default()
     });
@@ -496,6 +515,7 @@ fn make_developable<'py>(
     let rounds = PyList::empty(py);
     for round in &r.rounds {
         let d = PyDict::new(py);
+        d.set_item("energy", round.energy)?;
         d.set_item("n_vertices", round.n_vertices)?;
         d.set_item("n_faces", round.n_faces)?;
         d.set_item("energy_initial", round.energy_initial)?;
@@ -504,6 +524,8 @@ fn make_developable<'py>(
         d.set_item("status", round.status)?;
         d.set_item("flips", round.flips)?;
         d.set_item("collapses", round.collapses)?;
+        d.set_item("fallback_flips", round.fallback_flips)?;
+        d.set_item("fallback_collapses", round.fallback_collapses)?;
         d.set_item("remesh_rejected", round.remesh_rejected)?;
         d.set_item("inadmissible_trials", round.inadmissible_trials)?;
         d.set_item("seconds", round.seconds)?;
