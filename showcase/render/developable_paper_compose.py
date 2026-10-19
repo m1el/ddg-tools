@@ -21,7 +21,7 @@ def cell(png, out, size, caption=None, ps=None):
     args = [png, "-background", BG, "-alpha", "remove", "-alpha", "off", "-resize", f"{size}x{size}"]
     if caption:
         args += ["-font", FONT, "-pointsize", ps or size // 36, "-fill", INK, "-gravity", "northwest",
-                 "-annotate", f"+{size // 40}+{size // 40}", caption]
+                 "-annotate", f"+{size // 40}+{size // 40}", caption.replace("%", "%%")]
     cv(*args, out)
 
 
@@ -31,7 +31,7 @@ def text_block(lines, width, out, ps, bold_first=True):
     for i, l in enumerate(lines):
         f = out.with_name(out.stem + f"_l{i}.png")
         cv("-background", BG, "-fill", INK, "-font", "DejaVu-Sans-Bold" if (i == 0 and bold_first) else FONT,
-           "-pointsize", ps, f"label:{l}", f)
+           "-pointsize", ps, "label:" + l.replace("%", "%%"), f)
         parts.append(f)
     cv(*parts, "-background", BG, "-gravity", "west", "-append", "-extent", f"{width}x{len(lines) * int(ps * 1.55) + 6}", out)
 
@@ -134,7 +134,37 @@ def crumpled():
        M / "developable_crumpled.png")
 
 
+def cuts():
+    tmp = W / "dev2/cuts"
+    tmp.mkdir(exist_ok=True)
+    C = P.parent / "c"
+    for t, name in (("spot_iso", "spot"), ("bob_iso", "bob")):
+        a, b = (json.loads((W / f"dp_cut_{t}_{k}.json").read_text()) for k in ("nosplit", "split"))
+        S = 900
+        cell(C / f"{t}_front.png", tmp / "f.png", S, f"{name}: {b['n_charts']} charts after splitting, seams red, added splits black")
+        cell(C / f"{t}_back.png", tmp / "b.png", S, "seen from the other side")
+        cell(C / f"{t}_lay0.png", tmp / "l0.png", S,
+             f"flattened along the seams: 1 chart, {100 * a['overlapped_fraction']:.1f} % of it covered twice (red)")
+        cell(C / f"{t}_lay1.png", tmp / "l1.png", S,
+             f"Split Overlapping Charts: {b['n_charts']} charts, overlap {100 * b['overlapped_fraction']:.3f} %")
+        text_block([f"{name}, {a['n_triangles']:,} triangles, seams from epsilon {a['epsilon']:g}: {a['n_seam_edges']} edges, {a['n_terminals']} terminals",
+                    f"{b['n_splits']} splits add {b['n_extra_cut_edges']} cut edges; 0 flipped triangles; area distortion {a['area_distortion']:.1e} → {b['area_distortion']:.1e}; the unwrap takes {b['seconds']:.1f} s"],
+                   2 * S, tmp / "txt.png", 15, bold_first=False)
+        cv(tmp / "f.png", tmp / "b.png", "+append", tmp / "r1.png")
+        cv(tmp / "l0.png", tmp / "l1.png", "+append", tmp / "r2.png")
+        cv(tmp / "r1.png", tmp / "r2.png", tmp / "txt.png", "-background", BG, "-append", "-bordercolor", BG, "-border", "12",
+           M / f"developable_cut_{name}.png")
+    a = json.loads((W / "dp_cut_crumpled_split.json").read_text())
+    S = 900
+    cell(C / "crumpled_3d.png", tmp / "f.png", S, "crumpleddevelopable after the flow: no seams needed")
+    cell(C / "crumpled_lay.png", tmp / "l.png", S, "its flattening: 1 chart, no overlap")
+    text_block([f"{a['n_triangles']:,} triangles, epsilon {a['epsilon']:g}: {a['n_seam_edges']} seam edges, {a['n_charts']} chart, {a['flipped']} flipped triangles, overlap {100 * a['overlapped_fraction']:.1f} %",
+                f"area distortion {a['area_distortion']:.1e}, max quasi-conformal error {a['qc_max']:.4f}"], 2 * S, tmp / "txt.png", 15, bold_first=False)
+    cv(tmp / "f.png", tmp / "l.png", "+append", tmp / "r.png")
+    cv(tmp / "r.png", tmp / "txt.png", "-background", BG, "-append", "-bordercolor", BG, "-border", "12", M / "developable_cut_crumpled.png")
+
+
 if __name__ == "__main__":
     for k in (sys.argv[1:] or ["all"]):
-        for f in ((hero, inputs, energies, crumpled) if k == "all" else (globals()[k],)):
+        for f in ((hero, inputs, energies, crumpled, cuts) if k == "all" else (globals()[k],)):
             f()
