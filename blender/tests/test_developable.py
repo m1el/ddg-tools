@@ -225,6 +225,39 @@ def subdivision_gives_triangles_with_parent_materials_and_a_warning():
 
 
 @test
+def materials_and_smooth_survive_subdivision_and_remeshing_exactly():
+    """Six materials and alternating smooth flags on a noisy plane; two subdivisions and an
+    aggressive remeshing (flips and collapses happen). The library's face_parent gives the parent
+    polygon of every triangle; the operator must copy exactly its material and smooth flag."""
+    plane = noisy_plane(8, height=0.3, seed=3)
+    mesh = plane.data
+    for name in range(6):
+        mesh.materials.append(bpy.data.materials.new("m{}".format(name)))
+    n = len(mesh.polygons)
+    index = array.array('i', [(p * 5) % 6 for p in range(n)])
+    mesh.polygons.foreach_set("material_index", index)
+    smooth = [bool(p % 3 == 0) for p in range(n)]
+    mesh.polygons.foreach_set("use_smooth", smooth)
+    mesh.update()
+    ddg = module(".core").native()
+    buffers = module(".core").mesh_buffers(mesh)
+    kwargs = dict(iterations=40, subdivisions=2, remesh=True, small_angle=0.5)
+    expected = ddg.make_developable(*buffers, **kwargs)
+    flips = sum(r["flips"] + r["collapses"] for r in expected.report["rounds"])
+    assert flips > 0, "the remeshing did not run; the test would not test it"
+    run(bpy.ops.object.ddg_make_developable, iterations=40, subdivisions=2, remesh=True,
+        small_angle=0.5)
+    assert sides(mesh) == [3] and len(mesh.polygons) == len(expected.face_polygon)
+    mat = array.array('i', bytes(4 * len(mesh.polygons)))
+    mesh.polygons.foreach_get("material_index", mat)
+    flat = array.array('B', bytes(len(mesh.polygons)))
+    mesh.polygons.foreach_get("use_smooth", flat)
+    assert list(mat) == [index[p] for p in expected.face_polygon]
+    assert [bool(x) for x in flat] == [smooth[p] for p in expected.face_polygon]
+    assert len(set(mat)) == 6
+
+
+@test
 def triangulate_option_replaces_quads_even_without_new_vertices():
     cube = subdivided_cube(2)
     n, nv = len(cube.data.polygons), len(cube.data.vertices)

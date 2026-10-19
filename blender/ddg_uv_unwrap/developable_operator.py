@@ -17,8 +17,12 @@ triangulation is Blender's own (``mesh.loop_triangles``).
 * Topology unchanged (no subdivision, no remeshing operation applied, "Triangulate" off): the new
   positions are written into the existing mesh; polygons, UVs and other data stay.
 * Otherwise the mesh data is replaced by the triangle mesh the flow returns; the material index
-  and the smooth flag of every triangle come from the polygon it descends from; UV maps and other
-  attributes are dropped (the report warns).
+  and the smooth flag of every triangle come from the polygon it descends from (the library
+  tracks the parent of every triangle through subdivision, flips and collapses, so this is exact);
+  UV maps and other attributes are dropped (the report warns).
+* The report warns when the flow ended before a round because the energy is undefined there
+  (``stopped``: the round and the reason; the mesh is the state before it) and when triangles with
+  a corner angle below the small angle could not be repaired (``bad_faces``).
 """
 
 from array import array
@@ -223,6 +227,11 @@ def summary(stats):
         parts.append("| {} → {} triangles".format(r["n_input_triangles"], r["n_triangles"]))
     if r["cancelled"]:
         parts.append("| STOPPED early")
+    stopped = r.get("stopped")
+    if stopped is not None:
+        parts.append("| ENDED before round {}: {}".format(stopped["round"] + 1, stopped["reason"]))
+    if r.get("bad_faces"):
+        parts.append("| {} thin triangles left".format(r["bad_faces"]))
     if stats["n_pinned"]:
         parts.append("| {} pinned".format(stats["n_pinned"]))
     if r["nonplanarity_after"] is not None:
