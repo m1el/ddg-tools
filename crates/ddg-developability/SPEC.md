@@ -488,6 +488,13 @@ ignores the option. *Why:* every energy of §3 is scale free and bounded, so squ
 zero area costs (almost) nothing; the weak Wolfe line search accepts such steps, the energy
 decreases a little, and the face collapses until the cross product underflows (D31).
 
+**Blocked vertices.** The vertices of every face whose smallest angle is below `2 · min_face_angle`
+are *blocked*: their entries of the gradient and of the search direction are zero. The blocked
+set is computed at the starting point and again at every accepted point, and stays fixed during
+a line search (trial points do not change it). Without blocking the line search stops at the
+floor (spot control mesh, intrinsic, 300 it/round: 164 of 900 iterations at E 16.7; with
+blocking the full budget, E 5.05; D31).
+
 ## 5. Flow driver, subdivision, remeshing
 
 ### 5.1 Flow (Sec. 4.2, 5.2)

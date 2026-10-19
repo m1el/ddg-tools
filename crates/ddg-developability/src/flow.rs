@@ -187,7 +187,7 @@ pub struct FlowResult {
     /// Its positions.
     pub positions: Vec<[f64; 3]>,
     /// For each final vertex, the id of the input vertex it descends from, or
-    /// [`NONE`](ddg_core::topology::NONE) for a vertex created by subdivision. After a collapse
+    /// [`ddg_core::topology::NONE`] for a vertex created by subdivision. After a collapse
     /// the surviving vertex keeps its identity.
     pub vertex_source: Vec<u32>,
     /// For each final face, the input face it descends from. Subdivision: the four children of a
