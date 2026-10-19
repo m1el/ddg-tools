@@ -650,8 +650,11 @@ developability holds for the triangulation used, so the operator reports the lar
 non-planarity of non-triangle polygons; (b) topology changed (subdivision or an applied remesh
 operation), or the option "Triangulate" is on → replaces the mesh data by the returned triangle
 mesh (material index per face from the parent polygon; other attributes and UVs dropped, with a
-warning). Operator "Developable Seams + UV": marks `seam_edges` as seams and writes a UV map
-(new layer, name option), from `developable_unwrap`; it does not move vertices.
+warning). Operator "Developable Seams + UV": marks the developable cut (`cut_and_flatten`'s cut
+edges, restricted to polygon edges) as seams, existing seams kept, and writes the UV map with the
+`ddg-uv` pipeline of the Conformal Unwrap operator with "Cut Marked Seams" on (cones, extra cuts,
+packing and the overlap report come from it; D23); it does not move vertices. The paper's plain
+per-chart flatten stays available in Rust and Python.
 
 ## 8. Differences from the paper as printed, and decisions
 
@@ -702,8 +705,11 @@ warning). Operator "Developable Seams + UV": marks `seam_edges` as seams and wri
   (the paper names the ingredients but not the combination or the sign). The energy that selects
   the terminals stays `Covariance` by default (not the intrinsic width, see D30 for why).
 * **D23** Flatten: per chart BFF with `u = 0` on the boundary, harmonic extension; crack gluing and
-  overlap avoidance out of scope.
-* **D24** Polygons and topology rule of §7.2 (to confirm).
+  overlap avoidance out of scope for `cut_and_flatten` (the paper's method). Its charts can overlap
+  themselves globally (spot after the default flow: one chart, 48 % self-overlap, no flipped
+  triangle). The user decided (2026-10-19) that the UV map of the bindings and Blender comes from
+  the `ddg-uv` atlas pipeline instead, with the developable cut as marked seams (§7.2).
+* **D24** Polygons and topology rule of §7.2 (confirmed by the user, §11).
 * **D25** Evaluation is deterministic and bitwise independent of the thread count (§3.9).
 * **D26** Gradient descent: either line search; fixed step in units of `ℓ̄²`.
 * **D27** Stopping rules and statuses of §4.6 (L&O run "until breakdown" or a limit).
@@ -894,3 +900,5 @@ by a flip.
 3. **Boundary vertices (D8):** included by default; excluding them stays an option.
 4. **Safeguards (D19, D21):** keep the step cap `0.5 ℓ̄` and the 1° threshold; tune by
    measurement and record the numbers if runs show stalls or poor triangles.
+5. **UV map (D23):** the bindings and Blender take the developable cut as seams and unwrap with the
+   `ddg-uv` atlas pipeline (reuse, not the paper's plain BFF flatten, whose charts overlap).
