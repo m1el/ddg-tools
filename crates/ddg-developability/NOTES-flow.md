@@ -79,7 +79,7 @@ rounds (coarse + one subdivision), 1 thread per job, 60 jobs in parallel, ε = 1
 (remeshing on). 132 jobs in 3 min 7 s wall (machine load average about 60 from other agents; the
 times below are single-thread seconds under that load). Logs: `runs_tmp/dev-flow-study/job-*.log`.
 Result: all 132 jobs finished; no error, no non-finite energy or position, no line-search failure,
-no `NonDescent`; 1 stall (`EnergyStalled`, spot_control_mesh Intrinsic, budget 100 round 1 and 400);
+no `NonDescent`; 1 stall (`EnergyStalled` in round 0 of spot_control_mesh Intrinsic, budget 400);
 undefined trials: 1 in total; cut and flatten succeeded in all 132.
 Columns: `flips/collapses` are remesh operations over both rounds; `cut` is terminals(+added)/cut
 edges/charts; `flipped uv` and `mean |u|` are from the cut at ε = 1e-3 on the final mesh. E0 is
