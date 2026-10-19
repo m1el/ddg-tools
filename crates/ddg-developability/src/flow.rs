@@ -473,7 +473,7 @@ fn flow_impl(
                 final_status = OptimizeStatus::Cancelled;
                 break;
             }
-            let failed = matches!(status, OptimizeStatus::LineSearchFailed | OptimizeStatus::NonDescent);
+            let failed = matches!(status, OptimizeStatus::LineSearchFailed | OptimizeStatus::Stationary | OptimizeStatus::NonDescent);
             if !(need_remesh || (failed && opts.remesh.is_some())) {
                 final_status = status;
                 break;

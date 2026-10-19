@@ -76,6 +76,22 @@ fn noisy_developable_sheets_become_developable() {
     }
 }
 
+/// D34: a flow run until the line search cannot improve the energy (no tolerance, a large
+/// budget) ends `Stationary` at an energy at rounding level, not `LineSearchFailed`.
+#[test]
+fn converged_flow_is_stationary() {
+    let (mesh, pos) = developable_sheet(8, false, 0.02, 3);
+    let mut opts = FlowOptions::uniform(EnergyOptions::default(), 0, 20_000);
+    opts.optimize.gradient_tolerance = 0.0;
+    opts.optimize.energy_tolerance = 0.0;
+    no_remesh(&mut opts);
+    let res = flow(&mesh, &pos, &opts, None).unwrap();
+    let o = &res.report.rounds[0].optimize;
+    eprintln!("converged sheet: E {:.3e} -> {:.3e}, {} iterations, status {:?}, |g| {:.2e}", o.energy_initial, o.energy_final, o.iterations, o.status, o.gradient_norm_history.last().unwrap());
+    assert_eq!(o.status, ddg_developability::OptimizeStatus::Stationary);
+    assert!(o.energy_final < 1e-12, "E = {}", o.energy_final);
+}
+
 #[test]
 fn sphere_energy_concentrates() {
     let g = icosphere(2).unwrap();

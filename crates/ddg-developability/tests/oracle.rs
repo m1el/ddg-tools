@@ -741,7 +741,15 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
             }
         }
         "failed" => {
-            if r.status != OptimizeStatus::LineSearchFailed {
+            // D34: a failure with a wall (an undefined or inadmissible trial) is
+            // `LineSearchFailed`; without one it is `Stationary` when the energy at the smallest
+            // trial is within rounding noise of the start (the oracle does not model the noise)
+            let ok = if r.undefined_trials + r.inadmissible_trials > 0 {
+                r.status == OptimizeStatus::LineSearchFailed
+            } else {
+                matches!(r.status, OptimizeStatus::LineSearchFailed | OptimizeStatus::Stationary)
+            };
+            if !ok {
                 local.push(format!("oracle: line search failed, here {:?}", r.status));
             }
         }

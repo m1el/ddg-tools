@@ -433,7 +433,7 @@ sᵀy ≤ 0); otherwise the line search failed.
 Termination for semi-algebraic `E` and the existence of weak Wolfe steps are L&O Thm. 2.5/2.7
 (cited, [formula: dev-lewis-overton-termination]). On a failed line search L-BFGS resets its memory
 and retries once from steepest descent; a second failure ends the run with status
-`LineSearchFailed` (L&O terminate at "breakdown", Sec. 5.1).
+`Stationary` or `LineSearchFailed` (§4.6, D34; L&O terminate at "breakdown", Sec. 5.1).
 
 ### 4.4 Gradient descent
 
@@ -455,10 +455,17 @@ energy increases are counted in the report.
 Checked after every accepted step, first match wins; statuses:
 `GradientTolerance` (§4.1), `EnergyStalled` (`E_{k} − E_{k+1} ≤ energy_tolerance · max(E_k, 1e-300)`
 for `stall_iterations` consecutive iterations; defaults `1e-10`, `10`), `MaxIterations` (default
-1000 per round), `LineSearchFailed`, `Cancelled` (the progress callback returned `Break`),
+1000 per round), `Stationary` and `LineSearchFailed` (D34: the line search from steepest descent
+found no acceptable step; `Stationary` iff every trial point of that search was defined and
+admissible and at its smallest trial `|E(x + t d) − E(x)| ≤ max(η, 64 ε |E(x)|)`, the energy's
+rounding noise, with `η = 64 ε · 2π · |V|` for the mesh energies (`Objective::energy_noise`, 0 for
+the generic optimizer): the energy is flat to working precision, no descent is possible;
+otherwise `LineSearchFailed`: a wall (an undefined or inadmissible trial) or a measurable
+increase at every step size tried, i.e. a kink or a stiff point where `−g` is no descent
+direction), `Cancelled` (the progress callback returned `Break`),
 `NonDescent` (two consecutive non-descent steepest-descent directions — only possible through
 rounding). The paper subdivides "once the norm of the energy gradient is below a given threshold"
-(Sec. 4.2): that is `GradientTolerance` or `EnergyStalled`.
+(Sec. 4.2): that is `GradientTolerance`, `Stationary` or `EnergyStalled`.
 
 ### 4.7 Report
 
@@ -815,6 +822,20 @@ per-chart flatten stays available in Rust and Python.
   sensitivities) for every energy (the intrinsic ones are still undefined where D12 says so) (§3.1 says its energy vanishes identically;
   the eigenvector of the rank-deficient matrix is arbitrary and, for nearly coplanar normals, fed
   noise of the size of the angle into the gradient; found by the oracle fuzz).
+
+* **D34** Status `Stationary` (§4.6). *Paper / L&O:* nonsmooth BFGS runs "until breakdown" (the
+  line search finds no step); the paper subdivides once the gradient is small. *Before:* every
+  failed line search was `LineSearchFailed`, also at converged states (energy `1e-7` to `1e-13`),
+  which read as a failure. *Now:* a failure from steepest descent with every trial defined and
+  admissible and the energy change at the smallest trial within the rounding noise is
+  `Stationary`. *Measured* (control meshes, 3 rounds x 3000 iterations, six energies, logged
+  line-search failures): the `E_λ` failures have `|ΔE| = 4.7e-15` against a noise of `3e-11`
+  (E 5.3e-9, `ℓ̄‖g‖∞` 1.3e-6): `Stationary`; the intrinsic failures have `|ΔE| = 4e-3` to `1.1`
+  at `ℓ̄‖g‖∞` = `4e5` to `7e7` (a star whose vector area nearly vanishes: the energy rises like
+  `1e15 · |Δx|²` down to steps of `1e-9`), or a wall: `LineSearchFailed`. No case fell between.
+  Tests: `tests/optimize.rs::stationary_is_told_from_line_search_failure`,
+  `tests/flow.rs::converged_flow_is_stationary` (noisy cylinder sheet, E 1.4e-14 after 537
+  iterations, was `LineSearchFailed`).
 
 ## 9. Formula ids
 

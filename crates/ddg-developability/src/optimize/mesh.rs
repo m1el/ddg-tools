@@ -122,6 +122,12 @@ impl Objective for MeshObjective<'_> {
     fn near_ties(&self) -> usize {
         self.near_ties
     }
+    /// Every per-vertex energy is a function of unit normals and angles whose terms are at most
+    /// about `2π` (the trace of the angle-weighted covariance), so its absolute rounding error is
+    /// a few `2π ε`; summed over the vertices (D34).
+    fn energy_noise(&self) -> f64 {
+        super::core::NOISE_ULPS * f64::EPSILON * std::f64::consts::TAU * self.mesh.n_vertices() as f64
+    }
 }
 
 fn mean_edge_length(mesh: &TriMesh, pos: &[[f64; 3]]) -> f64 {

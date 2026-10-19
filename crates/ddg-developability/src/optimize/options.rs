@@ -211,8 +211,16 @@ pub enum OptimizeStatus {
     EnergyStalled,
     /// `max_iterations` accepted iterations done.
     MaxIterations,
-    /// No acceptable step was found (also from steepest descent).
+    /// No acceptable step was found (also from steepest descent), and at least one trial point
+    /// of the last line search was undefined or inadmissible (a wall, D12/D31): the run stopped
+    /// at an obstacle, not at a stationary point.
     LineSearchFailed,
+    /// The line search from steepest descent found no lower energy at any trial step (down to
+    /// `2^-max_bisections` of the first one), and every trial point was defined and admissible:
+    /// no descent is possible from here, a stationary point to working precision (or a nonsmooth
+    /// point where `−g` is not a descent direction; Lewis–Overton's "breakdown", their normal
+    /// end of a nonsmooth BFGS run). SPEC §4.6, D34.
+    Stationary,
     /// The progress callback returned `Break`.
     Cancelled,
     /// A steepest descent direction was not a descent direction (rounding).

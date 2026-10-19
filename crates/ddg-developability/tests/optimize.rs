@@ -461,3 +461,34 @@ mod on_meshes {
         assert!(r.report.energy_final < r.report.energy_initial);
     }
 }
+
+/// D34: a failed line search from steepest descent is `Stationary` only when every trial was
+/// defined and admissible and the energy at the smallest trial is within rounding noise of the
+/// start; a measurable increase (a kink, a stiff point) or a wall stays `LineSearchFailed`.
+#[test]
+fn stationary_is_told_from_line_search_failure() {
+    let opts = OptimizeOptions { max_iterations: 10, gradient_tolerance: 0.0, energy_tolerance: 0.0, ..Default::default() };
+    // flat to rounding (the "gradient" is not measurable in the values)
+    let flat = |_: &[f64], g: &mut [f64]| {
+        g[0] = 1.0;
+        Some(1.0)
+    };
+    let m = run(flat, &[0.0], 1, &opts);
+    assert_eq!(m.report.status, OptimizeStatus::Stationary);
+    assert_eq!(m.report.iterations, 0);
+    // a kink where -g is no descent direction: the energy rises measurably at every trial
+    let kink = |x: &[f64], g: &mut [f64]| {
+        g[0] = 1.0;
+        Some(x[0].abs() + 1.0)
+    };
+    let m = run(kink, &[0.0], 1, &opts);
+    assert_eq!(m.report.status, OptimizeStatus::LineSearchFailed);
+    // a wall: every trial is undefined
+    let wall = |x: &[f64], g: &mut [f64]| {
+        g[0] = 1.0;
+        (x[0] >= 0.0).then_some(1.0 + x[0])
+    };
+    let m = run(wall, &[0.0], 1, &opts);
+    assert_eq!(m.report.status, OptimizeStatus::LineSearchFailed);
+    assert!(m.report.undefined_trials > 0);
+}

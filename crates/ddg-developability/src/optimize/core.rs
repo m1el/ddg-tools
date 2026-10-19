@@ -38,7 +38,16 @@ pub trait Objective {
     fn near_ties(&self) -> usize {
         0
     }
+    /// Absolute rounding noise of an energy value (an upper estimate): differences this small
+    /// are not measurable. Used only to tell `Stationary` from `LineSearchFailed` (D34); the
+    /// generic optimizer adds a relative `NOISE_ULPS · ε · |f|`. Default 0.
+    fn energy_noise(&self) -> f64 {
+        0.0
+    }
 }
+
+/// Relative rounding noise of an energy value, in units of `f64::EPSILON` (D34).
+pub const NOISE_ULPS: f64 = 64.0;
 
 /// Error type of [`ClosureObjective`]: the closure returned `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,7 +209,10 @@ fn norm_inf(v: &[f64], group: usize) -> f64 {
 
 enum Ls {
     Accepted { t: f64, f: f64, capped: bool, weak: bool },
-    Failed,
+    /// No acceptable step. `walls`: some trial point was undefined or inadmissible (so the
+    /// failure may come from a wall rather than from the energy itself). `last_df`: `f(t) − f(0)`
+    /// at the last (smallest) trial, `None` if it was undefined.
+    Failed { walls: bool, last_df: Option<f64> },
 }
 
 struct Run<'a, O: Objective> {
@@ -277,8 +289,12 @@ impl<O: Objective> Run<'_, O> {
         let mut beta = f64::INFINITY;
         let mut t = t_start.min(t_max);
         let (mut nd, mut nb) = (0u32, 0u32);
+        let mut walls = false;
+        let mut last_df;
         loop {
             let ft = self.trial(x, d, t)?;
+            walls |= ft.is_none();
+            last_df = ft.map(|f| f - f0);
             let s_ok = matches!(ft, Some(f) if f - f0 < c1 * s * t);
             if !s_ok {
                 beta = t;
@@ -312,7 +328,7 @@ impl<O: Objective> Run<'_, O> {
             std::mem::swap(&mut self.tg, &mut self.ag);
             Ok(Ls::Accepted { t: alpha, f: f_alpha, capped: false, weak: true })
         } else {
-            Ok(Ls::Failed)
+            Ok(Ls::Failed { walls, last_df })
         }
     }
 
@@ -329,15 +345,20 @@ impl<O: Objective> Run<'_, O> {
         (c1, shrink, max_shrinks): (f64, f64, u32),
     ) -> Res<Ls, O> {
         let mut t = t_start.min(t_max);
+        let mut walls = false;
+        let mut last_df = None;
         for _ in 0..=max_shrinks {
-            if let Some(f) = self.trial(x, d, t)?
+            let ft = self.trial(x, d, t)?;
+            walls |= ft.is_none();
+            last_df = ft.map(|f| f - f0);
+            if let Some(f) = ft
                 && f - f0 <= c1 * s * t
             {
                 return Ok(Ls::Accepted { t, f, capped: t >= t_max, weak: false });
             }
             t *= shrink;
         }
-        Ok(Ls::Failed)
+        Ok(Ls::Failed { walls, last_df })
     }
 }
 
@@ -511,12 +532,19 @@ pub fn minimize<O: Objective>(
                 }
             };
             match ls {
-                Ls::Failed => {
+                Ls::Failed { walls, last_df } => {
                     if !steepest && !retry_pending {
                         mem.reset();
                         run.rep.memory_resets += 1;
                         retry_pending = true;
                         continue;
+                    }
+                    // SPEC §4.6, D34: from steepest descent, every trial defined and admissible,
+                    // none lower, and at the smallest trial the energy does not change by more than
+                    // its rounding noise: flat to working precision, no descent possible.
+                    let noise = run.obj.energy_noise().max(NOISE_ULPS * f64::EPSILON * f.abs());
+                    if steepest && !walls && last_df.is_some_and(|df| df.abs() <= noise) {
+                        break OptimizeStatus::Stationary;
                     }
                     break OptimizeStatus::LineSearchFailed;
                 }
