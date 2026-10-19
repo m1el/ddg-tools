@@ -21,6 +21,12 @@ Third paper: "Navigating Intrinsic Triangulations", Sharp, Soliman, Crane, ACM T
 which may be read and ported with its licence notice). Contract: `crates/ddg-intrinsic/SPEC.md`.
 `ROADMAP.md` lists what is scheduled and the known gaps.
 
+Fourth paper: "Developability of Triangle Meshes", Stein, Grinspun, Crane, ACM TOG 2018
+(`../DiscreteDevelopable/paper.pdf`). **Clean room**, as for the second paper: the authors' code (GPL,
+with Kopp's LGPL 3x3 eigensolver) is quarantined outside this tree; never open, search, download or
+paraphrase it, and do not copy Kopp's published C code (his paper may be read and cited). Contract:
+`crates/ddg-developability/SPEC.md`; formula ids start with `dev-`.
+
 ## Layout
 
 ```
@@ -31,6 +37,8 @@ crates/ddg-bff             boundary first flattening + cutting
 crates/ddg-variational-cuts  the cut flow of the second paper; `SPEC.md` is its contract
 crates/ddg-intrinsic       intrinsic triangulations (signposts, flips, Delaunay, refinement, overlay);
                            `SPEC.md` is its contract; the authors' MIT demo may be used as a reference
+crates/ddg-developability  the developability flow of the fourth paper (energies, L-BFGS, subdivision,
+                           remeshing, cut and flatten); `SPEC.md` is its contract
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs;
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
