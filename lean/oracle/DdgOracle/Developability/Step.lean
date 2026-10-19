@@ -72,6 +72,8 @@ structure StepResult where
   e1 : Float
   /-- new positions -/
   pos : Array V3
+  /-- smallest margin over the counted vertices, relative to `max 1 |e_v|` -/
+  margin : Float
 
 /-- Mean length of the unique edges. -/
 def meanEdgeLength (m : DMesh) (topo : Topo) : Float :=
@@ -80,13 +82,14 @@ def meanEdgeLength (m : DMesh) (topo : Topo) : Float :=
 /-- One step from the positions of `m`. -/
 def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError StepResult := do
   let ev0 ← evaluate m topo o
+  let margin := (Array.range topo.nv).foldl (fun acc v => if ev0.counted[v]! then min acc (ev0.margin[v]! / max 1 ev0.e[v]!.abs) else acc) posInf
   let pinned := fun v => so.pinned.contains v
   let g := Array.ofFn (n := topo.nv) fun v => if pinned v.val then V3.zero else ev0.grad[v]!
   let lbar := meanEdgeLength m topo
   let gmax := g.foldl (fun acc x => max acc x.norm) 0
   if !(gmax > 0) then
     return { lbar, gmax, e0 := ev0.total, slope := 0, tmax := posInf, trials := #[], kind := .stationary,
-             t := 0, e1 := ev0.total, pos := m.pos }
+             t := 0, e1 := ev0.total, pos := m.pos, margin }
   let scale := so.initialStep * lbar / gmax
   let d := g.map (V3.smul (-scale))
   let dinf := d.foldl (fun acc x => max acc x.norm) 0
@@ -155,7 +158,7 @@ def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError
         t := min (2 * alpha) tmax
   let pos := if kind == .failed then m.pos else (moved accepted).pos
   return { lbar, gmax, e0 := ev0.total, slope, tmax, trials, kind, t := accepted,
-           e1 := if kind == .failed then ev0.total else eAcc, pos }
+           e1 := if kind == .failed then ev0.total else eAcc, pos, margin }
 
 /-- 4-1 subdivision: returns the new mesh and the edge midpoints `(a, b, id)`. -/
 def subdivide (m : DMesh) (topo : Topo) : DMesh × Array (Nat × Nat × Nat) := Id.run do

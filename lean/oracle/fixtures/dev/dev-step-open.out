@@ -6,6 +6,7 @@ gmax 3ff64f89092ef34d
 energy0 3fd36fd39cbb1a6a
 slope bfd282d54b4d7574
 tmax 4013ffffffffffff
+margin 3f30bec71f76dba0
 trial 0 3ff0000000000000 3fbe5ac92d6c04a9 1 1
 result wolfe 3ff0000000000000 1 3fbe5ac92d6c04a9
 x 0 3fd9c3d7c7ef5731 bfa31de91adc5617 3fd047e544e25852

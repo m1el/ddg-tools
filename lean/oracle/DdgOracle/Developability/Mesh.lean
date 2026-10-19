@@ -67,6 +67,13 @@ def buildTopo (m : DMesh) : Except String Topo := do
       if he[a * nv + b]! != 0 then throw s!"directed edge ({a}, {b}) is used twice (non-manifold or inconsistent orientation)"
       he := he.set! (a * nv + b) (fi + 1)
       incident := incident.modify a (·.push (fi, s))
+  for fi in [0:m.faces.size] do
+    let (a, b, c) := m.faces[fi]!
+    let g := he[b * nv + a]!
+    if g != 0 then
+      let (x, y, z) := m.faces[g - 1]!
+      if [x, y, z].contains c && [x, y, z].contains a && [x, y, z].contains b then
+        throw s!"faces {fi} and {g - 1} are duplicates: both have the vertices ({a}, {b}, {c})"
   let mut stars : Array Star := #[]
   for v in [0:nv] do
     let inc := incident[v]!

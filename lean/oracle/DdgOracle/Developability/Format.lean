@@ -152,7 +152,7 @@ private def printStep (c : DevCase) (topo : Topo) : String := Id.run do
   | .error err => return printError c.name "step" err.text
   | .ok r =>
     let mut s := s!"case {c.name}\ntask step\nstatus ok\n"
-    s := s ++ s!"lbar {hx r.lbar}\ngmax {hx r.gmax}\nenergy0 {hx r.e0}\nslope {hx r.slope}\ntmax {hx r.tmax}\n"
+    s := s ++ s!"lbar {hx r.lbar}\ngmax {hx r.gmax}\nenergy0 {hx r.e0}\nslope {hx r.slope}\ntmax {hx r.tmax}\nmargin {hx r.margin}\n"
     for i in [0:r.trials.size] do
       let t := r.trials[i]!
       let cc := match t.c with | none => "-1" | some b => b2n b

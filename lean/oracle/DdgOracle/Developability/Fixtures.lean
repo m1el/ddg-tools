@@ -47,18 +47,21 @@ def fixtures : Array (DevCase × String) := Id.run do
   fs := add fs { mk "dev-crumpled-noboundary" "energy" crumpled with includeBoundary := false } "the same grid, boundary vertices excluded"
   fs := add fs (mk "dev-annulus" "energy" (ofRaw ((polar 2 6 0.4 1.0 fun x y => 0.3 * Float.sin (3 * x) + 0.2 * y * y).jitter 0.05 16))) "annulus with two boundary loops"
   fs := add fs (mk "dev-torus" "energy" (ofRaw ((torus 4 3 2.0 0.7 fun a b => 0.1 * Float.sin (a + 2 * b)).jitter 0.05 17))) "small torus"
-  -- undefined intrinsic energy: a double cover has a zero vertex normal
-  let cover : DMesh := { pos := #[⟨0, 0, 0⟩, ⟨1, 0, 0⟩, ⟨0, 1, 0⟩], faces := #[(0, 1, 2), (0, 2, 1)] }
-  fs := add fs (mk "dev-double-cover" "energy" cover) "two coincident faces with opposite orientation: zero vertex normal, the intrinsic energies are undefined"
+  -- undefined intrinsic energy: a bowtie ring has a vector area of exactly zero, so the vertex normal is undefined
+  let bowtie : DMesh := { pos := #[⟨0, 0, 1⟩, ⟨-2, -1, 0⟩, ⟨2, 1, 0⟩, ⟨2, -1, 0⟩, ⟨-2, 1, 0⟩],
+                          faces := #[(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1)] }
+  fs := add fs (mk "dev-bowtie" "energy" bowtie) "a star whose ring is a bowtie: the vector area is exactly zero, so the vertex normal is undefined and the intrinsic energies fail"
+  fs := add fs (mk "dev-double-cover" "energy" { pos := #[⟨0, 0, 0⟩, ⟨1, 0, 0⟩, ⟨0, 1, 0⟩], faces := #[(0, 1, 2), (0, 2, 1)] }) "two faces on the same three vertices: rejected as a duplicate"
   fs := add fs (mk "dev-degenerate" "energy" { crumpled with pos := crumpled.pos.set! 6 crumpled.pos[7]! }) "two coincident vertices: degenerate faces"
   fs := add fs (mk "dev-nonmanifold" "energy" { pos := crumpled.pos, faces := crumpled.faces.push (0, 1, 2) }) "a face added twice: the directed edge is used twice"
   -- one step
   for e in EnergyKind.all do
     fs := add fs { mk s!"dev-step-{e.name}" "step" crumpled with energies := #[e] } s!"first L-BFGS step ({e.name}) on the crumpled grid, default options"
-  let big : StepOpts := { initialStep := 3.0, maxDisplacement := 2.0, c1 := 1e-4, c2 := 0.9 }
-  fs := add fs { mk "dev-step-bisect" "step" ico with energies := #[.covariance], stepOpts := big } "covariance step with a large initial step: bisection"
+  let big : StepOpts := { initialStep := 5.0, maxDisplacement := 50.0, c1 := 1e-4, c2 := 0.9 }
+  fs := add fs { mk "dev-step-bisect" "step" crumpled with energies := #[.combinatorialMax], stepOpts := big } "pi_max step with a large initial step: bisection"
   let small : StepOpts := { initialStep := 0.001, maxDisplacement := 0.2 }
   fs := add fs { mk "dev-step-double" "step" ico with energies := #[.combinatorial], stepOpts := small } "combinatorial step with a tiny initial step: doubling up to the cap"
+  fs := add fs { mk "dev-step-limit" "step" ico with energies := #[.combinatorial], stepOpts := { small with maxDoublings := 2 } } "the same with at most 2 doublings: the weak step alpha is taken"
   fs := add fs { mk "dev-step-pinned" "step" crumpled with energies := #[.intrinsic], stepOpts := { pinned := #[0, 1, 2, 6, 12] } } "intrinsic step with pinned vertices"
   fs := add fs { mk "dev-step-open" "step" (ofRaw ((polar 2 6 0.4 1.0 fun x y => 0.3 * Float.sin (3 * x) + 0.2 * y * y).jitter 0.05 16)) with energies := #[.covarianceMax], includeBoundary := false } "lambda_max step on an annulus, boundary excluded"
   -- subdivision
