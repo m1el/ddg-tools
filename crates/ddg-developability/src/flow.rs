@@ -399,7 +399,7 @@ fn flow_impl(
                         }
                     }
                     if let Some(small) = small
-                        && p.iteration % interval == 0
+                        && p.iteration.is_multiple_of(interval)
                         && count_bad(mesh_ref, p.positions, small) > known_unfixable
                     {
                         need_remesh = true;

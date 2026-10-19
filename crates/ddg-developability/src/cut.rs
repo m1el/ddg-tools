@@ -173,9 +173,9 @@ fn edge_weights(
         let th = corner_angles(p);
         for k in 0..3 {
             let m = &mut a[tri[k] as usize];
-            for i in 0..3 {
-                for j in 0..3 {
-                    m[i][j] += th[k] * fr.normal[i] * fr.normal[j];
+            for (row, &ni) in m.iter_mut().zip(&fr.normal) {
+                for (cell, &nj) in row.iter_mut().zip(&fr.normal) {
+                    *cell += th[k] * ni * nj;
                 }
             }
         }
