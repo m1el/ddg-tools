@@ -238,6 +238,116 @@ marking seams.
 - The system Python of this machine's Blender (3.14) has no numpy; official builds have it. The
   add-on and the native module use neither.
 
+## Developability: Make Developable, Show Developability, Developable Seams + UV
+
+Three operators after Stein, Grinspun, Crane, *Developability of Triangle Meshes* (ACM TOG
+2018; implemented clean-room from the text; crates `ddg-developability`, `ddg-py`; contract
+`crates/ddg-developability/SPEC.md` section 7.2). All work on the active mesh from Object mode
+and from Edit mode (the mesh is read in Object mode and Edit mode is re-entered), use Blender's own
+triangulation of the polygons (`mesh.loop_triangles`), support undo and Adjust Last Operation, and
+refuse non-manifold or inconsistently oriented meshes with a message naming polygons and
+vertices. Menus: **Object** (all three), **Mesh** in Edit mode (Make Developable, Show
+Developability), **UV** in Edit mode (Developable Seams + UV).
+
+**Make Developable**, `bpy.ops.object.ddg_make_developable`: a flow that moves the vertices until
+the faces around each vertex fold along straight lines (rounds of L-BFGS, a 4-1 subdivision
+between rounds, small-angle remeshing). Runs in place.
+
+| property | Python name | default | meaning |
+|----------|-------------|---------|---------|
+| Energy | `energy` | Eigenvalue | `COVARIANCE` (E-lambda), `COMBINATORIAL` (E_P), `COMBINATORIAL_MAX`, `COVARIANCE_MAX`, `INTRINSIC`, `INTRINSIC_MAX` |
+| Method | `method` | L-BFGS | `LBFGS`, `GRADIENT_DESCENT`, `FIXED_STEP` |
+| Iterations | `iterations` | 500 | optimizer iterations per round |
+| Subdivision Rounds | `subdivisions` | 2 | 4-1 subdivisions; the flow has this + 1 rounds. Each one quadruples the triangles |
+| Remesh | `remesh` | on | repair triangles with a corner angle below the small angle by edge flips and collapses |
+| Small Angle | `small_angle` | 1 degree | the threshold of the remeshing |
+| Step Cap | `max_displacement` | 0.5 | no vertex moves farther than this many mean edge lengths per step |
+| Include Boundary | `include_boundary` | on | count boundary vertices in the energy |
+| Omit Valence 3 | `omit_valence_three` | on | leave out interior vertices with three faces |
+| Pin Selected | `pin_selected` | off | vertices selected (in Edit mode) do not move |
+| Pinned Group | `pinned_group` | (none) | vertex group (weight above 0) of vertices that do not move |
+| Triangulate | `triangulate` | off | replace the mesh by the algorithm's triangle mesh even if the topology is unchanged |
+| Write Energy Preview | `write_energy` | off | afterwards write the preview attributes of Show Developability |
+
+**What happens to the mesh (D24).** If no subdivision ran and no remeshing operation acted, and
+Triangulate is off, the new positions are written into the existing mesh: polygons (quads), UV maps,
+attributes, materials are untouched, and the report says the largest non-planarity of polygons with
+more than three corners (a warning above 1 % of a side: the flow makes the *triangulation*
+developable; n-gons follow only as far as they are planar). Otherwise the mesh data is replaced by
+the triangle mesh the flow returns: the material index and smooth flag of every triangle come from
+the polygon it descends from; **UV maps, vertex groups' weights and other attributes are dropped**
+and a warning lists them. Shape keys are refused (the flow would move only the basis). Vertices
+that no polygon used are dropped by a replacement.
+
+**Progress and cancelling.** The operator is synchronous (no existing operator of this add-on is
+modal). While it runs it reports to Blender's progress cursor (`window_manager.progress_*`, up to
+rounds x iterations), and Ctrl-C in the terminal stops it, leaving the mesh unchanged. There is no
+Escape key cancel: a flow of 500 iterations x 3 rounds on 20k triangles takes seconds; measured
+times are below. (The Python function accepts a `progress` callable that can stop the flow.)
+
+**Show Developability**, `bpy.ops.object.ddg_show_developability` (a third, small operator; the
+Make Developable option `write_energy` does the same after the flow): writes the energy of every
+vertex as the point color attribute `developability` (white below 1e-6, through yellow to red at
+1e-1 and above, logarithmic) and the float values as `developability_energy`, and makes the color
+attribute active (set the viewport's solid color to *Attribute*). Properties: `energy`,
+`include_boundary`, `omit_valence_three`, `attribute_name`. The mesh is not changed.
+
+**Developable Seams + UV**, `bpy.ops.uv.ddg_developable_seams`: (1) the library chooses the cut
+(terminals: vertices whose energy exceeds the threshold, and interior vertices whose angle defect
+exceeds the tolerance; a Steiner-tree-like cut graph through them along **polygon edges**); (2) the
+edges are **marked as seams** (existing seams are kept); (3) the UV map is made by the same
+pipeline as Conformal Unwrap with *Cut Marked Seams* on, so cones, extra cuts, packing and the
+overlap estimate come from it. Vertices are not moved. The paper's own per-chart flattening is
+`ddg_tools.developable_unwrap` (Python only): it keeps lengths along the cut but a chart can
+overlap itself, which is why the operator uses the atlas pipeline.
+
+| property | Python name | default | meaning |
+|----------|-------------|---------|---------|
+| Energy | `energy` | Eigenvalue | the energy that chooses the vertices to cut through |
+| Threshold | `epsilon` | 0.001 | a vertex above this is cut through (paper: 0.01 to 0.001) |
+| Cut Through Cone Vertices | `use_defect_rule` | on | also cut through interior vertices with a large angle defect (D30); off is the paper's rule |
+| Defect Tolerance | `defect_tolerance` | 0.1 rad | the angle defect above which that happens |
+| Length Weight | `length_weight` | 1 | weight of the edge length in the cost of a seam edge |
+| Alignment Weight | `alignment_weight` | 0 | weight of the edge's misalignment with the creases at its ends (0: length only) |
+| Keep Marked Seams | `use_existing_seams` | on | marked seams are cut too and the cut is planned around them |
+| UV Map | `uv_name` | Developable | name of the UV map written (created if missing, then made active) |
+| Lambda | `lambda_` | 0.1 | as in Conformal Unwrap |
+| Positive Cones Only | `positive_cones_only` | on | as in Conformal Unwrap |
+| Mark All Cuts | `mark_all_cuts` | off | also mark the extra cuts the unwrap made |
+
+The status line reports the seam edges (and how many were newly marked), terminals, charts, cones,
+the angle error and scale range, the **overlap** estimate, and the mirrored and collapsed UV
+triangles.
+
+Use it on a mesh that was made developable: on an untouched mesh a large part of the vertices has
+energy above the threshold and the seams are everywhere.
+
+### Developability tests and measurements
+
+`blender/tests/test_developable.py` (headless, 17 tests, run by `scripts/blender-test.sh` in
+parallel with the cut tests; `--source DIR --site DIR` for development without building the
+extension): subdivided cube (quads kept, energy down), noisy plane, UV sphere (all energies and
+methods), cylinder, the replacement branch (parent material, dropped UV map listed), Triangulate,
+pinned vertices (selected in Edit mode and a group), the preview attributes, readable errors
+(non-manifold, shape keys, empty name), seams marked and a UV map written with no mirrored
+triangle on cube, cylinder, sphere and spot, Edit mode, existing seams kept. Undo, redo and
+Adjust Last Operation of both branches and of Seams + UV are checked in `ui_smoke.py` (windowed:
+headless Blender has no undo stack, that test skips with a notice).
+
+Spot (`spot_quadrangulated.obj`, 2928 quads, 5856 triangles), development machine, Blender 5.0.1:
+
+| run | result |
+|-----|--------|
+| flow, 100 iterations, no subdivision (quads kept) | energy 111 to 22, largest quad non-planarity 25 % of a side, 0.6 s |
+| flow, 1 subdivision, 100 iterations per round | 5856 to 23356 triangles, energy 111 to 13.5, 27 flips and collapses, 3.4 s |
+| Seams + UV on untouched spot, threshold 1e-3 | 2617 seam edges, 2593 terminals, 1 chart, 0 cones, overlap 11 %, 0 mirrored, 0.06 s of native time |
+| Seams + UV after the flow above, threshold 1e-3 | 2472 seam edges, 1 chart, overlap 14 %, 0 mirrored |
+| Seams + UV after the flow above, threshold 1e-2 | 855 seam edges, 1 chart, overlap 13 %, 0 mirrored |
+
+The flow on spot ends early by `line_search_failed` (after 134 and 6 iterations of 500 in a run
+with two rounds, energy 18 of 111), so these seam sets are those of a mesh that is not yet
+developable; see the notes of the library.
+
 ## The variational cut: Start, Flow, Apply
 
 Three more operators, offered where the unwrap operator is (Edit mode: **UV** menu; Object mode:
@@ -342,6 +452,7 @@ Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4), 201
 | `ddg_uv_unwrap/__init__.py` | registration and the menu entries |
 | `ddg_uv_unwrap/operator.py` | the operator: properties, panel, mode handling, reports |
 | `ddg_uv_unwrap/cut_operators.py`, `cut.py` | the three cut operators; attributes, preview, flow settings, bmesh insertion |
+| `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
 
@@ -355,7 +466,7 @@ of the whole dependency tree into the wheel (`ddg_tools-<version>.dist-info/sbom
 
 ## Credits
 
-The add-on is a front end for two papers:
+The add-on is a front end for these papers:
 
 - Yousuf Soliman, Dejan Slepčev, Keenan Crane. *Optimal Cone Singularities for Conformal Flattening.*
   ACM Transactions on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201367>
@@ -363,6 +474,10 @@ The add-on is a front end for two papers:
 - Rohan Sawhney, Keenan Crane. *Boundary First Flattening.*
   ACM Transactions on Graphics 37(1), 2017. <https://doi.org/10.1145/3132705>
   (how the surface is flattened through them)
+
+- Oded Stein, Eitan Grinspun, Keenan Crane. *Developability of Triangle Meshes.*
+  ACM Transactions on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201303>
+  (the developability operators; implemented clean-room from the text of the paper)
 
 The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed reference
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's
