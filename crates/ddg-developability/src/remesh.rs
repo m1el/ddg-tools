@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use ddg_core::topology::{TriMesh, compact_vertices};
 
 use crate::error::DevError;
+use crate::optimize::DEFAULT_MIN_FACE_ANGLE;
 
 /// Options of [`remesh`] (SPEC §5.3).
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +33,10 @@ pub struct RemeshOptions {
     pub max_passes: usize,
     /// For a flow: run the check every this many accepted iterations (`>= 1`). Default 1.
     pub check_interval: usize,
+    /// Admissibility floor (D31): a collapse is refused if a face of the merged star would get a
+    /// smallest corner angle below this (radians) and below the angle that face has now. `0`
+    /// switches the rule off. Default [`DEFAULT_MIN_FACE_ANGLE`].
+    pub min_face_angle: f64,
     /// Rebuild and validate the whole mesh after every operation (O(|F|) each; for tests).
     /// Default `false`.
     pub validate_each_operation: bool,
@@ -44,6 +49,7 @@ impl Default for RemeshOptions {
             collapse_boundary_edges: true,
             max_passes: 10,
             check_interval: 1,
+            min_face_angle: DEFAULT_MIN_FACE_ANGLE,
             validate_each_operation: false,
         }
     }
@@ -64,6 +70,10 @@ impl RemeshOptions {
         }
         if self.check_interval == 0 {
             return Err(DevError::InvalidOption { name: "check_interval", value: 0.0, requirement: ">= 1" });
+        }
+        let m = self.min_face_angle;
+        if !(m.is_finite() && (0.0..a).contains(&m)) {
+            return Err(DevError::InvalidOption { name: "min_face_angle", value: m, requirement: "in [0, small_angle)" });
         }
         Ok(())
     }
@@ -88,6 +98,10 @@ pub struct RemeshReport {
     pub min_angle_before: f64,
     /// Smallest corner angle (radians) after.
     pub min_angle_after: f64,
+    /// Set by the flow driver: the remeshing was computed but not applied because its result
+    /// would not be a valid start for the optimizer (the energy undefined or a face below the
+    /// optimizer's angle floor); the reason. The counts above describe the rejected remeshing.
+    pub rejected: Option<&'static str>,
     /// Energy before; filled in by the flow driver (this function does not know the energy).
     pub energy_before: Option<f64>,
     /// Energy after; filled in by the flow driver.
@@ -103,6 +117,11 @@ pub struct Remeshed {
     pub positions: Vec<[f64; 3]>,
     /// For each new vertex, the id it had in the input (survivors keep their identity).
     pub vertex_to_old: Vec<u32>,
+    /// For each new face, the input face it descends from. A collapse removes two faces and the
+    /// others keep their identity; a flip rewrites the two faces of the quad in place: the new
+    /// face `(a, q, p)` inherits the flagged cap triangle `f` and `(q, b, p)` inherits its
+    /// neighbour `g` (deterministic: the faces keep their slots, and slots keep their order).
+    pub face_to_old: Vec<u32>,
     /// The input's pinned vertices in the new numbering (ascending, deduplicated; two pinned
     /// vertices are never merged).
     pub pinned: Vec<u32>,
@@ -290,7 +309,7 @@ fn try_flip(st: &mut State, f: usize, a: u32, b: u32, p: u32) -> Result<(), Refu
 /// Collapses the edge `(u, w)` if legal.
 ///
 /// [formula: dev-link-condition]
-fn try_collapse(st: &mut State, u: u32, w: u32, allow_boundary: bool) -> Result<(), Refused> {
+fn try_collapse(st: &mut State, u: u32, w: u32, allow_boundary: bool, floor: f64) -> Result<(), Refused> {
     let ef = st.edge_faces(u, w);
     if ef.is_empty() || ef.len() > 2 {
         return Err(Refused::Rule("collapse: not an edge"));
@@ -346,6 +365,13 @@ fn try_collapse(st: &mut State, u: u32, w: u32, allow_boundary: bool) -> Result<
         let (nn, ok) = normal_and_ok(new_pos[0], new_pos[1], new_pos[2]);
         if !ok {
             return Err(Refused::Rule("collapse: degenerate face in the merged star"));
+        }
+        if floor > 0.0 {
+            let new_min = angles(new_pos[0], new_pos[1], new_pos[2]).into_iter().fold(f64::INFINITY, f64::min);
+            let old_min = angles(old[0], old[1], old[2]).into_iter().fold(f64::INFINITY, f64::min);
+            if new_min < floor && new_min < old_min {
+                return Err(Refused::Rule("collapse: face below the angle floor"));
+            }
         }
         let (on, old_ok) = normal_and_ok(old[0], old[1], old[2]);
         if old_ok && dot(nn, on) <= 0.0 {
@@ -430,6 +456,7 @@ pub fn remesh(
         passes: 0,
         min_angle_before: min_angle(&st),
         min_angle_after: 0.0,
+        rejected: None,
         energy_before: None,
         energy_after: None,
     };
@@ -470,7 +497,7 @@ pub fn remesh(
             } else {
                 let k = (0..3).find(|&i| ang[i] < small).unwrap_or(0);
                 let (u, w) = (tri[(k + 1) % 3], tri[(k + 2) % 3]);
-                match try_collapse(&mut st, u, w, opts.collapse_boundary_edges) {
+                match try_collapse(&mut st, u, w, opts.collapse_boundary_edges, opts.min_face_angle) {
                     Ok(()) => {
                         rep.collapses += 1;
                         changed = true;
@@ -493,6 +520,7 @@ pub fn remesh(
     rep.min_angle_after = min_angle(&st);
 
     let faces = st.live_faces();
+    let face_to_old: Vec<u32> = (0..st.faces.len() as u32).filter(|&f| st.alive[f as usize]).collect();
     let c = compact_vertices(nv, &faces)?;
     let new_mesh = TriMesh::new(c.new_to_old.len(), c.faces)
         .map_err(|e| DevError::Internal(format!("remesh produced an invalid mesh: {e}")))?;
@@ -509,7 +537,7 @@ pub fn remesh(
         .collect();
     new_pinned.sort_unstable();
     new_pinned.dedup();
-    Ok(Remeshed { mesh: new_mesh, positions: new_pos, vertex_to_old: c.new_to_old, pinned: new_pinned, report: rep })
+    Ok(Remeshed { mesh: new_mesh, positions: new_pos, vertex_to_old: c.new_to_old, face_to_old, pinned: new_pinned, report: rep })
 }
 
 #[cfg(test)]
@@ -600,7 +628,7 @@ mod tests {
     }
 
     fn collapse(st: &mut State, u: u32, w: u32, allow: bool) -> &'static str {
-        reason(try_collapse(st, u, w, allow))
+        reason(try_collapse(st, u, w, allow, 0.0))
     }
 
     #[test]

@@ -88,7 +88,15 @@ pub struct OptimizeOptions {
     pub max_displacement: f64,
     /// Pinned vertices (groups): zero gradient, never move (D18).
     pub pinned: Vec<u32>,
+    /// Admissibility floor of the mesh optimizer (D31): a trial point with a face whose smallest
+    /// corner angle is below this (radians) is rejected like an undefined energy (`+∞` in the line
+    /// search); a starting point below it is an error. `0` switches the check off. Ignored by the
+    /// generic [`minimize`](super::minimize).
+    pub min_face_angle: f64,
 }
+
+/// Default of [`OptimizeOptions::min_face_angle`] (radians).
+pub const DEFAULT_MIN_FACE_ANGLE: f64 = 1e-4;
 
 impl Default for OptimizeOptions {
     fn default() -> Self {
@@ -107,6 +115,7 @@ impl Default for OptimizeOptions {
             initial_step: 0.1,
             max_displacement: 0.5,
             pinned: Vec::new(),
+            min_face_angle: DEFAULT_MIN_FACE_ANGLE,
         }
     }
 }
@@ -160,6 +169,12 @@ impl OptimizeOptions {
             "max_displacement",
             self.max_displacement,
             "finite and > 0",
+        )?;
+        check(
+            self.min_face_angle.is_finite() && (0.0..std::f64::consts::FRAC_PI_3).contains(&self.min_face_angle),
+            "min_face_angle",
+            self.min_face_angle,
+            "in [0, pi/3)",
         )?;
         Ok(())
     }
@@ -217,6 +232,9 @@ pub struct OptimizeReport {
     pub line_search_trials: usize,
     /// Trials where the energy was undefined (treated as `+∞`).
     pub undefined_trials: usize,
+    /// Trials rejected by the admissibility floors (`min_face_angle`, `min_fold_angle`; treated
+    /// as `+∞`, D31/D32).
+    pub inadmissible_trials: usize,
     /// Steps accepted at the cap `max_displacement`.
     pub capped_steps: usize,
     /// Steps accepted after a limit was hit (satisfy Armijo only).

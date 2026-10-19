@@ -35,12 +35,73 @@ struct MeshObjective<'a> {
     mesh: &'a TriMesh,
     energy: &'a EnergyOptions,
     near_ties: usize,
+    min_face_angle: f64,
+    evaluated: bool,
 }
+
+/// Relative slack of the admissibility check at the starting point (rounding in a subdivision).
+pub(crate) const START_SLACK: f64 = 1e-6;
+
+/// The admissibility rule of D31: every face has a smallest corner angle of at least `floor`
+/// (`floor = 0`: no check). `slack` (relative, `0` for a trial point) lets a starting point that
+/// was accepted at the floor survive rounding, e.g. in a subdivision. Lowest face id first.
+pub(crate) fn check_admissible(
+    mesh: &TriMesh,
+    pos: &[[f64; 3]],
+    floor: f64,
+    slack: f64,
+) -> Result<(), DevError> {
+    use crate::geometry::v3::{cross, norm, sub};
+    if floor <= 0.0 {
+        return Ok(());
+    }
+    let sin_floor = floor.sin() * (1.0 - slack);
+    for (f, t) in mesh.faces().iter().enumerate() {
+        let p = t.map(|v| pos[v as usize]);
+        let nl = norm(cross(sub(p[1], p[0]), sub(p[2], p[0])));
+        // the smallest angle is opposite the shortest edge: sin = |n| / (product of the two longer edges)
+        let mut l = [norm(sub(p[1], p[0])), norm(sub(p[2], p[1])), norm(sub(p[0], p[2]))];
+        l.sort_by(f64::total_cmp);
+        let sin = nl / (l[1] * l[2]);
+        if sin.is_nan() || sin < sin_floor {
+            let a = crate::geometry::corner_angles(p).into_iter().fold(f64::INFINITY, f64::min);
+            return Err(DevError::NearDegenerateFace { face: f as u32, min_angle: a, limit: floor });
+        }
+    }
+    Ok(())
+}
+
+/// Faces whose smallest angle is below this multiple of the floor block their vertices (D31).
+const BLOCK_FACTOR: f64 = 2.0;
 
 impl Objective for MeshObjective<'_> {
     type Error = DevError;
+    fn blocked(&mut self, x: &[f64], blocked: &mut [bool]) {
+        blocked.fill(false);
+        if self.min_face_angle <= 0.0 {
+            return;
+        }
+        use crate::geometry::v3::{cross, norm, sub};
+        let (pos, _) = x.as_chunks::<3>();
+        let sin_block = (BLOCK_FACTOR * self.min_face_angle).sin();
+        for t in self.mesh.faces() {
+            let p = t.map(|v| pos[v as usize]);
+            let nl = norm(cross(sub(p[1], p[0]), sub(p[2], p[0])));
+            let mut l = [norm(sub(p[1], p[0])), norm(sub(p[2], p[1])), norm(sub(p[0], p[2]))];
+            l.sort_by(f64::total_cmp);
+            let sin = nl / (l[1] * l[2]);
+            if sin.is_nan() || sin < sin_block {
+                for &v in t {
+                    blocked[v as usize] = true;
+                }
+            }
+        }
+    }
     fn evaluate(&mut self, x: &[f64], g: &mut [f64]) -> Result<f64, EvalError<DevError>> {
         let (pos, _) = x.as_chunks::<3>();
+        let slack = if self.evaluated { 0.0 } else { START_SLACK };
+        self.evaluated = true;
+        check_admissible(self.mesh, pos, self.min_face_angle, slack).map_err(EvalError::Inadmissible)?;
         match evaluate(self.mesh, pos, self.energy) {
             Ok(ev) => {
                 for (o, v) in g.chunks_exact_mut(3).zip(&ev.gradient) {
@@ -115,7 +176,13 @@ pub fn optimize(
         return Err(DevError::DegenerateFace { face: 0 });
     }
     let x0: Vec<f64> = positions.iter().flatten().copied().collect();
-    let mut obj = MeshObjective { mesh, energy, near_ties: 0 };
+    let mut obj = MeshObjective {
+        mesh,
+        energy,
+        near_ties: 0,
+        min_face_angle: opts.min_face_angle,
+        evaluated: false,
+    };
     let mut adapter = progress.map(|cb| {
         move |p: &FlatProgress| {
             let (pos, _) = p.x.as_chunks::<3>();

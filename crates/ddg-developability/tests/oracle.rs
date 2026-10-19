@@ -43,7 +43,7 @@
 //!   neighbours (those are the stars it depends on) has a margin `<= 1e-9 max(1, e)` on either
 //!   side, because there the active piece is chosen by rounding. Energies are compared everywhere.
 //! * step: the oracle models SPEC 4.1-4.3 (scaled steepest descent plus the weak Wolfe search), so
-//!   the optimizer's admissibility floors (`min_face_angle`, `min_fold_angle`) are switched off;
+//!   the optimizer's admissibility floors (`min_face_angle`) is switched off;
 //!   positions to `1e-9` mean edge lengths, energy as above, the trial count and the kind
 //!   of ending exactly; not compared if the start has a near tie anywhere.
 //! * subdivision: faces and midpoint ids exactly, positions to `1e-14` of the mesh extent.
@@ -375,7 +375,6 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
             max_iterations: 1,
             gradient_tolerance: 0.0,
             min_face_angle: 0.0,
-            min_fold_angle: 0.0,
             ..OptimizeOptions::default()
         };
         let ok = match (
@@ -685,7 +684,6 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
         // the oracle implements SPEC §4.1-§4.3; the admissibility floors (D31, D32) are an addition of
         // the optimizer that the oracle does not model, so they are switched off here
         min_face_angle: 0.0,
-        min_fold_angle: 0.0,
         ..OptimizeOptions::default()
     };
     let res = match optimize(mesh, &input.positions, &eopts, &opts, None) {

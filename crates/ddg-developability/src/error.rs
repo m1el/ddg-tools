@@ -41,6 +41,17 @@ pub enum DevError {
         /// The face.
         face: u32,
     },
+    /// A face has a corner angle below the admissibility floor (SPEC §4.9, D31): it is
+    /// degenerate for all practical purposes (a needle or a cap of zero area), although its normal
+    /// is not exactly zero.
+    NearDegenerateFace {
+        /// The face.
+        face: u32,
+        /// Its smallest corner angle (radians).
+        min_angle: f64,
+        /// The floor (radians).
+        limit: f64,
+    },
     /// The energy is undefined at a vertex that counts toward the total (SPEC §3.6, D12).
     UndefinedEnergy {
         /// The vertex.
@@ -97,6 +108,10 @@ impl fmt::Display for DevError {
                 f,
                 "face {face} is degenerate: its normal (f1 - f0) x (f2 - f0) is zero or not finite, \
                  so its unit normal and corner angles are undefined"
+            ),
+            DevError::NearDegenerateFace { face, min_angle, limit } => write!(
+                f,
+                "face {face} is nearly degenerate: its smallest corner angle is {min_angle:e} rad, below the floor {limit:e} rad"
             ),
             DevError::UndefinedEnergy { vertex, reason } => {
                 write!(f, "the energy is undefined at vertex {vertex}: {reason}")

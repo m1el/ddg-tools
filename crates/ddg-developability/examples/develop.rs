@@ -9,6 +9,7 @@
 //!   --no-remesh          switch small-angle remeshing off
 //!   --small-angle DEG    remeshing threshold in degrees (default 1)
 //!   --max-displacement X step cap in mean edge lengths (default 0.5)
+//!   --min-face-angle X   admissibility floor on the smallest corner angle in radians (default 1e-4; 0 = off)
 //!   --threads N          threads of the flow (default: all)
 //!   --out FILE.obj       write the developable mesh; the per-vertex energy goes to FILE.energy.txt
 //!   --cut-out FILE.obj   cut and flatten the result, write an OBJ with per-corner UVs (charts unpacked)
@@ -53,6 +54,7 @@ struct Args {
     remesh: bool,
     small_angle_deg: f64,
     max_displacement: f64,
+    min_face_angle: Option<f64>,
     threads: Option<usize>,
     out: Option<String>,
     cut_out: Option<String>,
@@ -74,6 +76,7 @@ fn parse_args() -> Result<Args, String> {
         remesh: true,
         small_angle_deg: 1.0,
         max_displacement: 0.5,
+        min_face_angle: None,
         threads: None,
         out: None,
         cut_out: None,
@@ -96,6 +99,7 @@ fn parse_args() -> Result<Args, String> {
             "--no-remesh" => a.remesh = false,
             "--small-angle" => a.small_angle_deg = val("--small-angle")?.parse().map_err(|e| format!("{e}"))?,
             "--max-displacement" => a.max_displacement = val("--max-displacement")?.parse().map_err(|e| format!("{e}"))?,
+            "--min-face-angle" => a.min_face_angle = Some(val("--min-face-angle")?.parse().map_err(|e| format!("{e}"))?),
             "--threads" => a.threads = Some(val("--threads")?.parse().map_err(|e| format!("{e}"))?),
             "--out" => a.out = Some(val("--out")?),
             "--cut-out" => a.cut_out = Some(val("--cut-out")?),
@@ -155,10 +159,16 @@ fn run() -> Result<(), String> {
     if !a.cut_only {
         let mut fo = FlowOptions::uniform(eopts.clone(), a.subdivisions, a.iterations);
         fo.optimize.max_displacement = a.max_displacement;
+        if let Some(x) = a.min_face_angle {
+            fo.optimize.min_face_angle = x;
+        }
         fo.remesh = a.remesh.then(|| RemeshOptions {
             small_angle: a.small_angle_deg.to_radians(),
             ..Default::default()
         });
+        if let (Some(x), Some(r)) = (a.min_face_angle, fo.remesh.as_mut()) {
+            r.min_face_angle = x;
+        }
         fo.threads = a.threads;
         let t = Instant::now();
         let res = flow(&mesh, &positions, &fo, None).map_err(|e| format!("flow failed: {e}"))?;
@@ -168,6 +178,7 @@ fn run() -> Result<(), String> {
         let mut iters = 0;
         let mut evals = 0;
         let mut undefined = 0;
+        let mut inadmissible = 0;
         let mut resets = 0;
         for (i, r) in res.report.rounds.iter().enumerate() {
             let o = &r.optimize;
@@ -189,10 +200,11 @@ fn run() -> Result<(), String> {
             iters += o.iterations;
             evals += o.evaluations;
             undefined += o.undefined_trials;
+            inadmissible += o.inadmissible_trials;
             resets += o.memory_resets;
         }
         let first = &res.report.rounds[0];
-        let last = res.report.rounds.last().expect("at least one round");
+        let Some(last) = res.report.rounds.last() else { return Err(format!("flow ran no round: {:?}", res.report.stopped)) };
         let (e_final, ve) = evaluate_energy(&res.mesh, &res.positions, &eopts).map_err(|e| format!("final energy: {e}"))?;
         summary.extend([
             ("e_initial".into(), format!("{:.6e}", first.optimize.energy_initial)),
@@ -202,10 +214,14 @@ fn run() -> Result<(), String> {
             ("iterations".into(), iters.to_string()),
             ("evaluations".into(), evals.to_string()),
             ("undefined_trials".into(), undefined.to_string()),
+            ("inadmissible_trials".into(), inadmissible.to_string()),
             ("memory_resets".into(), resets.to_string()),
             ("flips".into(), flips.to_string()),
             ("collapses".into(), collapses.to_string()),
             ("faces_out".into(), last.n_faces.to_string()),
+            ("min_angle".into(), format!("{:.3e}", res.report.min_angle)),
+            ("bad_faces".into(), res.report.bad_faces.to_string()),
+            ("stopped".into(), res.report.stopped.as_ref().map_or("none".into(), |s| format!("round{}:v{}", s.round, s.vertex))),
             ("finite".into(), (e_final.is_finite() && res.positions.iter().all(|p| p.iter().all(|c| c.is_finite()))).to_string()),
         ]);
         if let Some(out) = &a.out {

@@ -13,6 +13,7 @@
 
 mod core;
 mod mesh;
+pub(crate) use self::mesh::{START_SLACK, check_admissible};
 mod options;
 
 pub use self::core::{
@@ -20,6 +21,6 @@ pub use self::core::{
 };
 pub use self::mesh::{Optimized, Progress, optimize};
 pub use self::options::{
-    Control, FlatProgress, InvalidOption, LineSearch, Method, OptimizeOptions, OptimizeReport,
-    OptimizeStatus,
+    Control, DEFAULT_MIN_FACE_ANGLE, FlatProgress, InvalidOption, LineSearch,
+    Method, OptimizeOptions, OptimizeReport, OptimizeStatus,
 };

@@ -20,7 +20,7 @@ use ddg_core::topology::{NONE, TriMesh};
 use crate::energy::{EnergyOptions, evaluate_energy};
 use crate::error::DevError;
 use crate::geometry::{corner_angles, v3};
-use crate::optimize::{
+use crate::optimize::{START_SLACK, check_admissible, 
     Control, OptimizeOptions, OptimizeReport, OptimizeStatus, Progress, optimize,
 };
 use crate::remesh::{RemeshOptions, RemeshReport, remesh};
@@ -145,6 +145,19 @@ pub struct RoundReport {
     pub seconds_optimize: f64,
 }
 
+/// Why a flow ended before a round (D32).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowStop {
+    /// The round that was not run.
+    pub round: usize,
+    /// Whether the undefined state is the result of that round's subdivision.
+    pub after_subdivision: bool,
+    /// The vertex where the energy is undefined (id in the state that would have started the round).
+    pub vertex: u32,
+    /// Why it is undefined (SPEC §3.6).
+    pub reason: &'static str,
+}
+
 /// Report of [`flow`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlowReport {
@@ -152,6 +165,16 @@ pub struct FlowReport {
     pub rounds: Vec<RoundReport>,
     /// Whether the progress callback ended the flow early (remaining rounds are not run).
     pub cancelled: bool,
+    /// `Some` if the flow ended before a round because the energy of that round is undefined at
+    /// its starting state (D32); the returned mesh is the state after the previous round.
+    pub stopped: Option<FlowStop>,
+    /// Smallest corner angle (radians) of the returned mesh. At least
+    /// `optimize.min_face_angle` unless the input already was below it (then the flow failed).
+    pub min_angle: f64,
+    /// Faces of the returned mesh with a corner angle below the small angle of the remeshing
+    /// (default 1 degree when remeshing is off): the ones the remeshing could not fix and the
+    /// optimizer left (D31). The mesh is valid and admissible, but these faces are thin.
+    pub bad_faces: usize,
     /// Wall time.
     pub seconds: f64,
 }
@@ -167,6 +190,11 @@ pub struct FlowResult {
     /// [`NONE`](ddg_core::topology::NONE) for a vertex created by subdivision. After a collapse
     /// the surviving vertex keeps its identity.
     pub vertex_source: Vec<u32>,
+    /// For each final face, the input face it descends from. Subdivision: the four children of a
+    /// face have its parent. Remeshing: a collapse removes faces and the others keep their
+    /// parent; a flip rewrites two faces in place, the new face `(a, q, p)` keeps the parent of
+    /// the flagged cap triangle and `(q, b, p)` that of its neighbour (SPEC §5.3).
+    pub face_parent: Vec<u32>,
     /// The pinned vertices in the final numbering (ascending).
     pub pinned: Vec<u32>,
     /// What happened.
@@ -193,6 +221,7 @@ fn merge_reports(segments: &[OptimizeReport], final_status: OptimizeStatus) -> O
         evaluations: 0,
         line_search_trials: 0,
         undefined_trials: 0,
+        inadmissible_trials: 0,
         capped_steps: 0,
         weak_steps: 0,
         skipped_pairs: 0,
@@ -212,6 +241,7 @@ fn merge_reports(segments: &[OptimizeReport], final_status: OptimizeStatus) -> O
         m.evaluations += s.evaluations;
         m.line_search_trials += s.line_search_trials;
         m.undefined_trials += s.undefined_trials;
+        m.inadmissible_trials += s.inadmissible_trials;
         m.capped_steps += s.capped_steps;
         m.weak_steps += s.weak_steps;
         m.skipped_pairs += s.skipped_pairs;
@@ -229,6 +259,7 @@ struct State {
     mesh: TriMesh,
     pos: Vec<[f64; 3]>,
     source: Vec<u32>,
+    face_parent: Vec<u32>,
     pinned: Vec<u32>,
 }
 
@@ -336,37 +367,55 @@ fn flow_impl(
         mesh: mesh.clone(),
         pos: positions.to_vec(),
         source: (0..mesh.n_vertices() as u32).collect(),
+        face_parent: (0..mesh.n_faces() as u32).collect(),
         pinned,
     };
     let mut rounds: Vec<RoundReport> = Vec::new();
     let mut cancelled = false;
+    let mut stopped: Option<FlowStop> = None;
 
     for (ri, round) in opts.rounds.iter().enumerate() {
         let mut energy = round.energy.clone();
         if in_pool {
             energy.threads = None; // use the pool we are in
         }
-        let mut seconds_subdivide = 0.0;
         let mut seconds_remesh = 0.0;
 
-        // 1. Subdivision.
-        if round.subdivide_before {
-            let t = Instant::now();
+        // 1. Subdivision. The energy of the round must be defined at its starting state (the
+        // intrinsic energies are not on the midpoint of a flat fold, D32): if it is not, the flow
+        // stops before the round, with the state of the previous round, and says so (`stopped`).
+        let t = Instant::now();
+        let candidate = if round.subdivide_before {
             let sd = subdivide(&st.mesh, &st.pos)?;
-            st.pinned = sd.pinned_after(&st.mesh, &st.pinned)?;
+            let pinned = sd.pinned_after(&st.mesh, &st.pinned)?;
+            Some((sd, pinned))
+        } else {
+            None
+        };
+        let start_state = candidate.as_ref().map_or((&st.mesh, &st.pos[..]), |(sd, _)| (&sd.mesh, &sd.positions[..]));
+        let energy_start = match evaluate_energy(start_state.0, start_state.1, &energy) {
+            Ok((e, _)) => e,
+            Err(DevError::UndefinedEnergy { vertex, reason }) if ri > 0 => {
+                stopped = Some(FlowStop { round: ri, after_subdivision: round.subdivide_before, vertex, reason });
+                break;
+            }
+            Err(e) => return Err(e),
+        };
+        if let Some((sd, pinned)) = candidate {
+            st.pinned = pinned;
             st.source.resize(sd.mesh.n_vertices(), NONE);
+            st.face_parent = sd.face_parent.iter().map(|&p| st.face_parent[p as usize]).collect();
             st.mesh = sd.mesh;
             st.pos = sd.positions;
-            seconds_subdivide = t.elapsed().as_secs_f64();
         }
-        let (energy_start, _) = evaluate_energy(&st.mesh, &st.pos, &energy)?;
+        let seconds_subdivide = if round.subdivide_before { t.elapsed().as_secs_f64() } else { 0.0 };
 
         // 2. Remesh before optimizing.
         let mut remesh_reports: Vec<RemeshReport> = Vec::new();
         let mut known_unfixable = 0usize;
         if let Some(ro) = &opts.remesh {
             let t = Instant::now();
-            let rr = run_remesh(&mut st, ro, &energy)?;
+            let rr = run_remesh(&mut st, ro, &energy, opts.optimize.min_face_angle)?;
             remesh_reports.push(rr);
             known_unfixable = count_bad(&st.mesh, &st.pos, ro.small_angle);
             seconds_remesh += t.elapsed().as_secs_f64();
@@ -432,9 +481,9 @@ fn flow_impl(
             // remesh (a failure may be caused by a bad triangle the check has not flagged)
             let ro = opts.remesh.as_ref().expect("remesh requested only when enabled");
             let t = Instant::now();
-            let rr = run_remesh(&mut st, ro, &energy)?;
+            let rr = run_remesh(&mut st, ro, &energy, opts.optimize.min_face_angle)?;
             seconds_remesh += t.elapsed().as_secs_f64();
-            let changed = rr.flips + rr.collapses > 0;
+            let changed = rr.flips + rr.collapses > 0 && rr.rejected.is_none();
             remesh_reports.push(rr);
             known_unfixable = count_bad(&st.mesh, &st.pos, ro.small_angle);
             zero_runs = if iters == 0 { zero_runs + 1 } else { 0 };
@@ -465,27 +514,57 @@ fn flow_impl(
             break;
         }
     }
+    let small = opts.remesh.as_ref().map_or(RemeshOptions::default().small_angle, |r| r.small_angle);
+    let min_angle = st
+        .mesh
+        .faces()
+        .iter()
+        .flat_map(|f| corner_angles(f.map(|v| st.pos[v as usize])))
+        .fold(f64::INFINITY, f64::min);
+    let bad_faces = count_bad(&st.mesh, &st.pos, small);
     Ok(FlowResult {
         mesh: st.mesh,
         positions: st.pos,
         vertex_source: st.source,
+        face_parent: st.face_parent,
         pinned: st.pinned,
-        report: FlowReport { rounds, cancelled, seconds: start.elapsed().as_secs_f64() },
+        report: FlowReport { rounds, cancelled, stopped, min_angle, bad_faces, seconds: start.elapsed().as_secs_f64() },
     })
 }
 
 /// Remeshes the state in place, keeping the id bookkeeping, and fills in the report's energies.
-fn run_remesh(st: &mut State, ro: &RemeshOptions, energy: &EnergyOptions) -> Result<RemeshReport, DevError> {
+/// A result that the optimizer could not start from (undefined energy, a face below `floor`) is
+/// not applied (`rejected`, D32); everything else is unchanged by that.
+fn run_remesh(
+    st: &mut State,
+    ro: &RemeshOptions,
+    energy: &EnergyOptions,
+    floor: f64,
+) -> Result<RemeshReport, DevError> {
     let before = evaluate_energy(&st.mesh, &st.pos, energy).ok().map(|e| e.0);
     let rm = remesh(&st.mesh, &st.pos, ro, &st.pinned)?;
     let mut report = rm.report.clone();
     report.energy_before = before;
     if rm.changed() {
+        let after = evaluate_energy(&rm.mesh, &rm.positions, energy);
+        let reason = match &after {
+            Err(DevError::UndefinedEnergy { .. }) => Some("the energy is undefined on the result"),
+            Err(_) => Some("the energy cannot be evaluated on the result"),
+            Ok(_) => check_admissible(&rm.mesh, &rm.positions, floor, START_SLACK)
+                .err()
+                .map(|_| "a face of the result is below the angle floor"),
+        };
+        if let Some(r) = reason {
+            report.rejected = Some(r);
+            report.energy_after = before;
+            return Ok(report);
+        }
         st.source = rm.vertex_to_old.iter().map(|&o| st.source[o as usize]).collect();
+        st.face_parent = rm.face_to_old.iter().map(|&o| st.face_parent[o as usize]).collect();
         st.pinned = rm.pinned;
         st.mesh = rm.mesh;
         st.pos = rm.positions;
-        report.energy_after = evaluate_energy(&st.mesh, &st.pos, energy).ok().map(|e| e.0);
+        report.energy_after = after.ok().map(|e| e.0);
     } else {
         report.energy_after = before;
     }

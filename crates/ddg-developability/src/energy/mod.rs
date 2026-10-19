@@ -195,8 +195,13 @@ pub fn star_energy(
         Energy::IntrinsicMax => intrinsic_max(star, y, s, scratch)?,
     };
     if !star.closed && star.normals.len() <= 2 {
-        // The energy vanishes identically on such stars (SPEC §3.1): no nonsmoothness.
-        out.margin = f64::INFINITY;
+        // The energy vanishes identically on such stars (SPEC §3.1), by construction: no value, no
+        // sensitivities, no tie. (The eigenvector of a rank-deficient matrix is arbitrary: with
+        // nearly coplanar normals it would feed noise of the order of the angle into the
+        // gradient.) The intrinsic energies are still reported undefined where D12 says so.
+        y.fill([0.0; 3]);
+        s.fill(0.0);
+        out = StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] };
     }
     Ok(out)
 }

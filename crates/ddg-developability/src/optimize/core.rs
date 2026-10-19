@@ -15,6 +15,9 @@ pub enum EvalError<E> {
     /// The energy is undefined at this point (SPEC D12): `+∞` inside a line search, an error at
     /// the starting point.
     Undefined(E),
+    /// The point is outside the admissible set (D31/D32): handled like `Undefined` but counted in
+    /// `inadmissible_trials`.
+    Inadmissible(E),
     /// A real failure: aborts the run.
     Fatal(E),
 }
@@ -26,6 +29,11 @@ pub trait Objective {
     /// Writes the gradient at `x` into `gradient` (same length as `x`) and returns the energy.
     /// A non-finite energy or gradient is treated like [`EvalError::Undefined`].
     fn evaluate(&mut self, x: &[f64], gradient: &mut [f64]) -> Result<f64, EvalError<Self::Error>>;
+    /// Marks the groups (vertices) that must not move from `x`: `blocked[i]` is set for group `i`.
+    /// Their gradient entries are treated as zero and their direction entries are zeroed, as if
+    /// they were pinned, until the next accepted step (D31: the vertices of a face at the
+    /// admissibility floor, whose gradient would push the face through it). Default: none.
+    fn blocked(&mut self, _x: &[f64], _blocked: &mut [bool]) {}
     /// Number of near ties of the last evaluation (reporting only).
     fn near_ties(&self) -> usize {
         0
@@ -170,6 +178,15 @@ impl Memory {
     }
 }
 
+/// Zeroes the entries of the blocked groups.
+fn mask_blocked(v: &mut [f64], blocked: &[bool], group: usize) {
+    for (c, &b) in v.chunks_exact_mut(group).zip(blocked) {
+        if b {
+            c.fill(0.0);
+        }
+    }
+}
+
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
@@ -229,6 +246,10 @@ impl<O: Objective> Run<'_, O> {
             }
             Err(EvalError::Undefined(_)) => {
                 self.rep.undefined_trials += 1;
+                Ok(None)
+            }
+            Err(EvalError::Inadmissible(_)) => {
+                self.rep.inadmissible_trials += 1;
                 Ok(None)
             }
             Err(EvalError::Fatal(e)) => Err(OptimizeError::Objective(e)),
@@ -366,6 +387,7 @@ pub fn minimize<O: Objective>(
             evaluations: 0,
             line_search_trials: 0,
             undefined_trials: 0,
+            inadmissible_trials: 0,
             capped_steps: 0,
             weak_steps: 0,
             skipped_pairs: 0,
@@ -387,7 +409,7 @@ pub fn minimize<O: Objective>(
     run.rep.evaluations += 1;
     let mut f = match run.obj.evaluate(&x, &mut run.tg) {
         Ok(f) => f,
-        Err(EvalError::Undefined(e)) => return Err(OptimizeError::UndefinedAtStart(e)),
+        Err(EvalError::Undefined(e) | EvalError::Inadmissible(e)) => return Err(OptimizeError::UndefinedAtStart(e)),
         Err(EvalError::Fatal(e)) => return Err(OptimizeError::Objective(e)),
     };
     for (g, &fr) in run.tg.iter_mut().zip(&run.free) {
@@ -399,7 +421,11 @@ pub fn minimize<O: Objective>(
         return Err(OptimizeError::NonFiniteStart);
     }
     let mut g = run.tg.clone();
-    let mut gnorm = ell * norm_inf(&g, group);
+    let mut blocked = vec![false; n / group];
+    run.obj.blocked(&x, &mut blocked);
+    let mut ge = g.clone();
+    mask_blocked(&mut ge, &blocked, group);
+    let mut gnorm = ell * norm_inf(&ge, group);
     run.rep.energy_initial = f;
     run.rep.energy_history.push(f);
     run.rep.gradient_norm_history.push(gnorm);
@@ -421,13 +447,13 @@ pub fn minimize<O: Objective>(
         if run.rep.iterations >= opts.max_iterations {
             break OptimizeStatus::MaxIterations;
         }
-        let gmax = norm_inf(&g, group);
+        let gmax = norm_inf(&ge, group);
         let f_old = f;
 
         // ---- fixed step (§4.5)
         if let Method::FixedStep { step } = opts.method {
             let c = step * ell * ell;
-            let x_new: Vec<f64> = x.iter().zip(&g).map(|(xi, gi)| xi - c * gi).collect();
+            let x_new: Vec<f64> = x.iter().zip(&ge).map(|(xi, gi)| xi - c * gi).collect();
             let r = run.eval_at(&x_new)?;
             run.rep.line_search_trials += 1;
             let Some(f_new) = r else {
@@ -439,6 +465,9 @@ pub fn minimize<O: Objective>(
             x = x_new;
             f = f_new;
             g.copy_from_slice(&run.tg);
+            run.obj.blocked(&x, &mut blocked);
+            ge.copy_from_slice(&g);
+            mask_blocked(&mut ge, &blocked, group);
         } else {
             // ---- direction
             let mut steepest = true;
@@ -449,9 +478,10 @@ pub fn minimize<O: Objective>(
                 }
             };
             if lbfgs && !mem.is_empty() {
-                mem.direction(&g, &mut d);
+                mem.direction(&ge, &mut d);
+                mask_blocked(&mut d, &blocked, group);
                 steepest = false;
-                let s = dot(&g, &d);
+                let s = dot(&ge, &d);
                 if !(s < 0.0 && s.is_finite()) {
                     mem.reset();
                     run.rep.memory_resets += 1;
@@ -459,9 +489,9 @@ pub fn minimize<O: Objective>(
                 }
             }
             if steepest {
-                scaled(&g, &mut d);
+                scaled(&ge, &mut d);
             }
-            let s = dot(&g, &d);
+            let s = dot(&ge, &d);
             if !(s < 0.0 && s.is_finite()) {
                 break OptimizeStatus::NonDescent;
             }
@@ -502,8 +532,12 @@ pub fn minimize<O: Objective>(
                         y_vec[i] = run.tg[i] - g[i];
                         x[i] += s_vec[i];
                     }
+                    mask_blocked(&mut y_vec, &blocked, group);
                     f = f_new;
                     g.copy_from_slice(&run.tg);
+                    run.obj.blocked(&x, &mut blocked);
+                    ge.copy_from_slice(&g);
+                    mask_blocked(&mut ge, &blocked, group);
                     if lbfgs {
                         let sy = dot(&s_vec, &y_vec);
                         if sy > 0.0 && sy.is_finite() {
@@ -518,7 +552,7 @@ pub fn minimize<O: Objective>(
 
         // ---- accepted iterate
         run.rep.iterations += 1;
-        gnorm = ell * norm_inf(&g, group);
+        gnorm = ell * norm_inf(&ge, group);
         run.rep.energy_history.push(f);
         run.rep.gradient_norm_history.push(gnorm);
         if gnorm <= opts.gradient_tolerance {
