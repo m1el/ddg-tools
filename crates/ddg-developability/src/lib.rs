@@ -14,15 +14,19 @@
 //! implemented here with cyclic Jacobi rotations (a textbook method).
 
 pub mod eig;
+pub mod cut;
 pub mod energy;
 pub mod error;
+pub mod flow;
 pub mod geometry;
 pub mod optimize;
 pub mod remesh;
 pub mod subdivide;
 
+pub use cut::{CutOptions, DevelopableFlattening, cut_and_flatten};
 pub use energy::{Energy, EnergyOptions, Evaluation, evaluate, evaluate_energy};
 pub use error::DevError;
+pub use flow::{FlowOptions, FlowReport, FlowResult, Round, RoundReport, flow};
 pub use optimize::{
     Control, LineSearch, Method, OptimizeOptions, OptimizeReport, OptimizeStatus, Optimized, Progress,
     optimize,
