@@ -48,9 +48,8 @@ fn counts_topology_and_geometry() {
         // midpoints
         for (e, &[a, b]) in m.edges().iter().enumerate() {
             let q = s.positions[s.edge_midpoint[e] as usize];
-            for k in 0..3 {
-                assert_eq!(q[k], 0.5 * (g.positions[a as usize][k] + g.positions[b as usize][k]));
-            }
+            let (pa, pb) = (g.positions[a as usize], g.positions[b as usize]);
+            assert_eq!(q, [0, 1, 2].map(|k| 0.5 * (pa[k] + pb[k])));
         }
         // children are coplanar with their parent, same orientation, a quarter of the area
         for (t, f) in s.mesh.faces().iter().enumerate() {
