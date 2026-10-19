@@ -36,47 +36,47 @@ section maxmin
 
 variable (f : ℕ → ℝ)
 
-theorem maxTo1_zero : maxTo1 0 f = f 0 := rfl
-theorem maxTo1_succ (n : ℕ) : maxTo1 (n + 1) f = max (maxTo1 n f) (f (n + 1)) := rfl
-theorem minTo1_zero : minTo1 0 f = f 0 := rfl
-theorem minTo1_succ (n : ℕ) : minTo1 (n + 1) f = min (minTo1 n f) (f (n + 1)) := rfl
+theorem width_maxTo1_zero : maxTo1 0 f = f 0 := rfl
+theorem width_maxTo1_succ (n : ℕ) : maxTo1 (n + 1) f = max (maxTo1 n f) (f (n + 1)) := rfl
+theorem width_minTo1_zero : minTo1 0 f = f 0 := rfl
+theorem width_minTo1_succ (n : ℕ) : minTo1 (n + 1) f = min (minTo1 n f) (f (n + 1)) := rfl
 
-theorem le_maxTo1 : ∀ (n i : ℕ), i ≤ n → f i ≤ maxTo1 n f
-  | 0, i, hi => by rw [Nat.le_zero.mp hi, maxTo1_zero]
+theorem width_le_maxTo1 : ∀ (n i : ℕ), i ≤ n → f i ≤ maxTo1 n f
+  | 0, i, hi => by rw [Nat.le_zero.mp hi, width_maxTo1_zero]
   | n + 1, i, hi => by
-    rw [maxTo1_succ]
+    rw [width_maxTo1_succ]
     rcases Nat.lt_or_eq_of_le hi with h | rfl
-    · exact le_trans (le_maxTo1 n i (Nat.lt_succ_iff.mp h)) (le_max_left _ _)
+    · exact le_trans (width_le_maxTo1 n i (Nat.lt_succ_iff.mp h)) (le_max_left _ _)
     · exact le_max_right _ _
 
-theorem maxTo1_le {b : ℝ} : ∀ (n : ℕ), (∀ i ≤ n, f i ≤ b) → maxTo1 n f ≤ b
-  | 0, h => by rw [maxTo1_zero]; exact h 0 le_rfl
+theorem width_maxTo1_le {b : ℝ} : ∀ (n : ℕ), (∀ i ≤ n, f i ≤ b) → maxTo1 n f ≤ b
+  | 0, h => by rw [width_maxTo1_zero]; exact h 0 le_rfl
   | n + 1, h => by
-    rw [maxTo1_succ]
-    exact max_le (maxTo1_le n fun i hi => h i (Nat.le_succ_of_le hi)) (h _ le_rfl)
+    rw [width_maxTo1_succ]
+    exact max_le (width_maxTo1_le n fun i hi => h i (Nat.le_succ_of_le hi)) (h _ le_rfl)
 
-theorem exists_maxTo1 : ∀ (n : ℕ), ∃ i ≤ n, maxTo1 n f = f i
+theorem width_exists_maxTo1 : ∀ (n : ℕ), ∃ i ≤ n, maxTo1 n f = f i
   | 0 => ⟨0, le_rfl, rfl⟩
   | n + 1 => by
-    obtain ⟨i, hi, e⟩ := exists_maxTo1 n
-    rw [maxTo1_succ]
+    obtain ⟨i, hi, e⟩ := width_exists_maxTo1 n
+    rw [width_maxTo1_succ]
     rcases le_total (maxTo1 n f) (f (n + 1)) with h | h
     · exact ⟨n + 1, le_rfl, max_eq_right h⟩
     · exact ⟨i, Nat.le_succ_of_le hi, by rw [max_eq_left h, e]⟩
 
-theorem minTo1_le : ∀ (n i : ℕ), i ≤ n → minTo1 n f ≤ f i
-  | 0, i, hi => by rw [Nat.le_zero.mp hi, minTo1_zero]
+theorem width_minTo1_le : ∀ (n i : ℕ), i ≤ n → minTo1 n f ≤ f i
+  | 0, i, hi => by rw [Nat.le_zero.mp hi, width_minTo1_zero]
   | n + 1, i, hi => by
-    rw [minTo1_succ]
+    rw [width_minTo1_succ]
     rcases Nat.lt_or_eq_of_le hi with h | rfl
-    · exact le_trans (min_le_left _ _) (minTo1_le n i (Nat.lt_succ_iff.mp h))
+    · exact le_trans (min_le_left _ _) (width_minTo1_le n i (Nat.lt_succ_iff.mp h))
     · exact min_le_right _ _
 
-theorem exists_minTo1 : ∀ (n : ℕ), ∃ i ≤ n, minTo1 n f = f i
+theorem width_exists_minTo1 : ∀ (n : ℕ), ∃ i ≤ n, minTo1 n f = f i
   | 0 => ⟨0, le_rfl, rfl⟩
   | n + 1 => by
-    obtain ⟨i, hi, e⟩ := exists_minTo1 n
-    rw [minTo1_succ]
+    obtain ⟨i, hi, e⟩ := width_exists_minTo1 n
+    rw [width_minTo1_succ]
     rcases le_total (minTo1 n f) (f (n + 1)) with h | h
     · exact ⟨i, Nat.le_succ_of_le hi, by rw [min_eq_left h, e]⟩
     · exact ⟨n + 1, le_rfl, min_eq_right h⟩
@@ -102,21 +102,21 @@ theorem pairWidthSq_eq_sq_widthAlong (n : ℕ) (P : ℕ → V3) (u : V3) :
     unfold pairWidthSq; simp only [hd]
   rw [hps, hw]
   apply le_antisymm
-  · apply maxTo1_le
+  · apply width_maxTo1_le
     intro i hi
-    apply maxTo1_le
+    apply width_maxTo1_le
     intro j hj
-    have a1 := le_maxTo1 p n i hi
-    have a2 := minTo1_le p n i hi
-    have a3 := le_maxTo1 p n j hj
-    have a4 := minTo1_le p n j hj
+    have a1 := width_le_maxTo1 p n i hi
+    have a2 := width_minTo1_le p n i hi
+    have a3 := width_le_maxTo1 p n j hj
+    have a4 := width_minTo1_le p n j hj
     rw [← sq]
     exact sq_le_sq' (by linarith) (by linarith)
-  · obtain ⟨i, hi, ei⟩ := exists_maxTo1 p n
-    obtain ⟨j, hj, ej⟩ := exists_minTo1 p n
+  · obtain ⟨i, hi, ei⟩ := width_exists_maxTo1 p n
+    obtain ⟨j, hj, ej⟩ := width_exists_minTo1 p n
     rw [ei, ej, sq]
-    exact le_trans (le_maxTo1 (fun j => (p i - p j) * (p i - p j)) n j hj)
-      (le_maxTo1 (fun i => maxTo1 n (fun j => (p i - p j) * (p i - p j))) n i hi)
+    exact le_trans (width_le_maxTo1 (fun j => (p i - p j) * (p i - p j)) n j hj)
+      (width_le_maxTo1 (fun i => maxTo1 n (fun j => (p i - p j) * (p i - p j))) n i hi)
 
 /-! ## An orthonormal frame `v, n0 × v, n0` -/
 
