@@ -28,7 +28,7 @@ def stop_text(flow):
         return "stopped before round {}: {}".format(s["round"] + 1, s["reason"])
     statuses = [x["status"] for x in flow["rounds"]]
     short = {"gradient_tolerance": "grad", "energy_stalled": "stall", "max_iterations": "max",
-             "line_search_failed": "LS-FAIL", "cancelled": "cancel", "non_descent": "NON-DESC"}
+             "line_search_failed": "LS-FAIL", "stationary": "stat", "cancelled": "cancel", "non_descent": "NON-DESC"}
     return "/".join(short.get(x, x) for x in statuses)
 
 
@@ -37,8 +37,8 @@ def main():
     every = "--all-settings" in sys.argv
     runs = load(directory)
     print("| mesh | sub | tris | flow iters | rounds end | E before | E after | bad | flow s | "
-          "setting | seams | terminals | charts | cones | overlap | mirrored | UV s |")
-    print("|" + "---|" * 17)
+          "setting | seams | terminals | charts | cones | overlap | splits | mirrored | UV s |")
+    print("|" + "---|" * 18)
     for (case, sub, its), records in sorted(runs.items(), key=lambda kv: (kv[0][0], -kv[0][1], kv[0][2])):
         flow = next((r for r in records if r["stage"] == "flow"), None)
         for r in records:
@@ -63,9 +63,10 @@ def main():
             else:
                 f = "{} | -1 | no flow | | | | | | ".format(case)
             ov = r["overlap"]
-            print("| {} | {} | {} | {} | {} | {} | {} | {} | {:.2f} |".format(
+            print("| {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.2f} |".format(
                 f, r["setting"], r["seam_edges"], r["terminals"], r["charts"], r["cones"],
-                "n/a" if ov is None else "{:.1f} %".format(100 * ov), r["mirrored"], r["seconds"]))
+                "n/a" if ov is None else "{:.1f} %".format(100 * ov),
+                "-" if r.get("splits") is None else r["splits"], r["mirrored"], r["seconds"]))
 
 
 main()

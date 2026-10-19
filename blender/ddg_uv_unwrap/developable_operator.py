@@ -52,6 +52,27 @@ ENERGY_ITEMS = [
      "Branching-free intrinsic width (App. B.5.1)"),
 ]
 
+# Round 0 of the flow when there are subdivisions (paper Sec. 5.2, SPEC D36).
+COARSE_ENERGY_ITEMS = [
+    ('COMBINATORIAL', "Combinatorial (E_P)",
+     "Minimize E_P on the coarse mesh, then the Energy after each subdivision: the paper's "
+     "recipe (Sec. 5.2, Figs. 23-24). E_P keeps the shape; the Eigenvalue energy alone flattens "
+     "it"),
+    ('SAME', "Same as Energy",
+     "Minimize the Energy in every round (the flow of earlier versions)"),
+]
+
+# Readable names of the optimizer's statuses (the report's round["status"]).
+STATUS_LABELS = {
+    "gradient_tolerance": "converged",
+    "energy_stalled": "energy stalled",
+    "max_iterations": "iteration limit",
+    "line_search_failed": "line search failed",
+    "stationary": "stationary",
+    "cancelled": "stopped",
+    "non_descent": "no descent",
+}
+
 METHOD_ITEMS = [
     ('LBFGS', "L-BFGS", "Quasi-Newton minimization with a weak Wolfe line search (the paper's choice)"),
     ('GRADIENT_DESCENT', "Gradient Descent", "Steepest descent with a line search"),
@@ -144,15 +165,16 @@ def _replace_mesh(mesh, positions, faces, face_polygon):
 
 
 def make_developable_object(obj, *, energy='COVARIANCE', method='LBFGS', iterations=500,
-                            subdivisions=2, remesh=True, small_angle=radians(1.0),
-                            max_displacement=0.5, include_boundary=True, omit_valence_three=True,
+                            subdivisions=2, coarse_energy='COMBINATORIAL', remesh=True,
+                            small_angle=radians(1.0), max_displacement=0.5, include_boundary=True, omit_valence_three=True,
                             pin_selected=False, pinned_group="", triangulate=False,
                             write_energy=False, energy_attribute=DEFAULT_ENERGY_ATTRIBUTE,
                             progress=None):
     """Runs the developability flow on the mesh of ``obj`` and writes the result.
 
-    ``progress(round, iteration, energy, gradient_norm)`` is the library's progress function (it
-    may return False to stop). Returns a dict: ``report`` (that of ``ddg_tools.make_developable``),
+    ``coarse_energy`` is the energy of round 0 when ``subdivisions > 0`` (an energy id, or
+    ``'SAME'``/``None`` for ``energy`` in every round). ``progress(round, iteration, energy,
+    gradient_norm)`` is the library's progress function (it may return False to stop). Returns a dict: ``report`` (that of ``ddg_tools.make_developable``),
     ``topology_changed``, ``replaced`` (the mesh data was replaced), ``dropped`` (names of the
     data dropped by a replacement), ``n_pinned``, ``seconds_*``. Raises ``core.UnwrapFailed`` with
     a message for the user.
@@ -183,6 +205,7 @@ def make_developable_object(obj, *, energy='COVARIANCE', method='LBFGS', iterati
             method=method.lower(),
             iterations=iterations,
             subdivisions=subdivisions,
+            coarse_energy=None if coarse_energy in (None, 'SAME') else energy_name(coarse_energy),
             max_displacement=max_displacement,
             pinned_vertices=pinned,
             remesh=remesh,
@@ -225,6 +248,11 @@ def summary(stats):
         len(r["rounds"]), "" if len(r["rounds"]) == 1 else "s", r["iterations"]))
     if r["n_vertices"] != r["n_input_vertices"] or r["n_triangles"] != r["n_input_triangles"]:
         parts.append("| {} → {} triangles".format(r["n_input_triangles"], r["n_triangles"]))
+    if len(r["rounds"]) > 1 or r["rounds"][0]["status"] != "max_iterations":
+        parts.append("| " + ", ".join(
+            "{}: {} it, {}".format(rd["energy"], rd["iterations"],
+                                   STATUS_LABELS.get(rd["status"], rd["status"]))
+            for rd in r["rounds"]))
     if r["cancelled"]:
         parts.append("| STOPPED early")
     stopped = r.get("stopped")
@@ -267,8 +295,10 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         "Move the vertices of the active mesh so that the surface becomes developable (flat "
         "faces fold along straight lines): a gradient flow of the developability energy with "
         "subdivision and small-angle remeshing. Method: Stein, Grinspun, Crane, Developability "
-        "of Triangle Meshes (2018). Runs in place and can be undone. The operator is "
-        "synchronous: the Blender window waits until it is done"
+        "of Triangle Meshes (2018). Start from a coarse, uniform mesh of about 1000 triangles "
+        "(e.g. Remesh modifier in Voxel mode, then Decimate, both applied): a subdivision cage "
+        "or a dense mesh folds its thin parts flat. Runs in place and can be undone. The "
+        "operator is synchronous: the Blender window waits until it is done"
     )
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -289,6 +319,15 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         description=(
             "Number of 4-1 subdivisions (one extra round of optimization after each). Each one "
             "quadruples the number of triangles and turns the mesh into a triangle mesh"
+        ),
+    )
+    coarse_energy: EnumProperty(
+        name="Coarse Energy", items=COARSE_ENERGY_ITEMS, default='COMBINATORIAL',
+        description=(
+            "Energy of the first round, on the input mesh, when Subdivision Rounds is above 0. "
+            "The paper minimizes E_P there and the Energy after each subdivision (Sec. 5.2); "
+            "the Eigenvalue energy alone keeps flattening the shape (SPEC D36). Ignored without "
+            "subdivision"
         ),
     )
     remesh: BoolProperty(
@@ -355,6 +394,9 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         layout.prop(self, "method")
         layout.prop(self, "iterations")
         layout.prop(self, "subdivisions")
+        sub = layout.row()
+        sub.active = self.subdivisions > 0
+        sub.prop(self, "coarse_energy")
         layout.prop(self, "remesh")
         sub = layout.row()
         sub.active = self.remesh
@@ -383,7 +425,8 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         try:
             stats = make_developable_object(
                 obj, energy=self.energy, method=self.method, iterations=self.iterations,
-                subdivisions=self.subdivisions, remesh=self.remesh, small_angle=self.small_angle,
+                subdivisions=self.subdivisions, coarse_energy=self.coarse_energy,
+                remesh=self.remesh, small_angle=self.small_angle,
                 max_displacement=self.max_displacement, include_boundary=self.include_boundary,
                 omit_valence_three=self.omit_valence_three, pin_selected=self.pin_selected,
                 pinned_group=self.pinned_group, triangulate=self.triangulate,

@@ -258,6 +258,53 @@ def materials_and_smooth_survive_subdivision_and_remeshing_exactly():
 
 
 @test
+def coarse_energy_option_sets_round_zero_and_same_reproduces_the_old_flow():
+    """Default: E_P in round 0, the Energy after the subdivisions (the library's D36 recipe).
+    "Same as Energy" is bitwise the old flow (coarse_energy=None) and the report says so; the
+    summary line names the energies and the readable statuses."""
+    ddg = module(".core").native()
+    d = module(".developable_operator")
+    results = {}
+    for choice in ('COMBINATORIAL', 'SAME'):
+        reset()
+        plane = activate(noisy_plane(6, height=0.3, seed=5))
+        buffers = module(".core").mesh_buffers(plane.data)
+        stats = d.make_developable_object(plane, iterations=20, subdivisions=2, remesh=False,
+                                          coarse_energy=choice)
+        expected = ddg.make_developable(*buffers, iterations=20, subdivisions=2, remesh=False,
+                                        coarse_energy=None if choice == 'SAME' else "combinatorial")
+        names = [r["energy"] for r in stats["report"]["rounds"]]
+        want = ["covariance"] * 3 if choice == 'SAME' else ["combinatorial", "covariance", "covariance"]
+        assert names == want, (choice, names)
+        got = array.array('d', [c for v in plane.data.vertices for c in v.co])
+        assert len(got) == len(expected.positions)
+        assert max(abs(a - b) for a, b in zip(got, expected.positions)) < 1e-5  # float32 mesh
+        results[choice] = list(got)
+        line = d.summary(stats)
+        assert "{}: ".format(want[0]) in line and "iteration limit" in line, line
+    assert results['COMBINATORIAL'] != results['SAME']
+    # The operator takes the property; the default is E_P.
+    reset()
+    plane = activate(noisy_plane(6, height=0.3, seed=5))
+    assert bpy.ops.object.ddg_make_developable.get_rna_type().properties[
+        "coarse_energy"].default == 'COMBINATORIAL'
+    run(bpy.ops.object.ddg_make_developable, iterations=10, subdivisions=1, remesh=False,
+        coarse_energy='SAME')
+
+
+@test
+def stationary_round_reads_as_stationary_in_the_summary():
+    d = module(".developable_operator")
+    rd = dict(energy="covariance", iterations=537, status="stationary")
+    stats = dict(report=dict(energy_initial=1.0, energy_final=1e-14, rounds=[rd], iterations=537,
+                             n_vertices=5, n_input_vertices=5, n_triangles=4, n_input_triangles=4,
+                             cancelled=False, stopped=None, bad_faces=0, nonplanarity_after=None),
+                 n_pinned=0, seconds_extract=0.0, seconds_native=0.0, seconds_write=0.0)
+    line = d.summary(stats)
+    assert "covariance: 537 it, stationary" in line, line
+
+
+@test
 def triangulate_option_replaces_quads_even_without_new_vertices():
     cube = subdivided_cube(2)
     n, nv = len(cube.data.polygons), len(cube.data.vertices)
