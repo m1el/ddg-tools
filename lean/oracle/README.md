@@ -1537,3 +1537,67 @@ Self-tests: `g` of the piece equals the mean over the faces without a moved cros
 crossing give `g` to the last bit of the previous rule; `N = 2` through the N-region code equals the two-region code on both new cases (`2e-15`).
 
 Reading 58: the statistics `MIN`, `MEAN`, `MAX` are over the counted faces, the mean is arithmetic and unweighted (SPEC does not say which mean the "statistics" are).
+
+## Developability (fourth paper): `ddg-oracle dev`
+
+An independent Float implementation, from `crates/ddg-developability/SPEC.md` §1-§5 only, of the six
+energies of *Developability of Triangle Meshes* (Stein, Grinspun, Crane 2018) with their
+(sub)gradients, of one L-BFGS step with the Lewis-Overton weak Wolfe line search, and of 4-1
+subdivision. It does not use `Formulas/Developability.lean`. Code: `DdgOracle/Developability/`
+(`Vec` vectors and a cyclic Jacobi eigensolver, `Mesh` validation and stars, `Energy`, `Step`,
+`Format`, `Gen`, `Selftest`, `Fixtures`; `NOTES.md` has the progress notes).
+
+| command | |
+|---|---|
+| `ddg-oracle dev [IN [OUT]]` | answer every case of the stream (tasks `energy`, `step`, `subdivide`) |
+| `ddg-oracle dev-gen SEED COUNT [FIRST]` | write `COUNT` seeded random cases (case `i` depends on `(SEED, i)` only) |
+| `ddg-oracle dev-selftest` | closed forms of SPEC §10.3 (all five regular-cone formulas, 1e-15), brute force over all subsets for `E_P` and `π_max`, dense sphere search for `λ_max`, finite differences of the oracle's own gradient away from ties, invariances, subdivision, line search |
+| `ddg-oracle dev-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/dev`, 43 cases, about 230 KB) |
+
+**Input** (`case NAME`, lines, `end`; floats are 16 hex digits):
+
+```
+task energy|step|subdivide
+energy NAME | energy all        combinatorial combinatorial-max covariance covariance-max intrinsic intrinsic-max
+boundary 0|1                    include_boundary (default 1)
+omit3 0|1                       omit_valence_three (default 1)
+step INIT MAXDISP C1 C2 MAXDOUBLINGS MAXBISECTIONS     (task step; floats hex, limits decimal)
+pinned V V ...                  (task step, may repeat)
+mesh NV NF
+p X Y Z                         NV lines
+f A B C                         NF lines, counter-clockwise
+```
+
+**Output, task `energy`**: `status ok` (or `status error MESSAGE` for a mesh that is not a manifold
+oriented triangle mesh, with a duplicate face or an isolated vertex), `mesh NV NF NE NB`, then per
+requested energy `section NAME`, `result ok TOTAL` or `result error degenerate-face F` /
+`result error undefined V REASON`, and for every vertex `v I COUNTED VALENCE BOUNDARY ENERGY MARGIN`,
+`g I GX GY GZ`, `ch I INTS` (the partition, candidate or pair chosen). Vertices outside the domain
+report their energy (NaN where undefined) and contribute nothing to `TOTAL` or the gradient.
+
+**Margin** (SPEC §3.8): second best minus best value of the key (partition width, `φ(v)` of a
+candidate, `ψ` of a pair); for `π_max` and the intrinsic width also the gap to the runner-up pair
+inside the chosen piece; `(λ2 - λ1)/tr` for the eigenvalue energies; `+∞` when there is no
+alternative and for boundary stars with one face. Boundary stars with two faces report their real
+gap: it is tiny when the two normals nearly agree, and there the sensitivities `y = 2θ(x·N)x`
+of a computed `x` are arbitrary of the order of the normal angle (the energy is zero there, so the
+true contribution is zero).
+
+**Output, task `step`**: `lbar`, `gmax` (largest vertex gradient), `energy0`, `slope` (`g·d`),
+`tmax`, `margin` (smallest margin over counted vertices), `trial I T E S C SM CM` per trial
+(`S`, `C` the two Wolfe tests, `C` is `-1` when not evaluated; `SM`, `CM` their margins),
+`result KIND T NTRIALS E1` (kind `wolfe`, `capped`, `weak`, `failed`, `stationary`), and
+`x I X Y Z` for the new positions. **Task `subdivide`**: `mesh NV2 NF2 NE`, `em A B ID` per edge
+(midpoint ids `nv + e` in the lexicographic edge order), `x I X Y Z`, `f A B C`.
+
+**Choices where the SPEC leaves room.** Star order: interior vertices start at the face of smallest
+index (only `ch` depends on it). Ties of the active piece: first in the enumeration (strict `<`);
+the `λ_max` candidates use the key `(φ, slack, index)`; for the intrinsic width the maximizing
+site `s` and minimizing site `t` take the lowest index. At a hull-edge optimum `⟨Ñ_a,u⟩ = ⟨Ñ_b,u⟩`,
+so `s` is a rounding decision, but the gradient does not depend on the choice (the `d·ŵ` term
+compensates), which the selftest's finite differences confirm. The fixtures include a 'bowtie' ring
+(vector area exactly zero: the intrinsic energies are undefined) and a double-face mesh (rejected).
+
+**Rust side.** `crates/ddg-developability/tests/oracle.rs` replays the fixtures (always) and fuzzes
+(`#[ignore]`) against the executable; its module docs list the tolerances and how to run it
+(`DDG_DEV_FUZZ_CASES=20000 cargo test --release -p ddg-developability --test oracle -- --ignored --nocapture`).
