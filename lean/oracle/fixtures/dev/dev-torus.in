@@ -1,0 +1,48 @@
+case dev-torus
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 12 24
+p 40059a03918cf250 bf863c007dd5ac14 bf91943b1d321190
+p 3ffa7176169cadcc bfa8b761ebcec794 3fe061335e95ca14
+p 3ff92a4b5efbdbbd 3f8f716124e3ee30 bfe699107617f537
+p 3f9565357b9494a1 4005f6d073816292 bfa5815e6c026cb5
+p bf828cf09fa67ce5 3ffab1e4bdbfc587 3fe36483d6f58e84
+p bfa7b15b19668226 3ffb75c877836318 bfe2ab8801add22a
+p c005de2e10833616 bfa6bc3ef81c5d32 3f9590097682442c
+p bffa85d18a529c0f bf90112ddf498ee7 3fe6493b16b9f182
+p bffb076d3925b2cd bf5b541cf03f85ab bfe1b9fd58211460
+p 3fa0cffc7eab609c c00554c76e847283 3fa701cdf67ae09e
+p 3f90ed4369ee0912 bffa50d924d6e667 3fe39505ead724c4
+p 3f8148cb6cd5f793 bff984dbd6f22d11 bfe45193827d5086
+f 0 3 4
+f 0 4 1
+f 1 4 5
+f 1 5 2
+f 2 5 3
+f 2 3 0
+f 3 6 7
+f 3 7 4
+f 4 7 8
+f 4 8 5
+f 5 8 6
+f 5 6 3
+f 6 9 10
+f 6 10 7
+f 7 10 11
+f 7 11 8
+f 8 11 9
+f 8 9 6
+f 9 0 1
+f 9 1 10
+f 10 1 2
+f 10 2 11
+f 11 2 0
+f 11 0 9
+end

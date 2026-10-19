@@ -1,0 +1,30 @@
+case dev-fan-8
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 10 8
+p 0000000000000000 0000000000000000 3fe0000000000000
+p 3ff3357a1e539598 0000000000000000 bfce09ea0d5da53c
+p 3fe1f776fb6425b2 3fe2af45c2da36b4 bfd8aa42d69fdc66
+p 3fc8019782f51e8d 3ff5fc4effcc4460 bfd1fb522f616dc8
+p bfe3ace7c5d3d048 3fec17a671ef1d1b bfd24133f40ddfaa
+p bfe8e3dd3fec23c6 3fc3460050cfd128 3fd0a46df04daa98
+p bfee3eae737d6dca bfdd99078ab0aa4e bfd3639ce679a178
+p bfe2dfdf79d387a4 bfef42501579f840 3fd1102d3cbe1c4e
+p bfb22512275360b1 bfef1dd83e1a58b7 bfc024bcdf75187c
+p 3fe9b87fd006bc06 bfe99b6c26893eb5 3fdd7c7e5f8e20ae
+f 0 1 2
+f 0 2 3
+f 0 3 4
+f 0 4 5
+f 0 5 6
+f 0 6 7
+f 0 7 8
+f 0 8 9
+end

@@ -1,0 +1,25 @@
+case dev-flat-noisy
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 7 6
+p 0000000000000000 0000000000000000 0000000000000000
+p 3ff1d2cfd52c7d38 bfd4c29970610231 3ef7b14836bbdb04
+p 3fe25e5a4b04ccad 3fe093009aa64c66 3efc916140561dbc
+p bfd541cfe734289e 3ff44a8e4a2d29ec bebdfd4aeaaf9f00
+p bff1cb09aebc5644 bfd4d63d80d74cb7 3f0637c74b719b5a
+p bfdc7fb2747b52a8 bfe7df4b92d2dcab 3f06cb5c49126812
+p 3fe2487bbfb32f35 bfe3ea4e2197615e bf14c44a9c807f09
+f 0 1 2
+f 0 2 3
+f 0 3 4
+f 0 4 5
+f 0 5 6
+f 0 6 1
+end

@@ -1,0 +1,41 @@
+dev-cone-4	energy	ok	regular cone, valence 4, height 0.600000: closed forms of SPEC 10.3 (ties: the margins are zero)
+dev-cone-5	energy	ok	regular cone, valence 5, height 0.600000: closed forms of SPEC 10.3 (ties: the margins are zero)
+dev-cone-6	energy	ok	regular cone, valence 6, height 2.000000: closed forms of SPEC 10.3 (ties: the margins are zero)
+dev-cone-8	energy	ok	regular cone, valence 8, height 0.300000: closed forms of SPEC 10.3 (ties: the margins are zero)
+dev-cone-3	energy	ok	regular cone, valence 3, height 1.000000: closed forms of SPEC 10.3 (ties: the margins are zero)
+dev-hinge-exact	energy	ok	exact hinge star (two planar arcs): all energies vanish
+dev-hinge-noisy	energy	ok	hinge star with noise 1e-6
+dev-flat-noisy	energy	ok	nearly flat star (heights 1e-4)
+dev-star-3	energy	ok	random interior star of valence 3 (a triple point: not counted by default)
+dev-star-6	energy	ok	random interior star of valence 6
+dev-star-10	energy	ok	random interior star of valence 10
+dev-star-folded	energy	ok	strongly folded star of valence 7 (not embedded)
+dev-fan-4	energy	ok	boundary fan of 4 faces
+dev-fan-8	energy	ok	boundary fan of 8 faces
+dev-fan-8-noboundary	energy	ok	the same fan with boundary vertices excluded from the domain
+dev-star-3-all	energy	ok	valence-3 star with the omission switched off
+dev-icosphere	energy	ok	jittered icosahedron (closed, valence 5)
+dev-cube	energy	ok	jittered triangulated cube (valence-3 corners are omitted)
+dev-cube-all	energy	ok	the same cube with the valence-3 omission off
+dev-tetra	energy	ok	tetrahedron: every vertex has valence 3, so the domain is empty
+dev-octahedron	energy	ok	jittered octahedron (valence 4)
+dev-crumpled	energy	ok	crumpled 5x5 grid (open, 9 interior vertices)
+dev-crumpled-noboundary	energy	ok	the same grid, boundary vertices excluded
+dev-annulus	energy	ok	annulus with two boundary loops
+dev-torus	energy	ok	small torus
+dev-double-cover	energy	ok	two coincident faces with opposite orientation: zero vertex normal, the intrinsic energies are undefined
+dev-degenerate	energy	ok	two coincident vertices: degenerate faces
+dev-nonmanifold	energy	error	a face added twice: the directed edge is used twice
+dev-step-combinatorial	step	ok	first L-BFGS step (combinatorial) on the crumpled grid, default options
+dev-step-combinatorial-max	step	ok	first L-BFGS step (combinatorial-max) on the crumpled grid, default options
+dev-step-covariance	step	ok	first L-BFGS step (covariance) on the crumpled grid, default options
+dev-step-covariance-max	step	ok	first L-BFGS step (covariance-max) on the crumpled grid, default options
+dev-step-intrinsic	step	ok	first L-BFGS step (intrinsic) on the crumpled grid, default options
+dev-step-intrinsic-max	step	ok	first L-BFGS step (intrinsic-max) on the crumpled grid, default options
+dev-step-bisect	step	ok	covariance step with a large initial step: bisection
+dev-step-double	step	ok	combinatorial step with a tiny initial step: doubling up to the cap
+dev-step-pinned	step	ok	intrinsic step with pinned vertices
+dev-step-open	step	ok	lambda_max step on an annulus, boundary excluded
+dev-subdivide-tetra	subdivide	ok	4-1 subdivision of a tetrahedron
+dev-subdivide-fan	subdivide	ok	4-1 subdivision of a boundary fan (boundary edges are split too)
+dev-subdivide-crumpled	subdivide	ok	4-1 subdivision of the crumpled grid

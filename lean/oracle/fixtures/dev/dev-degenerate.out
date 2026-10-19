@@ -1,0 +1,17 @@
+case dev-degenerate
+task energy
+status ok
+mesh 25 32 56 16
+section combinatorial
+result error degenerate-face 3
+section combinatorial-max
+result error degenerate-face 3
+section covariance
+result error degenerate-face 3
+section covariance-max
+result error degenerate-face 3
+section intrinsic
+result error degenerate-face 3
+section intrinsic-max
+result error degenerate-face 3
+end

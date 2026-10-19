@@ -1,0 +1,33 @@
+case dev-star-10
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 11 10
+p 0000000000000000 0000000000000000 3fd999999999999a
+p 3fee7496ebc9ff5e 3fb9cb6549268a94 bfdc64e0bf235576
+p 3fede9eb62d75aa7 3fdd41c22efbd585 3fd4b74df7b5c5ca
+p 3fd52ffedff44a65 3fe5f790770b65d1 bfd874b141e7455a
+p bfd539b7d10ded40 3fe3b5ad0c84f10d bf5f6ec5ae842800
+p bfee5ca4a89a0614 3fece7287ce560d3 bfb733c4685f4600
+p bff11aebfe413281 3fcc73865b2094c8 3f88e24c6abde040
+p bfe15f3d6cdf8803 bfe213bb9afd698b 3fdfbf57bd14efce
+p bfd16a13fd9452d3 bff1a95257fd962c bfdf422db4927b72
+p 3fcbb3e50f5d23ad bfed2a599055d542 3fbbc99a87030f90
+p 3ff255b060b858ce bfe5b02de5e17ef4 bfdf7edbb04b6cc0
+f 0 1 2
+f 0 2 3
+f 0 3 4
+f 0 4 5
+f 0 5 6
+f 0 6 7
+f 0 7 8
+f 0 8 9
+f 0 9 10
+f 0 10 1
+end

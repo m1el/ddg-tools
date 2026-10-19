@@ -1,0 +1,40 @@
+case dev-step-double
+task step
+energy combinatorial
+boundary 1
+omit3 1
+step 3f50624dd2f1a9fc 3fc999999999999a 0000000000000000 3fe0000000000000 30 30
+mesh 12 20
+p bfe1c3a434165fd9 3fea010f053e393c 3f969dea5c6fbf68
+p 3fe0d8d643e4ab05 3fe981b14e5cd5e7 3f8104d972888fd0
+p bfe2de6726956cf6 bfe9c98da8af6172 bf9a23176121da62
+p 3fe32a14ca56140d bfecf12a4f79042e bfa422429c2fc383
+p 3fb0dcfdea0054e3 bfdcd28c18da066a 3fed88ec105a796c
+p bfa4d766bc603003 3fe162fa41e81abf 3fed52e1da76a90a
+p 3fa1e35c502fa89e bfdeb21ee022062f bfecdf48d0910739
+p 3fa9b590c4cc95e2 3fe2268d2e1a6164 bfeb72889346b9dc
+p 3fec039175c20f3a 3fb1a5bb4a9d2bd9 bfddf67cae963978
+p 3fec7d92aff5029d bf9249e016a15fa4 3fe2eb57a98fc507
+p bfea8032b38b9afe bfa8603a20244164 bfe07c6fefadaabe
+p bfea92f0b609428f bf883f2df37c3370 3fe2fc0bf1bc6a99
+f 0 11 5
+f 0 5 1
+f 0 1 7
+f 0 7 10
+f 0 10 11
+f 1 5 9
+f 5 11 4
+f 11 10 2
+f 10 7 6
+f 7 1 8
+f 3 9 4
+f 3 4 2
+f 3 2 6
+f 3 6 8
+f 3 8 9
+f 4 9 5
+f 2 4 11
+f 6 2 10
+f 8 6 7
+f 9 8 1
+end

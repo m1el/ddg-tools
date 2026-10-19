@@ -1,0 +1,27 @@
+case dev-hinge-exact
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 8 7
+p 0000000000000000 0000000000000000 0000000000000000
+p 3c9296bcc0ff4cf8 3ff0da1be56d401e 3c8dbdface6547f4
+p bfeb139842775814 3feb139842775815 3fe5a9469b92acdd
+p bff60761bf2628ea 3ca84c9909136cdb 3ff19f8165b820bb
+p bfe59ec629ef581f bfe59ec629ef581d 3fe14bd1bb25e019
+p bca94b0a12aba3ea bfee92bbaf4819c4 3ca43c080eefb655
+p 3ff0c547984934b5 bfe35d73ccc73445 3fead53f5a0ebabc
+p 3ff20a13c068c638 3fe4d47f05712914 3fecdcec670e09f4
+f 0 1 2
+f 0 2 3
+f 0 3 4
+f 0 4 5
+f 0 5 6
+f 0 6 7
+f 0 7 1
+end

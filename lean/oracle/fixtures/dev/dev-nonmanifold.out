@@ -1,0 +1,4 @@
+case dev-nonmanifold
+task energy
+status error directed edge (0, 1) is used twice (non-manifold or inconsistent orientation)
+end

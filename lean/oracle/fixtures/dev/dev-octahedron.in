@@ -1,0 +1,26 @@
+case dev-octahedron
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 6 8
+p bf9111bb23081ce8 bfb5f2face3543da 3fece543ef43e8ca
+p 3fa06739ea234ee8 3fb47d4d74f3b36e bff08a58fad82f0f
+p 3feccd93e1260822 3fae473b5558f204 3fb80eea3a39bbc2
+p 3f8b8cc72508faf3 3fee310792f2ae31 3faa78f17a15cb1c
+p bff11a04abe76215 bf624c34a026e446 3f92b6896f69cda8
+p 3fb0f892d4b2b0a9 bfed45f0e0e46fcb 3fac3130f004f63c
+f 0 2 3
+f 1 3 2
+f 0 3 4
+f 1 4 3
+f 0 4 5
+f 1 5 4
+f 0 5 2
+f 1 2 5
+end

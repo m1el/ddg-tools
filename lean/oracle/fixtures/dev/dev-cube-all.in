@@ -1,0 +1,32 @@
+case dev-cube-all
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 0
+mesh 8 12
+p bfef7e668ce28da3 bfed2ffbbf08dbc9 bff0d94d4d4f6802
+p 3ff14ba4e66e9c7b bfedbf030099ee93 bff0a8a7533d2bbb
+p 3fedb112c83c0c14 3ff0cd3afc6a88f0 bff095e32d3e9aec
+p bff126deade7d39e 3ff1649da0bae5aa bfeede9acdec66c4
+p bfef30853ecd29ff bff162b3f42440d2 3ff052310bf59420
+p 3fedfb5c0a673d9d bfed67ead90b8c62 3ff062c59f75f9c1
+p 3ff0285ad89e06cc 3ff0ba8ac9995c27 3ff0643f540b09a7
+p bfecd92b4cf7a592 3feec1d547f6597f 3ff031b888fc5d50
+f 0 2 1
+f 0 3 2
+f 4 5 6
+f 4 6 7
+f 0 1 5
+f 0 5 4
+f 1 2 6
+f 1 6 5
+f 2 3 7
+f 2 7 6
+f 3 0 4
+f 3 4 7
+end

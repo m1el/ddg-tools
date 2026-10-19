@@ -1,0 +1,17 @@
+case dev-double-cover
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 3 2
+p 0000000000000000 0000000000000000 0000000000000000
+p 3ff0000000000000 0000000000000000 0000000000000000
+p 0000000000000000 3ff0000000000000 0000000000000000
+f 0 1 2
+f 0 2 1
+end
