@@ -24,5 +24,14 @@
   a local pool unless already inside an `n`-thread pool.
 - `dev-regular-cone-values` not tagged in Rust (tests compare closed forms; Lean side decides).
 
+## Bench (machine loaded by fuzzers, load 37–88 on 64 cores: indicative only)
+Single thread, ns/vertex (value + gradient): spot E_P 1530, π_max 1310, E_λ 1020, λ_max 3850,
+intrinsic 1340, intrinsic max 1820 (load ~58); bob/blub similar or lower (790–1290, λ_max 3.9–4.1 µs)
+at load ~48. 16 threads at load ~48: bob/blub 290–620 ns/vertex. Multi-thread scaling not measurable.
+
 ## Remains
-- (see final report)
+- Re-run `cargo bench -p ddg-developability --bench energy` on an idle machine (1T and 64T).
+- The star layout (`Stars`) is rebuilt on every call; an evaluator that keeps it across optimizer
+  iterations would save ~20–30 % per call (not in the SPEC API).
+- Lean ids (`check-formulas.sh` MISSING) wait for the Lean agent; all Rust ids match SPEC §9.
+- 4-1 subdivision invariance is tested by the optimizer agent (`tests/subdivide.rs`).
