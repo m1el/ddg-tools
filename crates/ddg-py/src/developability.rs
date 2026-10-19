@@ -412,7 +412,7 @@ pub struct RoundSummary {
     /// Accepted iterations (over restarts after remeshing).
     pub iterations: usize,
     /// Why the optimizer ended (`gradient_tolerance`, `energy_stalled`, `max_iterations`,
-    /// `line_search_failed`, `cancelled`, `non_descent`).
+    /// `line_search_failed`, `stationary`, `cancelled`, `non_descent`).
     pub status: &'static str,
     /// Edge flips of all remeshing runs of the round.
     pub flips: usize,
