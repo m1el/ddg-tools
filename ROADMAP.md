@@ -296,6 +296,38 @@ Comparison with the authors' program (black box, `runs_tmp/blackbox/`, not in th
   option would build the forbidden set itself. Not added: the add-on's job is the UV map, and
   angles alone have no place in it.
 
+## Developability of Triangle Meshes (`crates/ddg-developability`, branch `developability`, 2026-10-19)
+
+Landed: the six energies with gradients, L-BFGS with the Lewis–Overton line search, gradient
+descent, 4-1 subdivision, small-angle remeshing, the flow driver with exact face provenance, cut
+and flatten (Sec. 4.4) with the angle-defect terminals (SPEC D30), the admissibility floor (D31,
+D32); Lean: 43 `dev-` ids (30 proved, 13 cited), the Float oracle (two 400k-case fuzz runs, 0
+disagreements); Python `make_developable`, `developability`, `developable_seams`,
+`developable_unwrap`; Blender "Make Developable", "Show Developability", "Developable Seams + UV".
+Clean room: the authors' GPL code is quarantined (mode 000) and was never read. Contract and
+studies: `crates/ddg-developability/SPEC.md` (§12 holds the studies), README, `blender/README.md`
+("Measured").
+
+Open:
+* **Global UV overlap.** "Developable Seams + UV" hands the developable cut to the `ddg-uv`
+  pipeline (the user's choice, D23). The pieces are so close to developable that the pipeline
+  places 0 cones and keeps 1 chart, so nothing stops a chart from overlapping itself: 1–16 % on
+  the dense spot/bob/blub meshes after the default flow, 31–38 % on spot's control mesh;
+  0 mirrored triangles everywhere. Neither the threshold nor the defect tolerance fixes it.
+* **Black-box comparison with the authors' program not run.** Its build needs libigl (an empty
+  submodule in the reference tree, commit `d4b67260855f`); fetching it was blocked by the
+  agent's safety check. Waits for the user to supply libigl at `/var/data/ddg-quarantine/libigl`.
+* **Timings** were all taken under load from an unrelated job (load 40–350): the energy bench
+  (`cargo bench -p ddg-developability --bench energy`), the flow bench, the multithread
+  speed-up, and the Blender end-to-end times. Re-run alone on a quiet machine.
+* The dense meshes do not converge at the default budget (every round ends by
+  `max_iterations`); only the control meshes approach zero energy.
+* A converged flow can end with the status `line_search_failed` at energy 1e-7 to 1e-13 (no
+  descent left): correct, but the name reads like a failure.
+* Long flows on control meshes leave 2–9 faces below the small angle that remeshing cannot
+  repair (reported as `bad_faces`).
+* The 14 clippy warnings in `crates/ddg-py/src/developability.rs`.
+
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
