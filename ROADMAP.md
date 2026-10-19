@@ -322,18 +322,21 @@ Open:
   2 to 10 times at 64 threads (SPEC 12.7), not investigated.
 * The dense meshes do not converge at the default budget (every round ends by
   `max_iterations`); only the control meshes approach zero energy.
-* A converged flow can end with the status `line_search_failed` at energy 1e-7 to 1e-13 (no
-  descent left): correct, but the name reads like a failure.
-* Long flows on control meshes leave 2–9 faces below the small angle that remeshing cannot
-  repair (reported as `bad_faces`).
+* Done (SPEC D34): a converged flow ends `Stationary` (was `line_search_failed`). The Blender e2e
+  table (`scripts/e2e_table.py`) has no short name for `stationary` yet.
+* Long flows on control meshes leave faces below the small angle that remeshing cannot repair
+  (`bad_faces`): halved by D35 (62 -> 35 over the 45 robustness flows), not gone; none on coarse
+  uniform inputs.
 * The 14 clippy warnings in `crates/ddg-py/src/developability.rs`.
-* **Quality against the paper's figures** (seen in the showcase, `showcase/media/developable_*`):
-  the paper's main workflow (coarse mesh, flow, 4-1 subdivision, flow again; Figs. 1, 23) turns
-  spot's control mesh into spikes and folded sheets, and squashes bob's and blub's, so the
-  showcase runs the flow in place on the fine meshes. Those results are piecewise developable
-  but covered in short creases (spot: 567 of 8,094 edges above 30°, many of them two-face folds
-  at 180°), not the clean seam curves of Figs. 1 and 22. The crumpled sheet ends with |angle
-  defect| 0.58 rad from 0.0015 (the flow is not isometric, as in the paper). Not investigated yet.
+* **Quality against the paper's figures**: investigated, `crates/ddg-developability/QUALITY.md`.
+  The cause is the input (a subdivision cage instead of a coarse uniform mesh: thin parts fold flat
+  into double sheets) and `E_λ` in the coarse phase (it flattens coarse meshes); the paper's recipe
+  (uniform ~1k triangles, `E_P` then `E_λ`, two subdivisions) gives its look (spot: Hausdorff 0.045
+  of the diagonal, volume 0.96). The default flow is now that recipe (D36). Open: the showcase and
+  the Blender operator still run `E_λ` throughout and on cages or in place; a uniform remesher in
+  the workspace (the study used MeshLab's) would let them run the paper's workflow. The "short
+  creases" of the in-place flows are mostly the hatching of seams that cross triangles in the
+  showcase's edge shading.
 
 ## Housekeeping
 
