@@ -11,11 +11,10 @@
 //!
 //! [`sym_eig3`] is cyclic Jacobi (Golub & Van Loan, *Matrix Computations*, 4th ed., Sec. 8.5;
 //! Rutishauser's stable rotation formulas; Demmel & Veselić 1992 for the accuracy of Jacobi).
-//! Kopp's paper (Sec. 3-5) compares an analytic characteristic-polynomial solver, QL
-//! with implicit shifts and Jacobi; it finds that Jacobi is the most accurate and the analytic
-//! solver the fastest but least accurate, and recommends hybrids that fall back to an iteration.
-//! Because a 3x3 Jacobi converges in 3-5 sweeps and costs only a few hundred flops, we use Jacobi
-//! alone, so there is no accuracy check and no fallback to get wrong.
+//! Kopp (2008, "Efficient numerical diagonalization of hermitian 3x3 matrices", arXiv
+//! physics/0610206) compares analytic and iterative 3x3 methods and hybrids of them; nothing here
+//! is taken from that paper or its code. A 3x3 Jacobi converges in 3-5 sweeps and costs only a few
+//! hundred flops, so we use Jacobi alone: there is no accuracy check and no fallback to get wrong.
 //!
 //! Details: the matrix is first scaled by a power of two (exact) so its largest entry is in
 //! `[1, 2)`; this makes overflow and underflow impossible, also for entries near `1e±300`.
