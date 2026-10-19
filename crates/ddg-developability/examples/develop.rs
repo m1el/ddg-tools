@@ -11,6 +11,15 @@
 //!   --max-displacement X step cap in mean edge lengths (default 0.5)
 //!   --min-face-angle X   admissibility floor on the smallest corner angle in radians (default 1e-4; 0 = off)
 //!   --threads N          threads of the flow (default: all)
+//!   --rounds SPEC        explicit rounds, comma separated `[+]energy:iterations` (`+` = 4-1 subdivide
+//!                        first), e.g. `combinatorial:1000,+combinatorial:1000,+covariance:1000`;
+//!                        overrides --energy/--subdivisions/--iterations (the energy reported is the last round's)
+//!   --gradient-tol X     stop a round when mean edge length * |grad|_inf <= X (default 1e-8)
+//!   --memory N           L-BFGS memory (default 10)
+//!   --initial-step X     steepest-descent trial step in mean edge lengths (default 0.1)
+//!   --stall-iters N      consecutive stalled iterations that end a round (default 10)
+//!   --energy-tol X       relative decrease that counts as stalled (default 1e-10)
+//!   --history FILE       write `round iteration energy gradient_norm` per accepted iterate
 //!   --out FILE.obj       write the developable mesh; the per-vertex energy goes to FILE.energy.txt
 //!   --cut-out FILE.obj   cut and flatten the result, write an OBJ with per-corner UVs (charts unpacked)
 //!   --epsilon X          terminal threshold of the cut (default 1e-3)
@@ -30,8 +39,8 @@ use std::time::Instant;
 use ddg_core::TriMesh;
 use ddg_core::io::{read_obj, write_obj};
 use ddg_developability::{
-    CutOptions, Energy, EnergyOptions, FlowOptions, OptimizeStatus, RemeshOptions, cut_and_flatten, evaluate_energy,
-    flow,
+    CutOptions, Energy, EnergyOptions, FlowOptions, Method, OptimizeStatus, RemeshOptions, Round, cut_and_flatten,
+    evaluate_energy, flow,
 };
 
 fn parse_energy(s: &str) -> Option<Energy> {
@@ -64,6 +73,27 @@ struct Args {
     cut_only: bool,
     no_cut: bool,
     conjugate: bool,
+    rounds: Option<Vec<(bool, Energy, usize)>>,
+    gradient_tol: Option<f64>,
+    memory: Option<usize>,
+    initial_step: Option<f64>,
+    stall_iters: Option<usize>,
+    energy_tol: Option<f64>,
+    history: Option<String>,
+}
+
+fn parse_rounds(s: &str) -> Result<Vec<(bool, Energy, usize)>, String> {
+    s.split(',')
+        .map(|r| {
+            let (sub, r) = match r.strip_prefix('+') {
+                Some(rest) => (true, rest),
+                None => (false, r),
+            };
+            let (e, it) = r.split_once(':').ok_or_else(|| format!("round {r}: expected energy:iterations"))?;
+            let e = parse_energy(e).ok_or_else(|| format!("unknown energy {e}"))?;
+            Ok((sub, e, it.parse().map_err(|x| format!("round {r}: {x}"))?))
+        })
+        .collect()
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -86,6 +116,13 @@ fn parse_args() -> Result<Args, String> {
         cut_only: false,
         no_cut: false,
         conjugate: false,
+        rounds: None,
+        gradient_tol: None,
+        memory: None,
+        initial_step: None,
+        stall_iters: None,
+        energy_tol: None,
+        history: None,
     };
     while let Some(arg) = it.next() {
         let mut val = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -112,6 +149,13 @@ fn parse_args() -> Result<Args, String> {
             "--cut-only" => a.cut_only = true,
             "--no-cut" => a.no_cut = true,
             "--conjugate" => a.conjugate = true,
+            "--rounds" => a.rounds = Some(parse_rounds(&val("--rounds")?)?),
+            "--gradient-tol" => a.gradient_tol = Some(val("--gradient-tol")?.parse().map_err(|e| format!("{e}"))?),
+            "--memory" => a.memory = Some(val("--memory")?.parse().map_err(|e| format!("{e}"))?),
+            "--initial-step" => a.initial_step = Some(val("--initial-step")?.parse().map_err(|e| format!("{e}"))?),
+            "--stall-iters" => a.stall_iters = Some(val("--stall-iters")?.parse().map_err(|e| format!("{e}"))?),
+            "--history" => a.history = Some(val("--history")?),
+            "--energy-tol" => a.energy_tol = Some(val("--energy-tol")?.parse().map_err(|e| format!("{e}"))?),
             s if s.starts_with("--") => return Err(format!("unknown option {s}")),
             s => a.input = s.to_string(),
         }
@@ -128,6 +172,7 @@ fn status_name(s: OptimizeStatus) -> &'static str {
         OptimizeStatus::EnergyStalled => "stalled",
         OptimizeStatus::MaxIterations => "max_iter",
         OptimizeStatus::LineSearchFailed => "linesearch_failed",
+        OptimizeStatus::Stationary => "stationary",
         OptimizeStatus::Cancelled => "cancelled",
         OptimizeStatus::NonDescent => "nondescent",
     }
@@ -154,10 +199,35 @@ fn run() -> Result<(), String> {
         ("boundary_loops".into(), mesh.boundary_loops().len().to_string()),
     ];
     let (mut cur_mesh, mut cur_pos) = (mesh.clone(), positions.clone());
-    let eopts = EnergyOptions::new(a.energy);
+    let eopts = EnergyOptions::new(a.rounds.as_ref().and_then(|r| r.last()).map_or(a.energy, |r| r.1));
 
     if !a.cut_only {
         let mut fo = FlowOptions::uniform(eopts.clone(), a.subdivisions, a.iterations);
+        if let Some(r) = &a.rounds {
+            fo.rounds = r
+                .iter()
+                .map(|&(subdivide_before, e, max_iterations)| Round {
+                    energy: EnergyOptions::new(e),
+                    max_iterations,
+                    subdivide_before,
+                })
+                .collect();
+        }
+        if let Some(x) = a.gradient_tol {
+            fo.optimize.gradient_tolerance = x;
+        }
+        if let Some(m) = a.memory {
+            fo.optimize.method = Method::Lbfgs { memory: m };
+        }
+        if let Some(x) = a.initial_step {
+            fo.optimize.initial_step = x;
+        }
+        if let Some(x) = a.stall_iters {
+            fo.optimize.stall_iterations = x;
+        }
+        if let Some(x) = a.energy_tol {
+            fo.optimize.energy_tolerance = x;
+        }
         fo.optimize.max_displacement = a.max_displacement;
         if let Some(x) = a.min_face_angle {
             fo.optimize.min_face_angle = x;
@@ -183,11 +253,13 @@ fn run() -> Result<(), String> {
         for (i, r) in res.report.rounds.iter().enumerate() {
             let o = &r.optimize;
             println!(
-                "round {i}: {} v / {} f, E {:.6e} -> {:.6e}, {} iterations in {} segments ({}), {} evals, remesh {:?}, {:.2}s",
+                "round {i}: {} v / {} f, E {:.6e} -> {:.6e}, |g| {:.3e} -> {:.3e}, {} iterations in {} segments ({}), {} evals, remesh {:?}, {:.2}s",
                 r.n_vertices,
                 r.n_faces,
                 o.energy_initial,
                 o.energy_final,
+                o.gradient_norm_history.first().copied().unwrap_or(f64::NAN),
+                o.gradient_norm_history.last().copied().unwrap_or(f64::NAN),
                 o.iterations,
                 r.segments.len(),
                 status_name(o.status),
@@ -203,6 +275,15 @@ fn run() -> Result<(), String> {
             inadmissible += o.inadmissible_trials;
             resets += o.memory_resets;
         }
+        if let Some(h) = &a.history {
+            let mut txt = String::new();
+            for (i, r) in res.report.rounds.iter().enumerate() {
+                for (k, (e, g)) in r.optimize.energy_history.iter().zip(&r.optimize.gradient_norm_history).enumerate() {
+                    txt.push_str(&format!("{i} {k} {e:e} {g:e}\n"));
+                }
+            }
+            std::fs::write(h, txt).map_err(|e| format!("{h}: {e}"))?;
+        }
         let first = &res.report.rounds[0];
         let Some(last) = res.report.rounds.last() else { return Err(format!("flow ran no round: {:?}", res.report.stopped)) };
         let (e_final, ve) = evaluate_energy(&res.mesh, &res.positions, &eopts).map_err(|e| format!("final energy: {e}"))?;
@@ -211,6 +292,8 @@ fn run() -> Result<(), String> {
             ("e_final".into(), format!("{:.6e}", e_final)),
             ("seconds".into(), format!("{secs:.3}")),
             ("status".into(), res.report.rounds.iter().map(|r| status_name(r.optimize.status)).collect::<Vec<_>>().join("/")),
+            ("gnorm_final".into(), res.report.rounds.iter().map(|r| format!("{:.2e}", r.optimize.gradient_norm_history.last().copied().unwrap_or(f64::NAN))).collect::<Vec<_>>().join("/")),
+            ("round_iterations".into(), res.report.rounds.iter().map(|r| r.optimize.iterations.to_string()).collect::<Vec<_>>().join("/")),
             ("iterations".into(), iters.to_string()),
             ("evaluations".into(), evals.to_string()),
             ("undefined_trials".into(), undefined.to_string()),
