@@ -8,6 +8,7 @@
 //!   --iterations N       iterations per round (default 200)
 //!   --no-remesh          switch small-angle remeshing off
 //!   --small-angle DEG    remeshing threshold in degrees (default 1)
+//!   --no-fallback        remeshing without the fallback operations (D35; the paper's rule alone)
 //!   --max-displacement X step cap in mean edge lengths (default 0.5)
 //!   --min-face-angle X   admissibility floor on the smallest corner angle in radians (default 1e-4; 0 = off)
 //!   --threads N          threads of the flow (default: all)
@@ -62,6 +63,7 @@ struct Args {
     iterations: usize,
     remesh: bool,
     small_angle_deg: f64,
+    no_fallback: bool,
     max_displacement: f64,
     min_face_angle: Option<f64>,
     threads: Option<usize>,
@@ -105,6 +107,7 @@ fn parse_args() -> Result<Args, String> {
         iterations: 200,
         remesh: true,
         small_angle_deg: 1.0,
+        no_fallback: false,
         max_displacement: 0.5,
         min_face_angle: None,
         threads: None,
@@ -134,6 +137,7 @@ fn parse_args() -> Result<Args, String> {
             "--subdivisions" => a.subdivisions = val("--subdivisions")?.parse().map_err(|e| format!("{e}"))?,
             "--iterations" => a.iterations = val("--iterations")?.parse().map_err(|e| format!("{e}"))?,
             "--no-remesh" => a.remesh = false,
+            "--no-fallback" => a.no_fallback = true,
             "--small-angle" => a.small_angle_deg = val("--small-angle")?.parse().map_err(|e| format!("{e}"))?,
             "--max-displacement" => a.max_displacement = val("--max-displacement")?.parse().map_err(|e| format!("{e}"))?,
             "--min-face-angle" => a.min_face_angle = Some(val("--min-face-angle")?.parse().map_err(|e| format!("{e}"))?),
@@ -234,6 +238,7 @@ fn run() -> Result<(), String> {
         }
         fo.remesh = a.remesh.then(|| RemeshOptions {
             small_angle: a.small_angle_deg.to_radians(),
+            fallback_operations: !a.no_fallback,
             ..Default::default()
         });
         if let (Some(x), Some(r)) = (a.min_face_angle, fo.remesh.as_mut()) {

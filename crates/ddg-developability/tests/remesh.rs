@@ -49,6 +49,26 @@ fn constructed_cap_is_flipped() {
     assert!(r.changed());
 }
 
+/// D35: a cap on a boundary edge cannot be flipped (the paper's rule); the fallback collapses its
+/// shortest edge instead. Without the fallback the cap stays.
+#[test]
+fn refused_cap_flip_falls_back_to_a_collapse() {
+    let pos = vec![[0., 0., 0.], [1., 0., 0.], [0.3, 0.003, 0.], [1., 1., 0.], [0., 1., 0.]];
+    let m = TriMesh::new(5, vec![[0, 1, 2], [1, 3, 2], [3, 4, 2], [4, 0, 2]]).unwrap();
+    let small = RemeshOptions::default().small_angle;
+    assert_eq!(n_bad(&m, &pos, small), 1);
+    let r = remesh(&m, &pos, &opts(), &[]).unwrap();
+    assert_eq!((r.report.flips, r.report.collapses, r.report.fallback_collapses), (0, 1, 1));
+    assert_eq!(r.report.refused_flips, 1);
+    assert_eq!(r.report.unresolved_bad_triangles, 0);
+    assert_eq!(r.mesh.n_faces(), 2);
+    // the boundary vertex 0 survives in place
+    assert_eq!(r.positions[0], pos[0]);
+    let off = remesh(&m, &pos, &RemeshOptions { fallback_operations: false, ..opts() }, &[]).unwrap();
+    assert_eq!((off.report.flips, off.report.collapses), (0, 0));
+    assert_eq!(off.report.unresolved_bad_triangles, 1);
+}
+
 /// Grid vertex `(i, j)` of `grid_disk(n, n)`.
 fn gv(n: usize, i: usize, j: usize) -> usize {
     i * (n + 1) + j
@@ -140,6 +160,7 @@ fn inject(g: &mut GeneratedMesh, m: &TriMesh, count: usize, seed: u64) {
 #[test]
 fn random_meshes_with_injected_bad_triangles_stay_valid() {
     let mut total = (0, 0, 0, 0);
+    let (mut paper_after, mut fallbacks) = (0, 0);
     for seed in 0..40u64 {
         let mut g = match seed % 3 {
             0 => icosphere(2).unwrap(),
@@ -180,9 +201,16 @@ fn random_meshes_with_injected_bad_triangles_stay_valid() {
         total.1 += after;
         total.2 += r.report.flips;
         total.3 += r.report.collapses;
+        let paper = remesh(&m, &g.positions, &RemeshOptions { fallback_operations: false, ..opts() }, &[]).unwrap();
+        paper_after += paper.report.unresolved_bad_triangles;
+        fallbacks += r.report.fallback_flips + r.report.fallback_collapses;
     }
-    eprintln!("bad before {} after {}, flips {}, collapses {}", total.0, total.1, total.2, total.3);
+    eprintln!(
+        "bad before {} after {} (without the fallback {paper_after}; {fallbacks} fallback operations), flips {}, collapses {}",
+        total.0, total.1, total.2, total.3
+    );
     assert!(total.0 > 0 && total.1 * 4 < total.0 && total.2 > 0 && total.3 > 0);
+    assert!(total.1 <= paper_after);
 }
 
 #[test]

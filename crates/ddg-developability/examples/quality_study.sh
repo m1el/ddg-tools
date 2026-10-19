@@ -13,7 +13,8 @@ OUT=$2
 PAR=${3:-60}
 Q=crates/ddg-developability/examples/quality.py
 mkdir -p "$OUT"
-grep -v '^\s*#' "$JOBS" | grep -v '^\s*$' | xargs -P "$PAR" -L 1 sh -c '
+# (trailing blanks are stripped: xargs -L would join such a line with the next)
+grep -v '^\s*#' "$JOBS" | grep -v '^\s*$' | sed 's/[[:space:]]*$//' | xargs -P "$PAR" -L 1 sh -c '
   tag=$0; in=$1; ref=$2; shift 2
   "'"$BIN"'" "$in" "$@" --threads 1 --no-cut --out "'"$OUT"'/$tag.obj" > "'"$OUT"'/$tag.log" 2>&1 || true
   if [ -f "'"$OUT"'/$tag.obj" ]; then

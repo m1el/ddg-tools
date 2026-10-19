@@ -159,8 +159,8 @@ def measures(P0, F0, P, F, seam_deg=20.0, samples=60000, seed=1):
     return m, dih, E
 
 
-def render(ax, P, F, view, up_axis="y", title=""):
-    from matplotlib.collections import PolyCollection
+def render(ax, P, F, view, up_axis="y", title="", crease_deg=None):
+    from matplotlib.collections import LineCollection, PolyCollection
 
     if up_axis == "y":  # rotate y-up models (Crane's repository) to z-up
         P = P[:, [2, 0, 1]]
@@ -185,6 +185,15 @@ def render(ax, P, F, view, up_axis="y", title=""):
     cols[facing < 0] *= np.array([1.0, 0.75, 0.75])  # back faces tinted (folds)
     pc = PolyCollection(X[F[order]], facecolors=np.clip(cols[order], 0, 1), edgecolors="none", antialiased=False)
     ax.add_collection(pc)
+    if crease_deg is not None:
+        E, ef = edges_of(F)
+        inner = ef[:, 1] >= 0
+        c = np.ones(len(E))
+        c[inner] = np.einsum("ij,ij->i", N[ef[inner, 0]], N[ef[inner, 1]])
+        sel = c < np.cos(np.radians(crease_deg))
+        # front-most: drawn on top (no occlusion test; a sketch of where the creases are)
+        vis = sel & ((facing[ef[:, 0]] > 0) | (inner & (facing[np.maximum(ef[:, 1], 0)] > 0)))
+        ax.add_collection(LineCollection(X[E[vis]], colors="crimson", linewidths=0.5))
     ax.set_xlim(X[:, 0].min(), X[:, 0].max())
     ax.set_ylim(X[:, 1].min(), X[:, 1].max())
     ax.set_aspect("equal")
@@ -201,6 +210,7 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--up", default="y", choices=["y", "z"])
     ap.add_argument("--seam-deg", type=float, default=20.0)
+    ap.add_argument("--crease-deg", type=float, help="draw the result's edges above this dihedral angle")
     ap.add_argument("--reference", help="mesh the distances are measured to (default: INPUT)")
     a = ap.parse_args()
     P0, F0 = read_obj(a.input)
@@ -216,7 +226,7 @@ def main():
         view = [float(x) for x in a.view.split(",")]
         fig, axs = plt.subplots(1, 2, figsize=(12, 6), dpi=110)
         render(axs[0], P0, F0, view, a.up, title=f"input {len(F0)} faces")
-        render(axs[1], P, F, view, a.up, title=f"{a.tag}  {len(F)} faces  e30 {m['e30']}  folds {m['folds']}  "
+        render(axs[1], P, F, view, a.up, crease_deg=a.crease_deg, title=f"{a.tag}  {len(F)} faces  e30 {m['e30']}  folds {m['folds']}  "
                                           f"seams {m['seam_comp']} (short {m['seam_short']})  vol {m['vol_ratio']}")
         fig.tight_layout()
         fig.savefig(a.png)

@@ -37,6 +37,11 @@ pub struct RemeshOptions {
     /// smallest corner angle below this (radians) and below the angle that face has now. `0`
     /// switches the rule off. Default [`DEFAULT_MIN_FACE_ANGLE`].
     pub min_face_angle: f64,
+    /// When the operation of the paper's rule is refused (D35), try the others on the same
+    /// triangle, each under the same legality rules: for a cap, collapse its shortest edge; then,
+    /// for both kinds, flip its other edges (longest first). Default `true`; `false` is the
+    /// paper's rule alone (D21).
+    pub fallback_operations: bool,
     /// Rebuild and validate the whole mesh after every operation (O(|F|) each; for tests).
     /// Default `false`.
     pub validate_each_operation: bool,
@@ -50,6 +55,7 @@ impl Default for RemeshOptions {
             max_passes: 10,
             check_interval: 1,
             min_face_angle: DEFAULT_MIN_FACE_ANGLE,
+            fallback_operations: true,
             validate_each_operation: false,
         }
     }
@@ -90,6 +96,10 @@ pub struct RemeshReport {
     pub refused_flips: usize,
     /// Collapses refused by a legality rule (counted per attempt, over all passes).
     pub refused_collapses: usize,
+    /// Of `flips`, those applied as a fallback after the primary operation was refused (D35).
+    pub fallback_flips: usize,
+    /// Of `collapses`, those applied as a fallback (a cap's shortest edge, D35).
+    pub fallback_collapses: usize,
     /// Bad triangles left at the end.
     pub unresolved_bad_triangles: usize,
     /// Number of passes run.
@@ -407,6 +417,36 @@ fn try_collapse(st: &mut State, u: u32, w: u32, allow_boundary: bool, floor: f64
     Ok(())
 }
 
+/// D35: the other operations on a bad triangle `f` whose primary operation was refused, under the
+/// same legality rules: a cap's shortest edge is collapsed; then the edges other than the one the
+/// primary rule used are flipped, longest first (a flip must increase the smallest angle of its
+/// quad). Returns whether one was applied (counted in `fallback_flips` / `fallback_collapses`).
+fn fallback(st: &mut State, f: usize, n_small: usize, ang: &[f64; 3], opts: &RemeshOptions, rep: &mut RemeshReport) -> bool {
+    let tri = st.faces[f];
+    let edge = |i: usize| (tri[(i + 1) % 3], tri[(i + 2) % 3], tri[i]);
+    let mut order = [0usize, 1, 2];
+    order.sort_by(|&i, &j| ang[j].total_cmp(&ang[i])); // largest angle (longest edge) first
+    if n_small >= 2 {
+        let (u, w, _) = edge(order[2]);
+        if try_collapse(st, u, w, opts.collapse_boundary_edges, opts.min_face_angle).is_ok() {
+            rep.collapses += 1;
+            rep.fallback_collapses += 1;
+            return true;
+        }
+    }
+    // the primary flip of a cap used order[0]; a needle's primary op was a collapse
+    let flips: &[usize] = if n_small >= 2 { &order[1..] } else { &order[..] };
+    for &i in flips {
+        let (a, b, p) = edge(i);
+        if try_flip(st, f, a, b, p).is_ok() {
+            rep.flips += 1;
+            rep.fallback_flips += 1;
+            return true;
+        }
+    }
+    false
+}
+
 fn min_angle(st: &State) -> f64 {
     (0..st.faces.len())
         .filter(|&f| st.alive[f])
@@ -452,6 +492,8 @@ pub fn remesh(
         collapses: 0,
         refused_flips: 0,
         refused_collapses: 0,
+        fallback_flips: 0,
+        fallback_collapses: 0,
         unresolved_bad_triangles: 0,
         passes: 0,
         min_angle_before: min_angle(&st),
@@ -483,29 +525,40 @@ pub fn remesh(
                 continue;
             }
             let tri = st.faces[f];
-            if n_small >= 2 {
+            // the edge opposite corner i is (tri[i+1], tri[i+2])
+            let edge = |i: usize| (tri[(i + 1) % 3], tri[(i + 2) % 3], tri[i]);
+            let largest = (0..3).max_by(|&i, &j| ang[i].total_cmp(&ang[j])).unwrap_or(0);
+            let smallest = (0..3).min_by(|&i, &j| ang[i].total_cmp(&ang[j])).unwrap_or(0);
+            let done = if n_small >= 2 {
                 // cap: flip the edge opposite the largest angle
-                let k = (0..3).max_by(|&i, &j| ang[i].total_cmp(&ang[j])).unwrap_or(0);
-                let (p, a, b) = (tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]);
+                let (a, b, p) = edge(largest);
                 match try_flip(&mut st, f, a, b, p) {
                     Ok(()) => {
                         rep.flips += 1;
-                        changed = true;
+                        true
                     }
-                    Err(Refused::Rule(_)) => rep.refused_flips += 1,
+                    Err(Refused::Rule(_)) => {
+                        rep.refused_flips += 1;
+                        false
+                    }
                 }
             } else {
-                let k = (0..3).find(|&i| ang[i] < small).unwrap_or(0);
-                let (u, w) = (tri[(k + 1) % 3], tri[(k + 2) % 3]);
+                // needle: collapse the edge opposite the small angle
+                let (u, w, _) = edge(smallest);
                 match try_collapse(&mut st, u, w, opts.collapse_boundary_edges, opts.min_face_angle) {
                     Ok(()) => {
                         rep.collapses += 1;
-                        changed = true;
+                        true
                     }
-                    Err(Refused::Rule(_)) => rep.refused_collapses += 1,
+                    Err(Refused::Rule(_)) => {
+                        rep.refused_collapses += 1;
+                        false
+                    }
                 }
-            }
-            if changed && opts.validate_each_operation {
+            };
+            let done = done || (opts.fallback_operations && fallback(&mut st, f, n_small, &ang, opts, &mut rep));
+            changed |= done;
+            if done && opts.validate_each_operation {
                 st.validate().map_err(|e| DevError::Internal(format!("remesh produced an invalid mesh: {e}")))?;
             }
         }

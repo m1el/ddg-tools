@@ -92,6 +92,16 @@ fn converged_flow_is_stationary() {
     assert!(o.energy_final < 1e-12, "E = {}", o.energy_final);
 }
 
+/// D36: the default flow is the paper's recipe of Figs. 23-24 (E_P coarse, E_lambda fine).
+#[test]
+fn default_flow_is_coarse_to_fine() {
+    let o = FlowOptions::default();
+    assert_eq!(o, FlowOptions::coarse_to_fine(2, 500));
+    let e: Vec<(Energy, bool, usize)> = o.rounds.iter().map(|r| (r.energy.energy, r.subdivide_before, r.max_iterations)).collect();
+    assert_eq!(e, vec![(Energy::Combinatorial, false, 500), (Energy::Covariance, true, 500), (Energy::Covariance, true, 500)]);
+    assert!(o.remesh.is_some() && o.pinned.is_empty());
+}
+
 #[test]
 fn sphere_energy_concentrates() {
     let g = icosphere(2).unwrap();

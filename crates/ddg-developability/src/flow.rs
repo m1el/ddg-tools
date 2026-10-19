@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use ddg_core::topology::{NONE, TriMesh};
 
-use crate::energy::{EnergyOptions, evaluate_energy};
+use crate::energy::{Energy, EnergyOptions, evaluate_energy};
 use crate::error::DevError;
 use crate::geometry::{corner_angles, v3};
 use crate::optimize::{START_SLACK, check_admissible, 
@@ -73,6 +73,17 @@ impl FlowOptions {
         }
     }
 
+    /// The paper's coarse-to-fine recipe of Figs. 23 and 24 (Sec. 5.2, D36): `E_P`
+    /// ([`Energy::Combinatorial`]) on the input, then `subdivisions` rounds of `E_λ`
+    /// ([`Energy::Covariance`]), each after a 4-1 subdivision; `iterations` per round. Remeshing on
+    /// with defaults; nothing pinned. Meant for a coarse input of uniform triangles (the paper's
+    /// are about 1k triangles from Instant Meshes); see `QUALITY.md`.
+    pub fn coarse_to_fine(subdivisions: usize, iterations: usize) -> Self {
+        let mut o = FlowOptions::uniform(EnergyOptions::new(Energy::Covariance), subdivisions, iterations);
+        o.rounds[0].energy = EnergyOptions::new(Energy::Combinatorial);
+        o
+    }
+
     /// Checks the options.
     ///
     /// # Errors
@@ -107,10 +118,12 @@ impl FlowOptions {
 }
 
 impl Default for FlowOptions {
-    /// Two subdivisions (three rounds) of 500 iterations with `E_λ`, remeshing on (≈ the setup
-    /// of the paper's Fig. 1).
+    /// [`FlowOptions::coarse_to_fine`]`(2, 500)`: `E_P` on the input, then two rounds of `E_λ`
+    /// after a 4-1 subdivision each, 500 iterations per round, remeshing on (the paper's recipe of
+    /// Figs. 23 and 24; D36). Before D36 the default was `E_λ` in all three rounds
+    /// (`FlowOptions::uniform(EnergyOptions::default(), 2, 500)`).
     fn default() -> Self {
-        FlowOptions::uniform(EnergyOptions::default(), 2, 500)
+        FlowOptions::coarse_to_fine(2, 500)
     }
 }
 

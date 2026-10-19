@@ -8,7 +8,9 @@
 #   uv run crates/ddg-developability/examples/robust_summary.py runs_tmp/dev-robust/study/flow
 set -e
 BIN=${CARGO_TARGET_DIR:-target}/release/examples/develop
-OUT=runs_tmp/dev-robust/study
+OUT=${OUT:-runs_tmp/dev-robust/study}
+# EXTRA: more develop options for every flow (e.g. EXTRA=--no-fallback)
+EXTRA=${EXTRA:-}
 PAR=${1:-56}
 M=data/models
 mkdir -p "$OUT/flow" "$OUT/cut"
@@ -32,8 +34,8 @@ while read -r f sub budgets; do
   for e in covariance intrinsic combinatorial; do
     for b in $budgets; do echo "$f $sub $e $b"; done
   done
-done < "$OUT/meshes.txt" | xargs -P "$PAR" -L 1 sh -c \
-  'n=$(basename "$0" .obj)-$2-$3; "'"$BIN"'" "$0" --subdivisions "$1" --energy "$2" --iterations "$3" --threads 1 --no-cut --out "'"$OUT"'/flow/$n.obj" > "'"$OUT"'/flow/$n.log" 2>&1 || true'
+done < "$OUT/meshes.txt" | EXTRA="$EXTRA" xargs -P "$PAR" -L 1 sh -c \
+  'n=$(basename "$0" .obj)-$2-$3; "'"$BIN"'" "$0" --subdivisions "$1" --energy "$2" --iterations "$3" --threads 1 $EXTRA --no-cut --out "'"$OUT"'/flow/$n.obj" > "'"$OUT"'/flow/$n.log" 2>&1 || true'
 # phase 2: one cut per flow (the variant of the cut study that is the default of D30)
 for f in "$OUT"/flow/*.obj; do echo "$f"; done | xargs -P "$PAR" -L 1 sh -c \
   'n=$(basename $0 .obj); "'"$BIN"'" "$0" --cut-only --cut-energy covariance --epsilon 1e-3 --defect-tol 0.1 --threads 1 > "'"$OUT"'/cut/$n.log" 2>&1 || true'
