@@ -35,13 +35,25 @@
 //! * gradients: per vertex `|g - g'| <= 1e-9 G + 1e-12 / mean_edge_length`, `G` the largest vertex
 //!   gradient of the mesh. Normwise relative to the largest entry: the gradient of a near-flat
 //!   star is `O(sqrt(E))` with rounding errors of the normals `1e-16 / h` that are not relative to
-//!   the entry itself.
+//!   the entry itself. The intrinsic energies amplify rounding by `1/sin(phi)` of the angle between
+//!   a face normal and the vertex normal (allowed down to `pi - phi = 1e-6`, SPEC D12), so their
+//!   worst observed disagreement is the largest (`~1e-9` of `G` over millions of vertices, still
+//!   below the tolerance).
 //! * ties (SPEC 3.8): a gradient entry is not compared if the star of the vertex or of one of its
 //!   neighbours (those are the stars it depends on) has a margin `<= 1e-9 max(1, e)` on either
 //!   side, because there the active piece is chosen by rounding. Energies are compared everywhere.
-//! * step: positions to `1e-9` mean edge lengths, energy as above, the trial count and the kind
+//! * step: the oracle models SPEC 4.1-4.3 (scaled steepest descent plus the weak Wolfe search), so
+//!   the optimizer's admissibility floors (`min_face_angle`, `min_fold_angle`) are switched off;
+//!   positions to `1e-9` mean edge lengths, energy as above, the trial count and the kind
 //!   of ending exactly; not compared if the start has a near tie anywhere.
 //! * subdivision: faces and midpoint ids exactly, positions to `1e-14` of the mesh extent.
+
+// The comparisons are written `!(d <= tol)` on purpose: they must fail for NaN.
+#![allow(
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::needless_range_loop,
+    clippy::collapsible_if
+)]
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -174,9 +186,18 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                 input.step.max_doublings = int(&line[5]) as u32;
                 input.step.max_bisections = int(&line[6]) as u32;
             }
-            "pinned" => input.step.pinned.extend(line[1..].iter().map(|t| int(t) as u32)),
-            "p" => input.positions.push([float(&line[1]), float(&line[2]), float(&line[3])]),
-            "f" => input.faces.push([int(&line[1]) as u32, int(&line[2]) as u32, int(&line[3]) as u32]),
+            "pinned" => input
+                .step
+                .pinned
+                .extend(line[1..].iter().map(|t| int(t) as u32)),
+            "p" => input
+                .positions
+                .push([float(&line[1]), float(&line[2]), float(&line[3])]),
+            "f" => input.faces.push([
+                int(&line[1]) as u32,
+                int(&line[2]) as u32,
+                int(&line[3]) as u32,
+            ]),
             "mesh" => {}
             other => panic!("{name}: unknown input line {other}"),
         }
@@ -203,6 +224,7 @@ struct EnergyStats {
     gradient_abs: f64,
     /// counted vertices with a near tie only here, only in the oracle, on both sides
     ties: [usize; 3],
+    worst_gradient_case: String,
 }
 
 #[derive(Default, Clone)]
@@ -212,6 +234,7 @@ struct Stats {
     steps: usize,
     steps_skipped: usize,
     cap_knife_edge: usize,
+    steps_refused: usize,
     steps_by_kind: HashMap<String, usize>,
     step_position: f64,
     step_energy: f64,
@@ -239,10 +262,14 @@ impl Stats {
             for i in 0..3 {
                 a.ties[i] += b.ties[i];
             }
+            if b.gradient_normwise >= a.gradient_normwise {
+                a.worst_gradient_case = b.worst_gradient_case.clone();
+            }
         }
         self.steps += o.steps;
         self.steps_skipped += o.steps_skipped;
         self.cap_knife_edge += o.cap_knife_edge;
+        self.steps_refused += o.steps_refused;
         for (k, v) in o.steps_by_kind {
             *self.steps_by_kind.entry(k).or_default() += v;
         }
@@ -277,13 +304,25 @@ impl Stats {
             let t = self.energy[i].ties;
             s += &format!("  {name:<22} {:>8} {:>8} {:>8}\n", t[0], t[1], t[2]);
         }
+        s += "worst gradient disagreements (case, vertex):\n";
+        for (i, (_, name)) in ENERGIES.iter().enumerate() {
+            s += &format!("  {name:<22} {}\n", self.energy[i].worst_gradient_case);
+        }
         s += &format!(
             "steps: {} compared ({} skipped: ties, rounding-level energy or gradient, close decisions; {} capped steps with one trial more or less at the cap), endings {:?}, largest position difference {:.2e} mean edge lengths, energy {:.2e}\n",
-            self.steps, self.steps_skipped, self.cap_knife_edge, self.steps_by_kind, self.step_position, self.step_energy
+            self.steps,
+            self.steps_skipped,
+            self.cap_knife_edge,
+            self.steps_by_kind,
+            self.step_position,
+            self.step_energy
         );
         s += &format!(
-            "subdivisions: {} compared, largest position difference {:.2e}; invalid meshes rejected by both: {}\n",
-            self.subdivisions, self.subdivision_position, self.invalid_meshes_agreed
+            "subdivisions: {} compared, largest position difference {:.2e}; invalid meshes rejected by both: {}; steps refused by both (undefined energy at the start): {}\n",
+            self.subdivisions,
+            self.subdivision_position,
+            self.invalid_meshes_agreed,
+            self.steps_refused
         );
         s += &format!("{} disagreements\n", self.problems.len());
         s
@@ -313,12 +352,62 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     stats.cases += 1;
     let status = out.iter().find(|l| l[0] == "status").expect("status line");
     let mesh = TriMesh::new(input.positions.len(), input.faces.clone());
+    if status[1] != "ok"
+        && input.task == "step"
+        && (status[2] == "undefined" || status[2] == "degenerate-face")
+    {
+        // the energy is undefined (or a face degenerate) at the start of the step: `optimize` must refuse
+        let Ok(m) = &mesh else {
+            stats.problems.push((
+                input.name.clone(),
+                "TriMesh::new rejects a mesh the oracle accepts".into(),
+            ));
+            return;
+        };
+        let (energy, _) = input.energies[0];
+        let eopts = EnergyOptions {
+            energy,
+            include_boundary: input.include_boundary,
+            omit_valence_three: input.omit_valence_three,
+            threads: None,
+        };
+        let opts = OptimizeOptions {
+            max_iterations: 1,
+            gradient_tolerance: 0.0,
+            min_face_angle: 0.0,
+            min_fold_angle: 0.0,
+            ..OptimizeOptions::default()
+        };
+        let ok = match (
+            optimize(m, &input.positions, &eopts, &opts, None),
+            status[2].as_str(),
+        ) {
+            (Err(DevError::UndefinedEnergy { .. }), "undefined") => true,
+            (Err(DevError::DegenerateFace { .. }), "degenerate-face") => true,
+            _ => false,
+        };
+        if ok {
+            stats.steps_refused += 1;
+        } else {
+            stats.problems.push((
+                input.name.clone(),
+                format!(
+                    "oracle: step refused ({}), here optimize does not fail the same way",
+                    status[2..].join(" ")
+                ),
+            ));
+        }
+        return;
+    }
     if status[1] != "ok" {
         match mesh {
             Err(_) => stats.invalid_meshes_agreed += 1,
             Ok(_) => stats.problems.push((
                 input.name.clone(),
-                format!("the oracle rejects the mesh ({}) but TriMesh::new accepts it", status[2..].join(" ")),
+                format!(
+                    "the oracle rejects the mesh ({}) but TriMesh::new accepts it",
+                    status[2..].join(" ")
+                ),
             )),
         }
         return;
@@ -326,7 +415,10 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     let mesh = match mesh {
         Ok(m) => m,
         Err(e) => {
-            stats.problems.push((input.name.clone(), format!("TriMesh::new rejects the mesh ({e}) but the oracle accepts it")));
+            stats.problems.push((
+                input.name.clone(),
+                format!("TriMesh::new rejects the mesh ({e}) but the oracle accepts it"),
+            ));
             return;
         }
     };
@@ -334,7 +426,9 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
         "energy" => replay_energy(input, &mesh, out, stats),
         "step" => replay_step(input, &mesh, out, stats),
         "subdivide" => replay_subdivide(input, &mesh, out, stats),
-        t => stats.problems.push((input.name.clone(), format!("unknown task {t}"))),
+        t => stats
+            .problems
+            .push((input.name.clone(), format!("unknown task {t}"))),
     }
 }
 
@@ -347,7 +441,10 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
         neighbours[e[0] as usize].push(e[1] as usize);
         neighbours[e[1] as usize].push(e[0] as usize);
     }
-    let mut at = out.iter().position(|l| l[0] == "section").expect("a section");
+    let mut at = out
+        .iter()
+        .position(|l| l[0] == "section")
+        .expect("a section");
     for (energy, name) in &input.energies {
         let k = ENERGIES.iter().position(|(_, nm)| nm == name).unwrap();
         let es = &mut stats.energy[k];
@@ -364,7 +461,9 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
         };
         let mine = evaluate(mesh, &input.positions, &opts);
         let problem = |stats: &mut Stats, msg: String| {
-            stats.problems.push((format!("{} [{name}]", input.name), msg))
+            stats
+                .problems
+                .push((format!("{} [{name}]", input.name), msg))
         };
         if result[1] == "error" {
             at += 2;
@@ -381,7 +480,14 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
             if agree {
                 stats.energy[k].errors_agreed += 1;
             } else {
-                problem(stats, format!("oracle error '{}', here {:?}", result[2..].join(" "), mine.as_ref().map(|e| e.energy)));
+                problem(
+                    stats,
+                    format!(
+                        "oracle error '{}', here {:?}",
+                        result[2..].join(" "),
+                        mine.as_ref().map(|e| e.energy)
+                    ),
+                );
             }
             continue;
         }
@@ -407,7 +513,10 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
         }
         let mut local: Vec<String> = Vec::new();
         if !(d <= ENERGY_REL * total.abs().max(ev.energy.abs()) + ENERGY_ABS) {
-            local.push(format!("total energy: here {:e}, oracle {:e}", ev.energy, total));
+            local.push(format!(
+                "total energy: here {:e}, oracle {:e}",
+                ev.energy, total
+            ));
         }
         // per-vertex lines: v, g, ch
         let mut o_energy = vec![0.0; n];
@@ -430,7 +539,10 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
         let mut gscale = 0.0f64;
         for i in 0..n {
             if o_counted[i] != ev.counted[i] {
-                local.push(format!("vertex {i}: counted here {}, oracle {}", ev.counted[i], o_counted[i]));
+                local.push(format!(
+                    "vertex {i}: counted here {}, oracle {}",
+                    ev.counted[i], o_counted[i]
+                ));
             }
             es.vertices += 1;
             let (a, b) = (ev.vertex_energy[i], o_energy[i]);
@@ -451,7 +563,16 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
             if ev.counted[i] {
                 let scale = TIE * 1.0f64.max(ev.vertex_energy[i].abs());
                 let (r, o) = (!(ev.vertex_margin[i] > scale), !(o_margin[i] > scale));
-                es.ties[if r && o { 2 } else if r { 0 } else if o { 1 } else { 3 }.min(2)] += (r || o) as usize;
+                es.ties[if r && o {
+                    2
+                } else if r {
+                    0
+                } else if o {
+                    1
+                } else {
+                    3
+                }
+                .min(2)] += (r || o) as usize;
             }
         }
         // tie-free vertices: the star and all neighbour stars
@@ -473,11 +594,14 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
             let h = o_grad[p];
             let d = norm([g[0] - h[0], g[1] - h[1], g[2] - h[2]]);
             es.gradient_abs = es.gradient_abs.max(d);
-            if gscale > 1e-6 {
-                es.gradient_normwise = es.gradient_normwise.max(d / gscale);
+            if gscale > 1e-6 && d / gscale > es.gradient_normwise {
+                es.gradient_normwise = d / gscale;
+                es.worst_gradient_case = format!("{} vertex {p}", input.name);
             }
             if !(d <= GRADIENT_REL * gscale + GRADIENT_ABS / ell) {
-                local.push(format!("vertex {p}: gradient here {g:?}, oracle {h:?} (G = {gscale:e})"));
+                local.push(format!(
+                    "vertex {p}: gradient here {g:?}, oracle {h:?} (G = {gscale:e})"
+                ));
             }
         }
         if !local.is_empty() {
@@ -494,7 +618,11 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
 fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     let (energy, name) = input.energies[0];
     let k = ENERGIES.iter().position(|(_, nm)| *nm == name).unwrap();
-    let key = |tag: &str| out.iter().find(|l| l[0] == tag).unwrap_or_else(|| panic!("{}: no {tag}", input.name));
+    let key = |tag: &str| {
+        out.iter()
+            .find(|l| l[0] == tag)
+            .unwrap_or_else(|| panic!("{}: no {tag}", input.name))
+    };
     let result = key("result");
     let o_margin = float(&key("margin")[1]);
     let o_lbar = float(&key("lbar")[1]);
@@ -508,7 +636,10 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     let ev = match evaluate(mesh, &input.positions, &eopts) {
         Ok(ev) => ev,
         Err(_) => {
-            stats.problems.push((input.name.clone(), "oracle ok at the start, here error".into()));
+            stats.problems.push((
+                input.name.clone(),
+                "oracle ok at the start, here error".into(),
+            ));
             return;
         }
     };
@@ -551,12 +682,18 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
         initial_step: s.initial_step,
         max_displacement: s.max_displacement,
         pinned: s.pinned.clone(),
+        // the oracle implements SPEC §4.1-§4.3; the admissibility floors (D31, D32) are an addition of
+        // the optimizer that the oracle does not model, so they are switched off here
+        min_face_angle: 0.0,
+        min_fold_angle: 0.0,
         ..OptimizeOptions::default()
     };
     let res = match optimize(mesh, &input.positions, &eopts, &opts, None) {
         Ok(r) => r,
         Err(e) => {
-            stats.problems.push((input.name.clone(), format!("optimize failed: {e}")));
+            stats
+                .problems
+                .push((input.name.clone(), format!("optimize failed: {e}")));
             return;
         }
     };
@@ -569,7 +706,10 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     match kind {
         "stationary" => {
             if r.iterations != 0 {
-                local.push(format!("oracle: stationary, here {} iterations", r.iterations));
+                local.push(format!(
+                    "oracle: stationary, here {} iterations",
+                    r.iterations
+                ));
             }
         }
         "failed" => {
@@ -597,14 +737,20 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
                 if kind == "capped" && r.line_search_trials.abs_diff(o_trials) == 1 {
                     stats.cap_knife_edge += 1;
                 } else {
-                    local.push(format!("trials: here {}, oracle {o_trials}", r.line_search_trials));
+                    local.push(format!(
+                        "trials: here {}, oracle {o_trials}",
+                        r.line_search_trials
+                    ));
                 }
             }
             let e1 = float(&result[4]);
             let de = (e1 - r.energy_final).abs();
             stats.step_energy = stats.step_energy.max(de);
             if !(de <= ENERGY_REL * e1.abs().max(r.energy_final.abs()) + ENERGY_ABS) {
-                local.push(format!("energy after the step: here {:e}, oracle {e1:e}", r.energy_final));
+                local.push(format!(
+                    "energy after the step: here {:e}, oracle {e1:e}",
+                    r.energy_final
+                ));
             }
         }
     }
@@ -616,10 +762,14 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     }
     stats.step_position = stats.step_position.max(worst);
     if !(worst <= 1e-9) {
-        local.push(format!("positions after the step differ by {worst:e} mean edge lengths"));
+        local.push(format!(
+            "positions after the step differ by {worst:e} mean edge lengths"
+        ));
     }
     if !local.is_empty() {
-        stats.problems.push((format!("{} [step {name}]", input.name), local.join("; ")));
+        stats
+            .problems
+            .push((format!("{} [step {name}]", input.name), local.join("; ")));
     }
 }
 
@@ -627,7 +777,9 @@ fn replay_subdivide(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Sta
     let sub = match subdivide(mesh, &input.positions) {
         Ok(s) => s,
         Err(e) => {
-            stats.problems.push((input.name.clone(), format!("subdivide failed: {e}")));
+            stats
+                .problems
+                .push((input.name.clone(), format!("subdivide failed: {e}")));
             return;
         }
     };
@@ -636,7 +788,13 @@ fn replay_subdivide(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Sta
     let nv = mesh.n_vertices();
     let header = out.iter().find(|l| l[0] == "mesh").unwrap();
     if int(&header[1]) != sub.positions.len() || int(&header[2]) != sub.mesh.n_faces() {
-        local.push(format!("sizes: here {} vertices {} faces, oracle {} {}", sub.positions.len(), sub.mesh.n_faces(), header[1], header[2]));
+        local.push(format!(
+            "sizes: here {} vertices {} faces, oracle {} {}",
+            sub.positions.len(),
+            sub.mesh.n_faces(),
+            header[1],
+            header[2]
+        ));
     }
     let extent = input
         .positions
@@ -669,7 +827,10 @@ fn replay_subdivide(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Sta
         let (a, b, id) = (int(&l[1]) as u32, int(&l[2]) as u32, int(&l[3]));
         match mesh.find_edge(a as usize, b as usize) {
             Some(e) if sub.edge_midpoint[e] as usize == id => {}
-            other => local.push(format!("midpoint of edge ({a}, {b}): oracle {id}, here {:?} (edge {other:?}, nv {nv})", other.map(|e| sub.edge_midpoint[e]))),
+            other => local.push(format!(
+                "midpoint of edge ({a}, {b}): oracle {id}, here {:?} (edge {other:?}, nv {nv})",
+                other.map(|e| sub.edge_midpoint[e])
+            )),
         }
     }
     if !local.is_empty() {
@@ -685,7 +846,9 @@ fn replay_text(inputs: &str, outputs: &str) -> Stats {
         let input = parse_input(&name, &lines);
         match outs.get(&name) {
             Some(out) => replay(&input, out, &mut stats),
-            None => stats.problems.push((name, "no answer from the oracle".into())),
+            None => stats
+                .problems
+                .push((name, "no answer from the oracle".into())),
         }
     }
     stats
@@ -708,7 +871,12 @@ fn fixtures_are_reproduced() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 40, "only {} fixtures in {}", names.len(), dir.display());
+    assert!(
+        names.len() >= 40,
+        "only {} fixtures in {}",
+        names.len(),
+        dir.display()
+    );
     let mut total = Stats::default();
     for name in &names {
         let inputs = std::fs::read_to_string(dir.join(format!("{name}.in"))).unwrap();
@@ -719,7 +887,11 @@ fn fixtures_are_reproduced() {
     for (name, msg) in &total.problems {
         println!("DISAGREEMENT {name}: {msg}");
     }
-    assert!(total.problems.is_empty(), "{} disagreements with the golden fixtures", total.problems.len());
+    assert!(
+        total.problems.is_empty(),
+        "{} disagreements with the golden fixtures",
+        total.problems.len()
+    );
 }
 
 // ----- fuzzing -----
@@ -727,18 +899,27 @@ fn fixtures_are_reproduced() {
 fn oracle_path() -> PathBuf {
     match std::env::var("DDG_ORACLE") {
         Ok(p) => PathBuf::from(p),
-        Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean/oracle/.lake/build/bin/ddg-oracle"),
+        Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../lean/oracle/.lake/build/bin/ddg-oracle"),
     }
 }
 
 fn env_usize(name: &str, default: usize) -> usize {
-    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Generate `count` cases starting at index `first`, answer them, replay them.
 fn fuzz_chunk(oracle: &Path, seed: usize, first: usize, count: usize) -> (Stats, String) {
     let generated = Command::new(oracle)
-        .args(["dev-gen", &seed.to_string(), &count.to_string(), &first.to_string()])
+        .args([
+            "dev-gen",
+            &seed.to_string(),
+            &count.to_string(),
+            &first.to_string(),
+        ])
         .output()
         .expect("run dev-gen");
     assert!(generated.status.success(), "dev-gen failed");
@@ -770,7 +951,9 @@ fn fuzz_against_the_oracle() {
     let seed = env_usize("DDG_DEV_FUZZ_SEED", 1);
     let threads = env_usize(
         "DDG_DEV_FUZZ_THREADS",
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4),
     );
     let chunk = 25;
     let n_chunks = cases.div_ceil(chunk);
@@ -793,7 +976,9 @@ fn fuzz_against_the_oracle() {
                         let mut map = inputs_of_problems.lock().unwrap();
                         for (name, _) in &stats.problems {
                             let base = name.split(' ').next().unwrap().to_string();
-                            if let Some((_, lines)) = blocks(&inputs).into_iter().find(|(n, _)| *n == base) {
+                            if let Some((_, lines)) =
+                                blocks(&inputs).into_iter().find(|(n, _)| *n == base)
+                            {
                                 let mut text = format!("case {base}\n");
                                 for l in lines {
                                     text += &(l.join(" ") + "\n");
@@ -809,7 +994,10 @@ fn fuzz_against_the_oracle() {
         }
     });
     let total = total.into_inner().unwrap();
-    println!("seed {seed}, {cases} cases, {threads} threads, {:.1} s", started.elapsed().as_secs_f64());
+    println!(
+        "seed {seed}, {cases} cases, {threads} threads, {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
     println!("{}", total.report());
     let dir = std::env::var("DDG_DEV_FUZZ_DIR")
         .map(PathBuf::from)
@@ -823,8 +1011,80 @@ fn fuzz_against_the_oracle() {
         for (name, text) in &map {
             std::fs::write(dir.join(format!("{name}.in")), text).unwrap();
         }
-        println!("inputs of the disagreeing cases written to {}", dir.display());
+        println!(
+            "inputs of the disagreeing cases written to {}",
+            dir.display()
+        );
     }
     let _ = hex(0.0);
-    assert!(total.problems.is_empty(), "{} disagreements", total.problems.len());
+    assert!(
+        total.problems.is_empty(),
+        "{} disagreements",
+        total.problems.len()
+    );
+}
+
+// ----- a finding that the comparison above cannot show (both sides share it) -----
+
+/// A boundary vertex with two faces has `e_v = 0` for every energy (SPEC 3.1), so including the
+/// boundary in the domain must not change the energy or the gradient of the interior vertices.
+/// For `E_lambda` and the intrinsic width it does, when the two faces of a boundary vertex are
+/// nearly coplanar: the smallest eigenvalue of its covariance is double up to the square of the
+/// normal angle `delta`, the computed eigenvector is an arbitrary vector of the null plane, and
+/// the sensitivities `2 theta (x.N) x` are of the size `delta` instead of zero (the oracle has the
+/// same noise, which is why it reports the real eigenvalue gap for such stars and the comparison
+/// skips them). Run with `--ignored --nocapture`; it prints the relative change of the gradient
+/// when the (zero) boundary energies are added, for hinge stars with noise `eps`.
+#[test]
+#[ignore = "informational: prints the effect; see the comment"]
+fn nearly_coplanar_two_face_boundary_stars_perturb_the_gradient() {
+    // hinge star: apex 0, ring on the planes z = +- a |x|, two ring points on the crease
+    let ring_angles = [90.0f64, 130.0, 180.0, 230.0, 270.0, 320.0, 0.0, 40.0];
+    for eps in [1e-12, 1e-9, 1e-6, 1e-3] {
+        let mut state = 0x9E3779B97F4A7C15u64;
+        let mut noise = || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 2.0 * eps
+        };
+        let mut positions = vec![[noise(), noise(), noise()]];
+        for a in ring_angles {
+            let t = a.to_radians();
+            let (x, y) = (1.1 * t.cos(), 1.1 * t.sin());
+            let x = if x.abs() < 1e-12 { 0.0 } else { x };
+            positions.push([x + noise(), y + noise(), 0.8 * x.abs() + noise()]);
+        }
+        let k = ring_angles.len();
+        let faces: Vec<[u32; 3]> = (0..k)
+            .map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32])
+            .collect();
+        let mesh = TriMesh::new(positions.len(), faces).unwrap();
+        for energy in [Energy::Covariance, Energy::Intrinsic, Energy::Combinatorial] {
+            let with = |include_boundary| {
+                let opts = EnergyOptions {
+                    energy,
+                    include_boundary,
+                    omit_valence_three: true,
+                    threads: None,
+                };
+                evaluate(&mesh, &positions, &opts).unwrap()
+            };
+            let (a, b) = (with(true), with(false));
+            let g0 = norm(b.gradient[0]).max(1e-300);
+            let diff = (0..positions.len())
+                .map(|v| {
+                    norm([
+                        a.gradient[v][0] - b.gradient[v][0],
+                        a.gradient[v][1] - b.gradient[v][1],
+                        a.gradient[v][2] - b.gradient[v][2],
+                    ])
+                })
+                .fold(0.0f64, f64::max);
+            println!(
+                "eps {eps:e} {energy:?}: |g| at the apex {g0:.3e}, change when the boundary is included {diff:.3e} (relative {:.3e})",
+                diff / g0
+            );
+        }
+    }
 }
