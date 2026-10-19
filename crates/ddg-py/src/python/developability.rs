@@ -269,6 +269,11 @@ impl MakeDevelopableResult {
 /// max_displacement  step cap in mean edge lengths (default 0.5).
 /// gradient_tolerance, energy_tolerance, stall_iterations, initial_step
 ///                   stopping rules and first trial step; None keeps the library's value.
+/// min_face_angle, min_fold_angle
+///                   admissibility floors (radians; None keeps the library's value, 0 switches
+///                   the check off): a step that would make a corner angle smaller than
+///                   min_face_angle, or two faces at an edge fold onto each other within
+///                   min_fold_angle, is refused. An input that violates them is a MeshError.
 /// pinned_vertices   vertices of the input that do not move (a midpoint created by subdivision
 ///                   is pinned iff both ends are).
 /// Remeshing
@@ -325,6 +330,8 @@ impl MakeDevelopableResult {
     energy_tolerance = None,
     stall_iterations = None,
     initial_step = None,
+    min_face_angle = None,
+    min_fold_angle = None,
     pinned_vertices = None,
     remesh = true,
     small_angle = std::f64::consts::PI / 180.0,
@@ -355,6 +362,8 @@ fn make_developable<'py>(
     energy_tolerance: Option<f64>,
     stall_iterations: Option<i64>,
     initial_step: Option<f64>,
+    min_face_angle: Option<f64>,
+    min_fold_angle: Option<f64>,
     pinned_vertices: Option<&Bound<'py, PyAny>>,
     remesh: bool,
     small_angle: f64,
@@ -401,6 +410,12 @@ fn make_developable<'py>(
     }
     if let Some(x) = initial_step {
         o.initial_step = x;
+    }
+    if let Some(x) = min_face_angle {
+        o.min_face_angle = x;
+    }
+    if let Some(x) = min_fold_angle {
+        o.min_fold_angle = x;
     }
     o.pinned = optional_indices("pinned_vertices", pinned_vertices)?;
     o.remesh = remesh.then(|| RemeshOptions { small_angle, collapse_boundary_edges, ..RemeshOptions::default() });
@@ -452,6 +467,7 @@ fn make_developable<'py>(
     report.set_item("iterations", r.iterations)?;
     report.set_item("max_displacement", r.max_displacement)?;
     report.set_item("mean_edge_length", r.mean_edge_length)?;
+    report.set_item("min_angle", r.min_angle)?;
     report.set_item("nonplanarity_before", r.nonplanarity_before)?;
     report.set_item("nonplanarity_after", r.nonplanarity_after)?;
     report.set_item("nonplanarity_after_relative", r.nonplanarity_after_relative)?;

@@ -5,7 +5,7 @@ element types. Results are ``array.array`` objects.
 """
 
 from array import array
-from collections.abc import Buffer, Sequence
+from collections.abc import Buffer, Callable, Sequence
 from typing import Final, Literal, final
 
 __version__: Final[str]
@@ -160,6 +160,179 @@ def map_to_sphere(
     result is determined up to a rotation of the sphere. Raises ``InputError`` (bad arguments, a
     pole that is not a vertex) and ``MeshError`` (not a valid manifold triangle mesh, or not
     connected, closed and of genus 0)."""
+
+# ----------------------------------------------------------------------------------------------
+# Developability of triangle meshes (Stein, Grinspun, Crane 2018).
+# ----------------------------------------------------------------------------------------------
+
+ENERGIES: Final[list[str]]
+"""The six energies: ``combinatorial``, ``combinatorial_max``, ``covariance``, ``covariance_max``,
+``intrinsic``, ``intrinsic_max``."""
+
+DEFAULT_DEFECT_TOLERANCE: Final[float]
+"""Default ``defect_tolerance`` of the cut functions, radians."""
+
+Energy = Literal["combinatorial", "combinatorial_max", "covariance", "covariance_max", "intrinsic", "intrinsic_max"]
+
+@final
+class DevelopabilityResult:
+    @property
+    def vertex_energy(self) -> array[float]:
+        """``array('d')``, one per vertex."""
+    @property
+    def counted(self) -> array[int]:
+        """``array('B')``: 1 where the vertex counts toward the total."""
+    @property
+    def energy(self) -> float: ...
+    @property
+    def report(self) -> dict[str, int | float]:
+        """``near_ties``, ``n_counted``, ``max_vertex_energy``, ``seconds``, ``seconds_total``."""
+
+def developability(
+    positions: Buffer,
+    corner_vertices: Buffer,
+    polygon_starts: Buffer,
+    triangles: Buffer,
+    *,
+    energy: Energy = "covariance",
+    include_boundary: bool = True,
+    omit_valence_three: bool = True,
+    threads: int | None = None,
+) -> DevelopabilityResult:
+    """The developability energy per vertex of a polygon mesh with Blender's triangulation.
+    Raises ``InputError`` and ``MeshError``."""
+
+@final
+class MakeDevelopableResult:
+    @property
+    def positions(self) -> array[float]:
+        """``array('d')``, 3 per vertex: of the input mesh if ``faces`` is ``None``, else of the
+        new mesh."""
+    @property
+    def faces(self) -> array[int] | None:
+        """``array('i')``, 3 vertices per triangle; ``None`` if the topology did not change."""
+    @property
+    def face_polygon(self) -> array[int] | None:
+        """``array('i')``: the polygon of the input each triangle of ``faces`` descends from."""
+    @property
+    def vertex_source(self) -> array[int]:
+        """``array('i')``: the input vertex each vertex descends from, -1 if created by
+        subdivision."""
+    @property
+    def report(self) -> dict[str, object]:
+        """See the README: ``energy_initial``, ``energy_final``, ``cancelled``,
+        ``topology_changed``, ``nonplanarity_*``, ``rounds`` (list of dicts), ``warnings``, ..."""
+
+def make_developable(
+    positions: Buffer,
+    corner_vertices: Buffer,
+    polygon_starts: Buffer,
+    triangles: Buffer,
+    *,
+    energy: Energy = "covariance",
+    include_boundary: bool = True,
+    omit_valence_three: bool = True,
+    method: Literal["lbfgs", "gradient_descent", "fixed_step"] = "lbfgs",
+    memory: int = 10,
+    step: float = 1e-3,
+    line_search: Literal["wolfe", "backtracking"] = "wolfe",
+    iterations: int = 500,
+    subdivisions: int = 2,
+    max_displacement: float = 0.5,
+    gradient_tolerance: float | None = None,
+    energy_tolerance: float | None = None,
+    stall_iterations: int | None = None,
+    initial_step: float | None = None,
+    min_face_angle: float | None = None,
+    min_fold_angle: float | None = None,
+    pinned_vertices: Buffer | None = None,
+    remesh: bool = True,
+    small_angle: float = 0.017453292519943295,
+    collapse_boundary_edges: bool = True,
+    return_faces: bool = False,
+    threads: int | None = None,
+    progress: "Callable[[int, int, float, float], object] | None" = None,
+    progress_interval: float = 0.1,
+) -> MakeDevelopableResult:
+    """The developability flow. ``progress(round, iteration, energy, gradient_norm)`` may return
+    ``False`` to stop. Raises ``InputError`` and ``MeshError``, ``SolveError``."""
+
+@final
+class DevelopableSeamsResult:
+    @property
+    def seam_edges(self) -> array[int]: ...
+    @property
+    def terminals(self) -> array[int]: ...
+    @property
+    def vertex_energy(self) -> array[float]: ...
+    @property
+    def vertex_defect(self) -> array[float]: ...
+    @property
+    def star_embeddedness(self) -> array[float]: ...
+    @property
+    def report(self) -> dict[str, object]: ...
+
+@final
+class DevelopableUnwrapResult:
+    @property
+    def corner_uvs(self) -> array[float]:
+        """``array('f')``, 2 per polygon corner, packed."""
+    @property
+    def seam_edges(self) -> array[int]: ...
+    @property
+    def polygon_chart(self) -> array[int]: ...
+    @property
+    def corner_log_scale(self) -> array[float]: ...
+    @property
+    def terminals(self) -> array[int]: ...
+    @property
+    def vertex_energy(self) -> array[float]: ...
+    @property
+    def vertex_defect(self) -> array[float]: ...
+    @property
+    def star_embeddedness(self) -> array[float]: ...
+    @property
+    def report(self) -> dict[str, object]: ...
+
+def developable_seams(
+    positions: Buffer,
+    corner_vertices: Buffer,
+    polygon_starts: Buffer,
+    triangles: Buffer,
+    *,
+    seam_edges: Buffer | None = None,
+    extra_terminals: Buffer | None = None,
+    energy: Energy | None = None,
+    epsilon: float = 1e-3,
+    defect_tolerance: float | None = DEFAULT_DEFECT_TOLERANCE,
+    length_weight: float = 1.0,
+    alignment_weight: float = 0.0,
+    extension: Literal["harmonic", "conjugate"] = "harmonic",
+    overlap_samples_per_triangle: float | None = 0.0,
+    threads: int | None = None,
+) -> DevelopableSeamsResult:
+    """Where to cut a polygon mesh (polygon edges only). Feed ``seam_edges`` to ``unwrap``."""
+
+def developable_unwrap(
+    positions: Buffer,
+    corner_vertices: Buffer,
+    polygon_starts: Buffer,
+    triangles: Buffer,
+    *,
+    seam_edges: Buffer | None = None,
+    extra_terminals: Buffer | None = None,
+    energy: Energy | None = None,
+    epsilon: float = 1e-3,
+    defect_tolerance: float | None = DEFAULT_DEFECT_TOLERANCE,
+    length_weight: float = 1.0,
+    alignment_weight: float = 0.0,
+    extension: Literal["harmonic", "conjugate"] = "harmonic",
+    overlap_samples_per_triangle: float | None = None,
+    margin: float = 1 / 256,
+    threads: int | None = None,
+) -> DevelopableUnwrapResult:
+    """The paper's cut and flatten: cut through the high-energy vertices and flatten each chart
+    with BFF keeping the boundary lengths; charts packed. A chart may overlap itself."""
 
 # ----------------------------------------------------------------------------------------------
 # The cut flow: "Variational Surface Cutting" (Sharp, Crane 2018) on a polygon mesh.

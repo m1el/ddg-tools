@@ -139,6 +139,38 @@ fn dev_error(e: dev::DevError, prep: &Prepared, input: bool) -> UnwrapError {
             "a degenerate triangle (zero area) appeared during the computation (face {face} of the \
              current mesh)"
         )),
+        E::NearDegenerateFace { face, min_angle, limit } if input => UnwrapError::Mesh(format!(
+            "polygon {} has a nearly degenerate triangle (corner angle {:.3e} degrees, the limit is \
+             {:.3e} degrees): repair the sliver or lower min_face_angle (0 switches the check off)",
+            prep.triangle_polygon.get(face as usize).copied().unwrap_or(face),
+            min_angle.to_degrees(),
+            limit.to_degrees()
+        )),
+        E::NearDegenerateFace { face, min_angle, limit } => UnwrapError::Solve(format!(
+            "a nearly degenerate triangle appeared (face {face} of the current mesh, corner angle \
+             {:.3e} degrees, limit {:.3e} degrees)",
+            min_angle.to_degrees(),
+            limit.to_degrees()
+        )),
+        E::FoldedEdge { vertices, gap, limit } if input => {
+            let v = |x: u32| prep.new_to_old.get(x as usize).copied().unwrap_or(x);
+            UnwrapError::Mesh(format!(
+                "edge ({}, {}) is folded flat onto itself (its two faces' normals are within {:.3e} degrees \
+                 of opposite, the limit is {:.3e} degrees): lower min_fold_angle (0 switches the check off)",
+                v(vertices[0]).min(v(vertices[1])),
+                v(vertices[0]).max(v(vertices[1])),
+                gap.to_degrees(),
+                limit.to_degrees()
+            ))
+        }
+        E::FoldedEdge { vertices, gap, limit } => UnwrapError::Solve(format!(
+            "an edge ({}, {}) of the current mesh folded flat onto itself ({:.3e} degrees from opposite normals, \
+             limit {:.3e} degrees)",
+            vertices[0],
+            vertices[1],
+            gap.to_degrees(),
+            limit.to_degrees()
+        )),
         E::UndefinedEnergy { vertex, reason } if input => UnwrapError::Mesh(format!(
             "the energy is undefined at vertex {}: {reason}",
             prep.new_to_old.get(vertex as usize).copied().unwrap_or(vertex)
@@ -338,6 +370,11 @@ pub struct MakeOptions {
     pub stall_iterations: usize,
     /// First trial step in mean edge lengths.
     pub initial_step: f64,
+    /// Admissibility floor on the smallest corner angle of a face, radians (D31); 0 is off.
+    pub min_face_angle: f64,
+    /// Admissibility floor on the angle between the normals of two faces at an edge and
+    /// antipodal, radians (D32); 0 is off.
+    pub min_fold_angle: f64,
     /// Vertices of the caller that do not move.
     pub pinned: Vec<u32>,
     /// Return the triangle mesh even if the topology did not change.
@@ -362,6 +399,8 @@ impl Default for MakeOptions {
             energy_tolerance: o.energy_tolerance,
             stall_iterations: o.stall_iterations,
             initial_step: o.initial_step,
+            min_face_angle: o.min_face_angle,
+            min_fold_angle: o.min_fold_angle,
             pinned: Vec::new(),
             return_faces: false,
             progress_interval: 0.1,
@@ -436,6 +475,8 @@ pub struct MakeReport {
     pub max_displacement: f64,
     /// Mean edge length of the input (the unit of the steps).
     pub mean_edge_length: f64,
+    /// Smallest corner angle of the result, radians.
+    pub min_angle: f64,
     /// Largest non-planarity of a polygon with more than three corners, before the flow: the
     /// largest distance of a corner from the polygon's mean plane (centroid and Newell normal).
     /// `None` if all polygons are triangles.
@@ -602,6 +643,8 @@ pub fn make_developable(
         stall_iterations: options.stall_iterations,
         initial_step: options.initial_step,
         max_displacement: options.max_displacement,
+        min_face_angle: options.min_face_angle,
+        min_fold_angle: options.min_fold_angle,
         pinned: Vec::new(),
     };
     oo.validate().map_err(|e| {
@@ -756,6 +799,11 @@ pub fn make_developable(
         iterations: rounds.iter().map(|x| x.iterations).sum(),
         max_displacement: max_disp,
         mean_edge_length: mean_edge,
+        min_angle: mesh
+            .faces()
+            .iter()
+            .flat_map(|f| dev::geometry::corner_angles(f.map(|v| pos[v as usize])))
+            .fold(f64::INFINITY, f64::min),
         nonplanarity_before,
         nonplanarity_after: np_after.map(|b| b.0),
         nonplanarity_after_relative: np_after.map(|b| if b.2 > 0.0 { b.0 / b.2 } else { 0.0 }),
