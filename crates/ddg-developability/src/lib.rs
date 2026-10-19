@@ -16,5 +16,6 @@
 pub mod eig;
 pub mod error;
 pub mod optimize;
+pub mod subdivide;
 
 pub use error::DevError;
