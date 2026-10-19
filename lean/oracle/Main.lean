@@ -27,6 +27,11 @@ usage:
                                     (flip, delaunay, trace, edgetrace, circumcenter, move)
   ddg-oracle intrinsic-selftest     internal checks of the intrinsic operations
   ddg-oracle intrinsic-fixtures write DIR | check DIR   golden fixtures (fixtures/intrinsic)
+  ddg-oracle dev [IN [OUT]]         energies, one L-BFGS step and 4-1 subdivision of 'Developability of Triangle Meshes'
+                                    (Stein, Grinspun, Crane 2018); tasks energy, step, subdivide
+  ddg-oracle dev-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `dev` to standard output
+  ddg-oracle dev-selftest           internal checks of the developability oracle
+  ddg-oracle dev-fixtures write DIR | check DIR   golden fixtures (fixtures/dev-*)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -111,6 +116,27 @@ def main (args : List String) : IO UInt32 := do
   | ["intrinsic-selftest"] => return if (← Intrinsic.selftest) == 0 then 0 else 1
   | ["intrinsic-fixtures", "write", dir] => Intrinsic.writeFixtures dir; return 0
   | ["intrinsic-fixtures", "check", dir] => return if (← Intrinsic.checkFixtures dir) == 0 then 0 else 1
+  | "dev" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← Developability.runStream input output
+    output.flush
+    return 0
+  | "dev-gen" :: seed :: count :: rest =>
+    match seed.toNat?, count.toNat?, (rest.getD 0 "0").toNat? with
+    | some s, some n, some first =>
+      let out ← IO.getStdout
+      for i in [first:first + n] do
+        out.putStr (Developability.printCase (Developability.genCase s i))
+      out.flush
+      return 0
+    | _, _, _ => IO.eprintln usage; return 2
+  | ["dev-selftest"] => return if (← Developability.selftest) == 0 then 0 else 1
+  | ["dev-fixtures", "write", dir] => Developability.writeFixtures dir; return 0
+  | ["dev-fixtures", "check", dir] => return if (← Developability.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

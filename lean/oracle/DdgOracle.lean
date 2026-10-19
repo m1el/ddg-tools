@@ -15,3 +15,4 @@ import DdgOracle.Fixtures
 import DdgOracle.Cuts
 import DdgOracle.Regions
 import DdgOracle.Intrinsic
+import DdgOracle.Developability
