@@ -14,8 +14,12 @@
 //! implemented here with cyclic Jacobi rotations (a textbook method).
 
 pub mod eig;
+pub mod energy;
 pub mod error;
+pub mod geometry;
 pub mod optimize;
+pub mod remesh;
 pub mod subdivide;
 
+pub use energy::{Energy, EnergyOptions, Evaluation, evaluate, evaluate_energy};
 pub use error::DevError;
