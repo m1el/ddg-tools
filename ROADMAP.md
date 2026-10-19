@@ -306,11 +306,12 @@ studies: `crates/ddg-developability/SPEC.md` (§12 holds the studies), README, `
 ("Measured").
 
 Open:
-* **Global UV overlap.** "Developable Seams + UV" hands the developable cut to the `ddg-uv`
-  pipeline (the user's choice, D23). The pieces are so close to developable that the pipeline
-  places 0 cones and keeps 1 chart, so nothing stops a chart from overlapping itself: 1–16 % on
-  the dense spot/bob/blub meshes after the default flow, 31–38 % on spot's control mesh;
-  0 mirrored triangles everywhere. Neither the threshold nor the defect tolerance fixes it.
+* **Global UV overlap.** Done (2026-10-19): `ddg-uv` splits overlapping charts automatically
+  (`UnwrapOptions::split_overlaps`, on in "Developable Seams + UV", off in Conformal Unwrap).
+  At the default flow the overlap falls from 1-40 % to at most 0.33 %, 0 mirrored triangles; some
+  raw dense input meshes keep 1.4-6.5 % (budget of 32 cuts, undone cuts). Open: try a second pair of
+  layers when a cut is undone; rerun only the changed charts instead of the whole pipeline
+  (3 to 10 times the unsplit time). See `crates/ddg-uv/README.md`.
 * **Black-box comparison with the authors' program not run.** Its build needs libigl (an empty
   submodule in the reference tree, commit `d4b67260855f`); fetching it was blocked by the
   agent's safety check. Waits for the user to supply libigl at `/var/data/ddg-quarantine/libigl`.

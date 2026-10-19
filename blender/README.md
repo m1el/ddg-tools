@@ -602,6 +602,28 @@ size); a second cut with the first as seams; every error path has a readable mes
 `scripts/blender-test.sh --bench` also times Start, Flow and Apply against the library time
 (`blender/tests/bench_cut.py`).
 
+#### Split Overlapping Charts (Developable Seams + UV)
+
+The option **Split Overlapping Charts** (on by default in Developable Seams + UV, off in Conformal
+Unwrap) cuts every chart that overlaps itself across the layers and flattens the parts again; a cut
+is kept only if it lowers the overlap and mirrors no triangle (`crates/ddg-uv/README.md`,
+"Splitting overlapping charts"). The status line reports the number of splits. "Mark All Cuts"
+also marks the split cuts as seams. The table repeats the rows above for the defaults, with the
+option off and on (the "overlap" column above is the option-off figure):
+
+| mesh (2 subdivisions) | overlap off | overlap on | splits kept (undone) | charts | extra seam length | area distortion off / on | mirrored | seams+UV s off / on |
+|---|---|---|---|---|---|---|---|---|
+| spot_quad | 2.92 % | 1.54 % | 5 (8) | 1 -> 6 | 0.9 | 0.0002 / 0.0002 | 0 / 0 | 0.8 / 8.0 |
+| spot_tri | 20.02 % | 0.03 % | 18 (2) | 1 -> 19 | 4.3 | 0.0003 / 0.0002 | 0 / 0 | 1.0 / 5.1 |
+| spot_control | 37.58 % | 0.01 % | 9 (0) | 1 -> 10 | 5.5 | 0.0004 / 0.0001 | 0 / 0 | 0.0 / 0.2 |
+| bob_quad | 0.98 % | 0.04 % | 3 (0) | 1 -> 4 | 1.0 | 0.0342 / 0.0343 | 0 / 0 | 1.8 / 7.0 |
+| bob_tri | 8.22 % | 0.06 % | 7 (0) | 1 -> 8 | 3.3 | 0.0485 / 0.0231 | 0 / 0 | 2.0 / 25.4 |
+| bob_control | 6.86 % | 0.02 % | 8 (0) | 1 -> 9 | 2.9 | 0.0001 / 0.0000 | 0 / 0 | 0.1 / 0.3 |
+| blub_quad | 10.76 % | 0.01 % | 9 (1) | 1 -> 10 | 6.2 | 0.0024 / 0.0007 | 0 / 0 | 2.3 / 20.2 |
+| blub_tri | 16.43 % | 0.33 % | 7 (4) | 1 -> 8 | 3.3 | 0.0014 / 0.0013 | 0 / 0 | 2.4 / 26.1 |
+| blub_control | 9.34 % | 0.00 % | 6 (0) | 1 -> 7 | 3.6 | 0.0001 / 0.0001 | 0 / 0 | 0.0 / 0.1 |
+
+
 ### Credits
 
 The cut operators are a front end for Sharp, Crane, *Variational Surface Cutting*, ACM

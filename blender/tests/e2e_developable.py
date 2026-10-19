@@ -123,7 +123,7 @@ def main():
             "seconds": time.perf_counter() - t0, "seconds_native": stats["seconds_native"],
             "warnings": r["warnings"],
         })
-    settings = [{"name": "default"}]
+    settings = [{"name": "default"}, {"name": "no split", "split_overlaps": False}]
     if args.sweep:
         settings += [
             {"name": "eps 1e-2", "epsilon": 1e-2},
@@ -132,6 +132,13 @@ def main():
             {"name": "paper rule (no defect)", "use_defect_rule": False},
             {"name": "eps 1e-2, defect 0.3", "epsilon": 1e-2, "defect_tolerance": 0.3},
             {"name": "lambda 1", "lambda_": 1.0},
+        ]
+    if args.sweep:
+        # The cheap alternatives to splitting: more cones (small lambda), unrestricted cone signs.
+        settings += [
+            {"name": "cones lambda 0.001", "lambda_": 0.001, "split_overlaps": False},
+            {"name": "cones lambda 0.001 any sign", "lambda_": 0.001, "positive_cones_only": False,
+             "split_overlaps": False},
         ]
     for i, setting in enumerate(settings):
         for e in mesh.edges:
@@ -151,6 +158,12 @@ def main():
             "seam_edges": s["n_seams"], "terminals": s["n_terminals"],
             "charts": r.get("n_charts"), "cones": s["n_cones"],
             "overlap": r.get("overlapped_fraction"),
+            "overlap_before_split": r.get("overlapped_fraction_before_split"),
+            "max_chart_overlap": r.get("max_chart_overlapped_fraction"),
+            "splits": r.get("n_splits"), "splits_rejected": r.get("n_splits_rejected"),
+            "split_cut_length": r.get("split_cut_length"),
+            "area_distortion": r.get("area_distortion"),
+            "seam_length_mismatch": r.get("max_seam_length_mismatch"),
             "mirrored": mirrored(mesh, uv_name),
             "mirrored_pipeline": r.get("n_flipped_uv_triangles"),
             "collapsed": r.get("n_collapsed_uv_triangles"),

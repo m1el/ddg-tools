@@ -24,6 +24,7 @@ ddg_tools.unwrap(
     lambda_=0.1,
     positive_cones_only=True,
     optimize_boundary=False,
+    split_overlaps=False, split_max=32, split_threshold=0.001,
 ) -> ddg_tools.UnwrapResult
 
 ddg_tools.pack_charts(uvs, polygon_starts, polygon_charts, *, margin=0.0)
@@ -96,6 +97,13 @@ Rules for the mesh arrays (violations raise `InputError`):
   (`max_boundary_length_error`) and the map can overlap itself or have mirrored triangles; on
   8 of 19 dataset meshes with boundary it does (`crates/ddg-uv/README.md`, "The boundary").
   Closed pieces are not affected.
+- `split_overlaps=False` (default): charts are left as the cones and seams made them. `True`
+  cuts every chart that overlaps itself by more than `split_threshold` of its footprint across
+  the layers and flattens again, keeping a cut only if it lowers the overlap without mirroring a
+  triangle, at most `split_max` cuts (`crates/ddg-uv/README.md`, "Splitting overlapping charts").
+  The report gains `n_splits`, `n_splits_rejected`, `n_split_no_cut`, `split_runs`,
+  `split_exhausted`, `split_cut_length`, `overlapped_fraction_before_split`; the added cuts are in
+  `cut_edges`.
 - Steering acts on vertices that are interior to their piece: a pinned vertex is a cone site
   that costs nothing, a forbidden vertex gets no cone, a prescribed vertex gets exactly the given
   angle. On a mesh boundary or along a seam there are no cones: pinned and forbidden vertices

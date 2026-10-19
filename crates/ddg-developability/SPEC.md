@@ -705,7 +705,8 @@ mesh (material index per face from the parent polygon; other attributes and UVs 
 warning). Operator "Developable Seams + UV": marks the developable cut (`cut_and_flatten`'s cut
 edges, restricted to polygon edges) as seams, existing seams kept, and writes the UV map with the
 `ddg-uv` pipeline of the Conformal Unwrap operator with "Cut Marked Seams" on (cones, extra cuts,
-packing and the overlap report come from it; D23); it does not move vertices. The paper's plain
+packing and the overlap report come from it, and with "Split Overlapping Charts" (default on here) the
+charts that overlap themselves are cut and flattened again; D23); it does not move vertices. The paper's plain
 per-chart flatten stays available in Rust and Python.
 
 ## 8. Differences from the paper as printed, and decisions
@@ -761,6 +762,12 @@ per-chart flatten stays available in Rust and Python.
   themselves globally (spot after the default flow: one chart, 48 % self-overlap, no flipped
   triangle). The user decided (2026-10-19) that the UV map of the bindings and Blender comes from
   the `ddg-uv` atlas pipeline instead, with the developable cut as marked seams (§7.2).
+  The atlas pipeline alone did not remove the overlap (0 cones, 1 chart: 1-40 % on the dense
+  meshes), so `ddg-uv` splits overlapping charts automatically (`UnwrapOptions::split_overlaps`:
+  a minimum cut between the two layers, kept only if it lowers the overlap without mirroring
+  a triangle; `crates/ddg-uv/README.md`), switched on by "Developable Seams + UV" (default on) and
+  `ddg_tools.unwrap(split_overlaps=True)`. Result at the default flow: at most 0.33 % overlap on
+  the models, 0 mirrored triangles.
 * **D24** Polygons and topology rule of §7.2 (confirmed by the user, §11).
 * **D25** Evaluation is deterministic and bitwise independent of the thread count (§3.9).
 * **D26** Gradient descent: either line search; fixed step in units of `ℓ̄²`.

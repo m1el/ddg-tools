@@ -1245,8 +1245,82 @@ charts, 1941 steering.
 Four error variants are not triggered by any test input, only their wording is checked:
 `ConeSolver`, `ConesNotCertified`, `Flatten`, `Internal`.
 
+## Splitting overlapping charts
+
+`UnwrapOptions::split_overlaps: Option<SplitOptions>` (default `None`: nothing changes). A chart
+that has no cone to keep it from folding (a nearly developable piece: the optimal-cones solver
+places 0 cones) can still lie on top of itself in the plane. With the option on, `unwrap`
+repeats the pipeline: every chart whose sampled overlap exceeds `min_overlap_fraction`
+(0.001) gets one cut, the cuts join the seams, and the pipeline runs again. The idea of
+cutting an overlapping chart into bounded-distortion pieces is that of Sorkine et al., 2002;
+the rule below is ours.
+
+* **Which layers.** The overlap estimate (the sampling of `ddg_bff::quality::coverage`, here
+  remembering which triangles cover each sample) gives pairs of triangles that share area. Among
+  the 8 most overlapped triangles `a`, the partner `b` maximizing `shared samples x surface
+  distance` is taken, provided the distance is at least 3 triangle diameters (neighbours that fold
+  over each other cannot be separated). Surface distance: Dijkstra over the dual graph.
+* **The cut.** Faces with `d_a - d_b < -band D` (`D = d_a(b)`, `band = 0.25`) are one side, faces
+  with `d_a - d_b > band D` the other; the cut is the minimum cut between them in the dual graph
+  (Dinic). An edge costs `length / (1 + crease_bias x dihedral angle)` (`crease_bias = 4`: creases
+  are cheaper), diagonals of the triangulation cost infinity (so polygons stay in one chart), chart
+  boundaries are free. The result is a curve from boundary to boundary across the strip between
+  the layers.
+* **Keeping it.** The next run is compared: the cut stays only if the overlapped area of the parts
+  is at most `1 - min_gain` (0.9) of the chart's and no triangle is mirrored that was not before;
+  otherwise it is undone and the chart is not tried again. At most `max_splits` (32) cuts are
+  kept; if overlapping charts remain, the report says `split_exhausted` and warns.
+* **Report** (`Report::splitting`, `summary()` keys `n_splits`, `n_splits_rejected`,
+  `n_split_no_cut`, `split_runs`, `split_exhausted`, `split_cut_length`,
+  `overlapped_fraction_before_split`, `max_chart_overlapped_fraction_before_split`): per cut the
+  chart, the cut's edges and length, overlap before and after, the number of parts, and the
+  outcome (`Kept`, `Rejected`, `NoCut`). The cuts are in `cut_edges` like seams; the seam counts of
+  `validation.seams` include them. Deterministic.
+* **Cost:** one pipeline run per round, so the time is that of the unsplit pipeline times the
+  number of runs (3 to 10 on the meshes below). Only charts that overlap are cut; the others come
+  out of each run unchanged.
+
+Tests: `tests/split.rs` (a flat annular sector of 1.5 turns, as triangles and as quads, which
+overlaps by half its footprint, must be cut across and come out below 0.1 % overlap with no flip;
+injective results are identical with the option on; the budget; invalid options).
+
+### Measurements
+
+Through Blender, "Developable Seams + UV" on the e2e meshes after the default flow
+(`scripts/e2e-developable.sh --no-sweep`, runs `default` = option on and `no split`; 2026-10-19,
+24 Blender processes in parallel, so the seconds are not single-thread figures). "Extra seam length"
+is the surface length of the kept cuts in the units of the mesh (the models are scaled to about
+unit size by the flow).
+
+| mesh (2 subdivisions) | overlap off | overlap on | splits kept (undone) | charts | extra seam length | area distortion off / on | mirrored | seams+UV s off / on |
+|---|---|---|---|---|---|---|---|---|
+| spot_quad | 2.92 % | 1.54 % | 5 (8) | 1 -> 6 | 0.9 | 0.0002 / 0.0002 | 0 / 0 | 0.8 / 8.0 |
+| spot_tri | 20.02 % | 0.03 % | 18 (2) | 1 -> 19 | 4.3 | 0.0003 / 0.0002 | 0 / 0 | 1.0 / 5.1 |
+| spot_control | 37.58 % | 0.01 % | 9 (0) | 1 -> 10 | 5.5 | 0.0004 / 0.0001 | 0 / 0 | 0.0 / 0.2 |
+| bob_quad | 0.98 % | 0.04 % | 3 (0) | 1 -> 4 | 1.0 | 0.0342 / 0.0343 | 0 / 0 | 1.8 / 7.0 |
+| bob_tri | 8.22 % | 0.06 % | 7 (0) | 1 -> 8 | 3.3 | 0.0485 / 0.0231 | 0 / 0 | 2.0 / 25.4 |
+| bob_control | 6.86 % | 0.02 % | 8 (0) | 1 -> 9 | 2.9 | 0.0001 / 0.0000 | 0 / 0 | 0.1 / 0.3 |
+| blub_quad | 10.76 % | 0.01 % | 9 (1) | 1 -> 10 | 6.2 | 0.0024 / 0.0007 | 0 / 0 | 2.3 / 20.2 |
+| blub_tri | 16.43 % | 0.33 % | 7 (4) | 1 -> 8 | 3.3 | 0.0014 / 0.0013 | 0 / 0 | 2.4 / 26.1 |
+| blub_control | 9.34 % | 0.00 % | 6 (0) | 1 -> 7 | 3.6 | 0.0001 / 0.0001 | 0 / 0 | 0.0 / 0.1 |
+
+All 45 e2e cases (the three subdivision settings, primitives included) end with 0 mirrored
+triangles, as before. Over the 27 model cases the overlap falls from 1 to 40 % to at most 0.33 %
+at 2 subdivisions (`spot_quad`: 1.5 %, 5 cuts kept, 8 undone), and the cases at -1 subdivisions
+(the raw input meshes) keep 1.4 to 6.5 % on the dense quad/triangle meshes because the budget of
+32 cuts, or the undone cuts, run out. Area distortion is equal or lower. Cases that did not overlap
+(cylinder, torus) get no cut and come out identical.
+
+**The cheap alternative does not work.** On spot_tri, spot_control, bob_tri and blub_tri at the
+default flow, `lambda 0.001` places no cone at all (overlap unchanged: 20 %, 38 %, 8 %, 16 %);
+with cones of any sign `bob_tri` gets 55 cones and the overlap grows to 47 %. The cuts the pipeline
+adds for cones therefore never appear. Raising the threshold (`eps 1e-2`) cuts less and the
+overlap falls on some meshes (0 to 0.02 %) but with distortions 0.01 to 0.7 (the charts are no
+longer developable); the defect tolerance changes little. Hence the automatic split.
+
 ## Not done, not verified
 
+- Splitting overlapping charts: the cut is one minimum cut per chart and round, chosen from one pair of layers; when it is undone the chart is not tried with another pair, which leaves 1.5 to 6 % overlap on some dense input meshes (spot_quad at 2 subdivisions: 1.5 %). The pipeline is rerun in full each round.
 - The spike check flags only meshes where a handful of vertices carry 99 % of the cone-free
   distortion; weaker spikes are not flagged (see its section). Spike tips on the boundary are
   not excluded.
