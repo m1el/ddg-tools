@@ -14,3 +14,4 @@
 //! implemented here with cyclic Jacobi rotations (a textbook method).
 
 pub mod eig;
+pub mod optimize;
