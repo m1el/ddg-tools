@@ -12,7 +12,8 @@ tags = ["UV", "Mesh"]
 # Credits: Soliman, Slepcev, Crane (Optimal Cone Singularities, 2018); Sawhney, Crane (Boundary
 # First Flattening, 2017); Sharp, Crane (Variational Surface Cutting, 2018, implemented
 # clean-room from the text of the paper); Sharp, Soliman, Crane (Navigating Intrinsic
-# Triangulations, 2019: the triangulation the cut flow runs on by default).
+# Triangulations, 2019: the triangulation the cut flow runs on by default); Stein, Grinspun,
+# Crane (Developability of Triangle Meshes, 2018, implemented clean-room from the text).
 
 # Developed and tested with Blender 5.0.1. See blender/README.md.
 blender_version_min = "5.0.0"
