@@ -874,6 +874,13 @@ pub struct UnwrapDevOutput {
     pub seam_edges: Vec<[u32; 2]>,
     /// The terminals, vertices of the caller's mesh, ascending.
     pub terminals: Vec<u32>,
+    /// The per-vertex energy that selected the terminals (every vertex of the caller's mesh; 0
+    /// for an unused vertex).
+    pub vertex_energy: Vec<f64>,
+    /// The angle defect `Ω_v` of every interior vertex (0 on the boundary and for unused vertices).
+    pub vertex_defect: Vec<f64>,
+    /// The star embeddedness diagnostic of the library (`NaN` for unused vertices).
+    pub star_embeddedness: Vec<f64>,
     /// What happened.
     pub report: UnwrapDevReport,
 }
@@ -1033,7 +1040,24 @@ pub fn developable_unwrap(
         warnings,
         seconds: start.elapsed().as_secs_f64(),
     };
-    Ok(UnwrapDevOutput { corner_uvs: uvs, polygon_chart, corner_log_scale: log_scale, seam_edges, terminals, report })
+    let spread = |values: &[f64], fill: f64| {
+        let mut out = vec![fill; prep.n_input_vertices];
+        for (i, &o) in prep.new_to_old.iter().enumerate() {
+            out[o as usize] = values[i];
+        }
+        out
+    };
+    Ok(UnwrapDevOutput {
+        corner_uvs: uvs,
+        polygon_chart,
+        corner_log_scale: log_scale,
+        seam_edges,
+        terminals,
+        vertex_energy: spread(&flat.vertex_energy, 0.0),
+        vertex_defect: spread(&flat.vertex_defect, 0.0),
+        star_embeddedness: spread(&flat.star_embeddedness, f64::NAN),
+        report,
+    })
 }
 
 #[cfg(test)]
@@ -1073,6 +1097,21 @@ mod tests {
             .collect();
         let polys: Vec<&[u32]> = quads.iter().map(|q| q.as_slice()).collect();
         buffers(&pos, &polys)
+    }
+
+    #[test]
+    fn python_defaults_match_the_library() {
+        // The literals in the Python signatures (src/python/developability.rs).
+        let c = CutOptions::default();
+        assert_eq!((c.epsilon, c.length_weight, c.alignment_weight), (1e-3, 1.0, 0.0));
+        assert_eq!(c.defect_tolerance, Some(ddg_developability::DEFAULT_DEFECT_TOLERANCE));
+        let o = MakeOptions::default();
+        assert_eq!((o.iterations, o.subdivisions, o.max_displacement), (500, 2, 0.5));
+        assert!(matches!(o.method, Method::Lbfgs { memory: 10 }));
+        assert!(matches!(o.line_search, LineSearch::WeakWolfe { .. }));
+        let r = o.remesh.unwrap();
+        assert_eq!((r.small_angle, r.collapse_boundary_edges), (PI / 180.0, true));
+        assert_eq!(EnergyParams::default().energy, Energy::Covariance);
     }
 
     #[test]
