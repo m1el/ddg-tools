@@ -410,6 +410,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ddg-developability"
+version = "0.1.0"
+
+[[package]]
 name = "ddg-intrinsic"
 version = "0.1.0"
 dependencies = [
