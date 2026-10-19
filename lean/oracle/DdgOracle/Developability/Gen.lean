@@ -104,9 +104,8 @@ def genMesh (kind : Nat) : G (DMesh × String) := do
     let amp ← uni 0.02 0.8
     return (← boundaryFan k span h amp, s!"fan{k}")
   | 2 =>
-    let kr := (← below 5)
-    let kl0 := (← below 5)
-    let kl := if kr + kl0 == 0 then 1 else kl0
+    let kr := 1 + (← below 4)
+    let kl := 1 + (← below 4)
     let a ← uni 0.3 2.0
     let eps ← pick #[0.0, 1e-9, 1e-6, 1e-3, 1e-2]
     return (← hingeStar kr kl a eps, s!"hinge{kr}{kl}")

@@ -68,6 +68,12 @@ const ENERGY_ABS: f64 = 1e-13;
 const GRADIENT_REL: f64 = 1e-9;
 const GRADIENT_ABS: f64 = 1e-12;
 const TIE: f64 = 1e-9;
+/// Steps from energies or gradients at rounding level are not compared (the direction is the
+/// normalized gradient, i.e. amplified noise): `E < NOISE_ENERGY` or `mean_edge_length |g|_inf < NOISE_GRADIENT`.
+const NOISE_ENERGY: f64 = 1e-8;
+const NOISE_GRADIENT: f64 = 1e-6;
+/// Smallest margin of a Wolfe test decision (see the oracle's `trial` lines) that is compared.
+const DECISION: f64 = 1e-7;
 
 // ----- the text format -----
 
@@ -195,6 +201,8 @@ struct EnergyStats {
     /// largest `|g - g'| / G`
     gradient_normwise: f64,
     gradient_abs: f64,
+    /// counted vertices with a near tie only here, only in the oracle, on both sides
+    ties: [usize; 3],
 }
 
 #[derive(Default, Clone)]
@@ -203,6 +211,7 @@ struct Stats {
     energy: [EnergyStats; 6],
     steps: usize,
     steps_skipped: usize,
+    cap_knife_edge: usize,
     steps_by_kind: HashMap<String, usize>,
     step_position: f64,
     step_energy: f64,
@@ -227,9 +236,13 @@ impl Stats {
             a.gradient_skipped += b.gradient_skipped;
             a.gradient_normwise = a.gradient_normwise.max(b.gradient_normwise);
             a.gradient_abs = a.gradient_abs.max(b.gradient_abs);
+            for i in 0..3 {
+                a.ties[i] += b.ties[i];
+            }
         }
         self.steps += o.steps;
         self.steps_skipped += o.steps_skipped;
+        self.cap_knife_edge += o.cap_knife_edge;
         for (k, v) in o.steps_by_kind {
             *self.steps_by_kind.entry(k).or_default() += v;
         }
@@ -259,9 +272,14 @@ impl Stats {
                 e.gradient_abs
             );
         }
+        s += "near ties among counted vertices (margin <= 1e-9 max(1,e)): only here / only in the oracle / both\n";
+        for (i, (_, name)) in ENERGIES.iter().enumerate() {
+            let t = self.energy[i].ties;
+            s += &format!("  {name:<22} {:>8} {:>8} {:>8}\n", t[0], t[1], t[2]);
+        }
         s += &format!(
-            "steps: {} compared ({} skipped for near ties), endings {:?}, largest position difference {:.2e} mean edge lengths, energy {:.2e}\n",
-            self.steps, self.steps_skipped, self.steps_by_kind, self.step_position, self.step_energy
+            "steps: {} compared ({} skipped: ties, rounding-level energy or gradient, close decisions; {} capped steps with one trial more or less at the cap), endings {:?}, largest position difference {:.2e} mean edge lengths, energy {:.2e}\n",
+            self.steps, self.steps_skipped, self.cap_knife_edge, self.steps_by_kind, self.step_position, self.step_energy
         );
         s += &format!(
             "subdivisions: {} compared, largest position difference {:.2e}; invalid meshes rejected by both: {}\n",
@@ -429,6 +447,13 @@ fn replay_energy(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats)
             }
             gscale = gscale.max(norm(ev.gradient[i])).max(norm(o_grad[i]));
         }
+        for i in 0..n {
+            if ev.counted[i] {
+                let scale = TIE * 1.0f64.max(ev.vertex_energy[i].abs());
+                let (r, o) = (!(ev.vertex_margin[i] > scale), !(o_margin[i] > scale));
+                es.ties[if r && o { 2 } else if r { 0 } else if o { 1 } else { 3 }.min(2)] += (r || o) as usize;
+            }
+        }
         // tie-free vertices: the star and all neighbour stars
         let tie = |u: usize| -> bool {
             if !ev.counted[u] {
@@ -495,7 +520,17 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     let tie = (0..mesh.n_vertices()).any(|v| {
         ev.counted[v] && !(ev.vertex_margin[v] > TIE * 1.0f64.max(ev.vertex_energy[v].abs()))
     }) || !(o_margin > TIE);
-    if tie {
+    // the decisions of the line search compare energies and slopes with rounding errors of the
+    // energy: not meaningful when the energy or the gradient is at rounding level, or when a
+    // decision is closer than `DECISION` (relative to the first order change `|g.d| t`)
+    let e0 = float(&key("energy0")[1]);
+    let gmax = float(&key("gmax")[1]);
+    let noise = e0 < NOISE_ENERGY || ell * gmax < NOISE_GRADIENT;
+    let close_decision = out.iter().filter(|l| l[0] == "trial").any(|l| {
+        let (sm, cm) = (float(&l[6]), float(&l[7]));
+        sm.abs() < DECISION || (l[5] != "-1" && cm.abs() < DECISION)
+    });
+    if tie || noise || close_decision {
         stats.steps_skipped += 1;
         if !local.is_empty() {
             stats.problems.push((input.name.clone(), local.join("; ")));
@@ -554,7 +589,16 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
                 local.push(format!("oracle ending '{kind}', here iterations {} capped {capped} weak {weak} status {:?}", r.iterations, r.status));
             }
             if r.line_search_trials != o_trials {
-                local.push(format!("trials: here {}, oracle {o_trials}", r.line_search_trials));
+                // Knife edge: with `initial_step = 0.1` and `max_displacement = 0.2` the cap is
+                // `t_max = 2` up to the last bit, and the doubling phase reaches exactly 2; whether
+                // that trial is the capped one or one more is evaluated (`alpha >= t_max`) depends
+                // on the last bit of `t_max`, i.e. on the rounding of `|d|_inf`. The accepted step
+                // is the same to 1e-16, so one trial more or less is accepted for capped steps.
+                if kind == "capped" && r.line_search_trials.abs_diff(o_trials) == 1 {
+                    stats.cap_knife_edge += 1;
+                } else {
+                    local.push(format!("trials: here {}, oracle {o_trials}", r.line_search_trials));
+                }
             }
             let e1 = float(&result[4]);
             let de = (e1 - r.energy_final).abs();

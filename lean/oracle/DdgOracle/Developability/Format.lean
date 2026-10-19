@@ -156,7 +156,7 @@ private def printStep (c : DevCase) (topo : Topo) : String := Id.run do
     for i in [0:r.trials.size] do
       let t := r.trials[i]!
       let cc := match t.c with | none => "-1" | some b => b2n b
-      s := s ++ s!"trial {i} {hx t.t} {hx t.e} {b2n t.s} {cc}\n"
+      s := s ++ s!"trial {i} {hx t.t} {hx t.e} {b2n t.s} {cc} {hx t.sm} {hx t.cm}\n"
     s := s ++ s!"result {r.kind.name} {hx r.t} {r.trials.size} {hx r.e1}\n"
     for v in [0:topo.nv] do
       let p := r.pos[v]!

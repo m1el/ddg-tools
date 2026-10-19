@@ -127,7 +127,7 @@ def selftest : IO Nat := do
   -- 2. exact hinges and flat stars vanish; valence-3 flag; two-face boundary stars
   let mut hingeMax := 0.0
   for seed in [0:20] do
-    let (m, _) := (hingeStar (seed % 4) (seed % 3 + 1) 0.7 0.0).run ⟨seed.toUInt64 + 1⟩
+    let (m, _) := (hingeStar (seed % 4 + 1) (seed % 3 + 1) 0.7 0.0).run ⟨seed.toUInt64 + 1⟩
     match buildTopo m with
     | .error e => t.check false s!"hinge: {e}"
     | .ok topo =>

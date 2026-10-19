@@ -38,6 +38,10 @@ structure Trial where
   s : Bool
   /-- curvature condition `C`, evaluated only if `S` holds -/
   c : Option Bool
+  /-- margin of the Armijo test, `(c1 s t - h) / |s t|`; positive iff `S` holds -/
+  sm : Float := 0
+  /-- margin of the curvature test, `(g(t)·d - c2 s) / |s|`; `0` if not evaluated -/
+  cm : Float := 0
   deriving Inhabited
 
 /-- How the line search ended. -/
@@ -79,6 +83,8 @@ structure StepResult where
 def meanEdgeLength (m : DMesh) (topo : Topo) : Float :=
   (topo.edges.foldl (fun acc (a, b) => acc + (m.pos[a]! - m.pos[b]!).norm) 0) / topo.edges.size.toFloat
 
+private def inf : Float := posInf
+
 /-- One step from the positions of `m`. -/
 def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError StepResult := do
   let ev0 ← evaluate m topo o
@@ -111,17 +117,18 @@ def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError
   while !done && fuel > 0 do
     fuel := fuel - 1
     let mt := moved t
-    let (e, sOk, cOk) :=
+    let (e, sOk, cOk, sm, cm) :=
       match evaluate mt topo o with
-      | .error _ => (nan, false, none)
+      | .error _ => (nan, false, none, -inf, 0.0)
       | .ok ev =>
         let h := ev.total - ev0.total
+        let smv := (so.c1 * slope * t - h) / (slope.abs * t)
         if h < so.c1 * slope * t then
           let gt := Array.ofFn (n := topo.nv) fun v => if pinned v.val then V3.zero else ev.grad[v]!
           let gd := (Array.range topo.nv).foldl (fun acc v => acc + V3.dot gt[v]! d[v]!) 0
-          (ev.total, true, some (decide (gd > so.c2 * slope)))
-        else (ev.total, false, none)
-    trials := trials.push { t, e, s := sOk, c := cOk }
+          (ev.total, true, some (decide (gd > so.c2 * slope)), smv, (gd - so.c2 * slope) / slope.abs)
+        else (ev.total, false, none, smv, 0.0)
+    trials := trials.push { t, e, s := sOk, c := cOk, sm, cm }
     if !sOk then beta := t
     else if cOk == some false then
       alpha := t

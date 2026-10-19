@@ -428,8 +428,10 @@ def evaluate (m : DMesh) (topo : Topo) (o : Opts) : Except EvalError Eval := do
       | .covarianceMax => covarianceMaxStar ns
       | .intrinsic => intrinsicStar ns th sv
       | .intrinsicMax => intrinsicMaxStar ns sv
-    -- boundary stars with at most two faces: every energy vanishes, nothing to tie
-    let r := if !st.closed && k ≤ 2 && r.undef.isNone then { r with margin := inf } else r
+    -- a boundary star with one face: both smallest eigenvalues are exactly zero and every
+    -- sensitivity vanishes, so there is nothing to tie. With two faces the eigenvalue gap is real
+    -- (it is small when the two normals nearly agree) and is reported as it is.
+    let r := if !st.closed && k ≤ 1 && r.undef.isNone then { r with margin := inf } else r
     let inDomain := (o.includeBoundary || st.closed) && !(o.omitValenceThree && st.closed && k == 3)
     if inDomain then
       if let some reason := r.undef then throw (.undefinedAt v reason)
