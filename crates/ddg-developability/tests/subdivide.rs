@@ -114,3 +114,32 @@ fn bad_input_is_an_error() {
     p[3][1] = f64::NAN;
     assert!(matches!(subdivide(&m, &p), Err(DevError::NonFinitePosition { vertex: 3 })));
 }
+
+#[test]
+fn all_six_energies_are_preserved() {
+    use ddg_developability::{Energy, EnergyOptions, evaluate_energy};
+    let mut sphere = icosphere(2).unwrap();
+    perturb(&mut sphere.positions, [0.03, 0.03, 0.03], 9);
+    let mut disk = bumpy_grid_disk(6, 5, 0.15).unwrap();
+    perturb(&mut disk.positions, [0.0, 0.0, 0.02], 2);
+    let mut tor = torus(10, 6, 2.0, 0.7).unwrap();
+    perturb(&mut tor.positions, [0.02, 0.02, 0.02], 5);
+    for (name, g) in [("sphere", sphere), ("disk", disk), ("torus", tor)] {
+        let m = g.topology().unwrap();
+        let s = subdivide(&m, &g.positions).unwrap();
+        for energy in [
+            Energy::Combinatorial,
+            Energy::CombinatorialMax,
+            Energy::Covariance,
+            Energy::CovarianceMax,
+            Energy::Intrinsic,
+            Energy::IntrinsicMax,
+        ] {
+            let o = EnergyOptions { energy, ..Default::default() };
+            let (e0, _) = evaluate_energy(&m, &g.positions, &o).unwrap();
+            let (e1, _) = evaluate_energy(&s.mesh, &s.positions, &o).unwrap();
+            assert!(e0 > 1e-3, "{name} {energy:?}: test energy too small ({e0})");
+            assert!((e0 - e1).abs() <= 1e-12 * e0.max(1.0), "{name} {energy:?}: {e0} vs {e1}");
+        }
+    }
+}

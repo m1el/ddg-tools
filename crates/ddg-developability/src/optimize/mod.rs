@@ -12,11 +12,13 @@
 //! (2006), Alg. 3.1, 7.4, 7.5.
 
 mod core;
+mod mesh;
 mod options;
 
 pub use self::core::{
     ClosureObjective, EvalError, Minimized, Objective, OptimizeError, Problem, Undefined, minimize,
 };
+pub use self::mesh::{Optimized, Progress, optimize};
 pub use self::options::{
     Control, FlatProgress, InvalidOption, LineSearch, Method, OptimizeOptions, OptimizeReport,
     OptimizeStatus,

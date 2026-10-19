@@ -331,3 +331,133 @@ fn options_validate() {
     assert!(bad(|o| o.line_search = LineSearch::Backtracking { c1: 1e-4, shrink: 1.0, max_shrinks: 3 }));
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// optimize() on meshes (SPEC §4, §10.5, §10.7)
+
+mod on_meshes {
+    use ddg_core::generators::{bumpy_grid_disk, icosphere, perturb};
+    use ddg_developability::{
+        Control, DevError, Energy, EnergyOptions, LineSearch, Method, OptimizeOptions, OptimizeStatus, optimize,
+    };
+
+    const ENERGIES: [Energy; 6] = [
+        Energy::Combinatorial,
+        Energy::CombinatorialMax,
+        Energy::Covariance,
+        Energy::CovarianceMax,
+        Energy::Intrinsic,
+        Energy::IntrinsicMax,
+    ];
+
+    fn eopts(energy: Energy) -> EnergyOptions {
+        EnergyOptions { energy, ..Default::default() }
+    }
+
+    fn crumpled() -> (ddg_core::topology::TriMesh, Vec<[f64; 3]>) {
+        let mut g = bumpy_grid_disk(7, 7, 0.1).unwrap();
+        perturb(&mut g.positions, [0.0, 0.0, 0.03], 17);
+        (g.topology().unwrap(), g.positions)
+    }
+
+    #[test]
+    fn energy_decreases_for_all_methods_and_energies() {
+        let (m, p) = crumpled();
+        let methods = [
+            (Method::Lbfgs { memory: 10 }, OptimizeOptions::default().line_search),
+            (Method::GradientDescent, OptimizeOptions::default().line_search),
+            (Method::GradientDescent, LineSearch::Backtracking { c1: 1e-4, shrink: 0.5, max_shrinks: 50 }),
+            (Method::FixedStep { step: 1e-3 }, OptimizeOptions::default().line_search),
+        ];
+        for e in ENERGIES {
+            for (method, line_search) in methods {
+                let opts = OptimizeOptions { method, line_search, max_iterations: 50, ..Default::default() };
+                let r = optimize(&m, &p, &eopts(e), &opts, None).unwrap_or_else(|err| panic!("{e:?} {method:?}: {err}"));
+                let rep = &r.report;
+                eprintln!(
+                    "{e:?} {method:?}: {:?} it {} ev {} E {:.4e} -> {:.4e} (undef {})",
+                    rep.status, rep.iterations, rep.evaluations, rep.energy_initial, rep.energy_final, rep.undefined_trials
+                );
+                assert!(rep.energy_final <= rep.energy_initial, "{e:?} {method:?}");
+                if !matches!(method, Method::FixedStep { .. }) {
+                    assert!(rep.energy_history.windows(2).all(|w| w[1] < w[0]), "{e:?} {method:?}: not strictly decreasing");
+                    assert_eq!(rep.energy_history.len(), rep.iterations + 1);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lbfgs_reduces_covariance_energy_a_lot() {
+        let (m, p) = crumpled();
+        let opts = OptimizeOptions { max_iterations: 500, ..Default::default() };
+        let r = optimize(&m, &p, &eopts(Energy::Covariance), &opts, None).unwrap();
+        let rep = &r.report;
+        eprintln!(
+            "lbfgs E_lambda bumpy disk: {:?}, it {}, ev {}, E {:.3e} -> {:.3e}, max disp {:.3} lbar, {:.3}s",
+            rep.status, rep.iterations, rep.evaluations, rep.energy_initial, rep.energy_final,
+            rep.max_vertex_displacement, rep.seconds
+        );
+        assert!(rep.energy_final < 0.2 * rep.energy_initial);
+        assert!(rep.mean_edge_length > 0.0 && rep.max_vertex_displacement > 0.0);
+    }
+
+    #[test]
+    fn units_are_mean_edge_lengths() {
+        // scaling the mesh scales the whole run: same energies, same displacements in units of l
+        let (m, p) = crumpled();
+        let opts = OptimizeOptions { max_iterations: 30, ..Default::default() };
+        let a = optimize(&m, &p, &eopts(Energy::Covariance), &opts, None).unwrap();
+        let big: Vec<[f64; 3]> = p.iter().map(|q| q.map(|c| c * 1000.0)).collect();
+        let b = optimize(&m, &big, &eopts(Energy::Covariance), &opts, None).unwrap();
+        assert_eq!(a.report.iterations, b.report.iterations);
+        for (x, y) in a.report.energy_history.iter().zip(&b.report.energy_history) {
+            assert!((x - y).abs() <= 1e-9 * x.abs().max(1e-12), "{x} vs {y}");
+        }
+        assert!((a.report.max_vertex_displacement - b.report.max_vertex_displacement).abs() < 1e-8);
+        assert!((b.report.mean_edge_length / a.report.mean_edge_length - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pinned_zero_iterations_cancel_and_errors() {
+        let (m, p) = crumpled();
+        let e = eopts(Energy::Covariance);
+        let pinned: Vec<u32> = m.boundary_vertices();
+        let opts = OptimizeOptions { pinned: pinned.clone(), max_iterations: 40, ..Default::default() };
+        let r = optimize(&m, &p, &e, &opts, None).unwrap();
+        for &v in &pinned {
+            assert_eq!(r.positions[v as usize], p[v as usize]);
+        }
+        assert!(r.positions.iter().zip(&p).any(|(a, b)| a != b));
+
+        let r0 = optimize(&m, &p, &e, &OptimizeOptions { max_iterations: 0, ..Default::default() }, None).unwrap();
+        assert_eq!(r0.positions, p);
+        assert_eq!(r0.report.status, OptimizeStatus::MaxIterations);
+
+        let mut last = vec![];
+        let mut cb = |pr: &ddg_developability::Progress| {
+            last = pr.positions.to_vec();
+            if pr.iteration == 4 { Control::Break } else { Control::Continue }
+        };
+        let rc = optimize(&m, &p, &e, &OptimizeOptions::default(), Some(&mut cb)).unwrap();
+        assert_eq!(rc.report.status, OptimizeStatus::Cancelled);
+        assert_eq!(rc.report.iterations, 4);
+        assert_eq!(rc.positions, last);
+
+        assert!(matches!(optimize(&m, &p[1..], &e, &opts, None), Err(DevError::LengthMismatch { .. })));
+        let bad = OptimizeOptions { pinned: vec![m.n_vertices() as u32], ..Default::default() };
+        assert!(matches!(optimize(&m, &p, &e, &bad, None), Err(DevError::VertexOutOfRange { .. })));
+        let bad = OptimizeOptions { initial_step: -1.0, ..Default::default() };
+        assert!(matches!(optimize(&m, &p, &e, &bad, None), Err(DevError::InvalidOption { .. })));
+    }
+
+    #[test]
+    fn sphere_with_noise_gets_smoother_in_energy() {
+        let mut g = icosphere(2).unwrap();
+        perturb(&mut g.positions, [0.02, 0.02, 0.02], 4);
+        let m = g.topology().unwrap();
+        let r = optimize(&m, &g.positions, &eopts(Energy::Covariance), &OptimizeOptions { max_iterations: 100, ..Default::default() }, None).unwrap();
+        eprintln!("sphere: {:?} it {} E {:.3e} -> {:.3e}", r.report.status, r.report.iterations, r.report.energy_initial, r.report.energy_final);
+        assert!(r.report.energy_final < r.report.energy_initial);
+    }
+}

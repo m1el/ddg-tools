@@ -23,3 +23,9 @@ pub mod subdivide;
 
 pub use energy::{Energy, EnergyOptions, Evaluation, evaluate, evaluate_energy};
 pub use error::DevError;
+pub use optimize::{
+    Control, LineSearch, Method, OptimizeOptions, OptimizeReport, OptimizeStatus, Optimized, Progress,
+    optimize,
+};
+pub use remesh::{RemeshOptions, RemeshReport, Remeshed, remesh};
+pub use subdivide::{Subdivided, subdivide};
