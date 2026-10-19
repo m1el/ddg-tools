@@ -14,6 +14,7 @@
 //!   --cut-out FILE.obj   cut and flatten the result, write an OBJ with per-corner UVs (charts unpacked)
 //!   --epsilon X          terminal threshold of the cut (default 1e-3)
 //!   --cut-only           skip the flow, cut and flatten the input
+//!   --conjugate          BFF conjugate extension instead of the harmonic one
 //!   --no-cut             skip the cut and flatten stage (by default it always runs)
 //! ```
 //!
@@ -56,6 +57,7 @@ struct Args {
     epsilon: f64,
     cut_only: bool,
     no_cut: bool,
+    conjugate: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -74,6 +76,7 @@ fn parse_args() -> Result<Args, String> {
         epsilon: 1e-3,
         cut_only: false,
         no_cut: false,
+        conjugate: false,
     };
     while let Some(arg) = it.next() {
         let mut val = |name: &str| it.next().ok_or_else(|| format!("{name} needs a value"));
@@ -93,6 +96,7 @@ fn parse_args() -> Result<Args, String> {
             "--epsilon" => a.epsilon = val("--epsilon")?.parse().map_err(|e| format!("{e}"))?,
             "--cut-only" => a.cut_only = true,
             "--no-cut" => a.no_cut = true,
+            "--conjugate" => a.conjugate = true,
             s if s.starts_with("--") => return Err(format!("unknown option {s}")),
             s => a.input = s.to_string(),
         }
@@ -207,7 +211,13 @@ fn run() -> Result<(), String> {
 
     if !a.no_cut {
         let t = Instant::now();
-        let co = CutOptions { energy: a.energy, epsilon: a.epsilon, threads: a.threads, ..Default::default() };
+        let co = CutOptions {
+            energy: a.energy,
+            epsilon: a.epsilon,
+            threads: a.threads,
+            extension: if a.conjugate { ddg_bff::Extension::Conjugate } else { ddg_bff::Extension::Harmonic },
+            ..Default::default()
+        };
         match cut_and_flatten(&cur_mesh, &cur_pos, &co) {
             Ok(cf) => {
                 let secs = t.elapsed().as_secs_f64();
