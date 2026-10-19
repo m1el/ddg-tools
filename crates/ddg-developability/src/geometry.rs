@@ -33,7 +33,11 @@ pub(crate) mod v3 {
     }
     #[inline(always)]
     pub fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
     }
     #[inline(always)]
     pub fn norm(a: [f64; 3]) -> f64 {
@@ -76,7 +80,7 @@ impl FaceFrame {
 pub fn face_frame(p: [[f64; 3]; 3]) -> Option<FaceFrame> {
     let n = cross(sub(p[1], p[0]), sub(p[2], p[0]));
     let n_len = norm(n);
-    if !(n_len > 0.0) || !n_len.is_finite() {
+    if !n_len.is_finite() || n_len <= 0.0 {
         return None;
     }
     let normal = scale(n, 1.0 / n_len);
@@ -182,15 +186,15 @@ pub fn backprop_face(
         cross(w, opposite_edge(p, 1)),
         cross(w, opposite_edge(p, 2)),
     ];
-    for m in 0..3 {
-        if s[m] == 0.0 {
+    for (m, &sm) in s.iter().enumerate() {
+        if sm == 0.0 {
             continue;
         }
         let (i, j, k) = (m, (m + 1) % 3, (m + 2) % 3);
         let dij = sub(p[i], p[j]);
         let dki = sub(p[k], p[i]);
-        let gj = scale(cross(nn, dij), s[m] / norm2(dij));
-        let gk = scale(cross(nn, dki), s[m] / norm2(dki));
+        let gj = scale(cross(nn, dij), sm / norm2(dij));
+        let gk = scale(cross(nn, dki), sm / norm2(dki));
         q[j] = add(q[j], gj);
         q[k] = add(q[k], gk);
         q[i] = sub(q[i], add(gj, gk));

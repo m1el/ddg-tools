@@ -29,13 +29,18 @@ fn fd_check(mesh: &TriMesh, pos: &[[f64; 3]], opts: &EnergyOptions, max_samples:
     let ok = |e: &ddg_developability::Evaluation, w: usize, thr: f64| {
         !e.counted[w] || e.vertex_margin[w] > thr * e.vertex_energy[w].max(1.0)
     };
-    let eligible: Vec<usize> =
-        (0..nv).filter(|&u| affected[u].iter().all(|&w| ok(&ev, w, MARGIN))).collect();
+    let eligible: Vec<usize> = (0..nv)
+        .filter(|&u| affected[u].iter().all(|&w| ok(&ev, w, MARGIN)))
+        .collect();
     let step = (eligible.len() / max_samples.max(1)).max(1);
     let lbar = mean_edge_length(mesh, pos);
     // Relative to the largest gradient entry, floored at 1e-3/ℓ̄ (stars whose energy vanishes
     // identically, e.g. boundary stars with <= 2 faces, have gradients at rounding level).
-    let gscale = ev.gradient.iter().map(|g| norm(*g)).fold(1e-3 / lbar, f64::max);
+    let gscale = ev
+        .gradient
+        .iter()
+        .map(|g| norm(*g))
+        .fold(1e-3 / lbar, f64::max);
     let h = 1e-6 * lbar;
     let mut max_err = 0.0f64;
     let mut checked = 0;
@@ -59,18 +64,31 @@ fn fd_check(mesh: &TriMesh, pos: &[[f64; 3]], opts: &EnergyOptions, max_samples:
                 }
                 let (_, ve) = evaluate_energy(mesh, &p, opts).unwrap();
                 assert_eq!(ve, e.vertex_energy);
-                vals[i] = affected[u].iter().filter(|&&w| ev.counted[w]).map(|&w| ve[w]).sum();
+                vals[i] = affected[u]
+                    .iter()
+                    .filter(|&&w| ev.counted[w])
+                    .map(|&w| ve[w])
+                    .sum();
             }
             let fd = (vals[0] - vals[1]) / (2.0 * h);
             max_err = max_err.max((fd - ev.gradient[u][d]).abs() / gscale);
         }
         checked += 1;
     }
-    FdStats { max_rel: max_err, scale: gscale * lbar, checked }
+    FdStats {
+        max_rel: max_err,
+        scale: gscale * lbar,
+        checked,
+    }
 }
 
 fn opts_all(energy: Energy) -> EnergyOptions {
-    EnergyOptions { energy, include_boundary: true, omit_valence_three: false, threads: None }
+    EnergyOptions {
+        energy,
+        include_boundary: true,
+        omit_valence_three: false,
+        threads: None,
+    }
 }
 
 fn run(name: &str, meshes: &[Mesh], max_samples: usize, opts_of: impl Fn(Energy) -> EnergyOptions) {
@@ -98,15 +116,17 @@ fn run(name: &str, meshes: &[Mesh], max_samples: usize, opts_of: impl Fn(Energy)
 
 #[test]
 fn fd_random_interior_stars() {
-    let meshes: Vec<Mesh> =
-        (3..=9).flat_map(|k| (0..4).map(move |s| interior_star(k, 100 * k as u64 + s, 0.5))).collect();
+    let meshes: Vec<Mesh> = (3..=9)
+        .flat_map(|k| (0..4).map(move |s| interior_star(k, 100 * k as u64 + s, 0.5)))
+        .collect();
     run("interior stars", &meshes, 100, opts_all);
 }
 
 #[test]
 fn fd_boundary_fans() {
-    let meshes: Vec<Mesh> =
-        (1..=7).flat_map(|k| (0..3).map(move |s| boundary_fan(k, 1000 + 10 * k as u64 + s, 0.5))).collect();
+    let meshes: Vec<Mesh> = (1..=7)
+        .flat_map(|k| (0..3).map(move |s| boundary_fan(k, 1000 + 10 * k as u64 + s, 0.5)))
+        .collect();
     run("boundary fans", &meshes, 100, opts_all);
 }
 

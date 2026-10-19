@@ -63,7 +63,13 @@ pub fn log_map(n0: [f64; 3], normal: [f64; 3]) -> LogMap {
     let phi = norm(cross(n0, normal)).atan2(c);
     let g = log_map_g(phi);
     let h = log_map_h(phi);
-    LogMap { tilde: scale(axpy(normal, -c, n0), g), c, phi, g, h }
+    LogMap {
+        tilde: scale(axpy(normal, -c, n0), g),
+        c,
+        phi,
+        g,
+        h,
+    }
 }
 
 /// Adjoint of the log map: for a sensitivity `z = ∂E/∂Ñ`, returns `(∂E/∂N, ∂E/∂n0)`:
@@ -105,14 +111,14 @@ pub fn tangent_basis(n: [f64; 3]) -> ([f64; 3], [f64; 3]) {
 fn prepare(star: &Star, scratch: &mut Scratch) -> Result<([f64; 3], f64), &'static str> {
     let sv = star.vector_area;
     let len = norm(sv);
-    if !(len > 0.0) || !len.is_finite() {
+    if !len.is_finite() || len <= 0.0 {
         return Err(REASON_ZERO_VECTOR_AREA);
     }
     let n0 = scale(sv, 1.0 / len);
     scratch.logs.clear();
     for n in star.normals {
         let lm = log_map(n0, *n);
-        if !(std::f64::consts::PI - lm.phi >= LOG_MAP_SINGULAR_ANGLE) {
+        if lm.phi.is_nan() || std::f64::consts::PI - lm.phi < LOG_MAP_SINGULAR_ANGLE {
             return Err(REASON_ANTIPODAL_NORMAL);
         }
         scratch.logs.push(lm);
@@ -122,10 +128,19 @@ fn prepare(star: &Star, scratch: &mut Scratch) -> Result<([f64; 3], f64), &'stat
 
 /// Back-propagate `z_σ = ∂e/∂Ñ_σ` (in `scratch.v1`) through the log map into `y_c` and the
 /// vertex-normal sensitivity `z_v = (y_n0 − (y_n0·n0) n0)/|S_v|`.
-fn finish(star: &Star, n0: [f64; 3], s_len: f64, y: &mut [[f64; 3]], scratch: &Scratch) -> [f64; 3] {
+fn finish(
+    star: &Star,
+    n0: [f64; 3],
+    s_len: f64,
+    y: &mut [[f64; 3]],
+    scratch: &Scratch,
+) -> [f64; 3] {
     let mut y_n0 = [0.0; 3];
-    for ((n, lm), (z, yc)) in
-        star.normals.iter().zip(&scratch.logs).zip(scratch.v1.iter().zip(y.iter_mut()))
+    for ((n, lm), (z, yc)) in star
+        .normals
+        .iter()
+        .zip(&scratch.logs)
+        .zip(scratch.v1.iter().zip(y.iter_mut()))
     {
         let (d_n, d_n0) = log_map_adjoint(n0, *n, lm, *z);
         *yc = d_n;
@@ -170,7 +185,11 @@ pub fn intrinsic(
     let z = finish(star, n0, s_len, y, scratch);
     let theta_sum: f64 = star.angles.iter().sum();
     let margin = (eig.values[1] - eig.values[0]) / theta_sum;
-    Ok(StarOut { value: eig.values[0], margin, z })
+    Ok(StarOut {
+        value: eig.values[0],
+        margin,
+        z,
+    })
 }
 
 /// The width direction of a hull-edge candidate: `u = n0 × ŵ`, `ŵ = w/|w|`. Its derivative in
@@ -179,12 +198,15 @@ pub fn intrinsic(
 /// [formula: dev-width-altitude-gradient]
 pub fn width_direction(n0: [f64; 3], w: [f64; 3]) -> Option<([f64; 3], [f64; 3], f64)> {
     let len = norm(w);
-    if !(len > 0.0) || !len.is_finite() {
+    if !len.is_finite() || len <= 0.0 {
         return None;
     }
     let wh = scale(w, 1.0 / len);
     Some((cross(n0, wh), wh, len))
 }
+
+/// An intrinsic-max candidate: the pair `(a, b)`, `u`, `ŵ`, `|w|`.
+type WidthCandidate = (usize, usize, [f64; 3], [f64; 3], f64);
 
 /// Branching-free intrinsic width (App. B.5.1): `e_v = (min width of conv{Ñ_σ})²`,
 /// `ψ(u) = (max_σ⟨Ñ_σ,u⟩ − min_σ⟨Ñ_σ,u⟩)²` minimized over the hull-edge normals
@@ -218,7 +240,7 @@ pub fn intrinsic_max(
         }
         (hi - lo) * (hi - lo)
     };
-    let mut best: Option<(usize, usize, [f64; 3], [f64; 3], f64)> = None;
+    let mut best: Option<WidthCandidate> = None;
     let mut best_psi = f64::INFINITY;
     let mut second = f64::INFINITY;
     for a in 0..k {
@@ -240,7 +262,11 @@ pub fn intrinsic_max(
     scratch.v1.resize(k, [0.0; 3]);
     let Some((a, b, u, wh, wl)) = best else {
         y.fill([0.0; 3]);
-        return Ok(StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] });
+        return Ok(StarOut {
+            value: 0.0,
+            margin: f64::INFINITY,
+            z: [0.0; 3],
+        });
     };
     let (mut si, mut ti) = (0, 0);
     let (mut hi, mut lo) = (f64::NEG_INFINITY, f64::INFINITY);
@@ -265,5 +291,9 @@ pub fn intrinsic_max(
     z[a] = add(z[a], za);
     z[b] = sub(z[b], za);
     let zv = finish(star, n0, s_len, y, scratch);
-    Ok(StarOut { value: best_psi, margin: second - best_psi, z: zv })
+    Ok(StarOut {
+        value: best_psi,
+        margin: second - best_psi,
+        z: zv,
+    })
 }

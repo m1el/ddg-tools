@@ -22,7 +22,11 @@ pub fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 pub fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 pub fn norm(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
@@ -35,13 +39,19 @@ pub fn normalize(a: [f64; 3]) -> [f64; 3] {
 /// heights; faces `(0, m, m+1)`. Ring vertices are boundary vertices with 2 faces.
 pub fn interior_star(k: usize, seed: u64, height: f64) -> Mesh {
     let mut r = SplitMix64::new(seed);
-    let mut pos = vec![[r.uniform(-0.05, 0.05), r.uniform(-0.05, 0.05), r.uniform(-0.05, 0.05)]];
+    let mut pos = vec![[
+        r.uniform(-0.05, 0.05),
+        r.uniform(-0.05, 0.05),
+        r.uniform(-0.05, 0.05),
+    ]];
     for m in 0..k {
         let t = 2.0 * PI * (m as f64 + r.uniform(-0.3, 0.3)) / k as f64;
         let rad = r.uniform(0.7, 1.3);
         pos.push([rad * t.cos(), rad * t.sin(), r.uniform(-height, height)]);
     }
-    let faces = (0..k).map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32]).collect();
+    let faces = (0..k)
+        .map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32])
+        .collect();
     (TriMesh::new(k + 1, faces).unwrap(), pos)
 }
 
@@ -51,7 +61,8 @@ pub fn boundary_fan(k: usize, seed: u64, height: f64) -> Mesh {
     let open = r.uniform(0.6, 1.8) * PI;
     let mut pos = vec![[0.0, 0.0, 0.0]];
     for m in 0..=k {
-        let t = open * (m as f64 + r.uniform(-0.25, 0.25) * (m > 0 && m < k) as u8 as f64) / k as f64;
+        let t =
+            open * (m as f64 + r.uniform(-0.25, 0.25) * (m > 0 && m < k) as u8 as f64) / k as f64;
         let rad = r.uniform(0.7, 1.3);
         pos.push([rad * t.cos(), rad * t.sin(), r.uniform(-height, height)]);
     }
@@ -66,7 +77,9 @@ pub fn regular_cone(k: usize, h: f64) -> Mesh {
         let t = 2.0 * PI * m as f64 / k as f64;
         pos.push([t.cos(), t.sin(), 0.0]);
     }
-    let faces = (0..k).map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32]).collect();
+    let faces = (0..k)
+        .map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32])
+        .collect();
     (TriMesh::new(k + 1, faces).unwrap(), pos)
 }
 
@@ -111,24 +124,47 @@ pub fn load_model(rel: &str) -> Option<Mesh> {
             faces.push([c[0], c[i], c[i + 1]]);
         }
     }
-    Some((TriMesh::new(obj.positions.len(), faces).unwrap(), obj.positions))
+    Some((
+        TriMesh::new(obj.positions.len(), faces).unwrap(),
+        obj.positions,
+    ))
 }
 
 pub fn mean_edge_length(mesh: &TriMesh, pos: &[[f64; 3]]) -> f64 {
     let e = mesh.edges();
-    e.iter().map(|&[a, b]| norm(sub(pos[a as usize], pos[b as usize]))).sum::<f64>() / e.len() as f64
+    e.iter()
+        .map(|&[a, b]| norm(sub(pos[a as usize], pos[b as usize])))
+        .sum::<f64>()
+        / e.len() as f64
 }
 
 /// A random rotation matrix (from a random unit quaternion).
 pub fn random_rotation(seed: u64) -> [[f64; 3]; 3] {
     let mut r = SplitMix64::new(seed);
-    let q = [r.uniform(-1.0, 1.0), r.uniform(-1.0, 1.0), r.uniform(-1.0, 1.0), r.uniform(-1.0, 1.0)];
+    let q = [
+        r.uniform(-1.0, 1.0),
+        r.uniform(-1.0, 1.0),
+        r.uniform(-1.0, 1.0),
+        r.uniform(-1.0, 1.0),
+    ];
     let l = (q.iter().map(|x| x * x).sum::<f64>()).sqrt();
     let [w, x, y, z] = q.map(|v| v / l);
     [
-        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
-        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
-        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
+        [
+            2.0 * (x * z - w * y),
+            2.0 * (y * z + w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
     ]
 }
 

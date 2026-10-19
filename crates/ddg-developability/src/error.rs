@@ -77,11 +77,21 @@ impl fmt::Display for DevError {
             DevError::Geometry(e) => write!(f, "invalid geometry: {e}"),
             DevError::Bff(e) => write!(f, "boundary first flattening failed: {e}"),
             DevError::Eig(e) => write!(f, "eigensolver failed: {e}"),
-            DevError::LengthMismatch { what, expected, got } => {
-                write!(f, "{what}: expected {expected} entries (one per element), got {got}")
+            DevError::LengthMismatch {
+                what,
+                expected,
+                got,
+            } => {
+                write!(
+                    f,
+                    "{what}: expected {expected} entries (one per element), got {got}"
+                )
             }
             DevError::NonFinitePosition { vertex } => {
-                write!(f, "vertex {vertex} has a non-finite (NaN or infinite) position")
+                write!(
+                    f,
+                    "vertex {vertex} has a non-finite (NaN or infinite) position"
+                )
             }
             DevError::DegenerateFace { face } => write!(
                 f,
@@ -91,10 +101,21 @@ impl fmt::Display for DevError {
             DevError::UndefinedEnergy { vertex, reason } => {
                 write!(f, "the energy is undefined at vertex {vertex}: {reason}")
             }
-            DevError::InvalidOption { name, value, requirement } => {
-                write!(f, "option `{name}` = {value} is invalid: it must satisfy {requirement}")
+            DevError::InvalidOption {
+                name,
+                value,
+                requirement,
+            } => {
+                write!(
+                    f,
+                    "option `{name}` = {value} is invalid: it must satisfy {requirement}"
+                )
             }
-            DevError::VertexOutOfRange { what, vertex, n_vertices } => write!(
+            DevError::VertexOutOfRange {
+                what,
+                vertex,
+                n_vertices,
+            } => write!(
                 f,
                 "{what}: vertex id {vertex} is out of range (the mesh has {n_vertices} vertices)"
             ),

@@ -21,7 +21,10 @@ pub fn bipartitions(k: usize, closed: bool) -> impl Iterator<Item = [(usize, usi
     });
     let boundary =
         (!closed).then(|| (0..k.saturating_sub(1)).map(move |a| [(0, a + 1), (a + 1, k - a - 1)]));
-    interior.into_iter().flatten().chain(boundary.into_iter().flatten())
+    interior
+        .into_iter()
+        .flatten()
+        .chain(boundary.into_iter().flatten())
 }
 
 /// Mean `N̄` and width `(1/n) Σ |N_σ − N̄|²` of the arc `(start, len)` of `normals` (mod `k`).
@@ -70,7 +73,11 @@ pub fn combinatorial(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut 
         }
     }
     let Some(parts) = best_p else {
-        return StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] };
+        return StarOut {
+            value: 0.0,
+            margin: f64::INFINITY,
+            z: [0.0; 3],
+        };
     };
     for part in parts {
         let (m, _) = arc_width(nrm, part);
@@ -80,7 +87,11 @@ pub fn combinatorial(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut 
             y[f] = scale(sub(nrm[f], m), c);
         }
     }
-    StarOut { value: best, margin: second - best, z: [0.0; 3] }
+    StarOut {
+        value: best,
+        margin: second - best,
+        z: [0.0; 3],
+    }
 }
 
 /// Active pair of an arc: the largest `|N_σ1 − N_σ2|²` within it (first found on ties).
@@ -111,7 +122,11 @@ pub fn combinatorial_max(
     s.fill(0.0);
     y.fill([0.0; 3]);
     if k < 2 {
-        return StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] };
+        return StarOut {
+            value: 0.0,
+            margin: f64::INFINITY,
+            z: [0.0; 3],
+        };
     }
     // Pairwise squared distances.
     let d = &mut scratch.f1;
@@ -129,7 +144,10 @@ pub fn combinatorial_max(
     mx.clear();
     mx.resize(k * k, ArcMaxSlot::default());
     for st in 0..k {
-        let mut cur = ArcMax { value: 0.0, pair: None };
+        let mut cur = ArcMax {
+            value: 0.0,
+            pair: None,
+        };
         mx[st * k] = cur.into();
         for len in 2..k {
             let new = (st + len - 1) % k;
@@ -137,7 +155,10 @@ pub fn combinatorial_max(
                 let old = (st + m) % k;
                 let v = d[new * k + old];
                 if v > cur.value {
-                    cur = ArcMax { value: v, pair: Some((old as u32, new as u32)) };
+                    cur = ArcMax {
+                        value: v,
+                        pair: Some((old as u32, new as u32)),
+                    };
                 }
             }
             mx[st * k + len - 1] = cur.into();
@@ -159,7 +180,11 @@ pub fn combinatorial_max(
         }
     }
     let Some((parts, act)) = chosen else {
-        return StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] };
+        return StarOut {
+            value: 0.0,
+            margin: f64::INFINITY,
+            z: [0.0; 3],
+        };
     };
     let mut margin = second - best;
     if let Some((p1, p2)) = act.pair {
@@ -182,7 +207,11 @@ pub fn combinatorial_max(
         }
         margin = margin.min(act.value - next);
     }
-    StarOut { value: best, margin, z: [0.0; 3] }
+    StarOut {
+        value: best,
+        margin,
+        z: [0.0; 3],
+    }
 }
 
 /// Storage form of [`ArcMax`] in the scratch table.
@@ -198,13 +227,20 @@ const NO_PAIR: u32 = u32::MAX;
 impl From<ArcMax> for ArcMaxSlot {
     fn from(m: ArcMax) -> Self {
         let (a, b) = m.pair.unwrap_or((NO_PAIR, NO_PAIR));
-        ArcMaxSlot { value: m.value, a, b }
+        ArcMaxSlot {
+            value: m.value,
+            a,
+            b,
+        }
     }
 }
 
 impl From<ArcMaxSlot> for ArcMax {
     fn from(m: ArcMaxSlot) -> Self {
-        ArcMax { value: m.value, pair: (m.a != NO_PAIR).then_some((m.a, m.b)) }
+        ArcMax {
+            value: m.value,
+            pair: (m.a != NO_PAIR).then_some((m.a, m.b)),
+        }
     }
 }
 
@@ -215,7 +251,11 @@ mod tests {
     #[test]
     fn bipartition_counts() {
         for k in 1..10 {
-            assert_eq!(bipartitions(k, true).count(), k * (k.max(1) - 1) / 2, "k = {k}");
+            assert_eq!(
+                bipartitions(k, true).count(),
+                k * (k.max(1) - 1) / 2,
+                "k = {k}"
+            );
             assert_eq!(bipartitions(k, false).count(), k - 1, "k = {k}");
         }
         // every part non-empty, parts complementary

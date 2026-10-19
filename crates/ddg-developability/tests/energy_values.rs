@@ -10,11 +10,21 @@ use ddg_core::generators::SplitMix64;
 use ddg_developability::{Energy, EnergyOptions, evaluate};
 
 fn center_only(energy: Energy) -> EnergyOptions {
-    EnergyOptions { energy, include_boundary: false, omit_valence_three: false, threads: Some(1) }
+    EnergyOptions {
+        energy,
+        include_boundary: false,
+        omit_valence_three: false,
+        threads: Some(1),
+    }
 }
 
 fn all_vertices(energy: Energy) -> EnergyOptions {
-    EnergyOptions { energy, include_boundary: true, omit_valence_three: false, threads: Some(1) }
+    EnergyOptions {
+        energy,
+        include_boundary: true,
+        omit_valence_three: false,
+        threads: Some(1),
+    }
 }
 
 /// Closed forms of SPEC §10.3 for the regular cone of valence `k` and apex height `h`;
@@ -30,18 +40,20 @@ fn cone_closed_form(energy: Energy, k: usize, h: f64) -> Option<f64> {
         Energy::Covariance => theta * kf * (sin2a / 2.0).min(cos2a),
         Energy::Combinatorial => {
             let rho = |m: usize| (m as f64 * PI / kf).sin() / (m as f64 * (PI / kf).sin());
-            let m = (1..k).map(|m| 2.0 - rho(m).powi(2) - rho(k - m).powi(2)).fold(f64::INFINITY, f64::min);
+            let m = (1..k)
+                .map(|m| 2.0 - rho(m).powi(2) - rho(k - m).powi(2))
+                .fold(f64::INFINITY, f64::min);
             sin2a * m
         }
         Energy::CovarianceMax => {
-            if k % 2 == 1 {
+            if !k.is_multiple_of(2) {
                 return None;
             }
             cos2a.min(sin2a * c * c)
         }
         Energy::Intrinsic => theta * kf * alpha * alpha / 2.0,
         Energy::IntrinsicMax => {
-            if k % 2 == 0 {
+            if k.is_multiple_of(2) {
                 (2.0 * alpha * c).powi(2)
             } else {
                 (alpha * (1.0 + c)).powi(2)
@@ -58,7 +70,9 @@ fn regular_cones_match_closed_forms() {
         for h in [0.1, 0.6, 2.0] {
             let (m, p) = regular_cone(k, h);
             for energy in Energy::ALL {
-                let Some(want) = cone_closed_form(energy, k, h) else { continue };
+                let Some(want) = cone_closed_form(energy, k, h) else {
+                    continue;
+                };
                 let e = evaluate(&m, &p, &center_only(energy)).unwrap();
                 let got = e.vertex_energy[0];
                 assert!(
@@ -87,8 +101,13 @@ fn regular_cones_odd_covariance_max_match_numpy() {
     ];
     for (k, h, want) in table {
         let (m, p) = regular_cone(k, h);
-        let got = evaluate(&m, &p, &center_only(Energy::CovarianceMax)).unwrap().vertex_energy[0];
-        assert!((got - want).abs() <= 1e-12, "k={k} h={h}: {got:.12} vs {want:.12}");
+        let got = evaluate(&m, &p, &center_only(Energy::CovarianceMax))
+            .unwrap()
+            .vertex_energy[0];
+        assert!(
+            (got - want).abs() <= 1e-12,
+            "k={k} h={h}: {got:.12} vs {want:.12}"
+        );
     }
 }
 
@@ -104,8 +123,13 @@ fn regular_cones_combinatorial_max() {
             let sin2a = h * h / (h * h + c * c);
             let j = k.div_ceil(2) - 1;
             let want = 4.0 * sin2a * (j as f64 * PI / k as f64).sin().powi(2);
-            let got = evaluate(&m, &p, &center_only(Energy::CombinatorialMax)).unwrap().vertex_energy[0];
-            assert!((got - want).abs() <= 1e-12 * want, "k={k} h={h}: {got} vs {want}");
+            let got = evaluate(&m, &p, &center_only(Energy::CombinatorialMax))
+                .unwrap()
+                .vertex_energy[0];
+            assert!(
+                (got - want).abs() <= 1e-12 * want,
+                "k={k} h={h}: {got} vs {want}"
+            );
         }
     }
 }
@@ -127,11 +151,19 @@ fn exact_hinge(n_up: usize, n_down: usize, seed: u64) -> Mesh {
     let k = ang.len();
     for (i, &t) in ang.iter().enumerate() {
         let rad = r.uniform(0.5, 1.5);
-        let (x, y) = if i == 0 { (rad, 0.0) } else if t == PI { (-rad, 0.0) } else { (rad * t.cos(), rad * t.sin()) };
+        let (x, y) = if i == 0 {
+            (rad, 0.0)
+        } else if t == PI {
+            (-rad, 0.0)
+        } else {
+            (rad * t.cos(), rad * t.sin())
+        };
         let z = if y < 0.0 { 0.5 * y } else { 0.0 };
         pos.push([x, y, z]);
     }
-    let faces = (0..k).map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32]).collect();
+    let faces = (0..k)
+        .map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32])
+        .collect();
     (TriMesh::new(k + 1, faces).unwrap(), pos)
 }
 
@@ -156,17 +188,28 @@ fn hinge_and_flat_stars_vanish() {
     let p: Vec<_> = p.iter().map(|&x| rotate(&rot, x)).collect();
     for energy in Energy::ALL {
         let e = evaluate(&m, &p, &center_only(energy)).unwrap();
-        assert!(e.vertex_energy[0].abs() <= 1e-14, "rotated hinge {energy:?}: {:e}", e.vertex_energy[0]);
+        assert!(
+            e.vertex_energy[0].abs() <= 1e-14,
+            "rotated hinge {energy:?}: {:e}",
+            e.vertex_energy[0]
+        );
     }
     // flat stars and a flat grid (all vertices, boundary included)
     // (random rings for k >= 4 keep every sector below pi; k = 3 from the regular cone)
     for k in 3..=8 {
-        let (m, mut p) = if k == 3 { regular_cone(3, 0.0) } else { interior_star(k, 77 + k as u64, 0.0) };
+        let (m, mut p) = if k == 3 {
+            regular_cone(3, 0.0)
+        } else {
+            interior_star(k, 77 + k as u64, 0.0)
+        };
         p[0][2] = 0.0;
         for energy in Energy::ALL {
             let e = evaluate(&m, &p, &all_vertices(energy)).unwrap();
             for (v, x) in e.vertex_energy.iter().enumerate() {
-                assert!(x.abs() <= 1e-28, "flat star k={k} {energy:?} vertex {v}: {x:e}");
+                assert!(
+                    x.abs() <= 1e-28,
+                    "flat star k={k} {energy:?} vertex {v}: {x:e}"
+                );
             }
         }
     }
@@ -180,7 +223,10 @@ fn small_boundary_stars_vanish() {
             for energy in Energy::ALL {
                 let e = evaluate(&m, &p, &all_vertices(energy)).unwrap();
                 for (v, x) in e.vertex_energy.iter().enumerate() {
-                    assert!(x.abs() <= 1e-15, "{k}-face fan {energy:?} vertex {v}: {x:e}");
+                    assert!(
+                        x.abs() <= 1e-15,
+                        "{k}-face fan {energy:?} vertex {v}: {x:e}"
+                    );
                 }
                 assert!(e.vertex_margin.iter().all(|&g| g == f64::INFINITY));
                 assert_eq!(e.near_ties, 0);
@@ -193,13 +239,22 @@ fn small_boundary_stars_vanish() {
 fn valence_three_is_omitted_by_default() {
     // A tetrahedron: all four vertices are interior with valence 3.
     let m = TriMesh::new(4, vec![[0, 1, 2], [0, 3, 1], [1, 3, 2], [0, 2, 3]]).unwrap();
-    let p = vec![[0.0, 0.0, 0.0], [1.0, 0.1, 0.0], [0.2, 1.0, 0.1], [0.3, 0.2, 1.0]];
+    let p = vec![
+        [0.0, 0.0, 0.0],
+        [1.0, 0.1, 0.0],
+        [0.2, 1.0, 0.1],
+        [0.3, 0.2, 1.0],
+    ];
     for energy in Energy::ALL {
         let e = evaluate(&m, &p, &EnergyOptions::new(energy)).unwrap();
         assert!(e.counted.iter().all(|&c| !c));
         assert_eq!(e.energy, 0.0);
         assert!(e.gradient.iter().all(|g| *g == [0.0; 3]));
-        assert!(e.vertex_energy.iter().all(|x| x.is_finite() && *x > 0.0), "{energy:?}: {:?}", e.vertex_energy);
+        assert!(
+            e.vertex_energy.iter().all(|x| x.is_finite() && *x > 0.0),
+            "{energy:?}: {:?}",
+            e.vertex_energy
+        );
         let all = evaluate(&m, &p, &all_vertices(energy)).unwrap();
         assert_eq!(all.vertex_energy, e.vertex_energy);
         assert!(all.energy > 0.0);

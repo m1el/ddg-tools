@@ -34,15 +34,27 @@ pub fn covariance(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> Result<Star
     let eig = sym_eig3(a).map_err(|_| "the covariance matrix has a non-finite entry")?;
     let lam = eig.values[0];
     let x = eig.vectors[0];
-    for ((n, &t), (yc, sc)) in star.normals.iter().zip(star.angles).zip(y.iter_mut().zip(s.iter_mut()))
+    for ((n, &t), (yc, sc)) in star
+        .normals
+        .iter()
+        .zip(star.angles)
+        .zip(y.iter_mut().zip(s.iter_mut()))
     {
         let xn = dot(x, *n);
         *yc = scale(x, 2.0 * t * xn);
         *sc = xn * xn;
     }
     let tr = a[0][0] + a[1][1] + a[2][2];
-    let margin = if tr > 0.0 { (eig.values[1] - eig.values[0]) / tr } else { 0.0 };
-    Ok(StarOut { value: lam, margin, z: [0.0; 3] })
+    let margin = if tr > 0.0 {
+        (eig.values[1] - eig.values[0]) / tr
+    } else {
+        0.0
+    };
+    Ok(StarOut {
+        value: lam,
+        margin,
+        z: [0.0; 3],
+    })
 }
 
 /// Spherical circumcenter of the sites `a, b, c`: `n = (b − a) × (c − a)`, `v = n/|n|`, and
@@ -52,7 +64,7 @@ pub fn covariance(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> Result<Star
 pub fn spherical_circumcenter(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> Option<([f64; 3], f64)> {
     let n = cross(sub(b, a), sub(c, a));
     let len = norm(n);
-    if !(len > 0.0) || !len.is_finite() {
+    if !len.is_finite() || len <= 0.0 {
         return None;
     }
     let v = scale(n, 1.0 / len);
@@ -83,6 +95,9 @@ pub fn circumcenter_value_gradient(
     }
     out
 }
+
+/// A `λ_max` candidate: faces and signs of its sites, circumcenter `v`, `|n|`.
+type Candidate = ([usize; 3], [f64; 3], [f64; 3], f64);
 
 /// Max covariance energy `e_v = min_{|u|=1} max_σ ⟨u, N_σ⟩²` (Eq. 6), the largest empty circle
 /// among the sites `±N_σ`, by the candidates of SPEC §3.5 (D11):
@@ -116,7 +131,7 @@ pub fn covariance_max(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut
         m
     };
     // Candidate: (faces, signs) of the sites (a, b, c).
-    let mut best: Option<([usize; 3], [f64; 3], [f64; 3], f64)> = None; // faces, signs, v, |n|
+    let mut best: Option<Candidate> = None;
     let mut best_key = (f64::INFINITY, f64::INFINITY);
     let mut second = f64::INFINITY;
     let mut consider = |faces: [usize; 3], signs: [f64; 3]| {
@@ -156,12 +171,20 @@ pub fn covariance_max(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut
         }
     }
     let Some((faces, signs, v, len)) = best else {
-        return StarOut { value: 0.0, margin: f64::INFINITY, z: [0.0; 3] };
+        return StarOut {
+            value: 0.0,
+            margin: f64::INFINITY,
+            z: [0.0; 3],
+        };
     };
     let sites = [0, 1, 2].map(|q| scale(nrm[faces[q]], signs[q]));
     let grad = circumcenter_value_gradient(sites[0], sites[1], sites[2], v, len);
     for q in 0..3 {
         y[faces[q]] = axpy(y[faces[q]], signs[q], grad[q]);
     }
-    StarOut { value: best_key.0, margin: second - best_key.0, z: [0.0; 3] }
+    StarOut {
+        value: best_key.0,
+        margin: second - best_key.0,
+        z: [0.0; 3],
+    }
 }

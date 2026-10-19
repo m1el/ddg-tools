@@ -18,8 +18,7 @@ pub use covariance::{
 };
 pub use intrinsic::{
     LOG_MAP_SINGULAR_ANGLE, LogMap, REASON_ANTIPODAL_NORMAL, REASON_ZERO_VECTOR_AREA, intrinsic,
-    intrinsic_max, log_map, log_map_adjoint, log_map_g, log_map_h, tangent_basis,
-    width_direction,
+    intrinsic_max, log_map, log_map_adjoint, log_map_g, log_map_h, tangent_basis, width_direction,
 };
 
 use ddg_core::TriMesh;
@@ -92,7 +91,10 @@ impl Default for EnergyOptions {
 impl EnergyOptions {
     /// Options with the given energy and the other fields at their defaults.
     pub fn new(energy: Energy) -> Self {
-        EnergyOptions { energy, ..Default::default() }
+        EnergyOptions {
+            energy,
+            ..Default::default()
+        }
     }
 
     /// Check the options.
@@ -233,7 +235,7 @@ struct Stars {
 }
 
 /// Split `data` into consecutive pieces of the given lengths.
-fn split_lengths<'a, T>(mut data: &'a mut [T], lengths: impl Iterator<Item = usize>) -> Vec<&'a mut [T]> {
+fn split_lengths<T>(mut data: &mut [T], lengths: impl Iterator<Item = usize>) -> Vec<&mut [T]> {
     let mut out = Vec::new();
     for len in lengths {
         let (a, b) = std::mem::take(&mut data).split_at_mut(len);
@@ -289,7 +291,12 @@ impl Stars {
                 (offsets[v] + pos) as u32
             })
             .collect();
-        Stars { offsets, corners, slot, closed }
+        Stars {
+            offsets,
+            corners,
+            slot,
+            closed,
+        }
     }
 }
 
@@ -319,9 +326,12 @@ pub(crate) fn with_threads<R: Send>(
             if rayon::current_thread_index().is_some() && rayon::current_num_threads() == n {
                 return Ok(f());
             }
-            let pool = rayon::ThreadPoolBuilder::new().num_threads(n).build().map_err(|e| {
-                DevError::Internal(format!("could not build a thread pool of {n} threads: {e}"))
-            })?;
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(n)
+                .build()
+                .map_err(|e| {
+                    DevError::Internal(format!("could not build a thread pool of {n} threads: {e}"))
+                })?;
             Ok(pool.install(f))
         }
     }
@@ -377,7 +387,11 @@ fn evaluate_impl(
     let nv = mesh.n_vertices();
     let nf = mesh.n_faces();
     if positions.len() != nv {
-        return Err(DevError::LengthMismatch { what: "positions", expected: nv, got: positions.len() });
+        return Err(DevError::LengthMismatch {
+            what: "positions",
+            expected: nv,
+            got: positions.len(),
+        });
     }
     if let Some(v) = positions.par_iter().position_first(|p| !v3::is_finite(*p)) {
         return Err(DevError::NonFinitePosition { vertex: v as u32 });
@@ -385,11 +399,19 @@ fn evaluate_impl(
     let faces = mesh.faces();
     let corner_pos = |f: usize| {
         let t = faces[f];
-        [positions[t[0] as usize], positions[t[1] as usize], positions[t[2] as usize]]
+        [
+            positions[t[0] as usize],
+            positions[t[1] as usize],
+            positions[t[2] as usize],
+        ]
     };
 
     // 1. Faces.
-    let bad = FaceFrame { n: [f64::NAN; 3], n_len: f64::NAN, normal: [f64::NAN; 3] };
+    let bad = FaceFrame {
+        n: [f64::NAN; 3],
+        n_len: f64::NAN,
+        normal: [f64::NAN; 3],
+    };
     let (frames, angles): (Vec<FaceFrame>, Vec<[f64; 3]>) = (0..nf)
         .into_par_iter()
         .with_min_len(1024)
@@ -414,25 +436,28 @@ fn evaluate_impl(
     } else {
         (Vec::new(), Vec::new())
     };
-    let mut vout = vec![VertexOut { value: 0.0, margin: 0.0, z: [0.0; 3] }; nv];
-    let lens = chunk_slot_lengths(&stars.offsets, nv);
-    let n_chunks = lens.len();
-    let (y_chunks, s_chunks): (Vec<Option<&mut [[f64; 3]]>>, Vec<Option<&mut [f64]>>) =
-        if want_gradient {
-            (
-                split_lengths(&mut ys, lens.iter().copied()).into_iter().map(Some).collect(),
-                split_lengths(&mut ss, lens.iter().copied()).into_iter().map(Some).collect(),
-            )
-        } else {
-            ((0..n_chunks).map(|_| None).collect(), (0..n_chunks).map(|_| None).collect())
+    let mut vout = vec![
+        VertexOut {
+            value: 0.0,
+            margin: 0.0,
+            z: [0.0; 3]
         };
+        nv
+    ];
+    // Per-chunk slot ranges of the sensitivity arrays (empty without a gradient).
+    let lens: Vec<usize> = chunk_slot_lengths(&stars.offsets, nv)
+        .into_iter()
+        .map(|l| if want_gradient { l } else { 0 })
+        .collect();
+    let y_chunks = split_lengths(&mut ys, lens.iter().copied());
+    let s_chunks = split_lengths(&mut ss, lens.iter().copied());
     let energy = opts.energy;
     let errors: Vec<Option<DevError>> = vout
         .par_chunks_mut(VERTEX_CHUNK)
         .zip(y_chunks)
         .zip(s_chunks)
         .enumerate()
-        .map(|(ci, ((vo, mut yc), mut sc))| {
+        .map(|(ci, ((vo, yc), sc))| {
             let mut scratch = Scratch::default();
             let mut normals: Vec<[f64; 3]> = Vec::new();
             let mut ang: Vec<f64> = Vec::new();
@@ -460,17 +485,20 @@ fn evaluate_impl(
                     vector_area: v3::scale(sv, 0.5),
                 };
                 let k = hi - lo;
-                let (y, s): (&mut [[f64; 3]], &mut [f64]) = match (&mut yc, &mut sc) {
-                    (Some(yc), Some(sc)) => (&mut yc[lo - base..hi - base], &mut sc[lo - base..hi - base]),
-                    _ => {
-                        ybuf.resize(k, [0.0; 3]);
-                        sbuf.resize(k, 0.0);
-                        (&mut ybuf[..k], &mut sbuf[..k])
-                    }
+                let (y, s): (&mut [[f64; 3]], &mut [f64]) = if want_gradient {
+                    (&mut yc[lo - base..hi - base], &mut sc[lo - base..hi - base])
+                } else {
+                    ybuf.resize(k, [0.0; 3]);
+                    sbuf.resize(k, 0.0);
+                    (&mut ybuf[..k], &mut sbuf[..k])
                 };
                 match star_energy(energy, &star, y, s, &mut scratch) {
                     Ok(r) => {
-                        *out = VertexOut { value: r.value, margin: r.margin, z: r.z };
+                        *out = VertexOut {
+                            value: r.value,
+                            margin: r.margin,
+                            z: r.z,
+                        };
                         if !counted[v] {
                             y.fill([0.0; 3]);
                             s.fill(0.0);
@@ -479,9 +507,16 @@ fn evaluate_impl(
                     }
                     Err(reason) => {
                         if counted[v] {
-                            return Some(DevError::UndefinedEnergy { vertex: v as u32, reason });
+                            return Some(DevError::UndefinedEnergy {
+                                vertex: v as u32,
+                                reason,
+                            });
                         }
-                        *out = VertexOut { value: f64::NAN, margin: f64::NAN, z: [0.0; 3] };
+                        *out = VertexOut {
+                            value: f64::NAN,
+                            margin: f64::NAN,
+                            z: [0.0; 3],
+                        };
                         y.fill([0.0; 3]);
                         s.fill(0.0);
                     }
@@ -543,5 +578,12 @@ fn evaluate_impl(
         Vec::new()
     };
 
-    Ok(Evaluation { energy: total, vertex_energy, counted, gradient, vertex_margin, near_ties })
+    Ok(Evaluation {
+        energy: total,
+        vertex_energy,
+        counted,
+        gradient,
+        vertex_margin,
+        near_ties,
+    })
 }
