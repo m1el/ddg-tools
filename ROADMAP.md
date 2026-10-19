@@ -327,6 +327,13 @@ Open:
 * Long flows on control meshes leave 2–9 faces below the small angle that remeshing cannot
   repair (reported as `bad_faces`).
 * The 14 clippy warnings in `crates/ddg-py/src/developability.rs`.
+* **Quality against the paper's figures** (seen in the showcase, `showcase/media/developable_*`):
+  the paper's main workflow (coarse mesh, flow, 4-1 subdivision, flow again; Figs. 1, 23) turns
+  spot's control mesh into spikes and folded sheets, and squashes bob's and blub's, so the
+  showcase runs the flow in place on the fine meshes. Those results are piecewise developable
+  but covered in short creases (spot: 567 of 8,094 edges above 30°, many of them two-face folds
+  at 180°), not the clean seam curves of Figs. 1 and 22. The crumpled sheet ends with |angle
+  defect| 0.58 rad from 0.0015 (the flow is not isometric, as in the paper). Not investigated yet.
 
 ## Housekeeping
 
