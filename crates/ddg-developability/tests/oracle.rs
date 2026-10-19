@@ -394,15 +394,18 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
             min_face_angle: input.step.floor,
             ..OptimizeOptions::default()
         };
-        let ok = match (
-            optimize(m, &input.positions, &eopts, &opts, None),
-            status[2].as_str(),
-        ) {
-            (Err(DevError::UndefinedEnergy { .. }), "undefined") => true,
-            (Err(DevError::DegenerateFace { .. }), "degenerate-face") => true,
-            (Err(DevError::NearDegenerateFace { .. }), "near-degenerate-face") => true,
-            _ => false,
-        };
+        let ok = matches!(
+            (
+                optimize(m, &input.positions, &eopts, &opts, None),
+                status[2].as_str()
+            ),
+            (Err(DevError::UndefinedEnergy { .. }), "undefined")
+                | (Err(DevError::DegenerateFace { .. }), "degenerate-face")
+                | (
+                    Err(DevError::NearDegenerateFace { .. }),
+                    "near-degenerate-face"
+                )
+        );
         if ok {
             stats.steps_refused += 1;
             stats.steps_refused_floor += (status[2] == "near-degenerate-face") as usize;
