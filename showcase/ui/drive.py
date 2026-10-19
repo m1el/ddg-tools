@@ -8,6 +8,7 @@ operator returns a black image on llvmpipe). Captures: <outdir>/<scene>_<nn>_<ta
 """
 
 import math
+import os
 import subprocess
 import sys
 import traceback
@@ -70,7 +71,7 @@ def set_workspace(name):
 def load_spot():
     for o in list(bpy.data.objects):
         bpy.data.objects.remove(o, do_unlink=True)
-    bpy.ops.wm.obj_import(filepath=str(SPOT))
+    bpy.ops.wm.obj_import(filepath=os.environ.get("DDG_SPOT_OBJ", str(SPOT)))
     obj = bpy.context.selected_objects[0]
     obj.name = "spot"
     bpy.context.view_layer.objects.active = obj
@@ -331,8 +332,11 @@ def scene_developable():
 
     def s2():
         with bpy.context.temp_override(**area('VIEW_3D')):
-            res = bpy.ops.object.ddg_make_developable('INVOKE_DEFAULT', True, subdivisions=0,
-                                                      iterations=int(ARGS[2]) if len(ARGS) > 2 else 1500)
+            # DDG_SPOT_OBJ (a uniform ~1k input): the paper's recipe, E_P then E_lambda x 2
+            paper = "DDG_SPOT_OBJ" in os.environ
+            res = bpy.ops.object.ddg_make_developable('INVOKE_DEFAULT', True,
+                                                      subdivisions=2 if paper else 0,
+                                                      iterations=int(ARGS[2]) if len(ARGS) > 2 else (500 if paper else 1500))
         log("make developable", res, bpy.data.objects["spot"].data.get("ddg_developable_last"))
         return 1.5
 
@@ -428,7 +432,7 @@ def scene_sphere():
         # Spot's own texture through its OBJ UVs: re-import keeps them, so reload.
         for o in list(bpy.data.objects):
             bpy.data.objects.remove(o, do_unlink=True)
-        bpy.ops.wm.obj_import(filepath=str(SPOT))
+        bpy.ops.wm.obj_import(filepath=os.environ.get("DDG_SPOT_OBJ", str(SPOT)))
         obj = bpy.context.selected_objects[0]
         obj.name = "spot"
         bpy.context.view_layer.objects.active = obj

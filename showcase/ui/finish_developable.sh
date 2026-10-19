@@ -2,7 +2,7 @@
 # Crop the captures of `shoot.sh developable 81` into showcase/media/blender_developable_*.png.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-S="$here/../work/ui-env/shots-81"
+S="$here/../work/ui-env/shots-${DEV_DISPLAY:-81}"
 M="$here/../media"
 LAY=1576x977+0+0       # Layout workspace without properties editor and timeline
 UV=1576x1055+0+0       # UV Editing workspace without properties editor and status bar
