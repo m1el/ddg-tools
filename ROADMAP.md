@@ -312,9 +312,18 @@ Open:
   raw dense input meshes keep 1.4-6.5 % (budget of 32 cuts, undone cuts). Open: try a second pair of
   layers when a cut is undone; rerun only the changed charts instead of the whole pipeline
   (3 to 10 times the unsplit time). See `crates/ddg-uv/README.md`.
-* **Black-box comparison with the authors' program not run.** Its build needs libigl (an empty
-  submodule in the reference tree, commit `d4b67260855f`); fetching it was blocked by the
-  agent's safety check. Waits for the user to supply libigl at `/var/data/ddg-quarantine/libigl`.
+* **Black-box comparison with the authors' program**: done 2026-10-19
+  (`crates/ddg-developability/COMPARISON.md`; libigl supplied by the user, a GL header shim the
+  user approved; no reading of their code). Same mesh, same energy: their values equal ours to
+  all printed digits once boundary vertices are excluded (they omit them; we count them by
+  default, D8, the user's choice); their L∞ covariance and L∞ combinatorial are ½ × ours; their
+  L2 combinatorial is a different normalization (per star, arcs ≥ 2 faces). Our flows are lower
+  in 25 of 30 intrinsic/E_λ runs at 200 steps, 72/72 runs valid against 64/72 of theirs; our
+  cut + flatten distorts far less and flips nothing. Open from it: **our L∞ covariance
+  (`CovarianceMax`) flow progresses slowly** (spot control, no remesh: 1.70 after 200
+  iterations and 1.21 after 1000 against their 0.35 after 200; reproducer in COMPARISON.md);
+  the `develop` example's `RESULT energy=` shows the `--energy` default when `--rounds` sets
+  another energy.
 * **Timings** measured on 2026-10-19 on a quiet machine (energy, eig and flow benches with
   4/16/64 threads; Blender end-to-end rows "2 sub x 500", "1 sub x 500", "none"). Open: the Blender
   rows of the long flows (N x 5000, 0 sub, 3000, converged control meshes) and the study timings
@@ -322,19 +331,18 @@ Open:
   2 to 10 times at 64 threads (SPEC 12.7), not investigated.
 * The dense meshes do not converge at the default budget (every round ends by
   `max_iterations`); only the control meshes approach zero energy.
-* Done (SPEC D34): a converged flow ends `Stationary` (was `line_search_failed`). The Blender e2e
-  table (`scripts/e2e_table.py`) has no short name for `stationary` yet.
+* Done (SPEC D34): a converged flow ends `Stationary` (was `line_search_failed`).
 * Long flows on control meshes leave faces below the small angle that remeshing cannot repair
   (`bad_faces`): halved by D35 (62 -> 35 over the 45 robustness flows), not gone; none on coarse
   uniform inputs.
-* The 14 clippy warnings in `crates/ddg-py/src/developability.rs`.
 * **Quality against the paper's figures**: investigated, `crates/ddg-developability/QUALITY.md`.
   The cause is the input (a subdivision cage instead of a coarse uniform mesh: thin parts fold flat
   into double sheets) and `E_λ` in the coarse phase (it flattens coarse meshes); the paper's recipe
   (uniform ~1k triangles, `E_P` then `E_λ`, two subdivisions) gives its look (spot: Hausdorff 0.045
-  of the diagonal, volume 0.96). The default flow is now that recipe (D36). Open: the showcase and
-  the Blender operator still run `E_λ` throughout and on cages or in place; a uniform remesher in
-  the workspace (the study used MeshLab's) would let them run the paper's workflow. The "short
+  of the diagonal, volume 0.96). The default flow is now that recipe (D36). Done since: the Blender
+  operator and Python have a coarse energy (`E_P` by default), Blender's own Remesh (voxel) +
+  Decimate to ~1k triangles gives inputs as good as the study's (`blender/README.md`), and the
+  showcase runs the paper's recipe. The "short
   creases" of the in-place flows are mostly the hatching of seams that cross triangles in the
   showcase's edge shading.
 
