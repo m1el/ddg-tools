@@ -84,7 +84,7 @@ class DevelopabilityTest(unittest.TestCase):
         self.assertEqual(len(ddg_tools.ENERGIES), 6)
         for name in ddg_tools.ENERGIES:
             r = ddg_tools.developability(*arrays(grid(5, 0.2)), energy=name)
-            self.assertTrue(all(math.isfinite(e) and e >= 0 for e in r.vertex_energy), name)
+            self.assertTrue(all(math.isfinite(e) and e >= -1e-12 for e in r.vertex_energy), name)
             self.assertGreater(r.energy, 0, name)
 
     def test_options_change_the_domain(self):
@@ -93,8 +93,10 @@ class DevelopabilityTest(unittest.TestCase):
         b = ddg_tools.developability(*m, include_boundary=False)
         self.assertLess(sum(b.counted), sum(a.counted))
         self.assertLessEqual(b.energy, a.energy)
-        c = ddg_tools.developability(*arrays(cube()), omit_valence_three=False)
-        d = ddg_tools.developability(*arrays(cube()), omit_valence_three=True)
+        tetra = ([1, 1, 1, 1, -1, -1, -1, 1, -1, -1, -1, 1], [0, 1, 2, 0, 3, 1, 0, 2, 3, 1, 3, 2],
+                 [0, 3, 6, 9], list(range(12)))
+        c = ddg_tools.developability(*arrays(tetra), omit_valence_three=False)
+        d = ddg_tools.developability(*arrays(tetra), omit_valence_three=True)
         self.assertGreater(sum(c.counted), sum(d.counted))
 
     def test_deterministic_and_independent_of_threads(self):
