@@ -169,13 +169,14 @@ def genCase (seed i : Nat) : DevCase :=
     let c1 ← pick #[0.0, 0.0, 1e-4]
     let c2 ← pick #[0.5, 0.5, 0.9, 0.1]
     let np ← below 4
+    let floor ← pick #[1e-4, 1e-4, 1e-4, 0.0, 0.02, 0.1, 0.25]
     let mut pins : Array Nat := #[]
     if np == 3 then
       for _ in [0:2] do pins := pins.push (← below mesh.pos.size)
     return ({ name := s!"{tag}-s{seed}-{i}", task := taskName,
               energies := if taskName == "energy" then EnergyKind.all else #[e],
               includeBoundary := incl, omit3 := omitV,
-              stepOpts := { initialStep := init, maxDisplacement := maxd, c1, c2, pinned := pins },
+              stepOpts := { initialStep := init, maxDisplacement := maxd, c1, c2, pinned := pins, floor },
               mesh } : DevCase) : G DevCase).run rng
   c
 

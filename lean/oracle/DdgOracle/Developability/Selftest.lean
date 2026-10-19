@@ -288,6 +288,28 @@ def selftest : IO Nat := do
     t.check (match evaluate { tri with pos := #[⟨0, 0, 0⟩, ⟨1, 0, 0⟩, ⟨2, 0, 0⟩, ⟨1, 1, 0⟩] } topo {} with
       | .error (.degenerate _) => true | _ => false) "a degenerate face is reported"
   | .error _ => t.check false "degenerate-face mesh topology"
+  -- 9. D33: boundary stars with at most two faces contribute exactly nothing
+  let hingeB := (hingeStar 3 3 0.8 1e-9).run ⟨5⟩ |>.1
+  match buildTopo hingeB with
+  | .error _ => t.check false "hinge mesh topology"
+  | .ok topo =>
+    for e in EnergyKind.all do
+      match evaluate hingeB topo { energy := e, includeBoundary := true }, evaluate hingeB topo { energy := e, includeBoundary := false } with
+      | .ok a, .ok b =>
+        let same := (Array.range topo.nv).all fun v => (a.grad[v]! - b.grad[v]!).norm == 0 && (!topo.stars[v]!.closed → a.e[v]! == 0)
+        t.check (same && a.total == b.total) s!"D33: two-face boundary stars add nothing ({e.name})"
+      | _, _ => t.check false s!"D33 evaluation ({e.name})"
+  -- 10. SPEC 4.9: floor, blocking, start error
+  let sq : DMesh := { pos := #[⟨0, 0, 0⟩, ⟨1, 0, 0⟩, ⟨1, 1, 0.3⟩, ⟨0, 1, 0⟩, ⟨0.5, 0.5, 0.6⟩], faces := #[(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)] }
+  match buildTopo sq with
+  | .error _ => t.check false "floor test mesh topology"
+  | .ok topo =>
+    let o : Opts := { energy := .covariance }
+    t.check (match step sq topo o { floor := 1.2 } with | .error (.nearDegenerate _) => true | _ => false) "a start below the floor is an error"
+    t.check (match step sq topo o { floor := 0.0 } with | .ok _ => true | _ => false) "floor 0 is off"
+    t.check (match step sq topo o { floor := 1e-4 } with | .ok r => r.inadmissible == 0 && r.blockedCount == 0 | _ => false) "the default floor blocks nothing here"
+    let minA := (Array.range 4).foldl (fun a f => min a (minAngle sq f)) 10.0
+    t.check (match step sq topo o { floor := minA * 0.75 } with | .ok r => r.blockedCount == 5 | _ => false) "faces within twice the floor block their vertices"
   let failures ← t.failures.get
   let checks ← t.checks.get
   say s!"dev-selftest: {checks - failures} of {checks} checks passed"

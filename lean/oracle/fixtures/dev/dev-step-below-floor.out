@@ -1,0 +1,4 @@
+case dev-step-below-floor
+task step
+status error near-degenerate-face 1
+end

@@ -26,6 +26,8 @@ structure StepOpts where
   maxBisections : Nat := 30
   /-- pinned vertices -/
   pinned : Array Nat := #[]
+  /-- `min_face_angle` (SPEC 4.9), `0` = off -/
+  floor : Float := 1e-4
   deriving Inhabited
 
 /-- One trial of the line search. -/
@@ -78,6 +80,10 @@ structure StepResult where
   pos : Array V3
   /-- smallest margin over the counted vertices, relative to `max 1 |e_v|` -/
   margin : Float
+  /-- trials rejected by the admissibility floor (SPEC 4.9) -/
+  inadmissible : Nat := 0
+  /-- number of vertices blocked at the start (SPEC 4.9) -/
+  blockedCount : Nat := 0
 
 /-- Mean length of the unique edges. -/
 def meanEdgeLength (m : DMesh) (topo : Topo) : Float :=
@@ -85,17 +91,59 @@ def meanEdgeLength (m : DMesh) (topo : Topo) : Float :=
 
 private def inf : Float := posInf
 
+/-- Sine of the smallest corner angle of face `fi`: `|n| / (product of the two longer edges)`, `0` if
+that product is not a positive finite number (SPEC 4.9). -/
+def sinMinAngle (m : DMesh) (fi : Nat) : Float :=
+  let (a, b, c) := m.faces[fi]!
+  let pa := m.pos[a]!
+  let pb := m.pos[b]!
+  let pc := m.pos[c]!
+  let n := (V3.cross (pb - pa) (pc - pa)).norm
+  let l1 := (pb - pc).norm
+  let l2 := (pc - pa).norm
+  let l3 := (pa - pb).norm
+  let lo := min l1 (min l2 l3)
+  let hi := max l1 (max l2 l3)
+  let mid := l1 + l2 + l3 - lo - hi
+  let prod := hi * mid
+  if prod.isFinite && prod > 0 && n.isFinite then n / prod else 0
+
+/-- The smallest corner angle of face `fi` in radians. -/
+def minAngle (m : DMesh) (fi : Nat) : Float := Float.asin (min 1 (sinMinAngle m fi))
+
+/-- Admissible: every face has smallest corner angle `>= floor`, tested on the sine with a relative
+slack `slack` (`1e-6` at the start, `0` for trials). Always true for `floor = 0`. -/
+def firstInadmissible (m : DMesh) (floor slack : Float) : Option Nat := Id.run do
+  if !(floor > 0) then return none
+  let lim := Float.sin floor * (1 - slack)
+  for fi in [0:m.faces.size] do
+    if !(sinMinAngle m fi ≥ lim) then return some fi
+  return none
+
+/-- Vertices of the faces whose smallest angle is below `2 floor` (SPEC 4.9). -/
+def blockedVertices (m : DMesh) (nv : Nat) (floor : Float) : Array Bool := Id.run do
+  let mut out := Array.replicate nv false
+  if !(floor > 0) then return out
+  for fi in [0:m.faces.size] do
+    if minAngle m fi < 2 * floor then
+      let (a, b, c) := m.faces[fi]!
+      out := ((out.set! a true).set! b true).set! c true
+  return out
+
 /-- One step from the positions of `m`. -/
 def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError StepResult := do
+  if let some f := firstInadmissible m so.floor 1e-6 then throw (.nearDegenerate f)
   let ev0 ← evaluate m topo o
+  let blocked0 := blockedVertices m topo.nv so.floor
   let margin := (Array.range topo.nv).foldl (fun acc v => if ev0.counted[v]! then min acc (ev0.margin[v]! / max 1 ev0.e[v]!.abs) else acc) posInf
   let pinned := fun v => so.pinned.contains v
-  let g := Array.ofFn (n := topo.nv) fun v => if pinned v.val then V3.zero else ev0.grad[v]!
+  let g := Array.ofFn (n := topo.nv) fun v => if pinned v.val || blocked0[v]! then V3.zero else ev0.grad[v]!
   let lbar := meanEdgeLength m topo
   let gmax := g.foldl (fun acc x => max acc x.norm) 0
   if !(gmax > 0) then
     return { lbar, gmax, e0 := ev0.total, slope := 0, tmax := posInf, trials := #[], kind := .stationary,
-             t := 0, e1 := ev0.total, pos := m.pos, margin }
+             t := 0, e1 := ev0.total, pos := m.pos, margin,
+             blockedCount := (blocked0.filter id).size }
   let scale := so.initialStep * lbar / gmax
   let d := g.map (V3.smul (-scale))
   let dinf := d.foldl (fun acc x => max acc x.norm) 0
@@ -113,18 +161,22 @@ def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError
   let mut eAcc := nan
   let mut eAlpha := nan
   let mut done := false
+  let mut inadmissible := 0
   let mut fuel := so.maxDoublings + so.maxBisections + 4
   while !done && fuel > 0 do
     fuel := fuel - 1
     let mt := moved t
+    let admissible := (firstInadmissible mt so.floor 0).isNone
+    if !admissible then inadmissible := inadmissible + 1
     let (e, sOk, cOk, sm, cm) :=
+      if !admissible then (inf, false, none, -inf, 0.0) else
       match evaluate mt topo o with
       | .error _ => (nan, false, none, -inf, 0.0)
       | .ok ev =>
         let h := ev.total - ev0.total
         let smv := (so.c1 * slope * t - h) / (slope.abs * t)
         if h < so.c1 * slope * t then
-          let gt := Array.ofFn (n := topo.nv) fun v => if pinned v.val then V3.zero else ev.grad[v]!
+          let gt := Array.ofFn (n := topo.nv) fun v => if pinned v.val || blocked0[v]! then V3.zero else ev.grad[v]!
           let gd := (Array.range topo.nv).foldl (fun acc v => acc + V3.dot gt[v]! d[v]!) 0
           (ev.total, true, some (decide (gd > so.c2 * slope)), smv, (gd - so.c2 * slope) / slope.abs)
         else (ev.total, false, none, smv, 0.0)
@@ -165,7 +217,8 @@ def step (m : DMesh) (topo : Topo) (o : Opts) (so : StepOpts) : Except EvalError
         t := min (2 * alpha) tmax
   let pos := if kind == .failed then m.pos else (moved accepted).pos
   return { lbar, gmax, e0 := ev0.total, slope, tmax, trials, kind, t := accepted,
-           e1 := if kind == .failed then ev0.total else eAcc, pos, margin }
+           e1 := if kind == .failed then ev0.total else eAcc, pos, margin, inadmissible,
+           blockedCount := (blocked0.filter id).size }
 
 /-- 4-1 subdivision: returns the new mesh and the edge midpoints `(a, b, id)`. -/
 def subdivide (m : DMesh) (topo : Topo) : DMesh × Array (Nat × Nat × Nat) := Id.run do

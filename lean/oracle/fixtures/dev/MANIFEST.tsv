@@ -38,6 +38,11 @@ dev-step-double	step	ok	combinatorial step with a tiny initial step: doubling up
 dev-step-limit	step	ok	the same with at most 2 doublings: the weak step alpha is taken
 dev-step-pinned	step	ok	intrinsic step with pinned vertices
 dev-step-open	step	ok	lambda_max step on an annulus, boundary excluded
+dev-hinge-boundary	energy	ok	hinge star with noise 1e-9: every ring vertex is a boundary star with two nearly coplanar faces and contributes exactly nothing (D33)
+dev-fan-2-flat	energy	ok	boundary fan of two faces with normals within 1e-9: the apex contributes exactly nothing (D33)
+dev-step-floor-hit	step	ok	lambda step with a large initial step and floor 0.1: three trials fall below the floor (+inf), then bisection
+dev-step-blocked	step	ok	lambda step with floor 0.1: vertices of faces within twice the floor have zero gradient
+dev-step-below-floor	step	error	start below the floor 0.5: near-degenerate-face error
 dev-subdivide-tetra	subdivide	ok	4-1 subdivision of a tetrahedron
 dev-subdivide-fan	subdivide	ok	4-1 subdivision of a boundary fan (boundary edges are split too)
 dev-subdivide-crumpled	subdivide	ok	4-1 subdivision of the crumpled grid

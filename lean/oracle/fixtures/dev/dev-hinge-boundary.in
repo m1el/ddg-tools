@@ -1,0 +1,29 @@
+case dev-hinge-boundary
+task energy
+energy combinatorial
+energy combinatorial-max
+energy covariance
+energy covariance-max
+energy intrinsic
+energy intrinsic-max
+boundary 1
+omit3 1
+mesh 9 8
+p bdf3733aaf6d9ae8 3dfa81a1824604c4 3e01ee2d6200999a
+p 3dd90be93f5e0476 3fe3e1010f23fd93 3de48c3ce7307cc2
+p bfee251491105c32 3fee251490d98486 3fe81daa0d6891e6
+p bff051d58c90b2e7 3e04a4fcdb5ad80c 3fea1c88e1401704
+p bfe95cba008bdbef bfe95cba006c1da4 3fe44a2e665460ab
+p be0776c041446baa bfe581b30f6ee032 be1112f088bcd103
+p 3fe5d5dc30387fdf bfe5d5dc2fbe31d2 3fe177e359bb429e
+p 3ff4726f8bdec96d be068105e626f66b 3ff05b8c6fe42bf6
+p 3fde23dc75b12c36 3fde23dc74e995ea 3fd81cb05d3374f7
+f 0 1 2
+f 0 2 3
+f 0 3 4
+f 0 4 5
+f 0 5 6
+f 0 6 7
+f 0 7 8
+f 0 8 1
+end

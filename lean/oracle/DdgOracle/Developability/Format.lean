@@ -79,6 +79,9 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String Dev
       so := { so with initialStep := ← floatTok "step" l[1]!, maxDisplacement := ← floatTok "step" l[2]!,
                       c1 := ← floatTok "step" l[3]!, c2 := ← floatTok "step" l[4]!,
                       maxDoublings := ← natTok "step" l[5]!, maxBisections := ← natTok "step" l[6]! }
+    | "floor" =>
+      if l.size != 2 then throw "floor: expected 'floor <min_face_angle>'"
+      so := { so with floor := ← floatTok "floor" l[1]! }
     | "pinned" =>
       let mut ps := so.pinned
       for k in [1:l.size] do ps := ps.push (← natTok "pinned" l[k]!)
@@ -118,6 +121,7 @@ def printCase (c : DevCase) : String := Id.run do
   if c.task == "step" then
     let o := c.stepOpts
     s := s ++ s!"step {hx o.initialStep} {hx o.maxDisplacement} {hx o.c1} {hx o.c2} {o.maxDoublings} {o.maxBisections}\n"
+    s := s ++ s!"floor {hx o.floor}\n"
     if o.pinned.size > 0 then s := s ++ "pinned " ++ " ".intercalate (o.pinned.map toString).toList ++ "\n"
   s := s ++ s!"mesh {c.mesh.pos.size} {c.mesh.faces.size}\n"
   for p in c.mesh.pos do s := s ++ s!"p {hx p.x} {hx p.y} {hx p.z}\n"
@@ -152,7 +156,7 @@ private def printStep (c : DevCase) (topo : Topo) : String := Id.run do
   | .error err => return printError c.name "step" err.text
   | .ok r =>
     let mut s := s!"case {c.name}\ntask step\nstatus ok\n"
-    s := s ++ s!"lbar {hx r.lbar}\ngmax {hx r.gmax}\nenergy0 {hx r.e0}\nslope {hx r.slope}\ntmax {hx r.tmax}\nmargin {hx r.margin}\n"
+    s := s ++ s!"lbar {hx r.lbar}\ngmax {hx r.gmax}\nenergy0 {hx r.e0}\nslope {hx r.slope}\ntmax {hx r.tmax}\nmargin {hx r.margin}\ninadmissible {r.inadmissible}\nblocked {r.blockedCount}\n"
     for i in [0:r.trials.size] do
       let t := r.trials[i]!
       let cc := match t.c with | none => "-1" | some b => b2n b

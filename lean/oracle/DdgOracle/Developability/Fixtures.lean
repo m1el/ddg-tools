@@ -64,6 +64,13 @@ def fixtures : Array (DevCase × String) := Id.run do
   fs := add fs { mk "dev-step-limit" "step" ico with energies := #[.combinatorial], stepOpts := { small with maxDoublings := 2 } } "the same with at most 2 doublings: the weak step alpha is taken"
   fs := add fs { mk "dev-step-pinned" "step" crumpled with energies := #[.intrinsic], stepOpts := { pinned := #[0, 1, 2, 6, 12] } } "intrinsic step with pinned vertices"
   fs := add fs { mk "dev-step-open" "step" (ofRaw ((polar 2 6 0.4 1.0 fun x y => 0.3 * Float.sin (3 * x) + 0.2 * y * y).jitter 0.05 16)) with energies := #[.covarianceMax], includeBoundary := false } "lambda_max step on an annulus, boundary excluded"
+  -- admissibility floor (SPEC 4.9) and boundary stars with two faces (D33)
+  let hingeB := run1 (hingeStar 3 3 0.8 1e-9) 21
+  fs := add fs (mk "dev-hinge-boundary" "energy" hingeB) "hinge star with noise 1e-9: every ring vertex is a boundary star with two nearly coplanar faces and contributes exactly nothing (D33)"
+  fs := add fs (mk "dev-fan-2-flat" "energy" (run1 (boundaryFan 2 3.0 0.0 1e-9) 22)) "boundary fan of two faces with normals within 1e-9: the apex contributes exactly nothing (D33)"
+  fs := add fs { mk "dev-step-floor-hit" "step" crumpled with energies := #[.covariance], stepOpts := { big with floor := 0.1 } } "lambda step with a large initial step and floor 0.1: three trials fall below the floor (+inf), then bisection"
+  fs := add fs { mk "dev-step-blocked" "step" crumpled with energies := #[.covariance], stepOpts := { floor := 0.1 } } "lambda step with floor 0.1: vertices of faces within twice the floor have zero gradient"
+  fs := add fs { mk "dev-step-below-floor" "step" crumpled with energies := #[.covariance], stepOpts := { floor := 0.5 } } "start below the floor 0.5: near-degenerate-face error"
   -- subdivision
   fs := add fs (mk "dev-subdivide-tetra" "subdivide" (ofRaw (tetrahedron.jitter 0.05 13))) "4-1 subdivision of a tetrahedron"
   fs := add fs (mk "dev-subdivide-fan" "subdivide" (run1 (boundaryFan 5 4.0 0.8 0.4) 8)) "4-1 subdivision of a boundary fan (boundary edges are split too)"

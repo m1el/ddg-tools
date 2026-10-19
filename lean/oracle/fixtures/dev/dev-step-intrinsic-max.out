@@ -7,6 +7,8 @@ energy0 40321afea9224e48
 slope c01f5232e8bd9aab
 tmax 4014000000000000
 margin 3f580a5adc058c00
+inadmissible 0
+blocked 0
 trial 0 3ff0000000000000 402b22d8d3d8a4af 1 1 3fe28aff48e7e14c 3fc0fbec10f6093f
 result wolfe 3ff0000000000000 1 402b22d8d3d8a4af
 x 0 3f8d7a0b493f9b42 3fc1ee36e1981ea6 3f9efd4ab7a326b2

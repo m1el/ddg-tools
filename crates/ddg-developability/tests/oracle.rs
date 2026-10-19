@@ -43,8 +43,9 @@
 //!   neighbours (those are the stars it depends on) has a margin `<= 1e-9 max(1, e)` on either
 //!   side, because there the active piece is chosen by rounding. Energies are compared everywhere.
 //! * step: the oracle models SPEC 4.1-4.3 (scaled steepest descent plus the weak Wolfe search), so
-//!   the optimizer's admissibility floors (`min_face_angle`) is switched off;
-//!   positions to `1e-9` mean edge lengths, energy as above, the trial count and the kind
+//!   the optimizer's admissibility floor, blocking and start error (SPEC §4.9, `floor` line of the
+//!   input, default the optimizer's `1e-4`) are modelled by the oracle and switched on;
+//!   the number of inadmissible trials is compared too; positions to `1e-9` mean edge lengths, energy as above, the trial count and the kind
 //!   of ending exactly; not compared if the start has a near tie anywhere.
 //! * subdivision: faces and midpoint ids exactly, positions to `1e-14` of the mesh extent.
 
@@ -134,6 +135,8 @@ struct StepParams {
     max_doublings: u32,
     max_bisections: u32,
     pinned: Vec<u32>,
+    /// `min_face_angle` (SPEC §4.9); the oracle's default is the optimizer's default `1e-4`
+    floor: f64,
 }
 
 struct Input {
@@ -162,6 +165,7 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
             max_doublings: 30,
             max_bisections: 30,
             pinned: Vec::new(),
+            floor: 1e-4,
         },
         positions: Vec::new(),
         faces: Vec::new(),
@@ -186,6 +190,7 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                 input.step.max_doublings = int(&line[5]) as u32;
                 input.step.max_bisections = int(&line[6]) as u32;
             }
+            "floor" => input.step.floor = float(&line[1]),
             "pinned" => input
                 .step
                 .pinned
@@ -233,6 +238,9 @@ struct Stats {
     energy: [EnergyStats; 6],
     steps: usize,
     steps_skipped: usize,
+    steps_refused_floor: usize,
+    inadmissible_seen: usize,
+    blocked_seen: usize,
     cap_knife_edge: usize,
     steps_refused: usize,
     steps_by_kind: HashMap<String, usize>,
@@ -268,6 +276,9 @@ impl Stats {
         }
         self.steps += o.steps;
         self.steps_skipped += o.steps_skipped;
+        self.steps_refused_floor += o.steps_refused_floor;
+        self.inadmissible_seen += o.inadmissible_seen;
+        self.blocked_seen += o.blocked_seen;
         self.cap_knife_edge += o.cap_knife_edge;
         self.steps_refused += o.steps_refused;
         for (k, v) in o.steps_by_kind {
@@ -318,6 +329,10 @@ impl Stats {
             self.step_energy
         );
         s += &format!(
+            "admissibility floor (SPEC 4.9): compared steps with an inadmissible trial {}, with blocked vertices {}; starts below the floor refused by both: {}\n",
+            self.inadmissible_seen, self.blocked_seen, self.steps_refused_floor
+        );
+        s += &format!(
             "subdivisions: {} compared, largest position difference {:.2e}; invalid meshes rejected by both: {}; steps refused by both (undefined energy at the start): {}\n",
             self.subdivisions,
             self.subdivision_position,
@@ -354,7 +369,9 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     let mesh = TriMesh::new(input.positions.len(), input.faces.clone());
     if status[1] != "ok"
         && input.task == "step"
-        && (status[2] == "undefined" || status[2] == "degenerate-face")
+        && (status[2] == "undefined"
+            || status[2] == "degenerate-face"
+            || status[2] == "near-degenerate-face")
     {
         // the energy is undefined (or a face degenerate) at the start of the step: `optimize` must refuse
         let Ok(m) = &mesh else {
@@ -374,7 +391,7 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
         let opts = OptimizeOptions {
             max_iterations: 1,
             gradient_tolerance: 0.0,
-            min_face_angle: 0.0,
+            min_face_angle: input.step.floor,
             ..OptimizeOptions::default()
         };
         let ok = match (
@@ -383,10 +400,12 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
         ) {
             (Err(DevError::UndefinedEnergy { .. }), "undefined") => true,
             (Err(DevError::DegenerateFace { .. }), "degenerate-face") => true,
+            (Err(DevError::NearDegenerateFace { .. }), "near-degenerate-face") => true,
             _ => false,
         };
         if ok {
             stats.steps_refused += 1;
+            stats.steps_refused_floor += (status[2] == "near-degenerate-face") as usize;
         } else {
             stats.problems.push((
                 input.name.clone(),
@@ -681,9 +700,8 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
         initial_step: s.initial_step,
         max_displacement: s.max_displacement,
         pinned: s.pinned.clone(),
-        // the oracle implements SPEC §4.1-§4.3; the admissibility floors (D31, D32) are an addition of
-        // the optimizer that the oracle does not model, so they are switched off here
-        min_face_angle: 0.0,
+        // the oracle models the admissibility floor and the blocked vertices (SPEC §4.9)
+        min_face_angle: s.floor,
         ..OptimizeOptions::default()
     };
     let res = match optimize(mesh, &input.positions, &eopts, &opts, None) {
@@ -700,6 +718,15 @@ fn replay_step(input: &Input, mesh: &TriMesh, out: &[Line], stats: &mut Stats) {
     *stats.steps_by_kind.entry(kind.to_string()).or_default() += 1;
     let o_trials = int(&result[3]);
     let r = &res.report;
+    let o_inadmissible = int(&key("inadmissible")[1]);
+    if r.inadmissible_trials != o_inadmissible {
+        local.push(format!(
+            "inadmissible trials: here {}, oracle {o_inadmissible}",
+            r.inadmissible_trials
+        ));
+    }
+    stats.inadmissible_seen += (o_inadmissible > 0) as usize;
+    stats.blocked_seen += (int(&key("blocked")[1]) > 0) as usize;
     // ending
     match kind {
         "stationary" => {
@@ -1022,20 +1049,15 @@ fn fuzz_against_the_oracle() {
     );
 }
 
-// ----- a finding that the comparison above cannot show (both sides share it) -----
+// ----- D33: boundary stars with at most two faces contribute nothing -----
 
-/// A boundary vertex with two faces has `e_v = 0` for every energy (SPEC 3.1), so including the
-/// boundary in the domain must not change the energy or the gradient of the interior vertices.
-/// For `E_lambda` and the intrinsic width it does, when the two faces of a boundary vertex are
-/// nearly coplanar: the smallest eigenvalue of its covariance is double up to the square of the
-/// normal angle `delta`, the computed eigenvector is an arbitrary vector of the null plane, and
-/// the sensitivities `2 theta (x.N) x` are of the size `delta` instead of zero (the oracle has the
-/// same noise, which is why it reports the real eigenvalue gap for such stars and the comparison
-/// skips them). Run with `--ignored --nocapture`; it prints the relative change of the gradient
-/// when the (zero) boundary energies are added, for hinge stars with noise `eps`.
+/// A boundary vertex with two faces has `e_v = 0` for every energy (SPEC 3.1, D33), so including the
+/// boundary in the domain must not change the energy or the gradient of the other vertices, however
+/// close to coplanar the two faces are (before D33 the arbitrary eigenvector of the rank-deficient
+/// covariance fed noise of the size of the normal angle `delta` into the gradient). Hinge stars with
+/// noise `eps`: the ring vertices are boundary stars with two faces.
 #[test]
-#[ignore = "informational: prints the effect; see the comment"]
-fn nearly_coplanar_two_face_boundary_stars_perturb_the_gradient() {
+fn nearly_coplanar_two_face_boundary_stars_contribute_nothing() {
     // hinge star: apex 0, ring on the planes z = +- a |x|, two ring points on the crease
     let ring_angles = [90.0f64, 130.0, 180.0, 230.0, 270.0, 320.0, 0.0, 40.0];
     for eps in [1e-12, 1e-9, 1e-6, 1e-3] {
@@ -1058,7 +1080,7 @@ fn nearly_coplanar_two_face_boundary_stars_perturb_the_gradient() {
             .map(|m| [0, 1 + m as u32, 1 + ((m + 1) % k) as u32])
             .collect();
         let mesh = TriMesh::new(positions.len(), faces).unwrap();
-        for energy in [Energy::Covariance, Energy::Intrinsic, Energy::Combinatorial] {
+        for (energy, name) in ENERGIES {
             let with = |include_boundary| {
                 let opts = EnergyOptions {
                     energy,
@@ -1066,9 +1088,11 @@ fn nearly_coplanar_two_face_boundary_stars_perturb_the_gradient() {
                     omit_valence_three: true,
                     threads: None,
                 };
-                evaluate(&mesh, &positions, &opts).unwrap()
+                evaluate(&mesh, &positions, &opts)
             };
-            let (a, b) = (with(true), with(false));
+            let (Ok(a), Ok(b)) = (with(true), with(false)) else {
+                continue; // an intrinsic energy undefined at the apex (D12)
+            };
             let g0 = norm(b.gradient[0]).max(1e-300);
             let diff = (0..positions.len())
                 .map(|v| {
@@ -1079,9 +1103,14 @@ fn nearly_coplanar_two_face_boundary_stars_perturb_the_gradient() {
                     ])
                 })
                 .fold(0.0f64, f64::max);
-            println!(
-                "eps {eps:e} {energy:?}: |g| at the apex {g0:.3e}, change when the boundary is included {diff:.3e} (relative {:.3e})",
-                diff / g0
+            assert!(
+                diff <= 1e-15 + 1e-12 * g0,
+                "eps {eps:e} {name}: |g| at the apex {g0:.3e}, change when the boundary is included {diff:.3e}"
+            );
+            assert!(
+                (a.energy - b.energy).abs() <= 1e-15 * a.energy.abs().max(1.0),
+                "eps {eps:e} {name}: total changes by {:e}",
+                a.energy - b.energy
             );
         }
     }
