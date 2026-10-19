@@ -124,6 +124,8 @@ fn rotation(app: f64, aqq: f64, apq: f64) -> (f64, f64) {
 ///
 /// See the [module documentation](self) for the algorithm, accuracy and conventions.
 ///
+/// [formula: dev-jacobi-rotation]
+///
 /// # Errors
 /// [`EigError::NonFinite`] if an entry of the upper triangle is NaN or infinite.
 pub fn sym_eig3(a: [[f64; 3]; 3]) -> Result<SymEig3, EigError> {
@@ -230,6 +232,8 @@ pub fn sym_eig3(a: [[f64; 3]; 3]) -> Result<SymEig3, EigError> {
 /// Uses the Jacobi rotation that annihilates the off-diagonal entry, so the eigenvalues are
 /// `a_00 − t a_01` and `a_11 + t a_01` with `|t| ≤ 1` (no cancellation between nearly equal
 /// eigenvalues, and the rotation angle is well defined even if they coincide).
+///
+/// [formula: dev-jacobi-rotation]
 ///
 /// # Errors
 /// [`EigError::NonFinite`] if an entry of the upper triangle is NaN or infinite.
