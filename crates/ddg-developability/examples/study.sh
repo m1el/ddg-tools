@@ -1,5 +1,5 @@
 #!/bin/sh
-# End-to-end study (NOTES-flow.md): every OBJ under data/models x all six energies x iteration
+# End-to-end study (SPEC §12.5): every OBJ under data/models x all six energies x iteration
 # budgets, one process per job (xargs -P), one log per job in runs_tmp/dev-flow-study/.
 # Usage (from the repository root):
 #   cargo build --release -p ddg-developability --example develop

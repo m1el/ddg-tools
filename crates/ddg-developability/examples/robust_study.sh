@@ -1,5 +1,5 @@
 #!/bin/sh
-# Robustness study (NOTES-flow.md, SPEC D31/D32): the flows of the cut study re-run with the admissibility floor, then the cut (covariance terminals, eps 1e-3, defect tolerance 0.1) on each result.
+# Robustness study (SPEC §12, SPEC D31/D32): the flows of the cut study re-run with the admissibility floor, then the cut (covariance terminals, eps 1e-3, defect tolerance 0.1) on each result.
 # One process and one log per job (xargs -P). Same flows as examples/cut_study.sh.
 # Usage (repository root):
 #   cargo build --release -p ddg-developability --example develop

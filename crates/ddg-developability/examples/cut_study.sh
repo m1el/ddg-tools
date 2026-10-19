@@ -1,5 +1,5 @@
 #!/bin/sh
-# Cut study (NOTES-flow.md, "Cut study", SPEC D30): the flow is run once per (mesh, flow energy,
+# Cut study (SPEC §12.3, SPEC D30): the flow is run once per (mesh, flow energy,
 # budget) and written to OBJ; every cut variant (terminal energy x epsilon x defect tolerance) is
 # then a cheap `--cut-only` job on that OBJ. One process and one log per job (xargs -P).
 # Usage (repository root):

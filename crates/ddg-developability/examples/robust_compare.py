@@ -1,7 +1,7 @@
 # /// script
 # dependencies = []
 # ///
-"""Before/after table of the robustness study (NOTES-flow.md): `robust_compare.py OLD NEW`, where OLD
+"""Before/after table of the robustness study (SPEC §12.5): `robust_compare.py OLD NEW`, where OLD
 is the directory of the cut study (flow/ and cut/ with the covariance / 1e-3 / 0.1 cut) and NEW that of
 `robust_study.sh`. Prints a markdown table."""
 import glob, os, sys, re

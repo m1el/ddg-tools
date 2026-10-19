@@ -271,7 +271,7 @@ fn run() -> Result<(), String> {
                     ("mean_abs_u".into(), format!("{:.6e}", cf.mean_abs_log_scale)),
                     ("cut_seconds".into(), format!("{secs:.3}")),
                 ]);
-                // diagnostics (NOTES-flow.md, "Cut study"): cut length, defects, embeddedness, flips
+                // diagnostics (SPEC §12.3): cut length, defects, embeddedness, flips
                 let lens: Vec<f64> = cur_mesh
                     .edges()
                     .iter()

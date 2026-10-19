@@ -1,7 +1,7 @@
 # /// script
 # dependencies = ["numpy"]
 # ///
-"""Summary of flow runs (NOTES-flow.md, "Robustness study", SPEC D31/D32).
+"""Summary of flow runs (SPEC §12.4, SPEC D31/D32).
 
 Usage: uv run robust_summary.py DIR [DIR ...]
 Reads every DIR/*.log written by `develop` (RESULT line) and the matching .obj (if any); prints a
