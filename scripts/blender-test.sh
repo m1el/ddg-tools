@@ -13,6 +13,8 @@
 #    in parallel, once per variant (intrinsic, caller, refined, intrinsic and refined with
 #    Optimal Delaunay on; logs
 #    runs_tmp/blender-test-cut-<name>.log; -k applies to both files).
+# 3c. blender/tests/test_developable.py runs the same way (Make Developable, Show Developability,
+#    Developable Seams + UV; log runs_tmp/blender-test-developable.log), in parallel with 3b.
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
@@ -88,6 +90,11 @@ for tri in "${variants[@]}"; do
         "${only[@]}" > "$root/runs_tmp/blender-test-cut-$tri.log" 2>&1 &
     pids+=($!)
 done
+dev_log="$root/runs_tmp/blender-test-developable.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_developable.py" -- --module "$module" \
+    "${only[@]}" > "$dev_log" 2>&1 &
+dev_pid=$!
 cut_failed=0
 for i in "${!variants[@]}"; do
     tri="${variants[$i]}"
@@ -101,6 +108,14 @@ for i in "${!variants[@]}"; do
         cut_failed=1
     fi
 done
+dev_status=0
+wait "$dev_pid" || dev_status=$?
+echo "developable tests: $(grep -E '^RESULT' "$dev_log")"
+grep -E '^(FAIL|  failed|SPOT)' "$dev_log" || true
+if [ "$dev_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$dev_log"; then
+    echo "Blender developable tests FAILED (exit status $dev_status); see $dev_log" >&2
+    cut_failed=1
+fi
 [ "$cut_failed" = 0 ] || exit 1
 
 if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then

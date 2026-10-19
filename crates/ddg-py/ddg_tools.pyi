@@ -244,7 +244,6 @@ def make_developable(
     stall_iterations: int | None = None,
     initial_step: float | None = None,
     min_face_angle: float | None = None,
-    min_fold_angle: float | None = None,
     pinned_vertices: Buffer | None = None,
     remesh: bool = True,
     small_angle: float = 0.017453292519943295,

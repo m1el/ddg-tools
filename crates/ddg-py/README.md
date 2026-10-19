@@ -487,6 +487,89 @@ manifold triangle mesh; not a disk for `"disk"`), `SolveError`. Glue: `src/pytho
 `src/intrinsic_apps.rs`, `src/intrinsic_vector.rs`; tests of the wheel:
 `python-tests/test_intrinsic_apps.py`, `python-tests/test_intrinsic_vector.py`.
 
+## Developability of triangle meshes
+
+Four functions over the crate `ddg-developability` (Stein, Grinspun, Crane, *Developability of
+Triangle Meshes*, ACM TOG 2018, implemented clean-room from the text; contract
+`crates/ddg-developability/SPEC.md`, section 7.2). Input is the polygon mesh of `unwrap`
+(`positions`, `corner_vertices`, `polygon_starts`, Blender's `triangles`; the triangulation of
+the caller is used, the polygons are never changed). The mesh must be a manifold, consistently
+oriented triangle mesh; vertices no polygon uses are allowed. Errors name polygons and vertices of
+your mesh (`MeshError`: "the mesh is not manifold: edge (0, 2) is shared by 3 faces: polygons 0, 4,
+6"), `InputError` starts with the parameter name. Results are objects with attributes
+(`array.array` and a `report` dict), as for `map_to_sphere`.
+
+```python
+developability(positions, corner_vertices, polygon_starts, triangles, *, energy="covariance",
+               include_boundary=True, omit_valence_three=True, threads=None)
+        # -> .vertex_energy ('d'), .counted ('B'), .energy, .report
+make_developable(..., energy=, include_boundary=, omit_valence_three=, method="lbfgs", memory=10,
+                 step=1e-3, line_search="wolfe", iterations=500, subdivisions=2,
+                 max_displacement=0.5, gradient_tolerance=None, energy_tolerance=None,
+                 stall_iterations=None, initial_step=None, min_face_angle=None,
+                 pinned_vertices=None, remesh=True,
+                 small_angle=radians(1), collapse_boundary_edges=True, return_faces=False,
+                 threads=None, progress=None, progress_interval=0.1)
+        # -> .positions ('d'), .faces ('i' | None), .face_polygon ('i' | None),
+        #    .vertex_source ('i'), .report
+developable_seams(..., seam_edges=None, extra_terminals=None, energy=None, epsilon=1e-3,
+                  defect_tolerance=0.1, length_weight=1.0, alignment_weight=0.0, threads=None)
+        # -> .seam_edges ('i', 2 per edge), .terminals, .vertex_energy, .vertex_defect,
+        #    .star_embeddedness ('d'), .report
+developable_unwrap(..., <the same options>, extension="harmonic",
+                   overlap_samples_per_triangle=None, margin=1/256)
+        # -> .corner_uvs ('f', packed), .seam_edges, .polygon_chart, .corner_log_scale, .terminals,
+        #    .vertex_energy, .vertex_defect, .star_embeddedness, .report
+ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
+```
+
+* **Energies** (`ENERGIES`): `covariance` (E_lambda, the default), `combinatorial` (E_P),
+  `combinatorial_max`, `covariance_max`, `intrinsic`, `intrinsic_max`. `omit_valence_three`
+  leaves out interior vertices with three faces; `include_boundary` counts boundary vertices. The
+  results do not depend on `threads`.
+* **`make_developable`** runs the flow round by round (`subdivisions + 1` rounds of `iterations`
+  L-BFGS iterations, a 4-1 subdivision before every round but the first, small-angle remeshing
+  during the rounds). `method` is `lbfgs`, `gradient_descent` or `fixed_step` (`step` in units
+  of the squared mean edge length); `line_search` is `wolfe` or `backtracking` (c1 = 1e-4, shrink
+  1/2); `max_displacement` caps a step in mean edge lengths; `min_face_angle`
+  is the admissibility floor of the library on the smallest corner angle (D31; `None` keeps its value, 0 switches the
+  check off). `pinned_vertices` do not move. **D24:** `faces` is `None` exactly when no
+  subdivision ran and no remeshing operation was applied; then `positions` has one entry per
+  vertex of your mesh and your polygons stay. The report then holds the largest
+  non-planarity of polygons with more than three corners (`nonplanarity_before/after`,
+  `nonplanarity_after_relative` = relative to the mean side of that polygon,
+  `nonplanarity_polygon`). Otherwise `positions`/`faces` are the new triangle mesh (vertices no
+  polygon used are dropped), `face_polygon` gives for every triangle the polygon it descends from
+  (exact for subdivision; after remeshing, a triangle that survived keeps its polygon and a
+  changed one takes the majority of the old triangles around its vertices) and `vertex_source`
+  the vertex of your mesh each vertex descends from (-1 for a subdivision midpoint).
+  `return_faces=True` returns `faces`/`face_polygon` also when nothing changed (the input's
+  triangles). `progress(round, iteration, energy, gradient_norm)` is called from the calling
+  thread at most every `progress_interval` seconds (0: every iteration) with the GIL; returning
+  `False` stops the flow and the state at that moment is returned (`report["cancelled"]`); an
+  exception, and Ctrl-C (checked at the same moments), stop the flow and propagate. Report:
+  `energy_initial/final`, `topology_changed`, `n_*`, `iterations`, `min_angle`, `rounds` (a list of
+  dicts: `status`, `iterations`, `flips`, `collapses`, `bad_triangles_left`, ...), `warnings`,
+  timings.
+* **`developable_seams`** is the cut of the paper (Sec. 4.4) without the flattening: terminals are
+  the vertices whose energy exceeds `epsilon` (evaluated with boundary vertices included and
+  valence 3 counted) and, since D30, interior vertices whose angle defect exceeds
+  `defect_tolerance` (`None`: the paper's rule), plus `extra_terminals`; a cut graph through
+  them (Steiner tree approximation, handle loops, `length_weight`/`alignment_weight` in the edge
+  cost) along **polygon edges only**; `seam_edges` are cut as well. It returns the edges as vertex
+  pairs `(min, max)` and the per-vertex energy, angle defect and star embeddedness (the library's
+  diagnostic of D28/D30) that explain the choice. Feed the edges to `unwrap(seam_edges=...)`: the
+  atlas pipeline then makes the UV map with its cones and packing (this is what the Blender
+  operator does).
+* **`developable_unwrap`** is the paper's own flattening: each chart by Boundary First Flattening
+  with the boundary lengths kept, packed by `pack_charts`. It is isometric where the surface is
+  developable, but a chart can overlap itself (spot: one chart, about half of it covered twice),
+  so the report counts flips and overlap per chart (`charts`). `corner_log_scale` is
+  `0.5 ln(UV area / area)` of the triangle that owns the corner.
+
+Glue: `src/python/developability.rs`; logic (pure Rust, tested by `cargo test`):
+`src/developability.rs`; tests of the wheel: `python-tests/test_developability.py`.
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the
@@ -520,10 +603,11 @@ assembles the report. New options become fields of `UnwrapOptions` and keyword a
 | `src/pipeline.rs` | `run_pipeline` (the call into `ddg-uv`) and the driver `unwrap` |
 | `src/cones.rs` | `reoptimize_cones`: validation and the call into `ddg-optimal-cones` (pure Rust) |
 | `src/sphere.rs` | `map_to_sphere`: validation and the call into `ddg-bff` (pure Rust) |
+| `src/developability.rs` | `developability`, `make_developable`, `developable_unwrap` over `ddg-developability` (pure Rust) |
 | `src/cutting.rs` | the cut session: controls, reports, arrays (pure Rust, tested by `cargo test`) |
 | `src/measure.rs` | distortion measured on the result |
 | `src/pack.rs` | packing charts into the unit square |
-| `src/python.rs`, `src/python/cut.rs`, `src/python/sphere.rs` | the PyO3 glue (cargo feature `python`) |
+| `src/python.rs`, `src/python/cut.rs`, `src/python/sphere.rs`, `src/python/developability.rs` | the PyO3 glue (cargo feature `python`) |
 | `ddg_tools.pyi` | type stubs, shipped in the wheel |
 | `python-tests/` | tests of the built wheel |
 
@@ -567,6 +651,9 @@ This crate contains no algorithm of its own. The pipeline it calls (`ddg-uv`) im
   <https://doi.org/10.1145/3197517.3201367>
 - Rohan Sawhney, Keenan Crane. *Boundary First Flattening.* ACM Transactions on Graphics 37(1),
   2017. <https://doi.org/10.1145/3132705>
+- Oded Stein, Eitan Grinspun, Keenan Crane. *Developability of Triangle Meshes.* ACM Transactions
+  on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201303> (the developability functions,
+  through `ddg-developability`)
 
 ## License
 

@@ -215,6 +215,77 @@ def step_cut():
         check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of Apply ran")
         sphere = bpy.context.view_layer.objects.active
         check(not any(e.use_seam for e in sphere.data.edges), "undo removed the seams again")
+    return step_developable
+
+
+def positions(obj):
+    values = array.array('f', bytes(12 * len(obj.data.vertices)))
+    obj.data.vertices.foreach_get("co", values)
+    return values.tobytes()
+
+
+def step_developable():
+    """Make Developable (both branches) and Developable Seams + UV from the viewport: undo, redo,
+    Adjust Last Operation."""
+    with bpy.context.temp_override(**viewport()):
+        bpy.ops.object.mode_set('EXEC_DEFAULT', True, mode='OBJECT')
+        bpy.ops.mesh.primitive_grid_add('EXEC_DEFAULT', True, x_subdivisions=8, y_subdivisions=8)
+        plane = bpy.context.view_layer.objects.active
+        for i, v in enumerate(plane.data.vertices):
+            v.co.z = 0.1 * ((i * 7919) % 13 - 6) / 6.0
+        plane.data.update()
+        bpy.ops.ed.undo_push(message="noise")
+        before = positions(plane)
+        n_polygons = len(plane.data.polygons)
+        draws = CALLS["draw"]
+        result = bpy.ops.object.ddg_make_developable(
+            'INVOKE_DEFAULT', True, subdivisions=0, remesh=False, iterations=30)
+        plane = bpy.context.view_layer.objects.active
+        check(result == {'FINISHED'}, "Make Developable finished from the viewport")
+        after = positions(plane)
+        check(after != before and len(plane.data.polygons) == n_polygons,
+              "positions changed, quads kept")
+        redraw()
+        bpy.ops.screen.redo_last('INVOKE_DEFAULT')
+        redraw()
+        check(CALLS["draw"] > draws, "the Make Developable panel was drawn")
+        plane = bpy.context.view_layer.objects.active
+        check(positions(plane) == after, "Adjust Last Operation re-ran with the same result")
+        check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of Make Developable ran")
+        plane = bpy.context.view_layer.objects.active
+        check(positions(plane) == before, "undo restored the positions")
+        check(bpy.ops.ed.redo() == {'FINISHED'}, "redo ran")
+        plane = bpy.context.view_layer.objects.active
+        check(positions(plane) == after, "redo brought the result back")
+
+        # The replacing branch.
+        bpy.ops.ed.undo()
+        plane = bpy.context.view_layer.objects.active
+        result = bpy.ops.object.ddg_make_developable(
+            'INVOKE_DEFAULT', True, subdivisions=1, remesh=False, iterations=10)
+        plane = bpy.context.view_layer.objects.active
+        check(result == {'FINISHED'} and len(plane.data.polygons) == 8 * n_polygons,
+              "subdivision replaced the mesh by triangles")
+        check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of the replacement ran")
+        plane = bpy.context.view_layer.objects.active
+        check(len(plane.data.polygons) == n_polygons and positions(plane) == before,
+              "undo restored the quads")
+        check(bpy.ops.ed.redo() == {'FINISHED'}, "redo of the replacement ran")
+        plane = bpy.context.view_layer.objects.active
+        check(len(plane.data.polygons) == 8 * n_polygons, "redo brought the triangles back")
+        bpy.ops.ed.undo()
+
+        # Seams + UV.
+        plane = bpy.context.view_layer.objects.active
+        result = bpy.ops.uv.ddg_developable_seams('INVOKE_DEFAULT', True)
+        plane = bpy.context.view_layer.objects.active
+        check(result == {'FINISHED'} and "Developable" in plane.data.uv_layers,
+              "Developable Seams + UV finished and wrote its UV map")
+        marked = sum(e.use_seam for e in plane.data.edges)
+        check(bpy.ops.ed.undo() == {'FINISHED'}, "undo of Developable Seams + UV ran")
+        plane = bpy.context.view_layer.objects.active
+        check("Developable" not in plane.data.uv_layers and not any(e.use_seam for e in plane.data.edges),
+              "undo removed the UV map and the {} seams".format(marked))
     return None
 
 

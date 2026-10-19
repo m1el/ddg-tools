@@ -152,25 +152,6 @@ fn dev_error(e: dev::DevError, prep: &Prepared, input: bool) -> UnwrapError {
             min_angle.to_degrees(),
             limit.to_degrees()
         )),
-        E::FoldedEdge { vertices, gap, limit } if input => {
-            let v = |x: u32| prep.new_to_old.get(x as usize).copied().unwrap_or(x);
-            UnwrapError::Mesh(format!(
-                "edge ({}, {}) is folded flat onto itself (its two faces' normals are within {:.3e} degrees \
-                 of opposite, the limit is {:.3e} degrees): lower min_fold_angle (0 switches the check off)",
-                v(vertices[0]).min(v(vertices[1])),
-                v(vertices[0]).max(v(vertices[1])),
-                gap.to_degrees(),
-                limit.to_degrees()
-            ))
-        }
-        E::FoldedEdge { vertices, gap, limit } => UnwrapError::Solve(format!(
-            "an edge ({}, {}) of the current mesh folded flat onto itself ({:.3e} degrees from opposite normals, \
-             limit {:.3e} degrees)",
-            vertices[0],
-            vertices[1],
-            gap.to_degrees(),
-            limit.to_degrees()
-        )),
         E::UndefinedEnergy { vertex, reason } if input => UnwrapError::Mesh(format!(
             "the energy is undefined at vertex {}: {reason}",
             prep.new_to_old.get(vertex as usize).copied().unwrap_or(vertex)
@@ -196,6 +177,9 @@ fn dev_error(e: dev::DevError, prep: &Prepared, input: bool) -> UnwrapError {
         E::Bff(b) => UnwrapError::Solve(format!("boundary first flattening failed: {b}")),
         E::Eig(g) => UnwrapError::Solve(format!("eigensolver failed: {g}")),
         E::Internal(m) => UnwrapError::Solve(format!("internal error: {m}")),
+        // Variants added by the library later: its message is meant for the user.
+        #[allow(unreachable_patterns)]
+        other => UnwrapError::Solve(other.to_string()),
     }
 }
 
@@ -372,9 +356,6 @@ pub struct MakeOptions {
     pub initial_step: f64,
     /// Admissibility floor on the smallest corner angle of a face, radians (D31); 0 is off.
     pub min_face_angle: f64,
-    /// Admissibility floor on the angle between the normals of two faces at an edge and
-    /// antipodal, radians (D32); 0 is off.
-    pub min_fold_angle: f64,
     /// Vertices of the caller that do not move.
     pub pinned: Vec<u32>,
     /// Return the triangle mesh even if the topology did not change.
@@ -400,7 +381,6 @@ impl Default for MakeOptions {
             stall_iterations: o.stall_iterations,
             initial_step: o.initial_step,
             min_face_angle: o.min_face_angle,
-            min_fold_angle: o.min_fold_angle,
             pinned: Vec::new(),
             return_faces: false,
             progress_interval: 0.1,
@@ -644,8 +624,8 @@ pub fn make_developable(
         initial_step: options.initial_step,
         max_displacement: options.max_displacement,
         min_face_angle: options.min_face_angle,
-        min_fold_angle: options.min_fold_angle,
         pinned: Vec::new(),
+        ..dev::OptimizeOptions::default()
     };
     oo.validate().map_err(|e| {
         UnwrapError::Input(InputError::BadOption { name: e.name, value: e.value.to_string(), requirement: e.requirement })
