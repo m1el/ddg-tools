@@ -36,3 +36,13 @@ Observations:
 
 Remains: the flow driver (owner: other agent) must call `remesh` between `optimize` calls
 (break from the progress callback, remesh, restart; memory is fresh per call).
+
+## Admissibility floor and blocked vertices (D31)
+
+`OptimizeOptions::min_face_angle` (1e-4 rad): trials with a face below it are `+∞`
+(`inadmissible_trials`); the vertices of faces within 2x of it are blocked (`Objective::blocked`:
+gradient, direction and curvature pair zeroed on them) so a face at the wall does not stop the
+other vertices. Without the blocking the line search failed at the wall (spot control mesh,
+intrinsic: 164 of 900 iterations). A second wall on flat folds was tried and removed (NOTES-flow.md,
+"Robustness study"). The L-BFGS memory keeps pairs from before a change of the blocked set; the
+curvature test `sᵀy > 0` skips the bad ones (`skipped_pairs`).

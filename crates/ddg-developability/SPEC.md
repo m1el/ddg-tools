@@ -473,6 +473,21 @@ energy_increases (fixed step), near_ties (last evaluation), seconds }`.
 Option `pinned: Vec<u32>` (not in the paper; for the Blender selection): their gradient entries are
 zero (exact projection for equality constraints); out-of-range ids are an error.
 
+### 4.9 Admissibility (D31)
+
+`OptimizeOptions::min_face_angle` (default `1e-4` rad = 0.006°, `0` = off; `[0, π/3)`): a point is
+*admissible* iff every face has its smallest corner angle `≥ min_face_angle`. The mesh
+objective checks it before the energy (O(|F|), `sin θ_min = |n| / (product of the two longer
+edges)`, no trigonometry): an inadmissible point is treated exactly like an undefined energy
+(§3.6, D12): `+∞` inside a line search (§4.3), counted in `OptimizeReport::inadmissible_trials`
+(`undefined_trials` stays for D12), and `DevError::NearDegenerateFace { face, min_angle, limit }`
+at the starting point (an input below the floor is reported, never repaired). The starting point
+is checked with a relative slack of `1e-6` on `sin θ` (a subdivision or a remeshing of an accepted
+point may change the last digits); trial points are checked exactly. The generic [`minimize`]
+ignores the option. *Why:* every energy of §3 is scale free and bounded, so squeezing a face to
+zero area costs (almost) nothing; the weak Wolfe line search accepts such steps, the energy
+decreases a little, and the face collapses until the cross product underflows (D31).
+
 ## 5. Flow driver, subdivision, remeshing
 
 ### 5.1 Flow (Sec. 4.2, 5.2)
@@ -487,9 +502,21 @@ For each round: (subdivide if asked; pinned ids follow §5.2) → (remesh if ena
 the remeshing check of §5.3 after every accepted iteration. The paper uses `E_P` in a coarse phase
 and `E_λ` in the fine phase for Figs. 23–24; rounds allow that. `FlowOptions::uniform(energy,
 subdivisions, iterations)` builds `subdivisions + 1` equal rounds. Result: final `TriMesh`,
-positions, `vertex_source: Vec<u32>` (input vertex id or `NONE` for created vertices), and
+positions, `vertex_source: Vec<u32>` (input vertex id or `NONE` for created vertices),
+`face_parent: Vec<u32>` (for each final face the input face it descends from: the four children of a
+subdivided face have its parent; a collapse removes two faces and the others keep theirs; a flip
+rewrites the two faces of the quad in place, the new face `(a, q, p)` keeps the parent of the
+flagged cap triangle `f` and `(q, b, p)` that of its neighbour `g`), and
 `FlowReport { rounds: [ { optimize: OptimizeReport, remesh: Vec<RemeshReport>, n_vertices, n_faces,
-energy_after_subdivision } ], seconds }`.
+energy_after_subdivision } ], cancelled, stopped: Option<FlowStop>, min_angle, bad_faces, seconds }`.
+`min_angle` is the smallest corner angle of the result (`≥ min_face_angle`, §4.9) and `bad_faces`
+the number of faces below the remeshing's small angle that remain (the ones remeshing could not
+fix; the flow says so rather than hiding them). **Stop (D32):** if the energy of a round is
+undefined at its starting state (after the subdivision, §3.6: the midpoint of a flat fold), the
+flow does not run that round and the later ones, returns the state of the previous round, and sets
+`stopped = Some(FlowStop { round, after_subdivision, vertex, reason })`; for round 0 it is an error.
+A remeshing whose result is undefined or has a face below the floor is computed but not applied
+(`RemeshReport::rejected = Some(reason)`).
 
 ### 5.2 4-1 subdivision [formula: dev-midpoint-subdivision]
 
@@ -523,7 +550,9 @@ max_passes (10), check_interval (1 iteration) }`, `0 < small_angle < π/3` enfor
   the boundary endpoint if exactly one endpoint is on the boundary; the pinned endpoint if one is
   pinned. An interior edge with both endpoints on the boundary is refused (it would pinch the
   surface). A boundary edge is collapsed (to its midpoint) only if `collapse_boundary_edges`.
-  The surviving vertex is the lower id; the other is removed.
+  The surviving vertex is the lower id; the other is removed. A collapse is also refused if a
+  face of the merged star would get a smallest angle below `min_face_angle` (default `1e-4`,
+  `0` = off, `< small_angle`) and below its present smallest angle (D31).
 
 A pass collects the bad triangles, sorts them by `(smallest angle, face id)` and handles each that
 is still present and still bad; passes repeat until nothing changes or `max_passes`. Vertices are
@@ -599,7 +628,8 @@ pub enum LineSearch { WeakWolfe { c1: f64, c2: f64, max_doublings: u32, max_bise
                       Backtracking { c1: f64, shrink: f64, max_shrinks: u32 } }
 pub struct OptimizeOptions { pub method: Method, pub line_search: LineSearch, pub max_iterations: usize,
     pub gradient_tolerance: f64, pub energy_tolerance: f64, pub stall_iterations: usize,
-    pub initial_step: f64, pub max_displacement: f64, pub pinned: Vec<u32> }
+    pub initial_step: f64, pub max_displacement: f64, pub pinned: Vec<u32>,
+    pub min_face_angle: f64 }                                                // 1e-4, §4.9
 pub enum Control { Continue, Break }
 pub struct Progress<'a> { pub round: usize, pub iteration: usize, pub energy: f64, pub gradient_norm: f64,
                           pub positions: &'a [[f64; 3]] }
@@ -617,6 +647,7 @@ pub enum DevError {
     Mesh(MeshError), Geometry(GeometryError), Bff(BffError), Eig(EigError),
     LengthMismatch { what: &'static str, expected: usize, got: usize },
     NonFinitePosition { vertex: u32 }, DegenerateFace { face: u32 },
+    NearDegenerateFace { face: u32, min_angle: f64, limit: f64 },            // §4.9
     UndefinedEnergy { vertex: u32, reason: &'static str },
     InvalidOption { name: &'static str, value: f64, requirement: &'static str },
     VertexOutOfRange { what: &'static str, vertex: u32, n_vertices: usize },
@@ -738,6 +769,38 @@ per-chart flatten stays available in Rust and Python.
   fails with an `DevError::UndefinedEnergy` error when a star has an exactly antipodal normal (seen on spiky
   over-run meshes); the defect criterion is energy independent, cheap and cannot fail. 0.1 rad
   against 0.02: 0.02 lowers mean |u| by 2 to 4 times for +20 to 25 % cut length.
+* **D31** Admissibility floor on the smallest corner angle (§4.9), default `1e-4` rad; also a collapse
+  rule of the remeshing. *Paper:* silent (it removes faces below a small angle by remeshing, but a
+  face that cannot be fixed, because the flip or collapse is illegal, is left to the optimizer).
+  *Found (NOTES-flow.md, "Robustness study"):* `E_P` and the intrinsic energies squeeze faces to
+  angles below `3e-9`: bare `optimize` without remeshing does it in 40 of 48 small test runs
+  (perturbed icospheres, tori, bumpy grids, 6 seeds, `E_P` and intrinsic; 800 iterations), and the flow with remeshing leaves
+  such faces on the blub, spot and bob control meshes (blub `E_P`, 300 and 3000 it/round; spot 3000)
+  because the unfixable faces (collapse refused by the normal-turn or link condition, flip refused)
+  are counted once as "known unfixable" and then the optimizer is free to squeeze them
+  (`Geometry::from_positions` of the cut then rejects them: the triangle inequality fails by
+  rounding). *Decision:* wall at `1e-4` as an undefined energy. *Measured on 24 of those runs
+  with floors 1e-5, 1e-4, 1e-3:* the final energy equals the unconstrained one to within 1 % in
+  most cases and is lower in several (the squeezed faces are worth nothing), the lowest angle is
+  exactly the floor.
+* **D32** Flows never end in the energy being undefined at a round start, and do not walk into it.
+  *Found:* "undefined at vertex 881" in the blub intrinsic 3000 it/round flow is raised at the
+  start of round 1 by the energy evaluation of the subdivided mesh. The state at the end of round 0
+  is a flat pancake: pairs of big faces of nearly opposite normals along an edge (cosine of the
+  normals `-0.9999995`, areas 0.45 and 0.41); the midpoint of such an edge has a vector area
+  nearly zero and a face normal within `1e-6` of the antipode of the vertex normal (D12). The
+  flow with `E_λ` reaches the same pancakes (energy `1e-11`, fold gap `4e-10`). *Rejected:* a
+  second wall on the fold angle (`min_fold_angle` 1e-3, 1e-4, 1e-5, 1e-6; the same measurements):
+  a hard wall in L-BFGS stops the whole run when one edge reaches it (`LineSearchFailed` at energy
+  0.9 instead of 5e-8 for spot `E_λ`; 1.4 against 2.7e-11 for blub), and with 1e-6 the undefined
+  states remained on spot intrinsic-max. *Decision:* the flow evaluates the energy of the next
+  round on the candidate state before committing; if it is undefined, it stops before that round
+  with `FlowReport::stopped` (round 0: error). A remeshing result that is undefined or below the
+  floor is not applied (`rejected`). Nothing is repaired.
+* **D33** A boundary star with at most two faces contributes exactly nothing (value 0, no
+  sensitivities) for every energy (the intrinsic ones are still undefined where D12 says so) (§3.1 says its energy vanishes identically;
+  the eigenvector of the rank-deficient matrix is arbitrary and, for nearly coplanar normals, fed
+  noise of the size of the angle into the gradient; found by the oracle fuzz).
 
 ## 9. Formula ids
 
@@ -879,6 +942,12 @@ by a flip.
   corners keep `|Ω| > π/4`; without it they round off (energy at the corners falls).
 * All six energies × {L-BFGS, GD+WeakWolfe, GD+Backtracking, FixedStep} on spot's control mesh for
   50 iterations: no error, monotone where guaranteed.
+* Robustness (`tests/robust.rs`, D31 to D33): fast tests on perturbed icospheres (the optimizer
+  squeezes faces without the floor and not with it; a start below the floor is an error; flows
+  return `Geometry`-valid meshes; two-face boundary stars contribute exactly nothing; `face_parent`),
+  ignored: the cut-study reproducers (blub `E_P` 300 it, blub intrinsic 3000 it) and the over-runs
+  (3 x 3000 it) of all six energies on spot / bob / blub control meshes complete without error and
+  without a face below the floor.
 * Independent runs are parallel jobs (one per mesh), one log each in `runs_tmp/`.
 
 ### 10.8 Benchmarks (`cargo bench -p ddg-developability`, single-thread numbers run alone)

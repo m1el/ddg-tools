@@ -135,18 +135,170 @@ cut stays at 2.1 to 4.1 % of the edge length on control meshes (the paper rule i
 only because it leaves the defect uncut). Tolerance 0.02 is the choice for lowest distortion
 (mean |u| below 1e-3 on spot and blub at +20 % cut length).
 
-Problems found in other modules (not fixed here):
+Problems found in other modules: fixed, see "Robustness study" below (D31, D32).
 
-* Flows with `E_P` (combinatorial) leave degenerate faces on 3 control meshes (blub 300 and 3000,
-  spot 3000: triangle-inequality violations, zero-area faces) so `Geometry::from_positions` rejects
-  the cut input. Remeshing does not prevent zero-area triangles with `E_P`.
-* Intrinsic or `E_λ` over-runs (3000 it) end with some star having a normal within 1e-6 of the
-  antipode of the vertex normal: the flow itself fails on blub with the intrinsic energy ("energy
-  is undefined at vertex 881"), and the intrinsic energy evaluation in the cut stage errors on
-  spot / blub `E_λ` or `E_P` over-runs (D12). `star_embeddedness` finds these stars.
-* "injective: false" (global overlap of the chart image with itself, out of scope D23) is reported
-  for all of these runs even with 0 flipped triangles (spot 300 with the default: one chart,
-  overlapped fraction 0.48): "no flipped triangle" is local injectivity only.
+## Robustness study (D31, D32, D33)
+
+Two failures of the cut study, both found in the flow itself. Logs: `runs_tmp/dev-robust/`
+(`repro/`, `sweep/`, `sweep2/`, `over/`, `study/`); scripts `examples/robust_study.sh`,
+`robust_summary.py`, `robust_compare.py`.
+
+**1. Degenerate faces with `E_P` (and the intrinsic energies).** Mechanism, measured:
+
+* The energies are scale free: squeezing a face to zero area costs (almost) nothing. Bare
+  `optimize` (no remeshing) on small meshes (perturbed icospheres level 1 and 2, tori, bumpy grids,
+  6 seeds, `E_P` and intrinsic, 800 iterations): 40 of 48 runs end with a face of angle
+  1e-9 to 1e-12; the weak Wolfe search accepts every such step because the energy goes down a bit.
+* In the flow the remeshing does not stop it: the blub control mesh with `E_P`, round 0, iteration
+  90: one needle appears, its collapse is refused ("normal turn of the merged star"), the face is
+  counted as `known_unfixable`, and from then on the flow only re-checks for *more* bad faces than
+  that. The unfixable face shrinks from 1.2e-2 rad through 1e-4 (iteration 120), 1e-7 (iteration
+  157) to 1e-9 (iteration 175) while the energy changes in the 7th digit. Refusal reasons over the
+  three failing flows (29 + 1, 19 + 16 + 40 + 5, 4 + 3 + 8 + 18 + 8 + 8 refused operations):
+  collapse "normal turn of the merged star" and "link condition", flip "normal turn", "degenerate
+  new face", "smallest angle does not increase", "opposite vertices adjacent": all legal refusals,
+  not bugs, but they leave faces of angles (0, 0, 180) and (0, 90, 90) in place.
+* The final faces have angles like (2e-8, 180, 1.8e-8) degrees-scale; `Geometry::from_positions`
+  rejects them in the cut ("violates the triangle inequality", Heron with rounding).
+
+*Fix (D31):* admissibility floor `min_face_angle = 1e-4` rad in the optimizer (an inadmissible
+trial is `+∞` like an undefined energy; the starting point is an error), the same floor as a collapse
+rule of the remeshing, and the vertices of faces within a factor 2 of the floor are blocked
+(gradient and direction zeroed, like pinned) so that one squeezed face does not stop the whole
+optimization. The first version of the floor (no blocking) made the line search fail at the wall:
+spot control mesh, intrinsic, 300 it/round, ended after 164 iterations at E = 16.7 (budget 900;
+E = 6.2 before the floor), and the next rounds made 0 iterations; with the blocking the same flow
+reaches E = 5.05 in 900 iterations. The default flow (E_λ, 2 rounds x 500 it) on spot, bob and blub
+(triangulated and control meshes) runs the whole budget (`runs_tmp/dev-robust/default/`). Cost of
+the floor on the energy: on 24 small runs the final energy with floors 1e-5, 1e-4, 1e-3 is within
+1 % of the unconstrained run in most cases (see SPEC D31).
+
+**2. Intrinsic energy undefined (blub, 3000 it/round).** The error is raised at the start of
+round 1: `evaluate_energy` of the *subdivided* mesh. Mechanism: the end state of round 0 (93
+vertices, E = 0.79) is a flat pancake, many edges with two big faces of nearly opposite normals
+(normal cosines -1.000000000, -0.999999486, -0.999998921 ..., areas 0.45 / 0.41); the midpoint of
+such an edge has two (planar-arc) half-stars with nearly opposite normals, vector area nearly
+zero, so D12 applies there although it did not at the old vertices. `E_λ` flows reach the same
+pancakes (E = 1e-11, smallest fold gap 4e-10, spot / blub / bob covariance 3000). So the line search
+treats undefined trials as `+∞` correctly; the undefined state appears only in the subdivision
+(an operation outside the line search). Candidates measured:
+
+* A second wall on the fold angle (`min_fold_angle` = 1e-3, 1e-4, 1e-5, 1e-6 rad). It does not
+  work: a hard wall in L-BFGS ends the run when one edge reaches it (`LineSearchFailed`; blub `E_λ`
+  with 1e-3: E = 1.4 after 0.05 s, unconstrained 2.7e-11; spot `E_λ` 1e-5: 0.021, unconstrained
+  5.5e-8), and even at 1e-6 spot intrinsic-max still hit the undefined state (sweeps in
+  `runs_tmp/dev-robust/sweep/`, `sweep2/`). Removed again.
+* Decision (D32): evaluate the energy of the next round on the candidate state before committing. If
+  it is undefined, the flow does not run that round, returns the state of the previous round and
+  reports `FlowReport::stopped = Some(FlowStop { round, after_subdivision, vertex, reason })` (an
+  error for round 0). A remeshing result with an undefined energy or a face below the floor is not
+  applied (`RemeshReport::rejected`). Nothing is repaired.
+* In the over-run set below this happens in 2 of 18 flows (spot intrinsic: before round 2; spot
+  intrinsic-max: before round 1); the other 16 complete all rounds. Blub intrinsic 3000 now
+  completes (E = 1.07, was an error).
+
+**3. Found by the oracle fuzz (D33):** a boundary star with at most two faces contributed noise to
+the `E_λ` gradient (the eigenvector of a rank-deficient matrix is arbitrary); it now contributes
+exactly nothing.
+
+### Over-runs: 3 rounds of 3000 iterations, spot / bob / blub control meshes, six energies
+
+All 18 flows complete without an error; none has a face below 1e-4 rad (`min angle`), the result of
+each builds a `Geometry`. "faces < 1 deg" are the thin faces left by the remeshing (reported as
+`FlowReport::bad_faces`). Before (cut study binary): blub `E_P`, spot `E_P`, bob `E_P`/intrinsic left
+degenerate faces (angles 3e-10 to 2e-11 rad), blub intrinsic and spot intrinsic-max failed with
+errors. `min fold gap` (pi minus the largest angle between adjacent normals) is a measurement, not a
+constraint. Seconds are single-thread under a machine load of 60 to 150.
+
+| run | faces | status | E_final | s | inadmissible | min angle | faces < 1 deg | min fold gap |
+|---|---|---|---|---|---|---|---|---|
+| blub_ctl-combinatorial-max | 3324 | max/max/max | 2.270763e0 | 20.905 | 4 | 2.13e-02 | 0 | 1.12e-03 |
+| blub_ctl-combinatorial | 2144 | stalled/stalled/stalled | 1.129796e0 | 0.923 | 54 | 3.30e-02 | 0 | 3.41e-08 |
+| blub_ctl-covariance-max | 3012 | max/max/max | 2.084945e-2 | 43.724 | 14 | 1.10e-04 | 9 | 4.17e-08 |
+| blub_ctl-covariance | 2832 | max/lsf/max | 9.052823e-9 | 11.960 | 0 | 1.44e-04 | 9 | 9.51e-10 |
+| blub_ctl-intrinsic-max | 3192 | max/max/max | 1.532855e0 | 31.878 | 16 | 1.15e-04 | 3 | 1.98e-04 |
+| blub_ctl-intrinsic | 2860 | stalled/lsf/lsf | 1.070741e0 | 0.571 | 2 | 3.03e-02 | 0 | 3.13e-03 |
+| bob_ctl-combinatorial-max | 10192 | max/max/max | 2.529696e0 | 86.508 | 0 | 2.00e-02 | 0 | 5.43e-01 |
+| bob_ctl-combinatorial | 8596 | max/max/max | 4.286885e-1 | 86.455 | 2 | 1.90e-04 | 5 | 1.79e-01 |
+| bob_ctl-covariance-max | 10462 | max/max/max | 4.346150e-1 | 123.544 | 0 | 1.93e-02 | 0 | 1.85e-05 |
+| bob_ctl-covariance | 8366 | max/max/max | 2.417610e-2 | 71.141 | 3 | 1.11e-04 | 1 | 1.14e-06 |
+| bob_ctl-intrinsic-max | 10152 | max/max/max | 2.002256e0 | 83.406 | 0 | 2.57e-02 | 0 | 1.11e-02 |
+| bob_ctl-intrinsic | 9040 | max/lsf/stalled | 2.444759e0 | 49.355 | 13 | 1.18e-02 | 2 | 3.26e-05 |
+| spot_ctl-combinatorial-max | 5442 | max/max/max | 1.008967e1 | 38.432 | 8 | 1.20e-04 | 2 | 2.18e-04 |
+| spot_ctl-combinatorial | 3952 | max/max/max | 1.037054e0 | 35.798 | 47 | 1.03e-04 | 19 | 2.52e-05 |
+| spot_ctl-covariance-max | 4790 | max/max/max | 2.640672e-1 | 61.758 | 0 | 1.78e-02 | 0 | 2.66e-08 |
+| spot_ctl-covariance | 3808 | max/max/max | 7.550502e-4 | 21.302 | 20 | 1.05e-04 | 11 | 7.10e-09 |
+| spot_ctl-intrinsic-max | 324 | lsf | 1.315386e1 | 1.728 | 0 | 4.80e-02 | 0 | 1.64e-03 |
+| spot_ctl-intrinsic | 1260 | max/lsf | 3.322428e0 | 7.378 | 19 | 1.95e-04 | 2 | 4.56e-07 |
+
+### Before / after on the flows of the cut study (45 flows)
+
+Same flows as `examples/cut_study.sh` (control meshes 300 and 3000 it/round, dense meshes 300
+it/round), then the cut with covariance terminals, eps 1e-3, defect tolerance 0.1 (D30). Old =
+`runs_tmp/dev-cut-study`, new = `runs_tmp/dev-robust/study`. "flipped uv / status": flipped UV
+triangles after the cut, then the optimizer status per round (lsf = line search failed). All 45
+flows are listed; the dense-mesh flows (300 it/round) are identical in energy, iterations and faces,
+the crumpled ones differ in the 4th digit or by 2 faces (the floor changes a few accepted steps).
+Seconds differ because of the machine load (about 60 to 150 during the new runs, less during the
+old), not because of the code (the check is O(|F|) per evaluation, measured below 1 % of an
+evaluation). The cut succeeds on all 45 (3 failed before; the 4th failure was the flow itself) and
+flips 0 UV triangles everywhere.
+
+| flow | E_final old | E_final new | iterations old | new | s old | s new | faces old | new | flipped uv / status old | flipped uv / status new | new min angle | new bad faces |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| CrumpledDevelopable-combinatorial-3000 | 4.404057e-6 | 4.404057e-6 | 3000 | 3000 | 1.787 | 1.835 | 507 | 507 | 0 / max | 0 / max | 5.884e-2 | 0 |
+| CrumpledDevelopable-combinatorial-500 | 1.478583e-3 | 1.478583e-3 | 500 | 500 | 0.322 | 0.322 | 510 | 510 | 0 / max | 0 / max | 4.100e-2 | 0 |
+| CrumpledDevelopable-covariance-3000 | 9.034545e-8 | 1.189913e-7 | 3000 | 3000 | 1.262 | 1.368 | 497 | 497 | 0 / max | 0 / max | 4.890e-2 | 0 |
+| CrumpledDevelopable-covariance-500 | 5.724026e-4 | 8.912045e-4 | 500 | 500 | 0.253 | 0.221 | 499 | 501 | 0 / max | 0 / max | 1.954e-2 | 0 |
+| CrumpledDevelopable-intrinsic-3000 | 2.723743e-7 | 2.326685e-7 | 3000 | 3000 | 1.342 | 1.351 | 506 | 508 | 0 / max | 0 / max | 5.655e-2 | 0 |
+| CrumpledDevelopable-intrinsic-500 | 6.472441e-5 | 7.021902e-5 | 500 | 500 | 0.239 | 0.194 | 508 | 508 | 0 / max | 0 / max | 5.745e-2 | 0 |
+| blub_ctl-combinatorial-300 | 1.733067e0 | 1.678362e0 | 807 | 900 | 2.992 | 2.022 | 3330 | 3292 | cut fails / max/max/stalled | 0 / max/max/max | 8.917e-3 | 2 |
+| blub_ctl-combinatorial-3000 | 3.733598e0 | 1.129796e0 | 602 | 2795 | 0.389 | 0.792 | 3204 | 2144 | cut fails / lsf/lsf/lsf | 0 / stalled/stalled/stalled | 3.296e-2 | 0 |
+| blub_ctl-covariance-300 | 1.319488e-2 | 1.319488e-2 | 900 | 900 | 1.231 | 0.999 | 2868 | 2868 | 0 / max/max/max | 0 / max/max/max | 2.020e-2 | 0 |
+| blub_ctl-covariance-3000 | 2.719293e-11 | 9.052823e-9 | 6056 | 7252 | 2.491 | 7.702 | 2788 | 2832 | 0 / max/max/lsf | 0 / max/lsf/max | 1.444e-4 | 9 |
+| blub_ctl-intrinsic-300 | 2.142529e0 | 2.142529e0 | 900 | 900 | 1.811 | 1.979 | 3040 | 3040 | 0 / max/max/max | 0 / max/max/max | 1.767e-2 | 0 |
+| blub_ctl-intrinsic-3000 | ERR error: flow failed: the energy is undefi | 1.070741e0 |  | 1360 |  | 0.383 |  | 2860 |  | 0 / stalled/lsf/lsf | 3.030e-2 | 0 |
+| blub_quadrangulated-combinatorial-300 | 4.146214e0 | 4.146214e0 | 600 | 600 | 29.408 | 30.676 | 56806 | 56806 | 0 / max/max | 0 / max/max | 2.348e-2 | 0 |
+| blub_quadrangulated-covariance-300 | 5.186006e0 | 5.186006e0 | 600 | 600 | 27.035 | 27.720 | 56598 | 56598 | 0 / max/max | 0 / max/max | 1.906e-2 | 0 |
+| blub_quadrangulated-intrinsic-300 | 6.198339e0 | 6.198339e0 | 600 | 600 | 33.605 | 33.360 | 56604 | 56604 | 0 / max/max | 0 / max/max | 1.734e-2 | 4 |
+| blub_triangulated-combinatorial-300 | 3.724887e0 | 3.724887e0 | 600 | 600 | 30.003 | 29.304 | 56822 | 56822 | 0 / max/max | 0 / max/max | 2.206e-2 | 0 |
+| blub_triangulated-covariance-300 | 5.632107e0 | 5.632107e0 | 600 | 600 | 33.106 | 33.190 | 56614 | 56614 | 0 / max/max | 0 / max/max | 1.801e-2 | 0 |
+| blub_triangulated-intrinsic-300 | 6.474141e0 | 6.474141e0 | 600 | 600 | 35.852 | 36.584 | 56634 | 56634 | 0 / max/max | 0 / max/max | 1.759e-2 | 0 |
+| bob_ctl-combinatorial-300 | 1.229317e0 | 1.229317e0 | 900 | 900 | 5.960 | 5.657 | 10422 | 10422 | 0 / max/max/max | 0 / max/max/max | 1.813e-2 | 0 |
+| bob_ctl-combinatorial-3000 | 9.014284e-1 | 4.286885e-1 | 2362 | 9000 | 6.799 | 45.902 | 9278 | 8596 | 0 / lsf/stalled/stalled | 0 / max/max/max | 1.899e-4 | 5 |
+| bob_ctl-covariance-300 | 9.265637e-1 | 9.265637e-1 | 900 | 900 | 4.505 | 4.268 | 10116 | 10116 | 0 / max/max/max | 0 / max/max/max | 1.833e-2 | 0 |
+| bob_ctl-covariance-3000 | 1.194679e-2 | 2.417610e-2 | 9000 | 9000 | 30.704 | 32.823 | 8292 | 8366 | 0 / max/max/max | 0 / max/max/max | 1.108e-4 | 1 |
+| bob_ctl-intrinsic-300 | 1.639766e0 | 1.639766e0 | 900 | 900 | 6.247 | 5.448 | 10254 | 10254 | 0 / max/max/max | 0 / max/max/max | 2.454e-2 | 0 |
+| bob_ctl-intrinsic-3000 | 4.165154e0 | 2.444759e0 | 2078 | 6576 | 6.214 | 30.871 | 9126 | 9040 | 0 / lsf/lsf/lsf | 0 / max/lsf/stalled | 1.185e-2 | 2 |
+| bob_isotropic-combinatorial-300 | 2.863124e0 | 2.863124e0 | 600 | 600 | 14.504 | 14.575 | 24638 | 24638 | 0 / max/max | 0 / max/max | 2.761e-2 | 0 |
+| bob_isotropic-covariance-300 | 4.627136e0 | 4.627136e0 | 600 | 600 | 14.970 | 14.220 | 24592 | 24592 | 0 / max/max | 0 / max/max | 1.890e-2 | 0 |
+| bob_isotropic-intrinsic-300 | 4.626109e0 | 4.626109e0 | 600 | 600 | 15.563 | 14.990 | 24610 | 24610 | 0 / max/max | 0 / max/max | 1.895e-2 | 0 |
+| bob_quad-combinatorial-300 | 3.491903e0 | 3.491903e0 | 600 | 600 | 23.304 | 23.207 | 42734 | 42734 | 0 / max/max | 0 / max/max | 2.393e-2 | 0 |
+| bob_quad-covariance-300 | 7.352449e0 | 7.352449e0 | 600 | 600 | 22.278 | 22.826 | 42660 | 42660 | 0 / max/max | 0 / max/max | 2.074e-2 | 0 |
+| bob_quad-intrinsic-300 | 8.249370e0 | 8.249370e0 | 600 | 600 | 21.949 | 24.263 | 42630 | 42630 | 0 / max/max | 0 / max/max | 2.951e-2 | 0 |
+| bob_tri-combinatorial-300 | 3.076487e0 | 3.076487e0 | 600 | 600 | 23.108 | 23.044 | 42750 | 42750 | 0 / max/max | 0 / max/max | 2.283e-2 | 0 |
+| bob_tri-covariance-300 | 7.024482e0 | 7.024482e0 | 600 | 600 | 22.363 | 23.569 | 42662 | 42662 | 0 / max/max | 0 / max/max | 3.613e-2 | 0 |
+| bob_tri-intrinsic-300 | 7.126420e0 | 7.126420e0 | 600 | 600 | 23.987 | 25.133 | 42656 | 42656 | 0 / max/max | 0 / max/max | 2.476e-2 | 0 |
+| spot_ctl-combinatorial-300 | 1.530048e0 | 1.530048e0 | 900 | 900 | 3.072 | 3.235 | 5512 | 5512 | 0 / max/max/max | 0 / max/max/max | 2.640e-2 | 0 |
+| spot_ctl-combinatorial-3000 | 2.485319e0 | 1.037054e0 | 975 | 9000 | 1.213 | 23.911 | 5216 | 3952 | cut fails / lsf/lsf/lsf | 0 / max/max/max | 1.027e-4 | 19 |
+| spot_ctl-covariance-300 | 3.154606e-1 | 3.154606e-1 | 900 | 900 | 2.819 | 2.431 | 5112 | 5112 | 0 / max/max/max | 0 / max/max/max | 1.805e-2 | 0 |
+| spot_ctl-covariance-3000 | 1.092982e-8 | 7.550502e-4 | 9000 | 9000 | 12.045 | 14.817 | 3888 | 3808 | 0 / max/max/max | 0 / max/max/max | 1.047e-4 | 11 |
+| spot_ctl-intrinsic-300 | 6.202401e0 | 5.054394e0 | 900 | 900 | 3.373 | 2.347 | 5584 | 5448 | 0 / max/max/max | 0 / max/max/max | 1.024e-4 | 7 |
+| spot_ctl-intrinsic-3000 | 4.892556e0 | 3.322428e0 | 6313 | 5359 | 23.363 | 5.157 | 5484 | 1260 | 0 / stalled/max/max | 0 / max/lsf | 1.951e-4 | 2 |
+| spot_quadrangulated-combinatorial-300 | 8.276170e0 | 8.276170e0 | 600 | 600 | 13.451 | 12.570 | 23392 | 23392 | 0 / max/max | 0 / max/max | 2.351e-2 | 0 |
+| spot_quadrangulated-covariance-300 | 9.867035e0 | 9.867035e0 | 600 | 600 | 14.241 | 14.118 | 23044 | 23044 | 0 / max/max | 0 / max/max | 1.869e-2 | 0 |
+| spot_quadrangulated-intrinsic-300 | 1.351481e1 | 1.351481e1 | 600 | 600 | 16.480 | 15.103 | 23008 | 23008 | 0 / max/max | 0 / max/max | 1.799e-2 | 0 |
+| spot_triangulated-combinatorial-300 | 8.062792e0 | 8.062792e0 | 600 | 600 | 13.707 | 12.577 | 23388 | 23388 | 0 / max/max | 0 / max/max | 2.784e-2 | 0 |
+| spot_triangulated-covariance-300 | 1.143797e1 | 1.143797e1 | 600 | 600 | 12.757 | 12.467 | 23168 | 23168 | 0 / max/max | 0 / max/max | 2.085e-2 | 0 |
+| spot_triangulated-intrinsic-300 | 1.664337e1 | 1.664337e1 | 600 | 600 | 17.093 | 16.104 | 23278 | 23278 | 0 / max/max | 0 / max/max | 2.856e-2 | 0 |
+
+Reading: where the floor is not reached nothing changes (identical energies). Where it is reached
+the flows run further (bob `E_P` 3000: 9000 iterations, E 0.43 instead of 0.90 after 2362; spot `E_P`
+3000: E 1.04 instead of 2.49 after 975), because the old runs ended in `LineSearchFailed` on
+squeezed faces. `E_λ` over-runs of the control meshes end at a higher energy than before (spot
+7.6e-4 instead of 1e-8, bob 2.4e-2 instead of 1.2e-2) because they no longer collapse faces to
+reach the flat pancake; blub `E_λ` 3000 ends at 9e-9 instead of 2.7e-11. These are the
+over-runs; with 300 it/round the energies are identical.
 
 ## Study (SPEC task 5)
 
@@ -268,7 +420,7 @@ vertices); a quiet-machine measurement of the speed-up remains to be done.
 
 ## Open / for others
 
-* No bug found in the energy, optimizer, subdivide or remesh modules.
+* Bugs found since: see "Robustness study" (D31 to D33).
 * `Evaluation` for the intrinsic energies with `omit_valence_three = false` errors on undefined
   vertices (cut stage propagates the error); not seen on any data model.
 * Not done: gluing cracks and overlap avoidance after the cut (D23, out of scope), Python/Blender

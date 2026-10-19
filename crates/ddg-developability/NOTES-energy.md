@@ -35,3 +35,10 @@ at load ~48. 16 threads at load ~48: bob/blub 290–620 ns/vertex. Multi-thread 
   iterations would save part of each call (unmeasured; not in the SPEC API).
 - Lean ids (`check-formulas.sh` MISSING) wait for the Lean agent; all Rust ids match SPEC §9.
 - 4-1 subdivision invariance is tested by the optimizer agent (`tests/subdivide.rs`).
+
+## Two-face boundary stars (D33)
+
+`star_energy` zeroes value, margin-tie, `y`, `s`, `z` of a boundary star with at most two faces after
+computing it (so the intrinsic energies still report D12 undefined states). Before, `E_λ` took an
+arbitrary eigenvector of the rank-deficient matrix and fed sensitivities of the size of the normals'
+angle into the gradient (found by the oracle fuzz; `tests/robust.rs`).
