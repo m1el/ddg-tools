@@ -11,6 +11,8 @@ Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
 * intrinsic triangulations, `crates/ddg-intrinsic` — *Navigating Intrinsic Triangulations*
   (Sharp, Soliman, Crane, ACM TOG 2019; "the signpost paper"); its contract is
   `crates/ddg-intrinsic/SPEC.md` ("the intrinsic SPEC", decisions `N1`–`N17`);
+* the developability flow, `crates/ddg-developability` — *Developability of Triangle Meshes*
+  (Stein, Grinspun, Crane, ACM TOG 2018); its contract is `crates/ddg-developability/SPEC.md`;
 * the operators of `crates/ddg-core` all of them use.
 
 The ground truth is the **canonical discrete problem** and the math conventions of the
@@ -29,7 +31,11 @@ leaves open. For intrinsic triangulations the theorems cover the closed forms of
 operations (unfolding, flip, Delaunay test, signposts, one tracing step, barycentric coordinates,
 circumcentre); the data structure and the algorithms built on them are not modelled, and the
 global results (existence, uniqueness and termination for the Delaunay triangulation, the
-refinement guarantees) are cited.
+refinement guarantees) are cited. For developability the theorems cover the per-face derivatives (with the
+corrections of SPEC D2, D3), the gradients of the active pieces of the six energies, the line
+search's acceptance conditions, subdivision and two closed forms of the regular cone; the hinge
+theory of the paper, the Voronoi and rotating-calipers arguments and the derivative of a simple
+eigenvalue are cited.
 
 ## Pins and how to check
 
@@ -104,6 +110,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Intrinsic/Trace.lean` | intrinsic triangulations: one step of a tracing query: crossing of an edge with the path, choice of the exit edge, forward progress (§4, N7) |
 | `DdgProofs/Intrinsic/Barycentric.lean` | intrinsic triangulations: barycentric coordinates, distances of a point to the corners, edge split, circumcentre (§4, N10, N14, N17) |
 | `DdgProofs/Intrinsic/Move.lean` | intrinsic triangulations: moving a vertex (lengths, areas of its star), the circumcentre and barycentre times the area, the energy of the optimal Delaunay triangulation of a star, its gradient, the step of Chen and Holst's Eq. 4.13 (§4, N19, N21) |
+| `DdgProofs/Developability/*.lean` | developability: vectors and derivatives along curves (`Vec`), per-face quantities and Eqs. 7–9 (`Basic`), invariances, the six energies (`Combinatorial`, `Covariance`, `MaxCovariance`, `Intrinsic`, `Width`), Jacobi rotation (`Eig`), line search (`Optimizer`), subdivision, remeshing classification, regular cone (developability SPEC §1–§5, §10.3) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
@@ -393,6 +400,59 @@ Cited for intrinsic triangulations (`CITED.md`): `it-delaunay-existence-uniquene
 `it-delaunay-flip-termination`, `it-rippa-theorem`, `it-chew-second-algorithm`,
 `it-ruppert-encroachment`, `it-straightest-geodesic`, `it-odt-energy`,
 `it-odt-target-length-splits`.
+
+### Developability of Triangle Meshes (`crates/ddg-developability`)
+
+Stein, Grinspun, Crane, ACM TOG 2018 ("the developability paper"); contract
+`crates/ddg-developability/SPEC.md` (decisions `D1`–`D29`). Clean room: written from the paper's
+text and the SPEC only. Notation of the oracle (`lean/oracle/DdgOracle/Formulas/Developability.lean`,
+namespace `Ddg.Dev`, at `ℝ`); vectors are `Ddg.Point ℝ` (`V3`), a face is `(f_i, f_j, f_k)`,
+`n = (f_j − f_i) × (f_k − f_i)`, `N = n/|n|`, `A = |n|/2`, `θ_i = atan2(|a × b|, a·b)`,
+`e_i = f_k − f_j`, `e_j = f_i − f_k`, `e_k = f_j − f_i`. **Derivatives** are along arbitrary
+differentiable curves (`HasDerivAt3`: each coordinate has a derivative; `DdgProofs/Developability/Vec.lean`),
+so "`dF = Σ_p g_p·δ_p`" contains the gradient with respect to each argument and the chain rule.
+All theorems are in `namespace DdgProofs.Dev`.
+
+| id | exact statement | theorems |
+|---|---|---|
+| `dev-face-frame` | `n ≠ 0`: `n = f_i×f_j + f_j×f_k + f_k×f_i`, `\|N\| = 1`, `N ⊥` the three edges, `A = triArea` (Heron) of the three edge lengths. | `face_frame` |
+| `dev-corner-angle` | `a, b ≠ 0`: `θ ∈ [0, π]`, `cos θ = a·b/(\|a\|\|b\|)`, `sin θ = \|a×b\|/(\|a\|\|b\|)`, `θ = arccos(a·b/(\|a\|\|b\|))`; for `n ≠ 0` it is the law-of-cosines `cornerAngle` of the lengths and the three angles sum to `π`. | `cornerAngleAt_spec`, `cornerAngleAt_eq_arccos`, `cornerAngleAt_eq_cornerAngle`, `cornerAngleAt_add` |
+| `dev-area-gradient` | `n ≠ 0`: `dA = Σ_p (½ N × e_p)·δ_p` (Eq. 7). | `hasDerivAt_faceArea` |
+| `dev-normal-gradient` | `n ≠ 0`: `dN = Σ_p (N·δ_p)(e_p × N)/(2A)` (Eq. 8 with `1/(2A)`, D2). | `hasDerivAt3_faceUnitNormal` |
+| `dev-angle-gradient` | `n ≠ 0`: `dθ_i = ∇_iθ_i·δ_i + ∇_jθ_i·δ_j + ∇_kθ_i·δ_k`, `∇_jθ_i = N×(f_i−f_j)/\|f_i−f_j\|²`, `∇_kθ_i = N×(f_k−f_i)/\|f_k−f_i\|²`, `∇_iθ_i = −(∇_j + ∇_k)` (Eq. 9 with the squares, D3). | `hasDerivAt_cornerAngleAt` |
+| `dev-backprop-face` | `n ≠ 0`: `F = y·N + ζ·n + s_iθ_i + s_jθ_j + s_kθ_k` has `dF = Σ_p g_p·δ_p`, `(g_i, g_j, g_k) = backpropFace`, i.e. `g_p = w × e_p + angle terms`, `w = (y − (y·N)N)/\|n\| + ζ`. | `hasDerivAt_backpropFace` |
+| `dev-vertex-normal` | Interior star with cyclic ring `w_m`: `S_v = ½ Σ_m w_m × w_{m+1}` (independent of `f_v`); `N_v = S_v/\|S_v\|` is a unit vector. | `ringVectorArea_eq`, `vertexNormal_unit` |
+| `dev-gradient-invariance` | `E : (Fin n → Fin 3 → ℝ) → ℝ`, `HasFDerivAt E E' f`, `E'δ = Σ g·δ`, `E` constant along the translations, the rotations about the three axes and the scalings of `f`: `Σ g = 0`, `Σ f × g = 0`, `Σ f·g = 0`. | `gradient_invariance` |
+| `dev-star-bipartitions` | `interiorBipartitions k` = the pairs `a < b < k`, `k(k−1)/2` of them; `F₁ = arcPart a b`, `F₂ = arcComplement k a b` are nonempty, disjoint, cover `0 … k−1`; distinct pairs give distinct unordered partitions; every cyclic interval of length `1 ≤ l < k` is `F₁` or `F₂` of a pair; `boundarySplits k` has `k − 1` entries. ("Edge-connected" = cyclic interval is taken as the definition.) | `length_interiorBipartitions`, `mem_interiorBipartitions`, `arcPart_arcComplement`, `arc_bipartition_injective`, `cycInterval_mem_bipartitions`, `length_boundarySplits` |
+| `dev-combinatorial-width` | `n ≥ 1`, unit normals: `(1/n)Σ\|N−N̄\|² = (1/n²)Σ_{σ1<σ2}\|N_σ1−N_σ2\|² = 1 − \|N̄\|²`; over ordered pairs the sum is twice (D1). | `partWidth_eq_pairs_eq_mean`, `sum_ordered_pairs` |
+| `dev-combinatorial-gradient` | `n ≥ 1`, any curves `N_σ(t)`: `d partWidth = Σ_σ (2/n)(N_σ − N̄)·N_σ'`. | `hasDerivAt_partWidth` |
+| `dev-combinatorial-max` | `\|N_i − N_j\|² ≤ partMaxWidth` for all `i, j ≤ n`, with equality for some pair; `d\|N₁−N₂\|² = y·N₁' − y·N₂'`, `y = 2(N₁ − N₂)`. | `partMaxWidth_spec`, `hasDerivAt_pairTerm` |
+| `dev-covariance-matrix` | `uᵀ(covMatrix)u = Σθ⟨u,N⟩²`; for an orthonormal eigenbasis with `λ₀ ≤ λ₁, λ₂`, `λ₀` is the least value of Eq. 3 over unit `u` (Rayleigh). | `quad_covMatrix`, `covObjective_isLeast` |
+| `dev-eigenvalue-supergradient` | `\|x\| = 1`, `xᵀAx = λ_A`, `λ_B ≤ uᵀBu` for all unit `u`: `λ_B ≤ λ_A + xᵀ(B−A)x`. | `eigenvalue_supergradient`, `eigenvalue_supergradient_of_eigenbasis` |
+| `dev-covariance-gradient` | Curves `θ_m(t)`, `N_m(t)`, fixed `x`: `d(xᵀA x) = Σ ((x·N)² θ' + 2θ(x·N) x·N')` (Eq. 10 up to the cited `dλ = xᵀ dA x`). | `hasDerivAt_quad_covMatrix` |
+| `dev-angle-weight-retessellation` | Splitting corner `j` into two corners with the same normal and angles summing to `θ_j` keeps `covMatrix`. | `covMatrix_split_corner` |
+| `dev-spherical-circumcenter` | `n = (b−a)×(c−a) ≠ 0`, `v = n/\|n\|`: `v·a = v·b = v·c = det(a,b,c)/\|n\|`, `\|v\| = 1`, `\|n\| = 2A_abc`; a unit `u` with `u·a = u·b = u·c` is `±v`. | `circumcenter_equidistant`, `eq_circumcenter_of_equidistant` |
+| `dev-max-covariance-gradient` | Curves `a, b, c` (no unit length needed), `n ≠ 0`: `d((v·a)²) = Σ_q ∂_q·q'`, `∂_q = 2g([q=a]v + ((e_q×v)·a/\|n\|) v)`; for sites `s_q N_q` the normal gets `s_q ∂_q` (D5). | `hasDerivAt_circumG_sq`, `hasDerivAt_circumG_sq_signed` |
+| `dev-log-map` | Unit `n0, N`, `s = \|n0×N\| > 0`: `cos φ = n0·N`, `sin φ = s`, `φ > 0`, `Ñ ⊥ n0`, `\|Ñ\| = φ`, `exp_{n0}(Ñ) = N`; `s = 0 < n0·N ⟹ N = n0, Ñ = 0`. | `logMap_spec`, `logMap_of_parallel` |
+| `dev-log-map-gradient` | At `t`: `n0, N` unit, `n0·n0' = N·N' = 0`, `s > 0`: `d(z·Ñ) = y_N·N' + y_{n0}·n0'` with `logMapAdjoint` (exact `G`, `H`; corrected Eq. 11, D6). | `hasDerivAt_logMap` |
+| `dev-tangent-eigen-derivative` | `t1, t2` orthonormal to first order, `Ã(t)` symmetric, `Ãx = λx`, `x = y₁t₁ + y₂t₂`: `d quad(Ã, y₁t₁ + y₂t₂) = quad(Ã', x)` (basis terms vanish); a 2x2 eigenvector of `TᵀÃT` lifts to a 3D eigenvector when all `Ñ ⊥ t₁×t₂`. | `hasDerivAt_quad_tangent`, `apply_eq_smul_of_tangent_eigen` |
+| `dev-intrinsic-width` | `pairWidthSq n P u = (max⟨P,u⟩ − min⟨P,u⟩)²`. | `pairWidthSq_eq_sq_widthAlong` |
+| `dev-width-altitude-gradient` | `n0` fixed unit, `w = x_b − x_a ≠ 0`, `w, w' ⊥ n0` at `t`: `du = −(u·w')ŵ/\|w\|`, `u = n0 × ŵ`. | `hasDerivAt3_altitudeDir` |
+| `dev-min-width-gradient` | `W = \|d\|² − (d·w)²/\|w\|²` equals `(d·u)²` for `d, w ⊥` unit `n0`; along arbitrary curves of the four points (`d, w ⊥ n0` at `t`) `dW = Σ z·x'` with `minWidthSensitivities`. | `gramWidth_eq_sq`, `hasDerivAt_gramWidth` |
+| `dev-jacobi-rotation` | `a_pq ≠ 0`: `t² + 2θt − 1 = 0`, `\|t\| ≤ 1`, `jacobiStep = JᵀMJ` (`J` the rotation by `c, s = tc` in the plane `(p,q)`), `a_pq ← 0`, trace and Frobenius norm kept; 2x2: `(c, −s)`, `(s, c)` orthonormal eigenvectors for `a_pp − t a_pq`, `a_qq + t a_pq`. | `jacobiStep_eq_rotated`, `jacobiT_quadratic`, `abs_jacobiT_le_one`, `jacobiStep_trace`, `jacobiStep_frobenius`, `jacobi2_eigen` |
+| `dev-weak-wolfe-curvature` | `t > 0`, `gᵀd < 0`, `c2 < 1`, `C(t)`: `sᵀy > t(c2 − 1)gᵀd > 0`. | `weakWolfe_curvature` |
+| `dev-lewis-overton-line-search` | The outcome of `lineSearch`: `accepted t` satisfies `S(t)` and `C(t)`; `capped t` satisfies `S(t)`; `weak t` satisfies `S(t)`, `t > 0`. | `lineSearch_spec`, `lineSearch_accepted` |
+| `dev-midpoint-subdivision` | The four children have `n/4` (same `N`); old corners keep their angles; old stars keep their vertex normal (`S → S/4`); a star whose normals (and face normals) are `⊥ w` has Eq. 3, Eq. 6, the intrinsic objectives `= 0` at `w`, `n0 ⊥ w`, `Ñ ⊥ w`; a part with one normal has width `0`. | `child_normals`, `child_unit_normals`, `child_angles`, `vectorArea_children`, `coplanar_energies_vanish`, `partWidth_const` |
+| `dev-small-angle-classification` | `n ≠ 0`, `θ_s ≤ π/3`: at most two angles `< θ_s`; if `θ_i, θ_j < θ_s` then `θ_k > π − 2θ_s` and the edge opposite `k` is strictly the longest. | `smallAngle_classification` |
+| `dev-regular-cone-values` | Regular cone, `k ≥ 3`: `Σθ⟨u,N_m⟩² = θk(h²/(2ρ²)(u_x²+u_y²) + cos²(π/k)/ρ² u_z²)`, least value over unit `u` `θk min(sin²α/2, cos²α)`; for `h > 0` the vertex normal is `e_z` and the intrinsic objective is `θkα²/2`, `α = atan2(h, cos π/k)`, in every tangent direction. (`E_P`, `λ_max`, intrinsic max: tests only.) | `cone_covObjective`, `cone_covariance_energy`, `cone_intrinsic_energy` |
+
+Cited for the developability paper (`CITED.md`): `dev-hinge-coplanar`, `dev-hinge-antiparallel`,
+`dev-hinge-ruled`, `dev-valence-three-flat`, `dev-simple-eigenvalue-derivative`,
+`dev-max-covariance-voronoi`, `dev-min-width-hull-edge`, `dev-lbfgs-two-loop`,
+`dev-lewis-overton-termination`, `dev-armijo-backtracking`, `dev-flip-manifold`,
+`dev-link-condition`, `dev-cut-edge-weight`. Not covered: the Taylor series of the log-map
+coefficients (`logGSeries`, `logHSeries`) and the overflow guard of the Jacobi rotation, which the
+oracle file marks as numerical devices.
 
 ## Theorems
 
