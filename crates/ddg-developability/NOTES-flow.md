@@ -48,7 +48,7 @@ preserve isometry; it only makes normals coplanar per star).
 
 ## Findings
 
-* **Spec expectation not met on spot.** SPEC §10.7 expects at most 0.1 % flipped UV triangles after
+* **(Resolved by D30, see "Cut study" below.)** **Spec expectation not met on spot.** SPEC §10.7 expects at most 0.1 % flipped UV triangles after
   flow + cut on spot. Measured (control mesh, 2 subdivisions, E_λ, ε = 1e-3): 300 iterations per
   round: 99 of 5112 (1.9 %), mean |u| 0.90; 1000 per round: 86 of 4568 (1.9 %), mean |u| 3.4.
   Lower ε helps (300 iterations: ε = 1e-4: 25 flips, 1e-5: 6 flips = 0.12 %, mean |u| 0.085, with
@@ -58,7 +58,7 @@ preserve isometry; it only makes normals coplanar per star).
   not, so a small energy does not mean a small defect. BFF with zero boundary scale must absorb
   that as area distortion. The tests assert <= 5 % for spot/bob/blub (blub 15 %) and print the
   numbers.
-* **Over-running the flow gives spikes.** Spot, 3 rounds, 3000 iterations each: E_λ = 1e-8, no
+* **(Resolved by D30.)** **Over-running the flow gives spikes.** Spot, 3 rounds, 3000 iterations each: E_λ = 1e-8, no
   terminal above ε, and the cut/flatten has 195 flipped triangles and mean |u| 6. The minimizers
   include non-embedded stars (spikes, double covers; SPEC D28, paper Fig. 9). The same shows on
   blub (E < 1e-3 everywhere after 2 x 500 iterations but Σ|Ω| = 99). Stopping early matters; an
@@ -69,6 +69,84 @@ preserve isometry; it only makes normals coplanar per star).
   threshold and the 0.5 step cap; a tuning was not needed.
 * Crumpled developable with E_λ: `cut_and_flatten` finds no terminals after the flow (E_λ ~ 6e-4),
   one chart, 0 flips, mean |u| 0.01.
+
+## Cut study (D30): flipped UV triangles after flow + cut
+
+Question: why does the paper's terminal rule (`E_λ > ε`) leave 1.9 % flipped UV triangles on spot
+(SPEC §10.7 expected 0.1 %), 5 % when the flow is over-run, and what fixes it at what cut length.
+
+**Hypothesis (non-embedded stars carry the defect): confirmed.** `star_embeddedness` (smallest
+cosine between a face normal and the vertex normal; <= 0 means the star is not a graph over its
+tangent plane) on spot control + 2 subdivisions, `E_λ`, ε = 1e-3, paper rule:
+
+| run | terminals | Σ\|Ω\| at terminals | Σ\|Ω\| at non-terminals | of which on non-embedded stars | non-terminals with \|Ω\| > 0.1 (non-embedded) | flipped | mean \|u\| |
+|---|---|---|---|---|---|---|---|
+| 3 x 300 it | 78 | 80.4 | 138.2 | 134.9 | 87 (86) | 99 (1.9 %) | 0.90 |
+| 3 x 3000 it | 0 (+2 added) | 9.4 | 222.2 | 222.2 | 77 (77) | 195 (5.0 %) | 6.08 |
+
+Non-embedded stars are 14 % of the interior vertices (360 of 2558), yet hold 98 % of the defect of
+the non-terminals; only 68 % of the flipped triangles touch one (the distortion spreads through
+the chart), so the flips are not located exactly at the spikes, but the defect that causes them is.
+
+**Study.** `examples/cut_study.sh` (flows once per mesh x flow energy x budget, written to OBJ, then
+`develop --cut-only` for 3 terminal energies x ε in {1e-2, 1e-3, 1e-4} x `defect_tolerance` in
+{off, 0.1, 0.02}: 1188 cut jobs, `xargs -P 56`, 3 min wall), `examples/cut_study.py` aggregates
+(`runs_tmp/dev-cut-study/{summary.md,all.csv}`). Flows: spot, bob, blub control meshes and
+CrumpledDevelopable (control: 2 subdivisions, 300 and 3000 it/round; crumpled 500 and 3000), seven
+dense meshes (1 subdivision, 300 it/round), flow energies `E_λ`, intrinsic, `E_P`. 4 of 45 flows are
+unusable for the cut or the flow failed (see "Problems found").
+
+Control meshes, flow `E_λ`, ε = 1e-3. Cells: terminals / flipped UV triangles / mean |u| / cut length
+as % of the total edge length.
+
+| mesh, it/round | paper: E_λ, off | intrinsic, off (a) | E_λ + tol 0.1 (b, default) | intrinsic + tol 0.1 (c) | E_λ + tol 0.02 |
+|---|---|---|---|---|---|
+| spot 300 | 78 / 99 (1.94 %) / 0.90 / 2.06 | 309 / 6 (0.12 %) / 4.2e-2 / 4.60 | 165 / 0 / 4.0e-3 / 4.06 | 329 / 0 / 2.4e-3 / 4.76 | 301 / 0 / 1.0e-3 / 4.93 |
+| spot 3000 | 2 / 195 (5.0 %) / 6.08 / 0.13 | n/a (energy undefined) | 79 / 0 / 1.3e-3 / 4.05 | n/a | 89 / 0 / 6.2e-5 / 4.13 |
+| bob 300 | 255 / 0 / 4.9e-2 / 2.18 | 339 / 0 / 1.1e-2 / 2.77 | 276 / 0 / 1.7e-2 / 2.37 | 345 / 0 / 1.0e-2 / 2.80 | 352 / 0 / 6.1e-3 / 2.70 |
+| bob 3000 | 2 / 145 (1.75 %) / 0.59 / 0.96 | 115 / 1 / 0.14 / 2.18 | 90 / 0 / 4.6e-3 / 2.10 | 175 / 0 / 3.3e-3 / 2.49 | 168 / 0 / 9.3e-4 / 2.56 |
+| blub 300 | 2 / 140 (4.88 %) / 2.49 / 0.76 | 165 / 8 (0.28 %) / 0.10 / 5.10 | 72 / 0 / 6.2e-3 / 3.73 | 194 / 0 / 5.1e-3 / 5.54 | 129 / 0 / 8.7e-4 / 4.79 |
+| blub 3000 | 2 / 158 (5.67 %) / 7.93 / 0.13 | n/a | 59 / 0 / 1.8e-3 / 4.05 | n/a | 64 / 0 / 6.3e-6 / 4.28 |
+
+Summary over all usable flows (worst case over meshes; "cut" is the mean over meshes):
+
+* control meshes, flow `E_λ`, 300 it: paper rule ε = 1e-2 / 1e-3 / 1e-4: worst 4.9 / 4.9 / 4.9 % flipped,
+  cut 0.8 / 1.7 / 4.0 %. Tolerance 0.1: 0 flipped for every ε, worst mean |u| 3.3e-2 / 1.7e-2 / 5.8e-3,
+  cut 3.1 / 3.4 / 5.3 %. Tolerance 0.02: 0 flipped, worst mean |u| 1.1e-2 / 6e-3 / 8.6e-4,
+  cut 4.0 / 4.1 / 5.8 %.
+* control meshes, flow `E_λ`, 3000 it: paper rule 5.7 % flipped, mean |u| up to 7.9, cut 0.4 %;
+  tolerance 0.1: 0 flipped, mean |u| <= 4.6e-3, cut 3.4 %.
+* control meshes, flow intrinsic or `E_P`: the paper rule is worse for coarser ε: worst flipped
+  0.1 to 0.6 % at ε = 1e-4, 0.4 to 3.4 % at 1e-3, 0.5 to 5.5 % at 1e-2 (worst with `E_λ` terminals
+  on the intrinsic flow); tolerance 0.1: 0 flipped in every case.
+* dense meshes (seven, 23k to 57k faces, three flow energies): 0 flipped in every variant;
+  tolerance 0.1 changes neither mean |u| nor the cut length (3.88 % -> 3.89 % at ε = 1e-3); mean |u|
+  is set by ε alone (medians 9e-5 at ε = 1e-4, 8e-3 at 1e-3, 0.2 at 1e-2).
+* CrumpledDevelopable: 0 flipped everywhere; the tolerance adds one terminal (1 cut edge, 0.17 %
+  of the length) and lowers mean |u| from 1e-2 to 1.4e-4 (500 it) or 1e-6 (3000 it).
+* The terminal energy matters little once the tolerance is set (`E_λ`, intrinsic and `E_P` give the
+  same 0 flips and mean |u| within a factor 2); intrinsic costs 20 to 30 % more cut length.
+
+**Decision (D30):** `CutOptions::energy` stays `Covariance`, new `defect_tolerance` defaults to
+`Some(0.1)` rad (`None` = the paper's rule). Reason: it removes all flips on all control meshes and
+over-runs, it is free on dense meshes, it cannot error (the intrinsic energy is undefined when a
+face normal is antipodal to the vertex normal, which happens exactly on the spiky stars), and the
+cut stays at 2.1 to 4.1 % of the edge length on control meshes (the paper rule is 0.1 to 2 % there
+only because it leaves the defect uncut). Tolerance 0.02 is the choice for lowest distortion
+(mean |u| below 1e-3 on spot and blub at +20 % cut length).
+
+Problems found in other modules (not fixed here):
+
+* Flows with `E_P` (combinatorial) leave degenerate faces on 3 control meshes (blub 300 and 3000,
+  spot 3000: triangle-inequality violations, zero-area faces) so `Geometry::from_positions` rejects
+  the cut input. Remeshing does not prevent zero-area triangles with `E_P`.
+* Intrinsic or `E_λ` over-runs (3000 it) end with some star having a normal within 1e-6 of the
+  antipode of the vertex normal: the flow itself fails on blub with the intrinsic energy ("energy
+  is undefined at vertex 881"), and the intrinsic energy evaluation in the cut stage errors on
+  spot / blub `E_λ` or `E_P` over-runs (D12). `star_embeddedness` finds these stars.
+* "injective: false" (global overlap of the chart image with itself, out of scope D23) is reported
+  for all of these runs even with 0 flipped triangles (spot 300 with the default: one chart,
+  overlapped fraction 0.48): "no flipped triangle" is local injectivity only.
 
 ## Study (SPEC task 5)
 

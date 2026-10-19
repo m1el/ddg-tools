@@ -9,7 +9,7 @@ use energy_common::*;
 
 use ddg_core::generators::{annulus, grid_disk, icosphere, open_cylinder, perturb, torus};
 use ddg_core::topology::TriMesh;
-use ddg_developability::{CutOptions, DevError, Energy, EnergyOptions, FlowOptions, cut_and_flatten, flow};
+use ddg_developability::{CutOptions, DevError, Energy, EnergyOptions, FlowOptions, cut_and_flatten, flow, star_embeddedness};
 
 fn cylinder_arc(n: usize) -> Mesh {
     let g = grid_disk(n, n).unwrap();
@@ -207,6 +207,12 @@ fn bad_input_is_an_error() {
     let ok = CutOptions::default();
     let bad = |o: CutOptions| cut_and_flatten(&mesh, &pos, &o);
     assert!(matches!(bad(CutOptions { epsilon: f64::NAN, ..ok.clone() }), Err(DevError::InvalidOption { name: "epsilon", .. })));
+    for t in [f64::NAN, -0.1] {
+        assert!(matches!(
+            bad(CutOptions { defect_tolerance: Some(t), ..ok.clone() }),
+            Err(DevError::InvalidOption { name: "defect_tolerance", .. })
+        ));
+    }
     assert!(matches!(bad(CutOptions { length_weight: 0.0, ..ok.clone() }), Err(DevError::InvalidOption { .. })));
     assert!(matches!(bad(CutOptions { alignment_weight: -1.0, ..ok.clone() }), Err(DevError::InvalidOption { .. })));
     assert!(matches!(bad(CutOptions { extra_terminals: vec![9999], ..ok.clone() }), Err(DevError::VertexOutOfRange { .. })));
@@ -259,6 +265,29 @@ fn flow_then_cut_on_a_noisy_sheet_has_low_distortion() {
 }
 
 #[test]
+fn defect_tolerance_makes_cone_vertices_terminals_and_none_is_the_paper_rule() {
+    // a flat disk with one interior vertex pulled up into a cone tip: the angle defect is
+    // positive; the covariance energy of the tip is small only if its star is nearly coplanar,
+    // so use a tolerance below the defect and check the terminal appears iff the option is set
+    let g = grid_disk(6, 6).unwrap();
+    let mesh = g.topology().unwrap();
+    let v = mesh.interior_vertices()[mesh.interior_vertices().len() / 2];
+    let mut pos = g.positions.clone();
+    pos[v as usize][2] = 0.05;
+    let geometry = ddg_core::Geometry::from_positions(&mesh, &pos).unwrap();
+    let omega = ddg_core::operators::angle_defects(&mesh, &geometry).unwrap()[v as usize].abs();
+    assert!(omega > 0.0);
+    let on = CutOptions { epsilon: 1e9, defect_tolerance: Some(0.5 * omega), ..Default::default() };
+    let cf = cut_and_flatten(&mesh, &pos, &on).unwrap();
+    assert_eq!(cf.terminals, vec![v]);
+    assert!((cf.vertex_defect[v as usize].abs() - omega).abs() < 1e-12);
+    let off = CutOptions { defect_tolerance: None, ..on.clone() };
+    assert!(cut_and_flatten(&mesh, &pos, &off).unwrap().terminals.is_empty());
+    let above = CutOptions { defect_tolerance: Some(2.0 * omega), ..on };
+    assert!(cut_and_flatten(&mesh, &pos, &above).unwrap().terminals.is_empty());
+}
+
+#[test]
 fn every_energy_can_select_terminals() {
     let g = icosphere(1).unwrap();
     let mesh = g.topology().unwrap();
@@ -270,20 +299,33 @@ fn every_energy_can_select_terminals() {
 
 // ---------------------------------------------------------------------------------------------
 
-fn run_model(rel: &str, subdivisions: usize, iterations: usize, max_flip_fraction: f64) -> Option<()> {
+/// Flow (E_λ, `rounds` x `iterations`) then cut and flatten with `cut`. Prints the numbers and
+/// returns (faces, flipped, mean |u|, cut length fraction, result) after the invariants passed.
+fn run_model_with(
+    rel: &str,
+    subdivisions: usize,
+    iterations: usize,
+    cut: &CutOptions,
+) -> Option<(usize, usize, f64, f64, ddg_developability::DevelopableFlattening, Mesh)> {
     let (mesh, pos) = load_model(rel)?;
     let opts = FlowOptions::uniform(EnergyOptions::default(), subdivisions, iterations);
     let res = flow(&mesh, &pos, &opts, None).unwrap();
-    let cf = cut_and_flatten(&res.mesh, &res.positions, &CutOptions::default()).unwrap();
+    let cf = cut_and_flatten(&res.mesh, &res.positions, cut).unwrap();
     check_invariants(&res.mesh, &cf);
     let nf = res.mesh.n_faces();
     let flips = cf.flipped_triangles();
+    let g = ddg_core::Geometry::from_positions(&res.mesh, &res.positions).unwrap();
+    let total: f64 = g.edge_lengths().iter().sum();
+    let cut_len: f64 = cf.cut_edges.iter().map(|&e| g.edge_lengths()[e as usize]).sum();
     eprintln!(
-        "{rel}: {nf} faces, genus {}, {} terminals (+{}), {} cut edges ({} loop edges), {} charts, {} flipped ({:.3}%), mean|u| {:.3e}, injective {}",
+        "{rel} (tol {:?}, eps {:e}): {nf} faces, genus {}, {} terminals (+{}), {} cut edges ({:.2}% of the edge length, {} loop edges), {} charts, {} flipped ({:.3}%), mean|u| {:.3e}, injective {}",
+        cut.defect_tolerance,
+        cut.epsilon,
         res.mesh.genus(),
         cf.terminals.len(),
         cf.added_terminals.len(),
         cf.cut_edges.len(),
+        100.0 * cut_len / total,
         cf.plan.n_loop_edges,
         cf.n_charts(),
         flips,
@@ -291,49 +333,121 @@ fn run_model(rel: &str, subdivisions: usize, iterations: usize, max_flip_fractio
         cf.mean_abs_log_scale,
         cf.is_injective()
     );
-    // where is the curvature? residual |angle defect| on interior non-terminals is what BFF with
-    // zero boundary scale has to absorb as area distortion
-    let mut sum = vec![0.0; res.mesh.n_vertices()];
-    for f in res.mesh.faces() {
-        let a = ddg_developability::geometry::corner_angles(f.map(|v| res.positions[v as usize]));
-        for k in 0..3 {
-            sum[f[k] as usize] += a[k];
-        }
-    }
-    let is_t: std::collections::HashSet<u32> = cf.terminals.iter().chain(&cf.added_terminals).copied().collect();
-    let (mut at, mut an) = (0.0, 0.0);
-    for v in res.mesh.interior_vertices() {
-        let d = (2.0 * std::f64::consts::PI - sum[v as usize]).abs();
-        if is_t.contains(&v) { at += d } else { an += d }
-    }
-    eprintln!("{rel}: sum |defect| at terminals {at:.3}, at other interior vertices {an:.3}");
-    assert!(flips as f64 <= max_flip_fraction * nf as f64);
     if res.mesh.genus() > 0 {
         assert_eq!(cf.plan.n_loop_edges, 2 * res.mesh.genus());
     }
-    Some(())
+    let mesh_pos = (res.mesh, res.positions);
+    Some((nf, flips, cf.mean_abs_log_scale, cut_len / total, cf, mesh_pos))
+}
+
+/// Sum of |Ω| over the interior non-terminals, and the part of it on non-embedded stars.
+fn nonterminal_defect(mesh: &TriMesh, cf: &ddg_developability::DevelopableFlattening) -> (f64, f64) {
+    let is_t: std::collections::HashSet<u32> = cf.terminals.iter().chain(&cf.added_terminals).copied().collect();
+    let (mut all, mut bad) = (0.0, 0.0);
+    for v in mesh.interior_vertices() {
+        if is_t.contains(&v) {
+            continue;
+        }
+        let d = cf.vertex_defect[v as usize].abs();
+        all += d;
+        if cf.star_embeddedness[v as usize].is_nan() || cf.star_embeddedness[v as usize] <= 0.0 {
+            bad += d;
+        }
+    }
+    (all, bad)
+}
+
+fn paper_rule() -> CutOptions {
+    CutOptions { defect_tolerance: None, ..Default::default() }
 }
 
 #[test]
 #[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
 fn spot_flow_then_cut() {
-    run_model("spot/spot/spot_control_mesh.obj", 2, 300, 0.05);
+    // SPEC D30 / section 10.7: the default (defect tolerance 0.1) gives no flipped UV triangle,
+    // the paper's rule alone leaves about 2 %
+    let (nf, flips, mean_u, len, ..) =
+        run_model_with("spot/spot/spot_control_mesh.obj", 2, 300, &CutOptions::default()).unwrap();
+    assert_eq!(flips, 0, "{flips} of {nf}");
+    assert!(mean_u < 0.02, "{mean_u}");
+    assert!(len < 0.06, "{len}");
+}
+
+#[test]
+#[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
+fn spot_paper_rule_leaves_defect_on_non_embedded_stars() {
+    // The hypothesis of D30, measured: with the energy threshold alone the cancelling angle
+    // defect of the non-terminals sits on stars that are not graphs over their tangent plane
+    // (normals nearly coplanar, so the energy is small, but Omega is not).
+    let (nf, flips, mean_u, _, cf, (mesh, _)) =
+        run_model_with("spot/spot/spot_control_mesh.obj", 2, 300, &paper_rule()).unwrap();
+    let (all, bad) = nonterminal_defect(&mesh, &cf);
+    eprintln!("paper rule: non-terminal sum |Omega| {all:.2}, of which on non-embedded stars {bad:.2}");
+    assert!(all > 50.0 && bad > 0.9 * all, "{all} {bad}");
+    assert!(flips as f64 > 0.005 * nf as f64, "{flips} of {nf}");
+    assert!(mean_u > 0.1, "{mean_u}");
+}
+
+#[test]
+#[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
+fn spot_over_run_flow_then_cut() {
+    // 3 x 3000 iterations: E_λ ~ 1e-8, no terminal from the energy; the paper's rule then has
+    // ~4 % flipped triangles and |u| ~ 6, the defect criterion none
+    let (nf, flips, mean_u, len, ..) =
+        run_model_with("spot/spot/spot_control_mesh.obj", 2, 3000, &CutOptions::default()).unwrap();
+    assert_eq!(flips, 0, "{flips} of {nf}");
+    assert!(mean_u < 0.01, "{mean_u}");
+    assert!(len < 0.06, "{len}");
+    let (_, flips2, ..) = run_model_with("spot/spot/spot_control_mesh.obj", 2, 3000, &paper_rule()).unwrap();
+    assert!(flips2 as f64 > 0.01 * nf as f64, "{flips2}");
 }
 
 #[test]
 #[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
 fn bob_flow_then_cut_has_handle_loops() {
-    run_model("bob/bob/bob_controlmesh.obj", 1, 300, 0.05);
+    let (nf, flips, mean_u, len, ..) =
+        run_model_with("bob/bob/bob_controlmesh.obj", 2, 300, &CutOptions::default()).unwrap();
+    assert_eq!(flips, 0, "{flips} of {nf}");
+    assert!(mean_u < 0.02, "{mean_u}");
+    assert!(len < 0.06, "{len}");
 }
 
 #[test]
 #[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
 fn blub_flow_then_cut() {
-    run_model("blub/blub/blub_control_mesh.obj", 1, 100, 0.15);
+    let (nf, flips, mean_u, len, ..) =
+        run_model_with("blub/blub/blub_control_mesh.obj", 2, 300, &CutOptions::default()).unwrap();
+    assert_eq!(flips, 0, "{flips} of {nf}");
+    assert!(mean_u < 0.02, "{mean_u}");
+    assert!(len < 0.06, "{len}");
 }
 
 #[test]
 #[ignore = "long: cargo test --release -p ddg-developability --test cut -- --ignored"]
 fn crumpled_then_cut() {
-    run_model("crumpleddevelopable/CrumpledDevelopable.obj", 0, 500, 0.001);
+    let (nf, flips, mean_u, ..) =
+        run_model_with("crumpleddevelopable/CrumpledDevelopable.obj", 0, 500, &CutOptions::default()).unwrap();
+    assert_eq!(flips, 0, "{flips} of {nf}");
+    assert!(mean_u < 1e-3, "{mean_u}");
+}
+
+#[test]
+fn star_embeddedness_flags_a_folded_star() {
+    // a flat fan around vertex 0 is a graph (cos = 1); lifting one rim vertex far above the
+    // center folds a face over (cos <= 0) while the energies would not notice
+    let g = grid_disk(4, 4).unwrap();
+    let mesh = g.topology().unwrap();
+    let e = star_embeddedness(&mesh, &g.positions).unwrap();
+    assert!(e.iter().all(|&c| (c - 1.0).abs() < 1e-12));
+    let mut pos = g.positions.clone();
+    let v = mesh.interior_vertices()[0] as usize;
+    pos[v][2] = 5.0;
+    let e = star_embeddedness(&mesh, &pos).unwrap();
+    assert!(e[v] > 0.0 && e[v] < 1.0, "a cone tip is still a graph: {}", e[v]);
+    let mut pos = g.positions.clone();
+    pos[v][2] = -0.0;
+    // push the vertex far outside its star: faces flip orientation around it
+    pos[v][0] += 10.0;
+    let e = star_embeddedness(&mesh, &pos).unwrap();
+    assert!(e[v] <= 0.0 || e[v].is_nan(), "{}", e[v]);
 }

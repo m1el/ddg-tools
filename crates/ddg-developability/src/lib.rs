@@ -23,7 +23,7 @@ pub mod optimize;
 pub mod remesh;
 pub mod subdivide;
 
-pub use cut::{CutOptions, DevelopableFlattening, cut_and_flatten};
+pub use cut::{CutOptions, DEFAULT_DEFECT_TOLERANCE, star_embeddedness, DevelopableFlattening, cut_and_flatten};
 pub use energy::{Energy, EnergyOptions, Evaluation, evaluate, evaluate_energy};
 pub use error::DevError;
 pub use flow::{FlowOptions, FlowReport, FlowResult, Round, RoundReport, flow};

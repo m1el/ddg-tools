@@ -1,6 +1,7 @@
 //! Cut and flatten (SPEC §6; paper Sec. 4.4; D22, D23).
 //!
-//! Terminals are the vertices whose developability energy exceeds `epsilon`. A cut graph
+//! Terminals are the vertices whose developability energy exceeds `epsilon` or whose angle
+//! defect exceeds `defect_tolerance` (the latter is an addition of ours, SPEC D30). A cut graph
 //! through them is planned with [`ddg_bff::plan_cut`] (Steiner tree approximation plus handle
 //! loops), the surface is cut, and every chart (a disk) is flattened with Boundary First
 //! Flattening with zero boundary scale factors, i.e. isometrically along the boundary, so that
@@ -22,6 +23,9 @@ use crate::energy::{Energy, EnergyOptions, evaluate_energy};
 use crate::error::DevError;
 use crate::geometry::{corner_angles, face_frame, v3};
 
+/// Default of [`CutOptions::defect_tolerance`] in radians (SPEC D30).
+pub const DEFAULT_DEFECT_TOLERANCE: f64 = 0.1;
+
 /// Options of [`cut_and_flatten`] (SPEC §6).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CutOptions {
@@ -31,6 +35,13 @@ pub struct CutOptions {
     /// A vertex is a terminal when its energy exceeds this (default `1e-3`; paper Fig. 20 uses
     /// 0.01 … 0.001). An energy that is NaN never makes a terminal.
     pub epsilon: f64,
+    /// Additional terminal criterion: an interior vertex with `|Ω_v| > defect_tolerance`
+    /// (angle defect `Ω_v = 2π − Σθ`, radians) is a terminal as well. Default
+    /// `Some(`[`DEFAULT_DEFECT_TOLERANCE`]`)` = 0.1 rad; `None` is the paper's rule (energy
+    /// threshold only), SPEC D30. A cut through a vertex lets the flattening absorb its defect
+    /// isometrically; the energies cannot see a defect on a star whose normals are coplanar but
+    /// which is not embedded (D28). [formula: angle-defect]
+    pub defect_tolerance: Option<f64>,
     /// Additional terminals (vertex ids), e.g. user-chosen cone sites.
     pub extra_terminals: Vec<u32>,
     /// `c_len` of the edge weight `w_e = c_len ℓ_e/ℓ̄ + c_align (1 − ½(|ê·x_a| + |ê·x_b|))`
@@ -58,6 +69,7 @@ impl Default for CutOptions {
         CutOptions {
             energy: Energy::Covariance,
             epsilon: 1e-3,
+            defect_tolerance: Some(DEFAULT_DEFECT_TOLERANCE),
             extra_terminals: Vec::new(),
             length_weight: 1.0,
             alignment_weight: 0.0,
@@ -80,6 +92,11 @@ impl CutOptions {
         let bad = |name, value, requirement| Err(DevError::InvalidOption { name, value, requirement });
         if self.epsilon.is_nan() || self.epsilon < 0.0 {
             return bad("epsilon", self.epsilon, ">= 0");
+        }
+        if let Some(t) = self.defect_tolerance
+            && (t.is_nan() || t < 0.0)
+        {
+            return bad("defect_tolerance", t, ">= 0 (and not NaN)");
         }
         if !(self.length_weight.is_finite() && self.length_weight >= 0.0) {
             return bad("length_weight", self.length_weight, "finite and >= 0");
@@ -131,6 +148,10 @@ pub struct DevelopableFlattening {
     pub charts: Vec<ChartReport>,
     /// The per-vertex energies of `CutOptions::energy` (no valence-3 omission).
     pub vertex_energy: Vec<f64>,
+    /// The angle defect `Ω_v` of every interior vertex of the input (0 on the boundary).
+    pub vertex_defect: Vec<f64>,
+    /// [`star_embeddedness`] of every vertex of the input.
+    pub star_embeddedness: Vec<f64>,
 }
 
 impl DevelopableFlattening {
@@ -148,6 +169,46 @@ impl DevelopableFlattening {
     pub fn is_injective(&self) -> bool {
         self.charts.iter().all(|c| c.is_injective())
     }
+}
+
+/// A per-vertex embeddedness diagnostic of the stars (SPEC D28, D30): the smallest cosine
+/// `min_σ n̂_σ · N_v` between the unit normal of a face of the star and the vertex normal `N_v`
+/// (§1). A positive value means that the star projects injectively onto the tangent plane (it is
+/// a graph over it, hence embedded); a value `<= 0` means that some face is vertical or
+/// folded over (a spike, a needle or a double cover in the sense of the paper's Fig. 9, or a
+/// sharp but embedded hinge: the test is conservative). `NaN` for a vertex with `S_v = 0`.
+/// Boundary vertices are included.
+pub fn star_embeddedness(mesh: &TriMesh, positions: &[[f64; 3]]) -> Result<Vec<f64>, DevError> {
+    let nv = mesh.n_vertices();
+    let mut s = vec![[0.0f64; 3]; nv];
+    let mut frames = Vec::with_capacity(mesh.n_faces());
+    for (f, tri) in mesh.faces().iter().enumerate() {
+        let fr = face_frame(tri.map(|v| positions[v as usize])).ok_or(DevError::DegenerateFace { face: f as u32 })?;
+        for &v in tri {
+            s[v as usize] = v3::add(s[v as usize], fr.n);
+        }
+        frames.push(fr);
+    }
+    let mut out = vec![f64::INFINITY; nv];
+    for (tri, fr) in mesh.faces().iter().zip(&frames) {
+        for &v in tri {
+            let sv = s[v as usize];
+            let l = v3::dot(sv, sv).sqrt();
+            let c = if l > 0.0 { v3::dot(fr.normal, sv) / l } else { f64::NAN };
+            let o = &mut out[v as usize];
+            if c.is_nan() || o.is_nan() {
+                *o = f64::NAN;
+            } else {
+                *o = o.min(c);
+            }
+        }
+    }
+    for o in out.iter_mut() {
+        if *o == f64::INFINITY {
+            *o = f64::NAN; // isolated vertex
+        }
+    }
+    Ok(out)
 }
 
 /// Edge weights `w_e = c_len ℓ_e/ℓ̄ + c_align (1 − ½(|ê·x_a| + |ê·x_b|))` (SPEC §6 step 2).
@@ -224,7 +285,8 @@ fn add_terminal(
 
 /// Cuts the surface through the high-energy vertices and flattens the charts (SPEC §6).
 ///
-/// 1. Terminals: vertices with `e_v > epsilon` plus `extra_terminals`.
+/// 1. Terminals: vertices with `e_v > epsilon` or `|Ω_v| > defect_tolerance` (D30), plus
+///    `extra_terminals`.
 /// 2. Edge weights ([`CutOptions::length_weight`], [`CutOptions::alignment_weight`]).
 /// 3. [`ddg_bff::plan_cut`]; a closed genus-0 component with fewer than two terminals gets its
 ///    highest-energy vertices added (reported in `added_terminals`).
@@ -266,7 +328,13 @@ pub fn cut_and_flatten(
     };
     let (_, vertex_energy) = evaluate_energy(mesh, positions, &eopts)?;
     let geometry = Geometry::from_positions(mesh, positions)?;
+    let vertex_defect = ddg_core::operators::angle_defects(mesh, &geometry)?;
     let mut is_terminal: Vec<bool> = vertex_energy.iter().map(|&e| e > opts.epsilon).collect();
+    if let Some(tol) = opts.defect_tolerance {
+        for (t, &d) in is_terminal.iter_mut().zip(&vertex_defect) {
+            *t |= d.abs() > tol;
+        }
+    }
     for &t in &opts.extra_terminals {
         is_terminal[t as usize] = true;
     }
@@ -396,5 +464,7 @@ pub fn cut_and_flatten(
         plan,
         charts: flats.iter().map(|f| f.report).collect(),
         vertex_energy,
+        vertex_defect,
+        star_embeddedness: star_embeddedness(mesh, positions)?,
     })
 }

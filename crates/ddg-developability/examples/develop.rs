@@ -13,6 +13,8 @@
 //!   --out FILE.obj       write the developable mesh; the per-vertex energy goes to FILE.energy.txt
 //!   --cut-out FILE.obj   cut and flatten the result, write an OBJ with per-corner UVs (charts unpacked)
 //!   --epsilon X          terminal threshold of the cut (default 1e-3)
+//!   --cut-energy NAME    energy that selects the terminals (default: the CutOptions default)
+//!   --defect-tol X       also make every vertex with |angle defect| > X a terminal (default: off)
 //!   --cut-only           skip the flow, cut and flatten the input
 //!   --conjugate          BFF conjugate extension instead of the harmonic one
 //!   --no-cut             skip the cut and flatten stage (by default it always runs)
@@ -55,6 +57,8 @@ struct Args {
     out: Option<String>,
     cut_out: Option<String>,
     epsilon: f64,
+    cut_energy: Option<Energy>,
+    defect_tol: Option<f64>,
     cut_only: bool,
     no_cut: bool,
     conjugate: bool,
@@ -74,6 +78,8 @@ fn parse_args() -> Result<Args, String> {
         out: None,
         cut_out: None,
         epsilon: 1e-3,
+        cut_energy: None,
+        defect_tol: None,
         cut_only: false,
         no_cut: false,
         conjugate: false,
@@ -94,6 +100,11 @@ fn parse_args() -> Result<Args, String> {
             "--out" => a.out = Some(val("--out")?),
             "--cut-out" => a.cut_out = Some(val("--cut-out")?),
             "--epsilon" => a.epsilon = val("--epsilon")?.parse().map_err(|e| format!("{e}"))?,
+            "--cut-energy" => {
+                let v = val("--cut-energy")?;
+                a.cut_energy = Some(parse_energy(&v).ok_or_else(|| format!("unknown energy {v}"))?);
+            }
+            "--defect-tol" => a.defect_tol = Some(val("--defect-tol")?.parse().map_err(|e| format!("{e}"))?),
             "--cut-only" => a.cut_only = true,
             "--no-cut" => a.no_cut = true,
             "--conjugate" => a.conjugate = true,
@@ -212,7 +223,8 @@ fn run() -> Result<(), String> {
     if !a.no_cut {
         let t = Instant::now();
         let co = CutOptions {
-            energy: a.energy,
+            energy: a.cut_energy.unwrap_or(CutOptions::default().energy),
+            defect_tolerance: a.defect_tol,
             epsilon: a.epsilon,
             threads: a.threads,
             extension: if a.conjugate { ddg_bff::Extension::Conjugate } else { ddg_bff::Extension::Harmonic },
@@ -242,6 +254,83 @@ fn run() -> Result<(), String> {
                     ("max_chart_overlap".into(), format!("{overlapped:.4}")),
                     ("mean_abs_u".into(), format!("{:.6e}", cf.mean_abs_log_scale)),
                     ("cut_seconds".into(), format!("{secs:.3}")),
+                ]);
+                // diagnostics (NOTES-flow.md, "Cut study"): cut length, defects, embeddedness, flips
+                let lens: Vec<f64> = cur_mesh
+                    .edges()
+                    .iter()
+                    .map(|&[p, q]| {
+                        let (p, q) = (cur_pos[p as usize], cur_pos[q as usize]);
+                        ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                    })
+                    .collect();
+                let total_len: f64 = lens.iter().sum();
+                let cut_len: f64 = cf.cut_edges.iter().map(|&e| lens[e as usize]).sum();
+                let mut is_term = vec![false; cur_mesh.n_vertices()];
+                for &t in cf.terminals.iter().chain(&cf.added_terminals) {
+                    is_term[t as usize] = true;
+                }
+                let nv = cur_mesh.n_vertices();
+                let (mut om_term, mut om_non, mut non_emb, mut non_emb_non, mut big_non) = (0.0, 0.0, 0, 0, 0);
+                let (mut om_non_bad, mut big_non_bad) = (0.0, 0);
+                let mut max_om_non: f64 = 0.0;
+                #[allow(clippy::needless_range_loop)]
+                for v in 0..nv {
+                    if cur_mesh.is_boundary_vertex(v) {
+                        continue;
+                    }
+                    let (om, emb) = (cf.vertex_defect[v].abs(), cf.star_embeddedness[v]);
+                    if is_term[v] {
+                        om_term += om;
+                    } else {
+                        om_non += om;
+                        max_om_non = max_om_non.max(om);
+                        if om > 0.1 {
+                            big_non += 1;
+                        }
+                        if emb.is_nan() || emb <= 0.0 {
+                            om_non_bad += om;
+                            if om > 0.1 {
+                                big_non_bad += 1;
+                            }
+                        }
+                    }
+                    if emb.is_nan() || emb <= 0.0 {
+                        non_emb += 1;
+                        if !is_term[v] {
+                            non_emb_non += 1;
+                        }
+                    }
+                }
+                // flipped uv triangles (negative signed area) and how many touch a non-embedded star
+                let (mut flips, mut flips_near) = (0, 0);
+                for (f, tri) in cur_mesh.faces().iter().enumerate() {
+                    let (a, b, c) = (cf.corner_uvs[3 * f], cf.corner_uvs[3 * f + 1], cf.corner_uvs[3 * f + 2]);
+                    if (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) < 0.0 {
+                        flips += 1;
+                        if tri.iter().any(|&v| { let e = cf.star_embeddedness[v as usize]; e.is_nan() || e <= 0.0 }) {
+                            flips_near += 1;
+                        }
+                    }
+                }
+                println!(
+                    "diag: cut length {:.4} of total edge length, sum|Omega| terminals {om_term:.3} / non-terminals {om_non:.3} (max {max_om_non:.3}, {big_non} above 0.1), non-embedded stars {non_emb} of {} interior ({non_emb_non} non-terminal, their sum|Omega| {om_non_bad:.3}, {big_non_bad} above 0.1), flipped {flips} ({flips_near} touch one)",
+                    cut_len / total_len,
+                    (0..nv).filter(|&v| !cur_mesh.is_boundary_vertex(v)).count()
+                );
+                summary.extend([
+                    ("cut_len_frac".into(), format!("{:.5}", cut_len / total_len)),
+                    ("om_terminals".into(), format!("{om_term:.4}")),
+                    ("om_nonterminals".into(), format!("{om_non:.4}")),
+                    ("max_om_nonterminal".into(), format!("{max_om_non:.4}")),
+                    ("nonembedded".into(), non_emb.to_string()),
+                    ("nonembedded_nonterminal".into(), non_emb_non.to_string()),
+                    ("om_nonterminal_nonembedded".into(), format!("{om_non_bad:.4}")),
+                    ("big_nonterminal".into(), big_non.to_string()),
+                    ("big_nonterminal_nonembedded".into(), big_non_bad.to_string()),
+                    ("flips_geom".into(), flips.to_string()),
+                    ("flips_near_nonembedded".into(), flips_near.to_string()),
+                    ("faces_cut".into(), cur_mesh.n_faces().to_string()),
                 ]);
                 if let Some(out) = &a.cut_out {
                     let cv: Vec<u32> = cur_mesh.faces().iter().flatten().copied().collect();

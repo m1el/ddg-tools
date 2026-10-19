@@ -541,7 +541,14 @@ remesh that changed something resets the L-BFGS memory.
 1. **Terminals.** Per-vertex energies `e_v` of `CutOptions.energy` (default `Covariance`)
    evaluated with `omit_valence_three = false` (a valence-3 triple point has positive energy unless
    flat and must be cut through), plus `extra_terminals`. Terminals: `e_v > epsilon` (default
-   `1e-3`; Fig. 20 uses 0.01 … 0.001).
+   `1e-3`; Fig. 20 uses 0.01 … 0.001) **or** (D30, our addition) an interior vertex with
+   `|Ω_v| > defect_tolerance` (`Ω_v = 2π − Σθ`, [formula: angle-defect]; default
+   `Some(0.1)` rad, `None` = the paper's rule). A cut through a vertex is what lets the flattening
+   absorb its angle defect isometrically; the energies are blind to a defect on a star whose
+   normals are coplanar but which is not embedded (D28, D30). `energy` stays `Covariance` by default
+   (D22). `star_embeddedness` (pub, also stored in the result) reports for every vertex the smallest
+   cosine between a face normal of its star and `N_v`: `> 0` means the star is a graph over its
+   tangent plane (embedded), `<= 0` or `NaN` flags a spike / needle / double cover / fold.
 2. **Edge weights** [formula: dev-cut-edge-weight] (cited: design choice of Sec. 4.4): with `x_v` the
    unit eigenvector of the smallest eigenvalue of `A_v` (§3.4, for every vertex, whatever the
    energy) and `ê` the unit edge direction,
@@ -569,7 +576,8 @@ remesh that changed something resets the L-BFGS memory.
 Output `DevelopableFlattening { cut_edges: Vec<u32> (edge ids, ascending), cut_vertex_pairs,
 corner_uvs: Vec<[f64;2]> (3|F|), face_chart: Vec<u32>, face_log_scale: Vec<f64>,
 vertex_log_scale: Vec<f64>, terminals: Vec<u32>, added_terminals: Vec<u32>, plan: CutPlan,
-charts: Vec<ChartReport> (BFF's: flips, overlap, distortion), vertex_energy: Vec<f64> }`.
+charts: Vec<ChartReport> (BFF's: flips, overlap, distortion), vertex_energy: Vec<f64>,
+vertex_defect: Vec<f64> (Ω_v), star_embeddedness: Vec<f64> }`.
 **Out of scope** (D23): gluing small "cracks" and re-flattening, automatic avoidance of global
 overlap (the paper does both by hand); overlap is reported per chart.
 
@@ -691,7 +699,8 @@ warning). Operator "Developable Seams + UV": marks `seam_edges` as seams and wri
   checked every iteration; memory reset only after a change.
 * **D22** Cut: terminals from energies without the valence-3 omission; `plan_cut` instead of
   Erickson–Har-Peled; terminals added on closed genus-0 components with < 2; weight formula of §6
-  (the paper names the ingredients but not the combination or the sign).
+  (the paper names the ingredients but not the combination or the sign). The energy that selects
+  the terminals stays `Covariance` by default (not the intrinsic width, see D30 for why).
 * **D23** Flatten: per chart BFF with `u = 0` on the boundary, harmonic extension; crack gluing and
   overlap avoidance out of scope.
 * **D24** Polygons and topology rule of §7.2 (to confirm).
@@ -701,6 +710,28 @@ warning). Operator "Developable Seams + UV": marks `seam_edges` as seams and wri
 * **D28** Embeddedness of stars is not checked (Theorem 3.3 assumes it); energies vanish on
   non-embedded coplanar stars too.
 * **D29** Eigensolver: cyclic Jacobi (`eig.rs`), not Kopp's hybrid.
+* **D30** Cut terminals: besides `e_v > ε`, every interior vertex with `|Ω_v| > 0.1` rad is a
+  terminal (`CutOptions::defect_tolerance`, `None` restores the paper's rule).
+  *Paper:* terminals are the vertices with energy above ε (Sec. 4.4, Figs. 20–22 use the intrinsic
+  energy, which the paper says remedies spikes, Sec. 5.2). *Ours:* with `E_λ` the flow leaves
+  stars that are not embedded (D28: spike, needle, double cover, Fig. 9) whose normals are
+  coplanar, hence energy about 0, but whose angle defect is large; they never become terminals and
+  BFF with zero boundary scale must absorb their defect as area distortion. *Measured*
+  (`NOTES-flow.md`, "Cut study", `examples/cut_study.sh`): spot control mesh + 2 subdivisions,
+  `E_λ`, 300 it/round, ε = 1e-3: non-terminals carry Σ|Ω| = 138.2, of which 134.9 on
+  non-embedded stars (86 of the 87 vertices with |Ω| > 0.1); 99 of 5112 UV triangles flipped
+  (1.9 %), mean |u| 0.90. Over-run (3 x 3000 it): 222.2 of 222.2 on non-embedded stars, no
+  terminal above ε, 195 flipped (5.0 %), mean |u| 6.1. With `defect_tolerance = 0.1`: 0 flipped,
+  mean |u| 4.0e-3 (1.3e-3 over-run), cut length 4.1 % of the total edge length (paper rule: 2.1 %,
+  and 0.1 % when over-run). Over the three control meshes and both budgets, 0 flipped in all 6
+  cases (paper rule: up to 5.7 %), at the price of 1.1 (bob) to 2 (spot) to 5 (blub, where the paper rule
+  found 2 terminals) times the cut length of the paper rule on the 300-iteration runs; on the dense meshes (23k to 57k faces) the criterion changes nothing
+  (0 flips either way, cut length +0.01 %). The intrinsic energy for terminals alone
+  (option (a)) is not enough (up to 0.5 % flipped for ε ≤ 1e-2 on E_λ-flowed control meshes, 5.5 % at ε = 1e-2 on intrinsic-flowed ones) and
+  cuts more (4.2 % against 3.4 % on E_λ-flowed control meshes) than the defect criterion, and it
+  fails with an `DevError::UndefinedEnergy` error when a star has an exactly antipodal normal (seen on spiky
+  over-run meshes); the defect criterion is energy independent, cheap and cannot fail. 0.1 rad
+  against 0.02: 0.02 lowers mean |u| by 2 to 4 times for +20 to 25 % cut length.
 
 ## 9. Formula ids
 
@@ -832,7 +863,10 @@ by a flip.
 * Spot control mesh (`spot_control_mesh.obj`, fan-triangulated, 372 faces) with 2 subdivision
   rounds, `E_P` then `E_λ` (as Figs. 23–24), remeshing on: completes, energy decreases in every
   round, then `cut_and_flatten`: every chart a disk, every terminal on the cut, `0` flipped UV
-  triangles expected (reported, asserted ≤ 0.1 % of faces), mean `|u_f|` reported.
+  triangles (achieved with the default `defect_tolerance = 0.1`, D30; asserted `== 0`; the paper's
+  rule alone, `None`, gives 1.9 % on this run and 5.0 % when over-run, asserted as the evidence
+  for D30), mean `|u_f|` ≤ 0.02 asserted (3.97e-3 measured), cut length ≤ 6 % of the edge length
+  (4.1 % measured).
 * `bob_controlmesh.obj` (genus 1): flow + cut: the cut contains the handle loops (2 loop edges
   counted by `CutPlan::n_loop_edges`) and every chart is a disk.
 * A jittered cube triangulated so its 8 corners have valence 3 (Fig. 16): with the omission the
