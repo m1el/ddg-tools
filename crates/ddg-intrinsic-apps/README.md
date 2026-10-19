@@ -356,9 +356,16 @@ the square only (not a table): with `m = 10` the iDT's distance there was right 
 field), with `m = 0.1` far worse.
 
 The bench `benches/heat.rs` (criterion) measures the factorization and one query on an
-icosphere, spot and camelbad, on the input, the iDT and iDR. It has not been run alone yet (a run on
-2026-10-17 was stopped: the machine was compiling a kernel); the table above was measured one
-process at a time.
+icosphere, spot and camelbad, on the input, the iDT and iDR. Run alone on a quiet machine (AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, one process at a time pinned to one core, load average 1.0 to 1.5;
+`runs_tmp/bench-quiet/heat.log`), factorization / one distance query (median):
+
+| mesh | input | iDT | iDR (25°) |
+|---|---|---|---|
+| icosphere4 | 8.4 ms / 0.87 ms | 9.5 ms / 0.88 ms | 8.7 ms / 0.87 ms |
+| spot | 6.9 ms / 0.93 ms | 7.1 ms / 0.95 ms | 7.7 ms / 1.03 ms |
+| camelbad | 46.6 ms / 3.89 ms | 46.7 ms / 3.90 ms | 62.0 ms / 5.45 ms |
+
+(The table above was also measured one process at a time.)
 
 ## 5.4 Adaptive mesh refinement
 
@@ -385,25 +392,25 @@ adaptive run near the paper's accuracy (`7e-3`), the uniform iDR with the same e
 
 | mesh | problem | marking | error | AMR V | AMR s | uniform V | uniform s | V ratio | time ratio |
 |---|---|---|--:|--:|--:|--:|--:|--:|--:|
-| spot_control_mesh | Green | supplement | 6.87e-3 | 3533 | 0.070 | 11648 | 0.080 | 3.3 | 1.1 |
-| bob_controlmesh | Green | supplement | 6.66e-3 | 2440 | 0.046 | 45458 | 0.411 | 18.6 | 9.0 |
-| blub_control_mesh | Green | supplement | 6.48e-3 | 5088 | 0.089 | 30739 | 0.241 | 6.0 | 2.7 |
-| spot_control_mesh | Green | squares | 7.18e-3 | 5814 | 0.403 | 10503 | 0.076 | 1.8 | 0.2 |
-| spot_control_mesh | heat | supplement | 7.08e-3 | 1740 | 0.039 | 152713 | 2.169 | 87.8 | 55.3 |
-| bob_controlmesh | heat | supplement | 1.09e-2 | 1569 | 0.030 | 94375 | 1.350 | 60.2 | 45.1 |
-| blub_control_mesh | heat | supplement | 5.87e-3 | 2624 | 0.047 | 134733 | 1.886 | 51.3 | 40.4 |
-| spot_control_mesh | heat | squares | 7.16e-3 | 1758 | 0.091 | 147999 | 2.210 | 84.2 | 24.2 |
+| spot_control_mesh | Green | supplement | 6.87e-3 | 3533 | 0.066 | 11648 | 0.072 | 3.3 | 1.1 |
+| bob_controlmesh | Green | supplement | 6.66e-3 | 2440 | 0.044 | 45458 | 0.299 | 18.6 | 6.7 |
+| blub_control_mesh | Green | supplement | 6.48e-3 | 5088 | 0.082 | 30739 | 0.186 | 6.0 | 2.3 |
+| spot_control_mesh | Green | squares | 7.18e-3 | 5814 | 0.382 | 10503 | 0.066 | 1.8 | 0.2 |
+| spot_control_mesh | heat | supplement | 7.08e-3 | 1740 | 0.037 | 152713 | 1.579 | 87.8 | 43.1 |
+| bob_controlmesh | heat | supplement | 1.09e-2 | 1569 | 0.028 | 94375 | 0.847 | 60.2 | 29.8 |
+| blub_control_mesh | heat | supplement | 5.87e-3 | 2624 | 0.044 | 134733 | 1.309 | 51.3 | 29.9 |
+| spot_control_mesh | heat | squares | 7.16e-3 | 1758 | 0.086 | 147999 | 1.556 | 84.2 | 18.0 |
 
 (bob's heat kernel: the last adaptive step within the range of the uniform runs. *AMR s*: all
 steps of the adaptive run including the initial refinement; *uniform s*: one uniform run,
-refinement and solve. **The times are from runs made in parallel, not alone**; a single-thread
-rerun on a quiet machine is open (ROADMAP). Vertex counts and errors do not depend on it.)
+refinement and solve. The times were re-measured alone on a quiet machine (AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, one process at a time pinned to one core, load average 1.0 to 1.5; single thread, `runs_tmp/bench-quiet/amr-*.log`); the vertex
+counts and errors reproduced exactly.)
 
 The heat kernel reproduces the paper (51× to 88× the vertices, against its 54×); the Green's
 function needs 3× to 19× (the paper's 18× is the upper end), and its time ratio spans 1.1× to
-9× (paper: 2–10×). The supplement's criterion (sums of indicators) beats Dörfler's on squares
+6.7× (paper: 2–10×). The supplement's criterion (sums of indicators) beats Dörfler's on squares
 clearly for the Green's function: the squares mark few faces per step and need many more steps
-(the spot rows: 0.40 s against 0.07 s). The study prints the full table per step.
+(the spot rows: 0.38 s against 0.07 s). The study prints the full table per step.
 
 Disk maps (Fig. 20), `jittered_disk` (a jittered sheared grid, 121 vertices) and `bumpy_disk`
 (a sheared height field, 169 vertices): flipped faces of the map and the conformal distortion
@@ -464,9 +471,10 @@ the field normalized to mean square length one) on the input, the iDT and the iD
 On a closed surface the indices add up to `nχ` on every triangulation (spot 2, 4, 8 for
 `n = 1, 2, 4`; bob 0); on a surface with boundary the sum is not a topological invariant and
 changes with the triangulation. The block solver converged on every run (16 to 64 iterations).
-A round sphere gives `λ ≈ n` as in the smooth case (`tests/vector.rs`). Times per field were
-0.01 s (spot's control mesh) to 4.6 s (the bunny's cross field) in runs made in parallel; a
-single-thread rerun is open.
+A round sphere gives `λ ≈ n` as in the smooth case (`tests/vector.rs`). Times per field, alone on a quiet machine
+(AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, one process at a time pinned to one core, load average 1.0 to 1.5; `runs_tmp/bench-quiet/vector.log`): 0.013 s (spot's control mesh) to 2.7 s (the bunny's cross field); per mesh, the
+range over the 1-, 2- and 4-direction fields on the three triangulations: spot 0.23 to 0.29 s,
+bob_tri 0.36 to 0.90 s, blub 0.58 to 0.91 s, camelbad 0.89 to 1.5 s, camel_noise2 0.89 to 2.5 s.
 
 Fig. 21's tenfold drop does not appear on these meshes: where the input is well shaped (spot,
 bob, blub, bunny, cow) the three energies agree within 1 %, and on the bad camels the iDT

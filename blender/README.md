@@ -352,69 +352,78 @@ could no longer find a decrease, at an energy of 1e-7 to 1e-13 that is convergen
 vertices, so it grows with the mesh), *thin faces* (the library's `bad_faces`), seam edges and
 terminals of the cut, charts, cones of the UV pipeline, *overlap* (the pipeline's sampled
 estimate of the UV area covered more than once), *mirrored* UV triangles (clockwise in UV), and
-seconds. **The seconds are not benchmarks:** the machine ran several hundred threads from other
-jobs (load average 40 to 350) while these were taken, and the flow time of the large cases
-(`blub` with 2 subdivisions: 225k triangles) is mostly waiting for a core.
+seconds. **The seconds of the rows "2 sub x 500", "1 sub x 500" and "none" were re-measured on
+2026-10-19 alone on a quiet machine** (AMD Ryzen Threadripper 3970X, 32 cores / 64 threads, load
+0.1 to 1.5; one Blender at a time, one rayon thread, `scripts/e2e-developable.sh --no-sweep` with
+`E2E_JOBS=1 RAYON_NUM_THREADS=1`), single-thread: spot (92k triangles after two subdivisions) 68
+to 70 s, bob 102 to 110 s (170k), blub 167 to 169 s (226k); the control meshes and primitives 0 to
+8 s. The seam and terminal counts of those rows agree with the earlier runs except for
+`prim_sphere` (new numbers in its two rows; the code has changed since the earlier runs). **The
+seconds of all other rows (the longer flows "N x 5000", "0 sub", "3000", the converged control
+meshes) are from the earlier runs under load (40 to 350) and are not benchmarks**; they have not
+been re-measured. The paper reports "seconds to a few minutes" single-threaded for its examples
+(control-mesh-sized inputs, 1k to 5k triangles): our control meshes take 2 to 6 s for the
+defaults, the dense models 1 to 3 minutes.
 
 | mesh | flow (subdivisions x iterations per round) | iterations done | rounds end | energy | thin faces | seam edges | terminals | charts | cones | overlap | mirrored | flow s | seams+UV s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| spot_quad | 2 sub x 500 | 1500 | max/max/max | 111 to 5.47 | 2 | 2870 | 1222 | 1 | 0 | 2.9 % | 0 | 94 | 1.3 |
-| spot_quad | 1 sub x 500 | 1000 | max/max | 111 to 8.84 | 2 | 2067 | 1538 | 1 | 0 | 15.2 % | 0 | 31 | 0.2 |
+| spot_quad | 2 sub x 500 | 1500 | max/max/max | 111 to 5.47 | 2 | 2870 | 1222 | 1 | 0 | 2.9 % | 0 | 70 | 0.73 |
+| spot_quad | 1 sub x 500 | 1000 | max/max | 111 to 8.84 | 2 | 2067 | 1538 | 1 | 0 | 15.2 % | 0 | 16 | 0.16 |
 | spot_quad | 1 sub x 3000 | 6000 | max/max | 111 to 3.77 | 1 | 1303 | 907 | 1 | 0 | 10.6 % | 0 | 312 | 0.4 |
 | spot_quad | 0 sub x 5000 | 5000 | max | 111 to 5.24 | 0 | 902 | 828 | 1 | 0 | 4.9 % | 0 | 61 | 0.1 |
 | spot_quad | 0 sub x 20000 | 20000 | max | 111 to 1.96 | 2 | 511 | 456 | 1 | 0 | 15.9 % | 0 | 435 | 0.8 |
-| spot_quad | none | - | - | - |  | 2617 | 2593 | 1 | 0 | 11.0 % | 0 | - | 0.1 |
-| spot_tri | 2 sub x 500 | 1500 | max/max/max | 112 to 5.95 | 0 | 2522 | 1310 | 1 | 0 | 20.0 % | 0 | 93 | 1.0 |
-| spot_tri | 1 sub x 500 | 1000 | max/max | 112 to 10.2 | 0 | 2049 | 1606 | 1 | 0 | 9.9 % | 0 | 29 | 0.3 |
-| spot_tri | none | - | - | - |  | 2674 | 2663 | 1 | 0 | 16.0 % | 0 | - | 0.1 |
-| spot_control | 2 sub x 500 | 1500 | max/max/max | 101 to 0.245 | 0 | 355 | 136 | 1 | 0 | 37.6 % | 0 | 5 | 0.1 |
+| spot_quad | none | - | - | - |  | 2617 | 2593 | 1 | 0 | 11.0 % | 0 | - | 0.04 |
+| spot_tri | 2 sub x 500 | 1500 | max/max/max | 112 to 5.95 | 0 | 2522 | 1310 | 1 | 0 | 20.0 % | 0 | 68 | 0.81 |
+| spot_tri | 1 sub x 500 | 1000 | max/max | 112 to 10.2 | 0 | 2049 | 1606 | 1 | 0 | 9.9 % | 0 | 15 | 0.16 |
+| spot_tri | none | - | - | - |  | 2674 | 2663 | 1 | 0 | 16.0 % | 0 | - | 0.05 |
+| spot_control | 2 sub x 500 | 1500 | max/max/max | 101 to 0.245 | 0 | 355 | 136 | 1 | 0 | 37.6 % | 0 | 3.0 | 0.04 |
 | spot_control | 2 sub x 5000 | 15000 | max/max/max | 101 to 3.88e-07 | 9 | 296 | 65 | 1 | 0 | 34.2 % | 0 | 131 | 0.1 |
-| spot_control | 1 sub x 500 | 1000 | max/max | 101 to 0.386 | 0 | 211 | 142 | 1 | 0 | 33.6 % | 0 | 2 | 0.0 |
+| spot_control | 1 sub x 500 | 1000 | max/max | 101 to 0.386 | 0 | 211 | 142 | 1 | 0 | 33.6 % | 0 | 0.9 | 0.01 |
 | spot_control | 1 sub x 5000 | 10000 | max/max | 101 to 1.69e-07 | 3 | 148 | 65 | 1 | 0 | 30.8 % | 0 | 9 | 0.0 |
 | spot_control | 0 sub x 5000 | 5000 | max | 101 to 8.02e-08 | 2 | 74 | 65 | 1 | 0 | 30.7 % | 0 | 2 | 0.0 |
-| spot_control | none | - | - | - |  | 182 | 183 | 1 | 0 | 40.0 % | 0 | - | 0.0 |
-| bob_quad | 2 sub x 500 | 1500 | max/max/max | 42.1 to 3.52 | 0 | 1392 | 284 | 1 | 0 | 1.0 % | 0 | 222 | 9.5 |
-| bob_quad | 1 sub x 500 | 1000 | max/max | 42.1 to 6.63 | 0 | 3110 | 2610 | 1 | 0 | 6.0 % | 0 | 45 | 0.6 |
+| spot_control | none | - | - | - |  | 182 | 183 | 1 | 0 | 40.0 % | 0 | - | 0.01 |
+| bob_quad | 2 sub x 500 | 1500 | max/max/max | 42.1 to 3.52 | 0 | 1392 | 284 | 1 | 0 | 1.0 % | 0 | 110 | 2.8 |
+| bob_quad | 1 sub x 500 | 1000 | max/max | 42.1 to 6.63 | 0 | 3110 | 2610 | 1 | 0 | 6.0 % | 0 | 24 | 0.30 |
 | bob_quad | 0 sub x 5000 | 5000 | max | 42.1 to 4.34 | 0 | 1127 | 1030 | 1 | 0 | 13.6 % | 0 | 223 | 0.1 |
-| bob_quad | none | - | - | - |  | 4340 | 4331 | 1 | 0 | 11.5 % | 0 | - | 0.1 |
-| bob_tri | 2 sub x 500 | 1500 | max/max/max | 42.9 to 3.24 | 0 | 1557 | 392 | 1 | 0 | 8.2 % | 0 | 252 | 10.0 |
-| bob_tri | 1 sub x 500 | 1000 | max/max | 42.9 to 5.72 | 0 | 2235 | 1514 | 1 | 0 | 4.0 % | 0 | 43 | 0.4 |
-| bob_tri | none | - | - | - |  | 4352 | 4342 | 1 | 0 | 14.5 % | 0 | - | 0.1 |
-| bob_control | 2 sub x 500 | 1500 | max/max/max | 47.4 to 1.09 | 0 | 472 | 284 | 1 | 0 | 6.9 % | 0 | 12 | 0.1 |
+| bob_quad | none | - | - | - |  | 4340 | 4331 | 1 | 0 | 11.5 % | 0 | - | 0.07 |
+| bob_tri | 2 sub x 500 | 1500 | max/max/max | 42.9 to 3.24 | 0 | 1557 | 392 | 1 | 0 | 8.2 % | 0 | 102 | 1.8 |
+| bob_tri | 1 sub x 500 | 1000 | max/max | 42.9 to 5.72 | 0 | 2235 | 1514 | 1 | 0 | 4.0 % | 0 | 22 | 0.31 |
+| bob_tri | none | - | - | - |  | 4352 | 4342 | 1 | 0 | 14.5 % | 0 | - | 0.08 |
+| bob_control | 2 sub x 500 | 1500 | max/max/max | 47.4 to 1.09 | 0 | 472 | 284 | 1 | 0 | 6.9 % | 0 | 5.9 | 0.07 |
 | bob_control | 2 sub x 5000 | 15000 | max/max/max | 47.4 to 0.0179 | 1 | 191 | 65 | 1 | 0 | 8.0 % | 0 | 248 | 0.4 |
-| bob_control | 1 sub x 500 | 1000 | max/max | 47.4 to 1.97 | 0 | 372 | 306 | 1 | 0 | 8.4 % | 0 | 2 | 0.0 |
+| bob_control | 1 sub x 500 | 1000 | max/max | 47.4 to 1.97 | 0 | 372 | 306 | 1 | 0 | 8.4 % | 0 | 1.6 | 0.02 |
 | bob_control | 1 sub x 5000 | 10000 | max/max | 47.4 to 0.0347 | 3 | 102 | 58 | 1 | 0 | 7.3 % | 0 | 24 | 0.0 |
-| bob_control | none | - | - | - |  | 335 | 334 | 1 | 0 | 14.7 % | 0 | - | 0.2 |
-| blub_quad | 2 sub x 500 | 1500 | max/max/max | 46.3 to 2.93 | 0 | 2201 | 433 | 1 | 0 | 10.8 % | 0 | 773 | 23.0 |
-| blub_quad | 1 sub x 500 | 1000 | max/max | 46.3 to 4.7 | 0 | 2263 | 1061 | 1 | 0 | 22.4 % | 0 | 61 | 0.6 |
+| bob_control | none | - | - | - |  | 335 | 334 | 1 | 0 | 14.7 % | 0 | - | 0.01 |
+| blub_quad | 2 sub x 500 | 1500 | max/max/max | 46.3 to 2.93 | 0 | 2201 | 433 | 1 | 0 | 10.8 % | 0 | 169 | 2.0 |
+| blub_quad | 1 sub x 500 | 1000 | max/max | 46.3 to 4.7 | 0 | 2263 | 1061 | 1 | 0 | 22.4 % | 0 | 36 | 0.42 |
 | blub_quad | 0 sub x 5000 | 5000 | max | 46.3 to 4.07 | 0 | 1181 | 912 | 1 | 0 | 22.2 % | 0 | 232 | 0.2 |
-| blub_quad | none | - | - | - |  | 5073 | 5024 | 1 | 0 | 11.8 % | 0 | - | 0.4 |
-| blub_tri | 2 sub x 500 | 1500 | max/max/max | 45.6 to 2.88 | 0 | 2567 | 406 | 1 | 0 | 16.4 % | 0 | 558 | 51.1 |
-| blub_tri | 1 sub x 500 | 1000 | max/max | 45.6 to 4.61 | 0 | 2278 | 1087 | 1 | 0 | 17.2 % | 0 | 60 | 0.6 |
-| blub_tri | none | - | - | - |  | 5028 | 4982 | 1 | 0 | 18.9 % | 0 | - | 0.2 |
-| blub_control | 2 sub x 500 | 1500 | max/max/max | 38 to 0.0142 | 2 | 207 | 70 | 1 | 0 | 9.3 % | 0 | 2 | 0.0 |
+| blub_quad | none | - | - | - |  | 5073 | 5024 | 1 | 0 | 11.8 % | 0 | - | 0.10 |
+| blub_tri | 2 sub x 500 | 1500 | max/max/max | 45.6 to 2.88 | 0 | 2567 | 406 | 1 | 0 | 16.4 % | 0 | 167 | 2.2 |
+| blub_tri | 1 sub x 500 | 1000 | max/max | 45.6 to 4.61 | 0 | 2278 | 1087 | 1 | 0 | 17.2 % | 0 | 34 | 0.41 |
+| blub_tri | none | - | - | - |  | 5028 | 4982 | 1 | 0 | 18.9 % | 0 | - | 0.11 |
+| blub_control | 2 sub x 500 | 1500 | max/max/max | 38 to 0.0142 | 2 | 207 | 70 | 1 | 0 | 9.3 % | 0 | 1.5 | 0.02 |
 | blub_control | 2 sub x 5000 | 3131 | LS/LS/LS | 38 to 5.02e-13 | 2 | 210 | 53 | 1 | 0 | 24.7 % | 0 | 2 | 0.0 |
-| blub_control | 1 sub x 500 | 1000 | max/max | 38 to 0.0232 | 3 | 104 | 65 | 1 | 0 | 18.7 % | 0 | 1 | 0.0 |
+| blub_control | 1 sub x 500 | 1000 | max/max | 38 to 0.0232 | 3 | 104 | 65 | 1 | 0 | 18.7 % | 0 | 0.5 | 0.00 |
 | blub_control | 1 sub x 5000 | 3100 | LS/LS | 38 to 6.33e-13 | 1 | 105 | 53 | 1 | 0 | 24.6 % | 0 | 1 | 0.0 |
-| blub_control | none | - | - | - |  | 110 | 111 | 1 | 0 | 25.2 % | 0 | - | 0.0 |
-| prim_cube | 2 sub x 500 | 1500 | max/max/max | 12.6 to 0.0267 | 0 | 198 | 71 | 1 | 0 | 20.7 % | 0 | 4 | 0.1 |
-| prim_cube | 1 sub x 500 | 1000 | max/max | 12.6 to 0.0414 | 0 | 102 | 75 | 1 | 0 | 19.1 % | 0 | 1 | 0.0 |
-| prim_cube | none | - | - | - |  | 35 | 8 | 1 | 0 | 0.0 % | 0 | - | 0.0 |
-| prim_sphere | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.403 | 0 | 151 | 74 | 1 | 0 | 0.0 % | 0 | 16 | 0.3 |
-| prim_sphere | 1 sub x 500 | 1000 | max/max | 15.5 to 0.624 | 0 | 278 | 244 | 1 | 0 | 4.6 % | 0 | 4 | 0.0 |
-| prim_sphere | none | - | - | - |  | 481 | 482 | 1 | 0 | 0.0 % | 0 | - | 0.0 |
-| prim_torus | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.0123 | 0 | 302 | 102 | 1 | 0 | 0.0 % | 0 | 17 | 0.2 |
-| prim_torus | 1 sub x 500 | 1000 | max/max | 15.5 to 0.0225 | 0 | 159 | 128 | 1 | 0 | 0.0 % | 0 | 3 | 0.0 |
-| prim_torus | none | - | - | - |  | 513 | 512 | 1 | 0 | 0.2 % | 0 | - | 0.0 |
-| prim_monkey | 2 sub x 500 | 1500 | max/max/max | 148 to 0.878 | 0 | 837 | 330 | 3 | 0 | 9.3 % | 0 | 18 | 0.2 |
-| prim_monkey | 1 sub x 500 | 1000 | max/max | 148 to 1.56 | 0 | 502 | 344 | 3 | 0 | 7.5 % | 0 | 4 | 0.1 |
-| prim_monkey | none | - | - | - |  | 464 | 483 | 3 | 0 | 12.0 % | 0 | - | 0.1 |
-| prim_cylinder | 2 sub x 500 | 161 | grad/LS/LS | 1.93 to -4.17e-15 | 0 | 200 | 44 | 1 | 0 | 0.0 % | 0 | 0 | 0.0 |
-| prim_cylinder | 1 sub x 500 | 157 | grad/LS | 1.93 to -6.69e-16 | 0 | 100 | 44 | 1 | 0 | 0.0 % | 0 | 0 | 0.0 |
-| prim_cylinder | none | - | - | - |  | 63 | 64 | 1 | 0 | 0.0 % | 0 | - | 0.0 |
-| prim_plane | 2 sub x 500 | 1500 | max/max/max | 149 to 0.00168 | 0 | 116 | 25 | 1 | 0 | 6.3 % | 0 | 10 | 0.1 |
-| prim_plane | 1 sub x 500 | 1000 | max/max | 149 to 0.00248 | 0 | 58 | 25 | 1 | 0 | 6.3 % | 0 | 2 | 0.0 |
-| prim_plane | none | - | - | - |  | 225 | 269 | 1 | 0 | 17.6 % | 0 | - | 0.0 |
+| blub_control | none | - | - | - |  | 110 | 111 | 1 | 0 | 25.2 % | 0 | - | 0.01 |
+| prim_cube | 2 sub x 500 | 1500 | max/max/max | 12.6 to 0.0267 | 0 | 198 | 71 | 1 | 0 | 20.7 % | 0 | 2.1 | 0.03 |
+| prim_cube | 1 sub x 500 | 1000 | max/max | 12.6 to 0.0414 | 0 | 102 | 75 | 1 | 0 | 19.1 % | 0 | 0.6 | 0.01 |
+| prim_cube | none | - | - | - |  | 35 | 8 | 1 | 0 | 0.0 % | 0 | - | 0.01 |
+| prim_sphere | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.391 | 6 | 177 | 76 | 1 | 0 | 0.0 % | 0 | 6.8 | 0.12 |
+| prim_sphere | 1 sub x 500 | 1000 | max/max | 15.5 to 0.851 | 2 | 302 | 281 | 1 | 0 | 3.4 % | 0 | 1.8 | 0.02 |
+| prim_sphere | none | - | - | - |  | 481 | 482 | 1 | 0 | 0.0 % | 0 | - | 0.02 |
+| prim_torus | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.0123 | 0 | 302 | 102 | 1 | 0 | 0.0 % | 0 | 7.4 | 0.12 |
+| prim_torus | 1 sub x 500 | 1000 | max/max | 15.5 to 0.0225 | 0 | 159 | 128 | 1 | 0 | 0.0 % | 0 | 1.8 | 0.03 |
+| prim_torus | none | - | - | - |  | 513 | 512 | 1 | 0 | 0.2 % | 0 | - | 0.01 |
+| prim_monkey | 2 sub x 500 | 1500 | max/max/max | 148 to 0.878 | 0 | 837 | 330 | 3 | 0 | 9.3 % | 0 | 8.4 | 0.09 |
+| prim_monkey | 1 sub x 500 | 1000 | max/max | 148 to 1.56 | 0 | 502 | 344 | 3 | 0 | 7.5 % | 0 | 2.2 | 0.02 |
+| prim_monkey | none | - | - | - |  | 464 | 483 | 3 | 0 | 12.0 % | 0 | - | 0.02 |
+| prim_cylinder | 2 sub x 500 | 161 | grad/LS/LS | 1.93 to -4.17e-15 | 0 | 200 | 44 | 1 | 0 | 0.0 % | 0 | 0.2 | 0.01 |
+| prim_cylinder | 1 sub x 500 | 157 | grad/LS | 1.93 to -6.69e-16 | 0 | 100 | 44 | 1 | 0 | 0.0 % | 0 | 0.0 | 0.00 |
+| prim_cylinder | none | - | - | - |  | 63 | 64 | 1 | 0 | 0.0 % | 0 | - | 0.01 |
+| prim_plane | 2 sub x 500 | 1500 | max/max/max | 149 to 0.00168 | 0 | 116 | 25 | 1 | 0 | 6.3 % | 0 | 4.3 | 0.06 |
+| prim_plane | 1 sub x 500 | 1000 | max/max | 149 to 0.00248 | 0 | 58 | 25 | 1 | 0 | 6.3 % | 0 | 1.2 | 0.01 |
+| prim_plane | none | - | - | - |  | 225 | 269 | 1 | 0 | 17.6 % | 0 | - | 0.01 |
 
 What the table says.
 

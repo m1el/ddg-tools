@@ -160,8 +160,9 @@ Full text, with the evidence, in **SPEC §8**. The ones that matter:
 ## Measured
 
 All numbers are from this tree; the studies and their tables are in SPEC §12 (the logs under
-`runs_tmp/` are not committed; the scripts in `examples/` regenerate them). Timings were taken on
-a 64-core machine loaded by other jobs and are upper bounds.
+`runs_tmp/` are not committed; the scripts in `examples/` regenerate them). Study timings were taken on
+a 64-core machine loaded by other jobs and are upper bounds; the benches (Speed, below) were run
+alone on a quiet AMD Ryzen Threadripper 3970X (32 cores, 64 threads) on 2026-10-19 (load 0.1 to 1.5).
 
 **Gradients (SPEC §10.2).** Central differences, `h = 1e-6 ℓ̄`, against the analytic gradient, for
 all six energies on random stars of valence 3 to 9, boundary fans, an icosphere, a bumpy grid, a
@@ -198,13 +199,15 @@ value, line-search failure or `NonDescent`. On the crumpled developable (the pap
 35 of 800 edges. The Blender end-to-end table on spot, bob, blub and primitives is in
 `blender/README.md`.
 
-**Speed** (taken under load 36 to 150, single thread; indicative only): value and gradient cost
-about 1 to 1.8 µs per vertex for `E_P`, `π_max`, `E_λ` and the intrinsic energies and about 4 µs
-for `λ_max` (spot, SPEC §12.7). The flow on spot's control mesh with two subdivisions (5112 faces,
-900 iterations, `E_λ`) takes 1.7 s; one iteration on a 10.7k-face mesh about 8 ms. Dense meshes of
-23k to 57k faces take 60 to 190 s per 800 iterations. The paper reports "seconds to a few minutes"
-on a 2018 laptop. Multi-threading does not help at these sizes under load; the 94k-face case gains
-3 to 4 times with all threads.
+**Speed** (benches run alone, quiet machine, 2026-10-19, single thread unless said otherwise):
+value and gradient cost 0.74 to 1.6 µs per vertex for `E_P`, `π_max`, `E_λ` and the intrinsic
+energies and 2.9 to 3.9 µs for `λ_max` (SPEC §12.7). The flow on spot's control mesh with two
+subdivisions (5112 faces, 900 iterations, `E_λ`) takes 1.8 s; one iteration on a 10.7k-face mesh
+about 9 ms. The paper reports "seconds to a few minutes" single-threaded on a 3.4 GHz i7 laptop:
+we are in the same range (Blender end to end, 2 subdivisions, 1500 iterations on 92k to 226k
+faces: 68 to 169 s). Threads: the energy on the 94k-face case gains 2.2 to 5.5 times with 4 to 64
+threads (up to 10 times for `λ_max` with 16); the flow does not gain at 5k to 14k faces (0.8 to 1.4
+times, slower for small meshes).
 
 ## Verification layers
 
@@ -250,7 +253,6 @@ cargo bench -p ddg-developability                                       # eig, e
   observe it works).
 * The intrinsic energies are undefined at a vertex whose face normal is antipodal to its vertex
   normal; with `omit_valence_three = false` the cut stage propagates that error.
-* Timings on a quiet machine, and the speed-up with threads, are not measured yet.
 * Not implemented (not in the paper's method as we read it): remeshing by anything but flips and
   collapses of small-angle triangles, anisotropic remeshing, constraints other than pinned
   vertices.

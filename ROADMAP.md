@@ -55,12 +55,9 @@ including three misplaced in the authors' demo repository, were removed the same
     inserted into the mesh first;
   * the vector-field study finds Fig. 21's large energy drop (input to iDT to iDR) only on the
     shot-noise camel; the paper's mesh is not in the data set (crate README, 5.5);
-  * timings to re-run single-thread, one at a time, on a quiet machine (a run on 2026-10-17 was
-    stopped because a kernel build was loading the machine): `cargo bench -p ddg-intrinsic-apps
-    --bench heat` (never run alone), the AMR-vs-uniform study (`examples/amr_study.rs`, eight
-    problem rows and two disk maps) and the vector-field study (`examples/vector_study.rs`); the
-    README's time columns of 5.4 and 5.5 come from parallel runs. Vertex counts, errors and
-    energies are not affected.
+  * timings: done on 2026-10-19 (quiet machine, single thread; README 5.3 to 5.5). The AMR
+    problem rows, the disk maps and the vector-field times were re-measured; the parallel
+    other `apps_study` tables were not touched.
 
 * **Disconnected meshes in the cones solver** (2026-10-17, `crates/ddg-optimal-cones`, README
   "Disconnected meshes"): every entry point accepts several components and returns the exact
@@ -317,9 +314,11 @@ Open:
 * **Black-box comparison with the authors' program not run.** Its build needs libigl (an empty
   submodule in the reference tree, commit `d4b67260855f`); fetching it was blocked by the
   agent's safety check. Waits for the user to supply libigl at `/var/data/ddg-quarantine/libigl`.
-* **Timings** were all taken under load from an unrelated job (load 40–350): the energy bench
-  (`cargo bench -p ddg-developability --bench energy`), the flow bench, the multithread
-  speed-up, and the Blender end-to-end times. Re-run alone on a quiet machine.
+* **Timings** measured on 2026-10-19 on a quiet machine (energy, eig and flow benches with
+  4/16/64 threads; Blender end-to-end rows "2 sub x 500", "1 sub x 500", "none"). Open: the Blender
+  rows of the long flows (N x 5000, 0 sub, 3000, converged control meshes) and the study timings
+  of SPEC 12.1 to 12.5 (parallel runs) were not re-run; the thread scaling of the energy is only
+  2 to 10 times at 64 threads (SPEC 12.7), not investigated.
 * The dense meshes do not converge at the default budget (every round ends by
   `max_iterations`); only the control meshes approach zero energy.
 * A converged flow can end with the status `line_search_failed` at energy 1e-7 to 1e-13 (no

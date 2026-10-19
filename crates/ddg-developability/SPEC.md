@@ -964,7 +964,7 @@ by a flip.
   without a face below the floor.
 * Independent runs are parallel jobs (one per mesh), one log each in `runs_tmp/`.
 
-### 10.8 Benchmarks (`cargo bench -p ddg-developability`, single-thread numbers run alone)
+### 10.8 Benchmarks (`cargo bench -p ddg-developability`, single-thread numbers run alone; measured values in §12.6, §12.7)
 
 * `energy`: each of the six energies, value+gradient, on `spot_triangulated` (5856 faces),
   `bob_tri` (10688), `blub_triangulated` (14208) and spot subdivided twice (93696 faces); report
@@ -991,9 +991,10 @@ by a flip.
 Moved here from the progress notes of the implementation (`NOTES-*.md`, deleted). The logs
 quoted as `runs_tmp/dev-*` are not committed (the directory is gitignored); the scripts that
 regenerate them are `examples/study.sh`, `cut_study.sh`/`cut_study.py`, `robust_study.sh`/
-`robust_summary.py`/`robust_compare.py` and the benches. Times were taken on a 64-core machine
-that was loaded by other jobs (load average 40 to 150), single-thread unless said otherwise:
-read them as upper bounds, not as benchmarks.
+`robust_summary.py`/`robust_compare.py` and the benches. The benchmark numbers of §12.6 and §12.7
+(energy, eig and flow benches) were taken alone on a quiet machine: AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, nothing else running (load average 0.1 to 1.5 before and during; the multithread parts load the machine themselves). The seconds
+of the studies (§12.1 to §12.5) were taken in parallel runs under load (60 to 150) and remain upper
+bounds.
 
 ### 12.1 How the flow, the cut and the tests behave
 
@@ -1387,27 +1388,29 @@ Covariance 85 flips, spot_control_mesh Covariance 97 flips, all dense meshes 0 f
 
 ### 12.6 Benchmarks of the flow
 
-Measured while the machine had a load average of 55 to 60 from other agents, so the "64 threads"
-column shows contention rather than scaling, and the single-thread numbers are probably slightly
-pessimistic. Remeshing on, default options.
+Measured alone on a quiet machine (AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, nothing else running (load average 0.1 to 1.5 before and during; the multithread parts load the machine themselves); `cargo bench -p ddg-developability --bench flow`,
+log `runs_tmp/bench-quiet/flow.log`). "64 threads" is a local pool of 64 threads on the 32 physical
+cores. Remeshing on, default options.
 
 | job | faces | iterations | evaluations | 1 thread | 64 threads |
 |---|---|---|---|---|---|
-| spot_triangulated, E_λ, 50 it | 5852 | 50 | 62 | 0.25 s (4.96 ms/it, 4.0 ms/eval) | 0.32 s |
-| spot_triangulated, intrinsic | 5850 | 50 | 67 | 0.29 s (5.77 ms/it) | 0.33 s |
-| bob_tri, E_λ | 10688 | 50 | 58 | 0.41 s (8.2 ms/it, 7.1 ms/eval) | 0.40 s |
-| bob_tri, intrinsic | 10688 | 50 | 57 | 0.44 s (8.9 ms/it) | 0.43 s |
-| blub_triangulated, E_λ | 14208 | 50 | 61 | 0.59 s (11.8 ms/it, 9.7 ms/eval) | 0.52 s |
-| blub_triangulated, intrinsic | 14208 | 50 | 53 | 0.56 s (11.2 ms/it) | 0.47 s |
-| spot control + 2 subdivisions, E_λ, 3 x 300 it | 5112 | 900 | 1427 | 1.68 s (1.9 ms/it) | 3.53 s |
-| crumpled, E_λ, 300 it | 503 | 300 | 452 | 0.12 s | 0.57 s |
-| bob control + 2 subdivisions, E_λ, 3 x 300 it | 10116 | 900 | 1397 | 3.62 s (4.0 ms/it) | 4.87 s |
+| spot_triangulated, E_λ, 50 it | 5852 | 50 | 62 | 0.27 s (5.4 ms/it, 4.4 ms/eval) | 0.28 s |
+| spot_triangulated, intrinsic | 5850 | 50 | 67 | 0.32 s (6.3 ms/it) | 0.30 s |
+| bob_tri, E_λ | 10688 | 50 | 58 | 0.45 s (9.0 ms/it, 7.7 ms/eval) | 0.36 s |
+| bob_tri, intrinsic | 10688 | 50 | 57 | 0.48 s (9.6 ms/it) | 0.36 s |
+| blub_triangulated, E_λ | 14208 | 50 | 61 | 0.62 s (12.5 ms/it, 10.2 ms/eval) | 0.46 s |
+| blub_triangulated, intrinsic | 14208 | 50 | 53 | 0.60 s (12.0 ms/it) | 0.43 s |
+| spot control + 2 subdivisions, E_λ, 3 x 300 it | 5112 | 900 | 1427 | 1.78 s (2.0 ms/it) | 2.80 s |
+| crumpled, E_λ, 300 it | 503 | 300 | 432 | 0.13 s | 0.43 s |
+| bob control + 2 subdivisions, E_λ, 3 x 300 it | 10116 | 900 | 1397 | 3.63 s (4.0 ms/it) | 4.21 s |
 
 Per evaluation (value + gradient + line search overhead) about 0.7 us per face single-threaded
-(7 ms for 10.7k faces). The paper: "seconds to a few minutes" single-threaded on a 3.4 GHz i7
-laptop for its examples; our spot run (the SPEC target: <= 60 s single-threaded) takes 1.7 s for 900
-iterations. Multithreading does not help at these sizes under load (thread pool overhead, ~5k to 14k
-vertices); a quiet-machine measurement of the speed-up remains to be done.
+(7.7 ms for 10.7k faces). The paper: "seconds to a few minutes" single-threaded on a 3.4 GHz i7
+laptop for its examples; our spot run (the SPEC target: <= 60 s single-threaded) takes 1.8 s for 900
+iterations, i.e. within the paper's "seconds" and 30 times below the target. The long Blender runs
+(§ of `blender/README.md`, 2 subdivisions, 1500 iterations on 92k to 226k faces, 1 thread) take 68
+to 169 s. Threads do not help the flow at these sizes (5k to 14k faces: 0.8 to 1.4 times at best,
+slower for the small ones: the pool overhead of every call); only the energy alone scales (§12.7).
 
 ### 12.7 Energies and optimizer: decisions that go beyond the text, observations
 
@@ -1429,12 +1432,18 @@ Energies (SPEC §1 to §3):
   computing them (so the intrinsic energies still report D12 undefined states). Before, `E_λ` took
   an arbitrary eigenvector of the rank-deficient matrix and fed sensitivities of the size of the
   angle between the normals into the gradient (found by the oracle fuzz; `tests/robust.rs`).
-* Energy bench (`cargo bench -p ddg-developability --bench energy`, value + gradient, one thread,
-  taken at load 48 to 58 on 64 cores, indicative only), ns per vertex: spot `E_P` 1530,
-  `π_max` 1310, `E_λ` 1020, `λ_max` 3850, intrinsic 1340, intrinsic max 1820; bob and blub similar
-  or lower (790 to 1290; `λ_max` 3.9 to 4.1 µs); 16 threads at load 48: bob and blub 290 to 620.
-  Multi-thread scaling is not measurable on a loaded machine. `eig` bench: `sym_eig3` 262 ns,
-  `sym_eig2` 51 ns per call.
+* Energy bench (`cargo bench -p ddg-developability --bench energy`, value + gradient; quiet
+  machine, AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, nothing else running (load average 0.1 to 1.5 before and during; the multithread parts load the machine themselves); logs `runs_tmp/bench-quiet/energy-{4,16,64}.log`), single thread, ns per vertex
+  (spot / bob / blub / spot subdivided twice, 93696 faces): `E_P` 1547 / 1180 / 1206 / 1608,
+  `π_max` 1014 / 992 / 959 / 1478, `E_λ` 756 / 742 / 741 / 1200, `λ_max` 3274 / 2897 / 2970 / 3860,
+  intrinsic 880 / 851 / 833 / 1297, intrinsic max 1210 / 1167 / 1168 / 1634. All meet the §10.8
+  targets (<= 2 µs, <= 5 µs for the max energies). Speed-up over one thread (the three runs
+  repeat the single-thread numbers within 5 %): spot-sub2 `E_λ` 2.2 (4 threads), 3.2 (16), 5.5
+  (64); `λ_max` 3.5 / 10.4 / 8.1; the other four energies 2.2 to 2.8 / 3.2 to 4.3 / 3.8 to 7.0.
+  The 5.8k to 14k-face meshes: `E_λ` 1.3 to 2.9 (4), 1.6 to 2.6 (16), 0.9 to 1.4 (64); `λ_max`
+  3.1 to 3.6 / 4.3 to 6.7 / 3.0 to 5.1. The scaling is modest (a call is 2 to 80 ms; the pool is
+  built per measurement and the gather is serial per vertex star). `eig` bench: `sym_eig3` 233 ns,
+  `sym_eig2` 37 ns per call.
 
 Optimizer, subdivision, remeshing (SPEC §4, §5):
 
@@ -1466,8 +1475,6 @@ Optimizer, subdivision, remeshing (SPEC §4, §5):
 
 ### 12.8 Open items
 
-* Quiet-machine measurements of the thread speed-up of the energy and the flow, and of the bench
-  numbers above, remain to be done.
 * The intrinsic energies with `omit_valence_three = false` error on undefined vertices (the cut
   stage propagates the error); not seen on any data model.
 * Out of scope (D23): gluing cracks and avoiding global overlap after the cut (the paper does both
