@@ -2,7 +2,7 @@
 
     DISPLAY=:N blender --factory-startup blank.blend --python showcase/ui/drive.py -- <scene> <outdir>
 
-Scenes: unwrap, cut, sphere. Every step runs from a timer so the window redraws in between;
+Scenes: unwrap, cut, sphere, developable. Every step runs from a timer so the window redraws in between;
 captures are taken from the X display with ImageMagick's `import` (Blender's own screenshot
 operator returns a black image on llvmpipe). Captures: <outdir>/<scene>_<nn>_<tag>.png.
 """
@@ -304,6 +304,119 @@ def scene_cut():
     return steps + [shot_flow, options, shot_options, apply, show, shot_applied]
 
 
+def scene_developable():
+    """Make Developable (Layout workspace, with its Adjust Last Operation panel), Show
+    Developability (the energy as vertex colors) and Developable Seams + UV (UV Editing
+    workspace, seams in Edit mode)."""
+    state = {}
+
+    def s0():
+        bpy.ops.preferences.addon_enable(module=MOD)
+        theme()
+        obj = load_spot()
+        state["img"] = checker_material(obj)
+        set_workspace("Layout")
+        return 1.0
+
+    def s1():
+        view3d_setup(texture=False, angle=(-140, 16))
+        for a in win().screen.areas:
+            if a.type == 'VIEW_3D':
+                a.spaces.active.show_region_toolbar = False
+                a.spaces.active.shading.color_type = 'SINGLE'
+                a.spaces.active.shading.single_color = (0.85, 0.85, 0.87)
+        capture("input")
+        mouse(1900, 20)
+        return 0.5
+
+    def s2():
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            res = bpy.ops.object.ddg_make_developable('INVOKE_DEFAULT', True, subdivisions=0,
+                                                      iterations=int(ARGS[2]) if len(ARGS) > 2 else 1500)
+        log("make developable", res, bpy.data.objects["spot"].data.get("ddg_developable_last"))
+        return 1.5
+
+    def s3():
+        capture("result")
+        mouse(1180, 700)
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            bpy.ops.screen.redo_last('INVOKE_DEFAULT')
+        return 1.5
+
+    def s4():
+        capture("options")
+        key('ESC')
+        return 0.5
+
+    def s5():
+        mouse(1900, 20)
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            res = bpy.ops.object.ddg_show_developability('INVOKE_DEFAULT', True)
+        log("show developability", res)
+        me = bpy.data.objects["spot"].data
+        log("color attrs", [(c.name, c.domain, c.data_type) for c in me.color_attributes],
+            "active", me.color_attributes.active_color_name)
+        c0 = me.color_attributes.get("developability")
+        if c0 is not None:
+            vals = [tuple(d.color) for d in c0.data[:2000]]
+            log("color sample min/max", min(vals), max(vals))
+            # The operator leaves the float attribute 'developability_energy' active, which the
+            # viewport draws black; make the color attribute the active one.
+            me.color_attributes.active_color = c0
+        for a in win().screen.areas:
+            if a.type == 'VIEW_3D':
+                a.spaces.active.shading.color_type = 'VERTEX'
+        return 1.5
+
+    def s6():
+        capture("energy")
+        mouse(1180, 700)
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            bpy.ops.screen.redo_last('INVOKE_DEFAULT')
+        return 1.5
+
+    def s7():
+        capture("energy_options")
+        key('ESC')
+        return 0.5
+
+    def s8():
+        set_workspace("UV Editing")
+        return 1.0
+
+    def s9():
+        edit_all_deselected()
+        view3d_setup(texture=True, angle=(-140, 16))
+        deselect()
+        for a in win().screen.areas:
+            if a.type == 'VIEW_3D':
+                a.spaces.active.shading.color_type = 'TEXTURE'
+        uv_editor_setup(state["img"])
+        return 1.0
+
+    def s10():
+        mouse(1900, 20)
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            res = bpy.ops.uv.ddg_developable_seams('INVOKE_DEFAULT', True)
+        log("seams", res)
+        uv_editor_setup(state["img"])
+        return 2.0
+
+    def s11():
+        capture("seams")
+        mouse(1180, 700)
+        with bpy.context.temp_override(**area('VIEW_3D')):
+            bpy.ops.screen.redo_last('INVOKE_DEFAULT')
+        return 1.5
+
+    def s12():
+        capture("seams_options")
+        key('ESC')
+        return None
+
+    return [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12]
+
+
 def scene_sphere():
     state = {}
 
@@ -434,4 +547,5 @@ def run(steps):
     bpy.app.timers.register(tick, first_interval=3.0)
 
 
-run({"unwrap": scene_unwrap, "cut": scene_cut, "sphere": scene_sphere}[SCENE]())
+run({"unwrap": scene_unwrap, "cut": scene_cut, "sphere": scene_sphere,
+     "developable": scene_developable}[SCENE]())

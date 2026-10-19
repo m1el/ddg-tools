@@ -58,7 +58,7 @@ def colorbar(path, stops, w=700, h=26, ticks=(), labels_size=24, title=""):
            "-gravity", "south", "-splice", f"0x{labels_size + 14}", "-font", F,
            "-pointsize", labels_size, "-fill", INK, "-gravity", "southwest"]
     for pos, text in ticks:
-        cmd += ["-annotate", f"+{int(80 + pos * w - len(text) * labels_size * 0.3)}+2", text]
+        cmd += ["-annotate", f"+{max(4, int(80 + pos * w - len(text) * labels_size * 0.3))}+2", text]
     if title:
         cmd += ["-gravity", "north", "-splice", f"0x{labels_size + 10}", "-gravity", "northwest",
                 "-annotate", f"+80+4", title]
