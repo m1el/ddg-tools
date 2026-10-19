@@ -853,17 +853,10 @@ by a flip.
   single-threaded for the spot run at the default iteration budget, and record speed-up with
   threads.
 
-## 11. Open questions for the user
+## 11. Questions answered by the user (2026-10-19)
 
-1. **Polygons and topology (D24).** Library never edits the caller's mesh; Blender "Make
-   Developable" writes positions only when topology is unchanged (polygons kept, non-planarity
-   reported) and replaces the mesh by the returned triangle mesh (undoable) after subdivision or
-   remeshing, or when "Triangulate" is ticked. Agree?
-2. **Cut edge weights (D22).** The paper says "a linear combination of length and the dot product
-   between the edge direction and the smaller eigenvector" without the sign. Ours makes edges
-   *along* that eigenvector (the ruling direction of a hinge) cheaper, with default weight 0 (pure
-   length). Should the default favour along-ruling cuts, across-ruling cuts, or stay 0?
-3. **Boundary vertices (D8).** Included in the energy by default, as the paper's sum over `V`
-   reads; excluding them lets the boundary move freely. Keep the default?
-4. **Non-paper safeguards** — step cap `0.5 ℓ̄` (D19), small-angle threshold 1° (D21): acceptable
-   defaults?
+1. **Polygons and topology (D24):** confirmed as written in §7.2.
+2. **Cut edge weights (D22):** default weight 0 (length only); the along-ruling term stays an option.
+3. **Boundary vertices (D8):** included by default; excluding them stays an option.
+4. **Safeguards (D19, D21):** keep the step cap `0.5 ℓ̄` and the 1° threshold; tune by
+   measurement and record the numbers if runs show stalls or poor triangles.
