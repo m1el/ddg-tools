@@ -158,11 +158,10 @@ impl Memory {
         for qj in q.iter_mut() {
             *qj *= gamma;
         }
-        for i in 0..k {
-            let (s, y, rho) = &self.pairs[i];
+        for ((s, y, rho), a) in self.pairs.iter().zip(&alpha) {
             let beta = rho * dot(y, &q);
             for (qj, sj) in q.iter_mut().zip(s) {
-                *qj += (alpha[i] - beta) * sj;
+                *qj += (a - beta) * sj;
             }
         }
         for (dj, qj) in d.iter_mut().zip(&q) {
@@ -297,6 +296,7 @@ impl<O: Objective> Run<'_, O> {
     }
 
     /// Armijo backtracking (N&W Alg. 3.1). [formula: dev-armijo-backtracking]
+    #[allow(clippy::too_many_arguments)]
     fn backtracking(
         &mut self,
         x: &[f64],
@@ -338,7 +338,7 @@ pub fn minimize<O: Objective>(
     opts.validate().map_err(OptimizeError::Options)?;
     let n = x0.len();
     let group = problem.group;
-    if group == 0 || n == 0 || n % group != 0 {
+    if group == 0 || n == 0 || !n.is_multiple_of(group) {
         return Err(OptimizeError::BadLayout { len: n, group });
     }
     let ell = problem.length_scale;
