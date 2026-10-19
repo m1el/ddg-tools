@@ -287,6 +287,85 @@ impl Default for SpikeCheck {
     }
 }
 
+/// Automatic splitting of charts that overlap themselves (`UnwrapOptions::split_overlaps`).
+///
+/// A chart that was flattened with its cones can still lie on top of itself, in particular a
+/// nearly developable piece that has no cones at all. The pipeline then cuts such a chart in
+/// two along the cheapest closed or boundary-to-boundary cut that separates the two layers
+/// and flattens the parts again, and repeats on the parts; a cut is kept only if it lowers the
+/// overlapped area without mirroring a triangle. See the crate README, section "Splitting
+/// overlapping charts".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplitOptions {
+    /// A chart is split while the sampled fraction of its footprint that is covered more than
+    /// once exceeds this. Default `0.001`.
+    pub min_overlap_fraction: f64,
+    /// At most this many cuts are made in total (accepted ones; every rejected one is undone
+    /// and not counted). Default 32.
+    pub max_splits: usize,
+    /// Width of the band in which the cut may run, as a fraction of the surface distance `D`
+    /// between the two layers: faces closer to the first layer than to the second by more than
+    /// `band · D` are kept apart from faces closer to the second. `0 <= band < 1`. Small values
+    /// force a balanced cut; large ones let the cut hug a short feature, up to cutting a small
+    /// island off. Default `0.25`.
+    pub band: f64,
+    /// Preference for creases: the cost of cutting an edge of length `ℓ` with dihedral angle
+    /// `θ` (angle between the normals of its two faces, in radians) is `ℓ / (1 + crease_bias θ)`.
+    /// `0` is the shortest cut. Default `4`.
+    pub crease_bias: f64,
+    /// A cut is kept only if the overlapped area of the parts is at most `1 - min_gain` times
+    /// that of the chart before. `0 <= min_gain < 1`. Default `0.1`.
+    pub min_gain: f64,
+}
+
+impl Default for SplitOptions {
+    fn default() -> Self {
+        SplitOptions {
+            min_overlap_fraction: 0.001,
+            max_splits: 32,
+            band: 0.25,
+            crease_bias: 4.0,
+            min_gain: 0.1,
+        }
+    }
+}
+
+impl SplitOptions {
+    pub(crate) fn validate(&self) -> Result<(), UvError> {
+        if !(self.min_overlap_fraction.is_finite()
+            && (0.0..1.0).contains(&self.min_overlap_fraction))
+        {
+            return Err(invalid(
+                "split_overlaps.min_overlap_fraction",
+                self.min_overlap_fraction,
+                "must be at least 0 and below 1",
+            ));
+        }
+        if !(self.band.is_finite() && (0.0..1.0).contains(&self.band)) {
+            return Err(invalid(
+                "split_overlaps.band",
+                self.band,
+                "must be at least 0 and below 1",
+            ));
+        }
+        if !(self.crease_bias.is_finite() && self.crease_bias >= 0.0) {
+            return Err(invalid(
+                "split_overlaps.crease_bias",
+                self.crease_bias,
+                "must be finite and not negative",
+            ));
+        }
+        if !(self.min_gain.is_finite() && (0.0..1.0).contains(&self.min_gain)) {
+            return Err(invalid(
+                "split_overlaps.min_gain",
+                self.min_gain,
+                "must be at least 0 and below 1",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// The options of [`crate::unwrap`]. `UnwrapOptions::default()` is the configuration the crate
 /// is tested with; the crate README gives the measurements behind every default.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -337,6 +416,10 @@ pub struct UnwrapOptions {
     /// switches the check off. A spike is reported in [`crate::Report`] and as a warning.
     /// Costs one factorization of the Laplacian per piece.
     pub spike_check: Option<SpikeCheck>,
+    /// Whether charts that overlap themselves are split automatically, and how; `None` (the
+    /// default) leaves the charts as the seams, cones and cuts made them. Needs the overlap
+    /// estimate (`overlap_samples_per_triangle > 0`).
+    pub split_overlaps: Option<SplitOptions>,
 }
 
 impl Default for UnwrapOptions {
@@ -355,6 +438,7 @@ impl Default for UnwrapOptions {
             boundary: BoundaryValues::Zero,
             require_certified_cones: false,
             spike_check: Some(SpikeCheck::default()),
+            split_overlaps: None,
         }
     }
 }
@@ -507,6 +591,17 @@ impl UnwrapOptions {
                 self.overlap_samples_per_triangle,
                 "must be finite and not negative",
             ));
+        }
+        if let Some(split) = self.split_overlaps {
+            split.validate()?;
+            if self.overlap_samples_per_triangle <= 0.0 {
+                return Err(invalid(
+                    "overlap_samples_per_triangle",
+                    self.overlap_samples_per_triangle,
+                    "must be positive when split_overlaps is set: the overlap estimate decides \
+                     what is split",
+                ));
+            }
         }
         if let Some(check) = self.spike_check {
             if !(check.share > 0.0 && check.share <= 1.0) {

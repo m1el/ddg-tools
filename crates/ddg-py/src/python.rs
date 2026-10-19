@@ -230,6 +230,13 @@ impl UnwrapResult {
 ///                   (report["max_seam_length_mismatch"]), and the flattening can fall short of
 ///                   the optimized values on some meshes (report["max_boundary_length_error"]).
 ///                   Default False.
+/// split_overlaps    split charts that overlap themselves: a cut that separates the two layers
+///                   is added to the seams and the charts are flattened again, a cut is kept
+///                   only if it lowers the overlap without mirroring a triangle
+///                   (report["n_splits"], ["overlapped_fraction_before_split"]). Default False.
+/// split_max         at most this many cuts are kept (default 32).
+/// split_threshold   a chart is split while more than this fraction of its footprint is covered
+///                   more than once (default 0.001).
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that cannot be unwrapped
 /// (for example "edge (12, 57) is shared by 3 faces: 4, 9, 31"), SolveError when no valid map
@@ -249,6 +256,9 @@ impl UnwrapResult {
     lambda_ = 0.1,
     positive_cones_only = true,
     optimize_boundary = false,
+    split_overlaps = false,
+    split_max = 32,
+    split_threshold = 0.001,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn unwrap<'py>(
@@ -265,6 +275,9 @@ fn unwrap<'py>(
     lambda_: f64,
     positive_cones_only: bool,
     optimize_boundary: bool,
+    split_overlaps: bool,
+    split_max: usize,
+    split_threshold: f64,
 ) -> PyResult<UnwrapResult> {
     let start = Instant::now();
     let optional_indices = |name, obj: Option<&Bound<'py, PyAny>>, width, row| match obj {
@@ -299,6 +312,9 @@ fn unwrap<'py>(
         lambda: lambda_,
         positive_cones_only,
         optimize_boundary,
+        split_overlaps,
+        split_max,
+        split_threshold,
     };
     let seconds_decode = start.elapsed().as_secs_f64();
 

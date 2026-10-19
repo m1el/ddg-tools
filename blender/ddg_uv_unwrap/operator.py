@@ -71,6 +71,15 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         ),
         default=False,
     )
+    split_overlaps: BoolProperty(
+        name="Split Overlapping Charts",
+        description=(
+            "A chart whose flattening lies on top of itself is cut in two where the layers "
+            "meet and flattened again; a cut is kept only if it lowers the overlap and mirrors "
+            "no triangle. Adds seams; off keeps the charts as the cones and seams made them"
+        ),
+        default=False,
+    )
     mark_seams: BoolProperty(
         name="Mark Cuts as Seams",
         description="Mark the edges the surface was cut along as seams",
@@ -93,6 +102,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         layout.prop(self, "lambda_")
         layout.prop(self, "positive_cones_only")
         layout.prop(self, "optimize_boundary")
+        layout.prop(self, "split_overlaps")
         layout.prop(self, "use_seams")
         obj = context.active_object
         if obj is not None and obj.type == 'MESH':
@@ -122,6 +132,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
                 forbidden_group=self.forbidden_group,
                 positive_cones_only=self.positive_cones_only,
                 optimize_boundary=self.optimize_boundary,
+                split_overlaps=self.split_overlaps,
                 mark_cuts_as_seams=self.mark_seams,
             )
         except core.UnwrapFailed as ex:

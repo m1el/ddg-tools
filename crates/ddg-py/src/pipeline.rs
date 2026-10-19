@@ -67,6 +67,11 @@ pub fn run_pipeline(
         },
         // The contract of `ddg_tools.unwrap` is "not packed": `ddg_tools.pack_charts` packs.
         packing: None,
+        split_overlaps: options.split_overlaps.then(|| ddg_uv::SplitOptions {
+            max_splits: options.split_max,
+            min_overlap_fraction: options.split_threshold,
+            ..ddg_uv::SplitOptions::default()
+        }),
         ..ddg_uv::UnwrapOptions::default()
     };
     let map = ddg_uv::unwrap(&mesh, &uv_options).map_err(|e| match e {

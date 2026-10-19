@@ -39,6 +39,9 @@ pub struct UvMap {
 /// [`UvError`]; `kind()` says whether the arguments are malformed, the mesh cannot be
 /// unwrapped as it is, or the solve failed. Nothing panics and the input is not modified.
 pub fn unwrap(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<UvMap, UvError> {
+    if let Some(split) = options.split_overlaps {
+        return crate::split::unwrap_splitting(input, options, &split);
+    }
     let start = Instant::now();
     let prepared = prepare(input, options)?;
     let cones = solve_cones(&prepared, options)?;
@@ -298,6 +301,7 @@ pub fn assemble(
         charts,
         seam_lengths,
         packing,
+        splitting: None,
         timings,
         warnings,
     };

@@ -119,6 +119,7 @@ pub mod prepare;
 pub mod primitives;
 pub mod report;
 mod slit;
+mod split;
 pub mod spikes;
 
 pub use ddg_core::io::Cone;
@@ -130,14 +131,15 @@ pub use input::{MeshInput, PolygonMesh, fan_triangulation};
 pub use measure::{AreaDistortion, area_distortion};
 pub use options::{
     BoundaryValues, ClosedSurfaces, ConeSigns, Degenerate, MergeClusters, Orientation, PackOptions,
-    SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions,
+    SlitPlacement, SpikeAction, SpikeCheck, SplitOptions, UnwrapOptions,
 };
 pub use pack::{PackReport, pack_charts};
 pub use pipeline::{UvMap, assemble, unwrap};
 pub use prepare::{Piece, Prepared, prepare};
 pub use report::{
     ChartReport, ClosedHandling, ConeSolveReport, ConeStats, DegenerateReport, FlattenReport,
-    MergeOutcome, Report, SeamLengths, SeamReport, SteeringReport, Timings, ValidationReport,
+    MergeOutcome, Report, SeamLengths, SeamReport, SplitInfo, SplitOutcome, SplitReport,
+    SteeringReport, Timings, ValidationReport,
     Value,
 };
 pub use spikes::SpikeReport;

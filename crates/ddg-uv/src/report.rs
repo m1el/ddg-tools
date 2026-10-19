@@ -312,6 +312,63 @@ pub struct SeamLengths {
     pub max_other_mismatch: f64,
 }
 
+/// What happened to one chart that overlapped itself ([`crate::SplitOptions`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SplitInfo {
+    /// Lowest polygon of the chart that was cut (in the numbering of the run it was cut in).
+    pub first_polygon: u32,
+    /// The round (0 = the first re-run) in which the cut was made.
+    pub round: usize,
+    /// Number of edges of the cut; 0 if no cut separating the two layers was found.
+    pub n_cut_edges: usize,
+    /// Length of the cut on the surface.
+    pub cut_length: f64,
+    /// Overlapped fraction of the chart before the cut.
+    pub overlap_before: f64,
+    /// Overlapped area over footprint of the parts after the cut (0 if there was no cut).
+    pub overlap_after: f64,
+    /// Number of charts the parts form after the cut (those of the run after it).
+    pub n_parts: usize,
+    /// What became of the cut.
+    pub outcome: SplitOutcome,
+}
+
+/// See [`SplitInfo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitOutcome {
+    /// The cut is part of the result.
+    Kept,
+    /// The cut did not lower the overlapped area enough, or mirrored a triangle: undone.
+    Rejected,
+    /// No cut was found (the overlapping parts are neighbours, or no finite cut separates
+    /// them because of diagonals of the triangulation).
+    NoCut,
+}
+
+/// What the automatic splitting of overlapping charts did.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SplitReport {
+    /// Runs of the pipeline, the first included.
+    pub runs: usize,
+    /// Cuts that are part of the result.
+    pub n_kept: usize,
+    /// Cuts that were undone.
+    pub n_rejected: usize,
+    /// Charts for which no cut was found.
+    pub n_no_cut: usize,
+    /// Whether overlapping charts remain that were not split because the budget
+    /// (`max_splits`) or the rounds ran out.
+    pub exhausted: bool,
+    /// Total length of the kept cuts.
+    pub cut_length: f64,
+    /// The area-weighted overlapped fraction of the layout before any split, if estimated.
+    pub overlap_before: Option<f64>,
+    /// The largest overlapped fraction of a chart before any split, if estimated.
+    pub max_chart_overlap_before: Option<f64>,
+    /// One entry per cut tried, in order.
+    pub splits: Vec<SplitInfo>,
+}
+
 /// The report of [`crate::unwrap`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
@@ -351,6 +408,8 @@ pub struct Report {
     pub seam_lengths: SeamLengths,
     /// Packing, if it ran.
     pub packing: Option<PackReport>,
+    /// The automatic splitting of overlapping charts, if it was switched on.
+    pub splitting: Option<SplitReport>,
     /// Where the time went.
     pub timings: Timings,
     /// Things the caller should know that did not stop the unwrap.
@@ -541,6 +600,20 @@ impl Report {
         }
         if let Some(fraction) = self.max_overlapped_fraction {
             out.push(("max_chart_overlapped_fraction", Value::Float(fraction)));
+        }
+        if let Some(split) = &self.splitting {
+            out.push(("n_splits", int(split.n_kept)));
+            out.push(("n_splits_rejected", int(split.n_rejected)));
+            out.push(("n_split_no_cut", int(split.n_no_cut)));
+            out.push(("split_runs", int(split.runs)));
+            out.push(("split_exhausted", Value::Bool(split.exhausted)));
+            out.push(("split_cut_length", Value::Float(split.cut_length)));
+            if let Some(x) = split.overlap_before {
+                out.push(("overlapped_fraction_before_split", Value::Float(x)));
+            }
+            if let Some(x) = split.max_chart_overlap_before {
+                out.push(("max_chart_overlapped_fraction_before_split", Value::Float(x)));
+            }
         }
         if let Some(pack) = &self.packing {
             out.push(("packed", Value::Bool(true)));

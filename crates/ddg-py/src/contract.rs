@@ -548,14 +548,27 @@ pub struct UnwrapOptions {
     /// two sides of a seam may differ (`max_seam_length_mismatch` in the report). Default
     /// `false`.
     pub optimize_boundary: bool,
+    /// Split charts that overlap themselves automatically (`ddg_uv::SplitOptions`): a cut that
+    /// separates the two layers is added to the seams and the charts are flattened again.
+    /// Default `false`.
+    pub split_overlaps: bool,
+    /// With `split_overlaps`: at most this many cuts are kept. Default 32.
+    pub split_max: usize,
+    /// With `split_overlaps`: a chart is split while more than this fraction of its footprint
+    /// is covered twice. Default 0.001.
+    pub split_threshold: f64,
 }
 
 impl Default for UnwrapOptions {
     fn default() -> Self {
+        let split = ddg_uv::SplitOptions::default();
         UnwrapOptions {
             lambda: 0.1,
             positive_cones_only: true,
             optimize_boundary: false,
+            split_overlaps: false,
+            split_max: split.max_splits,
+            split_threshold: split.min_overlap_fraction,
         }
     }
 }
@@ -571,6 +584,13 @@ impl UnwrapOptions {
                 name: "lambda_",
                 value: format!("{}", self.lambda),
                 requirement: "lambda must be a finite number that is not negative",
+            });
+        }
+        if self.split_overlaps && !(self.split_threshold.is_finite() && (0.0..1.0).contains(&self.split_threshold)) {
+            return Err(InputError::BadOption {
+                name: "split_threshold",
+                value: format!("{}", self.split_threshold),
+                requirement: "must be at least 0 and below 1",
             });
         }
         Ok(())

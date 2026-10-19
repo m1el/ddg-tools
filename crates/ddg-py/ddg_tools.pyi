@@ -70,6 +70,9 @@ def unwrap(
     lambda_: float = 0.1,
     positive_cones_only: bool = True,
     optimize_boundary: bool = False,
+    split_overlaps: bool = False,
+    split_max: int = 32,
+    split_threshold: float = 0.001,
 ) -> UnwrapResult: ...
 def pack_charts(
     uvs: Buffer,

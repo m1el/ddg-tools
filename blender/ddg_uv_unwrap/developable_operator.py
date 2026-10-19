@@ -535,7 +535,7 @@ class OBJECT_OT_ddg_show_developability(bpy.types.Operator):
 def developable_seams_uv(obj, *, energy='COVARIANCE', epsilon=1e-3, use_defect_rule=True,
                          defect_tolerance=0.1, length_weight=1.0, alignment_weight=0.0,
                          use_existing_seams=True, uv_name="Developable", lambda_=0.1,
-                         positive_cones_only=True, mark_all_cuts=False):
+                         positive_cones_only=True, mark_all_cuts=False, split_overlaps=True):
     """Marks the developable seams of the mesh of ``obj`` and writes a UV map from the unwrap
     pipeline (``core.unwrap_object``) that cuts along the marked seams.
 
@@ -575,7 +575,8 @@ def developable_seams_uv(obj, *, energy='COVARIANCE', epsilon=1e-3, use_defect_r
     mesh.uv_layers.active = layer
     stats = core.unwrap_object(
         obj, lambda_=lambda_, use_seams=True, positive_cones_only=positive_cones_only,
-        mark_cuts_as_seams=mark_all_cuts, use_stored_triangulation=False)
+        mark_cuts_as_seams=mark_all_cuts, use_stored_triangulation=False,
+        split_overlaps=split_overlaps)
     stats["seams"] = cut.report
     stats["n_seams"] = len(cut.seam_edges) // 2
     stats["developable_marked"] = marked
@@ -599,6 +600,9 @@ def seams_summary(stats):
         parts.append("| angle error max {:.2f}°, mean {:.2f}°, scale {:.2f}x to {:.2f}x".format(
             degrees(r["measured_angle_error_max"]), degrees(r["measured_angle_error_mean"]),
             exp(r["measured_log_scale_min"]), exp(r["measured_log_scale_max"])))
+    if "n_splits" in r:
+        parts.append("| {} split{} ({} undone)".format(
+            r["n_splits"], "" if r["n_splits"] == 1 else "s", r["n_splits_rejected"]))
     parts.append("| overlap {}".format("n/a" if overlap is None else "{:.1f} %".format(100.0 * overlap)))
     parts.append("| {} mirrored, {} collapsed triangles".format(
         r.get("n_flipped_uv_triangles", 0), r.get("n_collapsed_uv_triangles", 0)))
@@ -672,7 +676,16 @@ class UV_OT_ddg_developable_seams(bpy.types.Operator):
     )
     mark_all_cuts: BoolProperty(
         name="Mark All Cuts", default=False,
-        description="Also mark the extra cuts the unwrap made (to reach its cones) as seams",
+        description="Also mark the extra cuts the unwrap made (to reach its cones, and to split "
+                    "overlapping charts) as seams",
+    )
+    split_overlaps: BoolProperty(
+        name="Split Overlapping Charts", default=True,
+        description=(
+            "A chart whose flattening lies on top of itself is cut in two where the layers "
+            "meet and flattened again, repeatedly. A cut is kept only if it lowers the overlap "
+            "and mirrors no triangle. Off: the charts stay as the developable cut made them"
+        ),
     )
 
     @classmethod
@@ -696,6 +709,7 @@ class UV_OT_ddg_developable_seams(bpy.types.Operator):
         layout.prop(self, "uv_name")
         layout.prop(self, "lambda_")
         layout.prop(self, "positive_cones_only")
+        layout.prop(self, "split_overlaps")
         layout.prop(self, "mark_all_cuts")
 
     def execute(self, context):
@@ -713,7 +727,7 @@ class UV_OT_ddg_developable_seams(bpy.types.Operator):
                 length_weight=self.length_weight, alignment_weight=self.alignment_weight,
                 use_existing_seams=self.use_existing_seams, uv_name=self.uv_name,
                 lambda_=self.lambda_, positive_cones_only=self.positive_cones_only,
-                mark_all_cuts=self.mark_all_cuts)
+                mark_all_cuts=self.mark_all_cuts, split_overlaps=self.split_overlaps)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
