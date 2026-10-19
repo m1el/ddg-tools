@@ -527,7 +527,7 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   `combinatorial_max`, `covariance_max`, `intrinsic`, `intrinsic_max`. `omit_valence_three`
   leaves out interior vertices with three faces; `include_boundary` counts boundary vertices. The
   results do not depend on `threads`.
-* **`make_developable`** runs the flow round by round (`subdivisions + 1` rounds of `iterations`
+* **`make_developable`** runs the flow in one library call (`subdivisions + 1` rounds of `iterations`
   L-BFGS iterations, a 4-1 subdivision before every round but the first, small-angle remeshing
   during the rounds). `method` is `lbfgs`, `gradient_descent` or `fixed_step` (`step` in units
   of the squared mean edge length); `line_search` is `wolfe` or `backtracking` (c1 = 1e-4, shrink
@@ -540,8 +540,8 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   `nonplanarity_after_relative` = relative to the mean side of that polygon,
   `nonplanarity_polygon`). Otherwise `positions`/`faces` are the new triangle mesh (vertices no
   polygon used are dropped), `face_polygon` gives for every triangle the polygon it descends from
-  (exact for subdivision; after remeshing, a triangle that survived keeps its polygon and a
-  changed one takes the majority of the old triangles around its vertices) and `vertex_source`
+  (exact, also after several rounds with flips and collapses: the library tracks the parent
+  triangle of every output triangle, `FlowResult.face_parent`) and `vertex_source`
   the vertex of your mesh each vertex descends from (-1 for a subdivision midpoint).
   `return_faces=True` returns `faces`/`face_polygon` also when nothing changed (the input's
   triangles). `progress(round, iteration, energy, gradient_norm)` is called from the calling
@@ -549,8 +549,15 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   `False` stops the flow and the state at that moment is returned (`report["cancelled"]`); an
   exception, and Ctrl-C (checked at the same moments), stop the flow and propagate. Report:
   `energy_initial/final`, `topology_changed`, `n_*`, `iterations`, `min_angle`, `rounds` (a list of
-  dicts: `status`, `iterations`, `flips`, `collapses`, `bad_triangles_left`, ...), `warnings`,
-  timings.
+  dicts: `status`, `iterations`, `flips`, `collapses`, `remesh_rejected`, `inadmissible_trials`,
+  ...), `bad_faces` (triangles below `small_angle` that nothing could repair),
+  `inadmissible_trials` (steps refused by `min_face_angle`), `stopped` (`None`, or a dict
+  `round`, `after_subdivision`, `vertex`, `reason`: the flow ended before that round because the
+  energy is undefined at its starting state; the result is the state before it; also a warning),
+  `warnings`, timings. `min_face_angle` also sets the floor of the remeshing's collapses and
+  must be below `small_angle`; an input with a triangle below it is a `MeshError` (naming the
+  polygon) unless remeshing is on (then it is repaired first, and the message names a face of
+  the current mesh).
 * **`developable_seams`** is the cut of the paper (Sec. 4.4) without the flattening: terminals are
   the vertices whose energy exceeds `epsilon` (evaluated with boundary vertices included and
   valence 3 counted) and, since D30, interior vertices whose angle defect exceeds

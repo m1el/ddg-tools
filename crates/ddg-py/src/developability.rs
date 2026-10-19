@@ -17,19 +17,16 @@
 //!
 //! # Face provenance
 //!
-//! The flow is run one round at a time so that the polygon of every output triangle is known:
-//! the subdivision of a round is done here (it records the parent of every new triangle), and
-//! after a round in which remeshing changed the mesh, a triangle that still exists keeps its
-//! polygon and a changed one takes the polygon that most of the old triangles around its
-//! (surviving) vertices had. The library does not track faces through remeshing itself.
+//! The whole flow runs in one library call. The library reports the input triangle every output
+//! triangle descends from (`FlowResult::face_parent`: exact through subdivision, flips and
+//! collapses), and `face_polygon` is the polygon of that triangle.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use ddg_core::topology::{MeshError, NONE, TriMesh, compact_vertices};
 use ddg_developability as dev;
 use ddg_developability::{
-    CutOptions, Energy, EnergyOptions, FlowOptions, LineSearch, Method, OptimizeStatus, RemeshOptions, Round,
+    CutOptions, Energy, EnergyOptions, FlowOptions, LineSearch, Method, OptimizeStatus, RemeshOptions,
 };
 
 use crate::contract::UnwrapInput;
@@ -421,15 +418,40 @@ pub struct RoundSummary {
     pub flips: usize,
     /// Edge collapses of all remeshing runs of the round.
     pub collapses: usize,
-    /// Triangles with a corner angle below the small angle after the round.
-    pub bad_triangles_left: usize,
+    /// Remeshing runs of the round that the library rejected as a whole (it keeps the mesh).
+    pub remesh_rejected: usize,
+    /// Trial steps of the round that the admissibility floor refused (D31).
+    pub inadmissible_trials: usize,
     /// Wall time of the round.
     pub seconds: f64,
+}
+
+/// Why the flow ended before a round (D32): the energy of that round is undefined at its
+/// starting state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopInfo {
+    /// The round that was not run (0 is the first).
+    pub round: usize,
+    /// Whether the undefined state is the result of that round's subdivision.
+    pub after_subdivision: bool,
+    /// The vertex where the energy is undefined, in the numbering of the mesh at that moment
+    /// (after subdivisions and remeshing; not the caller's).
+    pub vertex: u32,
+    /// Why it is undefined.
+    pub reason: &'static str,
 }
 
 /// The report of [`make_developable`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct MakeReport {
+    /// `Some` if the flow ended before a round because the energy is undefined there; the result
+    /// is the state after the previous round.
+    pub stopped: Option<StopInfo>,
+    /// Triangles of the result with a corner angle below the small angle of the remeshing
+    /// (1 degree if remeshing is off) that nothing could repair.
+    pub bad_faces: usize,
+    /// Trial steps of all rounds refused by the admissibility floor.
+    pub inadmissible_trials: usize,
     /// Energy before the flow.
     pub energy_initial: f64,
     /// Energy after the flow.
@@ -552,41 +574,6 @@ pub fn max_nonplanarity(input: &UnwrapInput, positions: &[[f64; 3]]) -> Option<(
     best
 }
 
-/// Polygons of the faces of `new_mesh` after a remeshing: a face that was a face before keeps
-/// its polygon; a changed face takes the polygon that most of the old faces around its (old)
-/// vertices had, weighting a face by the number of those vertices it contains.
-/// `source[v]` is the old vertex of new vertex `v`.
-fn remeshed_face_polygons(old: &TriMesh, old_polygon: &[u32], new: &TriMesh, source: &[u32]) -> Vec<u32> {
-    let key = |f: [u32; 3]| {
-        let mut k = f;
-        k.sort_unstable();
-        k
-    };
-    let known: HashMap<[u32; 3], u32> = old.faces().iter().zip(old_polygon).map(|(&f, &p)| (key(f), p)).collect();
-    let mut around: Vec<Vec<u32>> = vec![Vec::new(); old.n_vertices()];
-    for (f, tri) in old.faces().iter().enumerate() {
-        for &v in tri {
-            around[v as usize].push(f as u32);
-        }
-    }
-    new.faces()
-        .iter()
-        .map(|tri| {
-            let s = tri.map(|v| source[v as usize]);
-            if let Some(&p) = known.get(&key(s)) {
-                return p;
-            }
-            let mut votes: HashMap<u32, u32> = HashMap::new();
-            for &v in &s {
-                for &f in &around[v as usize] {
-                    *votes.entry(old_polygon[f as usize]).or_insert(0) += 1;
-                }
-            }
-            votes.into_iter().max_by_key(|&(p, w)| (w, std::cmp::Reverse(p))).map_or(0, |(p, _)| p)
-        })
-        .collect()
-}
-
 /// Runs the developability flow on the triangle mesh of the input. See the
 /// [module documentation](self).
 ///
@@ -641,107 +628,99 @@ pub fn make_developable(
     // caller's numbering.
     let energy_initial =
         dev::evaluate_energy(&prep.mesh, &prep.positions, &energy).map_err(|e| dev_error(e, &prep, true))?.0;
+    if options.remesh.is_none() && options.min_face_angle > 0.0 {
+        // Without remeshing the flow starts on the input itself: report in the caller's numbering.
+        for (f, tri) in prep.mesh.faces().iter().enumerate() {
+            let a = dev::geometry::corner_angles(tri.map(|v| prep.positions[v as usize]));
+            let min_angle = a[0].min(a[1]).min(a[2]);
+            if min_angle < options.min_face_angle {
+                let e = dev::DevError::NearDegenerateFace { face: f as u32, min_angle, limit: options.min_face_angle };
+                return Err(dev_error(e, &prep, true));
+            }
+        }
+    }
     let nonplanarity_before = max_nonplanarity(input, input.positions()).map(|b| b.0);
 
-    let n_rounds = options.subdivisions + 1;
-    let mut mesh = prep.mesh.clone();
-    let mut pos = prep.positions.clone();
-    let mut source: Vec<u32> = (0..mesh.n_vertices() as u32).collect();
-    let mut pinned = to_prepared(&prep, &options.pinned);
-    let mut face_polygon = prep.triangle_polygon.clone();
-    let mut changed = false;
-    let mut rounds: Vec<RoundSummary> = Vec::new();
-    let mut cancelled = false;
+    let fo = FlowOptions {
+        optimize: oo,
+        remesh: options.remesh.clone(),
+        pinned: to_prepared(&prep, &options.pinned),
+        threads: options.energy.threads,
+        ..FlowOptions::uniform(energy.clone(), options.subdivisions, options.iterations)
+    };
+    let interval = options.progress_interval;
     let mut last_call: Option<Instant> = None;
-    let mut max_disp = 0.0f64;
-    let mut mean_edge = 0.0;
-
-    for r in 0..n_rounds {
-        let round_start = Instant::now();
-        if r > 0 {
-            let sd = dev::subdivide(&mesh, &pos).map_err(|e| dev_error(e, &prep, false))?;
-            pinned = sd.pinned_after(&mesh, &pinned).map_err(|e| dev_error(e, &prep, false))?;
-            face_polygon = sd.face_parent.iter().map(|&t| face_polygon[t as usize]).collect();
-            source.resize(sd.mesh.n_vertices(), NONE);
-            mesh = sd.mesh;
-            pos = sd.positions;
-            changed = true;
+    let mut cb = |p: &dev::Progress| -> dev::Control {
+        let Some(user) = progress.as_deref_mut() else { return dev::Control::Continue };
+        let now = Instant::now();
+        if let Some(t) = last_call
+            && now.duration_since(t).as_secs_f64() < interval
+        {
+            return dev::Control::Continue;
         }
-        let fo = FlowOptions {
-            rounds: vec![Round { energy: energy.clone(), max_iterations: options.iterations, subdivide_before: false }],
-            optimize: oo.clone(),
-            remesh: options.remesh.clone(),
-            pinned: pinned.clone(),
-            threads: options.energy.threads,
-        };
-        let interval = options.progress_interval;
-        let mut stopped = false;
-        let mut cb = |p: &dev::Progress| -> dev::Control {
-            let Some(user) = progress.as_deref_mut() else { return dev::Control::Continue };
-            let now = Instant::now();
-            if let Some(t) = last_call
-                && now.duration_since(t).as_secs_f64() < interval
-            {
-                return dev::Control::Continue;
-            }
-            last_call = Some(now);
-            let info = ProgressInfo { round: r, iteration: p.iteration, energy: p.energy, gradient_norm: p.gradient_norm };
-            if user(&info) {
-                dev::Control::Continue
-            } else {
-                stopped = true;
-                dev::Control::Break
-            }
-        };
-        let res = dev::flow(&mesh, &pos, &fo, Some(&mut cb)).map_err(|e| dev_error(e, &prep, false))?;
-        let rr = &res.report.rounds[0];
-        let flips: usize = rr.remesh.iter().map(|x| x.flips).sum();
-        let collapses: usize = rr.remesh.iter().map(|x| x.collapses).sum();
-        if flips + collapses > 0 {
-            face_polygon = remeshed_face_polygons(&mesh, &face_polygon, &res.mesh, &res.vertex_source);
-            source = res.vertex_source.iter().map(|&s| source[s as usize]).collect();
-            changed = true;
-        }
-        let bad_left = options.remesh.as_ref().map_or(0, |ro| {
-            res.mesh
-                .faces()
-                .iter()
-                .filter(|f| {
-                    let a = dev::geometry::corner_angles(f.map(|v| res.positions[v as usize]));
-                    a[0].min(a[1]).min(a[2]) < ro.small_angle
-                })
-                .count()
-        });
-        rounds.push(RoundSummary {
-            n_vertices: res.mesh.n_vertices(),
-            n_faces: res.mesh.n_faces(),
+        last_call = Some(now);
+        let info = ProgressInfo { round: p.round, iteration: p.iteration, energy: p.energy, gradient_norm: p.gradient_norm };
+        if user(&info) { dev::Control::Continue } else { dev::Control::Break }
+    };
+    let res = dev::flow(&prep.mesh, &prep.positions, &fo, Some(&mut cb)).map_err(|e| dev_error(e, &prep, false))?;
+    let rounds: Vec<RoundSummary> = res
+        .report
+        .rounds
+        .iter()
+        .map(|rr| RoundSummary {
+            n_vertices: rr.n_vertices,
+            n_faces: rr.n_faces,
             energy_initial: rr.energy_after_subdivision,
             energy_final: rr.optimize.energy_final,
             iterations: rr.optimize.iterations,
             status: status_name(rr.optimize.status),
-            flips,
-            collapses,
-            bad_triangles_left: bad_left,
-            seconds: round_start.elapsed().as_secs_f64(),
-        });
-        max_disp = rr.optimize.max_vertex_displacement;
-        mean_edge = rr.optimize.mean_edge_length;
-        mesh = res.mesh;
-        pos = res.positions;
-        pinned = res.pinned;
-        cancelled = res.report.cancelled || stopped;
-        if cancelled {
-            break;
-        }
-    }
-    if r_is_identity(&source, changed, prep.mesh.n_vertices()) == Some(false) {
-        changed = true;
-    }
+            flips: rr.remesh.iter().map(|x| x.flips).sum(),
+            collapses: rr.remesh.iter().map(|x| x.collapses).sum(),
+            remesh_rejected: rr.remesh.iter().filter(|x| x.rejected.is_some()).count(),
+            inadmissible_trials: rr.optimize.inadmissible_trials,
+            seconds: rr.seconds_subdivide + rr.seconds_remesh + rr.seconds_optimize,
+        })
+        .collect();
+    let (max_disp, mean_edge) = res
+        .report
+        .rounds
+        .last()
+        .map_or((0.0, 0.0), |rr| (rr.optimize.max_vertex_displacement, rr.optimize.mean_edge_length));
+    let cancelled = res.report.cancelled;
+    let stopped = res.report.stopped.as_ref().map(|s| StopInfo {
+        round: s.round,
+        after_subdivision: s.after_subdivision,
+        vertex: s.vertex,
+        reason: s.reason,
+    });
+    let bad_faces = res.report.bad_faces;
+    let face_polygon: Vec<u32> = res.face_parent.iter().map(|&t| prep.triangle_polygon[t as usize]).collect();
+    let source = res.vertex_source;
+    let (mesh, pos) = (res.mesh, res.positions);
+    let changed = mesh.n_vertices() != prep.mesh.n_vertices()
+        || mesh.faces() != prep.mesh.faces()
+        || source.iter().enumerate().any(|(i, &s)| s as usize != i);
     let energy_final = dev::evaluate_energy(&mesh, &pos, &energy).map_err(|e| dev_error(e, &prep, false))?.0;
 
     let mut warnings = Vec::new();
     if cancelled {
         warnings.push("the flow was stopped before it finished".to_owned());
+    }
+    if let Some(st) = &stopped {
+        warnings.push(format!(
+            "the flow stopped before round {}{}: the energy is undefined at vertex {} of the mesh at that \
+             moment ({}); the result is the state after round {}",
+            st.round + 1,
+            if st.after_subdivision { " (right after its subdivision)" } else { "" },
+            st.vertex,
+            st.reason,
+            st.round
+        ));
+    }
+    if bad_faces > 0 {
+        warnings.push(format!(
+            "{bad_faces} triangles have a corner angle below the small angle and could not be repaired"
+        ));
     }
     let (positions, faces, face_poly, vertex_source);
     let mut np_after = None;
@@ -768,6 +747,9 @@ pub fn make_developable(
         face_poly = Some(face_polygon);
     }
     let report = MakeReport {
+        stopped,
+        bad_faces,
+        inadmissible_trials: rounds.iter().map(|x| x.inadmissible_trials).sum(),
         energy_initial,
         energy_final,
         cancelled,
@@ -793,14 +775,6 @@ pub fn make_developable(
         seconds: start.elapsed().as_secs_f64(),
     };
     Ok(MakeOutput { positions, faces, face_polygon: face_poly, vertex_source, report })
-}
-
-/// Whether `source` is the identity on `n` vertices (a safety net for "no operation applied").
-fn r_is_identity(source: &[u32], changed: bool, n: usize) -> Option<bool> {
-    if changed {
-        return None;
-    }
-    Some(source.len() == n && source.iter().enumerate().all(|(i, &s)| s as usize == i))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1346,5 +1320,48 @@ mod tests {
         let mut o = UnwrapDevOptions::default();
         o.margin = 0.7;
         assert!(developable_unwrap(&i, &[], &o).is_err());
+    }
+
+    #[test]
+    fn face_polygon_is_exact_over_two_rounds_and_valid_after_remeshing() {
+        let i = input(bump(4));
+        let mut o = MakeOptions::default();
+        o.subdivisions = 2;
+        o.iterations = 15;
+        o.remesh = None;
+        let out = make_developable(&i, &o, None).unwrap();
+        let fp = out.face_polygon.as_ref().unwrap();
+        assert_eq!(fp.len(), 16 * 2 * 16);
+        // 16 polygons, 2 triangles each, 16 descendants per triangle: 32 per polygon, in order.
+        assert!(fp.chunks_exact(16).all(|c| c.iter().all(|&p| p == c[0])));
+        let mut count = vec![0usize; 16];
+        fp.iter().for_each(|&p| count[p as usize] += 1);
+        assert!(count.iter().all(|&c| c == 32), "{count:?}");
+        assert!(out.report.stopped.is_none() && out.report.rounds.len() == 3);
+        // With an aggressive small angle the remeshing runs; the polygons stay valid.
+        let mut o = MakeOptions::default();
+        o.subdivisions = 1;
+        o.iterations = 30;
+        o.remesh = Some(RemeshOptions { small_angle: 0.8, min_face_angle: 0.0, ..RemeshOptions::default() });
+        o.min_face_angle = 0.0;
+        let out = make_developable(&i, &o, None).unwrap();
+        let fp = out.face_polygon.as_ref().unwrap();
+        assert_eq!(fp.len() * 3, out.faces.as_ref().unwrap().len());
+        assert!(fp.iter().all(|&p| p < 16));
+        assert_eq!(out.report.n_triangles, fp.len());
+    }
+
+    #[test]
+    fn a_nearly_degenerate_input_is_a_mesh_error_naming_the_polygon() {
+        let mut b = grid(2, 2);
+        // The centre vertex (1, 1) moves next to the edge (0,0)-(1,0): needle triangles.
+        b.positions[3 * 4] = 1.0;
+        b.positions[3 * 4 + 1] = 1e-9;
+        let mut o = MakeOptions::default();
+        o.remesh = None;
+        let m = make_developable(&input(b.clone()), &o, None).unwrap_err().to_string();
+        assert!(m.contains("polygon") && m.contains("nearly degenerate") && m.contains("min_face_angle"), "{m}");
+        o.min_face_angle = 0.0;
+        assert!(make_developable(&input(b), &o, None).is_ok());
     }
 }

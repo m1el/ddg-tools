@@ -269,9 +269,10 @@ impl MakeDevelopableResult {
 /// max_displacement  step cap in mean edge lengths (default 0.5).
 /// gradient_tolerance, energy_tolerance, stall_iterations, initial_step
 ///                   stopping rules and first trial step; None keeps the library's value.
-/// min_face_angle    admissibility floor (radians; None keeps the library's value, 0 switches
-///                   the check off): a step that would make a corner angle smaller than this is
-///                   refused. An input that violates it is a MeshError.
+/// min_face_angle    admissibility floor (radians; None keeps the library's value 1e-4, 0
+///                   switches the check off): a step that would make a corner angle smaller than
+///                   this is refused, and so is a collapse that would. Must be below small_angle.
+///                   An input that violates it is a MeshError ("nearly degenerate triangle").
 /// pinned_vertices   vertices of the input that do not move (a midpoint created by subdivision
 ///                   is pinned iff both ends are).
 /// Remeshing
@@ -300,7 +301,15 @@ impl MakeDevelopableResult {
 /// n_input_triangles, n_vertices, n_triangles, iterations, max_displacement (last round, in
 /// mean edge lengths), mean_edge_length, nonplanarity_* (above), rounds (a list of dicts with
 /// n_vertices, n_faces, energy_initial, energy_final, iterations, status, flips, collapses,
-/// bad_triangles_left, seconds), warnings, seconds, seconds_total.
+/// remesh_rejected, inadmissible_trials, seconds), min_angle (smallest corner angle of the result,
+/// radians), bad_faces (triangles of the result below small_angle that nothing could repair),
+/// inadmissible_trials (trial steps refused by min_face_angle, all rounds), stopped (None, or a
+/// dict round/after_subdivision/vertex/reason: the flow ended before that round because the
+/// energy is undefined at its starting state, and the result is the state before it; also named
+/// in warnings), warnings, seconds, seconds_total.
+///
+/// face_polygon is exact: the library tracks the input triangle of every output triangle through
+/// subdivision, flips and collapses, and its polygon is reported.
 ///
 /// Raises InputError for malformed arguments or options outside their domain, MeshError for a
 /// mesh that is not a manifold, consistently oriented triangle mesh, or has a degenerate
@@ -411,7 +420,13 @@ fn make_developable<'py>(
         o.min_face_angle = x;
     }
     o.pinned = optional_indices("pinned_vertices", pinned_vertices)?;
-    o.remesh = remesh.then(|| RemeshOptions { small_angle, collapse_boundary_edges, ..RemeshOptions::default() });
+    // The remeshing's collapse floor is the same admissibility floor (it must be below small_angle).
+    o.remesh = remesh.then(|| RemeshOptions {
+        small_angle,
+        collapse_boundary_edges,
+        min_face_angle: o.min_face_angle,
+        ..RemeshOptions::default()
+    });
     o.return_faces = return_faces;
     o.progress_interval = progress_interval;
     let progress: Option<Py<PyAny>> = progress.map(Bound::unbind);
@@ -461,6 +476,19 @@ fn make_developable<'py>(
     report.set_item("max_displacement", r.max_displacement)?;
     report.set_item("mean_edge_length", r.mean_edge_length)?;
     report.set_item("min_angle", r.min_angle)?;
+    report.set_item("bad_faces", r.bad_faces)?;
+    report.set_item("inadmissible_trials", r.inadmissible_trials)?;
+    match &r.stopped {
+        Some(s) => {
+            let d = PyDict::new(py);
+            d.set_item("round", s.round)?;
+            d.set_item("after_subdivision", s.after_subdivision)?;
+            d.set_item("vertex", s.vertex)?;
+            d.set_item("reason", s.reason)?;
+            report.set_item("stopped", d)?;
+        }
+        None => report.set_item("stopped", py.None())?,
+    }
     report.set_item("nonplanarity_before", r.nonplanarity_before)?;
     report.set_item("nonplanarity_after", r.nonplanarity_after)?;
     report.set_item("nonplanarity_after_relative", r.nonplanarity_after_relative)?;
@@ -476,7 +504,8 @@ fn make_developable<'py>(
         d.set_item("status", round.status)?;
         d.set_item("flips", round.flips)?;
         d.set_item("collapses", round.collapses)?;
-        d.set_item("bad_triangles_left", round.bad_triangles_left)?;
+        d.set_item("remesh_rejected", round.remesh_rejected)?;
+        d.set_item("inadmissible_trials", round.inadmissible_trials)?;
         d.set_item("seconds", round.seconds)?;
         rounds.append(d)?;
     }

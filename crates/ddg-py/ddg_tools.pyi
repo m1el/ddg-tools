@@ -213,7 +213,8 @@ class MakeDevelopableResult:
         """``array('i')``, 3 vertices per triangle; ``None`` if the topology did not change."""
     @property
     def face_polygon(self) -> array[int] | None:
-        """``array('i')``: the polygon of the input each triangle of ``faces`` descends from."""
+        """``array('i')``: the polygon of the input each triangle of ``faces`` descends from
+        (exact: tracked through subdivision, flips and collapses)."""
     @property
     def vertex_source(self) -> array[int]:
         """``array('i')``: the input vertex each vertex descends from, -1 if created by
@@ -221,7 +222,10 @@ class MakeDevelopableResult:
     @property
     def report(self) -> dict[str, object]:
         """See the README: ``energy_initial``, ``energy_final``, ``cancelled``,
-        ``topology_changed``, ``nonplanarity_*``, ``rounds`` (list of dicts), ``warnings``, ..."""
+        ``topology_changed``, ``nonplanarity_*``, ``min_angle``, ``bad_faces``,
+        ``inadmissible_trials``, ``stopped`` (``None`` or a dict ``round``, ``after_subdivision``,
+        ``vertex``, ``reason``: the flow ended before that round because the energy is undefined
+        there), ``rounds`` (list of dicts), ``warnings``, ..."""
 
 def make_developable(
     positions: Buffer,

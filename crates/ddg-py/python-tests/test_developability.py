@@ -176,6 +176,51 @@ class MakeDevelopableTest(unittest.TestCase):
         self.assertIsNone(r.report["nonplanarity_after"])
         self.assertTrue(all(0 <= v < nv for v in r.faces))
 
+    def test_face_polygon_is_exact_over_two_rounds(self):
+        mesh = arrays(grid(4, 0.2))
+        r = ddg_tools.make_developable(*mesh, subdivisions=2, iterations=10, remesh=False)
+        self.assertEqual(len(r.face_polygon), 16 * 32)
+        self.assertEqual(list(r.face_polygon), [p for p in range(16) for _ in range(32)])
+        rep = r.report
+        self.assertEqual(len(rep["rounds"]), 3)
+        self.assertIsNone(rep["stopped"])
+        self.assertEqual(rep["bad_faces"], 0)
+        self.assertIsInstance(rep["inadmissible_trials"], int)
+        self.assertGreater(rep["min_angle"], 0.1)
+        for rd in rep["rounds"]:
+            self.assertIn("inadmissible_trials", rd)
+            self.assertIn("remesh_rejected", rd)
+            self.assertNotIn("bad_triangles_left", rd)
+
+    def test_face_polygon_survives_remeshing_exactly(self):
+        # An aggressive small angle forces flips and collapses; every output triangle keeps the
+        # polygon of its parent, which the library tracks (so the set of polygons is intact and
+        # polygons far from the repairs are untouched).
+        p, cv, st, tr = grid(8, 0.3)
+        p = [x * (1.0 if k % 3 else 6.0) for k, x in enumerate(p)]
+        r = ddg_tools.make_developable(*arrays((p, cv, st, tr)), subdivisions=1, iterations=30,
+                                       small_angle=0.5, min_face_angle=0.0)
+        self.assertEqual(len(r.face_polygon), len(r.faces) // 3)
+        self.assertTrue(all(0 <= q < 64 for q in r.face_polygon))
+        self.assertTrue(r.report["topology_changed"])
+        flips = sum(rd["flips"] + rd["collapses"] for rd in r.report["rounds"])
+        self.assertGreater(flips, 0)
+
+    def test_min_face_angle(self):
+        p, cv, st, tr = grid(2, 0.0)
+        p = list(p)
+        p[12], p[13] = 0.75, 1e-9  # the centre vertex next to the edge (0.5,0)-(1,0)
+        mesh = arrays((p, cv, st, tr))
+        with self.assertRaises(ddg_tools.MeshError) as c:
+            ddg_tools.make_developable(*mesh, remesh=False)
+        self.assertIn("nearly degenerate", str(c.exception))
+        self.assertIn("min_face_angle", str(c.exception))
+        r = ddg_tools.make_developable(*mesh, remesh=False, min_face_angle=0.0, subdivisions=0,
+                                       iterations=2)
+        self.assertEqual(len(r.positions), 27)
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.make_developable(*arrays(grid(3, 0.1)), small_angle=0.01, min_face_angle=0.02)
+
     def test_remeshing_keeps_polygons_valid(self):
         # A strongly sheared grid has small angles to repair.
         p, cv, st, tr = grid(8, 0.3)
