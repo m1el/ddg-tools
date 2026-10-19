@@ -148,5 +148,6 @@ minimum) or hit a wall. Those are now `Stationary` and `LineSearchFailed`, respe
   remesher in the workspace would let the Blender add-on run the paper's workflow on any model.
 * The intrinsic energy's stiff states (vector area nearly zero) stop its flows (D12 threshold
   `π − φ < 1e-6`); not changed here.
-* The Python and Blender layers still build `uniform` flows with one energy (default `E_λ`);
-  offering the coarse-to-fine recipe there is for the `ddg-py`/Blender owners.
+* (Done) The Python and Blender layers offer the recipe (`coarse_energy`, default `E_P` in round
+  0). Blender's Remesh (Voxel) + Decimate to about 1k triangles gives inputs as good as the
+  MeshLab ones (`blender/README.md`, "Starting mesh").

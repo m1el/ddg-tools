@@ -259,6 +259,7 @@ between rounds, small-angle remeshing). Runs in place.
 | Method | `method` | L-BFGS | `LBFGS`, `GRADIENT_DESCENT`, `FIXED_STEP` |
 | Iterations | `iterations` | 500 | optimizer iterations per round |
 | Subdivision Rounds | `subdivisions` | 2 | 4-1 subdivisions; the flow has this + 1 rounds. Each one quadruples the triangles |
+| Coarse Energy | `coarse_energy` | Combinatorial | `COMBINATORIAL` or `SAME`. The energy of round 0 (the input mesh) when Subdivision Rounds > 0: the paper minimizes E_P on the coarse mesh and the Energy after each subdivision (Sec. 5.2, Figs. 23-24; SPEC D36); the Eigenvalue energy alone keeps flattening the shape. `SAME` (Same as Energy) uses the Energy in every round, the flow of earlier versions (bitwise). Ignored without subdivision |
 | Remesh | `remesh` | on | repair triangles with a corner angle below the small angle by edge flips and collapses |
 | Small Angle | `small_angle` | 1 degree | the threshold of the remeshing |
 | Step Cap | `max_displacement` | 0.5 | no vertex moves farther than this many mean edge lengths per step |
@@ -268,6 +269,15 @@ between rounds, small-angle remeshing). Runs in place.
 | Pinned Group | `pinned_group` | (none) | vertex group (weight above 0) of vertices that do not move |
 | Triangulate | `triangulate` | off | replace the mesh by the algorithm's triangle mesh even if the topology is unchanged |
 | Write Energy Preview | `write_energy` | off | afterwards write the preview attributes of Show Developability |
+
+**Starting mesh.** The flow works as in the paper on a *coarse, uniform* mesh of about 1000
+triangles (the paper's inputs are Instant Meshes output). A subdivision cage (the `*_control_mesh`
+models) or a dense scan is a poor input: the thin parts of a cage (ears, fins, tails) fold into flat
+double sheets whatever the energy (`crates/ddg-developability/QUALITY.md`). Recipe in Blender
+(`blender/tests/remesh_recipe.py` does it headless): add a **Remesh** modifier (Mode Voxel) and
+raise the Voxel Size until the mesh has 5000 to 6000 triangles (Statistics overlay; sqrt(area / 2000) is a good first guess), apply it; add a
+**Decimate** modifier (Collapse, Triangulate on) with Ratio = 1000 / that count, apply it; then
+Make Developable with the defaults. Measured on spot, bob and blub in the next section.
 
 **What happens to the mesh (D24).** If no subdivision ran and no remeshing operation acted, and
 Triangulate is off, the new positions are written into the existing mesh: polygons (quads), UV maps,
@@ -324,7 +334,7 @@ energy above the threshold and the seams are everywhere.
 
 ### Developability tests and measurements
 
-`blender/tests/test_developable.py` (headless, 18 tests, one skipped without an undo stack, run by `scripts/blender-test.sh` in
+`blender/tests/test_developable.py` (headless, 20 tests, one skipped without an undo stack, run by `scripts/blender-test.sh` in
 parallel with the cut tests; `--source DIR --site DIR` for development without building the
 extension): subdivided cube (quads kept, energy down), noisy plane, UV sphere (all energies and
 methods), cylinder, the replacement branch (parent material, dropped UV map listed), Triangulate,
@@ -339,129 +349,155 @@ headless Blender has no undo stack, that test skips with a notice).
 End to end through the Blender operators (`bpy.ops`-level functions of
 `developable_operator.py`), headless, Blender 5.0.1, the wheel in the installed extension:
 `scripts/e2e-developable.sh` runs **Make Developable** with the defaults (2 subdivisions, 500
-iterations per round, `E_lambda`, remeshing on) and with 1 subdivision, and then **Developable
-Seams + UV** with its defaults (threshold 1e-3, defect rule 0.1 rad), on the models of
-`data/models` (spot, bob, blub: the quadrangulated, triangulated and control meshes, imported as
-OBJ) and on Blender primitives (the independent cases run in parallel, one Blender each;
-`blender/tests/e2e_developable.py`; `scripts/e2e_table.py` makes the tables from the
-`.jsonl` of the runs). The rows "0 x N" and "N x 5000" are longer flows run to see what a
-converged flow does. Columns: *iterations done* (all rounds), *rounds end* (the optimizer status
-of each round: `max` = ran out of iterations, `grad` = gradient tolerance, `LS` = the line search
-could no longer find a decrease, at an energy of 1e-7 to 1e-13 that is convergence, nothing was
-`STOPPED` by the D32 rule in any run), *energy* before and after (`E_lambda` of the paper, a sum over
-vertices, so it grows with the mesh), *thin faces* (the library's `bad_faces`), seam edges and
-terminals of the cut, charts, cones of the UV pipeline, *overlap* (the pipeline's sampled
-estimate of the UV area covered more than once), *mirrored* UV triangles (clockwise in UV), and
-seconds. **The seconds of the rows "2 sub x 500", "1 sub x 500" and "none" were re-measured on
-2026-10-19 alone on a quiet machine** (AMD Ryzen Threadripper 3970X, 32 cores / 64 threads, load
-0.1 to 1.5; one Blender at a time, one rayon thread, `scripts/e2e-developable.sh --no-sweep` with
-`E2E_JOBS=1 RAYON_NUM_THREADS=1`), single-thread: spot (92k triangles after two subdivisions) 68
-to 70 s, bob 102 to 110 s (170k), blub 167 to 169 s (226k); the control meshes and primitives 0 to
-8 s. The seam and terminal counts of those rows agree with the earlier runs except for
-`prim_sphere` (new numbers in its two rows; the code has changed since the earlier runs). **The
-seconds of all other rows (the longer flows "N x 5000", "0 sub", "3000", the converged control
-meshes) are from the earlier runs under load (40 to 350) and are not benchmarks**; they have not
-been re-measured. The paper reports "seconds to a few minutes" single-threaded for its examples
-(control-mesh-sized inputs, 1k to 5k triangles): our control meshes take 2 to 6 s for the
-defaults, the dense models 1 to 3 minutes.
+iterations per round, Coarse Energy Combinatorial = `E_P` in round 0 and `E_lambda` in the two
+rounds after a subdivision, SPEC D36; remeshing with the fallback of D35 on) and with 1
+subdivision, and then **Developable Seams + UV** with its defaults (threshold 1e-3, defect rule
+0.1 rad, Split Overlapping Charts on), on the models of `data/models` (spot, bob, blub: the
+quadrangulated, triangulated and control meshes, imported as OBJ) and on Blender primitives (the
+independent cases run in parallel, one Blender each; `blender/tests/e2e_developable.py`;
+`python3 scripts/e2e_table.py DIR --readme` makes this table from the `.jsonl` of the runs). The
+rows with other budgets ("N sub x 5000" ...) are longer flows run to see what a converged flow
+does. Columns: *iterations done* (all rounds), *rounds end* (the optimizer status of each round:
+`max` = ran out of iterations, `grad` = gradient tolerance, `stall` = the energy stopped
+changing, `stat` = stationary: the line search found no decrease at an energy flat to rounding,
+SPEC D34, that is convergence; no `LS-FAIL` and no flow `STOPPED` by the D32 rule occurred), *energy*
+before and after (the paper's `E_lambda`, a sum over vertices, so it grows with the mesh; it is
+measured in `E_lambda` although round 0 minimized `E_P`), *thin faces* (the library's `bad_faces`),
+seam edges and terminals of the cut, charts, cones, *overlap* (the pipeline's sampled estimate of
+the UV area covered more than once, after the splits), *splits* (charts the overlap splitting
+added: charts - 1), *mirrored* UV triangles (clockwise in UV), and seconds. **All seconds are
+from runs in parallel on a loaded machine (24 jobs, 2 rayon threads each, load 40 to 140; another
+study ran at the same time) and are not benchmarks.** The quiet-machine single-thread times of
+2026-10-19 (commit e965577) are for the previous default flow (`E_lambda` in every round, now
+Coarse Energy "Same as Energy") and a Seams + UV without splitting; no row here has unchanged
+settings, so they are not carried into the table: spot (92k triangles after two subdivisions)
+68 to 70 s, bob 102 to 110 s (170k), blub 167 to 169 s (226k), the control meshes and primitives
+0 to 8 s for 3 x 500 iterations. The cost of `E_P` in round 0 is small (the coarse mesh is 1 / 16
+of the final one). The paper reports "seconds to a few minutes" single-threaded for its examples.
 
-| mesh | flow (subdivisions x iterations per round) | iterations done | rounds end | energy | thin faces | seam edges | terminals | charts | cones | overlap | mirrored | flow s | seams+UV s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| spot_quad | 2 sub x 500 | 1500 | max/max/max | 111 to 5.47 | 2 | 2870 | 1222 | 1 | 0 | 2.9 % | 0 | 70 | 0.73 |
-| spot_quad | 1 sub x 500 | 1000 | max/max | 111 to 8.84 | 2 | 2067 | 1538 | 1 | 0 | 15.2 % | 0 | 16 | 0.16 |
-| spot_quad | 1 sub x 3000 | 6000 | max/max | 111 to 3.77 | 1 | 1303 | 907 | 1 | 0 | 10.6 % | 0 | 312 | 0.4 |
-| spot_quad | 0 sub x 5000 | 5000 | max | 111 to 5.24 | 0 | 902 | 828 | 1 | 0 | 4.9 % | 0 | 61 | 0.1 |
-| spot_quad | 0 sub x 20000 | 20000 | max | 111 to 1.96 | 2 | 511 | 456 | 1 | 0 | 15.9 % | 0 | 435 | 0.8 |
-| spot_quad | none | - | - | - |  | 2617 | 2593 | 1 | 0 | 11.0 % | 0 | - | 0.04 |
-| spot_tri | 2 sub x 500 | 1500 | max/max/max | 112 to 5.95 | 0 | 2522 | 1310 | 1 | 0 | 20.0 % | 0 | 68 | 0.81 |
-| spot_tri | 1 sub x 500 | 1000 | max/max | 112 to 10.2 | 0 | 2049 | 1606 | 1 | 0 | 9.9 % | 0 | 15 | 0.16 |
-| spot_tri | none | - | - | - |  | 2674 | 2663 | 1 | 0 | 16.0 % | 0 | - | 0.05 |
-| spot_control | 2 sub x 500 | 1500 | max/max/max | 101 to 0.245 | 0 | 355 | 136 | 1 | 0 | 37.6 % | 0 | 3.0 | 0.04 |
-| spot_control | 2 sub x 5000 | 15000 | max/max/max | 101 to 3.88e-07 | 9 | 296 | 65 | 1 | 0 | 34.2 % | 0 | 131 | 0.1 |
-| spot_control | 1 sub x 500 | 1000 | max/max | 101 to 0.386 | 0 | 211 | 142 | 1 | 0 | 33.6 % | 0 | 0.9 | 0.01 |
-| spot_control | 1 sub x 5000 | 10000 | max/max | 101 to 1.69e-07 | 3 | 148 | 65 | 1 | 0 | 30.8 % | 0 | 9 | 0.0 |
-| spot_control | 0 sub x 5000 | 5000 | max | 101 to 8.02e-08 | 2 | 74 | 65 | 1 | 0 | 30.7 % | 0 | 2 | 0.0 |
-| spot_control | none | - | - | - |  | 182 | 183 | 1 | 0 | 40.0 % | 0 | - | 0.01 |
-| bob_quad | 2 sub x 500 | 1500 | max/max/max | 42.1 to 3.52 | 0 | 1392 | 284 | 1 | 0 | 1.0 % | 0 | 110 | 2.8 |
-| bob_quad | 1 sub x 500 | 1000 | max/max | 42.1 to 6.63 | 0 | 3110 | 2610 | 1 | 0 | 6.0 % | 0 | 24 | 0.30 |
-| bob_quad | 0 sub x 5000 | 5000 | max | 42.1 to 4.34 | 0 | 1127 | 1030 | 1 | 0 | 13.6 % | 0 | 223 | 0.1 |
-| bob_quad | none | - | - | - |  | 4340 | 4331 | 1 | 0 | 11.5 % | 0 | - | 0.07 |
-| bob_tri | 2 sub x 500 | 1500 | max/max/max | 42.9 to 3.24 | 0 | 1557 | 392 | 1 | 0 | 8.2 % | 0 | 102 | 1.8 |
-| bob_tri | 1 sub x 500 | 1000 | max/max | 42.9 to 5.72 | 0 | 2235 | 1514 | 1 | 0 | 4.0 % | 0 | 22 | 0.31 |
-| bob_tri | none | - | - | - |  | 4352 | 4342 | 1 | 0 | 14.5 % | 0 | - | 0.08 |
-| bob_control | 2 sub x 500 | 1500 | max/max/max | 47.4 to 1.09 | 0 | 472 | 284 | 1 | 0 | 6.9 % | 0 | 5.9 | 0.07 |
-| bob_control | 2 sub x 5000 | 15000 | max/max/max | 47.4 to 0.0179 | 1 | 191 | 65 | 1 | 0 | 8.0 % | 0 | 248 | 0.4 |
-| bob_control | 1 sub x 500 | 1000 | max/max | 47.4 to 1.97 | 0 | 372 | 306 | 1 | 0 | 8.4 % | 0 | 1.6 | 0.02 |
-| bob_control | 1 sub x 5000 | 10000 | max/max | 47.4 to 0.0347 | 3 | 102 | 58 | 1 | 0 | 7.3 % | 0 | 24 | 0.0 |
-| bob_control | none | - | - | - |  | 335 | 334 | 1 | 0 | 14.7 % | 0 | - | 0.01 |
-| blub_quad | 2 sub x 500 | 1500 | max/max/max | 46.3 to 2.93 | 0 | 2201 | 433 | 1 | 0 | 10.8 % | 0 | 169 | 2.0 |
-| blub_quad | 1 sub x 500 | 1000 | max/max | 46.3 to 4.7 | 0 | 2263 | 1061 | 1 | 0 | 22.4 % | 0 | 36 | 0.42 |
-| blub_quad | 0 sub x 5000 | 5000 | max | 46.3 to 4.07 | 0 | 1181 | 912 | 1 | 0 | 22.2 % | 0 | 232 | 0.2 |
-| blub_quad | none | - | - | - |  | 5073 | 5024 | 1 | 0 | 11.8 % | 0 | - | 0.10 |
-| blub_tri | 2 sub x 500 | 1500 | max/max/max | 45.6 to 2.88 | 0 | 2567 | 406 | 1 | 0 | 16.4 % | 0 | 167 | 2.2 |
-| blub_tri | 1 sub x 500 | 1000 | max/max | 45.6 to 4.61 | 0 | 2278 | 1087 | 1 | 0 | 17.2 % | 0 | 34 | 0.41 |
-| blub_tri | none | - | - | - |  | 5028 | 4982 | 1 | 0 | 18.9 % | 0 | - | 0.11 |
-| blub_control | 2 sub x 500 | 1500 | max/max/max | 38 to 0.0142 | 2 | 207 | 70 | 1 | 0 | 9.3 % | 0 | 1.5 | 0.02 |
-| blub_control | 2 sub x 5000 | 3131 | LS/LS/LS | 38 to 5.02e-13 | 2 | 210 | 53 | 1 | 0 | 24.7 % | 0 | 2 | 0.0 |
-| blub_control | 1 sub x 500 | 1000 | max/max | 38 to 0.0232 | 3 | 104 | 65 | 1 | 0 | 18.7 % | 0 | 0.5 | 0.00 |
-| blub_control | 1 sub x 5000 | 3100 | LS/LS | 38 to 6.33e-13 | 1 | 105 | 53 | 1 | 0 | 24.6 % | 0 | 1 | 0.0 |
-| blub_control | none | - | - | - |  | 110 | 111 | 1 | 0 | 25.2 % | 0 | - | 0.01 |
-| prim_cube | 2 sub x 500 | 1500 | max/max/max | 12.6 to 0.0267 | 0 | 198 | 71 | 1 | 0 | 20.7 % | 0 | 2.1 | 0.03 |
-| prim_cube | 1 sub x 500 | 1000 | max/max | 12.6 to 0.0414 | 0 | 102 | 75 | 1 | 0 | 19.1 % | 0 | 0.6 | 0.01 |
-| prim_cube | none | - | - | - |  | 35 | 8 | 1 | 0 | 0.0 % | 0 | - | 0.01 |
-| prim_sphere | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.391 | 6 | 177 | 76 | 1 | 0 | 0.0 % | 0 | 6.8 | 0.12 |
-| prim_sphere | 1 sub x 500 | 1000 | max/max | 15.5 to 0.851 | 2 | 302 | 281 | 1 | 0 | 3.4 % | 0 | 1.8 | 0.02 |
-| prim_sphere | none | - | - | - |  | 481 | 482 | 1 | 0 | 0.0 % | 0 | - | 0.02 |
-| prim_torus | 2 sub x 500 | 1500 | max/max/max | 15.5 to 0.0123 | 0 | 302 | 102 | 1 | 0 | 0.0 % | 0 | 7.4 | 0.12 |
-| prim_torus | 1 sub x 500 | 1000 | max/max | 15.5 to 0.0225 | 0 | 159 | 128 | 1 | 0 | 0.0 % | 0 | 1.8 | 0.03 |
-| prim_torus | none | - | - | - |  | 513 | 512 | 1 | 0 | 0.2 % | 0 | - | 0.01 |
-| prim_monkey | 2 sub x 500 | 1500 | max/max/max | 148 to 0.878 | 0 | 837 | 330 | 3 | 0 | 9.3 % | 0 | 8.4 | 0.09 |
-| prim_monkey | 1 sub x 500 | 1000 | max/max | 148 to 1.56 | 0 | 502 | 344 | 3 | 0 | 7.5 % | 0 | 2.2 | 0.02 |
-| prim_monkey | none | - | - | - |  | 464 | 483 | 3 | 0 | 12.0 % | 0 | - | 0.02 |
-| prim_cylinder | 2 sub x 500 | 161 | grad/LS/LS | 1.93 to -4.17e-15 | 0 | 200 | 44 | 1 | 0 | 0.0 % | 0 | 0.2 | 0.01 |
-| prim_cylinder | 1 sub x 500 | 157 | grad/LS | 1.93 to -6.69e-16 | 0 | 100 | 44 | 1 | 0 | 0.0 % | 0 | 0.0 | 0.00 |
-| prim_cylinder | none | - | - | - |  | 63 | 64 | 1 | 0 | 0.0 % | 0 | - | 0.01 |
-| prim_plane | 2 sub x 500 | 1500 | max/max/max | 149 to 0.00168 | 0 | 116 | 25 | 1 | 0 | 6.3 % | 0 | 4.3 | 0.06 |
-| prim_plane | 1 sub x 500 | 1000 | max/max | 149 to 0.00248 | 0 | 58 | 25 | 1 | 0 | 6.3 % | 0 | 1.2 | 0.01 |
-| prim_plane | none | - | - | - |  | 225 | 269 | 1 | 0 | 17.6 % | 0 | - | 0.01 |
+**The table replaces the earlier one, which was made before D36, before Split Overlapping
+Charts (it had 1 chart in every row and overlaps of 3 to 40 %) and before the remeshing
+fallback.**
+
+| mesh | flow (subdivisions x iterations per round) | triangles | iterations done | rounds end | energy | thin faces | seam edges | terminals | charts | cones | overlap | splits | mirrored | flow s | seams+UV s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| blub_control | 2 sub x 500 | 2794 | 1500 | max/max/max | 38 to 0.425 | 4 | 239 | 144 | 7 | 0 | 0.0 % | 6 | 0 | 3.3 | 0.09 |
+| blub_control | 2 sub x 5000 | 2296 | 7957 | stall/stat/stat | 38 to 1.69e-11 | 0 | 158 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 4.5 | 0.05 |
+| blub_control | 1 sub x 500 | 710 | 1000 | max/max | 38 to 0.777 | 2 | 158 | 135 | 10 | 0 | 0.0 % | 9 | 0 | 0.9 | 0.04 |
+| blub_control | 1 sub x 5000 | 574 | 7921 | stall/stat | 38 to 1.76e-11 | 0 | 79 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 3.8 | 0.01 |
+| blub_control | none | - | - | - | - | - | 110 | 111 | 8 | 0 | 0.0 % | 7 | 0 | - | 0.03 |
+| blub_quad | 2 sub x 500 | 226814 | 1500 | max/max/max | 46.3 to 5.1 | 0 | 3095 | 776 | 6 | 0 | 0.1 % | 5 | 0 | 144.6 | 18.97 |
+| blub_quad | 1 sub x 500 | 56716 | 1000 | max/max | 46.3 to 8.48 | 0 | 2963 | 1839 | 11 | 0 | 2.0 % | 10 | 0 | 41.4 | 5.06 |
+| blub_quad | 0 sub x 5000 | 13830 | 5000 | max | 46.3 to 4.07 | 0 | 1181 | 912 | 22 | 0 | 0.0 % | 21 | 0 | 58.1 | 0.54 |
+| blub_quad | none | - | - | - | - | - | 5073 | 5024 | 33 | 0 | 1.9 % | 32 | 0 | - | 1.23 |
+| blub_tri | 2 sub x 500 | 226836 | 1500 | max/max/max | 45.6 to 4.37 | 0 | 2611 | 551 | 8 | 0 | 0.2 % | 7 | 0 | 142.1 | 21.72 |
+| blub_tri | 1 sub x 500 | 56718 | 1000 | max/max | 45.6 to 7.37 | 0 | 2743 | 1632 | 22 | 0 | 0.1 % | 21 | 0 | 45.2 | 3.52 |
+| blub_tri | none | - | - | - | - | - | 5028 | 4982 | 27 | 0 | 4.2 % | 26 | 0 | - | 0.91 |
+| bob_control | 2 sub x 500 | 10106 | 1500 | max/max/max | 47.4 to 1.61 | 0 | 652 | 500 | 6 | 0 | 0.1 % | 5 | 0 | 9.1 | 0.41 |
+| bob_control | 2 sub x 5000 | 8090 | 15000 | max/max/max | 47.4 to 0.269 | 0 | 170 | 106 | 4 | 0 | 0.0 % | 3 | 0 | 45.1 | 0.19 |
+| bob_control | 1 sub x 500 | 2528 | 1000 | max/max | 47.4 to 2.9 | 0 | 445 | 405 | 9 | 0 | 0.0 % | 8 | 0 | 2.6 | 0.06 |
+| bob_control | 1 sub x 5000 | 2048 | 10000 | max/max | 47.4 to 0.49 | 0 | 182 | 143 | 8 | 0 | 0.0 % | 7 | 0 | 15.6 | 0.06 |
+| bob_control | none | - | - | - | - | - | 335 | 334 | 12 | 0 | 0.0 % | 11 | 0 | - | 0.05 |
+| bob_quad | 2 sub x 500 | 170792 | 1500 | max/max/max | 42.1 to 4.93 | 0 | 1462 | 550 | 3 | 0 | 0.0 % | 2 | 0 | 95.4 | 5.89 |
+| bob_quad | 1 sub x 500 | 42700 | 1000 | max/max | 42.1 to 9.24 | 0 | 3471 | 3166 | 24 | 0 | 0.3 % | 23 | 0 | 29.4 | 3.29 |
+| bob_quad | 0 sub x 5000 | 10388 | 5000 | max | 42.1 to 4.55 | 0 | 1132 | 1042 | 9 | 0 | 0.1 % | 8 | 0 | 42.4 | 0.28 |
+| bob_quad | none | - | - | - | - | - | 4340 | 4331 | 11 | 0 | 6.5 % | 10 | 0 | - | 0.60 |
+| bob_tri | 2 sub x 500 | 170818 | 1500 | max/max/max | 42.9 to 4.08 | 0 | 1592 | 499 | 3 | 0 | 0.0 % | 2 | 0 | 101.0 | 5.43 |
+| bob_tri | 1 sub x 500 | 42710 | 1000 | max/max | 42.9 to 7.32 | 0 | 2531 | 2070 | 20 | 0 | 0.3 % | 19 | 0 | 29.3 | 3.21 |
+| bob_tri | none | - | - | - | - | - | 4352 | 4342 | 33 | 0 | 1.4 % | 32 | 0 | - | 0.77 |
+| prim_cube | 2 sub x 500 | 4534 | 1500 | max/max/max | 12.6 to 0.485 | 0 | 160 | 138 | 1 | 0 | 0.0 % | 0 | 0 | 5.0 | 0.04 |
+| prim_cube | 1 sub x 500 | 1136 | 1000 | max/max | 12.6 to 0.883 | 0 | 100 | 90 | 1 | 0 | 0.0 % | 0 | 0 | 1.2 | 0.04 |
+| prim_cube | none | - | - | - | - | - | 35 | 8 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
+| prim_cylinder | 2 sub x 500 | 960 | 1500 | max/max/max | 1.93 to 1.83e-07 | 0 | 108 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 1.1 | 0.01 |
+| prim_cylinder | 1 sub x 500 | 240 | 1000 | max/max | 1.93 to 1.11e-06 | 0 | 54 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 0.4 | 0.00 |
+| prim_cylinder | none | - | - | - | - | - | 63 | 64 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
+| prim_monkey | 2 sub x 500 | 14360 | 1500 | max/max/max | 148 to 2.71 | 0 | 821 | 554 | 12 | 0 | 0.4 % | 9 | 0 | 13.5 | 0.77 |
+| prim_monkey | 1 sub x 500 | 3600 | 1000 | max/max | 148 to 5.02 | 0 | 539 | 438 | 17 | 0 | 0.0 % | 14 | 0 | 4.8 | 0.19 |
+| prim_monkey | none | - | - | - | - | - | 464 | 483 | 35 | 0 | 0.1 % | 32 | 0 | - | 0.05 |
+| prim_plane | 2 sub x 500 | 7998 | 1500 | max/max/max | 149 to 0.000404 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 6.5 | 0.08 |
+| prim_plane | 1 sub x 500 | 2000 | 1000 | max/max | 149 to 0.00064 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 2.2 | 0.02 |
+| prim_plane | none | - | - | - | - | - | 225 | 269 | 27 | 0 | 0.0 % | 26 | 0 | - | 0.04 |
+| prim_sphere | 2 sub x 500 | 15358 | 1500 | max/max/max | 15.5 to 0.445 | 0 | 270 | 256 | 1 | 0 | 0.0 % | 0 | 0 | 10.2 | 0.16 |
+| prim_sphere | 1 sub x 500 | 3840 | 1000 | max/max | 15.5 to 0.867 | 0 | 134 | 128 | 1 | 0 | 0.0 % | 0 | 0 | 3.2 | 0.04 |
+| prim_sphere | none | - | - | - | - | - | 481 | 482 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
+| prim_torus | 2 sub x 500 | 16014 | 1500 | max/max/max | 15.5 to 0.245 | 0 | 238 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 12.5 | 0.19 |
+| prim_torus | 1 sub x 500 | 4012 | 1000 | max/max | 15.5 to 0.475 | 0 | 165 | 139 | 1 | 0 | 0.0 % | 0 | 0 | 4.0 | 0.04 |
+| prim_torus | none | - | - | - | - | - | 513 | 512 | 3 | 0 | 0.1 % | 2 | 0 | - | 0.04 |
+| spot_control | 2 sub x 500 | 5216 | 1500 | max/max/max | 101 to 1.41 | 0 | 456 | 303 | 16 | 0 | 0.0 % | 15 | 0 | 5.2 | 0.24 |
+| spot_control | 2 sub x 5000 | 2604 | 15000 | max/max/max | 101 to 0.0317 | 3 | 211 | 114 | 8 | 0 | 0.0 % | 7 | 0 | 18.2 | 0.10 |
+| spot_control | 1 sub x 500 | 1308 | 1000 | max/max | 101 to 2.64 | 0 | 305 | 264 | 19 | 0 | 0.0 % | 18 | 0 | 1.6 | 0.05 |
+| spot_control | 1 sub x 5000 | 672 | 10000 | max/max | 101 to 0.0706 | 5 | 114 | 84 | 5 | 0 | 0.1 % | 4 | 0 | 7.5 | 0.02 |
+| spot_control | 0 sub x 5000 | 240 | 4311 | stat | 101 to 2.07e-09 | 2 | 67 | 64 | 6 | 0 | 0.0 % | 5 | 0 | 1.6 | 0.01 |
+| spot_control | none | - | - | - | - | - | 182 | 183 | 19 | 0 | 0.0 % | 18 | 0 | - | 0.03 |
+| spot_quad | 2 sub x 500 | 93172 | 1500 | max/max/max | 111 to 9.26 | 0 | 3435 | 1779 | 3 | 0 | 4.1 % | 2 | 0 | 64.8 | 7.83 |
+| spot_quad | 1 sub x 500 | 23302 | 1000 | max/max | 111 to 16 | 0 | 2559 | 2010 | 33 | 0 | 0.1 % | 32 | 0 | 19.7 | 1.72 |
+| spot_quad | 1 sub x 3000 | 22876 | 6000 | max/max | 111 to 11.5 | 0 | 2016 | 1593 | 13 | 0 | 1.1 % | 12 | 0 | 77.1 | 1.43 |
+| spot_quad | 0 sub x 5000 | 5406 | 5000 | max | 111 to 5.42 | 0 | 895 | 824 | 33 | 0 | 0.1 % | 32 | 0 | 26.8 | 0.22 |
+| spot_quad | 0 sub x 20000 | 4742 | 20000 | max | 111 to 1.63 | 0 | 463 | 413 | 20 | 0 | 0.0 % | 19 | 0 | 87.2 | 0.20 |
+| spot_quad | none | - | - | - | - | - | 2617 | 2593 | 33 | 0 | 4.1 % | 32 | 0 | - | 0.35 |
+| spot_tri | 2 sub x 500 | 93008 | 1500 | max/max/max | 112 to 8.88 | 0 | 3199 | 1816 | 18 | 0 | 0.1 % | 17 | 0 | 66.6 | 4.81 |
+| spot_tri | 1 sub x 500 | 23262 | 1000 | max/max | 112 to 15.4 | 0 | 2433 | 2033 | 22 | 0 | 1.1 % | 21 | 0 | 20.9 | 1.04 |
+| spot_tri | none | - | - | - | - | - | 2674 | 2663 | 33 | 0 | 2.2 % | 32 | 0 | - | 0.37 |
 
 What the table says.
 
 * **Nothing mirrors.** 0 mirrored UV triangles in every row with the default settings, on all
-  models, control meshes included; no flow or default Seams + UV run raised an error (the only errors
-  in the logs are the study's own: its settings sweep made more than the 8 UV maps Blender allows,
-  fixed in the script since).
+  models, control meshes included; no flow or Seams + UV run raised an error or stopped (D32).
+  Overlap after the splits is at most 4.1 % (spot quadrangulated, 2 x 500; 6.5 % on the untouched
+  bob_quad), in most rows 0.0 to 0.3 %, against 3 to 40 % without splitting; the price is
+  charts: 2 to 33 per mesh (each split adds one), the untouched meshes already have 27 to 33.
 * **The flow of the defaults is not converged on the dense meshes.** Every round of the 500
-  iterations ends by the budget (`max`). Spot (5856 triangles) needs more than 20 000 iterations
-  to get to an energy of 2 (from 111); with 3 x 500 it is at 5.5. The control meshes (the paper's
-  inputs) converge: spot's to 4e-7 in 15 000 iterations, blub's to 5e-13 in 3100 (`LS`), bob's to
-  0.018.
-* **A longer flow does give a much shorter cut.** Spot, quadrangulated: the untouched mesh has
-  2617 seam edges (2593 terminals); after the defaults (3 x 500) 2870; after 1 x 3000 + 3000: 1303;
-  without subdivision, 5000 iterations: 902; 20 000 iterations: **511** (the 2472 of the earlier
-  run, which ended early, were those of a mesh that was not yet developable). The control meshes
-  have 182 edges (spot), 335 (bob), 110 (blub) untouched and 74 to 355, 102 to 472, 105 to 210
-  after the flows (65 terminals for spot, all of them cone-like vertices).
-  On bob and blub the same: 4340 / 5073 edges untouched, 1127 / 1181 after 5000 iterations
-  without subdivision.
-* **The overlap does not follow.** Spot quadrangulated: 11 % untouched, 2.9 % after the defaults,
-  15.2 % (1 x 500 + 500), 10.6 % (1 x 3000), 4.9 % (0 x 5000) and 15.9 % (0 x 20 000) for the longer
-  flows: the estimate jumps around by a factor of three between neighbouring runs without a trend, and it stays at 31 % to 38 % on spot's control
-  mesh whatever the flow does (40 % untouched). Bob and blub are between 1 % and 25 %. So a
-  converged flow shortens the cut by 2 to 5 times, but the overlap of the unwrap is **not
-  systematically lower**. One chart with a tree cut folds over itself where the cut has long
-  branches; the paper deals with that by hand (SPEC D23). The cylinder, the sphere and the torus
-  have 0 % overlap with the defaults (the sphere 4.6 % with 1 subdivision), and the cube goes from 0 % (8 terminals, 35
-  seam edges) to 20 % after the flow (198 edges): the flow rounds the cube's corners, which then
-  have to be cut through.
-* **No cones in any run**: the cut is a tree, one chart (3 for the monkey, whose eyes are separate
-  components), the pipeline needs no extra cones. That is also why `Lambda` has no effect (the
-  seam sets and the overlap are identical for 0.1 and 1).
-* The cylinder is made developable to rounding in 160 iterations (the status `grad`; its final
-  energy is noise and slightly negative, SPEC D14); the flow rounds the sphere and the torus as far
-  as the budget goes (energies 0.4 and 0.012).
+  iterations ends by the budget (`max`). The final energy is higher than with the old default
+  (spot 5.5 to 9.3, bob 3.5 to 4.9, blub 2.9 to 5.1): `E_P` in round 0 keeps the shape instead of
+  flattening it (QUALITY.md: volume 0.51 to 0.96 on spot's cage, 1.15 on the control mesh). The
+  control meshes converge with more iterations (blub's 2 x 5000: 1.7e-11, `stall/stat/stat`, 7957
+  iterations; spot's 0 x 5000: 2e-9, `stat`, 4311).
+* **A longer flow gives a shorter cut.** Spot, quadrangulated: untouched 2617 seam edges; after the
+  defaults 3435; 1 x 3000 + 3000: 2016; no subdivision, 5000 iterations: 895; 20 000 iterations:
+  **463**. Bob: 4340 untouched, 1132 after 5000 iterations without subdivision; blub 5073 and 1181.
+  The defaults (3 x 500) do not shorten the cut of the dense meshes (spot 3435, blub 3095): cut
+  shortening needs a flow that is run far longer than the defaults, or a coarse input.
+* **Cones: none in any run**, as before. `Lambda` therefore has no effect.
+* **A coarse input is the cheap way to a converged flow:** the control meshes (220 to 668 triangles)
+  end the defaults with 456 / 652 / 239 seam edges (spot / bob / blub), 5 s. For the input of the
+  paper's look use a uniform 1k-triangle mesh, see "Starting mesh" above and the next section.
+* The cylinder is made developable to rounding (energy 1.8e-7, round statuses `max`, 1.1 s); the
+  flow rounds the sphere and the torus as far as the budget goes (energies 0.4 and 0.25).
 
-The levers that were tried on the converged flows, **not applied to the defaults** (each row: the
+#### Starting mesh: Remesh (Voxel) + Decimate in Blender
+
+Is Blender's own remesher a replacement for the Instant Meshes inputs of the paper (QUALITY.md used
+MeshLab's isotropic remeshing, `*_iso1000`)? Measured (`blender/tests/remesh_recipe.py`, run in
+parallel; Hausdorff and mean distance to the dense model in units of its bounding-box diagonal,
+`examples/quality.py`; "folds" = edges above 170 degrees; the flow is Make Developable with the
+defaults from this section; the study's numbers are `QUALITY.md`'s rows "uniform 1k, new"):
+
+| input (about 1000 triangles) | input Hausdorff | input vol. | input min angle | result Hausdorff | result vol. | result folds |
+|---|---|---|---|---|---|---|
+| spot, MeshLab iso 1000 (study) | 0.011 | 0.96 | 5.0 | 0.045 | 0.96 | 24 |
+| spot, Blender Remesh 5.7k + Decimate | 0.017 | 0.98 | 5.2 | 0.040 | 0.99 | 10 |
+| spot, Blender Remesh 11.5k + Decimate | 0.011 | 0.99 | 3.1 | 0.038 | 1.00 | 4 |
+| spot, Remesh 1.4k + Decimate | 0.045 | 0.95 | 3.9 | 0.055 | 0.97 | 0 |
+| bob, MeshLab iso 1000 (study) | 0.010 | 0.97 | 31.7 | 0.058 | 0.97 | 0 |
+| bob, Blender Remesh 5.7k + Decimate | 0.012 | 0.98 | 2.9 | 0.058 | 0.98 | 12 |
+| bob, Blender Remesh 11.5k + Decimate | 0.008 | 0.99 | 1.7 | 0.044 | 0.98 | 0 |
+| blub, MeshLab iso 1000 (study) | 0.022 | 0.96 | 4.5 | 0.053 | 0.89 | 185 |
+| blub, Blender Remesh 5.7k + Decimate | 0.026 | 0.97 | 2.6 | 0.025 | 0.93 | 81 |
+| blub, Blender Remesh 11.5k + Decimate | 0.013 | 0.98 | 1.7 | 0.027 | 0.92 | 81 |
+
+It works: the flows from the Blender inputs end as close to the dense model as the study's
+(Hausdorff 0.025 to 0.058, volume 0.93 to 1.00, folds 0 to 81 against 0 to 185; blub's folds are its
+thin fins, a property of the model). The Blender inputs are less regular (smallest corner angle
+1.7 to 5 degrees against 5 to 32), which the flow tolerates (remeshing on; none of the flows reported thin faces left). Voxel
+Size matters: remeshing straight to 1.4k triangles loses detail (spot input Hausdorff 0.045).
+**Recipe:** Remesh modifier, Mode Voxel, Voxel Size = sqrt(area / 2000) (the first rows: 5.7k to 5.9k
+triangles; spot 0.053, bob 0.053, blub 0.064 for these models; in practice raise the size until the
+Statistics overlay shows 5000 to 6000 triangles), apply; Decimate modifier, Collapse, Ratio =
+1000 / that count, Triangulate on, apply; Make Developable with the defaults. (Remesh to 11.5k and
+decimate is a little closer to the model and a little less regular.) One run per cell; the flow is deterministic.
+
+The levers that were tried on the converged flows, **not applied to the defaults** (these rows are
+from the earlier runs: E_lambda in every round, Seams + UV without splitting; not re-run; each row: the
 same mesh after the same flow, only the settings of Developable Seams + UV change; "paper's rule"
 is *Cut Through Cone Vertices* off):
 
@@ -510,8 +546,7 @@ is *Cut Through Cone Vertices* off):
 
 Limits of this study: one run per cell (the flow is deterministic; the overlap is a sampled
 estimate); the dense meshes were converged by the flow only in the sense of the table; 1 or 2
-subdivisions of the dense meshes were not run to convergence (hours). The earlier table of this
-README (spot, 134 iterations then a stop) is replaced by these rows.
+subdivisions of the dense meshes were not run to convergence (hours).
 
 ## The variational cut: Start, Flow, Apply
 

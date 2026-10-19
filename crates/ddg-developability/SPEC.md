@@ -883,8 +883,9 @@ per-chart flatten stays available in Rust and Python.
   180-degree folds 282 -> 168, 57 -> 4, 287 -> 134. On uniform 1k inputs: volume 0.91 -> 0.96,
   0.83 -> 0.97, 0.84 -> 0.89, Hausdorff 0.096 -> 0.045, 0.085 -> 0.058, 0.050 -> 0.053, folds
   99 -> 24, 31 -> 0, 264 -> 185. `uniform` stays for the old behaviour and for one-energy flows.
-  The Python and Blender layers build their flows with `uniform` and an energy of their own, so
-  they are not changed by this.
+  `ddg_tools.make_developable` and the Blender operator offer the recipe as `coarse_energy`
+  (default `"combinatorial"` / Combinatorial: round 0 only when there are subdivisions; `None` /
+  Same as Energy is the `uniform` flow, bitwise).
 
 ## 9. Formula ids
 
