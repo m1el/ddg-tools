@@ -524,6 +524,7 @@ fn status_name(s: OptimizeStatus) -> &'static str {
         OptimizeStatus::LineSearchFailed => "line_search_failed",
         OptimizeStatus::Cancelled => "cancelled",
         OptimizeStatus::NonDescent => "non_descent",
+        OptimizeStatus::Stationary => "stationary",
     }
 }
 
@@ -553,7 +554,7 @@ pub fn max_nonplanarity(input: &UnwrapInput, positions: &[[f64; 3]]) -> Option<(
         let c = [0, 1, 2].map(|a| pts.iter().map(|q| q[a]).sum::<f64>() / k);
         let n = newell(&pts);
         let nl = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-        if !(nl > 0.0) {
+        if nl.is_nan() || nl <= 0.0 {
             continue;
         }
         let d = pts
@@ -612,7 +613,6 @@ pub fn make_developable(
         max_displacement: options.max_displacement,
         min_face_angle: options.min_face_angle,
         pinned: Vec::new(),
-        ..dev::OptimizeOptions::default()
     };
     oo.validate().map_err(|e| {
         UnwrapError::Input(InputError::BadOption { name: e.name, value: e.value.to_string(), requirement: e.requirement })
@@ -1063,6 +1063,7 @@ pub fn developable_unwrap(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use std::f64::consts::PI;
 
