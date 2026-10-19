@@ -32,6 +32,6 @@ at load ~48. 16 threads at load ~48: bob/blub 290–620 ns/vertex. Multi-thread 
 ## Remains
 - Re-run `cargo bench -p ddg-developability --bench energy` on an idle machine (1T and 64T).
 - The star layout (`Stars`) is rebuilt on every call; an evaluator that keeps it across optimizer
-  iterations would save ~20–30 % per call (not in the SPEC API).
+  iterations would save part of each call (unmeasured; not in the SPEC API).
 - Lean ids (`check-formulas.sh` MISSING) wait for the Lean agent; all Rust ids match SPEC §9.
 - 4-1 subdivision invariance is tested by the optimizer agent (`tests/subdivide.rs`).
