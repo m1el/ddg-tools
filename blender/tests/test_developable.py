@@ -354,6 +354,10 @@ def preview_writes_attributes_and_optionally_after_the_flow():
     values = mesh.attributes.get("developability_energy")
     assert color is not None and color.domain == 'POINT' and color.data_type == 'FLOAT_COLOR'
     assert values is not None and values.data_type == 'FLOAT'
+    # The color attribute (not the float values) is what the viewport shows.
+    assert mesh.color_attributes.active_color.name == "developability"
+    assert mesh.attributes.active.name == "developability"
+    assert mesh.color_attributes[mesh.color_attributes.render_color_index].name == "developability"
     v = array.array('f', bytes(4 * len(mesh.vertices)))
     values.data.foreach_get("value", v)
     assert max(v) > 1e-4 and all(x >= -1e-6 for x in v)

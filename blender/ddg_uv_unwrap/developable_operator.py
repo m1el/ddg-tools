@@ -472,7 +472,12 @@ def show_developability(obj, *, energy='COVARIANCE', include_boundary=True, omit
     if value_attribute is None:
         value_attribute = mesh.attributes.new(name + ENERGY_VALUES_SUFFIX, 'FLOAT', 'POINT')
     value_attribute.data.foreach_set("value", values)
-    mesh.color_attributes.active_color = color_attribute
+    # Creating the float attribute invalidates the Python reference `color_attribute` (and makes
+    # the float the active generic attribute, which Attribute shading then draws black), so the
+    # color attribute is made active and the render color by name.
+    mesh.color_attributes.active_color_name = name
+    mesh.color_attributes.render_color_index = mesh.color_attributes.active_color_index
+    mesh.attributes.active = mesh.attributes[name]
     mesh.update()
     return result
 
