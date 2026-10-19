@@ -11,7 +11,7 @@ Gauss sphere. The paper measures how far a vertex is from that state by six ener
 their sum over the vertex positions with L-BFGS, and cuts the result open along the seams that
 remain so that it flattens with little distortion. The discrete method as implemented here, with
 every formula, its derivation and its sign conventions, is specified in [`SPEC.md`](SPEC.md); every
-place where it differs from the paper as printed is listed in **SPEC §8** (D1 to D33). The
+place where it differs from the paper as printed is listed in **SPEC §8** (D1 to D36). The
 authors' code was not consulted (it is GPL; this workspace is MIT).
 
 ## Credits and clean room
@@ -69,8 +69,10 @@ use ddg_developability::{CutOptions, EnergyOptions, FlowOptions, cut_and_flatten
 let before = evaluate(&mesh, &positions, &EnergyOptions::default())?;   // energy, vertex_energy, gradient
 // before.vertex_energy is what Show Developability paints.
 
-// Two subdivisions (three rounds) of 500 L-BFGS iterations of E_λ, remeshing on.
-let options = FlowOptions::uniform(EnergyOptions::default(), 2, 500);
+// The paper's recipe (Figs. 23-24): E_P on the coarse input, then two rounds of E_λ, each after a
+// 4-1 subdivision, 500 L-BFGS iterations per round, remeshing on. Same as FlowOptions::default();
+// FlowOptions::uniform(EnergyOptions::default(), 2, 500) is E_λ in every round.
+let options = FlowOptions::coarse_to_fine(2, 500);
 let result = flow(&mesh, &positions, &options, None)?;
 result.mesh;                       // the final TriMesh
 result.positions;                  // its positions
@@ -111,6 +113,35 @@ Command line: `cargo run --release -p ddg-developability --example develop -- IN
 Python: `ddg_tools.developability`, `make_developable`, `developable_seams`, `developable_unwrap`
 (`crates/ddg-py/README.md`). Blender: Make Developable, Show Developability, Developable Seams + UV
 (`blender/README.md`, with end-to-end numbers on spot, bob and blub).
+
+## Reproducing the paper's look
+
+Measured in `QUALITY.md`. The look of Figs. 1, 22–24 (smooth developable pieces between regular
+seam curves) needs the paper's workflow, not just the energy:
+
+1. **A coarse input of uniform triangles**, about 1k (the paper used Instant Meshes with a
+   triangle field and extrinsic alignment). A subdivision cage (`*_control_mesh.obj`) is the wrong
+   input: its thin parts fold flat into double sheets and spikes for every energy. Without
+   Instant Meshes, MeshLab's isotropic remeshing does
+   (`uv run crates/ddg-developability/examples/coarse_inputs.py OUTDIR 1000`).
+2. **`E_P` on the coarse mesh, then `E_λ` after each 4-1 subdivision** (`FlowOptions::default()` =
+   `coarse_to_fine(2, 500)`), or `E_P` throughout (Fig. 1). `E_λ` alone on a coarse mesh keeps
+   flattening it (volume down to 0.3 to 0.7 of the model in 5000 iterations).
+3. **Two subdivisions, a few hundred iterations per round.** The gradient of these nonsmooth
+   energies does not become small; 300 to 1000 iterations per round look alike, more drifts
+   further from the model.
+
+```sh
+uv run crates/ddg-developability/examples/coarse_inputs.py runs_tmp/inputs 1000
+cargo run --release -p ddg-developability --example develop -- runs_tmp/inputs/spot_iso1000.obj \
+  --rounds combinatorial:500,+covariance:500,+covariance:500 --no-cut --out spot_developable.obj
+```
+
+Spot, bob, blub this way: Hausdorff distance to the dense model 0.045 / 0.058 / 0.053 of the
+diagonal, volume 0.96 / 0.97 / 0.89 (the old default on the control meshes: 0.33 / 0.11 / 0.32,
+volume 0.51 / 0.87 / 0.08). The flow in place on a dense model has no coarse phase to regularize
+the seams (Sec. 4.2), so it keeps more short creases; most of what looks like hatching when
+edges above 30 degrees are drawn dark is the zigzag of a seam that crosses the triangles.
 
 ## Where this departs from the paper
 
@@ -154,6 +185,15 @@ Full text, with the evidence, in **SPEC §8**. The ones that matter:
   applied (`RemeshReport::rejected`).
 * **D33: two-face boundary stars** contribute exactly nothing (the eigenvector of a rank-deficient
   matrix is arbitrary and had fed noise into the gradient; found by the oracle fuzz).
+* **D34: `Stationary`.** A line search that finds no descent where the energy is flat to rounding
+  (a converged flow) ends `Stationary`, not `LineSearchFailed` (which now means a wall or a stiff
+  point where the energy rises measurably).
+* **D35: remeshing fallback.** When the paper's operation (flip a cap, collapse a needle) is refused
+  by a legality rule, the triangle's other flip/collapse is tried: faces left below the small angle
+  62 -> 35 over the 45 robustness flows (`RemeshOptions::fallback_operations = false` is the
+  paper's rule alone).
+* **D36: default flow** `E_P` coarse, then `E_λ` fine (the paper's Figs. 23–24), instead of `E_λ`
+  throughout, which flattens coarse meshes (`QUALITY.md`).
 * **D24**: the polygon rule of the bindings (topology unchanged: positions only; otherwise the
   triangle mesh with the material of the parent polygon, which `face_parent` makes exact).
 
@@ -248,6 +288,10 @@ cargo bench -p ddg-developability                                       # eig, e
   flow does not avoid them, and a very long flow produces them.
 * A flow can end before a round (D32) or leave faces below the small angle (`bad_faces`): both are
   reported, neither is repaired.
+* Thin parts of a subdivision cage fold flat into double sheets; the flow needs a coarse uniform
+  input (no remesher in the workspace; `examples/coarse_inputs.py` uses MeshLab for the study).
+  The intrinsic energy gets stuck at stiff states where a star's vector area nearly vanishes
+  (`QUALITY.md`).
 * `E_λ` is nonsmooth at ties and repeated eigenvalues; a deterministic active piece is used and
   near ties are counted. L-BFGS on such an energy has no convergence theorem (Lewis–Overton
   observe it works).

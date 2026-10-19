@@ -515,7 +515,11 @@ Round { energy: EnergyOptions, max_iterations, subdivide_before: bool }
 For each round: (subdivide if asked; pinned ids follow §5.2) → (remesh if enabled) → optimize, with
 the remeshing check of §5.3 after every accepted iteration. The paper uses `E_P` in a coarse phase
 and `E_λ` in the fine phase for Figs. 23–24; rounds allow that. `FlowOptions::uniform(energy,
-subdivisions, iterations)` builds `subdivisions + 1` equal rounds. Result: final `TriMesh`,
+subdivisions, iterations)` builds `subdivisions + 1` equal rounds; `FlowOptions::coarse_to_fine(
+subdivisions, iterations)` the paper's recipe of Figs. 23–24 (round 0 `E_P`, the subdivided rounds
+`E_λ`), and `FlowOptions::default()` is `coarse_to_fine(2, 500)` (D36; before: `uniform(E_λ, 2,
+500)`). The input should be coarse and uniform (the paper's are about 1k triangles from Instant
+Meshes; `QUALITY.md`). Result: final `TriMesh`,
 positions, `vertex_source: Vec<u32>` (input vertex id or `NONE` for created vertices),
 `face_parent: Vec<u32>` (for each final face the input face it descends from: the four children of a
 subdivided face have its parent; a collapse removes two faces and the others keep theirs; a flip
@@ -567,6 +571,13 @@ max_passes (10), check_interval (1 iteration) }`, `0 < small_angle < π/3` enfor
   The surviving vertex is the lower id; the other is removed. A collapse is also refused if a
   face of the merged star would get a smallest angle below `min_face_angle` (default `1e-4`,
   `0` = off, `< small_angle`) and below its present smallest angle (D31).
+
+**Fallback (D35, `RemeshOptions::fallback_operations`, default `true`; `false` is the rule above
+alone):** when the operation of the rule is refused, the other operations on the same triangle are
+tried under the same legality rules, first applicable wins: for a cap, the collapse of its
+shortest edge; then, for both kinds, the flip of each of its other edges, longest edge first (a
+needle: all three; a cap: the two short ones). Counted in `flips`/`collapses` and also in
+`RemeshReport::fallback_flips`/`fallback_collapses`.
 
 A pass collects the bad triangles, sorts them by `(smallest angle, face id)` and handles each that
 is still present and still bad; passes repeat until nothing changes or `max_passes`. Vertices are
@@ -843,6 +854,37 @@ per-chart flatten stays available in Rust and Python.
   Tests: `tests/optimize.rs::stationary_is_told_from_line_search_failure`,
   `tests/flow.rs::converged_flow_is_stationary` (noisy cylinder sheet, E 1.4e-14 after 537
   iterations, was `LineSearchFailed`).
+
+* **D35** Remeshing fallback (§5.3). *Paper:* flip a triangle with two small angles, collapse one
+  with a single small angle, "otherwise we do not perform any remeshing" (Sec. 4.3); no legality
+  rules. *Before:* only the paper's operation was tried; when its legality rule refused it the
+  triangle stayed (`FlowReport::bad_faces`, 2 to 19 on long flows of the control meshes). Refusal
+  reasons, logged on five such flows: collapse "link condition" (73 to 3202 per flow, most
+  common), flip "normal turn", flip "opposite vertices adjacent", collapse "normal turn of the
+  merged star". *Now:* the other flip/collapse of the same triangle is tried. *Measured*
+  (`examples/robust_study.sh`, 45 flows, with and without `--no-fallback`): `bad_faces` summed 62
+  -> 35, every flow and every cut completes, 0 flipped UV triangles either way; the cut study
+  (1188 cuts) has 0 flipped UV triangles with the default cut (D30) either way; the dense and
+  crumpled flows are identical in 18 of 27 (the dense ones that differ end within 5 %; crumpled `E_λ`
+  ends lower: 8.9e-4 -> 1.1e-4 at 500 it, 1.2e-7 -> 6.1e-8 at 3000); on the coarse uniform inputs of
+  `QUALITY.md` both give 0 bad faces (the fallback never triggers or changes nothing visible).
+  Not a cure: the remaining thin faces are on chaotic over-runs of the control meshes (the
+  per-flow counts move both ways, e.g. spot `E_P` 3000 it 19 -> 3, bob `E_λ` 3000 it 1 -> 8).
+  Tests: `tests/remesh.rs::refused_cap_flip_falls_back_to_a_collapse`, the random-mesh test
+  (unresolved 13 -> 3 of 360 injected bad triangles).
+* **D36** Default flow = the paper's coarse-to-fine recipe (§5.1). *Paper:* coarse input (~1k
+  triangles, Instant Meshes), `E_P` for Figs. 1, 2, 25, `E_P` coarse then `E_λ` fine for Figs. 23,
+  24, intrinsic for Figs. 20–22; "just using one of the energies (say, `E_λ`) will produce
+  reasonable default designs". *Before:* `E_λ` in all three rounds. *Measured* (`QUALITY.md`, 500
+  it/round, distance to the dense model in units of its bounding-box diagonal): on the control
+  meshes `E_λ` keeps flattening the shape (volume ratio spot 0.51, bob 0.87, blub 0.08; one round of
+  5000 iterations on the uniform 1k inputs: 0.30 to 0.70 while `E_P` keeps 0.92 to 0.99); with
+  `E_P` first: volume 1.15 / 1.06 / 0.70, Hausdorff 0.33 -> 0.22, 0.11 -> 0.08, 0.32 -> 0.14,
+  180-degree folds 282 -> 168, 57 -> 4, 287 -> 134. On uniform 1k inputs: volume 0.91 -> 0.96,
+  0.83 -> 0.97, 0.84 -> 0.89, Hausdorff 0.096 -> 0.045, 0.085 -> 0.058, 0.050 -> 0.053, folds
+  99 -> 24, 31 -> 0, 264 -> 185. `uniform` stays for the old behaviour and for one-energy flows.
+  The Python and Blender layers build their flows with `uniform` and an energy of their own, so
+  they are not changed by this.
 
 ## 9. Formula ids
 
