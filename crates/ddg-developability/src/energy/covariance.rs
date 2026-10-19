@@ -122,13 +122,18 @@ pub fn covariance_max(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut
     let k = nrm.len();
     s.fill(0.0);
     y.fill([0.0; 3]);
-    let phi = |v: [f64; 3]| {
+    // φ(v), or `None` as soon as a partial maximum exceeds `bound` (then the candidate is neither
+    // the best nor the second best, so neither the result nor the margin depends on it).
+    let phi = |v: [f64; 3], bound: f64| {
         let mut m = 0.0f64;
         for n in nrm {
             let t = dot(v, *n);
             m = m.max(t * t);
+            if m > bound {
+                return None;
+            }
         }
-        m
+        Some(m)
     };
     // Candidate: (faces, signs) of the sites (a, b, c).
     let mut best: Option<Candidate> = None;
@@ -138,10 +143,27 @@ pub fn covariance_max(star: &Star, y: &mut [[f64; 3]], s: &mut [f64]) -> StarOut
         let a = scale(nrm[faces[0]], signs[0]);
         let b = scale(nrm[faces[1]], signs[1]);
         let c = scale(nrm[faces[2]], signs[2]);
-        let Some((v, len)) = spherical_circumcenter(a, b, c) else {
+        // Same arithmetic as `spherical_circumcenter`.
+        let n = cross(sub(b, a), sub(c, a));
+        let n2 = dot(n, n);
+        let len = n2.sqrt();
+        if !len.is_finite() || len <= 0.0 {
+            return;
+        }
+        // Cheap rejection with the unnormalized `n` (no square root): `(n·N)² / |n|²` differs
+        // from the computed `⟨v,N⟩²` by a few ulps, far below the absolute slack `1e-12`, so a
+        // rejected candidate has `φ(v) > second` and changes neither the choice nor the margin.
+        let lim = (second * (1.0 + 1e-9) + 1e-12) * n2;
+        if nrm.iter().any(|m| {
+            let t = dot(n, *m);
+            t * t > lim
+        }) {
+            return;
+        }
+        let v = scale(n, 1.0 / len);
+        let Some(p) = phi(v, second) else {
             return;
         };
-        let p = phi(v);
         let g = dot(v, a);
         let slack = p - g * g;
         if p < best_key.0 || (p == best_key.0 && slack < best_key.1) {

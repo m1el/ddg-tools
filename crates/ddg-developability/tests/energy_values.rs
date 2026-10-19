@@ -265,3 +265,93 @@ fn valence_three_is_omitted_by_default() {
     assert!(!e.counted[0] && e.counted[1]);
     assert!(e.vertex_energy[0] > 0.0);
 }
+
+/// `λ_max` with pruning equals the plain enumeration of SPEC §3.5 (bitwise, value and margin)
+/// and is never beaten by a dense search over the sphere.
+#[test]
+fn covariance_max_matches_plain_enumeration_and_dense_search() {
+    use ddg_developability::energy::{Scratch, Star, star_energy};
+    let mut r = SplitMix64::new(77);
+    for trial in 0..300 {
+        let k = 3 + trial % 7;
+        let h = [0.05, 0.4, 1.5][trial % 3];
+        let normals: Vec<[f64; 3]> = (0..k)
+            .map(|_| {
+                normalize([
+                    r.uniform(-h, h),
+                    r.uniform(-h, h),
+                    1.0 - 2.0 * (trial % 2) as f64 * r.uniform(0.0, 1.0),
+                ])
+            })
+            .collect();
+        let angles = vec![1.0; k];
+        let star = Star {
+            normals: &normals,
+            angles: &angles,
+            closed: true,
+            vector_area: [0.0, 0.0, 1.0],
+        };
+        let (mut y, mut s) = (vec![[0.0; 3]; k], vec![0.0; k]);
+        let out = star_energy(
+            Energy::CovarianceMax,
+            &star,
+            &mut y,
+            &mut s,
+            &mut Scratch::default(),
+        )
+        .unwrap();
+        // plain enumeration
+        let phi = |v: [f64; 3]| {
+            normals
+                .iter()
+                .map(|n| dot(v, *n).powi(2))
+                .fold(0.0, f64::max)
+        };
+        let mut keys: Vec<(f64, f64)> = Vec::new();
+        let mut cand = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| {
+            let n = cross(sub(b, a), sub(c, a));
+            let len = norm(n);
+            if len.is_finite() && len > 0.0 {
+                let v = scale(n, 1.0 / len);
+                let p = phi(v);
+                keys.push((p, p - dot(v, a).powi(2)));
+            }
+        };
+        for i in 0..k {
+            for j in i + 1..k {
+                for l in j + 1..k {
+                    for (s2, s3) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                        cand(normals[i], scale(normals[j], s2), scale(normals[l], s3));
+                    }
+                }
+            }
+        }
+        for i in 0..k {
+            for j in i + 1..k {
+                cand(normals[i], scale(normals[i], -1.0), normals[j]);
+            }
+        }
+        let mut ps: Vec<f64> = keys.iter().map(|k| k.0).collect();
+        ps.sort_by(f64::total_cmp);
+        assert_eq!(out.value.to_bits(), ps[0].to_bits(), "trial {trial}");
+        let margin = if ps.len() > 1 {
+            ps[1] - ps[0]
+        } else {
+            f64::INFINITY
+        };
+        assert_eq!(out.margin.to_bits(), margin.to_bits(), "trial {trial}");
+        // dense search: no direction is better
+        let mut dense = f64::INFINITY;
+        for a in 0..200 {
+            for b in 0..100 {
+                let (t, p) = (2.0 * PI * a as f64 / 200.0, PI * (b as f64 + 0.5) / 100.0);
+                dense = dense.min(phi([p.sin() * t.cos(), p.sin() * t.sin(), p.cos()]));
+            }
+        }
+        assert!(
+            out.value <= dense + 1e-12,
+            "trial {trial}: {} > dense {dense}",
+            out.value
+        );
+    }
+}

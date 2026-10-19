@@ -23,6 +23,7 @@ pub use intrinsic::{
 
 use ddg_core::TriMesh;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::error::DevError;
 use crate::geometry::{FaceFrame, backprop_face, corner_angles, face_frame, v3};
@@ -208,14 +209,28 @@ pub fn star_energy(
 /// [formula: dev-valence-three-flat]
 pub fn domain(mesh: &TriMesh, include_boundary: bool, omit_valence_three: bool) -> Vec<bool> {
     (0..mesh.n_vertices())
+        .into_par_iter()
+        .with_min_len(VERTEX_CHUNK)
         .map(|v| {
-            if mesh.is_boundary_vertex(v) {
-                include_boundary
+            let closed = !mesh.is_boundary_vertex(v);
+            let k = if closed && omit_valence_three {
+                mesh.vertex_face_count(v)
             } else {
-                !(omit_valence_three && mesh.vertex_face_count(v) == 3)
-            }
+                0
+            };
+            in_domain(closed, k, include_boundary, omit_valence_three)
         })
         .collect()
+}
+
+/// The rule of [`domain`] for one vertex (`k` = number of faces).
+#[inline]
+fn in_domain(closed: bool, k: usize, include_boundary: bool, omit_valence_three: bool) -> bool {
+    if closed {
+        !(omit_valence_three && k == 3)
+    } else {
+        include_boundary
+    }
 }
 
 /// Vertices per parallel work item. Fixed (not derived from the thread count) so that the
@@ -228,8 +243,8 @@ struct Stars {
     offsets: Vec<usize>,
     /// Corner id (`3 f + slot`) per star slot.
     corners: Vec<u32>,
-    /// Star slot per corner id.
-    slot: Vec<u32>,
+    /// Star slot per corner id (each written once, by the chunk owning the corner's vertex).
+    slot: Vec<AtomicU32>,
     /// Interior vertex (closed fan).
     closed: Vec<bool>,
 }
@@ -246,57 +261,59 @@ fn split_lengths<T>(mut data: &mut [T], lengths: impl Iterator<Item = usize>) ->
 }
 
 impl Stars {
+    /// One walk around every vertex (parallel over fixed vertex chunks), then the offsets, then
+    /// the inverse map (parallel scatter; every corner belongs to exactly one star).
     fn new(mesh: &TriMesh) -> Stars {
         let nv = mesh.n_vertices();
         let nc = 3 * mesh.n_faces();
-        let (valence, closed): (Vec<usize>, Vec<bool>) = (0..nv)
+        let chunks: Vec<(Vec<u32>, Vec<u32>, Vec<bool>)> = (0..nv.div_ceil(VERTEX_CHUNK))
             .into_par_iter()
-            .with_min_len(VERTEX_CHUNK)
-            .map(|v| (mesh.vertex_face_count(v), !mesh.is_boundary_vertex(v)))
-            .unzip();
-        let mut offsets = Vec::with_capacity(nv + 1);
-        offsets.push(0usize);
-        let mut acc = 0usize;
-        for &k in &valence {
-            acc += k;
-            offsets.push(acc);
-        }
-        let mut corners = vec![0u32; nc];
-        let chunk_lens = chunk_slot_lengths(&offsets, nv);
-        split_lengths(&mut corners, chunk_lens.into_iter())
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(ci, out)| {
-                let mut i = 0;
-                for v in ci * VERTEX_CHUNK..((ci + 1) * VERTEX_CHUNK).min(nv) {
-                    for h in mesh.outgoing_halfedges(v) {
-                        out[i] = h as u32;
-                        i += 1;
-                    }
+            .map(|ci| {
+                let vs = ci * VERTEX_CHUNK..((ci + 1) * VERTEX_CHUNK).min(nv);
+                let mut corners = Vec::with_capacity(7 * vs.len());
+                let mut valence = Vec::with_capacity(vs.len());
+                let mut closed = Vec::with_capacity(vs.len());
+                for v in vs {
+                    let before = corners.len();
+                    corners.extend(mesh.outgoing_halfedges(v).map(|h| h as u32));
+                    valence.push((corners.len() - before) as u32);
+                    closed.push(!mesh.is_boundary_vertex(v));
                 }
-            });
-        let faces = mesh.faces();
-        let slot: Vec<u32> = (0..nc)
-            .into_par_iter()
-            .with_min_len(1024)
-            .map(|c| {
-                let v = faces[c / 3][c % 3] as usize;
-                let mut pos = 0;
-                for h in mesh.outgoing_halfedges(v) {
-                    if h == c {
-                        break;
-                    }
-                    pos += 1;
-                }
-                (offsets[v] + pos) as u32
+                (corners, valence, closed)
             })
             .collect();
+        let mut offsets = Vec::with_capacity(nv + 1);
+        offsets.push(0usize);
+        let mut corners = Vec::with_capacity(nc);
+        let mut closed = Vec::with_capacity(nv);
+        for (c, val, cl) in &chunks {
+            corners.extend_from_slice(c);
+            closed.extend_from_slice(cl);
+            for &k in val {
+                offsets.push(offsets.last().copied().unwrap_or(0) + k as usize);
+            }
+        }
+        let slot: Vec<AtomicU32> = (0..nc).map(|_| AtomicU32::new(0)).collect();
+        (0..nv.div_ceil(VERTEX_CHUNK))
+            .into_par_iter()
+            .for_each(|ci| {
+                let lo = offsets[ci * VERTEX_CHUNK];
+                let hi = offsets[((ci + 1) * VERTEX_CHUNK).min(nv)];
+                for (i, &c) in corners[lo..hi].iter().enumerate() {
+                    slot[c as usize].store((lo + i) as u32, Ordering::Relaxed);
+                }
+            });
         Stars {
             offsets,
             corners,
             slot,
             closed,
         }
+    }
+
+    #[inline]
+    fn slot(&self, corner: usize) -> usize {
+        self.slot[corner].load(Ordering::Relaxed) as usize
     }
 }
 
@@ -429,7 +446,19 @@ fn evaluate_impl(
 
     // 2. Stars.
     let stars = Stars::new(mesh);
-    let counted = domain(mesh, opts.include_boundary, opts.omit_valence_three);
+    let counted: Vec<bool> = (0..nv)
+        .into_par_iter()
+        .with_min_len(VERTEX_CHUNK)
+        .map(|v| {
+            let k = stars.offsets[v + 1] - stars.offsets[v];
+            in_domain(
+                stars.closed[v],
+                k,
+                opts.include_boundary,
+                opts.omit_valence_three,
+            )
+        })
+        .collect();
     let n_slots = stars.corners.len();
     let (mut ys, mut ss) = if want_gradient {
         (vec![[0.0; 3]; n_slots], vec![0.0; n_slots])
@@ -553,7 +582,7 @@ fn evaluate_impl(
                 let mut z = [0.0; 3];
                 let mut s = [0.0; 3];
                 for m in 0..3 {
-                    let sl = stars.slot[3 * f + m] as usize;
+                    let sl = stars.slot(3 * f + m);
                     y = v3::add(y, ys[sl]);
                     s[m] = ss[sl];
                     z = v3::add(z, vout[t[m] as usize].z);
