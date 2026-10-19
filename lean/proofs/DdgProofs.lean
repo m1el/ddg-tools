@@ -47,3 +47,16 @@ import DdgProofs.Intrinsic.Barycentric
 import DdgProofs.Intrinsic.Move
 import DdgProofs.IntrinsicApps.HeatFem
 import DdgProofs.Intrinsic.AppsAmrVector
+import DdgProofs.Developability.Vec
+import DdgProofs.Developability.Basic
+import DdgProofs.Developability.Invariance
+import DdgProofs.Developability.Combinatorial
+import DdgProofs.Developability.Covariance
+import DdgProofs.Developability.MaxCovariance
+import DdgProofs.Developability.Intrinsic
+import DdgProofs.Developability.Width
+import DdgProofs.Developability.Eig
+import DdgProofs.Developability.Optimizer
+import DdgProofs.Developability.Subdivision
+import DdgProofs.Developability.Remesh
+import DdgProofs.Developability.RegularCone

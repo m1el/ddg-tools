@@ -1223,6 +1223,239 @@ machine-checked: the entries below, and everything about rounding and the solver
 
 ---
 
+## Developability of Triangle Meshes
+
+"Developability paper" is O. Stein, E. Grinspun, K. Crane, *Developability of Triangle Meshes*,
+ACM TOG 37(4), Article 77, 2018 (<https://doi.org/10.1145/3197517.3201303>); section, equation
+and proposition numbers are the paper's. The contract is `crates/ddg-developability/SPEC.md`
+("SPEC", decisions `D1`–`D29`). Clean room: everything here is written from the paper's text and
+the SPEC; the authors' code is never consulted. "L&O" is A. S. Lewis, M. L. Overton, *Nonsmooth
+optimization via quasi-Newton methods*, Math. Program. A 141, 135–163, 2013 (numbering of the
+preprint `cs.nyu.edu/~overton/papers/pdffiles/bfgs_inexactLS.pdf`, as the SPEC uses it); "N&W" is
+J. Nocedal, S. J. Wright, *Numerical Optimization*, 2nd ed., Springer 2006.
+
+**What the machine-checked part covers, and what it does not.** There is no certifiable minimizer:
+the library runs a descent method on a nonconvex, nonsmooth energy. Machine-checked
+(`DdgProofs/Developability/*.lean`, 30 `dev-` ids, statements in the README): the per-face
+quantities and their derivatives along arbitrary differentiable motions of the corners, with the
+corrections D2 (`1/(2A)` in Eq. 8) and D3 (squared length in Eq. 9); the adjoint
+(back-propagation) form of the gradient; the three forms of Eq. 1 (D1); the gradients of the
+active pieces of all six energies (for `E_λ` and the intrinsic width the derivative of `xᵀ A x`
+at a fixed `x`, which is the derivative of the eigenvalue only through the cited
+`dev-simple-eigenvalue-derivative`); the circumcenter formula and the site signs of D5; the
+corrected log-map adjoint of Eq. 11 (D6) and the altitude derivative of B.5.1 (D7); one Jacobi
+rotation; the acceptance conditions of the weak Wolfe line search as the oracle defines it; that
+4-1 midpoint subdivision keeps normals, angles and vertex normals and creates hinges; the
+small-angle classification of the remeshing; `E_λ` and the intrinsic energy of the regular cone.
+**Not** machine-checked: the entries below; that the gradient of the active piece chosen at a tie
+(SPEC §3.8, D10) is an element of the Clarke generalized gradient (L&O Sec. 5.1 practice); the
+convergence of the Jacobi sweeps, of L-BFGS and of the flow; the closed forms of SPEC §10.3 for
+`E_P`, `λ_max` and the intrinsic max energy (tests only); the topology of remeshing and cutting;
+the Taylor series of the log-map coefficients near `φ = 0` and the overflow guard of the Jacobi
+rotation (numerical devices); anything about rounding.
+
+### [formula: dev-hinge-coplanar] An embedded vertex star is a hinge iff its normals are coplanar
+
+- **Statement.** An embedded vertex star `St(i)` forms a hinge (Def. 3.1: its triangles split
+  into two edge-connected regions of constant normal) if and only if all its triangle normals lie
+  in a common plane through the origin.
+- **Reference.** Developability paper Sec. 3.3, Theorem 3.3 and its proof (the cross product of
+  two distinct normals of adjacent triangles is parallel to their common edge and to the normal of
+  the plane, so a change of normal across more than two edges forces two edges from `i` to be
+  parallel, which embeddedness excludes).
+- **Why not formalized.** Embeddedness of a simplicial star (injectivity of the piecewise linear
+  map of the star) is not set up in Mathlib or in `lean/proofs`; the argument is short but
+  topological.
+- **What depends on it.** The interpretation of all six energies as measures of developability
+  (each vanishes exactly on coplanar normals, SPEC §1). No formula of the code: the energies are
+  defined and differentiated without it, and the code does not check embeddedness (D28).
+  Proved instead: on a star whose normals are orthogonal to one vector the objectives of Eq. 3,
+  Eq. 6 and the intrinsic objectives vanish (`coplanar_energies_vanish`,
+  `dev-midpoint-subdivision`).
+
+### [formula: dev-hinge-antiparallel] A non-flat interior hinge has a pair of antiparallel edges
+
+- **Statement.** If an interior vertex `i` is a non-flat hinge vertex, it is contained in a pair
+  of antiparallel edges `ia, ib ∈ St(i)` (the two edges shared by the two flat regions, both
+  parallel to `N₁ × N₂`).
+- **Reference.** Developability paper App. A, Proposition A.1 and its proof.
+- **Why not formalized.** Needs embeddedness (as `dev-hinge-coplanar`).
+- **What depends on it.** Nothing in the code; it motivates `dev-hinge-ruled` and
+  `dev-valence-three-flat`.
+
+### [formula: dev-hinge-ruled] A discrete developable immersion without flat vertices is discrete ruled
+
+- **Statement.** A discrete developable immersion `f` (every vertex star a hinge) with no flat
+  vertices is discrete ruled (Def. 3.2): every vertex lies on a path of parallel edges with both
+  endpoints on the boundary.
+- **Reference.** Developability paper App. A, Proposition A.2 and its proof (by
+  Proposition A.1, followed from vertex to vertex).
+- **Why not formalized.** Needs `dev-hinge-antiparallel` and a global combinatorial argument on
+  the mesh.
+- **What depends on it.** Nothing in the code (it explains the rulings of the results and the
+  edge weights of the cut, `dev-cut-edge-weight`).
+
+### [formula: dev-valence-three-flat] A valence-3 hinge vertex is flat
+
+- **Statement.** Any valence-3 hinge vertex is flat: if it were not, by Proposition A.1 it would
+  have two antiparallel edges, which at valence 3 are edges of one triangle, so the triangle is
+  degenerate and the star is not embedded.
+- **Reference.** Developability paper App. A, Proposition A.3; Sec. 4.1.4 ("Triple points",
+  Fig. 16), which uses it to leave valence-3 vertices out of the energy.
+- **Why not formalized.** Needs `dev-hinge-antiparallel` (embeddedness).
+- **What depends on it.** Only the motivation of the default `omit_valence_three = true`
+  (SPEC §3.1, D8): a valence-3 interior vertex cannot become a non-flat hinge, so penalizing it
+  would flatten it. Not a correctness property of any formula.
+
+### [formula: dev-simple-eigenvalue-derivative] Derivative of a simple eigenvalue of a symmetric matrix
+
+- **Statement.** If `λ` is a simple eigenvalue of the real symmetric matrix `A₀` with unit
+  eigenvector `x₀`, there is a neighbourhood of `A₀` on which the eigenvalue `λ(A)` near `λ`
+  is a smooth (real analytic) function of the symmetric matrix `A`, with differential
+  `dλ = x₀ᵀ (dA) x₀`, i.e. `∇_A λ = x₀ x₀ᵀ`.
+- **Reference.** J. R. Magnus, *On differentiating eigenvalues and eigenvectors*, Econometric
+  Theory 1(2), 179–191, 1985, Theorem 1; T. Kato, *Perturbation Theory for Linear Operators*,
+  Springer, 1995 reprint of the 2nd ed., Ch. II §5. Used by
+  the developability paper App. B.3 ("the identity `∇_A λ = x xᵀ`").
+- **Why not formalized.** Mathlib has the spectral theorem and the min-max (Rayleigh)
+  characterization, but no perturbation theory of eigenvalues (differentiability of a simple
+  eigenvalue as a function of the matrix).
+- **What depends on it.** The gradient of `E_λ` (Eq. 10) and of the intrinsic width (SPEC §3.4,
+  §3.6): proved are the Rayleigh characterization (`dev-covariance-matrix`), the supergradient
+  inequality, which holds at every matrix (`dev-eigenvalue-supergradient`), and the derivative
+  of `xᵀ A(t) x` at fixed `x` (`dev-covariance-gradient`, `dev-tangent-eigen-derivative`); this
+  entry turns the last into the derivative of the eigenvalue. At a repeated smallest eigenvalue
+  (every regular cone with `sin²α/2 < cos²α`) the energy is not differentiable and the code uses
+  the gradient of one piece (SPEC §3.8); finite-difference tests are restricted to stars with an
+  eigenvalue gap (SPEC §10.2).
+
+### [formula: dev-max-covariance-voronoi] The minimum of `max_σ ⟨u, N_σ⟩²` is attained at a spherical Voronoi vertex
+
+- **Statement.** For unit vectors `N_σ`, `φ(u) = max_σ ⟨u, N_σ⟩²` attains its minimum over the
+  unit sphere at a point equidistant from three sites of `{±N_σ}` (a vertex of their spherical
+  Voronoi diagram), or, when all normals are parallel or antiparallel, `φ ≡ 0` on a great circle;
+  hence the minimum over the candidates of SPEC §3.5 (circumcenters of triples of sites, poles of
+  pairs) is the minimum of `φ`.
+- **Reference.** Developability paper App. B.4 (stated, with Fig. 28); the proof sketch of SPEC
+  §3.5 (within a Voronoi cell the distance to the site has no interior maximum except on the
+  great circle orthogonal to it, along a Voronoi edge `|⟨u, s⟩|` is monotone in the distance from
+  the midpoint of the bisector), checked there against dense search on 200 random stars.
+- **Why not formalized.** Spherical Voronoi diagrams and the largest empty circle problem are
+  not in Mathlib; the sketch would need the cell decomposition of the sphere.
+- **What depends on it.** That the code's `λ_max` is the minimum and not only an upper bound:
+  every candidate is a unit vector, so the computed value is always `≥ λ_max` (exact
+  arithmetic), and extra candidates are harmless. Proved: the circumcenter is equidistant from
+  its three sites and is, up to sign, the only equidistant unit vector
+  (`dev-spherical-circumcenter`), and the sensitivities at a generic minimizer
+  (`dev-max-covariance-gradient`).
+
+### [formula: dev-min-width-hull-edge] The minimum width of a convex polygon is attained orthogonally to an edge
+
+- **Statement.** The width `max_σ ⟨P_σ, u⟩ − min_σ ⟨P_σ, u⟩` of a finite planar point set,
+  minimized over unit directions `u`, attains its minimum at a direction orthogonal to an edge of
+  the convex hull (rotating calipers).
+- **Reference.** M. E. Houle, G. T. Toussaint, *Computing the width of a set*, IEEE Trans.
+  Pattern Anal. Mach. Intell. 10(5), 761–765, 1988; G. T. Toussaint, *Solving geometric problems
+  with the rotating calipers*, Proc. IEEE MELECON '83, Athens, 1983. Used by the developability
+  paper App. B.5.1.
+- **Why not formalized.** Needs convex hulls of planar point sets and the piecewise structure of
+  the support function; not set up in `lean/proofs`.
+- **What depends on it.** That the intrinsic max energy over the pair candidates
+  `u_ab = n0 × (Ñ_b − Ñ_a)/|Ñ_b − Ñ_a|` (D7) is the minimum and not only an upper bound (every
+  candidate is a unit tangent vector, so the computed value is always an upper bound). Proved:
+  the value as `(max − min)²` (`dev-intrinsic-width`) and the derivatives
+  (`dev-width-altitude-gradient`, `dev-min-width-gradient`).
+
+### [formula: dev-lbfgs-two-loop] The L-BFGS two-loop recursion
+
+- **Statement.** For stored pairs `(s_i, y_i)` with `s_iᵀ y_i > 0` and `H₀ = γ I`, `γ > 0`, the
+  two-loop recursion returns `H_k g`, where `H_k` is the matrix of the limited-memory BFGS update
+  of `H₀` by the stored pairs; `H_k` is symmetric positive definite, so `d = −H_k g` is a descent
+  direction for `g ≠ 0`.
+- **Reference.** N&W Algorithm 7.4 (two-loop recursion), Algorithm 7.5 (L-BFGS), Sec. 7.2,
+  Eq. (7.19) (the scaling `γ = sᵀy/yᵀy`); positive definiteness of the BFGS update for
+  `sᵀy > 0`: N&W Sec. 6.1.
+- **Why not formalized.** Linear algebra of rank-two updates; the code uses the result only to
+  expect a descent direction, which it checks at run time (`gᵀd < 0`, otherwise a reset to
+  steepest descent, SPEC §4.2).
+- **What depends on it.** The efficiency of the optimizer, not its safety: every accepted step
+  satisfies the line-search conditions, which are machine-checked (`dev-lewis-overton-line-search`),
+  and pairs with `sᵀy ≤ 0` are skipped (`dev-weak-wolfe-curvature` says when `sᵀy > 0` holds).
+
+### [formula: dev-lewis-overton-termination] Existence of weak Wolfe steps and termination of the bracketing line search
+
+- **Statement.** If `f` is locally Lipschitz and bounded below along the ray and `d` is a descent
+  direction (`s = gᵀd < 0`), with `0 < c1 < c2 < 1`, there are steps satisfying the Armijo and
+  weak Wolfe conditions, and the bracketing (doubling and bisection) search of Algorithm 2.6
+  terminates for semi-algebraic `f` (or more generally under the paper's hypotheses on the
+  one-dimensional function).
+- **Reference.** L&O Theorem 2.5 (existence) and Theorem 2.7 (termination of Algorithm 2.6), as
+  numbered in the SPEC (§4.3); the defaults `c1 = 0`, `c2 = 1/2` are those of L&O Sec. 5.1.
+- **Source check.** The theorem numbers are taken from the SPEC; the preprint was not re-read for
+  this entry.
+- **Why not formalized.** Needs nonsmooth analysis (Clarke subdifferentials, semi-algebraic
+  functions) not in Mathlib.
+- **What depends on it.** Only that the line search usually succeeds within its limits; the code
+  bounds the number of doublings and bisections and reports a weak or failed search
+  (`LineSearchFailed`), and the machine-checked part covers what an accepted, capped or weak step
+  satisfies (`dev-lewis-overton-line-search`).
+
+### [formula: dev-armijo-backtracking] Finite termination of backtracking for a descent direction
+
+- **Statement.** If `f` is continuously differentiable near `x`, `gᵀd < 0` and `0 < c1 < 1`, then
+  `f(x + t d) ≤ f(x) + c1 t gᵀd` for all sufficiently small `t > 0`; hence backtracking
+  `t ← ρ t` (`0 < ρ < 1`) stops after finitely many reductions.
+- **Reference.** N&W Algorithm 3.1 (backtracking line search) and the discussion after it in
+  Sec. 3.1; existence of steps satisfying the Wolfe conditions: N&W Lemma 3.1.
+- **Why not formalized.** A one-line consequence of the definition of the derivative; the energy
+  is only piecewise smooth, so the hypothesis holds only away from the switching set, and the
+  code bounds the number of reductions anyway (`max_shrinks`).
+- **What depends on it.** That the backtracking variant of gradient descent usually accepts a
+  step; a failure ends the run with `LineSearchFailed` (SPEC §4.4).
+
+### [formula: dev-flip-manifold] Flipping an interior edge keeps a manifold triangle mesh
+
+- **Statement.** Replacing the two triangles `ijk`, `jil` of an interior edge `ij` of a manifold
+  triangle mesh by `kli`, `lkj` gives a manifold triangle mesh with the same vertices, boundary
+  and Euler characteristic, provided `k ≠ l` and `k, l` are not already joined by an edge.
+- **Reference.** H. Edelsbrunner, *Geometry and Topology for Mesh Generation*, Cambridge
+  University Press, 2001, Ch. 2 (edge flips), as cited by the SPEC; the same operation on
+  surfaces is the flip of `it-delaunay-flip-termination` above (signpost paper Sec. 3.3).
+- **Source check.** Not re-read for this entry; the statement is elementary combinatorics.
+- **Why not formalized.** Combinatorics of the mesh data structure, which `lean/proofs` does not
+  model; the Rust code rebuilds and validates the mesh after every remeshing pass
+  (`TriMesh::new`, SPEC §5.3), so a violation is an error, never a silent corruption.
+- **What depends on it.** That legal flips are never refused by the validation.
+
+### [formula: dev-link-condition] An edge collapse keeps a 2-manifold iff the link condition holds
+
+- **Statement.** Contracting an edge `pq` of a triangulated 2-manifold (with boundary) gives a
+  homeomorphic triangulated 2-manifold if `link(p) ∩ link(q) = link(pq)` (and, at the boundary,
+  the corresponding condition for boundary edges).
+- **Reference.** T. K. Dey, H. Edelsbrunner, S. Guha, D. V. Nekhayev, *Topology preserving edge
+  contraction*, Publ. Inst. Math. (Beograd) (N.S.) 66(80), 23–45, 1999 (the link condition for
+  2-manifolds), as cited by the SPEC.
+- **Source check.** Not re-read for this entry.
+- **Why not formalized.** Simplicial topology of the mesh, not modelled in `lean/proofs`; as for
+  flips, the result of every pass is rebuilt and validated (SPEC §5.3).
+- **What depends on it.** That legal collapses are never refused by the validation and do not
+  change the topology.
+
+### [formula: dev-cut-edge-weight] Edge weights of the cut
+
+- **Statement.** The cut through the high-energy vertices is a shortest network for the weights
+  `w_e = c_len ℓ_e/ℓ̄ + c_align (1 − ½(|ê·x_a| + |ê·x_b|))` (`x_v` the eigenvector of the smallest
+  eigenvalue of `A_v`; defaults `c_len = 1`, `c_align = 0`).
+- **Reference.** Developability paper Sec. 4.4 ("a linear combination of length and the dot
+  product between the edge direction and the smaller eigenvector"); SPEC §6 step 2, D22 (the
+  combination and sign are a choice, open question 2 of the SPEC).
+- **Why not formalized.** A design choice, not a derived formula; the weights are nonnegative by
+  construction (`|ê·x| ≤ 1`).
+- **What depends on it.** Where the seams go, not whether the cut is valid: every chart is a disk
+  whatever the weights (guaranteed by `plan_cut`).
+
+---
+
 ## Out of scope of this package
 
 The end-to-end pipeline (`crates/ddg-uv`: charts, packing), the Python bindings and the Blender
@@ -1234,4 +1467,6 @@ quad diagonal, the bookkeeping of regions and components), the run loop around t
 the `N`-region variant (SPEC §8) as a whole and the helpers for initial level sets are not. For
 `crates/ddg-intrinsic` the closed forms of the sixteen proved `it-` ids are covered; the data structure,
 the algorithms built on them (flipping, tracing, insertion, overlay, refinement, export) and
-their tolerances are not.
+their tolerances are not. For `crates/ddg-developability`
+the formulas of the thirty proved `dev-` ids are covered; the flow driver, the remeshing and cutting
+algorithms, the evaluation loop and every tolerance are not.
