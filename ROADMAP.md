@@ -319,9 +319,12 @@ Open:
   default, D8, the user's choice); their L∞ covariance and L∞ combinatorial are ½ × ours; their
   L2 combinatorial is a different normalization (per star, arcs ≥ 2 faces). Our flows are lower
   in 25 of 30 intrinsic/E_λ runs at 200 steps, 72/72 runs valid against 64/72 of theirs; our
-  cut + flatten distorts far less and flips nothing. Open from it: **our L∞ covariance
-  (`CovarianceMax`) flow progresses slowly** (spot control, no remesh: 1.70 after 200
-  iterations and 1.21 after 1000 against their 0.35 after 200; reproducer in COMPARISON.md);
+  cut + flatten distorts far less and flips nothing. The slow L∞ covariance
+  (`CovarianceMax`) flow (spot control, no remesh: 1.70 after 200 iterations against their 0.35)
+  is explained (2026-10-20, two-team clean room, COMPARISON.md §3.3): their line search starts at
+  2 × the previous step (our new opt-in `FirstTrial::GrowPrevious`, D37: 1.10) and has no step
+  cap (with a cap of 2 ℓ̄: 0.062 at their level of distortion). Open: whether to make D37 the
+  default (lower in 28 of 36 study runs, but it traps spot `intrinsic`);
   the `develop` example's `RESULT energy=` shows the `--energy` default when `--rounds` sets
   another energy.
 * **Timings** measured on 2026-10-19 on a quiet machine (energy, eig and flow benches with

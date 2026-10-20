@@ -345,6 +345,59 @@ What we know:
 - So the difference is in the gradient/subgradient that is returned at the nonsmooth points,
   or in how our line search handles the max structure. Neither is identified.
 
+**Follow-up (2026-10-20, two-team clean room).** A separate agent read the reference and returned
+a prose-only list of differences (no code crossed; the clean side never saw its transcript). Its
+findings: the energy, the candidate set and the gradient of this energy are in effect the same as
+ours (full derivative through the circumcenter, no smoothing, Euclidean metric, same L-BFGS
+two-loop and `H_0`); the optimizers differ in the first trial step (theirs: twice the previous
+accepted step, up to 100, every iteration; ours: 1), in the constants (`c1 = 1e-4`, `c2 = 0.99`;
+ours `0`, `0.5`), in the step cap (none), and on a failed line search (they keep the last trial
+point even when it is higher, reset the memory and go on; ours retries once, then stops). They
+have no face-angle floor.
+
+Measured on our side (spot_ctrl, `covariance-max`, 200 iterations, no remeshing):
+
+| change to ours | E@200 |
+|---|---|
+| none | 1.70 |
+| `--min-face-angle 0` (no floor) | 1.70 (bitwise the same run) |
+| `--wolfe 1e-4:0.99` | 1.83 |
+| `--first-trial grow` (D37) | 1.10 |
+| `--first-trial grow --wolfe 1e-4:0.99` | 1.12 |
+| reference | 0.35 |
+
+With `grow`, the 12 combinations initial step 0.003–1 × memory 8/10 give 1.05–1.82 (unit:
+1.48–2.45), and 1000 iterations give 0.56 (unit: 1.21). Over six energies and the three control
+meshes `grow` ends lower in 28 of 36 runs but traps spot `intrinsic` (SPEC D37), so it is an
+option, not the default.
+
+**The rest of the gap is the step cap.** A per-step black-box measurement of the reference (same
+setup, every step synced and evaluated, by the same separate agent) found no failed line search,
+no memory reset and no rise of the energy in 200 steps. Steps 1–14 barely move it (25.6 -> 24.3),
+steps 15–24 take it to 8.6 with single-vertex moves of 0.6 to 3.5 mean edge lengths per step, then
+it settles (1.49 at 50, 0.61 at 100, 0.35 at 200). The mesh inflates: at step 200 the mean edge
+length is 3.1 × the input, the bounding-box diagonal 2.0 ×, the vertex displacement mean 1.90 and
+max 8.78 input edge lengths, smallest angle 1.7e-4. Our cap (D19, 0.5 ℓ̄ per step) forbids those
+steps. With `grow` and a larger cap (spot, 200 iterations, `E@200`):
+
+| max displacement | initial step 0.001 | 0.01 | 0.1 |
+|---|---|---|---|
+| 0.5 (default) | 1.31 | 1.52 | 1.10 |
+| 2 | 0.26 | **0.062** | 1.48 |
+| 4 | 0.63 | 0.062 | 1.46 |
+| none (1e6) | 0.015 | 0.66 | 0.92 |
+
+The 0.062 run is as distorted as the reference's (edge length × 3.08, diagonal × 1.80,
+displacement mean 2.02 / max 7.41, smallest angle 1.5e-3) at a sixth of its energy. Without a cap
+one run reaches 0.015 by blowing the mesh up 375 × (the reason for D19). The results jump with the
+options (0.062 to 1.48 at cap 2): the L∞ energy rewards a few large early moves, and whether the
+flow finds them depends on the path. No error in our energy or gradient is implicated.
+
+```
+develop runs_tmp/dev-blackbox/meshes/spot_ctrl.obj --rounds covariance-max:200 --gradient-tol 0 \
+  --stall-iters 100000000 --no-remesh --no-cut --first-trial grow [--wolfe 1e-4:0.99]
+```
+
 Reproducer (energy history in the file):
 
 ```
@@ -597,8 +650,10 @@ Observations:
 ## 9. Findings about ours
 
 1. **L∞ covariance flow progresses slowly** compared with the reference (§3.3, reproducer
-   there). The energy definition agrees up to the factor ½. The optimizer/subgradient path is
-   the suspect. Not a correctness error that we could demonstrate.
+   there). The energy definition agrees up to the factor ½. Partly explained (§3.3 follow-up): the
+   first trial step of the line search; `FirstTrial::GrowPrevious` (SPEC D37) brings 1.70 to 1.10
+   at 200 iterations against their 0.35. The rest is our step cap (D19): with `grow` and a cap of
+   2 ℓ̄ ours reaches 0.062 at the same distortion as theirs. Not a correctness error.
 2. **`examples/develop.rs` reports the wrong energy name in `RESULT energy=`** when `--rounds`
    is given. It prints `--energy` (default `Covariance`) instead of the energy of the rounds.
    Repro: `develop spot.obj --rounds intrinsic:10 --no-cut | tail -1` shows

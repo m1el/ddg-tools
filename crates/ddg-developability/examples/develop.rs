@@ -18,6 +18,9 @@
 //!   --gradient-tol X     stop a round when mean edge length * |grad|_inf <= X (default 1e-8)
 //!   --memory N           L-BFGS memory (default 10)
 //!   --initial-step X     steepest-descent trial step in mean edge lengths (default 0.1)
+//!   --first-trial R      first trial step of the line search (D37): `unit` (default) or
+//!                        `grow[:GROWTH[:MAX]]` = min(GROWTH x previous accepted step, MAX), default 2 and 100
+//!   --wolfe C1:C2        weak Wolfe constants (default 0:0.5)
 //!   --stall-iters N      consecutive stalled iterations that end a round (default 10)
 //!   --energy-tol X       relative decrease that counts as stalled (default 1e-10)
 //!   --history FILE       write `round iteration energy gradient_norm` per accepted iterate
@@ -40,7 +43,7 @@ use std::time::Instant;
 use ddg_core::TriMesh;
 use ddg_core::io::{read_obj, write_obj};
 use ddg_developability::{
-    CutOptions, Energy, EnergyOptions, FlowOptions, Method, OptimizeStatus, RemeshOptions, Round, cut_and_flatten,
+    CutOptions, Energy, EnergyOptions, FirstTrial, FlowOptions, LineSearch, Method, OptimizeStatus, RemeshOptions, Round, cut_and_flatten,
     evaluate_energy, flow,
 };
 
@@ -66,6 +69,8 @@ struct Args {
     no_fallback: bool,
     max_displacement: f64,
     min_face_angle: Option<f64>,
+    first_trial: Option<FirstTrial>,
+    wolfe: Option<(f64, f64)>,
     threads: Option<usize>,
     out: Option<String>,
     cut_out: Option<String>,
@@ -110,6 +115,8 @@ fn parse_args() -> Result<Args, String> {
         no_fallback: false,
         max_displacement: 0.5,
         min_face_angle: None,
+        first_trial: None,
+        wolfe: None,
         threads: None,
         out: None,
         cut_out: None,
@@ -141,6 +148,13 @@ fn parse_args() -> Result<Args, String> {
             "--small-angle" => a.small_angle_deg = val("--small-angle")?.parse().map_err(|e| format!("{e}"))?,
             "--max-displacement" => a.max_displacement = val("--max-displacement")?.parse().map_err(|e| format!("{e}"))?,
             "--min-face-angle" => a.min_face_angle = Some(val("--min-face-angle")?.parse().map_err(|e| format!("{e}"))?),
+            "--first-trial" => a.first_trial = Some(parse_first_trial(&val("--first-trial")?)?),
+            "--wolfe" => {
+                let v = val("--wolfe")?;
+                let (c1, c2) = v.split_once(':').ok_or_else(|| format!("--wolfe expects C1:C2, got {v}"))?;
+                let p = |x: &str| x.parse::<f64>().map_err(|e| format!("--wolfe {v}: {e}"));
+                a.wolfe = Some((p(c1)?, p(c2)?));
+            }
             "--threads" => a.threads = Some(val("--threads")?.parse().map_err(|e| format!("{e}"))?),
             "--out" => a.out = Some(val("--out")?),
             "--cut-out" => a.cut_out = Some(val("--cut-out")?),
@@ -235,6 +249,12 @@ fn run() -> Result<(), String> {
         fo.optimize.max_displacement = a.max_displacement;
         if let Some(x) = a.min_face_angle {
             fo.optimize.min_face_angle = x;
+        }
+        if let Some(ft) = a.first_trial {
+            fo.optimize.first_trial = ft;
+        }
+        if let Some((c1, c2)) = a.wolfe {
+            fo.optimize.line_search = LineSearch::WeakWolfe { c1, c2, max_doublings: 30, max_bisections: 30 };
         }
         fo.remesh = a.remesh.then(|| RemeshOptions {
             small_angle: a.small_angle_deg.to_radians(),
@@ -461,5 +481,22 @@ fn main() -> ExitCode {
             println!("RESULT error={}", e.replace(' ', "_"));
             ExitCode::FAILURE
         }
+    }
+}
+
+/// `unit` or `grow[:GROWTH[:MAX]]` (defaults 2 and 100).
+fn parse_first_trial(v: &str) -> Result<FirstTrial, String> {
+    let mut it = v.split(':');
+    match it.next() {
+        Some("unit") if it.next().is_none() => Ok(FirstTrial::Unit),
+        Some("grow") => {
+            let mut num = |d: f64| -> Result<f64, String> {
+                it.next().map_or(Ok(d), |x| x.parse().map_err(|e| format!("--first-trial {v}: {e}")))
+            };
+            let growth = num(2.0)?;
+            let max = num(100.0)?;
+            Ok(FirstTrial::GrowPrevious { growth, max })
+        }
+        _ => Err(format!("--first-trial expects unit or grow[:GROWTH[:MAX]], got {v}")),
     }
 }

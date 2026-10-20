@@ -617,6 +617,7 @@ pub fn make_developable(
     let oo = dev::OptimizeOptions {
         method: options.method,
         line_search: options.line_search,
+        first_trial: dev::FirstTrial::Unit,
         max_iterations: options.iterations,
         gradient_tolerance: options.gradient_tolerance,
         energy_tolerance: options.energy_tolerance,

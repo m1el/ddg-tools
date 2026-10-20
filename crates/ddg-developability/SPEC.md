@@ -417,7 +417,7 @@ Defaults `c1 = 0`, `c2 = 0.5` (L&O Sec. 5.1: "we set c1 = 0 … c2 = 1/2"); opti
 `0 ≤ c1 < c2 < 1` enforced (error otherwise). Algorithm:
 
 ```
-α ← 0, β ← +∞, t ← min(1, t_max)
+α ← 0, β ← +∞, t ← min(t₀, t_max)      (t₀ = 1, or the D37 rule `first_trial`)
 loop:
     evaluate E, g at x + t d       (undefined energy ⇒ S(t) fails; counted in undefined_trials)
     if S(t) fails:          β ← t
@@ -651,7 +651,9 @@ pub fn evaluate_energy(mesh, positions, opts) -> Result<(f64, Vec<f64>), DevErro
 pub enum Method { Lbfgs { memory: usize }, GradientDescent, FixedStep { step: f64 } }
 pub enum LineSearch { WeakWolfe { c1: f64, c2: f64, max_doublings: u32, max_bisections: u32 },
                       Backtracking { c1: f64, shrink: f64, max_shrinks: u32 } }
-pub struct OptimizeOptions { pub method: Method, pub line_search: LineSearch, pub max_iterations: usize,
+pub enum FirstTrial { Unit, GrowPrevious { growth: f64, max: f64 } }        // D37
+pub struct OptimizeOptions { pub method: Method, pub line_search: LineSearch,
+    pub first_trial: FirstTrial, pub max_iterations: usize,                  // Unit, §4.3
     pub gradient_tolerance: f64, pub energy_tolerance: f64, pub stall_iterations: usize,
     pub initial_step: f64, pub max_displacement: f64, pub pinned: Vec<u32>,
     pub min_face_angle: f64 }                                                // 1e-4, §4.9
@@ -886,6 +888,25 @@ per-chart flatten stays available in Rust and Python.
   `ddg_tools.make_developable` and the Blender operator offer the recipe as `coarse_energy`
   (default `"combinatorial"` / Combinatorial: round 0 only when there are subdivisions; `None` /
   Same as Energy is the `uniform` flow, bitwise).
+* **D37** First trial step of the weak Wolfe search: option `OptimizeOptions::first_trial`.
+  `Unit` (default, unchanged behaviour): `t₀ = 1` at every iteration, as L&O Algorithm 2.6 is
+  printed. `GrowPrevious { growth, max }`: `t₀ = min(growth · t_prev, max)` with `t_prev` the step
+  accepted at the previous iteration (the first iteration of a run tries `min(1, max)`); every
+  trial is still capped by `max_displacement` (§4.1). `Backtracking` keeps its own rule (§4.4).
+  *Why:* the slow L∞ covariance flow of the black-box comparison (`COMPARISON.md` §3.3); a prose
+  report of the two-team clean-room comparison named the first-trial rule as the main difference
+  of the optimizers. *Measured* (control meshes spot/bob/blub, six energies, 200 and 1000
+  iterations, no remeshing, `grow` = `GrowPrevious { 2, 100 }`; `runs_tmp/maxcov/study`, command in
+  `COMPARISON.md` §3.3): `grow` ends lower in 28 of 36 runs, typically by 10 to 50 %
+  (`covariance-max` spot 1.70 -> 1.10 at 200 it, 1.21 -> 0.56 at 1000; `covariance` spot 2.40 ->
+  0.82, blub 0.049 -> 0.018 at 1000); worse in 8, badly in one: spot `intrinsic` ends `Stationary`
+  at 20.7 after 171 iterations (unit: 10.9 at 200, 6.9 at 1000), trapped where the gradient grows
+  to 1e6. Changing `c1, c2` to `1e-4, 0.99` on top helps in no consistent way (22 of 36 lower
+  than unit). With a larger `max_displacement` (2 to 4) `grow` goes much further on spot
+  `covariance-max` (0.062 at 200 it), at the cost of the large, inflating moves the reference also
+  makes (`COMPARISON.md` §3.3). Kept opt-in until the trap is understood; `develop --first-trial grow[:G[:MAX]]`
+  and `--wolfe C1:C2` select it. Tests: `tests/optimize.rs::first_trial_rule_sets_the_second_line_search_start`,
+  `grow_previous_first_trial_converges`, `options_validate`.
 
 ## 9. Formula ids
 

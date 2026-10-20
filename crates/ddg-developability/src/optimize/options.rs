@@ -67,6 +67,26 @@ pub enum LineSearch {
     },
 }
 
+/// First trial step of each weak Wolfe line search (SPEC §4.3, D37).
+///
+/// `t` is in units of the current direction `d`; every trial is still capped by `max_displacement`.
+/// Ignored by `Backtracking` (§4.4: `2 t_prev` for gradient descent, `1` for L-BFGS) and by
+/// `FixedStep`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FirstTrial {
+    /// `t = 1` at every iteration (L&O Algorithm 2.6 as printed; the default).
+    Unit,
+    /// `t = min(growth · t_prev, max)`, `t_prev` = the step accepted at the previous iteration;
+    /// the first iteration of a run tries `min(1, max)`. A step size that worked is reused and
+    /// grows geometrically while the search keeps accepting it.
+    GrowPrevious {
+        /// Factor on the previous accepted step, finite and `>= 1`.
+        growth: f64,
+        /// Upper bound on the first trial, finite and `> 0`.
+        max: f64,
+    },
+}
+
 /// Options of [`minimize`](super::minimize) and `optimize` (SPEC §7.1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizeOptions {
@@ -74,6 +94,8 @@ pub struct OptimizeOptions {
     pub method: Method,
     /// Line search (ignored by `FixedStep`).
     pub line_search: LineSearch,
+    /// First trial step of the weak Wolfe line search (D37).
+    pub first_trial: FirstTrial,
     /// Maximum number of accepted iterations.
     pub max_iterations: usize,
     /// Stop when `ℓ̄ ‖g‖_∞ <= gradient_tolerance` (dimensionless).
@@ -108,6 +130,7 @@ impl Default for OptimizeOptions {
                 max_doublings: 30,
                 max_bisections: 30,
             },
+            first_trial: FirstTrial::Unit,
             max_iterations: 1000,
             gradient_tolerance: 1e-8,
             energy_tolerance: 1e-10,
@@ -144,6 +167,10 @@ impl OptimizeOptions {
                 check(c1 > 0.0 && c1 < 1.0, "c1", c1, "in (0, 1)")?;
                 check(shrink > 0.0 && shrink < 1.0, "shrink", shrink, "in (0, 1)")?;
             }
+        }
+        if let FirstTrial::GrowPrevious { growth, max } = self.first_trial {
+            check(growth.is_finite() && growth >= 1.0, "growth", growth, "finite and >= 1")?;
+            check(max.is_finite() && max > 0.0, "max", max, "finite and > 0")?;
         }
         check(
             self.gradient_tolerance.is_finite() && self.gradient_tolerance >= 0.0,

@@ -5,7 +5,7 @@ use std::fmt;
 use std::time::Instant;
 
 use super::options::{
-    Control, FlatProgress, InvalidOption, LineSearch, Method, OptimizeOptions, OptimizeReport,
+    Control, FirstTrial, FlatProgress, InvalidOption, LineSearch, Method, OptimizeOptions, OptimizeReport,
     OptimizeStatus,
 };
 
@@ -518,10 +518,15 @@ pub fn minimize<O: Objective>(
             }
             let dmax = norm_inf(&d, group);
             let t_max = opts.max_displacement * ell / dmax;
-            let t_start = if lbfgs || matches!(opts.line_search, LineSearch::WeakWolfe { .. }) {
-                1.0
-            } else {
-                2.0 * t_prev
+            // SPEC §4.3/§4.4, D37.
+            let t_start = match (opts.line_search, opts.first_trial) {
+                (LineSearch::Backtracking { .. }, _) => {
+                    if lbfgs { 1.0 } else { 2.0 * t_prev }
+                }
+                (LineSearch::WeakWolfe { .. }, FirstTrial::Unit) => 1.0,
+                (LineSearch::WeakWolfe { .. }, FirstTrial::GrowPrevious { growth, max }) => {
+                    if run.rep.iterations == 0 { 1.0f64.min(max) } else { (growth * t_prev).min(max) }
+                }
             };
             let ls = match opts.line_search {
                 LineSearch::WeakWolfe { c1, c2, max_doublings, max_bisections } => {

@@ -28,7 +28,7 @@ pub use energy::{Energy, EnergyOptions, Evaluation, evaluate, evaluate_energy};
 pub use error::DevError;
 pub use flow::{FlowOptions, FlowReport, FlowResult, FlowStop, Round, RoundReport, flow};
 pub use optimize::{
-    Control, LineSearch, Method, OptimizeOptions, OptimizeReport, OptimizeStatus, Optimized, Progress,
+    Control, FirstTrial, LineSearch, Method, OptimizeOptions, OptimizeReport, OptimizeStatus, Optimized, Progress,
     optimize,
 };
 pub use remesh::{RemeshOptions, RemeshReport, Remeshed, remesh};

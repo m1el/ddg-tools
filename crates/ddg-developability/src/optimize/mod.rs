@@ -21,6 +21,6 @@ pub use self::core::{
 };
 pub use self::mesh::{Optimized, Progress, optimize};
 pub use self::options::{
-    Control, DEFAULT_MIN_FACE_ANGLE, FlatProgress, InvalidOption, LineSearch,
+    Control, DEFAULT_MIN_FACE_ANGLE, FirstTrial, FlatProgress, InvalidOption, LineSearch,
     Method, OptimizeOptions, OptimizeReport, OptimizeStatus,
 };

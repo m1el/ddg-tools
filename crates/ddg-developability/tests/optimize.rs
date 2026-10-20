@@ -1,7 +1,7 @@
 //! Tests of the generic optimizer (SPEC §4, §10.5) on classic smooth and nonsmooth functions.
 
 use ddg_developability::optimize::{
-    ClosureObjective, Control, LineSearch, Method, Minimized, OptimizeError, OptimizeOptions,
+    ClosureObjective, Control, FirstTrial, LineSearch, Method, Minimized, OptimizeError, OptimizeOptions,
     OptimizeStatus, Problem, minimize,
 };
 
@@ -329,6 +329,84 @@ fn options_validate() {
     assert!(bad(|o| o.gradient_tolerance = -1.0));
     assert!(bad(|o| o.line_search = LineSearch::WeakWolfe { c1: 0.6, c2: 0.5, max_doublings: 1, max_bisections: 1 }));
     assert!(bad(|o| o.line_search = LineSearch::Backtracking { c1: 1e-4, shrink: 1.0, max_shrinks: 3 }));
+    assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: 0.5, max: 100.0 }));
+    assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: f64::INFINITY, max: 100.0 }));
+    assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: 2.0, max: 0.0 }));
+    assert!(bad(|o| o.first_trial = FirstTrial::GrowPrevious { growth: 2.0, max: f64::NAN }));
+    let mut ok = OptimizeOptions::default();
+    ok.first_trial = FirstTrial::GrowPrevious { growth: 1.0, max: 1e-3 };
+    assert!(ok.validate().is_ok());
+}
+
+/// D37: the first trial point of the second line search, on `f = x²/2` from `x = 1` by gradient
+/// descent with the weak Wolfe search (`c1 = 0`, `c2 = ½`, `initial_step = 0.1`, `ℓ̄ = 1`).
+/// Iteration 1 tries `t = 1, 2, 4, 8` (`x = 0.9, 0.8, 0.6, 0.2`) and accepts `t = 8` (the first
+/// that satisfies C). Iteration 2 has `d = −0.1` again, so its first trial is `x = 0.2 − 0.1 t`:
+/// `t = 1` (`Unit`), `t = 16` (`GrowPrevious { 2, 100 }`), `t = 4` (the same with `max = 4`).
+#[test]
+fn first_trial_rule_sets_the_second_line_search_start() {
+    for (ft, expected) in [
+        (FirstTrial::Unit, 0.1),
+        (FirstTrial::GrowPrevious { growth: 2.0, max: 100.0 }, 0.2 - 1.6),
+        (FirstTrial::GrowPrevious { growth: 2.0, max: 4.0 }, 0.2 - 0.4),
+    ] {
+        let mut trace = vec![];
+        {
+            let mut obj = ClosureObjective(|x: &[f64], g: &mut [f64]| {
+                trace.push(x[0]);
+                g[0] = x[0];
+                Some(0.5 * x[0] * x[0])
+            });
+            let opts = OptimizeOptions {
+                method: Method::GradientDescent,
+                first_trial: ft,
+                max_iterations: 2,
+                max_displacement: 1e3,
+                gradient_tolerance: 0.0,
+                ..Default::default()
+            };
+            minimize(&mut obj, &[1.0], &Problem { length_scale: 1.0, group: 1 }, &opts, None).unwrap();
+        }
+        for (k, want) in [0.9, 0.8, 0.6, 0.2].iter().enumerate() {
+            assert!((trace[k + 1] - want).abs() < 1e-12, "{ft:?}: trace {trace:?}");
+        }
+        assert!((trace[5] - expected).abs() < 1e-12, "{ft:?}: second search starts at {}, trace {trace:?}", trace[5]);
+    }
+}
+
+/// D37: with `GrowPrevious` the optimizer keeps its guarantees (monotone energy, convergence) on
+/// the smooth and nonsmooth test functions above.
+#[test]
+fn grow_previous_first_trial_converges() {
+    let grow = FirstTrial::GrowPrevious { growth: 2.0, max: 100.0 };
+    let m = run(quadratic, &[0.0; 10], 1, &OptimizeOptions { max_iterations: 500, first_trial: grow, ..Default::default() });
+    report_line("lbfgs quadratic, grow", &m);
+    monotone(&m);
+    assert!(m.report.energy_final < 1e-14, "{:?}", m.report.status);
+
+    let m = run(rosenbrock, &[-1.2, 1.0], 1, &OptimizeOptions { first_trial: grow, ..Default::default() });
+    report_line("lbfgs rosenbrock, grow", &m);
+    monotone(&m);
+    assert!((m.x[0] - 1.0).abs() < 1e-6 && (m.x[1] - 1.0).abs() < 1e-6);
+
+    let norm = |x: &[f64], g: &mut [f64]| {
+        let n = x.iter().map(|v| v * v).sum::<f64>().sqrt();
+        for (gi, xi) in g.iter_mut().zip(x) {
+            *gi = if n > 0.0 { xi / n } else { 0.0 };
+        }
+        Some(n)
+    };
+    let opts = OptimizeOptions {
+        first_trial: grow,
+        max_iterations: 300,
+        gradient_tolerance: 0.0,
+        energy_tolerance: 0.0,
+        ..Default::default()
+    };
+    let m = run(norm, &[1.0, -2.0, 0.5, 3.0, -1.0], 1, &opts);
+    report_line("lbfgs ||x||, grow", &m);
+    monotone(&m);
+    assert!(m.report.energy_final < 1e-8, "f = {}", m.report.energy_final);
 }
 
 
