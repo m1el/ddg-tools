@@ -293,6 +293,32 @@ def coarse_energy_option_sets_round_zero_and_same_reproduces_the_old_flow():
 
 
 @test
+def grow_steps_option_passes_first_trial_grow():
+    """Grow Steps (default off) is the library's first_trial="grow" (SPEC D37), off is "unit"."""
+    ddg = module(".core").native()
+    d = module(".developable_operator")
+    results = {}
+    for grow in (False, True):
+        reset()
+        plane = activate(noisy_plane(6, height=0.3, seed=5))
+        buffers = module(".core").mesh_buffers(plane.data)
+        kw = dict(iterations=20, subdivisions=0, remesh=False, energy='COVARIANCE_MAX')
+        d.make_developable_object(plane, grow_steps=grow, **kw)
+        expected = ddg.make_developable(*buffers, iterations=20, subdivisions=0, remesh=False,
+                                        energy="covariance_max",
+                                        first_trial="grow" if grow else "unit")
+        got = array.array('d', [c for v in plane.data.vertices for c in v.co])
+        assert max(abs(a - b) for a, b in zip(got, expected.positions)) < 1e-5  # float32 mesh
+        results[grow] = list(got)
+    assert results[False] != results[True]
+    reset()
+    activate(noisy_plane(6, height=0.3, seed=5))
+    assert bpy.ops.object.ddg_make_developable.get_rna_type().properties["grow_steps"].default is False
+    run(bpy.ops.object.ddg_make_developable, iterations=10, subdivisions=0, remesh=False,
+        grow_steps=True)
+
+
+@test
 def stationary_round_reads_as_stationary_in_the_summary():
     d = module(".developable_operator")
     rd = dict(energy="covariance", iterations=537, status="stationary")

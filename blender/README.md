@@ -263,6 +263,7 @@ between rounds, small-angle remeshing). Runs in place.
 | Remesh | `remesh` | on | repair triangles with a corner angle below the small angle by edge flips and collapses |
 | Small Angle | `small_angle` | 1 degree | the threshold of the remeshing |
 | Step Cap | `max_displacement` | 0.5 | no vertex moves farther than this many mean edge lengths per step |
+| Grow Steps | `grow_steps` | off | on: each line search starts at twice the previous step (`first_trial="grow"`, SPEC D37); usually a lower energy in the same iterations, can get stuck early |
 | Include Boundary | `include_boundary` | on | count boundary vertices in the energy |
 | Omit Valence 3 | `omit_valence_three` | on | leave out interior vertices with three faces |
 | Pin Selected | `pin_selected` | off | vertices selected (in Edit mode) do not move |

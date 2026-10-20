@@ -169,8 +169,8 @@ impl OptimizeOptions {
             }
         }
         if let FirstTrial::GrowPrevious { growth, max } = self.first_trial {
-            check(growth.is_finite() && growth >= 1.0, "growth", growth, "finite and >= 1")?;
-            check(max.is_finite() && max > 0.0, "max", max, "finite and > 0")?;
+            check(growth.is_finite() && growth >= 1.0, "first_trial.growth", growth, "finite and >= 1")?;
+            check(max.is_finite() && max > 0.0, "first_trial.max", max, "finite and > 0")?;
         }
         check(
             self.gradient_tolerance.is_finite() && self.gradient_tolerance >= 0.0,

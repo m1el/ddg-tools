@@ -905,8 +905,12 @@ per-chart flatten stays available in Rust and Python.
   than unit). With a larger `max_displacement` (2 to 4) `grow` goes much further on spot
   `covariance-max` (0.062 at 200 it), at the cost of the large, inflating moves the reference also
   makes (`COMPARISON.md` §3.3). Kept opt-in until the trap is understood; `develop --first-trial grow[:G[:MAX]]`
-  and `--wolfe C1:C2` select it. Tests: `tests/optimize.rs::first_trial_rule_sets_the_second_line_search_start`,
-  `grow_previous_first_trial_converges`, `options_validate`.
+  and `--wolfe C1:C2` select it; `ddg_tools.make_developable(first_trial="grow",
+  first_trial_growth=2.0, first_trial_max=100.0)` and the Blender operator's Grow Steps (default
+  off) expose it. Tests: `tests/optimize.rs::first_trial_rule_sets_the_second_line_search_start`,
+  `grow_previous_first_trial_converges`, `options_validate`; ddg-py `python_defaults_match_the_library`,
+  `bad_options_are_input_errors`, `python-tests/test_developability.py::test_first_trial`;
+  `blender/tests/test_developable.py::grow_steps_option_passes_first_trial_grow`.
 
 ## 9. Formula ids
 

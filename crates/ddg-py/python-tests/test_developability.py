@@ -282,6 +282,21 @@ class MakeDevelopableTest(unittest.TestCase):
             self.assertTrue(all(math.isfinite(x) for x in r.positions), kw)
             self.assertLessEqual(r.report["energy_final"], r.report["energy_initial"] * 1.0001, kw)
 
+    def test_first_trial(self):
+        # D37: "grow" starts each line search at 2x the previous step; a different path than "unit".
+        mesh = arrays(grid(6, 0.2))
+        kw = dict(subdivisions=0, iterations=30, remesh=False, energy="covariance_max")
+        unit = ddg_tools.make_developable(*mesh, **kw)
+        self.assertEqual(list(ddg_tools.make_developable(*mesh, first_trial="unit", **kw).positions),
+                         list(unit.positions))
+        grow = ddg_tools.make_developable(*mesh, first_trial="grow", **kw)
+        self.assertTrue(all(math.isfinite(x) for x in grow.positions))
+        self.assertLess(grow.report["energy_final"], grow.report["energy_initial"])
+        self.assertNotEqual(list(grow.positions), list(unit.positions))
+        capped = ddg_tools.make_developable(*mesh, first_trial="grow", first_trial_growth=1.0,
+                                            first_trial_max=0.5, **kw)
+        self.assertLess(capped.report["energy_final"], capped.report["energy_initial"])
+
     def test_deterministic_and_independent_of_threads(self):
         mesh = arrays(grid(8, 0.3))
         a = ddg_tools.make_developable(*mesh, subdivisions=1, iterations=25, threads=1)
@@ -325,6 +340,9 @@ class MakeDevelopableTest(unittest.TestCase):
         mesh = arrays(grid(3, 0.1))
         for kw, exc in (({"energy": "x"}, ddg_tools.InputError), ({"method": "x"}, ddg_tools.InputError),
                         ({"line_search": "x"}, ddg_tools.InputError),
+                        ({"first_trial": "x"}, ddg_tools.InputError),
+                        ({"first_trial": "grow", "first_trial_growth": 0.5}, ddg_tools.InputError),
+                        ({"first_trial": "grow", "first_trial_max": 0.0}, ddg_tools.InputError),
                         ({"iterations": 0}, ddg_tools.InputError),
                         ({"subdivisions": -1}, ddg_tools.InputError),
                         ({"max_displacement": -1.0}, ddg_tools.InputError),

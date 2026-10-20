@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use ddg_developability::{CutOptions, DEFAULT_DEFECT_TOLERANCE, LineSearch, Method, RemeshOptions};
+use ddg_developability::{CutOptions, DEFAULT_DEFECT_TOLERANCE, FirstTrial, LineSearch, Method, RemeshOptions};
 use ddg_bff::Extension;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -264,6 +264,13 @@ impl MakeDevelopableResult {
 /// step              fixed step, in units of the squared mean edge length (default 1e-3).
 /// line_search       "wolfe" (default; weak Wolfe, Lewis-Overton) or "backtracking" (Armijo);
 ///                   ignored by "fixed_step".
+/// first_trial       first trial step of the "wolfe" line search: "unit" (default; 1 at every
+///                   iteration) or "grow" (min(first_trial_growth x the previous accepted step,
+///                   first_trial_max); SPEC D37). "grow" ends lower on most energies and meshes
+///                   (28 of 36 study runs) but can get stuck; with a larger max_displacement it
+///                   goes further, by larger moves. Ignored by "backtracking" and "fixed_step".
+/// first_trial_growth, first_trial_max
+///                   the "grow" rule's factor (>= 1, default 2) and bound (> 0, default 100).
 /// iterations        iterations per round (default 500), over restarts after remeshing.
 /// subdivisions      number of 4-1 subdivisions; the flow has subdivisions + 1 rounds (default 2).
 /// coarse_energy     energy of round 0 when subdivisions > 0 (default "combinatorial"; one of the
@@ -341,6 +348,9 @@ impl MakeDevelopableResult {
     memory = 10,
     step = 1e-3,
     line_search = "wolfe",
+    first_trial = "unit",
+    first_trial_growth = 2.0,
+    first_trial_max = 100.0,
     iterations = 500,
     subdivisions = 2,
     coarse_energy = Some("combinatorial"),
@@ -374,6 +384,9 @@ fn make_developable<'py>(
     memory: i64,
     step: f64,
     line_search: &str,
+    first_trial: &str,
+    first_trial_growth: f64,
+    first_trial_max: f64,
     iterations: i64,
     subdivisions: i64,
     coarse_energy: Option<&str>,
@@ -415,6 +428,11 @@ fn make_developable<'py>(
         "wolfe" => o.line_search,
         "backtracking" => LineSearch::Backtracking { c1: 1e-4, shrink: 0.5, max_shrinks: 60 },
         other => return Err(reject("line_search", other, "wolfe or backtracking")),
+    };
+    o.first_trial = match first_trial {
+        "unit" => FirstTrial::Unit,
+        "grow" => FirstTrial::GrowPrevious { growth: first_trial_growth, max: first_trial_max },
+        other => return Err(reject("first_trial", other, "unit or grow")),
     };
     o.iterations = count("iterations", iterations, 1)?;
     o.subdivisions = count("subdivisions", subdivisions, 0)?;

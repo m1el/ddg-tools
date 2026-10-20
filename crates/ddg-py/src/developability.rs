@@ -335,6 +335,8 @@ pub struct MakeOptions {
     pub method: Method,
     /// Line search of L-BFGS and gradient descent.
     pub line_search: LineSearch,
+    /// First trial step of the weak Wolfe line search (SPEC D37).
+    pub first_trial: dev::FirstTrial,
     /// Iterations per round.
     pub iterations: usize,
     /// Number of 4-1 subdivisions (rounds after the first).
@@ -374,6 +376,7 @@ impl Default for MakeOptions {
             energy: EnergyParams::default(),
             method: o.method,
             line_search: o.line_search,
+            first_trial: o.first_trial,
             iterations: 500,
             subdivisions: 2,
             coarse_energy: Some(Energy::Combinatorial),
@@ -617,7 +620,7 @@ pub fn make_developable(
     let oo = dev::OptimizeOptions {
         method: options.method,
         line_search: options.line_search,
-        first_trial: dev::FirstTrial::Unit,
+        first_trial: options.first_trial,
         max_iterations: options.iterations,
         gradient_tolerance: options.gradient_tolerance,
         energy_tolerance: options.energy_tolerance,
@@ -1134,6 +1137,7 @@ mod tests {
         assert_eq!((o.iterations, o.subdivisions, o.max_displacement), (500, 2, 0.5));
         assert!(matches!(o.method, Method::Lbfgs { memory: 10 }));
         assert!(matches!(o.line_search, LineSearch::WeakWolfe { .. }));
+        assert_eq!(o.first_trial, dev::FirstTrial::Unit);
         let r = o.remesh.unwrap();
         assert_eq!((r.small_angle, r.collapse_boundary_edges), (PI / 180.0, true));
         assert_eq!(EnergyParams::default().energy, Energy::Covariance);
@@ -1219,6 +1223,10 @@ mod tests {
         o.max_displacement = -1.0;
         let e = make_developable(&i, &o, None).unwrap_err();
         assert!(e.to_string().contains("max_displacement"), "{e}");
+        let mut o = MakeOptions::default();
+        o.first_trial = dev::FirstTrial::GrowPrevious { growth: 0.5, max: 100.0 };
+        let e = make_developable(&i, &o, None).unwrap_err();
+        assert!(e.to_string().contains("first_trial.growth"), "{e}");
         let mut o = MakeOptions::default();
         o.pinned = vec![99];
         let e = make_developable(&i, &o, None).unwrap_err();

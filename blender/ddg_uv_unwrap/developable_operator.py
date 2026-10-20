@@ -166,14 +166,16 @@ def _replace_mesh(mesh, positions, faces, face_polygon):
 
 def make_developable_object(obj, *, energy='COVARIANCE', method='LBFGS', iterations=500,
                             subdivisions=2, coarse_energy='COMBINATORIAL', remesh=True,
-                            small_angle=radians(1.0), max_displacement=0.5, include_boundary=True, omit_valence_three=True,
+                            small_angle=radians(1.0), max_displacement=0.5, grow_steps=False,
+                            include_boundary=True, omit_valence_three=True,
                             pin_selected=False, pinned_group="", triangulate=False,
                             write_energy=False, energy_attribute=DEFAULT_ENERGY_ATTRIBUTE,
                             progress=None):
     """Runs the developability flow on the mesh of ``obj`` and writes the result.
 
     ``coarse_energy`` is the energy of round 0 when ``subdivisions > 0`` (an energy id, or
-    ``'SAME'``/``None`` for ``energy`` in every round). ``progress(round, iteration, energy,
+    ``'SAME'``/``None`` for ``energy`` in every round). ``grow_steps`` selects the library's
+    ``first_trial="grow"`` line-search start (SPEC D37). ``progress(round, iteration, energy,
     gradient_norm)`` is the library's progress function (it may return False to stop). Returns a dict: ``report`` (that of ``ddg_tools.make_developable``),
     ``topology_changed``, ``replaced`` (the mesh data was replaced), ``dropped`` (names of the
     data dropped by a replacement), ``n_pinned``, ``seconds_*``. Raises ``core.UnwrapFailed`` with
@@ -207,6 +209,7 @@ def make_developable_object(obj, *, energy='COVARIANCE', method='LBFGS', iterati
             subdivisions=subdivisions,
             coarse_energy=None if coarse_energy in (None, 'SAME') else energy_name(coarse_energy),
             max_displacement=max_displacement,
+            first_trial="grow" if grow_steps else "unit",
             pinned_vertices=pinned,
             remesh=remesh,
             small_angle=small_angle,
@@ -346,6 +349,14 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         name="Step Cap", default=0.5, min=0.001, soft_max=2.0,
         description="No vertex moves farther than this many mean edge lengths in one step",
     )
+    grow_steps: BoolProperty(
+        name="Grow Steps", default=False,
+        description=(
+            "Start each line search at twice the previous step instead of a unit step (SPEC D37). "
+            "Usually reaches a lower energy in the same iterations, most on the max energies; "
+            "it can also get stuck early. With a larger Step Cap it goes further, by larger moves"
+        ),
+    )
     include_boundary: BoolProperty(
         name="Include Boundary", default=True,
         description="Count the vertices on the boundary of the mesh in the energy",
@@ -402,6 +413,7 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
         sub.active = self.remesh
         sub.prop(self, "small_angle")
         layout.prop(self, "max_displacement")
+        layout.prop(self, "grow_steps")
         layout.prop(self, "include_boundary")
         layout.prop(self, "omit_valence_three")
         layout.prop(self, "pin_selected")
@@ -427,7 +439,8 @@ class OBJECT_OT_ddg_make_developable(bpy.types.Operator):
                 obj, energy=self.energy, method=self.method, iterations=self.iterations,
                 subdivisions=self.subdivisions, coarse_energy=self.coarse_energy,
                 remesh=self.remesh, small_angle=self.small_angle,
-                max_displacement=self.max_displacement, include_boundary=self.include_boundary,
+                max_displacement=self.max_displacement, grow_steps=self.grow_steps,
+                include_boundary=self.include_boundary,
                 omit_valence_three=self.omit_valence_three, pin_selected=self.pin_selected,
                 pinned_group=self.pinned_group, triangulate=self.triangulate,
                 write_energy=self.write_energy, progress=progress)

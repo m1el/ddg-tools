@@ -512,7 +512,8 @@ developability(positions, corner_vertices, polygon_starts, triangles, *, energy=
                include_boundary=True, omit_valence_three=True, threads=None)
         # -> .vertex_energy ('d'), .counted ('B'), .energy, .report
 make_developable(..., energy=, include_boundary=, omit_valence_three=, method="lbfgs", memory=10,
-                 step=1e-3, line_search="wolfe", iterations=500, subdivisions=2,
+                 step=1e-3, line_search="wolfe", first_trial="unit", first_trial_growth=2.0,
+                 first_trial_max=100.0, iterations=500, subdivisions=2,
                  coarse_energy="combinatorial", max_displacement=0.5, gradient_tolerance=None, energy_tolerance=None,
                  stall_iterations=None, initial_step=None, min_face_angle=None,
                  pinned_vertices=None, remesh=True,
@@ -544,7 +545,10 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
   flattens thin parts (`crates/ddg-developability/QUALITY.md`). `fallback_operations` (D35) lets
   the remeshing try the other flips/collapses of a triangle when the paper's is refused. `method` is `lbfgs`, `gradient_descent` or `fixed_step` (`step` in units
   of the squared mean edge length); `line_search` is `wolfe` or `backtracking` (c1 = 1e-4, shrink
-  1/2); `max_displacement` caps a step in mean edge lengths; `min_face_angle`
+  1/2); `first_trial` is the first trial step of the `wolfe` search (D37): `unit` (1 at every
+  iteration) or `grow` (`min(first_trial_growth` × the previous accepted step`, first_trial_max)`,
+  defaults 2 and 100), lower final energy in 28 of 36 study runs but it can get stuck (spot,
+  `intrinsic`); `max_displacement` caps a step in mean edge lengths; `min_face_angle`
   is the admissibility floor of the library on the smallest corner angle (D31; `None` keeps its value, 0 switches the
   check off). `pinned_vertices` do not move. **D24:** `faces` is `None` exactly when no
   subdivision ran and no remeshing operation was applied; then `positions` has one entry per
