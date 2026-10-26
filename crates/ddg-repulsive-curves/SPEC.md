@@ -1322,6 +1322,78 @@ Built outside the repository: `/var/data/discrete-geometry/RepulsiveCurves-build
   1.29; 1200: 2.07, 1.62, 5.21; 2400: 4.19, 8.0, 21.8. Freedman 600 (BH+dense) converges in 505
   steps (203 s), energy 2276 to 6.03, with a long plateau near 1510 for about 150 steps.
 
+## 17g. Multigrid on networks (WP6b)
+
+**Symptom.** The authors' CapillaryNetwork scene (two interleaved networks, junctions of degree
+3–5, 297 pinned endpoints, all edge lengths fixed, `(α, β) = (3, 6)`): on the 2146-vertex curve
+the cycles stagnated at a relative residual of 0.2–0.4 (20 cycles, returned without error) with a
+projected gradient 98 % off the dense one; on the 4296-vertex curve they diverged (residuals 5–13).
+The authors' program crashes on this scene with `--multigrid` ("Couldn't orient edge pair"), so
+there is nothing to compare with.
+
+**Cause: near-contacts, not junctions.** The scene has 262 (2146 vertices) and 142 (4296) edge
+pairs whose midpoints are closer than half an edge length (branches of the two networks that
+nearly cross; worst 0.095 ℓ and 0.049 ℓ). Their weights `ℓ_I ℓ_J |x_I − x_J|^{−(2σ+1)}` and
+`k²_{2σ+5}` (which grows like `d^{−(2σ+3)}` for a crossing) dwarf their neighbours'. The
+rediscretized coarse metric (§8.4) does not reproduce them: the coarse edges' midpoints are
+elsewhere. Measured with a smooth coarse vector `x` (an approximate coarse solution):
+`(Πx)ᵀ H_ℓ (Πx) / xᵀ H_{ℓ+1} x = 53, 5.5, 3.4` on levels 0→1, 1→2, 2→3 of the 4296-vertex curve,
+so the coarse correction overshoots by up to 53×. With the exact Galerkin operators `Πᵀ H Π`
+(matrix-free, `tests/multigrid_networks.rs`, `probe_galerkin`) four levels reach 1e-3 in about four
+cycles: the coarse spaces (prolongation, coarse constraints, projectors) are adequate, the coarse
+operator is not. Ruled out by measurement: the block cluster tree (θ = 0 behaves the same);
+coarse `EdgeLengths` rows (dropping them on coarse edges, or at junctions only, does not help);
+a Galerkin correction of the pairs of coarse edges that meet at a junction (no effect); the
+projectors between levels (`|J x − P J x| / |J x|` ≈ 1.5e-2, energy ratios with and without
+`P` equal to 1 %).
+
+**Fix** (`src/multigrid/near.rs`, `MgOptions`):
+
+1. *Galerkin near-pair correction* (`near_field_factor`, default 1): every coarse edge pair that
+   contains a pair of the finer level with `|x_I − x_J| < 1 · max(ℓ_I, ℓ_J)`, or a pair corrected
+   there, uses `S = Σ Jᵀ E J` over the finer pairs inside it instead of its rediscretized term
+   `R` (pair terms are 4 × 4 scalar blocks of Eq. 31; the level metric is `Ā_ℓ + Σ (S − R) ⊗ I`,
+   added to the dense matrix on the coarsest level). Checked: the blocks sum to the dense metric
+   (1e-12), and with every pair corrected the coarse metric is `Jᵀ A J` exactly (1e-10). The
+   smooth-vector ratios above become 1.03, 1.03, 1.13.
+2. *Block-preconditioned smoother* (`smoother_factor`, default 1): on levels with near pairs or
+   corrections, the CG smoother is preconditioned by `D_rest + Σ E(I, J)` over the near pairs
+   (`D_rest` the rest of the metric's diagonal from the BCT row sums; sparse Cholesky, `⊗ I_d`,
+   between projections). Near-contacts make the metric stiff (synthetic network, `κ(P Ā P)` on
+   `ker C`: 4.7e4 without crossings, 2.5e7 with crossings at 0.1 h, 4.4e8 at 0.05 h; only
+   `λ_max` grows); the block solve removes those couplings. Levels without near pairs keep plain
+   CG (closed curves unchanged).
+3. *Stop at fixed-vertex-dominated levels* (`max_fixed_fraction`, default 0.4): coarsening stops
+   when more than 40 % of a level's vertices cannot be removed (degree ≠ 2, pins), if the level has
+   at most 8 · `coarsest_vertices` vertices. On the scene, levels below 1073 vertices shrink by
+   3–20 % per level (547 junctions and endpoints), cost a product each and raised the cycle count
+   from 6 (two levels) to 15 (seven levels).
+4. *Energy-norm check* (`energy_check`, default on): flexible CG also requires
+   `rᵀ z ≤ tol² bᵀ x` (`z` the V-cycle of `r`) before it stops. The Euclidean residual relative
+   to `‖P b‖` is dominated by the near-contact entries of `b`; on a synthetic network it reached
+   8e-4 with a direction 20 % off the dense one (6.7e-3 with the check, one extra cycle at most).
+5. *No silent failure* (`failure_residual`, default 1e-2): a solve that ends unconverged above it
+   is `RcError::MultigridDiverged` (the message says "diverged" also for stagnation).
+
+**Results** (default options, BCT θ = 0.25, 32 threads on a shared machine, so times are
+indicative). 2146 vertices: levels 2146 → 1071, 1 cycle, residual 5.4e-4, gradient 2.8e-3 off
+dense (dense 22 s; multigrid build 5 s + solve 2 s); 20 steps of the exact-energy flow (scene
+obstacle included) with multigrid and with dense: energies agree to 1e-6–3e-5 relative, positions
+to 2.6e-4 edge lengths, 1–2 cycles per step. 4296 vertices: levels 4296 → 2146 → 1073, 9 cycles,
+residual 5.4e-4, gradient 3.3e-3 off dense (dense 80 s; build 9 s + solve 17 s);
+3 flow steps: energies agree to 5e-7–5e-6, positions to 3.5e-4 edge lengths, 9–11 cycles
+per step. Freedman 600–4736 (closed): same or fewer cycles than before (2, 3, 2 → 1, 3, 2), same
+error against dense. A synthetic network with junctions of degree 3, 4, 5, pinned endpoints and
+branches crossing at 0.1 h (`tests/multigrid_networks.rs`): 1–9 cycles, error 1.7e-3 at the
+default tolerance and 2e-8 at 1e-8.
+
+**Open.** (a) The product of the block cluster tree is slow on this scene (72 ms per product at
+4296 vertices), which dominates the multigrid time; WP5/WP14. (b) Crossings at 0.05 h exactly
+over edge midpoints (synthetic) still do not converge in 20 cycles; this is now reported as
+`MultigridDiverged`, and the session should fall back to the dense solver (WP3b: `src/step`).
+(c) The multigrid `tolerance` keeps its meaning (Euclidean residual); the direction error at
+1e-3 is a few 1e-3 on stiff networks.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
