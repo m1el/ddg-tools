@@ -1205,6 +1205,23 @@ Things the paper and the reference leave open, with how they are settled:
 * §5.2: rank is checked on the row-normalized `C Cᵀ` by inverse iteration (threshold 1e-10),
   since a plain sparse Cholesky can succeed with tiny pivots.
 
+## 17d. Noted after WP4 (orchestrator)
+
+* **D15 amended.** The split rule as printed (minimize the sum of squared 6-D diameters of the
+  two children over all positions) peels single tangent-points off the root on tangled curves
+  (Freedman 1200: depth 1001, mean leaf 1.2 edges, quadratic build, no speed-up). Split positions
+  are restricted to leave at least 25 % of the elements on each side
+  (`bvh::DEFAULT_MIN_SPLIT_FRACTION`; 0 restores the printed rule): depth 13, build 2 ms for
+  2368 edges.
+* **Leaf lumping** (`BhTree::set_lump_leaves`, off): lumping admissible leaves too is about 3x
+  faster on Freedman 2400 (one thread) with differential error 1e-2 instead of 1.9e-3. Decided
+  in §14.3 by measurement (convergence and iterations, not only error).
+* **Option names:** `theta_x = 0.125` is the reference's `diameter / distance < 0.25` written as a
+  radius; `theta_t = 0.25`.
+* The §8.2 differential is the derivative of the lumped `(I, J) + (J, I)` terms, not of the
+  evaluated Barnes–Hut energy (which lumps `(I, J)` only): 4 % apart at ε = 1, 1e-3 at 0.5.
+  Documented and tested; the line search compares Barnes–Hut energies with each other.
+
 ## 17c. The authors' program (built 2026-10-26)
 
 Built outside the repository: `/var/data/discrete-geometry/RepulsiveCurves-build/` (working copy
