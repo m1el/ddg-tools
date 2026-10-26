@@ -221,6 +221,8 @@ pub struct BarnesHutEnergy {
     exponents: Exponents,
     options: BhOptions,
     tree: Option<BhTree>,
+    /// Vertex and edge count the tree was built for (a different network needs a rebuild).
+    shape: (usize, usize),
 }
 
 impl BarnesHutEnergy {
@@ -235,6 +237,7 @@ impl BarnesHutEnergy {
             exponents,
             options,
             tree: None,
+            shape: (0, 0),
         }
     }
 
@@ -243,12 +246,20 @@ impl BarnesHutEnergy {
         self.tree.as_ref()
     }
 
-    /// Refits the tree to `positions`, or builds it if `prepare` was not called. The topology
-    /// only changes through `prepare` (a new step), never inside a line search.
+    fn build(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<(), RcError> {
+        self.tree = Some(BhTree::build(network, positions, self.options)?);
+        self.shape = (network.n_vertices(), network.n_edges());
+        Ok(())
+    }
+
+    /// Refits the tree to `positions`; builds it if `prepare` was not called, or if the network
+    /// is not the one the tree was built for (after a subdivision, when the energy is asked for
+    /// before the next step's `prepare`).
     fn fit(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<&BhTree, RcError> {
+        let same = self.shape == (network.n_vertices(), network.n_edges());
         match &mut self.tree {
-            Some(t) => t.refit(positions)?,
-            slot @ None => *slot = Some(BhTree::build(network, positions, self.options)?),
+            Some(t) if same => t.refit(positions)?,
+            _ => self.build(network, positions)?,
         }
         Ok(self.tree.as_ref().expect("tree was just set"))
     }
@@ -260,8 +271,7 @@ impl EnergyModel for BarnesHutEnergy {
     }
 
     fn prepare(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<(), RcError> {
-        self.tree = Some(BhTree::build(network, positions, self.options)?);
-        Ok(())
+        self.build(network, positions)
     }
 
     fn energy(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<f64, RcError> {

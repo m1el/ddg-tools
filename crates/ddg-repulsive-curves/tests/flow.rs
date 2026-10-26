@@ -1526,3 +1526,29 @@ fn grow_previous_start_keeps_the_guard_and_needs_fewer_trials() {
             .is_err()
     );
 }
+
+#[test]
+fn barnes_hut_flow_survives_subdivision() {
+    // Regression: after a live subdivision the Barnes-Hut tree has the old vertex count
+    // (PositionCountMismatch at the first energy evaluation of the new network).
+    let (net, pos) = trefoil(40);
+    let opts = FlowOptions {
+        schedule: Some(LengthSchedule {
+            factor: 2.5,
+            rate: 0.1,
+        }),
+        max_subdivisions: 1,
+        max_iterations: 40,
+        ..bh_flow_options(2, 2)
+    };
+    let mut s = Session::new(net, pos, opts).unwrap();
+    let mut subdivided = false;
+    for _ in 0..40 {
+        let r = s.step().unwrap();
+        assert_eq!(s.positions().len(), s.network().n_vertices());
+        subdivided |= r.subdivided;
+    }
+    assert!(subdivided, "the schedule subdivides");
+    assert_eq!(s.network().n_vertices(), 80);
+    assert!(s.energy().is_finite());
+}
