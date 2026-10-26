@@ -4,7 +4,7 @@
 //! [`RcError::MultigridDiverged`] (the residual grew) or [`RcError::MultigridNotConverged`] (it
 //! stagnated above `failure_residual`). When the network has at most
 //! [`FlowOptions::dense_fallback_max_vertices`](super::FlowOptions::dense_fallback_max_vertices)
-//! vertices, [`FallbackSaddle`] builds the dense saddle solver of the same step (same metric,
+//! vertices, `FallbackSaddle` builds the dense saddle solver of the same step (same metric,
 //! same constraint rows, same pools), repeats the failed solve with it, and answers every later
 //! solve of the step with it. The event is recorded in [`SolverFallback`] and ends up in
 //! [`StepReport::solver_fallback`](super::StepReport::solver_fallback). Larger networks, and

@@ -179,6 +179,21 @@ pub enum RcError {
         /// The bound `MgOptions::failure_residual` the final residual stayed above.
         failure_residual: f64,
     },
+    /// A step would shrink an edge below `FlowOptions::min_edge_length_ratio` times the mean edge
+    /// length at the start of the session (`SPEC.md` §17j). The step is not taken: the curve is
+    /// that of the last accepted step.
+    EdgeCollapse {
+        /// The edge.
+        edge: usize,
+        /// Its length after the rejected step.
+        length: f64,
+        /// Its length before.
+        length_before: f64,
+        /// The bound `ratio · ℓ̄₀`.
+        threshold: f64,
+        /// The step (1-based) that would have done it.
+        step: usize,
+    },
     /// The energy is NaN or infinite.
     NonFiniteEnergy {
         /// The step at which it happened.
@@ -353,6 +368,20 @@ impl fmt::Display for RcError {
                  residuals {residuals:?}",
                 residuals.last().copied().unwrap_or(f64::NAN),
                 residuals.len(),
+            ),
+            EdgeCollapse {
+                edge,
+                length,
+                length_before,
+                threshold,
+                step,
+            } => write!(
+                f,
+                "step {step} would shrink edge {edge} from {length_before:e} to {length:e}, below the \
+                 bound {threshold:e} (min_edge_length_ratio times the initial mean edge length): \
+                 the edge is collapsing, typically an end edge with a fixed tangent and a free \
+                 length (SPEC section 17j); fix the edge lengths (EdgeLengths constraint), or set \
+                 min_edge_length_ratio to None to allow it"
             ),
             NonFiniteEnergy { step } => write!(f, "the energy is not finite at step {step}"),
             ObstacleTriangleOutOfRange {

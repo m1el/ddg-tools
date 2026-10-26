@@ -549,7 +549,9 @@ the paper relies on `r_x/d` being small. Differential (B.1.2): for an admissible
 at a leaf, the exact `G_{I,a}` of §3.2 restricted to the leaf's edges
 [formula: rc-bh-differential]. As `θ_x, θ_T → 0` no internal node is admissible and both converge
 to Eq. 17 and its exact differential (§13.4). The approximation error bound is the paper's
-Taylor argument, cited.
+Taylor argument, cited. Since WP3d the differential the session uses is the exact derivative of the
+evaluated energy on the frozen interaction lists (the discrete adjoint, §17i); the increment above
+is kept as `energy_and_differential_lumped_pairs`.
 
 ### 8.3 Block cluster tree and matrix–vector product (B.2, Eq. 28; D16)
 
@@ -681,6 +683,7 @@ pub struct FlowOptions {
     pub schedule: Option<LengthSchedule>, pub max_subdivisions: u32, pub threads: Option<usize>,
     pub dense_threads: Option<usize>,
     pub dense_fallback_max_vertices: usize,            // default 5000; 0: never fall back (§17h)
+    pub min_edge_length_ratio: Option<f64>,            // default Some(1e-3); collapse guard (§17j)
 }
 
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
@@ -791,6 +794,7 @@ end-to-end table script (§14.5).
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
 | multigrid | coarsest 512 vertices, 20 levels max, 3+3 CG smoothing, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a 1536-row dense LU, milliseconds |
 | back end | `Auto { dense_max_vertices: 2000 }` | measured in §17h: at 8 threads exact + dense and BH + multigrid cost the same per step at about 2000 vertices; exact + dense is the reference computation and wins the tie; WP14 re-measures alone |
+| edge-collapse guard | `min_edge_length_ratio Some(1e-3)` | §17j: an edge that shrinks below 1e-3 of the initial mean edge length fails the step with a named error instead of a singular metric later |
 | dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (`(3\|V\|+k)²` doubles, about 2 GB at 5000) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
 | subdivision | 0 rounds | reference default |
@@ -946,6 +950,8 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rc-bvh-lumped` | `L_N, x̄_N, T̂_N`; parent = mass-weighted combination of children | `spatial::bvh` | proved, `Hierarchy.lean` |
 | `rc-bh-admissibility` | Eq. 27 error bound | `energy::barnes_hut` | cited (paper B.1.2; Barnes & Hut 1986) |
 | `rc-bh-differential` | B.1.2 increment = derivative of the lumped term | `energy::barnes_hut` | proved, `Hierarchy.lean` |
+| `rc-bh-adjoint` | differential of the evaluated BH energy on frozen lists (chain rule through `L_N`, `x̄_N`) | `energy::barnes_hut` | proved, `BarnesHutAdjoint.lean` |
+| `rc-bh-adjoint-shift` | re-centred downward pass of the node sums | `energy::barnes_hut` | proved, `BarnesHutAdjoint.lean` |
 | `rc-bct-admissibility` | Eq. 28, low-rank error | `spatial::bct` | cited (Hackbusch 2015, admissibility and low-rank approximation of asymptotically smooth kernels; Greengard & Rokhlin 1997) |
 | `rc-bct-lowrank` | rank-1 block = lumped kernel; exact as the clusters shrink | `spatial::bct` | proved, `Hierarchy.lean` (algebraic part) |
 | `rc-coarsen` | black/white rule: no two adjacent whites; whites have two black neighbours | `multigrid::coarsen` | proved, `Multigrid.lean` |
@@ -1224,6 +1230,8 @@ Things the paper and the reference leave open, with how they are settled:
   since a plain sparse Cholesky can succeed with tiny pivots.
 
 ## 17f. Noted after WP3 (orchestrator)
+
+*(The Barnes–Hut noise floor and `Stuck` ending noted below are fixed by §17i: the differential is now the derivative of the evaluated energy and Freedman 600 converges.)*
 
 * **Line-search start rule (D11).** Measured on 24 perturbed Knot128 knots (every 5th: 1, 6, ...,
   116; 1500-2750 vertices), `(α, β) = (3, 6)`, `Absolute(1e-4)`, 3 projection iterations, exact
@@ -1637,6 +1645,52 @@ cost 1.5× the WP4 differential at 9472 vertices (transpose 35–70 ms, scatter 
 then calls `tree.energy_and_differential`, which computes them again (about 3 ms at 2368
 vertices, 13 ms at 9472); passing them (`energy_and_differential_with_lists(&lists, …)`) saves
 that. Nothing else changes.
+
+## 17j. End-edge collapse and the guard (WP3c)
+
+**Symptom.** The authors' `TangentInterpolation` scene (curve of 132 vertices, ends and two
+interior vertices pinned, tangents fixed at both ends, **no** length constraint, a total-length
+penalty of weight 0.5, `(α, β) = (3, 6)`, `iteration_limit 65`): in our session an end edge shrinks
+by a factor of about 0.6 per step (step 3: 2.7e-2, step 10: 6e-4, step 20: 1.6e-5, step 30: 1e-7;
+mean edge 5e-2) and at step 33 the step fails with `SingularMetric`. (The WP13 note said 60 steps;
+with the scene's own settings it is 33, and both end edges collapse, the second one later.)
+
+**The reference does not do this.** Run through the authors' program on the same scene
+(`rcurves_app --batch --steps 100 --ignore-stop`, private copy, `runs_tmp/rc-wp3c-auth/`): the end
+edge dips to 1.4e-2 at step 1 and then grows; the curve is at rest from step 22 (energy 36.65,
+minimum edge 3.7e-2, last edge 9.6e-2, length 8.024; step sizes 1e-15 afterwards). The reference's
+tangent constraint is the same as ours (the unit tangent of the end edge, three rows, Jacobian of
+the normalized difference, `src/flow/constraint_functions.cpp`), so fixing the end tangent does
+not by itself allow the collapse. Without the tangent rows our end edge still shrinks (to 1.4e-3)
+but stalls there (exploration, `tests/end_edge.rs` history); with them it collapses, because the
+constraint is then satisfied by a vanishing edge whose direction is fixed while the next edge is
+free to turn: the tangent condition is circumvented, and the discrete energy has no term that
+resists it (an edge's pair terms are weighted by its length and vanish with it).
+
+**Cause (hypothesis, not proved).** The reference's energy is the vertex-pair sum
+`Σ_{i,j} K(x_i, x_j, T_i) l_i l_j` with dual lengths `l_i` (`tpe_energy_sc.cpp`, `tpe_total`);
+ours is the paper's edge-pair energy (D1, decision Q1 of §18: the vertex-pair variant is not
+implemented). In the reference an end vertex and its neighbour keep nonzero weight and a vertex
+tangent as the end edge shrinks, and the measured behaviour is a local minimum with a long end
+edge; in ours the lowest energy is reached by dropping the end edge. We did not port the
+vertex-pair variant to test this (it is excluded by Q1), so there is no fix "in the
+paper/reference" for the edge-pair energy.
+
+**Guard** (`FlowOptions::min_edge_length_ratio`, default `Some(1e-3)`, `None` disables; not in the
+paper or the reference; it changes no energy and no step that is taken). After the line search of a
+step and before the positions are taken, if some edge is shorter than `ratio · ℓ̄₀` (`ℓ̄₀` the mean
+edge length at the start of the session) **and** shorter than it was before the step, the step
+fails with `RcError::EdgeCollapse { edge, length, length_before, threshold, step }`; the curve is
+that of the last accepted step and the status is `Error`. On the scene this happens at step 15–20
+instead of `SingularMetric` at step 33, and the message names the edge and the remedies (fix the
+edge lengths with an `EdgeLengths` constraint, or disable the guard). The check is
+`O(|E|)` per step. Tests: `tests/end_edge.rs` (guard fires on the scene, curve unchanged by the
+rejected step, `None` gives the old `SingularMetric`, quiet on a trefoil, option validation);
+Python `min_edge_length_ratio`. A scene that needs the full 65 steps must fix its edge lengths or
+set the option to `None` (then it fails with `SingularMetric` near step 33).
+
+**Open.** Whether the vertex-pair energy of the reference removes the collapse (a differential
+test against the authors' program on this scene, WP15, would show it).
 
 ## 18. The user's decisions (2026-10-26)
 

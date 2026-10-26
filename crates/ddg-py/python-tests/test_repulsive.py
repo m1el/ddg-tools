@@ -616,6 +616,14 @@ class Multigrid(unittest.TestCase):
         self.assertTrue(last["finished"])
         self.assertAlmostEqual(last["fraction"], 1.0)
 
+    def test_min_edge_length_ratio_option(self):
+        p, e = trefoil(40)
+        self.assertEqual(ddg_tools.repulsive_defaults()["min_edge_length_ratio"], 1e-3)
+        ddg_tools.repulsive_flow(p, e, steps=2, min_edge_length_ratio=None)
+        for bad in (0.0, 1.0, -1.0):
+            with self.assertRaises(ValueError):
+                ddg_tools.repulsive_flow(p, e, steps=1, min_edge_length_ratio=bad)
+
     def test_dense_threads_is_an_option(self):
         p, e = trefoil(40)
         a = ddg_tools.repulsive_flow(p, e, steps=2, threads=2, dense_threads=1)[0].tolist()

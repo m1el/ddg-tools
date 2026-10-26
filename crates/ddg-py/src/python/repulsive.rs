@@ -1063,6 +1063,7 @@ fn repulsive_defaults(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("bh_leaf_size", o.bh_leaf_size)?;
     d.set_item("threads", o.threads)?;
     d.set_item("dense_threads", o.dense_threads)?;
+    d.set_item("min_edge_length_ratio", o.min_edge_length_ratio)?;
     d.set_item("projection_tolerance", o.projection_tolerance)?;
     d.set_item("projection_absolute", o.projection_absolute)?;
     d.set_item("projection_iterations", o.projection_iterations)?;

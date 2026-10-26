@@ -916,7 +916,10 @@ class RepulsiveSession:
     ``mg_*`` (``mg_near_field_factor`` and ``mg_smoother_factor`` for curve networks with
     near-contacts, ``mg_max_fixed_fraction``, ``mg_energy_check``, ``mg_failure_residual``) and
     ``dense_fallback_max_vertices`` (a step whose multigrid solve fails repeats it with the dense
-    solver up to that size; see ``solver_fallback`` of the step report); ``threads`` and
+    solver up to that size; see ``solver_fallback`` of the step report);
+    ``min_edge_length_ratio`` (a step that would shrink an edge below this fraction of the
+    initial mean edge length raises ``SolveError`` instead of continuing to a singular metric;
+    ``None`` disables); ``threads`` and
     ``dense_threads``; the projection and the stop rule (``"gradient"`` with ``stop_threshold``
     1e-4, ``"relative"`` 1e-3, or ``"stall"``).
     Raises ``RepulsiveInputError`` (a ``ValueError``) for anything wrong in the input.
@@ -990,6 +993,8 @@ class RepulsiveSession:
         bh_leaf_size: int = 8,
         threads: int | None = None,
         dense_threads: int | None = None,
+    min_edge_length_ratio: float | None = 1e-3,
+        min_edge_length_ratio: float | None = 1e-3,
         projection_tolerance: float = 1e-4,
         projection_absolute: bool = False,
         projection_iterations: int = 3,
@@ -1118,6 +1123,7 @@ def repulsive_flow(
     bh_leaf_size: int = 8,
     threads: int | None = None,
     dense_threads: int | None = None,
+    min_edge_length_ratio: float | None = 1e-3,
     projection_tolerance: float = 1e-4,
     projection_absolute: bool = False,
     projection_iterations: int = 3,

@@ -1119,6 +1119,8 @@ open DdgProofs
 #print axioms RC.guard_disjoint
 #print axioms RC.lumped_exact
 #print axioms RC.bh_differential
+#print axioms RC.bh_adjoint
+#print axioms RC.bh_adjoint_shift
 #print axioms RC.bct_lowrank
 #print axioms RC.K_mid_eq_gram
 #print axioms RC.no_adjacent_whites

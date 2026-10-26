@@ -101,10 +101,10 @@ pub use step::schedule::{LengthSchedule, ScheduleProgress};
 pub use step::stop::{GradNorm, Status, StepStatus, StopRule};
 pub use step::{
     Backend, BarnesHutEnergy, Control, DEFAULT_AUTO_DENSE_MAX_VERTICES,
-    DEFAULT_DENSE_FALLBACK_MAX_VERTICES, DEFAULT_DENSE_THREADS, DirectSolvers, EnergyModel,
-    ExactEnergy, FlowOptions, FlowReport, FlowResult, PenaltyTerm, RetargetReport, RetargetStatus,
-    Session, Solver, SolverFactory, SolverFallback, SolverRequest, StepReport, Timings, flow,
-    soft_options,
+    DEFAULT_DENSE_FALLBACK_MAX_VERTICES, DEFAULT_DENSE_THREADS, DEFAULT_MIN_EDGE_LENGTH_RATIO,
+    DirectSolvers, EnergyModel, ExactEnergy, FlowOptions, FlowReport, FlowResult, PenaltyTerm,
+    RetargetReport, RetargetStatus, Session, Solver, SolverFactory, SolverFallback, SolverRequest,
+    StepReport, Timings, flow, soft_options,
 };
 pub use subdivide::{SubdivisionMap, subdivide};
 pub use surfaces::{

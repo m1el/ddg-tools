@@ -62,20 +62,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
-use ddg_repulsive_curves::constraints::{
-    Constraint, ConstraintSet, ImplicitSurface, TangentSite,
-};
+use ddg_repulsive_curves::constraints::{Constraint, ConstraintSet, ImplicitSurface, TangentSite};
 use ddg_repulsive_curves::energy::exact::make_pool;
 use ddg_repulsive_curves::metric::sobolev_dense::GramGeometry;
 use ddg_repulsive_curves::metric::{GramQuadrature, Metric, gram, kernel_matrices};
 use ddg_repulsive_curves::optimize::Method;
-use ddg_repulsive_curves::step::line_search::{LineSearch, TrialOutcome};
-use ddg_repulsive_curves::step::stop::{GradNorm, StepStatus, StopRule};
-use ddg_repulsive_curves::step::{Backend, FlowOptions, Session, Solver};
 use ddg_repulsive_curves::solve::{
     ProjectionOptions, ProjectionStatus, Tolerance, dense_sobolev_solver, project_constraints,
     projected_gradient,
 };
+use ddg_repulsive_curves::step::line_search::{LineSearch, TrialOutcome};
+use ddg_repulsive_curves::step::stop::{GradNorm, StepStatus, StopRule};
+use ddg_repulsive_curves::step::{Backend, FlowOptions, Session, Solver};
 use ddg_repulsive_curves::{
     Axis, CurveNetwork, EnergyEval, Exponents, RcError, check_planar, energy,
 };
@@ -254,11 +252,9 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                     Spec::EdgeLengths((l.len() < 3 || l[2] != "all").then(|| ids(l, 2)))
                 }
                 "point" => Spec::Point(int(&l[2]) as u32, (l.len() == 6).then(|| p3(l, 3))),
-                "sphere" => Spec::Sphere(
-                    p3(l, 2),
-                    float(&l[5]),
-                    (l[6] != "all").then(|| ids(l, 6)),
-                ),
+                "sphere" => {
+                    Spec::Sphere(p3(l, 2), float(&l[5]), (l[6] != "all").then(|| ids(l, 6)))
+                }
                 "tangent" => Spec::Tangent(
                     l[2] == "vertex",
                     int(&l[3]) as u32,
@@ -351,7 +347,13 @@ impl Stats {
     }
 
     /// Records `ratio = error / tolerance`; a problem if it exceeds 1 or is NaN.
-    fn check(&mut self, name: &str, what: &'static str, ratio: f64, detail: impl FnOnce() -> String) {
+    fn check(
+        &mut self,
+        name: &str,
+        what: &'static str,
+        ratio: f64,
+        detail: impl FnOnce() -> String,
+    ) {
         self.comparisons += 1;
         let e = self.worst.entry(what).or_insert((0.0, 0));
         e.1 += 1;
@@ -428,10 +430,7 @@ fn oracle_matrix(rows: &[&Line]) -> Vec<f64> {
 }
 
 fn oracle_points(out: &[Line], tag: &str) -> Vec<P> {
-    rows_with(out, tag)
-        .iter()
-        .map(|l| p3(l, 2))
-        .collect()
+    rows_with(out, tag).iter().map(|l| p3(l, 2)).collect()
 }
 
 // ----- the Rust side -----
@@ -491,7 +490,18 @@ struct Solved {
     layout_coords: Vec<usize>,
 }
 
-fn solve_rust(input: &Input, net: &CurveNetwork, ex: Exponents) -> Result<(Solved, ConstraintSet, ddg_repulsive_curves::solve::DenseSaddle), RcError> {
+fn solve_rust(
+    input: &Input,
+    net: &CurveNetwork,
+    ex: Exponents,
+) -> Result<
+    (
+        Solved,
+        ConstraintSet,
+        ddg_repulsive_curves::solve::DenseSaddle,
+    ),
+    RcError,
+> {
     let pos = &input.positions;
     let pool = Arc::new(make_pool(Some(1))?);
     let report = energy(net, pos, ex, &EnergyEval::Exact, Some(1))?;
@@ -551,13 +561,19 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
                 if !error_matches(&kind, &e) {
                     stats.problem(
                         name,
-                        format!("the oracle reports {kind} ({}); this crate returns {e:?}", l[3..].join(" ")),
+                        format!(
+                            "the oracle reports {kind} ({}); this crate returns {e:?}",
+                            l[3..].join(" ")
+                        ),
                     );
                 }
             }
             (None, _) => stats.problem(
                 name,
-                format!("the oracle reports {kind} ({}); this crate accepts the input", l[3..].join(" ")),
+                format!(
+                    "the oracle reports {kind} ({}); this crate accepts the input",
+                    l[3..].join(" ")
+                ),
             ),
         }
         stats.comparisons += 1;
@@ -570,11 +586,21 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     stats.ok_cases += 1;
     let ex = match exponents(input) {
         Ok(e) => e,
-        Err(e) => return stats.problem(name, format!("the oracle accepts the exponents; this crate: {e:?}")),
+        Err(e) => {
+            return stats.problem(
+                name,
+                format!("the oracle accepts the exponents; this crate: {e:?}"),
+            );
+        }
     };
     let net = match network(input) {
         Ok(n) => n,
-        Err(e) => return stats.problem(name, format!("the oracle accepts the network; this crate: {e:?}")),
+        Err(e) => {
+            return stats.problem(
+                name,
+                format!("the oracle accepts the network; this crate: {e:?}"),
+            );
+        }
     };
     match input.task.as_str() {
         "energy" => replay_energy(input, &net, ex, out, stats),
@@ -655,7 +681,8 @@ fn outcome_token(o: &TrialOutcome) -> String {
                 ProjectionStatus::Converged => "converged".to_string(),
                 ProjectionStatus::MaxIterations => "max-iterations".to_string(),
                 ProjectionStatus::Diverged => "diverged".to_string(),
-                ProjectionStatus::TangentFlipped { constraint } => format!("tangent-flipped-{constraint}"),
+                ProjectionStatus::TangentFlipped { constraint } =>
+                    format!("tangent-flipped-{constraint}"),
             }
         ),
         TrialOutcome::PathCollision { .. } => "path-collision".into(),
@@ -673,15 +700,29 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
     let name = input.name.as_str();
     let mut session = match step_session(input, net, ex) {
         Ok(s) => s,
-        Err(e) => return stats.problem(name, format!("the oracle runs the steps; the session cannot start: {e:?}")),
+        Err(e) => {
+            return stats.problem(
+                name,
+                format!("the oracle runs the steps; the session cannot start: {e:?}"),
+            );
+        }
     };
     let lbar = float(&first(out, "lbar").unwrap()[1]);
     let n_steps = int(&first(out, "steps").unwrap()[1]);
     let mut ill_seen = false;
     for k in 0..n_steps {
         let kk = k.to_string();
-        let st = rows_with(out, "step").into_iter().find(|l| l[1] == kk).expect("step line");
-        let (tau0, slope, f0, gnorm, cond) = (float(&st[2]), float(&st[3]), float(&st[4]), float(&st[5]), float(&st[7]));
+        let st = rows_with(out, "step")
+            .into_iter()
+            .find(|l| l[1] == kk)
+            .expect("step line");
+        let (tau0, slope, f0, gnorm, cond) = (
+            float(&st[2]),
+            float(&st[3]),
+            float(&st[4]),
+            float(&st[5]),
+            float(&st[7]),
+        );
         let mult = (COND_ERROR * cond / SOLVE_BASE).max(1.0);
         if mult > 1.0 {
             stats.ill_conditioned += 1;
@@ -692,8 +733,14 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
             stats.tie_skips += 1;
             return;
         }
-        let otrials: Vec<&Line> = rows_with(out, "trial").into_iter().filter(|l| l[1] == kk).collect();
-        let res = rows_with(out, "result").into_iter().find(|l| l[1] == kk).expect("result line");
+        let otrials: Vec<&Line> = rows_with(out, "trial")
+            .into_iter()
+            .filter(|l| l[1] == kk)
+            .collect();
+        let res = rows_with(out, "result")
+            .into_iter()
+            .find(|l| l[1] == kk)
+            .expect("result line");
         let o_accepted = res[2] == "accepted";
         let rep = match session.step() {
             Ok(r) => r,
@@ -701,9 +748,24 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
         };
         // later steps start from curves that differ by the projection residuals of the earlier ones
         let f0_tol = if k == 0 { ENERGY_REL } else { 1e-9 * mult };
-        stats.check(name, "step: F0", rel_ratio(rep.energy_before, f0, f0_tol, 0.0), || format!("{} vs {f0}", rep.energy_before));
-        stats.check(name, "step: dF.g", rel_ratio(rep.sobolev_norm_sq, slope, SCALAR_REL * mult, 0.0), || format!("{} vs {slope}", rep.sobolev_norm_sq));
-        stats.check(name, "step: |g|", rel_ratio(rep.gradient_norm, gnorm, SCALAR_REL * mult, 0.0), || format!("{} vs {gnorm}", rep.gradient_norm));
+        stats.check(
+            name,
+            "step: F0",
+            rel_ratio(rep.energy_before, f0, f0_tol, 0.0),
+            || format!("{} vs {f0}", rep.energy_before),
+        );
+        stats.check(
+            name,
+            "step: dF.g",
+            rel_ratio(rep.sobolev_norm_sq, slope, SCALAR_REL * mult, 0.0),
+            || format!("{} vs {slope}", rep.sobolev_norm_sq),
+        );
+        stats.check(
+            name,
+            "step: |g|",
+            rel_ratio(rep.gradient_norm, gnorm, SCALAR_REL * mult, 0.0),
+            || format!("{} vs {gnorm}", rep.gradient_norm),
+        );
         if rep.trials.is_empty() && otrials.is_empty() {
             // no line search in either (degenerate slope)
             if o_accepted || rep.status == StepStatus::Accepted {
@@ -711,7 +773,12 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
             }
             return;
         }
-        stats.check(name, "step: first tau", rel_ratio(rep.tau_start, tau0, SCALAR_REL * mult, 0.0), || format!("{} vs {tau0}", rep.tau_start));
+        stats.check(
+            name,
+            "step: first tau",
+            rel_ratio(rep.tau_start, tau0, SCALAR_REL * mult, 0.0),
+            || format!("{} vs {tau0}", rep.tau_start),
+        );
         // trial by trial, up to the first Armijo race
         let mut raced = false;
         let n = rep.trials.len().min(otrials.len());
@@ -719,7 +786,12 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
             let (t, o) = (&rep.trials[i], otrials[i]);
             let margin = float(&o[8]);
             let race = margin.is_finite() && margin.abs() < ARMIJO_TIE * mult;
-            stats.check(name, "step: trial tau", rel_ratio(t.tau, float(&o[3]), SCALAR_REL * mult, 0.0), || format!("trial {i}"));
+            stats.check(
+                name,
+                "step: trial tau",
+                rel_ratio(t.tau, float(&o[3]), SCALAR_REL * mult, 0.0),
+                || format!("trial {i}"),
+            );
             if race {
                 raced = true;
                 stats.tie_skips += 1;
@@ -739,7 +811,12 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
             }
             if let Some(e) = t.energy {
                 let eo = float(&o[6]);
-                stats.check(name, "step: trial energy", rel_ratio(e, eo, 1e-9 * mult, 0.0), || format!("trial {i}: {e} vs {eo}"));
+                stats.check(
+                    name,
+                    "step: trial energy",
+                    rel_ratio(e, eo, 1e-9 * mult, 0.0),
+                    || format!("trial {i}: {e} vs {eo}"),
+                );
             }
         }
         if raced {
@@ -747,26 +824,70 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
         }
         stats.comparisons += 1;
         if rep.trials.len() != otrials.len() {
-            return stats.problem(name, format!("step {k}: {} trials here, {} in the oracle", rep.trials.len(), otrials.len()));
+            return stats.problem(
+                name,
+                format!(
+                    "step {k}: {} trials here, {} in the oracle",
+                    rep.trials.len(),
+                    otrials.len()
+                ),
+            );
         }
         let mine_accepted = rep.status == StepStatus::Accepted;
         if mine_accepted != o_accepted {
-            return stats.problem(name, format!("step {k}: status {:?} here, '{}' in the oracle", rep.status, res[2]));
+            return stats.problem(
+                name,
+                format!(
+                    "step {k}: status {:?} here, '{}' in the oracle",
+                    rep.status, res[2]
+                ),
+            );
         }
-        *stats.statuses.entry(format!("step-{}", res[2])).or_default() += 1;
+        *stats
+            .statuses
+            .entry(format!("step-{}", res[2]))
+            .or_default() += 1;
         if !o_accepted {
             return;
         }
-        stats.check(name, "step: accepted tau", rel_ratio(rep.tau, float(&res[3]), SCALAR_REL * mult, 0.0), || "tau".into());
-        stats.check(name, "step: F after", rel_ratio(rep.energy_after, float(&res[5]), 1e-9 * mult, 0.0), || "F1".into());
-        let x_o: Vec<P> = rows_with(out, "x").iter().filter(|l| l[1] == kk).map(|l| p3(l, 3)).collect();
+        stats.check(
+            name,
+            "step: accepted tau",
+            rel_ratio(rep.tau, float(&res[3]), SCALAR_REL * mult, 0.0),
+            || "tau".into(),
+        );
+        stats.check(
+            name,
+            "step: F after",
+            rel_ratio(rep.energy_after, float(&res[5]), 1e-9 * mult, 0.0),
+            || "F1".into(),
+        );
+        let x_o: Vec<P> = rows_with(out, "x")
+            .iter()
+            .filter(|l| l[1] == kk)
+            .map(|l| p3(l, 3))
+            .collect();
         let (a, b) = (flat(session.positions()), flat(&x_o));
-        let err = a.iter().zip(&b).fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
-        stats.check(name, "step: positions", err / (POS_LBAR * lbar * mult), || "x".into());
+        let err = a
+            .iter()
+            .zip(&b)
+            .fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
+        stats.check(
+            name,
+            "step: positions",
+            err / (POS_LBAR * lbar * mult),
+            || "x".into(),
+        );
     }
 }
 
-fn replay_energy(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], stats: &mut Stats) {
+fn replay_energy(
+    input: &Input,
+    net: &CurveNetwork,
+    ex: Exponents,
+    out: &[Line],
+    stats: &mut Stats,
+) {
     let name = input.name.as_str();
     let rep = match energy(net, &input.positions, ex, &EnergyEval::Exact, Some(1)) {
         Ok(r) => r,
@@ -774,7 +895,9 @@ fn replay_energy(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line],
     };
     let oe = float(&first(out, "energy").expect("energy line")[1]);
     let ratio = (rep.energy - oe).abs() / (ENERGY_REL * rep.energy.abs().max(oe.abs()));
-    stats.check(name, "energy", ratio, || format!("{} vs oracle {}", rep.energy, oe));
+    stats.check(name, "energy", ratio, || {
+        format!("{} vs oracle {}", rep.energy, oe)
+    });
     let od = oracle_points(out, "d");
     let mine = rep.differential;
     // components along the held axis are zero in the oracle; this crate leaves rounding
@@ -783,7 +906,13 @@ fn replay_energy(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line],
         let scale = max_abs(&b).max(max_abs(&a));
         for v in 0..mine.len() {
             if (mine[v][ax]).abs() > 1e-12 * scale.max(1e-300) {
-                stats.problem(name, format!("differential along the held axis at vertex {v}: {}", mine[v][ax]));
+                stats.problem(
+                    name,
+                    format!(
+                        "differential along the held axis at vertex {v}: {}",
+                        mine[v][ax]
+                    ),
+                );
             }
             a[3 * v + ax] = 0.0;
             b[3 * v + ax] = 0.0;
@@ -791,7 +920,13 @@ fn replay_energy(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line],
     }
     let ratio = normwise(&a, &b, DIFF_REL, DIFF_FLOOR * max_abs(&b));
     stats.check(name, "differential", ratio, || {
-        format!("max abs diff {:.3e} of {:.3e}", a.iter().zip(&b).fold(0.0f64, |m, (x, y)| m.max((x - y).abs())), max_abs(&b))
+        format!(
+            "max abs diff {:.3e} of {:.3e}",
+            a.iter()
+                .zip(&b)
+                .fold(0.0f64, |m, (x, y)| m.max((x - y).abs())),
+            max_abs(&b)
+        )
     });
 }
 
@@ -811,33 +946,76 @@ fn replay_gram(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
             } else {
                 GramQuadrature::Trapezoid
             };
-            sections.push((if l[1] == "midpoint" { "midpoint" } else { "trapezoid" }, q, Vec::new()));
+            sections.push((
+                if l[1] == "midpoint" {
+                    "midpoint"
+                } else {
+                    "trapezoid"
+                },
+                q,
+                Vec::new(),
+            ));
             cur = Some(sections.len() - 1);
         } else if let Some(c) = cur {
             sections[c].2.push(l);
         }
     }
     if sections.len() != 2 {
-        return stats.problem(name, format!("expected two sections, found {}", sections.len()));
+        return stats.problem(
+            name,
+            format!("expected two sections, found {}", sections.len()),
+        );
     }
     for (qname, q, lines) in sections {
-        let g = match gram(net, &input.positions, ex, &Metric::Sobolev { quadrature: q }, Some(1)) {
+        let g = match gram(
+            net,
+            &input.positions,
+            ex,
+            &Metric::Sobolev { quadrature: q },
+            Some(1),
+        ) {
             Ok(g) => g,
             Err(e) => return stats.problem(name, format!("gram: {e:?}")),
         };
-        let pick = |tag: &str| -> Vec<&Line> { lines.iter().copied().filter(|l| l[0] == tag).collect() };
+        let pick =
+            |tag: &str| -> Vec<&Line> { lines.iter().copied().filter(|l| l[0] == tag).collect() };
         let a = oracle_matrix(&pick("A"));
-        stats.check(name, "gram A", normwise(g.a.as_slice(), &a, GRAM_REL, 0.0), || qname.into());
+        stats.check(
+            name,
+            "gram A",
+            normwise(g.a.as_slice(), &a, GRAM_REL, 0.0),
+            || qname.into(),
+        );
         let b = pick("B");
         if !b.is_empty() {
-            stats.check(name, "gram B", normwise(g.b.as_slice(), &oracle_matrix(&b), GRAM_REL, 0.0), || qname.into());
-            stats.check(name, "gram B0", normwise(g.b0.as_slice(), &oracle_matrix(&pick("B0")), GRAM_REL, 0.0), || qname.into());
+            stats.check(
+                name,
+                "gram B",
+                normwise(g.b.as_slice(), &oracle_matrix(&b), GRAM_REL, 0.0),
+                || qname.into(),
+            );
+            stats.check(
+                name,
+                "gram B0",
+                normwise(g.b0.as_slice(), &oracle_matrix(&pick("B0")), GRAM_REL, 0.0),
+                || qname.into(),
+            );
             let km = kernel_matrices(&pool, net, &geom, q);
             let okb = oracle_matrix(&pick("KB"));
             let ok0 = oracle_matrix(&pick("K0"));
             assert_eq!(okb.len(), m * m);
-            stats.check(name, "kernel K^B", normwise(km.kb.as_slice(), &okb, GRAM_REL, 0.0), || qname.into());
-            stats.check(name, "kernel K0", normwise(km.k0.as_slice(), &ok0, GRAM_REL, 0.0), || qname.into());
+            stats.check(
+                name,
+                "kernel K^B",
+                normwise(km.kb.as_slice(), &okb, GRAM_REL, 0.0),
+                || qname.into(),
+            );
+            stats.check(
+                name,
+                "kernel K0",
+                normwise(km.k0.as_slice(), &ok0, GRAM_REL, 0.0),
+                || qname.into(),
+            );
         }
         let _ = n;
     }
@@ -853,7 +1031,10 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
                 stats.ambiguous_singular += 1;
                 return;
             }
-            return stats.problem(name, format!("the oracle solves the saddle; this crate: {e:?}"));
+            return stats.problem(
+                name,
+                format!("the oracle solves the saddle; this crate: {e:?}"),
+            );
         }
     };
     let cond = float(&first(out, "cond").unwrap()[1]);
@@ -864,33 +1045,74 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     let rows = first(out, "rows").expect("rows line");
     let (ok, ond) = (int(&rows[1]), int(&rows[2]));
     if ok != s.n_rows || ond != s.n_dofs {
-        return stats.problem(name, format!("the saddle has {ok} rows and {ond} unknowns in the oracle, {} and {} here", s.n_rows, s.n_dofs));
+        return stats.problem(
+            name,
+            format!(
+                "the saddle has {ok} rows and {ond} unknowns in the oracle, {} and {} here",
+                s.n_rows, s.n_dofs
+            ),
+        );
     }
     let lbar = s.mean_edge;
-    let phi_o: Vec<f64> = first(out, "phi").unwrap()[1..].iter().map(|t| float(t)).collect();
-    let phi_err = s.phi.iter().zip(&phi_o).fold(0.0f64, |m, (a, b)| m.max((a - b).abs() / (PHI_REL * (lbar + a.abs().max(b.abs())))));
+    let phi_o: Vec<f64> = first(out, "phi").unwrap()[1..]
+        .iter()
+        .map(|t| float(t))
+        .collect();
+    let phi_err = s.phi.iter().zip(&phi_o).fold(0.0f64, |m, (a, b)| {
+        m.max((a - b).abs() / (PHI_REL * (lbar + a.abs().max(b.abs()))))
+    });
     if s.phi.len() != phi_o.len() {
         return stats.problem(name, "row count of Φ differs".into());
     }
-    stats.check(name, "constraint values", phi_err, || format!("{:?} vs {:?}", s.phi, phi_o));
+    stats.check(name, "constraint values", phi_err, || {
+        format!("{:?} vs {:?}", s.phi, phi_o)
+    });
     if input.task == "saddle" {
         let co = oracle_matrix(&rows_with(out, "c"));
-        stats.check(name, "Jacobian C", normwise(&s.c, &co, JAC_REL, 0.0), || "C".into());
+        stats.check(
+            name,
+            "Jacobian C",
+            normwise(&s.c, &co, JAC_REL, 0.0),
+            || "C".into(),
+        );
         let g_o = oracle_points(out, "g");
         let g_mine = flat(&s.g);
         let g_oracle = flat(&g_o);
-        stats.check(name, "projected gradient", normwise(&g_mine, &g_oracle, G_REL * mult, G_ABS_LBAR * lbar * mult), || {
-            format!("max|g| {:.3e}", max_abs(&g_oracle))
-        });
-        let lam_o: Vec<f64> = first(out, "lambda").unwrap()[1..].iter().map(|t| float(t)).collect();
+        stats.check(
+            name,
+            "projected gradient",
+            normwise(&g_mine, &g_oracle, G_REL * mult, G_ABS_LBAR * lbar * mult),
+            || format!("max|g| {:.3e}", max_abs(&g_oracle)),
+        );
+        let lam_o: Vec<f64> = first(out, "lambda").unwrap()[1..]
+            .iter()
+            .map(|t| float(t))
+            .collect();
         let dfg_o = float(&first(out, "dfg").unwrap()[1]);
         let gn_o = float(&first(out, "gnorm").unwrap()[1]);
         // scales of the quantities: lambda by its own max, dF.g by the product of the norms
         let gscale = max_abs(&g_oracle).max(1e-300);
-        stats.check(name, "multipliers", normwise(&s.lambda, &lam_o, SCALAR_REL * mult, 0.0), || "λ".into());
+        stats.check(
+            name,
+            "multipliers",
+            normwise(&s.lambda, &lam_o, SCALAR_REL * mult, 0.0),
+            || "λ".into(),
+        );
         let dscale = (dfg_o.abs()).max(1e-300);
-        stats.check(name, "dF.g", (s.dfg - dfg_o).abs() / (SCALAR_REL * mult * dscale + s.n_dofs as f64 * s.diff_max * G_ABS_LBAR * lbar * mult), || format!("{} vs {}", s.dfg, dfg_o));
-        stats.check(name, "gradient norm", (s.gnorm - gn_o).abs() / (SCALAR_REL * mult * gn_o.abs() + G_ABS_LBAR * lbar * mult), || format!("{} vs {}", s.gnorm, gn_o));
+        stats.check(
+            name,
+            "dF.g",
+            (s.dfg - dfg_o).abs()
+                / (SCALAR_REL * mult * dscale
+                    + s.n_dofs as f64 * s.diff_max * G_ABS_LBAR * lbar * mult),
+            || format!("{} vs {}", s.dfg, dfg_o),
+        );
+        stats.check(
+            name,
+            "gradient norm",
+            (s.gnorm - gn_o).abs() / (SCALAR_REL * mult * gn_o.abs() + G_ABS_LBAR * lbar * mult),
+            || format!("{} vs {}", s.gnorm, gn_o),
+        );
         let _ = gscale;
         return;
     }
@@ -898,7 +1120,12 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     let g_o = oracle_points(out, "g");
     let tau = float(&first(out, "tau").unwrap()[1]);
     let lbar_o = float(&first(out, "lbar").unwrap()[1]);
-    stats.check(name, "mean edge length", (lbar - lbar_o).abs() / (1e-14 * lbar), || format!("{lbar} vs {lbar_o}"));
+    stats.check(
+        name,
+        "mean edge length",
+        (lbar - lbar_o).abs() / (1e-14 * lbar),
+        || format!("{lbar} vs {lbar_o}"),
+    );
     let coords = s.layout_coords.clone();
     let trial: Vec<P> = input
         .positions
@@ -934,15 +1161,29 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
         ProjectionStatus::Diverged => "diverged".to_string(),
         ProjectionStatus::TangentFlipped { constraint } => format!("tangent-flipped {constraint}"),
     };
-    *stats.statuses.entry(o_status.split(' ').next().unwrap().to_string()).or_default() += 1;
-    let hist_o: Vec<f64> = first(out, "hist").unwrap()[1..].iter().map(|t| float(t)).collect();
-    let near_tie = hist_o.iter().chain(pr.history.iter()).any(|h| (h - 1.0).abs() < DECISION);
+    *stats
+        .statuses
+        .entry(o_status.split(' ').next().unwrap().to_string())
+        .or_default() += 1;
+    let hist_o: Vec<f64> = first(out, "hist").unwrap()[1..]
+        .iter()
+        .map(|t| float(t))
+        .collect();
+    let near_tie = hist_o
+        .iter()
+        .chain(pr.history.iter())
+        .any(|h| (h - 1.0).abs() < DECISION);
     let n_common = hist_o.len().min(pr.history.len());
     // history entries up to the common length
     for i in 0..n_common {
         let (a, b) = (pr.history[i], hist_o[i]);
         let ratio = (a - b).abs() / ((HIST_REL * a.abs().max(b.abs()) + HIST_ABS) * mult);
-        stats.check(name, "projection history", ratio, || format!("entry {i}: {a} vs {b} (all: {:?} vs {:?})", pr.history, hist_o));
+        stats.check(name, "projection history", ratio, || {
+            format!(
+                "entry {i}: {a} vs {b} (all: {:?} vs {:?})",
+                pr.history, hist_o
+            )
+        });
     }
     if near_tie {
         stats.tie_skips += 1;
@@ -961,14 +1202,22 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     let x_o = oracle_points(out, "x");
     let ratio = {
         let (a, b) = (flat(&pr.positions), flat(&x_o));
-        let err = a.iter().zip(&b).fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
+        let err = a
+            .iter()
+            .zip(&b)
+            .fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
         err / (POS_LBAR * lbar * mult)
     };
     stats.check(name, "projected positions", ratio, || "x".into());
     let mv_o = float(&first(out, "maxviol").unwrap()[1]);
     // the final violation is rounding-level after convergence; compare only unconverged endings
     if my_status != "converged" {
-        stats.check(name, "final violation", (pr.max_violation - mv_o).abs() / ((1e-6 * mv_o.abs() + 1e-12 * lbar) * mult), || format!("{} vs {}", pr.max_violation, mv_o));
+        stats.check(
+            name,
+            "final violation",
+            (pr.max_violation - mv_o).abs() / ((1e-6 * mv_o.abs() + 1e-12 * lbar) * mult),
+            || format!("{} vs {}", pr.max_violation, mv_o),
+        );
     }
 }
 
@@ -1005,7 +1254,12 @@ fn fixtures_are_reproduced() {
         })
         .collect();
     names.sort();
-    assert!(names.len() >= 40, "only {} fixtures in {}", names.len(), dir.display());
+    assert!(
+        names.len() >= 40,
+        "only {} fixtures in {}",
+        names.len(),
+        dir.display()
+    );
     let mut total = Stats::default();
     for name in &names {
         let inputs = std::fs::read_to_string(dir.join(format!("{name}.in"))).unwrap();
@@ -1016,7 +1270,11 @@ fn fixtures_are_reproduced() {
     for (name, msg) in &total.problems {
         println!("DISAGREEMENT {name}: {msg}");
     }
-    assert!(total.problems.is_empty(), "{} disagreements with the golden fixtures", total.problems.len());
+    assert!(
+        total.problems.is_empty(),
+        "{} disagreements with the golden fixtures",
+        total.problems.len()
+    );
 }
 
 // ----- fuzzing -----
@@ -1024,18 +1282,27 @@ fn fixtures_are_reproduced() {
 fn oracle_path() -> PathBuf {
     match std::env::var("DDG_ORACLE") {
         Ok(p) => PathBuf::from(p),
-        Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean/oracle/.lake/build/bin/ddg-oracle"),
+        Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../lean/oracle/.lake/build/bin/ddg-oracle"),
     }
 }
 
 fn env_usize(name: &str, default: usize) -> usize {
-    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Generate `count` cases starting at index `first`, answer them, replay them.
 fn fuzz_chunk(oracle: &Path, seed: usize, first: usize, count: usize) -> (Stats, String) {
     let generated = Command::new(oracle)
-        .args(["rc-gen", &seed.to_string(), &count.to_string(), &first.to_string()])
+        .args([
+            "rc-gen",
+            &seed.to_string(),
+            &count.to_string(),
+            &first.to_string(),
+        ])
         .output()
         .expect("run rc-gen");
     assert!(generated.status.success(), "rc-gen failed");
@@ -1067,7 +1334,9 @@ fn fuzz_against_the_oracle() {
     let seed = env_usize("DDG_RC_FUZZ_SEED", 1);
     let threads = env_usize(
         "DDG_RC_FUZZ_THREADS",
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4),
     );
     let chunk = 20;
     let n_chunks = cases.div_ceil(chunk);
@@ -1089,7 +1358,9 @@ fn fuzz_against_the_oracle() {
                     if !stats.problems.is_empty() {
                         let mut map = inputs_of_problems.lock().unwrap();
                         for (name, _) in &stats.problems {
-                            if let Some((_, lines)) = blocks(&inputs).into_iter().find(|(n, _)| n == name) {
+                            if let Some((_, lines)) =
+                                blocks(&inputs).into_iter().find(|(n, _)| n == name)
+                            {
                                 let mut text = format!("case {name}\n");
                                 for l in lines {
                                     text += &(l.join(" ") + "\n");
@@ -1105,7 +1376,10 @@ fn fuzz_against_the_oracle() {
         }
     });
     let total = total.into_inner().unwrap();
-    println!("seed {seed}, {cases} cases, {threads} threads, {:.1} s", started.elapsed().as_secs_f64());
+    println!(
+        "seed {seed}, {cases} cases, {threads} threads, {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
     println!("{}", total.report());
     let dir = std::env::var("DDG_RC_FUZZ_DIR")
         .map(PathBuf::from)
@@ -1119,7 +1393,14 @@ fn fuzz_against_the_oracle() {
         for (name, text) in &map {
             std::fs::write(dir.join(format!("{name}.in")), text).unwrap();
         }
-        println!("inputs of the disagreeing cases written to {}", dir.display());
+        println!(
+            "inputs of the disagreeing cases written to {}",
+            dir.display()
+        );
     }
-    assert!(total.problems.is_empty(), "{} disagreements", total.problems.len());
+    assert!(
+        total.problems.is_empty(),
+        "{} disagreements",
+        total.problems.len()
+    );
 }

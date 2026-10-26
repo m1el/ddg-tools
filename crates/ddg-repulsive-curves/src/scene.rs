@@ -1533,7 +1533,7 @@ pub fn run_scene(scene: &Scene, opts: &RunOptions) -> Result<RunOutcome, RcError
 
 pub mod builtin;
 
-/// Reads the curve file of a scene: [`read_curve_obj`], except that a file without `l` lines and
+/// Reads the curve file of a scene: [`crate::io::read_curve_obj`], except that a file without `l` lines and
 /// with exactly one polygon face (`f i j k ...`, the authors' `DoubleTorus/InitialLoop.obj` and
 /// `FreedmanUnknot/FreedmanKnotPlot.obj`) is read as the closed loop through the face's vertices
 /// in that order.

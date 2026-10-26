@@ -1062,16 +1062,12 @@ fn freedman_600_barnes_hut_flows_to_a_circle() {
         "RESULT bh final: Barnes-Hut energy {:.5}, exact energy of the same curve {exact:.5}",
         s.energy()
     );
-    // The run ends (Converged, or Stuck at the noise floor of the Barnes-Hut differential, which
-    // is not the derivative of the evaluated energy, SPEC 17f) instead of taking steps of 1e-14
-    // until the iteration cap.
-    assert!(
-        matches!(s.status(), Status::Converged | Status::Stuck),
-        "{:?}",
-        s.status()
-    );
-    // The same near-circle: both energies are within 2 % of the exact flow's 6.0816.
-    assert!((exact - 6.0816).abs() < 0.02 * 6.0816, "exact {exact}");
+    // Since the differential is the exact derivative of the evaluated energy (SPEC 17i) the flow
+    // converges (step 711, |g| 9.86e-5, exact energy 6.08164) instead of getting stuck at the
+    // noise floor of the old differential.
+    assert_eq!(s.status(), Status::Converged);
+    // The same near-circle: the exact energy is within 0.5 % of the exact flow's 6.0816.
+    assert!((exact - 6.0816).abs() < 0.005 * 6.0816, "exact {exact}");
     assert!((s.energy() - exact).abs() < 0.02 * exact);
 }
 

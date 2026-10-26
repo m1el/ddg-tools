@@ -91,6 +91,9 @@ use stop::{Status, StepStatus, StopRule, StopState, mass_norm};
 /// `SPEC.md` §17b; measured again by WP3, see the crate notes).
 pub const DEFAULT_DENSE_THREADS: usize = 16;
 
+/// Default of [`FlowOptions::min_edge_length_ratio`]: 1e-3.
+pub const DEFAULT_MIN_EDGE_LENGTH_RATIO: f64 = 1e-3;
+
 /// Default of [`FlowOptions::dense_fallback_max_vertices`].
 pub const DEFAULT_DENSE_FALLBACK_MAX_VERTICES: usize = 5000;
 
@@ -312,8 +315,10 @@ impl EnergyModel for BarnesHutEnergy {
         let tree = self.tree.as_ref().expect("fitted");
         // The differential is taken at the base curve of a step: its interaction lists are the
         // ones the trial energies of the line search use.
-        self.lists = Some(tree.interaction_lists(&pool));
-        let (energy, differential, stats) = tree.energy_and_differential(&pool, exponents);
+        let lists = tree.interaction_lists(&pool);
+        let (energy, differential, stats) =
+            tree.energy_and_differential_with_lists(&lists, &pool, exponents)?;
+        self.lists = Some(lists);
         Ok(EnergyEvaluation {
             energy,
             differential,
@@ -549,6 +554,13 @@ pub struct FlowOptions {
     /// vertices (`(3|V| + k)²` doubles of memory, about 2 GB at 5000); larger networks return
     /// the error. 0: never fall back. Default 5000 (`SPEC.md` §17h).
     pub dense_fallback_max_vertices: usize,
+    /// Guard against collapsing edges (`SPEC.md` §17j): a step that would leave some edge
+    /// shorter than `ratio · ℓ̄₀` (`ℓ̄₀` the mean edge length at the start of the session), and
+    /// shorter than that edge was before the step, is not taken and fails with
+    /// [`RcError::EdgeCollapse`], before the metric becomes singular. `None`: no guard. Not part
+    /// of the paper or of the reference; it changes no energy and no step that is taken.
+    /// Default `Some(1e-3)`.
+    pub min_edge_length_ratio: Option<f64>,
 }
 
 impl fmt::Debug for FlowOptions {
@@ -576,6 +588,7 @@ impl fmt::Debug for FlowOptions {
                 "dense_fallback_max_vertices",
                 &self.dense_fallback_max_vertices,
             )
+            .field("min_edge_length_ratio", &self.min_edge_length_ratio)
             .finish()
     }
 }
@@ -603,6 +616,7 @@ impl Default for FlowOptions {
             dense_threads: None,
             record_path: false,
             dense_fallback_max_vertices: DEFAULT_DENSE_FALLBACK_MAX_VERTICES,
+            min_edge_length_ratio: Some(DEFAULT_MIN_EDGE_LENGTH_RATIO),
         }
     }
 }
@@ -635,6 +649,15 @@ impl FlowOptions {
         }
         if self.method.is_soft() && !self.constraints.is_empty() {
             return Err(RcError::MethodNeedsSoftProblem);
+        }
+        if let Some(r) = self.min_edge_length_ratio
+            && !(r.is_finite() && r > 0.0 && r < 1.0)
+        {
+            return Err(RcError::InvalidOption {
+                name: "min_edge_length_ratio",
+                value: r.to_string(),
+                requirement: "a ratio in (0, 1), or None",
+            });
         }
         if let Backend::Explicit {
             solver: Solver::Multigrid(o),
@@ -990,13 +1013,16 @@ impl SearchEnv for StepEnv<'_> {
     }
 }
 
+/// An energy model with a solver factory.
+type Backends = (Box<dyn EnergyModel>, Arc<dyn SolverFactory>);
+
 /// The energy model and solver factory for a network of `n_vertices` vertices
 /// ([`Backend::resolve`]).
 fn make_backends(
     options: &FlowOptions,
     n_vertices: usize,
     pool: &Arc<rayon::ThreadPool>,
-) -> Result<(Box<dyn EnergyModel>, Arc<dyn SolverFactory>), RcError> {
+) -> Result<Backends, RcError> {
     let (eval, solver) = options.backend.resolve(n_vertices);
     let energy = energy_model(&eval, options.exponents, pool.clone())?;
     let solver: Arc<dyn SolverFactory> = match solver {
@@ -1506,6 +1532,7 @@ impl Session {
             report.trials = ls.trials;
             // 4. Accept or stuck.
             if let (true, Some(new_pos)) = (ls.accepted, ls.positions) {
+                self.check_edge_collapse(&new_pos, iteration)?;
                 accepted = true;
                 let x_old = self.layout.gather(&self.positions);
                 self.positions = new_pos;
@@ -1598,6 +1625,33 @@ impl Session {
             .take();
         report.seconds.total = t_step.elapsed().as_secs_f64();
         Ok(report)
+    }
+
+    /// The collapse guard of [`FlowOptions::min_edge_length_ratio`] on the positions of an
+    /// accepted line search, before they are taken.
+    fn check_edge_collapse(&self, new_pos: &[[f64; 3]], step: usize) -> Result<(), RcError> {
+        let Some(ratio) = self.options.min_edge_length_ratio else {
+            return Ok(());
+        };
+        let threshold = ratio * self.mean_edge_length0;
+        let before = self.network.edge_geometry(&self.positions).length;
+        let after = self.network.edge_geometry(new_pos).length;
+        let worst = after
+            .iter()
+            .zip(&before)
+            .enumerate()
+            .filter(|(_, (a, b))| **a < threshold && **a < **b)
+            .min_by(|x, y| x.1.0.total_cmp(y.1.0));
+        match worst {
+            Some((edge, (&length, &length_before))) => Err(RcError::EdgeCollapse {
+                edge,
+                length,
+                length_before,
+                threshold,
+                step,
+            }),
+            None => Ok(()),
+        }
     }
 
     /// The soft direction (§6.4): `z = M⁻¹ r` (mean-free solve), then L-BFGS or NCG.

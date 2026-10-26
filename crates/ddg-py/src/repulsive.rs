@@ -78,6 +78,7 @@ impl From<RcError> for RepError {
             | RcError::SingularSaddle { .. }
             | RcError::MultigridDiverged { .. }
             | RcError::MultigridNotConverged { .. }
+            | RcError::EdgeCollapse { .. }
             | RcError::NonFiniteEnergy { .. }
             | RcError::Cancelled => RepError::Solve(e.to_string()),
             e => RepError::Input(e.to_string()),
@@ -182,6 +183,7 @@ pub const OPTION_NAMES: &[&str] = &[
     "bh_leaf_size",
     "threads",
     "dense_threads",
+    "min_edge_length_ratio",
     "projection_tolerance",
     "projection_absolute",
     "projection_iterations",
@@ -449,6 +451,9 @@ pub struct RepulsiveOptions {
     pub threads: Option<usize>,
     /// Threads of the dense LU (`None`: `min(16, threads)`).
     pub dense_threads: Option<usize>,
+    /// A step that would shrink an edge below this fraction of the initial mean edge length
+    /// fails with a named error (`None`: no guard).
+    pub min_edge_length_ratio: Option<f64>,
     /// Tolerance of the constraint projection.
     pub projection_tolerance: f64,
     /// The tolerance is an absolute length, not a fraction of the mean edge length.
@@ -566,6 +571,7 @@ impl Default for RepulsiveOptions {
             bh_leaf_size: bh.leaf_size,
             threads: lib.threads,
             dense_threads: lib.dense_threads,
+            min_edge_length_ratio: lib.min_edge_length_ratio,
             projection_tolerance,
             projection_absolute,
             projection_iterations: lib.projection.max_iterations,
@@ -840,6 +846,7 @@ impl RepulsiveOptions {
             max_subdivisions: self.max_subdivisions,
             threads: self.threads,
             dense_threads: self.dense_threads,
+            min_edge_length_ratio: self.min_edge_length_ratio,
             dense_fallback_max_vertices: self.dense_fallback_max_vertices,
             ..FlowOptions::default()
         };

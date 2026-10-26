@@ -544,16 +544,13 @@ fn refit_equals_rebuild_for_unchanged_topology() {
 /// Central differences of the Barnes–Hut energy (the tree refitted, topology frozen: D26)
 /// against (a) the Barnes–Hut differential and (b) the exact differential.
 ///
-/// They are different approximations: the evaluated energy lumps only the pairs `(I, J)` with
-/// `T_I` (Eq. 26) and its derivative also moves the lumped centres `x̄_N` and masses with the
-/// vertices; the differential of §8.2 is the derivative of the lumped `(I, J) + (J, I)` pair with
-/// `L_N, x̄_N, T̂_N` held fixed. Both converge to the exact differential with eps; the test
-/// asserts the relative difference `|FD - g_BH|/|g_BH|` (2-norm of the whole vector) stays below
-/// the tolerances listed in the loop and shrinks with eps. Measured on a perturbed trefoil with
-/// 300 edges, leaf size 4, `eps = θ_T = 2 θ_x`: 0.19, 0.16, 0.041, 0.0035, 0.00087 for eps = 4, 2,
-/// 1, 0.5, 0.25 (the BH differential differs from the exact one by 0.29, 0.22, 0.064,
-/// 0.0024, 0.00033); the tolerances are about 1.5 times these (the first two 1.2 times). At eps -> 0 nothing is lumped and the
-/// finite differences match the differential to the accuracy of the central differences.
+/// Since WP3d (`SPEC.md` §17i) the Barnes–Hut differential is the exact derivative of the
+/// evaluated energy on its frozen interaction lists (the discrete adjoint), so (a) is the accuracy
+/// of the central differences: 4e-8 to 6e-8 relative at every `eps` (measured on a perturbed
+/// trefoil with 300 edges, leaf size 4, `eps = θ_T = 2 θ_x`; the test requires 1e-6). (b) is the
+/// approximation error of the lumping, which shrinks with eps (0.24, 0.20, 0.065, 3.8e-3, 8.9e-4
+/// for eps = 4, 2, 1, 0.5, 0.25). At eps -> 0 nothing is lumped and the finite differences match
+/// the exact differential to the accuracy of the central differences.
 #[test]
 fn finite_differences_of_bh_energy_are_close_to_bh_differential() {
     let (net, pos) = trefoil(300);
@@ -564,11 +561,11 @@ fn finite_differences_of_bh_energy_are_close_to_bh_differential() {
     let (_, g_exact) = energy_and_differential(&p, &net, &pos, ex);
     let mut last = f64::INFINITY;
     for (eps, tol) in [
-        (4.0, 0.29),
-        (2.0, 0.24),
-        (1.0, 0.062),
-        (0.5, 5.3e-3),
-        (0.25, 1.3e-3),
+        (4.0, 1e-6),
+        (2.0, 1e-6),
+        (1.0, 1e-6),
+        (0.5, 1e-6),
+        (0.25, 1e-6),
     ] {
         let o = BhOptions {
             leaf_size: 4,
@@ -597,8 +594,10 @@ fn finite_differences_of_bh_energy_are_close_to_bh_differential() {
             diff_err(&g_bh, &g_exact)
         );
         assert!(a < tol, "eps {eps}: {a} >= {tol}");
-        assert!(a <= last * 1.5 + 1e-9, "not shrinking with eps");
-        last = a;
+        // The lumping error against the exact differential shrinks with eps.
+        let lump = diff_err(&g_bh, &g_exact);
+        assert!(lump <= last * 1.5 + 1e-9, "not shrinking with eps");
+        last = lump;
     }
     // With nothing lumped the two are the same function: FD against the differential to 1e-6.
     let o = opts_eps(1e-12);
