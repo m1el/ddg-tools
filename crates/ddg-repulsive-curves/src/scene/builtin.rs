@@ -467,7 +467,8 @@ pub fn spline_points(n: usize) -> Result<Scene, RcError> {
 
 /// Fig. 29: an open polyline from `(-1, 0, 0)` to `(1, 0, 0)` with a bend, endpoints pinned
 /// with tangents fixed (both pointing into the plane's `+z` direction), one interior control
-/// point; the total length is kept and the spacing penalized.
+/// point; all edge lengths grow by 30 % (with only a length penalty or a total-length constraint
+/// the end edge collapses and the tangent row degenerates, see the WP13 notes).
 ///
 /// # Errors
 /// Errors of the constructors.
@@ -488,9 +489,9 @@ pub fn spline_tangents(n: usize) -> Result<Scene, RcError> {
         pin_endpoints: true,
         special_tangents: true,
         pins: vec![(n / 2) as u32],
-        length: LengthMode::TotalLength { scale: 1.3 },
+        length: LengthMode::EdgeLengths { scale: 1.3 },
         schedule_rate: 0.02,
-        extra_penalties: vec![Arc::new(LengthDifference::new(1.0)?)],
+
         iteration_limit: Some(40),
         ..SceneSpec::default()
     };

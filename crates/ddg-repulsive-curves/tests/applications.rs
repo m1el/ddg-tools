@@ -185,7 +185,11 @@ fn spline_with_fixed_end_tangents() {
     assert!(r.min_distance_over_run > 0.0);
     assert!(r.audit_end.max_tangent_error < 1e-4, "{:?}", r.audit_end);
     assert!(r.audit_end.max_pin_error < 1e-6 * r.audit_end.mean_edge_length);
-    assert!(r.length.1 > 1.2 * r.length.0);
+    assert!(
+        r.length.1 > 1.2 * r.length.0 && r.length.1 < 1.31 * r.length.0,
+        "{:?}",
+        r.length
+    );
 }
 
 #[test]
