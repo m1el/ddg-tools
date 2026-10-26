@@ -116,14 +116,16 @@ normalized to 1.
 | `reoptimize_angles` | `false` | `true`: a second solve for the best angles at the chosen positions |
 | `boundary` | `Zero`: `u = 0` on the boundary of every piece, boundary lengths (and so the two sides of a seam) preserved | `Optimized`: the solver chooses `u` on the boundary, [see below](#the-boundary) |
 | `spike_check.action` | `ExcludeFromDistortion`: spike tips get zero distortion weight, see [the spike check](#the-spike-check) | `WarnOnly` |
-| `cone_feedback` | `None` | `Some(FeedbackOptions { .. })`: compare the solver's scale factor with the flattening's and solve again with lowered weights, see [the cone feedback loop](#the-cone-feedback-loop) |
+| `cone_feedback` | `Some(FeedbackOptions::default())`: compare the solver's scale factor (also without cones) with the flattening's, and solve again with zero weight where they are far apart (needle tips), see [the cone feedback loop](#the-cone-feedback-loop) | `None` |
 | `require_certified_cones` | `false`: uncertified cones are used with a warning | `true`: an error |
 
 Then the piece is cut through its cones by `ddg-bff`'s planner with a mask that allows
 **polygon edges only**, and flattened with the solver's scale factors. Every piece comes out
 as one chart. At the end the pipeline checks that all triangle corners of one polygon corner
 received the same UV, that every UV is finite, that every cut edge is a polygon edge and that
-every seam is in the cut; a violation is `UvError::Internal`.
+every seam is in the cut; a violation is `UvError::Internal`. By default the [cone feedback
+loop](#the-cone-feedback-loop) then compares the solver's scale factor with the flattening's and
+solves a piece again where needle tips are found.
 
 **4. Packing.** `PackOptions { margin: 1/256, rotate: true }`: every chart is rotated into its
 smallest bounding box (rigid, never mirrored), all charts get **one** scale, boxes are shelved
@@ -408,36 +410,66 @@ published map's 0.095.
 
 ## The cone feedback loop
 
-**What** (`src/feedback.rs`, `UnwrapOptions::cone_feedback = Some(FeedbackOptions { .. })`). After
-stages 3a and 3b, on every piece that was solved, the pipeline drives the cone solver's feedback
-rule (`ddg_optimal_cones::Feedback`; the rule, its design decisions and the proofs are in the
-solver's README, "The feedback loop"): it compares the solver's linearized log scale factor
-`u_i` with the realized log area factor of the faces around the vertex in the flattening the
-stage made (`realized_face_log_scale`), lowers the distortion weight of the interior vertices
-where they differ by more than the threshold, and solves (with the pipeline's own policies:
-closed pieces, merge guard, slit, angle bounds) and flattens that piece again, until a round
-picks nothing. The spike check runs once, before; the vertices it excluded start with weight
-zero and are not looked at. A solve or flattening that fails after a reweighting keeps the
-previous cones and flattening of the piece, with a warning.
+**What** (`src/feedback.rs`, `UnwrapOptions::cone_feedback`, default
+`Some(FeedbackOptions::default())`; `None` switches it off). After stages 3a and 3b, on every
+piece that was solved, the pipeline drives the cone solver's feedback rule
+(`ddg_optimal_cones::Feedback`; the rule, its design decisions, the `|δ|` measured on the dataset
+and the proofs are in the solver's README, "The feedback loop"):
+
+1. on a piece with a boundary, the **cone-free probe**: the piece without cones (the prescribed
+   ones only; the state the spike check evaluated, reused, or evaluated again on a piece with a
+   slit) is flattened and compared;
+2. then the solve and the flattening the stages made: the solver's linearized log scale factor
+   `u_i` against the realized log area factor of the faces around the vertex
+   (`realized_face_log_scale`);
+3. where they differ by more than the threshold (20 log units) the distortion weight of the
+   interior vertex goes to zero, and the piece is solved (with the pipeline's own policies:
+   closed pieces, merge guard, slit, angle bounds) and flattened again, until a round picks
+   nothing.
+
+The spike check runs once, before; the vertices it excluded start with weight zero and are not
+looked at. A solve or flattening that fails after a reweighting keeps the previous cones and
+flattening of the piece, with a warning. A closed piece gets no probe (no flattening exists
+without cones): `FeedbackReport::probe_note` says so.
 
 **Output.** `ChartReport::feedback: Option<ChartFeedback { reweighted, pending, report }>`
 (`reweighted` and `pending` in the caller's numbering; `report` is the solver crate's
-`FeedbackReport`: every round's mismatch and seconds, the final weights in the piece's
-numbering, why it stopped); in `Report::summary()` the keys `cone_feedback_rounds`,
-`n_cone_feedback_reweighted`, `n_cone_feedback_pending`, `cone_feedback_max_mismatch` (largest
-`|δ|` among the vertices looked at in the first round), `cone_feedback_final_mismatch` (the same
-in the last round), `cone_feedback_vertices` (only if any) and `seconds_cone_feedback`
-(`Timings::cone_feedback`); a warning per piece where weights were lowered or the loop could not
-finish.
+`FeedbackReport`: the probe and every round with its mismatch and seconds, the final weights in
+the piece's numbering, why it stopped); in `Report::summary()` the keys `cone_feedback_rounds`
+(solves, the probe not counted), `n_cone_feedback_reweighted`, `n_cone_feedback_pending`,
+`cone_feedback_max_mismatch` (largest `|δ|` among the vertices looked at in the first round, the
+probe where it ran), `cone_feedback_final_mismatch` (the same in the last round),
+`cone_feedback_vertices` (only if any) and `seconds_cone_feedback` (`Timings::cone_feedback`); a
+warning per piece where weights were lowered or the loop could not finish.
 
-**Cost.** Where nothing is reweighted: the comparison only (`O(F + V log V)`), no solve, and the
-map is bit for bit the one without the loop (tested). Per extra round: the piece's solve and
-flattening again; a zero weight disables the solver's factor-once method, so that solve runs the
-reference method.
+**Measured** (`cargo run --release -p ddg-uv --example evaluate -- feedback`; all other options
+default; 23 dataset meshes, the 11 models of `data/models` (spot, bob, blub in their four
+resolutions, CrumpledDevelopable), 8 primitives; logs `runs_tmp/fb-evaluate/`, timings alone,
+single thread, `runs_tmp/fb-timings/pipeline2.log`, 2026-10-26):
 
-**Measured** (`cargo run --release -p ddg-uv --example evaluate -- feedback`: with and without
-the loop, with the spike check on and off, on the 23 dataset meshes, the models of `data/models`
-and the primitives). Not measured yet (phase 2 of the work).
+| | spike check on (default) | spike check off |
+|---|---|---|
+| loop off | the result before this work | `camelshotnoise`: 22 cones, distortion 53.0, 17.9 % overlap, 14 742 mirrored triangles |
+| loop on | **identical maps on all 42 meshes** (cones, distortion, overlap, flips); nothing reweighted: the spike check has excluded the tips of `camelshotnoise` already | `camelshotnoise`: the probe finds exactly the 22 tips, and the map is the spike check's (4 cones, 0.259, 0.001 %, 116); every other mesh identical, nothing reweighted |
+
+And a case the spike check misses (`tests/feedback.rs`): a disk with bumps of amplitude 0.6 and
+three needles of height 0.5. The surface's own cone-free distortion keeps the 99 % share
+criterion from firing; the loop finds the three tips from the probe, and the map goes from 3
+cones and distortion 0.907 to 1 cone and 0.612.
+
+Cost with the spike check on (the default), loop on against off, single thread: pieces without
+boundary (spot, bob, blub, the closed dataset meshes, the closed primitives) **0 %** (the
+comparison only, at most 15 ms on `brain`); meshes with boundary **+29 %** median (+13 % to +42 %
+over the 15 that take more than 0.05 s, `camelshotnoise` aside; 7 to 81 ms more: the probe's
+flattening and comparison, the cone-free state being the spike check's). Where something is found, each extra round is a
+reference-method solve (`camelshotnoise` with the spike check off: 4.3 s instead of 0.09 s for a
+map that is unusable without it, the same 4.4 s as the spike check's exclusion).
+
+**Default: on**, also in Python (`cone_feedback=True`) and Blender ("Cone Feedback" on). The rule
+for defaults is that the more stable and reliable option is the default. On every measured mesh
+without needles the loop changes nothing (bit for bit, tested), and it catches needles that the
+spike check does not, which wreck the map; its price is about a quarter more time on meshes with
+boundary and nothing on closed ones.
 
 ## The dataset
 
@@ -1271,7 +1303,7 @@ cargo clippy -p ddg-uv --all-targets -- -D warnings
 | `tests/errors.rs` | every refusal with its exact message; inconsistent winding repaired and reported; degenerate triangles mollified and reported |
 | `tests/properties.rs` | random meshes of ten kinds (disk, sphere, cube, capped cylinder, cone, torus, genus 2, disk with n-gon, annulus, two components), jittered, quads split along either diagonal, random seams, steering and options: finite UVs, cuts on polygon edges only, UVs continuous across every edge that is not cut, seams cut, prescribed cones exact or reported, counts consistent, positive cones where asked, input unchanged, identical second run |
 | `tests/dataset.rs` | the 23 dataset meshes with the defaults (release build; a debug build runs `bump` only, because the unoptimized cone solver needs minutes for the others); skipped with a notice without the data |
-| `tests/feedback.rs` | the cone feedback loop: with the spike check off it finds the two tips of a spiked grid and ends with the cones of the spike check's exclusion, it finds a spike on a sphere, it leaves the map of smooth meshes bit for bit unchanged, invalid options are errors; `solve_with_feedback` with Boundary First Flattening on a grid with a lifted vertex |
+| `tests/feedback.rs` | the cone feedback loop: with the spike check off it finds the two tips of a spiked grid and ends with the cones of the spike check's exclusion; a spike on a sphere through a seam (none on the closed sphere, and the report says why); needles on a rough disk that the spike check misses; it leaves the map of smooth meshes bit for bit unchanged; invalid options are errors; `solve_with_feedback` with Boundary First Flattening on a grid with a lifted vertex |
 
 The census of the property test's generator (2000 fixed cases): 1982 unwrapped and passed
 every check, 9 refused because positive cones were demanded on a closed genus-2 surface, 9

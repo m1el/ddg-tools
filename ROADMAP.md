@@ -24,12 +24,26 @@ including three misplaced in the authors' demo repository, were removed the same
 
 ## Scheduled
 
-1. **The cones solver against the dataset's own measure** (proposed 2026-10-14, not approved): a
-   feedback loop that lowers the distortion weight where the solver's scale factor is far from the
-   one the flattening realizes (needle tips), judged by the 23-mesh comparison in
-   `crates/ddg-optimal-cones/README.md`, "Published UVs: measured comparison".
+Nothing (item 1, the feedback loop of the cones solver, landed on 2026-10-26; see below).
 
 ## Landed since the first version of this file
+
+* **Feedback loop of the cones solver** (2026-10-26, branch `cones-feedback`; formerly Scheduled
+  1; `crates/ddg-optimal-cones/README.md`, "The feedback loop" and "Published UVs with the
+  feedback loop"; `crates/ddg-uv/README.md`, "The cone feedback loop"): `Feedback`,
+  `scale_mismatch`, `solve_with_feedback` in the solver crate, `UnwrapOptions::cone_feedback` in
+  the pipeline, `cone_feedback=` in Python, "Cone Feedback" in Blender. The solver's linearized
+  `u` is compared with the log area factor the flattening realizes (first on the surface without
+  cones, since a cone at a needle tip hides it), and the distortion weight goes to zero where
+  they differ by more than 20 log units. Judged by the 23-mesh `D*` comparison: `camelshotnoise`
+  C1 goes from `+982 %` to `−20.2 %` (`u = 0`) and from `+57 944 %` to `−27.1 %` (optimized),
+  exactly the hand-set tips; every other C1 row identical, the 11 reproducing meshes untouched.
+  On by default (identical maps on 42 meshes without needles, catches needles the spike check
+  misses; +29 % median time on meshes with boundary, 0 on closed ones). Lean:
+  `cone-feedback-mismatch` proved, `cone-feedback-rule` cited as a design choice. Open: closed
+  surfaces get no cone-free probe (no flattening without cones), so a needle on a closed piece
+  whose tip received a cone is found only by the spike check; every extra round runs the
+  reference method (zero weights disable the factor-once method).
 
 * **Mapping to the sphere** (2026-10-17, `crates/ddg-bff`, README "Mapping to the sphere"):
   `map_to_sphere` maps a closed connected genus-0 mesh conformally to the unit sphere (port of

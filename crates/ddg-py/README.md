@@ -25,7 +25,7 @@ ddg_tools.unwrap(
     positive_cones_only=True,
     optimize_boundary=False,
     split_overlaps=False, split_max=32, split_threshold=0.001,
-    cone_feedback=False, feedback_threshold=4.0, feedback_max_rounds=4,
+    cone_feedback=True, feedback_threshold=20.0, feedback_max_rounds=4,
 ) -> ddg_tools.UnwrapResult
 
 ddg_tools.pack_charts(uvs, polygon_starts, polygon_charts, *, margin=0.0)
@@ -105,13 +105,14 @@ Rules for the mesh arrays (violations raise `InputError`):
   The report gains `n_splits`, `n_splits_rejected`, `n_split_no_cut`, `split_runs`,
   `split_exhausted`, `split_cut_length`, `overlapped_fraction_before_split`; the added cuts are in
   `cut_edges`.
-- `cone_feedback=False` (default): the cones are those of one solve per piece. `True` compares,
-  on every piece, the cone solver's linearized log scale factor with the one the flattening
-  realizes, lowers the distortion weight of the vertices where they differ by more than
-  `feedback_threshold` (log units; the tips of thin spikes, where the linearized value is off by
-  thousands), and solves and flattens again, at most `feedback_max_rounds` solves in all
-  (`crates/ddg-uv/README.md`, "The cone feedback loop"). Where nothing is reweighted it costs a
-  comparison only. The report gains `cone_feedback_rounds`, `n_cone_feedback_reweighted`,
+- `cone_feedback=True` (default): on every piece the cone solver's linearized log scale factor
+  is compared with the one the flattening realizes (on a piece with a boundary first without
+  cones), the distortion weight of the vertices where they differ by more than
+  `feedback_threshold` (log units; the tips of needles, where the linearized value is off by
+  thousands) goes to zero, and the piece is solved and flattened again, at most
+  `feedback_max_rounds` solves in all (`crates/ddg-uv/README.md`, "The cone feedback loop").
+  On every measured mesh without needles nothing changes; it costs about a quarter more time on
+  meshes with a boundary and nothing on closed ones. `False` solves once per piece. The report gains `cone_feedback_rounds`, `n_cone_feedback_reweighted`,
   `n_cone_feedback_pending`, `cone_feedback_max_mismatch`, `cone_feedback_final_mismatch` and
   `cone_feedback_vertices`.
 - Steering acts on vertices that are interior to their piece: a pinned vertex is a cone site

@@ -13,6 +13,11 @@
 //!
 //! # The loop
 //!
+//! 0. The cone-free probe ([`FeedbackOptions::cone_free_probe`], where every component has a
+//!    boundary): steps 2 to 4 on the surface without cones, before any solve. A cone that the
+//!    solver puts at a needle tip absorbs its curvature and hides the failure of the
+//!    linearization there; without cones the tip stands out (`|δ| ≈ 1.7·10⁴` on
+//!    `camelshotnoise`, at most 3.5 elsewhere on the dataset).
 //! 1. Solve with the current weights `wE`.
 //! 2. Flatten with the cones (the caller does this, e.g. with Boundary First Flattening; this
 //!    crate does not depend on a flattener) and measure the log area factor of every face of the
