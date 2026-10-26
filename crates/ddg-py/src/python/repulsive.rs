@@ -532,6 +532,9 @@ fn parse_options(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<RepulsiveOption
             "bh_leaf_size" => o.bh_leaf_size = count(k, &v)?,
             "threads" => o.threads = if none { None } else { Some(count(k, &v)?) },
             "dense_threads" => o.dense_threads = if none { None } else { Some(count(k, &v)?) },
+            "min_edge_length_ratio" => {
+                o.min_edge_length_ratio = if none { None } else { Some(float(k, &v)?) }
+            }
             "projection_tolerance" => o.projection_tolerance = float(k, &v)?,
             "projection_absolute" => o.projection_absolute = flag(k, &v)?,
             "projection_iterations" => {
