@@ -1205,6 +1205,35 @@ Things the paper and the reference leave open, with how they are settled:
 * §5.2: rank is checked on the row-normalized `C Cᵀ` by inverse iteration (threshold 1e-10),
   since a plain sparse Cholesky can succeed with tiny pivots.
 
+## 17c. The authors' program (built 2026-10-26)
+
+Built outside the repository: `/var/data/discrete-geometry/RepulsiveCurves-build/` (working copy
+`src/` with submodules at the pinned commits, binary `build/bin/rcurves_app`, g++-13 + OpenMP;
+`rcurves_shared` does not compile and is not needed). A batch mode was added as one patch
+(`batch-mode.patch`, no change to energy, solver or line search):
+`rcurves_app --batch --steps N --out DIR [--threads T] [--obj-every K | --no-obj] [--no-sobolev]
+[--no-backproj] [--no-bh] [--multigrid] [--no-exact-energy] [--ignore-stop] scene.txt`, writing
+`steps.csv` (energy exact and Barnes–Hut, gradient norms, step size, per-phase ms), `objs/` and
+`summary.txt`. Ready scenes in `RepulsiveCurves-build/scenes/`, runs in `RepulsiveCurves-build/runs/`.
+
+* `libgmultigrid` is MIT too (Copyright (c) 2020 Christopher Yu): it may be read and ported; add
+  its notice to `LICENSES/` when anything is ported.
+* **Datasets:** the Knot128 `original` curves are already at rest for `(3, 6)` (knot0001: gradient
+  norm 6e-7 at the start). The evaluation uses the `perturbed` set (about 2000 vertices) and
+  Trefoil100.
+* Reference defaults (file:line in the working copy): α, β = 3, 6 (`lws_options.cpp:15`; Freedman
+  scenes use 2, 4.5); Barnes–Hut opening θ = 0.25 (`spatial/tpe_bvh.cpp:168`); BCT separation 1.0
+  with dense blocks for s₁ + s₂ ≤ 8 (`product/block_cluster_tree.cpp:100`); multigrid tolerance 1e-2
+  (relative ∞-norm), at most 20 V-cycles, `max(1, log2|V| − 4)` levels, CG smoother 12 iterations
+  per level (24 for the initial guess), direct coarsest solve (`libgmultigrid/multigrid_hierarchy.h`);
+  Armijo σ = 0.01 with the Sobolev–L² cosine, start `1/|g|` (or `1/√|g|`) or `min(1.5 τ_prev, 4·start)`,
+  halving only, fail below 1e-15 (`tpe_flow_sc.cpp:176-196`); back-projection 1e-4 absolute, up to
+  10 halvings × 3 Newton steps; stop when the Sobolev dot < 1e-4 (absolute), or 5 consecutive
+  failed steps; no constraints in a scene means Barycenter + EdgeLengths; threads `max/2 + 2`.
+* Measured alone (34 threads, s/step): Freedman 600 BH+multigrid 0.94, BH+dense 0.40, exact dense
+  1.29; 1200: 2.07, 1.62, 5.21; 2400: 4.19, 8.0, 21.8. Freedman 600 (BH+dense) converges in 505
+  steps (203 s), energy 2276 to 6.03, with a long plateau near 1510 for about 150 steps.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
