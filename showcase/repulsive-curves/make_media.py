@@ -11,6 +11,7 @@ import json
 import math
 import os
 import subprocess
+import textwrap
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -24,6 +25,8 @@ sys.path.insert(0, str(SHOW))
 import post  # noqa: E402
 
 JOBS = int(os.environ.get("RC_JOBS", 6))
+# control points to mark (vertex indices of the start curve), see render.py
+PINS = {"spline_points": "62,94,126,158,222,254,286,318", "spline_tangents": "0,50,99"}
 
 
 def report(run):
@@ -46,11 +49,11 @@ def curve_length(path):
     return sum(math.dist(V[a], V[b]) for a, b in E), len(V)
 
 
-def blender(args, log):
+def blender(args, log, pins=""):
     cmd = ["blender", "-b", "--python", str(HERE / "render.py"), "--"] + [str(a) for a in args]
     for attempt in range(8):  # several Blenders share one GPU: retry on out-of-memory
         with open(log, "w") as f:
-            r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT)
+            r = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env={**os.environ, "RC_PINS": pins})
         if r.returncode == 0 and "Traceback" not in open(log).read():
             return
     raise RuntimeError(f"blender failed: {log}")
@@ -81,9 +84,9 @@ def stills():
         "graph_drawing": ("planar-graph", "graph-top", [0, 0.25, 1], cap_graph, (640, 640)),
         "graph_isometric_k5": ("k5", "graph", [0, 0.5, 1], cap_graph, (640, 640)),
         "graph_isometric_k33": ("k33", "graph", [0, 0.5, 1], cap_graph, (640, 640)),
-        "vascular": ("capillary", "capillary", [0, 1], cap_graph, (960, 960)),
+        "vascular": ("capillary-low-bh", "capillary", [0, 1], cap_graph, (960, 1100)),
         "spline_points": ("interp", "spline", [0, 0.5, 1], cap_grow, (640, 640)),
-        "spline_tangents": ("tangent", "spline", [0, 1], cap_grow, (640, 640)),
+        "spline_tangents": ("b-spline-tangents", "spline", [0, 1], cap_grow, (640, 640)),
     }, pk
 
 
@@ -99,14 +102,14 @@ def make_still(name, spec, pk):
     panels = []
     for i, f in enumerate(files):
         out = tmp / f"p{i}.png"
-        blender(["still", kind, f, out, W, H], HERE.parent.parent / "runs_tmp" / f"rc-wp13/render_{name}_{i}.log")
+        blender(["still", kind, f, out, W, H], HERE.parent.parent / "runs_tmp" / f"rc-wp13/render_{name}_{i}.log", PINS.get(name, ""))
         comp = tmp / f"c{i}.png"
         post.composite(out, comp)
         panels.append(comp)
     row = tmp / "row.png"
     subprocess.run(["convert", *map(str, panels), "+append", "-background", post.BG, "-gravity", "south",
-                    "-splice", "0x70", str(row)], check=True)
-    post.composite(row, MEDIA / f"repulsive_{name}.png", cap(r))
+                    "-splice", "0x110", str(row)], check=True)
+    post.composite(row, MEDIA / f"repulsive_{name}.png", "\n".join(textwrap.wrap(cap(r), 30 * len(panels) * W // 640)), pointsize=34)
     print("wrote", MEDIA / f"repulsive_{name}.png")
 
 
@@ -117,7 +120,6 @@ def make_anim(name, run, kind, W, H, n, title):
     blender(["anim", kind, d, f"rc_{name}", W, H, n], HERE.parent.parent / f"runs_tmp/rc-wp13/render_anim_{name}.log")
     fdir = FRAMES / f"rc_{name}"
     names = json.load(open(fdir / "frames.json"))
-    every = max(1, (r["steps"]) // max(1, len(frames(run)) - 2)) if False else None
     files = frames(run)
     # frame k of the run is step k * every, the last frame is the last step
     ev = int(round((r["steps"]) / max(1, len(files) - 1))) if len(files) > 1 else 1
@@ -146,9 +148,9 @@ def main():
                     jobs.append(ex.submit(make_still, name, spec, pk))
         if mode in ("anims", "all"):
             if not sel or "unknot" in sel:
-                jobs.append(ex.submit(make_anim, "unknot", "freedman1200", 960, 720, 120, "Freedman-He-Wang unknot"))
+                jobs.append(ex.submit(make_anim, "unknot", "freedman600", "unknot", 960, 720, 120, "Freedman-He-Wang unknot"))
             if not sel or "packing" in sel:
-                jobs.append(ex.submit(make_anim, "packing", "bunny", 960, 720, 90, "Packing in the bunny"))
+                jobs.append(ex.submit(make_anim, "packing", "bunny", "bunny", 960, 720, 90, "Packing in the bunny"))
         for j in jobs:
             j.result()
 

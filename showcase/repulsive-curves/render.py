@@ -56,10 +56,10 @@ KINDS = {
                       color=GOLD, glass=False, flat_obstacle=True),
     "graph": dict(top=False, az=-20, el=35, r=0.007, color=BLUE, nodes=True),
     "graph-top": dict(top=True, r=0.006, color=BLUE, nodes=True),
-    "capillary": dict(obstacle=SCENES / "CapillaryNetwork/hand-tri.obj", az=0, el=89.9, r=0.0018,
+    "capillary": dict(obstacle=SCENES / "CapillaryNetwork/hand-tri.obj", az=0, el=8, r=0.0016,
                       color=RED, glass=True, nodes=False),
     "spline": dict(top=True, r=0.008, color=GOLD, nodes=True),
-    "unknot": dict(az=-30, el=20, r=0.011, color="arclength"),
+    "unknot": dict(az=-30, el=20, r=0.011, color="arclength", follow=True),
 }
 
 
@@ -231,12 +231,15 @@ def build_curve(kind, cfg, V, E, norm):
         for b, g in enumerate(groups):
             if not g:
                 continue
-            col = B.cmap(np.array([(b + 0.5) / bins]), "spectral")[0]
-            B.tubes(f"curve{b}", g, R, B.mat_solid(B.lin(tuple(col)), roughness=0.3), resolution=6)
+            col = B.cmap(np.array([(b + 0.5) / bins]), "spectral", lo=0.0, hi=1.0)[0]
+            B.tubes(f"curve{b}", g, R, B.mat_solid(tuple(col), roughness=0.3), resolution=6)
     else:
         B.tubes("curve", [P[c] for c in ch], R, B.mat_solid(cfg["color"], roughness=0.3),
                 closed=closed, resolution=6)
-    if cfg.get("nodes"):
+    pins = [int(x) for x in os.environ.get("RC_PINS", "").split(",") if x]
+    if pins:
+        B.spheres("nodes_pins", P[pins], 2.2 * R, material=B.mat_solid(INK, roughness=0.35))
+    if cfg.get("nodes") and not pins:
         special = np.where(deg != 2)[0]
         if len(special):
             B.spheres("nodes", P[special], 1.9 * R, material=B.mat_solid(INK, roughness=0.35))
@@ -275,7 +278,7 @@ def frame_camera(cfg, norm, cat, W, H):
     P = apply(cat, norm)
     c = (P.min(0) + P.max(0)) / 2
     rad = float(np.linalg.norm(P.max(0) - P.min(0))) / 2
-    B.studio(c, rad, ground_z=float(P[:, 2].min()) - 0.02 * rad)
+    B.studio(c, rad, ground_z=None if cfg.get("follow") else float(P[:, 2].min()) - 0.02 * rad)
     if cfg.get("top"):
         lo, hi = P.min(0), P.max(0)
         ext = max(hi[0] - lo[0], (hi[1] - lo[1]) * W / H * (H / W) if False else hi[1] - lo[1])
@@ -345,10 +348,30 @@ def main():
         add_dressing(dr, norm)
         frame_camera(cfg, norm, cat, W, H)
 
+        follow = None
+        if cfg.get("follow"):
+            # camera follows the (smoothed) bounding sphere of each frame
+            cr = []
+            for V, _ in curves:
+                P = apply(V, norm)
+                cr.append(np.r_[(P.min(0) + P.max(0)) / 2, np.linalg.norm(P.max(0) - P.min(0)) / 2])
+            cr = np.array(cr)
+            k = np.exp(-0.5 * (np.arange(-8, 9) / 3.0) ** 2)
+            k /= k.sum()
+            pad = np.pad(cr, ((8, 8), (0, 0)), mode="edge")
+            follow = np.stack([np.convolve(pad[:, j], k, mode="valid") for j in range(4)], 1)
+            follow[:, 3] = np.maximum(follow[:, 3], cr[:, 3])
+
         def update(i):
             clear_curve_objects()
             V, E = curves[i]
             build_curve(kind, cfg, V, E, norm)
+            if follow is not None:
+                for o in [o for o in B.bpy.data.objects if o.name.startswith("camera")]:
+                    B.bpy.data.objects.remove(o, do_unlink=True)
+                c, r = follow[i, :3], follow[i, 3]
+                B.fit_camera(np.array([c - r / 1.732, c + r / 1.732]), azimuth=cfg.get("az", -30),
+                             elevation=cfg.get("el", 25), lens=50, margin=1.15)
 
         B.render_frames(name, len(curves), update)
         # frame -> step labels for post.py
