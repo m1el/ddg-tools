@@ -40,10 +40,10 @@ fn main() {
         let (net, pos) = curve("fhw-r", n).expect("curve");
         let inp = Inputs::new(&net, &pos, Exponents::new(2.0, 4.5).unwrap());
         for c in &comps {
-            if matches!(c.as_str(), "gram" | "lu") && n > dense_max {
+            if matches!(c.as_str(), "gram" | "lu" | "schur") && n > dense_max {
                 continue;
             }
-            let dense = (c == "lu").then(|| dense_data(&inp));
+            let dense = matches!(c.as_str(), "lu" | "schur").then(|| dense_data(&inp));
             let mut t1: Option<(f64, u64)> = None;
             for &t in &threads {
                 let mut prep = prepare(c, &inp, t, dense.as_ref());

@@ -34,7 +34,7 @@ fn main() {
         comp.split(',').collect()
     };
     for c in comps {
-        let dense = (c == "lu").then(|| dense_data(&inp));
+        let dense = matches!(c, "lu" | "schur").then(|| dense_data(&inp));
         for &t in &threads {
             let mut prep = prepare(c, &inp, t, dense.as_ref());
             let mut times = Vec::new();

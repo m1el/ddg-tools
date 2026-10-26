@@ -29,7 +29,7 @@ pub mod dense;
 pub mod projector;
 pub mod sparse;
 
-pub use dense::DenseSaddle;
+pub use dense::{DenseMethod, DenseSaddle};
 pub use projector::Projector;
 pub use sparse::SparseSaddle;
 
@@ -55,7 +55,7 @@ pub(crate) fn sparse_error(e: SparseError, what: &'static str) -> RcError {
 /// How a linear solve went (`SPEC.md` §9.1, `StepReport::linear`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LinearReport {
-    /// The back end: `"dense LU"`, `"sparse LU"`, `"multigrid"`.
+    /// The back end: `"dense Schur"`, `"dense LU"`, `"sparse LU"`, `"multigrid"`.
     pub solver: &'static str,
     /// Dimension of the saddle system `d|V| + k`.
     pub dimension: usize,
@@ -67,7 +67,8 @@ pub struct LinearReport {
     pub fallback_used: bool,
     /// Multigrid levels (0 for direct solvers).
     pub levels: usize,
-    /// Direct solvers: `min |pivot| / max |pivot|` of the factorization (dense LU only).
+    /// Dense solvers: `min |pivot| / max |pivot|` of the LU, or the smallest `min L_ii² / max L_ii²`
+    /// of the Schur method's Cholesky factors ([`DenseSaddle::pivot_ratio`]).
     pub pivot_ratio: Option<f64>,
     /// Seconds spent in the solve (factorization excluded).
     pub seconds: f64,
@@ -316,6 +317,139 @@ pub fn project_constraints(
         linear.push(sol.report);
         it += 1;
     }
+}
+
+/// The second-order correction of the line search's trials (`SPEC.md` §17l).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecondOrderCorrection {
+    /// `q` per vertex: trials are `γ − τ p + τ² q`.
+    pub q: Vec<[f64; 3]>,
+    /// `max_r |Φ₂_r|`, the curvature term `Φ₂ = ½ Φ''(γ)[p, p]` (rows' own units per length²
+    /// of `p`).
+    pub curvature: f64,
+    /// The linear solve (`None` when `Φ₂ = 0`, e.g. linear constraints only).
+    pub linear: Option<LinearReport>,
+}
+
+/// Relative step of the central difference of [`second_order_correction`]: `h · max_v |p_v|`
+/// is this fraction of the mean edge length `ℓ̄₀`.
+pub const SECOND_ORDER_DIFFERENCE_STEP: f64 = 1e-3;
+
+/// The second-order correction of the trials `γ − τ p` (`SPEC.md` §17l; the "second-order
+/// correction" of SQP methods, Nocedal & Wright, *Numerical Optimization*, 2nd ed., §18.3).
+///
+/// With `C p = 0` (the projected gradient of Eq. 22 satisfies it exactly), the constraint values
+/// along the straight trial are `Φ(γ − τ p) = Φ(γ) + τ² Φ₂ + O(τ³)`, `Φ₂ = ½ Φ''(γ)[p, p]`. The
+/// `Ā`-smallest `q` with `C q = −Φ₂` (the saddle system with right side `(0, −Φ₂)`, one solve with
+/// the step's `solver`) gives `Φ(γ − τ p + τ² q) = Φ(γ) + O(τ³)` for every `τ`, so one solve per
+/// step replaces the `O(τ²)` part of every trial's chord projection (§6.2). `τ² q` is the leading
+/// term of the projection's own first correction from `γ − τ p`, so the projected curve is the
+/// same to that order; the projection that follows keeps every tolerance of §6.2.
+///
+/// `Φ₂` is the central second difference
+/// `(Φ(γ + h p) + Φ(γ − h p) − 2 Φ(γ)) / (2 h²)` with `h max_v |p_v| =`
+/// [`SECOND_ORDER_DIFFERENCE_STEP`]` · ℓ̄₀` (truncation `O(h²)`, rounding `ε ℓ / h²`; both far
+/// below the projection tolerance after the factor `τ²`), generic over every constraint type.
+///
+/// [formula: rc-chord-projection]
+///
+/// # Errors
+/// The solver's errors; the errors of [`ConstraintSet::values`].
+pub fn second_order_correction(
+    solver: &mut dyn SaddleSolver,
+    constraints: &ConstraintSet,
+    network: &CurveNetwork,
+    positions: &[[f64; 3]],
+    direction: &[[f64; 3]],
+    mean_edge_length0: f64,
+) -> Result<SecondOrderCorrection, RcError> {
+    let layout = constraints.layout();
+    let zero_q = || vec![[0.0; 3]; positions.len()];
+    let pmax = direction
+        .iter()
+        .map(|d| (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
+        .fold(0.0f64, f64::max);
+    if !(pmax > 0.0 && pmax.is_finite() && mean_edge_length0 > 0.0) || solver.n_constraints() == 0 {
+        return Ok(SecondOrderCorrection {
+            q: zero_q(),
+            curvature: 0.0,
+            linear: None,
+        });
+    }
+    let h = SECOND_ORDER_DIFFERENCE_STEP * mean_edge_length0 / pmax;
+    let shifted = |s: f64| -> Vec<[f64; 3]> {
+        positions
+            .iter()
+            .zip(direction)
+            .map(|(x, d)| [x[0] + s * d[0], x[1] + s * d[1], x[2] + s * d[2]])
+            .collect()
+    };
+    let fp = constraints.values(network, &shifted(h))?;
+    let fm = constraints.values(network, &shifted(-h))?;
+    let f0 = constraints.values(network, positions)?;
+    let b: Vec<f64> = (0..f0.len())
+        .map(|r| -(fp[r] + fm[r] - 2.0 * f0[r]) / (2.0 * h * h))
+        .collect();
+    let curvature = b.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    if curvature == 0.0 || !curvature.is_finite() {
+        return Ok(SecondOrderCorrection {
+            q: zero_q(),
+            curvature,
+            linear: None,
+        });
+    }
+    let sol = solver.solve(&vec![0.0; solver.n_dofs()], &b)?;
+    Ok(SecondOrderCorrection {
+        q: layout.scatter(&sol.x),
+        curvature,
+        linear: Some(sol.report),
+    })
+}
+
+/// Maximal number of Newton steps of the polish ([`newton_correction`]) in one projection.
+pub const NEWTON_POLISH_MAX_STEPS: u32 = 8;
+
+/// One Newton step of the projection's polish (`SPEC.md` §17l): the smallest correction `x` in
+/// the lumped-mass metric `M = diag(m_v) ⊗ I_d` (`m_v` the dual lengths at `positions`) with
+/// `C(γ̃) x = −Φ(γ̃)`, the Jacobian taken at the iterate `γ̃ = positions` itself:
+/// `x = M⁻¹ Cᵀ (C M⁻¹ Cᵀ)⁻¹ (−Φ)`, by a sparse Cholesky factorization of `C M⁻¹ Cᵀ` (`O(k)` for
+/// the constraints of §5.1). Newton's method for the constraints converges quadratically near
+/// a regular point, where the chord iteration of Eq. 23 (Jacobian frozen at the base curve)
+/// converges linearly at a rate proportional to the step; the metric only selects the
+/// right-inverse, and the polish is used for small violations only.
+///
+/// [formula: rc-chord-projection]
+///
+/// # Errors
+/// The errors of [`ConstraintSet::jacobian`] and [`Projector::new`] (a rank-deficient Jacobian
+/// at the iterate).
+pub fn newton_correction(
+    constraints: &ConstraintSet,
+    network: &CurveNetwork,
+    positions: &[[f64; 3]],
+    phi: &[f64],
+) -> Result<Vec<f64>, RcError> {
+    let d = constraints.layout().dim();
+    let mut c = constraints.jacobian(network, positions)?;
+    let m = network.dual_lengths(positions);
+    let w: Vec<f64> = m
+        .iter()
+        .map(|x| 1.0 / x.max(f64::MIN_POSITIVE).sqrt())
+        .collect();
+    let cp = c.col_ptr().to_vec();
+    let vals = c.values_mut();
+    for j in 0..cp.len() - 1 {
+        for v in &mut vals[cp[j]..cp[j + 1]] {
+            *v *= w[j / d];
+        }
+    }
+    let pr = Projector::new(&c, None)?;
+    let b: Vec<f64> = phi.iter().map(|p| -p).collect();
+    let mut x = pr.pseudo_inverse(&b)?;
+    for (j, v) in x.iter_mut().enumerate() {
+        *v *= w[j / d];
+    }
+    Ok(x)
 }
 
 /// The dense Sobolev saddle solver of one step: assembles `A` (Eq. 31) on `pool`, the

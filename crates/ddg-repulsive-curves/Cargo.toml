@@ -25,3 +25,7 @@ harness = false
 [[bench]]
 name = "components"
 harness = false
+
+[[bench]]
+name = "projdiag"
+harness = false

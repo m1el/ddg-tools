@@ -657,6 +657,9 @@ fn step_session(input: &Input, net: &CurveNetwork, ex: Exponents) -> Result<Sess
             tolerance,
             max_iterations: input.maxit,
         },
+        // the oracle replays the paper's step: straight trials, chord projection (SPEC §17l)
+        second_order_correction: false,
+        newton_polish: None,
         // never converge: the oracle always takes the step
         stop: StopRule::GradientNorm {
             norm: GradNorm::Euclidean,

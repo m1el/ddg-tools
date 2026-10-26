@@ -9,7 +9,12 @@
 //! F(γ̂_τ) ≤ F(γ) − c τ dF·p,
 //! ```
 //!
-//! otherwise `τ ← shrink · τ`. After `max_halvings` shrinks, or below `1e-12 τ₀`, the search is
+//! otherwise `τ ← shrink · τ`. With a second-order correction `q` ([`SearchEnv::second_order_correction`],
+//! `SPEC.md` §17l) the trial is `γ − τ p + τ² q` before the projection: `C q = −½ Φ''(γ)[p, p]`
+//! cancels the `O(τ²)` violation of the straight trial (the leading term of the projection's
+//! own correction), so the projection starts at an `O(τ³)` violation; the piece from `γ − τ p`
+//! to the predicted trial is checked by the CCD like a chord step.
+//! After `max_halvings` shrinks, or below `1e-12 τ₀`, the search is
 //! stuck. For a descent direction (`dF·p > 0`) and a projection that succeeds for small `τ`, the
 //! search terminates (cited, `rc-armijo`).
 //!
@@ -35,7 +40,10 @@ use crate::ccd::{CcdOptions, CcdReport, Contact};
 use crate::constraints::ConstraintSet;
 use crate::error::RcError;
 use crate::network::CurveNetwork;
-use crate::solve::{LinearReport, Projection, ProjectionOptions, ProjectionStatus, SaddleSolver};
+use crate::solve::{
+    LinearReport, NEWTON_POLISH_MAX_STEPS, Projection, ProjectionOptions, ProjectionStatus,
+    SaddleSolver, newton_correction,
+};
 
 /// A projection and its path (the trial, then every chord iterate).
 pub type ProjectionWithPath = (Projection, Vec<Vec<[f64; 3]>>);
@@ -269,7 +277,8 @@ pub struct LineSearchReport {
     pub energy: f64,
     /// The accepted curve.
     pub positions: Option<Vec<[f64; 3]>>,
-    /// The path of the accepted step: `γ`, `γ − τ p`, then every chord iterate (empty if none).
+    /// The path of the accepted step: `γ`, `γ − τ p`, the predicted trial `γ − τ p + τ² q` (with a
+    /// second-order correction), then every chord iterate (empty if none).
     pub path: Vec<Vec<[f64; 3]>>,
     /// Chord iterations of the accepted trial.
     pub projection_iterations: u32,
@@ -311,6 +320,11 @@ pub trait SearchEnv {
     ) -> Result<CcdReport, RcError>;
     /// `true` once the run was cancelled (checked before every trial).
     fn cancelled(&self) -> bool;
+    /// The second-order correction `q` of the trials (`SPEC.md` §17l): trials are
+    /// `γ − τ p + τ² q` (then projected); `None` (the default) for the straight trials `γ − τ p`.
+    fn second_order_correction(&self) -> Option<&[[f64; 3]]> {
+        None
+    }
 }
 
 /// The input of one line search.
@@ -444,7 +458,25 @@ pub fn line_search(
             .map(|(b, p)| [b[0] - tau * p[0], b[1] - tau * p[1], b[2] - tau * p[2]])
             .collect();
         let t = Instant::now();
-        let (proj, chord_path) = env.project(trial_pos)?;
+        let correction = env.second_order_correction().map(<[[f64; 3]]>::to_vec);
+        let (proj, chord_path) = match correction.as_deref() {
+            // The predicted trial γ − τp + τ²q; the piece from γ − τp to it is part of the path
+            // (checked by the CCD like a chord step), so the path stays piecewise linear.
+            Some(q) => {
+                let t2 = tau * tau;
+                let predicted: Vec<[f64; 3]> = trial_pos
+                    .iter()
+                    .zip(q)
+                    .map(|(x, q)| [x[0] + t2 * q[0], x[1] + t2 * q[1], x[2] + t2 * q[2]])
+                    .collect();
+                let (proj, chord) = env.project(predicted)?;
+                let mut path = Vec::with_capacity(chord.len() + 1);
+                path.push(trial_pos);
+                path.extend(chord);
+                (proj, path)
+            }
+            None => env.project(trial_pos)?,
+        };
         rep.seconds.projection += t.elapsed().as_secs_f64();
         rep.projection_linear.extend(proj.linear.iter().cloned());
         rep.max_violation = proj.max_violation;
@@ -529,6 +561,38 @@ pub fn project_with_path(
     options: &ProjectionOptions,
     mean_edge_length0: f64,
 ) -> Result<ProjectionWithPath, RcError> {
+    project_with_path_polished(
+        solver,
+        constraints,
+        network,
+        trial,
+        options,
+        mean_edge_length0,
+        None,
+    )
+}
+
+/// [`project_with_path`] with the Newton polish of `SPEC.md` §17l: once the largest relative
+/// violation `max_r |Φ_r| / tol_r` is at most `polish` (`Some`), the remaining iterations are
+/// Newton steps with the Jacobian at the iterate in the lumped-mass metric
+/// ([`crate::solve::newton_correction`], no solve with `Ā`), at most
+/// [`NEWTON_POLISH_MAX_STEPS`] of them; chord iterations (with `solver`) still count against
+/// `options.max_iterations`. The success and failure rules are those of §6.2. `None`: the chord
+/// method throughout.
+///
+/// [formula: rc-chord-projection]
+///
+/// # Errors
+/// As [`project_with_path`]; the errors of [`crate::solve::newton_correction`].
+pub fn project_with_path_polished(
+    solver: &mut dyn SaddleSolver,
+    constraints: &ConstraintSet,
+    network: &CurveNetwork,
+    trial: Vec<[f64; 3]>,
+    options: &ProjectionOptions,
+    mean_edge_length0: f64,
+    polish: Option<f64>,
+) -> Result<ProjectionWithPath, RcError> {
     options.validate()?;
     let layout = constraints.layout();
     let mut path = vec![trial.clone()];
@@ -537,6 +601,7 @@ pub fn project_with_path(
     let mut linear = Vec::new();
     let zero = vec![0.0; solver.n_dofs()];
     let mut it = 0u32;
+    let (mut chord, mut newton) = (0u32, 0u32);
     loop {
         let phi = constraints.values(network, &pos)?;
         let tol =
@@ -553,6 +618,7 @@ pub fn project_with_path(
             max_violation = max_violation.max(p.abs());
         }
         history.push(rel);
+        let use_newton = polish.is_some_and(|p| rel <= p);
         let status = if rel <= 1.0 {
             Some(
                 match constraints.tangent_orientation_failure(network, &pos) {
@@ -562,7 +628,9 @@ pub fn project_with_path(
             )
         } else if !rel.is_finite() || (it > 0 && rel > 10.0 * history[0]) {
             Some(ProjectionStatus::Diverged)
-        } else if it >= options.max_iterations {
+        } else if (use_newton && newton >= NEWTON_POLISH_MAX_STEPS)
+            || (!use_newton && chord >= options.max_iterations)
+        {
             Some(ProjectionStatus::MaxIterations)
         } else {
             None
@@ -580,11 +648,18 @@ pub fn project_with_path(
                 path,
             ));
         }
-        let b: Vec<f64> = phi.iter().map(|p| -p).collect();
-        let sol = solver.solve(&zero, &b)?;
-        layout.add_scaled(&mut pos, 1.0, &sol.x);
+        if use_newton {
+            let x = newton_correction(constraints, network, &pos, &phi)?;
+            layout.add_scaled(&mut pos, 1.0, &x);
+            newton += 1;
+        } else {
+            let b: Vec<f64> = phi.iter().map(|p| -p).collect();
+            let sol = solver.solve(&zero, &b)?;
+            layout.add_scaled(&mut pos, 1.0, &sol.x);
+            linear.push(sol.report);
+            chord += 1;
+        }
         path.push(pos.clone());
-        linear.push(sol.report);
         it += 1;
     }
 }

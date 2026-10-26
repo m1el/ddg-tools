@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use ddg_repulsive_curves::metric::sobolev_gram;
 use ddg_repulsive_curves::multigrid::HierarchyInput;
-use ddg_repulsive_curves::solve::SaddleSolver;
+use ddg_repulsive_curves::solve::{DenseMethod, SaddleSolver};
 use ddg_repulsive_curves::{
     BctOptions, BhOptions, CcdOptions, ConstraintSet, CurveNetwork, DenseSaddle, DofLayout,
     EnergyEval, Exponents, GramQuadrature, HierarchicalMetric, MgOptions, MultigridSaddle,
@@ -21,6 +21,7 @@ pub const COMPONENTS: &[&str] = &[
     "energy-bh",
     "gram",
     "lu",
+    "schur",
     "bct-build",
     "bct-product",
     "mg-build",
@@ -204,11 +205,20 @@ pub fn run(
             let s = t0.elapsed().as_secs_f64();
             Ok((s, hash_slice(g.a.as_slice())))
         }
-        "lu" => {
-            let d = dense.ok_or("lu needs dense data")?;
+        "lu" | "schur" => {
+            let d = dense.ok_or("lu and schur need dense data")?;
             let p = pool(t);
+            let method = if c == "lu" {
+                DenseMethod::Lu
+            } else {
+                DenseMethod::Schur
+            };
             let t0 = Instant::now();
-            let mut sad = DenseSaddle::new(p, &d.a, &i.jac, DofLayout::new(None)).map_err(e)?;
+            let mut sad = DenseSaddle::with_method(p, &d.a, &i.jac, DofLayout::new(None), method)
+                .map_err(e)?;
+            if sad.method() != method {
+                return Err(format!("{c}: the Schur method fell back to the LU"));
+            }
             let s = t0.elapsed().as_secs_f64();
             let k = i.jac.nrows();
             let sol = sad.solve(&i.grad, &vec![0.0; k]).map_err(e)?;

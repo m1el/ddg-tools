@@ -69,7 +69,7 @@ use crate::network::{Axis, CurveNetwork, check_planar};
 use crate::optimize::{Lbfgs, Method, Ncg, dotv, mean_free_rows};
 use crate::solve::{
     DenseSaddle, LinearReport, Projection, ProjectionOptions, ProjectionStatus, SaddleSolver,
-    SparseSaddle, projected_gradient,
+    SparseSaddle, projected_gradient, second_order_correction,
 };
 use crate::subdivide::{SubdivisionMap, subdivide, subdivide_constraints};
 
@@ -81,7 +81,8 @@ pub mod stop;
 pub use fallback::SolverFallback;
 use fallback::{FallbackSaddle, FallbackSlot};
 use line_search::{
-    LineSearch, LineSearchReport, SearchEnv, SearchInput, Trial, line_search, project_with_path,
+    LineSearch, LineSearchReport, SearchEnv, SearchInput, Trial, line_search,
+    project_with_path_polished,
 };
 pub use schedule::ScheduleProgress;
 use schedule::{LengthSchedule, ScheduleState};
@@ -562,6 +563,26 @@ pub struct FlowOptions {
     /// of the paper or of the reference; it changes no energy and no step that is taken.
     /// Default `Some(1e-3)`.
     pub min_edge_length_ratio: Option<f64>,
+    /// Project every trial of the line search back onto the constraints (§6.2, Eq. 23; the
+    /// default). `false` is the paper's "Multigrid without projection" configuration of Fig. 20:
+    /// the direction is still the projected gradient (tangent to the constraints, Eq. 22), but the
+    /// trials `γ − τ p` are taken as they are, so nonlinear constraints (edge lengths, the
+    /// length-weighted barycenter) drift by `O(τ²)` per step; the re-target sub-step then runs only
+    /// for a moving length schedule, not for violated rows. Default `true` (`SPEC.md` §17l).
+    pub back_projection: bool,
+    /// Trials `γ − τ p + τ² q` with the second-order correction `q` of
+    /// [`second_order_correction`](crate::solve::second_order_correction) (one extra solve per
+    /// step), so that the projection starts at an `O(τ³)` instead of an `O(τ²)` violation.
+    /// Measured in `SPEC.md` §17l: the first trial of a step usually converges within the
+    /// iteration limit instead of failing, which saves the failed trial's solves. Used only with
+    /// hard constraints and [`FlowOptions::back_projection`]. Default: decided by the measurement of `SPEC.md` §17l.
+    pub second_order_correction: bool,
+    /// The Newton polish of the projection (`SPEC.md` §17l): once the largest violation is at
+    /// most this factor times its tolerance, the projection continues with Newton steps (Jacobian
+    /// at the iterate, lumped-mass metric, a sparse factorization each; see
+    /// [`newton_correction`](crate::solve::newton_correction)) instead of chord steps with `Ā`.
+    /// `None`: the chord method of §6.2 throughout.
+    pub newton_polish: Option<f64>,
 }
 
 impl fmt::Debug for FlowOptions {
@@ -590,6 +611,9 @@ impl fmt::Debug for FlowOptions {
                 &self.dense_fallback_max_vertices,
             )
             .field("min_edge_length_ratio", &self.min_edge_length_ratio)
+            .field("back_projection", &self.back_projection)
+            .field("second_order_correction", &self.second_order_correction)
+            .field("newton_polish", &self.newton_polish)
             .finish()
     }
 }
@@ -618,6 +642,9 @@ impl Default for FlowOptions {
             record_path: false,
             dense_fallback_max_vertices: DEFAULT_DENSE_FALLBACK_MAX_VERTICES,
             min_edge_length_ratio: Some(DEFAULT_MIN_EDGE_LENGTH_RATIO),
+            back_projection: true,
+            second_order_correction: false,
+            newton_polish: None,
         }
     }
 }
@@ -650,6 +677,15 @@ impl FlowOptions {
         }
         if self.method.is_soft() && !self.constraints.is_empty() {
             return Err(RcError::MethodNeedsSoftProblem);
+        }
+        if let Some(p) = self.newton_polish
+            && !(p.is_finite() && p >= 1.0)
+        {
+            return Err(RcError::InvalidOption {
+                name: "newton_polish",
+                value: p.to_string(),
+                requirement: "a finite factor ≥ 1 of the projection tolerance, or None",
+            });
         }
         if let Some(r) = self.min_edge_length_ratio
             && !(r.is_finite() && r > 0.0 && r < 1.0)
@@ -692,6 +728,9 @@ pub struct Timings {
     pub line_search_energy: f64,
     /// Projections of the line search.
     pub projection: f64,
+    /// The second-order correction of the trials (its constraint evaluations and solve; part of
+    /// `line_search`).
+    pub second_order: f64,
     /// CCD of the line search.
     pub ccd: f64,
     /// Subdivision (with the new constraint set and its rank checks).
@@ -792,6 +831,10 @@ pub struct StepReport {
     pub projection_solves: usize,
     /// Largest relative residual of those solves.
     pub projection_residual: f64,
+    /// Iterations (multigrid: V-cycles) of those solves, summed (0 for direct solvers).
+    pub projection_cycles: usize,
+    /// The solve of the second-order correction (`None`: not used, or `Φ₂ = 0`).
+    pub second_order: Option<LinearReport>,
     /// CCD counters of the line search.
     pub ccd: CcdReport,
     /// Number of CCD queries of the line search.
@@ -958,9 +1001,15 @@ struct StepEnv<'a> {
     obstacles: &'a [PreparedObstacle],
     ccd: CcdOptions,
     cancel: &'a AtomicBool,
+    second_order: Option<&'a [[f64; 3]]>,
+    polish: Option<f64>,
 }
 
 impl SearchEnv for StepEnv<'_> {
+    fn second_order_correction(&self) -> Option<&[[f64; 3]]> {
+        self.second_order
+    }
+
     fn objective(&mut self, positions: &[[f64; 3]]) -> Result<f64, RcError> {
         Ok(objective(self.energy, self.penalties, self.network, positions)?.0)
     }
@@ -970,13 +1019,14 @@ impl SearchEnv for StepEnv<'_> {
         trial: Vec<[f64; 3]>,
     ) -> Result<line_search::ProjectionWithPath, RcError> {
         match self.constraints {
-            Some(c) => project_with_path(
+            Some(c) => project_with_path_polished(
                 self.solver,
                 c,
                 self.network,
                 trial,
                 self.projection,
                 self.mean_edge_length0,
+                self.polish,
             ),
             None => Ok((
                 Projection {
@@ -1277,7 +1327,8 @@ impl Session {
                 .zip(&tol)
                 .any(|(p, t)| p.is_nan() || p.abs() > *t)
         };
-        if !moving && !violated {
+        // Without back-projection the rows drift by design: only a moving schedule re-targets.
+        if !moving && (!violated || !self.options.back_projection) {
             return Ok(None);
         }
         let jac = self.constraints.jacobian(&self.network, &self.positions)?;
@@ -1309,13 +1360,14 @@ impl Session {
                 }
                 _ => progress_from,
             };
-            let (proj, path) = project_with_path(
+            let (proj, path) = project_with_path_polished(
                 solver.as_mut(),
                 &cs,
                 &self.network,
                 self.positions.clone(),
                 &self.options.projection,
                 self.mean_edge_length0,
+                self.options.newton_polish,
             )?;
             report.projection_iterations = proj.iterations;
             report.max_violation = proj.max_violation;
@@ -1461,6 +1513,8 @@ impl Session {
             linear,
             projection_solves: 0,
             projection_residual: 0.0,
+            projection_cycles: 0,
+            second_order: None,
             ccd: CcdReport::default(),
             ccd_checks: 0,
             retarget,
@@ -1488,18 +1542,37 @@ impl Session {
                 (Method::Lbfgs { .. }, Some(l)) if !l.is_empty() => Some(1.0),
                 _ => None,
             };
+            let project = !soft && self.options.back_projection;
+            let correction = if project && self.options.second_order_correction {
+                let t = Instant::now();
+                let c = second_order_correction(
+                    solver.as_mut(),
+                    &self.constraints,
+                    &self.network,
+                    &self.positions,
+                    &direction,
+                    self.mean_edge_length0,
+                )?;
+                report.seconds.second_order = t.elapsed().as_secs_f64();
+                report.second_order = c.linear.clone();
+                c.linear.is_some().then_some(c.q)
+            } else {
+                None
+            };
             let mut env = StepEnv {
                 network: &self.network,
                 energy: self.energy.as_mut(),
                 penalties: &self.penalties,
                 solver: solver.as_mut(),
-                constraints: (!soft).then_some(&self.constraints),
+                constraints: project.then_some(&self.constraints),
                 projection: &self.options.projection,
                 mean_edge_length0: self.mean_edge_length0,
                 pool: &self.pool,
                 obstacles: &self.obstacles,
                 ccd: self.options.line_search.ccd_options(),
                 cancel: &self.cancel,
+                second_order: correction.as_deref(),
+                polish: self.options.newton_polish,
             };
             let ls: LineSearchReport = line_search(
                 &self.options.line_search,
@@ -1522,6 +1595,7 @@ impl Session {
             report.tau_max = ls.tau_max;
             report.halvings = ls.halvings;
             report.projection_solves = ls.projection_linear.len();
+            report.projection_cycles = ls.projection_linear.iter().map(|l| l.iterations).sum();
             report.projection_residual = ls
                 .projection_linear
                 .iter()
@@ -1564,8 +1638,9 @@ impl Session {
         if !accepted && retarget_stalled {
             report.status = StepStatus::RetargetStalled;
         }
-        if !soft && !accepted {
-            // The curve did not move in the line search: report its own violation.
+        if !soft && (!accepted || !self.options.back_projection) {
+            // The curve did not move in the line search, or was not projected: report its own
+            // violation.
             let phi = self.constraints.values(&self.network, &self.positions)?;
             report.max_violation = phi.iter().fold(0.0, |m: f64, p| m.max(p.abs()));
         }
