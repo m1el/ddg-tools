@@ -1507,6 +1507,137 @@ span, fraction, factor_target, factor_imposed, factor_measured, finished })`: th
 asked for, the factor the length constraints impose after the step, and the total length of the
 curve over its total length when the schedule was set.
 
+## 17i. Barnes–Hut adjoint (WP3d)
+
+**Problem** (§17d, §17f). The trial energies of a step are evaluated on the base curve's
+interaction lists, so within a line search the Barnes–Hut energy is a smooth function; but the
+§8.2 differential (the derivative of the lumped `(I, J) + (J, I)` pair with `L_N, x̄_N, T̂_N`
+fixed) is not its derivative: finite differences differ by 6e-4 to 3.5e-3, and Freedman 600 ended
+`Stuck` at `‖g‖ ≈ 8e-4`. Fix: differentiate the evaluated energy exactly (the discrete adjoint).
+
+**The function.** With `𝓛(I)` the lumped nodes and `𝓧(I)` the exactly evaluated edges of row `I`
+(`BhTree::interaction_lists`, frozen during a step) [formula: rc-bh-adjoint]
+
+```
+Ê_bh(γ) = Σ_I [ Σ_{N ∈ 𝓛(I)} ℓ_I L_N k(x_I, x̄_N, T_I) + Σ_{J ∈ 𝓧(I)} e_IJ ],
+L_N = Σ_{J∈N} ℓ_J,   x̄_N = Σ_{J∈N} ℓ_J x_J / L_N.
+```
+
+`T̂_N`, the radii and the boxes only enter the admissibility test, which the frozen lists replace;
+so the node data that move with the curve are `L_N` and `x̄_N`.
+
+**One lumped term** `f = ℓ_I L_N k(x_I, x̄_N, T_I)` (`k, ∇_p k, g_T = ∇_T k` at `(x_I, x̄_N, T_I)`,
+`∇_q k = −∇_p k`, `s₁ = −1, s₂ = +1`):
+
+```
+δf = L_N [ (k T_I + g_T)·(δγ_{i₂} − δγ_{i₁}) + ½ ℓ_I ∇_p k·(δγ_{i₁} + δγ_{i₂}) ]        (own part)
+   + ℓ_I k δL_N + ℓ_I L_N ∇_q k·δx̄_N                                                   (node part)
+δL_N = Σ_{J∈N} δℓ_J,   δx̄_N = L_N⁻¹ Σ_{J∈N} (δℓ_J (x_J − x̄_N) + ℓ_J δx_J).
+```
+
+With `b = ℓ_I k` and `u = ℓ_I ∇_q k = −ℓ_I ∇_p k` the node part is
+`Σ_{J∈N} [(b + u·(x_J − x̄_N)) δℓ_J + ℓ_J u·δx_J]`, and with `δℓ_J = T_J·(δγ_{j₂} − δγ_{j₁})`,
+`δx_J = ½(δγ_{j₁} + δγ_{j₂})`:
+
+```
+∂f/∂γ_{i_a} = L_N (s_a (k T_I + g_T) + ½ ℓ_I ∇_p k),
+∂f/∂γ_{j_b} = s_b λ_J T_J + ½ ℓ_J u,    λ_J = b + u·(x_J − x̄_N)      (J ∈ N).
+```
+
+The own part is the §8.2 increment without the `(J, I)` term; `L_N` cancels from the node part
+(`u` carries no `L_N`).
+
+**All lumped terms at once.** `λ_J` and `u` are linear in `(b, u)`, so per node
+`b_N = Σ_{I : N ∈ 𝓛(I)} ℓ_I k`, `u_N = Σ_I (−ℓ_I ∇_p k)` suffice, and an edge `J` collects
+`Σ_{N ∋ J} (b_N + u_N·(x_J − x̄_N))` and `ℓ_J Σ_{N ∋ J} u_N`. The nodes containing `J` are the
+path from the root to `J`'s leaf. Downward pass [formula: rc-bh-adjoint-shift]:
+
+```
+β_root = b_root, U_root = u_root;    child C of P:  β_C = β_P + U_P·(x̄_C − x̄_P) + b_C,  U_C = U_P + u_C
+⇒ Σ_{A on the path to Λ} (b_A + u_A·(x − x̄_A)) = β_Λ + U_Λ·(x − x̄_Λ)
+⇒ ∂/∂γ_{j_b} (all lumped terms) = s_b λ_J T_J + ½ ℓ_J U_Λ,   λ_J = β_Λ + U_Λ·(x_J − x̄_Λ).
+```
+
+Re-centring at every node avoids the cancellation in `Σb − Σu·x̄ + (Σu)·x` for a curve far from
+the origin (checked: `|Σ_v g_v|/‖g‖ = 2e-16` at an offset of `1e4`).
+
+**Exact pairs.** `∂e_IJ/∂γ_I` in row `I`, `∂e_IJ/∂γ_J` (§3.2) for the partner. The lists are not
+symmetric (`J ∈ 𝓧(I)` while `I`'s leaf is inside a node that `J` lumps), so the partner part is
+the transposed relation. Since a row's exact edges are all non-adjacent edges of the leaves its
+traversal opened, the transpose is taken over opened leaves (6–8× fewer entries than pairs), and a
+parallel pass over the leaves adds, for each row `I` that opened leaf `Λ` (increasing `I`),
+`∂e_IJ/∂γ_J` for every `J ∈ Λ` not adjacent to `I`.
+
+**Lean** (`DdgProofs/RepulsiveCurves/BarnesHutAdjoint.lean`): `hasDerivAt_nodeMass`,
+`hasDerivAt_nodeMoment`, `hasDerivAt_nodeCentre` (the derivative of `x̄_N`), `bh_adjoint` (the
+whole chain rule of one lumped term along a motion of the curve: own part plus node part,
+`ν > 0`, `L_N ≠ 0`), the algebraic identities `adj_own_alg`, `adj_node_alg`, and
+`bh_adjoint_shift`, `bh_adjoint_shift_root` (the downward pass as a fold over the path) — ids
+`rc-bh-adjoint`, `rc-bh-adjoint-shift`, both proved. The exact pairs are
+`hasDerivAt_pairEnergy` (`rc-energy-differential`); summing over the lists is the sum rule (not
+restated). Nothing is cited. (§12 and §8.2 should list the two ids and point to this section;
+not edited here.)
+
+**Implementation** (`src/energy/barnes_hut.rs`). `BhTree::energy_and_differential` is now the
+adjoint on the lists of the current tree and positions (it computes them; same signature, so
+`step::BarnesHutEnergy` uses it unchanged); `energy_and_differential_with_lists(lists, pool,
+exponents)` takes the lists (error `InvalidOption { name: "lists" }` for lists of another tree);
+the WP4 differential stays as `energy_and_differential_lumped_pairs`. The energy returned is
+`energy_with_lists` on the same lists bit for bit, and `BhTree::energy` (traversal) now sums the
+lumped terms before the exact pairs, so it is too: the base energy of a step and its trial
+energies are the same function, summed in the same order. `classify` / `interaction_lists`
+follow `set_lump_leaves`. Order of work: rows in parallel in fixed chunks of the tree order
+(at most 64 chunks, at least 16 rows each, at most 2²² chunk-local node slots: a function of the
+sizes only) with chunk-local `b, u`; node sums over the chunks in chunk order (parallel over
+nodes); downward pass (sequential, `O(#nodes)`); transpose of the opened leaves (sequential,
+`O(#opened leaves)`); partner pass (parallel over leaves); vertex sums in edge order. Bitwise
+independent of the thread count (tested at 1, 3, 8 threads, also on refitted curves with frozen
+lists). Kernel evaluations: one per lumped entry (WP4: two), eight per exact pair (as WP4).
+
+**Finite differences** (`tests/barnes_hut_adjoint.rs`; central differences at `h` and `h/2`,
+Richardson-extrapolated, `h = 10⁻³ ℓ̄`, `energy_with_lists` on the frozen lists; perturbed trefoil
+240, open helix 300, a network of four meridian arcs between two degree-4 junctions plus a
+branch at a degree-3 junction (174 vertices); `(3, 6)` and `(2, 4.5)`; `ε = θ_T = 2θ_x ∈ {0.25,
+0.5}` and `θ_x = θ_T = 0.5`, leaf size 4). Worst `|FD − ⟨g, v⟩| / (‖g‖‖v‖)` over 4 random `v`, and
+`|FD − ‖g‖²| / ‖g‖²` along `v = g`:
+
+| | adjoint, random `v` | adjoint, along `g` | WP4 differential, random `v` | WP4, along `g` |
+|---|---|---|---|---|
+| trefoil 240 | 8e-12 – 1.4e-9 | 2e-11 – 4e-10 | 2e-5 – 2.8e-3 | 3e-6 – 2.3e-3 |
+| helix 300 | 1e-12 – 2.4e-9 | 1e-11 – 3e-10 | 2.5e-6 – 4.4e-4 | 6e-6 – 5e-4 |
+| network 174 | 2e-12 – 4.6e-10 | 5e-13 – 2e-12 | 1.5e-5 – 1.7e-3 | 4e-6 – 9e-4 |
+
+(the `1e-9` entries are `(3, 6)`, the FD noise of the larger exponent). Coordinate by coordinate
+on a 72-vertex network (`θ = 0.5`, leaf size 2, 891 lumped entries): `‖g − FD‖/‖FD‖ = 3e-11`
+(WP4: 0.12). At a moved curve (perturbed by `0.3 ℓ̄`) with the base curve's lists, as in a line
+search: 6.5e-11 / 1e-11. `θ = 1e-12` (nothing lumped): equal to the exact differential to
+`1.4e-15`. Against the exact differential the adjoint is about as close as the WP4 one
+(perturbed trefoil 400, `(3, 6)`: 8.4e-3, 1.5e-3, 2.4e-4 at `ε = 1, 0.5, 0.25` against 6.8e-3,
+9.5e-4, 7.5e-5; the existing tests of `tests/barnes_hut.rs` pass unchanged).
+
+**Flow.** Freedman–He–Wang 600, `(2, 4.5)`, Barnes–Hut (default options) with the dense solver,
+default flow options otherwise, 8 threads (`freedman_600_barnes_hut_flow_converges`, ignored,
+release): **`Converged`** at step 711 with `‖g̃‖ = 9.86e-5` (before: `Stuck` at step 937,
+`‖g‖ = 8e-4`); Barnes–Hut energy 6.10156, exact energy of the final curve 6.08164 (the exact flow:
+6.0816 at step 603); 314–343 s on the shared machine (two runs, load 30–40).
+
+**Cost** (`timing_old_and_new_differential`, ignored; default options, 8 threads, minimum of 5,
+load 30–40 on 64 cores, indicative):
+
+| vertices | WP4 differential | adjoint (computes the lists) | adjoint, lists given | lists | energy on lists | lumped entries | exact pairs |
+|---|---|---|---|---|---|---|---|
+| 592 (Freedman 600) | 17.4 ms | 21.1 ms | 20.5 ms | 0.5 ms | 6.3 ms | 313 | 345 063 |
+| 2368 (Freedman 2400) | 78.3 ms | 76.1 ms | 77.1 ms | 2.8 ms | 29.3 ms | 276 015 | 1 852 338 |
+| 9472 (2400 subdivided twice) | 160.3 ms | 172.3 ms | 144.1 ms | 12.7 ms | 65.3 ms | 2 459 754 | 3 066 039 |
+
+A first version that transposed the exact pairs and scattered per-entry node terms sequentially
+cost 1.5× the WP4 differential at 9472 vertices (transpose 35–70 ms, scatter 35–65 ms).
+
+**Step.** `BarnesHutEnergy::energy_and_differential` (`src/step/mod.rs`) computes the lists and
+then calls `tree.energy_and_differential`, which computes them again (about 3 ms at 2368
+vertices, 13 ms at 9472); passing them (`energy_and_differential_with_lists(&lists, …)`) saves
+that. Nothing else changes.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
