@@ -905,12 +905,15 @@ fn bad_options_are_errors() {
     assert!(new(zero_dense).is_err());
     let bh = FlowOptions {
         backend: ddg_repulsive_curves::step::Backend::Explicit {
-            energy: EnergyEval::BarnesHut(Default::default()),
+            energy: EnergyEval::BarnesHut(BhOptions {
+                theta_x: 0.0,
+                ..BhOptions::default()
+            }),
             solver: ddg_repulsive_curves::step::Solver::Dense,
         },
         ..small_options()
     };
-    assert!(matches!(new(bh), Err(RcError::Unsupported { .. })));
+    assert!(matches!(new(bh), Err(RcError::InvalidOption { .. })));
     let no_translation = FlowOptions {
         constraints: vec![Constraint::TotalLength { target: None }],
         ..small_options()

@@ -484,6 +484,9 @@ not used.
 class; the other can tunnel), and the user's rule makes the more reliable option the default.
 Confirmed by the measurement of §14.3: if it is not at least as successful as the normalized
 search, or more than 1.5× slower to the 1.1×-reference energy, the numbers go to the user.
+The start is a `StartRule` (§17f): `TwoThirdsTauMax` (the paper's) or `GrowPrevious { factor }`,
+`τ₀ = min(⅔ τ_max, factor · τ_prev)` (the paper's rule on the first step). Both keep every trial
+bounded by `τ_max` and checked by the CCD. **The default is `GrowPrevious { factor: 2 }`** (§17f).
 
 ### 7.4 Continuous collision detection (D11)
 
@@ -656,9 +659,10 @@ pub enum Penalty {
     Hencky { weight: f64, rest_lengths: Option<Vec<f64>> },
 }
 pub enum LineSearch {
-    CollisionGuarded { armijo: f64, shrink: f64, start_fraction: f64, gap: f64, max_halvings: u32 },
+    CollisionGuarded { armijo: f64, shrink: f64, start: StartRule, gap: f64, max_halvings: u32 },
     NormalizedArmijo { armijo: f64, shrink: f64, max_halvings: u32 },
 }
+pub enum StartRule { TwoThirdsTauMax, GrowPrevious { factor: f64 } }            // guarded search only (§17f)
 pub enum Method { ProjectedGradient, Lbfgs { memory: usize }, Ncg }   // Lbfgs/Ncg: soft problems only (§6.4)
 pub struct ProjectionOptions { pub tolerance: Tolerance, pub max_iterations: u32 }
 pub enum Tolerance { Absolute(f64), MeanEdgeLength(f64) }            // MeanEdgeLength(t) = t · ℓ̄₀
@@ -766,7 +770,7 @@ end-to-end table script (§14.5).
 | `(α, β)` | (3, 6) | paper Sec. 3.2 ("(3, 6) elsewhere"), the reference's default and all its scenes but two; the evaluation uses (2, 4.5) as Figs. 14–19 and Supp. 1.2 |
 | quadrature | `Midpoint` | D2: what the reference ran (dense and BCT); 4× cheaper; the far field is midpoint anyway; confirmed in §14.3 |
 | constraints | `[Barycenter, EdgeLengths(all, current)]` | Supp. 2.1: barycenter removes the translations, edge lengths make a minimizer exist; `Ê(cγ) = c^{2+α−β} Ê` falls with growth |
-| line search | `CollisionGuarded { armijo 1e-4, shrink ½, start ⅔, gap 0.1, 40 halvings }` | D11 (more reliable); ⅔ is the paper's; `c = 1e-4` the usual lenient Armijo constant (Nocedal & Wright §3.1) |
+| line search | `CollisionGuarded { armijo 1e-4, shrink ½, start GrowPrevious { 2 }, gap 0.1, 40 halvings }` | D11 (more reliable); the start `min(⅔ τ_max, 2 τ_prev)` is measured in §17f (the paper's `⅔ τ_max` alone costs 1.5× Armijo's time per step); `c = 1e-4` the usual lenient Armijo constant (Nocedal & Wright §3.1) |
 | `NormalizedArmijo` | same Armijo, reference's start rule | D12 |
 | projection | `MeanEdgeLength(1e-4)`, 3 iterations | paper: 1e-4 (absolute) and ≤ 3 iterations; relative to `ℓ̄₀` so that Blender scenes of any scale behave alike; the evaluation uses `Absolute(1e-4)` (D10) |
 | stop | `GradientNorm { Euclidean, 1e-4 }`, `max_iterations` 1000 | paper Sec. 5.4, Supp. 1.3 (D14); Blender uses `RelativeGradient(1e-3)` |
@@ -1204,6 +1208,59 @@ Things the paper and the reference leave open, with how they are settled:
   flops). Decided by measurement in WP14 against the multigrid back end.
 * §5.2: rank is checked on the row-normalized `C Cᵀ` by inverse iteration (threshold 1e-10),
   since a plain sparse Cholesky can succeed with tiny pivots.
+
+## 17f. Noted after WP3 (orchestrator)
+
+* **Line-search start rule (D11).** Measured on 24 perturbed Knot128 knots (every 5th: 1, 6, ...,
+  116; 1500-2750 vertices), `(α, β) = (3, 6)`, `Absolute(1e-4)`, 3 projection iterations, exact
+  energy + dense solver, 100 iterations, one process per knot and variant (8 threads, 8 processes
+  at a time; the machine was shared, load average 55-75, so wall-clock ratios are approximate).
+  Logs, driver and table: `runs_tmp/rc-wp3b-ls/` (`table.md`; driver `tests/flow.rs`
+  `ls_compare_one_knot`, `RC_LS=guarded|grow|armijo`). `E*` is the best energy any variant reached
+  on that knot.
+
+  | search | stuck steps | isotopy violations (CCD audit) | trials/step | s/step (median) | paired s/step vs Armijo | reached 1.1 E* | median it, s to 1.1 E* | median final E / E* |
+  |---|---|---|---|---|---|---|---|---|
+  | guarded, paper start | 0 / 2400 | 0 | 6.0 | 21.0 | 1.54 (1.24-1.93) | 18 / 24 | 71, 1530 | 1.011 |
+  | guarded, grow-previous | 0 / 2400 | 0 | 2.0 | 16.7 | 1.14 (1.00-1.29) | 21 / 24 | 66, 1133 | 1.000 |
+  | normalized Armijo | 0 / 2400 | not guaranteed; 0 found | 1.0 | 14.4 | 1 | 0 / 24 | none | 32.3 |
+
+  The normalized Armijo start takes very small steps on these perturbed knots: after 100
+  iterations its energy is still 6-100 times `E*` (median 32), so none of the 24 reaches 1.1 E*;
+  to a common target (`max(1.1 E*, Armijo's final energy)`) both guarded variants need 0.12 of its
+  time (median 150 s against 1440 s, 8-10 iterations against 100). The per-step cost is dominated
+  by the metric (Gram + dense factorization), not by trials, so 6 trials against 2 cost 1.5×
+  against 1.14× per step. Decision: **grow-previous (factor 2) is the default**, because it is
+  within 1.5× of Armijo's time per step and is far faster to any energy level; the paper's start
+  stays available as `StartRule::TwoThirdsTauMax` (its median per-step ratio 1.54 is just outside
+  the D11 limit). The isotopy guarantee is the same for both (every trial is bounded by `τ_max` and
+  CCD-checked); the audit (`path_contact`, gap 1e-6, 1e5 advances) found no violation in any of the
+  72 runs. (WP3's first measurement on the Knot128 originals, which are at rest for `(3, 6)`, is
+  superseded; per §17c it was not a valid set.)
+* **Barnes–Hut in the session.** `BarnesHutEnergy`: `prepare` builds the tree at the base curve
+  (each step, so also after an accepted step and after a subdivision); trial energies refit it
+  (D26); `energy_and_differential` and `energy` also rebuild when the network's vertex or edge
+  count differs from the tree's (a live subdivision asks for the energy before the next
+  `prepare`; fixed, regression test `barnes_hut_flow_survives_subdivision`). Both sides of every
+  Armijo comparison are Barnes–Hut energies (§17d).
+* **WP3 API differences from §9.1.** `PenaltyTerm` is a trait (`evaluate`, `subdivided`,
+  `obstacle`) and `FlowOptions.penalties: Vec<Arc<dyn PenaltyTerm>>` replaces the `Penalty` enum
+  there; `FlowOptions.obstacles` (CCD obstacles, `CollisionObstacle`), `dense_threads` (the dense
+  LU pool, default `min(16, threads)`, `DEFAULT_DENSE_THREADS`, from the scaling measured in WP3:
+  16 threads is the knee) and `record_path` (each `StepReport` carries the piecewise-linear path
+  for audits) are added. `Status` has `Running` and `Error(RcError)`; `Solver` has `Custom` (the
+  hook through which the hierarchical and multigrid solvers plug in); `Backend::Auto` is exact +
+  dense at every size until WP6. The CCD Lipschitz constant is taken on velocities relative to the
+  mean velocity of the motion (`max|u − ū| + max|w − ū|`, still the Lean lemma's constant for the
+  shifted motion), which is sharper for a nearly rigid move. `StepStatus::RetargetStalled`: the
+  length re-target stalled and the descent step did not move; five in a row end the run `Stuck`.
+  L-BFGS uses the scaling `H₀ = γ M⁻¹` with `γ = sᵀy / yᵀM⁻¹y` (one extra solve) and caps trials
+  at `τ₀ ≤ 1` once curvature pairs exist.
+* **WP7.** The surface-potential `θ` default is 0.1 (measured error 6.9e-2 at 0.1, 1.5e-1 at
+  0.25); a vertex on an obstacle gives +∞ (a gradient request is an error); Barycenter + Surface
+  on a plane is redundant (translation along the normal is fixed twice), so planar-surface scenes
+  pin a Point instead; implicit surfaces include the reference's double torus and smooth union
+  plus `RoundedBox` and `Metaballs`.
 
 ## 17e. Noted after WP5 (orchestrator)
 

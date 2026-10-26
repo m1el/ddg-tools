@@ -80,7 +80,7 @@ impl StartRule {
 /// The line search (`SPEC.md` §9.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LineSearch {
-    /// CCD-guarded backtracking (D11, the default).
+    /// CCD-guarded backtracking (D11, the default with the grow-previous start).
     CollisionGuarded {
         /// Armijo constant `c ∈ (0, 1)`.
         armijo: f64,
@@ -105,15 +105,10 @@ pub enum LineSearch {
 }
 
 impl Default for LineSearch {
-    /// `CollisionGuarded { armijo 1e-4, shrink ½, start ⅔, gap 0.1, 40 halvings }` (§10).
+    /// `CollisionGuarded { armijo 1e-4, shrink ½, start GrowPrevious 2, gap 0.1, 40 halvings }`
+    /// (§10, §17f).
     fn default() -> Self {
-        LineSearch::CollisionGuarded {
-            armijo: 1e-4,
-            shrink: 0.5,
-            start: StartRule::TwoThirdsTauMax,
-            gap: 0.1,
-            max_halvings: 40,
-        }
+        LineSearch::guarded_with_start(StartRule::grow_previous())
     }
 }
 
