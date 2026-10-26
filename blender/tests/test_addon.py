@@ -324,12 +324,13 @@ def operator_is_registered_with_exactly_the_agreed_properties():
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {
         "lambda_", "use_seams", "pinned_group", "forbidden_group", "positive_cones_only",
-        "optimize_boundary", "split_overlaps", "mark_seams"}, sorted(properties)
+        "optimize_boundary", "split_overlaps", "cone_feedback", "mark_seams"}, sorted(properties)
     assert abs(properties["lambda_"].default - 0.1) < 1e-6
     assert properties["use_seams"].default is True
     assert properties["positive_cones_only"].default is True
     assert properties["optimize_boundary"].default is False
     assert properties["split_overlaps"].default is False
+    assert properties["cone_feedback"].default is False
     assert properties["mark_seams"].default is False
     assert properties["pinned_group"].default == "" and properties["forbidden_group"].default == ""
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):

@@ -73,6 +73,9 @@ def unwrap(
     split_overlaps: bool = False,
     split_max: int = 32,
     split_threshold: float = 0.001,
+    cone_feedback: bool = False,
+    feedback_threshold: float = 4.0,
+    feedback_max_rounds: int = 4,
 ) -> UnwrapResult: ...
 def pack_charts(
     uvs: Buffer,

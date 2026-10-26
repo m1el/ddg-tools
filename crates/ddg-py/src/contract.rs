@@ -557,11 +557,21 @@ pub struct UnwrapOptions {
     /// With `split_overlaps`: a chart is split while more than this fraction of its footprint
     /// is covered twice. Default 0.001.
     pub split_threshold: f64,
+    /// The feedback loop of the cone solver (`ddg_uv::UnwrapOptions::cone_feedback`): lower
+    /// the distortion weight where the solver's linearized scale factor is far from the one
+    /// the flattening realizes (thin spikes) and solve again. Default `false`.
+    pub cone_feedback: bool,
+    /// With `cone_feedback`: the threshold of the mismatch, in log units
+    /// (`ddg_optimal_cones::FeedbackOptions::threshold`). Default 4.
+    pub feedback_threshold: f64,
+    /// With `cone_feedback`: the most solves, the first included. Default 4.
+    pub feedback_max_rounds: usize,
 }
 
 impl Default for UnwrapOptions {
     fn default() -> Self {
         let split = ddg_uv::SplitOptions::default();
+        let feedback = ddg_uv::FeedbackOptions::default();
         UnwrapOptions {
             lambda: 0.1,
             positive_cones_only: true,
@@ -569,6 +579,9 @@ impl Default for UnwrapOptions {
             split_overlaps: false,
             split_max: split.max_splits,
             split_threshold: split.min_overlap_fraction,
+            cone_feedback: false,
+            feedback_threshold: feedback.threshold,
+            feedback_max_rounds: feedback.max_rounds,
         }
     }
 }
@@ -591,6 +604,22 @@ impl UnwrapOptions {
                 name: "split_threshold",
                 value: format!("{}", self.split_threshold),
                 requirement: "must be at least 0 and below 1",
+            });
+        }
+        if self.cone_feedback
+            && !(self.feedback_threshold.is_finite() && self.feedback_threshold > 0.0)
+        {
+            return Err(InputError::BadOption {
+                name: "feedback_threshold",
+                value: format!("{}", self.feedback_threshold),
+                requirement: "must be positive and finite",
+            });
+        }
+        if self.cone_feedback && self.feedback_max_rounds == 0 {
+            return Err(InputError::BadOption {
+                name: "feedback_max_rounds",
+                value: format!("{}", self.feedback_max_rounds),
+                requirement: "must be at least 1",
             });
         }
         Ok(())
@@ -1131,6 +1160,23 @@ mod tests {
             ..UnwrapOptions::default()
         };
         assert!(nan.validate().is_err());
+        assert!(!UnwrapOptions::default().cone_feedback);
+        for (threshold, rounds) in [(0.0, 4), (f64::NAN, 4), (f64::INFINITY, 4), (4.0, 0)] {
+            let bad = UnwrapOptions {
+                cone_feedback: true,
+                feedback_threshold: threshold,
+                feedback_max_rounds: rounds,
+                ..UnwrapOptions::default()
+            };
+            let message = bad.validate().unwrap_err().to_string();
+            assert!(message.starts_with("feedback_"), "{message}");
+            // Not checked while the loop is off.
+            let off = UnwrapOptions {
+                cone_feedback: false,
+                ..bad
+            };
+            assert!(off.validate().is_ok());
+        }
     }
 
     #[test]

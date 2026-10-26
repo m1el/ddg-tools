@@ -542,6 +542,33 @@ class SpikeTest(unittest.TestCase):
         self.assertIn("vertices " + report["spike_vertices"], warnings[0])
         self.assertIn("Repair the mesh", warnings[0])
 
+    def test_cone_feedback(self):
+        n = 20
+        arrays = as_arrays(grid(n, [(10, 10, 2.0), (4, 15, 2.0)]))
+        plain = ddg_tools.unwrap(*arrays)
+        self.assertIs(plain.report["cone_feedback"], False)
+        self.assertNotIn("cone_feedback_rounds", plain.report)
+        result = ddg_tools.unwrap(*arrays, cone_feedback=True)
+        report = result.report
+        self.assertIs(report["cone_feedback"], True)
+        for key, kind in {
+            "cone_feedback_rounds": int, "n_cone_feedback_reweighted": int,
+            "n_cone_feedback_pending": int, "cone_feedback_max_mismatch": float,
+            "cone_feedback_final_mismatch": float, "seconds_cone_feedback": float,
+        }.items():
+            self.assertIs(type(report[key]), kind, key)
+        self.assertTrue(1 <= report["cone_feedback_rounds"] <= 4)
+        # The spike check has excluded the two tips already; the loop does not look at them.
+        for tip in (10 * (n + 1) + 10, 15 * (n + 1) + 4):
+            self.assertNotIn(str(tip), report.get("cone_feedback_vertices", "").split(", "))
+        one = ddg_tools.unwrap(*arrays, cone_feedback=True, feedback_max_rounds=1)
+        self.assertEqual(one.report["cone_feedback_rounds"], 1)
+        self.assertEqual(one.report["n_cone_feedback_reweighted"], 0)
+        for bad in ({"feedback_threshold": 0.0}, {"feedback_threshold": math.nan},
+                    {"feedback_max_rounds": 0}):
+            with self.assertRaisesRegex(ddg_tools.InputError, "feedback_"):
+                ddg_tools.unwrap(*arrays, cone_feedback=True, **bad)
+
     def test_a_flat_and_a_bumpy_sheet_have_none(self):
         for spikes in ([], [(10, 10, 0.05)]):
             report = ddg_tools.unwrap(*as_arrays(grid(20, spikes))).report

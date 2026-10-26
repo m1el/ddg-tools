@@ -80,6 +80,16 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         ),
         default=False,
     )
+    cone_feedback: BoolProperty(
+        name="Cone Feedback",
+        description=(
+            "Compare the cone solver's scale factor with the one the flattening realizes, "
+            "ignore the distortion at vertices where they are far apart (the tips of thin "
+            "spikes) and solve again. Costs a comparison where nothing is found, and a solve "
+            "and a flattening per extra round where something is"
+        ),
+        default=False,
+    )
     mark_seams: BoolProperty(
         name="Mark Cuts as Seams",
         description="Mark the edges the surface was cut along as seams",
@@ -103,6 +113,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
         layout.prop(self, "positive_cones_only")
         layout.prop(self, "optimize_boundary")
         layout.prop(self, "split_overlaps")
+        layout.prop(self, "cone_feedback")
         layout.prop(self, "use_seams")
         obj = context.active_object
         if obj is not None and obj.type == 'MESH':
@@ -133,6 +144,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
                 positive_cones_only=self.positive_cones_only,
                 optimize_boundary=self.optimize_boundary,
                 split_overlaps=self.split_overlaps,
+                cone_feedback=self.cone_feedback,
                 mark_cuts_as_seams=self.mark_seams,
             )
         except core.UnwrapFailed as ex:

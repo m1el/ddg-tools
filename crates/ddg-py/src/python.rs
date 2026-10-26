@@ -237,6 +237,13 @@ impl UnwrapResult {
 /// split_max         at most this many cuts are kept (default 32).
 /// split_threshold   a chart is split while more than this fraction of its footprint is covered
 ///                   more than once (default 0.001).
+/// cone_feedback     compare the cone solver's linearized scale factor with the one the
+///                   flattening realizes, lower the distortion weight where they differ by more
+///                   than feedback_threshold (thin spikes) and solve again, until nothing changes
+///                   (report["cone_feedback_rounds"], ["n_cone_feedback_reweighted"],
+///                   ["cone_feedback_vertices"], ["cone_feedback_max_mismatch"]). Default False.
+/// feedback_threshold  the mismatch threshold in log units (default 4.0).
+/// feedback_max_rounds the most solves, the first included (default 4).
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that cannot be unwrapped
 /// (for example "edge (12, 57) is shared by 3 faces: 4, 9, 31"), SolveError when no valid map
@@ -259,6 +266,9 @@ impl UnwrapResult {
     split_overlaps = false,
     split_max = 32,
     split_threshold = 0.001,
+    cone_feedback = false,
+    feedback_threshold = 4.0,
+    feedback_max_rounds = 4,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn unwrap<'py>(
@@ -278,6 +288,9 @@ fn unwrap<'py>(
     split_overlaps: bool,
     split_max: usize,
     split_threshold: f64,
+    cone_feedback: bool,
+    feedback_threshold: f64,
+    feedback_max_rounds: usize,
 ) -> PyResult<UnwrapResult> {
     let start = Instant::now();
     let optional_indices = |name, obj: Option<&Bound<'py, PyAny>>, width, row| match obj {
@@ -315,6 +328,9 @@ fn unwrap<'py>(
         split_overlaps,
         split_max,
         split_threshold,
+        cone_feedback,
+        feedback_threshold,
+        feedback_max_rounds,
     };
     let seconds_decode = start.elapsed().as_secs_f64();
 

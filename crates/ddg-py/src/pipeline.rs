@@ -72,6 +72,11 @@ pub fn run_pipeline(
             min_overlap_fraction: options.split_threshold,
             ..ddg_uv::SplitOptions::default()
         }),
+        cone_feedback: options.cone_feedback.then(|| ddg_uv::FeedbackOptions {
+            threshold: options.feedback_threshold,
+            max_rounds: options.feedback_max_rounds,
+            ..ddg_uv::FeedbackOptions::default()
+        }),
         ..ddg_uv::UnwrapOptions::default()
     };
     let map = ddg_uv::unwrap(&mesh, &uv_options).map_err(|e| match e {
@@ -159,6 +164,7 @@ pub fn unwrap(input: &UnwrapInput, options: &UnwrapOptions) -> Result<UnwrapOutp
     report.set("lambda", options.lambda);
     report.set("positive_cones_only", options.positive_cones_only);
     report.set("optimize_boundary", options.optimize_boundary);
+    report.set("cone_feedback", options.cone_feedback);
     report.set("n_charts", charts.len());
     report.set("n_cones", output.cones.len());
     report.set("n_cut_edges", output.cut_edges.len());
@@ -177,7 +183,7 @@ mod tests {
     use crate::contract::test_meshes::*;
 
     /// Keys the binding itself writes, in order: before and after whatever the pipeline reports.
-    const LEADING: [&str; 16] = [
+    const LEADING: [&str; 17] = [
         "pipeline",
         "placeholder",
         "n_vertices",
@@ -191,6 +197,7 @@ mod tests {
         "lambda",
         "positive_cones_only",
         "optimize_boundary",
+        "cone_feedback",
         "n_charts",
         "n_cones",
         "n_cut_edges",
@@ -309,6 +316,36 @@ mod tests {
             error.to_string(),
             "edge (0, 1) is shared by 3 faces: 0, 1, 2"
         );
+    }
+
+    #[test]
+    fn the_cone_feedback_reaches_the_pipeline() {
+        let input = UnwrapInput::from_buffers(cube()).unwrap();
+        let off = unwrap(&input, &UnwrapOptions::default()).unwrap();
+        assert_eq!(off.report.get("cone_feedback"), Some(&ReportValue::Bool(false)));
+        assert!(off.report.get("cone_feedback_rounds").is_none());
+        let options = UnwrapOptions {
+            cone_feedback: true,
+            ..UnwrapOptions::default()
+        };
+        let on = unwrap(&input, &options).unwrap();
+        assert_eq!(on.report.get("cone_feedback"), Some(&ReportValue::Bool(true)));
+        // A cube has nothing to reweight: one round, the same cones.
+        assert_eq!(
+            on.report.get("cone_feedback_rounds"),
+            Some(&ReportValue::Int(1))
+        );
+        assert_eq!(
+            on.report.get("n_cone_feedback_reweighted"),
+            Some(&ReportValue::Int(0))
+        );
+        assert_eq!(on.cones, off.cones);
+        let bad = UnwrapOptions {
+            cone_feedback: true,
+            feedback_max_rounds: 0,
+            ..UnwrapOptions::default()
+        };
+        assert!(matches!(unwrap(&input, &bad), Err(UnwrapError::Input(_))));
     }
 
     #[test]

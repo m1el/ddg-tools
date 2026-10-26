@@ -25,6 +25,7 @@ ddg_tools.unwrap(
     positive_cones_only=True,
     optimize_boundary=False,
     split_overlaps=False, split_max=32, split_threshold=0.001,
+    cone_feedback=False, feedback_threshold=4.0, feedback_max_rounds=4,
 ) -> ddg_tools.UnwrapResult
 
 ddg_tools.pack_charts(uvs, polygon_starts, polygon_charts, *, margin=0.0)
@@ -104,6 +105,15 @@ Rules for the mesh arrays (violations raise `InputError`):
   The report gains `n_splits`, `n_splits_rejected`, `n_split_no_cut`, `split_runs`,
   `split_exhausted`, `split_cut_length`, `overlapped_fraction_before_split`; the added cuts are in
   `cut_edges`.
+- `cone_feedback=False` (default): the cones are those of one solve per piece. `True` compares,
+  on every piece, the cone solver's linearized log scale factor with the one the flattening
+  realizes, lowers the distortion weight of the vertices where they differ by more than
+  `feedback_threshold` (log units; the tips of thin spikes, where the linearized value is off by
+  thousands), and solves and flattens again, at most `feedback_max_rounds` solves in all
+  (`crates/ddg-uv/README.md`, "The cone feedback loop"). Where nothing is reweighted it costs a
+  comparison only. The report gains `cone_feedback_rounds`, `n_cone_feedback_reweighted`,
+  `n_cone_feedback_pending`, `cone_feedback_max_mismatch`, `cone_feedback_final_mismatch` and
+  `cone_feedback_vertices`.
 - Steering acts on vertices that are interior to their piece: a pinned vertex is a cone site
   that costs nothing, a forbidden vertex gets no cone, a prescribed vertex gets exactly the given
   angle. On a mesh boundary or along a seam there are no cones: pinned and forbidden vertices
@@ -153,7 +163,7 @@ estimated (it is, by default).
 | `pipeline`, `placeholder` | which pipeline ran (`"ddg-uv"`), and whether it is a stand-in (`False`) |
 | `n_vertices`, `n_polygons`, `n_corners`, `n_triangles` | size of the input |
 | `n_seam_edges`, `n_pinned`, `n_prescribed`, `n_forbidden` | the steering as the Rust side received it (after removing duplicates) |
-| `lambda`, `positive_cones_only`, `optimize_boundary` | the options as received |
+| `lambda`, `positive_cones_only`, `optimize_boundary`, `cone_feedback` | the options as received |
 | `n_charts`, `n_cones`, `n_cut_edges` | size of the result |
 | `n_unreferenced_vertices` | vertices that no polygon uses (ignored) |
 | `n_flipped_faces` | polygons whose winding was repaired |
@@ -171,7 +181,8 @@ estimated (it is, by default).
 | `cone_free_distortion`, `n_spike_vertices`, `spike_vertices` | the spike check: the distortion the surface would have without cones (largest over the charts, area normalized to 1), the number of spike vertices, and their numbers in your mesh, as text (`"11491, 11492, ..."`, at most 64; only present if there are spikes). A thin spike (a vertex pulled far out of the surface) dominates the distortion measure of this method and the map is then poor; the check fires when a handful of vertices (at most 64 and 1 % of the piece) carry 99 % of the distortion without cones, and adds a warning that suggests repairing the mesh. Measured: it fires on the dataset's `camelshotnoise` and on none of 22 other meshes (`crates/ddg-uv/README.md`). |
 | `overlapped_fraction`, `max_chart_overlapped_fraction` | estimated share of the footprint that is covered twice, over all charts and for the worst chart |
 | `packed` | `False`: the binding switches the pipeline's packer off; use `pack_charts` |
-| `seconds_stage_validate`, `seconds_stage_seams`, `seconds_stage_cones`, `seconds_cone_solver`, `seconds_spike_check`, `seconds_stage_flatten`, `seconds_stage_pack`, `seconds_stage_verify`, `seconds_unwrap` | the pipeline's wall-clock times per stage (`seconds_cone_solver` and `seconds_spike_check` are parts of `seconds_stage_cones`) |
+| `cone_feedback_rounds`, `n_cone_feedback_reweighted`, `n_cone_feedback_pending`, `cone_feedback_max_mismatch`, `cone_feedback_final_mismatch`, `cone_feedback_vertices` | only with `cone_feedback=True`: the most solves on a chart, the number of vertices whose distortion weight was lowered and of those the loop found but left (round limit, or more than 1 % of a piece), the largest mismatch `\|δ\|` (log units) among the vertices looked at in the first and in the last round, and the reweighted vertices in your mesh as text (at most 64; only present if there are any) |
+| `seconds_stage_validate`, `seconds_stage_seams`, `seconds_stage_cones`, `seconds_cone_solver`, `seconds_spike_check`, `seconds_stage_flatten`, `seconds_cone_feedback`, `seconds_stage_pack`, `seconds_stage_verify`, `seconds_unwrap` | the pipeline's wall-clock times per stage (`seconds_cone_solver` and `seconds_spike_check` are parts of `seconds_stage_cones`; `seconds_cone_feedback` is the feedback loop, 0 when it is off) |
 | `n_degenerate_triangles` | triangles with no area in 3D (left out of the measurements) |
 | `n_collapsed_uv_triangles` | triangles with area in 3D but none in UV |
 | `n_flipped_uv_triangles` | triangles whose UV image is mirrored |
@@ -609,7 +620,9 @@ other policy is `ddg-uv`'s default. In short (details and the measurements behin
 3. Per piece: the spike check (see the report keys), optimal cones (`ddg-optimal-cones`), then the piece is cut through its cones along
    polygon edges and flattened conformally (`ddg-bff`). A closed piece of genus 0 uses the raw
    optimum unless it is dense (more than 32 cones and more than 1 % of the vertices); then it
-   is solved again with 8 free cone sites.
+   is solved again with 8 free cone sites. With `cone_feedback=True` the piece is then solved
+   and flattened again with lowered distortion weights where the solver's scale factor and the
+   flattening's disagree, until nothing changes.
 4. Final checks: every UV is finite, all triangle corners of one polygon corner got the same
    UV, every cut edge is a polygon edge, every seam is cut.
 
