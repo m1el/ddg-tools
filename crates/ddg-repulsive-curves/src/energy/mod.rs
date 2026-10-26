@@ -53,7 +53,7 @@ impl Default for BhOptions {
 pub enum EnergyEval {
     /// All pairs, `O(|E|²)`.
     Exact,
-    /// Barnes–Hut with the given parameters (not yet available).
+    /// Barnes–Hut with the given parameters ([`barnes_hut`]).
     BarnesHut(BhOptions),
 }
 
@@ -85,7 +85,7 @@ pub struct EnergyReport {
 ///
 /// # Errors
 /// The errors of [`CurveNetwork::validate_positions`]; [`RcError::InvalidOption`] for
-/// `threads = Some(0)`; [`RcError::Unsupported`] for [`EnergyEval::BarnesHut`] until WP4 lands.
+/// `threads = Some(0)`; [`RcError::InvalidOption`] for bad [`BhOptions`].
 pub fn energy(
     network: &CurveNetwork,
     positions: &[[f64; 3]],
@@ -94,13 +94,20 @@ pub fn energy(
     threads: Option<usize>,
 ) -> Result<EnergyReport, RcError> {
     let t0 = Instant::now();
-    if !matches!(eval, EnergyEval::Exact) {
-        return Err(RcError::Unsupported {
-            what: "the Barnes-Hut evaluation",
-        });
-    }
     network.validate_positions(positions)?;
     let pool = exact::make_pool(threads)?;
+    if let EnergyEval::BarnesHut(opts) = eval {
+        let (energy, differential, stats) =
+            barnes_hut::energy_and_differential(&pool, network, positions, exponents, *opts)?;
+        return Ok(EnergyReport {
+            energy,
+            penalties: Vec::new(),
+            differential,
+            pairs_exact: stats.pairs_exact,
+            nodes_lumped: stats.nodes_lumped,
+            seconds: t0.elapsed().as_secs_f64(),
+        });
+    }
     let (energy, differential) =
         exact::energy_and_differential(&pool, network, positions, exponents);
     let m = network.n_edges() as u64;
