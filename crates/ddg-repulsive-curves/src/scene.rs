@@ -1558,3 +1558,15 @@ pub mod builtin;
 pub fn curve_from_text(text: &str) -> Result<(CurveNetwork, Vec<P>), RcError> {
     parse_curve_obj(text)
 }
+
+impl std::fmt::Debug for Scene {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Scene")
+            .field("name", &self.name)
+            .field("vertices", &self.network.n_vertices())
+            .field("edges", &self.network.n_edges())
+            .field("spec", &self.spec)
+            .field("notes", &self.notes)
+            .finish_non_exhaustive()
+    }
+}
