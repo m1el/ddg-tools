@@ -369,7 +369,7 @@ pub struct SolverRequest<'a> {
     /// tree products, hierarchy construction) runs on it, never on rayon's global pool, so that
     /// the thread count is the caller's and results are bitwise independent of it.
     pub pool: &'a Arc<rayon::ThreadPool>,
-    /// The session's pool of the dense LU (`faer`), see [`FlowOptions::dense_threads`].
+    /// The session's pool of the dense solver (`faer`), see [`FlowOptions::dense_threads`].
     pub dense_pool: &'a Arc<rayon::ThreadPool>,
 }
 
@@ -547,13 +547,13 @@ pub struct FlowOptions {
     pub max_subdivisions: u32,
     /// Size of the main pool (energy, Gram assembly, CCD); `None`: all cores.
     pub threads: Option<usize>,
-    /// Size of the dense LU's pool; `None`: `min(DEFAULT_DENSE_THREADS, threads)`.
+    /// Size of the dense solver's pool; `None`: `min(DEFAULT_DENSE_THREADS, threads)`.
     pub dense_threads: Option<usize>,
     /// Keep the path of every accepted step in the report (for audits; memory heavy).
     pub record_path: bool,
     /// When an iterative solver ([`Solver::Multigrid`], a custom factory) fails on a step, the
     /// step repeats the solve with the dense solver if the network has at most this many
-    /// vertices (`(3|V| + k)²` doubles of memory, about 2 GB at 5000); larger networks return
+    /// vertices (the Schur method holds about `4|V|² + k²` doubles, 1 GB at 5000); larger networks return
     /// the error. 0: never fall back. Default 5000 (`SPEC.md` §17h).
     pub dense_fallback_max_vertices: usize,
     /// Guard against collapsing edges (`SPEC.md` §17j): a step that would leave some edge
@@ -835,6 +835,9 @@ pub struct StepReport {
     pub projection_cycles: usize,
     /// The solve of the second-order correction (`None`: not used, or `Φ₂ = 0`).
     pub second_order: Option<LinearReport>,
+    /// The collision-guarded search took no step because two disjoint edges were closer than
+    /// [`line_search::CONTACT_FLOOR`]` · ℓ̄₀` (`SPEC.md` §17l); the step is `Stuck`.
+    pub contact_floor: bool,
     /// CCD counters of the line search.
     pub ccd: CcdReport,
     /// Number of CCD queries of the line search.
@@ -1008,6 +1011,11 @@ struct StepEnv<'a> {
 impl SearchEnv for StepEnv<'_> {
     fn second_order_correction(&self) -> Option<&[[f64; 3]]> {
         self.second_order
+    }
+
+    fn below_contact_floor(&mut self, positions: &[[f64; 3]]) -> Result<bool, RcError> {
+        let tol = line_search::CONTACT_FLOOR * self.mean_edge_length0;
+        Ok(line_search::closest_pair_within(self.network, positions, tol).is_some())
     }
 
     fn objective(&mut self, positions: &[[f64; 3]]) -> Result<f64, RcError> {
@@ -1515,6 +1523,7 @@ impl Session {
             projection_residual: 0.0,
             projection_cycles: 0,
             second_order: None,
+            contact_floor: false,
             ccd: CcdReport::default(),
             ccd_checks: 0,
             retarget,
@@ -1605,6 +1614,7 @@ impl Session {
             report.ccd_checks = ls.ccd_checks;
             report.max_violation = ls.max_violation;
             report.trials = ls.trials;
+            report.contact_floor = ls.contact_floor;
             // 4. Accept or stuck.
             if let (true, Some(new_pos)) = (ls.accepted, ls.positions) {
                 self.check_edge_collapse(&new_pos, iteration)?;

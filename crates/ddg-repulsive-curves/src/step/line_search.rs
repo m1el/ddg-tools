@@ -20,7 +20,8 @@
 //!
 //! * [`LineSearch::CollisionGuarded`] (the default, D11): `τ_hi = diam(bbox γ) / max_v |p_v|`,
 //!   `τ_max` = the first contact time of the linear motion `γ − τ p` on `[0, τ_hi]` by the CCD
-//!   of §7.4 (∞ if none), start `τ₀` by the [`StartRule`] (the paper's `⅔ τ_max`, or `τ_hi` without contact; or
+//!   of §7.4 (∞ if none; 0 if two disjoint edges are already closer than [`CONTACT_FLOOR`]
+//!   times `ℓ̄₀`, §17l), start `τ₀` by the [`StartRule`] (the paper's `⅔ τ_max`, or `τ_hi` without contact; or
 //!   grow-previous `min(⅔ τ_max, f τ_prev)`).
 //!   A trial is accepted only if, in addition, every chord step of its projection (each a linear
 //!   motion) is free of contacts. The move itself is free because `τ ≤ τ_max`. So the whole path
@@ -292,6 +293,85 @@ pub struct LineSearchReport {
     pub ccd_checks: u32,
     /// Seconds per phase.
     pub seconds: LineSearchTimings,
+    /// The guarded search found two disjoint edges closer than the contact floor at the base
+    /// curve ([`CONTACT_FLOOR`]) and took no step (`τ_max = 0`).
+    pub contact_floor: bool,
+}
+
+/// The contact floor of the collision-guarded search (`SPEC.md` §17l), relative to the mean
+/// edge length `ℓ̄₀` at the start of the session: two disjoint edges of the base curve closer
+/// than `CONTACT_FLOOR · ℓ̄₀` count as a contact, so `τ_max = 0` and the step is
+/// [`StepStatus::Stuck`](super::StepStatus::Stuck). Without it the CCD bounds each step by a
+/// fraction (the gap) of the current distance, which a metric blind to the repulsion (L², H¹,
+/// H²) lets shrink geometrically down to rounding, until the curve is no longer valid. The floor
+/// is 10⁶ times the validation tolerance of §2.3 (`INTERSECTION_TOLERANCE = 1e-12`), so the
+/// last accepted curve keeps a distance of at least `gap · CONTACT_FLOOR · ℓ̄₀`; the
+/// tangent-point energy of such a pair is enormous (`ℓ² d^{−(β−α)}`, about 10¹⁸ times its value
+/// at `d = ℓ` for (3, 6)), so a Sobolev flow never gets there and its steps are unchanged.
+pub const CONTACT_FLOOR: f64 = 1e-6;
+
+/// The pair `(I, J)`, `I < J`, of disjoint curve edges at the smallest distance `≤ tol`, if any
+/// (a uniform grid of cell size `max ℓ + 2 tol` as broad phase, exact segment distances;
+/// deterministic: candidates are sorted).
+pub fn closest_pair_within(
+    network: &CurveNetwork,
+    positions: &[[f64; 3]],
+    tol: f64,
+) -> Option<(u32, u32, f64)> {
+    let edges = network.edges();
+    if edges.len() < 2 || tol.is_nan() || tol < 0.0 {
+        return None;
+    }
+    let len = |&[a, b]: &[u32; 2]| {
+        let (p, q) = (positions[a as usize], positions[b as usize]);
+        ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+    };
+    let h = edges.iter().map(len).fold(0.0f64, f64::max) + 2.0 * tol;
+    if !(h > 0.0 && h.is_finite()) {
+        return None;
+    }
+    let cell = |x: f64| (x / h).floor() as i64;
+    let mut grid: std::collections::HashMap<[i64; 3], Vec<u32>> = std::collections::HashMap::new();
+    for (e, &[a, b]) in edges.iter().enumerate() {
+        let (p, q) = (positions[a as usize], positions[b as usize]);
+        let lo = [0, 1, 2].map(|c| cell(p[c].min(q[c]) - tol));
+        let hi = [0, 1, 2].map(|c| cell(p[c].max(q[c]) + tol));
+        for x in lo[0]..=hi[0] {
+            for y in lo[1]..=hi[1] {
+                for z in lo[2]..=hi[2] {
+                    grid.entry([x, y, z]).or_default().push(e as u32);
+                }
+            }
+        }
+    }
+    let mut pairs: Vec<(u32, u32)> = Vec::new();
+    for list in grid.values() {
+        for (k, &i) in list.iter().enumerate() {
+            for &j in &list[k + 1..] {
+                let (i, j) = (i.min(j), i.max(j));
+                if !network.edges_adjacent(i as usize, j as usize) {
+                    pairs.push((i, j));
+                }
+            }
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup();
+    let mut best: Option<(u32, u32, f64)> = None;
+    for (i, j) in pairs {
+        let [a, b] = edges[i as usize];
+        let [c, d] = edges[j as usize];
+        let dist = crate::ccd::segment_segment_distance(
+            positions[a as usize],
+            positions[b as usize],
+            positions[c as usize],
+            positions[d as usize],
+        );
+        if dist <= tol && best.is_none_or(|(_, _, bd)| dist < bd) {
+            best = Some((i, j, dist));
+        }
+    }
+    best
 }
 
 /// What a line search needs from its caller: the objective, the projection, the CCD and the
@@ -320,6 +400,15 @@ pub trait SearchEnv {
     ) -> Result<CcdReport, RcError>;
     /// `true` once the run was cancelled (checked before every trial).
     fn cancelled(&self) -> bool;
+    /// `true` if two disjoint edges of `positions` are closer than the contact floor
+    /// ([`CONTACT_FLOOR`]); the guarded search then takes no step. The default: never.
+    ///
+    /// # Errors
+    /// Evaluation failures.
+    fn below_contact_floor(&mut self, positions: &[[f64; 3]]) -> Result<bool, RcError> {
+        let _ = positions;
+        Ok(false)
+    }
     /// The second-order correction `q` of the trials (`SPEC.md` §17l): trials are
     /// `γ − τ p + τ² q` (then projected); `None` (the default) for the straight trials `γ − τ p`.
     fn second_order_correction(&self) -> Option<&[[f64; 3]]> {
@@ -400,6 +489,7 @@ pub fn line_search(
         ccd: CcdReport::default(),
         ccd_checks: 0,
         seconds: LineSearchTimings::default(),
+        contact_floor: false,
     };
     let max_speed = input
         .direction
@@ -419,6 +509,15 @@ pub fn line_search(
         LineSearch::CollisionGuarded { start, .. } => {
             let tau_hi = bbox_diameter(input.base) / max_speed;
             rep.tau_hi = Some(tau_hi);
+            let t = Instant::now();
+            let floor = env.below_contact_floor(input.base)?;
+            rep.seconds.ccd += t.elapsed().as_secs_f64();
+            if floor {
+                rep.contact_floor = true;
+                rep.tau_max = Some(0.0);
+                rep.seconds.total = t_all.elapsed().as_secs_f64();
+                return Ok(rep);
+            }
             let t = Instant::now();
             let r = env.ccd(input.base, &velocity, tau_hi)?;
             rep.seconds.ccd += t.elapsed().as_secs_f64();

@@ -219,3 +219,146 @@ fn multigrid_thread_cap_does_not_change_the_result() {
         .is_err()
     );
 }
+
+/// Pulls vertices `a` and `b` together: `w |x_a − x_b|`.
+#[derive(Debug)]
+struct Spring {
+    a: usize,
+    b: usize,
+    w: f64,
+}
+
+impl ddg_repulsive_curves::PenaltyTerm for Spring {
+    fn name(&self) -> &str {
+        "spring"
+    }
+    fn evaluate(
+        &self,
+        _network: &CurveNetwork,
+        positions: &[[f64; 3]],
+        gradient: Option<&mut [[f64; 3]]>,
+    ) -> Result<f64, ddg_repulsive_curves::RcError> {
+        let d: Vec<f64> = (0..3)
+            .map(|c| positions[self.a][c] - positions[self.b][c])
+            .collect();
+        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if let Some(g) = gradient
+            && n > 0.0
+        {
+            for c in 0..3 {
+                g[self.a][c] += self.w * d[c] / n;
+                g[self.b][c] -= self.w * d[c] / n;
+            }
+        }
+        Ok(self.w * n)
+    }
+    fn subdivided(
+        &self,
+        _map: &ddg_repulsive_curves::SubdivisionMap,
+    ) -> Result<std::sync::Arc<dyn ddg_repulsive_curves::PenaltyTerm>, ddg_repulsive_curves::RcError>
+    {
+        Err(ddg_repulsive_curves::RcError::Unsupported {
+            what: "spring subdivision",
+        })
+    }
+}
+
+/// A metric blind to the repulsion (L²) and a penalty that overpowers the tangent-point energy
+/// drive two strands together; each guarded step can only close a fraction of the gap, so before
+/// the contact floor (`SPEC.md` §17l) the distance shrank geometrically to rounding (with the
+/// floor set to 0 the curve fails `validate_positions` after step 25: edges 9 and 29 at 1.8e-13).
+/// Now the flow ends `Stuck` at the floor (step 20, distance 5.3e-7 ℓ̄₀) with a valid curve and an
+/// embedded path at every step.
+#[test]
+fn contact_floor_stops_a_flow_that_drives_two_edges_together() {
+    let n = 40;
+    let pos: Vec<P> = (0..n)
+        .map(|k| {
+            let t = std::f64::consts::TAU * k as f64 / n as f64;
+            [3.0 * t.cos(), 0.6 * t.sin(), 0.05 * (2.0 * t).sin()]
+        })
+        .collect();
+    let edges = (0..n as u32).map(|k| [k, (k + 1) % n as u32]).collect();
+    let net = CurveNetwork::new(n, edges).unwrap();
+    let o = FlowOptions {
+        metric: ddg_repulsive_curves::Metric::L2,
+        backend: Backend::Explicit {
+            energy: EnergyEval::Exact,
+            solver: Solver::Dense,
+        },
+        penalties: vec![std::sync::Arc::new(Spring {
+            a: 10,
+            b: 30,
+            w: 1e60,
+        })],
+        threads: Some(2),
+        record_path: true,
+        max_iterations: 400,
+        ..FlowOptions::default()
+    };
+    let mut s = Session::new(net, pos, o).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .build()
+        .unwrap();
+    let audit = CcdOptions {
+        gap: 1e-6,
+        max_advances: 100_000,
+    };
+    let mut floor_hit = false;
+    for _ in 0..400 {
+        let r = s.step().unwrap();
+        if let Some(p) = &r.path {
+            let mut rep = CcdReport::default();
+            let hit = path_contact(&pool, s.network(), p, &[], &audit, &mut rep).unwrap();
+            assert!(
+                hit.is_none(),
+                "step {}: the path has a contact",
+                r.iteration
+            );
+        }
+        s.network().validate_positions(s.positions()).unwrap();
+        if r.iteration.is_multiple_of(25) || r.contact_floor {
+            eprintln!(
+                "step {}: {:?}, tau {:.3e}, min distance / l0 {:.3e}",
+                r.iteration,
+                r.status,
+                r.tau,
+                ddg_repulsive_curves::ccd::min_pair_distance(s.network(), s.positions())
+                    / s.mean_edge_length0()
+            );
+        }
+        if r.contact_floor {
+            floor_hit = true;
+            assert_eq!(r.status, StepStatus::Stuck);
+            break;
+        }
+        if s.status().is_terminal() {
+            break;
+        }
+    }
+    assert!(
+        floor_hit,
+        "the flow ended {:?} before the floor",
+        s.status()
+    );
+    assert_eq!(s.status(), ddg_repulsive_curves::Status::Stuck);
+    let d = ddg_repulsive_curves::ccd::min_pair_distance(s.network(), s.positions());
+    let l0 = s.mean_edge_length0();
+    assert!(
+        d < 1e-6 * l0 && d > 1e-8 * l0,
+        "distance {d:.3e}, ℓ̄₀ {l0:.3e}"
+    );
+}
+
+/// A Sobolev flow never comes near the floor: no step reports it.
+#[test]
+fn contact_floor_is_never_hit_by_a_sobolev_flow() {
+    let (_, solves) = run(options(Solver::Dense, 2), 10);
+    let _ = solves;
+    let (net, pos) = trefoil(150);
+    let mut s = Session::new(net, pos, options(Solver::Dense, 2)).unwrap();
+    for _ in 0..10 {
+        assert!(!s.step().unwrap().contact_floor);
+    }
+}

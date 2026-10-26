@@ -22,6 +22,35 @@ use ddg_repulsive_curves::{
 
 fn main() {
     let a = args();
+    if let Some(p) = a.get("eval") {
+        // --eval PATH: exact and Barnes-Hut energies, length, bounding box of a curve file
+        let (net, pos) = read_curve_obj(p).expect("curve file");
+        let ex = Exponents::new(3.0, 6.0).unwrap();
+        let e = ddg_repulsive_curves::energy(&net, &pos, ex, &ddg_repulsive_curves::EnergyEval::Exact, Some(16)).unwrap();
+        let b = ddg_repulsive_curves::energy(
+            &net,
+            &pos,
+            ex,
+            &ddg_repulsive_curves::EnergyEval::BarnesHut(ddg_repulsive_curves::BhOptions::default()),
+            Some(16),
+        )
+        .unwrap();
+        let g = net.edge_geometry(&pos);
+        let (lo, hi) = pos.iter().fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), x| {
+            ([0, 1, 2].map(|c| lo[c].min(x[c])), [0, 1, 2].map(|c| hi[c].max(x[c])))
+        });
+        println!(
+            "EVAL exact {:.6} bh {:.6} length {:.4} min edge {:.4e} max edge {:.4e} bbox {:?} {:?}",
+            e.energy,
+            b.energy,
+            g.length.iter().sum::<f64>(),
+            g.length.iter().cloned().fold(f64::MAX, f64::min),
+            g.length.iter().cloned().fold(0.0, f64::max),
+            lo,
+            hi
+        );
+        return;
+    }
     let path = a.get("knot").cloned().expect("--knot PATH");
     let soc = get(&a, "soc", 0usize) != 0;
     let polish: f64 = get(&a, "polish", 0.0);
@@ -70,14 +99,16 @@ fn main() {
             stuck += 1;
         }
         println!(
-            "TRAJ {} {:.4} {:.10} {:.3e} {} {} {}",
+            "TRAJ {} {:.4} {:.10} {:.3e} {} {} {} {:.3e} {:.3e}",
             r.iteration,
             t0.elapsed().as_secs_f64() - audit_s,
             r.energy_after,
             r.gradient_norm,
             r.trials.len(),
             sv,
-            r.solver_backend
+            r.solver_backend,
+            r.max_violation,
+            r.tau
         );
         if let Some(p) = &r.path {
             let ta = Instant::now();
@@ -99,6 +130,9 @@ fn main() {
         if s.status().is_terminal() {
             break;
         }
+    }
+    if let Some(out) = a.get("out") {
+        ddg_repulsive_curves::write_curve_obj(out, s.network(), s.positions()).unwrap();
     }
     println!(
         "RESULT status {:?} iterations {} seconds {:.3} energy0 {:.6} energy {:.6} trials {} solves {} \

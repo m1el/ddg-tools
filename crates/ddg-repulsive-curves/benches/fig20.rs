@@ -4,7 +4,7 @@
 //! ```text
 //! cargo bench --bench fig20 -- --curve fhw|fhw-r|knot --size N --config exact|bh|mg|mg-noproj|mg-bary
 //!     [--threads T] [--dense-threads D] [--steps 20] [--min-steps 5] [--cap-s 240] [--trace 1]
-//!     [--soc 0|1] [--proj-it 3] [--polish F] [--bct-tt 0.25] [--bct-tx 0.25]
+//!     [--soc 0|1] [--proj-it 3] [--polish F] [--bct-tt 2] [--bct-tx 0.25] [--mg-threads 16]
 //! ```
 //!
 //! `--trace 1` prints one line per step on stderr (phases, cycles, every trial of the line
@@ -66,6 +66,10 @@ fn main() {
             let mut mg = MgOptions::default();
             mg.bct.theta_t = get(&a, "bct-tt", mg.bct.theta_t);
             mg.bct.theta_x = get(&a, "bct-tx", mg.bct.theta_x);
+            // --mg-threads N: MgOptions::max_threads (0: no cap)
+            if let Some(t) = a.get("mg-threads").and_then(|s| s.parse::<usize>().ok()) {
+                mg.max_threads = (t > 0).then_some(t);
+            }
             (
                 EnergyEval::BarnesHut(BhOptions::default()),
                 Solver::Multigrid(mg),
@@ -88,17 +92,24 @@ fn main() {
         "mg-bary" => opts.constraints = vec![Constraint::Barycenter { target: None }],
         _ => {}
     }
-    // --soc 0: straight trials (before WP14b)
-    opts.second_order_correction = get(&a, "soc", 1usize) != 0;
-    // --polish F: Newton polish below F times the tolerance (0: off)
-    let polish: f64 = get(&a, "polish", 0.0);
-    opts.newton_polish = (polish > 0.0).then_some(polish);
+    // --soc 0|1: straight trials (before WP14b) or the second-order correction (default: the
+    // library's)
+    if let Some(v) = a.get("soc") {
+        opts.second_order_correction = v != "0";
+    }
+    // --polish F: Newton polish below F times the tolerance (0: off; default: the library's)
+    if let Some(p) = a.get("polish").and_then(|s| s.parse::<f64>().ok()) {
+        opts.newton_polish = (p > 0.0).then_some(p);
+    }
     // --proj-it N: chord iterations of the projection
     opts.projection.max_iterations = get(&a, "proj-it", opts.projection.max_iterations);
     let opts_soc = opts.second_order_correction;
+    let mut note = match opts.newton_polish {
+        Some(p) => format!("polish={p}"),
+        None => String::new(),
+    };
     let n = net.n_vertices();
     let load0 = load_avg();
-    let mut note = String::new();
     let t_all = Instant::now();
     let mut s = Session::new(net, pos, opts).expect("session");
     let mut rows = Vec::new();
@@ -171,7 +182,7 @@ fn main() {
                 rows.push(r.seconds);
             }
             Err(e) => {
-                note = format!("step {k}: {e}").replace(',', ";");
+                note = format!("{note} step {k}: {e}").replace(',', ";");
                 break;
             }
         }
