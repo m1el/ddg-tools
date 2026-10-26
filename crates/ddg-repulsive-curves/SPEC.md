@@ -242,7 +242,7 @@ measurement of §14.3.
 * Degenerate: if all edges are collinear, `k² ≡ 0`, `B⁰ = 0` and `ker A` is larger. The solver
   reports `SingularMetric` (the energy and its differential are 0 there anyway).
 
-Scaling [formula: rc-gram-scaling]: `w(cγ) = c^{1−2σ} w(γ)`, `w⁰(cγ) = c^{1−2σ} w⁰(γ)`, hence
+Scaling [formula: rc-gram-scaling]: `w(cγ) = c^{1−2σ} w(γ)`, `w⁰(cγ) = c^{−(2σ+1)} w⁰(γ)`, hence
 `B(cγ) = c^{−(2σ+1)} B(γ)`, `B⁰(cγ) = c^{−(2σ+1)} B⁰(γ)` *(checked: exponents −7/3 and −5/2 for
 (3,6) and (2,4.5))*. With `dÊ(cγ) = c^{1+α−β} dÊ(γ)`, the Sobolev gradient scales as
 `c^{2σ+2+α−β}` (1/3 for (3,6), 1 for (2,4.5)): rescaling the input changes its length, not its
