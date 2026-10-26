@@ -12,3 +12,16 @@ rust-version.workspace = true
 ddg-core = { path = "../ddg-core" }
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
 rayon = "1.10"
+
+# Benchmarks (WP14, SPEC.md §17k): plain mains that print CSV rows; run alone.
+[[bench]]
+name = "fig20"
+harness = false
+
+[[bench]]
+name = "threads"
+harness = false
+
+[[bench]]
+name = "components"
+harness = false
