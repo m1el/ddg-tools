@@ -614,6 +614,20 @@ fn validation_errors() {
         ),
         Err(RcError::InvalidOption { .. })
     ));
+    // Another network or a wrong position count is an error, not a panic.
+    let set = ConstraintSet::new(&net, &pos, &default_constraints(), None).unwrap();
+    let (other, other_pos) = open_curve(10);
+    assert!(matches!(
+        set.values(&other, &other_pos),
+        Err(RcError::InvalidOption {
+            name: "network",
+            ..
+        })
+    ));
+    assert!(matches!(
+        set.jacobian(&net, &pos[..9]),
+        Err(RcError::PositionCountMismatch { .. })
+    ));
     // Setters.
     let mut set = ConstraintSet::new(&net, &pos, &default_constraints(), None).unwrap();
     assert!(set.set_total_length_target(1, 3.0).is_err());

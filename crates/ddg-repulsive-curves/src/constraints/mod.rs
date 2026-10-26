@@ -302,6 +302,8 @@ pub struct RowInfo {
 #[derive(Debug, Clone)]
 pub struct ConstraintSet {
     n_vertices: usize,
+    /// The edges of the network the set was built for (checked on every evaluation).
+    edges: Vec<[u32; 2]>,
     layout: DofLayout,
     resolved: Vec<ResolvedConstraint>,
     rows: Vec<RowInfo>,
@@ -535,6 +537,7 @@ impl ConstraintSet {
         }
         let mut set = ConstraintSet {
             n_vertices: n,
+            edges: network.edges().to_vec(),
             layout,
             resolved,
             rows: Vec::new(),
@@ -652,10 +655,21 @@ impl ConstraintSet {
         network: &CurveNetwork,
         positions: &[[f64; 3]],
     ) -> Result<(), RcError> {
-        if network.n_vertices() != self.n_vertices || positions.len() != self.n_vertices {
+        if network.n_vertices() != self.n_vertices || network.edges() != self.edges.as_slice() {
+            return Err(RcError::InvalidOption {
+                name: "network",
+                value: format!(
+                    "{} vertices, {} edges",
+                    network.n_vertices(),
+                    network.n_edges()
+                ),
+                requirement: "the network the constraint set was built for",
+            });
+        }
+        if positions.len() != self.n_vertices {
             return Err(RcError::PositionCountMismatch {
                 expected: self.n_vertices,
-                found: positions.len().min(network.n_vertices()),
+                found: positions.len(),
             });
         }
         Ok(())
@@ -675,7 +689,8 @@ impl ConstraintSet {
     /// `Φ(γ)` on the active rows.
     ///
     /// # Errors
-    /// [`RcError::PositionCountMismatch`] if `network` or `positions` do not match the set.
+    /// [`RcError::InvalidOption`] if `network` is not the one the set was built for;
+    /// [`RcError::PositionCountMismatch`].
     pub fn values(
         &self,
         network: &CurveNetwork,
