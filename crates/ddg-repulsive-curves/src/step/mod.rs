@@ -20,7 +20,7 @@
 //!
 //! Every part is timed in the [`StepReport`].
 //!
-//! # Back ends (hooks for later work packages)
+//! # Back ends
 //!
 //! * Energy: [`EnergyModel`], chosen by [`energy_model`] from [`EnergyEval`].
 //!   [`EnergyEval::Exact`] is [`ExactEnergy`]; [`EnergyEval::BarnesHut`] is [`BarnesHutEnergy`]
@@ -28,8 +28,13 @@
 //!   (Barnes–Hut: build the tree), the line search's trials only refit (D26).
 //! * Metric and solver: [`SolverFactory`], one [`SaddleSolver`] per step and per re-target.
 //!   [`Solver::Dense`] is [`DirectSolvers`] (dense LU for the Sobolev metric, sparse LU for
-//!   L², H¹, H²); the hierarchical/multigrid solver of WP5/WP6 plugs in as
-//!   [`Solver::Custom`].
+//!   L², H¹, H²); [`Solver::Multigrid`] is the multigrid solver of [`crate::multigrid`] (WP6);
+//!   [`Solver::Custom`] takes any factory. Factories run on the pools of the
+//!   [`SolverRequest`]. An iterative solver that fails ([`RcError::MultigridDiverged`],
+//!   [`RcError::MultigridNotConverged`]) falls back to the dense solver for the rest of the step
+//!   when the network is small enough ([`fallback`], [`StepReport::solver_fallback`]).
+//! * [`Backend::Auto`] picks exact + dense below a measured crossover and Barnes–Hut +
+//!   multigrid above (`SPEC.md` §17h).
 //! * Penalties and obstacles: [`PenaltyTerm`] (WP7 implements its penalties against it; the
 //!   Hencky penalty of the evaluation is [`crate::optimize::Hencky`]) and
 //!   [`CollisionObstacle`] for the CCD (from [`FlowOptions::obstacles`] and from
@@ -58,8 +63,8 @@ use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
 use crate::energy::{BhOptions, EnergyEval};
 use crate::error::RcError;
 use crate::kernel::Exponents;
-use crate::multigrid::{MgOptions, MultigridSolvers};
 use crate::metric::{DofLayout, Metric, classic_metric, sobolev_gram};
+use crate::multigrid::{MgOptions, MultigridSolvers};
 use crate::network::{Axis, CurveNetwork, check_planar};
 use crate::optimize::{Lbfgs, Method, Ncg, dotv, mean_free_rows};
 use crate::solve::{
@@ -78,6 +83,7 @@ use fallback::{FallbackSaddle, FallbackSlot};
 use line_search::{
     LineSearch, LineSearchReport, SearchEnv, SearchInput, Trial, line_search, project_with_path,
 };
+pub use schedule::ScheduleProgress;
 use schedule::{LengthSchedule, ScheduleState};
 use stop::{Status, StepStatus, StopRule, StopState, mass_norm};
 
@@ -398,8 +404,7 @@ impl SolverFactory for DirectSolvers {
         };
         match r.metric {
             Metric::Sobolev { quadrature } => {
-                let gram =
-                    sobolev_gram(r.pool, r.network, r.positions, r.exponents, quadrature);
+                let gram = sobolev_gram(r.pool, r.network, r.positions, r.exponents, quadrature);
                 let s = DenseSaddle::new(r.dense_pool.clone(), &gram.a, r.jacobian, r.layout)
                     .map_err(singular)?;
                 Ok(Box::new(s))
@@ -455,31 +460,43 @@ pub enum Backend {
         /// The solver.
         solver: Solver,
     },
-    /// Exact + dense up to `dense_max_vertices` vertices, Barnes–Hut + multigrid above. Until
-    /// the accelerated back ends exist (WP4–WP6), exact + dense at every size (the report names
-    /// the back end used).
+    /// Exact energy and dense solver up to `dense_max_vertices` vertices, Barnes–Hut energy
+    /// ([`BhOptions::default`]) and multigrid ([`MgOptions::default`]) above. The session
+    /// chooses at its start and again after every subdivision, with the vertex count of that
+    /// moment. The crossover is measured in `SPEC.md` §17h: at 8 threads on Freedman–He–Wang
+    /// the two choices cost the same per step at about 2000 vertices; the exact energy and the
+    /// dense solver are the reference computation, so they win a tie.
     Auto {
-        /// The crossover (placeholder 2000, measured in §14.1).
+        /// The crossover: networks with at most this many vertices use exact + dense.
         dense_max_vertices: usize,
     },
 }
+
+/// Default of [`Backend::Auto::dense_max_vertices`](Backend::Auto): 2000 (`SPEC.md` §17h).
+pub const DEFAULT_AUTO_DENSE_MAX_VERTICES: usize = 2000;
 
 impl Default for Backend {
     /// `Auto { dense_max_vertices: 2000 }` (§10).
     fn default() -> Self {
         Backend::Auto {
-            dense_max_vertices: 2000,
+            dense_max_vertices: DEFAULT_AUTO_DENSE_MAX_VERTICES,
         }
     }
 }
 
 impl Backend {
-    /// The energy evaluation and solver used for a network of `n_vertices` vertices.
-    pub fn resolve(&self, _n_vertices: usize) -> (EnergyEval, Solver) {
+    /// The energy evaluation and solver used for a network of `n_vertices` vertices (the rule of
+    /// [`Backend::Auto`] for it).
+    pub fn resolve(&self, n_vertices: usize) -> (EnergyEval, Solver) {
         match self {
             Backend::Explicit { energy, solver } => (*energy, solver.clone()),
-            // The accelerated back ends are not available yet: exact + dense everywhere.
-            Backend::Auto { .. } => (EnergyEval::Exact, Solver::Dense),
+            Backend::Auto { dense_max_vertices } if n_vertices <= *dense_max_vertices => {
+                (EnergyEval::Exact, Solver::Dense)
+            }
+            Backend::Auto { .. } => (
+                EnergyEval::BarnesHut(BhOptions::default()),
+                Solver::Multigrid(MgOptions::default()),
+            ),
         }
     }
 }
@@ -759,6 +776,9 @@ pub struct StepReport {
     pub retarget: Option<RetargetReport>,
     /// The network was subdivided at the end of this step.
     pub subdivided: bool,
+    /// The length schedule after this step: the final factor asked for, the factor imposed by
+    /// the constraints, the factor the curve has (`None` without a schedule).
+    pub schedule: Option<ScheduleProgress>,
     /// Energy back end used.
     pub energy_backend: &'static str,
     /// Solver back end used.
@@ -796,6 +816,16 @@ pub struct FlowReport {
     pub iterations: usize,
     /// Wall time of the run.
     pub seconds: f64,
+}
+
+impl FlowReport {
+    /// The error that ended the run ([`Status::Error`]), if any.
+    pub fn error(&self) -> Option<&RcError> {
+        match &self.status {
+            Status::Error(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 /// The result of [`flow`].
@@ -853,6 +883,8 @@ pub struct Session {
     status: Status,
     cancel: Arc<AtomicBool>,
     schedule: Option<ScheduleState>,
+    /// Total curve length when the schedule was set (the unit of `factor_measured`).
+    schedule_length0: f64,
     subdivisions: u32,
     previous_tau: Option<f64>,
     stop: StopState,
@@ -958,6 +990,23 @@ impl SearchEnv for StepEnv<'_> {
     }
 }
 
+/// The energy model and solver factory for a network of `n_vertices` vertices
+/// ([`Backend::resolve`]).
+fn make_backends(
+    options: &FlowOptions,
+    n_vertices: usize,
+    pool: &Arc<rayon::ThreadPool>,
+) -> Result<(Box<dyn EnergyModel>, Arc<dyn SolverFactory>), RcError> {
+    let (eval, solver) = options.backend.resolve(n_vertices);
+    let energy = energy_model(&eval, options.exponents, pool.clone())?;
+    let solver: Arc<dyn SolverFactory> = match solver {
+        Solver::Dense => Arc::new(DirectSolvers::new()),
+        Solver::Multigrid(o) => Arc::new(MultigridSolvers::new(o)?),
+        Solver::Custom(f) => f,
+    };
+    Ok((energy, solver))
+}
+
 fn prepare_obstacles(
     options: &FlowOptions,
     penalties: &[Arc<dyn PenaltyTerm>],
@@ -998,6 +1047,7 @@ impl Session {
         ))?);
         let layout = DofLayout::new(options.planar);
         let mean_edge_length0 = network.mean_edge_length(&positions);
+        let network_length: f64 = network.edge_geometry(&positions).length.iter().sum();
         let constraints =
             ConstraintSet::new(&network, &positions, &options.constraints, options.planar)?;
         if !options.method.is_soft() {
@@ -1018,13 +1068,7 @@ impl Session {
             p.check(&network)?;
         }
         let obstacles = prepare_obstacles(&options, &penalties)?;
-        let (eval, solver) = options.backend.resolve(network.n_vertices());
-        let energy = energy_model(&eval, options.exponents, pool.clone())?;
-        let solver: Arc<dyn SolverFactory> = match solver {
-            Solver::Dense => Arc::new(DirectSolvers::new()),
-            Solver::Multigrid(o) => Arc::new(MultigridSolvers::new(o)?),
-            Solver::Custom(f) => f,
-        };
+        let (energy, solver) = make_backends(&options, network.n_vertices(), &pool)?;
         let mut s = Session {
             soft: SoftState::new(options.method),
             network,
@@ -1043,6 +1087,7 @@ impl Session {
             status: Status::Running,
             cancel: Arc::new(AtomicBool::new(false)),
             schedule,
+            schedule_length0: network_length,
             subdivisions: 0,
             previous_tau: None,
             stop: StopState::default(),
@@ -1128,7 +1173,25 @@ impl Session {
             None => None,
         };
         self.options.schedule = schedule;
+        self.schedule_length0 = self
+            .network
+            .edge_geometry(&self.positions)
+            .length
+            .iter()
+            .sum();
         Ok(())
+    }
+
+    /// The schedule's progress as reported (`None` without a schedule).
+    fn schedule_report(&self) -> Option<ScheduleProgress> {
+        let s = self.schedule.as_ref()?;
+        let length: f64 = self
+            .network
+            .edge_geometry(&self.positions)
+            .length
+            .iter()
+            .sum();
+        Some(s.report(length, self.schedule_length0))
     }
 
     fn schedule_moving(&self) -> bool {
@@ -1261,7 +1324,10 @@ impl Session {
         Ok(Some(report))
     }
 
-    /// One step of §7.1. The session's status is updated (converged, stuck, max iterations).
+    /// One step of §7.1. The session's status is updated (converged, stuck, max iterations; a
+    /// failing step sets [`Status::Error`] and returns the same error, [`RcError::Cancelled`]
+    /// sets [`Status::Cancelled`]). [`Session::run`] turns these errors into its status instead
+    /// of returning them.
     ///
     /// # Errors
     /// [`RcError::Cancelled`] (the curve is that of the last completed sub-step);
@@ -1372,6 +1438,7 @@ impl Session {
             ccd_checks: 0,
             retarget,
             subdivided: false,
+            schedule: None,
             energy_backend: self.energy.name(),
             solver_backend: self.solver.name(),
             solver_fallback: None,
@@ -1523,6 +1590,7 @@ impl Session {
         if self.status == Status::Running && self.iteration >= self.options.max_iterations {
             self.status = Status::MaxIterations;
         }
+        report.schedule = self.schedule_report();
         report.solver_fallback = self
             .fallback
             .lock()
@@ -1625,17 +1693,30 @@ impl Session {
         self.subdivisions += 1;
         self.soft = SoftState::new(self.options.method);
         self.stop.reset();
+        if matches!(self.options.backend, Backend::Auto { .. }) {
+            // The vertex count changed: the rule of `Backend::Auto` may pick the other back ends.
+            let (energy, solver) =
+                make_backends(&self.options, self.network.n_vertices(), &self.pool)?;
+            self.energy = energy;
+            self.solver = solver;
+        }
         Ok(())
     }
 
     /// Steps until a stop rule, `max_iterations`, the time limit, a stuck line search (without
-    /// a moving schedule), cancellation (flag or `progress` returning [`Control::Stop`]) or an
-    /// error. Errors end the run with [`Status::Error`]; the curve is that of the last
-    /// completed step.
+    /// a moving schedule), cancellation (flag or `progress` returning [`Control::Stop`]) or a
+    /// failing step.
+    ///
+    /// **Errors of steps do not make `run` fail.** [`Session::step`] returns the error of a
+    /// failing step; `run` catches it and ends with [`Status::Error`] carrying that error
+    /// ([`FlowReport::status`], [`FlowReport::error`]), or with [`Status::Cancelled`] for
+    /// [`RcError::Cancelled`]. The report keeps the steps completed before it, and the curve is
+    /// that of the last completed step (or sub-step: a re-target that finished before the error
+    /// is kept). Python raises the error from the status.
     ///
     /// # Errors
-    /// None at present (errors of steps are reported in the status); the `Result` is kept for
-    /// the API of `SPEC.md` §9.1.
+    /// None at present: the `Result` is kept for the API of `SPEC.md` §9.1 (a future start-up
+    /// check can fail here without changing the signature).
     pub fn run(
         &mut self,
         mut progress: Option<&mut dyn FnMut(&StepReport) -> Control>,

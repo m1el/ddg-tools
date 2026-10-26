@@ -610,10 +610,14 @@ per chord iteration (no factorization to reuse; Sec. 7.4).
 
 `Energy::{Exact, BarnesHut(BhOptions)}` and `Solver::{Dense, Multigrid(MgOptions)}` are chosen
 independently (Fig. 20's "Barnes–Hut" curve is BH energy with the dense solve);
-`Backend::Auto { dense_max_vertices }` picks exact + dense below the crossover measured in §14.1
-(placeholder 2000 vertices) and BH + multigrid above. Dense solve: one LU with partial pivoting
+`Backend::Auto { dense_max_vertices }` picks exact + dense for networks of at most
+`dense_max_vertices` vertices (default 2000, measured in §17h) and BH + multigrid above, at the
+session's start and again after each live subdivision. Dense solve: one LU with partial pivoting
 (`faer`, multithreaded) of the `(3|V| + k)` saddle matrix, reused for Eq. 22 and every chord
 iteration. The L², H¹, H² metrics use a sparse LU of their saddle matrices (`ddg_core::sparse`).
+Every solver runs on the session's pools (`SolverRequest::{pool, dense_pool}`), never on rayon's
+global pool. When an iterative solver fails (`MultigridDiverged`, `MultigridNotConverged`), the
+step falls back to the dense solver if `|V| ≤ dense_fallback_max_vertices` (§17h).
 
 ## 9. Public API
 
@@ -636,7 +640,7 @@ pub struct BctOptions { pub theta_x: f64, pub theta_t: f64, pub leaf_pairs: usiz
 pub struct MgOptions { pub bct: BctOptions, pub coarsest_vertices: usize, pub max_levels: usize,
                        pub smoothing_steps: usize, pub tolerance: f64, pub max_cycles: usize }
 pub enum EnergyEval { Exact, BarnesHut(BhOptions) }
-pub enum Solver { Dense, Multigrid(MgOptions) }
+pub enum Solver { Dense, Multigrid(MgOptions), Custom(Arc<dyn SolverFactory>) }
 pub enum Backend { Explicit { energy: EnergyEval, solver: Solver }, Auto { dense_max_vertices: usize } }
 pub enum Metric { Sobolev { quadrature: GramQuadrature }, L2, H1, H2 }      // L2/H1/H2: evaluation (§4.6)
 
@@ -675,6 +679,8 @@ pub struct FlowOptions {
     pub line_search: LineSearch, pub projection: ProjectionOptions, pub stop: StopRule,
     pub max_iterations: usize, pub time_limit: Option<Duration>,
     pub schedule: Option<LengthSchedule>, pub max_subdivisions: u32, pub threads: Option<usize>,
+    pub dense_threads: Option<usize>,
+    pub dense_fallback_max_vertices: usize,            // default 5000; 0: never fall back (§17h)
 }
 
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
@@ -704,9 +710,14 @@ pub struct StepReport {
     pub projection_iterations: u32, pub max_violation: f64, pub dropped_rows: Vec<usize>,
     pub linear: LinearReport,                          // iterations, residual, fallback used, levels
     pub retarget: Option<RetargetReport>, pub subdivided: bool,
+    pub schedule: Option<ScheduleProgress>,            // factor asked for / imposed / measured (§5.4)
+    pub solver_fallback: Option<SolverFallback>,       // the dense solver took over in this step (§17h)
     pub seconds: Timings,                              // energy, differential, metric, solve, line search, projection, ccd
 }
 pub struct FlowReport { pub status: Status, pub steps: Vec<StepReport>, pub final_energy: f64 }
+// `step` returns the error of a failing step (status `Error(e)`); `run` never returns it: it ends
+// with `status == Error(e)` (`FlowReport::error()`), the steps before it kept, the curve that of
+// the last completed step. `RcError::Cancelled` gives `Status::Cancelled` in both.
 ```
 
 **Errors** (`RcError`, `thiserror`-free hand-written `Display` like the other crates): the
@@ -715,7 +726,9 @@ validation errors of §2.3; `InvalidExponents`, `InvalidOption { name, value, re
 `RedundantConstraints { rows }`, `InfeasibleConstraint { constraint, violation }`,
 `InvalidTangentSite { vertex, degree }`, `ConstraintOutOfRange { constraint, index }`,
 `ScheduleWithoutLengthConstraint`, `MethodNeedsSoftProblem`; solve errors `SingularMetric`,
-`SingularSaddle { pivot }`, `MultigridDiverged { residuals }`, `NonFiniteEnergy { step }`;
+`SingularSaddle { pivot }`, `MultigridDiverged { residuals }` (the residual grew),
+`MultigridNotConverged { residuals, failure_residual }` (it stagnated above the bound),
+`NonFiniteEnergy { step }`;
 obstacle errors `ObstacleTriangleOutOfRange`, `DegenerateObstacleTriangle`; `Io`, `Parse { line }`;
 `Cancelled`. Nothing mutates the caller's data; `Session` owns copies.
 
@@ -777,7 +790,8 @@ end-to-end table script (§14.5).
 | Barnes–Hut | `theta_x 0.125, theta_t 0.25, leaf_size 8` | reference `diag/d < 0.25` ⇔ `r_x/d < 0.125`; tangent bound per Eq. 27; final values by §14.3 (largest θ with differential error ≤ 1e-2 and unchanged iteration counts within 5 %) |
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
 | multigrid | coarsest 512 vertices, 20 levels max, 3+3 CG smoothing, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a 1536-row dense LU, milliseconds |
-| back end | `Auto { dense_max_vertices: 2000 }` | placeholder; the crossover of §14.1 |
+| back end | `Auto { dense_max_vertices: 2000 }` | measured in §17h: at 8 threads exact + dense and BH + multigrid cost the same per step at about 2000 vertices; exact + dense is the reference computation and wins the tie; WP14 re-measures alone |
+| dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (`(3\|V\|+k)²` doubles, about 2 GB at 5000) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
 | subdivision | 0 rounds | reference default |
 | surface potential | `p = β − α`, `θ_M = 0.25`, leaf 8 | paper; reference uses `p = β − α`, `θ = 0.25` |
@@ -1270,8 +1284,8 @@ Things the paper and the reference leave open, with how they are settled:
   LU pool, default `min(16, threads)`, `DEFAULT_DENSE_THREADS`, from the scaling measured in WP3:
   16 threads is the knee) and `record_path` (each `StepReport` carries the piecewise-linear path
   for audits) are added. `Status` has `Running` and `Error(RcError)`; `Solver` has `Custom` (the
-  hook through which the hierarchical and multigrid solvers plug in); `Backend::Auto` is exact +
-  dense at every size until WP6. The CCD Lipschitz constant is taken on velocities relative to the
+  hook for other solvers; `Solver::Multigrid` since WP3c); `Backend::Auto` is exact +
+  dense at every size until WP3c (§17h). The CCD Lipschitz constant is taken on velocities relative to the
   mean velocity of the motion (`max|u − ū| + max|w − ū|`, still the Lean lemma's constant for the
   shifted motion), which is sharper for a nearly rigid move. `StepStatus::RetargetStalled`: the
   length re-target stalled and the descent step did not move; five in a row end the run `Stuck`.
@@ -1414,6 +1428,84 @@ over edge midpoints (synthetic) still do not converge in 20 cycles; this is now 
 `MultigridDiverged`, and the session should fall back to the dense solver (WP3b: `src/step`).
 (c) The multigrid `tolerance` keeps its meaning (Euclidean residual); the direction error at
 1e-3 is a few 1e-3 on stiff networks.
+
+## 17h. Multigrid in the session, fallback, `Backend::Auto` (WP3c)
+
+**Plumbing.** `SolverRequest` carries the session's two pools (`pool`: Gram assembly, block cluster
+tree, hierarchy; `dense_pool`: the `faer` LU). The factories hold no pools any more
+(`DirectSolvers::new()`, `MultigridSolvers::new(options)`); a `Custom` factory builds on the pools
+of its request, so `FlowOptions::threads` / `dense_threads` govern every parallel loop of the
+solvers. (`SurfacePotential::evaluate` still uses rayon's global pool for a per-vertex map; it is
+elementwise, hence deterministic.) Tested bitwise at 1, 3 and 8 threads for exact/BH × dense/multigrid
+(`tests/session_backends.rs`).
+
+**`Solver::Multigrid(MgOptions)`** is `MultigridSolvers` on the session's pools, with both energy
+models. The hierarchy is part of the saddle solver, which is built at every step and every
+re-target, so a subdivision (new network, new constraint set) rebuilds it; there is no state to
+invalidate. Constraints: the hard constraints of the step are coarsened (§8.4); soft problems use
+the mean-free rows. Tests: trefoil with live subdivision (60 → 120 vertices, levels 2 → 3, no
+fallback, both energies), an open curve with both ends pinned, a fixed end tangent and all edge
+lengths. The multigrid projected gradient differs from the dense one by the block cluster tree's
+approximation of the metric (θ = 0.5): 0.9 % in the gradient norm on the open test curve at any
+multigrid tolerance (1e-3 … 1e-10), 3e-3 on closed curves (§17g); later steps of two such flows
+differ because the line search is path dependent.
+
+**Failure classes.** `MultigridDiverged { residuals }`: the final residual is larger than the
+residual after the full-multigrid start (or not finite, or above `‖b‖`): the cycles are not a
+contraction. `MultigridNotConverged { residuals, failure_residual }`: it did not grow, but the
+budget ended above `failure_residual` (stagnation; before WP3c this was also called "diverged").
+
+**Fallback.** `FallbackSaddle` (`src/step/fallback.rs`) wraps the solver of every step and
+re-target of a non-dense session. On either error, and when `|V| ≤
+FlowOptions::dense_fallback_max_vertices` (default 5000, 0 = never), it builds the dense saddle
+solver of the same step (same metric at the base curve, same constraint rows, same pools),
+repeats the failed solve, and answers all later solves of the step with it (the line search's
+chord iterations use the same metric). The next step tries multigrid again. `StepReport::
+solver_fallback = Some(SolverFallback { from, to: "direct", cause, dense_solves, build_seconds })`
+records it; `linear.solver` of that solve names the dense solver. Above the size limit, and for
+every other error, the error goes up (`Status::Error`). A fallback step is bitwise the dense
+session's step (test). Not exercised on a real network by a natural failure: the synthetic
+crossings at 0.05 h of §17g(b) are the intended case.
+
+**Crossover measurement** (`tests/session_backends.rs`, `crossover_one_configuration`, ignored;
+logs `runs_tmp/rc-wp3c-x/`). Freedman–He–Wang, `(α, β) = (2, 4.5)`, default options, 8 threads
+for the main and the dense pool, 5–8 steps from the start curve, mean seconds per step. The
+machine was shared (load 30–40 on 64 cores, 4–6 of these jobs at once), so repeated runs differ
+by up to 40 %; **indicative only, WP14 re-measures alone.** 300 = every other vertex of the 600
+file; 1600 and 2000 = the 1200 curve with evenly spread edges split at their midpoints (same
+shape). 1600 and 2000 were run for exact + dense, exact + MG and BH + MG only.
+
+| vertices | exact + dense | BH + dense | exact + MG | BH + MG |
+|---:|---:|---:|---:|---:|
+| 300 | 0.13 | 0.13 | 0.19 | 0.19 |
+| 600 | 1.0 (0.3 alone) | 0.6 | 1.7 | 1.3 |
+| 1200 | 3.6, 2.8, 2.5 | 3.4, 2.7, 2.5 | 6.7, 4.6, 4.4 | 3.7, 4.6, 4.2 |
+| 1600 | 6.8 | | 11.3 | 11.2 |
+| 2000 | 11.7 | | 11.8 | 11.8 |
+| 2400 | 16.9 | 17.2 | 12.4 | 11.7 |
+
+Where the time goes at 2400 (exact + dense): metric/LU 13.3 s, line search 2.6 s, solve 0.6 s,
+energy 0.25 s; BH + MG: line search 10 s (the chord iterations of the projections, one multigrid
+solve each), metric 0.26 s, solve 1.3 s, energy 0.2 s. At 1200 the dense LU (1.8–2.4 s) is still
+cheaper than the multigrid projections (3.4–5 s). Exponents: dense ≈ n^2.3–2.7, BH + MG ≈ n^1.5.
+Barnes–Hut with the dense solver saves nothing (the energy is 3–8 % of the step); the
+multigrid with the exact energy equals BH + MG. The curves cross at about 2000 vertices.
+
+**Rule.** `Backend::Auto { dense_max_vertices: 2000 }`: exact + dense for `|V| ≤ 2000`, BH
+(`BhOptions::default()`) + multigrid (`MgOptions::default()`) above. A tie goes to the exact
+computation. The rule is applied to the vertex count at session start and after each subdivision
+(`StepReport::{energy_backend, solver_backend}` name what ran). The multigrid line search is the
+obvious thing to speed up (its projections rebuild nothing but cost a multigrid solve per chord
+iteration); a faster projection would move the crossover down.
+
+**`run` and errors.** `Session::step` returns the error of a failing step and sets `Status::
+Error`; `Session::run` ends with `Status::Error(e)` (`FlowReport::error()`), keeps the steps
+before and the curve of the last completed step, and returns `Ok`. Documented in both and tested.
+
+**Length schedule in the report.** `StepReport::schedule = Some(ScheduleProgress { progress,
+span, fraction, factor_target, factor_imposed, factor_measured, finished })`: the final factor
+asked for, the factor the length constraints impose after the step, and the total length of the
+curve over its total length when the schedule was set.
 
 ## 18. The user's decisions (2026-10-26)
 

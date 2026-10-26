@@ -82,6 +82,32 @@ impl LengthSchedule {
     }
 }
 
+/// How far a [`LengthSchedule`] has come ([`StepReport::schedule`](crate::step::StepReport::schedule)).
+///
+/// The schedule moves the length targets from their bases to `factor` times the bases in
+/// increments of `rate`; [`progress`](Self::progress) runs from 0 to [`span`](Self::span).
+/// Three factors tell target from reached: the final one asked for, the one the constraints
+/// currently impose, and the one the curve actually has.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScheduleProgress {
+    /// Progress committed so far (`0 ..= span`).
+    pub progress: f64,
+    /// `|factor − 1|`: the progress at which the schedule ends.
+    pub span: f64,
+    /// `progress / span` in `[0, 1]` (1 for a schedule that changes nothing).
+    pub fraction: f64,
+    /// The final length factor of the schedule ([`LengthSchedule::factor`]), the target.
+    pub factor_target: f64,
+    /// The common factor the length constraints impose now (`c(progress)`).
+    pub factor_imposed: f64,
+    /// Total length of the curve now over its total length when the schedule was set: what the
+    /// curve has reached (it lags `factor_imposed` by the constraint violation, and while a
+    /// re-target stalls).
+    pub factor_measured: f64,
+    /// The targets have reached `factor_target`.
+    pub finished: bool,
+}
+
 /// The base targets of one constraint.
 #[derive(Debug, Clone, PartialEq)]
 enum Base {
@@ -145,6 +171,24 @@ impl ScheduleState {
     /// The current common factor.
     pub fn scale(&self) -> f64 {
         self.schedule.scale_at(self.progress)
+    }
+
+    /// The state as reported; `factor_measured` is `curve_length / curve_length0`.
+    pub fn report(&self, curve_length: f64, curve_length0: f64) -> ScheduleProgress {
+        let span = self.schedule.span();
+        ScheduleProgress {
+            progress: self.progress,
+            span,
+            fraction: if span > 0.0 {
+                (self.progress / span).clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            factor_target: self.schedule.factor,
+            factor_imposed: self.scale(),
+            factor_measured: curve_length / curve_length0,
+            finished: self.finished(),
+        }
     }
 
     /// `true` when the targets have reached `factor` times their bases.

@@ -75,8 +75,8 @@ fn every_backend_is_bitwise_independent_of_the_thread_count() {
 // ------------------------------------------------------------------ Solver::Multigrid
 
 use ddg_repulsive_curves::constraints::{Constraint, TangentSite};
-use ddg_repulsive_curves::{LengthSchedule, RcError, SaddleSolution, SaddleSolver, SolverFactory};
 use ddg_repulsive_curves::{DirectSolvers, SolverRequest};
+use ddg_repulsive_curves::{LengthSchedule, RcError, SaddleSolution, SaddleSolver, SolverFactory};
 
 fn mg_options(energy: EnergyEval, threads: usize) -> FlowOptions {
     options(energy, Solver::Multigrid(small_mg()), threads)
@@ -92,14 +92,13 @@ fn max_violation(s: &Session) -> f64 {
 #[test]
 fn multigrid_session_follows_the_dense_session() {
     let (net, pos) = trefoil(160);
-    for energy in [EnergyEval::Exact, EnergyEval::BarnesHut(BhOptions::default())] {
+    for energy in [
+        EnergyEval::Exact,
+        EnergyEval::BarnesHut(BhOptions::default()),
+    ] {
         let mut mg = Session::new(net.clone(), pos.clone(), mg_options(energy, 4)).unwrap();
-        let mut dense = Session::new(
-            net.clone(),
-            pos.clone(),
-            options(energy, Solver::Dense, 4),
-        )
-        .unwrap();
+        let mut dense =
+            Session::new(net.clone(), pos.clone(), options(energy, Solver::Dense, 4)).unwrap();
         for _ in 0..6 {
             let rm = mg.step().unwrap();
             let rd = dense.step().unwrap();
@@ -109,7 +108,12 @@ fn multigrid_session_follows_the_dense_session() {
             assert!(rm.solver_fallback.is_none());
             assert!(rd.solver_fallback.is_none());
             let rel = (rm.energy_after - rd.energy_after).abs() / rd.energy_after.abs();
-            assert!(rel < 1e-3, "energies {} {}", rm.energy_after, rd.energy_after);
+            assert!(
+                rel < 1e-3,
+                "energies {} {}",
+                rm.energy_after,
+                rd.energy_after
+            );
         }
         assert!(max_violation(&mg) < 1e-3);
     }
@@ -120,7 +124,10 @@ fn multigrid_session_follows_the_dense_session() {
 #[test]
 fn multigrid_session_survives_live_subdivision() {
     let (net, pos) = trefoil(60);
-    for energy in [EnergyEval::Exact, EnergyEval::BarnesHut(BhOptions::default())] {
+    for energy in [
+        EnergyEval::Exact,
+        EnergyEval::BarnesHut(BhOptions::default()),
+    ] {
         let opts = FlowOptions {
             schedule: Some(LengthSchedule {
                 factor: 2.5,
@@ -201,21 +208,28 @@ fn multigrid_session_handles_pins_and_tangents() {
         assert!(rm.linear.levels >= 2, "{:?}", rm.linear);
         if k == 0 {
             let rel = (rm.gradient_norm - rd.gradient_norm).abs() / rd.gradient_norm;
-            assert!(rel < 0.02, "gradient norms {} {}", rm.gradient_norm, rd.gradient_norm);
+            assert!(
+                rel < 0.02,
+                "gradient norms {} {}",
+                rm.gradient_norm,
+                rd.gradient_norm
+            );
         }
         assert!(rm.energy_after <= previous);
         previous = rm.energy_after;
     }
     assert!(previous < 0.97 * e0, "{previous} {e0}");
     assert!(max_violation(&mg) < 1e-3);
-    assert!(mg.positions()[0] == pos[0] || {
-        let d = mg.positions()[0]
-            .iter()
-            .zip(&pos[0])
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0, f64::max);
-        d < 1e-3
-    });
+    assert!(
+        mg.positions()[0] == pos[0] || {
+            let d = mg.positions()[0]
+                .iter()
+                .zip(&pos[0])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max);
+            d < 1e-3
+        }
+    );
 }
 
 // ------------------------------------------------------------------ fallback
@@ -247,7 +261,11 @@ fn stagnating_multigrid_falls_back_to_the_dense_solver() {
         let rd = dense.step().unwrap();
         let f = rm.solver_fallback.as_ref().expect("the step fell back");
         assert_eq!((f.from, f.to), ("multigrid", "direct"));
-        assert!(matches!(f.cause, RcError::MultigridNotConverged { .. }), "{:?}", f.cause);
+        assert!(
+            matches!(f.cause, RcError::MultigridNotConverged { .. }),
+            "{:?}",
+            f.cause
+        );
         assert!(f.dense_solves >= 1);
         assert!(f.cause.to_string().contains("did not converge"));
         assert_eq!(rm.linear.solver, rd.linear.solver);
@@ -309,7 +327,11 @@ fn diverging_solver_falls_back_and_names_the_cause() {
     let mut s = Session::new(
         net,
         pos,
-        options(EnergyEval::Exact, Solver::Custom(Arc::new(DivergingFactory)), 2),
+        options(
+            EnergyEval::Exact,
+            Solver::Custom(Arc::new(DivergingFactory)),
+            2,
+        ),
     )
     .unwrap();
     let r = s.step().unwrap();
@@ -318,4 +340,302 @@ fn diverging_solver_falls_back_and_names_the_cause() {
     assert!(matches!(f.cause, RcError::MultigridDiverged { .. }));
     assert!(f.cause.to_string().contains("diverged"));
     assert!(f.dense_solves >= 1);
+}
+
+// ------------------------------------------------------------------ crossover (SPEC §17h)
+
+/// Time per step of one back end on Freedman–He–Wang resampled to `RC_SIZE` vertices
+/// (300: every other vertex of the 600 file). Environment: `RC_SIZE`, `RC_ENERGY`
+/// (`exact`|`bh`), `RC_SOLVER` (`dense`|`mg`), `RC_STEPS` (5), `RC_THREADS` (8). Prints one
+/// line. `cargo test --release --test session_backends crossover -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement; reads data/repulsive-curves"]
+fn crossover_one_configuration() {
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let size: usize = var("RC_SIZE", "600").parse().unwrap();
+    let steps: usize = var("RC_STEPS", "5").parse().unwrap();
+    let threads: usize = var("RC_THREADS", "8").parse().unwrap();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/repulsive-curves");
+    let file = match size {
+        300 => 600,
+        600 | 1200 | 2400 => size,
+        _ => 1200,
+    };
+    let Ok((net, pos)) = ddg_repulsive_curves::read_curve_obj(
+        dir.join(format!("FreedmanHeWang/freedman-he-wang-{file}.obj")),
+    ) else {
+        eprintln!("data/repulsive-curves not present; skipping");
+        return;
+    };
+    let (net, pos) = if file == size {
+        (net, pos)
+    } else if size == 300 {
+        let p: Vec<P> = pos.iter().step_by(2).copied().collect();
+        let n = p.len();
+        let e = (0..n as u32).map(|k| [k, (k + 1) % n as u32]).collect();
+        (CurveNetwork::new(n, e).unwrap(), p)
+    } else {
+        // Between the files: split evenly spread edges at their midpoints of the 1200 curve
+        // (the shape is unchanged, the edge lengths differ by a factor 2).
+        let n = pos.len();
+        assert!(size > n, "sizes between 1200 and 2400 only");
+        let extra = size - n;
+        let mut split = vec![false; n];
+        for j in 0..extra {
+            split[j * n / extra] = true;
+        }
+        let mut p: Vec<P> = Vec::with_capacity(size);
+        for i in 0..n {
+            let (a, b) = (pos[i], pos[(i + 1) % n]);
+            p.push(a);
+            if split[i] {
+                p.push([0, 1, 2].map(|c| 0.5 * (a[c] + b[c])));
+            }
+        }
+        let e = (0..size as u32)
+            .map(|k| [k, (k + 1) % size as u32])
+            .collect();
+        (CurveNetwork::new(size, e).unwrap(), p)
+    };
+    {
+        let g = net.edge_geometry(&pos);
+        let (mn, mx) = g
+            .length
+            .iter()
+            .fold((f64::MAX, 0.0f64), |(a, b), &l| (a.min(l), b.max(l)));
+        eprintln!(
+            "resampled: {} vertices, edge length {mn:.3e} .. {mx:.3e}",
+            pos.len()
+        );
+    }
+    let energy_name = var("RC_ENERGY", "exact");
+    let solver_name = var("RC_SOLVER", "dense");
+    let energy = match energy_name.as_str() {
+        "bh" => EnergyEval::BarnesHut(BhOptions::default()),
+        _ => EnergyEval::Exact,
+    };
+    let solver = match solver_name.as_str() {
+        "mg" => Solver::Multigrid(MgOptions::default()),
+        _ => Solver::Dense,
+    };
+    let opts = FlowOptions {
+        exponents: ddg_repulsive_curves::Exponents::new(2.0, 4.5).unwrap(),
+        dense_threads: Some(threads),
+        ..options(energy, solver, threads)
+    };
+    let mut s = Session::new(net, pos, opts).unwrap();
+    let (mut tot, mut en, mut me, mut so, mut ls) = (vec![], 0.0, 0.0, 0.0, 0.0);
+    let mut fallbacks = 0;
+    for _ in 0..steps {
+        let r = s.step().unwrap();
+        tot.push(r.seconds.total);
+        en += r.seconds.energy;
+        me += r.seconds.metric;
+        so += r.seconds.solve;
+        ls += r.seconds.line_search;
+        fallbacks += usize::from(r.solver_fallback.is_some());
+    }
+    let n = steps as f64;
+    let mut sorted = tot.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    eprintln!(
+        "CROSSOVER size {size} energy {energy_name} solver {solver_name} threads {threads} steps {steps} \
+         mean_step {:.3} median_step {:.3} energy {:.3} metric {:.3} solve {:.3} line_search {:.3} fallbacks {fallbacks} E {:.6}",
+        tot.iter().sum::<f64>() / n,
+        sorted[steps / 2],
+        en / n,
+        me / n,
+        so / n,
+        ls / n,
+        s.energy()
+    );
+}
+
+// ------------------------------------------------------------------ Backend::Auto
+
+/// The rule of `Backend::Auto`: exact + dense up to the crossover, Barnes–Hut + multigrid above.
+#[test]
+fn auto_resolves_by_vertex_count() {
+    let auto = Backend::Auto {
+        dense_max_vertices: 100,
+    };
+    for (n, accelerated) in [(1, false), (100, false), (101, true), (100_000, true)] {
+        let (e, s) = auto.resolve(n);
+        match (accelerated, e, s) {
+            (false, EnergyEval::Exact, Solver::Dense) => {}
+            (true, EnergyEval::BarnesHut(o), Solver::Multigrid(m)) => {
+                assert_eq!(o, BhOptions::default());
+                assert_eq!(m, MgOptions::default());
+            }
+            (_, e, s) => panic!("{n} vertices: {e:?} + {s:?}"),
+        }
+    }
+    assert_eq!(
+        Backend::default().resolve(2000).1.to_string_for_test(),
+        "Dense"
+    );
+    assert_eq!(
+        Backend::default().resolve(2001).1.to_string_for_test(),
+        "Multigrid"
+    );
+}
+
+trait SolverName {
+    fn to_string_for_test(&self) -> &'static str;
+}
+
+impl SolverName for Solver {
+    fn to_string_for_test(&self) -> &'static str {
+        match self {
+            Solver::Dense => "Dense",
+            Solver::Multigrid(_) => "Multigrid",
+            Solver::Custom(_) => "Custom",
+        }
+    }
+}
+
+/// A session on `Auto` uses exact + dense on a small curve and switches to Barnes–Hut +
+/// multigrid when a live subdivision takes the curve above the crossover; the flow goes on.
+#[test]
+fn auto_session_switches_back_ends_after_a_subdivision() {
+    let (net, pos) = trefoil(60);
+    let opts = FlowOptions {
+        backend: Backend::Auto {
+            dense_max_vertices: 100,
+        },
+        threads: Some(4),
+        schedule: Some(LengthSchedule {
+            factor: 2.5,
+            rate: 0.1,
+        }),
+        max_subdivisions: 1,
+        max_iterations: 40,
+        ..FlowOptions::default()
+    };
+    let mut s = Session::new(net, pos, opts).unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..40 {
+        let r = s.step().unwrap();
+        assert!(r.solver_fallback.is_none());
+        seen.insert((r.n_vertices, r.energy_backend, r.solver_backend));
+    }
+    assert_eq!(s.network().n_vertices(), 120);
+    let want: std::collections::BTreeSet<_> =
+        [(60, "exact", "direct"), (120, "barnes-hut", "multigrid")]
+            .into_iter()
+            .collect();
+    assert_eq!(seen, want);
+}
+
+// ------------------------------------------------------------------ run vs step on errors
+
+struct FailingAfter(std::sync::atomic::AtomicUsize, usize);
+
+impl SolverFactory for FailingAfter {
+    fn name(&self) -> &'static str {
+        "failing-after"
+    }
+    fn build(&self, r: &SolverRequest<'_>) -> Result<Box<dyn SaddleSolver>, RcError> {
+        let k = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if k >= self.1 {
+            return Err(RcError::SingularMetric { components: 1 });
+        }
+        DirectSolvers::new().build(r)
+    }
+}
+
+/// A failing step: `step` returns the error and sets `Status::Error`; `run` returns `Ok` with
+/// `Status::Error` carrying the same error, the steps completed before it, and the curve of the
+/// last completed step.
+#[test]
+fn run_ends_with_status_error_while_step_returns_the_error() {
+    let (net, pos) = trefoil(40);
+    let mk = || {
+        Session::new(
+            net.clone(),
+            pos.clone(),
+            options(
+                EnergyEval::Exact,
+                Solver::Custom(Arc::new(FailingAfter(Default::default(), 3))),
+                2,
+            ),
+        )
+        .unwrap()
+    };
+    // run
+    let mut s = mk();
+    let report = s.run(None).unwrap();
+    assert_eq!(report.steps.len(), 3);
+    assert_eq!(
+        report.status,
+        ddg_repulsive_curves::Status::Error(RcError::SingularMetric { components: 1 })
+    );
+    assert_eq!(
+        report.error(),
+        Some(&RcError::SingularMetric { components: 1 })
+    );
+    assert_eq!(s.iteration(), 3);
+    let after_three = s.positions().to_vec();
+    // step, same failure
+    let mut t = mk();
+    for _ in 0..3 {
+        t.step().unwrap();
+    }
+    assert!(t.positions() == after_three.as_slice());
+    let e = t.step().unwrap_err();
+    assert_eq!(e, RcError::SingularMetric { components: 1 });
+    assert_eq!(t.status(), ddg_repulsive_curves::Status::Error(e));
+    assert!(t.positions() == after_three.as_slice());
+    // Cancellation is its own status, in both.
+    let mut c = Session::new(
+        net.clone(),
+        pos.clone(),
+        options(EnergyEval::Exact, Solver::Dense, 2),
+    )
+    .unwrap();
+    c.cancel_flag()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(c.step().unwrap_err(), RcError::Cancelled);
+    assert_eq!(c.status(), ddg_repulsive_curves::Status::Cancelled);
+    assert_eq!(
+        c.run(None).unwrap().status,
+        ddg_repulsive_curves::Status::Cancelled
+    );
+}
+
+/// The report of a length schedule: the factor asked for, the factor imposed and the measured one.
+#[test]
+fn step_report_exposes_the_schedule_progress() {
+    let (net, pos) = trefoil(40);
+    let opts = FlowOptions {
+        schedule: Some(LengthSchedule {
+            factor: 1.5,
+            rate: 0.1,
+        }),
+        max_iterations: 20,
+        ..options(EnergyEval::Exact, Solver::Dense, 2)
+    };
+    let mut s = Session::new(net.clone(), pos.clone(), opts).unwrap();
+    let mut last = None;
+    for k in 0..8 {
+        let r = s.step().unwrap();
+        let p = r.schedule.expect("a schedule is set");
+        assert_eq!(p.factor_target, 1.5);
+        assert!((p.span - 0.5).abs() < 1e-15);
+        assert!((p.factor_imposed - (1.0 + p.progress)).abs() < 1e-12);
+        assert!((p.fraction - p.progress / 0.5).abs() < 1e-12);
+        assert!(
+            (p.factor_measured - p.factor_imposed).abs() < 1e-3,
+            "step {k}: measured {} imposed {}",
+            p.factor_measured,
+            p.factor_imposed
+        );
+        assert_eq!(p.finished, p.progress >= 0.5);
+        last = Some(p);
+    }
+    let p = last.unwrap();
+    assert!(p.finished && p.fraction == 1.0 && (p.factor_measured - 1.5).abs() < 1e-3);
+    // No schedule: no field.
+    let mut t = Session::new(net, pos, options(EnergyEval::Exact, Solver::Dense, 2)).unwrap();
+    assert!(t.step().unwrap().schedule.is_none());
 }

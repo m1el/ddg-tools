@@ -875,9 +875,7 @@ impl SolverFactory for MultigridSolvers {
                     self.options,
                 )?))
             }
-            Metric::L2 | Metric::H1 | Metric::H2 => {
-                DirectSolvers::new().build(r)
-            }
+            Metric::L2 | Metric::H1 | Metric::H2 => DirectSolvers::new().build(r),
         }
     }
 }

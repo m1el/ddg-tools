@@ -79,11 +79,11 @@ pub use io::{parse_curve_obj, read_curve_obj, write_curve_obj};
 pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
 pub use metric::hierarchical::{CgOptions, HierarchicalCgSaddle, HierarchicalMetric};
 pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
-pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
 pub use multigrid::{
     Coarsening, CurveHierarchy, CycleOptions, CycleReport, Hierarchy, HierarchyInput, Level,
     MgOptions, MultigridSaddle, MultigridSolvers, NearCorrection, PairCorrection, ProlongationRow,
 };
+pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
 pub use obstacle::{Obstacle, PotentialValue, closest_point_on_triangle};
 pub use optimize::{Hencky, Method};
 pub use penalties::{
@@ -97,12 +97,14 @@ pub use solve::{
 pub use spatial::bct::{BctOptions, BctStats, BlockClusterTree, ClusterKernel};
 pub use spatial::{Aabb, Bvh, Element, Node};
 pub use step::line_search::{LineSearch, StartRule, Trial, TrialOutcome};
-pub use step::schedule::LengthSchedule;
+pub use step::schedule::{LengthSchedule, ScheduleProgress};
 pub use step::stop::{GradNorm, Status, StepStatus, StopRule};
 pub use step::{
-    Backend, BarnesHutEnergy, Control, DEFAULT_DENSE_THREADS, DirectSolvers, EnergyModel,
+    Backend, BarnesHutEnergy, Control, DEFAULT_AUTO_DENSE_MAX_VERTICES,
+    DEFAULT_DENSE_FALLBACK_MAX_VERTICES, DEFAULT_DENSE_THREADS, DirectSolvers, EnergyModel,
     ExactEnergy, FlowOptions, FlowReport, FlowResult, PenaltyTerm, RetargetReport, RetargetStatus,
-    Session, Solver, SolverFactory, SolverRequest, StepReport, Timings, flow, soft_options,
+    Session, Solver, SolverFactory, SolverFallback, SolverRequest, StepReport, Timings, flow,
+    soft_options,
 };
 pub use subdivide::{SubdivisionMap, subdivide};
 pub use surfaces::{

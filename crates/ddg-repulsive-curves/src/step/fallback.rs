@@ -126,12 +126,7 @@ impl FallbackSaddle {
             .as_mut()
             .expect("dense solver was just built")
             .solve(a, b)?;
-        if let Some(f) = self
-            .slot
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_mut()
-        {
+        if let Some(f) = self.slot.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
             f.dense_solves += 1;
         }
         Ok(sol)
