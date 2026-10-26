@@ -29,7 +29,10 @@ use ddg_repulsive_curves::solve::{
 };
 use ddg_repulsive_curves::spatial::bct::BctOptions;
 use ddg_repulsive_curves::subdivide::subdivide;
-use ddg_repulsive_curves::{Axis, CurveNetwork, Exponents, RcError, read_curve_obj};
+use ddg_repulsive_curves::{
+    Axis, Backend, BhOptions, CurveNetwork, EnergyEval, Exponents, FlowOptions, LineSearch,
+    RcError, Session, Solver, StartRule, read_curve_obj,
+};
 
 type P = [f64; 3];
 
@@ -916,6 +919,35 @@ fn stagnating_cycles_fall_back_to_flexible_cg() {
     // The same problem with the real hierarchy needs no fallback.
     let (_, rep) = vcycle::solve(h, &b, &o).unwrap();
     assert!(!rep.fallback_used && rep.converged, "{rep:?}");
+
+    // A natural case: the tangled Freedman 1200 with weak stationary cycles (2 + 2 smoothing,
+    // seven levels) stagnates; FCG finishes the solve.
+    if have_data() {
+        let (net, pos) = freedman(1200);
+        let pr = problem(
+            net,
+            pos,
+            Exponents::new(2.0, 4.5).unwrap(),
+            &default_constraints(),
+        );
+        let o = MgOptions {
+            smoothing_steps: 2,
+            initial_smoothing_steps: 4,
+            flexible_cg: false,
+            ..mg_options(40, 0.25)
+        };
+        let mut mg = mg_solver(&pr, 16, o);
+        let g = projected_gradient(&mut mg, pr.set.layout(), &pr.diff).unwrap();
+        let rep = &mg.last_reports()[0];
+        eprintln!(
+            "freedman 1200, 2 + 2 stationary: cycles {} fcg {} residuals {}",
+            rep.cycles,
+            rep.fcg_iterations,
+            es(&rep.residuals)
+        );
+        assert!(g.linear.fallback_used && rep.fallback_used);
+        assert!(rep.converged, "{rep:?}");
+    }
 }
 
 // ---------------------------------------------------------------- determinism, errors
@@ -1066,84 +1098,129 @@ fn bad_options_and_inputs_are_errors_not_panics() {
 
 // ---------------------------------------------------------------- studies (release, ignored)
 
-/// Iterations under refinement on the Freedman–He–Wang unknot, (2, 4.5), barycenter + edge
-/// lengths, default options: 600, 1200, 2400 and 2400 refined twice and four times. Prints the
-/// table. `--ignored --nocapture iterations_under_refinement_freedman`.
+/// Iterations under refinement and timings on the Freedman–He–Wang unknot, (2, 4.5),
+/// barycenter + edge lengths: 600, 1200, 2400 and 2400 refined twice and four times. Per curve,
+/// thread count and solver (dense LU, multigrid with the defaults, multigrid with the 3 + 3
+/// stationary cycles of `SPEC.md` §10): the build (Gram + LU, or the hierarchy), the projected
+/// gradient, and one projection of a trial step of half an edge length at the fastest vertex.
+/// Env: `RC_THREADS` (list, default `1`), `RC_SIZES` (list of `base` or `base:times`),
+/// `RC_DENSE_MAX` (largest |V| for the dense LU, default 4736), `RC_CONFIGS` (`dense,mg,spec`).
+/// `--ignored --nocapture multigrid_study`.
 #[test]
 #[ignore]
-fn iterations_under_refinement_freedman() {
+fn multigrid_study() {
     if !have_data() {
         return;
     }
-    let threads: usize = std::env::var("RC_THREADS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(64);
-    let coarsest: usize = std::env::var("RC_COARSEST")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(512);
-    let nu: usize = std::env::var("RC_NU")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3);
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let threads: Vec<usize> = var("RC_THREADS", "1")
+        .split(',')
+        .map(|t| t.parse().unwrap())
+        .collect();
+    let sizes: Vec<(usize, usize)> = var("RC_SIZES", "600,1200,2400,2400:1,2400:2")
+        .split(',')
+        .map(|t| {
+            let mut it = t.split(':');
+            let b = it.next().unwrap().parse().unwrap();
+            let k = it.next().map_or(0, |k| k.parse().unwrap());
+            (b, k)
+        })
+        .collect();
+    let dense_max: usize = var("RC_DENSE_MAX", "4736").parse().unwrap();
+    let configs = var("RC_CONFIGS", "dense,mg,spec");
     let ex = Exponents::new(2.0, 4.5).unwrap();
-    let o = MgOptions {
-        coarsest_vertices: coarsest,
-        smoothing_steps: nu,
-        initial_smoothing_steps: 2 * nu,
+    let spec = MgOptions {
+        smoothing_steps: 3,
+        initial_smoothing_steps: 6,
+        flexible_cg: false,
         ..MgOptions::default()
     };
     eprintln!(
-        "| curve | |V| | levels | gradient cycles | residuals | projection cycles (per chord its) | build s | solve s |"
+        "| curve | |V| | threads | solver | levels | build s | gradient s | gradient cycles | projection its | projection s | projection cycles | build+gradient+projection s | g error vs dense |"
     );
-    for (base, times) in [(600, 0), (1200, 0), (2400, 0), (2400, 1), (2400, 2)] {
+    eprintln!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for &(base, times) in &sizes {
         let (net, pos) = freedman_refined(base, times);
         let pr = problem(net, pos, ex, &default_constraints());
-        let t0 = Instant::now();
-        let mut mg = mg_solver(&pr, threads, o);
-        let build = t0.elapsed().as_secs_f64();
-        let t1 = Instant::now();
-        let g = projected_gradient(&mut mg, pr.set.layout(), &pr.diff).unwrap();
-        let solve = t1.elapsed().as_secs_f64();
-        let rep = mg.last_reports()[0].clone();
-        // A projection: trial step of half an edge length at the fastest vertex.
+        let name = if times > 0 {
+            format!("freedman {base} x{}", 1 << times)
+        } else {
+            format!("freedman {base}")
+        };
+        let layout = pr.set.layout();
         let l0 = pr.net.mean_edge_length(&pr.pos);
-        let gmax = g
-            .direction
-            .iter()
-            .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
-            .fold(0.0, f64::max);
-        let tau = 0.5 * l0 / gmax;
-        let trial: Vec<P> = pr
-            .pos
-            .iter()
-            .zip(&g.direction)
-            .map(|(x, d)| [x[0] - tau * d[0], x[1] - tau * d[1], x[2] - tau * d[2]])
-            .collect();
-        let pj = project_constraints(
-            &mut mg,
-            &pr.set,
-            &pr.net,
-            &trial,
-            &ProjectionOptions::default(),
-            l0,
-        )
-        .unwrap();
-        eprintln!(
-            "| freedman {base}{} | {} | {:?} | {} | {} | {:?} {:?} | {build:.3} | {solve:.3} |",
-            if times > 0 {
-                format!(" x{}", 1 << times)
-            } else {
-                String::new()
-            },
-            pr.net.n_vertices(),
-            level_sizes(&mg),
-            g.linear.iterations,
-            es(&rep.residuals),
-            pj.status,
-            pj.linear.iter().map(|l| l.iterations).collect::<Vec<_>>(),
-        );
+        let mut reference: Option<Vec<f64>> = None;
+        let mut trial: Option<Vec<P>> = None;
+        for &t in &threads {
+            for config in configs.split(',') {
+                let n = pr.net.n_vertices();
+                if config == "dense" && n > dense_max {
+                    continue;
+                }
+                let p = pool(t);
+                let t0 = Instant::now();
+                let mut solver: Box<dyn SaddleSolver> = match config {
+                    "dense" => Box::new(
+                        dense_sobolev_solver(
+                            p.clone(),
+                            &pr.net,
+                            &pr.pos,
+                            pr.ex,
+                            GramQuadrature::Midpoint,
+                            &pr.set,
+                        )
+                        .unwrap(),
+                    ),
+                    "spec" => Box::new(mg_solver(&pr, t, spec)),
+                    _ => Box::new(mg_solver(&pr, t, MgOptions::default())),
+                };
+                let build = t0.elapsed().as_secs_f64();
+                let t1 = Instant::now();
+                let g = projected_gradient(solver.as_mut(), layout, &pr.diff).unwrap();
+                let grad = t1.elapsed().as_secs_f64();
+                let x = layout.gather(&g.direction);
+                let err = match &reference {
+                    Some(r) => rel_err(&x, r),
+                    None => {
+                        reference = Some(x.clone());
+                        0.0
+                    }
+                };
+                let tr = trial.get_or_insert_with(|| {
+                    let gmax = g
+                        .direction
+                        .iter()
+                        .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+                        .fold(0.0, f64::max);
+                    let tau = 0.5 * l0 / gmax;
+                    pr.pos
+                        .iter()
+                        .zip(&g.direction)
+                        .map(|(x, d)| [x[0] - tau * d[0], x[1] - tau * d[1], x[2] - tau * d[2]])
+                        .collect()
+                });
+                let t2 = Instant::now();
+                let pj = project_constraints(
+                    solver.as_mut(),
+                    &pr.set,
+                    &pr.net,
+                    tr,
+                    &ProjectionOptions::default(),
+                    l0,
+                )
+                .unwrap();
+                let proj = t2.elapsed().as_secs_f64();
+                eprintln!(
+                    "| {name} | {n} | {t} | {config} | {} | {build:.3} | {grad:.3} | {} | {} {:?} | {proj:.3} | {:?} | {:.3} | {err:.1e} |",
+                    g.linear.levels,
+                    g.linear.iterations,
+                    pj.iterations,
+                    pj.status,
+                    pj.linear.iter().map(|l| l.iterations).collect::<Vec<_>>(),
+                    build + grad + proj,
+                );
+            }
+        }
     }
 }
 
@@ -1268,4 +1345,268 @@ fn probe_costs() {
             h.levels()[0].hierarchical_metric().map(|m| m.stats())
         );
     }
+}
+
+// ---------------------------------------------------------------- the solver in a session
+
+fn check_constraints(s: &Session) -> f64 {
+    let phi = s.constraints().values(s.network(), s.positions()).unwrap();
+    let tol = s
+        .constraints()
+        .row_tolerances(
+            s.network(),
+            s.positions(),
+            s.options().projection.tolerance,
+            s.mean_edge_length0(),
+        )
+        .unwrap();
+    let mut worst: f64 = 0.0;
+    for (k, (p, t)) in phi.iter().zip(&tol).enumerate() {
+        assert!(p.abs() <= *t, "row {k}: violation {p} > {t}");
+        worst = worst.max(p.abs() / t);
+    }
+    worst
+}
+
+fn session_options(solver: Solver, energy: EnergyEval, threads: usize) -> FlowOptions {
+    FlowOptions {
+        backend: Backend::Explicit { energy, solver },
+        threads: Some(threads),
+        ..FlowOptions::default()
+    }
+}
+
+/// The multigrid factory in a session (`Solver::Custom`): ten steps on a trefoil of 300
+/// vertices (four levels) follow the dense flow closely, every step reports the multigrid solve,
+/// the constraints hold.
+#[test]
+fn session_with_the_multigrid_factory_follows_the_dense_flow() {
+    let (net, pos) = trefoil(300);
+    let o = MgOptions {
+        coarsest_vertices: 40,
+        ..MgOptions::default()
+    };
+    let factory = Arc::new(MultigridSolvers::with_threads(Some(8), Some(8), o).unwrap());
+    assert_eq!(
+        ddg_repulsive_curves::SolverFactory::name(&*factory),
+        "multigrid"
+    );
+    let mut mg = Session::new(
+        net.clone(),
+        pos.clone(),
+        session_options(Solver::Custom(factory), EnergyEval::Exact, 8),
+    )
+    .unwrap();
+    let mut dense = Session::new(
+        net,
+        pos,
+        session_options(Solver::Dense, EnergyEval::Exact, 8),
+    )
+    .unwrap();
+    let e0 = mg.energy();
+    for _ in 0..10 {
+        let rm = mg.step().unwrap();
+        let rd = dense.step().unwrap();
+        assert_eq!(rm.linear.solver, "multigrid");
+        assert!(rm.linear.levels >= 3, "{:?}", rm.linear);
+        assert!(rm.linear.relative_residual <= 1e-2, "{:?}", rm.linear);
+        eprintln!(
+            "step {}: E mg {:.6} dense {:.6}, |g| mg {:.4e} dense {:.4e}, cycles {}, levels {}",
+            rm.iteration,
+            rm.energy_after,
+            rd.energy_after,
+            rm.gradient_norm,
+            rd.gradient_norm,
+            rm.linear.iterations,
+            rm.linear.levels
+        );
+        // Same base curve at the first step: same direction up to the solver tolerances.
+        if rm.iteration == 1 {
+            assert!(
+                (rm.gradient_norm - rd.gradient_norm).abs() <= 1e-2 * rd.gradient_norm,
+                "{} vs {}",
+                rm.gradient_norm,
+                rd.gradient_norm
+            );
+        }
+        assert!(rm.energy_after <= rm.energy_before);
+    }
+    assert!(mg.energy() < e0);
+    assert!((mg.energy() - dense.energy()).abs() <= 1e-3 * dense.energy());
+    check_constraints(&mg);
+}
+
+/// Freedman–He–Wang 600, (2, 4.5), Barnes–Hut energy + multigrid (or `RC_SOLVER=dense`,
+/// `RC_ENERGY=exact`, `RC_START=paper|grow`, `RC_THREADS`), to the near-circle state and the
+/// stop rule. `--ignored --nocapture freedman_600_multigrid_flow`.
+#[test]
+#[ignore]
+fn freedman_600_multigrid_flow() {
+    if !have_data() {
+        return;
+    }
+    let var = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
+    let threads: usize = var("RC_THREADS", "16").parse().unwrap();
+    let steps: usize = var("RC_STEPS", "1500").parse().unwrap();
+    let size: usize = var("RC_SIZE", "600").parse().unwrap();
+    let (net, pos) = freedman(size);
+    let energy = match var("RC_ENERGY", "bh").as_str() {
+        "exact" => EnergyEval::Exact,
+        _ => EnergyEval::BarnesHut(BhOptions::default()),
+    };
+    let solver = match var("RC_SOLVER", "mg").as_str() {
+        "dense" => Solver::Dense,
+        _ => Solver::Custom(Arc::new(
+            MultigridSolvers::with_threads(Some(threads), None, MgOptions::default()).unwrap(),
+        )),
+    };
+    let start = match var("RC_START", "grow").as_str() {
+        "paper" => StartRule::TwoThirdsTauMax,
+        _ => StartRule::grow_previous(),
+    };
+    let opts = FlowOptions {
+        exponents: Exponents::new(2.0, 4.5).unwrap(),
+        line_search: LineSearch::guarded_with_start(start),
+        max_iterations: steps,
+        ..session_options(solver, energy, threads)
+    };
+    eprintln!("options: {:?}", opts.backend);
+    let t0 = Instant::now();
+    let mut s = Session::new(net, pos, opts).unwrap();
+    eprintln!(
+        "start: |V| {} E {:.4}",
+        s.network().n_vertices(),
+        s.energy()
+    );
+    let mut round_at = None;
+    let mut split = [0.0f64; 7];
+    let mut cycles = 0usize;
+    let mut solves = 0usize;
+    loop {
+        let r = s.step().unwrap();
+        split[0] += r.seconds.energy;
+        split[1] += r.seconds.metric;
+        split[2] += r.seconds.solve;
+        split[3] += r.seconds.line_search_energy;
+        split[4] += r.seconds.projection;
+        split[5] += r.seconds.ccd;
+        split[6] += r.seconds.total;
+        cycles += r.linear.iterations;
+        solves += 1;
+        let (sp, pl, tu) = roundness(s.positions());
+        if r.iteration.is_multiple_of(25) || s.status().is_terminal() {
+            eprintln!(
+                "step {:4} {:?} E {:.5} |g| {:.2e} tau {:.2e} halv {} proj {} cycles {} spread {sp:.4} planarity {pl:.4} turning/2pi {tu:.4} t {:.1}s",
+                r.iteration,
+                r.status,
+                r.energy_after,
+                r.gradient_norm,
+                r.tau,
+                r.halvings,
+                r.projection_iterations,
+                r.linear.iterations,
+                t0.elapsed().as_secs_f64()
+            );
+        }
+        if round_at.is_none() && sp < 0.02 && pl < 0.02 && tu < 1.01 {
+            round_at = Some((r.iteration, t0.elapsed().as_secs_f64(), s.energy()));
+            eprintln!(
+                "near-circle at step {} ({:.1} s)",
+                r.iteration,
+                t0.elapsed().as_secs_f64()
+            );
+        }
+        if s.status().is_terminal() {
+            break;
+        }
+    }
+    let n = s.iteration() as f64;
+    let exact_final = ddg_repulsive_curves::energy(
+        s.network(),
+        s.positions(),
+        Exponents::new(2.0, 4.5).unwrap(),
+        &EnergyEval::Exact,
+        Some(threads),
+    )
+    .unwrap()
+    .energy;
+    eprintln!(
+        "end: status {:?} steps {} energy {:.5} (exact {exact_final:.5}) time {:.1}s, {:.3} s/step; per step: energy {:.3} metric {:.3} solve {:.3} ls-energy {:.3} projection {:.3} ccd {:.3}; gradient cycles/step {:.2}",
+        s.status(),
+        s.iteration(),
+        s.energy(),
+        t0.elapsed().as_secs_f64(),
+        split[6] / n,
+        split[0] / n,
+        split[1] / n,
+        split[2] / n,
+        split[3] / n,
+        split[4] / n,
+        split[5] / n,
+        cycles as f64 / solves as f64,
+    );
+    let worst = check_constraints(&s);
+    eprintln!("largest violation / tolerance {worst:.3}");
+    let (it, secs, e) = round_at.expect("near-circle within the budget");
+    eprintln!("RESULT near-circle iterations {it} seconds {secs:.1} energy {e:.5}");
+}
+
+/// Roundness of a closed loop: `(max r − min r)/mean r` about the length-weighted barycenter,
+/// planarity, total turning / 2π (as in `tests/flow.rs`).
+fn roundness(pos: &[P]) -> (f64, f64, f64) {
+    let n = pos.len() as f64;
+    let n3 = |a: P| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let mut c = [0.0; 3];
+    let mut total = 0.0;
+    for i in 0..pos.len() {
+        let (a, b) = (pos[i], pos[(i + 1) % pos.len()]);
+        let l = n3([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+        total += l;
+        for k in 0..3 {
+            c[k] += l * 0.5 * (a[k] + b[k]);
+        }
+    }
+    for k in 0..3 {
+        c[k] /= total;
+    }
+    let r: Vec<f64> = pos
+        .iter()
+        .map(|p| n3([p[0] - c[0], p[1] - c[1], p[2] - c[2]]))
+        .collect();
+    let mean = r.iter().sum::<f64>() / n;
+    let spread =
+        (r.iter().cloned().fold(0.0, f64::max) - r.iter().cloned().fold(f64::MAX, f64::min)) / mean;
+    let mut cov = [[0.0; 3]; 3];
+    for p in pos {
+        let d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+        for i in 0..3 {
+            for j in 0..3 {
+                cov[i][j] += d[i] * d[j] / n;
+            }
+        }
+    }
+    let tr = cov[0][0] + cov[1][1] + cov[2][2];
+    let mut v = [0.3, 0.5, 0.8];
+    let mut lam = 0.0;
+    for _ in 0..500 {
+        let w: Vec<f64> = (0..3)
+            .map(|i| tr * v[i] - (0..3).map(|j| cov[i][j] * v[j]).sum::<f64>())
+            .collect();
+        let nw = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
+        lam = nw;
+        v = [w[0] / nw, w[1] / nw, w[2] / nw];
+    }
+    let smallest = (tr - lam).max(0.0).sqrt();
+    let m = pos.len();
+    let mut turning = 0.0;
+    for i in 0..m {
+        let a = pos[(i + m - 1) % m];
+        let b = pos[i];
+        let cc = pos[(i + 1) % m];
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let w = [cc[0] - b[0], cc[1] - b[1], cc[2] - b[2]];
+        let cosang = (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / (n3(u) * n3(w));
+        turning += cosang.clamp(-1.0, 1.0).acos();
+    }
+    (spread, smallest / mean, turning / std::f64::consts::TAU)
 }

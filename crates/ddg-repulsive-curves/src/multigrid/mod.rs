@@ -1,7 +1,7 @@
 //! Multigrid solver of the saddle systems of Eq. 22 and 23 (`SPEC.md` §8.4, App. B.3; D17,
 //! D25).
 //!
-//! * [`coarsen`]: the black/white coarsening of curve networks and the prolongation `J`
+//! * [`coarsen`](mod@coarsen): the black/white coarsening of curve networks and the prolongation `J`
 //!   [formula: rc-coarsen] [formula: rc-prolongation].
 //! * [`vcycle`]: the generic V-cycle with a CG smoother, the full-multigrid start and the
 //!   flexible CG fallback over a [`vcycle::Hierarchy`] [formula: rc-multigrid].
