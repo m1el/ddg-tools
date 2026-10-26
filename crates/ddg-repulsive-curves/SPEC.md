@@ -1702,3 +1702,8 @@ test against the authors' program on this scene, WP15, would show it).
 * Q3: the live operator can subdivide while it runs, as an option that is off by default.
 * Q4: evaluation runs all 228 knots in parallel with iteration caps, then wall-clock timings
   alone on a 24-knot subset.
+* Q5 (after WP3c): the edge-collapse guard of §17j stays on by default
+  (`min_edge_length_ratio = Some(1e-3)`).
+* Q6: the timed evaluation (WP12 phase B) records curve frames for every algorithm on the 24-knot
+  subset, at equal wall-clock intervals, in a compact format, and renders a side-by-side grid video
+  (one column per algorithm), as in the authors' video. Phase A records energies and final curves only.
