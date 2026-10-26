@@ -1190,3 +1190,14 @@ Things the paper and the reference leave open, with how they are settled:
    for the parallel phase, timed subset alone (Q4).
 7. The reference's scene files assume all constraints hold initially; so do we (§5.1, error
    otherwise).
+
+## 18. The user's decisions (2026-10-26)
+
+* Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
+  implemented. The comparison with the authors' program uses what is comparable (Gram matrix,
+  Jacobians, coarsening, final curves); energies are reported side by side, not matched.
+* Q2: Blender writes Bézier/NURBS Curve objects back as poly splines (exact), with an optional,
+  approximate "Keep Bézier" re-fit; pins on Curve objects are the selected control points.
+* Q3: the live operator can subdivide while it runs, as an option that is off by default.
+* Q4: evaluation runs all 228 knots in parallel with iteration caps, then wall-clock timings
+  alone on a 24-knot subset.
