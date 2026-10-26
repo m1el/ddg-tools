@@ -88,5 +88,4 @@ load; ours takes about 2.5 steps/min and larger steps (on 0002, 0003 and 0005 it
 plateau with gradient norm below 1e-2 and no decrease in the 8th digit, but the stop threshold
 `1e-4` is not met), so the final curves are not the same shape (the knots expand with the fixed edge
 lengths, bounding box 130 for the reference and 350 for ours on 0001) and a Procrustes distance is
-not meaningful; only energies, steps and times are reported. The loosest honest statement is that
-the reference needs more than 2 to 5 times as many hours as the cap to finish these knots.
+not meaningful; only energies, steps and times are reported. The reference was still descending when the cap ended; how much longer it would need was not measured.
