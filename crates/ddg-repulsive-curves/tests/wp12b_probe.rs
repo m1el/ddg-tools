@@ -146,7 +146,9 @@ fn flow_probe() {
             r.status,
             strain
         );
-        if s.status().is_terminal() || r.status == StepStatus::Converged {
+        // `Session::step` does not apply `time_limit` (only `run` does): the wall cap is here.
+        let over = s.options().time_limit.is_some_and(|l| t0.elapsed() >= l);
+        if over || s.status().is_terminal() || r.status == StepStatus::Converged {
             break;
         }
     }
