@@ -39,7 +39,7 @@ use crate::energy::exact::make_pool;
 use crate::error::RcError;
 use crate::kernel::Exponents;
 use crate::metric::hierarchical::HierarchicalMetric;
-use crate::metric::{DofLayout, GramQuadrature, Metric, sobolev_gram};
+use crate::metric::{DofLayout, GramGeometry, GramQuadrature, Metric, sobolev_gram};
 use crate::network::CurveNetwork;
 use crate::optimize::mean_free_rows;
 use crate::solve::{
@@ -49,10 +49,17 @@ use crate::spatial::bct::BctOptions;
 use crate::step::{DEFAULT_DENSE_THREADS, DirectSolvers, SolverFactory, SolverRequest};
 
 pub mod coarsen;
+pub mod near;
 pub mod vcycle;
 
 pub use coarsen::{Coarsening, ProlongationRow, coarsen, forced_black, mark_black};
+pub use near::{NearCorrection, PairCorrection};
 pub use vcycle::{CycleOptions, CycleReport, Hierarchy};
+
+/// The stop on fixed vertices ([`MgOptions::max_fixed_fraction`]) applies only to levels with
+/// at most this many times [`MgOptions::coarsest_vertices`] vertices, so that the dense coarsest
+/// level stays bounded.
+pub const FIXED_STOP_MAX_VERTICES_FACTOR: usize = 8;
 
 /// Options of the multigrid solver (`SPEC.md` §8.4, §9.1, §10).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,6 +82,27 @@ pub struct MgOptions {
     /// (`false`) stationary V-cycles with the FCG fallback on stagnation as `SPEC.md` §8.4
     /// describes.
     pub flexible_cg: bool,
+    /// Coarse edge pairs that contain a finer pair whose midpoints are closer than
+    /// `near_field_factor · max(ℓ_I, ℓ_J)` use the Galerkin pair term instead of the
+    /// rediscretized one ([`near`], `SPEC.md` §17g); 0 turns this off.
+    pub near_field_factor: f64,
+    /// Coarsening stops (the level becomes the coarsest) when more than this fraction of its
+    /// vertices cannot be removed (degree other than 2, or a `Point`/`Tangent(Vertex)`
+    /// constraint), if the level has at most [`FIXED_STOP_MAX_VERTICES_FACTOR`] ·
+    /// `coarsest_vertices` vertices. Such levels (junctions, endpoints and pins of a network)
+    /// barely coarsen, cost a product each and slow the cycle down (`SPEC.md` §17g); 1 turns
+    /// this off.
+    pub max_fixed_fraction: f64,
+    /// The smoother is CG preconditioned by the diagonal plus the exact terms of the edge pairs
+    /// closer than `smoother_factor · max(ℓ_I, ℓ_J)` (`SPEC.md` §17g); 0: plain CG.
+    pub smoother_factor: f64,
+    /// A solve that ends above the tolerance fails ([`RcError::MultigridDiverged`]) when its
+    /// final relative residual is above this bound (an unconverged result between `tolerance`
+    /// and this bound is returned and reported in [`LinearReport::relative_residual`]).
+    pub failure_residual: f64,
+    /// Flexible CG stops only when the energy-norm estimate of the error also meets the
+    /// tolerance ([`vcycle::solve_with_energy_check`], `SPEC.md` §17g).
+    pub energy_check: bool,
 }
 
 impl Default for MgOptions {
@@ -96,6 +124,11 @@ impl Default for MgOptions {
             tolerance: 1e-3,
             max_cycles: 20,
             flexible_cg: true,
+            near_field_factor: 1.0,
+            max_fixed_fraction: 0.4,
+            smoother_factor: 1.0,
+            failure_residual: 1e-2,
+            energy_check: true,
         }
     }
 }
@@ -119,6 +152,34 @@ impl MgOptions {
                 name: "multigrid.max_levels",
                 value: "0".into(),
                 requirement: "at least 1 level",
+            });
+        }
+        if !(self.near_field_factor.is_finite() && self.near_field_factor >= 0.0) {
+            return Err(RcError::InvalidOption {
+                name: "multigrid.near_field_factor",
+                value: self.near_field_factor.to_string(),
+                requirement: "a finite factor ≥ 0",
+            });
+        }
+        if !(self.smoother_factor.is_finite() && self.smoother_factor >= 0.0) {
+            return Err(RcError::InvalidOption {
+                name: "multigrid.smoother_factor",
+                value: self.smoother_factor.to_string(),
+                requirement: "a finite factor ≥ 0",
+            });
+        }
+        if !(self.failure_residual.is_finite() && self.failure_residual >= self.tolerance) {
+            return Err(RcError::InvalidOption {
+                name: "multigrid.failure_residual",
+                value: self.failure_residual.to_string(),
+                requirement: "a finite bound ≥ the tolerance",
+            });
+        }
+        if !(self.max_fixed_fraction > 0.0 && self.max_fixed_fraction <= 1.0) {
+            return Err(RcError::InvalidOption {
+                name: "multigrid.max_fixed_fraction",
+                value: self.max_fixed_fraction.to_string(),
+                requirement: "a fraction in (0, 1]",
             });
         }
         if self.coarsest_vertices == 0 {
@@ -160,6 +221,10 @@ pub struct Level {
     projector: Projector,
     dropped_rows: Vec<usize>,
     metric: Option<LevelMetric>,
+    /// The Galerkin pair corrections added to the rediscretized metric (§17g).
+    near: NearCorrection,
+    /// The preconditioner of the smoother (§17g).
+    smoother: Option<near::BlockSmoother>,
     /// To the next (coarser) level.
     coarsening: Option<Coarsening>,
 }
@@ -202,6 +267,11 @@ impl Level {
         self.coarsening.as_ref()
     }
 
+    /// The Galerkin pair corrections of the level's metric (empty on the finest level).
+    pub fn near_correction(&self) -> &NearCorrection {
+        &self.near
+    }
+
     /// Whether the level uses the dense metric (the coarsest level).
     pub fn is_dense(&self) -> bool {
         matches!(self.metric, Some(LevelMetric::Dense(_)))
@@ -215,10 +285,18 @@ impl Level {
         }
     }
 
-    /// `Ā_ℓ x`.
+    /// `Ā_ℓ x` (with the pair corrections of §17g; the dense coarsest level has them in its
+    /// matrix).
     fn apply_metric(&self, x: &[f64]) -> Vec<f64> {
         match &self.metric {
-            Some(LevelMetric::Hierarchical(h)) => h.apply_unchecked(x),
+            Some(LevelMetric::Hierarchical(h)) => {
+                let mut y = h.apply_unchecked(x);
+                if !self.near.is_empty() {
+                    let d = x.len() / self.network.n_vertices().max(1);
+                    self.near.apply_add(x, &mut y, d);
+                }
+                y
+            }
             Some(LevelMetric::Dense(d)) => {
                 d.lock().unwrap_or_else(|e| e.into_inner()).apply_metric(x)
             }
@@ -353,8 +431,11 @@ impl CurveHierarchy {
             projector,
             dropped_rows: Vec::new(),
             metric: None,
+            near: NearCorrection::none(),
+            smoother: None,
             coarsening: None,
         }];
+        let mut geom = GramGeometry::new(input.network, input.positions, input.exponents);
         loop {
             let last = levels.last().expect("at least one level");
             if last.network.n_vertices() <= options.coarsest_vertices
@@ -362,7 +443,16 @@ impl CurveHierarchy {
             {
                 break;
             }
-            let forced = forced_black(last.network.n_vertices(), last.constraints.as_ref());
+            let n = last.network.n_vertices();
+            let forced = forced_black(n, last.constraints.as_ref());
+            let fixed = (0..n)
+                .filter(|&v| forced[v] || last.network.incident_edges(v as u32).len() != 2)
+                .count();
+            if fixed as f64 > options.max_fixed_fraction * n as f64
+                && n <= FIXED_STOP_MAX_VERTICES_FACTOR * options.coarsest_vertices
+            {
+                break;
+            }
             let coarsening = match coarsen(&last.network, &forced) {
                 Ok(Some(c)) => c,
                 // Nothing to remove, or the coarse network is degenerate: stop here.
@@ -380,6 +470,21 @@ impl CurveHierarchy {
                 None => (None, mean_free_rows(&net, &pos, layout)?),
             };
             let (c, projector, dropped_rows) = projector_with_drops(&c, true)?;
+            let coarse_geom = GramGeometry::new(&net, &pos, input.exponents);
+            let near = if options.near_field_factor > 0.0 {
+                NearCorrection::coarsen(
+                    &last.network,
+                    &geom,
+                    &last.near,
+                    &coarsening,
+                    &coarse_geom,
+                    input.quadrature,
+                    options.near_field_factor,
+                )
+            } else {
+                NearCorrection::none()
+            };
+            geom = coarse_geom;
             levels.last_mut().expect("at least one level").coarsening = Some(coarsening);
             levels.push(Level {
                 network: net,
@@ -389,19 +494,23 @@ impl CurveHierarchy {
                 projector,
                 dropped_rows,
                 metric: None,
+                near,
+                smoother: None,
                 coarsening: None,
             });
         }
         let n_levels = levels.len();
         for (l, level) in levels.iter_mut().enumerate() {
             let metric = if l + 1 == n_levels {
-                let gram = sobolev_gram(
+                let mut gram = sobolev_gram(
                     dense_pool,
                     &level.network,
                     &level.positions,
                     input.exponents,
                     input.quadrature,
                 );
+                let n = level.network.n_vertices();
+                level.near.add_to_dense(gram.a.as_mut_slice(), n);
                 let s = DenseSaddle::new(dense_pool.clone(), &gram.a, &level.jacobian, layout)
                     .map_err(|e| match e {
                         RcError::SingularSaddle { .. } => RcError::SingularMetric {
@@ -411,7 +520,7 @@ impl CurveHierarchy {
                     })?;
                 LevelMetric::Dense(Mutex::new(s))
             } else {
-                LevelMetric::Hierarchical(HierarchicalMetric::build(
+                let hm = HierarchicalMetric::build(
                     pool.clone(),
                     &level.network,
                     &level.positions,
@@ -419,7 +528,25 @@ impl CurveHierarchy {
                     input.quadrature,
                     layout,
                     options.bct,
-                )?)
+                )?;
+                if options.smoother_factor > 0.0 {
+                    let g = GramGeometry::new(&level.network, &level.positions, input.exponents);
+                    let diag = near::metric_diagonal(
+                        &level.network,
+                        &g.length,
+                        hm.tree().row_sums(),
+                        &level.near,
+                    );
+                    level.smoother = near::BlockSmoother::new(
+                        &level.network,
+                        &g,
+                        &level.near,
+                        &diag,
+                        options.smoother_factor,
+                        input.quadrature,
+                    );
+                }
+                LevelMetric::Hierarchical(hm)
             };
             level.metric = Some(metric);
         }
@@ -518,6 +645,20 @@ impl Hierarchy for CurveHierarchy {
         next.projector.project(&y)
     }
 
+    /// `P_ℓ (M_ℓ⁻¹ ⊗ I_d) P_ℓ r` with the level's block preconditioner (§17g), if any.
+    fn precondition(&self, level: usize, r: &[f64]) -> Result<Option<Vec<f64>>, RcError> {
+        self.check(level, r.len())?;
+        let lv = &self.levels[level];
+        let Some(sm) = &lv.smoother else {
+            return Ok(None);
+        };
+        let pr = lv.projector.project(r)?;
+        match sm.solve(&pr, self.layout.dim()) {
+            Some(z) => Ok(Some(lv.projector.project(&z)?)),
+            None => Ok(None),
+        }
+    }
+
     /// `[Ā_L C_Lᵀ; C_L 0] [x; µ] = [b; 0]` by the dense LU: `x ∈ ker C_L`, `H_L x = P_L b`.
     fn coarse_solve(&self, b: &[f64]) -> Result<Vec<f64>, RcError> {
         let l = self.levels.len() - 1;
@@ -614,12 +755,19 @@ impl SaddleSolver for MultigridSaddle {
         let level0 = &h.levels[0];
         let p0 = &level0.projector;
         let cycle = self.options.cycle();
+        let failure = self.options.failure_residual;
+        let energy_check = self.options.energy_check;
         let mut reports = Vec::new();
         let x = p0.solve_with_kernel_solver(
             |v| level0.apply_metric(v),
             |r| {
                 let pr = p0.project(r)?;
-                let (y, rep) = vcycle::solve(h, &pr, &cycle)?;
+                let (y, rep) = vcycle::solve_with_energy_check(h, &pr, &cycle, energy_check)?;
+                if !rep.converged && rep.final_residual() > failure {
+                    return Err(RcError::MultigridDiverged {
+                        residuals: rep.residuals,
+                    });
+                }
                 reports.push(rep);
                 p0.project(&y)
             },

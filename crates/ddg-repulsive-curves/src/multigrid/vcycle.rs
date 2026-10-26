@@ -68,6 +68,15 @@ pub trait Hierarchy {
     /// # Errors
     /// Back-end failures.
     fn coarse_solve(&self, b: &[f64]) -> Result<Vec<f64>, RcError>;
+    /// The preconditioner of the smoother on `level` applied to `r` (symmetric positive
+    /// definite on the level's space), or `None` for plain CG smoothing (the default).
+    ///
+    /// # Errors
+    /// Back-end failures.
+    fn precondition(&self, level: usize, r: &[f64]) -> Result<Option<Vec<f64>>, RcError> {
+        let _ = (level, r);
+        Ok(None)
+    }
 }
 
 /// Options of [`solve`].
@@ -161,10 +170,18 @@ fn cg_steps<H: Hierarchy + ?Sized>(
     mut r: Vec<f64>,
     steps: usize,
 ) -> Result<(Vec<f64>, Vec<f64>), RcError> {
-    let mut rr = dot(&r, &r);
-    let mut p = r.clone();
+    if steps == 0 {
+        return Ok((x, r));
+    }
+    // Preconditioned CG when the level has a smoother preconditioner, plain CG otherwise.
+    let pre = |r: &Vec<f64>| -> Result<Vec<f64>, RcError> {
+        Ok(h.precondition(level, r)?.unwrap_or_else(|| r.clone()))
+    };
+    let mut z = pre(&r)?;
+    let mut rz = dot(&r, &z);
+    let mut p = z;
     for _ in 0..steps {
-        if rr == 0.0 || !rr.is_finite() {
+        if rz == 0.0 || !rz.is_finite() || rz < 0.0 {
             break;
         }
         let q = h.apply(level, &p)?;
@@ -172,14 +189,15 @@ fn cg_steps<H: Hierarchy + ?Sized>(
         if pq.is_nan() || pq <= 0.0 {
             break;
         }
-        let alpha = rr / pq;
+        let alpha = rz / pq;
         axpy(&mut x, alpha, &p);
         axpy(&mut r, -alpha, &q);
-        let rr_new = dot(&r, &r);
-        let beta = rr_new / rr;
-        rr = rr_new;
-        for (pk, rk) in p.iter_mut().zip(&r) {
-            *pk = rk + beta * *pk;
+        z = pre(&r)?;
+        let rz_new = dot(&r, &z);
+        let beta = rz_new / rz;
+        rz = rz_new;
+        for (pk, zk) in p.iter_mut().zip(&z) {
+            *pk = zk + beta * *pk;
         }
     }
     Ok((x, r))
@@ -267,6 +285,25 @@ pub fn solve<H: Hierarchy + ?Sized>(
     b: &[f64],
     options: &CycleOptions,
 ) -> Result<(Vec<f64>, CycleReport), RcError> {
+    solve_with_energy_check(h, b, options, false)
+}
+
+/// [`solve`]; with `energy_check` (flexible CG only) the iteration also requires the
+/// energy-norm estimate `rᵀ z ≤ tolerance² · bᵀ x` (`z` the V-cycle of the residual, so
+/// `rᵀ z ≈ ‖x* − x‖²_H` and `bᵀ x ≈ ‖x*‖²_H`) before it stops. The Euclidean residual alone can
+/// be met while the smooth part of the error is still large when a few stiff couplings
+/// (near-contacts) dominate `‖b‖` (`SPEC.md` §17g). The reported residuals stay Euclidean.
+///
+/// [formula: rc-multigrid]
+///
+/// # Errors
+/// As [`solve`].
+pub fn solve_with_energy_check<H: Hierarchy + ?Sized>(
+    h: &H,
+    b: &[f64],
+    options: &CycleOptions,
+    energy_check: bool,
+) -> Result<(Vec<f64>, CycleReport), RcError> {
     check_options(options)?;
     if h.n_levels() == 0 || b.len() != h.len(0) {
         return Err(RcError::InvalidOption {
@@ -317,12 +354,23 @@ pub fn solve<H: Hierarchy + ?Sized>(
         };
         rel = new;
     }
+    // The energy check runs in the flexible CG iteration only.
+    let mut energy_ok = true;
     if report.fallback_used || options.flexible_cg {
         // Flexible CG (Notay 2000) with full orthogonalization against the previous search
         // directions (at most max_cycles of them), the V-cycle from zero as preconditioner.
         let mut dirs: Vec<(Vec<f64>, Vec<f64>, f64)> = Vec::new();
-        while rel > options.tolerance && report.total_cycles() < options.max_cycles {
+        let tol2 = options.tolerance * options.tolerance;
+        energy_ok = !energy_check;
+        while (rel > options.tolerance || !energy_ok) && report.total_cycles() < options.max_cycles
+        {
             let z = v_cycle(h, 0, &r, None, nu)?;
+            if energy_check {
+                energy_ok = dot(&r, &z) <= tol2 * dot(b, &x).max(0.0);
+                if energy_ok && rel <= options.tolerance {
+                    break;
+                }
+            }
             let mut d = z.clone();
             for (dj, qj, dqj) in &dirs {
                 let c = dot(&z, qj) / dqj;
@@ -355,6 +403,6 @@ pub fn solve<H: Hierarchy + ?Sized>(
     if !rel.is_finite() || rel > 1.0 {
         return Err(diverged(&report));
     }
-    report.converged = rel <= options.tolerance;
+    report.converged = rel <= options.tolerance && energy_ok;
     Ok((x, report))
 }
