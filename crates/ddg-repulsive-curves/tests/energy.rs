@@ -4,6 +4,7 @@
 
 use ddg_repulsive_curves::energy::exact::{energy_and_differential, energy_only, make_pool};
 use ddg_repulsive_curves::kernel::{kernel, kernel_with_gradient};
+use ddg_repulsive_curves::scene::read_scene_curve;
 use ddg_repulsive_curves::{
     Axis, CurveNetwork, EnergyEval, Exponents, RcError, check_planar, energy, parse_curve_obj,
     read_curve_obj, write_curve_obj,
@@ -453,15 +454,29 @@ fn result_is_bitwise_independent_of_the_thread_count() {
             ..
         })
     ));
+    // The Barnes-Hut energy and differential are deterministic across thread counts too.
+    let bh = EnergyEval::BarnesHut(Default::default());
+    let (net, pos) = trefoil(600);
+    let pos = perturb(&net, &pos, 0.03, 9);
+    let b1 = energy(&net, &pos, e, &bh, Some(1)).unwrap();
+    assert!(b1.nodes_lumped > 0, "the test must exercise the far field");
+    for t in [2, 3, 7, 16] {
+        let r = energy(&net, &pos, e, &bh, Some(t)).unwrap();
+        assert_eq!(b1.energy.to_bits(), r.energy.to_bits(), "bh threads {t}");
+        assert_eq!(b1.pairs_exact, r.pairs_exact, "bh threads {t}");
+        assert_eq!(b1.nodes_lumped, r.nodes_lumped, "bh threads {t}");
+        for (a, b) in b1.differential.iter().zip(&r.differential) {
+            for c in 0..3 {
+                assert_eq!(a[c].to_bits(), b[c].to_bits(), "bh threads {t}");
+            }
+        }
+    }
     assert!(matches!(
-        energy(
-            &net,
-            &pos,
-            e,
-            &EnergyEval::BarnesHut(Default::default()),
-            None
-        ),
-        Err(RcError::Unsupported { .. })
+        energy(&net, &pos, e, &bh, Some(0)),
+        Err(RcError::InvalidOption {
+            name: "threads",
+            ..
+        })
     ));
 }
 
@@ -769,6 +784,23 @@ fn all_dataset_files_load_with_finite_energy() {
     let mut files = Vec::new();
     collect_objs(&root, &mut files);
     assert!(files.len() >= 229, "only {} files found", files.len());
+    // Surface and obstacle meshes (several faces, no `l` line) are not curves.
+    let is_surface = |f: &std::path::PathBuf| {
+        let text = std::fs::read_to_string(f).unwrap_or_default();
+        let tag = |t: &str| {
+            text.lines()
+                .filter(|l| l.split_whitespace().next() == Some(t))
+                .count()
+        };
+        tag("l") == 0 && tag("f") > 1
+    };
+    let (surfaces, files): (Vec<_>, Vec<_>) = files.into_iter().partition(is_surface);
+    assert!(
+        surfaces.len() <= 13 && files.len() >= 216,
+        "{} surface meshes, {} curve files",
+        surfaces.len(),
+        files.len()
+    );
     let outer = make_pool(None).unwrap();
     let inner = make_pool(Some(1)).unwrap();
     // Small files in parallel (one thread each); the big ones afterwards with the full pool.
@@ -777,7 +809,7 @@ fn all_dataset_files_load_with_finite_energy() {
         .partition(|f| std::fs::metadata(f).map_or(0, |m| m.len()) < 40_000);
     let run = |f: &std::path::PathBuf, pool: &rayon::ThreadPool| -> Result<(String, f64), String> {
         let name = f.display().to_string();
-        let (net, pos) = read_curve_obj(f).map_err(|e| format!("{name}: {e}"))?;
+        let (net, pos) = read_scene_curve(f).map_err(|e| format!("{name}: {e}"))?;
         let (en, g) = energy_and_differential(pool, &net, &pos, Exponents::default());
         if !(en.is_finite() && en > 0.0 && g.iter().flatten().all(|x| x.is_finite())) {
             return Err(format!("{name}: energy {en}"));
@@ -794,7 +826,46 @@ fn all_dataset_files_load_with_finite_energy() {
         errors.len(),
         &errors[..errors.len().min(5)]
     );
-    eprintln!("{} dataset files loaded", files.len());
+    eprintln!(
+        "{} curve files loaded, {} surface meshes skipped",
+        files.len(),
+        surfaces.len()
+    );
+}
+
+/// The authors' two single-polygon curve files are closed loops through the face's vertices.
+#[test]
+fn scene_curves_given_as_one_polygon_face_are_closed_loops() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/repulsive-curves");
+    for rel in [
+        "scenes/DoubleTorus/InitialLoop.obj",
+        "scenes/FreedmanUnknot/FreedmanKnotPlot.obj",
+    ] {
+        let path = root.join(rel);
+        if !path.exists() {
+            eprintln!("{rel} not present; skipping");
+            continue;
+        }
+        let (net, pos) = read_scene_curve(&path).unwrap();
+        assert_eq!(net.n_edges(), net.n_vertices(), "{rel}");
+        assert!(
+            (0..net.n_vertices() as u32).all(|v| net.degree(v) == 2),
+            "{rel}"
+        );
+        assert_eq!(net.components().len(), 1, "{rel}");
+        assert!(
+            read_curve_obj(&path).is_err(),
+            "{rel}: the plain reader rejects the file"
+        );
+        assert!(pos.iter().flatten().all(|x| x.is_finite()));
+    }
+    // A face with a repeated first vertex and `v/vt/vn` indices still reads.
+    let text = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1/1/1 2/2/2 3/3/3 4/4/4\n";
+    let (net, _) = ddg_repulsive_curves::scene::parse_scene_curve(text).unwrap();
+    assert_eq!((net.n_vertices(), net.n_edges()), (4, 4));
+    // Two faces: not a curve.
+    let two = format!("{text}f 1 2 3\n");
+    assert!(ddg_repulsive_curves::scene::parse_scene_curve(&two).is_err());
 }
 
 /// Timing of energy + differential on Freedman-He-Wang 2400 (run alone, in release:
