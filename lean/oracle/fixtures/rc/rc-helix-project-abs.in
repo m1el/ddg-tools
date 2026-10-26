@@ -1,0 +1,42 @@
+case rc-helix-project-abs
+task project
+exponents 4000000000000000 4012000000000000
+quadrature midpoint
+steprel 3fc999999999999a
+tol abs 3ee4f8b588e368f1
+maxit 3
+c barycenter
+c total-length
+net 16 15
+p 3ff06fced513e0cd 3f93775101af476e 3f396deebb49aa00
+p 3fe93be745c14b41 3fe40ee953f3a38a 3fcc2548da6639ed
+p 3fcccafdfb01f4cf 3fef687c3f67f8d2 3fdcc0f2e9ba0eeb
+p bfd97a17d1e0b1e9 3fedcf05abfb56d4 3fe5ec8ca7151026
+p bfec1f14b688d297 3fdb66825ade6f7d 3fed825e43ffe50e
+p bff01389eada04c3 bfcc88fb6a132ec0 3ff27e90697fb03e
+p bfe3ab2a5a0926dc bfe91da923b5d6c2 3ff602208519095d
+p bf86990ec84094d0 bff0728719bfa748 3ffa84b1b86894c4
+p 3fe2adac5965815c bfea4c88fbebe432 3ffdef77edb966f3
+p 3fed8f0bb0af8848 bfce27b5d953633a 400092f06a0c78ee
+p 3fece792b7b38bc0 3fd73b1972a4f0fc 400295d3ac73b537
+p 3fe0966030e9ee22 3fecee9ba848236e 400493b5f2a74786
+p bfc19b506ae4f4ee 3ff006d241700f49 400681813162616d
+p bfe8b26abc6ac76d 3fe5671c702cfcf1 400874953c71c2c3
+p bff00a994806f19a 3fb623e7b022771a 400a62bd58af681f
+p bfea04ab88f07c72 bfe19f35dc7a7a50 400c0b66f25c664e
+e 0 1
+e 1 2
+e 2 3
+e 3 4
+e 4 5
+e 5 6
+e 6 7
+e 7 8
+e 8 9
+e 9 10
+e 10 11
+e 11 12
+e 12 13
+e 13 14
+e 14 15
+end

@@ -1,0 +1,37 @@
+case rc-bumpy-saddle-sphere-all
+task saddle
+exponents 4000000000000000 4012000000000000
+quadrature midpoint
+c sphere bf73b9c5bf808b89 3f82eaea8565b9c9 3f6e0c1ae752ef76 3ff055c1dc0e3da0 all
+c total-length
+c point 1
+net 14 14
+p 3fef5df580793222 0000000000000000 3f853d0d145adc74
+p 3ff23b7afb923a5e 3fe18f7aedbae16e 3fcc48a15fa9c188
+p 3fdd42993dd7b610 3fe25874ef31a2d7 3fd10ce4606d63d1
+p 3fd00e77fbd918aa 3ff19648f5ec39f4 3fb54461e508e826
+p bfd09237dc3115b5 3ff22697d4bc59ee bfbe5b7482ea73eb
+p bfdbcf4d258d402b 3fe16fa927e5e46c bfd02f79d8897491
+p bff244b8e737b03a 3fe19861a9c45a8f bfcc2dbc9759cf52
+p bff0035fb4b66bab 3ca1a9deec172596 3fa56f7030bc7bd5
+p bfe6147af6e29b30 bfd5442e9f6d2c60 3fcc0da46bd2b87a
+p bfe9f632dcad2f8d bff04708e6b52c86 3fd2316ab2b4b834
+p bfc7b100785e9f0e bfe9f32097b5ed42 3fc5ee03a7072d06
+p 3fc94b48de01b959 bfebb484d7a0cabe bfbfd0723f779965
+p 3fe91e50056bdec8 bfef7f5b6041aea3 bfd5e939247e8792
+p 3fe4a0f9b80e6a9f bfd3de5e1400a8f6 bfc80b09938c2d3e
+e 0 1
+e 1 2
+e 2 3
+e 3 4
+e 4 5
+e 5 6
+e 6 7
+e 7 8
+e 8 9
+e 9 10
+e 10 11
+e 11 12
+e 12 13
+e 13 0
+end

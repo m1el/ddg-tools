@@ -1,0 +1,4 @@
+case rc-error-selfloop
+task energy
+status error SelfLoop edge 3 at vertex 3
+end

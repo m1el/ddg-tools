@@ -1,0 +1,4 @@
+case rc-error-out-of-range
+task energy
+status error VertexOutOfRange edge 3 = (3, 99), 24 vertices
+end

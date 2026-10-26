@@ -1,0 +1,4 @@
+case rc-error-tangent-degree
+task saddle
+status error InvalidTangentSite vertex 0 has degree 3
+end

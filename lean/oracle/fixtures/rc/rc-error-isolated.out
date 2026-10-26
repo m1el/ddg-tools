@@ -1,0 +1,4 @@
+case rc-error-isolated
+task energy
+status error IsolatedVertex vertex 24
+end

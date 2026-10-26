@@ -1,0 +1,4 @@
+case rc-error-tangent-flipped
+task saddle
+status error InfeasibleConstraint tangent opposite to its direction
+end

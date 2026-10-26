@@ -1,0 +1,4 @@
+case rc-error-zero-edge
+task energy
+status error ZeroLengthEdge edge 3
+end

@@ -1,0 +1,4 @@
+case rc-error-exponents
+task energy
+status error InvalidExponents beta must be at least alpha + 2
+end

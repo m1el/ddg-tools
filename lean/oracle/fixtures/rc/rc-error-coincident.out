@@ -1,0 +1,4 @@
+case rc-error-coincident
+task energy
+status error CoincidentVertices 3 and 10
+end

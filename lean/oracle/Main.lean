@@ -32,6 +32,11 @@ usage:
   ddg-oracle dev-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `dev` to standard output
   ddg-oracle dev-selftest           internal checks of the developability oracle
   ddg-oracle dev-fixtures write DIR | check DIR   golden fixtures (fixtures/dev-*)
+  ddg-oracle rc [IN [OUT]]          projected Sobolev gradient and chord projection of 'Repulsive Curves'
+                                    (Yu, Schumacher, Crane 2021); tasks energy, gram, saddle, project
+  ddg-oracle rc-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `rc` to standard output
+  ddg-oracle rc-selftest [N]        internal checks of the repulsive-curves oracle (N seeded networks, default 120)
+  ddg-oracle rc-fixtures write DIR | check DIR   golden fixtures (fixtures/rc)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -137,6 +142,31 @@ def main (args : List String) : IO UInt32 := do
   | ["dev-selftest"] => return if (← Developability.selftest) == 0 then 0 else 1
   | ["dev-fixtures", "write", dir] => Developability.writeFixtures dir; return 0
   | ["dev-fixtures", "check", dir] => return if (← Developability.checkFixtures dir) == 0 then 0 else 1
+  | "rc" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← RepulsiveCurves.runStream input output
+    output.flush
+    return 0
+  | "rc-gen" :: seed :: count :: rest =>
+    match seed.toNat?, count.toNat?, (rest.getD 0 "0").toNat? with
+    | some s, some n, some first =>
+      let out ← IO.getStdout
+      for i in [first:first + n] do
+        out.putStr (RepulsiveCurves.printCase (RepulsiveCurves.genCase s i))
+      out.flush
+      return 0
+    | _, _, _ => IO.eprintln usage; return 2
+  | ["rc-selftest"] => return if (← RepulsiveCurves.selftest) == 0 then 0 else 1
+  | ["rc-selftest", n] =>
+    match n.toNat? with
+    | some k => return if (← RepulsiveCurves.selftest k) == 0 then 0 else 1
+    | none => IO.eprintln usage; return 2
+  | ["rc-fixtures", "write", dir] => RepulsiveCurves.writeFixtures dir; return 0
+  | ["rc-fixtures", "check", dir] => return if (← RepulsiveCurves.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

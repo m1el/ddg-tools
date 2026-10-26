@@ -1,0 +1,53 @@
+rc-circle-energy	energy	ok	regular 24-gon, (3,6): radial equal-norm differential	
+rc-circle-energy-245	energy	ok	regular 24-gon, (2,4.5)	
+rc-trefoil80-energy	energy	ok	trefoil with 80 vertices, (3,6)	
+rc-trefoil80-energy-245	energy	ok	trefoil with 80 vertices, (2,4.5)	
+rc-helix-energy	energy	ok	open helical arc, (2,4.5)	
+rc-tripod-energy	energy	ok	3-junction graph, (3,6)	
+rc-hopf-energy	energy	ok	two linked loops, (2.5,5.5)	
+rc-planar-energy	energy	ok	planar loop in z = 0: no differential along z	
+rc-circle-gram	gram	ok	24-gon: B, B0, A, K^B, K0, both quadratures, (3,6)	
+rc-trefoil40-gram	gram	ok	trefoil with 40 vertices, (2,4.5), both quadratures	
+rc-trefoil80-gram	gram	ok	trefoil with 80 vertices: A only, both quadratures	
+rc-helix-gram	gram	ok	open helix, (3,6)	
+rc-tripod-gram	gram	ok	tripod, (2,4.5)	
+rc-hopf-gram	gram	ok	Hopf link, (3,6): B0 couples the two components	
+rc-planar-gram	gram	ok	planar loop, (3,6)	
+rc-circle-saddle-lengths	saddle	ok	24-gon, barycenter + all edge lengths: the projected gradient vanishes (analytic)	
+rc-circle-saddle-point	saddle	ok	24-gon, point 0 + total length	
+rc-trefoil-saddle	saddle	ok	trefoil (80), barycenter + total length, trapezoid	
+rc-trefoil-saddle-245	saddle	ok	trefoil (40), (2,4.5), barycenter + all edge lengths	
+rc-helix-saddle-tangent	saddle	ok	open curve: tangents at both ends (degree-1 vertices) and at an edge	
+rc-helix-saddle-tangent-v	saddle	ok	degree-2 vertex tangent (sum of unit edge vectors), subset of edge lengths	
+rc-tripod-saddle	saddle	ok	tripod, barycenter + all edge lengths	
+rc-tripod-saddle-tangent	saddle	ok	tripod, tangents at the three free ends	
+rc-hopf-saddle	saddle	ok	Hopf link, barycenter + total length	
+rc-hopf-saddle-points	saddle	ok	Hopf link, two point constraints + some edge lengths	
+rc-bumpy-saddle-sphere	saddle	ok	wobbly loop, barycenter + implicit sphere |x - c|^2 - R^2 on five vertices	
+rc-bumpy-saddle-sphere-all	saddle	ok	sphere on all vertices (k = 14 rows), (2,4.5)	
+rc-planar-saddle	saddle	ok	planar loop (z held), barycenter (2 rows) + edge lengths	
+rc-planar-saddle-y	saddle	ok	loop in the plane y = 0.5 (y held), point + total length + sphere	
+rc-circle-project-point	project	ok	24-gon: step of 0.3 edge lengths, projection onto point + total length	result converged 2
+rc-trefoil-project	project	ok	trefoil (80): chord projection, default tolerance	result converged 2
+rc-trefoil-project-lengths	project	ok	trefoil (40): all edge lengths, tolerance 1e-8 edge lengths, up to 6 iterations	result converged 3
+rc-helix-project-tangent	project	ok	open curve: tangent rows are dimensionless (tolerance tau/lbar)	result converged 3
+rc-helix-project-maxit	project	ok	iteration limit 1 with a tight tolerance: max-iterations	result max-iterations 1
+rc-helix-project-abs	project	ok	absolute tolerance	result converged 2
+rc-tripod-project	project	ok	tripod: lengths + a tangent	result converged 3
+rc-hopf-project	project	ok	Hopf link	result converged 2
+rc-bumpy-project-sphere	project	ok	surface rows: tolerance scaled by |grad f|	result max-iterations 5
+rc-planar-project	project	ok	planar projection	result converged 4
+rc-circle-project-diverge	project	ok	very large step (40 edge lengths): the iteration limit, whatever the ending	result max-iterations 3
+rc-error-exponents	energy	error	beta < alpha + 2: InvalidExponents	status error InvalidExponents beta must be at least alpha + 2
+rc-error-exponents-upper	energy	error	beta >= 2 alpha + 1: InvalidExponents	status error InvalidExponents beta must be smaller than 2 alpha + 1
+rc-error-selfloop	energy	error	edge (3,3): SelfLoop	status error SelfLoop edge 3 at vertex 3
+rc-error-duplicate	energy	error	edge (1,0) twice: DuplicateEdge	status error DuplicateEdge edges 0 and 24
+rc-error-isolated	energy	error	a vertex without edges: IsolatedVertex	status error IsolatedVertex vertex 24
+rc-error-zero-edge	energy	error	coincident neighbours: ZeroLengthEdge	status error ZeroLengthEdge edge 3
+rc-error-coincident	energy	error	coincident non-adjacent vertices: CoincidentVertices	status error CoincidentVertices 3 and 10
+rc-error-no-pairs	energy	error	a triangle has no disjoint edges: NoInteractingPairs	status error NoInteractingPairs no two edges are disjoint
+rc-error-out-of-range	energy	error	edge to vertex 99: VertexOutOfRange	status error VertexOutOfRange edge 3 = (3, 99), 24 vertices
+rc-error-not-planar	energy	error	planar axis but one vertex off the plane: NotPlanar	status error NotPlanar vertex 3 is off the plane
+rc-error-singular	saddle	error	the same point twice: the saddle matrix is singular	status error SingularSaddle the saddle matrix is singular
+rc-error-tangent-degree	saddle	error	tangent at the degree-3 junction: InvalidTangentSite	status error InvalidTangentSite vertex 0 has degree 3
+rc-error-tangent-flipped	saddle	error	tangent opposite to its direction: InfeasibleConstraint	status error InfeasibleConstraint tangent opposite to its direction

@@ -1,0 +1,4 @@
+case rc-error-duplicate
+task energy
+status error DuplicateEdge edges 0 and 24
+end

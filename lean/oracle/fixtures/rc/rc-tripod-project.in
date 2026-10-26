@@ -1,0 +1,37 @@
+case rc-tripod-project
+task project
+exponents 4008000000000000 4018000000000000
+quadrature midpoint
+steprel 3fb47ae147ae147b
+tol mean 3e7ad7f29abcaf48
+maxit 4
+c barycenter
+c edge-lengths all
+c tangent vertex 4
+net 13 12
+p 0000000000000000 0000000000000000 0000000000000000
+p 3fdb342c25b73318 3f771c1667032740 bfab17f7a726c7f6
+p 3fea04c543ef21ca 3f6f6ec7ae0ca940 bfcb6e8e1b33172a
+p 3ff33b05814d5080 bf781cb5b979fd20 bfe2f1fefd8ec05c
+p 3ff9abdf26ff2d24 bf99310b37fa9799 bff1cfbba4f8a054
+p bfca8ef528fc322d 3fd469a66e6741cd bf9d62333f8adf1c
+p bfd9654f65cb5fee 3fe627b131f137f1 bfacaa2f2885865d
+p bfe28c33f4cb8787 3ff0c3d77191f3d4 bfbfafd529e1b29b
+p bfe99defad92f22c 3ff6858c559a476f bfc19582abb1b050
+p bfcce7baf76c80aa bfd6db80bc2b54e3 3fc089c670b418b5
+p bfdb30e800fa1159 bfe5b86d9f9b9cf1 3fdd0c9bca2a8c9a
+p bfe344aa734931ea bff0ca9274afa477 3fed01bdaf3fd643
+p bfe9d00aa116bcc0 bff6a006bc58f747 3ff814273ff2c02b
+e 0 1
+e 1 2
+e 2 3
+e 3 4
+e 0 5
+e 5 6
+e 6 7
+e 7 8
+e 0 9
+e 9 10
+e 10 11
+e 11 12
+end

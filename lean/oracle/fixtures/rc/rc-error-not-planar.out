@@ -1,0 +1,4 @@
+case rc-error-not-planar
+task energy
+status error NotPlanar vertex 3 is off the plane
+end
