@@ -480,8 +480,10 @@ pub fn line_search(
 /// The chord projection of §6.2 with its path: the same iteration and the same success and
 /// failure rules as [`crate::solve::project_constraints`], and in addition the list of iterates
 /// (`trial` first), so that the guarded search can check every chord step with the CCD.
+/// Local convergence of the chord method near a regular point is cited (D10).
 ///
 /// [formula: rc-chord-projection]
+/// [formula: rc-chord-convergence]
 ///
 /// # Errors
 /// The solver's errors; [`RcError::PositionCountMismatch`].

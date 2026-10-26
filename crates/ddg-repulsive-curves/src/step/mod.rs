@@ -1306,7 +1306,8 @@ impl Session {
         if !accepted && retarget_stalled {
             report.status = StepStatus::RetargetStalled;
         }
-        if !soft && report.max_violation == 0.0 {
+        if !soft && !accepted {
+            // The curve did not move in the line search: report its own violation.
             let phi = self.constraints.values(&self.network, &self.positions)?;
             report.max_violation = phi.iter().fold(0.0, |m: f64, p| m.max(p.abs()));
         }

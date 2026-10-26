@@ -963,16 +963,25 @@ fn bad_options_are_errors() {
 // Freedman–He–Wang 600 (release; ignored)
 // ---------------------------------------------------------------------------------------------
 
-/// Roundness of a closed loop: `(max r − min r)/mean r` of the distances to the barycenter,
+/// Roundness of a closed loop (vertices in curve order): `(max r − min r)/mean r` of the
+/// distances to the length-weighted barycenter,
 /// the planarity `(smallest singular value of the centred positions)/mean r`, and the total
 /// turning angle divided by 2π (1 for a planar convex curve, Fenchel).
 fn roundness(pos: &[P]) -> (f64, f64, f64) {
     let n = pos.len() as f64;
+    // The length-weighted barycenter (the centre of a circle whatever its vertex spacing).
     let mut c = [0.0; 3];
-    for p in pos {
+    let mut total = 0.0;
+    for i in 0..pos.len() {
+        let (a, b) = (pos[i], pos[(i + 1) % pos.len()]);
+        let l = norm3([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+        total += l;
         for k in 0..3 {
-            c[k] += p[k] / n;
+            c[k] += l * 0.5 * (a[k] + b[k]);
         }
+    }
+    for k in 0..3 {
+        c[k] /= total;
     }
     let r: Vec<f64> = pos
         .iter()
@@ -1181,6 +1190,14 @@ fn ls_compare_one_knot() {
         if r.status == StepStatus::Stuck {
             stuck_steps += 1;
         }
+        println!(
+            "TRAJ {} {:.4} {:.10} {:.3e} {}",
+            r.iteration,
+            t0.elapsed().as_secs_f64() - audit_s,
+            r.energy_after,
+            r.gradient_norm,
+            r.trials.len()
+        );
         if let Some(p) = &r.path {
             let ta = Instant::now();
             let mut rep = CcdReport::default();
@@ -1260,5 +1277,50 @@ fn debug_trefoil_steps() {
                 .map(|t| format!("{:?}", t.outcome))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+/// Factorization time of the dense saddle of Freedman–He–Wang 600/1200 against the size of
+/// the dense pool (`cargo test --release --test flow dense_pool -- --ignored --nocapture`).
+#[test]
+#[ignore]
+fn dense_pool_scaling() {
+    use ddg_repulsive_curves::constraints::ConstraintSet;
+    use ddg_repulsive_curves::metric::{DofLayout, GramQuadrature, sobolev_gram};
+    use ddg_repulsive_curves::solve::DenseSaddle;
+    for size in [600, 1200] {
+        let path = format!("{}/FreedmanHeWang/freedman-he-wang-{size}.obj", data_dir());
+        let (net, pos) = read_curve_obj(&path).unwrap();
+        let cons = ddg_repulsive_curves::default_constraints();
+        let cs = ConstraintSet::new(&net, &pos, &cons, None).unwrap();
+        let c = cs.jacobian(&net, &pos).unwrap();
+        let main = rayon::ThreadPoolBuilder::new()
+            .num_threads(64)
+            .build()
+            .unwrap();
+        let g = sobolev_gram(
+            &main,
+            &net,
+            &pos,
+            Exponents::default(),
+            GramQuadrature::Midpoint,
+        );
+        for threads in [1, 4, 8, 16, 24, 32, 48, 64] {
+            let pool = Arc::new(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap(),
+            );
+            let mut best = f64::INFINITY;
+            for _ in 0..3 {
+                let s = DenseSaddle::new(pool.clone(), &g.a, &c, DofLayout::new(None)).unwrap();
+                best = best.min(s.factor_seconds());
+            }
+            eprintln!(
+                "RESULT |V| {} threads {threads:2} factor {best:.3} s",
+                net.n_vertices()
+            );
+        }
     }
 }
