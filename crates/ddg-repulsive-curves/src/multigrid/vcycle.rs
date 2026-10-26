@@ -10,6 +10,8 @@
 //! * **Smoother:** `ν` conjugate-gradient iterations on `H_ℓ x = b_ℓ` from the current guess
 //!   (paper: "a standard conjugate gradient smoother"; the reference uses Eigen's CG with 12
 //!   iterations).
+//!   When the hierarchy provides a preconditioner ([`Hierarchy::precondition`]), the smoother is
+//!   preconditioned CG (the block smoother of `SPEC.md` §17g).
 //! * **V-cycle:** pre-smooth, restrict the residual, recurse (zero start), prolong and correct,
 //!   post-smooth; the coarsest level is solved directly.
 //! * **Start (full multigrid, B.3.1 "Initialization"):** restrict the right side down to the

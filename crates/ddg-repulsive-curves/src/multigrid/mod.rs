@@ -3,14 +3,17 @@
 //!
 //! * [`coarsen`](mod@coarsen): the black/white coarsening of curve networks and the prolongation `J`
 //!   [formula: rc-coarsen] [formula: rc-prolongation].
+//! * [`near`]: the Galerkin correction of the coarse metrics at near-contacts and the block
+//!   preconditioner of the smoother (`SPEC.md` §17g).
 //! * [`vcycle`]: the generic V-cycle with a CG smoother, the full-multigrid start and the
 //!   flexible CG fallback over a [`vcycle::Hierarchy`] [formula: rc-multigrid].
 //! * [`CurveHierarchy`]: the levels of one step. Level 0 is the curve of the step; level `ℓ+1`
 //!   is the coarsening of level `ℓ` at the fine positions of its black vertices (D17), with its
 //!   own constraint rows `C_ℓ` (§8.4 "Constraints per level"; a rank-deficient coarse `C_ℓ` drops
 //!   rows there, reported), its projector `P_ℓ = I − C_ℓ†C_ℓ` and its rediscretized metric `Ā_ℓ`
-//!   (not Galerkin): a [`HierarchicalMetric`] on every level but the coarsest, which assembles the
-//!   dense `Ā_L` and factors `[Ā_L C_Lᵀ; C_L 0]` ([`DenseSaddle`]). The operators are
+//!   (not Galerkin, except for the near-contact pairs of [`near`], §17g): a [`HierarchicalMetric`]
+//!   on every level but the coarsest, which assembles the dense `Ā_L` and factors
+//!   `[Ā_L C_Lᵀ; C_L 0]` ([`DenseSaddle`]). The operators are
 //!   `H_ℓ = P_ℓ Ā_ℓ P_ℓ`, `Π_ℓ = P_ℓ (J_ℓ ⊗ I_d) P_{ℓ+1}` and `Π_ℓᵀ` (the reference's
 //!   `MatrixProjectorOperator`); the coarsest solve gives `x ∈ ker C_L` with `H_L x = P_L b`.
 //! * [`MultigridSaddle`]: a [`SaddleSolver`] (Braess–Sarazin as in B.3.3): Eq. 30 by multigrid
@@ -114,6 +117,10 @@ impl Default for MgOptions {
     /// to 15 cycles, growing with the depth, while 12 + 12 with FCG needs 2 to 3 at every size
     /// and is as fast or faster. The reference: 12 smoothing iterations, 24 in the start,
     /// tolerance `1e-2` in the ∞-norm, `max(1, log₂|V| − 4)` levels, stationary cycles.
+    ///
+    /// Networks (`SPEC.md` §17g): Galerkin near-pair correction and block smoother at factor 1,
+    /// stop at levels with more than 40 % fixed vertices, energy-norm check on, failure above a
+    /// final residual of `1e-2`.
     fn default() -> Self {
         MgOptions {
             bct: BctOptions::default(),

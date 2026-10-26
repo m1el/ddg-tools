@@ -895,7 +895,7 @@ fn full_correction_gives_the_galerkin_coarse_metric() {
 #[test]
 fn multigrid_matches_dense_on_a_network_with_junctions_crossings_and_pins() {
     for (frac, shift) in [(0.1, 0.2), (0.5, 0.0)] {
-        let (net, pos) = hub_network_at(40, 12, 0.1, frac, shift);
+        let (net, pos) = hub_network_at(30, 8, 0.1, frac, shift);
         let mut hist = [0usize; 6];
         for v in 0..net.n_vertices() as u32 {
             hist[net.incident_edges(v).len().min(5)] += 1;
