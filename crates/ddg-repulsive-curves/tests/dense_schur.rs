@@ -202,6 +202,23 @@ fn cases() -> Vec<Case> {
             Some(Axis::Z),
         ),
     ];
+    // The mean-free rows of a soft problem (§6.4): 3 dense rows only.
+    {
+        let (net, pos) = trefoil(40);
+        let set = ConstraintSet::new(&net, &pos, &[], None).unwrap();
+        let c = ddg_repulsive_curves::optimize::mean_free_rows(&net, &pos, set.layout()).unwrap();
+        let (_, d) = energy_and_differential(&pool(8), &net, &pos, ex2);
+        let diff = set.layout().gather(&d);
+        v.push(Case {
+            name: "trefoil 40, mean-free rows",
+            net,
+            pos,
+            ex: ex2,
+            set,
+            c,
+            diff,
+        });
+    }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../data/repulsive-curves/FreedmanHeWang/freedman-he-wang-600.obj");
     if let Ok(c) = read_curve_obj(&path) {
@@ -248,7 +265,15 @@ fn schur_matches_lu_to_1e_10() {
             let x_lu = lu.solve(a, b).unwrap();
             let x_sc = sc.solve(a, b).unwrap();
             let ex = rel(&x_sc.x, &x_lu.x);
-            let el = rel(&x_sc.lambda, &x_lu.lambda);
+            // λ relative to the larger of |λ| and the right side: on the mean-free rows λ is 0
+            // up to rounding (dF has no translation part), so its own size is no scale.
+            let dl: Vec<f64> = x_sc
+                .lambda
+                .iter()
+                .zip(&x_lu.lambda)
+                .map(|(p, q)| p - q)
+                .collect();
+            let el = norm(&dl) / norm(&x_lu.lambda).max(norm(a) + norm(b));
             eprintln!(
                 "{} rhs {j}: |x - x_LU| {ex:.1e}, |λ - λ_LU| {el:.1e}, residual Schur {:.1e} LU {:.1e}, \
                  pivot ratio Schur {:.1e} LU {:.1e}",

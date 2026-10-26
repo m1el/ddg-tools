@@ -479,6 +479,10 @@ pub enum Backend {
     },
 }
 
+/// Default of [`FlowOptions::newton_polish`]: Newton steps once the largest violation is at most
+/// 100 times its tolerance (`SPEC.md` §17l).
+pub const DEFAULT_NEWTON_POLISH: f64 = 100.0;
+
 /// Default of [`Backend::Auto::dense_max_vertices`](Backend::Auto): 1500 (`SPEC.md` §17k).
 pub const DEFAULT_AUTO_DENSE_MAX_VERTICES: usize = 1500;
 
@@ -575,13 +579,19 @@ pub struct FlowOptions {
     /// step), so that the projection starts at an `O(τ³)` instead of an `O(τ²)` violation.
     /// Measured in `SPEC.md` §17l: the first trial of a step usually converges within the
     /// iteration limit instead of failing, which saves the failed trial's solves. Used only with
-    /// hard constraints and [`FlowOptions::back_projection`]. Default: decided by the measurement of `SPEC.md` §17l.
+    /// hard constraints and [`FlowOptions::back_projection`]. Default `false`: on 24 perturbed
+    /// Knot128 knots (`SPEC.md` §17l) it saves 8 % of the projection solves and 4 % of the time
+    /// to 1.1 E* alone, but with the Newton polish (the default) it is 6 % slower than the polish
+    /// alone.
     pub second_order_correction: bool,
     /// The Newton polish of the projection (`SPEC.md` §17l): once the largest violation is at
     /// most this factor times its tolerance, the projection continues with Newton steps (Jacobian
     /// at the iterate, lumped-mass metric, a sparse factorization each; see
     /// [`newton_correction`](crate::solve::newton_correction)) instead of chord steps with `Ā`.
-    /// `None`: the chord method of §6.2 throughout.
+    /// `None`: the chord method of §6.2 throughout (the paper's). Default
+    /// `Some(`[`DEFAULT_NEWTON_POLISH`]`)`: measured on 24 perturbed Knot128 knots in `SPEC.md`
+    /// §17l (0.69× the time to 1.1 E* of the chord method, no stuck step, no isotopy violation).
+    /// It departs from the paper's projection only below 100 times the tolerance.
     pub newton_polish: Option<f64>,
 }
 
@@ -644,7 +654,7 @@ impl Default for FlowOptions {
             min_edge_length_ratio: Some(DEFAULT_MIN_EDGE_LENGTH_RATIO),
             back_projection: true,
             second_order_correction: false,
-            newton_polish: None,
+            newton_polish: Some(DEFAULT_NEWTON_POLISH),
         }
     }
 }

@@ -690,7 +690,7 @@ pub fn project_with_path_polished(
     trial: Vec<[f64; 3]>,
     options: &ProjectionOptions,
     mean_edge_length0: f64,
-    polish: Option<f64>,
+    mut polish: Option<f64>,
 ) -> Result<ProjectionWithPath, RcError> {
     options.validate()?;
     let layout = constraints.layout();
@@ -747,10 +747,35 @@ pub fn project_with_path_polished(
                 path,
             ));
         }
-        if use_newton {
-            let x = newton_correction(constraints, network, &pos, &phi)?;
+        // A Jacobian that is rank deficient at the iterate (e.g. a collapsing edge) has no
+        // Newton step: the iteration continues with chord steps, which use the base curve's.
+        let newton_step = if use_newton {
+            match newton_correction(constraints, network, &pos, &phi) {
+                Ok(x) => Some(x),
+                Err(RcError::RedundantConstraints { .. } | RcError::SingularSaddle { .. }) => {
+                    polish = None;
+                    None
+                }
+                Err(e) => return Err(e),
+            }
+        } else {
+            None
+        };
+        if let Some(x) = newton_step {
             layout.add_scaled(&mut pos, 1.0, &x);
             newton += 1;
+        } else if use_newton && chord >= options.max_iterations {
+            return Ok((
+                Projection {
+                    positions: pos,
+                    status: ProjectionStatus::MaxIterations,
+                    iterations: it,
+                    max_violation,
+                    history,
+                    linear,
+                },
+                path,
+            ));
         } else {
             let b: Vec<f64> = phi.iter().map(|p| -p).collect();
             let sol = solver.solve(&zero, &b)?;
