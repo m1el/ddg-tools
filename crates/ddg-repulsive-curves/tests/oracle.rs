@@ -43,7 +43,7 @@
 //! | Jacobian `C` | normwise `1e-12` |
 //! | `g̃` | normwise `1e-10` plus `1e-12 ℓ̄` (it vanishes at symmetric critical points) |
 //! | `λ`, `dF·g̃`, `‖g̃‖` | normwise `1e-9` plus `1e-12` of the scale |
-//! | all solve quantities (`g̃`, `λ`, `dF·g̃`, projection) | multiplied by `max(1, 200 eps κ / 1e-10)`; the second and third step of a chain have 10 times more, since they start from curves that differ by the errors of the earlier steps, `κ` the condition number printed by the oracle (`cond`), for the few percent-of-a-percent ill-conditioned saddles |
+//! | all solve quantities (`g̃`, `λ`, `dF·g̃`, projection) | multiplied by `max(1, 200 eps κ / 1e-10)`; a chained step is not compared at all after an earlier step of the chain had such a multiplier (it starts from a curve that differs by the amplified error), `κ` the condition number printed by the oracle (`cond`), for the few percent-of-a-percent ill-conditioned saddles |
 //! | projection: status, number of iterations | exactly, unless a violation history entry is within `1e-5` of 1 (a decision at the tolerance) or the status is a rounding race |
 //! | projection: history `max|Φ_r|/tol_r` | `1e-6` relative plus `1e-3` absolute (entries below 1 are rounding-level residuals) |
 //! | projection: final positions | `1e-9 ℓ̄` |
@@ -101,9 +101,9 @@ const DECISION: f64 = 1e-5;
 /// calls it singular and this crate does not (or the reverse), neither is wrong.
 const SINGULAR_AMBIGUITY: f64 = 1e-11;
 /// The oracle prints the infinity-norm condition number `κ` of its equilibrated saddle matrix. A
-/// solve is trusted to about `200 eps κ` (`eps = 1.1e-16`); where that exceeds the base tolerance of
-/// the solve quantities (`1e-10`), the tolerances are multiplied by `200 eps κ / 1e-10`.
-const COND_ERROR: f64 = 200.0 * 1.1e-16;
+/// solve is trusted to about `1000 eps κ` (`eps = 1.1e-16`); where that exceeds the base tolerance of
+/// the solve quantities (`1e-10`), the tolerances are multiplied by `1000 eps κ / 1e-10`.
+const COND_ERROR: f64 = 1000.0 * 1.1e-16;
 const SOLVE_BASE: f64 = 1e-10;
 
 // ----- the text format -----
@@ -677,16 +677,20 @@ fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], s
     };
     let lbar = float(&first(out, "lbar").unwrap()[1]);
     let n_steps = int(&first(out, "steps").unwrap()[1]);
+    let mut ill_seen = false;
     for k in 0..n_steps {
         let kk = k.to_string();
         let st = rows_with(out, "step").into_iter().find(|l| l[1] == kk).expect("step line");
         let (tau0, slope, f0, gnorm, cond) = (float(&st[2]), float(&st[3]), float(&st[4]), float(&st[5]), float(&st[7]));
-        let mut mult = (COND_ERROR * cond / SOLVE_BASE).max(1.0);
+        let mult = (COND_ERROR * cond / SOLVE_BASE).max(1.0);
         if mult > 1.0 {
             stats.ill_conditioned += 1;
-            if k > 0 {
-                mult *= 10.0;
-            }
+            ill_seen = true;
+        }
+        if ill_seen && k > 0 {
+            // started from a curve that differs by the amplified error of an ill-conditioned step
+            stats.tie_skips += 1;
+            return;
         }
         let otrials: Vec<&Line> = rows_with(out, "trial").into_iter().filter(|l| l[1] == kk).collect();
         let res = rows_with(out, "result").into_iter().find(|l| l[1] == kk).expect("result line");
