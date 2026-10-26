@@ -324,7 +324,7 @@ theorem hasDerivAt_tangent (hΓ : ∀ v, HasDerivAt (fun s => Γ s v) (Γ' v) t)
   refine this.congr_deriv ?_
   ext i
   simp only [Fin.sum_univ_two, sgn_zero, sgn_one, proj, tangent, len, Pi.smul_apply,
-    Finset.sum_apply, Pi.add_apply, Pi.sub_apply, smul_eq_mul, dotProduct_sub, neg_mul, one_mul]
+    Pi.add_apply, Pi.sub_apply, smul_eq_mul, dotProduct_sub, neg_mul, one_mul]
   ring
 
 /-- **Derivative of a midpoint**: `x_I' = (Γ'_{i₁} + Γ'_{i₂})/2`. -/
