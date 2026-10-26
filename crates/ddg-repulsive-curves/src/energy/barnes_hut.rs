@@ -46,12 +46,16 @@
 //!   accumulates `β_C = β_P + U_P·(x̄_C − x̄_P) + b_C`, `U_C = U_P + u_C` (re-centred at each node,
 //!   so no large coordinates cancel) [formula: rc-bh-adjoint-shift], and at the leaf `Λ` of `J`
 //!   `λ_J = β_Λ + U_Λ·(x_J − x̄_Λ)`, `μ_J = U_Λ`, `∂/∂γ_{j_b} = s_b λ_J T_J + ½ ℓ_J μ_J`;
-//! * the **exact pairs**: `∂e_IJ/∂γ_I` in row `I` and `∂e_IJ/∂γ_J` in row `J` (the transposed lists;
-//!   the lists are not symmetric) [formula: rc-energy-differential].
+//! * the **exact pairs**: `∂e_IJ/∂γ_I` in row `I`, and `∂e_IJ/∂γ_J` in a pass over the leaves:
+//!   each leaf takes the rows that opened it (the lists are not symmetric, so this is a
+//!   transpose, of the opened leaves rather than of the pairs) [formula: rc-energy-differential].
 //!
 //! So the differential is the derivative of exactly the function that the line search evaluates
-//! with [`BhTree::energy_with_lists`] (the base curve's lists, D26); its cost is the energy's plus
-//! one sequential pass over the lumped entries and one over the nodes (`O(n log n)` in all).
+//! with [`BhTree::energy_with_lists`] (the base curve's lists, D26). Kernel evaluations: one per
+//! lumped entry (the WP4 differential: two) and eight per exact pair (as before); the node sums
+//! use fixed chunks of rows with chunk-local arrays, the downward pass is `O(#nodes)`, the
+//! transpose `O(#opened leaves)`; `O(n log n)` in all, multithreaded except the two short
+//! sequential passes (transpose, downward pass).
 //! The previous differential of §8.2 (WP4: the derivative of the lumped `(I, J) + (J, I)` pair with
 //! `L_N, x̄_N, T̂_N` held fixed) [formula: rc-bh-differential] remains as
 //! [`BhTree::energy_and_differential_lumped_pairs`]; it is not the derivative of `Ê_bh` (it differs
@@ -553,12 +557,15 @@ impl BhTree {
 
     /// The discrete adjoint of [`BhTree::energy_with_lists`] (module docs, `SPEC.md` §17i).
     ///
-    /// 1. rows in parallel (tree order, per-edge slots): the energy, the own part of every term
-    ///    of the row, the node terms `(b, u)` of its lumped entries, and `∂e_KI/∂γ_I` for the
-    ///    edges `K` whose exact list contains `I`;
-    /// 2. node sums `b_N, u_N` in increasing edge order (sequential);
+    /// 1. rows in parallel, in fixed chunks of the tree order (the chunks depend on the sizes
+    ///    only, never on the thread count): the energy, the own part of every term of the row,
+    ///    the leaves the row opened, and the node terms `(b, u)` summed into chunk-local arrays;
+    /// 2. node sums `b_N, u_N`: the chunk sums added in chunk order (parallel over nodes);
     /// 3. the downward pass over the nodes in index order (parents precede their children);
-    /// 4. per edge, the node part at its leaf; vertex sums in increasing edge order.
+    /// 4. the partner part `∂e_IJ/∂γ_J`, in parallel over leaves: for every leaf, the rows that
+    ///    opened it (increasing `I`), each pair with a non-adjacent edge `J` of the leaf (exactly
+    ///    the exact pairs `J ∈ 𝓧(I)` of the leaf);
+    /// 5. per edge, the node part at its leaf; vertex sums in increasing edge order.
     ///
     /// Every reduction has a fixed order: bitwise independent of the thread count (D25).
     ///
@@ -573,30 +580,48 @@ impl BhTree {
         let s = &self.snap;
         let nodes = self.bvh.nodes();
         let nn = nodes.len();
-        let (toff, tidx) = transpose(&lists.exact, m);
         let order = self.bvh.order();
-        let computed: Vec<AdjRow> = pool.install(|| {
+        let leaves: Vec<usize> = (0..nn).filter(|&n| nodes[n].is_leaf()).collect();
+        let mut leaf_of = vec![0u32; m];
+        for &n in &leaves {
+            for &j in self.bvh.elements_of(n) {
+                leaf_of[j as usize] = n as u32;
+            }
+        }
+        // 1. Rows, in chunks with chunk-local node sums.
+        let chunk_len = m.div_ceil(adjoint_chunks(m, nn)).max(1);
+        let chunks: Vec<AdjChunk> = pool.install(|| {
             order
-                .par_iter()
-                .with_min_len(16)
-                .map(|&i| {
-                    let i = i as usize;
-                    self.adjoint_row(i, lists, &tidx[toff[i]..toff[i + 1]], e)
+                .par_chunks(chunk_len)
+                .map(|chunk| {
+                    let mut b = vec![0.0; nn];
+                    let mut u = vec![[0.0; 3]; nn];
+                    let rows = chunk
+                        .iter()
+                        .map(|&i| self.adjoint_row(i as usize, lists, &leaf_of, &mut b, &mut u, e))
+                        .collect();
+                    (rows, b, u)
                 })
                 .collect()
         });
-        let mut rows: Vec<AdjRow> = (0..m).map(|_| AdjRow::default()).collect();
-        for (r, &i) in computed.into_iter().zip(order) {
-            rows[i as usize] = r;
-        }
         // 2. Node sums: b_N = ∂Ê/∂L_N at fixed x̄_N, u_N = ∂Ê/∂x̄_N / L_N.
-        let mut b = vec![0.0; nn];
-        let mut u = vec![[0.0; 3]; nn];
-        for (i, r) in rows.iter().enumerate() {
-            for (&n, &(bk, uk)) in lists.lumped[i].iter().zip(&r.node_terms) {
-                b[n as usize] += bk;
-                u[n as usize] = axpy(u[n as usize], 1.0, uk);
-            }
+        let (b, u): (Vec<f64>, Vec<[f64; 3]>) = pool.install(|| {
+            (0..nn)
+                .into_par_iter()
+                .with_min_len(256)
+                .map(|n| {
+                    let (mut bn, mut un) = (0.0, [0.0; 3]);
+                    for c in &chunks {
+                        bn += c.1[n];
+                        un = axpy(un, 1.0, c.2[n]);
+                    }
+                    (bn, un)
+                })
+                .unzip()
+        });
+        let mut rows: Vec<AdjRow> = (0..m).map(|_| AdjRow::default()).collect();
+        for (r, &i) in chunks.into_iter().flat_map(|c| c.0).zip(order) {
+            rows[i as usize] = r;
         }
         // 3. Downward pass [formula: rc-bh-adjoint-shift]: Σ_{A ⊇ N} (b_A + u_A·(x − x̄_A)) =
         //    beta_N + ubig_N·(x − x̄_N).
@@ -616,21 +641,40 @@ impl BhTree {
                 ubig[c] = axpy(ubig[n], 1.0, u[c]);
             }
         }
-        // 4. The node part of every edge, at its leaf: s_b λ_J T_J + ½ ℓ_J μ_J.
-        let mut through_nodes = vec![[[0.0; 3]; 2]; m];
-        for (n, node) in nodes.iter().enumerate() {
-            if !node.is_leaf() {
-                continue;
-            }
-            for &j in self.bvh.elements_of(n) {
+        // 4. Partner part, per leaf: the rows that opened the leaf, in increasing order.
+        let opened: Vec<&[u32]> = rows.iter().map(|r| r.opened.as_slice()).collect();
+        let (loff, lidx) = transpose(&opened, nn);
+        let partner: Vec<Vec<[[f64; 3]; 2]>> = pool.install(|| {
+            leaves
+                .par_iter()
+                .map(|&n| {
+                    let elems = self.bvh.elements_of(n);
+                    let mut g = vec![[[0.0; 3]; 2]; elems.len()];
+                    for &i in &lidx[loff[n]..loff[n + 1]] {
+                        let [a, bb] = self.edges[i as usize];
+                        for (k, &j) in elems.iter().enumerate() {
+                            let [c, d] = self.edges[j as usize];
+                            if !(a == c || a == d || bb == c || bb == d) {
+                                pair_partner_gradient(s, i as usize, j as usize, e, &mut g[k]);
+                            }
+                        }
+                    }
+                    g
+                })
+                .collect()
+        });
+        // 5. Partner part and node part of every edge: s_b λ_J T_J + ½ ℓ_J μ_J at its leaf.
+        let mut through = vec![[[0.0; 3]; 2]; m];
+        for (&n, g) in leaves.iter().zip(&partner) {
+            for (&j, gj) in self.bvh.elements_of(n).iter().zip(g) {
                 let j = j as usize;
                 let [p, q] = s.ends[j];
                 let xj = scale([p[0] + q[0], p[1] + q[1], p[2] + q[2]], 0.5);
                 let lambda = beta[n] + dot(ubig[n], sub(xj, self.data[n].xbar));
                 let half = scale(ubig[n], 0.5 * s.length[j]);
-                through_nodes[j] = [
-                    axpy(half, -lambda, s.tangent[j]),
-                    axpy(half, lambda, s.tangent[j]),
+                through[j] = [
+                    axpy(gj[0], 1.0, axpy(half, -lambda, s.tangent[j])),
+                    axpy(gj[1], 1.0, axpy(half, lambda, s.tangent[j])),
                 ];
             }
         }
@@ -641,8 +685,8 @@ impl BhTree {
             stats.pairs_exact += lists.exact[i].len() as u64;
             stats.nodes_lumped += lists.lumped[i].len() as u64;
             let [a, bb] = self.edges[i];
-            let g0 = axpy(r.grad[0], 1.0, through_nodes[i][0]);
-            let g1 = axpy(r.grad[1], 1.0, through_nodes[i][1]);
+            let g0 = axpy(r.grad[0], 1.0, through[i][0]);
+            let g1 = axpy(r.grad[1], 1.0, through[i][1]);
             diff[a as usize] = axpy(diff[a as usize], 1.0, g0);
             diff[bb as usize] = axpy(diff[bb as usize], 1.0, g1);
         }
@@ -651,14 +695,17 @@ impl BhTree {
 
     /// Row `i` of the adjoint: the energy of its lists (the same operations, in the same order,
     /// as [`BhTree::energy_with_lists`]), the own derivative of its lumped terms and exact pairs,
-    /// the partner derivatives `∂e_KI/∂γ_I` for `K ∈ partners`, and the node terms.
+    /// the leaves its exact pairs lie in (each leaf's edges are contiguous in the list), and the
+    /// node terms `b = ℓ_I k`, `u = −ℓ_I ∇_p k` added to `b[N]`, `u[N]`.
     ///
     /// [formula: rc-bh-adjoint]
     fn adjoint_row(
         &self,
         i: usize,
         lists: &InteractionLists,
-        partners: &[u32],
+        leaf_of: &[u32],
+        b: &mut [f64],
+        u: &mut [[f64; 3]],
         e: Exponents,
     ) -> AdjRow {
         let s = &self.snap;
@@ -671,13 +718,11 @@ impl BhTree {
             ],
             0.5,
         );
-        let mut row = AdjRow {
-            node_terms: Vec::with_capacity(lists.lumped[i].len()),
-            ..AdjRow::default()
-        };
+        let mut row = AdjRow::default();
         let signs = [-1.0, 1.0];
         for &n in &lists.lumped[i] {
-            let nd = &self.data[n as usize];
+            let n = n as usize;
+            let nd = &self.data[n];
             let k = kernel_with_gradient(xi, nd.xbar, ti, e);
             row.energy += li * nd.mass * k.value;
             // Own part: L_N (s_a (k T_I + g_T) + ½ ℓ_I ∇_p k).
@@ -687,13 +732,15 @@ impl BhTree {
                 row.grad[a] = axpy(row.grad[a], nd.mass, axpy(pos, signs[a], along));
             }
             // Node part: b = ℓ_I k, u = ℓ_I ∇_q k = −ℓ_I ∇_p k.
-            row.node_terms.push((li * k.value, scale(k.grad_p, -li)));
+            b[n] += li * k.value;
+            u[n] = axpy(u[n], -li, k.grad_p);
         }
         for &j in &lists.exact[i] {
             pair_own_gradient(s, i, j as usize, e, &mut row);
-        }
-        for &k in partners {
-            pair_partner_gradient(s, k as usize, i, e, &mut row.grad);
+            let leaf = leaf_of[j as usize];
+            if row.opened.last() != Some(&leaf) {
+                row.opened.push(leaf);
+            }
         }
         row
     }
@@ -784,18 +831,29 @@ pub fn energy_and_differential(
 #[derive(Debug, Clone, Default)]
 struct AdjRow {
     energy: f64,
-    /// Derivative with respect to the two endpoints of the row's edge (own and partner parts).
+    /// Own derivative with respect to the two endpoints of the row's edge.
     grad: [[f64; 3]; 2],
-    /// `(b, u)` per lumped entry, in the order of the row's lumped list.
-    node_terms: Vec<(f64, [f64; 3])>,
+    /// The leaves of the row's exact pairs, in list order (each once).
+    opened: Vec<u32>,
 }
 
-/// The transpose of per-edge lists: `idx[off[j]..off[j + 1]]` are the `i` with `j ∈ lists[i]`, in
-/// increasing order.
-fn transpose(lists: &[Vec<u32>], m: usize) -> (Vec<usize>, Vec<u32>) {
+/// One chunk of rows of the adjoint and its node sums `b`, `u`.
+type AdjChunk = (Vec<AdjRow>, Vec<f64>, Vec<[f64; 3]>);
+
+/// Number of row chunks of the adjoint: at most 64, at least 16 rows each, and at most 2²² node
+/// slots of chunk-local sums in all. A function of the sizes only (D25).
+fn adjoint_chunks(m: usize, nn: usize) -> usize {
+    (m / 16)
+        .clamp(1, 64)
+        .min(((1usize << 22) / nn.max(1)).max(1))
+}
+
+/// The transpose of lists: `idx[off[j]..off[j + 1]]` are the `i` with `j ∈ lists[i]`, in
+/// increasing order (`j < m`).
+fn transpose(lists: &[&[u32]], m: usize) -> (Vec<usize>, Vec<u32>) {
     let mut off = vec![0usize; m + 1];
     for l in lists {
-        for &j in l {
+        for &j in l.iter() {
             off[j as usize + 1] += 1;
         }
     }
@@ -805,7 +863,7 @@ fn transpose(lists: &[Vec<u32>], m: usize) -> (Vec<usize>, Vec<u32>) {
     let mut fill = off.clone();
     let mut idx = vec![0u32; off[m]];
     for (i, l) in lists.iter().enumerate() {
-        for &j in l {
+        for &j in l.iter() {
             let f = &mut fill[j as usize];
             idx[*f] = i as u32;
             *f += 1;
