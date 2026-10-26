@@ -50,12 +50,12 @@ pub mod surfaces;
 pub use constraints::{
     Constraint, ConstraintSet, ImplicitSurface, RankReport, TangentSite, default_constraints,
 };
+pub use energy::barnes_hut::{BhStats, BhTree};
 pub use energy::{BhOptions, EnergyEval, EnergyReport, energy};
 pub use error::RcError;
 pub use io::{parse_curve_obj, read_curve_obj, write_curve_obj};
 pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
-pub use energy::barnes_hut::{BhStats, BhTree};
-pub use spatial::{Aabb, Bvh, Element, Node};
+pub use metric::hierarchical::{CgOptions, HierarchicalCgSaddle, HierarchicalMetric};
 pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
 pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
 pub use solve::{
@@ -63,3 +63,5 @@ pub use solve::{
     Projector, SaddleSolution, SaddleSolver, SparseSaddle, Tolerance, project_constraints,
     projected_gradient,
 };
+pub use spatial::bct::{BctOptions, BctStats, BlockClusterTree, ClusterKernel};
+pub use spatial::{Aabb, Bvh, Element, Node};

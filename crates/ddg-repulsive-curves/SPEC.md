@@ -1205,6 +1205,20 @@ Things the paper and the reference leave open, with how they are settled:
 * §5.2: rank is checked on the row-normalized `C Cᵀ` by inverse iteration (threshold 1e-10),
   since a plain sparse Cholesky can succeed with tiny pivots.
 
+## 17e. Noted after WP5 (orchestrator)
+
+* **BCT default ε = 0.25, not 0.5.** Measured operator error of `Ā` against dense (random
+  vector): at 0.5, 2.4e-2 to 5.9e-2 on Freedman 600-2400 and a perturbed Knot128 knot (projected
+  gradient 3 % off dense on Freedman 600), above the 1e-2 target of §13.4; at 0.25, 8e-4 to
+  6.2e-3 (gradient 0.15 % off). Default set to 0.25 by the reliability rule; §14.3 measures the
+  speed cost against multigrid convergence.
+* The reference admits a block when `2 r_A / (d − r_B) < 1` (position boxes only), i.e. about
+  `r/d < 1/3` for equal clusters, with no tangent criterion; ours is Eq. 28 with both criteria.
+* `BctOptions` carries `leaf_size` (BVH leaf, default 8); θ = 0 means no block is admissible;
+  κ⁰ is computed as `|T̂ × d|²` (never negative by rounding).
+* 0th-order blocks are coarse entry by entry (worst entry per block off by 24 % on average at
+  θ = 0.1); the operator error is far smaller because entry errors average out.
+
 ## 17d. Noted after WP4 (orchestrator)
 
 * **D15 amended.** The split rule as printed (minimize the sum of squared 6-D diameters of the

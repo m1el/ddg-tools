@@ -70,11 +70,12 @@ pub struct BctOptions {
 }
 
 impl Default for BctOptions {
-    /// `theta_x 0.5, theta_t 0.5, leaf_pairs 64, leaf_size 8` (`SPEC.md` §10).
+    /// `theta_x 0.25, theta_t 0.25, leaf_pairs 64, leaf_size 8` (`SPEC.md` §10, §17e: 0.5
+    /// missed the 1e-2 operator error target of §13.4).
     fn default() -> Self {
         BctOptions {
-            theta_x: 0.5,
-            theta_t: 0.5,
+            theta_x: 0.25,
+            theta_t: 0.25,
             leaf_pairs: 64,
             leaf_size: 8,
         }
