@@ -15,15 +15,26 @@
 //! (decisions `D1`, `D2`, ...), the public API, the defaults, the verification and measurement
 //! plans and the work packages.
 //!
-//! # Implemented so far (work package WP1)
+//! # Implemented so far (work packages WP1–WP5 and the line-search follow-up)
 //!
-//! * [`CurveNetwork`]: validated topology, components, edge quantities, geometric validation
-//!   (`SPEC.md` §2); [`read_curve_obj`] and [`write_curve_obj`] for polyline OBJ files.
-//! * [`Exponents`], [`kernel`](mod@kernel): the tangent-point kernel and its gradients (§3.1–3.2).
-//! * [`energy`](fn@energy::energy): the exact `O(|E|²)` energy and differential, parallel and
-//!   deterministic (§3).
+//! * WP1: [`CurveNetwork`]: validated topology, components, edge quantities, geometric
+//!   validation (`SPEC.md` §2); [`read_curve_obj`] and [`write_curve_obj`]; [`Exponents`],
+//!   [`kernel`](mod@kernel): the tangent-point kernel and gradients (§3); the exact `O(|E|²)`
+//!   [`energy`](fn@energy::energy), parallel and deterministic.
+//! * WP2: constraints and their projection ([`constraints`], [`solve`], §5–6), the fractional
+//!   Sobolev metric and Gram matrices ([`metric`]), subdivision ([`subdivide`]).
+//! * WP3: the gradient flow ([`step`]): [`Session`] and [`flow`], the line searches
+//!   ([`LineSearch`], with the start rules of [`StartRule`]), the stopping rules, length
+//!   schedules, L-BFGS and NCG ([`optimize`]) and the continuous collision detection of
+//!   [`ccd`] that guards the isotopy class.
+//! * WP4: the Barnes–Hut energy ([`BhTree`]), wired into the session as [`BarnesHutEnergy`]
+//!   (the tree is built once per step and refitted in the line search).
+//! * WP5: the block cluster tree and the hierarchical metric product ([`BlockClusterTree`],
+//!   [`HierarchicalMetric`], [`HierarchicalCgSaddle`]).
+//! * Follow-up: the grow-previous start of the guarded search (`SPEC.md` §17f).
 //!
-//! The other modules are stubs filled by the later work packages of `SPEC.md` §15.
+//! The multigrid solver (WP6) and the remaining modules are filled by the later work packages
+//! of `SPEC.md` §15.
 
 #![warn(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -47,6 +58,10 @@ pub mod step;
 pub mod subdivide;
 pub mod surfaces;
 
+pub use ccd::{
+    CcdOptions, CcdReport, CollisionObstacle, Contact, ContactPrimitive, PreparedObstacle,
+    first_contact, path_contact,
+};
 pub use constraints::{
     Constraint, ConstraintSet, ImplicitSurface, RankReport, TangentSite, default_constraints,
 };
@@ -58,6 +73,7 @@ pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
 pub use metric::hierarchical::{CgOptions, HierarchicalCgSaddle, HierarchicalMetric};
 pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
 pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
+pub use optimize::{Hencky, Method};
 pub use solve::{
     DenseSaddle, LinearReport, ProjectedGradient, Projection, ProjectionOptions, ProjectionStatus,
     Projector, SaddleSolution, SaddleSolver, SparseSaddle, Tolerance, project_constraints,
@@ -65,3 +81,12 @@ pub use solve::{
 };
 pub use spatial::bct::{BctOptions, BctStats, BlockClusterTree, ClusterKernel};
 pub use spatial::{Aabb, Bvh, Element, Node};
+pub use step::line_search::{LineSearch, StartRule, Trial, TrialOutcome};
+pub use step::schedule::LengthSchedule;
+pub use step::stop::{GradNorm, Status, StepStatus, StopRule};
+pub use step::{
+    Backend, BarnesHutEnergy, Control, DEFAULT_DENSE_THREADS, DirectSolvers, EnergyModel,
+    ExactEnergy, FlowOptions, FlowReport, FlowResult, PenaltyTerm, RetargetReport, RetargetStatus,
+    Session, Solver, SolverFactory, SolverRequest, StepReport, Timings, flow, soft_options,
+};
+pub use subdivide::{SubdivisionMap, subdivide};

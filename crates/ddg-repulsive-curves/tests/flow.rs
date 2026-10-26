@@ -14,16 +14,18 @@ use ddg_repulsive_curves::ccd::{CcdOptions, CcdReport, segment_segment_distance 
 use ddg_repulsive_curves::optimize::{Hencky, Method};
 use ddg_repulsive_curves::solve::{Projection, ProjectionStatus};
 use ddg_repulsive_curves::step::line_search::{
-    LineSearch, SearchEnv, SearchInput, TrialOutcome, line_search,
+    LineSearch, SearchEnv, SearchInput, StartRule, TrialOutcome, line_search,
 };
 use ddg_repulsive_curves::step::schedule::LengthSchedule;
 use ddg_repulsive_curves::step::stop::{Status, StepStatus, StopRule};
 use ddg_repulsive_curves::step::{
-    Control, FlowOptions, PenaltyTerm, Session, StepReport, flow, soft_options,
+    Backend, BarnesHutEnergy, Control, EnergyModel, FlowOptions, PenaltyTerm, Session, Solver,
+    StepReport, flow, soft_options,
 };
 use ddg_repulsive_curves::subdivide::SubdivisionMap;
 use ddg_repulsive_curves::{
-    Axis, Constraint, CurveNetwork, EnergyEval, Exponents, RcError, Tolerance, read_curve_obj,
+    Axis, BhOptions, BhTree, Constraint, CurveNetwork, EnergyEval, Exponents, RcError, Tolerance,
+    read_curve_obj,
 };
 
 type P = [f64; 3];
@@ -659,7 +661,7 @@ fn every_stop_status_is_reached() {
         line_search: LineSearch::CollisionGuarded {
             armijo: 1e-4,
             shrink: 0.5,
-            start_fraction: 2.0 / 3.0,
+            start: StartRule::TwoThirdsTauMax,
             gap: 0.1,
             max_halvings: 2,
         },
@@ -728,7 +730,7 @@ fn every_stop_status_is_reached() {
             line_search: LineSearch::CollisionGuarded {
                 armijo: 1e-4,
                 shrink: 0.5,
-                start_fraction: 2.0 / 3.0,
+                start: StartRule::TwoThirdsTauMax,
                 gap: 0.1,
                 max_halvings: 2,
             },
@@ -856,7 +858,7 @@ fn bad_options_are_errors() {
         line_search: LineSearch::CollisionGuarded {
             armijo: 1.5,
             shrink: 0.5,
-            start_fraction: 0.5,
+            start: StartRule::TwoThirdsTauMax,
             gap: 0.1,
             max_halvings: 4,
         },
@@ -867,7 +869,7 @@ fn bad_options_are_errors() {
         line_search: LineSearch::CollisionGuarded {
             armijo: 1e-4,
             shrink: 0.5,
-            start_fraction: 0.5,
+            start: StartRule::TwoThirdsTauMax,
             gap: 1.0,
             max_halvings: 4,
         },
@@ -1034,6 +1036,35 @@ fn data_dir() -> String {
 #[test]
 #[ignore]
 fn freedman_600_flows_to_a_circle() {
+    freedman_flow(EnergyEval::Exact);
+}
+
+/// The Freedman flow on the Barnes–Hut energy (dense solver): `RC_ALPHA`, `RC_BETA`, `RC_STEPS`
+/// as above. Prints the exact energy of the final curve and compares it with the exact flow's
+/// (`6.0816` at `|g| < 1e-4`, `runs_tmp/rc-wp3-notes.md`).
+#[test]
+#[ignore]
+fn freedman_600_barnes_hut_flows_to_a_circle() {
+    let s = freedman_flow(EnergyEval::BarnesHut(BhOptions::default()));
+    let exact = ddg_repulsive_curves::energy(
+        s.network(),
+        s.positions(),
+        Exponents::new(2.0, 4.5).unwrap(),
+        &EnergyEval::Exact,
+        Some(8),
+    )
+    .unwrap()
+    .energy;
+    eprintln!(
+        "RESULT bh final: Barnes-Hut energy {:.5}, exact energy of the same curve {exact:.5}",
+        s.energy()
+    );
+    // The same near-circle: both energies are within 2 % of the exact flow's 6.0816.
+    assert!((exact - 6.0816).abs() < 0.02 * 6.0816, "exact {exact}");
+    assert!((s.energy() - exact).abs() < 0.02 * exact);
+}
+
+fn freedman_flow(eval: EnergyEval) -> Session {
     let path = format!("{}/FreedmanHeWang/freedman-he-wang-600.obj", data_dir());
     let (net, pos) = read_curve_obj(&path).unwrap();
     let alpha: f64 = std::env::var("RC_ALPHA")
@@ -1052,6 +1083,10 @@ fn freedman_600_flows_to_a_circle() {
         exponents: Exponents::new(alpha, beta).unwrap(),
         max_iterations: budget,
         record_path: false,
+        backend: Backend::Explicit {
+            energy: eval,
+            solver: Solver::Dense,
+        },
         ..FlowOptions::default()
     };
     let t0 = Instant::now();
@@ -1120,13 +1155,14 @@ fn freedman_600_flows_to_a_circle() {
     assert!(min_dist > 0.0);
     let (it, secs) = round_at.expect("the unknot becomes a near-circle within the budget");
     eprintln!("RESULT near-circle iterations {it} seconds {secs:.1}");
+    s
 }
 
 // ---------------------------------------------------------------------------------------------
 // Line-search comparison driver (one knot per process; ignored)
 // ---------------------------------------------------------------------------------------------
 
-/// `RC_KNOT=path RC_LS=guarded|armijo cargo test --release --test flow ls_compare -- --ignored
+/// `RC_KNOT=path RC_LS=guarded|grow|armijo cargo test --release --test flow ls_compare -- --ignored
 /// --nocapture`: flows one knot with barycenter + edge lengths and audits every accepted step
 /// with the CCD (tiny gap, many advances). Prints one `RESULT` line.
 #[test]
@@ -1138,8 +1174,10 @@ fn ls_compare_one_knot() {
     };
     let ls = match std::env::var("RC_LS").as_deref() {
         Ok("armijo") => LineSearch::normalized_armijo(),
-        _ => LineSearch::default(),
+        Ok("grow") => LineSearch::guarded_with_start(StartRule::grow_previous()),
+        _ => LineSearch::guarded_with_start(StartRule::TwoThirdsTauMax),
     };
+    let ls_name = std::env::var("RC_LS").unwrap_or_else(|_| "guarded".into());
     let alpha: f64 = std::env::var("RC_ALPHA")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -1229,7 +1267,7 @@ fn ls_compare_one_knot() {
             .file_name()
             .unwrap()
             .to_string_lossy(),
-        if ls.is_guarded() { "guarded" } else { "armijo" },
+        ls_name,
         s.status(),
         last_g,
         secs,
@@ -1323,4 +1361,168 @@ fn dense_pool_scaling() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Barnes–Hut in the session (D26, SPEC §17d)
+// ---------------------------------------------------------------------------------------------
+
+fn bh_flow_options(threads: usize, dense: usize) -> FlowOptions {
+    FlowOptions {
+        backend: Backend::Explicit {
+            energy: EnergyEval::BarnesHut(BhOptions::default()),
+            solver: Solver::Dense,
+        },
+        max_iterations: 8,
+        threads: Some(threads),
+        dense_threads: Some(dense),
+        ..FlowOptions::default()
+    }
+}
+
+#[test]
+fn barnes_hut_refit_matches_rebuild() {
+    let (net, pos) = rough_trefoil(80);
+    let e = Exponents::new(3.0, 6.0).unwrap();
+    let pool = Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap(),
+    );
+    let opts = BhOptions::default();
+    // Unchanged positions: the refit is the tree that was built.
+    let mut model = BarnesHutEnergy::new(pool.clone(), e, opts);
+    model.prepare(&net, &pos).unwrap();
+    let built = BhTree::build(&net, &pos, opts).unwrap().energy(&pool, e).0;
+    assert_eq!(model.energy(&net, &pos).unwrap().to_bits(), built.to_bits());
+    // A small move, as the line search makes: the refit tree is a valid (slightly different)
+    // tree, so the energy agrees with a rebuild and with the exact energy to the approximation.
+    let moved: Vec<P> = pos
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let t = 0.01 * (i as f64 * 0.7).sin();
+            [p[0] + t, p[1] - 0.5 * t, p[2] + 0.3 * t]
+        })
+        .collect();
+    let refit = model.energy(&net, &moved).unwrap();
+    let rebuilt = BhTree::build(&net, &moved, opts)
+        .unwrap()
+        .energy(&pool, e)
+        .0;
+    let exact = ddg_repulsive_curves::energy(&net, &moved, e, &EnergyEval::Exact, Some(2))
+        .unwrap()
+        .energy;
+    assert!(
+        (refit - rebuilt).abs() < 1e-3 * rebuilt,
+        "{refit} {rebuilt}"
+    );
+    assert!((refit - exact).abs() < 1e-2 * exact, "{refit} {exact}");
+    // A new `prepare` (next step, or after a subdivision) rebuilds and so equals a rebuild.
+    let (net2, pos2, _) = ddg_repulsive_curves::subdivide(&net, &moved).unwrap();
+    model.prepare(&net2, &pos2).unwrap();
+    let ev = model.energy_and_differential(&net2, &pos2).unwrap();
+    let want = BhTree::build(&net2, &pos2, opts)
+        .unwrap()
+        .energy(&pool, e)
+        .0;
+    assert_eq!(ev.energy.to_bits(), want.to_bits());
+    assert_eq!(ev.differential.len(), net2.n_vertices());
+}
+
+#[test]
+fn barnes_hut_flow_follows_the_exact_flow() {
+    let (net, pos) = rough_trefoil(60);
+    let mut bh = Session::new(net.clone(), pos.clone(), bh_flow_options(2, 2)).unwrap();
+    let mut ex = Session::new(
+        net.clone(),
+        pos,
+        FlowOptions {
+            backend: Backend::Explicit {
+                energy: EnergyEval::Exact,
+                solver: Solver::Dense,
+            },
+            ..bh_flow_options(2, 2)
+        },
+    )
+    .unwrap();
+    let e0 = bh.energy();
+    let (r_bh, r_ex) = (bh.run(None).unwrap(), ex.run(None).unwrap());
+    assert!(r_bh.steps.iter().all(|s| s.status != StepStatus::Stuck));
+    assert!(bh.energy() < 0.9 * e0, "the flow decreases the energy");
+    // Same energy within the approximation (the tree is accurate to about 1 %).
+    assert!(
+        (bh.energy() - ex.energy()).abs() < 0.03 * ex.energy(),
+        "{} {}",
+        bh.energy(),
+        ex.energy()
+    );
+    // Every accepted step decreased the Barnes-Hut energy (both sides of Armijo, §17d).
+    let mut prev = e0;
+    for s in &r_bh.steps {
+        assert!(s.energy_after <= prev, "{} {prev}", s.energy_after);
+        prev = s.energy_after;
+    }
+    drop(r_ex);
+    check_constraints(&bh);
+}
+
+#[test]
+fn barnes_hut_flow_is_deterministic_across_thread_counts() {
+    let (net, pos) = rough_trefoil(60);
+    let run = |threads: usize| {
+        let mut s = Session::new(net.clone(), pos.clone(), bh_flow_options(threads, 2)).unwrap();
+        s.run(None).unwrap();
+        (
+            s.energy().to_bits(),
+            s.positions()
+                .iter()
+                .flat_map(|p| p.map(f64::to_bits))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let (e1, p1) = run(1);
+    for threads in [3, 8] {
+        let (e, p) = run(threads);
+        assert_eq!(e, e1, "energy differs with {threads} threads");
+        assert_eq!(p, p1, "positions differ with {threads} threads");
+    }
+}
+
+#[test]
+fn grow_previous_start_keeps_the_guard_and_needs_fewer_trials() {
+    let (net, pos) = rough_trefoil(60);
+    let run = |start: StartRule| {
+        let mut s = Session::new(
+            net.clone(),
+            pos.clone(),
+            FlowOptions {
+                line_search: LineSearch::guarded_with_start(start),
+                max_iterations: 12,
+                record_path: true,
+                ..small_options()
+            },
+        )
+        .unwrap();
+        let mut trials = 0;
+        for _ in 0..12 {
+            let r = s.step().unwrap();
+            trials += r.trials.len();
+            // Every trial is bounded by tau_max, whatever the start rule.
+            if let Some(tm) = r.tau_max {
+                assert!(r.trials.iter().all(|t| t.tau <= tm * (1.0 + 1e-12)));
+            }
+        }
+        (trials, s.energy())
+    };
+    let (paper, e_paper) = run(StartRule::TwoThirdsTauMax);
+    let (grow, e_grow) = run(StartRule::grow_previous());
+    assert!(grow <= paper, "grow {grow} paper {paper}");
+    assert!(e_grow.is_finite() && e_paper.is_finite());
+    assert!(
+        LineSearch::guarded_with_start(StartRule::GrowPrevious { factor: 0.5 })
+            .validate()
+            .is_err()
+    );
 }

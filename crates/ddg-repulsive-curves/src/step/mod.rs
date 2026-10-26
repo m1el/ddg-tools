@@ -23,8 +23,8 @@
 //! # Back ends (hooks for later work packages)
 //!
 //! * Energy: [`EnergyModel`], chosen by [`energy_model`] from [`EnergyEval`].
-//!   [`EnergyEval::Exact`] is [`ExactEnergy`]; [`EnergyEval::BarnesHut`] is filled in by WP4
-//!   (until then [`RcError::Unsupported`]). `prepare` is called once per step at the base curve
+//!   [`EnergyEval::Exact`] is [`ExactEnergy`]; [`EnergyEval::BarnesHut`] is [`BarnesHutEnergy`]
+//!   `prepare` is called once per step at the base curve
 //!   (Barnes–Hut: build the tree), the line search's trials only refit (D26).
 //! * Metric and solver: [`SolverFactory`], one [`SaddleSolver`] per step and per re-target.
 //!   [`Solver::Dense`] is [`DirectSolvers`] (dense LU for the Sobolev metric, sparse LU for
@@ -53,8 +53,9 @@ use ddg_core::sparse::SparseMatrix;
 
 use crate::ccd::{CcdOptions, CcdReport, CollisionObstacle, PreparedObstacle, first_contact};
 use crate::constraints::{Constraint, ConstraintSet, default_constraints};
-use crate::energy::EnergyEval;
+use crate::energy::barnes_hut::BhTree;
 use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
+use crate::energy::{BhOptions, EnergyEval};
 use crate::error::RcError;
 use crate::kernel::Exponents;
 use crate::metric::{DofLayout, Metric, classic_metric, sobolev_gram};
@@ -208,10 +209,88 @@ impl EnergyModel for ExactEnergy {
     }
 }
 
+/// The Barnes–Hut energy (`SPEC.md` §8) on an explicit pool.
+///
+/// [`EnergyModel::prepare`] builds the tree at the base curve of the step (so it is rebuilt after
+/// every accepted step and after a subdivision, the network of `prepare` being the current one);
+/// the trial energies of the line search only [`refit`](BhTree::refit) it (D26). Both sides of
+/// every Armijo comparison are Barnes–Hut energies (§17d).
+#[derive(Debug)]
+pub struct BarnesHutEnergy {
+    pool: Arc<rayon::ThreadPool>,
+    exponents: Exponents,
+    options: BhOptions,
+    tree: Option<BhTree>,
+}
+
+impl BarnesHutEnergy {
+    /// The Barnes–Hut energy with `exponents` and `options` on `pool`.
+    pub fn new(
+        pool: Arc<rayon::ThreadPool>,
+        exponents: Exponents,
+        options: BhOptions,
+    ) -> BarnesHutEnergy {
+        BarnesHutEnergy {
+            pool,
+            exponents,
+            options,
+            tree: None,
+        }
+    }
+
+    /// The current tree (after [`EnergyModel::prepare`]).
+    pub fn tree(&self) -> Option<&BhTree> {
+        self.tree.as_ref()
+    }
+
+    /// Refits the tree to `positions`, or builds it if `prepare` was not called. The topology
+    /// only changes through `prepare` (a new step), never inside a line search.
+    fn fit(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<&BhTree, RcError> {
+        match &mut self.tree {
+            Some(t) => t.refit(positions)?,
+            slot @ None => *slot = Some(BhTree::build(network, positions, self.options)?),
+        }
+        Ok(self.tree.as_ref().expect("tree was just set"))
+    }
+}
+
+impl EnergyModel for BarnesHutEnergy {
+    fn name(&self) -> &'static str {
+        "barnes-hut"
+    }
+
+    fn prepare(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<(), RcError> {
+        self.tree = Some(BhTree::build(network, positions, self.options)?);
+        Ok(())
+    }
+
+    fn energy(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<f64, RcError> {
+        let (pool, exponents) = (self.pool.clone(), self.exponents);
+        Ok(self.fit(network, positions)?.energy(&pool, exponents).0)
+    }
+
+    fn energy_and_differential(
+        &mut self,
+        network: &CurveNetwork,
+        positions: &[[f64; 3]],
+    ) -> Result<EnergyEvaluation, RcError> {
+        let (pool, exponents) = (self.pool.clone(), self.exponents);
+        let (energy, differential, stats) = self
+            .fit(network, positions)?
+            .energy_and_differential(&pool, exponents);
+        Ok(EnergyEvaluation {
+            energy,
+            differential,
+            pairs_exact: stats.pairs_exact,
+            nodes_lumped: stats.nodes_lumped,
+        })
+    }
+}
+
 /// The energy back end for `eval`.
 ///
 /// # Errors
-/// [`RcError::Unsupported`] for [`EnergyEval::BarnesHut`] until work package WP4 adds it here.
+/// [`RcError::InvalidOption`] for bad Barnes–Hut options.
 pub fn energy_model(
     eval: &EnergyEval,
     exponents: Exponents,
@@ -219,9 +298,10 @@ pub fn energy_model(
 ) -> Result<Box<dyn EnergyModel>, RcError> {
     match eval {
         EnergyEval::Exact => Ok(Box::new(ExactEnergy::new(pool, exponents))),
-        EnergyEval::BarnesHut(_) => Err(RcError::Unsupported {
-            what: "the Barnes-Hut energy (work package WP4)",
-        }),
+        EnergyEval::BarnesHut(opts) => {
+            opts.validate()?;
+            Ok(Box::new(BarnesHutEnergy::new(pool, exponents, *opts)))
+        }
     }
 }
 

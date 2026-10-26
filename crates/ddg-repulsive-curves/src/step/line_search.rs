@@ -15,7 +15,8 @@
 //!
 //! * [`LineSearch::CollisionGuarded`] (the default, D11): `τ_hi = diam(bbox γ) / max_v |p_v|`,
 //!   `τ_max` = the first contact time of the linear motion `γ − τ p` on `[0, τ_hi]` by the CCD
-//!   of §7.4 (∞ if none), start `τ₀ = start_fraction · τ_max` (the paper's ⅔) or `τ_hi`.
+//!   of §7.4 (∞ if none), start `τ₀` by the [`StartRule`] (the paper's `⅔ τ_max`, or `τ_hi` without contact; or
+//!   grow-previous `min(⅔ τ_max, f τ_prev)`).
 //!   A trial is accepted only if, in addition, every chord step of its projection (each a linear
 //!   motion) is free of contacts. The move itself is free because `τ ≤ τ_max`. So the whole path
 //!   of every accepted step is a piecewise linear path of embeddings, and no two edges of `𝒫`
@@ -39,6 +40,43 @@ use crate::solve::{LinearReport, Projection, ProjectionOptions, ProjectionStatus
 /// A projection and its path (the trial, then every chord iterate).
 pub type ProjectionWithPath = (Projection, Vec<Vec<[f64; 3]>>);
 
+/// Where the collision-guarded search starts (D11, §17f).
+///
+/// Every trial is bounded by `τ_max` and checked by the CCD whatever the rule: the rule only
+/// moves the first trial, so the isotopy guarantee is the same.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartRule {
+    /// `τ₀ = ⅔ τ_max` (`τ_hi` if there is no contact): the paper's rule.
+    TwoThirdsTauMax,
+    /// `τ₀ = min(⅔ τ_max, factor · τ_prev)`, with `τ_prev` the previous accepted step size of the
+    /// session (the paper's rule for the first step). Needs far fewer trials per step, because the
+    /// accepted `τ` is usually much smaller than `⅔ τ_max`.
+    GrowPrevious {
+        /// Growth of the previous accepted step size, `≥ 1` (2 in the study of §17f).
+        factor: f64,
+    },
+}
+
+impl StartRule {
+    /// The grow-previous rule with factor 2, the measured one (§17f).
+    pub const fn grow_previous() -> StartRule {
+        StartRule::GrowPrevious { factor: 2.0 }
+    }
+
+    fn start(&self, tau_max: Option<f64>, tau_hi: f64, previous_tau: Option<f64>) -> f64 {
+        let paper = match tau_max {
+            Some(t) => 2.0 / 3.0 * t,
+            None => tau_hi,
+        };
+        match (*self, previous_tau) {
+            (StartRule::GrowPrevious { factor }, Some(prev)) if prev > 0.0 => {
+                paper.min(factor * prev)
+            }
+            _ => paper,
+        }
+    }
+}
+
 /// The line search (`SPEC.md` §9.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LineSearch {
@@ -48,8 +86,8 @@ pub enum LineSearch {
         armijo: f64,
         /// Shrink factor `∈ (0, 1)`.
         shrink: f64,
-        /// `τ₀ = start_fraction · τ_max`, `∈ (0, 1]` (the paper: ⅔).
-        start_fraction: f64,
+        /// The start rule (the paper's ⅔ τ_max, or grow-previous).
+        start: StartRule,
         /// The CCD gap `s ∈ (0, 1)`.
         gap: f64,
         /// Maximal number of shrinks.
@@ -72,7 +110,7 @@ impl Default for LineSearch {
         LineSearch::CollisionGuarded {
             armijo: 1e-4,
             shrink: 0.5,
-            start_fraction: 2.0 / 3.0,
+            start: StartRule::TwoThirdsTauMax,
             gap: 0.1,
             max_halvings: 40,
         }
@@ -80,6 +118,17 @@ impl Default for LineSearch {
 }
 
 impl LineSearch {
+    /// The default guarded search with the start rule `start`.
+    pub fn guarded_with_start(start: StartRule) -> LineSearch {
+        LineSearch::CollisionGuarded {
+            armijo: 1e-4,
+            shrink: 0.5,
+            start,
+            gap: 0.1,
+            max_halvings: 40,
+        }
+    }
+
     /// `NormalizedArmijo { armijo 1e-4, shrink ½, 40 halvings }` (§10).
     pub fn normalized_armijo() -> LineSearch {
         LineSearch::NormalizedArmijo {
@@ -140,17 +189,14 @@ impl LineSearch {
         };
         open("line_search.armijo", armijo)?;
         open("line_search.shrink", shrink)?;
-        if let LineSearch::CollisionGuarded {
-            start_fraction,
-            gap,
-            ..
-        } = *self
-        {
-            if !(start_fraction > 0.0 && start_fraction <= 1.0) {
+        if let LineSearch::CollisionGuarded { start, gap, .. } = *self {
+            if let StartRule::GrowPrevious { factor } = start
+                && !(factor >= 1.0 && factor.is_finite())
+            {
                 return Err(RcError::InvalidOption {
-                    name: "line_search.start_fraction",
-                    value: start_fraction.to_string(),
-                    requirement: "a number in (0, 1]",
+                    name: "line_search.start.factor",
+                    value: factor.to_string(),
+                    requirement: "a finite number ≥ 1",
                 });
             }
             open("line_search.gap", gap)?;
@@ -283,7 +329,7 @@ pub struct SearchInput<'a> {
     pub slope: f64,
     /// `F(γ)`.
     pub f0: f64,
-    /// The previous accepted step size (normalized search).
+    /// The previous accepted step size (normalized search, grow-previous start).
     pub previous_tau: Option<f64>,
     /// An upper bound on `τ₀` (L-BFGS: 1 once curvature pairs exist), `None` for none.
     pub max_start: Option<f64>,
@@ -361,7 +407,7 @@ pub fn line_search(
         .map(|p| [-p[0], -p[1], -p[2]])
         .collect();
     let mut tau0 = match *ls {
-        LineSearch::CollisionGuarded { start_fraction, .. } => {
+        LineSearch::CollisionGuarded { start, .. } => {
             let tau_hi = bbox_diameter(input.base) / max_speed;
             rep.tau_hi = Some(tau_hi);
             let t = Instant::now();
@@ -369,16 +415,9 @@ pub fn line_search(
             rep.seconds.ccd += t.elapsed().as_secs_f64();
             rep.ccd.accumulate(&r);
             rep.ccd_checks += 1;
-            match r.contact {
-                Some(c) => {
-                    rep.tau_max = Some(c.tau);
-                    start_fraction * c.tau
-                }
-                None => {
-                    rep.tau_max = Some(f64::INFINITY);
-                    tau_hi
-                }
-            }
+            let tau_max = r.contact.map(|c| c.tau);
+            rep.tau_max = Some(tau_max.unwrap_or(f64::INFINITY));
+            start.start(tau_max, tau_hi, input.previous_tau)
         }
         LineSearch::NormalizedArmijo { .. } => {
             let n = input
