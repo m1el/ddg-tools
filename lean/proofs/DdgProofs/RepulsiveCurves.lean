@@ -10,6 +10,7 @@ import DdgProofs.RepulsiveCurves.Schedule
 import DdgProofs.RepulsiveCurves.Ccd
 import DdgProofs.RepulsiveCurves.Hierarchy
 import DdgProofs.RepulsiveCurves.Multigrid
+import DdgProofs.RepulsiveCurves.BarnesHutAdjoint
 
 /-!
 # Repulsive Curves (Yu, Schumacher, Crane, ACM TOG 40(2), 2021)
