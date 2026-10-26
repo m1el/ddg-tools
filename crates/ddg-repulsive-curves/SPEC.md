@@ -1095,7 +1095,8 @@ failure table, next to the paper's numbers (hard: Hs 6.5 % stuck; H¹ 64.5 % fai
 L² ≥ 97.7 %; soft: Hs NCG 3.3 % stuck, Hs L-BFGS 14.8 %).
 
 *Hencky calibration:* the smallest weight `w_H ∈ {10^k}` for which the median, over 10 knots,
-of the final largest `|ln(ℓ/ℓ⁰)|` under Hs NCG is ≤ 1e-2, fixed before the full run.
+of the final largest `|ln(ℓ/ℓ⁰)|` under Hs NCG is ≤ 1e-2, fixed before the full run. "Final" means at the soft minimizer, not after a fixed number of iterations: §17m measures it
+through the edge tensions of the hard reference runs (strain ≈ `max_I λ_I/(2w)`), which gives `w_H = 10`.
 
 *Budget (Q4):* phase A — all 228 × methods in parallel, one thread per job, with an iteration
 cap (the paper's 24-minute cap is wall time on a 2019 Xeon), recording iterations and energies;
@@ -1997,6 +1998,267 @@ Final energies are not compared here.
    projections of the near-contact knot (83 % of the iteration at 16384).
 5. `Backend::Auto` is untouched in its rule of form; a thread-aware crossover (1300 at 8 threads,
    1600 at 64) would gain at most 20 % near the crossing.
+
+## 17m. Soft Hs and the stop test of the Sec. 7 comparison (WP12b)
+
+Two findings came out of the evaluation probe: trefoil0022, 1857 vertices, (α, β) = (2, 4.5),
+`Absolute(1e-4)`, 1 thread, 24 minutes, `Backend::Auto` (Barnes–Hut + multigrid).
+
+* Soft Hs NCG with `w_H = 1e4` reached only Ê 1320. Hard Hs reached 10.7 after 100 iterations.
+* Hard Hs never met `‖g̃‖₂ < 1e-4`. It was still at 0.28 after 2316 iterations.
+
+Probes: `tests/wp12b_probe.rs` (`flow_probe`, `multipliers_probe`, `small_hard_tail`). Test:
+`tests/soft_problem.rs`. Logs, curves and scripts are in `runs_tmp/rc-wp12b/`:
+
+* `A/`: soft runs at several weights;
+* `B/`: back ends compared from the plateau curve;
+* `C/`: full hard runs;
+* `T/`: tension calibration.
+
+Unless a row says otherwise, runs use 1 thread.
+
+### Finding A: the Hencky weight, not Hs, made soft Hs slow
+
+**What the paper says.**
+
+* Supp. 2.2 replaces the edge lengths "with Hencky strain terms in the objective for each edge,
+  weighted by edge lengths of the initial configuration". It gives no further weight and no
+  normalization by edge count or by total length.
+* Supp. 3.2 uses an inner product `A` in NCG by "evaluating all gradients and inner products in
+  the NCG algorithm using the new inner product". The metric is the preconditioner, with nothing
+  added for the penalty.
+* Supp. 2.2 expects soft methods to do better than hard ones: "allowing trajectories to leave
+  the constraint manifold can only result in more direct paths to minimizers".
+* Supp. 4.2 reports Hs NCG and Hs L-BFGS "roughly equally well" (stuck 3.3 % and 14.8 %). H¹ NCG
+  and H¹ L-BFGS take about twice as long and get stuck more than 50 % of the time.
+* The authors' program has no soft path: there is no Hencky term, L-BFGS or NCG in `src/`.
+
+Our objective and our dynamic Hs preconditioner are the paper's. `w_H = 1e4` came from our own
+rule (§14.2, D21), not from the paper.
+
+**What we checked.**
+
+* *The Hencky gradient.* Central differences at the plateau curve of trefoil0022 agree to
+  1.5e-6 relative. The existing small-curve FD test passes. No bug.
+* *Scale (edge tensions).* At a hard minimizer, Eq. 22 gives `dÊ = −Σ λ_I ∇ℓ_I`. The soft
+  problem is stationary where `2w ln(ℓ_I/ℓ⁰_I) ≈ λ_I`, so its equilibrium strain is `λ_I / (2w)`.
+  * The Euler identity (§3.3) gives `Σ λ_I ℓ_I = ½ Ê` for (2, 4.5), so `λ̄ ≈ Ê/(2L)`.
+  * Trefoil0022 plateau (Ê 10.33, L 898): `λ_I` lies in 5.6e-3 … 6.0e-3, which predicts a strain
+    of 3.0e-3 / w.
+  * Measured after the 24-minute soft Hs NCG runs: 3.12e-3 at w = 1 and 3.1e-4 at w = 10.
+  * Test `soft_equilibrium_strain_is_tension_over_two_w` (40-vertex trefoil) checks `Σλℓ = ½Ê`
+    and the strain rule to O(1/w), at w = 10, 30, 100.
+* *Conditioning (the cause).* The Hencky Hessian is `2w Σ (δℓ_I)²/ℓ⁰_I`, a second-order operator
+  on the tangential components, scaled by `2w`. It is not in the Hs metric, which has order
+  2s = 3.5.
+  * At large `w` the stiff, low-frequency stretching modes dominate the Hs-preconditioned problem,
+    and the descent is cut down to the steps those modes allow.
+  * H¹ matches the order of a dominant Hencky term. That is why soft H¹ NCG beat soft Hs NCG at
+    w = 1e4 (E 220 against 1320). This is an artifact of the weight.
+  * On the 40-vertex trefoil, the iteration count of soft Hs NCG near the minimizer depends on the
+    numerical path. At w = 100 it was 413, 2702 or 3842, depending on the dense solver and the
+    starting curve, so no iteration count is asserted.
+* *The weight on trefoil0022* (soft Hs NCG, auto back end, 24 min):
+
+  | w_H | Ê at the end | final max \|ln ℓ/ℓ⁰\| | to 1.1 × 10.334 | to 1.01 × | largest strain in the first 300 s |
+  |---|---|---|---|---|---|
+  | 1 | 10.318 | 3.1e-3 | 49 s (it 60) | 80 s (it 142) | 1.77 (it 6) |
+  | 10 | 10.333 | 3.1e-4 | 197 s (it 320) | 400 s (it 921) | 1.44 (it 8) |
+  | 100 | 10.661 | 1.2e-4 | 932 s (it 1724) | not reached | 1.12 (it 4) |
+  | 1e4 (eval probe) | 1320 | 1.5e-3 | not reached | not reached | 0.096 (it 24) |
+
+  The transient column is the largest `max_I |ln ℓ/ℓ⁰|` in the first 300 s, measured with
+  `flow_probe` on the branch head. Hard Hs PG reaches 1.1 × at 284 s in the eval probe and at
+  148 s on the branch head. On the branch head, at w = 10 (`A/head.*`):
+
+  | method | to 1.1 × | to 1.01 × | outcome |
+  |---|---|---|---|
+  | Hs NCG | 167 s | 356 s | |
+  | Hs L-BFGS | 143 s | 195 s | |
+  | H¹ NCG | | | `Stuck` at iteration 24, Ê 2999 |
+  | H¹ L-BFGS | | | `Stuck` at iteration 29, Ê 2900 |
+
+  At w = 1 (older build): Hs L-BFGS took 90 s and 117 s. H¹ NCG and H¹ L-BFGS stayed above
+  Ê 2100, and both final curves failed validation (touching edges, distance 0 and 3e-15; built
+  before WP14b's contact floor). With `w ≤ 10` the paper's soft ranking holds: Hs NCG ≈ Hs
+  L-BFGS, H¹ slower or stuck, soft at least as fast as hard.
+* *The NCG formula and the line search.* PR+ with restarts and the guarded grow-previous search
+  reach the hard minimum's energy within 1 % in 80 s at w = 1. They are not the bottleneck.
+  Nothing changed.
+
+**Why the old rule picked 1e4.** It measured the strain *after 50 iterations*. At that point the
+curve is still untangling: Ê is in the hundreds or thousands, and the strain follows the
+current, large tension `Ê/(2L)`. A stiffer weight also slows the descent and keeps Ê high. So
+the rule measured transient stiffness and rewarded the weights that stall the flow. The median
+Ê after 50 iterations was 91 at w = 10 and 1926 at 1e4.
+
+**Decision (for the evaluation; no library change).**
+
+1. **The calibration measures the strain at the soft minimizer, not after 50 iterations.**
+   * Cheap form: the edge tensions of the hard reference runs. Take the smallest decade with
+     median over the 10 calibration knots of `max_I λ_I/(2w) ≤ 1e-2`.
+   * `λ` comes from `multipliers_probe` at the final hard Hs curve (exact energy, one dense
+     Eq. 22 solve per knot).
+   * Calibration knots, hard Hs on the branch head, auto back end, 600 s:
+
+     | knot | Ê | λ range | `max λ/2` (strain at w = 1) |
+     |---|---|---|---|
+     | knot0074 | 54.2 | 2.9e-2 … 3.5e-2 | 1.75e-2 |
+     | knot0094 | 55.9 | 2.8e-2 … 3.6e-2 | 1.82e-2 |
+     | knot0114 | 65.3 | 1.6e-2 … 9.8e-2 | 4.9e-2 (not converged, dE·g̃ 0.34) |
+     | knot0125 | 65.5 | 3.9e-2 … 5.3e-2 | 2.67e-2 |
+     | trefoil0013 | 11.0 | 6.9e-3 … 7.6e-3 | 3.8e-3 |
+     | trefoil0027 | 10.2 | 5.5e-3 … 5.9e-3 | 2.9e-3 |
+
+   * Median: 1.8e-2 at w = 1, 1.8e-3 at w = 10. The largest is 4.9e-3 at w = 10.
+   * knot0023, knot0086, knot0102 and trefoil0046 were stopped for WP14b's timing block. Three
+     are Knot128 knots (Ê ≈ 55–65, strain at w = 1 above 1e-2), so they cannot move the median
+     below 1e-2 at w = 1.
+   * **Result: `w_H = 10`.**
+   * The literal reading of Supp. 2.2 is w = 1 (initial-length weights only). It meets the target
+     on the trefoils but not on the Knot128 knots (up to 5e-2).
+   * The driver's default `--hencky-w 1e3` should become 10.
+2. **Record the transient strain** (largest `max_I |ln ℓ/ℓ⁰|` over the run) next to the final
+   one.
+   * At every `w ≤ 100` the first steps stretch the edges near close contacts by `e^1` or more,
+     then relax.
+   * So the soft trajectories leave the hard constraint set by far more than the final strain
+     shows. Only `w ≈ 1e4` keeps the transient below 0.1, and it makes the Hs-preconditioned
+     problem stiff.
+   * The soft group is compared only within itself (as in the paper), so this is acceptable.
+     Whether the transient matters is a question for the user.
+3. **No metric change.** Adding the Hencky stiffness to the Hs preconditioner might make a
+   better soft method, but the paper's soft methods do not do it.
+
+### Finding B: why hard Hs never met `‖g̃‖₂ < 1e-4`
+
+Three causes, measured separately, plus the norm question.
+
+**(d) A bug: the flow stalled at the projection-tolerance boundary.**
+
+*Mechanism.*
+
+* `project_constraints` and the line search's `project_with_path_polished` tested the tolerance
+  before the first chord step. A trial already within tolerance was not projected at all.
+* A step along the tangent of the edge-length constraint lengthens every edge at second order
+  (`ℓ(γ − τg̃)² = ℓ² + τ²|Δg̃|²`).
+* With positive tensions, stretching lowers Ê. The curve drifted, unprojected and "for free",
+  until `|Φ| = tol`.
+* From there, every trial that left the tolerance band was projected back and paid
+  `≈ Σ λ_I δℓ_I`.
+* On trefoil0022 that cost is `5.7e-3 · 1857 · O(1e-4) ≈ 1e-3`. It is far larger than the
+  Armijo decrease `c τ dE·g̃` (about 1e-10).
+* So the search halved `τ` to about 1e-5. Only steps that stay inside the band were accepted.
+
+*Measurement* (`small_hard_tail`: 40-vertex trefoil, exact + dense, (2, 4.5), 3000 iterations):
+
+| projection tolerance (× ℓ̄₀) | ‖g̃‖ floor | base violation | unprojected accepted steps |
+|---|---|---|---|
+| 1e-4 | 4.9e-3 (1.1e-2 with the Newton polish of §17l on) | = tol | 2983 / 3000 |
+| 1e-6 | 1.0e-3 | = tol | 2892 / 3000 |
+| 1e-8 | 9.1e-5 | = tol | 2573 / 3000 |
+| 1e-10 | 7.4e-6 | = tol | 2181 / 3000 |
+| 1e-4, at least one projection step | 1.6e-5 at iteration 1000, linear decrease, τ ≈ 0.6 | 2e-16 | 0 |
+
+*What the paper and the reference do.*
+
+* The paper projects by "update our guess via γ̃ ← γ̃ + x and repeat until the constraint
+  violation is numerically small" (Sec. 5.3.2).
+* The reference's `LSBackproject` always calls `BackprojectConstraints` once before it tests
+  (`ref: src/tpe_flow_sc.cpp`, l. 306–313).
+
+*Fix.* At least one projection step per trial, unless `Φ = 0` exactly.
+
+* Applied by WP14b in `src/solve/mod.rs` and `src/step/line_search.rs` (§6.2, §17l, commit
+  0e7848e).
+* Verified first on a patched copy: last row of the table.
+* Cost: one extra chord or Newton step for each trial that was within tolerance.
+
+**(a) The Barnes–Hut energy makes a noise floor of `‖g̃‖`; the multigrid does not.** Four back
+ends, 150 steps each, from the saved plateau curve of the eval's hs-pg run (`B/`, fresh length
+targets):
+
+| back end | ‖g̃‖, step 1 → 150 | F over the run |
+|---|---|---|
+| exact + dense | 1.32 → 0.024, monotone | 10.334368 → 10.334365, monotone |
+| exact + multigrid (tol 1e-3) | 1.32 → 0.025, monotone (within 4 % of dense) | same |
+| Barnes–Hut + dense | 0.07 … 0.29, no trend | jitters by ±2e-6 |
+| Barnes–Hut + multigrid | 0.08 … 0.28, no trend | jitters by ±2e-6 (BH energy 0.11 % above exact) |
+
+* *Multigrid: no floor.* Its tolerance is relative to the projected right side `P dE`, which
+  vanishes at the minimum.
+* *Approximate metric (BCT): no floor.* An approximate metric only rescales `g̃`.
+* *Barnes–Hut: the floor.*
+  * The interaction lists are rebuilt every step (§17f, §17i), so the evaluated function changes
+    by about the approximation error from step to step.
+  * The Euclidean `‖g̃‖` amplifies that change, because it is dominated by low-frequency modes
+    with tiny `Ā` eigenvalues (see (c)).
+  * The 0.1–0.3 floor of the eval's run is this one.
+* From the start, Barnes–Hut + multigrid with the fix of (d) (patched copy) is at `‖g̃‖₂` 2.0e-2
+  after 1680 iterations. Without the fix it is at 5.7e-2 after 3102 iterations.
+
+**(c) A genuinely slow tail in the Euclidean norm.**
+
+* *Rate.* Even exact, dense and fixed, `‖g̃‖₂` falls by only about 1.1 % per step on the plateau
+  (`τ` 0.18–0.36, Armijo-limited).
+* *Time to 1e-4.* From 0.024 at step 150, it needs about 500 more steps to reach 1e-4: about 25
+  minutes at 3 s per exact dense step. Meanwhile the energy is flat to 3e-7 relative.
+* *Why so slow.* At the plateau curve, `|dE| = 3.0e-3` and `‖g̃‖₂ = 1.32`, but
+  `dE·g̃ = g̃ᵀĀg̃ = 1.9e-5`. The Rayleigh quotient of `g̃` is 1e-5, so its Euclidean norm is
+  carried by modes the energy barely sees.
+* *Full runs from the start* (trefoil0022, 24 min, `C/`):
+  * Every back end first has `dE·g̃ < 1e-4` at iteration 412–420.
+  * Barnes–Hut + multigrid gets there at 318–388 s (E 10.3458, its plateau value).
+  * Exact + dense gets there at about 1370 s (E 10.3350).
+  * No configuration reaches `‖g̃‖₂ < 1e-4` within 24 minutes.
+
+**(b) The norm.**
+
+* *Which vector.* `gradient_norm` is the Euclidean norm of the projected `g̃` itself. `g̃` lies in
+  `ker C`, so no constraint-violating component is included (the dense saddle residual is
+  1e-12).
+* *Which norm.*
+  * `gradient_mass_norm` is `√(Σ m_v |g̃_v|²)`: the discrete L² norm of the function,
+    independent of resolution.
+  * The Euclidean norm grows like `√|V|` for a fixed field.
+  * Here the two differ by a factor of 0.71 (0.94 against 1.32), which does not change the
+    conclusion.
+* *Scale.* `g̃` scales as `c¹` under `γ → cγ` for (2, 4.5) (§4.5). These knots are 30 units wide
+  with L ≈ 900, so the threshold 1e-4 is 3e-6 of the curve's size.
+* *Supplemental.* It says "the L² norm of the preconditioned gradient is below a fixed tolerance
+  ε = 10⁻⁴". Supp. 1.3 says the time cap exists because some methods "would require days to
+  satisfy the first condition".
+* *Reference.* The authors' program stops on `dE·g̃ < 1e-4` and prints that quantity as
+  "Sobolev gradient norm" (`ref: src/tpe_flow_sc.cpp`, `soboNormZero = (soboDot < 1e-4)`).
+
+**Decision (for the evaluation).**
+
+* *Stop rule.* Use **`dE·g̃ < 1e-4`** as the evaluation's convergence test. It is the reference
+  program's rule, and the reference prints the quantity as "Sobolev gradient norm".
+  * The Sec. 7 measures do not depend on the stop rule, only on the energy history: time and
+    iterations to 1.1 × the reference's minimal energy, and stuck or nonconvergent.
+  * The stop only ends runs early and, for the reference method, fixes `E_ref`.
+  * Hard methods: `StepReport::sobolev_norm_sq`.
+  * Soft methods: the same field holds `dF·p` for the NCG or L-BFGS direction, which equals
+    `dF·z` at restarts.
+  * Keep `‖g̃‖₂` and `‖g̃‖_{L²}` in the per-step history.
+* *Effect on trefoil0022.* The rule ends hard Hs at about 318 s, at its plateau energy, instead
+  of running the full 24 minutes. That is about 4.5× less compute for the reference method on
+  this knot.
+* *Library default unchanged.* `‖g̃‖₂ < 1e-4` stays the library default (D14). It is an absolute,
+  scale-dependent rule, and unit-size curves reach it: the 40-vertex trefoil does within 1000
+  iterations with the fix.
+* *Where the evaluation's stop goes.* Either the driver (`examples/eval_knots.rs`: end the loop
+  when `r.sobolev_norm_sq < 1e-4` after an accepted step), or a `StopRule` variant in
+  `src/step/stop.rs`. Neither was changed here, because both have other owners.
+  `Session::step` does not apply `FlowOptions::time_limit` (only `run` does). The driver has its
+  own `--max-seconds`.
+* *Back end.* Barnes–Hut + multigrid departs from the paper's Sec. 7 setup (exact derivatives,
+  dense solves) on these 1500–3000-vertex knots.
+  * It moves energies by 0.1 % and adds the floor of (a).
+  * It reaches `dE·g̃ < 1e-4` at the same iteration as exact + dense.
+  * Exact + dense costs about 3 s per step against 0.4–0.8 s, so Auto stays the budget choice.
+  * The driver re-evaluates final energies exactly anyway.
 
 ## 18. The user's decisions (2026-10-26)
 
