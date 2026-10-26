@@ -22,6 +22,10 @@ structure Saddle where
   c : FloatArray
   /-- LU of the saddle matrix -/
   lu : LU
+  /-- smallest over largest pivot magnitude of the LU: a crude inverse condition estimate -/
+  pivotRatio : Float
+  /-- infinity-norm condition number of the equilibrated saddle matrix (explicit inverse) -/
+  cond : Float
 
 /-- Assemble and factor `[Ā Cᵀ; C 0]`. -/
 def Saddle.build (nv : Nat) (coords : Array Nat) (a : FloatArray) (rows : Array Row) : Except String Saddle := do
@@ -42,17 +46,58 @@ def Saddle.build (nv : Nat) (coords : Array Nat) (a : FloatArray) (rows : Array 
       m := m.set! ((nd + r) * n + j) x
       m := m.set! (j * n + nd + r) x
   match luFactor n m with
-  | some lu =>
-    -- a pivot below 1e-14 of the largest means a redundant constraint row (as in the Rust solver)
-    let mut pmax : Float := 0.0
-    let mut pmin : Float := 1e300
-    for i in [0:n] do
-      let p := (lu.a.get! (i * n + i)).abs
-      if p > pmax then pmax := p
-      if p < pmin then pmin := p
-    if !(pmin > 1e-14 * pmax) then throw "SingularSaddle: a pivot of the saddle matrix is below 1e-14 of the largest"
-    return { nd, k, coords, c, lu }
   | none => throw "SingularSaddle: the saddle matrix is singular"
+  | some lu =>
+    -- Conditioning estimate that does not depend on the units of `A` and `C`: scale the primal
+    -- unknowns by `1/sqrt(Ā_ii)` and the constraint rows to unit norm, factor again, and take
+    -- the smallest over the largest pivot. Below 1e-13: redundant rows (SPEC D9) or a singular
+    -- metric on the kernel of `C`; the saddle is reported singular.
+    let mut dp := zeros nd
+    for j in [0:nd] do
+      let a := m.get! (j * n + j)
+      dp := dp.set! j (if a > 0.0 then 1.0 / Float.sqrt a else 1.0)
+    let mut dl := zeros k
+    for r in [0:k] do
+      let mut ss : Float := 0.0
+      for j in [0:nd] do
+        let x := c.get! (r * nd + j) * dp.get! j
+        ss := ss + x * x
+      dl := dl.set! r (if ss > 0.0 then 1.0 / Float.sqrt ss else 1.0)
+    let dd := fun (i : Nat) => if i < nd then dp.get! i else dl.get! (i - nd)
+    let mut ms := m
+    for i in [0:n] do
+      for j in [0:n] do
+        ms := ms.set! (i * n + j) (m.get! (i * n + j) * dd i * dd j)
+    let mut ratio : Float := 0.0
+    let mut cond : Float := 1e300
+    match luFactor n ms with
+    | none => ratio := 0.0
+    | some lus =>
+      -- ‖M‖∞ ‖M⁻¹‖∞ with the inverse formed column by column
+      let mut normM : Float := 0.0
+      for i in [0:n] do
+        let mut rs : Float := 0.0
+        for j in [0:n] do rs := rs + (ms.get! (i * n + j)).abs
+        if rs > normM then normM := rs
+      let mut rowsum := zeros n
+      for j in [0:n] do
+        let mut e := zeros n
+        e := e.set! j 1.0
+        let col := lus.solve e
+        for i in [0:n] do rowsum := rowsum.set! i (rowsum.get! i + (col.get! i).abs)
+      let mut normInv : Float := 0.0
+      for i in [0:n] do
+        if rowsum.get! i > normInv then normInv := rowsum.get! i
+      cond := normM * normInv
+      let mut pmax : Float := 0.0
+      let mut pmin : Float := 1e300
+      for i in [0:n] do
+        let p := (lus.a.get! (i * n + i)).abs
+        if p > pmax then pmax := p
+        if p < pmin then pmin := p
+      ratio := pmin / pmax
+    if !(ratio > 1e-13) then throw "SingularSaddle: the equilibrated saddle matrix has a pivot below 1e-13 of the largest"
+    return { nd, k, coords, c, lu, pivotRatio := ratio, cond }
 
 /-- Solution `(x, λ)` of `[Ā Cᵀ; C 0] (x, λ) = (a, b)`. -/
 def Saddle.solve (s : Saddle) (a b : FloatArray) : FloatArray × FloatArray := Id.run do

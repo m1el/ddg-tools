@@ -1605,3 +1605,84 @@ compensates), which the selftest's finite differences confirm. The fixtures incl
 **Rust side.** `crates/ddg-developability/tests/oracle.rs` replays the fixtures (always) and fuzzes
 (`#[ignore]`) against the executable; its module docs list the tolerances and how to run it
 (`DDG_DEV_FUZZ_CASES=20000 cargo test --release -p ddg-developability --test oracle -- --ignored --nocapture`).
+
+## Repulsive curves (fifth paper): `ddg-oracle rc`
+
+An independent Float implementation, from `crates/ddg-repulsive-curves/SPEC.md` §2-§6 only, of
+*Repulsive Curves* (Yu, Schumacher, Crane 2021): the discrete tangent-point energy and its
+differential, the Gram matrices `B`, `B⁰`, `A` by their increments at both quadratures, the
+constraints with their Jacobians, one projected Sobolev gradient (the dense saddle system, LU of
+`Dense.lean`) and one chord projection. Plain `Float` with its own 3-vector type; it shares no
+formula code with the Rust crate or with `lean/proofs`. Code: `DdgOracle/RepulsiveCurves/`
+(`Basic` vectors, networks, validation; `Energy`; `Gram`; `Constraints`; `Saddle`; `Format`; `Gen`;
+`Selftest`; `Fixtures`).
+
+| command | |
+|---|---|
+| `ddg-oracle rc [IN [OUT]]` | answer every case of the stream (tasks `energy`, `gram`, `saddle`, `project`) |
+| `ddg-oracle rc-gen SEED COUNT [FIRST]` | write `COUNT` seeded random cases (case `i` depends on `(SEED, i)` only) |
+| `ddg-oracle rc-selftest [N]` | central differences of the differential and of every Jacobian, the increments against the quadratic forms of §4.2-4.3 and against Eq. 31, scaling laws, the saddle equations, a regular circle (analytic), convergence of the projection, on `N` seeded networks (default 120) |
+| `ddg-oracle rc-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/rc`, 55 cases, 1.5 MB) |
+
+**Input** (`case NAME`, lines, `end`; floats are 16 hex digits, indices 0-based):
+
+```
+task energy|gram|saddle|project
+exponents ALPHA BETA            hex floats
+quadrature midpoint|trapezoid   (saddle, project; gram always prints both)
+planar AXIS                     optional: held coordinate 0|1|2 (SPEC 2.2); every vertex must have the same value of it
+matrices all|a                  (gram) a: only A (default all: B, B0, A, KB, K0)
+step TAU | steprel F            (project) trial = gamma - TAU g~, or TAU = F lbar / max|g~|
+tol mean|abs VALUE              (project) tau_len = VALUE lbar or VALUE   (default mean 1e-4)
+maxit N                         (project) default 3
+c barycenter [X Y Z]            constraints, in this order; targets default to the current values
+c total-length [L]
+c edge-lengths all | E E ...
+c point V [X Y Z]
+c sphere CX CY CZ R all | V V ...   rows |x - c|^2 - R^2 (not a signed distance, so |grad f| enters the tolerance)
+c tangent edge|vertex N [X Y Z]     direction X defaults to the current tangent
+net NV NE
+p X Y Z                         NV lines
+e A B                           NE lines
+```
+
+**Output**, after `status ok` (or `status error KIND MESSAGE` with `KIND` the name of the Rust error
+variant: `InvalidExponents`, `VertexOutOfRange`, `SelfLoop`, `DuplicateEdge`, `IsolatedVertex`,
+`NonFinitePosition`, `ZeroLengthEdge`, `CoincidentVertices`, `EdgesIntersect`, `NoInteractingPairs`,
+`NotPlanar`, `ConstraintOutOfRange`, `InvalidTangentSite`, `InfeasibleConstraint`, `SingularSaddle`,
+`Unsupported`):
+
+* `energy`: `net NV NE NPAIRS`, `energy E`, `d V GX GY GZ` (the differential `∂Ê/∂γ_v`; the held
+  coordinate is 0 in planar mode).
+* `gram`: for `section midpoint` and `section trapezoid`: rows `B i ...`, `B0 i ...`, `A i ...`
+  (`|V| × |V|`), `KB i ...`, `K0 i ...` (`|E| × |E|`, `K_IJ = w_IJ + w_JI`, zero on adjacent pairs).
+* `saddle`: `rows K ND`, `pivot R` (smallest over largest pivot of the LU of the equilibrated saddle matrix, primal
+  unknowns scaled by `1/sqrt(Ā_ii)` and constraint rows to unit norm: a unit-free crude inverse
+  condition number; below `1e-13` the oracle answers `SingularSaddle`), `cond K` (infinity-norm
+  condition number `‖M‖‖M⁻¹‖` of the same equilibrated matrix, explicit inverse: the Rust test trusts
+  a solve to about `50 eps K`), `phi` (`Φ` on the K rows), `c i ...`
+  (the Jacobian, `K × ND`, columns `v · ncoords + slot`), `g V X Y Z` (`g̃`), `lambda`, `dfg` (`dF·g̃`),
+  `gnorm` (`‖g̃‖₂`).
+* `project`: `rows`, `pivot`, `lbar` (`ℓ̄₀` of the base curve), `tau` (the step actually used), `phi`, `g V X Y Z`,
+  `result STATUS ITERATIONS` (`converged`, `max-iterations`, `diverged`, `tangent-flipped C`),
+  `maxviol` (`max|Φ|` at the end), `hist` (`max_r |Φ_r|/tol_r` at the trial point and after every
+  iteration), `x V X Y Z` (final positions). The row tolerances are `τ_len` for length rows,
+  `τ_len/ℓ̄₀` for tangent rows and `τ_len |∇f(γ_v)|` for surface rows (over the active
+  coordinates, at the current iterate); failure when the violation grows by more than 10× the
+  trial's, at the iteration limit, or when a tangent site ends with `s·X ≤ 0` (SPEC §6.2).
+
+**Choices where the SPEC leaves room.** Tangent frame: Duff et al. 2017 as in SPEC D7 (the
+multipliers `λ` of tangent rows depend on it, `g̃` does not). Degree-2 vertex tangent: `a`, `b` are
+the other ends of the first and second incident edge in edge order; `s = (γ_v−γ_a)/|·| + (γ_b−γ_v)/|·|`
+(not normalized). Edge intersection: closest points of two segments (Ericson 5.1.9), threshold
+`1e-12 ℓ̄`. Planar mode: tangent constraints answer `Unsupported`. Rows are never dropped (SPEC D9):
+a redundant row gives a singular saddle. Penalties and the Armijo step are not modelled
+(see below).
+
+**Not yet done.** Task `step` (one normalized-Armijo step with a fixed schedule: trial `τ` sequence,
+chord iterations, accepted `τ`, positions; SPEC §13.6, §7) waits for the step API of the Rust crate
+(WP3); task `penalties` (WP7).
+
+**Rust side.** `crates/ddg-repulsive-curves/tests/oracle.rs` replays the fixtures (always) and fuzzes
+(`#[ignore]`) against the executable; its module docs state the tolerances and how to run it
+(`DDG_RC_FUZZ_CASES=200000 cargo test --release -p ddg-repulsive-curves --test oracle -- --ignored --nocapture`).

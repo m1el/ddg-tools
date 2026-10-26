@@ -269,7 +269,7 @@ private def printSaddle (c : RCCase) (d : Array V3) : Except String String := do
   let sad ← Saddle.build c.net.nv coords G.a rows
   let gr := projectedGradient sad d
   let mut s := s!"case {c.name}\ntask saddle\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\nquadrature {c.quad.name}\n"
-  s := s ++ s!"rows {sad.k} {sad.nd}\n"
+  s := s ++ s!"rows {sad.k} {sad.nd}\npivot {hx sad.pivotRatio}\ncond {hx sad.cond}\n"
   s := s ++ "phi" ++ (rows.foldl (fun acc r => acc ++ " " ++ hx r.phi) "") ++ "\n"
   s := s ++ matrix "c" sad.c sad.k sad.nd
   for v in [0:gr.g.size] do s := s ++ s!"g {v} {hx gr.g[v]!.x} {hx gr.g[v]!.y} {hx gr.g[v]!.z}\n"
@@ -291,7 +291,7 @@ private def printProject (c : RCCase) (d : Array V3) : Except String String := d
   let trial := (Array.range c.net.nv).map fun v => c.net.pos[v]! - V3.smul step gr.g[v]!
   let r := chordProject c.net rc sad trial tol lbar c.maxit
   let mut s := s!"case {c.name}\ntask project\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\nquadrature {c.quad.name}\n"
-  s := s ++ s!"rows {sad.k} {sad.nd}\nlbar {hx lbar}\ntau {hx step}\n"
+  s := s ++ s!"rows {sad.k} {sad.nd}\npivot {hx sad.pivotRatio}\ncond {hx sad.cond}\nlbar {hx lbar}\ntau {hx step}\n"
   s := s ++ "phi" ++ (rows.foldl (fun acc r => acc ++ " " ++ hx r.phi) "") ++ "\n"
   for v in [0:gr.g.size] do s := s ++ s!"g {v} {hx gr.g[v]!.x} {hx gr.g[v]!.y} {hx gr.g[v]!.z}\n"
   s := s ++ s!"result {r.status.name} {r.iterations}\nmaxviol {hx r.maxViolation}\n"

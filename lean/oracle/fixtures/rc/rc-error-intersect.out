@@ -1,0 +1,4 @@
+case rc-error-intersect
+task energy
+status error EdgesIntersect edges 0 and 1 at distance 0.000000
+end

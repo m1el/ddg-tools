@@ -94,6 +94,7 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs (mk "rc-error-no-pairs" "energy" (circle 3 1.0)) "a triangle has no disjoint edges: NoInteractingPairs"
   fs := add fs (mk "rc-error-out-of-range" "energy" { circ with edges := circ.edges.set! 3 (3, 99) }) "edge to vertex 99: VertexOutOfRange"
   fs := add fs { mk "rc-error-not-planar" "energy" circ with planar := some 2, net := { circ with pos := circ.pos.set! 3 ⟨circ.pos[3]!.x, circ.pos[3]!.y, 0.5⟩ } } "planar axis but one vertex off the plane: NotPlanar"
+  fs := add fs (mk "rc-error-intersect" "energy" { pos := #[⟨-1.0, 0.0, 0.0⟩, ⟨1.0, 0.0, 0.0⟩, ⟨0.0, -1.0, 0.0⟩, ⟨0.0, 1.0, 0.0⟩], edges := #[(0, 1), (2, 3)] }) "two crossing edges: EdgesIntersect"
   fs := add fs { mk "rc-error-singular" "saddle" circ with cons := #[.point 0 none, .point 0 none] } "the same point twice: the saddle matrix is singular"
   fs := add fs { mk "rc-error-redundant" "saddle" bumpy with cons := #[.point 1 none, .sphere c0 r0 (some #[1, 4])] } "a surface row at a point-constrained vertex is redundant (D9): singular (the surface value at vertex 1 is not zero, but the row is dependent)"
   fs := add fs { mk "rc-error-tangent-degree" "saddle" tri with cons := #[.barycenter none, .tangent (.vertex 0) none] } "tangent at the degree-3 junction: InvalidTangentSite"

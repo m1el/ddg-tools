@@ -48,7 +48,8 @@ rc-error-coincident	energy	error	coincident non-adjacent vertices: CoincidentVer
 rc-error-no-pairs	energy	error	a triangle has no disjoint edges: NoInteractingPairs	status error NoInteractingPairs no two edges are disjoint
 rc-error-out-of-range	energy	error	edge to vertex 99: VertexOutOfRange	status error VertexOutOfRange edge 3 = (3, 99), 24 vertices
 rc-error-not-planar	energy	error	planar axis but one vertex off the plane: NotPlanar	status error NotPlanar vertex 3 is off the plane
+rc-error-intersect	energy	error	two crossing edges: EdgesIntersect	status error EdgesIntersect edges 0 and 1 at distance 0.000000
 rc-error-singular	saddle	error	the same point twice: the saddle matrix is singular	status error SingularSaddle the saddle matrix is singular
-rc-error-redundant	saddle	error	a surface row at a point-constrained vertex is redundant (D9): singular (the surface value at vertex 1 is not zero, but the row is dependent)	status error SingularSaddle a pivot of the saddle matrix is below 1e-14 of the largest
+rc-error-redundant	saddle	error	a surface row at a point-constrained vertex is redundant (D9): singular (the surface value at vertex 1 is not zero, but the row is dependent)	status error SingularSaddle the equilibrated saddle matrix has a pivot below 1e-13 of the largest
 rc-error-tangent-degree	saddle	error	tangent at the degree-3 junction: InvalidTangentSite	status error InvalidTangentSite vertex 0 has degree 3
 rc-error-tangent-flipped	saddle	error	tangent opposite to its direction: InfeasibleConstraint	status error InfeasibleConstraint tangent opposite to its direction

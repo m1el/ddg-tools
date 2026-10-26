@@ -41,6 +41,7 @@
 //! | Jacobian `C` | normwise `1e-12` |
 //! | `g̃` | normwise `1e-10` plus `1e-12 ℓ̄` (it vanishes at symmetric critical points) |
 //! | `λ`, `dF·g̃`, `‖g̃‖` | normwise `1e-9` plus `1e-12` of the scale |
+//! | all solve quantities (`g̃`, `λ`, `dF·g̃`, projection) | multiplied by `max(1, 50 eps κ / 1e-10)`, `κ` the condition number printed by the oracle (`cond`), for the few percent-of-a-percent ill-conditioned saddles |
 //! | projection: status, number of iterations | exactly, unless a violation history entry is within `1e-5` of 1 (a decision at the tolerance) or the status is a rounding race |
 //! | projection: history `max|Φ_r|/tol_r` | `1e-6` relative plus `1e-3` absolute (entries below 1 are rounding-level residuals) |
 //! | projection: final positions | `1e-9 ℓ̄` |
@@ -89,6 +90,14 @@ const HIST_REL: f64 = 1e-6;
 const HIST_ABS: f64 = 1e-3;
 const POS_LBAR: f64 = 1e-9;
 const DECISION: f64 = 1e-5;
+/// A saddle whose smallest/largest LU pivot is below this is at the edge of singular: if the oracle
+/// calls it singular and this crate does not (or the reverse), neither is wrong.
+const SINGULAR_AMBIGUITY: f64 = 1e-11;
+/// The oracle prints the infinity-norm condition number `κ` of its equilibrated saddle matrix. A
+/// solve is trusted to about `50 eps κ` (`eps = 1.1e-16`); where that exceeds the base tolerance of
+/// the solve quantities (`1e-10`), the tolerances are multiplied by `50 eps κ / 1e-10`.
+const COND_ERROR: f64 = 50.0 * 1.1e-16;
+const SOLVE_BASE: f64 = 1e-10;
 
 // ----- the text format -----
 
@@ -221,7 +230,7 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                 "barycenter" => Spec::Barycenter((l.len() == 5).then(|| p3(l, 2))),
                 "total-length" => Spec::TotalLength((l.len() == 3).then(|| float(&l[2]))),
                 "edge-lengths" => {
-                    Spec::EdgeLengths((l[2] != "all").then(|| ids(l, 2)))
+                    Spec::EdgeLengths((l.len() < 3 || l[2] != "all").then(|| ids(l, 2)))
                 }
                 "point" => Spec::Point(int(&l[2]) as u32, (l.len() == 6).then(|| p3(l, 3))),
                 "sphere" => Spec::Sphere(
@@ -283,6 +292,8 @@ struct Stats {
     error_cases: usize,
     skipped: usize,
     tie_skips: usize,
+    ill_conditioned: usize,
+    ambiguous_singular: usize,
     statuses: BTreeMap<String, usize>,
     comparisons: usize,
     /// per quantity: (largest ratio error/tolerance, number of comparisons)
@@ -300,6 +311,8 @@ impl Stats {
         self.error_cases += o.error_cases;
         self.skipped += o.skipped;
         self.tie_skips += o.tie_skips;
+        self.ill_conditioned += o.ill_conditioned;
+        self.ambiguous_singular += o.ambiguous_singular;
         for (k, v) in o.statuses {
             *self.statuses.entry(k).or_default() += v;
         }
@@ -332,12 +345,14 @@ impl Stats {
 
     fn report(&self) -> String {
         let mut s = format!(
-            "{} cases ({} answered, {} errors, {} skipped, {} decision ties), {} comparisons, {} disagreements\n",
+            "{} cases ({} answered, {} errors, {} skipped, {} decision ties, {} ill-conditioned saddles with scaled tolerances, {} singular-or-not ambiguities), {} comparisons, {} disagreements\n",
             self.cases,
             self.ok_cases,
             self.error_cases,
             self.skipped,
             self.tie_skips,
+            self.ill_conditioned,
+            self.ambiguous_singular,
             self.comparisons,
             self.problems.len()
         );
@@ -507,7 +522,11 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
         }
         stats.error_cases += 1;
         match rust_pipeline_error(input) {
-            Some(e) => {
+            (None, Some(ratio)) if kind == "SingularSaddle" && ratio < SINGULAR_AMBIGUITY => {
+                // the saddle is at the edge of singular for both: either answer is right
+                stats.ambiguous_singular += 1;
+            }
+            (Some(e), _) => {
                 if !error_matches(&kind, &e) {
                     stats.problem(
                         name,
@@ -515,7 +534,7 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
                     );
                 }
             }
-            None => stats.problem(
+            (None, _) => stats.problem(
                 name,
                 format!("the oracle reports {kind} ({}); this crate accepts the input", l[3..].join(" ")),
             ),
@@ -544,18 +563,21 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
 }
 
 /// The error this crate returns for the input, running the same pipeline as the task.
-fn rust_pipeline_error(input: &Input) -> Option<RcError> {
+fn rust_pipeline_error(input: &Input) -> (Option<RcError>, Option<f64>) {
     let ex = match exponents(input) {
         Ok(e) => e,
-        Err(e) => return Some(e),
+        Err(e) => return (Some(e), None),
     };
     let net = match network(input) {
         Ok(n) => n,
-        Err(e) => return Some(e),
+        Err(e) => return (Some(e), None),
     };
     match input.task.as_str() {
-        "energy" | "gram" => None,
-        _ => solve_rust(input, &net, ex).err(),
+        "energy" | "gram" => (None, None),
+        _ => match solve_rust(input, &net, ex) {
+            Ok((_, _, solver)) => (None, Some(solver.pivot_ratio())),
+            Err(e) => (Some(e), None),
+        },
     }
 }
 
@@ -640,8 +662,20 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     let name = input.name.as_str();
     let (s, cs, mut solver) = match solve_rust(input, net, ex) {
         Ok(x) => x,
-        Err(e) => return stats.problem(name, format!("the oracle solves the saddle; this crate: {e:?}")),
+        Err(e) => {
+            let piv = float(&first(out, "pivot").unwrap()[1]);
+            if piv < SINGULAR_AMBIGUITY && variant(&e).starts_with("Singular") {
+                stats.ambiguous_singular += 1;
+                return;
+            }
+            return stats.problem(name, format!("the oracle solves the saddle; this crate: {e:?}"));
+        }
     };
+    let cond = float(&first(out, "cond").unwrap()[1]);
+    let mult = (COND_ERROR * cond / SOLVE_BASE).max(1.0);
+    if mult > 1.0 {
+        stats.ill_conditioned += 1;
+    }
     let rows = first(out, "rows").expect("rows line");
     let (ok, ond) = (int(&rows[1]), int(&rows[2]));
     if ok != s.n_rows || ond != s.n_dofs {
@@ -660,7 +694,7 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
         let g_o = oracle_points(out, "g");
         let g_mine = flat(&s.g);
         let g_oracle = flat(&g_o);
-        stats.check(name, "projected gradient", normwise(&g_mine, &g_oracle, G_REL, G_ABS_LBAR * lbar), || {
+        stats.check(name, "projected gradient", normwise(&g_mine, &g_oracle, G_REL * mult, G_ABS_LBAR * lbar * mult), || {
             format!("max|g| {:.3e}", max_abs(&g_oracle))
         });
         let lam_o: Vec<f64> = first(out, "lambda").unwrap()[1..].iter().map(|t| float(t)).collect();
@@ -668,10 +702,10 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
         let gn_o = float(&first(out, "gnorm").unwrap()[1]);
         // scales of the quantities: lambda by its own max, dF.g by the product of the norms
         let gscale = max_abs(&g_oracle).max(1e-300);
-        stats.check(name, "multipliers", normwise(&s.lambda, &lam_o, SCALAR_REL, 0.0), || "λ".into());
+        stats.check(name, "multipliers", normwise(&s.lambda, &lam_o, SCALAR_REL * mult, 0.0), || "λ".into());
         let dscale = (dfg_o.abs()).max(1e-300);
-        stats.check(name, "dF.g", (s.dfg - dfg_o).abs() / (SCALAR_REL * dscale + s.n_dofs as f64 * s.diff_max * G_ABS_LBAR * lbar), || format!("{} vs {}", s.dfg, dfg_o));
-        stats.check(name, "gradient norm", (s.gnorm - gn_o).abs() / (SCALAR_REL * gn_o.abs() + G_ABS_LBAR * lbar), || format!("{} vs {}", s.gnorm, gn_o));
+        stats.check(name, "dF.g", (s.dfg - dfg_o).abs() / (SCALAR_REL * mult * dscale + s.n_dofs as f64 * s.diff_max * G_ABS_LBAR * lbar * mult), || format!("{} vs {}", s.dfg, dfg_o));
+        stats.check(name, "gradient norm", (s.gnorm - gn_o).abs() / (SCALAR_REL * mult * gn_o.abs() + G_ABS_LBAR * lbar * mult), || format!("{} vs {}", s.gnorm, gn_o));
         let _ = gscale;
         return;
     }
@@ -723,7 +757,7 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     // history entries up to the common length
     for i in 0..n_common {
         let (a, b) = (pr.history[i], hist_o[i]);
-        let ratio = (a - b).abs() / (HIST_REL * a.abs().max(b.abs()) + HIST_ABS);
+        let ratio = (a - b).abs() / ((HIST_REL * a.abs().max(b.abs()) + HIST_ABS) * mult);
         stats.check(name, "projection history", ratio, || format!("entry {i}: {a} vs {b} (all: {:?} vs {:?})", pr.history, hist_o));
     }
     if near_tie {
@@ -744,13 +778,13 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
     let ratio = {
         let (a, b) = (flat(&pr.positions), flat(&x_o));
         let err = a.iter().zip(&b).fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
-        err / (POS_LBAR * lbar)
+        err / (POS_LBAR * lbar * mult)
     };
     stats.check(name, "projected positions", ratio, || "x".into());
     let mv_o = float(&first(out, "maxviol").unwrap()[1]);
     // the final violation is rounding-level after convergence; compare only unconverged endings
     if my_status != "converged" {
-        stats.check(name, "final violation", (pr.max_violation - mv_o).abs() / (1e-6 * mv_o.abs() + 1e-12 * lbar), || format!("{} vs {}", pr.max_violation, mv_o));
+        stats.check(name, "final violation", (pr.max_violation - mv_o).abs() / ((1e-6 * mv_o.abs() + 1e-12 * lbar) * mult), || format!("{} vs {}", pr.max_violation, mv_o));
     }
 }
 

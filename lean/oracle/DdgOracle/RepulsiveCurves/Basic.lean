@@ -135,6 +135,27 @@ def Net.nPairs (n : Net) : Nat := Id.run do
       if !n.adj i j then c := c + 1
   return c
 
+/-- Distance between the segments `p1 q1` and `p2 q2` (closest points of two segments, clamped
+projections; Ericson, *Real-Time Collision Detection*, 5.1.9). -/
+def segmentDistance (p1 q1 p2 q2 : V3) : Float :=
+  let d1 := q1 - p1
+  let d2 := q2 - p2
+  let r := p1 - p2
+  let a := d1.dot d1
+  let e := d2.dot d2
+  let f := d2.dot r
+  let c := d1.dot r
+  let b := d1.dot d2
+  let clamp := fun (x : Float) => if x < 0.0 then 0.0 else if x > 1.0 then 1.0 else x
+  let denom := a * e - b * b
+  let s0 := if denom > 0.0 then clamp ((b * f - c * e) / denom) else 0.0
+  let t0 := (b * s0 + f) / e
+  let (s, t) :=
+    if t0 < 0.0 then (clamp (-c / a), 0.0)
+    else if t0 > 1.0 then (clamp ((b - c) / a), 1.0)
+    else (s0, t0)
+  ((p1 + s * d1) - (p2 + t * d2)).norm
+
 /-- The checks of SPEC §2.3 (all but `EdgesIntersect`), named like the Rust error variants. -/
 def Net.validate (n : Net) : Except String Unit := do
   for i in [0:n.edges.size] do
@@ -158,6 +179,14 @@ def Net.validate (n : Net) : Except String Unit := do
     for b in [a+1:n.nv] do
       let d := n.pos[a]! - n.pos[b]!
       if d.x == 0.0 && d.y == 0.0 && d.z == 0.0 then throw s!"CoincidentVertices: {a} and {b}"
+  let lbar := (n.geo.len.foldl (· + ·) 0.0) / n.ne.toFloat
+  for i in [0:n.ne] do
+    for j in [i+1:n.ne] do
+      if !n.adj i j then
+        let (a, b) := n.edges[i]!
+        let (c, d) := n.edges[j]!
+        let dist := segmentDistance n.pos[a]! n.pos[b]! n.pos[c]! n.pos[d]!
+        if dist ≤ 1e-12 * lbar then throw s!"EdgesIntersect: edges {i} and {j} at distance {dist}"
   if n.nPairs == 0 then throw "NoInteractingPairs: no two edges are disjoint"
 
 /-- The coordinates carried by the unknowns: all three, or two in planar mode (SPEC §2.2). -/
