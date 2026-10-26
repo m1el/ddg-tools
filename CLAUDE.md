@@ -37,12 +37,15 @@ crates/ddg-bff             boundary first flattening + cutting
 crates/ddg-variational-cuts  the cut flow of the second paper; `SPEC.md` is its contract
 crates/ddg-intrinsic       intrinsic triangulations (signposts, flips, Delaunay, refinement, overlay);
                            `SPEC.md` is its contract; the authors' MIT demo may be used as a reference
+crates/ddg-intrinsic-apps  applications of intrinsic triangulations (paper Sec. 5): Steiner trees, FEM,
+                           heat-method distance, adaptive refinement, tangent fields; `SPEC.md` N30-N49
 crates/ddg-developability  the developability flow of the fourth paper (energies, L-BFGS, subdivision,
                            remeshing, cut and flatten); `SPEC.md` is its contract
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs;
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
-blender/                   Blender extension: mesh -> UV map; cut operators (Start, Flow, Apply)
+blender/                   Blender extension: mesh -> UV map; cut operators (Start, Flow, Apply); map to sphere;
+                           Make Developable, Show Developability, Developable Seams + UV
 lean/oracle/               Lake package, no Mathlib: scalar-generic formula definitions and a Float
                            executable used as a differential-testing oracle
 lean/proofs/               Lake package on Mathlib: machine-checked derivations of the formulas the Rust code uses

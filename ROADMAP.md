@@ -323,9 +323,8 @@ Open:
   (`CovarianceMax`) flow (spot control, no remesh: 1.70 after 200 iterations against their 0.35)
   is explained (2026-10-20, two-team clean room, COMPARISON.md §3.3): their line search starts at
   2 × the previous step (our new opt-in `FirstTrial::GrowPrevious`, D37: 1.10) and has no step
-  cap (with a cap of 2 ℓ̄: 0.062 at their level of distortion). Open: whether to make D37 the
-  default (lower in 28 of 36 study runs, but it traps spot `intrinsic`);
-  the `develop` example's `RESULT energy=` shows the `--energy` default when `--rounds` sets
+  cap (with a cap of 2 ℓ̄: 0.062 at their level of distortion). D37 stays opt-in (the user,
+  2026-10-26: the more reliable rule is the default). Open: the `develop` example's `RESULT energy=` shows the `--energy` default when `--rounds` sets
   another energy.
 * **Timings** measured on 2026-10-19 on a quiet machine (energy, eig and flow benches with
   4/16/64 threads; Blender end-to-end rows "2 sub x 500", "1 sub x 500", "none"). Open: the Blender
