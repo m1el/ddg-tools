@@ -326,11 +326,12 @@ Open:
   cap (with a cap of 2 ℓ̄: 0.062 at their level of distortion). D37 stays opt-in (the user,
   2026-10-26: the more reliable rule is the default). Open: the `develop` example's `RESULT energy=` shows the `--energy` default when `--rounds` sets
   another energy.
-* **Timings** measured on 2026-10-19 on a quiet machine (energy, eig and flow benches with
-  4/16/64 threads; Blender end-to-end rows "2 sub x 500", "1 sub x 500", "none"). Open: the Blender
-  rows of the long flows (N x 5000, 0 sub, 3000, converged control meshes) and the study timings
-  of SPEC 12.1 to 12.5 (parallel runs) were not re-run; the thread scaling of the energy is only
-  2 to 10 times at 64 threads (SPEC 12.7), not investigated.
+* **Timings** measured on a quiet machine, single thread, one job at a time (energy, eig and flow
+  benches with 4/16/64 threads on 2026-10-19; the Blender end-to-end table of `blender/README.md`
+  (all 57 rows, including the long flows N x 5000, 0 sub, 3000 and the converged control meshes) and
+  the 132 jobs of SPEC 12.5 on 2026-10-26, pinned to one core, load 1.1 to 2.8). SPEC 12.1 to 12.4
+  hold only wall-clock totals of parallel studies and were not re-run. Open: the thread scaling of
+  the energy is only 2 to 10 times at 64 threads (SPEC 12.7), not investigated.
 * The dense meshes do not converge at the default budget (every round ends by
   `max_iterations`); only the control meshes approach zero energy.
 * Done (SPEC D34): a converged flow ends `Stationary` (was `line_search_failed`).

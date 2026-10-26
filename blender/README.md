@@ -368,13 +368,26 @@ measured in `E_lambda` although round 0 minimized `E_P`), *thin faces* (the libr
 seam edges and terminals of the cut, charts, cones, *overlap* (the pipeline's sampled estimate of
 the UV area covered more than once, after the splits), *splits* (charts the overlap splitting
 added: charts - 1), *mirrored* UV triangles (clockwise in UV), and seconds. **All seconds are
-from runs in parallel on a loaded machine (24 jobs, 2 rayon threads each, load 40 to 140; another
-study ran at the same time) and are not benchmarks.** The quiet-machine single-thread times of
-2026-10-19 (commit e965577) are for the previous default flow (`E_lambda` in every round, now
-Coarse Energy "Same as Energy") and a Seams + UV without splitting; no row here has unchanged
-settings, so they are not carried into the table: spot (92k triangles after two subdivisions)
-68 to 70 s, bob 102 to 110 s (170k), blub 167 to 169 s (226k), the control meshes and primitives
-0 to 8 s for 3 x 500 iterations. The cost of `E_P` in round 0 is small (the coarse mesh is 1 / 16
+single-thread, quiet-machine measurements of 2026-10-26** (commit b55f6cd, release build of the extension from
+`scripts/blender-build-extension.sh`, AMD Ryzen Threadripper 3970X, 32 cores / 64 threads, Blender
+headless): one Blender process at a time, pinned to one core (`taskset -c 2`) with
+`RAYON_NUM_THREADS=1`, nothing else of ours running; the 1-minute load average was 1.2 to 2.8
+(one core is the measurement itself, the rest is other idle desktop sessions). The rows of 500
+iterations per round are `E2E_JOBS=1 RAYON_NUM_THREADS=1 taskset -c 2 scripts/e2e-developable.sh
+runs_tmp/e2e-quiet-2026-10-26` (45 cases, 24 min), the rows with other budgets (`N sub x 5000`,
+`0 sub x 20000`, `1 sub x 3000`) are the same script's Blender command with `--iterations` and
+`--sweep`, one case after the other (12 cases, 10 min). They replace the seconds of the table made
+under load (24 jobs of 2 rayon threads, load 40 to 140), which were 1.2 to 2 times higher on
+the small meshes and within 10 % either way on the dense ones. Every other column reproduced
+exactly except the sphere's 2 x 500 row (triangles 15358, energy 0.445 before; the sphere's flow
+is not deterministic from run to run: 15338 to 15360 triangles in five runs, energy 0.443 to
+0.454).
+The quiet single-thread times of 2026-10-19 (commit e965577) are for the previous default flow
+(`E_lambda` in every round, now Coarse Energy "Same as Energy") and a Seams + UV without splitting,
+so they are not comparable row by row: spot (92k triangles after two subdivisions) 68 to 70 s, bob
+102 to 110 s (170k), blub 167 to 169 s (226k), the control meshes and primitives 0 to 8 s for
+3 x 500 iterations; with the current defaults the same meshes take 59 to 62 s (spot), 94 to 102 s
+(bob) and 154 to 160 s (blub), the control meshes and primitives 0.5 to 9 s. The cost of `E_P` in round 0 is small (the coarse mesh is 1 / 16
 of the final one). The paper reports "seconds to a few minutes" single-threaded for its examples.
 
 **The table replaces the earlier one, which was made before D36, before Split Overlapping
@@ -383,63 +396,63 @@ fallback.**
 
 | mesh | flow (subdivisions x iterations per round) | triangles | iterations done | rounds end | energy | thin faces | seam edges | terminals | charts | cones | overlap | splits | mirrored | flow s | seams+UV s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| blub_control | 2 sub x 500 | 2794 | 1500 | max/max/max | 38 to 0.425 | 4 | 239 | 144 | 7 | 0 | 0.0 % | 6 | 0 | 3.3 | 0.09 |
-| blub_control | 2 sub x 5000 | 2296 | 7957 | stall/stat/stat | 38 to 1.69e-11 | 0 | 158 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 4.5 | 0.05 |
-| blub_control | 1 sub x 500 | 710 | 1000 | max/max | 38 to 0.777 | 2 | 158 | 135 | 10 | 0 | 0.0 % | 9 | 0 | 0.9 | 0.04 |
-| blub_control | 1 sub x 5000 | 574 | 7921 | stall/stat | 38 to 1.76e-11 | 0 | 79 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 3.8 | 0.01 |
-| blub_control | none | - | - | - | - | - | 110 | 111 | 8 | 0 | 0.0 % | 7 | 0 | - | 0.03 |
-| blub_quad | 2 sub x 500 | 226814 | 1500 | max/max/max | 46.3 to 5.1 | 0 | 3095 | 776 | 6 | 0 | 0.1 % | 5 | 0 | 144.6 | 18.97 |
-| blub_quad | 1 sub x 500 | 56716 | 1000 | max/max | 46.3 to 8.48 | 0 | 2963 | 1839 | 11 | 0 | 2.0 % | 10 | 0 | 41.4 | 5.06 |
-| blub_quad | 0 sub x 5000 | 13830 | 5000 | max | 46.3 to 4.07 | 0 | 1181 | 912 | 22 | 0 | 0.0 % | 21 | 0 | 58.1 | 0.54 |
-| blub_quad | none | - | - | - | - | - | 5073 | 5024 | 33 | 0 | 1.9 % | 32 | 0 | - | 1.23 |
-| blub_tri | 2 sub x 500 | 226836 | 1500 | max/max/max | 45.6 to 4.37 | 0 | 2611 | 551 | 8 | 0 | 0.2 % | 7 | 0 | 142.1 | 21.72 |
-| blub_tri | 1 sub x 500 | 56718 | 1000 | max/max | 45.6 to 7.37 | 0 | 2743 | 1632 | 22 | 0 | 0.1 % | 21 | 0 | 45.2 | 3.52 |
-| blub_tri | none | - | - | - | - | - | 5028 | 4982 | 27 | 0 | 4.2 % | 26 | 0 | - | 0.91 |
-| bob_control | 2 sub x 500 | 10106 | 1500 | max/max/max | 47.4 to 1.61 | 0 | 652 | 500 | 6 | 0 | 0.1 % | 5 | 0 | 9.1 | 0.41 |
-| bob_control | 2 sub x 5000 | 8090 | 15000 | max/max/max | 47.4 to 0.269 | 0 | 170 | 106 | 4 | 0 | 0.0 % | 3 | 0 | 45.1 | 0.19 |
-| bob_control | 1 sub x 500 | 2528 | 1000 | max/max | 47.4 to 2.9 | 0 | 445 | 405 | 9 | 0 | 0.0 % | 8 | 0 | 2.6 | 0.06 |
-| bob_control | 1 sub x 5000 | 2048 | 10000 | max/max | 47.4 to 0.49 | 0 | 182 | 143 | 8 | 0 | 0.0 % | 7 | 0 | 15.6 | 0.06 |
-| bob_control | none | - | - | - | - | - | 335 | 334 | 12 | 0 | 0.0 % | 11 | 0 | - | 0.05 |
-| bob_quad | 2 sub x 500 | 170792 | 1500 | max/max/max | 42.1 to 4.93 | 0 | 1462 | 550 | 3 | 0 | 0.0 % | 2 | 0 | 95.4 | 5.89 |
-| bob_quad | 1 sub x 500 | 42700 | 1000 | max/max | 42.1 to 9.24 | 0 | 3471 | 3166 | 24 | 0 | 0.3 % | 23 | 0 | 29.4 | 3.29 |
-| bob_quad | 0 sub x 5000 | 10388 | 5000 | max | 42.1 to 4.55 | 0 | 1132 | 1042 | 9 | 0 | 0.1 % | 8 | 0 | 42.4 | 0.28 |
-| bob_quad | none | - | - | - | - | - | 4340 | 4331 | 11 | 0 | 6.5 % | 10 | 0 | - | 0.60 |
-| bob_tri | 2 sub x 500 | 170818 | 1500 | max/max/max | 42.9 to 4.08 | 0 | 1592 | 499 | 3 | 0 | 0.0 % | 2 | 0 | 101.0 | 5.43 |
-| bob_tri | 1 sub x 500 | 42710 | 1000 | max/max | 42.9 to 7.32 | 0 | 2531 | 2070 | 20 | 0 | 0.3 % | 19 | 0 | 29.3 | 3.21 |
-| bob_tri | none | - | - | - | - | - | 4352 | 4342 | 33 | 0 | 1.4 % | 32 | 0 | - | 0.77 |
-| prim_cube | 2 sub x 500 | 4534 | 1500 | max/max/max | 12.6 to 0.485 | 0 | 160 | 138 | 1 | 0 | 0.0 % | 0 | 0 | 5.0 | 0.04 |
-| prim_cube | 1 sub x 500 | 1136 | 1000 | max/max | 12.6 to 0.883 | 0 | 100 | 90 | 1 | 0 | 0.0 % | 0 | 0 | 1.2 | 0.04 |
-| prim_cube | none | - | - | - | - | - | 35 | 8 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
-| prim_cylinder | 2 sub x 500 | 960 | 1500 | max/max/max | 1.93 to 1.83e-07 | 0 | 108 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 1.1 | 0.01 |
-| prim_cylinder | 1 sub x 500 | 240 | 1000 | max/max | 1.93 to 1.11e-06 | 0 | 54 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 0.4 | 0.00 |
-| prim_cylinder | none | - | - | - | - | - | 63 | 64 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
-| prim_monkey | 2 sub x 500 | 14360 | 1500 | max/max/max | 148 to 2.71 | 0 | 821 | 554 | 12 | 0 | 0.4 % | 9 | 0 | 13.5 | 0.77 |
-| prim_monkey | 1 sub x 500 | 3600 | 1000 | max/max | 148 to 5.02 | 0 | 539 | 438 | 17 | 0 | 0.0 % | 14 | 0 | 4.8 | 0.19 |
-| prim_monkey | none | - | - | - | - | - | 464 | 483 | 35 | 0 | 0.1 % | 32 | 0 | - | 0.05 |
-| prim_plane | 2 sub x 500 | 7998 | 1500 | max/max/max | 149 to 0.000404 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 6.5 | 0.08 |
-| prim_plane | 1 sub x 500 | 2000 | 1000 | max/max | 149 to 0.00064 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 2.2 | 0.02 |
-| prim_plane | none | - | - | - | - | - | 225 | 269 | 27 | 0 | 0.0 % | 26 | 0 | - | 0.04 |
-| prim_sphere | 2 sub x 500 | 15358 | 1500 | max/max/max | 15.5 to 0.445 | 0 | 270 | 256 | 1 | 0 | 0.0 % | 0 | 0 | 10.2 | 0.16 |
-| prim_sphere | 1 sub x 500 | 3840 | 1000 | max/max | 15.5 to 0.867 | 0 | 134 | 128 | 1 | 0 | 0.0 % | 0 | 0 | 3.2 | 0.04 |
-| prim_sphere | none | - | - | - | - | - | 481 | 482 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.02 |
-| prim_torus | 2 sub x 500 | 16014 | 1500 | max/max/max | 15.5 to 0.245 | 0 | 238 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 12.5 | 0.19 |
-| prim_torus | 1 sub x 500 | 4012 | 1000 | max/max | 15.5 to 0.475 | 0 | 165 | 139 | 1 | 0 | 0.0 % | 0 | 0 | 4.0 | 0.04 |
-| prim_torus | none | - | - | - | - | - | 513 | 512 | 3 | 0 | 0.1 % | 2 | 0 | - | 0.04 |
-| spot_control | 2 sub x 500 | 5216 | 1500 | max/max/max | 101 to 1.41 | 0 | 456 | 303 | 16 | 0 | 0.0 % | 15 | 0 | 5.2 | 0.24 |
-| spot_control | 2 sub x 5000 | 2604 | 15000 | max/max/max | 101 to 0.0317 | 3 | 211 | 114 | 8 | 0 | 0.0 % | 7 | 0 | 18.2 | 0.10 |
-| spot_control | 1 sub x 500 | 1308 | 1000 | max/max | 101 to 2.64 | 0 | 305 | 264 | 19 | 0 | 0.0 % | 18 | 0 | 1.6 | 0.05 |
-| spot_control | 1 sub x 5000 | 672 | 10000 | max/max | 101 to 0.0706 | 5 | 114 | 84 | 5 | 0 | 0.1 % | 4 | 0 | 7.5 | 0.02 |
-| spot_control | 0 sub x 5000 | 240 | 4311 | stat | 101 to 2.07e-09 | 2 | 67 | 64 | 6 | 0 | 0.0 % | 5 | 0 | 1.6 | 0.01 |
-| spot_control | none | - | - | - | - | - | 182 | 183 | 19 | 0 | 0.0 % | 18 | 0 | - | 0.03 |
-| spot_quad | 2 sub x 500 | 93172 | 1500 | max/max/max | 111 to 9.26 | 0 | 3435 | 1779 | 3 | 0 | 4.1 % | 2 | 0 | 64.8 | 7.83 |
-| spot_quad | 1 sub x 500 | 23302 | 1000 | max/max | 111 to 16 | 0 | 2559 | 2010 | 33 | 0 | 0.1 % | 32 | 0 | 19.7 | 1.72 |
-| spot_quad | 1 sub x 3000 | 22876 | 6000 | max/max | 111 to 11.5 | 0 | 2016 | 1593 | 13 | 0 | 1.1 % | 12 | 0 | 77.1 | 1.43 |
-| spot_quad | 0 sub x 5000 | 5406 | 5000 | max | 111 to 5.42 | 0 | 895 | 824 | 33 | 0 | 0.1 % | 32 | 0 | 26.8 | 0.22 |
-| spot_quad | 0 sub x 20000 | 4742 | 20000 | max | 111 to 1.63 | 0 | 463 | 413 | 20 | 0 | 0.0 % | 19 | 0 | 87.2 | 0.20 |
-| spot_quad | none | - | - | - | - | - | 2617 | 2593 | 33 | 0 | 4.1 % | 32 | 0 | - | 0.35 |
-| spot_tri | 2 sub x 500 | 93008 | 1500 | max/max/max | 112 to 8.88 | 0 | 3199 | 1816 | 18 | 0 | 0.1 % | 17 | 0 | 66.6 | 4.81 |
-| spot_tri | 1 sub x 500 | 23262 | 1000 | max/max | 112 to 15.4 | 0 | 2433 | 2033 | 22 | 0 | 1.1 % | 21 | 0 | 20.9 | 1.04 |
-| spot_tri | none | - | - | - | - | - | 2674 | 2663 | 33 | 0 | 2.2 % | 32 | 0 | - | 0.37 |
+| blub_control | 2 sub x 500 | 2794 | 1500 | max/max/max | 38 to 0.425 | 4 | 239 | 144 | 7 | 0 | 0.0 % | 6 | 0 | 1.9 | 0.06 |
+| blub_control | 2 sub x 5000 | 2296 | 7957 | stall/stat/stat | 38 to 1.69e-11 | 0 | 158 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 3.2 | 0.04 |
+| blub_control | 1 sub x 500 | 710 | 1000 | max/max | 38 to 0.777 | 2 | 158 | 135 | 10 | 0 | 0.0 % | 9 | 0 | 0.6 | 0.03 |
+| blub_control | 1 sub x 5000 | 574 | 7921 | stall/stat | 38 to 1.76e-11 | 0 | 79 | 39 | 4 | 0 | 0.0 % | 3 | 0 | 2.6 | 0.01 |
+| blub_control | none | - | - | - | - | - | 110 | 111 | 8 | 0 | 0.0 % | 7 | 0 | - | 0.01 |
+| blub_quad | 2 sub x 500 | 226814 | 1500 | max/max/max | 46.3 to 5.1 | 0 | 3095 | 776 | 6 | 0 | 0.1 % | 5 | 0 | 160.0 | 16.83 |
+| blub_quad | 1 sub x 500 | 56716 | 1000 | max/max | 46.3 to 8.48 | 0 | 2963 | 1839 | 11 | 0 | 2.0 % | 10 | 0 | 36.0 | 4.12 |
+| blub_quad | 0 sub x 5000 | 13830 | 5000 | max | 46.3 to 4.07 | 0 | 1181 | 912 | 22 | 0 | 0.0 % | 21 | 0 | 60.2 | 0.51 |
+| blub_quad | none | - | - | - | - | - | 5073 | 5024 | 33 | 0 | 1.9 % | 32 | 0 | - | 0.79 |
+| blub_tri | 2 sub x 500 | 226836 | 1500 | max/max/max | 45.6 to 4.37 | 0 | 2611 | 551 | 8 | 0 | 0.2 % | 7 | 0 | 153.7 | 17.93 |
+| blub_tri | 1 sub x 500 | 56718 | 1000 | max/max | 45.6 to 7.37 | 0 | 2743 | 1632 | 22 | 0 | 0.1 % | 21 | 0 | 36.8 | 3.18 |
+| blub_tri | none | - | - | - | - | - | 5028 | 4982 | 27 | 0 | 4.2 % | 26 | 0 | - | 0.56 |
+| bob_control | 2 sub x 500 | 10106 | 1500 | max/max/max | 47.4 to 1.61 | 0 | 652 | 500 | 6 | 0 | 0.1 % | 5 | 0 | 5.6 | 0.30 |
+| bob_control | 2 sub x 5000 | 8090 | 15000 | max/max/max | 47.4 to 0.269 | 0 | 170 | 106 | 4 | 0 | 0.0 % | 3 | 0 | 44.8 | 0.18 |
+| bob_control | 1 sub x 500 | 2528 | 1000 | max/max | 47.4 to 2.9 | 0 | 445 | 405 | 9 | 0 | 0.0 % | 8 | 0 | 1.6 | 0.05 |
+| bob_control | 1 sub x 5000 | 2048 | 10000 | max/max | 47.4 to 0.49 | 0 | 182 | 143 | 8 | 0 | 0.0 % | 7 | 0 | 14.3 | 0.05 |
+| bob_control | none | - | - | - | - | - | 335 | 334 | 12 | 0 | 0.0 % | 11 | 0 | - | 0.02 |
+| bob_quad | 2 sub x 500 | 170792 | 1500 | max/max/max | 42.1 to 4.93 | 0 | 1462 | 550 | 3 | 0 | 0.0 % | 2 | 0 | 93.9 | 4.14 |
+| bob_quad | 1 sub x 500 | 42700 | 1000 | max/max | 42.1 to 9.24 | 0 | 3471 | 3166 | 24 | 0 | 0.3 % | 23 | 0 | 22.3 | 2.72 |
+| bob_quad | 0 sub x 5000 | 10388 | 5000 | max | 42.1 to 4.55 | 0 | 1132 | 1042 | 9 | 0 | 0.1 % | 8 | 0 | 43.4 | 0.25 |
+| bob_quad | none | - | - | - | - | - | 4340 | 4331 | 11 | 0 | 6.5 % | 10 | 0 | - | 0.40 |
+| bob_tri | 2 sub x 500 | 170818 | 1500 | max/max/max | 42.9 to 4.08 | 0 | 1592 | 499 | 3 | 0 | 0.0 % | 2 | 0 | 101.5 | 4.04 |
+| bob_tri | 1 sub x 500 | 42710 | 1000 | max/max | 42.9 to 7.32 | 0 | 2531 | 2070 | 20 | 0 | 0.3 % | 19 | 0 | 22.1 | 2.54 |
+| bob_tri | none | - | - | - | - | - | 4352 | 4342 | 33 | 0 | 1.4 % | 32 | 0 | - | 0.52 |
+| prim_cube | 2 sub x 500 | 4534 | 1500 | max/max/max | 12.6 to 0.485 | 0 | 160 | 138 | 1 | 0 | 0.0 % | 0 | 0 | 2.6 | 0.03 |
+| prim_cube | 1 sub x 500 | 1136 | 1000 | max/max | 12.6 to 0.883 | 0 | 100 | 90 | 1 | 0 | 0.0 % | 0 | 0 | 0.7 | 0.01 |
+| prim_cube | none | - | - | - | - | - | 35 | 8 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.00 |
+| prim_cylinder | 2 sub x 500 | 960 | 1500 | max/max/max | 1.93 to 1.83e-07 | 0 | 108 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 0.5 | 0.01 |
+| prim_cylinder | 1 sub x 500 | 240 | 1000 | max/max | 1.93 to 1.11e-06 | 0 | 54 | 8 | 1 | 0 | 0.0 % | 0 | 0 | 0.2 | 0.00 |
+| prim_cylinder | none | - | - | - | - | - | 63 | 64 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.00 |
+| prim_monkey | 2 sub x 500 | 14360 | 1500 | max/max/max | 148 to 2.71 | 0 | 821 | 554 | 12 | 0 | 0.4 % | 9 | 0 | 8.9 | 0.56 |
+| prim_monkey | 1 sub x 500 | 3600 | 1000 | max/max | 148 to 5.02 | 0 | 539 | 438 | 17 | 0 | 0.0 % | 14 | 0 | 2.6 | 0.14 |
+| prim_monkey | none | - | - | - | - | - | 464 | 483 | 35 | 0 | 0.1 % | 32 | 0 | - | 0.04 |
+| prim_plane | 2 sub x 500 | 7998 | 1500 | max/max/max | 149 to 0.000404 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 3.9 | 0.05 |
+| prim_plane | 1 sub x 500 | 2000 | 1000 | max/max | 149 to 0.00064 | 0 | 0 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 1.0 | 0.01 |
+| prim_plane | none | - | - | - | - | - | 225 | 269 | 27 | 0 | 0.0 % | 26 | 0 | - | 0.02 |
+| prim_sphere | 2 sub x 500 | 15338 | 1500 | max/max/max | 15.5 to 0.452 | 0 | 270 | 256 | 1 | 0 | 0.0 % | 0 | 0 | 6.5 | 0.11 |
+| prim_sphere | 1 sub x 500 | 3840 | 1000 | max/max | 15.5 to 0.867 | 0 | 134 | 128 | 1 | 0 | 0.0 % | 0 | 0 | 1.7 | 0.02 |
+| prim_sphere | none | - | - | - | - | - | 481 | 482 | 1 | 0 | 0.0 % | 0 | 0 | - | 0.01 |
+| prim_torus | 2 sub x 500 | 16014 | 1500 | max/max/max | 15.5 to 0.245 | 0 | 238 | 0 | 1 | 0 | 0.0 % | 0 | 0 | 8.2 | 0.12 |
+| prim_torus | 1 sub x 500 | 4012 | 1000 | max/max | 15.5 to 0.475 | 0 | 165 | 139 | 1 | 0 | 0.0 % | 0 | 0 | 2.1 | 0.03 |
+| prim_torus | none | - | - | - | - | - | 513 | 512 | 3 | 0 | 0.1 % | 2 | 0 | - | 0.02 |
+| spot_control | 2 sub x 500 | 5216 | 1500 | max/max/max | 101 to 1.41 | 0 | 456 | 303 | 16 | 0 | 0.0 % | 15 | 0 | 3.2 | 0.17 |
+| spot_control | 2 sub x 5000 | 2604 | 15000 | max/max/max | 101 to 0.0317 | 3 | 211 | 114 | 8 | 0 | 0.0 % | 7 | 0 | 15.4 | 0.09 |
+| spot_control | 1 sub x 500 | 1308 | 1000 | max/max | 101 to 2.64 | 0 | 305 | 264 | 19 | 0 | 0.0 % | 18 | 0 | 1.0 | 0.04 |
+| spot_control | 1 sub x 5000 | 672 | 10000 | max/max | 101 to 0.0706 | 5 | 114 | 84 | 5 | 0 | 0.1 % | 4 | 0 | 5.3 | 0.01 |
+| spot_control | 0 sub x 5000 | 240 | 4311 | stat | 101 to 2.07e-09 | 2 | 67 | 64 | 6 | 0 | 0.0 % | 5 | 0 | 1.0 | 0.01 |
+| spot_control | none | - | - | - | - | - | 182 | 183 | 19 | 0 | 0.0 % | 18 | 0 | - | 0.01 |
+| spot_quad | 2 sub x 500 | 93172 | 1500 | max/max/max | 111 to 9.26 | 0 | 3435 | 1779 | 3 | 0 | 4.1 % | 2 | 0 | 58.8 | 6.76 |
+| spot_quad | 1 sub x 500 | 23302 | 1000 | max/max | 111 to 16 | 0 | 2559 | 2010 | 33 | 0 | 0.1 % | 32 | 0 | 14.6 | 1.34 |
+| spot_quad | 1 sub x 3000 | 22876 | 6000 | max/max | 111 to 11.5 | 0 | 2016 | 1593 | 13 | 0 | 1.1 % | 12 | 0 | 84.6 | 1.37 |
+| spot_quad | 0 sub x 5000 | 5406 | 5000 | max | 111 to 5.42 | 0 | 895 | 824 | 33 | 0 | 0.1 % | 32 | 0 | 26.9 | 0.19 |
+| spot_quad | 0 sub x 20000 | 4742 | 20000 | max | 111 to 1.63 | 0 | 463 | 413 | 20 | 0 | 0.0 % | 19 | 0 | 93.6 | 0.19 |
+| spot_quad | none | - | - | - | - | - | 2617 | 2593 | 33 | 0 | 4.1 % | 32 | 0 | - | 0.24 |
+| spot_tri | 2 sub x 500 | 93008 | 1500 | max/max/max | 112 to 8.88 | 0 | 3199 | 1816 | 18 | 0 | 0.1 % | 17 | 0 | 61.6 | 4.02 |
+| spot_tri | 1 sub x 500 | 23262 | 1000 | max/max | 112 to 15.4 | 0 | 2433 | 2033 | 22 | 0 | 1.1 % | 21 | 0 | 14.9 | 0.84 |
+| spot_tri | none | - | - | - | - | - | 2674 | 2663 | 33 | 0 | 2.2 % | 32 | 0 | - | 0.28 |
 
 What the table says.
 
@@ -461,9 +474,9 @@ What the table says.
   shortening needs a flow that is run far longer than the defaults, or a coarse input.
 * **Cones: none in any run**, as before. `Lambda` therefore has no effect.
 * **A coarse input is the cheap way to a converged flow:** the control meshes (220 to 668 triangles)
-  end the defaults with 456 / 652 / 239 seam edges (spot / bob / blub), 5 s. For the input of the
+  end the defaults with 456 / 652 / 239 seam edges (spot / bob / blub), 2 to 6 s. For the input of the
   paper's look use a uniform 1k-triangle mesh, see "Starting mesh" above and the next section.
-* The cylinder is made developable to rounding (energy 1.8e-7, round statuses `max`, 1.1 s); the
+* The cylinder is made developable to rounding (energy 1.8e-7, round statuses `max`, 0.5 s); the
   flow rounds the sphere and the torus as far as the budget goes (energies 0.4 and 0.25).
 
 #### Starting mesh: Remesh (Voxel) + Decimate in Blender

@@ -200,9 +200,10 @@ Full text, with the evidence, in **SPEC §8**. The ones that matter:
 ## Measured
 
 All numbers are from this tree; the studies and their tables are in SPEC §12 (the logs under
-`runs_tmp/` are not committed; the scripts in `examples/` regenerate them). Study timings were taken on
-a 64-core machine loaded by other jobs and are upper bounds; the benches (Speed, below) were run
-alone on a quiet AMD Ryzen Threadripper 3970X (32 cores, 64 threads) on 2026-10-19 (load 0.1 to 1.5).
+`runs_tmp/` are not committed; the scripts in `examples/` regenerate them). The seconds of
+the SPEC §12.5 study (132 jobs) were re-measured on 2026-10-26, one job at a time, single thread, pinned to one
+core (load 1.1 to 1.7); the benches (Speed, below) were run alone on a quiet AMD Ryzen Threadripper
+3970X (32 cores, 64 threads) on 2026-10-19 (load 0.1 to 1.5).
 
 **Gradients (SPEC §10.2).** Central differences, `h = 1e-6 ℓ̄`, against the analytic gradient, for
 all six energies on random stars of valence 3 to 9, boundary fans, an icosphere, a bumpy grid, a
@@ -245,7 +246,7 @@ energies and 2.9 to 3.9 µs for `λ_max` (SPEC §12.7). The flow on spot's contr
 subdivisions (5112 faces, 900 iterations, `E_λ`) takes 1.8 s; one iteration on a 10.7k-face mesh
 about 9 ms. The paper reports "seconds to a few minutes" single-threaded on a 3.4 GHz i7 laptop:
 we are in the same range (Blender end to end, 2 subdivisions, 1500 iterations on 92k to 226k
-faces: 68 to 169 s). Threads: the energy on the 94k-face case gains 2.2 to 5.5 times with 4 to 64
+faces: 59 to 160 s, measured again on 2026-10-26 with the current defaults). Threads: the energy on the 94k-face case gains 2.2 to 5.5 times with 4 to 64
 threads (up to 10 times for `λ_max` with 16); the flow does not gain at 5k to 14k faces (0.8 to 1.4
 times, slower for small meshes).
 
