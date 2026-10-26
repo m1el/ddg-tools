@@ -1610,3 +1610,33 @@ fn roundness(pos: &[P]) -> (f64, f64, f64) {
     }
     (spread, smallest / mean, turning / std::f64::consts::TAU)
 }
+
+/// Three session steps with the multigrid factory give bitwise identical curves at 1, 7 and 64
+/// threads (D25), with the Barnes–Hut energy.
+#[test]
+fn session_with_multigrid_is_bitwise_identical_across_threads() {
+    let (net, pos) = trefoil(300);
+    let o = MgOptions {
+        coarsest_vertices: 40,
+        ..MgOptions::default()
+    };
+    let mut curves = Vec::new();
+    for t in [1, 7, 64] {
+        let factory = Arc::new(MultigridSolvers::with_threads(Some(t), Some(t), o).unwrap());
+        let mut s = Session::new(
+            net.clone(),
+            pos.clone(),
+            session_options(
+                Solver::Custom(factory),
+                EnergyEval::BarnesHut(BhOptions::default()),
+                t,
+            ),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            s.step().unwrap();
+        }
+        curves.push(s.positions().to_vec());
+    }
+    assert!(curves[1] == curves[0] && curves[2] == curves[0]);
+}
