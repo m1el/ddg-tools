@@ -614,8 +614,13 @@ per chord iteration (no factorization to reuse; Sec. 7.4).
 independently (Fig. 20's "Barnes–Hut" curve is BH energy with the dense solve);
 `Backend::Auto { dense_max_vertices }` picks exact + dense for networks of at most
 `dense_max_vertices` vertices (default 1500, measured in §17k) and BH + multigrid above, at the
-session's start and again after each live subdivision. Dense solve: one LU with partial pivoting
-(`faer`, multithreaded) of the `(3|V| + k)` saddle matrix, reused for Eq. 22 and every chord
+session's start and again after each live subdivision. Dense solve (§17l): the Schur-complement
+method of §17b, a Cholesky factorization of `A + ρ u uᵀ` (`u = 𝟙/√|V|`) and its inverse, the
+`k × k` Schur complement `C (M⁻¹ ⊗ I₃) Cᵀ` (Cholesky) and a `3 × 3` block for the translations,
+one step of iterative refinement per solve (`DenseMethod::Schur`, about 30× fewer flops than the
+LU); it falls back to one LU with partial pivoting (`faer`, multithreaded) of the `(3|V| + k)`
+saddle matrix (`DenseMethod::Lu`) when a Cholesky factor fails or is nearly singular, so singular
+saddles are reported as before. The factorization is reused for Eq. 22 and every chord
 iteration. The L², H¹, H² metrics use a sparse LU of their saddle matrices (`ddg_core::sparse`).
 Every solver runs on the session's pools (`SolverRequest::{pool, dense_pool}`), never on rayon's
 global pool. When an iterative solver fails (`MultigridDiverged`, `MultigridNotConverged`), the
@@ -792,10 +797,13 @@ end-to-end table script (§14.5).
 | stop | `GradientNorm { Euclidean, 1e-4 }`, `max_iterations` 1000 | paper Sec. 5.4, Supp. 1.3 (D14); Blender uses `RelativeGradient(1e-3)` |
 | Barnes–Hut | `theta_x 0.125, theta_t 0.25, leaf_size 8` | reference `diag/d < 0.25` ⇔ `r_x/d < 0.125`; tangent bound per Eq. 27; final values by §14.3 (largest θ with differential error ≤ 1e-2 and unchanged iteration counts within 5 %) |
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
-| multigrid | coarsest 512 vertices, 20 levels max, 3+3 CG smoothing, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a 1536-row dense LU, milliseconds |
+| multigrid | coarsest 512 vertices, 20 levels max, 12+12 CG smoothing (24 in the start), FCG, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a small dense coarsest solve, milliseconds; 12+12 with FCG measured in WP6 |
+| multigrid BCT | `theta_x 0.25, theta_t 2` (position-only admissibility), `leaf_pairs 64` | §17l: the reference's rule; `theta_t 0.25` leaves the trees of the perturbed knot nearly dense; direction error against dense 2e-3–8.5e-3 (< 1e-2 of §13.4), 2.3–2.8× faster on knot 96 |
+| multigrid threads | `max_threads Some(16)` | §17l: the hierarchy's products and projections stop gaining past 8–16 threads and get slower at 64 (§17k); results do not depend on it |
+| dense solver | Schur complement, LU fallback | §17l: same solutions as the LU to 1e-13 relative, residual as small or smaller, bitwise across thread counts, 15× faster at 2048 vertices on one thread |
 | back end | `Auto { dense_max_vertices: 1500 }` | measured alone in §17k: exact + dense and BH + multigrid cost the same per step at about 1300 vertices (8 threads) and 1600 (64 threads); exact + dense is the reference computation and wins the tie (§17h had 2000, measured under load) |
 | edge-collapse guard | `min_edge_length_ratio Some(1e-3)` | §17j: an edge that shrinks below 1e-3 of the initial mean edge length fails the step with a named error instead of a singular metric later |
-| dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (`(3\|V\|+k)²` doubles, about 2 GB at 5000) |
+| dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (the Schur method holds about `4\|V\|² + k²` doubles, 1 GB at 5000; its LU fallback `(3\|V\|+k)²`, 3.2 GB) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
 | subdivision | 0 rounds | reference default |
 | surface potential | `p = β − α`, `θ_M = 0.25`, leaf 8 | paper; reference uses `p = β − α`, `θ = 0.25` |
@@ -2005,3 +2013,7 @@ Final energies are not compared here.
 * Q6: the timed evaluation (WP12 phase B) records curve frames for every algorithm on the 24-knot
   subset, at equal wall-clock intervals, in a compact format, and renders a side-by-side grid video
   (one column per algorithm), as in the authors' video. Phase A records energies and final curves only.
+* Q7 (after WP12 part 1): phase A uses the paper's budget, 24 minutes of wall time per run at one
+  thread (60 runs in parallel), no iteration cap below it. Phase B runs the 24-knot subset alone at
+  64 threads (reference methods 300 s, the others 120 s, frames every second), plus the two
+  reference methods at one thread on 6 of those knots; the other one-thread times come from phase A.
