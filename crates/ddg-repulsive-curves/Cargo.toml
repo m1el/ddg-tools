@@ -1,0 +1,11 @@
+[package]
+name = "ddg-repulsive-curves"
+description = "Repulsive Curves (Yu, Schumacher, Crane 2021): tangent-point energy, fractional Sobolev descent, constraints and hierarchical acceleration for curve networks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Dependencies are added by the work packages of SPEC.md §15 (WP1 first).
+[dependencies]
