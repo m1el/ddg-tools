@@ -38,7 +38,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--steps" => o.steps = Some(val()?.parse()?),
             "--backend" => {
                 let v = val()?;
-                o.backend = BackendChoice::parse(&v).ok_or("backend: auto, exact, bh or mg")?;
+                o.backend = BackendChoice::parse(&v).ok_or("backend: auto, exact, bh, mg (Barnes-Hut + multigrid) or emg (exact + multigrid)")?;
             }
             "--threads" => o.threads = Some(val()?.parse()?),
             "--every" => o.frame_every = val()?.parse()?,

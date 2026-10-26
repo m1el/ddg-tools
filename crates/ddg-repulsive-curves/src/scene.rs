@@ -53,9 +53,9 @@ use crate::ccd::segment_segment_distance;
 use crate::constraints::{Constraint, ImplicitSurface, TangentSite, default_constraints};
 use crate::energy::{BhOptions, EnergyEval};
 use crate::error::RcError;
-use crate::io::{parse_curve_obj, read_curve_obj, write_curve_obj};
+use crate::io::{parse_curve_obj, write_curve_obj};
 use crate::kernel::Exponents;
-use crate::multigrid::{MgOptions, MultigridSolvers};
+use crate::multigrid::MgOptions;
 use crate::network::CurveNetwork;
 use crate::obstacle::Obstacle;
 use crate::penalties::{FieldAlignment, LengthDifference, SurfacePotential, TotalLengthPenalty};
@@ -240,7 +240,8 @@ pub struct ResolvedScene {
 /// The back end of a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendChoice {
-    /// Exact energy, dense solver for up to 2000 expected vertices, Barnes–Hut and multigrid above.
+    /// The session's [`Backend::Auto`]: exact energy and dense solver up to the measured
+    /// crossover, Barnes–Hut and multigrid above (`SPEC.md` §17h); re-chosen after a subdivision.
     Auto,
     /// Exact energy, dense solver.
     Exact,
@@ -248,20 +249,20 @@ pub enum BackendChoice {
     BarnesHutDense,
     /// Barnes–Hut energy, multigrid solver.
     BarnesHutMultigrid,
-    /// Exact energy, multigrid solver (used by `Auto` for subdivided curves: the Barnes-Hut
-    /// energy of the session fails after a subdivision, see the WP13 notes).
+    /// Exact energy, multigrid solver.
     ExactMultigrid,
 }
 
 impl BackendChoice {
-    /// Parses `auto`, `exact`, `bh`, `mg`.
+    /// Parses `auto`, `exact`, `bh` (Barnes–Hut + dense), `mg` or `bh-mg` (Barnes–Hut +
+    /// multigrid), `emg` or `exact-mg` (exact + multigrid).
     pub fn parse(s: &str) -> Option<BackendChoice> {
         Some(match s {
             "auto" => BackendChoice::Auto,
             "exact" => BackendChoice::Exact,
             "bh" => BackendChoice::BarnesHutDense,
-            "mg" => BackendChoice::BarnesHutMultigrid,
-            "emg" => BackendChoice::ExactMultigrid,
+            "mg" | "bh-mg" => BackendChoice::BarnesHutMultigrid,
+            "emg" | "exact-mg" => BackendChoice::ExactMultigrid,
             _ => return None,
         })
     }
@@ -482,22 +483,9 @@ impl Scene {
         }
         o.penalties.extend(sp.extra_penalties.iter().cloned());
         // back end
-        let expected = self.network.n_vertices() << sp.subdivide_limit.min(20);
-        let _nthreads = threads;
-        let choice = match backend {
-            BackendChoice::Auto => {
-                if expected <= 2000 {
-                    BackendChoice::Exact
-                } else if sp.subdivide_limit > 0 {
-                    BackendChoice::ExactMultigrid
-                } else {
-                    BackendChoice::BarnesHutMultigrid
-                }
-            }
-            b => b,
-        };
-        o.backend = match choice {
-            BackendChoice::Exact | BackendChoice::Auto => Backend::Explicit {
+        o.backend = match backend {
+            BackendChoice::Auto => Backend::default(),
+            BackendChoice::Exact => Backend::Explicit {
                 energy: EnergyEval::Exact,
                 solver: Solver::Dense,
             },
@@ -505,16 +493,14 @@ impl Scene {
                 energy: EnergyEval::BarnesHut(BhOptions::default()),
                 solver: Solver::Dense,
             },
-            BackendChoice::BarnesHutMultigrid | BackendChoice::ExactMultigrid => {
-                Backend::Explicit {
-                    energy: if choice == BackendChoice::ExactMultigrid {
-                        EnergyEval::Exact
-                    } else {
-                        EnergyEval::BarnesHut(BhOptions::default())
-                    },
-                    solver: Solver::Custom(Arc::new(MultigridSolvers::new(MgOptions::default())?)),
-                }
-            }
+            BackendChoice::BarnesHutMultigrid => Backend::Explicit {
+                energy: EnergyEval::BarnesHut(BhOptions::default()),
+                solver: Solver::Multigrid(MgOptions::default()),
+            },
+            BackendChoice::ExactMultigrid => Backend::Explicit {
+                energy: EnergyEval::Exact,
+                solver: Solver::Multigrid(MgOptions::default()),
+            },
         };
         Ok(o)
     }
@@ -920,7 +906,7 @@ pub fn parse_scene(text: &str, base: &Path, name: &str) -> Result<Scene, RcError
         }
     }
     let curve = curve.ok_or_else(|| perr(0, "the scene has no `curve` line"))?;
-    let (network, positions) = read_curve_obj(&curve)?;
+    let (network, positions) = read_scene_curve(&curve)?;
     if let Some(f) = surface {
         let label = if surface_names.len() == 1 {
             surface_names[0].clone()
@@ -1546,6 +1532,69 @@ pub fn run_scene(scene: &Scene, opts: &RunOptions) -> Result<RunOutcome, RcError
 }
 
 pub mod builtin;
+
+/// Reads the curve file of a scene: [`read_curve_obj`], except that a file without `l` lines and
+/// with exactly one polygon face (`f i j k ...`, the authors' `DoubleTorus/InitialLoop.obj` and
+/// `FreedmanUnknot/FreedmanKnotPlot.obj`) is read as the closed loop through the face's vertices
+/// in that order.
+///
+/// # Errors
+/// [`RcError::Io`]; as [`parse_curve_obj`]; [`RcError::Parse`] for a malformed face.
+pub fn read_scene_curve(
+    path: impl AsRef<std::path::Path>,
+) -> Result<(CurveNetwork, Vec<P>), RcError> {
+    let path = path.as_ref();
+    let text = std::fs::read_to_string(path).map_err(|e| RcError::Io {
+        path: path.display().to_string(),
+        message: e.to_string(),
+    })?;
+    parse_scene_curve(&text).map_err(|e| match e {
+        RcError::Parse { line, message } => RcError::Parse {
+            line,
+            message: format!("{}: {message}", path.display()),
+        },
+        e => e,
+    })
+}
+
+/// [`read_scene_curve`] on text.
+///
+/// # Errors
+/// As [`read_scene_curve`], without the I/O error.
+pub fn parse_scene_curve(text: &str) -> Result<(CurveNetwork, Vec<P>), RcError> {
+    let is_tag = |l: &str, t: &str| l.split_whitespace().next() == Some(t);
+    let has_lines = text.lines().any(|l| is_tag(l, "l"));
+    let faces: Vec<(usize, &str)> = text
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| is_tag(l, "f"))
+        .collect();
+    if has_lines || faces.len() != 1 {
+        return parse_curve_obj(text);
+    }
+    let (ln, face) = faces[0];
+    let first = face
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| RcError::Parse {
+            line: ln + 1,
+            message: "polygon face without vertices".into(),
+        })?;
+    let mut loop_line = String::from("l");
+    for tok in face.split_whitespace().skip(1) {
+        loop_line.push(' ');
+        loop_line.push_str(tok);
+    }
+    loop_line.push(' ');
+    loop_line.push_str(first);
+    let mut out = String::with_capacity(text.len() + loop_line.len() + 1);
+    for (k, l) in text.lines().enumerate() {
+        // Keep the line numbers: the face line becomes the loop.
+        out.push_str(if k == ln { &loop_line } else { l });
+        out.push('\n');
+    }
+    parse_curve_obj(&out)
+}
 
 /// Parses a curve OBJ given as text (convenience for generated scenes).
 ///
