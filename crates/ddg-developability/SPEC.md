@@ -1090,8 +1090,10 @@ quoted as `runs_tmp/dev-*` are not committed (the directory is gitignored); the 
 regenerate them are `examples/study.sh`, `cut_study.sh`/`cut_study.py`, `robust_study.sh`/
 `robust_summary.py`/`robust_compare.py` and the benches. The benchmark numbers of §12.6 and §12.7
 (energy, eig and flow benches) were taken alone on a quiet machine: AMD Ryzen Threadripper 3970X (32 cores, 64 threads), 2026-10-19, nothing else running (load average 0.1 to 1.5 before and during; the multithread parts load the machine themselves). The seconds
-of the studies (§12.1 to §12.5) were taken in parallel runs under load (60 to 150) and remain upper
-bounds.
+of §12.5 were re-measured on 2026-10-26, one job at a time on one pinned core (see there). §12.1
+to §12.4 contain only wall-clock totals of parallel studies ("3 min wall" and the like); those are
+what they say, a duration of the whole study on a loaded machine, and are not single-thread
+numbers; they were not re-run.
 
 ### 12.1 How the flow, the cut and the tests behave
 
@@ -1394,94 +1396,124 @@ over-runs; with 300 it/round the energies are identical.
 `sh crates/ddg-developability/examples/study.sh 60 "100 400"` after
 `cargo build --release -p ddg-developability --example develop`. Every OBJ of `data/models`
 (11 files; polygons fan-triangulated) x 6 energies x iteration budgets 100 and 400 per round, two
-rounds (coarse + one subdivision), 1 thread per job, 60 jobs in parallel, ε = 1e-3, default options
-(remeshing on). 132 jobs in 3 min 7 s wall (machine load average about 60 from other agents; the
-times below are single-thread seconds under that load). Logs: `runs_tmp/dev-flow-study/job-*.log`.
+rounds (coarse + one subdivision, the same energy in both: the example's `--subdivisions`, not the
+`E_P`-then-`E_λ` default of D36), 1 thread per job, ε = 1e-3, default options (remeshing on).
+
+**Re-run on 2026-10-26 with the code of commit b55f6cd, alone.** The first run (2026-10-19, 05:42,
+60 jobs in parallel under a load of about 60, 132 jobs in 3 min 7 s wall) gave seconds that were
+only upper bounds; they and the other columns are replaced. Same 132 jobs, same arguments, but one
+job at a time: `runs_tmp/dev-study-quiet.sh` runs each as `RAYON_NUM_THREADS=1 taskset -c 2
+target-timings/release/examples/develop FILE --energy E --subdivisions 1 --iterations B --threads 1`
+(release build with its own `CARGO_TARGET_DIR`), waits while the 1-minute load average is 3 or more
+(it never had to), one log per job in `runs_tmp/dev-flow-study-quiet/job-*.log`, the tables are
+`table400.md` and `table100.md` there. Machine: AMD Ryzen Threadripper 3970X (32 cores, 64
+threads), 1-minute load average 1.1 to 1.7 during the run (one core is the job itself; nothing else
+of ours was running). 132 jobs, 22 minutes in total; the sum of the job seconds is 1020 s for
+budget 400 and 250 s for budget 100 (4979 s and 1714 s before). A repeated job (spot_quadrangulated
+Covariance 400) reproduces the energy, the flips and collapses and the cut exactly and the seconds
+to 1 % (14.37 s, 14.38 s, 14.52 s), so the flow is deterministic and the timing noise is small.
+What changed besides the seconds: the first run predates D30 (cut terminals by angle defect,
+committed 12 minutes later), D31 to D33 (admissibility floor, blocked vertices, flow stop) and
+D34 to D37 (Stationary status, remeshing fallback, coarse-to-fine default and opt-in first trial,
+which this study does not use). Consequently 59 of the 66 rows differ in the `cut` or `mean |u|` column in each budget (terminals,
+cut edges, distortion of the cut: D30; on the dense meshes `Combinatorial` has 1.5 to 8 times and
+`CovarianceMax` 2.5 to 13 times the terminals of before, the other four energies 0.8 to 1.8 times),
+and 17 rows of budget 400 (10 of budget 100) differ in the flow itself (faces out, `E_final`,
+flips/collapses, status): the dense ones are Covariance (4 meshes) and Intrinsic (2) with
+`E_final` changes of 1 to 10 %, the rest are control meshes (blub, spot) with larger changes;
+likely D31 to D33 and D35, not bisected. `E0` is unchanged in every row. Flipped uv triangles: the dense meshes 0 as before;
+the control meshes 11 rows with flips in budget 400 (blub_control_mesh 36 to 93 in all six energies,
+spot_control_mesh Covariance 78, CovarianceMax 67, Combinatorial 14; bob_controlmesh
+CovarianceMax 1, IntrinsicMax 14). The one stall of the first run (spot_control_mesh Intrinsic, 400)
+is gone: the status of all 132 jobs is `max_iter/max_iter`.
 Result: all 132 jobs finished; no error, no non-finite energy or position, no line-search failure,
-no `NonDescent`; 1 stall (`EnergyStalled` in round 0 of spot_control_mesh Intrinsic, budget 400);
-undefined trials: 1 in total; cut and flatten succeeded in all 132.
+no `NonDescent`, no `Stationary`; no stall; undefined trials: 0 in total (1 in the first run); cut
+and flatten succeeded in all 132.
 Columns: `flips/collapses` are remesh operations over both rounds; `cut` is terminals(+added)/cut
 edges/charts; `flipped uv` and `mean |u|` are from the cut at ε = 1e-3 on the final mesh. E0 is
 the energy of the input (energy-specific). Energies of different kinds are not comparable.
 
-Budget 400 iterations per round:
+Budget 400 iterations per round (re-run of 2026-10-26, commit b55f6cd, alone, single thread):
 
 | mesh | energy | faces in->out | E0 | E_final | s | status | flips/collapses | cut: term(+add)/edges/charts | flipped uv | mean abs u |
 |---|---|---|---|---|---|---|---|---|---|---|
-| CrumpledDevelopable | Combinatorial | 512->2040 | 33.9 | 0.00173 | 4.116 | max_iter/max_iter | 0/1 | 0(+0)/0/1 | 0 | 0.000831 |
-| CrumpledDevelopable | CombinatorialMax | 512->2044 | 126 | 0.0224 | 1.774 | max_iter/max_iter | 0/1 | 1(+0)/6/1 | 0 | 0.00115 |
-| CrumpledDevelopable | Covariance | 512->2000 | 61.9 | 0.000639 | 3.534 | max_iter/max_iter | 1/8 | 0(+0)/0/1 | 0 | 0.011 |
-| CrumpledDevelopable | CovarianceMax | 512->2024 | 18.3 | 0.00209 | 3.505 | max_iter/max_iter | 0/3 | 0(+0)/0/1 | 0 | 0.00149 |
-| CrumpledDevelopable | Intrinsic | 512->2032 | 79.6 | 6.68e-05 | 1.305 | max_iter/max_iter | 0/2 | 0(+0)/0/1 | 0 | 2e-05 |
-| CrumpledDevelopable | IntrinsicMax | 512->2040 | 91.3 | 0.00518 | 1.676 | max_iter/max_iter | 0/1 | 0(+0)/0/1 | 0 | 0.000933 |
-| blub_control_mesh | Combinatorial | 220->812 | 23.7 | 2.11 | 1.526 | max_iter/max_iter | 6/25 | 125(+0)/152/1 | 57 | 1.45 |
-| blub_control_mesh | CombinatorialMax | 220->852 | 98.2 | 4.62 | 1.637 | max_iter/max_iter | 5/5 | 280(+0)/301/1 | 3 | 0.0873 |
-| blub_control_mesh | Covariance | 220->700 | 37.6 | 0.00983 | 0.988 | max_iter/max_iter | 7/33 | 2(+0)/16/1 | 36 | 2.52 |
-| blub_control_mesh | CovarianceMax | 220->788 | 10.3 | 0.0641 | 2.324 | max_iter/max_iter | 0/13 | 16(+0)/41/1 | 57 | 2.13 |
-| blub_control_mesh | Intrinsic | 220->746 | 89 | 1.48 | 1.002 | max_iter/max_iter | 2/19 | 137(+0)/146/1 | 35 | 1.22 |
-| blub_control_mesh | IntrinsicMax | 220->832 | 76 | 3.5 | 2.103 | max_iter/max_iter | 0/6 | 227(+0)/250/1 | 19 | 0.113 |
-| blub_quadrangulated | Combinatorial | 14208->56798 | 19 | 3.88 | 167.064 | max_iter/max_iter | 0/5 | 663(+0)/1690/1 | 0 | 0.0378 |
-| blub_quadrangulated | CombinatorialMax | 14208->56828 | 61.8 | 15.8 | 140.425 | max_iter/max_iter | 0/2 | 3150(+0)/5354/1 | 0 | 0.00633 |
-| blub_quadrangulated | Covariance | 14208->56542 | 45.7 | 4.79 | 169.838 | max_iter/max_iter | 0/49 | 1041(+0)/2104/1 | 0 | 0.0117 |
-| blub_quadrangulated | CovarianceMax | 14208->56824 | 10.5 | 1.91 | 165.817 | max_iter/max_iter | 0/1 | 214(+0)/746/1 | 0 | 0.252 |
-| blub_quadrangulated | Intrinsic | 14208->56536 | 49.1 | 5.91 | 179.217 | max_iter/max_iter | 2/49 | 1279(+0)/2512/1 | 0 | 0.00919 |
-| blub_quadrangulated | IntrinsicMax | 14208->56832 | 44.4 | 8.22 | 105.901 | max_iter/max_iter | 0/0 | 1722(+0)/3110/1 | 0 | 0.00812 |
-| blub_triangulated | Combinatorial | 14208->56812 | 19.6 | 3.56 | 152.299 | max_iter/max_iter | 0/4 | 587(+0)/1495/1 | 0 | 0.0374 |
-| blub_triangulated | CombinatorialMax | 14208->56832 | 62.2 | 17.1 | 161.897 | max_iter/max_iter | 0/0 | 2958(+0)/4912/1 | 0 | 0.00788 |
-| blub_triangulated | Covariance | 14208->56534 | 45.6 | 5.13 | 181.483 | max_iter/max_iter | 0/59 | 1168(+0)/2406/1 | 0 | 0.00964 |
-| blub_triangulated | CovarianceMax | 14208->56824 | 10.7 | 2.04 | 167.955 | max_iter/max_iter | 0/1 | 259(+0)/1006/1 | 0 | 0.0919 |
-| blub_triangulated | Intrinsic | 14208->56580 | 48.4 | 6.81 | 186.133 | max_iter/max_iter | 1/45 | 1375(+0)/2647/1 | 0 | 0.00867 |
-| blub_triangulated | IntrinsicMax | 14208->56824 | 44.4 | 8.48 | 142.241 | max_iter/max_iter | 0/1 | 1865(+0)/3271/1 | 0 | 0.00878 |
-| bob_controlmesh | Combinatorial | 668->2572 | 16.3 | 1.51 | 6.612 | max_iter/max_iter | 0/17 | 327(+0)/348/1 | 0 | 0.00112 |
-| bob_controlmesh | CombinatorialMax | 668->2656 | 58 | 10.3 | 6.478 | max_iter/max_iter | 0/2 | 753(+0)/785/1 | 0 | 0.000141 |
-| bob_controlmesh | Covariance | 668->2490 | 47.2 | 1.39 | 5.863 | max_iter/max_iter | 0/31 | 255(+0)/306/1 | 1 | 0.029 |
-| bob_controlmesh | CovarianceMax | 668->2640 | 11.1 | 1.13 | 7.905 | max_iter/max_iter | 0/4 | 386(+0)/440/1 | 1 | 0.0143 |
-| bob_controlmesh | Intrinsic | 668->2546 | 67.7 | 2.79 | 6.529 | max_iter/max_iter | 0/21 | 349(+0)/383/1 | 0 | 0.00122 |
-| bob_controlmesh | IntrinsicMax | 668->2606 | 58.5 | 8.15 | 8.086 | max_iter/max_iter | 1/9 | 670(+0)/696/1 | 0 | 0.00984 |
-| bob_isotropic | Combinatorial | 6174->24628 | 17.4 | 2.79 | 90.926 | max_iter/max_iter | 0/10 | 579(+0)/1136/1 | 0 | 0.0515 |
-| bob_isotropic | CombinatorialMax | 6174->24696 | 56.8 | 11.5 | 74.044 | max_iter/max_iter | 0/0 | 2374(+0)/3028/1 | 0 | 0.00185 |
-| bob_isotropic | Covariance | 6174->24554 | 43.8 | 4.3 | 105.770 | max_iter/max_iter | 2/26 | 1096(+0)/1558/1 | 0 | 0.00532 |
-| bob_isotropic | CovarianceMax | 6174->24696 | 11.9 | 2.23 | 112.171 | max_iter/max_iter | 0/0 | 448(+0)/960/1 | 0 | 0.0488 |
-| bob_isotropic | Intrinsic | 6174->24590 | 44.4 | 4.48 | 106.043 | max_iter/max_iter | 4/23 | 1163(+0)/1588/1 | 0 | 0.00482 |
-| bob_isotropic | IntrinsicMax | 6174->24672 | 48.5 | 9.07 | 80.680 | max_iter/max_iter | 0/3 | 2103(+0)/2729/1 | 0 | 0.00202 |
-| bob_quad | Combinatorial | 10688->42736 | 13.3 | 3.35 | 135.340 | max_iter/max_iter | 0/2 | 420(+0)/856/1 | 0 | 0.162 |
-| bob_quad | CombinatorialMax | 10688->42752 | 38.2 | 13.3 | 91.447 | max_iter/max_iter | 0/0 | 3017(+0)/3895/1 | 0 | 0.0172 |
-| bob_quad | Covariance | 10688->42640 | 42.1 | 6.96 | 142.175 | max_iter/max_iter | 3/23 | 2784(+0)/3217/1 | 0 | 0.00943 |
-| bob_quad | CovarianceMax | 10688->42752 | 8.58 | 2.53 | 132.234 | max_iter/max_iter | 0/0 | 342(+0)/842/1 | 0 | 0.163 |
-| bob_quad | Intrinsic | 10688->42584 | 42.9 | 7.58 | 144.470 | max_iter/max_iter | 2/36 | 3034(+0)/3434/1 | 0 | 0.00913 |
-| bob_quad | IntrinsicMax | 10688->42752 | 34.5 | 10.3 | 131.256 | max_iter/max_iter | 0/0 | 2504(+0)/3180/1 | 0 | 0.0185 |
-| bob_tri | Combinatorial | 10688->42738 | 13.6 | 3.01 | 136.723 | max_iter/max_iter | 0/4 | 400(+0)/838/1 | 0 | 0.159 |
-| bob_tri | CombinatorialMax | 10688->42752 | 38 | 12.7 | 125.328 | max_iter/max_iter | 0/0 | 2784(+0)/3606/1 | 0 | 0.0159 |
-| bob_tri | Covariance | 10688->42636 | 42.9 | 6.47 | 134.003 | max_iter/max_iter | 1/22 | 1765(+0)/2510/1 | 0 | 0.0103 |
-| bob_tri | CovarianceMax | 10688->42752 | 8.81 | 2.32 | 131.083 | max_iter/max_iter | 0/0 | 291(+0)/775/1 | 0 | 0.158 |
-| bob_tri | Intrinsic | 10688->42638 | 43.8 | 6.59 | 110.589 | max_iter/max_iter | 1/24 | 1701(+0)/2528/1 | 0 | 0.0102 |
-| bob_tri | IntrinsicMax | 10688->42752 | 35.5 | 9.52 | 130.692 | max_iter/max_iter | 0/0 | 2195(+0)/2987/1 | 0 | 0.0163 |
-| spot_control_mesh | Combinatorial | 372->1352 | 40.2 | 2.09 | 1.211 | max_iter/max_iter | 0/23 | 196(+0)/234/1 | 15 | 0.206 |
-| spot_control_mesh | CombinatorialMax | 372->1424 | 170 | 17.5 | 1.069 | max_iter/max_iter | 0/8 | 535(+0)/544/1 | 0 | 0.00581 |
-| spot_control_mesh | Covariance | 372->1236 | 99 | 0.294 | 2.772 | max_iter/max_iter | 3/42 | 70(+0)/123/1 | 55 | 0.871 |
-| spot_control_mesh | CovarianceMax | 372->1382 | 24.3 | 1.02 | 5.375 | max_iter/max_iter | 1/14 | 146(+0)/177/1 | 12 | 0.336 |
-| spot_control_mesh | Intrinsic | 372->1394 | 172 | 9.4 | 2.406 | stalled/max_iter | 4/17 | 437(+0)/451/1 | 0 | 0.000628 |
-| spot_control_mesh | IntrinsicMax | 372->1438 | 168 | 21.8 | 3.795 | max_iter/max_iter | 0/10 | 533(+0)/549/1 | 0 | 0.000436 |
-| spot_quadrangulated | Combinatorial | 5856->23362 | 42 | 8.22 | 71.721 | max_iter/max_iter | 0/13 | 1249(+0)/1866/1 | 0 | 0.00374 |
-| spot_quadrangulated | CombinatorialMax | 5856->23416 | 126 | 31.6 | 77.321 | max_iter/max_iter | 0/4 | 3065(+0)/3839/1 | 0 | 0.000839 |
-| spot_quadrangulated | Covariance | 5856->23000 | 111 | 8.78 | 80.551 | max_iter/max_iter | 7/83 | 1499(+0)/2009/1 | 2 | 0.00263 |
-| spot_quadrangulated | CovarianceMax | 5856->23388 | 25 | 4.93 | 83.495 | max_iter/max_iter | 0/6 | 914(+0)/1398/1 | 0 | 0.0136 |
-| spot_quadrangulated | Intrinsic | 5856->22902 | 115 | 13.1 | 76.713 | max_iter/max_iter | 7/99 | 1862(+0)/2457/1 | 0 | 0.00128 |
-| spot_quadrangulated | IntrinsicMax | 5856->23334 | 104 | 23.2 | 67.407 | max_iter/max_iter | 0/15 | 2627(+0)/3200/1 | 0 | 0.00087 |
-| spot_triangulated | Combinatorial | 5856->23360 | 39.1 | 7.64 | 60.386 | max_iter/max_iter | 1/11 | 1383(+0)/1860/1 | 0 | 0.00794 |
-| spot_triangulated | CombinatorialMax | 5856->23406 | 123 | 30 | 55.407 | max_iter/max_iter | 0/3 | 3449(+0)/3961/1 | 0 | 0.000835 |
-| spot_triangulated | Covariance | 5856->23086 | 112 | 10.6 | 74.507 | max_iter/max_iter | 5/64 | 1609(+0)/2078/1 | 0 | 0.00275 |
-| spot_triangulated | CovarianceMax | 5856->23378 | 25.5 | 4.8 | 74.532 | max_iter/max_iter | 0/8 | 879(+0)/1363/1 | 0 | 0.0158 |
-| spot_triangulated | Intrinsic | 5856->23256 | 118 | 15.6 | 79.991 | max_iter/max_iter | 1/27 | 2014(+0)/2596/1 | 0 | 0.00176 |
-| spot_triangulated | IntrinsicMax | 5856->23314 | 105 | 24.8 | 57.766 | max_iter/max_iter | 0/16 | 2926(+0)/3500/1 | 0 | 0.000963 |
+| CrumpledDevelopable | Combinatorial | 512->2040 | 33.9 | 0.00173 | 1.015 | max_iter/max_iter | 0/1 | 0(+0)/0/1 | 0 | 0.000831 |
+| CrumpledDevelopable | CombinatorialMax | 512->2044 | 126 | 0.0224 | 0.813 | max_iter/max_iter | 0/1 | 1(+0)/6/1 | 0 | 0.00115 |
+| CrumpledDevelopable | Covariance | 512->2008 | 61.9 | 0.000129 | 0.756 | max_iter/max_iter | 1/5 | 0(+0)/0/1 | 0 | 0.0159 |
+| CrumpledDevelopable | CovarianceMax | 512->2024 | 18.3 | 0.00209 | 1.918 | max_iter/max_iter | 0/3 | 0(+0)/0/1 | 0 | 0.00149 |
+| CrumpledDevelopable | Intrinsic | 512->2032 | 79.6 | 7.47e-05 | 0.793 | max_iter/max_iter | 0/2 | 0(+0)/0/1 | 0 | 3.75e-05 |
+| CrumpledDevelopable | IntrinsicMax | 512->2040 | 91.3 | 0.00518 | 0.880 | max_iter/max_iter | 0/1 | 0(+0)/0/1 | 0 | 0.000933 |
+| blub_control_mesh | Combinatorial | 220->810 | 23.7 | 2.08 | 0.549 | max_iter/max_iter | 7/17 | 154(+0)/178/1 | 45 | 1.38 |
+| blub_control_mesh | CombinatorialMax | 220->856 | 98.2 | 4.36 | 0.424 | max_iter/max_iter | 3/3 | 194(+0)/211/1 | 93 | 1.03 |
+| blub_control_mesh | Covariance | 220->664 | 37.6 | 0.0437 | 0.315 | max_iter/max_iter | 8/36 | 9(+0)/25/1 | 44 | 2.26 |
+| blub_control_mesh | CovarianceMax | 220->800 | 10.3 | 0.157 | 0.873 | max_iter/max_iter | 4/10 | 99(+0)/110/1 | 36 | 1.95 |
+| blub_control_mesh | Intrinsic | 220->752 | 89 | 0.832 | 0.376 | max_iter/max_iter | 9/16 | 117(+0)/129/1 | 65 | 1.46 |
+| blub_control_mesh | IntrinsicMax | 220->832 | 76 | 3.5 | 0.478 | max_iter/max_iter | 0/6 | 192(+0)/216/1 | 52 | 0.806 |
+| blub_quadrangulated | Combinatorial | 14208->56798 | 19 | 3.88 | 32.347 | max_iter/max_iter | 0/5 | 1946(+0)/3572/1 | 0 | 0.00761 |
+| blub_quadrangulated | CombinatorialMax | 14208->56828 | 61.8 | 15.8 | 24.192 | max_iter/max_iter | 0/2 | 2745(+0)/4679/1 | 0 | 0.0066 |
+| blub_quadrangulated | Covariance | 14208->56542 | 45.7 | 4.79 | 30.576 | max_iter/max_iter | 0/49 | 1041(+0)/2104/1 | 0 | 0.0117 |
+| blub_quadrangulated | CovarianceMax | 14208->56824 | 10.5 | 1.91 | 53.303 | max_iter/max_iter | 0/1 | 1955(+0)/3297/1 | 0 | 0.00773 |
+| blub_quadrangulated | Intrinsic | 14208->56536 | 49.1 | 5.91 | 33.435 | max_iter/max_iter | 2/49 | 1228(+0)/2452/1 | 0 | 0.0101 |
+| blub_quadrangulated | IntrinsicMax | 14208->56832 | 44.4 | 8.22 | 26.960 | max_iter/max_iter | 0/0 | 1896(+0)/3212/1 | 0 | 0.00729 |
+| blub_triangulated | Combinatorial | 14208->56812 | 19.6 | 3.56 | 32.314 | max_iter/max_iter | 0/4 | 1766(+0)/3221/1 | 0 | 0.0081 |
+| blub_triangulated | CombinatorialMax | 14208->56832 | 62.2 | 17.1 | 24.648 | max_iter/max_iter | 0/0 | 2762(+0)/4506/1 | 0 | 0.00727 |
+| blub_triangulated | Covariance | 14208->56520 | 45.6 | 5.1 | 35.405 | max_iter/max_iter | 0/57 | 1154(+0)/2383/1 | 0 | 0.00976 |
+| blub_triangulated | CovarianceMax | 14208->56824 | 10.7 | 2.04 | 54.324 | max_iter/max_iter | 0/1 | 2034(+0)/3458/1 | 0 | 0.00766 |
+| blub_triangulated | Intrinsic | 14208->56580 | 48.4 | 6.81 | 43.369 | max_iter/max_iter | 1/45 | 1310(+0)/2596/1 | 0 | 0.00984 |
+| blub_triangulated | IntrinsicMax | 14208->56824 | 44.4 | 8.48 | 27.592 | max_iter/max_iter | 0/1 | 2099(+0)/3530/1 | 0 | 0.00774 |
+| bob_controlmesh | Combinatorial | 668->2574 | 16.3 | 1.5 | 1.572 | max_iter/max_iter | 1/16 | 365(+0)/388/1 | 0 | 0.000401 |
+| bob_controlmesh | CombinatorialMax | 668->2656 | 58 | 10.3 | 1.148 | max_iter/max_iter | 0/2 | 723(+0)/749/1 | 0 | 0.000188 |
+| bob_controlmesh | Covariance | 668->2498 | 47.2 | 1.39 | 1.190 | max_iter/max_iter | 1/27 | 253(+0)/312/1 | 0 | 0.0333 |
+| bob_controlmesh | CovarianceMax | 668->2640 | 11.1 | 1.13 | 2.547 | max_iter/max_iter | 0/4 | 576(+0)/615/1 | 1 | 0.0118 |
+| bob_controlmesh | Intrinsic | 668->2546 | 67.7 | 2.79 | 1.301 | max_iter/max_iter | 0/21 | 342(+0)/377/1 | 0 | 0.00157 |
+| bob_controlmesh | IntrinsicMax | 668->2606 | 58.5 | 8.15 | 1.556 | max_iter/max_iter | 1/9 | 662(+0)/681/1 | 14 | 0.0358 |
+| bob_isotropic | Combinatorial | 6174->24628 | 17.4 | 2.79 | 15.137 | max_iter/max_iter | 0/10 | 1360(+0)/1935/1 | 0 | 0.00661 |
+| bob_isotropic | CombinatorialMax | 6174->24696 | 56.8 | 11.5 | 10.947 | max_iter/max_iter | 0/0 | 1970(+0)/2652/1 | 0 | 0.00251 |
+| bob_isotropic | Covariance | 6174->24554 | 43.8 | 4.28 | 13.242 | max_iter/max_iter | 1/26 | 1104(+0)/1566/1 | 0 | 0.00531 |
+| bob_isotropic | CovarianceMax | 6174->24696 | 11.9 | 2.23 | 30.307 | max_iter/max_iter | 0/0 | 2146(+0)/2847/1 | 0 | 0.00174 |
+| bob_isotropic | Intrinsic | 6174->24590 | 44.4 | 4.48 | 14.279 | max_iter/max_iter | 4/23 | 1126(+0)/1565/1 | 0 | 0.00505 |
+| bob_isotropic | IntrinsicMax | 6174->24672 | 48.5 | 9.07 | 12.289 | max_iter/max_iter | 0/3 | 2171(+0)/2792/1 | 0 | 0.00188 |
+| bob_quad | Combinatorial | 10688->42736 | 13.3 | 3.35 | 23.354 | max_iter/max_iter | 0/2 | 3303(+0)/3736/1 | 0 | 0.00917 |
+| bob_quad | CombinatorialMax | 10688->42752 | 38.2 | 13.3 | 17.432 | max_iter/max_iter | 0/0 | 4505(+0)/5125/1 | 0 | 0.00664 |
+| bob_quad | Covariance | 10688->42612 | 42.1 | 6.86 | 21.617 | max_iter/max_iter | 1/25 | 2733(+0)/3163/1 | 0 | 0.00977 |
+| bob_quad | CovarianceMax | 10688->42752 | 8.58 | 2.53 | 39.907 | max_iter/max_iter | 0/0 | 4153(+0)/4732/1 | 0 | 0.00673 |
+| bob_quad | Intrinsic | 10688->42584 | 42.9 | 7.58 | 22.984 | max_iter/max_iter | 2/36 | 3005(+0)/3409/1 | 0 | 0.00942 |
+| bob_quad | IntrinsicMax | 10688->42752 | 34.5 | 10.3 | 21.021 | max_iter/max_iter | 0/0 | 4272(+0)/4773/1 | 0 | 0.00681 |
+| bob_tri | Combinatorial | 10688->42738 | 13.6 | 3.01 | 23.610 | max_iter/max_iter | 0/4 | 2279(+0)/2977/1 | 0 | 0.00815 |
+| bob_tri | CombinatorialMax | 10688->42752 | 38 | 12.7 | 18.018 | max_iter/max_iter | 0/0 | 4258(+0)/4884/1 | 0 | 0.00651 |
+| bob_tri | Covariance | 10688->42636 | 42.9 | 6.47 | 21.380 | max_iter/max_iter | 1/22 | 1765(+0)/2510/1 | 0 | 0.0103 |
+| bob_tri | CovarianceMax | 10688->42752 | 8.81 | 2.32 | 41.355 | max_iter/max_iter | 0/0 | 3784(+0)/4447/1 | 0 | 0.00673 |
+| bob_tri | Intrinsic | 10688->42638 | 43.8 | 6.59 | 23.135 | max_iter/max_iter | 1/24 | 1668(+0)/2503/1 | 0 | 0.0102 |
+| bob_tri | IntrinsicMax | 10688->42752 | 35.5 | 9.52 | 20.889 | max_iter/max_iter | 0/0 | 3836(+0)/4509/1 | 0 | 0.00659 |
+| spot_control_mesh | Combinatorial | 372->1352 | 40.2 | 2.09 | 0.869 | max_iter/max_iter | 0/23 | 250(+0)/277/1 | 14 | 0.232 |
+| spot_control_mesh | CombinatorialMax | 372->1424 | 170 | 17.5 | 0.658 | max_iter/max_iter | 0/8 | 466(+0)/483/1 | 0 | 0.0231 |
+| spot_control_mesh | Covariance | 372->1252 | 99 | 0.355 | 0.579 | max_iter/max_iter | 9/37 | 84(+0)/135/1 | 78 | 0.838 |
+| spot_control_mesh | CovarianceMax | 372->1382 | 24.3 | 1.02 | 1.768 | max_iter/max_iter | 1/14 | 266(+0)/292/1 | 67 | 0.397 |
+| spot_control_mesh | Intrinsic | 372->1346 | 172 | 7.31 | 0.734 | max_iter/max_iter | 6/20 | 361(+0)/380/1 | 0 | 0.0211 |
+| spot_control_mesh | IntrinsicMax | 372->1438 | 168 | 21.8 | 1.003 | max_iter/max_iter | 0/10 | 475(+0)/494/1 | 0 | 0.00878 |
+| spot_quadrangulated | Combinatorial | 5856->23362 | 42 | 8.22 | 15.719 | max_iter/max_iter | 0/13 | 1909(+0)/2540/1 | 0 | 0.00125 |
+| spot_quadrangulated | CombinatorialMax | 5856->23416 | 126 | 31.6 | 11.524 | max_iter/max_iter | 0/4 | 2388(+0)/3192/1 | 0 | 0.00121 |
+| spot_quadrangulated | Covariance | 5856->22986 | 111 | 9.64 | 14.518 | max_iter/max_iter | 9/87 | 1564(+0)/2048/1 | 0 | 0.00275 |
+| spot_quadrangulated | CovarianceMax | 5856->23388 | 25 | 4.93 | 27.176 | max_iter/max_iter | 0/6 | 2239(+0)/2817/1 | 0 | 0.00111 |
+| spot_quadrangulated | Intrinsic | 5856->22902 | 115 | 13.1 | 17.119 | max_iter/max_iter | 5/99 | 1801(+0)/2388/1 | 0 | 0.00139 |
+| spot_quadrangulated | IntrinsicMax | 5856->23334 | 104 | 23.2 | 12.170 | max_iter/max_iter | 0/15 | 2561(+0)/3144/1 | 0 | 0.000853 |
+| spot_triangulated | Combinatorial | 5856->23360 | 39.1 | 7.64 | 13.724 | max_iter/max_iter | 1/11 | 2118(+0)/2608/1 | 0 | 0.00174 |
+| spot_triangulated | CombinatorialMax | 5856->23406 | 123 | 30 | 10.141 | max_iter/max_iter | 0/3 | 2824(+0)/3362/1 | 0 | 0.00116 |
+| spot_triangulated | Covariance | 5856->23086 | 112 | 10.6 | 13.962 | max_iter/max_iter | 5/64 | 1609(+0)/2078/1 | 0 | 0.00275 |
+| spot_triangulated | CovarianceMax | 5856->23378 | 25.5 | 4.8 | 24.575 | max_iter/max_iter | 0/8 | 2363(+0)/2984/1 | 0 | 0.0012 |
+| spot_triangulated | Intrinsic | 5856->23250 | 118 | 15.1 | 13.499 | max_iter/max_iter | 0/30 | 1924(+0)/2445/1 | 0 | 0.00189 |
+| spot_triangulated | IntrinsicMax | 5856->23314 | 105 | 24.8 | 12.211 | max_iter/max_iter | 0/16 | 2904(+0)/3498/1 | 0 | 0.000934 |
 
 Reading the table: the dense meshes (5.8k to 14k faces, 23k to 57k after the subdivision) run in
-60 to 190 s single-threaded for 800 iterations; the control meshes in 1 to 8 s. The cut
+10 to 54 s single-threaded for 800 iterations (2.7 to 14 s for 200); the control meshes and the
+CrumpledDevelopable in 0.3 to 2.5 s (0.1 to 0.6 s for 200). The first run's 60 to 190 s and 1 to
+8 s, taken under a load of 60, were 3.5 to 6 times too high. The cut
 distortion is small (mean |u| ~ 1e-3 to 1e-2, 0 flips) on dense meshes, large on the coarse control
-meshes (spot_control_mesh Covariance 0.87, blub_control_mesh 1 to 2.5 with 20 to 60 flips of ~800
+meshes (spot_control_mesh Covariance 0.84, blub_control_mesh 1 to 2.3 with 36 to 93 flips of ~800
 faces): coarse meshes with few vertices cannot hide the residual curvature. Budget 100 per round
-gives the same picture (`runs_tmp/dev-flow-study/table100.md`, not reproduced; e.g. blub_control_mesh
-Covariance 85 flips, spot_control_mesh Covariance 97 flips, all dense meshes 0 flips).
+gives the same picture (`runs_tmp/dev-flow-study-quiet/table100.md`, not reproduced; e.g.
+blub_control_mesh Covariance 58 flips, spot_control_mesh Covariance 121 flips, all dense meshes
+0 flips).
 
 ### 12.6 Benchmarks of the flow
 
