@@ -471,6 +471,34 @@ centering Jacobian. Cited:
   canonical problem, for which all theorems hold; for `ε > 0` and positive masses both readings
   give `r_i > 0`.
 
+### [formula: cone-feedback-rule] The reweighting rule of the feedback loop
+
+- **Statement.** `crates/ddg-optimal-cones/src/feedback.rs` (`Feedback::observe`): after a solve
+  and its flattening, every interior vertex with `wE_i > 0` that was not reweighted before and has
+  `|δ_i| > threshold` (`δ` the scale mismatch, `cone-feedback-mismatch`) gets
+  `wE_i ← reduced_weight · wE_i` (default `0`), and the problem is solved again, until a round
+  picks no vertex, `max_rounds` solves were done, more than `max_reweighted_fraction` of the
+  vertices would be reweighted, or a connected component would be left without a positive weight
+  (then nothing of that round is applied).
+- **Reference.** None: this is a **design choice, not a formula**. The paper (Sec. 7.2, Fig. 20)
+  says that needle-like outliers "are ignored" because they carry almost no area, without saying
+  how; the crate README ("Needle-like spikes") measured that zero distortion weight at the tips of
+  the needles of `camelshotnoise` does it, and the loop finds such vertices from the flattening
+  instead of by hand. The threshold (`4` in log units), the per-vertex rule, the drop to zero and
+  the limits were chosen by measurement (crate README, "The feedback loop"); the reasons are
+  heuristic (a needle tip has `|δ|` of order `h/ρ`, a cone of angle near `2π` on a regular mesh
+  about 1.7), not derived.
+- **Why not formalized.** There is nothing to prove about a threshold. What is proved about the
+  ingredients: the mismatch does not depend on the free constant of `u` or on the scale of the
+  plane, and vanishes where the flattening realizes `u` up to those constants
+  (`cone-feedback-mismatch`); the weights only decrease and every vertex is reweighted at most
+  once (by reading: `is_reweighted`), so the loop ends after at most `max_rounds` solves.
+- **Does correctness depend on it?** No, relative to the canonical problem **with the returned
+  weights** (`FeedbackReport::weights`): every solve is a solve of a well-formed canonical problem
+  (`wE ≥ 0`, at least one positive weight per closed component, guaranteed by the rule) and is
+  certified as any other. The loop changes which problem is solved, not how; it is off unless the
+  caller asks for it.
+
 ---
 
 ## Variational Surface Cutting

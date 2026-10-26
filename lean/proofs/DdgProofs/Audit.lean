@@ -1010,3 +1010,9 @@ open DdgProofs
 #print axioms Dev.lineSearch_accepted
 #print axioms Dev.apply_eq_smul_of_tangent_eigen
 #print axioms Dev.logMap_of_parallel
+-- The feedback loop of the cone solver: the scale mismatch (ConeFeedback.lean)
+#print axioms ConeFeedback.isWeightedQuantile_shift
+#print axioms ConeFeedback.weightedQuantile_shift
+#print axioms ConeFeedback.faceMean_shift
+#print axioms ConeFeedback.mismatch_shift
+#print axioms ConeFeedback.mismatch_eq_zero_of_const

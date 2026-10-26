@@ -121,7 +121,10 @@
 //! factor and adjoint state of a given cone configuration; [`reoptimize_cones`] finds the
 //! least-distortion angles for given cone positions (by a direct solve of the linear optimality
 //! system, or the reduced system for few cones); [`feature_size_weights`] builds the
-//! curvature-adapted weights of the paper's Sec. 8.1.
+//! curvature-adapted weights of the paper's Sec. 8.1. [`solve_with_feedback`] (and the state
+//! machine [`Feedback`] behind it) lowers the distortion weight where the solver's linearized
+//! scale factor is far from the one a flattening realizes, e.g. at needle tips (crate README,
+//! "The feedback loop").
 //!
 //! The mesh may have several connected components. Every function then works on the canonical
 //! problem of the whole mesh (masses divided by the total area, one constant of `u` per closed
@@ -147,6 +150,7 @@ mod error;
 mod evaluate;
 mod extract;
 mod factor_once;
+mod feedback;
 mod linsys;
 mod newton;
 mod problem;
@@ -165,6 +169,10 @@ pub use extract::{ExtractionReport, MergedCluster, UnmergedCluster, UnmergedReas
 pub use factor_once::{
     DenseStats, FactorOnceOptions, FactorOnceReport, FactorOnceTimings, FallbackReason, MethodUsed,
     SolveMethod, Unsupported,
+};
+pub use feedback::{
+    Feedback, FeedbackError, FeedbackOptions, FeedbackReport, FeedbackRound, FeedbackSolution,
+    FeedbackStop, ScaleMismatch, scale_mismatch, solve_with_feedback,
 };
 pub use linsys::{LinearSolver, LinearSolverReport};
 pub use newton::StageStop;
