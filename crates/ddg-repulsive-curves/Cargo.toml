@@ -29,3 +29,7 @@ harness = false
 [[bench]]
 name = "projdiag"
 harness = false
+
+[[bench]]
+name = "trialrule"
+harness = false

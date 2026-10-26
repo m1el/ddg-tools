@@ -63,10 +63,24 @@ pub use vcycle::{CycleOptions, CycleReport, Hierarchy};
 /// level stays bounded.
 pub const FIXED_STOP_MAX_VERTICES_FACTOR: usize = 8;
 
+/// The tangent admissibility parameter of the multigrid's block cluster trees
+/// ([`MgOptions::bct`]): 2 admits every pair of unit-tangent clusters (the half diagonal of a box
+/// of unit vectors is at most √3 < 2), so blocks are admitted by position only, as in the reference
+/// (`ref: src/product/block_cluster_tree.cpp`, `isPairAdmissible`). The metric's kernel `K^B`
+/// does not depend on the tangents and `K⁰` only through its far coefficient (the normalized mean
+/// tangent of the cluster). Measured in
+/// `SPEC.md` §17l: on the perturbed knot 96 the tangent test at 0.25 leaves the trees nearly dense
+/// (about 2000 exact entries per row at 2048–8192 vertices); position only makes the multigrid
+/// direction 2.3–2.8× faster there, with an error against the dense direction of 2e-3–8.5e-3
+/// (below the 1e-2 target of §13.4) instead of 1e-4–4e-3.
+pub const MG_BCT_THETA_T: f64 = 2.0;
+
 /// Options of the multigrid solver (`SPEC.md` §8.4, §9.1, §10).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MgOptions {
-    /// The block cluster tree of every level but the coarsest.
+    /// The block cluster tree of every level but the coarsest. Default
+    /// [`MG_BCT_THETA_T`] for the tangent parameter (position-only admissibility, the reference's
+    /// rule), the other parameters of [`BctOptions::default`].
     pub bct: BctOptions,
     /// Stop coarsening once a level has at most this many vertices.
     pub coarsest_vertices: usize,
@@ -106,7 +120,16 @@ pub struct MgOptions {
     /// Flexible CG stops only when the energy-norm estimate of the error also meets the
     /// tolerance ([`vcycle::solve_with_energy_check`], `SPEC.md` §17g).
     pub energy_check: bool,
+    /// [`MultigridSolvers`] builds and solves on at most this many threads: when the session's
+    /// main pool is larger, it uses a pool of this size of its own (created once per factory),
+    /// because the hierarchy's products and projections stop gaining past 8–16 threads and get
+    /// slower at 64 (`SPEC.md` §17k, §17l). Results do not depend on it (D25). `None`: the
+    /// session's pool as it is. Default `Some(`[`MG_DEFAULT_MAX_THREADS`]`)`.
+    pub max_threads: Option<usize>,
 }
+
+/// Default of [`MgOptions::max_threads`] (measured, `SPEC.md` §17l).
+pub const MG_DEFAULT_MAX_THREADS: usize = 16;
 
 impl Default for MgOptions {
     /// Coarsest 512 vertices, 20 levels, 12 + 12 CG smoothing (24 per level in the start),
@@ -123,7 +146,10 @@ impl Default for MgOptions {
     /// final residual of `1e-2`.
     fn default() -> Self {
         MgOptions {
-            bct: BctOptions::default(),
+            bct: BctOptions {
+                theta_t: MG_BCT_THETA_T,
+                ..BctOptions::default()
+            },
             coarsest_vertices: 512,
             max_levels: 20,
             smoothing_steps: 12,
@@ -136,6 +162,7 @@ impl Default for MgOptions {
             smoother_factor: 1.0,
             failure_residual: 1e-2,
             energy_check: true,
+            max_threads: Some(MG_DEFAULT_MAX_THREADS),
         }
     }
 }
@@ -187,6 +214,13 @@ impl MgOptions {
                 name: "multigrid.max_fixed_fraction",
                 value: self.max_fixed_fraction.to_string(),
                 requirement: "a fraction in (0, 1]",
+            });
+        }
+        if self.max_threads == Some(0) {
+            return Err(RcError::InvalidOption {
+                name: "multigrid.max_threads",
+                value: "0".into(),
+                requirement: "at least 1 thread, or None",
             });
         }
         if self.coarsest_vertices == 0 {
@@ -831,6 +865,8 @@ impl SaddleSolver for MultigridSaddle {
 #[derive(Debug, Clone)]
 pub struct MultigridSolvers {
     options: MgOptions,
+    /// The pool of [`MgOptions::max_threads`] threads, created at the first build that needs it.
+    capped: Arc<Mutex<Option<Arc<rayon::ThreadPool>>>>,
 }
 
 impl MultigridSolvers {
@@ -842,7 +878,37 @@ impl MultigridSolvers {
     /// [`RcError::InvalidOption`] for bad options.
     pub fn new(options: MgOptions) -> Result<MultigridSolvers, RcError> {
         options.validate()?;
-        Ok(MultigridSolvers { options })
+        Ok(MultigridSolvers {
+            options,
+            capped: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    /// The pool of a build: `pool`, or the capped pool when `pool` has more threads than
+    /// [`MgOptions::max_threads`].
+    fn pool_for(&self, pool: &Arc<rayon::ThreadPool>) -> Result<Arc<rayon::ThreadPool>, RcError> {
+        let Some(cap) = self.options.max_threads else {
+            return Ok(pool.clone());
+        };
+        if pool.current_num_threads() <= cap {
+            return Ok(pool.clone());
+        }
+        let mut slot = self.capped.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(p) = slot.as_ref() {
+            return Ok(p.clone());
+        }
+        let p = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(cap)
+                .build()
+                .map_err(|e| RcError::InvalidOption {
+                    name: "multigrid.max_threads",
+                    value: e.to_string(),
+                    requirement: "a thread pool that can be created",
+                })?,
+        );
+        *slot = Some(p.clone());
+        Ok(p)
     }
 
     /// The options.
@@ -868,8 +934,9 @@ impl SolverFactory for MultigridSolvers {
                     jacobian: r.jacobian,
                     constraints: r.constraints,
                 };
+                let pool = self.pool_for(r.pool)?;
                 Ok(Box::new(MultigridSaddle::new(
-                    r.pool,
+                    &pool,
                     r.dense_pool,
                     &input,
                     self.options,
