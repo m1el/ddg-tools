@@ -27,6 +27,13 @@ with Kopp's LGPL 3x3 eigensolver) is quarantined outside this tree; never open, 
 paraphrase it, and do not copy Kopp's published C code (his paper may be read and cited). Contract:
 `crates/ddg-developability/SPEC.md`; formula ids start with `dev-`.
 
+Fifth paper: "Repulsive Curves", Yu, Schumacher, Crane, ACM TOG 40(2), 2021
+(`../RepulsiveCurves/RepulsiveCurves.pdf`, `RepulsiveCurves_Supplemental.pdf`; reference: the authors'
+code in `../RepulsiveCurves/repulsive-curves`, MIT, which may be read and ported; keep its licence
+notice (Copyright (c) 2019 Christopher Yu) in the crate's `LICENSES/`, and credit all three authors).
+Datasets (Knot128, Trefoil100, Freedman–He–Wang unknot) unpacked in `data/repulsive-curves/`.
+Contract: `crates/ddg-repulsive-curves/SPEC.md`; formula ids start with `rc-`.
+
 ## Layout
 
 ```
@@ -41,6 +48,8 @@ crates/ddg-intrinsic-apps  applications of intrinsic triangulations (paper Sec. 
                            heat-method distance, adaptive refinement, tangent fields; `SPEC.md` N30-N49
 crates/ddg-developability  the developability flow of the fourth paper (energies, L-BFGS, subdivision,
                            remeshing, cut and flatten); `SPEC.md` is its contract
+crates/ddg-repulsive-curves  tangent-point energy, fractional Sobolev descent, constraints, Barnes-Hut,
+                           hierarchical matrices and multigrid for curve networks; `SPEC.md` is its contract
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs;
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
