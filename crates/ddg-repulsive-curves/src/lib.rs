@@ -22,7 +22,7 @@
 //!   [`kernel`](mod@kernel): the tangent-point kernel and gradients (§3); the exact `O(|E|²)`
 //!   [`energy`](fn@energy::energy), parallel and deterministic.
 //! * WP2: constraints and their projection ([`constraints`], [`solve`], §5–6), the fractional
-//!   Sobolev metric and Gram matrices ([`metric`]), subdivision ([`subdivide`]).
+//!   Sobolev metric and Gram matrices ([`metric`]), subdivision ([`mod@subdivide`]).
 //! * WP3: the gradient flow ([`step`]): [`Session`] and [`flow`], the line searches
 //!   ([`LineSearch`], with the start rules of [`StartRule`]), the stopping rules, length
 //!   schedules, L-BFGS and NCG ([`optimize`]) and the continuous collision detection of

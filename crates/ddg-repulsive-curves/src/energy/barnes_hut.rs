@@ -389,6 +389,74 @@ impl BhTree {
         (lumped, exact)
     }
 
+    /// The interaction lists of the current tree and positions: for every edge `I`, the lumped
+    /// nodes and the exactly evaluated edges (what [`BhTree::classify`] returns).
+    ///
+    /// Barnes–Hut energies at different positions are not comparable at the level of a line
+    /// search's decrease: the admissibility tests flip as the curve moves, and each flip changes the
+    /// energy by about the approximation error (1e-6 relative on Freedman 600), which swamps
+    /// the decrease near a minimum. Evaluating the trial energies with the lists of the base
+    /// curve ([`BhTree::energy_with_lists`], after a [`BhTree::refit`]) removes that noise: the
+    /// energy is then a smooth function of the positions.
+    pub fn interaction_lists(&self, pool: &rayon::ThreadPool) -> InteractionLists {
+        let (lumped, exact): (Vec<_>, Vec<_>) = pool.install(|| {
+            (0..self.edges.len())
+                .into_par_iter()
+                .with_min_len(16)
+                .map(|i| {
+                    let (l, x) = self.classify(i);
+                    (
+                        l.into_iter().map(|n| n as u32).collect::<Vec<_>>(),
+                        x.into_iter().map(|j| j as u32).collect::<Vec<_>>(),
+                    )
+                })
+                .unzip()
+        });
+        InteractionLists { lumped, exact }
+    }
+
+    /// The Barnes–Hut energy with the given (frozen) interaction lists at the current positions
+    /// (set by [`BhTree::refit`]); summed in edge order, so independent of the thread count.
+    ///
+    /// # Panics
+    /// If `lists` was made for a tree with a different number of edges.
+    pub fn energy_with_lists(
+        &self,
+        lists: &InteractionLists,
+        pool: &rayon::ThreadPool,
+        e: Exponents,
+    ) -> f64 {
+        assert_eq!(lists.lumped.len(), self.edges.len());
+        let s = &self.snap;
+        let rows: Vec<f64> = pool.install(|| {
+            (0..self.edges.len())
+                .into_par_iter()
+                .with_min_len(16)
+                .map(|i| {
+                    let (pi, ti, li) = (&s.ends[i], s.tangent[i], s.length[i]);
+                    let xi = scale(
+                        [
+                            pi[0][0] + pi[1][0],
+                            pi[0][1] + pi[1][1],
+                            pi[0][2] + pi[1][2],
+                        ],
+                        0.5,
+                    );
+                    let mut sum = 0.0;
+                    for &n in &lists.lumped[i] {
+                        let nd = &self.data[n as usize];
+                        sum += li * nd.mass * kernel(xi, nd.xbar, ti, e);
+                    }
+                    for &j in &lists.exact[i] {
+                        sum += pair_energy(s, i, j as usize, e);
+                    }
+                    sum
+                })
+                .collect()
+        });
+        rows.iter().sum()
+    }
+
     /// Barnes–Hut energy only.
     ///
     /// # Errors
@@ -446,6 +514,13 @@ impl BhTree {
         }
         rows
     }
+}
+
+/// Per-edge interaction lists of a [`BhTree`] ([`BhTree::interaction_lists`]).
+#[derive(Debug, Clone, Default)]
+pub struct InteractionLists {
+    lumped: Vec<Vec<u32>>,
+    exact: Vec<Vec<u32>>,
 }
 
 /// Free-function form: build the tree and evaluate once.

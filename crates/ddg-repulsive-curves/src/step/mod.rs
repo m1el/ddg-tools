@@ -16,7 +16,7 @@
 //! 4. Accept, or [`StepStatus::Stuck`].
 //! 5. Subdivision check (§5.4): when the mean edge length exceeds twice `ℓ̄₀`, every edge is
 //!    split (at most `max_subdivisions` times); constraints, penalties and the schedule follow
-//!    the mapping of [`crate::subdivide`]. The vertex count of the session changes.
+//!    the mapping of [`mod@crate::subdivide`]. The vertex count of the session changes.
 //!
 //! Every part is timed in the [`StepReport`].
 //!
@@ -53,7 +53,7 @@ use ddg_core::sparse::SparseMatrix;
 
 use crate::ccd::{CcdOptions, CcdReport, CollisionObstacle, PreparedObstacle, first_contact};
 use crate::constraints::{Constraint, ConstraintSet, default_constraints};
-use crate::energy::barnes_hut::BhTree;
+use crate::energy::barnes_hut::{BhTree, InteractionLists};
 use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
 use crate::energy::{BhOptions, EnergyEval};
 use crate::error::RcError;
@@ -221,6 +221,8 @@ pub struct BarnesHutEnergy {
     exponents: Exponents,
     options: BhOptions,
     tree: Option<BhTree>,
+    /// The interaction lists of the base curve, used for the trial energies of the line search.
+    lists: Option<InteractionLists>,
     /// Vertex and edge count the tree was built for (a different network needs a rebuild).
     shape: (usize, usize),
 }
@@ -237,6 +239,7 @@ impl BarnesHutEnergy {
             exponents,
             options,
             tree: None,
+            lists: None,
             shape: (0, 0),
         }
     }
@@ -247,7 +250,9 @@ impl BarnesHutEnergy {
     }
 
     fn build(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<(), RcError> {
-        self.tree = Some(BhTree::build(network, positions, self.options)?);
+        let tree = BhTree::build(network, positions, self.options)?;
+        self.lists = Some(tree.interaction_lists(&self.pool));
+        self.tree = Some(tree);
         self.shape = (network.n_vertices(), network.n_edges());
         Ok(())
     }
@@ -255,13 +260,13 @@ impl BarnesHutEnergy {
     /// Refits the tree to `positions`; builds it if `prepare` was not called, or if the network
     /// is not the one the tree was built for (after a subdivision, when the energy is asked for
     /// before the next step's `prepare`).
-    fn fit(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<&BhTree, RcError> {
+    fn fit(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<(), RcError> {
         let same = self.shape == (network.n_vertices(), network.n_edges());
         match &mut self.tree {
             Some(t) if same => t.refit(positions)?,
             _ => self.build(network, positions)?,
         }
-        Ok(self.tree.as_ref().expect("tree was just set"))
+        Ok(())
     }
 }
 
@@ -276,7 +281,12 @@ impl EnergyModel for BarnesHutEnergy {
 
     fn energy(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<f64, RcError> {
         let (pool, exponents) = (self.pool.clone(), self.exponents);
-        Ok(self.fit(network, positions)?.energy(&pool, exponents).0)
+        self.fit(network, positions)?;
+        // The base curve's interaction lists (rebuilt together with the tree): a smooth energy
+        // for the Armijo comparison, see `BhTree::interaction_lists`.
+        let (tree, lists) = (self.tree.as_ref(), self.lists.as_ref());
+        let (tree, lists) = (tree.expect("fitted"), lists.expect("fitted"));
+        Ok(tree.energy_with_lists(lists, &pool, exponents))
     }
 
     fn energy_and_differential(
@@ -285,9 +295,12 @@ impl EnergyModel for BarnesHutEnergy {
         positions: &[[f64; 3]],
     ) -> Result<EnergyEvaluation, RcError> {
         let (pool, exponents) = (self.pool.clone(), self.exponents);
-        let (energy, differential, stats) = self
-            .fit(network, positions)?
-            .energy_and_differential(&pool, exponents);
+        self.fit(network, positions)?;
+        let tree = self.tree.as_ref().expect("fitted");
+        // The differential is taken at the base curve of a step: its interaction lists are the
+        // ones the trial energies of the line search use.
+        self.lists = Some(tree.interaction_lists(&pool));
+        let (energy, differential, stats) = tree.energy_and_differential(&pool, exponents);
         Ok(EnergyEvaluation {
             energy,
             differential,

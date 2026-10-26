@@ -1062,6 +1062,14 @@ fn freedman_600_barnes_hut_flows_to_a_circle() {
         "RESULT bh final: Barnes-Hut energy {:.5}, exact energy of the same curve {exact:.5}",
         s.energy()
     );
+    // The run ends (Converged, or Stuck at the noise floor of the Barnes-Hut differential, which
+    // is not the derivative of the evaluated energy, SPEC 17f) instead of taking steps of 1e-14
+    // until the iteration cap.
+    assert!(
+        matches!(s.status(), Status::Converged | Status::Stuck),
+        "{:?}",
+        s.status()
+    );
     // The same near-circle: both energies are within 2 % of the exact flow's 6.0816.
     assert!((exact - 6.0816).abs() < 0.02 * 6.0816, "exact {exact}");
     assert!((s.energy() - exact).abs() < 0.02 * exact);
@@ -1158,7 +1166,87 @@ fn freedman_flow(eval: EnergyEval) -> Session {
     assert!(min_dist > 0.0);
     let (it, secs) = round_at.expect("the unknot becomes a near-circle within the budget");
     eprintln!("RESULT near-circle iterations {it} seconds {secs:.1}");
+    if matches!(eval, EnergyEval::BarnesHut(_)) {
+        bh_differential_consistency(&s, eval);
+    }
     s
+}
+
+/// Diagnostic for the Barnes-Hut stall: along random directions `v`, compares the central
+/// difference of the evaluated Barnes-Hut energy (tree refitted, topology fixed, as in the line
+/// search), the Barnes-Hut differential `<dE_bh, v>` and the exact differential `<dE, v>`.
+fn bh_differential_consistency(s: &Session, eval: EnergyEval) {
+    let EnergyEval::BarnesHut(opts) = eval else {
+        return;
+    };
+    let e = Exponents::new(2.0, 4.5).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap();
+    let (net, pos) = (s.network(), s.positions());
+    let tree = BhTree::build(net, pos, opts).unwrap();
+    let (_, d_bh, _) = tree.energy_and_differential(&pool, e);
+    let lists = tree.interaction_lists(&pool);
+    let exact = ddg_repulsive_curves::energy(net, pos, e, &EnergyEval::Exact, Some(8)).unwrap();
+    let mut seed = 12345u64;
+    let mut rnd = || {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((seed >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+    };
+    for trial in 0..4 {
+        let v: Vec<P> = pos.iter().map(|_| [rnd(), rnd(), rnd()]).collect();
+        let h = 1e-5;
+        let at_frozen = |sign: f64| {
+            let q: Vec<P> = pos
+                .iter()
+                .zip(&v)
+                .map(|(p, d)| {
+                    [
+                        p[0] + sign * h * d[0],
+                        p[1] + sign * h * d[1],
+                        p[2] + sign * h * d[2],
+                    ]
+                })
+                .collect();
+            let mut t = tree.clone();
+            t.refit(&q).unwrap();
+            t.energy_with_lists(&lists, &pool, e)
+        };
+        let fd_frozen = (at_frozen(1.0) - at_frozen(-1.0)) / (2.0 * h);
+        let at = |sign: f64| {
+            let q: Vec<P> = pos
+                .iter()
+                .zip(&v)
+                .map(|(p, d)| {
+                    [
+                        p[0] + sign * h * d[0],
+                        p[1] + sign * h * d[1],
+                        p[2] + sign * h * d[2],
+                    ]
+                })
+                .collect();
+            let mut t = tree.clone();
+            t.refit(&q).unwrap();
+            t.energy(&pool, e).0
+        };
+        let fd = (at(1.0) - at(-1.0)) / (2.0 * h);
+        let dot = |d: &[P]| -> f64 {
+            d.iter()
+                .zip(&v)
+                .map(|(a, b)| a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+                .sum()
+        };
+        let (bh, ex) = (dot(&d_bh), dot(&exact.differential));
+        eprintln!(
+            "DIFF-CHECK {trial}: FD(E_bh) {fd:.6e}  <dE_bh,v> {bh:.6e}  <dE_exact,v> {ex:.6e}  \
+             FD(frozen lists) {fd_frozen:.6e}  |FD-dE_bh| {:.2e}  |dE_bh-dE_exact| {:.2e}",
+            (fd - bh).abs(),
+            (bh - ex).abs()
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

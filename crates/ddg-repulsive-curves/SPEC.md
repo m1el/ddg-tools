@@ -1243,6 +1243,27 @@ Things the paper and the reference leave open, with how they are settled:
   count differs from the tree's (a live subdivision asks for the energy before the next
   `prepare`; fixed, regression test `barnes_hut_flow_survives_subdivision`). Both sides of every
   Armijo comparison are Barnes–Hut energies (§17d).
+* **Barnes–Hut stall near the minimum (found by WP6).** Freedman 600 with Barnes–Hut reached the
+  near-circle (step 659) and then took steps of `τ ≈ 1e-14` with `‖g‖ ≈ 4e-3` until the cap.
+  Diagnosis (`bh_differential_consistency` in `tests/flow.rs`, directional derivatives along
+  random `v` at the final curve): (i) the *evaluated* Barnes–Hut energy is not smooth under the
+  refit, because the admissibility tests flip as the curve moves and every flip changes the energy
+  by about the approximation error: central differences of `Ê_bh` at `h = 1e-5` were 0.12 off
+  against derivatives of order 1e-2 (the differential and the exact differential agreed to 1e-3),
+  so Armijo compared noise; (ii) even without flips the Barnes–Hut differential is not the
+  derivative of `Ê_bh` (§17d): FD of `Ê_bh` against `⟨dÊ_bh, v⟩` differs by 6e-4 to 3.5e-3, the
+  same size as `⟨dÊ_bh − dÊ_exact, v⟩`. Fix applied: the trial energies of a step use the
+  interaction lists (lumped nodes and exact leaf edges per edge, `BhTree::interaction_lists`) of
+  the step's base curve with refitted node data (`BhTree::energy_with_lists`), so `Ê_bh` is
+  smooth within the line search; this removed (i): the run now ends `Stuck` (five failed steps, as
+  the reference does) at step 937 with `‖g‖ = 8e-4` after 355 s instead of spinning (the exact
+  flow reaches 1e-4 at step 603). The remaining floor is (ii): the principled complete fix is the
+  discrete adjoint of `Ê_bh` on the frozen lists (row `I` lumped term `ℓ_I M_N k(x_I, x̄_N, T_I)`
+  plus the pushed-down derivative with respect to the node's `x̄_N` and `M_N` through the edges of
+  `N`, and the exact pairs with only the `(I, J)` term), which makes the Barnes–Hut flow a descent
+  method on the function it evaluates; not done here, left to a separate package. Until then a
+  Barnes–Hut flow ends `Stuck` at `‖g‖` ≈ 1e-3, near-circle and energy within 0.4 % of the exact
+  flow's (6.1015 against 6.0816 at the same curve, the Barnes–Hut energy 0.33 % high).
 * **WP3 API differences from §9.1.** `PenaltyTerm` is a trait (`evaluate`, `subdivided`,
   `obstacle`) and `FlowOptions.penalties: Vec<Arc<dyn PenaltyTerm>>` replaces the `Penalty` enum
   there; `FlowOptions.obstacles` (CCD obstacles, `CollisionObstacle`), `dense_threads` (the dense
