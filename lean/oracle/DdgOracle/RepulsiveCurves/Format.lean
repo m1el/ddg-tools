@@ -292,6 +292,7 @@ private def printProject (c : RCCase) (d : Array V3) : Except String String := d
   let r := chordProject c.net rc sad trial tol lbar c.maxit
   let mut s := s!"case {c.name}\ntask project\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\nquadrature {c.quad.name}\n"
   s := s ++ s!"rows {sad.k} {sad.nd}\nlbar {hx lbar}\ntau {hx step}\n"
+  s := s ++ "phi" ++ (rows.foldl (fun acc r => acc ++ " " ++ hx r.phi) "") ++ "\n"
   for v in [0:gr.g.size] do s := s ++ s!"g {v} {hx gr.g[v]!.x} {hx gr.g[v]!.y} {hx gr.g[v]!.z}\n"
   s := s ++ s!"result {r.status.name} {r.iterations}\nmaxviol {hx r.maxViolation}\n"
   s := s ++ "hist" ++ (r.history.foldl (fun acc h => acc ++ " " ++ hx h) "") ++ "\n"

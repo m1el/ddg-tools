@@ -4,7 +4,7 @@ exponents 4000000000000000 4012000000000000
 quadrature midpoint
 c sphere bf73b9c5bf808b89 3f82eaea8565b9c9 3f6e0c1ae752ef76 3ff055c1dc0e3da0 all
 c total-length
-c point 1
+c barycenter
 net 14 14
 p 3fef5df580793222 0000000000000000 3f853d0d145adc74
 p 3ff23b7afb923a5e 3fe18f7aedbae16e 3fcc48a15fa9c188

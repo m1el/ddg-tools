@@ -24,7 +24,7 @@ rc-tripod-saddle-tangent	saddle	ok	tripod, tangents at the three free ends
 rc-hopf-saddle	saddle	ok	Hopf link, barycenter + total length	
 rc-hopf-saddle-points	saddle	ok	Hopf link, two point constraints + some edge lengths	
 rc-bumpy-saddle-sphere	saddle	ok	wobbly loop, barycenter + implicit sphere |x - c|^2 - R^2 on five vertices	
-rc-bumpy-saddle-sphere-all	saddle	ok	sphere on all vertices (k = 14 rows), (2,4.5)	
+rc-bumpy-saddle-sphere-all	saddle	ok	sphere on all vertices, total length and barycenter (k = 18 rows), (2,4.5)	
 rc-planar-saddle	saddle	ok	planar loop (z held), barycenter (2 rows) + edge lengths	
 rc-planar-saddle-y	saddle	ok	loop in the plane y = 0.5 (y held), point + total length + sphere	
 rc-circle-project-point	project	ok	24-gon: step of 0.3 edge lengths, projection onto point + total length	result converged 2
@@ -49,5 +49,6 @@ rc-error-no-pairs	energy	error	a triangle has no disjoint edges: NoInteractingPa
 rc-error-out-of-range	energy	error	edge to vertex 99: VertexOutOfRange	status error VertexOutOfRange edge 3 = (3, 99), 24 vertices
 rc-error-not-planar	energy	error	planar axis but one vertex off the plane: NotPlanar	status error NotPlanar vertex 3 is off the plane
 rc-error-singular	saddle	error	the same point twice: the saddle matrix is singular	status error SingularSaddle the saddle matrix is singular
+rc-error-redundant	saddle	error	a surface row at a point-constrained vertex is redundant (D9): singular (the surface value at vertex 1 is not zero, but the row is dependent)	status error SingularSaddle a pivot of the saddle matrix is below 1e-14 of the largest
 rc-error-tangent-degree	saddle	error	tangent at the degree-3 junction: InvalidTangentSite	status error InvalidTangentSite vertex 0 has degree 3
 rc-error-tangent-flipped	saddle	error	tangent opposite to its direction: InfeasibleConstraint	status error InfeasibleConstraint tangent opposite to its direction

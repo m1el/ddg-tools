@@ -42,7 +42,16 @@ def Saddle.build (nv : Nat) (coords : Array Nat) (a : FloatArray) (rows : Array 
       m := m.set! ((nd + r) * n + j) x
       m := m.set! (j * n + nd + r) x
   match luFactor n m with
-  | some lu => return { nd, k, coords, c, lu }
+  | some lu =>
+    -- a pivot below 1e-14 of the largest means a redundant constraint row (as in the Rust solver)
+    let mut pmax : Float := 0.0
+    let mut pmin : Float := 1e300
+    for i in [0:n] do
+      let p := (lu.a.get! (i * n + i)).abs
+      if p > pmax then pmax := p
+      if p < pmin then pmin := p
+    if !(pmin > 1e-14 * pmax) then throw "SingularSaddle: a pivot of the saddle matrix is below 1e-14 of the largest"
+    return { nd, k, coords, c, lu }
   | none => throw "SingularSaddle: the saddle matrix is singular"
 
 /-- Solution `(x, λ)` of `[Ā Cᵀ; C 0] (x, λ) = (a, b)`. -/

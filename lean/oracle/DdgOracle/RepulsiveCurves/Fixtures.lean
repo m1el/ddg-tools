@@ -67,7 +67,7 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs { mk "rc-hopf-saddle-points" "saddle" hop with cons := #[.point 0 none, .point 13 none, .edgeLengths (some #[0, 1, 2, 3, 12, 13])] } "Hopf link, two point constraints + some edge lengths"
   let (c0, r0) := centroidRadius bumpy
   fs := add fs { mk "rc-bumpy-saddle-sphere" "saddle" bumpy with cons := #[.barycenter none, .sphere c0 r0 (some #[0, 3, 6, 9, 12])] } "wobbly loop, barycenter + implicit sphere |x - c|^2 - R^2 on five vertices"
-  fs := add fs { mk "rc-bumpy-saddle-sphere-all" "saddle" bumpy with ex := ex245, cons := #[.sphere c0 r0 none, .totalLength none, .point 1 none] } "sphere on all vertices (k = 14 rows), (2,4.5)"
+  fs := add fs { mk "rc-bumpy-saddle-sphere-all" "saddle" bumpy with ex := ex245, cons := #[.sphere c0 r0 none, .totalLength none, .barycenter none] } "sphere on all vertices, total length and barycenter (k = 18 rows), (2,4.5)"
   fs := add fs { mk "rc-planar-saddle" "saddle" planar with planar := some 2, cons := #[.barycenter none, .edgeLengths none] } "planar loop (z held), barycenter (2 rows) + edge lengths"
   fs := add fs { mk "rc-planar-saddle-y" "saddle" planarY with planar := some 1, ex := ex245, quad := .trapezoid, cons := #[.point 0 none, .totalLength none, .sphere ⟨0.0, 0.5, 0.0⟩ 1.0 (some #[2, 5])] } "loop in the plane y = 0.5 (y held), point + total length + sphere"
   -- projection
@@ -95,6 +95,7 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs (mk "rc-error-out-of-range" "energy" { circ with edges := circ.edges.set! 3 (3, 99) }) "edge to vertex 99: VertexOutOfRange"
   fs := add fs { mk "rc-error-not-planar" "energy" circ with planar := some 2, net := { circ with pos := circ.pos.set! 3 ⟨circ.pos[3]!.x, circ.pos[3]!.y, 0.5⟩ } } "planar axis but one vertex off the plane: NotPlanar"
   fs := add fs { mk "rc-error-singular" "saddle" circ with cons := #[.point 0 none, .point 0 none] } "the same point twice: the saddle matrix is singular"
+  fs := add fs { mk "rc-error-redundant" "saddle" bumpy with cons := #[.point 1 none, .sphere c0 r0 (some #[1, 4])] } "a surface row at a point-constrained vertex is redundant (D9): singular (the surface value at vertex 1 is not zero, but the row is dependent)"
   fs := add fs { mk "rc-error-tangent-degree" "saddle" tri with cons := #[.barycenter none, .tangent (.vertex 0) none] } "tangent at the degree-3 junction: InvalidTangentSite"
   fs := add fs { mk "rc-error-tangent-flipped" "saddle" helix with cons := #[.barycenter none, .tangent (.edge 3) (some ((-1.0 : Float) * (helix.pos[4]! - helix.pos[3]!)))] } "tangent opposite to its direction: InfeasibleConstraint"
   return fs
