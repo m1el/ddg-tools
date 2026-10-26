@@ -38,4 +38,7 @@ ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 # Developability of triangle meshes (Stein, Grinspun, Crane 2018): energy, flow, cut and flatten
 # (src/developability.rs).
 ddg-developability = { path = "../ddg-developability" }
+# Repulsive Curves (Yu, Schumacher, Crane 2021): tangent-point energy, fractional Sobolev flow,
+# constraints and penalties for curve networks (src/repulsive.rs).
+ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

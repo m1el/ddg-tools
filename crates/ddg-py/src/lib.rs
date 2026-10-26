@@ -22,6 +22,8 @@
 //! * [`sphere`] — `map_to_sphere`: a conformal map of a closed genus-0 mesh to the unit sphere.
 //! * [`developability`] — `developability`, `make_developable`, `developable_unwrap`: the
 //!   developability energy, flow and cut-and-flatten of Stein, Grinspun, Crane (2018).
+//! * [`repulsive`] — `RepulsiveSession`, `repulsive_flow`, `curve_energy`: the flow of Yu,
+//!   Schumacher, Crane, *Repulsive Curves* (ACM TOG 40(2), 2021) on curve networks.
 //! * `python` (cargo feature `python`) — the PyO3 glue. It contains no logic of its own:
 //!   it turns Python buffers into [`buffers::BufferView`]s, calls the functions above and
 //!   turns the results into Python objects.
@@ -52,6 +54,7 @@ pub mod intrinsic_vector;
 pub mod measure;
 pub mod pack;
 pub mod pipeline;
+pub mod repulsive;
 pub mod sphere;
 
 #[cfg(feature = "python")]

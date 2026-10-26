@@ -26,6 +26,7 @@ mod developability;
 mod sphere;
 mod intrinsic_apps;
 mod intrinsic_vector;
+mod repulsive;
 
 pyo3::create_exception!(
     ddg_tools,
@@ -591,6 +592,9 @@ fn reoptimize_cones<'py>(
 /// developability(...), make_developable(...), developable_seams(...), developable_unwrap(...)
 ///                   the developability energy, flow and cut of Stein, Grinspun, Crane (2018)
 ///
+/// RepulsiveSession(...), repulsive_flow(...), curve_energy(...), repulsive_defaults()
+///                   the repulsive-curves flow of Yu, Schumacher, Crane (2021)
+///
 /// PIPELINE          name of the unwrap pipeline this build contains
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
 ///                   (the flag exists so that a build with a stand-in would label itself)
@@ -611,6 +615,7 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     developability::register(m)?;
     intrinsic_apps::register(m)?;
     intrinsic_vector::register(m)?;
+    repulsive::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;
     m.add("MeshError", py.get_type::<MeshError>())?;

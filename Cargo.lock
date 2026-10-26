@@ -456,6 +456,7 @@ dependencies = [
  "ddg-intrinsic",
  "ddg-intrinsic-apps",
  "ddg-optimal-cones",
+ "ddg-repulsive-curves",
  "ddg-uv",
  "ddg-variational-cuts",
  "pyo3",
