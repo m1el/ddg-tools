@@ -464,6 +464,11 @@ dependencies = [
 [[package]]
 name = "ddg-repulsive-curves"
 version = "0.1.0"
+dependencies = [
+ "ddg-core",
+ "faer",
+ "rayon",
+]
 
 [[package]]
 name = "ddg-uv"

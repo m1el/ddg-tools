@@ -7,5 +7,8 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-# Dependencies are added by the work packages of SPEC.md §15 (WP1 first).
+# Dependencies are set by WP1 (SPEC.md §15); `[[bench]]` entries are added by WP14.
 [dependencies]
+ddg-core = { path = "../ddg-core" }
+faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
+rayon = "1.10"
