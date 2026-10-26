@@ -718,7 +718,9 @@ pub fn project_with_path_polished(
         }
         history.push(rel);
         let use_newton = polish.is_some_and(|p| rel <= p);
-        let status = if rel <= 1.0 {
+        // At least one step, also for a trial already within the tolerance (§17l, as
+        // `project_constraints`).
+        let status = if rel <= 1.0 && (it > 0 || rel == 0.0 || options.max_iterations == 0) {
             Some(
                 match constraints.tangent_orientation_failure(network, &pos) {
                     Some((constraint, _)) => ProjectionStatus::TangentFlipped { constraint },

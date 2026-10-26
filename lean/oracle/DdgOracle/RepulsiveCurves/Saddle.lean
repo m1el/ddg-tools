@@ -207,7 +207,9 @@ def chordProject (net : Net) (rc : Array RCons) (s : Saddle) (trial : Array V3) 
       if r.phi.abs > maxv then maxv := r.phi.abs
     hist := hist.push rel
     let fin := fun (st : ProjStatus) => some { pos, status := st, iterations := it, maxViolation := maxv, history := hist : ProjResult }
-    if rel ≤ 1.0 then
+    -- at least one step, also for a trial already within the tolerance (SPEC §17l; the paper's
+    -- "update γ̃ ← γ̃ + x and repeat"), unless Φ = 0 exactly or no step is allowed
+    if rel ≤ 1.0 && (it > 0 || rel == 0.0 || maxit == 0) then
       -- orientation of the tangent sites: s · X > 0
       let mut flipped : Option Nat := none
       for ci in [0:rc.size] do

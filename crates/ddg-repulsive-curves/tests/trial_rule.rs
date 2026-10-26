@@ -362,3 +362,99 @@ fn contact_floor_is_never_hit_by_a_sobolev_flow() {
         assert!(!s.step().unwrap().contact_floor);
     }
 }
+
+/// A rough trefoil of 40 vertices (the curve of WP12b's diagnosis, `SPEC.md` §17l).
+fn rough_trefoil(n: usize) -> (CurveNetwork, Vec<P>) {
+    let pos = (0..n)
+        .map(|i| {
+            let t = std::f64::consts::TAU * i as f64 / n as f64;
+            let w = 0.35 * (4.0 * t).sin();
+            [
+                t.sin() + 2.0 * (2.0 * t).sin() + w,
+                t.cos() - 2.0 * (2.0 * t).cos() + 0.5 * w,
+                -(3.0 * t).sin() + 0.3 * (7.0 * t).cos(),
+            ]
+        })
+        .collect();
+    let edges = (0..n as u32).map(|i| [i, (i + 1) % n as u32]).collect();
+    (CurveNetwork::new(n, edges).unwrap(), pos)
+}
+
+/// A trial already within the tolerance still gets one projection step (the paper's "update and
+/// repeat"; `SPEC.md` §17l), with the chord method and with the Newton polish.
+#[test]
+fn a_trial_within_the_tolerance_is_projected_once() {
+    use ddg_repulsive_curves::metric::{GramQuadrature, sobolev_gram};
+    use ddg_repulsive_curves::step::line_search::project_with_path_polished;
+    use ddg_repulsive_curves::{
+        ConstraintSet, DenseSaddle, Exponents, ProjectionOptions, ProjectionStatus, Tolerance,
+        default_constraints, project_constraints,
+    };
+    let (net, pos) = rough_trefoil(40);
+    let ex = Exponents::new(2.0, 4.5).unwrap();
+    let set = ConstraintSet::new(&net, &pos, &default_constraints(), None).unwrap();
+    let c = set.jacobian(&net, &pos).unwrap();
+    let pool = std::sync::Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap(),
+    );
+    let g = sobolev_gram(&pool, &net, &pos, ex, GramQuadrature::Midpoint);
+    let mut s = DenseSaddle::new(pool, &g.a, &c, set.layout()).unwrap();
+    let l0 = net.mean_edge_length(&pos);
+    // A small move, inside the tolerance.
+    let trial: Vec<P> = pos
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let e = 2e-5 * l0 * ((i % 3) as f64 - 1.0);
+            [x[0] + e, x[1] - e, x[2] + 0.5 * e]
+        })
+        .collect();
+    let opts = ProjectionOptions {
+        tolerance: Tolerance::MeanEdgeLength(1e-4),
+        max_iterations: 3,
+    };
+    let r = project_constraints(&mut s, &set, &net, &trial, &opts, l0).unwrap();
+    assert!(r.history[0] <= 1.0 && r.history[0] > 0.0, "{:?}", r.history);
+    assert_eq!(r.status, ProjectionStatus::Converged);
+    assert_eq!(r.iterations, 1);
+    assert!(r.history[1] < 1e-3 * r.history[0], "{:?}", r.history);
+    for polish in [None, Some(100.0)] {
+        let (p, path) =
+            project_with_path_polished(&mut s, &set, &net, trial.clone(), &opts, l0, polish)
+                .unwrap();
+        assert_eq!(p.status, ProjectionStatus::Converged);
+        assert_eq!(p.iterations, 1, "polish {polish:?}");
+        assert_eq!(path.len(), 2);
+    }
+}
+
+/// The hard flow of the rough trefoil reaches `‖g̃‖ < 1e-4` (before the fix of §17l it stalled at
+/// `‖g̃‖ ≈ 1.1e-2`, the curve drifting unprojected at the tolerance boundary).
+#[test]
+fn hard_flow_of_a_rough_trefoil_reaches_a_small_gradient() {
+    let (net, pos) = rough_trefoil(40);
+    let o = FlowOptions {
+        exponents: ddg_repulsive_curves::Exponents::new(2.0, 4.5).unwrap(),
+        backend: Backend::Explicit {
+            energy: EnergyEval::Exact,
+            solver: Solver::Dense,
+        },
+        threads: Some(2),
+        max_iterations: 1000,
+        ..FlowOptions::default()
+    };
+    let mut s = Session::new(net, pos, o).unwrap();
+    let mut g = f64::INFINITY;
+    while !s.status().is_terminal() {
+        g = s.step().unwrap().gradient_norm;
+    }
+    assert!(
+        g < 1e-4,
+        "‖g̃‖ = {g:.3e} after {} steps ({:?})",
+        s.iteration(),
+        s.status()
+    );
+}

@@ -246,7 +246,8 @@ pub struct Projection {
 
 /// The chord projection of §6.2 (Eq. 23): from `trial`, repeat
 /// `[Ā Cᵀ; C 0] [x; µ] = [0; −Φ(γ̃)]`, `γ̃ ← γ̃ + x` with `Ā` and `C` frozen at the step's
-/// base point (the `solver`), until every active row satisfies `|Φ_r| ≤ tol_r` (§5.1), at most
+/// base point (the `solver`), until every active row satisfies `|Φ_r| ≤ tol_r` (§5.1), at least
+/// once (unless `Φ = 0` exactly; the paper's "update γ̃ ← γ̃ + x and repeat", §17l) and at most
 /// `options.max_iterations` times. Each iteration gives the `Ā`-smallest `x` solving the
 /// linearized constraints. Failure (a status, not an error): the iteration limit, growth of the
 /// largest relative violation by more than 10× over the trial's, or a tangent site with
@@ -298,7 +299,10 @@ pub fn project_constraints(
                 linear,
             })
         };
-        if rel <= 1.0 {
+        // At least one step, also for a trial already within the tolerance (`SPEC.md` §17l):
+        // otherwise the curve drifts unprojected up to the tolerance (second-order edge
+        // growth lowers Ê) and every larger trial pays for the way back.
+        if rel <= 1.0 && (it > 0 || rel == 0.0 || options.max_iterations == 0) {
             let status = match constraints.tangent_orientation_failure(network, &pos) {
                 Some((constraint, _)) => ProjectionStatus::TangentFlipped { constraint },
                 None => ProjectionStatus::Converged,
