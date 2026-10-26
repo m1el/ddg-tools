@@ -415,7 +415,7 @@ fn run(a: &Args) -> Result<(), String> {
     };
     let pos = session.positions().to_vec();
     if let Some(f) = frames.as_mut() {
-        f.record(seconds as f64, session.iteration(), 1, &pos)
+        f.record(seconds, session.iteration(), 1, &pos)
             .map_err(|e| e.to_string())?;
         f.file.flush().map_err(|e| e.to_string())?;
     }
