@@ -1102,7 +1102,8 @@ fn bad_options_and_inputs_are_errors_not_panics() {
 /// barycenter + edge lengths: 600, 1200, 2400 and 2400 refined twice and four times. Per curve,
 /// thread count and solver (dense LU, multigrid with the defaults, multigrid with the 3 + 3
 /// stationary cycles of `SPEC.md` §10): the build (Gram + LU, or the hierarchy), the projected
-/// gradient, and one projection of a trial step of half an edge length at the fastest vertex.
+/// gradient, and one projection of a trial step of half an edge length at the fastest vertex
+/// plus a random perturbation of 1 % of an edge length.
 /// Env: `RC_THREADS` (list, default `1`), `RC_SIZES` (list of `base` or `base:times`),
 /// `RC_DENSE_MAX` (largest |V| for the dense LU, default 4736), `RC_CONFIGS` (`dense,mg,spec`).
 /// `--ignored --nocapture multigrid_study`.
@@ -1193,10 +1194,18 @@ fn multigrid_study() {
                         .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
                         .fold(0.0, f64::max);
                     let tau = 0.5 * l0 / gmax;
+                    let noise = rand_vec(3 * pr.pos.len(), 77);
                     pr.pos
                         .iter()
                         .zip(&g.direction)
-                        .map(|(x, d)| [x[0] - tau * d[0], x[1] - tau * d[1], x[2] - tau * d[2]])
+                        .enumerate()
+                        .map(|(v, (x, d))| {
+                            let mut y = [0.0; 3];
+                            for k in 0..3 {
+                                y[k] = x[k] - tau * d[k] + 0.01 * l0 * noise[3 * v + k];
+                            }
+                            y
+                        })
                         .collect()
                 });
                 let t2 = Instant::now();
