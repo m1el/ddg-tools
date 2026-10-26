@@ -575,7 +575,7 @@ pub struct FlowOptions {
     /// for a moving length schedule, not for violated rows. Default `true` (`SPEC.md` §17l).
     pub back_projection: bool,
     /// Trials `γ − τ p + τ² q` with the second-order correction `q` of
-    /// [`second_order_correction`](crate::solve::second_order_correction) (one extra solve per
+    /// [`crate::solve::second_order_correction`] (one extra solve per
     /// step), so that the projection starts at an `O(τ³)` instead of an `O(τ²)` violation.
     /// Measured in `SPEC.md` §17l: the first trial of a step usually converges within the
     /// iteration limit instead of failing, which saves the failed trial's solves. Used only with
