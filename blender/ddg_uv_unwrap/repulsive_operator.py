@@ -57,10 +57,12 @@ LINE_SEARCH_ITEMS = [
     ('armijo', "Armijo", "Plain backtracking on the energy; no collision check"),
 ]
 BACKEND_ITEMS = [
-    ('auto', "Auto", "The library's choice"),
+    ('auto', "Auto", "Exact energy and dense solves up to about 2000 vertices, Barnes-Hut energy "
+     "and multigrid solves above"),
     ('dense', "Dense", "Exact energy and dense solves"),
-    ('barnes_hut', "Barnes-Hut", "Barnes-Hut energy"),
-    ('multigrid', "Multigrid", "Multigrid solves"),
+    ('barnes_hut', "Barnes-Hut", "Barnes-Hut energy and dense solves"),
+    ('multigrid', "Multigrid", "Exact energy and multigrid solves (a step whose multigrid solve "
+     "fails is repeated with the dense solver on curves of up to 5000 vertices)"),
     ('accelerated', "Accelerated", "Barnes-Hut energy and multigrid solves"),
 ]
 

@@ -342,7 +342,7 @@ def invoke_takes_the_scene_settings():
 
 @test
 def native_backends_are_accepted():
-    for backend in ('auto', 'dense'):
+    for backend in ('auto', 'dense', 'barnes_hut', 'multigrid', 'accelerated'):
         reset()
         trefoil(30)
         run(steps=2, backend=backend)

@@ -35,8 +35,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use ddg_repulsive_curves as rc;
-use ddg_repulsive_curves::energy::exact::make_pool;
-use ddg_repulsive_curves::multigrid::{MgOptions, MultigridSolvers};
+use ddg_repulsive_curves::multigrid::MgOptions;
 use ddg_repulsive_curves::surfaces::{
     CircularField, ConstantField, DoubleTorus, Metaballs, Plane, RoundedBox, SmoothUnion, Sphere,
     SphereTangentField, Torus, Union, VectorField,
@@ -78,6 +77,7 @@ impl From<RcError> for RepError {
             RcError::SingularMetric { .. }
             | RcError::SingularSaddle { .. }
             | RcError::MultigridDiverged { .. }
+            | RcError::MultigridNotConverged { .. }
             | RcError::NonFiniteEnergy { .. }
             | RcError::Cancelled => RepError::Solve(e.to_string()),
             e => RepError::Input(e.to_string()),
@@ -157,15 +157,31 @@ pub const OPTION_NAMES: &[&str] = &[
     "field_weight",
     "line_search",
     "line_search_start",
+    "line_search_start_factor",
     "armijo",
     "shrink",
     "max_halvings",
     "gap",
     "backend",
+    "auto_dense_max_vertices",
+    "dense_fallback_max_vertices",
+    "mg_coarsest_vertices",
+    "mg_max_levels",
+    "mg_smoothing_steps",
+    "mg_initial_smoothing_steps",
+    "mg_tolerance",
+    "mg_max_cycles",
+    "mg_flexible_cg",
+    "mg_near_field_factor",
+    "mg_smoother_factor",
+    "mg_max_fixed_fraction",
+    "mg_energy_check",
+    "mg_failure_residual",
     "bh_theta_x",
     "bh_theta_t",
     "bh_leaf_size",
     "threads",
+    "dense_threads",
     "projection_tolerance",
     "projection_absolute",
     "projection_iterations",
@@ -376,6 +392,9 @@ pub struct RepulsiveOptions {
     pub line_search: String,
     /// `"two_thirds"` or `"grow_previous"` (the start of the collision-guarded search).
     pub line_search_start: String,
+    /// The growth factor of `"grow_previous"`: the first trial is at most this many times the
+    /// previous accepted step size.
+    pub line_search_start_factor: f64,
     /// Armijo constant.
     pub armijo: f64,
     /// Shrink factor.
@@ -384,8 +403,42 @@ pub struct RepulsiveOptions {
     pub max_halvings: u32,
     /// The collision-guarded search's gap.
     pub gap: f64,
-    /// `"auto"`, `"dense"`, `"barnes_hut"`, `"multigrid"`, `"accelerated"`.
+    /// `"auto"` (exact + dense up to `auto_dense_max_vertices` vertices, Barnes-Hut + multigrid
+    /// above), `"dense"` (exact + dense), `"barnes_hut"` (Barnes-Hut + dense), `"multigrid"`
+    /// (exact + multigrid), `"accelerated"` (Barnes-Hut + multigrid).
     pub backend: String,
+    /// The crossover of `backend = "auto"`.
+    pub auto_dense_max_vertices: usize,
+    /// A failed multigrid solve is repeated with the dense solver up to this many vertices
+    /// (0: never); the step report says so (`solver_fallback`).
+    pub dense_fallback_max_vertices: usize,
+    /// Multigrid: a level with at most this many vertices is the coarsest.
+    pub mg_coarsest_vertices: usize,
+    /// Multigrid: maximal number of levels.
+    pub mg_max_levels: usize,
+    /// Multigrid: CG smoothing steps before and after the coarse correction.
+    pub mg_smoothing_steps: usize,
+    /// Multigrid: smoothing steps of the full-multigrid start.
+    pub mg_initial_smoothing_steps: usize,
+    /// Multigrid: relative residual at which the solve stops.
+    pub mg_tolerance: f64,
+    /// Multigrid: maximal number of cycles per solve.
+    pub mg_max_cycles: usize,
+    /// Multigrid: use flexible CG with the V-cycle as preconditioner.
+    pub mg_flexible_cg: bool,
+    /// Multigrid: coarse edge pairs closer than this many edge lengths get the exact Galerkin
+    /// term (0: off).
+    pub mg_near_field_factor: f64,
+    /// Multigrid: the smoother's block preconditioner covers pairs closer than this many edge
+    /// lengths (0: plain CG).
+    pub mg_smoother_factor: f64,
+    /// Multigrid: coarsening stops at levels with more than this fraction of fixed vertices.
+    pub mg_max_fixed_fraction: f64,
+    /// Multigrid: also require the energy-norm error estimate to meet the tolerance.
+    pub mg_energy_check: bool,
+    /// Multigrid: a solve ending above this relative residual is an error (and the step falls
+    /// back to the dense solver if it is small enough).
+    pub mg_failure_residual: f64,
     /// Barnes-Hut `theta_x`.
     pub bh_theta_x: f64,
     /// Barnes-Hut `theta_t`.
@@ -394,6 +447,8 @@ pub struct RepulsiveOptions {
     pub bh_leaf_size: usize,
     /// Threads (`None`: all cores).
     pub threads: Option<usize>,
+    /// Threads of the dense LU (`None`: `min(16, threads)`).
+    pub dense_threads: Option<usize>,
     /// Tolerance of the constraint projection.
     pub projection_tolerance: f64,
     /// The tolerance is an absolute length, not a fraction of the mean edge length.
@@ -447,6 +502,7 @@ impl Default for RepulsiveOptions {
             _ => (1e-4, "euclidean"),
         };
         let bh = BhOptions::default();
+        let mg = MgOptions::default();
         RepulsiveOptions {
             alpha: lib.exponents.alpha(),
             beta: lib.exponents.beta(),
@@ -471,16 +527,45 @@ impl Default for RepulsiveOptions {
             field: None,
             field_weight: 1.0,
             line_search: "collision".into(),
-            line_search_start: "two_thirds".into(),
+            line_search_start: match LineSearch::default() {
+                LineSearch::CollisionGuarded {
+                    start: StartRule::TwoThirdsTauMax,
+                    ..
+                } => "two_thirds",
+                _ => "grow_previous",
+            }
+            .into(),
+            line_search_start_factor: match LineSearch::default() {
+                LineSearch::CollisionGuarded {
+                    start: StartRule::GrowPrevious { factor },
+                    ..
+                } => factor,
+                _ => 2.0,
+            },
             armijo,
             shrink,
             max_halvings,
             gap,
             backend: "auto".into(),
+            auto_dense_max_vertices: rc::DEFAULT_AUTO_DENSE_MAX_VERTICES,
+            dense_fallback_max_vertices: lib.dense_fallback_max_vertices,
+            mg_coarsest_vertices: mg.coarsest_vertices,
+            mg_max_levels: mg.max_levels,
+            mg_smoothing_steps: mg.smoothing_steps,
+            mg_initial_smoothing_steps: mg.initial_smoothing_steps,
+            mg_tolerance: mg.tolerance,
+            mg_max_cycles: mg.max_cycles,
+            mg_flexible_cg: mg.flexible_cg,
+            mg_near_field_factor: mg.near_field_factor,
+            mg_smoother_factor: mg.smoother_factor,
+            mg_max_fixed_fraction: mg.max_fixed_fraction,
+            mg_energy_check: mg.energy_check,
+            mg_failure_residual: mg.failure_residual,
             bh_theta_x: bh.theta_x,
             bh_theta_t: bh.theta_t,
             bh_leaf_size: bh.leaf_size,
             threads: lib.threads,
+            dense_threads: lib.dense_threads,
             projection_tolerance,
             projection_absolute,
             projection_iterations: lib.projection.max_iterations,
@@ -626,7 +711,9 @@ impl RepulsiveOptions {
                 armijo: self.armijo,
                 shrink: self.shrink,
                 start: if self.line_search_start == "grow_previous" {
-                    StartRule::grow_previous()
+                    StartRule::GrowPrevious {
+                        factor: self.line_search_start_factor,
+                    }
                 } else {
                     StartRule::TwoThirdsTauMax
                 },
@@ -672,11 +759,22 @@ impl RepulsiveOptions {
             theta_t: self.bh_theta_t,
             leaf_size: self.bh_leaf_size,
         });
-        let multigrid = || -> Result<Solver, RepError> {
-            Ok(Solver::Custom(Arc::new(MultigridSolvers::new(
-                MgOptions::default(),
-            )?)))
+        let mg = MgOptions {
+            coarsest_vertices: self.mg_coarsest_vertices,
+            max_levels: self.mg_max_levels,
+            smoothing_steps: self.mg_smoothing_steps,
+            initial_smoothing_steps: self.mg_initial_smoothing_steps,
+            tolerance: self.mg_tolerance,
+            max_cycles: self.mg_max_cycles,
+            flexible_cg: self.mg_flexible_cg,
+            near_field_factor: self.mg_near_field_factor,
+            smoother_factor: self.mg_smoother_factor,
+            max_fixed_fraction: self.mg_max_fixed_fraction,
+            energy_check: self.mg_energy_check,
+            failure_residual: self.mg_failure_residual,
+            ..MgOptions::default()
         };
+        mg.validate().map_err(|e| input("multigrid options", e))?;
         let backend = match self.backend.as_str() {
             "dense" => rc::Backend::Explicit {
                 energy: EnergyEval::Exact,
@@ -688,13 +786,15 @@ impl RepulsiveOptions {
             },
             "multigrid" => rc::Backend::Explicit {
                 energy: EnergyEval::Exact,
-                solver: multigrid()?,
+                solver: Solver::Multigrid(mg),
             },
             "accelerated" => rc::Backend::Explicit {
                 energy: bh,
-                solver: multigrid()?,
+                solver: Solver::Multigrid(mg),
             },
-            _ => rc::Backend::default(),
+            _ => rc::Backend::Auto {
+                dense_max_vertices: self.auto_dense_max_vertices,
+            },
         };
 
         let tolerance = if self.projection_absolute {
@@ -739,6 +839,8 @@ impl RepulsiveOptions {
             schedule,
             max_subdivisions: self.max_subdivisions,
             threads: self.threads,
+            dense_threads: self.dense_threads,
+            dense_fallback_max_vertices: self.dense_fallback_max_vertices,
             ..FlowOptions::default()
         };
         o.validate()?;
@@ -840,6 +942,39 @@ pub fn step_val(r: &StepReport, session_status: &Status) -> Val {
             ("collision", Val::Bool(t.collision)),
         ]),
     };
+    let fallback = match &r.solver_fallback {
+        None => Val::None,
+        Some(f) => Val::Dict(vec![
+            ("from", Val::Str(f.from.into())),
+            ("to", Val::Str(f.to.into())),
+            (
+                "cause",
+                Val::Str(
+                    match f.cause {
+                        RcError::MultigridDiverged { .. } => "multigrid_diverged",
+                        RcError::MultigridNotConverged { .. } => "multigrid_not_converged",
+                        _ => "other",
+                    }
+                    .into(),
+                ),
+            ),
+            ("message", Val::Str(f.cause.to_string())),
+            ("dense_solves", Val::uint(f.dense_solves)),
+            ("build_seconds", Val::Float(f.build_seconds)),
+        ]),
+    };
+    let schedule = match &r.schedule {
+        None => Val::None,
+        Some(p) => Val::Dict(vec![
+            ("progress", Val::Float(p.progress)),
+            ("span", Val::Float(p.span)),
+            ("fraction", Val::Float(p.fraction)),
+            ("factor_target", Val::Float(p.factor_target)),
+            ("factor_imposed", Val::Float(p.factor_imposed)),
+            ("factor_measured", Val::Float(p.factor_measured)),
+            ("finished", Val::Bool(p.finished)),
+        ]),
+    };
     let s = &r.seconds;
     let seconds = Val::Dict(vec![
         ("retarget", Val::Float(s.retarget)),
@@ -892,6 +1027,8 @@ pub fn step_val(r: &StepReport, session_status: &Status) -> Val {
         ("subdivided", Val::Bool(r.subdivided)),
         ("energy_backend", Val::Str(r.energy_backend.into())),
         ("solver_backend", Val::Str(r.solver_backend.into())),
+        ("solver_fallback", fallback),
+        ("schedule", schedule),
         ("seconds", seconds),
     ])
 }
@@ -1402,6 +1539,27 @@ mod tests {
                 "backend",
                 RepulsiveOptions {
                     backend: "gpu".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "multigrid",
+                RepulsiveOptions {
+                    mg_failure_residual: 1e-9,
+                    ..Default::default()
+                },
+            ),
+            (
+                "multigrid",
+                RepulsiveOptions {
+                    mg_max_fixed_fraction: 0.0,
+                    ..Default::default()
+                },
+            ),
+            (
+                "line_search_start",
+                RepulsiveOptions {
+                    line_search_start: "sideways".into(),
                     ..Default::default()
                 },
             ),

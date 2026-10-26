@@ -907,8 +907,18 @@ class RepulsiveSession:
     ``obstacles`` (``(vertices, triangles)`` pairs, never crossed by the collision-guarded line
     search) with ``obstacle_weight`` > 0 to add their repulsive potential; ``total_length_weight``,
     ``length_difference_weight``, ``field`` with ``field_weight`` (penalties); ``line_search``
-    and its constants; ``backend``; ``threads``; the projection and the stop rule
-    (``"gradient"`` with ``stop_threshold`` 1e-4, ``"relative"`` 1e-3, or ``"stall"``).
+    and its constants (``line_search_start``: ``"grow_previous"``, the first trial is at most
+    ``line_search_start_factor`` times the previous accepted step, or the paper's
+    ``"two_thirds"`` of the longest collision-free step); ``backend`` (``"auto"``: exact energy
+    and dense solver up to ``auto_dense_max_vertices`` vertices, Barnes-Hut energy and multigrid
+    above, re-chosen after a subdivision; ``"dense"``; ``"barnes_hut"``; ``"multigrid"`` = exact
+    + multigrid; ``"accelerated"`` = Barnes-Hut + multigrid) with the multigrid options
+    ``mg_*`` (``mg_near_field_factor`` and ``mg_smoother_factor`` for curve networks with
+    near-contacts, ``mg_max_fixed_fraction``, ``mg_energy_check``, ``mg_failure_residual``) and
+    ``dense_fallback_max_vertices`` (a step whose multigrid solve fails repeats it with the dense
+    solver up to that size; see ``solver_fallback`` of the step report); ``threads`` and
+    ``dense_threads``; the projection and the stop rule (``"gradient"`` with ``stop_threshold``
+    1e-4, ``"relative"`` 1e-3, or ``"stall"``).
     Raises ``RepulsiveInputError`` (a ``ValueError``) for anything wrong in the input.
     """
 
@@ -940,16 +950,46 @@ class RepulsiveSession:
         field: RepulsiveField | None = None,
         field_weight: float = 1.0,
         line_search: Literal["collision", "armijo"] = "collision",
-        line_search_start: Literal["two_thirds", "grow_previous"] = "two_thirds",
+        line_search_start: Literal["two_thirds", "grow_previous"] = "grow_previous",
+        line_search_start_factor: float = 2.0,
         armijo: float = 1e-4,
         shrink: float = 0.5,
         max_halvings: int = 40,
         gap: float = 0.1,
         backend: Literal["auto", "dense", "barnes_hut", "multigrid", "accelerated"] = "auto",
+    auto_dense_max_vertices: int = 2000,
+    dense_fallback_max_vertices: int = 5000,
+    mg_coarsest_vertices: int = 512,
+    mg_max_levels: int = 20,
+    mg_smoothing_steps: int = 12,
+    mg_initial_smoothing_steps: int = 24,
+    mg_tolerance: float = 1e-3,
+    mg_max_cycles: int = 20,
+    mg_flexible_cg: bool = True,
+    mg_near_field_factor: float = 1.0,
+    mg_smoother_factor: float = 1.0,
+    mg_max_fixed_fraction: float = 0.4,
+    mg_energy_check: bool = True,
+    mg_failure_residual: float = 1e-2,
+        auto_dense_max_vertices: int = 2000,
+        dense_fallback_max_vertices: int = 5000,
+        mg_coarsest_vertices: int = 512,
+        mg_max_levels: int = 20,
+        mg_smoothing_steps: int = 12,
+        mg_initial_smoothing_steps: int = 24,
+        mg_tolerance: float = 1e-3,
+        mg_max_cycles: int = 20,
+        mg_flexible_cg: bool = True,
+        mg_near_field_factor: float = 1.0,
+        mg_smoother_factor: float = 1.0,
+        mg_max_fixed_fraction: float = 0.4,
+        mg_energy_check: bool = True,
+        mg_failure_residual: float = 1e-2,
         bh_theta_x: float = 0.125,
         bh_theta_t: float = 0.25,
         bh_leaf_size: int = 8,
         threads: int | None = None,
+        dense_threads: int | None = None,
         projection_tolerance: float = 1e-4,
         projection_absolute: bool = False,
         projection_iterations: int = 3,
@@ -965,7 +1005,12 @@ class RepulsiveSession:
         ``"converged"``, ``"retarget_stalled"``, ``"cancelled"``), ``session_status``,
         ``n_vertices``, ``n_edges``, ``energy_before``, ``energy_after``, ``gradient_norm``,
         ``tau``, ``halvings``, ``max_violation``, ``linear``, ``retarget``, ``subdivided``,
-        ``seconds`` ..."""
+        ``energy_backend``, ``solver_backend``, ``solver_fallback`` (``None``, or a dict with
+        ``from``, ``to``, ``cause`` = ``"multigrid_diverged"`` / ``"multigrid_not_converged"``,
+        ``message``, ``dense_solves``, ``build_seconds``: the multigrid solve failed and the
+        dense solver answered the rest of the step), ``schedule`` (``None``, or ``progress``,
+        ``span``, ``fraction``, ``factor_target``, ``factor_imposed``, ``factor_measured``,
+        ``finished``: the length schedule), ``seconds`` ..."""
     def run(
         self,
         max_steps: int | None = None,
@@ -1047,16 +1092,32 @@ def repulsive_flow(
     field: RepulsiveField | None = None,
     field_weight: float = 1.0,
     line_search: Literal["collision", "armijo"] = "collision",
-    line_search_start: Literal["two_thirds", "grow_previous"] = "two_thirds",
+    line_search_start: Literal["two_thirds", "grow_previous"] = "grow_previous",
+    line_search_start_factor: float = 2.0,
     armijo: float = 1e-4,
     shrink: float = 0.5,
     max_halvings: int = 40,
     gap: float = 0.1,
     backend: Literal["auto", "dense", "barnes_hut", "multigrid", "accelerated"] = "auto",
+    auto_dense_max_vertices: int = 2000,
+    dense_fallback_max_vertices: int = 5000,
+    mg_coarsest_vertices: int = 512,
+    mg_max_levels: int = 20,
+    mg_smoothing_steps: int = 12,
+    mg_initial_smoothing_steps: int = 24,
+    mg_tolerance: float = 1e-3,
+    mg_max_cycles: int = 20,
+    mg_flexible_cg: bool = True,
+    mg_near_field_factor: float = 1.0,
+    mg_smoother_factor: float = 1.0,
+    mg_max_fixed_fraction: float = 0.4,
+    mg_energy_check: bool = True,
+    mg_failure_residual: float = 1e-2,
     bh_theta_x: float = 0.125,
     bh_theta_t: float = 0.25,
     bh_leaf_size: int = 8,
     threads: int | None = None,
+    dense_threads: int | None = None,
     projection_tolerance: float = 1e-4,
     projection_absolute: bool = False,
     projection_iterations: int = 3,

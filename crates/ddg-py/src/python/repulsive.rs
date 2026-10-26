@@ -505,6 +505,7 @@ fn parse_options(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<RepulsiveOption
             "field_weight" => o.field_weight = float(k, &v)?,
             "line_search" => o.line_search = text(k, &v)?,
             "line_search_start" => o.line_search_start = text(k, &v)?,
+            "line_search_start_factor" => o.line_search_start_factor = float(k, &v)?,
             "armijo" => o.armijo = float(k, &v)?,
             "shrink" => o.shrink = float(k, &v)?,
             "max_halvings" => {
@@ -512,10 +513,25 @@ fn parse_options(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<RepulsiveOption
             }
             "gap" => o.gap = float(k, &v)?,
             "backend" => o.backend = text(k, &v)?,
+            "auto_dense_max_vertices" => o.auto_dense_max_vertices = count(k, &v)?,
+            "dense_fallback_max_vertices" => o.dense_fallback_max_vertices = count(k, &v)?,
+            "mg_coarsest_vertices" => o.mg_coarsest_vertices = count(k, &v)?,
+            "mg_max_levels" => o.mg_max_levels = count(k, &v)?,
+            "mg_smoothing_steps" => o.mg_smoothing_steps = count(k, &v)?,
+            "mg_initial_smoothing_steps" => o.mg_initial_smoothing_steps = count(k, &v)?,
+            "mg_tolerance" => o.mg_tolerance = float(k, &v)?,
+            "mg_max_cycles" => o.mg_max_cycles = count(k, &v)?,
+            "mg_flexible_cg" => o.mg_flexible_cg = flag(k, &v)?,
+            "mg_near_field_factor" => o.mg_near_field_factor = float(k, &v)?,
+            "mg_smoother_factor" => o.mg_smoother_factor = float(k, &v)?,
+            "mg_max_fixed_fraction" => o.mg_max_fixed_fraction = float(k, &v)?,
+            "mg_energy_check" => o.mg_energy_check = flag(k, &v)?,
+            "mg_failure_residual" => o.mg_failure_residual = float(k, &v)?,
             "bh_theta_x" => o.bh_theta_x = float(k, &v)?,
             "bh_theta_t" => o.bh_theta_t = float(k, &v)?,
             "bh_leaf_size" => o.bh_leaf_size = count(k, &v)?,
             "threads" => o.threads = if none { None } else { Some(count(k, &v)?) },
+            "dense_threads" => o.dense_threads = if none { None } else { Some(count(k, &v)?) },
             "projection_tolerance" => o.projection_tolerance = float(k, &v)?,
             "projection_absolute" => o.projection_absolute = flag(k, &v)?,
             "projection_iterations" => {
@@ -1022,15 +1038,31 @@ fn repulsive_defaults(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("field_weight", o.field_weight)?;
     d.set_item("line_search", &o.line_search)?;
     d.set_item("line_search_start", &o.line_search_start)?;
+    d.set_item("line_search_start_factor", o.line_search_start_factor)?;
     d.set_item("armijo", o.armijo)?;
     d.set_item("shrink", o.shrink)?;
     d.set_item("max_halvings", o.max_halvings)?;
     d.set_item("gap", o.gap)?;
     d.set_item("backend", &o.backend)?;
+    d.set_item("auto_dense_max_vertices", o.auto_dense_max_vertices)?;
+    d.set_item("dense_fallback_max_vertices", o.dense_fallback_max_vertices)?;
+    d.set_item("mg_coarsest_vertices", o.mg_coarsest_vertices)?;
+    d.set_item("mg_max_levels", o.mg_max_levels)?;
+    d.set_item("mg_smoothing_steps", o.mg_smoothing_steps)?;
+    d.set_item("mg_initial_smoothing_steps", o.mg_initial_smoothing_steps)?;
+    d.set_item("mg_tolerance", o.mg_tolerance)?;
+    d.set_item("mg_max_cycles", o.mg_max_cycles)?;
+    d.set_item("mg_flexible_cg", o.mg_flexible_cg)?;
+    d.set_item("mg_near_field_factor", o.mg_near_field_factor)?;
+    d.set_item("mg_smoother_factor", o.mg_smoother_factor)?;
+    d.set_item("mg_max_fixed_fraction", o.mg_max_fixed_fraction)?;
+    d.set_item("mg_energy_check", o.mg_energy_check)?;
+    d.set_item("mg_failure_residual", o.mg_failure_residual)?;
     d.set_item("bh_theta_x", o.bh_theta_x)?;
     d.set_item("bh_theta_t", o.bh_theta_t)?;
     d.set_item("bh_leaf_size", o.bh_leaf_size)?;
     d.set_item("threads", o.threads)?;
+    d.set_item("dense_threads", o.dense_threads)?;
     d.set_item("projection_tolerance", o.projection_tolerance)?;
     d.set_item("projection_absolute", o.projection_absolute)?;
     d.set_item("projection_iterations", o.projection_iterations)?;

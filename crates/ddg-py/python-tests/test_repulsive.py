@@ -484,6 +484,147 @@ class Contract(unittest.TestCase):
             self.assertEqual(numpy.frombuffer(s.positions).reshape(-1, 3).shape, (24, 3))
 
 
+class Multigrid(unittest.TestCase):
+    """The multigrid solver choice, its options, the start rule and the fallback field."""
+
+    SMALL = dict(mg_coarsest_vertices=16)
+
+    def test_multigrid_options_and_their_defaults(self):
+        d = ddg_tools.repulsive_defaults()
+        self.assertEqual(d["backend"], "auto")
+        self.assertEqual(d["auto_dense_max_vertices"], 2000)
+        self.assertEqual(d["dense_fallback_max_vertices"], 5000)
+        self.assertEqual(d["mg_coarsest_vertices"], 512)
+        self.assertEqual(d["mg_near_field_factor"], 1.0)
+        self.assertEqual(d["mg_smoother_factor"], 1.0)
+        self.assertEqual(d["mg_max_fixed_fraction"], 0.4)
+        self.assertIs(d["mg_energy_check"], True)
+        self.assertEqual(d["mg_failure_residual"], 1e-2)
+        self.assertEqual(d["line_search_start"], "grow_previous")
+        self.assertEqual(d["line_search_start_factor"], 2.0)
+
+    def test_multigrid_backend_runs_with_a_hierarchy(self):
+        p, e = trefoil(64)
+        for backend in ["multigrid", "accelerated"]:
+            _, _, report = ddg_tools.repulsive_flow(
+                p, e, steps=3, backend=backend, **self.SMALL
+            )
+            self.assertLess(report["energy_final"], report["energy_initial"])
+            for step in report["steps"]:
+                self.assertEqual(step["solver_backend"], "multigrid")
+                self.assertEqual(step["linear"]["solver"], "multigrid")
+                self.assertGreaterEqual(step["linear"]["levels"], 2)
+                self.assertIsNone(step["solver_fallback"])
+        self.assertEqual(report["steps"][0]["energy_backend"], "barnes-hut")
+
+    def test_every_multigrid_option_is_accepted_and_validated(self):
+        p, e = trefoil(64)
+        options = dict(
+            mg_coarsest_vertices=16,
+            mg_max_levels=4,
+            mg_smoothing_steps=6,
+            mg_initial_smoothing_steps=12,
+            mg_tolerance=1e-4,
+            mg_max_cycles=30,
+            mg_flexible_cg=False,
+            mg_near_field_factor=0.5,
+            mg_smoother_factor=0.0,
+            mg_max_fixed_fraction=0.9,
+            mg_energy_check=False,
+            mg_failure_residual=0.1,
+        )
+        _, _, report = ddg_tools.repulsive_flow(p, e, steps=2, backend="multigrid", **options)
+        self.assertEqual(report["steps"][0]["linear"]["solver"], "multigrid")
+        for bad in [
+            dict(mg_tolerance=0.0),
+            dict(mg_failure_residual=1e-9),
+            dict(mg_max_fixed_fraction=0.0),
+            dict(mg_near_field_factor=-1.0),
+            dict(mg_max_levels=0),
+        ]:
+            with self.assertRaises(ValueError, msg=str(bad)):
+                ddg_tools.repulsive_flow(p, e, steps=1, backend="multigrid", **bad)
+
+    def test_auto_follows_the_crossover_option(self):
+        p, e = trefoil(64)
+        small = ddg_tools.repulsive_flow(p, e, steps=1, auto_dense_max_vertices=10)[2]["steps"][0]
+        self.assertEqual((small["energy_backend"], small["solver_backend"]), ("barnes-hut", "multigrid"))
+        big = ddg_tools.repulsive_flow(p, e, steps=1)[2]["steps"][0]
+        self.assertEqual((big["energy_backend"], big["solver_backend"]), ("exact", "direct"))
+
+    def test_start_rules(self):
+        p, e = trefoil(64)
+        results = {}
+        for rule in ["two_thirds", "grow_previous"]:
+            q, _, report = ddg_tools.repulsive_flow(p, e, steps=6, line_search_start=rule)
+            self.assertLess(report["energy_final"], report["energy_initial"], rule)
+            results[rule] = q.tolist()
+        self.assertNotEqual(results["two_thirds"], results["grow_previous"])
+        # The default is the grow-previous rule with factor 2.
+        a = ddg_tools.repulsive_flow(p, e, steps=6)[0].tolist()
+        b = ddg_tools.repulsive_flow(
+            p, e, steps=6, line_search_start="grow_previous", line_search_start_factor=2.0
+        )[0].tolist()
+        self.assertEqual(a, b)
+        self.assertEqual(a, results["grow_previous"])
+        with self.assertRaises(ValueError):
+            ddg_tools.repulsive_flow(p, e, steps=1, line_search_start="sideways")
+        with self.assertRaises(ValueError):
+            ddg_tools.repulsive_flow(p, e, steps=1, line_search_start_factor=0.5)
+
+    FAILING = dict(
+        backend="multigrid",
+        mg_coarsest_vertices=16,
+        mg_tolerance=1e-14,
+        mg_failure_residual=1e-13,
+        mg_max_cycles=1,
+    )
+
+    def test_a_failed_multigrid_solve_falls_back_and_says_so(self):
+        p, e = trefoil(64)
+        dense = ddg_tools.RepulsiveSession(p, e, backend="dense")
+        mg = ddg_tools.RepulsiveSession(p, e, **self.FAILING)
+        for _ in range(2):
+            rd = dense.step()
+            rm = mg.step()
+            fb = rm["solver_fallback"]
+            self.assertIsNotNone(fb)
+            self.assertEqual((fb["from"], fb["to"]), ("multigrid", "direct"))
+            self.assertEqual(fb["cause"], "multigrid_not_converged")
+            self.assertIn("did not converge", fb["message"])
+            self.assertGreaterEqual(fb["dense_solves"], 1)
+            self.assertIsNone(rd["solver_fallback"])
+        # The fallback step is the dense step.
+        self.assertEqual(mg.positions.tolist(), dense.positions.tolist())
+
+    def test_the_fallback_can_be_refused(self):
+        p, e = trefoil(64)
+        with self.assertRaises(ddg_tools.SolveError) as cm:
+            ddg_tools.RepulsiveSession(p, e, dense_fallback_max_vertices=0, **self.FAILING).step()
+        self.assertIn("did not converge", str(cm.exception))
+
+    def test_schedule_progress_is_in_the_step_report(self):
+        p, e = trefoil(40)
+        s = ddg_tools.RepulsiveSession(p, e, grow_factor=1.3, grow_rate=0.1)
+        self.assertIsNone(ddg_tools.RepulsiveSession(p, e).step()["schedule"])
+        last = None
+        for _ in range(5):
+            last = s.step()["schedule"]
+        self.assertEqual(last["factor_target"], 1.3)
+        self.assertAlmostEqual(last["factor_imposed"], 1.3, places=12)
+        self.assertAlmostEqual(last["factor_measured"], 1.3, delta=1e-3)
+        self.assertTrue(last["finished"])
+        self.assertAlmostEqual(last["fraction"], 1.0)
+
+    def test_dense_threads_is_an_option(self):
+        p, e = trefoil(40)
+        a = ddg_tools.repulsive_flow(p, e, steps=2, threads=2, dense_threads=1)[0].tolist()
+        b = ddg_tools.repulsive_flow(p, e, steps=2, threads=3, dense_threads=2)[0].tolist()
+        self.assertEqual(a, b)  # bitwise independent of the thread counts
+        with self.assertRaises(ValueError):
+            ddg_tools.repulsive_flow(p, e, steps=1, dense_threads=0)
+
+
 class Errors(unittest.TestCase):
     def setUp(self):
         self.p, self.e = trefoil(30)
