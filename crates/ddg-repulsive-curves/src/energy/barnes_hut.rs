@@ -26,21 +26,36 @@
 //! form of `SPEC.md` §3 (D1), not the reference's vertex form, and the criteria are those of
 //! Eq. 27 plus the guard (D15).
 //!
-//! **Differential** [formula: rc-bh-differential]. Lumping the pairs `(I, J)` and `(J, I)` for
-//! `J ∈ N` gives `ℓ_I L_N (k(x_I, x̄_N, T_I) + k(x̄_N, x_I, T̂_N))` with `L_N, x̄_N, T̂_N` held
-//! fixed; its derivative with respect to the two endpoints of `I` is added for an admissible
-//! node, and the exact `G_{I,a}` of `SPEC.md` §3.2 restricted to the leaf's edges for a leaf.
-//! With `s₁ = −1, s₂ = +1`, `g_T = ∇_T k(x_I, x̄_N, T_I)`:
+//! **Differential: the discrete adjoint** (`SPEC.md` §17i) [formula: rc-bh-adjoint]. On fixed
+//! interaction lists ([`BhTree::interaction_lists`]: per edge `I` the lumped nodes `𝓛(I)` and the
+//! exactly evaluated edges `𝓧(I)`) the evaluated energy is
 //!
 //! ```text
-//! ∂/∂γ_{i_a} = s_a L_N (k₁ T_I + g_T + k₂ T_I) + ½ ℓ_I L_N (∇_p k(x_I, x̄_N, T_I) − ∇_p k(x̄_N, x_I, T̂_N))
+//! Ê_bh = Σ_I [ Σ_{N ∈ 𝓛(I)} ℓ_I L_N k(x_I, x̄_N, T_I) + Σ_{J ∈ 𝓧(I)} e_IJ ],
+//! L_N = Σ_{J ∈ N} ℓ_J,   x̄_N = Σ_{J ∈ N} ℓ_J x_J / L_N
 //! ```
 //!
-//! (the second kernel's argument `x_I` is its `q`, hence `∇_q = −∇_p`.) This is the exact
-//! derivative of the lumped energy, not the derivative of the *evaluated* Barnes–Hut energy: the
-//! latter is the energy of Eq. 26 only (lumping the pairs `(I, J)`), whose derivative would miss
-//! the `(J, I)` terms. The two are different approximations of the same differential; the test
-//! suite documents the tolerance between finite differences of one and the other.
+//! (`T̂_N` does not enter it). [`BhTree::energy_and_differential`] returns its exact derivative:
+//!
+//! * the **own part** of every lumped term, with `s₁ = −1, s₂ = +1`, `k, ∇_p k, g_T = ∇_T k` at
+//!   `(x_I, x̄_N, T_I)`: `∂/∂γ_{i_a} = L_N (s_a (k T_I + g_T) + ½ ℓ_I ∇_p k)`;
+//! * the **node part**: each lumped term adds `b = ℓ_I k` to `∂Ê/∂L_N` (at fixed `x̄_N`) and
+//!   `u = −ℓ_I ∇_p k` to `∂Ê/∂x̄_N · L_N`. Through `L_N` and `x̄_N` an edge `J ∈ N` sees
+//!   `∂/∂ℓ_J = b_N + u_N·(x_J − x̄_N)` and `∂/∂x_J = ℓ_J u_N` (sums `b_N, u_N` over all `I`
+//!   lumping `N`). The nodes containing `J` are the ancestors of its leaf; one downward pass
+//!   accumulates `β_C = β_P + U_P·(x̄_C − x̄_P) + b_C`, `U_C = U_P + u_C` (re-centred at each node,
+//!   so no large coordinates cancel) [formula: rc-bh-adjoint-shift], and at the leaf `Λ` of `J`
+//!   `λ_J = β_Λ + U_Λ·(x_J − x̄_Λ)`, `μ_J = U_Λ`, `∂/∂γ_{j_b} = s_b λ_J T_J + ½ ℓ_J μ_J`;
+//! * the **exact pairs**: `∂e_IJ/∂γ_I` in row `I` and `∂e_IJ/∂γ_J` in row `J` (the transposed lists;
+//!   the lists are not symmetric) [formula: rc-energy-differential].
+//!
+//! So the differential is the derivative of exactly the function that the line search evaluates
+//! with [`BhTree::energy_with_lists`] (the base curve's lists, D26); its cost is the energy's plus
+//! one sequential pass over the lumped entries and one over the nodes (`O(n log n)` in all).
+//! The previous differential of §8.2 (WP4: the derivative of the lumped `(I, J) + (J, I)` pair with
+//! `L_N, x̄_N, T̂_N` held fixed) [formula: rc-bh-differential] remains as
+//! [`BhTree::energy_and_differential_lumped_pairs`]; it is not the derivative of `Ê_bh` (it differs
+//! from finite differences by the approximation error, `SPEC.md` §17d, §17f).
 //!
 //! **Determinism (D25).** The tree is built and refitted sequentially; each edge's traversal is
 //! a sequential depth-first walk; rows are computed in parallel into per-edge slots and reduced
@@ -309,6 +324,9 @@ impl BhTree {
             0.5,
         );
         let mut row = Row::default();
+        // The exact pair energies are added after the lumped terms, so that the sum is the one
+        // of `energy_with_lists` on this tree's own lists, bit for bit.
+        let mut exact_energies: Vec<f64> = Vec::new();
         let nodes = self.bvh.nodes();
         let mut stack: Vec<usize> = Vec::with_capacity(64);
         stack.push(0);
@@ -337,17 +355,20 @@ impl BhTree {
                         continue;
                     }
                     row.pairs += 1;
-                    if with_gradient {
-                        pair_with_gradient(s, i, j, e, &mut row);
+                    exact_energies.push(if with_gradient {
+                        pair_with_gradient(s, i, j, e, &mut row)
                     } else {
-                        row.energy += pair_energy(s, i, j, e);
-                    }
+                        pair_energy(s, i, j, e)
+                    });
                 }
                 continue;
             }
             // Left child first: push the right child, then the left one.
             stack.push(node.right as usize);
             stack.push(n + 1);
+        }
+        for v in exact_energies {
+            row.energy += v;
         }
         row
     }
@@ -371,7 +392,12 @@ impl BhTree {
         let mut stack = vec![0usize];
         while let Some(n) = stack.pop() {
             let node = &self.bvh.nodes()[n];
-            if node.is_leaf() {
+            // The same decisions, in the same order, as `row` (leaves only lumped when
+            // `set_lump_leaves` is on).
+            let lump = !node.is_leaf() || self.lump_leaves;
+            if lump && self.admissible(&self.data[n], xi, pi) {
+                lumped.push(n);
+            } else if node.is_leaf() {
                 for &j in self.bvh.elements_of(n) {
                     let [a, b] = self.edges[i];
                     let [c, d] = self.edges[j as usize];
@@ -379,8 +405,6 @@ impl BhTree {
                         exact.push(j as usize);
                     }
                 }
-            } else if self.admissible(&self.data[n], xi, pi) {
-                lumped.push(n);
             } else {
                 stack.push(node.right as usize);
                 stack.push(n + 1);
@@ -412,7 +436,11 @@ impl BhTree {
                 })
                 .unzip()
         });
-        InteractionLists { lumped, exact }
+        InteractionLists {
+            lumped,
+            exact,
+            n_nodes: self.bvh.nodes().len(),
+        }
     }
 
     /// The Barnes–Hut energy with the given (frozen) interaction lists at the current positions
@@ -474,10 +502,210 @@ impl BhTree {
         (energy, stats)
     }
 
-    /// Barnes–Hut energy and differential `∂Ê/∂γ_v` (one entry per vertex).
+    /// Barnes–Hut energy and its exact differential `∂Ê_bh/∂γ_v` (one entry per vertex): the
+    /// discrete adjoint on the interaction lists of the current tree and positions (module docs,
+    /// `SPEC.md` §17i). The energy is [`BhTree::energy_with_lists`] on those lists, bit for bit,
+    /// and the differential is its derivative with the lists held fixed, so a line search that
+    /// evaluates its trials with these lists sees a descent direction whose directional
+    /// derivative is exact. Computes the lists itself; a caller that has them already uses
+    /// [`BhTree::energy_and_differential_with_lists`].
+    ///
+    /// [formula: rc-bh-adjoint]
+    pub fn energy_and_differential(
+        &self,
+        pool: &rayon::ThreadPool,
+        exponents: Exponents,
+    ) -> (f64, Vec<[f64; 3]>, BhStats) {
+        let lists = self.interaction_lists(pool);
+        self.adjoint(&lists, pool, exponents)
+    }
+
+    /// As [`BhTree::energy_and_differential`] with given interaction lists (normally the ones
+    /// [`BhTree::interaction_lists`] made for this tree at the current positions; any lists of
+    /// this tree's topology give the energy on those lists and its exact derivative).
+    ///
+    /// # Errors
+    /// [`RcError::InvalidOption`] (`lists`) if the lists were made for a tree with a different
+    /// number of edges or nodes.
+    ///
+    /// [formula: rc-bh-adjoint]
+    pub fn energy_and_differential_with_lists(
+        &self,
+        lists: &InteractionLists,
+        pool: &rayon::ThreadPool,
+        exponents: Exponents,
+    ) -> Result<(f64, Vec<[f64; 3]>, BhStats), RcError> {
+        let (m, nn) = (self.edges.len(), self.bvh.nodes().len());
+        if lists.lumped.len() != m || lists.exact.len() != m || lists.n_nodes != nn {
+            return Err(RcError::InvalidOption {
+                name: "lists",
+                value: format!(
+                    "interaction lists of a tree with {} edges and {} nodes",
+                    lists.lumped.len(),
+                    lists.n_nodes
+                ),
+                requirement: "the lists of this tree (BhTree::interaction_lists): same edge and \
+                              node count",
+            });
+        }
+        Ok(self.adjoint(lists, pool, exponents))
+    }
+
+    /// The discrete adjoint of [`BhTree::energy_with_lists`] (module docs, `SPEC.md` §17i).
+    ///
+    /// 1. rows in parallel (tree order, per-edge slots): the energy, the own part of every term
+    ///    of the row, the node terms `(b, u)` of its lumped entries, and `∂e_KI/∂γ_I` for the
+    ///    edges `K` whose exact list contains `I`;
+    /// 2. node sums `b_N, u_N` in increasing edge order (sequential);
+    /// 3. the downward pass over the nodes in index order (parents precede their children);
+    /// 4. per edge, the node part at its leaf; vertex sums in increasing edge order.
+    ///
+    /// Every reduction has a fixed order: bitwise independent of the thread count (D25).
+    ///
+    /// [formula: rc-bh-adjoint]
+    fn adjoint(
+        &self,
+        lists: &InteractionLists,
+        pool: &rayon::ThreadPool,
+        e: Exponents,
+    ) -> (f64, Vec<[f64; 3]>, BhStats) {
+        let m = self.edges.len();
+        let s = &self.snap;
+        let nodes = self.bvh.nodes();
+        let nn = nodes.len();
+        let (toff, tidx) = transpose(&lists.exact, m);
+        let order = self.bvh.order();
+        let computed: Vec<AdjRow> = pool.install(|| {
+            order
+                .par_iter()
+                .with_min_len(16)
+                .map(|&i| {
+                    let i = i as usize;
+                    self.adjoint_row(i, lists, &tidx[toff[i]..toff[i + 1]], e)
+                })
+                .collect()
+        });
+        let mut rows: Vec<AdjRow> = (0..m).map(|_| AdjRow::default()).collect();
+        for (r, &i) in computed.into_iter().zip(order) {
+            rows[i as usize] = r;
+        }
+        // 2. Node sums: b_N = ∂Ê/∂L_N at fixed x̄_N, u_N = ∂Ê/∂x̄_N / L_N.
+        let mut b = vec![0.0; nn];
+        let mut u = vec![[0.0; 3]; nn];
+        for (i, r) in rows.iter().enumerate() {
+            for (&n, &(bk, uk)) in lists.lumped[i].iter().zip(&r.node_terms) {
+                b[n as usize] += bk;
+                u[n as usize] = axpy(u[n as usize], 1.0, uk);
+            }
+        }
+        // 3. Downward pass [formula: rc-bh-adjoint-shift]: Σ_{A ⊇ N} (b_A + u_A·(x − x̄_A)) =
+        //    beta_N + ubig_N·(x − x̄_N).
+        let mut beta = vec![0.0; nn];
+        let mut ubig = vec![[0.0; 3]; nn];
+        if nn > 0 {
+            beta[0] = b[0];
+            ubig[0] = u[0];
+        }
+        for (n, node) in nodes.iter().enumerate() {
+            if node.is_leaf() {
+                continue;
+            }
+            for c in [n + 1, node.right as usize] {
+                let shift = sub(self.data[c].xbar, self.data[n].xbar);
+                beta[c] = beta[n] + dot(ubig[n], shift) + b[c];
+                ubig[c] = axpy(ubig[n], 1.0, u[c]);
+            }
+        }
+        // 4. The node part of every edge, at its leaf: s_b λ_J T_J + ½ ℓ_J μ_J.
+        let mut through_nodes = vec![[[0.0; 3]; 2]; m];
+        for (n, node) in nodes.iter().enumerate() {
+            if !node.is_leaf() {
+                continue;
+            }
+            for &j in self.bvh.elements_of(n) {
+                let j = j as usize;
+                let [p, q] = s.ends[j];
+                let xj = scale([p[0] + q[0], p[1] + q[1], p[2] + q[2]], 0.5);
+                let lambda = beta[n] + dot(ubig[n], sub(xj, self.data[n].xbar));
+                let half = scale(ubig[n], 0.5 * s.length[j]);
+                through_nodes[j] = [
+                    axpy(half, -lambda, s.tangent[j]),
+                    axpy(half, lambda, s.tangent[j]),
+                ];
+            }
+        }
+        let energy: f64 = rows.iter().map(|r| r.energy).sum();
+        let mut stats = BhStats::default();
+        let mut diff = vec![[0.0; 3]; self.n_vertices];
+        for (i, r) in rows.iter().enumerate() {
+            stats.pairs_exact += lists.exact[i].len() as u64;
+            stats.nodes_lumped += lists.lumped[i].len() as u64;
+            let [a, bb] = self.edges[i];
+            let g0 = axpy(r.grad[0], 1.0, through_nodes[i][0]);
+            let g1 = axpy(r.grad[1], 1.0, through_nodes[i][1]);
+            diff[a as usize] = axpy(diff[a as usize], 1.0, g0);
+            diff[bb as usize] = axpy(diff[bb as usize], 1.0, g1);
+        }
+        (energy, diff, stats)
+    }
+
+    /// Row `i` of the adjoint: the energy of its lists (the same operations, in the same order,
+    /// as [`BhTree::energy_with_lists`]), the own derivative of its lumped terms and exact pairs,
+    /// the partner derivatives `∂e_KI/∂γ_I` for `K ∈ partners`, and the node terms.
+    ///
+    /// [formula: rc-bh-adjoint]
+    fn adjoint_row(
+        &self,
+        i: usize,
+        lists: &InteractionLists,
+        partners: &[u32],
+        e: Exponents,
+    ) -> AdjRow {
+        let s = &self.snap;
+        let (pi, ti, li) = (&s.ends[i], s.tangent[i], s.length[i]);
+        let xi = scale(
+            [
+                pi[0][0] + pi[1][0],
+                pi[0][1] + pi[1][1],
+                pi[0][2] + pi[1][2],
+            ],
+            0.5,
+        );
+        let mut row = AdjRow {
+            node_terms: Vec::with_capacity(lists.lumped[i].len()),
+            ..AdjRow::default()
+        };
+        let signs = [-1.0, 1.0];
+        for &n in &lists.lumped[i] {
+            let nd = &self.data[n as usize];
+            let k = kernel_with_gradient(xi, nd.xbar, ti, e);
+            row.energy += li * nd.mass * k.value;
+            // Own part: L_N (s_a (k T_I + g_T) + ½ ℓ_I ∇_p k).
+            let along = axpy(scale(ti, k.value), 1.0, k.grad_t);
+            let pos = scale(k.grad_p, 0.5 * li);
+            for a in 0..2 {
+                row.grad[a] = axpy(row.grad[a], nd.mass, axpy(pos, signs[a], along));
+            }
+            // Node part: b = ℓ_I k, u = ℓ_I ∇_q k = −ℓ_I ∇_p k.
+            row.node_terms.push((li * k.value, scale(k.grad_p, -li)));
+        }
+        for &j in &lists.exact[i] {
+            pair_own_gradient(s, i, j as usize, e, &mut row);
+        }
+        for &k in partners {
+            pair_partner_gradient(s, k as usize, i, e, &mut row.grad);
+        }
+        row
+    }
+
+    /// The differential of `SPEC.md` §8.2 as implemented by WP4: the derivative of the lumped
+    /// `(I, J) + (J, I)` pair with `L_N, x̄_N, T̂_N` held fixed. An approximation of the exact
+    /// differential, but **not** the derivative of the evaluated Barnes–Hut energy (it differs
+    /// from finite differences by about the approximation error, §17d, §17f); kept for
+    /// comparison. [`BhTree::energy_and_differential`] is the exact derivative.
     ///
     /// [formula: rc-bh-differential]
-    pub fn energy_and_differential(
+    pub fn energy_and_differential_lumped_pairs(
         &self,
         pool: &rayon::ThreadPool,
         exponents: Exponents,
@@ -521,6 +749,20 @@ impl BhTree {
 pub struct InteractionLists {
     lumped: Vec<Vec<u32>>,
     exact: Vec<Vec<u32>>,
+    /// Node count of the tree the lists were made for.
+    n_nodes: usize,
+}
+
+impl InteractionLists {
+    /// Number of lumped (edge, node) entries.
+    pub fn n_lumped(&self) -> usize {
+        self.lumped.iter().map(Vec::len).sum()
+    }
+
+    /// Number of exactly evaluated ordered edge pairs.
+    pub fn n_exact(&self) -> usize {
+        self.exact.iter().map(Vec::len).sum()
+    }
 }
 
 /// Free-function form: build the tree and evaluate once.
@@ -536,6 +778,96 @@ pub fn energy_and_differential(
 ) -> Result<(f64, Vec<[f64; 3]>, BhStats), RcError> {
     let tree = BhTree::build(network, positions, opts)?;
     Ok(tree.energy_and_differential(pool, exponents))
+}
+
+/// One row of the adjoint.
+#[derive(Debug, Clone, Default)]
+struct AdjRow {
+    energy: f64,
+    /// Derivative with respect to the two endpoints of the row's edge (own and partner parts).
+    grad: [[f64; 3]; 2],
+    /// `(b, u)` per lumped entry, in the order of the row's lumped list.
+    node_terms: Vec<(f64, [f64; 3])>,
+}
+
+/// The transpose of per-edge lists: `idx[off[j]..off[j + 1]]` are the `i` with `j ∈ lists[i]`, in
+/// increasing order.
+fn transpose(lists: &[Vec<u32>], m: usize) -> (Vec<usize>, Vec<u32>) {
+    let mut off = vec![0usize; m + 1];
+    for l in lists {
+        for &j in l {
+            off[j as usize + 1] += 1;
+        }
+    }
+    for k in 0..m {
+        off[k + 1] += off[k];
+    }
+    let mut fill = off.clone();
+    let mut idx = vec![0u32; off[m]];
+    for (i, l) in lists.iter().enumerate() {
+        for &j in l {
+            let f = &mut fill[j as usize];
+            idx[*f] = i as u32;
+            *f += 1;
+        }
+    }
+    (off, idx)
+}
+
+/// Adds `e_IJ` (the operations of [`pair_energy`]) and `∂e_IJ/∂γ_{i_a}` to `row`:
+/// `s_a ℓ_J (k̂_IJ T_I + g_T) + ℓ_I ℓ_J ¼ Σ_b ∇_p k(γ_{i_a}, γ_{j_b}, T_I)`.
+///
+/// [formula: rc-energy-differential]
+#[inline]
+fn pair_own_gradient(s: &Snapshot, i: usize, j: usize, e: Exponents, row: &mut AdjRow) {
+    let (pi, ti, li) = (&s.ends[i], s.tangent[i], s.length[i]);
+    let (pj, lj) = (&s.ends[j], s.length[j]);
+    let mut k = 0.0;
+    let mut gp = [[0.0; 3]; 2];
+    let mut gt = [0.0; 3];
+    for a in 0..2 {
+        for b in 0..2 {
+            let ke = kernel_with_gradient(pi[a], pj[b], ti, e);
+            k += ke.value;
+            gp[a] = axpy(gp[a], 1.0, ke.grad_p);
+            gt = axpy(gt, 1.0, ke.grad_t);
+        }
+    }
+    row.energy += 0.25 * k * li * lj;
+    let khat = 0.25 * k;
+    let first = axpy(scale(ti, khat), 0.25, gt);
+    let ll = 0.25 * li * lj;
+    let signs = [-1.0, 1.0];
+    for a in 0..2 {
+        let v = axpy(scale(first, signs[a] * lj), ll, gp[a]);
+        row.grad[a] = axpy(row.grad[a], 1.0, v);
+    }
+}
+
+/// Adds `∂e_KI/∂γ_{i_b} = s_b ℓ_K k̂_KI T_I − ℓ_K ℓ_I ¼ Σ_a ∇_p k(γ_{k_a}, γ_{i_b}, T_K)` to `grad`
+/// (the derivative of a pair term of row `K` with respect to the endpoints of its partner `I`).
+///
+/// [formula: rc-energy-differential]
+#[inline]
+fn pair_partner_gradient(s: &Snapshot, k: usize, i: usize, e: Exponents, grad: &mut [[f64; 3]; 2]) {
+    let (pk, tk, lk) = (&s.ends[k], s.tangent[k], s.length[k]);
+    let (pi, ti, li) = (&s.ends[i], s.tangent[i], s.length[i]);
+    let mut ksum = 0.0;
+    let mut gq = [[0.0; 3]; 2];
+    for a in 0..2 {
+        for b in 0..2 {
+            let ke = kernel_with_gradient(pk[a], pi[b], tk, e);
+            ksum += ke.value;
+            gq[b] = axpy(gq[b], -1.0, ke.grad_p);
+        }
+    }
+    let khat = 0.25 * ksum;
+    let ll = 0.25 * lk * li;
+    let signs = [-1.0, 1.0];
+    for b in 0..2 {
+        let v = axpy(scale(ti, signs[b] * lk * khat), ll, gq[b]);
+        grad[b] = axpy(grad[b], 1.0, v);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -612,12 +944,12 @@ fn pair_energy(s: &Snapshot, i: usize, j: usize, e: Exponents) -> f64 {
     0.25 * k * s.length[i] * s.length[j]
 }
 
-/// Adds `e_IJ` and the derivative of `e_IJ + e_JI` with respect to the endpoints of `I` to `row`
-/// (the same formulas as `exact::row_with_gradient`, `SPEC.md` §3.2).
+/// Adds the derivative of `e_IJ + e_JI` with respect to the endpoints of `I` to `row` and returns
+/// `e_IJ` (the same formulas as `exact::row_with_gradient`, `SPEC.md` §3.2).
 ///
 /// [formula: rc-energy-differential]
 #[inline]
-fn pair_with_gradient(s: &Snapshot, i: usize, j: usize, e: Exponents, row: &mut Row) {
+fn pair_with_gradient(s: &Snapshot, i: usize, j: usize, e: Exponents, row: &mut Row) -> f64 {
     let (pi, ti, li) = (&s.ends[i], s.tangent[i], s.length[i]);
     let (pj, tj, lj) = (&s.ends[j], s.tangent[j], s.length[j]);
     let signs = [-1.0, 1.0];
@@ -643,7 +975,7 @@ fn pair_with_gradient(s: &Snapshot, i: usize, j: usize, e: Exponents, row: &mut 
         }
     }
     khat_ji *= 0.25;
-    row.energy += khat_ij * li * lj;
+    let e_ij = khat_ij * li * lj;
     let ll = 0.25 * li * lj;
     for a in 0..2 {
         let first = axpy(scale(ti, khat_ij), 0.25, gt);
@@ -653,6 +985,7 @@ fn pair_with_gradient(s: &Snapshot, i: usize, j: usize, e: Exponents, row: &mut 
         v = axpy(v, ll, gq[a]);
         row.grad[a] = axpy(row.grad[a], 1.0, v);
     }
+    e_ij
 }
 
 /// Derivative of `ℓ_I L_N (k(x_I, x̄_N, T_I) + k(x̄_N, x_I, T̂_N))` with respect to the endpoints
