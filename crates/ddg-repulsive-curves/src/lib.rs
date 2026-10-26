@@ -47,8 +47,17 @@ pub mod step;
 pub mod subdivide;
 pub mod surfaces;
 
+pub use constraints::{
+    Constraint, ConstraintSet, ImplicitSurface, RankReport, TangentSite, default_constraints,
+};
 pub use energy::{BhOptions, EnergyEval, EnergyReport, energy};
 pub use error::RcError;
 pub use io::{parse_curve_obj, read_curve_obj, write_curve_obj};
 pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
+pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
 pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
+pub use solve::{
+    DenseSaddle, LinearReport, ProjectedGradient, Projection, ProjectionOptions, ProjectionStatus,
+    Projector, SaddleSolution, SaddleSolver, SparseSaddle, Tolerance, project_constraints,
+    projected_gradient,
+};

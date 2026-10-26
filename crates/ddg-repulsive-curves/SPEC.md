@@ -231,9 +231,12 @@ measurement of §14.3.
 * `B`, `B⁰`, `A` are symmetric positive semidefinite (sums of `w ≥ 0` times squares).
 * `u ∈ ker B ⇔ D_I u = D_J u` for every `(I, J)` with `w_IJ > 0`; `ker B` contains the functions
   that are constant on each component. `u ∈ ker B⁰ ⇔ u_I = u_J` for every `(I, J)` with
-  `w⁰_IJ + w⁰_JI > 0`; `ker B⁰` contains the global constants. `ker A = ker B ∩ ker B⁰`.
+  `w⁰_IJ + w⁰_JI > 0`; `ker B⁰` contains the global constants and, since `u_I` is the edge
+  average, the alternating ±1 colouring of every bipartite component (even loops, open curves,
+  trees; WP2 finding). `ker A = ker B ∩ ker B⁰`.
 * For a generic network `ker A = span{𝟙}`: `B⁰` couples all pairs of edges, also across
-  components. *(checked: two loops, dim ker B = 2, dim ker B⁰ = dim ker A = 1.)* So `Ā` has
+  components. *(checked: two odd loops, dim ker B = 2, dim ker B⁰ = dim ker A = 1; with even
+  loops `ker B⁰` is larger, `ker A = span{𝟙}` still.)* So `Ā` has
   exactly the three translations in its kernel (Sec. 4.2.4); a constraint must remove them
   (§5.2, D5).
 * Degenerate: if all edges are collinear, `k² ≡ 0`, `B⁰ = 0` and `ker A` is larger. The solver
@@ -1190,6 +1193,17 @@ Things the paper and the reference leave open, with how they are settled:
    for the parallel phase, timed subset alone (Q4).
 7. The reference's scene files assume all constraints hold initially; so do we (§5.1, error
    otherwise).
+
+## 17b. Noted after WP2 (orchestrator)
+
+* §8.5: faer's parallel triangular solve is not bitwise deterministic across thread counts, so
+  the dense solve runs sequentially (D25 holds); its LU stops scaling past 16-32 threads, so the
+  dense back end sizes its own pool by measurement (WP14), not 64 by default.
+* Possible speed-up, not adopted yet: a Schur-complement solve that uses `Ā = A ⊗ I₃` (Cholesky
+  of `A + ρ𝟙𝟙ᵀ`, bordered by the translations, plus a dense `k × k` system; about 6x fewer
+  flops). Decided by measurement in WP14 against the multigrid back end.
+* §5.2: rank is checked on the row-normalized `C Cᵀ` by inverse iteration (threshold 1e-10),
+  since a plain sparse Cholesky can succeed with tiny pivots.
 
 ## 18. The user's decisions (2026-10-26)
 
