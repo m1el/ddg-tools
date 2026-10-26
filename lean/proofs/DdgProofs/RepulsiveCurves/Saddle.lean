@@ -12,7 +12,7 @@ means `[A Cᵀ; C 0][x; μ] = [b; r]`.
   `(dFᵀ, 0)` satisfies `Φ(y) = Φ(g̃) + ½ (y − g̃)ᵀ A (y − g̃)` on `ker C`, `Φ(y) = ½ yᵀAy − dF·y`;
   equivalently (if `A g = dFᵀ`) `½‖y − g‖²_A = ½‖g̃ − g‖²_A + ½‖y − g̃‖²_A`: `g̃` is the `A`-closest
   point to `g` in `ker C`. If `A` is positive definite on `ker C` and `C` has full row rank, the
-  solution exists and is unique (`saddle_existsUnique`); positive definiteness on `ker C` follows
+  solution exists and is unique (`saddle_exists`, `saddle_unique`); positive definiteness on `ker C` follows
   from `A` PSD with `ker A ∩ ker C = 0` (`posDefOn_of_ker`), which is the translation check of
   §5.2 when `ker Ā` is the translations (D5).
 * `rc-descent-direction`: `dF·g̃ = g̃ᵀ A g̃`, positive unless `g̃ = 0`.

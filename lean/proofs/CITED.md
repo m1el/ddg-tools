@@ -1486,6 +1486,273 @@ rotation (numerical devices); anything about rounding.
 - **What depends on it.** Where the seams go, not whether the cut is valid: every chart is a disk
   whatever the weights (guaranteed by `plan_cut`).
 
+## Repulsive Curves
+
+"RC paper" is C. Yu, H. Schumacher, K. Crane, *Repulsive Curves*, ACM TOG 40(2), Article 10, 2021
+(<https://doi.org/10.1145/3439429>); section, equation, lemma and appendix numbers are the paper's.
+The contract is `crates/ddg-repulsive-curves/SPEC.md` ("SPEC", decisions `D1`–`D30`, formula
+table §12). "N&W" is J. Nocedal, S. J. Wright, *Numerical Optimization*, 2nd ed., Springer 2006.
+
+**What the machine-checked part covers, and what it does not.** There is no certifiable minimizer:
+the library runs a descent method on a nonconvex energy. Machine-checked
+(`DdgProofs/RepulsiveCurves/*.lean`, 44 `rc-` ids, statements in the README): the edge quantities
+and dual lengths; the kernel's identities, invariances and homogeneity, its gradient for `ν > 0`
+and the continuity of that gradient at `ν = 0` for `α > 1` (D24); the discrete energy of Eq. 17–18,
+its homogeneity `c^{2+α−β}`, invariance under translations, orthogonal maps and edge re-orientation,
+the derivative of every pair term along any differentiable motion (SPEC §3.2), the assembled
+vertex gradient, and the identities `Σ g = 0`, `Σ γ × g = 0`, `Σ γ·g = (2+α−β)Ê`; the Gram
+matrices `B`, `B⁰` assembled by the increments of Sec. 5.2.2–5.2.3 and their quadratic forms
+(Eq. 21), symmetry, positive semidefiniteness and kernels, the Eq. 31 identity as matrices with
+`K = w + wᵀ`, Eq. 32 as the midpoint weights and the D2 kernel identity, the scaling of both
+quadratures (`B, B⁰ ∝ c^{−(2σ+1)}`, D3), the H¹/H² comparison metrics; the saddle systems of
+Eq. 22 and 23 (closest point, existence and uniqueness, descent, least-norm chord step), the
+projector of D4 and Eqs. 30 and 33, the rows of §6.4, the scaling of the direction; the constraint
+Jacobians of §5.1 with D6, D7 and the Duff et al. frame; the penalties of §5.3 (the surface
+potential given the cited distance gradient); the length schedule and the subdivision mapping;
+the conservative-advancement lemma of the CCD; the lumped quantities of the BVH, Eq. 26 for a
+collapsed cluster, the B.1.2 increment, the rank-one BCT block; the coarsening rule and the
+prolongation. **Not** machine-checked: the entries below; anything about the discrete energy as
+an approximation of the smooth one; the derivative of the kernel at `ν = 0` (only the continuity
+of the gradient there); the convergence of the flow, of the chord projection, of multigrid, of
+L-BFGS and NCG; the error of Barnes–Hut and of the block cluster tree; that the BFS of the code
+satisfies `CoarsenRule` (it is the rule written as a predicate); the data structures (BVH, BCT,
+the multigrid hierarchy) and every tolerance; anything about rounding.
+
+### [formula: rc-exponent-range] Blatt's lemma: the energy space of the tangent-point energy
+
+- **Statement.** For `α > 1`, `β ∈ [α + 2, 2α + 1)` and `s = (β − 1)/α ∈ (1, 2)`, an embedded curve
+  `γ ∈ C¹(S¹; R³)` has finite tangent-point energy `ℰ^α_β(γ)` if and only if, up to
+  reparametrization, `γ ∈ W^{s,α}(S¹; R³)`.
+- **Reference.** RC paper Lemma A.1 (App. A.2), citing S. Blatt, *The energy spaces of the tangent
+  point energies*, J. Topol. Anal. 5(3), 261–270, 2013 (the main theorem), and S. Blatt,
+  P. Reiter, *Regularity theory for tangent-point energies: the non-degenerate sub-critical case*,
+  Adv. Calc. Var. 8(2), 93–116, 2015.
+- **Source check.** Read in the RC paper; Blatt's article was not re-read for this entry.
+- **Why not formalized.** Fractional Sobolev–Slobodeckij spaces on curves and the
+  characterization of the energy space are not in Mathlib.
+- **What depends on it.** Only the admissible exponent range: `Exponents::new` rejects `α ≤ 1`,
+  `β < α + 2`, `β ≥ 2α + 1` (D24). The discrete formulas and their proofs hold for any real
+  exponents.
+
+### [formula: rc-differential-order] The differential of the tangent-point energy has order `2s`
+
+- **Statement.** `dℰ^α_β` maps `W^{s,α}` to its dual `W^{−s,α'}`; in this sense it is a
+  differential operator of order `2s = 2σ + 2`, which motivates an inner product of the same order
+  (`B_σ` of Eq. 12, order `2σ + 2`; `B⁰_σ` of Eq. 13, lower order).
+- **Reference.** RC paper App. A.3 ("Order of the Differential") and A.4.1; the dual space
+  `W^{−s,q} = (W^{s,p})*`: E. Di Nezza, G. Palatucci, E. Valdinoci, *Hitchhiker's guide to the
+  fractional Sobolev spaces*, Bull. Sci. Math. 136(5), 521–573, 2012, Remark 2.5 (as cited in
+  App. A.1). A.3 writes `W^{s,p}` for `W^{s,α}` (SPEC D3).
+- **Why not formalized.** A heuristic statement about smooth operators between fractional
+  spaces; it motivates the choice of the metric and is not used by any formula.
+- **What depends on it.** The efficiency of the Sobolev descent (the step sizes and iteration
+  counts of Sec. 7), not its correctness: every accepted step is a descent step
+  (`rc-descent-direction`) checked by the line search.
+
+### [formula: rc-fractional-operator] The fractional Laplacian and `L_σ` are of order `2σ`
+
+- **Statement.** For `σ ∈ (0, 1)` the fractional Laplacian `(−Δ)^σ` (Eq. 24) and the operator
+  `L_σ` (Eq. 25, extrinsic distances `|γ(x) − γ(y)|` in place of intrinsic ones) are fractional
+  operators of order `2σ`; `B_σ = 𝒟* L_σ 𝒟` has order `2σ + 2`.
+- **Reference.** RC paper App. A.1.1 (Eq. 24), A.4 (Eq. 25) and A.4.1 (`⟨⟨B_σ u, v⟩⟩ =
+  ⟨⟨L_σ 𝒟u, 𝒟v⟩⟩`); Di Nezza, Palatucci, Valdinoci 2012 (above), Sec. 3 (the fractional Laplacian
+  as a singular integral).
+- **Why not formalized.** Smooth theory of nonlocal operators, not in Mathlib.
+- **What depends on it.** Nothing in the discrete formulas: the discrete metric is defined by
+  Eq. 20–21 (and 31–32), whose algebra is machine-checked (`rc-high-order-gram`,
+  `rc-low-order-gram`, `rc-kernel-matrix-form`, `rc-gram-psd-kernel`).
+
+### [formula: rc-quadrature-consistency] Omitting adjacent edge pairs is insignificant under refinement
+
+- **Statement.** The discrete energy of Eq. 17 omits pairs of edges with a common vertex; because
+  the kernel is only weakly singular, these terms contribute nothing in the limit of regular
+  refinement of a smooth curve, so Eq. 17 approximates `ℰ^α_β` of any sufficiently smooth curve
+  through the vertices.
+- **Reference.** RC paper Sec. 5.1 and Fig. 9; the energy of a polygon is infinite: P. Strzelecki,
+  H. von der Mosel, *Geometric curvature energies: facts, trends, and open problems*, in *New
+  Directions in Geometric and Applied Knot Theory*, De Gruyter 2017, Fig. 2.2 (as cited in
+  Sec. 5.1).
+- **Source check.** Read in the RC paper; Strzelecki–von der Mosel not re-read.
+- **Why not formalized.** A consistency statement of a quadrature for a singular integral; the
+  paper gives an argument, not a proof.
+- **What depends on it.** That minimizers of the discrete energy resemble those of the smooth one.
+  The flow minimizes the discrete energy as defined (`rc-energy`), whose formulas are checked.
+
+### [formula: rc-chord-convergence] Local linear convergence of the chord method
+
+- **Statement.** For `Φ` continuously differentiable near a regular point `γ*` of `{Φ = 0}`
+  (`C = dΦ` of full row rank) and a starting point close enough to `γ*`, the iteration
+  `γ̃ ← γ̃ + x`, `x` the `Ā`-least-norm solution of `C(γ) x = −Φ(γ̃)` with `C` and `Ā` frozen at a
+  nearby `γ` (Eq. 23), converges linearly to a point of `{Φ = 0}`.
+- **Reference.** J. M. Ortega, W. C. Rheinboldt, *Iterative Solution of Nonlinear Equations in
+  Several Variables*, Academic Press 1970, Ch. 10 (Ostrowski's theorem on the convergence of
+  fixed-point iterations, 10.1.3); C. T. Kelley, *Iterative Methods for Linear and Nonlinear
+  Equations*, SIAM 1995, Ch. 5 (the chord method, Theorem 5.4.1), for the square case; the
+  underdetermined case with the least-norm correction is a Gauss–Newton/chord iteration on the
+  constraint manifold.
+- **Source check.** The references are the SPEC's (§12); the theorem numbers were not re-read.
+- **Why not formalized.** Needs a contraction argument with the inverse function theorem in
+  several variables; the code needs only what one iteration does, which is machine-checked
+  (`rc-chord-projection`).
+- **What depends on it.** That the projection usually succeeds within 3 iterations. The code checks
+  every row against its tolerance and rejects the trial step otherwise (SPEC §6.2), so a failure is
+  reported, never accepted.
+
+### [formula: rc-distance-gradient] The distance to a closed convex set is `C¹` outside it
+
+- **Statement.** For a nonempty closed convex set `K ⊂ R³` (a triangle) with metric projection
+  `π`, `½ δ²` with `δ(x) = |x − π(x)|` is differentiable with gradient `x − π(x)`; hence `δ` is
+  differentiable at every `x ∉ K` with `∇δ = (x − π(x))/δ(x)`.
+- **Reference.** H. H. Bauschke, P. L. Combettes, *Convex Analysis and Monotone Operator Theory in
+  Hilbert Spaces*, 2nd ed., Springer 2017, Ch. 12 (Moreau envelopes; the Moreau envelope of the
+  indicator of `K` is `½δ²`, its gradient is `Id − P_K`); the closest point on a triangle:
+  C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.5.
+- **Source check.** As cited by the SPEC; the proposition numbers were not re-read.
+- **Why not formalized.** Mathlib has the orthogonal projection onto closed subspaces and convex
+  sets but not the differentiability of the distance function in this form.
+- **What depends on it.** The gradient of the surface potential (D19); its chain rule given `∇δ`
+  is machine-checked (`rc-penalty-surface`), and the Rust test compares it with finite differences.
+
+### [formula: rc-closest-points] Closest points of segment–segment and point–triangle pairs
+
+- **Statement.** The algorithms return a closest pair of points of two segments, and the closest
+  point of a triangle to a point (with the degenerate cases handled), hence the exact distances.
+- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.9
+  (closest points of two segments) and §5.1.5 (closest point on a triangle to a point).
+- **Why not formalized.** Case analyses of an algorithm; the code is tested against brute-force
+  minimization (SPEC §13.5).
+- **What depends on it.** The distances used by the CCD (SPEC §7.4), the validation
+  `EdgesIntersect` (§2.3) and the surface potential; the conservative advancement built on them is
+  machine-checked (`rc-ccd-advancement`) for whatever distance satisfies the Lipschitz bound.
+
+### [formula: rc-armijo] Finite termination of backtracking for a descent direction
+
+- **Statement.** If `F` is continuously differentiable near `γ` and `dF·d < 0`, then
+  `F(γ + τd) ≤ F(γ) + c τ dF·d` for all sufficiently small `τ > 0` (`0 < c < 1`), so halving
+  `τ` stops after finitely many steps.
+- **Reference.** N&W Sec. 3.1 and Algorithm 3.1 (backtracking line search); S. Boyd,
+  L. Vandenberghe, *Convex Optimization*, Cambridge University Press 2004, Algorithm 9.2 (the
+  paper's choice, Sec. 5.4). The same fact for the developability flow:
+  `dev-armijo-backtracking`.
+- **Why not formalized.** A consequence of the definition of the derivative; with the projection
+  onto the constraint set and the CCD bound the accepted step is not the plain Armijo step, and
+  the code bounds the number of halvings anyway.
+- **What depends on it.** That the line search usually accepts a step; a failure ends the run with
+  `Stuck` (SPEC §7.1–§7.3). That the direction is a descent direction is machine-checked
+  (`rc-descent-direction`).
+
+### [formula: rc-accd] The additive CCD algorithm
+
+- **Statement.** Conservative advancement with the additive (Lipschitz) distance bound and a gap
+  `s d₀` computes a conservative time of impact for linearly moving point–triangle and
+  edge–edge pairs, in finitely many advancements for a positive gap.
+- **Reference.** M. Li, D. M. Kaufman, C. Jiang, *Codimensional Incremental Potential Contact*,
+  ACM TOG 40(4), Article 170, 2021, Sec. 5 (Additive CCD), as cited by the SPEC (§7.4).
+- **Source check.** As cited by the SPEC; not re-read for this entry.
+- **Why not formalized.** The algorithm's termination and efficiency; the safety of one
+  advancement (no contact before the advanced time) is machine-checked
+  (`rc-ccd-advancement`), and the code caps the number of advancements at 100, returning the
+  current (still conservative) time.
+- **What depends on it.** The efficiency of the collision-guarded line search (D11), not its
+  safety.
+
+### [formula: rc-isotopy] A collision-free path of embeddings keeps the isotopy class
+
+- **Statement.** If every accepted step moves the curve network along a path (piecewise linear in
+  time: the step and each chord iteration) along which no two edges without a common vertex
+  intersect, and the edges keep positive length, then the network stays embedded along the path,
+  and the initial and final networks are isotopic (and, being polygonal, ambient isotopic).
+- **Reference.** RC paper Sec. 5.4 (the first time of collision as the start of the line search
+  "guarantees that the curve remains in the same isotopy class"); for polygonal knots,
+  G. Burde, H. Zieschang, *Knots*, 2nd ed., de Gruyter 2003, Ch. 1 (tame knots, isotopy).
+- **Source check.** The textbook reference is generic and was not re-read for this entry.
+- **Why not formalized.** Knot theory (isotopy of embeddings) is not in Mathlib. Note that
+  adjacent edges are not checked by the CCD; a fold of two edges at a common vertex onto each other
+  would need the angle between them to reach zero, which the energy (`k → ∞` when edges become
+  close) and the length constraints resist but no theorem here excludes.
+- **What depends on it.** The claim that the collision-guarded flow does not change the knot type
+  (SPEC §7.2); the normalized Armijo search (D12) has no such guarantee.
+
+### [formula: rc-bh-admissibility] The error of the Barnes–Hut approximation (Eq. 27)
+
+- **Statement.** If `r_x^ℬ/|x_I − x̄_ℬ| ≲ ε` and `r_T^ℬ ≲ ε`, the lumped term of Eq. 26 approximates
+  the sum over the node `ℬ` with an error of order `ε` relative to it (a Taylor expansion of the
+  kernel about the lumped tangent-point).
+- **Reference.** RC paper App. B.1.2 ("Admissibility", Eq. 27); J. Barnes, P. Hut, *A hierarchical
+  O(N log N) force-calculation algorithm*, Nature 324, 446–449, 1986.
+- **Why not formalized.** The paper gives a Taylor-series argument, not a quantitative bound; the
+  exactness for a collapsed cluster and the derivative of the lumped term are machine-checked
+  (`rc-bvh-lumped`, `rc-bh-differential`).
+- **What depends on it.** The accuracy of the accelerated energy and differential; the SPEC
+  measures it (§13.4: convergence to the exact values as `θ → 0`, equality at `θ = 0`). The
+  endpoint-box guard that makes the exclusion of adjacent pairs exact is machine-checked
+  (`guard_disjoint`, under `rc-bvh-lumped`).
+
+### [formula: rc-bct-admissibility] Low-rank approximation of admissible blocks (Eq. 28)
+
+- **Statement.** For an asymptotically smooth kernel, a block `(𝒜, ℬ)` with
+  `max(r_x^𝒜, r_x^ℬ) ≲ ε |x̄_𝒜 − x̄_ℬ|` and `max(r_T^𝒜, r_T^ℬ) ≲ ε` is approximated by the rank-one
+  matrix `ℓ[𝒜] κ(𝒜, ℬ) ℓ[ℬ]ᵀ` with an error of order `ε` (0th-order multipole expansion).
+- **Reference.** RC paper App. B.2 (Eq. 28); W. Hackbusch, *Hierarchical Matrices: Algorithms and
+  Analysis*, Springer Series in Computational Mathematics 49, 2015 (admissibility conditions and
+  low-rank approximation of asymptotically smooth kernels); L. Greengard, V. Rokhlin, *A new version
+  of the fast multipole method for the Laplace equation in three dimensions*, Acta Numerica 6,
+  229–269, 1997.
+- **Source check.** Chapter numbers of Hackbusch's book were not re-read for this entry.
+- **Why not formalized.** Approximation theory of kernel functions, not in Mathlib; the algebra of
+  the rank-one block and its exactness for collapsed clusters are machine-checked
+  (`rc-bct-lowrank`).
+- **What depends on it.** The quality of the multigrid preconditioner, not the correctness of the
+  result: the residual of every solve is measured against the hierarchical product and reported
+  (SPEC §8.4).
+
+### [formula: rc-multigrid] Convergence of the V-cycle and of flexible CG for the projected system
+
+- **Statement.** The multigrid V-cycle with conjugate-gradient smoothing on `PᵀĀPy = Pᵀa`
+  (Eq. 30), with the coarsening and prolongation of B.3.2, reduces the residual by a factor bounded
+  away from 1 independently of the resolution; flexible CG with the V-cycle as a variable
+  preconditioner converges.
+- **Reference.** RC paper App. B.3 (empirical: "6 or fewer V-cycles" to `10⁻³`); D. Braess,
+  R. Sarazin, *An efficient smoother for the Stokes problem*, Appl. Numer. Math. 23(1), 3–19, 1997
+  (multigrid for saddle-point problems via the projected system); M. Ainsworth, C. Glusa, *Aspects
+  of an adaptive finite element method for the fractional Laplacian*, Comput. Methods Appl. Mech.
+  Eng. 327, 4–35, 2017 (multigrid for fractional operators); Y. Notay, *Flexible conjugate
+  gradients*, SIAM J. Sci. Comput. 22(4), 1444–1460, 2000.
+- **Why not formalized.** There is no convergence proof for multigrid on `L_σ`-type operators with
+  this coarsening (SPEC §12: "no proof for `L_σ`-type operators"); the algebra it relies on is
+  machine-checked (`rc-projector`, `rc-projected-system`, `rc-projection-transform`,
+  `rc-prolongation`, `rc-coarsen`).
+- **What depends on it.** Speed. The solver stops on its measured residual or after 20 cycles and
+  reports the residual history; stagnation switches to flexible CG (SPEC §8.4).
+
+### [formula: rc-lbfgs-two-loop] The L-BFGS two-loop recursion
+
+- **Statement.** The two-loop recursion with stored pairs `(s_i, y_i)`, `s_iᵀy_i > 0`, and an initial
+  operator `H₀` (here the solve of the §6.4 system, "dynamic" metric) returns `H_k r`, where `H_k`
+  is the L-BFGS update of `H₀`; `H_k` is symmetric positive definite when `H₀` is, so `−H_k r` is a
+  descent direction.
+- **Reference.** D. C. Liu, J. Nocedal, *On the limited memory BFGS method for large scale
+  optimization*, Math. Program. 45, 503–528, 1989; N&W Algorithm 7.4 and Sec. 7.2. The same entry
+  for the developability flow: `dev-lbfgs-two-loop`.
+- **Why not formalized.** As for `dev-lbfgs-two-loop` (rank-two updates). With a positive definite
+  `H₀` on `ker M_c` (machine-checked: `massRows_posDefOn`, `rc-mean-free-direction`).
+- **What depends on it.** The efficiency of the evaluation method of Sec. 7 (soft problems only);
+  pairs with `sᵀy ≤ 1e-12 |s||y|` are skipped (D22).
+
+### [formula: rc-ncg-polak-ribiere] Polak–Ribière+ conjugate gradients with restarts
+
+- **Statement.** With `β = max(0, ⟨r_k, z_k − z_{k−1}⟩/⟨r_{k−1}, z_{k−1}⟩)` (PR+) and the restart
+  `d_k = −z_k` whenever `dF·d_k ≥ 0`, every direction used is a descent direction (by the restart
+  rule) and the method converges globally under the usual line-search conditions.
+- **Reference.** E. Polak, G. Ribière, *Note sur la convergence de méthodes de directions
+  conjuguées*, Rev. Française Informat. Recherche Opérationnelle 3(16), 35–43, 1969; N&W Sec. 5.2
+  (the PR+ choice, Eq. 5.45, and restarts).
+- **Source check.** Equation number as in N&W 2nd ed., not re-read for this entry.
+- **Why not formalized.** Global convergence of nonlinear CG is outside the scope of this
+  package; that the restart yields a descent direction is immediate from the rule, and the
+  preconditioned direction `z` itself is a descent direction (`rc-descent-direction`).
+- **What depends on it.** The efficiency of the NCG evaluation method (soft problems only, D22).
+
 ---
 
 ## Out of scope of this package
@@ -1501,4 +1768,7 @@ the `N`-region variant (SPEC §8) as a whole and the helpers for initial level s
 the algorithms built on them (flipping, tracing, insertion, overlay, refinement, export) and
 their tolerances are not. For `crates/ddg-developability`
 the formulas of the thirty proved `dev-` ids are covered; the flow driver, the remeshing and cutting
-algorithms, the evaluation loop and every tolerance are not.
+algorithms, the evaluation loop and every tolerance are not. For `crates/ddg-repulsive-curves` the
+formulas of the forty-four proved `rc-` ids are covered; the session and step driver, the line
+searches as algorithms, the BVH, block cluster tree and multigrid data structures, the scene
+reader, the evaluation and every tolerance are not.

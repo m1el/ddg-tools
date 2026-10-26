@@ -23,9 +23,10 @@ SPEC D2 are instances, see below), edge data `ℓ : E → ℝ`, `T : E → ℝ³
   `w⁰_IJ > 0`; constants along every edge are in `ker B`; `ker(B + B⁰) = ker B ∩ ker B⁰` for any two
   PSD matrices; if every edge is coupled with positive weight to an edge with an independent
   tangent and the edges are connected through `w⁰ > 0`, `ker A` is the constants and `ker Ā` the
-  translations. **Not** "`ker B⁰` = constants": `ker E ⊆ ker B⁰` (`u_{i₁} = −u_{i₂}` on every
-  edge: alternating values on a bipartite component, i.e. every open curve, tree or even loop), so
-  `ker B⁰` is larger than the constants on such networks (`gramB0_mulVec_eq_zero_of_alternating`).
+  translations. `ker B⁰` is in general larger than the constants, even when all edges are
+  coupled: `ker E ⊆ ker B⁰` (`u_{i₁} = −u_{i₂}` on every edge: the alternating colouring of a
+  bipartite component, i.e. every open curve, tree or even loop;
+  `gramB0_mulVec_eq_zero_of_alternating`, as SPEC §4.5 records).
 * `rc-gram-scaling`: `w(cγ) = c^{1−2σ} w(γ)` (both quadratures), `w⁰(cγ) = c^{−(2σ+1)} w⁰(γ)`
   (both), hence `B(cγ) = c^{−(2σ+1)} B(γ)`, `B⁰(cγ) = c^{−(2σ+1)} B⁰(γ)`.
 * `rc-classic-metrics` (SPEC §4.6): the H¹ matrix `L` (increments `±1/ℓ`), `uᵀ L v = Σ_I (u_{i₂} −
@@ -352,8 +353,7 @@ omit [DecidableEq E] [Fintype E] in
 /-- **`ker E ⊆ ker B⁰`**: a function with `u_{i₁} = −u_{i₂}` on every edge (alternating values on a
 bipartite component: an open curve, a tree, a loop with an even number of vertices) has `E u = 0`,
 hence `B⁰ u = 0`. So `ker B⁰` is in general larger than the constants, even when every pair of
-edges is coupled (SPEC §4.5 claims `dim ker B⁰ = 1`; `ker A` is still the constants, see
-`gram_ker_eq_const`).
+edges is coupled (SPEC §4.5; `ker A` is still the constants, see `gram_ker_eq_const`).
 
 [formula: rc-gram-psd-kernel] -/
 theorem gramB0_mulVec_eq_zero_of_alternating (hw : ∀ p ∈ S, 0 ≤ w0 p.1 p.2) {u : V → ℝ}
@@ -724,8 +724,8 @@ theorem w_smul {c : ℝ} (hc : 0 < c) (I J : E) :
 
 omit [Fintype V] [Fintype E] [DecidableEq V] [DecidableEq E] in
 /-- **Scaling of the weights of `B⁰`**: `w⁰(cγ) = c^{−(2σ+1)} w⁰(γ)` for both quadratures,
-`c > 0` (`ℓ_I ℓ_J` gives `c²`, `k²_{2σ+5}` gives `c^{2−(2σ+5)}`). (SPEC §4.5 printed
-`c^{1−2σ}` here; its conclusion about `B⁰` is right.)
+`c > 0` (`ℓ_I ℓ_J` gives `c²`, `k²_{2σ+5}` gives `c^{2−(2σ+5)}`). (SPEC §4.5 first printed
+`c^{1−2σ}` here, corrected; its conclusion about `B⁰` was right.)
 
 [formula: rc-gram-scaling] -/
 theorem w0_smul {c : ℝ} (hc : 0 < c) (I J : E) :

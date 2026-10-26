@@ -15,8 +15,6 @@ weights of both (`primDist`). In any real normed space (for `ℝ³` with the Euc
   `dist(τ_k) > g`, then with `τ_{k+1} = τ_k + (dist(τ_k) − g)/l` the distance stays `≥ g` on
   `[τ_k, τ_{k+1}]`, and `τ_{k+1} > τ_k`; with `g = s d₀ > 0` there is no contact before the advanced
   time.
-
-[formula: rc-ccd-advancement]
 -/
 
 noncomputable section

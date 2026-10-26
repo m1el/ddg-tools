@@ -66,6 +66,10 @@ def energy (α β : ℝ) (γ : V → V3) (ep : E → Fin 2 → V) : ℝ :=
   ∑ I, ∑ J, if Disj ep I J then pairEnergy α β γ ep I J else 0
 
 omit [Fintype V] [Fintype E] [DecidableEq V] in
+/-- The discrete kernel (Eq. 18) is the mean of the kernel over the four endpoint pairs, hence
+nonnegative.
+
+[formula: rc-discrete-kernel] -/
 theorem discreteKernel_nonneg (α β : ℝ) (γ : V → V3) (ep : E → Fin 2 → V) (I J : E) :
     0 ≤ discreteKernel α β γ ep I J :=
   mul_nonneg (by norm_num) (Finset.sum_nonneg fun _ _ => Finset.sum_nonneg fun _ _ =>
@@ -92,6 +96,19 @@ theorem energy_nonneg_and_finite (α β : ℝ) (γ : V → V3) (ep : E → Fin 2
 section invariance
 
 variable (α β : ℝ) (γ : V → V3) (ep : E → Fin 2 → V)
+
+omit [Fintype V] [Fintype E] [DecidableEq V] in
+/-- **Eq. 18 written out**: `(k̂)_IJ` is the trapezoid rule over the four endpoint pairs.
+
+[formula: rc-discrete-kernel] -/
+theorem discreteKernel_eq (α β : ℝ) (γ : V → V3) (ep : E → Fin 2 → V) (I J : E) :
+    discreteKernel α β γ ep I J = (1 / 4) *
+      (kernel α β (γ (ep I 0)) (γ (ep J 0)) (tangent γ ep I)
+        + kernel α β (γ (ep I 0)) (γ (ep J 1)) (tangent γ ep I)
+        + kernel α β (γ (ep I 1)) (γ (ep J 0)) (tangent γ ep I)
+        + kernel α β (γ (ep I 1)) (γ (ep J 1)) (tangent γ ep I)) := by
+  simp only [discreteKernel, Fin.sum_univ_two]
+  ring
 
 omit [Fintype V] [Fintype E] [DecidableEq V] in
 theorem edgeVec_smul (c : ℝ) (I : E) : edgeVec (c • γ) ep I = c • edgeVec γ ep I := by

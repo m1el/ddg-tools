@@ -61,3 +61,4 @@ import DdgProofs.Developability.Optimizer
 import DdgProofs.Developability.Subdivision
 import DdgProofs.Developability.Remesh
 import DdgProofs.Developability.RegularCone
+import DdgProofs.RepulsiveCurves

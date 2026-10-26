@@ -13,6 +13,8 @@ Lean 4 / Mathlib proofs of the discrete formulas used by `ddg-tools`:
   `crates/ddg-intrinsic/SPEC.md` ("the intrinsic SPEC", decisions `N1`–`N17`);
 * the developability flow, `crates/ddg-developability` — *Developability of Triangle Meshes*
   (Stein, Grinspun, Crane, ACM TOG 2018); its contract is `crates/ddg-developability/SPEC.md`;
+* the repulsive-curves flow, `crates/ddg-repulsive-curves` — *Repulsive Curves* (Yu, Schumacher,
+  Crane, ACM TOG 40(2), 2021); its contract is `crates/ddg-repulsive-curves/SPEC.md`;
 * the operators of `crates/ddg-core` all of them use.
 
 The ground truth is the **canonical discrete problem** and the math conventions of the
@@ -35,7 +37,13 @@ refinement guarantees) are cited. For developability the theorems cover the per-
 corrections of SPEC D2, D3), the gradients of the active pieces of the six energies, the line
 search's acceptance conditions, subdivision and two closed forms of the regular cone; the hinge
 theory of the paper, the Voronoi and rotating-calipers arguments and the derivative of a simple
-eigenvalue are cited.
+eigenvalue are cited. For repulsive curves the theorems cover the discrete energy, its exact
+differential along any motion and its invariances, the assembly, kernels and scaling of the
+fractional Sobolev Gram matrices, the saddle systems and the projector, the constraint and
+penalty gradients, the CCD advancement step and the algebra of the hierarchy (lumping, rank-one
+blocks, coarsening, prolongation); the smooth theory (Blatt's lemma, the order of the
+operators), the error bounds of Barnes–Hut and of the block cluster tree and every convergence
+statement are cited.
 
 ## Pins and how to check
 
@@ -112,6 +120,7 @@ apply that option (pass `-DautoImplicit=false`), `lake build` does.
 | `DdgProofs/Intrinsic/Barycentric.lean` | intrinsic triangulations: barycentric coordinates, distances of a point to the corners, edge split, circumcentre (§4, N10, N14, N17) |
 | `DdgProofs/Intrinsic/Move.lean` | intrinsic triangulations: moving a vertex (lengths, areas of its star), the circumcentre and barycentre times the area, the energy of the optimal Delaunay triangulation of a star, its gradient, the step of Chen and Holst's Eq. 4.13 (§4, N19, N21) |
 | `DdgProofs/Developability/*.lean` | developability: vectors and derivatives along curves (`Vec`), per-face quantities and Eqs. 7–9 (`Basic`), invariances, the six energies (`Combinatorial`, `Covariance`, `MaxCovariance`, `Intrinsic`, `Width`), Jacobi rotation (`Eig`), line search (`Optimizer`), subdivision, remeshing classification, regular cone (developability SPEC §1–§5, §10.3) |
+| `DdgProofs/RepulsiveCurves/*.lean` | repulsive curves: vectors and edge quantities (`Basic`), the kernel and its gradient (`Kernel`, `KernelGradient`), the energy, its differential and invariances (`Energy`), the Gram matrices (`Gram`), saddle systems and projector (`Saddle`), constraints (`Constraints`), penalties (`Penalties`), schedules and subdivision (`Schedule`), CCD advancement (`Ccd`), BVH/BCT lumping (`Hierarchy`), coarsening and prolongation (`Multigrid`) (RC SPEC §2–§8) |
 | `DdgProofs/Oracle/*.lean` | the real-number instance of the oracle's `Ddg.Scalar` and the theorems restated about the oracle's definitions; `Oracle/Unbounded.lean`: the same with absent bounds |
 | `DdgProofs/Audit.lean`, `DdgProofs/AuditAll.lean` | axiom audits (not imported by the library) |
 
@@ -455,6 +464,73 @@ Cited for the developability paper (`CITED.md`): `dev-hinge-coplanar`, `dev-hing
 `dev-link-condition`, `dev-cut-edge-weight`. Not covered: the Taylor series of the log-map
 coefficients (`logGSeries`, `logHSeries`) and the overflow guard of the Jacobi rotation, which the
 oracle file marks as numerical devices.
+
+### Repulsive Curves (`crates/ddg-repulsive-curves`)
+
+Yu, Schumacher, Crane, ACM TOG 40(2), 2021 ("the RC paper"); contract
+`crates/ddg-repulsive-curves/SPEC.md` (decisions `D1`–`D30`, formula table §12). Own definitions
+(no oracle definitions are used), all in `namespace DdgProofs.RC`. Vectors are `V3 = Fin 3 → ℝ`
+with Mathlib's `⬝ᵥ` and `crossProduct`, `vnorm v = √(v·v)`; a network has endpoints
+`ep : E → Fin 2 → V` (`i₁ = ep I 0`, `i₂ = ep I 1`), positions `γ : V → V3`, `s₁ = −1`, `s₂ = +1`
+(`sgn`). **Derivatives** are along arbitrary differentiable motions `s ↦ Γ s` of the vertices
+(`HasDerivAt` of each position), so "`d/ds F(Γ s) = Σ g·Γ'`" contains the gradient and the chain
+rule, as for developability. **Assembled matrices** are finite sums of single-entry increments
+(`incr`), i.e. exactly the assembly loops of the paper; pairs are any finite set `S` of ordered
+edge pairs (`𝒫` in the code), weights abstract. Matrix and saddle statements are generic in the
+index types (`Ā = A ⊗ I₃` on the interleaved index `V × Fin 3`, D29).
+
+| id | exact statement | theorems |
+|---|---|---|
+| `rc-edge-quantities` | `d_I = Σ_a s_a γ_{i_a}`, `ℓ_I T_I = d_I`, `T_I·d_I = ℓ_I`, `x_I = γ_{i₁} + ½d_I`; `ℓ_I > 0 ⟹ T_I·T_I = 1`. | `edge_quantities`, `tangent_dot_self` |
+| `rc-dual-length` | `m_v = ½ Σ_{(I,a): i_a = v} ℓ_I`: `Σ_v m_v = Σ_I ℓ_I`. | `sum_dualLen` |
+| `rc-kernel` | `k = \|T×(p−q)\|^α/\|p−q\|^β`; unit `T`: `\|T×d\|² = \|d\|² − (T·d)²`, `\|T×d\| = \|P_T d\|`; `k(p,q,−T) = k`, `k(q,p,T) = k`, `k(p+a,q+a,T) = k`, `Rᵀ R = 1 ⟹ k(Rp,Rq,RT) = k`, `c > 0 ⟹ k(cp,cq,T) = c^{α−β} k`. | `cross_vnorm_sq_unit`, `kernel_neg_tangent`, `kernel_swap`, `kernel_translate`, `kernel_orth`, `kernel_smul` |
+| `rc-kernel-gradient` | `∇_p k = α ν^{α−2} P_T d/ρ^β − β k d/ρ²`, `∇_T k = −α ν^{α−2}(T·d) P_T d/ρ^β` (= the SPEC's `n̂` form for `ν > 0`); along curves with `\|T\| = 1`, `T·T' = 0`, `ν > 0`: `d/ds k = ∇_p k·(p' − q') + ∇_T k·T'`; for `α > 1`, at `ν = 0`, `p ≠ q`, both gradients are `0` and tend to `0` (with `\|T\| = 1`). | `kgrad_eq_spec`, `hasDerivAt_kernel`, `tendsto_kgrad` |
+| `rc-discrete-kernel` | Eq. 18 as the four-term trapezoid sum; `k̂ ≥ 0`. | `discreteKernel_eq`, `discreteKernel_nonneg` |
+| `rc-energy` | `Ê ≥ 0`; all denominators positive iff no two vertices of a pair in `𝒫` coincide; `Ê` invariant under translations, orthogonal maps, re-orientation of any set of edges. | `energy_nonneg_and_finite`, `energy_translate`, `energy_orth`, `energy_reorient` |
+| `rc-energy-scaling` | `c > 0 ⟹ Ê(cγ) = c^{2+α−β} Ê(γ)`. | `energy_smul` |
+| `rc-energy-differential` | Pair regular at `Γ t` (`ℓ_I, ℓ_J > 0`, `ν ≠ 0` for the four evaluations): `d/ds e_IJ = Σ_a ∂_{i_a}·Γ'_{i_a} + Σ_b ∂_{j_b}·Γ'_{j_b}` with SPEC §3.2's `∂` (`pairGradI`, `pairGradJ`); all pairs regular: `d/ds Ê = Σ_v g_v·Γ'_v`, `g = energyGrad`. | `hasDerivAt_pairEnergy`, `hasDerivAt_energy` |
+| `rc-gradient-identities` | For `F` with derivative `Σ g·Γ'` along every motion through `γ`, invariant under translations and orthogonal maps, homogeneous of degree `p`: `Σ g = 0`, `Σ γ×g = 0`, `Σ γ·g = p F(γ)`; for `Ê` with all pairs regular: `Σ g = 0`, `Σ γ×g = 0`, `Σ γ·g = (2+α−β)Ê`; for a Fréchet gradient on `Fin n` vertices through `dev-gradient-invariance`. | `gradient_identities_of_curves`, `energy_gradient_identities`, `energy_gradient_identities_fderiv` |
+| `rc-derivative-operator` | `(Dmat u)_{(I,c)} = (D u)_I c`, `D_I u = Σ_a (s_a u_{i_a}/ℓ_I) T_I`, `D 𝟙 = 0`, unit `T`, `ℓ ≠ 0`: `ℓ_I T_I·(D u)_I = u_{i₂} − u_{i₁}`; `Emat u = E u`, `E 𝟙 = 𝟙`. | `derivative_operator` |
+| `rc-high-order-gram` | Unit tangents: `uᵀ B v = Σ_{(I,J)∈S} w_IJ ⟨D_I u − D_J u, D_I v − D_J v⟩` for `B` assembled by the increments of Sec. 5.2.2 (`(−1)^{a+b}` literally). | `gramB_form` |
+| `rc-low-order-gram` | `uᵀ B⁰ v = Σ_{(I,J)∈S} w⁰_IJ (u_I − u_J)(v_I − v_J)` for the increments of Sec. 5.2.3. | `gramB0_form` |
+| `rc-kernel-matrix-form` | Symmetric `K`: `Σ_IJ (diag(K𝟙) − K)_IJ ⟨X_I, Y_J⟩ = ½ Σ_IJ K_IJ ⟨X_I − X_J, Y_I − Y_J⟩`; with `K = W + Wᵀ`: `B = Dᵀ((diag(K𝟙) − K) ⊗ I₃) D`, `B⁰ = Eᵀ(diag(K⁰𝟙) − K⁰) E` (as matrices); Eq. 32 = midpoint weights (`K⁰`, and `K^B` with `k⁰_{2σ+1} = \|d\|^{−(2σ+1)}`); `p ≠ q ⟹ k²₄ \|d\|^{−(2σ+1)} = k²_{2σ+5}` (D2), so the printed trapezoid `w⁰` equals the `k²_{2σ+5}` form. | `lapK_bilin`, `gramB_kernel_form`, `gramB0_kernel_form`, `gramB_eq_kron`, `gramB0_eq_kernel`, `eq32_midpoint`, `kernel_sq_quadrature`, `w0Trap_eq_printed` |
+| `rc-gram-psd-kernel` | `w ≥ 0`, unit `T`: `B`, `B⁰` PSD; `B u = 0 ⟺ D_I u = D_J u` on pairs with `w > 0`; `B⁰ u = 0 ⟺ u_I = u_J` on pairs with `w⁰ > 0`; edge-constant `u ∈ ker B`; constants `∈ ker B⁰`; `u_{i₁} = −u_{i₂}` on every edge `⟹ u ∈ ker B⁰`; edges connected through `w⁰ > 0`: `ker B⁰ = {E u constant}`; PSD `M, N`: `ker(M+N) = ker M ∩ ker N`; (each edge coupled with `w > 0` to an edge with independent tangent, `ℓ ≠ 0`, `w⁰`-connected, no isolated vertex) `⟹ ker(B + B⁰)` = constants; then `ker(A ⊗ I₃)` = translations. | `gramB_posSemidef`, `gramB0_posSemidef`, `gramB_ker`, `gramB0_ker`, `gramB_mulVec_eq_zero_of_edge_const`, `gramB0_mulVec_const`, `gramB0_mulVec_eq_zero_of_alternating`, `gramB0_ker_connected`, `ker_add_posSemidef`, `gram_ker_eq_const`, `kron_ker_translations` |
+| `rc-gram-scaling` | `c > 0`: `w(cγ) = c^{1−2σ} w(γ)`, `w⁰(cγ) = c^{−(2σ+1)} w⁰(γ)` (trapezoid and midpoint); `B(cγ) = c^{−(2σ+1)} B(γ)`, `B⁰(cγ) = c^{−(2σ+1)} B⁰(γ)`. | `w_smul`, `w0_smul`, `gramB_smul`, `gramB0_smul` |
+| `rc-gradient-scaling` | `A` PD on `ker C`, `(g̃, λ)` solves Eq. 22 for `(A, C, b)`, `g̃'` for `(c^{−(2σ+1)}A, C, c^{1+α−β} b)` ⟹ `g̃' = c^{2σ+2+α−β} g̃`; `F(cγ) = c^p F(γ)` ⟹ gradient at `cγ` = `c^{p−1}` × gradient at `γ`. | `direction_scaling`, `grad_homogeneous` |
+| `rc-classic-metrics` | `L` by increments `±1/ℓ`: `uᵀLv = Σ_I (u_{i₂} − u_{i₁})(v_{i₂} − v_{i₁})/ℓ_I`; `ℓ > 0`: PSD, `L u = 0 ⟺ u` constant along every edge; `m > 0`: `uᵀLM⁻¹Lu = Σ_v (Lu)_v²/m_v`, `ker LM⁻¹L = ker L`. | `lapH1_form`, `lapH1_psd_ker`, `metricH2_ker` |
+| `rc-saddle-gradient` | Symmetric `A`, `(g̃, λ)` solving Eq. 22 with right side `(b, 0)`: `Φ(y) = Φ(g̃) + ½(y−g̃)ᵀA(y−g̃)` on `ker C`; with `A g = b`: `½‖y−g‖²_A = ½‖g̃−g‖²_A + ½‖y−g̃‖²_A`; PD on `ker C`: strict minimizer, unique `x` (and `λ` for full row rank), existence for full row rank; PSD with `ker A ∩ ker C = 0` ⟹ PD on `ker C`. | `saddle_split`, `saddle_closest`, `saddle_isMin`, `saddle_unique`, `saddle_exists`, `posDefOn_of_ker` |
+| `rc-descent-direction` | `b·g̃ = g̃ᵀAg̃`; PD on `ker C`, `g̃ ≠ 0` ⟹ `b·g̃ > 0`. | `descent_direction` |
+| `rc-chord-projection` | `(x, µ)` solving Eq. 23 with lower block `r`, `C y = r` ⟹ `yᵀAy = xᵀAx + (y−x)ᵀA(y−x)`. | `chord_least_norm` |
+| `rc-projector` | `IsUnit det(CCᵀ)`: `C C† = 1`, `C P = 0`, `P² = P`, `Pᵀ = P`, `C(Px) = 0`, `C x = 0 ⟹ P x = x`. | `projector_props` |
+| `rc-projected-system` | `PᵀAPy = Pᵀa ⟺ ∃ λ, (Py, λ)` solves Eq. 29. | `projected_system` |
+| `rc-projection-transform` | `z = C†b`, `(y, µ)` solving Eq. 29 with right side `Az` ⟹ `(z − y, −µ)` solves Eq. 23 with lower block `b`. | `projection_transform` |
+| `rc-mean-free-direction` | `M_c z = 0 ⟺ Σ_v m_v z_v·s = 0` for all `s`; `M_c M_cᵀ = (Σ m_v²) I₃`; `M_c t = (Σ m_v) t`; `A` PSD with kernel the constants, `Σ m ≠ 0` ⟹ `A ⊗ I₃` PD on `ker M_c`. | `massRows_props`, `massRows_posDefOn` |
+| `rc-constraint-edge-length` | `ℓ_I > 0`: `d/ds(ℓ⁰ − ℓ_I) = T_I·Γ'_{i₁} − T_I·Γ'_{i₂}`. | `jac_edge_length` |
+| `rc-constraint-total-length` | All `ℓ > 0`: `d/ds(L⁰ − Σℓ) = −Σ_I Σ_a s_a T_I·Γ'_{i_a}`. | `jac_total_length` |
+| `rc-constraint-barycenter` | All `ℓ > 0`, `L > 0`: `d/ds(x̄ − x₀) = L⁻¹ Σ_I Σ_a [(ℓ_I/2)Γ'_{i_a} + s_a(T_I·Γ'_{i_a})(x_I − x̄)]` (D6, exact). | `jac_barycenter` |
+| `rc-constraint-point` | `d/ds(γ_v − x_v) = Γ'_v`. | `jac_point` |
+| `rc-constraint-surface` | `f` with Fréchet derivative `w ↦ ∇f·w` at `γ_v`: `d/ds f(γ_v) = ∇f·Γ'_v`. | `jac_surface` |
+| `rc-constraint-tangent` | Edge site: `d/ds(e·T_I) = Σ_a (s_a/ℓ_I)(P_{T_I}e)·Γ'_{i_a}`; vertex site (degree 2, or 1 with one term): the sum of the two unit-direction terms; unit `T`: `Σ_k T_k P_T e_k = 0`, `P_T T = 0` (the paper's three rows are dependent, D7). | `jac_tangent_edge`, `jac_tangent_vertex`, `tangent_rows_dependent` |
+| `rc-tangent-frame` | Orthonormal `(u, e₁, e₂)`: `e₁·s = e₂·s = 0 ⟺ s = (u·s)u`; the frame of Duff et al. 2017 (`sign² = 1`, `sign + n_z ≠ 0`, `\|n\| = 1`) is orthonormal with `n`. | `tangent_frame`, `duff_frame` |
+| `rc-penalty-total-length` | `d/ds(wΣℓ) = Σ_I Σ_a (w s_a) T_I·Γ'_{i_a}`. | `penalty_total_length` |
+| `rc-penalty-length-difference` | `d/ds(w Σ_v (ℓ_{I_v} − ℓ_{J_v})²) = w Σ_v 2(ℓ_I − ℓ_J)(ℓ_I' − ℓ_J')`. | `penalty_length_difference` |
+| `rc-penalty-field` | `ℓ_I > 0`, `d/ds X(x_I) = J x_I'`: `d/ds(ℓ_I c·c) = Σ_a (s_a(c·c)T_I + 2s_a P_{T_I}(X × c) + ℓ_I Jᵀ(c × T_I))·Γ'_{i_a}`, `c = T_I × X(x_I)`. | `penalty_field_edge` |
+| `rc-penalty-hencky` | `ℓ⁰, ℓ > 0`: `d/dℓ (wℓ⁰ ln²(ℓ/ℓ⁰)) = 2w(ℓ⁰/ℓ) ln(ℓ/ℓ⁰)`, and along the motion summed over the edges. | `hencky_hasDerivAt`, `penalty_hencky` |
+| `rc-penalty-surface` | `d ≠ 0`: `d/ds \|g − c\|^{−p} = −p\|d\|^{−p−2}(d·g')`; `m_v' = ½Σ_{(I,a): i_a=v} ℓ_I'`; `δ > 0`: `d/ds(wΣ_v m_v Σ_k A_k δ_vk^{−p}) = wΣ_v(m_v'ΣA δ^{−p} + m_v ΣA(−p)δ^{−p−1}δ')` (D19; `∇δ` cited). | `hasDerivAt_dist_rpow`, `hasDerivAt_dualLen`, `penalty_surface` |
+| `rc-length-schedule` | `L⁰, rate > 0`: `L*_0 = L⁰`; `k·rate ≥ \|f−1\| ⟹ L*_k = fL⁰`; `min(L⁰, fL⁰) ≤ L*_k ≤ max(L⁰, fL⁰)`; `\|L*_{k+1} − L*_k\| ≤ rate·L⁰`; edge targets `ℓ⁰_I L*/L⁰` keep ratios and sum to `L*` when `Σℓ⁰ = L⁰`. | `schedule_props`, `edge_targets` |
+| `rc-subdivision-constraints` | Split network (`V ⊕ E`, `E ⊕ E`): children have length `ℓ_I/2` and tangent `T_I`; old positions kept; total length and length-weighted barycenter unchanged; unit directions from a vertex to its new neighbours unchanged. | `sub_children`, `sub_old_positions`, `sub_total_bary`, `sub_vertex_direction` |
+| `rc-ccd-advancement` | Corner speeds `≤ l_A`, `≤ l_B`: `dist(τ') ≥ dist(τ) − \|τ'−τ\|(l_A + l_B)` for the infimum over barycentric weights; `l > 0`, `f(τ) ≥ f(τ_k) − l(τ − τ_k)`, `f(τ_k) > g` ⟹ `f ≥ g` on `[τ_k, τ_k + (f(τ_k) − g)/l]`; together: no contact before the advanced time for `g > 0`. | `primDist_lipschitz`, `advance_safe`, `primDist_advance` |
+| `rc-bvh-lumped` | Disjoint children: masses, moments, tangent sums add, `x̄ = (L₁x̄₁ + L₂x̄₂)/(L₁+L₂)`, `T̂ = (S₁+S₂)/\|S₁+S₂\|`; `T̂` = normalized paper `T̄` (D15); `x̄` in the box of the midpoints; the endpoint-box guard excludes adjacent edges; Eq. 26 exact for a collapsed cluster. | `node_union`, `nodeTangent_eq_normalize_paper`, `nodeCentre_mem_box`, `guard_disjoint`, `lumped_exact` |
+| `rc-bh-differential` | `ℓ_I > 0`, unit `T̂`, `ν ≠ 0` in both evaluations: `d/ds[ℓ_I L(k(x_I, x̄, T_I) + k(x̄, x_I, T̂))] = Σ_a L(s_a(k₁+k₂)T_I + s_a∇_T k₁ + (ℓ_I/2)(∇_p k₁ − ∇_p k₂))·Γ'_{i_a}`. | `bh_differential` |
+| `rc-bct-lowrank` | `Σ_{J∈ℬ} ℓ_I κ ℓ_J ψ_J = ℓ_I κ Σ_{J∈ℬ} ℓ_J ψ_J`; collapsed clusters: `K⁰_IJ = ℓ_I κ⁰ ℓ_J`, `K^B_IJ = ℓ_I κ^B ℓ_J`; `K⁰mid`, `K^Bmid` are `w⁰ + w⁰ᵀ`, `w + wᵀ` of `Gram.lean`. | `bct_lowrank`, `K_mid_eq_gram` |
+| `rc-coarsen` | `CoarsenRule` (injective order; white ⟹ degree 2, unconstrained, no earlier white neighbour), no self-loops: no two adjacent whites; the neighbours of a white vertex are black. | `no_adjacent_whites`, `coarse_edge_black` |
+| `rc-prolongation` | `(J u)_v = u_{idx v}` (black), `(u_a + u_b)/2` (white); `J 𝟙 = 𝟙`; `C_ℓ (P_ℓ M P') = 0` for any `M`. | `prolong_props`, `projected_prolongation_range` |
+
+Cited for the RC paper (`CITED.md`): `rc-exponent-range`, `rc-differential-order`,
+`rc-fractional-operator`, `rc-quadrature-consistency`, `rc-chord-convergence`,
+`rc-distance-gradient`, `rc-closest-points`, `rc-armijo`, `rc-accd`, `rc-isotopy`,
+`rc-bh-admissibility`, `rc-bct-admissibility`, `rc-multigrid`, `rc-lbfgs-two-loop`,
+`rc-ncg-polak-ribiere`.
 
 ## Theorems
 
@@ -845,7 +921,7 @@ differential tests against the oracle.
 ## Discrepancies with the papers as printed
 
 Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–26 the cuts paper, its SPEC and the
-oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
+oracle's definitions for it; 46–51 the RC paper and its SPEC. (BFF Proposition 1 is stated for a disk;
 `TriMesh.sum_exteriorAngle` gives `2πχ` for any valid manifold mesh.)
 
 1. **Sign of the state equation.** Eq. 17 / B.2 print `L u = Ω − µ` with a positive semidefinite
@@ -1121,6 +1197,30 @@ oracle's definitions for it. (BFF Proposition 1 is stated for a disk;
     that are cut-adjacent after the step. "A piece without any face that counts has `ḡ = 1`"
     (§3.9) is a rule of the code, not a property of the formula; the code also takes `1` when
     the harmonic mean is not positive (`pieceSlope`).
+
+46. **RC SPEC §4.5, the scaling of `w⁰`.** Printed `w⁰(cγ) = c^{1−2σ} w⁰(γ)`; `w⁰ = ℓ_Iℓ_J
+    k²_{2σ+5}` (either quadrature) scales as `c² · c^{2−(2σ+5)} = c^{−(2σ+1)}` (`w0_smul`). The
+    conclusion `B⁰(cγ) = c^{−(2σ+1)}B⁰(γ)` was right (`gramB0_smul`); the SPEC line is corrected.
+47. **RC SPEC §4.5, the kernel of `B⁰`** (recorded in the SPEC after WP2). `ker E ⊆ ker B⁰`: the
+    alternating colouring of a bipartite component (every open curve, tree, even loop) has
+    `E u = 0` (`gramB0_mulVec_eq_zero_of_alternating`), so `ker B⁰` is larger than the constants
+    even when every pair of edges is coupled; with the edges connected through `w⁰ > 0`,
+    `ker B⁰ = {u : E u constant}` (`gramB0_ker_connected`). `ker A` is still the constants under
+    the genericity condition of `gram_ker_eq_const`, so D5 stands.
+48. **RC SPEC, equation numbers.** The paper's Eq. 20 is the Sobolev gradient `A g = dℰ`; the
+    quadratic form of `B⁰` (Sec. 5.2.3) has no number (its smooth version is Eq. 13). The SPEC
+    calls the `B⁰` form "Eq. 20" (§4.3, D2, §12); the formulas are right.
+49. **RC paper B.3.3 (SPEC D4) confirmed.** The printed `C† = (CCᵀ)⁻¹Cᵀ` multiplies a `k × k`
+    by an `n × k` matrix; with the corrected `C† = Cᵀ(CCᵀ)⁻¹`, `CC† = I_k`, so the printed
+    `P := CC†` is the identity; `P = I − C†C` has the properties the paper uses
+    (`projector_props`).
+50. **RC paper A.4.2 (SPEC D3) confirmed.** The discrete `B` and `B⁰` scale by `c^{−(2σ+1)}`
+    (`gramB_smul`, `gramB0_smul`, both quadratures), so the direction scales by `c^{2σ+2+α−β}`
+    (`direction_scaling`): rescaling changes the length of the step, not its direction.
+51. **RC kernel at `ν = 0` (SPEC D24).** Only the continuity of the gradient at `ν = 0` (for
+    `α > 1`, unit `T`) is proved (`tendsto_kgrad`); the derivative of the kernel and of the pair
+    terms is proved where every `ν > 0` (`PairRegular`). The SPEC's "continuous extension" is
+    exactly what `tendsto_kgrad` states.
 
 ## Caveats on faithfulness
 
