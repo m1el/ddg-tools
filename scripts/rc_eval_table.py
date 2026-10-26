@@ -87,7 +87,7 @@ def analyse(A, T, factor):
                     "status": r["status"], "iters": r["iterations"], "seconds": r["seconds"],
                     "hit": hit, "hit_timed": th,
                     "violations": r["audit"]["violations"],
-                    "final_ratio": r["final_energy_exact"] / eref,
+                    "final_ratio": min(e for _, _, _, e, _ in r["history"] if e is not None) / eref,
                 }
             rows.append(row)
         res[gname] = {"rows": rows, "excluded": excluded}

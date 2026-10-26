@@ -422,7 +422,11 @@ fn run(a: &Args) -> Result<(), String> {
     if let Some(p) = &a.final_obj {
         write_curve_obj(p, session.network(), &pos).map_err(|e| e.to_string())?;
     }
-    let ef_exact = exact_energy(session.network(), &pos).map_err(|e| e.to_string())?;
+    // A final curve that fails validation (e.g. edges touching) is a result, not a crash.
+    let (ef_exact, final_invalid) = match exact_energy(session.network(), &pos) {
+        Ok(e) => (e, None),
+        Err(e) => (f64::NAN, Some(e.to_string())),
+    };
     let (mut len_err, mut log_strain) = (0.0f64, 0.0f64);
     for (&[i, j], r) in session.network().edges().iter().zip(&rest) {
         let (p, q) = (pos[i as usize], pos[j as usize]);
@@ -445,7 +449,7 @@ fn run(a: &Args) -> Result<(), String> {
     let mut o = String::new();
     o.push_str(&format!(
         "{{\"knot\":{},\"method\":{},\"tag\":{},\"status\":{},\"end_reason\":{},\"status_debug\":{},\
-\"error\":{},\"iterations\":{},\"seconds\":{},\"audit_seconds\":{},\"threads\":{},\"backend_option\":{},\
+\"error\":{},\"final_curve_invalid\":{},\"iterations\":{},\"seconds\":{},\"audit_seconds\":{},\"threads\":{},\"backend_option\":{},\
 \"vertices\":{},\"alpha\":{},\"beta\":{},\"hencky_w\":{},\"max_iters\":{},\"max_seconds\":{},\
 \"energy0_exact\":{},\"final_energy_exact\":{},\"final_objective\":{},\"final_ehat\":{},\
 \"audit\":{{\"enabled\":{},\"audited_steps\":{},\"violations\":{},\"first_violation\":{},\"errors\":{}}},\
@@ -458,6 +462,7 @@ fn run(a: &Args) -> Result<(), String> {
         json_str(reason),
         json_str(&status_dbg),
         error.as_deref().map_or("null".into(), json_str),
+        final_invalid.as_deref().map_or("null".into(), json_str),
         session.iteration(),
         jnum(seconds),
         jnum(audit_s),
