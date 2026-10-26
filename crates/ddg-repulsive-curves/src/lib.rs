@@ -35,9 +35,13 @@
 //!   [`LengthDifference`], [`FieldAlignment`]) and the implicit surfaces and vector fields of
 //!   [`surfaces`].
 //! * Follow-up: the grow-previous start of the guarded search (`SPEC.md` §17f).
+//! * WP6 and WP6b: the multigrid saddle solver for curves and curve networks ([`mod@multigrid`]:
+//!   [`MgOptions`], [`CurveHierarchy`], [`MultigridSaddle`], [`MultigridSolvers`], the
+//!   near-contact correction of [`NearCorrection`]; `SPEC.md` §8.4, §17g).
+//! * WP3c: multigrid in the session ([`Solver::Multigrid`]), the dense fallback, and
+//!   [`Backend::Auto`] with a measured crossover (`SPEC.md` §17h).
 //!
-//! The multigrid solver (WP6) and the remaining modules are filled by the later work packages
-//! of `SPEC.md` §15.
+//! The remaining modules are filled by the later work packages of `SPEC.md` §15.
 
 #![warn(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -76,6 +80,10 @@ pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
 pub use metric::hierarchical::{CgOptions, HierarchicalCgSaddle, HierarchicalMetric};
 pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
 pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
+pub use multigrid::{
+    Coarsening, CurveHierarchy, CycleOptions, CycleReport, Hierarchy, HierarchyInput, Level,
+    MgOptions, MultigridSaddle, MultigridSolvers, NearCorrection, PairCorrection, ProlongationRow,
+};
 pub use obstacle::{Obstacle, PotentialValue, closest_point_on_triangle};
 pub use optimize::{Hencky, Method};
 pub use penalties::{
