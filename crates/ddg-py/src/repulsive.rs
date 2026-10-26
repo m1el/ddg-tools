@@ -673,13 +673,7 @@ impl RepulsiveOptions {
             leaf_size: self.bh_leaf_size,
         });
         let multigrid = || -> Result<Solver, RepError> {
-            let pool = Arc::new(make_pool(self.threads)?);
-            let dense = Arc::new(make_pool(Some(
-                rc::DEFAULT_DENSE_THREADS.min(pool.current_num_threads()),
-            ))?);
             Ok(Solver::Custom(Arc::new(MultigridSolvers::new(
-                pool,
-                dense,
                 MgOptions::default(),
             )?)))
         };

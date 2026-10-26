@@ -1028,7 +1028,7 @@ fn bad_options_and_inputs_are_errors_not_panics() {
             MultigridSaddle::new(&p, &p, &input, o),
             Err(RcError::InvalidOption { .. })
         ));
-        assert!(MultigridSolvers::new(p.clone(), p.clone(), o).is_err());
+        assert!(MultigridSolvers::new(o).is_err());
     }
     // Wrong position count, wrong Jacobian width.
     let short = HierarchyInput {
@@ -1395,7 +1395,7 @@ fn session_with_the_multigrid_factory_follows_the_dense_flow() {
         coarsest_vertices: 40,
         ..MgOptions::default()
     };
-    let factory = Arc::new(MultigridSolvers::with_threads(Some(8), Some(8), o).unwrap());
+    let factory = Arc::new(MultigridSolvers::new(o).unwrap());
     assert_eq!(
         ddg_repulsive_curves::SolverFactory::name(&*factory),
         "multigrid"
@@ -1466,7 +1466,7 @@ fn freedman_600_multigrid_flow() {
     let solver = match var("RC_SOLVER", "mg").as_str() {
         "dense" => Solver::Dense,
         _ => Solver::Custom(Arc::new(
-            MultigridSolvers::with_threads(Some(threads), None, MgOptions::default()).unwrap(),
+            MultigridSolvers::new(MgOptions::default()).unwrap(),
         )),
     };
     let start = match var("RC_START", "grow").as_str() {
@@ -1631,7 +1631,7 @@ fn session_with_multigrid_is_bitwise_identical_across_threads() {
     };
     let mut curves = Vec::new();
     for t in [1, 7, 64] {
-        let factory = Arc::new(MultigridSolvers::with_threads(Some(t), Some(t), o).unwrap());
+        let factory = Arc::new(MultigridSolvers::new(o).unwrap());
         let mut s = Session::new(
             net.clone(),
             pos.clone(),

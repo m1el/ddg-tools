@@ -346,6 +346,12 @@ pub struct SolverRequest<'a> {
     pub layout: DofLayout,
     /// The hard constraints (`None` on soft problems), for back ends that coarsen them (WP6).
     pub constraints: Option<&'a ConstraintSet>,
+    /// The session's main pool: every parallel loop of the solver (Gram assembly, block cluster
+    /// tree products, hierarchy construction) runs on it, never on rayon's global pool, so that
+    /// the thread count is the caller's and results are bitwise independent of it.
+    pub pool: &'a Arc<rayon::ThreadPool>,
+    /// The session's pool of the dense LU (`faer`), see [`FlowOptions::dense_threads`].
+    pub dense_pool: &'a Arc<rayon::ThreadPool>,
 }
 
 /// Builds the saddle solver of a step (`[Ā Cᵀ; C 0]`).
@@ -359,18 +365,15 @@ pub trait SolverFactory: Send + Sync {
     fn build(&self, request: &SolverRequest<'_>) -> Result<Box<dyn SaddleSolver>, RcError>;
 }
 
-/// The direct solvers: dense LU for the Sobolev metric (`faer`, on the dense pool; the Gram
-/// matrix is assembled on the main pool), sparse LU for L², H¹, H² (§8.5).
-#[derive(Debug, Clone)]
-pub struct DirectSolvers {
-    pool: Arc<rayon::ThreadPool>,
-    dense_pool: Arc<rayon::ThreadPool>,
-}
+/// The direct solvers: dense LU for the Sobolev metric (`faer`, on the request's dense pool;
+/// the Gram matrix is assembled on its main pool), sparse LU for L², H¹, H² (§8.5).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DirectSolvers;
 
 impl DirectSolvers {
-    /// The direct solvers on `pool` (assembly) and `dense_pool` (dense LU).
-    pub fn new(pool: Arc<rayon::ThreadPool>, dense_pool: Arc<rayon::ThreadPool>) -> Self {
-        DirectSolvers { pool, dense_pool }
+    /// The direct solvers (the pools come with every [`SolverRequest`]).
+    pub fn new() -> Self {
+        DirectSolvers
     }
 }
 
@@ -389,8 +392,8 @@ impl SolverFactory for DirectSolvers {
         match r.metric {
             Metric::Sobolev { quadrature } => {
                 let gram =
-                    sobolev_gram(&self.pool, r.network, r.positions, r.exponents, quadrature);
-                let s = DenseSaddle::new(self.dense_pool.clone(), &gram.a, r.jacobian, r.layout)
+                    sobolev_gram(r.pool, r.network, r.positions, r.exponents, quadrature);
+                let s = DenseSaddle::new(r.dense_pool.clone(), &gram.a, r.jacobian, r.layout)
                     .map_err(singular)?;
                 Ok(Box::new(s))
             }
@@ -805,6 +808,7 @@ pub struct Session {
     penalties: Vec<Arc<dyn PenaltyTerm>>,
     obstacles: Vec<PreparedObstacle>,
     pool: Arc<rayon::ThreadPool>,
+    dense_pool: Arc<rayon::ThreadPool>,
     energy: Box<dyn EnergyModel>,
     solver: Arc<dyn SolverFactory>,
     mean_edge_length0: f64,
@@ -980,7 +984,7 @@ impl Session {
         let (eval, solver) = options.backend.resolve(network.n_vertices());
         let energy = energy_model(&eval, options.exponents, pool.clone())?;
         let solver: Arc<dyn SolverFactory> = match solver {
-            Solver::Dense => Arc::new(DirectSolvers::new(pool.clone(), dense_pool)),
+            Solver::Dense => Arc::new(DirectSolvers::new()),
             Solver::Custom(f) => f,
         };
         let mut s = Session {
@@ -992,6 +996,7 @@ impl Session {
             penalties,
             obstacles,
             pool,
+            dense_pool,
             energy,
             solver,
             mean_edge_length0,
@@ -1104,6 +1109,8 @@ impl Session {
             jacobian,
             layout: self.layout,
             constraints: hard.then_some(&self.constraints),
+            pool: &self.pool,
+            dense_pool: &self.dense_pool,
         })
     }
 

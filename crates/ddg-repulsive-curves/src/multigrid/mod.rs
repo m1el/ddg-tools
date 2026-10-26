@@ -38,7 +38,6 @@ use std::time::Instant;
 use ddg_core::sparse::SparseMatrix;
 
 use crate::constraints::{Constraint, ConstraintSet};
-use crate::energy::exact::make_pool;
 use crate::error::RcError;
 use crate::kernel::Exponents;
 use crate::metric::hierarchical::HierarchicalMetric;
@@ -49,7 +48,7 @@ use crate::solve::{
     DenseSaddle, LinearReport, Projector, SaddleSolution, SaddleSolver, check_rhs, sparse_error,
 };
 use crate::spatial::bct::BctOptions;
-use crate::step::{DEFAULT_DENSE_THREADS, DirectSolvers, SolverFactory, SolverRequest};
+use crate::step::{DirectSolvers, SolverFactory, SolverRequest};
 
 pub mod coarsen;
 pub mod near;
@@ -821,46 +820,19 @@ impl SaddleSolver for MultigridSaddle {
 /// direct solver of [`DirectSolvers`].
 #[derive(Debug, Clone)]
 pub struct MultigridSolvers {
-    pool: Arc<rayon::ThreadPool>,
-    dense_pool: Arc<rayon::ThreadPool>,
     options: MgOptions,
 }
 
 impl MultigridSolvers {
-    /// The factory on `pool` (block cluster trees and products) and `dense_pool` (the coarsest
-    /// level's dense assembly and LU).
+    /// The factory. It runs on the pools of every [`SolverRequest`] (the session's): block cluster
+    /// trees and products on the main pool, the coarsest level's dense assembly and LU on the
+    /// dense pool.
     ///
     /// # Errors
     /// [`RcError::InvalidOption`] for bad options.
-    pub fn new(
-        pool: Arc<rayon::ThreadPool>,
-        dense_pool: Arc<rayon::ThreadPool>,
-        options: MgOptions,
-    ) -> Result<MultigridSolvers, RcError> {
+    pub fn new(options: MgOptions) -> Result<MultigridSolvers, RcError> {
         options.validate()?;
-        Ok(MultigridSolvers {
-            pool,
-            dense_pool,
-            options,
-        })
-    }
-
-    /// The factory with its own pools: `threads` (`None`: all cores) and `dense_threads`
-    /// (`None`: `min(DEFAULT_DENSE_THREADS, threads)`).
-    ///
-    /// # Errors
-    /// [`RcError::InvalidOption`] for bad options or a zero thread count.
-    pub fn with_threads(
-        threads: Option<usize>,
-        dense_threads: Option<usize>,
-        options: MgOptions,
-    ) -> Result<MultigridSolvers, RcError> {
-        let pool = Arc::new(make_pool(threads)?);
-        let n = pool.current_num_threads();
-        let dense_pool = Arc::new(make_pool(Some(
-            dense_threads.unwrap_or(DEFAULT_DENSE_THREADS.min(n)),
-        ))?);
-        MultigridSolvers::new(pool, dense_pool, options)
+        Ok(MultigridSolvers { options })
     }
 
     /// The options.
@@ -887,14 +859,14 @@ impl SolverFactory for MultigridSolvers {
                     constraints: r.constraints,
                 };
                 Ok(Box::new(MultigridSaddle::new(
-                    &self.pool,
-                    &self.dense_pool,
+                    r.pool,
+                    r.dense_pool,
                     &input,
                     self.options,
                 )?))
             }
             Metric::L2 | Metric::H1 | Metric::H2 => {
-                DirectSolvers::new(self.pool.clone(), self.dense_pool.clone()).build(r)
+                DirectSolvers::new().build(r)
             }
         }
     }

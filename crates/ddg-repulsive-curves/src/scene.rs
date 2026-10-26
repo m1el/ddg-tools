@@ -483,7 +483,7 @@ impl Scene {
         o.penalties.extend(sp.extra_penalties.iter().cloned());
         // back end
         let expected = self.network.n_vertices() << sp.subdivide_limit.min(20);
-        let nthreads = threads;
+        let _nthreads = threads;
         let choice = match backend {
             BackendChoice::Auto => {
                 if expected <= 2000 {
@@ -512,11 +512,7 @@ impl Scene {
                     } else {
                         EnergyEval::BarnesHut(BhOptions::default())
                     },
-                    solver: Solver::Custom(Arc::new(MultigridSolvers::with_threads(
-                        nthreads,
-                        None,
-                        MgOptions::default(),
-                    )?)),
+                    solver: Solver::Custom(Arc::new(MultigridSolvers::new(MgOptions::default())?)),
                 }
             }
         };
