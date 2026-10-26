@@ -31,6 +31,9 @@
 //!   (the tree is built once per step and refitted in the line search).
 //! * WP5: the block cluster tree and the hierarchical metric product ([`BlockClusterTree`],
 //!   [`HierarchicalMetric`], [`HierarchicalCgSaddle`]).
+//! * WP7: obstacles ([`Obstacle`]), penalties ([`SurfacePotential`], [`TotalLengthPenalty`],
+//!   [`LengthDifference`], [`FieldAlignment`]) and the implicit surfaces and vector fields of
+//!   [`surfaces`].
 //! * Follow-up: the grow-previous start of the guarded search (`SPEC.md` §17f).
 //!
 //! The multigrid solver (WP6) and the remaining modules are filled by the later work packages
@@ -73,7 +76,11 @@ pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
 pub use metric::hierarchical::{CgOptions, HierarchicalCgSaddle, HierarchicalMetric};
 pub use metric::{DenseGram, DenseMatrix, DofLayout, GramQuadrature, Metric, gram};
 pub use network::{Axis, Component, CurveNetwork, EdgeGeometry, check_planar};
+pub use obstacle::{Obstacle, PotentialValue, closest_point_on_triangle};
 pub use optimize::{Hencky, Method};
+pub use penalties::{
+    FieldAlignment, LengthDifference, SurfacePotential, TotalLengthPenalty, calibrate_hencky_weight,
+};
 pub use solve::{
     DenseSaddle, LinearReport, ProjectedGradient, Projection, ProjectionOptions, ProjectionStatus,
     Projector, SaddleSolution, SaddleSolver, SparseSaddle, Tolerance, project_constraints,
@@ -90,3 +97,7 @@ pub use step::{
     Session, Solver, SolverFactory, SolverRequest, StepReport, Timings, flow, soft_options,
 };
 pub use subdivide::{SubdivisionMap, subdivide};
+pub use surfaces::{
+    CircularField, ConstantField, DoubleTorus, Metaballs, Plane, RoundedBox, SmoothUnion, Sphere,
+    SphereTangentField, Torus, Union, VectorField,
+};
