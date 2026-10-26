@@ -468,8 +468,9 @@ pub enum Backend {
     /// Exact energy and dense solver up to `dense_max_vertices` vertices, Barnes–Hut energy
     /// ([`BhOptions::default`]) and multigrid ([`MgOptions::default`]) above. The session
     /// chooses at its start and again after every subdivision, with the vertex count of that
-    /// moment. The crossover is measured in `SPEC.md` §17h: at 8 threads on Freedman–He–Wang
-    /// the two choices cost the same per step at about 2000 vertices; the exact energy and the
+    /// moment. The crossover is measured in `SPEC.md` §17k, on Freedman–He–Wang with the machine
+    /// alone: the two choices cost the same per step at about 1300 vertices at 8 threads and 1600
+    /// at 64, so the default 1500 loses at most about 30 % on either side. The exact energy and the
     /// dense solver are the reference computation, so they win a tie.
     Auto {
         /// The crossover: networks with at most this many vertices use exact + dense.
@@ -477,11 +478,11 @@ pub enum Backend {
     },
 }
 
-/// Default of [`Backend::Auto::dense_max_vertices`](Backend::Auto): 2000 (`SPEC.md` §17h).
-pub const DEFAULT_AUTO_DENSE_MAX_VERTICES: usize = 2000;
+/// Default of [`Backend::Auto::dense_max_vertices`](Backend::Auto): 1500 (`SPEC.md` §17k).
+pub const DEFAULT_AUTO_DENSE_MAX_VERTICES: usize = 1500;
 
 impl Default for Backend {
-    /// `Auto { dense_max_vertices: 2000 }` (§10).
+    /// `Auto { dense_max_vertices: 1500 }` (§10).
     fn default() -> Self {
         Backend::Auto {
             dense_max_vertices: DEFAULT_AUTO_DENSE_MAX_VERTICES,

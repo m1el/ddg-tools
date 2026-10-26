@@ -613,7 +613,7 @@ per chord iteration (no factorization to reuse; Sec. 7.4).
 `Energy::{Exact, BarnesHut(BhOptions)}` and `Solver::{Dense, Multigrid(MgOptions)}` are chosen
 independently (Fig. 20's "Barnes–Hut" curve is BH energy with the dense solve);
 `Backend::Auto { dense_max_vertices }` picks exact + dense for networks of at most
-`dense_max_vertices` vertices (default 2000, measured in §17h) and BH + multigrid above, at the
+`dense_max_vertices` vertices (default 1500, measured in §17k) and BH + multigrid above, at the
 session's start and again after each live subdivision. Dense solve: one LU with partial pivoting
 (`faer`, multithreaded) of the `(3|V| + k)` saddle matrix, reused for Eq. 22 and every chord
 iteration. The L², H¹, H² metrics use a sparse LU of their saddle matrices (`ddg_core::sparse`).
@@ -793,7 +793,7 @@ end-to-end table script (§14.5).
 | Barnes–Hut | `theta_x 0.125, theta_t 0.25, leaf_size 8` | reference `diag/d < 0.25` ⇔ `r_x/d < 0.125`; tangent bound per Eq. 27; final values by §14.3 (largest θ with differential error ≤ 1e-2 and unchanged iteration counts within 5 %) |
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
 | multigrid | coarsest 512 vertices, 20 levels max, 3+3 CG smoothing, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a 1536-row dense LU, milliseconds |
-| back end | `Auto { dense_max_vertices: 2000 }` | measured in §17h: at 8 threads exact + dense and BH + multigrid cost the same per step at about 2000 vertices; exact + dense is the reference computation and wins the tie; WP14 re-measures alone |
+| back end | `Auto { dense_max_vertices: 1500 }` | measured alone in §17k: exact + dense and BH + multigrid cost the same per step at about 1300 vertices (8 threads) and 1600 (64 threads); exact + dense is the reference computation and wins the tie (§17h had 2000, measured under load) |
 | edge-collapse guard | `min_edge_length_ratio Some(1e-3)` | §17j: an edge that shrinks below 1e-3 of the initial mean edge length fails the step with a named error instead of a singular metric later |
 | dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (`(3\|V\|+k)²` doubles, about 2 GB at 5000) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
@@ -1071,6 +1071,7 @@ Multigrid ≈ 6 s at 2000, ≈ 25 s at 8000, ≈ 57 s at 16000; without projecti
 ≈ 38 s at 16000. **Gate:** single-thread at or below the paper at every size; report the
 64-thread speed-up, memory, the dense/accelerated crossover (sets `Auto`), and the time split
 (energy, metric, solve, line search, projection, CCD).
+Results: §17k.
 
 ### 14.2 Sec. 7 comparison
 
@@ -1499,7 +1500,7 @@ cheaper than the multigrid projections (3.4–5 s). Exponents: dense ≈ n^2.3�
 Barnes–Hut with the dense solver saves nothing (the energy is 3–8 % of the step); the
 multigrid with the exact energy equals BH + MG. The curves cross at about 2000 vertices.
 
-**Rule.** `Backend::Auto { dense_max_vertices: 2000 }`: exact + dense for `|V| ≤ 2000`, BH
+**Rule (superseded by §17k: 1500, measured alone).** `Backend::Auto { dense_max_vertices: 2000 }`: exact + dense for `|V| ≤ 2000`, BH
 (`BhOptions::default()`) + multigrid (`MgOptions::default()`) above. A tie goes to the exact
 computation. The rule is applied to the vertex count at session start and after each subdivision
 (`StepReport::{energy_backend, solver_backend}` name what ran). The multigrid line search is the
@@ -1691,6 +1692,303 @@ set the option to `None` (then it fails with `SingularMetric` near step 33).
 
 **Open.** Whether the vertex-pair energy of the reference removes the collapse (a differential
 test against the authors' program on this scene, WP15, would show it).
+
+## 17k. Benchmarks (WP14, 2026-10-26)
+
+Benches: `benches/fig20.rs` (one flow configuration per call, one CSV row), `benches/threads.rs`
+(every component at 1…64 threads with efficiency and a bitwise check), `benches/components.rs` (one
+component, any thread list), shared helpers in `benches/common/`. Plain `harness = false` mains:
+`cargo bench --bench fig20 -- --curve fhw|fhw-r|knot --size N --config exact|bh|mg|mg-noproj
+--threads T [--dense-threads D --steps 20 --min-steps 5 --cap-s 240]`. Driver scripts, CSVs and
+logs: `runs_tmp/rc-wp14/` (`jobs-*.txt`, `runjobs.sh`, `fig20-*.csv`, `threads.csv`, `ref/`).
+
+**Protocol.** The machine was alone for all timing: the comparison jobs of the other agent were
+gone at 16:14, the 1-minute load average was 3.96 at the start (16:15) and 1.1–1.5 during the
+1-thread blocks. Blocks ran one after another; the `load_start/load_end` columns of the CSVs are
+the 1-minute averages around each run. During 34- and 64-thread runs they include the benchmark's
+own threads, and they lag at block boundaries (the first 1-thread runs after a 64-thread block
+show 9–22 for that reason); spot checks with `ps` during the blocks showed no other process above
+12 % CPU. Each
+configuration is a *running flow from the start curve*, not a converged one: the mean over the
+first 20 steps (the paper: up to 500), stopping earlier when the next step would pass a budget
+of 240 s (at least 5 steps, down to 2–3 where one step takes 100–200 s; the `steps` column says
+how many). The medians are in the CSVs; they agree with the means within 10 % for the dense configurations
+and most multigrid ones, not where single steps vary a lot (the barycenter-only runs, knot 16384). Exponents (2, 4.5) on
+Freedman–He–Wang, (3, 6) on the knot; hard constraints barycenter + edge lengths, projection
+tolerance `MeanEdgeLength(1e-4)`, 3 chord iterations; multigrid and Barnes–Hut with their
+defaults; `dense_fallback_max_vertices = 0` (no silent switch of solver). Main pool `T` threads,
+dense pool `min(16, T)`. Sizes: the Freedman files are named 600/1200/2400 but hold 592/1184/2368 vertices (and as many
+edges); they are refined by midpoint splitting to 4736/9472/18944 (nominal 4800/9600/19200). The
+tables give the actual vertex counts. To compare with the paper's *sizes* the 2368 curve was
+also resampled by arclength to exactly 1000, 2000, 4000, 8000, 16000 (`fhw-r`). Knot 96
+(`Knot128/perturbed/knot0096.obj`, 2106 vertices) is resampled by arclength to 1024…16384.
+"Multigrid without projection": the library has no switch for the back-projection (not changed:
+no algorithm work in WP14), so `mg-noproj` runs with the barycenter as the only constraint (no
+length rows); that flow differs from the paper's (edge lengths drift, 2–7 cycles per solve) and
+its projections are not free (see below). The better proxy is the derived `total − projection`.
+
+### Fig. 20 against the paper, 1 thread (the gate)
+
+Paper values read off Fig. 20 (§14.1). Ours: Freedman–He–Wang resampled to the paper's sizes,
+(2, 4.5), 1 thread (main and dense pool), seconds per iteration.
+
+| configuration | n | paper | ours | verdict |
+|---|---:|---:|---:|---|
+| Exact | 1000 | ≈ 6 | 1.64 | below |
+| Exact | 4000 | ≈ 145 | 69.5 (5 steps) | below |
+| Barnes–Hut + dense | 2000 | ≈ 10 | 9.01 | below |
+| Barnes–Hut + dense | 4000 | ≈ 60 | 63.0 (5 steps) | **5 % above** (figure reading error is of that size) |
+| Multigrid | 2000 | ≈ 6 | 3.57 | below |
+| Multigrid | 8000 | ≈ 25 | 8.39 | below |
+| Multigrid | 16000 | ≈ 57 | 14.8 | below |
+| Multigrid w/o projection, derived (total − projection) | 2000 | ≈ 3 | 1.56 | below |
+| same | 16000 | ≈ 38 | 4.76 | below |
+| same, measured (barycenter only) | 2000 / 16000 | ≈ 3 / ≈ 38 | 3.13 / 11.8 | 4 % above / below |
+
+**Gate verdict.** Passed at every size for Exact and Multigrid (Multigrid by 1.7× at 2000, 3× at 8000, 3.9×
+at 16000), failed by 5 % for Barnes–Hut + dense at 4000: that configuration is the dense LU (60.6 of
+63.0 s), which runs at about 19 GFlop/s on one core, and the Schur-complement solve of §17b
+(about 6× fewer flops) would pass it; `Backend::Auto` never selects Barnes–Hut with the dense
+solver. The knot is harder than the Freedman curve (`mg` per iteration on 1 thread: 2.85 s at 1024, 11.7 s at 2048, 41 s at 4096, 127 s at 8192,
+216 s at 16384, the paper's multigrid curve being 6 s at 2000, 25 s at 8000, 57 s at 16000):
+the paper does not say which curve Fig. 20 uses; the Freedman curve is the one the datasets'
+README names for it, and we pass there. On the knot we are above the paper from 2048 vertices
+(2× at 2048, 5× at 8192), because the line-search projections of the near-contact knot cost
+more (below).
+
+### Fig. 20 on the listed sizes, seconds per iteration (means; steps in parentheses where < 20)
+
+Freedman–He–Wang (2, 4.5). `metric` = Gram assembly + factorization (dense) or hierarchy
+build (multigrid); `proj` = the projections of the line search, `f` its objective evaluations.
+
+| n | config | thr | total | energy | metric | solve | line search | proj | ccd | f | peak GB |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 592 | Exact | 1 | 0.451 | 0.089 | 0.250 | 0.006 | 0.070 | 0.031 | 0.003 | 0.036 | 0.1 |
+| 1184 | Exact | 1 | 2.58 | 0.356 | 1.73 | 0.021 | 0.328 | 0.092 | 0.007 | 0.229 | 0.3 |
+| 2368 | Exact | 1 | 16.1 | 1.42 | 12.9 | 0.070 | 1.22 | 0.309 | 0.016 | 0.900 | 0.9 |
+| 4736 | Exact | 1 | 113 (3) | 5.71 | 100 | 0.256 | 4.86 | 1.77 | 0.037 | 3.05 | 3.6 |
+| 592 | BH + dense | 1 | 0.463 | 0.097 | 0.251 | 0.006 | 0.072 | 0.030 | 0.003 | 0.039 | 0.1 |
+| 1184 | BH + dense | 1 | 2.46 | 0.303 | 1.72 | 0.021 | 0.291 | 0.091 | 0.007 | 0.194 | 0.3 |
+| 2368 | BH + dense | 1 | 14.2 (16) | 0.466 | 12.9 | 0.069 | 0.580 | 0.277 | 0.015 | 0.288 | 0.9 |
+| 4736 | BH + dense | 1 | 104 (3) | 0.634 | 101 | 0.252 | 2.15 | 1.78 | 0.037 | 0.329 | 3.6 |
+| 592 | Multigrid | 1 | 1.08 | 0.096 | 0.053 | 0.121 | 0.767 | 0.726 | 0.003 | 0.038 | 0.1 |
+| 1184 | Multigrid | 1 | 2.60 | 0.302 | 0.091 | 0.347 | 1.74 | 1.54 | 0.006 | 0.192 | 0.1 |
+| 2368 | Multigrid | 1 | 4.27 | 0.459 | 0.130 | 0.606 | 2.90 | 2.56 | 0.015 | 0.324 | 0.1 |
+| 4736 | Multigrid | 1 | 6.51 | 0.566 | 0.179 | 0.951 | 4.60 | 4.14 | 0.043 | 0.409 | 0.1 |
+| 9472 | Multigrid | 1 | 11.8 | 0.743 | 0.286 | 1.64 | 8.83 | 8.19 | 0.115 | 0.533 | 0.2 |
+| 18944 | Multigrid | 1 | 27.7 (8) | 1.31 | 0.478 | 3.37 | 22.0 | 21.0 | 0.328 | 0.731 | 0.3 |
+| 592 | Multigrid, barycenter only | 1 | 2.07 | 0.095 | 0.042 | 0.280 | 1.61 | 1.56 | 0.005 | 0.041 | 0.0 |
+| 2368 | same | 1 | 3.63 | 0.450 | 0.092 | 0.606 | 2.30 | 1.91 | 0.029 | 0.363 | 0.1 |
+| 4736 | same | 1 | 3.86 | 0.507 | 0.142 | 0.757 | 2.26 | 1.78 | 0.078 | 0.400 | 0.1 |
+| 9472 | same | 1 | 7.26 | 0.730 | 0.228 | 1.37 | 4.66 | 3.86 | 0.236 | 0.560 | 0.2 |
+| 18944 | same | 1 | 16.1 (14) | 1.36 | 0.397 | 2.31 | 11.6 | 9.73 | 0.776 | 1.04 | 0.3 |
+| 592 | Exact | 64 | 0.154 | 0.003 | 0.113 | 0.005 | 0.031 | 0.026 | 0.004 | 0.001 | 0.1 |
+| 1184 | Exact | 64 | 0.556 | 0.010 | 0.438 | 0.018 | 0.086 | 0.072 | 0.007 | 0.007 | 0.3 |
+| 2368 | Exact | 64 | 2.98 | 0.039 | 2.63 | 0.057 | 0.233 | 0.197 | 0.011 | 0.025 | 1.1 |
+| 4736 | Exact | 64 | 24.3 (9) | 0.146 | 22.7 | 0.195 | 1.15 | 1.03 | 0.027 | 0.095 | 3.7 |
+| 9472 | Exact | 64 | 170 (2) | 0.576 | 163 | 0.727 | 5.54 | 5.27 | 0.052 | 0.211 | 14.2 |
+| 2368 | BH + dense | 64 | 2.68 | 0.024 | 2.39 | 0.054 | 0.203 | 0.181 | 0.011 | 0.010 | 1.1 |
+| 4736 | BH + dense | 64 | 21.5 (11) | 0.033 | 20.3 | 0.188 | 0.944 | 0.903 | 0.028 | 0.013 | 3.7 |
+| 9472 | BH + dense | 64 | 193 (2) | 0.061 | 186 | 0.725 | 5.37 | 5.31 | 0.049 | 0.010 | 14.2 |
+| 592 | Multigrid | 64 | 0.392 | 0.007 | 0.036 | 0.051 | 0.296 | 0.289 | 0.004 | 0.002 | 0.1 |
+| 1184 | Multigrid | 64 | 0.814 | 0.019 | 0.061 | 0.132 | 0.597 | 0.579 | 0.008 | 0.010 | 0.1 |
+| 2368 | Multigrid | 64 | 1.40 | 0.028 | 0.091 | 0.247 | 1.03 | 1.00 | 0.013 | 0.013 | 0.2 |
+| 4736 | Multigrid | 64 | 2.39 | 0.038 | 0.129 | 0.412 | 1.80 | 1.76 | 0.026 | 0.015 | 0.3 |
+| 9472 | Multigrid | 64 | 4.89 | 0.057 | 0.205 | 0.784 | 3.83 | 3.76 | 0.054 | 0.019 | 0.4 |
+| 18944 | Multigrid | 64 | 12.3 (19) | 0.099 | 0.355 | 1.86 | 9.98 | 9.83 | 0.120 | 0.029 | 0.7 |
+| 4736 | Multigrid, barycenter only | 64 | 1.39 | 0.037 | 0.103 | 0.366 | 0.881 | 0.837 | 0.028 | 0.016 | 0.2 |
+| 18944 | same | 64 | 6.38 | 0.103 | 0.266 | 1.20 | 4.79 | 4.62 | 0.135 | 0.034 | 0.5 |
+
+Knot 96 (3, 6), same columns, totals only (`mg`, 1 thread / 64 threads; dense `exact` = `bh`
+within 3 %): 1024: exact 1.52 / 0.416, mg 2.85 / 0.727; 2048: exact 9.92 / 2.05, mg 11.7 / 2.35;
+4096: exact 72.0 (4 steps) / 15.3, mg 41.0 (5) / 6.09; 8192: mg 127 (2) / 16.0; 16384: mg 216 (2)
+/ 29.9 (7; the median is 14.7); full rows in `runs_tmp/rc-wp14/fig20-knot.csv`.
+
+**Skipped.** Dense at 9472 on one thread (the LU alone would take about 13 min per step: 28 416
+unknowns, 1.5e13 flops at the measured 19 GFlop/s) and dense at 18944 on any thread count: the
+saddle matrix is `(3·18944)² · 8 B` = 26 GB, plus the Gram matrices and a copy for the residual
+check (about 56 GB peak, extrapolating the measured 3.6 and 14.2 GB with a factor 4 per doubling; 94 GB
+machine shared with other sessions) and about 16 min per LU on 16 threads (1.2e14 flops at the
+measured 125 GFlop/s). Dense peak memory measured: 3.6 GB at 4736, 14.2 GB at 9472; multigrid 0.3 GB at 18944.
+
+**64-thread speed-up** (1 → 64 threads; dense pool 16): Exact 4736: 113 → 24.3 s (4.7×); BH +
+dense 4736: 104 → 21.5 (4.8×); Multigrid 592: 2.8×, 2368: 3.1×, 4736: 2.7×, 9472: 2.4×,
+18944: 2.3× (27.7 → 12.3 s). The dense configurations are limited by the LU (below), the
+multigrid ones by the projections, whose work is mostly sequential (below).
+
+**Dense pool size** (Exact, 2368, 64 main threads, 8 steps): dense pool 8: 3.71 s, **16: 3.12**,
+32: 3.46, 64: 6.33; the LU alone on 24 576 unknowns: 4 threads 159 s, 8: 124, **16: 121**, 32:
+126, 64: 136 (2048: 16 threads 1.63 s, 32: 1.79, 64: 4.65). The default `DEFAULT_DENSE_THREADS =
+16` is the measured optimum (§17b); unchanged.
+
+### Where the time goes
+
+* **Dense (exact or BH):** the metric (Gram assembly + saddle LU) is 87 % of an Exact iteration at
+  4000 vertices (60.6 of 69.5 s) and 96 % of a Barnes–Hut one (60.6 of 63.0 s); the exact energy
+  costs 4.1 s (6 %), Barnes–Hut 0.56 s (0.9 %); direction solve 0.3 %, line search 2–4 %. At 64
+  threads (dense pool 16) the LU is still 93–96 %.
+* **Multigrid: the line search, i.e. its projections, dominates**: projections are
+  67 % of the iteration at 592 vertices, 59–60 % at 1184–2368, 64 % at 4736, 69 % at 9472 and
+  **76 % at 18944** on one thread (21.0 of 27.7 s); at 64 threads 74 % at 592 rising to **80 %**
+  at 18944 (9.83 of 12.3 s). The knot is worse: 83 % at 16384 (179 of 216 s). Per iteration the
+  projections cost about 6 direction solves (21.0 s vs 3.4 s at 18944; 0.73 vs 0.12 at 592),
+  because each trial of the line search runs a chord projection of 1–3 multigrid solves. The
+  rest at 18944 / 1 thread: direction solve 12 %, hierarchy build 1.7 %, energy 4.7 %,
+  objective evaluations of the line search 2.6 %, CCD 1.2 %. Even with the barycenter as the
+  only (linear) constraint the projection phase takes 80–85 % of the line search (`mg-noproj`): the
+  multigrid direction satisfies `C p = 0` only to the solver tolerance, which is consistent with
+  every trial needing a chord solve even for a linear constraint (not verified here). Without
+  the projections (total − projection) an iteration at 16000 would cost 4.8 s instead of 14.8 s
+  (3×): the paper's gain from dropping the projection is 1.5× (57 → 38 s). This is the first
+  thing to speed up (cheaper or fewer chord solves, or a convergence test that accepts the
+  predicted state); not done here.
+* **CCD** is under 3 % of every configuration (1.2 % of the multigrid iteration at 18944 on one
+  thread; 4.8 % in the barycenter-only run there).
+
+### Thread scaling (§14.6)
+
+Components on Freedman–He–Wang resampled to 2048, 8192, 32768 vertices (2, 4.5); `best` of 3–20
+timed runs after one warm-up, 1/2/4/8/16/32/64 threads, one pool per run. Efficiency
+`T₁ / (t · T_t)`. Components: exact energy + differential (`energy-exact`), BH energy +
+differential (`energy-bh`, default θ), dense Sobolev Gram assembly (`gram`: `B`, `B⁰`, `A`), dense
+saddle LU (`lu`: assemble the `3n + k` matrix and factor; the solve follows sequentially),
+block cluster tree build and one product (`bct-build`, `bct-product`), multigrid hierarchy build
+and one solve to the default tolerance (`mg-build`, `mg-solve`), CCD of one typical step
+(`ccd`, all pairs with a motion of 0.2 mean edge lengths, no obstacle). Dense components are
+skipped at 32768 (`gram` 3 × 8.6 GB, `lu` 3·32768 = 98 304 unknowns, 77 GB). `lu` at 8192 was run
+from 4 threads (1 thread would be about 13 min; efficiency is relative to 4 threads there).
+
+**Bitwise equality: every row (173) has the same result hash as the first thread count of its series** (hash of
+the differential and energy, the Gram matrix, the LU solution, the product / solution vectors,
+the CCD report): D25 holds for every parallel component, including the dense LU.
+
+| n | component | T₁ (s) | eff 2 | 4 | 8 | 16 | 32 | 64 | fastest (thr, s, speed-up) |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 2048 | energy-exact | 1.052 | 0.94 | 0.98 | 0.98 | 0.95 | 0.81 | 0.49 | 64, 0.0338, 31× |
+| 2048 | energy-bh | 0.484 | 0.94 | 0.90 | 0.90 | 0.81 | 0.53 | 0.28 | 64, 0.0265, 18× |
+| 2048 | gram | 0.387 | 0.84 | 0.74 | 0.53 | 0.35 | 0.19 | 0.09 | 32, 0.0635, 6.1× |
+| 2048 | lu | 8.22 | 0.87 | 0.71 | 0.52 | 0.32 | 0.14 | 0.03 | 16, 1.63, 5.1× |
+| 2048 | bct-build | 0.0392 | 1.04 | 0.58 | 0.29 | 0.15 | 0.08 | 0.03 | 16, 0.0161, 2.4× |
+| 2048 | bct-product | 0.00262 | 0.89 | 0.73 | 0.57 | 0.34 | 0.15 | 0.05 | 16, 0.00049, 5.3× |
+| 2048 | mg-build | 0.242 | 0.71 | 0.44 | 0.26 | 0.13 | 0.07 | 0.03 | 32, 0.114, 2.1× |
+| 2048 | mg-solve | 0.527 | 0.80 | 0.62 | 0.41 | 0.22 | 0.10 | 0.04 | 16, 0.149, 3.5× |
+| 2048 | ccd | 0.00135 | 0.73 | 0.47 | 0.25 | 0.12 | 0.05 | 0.02 | 8, 0.00069, 2.0× |
+| 8192 | energy-exact | 17.1 | 0.98 | 0.99 | 0.99 | 0.98 | 0.95 | 0.60 | 64, 0.446, 38× |
+| 8192 | energy-bh | 0.719 | 0.96 | 0.90 | 0.81 | 0.69 | 0.44 | 0.24 | 64, 0.0469, 15× |
+| 8192 | gram | 6.40 | 0.91 | 0.69 | 0.55 | 0.35 | 0.20 | 0.10 | 64, 1.01, 6.3× |
+| 8192 | lu | 159 (at 4 thr) | – | 1.00 | 0.64 | 0.33 | 0.16 | 0.07 | 16, 121, 5.3× vs 1 thr (est.) |
+| 8192 | bct-build | 0.0532 | 0.90 | 0.49 | 0.27 | 0.14 | 0.07 | 0.03 | 16, 0.0242, 2.2× |
+| 8192 | bct-product | 0.00361 | 0.71 | 0.62 | 0.38 | 0.21 | 0.09 | 0.04 | 16, 0.00106, 3.4× |
+| 8192 | mg-build | 0.397 | 0.69 | 0.40 | 0.22 | 0.11 | 0.06 | 0.03 | 32, 0.220, 1.8× |
+| 8192 | mg-solve | 1.35 | 0.74 | 0.51 | 0.33 | 0.17 | 0.08 | 0.03 | 16, 0.487, 2.8× |
+| 8192 | ccd | 0.00547 | 0.75 | 0.46 | 0.25 | 0.13 | 0.06 | 0.03 | 16, 0.0026, 2.1× |
+| 32768 | energy-exact | 271 | 1.03 | 0.98 | 0.98 | 0.98 | 0.98 | 0.61 | 64, 6.93, 39× |
+| 32768 | energy-bh | 1.72 | 0.96 | 0.86 | 0.79 | 0.60 | 0.36 | 0.18 | 64, 0.147, 11.7× |
+| 32768 | bct-build | 0.140 | 0.81 | 0.51 | 0.28 | 0.14 | 0.07 | 0.03 | 8, 0.0627, 2.2× |
+| 32768 | bct-product | 0.00969 | 0.72 | 0.44 | 0.30 | 0.14 | 0.06 | 0.03 | 8, 0.00409, 2.4× |
+| 32768 | mg-build | 0.856 | 0.61 | 0.33 | 0.18 | 0.09 | 0.04 | 0.02 | 16, 0.590, 1.4× |
+| 32768 | mg-solve | 3.57 | 0.78 | 0.45 | 0.25 | 0.12 | 0.05 | 0.02 | 8, 1.80, 2.0× |
+| 32768 | ccd | 0.0192 | 0.63 | 0.37 | 0.20 | 0.11 | 0.05 | 0.03 | 32, 0.0111, 1.7× |
+
+Reading: the exact energy scales to 32 threads at 95–98 % efficiency on 8192 and 32768 vertices
+(81 % on 2048; at 64 threads 49–61 %: the machine has 64 hardware threads and the OS shares them).
+Barnes–Hut falls off earlier (90 % at 8 threads and 53 % at 32 on 2048; 79 % and 36 % on 32768;
+not investigated). The dense Gram assembly and the LU reach 5–6× at best, with the optimum at 16
+threads (LU) and 32–64 (Gram); the LU of 2048 vertices is slower at 64 threads than at 4. The hierarchical components
+(BCT build and product, multigrid build and solve, CCD) are **sequential-bound at these sizes**:
+they stop gaining at 8–16 threads (1.4–3.5×) and the multigrid solve is *slower* at 64 threads
+than at 16 on 2048, 8192 and 32768 vertices (0.198 vs 0.149 s; 0.662 vs 0.487 s; 2.51 vs 1.85 s).
+One BCT product at 8192 vertices takes 3.6 ms on one thread while one multigrid solve takes 1.35 s
+(a solve is about 2 cycles of 6 CG smoothing steps and a residual on each of 3–4 levels, so on
+the order of 80 products of decreasing size): the products are a part of the solve, not
+obviously all of it, and where the rest goes (coarse levels, the coarsest dense solve, the
+projectors) is not identified here. Follow-up: profile `MultigridSaddle::solve`, and cap the
+multigrid pool at 8–16 threads (as the dense pool is capped at 16) or parallelize what the
+profile shows.
+
+### Auto crossover (§17h re-measured)
+
+Exact + dense against BH + multigrid, mean seconds per iteration of the first 20 steps of the
+flow (Freedman resampled to the sizes, (2, 4.5)), machine alone. **Default session threads**
+(all 64 cores, dense pool 16) and the 8-thread configuration of §17h (8 and 8):
+
+| n | 64 thr: exact + dense | BH + MG | ratio | 8 thr: exact + dense | BH + MG | ratio |
+|---:|---:|---:|---:|---:|---:|---:|
+| 600 | 0.148 | 0.348 | 0.43 | | | |
+| 800 | 0.253 | 0.492 | 0.52 | 0.283 | 0.401 | 0.71 |
+| 1000 | 0.385 | 0.606 | 0.64 | | | |
+| 1200 | 0.568 | 0.815 | 0.70 | 0.689 | 0.737 | 0.93 |
+| 1400 | 0.825 | 0.980 | 0.84 | | | |
+| 1500 | 0.927 | 1.085 | 0.85 | | | |
+| 1600 | 1.108 | 1.093 | 1.01 | 1.345 | 0.913 | 1.47 |
+| 1700 | 1.301 | 1.130 | 1.15 | | | |
+| 1800 | 1.478 | 1.133 | 1.30 | | | |
+| 2000 | 1.919 | 1.235 | 1.55 | 2.370 | 1.086 | 2.18 |
+| 2500 | 3.478 | 1.536 | 2.26 | 4.361 | 1.304 | 3.35 |
+| 3000 | 5.827 | 1.840 | 3.17 | 7.593 | 1.459 | 5.21 |
+| 4000 | 14.05 | 2.252 | 6.24 | | | |
+
+(ratio > 1: multigrid is faster.) The crossover is at about **1600 vertices at 64 threads and
+1300 at 8 threads**, below §17h's 2000, which was measured under load 30–40 and at 8 threads
+with a slower dense side. The 64-thread rows at 1800 and 2000 were measured twice (ratios 1.25 and 1.30; 1.48
+and 1.55; the table shows the second pass), which gives the run-to-run spread, 5 %. Scaling
+between 2000 and 4000 vertices: exact + dense n^2.9, BH + multigrid n^0.9.
+
+**Rule (replaces §17h's).** `Backend::Auto { dense_max_vertices: 1500 }`: exact + dense for
+`|V| ≤ 1500`, BH + multigrid above; at the worst point inside 1300…1600 either side loses 30 %
+(8 threads at 1500: exact + dense about 1.3× slower than multigrid, interpolated; 64 threads at
+1500: multigrid 1.2× slower). **Changed from 2000** in `src/step/mod.rs` (`DEFAULT_AUTO_DENSE_MAX_VERTICES`,
+rustdoc), the Python default (`ddg_tools.pyi`, `python-tests/test_repulsive.py`; the option's
+default itself follows the Rust constant) and the Blender tooltip; the test of the rule
+(`tests/session_backends.rs`) now checks 1500/1501. At 2000 vertices the old default was
+1.5× (64 threads) and 2.2× (8 threads) slower than the accelerated pair. A faster projection
+(above) would move the crossover down.
+
+### The authors' program, alone (§17c re-run)
+
+`rcurves_app --batch --steps 6 (4 at 1 thread) --no-obj --no-exact-energy --ignore-stop`, scenes
+`freedman{600,1200,2400}`, (2, 4.5), barycenter + edge lengths, `OMP_NUM_THREADS = --threads =
+T`; mean of steps 1…N of `steps.csv` (`seconds_step`), the machine alone (load 1–2 at 1 thread).
+Their "Barnes–Hut" is BH energy + dense solve, "multigrid" is BH + multigrid (their
+`--multigrid`), "exact" is `--no-bh` (exact energy of their vertex discretization, dense).
+Ours: the same curves, same configurations; steps of the two programs differ (line search,
+step-size rule), so these are times per step of two flows from the same start, not per equal work.
+Seconds per step, **ours / authors'**:
+
+| curve | config | 1 thread | 34 threads (their default) | ours at 64 |
+|---|---|---:|---:|---:|
+| 592 | exact + dense | 0.451 / 1.362 | 0.151 / 1.310 | 0.154 |
+| 592 | BH + dense | 0.463 / 0.718 | 0.154 / 0.421 | 0.155 |
+| 592 | BH + multigrid | 1.08 / 2.995 | 0.385 / 1.492 | 0.392 |
+| 1184 | exact + dense | 2.58 / 6.289 | 0.576 / 5.226 | 0.556 |
+| 1184 | BH + dense | 2.46 / 3.278 | 0.585 / 1.646 | 0.556 |
+| 1184 | BH + multigrid | 2.60 / 5.967 | 0.954 / 2.935 | 0.814 |
+| 2368 | exact + dense | 16.1 / 30.8 | 3.08 / 21.8 | 2.98 |
+| 2368 | BH + dense | 14.2 / 17.7 | 3.04 / 7.54 | 2.68 |
+| 2368 | BH + multigrid | 4.27 / 16.1 | 1.58 / 7.23 | 1.40 |
+
+Ours is faster in every cell: 1.25–3.8× at one thread, 2.5–9× at 34 threads. Their dense solve
+scales 2.2× from 1 to 34 threads at 2368 vertices (BH + dense: 16.4 → 7.3 s), ours 4.9× (the
+metric: 12.9 → 2.6 s). Their split at 2400
+(ms/step, 1 thread): BH energy 1004, solve 16 412 (dense) / 5 946 (multigrid), line search 101,
+**back-projection 9 028 with multigrid** (56 % of the step; 59 % at 34 threads): the authors'
+multigrid program is also dominated by the constraint projection, the same effect as in §17k above.
+Their exact energy costs 13.3 s at 2400 against 1.4 s for ours (different discretizations, D1).
+Final energies are not compared here.
+
+### Follow-ups found
+
+1. **Multigrid line search**: 60–80 % of a multigrid iteration; about 6 solves worth of work per
+   iteration, and it scales worst (2.3× on 64 threads at 18944).
+2. **Multigrid solve and hierarchy build do not scale** past 8–16 threads and get slower at 64;
+   a cap on the pool, or a profile of what in the solve is sequential.
+3. **Dense LU** at 19 GFlop/s single-core, 5× on 16 threads; the Schur solve of §17b
+   (Cholesky of `A + ρ𝟙𝟙ᵀ`, about 6× fewer flops) would move the dense side and the crossover up
+   and would close the 5 % gate miss of Barnes–Hut + dense at 4000.
+4. **Knot 96** is 2–5× above the paper's multigrid curve from 2048 vertices on one thread:
+   projections of the near-contact knot (83 % of the iteration at 16384).
+5. `Backend::Auto` is untouched in its rule of form; a thread-aware crossover (1300 at 8 threads,
+   1600 at 64) would gain at most 20 % near the crossing.
 
 ## 18. The user's decisions (2026-10-26)
 

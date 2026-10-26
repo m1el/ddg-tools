@@ -492,7 +492,7 @@ class Multigrid(unittest.TestCase):
     def test_multigrid_options_and_their_defaults(self):
         d = ddg_tools.repulsive_defaults()
         self.assertEqual(d["backend"], "auto")
-        self.assertEqual(d["auto_dense_max_vertices"], 2000)
+        self.assertEqual(d["auto_dense_max_vertices"], 1500)
         self.assertEqual(d["dense_fallback_max_vertices"], 5000)
         self.assertEqual(d["mg_coarsest_vertices"], 512)
         self.assertEqual(d["mg_near_field_factor"], 1.0)

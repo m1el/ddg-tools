@@ -471,11 +471,11 @@ fn auto_resolves_by_vertex_count() {
         }
     }
     assert_eq!(
-        Backend::default().resolve(2000).1.to_string_for_test(),
+        Backend::default().resolve(1500).1.to_string_for_test(),
         "Dense"
     );
     assert_eq!(
-        Backend::default().resolve(2001).1.to_string_for_test(),
+        Backend::default().resolve(1501).1.to_string_for_test(),
         "Multigrid"
     );
 }

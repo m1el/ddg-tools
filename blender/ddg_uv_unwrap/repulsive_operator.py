@@ -57,7 +57,7 @@ LINE_SEARCH_ITEMS = [
     ('armijo', "Armijo", "Plain backtracking on the energy; no collision check"),
 ]
 BACKEND_ITEMS = [
-    ('auto', "Auto", "Exact energy and dense solves up to about 2000 vertices, Barnes-Hut energy "
+    ('auto', "Auto", "Exact energy and dense solves up to about 1500 vertices, Barnes-Hut energy "
      "and multigrid solves above"),
     ('dense', "Dense", "Exact energy and dense solves"),
     ('barnes_hut', "Barnes-Hut", "Barnes-Hut energy and dense solves"),
