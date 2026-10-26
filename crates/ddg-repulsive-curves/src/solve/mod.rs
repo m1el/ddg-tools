@@ -179,8 +179,14 @@ pub struct ProjectedGradient {
 /// Sobolev gradient; `dF · g̃ = g̃ᵀ Ā g̃ ≥ 0` with equality only for `g̃ = 0`, so `−g̃` is a
 /// descent direction tangent to the constraint set.
 ///
+/// Under `γ → cγ` the direction scales as `c^{2σ+2+α−β}` (`dÊ` as `c^{1+α−β}`, `Ā` as
+/// `c^{−(2σ+1)}`), when the constraint rows are homogeneous of degree 0 (all of §5.1 except
+/// `Surface` with a non-homogeneous `f`): rescaling changes the direction's length, not its
+/// direction (paper A.4.2, with the exponents corrected, D3).
+///
 /// [formula: rc-saddle-gradient]
 /// [formula: rc-descent-direction]
+/// [formula: rc-gradient-scaling]
 ///
 /// # Errors
 /// The solver's errors; [`RcError::InvalidOption`] if `differential` has the wrong length.

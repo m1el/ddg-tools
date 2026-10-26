@@ -278,4 +278,52 @@ impl Projector {
         let z = self.pseudo_inverse(&self.mul_c(x)?)?;
         Ok(x.iter().zip(&z).map(|(a, b)| a - b).collect())
     }
+
+    /// `Pᵀ Ā P y`, the operator of Eq. 30 (`P` is symmetric), for a metric product
+    /// `apply_metric(v) = Ā v`. With `Ā` positive definite on `ker C`, `y` solves
+    /// `Pᵀ Ā P y = Pᵀ a` iff `x = P y` solves the saddle system with `b = 0` (`x` is unique,
+    /// `y` is not).
+    ///
+    /// [formula: rc-projected-system]
+    ///
+    /// # Errors
+    /// As [`Projector::project`].
+    pub fn projected_operator(
+        &self,
+        apply_metric: impl Fn(&[f64]) -> Vec<f64>,
+        y: &[f64],
+    ) -> Result<Vec<f64>, RcError> {
+        let py = self.project(y)?;
+        self.project(&apply_metric(&py))
+    }
+
+    /// Eq. 33, for a general right side: the `x` of `[Ā Cᵀ; C 0] [x; λ] = [a; b]` from a solver
+    /// of the `b = 0` system (`solve_kernel(r)` returns the `x` of `[Ā Cᵀ; C 0] [x; µ] = [r; 0]`,
+    /// e.g. Eq. 30 by multigrid): `z = C† b`, `y = solve_kernel(a − Ā z)`, `x = z + y`. With
+    /// `a = 0` this is the paper's `x = z − y'`, `y'` the solution for the right side `Ā z`.
+    ///
+    /// [formula: rc-projection-transform]
+    ///
+    /// # Errors
+    /// As [`Projector::pseudo_inverse`], and the errors of `solve_kernel`.
+    pub fn solve_with_kernel_solver(
+        &self,
+        apply_metric: impl Fn(&[f64]) -> Vec<f64>,
+        mut solve_kernel: impl FnMut(&[f64]) -> Result<Vec<f64>, RcError>,
+        a: &[f64],
+        b: &[f64],
+    ) -> Result<Vec<f64>, RcError> {
+        if a.len() != self.n_dofs() {
+            return Err(RcError::InvalidOption {
+                name: "saddle right-hand side",
+                value: a.len().to_string(),
+                requirement: "d|V| entries",
+            });
+        }
+        let z = self.pseudo_inverse(b)?;
+        let az = apply_metric(&z);
+        let r: Vec<f64> = a.iter().zip(&az).map(|(p, q)| p - q).collect();
+        let y = solve_kernel(&r)?;
+        Ok(z.iter().zip(&y).map(|(p, q)| p + q).collect())
+    }
 }

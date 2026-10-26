@@ -224,19 +224,20 @@ impl SaddleSolver for DenseSaddle {
         let inv = 1.0 / self.scale;
         let mut rhs =
             Mat::<f64>::from_fn(dim, 1, |i, _| if i < nd { a[i] * inv } else { b[i - nd] });
-        let n_threads = self.pool.current_num_threads();
-        let par = if n_threads > 1 {
-            Par::rayon(n_threads)
-        } else {
-            Par::Seq
-        };
+        // The triangular solves of one right-hand side run sequentially: they are memory bound
+        // (no gain from threads) and faer's parallel triangular solve sums in an order that
+        // depends on the thread count, which would break D25.
+        let par = Par::Seq;
         let perm = PermRef::new_checked(&self.perm, &self.perm_inv, dim);
-        let lu = self.lu.as_ref();
-        self.pool.install(|| {
-            let mut mem =
-                MemBuffer::new(lu_solve::solve_in_place_scratch::<usize, f64>(dim, 1, par));
-            lu_solve::solve_in_place(lu, lu, perm, rhs.as_mut(), par, MemStack::new(&mut mem));
-        });
+        let mut mem = MemBuffer::new(lu_solve::solve_in_place_scratch::<usize, f64>(dim, 1, par));
+        lu_solve::solve_in_place(
+            self.lu.as_ref(),
+            self.lu.as_ref(),
+            perm,
+            rhs.as_mut(),
+            par,
+            MemStack::new(&mut mem),
+        );
         let x: Vec<f64> = (0..nd).map(|i| rhs[(i, 0)]).collect();
         let lambda: Vec<f64> = (0..self.k).map(|r| rhs[(nd + r, 0)] * self.scale).collect();
         if let Some(i) = x.iter().chain(&lambda).position(|v| !v.is_finite()) {
