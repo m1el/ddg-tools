@@ -11,7 +11,8 @@ Cutting (2018), implemented clean-room from the text of the paper. Map to sphere
 Crane, Boundary First Flattening (2017), Sec. 7.5; Baden, Crane, Kazhdan, Moebius Registration
 (2018). Developability: Stein, Grinspun, Crane, Developability of Triangle Meshes (2018),
 implemented clean-room from the text of the paper (Make Developable, Show Developability,
-Developable Seams + UV).
+Developable Seams + UV). Repulsive curves: Yu, Schumacher, Crane, Repulsive Curves (2021): a live
+flow and an N-steps flow of edge meshes and Curve objects.
 """
 
 import bpy
@@ -24,6 +25,7 @@ from .developable_operator import (
     UV_OT_ddg_developable_seams,
 )
 from .operator import UV_OT_ddg_conformal_unwrap
+from . import repulsive_operator
 from .sphere_operator import OBJECT_OT_ddg_map_to_sphere
 
 _CUT_OPERATORS = (UV_OT_ddg_cut_start, UV_OT_ddg_cut_flow, UV_OT_ddg_cut_apply)
@@ -89,9 +91,11 @@ def register():
     bpy.types.VIEW3D_MT_object.append(_draw_developable_object_entries)
     bpy.types.VIEW3D_MT_edit_mesh.append(_draw_developable_edit_entries)
     bpy.types.VIEW3D_MT_uv_map.append(_draw_developable_uv_entry)
+    repulsive_operator.register()
 
 
 def unregister():
+    repulsive_operator.unregister()
     bpy.types.VIEW3D_MT_uv_map.remove(_draw_developable_uv_entry)
     bpy.types.VIEW3D_MT_edit_mesh.remove(_draw_developable_edit_entries)
     bpy.types.VIEW3D_MT_object.remove(_draw_developable_object_entries)
