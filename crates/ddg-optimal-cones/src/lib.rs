@@ -172,7 +172,7 @@ pub use factor_once::{
 };
 pub use feedback::{
     Feedback, FeedbackError, FeedbackOptions, FeedbackReport, FeedbackRound, FeedbackSolution,
-    FeedbackStop, ScaleMismatch, scale_mismatch, solve_with_feedback,
+    FeedbackStop, ScaleMismatch, every_component_has_boundary, scale_mismatch, solve_with_feedback,
 };
 pub use linsys::{LinearSolver, LinearSolverReport};
 pub use newton::StageStop;

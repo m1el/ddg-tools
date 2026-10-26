@@ -31,7 +31,7 @@ use ddg_bff::{
 use ddg_core::io::{Cone, read_obj};
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{
-    BoundaryTreatment, ConeProblem, FeedbackOptions, Solution, SolveOptions, scale_mismatch,
+    BoundaryTreatment, ConeProblem, FeedbackOptions, SolveOptions, scale_mismatch,
     solve_with_boundary, solve_with_feedback,
 };
 use ddg_uv::realized_face_log_scale;
@@ -97,7 +97,11 @@ fn dstar(geometry: &Geometry, uvs: &[[f64; 2]]) -> f64 {
         })
         .collect();
     let positive = signed.iter().filter(|b| **b > 0.0).count();
-    let sign = if 2 * positive >= signed.len() { 1.0 } else { -1.0 };
+    let sign = if 2 * positive >= signed.len() {
+        1.0
+    } else {
+        -1.0
+    };
     let total: f64 = areas.iter().sum();
     let (mut sw, mut swu, mut swuu) = (0.0, 0.0, 0.0);
     for (f, &a) in areas.iter().enumerate() {
@@ -184,10 +188,16 @@ fn run(name: &str, lambdas: &[f64], feedback: &FeedbackOptions) -> Result<(), St
         );
         // The loop.
         let start = Instant::now();
-        let result = solve_with_feedback(&problem, bt, &options, feedback, |s: &Solution| {
-            let (uvs, _) = flatten(&mesh, &geometry, &s.cones, &s.log_scale)?;
-            Ok::<_, String>((realized_face_log_scale(&geometry, &uvs), uvs))
-        });
+        let result = solve_with_feedback(
+            &problem,
+            bt,
+            &options,
+            feedback,
+            |cones: &[Cone], u: &[f64]| {
+                let (uvs, _) = flatten(&mesh, &geometry, cones, u)?;
+                Ok::<_, String>((realized_face_log_scale(&geometry, &uvs), uvs))
+            },
+        );
         let total = start.elapsed().as_secs_f64();
         match result {
             Err(e) => println!("{tag} | loop FAILED: {e}"),
@@ -198,7 +208,8 @@ fn run(name: &str, lambdas: &[f64], feedback: &FeedbackOptions) -> Result<(), St
                     .iter()
                     .map(|x| {
                         format!(
-                            "solve {:.3}s flatten {:.3}s compare {:.4}s max|δ| {:.2e} over {}",
+                            "{}solve {:.3}s flatten {:.3}s compare {:.4}s max|δ| {:.2e} over {}",
+                            if x.probe { "probe: " } else { "" },
                             x.seconds_solve,
                             x.seconds_realize,
                             x.seconds_mismatch,
@@ -235,7 +246,9 @@ fn main() {
     let feedback = FeedbackOptions {
         threshold: env_f64("DDG_FB_THRESHOLD", d.threshold),
         max_rounds: env_f64("DDG_FB_ROUNDS", d.max_rounds as f64) as usize,
-        ..d
+        max_reweighted_fraction: env_f64("DDG_FB_FRACTION", d.max_reweighted_fraction),
+        reduced_weight: env_f64("DDG_FB_REDUCED", d.reduced_weight),
+        cone_free_probe: env_f64("DDG_FB_PROBE", 1.0) != 0.0,
     };
     let mut names: Vec<String> = std::fs::read_dir(dataset_dir())
         .map(|rd| {

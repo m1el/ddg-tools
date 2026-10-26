@@ -426,7 +426,9 @@ fn feedback_options() -> FeedbackOptions {
     FeedbackOptions {
         threshold: env_f64("DDG_FB_THRESHOLD", d.threshold),
         max_rounds: env_f64("DDG_FB_ROUNDS", d.max_rounds as f64) as usize,
-        ..d
+        max_reweighted_fraction: env_f64("DDG_FB_FRACTION", d.max_reweighted_fraction),
+        reduced_weight: env_f64("DDG_FB_REDUCED", d.reduced_weight),
+        cone_free_probe: env_f64("DDG_FB_PROBE", 1.0) != 0.0,
     }
 }
 
@@ -946,8 +948,8 @@ fn run_mesh(d: &Data, tips_variant: bool, treatment: Option<BoundaryTreatment>) 
             family,
             &options(false),
             &feedback_options(),
-            |s: &Solution| {
-                let f = flatten(d, &s.cones, Some(&s.log_scale))?;
+            |cones: &[Cone], u: &[f64]| {
+                let f = flatten(d, cones, Some(u))?;
                 Ok::<_, String>((realized_face_log_scale(&d.geometry, &f.uvs), ()))
             },
         )
@@ -958,7 +960,8 @@ fn run_mesh(d: &Data, tips_variant: bool, treatment: Option<BoundaryTreatment>) 
             .iter()
             .map(|r| {
                 format!(
-                    "max|d| {:.2e} (eligible {:.2e}), {} over, solve {:.2}s, flatten {:.2}s",
+                    "{}max|d| {:.2e} (eligible {:.2e}), {} over, solve {:.2}s, flatten {:.2}s",
+                    if r.probe { "probe: " } else { "" },
                     r.max_abs_mismatch,
                     r.max_abs_eligible,
                     r.n_over_threshold,

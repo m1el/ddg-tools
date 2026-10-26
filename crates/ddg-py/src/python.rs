@@ -242,7 +242,7 @@ impl UnwrapResult {
 ///                   than feedback_threshold (thin spikes) and solve again, until nothing changes
 ///                   (report["cone_feedback_rounds"], ["n_cone_feedback_reweighted"],
 ///                   ["cone_feedback_vertices"], ["cone_feedback_max_mismatch"]). Default False.
-/// feedback_threshold  the mismatch threshold in log units (default 4.0).
+/// feedback_threshold  the mismatch threshold in log units (default 20.0).
 /// feedback_max_rounds the most solves, the first included (default 4).
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that cannot be unwrapped
@@ -267,7 +267,7 @@ impl UnwrapResult {
     split_max = 32,
     split_threshold = 0.001,
     cone_feedback = false,
-    feedback_threshold = 4.0,
+    feedback_threshold = 20.0,
     feedback_max_rounds = 4,
 ))]
 #[allow(clippy::too_many_arguments)]

@@ -20,15 +20,20 @@
 
 use std::time::Instant;
 
+use ddg_bff::ConeFlattenOptions;
 use ddg_bff::quality::{log_scale_factor, signed_double_area};
 use ddg_core::Geometry;
-use ddg_optimal_cones::{Feedback, FeedbackReport, FeedbackStop};
+use ddg_core::io::Cone;
+use ddg_optimal_cones::{
+    ConeProblem, Feedback, FeedbackReport, FeedbackStop, Parallelism, evaluate_cones,
+    every_component_has_boundary,
+};
 
 use crate::cones::{ConeStage, PieceCones, piece_solve, piece_weights};
 use crate::error::{UvError, internal};
 use crate::flatten::{FlatStage, flatten_options, flatten_piece};
 use crate::options::UnwrapOptions;
-use crate::prepare::Prepared;
+use crate::prepare::{Piece, Prepared};
 
 /// What the feedback loop did on one chart.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,9 +104,10 @@ pub fn cone_feedback(
     let start = Instant::now();
     let flattener = flatten_options(options);
     for (k, piece) in prepared.pieces.iter().enumerate() {
-        let (Some(first_log_scale), Some(first_solve)) =
-            (cones.pieces[k].log_scale.clone(), cones.pieces[k].solve.as_ref())
-        else {
+        let (Some(first_log_scale), Some(first_solve)) = (
+            cones.pieces[k].log_scale.clone(),
+            cones.pieces[k].solve.as_ref(),
+        ) else {
             continue;
         };
         let mut seconds_solve = first_solve.seconds;
@@ -123,7 +129,77 @@ pub fn cone_feedback(
         let mut log_scale = first_log_scale;
         let mut realized = realized_face_log_scale(&on.geometry, &flat.pieces[k].corner_uvs);
         let mut seconds_flatten = flat.pieces[k].seconds;
+        // The cone-free probe: the piece without cones (the prescribed ones only), flattened.
+        let mut probe_note = None;
+        let mut out_of_date = false;
+        if feedback_options.cone_free_probe {
+            if every_component_has_boundary(&on.mesh) {
+                match probe(prepared, piece, on, &slit, &cones.pieces[k], &flattener) {
+                    Ok((u0, faces, seconds_evaluate, seconds_probe_flatten)) => {
+                        out_of_date = state
+                            .observe_probe(
+                                &on.mesh,
+                                &on.geometry,
+                                &u0,
+                                &faces,
+                                seconds_evaluate,
+                                seconds_probe_flatten,
+                            )
+                            .map_err(|e| internal(format!("the feedback loop failed: {e}")))?;
+                    }
+                    Err(message) => probe_note = Some(message),
+                }
+            } else {
+                probe_note = Some("the piece is closed".to_owned());
+            }
+        }
         loop {
+            if out_of_date {
+                // The weights, per vertex of the caller, where they are not 1. Interior vertices
+                // of `on` are distinct vertices of the caller; the two copies of a vertex on a
+                // slit are boundary vertices, which the loop never reweights, so they carry the
+                // same weight.
+                let mut weights: Vec<(u32, f64)> = (0..on.mesh.n_vertices())
+                    .filter(|&v| state.weights()[v] != 1.0)
+                    .map(|v| (on.vertex_input[v], state.weights()[v]))
+                    .collect();
+                weights.sort_unstable_by_key(|p| p.0);
+                weights.dedup_by_key(|p| p.0);
+                let solve_start = Instant::now();
+                let mut solve_warnings = Vec::new();
+                let solved =
+                    match piece_solve(prepared, piece, options, &weights, &mut solve_warnings) {
+                        Ok(solved) => solved,
+                        Err(e) => {
+                            state.round_failed(format!("the cone solve failed: {e}"));
+                            break;
+                        }
+                    };
+                let same_mesh = solved.slit_piece.as_ref().map(|p| p.mesh.n_vertices())
+                    == slit.as_ref().map(|p| p.mesh.n_vertices());
+                let Some(next_log_scale) = solved.log_scale.clone().filter(|_| same_mesh) else {
+                    state.round_failed("the piece was not solved on the same mesh again");
+                    break;
+                };
+                seconds_solve = solve_start.elapsed().as_secs_f64();
+                let mut flatten_warnings = Vec::new();
+                let flattened =
+                    match flatten_piece(piece, &solved, &flattener, &mut flatten_warnings) {
+                        Ok(flattened) => flattened,
+                        Err(e) => {
+                            state.round_failed(format!("the flattening failed: {e}"));
+                            break;
+                        }
+                    };
+                seconds_flatten = flattened.seconds;
+                realized = realized_face_log_scale(&on.geometry, &flattened.corner_uvs);
+                log_scale = next_log_scale;
+                let spikes = cones.pieces[k].spikes.take();
+                cones.pieces[k] = PieceCones { spikes, ..solved };
+                cones.piece_warnings[k].solve = solve_warnings;
+                flat.pieces[k] = flattened;
+                flat.piece_warnings[k] = flatten_warnings;
+            }
             let again = state
                 .observe(
                     &on.mesh,
@@ -137,51 +213,10 @@ pub fn cone_feedback(
             if !again {
                 break;
             }
-            // The weights, per vertex of the caller, where they are not 1. Interior vertices of
-            // `on` are distinct vertices of the caller; the two copies of a vertex on a slit are
-            // boundary vertices, which the loop never reweights, so they carry the same weight.
-            let mut weights: Vec<(u32, f64)> = (0..on.mesh.n_vertices())
-                .filter(|&v| state.weights()[v] != 1.0)
-                .map(|v| (on.vertex_input[v], state.weights()[v]))
-                .collect();
-            weights.sort_unstable_by_key(|p| p.0);
-            weights.dedup_by_key(|p| p.0);
-            let solve_start = Instant::now();
-            let mut solve_warnings = Vec::new();
-            let solved = match piece_solve(prepared, piece, options, &weights, &mut solve_warnings)
-            {
-                Ok(solved) => solved,
-                Err(e) => {
-                    state.round_failed(format!("the cone solve failed: {e}"));
-                    break;
-                }
-            };
-            let same_mesh = solved.slit_piece.as_ref().map(|p| p.mesh.n_vertices())
-                == slit.as_ref().map(|p| p.mesh.n_vertices());
-            let Some(next_log_scale) = solved.log_scale.clone().filter(|_| same_mesh) else {
-                state.round_failed("the piece was not solved on the same mesh again");
-                break;
-            };
-            seconds_solve = solve_start.elapsed().as_secs_f64();
-            let mut flatten_warnings = Vec::new();
-            let flattened = match flatten_piece(piece, &solved, &flattener, &mut flatten_warnings)
-            {
-                Ok(flattened) => flattened,
-                Err(e) => {
-                    state.round_failed(format!("the flattening failed: {e}"));
-                    break;
-                }
-            };
-            seconds_flatten = flattened.seconds;
-            realized = realized_face_log_scale(&on.geometry, &flattened.corner_uvs);
-            log_scale = next_log_scale;
-            let spikes = cones.pieces[k].spikes.take();
-            cones.pieces[k] = PieceCones { spikes, ..solved };
-            cones.piece_warnings[k].solve = solve_warnings;
-            flat.pieces[k] = flattened;
-            flat.piece_warnings[k] = flatten_warnings;
+            out_of_date = true;
         }
-        let report = state.finish();
+        let mut report = state.finish();
+        report.probe_note = probe_note;
         let caller = |vertices: &[u32]| {
             let mut out: Vec<u32> = vertices
                 .iter()
@@ -204,6 +239,50 @@ pub fn cone_feedback(
     Ok(())
 }
 
+/// The cone-free probe of one piece: the scale factor without cones (the prescribed cones of
+/// the piece only, `u = 0` on the boundary) and the realized log area factor of its
+/// flattening, with the seconds of both. An error message if either fails.
+fn probe(
+    prepared: &Prepared,
+    piece: &Piece,
+    on: &Piece,
+    slit: &Option<Piece>,
+    solved: &PieceCones,
+    flattener: &ConeFlattenOptions,
+) -> Result<(Vec<f64>, Vec<f64>, f64, f64), String> {
+    let start = Instant::now();
+    let n = on.mesh.n_vertices();
+    let prescribed: Vec<Cone> = (0..n)
+        .filter(|&v| !on.mesh.is_boundary_vertex(v))
+        .filter(|&v| prepared.steering_role[on.vertex_input[v] as usize] == 2)
+        .map(|v| Cone {
+            vertex: v as u32,
+            angle: prepared.prescribed_angle[on.vertex_input[v] as usize],
+        })
+        .collect();
+    let problem = ConeProblem::new(&on.mesh, &on.geometry, 0.0);
+    let free = evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
+        .map_err(|e| format!("the cone-free state failed: {e}"))?;
+    let seconds_evaluate = start.elapsed().as_secs_f64();
+    let cone_free = PieceCones {
+        slit_piece: slit.clone(),
+        slit_edges: Vec::new(),
+        cones: prescribed,
+        log_scale: Some(free.log_scale.clone()),
+        boundary_optimized: false,
+        closed: solved.closed,
+        positive_only: solved.positive_only,
+        solve: None,
+        spikes: None,
+        feedback: None,
+    };
+    let mut ignored = Vec::new();
+    let flattened = flatten_piece(piece, &cone_free, flattener, &mut ignored)
+        .map_err(|e| format!("the cone-free flattening failed: {e}"))?;
+    let faces = realized_face_log_scale(&on.geometry, &flattened.corner_uvs);
+    Ok((free.log_scale, faces, seconds_evaluate, flattened.seconds))
+}
+
 /// The warning for a chart where the loop changed something or could not finish.
 fn warning(first_polygon: u32, n_vertices: usize, chart: &ChartFeedback) -> Option<String> {
     const LISTED: usize = 16;
@@ -215,10 +294,7 @@ fn warning(first_polygon: u32, n_vertices: usize, chart: &ChartFeedback) -> Opti
         text.join(", ")
     };
     let report = &chart.report;
-    let largest = report
-        .rounds
-        .first()
-        .map_or(0.0, |r| r.max_abs_eligible);
+    let largest = report.rounds.first().map_or(0.0, |r| r.max_abs_eligible);
     let mut parts = Vec::new();
     if !chart.reweighted.is_empty() {
         parts.push(format!(

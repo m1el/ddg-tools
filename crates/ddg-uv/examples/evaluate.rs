@@ -820,7 +820,10 @@ fn models() -> Vec<(String, PolygonMesh)> {
                 .map(|k| obj.corner_verts[obj.face_corners(k)].to_vec())
                 .collect();
             let name = f.rsplit('/').next()?.trim_end_matches(".obj").to_owned();
-            Some((name, PolygonMesh::from_polygons(obj.positions.clone(), &polygons)))
+            Some((
+                name,
+                PolygonMesh::from_polygons(obj.positions.clone(), &polygons),
+            ))
         })
         .collect()
 }
@@ -832,7 +835,9 @@ fn feedback(names: &[String]) {
     let loop_options = FeedbackOptions {
         threshold: env("DDG_FB_THRESHOLD").unwrap_or(defaults.threshold),
         max_rounds: env("DDG_FB_ROUNDS").map_or(defaults.max_rounds, |r| r as usize),
-        ..defaults
+        max_reweighted_fraction: env("DDG_FB_FRACTION").unwrap_or(defaults.max_reweighted_fraction),
+        reduced_weight: env("DDG_FB_REDUCED").unwrap_or(defaults.reduced_weight),
+        cone_free_probe: env("DDG_FB_PROBE").map_or(defaults.cone_free_probe, |x| x != 0.0),
     };
     let mut meshes: Vec<(String, PolygonMesh, Option<f64>)> = Vec::new();
     for name in dataset_names() {
@@ -843,8 +848,11 @@ fn feedback(names: &[String]) {
     for (name, mesh) in models().into_iter().chain(primitives()) {
         meshes.push((name, mesh, None));
     }
+    // `prims` stands for all primitives.
+    let primitive_names: Vec<String> = primitives().into_iter().map(|(n, _)| n).collect();
     if !names.is_empty() {
-        meshes.retain(|(n, _, _)| names.contains(n));
+        let all_prims = names.iter().any(|n| n == "prims");
+        meshes.retain(|(n, _, _)| names.contains(n) || (all_prims && primitive_names.contains(n)));
     }
     println!(
         "| mesh | spike check | feedback | cones | distortion | published | overlap % | flipped | rounds | reweighted | pending | stop | max mismatch first | max mismatch last | seconds | feedback s | warnings |"
@@ -871,8 +879,16 @@ fn feedback(names: &[String]) {
                     }
                     Ok(map) => {
                         let r = &map.report;
-                        let loops: Vec<_> = r.charts.iter().filter_map(|c| c.feedback.as_ref()).collect();
-                        let rounds = loops.iter().map(|f| f.report.rounds.len()).max().unwrap_or(0);
+                        let loops: Vec<_> = r
+                            .charts
+                            .iter()
+                            .filter_map(|c| c.feedback.as_ref())
+                            .collect();
+                        let rounds = loops
+                            .iter()
+                            .map(|f| f.report.rounds.len())
+                            .max()
+                            .unwrap_or(0);
                         let reweighted: usize = loops.iter().map(|f| f.reweighted.len()).sum();
                         let pending: usize = loops.iter().map(|f| f.pending.len()).sum();
                         let first = loops
@@ -895,10 +911,18 @@ fn feedback(names: &[String]) {
                             published.map_or("-".to_string(), |d| format!("{d:.5}")),
                             100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
                             r.flipped_triangles,
-                            if fb.is_some() { rounds.to_string() } else { "-".into() },
+                            if fb.is_some() {
+                                rounds.to_string()
+                            } else {
+                                "-".into()
+                            },
                             reweighted,
                             pending,
-                            if stops.is_empty() { "Stable".to_string() } else { stops.join(" ") },
+                            if stops.is_empty() {
+                                "Stable".to_string()
+                            } else {
+                                stops.join(" ")
+                            },
                             first,
                             last,
                             r.timings.total,

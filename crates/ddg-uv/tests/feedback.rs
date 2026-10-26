@@ -15,8 +15,8 @@ use ddg_optimal_cones::{
 };
 use ddg_uv::primitives::{capsule, uv_sphere};
 use ddg_uv::{
-    PolygonMesh, SpikeAction, SpikeCheck, UnwrapOptions, UvError, Value,
-    realized_face_log_scale, unwrap,
+    PolygonMesh, SpikeAction, SpikeCheck, UnwrapOptions, UvError, Value, realized_face_log_scale,
+    unwrap,
 };
 
 /// A 24 x 24 grid with two vertices pulled 2.0 out of a sheet of side 1 (`h/ρ ≈ 48`), behind
@@ -54,15 +54,25 @@ fn the_loop_finds_the_tips_of_thin_spikes() {
     let options = with_feedback(None);
     let map = unwrap(&input, &options).unwrap();
     check(&mesh, &input, &map, &options);
-    let feedback = map.report.charts[0].feedback.as_ref().expect("the loop ran");
+    let feedback = map.report.charts[0]
+        .feedback
+        .as_ref()
+        .expect("the loop ran");
     assert_eq!(feedback.reweighted, tips.to_vec(), "{:?}", feedback.report);
     assert_eq!(feedback.report.stop, FeedbackStop::Stable);
     let rounds = &feedback.report.rounds;
     assert!(rounds.len() >= 2, "{rounds:?}");
-    assert!(rounds[0].max_abs_eligible > 10.0 * options.cone_feedback.unwrap().threshold);
+    assert!(
+        rounds[0].probe && rounds[0].max_abs_eligible > options.cone_feedback.unwrap().threshold
+    );
     assert!(rounds.last().unwrap().max_abs_eligible <= options.cone_feedback.unwrap().threshold);
     // The final weights are zero at the tips (in the piece's numbering) and one elsewhere.
-    let zero = feedback.report.weights.iter().filter(|&&w| w == 0.0).count();
+    let zero = feedback
+        .report
+        .weights
+        .iter()
+        .filter(|&&w| w == 0.0)
+        .count();
     assert_eq!(zero, 2);
 
     // It ends where the spike check's exclusion of the same tips starts: the same cones.
@@ -74,7 +84,10 @@ fn the_loop_finds_the_tips_of_thin_spikes() {
         ..UnwrapOptions::default()
     };
     let by_check = unwrap(&input, &excluded).unwrap();
-    assert_eq!(by_check.report.charts[0].spikes.as_ref().unwrap().excluded, tips);
+    assert_eq!(
+        by_check.report.charts[0].spikes.as_ref().unwrap().excluded,
+        tips
+    );
     assert_eq!(map.cones, by_check.cones);
 
     // The report and the warning.
@@ -90,7 +103,7 @@ fn the_loop_finds_the_tips_of_thin_spikes() {
         get("cone_feedback_vertices"),
         Some(Value::Text(format!("{}, {}", tips[0], tips[1])))
     );
-    assert!(matches!(get("cone_feedback_rounds"), Some(Value::Int(n)) if n >= 2));
+    assert!(matches!(get("cone_feedback_rounds"), Some(Value::Int(n)) if n >= 1));
     assert!(matches!(get("seconds_cone_feedback"), Some(Value::Float(s)) if s > 0.0));
     let warnings: Vec<&String> = map
         .report
@@ -111,32 +124,72 @@ fn with_the_spike_check_the_loop_has_nothing_left_to_do_at_the_tips() {
     assert!(feedback.reweighted.iter().all(|v| !tips.contains(v)));
     let plain = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
     if feedback.reweighted.is_empty() {
-        assert_eq!(feedback.report.rounds.len(), 1);
+        assert_eq!(
+            feedback.report.rounds.iter().filter(|r| !r.probe).count(),
+            1
+        );
         assert_eq!(map.uvs, plain.uvs);
         assert_eq!(map.cones, plain.cones);
     }
 }
 
-/// A sphere with one vertex pulled out to three times the radius: a closed piece, handled by
-/// the default policy for closed surfaces; the loop finds the tip there too.
+/// A sphere with one vertex pulled out to three times the radius. Closed, the piece gets no
+/// cone-free probe (a closed surface has no flattening without cones), and the solver's cone
+/// at the tip hides the spike from the rounds after the solve: nothing is reweighted, the
+/// report says why. With a seam of two edges on the far side the piece has a boundary, and the
+/// probe finds the tip.
 #[test]
-fn the_loop_finds_a_spike_on_a_sphere() {
+fn a_spike_on_a_sphere_is_found_through_a_seam() {
     let ico = icosphere(3).unwrap(); // 642 vertices
     let mut positions = ico.positions.clone();
     let tip = 17usize;
     positions[tip] = positions[tip].map(|x| 3.0 * x);
-    let mesh = PolygonMesh::from_triangles(positions, &ico.faces);
-    let input = mesh.input();
+    let mesh = PolygonMesh::from_triangles(positions.clone(), &ico.faces);
     let options = with_feedback(None);
+
+    let closed = unwrap(&mesh.input(), &options).unwrap();
+    let feedback = closed.report.charts[0]
+        .feedback
+        .as_ref()
+        .expect("the loop ran");
+    assert_eq!(
+        feedback.report.probe_note.as_deref(),
+        Some("the piece is closed")
+    );
+    assert!(feedback.report.rounds.iter().all(|r| !r.probe));
+
+    // The face farthest from the tip; two of its edges as a seam.
+    let dot = |v: u32| {
+        let (p, q) = (ico.positions[v as usize], ico.positions[tip]);
+        p[0] * q[0] + p[1] * q[1] + p[2] * q[2]
+    };
+    let far = ico
+        .faces
+        .iter()
+        .min_by(|a, b| {
+            let s = |f: &[u32; 3]| f.iter().map(|&v| dot(v)).sum::<f64>();
+            s(a).total_cmp(&s(b))
+        })
+        .unwrap();
+    let seams = [[far[0], far[1]], [far[1], far[2]]];
+    let input = ddg_uv::MeshInput {
+        seam_edges: &seams,
+        ..mesh.input()
+    };
     let map = unwrap(&input, &options).unwrap();
     check(&mesh, &input, &map, &options);
-    let feedback = map.report.charts[0].feedback.as_ref().expect("the loop ran");
-    assert!(
-        feedback.reweighted.contains(&(tip as u32)),
+    let feedback = map.report.charts[0]
+        .feedback
+        .as_ref()
+        .expect("the loop ran");
+    assert_eq!(
+        feedback.reweighted,
+        vec![tip as u32],
         "{:?}",
         feedback.report
     );
-    assert!(feedback.reweighted.len() <= 6, "{:?}", feedback.reweighted);
+    assert!(feedback.report.rounds[0].probe);
+    assert_eq!(feedback.report.stop, FeedbackStop::Stable);
 }
 
 #[test]
@@ -162,8 +215,17 @@ fn smooth_meshes_are_not_changed() {
             let Some(feedback) = &chart.feedback else {
                 continue;
             };
-            assert!(feedback.reweighted.is_empty(), "{name}: {:?}", feedback.report);
-            assert_eq!(feedback.report.rounds.len(), 1, "{name}");
+            assert!(
+                feedback.reweighted.is_empty(),
+                "{name}: {:?}",
+                feedback.report
+            );
+            // At most the probe and the solve the pipeline made anyway.
+            assert_eq!(
+                feedback.report.rounds.iter().filter(|r| !r.probe).count(),
+                1,
+                "{name}"
+            );
             assert_eq!(feedback.report.stop, FeedbackStop::Stable, "{name}");
         }
         // One round compares what the pipeline made anyway: the map is the same.
@@ -183,10 +245,31 @@ fn invalid_options_are_errors_not_panics() {
     let (mesh, _) = spiked_disk();
     let d = FeedbackOptions::default();
     for (bad, name) in [
-        (FeedbackOptions { threshold: 0.0, ..d }, "cone_feedback.threshold"),
-        (FeedbackOptions { threshold: f64::NAN, ..d }, "cone_feedback.threshold"),
-        (FeedbackOptions { reduced_weight: 1.0, ..d }, "cone_feedback.reduced_weight"),
-        (FeedbackOptions { max_rounds: 0, ..d }, "cone_feedback.max_rounds"),
+        (
+            FeedbackOptions {
+                threshold: 0.0,
+                ..d
+            },
+            "cone_feedback.threshold",
+        ),
+        (
+            FeedbackOptions {
+                threshold: f64::NAN,
+                ..d
+            },
+            "cone_feedback.threshold",
+        ),
+        (
+            FeedbackOptions {
+                reduced_weight: 1.0,
+                ..d
+            },
+            "cone_feedback.reduced_weight",
+        ),
+        (
+            FeedbackOptions { max_rounds: 0, ..d },
+            "cone_feedback.max_rounds",
+        ),
         (
             FeedbackOptions {
                 max_reweighted_fraction: -0.5,
@@ -218,14 +301,14 @@ fn solve_with_feedback_and_boundary_first_flattening() {
     let geometry = Geometry::from_positions(&mesh, &positions).unwrap();
     let problem = ConeProblem::new(&mesh, &geometry, 0.1);
     let mut flattenings = 0;
-    let realize = |s: &ddg_optimal_cones::Solution| {
+    let realize = |cones: &[ddg_optimal_cones::Cone], u: &[f64]| {
         flattenings += 1;
         let flat = flatten_with_cones(
             &ConeFlattenInput {
                 mesh: &mesh,
                 geometry: &geometry,
-                cones: &s.cones,
-                scale_factors: Some(&s.log_scale),
+                cones,
+                scale_factors: Some(u),
                 cut: CutSource::Plan {
                     may_cut: None,
                     must_cut: &[],
@@ -275,7 +358,7 @@ fn solve_with_feedback_and_boundary_first_flattening() {
         BoundaryTreatment::Fixed,
         &SolveOptions::default(),
         &bad,
-        |_| Ok::<_, String>((Vec::new(), ())),
+        |_: &[ddg_optimal_cones::Cone], _: &[f64]| Ok::<_, String>((Vec::new(), ())),
     )
     .unwrap_err();
     assert!(matches!(
@@ -288,7 +371,7 @@ fn solve_with_feedback_and_boundary_first_flattening() {
         BoundaryTreatment::Fixed,
         &SolveOptions::default(),
         &FeedbackOptions::default(),
-        |_| Ok::<_, String>((vec![0.0; 3], ())),
+        |_: &[ddg_optimal_cones::Cone], _: &[f64]| Ok::<_, String>((vec![0.0; 3], ())),
     )
     .unwrap_err();
     assert!(matches!(
@@ -301,8 +384,47 @@ fn solve_with_feedback_and_boundary_first_flattening() {
         BoundaryTreatment::Fixed,
         &SolveOptions::default(),
         &FeedbackOptions::default(),
-        |_| Err::<(Vec<f64>, ()), _>("no flattener".to_owned()),
+        |_: &[ddg_optimal_cones::Cone], _: &[f64]| {
+            Err::<(Vec<f64>, ()), _>("no flattener".to_owned())
+        },
     )
     .unwrap_err();
     assert_eq!(error, FeedbackError::Realize("no flattener".to_owned()));
+}
+
+/// Needles on a rough surface: the surface's own distortion keeps the spike check's share
+/// criterion (99 % on at most 1 % of the vertices) from firing; the loop finds the needles from
+/// the flattening anyway, and the map improves (measured: 3 cones and distortion 0.907 without
+/// the loop, 1 cone and 0.612 with it).
+#[test]
+fn the_loop_finds_needles_that_the_spike_check_misses() {
+    let g = bumpy_grid_disk(48, 48, 0.6).unwrap();
+    let at = |i: usize, j: usize| (i * 49 + j) as u32;
+    let mut tips = [at(12, 12), at(30, 20), at(20, 36)];
+    tips.sort_unstable();
+    let mut positions = g.positions.clone();
+    for &t in &tips {
+        positions[t as usize][2] += 0.5;
+    }
+    let mesh = PolygonMesh::from_triangles(positions, &g.faces);
+    let plain = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
+    assert!(
+        plain.report.charts[0]
+            .spikes
+            .as_ref()
+            .unwrap()
+            .vertices
+            .is_empty()
+    );
+    let options = with_feedback(Some(SpikeCheck::default()));
+    let map = unwrap(&mesh.input(), &options).unwrap();
+    check(&mesh, &mesh.input(), &map, &options);
+    let feedback = map.report.charts[0].feedback.as_ref().unwrap();
+    assert_eq!(feedback.reweighted, tips.to_vec(), "{:?}", feedback.report);
+    assert!(
+        map.report.area_distortion.scale_free < 0.8 * plain.report.area_distortion.scale_free,
+        "{} {}",
+        map.report.area_distortion.scale_free,
+        plain.report.area_distortion.scale_free
+    );
 }

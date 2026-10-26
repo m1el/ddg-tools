@@ -562,7 +562,7 @@ pub struct UnwrapOptions {
     /// the flattening realizes (thin spikes) and solve again. Default `false`.
     pub cone_feedback: bool,
     /// With `cone_feedback`: the threshold of the mismatch, in log units
-    /// (`ddg_optimal_cones::FeedbackOptions::threshold`). Default 4.
+    /// (`ddg_optimal_cones::FeedbackOptions::threshold`). Default 20.
     pub feedback_threshold: f64,
     /// With `cone_feedback`: the most solves, the first included. Default 4.
     pub feedback_max_rounds: usize,

@@ -2,9 +2,9 @@
 
 use ddg_optimal_cones::Status;
 
+use crate::feedback::ChartFeedback;
 use crate::measure::AreaDistortion;
 use crate::pack::PackReport;
-use crate::feedback::ChartFeedback;
 use crate::spikes::SpikeReport;
 
 /// What was done about triangles without area.
@@ -615,7 +615,11 @@ impl Report {
             reweighted.sort_unstable();
             out.push((
                 "cone_feedback_rounds",
-                int(loops.iter().map(|f| f.report.rounds.len()).max().unwrap_or(0)),
+                int(loops
+                    .iter()
+                    .map(|f| f.report.rounds.iter().filter(|r| !r.probe).count())
+                    .max()
+                    .unwrap_or(0)),
             ));
             out.push(("n_cone_feedback_reweighted", int(reweighted.len())));
             out.push((
@@ -624,15 +628,19 @@ impl Report {
             ));
             out.push((
                 "cone_feedback_max_mismatch",
-                Value::Float(fold_max(&mut loops.iter().filter_map(|f| {
-                    f.report.rounds.first().map(|r| r.max_abs_eligible)
-                }))),
+                Value::Float(fold_max(
+                    &mut loops
+                        .iter()
+                        .filter_map(|f| f.report.rounds.first().map(|r| r.max_abs_eligible)),
+                )),
             ));
             out.push((
                 "cone_feedback_final_mismatch",
-                Value::Float(fold_max(&mut loops.iter().filter_map(|f| {
-                    f.report.rounds.last().map(|r| r.max_abs_eligible)
-                }))),
+                Value::Float(fold_max(
+                    &mut loops
+                        .iter()
+                        .filter_map(|f| f.report.rounds.last().map(|r| r.max_abs_eligible)),
+                )),
             ));
             if !reweighted.is_empty() {
                 out.push((

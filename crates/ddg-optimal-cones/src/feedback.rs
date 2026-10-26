@@ -52,15 +52,19 @@ use ddg_core::operators::lumped_mass;
 use ddg_core::{Geometry, TriMesh};
 
 use crate::error::ConeError;
+use crate::evaluate::evaluate_cones;
 use crate::problem::{BoundaryTreatment, ConeProblem};
 use crate::solve::{Solution, SolveOptions, solve_with_boundary};
+use crate::{Cone, Parallelism};
 
 /// The options of the feedback loop. Plain values; [`FeedbackOptions::validate`] checks them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeedbackOptions {
     /// A vertex is reweighted where `|δ_i|` exceeds this (natural log units of the length
     /// scale; `δ = 1` is a factor `e` in length, `e²` in area). Positive and finite.
-    /// Default `4`.
+    /// Default `20`: on the 23 meshes of the published dataset the vertices of the clean
+    /// meshes have `|δ|` at most 3.5 without cones and 7.6 after a solve, the 22 needle tips of
+    /// `camelshotnoise` about `10⁴` without cones (crate README, "The feedback loop").
     pub threshold: f64,
     /// The factor by which the distortion weight of a reweighted vertex is multiplied,
     /// `0 ≤ reduced_weight < 1`. Default `0`: the vertex no longer counts.
@@ -73,15 +77,22 @@ pub struct FeedbackOptions {
     /// round ([`FeedbackStop::TooManyVertices`]). Default `0.01`: a mesh of fewer than 100
     /// vertices is never reweighted.
     pub max_reweighted_fraction: f64,
+    /// Whether the loop first looks at the surface **without cones** (only the prescribed
+    /// ones), flattened, before the first solve ([`Feedback::observe_probe`]): a cone that the
+    /// solver puts at a needle tip absorbs its curvature and hides the failure of the
+    /// linearization there. Only on meshes whose every component has a boundary. Default
+    /// `true`.
+    pub cone_free_probe: bool,
 }
 
 impl Default for FeedbackOptions {
     fn default() -> Self {
         FeedbackOptions {
-            threshold: 4.0,
+            threshold: 20.0,
             reduced_weight: 0.0,
             max_rounds: 4,
             max_reweighted_fraction: 0.01,
+            cone_free_probe: true,
         }
     }
 }
@@ -328,6 +339,8 @@ pub enum FeedbackStop {
 /// One round of the loop: what the comparison of one solve with its flattening gave.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeedbackRound {
+    /// Whether this round is the cone-free probe ([`Feedback::observe_probe`]), not a solve.
+    pub probe: bool,
     /// The largest `|δ_i|` over the measured vertices.
     pub max_abs_mismatch: f64,
     /// The mass-weighted root mean square of `δ` over the measured vertices.
@@ -355,7 +368,7 @@ pub struct FeedbackRound {
 /// What the feedback loop did.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeedbackReport {
-    /// One entry per solve, the first included.
+    /// One entry per solve, the first included, after the cone-free probe if it ran.
     pub rounds: Vec<FeedbackRound>,
     /// Every reweighted vertex, ascending.
     pub reweighted: Vec<u32>,
@@ -371,6 +384,9 @@ pub struct FeedbackReport {
     /// Seconds from [`Feedback::new`] to [`Feedback::finish`], the caller's solves and
     /// flattenings included.
     pub seconds: f64,
+    /// Why the cone-free probe did not run or failed, if it was asked for (set by the drivers,
+    /// [`solve_with_feedback`] and `ddg-uv`; `None` from [`Feedback::finish`]).
+    pub probe_note: Option<String>,
 }
 
 /// The feedback rule as a state machine. The caller solves with [`Feedback::weights`], flattens,
@@ -491,6 +507,66 @@ impl Feedback {
         seconds_solve: f64,
         seconds_realize: f64,
     ) -> Result<bool, ConeError> {
+        self.step(
+            mesh,
+            geometry,
+            log_scale,
+            realized_face_log_scale,
+            [seconds_solve, seconds_realize],
+            false,
+        )
+    }
+
+    /// Observes the **cone-free probe**, before the first solve: `log_scale` is the scale factor
+    /// of the surface without cones (only prescribed ones; `evaluate_cones`, `u = 0` on the
+    /// boundary), `realized_face_log_scale` that of its flattening. A cone at the tip of a needle
+    /// absorbs its curvature and hides the failure of the linearization there; without cones
+    /// the tip's `|δ|` is of order `h/ρ`. The rule picks as in [`Feedback::observe`]; the picks
+    /// are applied if the limits allow it (otherwise nothing is applied), and the loop never
+    /// ends here: the caller solves next, with [`Feedback::weights`]. Returns whether weights
+    /// were lowered (then a solve made with the previous weights is out of date). The probe
+    /// does not count as a solve for [`FeedbackOptions::max_rounds`]. Only on meshes whose
+    /// every component has a boundary (a closed surface cannot be flattened without cones).
+    ///
+    /// [formula: cone-feedback-rule]
+    ///
+    /// # Errors
+    /// As [`Feedback::observe`], and [`ConeError::InvalidArgument`] if a round was observed
+    /// already.
+    pub fn observe_probe(
+        &mut self,
+        mesh: &TriMesh,
+        geometry: &Geometry,
+        log_scale: &[f64],
+        realized_face_log_scale: &[f64],
+        seconds_evaluate: f64,
+        seconds_realize: f64,
+    ) -> Result<bool, ConeError> {
+        if !self.rounds.is_empty() {
+            return Err(ConeError::InvalidArgument {
+                reason: "the cone-free probe must come before the first round".into(),
+            });
+        }
+        self.step(
+            mesh,
+            geometry,
+            log_scale,
+            realized_face_log_scale,
+            [seconds_evaluate, seconds_realize],
+            true,
+        )?;
+        Ok(!self.last_applied.is_empty())
+    }
+
+    fn step(
+        &mut self,
+        mesh: &TriMesh,
+        geometry: &Geometry,
+        log_scale: &[f64],
+        realized_face_log_scale: &[f64],
+        seconds: [f64; 2],
+        probe: bool,
+    ) -> Result<bool, ConeError> {
         if self.stop.is_some() {
             return Err(ConeError::InvalidArgument {
                 reason: "the feedback loop has ended; it cannot observe another round".into(),
@@ -508,30 +584,32 @@ impl Feedback {
         let start = Instant::now();
         let m = scale_mismatch(mesh, geometry, log_scale, realized_face_log_scale)?;
         let looked_at = |v: usize| self.eligible[v] && !self.is_reweighted[v];
-        let candidates: Vec<u32> = (0..nv)
-            .filter(|&v| looked_at(v) && m.mismatch[v].abs() > self.options.threshold)
-            .map(|v| v as u32)
-            .collect();
         let max_abs_eligible = (0..nv)
             .filter(|&v| looked_at(v) && m.mismatch[v].is_finite())
             .map(|v| m.mismatch[v].abs())
             .fold(0.0f64, f64::max);
+        let candidates: Vec<u32> = (0..nv)
+            .filter(|&v| looked_at(v) && m.mismatch[v].abs() > self.options.threshold)
+            .map(|v| v as u32)
+            .collect();
+        let n_over_threshold = candidates.len();
         let mut round = FeedbackRound {
+            probe,
             max_abs_mismatch: m.max_abs,
             rms_mismatch: m.rms,
             max_abs_eligible,
             offsets: m.offsets,
             n_unmeasured: m.n_unmeasured,
-            n_over_threshold: candidates.len(),
+            n_over_threshold,
             reweighted: Vec::new(),
-            seconds_solve,
-            seconds_realize,
+            seconds_solve: seconds[0],
+            seconds_realize: seconds[1],
             seconds_mismatch: 0.0,
         };
         self.last_applied.clear();
         let stop = if candidates.is_empty() {
             Some(FeedbackStop::Stable)
-        } else if self.rounds.len() + 1 >= self.options.max_rounds {
+        } else if !probe && self.n_solves() + 1 >= self.options.max_rounds {
             Some(FeedbackStop::RoundLimit)
         } else if self.n_reweighted() + candidates.len() > self.allowed {
             Some(FeedbackStop::TooManyVertices {
@@ -545,6 +623,8 @@ impl Feedback {
             None
         };
         match stop {
+            // The probe never ends the loop: a limit only means that nothing is applied.
+            Some(_) if probe => {}
             Some(stop) => {
                 if stop != FeedbackStop::Stable {
                     self.pending = candidates;
@@ -564,6 +644,11 @@ impl Feedback {
         round.seconds_mismatch = start.elapsed().as_secs_f64();
         self.rounds.push(round);
         Ok(self.stop.is_none())
+    }
+
+    /// Number of solves observed (rounds other than the probe).
+    fn n_solves(&self) -> usize {
+        self.rounds.iter().filter(|r| !r.probe).count()
     }
 
     /// The solve or the flattening with the lowered weights failed: the last reweighting is
@@ -600,6 +685,7 @@ impl Feedback {
             weights: self.weights,
             stop: self.stop.unwrap_or(FeedbackStop::NotContinued),
             seconds: self.start.elapsed().as_secs_f64(),
+            probe_note: None,
         }
     }
 
@@ -623,7 +709,12 @@ impl Feedback {
     /// The first component in which zeroing the weights of `candidates` leaves no positive
     /// weight.
     fn component_left_without_weight(&self, candidates: &[u32]) -> Option<u32> {
-        let nc = self.components.iter().map(|&c| c as usize + 1).max().unwrap_or(0);
+        let nc = self
+            .components
+            .iter()
+            .map(|&c| c as usize + 1)
+            .max()
+            .unwrap_or(0);
         let mut positive = vec![0usize; nc];
         for (v, &w) in self.weights.iter().enumerate() {
             if w > 0.0 {
@@ -666,37 +757,100 @@ impl<E: fmt::Display> fmt::Display for FeedbackError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FeedbackError::Cones(e) => write!(f, "{e}"),
-            FeedbackError::Realize(e) => write!(f, "the flattening of the first solution failed: {e}"),
+            FeedbackError::Realize(e) => {
+                write!(f, "the flattening of the first solution failed: {e}")
+            }
         }
     }
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for FeedbackError<E> {}
 
-/// Solves `problem` with the feedback loop: [`solve_with_boundary`], then `realize` (which
-/// flattens the solution's `cones` with its `log_scale` and returns the realized log area
-/// factor of every face, see [`scale_mismatch`], plus anything the caller wants back), then
-/// the rule, until it is stable or a limit ends it. The distortion weights of `problem` are
-/// those of the first solve.
+/// Whether every connected component of the mesh has a boundary vertex (then the surface
+/// without cones can be flattened, and the cone-free probe applies).
+pub fn every_component_has_boundary(mesh: &TriMesh) -> bool {
+    let components = mesh.vertex_components();
+    let mut has = vec![false; mesh.n_components()];
+    for (v, &c) in components.iter().enumerate() {
+        if mesh.is_boundary_vertex(v) {
+            has[c as usize] = true;
+        }
+    }
+    has.iter().all(|&h| h)
+}
+
+/// Solves `problem` with the feedback loop. `realize(cones, log_scale)` flattens the surface
+/// with these cones and scale factors and returns the realized log area factor of every face
+/// (see [`scale_mismatch`]) plus anything the caller wants back.
+///
+/// With [`FeedbackOptions::cone_free_probe`] (and a mesh whose every component has a boundary)
+/// the loop first flattens the surface without cones (the prescribed ones only, `u` from
+/// [`evaluate_cones`](crate::evaluate_cones), zero on the boundary) and applies the rule to it
+/// ([`Feedback::observe_probe`]). Then: [`solve_with_boundary`], `realize` with the solution's
+/// `cones` and `log_scale`, the rule, until it is stable or a limit ends it. The distortion
+/// weights of `problem` are those the loop starts from.
 ///
 /// # Errors
 /// [`FeedbackError::Cones`] for invalid options or problems and errors of the first solve,
-/// [`FeedbackError::Realize`] if `realize` fails on the first solution.
+/// [`FeedbackError::Realize`] if `realize` fails on the first solution. A failure of the probe
+/// is not an error: the loop goes on without it ([`FeedbackReport::probe_note`]).
 pub fn solve_with_feedback<R, E: fmt::Display>(
     problem: &ConeProblem<'_>,
     boundary: BoundaryTreatment,
     options: &SolveOptions<'_>,
     feedback: &FeedbackOptions,
-    mut realize: impl FnMut(&Solution) -> Result<(Vec<f64>, R), E>,
+    mut realize: impl FnMut(&[Cone], &[f64]) -> Result<(Vec<f64>, R), E>,
 ) -> Result<FeedbackSolution<R>, FeedbackError<E>> {
-    let mut state = Feedback::new(problem.mesh, problem.distortion_weights.as_deref(), feedback)
-        .map_err(FeedbackError::Cones)?;
+    let mut state = Feedback::new(
+        problem.mesh,
+        problem.distortion_weights.as_deref(),
+        feedback,
+    )
+    .map_err(FeedbackError::Cones)?;
+    let mut probe_note = None;
+    if feedback.cone_free_probe {
+        if every_component_has_boundary(problem.mesh) {
+            let start = Instant::now();
+            match evaluate_cones(problem, &problem.prescribed_cones, Parallelism::Sequential) {
+                Err(e) => probe_note = Some(format!("the cone-free state failed: {e}")),
+                Ok(free) => {
+                    let seconds_evaluate = start.elapsed().as_secs_f64();
+                    let start = Instant::now();
+                    match realize(&problem.prescribed_cones, &free.log_scale) {
+                        Err(e) => {
+                            probe_note = Some(format!("the cone-free flattening failed: {e}"));
+                        }
+                        Ok((faces, _)) => {
+                            let seconds_realize = start.elapsed().as_secs_f64();
+                            state
+                                .observe_probe(
+                                    problem.mesh,
+                                    problem.geometry,
+                                    &free.log_scale,
+                                    &faces,
+                                    seconds_evaluate,
+                                    seconds_realize,
+                                )
+                                .map_err(FeedbackError::Cones)?;
+                        }
+                    }
+                }
+            }
+        } else {
+            probe_note = Some("a component has no boundary".to_owned());
+        }
+    }
+    let weighted = |state: &Feedback| ConeProblem {
+        distortion_weights: Some(state.weights().to_vec()),
+        ..problem.clone()
+    };
     let start = Instant::now();
     let mut solution =
-        solve_with_boundary(problem, boundary, options).map_err(FeedbackError::Cones)?;
+        solve_with_boundary(&weighted(&state), boundary, options).map_err(FeedbackError::Cones)?;
     let mut seconds_solve = start.elapsed().as_secs_f64();
     let start = Instant::now();
-    let (mut faces, mut realized) = realize(&solution).map_err(FeedbackError::Realize)?;
+    let (mut faces, mut realized) =
+        realize(&solution.cones, &solution.log_scale).map_err(FeedbackError::Realize)?;
     let mut seconds_realize = start.elapsed().as_secs_f64();
     loop {
         let again = state
@@ -712,12 +866,8 @@ pub fn solve_with_feedback<R, E: fmt::Display>(
         if !again {
             break;
         }
-        let weighted = ConeProblem {
-            distortion_weights: Some(state.weights().to_vec()),
-            ..problem.clone()
-        };
         let start = Instant::now();
-        let next = match solve_with_boundary(&weighted, boundary, options) {
+        let next = match solve_with_boundary(&weighted(&state), boundary, options) {
             Ok(next) => next,
             Err(e) => {
                 state.round_failed(format!("the solve failed: {e}"));
@@ -726,7 +876,7 @@ pub fn solve_with_feedback<R, E: fmt::Display>(
         };
         seconds_solve = start.elapsed().as_secs_f64();
         let start = Instant::now();
-        match realize(&next) {
+        match realize(&next.cones, &next.log_scale) {
             Ok((f, r)) => {
                 faces = f;
                 realized = r;
@@ -739,10 +889,12 @@ pub fn solve_with_feedback<R, E: fmt::Display>(
         }
         seconds_realize = start.elapsed().as_secs_f64();
     }
+    let mut report = state.finish();
+    report.probe_note = probe_note;
     Ok(FeedbackSolution {
         solution,
         realized,
-        feedback: state.finish(),
+        feedback: report,
     })
 }
 
@@ -769,11 +921,17 @@ mod tests {
     #[test]
     fn weighted_quantile_is_the_lower_weighted_median() {
         assert_eq!(weighted_quantile(&[], &[], 0.5), 0.0);
-        assert_eq!(weighted_quantile(&[3.0, 1.0, 2.0], &[1.0, 1.0, 1.0], 0.5), 2.0);
+        assert_eq!(
+            weighted_quantile(&[3.0, 1.0, 2.0], &[1.0, 1.0, 1.0], 0.5),
+            2.0
+        );
         // Half the weight exactly at the first value: the lower median.
         assert_eq!(weighted_quantile(&[1.0, 2.0], &[1.0, 1.0], 0.5), 1.0);
         // A heavy value wins.
-        assert_eq!(weighted_quantile(&[5.0, 1.0, 2.0], &[10.0, 1.0, 1.0], 0.5), 5.0);
+        assert_eq!(
+            weighted_quantile(&[5.0, 1.0, 2.0], &[10.0, 1.0, 1.0], 0.5),
+            5.0
+        );
         // An outlier of tiny weight does not move it.
         assert_eq!(
             weighted_quantile(&[0.0, 0.1, -0.1, -1e4], &[1.0, 1.0, 1.0, 1e-6], 0.5),
@@ -857,16 +1015,43 @@ mod tests {
         let (mesh, _, _) = grid(4);
         let d = FeedbackOptions::default();
         for bad in [
-            FeedbackOptions { threshold: 0.0, ..d },
-            FeedbackOptions { threshold: -1.0, ..d },
-            FeedbackOptions { threshold: f64::NAN, ..d },
-            FeedbackOptions { threshold: f64::INFINITY, ..d },
-            FeedbackOptions { reduced_weight: 1.0, ..d },
-            FeedbackOptions { reduced_weight: -0.1, ..d },
-            FeedbackOptions { reduced_weight: f64::NAN, ..d },
+            FeedbackOptions {
+                threshold: 0.0,
+                ..d
+            },
+            FeedbackOptions {
+                threshold: -1.0,
+                ..d
+            },
+            FeedbackOptions {
+                threshold: f64::NAN,
+                ..d
+            },
+            FeedbackOptions {
+                threshold: f64::INFINITY,
+                ..d
+            },
+            FeedbackOptions {
+                reduced_weight: 1.0,
+                ..d
+            },
+            FeedbackOptions {
+                reduced_weight: -0.1,
+                ..d
+            },
+            FeedbackOptions {
+                reduced_weight: f64::NAN,
+                ..d
+            },
             FeedbackOptions { max_rounds: 0, ..d },
-            FeedbackOptions { max_reweighted_fraction: 1.5, ..d },
-            FeedbackOptions { max_reweighted_fraction: f64::NAN, ..d },
+            FeedbackOptions {
+                max_reweighted_fraction: 1.5,
+                ..d
+            },
+            FeedbackOptions {
+                max_reweighted_fraction: f64::NAN,
+                ..d
+            },
         ] {
             let error = bad.validate().unwrap_err();
             assert!(matches!(error, ConeError::InvalidOptions { .. }), "{bad:?}");
@@ -897,11 +1082,17 @@ mod tests {
         u[tip] = -1.0e4;
         let realized = vec![0.0; mesh.n_faces()];
         let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
-        assert!(fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         assert_eq!(fb.weights()[tip], 0.0);
         assert_eq!(fb.weights().iter().filter(|&&w| w == 0.0).count(), 1);
         // The same mismatch again: the tip is not picked a second time, nothing else is.
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         let report = fb.finish();
         assert_eq!(report.reweighted, vec![tip as u32]);
         assert_eq!(report.stop, FeedbackStop::Stable);
@@ -923,7 +1114,10 @@ mod tests {
         let realized = vec![0.0; mesh.n_faces()];
         // Five far vertices, four allowed.
         let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         let report = fb.finish();
         assert_eq!(
             report.stop,
@@ -941,17 +1135,26 @@ mod tests {
         };
         let mut fb = Feedback::new(&mesh, None, &one).unwrap();
         u[tips[4]] = 0.0;
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         let report = fb.finish();
         assert_eq!(report.stop, FeedbackStop::RoundLimit);
         assert_eq!(report.pending.len(), 4);
         assert!(report.weights.iter().all(|&w| w == 1.0));
         // A failed round is undone.
         let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
-        assert!(fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         fb.round_failed("no flattening");
         let report = fb.finish();
-        assert!(matches!(report.stop, FeedbackStop::RoundFailed { round: 1, .. }));
+        assert!(matches!(
+            report.stop,
+            FeedbackStop::RoundFailed { round: 1, .. }
+        ));
         assert!(report.reweighted.is_empty());
         assert_eq!(report.pending.len(), 4);
         assert!(report.weights.iter().all(|&w| w == 1.0));
@@ -973,10 +1176,16 @@ mod tests {
         };
         let mut fb = Feedback::new(&mesh, Some(initial.as_slice()), &options).unwrap();
         let realized = vec![0.0; mesh.n_faces()];
-        assert!(fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         assert_eq!(fb.weights()[a], 0.5);
         assert_eq!(fb.weights()[b], 0.0);
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         assert_eq!(fb.finish().reweighted, vec![a as u32]);
     }
 
@@ -990,7 +1199,10 @@ mod tests {
         u[corner] = 100.0;
         let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
         let realized = vec![0.0; mesh.n_faces()];
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
         let report = fb.finish();
         assert_eq!(report.stop, FeedbackStop::Stable);
         assert!(report.rounds[0].max_abs_mismatch > 50.0);
@@ -1013,8 +1225,77 @@ mod tests {
         let mut u = vec![0.0; 12];
         u[0] = 100.0;
         let realized = vec![0.0; mesh.n_faces()];
-        assert!(!fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0).unwrap());
-        assert_eq!(fb.finish().stop, FeedbackStop::NoWeightLeft { component: 0 });
+        assert!(
+            !fb.observe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
+        assert_eq!(
+            fb.finish().stop,
+            FeedbackStop::NoWeightLeft { component: 0 }
+        );
+    }
+
+    /// The probe applies its picks but never ends the loop, does not count as a solve, and must
+    /// come first; picks beyond the limit are not applied.
+    #[test]
+    fn the_cone_free_probe() {
+        let (mesh, geometry, _) = grid(20);
+        let nv = mesh.n_vertices();
+        let tip = 10 * 21 + 10;
+        let realized = vec![0.0; mesh.n_faces()];
+        let mut u = vec![0.0; nv];
+        u[tip] = -1.0e3;
+        let one = FeedbackOptions {
+            max_rounds: 1,
+            ..FeedbackOptions::default()
+        };
+        let mut fb = Feedback::new(&mesh, None, &one).unwrap();
+        assert!(
+            fb.observe_probe(&mesh, &geometry, &u, &realized, 0.0, 0.0)
+                .unwrap()
+        );
+        assert!(!fb.is_finished());
+        assert_eq!(fb.weights()[tip], 0.0);
+        // The first solve agrees: stable, with the one solve that max_rounds = 1 allows.
+        let flat = vec![0.0; nv];
+        assert!(
+            !fb.observe(&mesh, &geometry, &flat, &realized, 0.0, 0.0)
+                .unwrap()
+        );
+        let report = fb.finish();
+        assert_eq!(report.stop, FeedbackStop::Stable);
+        assert_eq!(report.reweighted, vec![tip as u32]);
+        assert!(report.rounds[0].probe && !report.rounds[1].probe);
+        // Nothing found: nothing applied, the loop goes on.
+        let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
+        assert!(
+            !fb.observe_probe(&mesh, &geometry, &flat, &realized, 0.0, 0.0)
+                .unwrap()
+        );
+        assert!(!fb.is_finished());
+        // Too many: nothing applied, the loop goes on.
+        let mut many = vec![0.0; nv];
+        for k in 0..5 {
+            many[(4 + 3 * k) * 21 + 10] = 100.0;
+        }
+        let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
+        assert!(
+            !fb.observe_probe(&mesh, &geometry, &many, &realized, 0.0, 0.0)
+                .unwrap()
+        );
+        assert!(!fb.is_finished() && fb.weights().iter().all(|&w| w == 1.0));
+        // Not after a round.
+        assert!(
+            fb.observe(&mesh, &geometry, &flat, &realized, 0.0, 0.0)
+                .is_ok()
+        );
+        let mut fb = Feedback::new(&mesh, None, &FeedbackOptions::default()).unwrap();
+        fb.observe(&mesh, &geometry, &many, &realized, 0.0, 0.0)
+            .unwrap();
+        assert!(matches!(
+            fb.observe_probe(&mesh, &geometry, &u, &realized, 0.0, 0.0),
+            Err(ConeError::InvalidArgument { .. })
+        ));
     }
 
     #[test]
