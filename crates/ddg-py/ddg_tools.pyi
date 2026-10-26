@@ -862,3 +862,227 @@ def adaptive_solve(
     edge length), or a harmonic map of a disk-shaped mesh onto the unit disk (``"disk"``).
     Returns the solution at the mesh's vertices. Raises ``InputError``, ``MeshError`` (also a
     mesh that is not a disk for ``"disk"``) and ``SolveError``."""
+
+
+# ---------------------------------------------------------------------------------------------
+# Repulsive Curves (Yu, Schumacher, Crane 2021)
+# ---------------------------------------------------------------------------------------------
+
+Reals = Buffer | Sequence[float] | Sequence[Sequence[float]]
+Indices = Buffer | Sequence[int] | Sequence[Sequence[int]]
+
+RepulsiveSurface = dict[str, object]
+"""An implicit surface by name: ``{"type": "sphere", "center": (0, 0, 0), "radius": 1.0}``;
+``"torus"`` (``center``, ``major``, ``minor``), ``"plane"`` (``point``, ``normal``),
+``"double_torus"`` (``radius2``), ``"rounded_box"`` (``center``, ``half``, ``radius``),
+``"metaballs"`` (``balls``: ``[(center, amplitude, width)]``, ``threshold``), ``"union"``
+(``parts``: list of surface dicts), ``"smooth_union"`` (``a``, ``b``, ``k``). The optional key
+``"vertices"`` restricts the constraint to those vertices (default: all)."""
+
+RepulsiveField = dict[str, object]
+"""A vector field by name: ``{"type": "constant", "vector": (x, y, z), "normalize": False}``,
+``{"type": "circular"}`` (around the y axis) or ``{"type": "sphere_tangent"}``."""
+
+class RepulsiveInputError(InputError, ValueError):
+    """An argument or an option of the repulsive-curves functions is invalid (the message is
+    the library's). Both an ``InputError`` and a ``ValueError``."""
+
+REPULSIVE_BACKENDS: Final[list[str]]
+
+def repulsive_defaults() -> dict[str, object]:
+    """The defaults of all options, read from the Rust library; the stubs below equal them."""
+
+@final
+class RepulsiveSession:
+    """The repulsive flow of a curve network, one step at a time (the engine of a live Blender
+    operator). ``step`` and ``run`` release the GIL; ``snapshot``, ``positions``, ``status``,
+    ... never wait for a running step; ``cancel`` is safe from any thread.
+
+    Options: ``alpha``, ``beta`` (energy exponents); ``length`` (``"edges"`` keeps every edge
+    length, ``"total"`` the total length, ``"free"`` neither) with ``grow_factor`` and
+    ``grow_rate`` (move the kept length to a factor of itself, ``rate`` of the start length per
+    step); ``max_subdivisions``; ``pinned`` (vertices that do not move), ``tangent_vertices`` /
+    ``tangent_edges`` (tangents that are kept), ``surface`` (vertices stay on an implicit
+    surface), ``barycenter`` (default: fixed unless something is pinned), ``planar_axis``;
+    ``obstacles`` (``(vertices, triangles)`` pairs, never crossed by the collision-guarded line
+    search) with ``obstacle_weight`` > 0 to add their repulsive potential; ``total_length_weight``,
+    ``length_difference_weight``, ``field`` with ``field_weight`` (penalties); ``line_search``
+    and its constants; ``backend``; ``threads``; the projection and the stop rule
+    (``"gradient"`` with ``stop_threshold`` 1e-4, ``"relative"`` 1e-3, or ``"stall"``).
+    Raises ``RepulsiveInputError`` (a ``ValueError``) for anything wrong in the input.
+    """
+
+    def __init__(
+        self,
+        positions: Reals,
+        edges: Indices,
+        *,
+        alpha: float = 3.0,
+        beta: float = 6.0,
+        metric: Literal["sobolev", "l2", "h1", "h2"] = "sobolev",
+        quadrature: Literal["midpoint", "trapezoid"] = "midpoint",
+        length: Literal["edges", "total", "free"] = "edges",
+        grow_factor: float = 1.0,
+        grow_rate: float = 0.01,
+        max_subdivisions: int = 0,
+        barycenter: bool | None = None,
+        pinned: Indices | None = None,
+        tangent_vertices: Indices | None = None,
+        tangent_edges: Indices | None = None,
+        surface: RepulsiveSurface | None = None,
+        planar_axis: Literal["x", "y", "z"] | None = None,
+        obstacles: Sequence[tuple[Reals, Indices]] | None = None,
+        obstacle_weight: float = 0.0,
+        obstacle_exponent: float | None = None,
+        obstacle_theta: float | None = None,
+        total_length_weight: float = 0.0,
+        length_difference_weight: float = 0.0,
+        field: RepulsiveField | None = None,
+        field_weight: float = 1.0,
+        line_search: Literal["collision", "armijo"] = "collision",
+        line_search_start: Literal["two_thirds", "grow_previous"] = "two_thirds",
+        armijo: float = 1e-4,
+        shrink: float = 0.5,
+        max_halvings: int = 40,
+        gap: float = 0.1,
+        backend: Literal["auto", "dense", "barnes_hut", "multigrid", "accelerated"] = "auto",
+        bh_theta_x: float = 0.125,
+        bh_theta_t: float = 0.25,
+        bh_leaf_size: int = 8,
+        threads: int | None = None,
+        projection_tolerance: float = 1e-4,
+        projection_absolute: bool = False,
+        projection_iterations: int = 3,
+        stop: Literal["gradient", "relative", "stall"] = "gradient",
+        stop_threshold: float | None = None,
+        stall_window: int = 10,
+        gradient_norm: Literal["euclidean", "mass"] = "euclidean",
+        max_steps: int = 1000,
+        time_limit: float | None = None,
+    ) -> None: ...
+    def step(self) -> dict[str, object]:
+        """One step. Keys: ``iteration``, ``status`` (``"accepted"``, ``"stuck"``,
+        ``"converged"``, ``"retarget_stalled"``, ``"cancelled"``), ``session_status``,
+        ``n_vertices``, ``n_edges``, ``energy_before``, ``energy_after``, ``gradient_norm``,
+        ``tau``, ``halvings``, ``max_violation``, ``linear``, ``retarget``, ``subdivided``,
+        ``seconds`` ..."""
+    def run(
+        self,
+        max_steps: int | None = None,
+        progress: Callable[[dict[str, object]], bool | None] | None = None,
+        time_limit: float | None = None,
+    ) -> dict[str, object]:
+        """Step until final, ``max_steps``, ``cancel()``, ``time_limit`` seconds, or
+        ``progress(report)`` returns ``False``. Keys: ``end``, ``status``, ``steps_taken``,
+        ``iteration``, ``energy_before``, ``energy_after``, ``seconds``, ``steps``."""
+    def snapshot(self) -> tuple[array[float], array[int], int, float, str]:
+        """``(positions, edges, iteration, energy, status)`` of the last completed step."""
+    def cancel(self) -> None: ...
+    def reset(self) -> None: ...
+    def set_schedule(self, factor: float, rate: float = 0.01) -> None: ...
+    @property
+    def positions(self) -> array[float]:
+        """``array('d')``, 3 per vertex."""
+    @property
+    def edges(self) -> array[int]:
+        """``array('i')``, 2 per edge."""
+    @property
+    def energy(self) -> float: ...
+    @property
+    def iteration(self) -> int: ...
+    @property
+    def status(self) -> Literal[
+        "running", "converged", "max_steps", "time_limit", "stuck", "cancelled", "error"
+    ]: ...
+    @property
+    def error(self) -> str | None: ...
+    @property
+    def n_vertices(self) -> int: ...
+    @property
+    def n_edges(self) -> int: ...
+    @property
+    def subdivisions(self) -> int: ...
+    @property
+    def mean_edge_length0(self) -> float: ...
+    @property
+    def total_length(self) -> float: ...
+    @property
+    def vertex_source(self) -> array[int]:
+        """``array('i')``: the input vertex each vertex is, -1 if created by subdivision.
+        Old vertices keep their indices; the midpoint of edge ``I`` is vertex ``|V| + I`` and
+        edge ``I`` becomes edges ``I`` and ``|E| + I``."""
+    @property
+    def edge_source(self) -> array[int]:
+        """``array('i')``: the input edge each edge descends from."""
+    @property
+    def report(self) -> dict[str, object] | None:
+        """The dict of the last step."""
+
+def repulsive_flow(
+    positions: Reals,
+    edges: Indices,
+    steps: int | None = None,
+    progress: Callable[[dict[str, object]], bool | None] | None = None,
+    *,
+    alpha: float = 3.0,
+    beta: float = 6.0,
+    metric: Literal["sobolev", "l2", "h1", "h2"] = "sobolev",
+    quadrature: Literal["midpoint", "trapezoid"] = "midpoint",
+    length: Literal["edges", "total", "free"] = "edges",
+    grow_factor: float = 1.0,
+    grow_rate: float = 0.01,
+    max_subdivisions: int = 0,
+    barycenter: bool | None = None,
+    pinned: Indices | None = None,
+    tangent_vertices: Indices | None = None,
+    tangent_edges: Indices | None = None,
+    surface: RepulsiveSurface | None = None,
+    planar_axis: Literal["x", "y", "z"] | None = None,
+    obstacles: Sequence[tuple[Reals, Indices]] | None = None,
+    obstacle_weight: float = 0.0,
+    obstacle_exponent: float | None = None,
+    obstacle_theta: float | None = None,
+    total_length_weight: float = 0.0,
+    length_difference_weight: float = 0.0,
+    field: RepulsiveField | None = None,
+    field_weight: float = 1.0,
+    line_search: Literal["collision", "armijo"] = "collision",
+    line_search_start: Literal["two_thirds", "grow_previous"] = "two_thirds",
+    armijo: float = 1e-4,
+    shrink: float = 0.5,
+    max_halvings: int = 40,
+    gap: float = 0.1,
+    backend: Literal["auto", "dense", "barnes_hut", "multigrid", "accelerated"] = "auto",
+    bh_theta_x: float = 0.125,
+    bh_theta_t: float = 0.25,
+    bh_leaf_size: int = 8,
+    threads: int | None = None,
+    projection_tolerance: float = 1e-4,
+    projection_absolute: bool = False,
+    projection_iterations: int = 3,
+    stop: Literal["gradient", "relative", "stall"] = "gradient",
+    stop_threshold: float | None = None,
+    stall_window: int = 10,
+    gradient_norm: Literal["euclidean", "mass"] = "euclidean",
+    max_steps: int = 1000,
+    time_limit: float | None = None,
+) -> tuple[array[float], array[int], dict[str, object]]:
+    """The repulsive flow in one call: ``(positions, edges, report)``. ``steps`` overrides
+    ``max_steps``. Report keys: ``status``, ``iterations``, ``energy_initial``,
+    ``energy_final``, ``seconds``, ``n_subdivisions``, ``vertex_source``, ``edge_source``,
+    ``steps`` (the dicts of ``RepulsiveSession.step``). A session stepped the same number of
+    times gives bitwise the same curve."""
+
+def curve_energy(
+    positions: Reals,
+    edges: Indices,
+    alpha: float = 3.0,
+    beta: float = 6.0,
+    *,
+    backend: Literal["exact", "barnes_hut"] = "exact",
+    bh_theta_x: float = 0.125,
+    bh_theta_t: float = 0.25,
+    bh_leaf_size: int = 8,
+    threads: int | None = None,
+) -> tuple[float, array[float]]:
+    """The tangent-point energy and its differential (``array('d')``, 3 per vertex)."""

@@ -607,6 +607,78 @@ ENERGIES, DEFAULT_DEFECT_TOLERANCE                # module constants
 Glue: `src/python/developability.rs`; logic (pure Rust, tested by `cargo test`):
 `src/developability.rs`; tests of the wheel: `python-tests/test_developability.py`.
 
+## Repulsive curves: `RepulsiveSession`, `repulsive_flow`, `curve_energy`
+
+The flow of Yu, Schumacher, Crane, *Repulsive Curves*, ACM TOG 40(2), 2021, over the crate
+`ddg-repulsive-curves` (contract `crates/ddg-repulsive-curves/SPEC.md`, section 9.2): the
+tangent-point energy of a curve network (closed curves, open curves, junctions) is decreased by
+fractional Sobolev descent, with constraints (edge lengths, pins, tangents, surfaces),
+penalties, obstacles that are never crossed, and optional growth, shrinking and subdivision.
+`positions` is 3 reals per vertex, `edges` 2 vertex indices per edge; both take any buffer
+(`array.array`, numpy) and, for convenience, plain Python sequences (nested or flat). Results are
+`array.array` objects (`numpy.frombuffer` makes a view) and dicts.
+
+```python
+import ddg_tools
+s = ddg_tools.RepulsiveSession(positions, edges, length="edges", pinned=[0], max_subdivisions=1)
+report = s.step()                      # one step, GIL released; a dict
+s.run(max_steps=50, progress=lambda r: True)   # until final / 50 steps / progress -> False
+pos, edges, iteration, energy, status = s.snapshot()   # never waits for a running step
+s.cancel()                             # from any thread; reset() starts again
+positions, edges, report = ddg_tools.repulsive_flow(positions, edges, steps=100)
+energy, differential = ddg_tools.curve_energy(positions, edges, alpha=3, beta=6)
+```
+
+* **Live use (Blender).** A worker thread calls `step()` (or `run`), a timer reads `snapshot()`
+  or the properties `positions`, `edges`, `energy`, `iteration`, `status`; they come from the last
+  completed step and never wait. `cancel()` ends a running step between line-search trials; the
+  curve is that of the last completed step. After `cancel()` further `step()` calls compute nothing
+  and return `status == "cancelled"`; `reset()` returns to the input curve. A `RepulsiveSession`
+  stepped *n* times gives bitwise the same curve as `repulsive_flow(..., steps=n)`, whatever
+  `threads` is.
+* **Status.** `"running"`, `"converged"`, `"max_steps"`, `"time_limit"`, `"stuck"` (the line search
+  found no step), `"cancelled"`, `"error"` (then `error` holds the message). A final session does
+  not step in `run()`, but `step()` always tries.
+* **Subdivision** (`max_subdivisions=k`): when the mean edge length exceeds twice its start value,
+  every edge is split. The vertex count changes (`n_vertices`, report key `subdivided`). Old
+  vertices keep their indices, the midpoint of edge `I` is vertex `|V| + I`, and edge `I` becomes
+  edges `I` and `|E| + I`; `vertex_source` (input vertex or `-1`) and `edge_source` (input edge)
+  follow that through any number of subdivisions.
+* **Options** (keywords; `repulsive_defaults()` lists them all with the library's defaults, and
+  `ddg_tools.pyi` has them typed; an unknown name is an error): `alpha=3`, `beta=6`;
+  `length="edges"|"total"|"free"`, `grow_factor=1` and `grow_rate=0.01` (the kept length moves to
+  `factor` times itself, `rate` of the start length per step; `session.set_schedule(factor, rate)`
+  changes it on the fly); `pinned`, `tangent_vertices`, `tangent_edges` (index lists), `surface`
+  (a dict, `{"type": "sphere", "radius": 1.0}`, also torus, plane, double_torus, rounded_box,
+  metaballs, union, smooth_union; key `"vertices"` restricts it), `barycenter` (default: fixed
+  unless a vertex is pinned), `planar_axis="x"|"y"|"z"`; `obstacles=[(vertices, triangles)]`
+  (never crossed with the default line search; `obstacle_weight > 0` adds a repulsive potential);
+  penalties `total_length_weight`, `length_difference_weight`, `field` (`{"type": "constant",
+  "vector": (0, 0, 1)}`, `"circular"`, `"sphere_tangent"`) with `field_weight`;
+  `line_search="collision"|"armijo"` (`"armijo"` does not check collisions), `line_search_start`,
+  `armijo`, `shrink`, `max_halvings`, `gap`; `backend="auto"|"dense"|"barnes_hut"|"multigrid"|
+  "accelerated"` (Barnes-Hut energy and/or the multigrid solver; `"auto"` is the library's choice,
+  at present exact and dense); `threads`; `projection_tolerance` (a fraction of the start mean
+  edge length, or an absolute length with `projection_absolute=True`),
+  `projection_iterations`; `stop="gradient"|"relative"|"stall"` with `stop_threshold` (default
+  1e-4 / 1e-3; required for `"stall"`) and `stall_window`; `max_steps=1000`, `time_limit`
+  (seconds, for `run`).
+* **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"converged"`,
+  `"retarget_stalled"`, `"cancelled"`), `session_status`, `n_vertices`, `n_edges`,
+  `energy_before`, `energy_after`, `tangent_point_after`, `penalties_after`, `gradient_norm`,
+  `sobolev_norm_sq`, `tau`, `tau_max`, `halvings`, `trials`, `max_violation`,
+  `projection_iterations`, `linear` (solver, iterations, residual, levels), `retarget`,
+  `subdivided`, `energy_backend`, `solver_backend`, `seconds` (per phase).
+* **Errors.** Anything wrong in the input or the options (a bad edge, a pin out of range, an
+  infeasible constraint, an unknown option, a degenerate obstacle triangle) raises
+  `ddg_tools.RepulsiveInputError`, which is both a `ValueError` and a `ddg_tools.InputError`, with
+  the library's message; a failed solve raises `SolveError`. Nothing panics.
+
+Glue: `src/python/repulsive.rs`; logic (pure Rust, tested by `cargo test`, including that the
+defaults equal the library's): `src/repulsive.rs`; tests of the wheel:
+`python-tests/test_repulsive.py` (which also checks the `.pyi` defaults against
+`repulsive_defaults()`).
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the

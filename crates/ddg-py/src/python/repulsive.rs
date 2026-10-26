@@ -76,6 +76,15 @@ fn bad(name: &str, message: impl std::fmt::Display) -> PyErr {
     input_err(format!("{name}: {message}"))
 }
 
+/// A buffer-decoding `InputError` becomes a `RepulsiveInputError` (also a `ValueError`).
+fn as_input(e: PyErr, py: Python<'_>) -> PyErr {
+    if e.is_instance_of::<InputError>(py) {
+        input_err(e.value(py).to_string())
+    } else {
+        e
+    }
+}
+
 fn is_type_error(e: &PyErr, py: Python<'_>) -> bool {
     e.is_instance_of::<PyTypeError>(py)
 }
@@ -114,7 +123,7 @@ fn reals_any(
             }
             Ok(flat)
         }
-        Err(e) => Err(e),
+        Err(e) => Err(as_input(e, obj.py())),
     }
 }
 
@@ -155,7 +164,7 @@ fn indices_any(
                 })
                 .collect()
         }
-        Err(e) => Err(e),
+        Err(e) => Err(as_input(e, obj.py())),
     }
 }
 
