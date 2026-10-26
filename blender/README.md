@@ -681,6 +681,103 @@ Transactions on Graphics 37(4), 2018, implemented from the text of the paper. No
 authors is used or was read. The flow runs by default on an intrinsic triangulation:
 Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4), 2019.
 
+## Repulsive Curves: live flow and N steps
+
+Two operators after Yu, Schumacher, Crane, *Repulsive Curves* (ACM TOG 40(2), 2021; crates
+`ddg-repulsive-curves`, `ddg-py`; contract `crates/ddg-repulsive-curves/SPEC.md` section 9.3).
+The flow decreases the tangent-point energy of a curve network: the curve spreads out and
+untangles without passing through itself (or through an obstacle). Sidebar: **View3D > N panel >
+DDG > Repulsive Curves** (all options, the Live and Steps buttons); menu: **Object**. Code:
+`repulsive_operator.py` (options, operators, `LiveFlow`), `repulsive_io.py` (reading objects and
+writing results). No numpy is needed.
+
+**Input.**
+
+- *Mesh objects, edges only* (graphs with junctions are fine). A mesh with faces is rejected with
+  the face count; "Loose Edges Only" uses only the edges that belong to no face (a warning says
+  how many) and leaves the rest alone. Vertices without an edge are an error, unless "Ignore
+  Loose Vertices" is on. Empty meshes, coincident vertices (the message names two vertex
+  indices), non-finite coordinates, shape keys: a message, nothing is changed.
+- *Curve objects* (poly, Bezier, NURBS). Each spline is one component; a cyclic spline is a
+  closed loop. The polyline is the control points (NURBS: the control polygon); "Bezier Samples"
+  above 1 samples the Bezier curve instead.
+
+**Space.** The flow runs in **world space** by default (the object's scale counts, as it would
+physically; obstacles are used as they stand), or in **local space** (obstacles are transformed
+into the object's space). Positions are written back in local coordinates. "Planar" holds the
+coordinate of an axis of that space.
+
+**Write-back.** Meshes: positions only (topology unchanged), through the position attribute so
+that undo is not corrupted. Curves: **poly splines**, the same point count (exact: the polyline
+is the flow's result). **Keep Bezier** re-fits instead: Bezier splines stay Bezier splines
+through the new points (Catmull-Rom tangents, aligned handles: approximate), NURBS splines stay
+NURBS with moved control points. Materials, resolution, cyclic flags, tilt and radius are kept
+when the point count is.
+
+**Pins.** Mesh: vertices of the *Pin Group* (weights above 0). Curve: the selected control
+points. "Keep Tangents at Pins" and the mesh *Tangent Group* also keep the tangent there. (Tangent
+pins on a pinned vertex's neighbour make the constraints dependent: the library says so.)
+
+**Obstacles.** Pick a mesh object and/or a collection (names, picked from lists; evaluated with
+modifiers, world transforms applied). The line search never lets the curve cross them;
+"Obstacle Repulsion" above 0 adds a repulsive potential. A degenerate obstacle (zero-area
+triangles, no faces, not a mesh, not finite) is an error that names the object and the first bad
+triangle. A curve that already passes through an obstacle is not detected: it starts there and
+cannot cross further.
+
+**Live subdivision** (off by default: pins, vertex groups and point counts then never change).
+On: every edge is split when the mean edge length has doubled, at most "Subdivisions" times.
+Old vertices keep their indices; meshes get their vertex groups reapplied through `vertex_source`
+(a new vertex joins a group, with the mean weight, when both neighbours it was inserted between
+are in it); curves are rebuilt with the new points in order. Needs the whole mesh to be the curve
+(no faces, no ignored vertices).
+
+| operator | Python name | what it does |
+|----------|-------------|--------------|
+| Repulsive Flow (Live) | `object.ddg_repulsive_live` | modal: a worker thread steps the session, a 1/30 s timer writes the last completed step to the object. The header and status bar show step, energy, gradient norm and status. **Enter**, **right click** or the panel's **Accept** button keep the result (one undo step); **Esc** or **Cancel** restore the original object exactly. On convergence or "stuck" it stops stepping and waits. Options: those of the sidebar panel (`scene.ddg_repulsive`) |
+| Repulsive Flow (Steps) | `object.ddg_repulsive_flow` | N steps (`steps = 0`: until convergence, at most Step Limit) in one go, one undo step, Adjust Last Operation reruns from the original. Starts from the panel's options. The status line gives steps, energy before and after, status, native and Blender seconds |
+
+Options (both; Python names):
+
+| option | Python name | default | meaning |
+|--------|-------------|---------|---------|
+| Alpha, Beta | `alpha`, `beta` | 3, 6 | exponents of the kernel (beta at least alpha + 2) |
+| Length | `length` | Keep Edge Lengths | `EDGES`, `TOTAL` (keep total length), `FREE` |
+| Grow/Shrink Factor, Rate | `grow_factor`, `grow_rate` | 1, 0.01 | the kept length moves to this factor times itself, this fraction of the start length per step |
+| Space | `space` | World | `WORLD`, `LOCAL` |
+| Pin Group, Tangent Group | `pin_group`, `tangent_group` | none | mesh vertex groups |
+| Keep Tangents at Pins | `pin_tangents` | off | pinned vertices also keep their tangent |
+| Ignore Loose Vertices, Loose Edges Only | `ignore_loose`, `loose_edges_only` | off | mesh input policies |
+| Bezier Samples, Keep Bezier | `bezier_samples`, `keep_bezier` | 1, off | curve input and write-back |
+| Obstacle, Obstacles, Repulsion | `obstacle_object`, `obstacle_collection`, `obstacle_weight` | none, none, 0 | the obstacles |
+| Planar, Axis | `planar`, `planar_axis` | off, Z | hold one coordinate |
+| Live Subdivision, Subdivisions | `subdivide`, `max_subdivisions` | off, 2 | see above |
+| Stop Tolerance | `stop_tolerance` | 1e-4 | converged when the gradient norm is below this |
+| Step Limit | `max_steps` | 1000 | |
+| Steps | `steps` | 50 | N-steps operator only; 0 = until convergence |
+| Line Search | `line_search` | Collision Guarded | `collision` or `armijo` (no collision check) |
+| Back End | `backend` | Auto | `auto`, `dense`, `barnes_hut`, `multigrid`, `accelerated` |
+| Threads | `threads` | 0 | 0: the library's choice |
+
+### Repulsive tests
+
+- `blender/tests/test_repulsive.py` (headless, 40 tests): a trefoil flows (energy down, edge
+  lengths kept), Bezier round trip (poly keeps the count, Keep Bezier gives Bezier, NURBS, several
+  splines, sampling), pins (vertex group, selected control points, tangents), an obstacle plane
+  is never crossed (also tilted, in a collection, with transformed objects), space and planar,
+  the live flow driven through `LiveFlow` with a real worker thread (accept; Esc restores the
+  exact original floats, also for transformed objects, curves and after subdivision), live
+  subdivision with vertex groups, and bad input (faces, empty mesh, coincident vertices, loose
+  vertices, shape keys, degenerate obstacle, wrong object type): a message each, the object
+  untouched.
+- `blender/tests/ui_repulsive.py` (windowed Blender on Xvfb with `--enable-event-simulate`): the
+  modal operator with the real timer and events: start, object changes while it runs, panel
+  draws, Cancel and Esc restore, Accept, Enter and right click keep, undo and redo of the
+  accepted result, the N-steps operator with undo and Adjust Last Operation.
+- **Not testable headless**: the modal event loop, timers, the header text, the panel buttons
+  (`-b` has no timers or windows). The windowed test covers the loop, keys and undo; the header
+  and status-bar *text* is set but cannot be read back, so it is not checked.
+
 ## Layout
 
 | path | contents |
@@ -690,6 +787,7 @@ Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, ACM TOG 38(4), 201
 | `ddg_uv_unwrap/operator.py` | the operator: properties, panel, mode handling, reports |
 | `ddg_uv_unwrap/cut_operators.py`, `cut.py` | the three cut operators; attributes, preview, flow settings, bmesh insertion |
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
+| `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
 
@@ -715,6 +813,10 @@ The add-on is a front end for these papers:
 - Oded Stein, Eitan Grinspun, Keenan Crane. *Developability of Triangle Meshes.*
   ACM Transactions on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201303>
   (the developability operators; implemented clean-room from the text of the paper)
+
+- Chris Yu, Henrik Schumacher, Keenan Crane. *Repulsive Curves.*
+  ACM Transactions on Graphics 40(2), 2021.
+  (the repulsive-curves operators)
 
 The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed reference
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's

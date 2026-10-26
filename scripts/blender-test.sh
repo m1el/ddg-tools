@@ -15,9 +15,13 @@
 #    runs_tmp/blender-test-cut-<name>.log; -k applies to both files).
 # 3c. blender/tests/test_developable.py runs the same way (Make Developable, Show Developability,
 #    Developable Seams + UV; log runs_tmp/blender-test-developable.log), in parallel with 3b.
+# 3d. blender/tests/test_repulsive.py runs the same way (Repulsive Curves: live flow, N steps, curves,
+#    pins, obstacles, bad input; log runs_tmp/blender-test-repulsive.log), in parallel with 3b.
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
+# 4b. blender/tests/ui_repulsive.py (same display, Blender with --enable-event-simulate): the live
+#    modal operator with the real timer and key events.
 # 5. With --bench, blender/tests/bench_overhead.py measures the cost of the Blender side on
 #    meshes of about 300k triangles.
 #
@@ -95,6 +99,11 @@ dev_log="$root/runs_tmp/blender-test-developable.log"
     --python "$root/blender/tests/test_developable.py" -- --module "$module" \
     "${only[@]}" > "$dev_log" 2>&1 &
 dev_pid=$!
+rep_log="$root/runs_tmp/blender-test-repulsive.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_repulsive.py" -- --module "$module" \
+    "${only[@]}" > "$rep_log" 2>&1 &
+rep_pid=$!
 cut_failed=0
 for i in "${!variants[@]}"; do
     tri="${variants[$i]}"
@@ -116,6 +125,14 @@ if [ "$dev_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$dev_log"; then
     echo "Blender developable tests FAILED (exit status $dev_status); see $dev_log" >&2
     cut_failed=1
 fi
+rep_status=0
+wait "$rep_pid" || rep_status=$?
+echo "repulsive tests: $(grep -E '^RESULT' "$rep_log")"
+grep -E '^(FAIL|  failed|INFO)' "$rep_log" || true
+if [ "$rep_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$rep_log"; then
+    echo "Blender repulsive tests FAILED (exit status $rep_status); see $rep_log" >&2
+    cut_failed=1
+fi
 [ "$cut_failed" = 0 ] || exit 1
 
 if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then
@@ -130,6 +147,17 @@ if [ "$ui" = 1 ] && [ "${#only[@]}" -eq 0 ]; then
             exit 1
         fi
         echo "UI smoke test: $(grep -c '^UI: ok' "$log") checks passed"
+        log="$root/runs_tmp/blender-test-ui-repulsive.log"
+        status=0
+        timeout 300 xvfb-run -a -s "-screen 0 1280x800x24" "$BLENDER" --factory-startup \
+            --enable-event-simulate --python "$root/blender/tests/ui_repulsive.py" \
+            -- --module "$module" > "$log" 2>&1 || status=$?
+        grep -E '^(UI: FAILED|UI RESULT|UI REPULSIVE TEST PASSED|  failed)' "$log" || true
+        if [ "$status" != 0 ] || ! grep -q '^UI REPULSIVE TEST PASSED$' "$log" || grep -q 'Traceback' "$log"; then
+            echo "UI test of the live repulsive flow FAILED (exit status $status); see $log" >&2
+            exit 1
+        fi
+        echo "UI test of the live repulsive flow: $(grep -c '^UI: ok' "$log") checks passed"
     else
         echo "UI smoke test SKIPPED: xvfb-run is not installed"
     fi
