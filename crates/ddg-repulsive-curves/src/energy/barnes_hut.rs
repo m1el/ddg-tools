@@ -57,7 +57,7 @@ use crate::kernel::v3::{axpy, dot, norm, scale, sub};
 use crate::kernel::{Exponents, kernel, kernel_with_gradient};
 use crate::network::CurveNetwork;
 use crate::spatial::aabb::Aabb;
-use crate::spatial::bvh::{Bvh, Element};
+use crate::spatial::bvh::{Bvh, DEFAULT_MIN_SPLIT_FRACTION, Element};
 
 use super::BhOptions;
 
@@ -157,6 +157,7 @@ pub struct BhTree {
     bvh: Bvh<6>,
     data: Vec<NodeData>,
     snap: Snapshot,
+    lump_leaves: bool,
 }
 
 impl BhTree {
@@ -173,11 +174,25 @@ impl BhTree {
         positions: &[[f64; 3]],
         opts: BhOptions,
     ) -> Result<BhTree, RcError> {
+        Self::build_with(network, positions, opts, DEFAULT_MIN_SPLIT_FRACTION)
+    }
+
+    /// As [`BhTree::build`] with an explicit balance bound of the BVH splits
+    /// ([`Bvh::build_with`]; `0` is the paper's rule as printed).
+    ///
+    /// # Errors
+    /// As [`BhTree::build`]; [`RcError::InvalidOption`] for `min_split_fraction ∉ [0, ½]`.
+    pub fn build_with(
+        network: &CurveNetwork,
+        positions: &[[f64; 3]],
+        opts: BhOptions,
+        min_split_fraction: f64,
+    ) -> Result<BhTree, RcError> {
         opts.validate()?;
         let edges = network.edges().to_vec();
         let snap = snapshot(&edges, network.n_vertices(), positions)?;
         let elems = elements(&snap);
-        let bvh = Bvh::build(&elems, opts.leaf_size)?;
+        let bvh = Bvh::build_with(&elems, opts.leaf_size, min_split_fraction)?;
         let mut tree = BhTree {
             opts,
             edges,
@@ -185,6 +200,7 @@ impl BhTree {
             bvh,
             data: Vec::new(),
             snap,
+            lump_leaves: false,
         };
         tree.compute_node_data();
         Ok(tree)
@@ -200,6 +216,12 @@ impl BhTree {
         self.bvh.refit(&elems)?;
         self.compute_node_data();
         Ok(())
+    }
+
+    /// Experimental, off by default (the contract is "leaves are always exact", §8.2): also lump
+    /// leaves that are admissible. Their node data are those of any node.
+    pub fn set_lump_leaves(&mut self, on: bool) {
+        self.lump_leaves = on;
     }
 
     /// The underlying hierarchy.
@@ -297,6 +319,17 @@ impl BhTree {
         };
         while let Some(n) = stack.pop() {
             let node = &nodes[n];
+            let lump = !node.is_leaf() || self.lump_leaves;
+            if lump && self.admissible(&self.data[n], xi, pi) {
+                let nd = &self.data[n];
+                row.lumped += 1;
+                let k1 = kernel(xi, nd.xbar, ti, e);
+                row.energy += li * nd.mass * k1;
+                if with_gradient {
+                    lumped_gradient(&mut row, ti, li, xi, nd, e);
+                }
+                continue;
+            }
             if node.is_leaf() {
                 for &j in self.bvh.elements_of(n) {
                     let j = j as usize;
@@ -309,16 +342,6 @@ impl BhTree {
                     } else {
                         row.energy += pair_energy(s, i, j, e);
                     }
-                }
-                continue;
-            }
-            let nd = &self.data[n];
-            if self.admissible(nd, xi, pi) {
-                row.lumped += 1;
-                let k1 = kernel(xi, nd.xbar, ti, e);
-                row.energy += li * nd.mass * k1;
-                if with_gradient {
-                    lumped_gradient(&mut row, ti, li, xi, nd, e);
                 }
                 continue;
             }

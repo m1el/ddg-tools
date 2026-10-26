@@ -4,6 +4,8 @@
 //! The timing tests are `#[ignore]`d; run them alone, in release:
 //! `cargo test -p ddg-repulsive-curves --release --test barnes_hut -- --ignored --nocapture timing`.
 
+#![allow(clippy::needless_range_loop)]
+
 use ddg_repulsive_curves::energy::barnes_hut::BhTree;
 use ddg_repulsive_curves::energy::exact::{energy_and_differential, make_pool};
 use ddg_repulsive_curves::spatial::aabb::Aabb;
@@ -222,9 +224,10 @@ fn converges_to_exact_as_eps_goes_to_zero() {
                 c.lumped
             );
             errs.push((eps, c.e_rel, c.g_rel));
-            // Roughly monotone (a factor 3 of slack: the error is not monotone in eps on a
-            // fixed curve because the tree changes), but never worse than 3x the coarser one.
-            assert!(c.e_rel <= 3.0 * prev.0 + 1e-14 && c.g_rel <= 3.0 * prev.1 + 1e-14);
+            // The differential error is roughly monotone in eps (3x slack: the tree changes with
+            // eps). The signed energy error may cross zero by luck (eps = 2 below is better than
+            // eps = 1), so the energy is only checked at the ends.
+            assert!(c.g_rel <= 3.0 * prev.1 + 1e-14, "g err not decreasing");
             prev = (c.e_rel, c.g_rel);
         }
         let first = errs[0];
@@ -545,8 +548,12 @@ fn refit_equals_rebuild_for_unchanged_topology() {
 /// `T_I` (Eq. 26) and its derivative also moves the lumped centres `x̄_N` and masses with the
 /// vertices; the differential of §8.2 is the derivative of the lumped `(I, J) + (J, I)` pair with
 /// `L_N, x̄_N, T̂_N` held fixed. Both converge to the exact differential with eps; the test
-/// asserts the relative difference (in the 2-norm of the whole vector) is below `0.1 eps_T`'s
-/// order: 0.15 at eps = 0.5, 0.06 at 0.25 and 5e-3 at 0.05, and that it shrinks with eps.
+/// asserts the relative difference `|FD - g_BH|/|g_BH|` (2-norm of the whole vector) stays below
+/// the tolerances listed in the loop and shrinks with eps. Measured on a perturbed trefoil with
+/// 300 edges, leaf size 4, `eps = θ_T = 2 θ_x`: 0.19, 0.16, 0.041, 0.0035, 0.00087 for eps = 4, 2,
+/// 1, 0.5, 0.25 (the BH differential differs from the exact one by 0.29, 0.22, 0.064,
+/// 0.0024, 0.00033); the tolerances are about 1.5 times these (the first two 1.2 times). At eps -> 0 nothing is lumped and the
+/// finite differences match the differential to the accuracy of the central differences.
 #[test]
 fn finite_differences_of_bh_energy_are_close_to_bh_differential() {
     let (net, pos) = trefoil(300);
@@ -556,7 +563,13 @@ fn finite_differences_of_bh_energy_are_close_to_bh_differential() {
     let h = 1e-6 * net.mean_edge_length(&pos);
     let (_, g_exact) = energy_and_differential(&p, &net, &pos, ex);
     let mut last = f64::INFINITY;
-    for (eps, tol) in [(4.0, 0.0), (2.0, 0.0), (1.0, 0.0), (0.5, 0.0)] {
+    for (eps, tol) in [
+        (4.0, 0.29),
+        (2.0, 0.24),
+        (1.0, 0.062),
+        (0.5, 5.3e-3),
+        (0.25, 1.3e-3),
+    ] {
         let o = BhOptions {
             leaf_size: 4,
             ..opts_eps(eps)
@@ -650,7 +663,7 @@ fn random_points<const D: usize>(n: usize, seed: u64, clustered: bool) -> Vec<Pt
         .collect()
 }
 
-fn check_bvh<const D: usize>(bvh: &Bvh<D>, el: &[Pt<D>], leaf_size: usize) {
+fn check_bvh<const D: usize>(bvh: &Bvh<D>, el: &[Pt<D>], leaf_size: usize, min_fraction: f64) {
     let n = el.len();
     // order is a permutation
     let mut seen = vec![0u32; n];
@@ -674,6 +687,13 @@ fn check_bvh<const D: usize>(bvh: &Bvh<D>, el: &[Pt<D>], leaf_size: usize) {
         } else {
             let (l, r) = (&bvh.nodes()[i + 1], &bvh.nodes()[nd.right as usize]);
             assert!(nd.len() > leaf_size);
+            let lo = ((min_fraction * nd.len() as f64).ceil() as usize).clamp(1, nd.len() / 2);
+            assert!(
+                l.len() >= lo && r.len() >= lo,
+                "unbalanced split {} + {}",
+                l.len(),
+                r.len()
+            );
             assert_eq!(l.start, nd.start);
             assert_eq!(l.end, r.start);
             assert_eq!(r.end, nd.end);
@@ -719,26 +739,28 @@ fn property<const D: usize>() {
         (7, 1000, 8, false),
         (8, 513, 5, true),
     ] {
-        let el: Vec<Pt<D>> = random_points(n, seed * 100 + D as u64, clustered);
-        let bvh = Bvh::build(&el, leaf).unwrap();
-        check_bvh(&bvh, &el, leaf);
-        // Refit after moving every element: same topology, new valid boxes.
-        let moved: Vec<Pt<D>> = random_points(n, seed * 977 + D as u64, clustered);
-        let mut b2 = bvh.clone();
-        b2.refit(&moved).unwrap();
-        assert_eq!(b2.order(), bvh.order());
-        check_bvh(&b2, &moved, leaf);
-        // Refit on unchanged elements is the identity.
-        let mut b3 = bvh.clone();
-        b3.refit(&el).unwrap();
-        assert_eq!(b3, bvh);
-        // fold_up: element counts agree with the node ranges.
-        let counts = bvh.fold_up(|idx| idx.len(), |a, b| a + b);
-        for (c, nd) in counts.iter().zip(bvh.nodes()) {
-            assert_eq!(*c, nd.len());
+        for frac in [0.0, 0.1, 0.25, 0.5] {
+            let el: Vec<Pt<D>> = random_points(n, seed * 100 + D as u64, clustered);
+            let bvh = Bvh::build_with(&el, leaf, frac).unwrap();
+            check_bvh(&bvh, &el, leaf, frac);
+            // Refit after moving every element: same topology, new valid boxes.
+            let moved: Vec<Pt<D>> = random_points(n, seed * 977 + D as u64, clustered);
+            let mut b2 = bvh.clone();
+            b2.refit(&moved).unwrap();
+            assert_eq!(b2.order(), bvh.order());
+            check_bvh(&b2, &moved, leaf, frac);
+            // Refit on unchanged elements is the identity.
+            let mut b3 = bvh.clone();
+            b3.refit(&el).unwrap();
+            assert_eq!(b3, bvh);
+            // fold_up: element counts agree with the node ranges.
+            let counts = bvh.fold_up(|idx| idx.len(), |a, b| a + b);
+            for (c, nd) in counts.iter().zip(bvh.nodes()) {
+                assert_eq!(*c, nd.len());
+            }
+            // Determinism: building twice gives the same tree.
+            assert_eq!(Bvh::build_with(&el, leaf, frac).unwrap(), bvh);
         }
-        // Determinism: building twice gives the same tree.
-        assert_eq!(Bvh::build(&el, leaf).unwrap(), bvh);
     }
 }
 
@@ -764,8 +786,63 @@ fn bvh_with_identical_points_terminates() {
             m: 1.0,
         })
         .collect();
-    let bvh = Bvh::build(&el, 8).unwrap();
-    check_bvh(&bvh, &el, 8);
+    for frac in [0.0, 0.25] {
+        let bvh = Bvh::build_with(&el, 8, frac).unwrap();
+        check_bvh(&bvh, &el, 8, frac);
+    }
+}
+
+fn depth_of<const D: usize>(bvh: &Bvh<D>) -> usize {
+    let nodes = bvh.nodes();
+    let mut depth = vec![0usize; nodes.len()];
+    let mut max = 0;
+    for i in 0..nodes.len() {
+        if nodes[i].is_leaf() {
+            max = max.max(depth[i]);
+        } else {
+            depth[i + 1] = depth[i] + 1;
+            depth[nodes[i].right as usize] = depth[i] + 1;
+        }
+    }
+    max
+}
+
+/// SPEC D15 as printed (split at the minimum of the sum of squared diameters over all positions)
+/// builds a degenerate tree on a tangled curve: it peels single tangent-points off the root. The
+/// default bounds the imbalance and gives depth `<= log_{4/3}(n / leaf) + 1`.
+#[test]
+fn unrestricted_split_rule_is_degenerate_on_curves() {
+    if !data("").exists() {
+        return;
+    }
+    let (net, pos) = read_curve_obj(data("FreedmanHeWang/freedman-he-wang-1200.obj")).unwrap();
+    let o = BhOptions::default();
+    let literal = BhTree::build_with(&net, &pos, o, 0.0).unwrap();
+    let balanced = BhTree::build(&net, &pos, o).unwrap();
+    let (dl, db) = (depth_of(literal.bvh()), depth_of(balanced.bvh()));
+    let bound = ((net.n_edges() as f64 / 8.0).ln() / (4.0f64 / 3.0).ln()).ceil() as usize + 1;
+    eprintln!("freedman-1200: depth {dl} with the printed rule, {db} balanced (bound {bound})");
+    assert!(db <= bound, "{db} > {bound}");
+    assert!(
+        dl > 4 * db,
+        "the printed rule was expected to degenerate: {dl} vs {db}"
+    );
+}
+
+/// The experimental lumping of admissible leaves stays an approximation of the same quantities.
+#[test]
+fn lumping_leaves_is_a_looser_approximation_of_the_same_thing() {
+    let (net, pos) = trefoil(400);
+    let pos = perturb(&net, &pos, 0.05, 13);
+    let ex = Exponents::default();
+    let p = pool(4);
+    let (e0, g0) = energy_and_differential(&p, &net, &pos, ex);
+    let mut tree = BhTree::build(&net, &pos, opts_eps(0.25)).unwrap();
+    let (_, _, a) = tree.energy_and_differential(&p, ex);
+    tree.set_lump_leaves(true);
+    let (e1, g1, b) = tree.energy_and_differential(&p, ex);
+    assert!(b.pairs_exact < a.pairs_exact);
+    assert!(((e1 - e0) / e0).abs() < 1e-2 && diff_err(&g1, &g0) < 5e-2);
 }
 
 // ---------------------------------------------------------------- timings (ignored)

@@ -7,7 +7,9 @@
 //! * **Build** (top down, App. B.1.1): the split axis cycles through the `D` coordinates with the
 //!   depth, starting at coordinate 0; along the elements sorted by that coordinate, the split
 //!   position minimizes the sum of the squared diameters of the two children's boxes (prefix and
-//!   suffix boxes, `O(n)` per node after the sort). The reference
+//!   suffix boxes, `O(n)` per node after the sort), restricted to positions that leave at least a
+//!   quarter of the elements on each side ([`DEFAULT_MIN_SPLIT_FRACTION`]; the unrestricted
+//!   rule peels single outliers and gives a degenerate tree on curves, SPEC §17d). The reference
 //!   (`src/spatial/tpe_bvh.cpp`, MIT, Copyright (c) 2019 Christopher Yu) splits at the position
 //!   minimizing squared 1-D widths along the axis; this one follows the paper (D15). Leaves hold
 //!   at most `leaf_size` elements. The build is sequential and deterministic (ties broken by
@@ -24,6 +26,9 @@
 
 use crate::error::RcError;
 use crate::spatial::aabb::Aabb;
+
+/// The default of [`Bvh::build`]: each child of a split gets at least a quarter of the elements.
+pub const DEFAULT_MIN_SPLIT_FRACTION: f64 = 0.25;
 
 /// An element of a [`Bvh`]: a weighted point with a bounding box.
 pub trait Element<const D: usize> {
@@ -102,11 +107,34 @@ fn opt_err(name: &'static str, value: String, requirement: &'static str) -> RcEr
 }
 
 impl<const D: usize> Bvh<D> {
-    /// Builds the hierarchy.
+    /// Builds the hierarchy with the default balance bound [`DEFAULT_MIN_SPLIT_FRACTION`].
     ///
     /// # Errors
     /// [`RcError::InvalidOption`] for `leaf_size = 0` or an empty element list.
     pub fn build<E: Element<D>>(elements: &[E], leaf_size: usize) -> Result<Self, RcError> {
+        Self::build_with(elements, leaf_size, DEFAULT_MIN_SPLIT_FRACTION)
+    }
+
+    /// Builds the hierarchy; every split leaves at least `⌈min_fraction · n⌉` elements (and at
+    /// least one) on each side of a node with `n` elements. `min_fraction = 0` is the paper's
+    /// rule as printed (the sum of squared diameters over all split positions), which on curves
+    /// peels single outliers off the node and builds a tree of depth `O(n)` (D15, SPEC §17d).
+    ///
+    /// # Errors
+    /// [`RcError::InvalidOption`] for `leaf_size = 0`, an empty element list, or `min_fraction`
+    /// outside `[0, ½]`.
+    pub fn build_with<E: Element<D>>(
+        elements: &[E],
+        leaf_size: usize,
+        min_fraction: f64,
+    ) -> Result<Self, RcError> {
+        if !(0.0..=0.5).contains(&min_fraction) {
+            return Err(opt_err(
+                "min_split_fraction",
+                min_fraction.to_string(),
+                "a number in [0, 0.5]",
+            ));
+        }
         if leaf_size == 0 {
             return Err(opt_err(
                 "leaf_size",
@@ -159,8 +187,12 @@ impl<const D: usize> Bvh<D> {
             }
             let mut prefix = Aabb::empty();
             let mut best = (f64::INFINITY, cnt / 2);
-            for k in 1..cnt {
+            let lo = ((min_fraction * cnt as f64).ceil() as usize).clamp(1, cnt / 2);
+            for k in 1..=cnt - lo {
                 prefix = prefix.union(&bnds[slice[k - 1] as usize]);
+                if k < lo {
+                    continue;
+                }
                 let cost = prefix.diameter_sq() + suffix[k].diameter_sq();
                 // A NaN or infinite cost never wins; the median split is the fallback.
                 if cost < best.0 {
