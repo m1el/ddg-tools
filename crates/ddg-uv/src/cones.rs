@@ -10,6 +10,7 @@ use ddg_optimal_cones::{
 };
 
 use crate::error::{UvError, internal};
+use crate::feedback::ChartFeedback;
 use crate::options::{
     BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, SlitPlacement, SpikeAction,
     UnwrapOptions,
@@ -45,6 +46,10 @@ pub struct PieceCones {
     pub solve: Option<ConeSolveReport>,
     /// The spike check of the piece, if it ran (see [`crate::spikes`]).
     pub spikes: Option<SpikeReport>,
+    /// The feedback loop of the piece, if it ran ([`UnwrapOptions::cone_feedback`],
+    /// [`crate::feedback`]). The cones and scale factors above are those of its last kept
+    /// solve.
+    pub feedback: Option<ChartFeedback>,
 }
 
 /// The result of stage 3a.
@@ -55,10 +60,33 @@ pub struct ConeStage {
     /// Per vertex of the caller: whether its steering was applied (it is an interior vertex of
     /// the piece the cones were computed on).
     pub(crate) steering_applied: Vec<bool>,
-    pub(crate) warnings: Vec<String>,
+    /// The warnings of every piece: those of the spike check, then those of the solve.
+    pub(crate) piece_warnings: Vec<PieceWarnings>,
+    /// The warnings of the feedback loop ([`crate::feedback`]).
+    pub(crate) feedback_warnings: Vec<String>,
     pub(crate) seconds: f64,
     pub(crate) seconds_solver: f64,
     pub(crate) seconds_spikes: f64,
+    /// Seconds of the feedback loop (its extra solves and flattenings included).
+    pub(crate) seconds_feedback: f64,
+}
+
+/// The warnings of one piece, kept apart so that a solve again (the feedback loop) replaces
+/// those of the solve and keeps those of the spike check.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PieceWarnings {
+    pub(crate) check: Vec<String>,
+    pub(crate) solve: Vec<String>,
+}
+
+impl ConeStage {
+    /// Every warning of the stage, piece by piece, then those of the feedback loop.
+    pub(crate) fn warnings(&self) -> impl Iterator<Item = &String> {
+        self.piece_warnings
+            .iter()
+            .flat_map(|w| w.check.iter().chain(&w.solve))
+            .chain(&self.feedback_warnings)
+    }
 }
 
 /// What one solve on one mesh gave.
@@ -85,14 +113,17 @@ pub fn solve_cones(prepared: &Prepared, options: &UnwrapOptions) -> Result<ConeS
     let mut stage = ConeStage {
         pieces: Vec::with_capacity(prepared.pieces.len()),
         steering_applied: vec![false; prepared.n_input_vertices],
-        warnings: Vec::new(),
+        piece_warnings: Vec::with_capacity(prepared.pieces.len()),
+        feedback_warnings: Vec::new(),
         seconds: 0.0,
         seconds_solver: 0.0,
         seconds_spikes: 0.0,
+        seconds_feedback: 0.0,
     };
     for piece in &prepared.pieces {
-        let cones = piece_cones(prepared, piece, options, &mut stage)?;
+        let (cones, warnings) = piece_cones(prepared, piece, options, &mut stage)?;
         stage.pieces.push(cones);
+        stage.piece_warnings.push(warnings);
     }
     stage.seconds_solver = stage
         .pieces
@@ -109,7 +140,7 @@ fn piece_cones(
     piece: &Piece,
     options: &UnwrapOptions,
     stage: &mut ConeStage,
-) -> Result<PieceCones, UvError> {
+) -> Result<(PieceCones, PieceWarnings), UvError> {
     let closed = piece.is_closed();
     let genus = piece.genus();
     if closed && options.closed_surfaces == ClosedSurfaces::Refuse {
@@ -119,11 +150,7 @@ fn piece_cones(
             genus,
         });
     }
-    let sphere = closed && genus == 0;
-    // Optimized boundary values concern pieces that have a boundary. A closed piece is solved
-    // exactly as without the option, also with an automatic slit (whose sides keep their
-    // lengths).
-    let optimize_boundary = options.boundary == BoundaryValues::Optimized && !closed;
+    let mut warnings = PieceWarnings::default();
 
     // Thin spikes dominate the distortion measure: look for them before solving.
     let mut spike_report = None;
@@ -150,16 +177,73 @@ fn piece_cones(
                         found.not_excluded_boundary = boundary;
                         excluded = found.excluded.clone();
                     }
-                    stage.warnings.push(spikes::warning(piece, found));
+                    warnings.check.push(spikes::warning(piece, found));
                 }
             }
-            Err(message) => stage.warnings.push(format!(
+            Err(message) => warnings.check.push(format!(
                 "the spike check of the piece of the surface that contains face {} failed ({});                  it was skipped",
                 piece.first_polygon, message
             )),
         }
         stage.seconds_spikes += start.elapsed().as_secs_f64();
     }
+    // `excluded` is sorted (the spike report lists vertices ascending).
+    let weights: Vec<(u32, f64)> = excluded.iter().map(|&v| (v, 0.0)).collect();
+    let mut result = piece_solve(prepared, piece, options, &weights, &mut warnings.solve)?;
+
+    // Which steering took effect.
+    let on = result.slit_piece.as_ref().unwrap_or(piece);
+    for v in 0..on.mesh.n_vertices() {
+        if !on.mesh.is_boundary_vertex(v) {
+            stage.steering_applied[on.vertex_input[v] as usize] = true;
+        }
+    }
+    result.spikes = spike_report;
+    Ok((result, warnings))
+}
+
+/// The distortion weights of a mesh of the pipeline (a piece, or a piece with its slit) from
+/// weights given per vertex of the caller: `weights` lists `(vertex, weight)` sorted by vertex,
+/// every other vertex has weight 1. `None` if no vertex of the mesh is listed, or if every
+/// weight would be zero (such a piece is solved without weights).
+pub(crate) fn piece_weights(piece: &Piece, weights: &[(u32, f64)]) -> Option<Vec<f64>> {
+    if weights.is_empty() {
+        return None;
+    }
+    let mut listed = false;
+    let w: Vec<f64> = piece
+        .vertex_input
+        .iter()
+        .map(|&v| match weights.binary_search_by_key(&v, |p| p.0) {
+            Ok(i) => {
+                listed = true;
+                weights[i].1
+            }
+            Err(_) => 1.0,
+        })
+        .collect();
+    (listed && w.iter().any(|&x| x > 0.0)).then_some(w)
+}
+
+/// The cones of one piece with the given distortion weights (per vertex of the caller, see
+/// [`piece_weights`]): the policies for closed pieces, the solve, the merge guard, and the check
+/// that every cone can exist. The spike check is not run (`spikes` is `None`), and the steering
+/// report is not touched. The feedback loop calls this again with lowered weights.
+pub(crate) fn piece_solve(
+    prepared: &Prepared,
+    piece: &Piece,
+    options: &UnwrapOptions,
+    weights: &[(u32, f64)],
+    warnings: &mut Vec<String>,
+) -> Result<PieceCones, UvError> {
+    let closed = piece.is_closed();
+    let genus = piece.genus();
+    let sphere = closed && genus == 0;
+    // Optimized boundary values concern pieces that have a boundary. A closed piece is solved
+    // exactly as without the option, also with an automatic slit (whose sides keep their
+    // lengths).
+    let optimize_boundary = options.boundary == BoundaryValues::Optimized && !closed;
+
     let slit_of = |placement: SlitPlacement, relative_length: f64| {
         // Keep the slit away from prescribed cones: a vertex on the slit is on the boundary.
         let avoid: Vec<bool> = piece
@@ -182,7 +266,6 @@ fn piece_cones(
         Ok::<_, UvError>((cut, edges, slit.length))
     };
 
-    let mut warnings = Vec::new();
     let mut result = match (sphere, options.closed_surfaces) {
         (
             true,
@@ -198,8 +281,8 @@ fn piece_cones(
                 options,
                 None,
                 optimize_boundary,
-                &excluded,
-                &mut warnings,
+                weights,
+                warnings,
             )?;
             finish(
                 solved,
@@ -226,7 +309,7 @@ fn piece_cones(
                 options,
                 None,
                 optimize_boundary,
-                &excluded,
+                weights,
                 &mut raw_warnings,
             )?;
             let sparse =
@@ -244,8 +327,8 @@ fn piece_cones(
                     options,
                     sites,
                     optimize_boundary,
-                    &excluded,
-                    &mut warnings,
+                    weights,
+                    warnings,
                 )?;
                 if let Some(report) = &mut solved.report {
                     report.seconds += raw_seconds;
@@ -273,8 +356,8 @@ fn piece_cones(
                 options,
                 sites,
                 optimize_boundary,
-                &excluded,
-                &mut warnings,
+                weights,
+                warnings,
             )?;
             let handling = ClosedHandling::FreeSites {
                 n_automatic: solved.n_free_sites,
@@ -290,8 +373,8 @@ fn piece_cones(
                 options,
                 None,
                 optimize_boundary,
-                &excluded,
-                &mut warnings,
+                weights,
+                warnings,
             )?;
             let handling = if closed {
                 ClosedHandling::RawOptimum
@@ -302,13 +385,8 @@ fn piece_cones(
         }
     };
 
-    // Which steering took effect, and whether every cone can exist.
+    // Whether every cone can exist.
     let on = result.slit_piece.as_ref().unwrap_or(piece);
-    for v in 0..on.mesh.n_vertices() {
-        if !on.mesh.is_boundary_vertex(v) {
-            stage.steering_applied[on.vertex_input[v] as usize] = true;
-        }
-    }
     if let Some(cone) = result.cones.iter().find(|c| c.angle >= TAU) {
         return Err(UvError::UnrealizableCone {
             vertex: on.vertex_input[cone.vertex as usize],
@@ -316,8 +394,6 @@ fn piece_cones(
         });
     }
     result.cones.sort_by_key(|c| c.vertex);
-    result.spikes = spike_report;
-    stage.warnings.append(&mut warnings);
     Ok(result)
 }
 
@@ -337,18 +413,20 @@ fn finish(
         positive_only: solved.positive_only,
         solve: solved.report,
         spikes: None,
+        feedback: None,
     }
 }
 
 /// Solves the cone problem of one mesh (a piece, or a piece with its slit). `free_sites` is
-/// `(count, angle bound, forbid cones elsewhere)` if the policy asks for free cone sites.
+/// `(count, angle bound, forbid cones elsewhere)` if the policy asks for free cone sites;
+/// `weights` are distortion weights per vertex of the caller ([`piece_weights`]).
 fn solve_on(
     prepared: &Prepared,
     piece: &Piece,
     options: &UnwrapOptions,
     free_sites: Option<(usize, f64, bool)>,
     optimize_boundary: bool,
-    excluded: &[u32],
+    weights: &[(u32, f64)],
     warnings: &mut Vec<String>,
 ) -> Result<Solved, UvError> {
     let treatment = if optimize_boundary {
@@ -494,22 +572,9 @@ fn solve_on(
     problem.lower_bounds = positive_only.then(|| vec![0.0; n]);
     problem.upper_bounds = Some(upper);
     problem.prescribed_cones = prescribed;
-    // Spike tips (excluded vertices, caller's numbering): zero distortion weight. A piece
-    // where that would remove every weight is left alone.
-    if !excluded.is_empty() {
-        let weights: Vec<f64> = (0..n)
-            .map(|v| {
-                if excluded.binary_search(&piece.vertex_input[v]).is_ok() {
-                    0.0
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        if weights.iter().any(|&w| w > 0.0) {
-            problem.distortion_weights = Some(weights);
-        }
-    }
+    // Spike tips (zero), vertices the feedback loop reweighted: distortion weights. A piece
+    // where every weight would be zero is left alone.
+    problem.distortion_weights = piece_weights(piece, weights);
     let defaults = SolveOptions::default();
     let cone_threshold = defaults.cone_threshold;
     let solve_options = SolveOptions {

@@ -6,6 +6,7 @@ use ddg_core::io::Cone;
 
 use crate::cones::{ConeStage, solve_cones};
 use crate::error::{UvError, internal};
+use crate::feedback::cone_feedback;
 use crate::flatten::{FlatStage, flatten};
 use crate::input::MeshInput;
 use crate::measure::Accumulator;
@@ -44,8 +45,9 @@ pub fn unwrap(input: &MeshInput<'_>, options: &UnwrapOptions) -> Result<UvMap, U
     }
     let start = Instant::now();
     let prepared = prepare(input, options)?;
-    let cones = solve_cones(&prepared, options)?;
-    let flat = flatten(&prepared, &cones, options)?;
+    let mut cones = solve_cones(&prepared, options)?;
+    let mut flat = flatten(&prepared, &cones, options)?;
+    cone_feedback(&prepared, &mut cones, &mut flat, options)?;
     let mut map = assemble(input, &prepared, &cones, &flat, options)?;
     map.report.timings.total = start.elapsed().as_secs_f64();
     Ok(map)
@@ -145,6 +147,7 @@ pub fn assemble(
             positive_cones_only: piece_cones.positive_only,
             solve: piece_cones.solve.clone(),
             spikes: piece_cones.spikes.clone(),
+            feedback: piece_cones.feedback.clone(),
             cones: ConeStats::of(piece_cones.cones.iter().map(|c| c.angle)),
             flatten: piece_flat.report,
         });
@@ -216,8 +219,8 @@ pub fn assemble(
         }
     }
     let mut warnings = prepared.warnings.clone();
-    warnings.extend(cones.warnings.iter().cloned());
-    warnings.extend(flat.warnings.iter().cloned());
+    warnings.extend(cones.warnings().cloned());
+    warnings.extend(flat.piece_warnings.iter().flatten().cloned());
     if let Some(&first) = steering.prescribed_not_applied.first() {
         warnings.push(format!(
             "{} prescribed cones could not be imposed because their vertex lies on a boundary, \
@@ -269,12 +272,14 @@ pub fn assemble(
         cone_solver: cones.seconds_solver,
         spike_check: cones.seconds_spikes,
         flatten: flat.seconds,
+        cone_feedback: cones.seconds_feedback,
         pack: seconds_pack,
         verify: seconds_verify,
         total: prepared.seconds_validate
             + prepared.seconds_seams
             + cones.seconds
             + flat.seconds
+            + cones.seconds_feedback
             + seconds_pack
             + seconds_verify,
     };

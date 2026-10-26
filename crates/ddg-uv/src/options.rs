@@ -2,6 +2,8 @@
 
 use std::f64::consts::TAU;
 
+use ddg_optimal_cones::FeedbackOptions;
+
 use crate::error::UvError;
 
 /// Which signs cone angles may have.
@@ -420,6 +422,13 @@ pub struct UnwrapOptions {
     /// default) leaves the charts as the seams, cones and cuts made them. Needs the overlap
     /// estimate (`overlap_samples_per_triangle > 0`).
     pub split_overlaps: Option<SplitOptions>,
+    /// The feedback loop of the cone solver ([`crate::feedback`]): on every piece, compare the
+    /// solver's linearized log scale factor with the one the flattening realizes, lower the
+    /// distortion weight where they are far apart (thin spikes), and solve and flatten again
+    /// until nothing changes. `None` switches it off. Costs a comparison per piece, and a solve
+    /// and a flattening per extra round where something is reweighted. Default `None` (see
+    /// the crate README, "The cone feedback loop", for the measurements behind the choice).
+    pub cone_feedback: Option<FeedbackOptions>,
 }
 
 impl Default for UnwrapOptions {
@@ -439,6 +448,7 @@ impl Default for UnwrapOptions {
             require_certified_cones: false,
             spike_check: Some(SpikeCheck::default()),
             split_overlaps: None,
+            cone_feedback: None,
         }
     }
 }
@@ -600,6 +610,36 @@ impl UnwrapOptions {
                     self.overlap_samples_per_triangle,
                     "must be positive when split_overlaps is set: the overlap estimate decides \
                      what is split",
+                ));
+            }
+        }
+        if let Some(feedback) = self.cone_feedback {
+            if !(feedback.threshold.is_finite() && feedback.threshold > 0.0) {
+                return Err(invalid(
+                    "cone_feedback.threshold",
+                    feedback.threshold,
+                    "must be positive and finite",
+                ));
+            }
+            if !(feedback.reduced_weight >= 0.0 && feedback.reduced_weight < 1.0) {
+                return Err(invalid(
+                    "cone_feedback.reduced_weight",
+                    feedback.reduced_weight,
+                    "must be at least 0 and below 1",
+                ));
+            }
+            if feedback.max_rounds == 0 {
+                return Err(invalid(
+                    "cone_feedback.max_rounds",
+                    feedback.max_rounds,
+                    "must be at least 1",
+                ));
+            }
+            if !(0.0..=1.0).contains(&feedback.max_reweighted_fraction) {
+                return Err(invalid(
+                    "cone_feedback.max_reweighted_fraction",
+                    feedback.max_reweighted_fraction,
+                    "must be between 0 and 1",
                 ));
             }
         }

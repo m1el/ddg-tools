@@ -30,7 +30,12 @@
 //!
 //! Environment: `DDG_DATASET` (directory), `DDG_BUDGET_S` (seconds of searching per mesh and
 //! variant, default 1500), `DDG_ITERS` (bisection steps, default 20), `DDG_SLACK` (relative slack on the cap, default 1e-3), `DDG_GRID` (values of
-//! `lambda` in the coarse scan, default 12; no scan on meshes of more than 100 000 faces).
+//! `lambda` in the coarse scan, default 12; no scan on meshes of more than 100 000 faces),
+//! `DDG_RECIPES` (comma-separated recipes of Table C, default `c1,c2`; `c1fb` is C1 with the
+//! feedback loop of the cone solver at every probe: solve, flatten, lower the distortion weight
+//! where the solver's `u` is far from the flattening's, repeat; its note lists the rounds and
+//! the reweighted vertices), `DDG_FB_THRESHOLD`, `DDG_FB_ROUNDS` (the loop's threshold and
+//! round limit, defaults those of `FeedbackOptions`).
 
 use std::f64::consts::PI;
 use std::path::PathBuf;
@@ -44,9 +49,10 @@ use ddg_core::io::{Cone, read_cones, read_obj};
 use ddg_core::operators::angle_defects;
 use ddg_core::{Geometry, TriMesh};
 use ddg_optimal_cones::{
-    BoundaryTreatment, ConeProblem, Parallelism, Solution, SolveOptions, Status, evaluate_cones,
-    solve_with_boundary,
+    BoundaryTreatment, ConeProblem, FeedbackOptions, Parallelism, Solution, SolveOptions, Status,
+    evaluate_cones, solve_with_boundary, solve_with_feedback,
 };
+use ddg_uv::realized_face_log_scale;
 
 /// Relative slack on the published total cone angle (`DDG_SLACK`, default 1e-3) (the file's angles have six digits and the
 /// same positions re-optimized sum to it only to about 4e-5, `bump`).
@@ -414,6 +420,24 @@ fn flatten(d: &Data, cones: &[Cone], u: Option<&[f64]>) -> Result<Flat, String> 
     })
 }
 
+/// The options of the feedback loop (`DDG_FB_THRESHOLD`, `DDG_FB_ROUNDS`).
+fn feedback_options() -> FeedbackOptions {
+    let d = FeedbackOptions::default();
+    FeedbackOptions {
+        threshold: env_f64("DDG_FB_THRESHOLD", d.threshold),
+        max_rounds: env_f64("DDG_FB_ROUNDS", d.max_rounds as f64) as usize,
+        ..d
+    }
+}
+
+/// The recipes of Table C to run (`DDG_RECIPES`).
+fn recipe(name: &str) -> bool {
+    std::env::var("DDG_RECIPES")
+        .unwrap_or_else(|_| "c1,c2".to_owned())
+        .split(',')
+        .any(|r| r.trim() == name)
+}
+
 fn total_angle(cones: &[Cone]) -> f64 {
     cones.iter().map(|c| c.angle.abs()).sum()
 }
@@ -432,6 +456,8 @@ struct Probe {
     /// The solver's `1/2 sum m u^2` of these cones.
     dist: f64,
     converged: bool,
+    /// What else to print with the probe (the feedback loop's rounds).
+    note: String,
 }
 
 struct Search {
@@ -474,6 +500,7 @@ fn search(
                 total: p.total,
                 dist: p.dist,
                 converged: p.converged,
+                note: p.note.clone(),
             });
         }
         out.probes.push(p);
@@ -644,7 +671,7 @@ fn row_c(d: &Data, label: &str, p: &Probe, pub_dstar: f64, note: &str) -> String
                 } else {
                     ""
                 }
-            )
+            ) + &p.note
         }
     }
 }
@@ -902,10 +929,69 @@ fn run_mesh(d: &Data, tips_variant: bool, treatment: Option<BoundaryTreatment>) 
         u: s.log_scale,
         dist: s.distortion,
         converged: s.report.status == Status::Converged,
+        note: String::new(),
     };
     // C1
     let c1_eval = |l: f64| -> Result<Probe, String> {
         penalized(d, l, family, false, &dw).map(|s| sol_probe(l, s))
+    };
+    // C1 with the feedback loop: every probe is a loop of solves and flattenings.
+    let c1fb_eval = |l: f64| -> Result<Probe, String> {
+        let problem = ConeProblem {
+            distortion_weights: dw.clone(),
+            ..ConeProblem::new(&d.mesh, &d.geometry, l)
+        };
+        let result = solve_with_feedback(
+            &problem,
+            family,
+            &options(false),
+            &feedback_options(),
+            |s: &Solution| {
+                let f = flatten(d, &s.cones, Some(&s.log_scale))?;
+                Ok::<_, String>((realized_face_log_scale(&d.geometry, &f.uvs), ()))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let report = &result.feedback;
+        let rounds: Vec<String> = report
+            .rounds
+            .iter()
+            .map(|r| {
+                format!(
+                    "max|d| {:.2e} (eligible {:.2e}), {} over, solve {:.2}s, flatten {:.2}s",
+                    r.max_abs_mismatch,
+                    r.max_abs_eligible,
+                    r.n_over_threshold,
+                    r.seconds_solve,
+                    r.seconds_realize
+                )
+            })
+            .collect();
+        let note = format!(
+            "[feedback: {} rounds, {} reweighted{}, {:?}, {:.2}s; {}]",
+            report.rounds.len(),
+            report.reweighted.len(),
+            if report.reweighted.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " ({})",
+                    report
+                        .reweighted
+                        .iter()
+                        .take(32)
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            },
+            report.stop,
+            report.seconds,
+            rounds.join(" | ")
+        );
+        let mut probe = sol_probe(l, result.solution);
+        probe.note = note;
+        Ok(probe)
     };
     let c2_eval = |l: f64| -> Result<Probe, String> {
         let s = penalized(d, l, family, true, &dw)?;
@@ -918,6 +1004,7 @@ fn run_mesh(d: &Data, tips_variant: bool, treatment: Option<BoundaryTreatment>) 
                 total: 0.0,
                 dist: s.distortion,
                 converged: true,
+                note: String::new(),
             });
         }
         refit(d, &vs, family, &dw).map(|r| sol_probe(l, r))
@@ -986,10 +1073,19 @@ fn run_mesh(d: &Data, tips_variant: bool, treatment: Option<BoundaryTreatment>) 
         let _ = (st, sb);
     };
     {
-        let mut s1 = search(cap, iters, grid, budget, start, c1_eval);
-        report("C1 penalized", &mut s1, &c1_eval, &mut t);
-        let mut s2 = search(cap, iters, grid, budget, start, c2_eval);
-        report("C2 merge+reopt", &mut s2, &c2_eval, &mut t);
+        if recipe("c1") {
+            let mut s1 = search(cap, iters, grid, budget, start, c1_eval);
+            report("C1 penalized", &mut s1, &c1_eval, &mut t);
+        }
+        // With the weights set by hand (the tips variant) the loop is not run.
+        if recipe("c1fb") && !tips_variant {
+            let mut s3 = search(cap, iters, grid, budget, start, c1fb_eval);
+            report("C1 + feedback", &mut s3, &c1fb_eval, &mut t);
+        }
+        if recipe("c2") {
+            let mut s2 = search(cap, iters, grid, budget, start, c2_eval);
+            report("C2 merge+reopt", &mut s2, &c2_eval, &mut t);
+        }
     }
     t.c.push(format!(
         "{label_base}: total {:.1}s",

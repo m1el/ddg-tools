@@ -55,8 +55,9 @@
 //!
 //! # Stages
 //!
-//! [`unwrap`] runs these in order; [`prepare`], [`solve_cones`], [`flatten`] and [`assemble`]
-//! are the same stages as separate functions (the benchmarks time them apart).
+//! [`unwrap`] runs these in order; [`prepare`], [`solve_cones`], [`flatten`],
+//! [`cone_feedback`] and [`assemble`] are the same stages as separate functions (the benchmarks
+//! time them apart).
 //!
 //! 1. **Validation** ([`prepare`]). The arrays are checked ([`MeshInput::validate`]). Vertices
 //!    that no polygon uses are ignored. The triangulated surface must be a manifold: every
@@ -81,6 +82,10 @@
 //!    run along a diagonal of the triangulation, all triangle corners that belong to one
 //!    polygon corner receive the same UV; this is checked, and a violation is
 //!    [`UvError::Internal`].
+//!    Optionally ([`UnwrapOptions::cone_feedback`], [`cone_feedback`]), the solver's linearized
+//!    scale factor is then compared with the one the flattening realizes, the distortion
+//!    weight is lowered where they are far apart (thin spikes), and the piece is solved and
+//!    flattened again until nothing changes.
 //! 4. **Packing** ([`assemble`], [`pack`]). All charts go into the unit square with one common
 //!    scale and a margin ([`PackOptions`]).
 //!
@@ -109,6 +114,7 @@
 pub mod cones;
 pub mod cutting;
 pub mod error;
+pub mod feedback;
 pub mod flatten;
 pub mod input;
 pub mod measure;
@@ -125,7 +131,9 @@ pub mod spikes;
 pub use ddg_core::io::Cone;
 
 pub use cones::{ConeStage, PieceCones, solve_cones};
+pub use ddg_optimal_cones::{FeedbackOptions, FeedbackReport, FeedbackRound, FeedbackStop};
 pub use error::{ErrorKind, UvError};
+pub use feedback::{ChartFeedback, cone_feedback, realized_face_log_scale};
 pub use flatten::{FlatStage, PieceFlat, flatten};
 pub use input::{MeshInput, PolygonMesh, fan_triangulation};
 pub use measure::{AreaDistortion, area_distortion};

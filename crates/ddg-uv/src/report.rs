@@ -4,6 +4,7 @@ use ddg_optimal_cones::Status;
 
 use crate::measure::AreaDistortion;
 use crate::pack::PackReport;
+use crate::feedback::ChartFeedback;
 use crate::spikes::SpikeReport;
 
 /// What was done about triangles without area.
@@ -249,6 +250,9 @@ pub struct ChartReport {
     /// The spike check, or `None` if it was switched off, skipped, or the chart has no interior
     /// vertex.
     pub spikes: Option<SpikeReport>,
+    /// The feedback loop of the cone solver, or `None` if it was switched off
+    /// ([`crate::UnwrapOptions::cone_feedback`]) or the chart was not solved.
+    pub feedback: Option<ChartFeedback>,
     /// The cones of the chart.
     pub cones: ConeStats,
     /// The flattening.
@@ -271,6 +275,9 @@ pub struct Timings {
     pub spike_check: f64,
     /// Stage 3b: cutting through the cones and flattening.
     pub flatten: f64,
+    /// Stage 3c: the feedback loop of the cone solver (its comparison, extra solves and
+    /// flattenings); 0 if it is off.
+    pub cone_feedback: f64,
     /// Stage 4: packing.
     pub pack: f64,
     /// The final checks and measurements.
@@ -594,6 +601,46 @@ impl Report {
                 out.push(("spike_vertices", Value::Text(spike_list(&spikes))));
             }
         }
+        // Present only if the feedback loop ran.
+        let loops: Vec<&ChartFeedback> = self
+            .charts
+            .iter()
+            .filter_map(|c| c.feedback.as_ref())
+            .collect();
+        if !loops.is_empty() {
+            let mut reweighted: Vec<u32> = loops
+                .iter()
+                .flat_map(|f| f.reweighted.iter().copied())
+                .collect();
+            reweighted.sort_unstable();
+            out.push((
+                "cone_feedback_rounds",
+                int(loops.iter().map(|f| f.report.rounds.len()).max().unwrap_or(0)),
+            ));
+            out.push(("n_cone_feedback_reweighted", int(reweighted.len())));
+            out.push((
+                "n_cone_feedback_pending",
+                int(loops.iter().map(|f| f.pending.len()).sum()),
+            ));
+            out.push((
+                "cone_feedback_max_mismatch",
+                Value::Float(fold_max(&mut loops.iter().filter_map(|f| {
+                    f.report.rounds.first().map(|r| r.max_abs_eligible)
+                }))),
+            ));
+            out.push((
+                "cone_feedback_final_mismatch",
+                Value::Float(fold_max(&mut loops.iter().filter_map(|f| {
+                    f.report.rounds.last().map(|r| r.max_abs_eligible)
+                }))),
+            ));
+            if !reweighted.is_empty() {
+                out.push((
+                    "cone_feedback_vertices",
+                    Value::Text(spike_list(&reweighted)),
+                ));
+            }
+        }
         // Present only if the overlap was estimated: a NaN would break comparisons of reports.
         if let Some(fraction) = self.overlapped_fraction {
             out.push(("overlapped_fraction", Value::Float(fraction)));
@@ -631,6 +678,7 @@ impl Report {
             ("seconds_cone_solver", Value::Float(t.cone_solver)),
             ("seconds_spike_check", Value::Float(t.spike_check)),
             ("seconds_stage_flatten", Value::Float(t.flatten)),
+            ("seconds_cone_feedback", Value::Float(t.cone_feedback)),
             ("seconds_stage_pack", Value::Float(t.pack)),
             ("seconds_stage_verify", Value::Float(t.verify)),
             ("seconds_unwrap", Value::Float(t.total)),

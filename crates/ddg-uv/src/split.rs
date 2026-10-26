@@ -31,6 +31,7 @@ use std::time::Instant;
 use ddg_bff::quality::signed_double_area;
 
 use crate::cones::solve_cones;
+use crate::feedback::cone_feedback;
 use crate::error::UvError;
 use crate::flatten::flatten;
 use crate::input::MeshInput;
@@ -514,8 +515,9 @@ pub(crate) fn unwrap_splitting(
             ..*input
         };
         let prepared = prepare(&run_input, options)?;
-        let cones = solve_cones(&prepared, options)?;
-        let flat = flatten(&prepared, &cones, options)?;
+        let mut cones = solve_cones(&prepared, options)?;
+        let mut flat = flatten(&prepared, &cones, options)?;
+        cone_feedback(&prepared, &mut cones, &mut flat, options)?;
         report.runs += 1;
         let n_pieces = prepared.pieces.len();
         let on = |i: usize| cones.pieces[i].slit_piece.as_ref().unwrap_or(&prepared.pieces[i]);

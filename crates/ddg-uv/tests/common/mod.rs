@@ -67,6 +67,14 @@ pub fn without_times(mut map: UvMap) -> UvMap {
         if let Some(solve) = &mut chart.solve {
             solve.seconds = 0.0;
         }
+        if let Some(feedback) = &mut chart.feedback {
+            feedback.report.seconds = 0.0;
+            for round in &mut feedback.report.rounds {
+                round.seconds_solve = 0.0;
+                round.seconds_realize = 0.0;
+                round.seconds_mismatch = 0.0;
+            }
+        }
     }
     map
 }

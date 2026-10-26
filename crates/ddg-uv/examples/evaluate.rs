@@ -9,7 +9,14 @@
 //! cargo run --release -p ddg-uv --example evaluate -- reopt     # re-optimized cone angles
 //! cargo run --release -p ddg-uv --example evaluate -- boundary  # u = 0 or optimized on the boundary
 //! cargo run --release -p ddg-uv --example evaluate -- verify    # does the layout realize the solver's boundary u
+//! cargo run --release -p ddg-uv --example evaluate -- feedback [name ...]  # the cone feedback loop
 //! ```
+//!
+//! `feedback` runs the pipeline with and without the feedback loop of the cone solver, each
+//! with the spike check on (the default) and off, on the dataset meshes, the models of
+//! `data/models` (or `DDG_MODELS`) and the primitives; further arguments are exact names (one
+//! process per mesh can then run in parallel). `DDG_FB_THRESHOLD` and `DDG_FB_ROUNDS` set the
+//! loop's threshold and round limit.
 //!
 //! A further argument restricts the meshes to those whose name contains it. The dataset is
 //! read from `data/optimal-cones/optimal-cones-data/data` (or `DDG_DATASET`); without it the
@@ -24,8 +31,8 @@ use ddg_uv::primitives::{
     End, capsule, cone, cube, cylinder, grid_cube, holed_slab, revolution, torus, uv_sphere,
 };
 use ddg_uv::{
-    BoundaryValues, ClosedSurfaces, ConeSigns, MergeClusters, MergeOutcome, PolygonMesh,
-    SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions, area_distortion, unwrap,
+    BoundaryValues, ClosedSurfaces, ConeSigns, FeedbackOptions, MergeClusters, MergeOutcome,
+    PolygonMesh, SlitPlacement, SpikeAction, SpikeCheck, UnwrapOptions, area_distortion, unwrap,
 };
 
 fn dataset_dir() -> PathBuf {
@@ -786,6 +793,125 @@ fn spike_action(filter: &str) {
     }
 }
 
+/// The models of `data/models` (or `DDG_MODELS`): name and polygon mesh, those present.
+fn models() -> Vec<(String, PolygonMesh)> {
+    let root = std::env::var_os("DDG_MODELS").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/models"),
+        PathBuf::from,
+    );
+    let files = [
+        "spot/spot/spot_triangulated.obj",
+        "spot/spot/spot_quadrangulated.obj",
+        "spot/spot/spot_control_mesh.obj",
+        "bob/bob/bob_tri.obj",
+        "bob/bob/bob_quad.obj",
+        "bob/bob/bob_isotropic.obj",
+        "bob/bob/bob_controlmesh.obj",
+        "blub/blub/blub_triangulated.obj",
+        "blub/blub/blub_quadrangulated.obj",
+        "blub/blub/blub_control_mesh.obj",
+        "crumpleddevelopable/CrumpledDevelopable.obj",
+    ];
+    files
+        .iter()
+        .filter_map(|f| {
+            let obj = read_obj(root.join(f)).ok()?;
+            let polygons: Vec<Vec<u32>> = (0..obj.n_faces())
+                .map(|k| obj.corner_verts[obj.face_corners(k)].to_vec())
+                .collect();
+            let name = f.rsplit('/').next()?.trim_end_matches(".obj").to_owned();
+            Some((name, PolygonMesh::from_polygons(obj.positions.clone(), &polygons)))
+        })
+        .collect()
+}
+
+/// The pipeline with and without the feedback loop, with the spike check on and off.
+fn feedback(names: &[String]) {
+    let env = |name: &str| std::env::var(name).ok().and_then(|s| s.parse::<f64>().ok());
+    let defaults = FeedbackOptions::default();
+    let loop_options = FeedbackOptions {
+        threshold: env("DDG_FB_THRESHOLD").unwrap_or(defaults.threshold),
+        max_rounds: env("DDG_FB_ROUNDS").map_or(defaults.max_rounds, |r| r as usize),
+        ..defaults
+    };
+    let mut meshes: Vec<(String, PolygonMesh, Option<f64>)> = Vec::new();
+    for name in dataset_names() {
+        if let Some((mesh, published)) = load(&name) {
+            meshes.push((name, mesh, published));
+        }
+    }
+    for (name, mesh) in models().into_iter().chain(primitives()) {
+        meshes.push((name, mesh, None));
+    }
+    if !names.is_empty() {
+        meshes.retain(|(n, _, _)| names.contains(n));
+    }
+    println!(
+        "| mesh | spike check | feedback | cones | distortion | published | overlap % | flipped | rounds | reweighted | pending | stop | max mismatch first | max mismatch last | seconds | feedback s | warnings |"
+    );
+    println!("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|");
+    for (name, mesh, published) in &meshes {
+        for check in [Some(SpikeCheck::default()), None] {
+            for fb in [None, Some(loop_options)] {
+                let options = UnwrapOptions {
+                    spike_check: check,
+                    cone_feedback: fb,
+                    ..UnwrapOptions::default()
+                };
+                let head = format!(
+                    "| {name} | {} | {} |",
+                    if check.is_some() { "on" } else { "off" },
+                    if fb.is_some() { "on" } else { "off" }
+                );
+                match unwrap(&mesh.input(), &options) {
+                    Err(e) => {
+                        let mut message = e.to_string();
+                        message.truncate(110);
+                        println!("{head} FAILED: {message} |");
+                    }
+                    Ok(map) => {
+                        let r = &map.report;
+                        let loops: Vec<_> = r.charts.iter().filter_map(|c| c.feedback.as_ref()).collect();
+                        let rounds = loops.iter().map(|f| f.report.rounds.len()).max().unwrap_or(0);
+                        let reweighted: usize = loops.iter().map(|f| f.reweighted.len()).sum();
+                        let pending: usize = loops.iter().map(|f| f.pending.len()).sum();
+                        let first = loops
+                            .iter()
+                            .filter_map(|f| f.report.rounds.first().map(|x| x.max_abs_eligible))
+                            .fold(0.0f64, f64::max);
+                        let last = loops
+                            .iter()
+                            .filter_map(|f| f.report.rounds.last().map(|x| x.max_abs_eligible))
+                            .fold(0.0f64, f64::max);
+                        let stops: Vec<String> = loops
+                            .iter()
+                            .map(|f| format!("{:?}", f.report.stop))
+                            .filter(|s| s != "Stable")
+                            .collect();
+                        println!(
+                            "{head} {} | {:.5} | {} | {:.3} | {} | {} | {} | {} | {} | {:.3e} | {:.3e} | {:.3} | {:.3} | {} |",
+                            r.cones.n_cones,
+                            r.area_distortion.scale_free,
+                            published.map_or("-".to_string(), |d| format!("{d:.5}")),
+                            100.0 * r.overlapped_fraction.unwrap_or(f64::NAN),
+                            r.flipped_triangles,
+                            if fb.is_some() { rounds.to_string() } else { "-".into() },
+                            reweighted,
+                            pending,
+                            if stops.is_empty() { "Stable".to_string() } else { stops.join(" ") },
+                            first,
+                            last,
+                            r.timings.total,
+                            r.timings.cone_feedback,
+                            r.warnings.len(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let filter = args.get(1).map_or("", String::as_str);
@@ -799,6 +925,7 @@ fn main() {
         Some("boundary") => boundary(filter),
         Some("verify") => verify(filter),
         Some("spikeaction") => spike_action(filter),
+        Some("feedback") => feedback(&args[1..]),
         _ => eprintln!(
             "usage: evaluate closed|lambda|signs|merge|dataset|reopt|boundary [name filter]"
         ),
