@@ -88,7 +88,7 @@ class UV_OT_ddg_conformal_unwrap(bpy.types.Operator):
             "spikes) and solve again. Costs a comparison where nothing is found, and a solve "
             "and a flattening per extra round where something is"
         ),
-        default=False,
+        default=True,
     )
     mark_seams: BoolProperty(
         name="Mark Cuts as Seams",

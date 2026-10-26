@@ -559,7 +559,7 @@ pub struct UnwrapOptions {
     pub split_threshold: f64,
     /// The feedback loop of the cone solver (`ddg_uv::UnwrapOptions::cone_feedback`): lower
     /// the distortion weight where the solver's linearized scale factor is far from the one
-    /// the flattening realizes (thin spikes) and solve again. Default `false`.
+    /// the flattening realizes (thin spikes) and solve again. Default `true`.
     pub cone_feedback: bool,
     /// With `cone_feedback`: the threshold of the mismatch, in log units
     /// (`ddg_optimal_cones::FeedbackOptions::threshold`). Default 20.
@@ -579,7 +579,7 @@ impl Default for UnwrapOptions {
             split_overlaps: false,
             split_max: split.max_splits,
             split_threshold: split.min_overlap_fraction,
-            cone_feedback: false,
+            cone_feedback: true,
             feedback_threshold: feedback.threshold,
             feedback_max_rounds: feedback.max_rounds,
         }
@@ -1160,7 +1160,7 @@ mod tests {
             ..UnwrapOptions::default()
         };
         assert!(nan.validate().is_err());
-        assert!(!UnwrapOptions::default().cone_feedback);
+        assert!(UnwrapOptions::default().cone_feedback);
         for (threshold, rounds) in [(0.0, 4), (f64::NAN, 4), (f64::INFINITY, 4), (4.0, 0)] {
             let bad = UnwrapOptions {
                 cone_feedback: true,

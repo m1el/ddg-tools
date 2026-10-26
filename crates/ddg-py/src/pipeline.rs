@@ -321,17 +321,18 @@ mod tests {
     #[test]
     fn the_cone_feedback_reaches_the_pipeline() {
         let input = UnwrapInput::from_buffers(cube()).unwrap();
-        let off = unwrap(&input, &UnwrapOptions::default()).unwrap();
+        assert!(UnwrapOptions::default().cone_feedback);
+        let off_options = UnwrapOptions {
+            cone_feedback: false,
+            ..UnwrapOptions::default()
+        };
+        let off = unwrap(&input, &off_options).unwrap();
         assert_eq!(
             off.report.get("cone_feedback"),
             Some(&ReportValue::Bool(false))
         );
         assert!(off.report.get("cone_feedback_rounds").is_none());
-        let options = UnwrapOptions {
-            cone_feedback: true,
-            ..UnwrapOptions::default()
-        };
-        let on = unwrap(&input, &options).unwrap();
+        let on = unwrap(&input, &UnwrapOptions::default()).unwrap();
         assert_eq!(
             on.report.get("cone_feedback"),
             Some(&ReportValue::Bool(true))

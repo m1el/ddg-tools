@@ -10,8 +10,11 @@
 //! [`ddg_optimal_cones::Feedback`]; this module drives it with the pipeline's own solve
 //! (policies, merge guard, slit) and flattening.
 //!
-//! On a piece where nothing is reweighted the loop costs the comparison only (no extra solve):
-//! the first round compares the solve and the flattening that stages 3a and 3b made anyway.
+//! On a piece with a boundary the loop first looks at the piece without cones (the cone-free
+//! probe: the state the spike check evaluated, flattened), because a cone that the solver puts at
+//! a needle tip hides the needle afterwards. Where nothing is reweighted the loop costs that probe
+//! and the comparison only (no extra solve): the first round compares the solve and the
+//! flattening that stages 3a and 3b made anyway.
 //! Vertices that the spike check ([`crate::spikes`]) already excluded start with weight zero
 //! and are not looked at.
 //!
@@ -195,7 +198,12 @@ pub fn cone_feedback(
                 realized = realized_face_log_scale(&on.geometry, &flattened.corner_uvs);
                 log_scale = next_log_scale;
                 let spikes = cones.pieces[k].spikes.take();
-                cones.pieces[k] = PieceCones { spikes, ..solved };
+                let cone_free_log_scale = cones.pieces[k].cone_free_log_scale.take();
+                cones.pieces[k] = PieceCones {
+                    spikes,
+                    cone_free_log_scale,
+                    ..solved
+                };
                 cones.piece_warnings[k].solve = solve_warnings;
                 flat.pieces[k] = flattened;
                 flat.piece_warnings[k] = flatten_warnings;
@@ -260,27 +268,35 @@ fn probe(
             angle: prepared.prescribed_angle[on.vertex_input[v] as usize],
         })
         .collect();
-    let problem = ConeProblem::new(&on.mesh, &on.geometry, 0.0);
-    let free = evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
-        .map_err(|e| format!("the cone-free state failed: {e}"))?;
+    // The spike check evaluated the same state on the piece without slit; reuse it.
+    let u0 = match (&solved.cone_free_log_scale, slit) {
+        (Some(u0), None) => u0.clone(),
+        _ => {
+            let problem = ConeProblem::new(&on.mesh, &on.geometry, 0.0);
+            evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
+                .map_err(|e| format!("the cone-free state failed: {e}"))?
+                .log_scale
+        }
+    };
     let seconds_evaluate = start.elapsed().as_secs_f64();
     let cone_free = PieceCones {
         slit_piece: slit.clone(),
         slit_edges: Vec::new(),
         cones: prescribed,
-        log_scale: Some(free.log_scale.clone()),
+        log_scale: Some(u0.clone()),
         boundary_optimized: false,
         closed: solved.closed,
         positive_only: solved.positive_only,
         solve: None,
         spikes: None,
         feedback: None,
+        cone_free_log_scale: None,
     };
     let mut ignored = Vec::new();
     let flattened = flatten_piece(piece, &cone_free, flattener, &mut ignored)
         .map_err(|e| format!("the cone-free flattening failed: {e}"))?;
     let faces = realized_face_log_scale(&on.geometry, &flattened.corner_uvs);
-    Ok((free.log_scale, faces, seconds_evaluate, flattened.seconds))
+    Ok((u0, faces, seconds_evaluate, flattened.seconds))
 }
 
 /// The warning for a chart where the loop changed something or could not finish.
@@ -301,8 +317,8 @@ fn warning(first_polygon: u32, n_vertices: usize, chart: &ChartFeedback) -> Opti
             "the cone feedback lowered the distortion weight of {} of the {n_vertices} vertices \
              of the piece of the surface that contains face {first_polygon} (vertices {}): there \
              the cone solver's linearized scale factor was off by up to {largest:.3e} (log \
-             units) from the one the flattening realized, which is what a thin spike looks \
-             like; {} solves",
+             units) from the one the flattening realized, the signature of a needle-like \
+             spike; {} solves",
             chart.reweighted.len(),
             list(&chart.reweighted),
             report.rounds.len()

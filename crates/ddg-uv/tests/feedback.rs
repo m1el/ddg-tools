@@ -38,6 +38,14 @@ fn spiked_disk() -> (PolygonMesh, [u32; 2]) {
     (mesh, tips)
 }
 
+/// The defaults without the loop.
+fn without_feedback() -> UnwrapOptions {
+    UnwrapOptions {
+        cone_feedback: None,
+        ..UnwrapOptions::default()
+    }
+}
+
 fn with_feedback(spike_check: Option<SpikeCheck>) -> UnwrapOptions {
     UnwrapOptions {
         spike_check,
@@ -81,7 +89,7 @@ fn the_loop_finds_the_tips_of_thin_spikes() {
             action: SpikeAction::ExcludeFromDistortion,
             ..SpikeCheck::default()
         }),
-        ..UnwrapOptions::default()
+        ..without_feedback()
     };
     let by_check = unwrap(&input, &excluded).unwrap();
     assert_eq!(
@@ -122,7 +130,7 @@ fn with_the_spike_check_the_loop_has_nothing_left_to_do_at_the_tips() {
     let map = unwrap(&mesh.input(), &options).unwrap();
     let feedback = map.report.charts[0].feedback.as_ref().unwrap();
     assert!(feedback.reweighted.iter().all(|v| !tips.contains(v)));
-    let plain = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
+    let plain = unwrap(&mesh.input(), &without_feedback()).unwrap();
     if feedback.reweighted.is_empty() {
         assert_eq!(
             feedback.report.rounds.iter().filter(|r| !r.probe).count(),
@@ -207,7 +215,7 @@ fn smooth_meshes_are_not_changed() {
     ];
     for (name, mesh) in shapes {
         let input = mesh.input();
-        let plain = unwrap(&input, &UnwrapOptions::default()).unwrap();
+        let plain = unwrap(&input, &without_feedback()).unwrap();
         let options = with_feedback(Some(SpikeCheck::default()));
         let map = unwrap(&input, &options).unwrap();
         check(&mesh, &input, &map, &options);
@@ -407,7 +415,7 @@ fn the_loop_finds_needles_that_the_spike_check_misses() {
         positions[t as usize][2] += 0.5;
     }
     let mesh = PolygonMesh::from_triangles(positions, &g.faces);
-    let plain = unwrap(&mesh.input(), &UnwrapOptions::default()).unwrap();
+    let plain = unwrap(&mesh.input(), &without_feedback()).unwrap();
     assert!(
         plain.report.charts[0]
             .spikes

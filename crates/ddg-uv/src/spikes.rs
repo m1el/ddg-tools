@@ -57,7 +57,8 @@ pub struct SpikeReport {
     pub not_excluded_boundary: Vec<u32>,
 }
 
-/// Runs the check on one piece (cone-free state with `u = 0` on the boundary).
+/// Runs the check on one piece (cone-free state with `u = 0` on the boundary). The cone-free
+/// log scale factor it evaluates is left in `cone_free` (the feedback loop's probe reuses it).
 ///
 /// # Errors
 /// The message of the error of the Laplacian solve; the caller reports it as a warning and
@@ -66,6 +67,7 @@ pub(crate) fn check_piece(
     prepared: &Prepared,
     piece: &Piece,
     check: &SpikeCheck,
+    cone_free: &mut Option<Vec<f64>>,
 ) -> Result<Option<SpikeReport>, String> {
     let mesh = &piece.mesh;
     let n = mesh.n_vertices();
@@ -89,6 +91,7 @@ pub(crate) fn check_piece(
     let log_scale = evaluate_cones(&problem, &prescribed, Parallelism::Sequential)
         .map_err(|e| e.to_string())?
         .log_scale;
+    *cone_free = Some(log_scale.clone());
     let mass = lumped_mass_normalized(mesh, &piece.geometry).map_err(|e| e.to_string())?;
     let mut parts: Vec<(f64, usize)> = (0..n)
         .map(|v| (mass[v] * log_scale[v] * log_scale[v], v))

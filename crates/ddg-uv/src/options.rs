@@ -426,8 +426,10 @@ pub struct UnwrapOptions {
     /// solver's linearized log scale factor with the one the flattening realizes, lower the
     /// distortion weight where they are far apart (thin spikes), and solve and flatten again
     /// until nothing changes. `None` switches it off. Costs a comparison per piece, and a solve
-    /// and a flattening per extra round where something is reweighted. Default `None` (see
-    /// the crate README, "The cone feedback loop", for the measurements behind the choice).
+    /// and a flattening per extra round where something is reweighted, and on a piece with a
+    /// boundary the cone-free probe (a flattening). Default `Some(FeedbackOptions::default())`:
+    /// on the measured meshes without needles it changes nothing, and it finds needles that the
+    /// spike check misses (the crate README, "The cone feedback loop").
     pub cone_feedback: Option<FeedbackOptions>,
 }
 
@@ -448,7 +450,7 @@ impl Default for UnwrapOptions {
             require_certified_cones: false,
             spike_check: Some(SpikeCheck::default()),
             split_overlaps: None,
-            cone_feedback: None,
+            cone_feedback: Some(FeedbackOptions::default()),
         }
     }
 }

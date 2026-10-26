@@ -545,10 +545,10 @@ class SpikeTest(unittest.TestCase):
     def test_cone_feedback(self):
         n = 20
         arrays = as_arrays(grid(n, [(10, 10, 2.0), (4, 15, 2.0)]))
-        plain = ddg_tools.unwrap(*arrays)
+        plain = ddg_tools.unwrap(*arrays, cone_feedback=False)
         self.assertIs(plain.report["cone_feedback"], False)
         self.assertNotIn("cone_feedback_rounds", plain.report)
-        result = ddg_tools.unwrap(*arrays, cone_feedback=True)
+        result = ddg_tools.unwrap(*arrays)  # on by default
         report = result.report
         self.assertIs(report["cone_feedback"], True)
         for key, kind in {

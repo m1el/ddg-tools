@@ -50,6 +50,9 @@ pub struct PieceCones {
     /// [`crate::feedback`]). The cones and scale factors above are those of its last kept
     /// solve.
     pub feedback: Option<ChartFeedback>,
+    /// The cone-free log scale factor of the prepared piece, if the spike check evaluated it
+    /// (the feedback loop's probe reuses it on a piece without slit).
+    pub(crate) cone_free_log_scale: Option<Vec<f64>>,
 }
 
 /// The result of stage 3a.
@@ -154,10 +157,11 @@ fn piece_cones(
 
     // Thin spikes dominate the distortion measure: look for them before solving.
     let mut spike_report = None;
+    let mut cone_free = None;
     let mut excluded: Vec<u32> = Vec::new();
     if let Some(check) = &options.spike_check {
         let start = Instant::now();
-        match spikes::check_piece(prepared, piece, check) {
+        match spikes::check_piece(prepared, piece, check, &mut cone_free) {
             Ok(found) => {
                 spike_report = found;
                 if let Some(found) = &mut spike_report
@@ -199,6 +203,7 @@ fn piece_cones(
         }
     }
     result.spikes = spike_report;
+    result.cone_free_log_scale = cone_free;
     Ok((result, warnings))
 }
 
@@ -414,6 +419,7 @@ fn finish(
         solve: solved.report,
         spikes: None,
         feedback: None,
+        cone_free_log_scale: None,
     }
 }
 

@@ -248,11 +248,13 @@ fn spike_tips_are_excluded_from_the_distortion_by_default_and_the_report_says_wh
             .iter()
             .any(|w| w.contains("excluded from the distortion"))
     );
+    // Without the cone feedback loop, which would find the tips on its own.
     let warn = UnwrapOptions {
         spike_check: Some(SpikeCheck {
             action: SpikeAction::WarnOnly,
             ..SpikeCheck::default()
         }),
+        cone_feedback: None,
         ..UnwrapOptions::default()
     };
     let only = unwrap(&mesh.input(), &warn).unwrap();

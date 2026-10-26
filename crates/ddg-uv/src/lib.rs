@@ -82,7 +82,7 @@
 //!    run along a diagonal of the triangulation, all triangle corners that belong to one
 //!    polygon corner receive the same UV; this is checked, and a violation is
 //!    [`UvError::Internal`].
-//!    Optionally ([`UnwrapOptions::cone_feedback`], [`cone_feedback`]), the solver's linearized
+//!    By default ([`UnwrapOptions::cone_feedback`], [`cone_feedback`]), the solver's linearized
 //!    scale factor is then compared with the one the flattening realizes, the distortion
 //!    weight is lowered where they are far apart (thin spikes), and the piece is solved and
 //!    flattened again until nothing changes.

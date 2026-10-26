@@ -330,7 +330,7 @@ def operator_is_registered_with_exactly_the_agreed_properties():
     assert properties["positive_cones_only"].default is True
     assert properties["optimize_boundary"].default is False
     assert properties["split_overlaps"].default is False
-    assert properties["cone_feedback"].default is False
+    assert properties["cone_feedback"].default is True
     assert properties["mark_seams"].default is False
     assert properties["pinned_group"].default == "" and properties["forbidden_group"].default == ""
     for menu in (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object):
