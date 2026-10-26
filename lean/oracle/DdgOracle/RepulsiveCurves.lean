@@ -6,3 +6,4 @@ import DdgOracle.RepulsiveCurves.Saddle
 import DdgOracle.RepulsiveCurves.Format
 import DdgOracle.RepulsiveCurves.Gen
 import DdgOracle.RepulsiveCurves.Fixtures
+import DdgOracle.RepulsiveCurves.Step

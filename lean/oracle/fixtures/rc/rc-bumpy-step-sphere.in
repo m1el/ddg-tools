@@ -1,0 +1,39 @@
+case rc-bumpy-step-sphere
+task step
+exponents 4008000000000000 4018000000000000
+quadrature midpoint
+search 3f1a36e2eb1c432d 3fe0000000000000 40 2
+tol mean 3eb0c6f7a0b5ed8d
+maxit 5
+c barycenter
+c sphere bf73b9c5bf808b89 3f82eaea8565b9c9 3f6e0c1ae752ef76 3ff055c1dc0e3da0 0 3 6 9 12
+net 14 14
+p 3ff041c03e358bdf bf360580870a0740 3f85bce1b2743e80
+p 3ff23b7afb923a5e 3fe18f7aedbae16e 3fcc48a15fa9c188
+p 3fdd42993dd7b610 3fe25874ef31a2d7 3fd10ce4606d63d1
+p 3fcd27cd3e1af0cb 3ff002dc2b561080 3fb36e20e125cfb0
+p bfd09237dc3115b5 3ff22697d4bc59ee bfbe5b7482ea73eb
+p bfdbcf4d258d402b 3fe16fa927e5e46c bfd02f79d8897491
+p bfed33fd03130149 3fdc3756ec9de263 bfc66768f59f3d2f
+p bff0035fb4b66bab 3ca1a9deec172596 3fa56f7030bc7bd5
+p bfe6147af6e29b30 bfd5442e9f6d2c60 3fcc0da46bd2b87a
+p bfe3e2cedb48108c bfe8d235c8ee5dcc 3fcbee30391227e2
+p bfc7b100785e9f0e bfe9f32097b5ed42 3fc5ee03a7072d06
+p 3fc94b48de01b959 bfebb484d7a0cabe bfbfd0723f779965
+p 3fe3759217895b48 bfe860d33eaef106 bfd0f3b8a117ed52
+p 3fe4a0f9b80e6a9f bfd3de5e1400a8f6 bfc80b09938c2d3e
+e 0 1
+e 1 2
+e 2 3
+e 3 4
+e 4 5
+e 5 6
+e 6 7
+e 7 8
+e 8 9
+e 9 10
+e 10 11
+e 11 12
+e 12 13
+e 13 0
+end

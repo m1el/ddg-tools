@@ -1612,14 +1612,14 @@ An independent Float implementation, from `crates/ddg-repulsive-curves/SPEC.md` 
 *Repulsive Curves* (Yu, Schumacher, Crane 2021): the discrete tangent-point energy and its
 differential, the Gram matrices `B`, `B⁰`, `A` by their increments at both quadratures, the
 constraints with their Jacobians, one projected Sobolev gradient (the dense saddle system, LU of
-`Dense.lean`) and one chord projection. Plain `Float` with its own 3-vector type; it shares no
+`Dense.lean`) and one chord projection, and chained normalized-Armijo steps. Plain `Float` with its own 3-vector type; it shares no
 formula code with the Rust crate or with `lean/proofs`. Code: `DdgOracle/RepulsiveCurves/`
 (`Basic` vectors, networks, validation; `Energy`; `Gram`; `Constraints`; `Saddle`; `Format`; `Gen`;
 `Selftest`; `Fixtures`).
 
 | command | |
 |---|---|
-| `ddg-oracle rc [IN [OUT]]` | answer every case of the stream (tasks `energy`, `gram`, `saddle`, `project`) |
+| `ddg-oracle rc [IN [OUT]]` | answer every case of the stream (tasks `energy`, `gram`, `saddle`, `project`, `step`) |
 | `ddg-oracle rc-gen SEED COUNT [FIRST]` | write `COUNT` seeded random cases (case `i` depends on `(SEED, i)` only) |
 | `ddg-oracle rc-selftest [N]` | central differences of the differential and of every Jacobian, the increments against the quadratic forms of §4.2-4.3 and against Eq. 31, scaling laws, the saddle equations, a regular circle (analytic), convergence of the projection, on `N` seeded networks (default 120) |
 | `ddg-oracle rc-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/rc`, 55 cases, 1.5 MB) |
@@ -1627,14 +1627,15 @@ formula code with the Rust crate or with `lean/proofs`. Code: `DdgOracle/Repulsi
 **Input** (`case NAME`, lines, `end`; floats are 16 hex digits, indices 0-based):
 
 ```
-task energy|gram|saddle|project
+task energy|gram|saddle|project|step
 exponents ALPHA BETA            hex floats
-quadrature midpoint|trapezoid   (saddle, project; gram always prints both)
+quadrature midpoint|trapezoid   (saddle, project, step; gram always prints both)
 planar AXIS                     optional: held coordinate 0|1|2 (SPEC 2.2); every vertex must have the same value of it
 matrices all|a                  (gram) a: only A (default all: B, B0, A, KB, K0)
 step TAU | steprel F            (project) trial = gamma - TAU g~, or TAU = F lbar / max|g~|
-tol mean|abs VALUE              (project) tau_len = VALUE lbar or VALUE   (default mean 1e-4)
-maxit N                         (project) default 3
+tol mean|abs VALUE              (project, step) tau_len = VALUE lbar or VALUE   (default mean 1e-4)
+maxit N                         (project, step) default 3
+search C S MAXHALV NSTEPS       (step) Armijo constant and shrink (hex floats), shrink limit, number of chained steps
 c barycenter [X Y Z]            constraints, in this order; targets default to the current values
 c total-length [L]
 c edge-lengths all | E E ...
@@ -1679,9 +1680,20 @@ the other ends of the first and second incident edge in edge order; `s = (γ_v�
 a redundant row gives a singular saddle. Penalties and the Armijo step are not modelled
 (see below).
 
-**Not yet done.** Task `step` (one normalized-Armijo step with a fixed schedule: trial `τ` sequence,
-chord iterations, accepted `τ`, positions; SPEC §13.6, §7) waits for the step API of the Rust crate
-(WP3); task `penalties` (WP7).
+* `step` (SPEC §7.1, §7.3): `steps N` (executed; a stuck step ends the chain), then per step `K`:
+  `step K TAU0 SLOPE F0 GNORM PIVOT COND` (`SLOPE = dÊ·g̃`, `GNORM = ‖g̃‖₂`), one
+  `trial K I TAU OUTCOME ITERS ENERGY VIOL MARGIN` per trial (`OUTCOME`: `accepted`,
+  `armijo-failed`, `non-finite`, `projection-failed:STATUS`; `ENERGY` of the projected curve, NaN if
+  the projection failed; `MARGIN = (F0 - c τ slope - F)/|F0|`, positive iff Armijo holds),
+  `result K accepted|stuck TAU HALVINGS E1`, `x K V X Y Z`. The rule: `n = ‖g̃‖₂`,
+  `τ₀ = 1/n` if `n > 1` else `1/√n`, and if the previous accepted `τ > 1e-5`,
+  `τ₀ = min(1.5 τ_prev, 4 τ₀)`; then `τ ← shrink · τ` until the chord projection of
+  `γ − τ g̃` converges and `Ê(γ̂) ≤ Ê(γ) - c τ slope`; stuck after more than `MAXHALV` shrinks or when
+  `τ < 1e-12 τ₀`, or when `slope` is not positive. Constraint targets and `ℓ̄₀` are those of the
+  first curve; `Ā`, `C` are frozen at the base curve of each step.
+
+**Not modelled.** Penalties (WP7), the collision-guarded line search, length schedules,
+subdivision, Barnes-Hut and multigrid back ends.
 
 **Rust side.** `crates/ddg-repulsive-curves/tests/oracle.rs` replays the fixtures (always) and fuzzes
 (`#[ignore]`) against the executable; its module docs state the tolerances and how to run it

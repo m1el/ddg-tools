@@ -160,7 +160,13 @@ def main (args : List String) : IO UInt32 := do
       out.flush
       return 0
     | _, _, _ => IO.eprintln usage; return 2
-  | ["rc-selftest"] => return if (← RepulsiveCurves.selftest) == 0 then 0 else 1
+  | ["rc-selftest"] =>
+    let mut bad ← RepulsiveCurves.selftest
+    for i in [0:300] do
+      if !RepulsiveCurves.roundTrips (RepulsiveCurves.genCase 5 i) then
+        IO.println s!"FAIL  generated case {i} does not round-trip"
+        bad := bad + 1
+    return if bad == 0 then 0 else 1
   | ["rc-selftest", n] =>
     match n.toNat? with
     | some k => return if (← RepulsiveCurves.selftest k) == 0 then 0 else 1

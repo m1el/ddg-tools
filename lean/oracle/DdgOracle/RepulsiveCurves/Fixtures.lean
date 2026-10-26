@@ -83,6 +83,18 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs { mk "rc-bumpy-project-sphere" "project" bumpy with cons := #[.barycenter none, .sphere c0 r0 (some #[0, 3, 6, 9, 12])], tau := 0.1, tauRel := true, tolVal := 1e-6, maxit := 5 } "surface rows: tolerance scaled by |grad f|"
   fs := add fs { mk "rc-planar-project" "project" planar with planar := some 2, cons := #[.barycenter none, .edgeLengths none], tau := 0.3, tauRel := true, tolVal := 1e-7, maxit := 5 } "planar projection"
   fs := add fs { mk "rc-circle-project-diverge" "project" circ with cons := #[.point 0 none, .edgeLengths (some #[0, 1, 2, 3, 4, 5, 6, 7])], tau := 40.0, tauRel := true, maxit := 3 } "very large step (40 edge lengths): the iteration limit, whatever the ending"
+  -- normalized Armijo steps
+  fs := add fs { mk "rc-circle-step" "step" (circle 20 1.0) with cons := #[.barycenter none] } "regular 20-gon, barycenter only: the radial gradient grows the circle (no noise-level direction)"
+  let wob := run1 (wobbleLoop 16 0.3 3 0.2 0.04) 36
+  fs := add fs { mk "rc-wobble-step" "step" wob with cons := #[.barycenter none, .edgeLengths none] } "wobbly loop with all edge lengths, one step (the first trial fails its projection)"
+  fs := add fs { mk "rc-wobble-step-chained" "step" wob with cons := #[.barycenter none, .edgeLengths none], search := { nSteps := 3 } } "three chained steps, default search"
+  fs := add fs { mk "rc-trefoil-step" "step" tre40 with ex := ex245, cons := #[.barycenter none, .totalLength none], search := { nSteps := 2 }, quad := .trapezoid } "trefoil (40), (2,4.5), trapezoid, two steps"
+  fs := add fs { mk "rc-helix-step-tangent" "step" helix with cons := #[.barycenter none, .totalLength none, .tangent (.vertex 0) none, .tangent (.vertex 15) none], search := { nSteps := 2 }, tolVal := 1e-6, maxit := 5 } "open curve with end tangents"
+  fs := add fs { mk "rc-tripod-step" "step" tri with cons := #[.barycenter none, .edgeLengths none], search := { nSteps := 2 } } "tripod"
+  fs := add fs { mk "rc-hopf-step" "step" hop with ex := ⟨2.5, 5.5⟩, cons := #[.barycenter none, .totalLength none], search := { armijo := 0.3, shrink := 0.25, nSteps := 2 } } "Hopf link, strict Armijo constant, shrink 1/4"
+  fs := add fs { mk "rc-bumpy-step-sphere" "step" ({ bumpy with pos := bumpy.pos.mapIdx fun i p => if [0, 3, 6, 9, 12].contains i then c0 + ((r0 / (p - c0).norm) * (p - c0)) else p }) with cons := #[.barycenter none, .sphere c0 r0 (some #[0, 3, 6, 9, 12])], search := { nSteps := 2 }, tolVal := 1e-6, maxit := 5 } "five vertices kept on a sphere"
+  fs := add fs { mk "rc-planar-step" "step" planar with planar := some 2, cons := #[.barycenter none, .edgeLengths none], search := { nSteps := 2 } } "planar loop"
+  fs := add fs { mk "rc-wobble-step-maxit" "step" wob with cons := #[.barycenter none, .edgeLengths none], tolVal := 1e-9, maxit := 1, search := { maxHalvings := 4 } } "projection limit 1 with a tight tolerance: every trial fails its projection, the search is stuck"
   -- errors (status error KIND ...)
   fs := add fs { mk "rc-error-exponents" "energy" circ with ex := ⟨3.0, 4.5⟩ } "beta < alpha + 2: InvalidExponents"
   fs := add fs { mk "rc-error-exponents-upper" "energy" circ with ex := ⟨2.0, 5.0⟩ } "beta >= 2 alpha + 1: InvalidExponents"
@@ -100,6 +112,15 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs { mk "rc-error-tangent-degree" "saddle" tri with cons := #[.barycenter none, .tangent (.vertex 0) none] } "tangent at the degree-3 junction: InvalidTangentSite"
   fs := add fs { mk "rc-error-tangent-flipped" "saddle" helix with cons := #[.barycenter none, .tangent (.edge 3) (some ((-1.0 : Float) * (helix.pos[4]! - helix.pos[3]!)))] } "tangent opposite to its direction: InfeasibleConstraint"
   return fs
+
+/-- Does the printed input parse back to a case with the same output? -/
+def roundTrips (c : RCCase) : Bool :=
+  let lines := ((printCase c).splitOn "\n").toArray.filterMap fun l =>
+    let t := tokens l
+    if t.isEmpty || t[0]! == "case" || t[0]! == "end" then none else some t
+  match parseBody c.name lines with
+  | .error _ => false
+  | .ok c2 => runCase c2 == runCase c && printCase c2 == printCase c
 
 private def statusOf (output : String) : String :=
   match (output.splitOn "\n").find? (·.startsWith "status ") with
@@ -160,7 +181,11 @@ def checkFixtures (dir : System.FilePath) : IO Nat := do
     else
       bad := bad + 1
       for p in problems do IO.println s!"FAIL  {p}"
-  IO.println s!"rc fixtures: {fixtures.size - bad} of {fixtures.size} match"
+  for (c, _) in fixtures do
+    if !roundTrips c then
+      bad := bad + 1
+      IO.println s!"FAIL  {c.name}: the printed input does not parse back to the same case"
+  IO.println s!"rc fixtures: {fixtures.size} cases, {bad} problems"
   return bad
 
 end Ddg.RepulsiveCurves

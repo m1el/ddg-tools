@@ -233,6 +233,36 @@ def selftest (count : Nat := 120) : IO Nat := do
               | .converged => pure ()
               | .tangentFlipped _ => pure ()
               | _ => bad ← fail bad s!"{tag}: projection of a 1% step did not converge to 1e-9 in 8 iterations ({pr.history})"
+  -- chained steps: monotone energy, the constraints hold after every accepted step
+  for i in [0:count / 4] do
+    let c0 := genCase 9 (8 * i + 7)
+    if c0.task == "step" then
+      let c := { c0 with cons := c0.cons.map fun | .tangent s _ => .tangent s none | k => k }
+      match common c with
+      | .error _ => pure ()
+      | .ok _ =>
+        let coords := coordsOf c.planar
+        match resolve c.net c.net.pos c.planar c.cons with
+        | .error _ => pure ()
+        | .ok rc =>
+          let lbar := (c.net.geo.len.foldl (· + ·) 0.0) / c.net.ne.toFloat
+          let tol := if c.tolMean then c.tolVal * lbar else c.tolVal
+          let mut pos := c.net.pos
+          let mut prev : Option Float := none
+          for _ in [0:c.search.nSteps] do
+            match normalizedStep c.net c.ex c.quad coords rc c.search tol lbar c.maxit pos prev with
+            | .error _ => break
+            | .ok r =>
+              checks := checks + 1
+              if r.accepted then
+                if r.e1 > r.f0 then bad ← fail bad s!"{c.name}: accepted step raises the energy"
+                let rows := evalRows { c.net with pos := r.pos } r.pos coords rc
+                for row in rows do
+                  let t := if row.unit == 0 then tol else if row.unit == 1 then tol / lbar else tol * row.gscale
+                  if row.phi.abs > t * (1.0 + 1e-9) then bad ← fail bad s!"{c.name}: constraint row violated after an accepted step"
+                pos := r.pos
+                prev := some r.tau
+              else break
   IO.println s!"rc selftest: {checks} checks, {bad} failures"
   return bad
 

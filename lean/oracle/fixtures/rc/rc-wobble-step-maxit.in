@@ -1,0 +1,43 @@
+case rc-wobble-step-maxit
+task step
+exponents 4008000000000000 4018000000000000
+quadrature midpoint
+search 3f1a36e2eb1c432d 3fe0000000000000 4 1
+tol mean 3e112e0be826d695
+maxit 1
+c barycenter
+c edge-lengths all
+net 16 16
+p 3ff0874ba17c321b 0000000000000000 bf8a67d13fd3dd2e
+p 3ff2a31bbcb794cc 3fdee107f8e7c162 3fc0911ecbd215fd
+p 3feb919707c1bd41 3feb919707c1bd40 3fcb3d48e99399e1
+p 3fd656abc839ae73 3feaf70bec2ae173 3fc3b734e5a0af20
+p 3c899f04f72b44ec 3fe73a2eed260336 bf751e790032df74
+p bfd62d7445d8523f 3feac54b1fc54498 bfc5b0b044c9a2ba
+p bfeb9b679c227bc8 3feb9b679c227bc9 bfccfe8dc499c45b
+p bff358ea1a2f4350 3fe00720f1a005d6 bfc3436068a3a136
+p bfef0a0591ee61c3 3ca11e7bffddfe3d bf775ca8653a1950
+p bfe4a81aa91e331c bfd11ccf14c36962 3fbc337e17aa345a
+p bfe24c194b13af20 bfe24c194b13af1e 3fccf52dd7d07969
+p bfda60b71737233d bfefd73f910ab8d4 3fc008ab0ce34a4d
+p bcb100145bb22f32 bff48c9888f7355e 3f7a8280a5a3895d
+p 3fdbca515911d3a9 bff0c5dee03bc735 bfc1cc038e9e0fc4
+p 3fe1fb89ab539609 bfe1fb89ab53960b bfcddb771f450e1b
+p 3fe45286713e6b3a bfd0d5e9b8065588 bfc59e0fe81b9f9e
+e 0 1
+e 1 2
+e 2 3
+e 3 4
+e 4 5
+e 5 6
+e 6 7
+e 7 8
+e 8 9
+e 9 10
+e 10 11
+e 11 12
+e 12 13
+e 13 14
+e 14 15
+e 15 0
+end

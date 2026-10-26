@@ -200,13 +200,21 @@ def genCase (seed i : Nat) : RCCase :=
     let ex := expoChoices[(← below expoChoices.size)]!
     let quad := if (← below 2) == 0 then Quad.midpoint else Quad.trapezoid
     let tk ← below 8
-    let task := if tk == 0 then "energy" else if tk == 1 then "gram" else if tk < 5 then "saddle" else "project"
-    let (net, cons) ← if task == "saddle" || task == "project" then randomConstraints net planar.isSome else pure (net, #[])
+    let task := if tk == 0 then "energy" else if tk == 1 then "gram" else if tk < 5 then "saddle"
+                else if tk < 7 then "project" else "step"
+    let (net, cons) ← if task != "energy" && task != "gram" then randomConstraints net planar.isSome else pure (net, #[])
+    -- a session needs a feasible start: tangent directions are the current tangents
+    let cons := if task == "step" then cons.map fun
+      | .tangent s _ => .tangent s none
+      | c => c else cons
+    let armijo := #[1e-4, 1e-2, 0.3][(← below 3)]!
+    let shrink := #[0.5, 0.7, 0.25][(← below 3)]!
+    let nSteps := 1 + (← below 3)
     let f ← uni 0.02 0.6
     let tolExp ← uni 2.0 5.0
     let maxit ← below 4
     return { name := s!"rc-{seed}-{i}", task, ex, quad, planar, allMatrices := true, net, cons,
-             tau := f, tauRel := true, tolMean := true, tolVal := Float.pow 10.0 (-tolExp), maxit := 1 + maxit }
+             tau := f, tauRel := true, search := { armijo, shrink, maxHalvings := 40, nSteps }, tolMean := true, tolVal := Float.pow 10.0 (-tolExp), maxit := 1 + maxit }
   (act.run rng).1
 
 end Ddg.RepulsiveCurves

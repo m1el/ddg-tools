@@ -1,5 +1,5 @@
 import DdgOracle.Cuts.Format
-import DdgOracle.RepulsiveCurves.Saddle
+import DdgOracle.RepulsiveCurves.Step
 
 /-!
 # Text format of the `rc` command
@@ -34,6 +34,8 @@ structure RCCase where
   /-- `step` is a fraction: `τ = tau · ℓ̄ / max|g̃|` (so the trial moves the curve by a fraction of
   an edge length whatever the scale of the gradient) -/
   tauRel : Bool := false
+  /-- line search of `step` -/
+  search : SearchOpts := {}
   /-- tolerance relative to the mean edge length (else absolute) -/
   tolMean : Bool := true
   /-- tolerance value -/
@@ -111,6 +113,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
   let mut cons : Array Cons := #[]
   let mut tau : Float := 0.0
   let mut tauRel := false
+  let mut search : SearchOpts := {}
   let mut tolMean := true
   let mut tolVal : Float := 1e-4
   let mut maxit := 3
@@ -120,8 +123,8 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
     let l := lines[i]!
     match l[0]! with
     | "task" =>
-      if l.size != 2 || !["energy", "gram", "saddle", "project"].contains l[1]! then
-        throw "task: expected 'task energy|gram|saddle|project'"
+      if l.size != 2 || !["energy", "gram", "saddle", "project", "step"].contains l[1]! then
+        throw "task: expected 'task energy|gram|saddle|project|step'"
       task := l[1]!
     | "exponents" =>
       if l.size != 3 then throw "exponents: expected 'exponents ALPHA BETA'"
@@ -147,6 +150,10 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
       if l.size != 2 then throw "steprel: expected 'steprel FRACTION'"
       tau ← floatTok "steprel" l[1]!
       tauRel := true
+    | "search" =>
+      if l.size != 5 then throw "search: expected 'search ARMIJO SHRINK MAXHALVINGS NSTEPS'"
+      search := { armijo := ← floatTok "search" l[1]!, shrink := ← floatTok "search" l[2]!,
+                  maxHalvings := ← natTok "search" l[3]!, nSteps := ← natTok "search" l[4]! }
     | "tol" =>
       if l.size != 3 then throw "tol: expected 'tol mean|abs VALUE'"
       tolMean := l[1]! == "mean"
@@ -177,7 +184,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
     i := i + 1
   if task == "" then throw "missing 'task' line"
   let some nt := net | throw "missing 'net' block"
-  return { name, task, ex, quad, planar, allMatrices := allM, net := nt, cons, tau, tauRel, tolMean, tolVal, maxit }
+  return { name, task, ex, quad, planar, allMatrices := allM, net := nt, cons, tau, tauRel, search, tolMean, tolVal, maxit }
 
 private def consLine : Cons → String
   | .barycenter none => "c barycenter\n"
@@ -197,11 +204,13 @@ private def consLine : Cons → String
 /-- The case in the input format. -/
 def printCase (c : RCCase) : String := Id.run do
   let mut s := s!"case {c.name}\ntask {c.task}\nexponents {hx c.ex.alpha} {hx c.ex.beta}\n"
-  if c.task == "saddle" || c.task == "project" then s := s ++ s!"quadrature {c.quad.name}\n"
+  if c.task == "saddle" || c.task == "project" || c.task == "step" then s := s ++ s!"quadrature {c.quad.name}\n"
   if c.task == "gram" && !c.allMatrices then s := s ++ "matrices a\n"
   if let some a := c.planar then s := s ++ s!"planar {a}\n"
   if c.task == "project" then
     s := s ++ s!"{if c.tauRel then "steprel" else "step"} {hx c.tau}\ntol {if c.tolMean then "mean" else "abs"} {hx c.tolVal}\nmaxit {c.maxit}\n"
+  if c.task == "step" then
+    s := s ++ s!"search {hx c.search.armijo} {hx c.search.shrink} {c.search.maxHalvings} {c.search.nSteps}\ntol {if c.tolMean then "mean" else "abs"} {hx c.tolVal}\nmaxit {c.maxit}\n"
   for k in c.cons do s := s ++ consLine k
   s := s ++ s!"net {c.net.nv} {c.net.ne}\n"
   for p in c.net.pos do s := s ++ s!"p {hx p.x} {hx p.y} {hx p.z}\n"
@@ -277,6 +286,32 @@ private def printSaddle (c : RCCase) (d : Array V3) : Except String String := do
   s := s ++ s!"dfg {hx gr.dfg}\ngnorm {hx gr.gnorm}\n"
   return s ++ "end\n"
 
+private def printStep (c : RCCase) : Except String String := do
+  let coords := coordsOf c.planar
+  let rc ← resolve c.net c.net.pos c.planar c.cons
+  let lbar := (c.net.geo.len.foldl (· + ·) 0.0) / c.net.ne.toFloat
+  let tol := if c.tolMean then c.tolVal * lbar else c.tolVal
+  let mut pos := c.net.pos
+  let mut prev : Option Float := none
+  let mut recs : Array StepRec := #[]
+  for _ in [0:c.search.nSteps] do
+    let r ← normalizedStep c.net c.ex c.quad coords rc c.search tol lbar c.maxit pos prev
+    recs := recs.push r
+    if !r.accepted then break
+    pos := r.pos
+    prev := some r.tau
+  let mut s := s!"case {c.name}\ntask step\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\nquadrature {c.quad.name}\n"
+  s := s ++ s!"rows {rc.size} {coords.size * c.net.nv}\nlbar {hx lbar}\nsteps {recs.size}\n"
+  for k in [0:recs.size] do
+    let r := recs[k]!
+    s := s ++ s!"step {k} {hx r.tau0} {hx r.slope} {hx r.f0} {hx r.gnorm} {hx r.pivot} {hx r.cond}\n"
+    for i in [0:r.trials.size] do
+      let t := r.trials[i]!
+      s := s ++ s!"trial {k} {i} {hx t.tau} {t.outcome} {t.iters} {hx t.energy} {hx t.viol} {hx t.margin}\n"
+    s := s ++ s!"result {k} {if r.accepted then "accepted" else "stuck"} {hx r.tau} {r.halvings} {hx r.e1}\n"
+    for v in [0:r.pos.size] do s := s ++ s!"x {k} {v} {hx r.pos[v]!.x} {hx r.pos[v]!.y} {hx r.pos[v]!.z}\n"
+  return s ++ "end\n"
+
 private def printProject (c : RCCase) (d : Array V3) : Except String String := do
   let coords := coordsOf c.planar
   let rc ← resolve c.net c.net.pos c.planar c.cons
@@ -308,6 +343,7 @@ def runCase (c : RCCase) : String :=
     | "energy" => printEnergy c e d
     | "gram" => printGram c
     | "saddle" => match printSaddle c d with | .error err => printError c.name c.task err | .ok s => s
+    | "step" => match printStep c with | .error err => printError c.name c.task err | .ok s => s
     | _ => match printProject c d with | .error err => printError c.name c.task err | .ok s => s
 
 /-- Read cases until the end of `input`, write one block per case, flush after each. -/

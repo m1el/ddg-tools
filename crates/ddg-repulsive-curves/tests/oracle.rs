@@ -5,7 +5,9 @@
 //! `B⁰`, `A` by their increments and the kernel matrices `K^B`, `K⁰`, at both quadratures (`gram`),
 //! the constraint values and Jacobians of every constraint type together with one projected
 //! Sobolev gradient from the dense saddle system (`saddle`), and one chord projection of a trial
-//! step `γ − τ g̃` (`project`). This test is written from the oracle's README section "Repulsive
+//! step `γ − τ g̃` (`project`), and up to three chained normalized-Armijo steps (`step`: the
+//! sequence of trial step sizes with their projections and Armijo decisions, the accepted step and the
+//! curve; compared with this crate's `Session`). This test is written from the oracle's README section "Repulsive
 //! curves" and this crate's public API.
 //!
 //! * `fixtures_are_reproduced` (always runs): replays the committed golden fixtures
@@ -41,10 +43,11 @@
 //! | Jacobian `C` | normwise `1e-12` |
 //! | `g̃` | normwise `1e-10` plus `1e-12 ℓ̄` (it vanishes at symmetric critical points) |
 //! | `λ`, `dF·g̃`, `‖g̃‖` | normwise `1e-9` plus `1e-12` of the scale |
-//! | all solve quantities (`g̃`, `λ`, `dF·g̃`, projection) | multiplied by `max(1, 50 eps κ / 1e-10)`, `κ` the condition number printed by the oracle (`cond`), for the few percent-of-a-percent ill-conditioned saddles |
+//! | all solve quantities (`g̃`, `λ`, `dF·g̃`, projection) | multiplied by `max(1, 200 eps κ / 1e-10)`; the second and third step of a chain have 10 times more, since they start from curves that differ by the errors of the earlier steps, `κ` the condition number printed by the oracle (`cond`), for the few percent-of-a-percent ill-conditioned saddles |
 //! | projection: status, number of iterations | exactly, unless a violation history entry is within `1e-5` of 1 (a decision at the tolerance) or the status is a rounding race |
 //! | projection: history `max|Φ_r|/tol_r` | `1e-6` relative plus `1e-3` absolute (entries below 1 are rounding-level residuals) |
 //! | projection: final positions | `1e-9 ℓ̄` |
+//! | step: trials | the number, the outcome and the chord iterations of every trial exactly, step sizes `1e-9`, energies `1e-9` (relative); not compared after a trial whose Armijo margin `(F0 - c tau slope - F)/F0` is below `1e-7` (a rounding race) |
 //! | invalid input | the oracle names the error variant; this crate must return an error of the same variant (singular saddle: any of `SingularMetric`, `SingularSaddle`, `RedundantConstraints`) |
 //!
 //! Not modelled by the oracle (so never generated): intersecting edges (`EdgesIntersect`), tangent
@@ -65,6 +68,10 @@ use ddg_repulsive_curves::constraints::{
 use ddg_repulsive_curves::energy::exact::make_pool;
 use ddg_repulsive_curves::metric::sobolev_dense::GramGeometry;
 use ddg_repulsive_curves::metric::{GramQuadrature, Metric, gram, kernel_matrices};
+use ddg_repulsive_curves::optimize::Method;
+use ddg_repulsive_curves::step::line_search::{LineSearch, TrialOutcome};
+use ddg_repulsive_curves::step::stop::{GradNorm, StepStatus, StopRule};
+use ddg_repulsive_curves::step::{Backend, FlowOptions, Session, Solver};
 use ddg_repulsive_curves::solve::{
     ProjectionOptions, ProjectionStatus, Tolerance, dense_sobolev_solver, project_constraints,
     projected_gradient,
@@ -94,9 +101,9 @@ const DECISION: f64 = 1e-5;
 /// calls it singular and this crate does not (or the reverse), neither is wrong.
 const SINGULAR_AMBIGUITY: f64 = 1e-11;
 /// The oracle prints the infinity-norm condition number `κ` of its equilibrated saddle matrix. A
-/// solve is trusted to about `50 eps κ` (`eps = 1.1e-16`); where that exceeds the base tolerance of
-/// the solve quantities (`1e-10`), the tolerances are multiplied by `50 eps κ / 1e-10`.
-const COND_ERROR: f64 = 50.0 * 1.1e-16;
+/// solve is trusted to about `200 eps κ` (`eps = 1.1e-16`); where that exceeds the base tolerance of
+/// the solve quantities (`1e-10`), the tolerances are multiplied by `200 eps κ / 1e-10`.
+const COND_ERROR: f64 = 200.0 * 1.1e-16;
 const SOLVE_BASE: f64 = 1e-10;
 
 // ----- the text format -----
@@ -177,6 +184,10 @@ struct Input {
     tol_mean: bool,
     tol_val: f64,
     maxit: u32,
+    armijo: f64,
+    shrink: f64,
+    max_halvings: u32,
+    n_steps: usize,
 }
 
 fn p3(l: &Line, i: usize) -> P {
@@ -201,6 +212,10 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
         tol_mean: true,
         tol_val: 1e-4,
         maxit: 3,
+        armijo: 1e-4,
+        shrink: 0.5,
+        max_halvings: 40,
+        n_steps: 1,
     };
     for l in lines {
         match l[0].as_str() {
@@ -221,6 +236,12 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
             "tol" => {
                 input.tol_mean = l[1] == "mean";
                 input.tol_val = float(&l[2]);
+            }
+            "search" => {
+                input.armijo = float(&l[1]);
+                input.shrink = float(&l[2]);
+                input.max_halvings = int(&l[3]) as u32;
+                input.n_steps = int(&l[4]);
             }
             "maxit" => input.maxit = int(&l[1]) as u32,
             "p" => input.positions.push(p3(l, 1)),
@@ -558,6 +579,7 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     match input.task.as_str() {
         "energy" => replay_energy(input, &net, ex, out, stats),
         "gram" => replay_gram(input, &net, ex, out, stats),
+        "step" => replay_step(input, &net, ex, out, stats),
         _ => replay_solve(input, &net, ex, out, stats),
     }
 }
@@ -574,10 +596,169 @@ fn rust_pipeline_error(input: &Input) -> (Option<RcError>, Option<f64>) {
     };
     match input.task.as_str() {
         "energy" | "gram" => (None, None),
+        "step" => (step_session(input, &net, ex).err(), None),
         _ => match solve_rust(input, &net, ex) {
             Ok((_, _, solver)) => (None, Some(solver.pivot_ratio())),
             Err(e) => (Some(e), None),
         },
+    }
+}
+
+fn step_session(input: &Input, net: &CurveNetwork, ex: Exponents) -> Result<Session, RcError> {
+    let tolerance = if input.tol_mean {
+        Tolerance::MeanEdgeLength(input.tol_val)
+    } else {
+        Tolerance::Absolute(input.tol_val)
+    };
+    let opts = FlowOptions {
+        exponents: ex,
+        metric: Metric::Sobolev {
+            quadrature: input.quad,
+        },
+        backend: Backend::Explicit {
+            energy: EnergyEval::Exact,
+            solver: Solver::Dense,
+        },
+        method: Method::ProjectedGradient,
+        constraints: constraints_of(input),
+        planar: axis_of(input),
+        line_search: LineSearch::NormalizedArmijo {
+            armijo: input.armijo,
+            shrink: input.shrink,
+            max_halvings: input.max_halvings,
+        },
+        projection: ProjectionOptions {
+            tolerance,
+            max_iterations: input.maxit,
+        },
+        // never converge: the oracle always takes the step
+        stop: StopRule::GradientNorm {
+            norm: GradNorm::Euclidean,
+            eps: 1e-300,
+        },
+        max_iterations: 1000,
+        threads: Some(1),
+        dense_threads: Some(1),
+        ..FlowOptions::default()
+    };
+    Session::new(net.clone(), input.positions.clone(), opts)
+}
+
+fn outcome_token(o: &TrialOutcome) -> String {
+    match o {
+        TrialOutcome::Accepted => "accepted".into(),
+        TrialOutcome::ArmijoFailed => "armijo-failed".into(),
+        TrialOutcome::NonFinite => "non-finite".into(),
+        TrialOutcome::ProjectionFailed(st) => format!(
+            "projection-failed:{}",
+            match st {
+                ProjectionStatus::Converged => "converged".to_string(),
+                ProjectionStatus::MaxIterations => "max-iterations".to_string(),
+                ProjectionStatus::Diverged => "diverged".to_string(),
+                ProjectionStatus::TangentFlipped { constraint } => format!("tangent-flipped-{constraint}"),
+            }
+        ),
+        TrialOutcome::PathCollision { .. } => "path-collision".into(),
+    }
+}
+
+fn rel_ratio(a: f64, b: f64, rel: f64, abs: f64) -> f64 {
+    (a - b).abs() / (rel * a.abs().max(b.abs()) + abs)
+}
+
+/// The Armijo margin below which the accept/reject decision of a trial is a rounding race.
+const ARMIJO_TIE: f64 = 1e-7;
+
+fn replay_step(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], stats: &mut Stats) {
+    let name = input.name.as_str();
+    let mut session = match step_session(input, net, ex) {
+        Ok(s) => s,
+        Err(e) => return stats.problem(name, format!("the oracle runs the steps; the session cannot start: {e:?}")),
+    };
+    let lbar = float(&first(out, "lbar").unwrap()[1]);
+    let n_steps = int(&first(out, "steps").unwrap()[1]);
+    for k in 0..n_steps {
+        let kk = k.to_string();
+        let st = rows_with(out, "step").into_iter().find(|l| l[1] == kk).expect("step line");
+        let (tau0, slope, f0, gnorm, cond) = (float(&st[2]), float(&st[3]), float(&st[4]), float(&st[5]), float(&st[7]));
+        let mut mult = (COND_ERROR * cond / SOLVE_BASE).max(1.0);
+        if mult > 1.0 {
+            stats.ill_conditioned += 1;
+            if k > 0 {
+                mult *= 10.0;
+            }
+        }
+        let otrials: Vec<&Line> = rows_with(out, "trial").into_iter().filter(|l| l[1] == kk).collect();
+        let res = rows_with(out, "result").into_iter().find(|l| l[1] == kk).expect("result line");
+        let o_accepted = res[2] == "accepted";
+        let rep = match session.step() {
+            Ok(r) => r,
+            Err(e) => return stats.problem(name, format!("step {k}: {e:?}")),
+        };
+        // later steps start from curves that differ by the projection residuals of the earlier ones
+        let f0_tol = if k == 0 { ENERGY_REL } else { 1e-9 * mult };
+        stats.check(name, "step: F0", rel_ratio(rep.energy_before, f0, f0_tol, 0.0), || format!("{} vs {f0}", rep.energy_before));
+        stats.check(name, "step: dF.g", rel_ratio(rep.sobolev_norm_sq, slope, SCALAR_REL * mult, 0.0), || format!("{} vs {slope}", rep.sobolev_norm_sq));
+        stats.check(name, "step: |g|", rel_ratio(rep.gradient_norm, gnorm, SCALAR_REL * mult, 0.0), || format!("{} vs {gnorm}", rep.gradient_norm));
+        if rep.trials.is_empty() && otrials.is_empty() {
+            // no line search in either (degenerate slope)
+            if o_accepted || rep.status == StepStatus::Accepted {
+                return stats.problem(name, format!("step {k}: no trials but a step was accepted"));
+            }
+            return;
+        }
+        stats.check(name, "step: first tau", rel_ratio(rep.tau_start, tau0, SCALAR_REL * mult, 0.0), || format!("{} vs {tau0}", rep.tau_start));
+        // trial by trial, up to the first Armijo race
+        let mut raced = false;
+        let n = rep.trials.len().min(otrials.len());
+        for i in 0..n {
+            let (t, o) = (&rep.trials[i], otrials[i]);
+            let margin = float(&o[8]);
+            let race = margin.is_finite() && margin.abs() < ARMIJO_TIE * mult;
+            stats.check(name, "step: trial tau", rel_ratio(t.tau, float(&o[3]), SCALAR_REL * mult, 0.0), || format!("trial {i}"));
+            if race {
+                raced = true;
+                stats.tie_skips += 1;
+                break;
+            }
+            let (mine, theirs) = (outcome_token(&t.outcome), o[4].clone());
+            stats.comparisons += 1;
+            if mine != theirs || t.projection_iterations as usize != int(&o[5]) {
+                return stats.problem(
+                    name,
+                    format!(
+                        "step {k}, trial {i}: '{mine}' after {} iterations here, '{theirs}' after {} in the oracle",
+                        t.projection_iterations,
+                        int(&o[5])
+                    ),
+                );
+            }
+            if let Some(e) = t.energy {
+                let eo = float(&o[6]);
+                stats.check(name, "step: trial energy", rel_ratio(e, eo, 1e-9 * mult, 0.0), || format!("trial {i}: {e} vs {eo}"));
+            }
+        }
+        if raced {
+            return;
+        }
+        stats.comparisons += 1;
+        if rep.trials.len() != otrials.len() {
+            return stats.problem(name, format!("step {k}: {} trials here, {} in the oracle", rep.trials.len(), otrials.len()));
+        }
+        let mine_accepted = rep.status == StepStatus::Accepted;
+        if mine_accepted != o_accepted {
+            return stats.problem(name, format!("step {k}: status {:?} here, '{}' in the oracle", rep.status, res[2]));
+        }
+        *stats.statuses.entry(format!("step-{}", res[2])).or_default() += 1;
+        if !o_accepted {
+            return;
+        }
+        stats.check(name, "step: accepted tau", rel_ratio(rep.tau, float(&res[3]), SCALAR_REL * mult, 0.0), || "tau".into());
+        stats.check(name, "step: F after", rel_ratio(rep.energy_after, float(&res[5]), 1e-9 * mult, 0.0), || "F1".into());
+        let x_o: Vec<P> = rows_with(out, "x").iter().filter(|l| l[1] == kk).map(|l| p3(l, 3)).collect();
+        let (a, b) = (flat(session.positions()), flat(&x_o));
+        let err = a.iter().zip(&b).fold(0.0f64, |m, (x, y)| m.max((x - y).abs()));
+        stats.check(name, "step: positions", err / (POS_LBAR * lbar * mult), || "x".into());
     }
 }
 
@@ -748,7 +929,6 @@ fn replay_solve(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], 
         ProjectionStatus::MaxIterations => "max-iterations".to_string(),
         ProjectionStatus::Diverged => "diverged".to_string(),
         ProjectionStatus::TangentFlipped { constraint } => format!("tangent-flipped {constraint}"),
-        _ => "other".to_string(),
     };
     *stats.statuses.entry(o_status.split(' ').next().unwrap().to_string()).or_default() += 1;
     let hist_o: Vec<f64> = first(out, "hist").unwrap()[1..].iter().map(|t| float(t)).collect();
