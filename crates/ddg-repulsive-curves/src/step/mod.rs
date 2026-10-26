@@ -58,6 +58,7 @@ use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
 use crate::energy::{BhOptions, EnergyEval};
 use crate::error::RcError;
 use crate::kernel::Exponents;
+use crate::multigrid::{MgOptions, MultigridSolvers};
 use crate::metric::{DofLayout, Metric, classic_metric, sobolev_gram};
 use crate::network::{Axis, CurveNetwork, check_planar};
 use crate::optimize::{Lbfgs, Method, Ncg, dotv, mean_free_rows};
@@ -67,10 +68,13 @@ use crate::solve::{
 };
 use crate::subdivide::{SubdivisionMap, subdivide, subdivide_constraints};
 
+pub mod fallback;
 pub mod line_search;
 pub mod schedule;
 pub mod stop;
 
+pub use fallback::SolverFallback;
+use fallback::{FallbackSaddle, FallbackSlot};
 use line_search::{
     LineSearch, LineSearchReport, SearchEnv, SearchInput, Trial, line_search, project_with_path,
 };
@@ -80,6 +84,9 @@ use stop::{Status, StepStatus, StopRule, StopState, mass_norm};
 /// Default size of the dense solver's pool: `faer`'s LU stops scaling past 16–32 threads (WP2,
 /// `SPEC.md` §17b; measured again by WP3, see the crate notes).
 pub const DEFAULT_DENSE_THREADS: usize = 16;
+
+/// Default of [`FlowOptions::dense_fallback_max_vertices`].
+pub const DEFAULT_DENSE_FALLBACK_MAX_VERTICES: usize = 5000;
 
 // =============================================================================================
 // Hooks
@@ -416,7 +423,15 @@ impl SolverFactory for DirectSolvers {
 pub enum Solver {
     /// [`DirectSolvers`].
     Dense,
-    /// A caller-supplied back end (the multigrid of WP6 plugs in here).
+    /// The multigrid saddle solver ([`MultigridSolvers`]) with these options, on the session's
+    /// pools. The hierarchy is rebuilt at every step (and so after every subdivision); when it
+    /// fails ([`RcError::MultigridDiverged`], [`RcError::MultigridNotConverged`]) the step falls
+    /// back to the dense solver if the network has at most
+    /// [`FlowOptions::dense_fallback_max_vertices`] vertices
+    /// ([`StepReport::solver_fallback`]).
+    Multigrid(MgOptions),
+    /// A caller-supplied back end. It builds on the pools of the [`SolverRequest`], and gets
+    /// the same dense fallback as [`Solver::Multigrid`].
     Custom(Arc<dyn SolverFactory>),
 }
 
@@ -424,6 +439,7 @@ impl fmt::Debug for Solver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Solver::Dense => write!(f, "Dense"),
+            Solver::Multigrid(o) => write!(f, "Multigrid({o:?})"),
             Solver::Custom(s) => write!(f, "Custom({})", s.name()),
         }
     }
@@ -511,6 +527,11 @@ pub struct FlowOptions {
     pub dense_threads: Option<usize>,
     /// Keep the path of every accepted step in the report (for audits; memory heavy).
     pub record_path: bool,
+    /// When an iterative solver ([`Solver::Multigrid`], a custom factory) fails on a step, the
+    /// step repeats the solve with the dense solver if the network has at most this many
+    /// vertices (`(3|V| + k)²` doubles of memory, about 2 GB at 5000); larger networks return
+    /// the error. 0: never fall back. Default 5000 (`SPEC.md` §17h).
+    pub dense_fallback_max_vertices: usize,
 }
 
 impl fmt::Debug for FlowOptions {
@@ -534,6 +555,10 @@ impl fmt::Debug for FlowOptions {
             .field("threads", &self.threads)
             .field("dense_threads", &self.dense_threads)
             .field("record_path", &self.record_path)
+            .field(
+                "dense_fallback_max_vertices",
+                &self.dense_fallback_max_vertices,
+            )
             .finish()
     }
 }
@@ -560,6 +585,7 @@ impl Default for FlowOptions {
             threads: None,
             dense_threads: None,
             record_path: false,
+            dense_fallback_max_vertices: DEFAULT_DENSE_FALLBACK_MAX_VERTICES,
         }
     }
 }
@@ -592,6 +618,13 @@ impl FlowOptions {
         }
         if self.method.is_soft() && !self.constraints.is_empty() {
             return Err(RcError::MethodNeedsSoftProblem);
+        }
+        if let Backend::Explicit {
+            solver: Solver::Multigrid(o),
+            ..
+        } = &self.backend
+        {
+            o.validate()?;
         }
         Ok(())
     }
@@ -730,6 +763,9 @@ pub struct StepReport {
     pub energy_backend: &'static str,
     /// Solver back end used.
     pub solver_backend: &'static str,
+    /// The iterative solver failed in this step and the dense solver answered instead
+    /// ([`Solver::Multigrid`]); `None`: no fallback.
+    pub solver_fallback: Option<SolverFallback>,
     /// Soft methods: L-BFGS / NCG details.
     pub soft: Option<SoftReport>,
     /// Seconds per phase.
@@ -809,6 +845,7 @@ pub struct Session {
     obstacles: Vec<PreparedObstacle>,
     pool: Arc<rayon::ThreadPool>,
     dense_pool: Arc<rayon::ThreadPool>,
+    fallback: FallbackSlot,
     energy: Box<dyn EnergyModel>,
     solver: Arc<dyn SolverFactory>,
     mean_edge_length0: f64,
@@ -985,6 +1022,7 @@ impl Session {
         let energy = energy_model(&eval, options.exponents, pool.clone())?;
         let solver: Arc<dyn SolverFactory> = match solver {
             Solver::Dense => Arc::new(DirectSolvers::new()),
+            Solver::Multigrid(o) => Arc::new(MultigridSolvers::new(o)?),
             Solver::Custom(f) => f,
         };
         let mut s = Session {
@@ -997,6 +1035,7 @@ impl Session {
             obstacles,
             pool,
             dense_pool,
+            fallback: FallbackSlot::default(),
             energy,
             solver,
             mean_edge_length0,
@@ -1101,7 +1140,7 @@ impl Session {
         jacobian: &SparseMatrix,
         hard: bool,
     ) -> Result<Box<dyn SaddleSolver>, RcError> {
-        self.solver.build(&SolverRequest {
+        let request = SolverRequest {
             network: &self.network,
             positions: &self.positions,
             exponents: self.options.exponents,
@@ -1111,7 +1150,19 @@ impl Session {
             constraints: hard.then_some(&self.constraints),
             pool: &self.pool,
             dense_pool: &self.dense_pool,
-        })
+        };
+        let solver = self.solver.build(&request)?;
+        let iterative = !matches!(self.solver.name(), "direct");
+        let n = self.network.n_vertices();
+        if iterative && n <= self.options.dense_fallback_max_vertices {
+            return Ok(Box::new(FallbackSaddle::new(
+                solver,
+                self.solver.name(),
+                &request,
+                self.fallback.clone(),
+            )));
+        }
+        Ok(solver)
     }
 
     fn ccd_options(&self) -> CcdOptions {
@@ -1232,6 +1283,7 @@ impl Session {
         }
         let iteration = self.iteration + 1;
         let mut seconds = Timings::default();
+        *self.fallback.lock().unwrap_or_else(|e| e.into_inner()) = None;
 
         // 0. Re-target.
         let t = Instant::now();
@@ -1322,6 +1374,7 @@ impl Session {
             subdivided: false,
             energy_backend: self.energy.name(),
             solver_backend: self.solver.name(),
+            solver_fallback: None,
             soft: soft_report,
             seconds,
             path: None,
@@ -1470,6 +1523,11 @@ impl Session {
         if self.status == Status::Running && self.iteration >= self.options.max_iterations {
             self.status = Status::MaxIterations;
         }
+        report.solver_fallback = self
+            .fallback
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         report.seconds.total = t_step.elapsed().as_secs_f64();
         Ok(report)
     }

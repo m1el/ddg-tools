@@ -98,8 +98,9 @@ pub struct MgOptions {
     /// The smoother is CG preconditioned by the diagonal plus the exact terms of the edge pairs
     /// closer than `smoother_factor · max(ℓ_I, ℓ_J)` (`SPEC.md` §17g); 0: plain CG.
     pub smoother_factor: f64,
-    /// A solve that ends above the tolerance fails ([`RcError::MultigridDiverged`]) when its
-    /// final relative residual is above this bound (an unconverged result between `tolerance`
+    /// A solve that ends above the tolerance fails when its final relative residual is above this
+    /// bound: [`RcError::MultigridDiverged`] if the residual grew since the full-multigrid start,
+    /// [`RcError::MultigridNotConverged`] if it stagnated (an unconverged result between `tolerance`
     /// and this bound is returned and reported in [`LinearReport::relative_residual`]).
     pub failure_residual: f64,
     /// Flexible CG stops only when the energy-norm estimate of the error also meets the
@@ -770,8 +771,17 @@ impl SaddleSolver for MultigridSaddle {
                 let pr = p0.project(r)?;
                 let (y, rep) = vcycle::solve_with_energy_check(h, &pr, &cycle, energy_check)?;
                 if !rep.converged && rep.final_residual() > failure {
-                    return Err(RcError::MultigridDiverged {
-                        residuals: rep.residuals,
+                    // Grown since the full-multigrid start: diverged; otherwise stagnated.
+                    let first = rep.residuals.first().copied().unwrap_or(0.0);
+                    return Err(if rep.final_residual() > first {
+                        RcError::MultigridDiverged {
+                            residuals: rep.residuals,
+                        }
+                    } else {
+                        RcError::MultigridNotConverged {
+                            residuals: rep.residuals,
+                            failure_residual: failure,
+                        }
                     });
                 }
                 reports.push(rep);

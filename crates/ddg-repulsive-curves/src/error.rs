@@ -163,10 +163,21 @@ pub enum RcError {
         /// Index of the pivot.
         pivot: usize,
     },
-    /// The multigrid residual history grew.
+    /// The multigrid residual grew (or became non-finite): the cycles are not a contraction on
+    /// this problem. The session falls back to the dense solver when the size permits
+    /// (`SPEC.md` §17h).
     MultigridDiverged {
-        /// Relative residuals per cycle.
+        /// Relative residuals per cycle (the first entry is the full-multigrid start).
         residuals: Vec<f64>,
+    },
+    /// The multigrid residual did not grow but stagnated above `failure_residual` when the
+    /// cycle budget ended: the solve is too inaccurate to use, yet the cycles did not diverge.
+    /// Handled like [`RcError::MultigridDiverged`] by the session (`SPEC.md` §17h).
+    MultigridNotConverged {
+        /// Relative residuals per cycle (the first entry is the full-multigrid start).
+        residuals: Vec<f64>,
+        /// The bound `MgOptions::failure_residual` the final residual stayed above.
+        failure_residual: f64,
     },
     /// The energy is NaN or infinite.
     NonFiniteEnergy {
@@ -325,9 +336,24 @@ impl fmt::Display for RcError {
                     "the saddle-point matrix has a zero pivot at index {pivot}"
                 )
             }
-            MultigridDiverged { residuals } => {
-                write!(f, "multigrid diverged; relative residuals {residuals:?}")
-            }
+            MultigridDiverged { residuals } => write!(
+                f,
+                "multigrid diverged: the relative residual grew or became non-finite \
+                 (first {:e}, last {:e}); relative residuals {residuals:?}",
+                residuals.first().copied().unwrap_or(f64::NAN),
+                residuals.last().copied().unwrap_or(f64::NAN),
+            ),
+            MultigridNotConverged {
+                residuals,
+                failure_residual,
+            } => write!(
+                f,
+                "multigrid did not converge: the relative residual stagnated at {:e} after {} \
+                 residual evaluations, above the failure bound {failure_residual:e}; relative \
+                 residuals {residuals:?}",
+                residuals.last().copied().unwrap_or(f64::NAN),
+                residuals.len(),
+            ),
             NonFiniteEnergy { step } => write!(f, "the energy is not finite at step {step}"),
             ObstacleTriangleOutOfRange {
                 triangle,

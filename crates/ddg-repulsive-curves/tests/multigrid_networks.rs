@@ -975,7 +975,7 @@ fn unconverged_solve_above_the_failure_bound_is_an_error() {
     let mut mg = mg_solver(&pr, 2, o).unwrap();
     let r = projected_gradient(&mut mg, pr.set.layout(), &pr.diff);
     assert!(
-        matches!(r, Err(RcError::MultigridDiverged { .. })),
+        matches!(r, Err(RcError::MultigridNotConverged { .. })),
         "{:?}",
         r.map(|g| g.linear)
     );
