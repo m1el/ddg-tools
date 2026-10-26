@@ -54,9 +54,10 @@ let map = unwrap(&input, &UnwrapOptions::default())?;
 | `unwrap(&MeshInput, &UnwrapOptions) -> Result<UvMap, UvError>` | the whole pipeline |
 | `MeshInput { positions, corner_vertices, polygon_offsets, triangles, seam_edges, pinned_vertices, prescribed_cones, forbidden_vertices }` | borrowed input; `triangles` are triples of polygon-**corner** indices; `MeshInput::new`, `validate` |
 | `UvMap { uvs, polygon_charts, cones, cut_edges, report }` | the result |
-| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, boundary, require_certified_cones, spike_check }` | every policy, see below; `validate` |
+| `UnwrapOptions { lambda, cone_signs, max_cone_angle, closed_surfaces, merge, orientation, degenerate, packing, overlap_samples_per_triangle, reoptimize_angles, boundary, require_certified_cones, spike_check, split_overlaps, cone_feedback }` | every policy, see below; `validate` |
 | `ConeSigns`, `ClosedSurfaces`, `SlitPlacement`, `MergeClusters`, `Orientation`, `Degenerate`, `PackOptions`, `SpikeCheck`, `SpikeAction`, `BoundaryValues` | the policy types |
-| `prepare`, `solve_cones`, `flatten`, `assemble` (`Prepared`, `Piece`, `ConeStage`, `PieceCones`, `FlatStage`, `PieceFlat`) | the stages as separate functions |
+| `prepare`, `solve_cones`, `flatten`, `cone_feedback`, `assemble` (`Prepared`, `Piece`, `ConeStage`, `PieceCones`, `FlatStage`, `PieceFlat`) | the stages as separate functions |
+| `FeedbackOptions`, `ChartFeedback { reweighted, pending, report: FeedbackReport }`, `realized_face_log_scale(geometry, corner_uvs)` | the [cone feedback loop](#the-cone-feedback-loop) |
 | `pack_charts(&mut uvs, polygon_offsets, polygon_charts, &PackOptions) -> Result<PackReport, UvError>` | the packer on its own |
 | `area_distortion(positions, corner_vertices, triangles, uvs) -> AreaDistortion` | the dataset README's distortion measure of any UV map |
 | `Report` (`ValidationReport`, `SeamReport`, `DegenerateReport`, `SteeringReport`, `ChartReport`, `ConeSolveReport`, `FlattenReport`, `ConeStats`, `SeamLengths`, `ClosedHandling`, `MergeOutcome`, `Timings`, `PackReport`, `SpikeReport`), `Report::summary() -> Vec<(&str, Value)>` | the report, typed and as a flat key–value list for bindings |
@@ -115,6 +116,7 @@ normalized to 1.
 | `reoptimize_angles` | `false` | `true`: a second solve for the best angles at the chosen positions |
 | `boundary` | `Zero`: `u = 0` on the boundary of every piece, boundary lengths (and so the two sides of a seam) preserved | `Optimized`: the solver chooses `u` on the boundary, [see below](#the-boundary) |
 | `spike_check.action` | `ExcludeFromDistortion`: spike tips get zero distortion weight, see [the spike check](#the-spike-check) | `WarnOnly` |
+| `cone_feedback` | `None` | `Some(FeedbackOptions { .. })`: compare the solver's scale factor with the flattening's and solve again with lowered weights, see [the cone feedback loop](#the-cone-feedback-loop) |
 | `require_certified_cones` | `false`: uncertified cones are used with a warning | `true`: an error |
 
 Then the piece is cut through its cones by `ddg-bff`'s planner with a mask that allows
@@ -403,6 +405,39 @@ on them; `tests/dataset.rs` still asserts their warning-free results). The cone 
 with the exclusion on `camelshotnoise` (4.5 s instead of 0.5 s). Excluded tips still count in the
 distortion of the realized map, so the pipeline's measured distortion (0.26) stays above the
 published map's 0.095.
+
+## The cone feedback loop
+
+**What** (`src/feedback.rs`, `UnwrapOptions::cone_feedback = Some(FeedbackOptions { .. })`). After
+stages 3a and 3b, on every piece that was solved, the pipeline drives the cone solver's feedback
+rule (`ddg_optimal_cones::Feedback`; the rule, its design decisions and the proofs are in the
+solver's README, "The feedback loop"): it compares the solver's linearized log scale factor
+`u_i` with the realized log area factor of the faces around the vertex in the flattening the
+stage made (`realized_face_log_scale`), lowers the distortion weight of the interior vertices
+where they differ by more than the threshold, and solves (with the pipeline's own policies:
+closed pieces, merge guard, slit, angle bounds) and flattens that piece again, until a round
+picks nothing. The spike check runs once, before; the vertices it excluded start with weight
+zero and are not looked at. A solve or flattening that fails after a reweighting keeps the
+previous cones and flattening of the piece, with a warning.
+
+**Output.** `ChartReport::feedback: Option<ChartFeedback { reweighted, pending, report }>`
+(`reweighted` and `pending` in the caller's numbering; `report` is the solver crate's
+`FeedbackReport`: every round's mismatch and seconds, the final weights in the piece's
+numbering, why it stopped); in `Report::summary()` the keys `cone_feedback_rounds`,
+`n_cone_feedback_reweighted`, `n_cone_feedback_pending`, `cone_feedback_max_mismatch` (largest
+`|δ|` among the vertices looked at in the first round), `cone_feedback_final_mismatch` (the same
+in the last round), `cone_feedback_vertices` (only if any) and `seconds_cone_feedback`
+(`Timings::cone_feedback`); a warning per piece where weights were lowered or the loop could not
+finish.
+
+**Cost.** Where nothing is reweighted: the comparison only (`O(F + V log V)`), no solve, and the
+map is bit for bit the one without the loop (tested). Per extra round: the piece's solve and
+flattening again; a zero weight disables the solver's factor-once method, so that solve runs the
+reference method.
+
+**Measured** (`cargo run --release -p ddg-uv --example evaluate -- feedback`: with and without
+the loop, with the spike check on and off, on the 23 dataset meshes, the models of `data/models`
+and the primitives). Not measured yet (phase 2 of the work).
 
 ## The dataset
 
@@ -1236,6 +1271,7 @@ cargo clippy -p ddg-uv --all-targets -- -D warnings
 | `tests/errors.rs` | every refusal with its exact message; inconsistent winding repaired and reported; degenerate triangles mollified and reported |
 | `tests/properties.rs` | random meshes of ten kinds (disk, sphere, cube, capped cylinder, cone, torus, genus 2, disk with n-gon, annulus, two components), jittered, quads split along either diagonal, random seams, steering and options: finite UVs, cuts on polygon edges only, UVs continuous across every edge that is not cut, seams cut, prescribed cones exact or reported, counts consistent, positive cones where asked, input unchanged, identical second run |
 | `tests/dataset.rs` | the 23 dataset meshes with the defaults (release build; a debug build runs `bump` only, because the unoptimized cone solver needs minutes for the others); skipped with a notice without the data |
+| `tests/feedback.rs` | the cone feedback loop: with the spike check off it finds the two tips of a spiked grid and ends with the cones of the spike check's exclusion, it finds a spike on a sphere, it leaves the map of smooth meshes bit for bit unchanged, invalid options are errors; `solve_with_feedback` with Boundary First Flattening on a grid with a lifted vertex |
 
 The census of the property test's generator (2000 fixed cases): 1982 unwrapped and passed
 every check, 9 refused because positive cones were demanded on a closed genus-2 surface, 9

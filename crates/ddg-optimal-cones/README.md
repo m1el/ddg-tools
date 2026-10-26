@@ -20,6 +20,7 @@ Contents: [example](#example) · [the problem](#the-problem) · [the boundary](#
 [the published dataset](#the-published-dataset) · [choosing λ](#choosing-λ) ·
 [closed meshes](#closed-meshes) · [disconnected meshes](#disconnected-meshes) ·
 [re-optimizing given cones](#re-optimizing-given-cones) · [needle-like spikes](#needle-like-spikes) ·
+[the feedback loop](#the-feedback-loop) ·
 [performance baseline](#performance-baseline) · [performance of the factor-once method](#performance-of-the-factor-once-method) · [formula tags](#formula-tags) · [tests](#tests) ·
 [not implemented](#not-implemented)
 
@@ -274,6 +275,22 @@ pub struct ExtractionReport { threshold, n_dropped, dropped_angle, merge_request
     unmerged: Vec<UnmergedCluster>,   // vertices, angle, diameter, reason: TooLarge | TooWide | BoundsViolated
     cones_differ_from_measure, distortion_change, total_angle_change, n_beyond_two_pi }
 
+// feedback.rs: lower wE where the solver's u is far from a flattening's (see "The feedback loop")
+pub struct FeedbackOptions { threshold: f64 /* 4 */, reduced_weight: f64 /* 0 */,
+    max_rounds: usize /* 4 */, max_reweighted_fraction: f64 /* 0.01 */ }
+pub fn solve_with_feedback<R, E: Display>(problem, boundary, options: &SolveOptions, feedback: &FeedbackOptions,
+    realize: impl FnMut(&Solution) -> Result<(Vec<f64> /* r_t per face */, R), E>)
+    -> Result<FeedbackSolution<R>, FeedbackError<E>>;    // solution, realized: R, feedback: FeedbackReport
+pub struct Feedback;                                     // the rule as a state machine (new, weights, observe,
+                                                         // round_failed, finish), for callers with their own solve
+pub struct FeedbackReport { rounds: Vec<FeedbackRound>, reweighted, pending, weights, stop: FeedbackStop, seconds }
+pub struct FeedbackRound { max_abs_mismatch, rms_mismatch, max_abs_eligible, offsets, n_unmeasured,
+    n_over_threshold, reweighted, seconds_solve, seconds_realize, seconds_mismatch }
+pub enum FeedbackStop { Stable, RoundLimit, TooManyVertices { wanted, allowed }, NoWeightLeft { component },
+    RoundFailed { round, message }, NotContinued }
+pub fn scale_mismatch(mesh, geometry, log_scale: &[f64], realized_face_log_scale: &[f64])
+    -> Result<ScaleMismatch, ConeError>;                 // δ per vertex, offsets, max, rms
+
 // weights.rs: the curvature-adapted weights of the paper's Sec. 8.1
 pub fn feature_size_weights(mesh, geometry, epsilon: f64, convention: FeatureSizeConvention)
     -> Result<FeatureSizeWeights, ConeError>;      // AsDescribed | AsPrinted
@@ -302,6 +319,7 @@ says what is wrong and where; a solve that runs but does not reach a certified o
 | re-optimize the angles of a given set of cones | `reoptimize_cones(problem, &vertices, ..)`: `cone_costs = 0` at those vertices and `+∞` elsewhere, solved directly ([re-optimizing given cones](#re-optimizing-given-cones)) |
 | keep every angle realizable | bounds inside `(−2π, 2π)`; `extraction.n_beyond_two_pi` counts what is outside |
 | ignore needle-like spikes | `distortion_weights[v] = 0.0` at their tips ([needle-like spikes](#needle-like-spikes)) |
+| find such vertices from a flattening | `solve_with_feedback(.., realize)` with a flattener in `realize` ([the feedback loop](#the-feedback-loop)); `ddg-uv` does it with `UnwrapOptions::cone_feedback` |
 | a closed convex mesh | several free sites, cones forbidden elsewhere, bounds ([closed meshes](#closed-meshes)) |
 
 Every array has one entry per mesh vertex; entries of boundary vertices are validated and have
@@ -1181,6 +1199,13 @@ treatment of the file's family).
 | rhino | n=36, Σ=15.4330, D*=1.5627e-1: +316.3% | n=36, Σ=56.3305, D*=4.3284e-2: +15.3% |
 | tree | n=8, Σ=6.8537, D*=1.5862e-1: +267.5% | n=7, Σ=21.2411, D*=4.2963e-2: -0.5% (n differs) [Σ>cap] |
 
+### Published UVs with the feedback loop
+
+C1 of Table C with [the feedback loop](#the-feedback-loop) at every probe of the search
+(`DDG_RECIPES=c1,c1fb cargo run --release -p ddg-uv --example published_uvs`), against C1 without
+it and, on `camelshotnoise`, against zero weight at the 22 tips set by hand. Not measured yet
+(phase 2 of the work).
+
 ## Choosing λ
 
 `λ` here is for masses divided by the area. For masses as they are in a file,
@@ -1337,6 +1362,69 @@ and 1 to 245 other cones, one cone next to a tip (at `λ = 0.002`); with optimiz
 cone for `λ ≥ 0.2`, for `λ ≤ 0.1` 0 to 3 of the 6 and 2 to 231 other cones, none at a tip. The
 as-described feature-size weights were not solved penalized, since their refit does not converge. So this
 hypothesis is **not** confirmed: the weights do not reproduce the published angles on this mesh.
+
+## The feedback loop
+
+The canonical problem measures distortion with the solution `u` of the **linearized** Yamabe
+equation. Where that linearization is poor the solver optimizes a distortion that no flattening
+has: at the tips of needles ([needle-like spikes](#needle-like-spikes)) the linearized `u` is of
+order `−h/ρ` (`−1.5·10⁴` on `camelshotnoise`) while a flattening places the tip between its
+neighbours (about `−4`), and the solver spends its cones there (C1 at `+982 %` `D*`, [published
+UVs](#published-uvs-measured-comparison)). Zero distortion weight at the 22 tips, set by hand,
+gives `−20 %`. The feedback loop finds such vertices from a flattening instead of by hand
+(ROADMAP, "Scheduled" 1 of 2026-10-14).
+
+**The rule** (`src/feedback.rs`).
+
+1. Solve with the current weights `wE`.
+2. Flatten the solution's `cones` with its `log_scale` (the caller does this; this crate does not
+   depend on a flattener) and measure the realized log area factor of every face,
+   `r_t = ½ ln(|B_t|/A_t)` (`A_t` on the surface, `B_t` in the plane; absolute value, so a flipped
+   face still says how much it was scaled; `ddg_uv::realized_face_log_scale`).
+3. Compare at every vertex (`scale_mismatch`):
+   `δ_i = (u_i − R_i) − c`, `R_i = Σ_{t∋i} A_t r_t / Σ_{t∋i} A_t`, `c` the mass-weighted
+   median of `u − R` over the measured vertices of the connected component.
+4. Every interior vertex with `wE_i > 0`, not reweighted before, with `|δ_i| > threshold` gets
+   `wE_i ← reduced_weight · wE_i`.
+5. Repeat until a round picks nothing (`Stable`). Stop without applying a round if `max_rounds`
+   solves were done (`RoundLimit`), if more than `max_reweighted_fraction` of the vertices would
+   be reweighted in total (`TooManyVertices`), or if a component would be left without a positive
+   weight (`NoWeightLeft`). A solve or flattening that fails after a reweighting undoes it and
+   keeps the previous solution (`RoundFailed`).
+
+**Design decisions, and why.**
+
+| question | decision | reason |
+|---|---|---|
+| where it lives | the rule (`Feedback`, `scale_mismatch`) and a driver with a flattening closure (`solve_with_feedback`) here; the pipeline's driver in `ddg-uv` (`UnwrapOptions::cone_feedback`, `ddg_uv::cone_feedback`) | this crate does not depend on `ddg-bff`; `ddg-uv` depends on both and has its own solve (policies for closed pieces, merge guard, slits), so it drives the same state machine with its own solve and flattening instead of a second copy of the rule |
+| what is compared | the solver's vertex value `u_i` with the area-weighted mean `R_i` of the realized face values around it | comparing the solver's own face values `(u_a + u_b + u_c)/3` with `r_t` would spread a tip's `−1.5·10⁴` over its neighbours (the ring of a needle would be flagged too); the price is a bias where `u` has a kink: at a cone `u_i` lies `(µ − Ω_i)/Σ_j w_ij` below its neighbours, about `1.7` for `µ = 0.95 · 2π` on a regular mesh |
+| scale invariance | `δ` is a difference of logs (dimensionless), and the offset `c` removes the free constant of `u` (closed meshes) and the scale of the plane; `δ` is invariant under both (`lean/proofs`, `cone-feedback-mismatch`) | a closed mesh has a free constant, and a flattening may be scaled |
+| offset | weighted median, not mean | the tips' `\|δ\|` of `10⁴` on `0.26 %` of the area would move a mean by about 13 and flag every other vertex |
+| "far" | `\|δ_i\| > threshold`, default `4` (a factor `e⁸ ≈ 3000` in area), provisional until the measurements below | a needle tip has `\|δ\|` of order `h/ρ` (`10⁴` on `camelshotnoise`, about 50 on the synthetic spikes of the tests); a cone near `2π` about 1.7 |
+| per vertex or per region | per vertex | zero weight at the tips and at the tips plus their 1-rings give the same angles ([needle-like spikes](#needle-like-spikes)); with the vertex value the ring is not flagged |
+| how the weight drops | to `0` by default (`reduced_weight`, any factor in `[0, 1)`) | what the hand-set experiment did; a factor `f > 0` keeps the minimizer unique, but the tip's `m u²` of `10⁴` times `f` must be negligible, so `f` would have to be tiny anyway |
+| which vertices | interior vertices with a positive weight, each at most once | a zero weight at a `Free` boundary vertex can make the problem ill posed ([the boundary](#the-boundary)); weights only decrease, so the loop ends |
+| round cap | `max_rounds = 4` solves, the first included; `1` measures only | after the tips are excluded the next round should be stable; a needle whose tip got a cone in round 0 shows up in round 1 when that cone moves away |
+| guard | at most `1 %` of the vertices (`max_reweighted_fraction`); a round that would exceed it is not applied | a mismatch on many vertices is not a spike; lowering weights everywhere would change the problem, not repair it. With `1 %` a mesh of fewer than 100 vertices is never reweighted (the rule of `ddg-uv`'s spike check) |
+| stop | a round that picks no vertex | then the solution agrees with its flattening at the threshold |
+| default | off in this crate (it needs a flattener); in the pipeline, Python and Blender decided by the measurements below | the user's rule: the more stable and reliable option is the default |
+
+**What is proved and what is not.** `cone-feedback-mismatch` (`DdgProofs/ConeFeedback.lean`):
+`faceMean` shifts with its values, the weighted median is shift-equivariant (the quantile of
+`cut-weighted-quantile`, the same scan in Rust), `δ` does not change when a constant is added
+to `u` and another to every `r_t`, and `δ = 0` wherever the flattening realizes `u` up to such
+constants. The rule itself is a design choice (`CITED.md`, `cone-feedback-rule`): there is
+nothing to prove about a threshold. Each solve of the loop is certified as any other; the result
+is the certified optimum of the canonical problem **with the returned weights**
+(`FeedbackReport::weights`).
+
+**Cost.** On a mesh where nothing is reweighted: one comparison (`O(F + V log V)`, a sort for
+the median) after the solve and the flattening that were made anyway. Per extra round: one solve
+and one flattening. A zero weight disables the factor-once method
+([not implemented](#not-implemented)), so the extra solves run the reference method. The
+measured numbers are below.
+
+**Measured.** (Not measured yet: phase 2 of the work.)
 
 ## Performance baseline
 
@@ -1527,6 +1615,9 @@ what the theorems cover, which is not always the whole statement.
 | `component-separation` | `Instance::part`, `Discrete::from_instance`, `certify_instance`, `solve`, `solve_part`, `evaluate_cones`, `reoptimize_cones` | On a mesh with several components `L` is block diagonal and the objective a sum: `(u, µ)` is a minimizer (a solution of the optimality system) of the whole problem iff every restriction is one of its component's part, with the masses of the whole problem; every closed component has its own constant of `u` and its own `Σ µ = 2πχ`. | `isMinimizer_sum_iff`, `kkt_sum_iff`, `objective_sum`, `feasible_sum_iff`, `isMinimizer_sum_iff_alone` (`DdgProofs/Components.lean`) |
 | `component-lambda-rescaling` | `equivalent_lambda` | A component with its masses normalized by its own area `A_c` instead of the total `A` has the same minimizers with `λ · A / A_c`, and the adjoint of its optimality system is `A / A_c` times that of the whole problem. | `isMinimizer_normalizeMass_alone_iff`, `kkt_normalizeMass_alone_iff`, `isMinimizer_scaleMass_withLam_iff`, `kkt_scaleMass_withLam_iff`, `Site.stationary_mul_iff` |
 | `feature-size-weights` | `feature_size_weights` | `wE_i = r_i`, `wR_i = 1/r_i` with `r_i = \|Ω_i\|/m_i + ε` ("as described") or its reciprocal ("as printed"), `m` area-normalized (paper Sec. 8.1). | cited in `CITED.md` (a choice of input data, not a derived formula) |
+| `cone-feedback-mismatch` | `scale_mismatch` | `R_i = Σ_{t∋i} A_t r_t / Σ_{t∋i} A_t` over the measured faces, `δ_i = (u_i − R_i) − c` with `c` the mass-weighted median of `u − R` over the measured vertices of the component; `δ` is invariant under `u + a`, `r + b`, and zero where `u − R` is constant. | `faceMean_shift`, `mismatch_shift`, `mismatch_eq_zero_of_const` (`DdgProofs/ConeFeedback.lean`) |
+| `cut-weighted-quantile` (taken from the cut flow) | `weighted_quantile` (feedback) | the first value, in ascending order, at which the weights summed so far reach `q` times their sum; here `q = ½`. Shifting the values shifts it. | the cut flow's theorems, and `isWeightedQuantile_shift`, `weightedQuantile_shift` |
+| `cone-feedback-rule` | `Feedback::observe` | the reweighting rule of [the feedback loop](#the-feedback-loop) | cited in `CITED.md` as a design choice: a threshold rule, nothing to prove |
 
 ## Tests
 
@@ -1553,6 +1644,8 @@ cargo run  --release -p ddg-optimal-cones --example fingerprint            # bit
 | `tests/enclosure.rs` | `optimum_enclosure` against the generic convex solver on perturbed triples; when it is withheld |
 | `tests/components.rs` | disconnected meshes: the union against separate solves with `λ · A / A_c`, against Clarabel, relabeling, steering per component, methods, threads, every entry point |
 | `tests/reoptimize.rs` | `reoptimize_cones` against `solve` on `reoptimization_problem` and against Clarabel, moving a cone, edge cases, disconnected meshes, the published cone files |
+| unit tests in `src/feedback.rs` | the weighted median, the mismatch (no mismatch for a consistent realization, invariance under constants, unmeasured faces, errors), the rule (a far vertex is reweighted once, the limits end the loop without applying the round, a failed round is undone, factors and initial weights, boundary vertices, a component keeps a weight), invalid options |
+| `crates/ddg-uv/tests/feedback.rs` | the loop with Boundary First Flattening: it finds the tips of thin spikes on a grid and on a sphere, ends where the hand-set exclusion starts, changes nothing on smooth meshes, invalid options are errors |
 
 The dataset is not part of the repository; without it the dataset tests print a notice and pass.
 
