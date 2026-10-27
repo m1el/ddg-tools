@@ -117,6 +117,7 @@ k(p, q, T) = |T × d|^α / |d|^β,     d = p − q,  |T × d| = |P_T d|,  P_T = 
 Both orders `(I, J)` and `(J, I)` are summed; `k̂` is not symmetric (it uses `T_I`). Pairs of
 edges with a common vertex are omitted (paper Sec. 5.1). This is the paper's discretization; the
 reference uses another one (D1).
+Close pairs: by default the flow corrects Eq. 18 for edge pairs that come close in their interiors (§3.4, WP16; not in the paper).
 
 ### 3.2 Differential
 
@@ -159,6 +160,93 @@ homogeneous: `Ê(cγ) = c^{2+α−β} Ê(γ)` for `c > 0` [formula: rc-energy-sc
 
 *(checked: 4e-15, 1e-14, and the Euler identity to 1e-14 relative.)* The exponent `2 + α − β` is
 −1 for (3, 6) and −½ for (2, 4.5): the energy falls when the curve grows.
+
+### 3.4 Near pairs: an accurate pair integral for close edges (WP16; not in the paper)
+
+**Why.** Eq. 18 evaluates the pair integral `e_IJ = ∫_I ∫_J k(x, y, T_I) dx dy` with the four
+endpoint pairs. When two disjoint edges come close in their interiors (closest points far from
+all four endpoints), `k̂_IJ` stays bounded while the pair integral of the polygon diverges like
+`d^{2+α−β}` (−1 for (3, 6), −½ for (2, 4.5); [formula: rc-near-divergence]). The evaluation
+(§17o) found Hs runs that the flow drove into such a crossing until the contact floor (§17l.6)
+stopped them. With `FlowOptions::near_pair = Some(NearPairOptions)` (**the default**) close pairs
+use an accurate evaluation of the same pair integral, blended into Eq. 18; `None` is the paper's
+energy exactly. This departs from the paper (like the collapse guard of §17j).
+
+**Which pairs.** Unordered pairs `{I, J}` of disjoint edges with `r_IJ = d_IJ / ℓ_IJ < c₂`, where
+`d_IJ` is the segment distance and `ℓ_IJ = √((ℓ_I² + ℓ_J²)/2)` (smooth in both lengths, `= ℓ` for
+equal lengths), **except** pairs joined by one edge (`I, K, J` consecutive; option
+`second_neighbours`, default `false`): their closest points are the ends of `K`, where Eq. 18
+has nodes; there it overestimates the pair integral (a corner barrier the paper's flows and the
+authors' scenes rely on, §17o). Defaults `c₁ = 0.25`, `c₂ = 0.75`, `M = 4` (§17o). Broad phase: a
+uniform grid (cell `(1 + 2c₂) max ℓ`, sorted cell entries), `O(|E|)`; the pair list is sorted.
+
+**The term.** For each such pair and each order `(I, J)` [formula: rc-near-blend]
+
+```
+e_IJ = e^p_IJ + w(r_IJ) (e^n_IJ − e^p_IJ),   e^p = k̂_IJ ℓ_I ℓ_J (Eq. 18)
+w(r) = W(τ),  τ = (c₂ − r)/(c₂ − c₁) clamped to [0, 1],  W(τ) = τ³(10 − 15τ + 6τ²)
+```
+
+`W(0) = 0`, `W(1) = 1`, `W' = 30τ²(1−τ)²`, `W'' = 60τ(1−τ)(1−2τ)`: C², flat at both ends.
+
+**Inner integral** (along `I`, `T_I` fixed). With `a = γ_{i₁}`, `y ∈ J`, `u₀ = T_I·(y − a)`,
+`h = |P_{T_I}(y − a)|`: `|T_I × (x − y)| = h` for every `x ∈ I` and `|x − y|² = (u − u₀)² + h²`
+[formula: rc-near-h-constant], and with `u − u₀ = h tan θ` [formula: rc-near-inner]
+
+```
+F(y) = ∫_0^{ℓ_I} h^α ((u − u₀)² + h²)^{−β/2} du = h^{1+α−β} (S(θ₁) − S(θ₀)),
+θ₁ = atan2(ℓ_I − u₀, h),  θ₀ = atan2(−u₀, h),  S(θ) = ∫_0^θ cos^{β−2} φ dφ.
+```
+
+`S` by two binomial series with ratio ≤ ½, 60 terms [formula: rc-near-cos-series]:
+`|θ| ≤ π/4`: `S = Σ_k C(a,k)(−1)^k s^{2k+1}/(2k+1)`, `s = sin θ`, `a = (β − 3)/2`;
+`|θ| > π/4`: `S = ±(S(π/2) − R(cos θ))`, `R(c) = c^{β−1} Σ_k C(−½,k)(−1)^k c^{2k}/(β − 1 + 2k)`;
+`S(π/2) = S(π/4) + R(cos π/4)`. When both angles are beyond `π/4` on one side, `S(θ₁) − S(θ₀)` is
+evaluated as the difference of the two `R` terms (no cancellation of `S(π/2)` against itself).
+`h = 0` (on the line of `I`, outside `I`): `F = 0` with zero gradient (`α > 1`). `S' = cos^{β−2}`
+holds to rounding, so the gradient of `F` is analytic:
+`∂F/∂u₀ = h^γ(−∂C/∂X₁ − ∂C/∂X₀)`, `∂F/∂h = γF/h + h^γ ∂C/∂h`, `∂F/∂ℓ_I = h^γ ∂C/∂X₁` with
+`γ = 1 + α − β`, `C = S(θ₁) − S(θ₀)`, `X₁ = ℓ_I − u₀`, `X₀ = −u₀`, `R_i² = X_i² + h²`,
+`∂C/∂X_i = ±cos^{β−2}θ_i · h/R_i²`, `∂C/∂h = −cos^{β−2}θ₁ X₁/R₁² + cos^{β−2}θ₀ X₀/R₀²`, and
+`δu₀ = n·(δγ_{i₂} − δγ_{i₁})/ℓ_I + T·(δy − δγ_{i₁})`, `δh = n̂·(δy − δγ_{i₁}) − u₀ n̂·(δγ_{i₂} − δγ_{i₁})/ℓ_I`
+(`n = P_T(y − a)`).
+
+**Outer integral** (along `J`, `y = γ_{j₁} + t(γ_{j₂} − γ_{j₁})`, `t ∈ [0, 1]`)
+[formula: rc-near-outer]. Breakpoints: the closest-point parameter `t*` on `J` and the projections
+of `γ_{i₁}`, `γ_{i₂}` onto `J` (clamped), sorted (stable: `t*` first on ties); panels between
+`0`, the three breakpoints and `1`. Each panel `[lo, hi]` is halved; a half of length `L` is graded
+toward its end `c` by `t = c ± δ sinh w`, `w ∈ [0, asinh(L/δ)]`, `δ = d_IJ/ℓ_J`, with `M`
+sub-panels of 8-point Gauss–Legendre in `w` (`dt = δ cosh w dw`). `e^n_IJ = ℓ_J ∫_0^1 F dt`. The
+node count is fixed, `64 M` per order; empty panels are skipped unless an end moves (their
+derivative with respect to a moving end is `±F`). The energy diverges like `d^{2+α−β}` as
+`d → 0` at bounded cost; the error against an adaptive reference is ≤ `2.5e-6` relative (§17o)
+[formula: rc-near-quadrature-error].
+
+**Differential** [formula: rc-near-differential]. Exact for the evaluated quadrature: direct
+dependence of `F` on the four endpoints at fixed nodes, plus the nodes and weights through `t*`,
+the two projections, `δ` and `ℓ_J`; `∇d = n̂ ⊗ ((1 − s*), s*, −(1 − t*), −t*)` (envelope theorem);
+`∇s*, ∇t*` by implicit differentiation of `A·D = 0`, `B·D = 0` for the free parameters (zero when
+clamped) [formula: rc-near-closest]; the blend
+`∇e = (1 − w)∇e^p + w∇e^n + w'(r)(e^n − e^p)∇r`, `∇r = ∇d/ℓ_IJ − r ∇ℓ_IJ/ℓ_IJ`,
+`∇ℓ_IJ = (ℓ_I∇ℓ_I + ℓ_J∇ℓ_J)/(2ℓ_IJ)`. Smoothness: `e^n` is smooth where the breakpoint order
+and the clamping regimes are fixed; at their switches it has kinks of the size of the quadrature
+error. `d_IJ` is `C¹` but not `C²` where the active bounds change and not differentiable for
+parallel overlapping segments; inside the blend band (`w' ≠ 0`) the energy is therefore `C¹`, and
+at exactly parallel overlapping pairs in the band only directionally differentiable.
+
+**Evaluation.** Exact energy: the correction `Σ_{pairs} w Σ_{orders}(e^n − e^p)` is added to
+Eq. 17 after the rows, in pair order, and its differential vertex by vertex in pair order; pairs
+are evaluated in parallel: bitwise independent of the thread count (D25). When no pair is near,
+nothing is added: the energy and its differential are **bitwise** those of §3.1–3.2. Barnes–Hut
+(§8.2): the order `(I, J)` is corrected iff `J` is among the exactly evaluated edges of row `I`
+in the frozen interaction lists (near pairs are never lumped by the default parameters; if one
+were, its lumped term stays), so the trial energies of a line search are one function and the
+differential (§17i plus the correction) is its exact derivative. The near pairs are found anew
+at every evaluation (outside the band `w = 0`, so pairs entering or leaving it do not break
+smoothness). Invariances: the correction is invariant under rigid motions and re-orientation
+and homogeneous of degree `2 + α − β` (`r`, `δ`, the nodes in `t` are scale-free), so §3.3 holds.
+The metric (§4) is unchanged. `energy()` (§9.1) stays the paper's; `energy_with_near_pair()`
+evaluates this one.
 
 ## 4. Inner products
 
@@ -699,6 +787,7 @@ pub struct FlowOptions {
     pub dense_threads: Option<usize>,
     pub dense_fallback_max_vertices: usize,            // default 5000; 0: never fall back (§17h)
     pub min_edge_length_ratio: Option<f64>,            // default Some(1e-3); collapse guard (§17j)
+    pub near_pair: Option<NearPairOptions>,             // default Some(default); near-pair quadrature (§3.4)
     pub back_projection: bool,                         // default true; false: Fig. 20's "without projection" (§17l)
     pub second_order_correction: bool,                 // default false; trials γ − τp + τ²q (§17l)
     pub newton_polish: Option<f64>,                    // default Some(100); Newton steps below 100 tol (§17l)
@@ -817,6 +906,7 @@ end-to-end table script (§14.5).
 | multigrid threads | `max_threads Some(16)` | §17l: the hierarchy's products and projections stop gaining past 8–16 threads and get slower at 64 (§17k); results do not depend on it |
 | dense solver | Schur complement, LU fallback | §17l: same solutions as the LU to 1e-13 relative, residual as small or smaller, bitwise across thread counts, 15× faster at 2048 vertices on one thread |
 | back end | `Auto { dense_max_vertices: 2500 }` | measured alone in §17l (Schur dense solve): exact + dense and BH + multigrid cost the same per step at about 2000 vertices (8 threads) and 3000 (64 threads); exact + dense is the reference computation and wins the tie (§17k had 1500 with the LU, §17h 2000 under load) |
+| near pairs | `near_pair Some(NearPairOptions { blend_start 0.25, blend_end 0.75, subpanels 4, second_neighbours false })` | §3.4, §17o (WP16): mid-edge contacts repel; not in the paper; `None` is Eq. 17 |
 | edge-collapse guard | `min_edge_length_ratio Some(1e-3)` | §17j: an edge that shrinks below 1e-3 of the initial mean edge length fails the step with a named error instead of a singular metric later |
 | dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (the Schur method holds about `4\|V\|² + k²` doubles, 1 GB at 5000; its LU fallback `(3\|V\|+k)²`, 3.2 GB) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
@@ -981,6 +1071,7 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rc-prolongation` | `J𝟙 = 𝟙`; `Π_ℓ = P_ℓ (J_ℓ ⊗ I₃) P_{ℓ+1}` has its range in `range P_ℓ = ker C_ℓ` | `multigrid::coarsen` | proved, `Multigrid.lean` |
 | `rc-multigrid` | V-cycle/FCG convergence for this operator | `multigrid` | cited (Braess & Sarazin 1997; Ainsworth & Glusa 2017; Notay 2000; no proof for `L_σ`-type operators) |
 | `rc-lbfgs-two-loop` | two-loop = `H_k r` | `optimize::lbfgs` | cited (reuse `dev-lbfgs-two-loop`) |
+| `rc-near-h-constant`, `-inner`, `-outer`, `-blend`, `-differential`, `-divergence`; `rc-near-cos-series`, `-closest`, `-quadrature-error` | near-pair quadrature, §3.4 (WP16) | `energy::near_pair` | proved, `NearPair.lean`; cited (last three) |
 | `rc-ncg-polak-ribiere` | PR+ restart keeps descent | `optimize::ncg` | cited (Polak & Ribière 1969; Nocedal & Wright §5.2) |
 
 **Oracle** (§13.6): energy, differential, Gram matrices, one projected step.
@@ -2208,7 +2299,7 @@ With metrics blind to the repulsion (H² projected gradient, soft H¹ L-BFGS, th
 the H¹ projected gradient), the CCD bounded every step by a fraction (the gap, 0.1) of the
 current distance of the closest pair, which then shrank geometrically until two edges touched
 in floating point (1e-15…0): `validate_positions` failed and the path audit reported EdgeEdge
-contacts; Hs runs never came close. Now the guarded search first checks the base curve: two
+contacts; Hs runs never came close (the full evaluation found Hs runs that do, at mid-edge crossings Eq. 18 does not see: §3.4, §17o). Now the guarded search first checks the base curve: two
 disjoint edges closer than `CONTACT_FLOOR · ℓ̄₀ = 1e-6 ℓ̄₀` count as a contact, `τ_max = 0`, no
 step, `StepStatus::Stuck` (`StepReport::contact_floor`); the last accepted curve keeps a distance
 of at least `gap · 1e-6 ℓ̄₀ = 1e-7 ℓ̄₀`, 10⁵ times the validation tolerance (`1e-12 ℓ̄`). The

@@ -157,7 +157,17 @@ fn series_and_inner_integral_match_brute_force() {
         let tab = InnerTables::new(e);
         let m = be - 2.0;
         // S(θ) = ∫_0^θ cos^m.
-        for th in [-1.55f64, -0.9, -0.3, 0.0, 0.2, FRAC_PI_4 - 1e-4, FRAC_PI_4 + 1e-4, 1.1, FRAC_PI_2 - 1e-4] {
+        for th in [
+            -1.55f64,
+            -0.9,
+            -0.3,
+            0.0,
+            0.2,
+            FRAC_PI_4 - 1e-4,
+            FRAC_PI_4 + 1e-4,
+            1.1,
+            FRAC_PI_2 - 1e-4,
+        ] {
             let f = |x: f64| x.cos().powf(m);
             let ex = if th >= 0.0 {
                 adaptive(&f, 0.0, th, 1e-17, 24)
@@ -285,6 +295,7 @@ fn blended_pair_term_matches_central_differences() {
                 if w == 0.0 || (name == "parallel" && w < 1.0) {
                     continue;
                 }
+                eprintln!("FD ({al},{be}) d = {d} {name} (w = {w:.3}): relative error {err:.2e}");
                 assert!(
                     err < 2e-6,
                     "({al},{be}) d = {d} {name} (w = {w:.3}): relative FD error {err:.2e}"

@@ -33,3 +33,7 @@ harness = false
 [[bench]]
 name = "trialrule"
 harness = false
+
+[[bench]]
+name = "nearpair"
+harness = false
