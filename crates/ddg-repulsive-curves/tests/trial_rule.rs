@@ -385,7 +385,7 @@ fn rough_trefoil(n: usize) -> (CurveNetwork, Vec<P>) {
 #[test]
 fn a_trial_within_the_tolerance_is_projected_once() {
     use ddg_repulsive_curves::metric::{GramQuadrature, sobolev_gram};
-    use ddg_repulsive_curves::step::line_search::project_with_path_polished;
+    use ddg_repulsive_curves::step::line_search::{ProjectionRules, project_with_path_polished};
     use ddg_repulsive_curves::{
         ConstraintSet, DenseSaddle, Exponents, ProjectionOptions, ProjectionStatus, Tolerance,
         default_constraints, project_constraints,
@@ -422,9 +422,19 @@ fn a_trial_within_the_tolerance_is_projected_once() {
     assert_eq!(r.iterations, 1);
     assert!(r.history[1] < 1e-3 * r.history[0], "{:?}", r.history);
     for polish in [None, Some(100.0)] {
-        let (p, path) =
-            project_with_path_polished(&mut s, &set, &net, trial.clone(), &opts, l0, polish)
-                .unwrap();
+        let (p, path) = project_with_path_polished(
+            &mut s,
+            &set,
+            &net,
+            trial.clone(),
+            &opts,
+            l0,
+            ProjectionRules {
+                newton_polish: polish,
+                early_abort: false,
+            },
+        )
+        .unwrap();
         assert_eq!(p.status, ProjectionStatus::Converged);
         assert_eq!(p.iterations, 1, "polish {polish:?}");
         assert_eq!(path.len(), 2);
@@ -457,4 +467,82 @@ fn hard_flow_of_a_rough_trefoil_reaches_a_small_gradient() {
         s.iteration(),
         s.status()
     );
+}
+
+/// The rate test stops a chord projection that cannot converge within the limit after fewer
+/// solves, and does not stop one that converges (`SPEC.md` §17l).
+#[test]
+fn early_abort_stops_hopeless_projections_only() {
+    use ddg_repulsive_curves::energy::exact::energy_and_differential;
+    use ddg_repulsive_curves::metric::{GramQuadrature, sobolev_gram};
+    use ddg_repulsive_curves::step::line_search::{ProjectionRules, project_with_path_polished};
+    use ddg_repulsive_curves::{
+        ConstraintSet, DenseSaddle, Exponents, ProjectionOptions, ProjectionStatus, Tolerance,
+        default_constraints, projected_gradient,
+    };
+    let (net, pos) = rough_trefoil(40);
+    let ex = Exponents::new(2.0, 4.5).unwrap();
+    let set = ConstraintSet::new(&net, &pos, &default_constraints(), None).unwrap();
+    let c = set.jacobian(&net, &pos).unwrap();
+    let pool = std::sync::Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap(),
+    );
+    let g = sobolev_gram(&pool, &net, &pos, ex, GramQuadrature::Midpoint);
+    let mut s = DenseSaddle::new(pool.clone(), &g.a, &c, set.layout()).unwrap();
+    let (_, d) = energy_and_differential(&pool, &net, &pos, ex);
+    let pg = projected_gradient(&mut s, set.layout(), &d).unwrap();
+    let l0 = net.mean_edge_length(&pos);
+    let pmax = pg
+        .direction
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+        .fold(0.0f64, f64::max);
+    let opts = ProjectionOptions {
+        tolerance: Tolerance::MeanEdgeLength(1e-4),
+        max_iterations: 3,
+    };
+    let mut saw_abort = false;
+    for frac in [0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4] {
+        let tau = frac * l0 / pmax;
+        let trial: Vec<P> = pos
+            .iter()
+            .zip(&pg.direction)
+            .map(|(x, p)| [x[0] - tau * p[0], x[1] - tau * p[1], x[2] - tau * p[2]])
+            .collect();
+        let run = |s: &mut DenseSaddle, abort: bool| {
+            project_with_path_polished(
+                s,
+                &set,
+                &net,
+                trial.clone(),
+                &opts,
+                l0,
+                ProjectionRules {
+                    newton_polish: None,
+                    early_abort: abort,
+                },
+            )
+            .unwrap()
+            .0
+        };
+        let plain = run(&mut s, false);
+        let early = run(&mut s, true);
+        eprintln!(
+            "frac {frac}: plain {:?} {:?}, early {:?} {:?}",
+            plain.status, plain.history, early.status, early.history
+        );
+        if plain.status == ProjectionStatus::Converged {
+            // never stopped when the iteration converges
+            assert_eq!(early.status, ProjectionStatus::Converged, "step {frac}");
+            assert_eq!(early.iterations, plain.iterations);
+        } else {
+            assert_ne!(early.status, ProjectionStatus::Converged);
+            assert!(early.iterations <= plain.iterations);
+            saw_abort |= early.iterations < plain.iterations;
+        }
+    }
+    assert!(saw_abort, "no trial was stopped early");
 }

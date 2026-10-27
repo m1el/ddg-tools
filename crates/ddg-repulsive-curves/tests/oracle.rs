@@ -660,6 +660,7 @@ fn step_session(input: &Input, net: &CurveNetwork, ex: Exponents) -> Result<Sess
         // the oracle replays the paper's step: straight trials, chord projection (SPEC §17l)
         second_order_correction: false,
         newton_polish: None,
+        projection_early_abort: false,
         // never converge: the oracle always takes the step
         stop: StopRule::GradientNorm {
             norm: GradNorm::Euclidean,

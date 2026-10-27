@@ -593,6 +593,13 @@ pub struct FlowOptions {
     /// §17l (0.69× the time to 1.1 E* of the chord method, no stuck step, no isotopy violation).
     /// It departs from the paper's projection only below 100 times the tolerance.
     pub newton_polish: Option<f64>,
+    /// Stop a chord projection early when its observed convergence rate cannot reach the target
+    /// within the remaining iterations (the rate test of simplified-Newton iterations, Hairer &
+    /// Wanner §IV.8; [`project_with_path_polished`]):
+    /// the trial is rejected (`MaxIterations`) after fewer solves. Default `true`: on 24 perturbed
+    /// Knot128 knots (`SPEC.md` §17l) the same iterations to 1.1 E* in 0.76× the time, no stuck
+    /// step, no isotopy violation. `false`: every chord projection runs to its limit (the paper).
+    pub projection_early_abort: bool,
 }
 
 impl fmt::Debug for FlowOptions {
@@ -624,6 +631,7 @@ impl fmt::Debug for FlowOptions {
             .field("back_projection", &self.back_projection)
             .field("second_order_correction", &self.second_order_correction)
             .field("newton_polish", &self.newton_polish)
+            .field("projection_early_abort", &self.projection_early_abort)
             .finish()
     }
 }
@@ -655,6 +663,7 @@ impl Default for FlowOptions {
             back_projection: true,
             second_order_correction: false,
             newton_polish: Some(DEFAULT_NEWTON_POLISH),
+            projection_early_abort: true,
         }
     }
 }
@@ -1016,6 +1025,7 @@ struct StepEnv<'a> {
     cancel: &'a AtomicBool,
     second_order: Option<&'a [[f64; 3]]>,
     polish: Option<f64>,
+    early_abort: bool,
 }
 
 impl SearchEnv for StepEnv<'_> {
@@ -1044,7 +1054,10 @@ impl SearchEnv for StepEnv<'_> {
                 trial,
                 self.projection,
                 self.mean_edge_length0,
-                self.polish,
+                line_search::ProjectionRules {
+                    newton_polish: self.polish,
+                    early_abort: self.early_abort,
+                },
             ),
             None => Ok((
                 Projection {
@@ -1385,7 +1398,10 @@ impl Session {
                 self.positions.clone(),
                 &self.options.projection,
                 self.mean_edge_length0,
-                self.options.newton_polish,
+                line_search::ProjectionRules {
+                    newton_polish: self.options.newton_polish,
+                    early_abort: self.options.projection_early_abort,
+                },
             )?;
             report.projection_iterations = proj.iterations;
             report.max_violation = proj.max_violation;
@@ -1592,6 +1608,7 @@ impl Session {
                 cancel: &self.cancel,
                 second_order: correction.as_deref(),
                 polish: self.options.newton_polish,
+                early_abort: self.options.projection_early_abort,
             };
             let ls: LineSearchReport = line_search(
                 &self.options.line_search,

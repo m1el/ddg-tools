@@ -4,7 +4,7 @@
 //! iterations, default back end, a CCD audit of every accepted path (`path_contact`, gap 1e-6).
 //!
 //! ```text
-//! cargo bench --bench trialrule -- --knot PATH [--soc 0|1] [--polish F] [--steps 100] [--threads 4]
+//! cargo bench --bench trialrule -- --knot PATH [--soc 0|1] [--polish F] [--abort 0|1] [--steps 100] [--threads 4]
 //! ```
 //!
 //! Prints `TRAJ iteration seconds energy |g| trials solves backend` per step (seconds without the
@@ -26,19 +26,34 @@ fn main() {
         // --eval PATH: exact and Barnes-Hut energies, length, bounding box of a curve file
         let (net, pos) = read_curve_obj(p).expect("curve file");
         let ex = Exponents::new(3.0, 6.0).unwrap();
-        let e = ddg_repulsive_curves::energy(&net, &pos, ex, &ddg_repulsive_curves::EnergyEval::Exact, Some(16)).unwrap();
-        let b = ddg_repulsive_curves::energy(
+        let e = ddg_repulsive_curves::energy(
             &net,
             &pos,
             ex,
-            &ddg_repulsive_curves::EnergyEval::BarnesHut(ddg_repulsive_curves::BhOptions::default()),
+            &ddg_repulsive_curves::EnergyEval::Exact,
             Some(16),
         )
         .unwrap();
+        let b =
+            ddg_repulsive_curves::energy(
+                &net,
+                &pos,
+                ex,
+                &ddg_repulsive_curves::EnergyEval::BarnesHut(
+                    ddg_repulsive_curves::BhOptions::default(),
+                ),
+                Some(16),
+            )
+            .unwrap();
         let g = net.edge_geometry(&pos);
-        let (lo, hi) = pos.iter().fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), x| {
-            ([0, 1, 2].map(|c| lo[c].min(x[c])), [0, 1, 2].map(|c| hi[c].max(x[c])))
-        });
+        let (lo, hi) = pos
+            .iter()
+            .fold(([f64::MAX; 3], [f64::MIN; 3]), |(lo, hi), x| {
+                (
+                    [0, 1, 2].map(|c| lo[c].min(x[c])),
+                    [0, 1, 2].map(|c| hi[c].max(x[c])),
+                )
+            });
         println!(
             "EVAL exact {:.6} bh {:.6} length {:.4} min edge {:.4e} max edge {:.4e} bbox {:?} {:?}",
             e.energy,
@@ -55,6 +70,7 @@ fn main() {
     let soc = get(&a, "soc", 0usize) != 0;
     let polish: f64 = get(&a, "polish", 0.0);
     let steps: usize = get(&a, "steps", 100);
+    let abort = get(&a, "abort", 0usize) != 0;
     let threads: usize = get(&a, "threads", 4);
     let (net, pos) = read_curve_obj(&path).expect("knot file");
     let opts = FlowOptions {
@@ -65,6 +81,7 @@ fn main() {
         },
         second_order_correction: soc,
         newton_polish: (polish > 0.0).then_some(polish),
+        projection_early_abort: abort,
         max_iterations: steps,
         record_path: true,
         threads: Some(threads),

@@ -399,7 +399,14 @@ From `γ̃ = γ − τ g̃`, repeat
 with `Ā` and `C` frozen at `γ` (a chord method: the paper's "approximation of Newton's method",
 which lets the dense back end reuse one factorization for Eq. 22 and every iteration, Sec. 7.4).
 Each iteration gives the `Ā`-smallest `x` solving the linearized constraints (proved). Success
-when every row is within its tolerance (§5.1). Failure after `max_projection_iterations` (3; the
+when every row is within its tolerance (§5.1) after at least one iteration (a trial already
+within the tolerance is projected once too, unless `Φ = 0` exactly; §17l, found by WP12b).
+**Departure from the paper (§17l, default):** once the largest relative violation is at most
+`FlowOptions::newton_polish` (100) times its tolerance, the remaining iterations are Newton steps
+with the Jacobian at the iterate and the lumped-mass metric (`x = M⁻¹Cᵀ(CM⁻¹Cᵀ)⁻¹(−Φ)`, a sparse
+factorization each) instead of chord steps with `Ā`; `newton_polish: None` is the paper's chord
+method throughout. An optional second-order correction of the trial (`γ − τp + τ²q`,
+`C q = −½Φ''[p, p]`, off by default) is described in §17l. Failure after `max_projection_iterations` (3; the
 paper: "rarely more than three", the reference: 3 dense, 2 multigrid), when the largest violation
 grows by more than 10×, or when a tangent site ends with `s·X ≤ 0`. A failure rejects the trial
 step (§7). Convergence of the chord method near a regular point: cited (D10).
@@ -645,7 +652,9 @@ pub enum GramQuadrature { Midpoint, Trapezoid }           // D2
 pub struct BhOptions { pub theta_x: f64, pub theta_t: f64, pub leaf_size: usize }
 pub struct BctOptions { pub theta_x: f64, pub theta_t: f64, pub leaf_pairs: usize }
 pub struct MgOptions { pub bct: BctOptions, pub coarsest_vertices: usize, pub max_levels: usize,
-                       pub smoothing_steps: usize, pub tolerance: f64, pub max_cycles: usize }
+                       pub smoothing_steps: usize, pub tolerance: f64, pub max_cycles: usize,
+                       /* … §17g options … */ pub max_threads: Option<usize> }   // default Some(16) (§17l)
+pub enum DenseMethod { Schur, Lu }                        // DenseSaddle::with_method; default Schur (§17l)
 pub enum EnergyEval { Exact, BarnesHut(BhOptions) }
 pub enum Solver { Dense, Multigrid(MgOptions), Custom(Arc<dyn SolverFactory>) }
 pub enum Backend { Explicit { energy: EnergyEval, solver: Solver }, Auto { dense_max_vertices: usize } }
@@ -689,6 +698,9 @@ pub struct FlowOptions {
     pub dense_threads: Option<usize>,
     pub dense_fallback_max_vertices: usize,            // default 5000; 0: never fall back (§17h)
     pub min_edge_length_ratio: Option<f64>,            // default Some(1e-3); collapse guard (§17j)
+    pub back_projection: bool,                         // default true; false: Fig. 20's "without projection" (§17l)
+    pub second_order_correction: bool,                 // default false; trials γ − τp + τ²q (§17l)
+    pub newton_polish: Option<f64>,                    // default Some(100); Newton steps below 100 tol (§17l)
 }
 
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
@@ -793,7 +805,8 @@ end-to-end table script (§14.5).
 | constraints | `[Barycenter, EdgeLengths(all, current)]` | Supp. 2.1: barycenter removes the translations, edge lengths make a minimizer exist; `Ê(cγ) = c^{2+α−β} Ê` falls with growth |
 | line search | `CollisionGuarded { armijo 1e-4, shrink ½, start GrowPrevious { 2 }, gap 0.1, 40 halvings }` | D11 (more reliable); the start `min(⅔ τ_max, 2 τ_prev)` is measured in §17f (the paper's `⅔ τ_max` alone costs 1.5× Armijo's time per step); `c = 1e-4` the usual lenient Armijo constant (Nocedal & Wright §3.1) |
 | `NormalizedArmijo` | same Armijo, reference's start rule | D12 |
-| projection | `MeanEdgeLength(1e-4)`, 3 iterations | paper: 1e-4 (absolute) and ≤ 3 iterations; relative to `ℓ̄₀` so that Blender scenes of any scale behave alike; the evaluation uses `Absolute(1e-4)` (D10) |
+| projection | `MeanEdgeLength(1e-4)`, 3 iterations, at least one step per trial; Newton polish below 100 × tolerance; no second-order correction | paper: 1e-4 (absolute) and ≤ 3 iterations; relative to `ℓ̄₀` so that Blender scenes of any scale behave alike; the evaluation uses `Absolute(1e-4)` (D10); polish and correction measured on 24 knots in §17l |
+| contact floor | `CONTACT_FLOOR = 1e-6` (of `ℓ̄₀`) | §17l: a guarded step from a curve with two disjoint edges closer than this takes no step (Stuck) |
 | stop | `GradientNorm { Euclidean, 1e-4 }`, `max_iterations` 1000 | paper Sec. 5.4, Supp. 1.3 (D14); Blender uses `RelativeGradient(1e-3)` |
 | Barnes–Hut | `theta_x 0.125, theta_t 0.25, leaf_size 8` | reference `diag/d < 0.25` ⇔ `r_x/d < 0.125`; tangent bound per Eq. 27; final values by §14.3 (largest θ with differential error ≤ 1e-2 and unchanged iteration counts within 5 %) |
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
@@ -1998,6 +2011,194 @@ Final energies are not compared here.
    projections of the near-contact knot (83 % of the iteration at 16384).
 5. `Backend::Auto` is untouched in its rule of form; a thread-aware crossover (1300 at 8 threads,
    1600 at 64) would gain at most 20 % near the crossing.
+
+## 17l. Performance after WP14b (2026-10-26)
+
+Logs, job files and CSVs: `runs_tmp/rc-wp14b/` (`projdiag-*.log`, `diag-*.log`, `trial/` and
+`trial2/` for the knot study, `fig20-*.csv`, `components.csv`). Benches: `benches/fig20.rs`
+(new flags `--trace 1`, `--soc`, `--polish`, `--proj-it`, `--bct-tt`, `--bct-tx`,
+`--mg-threads`; `mg-noproj` is now the real switch, the barycenter-only proxy of §17k is
+`mg-bary`), `benches/projdiag.rs` (the projection of the trials of one step with several
+solvers, violation history per chord iteration), `benches/trialrule.rs` (the knot study).
+
+### 1. Why the projection cost about six direction solves per iteration
+
+Measured with `--trace 1` (every trial: `τ/τ₀`, chord iterations, outcome) and `projdiag`
+(Freedman resampled to 2000 / 8000, knot 96 at 2048 / 8192, multigrid, 1 thread):
+
+* **Not the causes suspected in §17k.** The direction satisfies `C p = 0` to rounding (the
+  multigrid's `x = P y` uses the exact sparse projector), so the violation of a trial is the
+  curvature term `Φ(γ − τp) = τ² ½Φ''[p, p] + O(τ³)`; even the barycenter row is nonlinear
+  (length-weighted, D6). The hierarchy is built once per step and reused by every solve. The
+  multigrid accuracy is not the problem either: the chord histories with multigrid (tolerance
+  1e-3) and with the dense LU agree to three digits (`1.46e3 → 3.97e2 → 2.81e1 → 2.13e0 →
+  2.42e-1` both); a looser multigrid tolerance (1e-1) makes the chord iteration converge more
+  slowly (8 instead of 4 iterations at `τ₀`) and is not cheaper.
+* **The cause: failed trials.** With the grow-previous start the first trial is `2 τ_prev`;
+  its chord iteration (rate 0.07–0.27 at that step size) usually needs 4 iterations and fails at
+  the limit of 3 (`MaxIterations`), wasting 3 solves; the halved trial then takes 2–3. Typical
+  steps: `[1.000:3:MaxIterations 0.500:2:ok]`, `[1.000:3:MaxIterations 0.500:3:MaxIterations
+  0.250:2:ok]`; 4.4 projection solves per step on Freedman 2000 (20 steps), 5.3 on knot 2048,
+  each a full multigrid solve (full-multigrid start plus 1–2 FCG cycles, 0.47 s at 2000 = the
+  direction solve). On the knot, `τ₀ = ⅔ τ_max` binds (the CCD) and that trial failed in every
+  step.
+* **The knot's solves are 4–15× more expensive** than Freedman's at the same size because its
+  block cluster trees are almost dense (item 3 below).
+* **The authors' program** (`ref: include/tpe_flow_sc.h`, `LSBackprojectMultigrid`) runs the
+  Armijo search on the *unprojected* trials and projects only the accepted step: at most 2
+  chord steps per attempt with the multigrid (3 dense), the same threshold `1e-4 ℓ̄`
+  (`mg_backproj_threshold`), halving `τ` on failure, up to 10 attempts; each chord step is a
+  multigrid solve from scratch (`VCycleSolve` at tolerance 1e-2). It is projection-dominated too
+  (56–59 %, §17k). We keep the projected Armijo test (D11: the guarantee is on the projected,
+  CCD-checked path).
+
+**Fix 1: the Newton polish (default).** Once the largest relative violation of the projection is
+at most `newton_polish = 100` times its tolerance, the remaining iterations are Newton steps
+with the Jacobian *at the iterate* and the lumped-mass metric,
+`x = M⁻¹Cᵀ(CM⁻¹Cᵀ)⁻¹(−Φ)` (`solve::newton_correction`; one sparse Cholesky factorization of
+the `k × k` matrix, `O(k)`, about 4 ms at 2000 vertices against 470 ms for a multigrid solve),
+instead of chord steps with `Ā` and `C` frozen at the base curve. Newton converges quadratically
+(`6.30e0 → 1.87e-3`, `1.05e2 → 2.25e0 → 2.41e-3` relative violation) where the chord method
+converges linearly at a rate proportional to the step. Every correction above 100 × tolerance
+(`1e-2 ℓ̄` for the default) is still the `Ā`-smallest chord step of Eq. 23, so the large, smooth
+part of every projection is the paper's; the polish only places the last `≤ 1e-2 ℓ̄`, where the
+metric does not matter. A rank-deficient Jacobian at the iterate (a collapsing edge) falls back
+to chord steps. **This departs from the paper's chord projection**; `newton_polish: None`
+restores it (the Lean oracle replays the paper's step and pins it).
+
+**Fix 2 (option, off): the second-order correction.** Trials `γ − τp + τ²q` with `C q = −Φ₂`,
+`Φ₂ = ½Φ''[p, p]` by a central second difference of the constraint values (step
+`h max|p| = 1e-3 ℓ̄₀`), one solve per step (`solve::second_order_correction`; the second-order
+correction of SQP methods, Nocedal & Wright §18.3). The piece from `γ − τp` to the predicted
+trial is CCD-checked like a chord step. It cuts the trial violation 18–80× (`1.46e3 → 8.2e1` at
+`τ₀`, `3.24e2 → 6.2e0` at `τ₀/2`, trials at `τ₀/4` already within the tolerance), but the step
+then grows and the failing first trial moves to larger `τ`: on the knots it saves no time
+(below), so it is off by default (`second_order_correction: false`).
+
+**Fix 3 (found by WP12b): every trial gets at least one projection step.** A trial already
+within the tolerance used to be accepted unprojected. Tangential steps lengthen the edges at
+second order, which lowers `Ê`, so the curve drifted unprojected to `|Φ| = tol`, and every larger
+trial was then projected back and paid `λ · Σ δℓ`, far more than the Armijo decrease: on a
+40-vertex rough trefoil (exact + dense, (2, 4.5)) `‖g̃‖` stalled at 1.1e-2 with the base
+violation at the tolerance and 989 of 1000 accepted steps unprojected; the floor scaled with the
+tolerance (4.9e-3 / 1.0e-3 / 9e-5 / 7e-6 for `MeanEdgeLength` 1e-4 / 1e-6 / 1e-8 / 1e-10).
+Now `project_constraints` and the line search's projection take at least one step unless
+`Φ = 0` exactly (the paper: "update γ̃ ← γ̃ + x and repeat until …"; the reference always calls
+`BackprojectConstraints`); the same flow reaches `‖g̃‖ < 1e-4` (test
+`hard_flow_of_a_rough_trefoil_reaches_a_small_gradient`; 1.6e-5 at step 1000 in WP12b's run).
+The Lean oracle (`chordProject`) follows; fixture `rc-circle-step` changes (its trial now takes
+one chord step). With the polish the extra step is a Newton step (cheap).
+
+**Measurement of the defaults (as §17f).** 24 perturbed Knot128 knots (every 5th, 1500–2750
+vertices, all steps on Barnes–Hut + multigrid by `Backend::Auto`), (3, 6), `Absolute(1e-4)`,
+3 chord iterations, 100 iterations, CCD audit of every accepted path (`path_contact`, gap 1e-6,
+1e5 advances), 8 processes × 4 threads on a shared machine (load 25–35; per-step ratios are
+paired per knot). `E*` is the best energy any variant reached on that knot. With fix 3 in place
+(`runs_tmp/rc-wp14b/trial2/`, `table.md`; the run before fix 3 in `trial/` gave the same
+ranking):
+
+| trial rule | stuck steps | isotopy violations | trials/step | projection solves/step | s/step (median) | paired s/step | reached 1.1 E* | paired time to 1.1 E* (n) | median final E / E* |
+|---|---|---|---|---|---|---|---|---|---|
+| straight trials, chord projection (the paper) | 0 / 2400 | 0 | 1.98 | 4.25 | 1.67 | 1 | 19 / 24 | 1 | 1.025 |
+| second-order correction | 0 / 2400 | 0 | 1.97 | 4.46 | 1.70 | 1.03 (1.01–1.07) | 23 / 24 | 0.97 (0.93–1.04, 19) | 1.012 |
+| correction + Newton polish | 0 / 2400 | 0 | 1.98 | 2.43 | 1.20 | 0.75 (0.70–0.84) | 19 / 24 | 0.71 (0.63–0.85, 18) | 1.015 |
+| **Newton polish (default)** | 0 / 2400 | 0 | 1.97 | 2.31 | 1.20 | 0.69 (0.66–0.80) | 21 / 24 | 0.69 (0.62–0.81, 18) | 1.000 |
+
+(projection solves/step include the correction's solve; the paired time to 1.5 E* and 2 E*:
+polish 0.67 and 0.71, correction 1.01 and 1.02.) Decision: **`newton_polish = Some(100)` by
+default** (as reliable, 0.69× the time to the energy target, best final energies);
+**`second_order_correction = false`** (no faster alone, slower with the polish).
+
+### 2. The back-projection switch
+
+`FlowOptions::back_projection` (default `true`). `false` is the paper's "Multigrid without
+projection": the direction is still the projected gradient of Eq. 22 (tangent to the
+constraints), the trials are taken unprojected, nonlinear rows drift by `O(τ²)` per step, and
+the re-target sub-step runs only for a moving length schedule. `benches/fig20.rs`'s `mg-noproj`
+uses it (§17k used a barycenter-only proxy, now `mg-bary`). Test:
+`without_back_projection_no_projection_solve_runs_and_the_lengths_drift`.
+
+### 3. Knot 96: the block cluster trees were almost dense
+
+The multigrid's trees used Eq. 28's tangent test (`theta_t 0.25`). On the perturbed knot every
+cluster of more than a few edges has a large tangent spread, so almost no block is admissible:
+level 0 stores 1930 exact entries per row at 2048 vertices (94 % of the dense matrix), 1980 at
+8192, 2640 at 4096; Freedman: 90–260. The metric's kernel `K^B` does not depend on the tangents
+and `K⁰` only through its far coefficient; the reference admits blocks by position only.
+`MgOptions::default().bct.theta_t = 2` (`MG_BCT_THETA_T`; every unit-tangent cluster passes,
+i.e. position only; `BctOptions::default()` is unchanged). Multigrid direction against the dense
+direction, and its solve time (projdiag, after 1 step, machine shared):
+
+| curve | n | `theta_t 0.25`: exact entries/row, error, s | `theta_t 2`: entries/row, error, s |
+|---|---:|---|---|
+| knot 96 | 1024 | 1016, 7.5e-5, 0.41 | 703, 2.2e-3, 0.32 |
+| knot 96 | 2048 | 1850, 9.9e-4, 2.07 | 780, 6.8e-3, 0.89 |
+| knot 96 | 4096 | 2641, 2.4e-3, 7.11 | 706, 8.5e-3, 2.49 |
+| Freedman | 2000 | 238, 4.4e-3, 0.44 | 122, 6.7e-3, 0.18 |
+| Freedman | 4000 | 89, 4.0e-3, 0.72 | 72, 6.8e-3, 0.57 |
+
+All errors stay below the 1e-2 target of §13.4; the multigrid tests (`tests/multigrid.rs`,
+`tests/multigrid_networks.rs` with the capillary scene) and the Freedman 600 flows (exact energy
+6.0816 within 0.5 %) pass.
+
+### 4. Multigrid thread scaling
+
+Profile of one BCT product (32768 vertices, 1 thread): the two parallel loops (near field per
+row, far field per node) are about 54 % of a multigrid solve's time and 83 % of a product; the
+upward and downward passes over the nodes and the `ψ`/output loops of
+`HierarchicalMetric::apply_unchecked` are sequential (about 17 % of a product), and so are the
+projector's sparse triangular solves and the CG vector operations of the smoother. With rayon's
+overhead per parallel region these cap the speed-up at 2–3.5×, and at 64 threads the regions'
+cost exceeds their gain (§17k). The sequential parts are in `src/spatial` and `src/metric`,
+outside this package. Fix here: `MgOptions::max_threads` (default `Some(16)`,
+`MG_DEFAULT_MAX_THREADS`): `MultigridSolvers` builds and solves on a pool of its own with at most
+16 threads when the session's pool is larger (created once per factory; results bitwise the
+same, test `multigrid_thread_cap_does_not_change_the_result`). Measured below.
+
+### 5. Dense solve: the Schur complement (§17b)
+
+`DenseSaddle` factors by the Schur method (module docs of `solve::dense`): `M = A + ρ uuᵀ`
+(`u = 𝟙/√n`, `ρ = max_v A_vv`, positive definite since `ker A = span{𝟙}`, and `M u = ρu`),
+Cholesky of `M` and its explicit inverse, `S = C(M⁻¹ ⊗ I₃)Cᵀ` (`k × k`, from the sparse rows in
+`O(n · nnz C)`), Cholesky of `S`, and the `3 × 3` matrix `W = Eᵀ S⁻¹ E`, `E = CU/ρ`, for the
+translations (nonsingular iff the constraints fix them, D5); every solve does one step of
+iterative refinement. `k` (≈ n with edge lengths) does not make it as large as the original:
+`S` is `k × k` but costs only `k³/3`; total about `1.3 n³` flops against `(2/3)(4n)³ ≈ 43 n³` for
+the LU of the `(3n + k)` matrix, memory `≈ 4n² + k²` doubles against `(3n + k)²`. It falls back
+to the LU when a Cholesky factor fails or has `min L_ii²/max L_ii² ≤ 1e-13`, so singular saddles
+are still decided (and reported) by the LU. Accuracy (`tests/dense_schur.rs`, against the LU on
+closed curves, an open helix with pins and an end tangent, a theta network, a planar loop, few
+rows, the mean-free rows of a soft problem, Freedman 592; right sides of Eq. 22, of a projection
+and both): `x` agrees to 8e-16–3.3e-13 relative, `λ` to 3e-15–1.8e-12, the Schur residual is
+as small as the LU's or smaller (4e-15–2.7e-11 against 1.6e-14–2.4e-10). Bitwise identical at
+1/3/8/16 threads on the test curves and at 1/7/16/32 threads at 8192 vertices (result hashes).
+Time of the factorization on one thread (shared machine): 2048 vertices 0.58 s against 8.69 s
+for the LU (15×), 8192 vertices 36 s (the LU about 13 min, §17k).
+
+### 6. Contact floor of the guarded line search (requested after the evaluation's smoke runs)
+
+With metrics blind to the repulsion (H² projected gradient, soft H¹ L-BFGS, the final curve of
+the H¹ projected gradient), the CCD bounded every step by a fraction (the gap, 0.1) of the
+current distance of the closest pair, which then shrank geometrically until two edges touched
+in floating point (1e-15…0): `validate_positions` failed and the path audit reported EdgeEdge
+contacts; Hs runs never came close. Now the guarded search first checks the base curve: two
+disjoint edges closer than `CONTACT_FLOOR · ℓ̄₀ = 1e-6 ℓ̄₀` count as a contact, `τ_max = 0`, no
+step, `StepStatus::Stuck` (`StepReport::contact_floor`); the last accepted curve keeps a distance
+of at least `gap · 1e-6 ℓ̄₀ = 1e-7 ℓ̄₀`, 10⁵ times the validation tolerance (`1e-12 ℓ̄`). The
+broad phase is a uniform grid (cell = longest edge), `O(|E|)` per step. Choice of `1e-6`: far
+above rounding and the validation tolerance, far below anything a Sobolev flow reaches (the
+tangent-point energy of a pair at `10⁻⁶ ℓ` is about 10¹⁸ times its value at `ℓ` for (3, 6)), so
+Hs flows are bitwise unchanged unless they hit it (they do not: test
+`contact_floor_is_never_hit_by_a_sobolev_flow`). Regression test
+`contact_floor_stops_a_flow_that_drives_two_edges_together`: an L² flow with a penalty that
+overpowers the energy pulls two strands together; with the floor set to 0 the curve fails
+`validate_positions` after step 25 (edges 9 and 29 at 1.8e-13); with it the flow ends Stuck at
+step 20 at 5.3e-7 ℓ̄₀, every path embedded. Obstacles (vertex–triangle) are not covered by the
+floor (no failure seen).
+
+### 7. Timing alone
+
+(below)
 
 ## 17m. Soft Hs and the stop test of the Sec. 7 comparison (WP12b)
 

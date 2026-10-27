@@ -4,7 +4,7 @@
 //! ```text
 //! cargo bench --bench fig20 -- --curve fhw|fhw-r|knot --size N --config exact|bh|mg|mg-noproj|mg-bary
 //!     [--threads T] [--dense-threads D] [--steps 20] [--min-steps 5] [--cap-s 240] [--trace 1]
-//!     [--soc 0|1] [--proj-it 3] [--polish F] [--bct-tt 2] [--bct-tx 0.25] [--mg-threads 16]
+//!     [--soc 0|1] [--proj-it 3] [--polish F] [--abort 0|1] [--bct-tt 2] [--bct-tx 0.25] [--mg-threads 16]
 //! ```
 //!
 //! `--trace 1` prints one line per step on stderr (phases, cycles, every trial of the line
@@ -100,6 +100,10 @@ fn main() {
     // --polish F: Newton polish below F times the tolerance (0: off; default: the library's)
     if let Some(p) = a.get("polish").and_then(|s| s.parse::<f64>().ok()) {
         opts.newton_polish = (p > 0.0).then_some(p);
+    }
+    // --abort 0|1: the early abort of hopeless chord projections (default: the library's)
+    if let Some(v) = a.get("abort") {
+        opts.projection_early_abort = v != "0";
     }
     // --proj-it N: chord iterations of the projection
     opts.projection.max_iterations = get(&a, "proj-it", opts.projection.max_iterations);

@@ -667,17 +667,36 @@ pub fn project_with_path(
         trial,
         options,
         mean_edge_length0,
-        None,
+        ProjectionRules::default(),
     )
 }
 
+/// The departures from the paper's chord projection (`SPEC.md` §17l) used by
+/// [`project_with_path_polished`]; the default (`None`, `false`) is the paper's projection.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ProjectionRules {
+    /// The Newton polish threshold ([`FlowOptions::newton_polish`](super::FlowOptions::newton_polish)).
+    pub newton_polish: Option<f64>,
+    /// The rate test ([`FlowOptions::projection_early_abort`](super::FlowOptions::projection_early_abort)).
+    pub early_abort: bool,
+}
+
 /// [`project_with_path`] with the Newton polish of `SPEC.md` §17l: once the largest relative
-/// violation `max_r |Φ_r| / tol_r` is at most `polish` (`Some`), the remaining iterations are
+/// violation `max_r |Φ_r| / tol_r` is at most `rules.newton_polish` (`Some`), the remaining iterations are
 /// Newton steps with the Jacobian at the iterate in the lumped-mass metric
 /// ([`crate::solve::newton_correction`], no solve with `Ā`), at most
 /// [`NEWTON_POLISH_MAX_STEPS`] of them; chord iterations (with `solver`) still count against
 /// `options.max_iterations`. The success and failure rules are those of §6.2. `None`: the chord
 /// method throughout.
+///
+/// With `rules.early_abort`, a chord iteration that cannot reach its target within the remaining
+/// chord iterations is stopped early (`MaxIterations`, fewer iterations): after a chord step from
+/// `h_{k−1}` to `h_k` (largest relative violations) the observed rate `θ = h_k / h_{k−1}` predicts
+/// `h_k θ^m` after `m` more chord steps (the chord method converges linearly, at a rate
+/// proportional to the step); the target is the polish threshold (or 1 without polish). The trial
+/// is given up when `θ ≥ 1` or the predicted number of steps exceeds the remaining budget. This is
+/// the convergence-rate test of simplified-Newton iterations in implicit integrators (Hairer &
+/// Wanner, *Solving ODEs II*, 2nd ed., §IV.8, stopping rule (8.12)), `SPEC.md` §17l.
 ///
 /// [formula: rc-chord-projection]
 ///
@@ -690,9 +709,11 @@ pub fn project_with_path_polished(
     trial: Vec<[f64; 3]>,
     options: &ProjectionOptions,
     mean_edge_length0: f64,
-    mut polish: Option<f64>,
+    rules: ProjectionRules,
 ) -> Result<ProjectionWithPath, RcError> {
     options.validate()?;
+    let mut polish = rules.newton_polish;
+    let early_abort = rules.early_abort;
     let layout = constraints.layout();
     let mut path = vec![trial.clone()];
     let mut pos = trial;
@@ -701,6 +722,7 @@ pub fn project_with_path_polished(
     let zero = vec![0.0; solver.n_dofs()];
     let mut it = 0u32;
     let (mut chord, mut newton) = (0u32, 0u32);
+    let mut last_chord = false;
     loop {
         let phi = constraints.values(network, &pos)?;
         let tol =
@@ -718,6 +740,15 @@ pub fn project_with_path_polished(
         }
         history.push(rel);
         let use_newton = polish.is_some_and(|p| rel <= p);
+        // The rate test (Hairer & Wanner IV.8) after a chord step.
+        let hopeless = early_abort && last_chord && !use_newton && rel > 1.0 && it > 0 && {
+            let target = polish.unwrap_or(1.0).max(1.0);
+            let theta = rel / history[history.len() - 2];
+            let remaining = options.max_iterations.saturating_sub(chord);
+            theta.is_nan()
+                || theta >= 1.0
+                || (rel / target).ln() / (1.0 / theta).ln() > f64::from(remaining)
+        };
         // At least one step, also for a trial already within the tolerance (§17l, as
         // `project_constraints`).
         let status = if rel <= 1.0 && (it > 0 || rel == 0.0 || options.max_iterations == 0) {
@@ -731,6 +762,7 @@ pub fn project_with_path_polished(
             Some(ProjectionStatus::Diverged)
         } else if (use_newton && newton >= NEWTON_POLISH_MAX_STEPS)
             || (!use_newton && chord >= options.max_iterations)
+            || hopeless
         {
             Some(ProjectionStatus::MaxIterations)
         } else {
@@ -763,6 +795,7 @@ pub fn project_with_path_polished(
         } else {
             None
         };
+        last_chord = newton_step.is_none();
         if let Some(x) = newton_step {
             layout.add_scaled(&mut pos, 1.0, &x);
             newton += 1;
