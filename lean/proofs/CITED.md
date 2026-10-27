@@ -1714,7 +1714,7 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
   University of Tasmania eCite record).
 - **Source check.** Checked 2026-10-27, secondarily, since the book text could not be read:
   Thm. 19.3 is cited for Gauss–Legendre quadrature of functions analytic and bounded by `M` in
-  `E_ρ` in L. N. Trefethen, SIAM Rev. 63 (2021) "Exactness of quadrature formulas" (Section 6,
+  `E_ρ` in L. N. Trefethen, "Exactness of quadrature formulas" (SIAM Rev., 2022; volume and pages not verified; the passage is near p. 148,
   <https://people.maths.ox.ac.uk/trefethen/exactness.pdf>), and stated with the constant `64/15`
   for `N` points, `N ≥ 2`, and `ρ^{−2(N−1)}` in arXiv:2411.19086, Thm. 6.9
   (<https://arxiv.org/pdf/2411.19086>), which cites Rabinowitz ineq. (18) and Thm. 19.3 of the
