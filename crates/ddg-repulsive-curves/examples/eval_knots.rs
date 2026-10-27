@@ -10,13 +10,13 @@
 //! Methods (names as in the tables): hard constraints (barycenter + edge lengths), collision
 //! guarded line search: `hs-pg` (reference), `l2-pg`, `h1-pg`, `h2-pg`; `hs-armijo` (Hs projected
 //! gradient with the normalized Armijo search); soft (`Ê` + Hencky, weight `--hencky-w`, default
-//! 1e3): `soft-hs-ncg` (reference), `soft-hs-lbfgs` (memory 30), `soft-h1-ncg`, `soft-h1-lbfgs`.
+//! 10): `soft-hs-ncg` (reference), `soft-hs-lbfgs` (memory 30), `soft-h1-ncg`, `soft-h1-lbfgs`.
 //! Soft methods use the guarded search too (isotopy). Exponents (2, 4.5), projection tolerance
-//! `Absolute(1e-4)`, stop `‖g̃‖₂ < 1e-4`.
+//! `Absolute(1e-4)`, stop energy-rate stop `dE·g̃ < 1e-4` (after an accepted step; the library's gradient rule is off), the Hencky weight defaults to 10.
 //!
 //! One JSON line is appended to `--out` (stdout when absent) with: knot, method, status
 //! (`converged` | `stuck` | `nonconvergent` | `error`), `end_reason`, iterations, wall seconds
-//! (without the audit and the frame writing), the history `[iteration, seconds, F, Ê, ‖g̃‖]`
+//! (without the audit and the frame writing), the history `[iteration, seconds, F, Ê, ‖g̃‖₂, ‖g̃‖_L², dE·g̃]`
 //! (`F` the objective, `Ê` = `F` minus the penalties), exact initial and final energy (Eq. 17), the
 //! isotopy audit (CCD on every accepted step, as `path_contact` in §17f), the constraint residual
 //! (largest `|ℓ/ℓ⁰ − 1|`, the last step's `max_violation`, the largest `|ln(ℓ/ℓ⁰)|`), threads and
@@ -35,7 +35,7 @@ use std::time::Instant;
 use ddg_repulsive_curves::ccd::{CcdOptions, CcdReport, path_contact};
 use ddg_repulsive_curves::optimize::{Hencky, Method};
 use ddg_repulsive_curves::solve::{ProjectionOptions, Tolerance};
-use ddg_repulsive_curves::step::stop::{Status, StepStatus};
+use ddg_repulsive_curves::step::stop::{GradNorm, Status, StepStatus, StopRule};
 use ddg_repulsive_curves::{
     Backend, CurveNetwork, EnergyEval, Exponents, FlowOptions, LineSearch, Metric, RcError,
     Session, Solver, energy, read_curve_obj, write_curve_obj,
@@ -68,7 +68,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         max_seconds: None,
         alpha: 2.0,
         beta: 4.5,
-        hencky_w: 1e3,
+        hencky_w: 10.0,
         backend: "auto".into(),
         audit: true,
         out: None,
@@ -266,6 +266,12 @@ fn run(a: &Args) -> Result<(), String> {
             tolerance: Tolerance::Absolute(1e-4),
             ..ProjectionOptions::default()
         },
+        // The evaluation stops on the energy rate dE.g < 1e-4 (SPEC 18 Q9), tested below; the
+        // library's own gradient-norm rule is switched off.
+        stop: StopRule::GradientNorm {
+            norm: GradNorm::Euclidean,
+            eps: 1e-14,
+        },
         max_iterations: a.max_iters,
         record_path: a.audit,
         threads: Some(a.threads),
@@ -307,13 +313,14 @@ fn run(a: &Args) -> Result<(), String> {
     let mut session = Session::new(net.clone(), pos0.clone(), opts).map_err(|e| e.to_string())?;
     let f0 = session.energy();
 
-    let (mut history, mut audit_s) = (Vec::<[f64; 5]>::new(), 0.0f64);
+    let (mut history, mut audit_s) = (Vec::<[f64; 7]>::new(), 0.0f64);
     let (mut audited, mut violations, mut first_violation) = (0usize, 0usize, None);
     let (mut audit_errors, mut stuck_steps, mut trials) = (0usize, 0usize, 0usize);
     let mut last_violation = 0.0;
     let mut error: Option<String> = None;
     let (mut eb, mut sb) = ("", "");
     let mut end_reason = "";
+    let (mut contact_steps, mut last_contact, mut energy_rate_stop) = (0usize, false, false);
     let t0 = Instant::now();
     let mut frame_s = 0.0f64;
     let wall = |audit_s: f64, frame_s: f64| t0.elapsed().as_secs_f64() - audit_s - frame_s;
@@ -323,7 +330,7 @@ fn run(a: &Args) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         frame_s += tf.elapsed().as_secs_f64();
     }
-    history.push([0.0, 0.0, f0, f0, f64::NAN]);
+    history.push([0.0, 0.0, f0, f0, f64::NAN, f64::NAN, f64::NAN]);
     loop {
         if let Some(limit) = a.max_seconds
             && wall(audit_s, frame_s) >= limit
@@ -346,18 +353,28 @@ fn run(a: &Args) -> Result<(), String> {
         if r.status == StepStatus::Stuck {
             stuck_steps += 1;
         }
-        let pen: f64 = r.penalties_after.iter().sum();
+        if r.contact_floor {
+            contact_steps += 1;
+            last_contact = true;
+        } else if r.status != StepStatus::Stuck {
+            last_contact = false;
+        }
         history.push([
             r.iteration as f64,
             t,
             r.energy_after,
-            r.energy_after - pen,
+            r.tangent_point_after,
             r.gradient_norm,
+            r.gradient_mass_norm,
+            r.sobolev_norm_sq,
         ]);
         eprintln!(
             "TRAJ {} {:.3} {:.8} {:.3e}",
             r.iteration, t, r.energy_after, r.gradient_norm
         );
+        if r.status == StepStatus::Accepted && r.sobolev_norm_sq < 1e-4 {
+            energy_rate_stop = true;
+        }
         if let Some(p) = &r.path {
             let ta = Instant::now();
             let mut rep = CcdReport::default();
@@ -382,6 +399,10 @@ fn run(a: &Args) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
             frame_s += tf.elapsed().as_secs_f64();
         }
+        if energy_rate_stop {
+            end_reason = "energy_rate";
+            break;
+        }
         if session.status().is_terminal() {
             break;
         }
@@ -390,7 +411,14 @@ fn run(a: &Args) -> Result<(), String> {
     let status_dbg = format!("{:?}", session.status());
     let (status, reason) = match session.status() {
         Status::Converged => ("converged", "converged"),
-        Status::Stuck => ("stuck", "stuck"),
+        Status::Stuck => (
+            "stuck",
+            if last_contact {
+                "contact_floor"
+            } else {
+                "stuck"
+            },
+        ),
         Status::MaxIterations => ("nonconvergent", "max_iters"),
         Status::TimeLimit => ("nonconvergent", "time"),
         Status::Error(e) => {
@@ -399,7 +427,9 @@ fn run(a: &Args) -> Result<(), String> {
         }
         Status::Cancelled => ("error", "cancelled"),
         Status::Running => {
-            if error.is_some() {
+            if end_reason == "energy_rate" {
+                ("converged", "energy_rate")
+            } else if error.is_some() {
                 ("error", "error")
             } else {
                 (
@@ -454,7 +484,7 @@ fn run(a: &Args) -> Result<(), String> {
 \"energy0_exact\":{},\"final_energy_exact\":{},\"final_objective\":{},\"final_ehat\":{},\
 \"audit\":{{\"enabled\":{},\"audited_steps\":{},\"violations\":{},\"first_violation\":{},\"errors\":{}}},\
 \"constraint\":{{\"max_len_rel_err\":{},\"max_abs_log_strain\":{},\"last_step_max_violation\":{}}},\
-\"stuck_steps\":{},\"trials\":{},\"energy_backend\":{},\"solver_backend\":{},",
+\"contact_floor_steps\":{},\"ended_on_contact_floor\":{},\"stuck_steps\":{},\"trials\":{},\"energy_backend\":{},\"solver_backend\":{},",
         json_str(&knot_name),
         json_str(&a.method),
         json_str(&a.tag),
@@ -488,6 +518,8 @@ fn run(a: &Args) -> Result<(), String> {
         jnum(len_err),
         jnum(log_strain_lib.unwrap_or(log_strain)),
         jnum(last_violation),
+        contact_steps,
+        last_contact && status == "stuck",
         stuck_steps,
         trials,
         json_str(eb),
@@ -499,12 +531,14 @@ fn run(a: &Args) -> Result<(), String> {
             o.push(',');
         }
         o.push_str(&format!(
-            "[{},{},{},{},{}]",
+            "[{},{},{},{},{},{},{}]",
             h[0] as usize,
             jnum(h[1]),
             jnum(h[2]),
             jnum(h[3]),
-            jnum(h[4])
+            jnum(h[4]),
+            jnum(h[5]),
+            jnum(h[6])
         ));
     }
     o.push_str("]}");

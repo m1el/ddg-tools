@@ -57,7 +57,7 @@ def load(d):
 
 def reach(r, target):
     """(iteration, seconds) of the first history entry with E-hat <= target, else None."""
-    for it, t, f, e, g in r["history"]:
+    for it, t, f, e, *_ in r["history"]:
         if e is not None and e <= target:
             return it, t
     return None
@@ -75,19 +75,19 @@ def analyse(A, T, factor):
             if all(r["status"] == "stuck" for r in runs.values()):
                 excluded.append(k)
                 continue
-            eref = min(e for _, _, _, e, _ in runs[ref]["history"] if e is not None)
+            eref = min(e for _, _, _, e, *_ in runs[ref]["history"] if e is not None)
             target = factor * eref
             row = {"knot": k, "eref": eref, "vertices": runs[ref]["vertices"], "m": {}}
             for m, r in runs.items():
                 hit = reach(r, target)
                 th = None
                 if T is not None and (k, m) in T:
-                    th = reach(T[(k, m)], factor * min(e for _, _, _, e, _ in T[(k, ref)]["history"]) if (k, ref) in T else target)
+                    th = reach(T[(k, m)], factor * min(e for _, _, _, e, *_ in T[(k, ref)]["history"]) if (k, ref) in T else target)
                 row["m"][m] = {
                     "status": r["status"], "iters": r["iterations"], "seconds": r["seconds"],
                     "hit": hit, "hit_timed": th,
                     "violations": r["audit"]["violations"],
-                    "final_ratio": min(e for _, _, _, e, _ in r["history"] if e is not None) / eref,
+                    "final_ratio": min(e for _, _, _, e, *_ in r["history"] if e is not None) / eref,
                 }
             rows.append(row)
         res[gname] = {"rows": rows, "excluded": excluded}
