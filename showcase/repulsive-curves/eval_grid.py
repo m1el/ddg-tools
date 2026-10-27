@@ -70,6 +70,7 @@ def main():
     ap.add_argument("--width", type=int, default=2700)
     ap.add_argument("--height", type=int, default=420)
     ap.add_argument("--methods")
+    ap.add_argument("--results-dir", help="results/ of the run: adds the energy to the labels")
     ap.add_argument("--still-at", type=float)
     a = ap.parse_args()
     import matplotlib
@@ -83,6 +84,15 @@ def main():
         f = os.path.join(a.frames_dir, f"{a.knot}.{m}.rcf")
         if os.path.exists(f):
             runs[m] = read_rcf(f)
+    import json
+    energy = {}
+    if a.results_dir:
+        for m in list(runs):
+            f = os.path.join(a.results_dir, f"{a.knot}.{m}.jsonl")
+            if os.path.exists(f):
+                h = json.loads(open(f).readline())["history"]
+                energy[m] = {row[0]: row[3] for row in h}
+                runs[m]["status"] = json.loads(open(f).readline())["end_reason"]
     if not runs:
         raise SystemExit(f"no .rcf files for {a.knot} in {a.frames_dir}")
     methods = [m for m in want if m in runs]
@@ -128,7 +138,10 @@ def main():
             lc.set_segments(seg[order])
             lc.set_color(np.stack([shade * 0.3, shade * 0.4, np.full_like(shade, 0.5) + 0.5 * (1 - shade) * 0, np.ones_like(shade)], 1))
             done = k == len(r["t"]) - 1 and r["final"][k] == 1 and t >= r["t"][-1]
-            info.set_text(f"it {r['it'][k]:5d}  {min(t, r['t'][-1]):7.1f}s" + ("  done" if done else ""))
+            e = energy.get(m, {}).get(int(r["it"][k]))
+            es = f"\nE {e:9.2f}" if e is not None else ""
+            tail = ("  done: " + r.get("status", "")) if done else ""
+            info.set_text(f"it {r['it'][k]:5d}  {min(t, r['t'][-1]):6.1f}s{es}{tail}")
         fig.canvas.draw()
         return np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
 
