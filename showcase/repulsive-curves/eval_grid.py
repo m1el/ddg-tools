@@ -8,6 +8,7 @@ curves at equal wall-clock times, from the `.rcf` frame files of `examples/eval_
   uv run showcase/repulsive-curves/eval_grid.py --frames-dir runs_tmp/rc-eval/runB/frames \
       --knot knot0102 --out showcase/media/rc_eval_knot0102.mp4 [--fps 30] [--seconds 60]
       [--width 2400 --height 420] [--methods hs-pg,l2-pg,...] [--still-at 0.5]
+      [--cols 3 --width 1350 --height 1350]   (a grid: panels fill rows of --cols)
 
 Every column is the last record with wall time <= t (the file format is in the header of
 eval_knots.rs), so all columns show the same wall-clock instant; a run that has ended shows its
@@ -30,8 +31,8 @@ import numpy as np
 ORDER = ["hs-pg", "l2-pg", "h1-pg", "h2-pg", "hs-armijo",
          "soft-hs-ncg", "soft-hs-lbfgs", "soft-h1-ncg", "soft-h1-lbfgs"]
 TITLE = {"hs-pg": "Hs grad.", "l2-pg": "L2 grad.", "h1-pg": "H1 grad.", "h2-pg": "H2 grad.",
-         "hs-armijo": "Hs Armijo", "soft-hs-ncg": "Hs NCG", "soft-hs-lbfgs": "Hs L-BFGS",
-         "soft-h1-ncg": "H1 NCG", "soft-h1-lbfgs": "H1 L-BFGS"}
+         "hs-armijo": "Hs Armijo", "soft-hs-ncg": "soft Hs NCG", "soft-hs-lbfgs": "soft Hs L-BFGS",
+         "soft-h1-ncg": "soft H1 NCG", "soft-h1-lbfgs": "soft H1 L-BFGS"}
 
 
 def read_rcf(path):
@@ -72,6 +73,7 @@ def main():
     ap.add_argument("--methods")
     ap.add_argument("--results-dir", help="results/ of the run: adds the energy to the labels")
     ap.add_argument("--still-at", type=float)
+    ap.add_argument("--cols", type=int, help="panels per row (default: all in one row)")
     a = ap.parse_args()
     import matplotlib
     matplotlib.use("Agg")
@@ -101,15 +103,18 @@ def main():
     ctr = (allp.min(0) + allp.max(0)) / 2
     rad = float(np.linalg.norm(allp.max(0) - allp.min(0))) / 2
 
-    ncol = len(methods)
+    ncol = min(a.cols or len(methods), len(methods))
+    nrow = -(-len(methods) // ncol)
     dpi = 100
-    fig, axs = plt.subplots(1, ncol, figsize=(a.width / dpi, a.height / dpi), dpi=dpi, squeeze=False)
+    fig, axs = plt.subplots(nrow, ncol, figsize=(a.width / dpi, a.height / dpi), dpi=dpi, squeeze=False)
+    for ax in axs.flat[len(methods):]:
+        ax.axis("off")
     fig.patch.set_facecolor("white")
     nframes = int(a.seconds * a.fps)
     arts = []
-    for ax, m in zip(axs[0], methods):
-        ax.set_xlim(-rad * 0.75, rad * 0.75)
-        ax.set_ylim(-rad * 0.75, rad * 0.75)
+    for ax, m in zip(axs.flat, methods):
+        ax.set_xlim(-rad * 0.85, rad * 0.85)
+        ax.set_ylim(-rad * 0.85, rad * 0.85)
         ax.set_aspect("equal")
         ax.axis("off")
         lc = LineCollection([], linewidths=1.2)
@@ -118,7 +123,10 @@ def main():
         info = ax.text(0.5, 0.0, "", transform=ax.transAxes, ha="center", va="bottom", fontsize=8,
                        family="monospace")
         arts.append((lc, info))
-    fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0)
+    if nrow > 1:  # room between a panel's info line and the title of the panel below
+        fig.subplots_adjust(left=0, right=1, bottom=0.005, top=0.98, wspace=0, hspace=0.08)
+    else:
+        fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
 
     def draw(fi):
         t = wall * fi / max(nframes - 1, 1)
@@ -159,7 +167,7 @@ def main():
         ff.stdin.write(np.ascontiguousarray(draw(fi)).tobytes())
     ff.stdin.close()
     ff.wait()
-    print(f"wrote {a.out}: {nframes} frames, wall time shown {wall:.1f} s, {len(methods)} columns")
+    print(f"wrote {a.out}: {nframes} frames, wall time shown {wall:.1f} s, {len(methods)} panels, {nrow}x{ncol}")
 
 
 main()
