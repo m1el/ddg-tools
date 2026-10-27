@@ -1637,11 +1637,18 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
   `S(θ) = ½ B_{sin²θ}(½, (m+1)/2)` (incomplete beta function) with its hypergeometric series.
   The crate sums 60 terms; with ratio at most ½ the remainder is below `2⁻⁶⁰` times the leading
   term (`|C(a, k)|` grows at most polynomially in `k`).
-- **Reference.** NIST *Digital Library of Mathematical Functions*, §8.17 (incomplete beta function,
-  hypergeometric representation 8.17.7) and §15.2 (the Gauss series and its convergence for
-  `|z| < 1`); the binomial series: M. Abramowitz, I. A. Stegun, *Handbook of Mathematical
-  Functions*, NBS 1964, 3.6.8.
-- **Source check.** Equation numbers as remembered, not re-read. The series are checked against
+- **Reference.** NIST *Digital Library of Mathematical Functions* (<https://dlmf.nist.gov>): §8.17
+  (incomplete beta function `B_x(a, b)`, eq. 8.17.1; hypergeometric representation
+  `B_x(a, b) = (x^a/a) F(a, 1 − b; a + 1; x)`, eq. 8.17.7; with `a = ½`, `b = (m + 1)/2` this is the
+  second form of the statement) and §15.2 (the Gauss series, eq. 15.2.1, defined by the series on
+  `|z| < 1`); the binomial series with general exponent: M. Abramowitz, I. A. Stegun, *Handbook of
+  Mathematical Functions*, NBS 1964, §3.6 (binomial series, pp. 14–15 of the Dover printing; the
+  equation number 3.6.8 of the first version of this entry was not verified and is dropped).
+- **Source check.** Checked 2026-10-27 against <https://dlmf.nist.gov/8.17> and
+  <https://dlmf.nist.gov/15.2>: eqs. 8.17.1, 8.17.7 and 15.2.1 read as above (8.17.8 is the
+  different form with the factor `(1 − x)^b`). The derivation in the Statement (substitution
+  `t = sin φ`, termwise integration, `S = ½ B_{sin²θ}(½, (m+1)/2)`) was rechecked by hand and is
+  consistent with 8.17.7. A&S equation number not verified (no readable scan reached). The series are checked against
   adaptive Gauss–Legendre quadrature of `cos^m` to `2e-15` absolute for three exponents
   (`tests/near_pair.rs`, `series_and_inner_integral_match_brute_force`) and against SciPy to
   `4e-16` (WP16 prototype).
@@ -1664,11 +1671,24 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
   those conditions; clamped parameters have zero derivative. `d` is `C¹` but not `C²` where the
   set of active bounds changes, and not differentiable for parallel overlapping segments (the
   minimizer is not unique).
-- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.9;
-  J. M. Danskin, *The Theory of Max-Min and its Application to Weapons Allocation Problems*,
-  Springer 1967; J. F. Bonnans, A. Shapiro, *Perturbation Analysis of Optimization Problems*,
-  Springer 2000, §4.1 (directional differentiability of optimal value functions).
-- **Source check.** As cited; the theorem numbers were not re-read. The Rust differential through
+- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.9
+  "Closest Points of Two Line Segments" (about p. 148; page not verified);
+  J. M. Danskin, "The theory of max-min, with applications", *SIAM J. Appl. Math.* 14 (4) (1966)
+  641–664, and the monograph *The Theory of Max-Min and its Application to Weapons Allocation
+  Problems*, Springer 1967 (Ökonometrie und Unternehmensforschung 5); J. F. Bonnans, A. Shapiro,
+  *Perturbation Analysis of Optimization Problems*, Springer 2000, Chapter 4 (first-order
+  differentiability of optimal value functions; section and theorem numbers not verified).
+- **Source check.** Checked 2026-10-27: the Ericson section number and title 5.1.9 (and 5.1.5
+  "Closest Point on Triangle to Point") against the Routledge table of contents
+  (<https://www.routledge.com/Real-Time-Collision-Detection/Ericson/p/book/9781558607323>); the
+  Danskin 1967 monograph (Springer, Berlin, series volume 5, viii + 126 pp.) against library
+  records (<https://www.springer.com/gp/book/9783642460944>). The 1966 SIAM paper is added from
+  memory of the standard citation for Danskin's theorem and was not re-read. Bonnans–Shapiro title,
+  publisher and year confirmed by catalogue records; the section number `§4.1` of the first version
+  was not verified and is replaced by the chapter. Danskin's theorem is used in its standard form
+  (the minimum over a compact set, here `[0, 1]²`, of a function `C¹` in the parameter; its
+  directional derivative is the minimum of the partials over the minimizers, hence the gradient at
+  a unique minimizer). The Rust differential through
   these derivatives is checked by central differences (`tests/near_pair.rs`).
 - **Why not formalized.** The case analysis of the algorithm and the envelope theorem on a
   rectangle; the consequence (the differential of the blended energy) is tested.
@@ -1678,14 +1698,34 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
 ### [formula: rc-near-quadrature-error] Accuracy of the graded outer quadrature (WP16, SPEC §3.4)
 
 - **Statement.** For an integrand analytic in the Bernstein ellipse `E_ρ` of an interval and bounded
-  there by `M`, the `n`-point Gauss–Legendre error is at most `64 M / (15 (ρ² − 1) ρ^{2n})` times
-  the half-length; after the substitution `t = c ± δ sinh w` a near singularity at distance `δ`
+  there by `M`, the `N`-point Gauss–Legendre error (`N ≥ 2`) is at most
+  `64 M / (15 (ρ² − 1) ρ^{2(N−1)})` times the half-length (equivalently `ρ^{−2n}` for `n + 1`
+  points); after the substitution `t = c ± δ sinh w` a near singularity at distance `δ`
   from `c` lies at imaginary distance about `π/2` from the real `w` axis for every ratio `δ/L`,
   so a fixed number of panels in `w` gives a uniform relative accuracy as `δ/L → 0`.
-- **Reference.** L. N. Trefethen, *Approximation Theory and Approximation Practice*, SIAM 2013,
-  Thm. 19.3; P. R. Johnston, D. Elliott, "A sinh transformation for evaluating nearly singular
-  boundary element integrals", *Int. J. Numer. Meth. Engng.* 62 (2005) 564–578.
-- **Source check.** As cited, not re-read. The crate does not rely on the bound: the accuracy is
+- **Reference.** L. N. Trefethen, *Approximation Theory and Approximation Practice*, SIAM 2013
+  (Extended Edition 2019), Chapter 19, Thm. 19.3 (Gauss and Clenshaw–Curtis error for functions
+  analytic in a Bernstein ellipse; the book's own page not seen); P. Rabinowitz, "Rough and ready
+  error estimates in Gaussian integration of analytic functions", *Comm. ACM* 12 (5) (1969)
+  268–270, ineq. (18) (the origin of the `64/15` constant); P. R. Johnston, D. Elliott, "A sinh
+  transformation for evaluating nearly singular boundary element integrals", *Int. J. Numer.
+  Meth. Engng.* 62 (4) (2005) 564–578, doi:10.1002/nme.1208 (the repository record of the Griffith
+  copy gives the title with "two-dimensional" inserted; the wording of the title is as in the
+  University of Tasmania eCite record).
+- **Source check.** Checked 2026-10-27, secondarily, since the book text could not be read:
+  Thm. 19.3 is cited for Gauss–Legendre quadrature of functions analytic and bounded by `M` in
+  `E_ρ` in L. N. Trefethen, SIAM Rev. 63 (2021) "Exactness of quadrature formulas" (Section 6,
+  <https://people.maths.ox.ac.uk/trefethen/exactness.pdf>), and stated with the constant `64/15`
+  for `N` points, `N ≥ 2`, and `ρ^{−2(N−1)}` in arXiv:2411.19086, Thm. 6.9
+  (<https://arxiv.org/pdf/2411.19086>), which cites Rabinowitz ineq. (18) and Thm. 19.3 of the
+  Extended Edition. Another paper (arXiv:2211.00696, Thm. 3.1) quotes Thm. 19.3 with `144/35`
+  for `n + 1` points, `n ≥ 2`; so the constant (`64/15` vs `144/35`) and the exact hypotheses of
+  the book's theorem are not verified. The first version of this entry wrote `ρ^{2n}` for `n`
+  points, an off-by-one in the point count, now corrected. The Johnston–Elliott bibliographic data
+  (journal, volume, issue, pages, year, doi) match the eCite record
+  (<https://ecite.utas.edu.au/36544>, via search summary; the page itself was not readable); the
+  claim "imaginary distance about `π/2`" was rechecked by hand (`sinh w = ±i` at `w = ±iπ/2`).
+  The crate does not rely on the bound: the accuracy is
   measured (`tests/near_pair.rs`: at most `2.5e-6` relative against an adaptive reference on seven
   crafted pairs at distances `0.5 … 1e-6`, both exponent pairs; SPEC §17o).
 - **Why not formalized.** An error bound of a numerical rule; only the substitution identity is
