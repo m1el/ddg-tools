@@ -8,7 +8,7 @@
 #                                     frames every $RC_FRAME_S seconds (0 = none)
 #
 # Environment: RC_OUT (output dir, default runs_tmp/rc-eval/run), RC_P (default 60), RC_MAX_ITERS,
-# RC_MAX_SECONDS (caps; empty = none), RC_HW (Hencky weight, default 10), RC_THREADS (B, default 64;
+# RC_MAX_SECONDS (cap; empty = none), RC_MAX_SECONDS_REF (cap of the two reference methods hs-pg, soft-hs-ncg), RC_HW (Hencky weight, default 10), RC_THREADS (B, default 64;
 # A is always 1), RC_FRAME_S (B, default 0), RC_BACKEND (default auto), RC_BIN.
 # Finished jobs (result file present) are skipped, so a run can be resumed.
 set -euo pipefail
@@ -27,7 +27,9 @@ run_job() { # knot method mode
   local args=(--knot "$knot" --method "$method" --hencky-w "${RC_HW:-10}" --backend "${RC_BACKEND:-auto}"
               --out "$res.tmp" --tag "$mode")
   [ -n "${RC_MAX_ITERS:-}" ] && args+=(--max-iters "$RC_MAX_ITERS")
-  [ -n "${RC_MAX_SECONDS:-}" ] && args+=(--max-seconds "$RC_MAX_SECONDS")
+  local cap="${RC_MAX_SECONDS:-}"
+  case "$method" in hs-pg|soft-hs-ncg) cap="${RC_MAX_SECONDS_REF:-$cap}" ;; esac
+  [ -n "$cap" ] && args+=(--max-seconds "$cap")
   if [ "$mode" = A ]; then
     args+=(--threads 1 --final-obj "$OUT/final/$base.obj")
   else
