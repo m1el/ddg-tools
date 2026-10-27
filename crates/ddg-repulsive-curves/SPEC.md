@@ -2602,3 +2602,9 @@ targets):
   thread (60 runs in parallel), no iteration cap below it. Phase B runs the 24-knot subset alone at
   64 threads (reference methods 300 s, the others 120 s, frames every second), plus the two
   reference methods at one thread on 6 of those knots; the other one-thread times come from phase A.
+* Q8 (after WP12b, §17m Finding A): the soft problems of the evaluation use the Hencky weight
+  `w_H = 10`, from the tension rule (median over knots of the maximum strain `λ/(2w)` at most 1e-2),
+  not the earlier 1e4.
+* Q9 (after WP12b, §17m Finding B): the evaluation stops a run on the energy rate,
+  `dE·g̃ < 1e-4` (`StepReport::sobolev_norm_sq`, the reference's rule), or on its wall budget.
+  The library's default stop rule (`‖g̃‖₂ < 1e-4`, D14) is unchanged.
