@@ -2674,6 +2674,183 @@ targets):
   * Exact + dense costs about 3 s per step against 0.4–0.8 s, so Auto stays the budget choice.
   * The driver re-evaluates final energies exactly anyway.
 
+## 17o. Near-pair quadrature (WP16, 2026-10-27)
+
+**Problem.** In the evaluation (Sec. 7, phase A, `runs_tmp/rc-eval/runA-v1-endpoint-quadrature`)
+20 Hs runs ended on the contact floor (§17l.6): hs-pg 1, soft-hs-lbfgs 15, soft-hs-ncg 4 (of the
+230 results present). In the two that were measured the closest pair was at `9.3e-7 ℓ̄` and
+`4.1e-7 ℓ̄` with segment parameters `(0.05, 0.44)` and `(0.39, 0.55)` and nearest endpoints
+`0.75 ℓ̄` and `0.91 ℓ̄` apart, from clean initial curves (`0.12`, `0.65 ℓ̄`). Eq. 18 averages the
+kernel over the four endpoint pairs, so it is blind to two edges crossing in their interiors: the
+pair term stays bounded as `d → 0`, the flow pushes the pair together, the CCD lets the gap shrink
+by its fixed fraction per step, and the floor ends the run. The pair integral of the polygon does
+see it: for two perpendicular segments of half-length 1 crossing in their middles it is at least
+`4 · 3^{−β/2} d^{2+α−β}` (Lean `perpPair_lower_bound`, `rc-near-divergence`), i.e. it diverges
+like `1/d` for (3, 6) and like `d^{−1/2}` for (2, 4.5); the graded quadrature reproduces the rate
+(`≈ 7.5 d^{−1/2}` for (2, 4.5): `7531` at `d = 1e-6`; local slopes −1 and −½ to `1e-2` for
+`d = 1e-5 … 1e-9`, test `pair_integral_diverges_at_the_rate_of_the_polygon`). The contract is
+§3.4; this section records the choices and measurements. User decision: fix the energy for near
+pairs, default on, `None` gives the paper's formula.
+
+**Choices** (prototype in NumPy/SciPy against `scipy.integrate.quad`, then Rust):
+
+* *Inner integral in closed form.* `|T_I × (x − y)| = h` is constant along `I`, and `u = h tan θ`
+  turns the integrand into `h^{1+α−β} cos^{β−2} θ`. `S = ∫ cos^{β−2}` by two binomial series of
+  ratio ≤ ½ (60 terms, `2e-15` absolute against adaptive quadrature for three exponent pairs)
+  rather than Gauss–Legendre in `θ`: `S' = cos^{β−2}` then holds to rounding, the differential of
+  `F` is analytic, and 2 × 60 multiply-adds are cheaper than 16 `powf`. The same-side branch
+  (both angles beyond `π/4`) avoids cancelling `S(π/2)`: without it the prototype lost all digits
+  for pairs whose projections fall beyond the end of `I` (errors to 15 % for (3, 6)).
+* *Outer quadrature.* Grading toward the closest point alone is not enough for nearly parallel
+  pairs: `F` has steps of width `d` where `y` passes the ends of `I`. On 60 random near-parallel
+  pairs (`d = 1e-6 … 1e-1`, angles `1e-4 … 0.3`) the worst error was 13 % with the closest point
+  as the only breakpoint and `1.3e-7` (2, 4.5) / `1.8e-7` (3, 6) with the projections of the ends
+  of `I` as breakpoints too (`M = 4`; `M = 3`: `4e-6` / `1.3e-5`). One scale `δ = d/ℓ_J` for all
+  breakpoints (finer than needed at the projections) keeps the rule continuous when breakpoints
+  swap order. Against the adaptive reference of `tests/near_pair.rs` on seven crafted pairs
+  (perpendicular, off-centre, skew 0.3, nearly parallel 0.02, parallel overlapping, `T` (an end
+  of `J` above the middle of `I`), endpoint-closest), `d = 0.5 … 1e-6`, both exponent pairs: worst
+  `2.5e-6` relative (the `T` pair at `d = 1e-6`, (3, 6)), `6e-7` otherwise.
+* *Length scale `ℓ_IJ = √((ℓ_I² + ℓ_J²)/2)`* instead of `max(ℓ_I, ℓ_J)`: smooth in both lengths
+  (`max` has a kink at `ℓ_I = ℓ_J`, the common case under `EdgeLengths`), within `[1/√2, 1]` of the
+  max.
+* *Band `c₁ = 0.25`, `c₂ = 0.75`.* Inside the band the blend term `w'(r)(e^n − e^p)∇r` acts as a
+  force. Where Eq. 18 underestimates (mid-edge crossings, `e^n/e^p` = 2–3 at `d = 0.5 ℓ`) it only
+  adds repulsion; where it overestimates (closest points at endpoints) it pulls the pair into the
+  band. Depth of the energy pocket along a pure separation (largest relative rise of the pair
+  energy with `d`) for an endpoint-near-endpoint pair: band `[0.25, 0.5]` 20 % (2, 4.5) and 47 %
+  (3, 6); `[0.2, 0.6]` 0 % / 7 %; `[0.3, 0.7]` 0 % / 3 %; `[0.25, 0.75]` and `[0.4, 0.8]` 0 % / 0 %;
+  the five other crafted pairs had no pocket for any band (one tilted endpoint pair has a 9 %
+  pocket that Eq. 18 alone already has). `c₂ = 0.75` keeps pairs one edge apart on curves of
+  uniform edge length (`r = 1`) outside the band.
+* *Second neighbours excluded* (`second_neighbours: false`). With them included, on the 16
+  converged Hs curves of phase A every in-band pair (160 on 11 curves, Python count with the mean
+  length) was a pair `I, K, J` with a short middle edge (the perturbed knots keep edge-length
+  ratios up to 27), and on the authors' `TangentInterpolation` scene (sharp corners, no length
+  constraint) the energy after the first step was 156 instead of the paper's 789 (`e^n ≪ e^p` at
+  the corners: Eq. 18 overestimates there by up to 300 per pair) and the end edge collapsed at
+  step 4 instead of step 15–20 (`tests/end_edge.rs` and `applications.rs` failed). Excluded, both
+  tests pass, the scene stays close to the paper's run (644 after the first step; 4, 0, 1, 0, 0 … pairs
+  in the band; end-edge lengths `2.1e-2, 2.5e-2, 2.9e-2, 2.3e-2` as
+  against `2.1e-2, 2.3e-2, 2.7e-2, 1.4e-2`), and the converged curves have no pair in the band. Second neighbours cannot cross in their
+  interiors without the joining edge's ends being close, which Eq. 18 sees.
+
+**Pairs in the band** (`near_pairs`, defaults): on the 228 initial curves (Knot128 perturbed,
+Trefoil100) 2873 pairs on 167 curves (199 with `w = 1`, at most 93 on one curve, smallest
+`r = 0.0073`); on the 16 converged Hs curves of phase A none.
+
+**Bitwise unchanged.** When no pair is in the band nothing is added (test
+`no_near_pair_means_bitwise_the_paper`: energy and differential of the exact and the Barnes–Hut
+models, and three flow steps, bit for bit; every other test of the crate passes unchanged; the
+oracle's step replay sets `near_pair: None`). In gate 2 below, the three runs whose curves never
+had a pair in the band (knot0018 soft-hs-lbfgs, trefoil0018 hs-pg and soft-hs-ncg) reproduced the
+phase-A history (`F`, `Ê`, `‖g̃‖₂`, `‖g̃‖_L²`, `dE·g̃` of every step) bit for bit.
+
+**Differential.** Central differences (`h = 1e-6 ℓ`) of the blended pair term on the seven crafted
+pairs at `d = 3e-3, 0.08, 0.35, 0.5` (`w = 1` and inside the band), both exponent pairs: relative
+errors `3e-11 … 1.6e-7` (exactly parallel overlapping pairs inside the band are skipped: `d` is not
+differentiable there, §3.4). Whole curves (two crossing strands at gaps `1e-4, 0.05, 0.4`, exact and
+Barnes–Hut with `θ = 0.5`, leaf 2): directional errors below `1e-7`. On the two stuck curves of
+phase A (exact and Barnes–Hut, 16 threads), pair by pair after re-centring at the pair (positions
+of size 1 limit a step of `1e-12`): the pairs at `9.3e-7 ℓ̄` and `4.1e-7 ℓ̄` `4.5e-9` and `3.5e-8`,
+all others `≤ 7e-7`; along random directions of the whole curve `≤ 7e-6`, limited by the rounding
+of the steps. Oracle (`lean/oracle`, task `near`, independent implementation, its differential a
+Richardson central difference of the correction): fixtures `rc-near-crossing-245`,
+`rc-near-crossing-36`, `rc-near-blend-245`, energy within `3e-4` and differential within `2e-2` of
+the tolerances (`1e-12`, `1e-8`). Thread counts 1, 3, 8: bitwise equal (exact and Barnes–Hut).
+Barnes–Hut with nothing lumped equals the exact model to `1e-13`.
+
+**Gate 1: the stuck runs** (`eval_knots` of this branch, phase-A flags, one thread, 24 min cap, 32
+jobs in parallel with the 20 runs of the variant; `runs_tmp/rc-wp16/gate/g1v2`). No run stuck,
+none on the contact floor, 0 isotopy violations in the per-step audit; 15 of 20 stop on the energy
+rate, 5 on the wall budget (four soft NCG runs and one L-BFGS run, still descending). `Ê` is the
+paper's energy (Eq. 17) of the final curve as the driver reports it; the closest pair of the final
+curve by the user's script (adjacent pairs excluded, so mostly second neighbours at corners).
+
+| knot | method | before: end, steps, Ê | after: end, steps, s | Ê after | closest pair / ℓ̄ | audit | variant with second neighbours: end, Ê |
+|---|---|---|---|---|---|---|---|
+| knot0027 | soft-hs-lbfgs | contact_floor, 22, 1066.3 | energy_rate, 551, 1064 | 36.091 | 0.36 | 0/551 | energy_rate, 35.767 |
+| knot0072 | soft-hs-lbfgs | contact_floor, 23, 1891.4 | energy_rate, 639, 1282 | 39.326 | 0.44 | 0/639 | time, 39.326 |
+| knot0121 | soft-hs-lbfgs | contact_floor, 18, 2192.1 | energy_rate, 811, 1357 | 47.966 | 0.47 | 0/811 | time, 47.967 |
+| trefoil0001 | soft-hs-lbfgs | contact_floor, 20, 4116.7 | energy_rate, 375, 1129 | 8.5089 | 0.26 | 0/375 | energy_rate, 8.5066 |
+| trefoil0018 | soft-hs-lbfgs | contact_floor, 19, 931.13 | energy_rate, 289, 643 | 9.0743 | 0.65 | 0/289 | energy_rate, 9.0744 |
+| trefoil0031 | soft-hs-lbfgs | contact_floor, 20, 5881.3 | time, 629, 1441 | 8.064 | 0.28 | 0/629 | time, 8.555 |
+| trefoil0037 | soft-hs-lbfgs | contact_floor, 19, 1431.1 | energy_rate, 394, 888 | 8.5106 | 0.66 | 0/394 | energy_rate, 8.5105 |
+| trefoil0045 | soft-hs-lbfgs | contact_floor, 19, 2974.5 | energy_rate, 445, 1262 | 7.7466 | 0.26 | 0/445 | energy_rate, 7.7481 |
+| trefoil0048 | soft-hs-lbfgs | contact_floor, 17, 2446 | energy_rate, 630, 1297 | 7.8435 | 0.40 | 0/630 | energy_rate, 7.8433 |
+| trefoil0061 | soft-hs-lbfgs | contact_floor, 20, 1939.2 | energy_rate, 458, 980 | 8.276 | 0.37 | 0/458 | energy_rate, 8.2757 |
+| trefoil0065 | soft-hs-ncg | contact_floor, 1015, 19.121 | time, 1066, 1441 | 8.7147 | 0.05 | 0/1066 | time, 8.7436 |
+| trefoil0070 | soft-hs-lbfgs | contact_floor, 16, 2476.8 | energy_rate, 731, 1303 | 8.3116 | 0.33 | 0/731 | energy_rate, 8.3112 |
+| trefoil0070 | soft-hs-ncg | contact_floor, 20, 1222.6 | time, 1237, 1440 | 12.155 | 0.33 | 0/1237 | time, 16.655 |
+| trefoil0074 | soft-hs-lbfgs | contact_floor, 24, 1660.1 | energy_rate, 576, 1199 | 8.3941 | 0.18 | 0/576 | energy_rate, 8.3942 |
+| trefoil0075 | soft-hs-lbfgs | contact_floor, 23, 3803.2 | energy_rate, 411, 942 | 8.1079 | 0.30 | 0/411 | energy_rate, 8.1101 |
+| trefoil0075 | soft-hs-ncg | contact_floor, 17, 1446.5 | time, 1576, 1440 | 8.1489 | 0.30 | 0/1576 | time, 8.1214 |
+| trefoil0080 | hs-pg | contact_floor, 14, 4354.7 | energy_rate, 679, 1146 | 8.3473 | 0.30 | 0/679 | energy_rate, 8.3474 |
+| trefoil0080 | soft-hs-lbfgs | contact_floor, 15, 5011.7 | energy_rate, 500, 1027 | 8.3499 | 0.30 | 0/500 | energy_rate, 8.3495 |
+| trefoil0080 | soft-hs-ncg | contact_floor, 14, 3317.7 | time, 1562, 1440 | 8.7534 | 0.30 | 0/1562 | time, 9.4585 |
+| trefoil0082 | soft-hs-lbfgs | contact_floor, 382, 17.668 | energy_rate, 418, 1018 | 7.9929 | 0.27 | 0/418 | energy_rate, 7.9934 |
+
+**Gate 2: runs that were fine** (12 converged Hs runs of phase A; `g2v2`). All converge again,
+final `Ê` within `0.11 %` (the largest change, −0.11 %, is lower), mostly within `0.01 %`;
+iteration counts within ±10 % except trefoil0001 hs-pg (+26 %), trefoil0037 hs-pg (+83 %),
+trefoil0005 soft-hs-ncg (+13 %): the energy-rate stop is path dependent and these curves start
+with 8–74 pairs in the band. Wall seconds are not comparable with phase A (different load); the
+runs with 0 pairs at the start did exactly the same computation.
+
+| knot | method | near pairs at start | before: steps, Ê | after: steps, s | Ê after | Ê after / before − 1 | audit |
+|---|---|---|---|---|---|---|---|
+| knot0018 | soft-hs-lbfgs | 0 | 559, 32.5335 | 559, 1040 | 32.5335 | +0.000 % | 0/559 |
+| knot0051 | soft-hs-lbfgs | 4 | 695, 43.6032 | 675, 1095 | 43.6044 | +0.003 % | 0/675 |
+| trefoil0001 | hs-pg | 74 | 552, 8.50476 | 697, 1227 | 8.50482 | +0.001 % | 0/697 |
+| trefoil0005 | hs-pg | 63 | 395, 8.77956 | 373, 853 | 8.77953 | -0.000 % | 0/373 |
+| trefoil0005 | soft-hs-lbfgs | 63 | 323, 8.7805 | 313, 773 | 8.77933 | -0.013 % | 0/313 |
+| trefoil0005 | soft-hs-ncg | 63 | 1146, 8.79009 | 1296, 1145 | 8.78021 | -0.112 % | 0/1296 |
+| trefoil0018 | hs-pg | 0 | 236, 9.07395 | 236, 550 | 9.07395 | +0.000 % | 0/236 |
+| trefoil0018 | soft-hs-ncg | 0 | 687, 9.07472 | 687, 741 | 9.07472 | +0.000 % | 0/687 |
+| trefoil0037 | hs-pg | 8 | 264, 8.50824 | 482, 894 | 8.50765 | -0.007 % | 0/482 |
+| trefoil0061 | hs-pg | 21 | 473, 8.2745 | 447, 893 | 8.27428 | -0.003 % | 0/447 |
+| trefoil0067 | hs-pg | 4 | 174, 9.07084 | 173, 420 | 9.07077 | -0.001 % | 0/173 |
+| trefoil0067 | soft-hs-lbfgs | 4 | 382, 9.07221 | 391, 685 | 9.07169 | -0.006 % | 0/391 |
+
+**Cost** (`benches/nearpair.rs`, one thread, alone, load 0.2–1.8; 10 steps; `Timings::near_pair`
+covers the base curve and every trial energy of the line search):
+
+| curve | vertices | back end | s / iteration | near-pair pass / iteration | share | pairs in band (mean, max) |
+|---|---|---|---|---|---|---|
+| Freedman–He–Wang (Fig. 20) | 592 | exact + dense | 0.261 (without: 0.280) | 4.5 ms | 1.7 % | 0, 0 |
+| Freedman–He–Wang (Fig. 20) | 2368 | Barnes–Hut + multigrid | 2.59 (without: 2.58) | 8.8 ms | 0.34 % | 0, 0 |
+| trefoil0080 (initial) | 2880 | Barnes–Hut + multigrid | 11.4 (without: 8.3) | 62 ms | 0.55 % | 4.8, 35 |
+| trefoil0080, the stuck curve of hs-pg | 2880 | Barnes–Hut + multigrid | 4.5 | 35 ms | 0.77 % | 9, 9 |
+
+With no pair near, the pass is the grid broad phase only (about 1.5 µs per edge per energy
+evaluation). The per-iteration difference on trefoil0080 comes from the different path (the run
+without the correction is already on its way into the crossing), not from the pass; on the stuck
+curve every step is `Stuck` at the floor (the correction cannot undo a crossing at `1e-6 ℓ̄`; it
+prevents it).
+
+**Variant with second neighbours** (the first build, `g1`): also no stuck run, 0 violations;
+13 of 20 on the energy rate, 7 on the budget, final energies within 1 % of the default's except
+three runs on the budget (trefoil0031 L-BFGS +6 %, trefoil0070 and trefoil0080 NCG +37 % and
++8 %; last column above).
+
+**Open.**
+
+* The driver (`examples/eval_knots.rs`, not WP16's) needs `--near-pair 0|1` to reproduce the
+  paper's energy, and a column with the near-pair count / correction; its `final_energy_exact`
+  stays the paper's Eq. 17 (it calls `energy()`), its history `F`, `Ê` include the correction.
+  Phases A and B have to be rerun in full.
+* `ddg-py` and Blender get the correction by default (they build `FlowOptions` with
+  `..FlowOptions::default()`); they need an explicit option (`near_pair: bool`, default true;
+  optionally the band) and, for an energy readout, `energy_with_near_pair`.
+* The crate root does not re-export `NearPairOptions` (it is
+  `ddg_repulsive_curves::energy::NearPairOptions`; `lib.rs` is not WP16's).
+* Smoothness: inside the blend band the energy is `C¹` (not `C²`) where the closest-point regime
+  of a pair changes, and only directionally differentiable at exactly parallel overlapping pairs;
+  near pairs lumped by Barnes–Hut (impossible with the default parameters) keep Eq. 26.
+* The oracle fuzz (`fuzz_against_the_oracle`, ignored) reports 47 step disagreements of the
+  chord-iteration count (`0` here, `1` in the oracle); the same 47 at the commit before WP16
+  (c657176), so not caused by it.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
