@@ -16,7 +16,7 @@
 //!
 //! One JSON line is appended to `--out` (stdout when absent) with: knot, method, status
 //! (`converged` | `stuck` | `nonconvergent` | `error`), `end_reason`, iterations, wall seconds
-//! (without the audit and the frame writing), the history `[iteration, seconds, F, Ê, ‖g̃‖₂, ‖g̃‖_L², dE·g̃]`
+//! (without the audit and the frame writing), the history `[iteration, seconds, F, Ê, ‖g̃‖₂, ‖g̃‖_L², dE·g̃, near pairs]` (F and Ê are the objective the flow minimizes, i.e. including the near-pair correction when `--near-pair 1`, the default; `final_energy_paper` is Eq. 17 exact, `final_energy_near` the corrected energy exact, both at the final curve)
 //! (`F` the objective, `Ê` = `F` minus the penalties), exact initial and final energy (Eq. 17), the
 //! isotopy audit (CCD on every accepted step, as `path_contact` in §17f), the constraint residual
 //! (largest `|ℓ/ℓ⁰ − 1|`, the last step's `max_violation`, the largest `|ln(ℓ/ℓ⁰)|`), threads and
@@ -33,6 +33,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use ddg_repulsive_curves::ccd::{CcdOptions, CcdReport, path_contact};
+use ddg_repulsive_curves::energy::{NearPairOptions, energy_with_near_pair};
 use ddg_repulsive_curves::optimize::{Hencky, Method};
 use ddg_repulsive_curves::solve::{ProjectionOptions, Tolerance};
 use ddg_repulsive_curves::step::stop::{GradNorm, Status, StepStatus, StopRule};
@@ -57,6 +58,7 @@ struct Args {
     frames_every: Option<f64>,
     frames_out: Option<String>,
     tag: String,
+    near_pair: bool,
 }
 
 fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -76,6 +78,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         frames_every: None,
         frames_out: None,
         tag: String::new(),
+        near_pair: true,
     };
     let mut it = args;
     while let Some(s) = it.next() {
@@ -107,6 +110,13 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--frames-out" => a.frames_out = Some(value("--frames-out")?),
             "--tag" => a.tag = value("--tag")?,
+            "--near-pair" => {
+                a.near_pair = match value("--near-pair")?.as_str() {
+                    "0" => false,
+                    "1" => true,
+                    o => return Err(format!("--near-pair takes 0 or 1, not {o}")),
+                }
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -272,6 +282,7 @@ fn run(a: &Args) -> Result<(), String> {
             norm: GradNorm::Euclidean,
             eps: 1e-14,
         },
+        near_pair: a.near_pair.then(NearPairOptions::default),
         max_iterations: a.max_iters,
         record_path: a.audit,
         threads: Some(a.threads),
@@ -296,6 +307,19 @@ fn run(a: &Args) -> Result<(), String> {
     let exact_energy = |net: &CurveNetwork, p: &[[f64; 3]]| -> Result<f64, RcError> {
         Ok(energy(net, p, exps, &EnergyEval::Exact, Some(a.threads))?.energy)
     };
+    let near_opts = NearPairOptions::default();
+    let near_energy = |net: &CurveNetwork, p: &[[f64; 3]]| -> Result<f64, RcError> {
+        Ok(energy_with_near_pair(
+            net,
+            p,
+            exps,
+            &EnergyEval::Exact,
+            Some(&near_opts),
+            Some(a.threads),
+        )?
+        .energy)
+    };
+    let e0_near = near_energy(&net, &pos0).unwrap_or(f64::NAN);
     let e0_exact = exact_energy(&net, &pos0).map_err(|e| e.to_string())?;
     let rest: Vec<f64> = net
         .edges()
@@ -313,13 +337,14 @@ fn run(a: &Args) -> Result<(), String> {
     let mut session = Session::new(net.clone(), pos0.clone(), opts).map_err(|e| e.to_string())?;
     let f0 = session.energy();
 
-    let (mut history, mut audit_s) = (Vec::<[f64; 7]>::new(), 0.0f64);
+    let (mut history, mut audit_s) = (Vec::<[f64; 8]>::new(), 0.0f64);
     let (mut audited, mut violations, mut first_violation) = (0usize, 0usize, None);
     let (mut audit_errors, mut stuck_steps, mut trials) = (0usize, 0usize, 0usize);
     let mut last_violation = 0.0;
     let mut error: Option<String> = None;
     let (mut eb, mut sb) = ("", "");
     let mut end_reason = "";
+    let (mut near_pairs_max, mut near_pairs_last) = (0u64, 0u64);
     let (mut contact_steps, mut last_contact, mut energy_rate_stop) = (0usize, false, false);
     let t0 = Instant::now();
     let mut frame_s = 0.0f64;
@@ -330,7 +355,7 @@ fn run(a: &Args) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         frame_s += tf.elapsed().as_secs_f64();
     }
-    history.push([0.0, 0.0, f0, f0, f64::NAN, f64::NAN, f64::NAN]);
+    history.push([0.0, 0.0, f0, f0, f64::NAN, f64::NAN, f64::NAN, 0.0]);
     loop {
         if let Some(limit) = a.max_seconds
             && wall(audit_s, frame_s) >= limit
@@ -367,7 +392,10 @@ fn run(a: &Args) -> Result<(), String> {
             r.gradient_norm,
             r.gradient_mass_norm,
             r.sobolev_norm_sq,
+            r.near_pairs as f64,
         ]);
+        near_pairs_max = near_pairs_max.max(r.near_pairs);
+        near_pairs_last = r.near_pairs;
         eprintln!(
             "TRAJ {} {:.3} {:.8} {:.3e}",
             r.iteration, t, r.energy_after, r.gradient_norm
@@ -457,6 +485,7 @@ fn run(a: &Args) -> Result<(), String> {
         Ok(e) => (e, None),
         Err(e) => (f64::NAN, Some(e.to_string())),
     };
+    let ef_near = near_energy(session.network(), &pos).unwrap_or(f64::NAN);
     let (mut len_err, mut log_strain) = (0.0f64, 0.0f64);
     for (&[i, j], r) in session.network().edges().iter().zip(&rest) {
         let (p, q) = (pos[i as usize], pos[j as usize]);
@@ -481,7 +510,7 @@ fn run(a: &Args) -> Result<(), String> {
         "{{\"knot\":{},\"method\":{},\"tag\":{},\"status\":{},\"end_reason\":{},\"status_debug\":{},\
 \"error\":{},\"final_curve_invalid\":{},\"iterations\":{},\"seconds\":{},\"audit_seconds\":{},\"threads\":{},\"backend_option\":{},\
 \"vertices\":{},\"alpha\":{},\"beta\":{},\"hencky_w\":{},\"max_iters\":{},\"max_seconds\":{},\
-\"energy0_exact\":{},\"final_energy_exact\":{},\"final_objective\":{},\"final_ehat\":{},\
+\"near_pair\":{},\"near_pairs_last\":{},\"near_pairs_max\":{},\"energy0_exact\":{},\"energy0_near\":{},\"final_energy_exact\":{},\"final_energy_paper\":{},\"final_energy_near\":{},\"final_objective\":{},\"final_ehat\":{},\
 \"audit\":{{\"enabled\":{},\"audited_steps\":{},\"violations\":{},\"first_violation\":{},\"errors\":{}}},\
 \"constraint\":{{\"max_len_rel_err\":{},\"max_abs_log_strain\":{},\"last_step_max_violation\":{}}},\
 \"contact_floor_steps\":{},\"ended_on_contact_floor\":{},\"stuck_steps\":{},\"trials\":{},\"energy_backend\":{},\"solver_backend\":{},",
@@ -504,8 +533,14 @@ fn run(a: &Args) -> Result<(), String> {
         if spec.soft { jnum(a.hencky_w) } else { "null".into() },
         if a.max_iters >= 1_000_000 { "null".into() } else { a.max_iters.to_string() },
         a.max_seconds.map_or("null".into(), jnum),
+        a.near_pair,
+        near_pairs_last,
+        near_pairs_max,
         jnum(e0_exact),
+        jnum(e0_near),
         jnum(ef_exact),
+        jnum(ef_exact),
+        jnum(ef_near),
         jnum(f_last),
         jnum(e_last),
         a.audit,
@@ -531,14 +566,15 @@ fn run(a: &Args) -> Result<(), String> {
             o.push(',');
         }
         o.push_str(&format!(
-            "[{},{},{},{},{},{},{}]",
+            "[{},{},{},{},{},{},{},{}]",
             h[0] as usize,
             jnum(h[1]),
             jnum(h[2]),
             jnum(h[3]),
             jnum(h[4]),
             jnum(h[5]),
-            jnum(h[6])
+            jnum(h[6]),
+            h[7] as u64
         ));
     }
     o.push_str("]}");

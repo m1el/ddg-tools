@@ -90,6 +90,7 @@ def analyse(A, T, factor):
                     "reason": r.get("end_reason", ""),
                     "floor": bool(r.get("ended_on_contact_floor")),
                     "invalid": bool(r.get("final_curve_invalid")),
+                    "paper_final": r.get("final_energy_paper"),
                     "final_ratio": min(e for _, _, _, e, *_ in r["history"] if e is not None) / eref,
                 }
             rows.append(row)
@@ -109,8 +110,8 @@ def table(res):
         rows, ex = res[g]["rows"], res[g]["excluded"]
         L.append(f"### {g}: {len(rows)} knots compared, {len(ex)} excluded (every method stuck)\n")
         L.append("| method | knots | reached 1.1 E_ref | stuck | nonconvergent | error | failed total | "
-                 "ended stuck (any) | of which contact floor | energy-rate stop | invalid final curve | audit violations | paper |")
-        L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+                 "ended stuck (any) | of which contact floor | energy-rate stop | invalid final curve | audit violations | median final Eq. 17 / reference | paper |")
+        L.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
         for m in methods:
             cs = [r["m"][m] for r in rows]
             n = max(len(cs), 1)
@@ -122,13 +123,17 @@ def table(res):
             nfloor = sum(c["floor"] for c in cs)
             nrate = sum(c["reason"] == "energy_rate" for c in cs)
             ninv = sum(c["invalid"] for c in cs)
+            ratios = [r["m"][m]["paper_final"] / r["m"][ref]["paper_final"] for r in rows
+                      if r["m"][m]["paper_final"] and r["m"][ref]["paper_final"]]
+            med = f"{float(np.median(ratios)):.3g}" if ratios else "-"
             pc = lambda x: f"{x} ({100 * x / n:.1f} %)"
             fail = cnt["stuck"] + cnt["nonconvergent"] + cnt["error"]
             L.append(f"| {LABEL[m]} | {len(cs)} | {pc(cnt['ok'])} | {pc(cnt['stuck'])} | "
                      f"{pc(cnt['nonconvergent'])} | {pc(cnt['error'])} | {pc(fail)} | {pc(anystuck)} | "
-                     f"{nfloor} | {nrate} | {ninv} | {viol} | {PAPER[m]} |")
+                     f"{nfloor} | {nrate} | {ninv} | {viol} | {med} | {PAPER[m]} |")
         L.append("")
-    L.append("`stuck`/`nonconvergent`/`error`: runs that never reach 1.1 E_ref, by how they ended. The reference "
+    L.append("Energies in the history, E_ref and the 1.1 x targets are the corrected (near-pair) energy the flows minimize; the Eq. 17 column compares final curves on the paper's energy (exact).\n"
+             "`stuck`/`nonconvergent`/`error`: runs that never reach 1.1 E_ref, by how they ended. The reference "
              "method always reaches 1.1 E_ref of its own minimum, so its stuck rate (paper: 'stuck') is the "
              "column `ended stuck (any)`; for the other methods the paper's 'failed' is `failed total`.\n")
     return "\n".join(L)
