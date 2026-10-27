@@ -17,22 +17,25 @@ plans, and the work packages. The library is not implemented yet.
 
 ## Benchmarks
 
-`cargo bench --bench fig20|threads|components` (`benches/`, results and method in `SPEC.md` §17k).
-Mean seconds per iteration of a running flow (Freedman–He–Wang resampled to the paper's sizes,
-(2, 4.5), barycenter + edge lengths), 1 thread, machine alone, against the values read from the
-paper's Fig. 20:
+`cargo bench --bench fig20|threads|components|projdiag|trialrule` (`benches/`, results and method
+in `SPEC.md` §17k and §17l). Mean seconds per iteration of a running flow (Freedman–He–Wang
+resampled to the paper's sizes, (2, 4.5), barycenter + edge lengths), 1 thread, machine alone,
+against the values read from the paper's Fig. 20:
 
 | configuration | n | paper | this crate |
 |---|---:|---:|---:|
-| Exact | 1000 / 4000 | 6 / 145 s | 1.6 / 69.5 s |
-| Barnes–Hut + dense | 2000 / 4000 | 10 / 60 s | 9.0 / 63.0 s |
-| Multigrid | 2000 / 8000 / 16000 | 6 / 25 / 57 s | 3.6 / 8.4 / 14.8 s |
-| Multigrid, projection removed (total minus projection) | 2000 / 16000 | 3 / 38 s | 1.6 / 4.8 s |
+| Exact | 1000 / 4000 | 6 / 145 s | 0.76 / 13.9 s |
+| Barnes–Hut + dense | 2000 / 4000 | 10 / 60 s | 1.8 / 5.9 s |
+| Multigrid | 2000 / 8000 / 16000 | 6 / 25 / 57 s | 1.7 / 3.7 / 5.2 s |
+| Multigrid without projection | 2000 / 16000 | 3 / 38 s | 1.3 / 4.1 s |
+| Multigrid, knot 96 ((3, 6)) | 2048 / 8192 / 16384 | 6 / 25 / 57 s (the paper's curve) | 2.5 / 18.5 / 33.0 s (20 steps) |
 
-On 64 threads: Multigrid 4.9 s at 9472 vertices and 12.3 s at 18944; dense Exact 24 s at 4736
-and 170 s at 9472. The multigrid line search (its projections) is 60-80 % of a multigrid
-iteration. `Backend::Auto` switches from exact + dense to Barnes-Hut + multigrid above 1500
-vertices (measured crossover 1300-1600).
+The dense solve is a Schur complement of `A + ρ𝟙𝟙ᵀ` (about 30× fewer flops than the LU of the
+whole saddle matrix); the line search's projection finishes with Newton steps below 100 times the
+tolerance and gives up early on trials whose chord iteration cannot converge (both measured on 24
+knots, `SPEC.md` §17l; the paper's projection is `newton_polish: None`,
+`projection_early_abort: false`). `Backend::Auto` switches from exact + dense to Barnes–Hut +
+multigrid above 2500 vertices (measured crossover 2000 at 8 threads, 3000 at 64).
 
 ## Credits
 

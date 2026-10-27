@@ -405,7 +405,8 @@ within the tolerance is projected once too, unless `Φ = 0` exactly; §17l, foun
 `FlowOptions::newton_polish` (100) times its tolerance, the remaining iterations are Newton steps
 with the Jacobian at the iterate and the lumped-mass metric (`x = M⁻¹Cᵀ(CM⁻¹Cᵀ)⁻¹(−Φ)`, a sparse
 factorization each) instead of chord steps with `Ā`; `newton_polish: None` is the paper's chord
-method throughout. An optional second-order correction of the trial (`γ − τp + τ²q`,
+method throughout. **Also a departure (default):** a chord iteration whose observed rate cannot
+reach its target within the remaining iterations is stopped early (`projection_early_abort`). An optional second-order correction of the trial (`γ − τp + τ²q`,
 `C q = −½Φ''[p, p]`, off by default) is described in §17l. Failure after `max_projection_iterations` (3; the
 paper: "rarely more than three", the reference: 3 dense, 2 multigrid), when the largest violation
 grows by more than 10×, or when a tangent site ends with `s·X ≤ 0`. A failure rejects the trial
@@ -620,7 +621,7 @@ per chord iteration (no factorization to reuse; Sec. 7.4).
 `Energy::{Exact, BarnesHut(BhOptions)}` and `Solver::{Dense, Multigrid(MgOptions)}` are chosen
 independently (Fig. 20's "Barnes–Hut" curve is BH energy with the dense solve);
 `Backend::Auto { dense_max_vertices }` picks exact + dense for networks of at most
-`dense_max_vertices` vertices (default 1500, measured in §17k) and BH + multigrid above, at the
+`dense_max_vertices` vertices (default 2500, measured in §17l; 1500 in §17k) and BH + multigrid above, at the
 session's start and again after each live subdivision. Dense solve (§17l): the Schur-complement
 method of §17b, a Cholesky factorization of `A + ρ u uᵀ` (`u = 𝟙/√|V|`) and its inverse, the
 `k × k` Schur complement `C (M⁻¹ ⊗ I₃) Cᵀ` (Cholesky) and a `3 × 3` block for the translations,
@@ -701,6 +702,7 @@ pub struct FlowOptions {
     pub back_projection: bool,                         // default true; false: Fig. 20's "without projection" (§17l)
     pub second_order_correction: bool,                 // default false; trials γ − τp + τ²q (§17l)
     pub newton_polish: Option<f64>,                    // default Some(100); Newton steps below 100 tol (§17l)
+    pub projection_early_abort: bool,                  // default true; rate test of the chord projection (§17l)
 }
 
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
@@ -805,7 +807,7 @@ end-to-end table script (§14.5).
 | constraints | `[Barycenter, EdgeLengths(all, current)]` | Supp. 2.1: barycenter removes the translations, edge lengths make a minimizer exist; `Ê(cγ) = c^{2+α−β} Ê` falls with growth |
 | line search | `CollisionGuarded { armijo 1e-4, shrink ½, start GrowPrevious { 2 }, gap 0.1, 40 halvings }` | D11 (more reliable); the start `min(⅔ τ_max, 2 τ_prev)` is measured in §17f (the paper's `⅔ τ_max` alone costs 1.5× Armijo's time per step); `c = 1e-4` the usual lenient Armijo constant (Nocedal & Wright §3.1) |
 | `NormalizedArmijo` | same Armijo, reference's start rule | D12 |
-| projection | `MeanEdgeLength(1e-4)`, 3 iterations, at least one step per trial; Newton polish below 100 × tolerance; no second-order correction | paper: 1e-4 (absolute) and ≤ 3 iterations; relative to `ℓ̄₀` so that Blender scenes of any scale behave alike; the evaluation uses `Absolute(1e-4)` (D10); polish and correction measured on 24 knots in §17l |
+| projection | `MeanEdgeLength(1e-4)`, 3 iterations, at least one step per trial; Newton polish below 100 × tolerance; early abort by the rate test; no second-order correction | paper: 1e-4 (absolute) and ≤ 3 iterations; relative to `ℓ̄₀` so that Blender scenes of any scale behave alike; the evaluation uses `Absolute(1e-4)` (D10); polish and correction measured on 24 knots in §17l |
 | contact floor | `CONTACT_FLOOR = 1e-6` (of `ℓ̄₀`) | §17l: a guarded step from a curve with two disjoint edges closer than this takes no step (Stuck) |
 | stop | `GradientNorm { Euclidean, 1e-4 }`, `max_iterations` 1000 | paper Sec. 5.4, Supp. 1.3 (D14); Blender uses `RelativeGradient(1e-3)` |
 | Barnes–Hut | `theta_x 0.125, theta_t 0.25, leaf_size 8` | reference `diag/d < 0.25` ⇔ `r_x/d < 0.125`; tangent bound per Eq. 27; final values by §14.3 (largest θ with differential error ≤ 1e-2 and unchanged iteration counts within 5 %) |
@@ -814,7 +816,7 @@ end-to-end table script (§14.5).
 | multigrid BCT | `theta_x 0.25, theta_t 2` (position-only admissibility), `leaf_pairs 64` | §17l: the reference's rule; `theta_t 0.25` leaves the trees of the perturbed knot nearly dense; direction error against dense 2e-3–8.5e-3 (< 1e-2 of §13.4), 2.3–2.8× faster on knot 96 |
 | multigrid threads | `max_threads Some(16)` | §17l: the hierarchy's products and projections stop gaining past 8–16 threads and get slower at 64 (§17k); results do not depend on it |
 | dense solver | Schur complement, LU fallback | §17l: same solutions as the LU to 1e-13 relative, residual as small or smaller, bitwise across thread counts, 15× faster at 2048 vertices on one thread |
-| back end | `Auto { dense_max_vertices: 1500 }` | measured alone in §17k: exact + dense and BH + multigrid cost the same per step at about 1300 vertices (8 threads) and 1600 (64 threads); exact + dense is the reference computation and wins the tie (§17h had 2000, measured under load) |
+| back end | `Auto { dense_max_vertices: 2500 }` | measured alone in §17l (Schur dense solve): exact + dense and BH + multigrid cost the same per step at about 2000 vertices (8 threads) and 3000 (64 threads); exact + dense is the reference computation and wins the tie (§17k had 1500 with the LU, §17h 2000 under load) |
 | edge-collapse guard | `min_edge_length_ratio Some(1e-3)` | §17j: an edge that shrinks below 1e-3 of the initial mean edge length fails the step with a named error instead of a singular metric later |
 | dense fallback | `dense_fallback_max_vertices 5000` | a failed multigrid solve (§17h) is repeated with the dense solver up to this size (the Schur method holds about `4\|V\|² + k²` doubles, 1 GB at 5000; its LU fallback `(3\|V\|+k)²`, 3.2 GB) |
 | schedule | none; `rate 0.01` when set | reference: total length moves by 1 % of `L⁰` per step |
@@ -1717,6 +1719,8 @@ test against the authors' program on this scene, WP15, would show it).
 
 ## 17k. Benchmarks (WP14, 2026-10-26)
 
+*(After WP14b — Schur dense solve, Newton polish, early abort, position-only multigrid trees, capped multigrid pool — the gate passes everywhere, the knot included, and `Backend::Auto` is 2500: §17l.)*
+
 Benches: `benches/fig20.rs` (one flow configuration per call, one CSV row), `benches/threads.rs`
 (every component at 1…64 threads with efficiency and a bitwise check), `benches/components.rs` (one
 component, any thread list), shared helpers in `benches/common/`. Plain `harness = false` mains:
@@ -1956,7 +1960,7 @@ with a slower dense side. The 64-thread rows at 1800 and 2000 were measured twic
 and 1.55; the table shows the second pass), which gives the run-to-run spread, 5 %. Scaling
 between 2000 and 4000 vertices: exact + dense n^2.9, BH + multigrid n^0.9.
 
-**Rule (replaces §17h's).** `Backend::Auto { dense_max_vertices: 1500 }`: exact + dense for
+**Rule (replaces §17h's; superseded by §17l: 2500 with the Schur dense solve).** `Backend::Auto { dense_max_vertices: 1500 }`: exact + dense for
 `|V| ≤ 1500`, BH + multigrid above; at the worst point inside 1300…1600 either side loses 30 %
 (8 threads at 1500: exact + dense about 1.3× slower than multigrid, interpolated; 64 threads at
 1500: multigrid 1.2× slower). **Changed from 2000** in `src/step/mod.rs` (`DEFAULT_AUTO_DENSE_MAX_VERTICES`,
@@ -2089,6 +2093,18 @@ Now `project_constraints` and the line search's projection take at least one ste
 The Lean oracle (`chordProject`) follows; fixture `rc-circle-step` changes (its trial now takes
 one chord step). With the polish the extra step is a Newton step (cheap).
 
+**Fix 4: early abort of hopeless chord projections (default).** In the knot's steps the first
+trial (`2 τ_prev`) still failed after 3 chord solves almost every time
+(`[1.000:3:MaxIterations 0.500:3:MaxIterations 0.250:4:ok]` at 8192). A chord iteration
+converges linearly, so after one step its rate `θ = h_k/h_{k−1}` predicts how many more steps
+reach the target (the polish threshold, or the tolerance); the projection now gives the trial up
+(`MaxIterations`, fewer iterations) when `θ ≥ 1` or that number exceeds the remaining budget —
+the rate test of simplified-Newton iterations in implicit integrators (Hairer & Wanner, *Solving
+ODEs II*, §IV.8, (8.12)). Example (rough trefoil, 3 iterations allowed): `2836 → 591` (`θ = 0.21`,
+4.1 more steps needed) stops after 1 solve instead of 3 and ends rejected either way; converging
+trials are never stopped (test `early_abort_stops_hopeless_projections_only`).
+`FlowOptions::projection_early_abort`, default `true` (below); `false` is the paper's.
+
 **Measurement of the defaults (as §17f).** 24 perturbed Knot128 knots (every 5th, 1500–2750
 vertices, all steps on Barnes–Hut + multigrid by `Backend::Auto`), (3, 6), `Absolute(1e-4)`,
 3 chord iterations, 100 iterations, CCD audit of every accepted path (`path_contact`, gap 1e-6,
@@ -2108,6 +2124,17 @@ ranking):
 polish 0.67 and 0.71, correction 1.01 and 1.02.) Decision: **`newton_polish = Some(100)` by
 default** (as reliable, 0.69× the time to the energy target, best final energies);
 **`second_order_correction = false`** (no faster alone, slower with the polish).
+
+The early abort on top of the polish (same setup, `trial3/`, machine less loaded):
+
+| trial rule | stuck steps | isotopy violations | projection solves/step | s/step (median) | paired s/step | reached 1.1 E* | paired time, iterations to 1.1 E* (n) | median final E / E* |
+|---|---|---|---|---|---|---|---|---|
+| Newton polish | 0 / 2400 | 0 | 2.31 | 0.96 | 1 | 24 / 24 | 1, 1 | 1.000 |
+| **polish + early abort (default)** | 0 / 2400 | 0 | 1.54 | 0.78 | 0.79 (0.77–0.82) | 24 / 24 | 0.76 (0.74–0.79), 1.00 (24) | 1.000 |
+
+Same iterations to every target (the aborted trials would have failed), 0.74–0.76× the time:
+**`projection_early_abort = true` by default.** The Lean oracle replays the paper's step
+(straight trials, chord projection to its limit) and pins all three options off.
 
 ### 2. The back-projection switch
 
@@ -2196,9 +2223,104 @@ overpowers the energy pulls two strands together; with the floor set to 0 the cu
 step 20 at 5.3e-7 ℓ̄₀, every path embedded. Obstacles (vertex–triangle) are not covered by the
 floor (no failure seen).
 
-### 7. Timing alone
+### 7. Timing alone (2026-10-26/27)
 
-(below)
+Protocol as §17k (`runs_tmp/rc-wp14b/runjobs.sh`, one job after another, `load_start`/`load_end`
+columns; a launcher waited for the 1-minute load to stay below 4). No other agent's job was
+running (`ps` spot checks); the remaining load (1.1–2.9 at the 1-thread starts) came from an unrelated desktop process
+(about 1.5 cores) and from the lag after the benchmark's own multi-threaded runs. Defaults of
+this section: Newton polish, early abort, no second-order correction, `theta_t 2`, Schur dense,
+multigrid pool capped at 16. CSVs: `fig20-gate2.csv` (the gate), `fig20-long.csv`,
+`fig20-items.csv`, `fig20-items2.csv`, `fig20-mgthreads.csv`, `fig20-cross.csv`,
+`fig20-cross2.csv`, `components.csv`; the first gate pass `fig20-gate1.csv` (before the early
+abort) differs from the second by < 5 % except on the knot (knot 8192: 46.2 → 28.1 s).
+
+**Fig. 20 gate, 1 thread, seconds per iteration** (Freedman resampled, (2, 4.5); mean over the
+first 20 steps or the 240 s budget):
+
+| configuration | n | paper | §17k (WP14) | now | verdict |
+|---|---:|---:|---:|---:|---|
+| Exact | 1000 | ≈ 6 | 1.64 | 0.756 | below |
+| Exact | 4000 | ≈ 145 | 69.5 | 13.9 (17 steps) | below |
+| Barnes–Hut + dense | 2000 | ≈ 10 | 9.01 | 1.84 | below |
+| Barnes–Hut + dense | 4000 | ≈ 60 | 63.0 | 5.90 | **below** (was 5 % above) |
+| Multigrid | 2000 | ≈ 6 | 3.57 | 1.74 | below |
+| Multigrid | 8000 | ≈ 25 | 8.39 | 3.67 | below |
+| Multigrid | 16000 | ≈ 57 | 14.8 | 5.19 | below |
+| Multigrid without projection (`back_projection = false`) | 2000 | ≈ 3 | 3.13 (proxy) | 1.33 | below |
+| same | 16000 | ≈ 38 | 11.8 (proxy) | 4.09 | below |
+
+Knot 96 ((3, 6), multigrid, 1 thread), against the paper's multigrid curve (6 / 25 / 57 s at
+2000 / 8000 / 16000):
+
+| n | §17k | now (240 s budget) | now, 20 steps | verdict |
+|---:|---:|---:|---:|---|
+| 1024 | 2.85 | 0.845 | | below |
+| 2048 | 11.7 | 2.45 | | **below** (was 2× above) |
+| 4096 | 41.0 (5 steps) | 6.98 | | below |
+| 8192 | 127 (2) | 28.1 (8 steps; median 25.2) | 18.5 (median 18.2) | **below over 20 steps**; the first 8 steps 12 % above |
+| 16384 | 216 (2) | 40.4 (5 steps) | 33.0 (median 31.1) | **below** |
+
+(Knot without projection: 1.43 s at 2048, 21.6 at 16384. Exact + dense on the knot: 0.470 /
+2.16 / 9.89 s at 1024 / 2048 / 4096, was 1.52 / 9.92 / 72.0.) The paper averages up to 500
+iterations; the first steps of the perturbed knot are the most expensive (2–3 failed trials per
+step), so the 20-step means are the closer comparison; at 8192 the 240 s budget stops after 8.
+
+**Before / after per item** (1 thread, 10 steps unless noted; `fig20-items*.csv`):
+
+| change | Freedman 8000 | knot 2048 | knot 8192 (5 steps) |
+|---|---:|---:|---:|
+| WP14 configuration (chord projection, `theta_t 0.25`) | 9.43 | 12.5 | 127 (§17k, 2 steps) |
+| + `theta_t 2` only | 6.15 | 5.52 | 43.6 |
+| + Newton polish only (`theta_t 0.25`) | 5.90 | 10.5 | 131 (2 steps) |
+| `theta_t 2` + polish, no early abort | 5.05 | 4.80 | 50.8 |
+| `theta_t 2` + polish + early abort (default) | 4.52 | 3.86 | 35.1 |
+| `theta_t 2` + polish + second-order correction | | 4.63 | |
+
+Dense: the metric phase (Gram + factorization) of Barnes–Hut + dense at 4000 is 3.99 s against
+60.6 s with the LU. Schur factorization alone (`components.csv`, result hash identical across
+each row's thread counts): 2048 vertices 0.51 / 0.27 / 0.21 s at 1 / 4 / 16 threads (LU 8.32 /
+2.90 / 1.63), 4096: 3.50 / 1.45 / 1.13 / 1.00 / 1.02 s at 1 / 4 / 8 / 16 / 32, 8192: 22.9 / 7.2 /
+6.2 / 5.4 s at 1 / 8 / 16 / 32.
+
+**Multigrid threads.** Components with `theta_t 2` (best of 3): solve at 8192 vertices 0.82 /
+0.58 / 0.47 / 0.40 / 0.39 / 0.43 / 0.54 s at 1 / 2 / 4 / 8 / 16 / 32 / 64 threads; at 32768
+2.66 / 2.12 / 1.56 / 1.56 / 1.59 / 1.71 / 2.04; build 0.19 → 0.14 s (8192) and 0.61 → 0.51 s
+(32768) at best; one BCT product 4.8 → 1.3 ms at 8 threads (8192). Flows at 64 main threads
+(`fig20-mgthreads.csv`, 10 steps): Freedman 16000 2.83 s without a cap, 2.36 / 2.37 / 2.51 with
+8 / 16 / 32; knot 8192 9.26 → 7.88 (16); Freedman 2000 0.756 → 0.567 (16). Default
+`max_threads = Some(16)` (15–25 % faster at 64 threads, the same at ≤ 16).
+
+**Auto crossover** (exact + dense against Barnes–Hut + multigrid, Freedman resampled, 10 steps,
+`fig20-cross.csv` before the early abort, `fig20-cross2.csv` after; seconds per iteration):
+
+| n | 64 thr: exact + dense | BH + MG | 8 thr: exact + dense | BH + MG |
+|---:|---:|---:|---:|---:|
+| 1500 | 0.196 | 0.534 | 0.335 | 0.576 |
+| 2000 | 0.379 | 0.609 | 0.620 | 0.636 |
+| 2500 | 0.716 | 0.782 | 1.106 | 0.856 |
+| 3000 | 1.037 | 1.013 | 1.613 | 1.069 |
+| 4000 | 1.62 | 1.07 | 2.78 | 1.15 |
+| 6000 | 3.76 | 1.48 | 6.38 | 1.57 |
+| 8000 | 7.28 | 1.75 | 12.1 | 1.83 |
+
+(2000–3000 from the second pass; the others from the first, which had no early abort: the
+multigrid side would be a few per cent faster.) The curves cross at about 2000 vertices at 8
+threads and 3000 at 64 (§17k: 1300 and 1600, before the Schur solve). **`Backend::Auto`'s
+default is now 2500** (`DEFAULT_AUTO_DENSE_MAX_VERTICES`, rustdoc, the Python default and
+`.pyi`, `python-tests/test_repulsive.py`, the Blender tooltip, `tests/session_backends.rs`
+checks 2500/2501): at 2500 exact + dense is 1.29× slower at 8 threads and multigrid 1.09× at
+64; within 2000…3000 neither side loses more than 30 %.
+
+**What is still open.** (a) The first steps of the knot at 8192 are above the paper within the
+240 s budget (28 s, 12 %), below over 20 steps. (b) The sequential parts of the block cluster
+tree product (`src/spatial/bct.rs`: upward/downward passes; `src/metric/hierarchical.rs`: `ψ`
+and output loops) cap the multigrid's thread scaling at about 2–3.5×; parallelizing them needs
+work outside this package. (c) A far field of `K⁰` that is exact in the tangents (second
+moments of the cluster tangents, a few extra numbers per node) would let the trees keep
+`theta_t` without the knot's dense trees; also `src/spatial`. (d) A dedicated formula id for the
+second-order correction and the Newton polish (both tagged `rc-chord-projection` for now) needs
+an entry in `lean/proofs/CITED.md`.
 
 ## 17m. Soft Hs and the stop test of the Sec. 7 comparison (WP12b)
 
