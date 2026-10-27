@@ -810,6 +810,14 @@ impl InteractionLists {
     pub fn n_exact(&self) -> usize {
         self.exact.iter().map(Vec::len).sum()
     }
+
+    /// `true` if the ordered pair `(i, j)` is evaluated exactly (`j ∈ 𝓧(i)`); a linear scan of
+    /// row `i` (used for the few near pairs of `SPEC.md` §3.4). `false` for `i` out of range.
+    pub fn contains_exact(&self, i: usize, j: usize) -> bool {
+        self.exact
+            .get(i)
+            .is_some_and(|row| row.contains(&(j as u32)))
+    }
 }
 
 /// Free-function form: build the tree and evaluate once.

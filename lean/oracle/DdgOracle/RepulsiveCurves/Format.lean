@@ -1,5 +1,6 @@
 import DdgOracle.Cuts.Format
 import DdgOracle.RepulsiveCurves.Step
+import DdgOracle.RepulsiveCurves.NearPair
 
 /-!
 # Text format of the `rc` command
@@ -42,6 +43,8 @@ structure RCCase where
   tolVal : Float := 1e-4
   /-- maximal chord iterations -/
   maxit : Nat := 3
+  /-- `near`: options of the near-pair quadrature (SPEC §3.4) -/
+  near : NearOpts := {}
   deriving Inhabited
 
 private def hx (x : Float) : String := floatToHex x
@@ -117,14 +120,15 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
   let mut tolMean := true
   let mut tolVal : Float := 1e-4
   let mut maxit := 3
+  let mut near : NearOpts := {}
   let mut net : Option Net := none
   let mut i := 0
   while i < lines.size do
     let l := lines[i]!
     match l[0]! with
     | "task" =>
-      if l.size != 2 || !["energy", "gram", "saddle", "project", "step"].contains l[1]! then
-        throw "task: expected 'task energy|gram|saddle|project|step'"
+      if l.size != 2 || !["energy", "gram", "saddle", "project", "step", "near"].contains l[1]! then
+        throw "task: expected 'task energy|gram|saddle|project|step|near'"
       task := l[1]!
     | "exponents" =>
       if l.size != 3 then throw "exponents: expected 'exponents ALPHA BETA'"
@@ -161,6 +165,9 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
     | "maxit" =>
       if l.size != 2 then throw "maxit: expected a count"
       maxit ← natTok "maxit" l[1]!
+    | "near" =>
+      if l.size != 4 then throw "near: expected 'near C1 C2 SUBPANELS'"
+      near := { c1 := ← floatTok "near" l[1]!, c2 := ← floatTok "near" l[2]!, m := ← natTok "near" l[3]! }
     | "c" => cons := cons.push (← parseCons l)
     | "net" =>
       if l.size != 3 then throw "net: expected 'net NV NE'"
@@ -184,7 +191,7 @@ def parseBody (name : String) (lines : Array (Array String)) : Except String RCC
     i := i + 1
   if task == "" then throw "missing 'task' line"
   let some nt := net | throw "missing 'net' block"
-  return { name, task, ex, quad, planar, allMatrices := allM, net := nt, cons, tau, tauRel, search, tolMean, tolVal, maxit }
+  return { name, task, ex, quad, planar, allMatrices := allM, net := nt, cons, tau, tauRel, search, tolMean, tolVal, maxit, near }
 
 private def consLine : Cons → String
   | .barycenter none => "c barycenter\n"
@@ -211,6 +218,7 @@ def printCase (c : RCCase) : String := Id.run do
     s := s ++ s!"{if c.tauRel then "steprel" else "step"} {hx c.tau}\ntol {if c.tolMean then "mean" else "abs"} {hx c.tolVal}\nmaxit {c.maxit}\n"
   if c.task == "step" then
     s := s ++ s!"search {hx c.search.armijo} {hx c.search.shrink} {c.search.maxHalvings} {c.search.nSteps}\ntol {if c.tolMean then "mean" else "abs"} {hx c.tolVal}\nmaxit {c.maxit}\n"
+  if c.task == "near" then s := s ++ s!"near {hx c.near.c1} {hx c.near.c2} {c.near.m}\n"
   for k in c.cons do s := s ++ consLine k
   s := s ++ s!"net {c.net.nv} {c.net.ne}\n"
   for p in c.net.pos do s := s ++ s!"p {hx p.x} {hx p.y} {hx p.z}\n"
@@ -253,6 +261,14 @@ def common (c : RCCase) : Except String (Array V3 × Float × Array V3) := do
 
 private def printEnergy (c : RCCase) (e : Float) (d : Array V3) : String := Id.run do
   let mut s := s!"case {c.name}\ntask energy\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\nenergy {hx e}\n"
+  for v in [0:d.size] do s := s ++ s!"d {v} {hx d[v]!.x} {hx d[v]!.y} {hx d[v]!.z}\n"
+  return s ++ "end\n"
+
+private def printNear (c : RCCase) : String := Id.run do
+  let (e, en, recs, d) := nearEnergyAndDifferential c.net c.ex c.near
+  let mut s := s!"case {c.name}\ntask near\nstatus ok\nnet {c.net.nv} {c.net.ne} {c.net.nPairs}\n"
+  s := s ++ s!"energy {hx e}\nnear-energy {hx en}\npairs {recs.size}\n"
+  for r in recs do s := s ++ s!"pair {r.i} {r.j} {hx r.d} {hx r.w} {hx r.corr}\n"
   for v in [0:d.size] do s := s ++ s!"d {v} {hx d[v]!.x} {hx d[v]!.y} {hx d[v]!.z}\n"
   return s ++ "end\n"
 
@@ -341,6 +357,7 @@ def runCase (c : RCCase) : String :=
   | .ok (_, e, d) =>
     match c.task with
     | "energy" => printEnergy c e d
+    | "near" => printNear c
     | "gram" => printGram c
     | "saddle" => match printSaddle c d with | .error err => printError c.name c.task err | .ok s => s
     | "step" => match printStep c with | .error err => printError c.name c.task err | .ok s => s

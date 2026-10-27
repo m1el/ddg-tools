@@ -60,7 +60,8 @@ use crate::ccd::{CcdOptions, CcdReport, CollisionObstacle, PreparedObstacle, fir
 use crate::constraints::{Constraint, ConstraintSet, default_constraints};
 use crate::energy::barnes_hut::{BhTree, InteractionLists};
 use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
-use crate::energy::{BhOptions, EnergyEval};
+use crate::energy::near_pair::{self, NearPairStats};
+use crate::energy::{BhOptions, EnergyEval, NearPairOptions};
 use crate::error::RcError;
 use crate::kernel::Exponents;
 use crate::metric::{DofLayout, Metric, classic_metric, sobolev_gram};
@@ -146,6 +147,8 @@ pub struct EnergyEvaluation {
     pub pairs_exact: u64,
     /// Lumped nodes used (Barnes–Hut).
     pub nodes_lumped: u64,
+    /// Edge pairs in the band of the near-pair quadrature (`SPEC.md` §3.4; 0 without it).
+    pub near_pairs: u64,
 }
 
 /// An evaluation back end of the tangent-point energy (exact here, Barnes–Hut in WP4).
@@ -174,19 +177,80 @@ pub trait EnergyModel: Send {
         network: &CurveNetwork,
         positions: &[[f64; 3]],
     ) -> Result<EnergyEvaluation, RcError>;
+    /// Seconds spent in the near-pair quadrature (`SPEC.md` §3.4) since the last call, which
+    /// resets the count. The default: 0.
+    fn take_near_pair_seconds(&mut self) -> f64 {
+        0.0
+    }
 }
 
-/// The exact `O(|E|²)` energy (`SPEC.md` §3) on an explicit pool.
+/// Adds the near-pair correction (`SPEC.md` §3.4) of the ordered pairs `include` accepts to
+/// `energy` (and `differential`); unchanged, bit for bit, when no pair is near. Returns the
+/// statistics and the seconds spent.
+#[allow(clippy::too_many_arguments)]
+fn add_near_pair(
+    pool: &rayon::ThreadPool,
+    network: &CurveNetwork,
+    positions: &[[f64; 3]],
+    exponents: Exponents,
+    options: &NearPairOptions,
+    include: &(dyn Fn(usize, usize) -> bool + Sync),
+    energy: &mut f64,
+    differential: Option<&mut [[f64; 3]]>,
+) -> (NearPairStats, f64) {
+    let t = Instant::now();
+    let with_gradient = differential.is_some();
+    let Some(near_pair::NearCorrection {
+        energy: c,
+        differential: g,
+        stats,
+    }) = near_pair::correction(
+        pool,
+        network,
+        positions,
+        exponents,
+        options,
+        include,
+        with_gradient,
+    )
+    else {
+        return (NearPairStats::default(), t.elapsed().as_secs_f64());
+    };
+    *energy += c;
+    if let (Some(d), Some(g)) = (differential, g) {
+        for (dv, gv) in d.iter_mut().zip(&g) {
+            *dv = [dv[0] + gv[0], dv[1] + gv[1], dv[2] + gv[2]];
+        }
+    }
+    (stats, t.elapsed().as_secs_f64())
+}
+
+/// The exact `O(|E|²)` energy (`SPEC.md` §3) on an explicit pool, with the near-pair
+/// quadrature of §3.4 if set ([`ExactEnergy::with_near_pair`]).
 #[derive(Debug, Clone)]
 pub struct ExactEnergy {
     pool: Arc<rayon::ThreadPool>,
     exponents: Exponents,
+    near_pair: Option<NearPairOptions>,
+    near_seconds: f64,
 }
 
 impl ExactEnergy {
-    /// The exact energy with `exponents` on `pool`.
+    /// The exact energy with `exponents` on `pool` (the paper's: no near-pair quadrature).
     pub fn new(pool: Arc<rayon::ThreadPool>, exponents: Exponents) -> ExactEnergy {
-        ExactEnergy { pool, exponents }
+        ExactEnergy {
+            pool,
+            exponents,
+            near_pair: None,
+            near_seconds: 0.0,
+        }
+    }
+
+    /// The same energy with the near-pair quadrature `near_pair` (`SPEC.md` §3.4; `None`: the
+    /// paper's energy).
+    pub fn with_near_pair(mut self, near_pair: Option<NearPairOptions>) -> ExactEnergy {
+        self.near_pair = near_pair;
+        self
     }
 }
 
@@ -207,7 +271,22 @@ impl EnergyModel for ExactEnergy {
     }
 
     fn energy(&mut self, network: &CurveNetwork, positions: &[[f64; 3]]) -> Result<f64, RcError> {
-        Ok(energy_only(&self.pool, network, positions, self.exponents))
+        let mut e = energy_only(&self.pool, network, positions, self.exponents);
+        if let Some(o) = &self.near_pair {
+            let all = |_: usize, _: usize| true;
+            let (_, sec) = add_near_pair(
+                &self.pool,
+                network,
+                positions,
+                self.exponents,
+                o,
+                &all,
+                &mut e,
+                None,
+            );
+            self.near_seconds += sec;
+        }
+        Ok(e)
     }
 
     fn energy_and_differential(
@@ -215,14 +294,35 @@ impl EnergyModel for ExactEnergy {
         network: &CurveNetwork,
         positions: &[[f64; 3]],
     ) -> Result<EnergyEvaluation, RcError> {
-        let (energy, differential) =
+        let (mut energy, mut differential) =
             energy_and_differential(&self.pool, network, positions, self.exponents);
+        let mut near_pairs = 0;
+        if let Some(o) = &self.near_pair {
+            let all = |_: usize, _: usize| true;
+            let (stats, sec) = add_near_pair(
+                &self.pool,
+                network,
+                positions,
+                self.exponents,
+                o,
+                &all,
+                &mut energy,
+                Some(&mut differential),
+            );
+            self.near_seconds += sec;
+            near_pairs = stats.pairs;
+        }
         Ok(EnergyEvaluation {
             energy,
             differential,
             pairs_exact: exact_pairs(network),
             nodes_lumped: 0,
+            near_pairs,
         })
+    }
+
+    fn take_near_pair_seconds(&mut self) -> f64 {
+        std::mem::take(&mut self.near_seconds)
     }
 }
 
@@ -242,6 +342,8 @@ pub struct BarnesHutEnergy {
     lists: Option<InteractionLists>,
     /// Vertex and edge count the tree was built for (a different network needs a rebuild).
     shape: (usize, usize),
+    near_pair: Option<NearPairOptions>,
+    near_seconds: f64,
 }
 
 impl BarnesHutEnergy {
@@ -258,7 +360,19 @@ impl BarnesHutEnergy {
             tree: None,
             lists: None,
             shape: (0, 0),
+            near_pair: None,
+            near_seconds: 0.0,
         }
+    }
+
+    /// The same energy with the near-pair quadrature `near_pair` (`SPEC.md` §3.4; `None`: the
+    /// paper's). The correction applies to the ordered pairs `(I, J)` with `J` among the exactly
+    /// evaluated edges of row `I` in the frozen interaction lists (near pairs are not lumped by
+    /// the default parameters; if one were, its lumped term stays), so the energy of a line
+    /// search stays one smooth function and the differential its exact derivative.
+    pub fn with_near_pair(mut self, near_pair: Option<NearPairOptions>) -> BarnesHutEnergy {
+        self.near_pair = near_pair;
+        self
     }
 
     /// The current tree (after [`EnergyModel::prepare`]).
@@ -303,7 +417,15 @@ impl EnergyModel for BarnesHutEnergy {
         // for the Armijo comparison, see `BhTree::interaction_lists`.
         let (tree, lists) = (self.tree.as_ref(), self.lists.as_ref());
         let (tree, lists) = (tree.expect("fitted"), lists.expect("fitted"));
-        Ok(tree.energy_with_lists(lists, &pool, exponents))
+        let mut e = tree.energy_with_lists(lists, &pool, exponents);
+        if let Some(o) = &self.near_pair {
+            let include = |i: usize, j: usize| lists.contains_exact(i, j);
+            let (_, sec) = add_near_pair(
+                &pool, network, positions, exponents, o, &include, &mut e, None,
+            );
+            self.near_seconds += sec;
+        }
+        Ok(e)
     }
 
     fn energy_and_differential(
@@ -317,15 +439,36 @@ impl EnergyModel for BarnesHutEnergy {
         // The differential is taken at the base curve of a step: its interaction lists are the
         // ones the trial energies of the line search use.
         let lists = tree.interaction_lists(&pool);
-        let (energy, differential, stats) =
+        let (mut energy, mut differential, stats) =
             tree.energy_and_differential_with_lists(&lists, &pool, exponents)?;
+        let mut near_pairs = 0;
+        if let Some(o) = &self.near_pair {
+            let include = |i: usize, j: usize| lists.contains_exact(i, j);
+            let (st, sec) = add_near_pair(
+                &pool,
+                network,
+                positions,
+                exponents,
+                o,
+                &include,
+                &mut energy,
+                Some(&mut differential),
+            );
+            self.near_seconds += sec;
+            near_pairs = st.pairs;
+        }
         self.lists = Some(lists);
         Ok(EnergyEvaluation {
             energy,
             differential,
             pairs_exact: stats.pairs_exact,
             nodes_lumped: stats.nodes_lumped,
+            near_pairs,
         })
+    }
+
+    fn take_near_pair_seconds(&mut self) -> f64 {
+        std::mem::take(&mut self.near_seconds)
     }
 }
 
@@ -338,11 +481,32 @@ pub fn energy_model(
     exponents: Exponents,
     pool: Arc<rayon::ThreadPool>,
 ) -> Result<Box<dyn EnergyModel>, RcError> {
+    energy_model_with_near_pair(eval, exponents, None, pool)
+}
+
+/// The energy back end for `eval` with the near-pair quadrature `near_pair` (`SPEC.md` §3.4;
+/// `None`: [`energy_model`], the paper's energy).
+///
+/// # Errors
+/// [`RcError::InvalidOption`] for bad Barnes–Hut or near-pair options.
+pub fn energy_model_with_near_pair(
+    eval: &EnergyEval,
+    exponents: Exponents,
+    near_pair: Option<NearPairOptions>,
+    pool: Arc<rayon::ThreadPool>,
+) -> Result<Box<dyn EnergyModel>, RcError> {
+    if let Some(o) = &near_pair {
+        o.validate()?;
+    }
     match eval {
-        EnergyEval::Exact => Ok(Box::new(ExactEnergy::new(pool, exponents))),
+        EnergyEval::Exact => Ok(Box::new(
+            ExactEnergy::new(pool, exponents).with_near_pair(near_pair),
+        )),
         EnergyEval::BarnesHut(opts) => {
             opts.validate()?;
-            Ok(Box::new(BarnesHutEnergy::new(pool, exponents, *opts)))
+            Ok(Box::new(
+                BarnesHutEnergy::new(pool, exponents, *opts).with_near_pair(near_pair),
+            ))
         }
     }
 }
@@ -595,6 +759,13 @@ pub struct FlowOptions {
     /// §17l (0.69× the time to 1.1 E* of the chord method, no stuck step, no isotopy violation).
     /// It departs from the paper's projection only below 100 times the tolerance.
     pub newton_polish: Option<f64>,
+    /// The near-pair quadrature of the energy (`SPEC.md` §3.4, §17o): edge pairs closer than
+    /// `c₂ ℓ_IJ` get an accurate evaluation of the pair integral that the paper's endpoint rule
+    /// (Eq. 18) approximates, blended in smoothly, so that two edges that come close in their
+    /// interiors repel (the paper's rule does not see them). **Not part of the paper**; when no
+    /// pair is that close, the energy and the flow are bitwise the paper's. `None`: the paper's
+    /// energy. Default `Some(NearPairOptions::default())`.
+    pub near_pair: Option<NearPairOptions>,
     /// Stop a chord projection early when its observed convergence rate cannot reach the target
     /// within the remaining iterations (the rate test of simplified-Newton iterations, Hairer &
     /// Wanner §IV.8; [`project_with_path_polished`]):
@@ -633,6 +804,7 @@ impl fmt::Debug for FlowOptions {
             .field("back_projection", &self.back_projection)
             .field("second_order_correction", &self.second_order_correction)
             .field("newton_polish", &self.newton_polish)
+            .field("near_pair", &self.near_pair)
             .field("projection_early_abort", &self.projection_early_abort)
             .finish()
     }
@@ -665,6 +837,7 @@ impl Default for FlowOptions {
             back_projection: true,
             second_order_correction: false,
             newton_polish: Some(DEFAULT_NEWTON_POLISH),
+            near_pair: Some(NearPairOptions::default()),
             projection_early_abort: true,
         }
     }
@@ -683,6 +856,9 @@ impl FlowOptions {
         self.method.validate()?;
         if let Some(s) = &self.schedule {
             s.validate()?;
+        }
+        if let Some(o) = &self.near_pair {
+            o.validate()?;
         }
         for (name, t) in [
             ("threads", self.threads),
@@ -754,6 +930,9 @@ pub struct Timings {
     pub second_order: f64,
     /// CCD of the line search.
     pub ccd: f64,
+    /// The near-pair quadrature (`SPEC.md` §3.4) at the base curve and in the line search's
+    /// energies (part of `energy` and `line_search_energy`).
+    pub near_pair: f64,
     /// Subdivision (with the new constraint set and its rank checks).
     pub subdivision: f64,
     /// The whole step.
@@ -861,6 +1040,8 @@ pub struct StepReport {
     pub contact_floor: bool,
     /// CCD counters of the line search.
     pub ccd: CcdReport,
+    /// Edge pairs of the base curve in the band of the near-pair quadrature (`SPEC.md` §3.4).
+    pub near_pairs: u64,
     /// Number of CCD queries of the line search.
     pub ccd_checks: u32,
     /// The re-target sub-step, if any.
@@ -1108,7 +1289,8 @@ fn make_backends(
     pool: &Arc<rayon::ThreadPool>,
 ) -> Result<Backends, RcError> {
     let (eval, solver) = options.backend.resolve(n_vertices);
-    let energy = energy_model(&eval, options.exponents, pool.clone())?;
+    let energy =
+        energy_model_with_near_pair(&eval, options.exponents, options.near_pair, pool.clone())?;
     let solver: Arc<dyn SolverFactory> = match solver {
         Solver::Dense => Arc::new(DirectSolvers::new()),
         Solver::Multigrid(o) => Arc::new(MultigridSolvers::new(o)?),
@@ -1459,6 +1641,7 @@ impl Session {
 
     fn step_inner(&mut self) -> Result<StepReport, RcError> {
         let t_step = Instant::now();
+        let _ = self.energy.take_near_pair_seconds();
         if self.cancel.load(Ordering::Relaxed) {
             return Err(RcError::Cancelled);
         }
@@ -1554,6 +1737,7 @@ impl Session {
             contact_floor: false,
             ccd: CcdReport::default(),
             ccd_checks: 0,
+            near_pairs: ev.near_pairs,
             retarget,
             subdivided: false,
             schedule: None,
@@ -1738,6 +1922,7 @@ impl Session {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+        report.seconds.near_pair = self.energy.take_near_pair_seconds();
         report.seconds.total = t_step.elapsed().as_secs_f64();
         Ok(report)
     }

@@ -1625,6 +1625,73 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
   `EdgesIntersect` (§2.3) and the surface potential; the conservative advancement built on them is
   machine-checked (`rc-ccd-advancement`) for whatever distance satisfies the Lipschitz bound.
 
+### [formula: rc-near-cos-series] The two series of `S(θ) = ∫_0^θ cos^m φ dφ` (WP16, SPEC §3.4)
+
+- **Statement.** For `m > 0` and `|θ| ≤ π/4`, with `s = sin θ`, `a = (m − 1)/2`:
+  `S(θ) = Σ_{k≥0} C(a, k)(−1)^k s^{2k+1}/(2k + 1)`; for `ψ = π/2 − |θ| ≤ π/4`, `c = cos θ = sin ψ`:
+  `∫_0^ψ sin^m = c^{m+1} Σ_{k≥0} C(−½, k)(−1)^k c^{2k}/(m + 1 + 2k)`, and
+  `S(θ) = ±(S(π/2) − ∫_0^ψ sin^m)`. Both follow from the substitution `t = sin φ`
+  (`∫_0^{sin θ} (1 − t²)^{(m−1)/2} dt`, resp. `∫_0^{sin ψ} t^m (1 − t²)^{−1/2} dt`) and termwise
+  integration of the binomial series `(1 − x)^a = Σ C(a, k)(−x)^k`, which converges absolutely and
+  uniformly for `|x| ≤ ½` (here `x = s²` or `c²` `≤ ½`). Equivalently
+  `S(θ) = ½ B_{sin²θ}(½, (m+1)/2)` (incomplete beta function) with its hypergeometric series.
+  The crate sums 60 terms; with ratio at most ½ the remainder is below `2⁻⁶⁰` times the leading
+  term (`|C(a, k)|` grows at most polynomially in `k`).
+- **Reference.** NIST *Digital Library of Mathematical Functions*, §8.17 (incomplete beta function,
+  hypergeometric representation 8.17.7) and §15.2 (the Gauss series and its convergence for
+  `|z| < 1`); the binomial series: M. Abramowitz, I. A. Stegun, *Handbook of Mathematical
+  Functions*, NBS 1964, 3.6.8.
+- **Source check.** Equation numbers as remembered, not re-read. The series are checked against
+  adaptive Gauss–Legendre quadrature of `cos^m` to `2e-15` absolute for three exponents
+  (`tests/near_pair.rs`, `series_and_inner_integral_match_brute_force`) and against SciPy to
+  `4e-16` (WP16 prototype).
+- **Why not formalized.** Termwise integration of a power series and the binomial series with real
+  exponents are in Mathlib only in pieces; the identity is classical and the numbers are checked.
+  What is machine-checked is that any `S` with `S' = cos^m` gives the inner integral
+  (`rc-near-inner`, `near_inner_hasDerivAt`, `near_inner_integral`), and that `∫_0^θ cos^m` is one.
+- **What depends on it.** The value of the inner integral `F(y)` (SPEC §3.4); its differential uses
+  `S' = cos^m`, exact up to the truncation of the series.
+
+### [formula: rc-near-closest] Closest points of two segments and their derivatives (WP16, SPEC §3.4)
+
+- **Statement.** The closest points `P(s*)`, `Q(t*)` of two non-intersecting segments are found by
+  minimizing the convex quadratic `|P(s) − Q(t)|²` over `[0, 1]²` (clamping, the parallel case by a
+  choice). The distance `d = min |P(s) − Q(t)|` has the derivative
+  `∇d = n̂ ⊗ ((1 − s*), s*, −(1 − t*), −t*)` (`n̂` the unit vector between the closest points)
+  wherever the minimizer is unique (Danskin's theorem: the constraint set `[0, 1]²` does not depend
+  on the positions); a free parameter (`0 < s* < 1`, resp. `t*`) satisfies `A·D = 0` (`B·D = 0`),
+  and the implicit function theorem gives `∇s*`, `∇t*` from the `2 × 2` (or `1 × 1`) system of
+  those conditions; clamped parameters have zero derivative. `d` is `C¹` but not `C²` where the
+  set of active bounds changes, and not differentiable for parallel overlapping segments (the
+  minimizer is not unique).
+- **Reference.** C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann 2004, §5.1.9;
+  J. M. Danskin, *The Theory of Max-Min and its Application to Weapons Allocation Problems*,
+  Springer 1967; J. F. Bonnans, A. Shapiro, *Perturbation Analysis of Optimization Problems*,
+  Springer 2000, §4.1 (directional differentiability of optimal value functions).
+- **Source check.** As cited; the theorem numbers were not re-read. The Rust differential through
+  these derivatives is checked by central differences (`tests/near_pair.rs`).
+- **Why not formalized.** The case analysis of the algorithm and the envelope theorem on a
+  rectangle; the consequence (the differential of the blended energy) is tested.
+- **What depends on it.** The blend weight `w(d/ℓ_IJ)` and the breakpoints of the outer
+  quadrature (SPEC §3.4).
+
+### [formula: rc-near-quadrature-error] Accuracy of the graded outer quadrature (WP16, SPEC §3.4)
+
+- **Statement.** For an integrand analytic in the Bernstein ellipse `E_ρ` of an interval and bounded
+  there by `M`, the `n`-point Gauss–Legendre error is at most `64 M / (15 (ρ² − 1) ρ^{2n})` times
+  the half-length; after the substitution `t = c ± δ sinh w` a near singularity at distance `δ`
+  from `c` lies at imaginary distance about `π/2` from the real `w` axis for every ratio `δ/L`,
+  so a fixed number of panels in `w` gives a uniform relative accuracy as `δ/L → 0`.
+- **Reference.** L. N. Trefethen, *Approximation Theory and Approximation Practice*, SIAM 2013,
+  Thm. 19.3; P. R. Johnston, D. Elliott, "A sinh transformation for evaluating nearly singular
+  boundary element integrals", *Int. J. Numer. Meth. Engng.* 62 (2005) 564–578.
+- **Source check.** As cited, not re-read. The crate does not rely on the bound: the accuracy is
+  measured (`tests/near_pair.rs`: at most `2.5e-6` relative against an adaptive reference on seven
+  crafted pairs at distances `0.5 … 1e-6`, both exponent pairs; SPEC §17o).
+- **Why not formalized.** An error bound of a numerical rule; only the substitution identity is
+  machine-checked (`rc-near-outer`).
+- **What depends on it.** How close the near-pair energy is to the pair integral of the polygon.
+
 ### [formula: rc-armijo] Finite termination of backtracking for a descent direction
 
 - **Statement.** If `F` is continuously differentiable near `γ` and `dF·d < 0`, then
@@ -1769,6 +1836,6 @@ the algorithms built on them (flipping, tracing, insertion, overlay, refinement,
 their tolerances are not. For `crates/ddg-developability`
 the formulas of the thirty proved `dev-` ids are covered; the flow driver, the remeshing and cutting
 algorithms, the evaluation loop and every tolerance are not. For `crates/ddg-repulsive-curves` the
-formulas of the forty-four proved `rc-` ids are covered; the session and step driver, the line
+formulas of the forty-four proved `rc-` ids (and the six `rc-near-` ids of WP16) are covered; the session and step driver, the line
 searches as algorithms, the BVH, block cluster tree and multigrid data structures, the scene
 reader, the evaluation and every tolerance are not.

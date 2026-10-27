@@ -25,6 +25,9 @@ use crate::network::CurveNetwork;
 
 pub mod barnes_hut;
 pub mod exact;
+pub mod near_pair;
+
+pub use near_pair::NearPairOptions;
 
 /// Parameters of the Barnes–Hut evaluation (`SPEC.md` §8.2; implemented by WP4).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +77,9 @@ pub struct EnergyReport {
     pub seconds: f64,
 }
 
-/// Energy and differential of the curve `positions` on `network`.
+/// Energy and differential of the curve `positions` on `network`: the paper's discrete energy
+/// (Eq. 17), without the near-pair quadrature of `SPEC.md` §3.4 (see
+/// [`energy_with_near_pair`], which the flow uses by default).
 ///
 /// `threads` is the size of the explicit rayon pool used (`None`: all cores); the result does not
 /// depend on it, bit for bit (D25). Positions are validated with
@@ -110,6 +115,18 @@ pub fn energy(
     }
     let (energy, differential) =
         exact::energy_and_differential(&pool, network, positions, exponents);
+    Ok(EnergyReport {
+        energy,
+        penalties: Vec::new(),
+        differential,
+        pairs_exact: exact_pair_count(network),
+        nodes_lumped: 0,
+        seconds: t0.elapsed().as_secs_f64(),
+    })
+}
+
+/// `|𝒫|`: ordered pairs of edges without a common vertex.
+fn exact_pair_count(network: &CurveNetwork) -> u64 {
     let m = network.n_edges() as u64;
     let adjacent: u64 = (0..network.n_vertices() as u32)
         .map(|v| {
@@ -117,12 +134,67 @@ pub fn energy(
             d * (d - 1)
         })
         .sum();
+    m * (m - 1) - adjacent
+}
+
+/// As [`energy`], with the near-pair quadrature of `SPEC.md` §3.4 when `near_pair` is `Some`
+/// (the energy a flow with [`FlowOptions::near_pair`](crate::step::FlowOptions::near_pair)
+/// minimizes). For Barnes–Hut, the correction applies to the ordered pairs that the tree
+/// evaluates exactly. `None` is [`energy`], bit for bit; so is `Some` when no pair is near.
+///
+/// # Errors
+/// As [`energy`]; [`RcError::InvalidOption`] for bad [`NearPairOptions`].
+pub fn energy_with_near_pair(
+    network: &CurveNetwork,
+    positions: &[[f64; 3]],
+    exponents: Exponents,
+    eval: &EnergyEval,
+    near_pair: Option<&NearPairOptions>,
+    threads: Option<usize>,
+) -> Result<EnergyReport, RcError> {
+    let Some(np) = near_pair else {
+        return energy(network, positions, exponents, eval, threads);
+    };
+    np.validate()?;
+    let t0 = Instant::now();
+    network.validate_positions(positions)?;
+    let pool = exact::make_pool(threads)?;
+    let (mut e, mut diff, pairs_exact, nodes_lumped, corr) = match eval {
+        EnergyEval::BarnesHut(opts) => {
+            opts.validate()?;
+            let tree = barnes_hut::BhTree::build(network, positions, *opts)?;
+            let lists = tree.interaction_lists(&pool);
+            let (e, d, stats) =
+                tree.energy_and_differential_with_lists(&lists, &pool, exponents)?;
+            let include = |i: usize, j: usize| lists.contains_exact(i, j);
+            let corr =
+                near_pair::correction(&pool, network, positions, exponents, np, &include, true);
+            (e, d, stats.pairs_exact, stats.nodes_lumped, corr)
+        }
+        EnergyEval::Exact => {
+            let (e, d) = exact::energy_and_differential(&pool, network, positions, exponents);
+            let corr =
+                near_pair::correction(&pool, network, positions, exponents, np, &|_, _| true, true);
+            (e, d, exact_pair_count(network), 0, corr)
+        }
+    };
+    if let Some(near_pair::NearCorrection {
+        energy: c,
+        differential: Some(g),
+        ..
+    }) = corr
+    {
+        e += c;
+        for (dv, gv) in diff.iter_mut().zip(&g) {
+            *dv = [dv[0] + gv[0], dv[1] + gv[1], dv[2] + gv[2]];
+        }
+    }
     Ok(EnergyReport {
-        energy,
+        energy: e,
         penalties: Vec::new(),
-        differential,
-        pairs_exact: m * (m - 1) - adjacent,
-        nodes_lumped: 0,
+        differential: diff,
+        pairs_exact,
+        nodes_lumped,
         seconds: t0.elapsed().as_secs_f64(),
     })
 }

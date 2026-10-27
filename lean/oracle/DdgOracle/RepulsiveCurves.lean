@@ -7,3 +7,4 @@ import DdgOracle.RepulsiveCurves.Format
 import DdgOracle.RepulsiveCurves.Gen
 import DdgOracle.RepulsiveCurves.Fixtures
 import DdgOracle.RepulsiveCurves.Step
+import DdgOracle.RepulsiveCurves.NearPair

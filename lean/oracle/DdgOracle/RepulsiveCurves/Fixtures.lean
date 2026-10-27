@@ -23,6 +23,17 @@ private def dirOf (net : Net) (site : Site) (off : V3) : V3 :=
 private def ex36 : Expo := ⟨3.0, 6.0⟩
 private def ex245 : Expo := ⟨2.0, 4.5⟩
 
+/-- Two straight strands crossing at distance `gap` in the middle of two edges, joined into one
+loop far away (SPEC §3.4: a mid-edge near pair). -/
+private def crossingLoop (gap : Float) : Net := Id.run do
+  let mut pos : Array V3 := #[]
+  for i in [0:5] do pos := pos.push ⟨i.toFloat - 2.0 + 0.5 - 0.37, 0.0, 0.0⟩
+  pos := pos ++ #[⟨4.0, 0.0, 2.0⟩, ⟨2.8, 2.8, 4.0⟩, ⟨0.31, 4.0, gap + 3.0⟩]
+  for i in [0:5] do pos := pos.push ⟨0.31, 2.0 - i.toFloat + 0.5 - 0.21, gap⟩
+  pos := pos ++ #[⟨0.31, -4.0, -2.0⟩, ⟨-4.0, -2.0, -3.0⟩]
+  let n := pos.size
+  return { pos, edges := (Array.range n).map fun i => (i, (i + 1) % n) }
+
 /-- The fixtures: case and description. -/
 def fixtures : Array (RCCase × String) := Id.run do
   let mut fs : Array (RCCase × String) := #[]
@@ -46,6 +57,10 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs (mk "rc-tripod-energy" "energy" tri) "3-junction graph, (3,6)"
   fs := add fs { mk "rc-hopf-energy" "energy" hop with ex := ⟨2.5, 5.5⟩ } "two linked loops, (2.5,5.5)"
   fs := add fs { mk "rc-planar-energy" "energy" planar with planar := some 2 } "planar loop in z = 0: no differential along z"
+  -- near-pair quadrature (SPEC §3.4)
+  fs := add fs { mk "rc-near-crossing-245" "near" (crossingLoop 2e-3) with ex := ex245 } "mid-edge crossing at 2e-3, (2,4.5): near-pair energy and differential"
+  fs := add fs (mk "rc-near-crossing-36" "near" (crossingLoop 1e-2)) "mid-edge crossing at 1e-2, (3,6)"
+  fs := add fs { mk "rc-near-blend-245" "near" (crossingLoop 0.4) with ex := ex245 } "crossing at 0.4 edge lengths: inside the blend band"
   -- gram
   fs := add fs (mk "rc-circle-gram" "gram" circ) "24-gon: B, B0, A, K^B, K0, both quadratures, (3,6)"
   fs := add fs { mk "rc-trefoil40-gram" "gram" tre40 with ex := ex245 } "trefoil with 40 vertices, (2,4.5), both quadratures"

@@ -64,6 +64,8 @@ use std::sync::Arc;
 
 use ddg_repulsive_curves::constraints::{Constraint, ConstraintSet, ImplicitSurface, TangentSite};
 use ddg_repulsive_curves::energy::exact::make_pool;
+use ddg_repulsive_curves::energy::near_pair::near_pairs;
+use ddg_repulsive_curves::energy::{NearPairOptions, energy_with_near_pair};
 use ddg_repulsive_curves::metric::sobolev_dense::GramGeometry;
 use ddg_repulsive_curves::metric::{GramQuadrature, Metric, gram, kernel_matrices};
 use ddg_repulsive_curves::optimize::Method;
@@ -85,6 +87,10 @@ type P = [f64; 3];
 const ENERGY_REL: f64 = 1e-12;
 const DIFF_REL: f64 = 1e-11;
 const DIFF_FLOOR: f64 = 1e-14;
+/// Near-pair energy: the same quadrature, summed in another order.
+const NEAR_ENERGY_REL: f64 = 1e-12;
+/// Near-pair differential against the oracle's finite difference of the correction.
+const NEAR_DIFF_REL: f64 = 1e-8;
 const GRAM_REL: f64 = 1e-12;
 const PHI_REL: f64 = 1e-12;
 const JAC_REL: f64 = 1e-12;
@@ -186,6 +192,8 @@ struct Input {
     shrink: f64,
     max_halvings: u32,
     n_steps: usize,
+    /// `near`: the near-pair options (SPEC §3.4).
+    near: NearPairOptions,
 }
 
 fn p3(l: &Line, i: usize) -> P {
@@ -214,6 +222,7 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
         shrink: 0.5,
         max_halvings: 40,
         n_steps: 1,
+        near: NearPairOptions::default(),
     };
     for l in lines {
         match l[0].as_str() {
@@ -242,6 +251,14 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                 input.n_steps = int(&l[4]);
             }
             "maxit" => input.maxit = int(&l[1]) as u32,
+            "near" => {
+                input.near = NearPairOptions {
+                    blend_start: float(&l[1]),
+                    blend_end: float(&l[2]),
+                    subpanels: int(&l[3]),
+                    second_neighbours: false,
+                }
+            }
             "p" => input.positions.push(p3(l, 1)),
             "e" => input.edges.push([int(&l[1]) as u32, int(&l[2]) as u32]),
             "net" => {}
@@ -604,6 +621,7 @@ fn replay(input: &Input, out: &[Line], stats: &mut Stats) {
     };
     match input.task.as_str() {
         "energy" => replay_energy(input, &net, ex, out, stats),
+        "near" => replay_near(input, &net, ex, out, stats),
         "gram" => replay_gram(input, &net, ex, out, stats),
         "step" => replay_step(input, &net, ex, out, stats),
         _ => replay_solve(input, &net, ex, out, stats),
@@ -621,7 +639,7 @@ fn rust_pipeline_error(input: &Input) -> (Option<RcError>, Option<f64>) {
         Err(e) => return (Some(e), None),
     };
     match input.task.as_str() {
-        "energy" | "gram" => (None, None),
+        "energy" | "gram" | "near" => (None, None),
         "step" => (step_session(input, &net, ex).err(), None),
         _ => match solve_rust(input, &net, ex) {
             Ok((_, _, solver)) => (None, Some(solver.pivot_ratio())),
@@ -657,8 +675,10 @@ fn step_session(input: &Input, net: &CurveNetwork, ex: Exponents) -> Result<Sess
             tolerance,
             max_iterations: input.maxit,
         },
-        // the oracle replays the paper's step: straight trials, chord projection (SPEC §17l)
+        // the oracle replays the paper's step: straight trials, chord projection (SPEC §17l),
+        // the paper's energy (no near-pair quadrature, SPEC §3.4)
         second_order_correction: false,
+        near_pair: None,
         newton_polish: None,
         projection_early_abort: false,
         // never converge: the oracle always takes the step
@@ -924,6 +944,56 @@ fn replay_energy(
     }
     let ratio = normwise(&a, &b, DIFF_REL, DIFF_FLOOR * max_abs(&b));
     stats.check(name, "differential", ratio, || {
+        format!(
+            "max abs diff {:.3e} of {:.3e}",
+            a.iter()
+                .zip(&b)
+                .fold(0.0f64, |m, (x, y)| m.max((x - y).abs())),
+            max_abs(&b)
+        )
+    });
+}
+
+/// The near-pair task (SPEC §3.4): the paper's energy, the energy with the near-pair quadrature,
+/// the pairs in the band with their weights and corrections, and the differential (the oracle's
+/// is the paper's analytic one plus a Richardson-extrapolated central difference of the
+/// correction, so the tolerance is that of a finite difference).
+fn replay_near(input: &Input, net: &CurveNetwork, ex: Exponents, out: &[Line], stats: &mut Stats) {
+    let name = input.name.as_str();
+    let o = input.near;
+    let rep = match energy_with_near_pair(
+        net,
+        &input.positions,
+        ex,
+        &EnergyEval::Exact,
+        Some(&o),
+        Some(1),
+    ) {
+        Ok(r) => r,
+        Err(e) => return stats.problem(name, format!("near energy: {e:?}")),
+    };
+    let paper = energy(net, &input.positions, ex, &EnergyEval::Exact, Some(1))
+        .map(|r| r.energy)
+        .unwrap_or(f64::NAN);
+    let oe = float(&first(out, "energy").expect("energy line")[1]);
+    let on = float(&first(out, "near-energy").expect("near-energy line")[1]);
+    for (what, a, b) in [("energy", paper, oe), ("near energy", rep.energy, on)] {
+        let ratio = (a - b).abs() / (NEAR_ENERGY_REL * a.abs().max(b.abs()));
+        stats.check(name, what, ratio, || format!("{a} vs oracle {b}"));
+    }
+    let opairs: Vec<(u32, u32)> = out
+        .iter()
+        .filter(|l| l[0] == "pair")
+        .map(|l| (int(&l[1]) as u32, int(&l[2]) as u32))
+        .collect();
+    let mine = near_pairs(net, &input.positions, &o);
+    if mine != opairs {
+        stats.problem(name, format!("near pairs {mine:?}, oracle {opairs:?}"));
+    }
+    stats.comparisons += 1;
+    let (a, b) = (flat(&rep.differential), flat(&oracle_points(out, "d")));
+    let ratio = normwise(&a, &b, NEAR_DIFF_REL, DIFF_FLOOR * max_abs(&b));
+    stats.check(name, "near differential", ratio, || {
         format!(
             "max abs diff {:.3e} of {:.3e}",
             a.iter()

@@ -6,6 +6,9 @@ rc-helix-energy	energy	ok	open helical arc, (2,4.5)
 rc-tripod-energy	energy	ok	3-junction graph, (3,6)	
 rc-hopf-energy	energy	ok	two linked loops, (2.5,5.5)	
 rc-planar-energy	energy	ok	planar loop in z = 0: no differential along z	
+rc-near-crossing-245	near	ok	mid-edge crossing at 2e-3, (2,4.5): near-pair energy and differential	
+rc-near-crossing-36	near	ok	mid-edge crossing at 1e-2, (3,6)	
+rc-near-blend-245	near	ok	crossing at 0.4 edge lengths: inside the blend band	
 rc-circle-gram	gram	ok	24-gon: B, B0, A, K^B, K0, both quadratures, (3,6)	
 rc-trefoil40-gram	gram	ok	trefoil with 40 vertices, (2,4.5), both quadratures	
 rc-trefoil80-gram	gram	ok	trefoil with 80 vertices: A only, both quadratures	
