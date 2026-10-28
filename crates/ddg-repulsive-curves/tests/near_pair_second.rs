@@ -273,7 +273,11 @@ fn rules_are_inert_while_second_neighbours_are_excluded() {
     let e = exps(2.0, 4.5);
     let (net, pos) = accordion(0.01);
     let reference = {
-        let mut m = ExactEnergy::new(pool(), e).with_near_pair(Some(NearPairOptions::default()));
+        let excluded = NearPairOptions {
+            second_neighbours: false,
+            ..NearPairOptions::default()
+        };
+        let mut m = ExactEnergy::new(pool(), e).with_near_pair(Some(excluded));
         m.prepare(&net, &pos).unwrap();
         m.energy_and_differential(&net, &pos).unwrap()
     };

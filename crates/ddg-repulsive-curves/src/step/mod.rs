@@ -784,8 +784,8 @@ pub struct FlowOptions {
     /// `SPEC.md` §17p). The polish corrects in the lumped-mass metric, which favours the light
     /// vertices between short edges; its correction of the base's residual violation can raise
     /// the objective by more than any trial can gain (the chord step, in the metric `Ā`, is
-    /// orthogonal to the direction to first order). **Not in the paper.** Default `false`; steps
-    /// that are not stuck are unchanged either way.
+    /// orthogonal to the direction to first order). **Not in the paper.** Default `true`
+    /// (`SPEC.md` §18 Q10); steps that are not stuck are unchanged either way.
     pub stuck_retry_chord: bool,
 }
 
@@ -856,7 +856,7 @@ impl Default for FlowOptions {
             near_pair: Some(NearPairOptions::default()),
             projection_early_abort: true,
             stuck_projected_reference: false,
-            stuck_retry_chord: false,
+            stuck_retry_chord: true,
         }
     }
 }

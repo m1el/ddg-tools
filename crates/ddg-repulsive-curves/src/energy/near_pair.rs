@@ -90,14 +90,15 @@ pub struct NearPairOptions {
     /// `M`: Gauss–Legendre sub-panels (8 nodes each) per graded half-panel of the outer integral.
     pub subpanels: usize,
     /// Also correct pairs of edges joined by one edge (`I`, `K`, `J` consecutive at a vertex
-    /// each). Default `false`: their closest points are at the ends of the joining edge, where the
-    /// paper's rule has quadrature nodes (it overestimates there, a corner barrier the paper's
-    /// flows and the authors' scenes rely on), and correcting them changes the energy of every
-    /// sharp corner of a curve (`SPEC.md` §17o).
+    /// each). Default `true` with [`SecondNeighbourRule::OneSided`] (`SPEC.md` §17p, §18 Q10): the
+    /// paper's rule cannot see an accordion fold (`I` and `J` overlapping across `K`), while at a
+    /// corner, where the closest points are at the ends of `K` and Eq. 18 overestimates (a
+    /// barrier the paper's flows and the authors' scenes rely on), the one-sided rule keeps
+    /// Eq. 18. `false`: the pair is the paper's term (WP16, §17o).
     pub second_neighbours: bool,
     /// How second neighbours are corrected when [`NearPairOptions::second_neighbours`] is set
-    /// (WP16b, `SPEC.md` §17p). Default [`SecondNeighbourRule::TwoSided`] (the blend of every
-    /// other pair, WP16's variant). Ignored when second neighbours are excluded.
+    /// (WP16b, `SPEC.md` §17p). Default [`SecondNeighbourRule::OneSided`] (never below Eq. 18).
+    /// Ignored when second neighbours are excluded.
     pub second_neighbour_rule: SecondNeighbourRule,
     /// The band `(c₁, c₂)` in `r = d/ℓ_IJ` for second neighbours; `None` (the default): the
     /// band of every other pair. Ignored when second neighbours are excluded.
@@ -143,14 +144,15 @@ pub enum SecondNeighbourRule {
 }
 
 impl Default for NearPairOptions {
-    /// `c₁ = 0.25, c₂ = 0.75, M = 4`, second neighbours excluded (`SPEC.md` §17o).
+    /// `c₁ = 0.25, c₂ = 0.75, M = 4`, second neighbours corrected by the one-sided rule
+    /// (`SPEC.md` §17o, §17p, §18 Q10).
     fn default() -> Self {
         NearPairOptions {
             blend_start: 0.25,
             blend_end: 0.75,
             subpanels: 4,
-            second_neighbours: false,
-            second_neighbour_rule: SecondNeighbourRule::TwoSided,
+            second_neighbours: true,
+            second_neighbour_rule: SecondNeighbourRule::OneSided,
             second_neighbour_band: None,
         }
     }

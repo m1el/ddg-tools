@@ -120,7 +120,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         near_pair: true,
         trace: None,
         stuck_ref: false,
-        stuck_chord: false,
+        stuck_chord: FlowOptions::default().stuck_retry_chord,
         start_obj: None,
         newton_polish: None,
         early_abort: None,

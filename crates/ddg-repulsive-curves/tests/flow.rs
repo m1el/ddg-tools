@@ -670,7 +670,8 @@ fn every_stop_status_is_reached() {
     assert_eq!(r.status, Status::Stuck);
     let last = r.steps.last().unwrap();
     assert_eq!(last.status, StepStatus::Stuck);
-    assert_eq!(last.trials.len(), 3);
+    // Three trials with the Newton polish, then the stuck retry with chord steps (§17p).
+    assert_eq!(last.trials.len(), 6);
     assert!(
         last.trials
             .iter()

@@ -186,11 +186,13 @@ initial curves.
 **Which pairs.** Unordered pairs `{I, J}` of disjoint edges with `r_IJ = d_IJ / ℓ_IJ < c₂`, where
 `d_IJ` is the segment distance and `ℓ_IJ = √((ℓ_I² + ℓ_J²)/2)` (smooth in both lengths, `= ℓ` for
 equal lengths), **except** pairs joined by one edge (`I, K, J` consecutive; option
-`second_neighbours`, default `false`): their closest points are the ends of `K`, where Eq. 18
+`second_neighbours`): their closest points are the ends of `K`, where Eq. 18
 has nodes; there it overestimates the pair integral (a corner barrier the paper's flows and the
-authors' scenes rely on, §17o). Defaults `c₁ = 0.25`, `c₂ = 0.75`, `M = 4` (§17o). Broad phase: a
+authors' scenes rely on, §17o). Since §18 Q10 they are included by default with the one-sided rule
+(never below Eq. 18, so the corner barrier stays; it catches accordion folds, §17p);
+`second_neighbours: false` gives WP16's term. Defaults `c₁ = 0.25`, `c₂ = 0.75`, `M = 4` (§17o). Broad phase: a
 uniform grid (cell `(1 + 2c₂) max ℓ`, sorted cell entries), `O(|E|)`; the pair list is sorted.
-Options for second neighbours (WP16b, all off by default, measured in §17p):
+Options for second neighbours (WP16b, measured in §17p; default `OneSided`, §18 Q10):
 `second_neighbour_rule` (`TwoSided`, `OneSided` [formula: rc-near-onesided], gated variants
 [formula: rc-near-gate]) and `second_neighbour_band`.
 
@@ -574,7 +576,7 @@ The step report (§9.1) records every one of these parts with its time.
 (∞ if none). Start `τ₀ = ⅔ τ_max` (the paper's heuristic) or `τ_hi` if `τ_max = ∞`; halve until
 (i) Armijo holds at `γ̂_τ`, (ii) the projection succeeds, (iii) the projection displacements
 (each chord step is a linear motion) are also CCD-free. At most 40 halvings, or `τ < 1e-12 τ₀`:
-`Stuck`. Boyd & Vandenberghe Alg. 9.2 with `c = 1e-4`, shrink ½. Optional retries of a stuck search (`stuck_retry_chord`, `stuck_projected_reference`; off by default; WP16b): §17p. Because every accepted step
+`Stuck`. Boyd & Vandenberghe Alg. 9.2 with `c = 1e-4`, shrink ½. Optional retries of a stuck search (`stuck_retry_chord`, on by default since §18 Q10; `stuck_projected_reference`, off; WP16b): §17p. Because every accepted step
 checks the whole path (move and projection), no two edges of `𝒫` and no edge and obstacle ever
 cross during the flow: the isotopy class is kept (paper Sec. 5.4; the paper guards only the
 move, the reference has no CCD at all).
@@ -3014,8 +3016,8 @@ edge), `--start-obj` and the option flags below; probes `tests/wp16b_probe.rs` (
 `multiplier_probe`, `projection_probe`, `sn_census`, `sn_cost`, `tangent_interpolation_probe`).
 All runs: phase-A flags, one thread, 24-minute cap; 25–110 jobs at a time (phase A: 60), so a
 run that hit the cap made fewer steps than in phase A; histories are compared step by step on
-the common prefix (bitwise), which load does not change. **Every option below is off by default;
-no default was changed.**
+the common prefix (bitwise), which load does not change. **Every option below was off by default
+during WP16b;** the user then adopted the recommendation (§18 Q10).
 
 ### Reproduction
 
@@ -3237,7 +3239,7 @@ which compares against the default; an artefact of making the rule the default.)
 | (c′) one-sided, either gate | 9/9 (+9) | 0/3 | 5/30 | as (b) | C¹ (argued) | proved | ≈ 0 |
 | (d) local subdivision, (e) three-point circles | not attempted (above) | | | | | | |
 
-### Recommendation (for the user; nothing is switched on)
+### Recommendation (adopted as §18 Q10, 2026-10-28)
 
 1. **Group B: `stuck_retry_chord = true`.** It removes the only failure mode found (the polish
    correction of the base's residual violation), keeps the flow monotone, and is bitwise neutral for
@@ -3286,3 +3288,10 @@ which compares against the default; an artefact of making the rule the default.)
 * Q9 (after WP12b, §17m Finding B): the evaluation stops a run on the energy rate,
   `dE·g̃ < 1e-4` (`StepReport::sobolev_norm_sq`, the reference's rule), or on its wall budget.
   The library's default stop rule (`‖g̃‖₂ < 1e-4`, D14) is unchanged.
+* Q10 (2026-10-28, after WP16b, §17p): both recommended fixes are defaults.
+  `FlowOptions::stuck_retry_chord = true` (a stuck search with the Newton polish is repeated with
+  chord steps), and `NearPairOptions { second_neighbours: true, second_neighbour_rule: OneSided }`.
+  `flow::every_stop_status_is_reached` now counts 3 + 3 trials at its stuck step;
+  `near_pair_second::rules_are_inert_while_second_neighbours_are_excluded` compares against the
+  excluded variant explicitly. Phases A and B of the evaluation are rerun in full with these
+  defaults (`runs_tmp/rc-eval/runA2`, `runB2`); §17n keeps the earlier results.
