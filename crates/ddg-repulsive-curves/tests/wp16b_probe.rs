@@ -521,3 +521,94 @@ fn sn_cost() {
         println!("{line}");
     }
 }
+
+/// The authors' `TangentInterpolation` scene (exact back end, 4 threads) under each
+/// second-neighbour rule and with the chord retry: energy after steps 1, 5, 10, the near pairs
+/// in the band after step 1, the two end-edge lengths after steps 5, 10, 15, and the step and
+/// error that ends the run (within 80 steps).
+#[test]
+#[ignore]
+fn tangent_interpolation_probe() {
+    use ddg_repulsive_curves::Session;
+    use ddg_repulsive_curves::energy::near_pair::{NearPairOptions, SecondNeighbourRule};
+    use ddg_repulsive_curves::scene::{BackendChoice, read_scene};
+    let sc = read_scene("scenes/TangentInterpolation/scene.txt").unwrap();
+    let sn = NearPairOptions {
+        second_neighbours: true,
+        ..NearPairOptions::default()
+    };
+    let cases: Vec<(&str, Option<NearPairOptions>, bool)> = vec![
+        ("paper", None, false),
+        ("default", Some(NearPairOptions::default()), false),
+        ("chordretry", Some(NearPairOptions::default()), true),
+        ("sn-two", Some(sn), false),
+        (
+            "sn-narrow",
+            Some(NearPairOptions {
+                second_neighbour_band: Some((0.1, 0.25)),
+                ..sn
+            }),
+            false,
+        ),
+        (
+            "sn-one",
+            Some(NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSided,
+                ..sn
+            }),
+            false,
+        ),
+        (
+            "sn-gated",
+            Some(NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::Gated { width: 0.1 },
+                ..sn
+            }),
+            false,
+        ),
+        (
+            "sn-onegated",
+            Some(NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGated { width: 0.1 },
+                ..sn
+            }),
+            false,
+        ),
+    ];
+    for (name, np, chord) in cases {
+        let mut o = sc.options(BackendChoice::Exact, Some(4)).unwrap();
+        o.near_pair = np;
+        o.stuck_retry_chord = chord;
+        let mut s = Session::new(sc.network.clone(), sc.positions.clone(), o).unwrap();
+        let m = s.network().n_edges();
+        let mut line = format!("TI {name}");
+        let mut end = String::from("none within 80");
+        let mut energies = Vec::new();
+        for k in 1..=80 {
+            match s.step() {
+                Ok(r) => {
+                    energies.push(r.energy_after);
+                    if k == 1 {
+                        line.push_str(&format!(" pairs1 {}", r.near_pairs));
+                    }
+                    if [1, 5, 10].contains(&k) {
+                        line.push_str(&format!(" E{k} {:.3}", r.energy_after));
+                    }
+                    if [5, 10, 15].contains(&k) {
+                        let l = s.network().edge_geometry(s.positions()).length;
+                        line.push_str(&format!(" ends{k} {:.2e},{:.2e}", l[0], l[m - 1]));
+                    }
+                    if s.status().is_terminal() {
+                        end = format!("step {k} {:?}", s.status());
+                        break;
+                    }
+                }
+                Err(e) => {
+                    end = format!("step {k} {e}");
+                    break;
+                }
+            }
+        }
+        println!("{line} end: {}", end.chars().take(120).collect::<String>());
+    }
+}
