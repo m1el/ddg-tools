@@ -9,7 +9,7 @@
 //!             --trace TRACE.jsonl --stuck-projected-reference 0|1
 //!             --stuck-retry-chord 0|1 --start-obj CURVE.obj --newton-polish none|X --early-abort 0|1
 //!             --proj-tol X --proj-iters N --max-halvings N --np-second-neighbours 0|1
-//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W]
+//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W|oneeither:W]
 //! ```
 //!
 //! Diagnostic options (WP16b, `SPEC.md` §17p): `--trace` appends one JSON line per step (step
@@ -208,9 +208,12 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     ("one", None) => SecondNeighbourRule::OneSided,
                     ("gated", Some(width)) => SecondNeighbourRule::Gated { width },
                     ("onegated", Some(width)) => SecondNeighbourRule::OneSidedGated { width },
+                    ("oneeither", Some(width)) => {
+                        SecondNeighbourRule::OneSidedGatedEither { width }
+                    }
                     _ => {
                         return Err(format!(
-                            "--np-sn-mode: two | one | gated:W | onegated:W, not {v}"
+                            "--np-sn-mode: two | one | gated:W | onegated:W | oneeither:W, not {v}"
                         ));
                     }
                 };

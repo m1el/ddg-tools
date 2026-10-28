@@ -408,6 +408,13 @@ fn sn_census() {
                 ..sn
             },
         ),
+        (
+            "sn-oneeither",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGatedEither { width: 0.1 },
+                ..sn
+            },
+        ),
     ];
     for path in std::fs::read_to_string(&list).unwrap().lines() {
         let path = path.trim();
@@ -479,6 +486,13 @@ fn sn_cost() {
             "sn-gated",
             NearPairOptions {
                 second_neighbour_rule: SecondNeighbourRule::Gated { width: 0.1 },
+                ..sn
+            },
+        ),
+        (
+            "sn-oneeither",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGatedEither { width: 0.1 },
                 ..sn
             },
         ),
@@ -573,6 +587,14 @@ fn tangent_interpolation_probe() {
                 ..sn
             }),
             false,
+        ),
+        (
+            "sn-oneeither",
+            Some(NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGatedEither { width: 0.1 },
+                ..sn
+            }),
+            true,
         ),
     ];
     for (name, np, chord) in cases {

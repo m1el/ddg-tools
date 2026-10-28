@@ -168,6 +168,36 @@ theorem gated_hasDerivAt {ep en r a b : ℝ → ℝ} {w : ℝ → ℝ} {ep' en' 
   simp only [Function.comp, Pi.mul_apply, Pi.sub_apply]
   ring
 
+/-- **The either gate** `g = 1 − (1 − G(a/σ))(1 − G(b/σ))` along a motion `s`:
+`g' = (1 − G(b/σ)) G'(a/σ) a'/σ + (1 − G(a/σ)) G'(b/σ) b'/σ`.
+
+[formula: rc-near-gate] -/
+theorem either_gate_hasDerivAt {a b : ℝ → ℝ} {a' b' s σ : ℝ} (ha : HasDerivAt a a' s)
+    (hb : HasDerivAt b b' s) :
+    HasDerivAt (fun s => 1 - (1 - smoother (a s / σ)) * (1 - smoother (b s / σ)))
+      ((1 - smoother (b s / σ)) * (30 * (a s / σ) ^ 2 * (1 - a s / σ) ^ 2 * (a' / σ)) +
+        (1 - smoother (a s / σ)) * (30 * (b s / σ) ^ 2 * (1 - b s / σ) ^ 2 * (b' / σ))) s := by
+  have hga := (smoother_hasDerivAt (a s / σ)).comp s (ha.div_const σ)
+  have hgb := (smoother_hasDerivAt (b s / σ)).comp s (hb.div_const σ)
+  have h := ((hga.const_sub 1).mul (hgb.const_sub 1)).const_sub 1
+  refine h.congr_deriv ?_
+  simp only [Function.comp]
+  ring
+
+/-- **The either gate is a weight that shuts only at a corner:** for `x, y ∈ [0, 1]`,
+`0 ≤ 1 − (1 − x)(1 − y) ≤ 1`, and it is `0` iff `x = y = 0`.
+
+[formula: rc-near-gate] -/
+theorem either_gate_bounds {x y : ℝ} (hx0 : 0 ≤ x) (hx1 : x ≤ 1) (hy0 : 0 ≤ y) (hy1 : y ≤ 1) :
+    0 ≤ 1 - (1 - x) * (1 - y) ∧ 1 - (1 - x) * (1 - y) ≤ 1 ∧
+      (1 - (1 - x) * (1 - y) = 0 ↔ x = 0 ∧ y = 0) := by
+  have h1 : 0 ≤ (1 - x) * (1 - y) := mul_nonneg (by linarith) (by linarith)
+  have h2 : (1 - x) * (1 - y) ≤ 1 := by nlinarith
+  refine ⟨by linarith, by linarith, ⟨fun h => ?_, fun ⟨hx, hy⟩ => by simp [hx, hy]⟩⟩
+  have hxy : x + y = x * y := by linarith
+  have hx : x = 0 := by nlinarith
+  exact ⟨hx, by subst hx; linarith⟩
+
 end RC
 
 end DdgProofs

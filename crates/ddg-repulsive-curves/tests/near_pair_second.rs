@@ -65,6 +65,11 @@ fn configs(d: f64) -> Vec<(&'static str, [P; 2], [P; 2])> {
             [[0.0, 0.1 + d, 0.0], [0.0, 0.1 + d, 1.0]],
         ),
         (
+            "end-on-interior",
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            [[1.0, 0.4, d], [1.0, -0.6, d]],
+        ),
+        (
             "hairpin",
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
             [[1.0, 0.05 + d, 0.0], [0.2, 0.35 + d, 0.0]],
@@ -96,6 +101,13 @@ fn rules() -> Vec<(&'static str, NearPairOptions)> {
             "one-sided-gated",
             NearPairOptions {
                 second_neighbour_rule: SecondNeighbourRule::OneSidedGated { width: 0.1 },
+                ..base
+            },
+        ),
+        (
+            "one-sided-either",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGatedEither { width: 0.1 },
                 ..base
             },
         ),
@@ -174,6 +186,10 @@ fn one_sided_rules_never_lower_the_pair_and_see_the_fold() {
                     assert!(c.value >= 0.0, "{cname} {d} {rname}: {}", c.value);
                 }
                 if cname == "zfold" && d <= 1e-3 && rname != "narrow" {
+                    assert!(c.value > 10.0, "{cname} {d} {rname}: {}", c.value);
+                }
+                if cname == "end-on-interior" && d <= 1e-3 && rname == "one-sided-either" {
+                    // One closest point at an end of K, the other inside J: the either gate is open.
                     assert!(c.value > 10.0, "{cname} {d} {rname}: {}", c.value);
                 }
                 if cname == "corner" && rname != "narrow" && rname != "one-sided" {

@@ -130,6 +130,16 @@ pub enum SecondNeighbourRule {
         /// `σ ∈ (0, 1]`, in segment parameters.
         width: f64,
     },
+    /// The one-sided term with the "either" gate `g = 1 − (1 − G_s)(1 − G_t)`
+    /// (`G_s = G(|s* − s_K|/σ)`, `G_t` likewise): shut only when **both** closest points are at
+    /// the ends of `K` (a corner), open as soon as one of them is at least `σ` away. The product
+    /// gate of [`SecondNeighbourRule::OneSidedGated`] lets a flow slide the contact onto an end
+    /// of `K` (one closest point at `K`, the other in the interior of its edge) and shut the
+    /// barrier (`SPEC.md` §17p). [formula: rc-near-gate]
+    OneSidedGatedEither {
+        /// `σ ∈ (0, 1]`, in segment parameters.
+        width: f64,
+    },
 }
 
 impl Default for NearPairOptions {
@@ -176,8 +186,9 @@ impl NearPairOptions {
                 requirement: "finite, 0 < c1 < c2 ≤ 4",
             });
         }
-        if let SecondNeighbourRule::Gated { width } | SecondNeighbourRule::OneSidedGated { width } =
-            self.second_neighbour_rule
+        if let SecondNeighbourRule::Gated { width }
+        | SecondNeighbourRule::OneSidedGated { width }
+        | SecondNeighbourRule::OneSidedGatedEither { width } = self.second_neighbour_rule
             && !(width > 0.0 && width <= 1.0)
         {
             return Err(RcError::InvalidOption {
@@ -995,7 +1006,10 @@ fn second_neighbour_term(
 ) -> PairCorrection {
     // The gate g = G(|s* − s_K|/σ) G(|t* − t_K|/σ) and its gradient.
     let (g, grad_g) = match rule {
-        SecondNeighbourRule::Gated { width } | SecondNeighbourRule::OneSidedGated { width } => {
+        SecondNeighbourRule::Gated { width }
+        | SecondNeighbourRule::OneSidedGated { width }
+        | SecondNeighbourRule::OneSidedGatedEither { width } => {
+            let either = matches!(rule, SecondNeighbourRule::OneSidedGatedEither { .. });
             let (sk, tk) = (a as f64, b as f64);
             let (xs, xt) = ((cl.s - sk).abs() / width, (cl.t - tk).abs() / width);
             let (gs, dgs) = gate_factor(xs);
@@ -1005,16 +1019,28 @@ fn second_neighbour_term(
                 // d|s − s_K|/ds = +1 for s_K = 0, −1 for s_K = 1.
                 let ss = if a == 0 { 1.0 } else { -1.0 } / width;
                 let st = if b == 0 { 1.0 } else { -1.0 } / width;
-                grad4_axpy(&mut gg, dgs * ss * gt, &cl.grad_s);
-                grad4_axpy(&mut gg, gs * dgt * st, &cl.grad_t);
+                // Product gate: ∇(G_s G_t); either gate: ∇(1 − (1 − G_s)(1 − G_t)).
+                let (fs, ft) = if either {
+                    (1.0 - gt, 1.0 - gs)
+                } else {
+                    (gt, gs)
+                };
+                grad4_axpy(&mut gg, dgs * ss * fs, &cl.grad_s);
+                grad4_axpy(&mut gg, ft * dgt * st, &cl.grad_t);
             }
-            (gs * gt, gg)
+            if either {
+                (1.0 - (1.0 - gs) * (1.0 - gt), gg)
+            } else {
+                (gs * gt, gg)
+            }
         }
         _ => (1.0, ZERO4),
     };
     let one_sided = matches!(
         rule,
-        SecondNeighbourRule::OneSided | SecondNeighbourRule::OneSidedGated { .. }
+        SecondNeighbourRule::OneSided
+            | SecondNeighbourRule::OneSidedGated { .. }
+            | SecondNeighbourRule::OneSidedGatedEither { .. }
     );
     // The un-weighted term c (w and g factored out) and its gradient.
     let (c, grad_c) = if one_sided {
