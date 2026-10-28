@@ -5,7 +5,18 @@
 //!            [--alpha A] [--beta B] [--hencky-w W] [--backend auto|exact|bh-mg]
 //!            [--no-audit] [--out RESULT.jsonl] [--final-obj FINAL.obj]
 //!            [--frames-every-seconds S --frames-out FRAMES.rcf] [--tag TEXT]
+//!            [--near-pair 0|1] [diagnostic options, WP16b; defaults = the evaluation's settings:
+//!             --trace TRACE.jsonl --stuck-projected-reference 0|1
+//!             --stuck-retry-chord 0|1 --start-obj CURVE.obj --newton-polish none|X --early-abort 0|1
+//!             --proj-tol X --proj-iters N --max-halvings N --np-second-neighbours 0|1
+//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W]
 //! ```
+//!
+//! Diagnostic options (WP16b, `SPEC.md` §17p): `--trace` appends one JSON line per step (step
+//! sizes, every trial with its outcome, and at a stuck step the closest pair and the shortest
+//! edge); `--start-obj` starts from another curve with the constraint targets (edge lengths,
+//! barycenter) of `--knot`; the others override the projection, line search and near-pair
+//! options (the `--np-*` options apply to the flow and to the reported `final_energy_near`).
 //!
 //! Methods (names as in the tables): hard constraints (barycenter + edge lengths), collision
 //! guarded line search: `hs-pg` (reference), `l2-pg`, `h1-pg`, `h2-pg`; `hs-armijo` (Hs projected
@@ -33,13 +44,17 @@ use std::path::Path;
 use std::time::Instant;
 
 use ddg_repulsive_curves::ccd::{CcdOptions, CcdReport, path_contact};
+use ddg_repulsive_curves::energy::near_pair::{
+    SecondNeighbourRule, closest_points, joined_by_edge,
+};
 use ddg_repulsive_curves::energy::{NearPairOptions, energy_with_near_pair};
 use ddg_repulsive_curves::optimize::{Hencky, Method};
 use ddg_repulsive_curves::solve::{ProjectionOptions, Tolerance};
+use ddg_repulsive_curves::step::line_search::closest_pair_within;
 use ddg_repulsive_curves::step::stop::{GradNorm, Status, StepStatus, StopRule};
 use ddg_repulsive_curves::{
-    Backend, CurveNetwork, EnergyEval, Exponents, FlowOptions, LineSearch, Metric, RcError,
-    Session, Solver, energy, read_curve_obj, write_curve_obj,
+    Backend, Constraint, CurveNetwork, EnergyEval, Exponents, FlowOptions, LineSearch, Metric,
+    RcError, Session, Solver, energy, read_curve_obj, write_curve_obj,
 };
 
 struct Args {
@@ -59,6 +74,30 @@ struct Args {
     frames_out: Option<String>,
     tag: String,
     near_pair: bool,
+    trace: Option<String>,
+    stuck_ref: bool,
+    stuck_chord: bool,
+    start_obj: Option<String>,
+    newton_polish: Option<Option<f64>>,
+    early_abort: Option<bool>,
+    proj_tol: Option<f64>,
+    proj_iters: Option<u32>,
+    max_halvings: Option<u32>,
+    np: NearPairOptions,
+}
+
+fn bit(s: &str) -> Result<bool, String> {
+    match s {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        o => Err(format!("expected 0 or 1, not {o}")),
+    }
+}
+
+fn pair(s: String) -> Result<(f64, f64), String> {
+    let (a, b) = s.split_once(',').ok_or(format!("{s}: expected C1,C2"))?;
+    let p = |x: &str| x.parse::<f64>().map_err(|e| format!("{x}: {e}"));
+    Ok((p(a)?, p(b)?))
 }
 
 fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -79,6 +118,16 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         frames_out: None,
         tag: String::new(),
         near_pair: true,
+        trace: None,
+        stuck_ref: false,
+        stuck_chord: false,
+        start_obj: None,
+        newton_polish: None,
+        early_abort: None,
+        proj_tol: None,
+        proj_iters: None,
+        max_halvings: None,
+        np: NearPairOptions::default(),
     };
     let mut it = args;
     while let Some(s) = it.next() {
@@ -116,6 +165,55 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     "1" => true,
                     o => return Err(format!("--near-pair takes 0 or 1, not {o}")),
                 }
+            }
+            "--trace" => a.trace = Some(value("--trace")?),
+            "--stuck-retry-chord" => a.stuck_chord = bit(&value("--stuck-retry-chord")?)?,
+            "--stuck-projected-reference" => {
+                a.stuck_ref = bit(&value("--stuck-projected-reference")?)?
+            }
+            "--start-obj" => a.start_obj = Some(value("--start-obj")?),
+            "--newton-polish" => {
+                let v = value("--newton-polish")?;
+                a.newton_polish = Some(if v == "none" { None } else { Some(num(v)?) });
+            }
+            "--early-abort" => a.early_abort = Some(bit(&value("--early-abort")?)?),
+            "--proj-tol" => a.proj_tol = Some(num(value("--proj-tol")?)?),
+            "--proj-iters" => {
+                a.proj_iters = Some(
+                    value("--proj-iters")?
+                        .parse()
+                        .map_err(|e| format!("--proj-iters: {e}"))?,
+                )
+            }
+            "--max-halvings" => {
+                a.max_halvings = Some(
+                    value("--max-halvings")?
+                        .parse()
+                        .map_err(|e| format!("--max-halvings: {e}"))?,
+                )
+            }
+            "--np-second-neighbours" => {
+                a.np.second_neighbours = bit(&value("--np-second-neighbours")?)?
+            }
+            "--np-band" => (a.np.blend_start, a.np.blend_end) = pair(value("--np-band")?)?,
+            "--np-sn-band" => a.np.second_neighbour_band = Some(pair(value("--np-sn-band")?)?),
+            "--np-sn-mode" => {
+                let v = value("--np-sn-mode")?;
+                let (name, width) = match v.split_once(':') {
+                    Some((n, w)) => (n.to_string(), Some(num(w.to_string())?)),
+                    None => (v.clone(), None),
+                };
+                a.np.second_neighbour_rule = match (name.as_str(), width) {
+                    ("two", None) => SecondNeighbourRule::TwoSided,
+                    ("one", None) => SecondNeighbourRule::OneSided,
+                    ("gated", Some(width)) => SecondNeighbourRule::Gated { width },
+                    ("onegated", Some(width)) => SecondNeighbourRule::OneSidedGated { width },
+                    _ => {
+                        return Err(format!(
+                            "--np-sn-mode: two | one | gated:W | onegated:W, not {v}"
+                        ));
+                    }
+                };
             }
             other => return Err(format!("unknown argument {other}")),
         }
@@ -245,6 +343,89 @@ impl Frames {
     }
 }
 
+/// One line of `--trace` (WP16b): the step, every trial, and at a step that did not move the
+/// closest disjoint pair and the shortest edge of the curve.
+fn trace_line(
+    r: &ddg_repulsive_curves::StepReport,
+    net: &CurveNetwork,
+    pos: &[[f64; 3]],
+    lbar0: f64,
+) -> String {
+    let opt = |x: Option<f64>| x.map_or("null".into(), jnum);
+    let trials: Vec<String> = r
+        .trials
+        .iter()
+        .map(|t| {
+            format!(
+                "[{},{},{},{},{}]",
+                jnum(t.tau),
+                opt(t.energy),
+                t.projection_iterations,
+                jnum(t.max_violation),
+                json_str(&format!("{:?}", t.outcome))
+            )
+        })
+        .collect();
+    let mut extra = String::new();
+    if r.status != StepStatus::Accepted {
+        let geom = net.edge_geometry(pos);
+        let (emin, lmin) = geom
+            .length
+            .iter()
+            .enumerate()
+            .fold(
+                (0, f64::INFINITY),
+                |b, (i, &l)| if l < b.1 { (i, l) } else { b },
+            );
+        let cp = closest_pair_within(net, pos, lbar0);
+        let cp_s = match cp {
+            Some((i, j, d)) => {
+                let e = net.edges();
+                let (p, q) = (e[i as usize], e[j as usize]);
+                let c = closest_points(
+                    pos[p[0] as usize],
+                    pos[p[1] as usize],
+                    pos[q[0] as usize],
+                    pos[q[1] as usize],
+                );
+                format!(
+                    "{{\"i\":{i},\"j\":{j},\"d\":{},\"s\":{},\"t\":{},\"second_neighbours\":{},\"li\":{},\"lj\":{}}}",
+                    jnum(d / lbar0),
+                    jnum(c.s),
+                    jnum(c.t),
+                    joined_by_edge(net, i as usize, j as usize),
+                    jnum(geom.length[i as usize] / lbar0),
+                    jnum(geom.length[j as usize] / lbar0)
+                )
+            }
+            None => "null".into(),
+        };
+        extra = format!(
+            ",\"shortest_edge\":[{emin},{}],\"closest_pair\":{cp_s}",
+            jnum(lmin / lbar0)
+        );
+    }
+    format!(
+        "{{\"it\":{},\"status\":{},\"f_before\":{},\"f_after\":{},\"slope\":{},\"gnorm\":{},\"tau\":{},\"tau_start\":{},\"tau_hi\":{},\"tau_max\":{},\"halvings\":{},\"contact_floor\":{},\"near_pairs\":{},\"max_violation\":{},\"proj_iters\":{},\"trials\":[{}]{extra}}}",
+        r.iteration,
+        json_str(&format!("{:?}", r.status)),
+        jnum(r.energy_before),
+        jnum(r.energy_after),
+        jnum(r.sobolev_norm_sq),
+        jnum(r.gradient_norm),
+        jnum(r.tau),
+        jnum(r.tau_start),
+        opt(r.tau_hi),
+        opt(r.tau_max),
+        r.halvings,
+        r.contact_floor,
+        r.near_pairs,
+        jnum(r.max_violation),
+        r.projection_iterations,
+        trials.join(",")
+    )
+}
+
 fn run(a: &Args) -> Result<(), String> {
     let spec = method_spec(&a.method).ok_or(format!("unknown method {}", a.method))?;
     let (net, pos0) = read_curve_obj(&a.knot).map_err(|e| format!("{}: {e}", a.knot))?;
@@ -273,8 +454,10 @@ fn run(a: &Args) -> Result<(), String> {
             LineSearch::default()
         },
         projection: ProjectionOptions {
-            tolerance: Tolerance::Absolute(1e-4),
-            ..ProjectionOptions::default()
+            tolerance: Tolerance::Absolute(a.proj_tol.unwrap_or(1e-4)),
+            max_iterations: a
+                .proj_iters
+                .unwrap_or(ProjectionOptions::default().max_iterations),
         },
         // The evaluation stops on the energy rate dE.g < 1e-4 (SPEC 18 Q9), tested below; the
         // library's own gradient-norm rule is switched off.
@@ -282,11 +465,55 @@ fn run(a: &Args) -> Result<(), String> {
             norm: GradNorm::Euclidean,
             eps: 1e-14,
         },
-        near_pair: a.near_pair.then(NearPairOptions::default),
+        near_pair: a.near_pair.then_some(a.np),
         max_iterations: a.max_iters,
         record_path: a.audit,
         threads: Some(a.threads),
         ..FlowOptions::default()
+    };
+    if let Some(p) = a.newton_polish {
+        opts.newton_polish = p;
+    }
+    opts.stuck_projected_reference = a.stuck_ref;
+    opts.stuck_retry_chord = a.stuck_chord;
+    if let Some(e) = a.early_abort {
+        opts.projection_early_abort = e;
+    }
+    if let Some(m) = a.max_halvings {
+        match &mut opts.line_search {
+            LineSearch::CollisionGuarded { max_halvings, .. }
+            | LineSearch::NormalizedArmijo { max_halvings, .. } => *max_halvings = m,
+        }
+    }
+    // Start from another curve (`--start-obj`) with the targets of the knot.
+    let start_pos = match &a.start_obj {
+        Some(path) => {
+            let (net1, p1) = read_curve_obj(path).map_err(|e| format!("{path}: {e}"))?;
+            if net1.edges() != net.edges() {
+                return Err(format!("{path}: not the network of {}", a.knot));
+            }
+            let geom = net.edge_geometry(&pos0);
+            let (mut s, mut l) = ([0.0f64; 3], 0.0f64);
+            for (m, &len) in geom.midpoint.iter().zip(&geom.length) {
+                for c in 0..3 {
+                    s[c] += len * m[c];
+                }
+                l += len;
+            }
+            if !spec.soft {
+                opts.constraints = vec![
+                    Constraint::Barycenter {
+                        target: Some(s.map(|x| x / l)),
+                    },
+                    Constraint::EdgeLengths {
+                        edges: None,
+                        targets: Some(geom.length.clone()),
+                    },
+                ];
+            }
+            p1
+        }
+        None => pos0.clone(),
     };
     let hencky = if spec.soft {
         let h = Hencky::at_rest(a.hencky_w, &net, &pos0).map_err(|e| e.to_string())?;
@@ -307,7 +534,7 @@ fn run(a: &Args) -> Result<(), String> {
     let exact_energy = |net: &CurveNetwork, p: &[[f64; 3]]| -> Result<f64, RcError> {
         Ok(energy(net, p, exps, &EnergyEval::Exact, Some(a.threads))?.energy)
     };
-    let near_opts = NearPairOptions::default();
+    let near_opts = a.np;
     let near_energy = |net: &CurveNetwork, p: &[[f64; 3]]| -> Result<f64, RcError> {
         Ok(energy_with_near_pair(
             net,
@@ -334,7 +561,13 @@ fn run(a: &Args) -> Result<(), String> {
         (Some(p), Some(s)) => Some(Frames::create(p, s, &net, n).map_err(|e| format!("{p}: {e}"))?),
         _ => None,
     };
-    let mut session = Session::new(net.clone(), pos0.clone(), opts).map_err(|e| e.to_string())?;
+    let mut session = Session::new(net.clone(), start_pos, opts).map_err(|e| e.to_string())?;
+    let mut trace = match &a.trace {
+        Some(p) => Some(std::io::BufWriter::new(
+            std::fs::File::create(p).map_err(|e| format!("{p}: {e}"))?,
+        )),
+        None => None,
+    };
     let f0 = session.energy();
 
     let (mut history, mut audit_s) = (Vec::<[f64; 8]>::new(), 0.0f64);
@@ -419,6 +652,18 @@ fn run(a: &Args) -> Result<(), String> {
                 Err(_) => audit_errors += 1,
             }
             audited += 1;
+            audit_s += ta.elapsed().as_secs_f64();
+        }
+        if let Some(w) = trace.as_mut() {
+            let ta = Instant::now();
+            let line = trace_line(
+                &r,
+                session.network(),
+                session.positions(),
+                session.mean_edge_length0(),
+            );
+            writeln!(w, "{line}").map_err(|e| e.to_string())?;
+            w.flush().map_err(|e| e.to_string())?;
             audit_s += ta.elapsed().as_secs_f64();
         }
         if let Some(f) = frames.as_mut() {

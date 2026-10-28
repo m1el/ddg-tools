@@ -95,6 +95,41 @@ pub struct NearPairOptions {
     /// flows and the authors' scenes rely on), and correcting them changes the energy of every
     /// sharp corner of a curve (`SPEC.md` §17o).
     pub second_neighbours: bool,
+    /// How second neighbours are corrected when [`NearPairOptions::second_neighbours`] is set
+    /// (WP16b, `SPEC.md` §17p). Default [`SecondNeighbourRule::TwoSided`] (the blend of every
+    /// other pair, WP16's variant). Ignored when second neighbours are excluded.
+    pub second_neighbour_rule: SecondNeighbourRule,
+    /// The band `(c₁, c₂)` in `r = d/ℓ_IJ` for second neighbours; `None` (the default): the
+    /// band of every other pair. Ignored when second neighbours are excluded.
+    pub second_neighbour_band: Option<(f64, f64)>,
+}
+
+/// The correction of a pair `I, K, J` joined by one edge `K` (WP16b, `SPEC.md` §17p). Every rule
+/// keeps the blend weight `w(r)` of §3.4 (with [`NearPairOptions::second_neighbour_band`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SecondNeighbourRule {
+    /// `w (E^n − E^p)`, as for every other pair (§3.4). Lowers the energy at corners, where Eq. 18
+    /// overestimates.
+    TwoSided,
+    /// Never below Eq. 18: `w E^p ψ(E^n/E^p − 1)` with `E^{n,p}` the sums over the two orders and
+    /// `ψ(z) = 0` for `z ≤ 0`, `6z³ − 8z⁴ + 3z⁵` on `[0, 1]`, `z` beyond (C², nondecreasing,
+    /// `0 ≤ ψ(z) ≤ max(z, 0)`). So `E^p ≤ e ≤ max(E^p, E^n)`, and the pair is the paper's wherever
+    /// the accurate integral is not larger. [formula: rc-near-onesided]
+    OneSided,
+    /// `w g (E^n − E^p)` with the gate `g = G(|s* − s_K|/σ) G(|t* − t_K|/σ)`, `s_K`, `t_K` the
+    /// parameters of the ends of `I`, `J` at `K`, `G(x) = W(min(x, 1))` the quintic of the blend:
+    /// zero when a closest point is at `K` (a corner), one when both are at least `σ` away from it
+    /// (a fold). [formula: rc-near-gate]
+    Gated {
+        /// `σ ∈ (0, 1]`, in segment parameters.
+        width: f64,
+    },
+    /// The gate of [`SecondNeighbourRule::Gated`] on the one-sided term:
+    /// `w g E^p ψ(E^n/E^p − 1)`.
+    OneSidedGated {
+        /// `σ ∈ (0, 1]`, in segment parameters.
+        width: f64,
+    },
 }
 
 impl Default for NearPairOptions {
@@ -105,6 +140,8 @@ impl Default for NearPairOptions {
             blend_end: 0.75,
             subpanels: 4,
             second_neighbours: false,
+            second_neighbour_rule: SecondNeighbourRule::TwoSided,
+            second_neighbour_band: None,
         }
     }
 }
@@ -128,6 +165,25 @@ impl NearPairOptions {
                 name: "near_pair.blend_end",
                 value: c2.to_string(),
                 requirement: "finite, > blend_start and ≤ 4",
+            });
+        }
+        if let Some((c1, c2)) = self.second_neighbour_band
+            && !(c1.is_finite() && c1 > 0.0 && c1 < c2 && c2.is_finite() && c2 <= 4.0)
+        {
+            return Err(RcError::InvalidOption {
+                name: "near_pair.second_neighbour_band",
+                value: format!("({c1}, {c2})"),
+                requirement: "finite, 0 < c1 < c2 ≤ 4",
+            });
+        }
+        if let SecondNeighbourRule::Gated { width } | SecondNeighbourRule::OneSidedGated { width } =
+            self.second_neighbour_rule
+            && !(width > 0.0 && width <= 1.0)
+        {
+            return Err(RcError::InvalidOption {
+                name: "near_pair.second_neighbour_rule.width",
+                value: width.to_string(),
+                requirement: "in (0, 1]",
             });
         }
         if !(1..=64).contains(&self.subpanels) {
@@ -159,6 +215,42 @@ pub fn blend_weight(r: f64, c1: f64, c2: f64) -> (f64, f64) {
         let w = tau * tau * tau * (10.0 - 15.0 * tau + 6.0 * tau * tau);
         let dw = -30.0 * tau * tau * (1.0 - tau) * (1.0 - tau) / (c2 - c1);
         (w, dw)
+    }
+}
+
+/// The smooth positive part of [`SecondNeighbourRule::OneSided`] and its derivative:
+/// `ψ(z) = 0` (`z ≤ 0`), `6z³ − 8z⁴ + 3z⁵` (`0 < z < 1`), `z` (`z ≥ 1`). `ψ` and `ψ'` are
+/// continuous, `ψ'' ` too (`ψ''(0) = ψ''(1) = 0`); `ψ' = z²(18 − 32z + 15z²) > 0` inside.
+///
+/// [formula: rc-near-onesided]
+pub fn smooth_positive_part(z: f64) -> (f64, f64) {
+    if z <= 0.0 {
+        (0.0, 0.0)
+    } else if z >= 1.0 {
+        (z, 1.0)
+    } else {
+        let z2 = z * z;
+        (
+            z2 * z * (6.0 - 8.0 * z + 3.0 * z2),
+            z2 * (18.0 - 32.0 * z + 15.0 * z2),
+        )
+    }
+}
+
+/// The gate factor `G(x) = W(min(x, 1))` of [`SecondNeighbourRule::Gated`] (`W` the quintic of
+/// [`blend_weight`]) and `dG/dx`, for `x ≥ 0`.
+///
+/// [formula: rc-near-gate]
+pub fn gate_factor(x: f64) -> (f64, f64) {
+    if x <= 0.0 {
+        (0.0, 0.0)
+    } else if x >= 1.0 {
+        (1.0, 0.0)
+    } else {
+        (
+            x * x * x * (10.0 - 15.0 * x + 6.0 * x * x),
+            30.0 * x * x * (1.0 - x) * (1.0 - x),
+        )
     }
 }
 
@@ -718,13 +810,54 @@ pub fn pair_correction(
     include_ji: bool,
     with_gradient: bool,
 ) -> PairCorrection {
+    pair_correction_of_kind(
+        tables,
+        exponents,
+        options,
+        p,
+        q,
+        None,
+        include_ij,
+        include_ji,
+        with_gradient,
+    )
+}
+
+/// [`pair_correction`] for a pair of the given kind: `joined = Some((a, b))` for second
+/// neighbours, whose joining edge `K` meets `I` at its end `a ∈ {0, 1}` (`p_a`) and `J` at its
+/// end `b` (`q_b`); the pair then follows [`NearPairOptions::second_neighbour_rule`] and
+/// [`NearPairOptions::second_neighbour_band`] (`SPEC.md` §17p). `None`: every other pair (§3.4).
+///
+/// [formula: rc-near-differential]
+#[allow(clippy::too_many_arguments)]
+pub fn pair_correction_of_kind(
+    tables: &InnerTables,
+    exponents: Exponents,
+    options: &NearPairOptions,
+    p: [P; 2],
+    q: [P; 2],
+    joined: Option<(usize, usize)>,
+    include_ij: bool,
+    include_ji: bool,
+    with_gradient: bool,
+) -> PairCorrection {
     let cl = closest_points(p[0], p[1], q[0], q[1]);
     let ev = sub(p[1], p[0]);
     let fv = sub(q[1], q[0]);
     let (li, lj) = (norm(ev), norm(fv));
     let lm = (0.5 * (li * li + lj * lj)).sqrt();
     let ratio = cl.d / lm;
-    let (w, dw) = blend_weight(ratio, options.blend_start, options.blend_end);
+    let rule = match joined {
+        Some(_) => options.second_neighbour_rule,
+        None => SecondNeighbourRule::TwoSided,
+    };
+    let (c1, c2) = match joined {
+        Some(_) => options
+            .second_neighbour_band
+            .unwrap_or((options.blend_start, options.blend_end)),
+        None => (options.blend_start, options.blend_end),
+    };
+    let (w, dw) = blend_weight(ratio, c1, c2);
     if w == 0.0 || !(include_ij || include_ji) {
         return PairCorrection {
             value: 0.0,
@@ -735,6 +868,9 @@ pub fn pair_correction(
     }
     let mut diff = 0.0;
     let mut gdiff = ZERO4;
+    // The sums E^n, E^p over the orders and their gradients (the one-sided rules only).
+    let (mut en_sum, mut ep_sum) = (0.0f64, 0.0f64);
+    let (mut gen_sum, mut gep_sum) = (ZERO4, ZERO4);
     if include_ij {
         let (en, gn) = ordered_near_energy(
             tables,
@@ -750,8 +886,15 @@ pub fn pair_correction(
             diff += en - ep;
             grad4_axpy(&mut gdiff, 1.0, &gn);
             grad4_axpy(&mut gdiff, -1.0, &gp);
+            en_sum += en;
+            ep_sum += ep;
+            grad4_axpy(&mut gen_sum, 1.0, &gn);
+            grad4_axpy(&mut gep_sum, 1.0, &gp);
         } else {
-            diff += en - paper_pair_value(p, q, exponents);
+            let ep = paper_pair_value(p, q, exponents);
+            diff += en - ep;
+            en_sum += en;
+            ep_sum += ep;
         }
     }
     if include_ji {
@@ -772,9 +915,30 @@ pub fn pair_correction(
             diff += en - ep;
             grad4_axpy(&mut gdiff, 1.0, &sw(&gn));
             grad4_axpy(&mut gdiff, -1.0, &sw(&gp));
+            en_sum += en;
+            ep_sum += ep;
+            grad4_axpy(&mut gen_sum, 1.0, &sw(&gn));
+            grad4_axpy(&mut gep_sum, 1.0, &sw(&gp));
         } else {
-            diff += en - paper_pair_value(q, p, exponents);
+            let ep = paper_pair_value(q, p, exponents);
+            diff += en - ep;
+            en_sum += en;
+            ep_sum += ep;
         }
+    }
+    if rule != SecondNeighbourRule::TwoSided {
+        return second_neighbour_term(
+            rule,
+            joined.unwrap_or((1, 0)),
+            &cl,
+            (w, dw),
+            ratio,
+            (lm, li, lj, ev, fv),
+            (diff, &gdiff),
+            (en_sum, &gen_sum),
+            (ep_sum, &gep_sum),
+            with_gradient,
+        );
     }
     let mut grad = ZERO4;
     if with_gradient {
@@ -799,6 +963,111 @@ pub fn pair_correction(
         weight: w,
         ratio,
     }
+}
+
+/// `∇r` of `r = d/ℓ_IJ` (`SPEC.md` §3.4).
+fn ratio_gradient(cl: &Closest, ratio: f64, lm: f64, li: f64, lj: f64, ev: P, fv: P) -> Grad4 {
+    let mut gr = ZERO4;
+    grad4_axpy(&mut gr, 1.0 / lm, &cl.grad_d);
+    let ci = -ratio / lm * li / (2.0 * lm);
+    let cj = -ratio / lm * lj / (2.0 * lm);
+    let (ti, tj) = (scale(ev, 1.0 / li), scale(fv, 1.0 / lj));
+    gr[0] = axpy(gr[0], -ci, ti);
+    gr[1] = axpy(gr[1], ci, ti);
+    gr[2] = axpy(gr[2], -cj, tj);
+    gr[3] = axpy(gr[3], cj, tj);
+    gr
+}
+
+/// The second-neighbour rules other than [`SecondNeighbourRule::TwoSided`] (`SPEC.md` §17p).
+#[allow(clippy::too_many_arguments)]
+fn second_neighbour_term(
+    rule: SecondNeighbourRule,
+    (a, b): (usize, usize),
+    cl: &Closest,
+    (w, dw): (f64, f64),
+    ratio: f64,
+    (lm, li, lj, ev, fv): (f64, f64, f64, P, P),
+    (diff, gdiff): (f64, &Grad4),
+    (en, gen_): (f64, &Grad4),
+    (ep, gep): (f64, &Grad4),
+    with_gradient: bool,
+) -> PairCorrection {
+    // The gate g = G(|s* − s_K|/σ) G(|t* − t_K|/σ) and its gradient.
+    let (g, grad_g) = match rule {
+        SecondNeighbourRule::Gated { width } | SecondNeighbourRule::OneSidedGated { width } => {
+            let (sk, tk) = (a as f64, b as f64);
+            let (xs, xt) = ((cl.s - sk).abs() / width, (cl.t - tk).abs() / width);
+            let (gs, dgs) = gate_factor(xs);
+            let (gt, dgt) = gate_factor(xt);
+            let mut gg = ZERO4;
+            if with_gradient {
+                // d|s − s_K|/ds = +1 for s_K = 0, −1 for s_K = 1.
+                let ss = if a == 0 { 1.0 } else { -1.0 } / width;
+                let st = if b == 0 { 1.0 } else { -1.0 } / width;
+                grad4_axpy(&mut gg, dgs * ss * gt, &cl.grad_s);
+                grad4_axpy(&mut gg, gs * dgt * st, &cl.grad_t);
+            }
+            (gs * gt, gg)
+        }
+        _ => (1.0, ZERO4),
+    };
+    let one_sided = matches!(
+        rule,
+        SecondNeighbourRule::OneSided | SecondNeighbourRule::OneSidedGated { .. }
+    );
+    // The un-weighted term c (w and g factored out) and its gradient.
+    let (c, grad_c) = if one_sided {
+        if !(ep > 0.0) {
+            (0.0, ZERO4)
+        } else {
+            let rho = en / ep;
+            let (psi, dpsi) = smooth_positive_part(rho - 1.0);
+            let mut gc = ZERO4;
+            if with_gradient && psi != 0.0 {
+                // ∇(E^p ψ(E^n/E^p − 1)) = ψ ∇E^p + ψ' (∇E^n − ρ ∇E^p).
+                grad4_axpy(&mut gc, psi - dpsi * rho, gep);
+                grad4_axpy(&mut gc, dpsi, gen_);
+            }
+            (ep * psi, gc)
+        }
+    } else {
+        (diff, *gdiff)
+    };
+    let mut grad = ZERO4;
+    if with_gradient && c != 0.0 {
+        grad4_axpy(&mut grad, w * g, &grad_c);
+        grad4_axpy(&mut grad, w * c, &grad_g);
+        if dw != 0.0 {
+            let gr = ratio_gradient(cl, ratio, lm, li, lj, ev, fv);
+            grad4_axpy(&mut grad, g * c * dw, &gr);
+        }
+    } else if with_gradient && !one_sided {
+        // c = 0 with a nonzero gradient is possible for the gated two-sided rule.
+        grad4_axpy(&mut grad, w * g, &grad_c);
+    }
+    PairCorrection {
+        value: w * g * c,
+        grad,
+        weight: w,
+        ratio,
+    }
+}
+
+/// The ends `(a, b)` of edges `i`, `j` joined by one edge `K` (`p_a` of `i` and `q_b` of `j` are
+/// the two ends of `K`), the first such edge in the incidence lists; `None` if none.
+pub fn joining_ends(network: &CurveNetwork, i: usize, j: usize) -> Option<(usize, usize)> {
+    let e = network.edges();
+    for (a, &va) in e[i].iter().enumerate() {
+        for &k in network.incident_edges(va) {
+            let [x, y] = e[k as usize];
+            let other = if x == va { y } else { x };
+            if let Some(b) = e[j].iter().position(|&v| v == other) {
+                return Some((a, b));
+            }
+        }
+    }
+    None
 }
 
 // =============================================================================================
@@ -838,7 +1107,12 @@ pub fn near_pairs(
         .collect();
     let lens: Vec<f64> = ends.iter().map(|e| norm(sub(e[1], e[0]))).collect();
     let lmax = lens.iter().copied().fold(0.0f64, f64::max);
-    let tol = options.blend_end * lmax;
+    // The second neighbours' band may reach further (`SPEC.md` §17p).
+    let c2_second = match (options.second_neighbours, options.second_neighbour_band) {
+        (true, Some((_, c2))) => c2,
+        _ => options.blend_end,
+    };
+    let tol = options.blend_end.max(c2_second) * lmax;
     let h = lmax + 2.0 * tol;
     if !(h > 0.0 && h.is_finite()) {
         return Vec::new();
@@ -882,7 +1156,13 @@ pub fn near_pairs(
     cand.retain(|&(i, j)| {
         let (pi, pj) = (&ends[i as usize], &ends[j as usize]);
         let lm = (0.5 * (lens[i as usize].powi(2) + lens[j as usize].powi(2))).sqrt();
-        closest_points(pi[0], pi[1], pj[0], pj[1]).d < options.blend_end * lm
+        let c2 =
+            if c2_second != options.blend_end && joined_by_edge(network, i as usize, j as usize) {
+                c2_second
+            } else {
+                options.blend_end
+            };
+        closest_points(pi[0], pi[1], pj[0], pj[1]).d < c2 * lm
     });
     cand
 }
@@ -942,12 +1222,18 @@ pub fn correction(
                 let [c, d] = edges[j as usize];
                 let p = [positions[a as usize], positions[b as usize]];
                 let q = [positions[c as usize], positions[d as usize]];
-                pair_correction(
+                let joined = if options.second_neighbours {
+                    joining_ends(network, i as usize, j as usize)
+                } else {
+                    None
+                };
+                pair_correction_of_kind(
                     &tables,
                     exponents,
                     options,
                     p,
                     q,
+                    joined,
                     include(i as usize, j as usize),
                     include(j as usize, i as usize),
                     with_gradient,

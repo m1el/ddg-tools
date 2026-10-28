@@ -642,6 +642,70 @@ pub fn line_search(
     }
 }
 
+/// The retry of a stuck search with the projected base as the Armijo reference (WP16b,
+/// `SPEC.md` §17p; [`FlowOptions::stuck_projected_reference`](super::FlowOptions::stuck_projected_reference)).
+///
+/// With back-projection every trial is projected with at least one step, so as `τ → 0` the
+/// trials tend to `P(γ)`, the projection of the base, not to `γ`: the base satisfies the
+/// constraints only within the tolerance, and `F(P(γ)) − F(γ) ≈ −λ·Φ(γ)` (the multipliers of
+/// Eq. 22 times the residual violation). When that exceeds the decrease the Armijo test can
+/// find, no trial passes and the search is stuck although `γ` is far from a minimum. This
+/// projects the base (`τ = 0`), and if that succeeds and `F(P(γ)) > F(γ)`, runs the same search
+/// again with `F(P(γ))` as the reference: `F(γ̂_τ) ≤ F(P(γ)) − c τ dF·p`. An accepted step can
+/// raise `F` by at most `F(P(γ)) − F(γ)`. Returns `None` when the projection fails or does not
+/// raise the objective (then the first search's verdict stands), else the second search with
+/// the first one's trials, counters and times prepended.
+///
+/// # Errors
+/// As [`line_search`].
+pub fn retry_with_projected_reference(
+    ls: &LineSearch,
+    input: SearchInput<'_>,
+    env: &mut dyn SearchEnv,
+    first: &LineSearchReport,
+) -> Result<Option<LineSearchReport>, RcError> {
+    let t = Instant::now();
+    let (proj, _) = env.project(input.base.to_vec())?;
+    let t_proj = t.elapsed().as_secs_f64();
+    if proj.status != ProjectionStatus::Converged {
+        return Ok(None);
+    }
+    let t = Instant::now();
+    let f_ref = env.objective(&proj.positions)?;
+    let t_energy = t.elapsed().as_secs_f64();
+    if !(f_ref.is_finite() && f_ref > input.f0) {
+        return Ok(None);
+    }
+    let mut second = line_search(ls, SearchInput { f0: f_ref, ..input }, env)?;
+    second.projection_linear.splice(0..0, proj.linear);
+    second.seconds.energy += t_energy;
+    second.seconds.projection += t_proj;
+    second.seconds.total += t_proj + t_energy;
+    if !second.accepted {
+        second.energy = input.f0;
+    }
+    Ok(Some(merge_after(first, second)))
+}
+
+/// `second`, a repeated search of the same step, with the trials, counters and times of
+/// `first` prepended (the retries of WP16b, `SPEC.md` §17p).
+pub fn merge_after(first: &LineSearchReport, mut second: LineSearchReport) -> LineSearchReport {
+    let mut trials = first.trials.clone();
+    trials.append(&mut second.trials);
+    second.trials = trials;
+    second.halvings += first.halvings;
+    let mut linear = first.projection_linear.clone();
+    linear.append(&mut second.projection_linear);
+    second.projection_linear = linear;
+    second.ccd.accumulate(&first.ccd);
+    second.ccd_checks += first.ccd_checks;
+    second.seconds.energy += first.seconds.energy;
+    second.seconds.projection += first.seconds.projection;
+    second.seconds.ccd += first.seconds.ccd;
+    second.seconds.total += first.seconds.total;
+    second
+}
+
 /// The chord projection of §6.2 with its path: the same iteration and the same success and
 /// failure rules as [`crate::solve::project_constraints`], and in addition the list of iterates
 /// (`trial` first), so that the guarded search can check every chord step with the CCD.

@@ -773,6 +773,20 @@ pub struct FlowOptions {
     /// Knot128 knots (`SPEC.md` §17l) the same iterations to 1.1 E* in 0.76× the time, no stuck
     /// step, no isotopy violation. `false`: every chord projection runs to its limit (the paper).
     pub projection_early_abort: bool,
+    /// When a collision-guarded search with back-projection is stuck (not on the contact floor),
+    /// project the base curve and, if that raises the objective, search again with the projected
+    /// base's objective as the Armijo reference (WP16b, `SPEC.md` §17p;
+    /// [`line_search::retry_with_projected_reference`]). **Not in the paper.** Default `false`;
+    /// steps that are not stuck are unchanged either way.
+    pub stuck_projected_reference: bool,
+    /// When a search with back-projection and the Newton polish is stuck (not on the contact
+    /// floor), repeat it with the chord projection of §6.2 (no polish) for this step (WP16b,
+    /// `SPEC.md` §17p). The polish corrects in the lumped-mass metric, which favours the light
+    /// vertices between short edges; its correction of the base's residual violation can raise
+    /// the objective by more than any trial can gain (the chord step, in the metric `Ā`, is
+    /// orthogonal to the direction to first order). **Not in the paper.** Default `false`; steps
+    /// that are not stuck are unchanged either way.
+    pub stuck_retry_chord: bool,
 }
 
 impl fmt::Debug for FlowOptions {
@@ -806,6 +820,8 @@ impl fmt::Debug for FlowOptions {
             .field("newton_polish", &self.newton_polish)
             .field("near_pair", &self.near_pair)
             .field("projection_early_abort", &self.projection_early_abort)
+            .field("stuck_projected_reference", &self.stuck_projected_reference)
+            .field("stuck_retry_chord", &self.stuck_retry_chord)
             .finish()
     }
 }
@@ -839,6 +855,8 @@ impl Default for FlowOptions {
             newton_polish: Some(DEFAULT_NEWTON_POLISH),
             near_pair: Some(NearPairOptions::default()),
             projection_early_abort: true,
+            stuck_projected_reference: false,
+            stuck_retry_chord: false,
         }
     }
 }
@@ -1796,18 +1814,39 @@ impl Session {
                 polish: self.options.newton_polish,
                 early_abort: self.options.projection_early_abort,
             };
-            let ls: LineSearchReport = line_search(
-                &self.options.line_search,
-                SearchInput {
-                    base: &self.positions,
-                    direction: &direction,
-                    slope,
-                    f0,
-                    previous_tau: self.previous_tau,
-                    max_start,
-                },
-                &mut env,
-            )?;
+            let input = SearchInput {
+                base: &self.positions,
+                direction: &direction,
+                slope,
+                f0,
+                previous_tau: self.previous_tau,
+                max_start,
+            };
+            let mut ls: LineSearchReport = line_search(&self.options.line_search, input, &mut env)?;
+            if !ls.accepted
+                && !ls.contact_floor
+                && project
+                && self.options.stuck_retry_chord
+                && env.polish.is_some()
+            {
+                env.polish = None;
+                let retry = line_search(&self.options.line_search, input, &mut env)?;
+                ls = line_search::merge_after(&ls, retry);
+            }
+            if !ls.accepted
+                && !ls.contact_floor
+                && project
+                && self.options.stuck_projected_reference
+                && self.options.line_search.is_guarded()
+                && let Some(retry) = line_search::retry_with_projected_reference(
+                    &self.options.line_search,
+                    input,
+                    &mut env,
+                    &ls,
+                )?
+            {
+                ls = retry;
+            }
             report.seconds.line_search = t.elapsed().as_secs_f64();
             report.seconds.line_search_energy = ls.seconds.energy;
             report.seconds.projection = ls.seconds.projection;

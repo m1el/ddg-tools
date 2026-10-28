@@ -257,6 +257,7 @@ fn parse_input(name: &str, lines: &[Line]) -> Input {
                     blend_end: float(&l[2]),
                     subpanels: int(&l[3]),
                     second_neighbours: false,
+                    ..NearPairOptions::default()
                 }
             }
             "p" => input.positions.push(p3(l, 1)),
