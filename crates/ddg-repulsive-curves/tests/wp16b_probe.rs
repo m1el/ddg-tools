@@ -353,3 +353,171 @@ fn projection_probe() {
         }
     }
 }
+
+/// For every OBJ listed in the file `RC_LIST` (one path per line): the second-neighbour part of
+/// the near-pair correction under each rule (the correction with second neighbours minus the
+/// default's), and whether it is exactly zero (then a flow from that curve starts bitwise as with
+/// the default). One `CENSUS` line per curve and rule.
+#[test]
+#[ignore]
+fn sn_census() {
+    use ddg_repulsive_curves::energy::near_pair::{
+        NearPairOptions, SecondNeighbourRule, correction,
+    };
+    let Some(list) = env("RC_LIST") else {
+        eprintln!("RC_LIST not set; skipped");
+        return;
+    };
+    let e = Exponents::new(2.0, 4.5).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    let base = NearPairOptions::default();
+    let sn = NearPairOptions {
+        second_neighbours: true,
+        ..base
+    };
+    let rules = [
+        ("sn-two", sn),
+        (
+            "sn-narrow",
+            NearPairOptions {
+                second_neighbour_band: Some((0.1, 0.25)),
+                ..sn
+            },
+        ),
+        (
+            "sn-one",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSided,
+                ..sn
+            },
+        ),
+        (
+            "sn-gated",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::Gated { width: 0.1 },
+                ..sn
+            },
+        ),
+        (
+            "sn-onegated",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSidedGated { width: 0.1 },
+                ..sn
+            },
+        ),
+    ];
+    for path in std::fs::read_to_string(&list).unwrap().lines() {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let Ok((net, pos)) = read_curve_obj(path) else {
+            println!("CENSUS {path} unreadable");
+            continue;
+        };
+        let all = |_: usize, _: usize| true;
+        let c0 = correction(&pool, &net, &pos, e, &base, &all, false);
+        let (e0, p0) = c0.map_or((0.0, 0), |c| (c.energy, c.stats.pairs));
+        for (name, o) in &rules {
+            let c = correction(&pool, &net, &pos, e, o, &all, false);
+            let (e1, p1) = c.map_or((0.0, 0), |c| (c.energy, c.stats.pairs));
+            println!(
+                "CENSUS {path} {name} pairs {} delta_pairs {} delta_energy {:.6e} zero {}",
+                p1,
+                p1 as i64 - p0 as i64,
+                e1 - e0,
+                (e1 - e0) == 0.0
+            );
+        }
+    }
+}
+
+/// Seconds of one near-pair pass with the differential (one thread, median of `RC_REPS`, default
+/// 15) per rule on each curve listed in `RC_LIST`, next to the exact energy and differential;
+/// run alone.
+#[test]
+#[ignore]
+fn sn_cost() {
+    use ddg_repulsive_curves::energy::exact::{energy_and_differential, make_pool};
+    use ddg_repulsive_curves::energy::near_pair::{
+        NearPairOptions, SecondNeighbourRule, correction,
+    };
+    use std::time::Instant;
+    let Some(list) = env("RC_LIST") else {
+        eprintln!("RC_LIST not set; skipped");
+        return;
+    };
+    let reps: usize = env("RC_REPS").and_then(|s| s.parse().ok()).unwrap_or(15);
+    let e = Exponents::new(2.0, 4.5).unwrap();
+    let pool = make_pool(Some(1)).unwrap();
+    let base = NearPairOptions::default();
+    let sn = NearPairOptions {
+        second_neighbours: true,
+        ..base
+    };
+    let rules = [
+        ("default", base),
+        ("sn-two", sn),
+        (
+            "sn-narrow",
+            NearPairOptions {
+                second_neighbour_band: Some((0.1, 0.25)),
+                ..sn
+            },
+        ),
+        (
+            "sn-one",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::OneSided,
+                ..sn
+            },
+        ),
+        (
+            "sn-gated",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::Gated { width: 0.1 },
+                ..sn
+            },
+        ),
+    ];
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    for path in std::fs::read_to_string(&list).unwrap().lines() {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let (net, pos) = read_curve_obj(path).unwrap();
+        let te = median(
+            (0..3)
+                .map(|_| {
+                    let t = Instant::now();
+                    let _ = energy_and_differential(&pool, &net, &pos, e);
+                    t.elapsed().as_secs_f64()
+                })
+                .collect(),
+        );
+        let mut line = format!("COST {path} n {} exact {te:.4e}", pos.len());
+        for (name, o) in &rules {
+            let all = |_: usize, _: usize| true;
+            let mut pairs = 0;
+            let t = median(
+                (0..reps)
+                    .map(|_| {
+                        let t = Instant::now();
+                        let c = correction(&pool, &net, &pos, e, o, &all, true);
+                        pairs = c.map_or(0, |c| c.stats.pairs);
+                        t.elapsed().as_secs_f64()
+                    })
+                    .collect(),
+            );
+            line.push_str(&format!(" {name} {t:.4e} ({pairs})"));
+        }
+        println!("{line}");
+    }
+}

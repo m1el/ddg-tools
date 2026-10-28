@@ -12,6 +12,7 @@ import DdgProofs.RepulsiveCurves.Hierarchy
 import DdgProofs.RepulsiveCurves.Multigrid
 import DdgProofs.RepulsiveCurves.BarnesHutAdjoint
 import DdgProofs.RepulsiveCurves.NearPair
+import DdgProofs.RepulsiveCurves.NearPairSecond
 
 /-!
 # Repulsive Curves (Yu, Schumacher, Crane, ACM TOG 40(2), 2021)
