@@ -172,6 +172,17 @@ stopped them. With `FlowOptions::near_pair = Some(NearPairOptions)` (**the defau
 use an accurate evaluation of the same pair integral, blended into Eq. 18; `None` is the paper's
 energy exactly. This departs from the paper (like the collapse guard of §17j).
 
+*Relation to the paper.* Sec. 9 (Limitations) names the problem and proposes, untested, "adaptive
+quadrature for edge pairs that are close in space" and "adding more quadrature points", adding
+that the authors "did not find such strategies necessary" for their design tasks. Their code
+evaluates every pair with a fixed rule (one point per pair in the metric). §3.4 is our
+implementation of that idea, measured in §17o; it is not the authors' method. The mechanism also
+differs from the one Sec. 9 gives for getting stuck: Sec. 9 says the large low-order term makes the
+Sobolev gradient very small, while our stuck runs (§17o) come from the endpoint rule being blind
+to a mid-edge crossing, with the CCD guard (§7.4) shrinking each step until the contact floor.
+Sec. 7 attributes the paper's own stuck runs (Fig. 19) mainly to near-intersections in the
+initial curves.
+
 **Which pairs.** Unordered pairs `{I, J}` of disjoint edges with `r_IJ = d_IJ / ℓ_IJ < c₂`, where
 `d_IJ` is the segment distance and `ℓ_IJ = √((ℓ_I² + ℓ_J²)/2)` (smooth in both lengths, `= ℓ` for
 equal lengths), **except** pairs joined by one edge (`I, K, J` consecutive; option
