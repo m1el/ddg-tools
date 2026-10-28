@@ -190,6 +190,9 @@ equal lengths), **except** pairs joined by one edge (`I, K, J` consecutive; opti
 has nodes; there it overestimates the pair integral (a corner barrier the paper's flows and the
 authors' scenes rely on, §17o). Defaults `c₁ = 0.25`, `c₂ = 0.75`, `M = 4` (§17o). Broad phase: a
 uniform grid (cell `(1 + 2c₂) max ℓ`, sorted cell entries), `O(|E|)`; the pair list is sorted.
+Options for second neighbours (WP16b, all off by default, measured in §17p):
+`second_neighbour_rule` (`TwoSided`, `OneSided` [formula: rc-near-onesided], gated variants
+[formula: rc-near-gate]) and `second_neighbour_band`.
 
 **The term.** For each such pair and each order `(I, J)` [formula: rc-near-blend]
 
@@ -571,7 +574,7 @@ The step report (§9.1) records every one of these parts with its time.
 (∞ if none). Start `τ₀ = ⅔ τ_max` (the paper's heuristic) or `τ_hi` if `τ_max = ∞`; halve until
 (i) Armijo holds at `γ̂_τ`, (ii) the projection succeeds, (iii) the projection displacements
 (each chord step is a linear motion) are also CCD-free. At most 40 halvings, or `τ < 1e-12 τ₀`:
-`Stuck`. Boyd & Vandenberghe Alg. 9.2 with `c = 1e-4`, shrink ½. Because every accepted step
+`Stuck`. Boyd & Vandenberghe Alg. 9.2 with `c = 1e-4`, shrink ½. Optional retries of a stuck search (`stuck_retry_chord`, `stuck_projected_reference`; off by default; WP16b): §17p. Because every accepted step
 checks the whole path (move and projection), no two edges of `𝒫` and no edge and obstacle ever
 cross during the flow: the isotopy class is kept (paper Sec. 5.4; the paper guards only the
 move, the reference has no CCD at all).
@@ -2996,8 +2999,267 @@ barely leave the tangle; H¹ untangles but slowly (a long loop stays); the Armij
   are kept in `runA-v1-endpoint-quadrature/`.
 * Hs hard still hits the 24-min cap on 180 of 228 knots because `dE·g̃ < 1e-4` is a strict test for the slow tail; `E_ref` is then the best
   within 24 min. This matches the paper's budget but means the 1.1× target is not 1.1× a converged minimum.
-* Nine soft Hs runs ending on the contact floor at high energy and three stuck hard Hs runs (listed above) remain; none violates the audit.
+* Nine soft Hs runs ending on the contact floor at high energy and three stuck hard Hs runs (listed above) remain; none violates the audit. Diagnosed in §17p (accordion folds of second neighbours; the Newton polish at the shortest edges).
 * A game running on the machine during parts of phase B and the one-thread check; the load log is `runB-loads.txt`, `check1-start.txt`.
+
+## 17p. The failed 12 (WP16b, 2026-10-28)
+
+The 12 Hs runs of phase A (§17n) that did not end normally: 9 soft runs on the contact floor
+(group A) and 3 hard `hs-pg` runs `stuck` in the line search (group B). Data (git-ignored):
+`runs_tmp/rc-wp16b/` (`diagA`, `diagB` the traced reruns, `Bvar` the group B variants, `cand` the
+second-neighbour rules on the 12, `fold` on 9 more runs, `reg` the regression set, `census`,
+`cost.log`, `ti2.log`, `test-v-*.log`). Tools: `eval_knots --trace` (one JSON line per step with
+every trial and its outcome, and at a step that did not move the closest pair and the shortest
+edge), `--start-obj` and the option flags below; probes `tests/wp16b_probe.rs` (`fold_probe`,
+`multiplier_probe`, `projection_probe`, `sn_census`, `sn_cost`, `tangent_interpolation_probe`).
+All runs: phase-A flags, one thread, 24-minute cap; 25–110 jobs at a time (phase A: 60), so a
+run that hit the cap made fewer steps than in phase A; histories are compared step by step on
+the common prefix (bitwise), which load does not change. **Every option below is off by default;
+no default was changed.**
+
+### Reproduction
+
+All 12 reruns with `--trace` reproduced phase A exactly (same steps, same end). Code unchanged
+since phase A (`0195abc`).
+
+### Group B: the Newton polish at the light vertices of the shortest edges
+
+**What the last line search does.** In all three the stuck step has 40 trials, 39–40 `ArmijoFailed`
+(one `ProjectionFailed` in trefoil0065), `τ₀ = 2 τ_prev` far below `τ_max` (CCD not involved),
+no non-finite value. As `τ → 0` the trial energies do not tend to `F(γ)` but to a higher value:
+
+| knot (back end) | step | `F(γ)` | `lim_{τ→0} F(γ̂_τ)` | offset | base violation | shortest edge / ℓ̄ |
+|---|---:|---:|---:|---:|---:|---:|
+| knot0052 (exact + dense) | 105 | 51.308092 | 51.326650 | +1.86e-2 | 8.6e-5 | 0.064 (edge 1609) |
+| trefoil0026 (exact + dense) | 130 | 23.116168 | 23.122442 | +6.27e-3 | 7.5e-5 | 0.070 (edge 1333) |
+| trefoil0065 (Barnes–Hut + MG) | 185 | 11.311280 | 11.329280 | +1.80e-2 | 9.4e-5 | 0.052 (edge 906) |
+
+(knot0052 has 2361 vertices and ran on the exact back end, not Barnes–Hut.) Every trial is
+projected with at least one step (§17l), so the trials tend to `P(γ)`, the projection of the base,
+which satisfies the constraints only within the tolerance (`Absolute(1e-4)`). The base violation is
+75–94 % of it, so the projection starts in the Newton polish (relative violation ≤ 100), which
+corrects in the **lumped-mass metric**. `projection_probe` (exact energy, dense solve, the same
+direction) at the three stuck curves, polish against chord steps (§6.2, metric `Ā`):
+
+| knot | `F(P(γ)) − F(γ)` polish | chord | `−λ·Φ` (Eq. 22 multipliers) | largest polish move / ℓ̄, at | largest chord move / ℓ̄ |
+|---|---:|---:|---:|---|---:|
+| knot0052 | +1.86e-2 | +6.1e-5 | | 2.3e-3, v1610 (edges 0.064, 0.100) | 5.5e-4 |
+| trefoil0026 | +6.27e-3 | +4.85e-6 | +4.83e-6 | 1.4e-3, v1333 (edges 0.092, 0.070) | 3.5e-4 |
+| trefoil0065 | +1.80e-2 | +2.0e-5 | | 1.1e-3, v907 (edges 0.052, 0.212) | 6.8e-4 |
+
+To first order a chord correction `δ = Ā⁻¹Cᵀμ` changes `F` by `dF·δ = g̃ᵀĀδ − λ·Φ = −λ·Φ`
+(`C g̃ = 0`), a few 1e-6 here (multipliers ≤ 0.17). The mass-metric correction
+`M⁻¹Cᵀ(CM⁻¹Cᵀ)⁻¹(−Φ)` is not `Ā`-orthogonal to `g̃` and puts most of its length on the lightest
+vertex (dual length 0.06–0.08 ℓ̄, at the shortest edge, which sits at a corner where the energy is
+stiff); it raises `F` by 6e-3–2e-2, more than any trial gains. In the same probe the polish also
+**diverges** (relative violation 1.1 → 15.7, 4.4 → 45) for `τ ≥ 0.025–0.1`, where chord steps
+converge in one or two iterations and pass Armijo up to `τ = 0.2–0.4`; that is why the accepted
+steps before the stall were small (median `τ` of the last 20 steps 0.0074–0.071, 4–17 polished trials
+rejected by the projection). Barnes–Hut noise is not involved (two of the three are exact; the
+probe is exact on all three). Root cause: **the Newton polish of §17l**, not the energy.
+
+**Variants (full reruns from the input, 24 min).** First differing step against the baseline
+(bitwise), end, steps, final Eq. 17:
+
+| variant | knot0052 | trefoil0026 | trefoil0065 |
+|---|---|---|---|
+| baseline (phase A) | stuck 105, 51.31 | stuck 130, 23.12 | stuck 185, 11.30 |
+| `--max-halvings 80` | identical, stuck | identical, stuck | identical, stuck |
+| `--early-abort 0` | identical, stuck | identical, stuck | identical, stuck |
+| `--backend exact` | (already exact) | (already exact) | from step 0: cap 151, 39.43 (dense at 2631 vertices is slow) |
+| `--newton-polish none` (all steps) | from 1: cap 192, 50.50 | from 1: cap 383, 10.58 | from 1: cap 365, 38.46 |
+| `--proj-tol 1e-5` | from 1: cap 183, 49.28 | from 1: cap 436, 10.59 | from 1: cap 692, 38.40 |
+| `--proj-tol 1e-6` | from 1: cap 186, 49.21 | from 1: cap 404, 10.57 | from 1: cap 418, 38.43 |
+| `--stuck-projected-reference 1` | from 105: cap 191, 49.37 | from 130: cap 422, 17.28 | from 185: cap 533, 9.35 |
+| **`--stuck-retry-chord 1`** | from 105: cap 192, 49.25 | from 130: cap 428, 17.08 | from 185: cap 525, 9.36 |
+
+Every variant that is not a retry changes the whole trajectory (from step 1) and is better on one
+knot and worse on another (trefoil0065 ends at 38 instead of 9); more halvings and the early-abort
+rule change nothing. The two retries act only at a stuck step (`FlowOptions`, off by default):
+
+* `stuck_retry_chord`: when a guarded search with back-projection and the polish is stuck (not on
+  the contact floor), repeat it with chord steps for that step
+  (`Session::step`; `line_search::merge_after` keeps all trials in the report). Used 4 times in the
+  3 runs (steps 105; 130 and 164; 185), accepted each time with `τ = 0.14, 0.015, 0.015, 0.052` and
+  **`F` decreasing** at each (by 0.062–0.098); all three then run to the cap.
+* `stuck_projected_reference`: project the base, and if `F(P(γ)) > F(γ)` search again with
+  `F(P(γ))` as the Armijo reference (`line_search::retry_with_projected_reference`). Used 7 times,
+  accepted each time but with small steps (`τ = 0.004–0.026`) and **`F` rising** by up to 2.2e-2 at
+  the step: the flow is no longer monotone. Not recommended.
+
+Smoothness and proofs: nothing changes in the energy; the chord retry is the paper's projection
+(`rc-chord-projection`) and the Armijo test (`rc-armijo`) on the same step. Cost: one more line
+search at a stuck step only.
+
+### Group A: accordion folds of second neighbours
+
+`fold_probe` at the 9 final curves: in every one the closest pair is `I, K, J` consecutive with
+**both** turning angles at the ends of `K` between 159° and 180° (knot0076: 173° and 49°), `I` and
+`J` nearly parallel and overlapping (angle 0.2°–38°), closest points inside both edges
+(`s = 0.27–0.92`, `t = 0.03–0.36`), `ℓ_K = 0.03–1.13 ℓ̄` (mostly 0.3–0.9: not a short edge). The
+paper's term is blind to it: its four nodes lie on the nearly common line, so
+`|T_I × (γ_i − γ_j)|` and with it `e^p` vanish (`E^p = 1e-4 … 2`, both orders), while the pair integral is
+`E^n = 4e4 … 6e6` (`E^n/E^p = 2e4 … 6e10`; along a pure separation of the pair the ratio is still
+3.7–5.7 at 0.3 ℓ̄). The neighbouring pairs `(I, K)`, `(K, J)` are omitted (paper Sec. 5.1) and the
+second neighbours are excluded by WP16, so a Z-fold costs nothing and the soft L-BFGS / NCG steps
+close it until the floor. The same geometry ends 9 more phase-A runs (3 soft-H¹-NCG on the floor,
+6 soft runs at the cap with a fold at contact distance: knot0006, knot0064, knot0066, trefoil0021,
+trefoil0077, trefoil0065 h1-pg; found by `sn_census` on the 2052 final curves).
+
+**Candidates** (`NearPairOptions`, all with `second_neighbours: true`; off by default):
+
+* **(a) narrow band** `second_neighbour_band = (0.1, 0.25)`, two-sided (§3.4's blend).
+* **(b) one-sided** `SecondNeighbourRule::OneSided`: `e = E^p + w E^p ψ(E^n/E^p − 1)`, `E^{n,p}`
+  summed over both orders, `ψ = 0 | 6z³ − 8z⁴ + 3z⁵ | z` (C², nondecreasing, `0 ≤ ψ(z) ≤ z⁺`), so
+  `E^p ≤ e ≤ max(E^p, E^n)` [formula: rc-near-onesided]: never below Eq. 18 (the corner barrier
+  stays), the accurate integral where it is larger.
+* **(c) gated** `Gated { width: 0.1 }`: two-sided, times `g = W(|s* − s_K|/σ) W(|t* − t_K|/σ)`
+  (shut when a closest point is at an end of `K`) [formula: rc-near-gate]; and `OneSidedGated`, the
+  same gate on (b).
+* **(c′) either gate** `OneSidedGatedEither { width: 0.1 }`: (b) with `g = 1 − (1 − G_s)(1 − G_t)`,
+  shut only when both closest points are at the ends of `K`.
+* (d) local subdivision of `I, K, J`: not attempted. The session subdivides the whole network only
+  (§5.4); a local split changes the vertex count mid-run, which the evaluation's per-vertex
+  histories, the constraints (edge targets), the Hencky rest lengths and the multigrid hierarchy
+  would all have to follow; and a fold of edges of 0.3–0.9 ℓ̄ is not a resolution problem.
+* (e) Sec. 5.1's circle through three points: the paper drops it because it vanishes under
+  refinement; it involves adjacent pairs, not the second neighbours that fold. Not attempted.
+
+Differentiability: (a) and (b) are exactly differentiated (FD of the pair term `≤ 1.4e-7`
+relative on Z-fold, skew fold, corner, end-on-interior and hairpin pairs at `d = 3e-3 … 0.3`, both
+exponent pairs; a whole curve with a fold `≤ 2.2e-9`; `tests/near_pair_second.rs`). (b) is C¹ in
+`(E^n, E^p)` (C² in `ψ`); with the pair term's own kinks (§3.4) the energy is C¹. The gates are C¹
+because `W' = 0` at the shut value where `s*`, `t*` are clamped (argued, not machine-checked).
+Lean (`DdgProofs/RepulsiveCurves/NearPairSecond.lean`): `ψ`'s junction conditions, bounds and
+monotonicity, the bound `E^p ≤ e ≤ max(E^p, E^n)` (`onesided_bounds`), the chain rules of (b) and
+(c), and the either gate's bounds and chain rule; `scripts/check-formulas.sh` OK. Cost
+(`sn_cost`, one thread, alone, load 2.6; three initial and three final curves, 1557–2880
+vertices): the near-pair pass with the differential takes the same time with every rule as with
+the default, within the timing noise (±10 %): 17–75 ms on the initial curves (2–4 % of the exact
+energy and differential, 0.7–2.0 s), 1.5–3.2 ms on the final ones (0.2–0.4 %); the second
+neighbours add 2–19 pairs per curve.
+
+**Results on the 12** (end, steps, final Eq. 17; `rec` = (c′) + `stuck_retry_chord`):
+
+| run | phase A | (sn-two, WP16's variant) | (a) narrow | (b) one-sided | (c) gated | one-sided gated | (c′) either | rec |
+|---|---|---|---|---|---|---|---|---|
+| knot0052 soft-hs-lbfgs | FLOOR 38, 293 | cap 217, 46.3 | cap 216, 47.1 | cap 216, 45.7 | cap 208, 51.0 | **FLOOR 68, 143** | cap 207, 46.0 | |
+| knot0076 soft-hs-lbfgs | FLOOR 15, 1625 | rate 352, 54.4 | rate 358, 54.4 | cap 358, 54.4 | rate 378, 54.4 | cap 369, 54.4 | cap 337, 54.4 | |
+| knot0115 soft-hs-ncg | FLOOR 36, 581 | cap 269, 63.8 | cap 270, 62.0 | cap 272, 65.0 | cap 280, 60.4 | cap 276, 66.5 | cap 250, 65.4 | |
+| trefoil0014 soft-hs-lbfgs | FLOOR 64, 26.6 | rate 194, 10.89 | rate 191, 10.89 | rate 190, 10.89 | cap 498, 10.91 | cap 455, 10.92 | rate 190, 10.89 | |
+| trefoil0017 soft-hs-ncg | FLOOR 39, 229 | cap 353, 10.9 | cap 352, 15.9 | cap 354, 19.7 | cap 362, 13.2 | cap 347, 15.6 | cap 323, 15.6 | |
+| trefoil0038 soft-hs-lbfgs | FLOOR 53, 75.7 | cap 371, 10.6 | cap 367, 10.7 | cap 372, 10.6 | cap 383, 10.5 | cap 369, 10.6 | cap 348, 10.9 | |
+| trefoil0090 soft-hs-lbfgs | FLOOR 38, 147 | rate 353, 11.48 | rate 368, 11.48 | rate 372, 11.48 | rate 370, 11.48 | rate 369, 11.48 | rate 372, 11.48 | |
+| trefoil0091 soft-hs-lbfgs | FLOOR 69, 52.2 | rate 415, 8.43 | rate 423, 8.43 | rate 408, 8.43 | **FLOOR 275, 10.5** | **FLOOR 584, 9.62** | rate 408, 8.43 | |
+| trefoil0098 soft-hs-ncg | FLOOR 75, 73.0 | cap 320, 11.9 | cap 320, 12.7 | cap 323, 11.7 | cap 325, 15.5 | cap 312, 17.8 | cap 296, 13.5 | |
+| knot0052 hs-pg | STUCK 105, 51.3 | cap 198, 48.0 | cap 193, 49.5 | cap 198, 49.6 | STUCK 105 (same) | STUCK 105 (same) | cap 188, 49.7 | cap 194, 49.6 |
+| trefoil0026 hs-pg | STUCK 130, 23.1 | STUCK 54, 16.9 | STUCK 130 (same) | STUCK 177, 21.2 | STUCK 130 (same) | STUCK 130 (same) | STUCK 177, 21.2 | **cap 413, 17.1** |
+| trefoil0065 hs-pg | STUCK 185, 11.3 | STUCK 43, 9.24 | STUCK 207, 13.2 | STUCK 193, 14.6 | STUCK 192, 13.1 | STUCK 192, 13.1 | STUCK 193, 14.6 | **cap 433, 9.85** |
+
+For comparison, hs-pg reaches 51, 84, 58, 10.9, 10.1, 28.2, 11.5, 8.9, 9.9 on the 9 knots of group A
+in phase A: the fixed soft runs end at or below it (54.4 vs 84 on knot0076 …) except where the cap
+cut them. The second-neighbour rules do not fix group B (it is the projection), the chord retry
+does. **The product gates are unsound:** on trefoil0091 (c) and on knot0052 and trefoil0091 the
+one-sided gated rule, the flow slid the contact onto an end of `K` (`s = 1`, `t = 0.94–0.98`: `J`
+folded back onto `K` and its interior touches the vertex between `I` and `K`), the gate shut
+(`G(0) = 0`) and the run ended on the floor at `E^n/E^p ≈ 1e10`. (c′) shuts only at a true corner
+and has no such escape. On the 9 other fold-ending runs (`fold/`):
+
+| run | phase A | (b) one-sided | (c) gated | one-sided gated | (c′) either |
+|---|---|---|---|---|---|
+| knot0006 soft-h1-ncg | cap 428, 93.7 | cap 359, 27.2 | cap 360, 99.8 | cap 356, 99.8 | cap 338, 27.2 |
+| knot0064 soft-h1-ncg | cap 282, 182 | cap 280, 96.7 | cap 258, 186 | cap 259, 186 | cap 246, 106 |
+| knot0066 soft-hs-ncg | cap 444, 74.0 | cap 399, 55.8 | cap 371, 82.2 | cap 369, 82.1 | cap 346, 56.4 |
+| trefoil0009 soft-h1-ncg | FLOOR 102, 41.5 | cap 390, 16.1 | cap 362, 41.6 | FLOOR 228, 41.6 | cap 337, 16.3 |
+| trefoil0021 soft-hs-ncg | cap 485, 12.0 | cap 525, 10.7 | cap 453, 10.7 | cap 481, 10.8 | cap 418, 10.8 |
+| trefoil0065 h1-pg | cap 245, 748 | cap 258, 808 | cap 219, 1046 | cap 219, 1045 | cap 208, 813 |
+| trefoil0077 soft-h1-ncg | cap 259, 72.0 | cap 261, 29.6 | cap 224, 81.8 | cap 225, 81.7 | cap 211, 37.2 |
+| trefoil0094 soft-h1-ncg | FLOOR 64, 47.7 | cap 558, 10.4 | cap 484, 43.4 | cap 484, 45.7 | cap 455, 10.5 |
+| trefoil0097 soft-h1-ncg | FLOOR 84, 58.4 | cap 617, 11.1 | cap 532, 16.4 | cap 535, 16.4 | cap 536, 12.1 |
+
+(b) and (c′) resolve all of them (H¹ projected gradient excepted, which does not converge anyway).
+
+### Regressions
+
+*Footprint* (`sn_census`: curves on which the rule's second-neighbour part is not exactly zero, so
+that a flow from there differs from step 0): initial curves (228) / phase-A final curves (2052):
+sn-two 201 / 1809, (a) 23 / 153, (b) 24 / 130, (c) and one-sided gated 0 / 18, (c′) 24 / 130.
+On the initial curves (b) and (c′) touch knot0002, 0016, 0022, 0044, 0052, 0066, 0072, 0076,
+0092, trefoil0003, 0010, 0016, 0017, 0027, 0033, 0055, 0060, 0064, 0065, 0074, 0077, 0080, 0094,
+0097 (three of them in the phase-B subset: knot0072, trefoil0080, trefoil0097).
+
+*The 30-run regression set* (6 hs-pg, 5 soft-hs-ncg, 6 soft-hs-lbfgs, 3 soft-h1-lbfgs, 2 soft-h1-ncg,
+3 h1-pg, 2 h2-pg, 1 l2-pg, 2 hs-armijo; 14 ended on the rate, 16 on the cap in phase A;
+`regset.txt`). Bitwise-identical histories on the common prefix (two runs, knot0074 soft-hs-lbfgs
+and trefoil0079 h2-pg, ended on the rate in phase A after 1401 s and 1299 s and hit the cap here
+under the heavier load, with identical histories; they count as identical):
+
+| rule | identical | changed (first differing step: change of `F` at the last common step) |
+|---|---:|---|
+| `stuck_retry_chord` | 30 | none |
+| (c) gated | 29 | trefoil0097 hs-pg (18: +0.03 %) |
+| one-sided gated | 29 | trefoil0097 hs-pg (18: −0.02 %) |
+| (b) one-sided | 25 | knot0002 hs-pg (0: +0.001 %, rate stop at 342 instead of 332, same Eq. 17), knot0044 soft-hs-ncg (0: −0.6 %), knot0072 hs-armijo (0: +0.02 %), trefoil0097 hs-pg (0: **+13.7 %**), trefoil0100 soft-hs-ncg (5: −6.5 %) |
+| (c′) either | 25 | the same five (+0.001 %, −0.8 %, +0.02 %, **+13.4 %**, −3.0 %) |
+| (a) narrow | 26 | knot0044 soft-hs-ncg (0: −1.2 %), knot0072 hs-armijo (0: +0.02 %), knot0126 soft-hs-lbfgs (3: −0.0 %, now a rate stop), trefoil0097 hs-pg (0: −39.9 %) |
+
+The changed runs are the ones whose initial curve the census flags, plus trefoil0100 (from step 5)
+and, for the gates, trefoil0097 (from step 18). The large swings are hs-pg on trefoil0097 at the
+cap, a run that is not converged in 24 min (path dependence, both signs across rules).
+
+*Scenes and the crate's tests* (each rule as the default, in a copy of the workspace; full
+`cargo test -p ddg-repulsive-curves`, 217 tests): `TangentInterpolation` (`tangent_interpolation_probe`,
+energy after step 1, end of the run):
+
+| rule | E after step 1 | end edges after step 10 | collapse guard | failing tests |
+|---|---:|---|---|---|
+| paper (`near_pair: None`) | 789.2 | 4.2e-2, 1.4e-3 | step 18 | — |
+| default | 644.0 | 3.8e-2, 2.6e-3 | step 21 | — |
+| `stuck_retry_chord` | 644.0 (bitwise) | same | step 21 | `flow::every_stop_status_is_reached` (expects 3 trials at its stuck step, gets 3 + 3) |
+| sn-two (WP16's variant) | 155.7 | — | **step 4** | `end_edge::the_default_guard_names_the_collapsing_edge`, `applications::importer_reads_the_authors_scenes` (§17o) |
+| (a) narrow | 644.0 (bitwise) | same | step 21 | **`applications::graph_drawing_keeps_junctions_and_untangles_edges`** (energy 6585 → 3695, not below 1/10) |
+| (b) one-sided | 657.8 | 3.5e-2, 1.1e-3 | step 18 | — |
+| (c), one-sided gated | 644.0 (bitwise) | same | step 21 | — |
+| (c′) either (+ chord retry) | 657.8 | 3.5e-2, 1.1e-3 | step 18 | `every_stop_status_is_reached` (as above) |
+
+(Every variant also fails `near_pair_second::rules_are_inert_while_second_neighbours_are_excluded`,
+which compares against the default; an artefact of making the rule the default.)
+
+### Summary
+
+| candidate | group A fixed | group B fixed | regression set changed | scene / tests | smoothness | Lean | cost |
+|---|---|---|---|---|---|---|---|
+| `stuck_retry_chord` | – (soft runs have no projection) | **3/3** | 0/30 | 1 test counts trials | energy unchanged | uses `rc-chord-projection`, `rc-armijo` | one search at a stuck step |
+| `stuck_projected_reference` | – | 3/3, `F` not monotone | not run | – | – | – | one projection + search at a stuck step |
+| (a) narrow band | 9/9 | 0/3 | 4/30 | graph drawing fails | C¹ | `rc-near-blend` | ≈ 0 |
+| **(b) one-sided** | **9/9** (+9 fold runs) | 0/3 | 5/30 | TI changes (guard at step 18, as the paper's energy) | C¹ (ψ C²) | `rc-near-onesided` proved | no measurable increase |
+| (c) gated / one-sided gated | 8/9, 7/9 (escape) | 0/3 | 1/30 | unchanged | C¹ (argued) | `rc-near-gate` proved | ≈ 0 |
+| (c′) one-sided, either gate | 9/9 (+9) | 0/3 | 5/30 | as (b) | C¹ (argued) | proved | ≈ 0 |
+| (d) local subdivision, (e) three-point circles | not attempted (above) | | | | | | |
+
+### Recommendation (for the user; nothing is switched on)
+
+1. **Group B: `stuck_retry_chord = true`.** It removes the only failure mode found (the polish
+   correction of the base's residual violation), keeps the flow monotone, and is bitwise neutral for
+   every step that is not stuck (30/30 regression runs, every scene). The one test that counts the
+   trials of a stuck step would need `6`. Alternatively, a polish in a metric closer to `Ā` (a mass
+   floor at the shortest edges) would address the cause rather than the symptom; not tried.
+2. **Group A: `second_neighbours: true` with `SecondNeighbourRule::OneSided`** (the band of §3.4).
+   It fixes the 9 and 9 more fold runs, never lowers Eq. 18 (so the corner barrier of the authors'
+   scenes stays and every test passes), has no gate to escape through, and is proved. (c′) is
+   equivalent on the data (identical on 9 of the 12, same census) and adds a gate; the product gates
+   are unsound. (a) breaks graph drawing. The price of (b): 24 of 228 initial curves (all their 9
+   methods) change from step 0, `TangentInterpolation` changes (its guard fires at step 18 instead
+   of 21), and on trefoil0097 hs-pg the energy at the cap moved by +13 %.
+3. **Rerunning the evaluation.** With (1) alone: a **partial** rerun is valid. Only steps that were
+   stuck change, so only the 4 phase-A runs that ended `stuck` (not on the floor) change:
+   hs-pg on knot0052, trefoil0026, trefoil0065 and h2-pg on trefoil0026. The `E_ref` of the first
+   three knots becomes about 49.3, 17.1, 9.4 instead of 51.3, 23.1, 11.3 (Eq. 17, from `Bvar/chordretry`),
+   so the "reached 1.1 E_ref" columns of the other methods on these three knots must be recomputed
+   from the existing histories. Phase B has no stuck run and is unchanged. With (2): a **full**
+   rerun of phases A and B. At least the 216 runs on the 24 flagged knots differ from step 0
+   (including 3 knots of the phase-B subset), and any run can meet a fold later; histories cannot
+   tell which runs would.
 
 ## 18. The user's decisions (2026-10-26)
 

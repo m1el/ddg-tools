@@ -1044,7 +1044,7 @@ fn second_neighbour_term(
     );
     // The un-weighted term c (w and g factored out) and its gradient.
     let (c, grad_c) = if one_sided {
-        if !(ep > 0.0) {
+        if ep.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             (0.0, ZERO4)
         } else {
             let rho = en / ep;
