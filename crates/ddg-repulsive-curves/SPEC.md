@@ -2851,6 +2851,143 @@ three runs on the budget (trefoil0031 L-BFGS +6 %, trefoil0070 and trefoil0080 N
   chord-iteration count (`0` here, `1` in the oracle); the same 47 at the commit before WP16
   (c657176), so not caused by it.
 
+## 17n. The Sec. 7 comparison on the 228 knots (WP12, 2026-10-27/28)
+
+Paper: Fig. 19, Supp. Figs. 2 and 5 (§14.2). Driver `examples/eval_knots.rs` (one knot, one method per process),
+runner `scripts/rc-eval.sh`, tables `scripts/rc_eval_table.py`, `rc_eval_summary.py`, `rc_eval_phaseb.py`,
+`rc_eval_check1.py`, videos `showcase/repulsive-curves/eval_grid.py` and `scripts/rc_eval_sheet.py`.
+Data (git-ignored, `runs_tmp/rc-eval/`): `runA/` (228 × 9 results, logs, final curves), `runB/` (24 × 9, frames, videos),
+`runB1/` (one-thread check), `report/` (failure table, the four scatter plots `{hard,soft}_{iterations,time}.png`),
+`runA-v1-endpoint-quadrature/` (the 230 runs finished before WP16, kept as the "before"), `phaseA-summary.md`,
+`phaseB-summary.md`, `check1-summary.md`. Build: HEAD of 2026-10-27 (WP16 near-pair energy). All 2052 + 216 + 12 runs
+finished; no run ended in `error`, none had an isotopy-audit violation or an invalid final curve.
+
+### Setup and departures from the paper's Sec. 7
+
+* **Methods and data** as §14.2: 228 knots (128 Knot128 perturbed + 100 Trefoil100, 1494–3351 vertices, median 1900),
+  (α, β) = (2, 4.5), hard (barycenter + edge lengths, collision-guarded grow-previous search): Hs, L², H¹, H² projected
+  gradient and Hs with the normalized Armijo search; soft (`Ê` + Hencky): Hs NCG, Hs L-BFGS(30), H¹ NCG, H¹ L-BFGS (guarded
+  search too). `Absolute(1e-4)` projection tolerance.
+* **Stop:** the energy rate `dE·g̃ < 1e-4` after an accepted step (Q9; the library's `‖g̃‖₂` rule is switched off), or the
+  wall cap of 24 min at one thread (the paper's cap, Q7), or the line search stuck. Of the Hs hard runs 45 of 228 stopped on
+  the rate, 180 on the cap and 3 on a stuck line search: the **reference energy `E_ref` is the minimum within the budget,
+  not a converged minimum**, as in the paper (24 min there too).
+* **Energy:** the flows minimize Eq. 17 plus the near-pair correction of §3.4 (default since WP16; without it 20 Hs runs wedged
+  edges against the CCD guard at high energy, §17o). History, `E_ref` and the 1.1× targets use this corrected energy; the
+  failure table's last column compares final curves on the paper's Eq. 17 (exact): median final Eq. 17 relative to the
+  reference's is 1 (reference), 0.96–1.01 for the soft methods that reach the target, and 1.21 / 25 / 5.7 / 102 for hard H¹ / H² /
+  Armijo / L² (those stop far from a minimum).
+* **Hencky weight** `w_H = 10` (Q8, the tension rule of §17m Finding A; re-checked here on four more knots: knot0023, 0086,
+  0102, trefoil0046 give `max λ/2` at `w = 1` of 3.0e-2, 2.1e-2, 1.8e-2, 3.7e-3, and with the six knots of §17m the median is 1.8e-2 at
+  `w = 1`, 1.8e-3 at `w = 10`; the rule's answer is unchanged). The paper does not give its weight. The softly constrained runs
+  end with the largest `|ln(ℓ/ℓ⁰)|` of 7e-4 (Hs) on the probe knot.
+* **Back ends** (`Backend::Auto`, crossover 2500): exact energy + dense Schur solve for the 197 knots with ≤ 2500 vertices,
+  Barnes–Hut + multigrid for the 31 larger ones; the paper ran one configuration. L², H¹, H² use the sparse metrics.
+* **Contact floor:** two disjoint edges closer than `1e-6 ℓ̄₀` end the step `Stuck` (§17l); the failure table's column
+  "contact floor" counts runs that ended that way.
+* **Hardware:** one Xeon-class core of a 64-core machine (not the paper's 2019 Xeon); phase A ran 60 jobs at once (load 61–66, no
+  outside load), which makes its times 1.49× the times of the same runs alone (check below). A game used 5–6 cores for about 20
+  of the 510 minutes of phase B and during the one-thread check.
+* **No knot was excluded:** no knot had every method of a group stuck (the paper excludes those).
+
+### Phase A: failure table (228 knots, 1 thread, 24 min), next to the paper
+
+"Failed" = never reaches 1.1 × `E_ref` of the reference; for the references the paper's "stuck" is "ended stuck (any)".
+
+| method | reached 1.1 E_ref | failed | ended stuck (contact floor / library) | energy-rate stop | paper |
+|---|---:|---:|---:|---:|---|
+| Hs projected gradient (reference) | 228 (100 %) | 0 | 3 (1.3 %; 0 / 3) | 45 | 6.5 % stuck |
+| L² projected gradient | 0 | 228 (100 %) | 0 | 0 | ≥ 97.7 % failed |
+| H¹ projected gradient | 73 (32.0 %) | 155 (68.0 %) | 0 | 0 | 64.5 % failed |
+| H² projected gradient | 18 (7.9 %) | 210 (92.1 %) | 1 (0.4 %) | 3 | 92.1 % failed |
+| Hs, normalized Armijo | 11 (4.8 %) | 217 (95.2 %) | 0 | 0 | not in the paper |
+| soft Hs NCG (reference) | 228 (100 %) | 0 | 3 (1.3 %; 3 / 0) | 15 | 3.3 % stuck |
+| soft Hs L-BFGS | 221 (96.9 %) | 7 (3.1 %) | 6 (2.6 %; 6 / 0) | 111 | 14.8 % stuck |
+| soft H¹ NCG | 165 (72.4 %) | 63 (27.6 %) | 3 (1.3 %) | 29 | not in the paper |
+| soft H¹ L-BFGS | 214 (93.9 %) | 14 (6.1 %) | 0 | 110 | not in the paper |
+
+All failures of the non-Hs hard methods are non-convergence (the budget ran out), none "stuck": with the near-pair energy the
+H¹/H²/L² flows no longer drive an edge pair to the contact floor within the budget (before WP16 22/27/5 of the first 230 runs of
+H¹/H²/L² ended on the floor within about 25 steps). The failure rates of H¹, H² and L² agree with the paper's
+(68.0 vs 64.5 %, 92.1 vs 92.1 %, 100 vs ≥ 97.7 %); our Hs and soft-Hs stuck rates are lower (1.3 vs 6.5 %, 1.3 vs 3.3 %, 2.6 vs 14.8 %).
+Hs-method runs ending on the contact floor at a high energy: 9 soft runs (knot0052, 0076, 0115, trefoil0014, 0017, 0038,
+0090, 0091, 0098; 15–75 steps; Ê 27–1630 at the end), 1.0 % of the 912 Hs-method runs; 3 hard Hs runs ended
+stuck in the line search (knot0052, trefoil0026, trefoil0065; Ê 51, 23, 11).
+
+Per method (1 thread, 60 jobs in parallel; medians over the runs that reach the target; `Ê_final/E_ref` over all runs):
+
+| method | energy rate / cap / stuck | reached | median iterations | median s | median final Ê / E_ref | core-hours |
+|---|---|---:|---:|---:|---:|---:|
+| hs-pg | 45 / 180 / 3 | 228 | 68 | 305 | 1 | 85 |
+| l2-pg | 0 / 228 / 0 | 0 | | | 102 | 91 |
+| h1-pg | 0 / 228 / 0 | 73 | 333 | 801 | 1.21 | 91 |
+| h2-pg | 3 / 224 / 1 | 18 | 318 | 909 | 25.2 | 91 |
+| hs-armijo | 0 / 228 / 0 | 11 | 474 | 1196 | 5.69 | 91 |
+| soft-hs-ncg | 15 / 210 / 3 | 228 | 165 | 614 | 1 | 89 |
+| soft-hs-lbfgs | 111 / 111 / 6 | 221 | 80 | 312 | 0.96 | 76 |
+| soft-h1-ncg | 29 / 196 / 3 | 165 | 157 | 565 | 1.01 | 87 |
+| soft-h1-lbfgs | 110 / 118 / 0 | 214 | 101 | 335 | 0.97 | 77 |
+
+(778 core-hours in total, 13 h of wall time at 60 jobs: 2026-10-27 05:38–18:55.) Scatter plots (iterations, from phase A;
+time, from phase B on the 24 knots): `runs_tmp/rc-eval/report/{hard,soft}_{iterations,time}.png`. Hs reaches 1.1 × `E_ref` in
+a median of 68 iterations, H¹ (where it gets there) in 333, H² in 318, the Armijo search in 474, i.e. 5–7× more; the failed
+runs sit on the dashed margin of the plots.
+
+### Phase B: the 24-knot subset, alone, 64 threads
+
+Subset (`scripts/rc-eval-subset.txt`): knot0087, 0075, 0013, 0098, 0048, 0061, 0074, 0006, 0046, 0084, 0038, 0072 and
+trefoil0056, 0097, 0040, 0015, 0034, 0043, 0030, 0042, 0035, 0018, 0080, 0031 (1509–3060 and 1518–3030 vertices; 12 sizes per family,
+low/mid/high initial energy cycled). Caps: 300 s for the references (hs-pg, soft-hs-ncg), 120 s for the other methods, frames every
+second; the 216 runs took 8.5 h (2026-10-27 18:55 – 2026-10-28 03:25); load at the start 3 (the phase A jobs gone). The system load
+logged every minute (`runB-loads.txt`): at most 53 (our 64-thread jobs), outside load only the 20 minutes with the game.
+Time to 1.1 × `E_ref` (the reference's minimum within its own 300 s) over the 24 knots; "reached" counts knots:
+
+| method | reached | median s to target | median iterations | ended: rate / floor / stuck / cap |
+|---|---:|---:|---:|---|
+| hs-pg | 24/24 | 24.2 | 76 | 9 / 0 / 0 / 15 |
+| l2-pg | 0/24 | | | 0 / 0 / 0 / 24 |
+| h1-pg | 16/24 | 60.1 | 566 | 0 / 0 / 0 / 24 |
+| h2-pg | 0/24 | | | 0 / 0 / 0 / 24 |
+| hs-armijo | 3/24 | 108.2 | 564 | 0 / 0 / 0 / 24 |
+| soft-hs-ncg | 24/24 | 49.6 | 238 | 12 / 0 / 0 / 12 |
+| soft-hs-lbfgs | 23/24 | 23.6 | 99 | 16 / 0 / 0 / 8 |
+| soft-h1-ncg | 11/24 | 55.8 | 183 | 1 / 1 / 0 / 22 |
+| soft-h1-lbfgs | 19/24 | 47.7 | 114 | 4 / 0 / 0 / 20 |
+
+With the target from the phase A reference (24 min, 1 thread, same knots) the medians are 22.5, 58.1, 107.2 s (hard Hs, H¹, Armijo)
+and 41.2, 19.8, 56.2, 44.5 s (soft); the 120 s cap truncates the slow methods, so their medians are lower bounds for the
+ones that did not reach it. Hs and soft Hs L-BFGS are the fastest to a common energy; soft Hs NCG takes about twice as long as hard Hs
+(238 against 76 iterations: the soft problem needs more steps). 0 audit violations, 0 invalid curves in all 216 runs.
+Full text: `runs_tmp/rc-eval/phaseB-summary.md`.
+
+### One-thread check (the two references on 6 of the subset knots, 12 jobs on an otherwise idle machine, a game running)
+
+Same iterations as in phase A (the runs are deterministic), times to 1.1 × `E_ref(A)`:
+
+| quantity | hs-pg | soft-hs-ncg |
+|---|---:|---:|
+| median (phase A, 60 jobs) / (alone), n = 6 | 1.49 | 1.49 |
+| median (alone, 1 thread) / (64 threads), n = 6 | 8.95 | 12.1 |
+
+i.e. the 64-thread runs are 9× and 12× faster than one thread on the same knots (the cause of the sub-linear speed-up was not examined; the multigrid pool is capped at 16 threads for the 31 larger knots). Per-knot rows: `runs_tmp/rc-eval/check1-summary.md`. The
+other one-thread times of this section are from phase A, so they are 1.49× too slow for an idle machine.
+
+### Videos
+
+`runs_tmp/rc-eval/runB/videos/<knot>.mp4` (24 knots; 3 × 3 grid, 1350 × 1400, 30 fps, 60 s showing the wall time 0–300 s, each panel labelled
+with method, iteration, wall seconds, energy and the stop reason once the run ended), `<knot>.png` (the frame at 50 %), `sheet.png` (all 24 stills),
+and the preview `runs_tmp/rc-eval/preview/grid.mp4`. In the stills I looked at (trefoil0034, trefoil0056) Hs hard and soft Hs L-BFGS reach the trefoil/knot minimum first; L² and H²
+barely leave the tangle; H¹ untangles but slowly (a long loop stays); the Armijo search stays tangled in the budget.
+
+### Anything that looked wrong
+
+* The endpoint-quadrature energy wedged edges against the CCD guard mid-edge (fixed by WP16, §17o); the 230 runs before the fix
+  are kept in `runA-v1-endpoint-quadrature/`.
+* Hs hard still hits the 24-min cap on 180 of 228 knots because `dE·g̃ < 1e-4` is a strict test for the slow tail; `E_ref` is then the best
+  within 24 min. This matches the paper's budget but means the 1.1× target is not 1.1× a converged minimum.
+* Nine soft Hs runs ending on the contact floor at high energy and three stuck hard Hs runs (listed above) remain; none violates the audit.
+* A game running on the machine during parts of phase B and the one-thread check; the load log is `runB-loads.txt`, `check1-start.txt`.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
