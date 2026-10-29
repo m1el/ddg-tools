@@ -3263,6 +3263,68 @@ which compares against the default; an artefact of making the rule the default.)
    (including 3 knots of the phase-B subset), and any run can meet a fold later; histories cannot
    tell which runs would.
 
+## 17q. The Sec. 7 comparison with the Q10 defaults (2026-10-28/29)
+
+The flags, knots, budgets and scripts are the same as §17n. Build 0a5dece, binary frozen in
+`runs_tmp/rc-eval/bin-0a5dece`. Phase A is `runA2` (2052 runs, 60 in parallel, 13.4 h). Phase B is `runB2`
+(216 runs, alone, 64 threads). The one-thread check is `runB1-2`. Outside load slowed 8 knots of
+phase B by about 1.75× per step for every method (trefoil0056, 0097, 0040, 0015, 0034, 0043,
+0030, 0042). Those 72 runs were rerun alone (`runB2-redo`, load logged; per step 0.99× the
+§17n run) and replace the slowed ones (kept in `runB2-slowed`). Tables:
+`runs_tmp/rc-eval/report2/`, `phaseA2-summary.md`, `phaseB2-summary.md`, `check1-2-summary.md`.
+Videos: `runB2/videos`.
+
+**Failures.** No run ended stuck or on the contact floor, against 19 in §17n: the 12 Hs runs,
+3 soft H1 NCG runs, the h2-pg stuck run and 3 more. There were 0 audit violations, 0 invalid curves
+and 0 errors.
+
+| method (phase A) | failed, §17n | failed, Q10 | paper |
+|---|---:|---:|---|
+| hs-pg, ended stuck | 1.3 % | **0 %** | 6.5 % stuck |
+| L2 | 100 % | 100 % | ≥ 97.7 % |
+| H1 | 68.0 % | 68.4 % | 64.5 % |
+| H2 | 92.1 % | 92.5 % | 92.1 % |
+| Hs normalized Armijo | 95.2 % | 93.9 % | – |
+| soft Hs NCG, ended stuck | 1.3 % | **0 %** | 3.3 % stuck |
+| soft Hs L-BFGS, ended stuck | 2.6 % | **0 %** | 14.8 % stuck |
+| soft H1 NCG | 28.1 % | 28.1 % | – |
+| soft H1 L-BFGS | 6.6 % | 6.6 % | – |
+
+**Phase B** (median seconds to 1.1 E_ref, 64 threads; §17n in brackets): hs-pg 23.7 (24.2),
+24/24; soft-hs-lbfgs 24.9 (23.6), 23/24; soft-hs-ncg 50.3 (49.6), 24/24; h1-pg 60.0 (60.1),
+17/24 (16/24); hs-armijo 114.8 (108.2), 3/24. The cost per step did not change: the median
+ratio over the first 40 steps is 1.00–1.01 in phase A, and the one-thread runs on the idle machine
+are 0.91×.
+
+**Final energies (Eq. 17, exact), new over §17n, phase A:**
+
+| method | geometric mean | > 1.5× | < 1/1.5× | mean near pairs per step |
+|---|---:|---:|---:|---|
+| hs-pg | 1.028 | 8 | 3 | 0.4 → 6.2 |
+| hs-armijo | 1.040 | 13 | 0 | 2.1 → 8.1 |
+| h1-pg | 1.037 | 8 | 1 | 2.2 → 8.0 |
+| soft-hs-ncg | 0.970 | 1 | 5 | 0.2 → 6.0 |
+| soft-hs-lbfgs | 0.947 | 0 | 6 | 0.4 → 6.1 |
+| soft-h1-ncg | 0.980 | 5 | 8 | 1.0 → 6.2 |
+
+The medians are 1.000. In phase B (shorter caps) the geometric means are 0.89–1.00, and no
+run is more than 1.5× worse.
+
+**Regression on the hard flows (open).** On a few knots per hard method, the one-sided
+second-neighbour term keeps 15–20 near pairs active for the whole run (§17n: 2–9). The energy
+then decreases much more slowly from the first steps on, at the same cost per step:
+
+* trefoil0073 hs-pg: step 10 has F 3538 (§17n: 2084), and the run ends at 500 (34) after 286 steps.
+* trefoil0077 hs-pg: ends at 290 (49) after 199 steps.
+* trefoil0016 hs-pg: 68 steps in 24 min (546), each step 2× slower, ending at 131 (54).
+
+The rate `dE·g̃` stays high (1e4) while the accepted steps are short. This suggests that the
+corrected energy is stiff at the folds of the crumpled initial curves, and that the Hs metric
+(which has no second-neighbour term) does not precondition this stiffness. This is not yet
+diagnosed. The reference minima `E_ref` of those knots rise, so their targets for the other hard
+methods are looser. With `second_neighbours: false` and `stuck_retry_chord` alone, the §17n runs
+are valid except the 4 stuck runs named in §17p (recommendation 3).
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
