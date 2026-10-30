@@ -9,7 +9,7 @@
 //!             --trace TRACE.jsonl --stuck-projected-reference 0|1
 //!             --stuck-retry-chord 0|1 --start-obj CURVE.obj --newton-polish none|X --early-abort 0|1
 //!             --proj-tol X --proj-iters N --max-halvings N --np-second-neighbours 0|1
-//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W|oneeither:W;
+//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W|oneeither:W|foldgate:C2;
 //!             WP16c: --trace-detail 0|1 --checkpoint-every N --checkpoint-dir DIR]
 //! ```
 //!
@@ -223,9 +223,22 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     ("oneeither", Some(width)) => {
                         SecondNeighbourRule::OneSidedGatedEither { width }
                     }
+                    // WP16c (SPEC 17r): the fold gate; `foldgate:0` takes the candidate's
+                    // parameters, `foldgate:C2` a contact band (C2/5, C2).
+                    ("foldgate", Some(c2)) => {
+                        if c2 > 0.0 {
+                            SecondNeighbourRule::OneSidedFoldGated {
+                                contact_band: (0.2 * c2, c2),
+                                cos_shut: 0.0,
+                                cos_open: 0.5,
+                            }
+                        } else {
+                            SecondNeighbourRule::fold_gated()
+                        }
+                    }
                     _ => {
                         return Err(format!(
-                            "--np-sn-mode: two | one | gated:W | onegated:W | oneeither:W, not {v}"
+                            "--np-sn-mode: two | one | gated:W | onegated:W | oneeither:W | foldgate:C2, not {v}"
                         ));
                     }
                 };

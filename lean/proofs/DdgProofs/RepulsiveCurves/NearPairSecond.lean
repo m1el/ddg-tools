@@ -15,6 +15,10 @@ joined by one edge `K`, the one-sided rule replaces the blend of `rc-near-blend`
   chain rule along a motion.
 * `rc-near-gate`: the chain rule of the gated term `w g (E^n − E^p)` with `g` the product of two
   quintics `W` (`smoother`, `rc-near-blend`) of the scaled closest-point offsets.
+* `rc-near-foldgate` (WP16c, SPEC §17r): the fold-gated weight `W = 1 − (1 − w_c)(1 − w G)` is
+  in `[0, 1]` (so the one-sided bounds hold with `W` in place of `w`) and its chain rule. The
+  gradient of `cos φ` (the normalized dot product of the two edge vectors) is the standard one and
+  is checked by central differences (`tests/wp16c_band.rs`).
 
 Not machine-checked (argued in SPEC §17p): that the composition with the clamped closest-point
 parameters stays C¹ (the parameters are only Lipschitz where a clamp switches, and `W' = 0` at the
@@ -197,6 +201,42 @@ theorem either_gate_bounds {x y : ℝ} (hx0 : 0 ≤ x) (hx1 : x ≤ 1) (hy0 : 0 
   have hxy : x + y = x * y := by linarith
   have hx : x = 0 := by nlinarith
   exact ⟨hx, by subst hx; linarith⟩
+
+/-! ## `rc-near-foldgate` (WP16c, SPEC §17r; an option, off by default) -/
+
+/-- **The fold-gated weight is a weight:** for `w_c, w, G ∈ [0, 1]`,
+`0 ≤ W = 1 − (1 − w_c)(1 − w G) ≤ 1`, so with `onesided_bounds` the fold-gated term keeps
+`E^p ≤ e ≤ max(E^p, E^n)`; and `W = w` wherever the contact weight vanishes and the gate is open.
+
+[formula: rc-near-foldgate] -/
+theorem foldgate_bounds {wc w g : ℝ} (hc0 : 0 ≤ wc) (hc1 : wc ≤ 1) (hw0 : 0 ≤ w) (hw1 : w ≤ 1)
+    (hg0 : 0 ≤ g) (hg1 : g ≤ 1) :
+    0 ≤ 1 - (1 - wc) * (1 - w * g) ∧ 1 - (1 - wc) * (1 - w * g) ≤ 1 ∧
+      1 - (1 - 0) * (1 - w * 1) = w := by
+  have h0 : 0 ≤ w * g := mul_nonneg hw0 hg0
+  have h1 : w * g ≤ 1 := by nlinarith
+  obtain ⟨a, b, _⟩ := either_gate_bounds hc0 hc1 h0 h1
+  exact ⟨a, b, by ring⟩
+
+/-- **The chain rule of the fold-gated weight** `W = 1 − (1 − w_c(r))(1 − w(r) G((cos φ − c₀)/δ))`
+along a motion `s` (`G` the quintic `smoother`, `δ = cos_open − cos_shut`):
+`W' = (1 − w G) w_c' r' + (1 − w_c)(w' r' G + w G' cos φ'/δ)`.
+
+[formula: rc-near-foldgate] -/
+theorem foldgate_hasDerivAt {r c : ℝ → ℝ} {wc w : ℝ → ℝ} {r' c' wc' w' s c₀ δ : ℝ}
+    (hr : HasDerivAt r r' s) (hc : HasDerivAt c c' s) (hwc : HasDerivAt wc wc' (r s))
+    (hw : HasDerivAt w w' (r s)) :
+    HasDerivAt
+      (fun s => 1 - (1 - wc (r s)) * (1 - w (r s) * smoother ((c s - c₀) / δ)))
+      ((1 - w (r s) * smoother ((c s - c₀) / δ)) * (wc' * r') +
+        (1 - wc (r s)) * (w' * r' * smoother ((c s - c₀) / δ) +
+          w (r s) * (30 * ((c s - c₀) / δ) ^ 2 * (1 - (c s - c₀) / δ) ^ 2 * (c' / δ)))) s := by
+  have hg := (smoother_hasDerivAt ((c s - c₀) / δ)).comp s ((hc.sub_const c₀).div_const δ)
+  have h := (((hwc.comp s hr).const_sub 1).mul (((hw.comp s hr).mul hg).const_sub 1)).const_sub 1
+  refine h.congr_deriv ?_
+  simp only [Function.comp, Pi.mul_apply]
+  generalize smoother ((c s - c₀) / δ) = q
+  ring
 
 end RC
 

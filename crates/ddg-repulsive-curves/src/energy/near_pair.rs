@@ -141,6 +141,35 @@ pub enum SecondNeighbourRule {
         /// `σ ∈ (0, 1]`, in segment parameters.
         width: f64,
     },
+    /// The one-sided term with the weight `W = 1 − (1 − w_c(r))(1 − w(r) G(cos φ))` in place of
+    /// `w(r)` (WP16c, `SPEC.md` §17r): `w` the band of the rule (§3.4, or
+    /// [`NearPairOptions::second_neighbour_band`]), `w_c` the same quintic on the narrower
+    /// `contact_band`, `φ` the angle between `I` oriented toward `K` and `J` oriented away from
+    /// `K` (0 for a Z-fold or a straight line, π for a hairpin), `G` the quintic of the blend
+    /// rising from 0 at `cos φ = cos_shut` to 1 at `cos φ = cos_open`. Z-folds are corrected as by
+    /// [`SecondNeighbourRule::OneSided`]; hairpins only within the contact band. `0 ≤ W ≤ 1`, so
+    /// `E^p ≤ e ≤ max(E^p, E^n)` still holds. **Not a default.** [formula: rc-near-foldgate]
+    OneSidedFoldGated {
+        /// The band `(c₁, c₂)` in `r` within which every second-neighbour pair is corrected
+        /// (`0 < c₁ < c₂ ≤` the rule's `c₂`).
+        contact_band: (f64, f64),
+        /// `cos φ` at and below which the fold gate is shut.
+        cos_shut: f64,
+        /// `cos φ` at and above which the fold gate is open (`cos_shut < cos_open ≤ 1`).
+        cos_open: f64,
+    },
+}
+
+impl SecondNeighbourRule {
+    /// The candidate of `SPEC.md` §17r: contact band `(0.001, 0.005)`, the fold gate shut at
+    /// `φ ≥ 90°` and open at `φ ≤ 60°`.
+    pub const fn fold_gated() -> SecondNeighbourRule {
+        SecondNeighbourRule::OneSidedFoldGated {
+            contact_band: (0.001, 0.005),
+            cos_shut: 0.0,
+            cos_open: 0.5,
+        }
+    }
 }
 
 impl Default for NearPairOptions {
@@ -198,6 +227,31 @@ impl NearPairOptions {
                 value: width.to_string(),
                 requirement: "in (0, 1]",
             });
+        }
+        if let SecondNeighbourRule::OneSidedFoldGated {
+            contact_band: (c1, c2),
+            cos_shut,
+            cos_open,
+        } = self.second_neighbour_rule
+        {
+            let wide = self
+                .second_neighbour_band
+                .map_or(self.blend_end, |(_, c2)| c2);
+            if !(c1.is_finite() && c1 > 0.0 && c1 < c2 && c2 <= wide) {
+                return Err(RcError::InvalidOption {
+                    name: "near_pair.second_neighbour_rule.contact_band",
+                    value: format!("({c1}, {c2})"),
+                    requirement: "finite, 0 < c1 < c2 ≤ the second neighbours' c2",
+                });
+            }
+            if !(cos_shut.is_finite() && cos_shut >= -1.0 && cos_shut < cos_open && cos_open <= 1.0)
+            {
+                return Err(RcError::InvalidOption {
+                    name: "near_pair.second_neighbour_rule.cos_shut",
+                    value: format!("({cos_shut}, {cos_open})"),
+                    requirement: "−1 ≤ cos_shut < cos_open ≤ 1",
+                });
+            }
         }
         if !(1..=64).contains(&self.subpanels) {
             return Err(RcError::InvalidOption {
@@ -1043,6 +1097,7 @@ fn second_neighbour_term(
         SecondNeighbourRule::OneSided
             | SecondNeighbourRule::OneSidedGated { .. }
             | SecondNeighbourRule::OneSidedGatedEither { .. }
+            | SecondNeighbourRule::OneSidedFoldGated { .. }
     );
     // The un-weighted term c (w and g factored out) and its gradient.
     let (c, grad_c) = if one_sided {
@@ -1062,6 +1117,23 @@ fn second_neighbour_term(
     } else {
         (diff, *gdiff)
     };
+    if let SecondNeighbourRule::OneSidedFoldGated {
+        contact_band: (cc1, cc2),
+        cos_shut,
+        cos_open,
+    } = rule
+    {
+        return fold_gated_term(
+            (a, b),
+            cl,
+            (w, dw),
+            (cc1, cc2, cos_shut, cos_open),
+            ratio,
+            (lm, li, lj, ev, fv),
+            (c, &grad_c),
+            with_gradient,
+        );
+    }
     let mut grad = ZERO4;
     if with_gradient && c != 0.0 {
         grad4_axpy(&mut grad, w * g, &grad_c);
@@ -1078,6 +1150,61 @@ fn second_neighbour_term(
         value: w * g * c,
         grad,
         weight: w,
+        ratio,
+    }
+}
+
+/// [`SecondNeighbourRule::OneSidedFoldGated`]: `W c` with `W = 1 − (1 − w_c)(1 − w G)` and
+/// `c = E^p ψ(E^n/E^p − 1)` (`SPEC.md` §17r);
+/// `∇W = (1 − w G) w_c' ∇r + (1 − w_c)(G w' ∇r + w G' ∇cos φ)`,
+/// `∇_u cos φ = (v̂ − cos φ û)/|u|` for `u = ±(p₁ − p₀)` (toward `K`), `v = ±(q₁ − q₀)` (away).
+///
+/// [formula: rc-near-foldgate]
+#[allow(clippy::too_many_arguments)]
+fn fold_gated_term(
+    (a, b): (usize, usize),
+    cl: &Closest,
+    (w, dw): (f64, f64),
+    (cc1, cc2, cos_shut, cos_open): (f64, f64, f64, f64),
+    ratio: f64,
+    (lm, li, lj, ev, fv): (f64, f64, f64, P, P),
+    (c, grad_c): (f64, &Grad4),
+    with_gradient: bool,
+) -> PairCorrection {
+    let (wc, dwc) = blend_weight(ratio, cc1, cc2);
+    // I oriented toward K (K meets I at p_a), J away from K (K meets J at q_b).
+    let sa = if a == 1 { 1.0 } else { -1.0 };
+    let sb = if b == 0 { 1.0 } else { -1.0 };
+    let (uh, vh) = (scale(ev, sa / li), scale(fv, sb / lj));
+    let cosphi = dot(uh, vh);
+    let (gf, dgf) = gate_factor((cosphi - cos_shut) / (cos_open - cos_shut));
+    let dgf = dgf / (cos_open - cos_shut);
+    let wg = w * gf;
+    let weight = 1.0 - (1.0 - wc) * (1.0 - wg);
+    let mut grad = ZERO4;
+    if with_gradient && c != 0.0 {
+        grad4_axpy(&mut grad, weight, grad_c);
+        let gr = ratio_gradient(cl, ratio, lm, li, lj, ev, fv);
+        let coef_r = (1.0 - wg) * dwc + (1.0 - wc) * gf * dw;
+        if coef_r != 0.0 {
+            grad4_axpy(&mut grad, c * coef_r, &gr);
+        }
+        let coef_cos = (1.0 - wc) * w * dgf;
+        if coef_cos != 0.0 {
+            // ∇cos φ with respect to ev and fv, then to the endpoints.
+            let gu = scale(sub(vh, scale(uh, cosphi)), sa / li);
+            let gv = scale(sub(uh, scale(vh, cosphi)), sb / lj);
+            let s = c * coef_cos;
+            grad[0] = axpy(grad[0], -s, gu);
+            grad[1] = axpy(grad[1], s, gu);
+            grad[2] = axpy(grad[2], -s, gv);
+            grad[3] = axpy(grad[3], s, gv);
+        }
+    }
+    PairCorrection {
+        value: weight * c,
+        grad,
+        weight,
         ratio,
     }
 }
