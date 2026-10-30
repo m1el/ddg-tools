@@ -675,3 +675,136 @@ fn band_probe() {
         );
     }
 }
+
+/// The authors' `TangentInterpolation` scene (exact back end, 4 threads) under the paper's
+/// energy, WP16 (no second neighbours), Q10 and the WP16c candidates (contact band, fold gate):
+/// energy after steps 1, 5, 10, the two end-edge lengths after steps 5, 10, and the step and
+/// status that end the run (within 80 steps).
+#[test]
+#[ignore]
+fn tangent_interpolation_wp16c() {
+    use ddg_repulsive_curves::Session;
+    use ddg_repulsive_curves::energy::near_pair::SecondNeighbourRule;
+    use ddg_repulsive_curves::scene::{BackendChoice, read_scene};
+    let sc = read_scene("scenes/TangentInterpolation/scene.txt").unwrap();
+    let q10 = NearPairOptions {
+        second_neighbours: true,
+        second_neighbour_rule: SecondNeighbourRule::OneSided,
+        second_neighbour_band: None,
+        ..NearPairOptions::default()
+    };
+    let cases: Vec<(&str, Option<NearPairOptions>)> = vec![
+        ("paper", None),
+        (
+            "wp16",
+            Some(NearPairOptions {
+                second_neighbours: false,
+                ..q10
+            }),
+        ),
+        ("q10", Some(q10)),
+        (
+            "contact-band",
+            Some(NearPairOptions {
+                second_neighbour_band: Some((0.001, 0.005)),
+                ..q10
+            }),
+        ),
+        (
+            "fold-gate",
+            Some(NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::fold_gated(),
+                ..q10
+            }),
+        ),
+    ];
+    for (name, np) in cases {
+        let mut o = sc.options(BackendChoice::Exact, Some(4)).unwrap();
+        o.near_pair = np;
+        let mut s = Session::new(sc.network.clone(), sc.positions.clone(), o).unwrap();
+        let m = s.network().n_edges();
+        let mut line = format!("TI {name}");
+        let mut end = String::from("none within 80");
+        for k in 1..=80 {
+            match s.step() {
+                Ok(r) => {
+                    if [1, 5, 10].contains(&k) {
+                        line.push_str(&format!(" E{k} {:.3}", r.energy_after));
+                    }
+                    if [5, 10].contains(&k) {
+                        let l = s.network().edge_geometry(s.positions()).length;
+                        line.push_str(&format!(" ends{k} {:.2e},{:.2e}", l[0], l[m - 1]));
+                    }
+                    if s.status().is_terminal() {
+                        end = format!("step {k} {:?}", s.status());
+                        break;
+                    }
+                }
+                Err(e) => {
+                    end = format!("step {k} {e}");
+                    break;
+                }
+            }
+        }
+        println!("{line} end: {}", end.chars().take(120).collect::<String>());
+    }
+}
+
+/// For every OBJ listed in `RC_LIST`: whether the second-neighbour part of the correction is
+/// exactly zero under Q10, the contact band and the fold gate (then a flow from that curve starts
+/// bitwise as with WP16's options). One `FOOT` line per curve.
+#[test]
+#[ignore]
+fn rule_footprint() {
+    use ddg_repulsive_curves::energy::near_pair::SecondNeighbourRule;
+    let Some(list) = env("RC_LIST") else {
+        eprintln!("RC_LIST not set; skipped");
+        return;
+    };
+    let e = Exponents::new(2.0, 4.5).unwrap();
+    let pool = make_pool(Some(1)).unwrap();
+    let q10 = NearPairOptions {
+        second_neighbours: true,
+        second_neighbour_rule: SecondNeighbourRule::OneSided,
+        second_neighbour_band: None,
+        ..NearPairOptions::default()
+    };
+    let wp16 = NearPairOptions {
+        second_neighbours: false,
+        ..q10
+    };
+    let rules = [
+        ("q10", q10),
+        (
+            "band",
+            NearPairOptions {
+                second_neighbour_band: Some((0.001, 0.005)),
+                ..q10
+            },
+        ),
+        (
+            "foldgate",
+            NearPairOptions {
+                second_neighbour_rule: SecondNeighbourRule::fold_gated(),
+                ..q10
+            },
+        ),
+    ];
+    let all = |_: usize, _: usize| true;
+    for path in std::fs::read_to_string(&list).unwrap().lines() {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let Ok((net, pos)) = read_curve_obj(path) else {
+            continue;
+        };
+        let base = correction(&pool, &net, &pos, e, &wp16, &all, false).map_or(0.0, |c| c.energy);
+        let mut line = format!("FOOT {path}");
+        for (name, o) in &rules {
+            let c = correction(&pool, &net, &pos, e, o, &all, false).map_or(0.0, |c| c.energy);
+            line.push_str(&format!(" {name} {:.4e}", c - base));
+        }
+        println!("{line}");
+    }
+}

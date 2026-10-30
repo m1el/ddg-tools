@@ -12,10 +12,21 @@ use ddg_repulsive_curves::energy::near_pair::{
 
 type P = [f64; 3];
 
+/// The Q10 rule, spelled out (so the tests do not depend on the default).
+fn q10_rule() -> NearPairOptions {
+    NearPairOptions {
+        second_neighbours: true,
+        second_neighbour_rule:
+            ddg_repulsive_curves::energy::near_pair::SecondNeighbourRule::OneSided,
+        second_neighbour_band: None,
+        ..NearPairOptions::default()
+    }
+}
+
 fn near_contact() -> NearPairOptions {
     NearPairOptions {
         second_neighbour_band: Some((0.001, 0.005)),
-        ..NearPairOptions::default()
+        ..q10_rule()
     }
 }
 
@@ -41,7 +52,7 @@ fn zfold(h: f64) -> ([P; 2], [P; 2]) {
 fn the_band_leaves_hairpins_to_eq18_and_catches_folds_at_contact() {
     let e = Exponents::new(2.0, 4.5).unwrap();
     let t = InnerTables::new(e);
-    let q10 = NearPairOptions::default();
+    let q10 = q10_rule();
     let band = near_contact();
     // K = p₁q₀: I meets K at its end 1, J at its end 0.
     let joined = Some((1, 0));
@@ -126,7 +137,7 @@ fn bent(phi_deg: f64, h: f64) -> ([P; 2], [P; 2]) {
 fn the_fold_gate_keeps_z_folds_drops_hairpins_and_matches_central_differences() {
     let e = Exponents::new(2.0, 4.5).unwrap();
     let t = InnerTables::new(e);
-    let q10 = NearPairOptions::default();
+    let q10 = q10_rule();
     let fg = fold_gated();
     fg.validate().unwrap();
     let joined = Some((1, 0));
