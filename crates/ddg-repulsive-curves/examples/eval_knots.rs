@@ -9,8 +9,14 @@
 //!             --trace TRACE.jsonl --stuck-projected-reference 0|1
 //!             --stuck-retry-chord 0|1 --start-obj CURVE.obj --newton-polish none|X --early-abort 0|1
 //!             --proj-tol X --proj-iters N --max-halvings N --np-second-neighbours 0|1
-//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W|oneeither:W]
+//!             --np-band C1,C2 --np-sn-band C1,C2 --np-sn-mode two|one|gated:W|onegated:W|oneeither:W;
+//!             WP16c: --trace-detail 0|1 --checkpoint-every N --checkpoint-dir DIR]
 //! ```
+//!
+//! WP16c (`SPEC.md` §17r): `--trace-detail 1` adds the seconds per phase of the step, the CCD
+//! counters and the solver report to every `--trace` line; `--checkpoint-every N` writes the curve
+//! at step 0 and every `N`-th step to `--checkpoint-dir` as `step<k>.obj` (for `--start-obj`
+//! replays and probes). Both are off by default and change nothing else.
 //!
 //! Diagnostic options (WP16b, `SPEC.md` §17p): `--trace` appends one JSON line per step (step
 //! sizes, every trial with its outcome, and at a stuck step the closest pair and the shortest
@@ -84,6 +90,9 @@ struct Args {
     proj_iters: Option<u32>,
     max_halvings: Option<u32>,
     np: NearPairOptions,
+    trace_detail: bool,
+    checkpoint_every: usize,
+    checkpoint_dir: Option<String>,
 }
 
 fn bit(s: &str) -> Result<bool, String> {
@@ -128,6 +137,9 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
         proj_iters: None,
         max_halvings: None,
         np: NearPairOptions::default(),
+        trace_detail: false,
+        checkpoint_every: 0,
+        checkpoint_dir: None,
     };
     let mut it = args;
     while let Some(s) = it.next() {
@@ -218,6 +230,13 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
                     }
                 };
             }
+            "--trace-detail" => a.trace_detail = bit(&value("--trace-detail")?)?,
+            "--checkpoint-every" => {
+                a.checkpoint_every = value("--checkpoint-every")?
+                    .parse()
+                    .map_err(|e| format!("--checkpoint-every: {e}"))?
+            }
+            "--checkpoint-dir" => a.checkpoint_dir = Some(value("--checkpoint-dir")?),
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -229,6 +248,9 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     if a.frames_every.is_some() != a.frames_out.is_some() {
         return Err("--frames-every-seconds and --frames-out go together".into());
+    }
+    if (a.checkpoint_every > 0) != a.checkpoint_dir.is_some() {
+        return Err("--checkpoint-every and --checkpoint-dir go together".into());
     }
     if a.frames_every.is_some_and(|s| !(s.is_finite() && s > 0.0)) {
         return Err("--frames-every-seconds must be positive".into());
@@ -353,6 +375,7 @@ fn trace_line(
     net: &CurveNetwork,
     pos: &[[f64; 3]],
     lbar0: f64,
+    detail: bool,
 ) -> String {
     let opt = |x: Option<f64>| x.map_or("null".into(), jnum);
     let trials: Vec<String> = r
@@ -407,6 +430,33 @@ fn trace_line(
             ",\"shortest_edge\":[{emin},{}],\"closest_pair\":{cp_s}",
             jnum(lmin / lbar0)
         );
+    }
+    if detail {
+        // WP16c: where the time of the step goes.
+        let s = &r.seconds;
+        extra.push_str(&format!(
+            ",\"seconds\":{{\"total\":{},\"retarget\":{},\"energy\":{},\"metric\":{},\"solve\":{},\"line_search\":{},\"ls_energy\":{},\"projection\":{},\"second_order\":{},\"ccd\":{},\"near_pair\":{}}},\"ccd\":{{\"checks\":{},\"candidates\":{},\"advances\":{},\"windows\":{}}},\"projection_solves\":{},\"projection_cycles\":{},\"linear\":{{\"solver\":{},\"iterations\":{},\"residual\":{}}}",
+            jnum(s.total),
+            jnum(s.retarget),
+            jnum(s.energy),
+            jnum(s.metric),
+            jnum(s.solve),
+            jnum(s.line_search),
+            jnum(s.line_search_energy),
+            jnum(s.projection),
+            jnum(s.second_order),
+            jnum(s.ccd),
+            jnum(s.near_pair),
+            r.ccd_checks,
+            r.ccd.candidates,
+            r.ccd.advances,
+            r.ccd.windows,
+            r.projection_solves,
+            r.projection_cycles,
+            json_str(r.linear.solver),
+            r.linear.iterations,
+            jnum(r.linear.relative_residual)
+        ));
     }
     format!(
         "{{\"it\":{},\"status\":{},\"f_before\":{},\"f_after\":{},\"slope\":{},\"gnorm\":{},\"tau\":{},\"tau_start\":{},\"tau_hi\":{},\"tau_max\":{},\"halvings\":{},\"contact_floor\":{},\"near_pairs\":{},\"max_violation\":{},\"proj_iters\":{},\"trials\":[{}]{extra}}}",
@@ -592,6 +642,20 @@ fn run(a: &Args) -> Result<(), String> {
         frame_s += tf.elapsed().as_secs_f64();
     }
     history.push([0.0, 0.0, f0, f0, f64::NAN, f64::NAN, f64::NAN, 0.0]);
+    let checkpoint = |session: &Session| -> Result<(), String> {
+        if let Some(dir) = &a.checkpoint_dir
+            && session.iteration().is_multiple_of(a.checkpoint_every)
+        {
+            let p = format!("{dir}/step{}.obj", session.iteration());
+            write_curve_obj(&p, session.network(), session.positions())
+                .map_err(|e| format!("{p}: {e}"))?;
+        }
+        Ok(())
+    };
+    if let Some(dir) = &a.checkpoint_dir {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{dir}: {e}"))?;
+    }
+    checkpoint(&session)?;
     loop {
         if let Some(limit) = a.max_seconds
             && wall(audit_s, frame_s) >= limit
@@ -664,9 +728,15 @@ fn run(a: &Args) -> Result<(), String> {
                 session.network(),
                 session.positions(),
                 session.mean_edge_length0(),
+                a.trace_detail,
             );
             writeln!(w, "{line}").map_err(|e| e.to_string())?;
             w.flush().map_err(|e| e.to_string())?;
+            audit_s += ta.elapsed().as_secs_f64();
+        }
+        if a.checkpoint_dir.is_some() {
+            let ta = Instant::now();
+            checkpoint(&session)?;
             audit_s += ta.elapsed().as_secs_f64();
         }
         if let Some(f) = frames.as_mut() {
