@@ -3320,10 +3320,170 @@ then decreases much more slowly from the first steps on, at the same cost per st
 
 The rate `dE·g̃` stays high (1e4) while the accepted steps are short. This suggests that the
 corrected energy is stiff at the folds of the crumpled initial curves, and that the Hs metric
-(which has no second-neighbour term) does not precondition this stiffness. This is not yet
-diagnosed. The reference minima `E_ref` of those knots rise, so their targets for the other hard
+(which has no second-neighbour term) does not precondition this stiffness. Diagnosed in §17r
+(hairpins at short joining edges in the hard flows; 19 of the 37 are wall-clock truncations). The reference minima `E_ref` of those knots rise, so their targets for the other hard
 methods are looser. With `second_neighbours: false` and `stuck_retry_chord` alone, the §17n runs
 are valid except the 4 stuck runs named in §17p (recommendation 3).
+
+## 17r. The hard-flow regression (WP16c, 2026-10-30)
+
+The 37 phase-A runs of §17q whose final Eq. 17 got more than 1.5× worse under the Q10 defaults.
+Data (git-ignored): `runs_tmp/rc-wp16c/` (`regressed.txt`, `classify.json` and `timing.txt` the
+history census, `rep/` traced replays with checkpoints of six runs, `probe/` step probes,
+`census/` the fold census of the 228 initial and 2 × 2052 final curves, `mA/`, `mF/` the
+candidates, `scr1/` a screen). Tools: `eval_knots --trace-detail 1` (seconds per phase, CCD and
+solver counters on every trace line) and `--checkpoint-every N --checkpoint-dir D` (both off by
+default, outputs otherwise unchanged); probes in `tests/wp16c_probe.rs` (`sn_step_probe`: the
+second-neighbour pairs of a curve, the projected gradient with and without them, a line scan, the
+CCD contact, finite differences with `RC_FD=1`; `track_probe`, `sn_fold_census`, `band_probe`,
+`rule_footprint`, `tangent_interpolation_wp16c`). Replays reproduce phase A (§17n, WP16 options
+`--np-second-neighbours 0 --stuck-retry-chord 0`) and §17q bitwise.
+
+### Census: 19 of the 37 are not regressions of the flow
+
+Comparing the §17n and §17q histories step by step:
+
+* **16 runs have bitwise identical histories** on the common prefix and only made fewer steps in
+  the 24 minutes: hs-armijo knot0006, 0014, 0050, 0080, 0094, 0101, trefoil0059, 0098; h1-pg
+  knot0094, trefoil0043, 0072, 0098; h2-pg trefoil0009, 0059; soft-h1-ncg trefoil0001, 0048.
+  Thirteen of them started 5.5–6.7 h into the §17q phase A, when every run then started was slower
+  per step (median over all runs started in that hour 1.05–1.08×, these 1.2–1.67×; trefoil0059
+  hs-armijo, which never has a near pair, 1.62×): outside load. The two soft-h1-ncg runs stopped one
+  step (2–5 %) short, where their energy was still falling fast.
+* 3 hs-armijo runs (knot0110, trefoil0009, 0043) diverge at steps 12–14 by rounding-size amounts
+  and reach the same energy at the same step (ratio 1.00); they too were cut by the load window.
+* **18 runs regressed in the flow**: the objective at the same step count is 1.23–14.6× the §17n
+  one: hs-pg knot0064, knot0066, trefoil0012, 0016, 0038, 0073, 0077, 0078; h1-pg knot0066,
+  trefoil0010, 0038, 0073; hs-armijo knot0066, trefoil0073; soft-h1-ncg knot0001, trefoil0033, 0074;
+  soft-hs-ncg knot0001. For hs-pg the ratio grows from the first steps (trefoil0073: 1.5 at step 5,
+  4.0 at 80, 14.6 at 286); for the other methods it stays near 1 for 40–160 steps and grows later.
+
+**The near-pair counts are not the cause.** The history column counts every pair in the band,
+including second-neighbour pairs whose one-sided correction is exactly zero. Along straight runs
+of edges `d_IJ ≈ ℓ_K`, so a joining edge shorter than `0.75 ℓ_IJ` puts the pair in the band with
+`E^n/E^p ≈ 0.4–0.5` (`band_probe`: the same 19 such pairs on the §17n and §17q curves of
+trefoil0016 at step 26). Runs with bitwise identical histories show the same jump (knot0006
+hs-armijo: mean 0.3 → 8.4).
+
+**The derivative is right.** Central differences of the corrected energy and of its
+second-neighbour part on the stalled curves (trefoil0073 steps 1, 5 and the §17n step 3,
+trefoil0077 step 5, trefoil0016 step 0, knot0066 hs-armijo §17n step 10), along the
+second-neighbour differential and a random field: relative error `≈ 1e-9 … 2e-7` at
+`h = 1e-6 ℓ̄`, falling as `h²` from `h = 1e-4 ℓ̄`.
+
+### Root cause: hairpins at short joining edges, held open against Eq. 18
+
+**trefoil0073 hs-pg** (traced replay, 30 steps). Step 1 is the same in both runs (same direction,
+`τ = 0.0232`, CCD-limited). It closes a hairpin `I, K, J` = edges 1035, 1036, 1037 with a short
+joining edge (`ℓ_K = 0.28 ℓ̄` between `ℓ_I = 3.23 ℓ̄` and `ℓ_J = 1.90 ℓ̄`): turning angles 171° at
+`I/K` and 9° at `K/J`, so `J` runs back along `I` (angle between `I` toward `K` and `J` away from
+`K`: 163°), `d = 0.042 ℓ̄`, `r = 0.016`, `E^n/E^p = 31`, one-sided correction `+98.7` (the paper's
+term of the pair drops as the hairpin closes, because its four nodes become collinear: Eq. 18 pulls
+the hairpin shut). At that curve the second-neighbour term is 87 % of the rate `dF·g̃` (5.0e4
+against 6.3e3), its differential has norm 4446 against 193 for Eq. 17, and the hairpin vertex moves
+41 ℓ̄ per unit `τ` against 14 ℓ̄ without it. The corrected energy is stiff along `−g̃`: its decrease
+falls to half the linear prediction at `τ = 0.0016` (without the term: `τ = 0.41`). The Hs metric
+does not know this stiffness. From then on the §17q flow flaps the hairpin open and shut every
+step (open: turn 134–147°, `E^n/E^p ≈ 0.7–1.9`; shut: 169°, `E^n/E^p = 14–18`, correction 65–73),
+and the whole curve moves with the step the hairpin allows: the start is `⅔ τ_max` of a CCD contact
+of the closing pair (gap 0.1), or larger trials fail in the projection because the hairpin vertex
+moves several `ℓ_K` (all 28 rejected trials of the 30 steps are projection failures, none is
+an Armijo failure; §17n run: 26). Median `τ` 0.014 against 0.026, `F` after 30 steps 2505 against 1185. The §17n
+flow carries the same hairpin collapsed (turn 160–175°, `E^n/E^p` 5–34, invisible to its energy)
+and keeps the longer steps.
+
+The same geometry is in every hard-flow regression: trefoil0077 (edges 1432–1434, turns 21°/174°;
+median `τ` 0.021 against 0.052, 29 against 22 projection failures in 30 steps), knot0064,
+knot0066, trefoil0012, 0038, 0073, 0078 (the §17n final curves carry hairpins with `E^n/E^p`
+5.7–22.6, `ℓ_K = 0.13–0.64 ℓ̄` between longer edges, angle 143–164°, `d = 0.05–0.2 ℓ̄`).
+trefoil0016 is the one case where the term mattered only at the start: its initial curve has an
+active hairpin at a joining edge of `0.045 ℓ̄` (between 0.21 and 0.14 ℓ̄); §17q flips it open in the
+first steps and no second-neighbour pair is active after step 4 (a replay from the §17q step-26
+curve is bitwise the same with and without second neighbours). The later 2.15× time per step
+(time to step 68: 1448 s against 674 s) is a path effect: on the new trajectory the multigrid needs
+8–20 V-cycles per direction solve instead of 2–3, and more trials fail in the projection
+(projection seconds per step 4.9 against 2.3).
+
+**Census of the final curves** (`sn_fold_census`, one-sided term of each second-neighbour pair):
+
+| | §17n finals with an active second-neighbour pair | of them hairpins (angle ≥ 90°) | `r` (q10 / median / q90) | `E^n/E^p` (median / q90) |
+|---|---:|---:|---|---|
+| hard flows (hs-pg 20, hs-armijo 22, h1 17, h2 14, L2 36 of 228 each) | 109 | 108 | 0.03 / 0.12 / 0.28 | 3.9 / 12.4 |
+| the 18 fold-ending runs of §17p (17 soft, trefoil0065 h1-pg) | 18 | 1 (knot0076) | all `< 0.001` (contact) | 2e4 … 2e11 |
+
+Hard flows keep hairpins at short joining edges at moderate distance; the failures of §17p are
+Z-folds (both turning angles 160–180°, angle 0–38°) at contact. Among the hs-pg runs that changed
+under Q10, those whose §17n final carries such a hairpin have a geometric-mean step-matched ratio
+of 1.35 (7 worse than 1.5×, 3 better, of 20), the others 1.03 (none, of 17).
+
+**Why soft Hs gains and the hard flows lose.** Soft methods move edge lengths freely and the
+L-BFGS / NCG directions carry curvature, and their §17n failures were Z-folds closed to the contact
+floor, which the one-sided term stops (soft-Hs runs whose §17n final has an active pair: geometric
+mean 0.47, 9 of 13 better than 1/1.5; 3 of the 13 are hairpins). A projected-gradient step with
+fixed edge lengths has neither: one stiff hairpin bounds `τ` for the whole curve.
+
+### Candidates (all off by default; `NearPairOptions`)
+
+* **(A) contact band** `second_neighbour_band = Some((0.001, 0.005))` with the one-sided rule (an
+  existing option): every second-neighbour pair is corrected only within `r < 0.005`. No new code;
+  `rc-near-blend`, `rc-near-onesided`.
+* **(F) fold gate** `SecondNeighbourRule::OneSidedFoldGated { contact_band: (0.001, 0.005),
+  cos_shut: 0, cos_open: 0.5 }` (`SecondNeighbourRule::fold_gated()`, `eval_knots --np-sn-mode
+  foldgate:0`): the one-sided term with `W = 1 − (1 − w_c(r))(1 − w(r) G(cos φ))` in place of
+  `w(r)`, `φ` the angle between `I` toward `K` and `J` away from `K` (0 for a Z-fold, 180° for a
+  hairpin), `G` the quintic rising from `φ = 90°` to `φ = 60°`. Z-folds get the Q10 term, hairpins
+  only the contact band. `0 ≤ W ≤ 1`, so `E^p ≤ e ≤ max(E^p, E^n)` holds [formula:
+  rc-near-foldgate] (Lean `foldgate_bounds`, `foldgate_hasDerivAt` in `NearPairSecond.lean`; the
+  gradient of `cos φ` is checked by central differences, `tests/wp16c_band.rs`). C¹ as the other
+  one-sided rules.
+* Not attempted: **the second-neighbour stiffness in the metric** (a Gauss–Newton block per active
+  pair added to `Ā`) would treat the cause rather than skip the hairpins, but every solver back end
+  (dense Schur, multigrid with the block cluster tree, the chord projection) would need the term,
+  and it would change the direction of every metric-based method; **a cap** on the correction loses
+  the divergence that stops the Z-folds; **activation by `E^n/E^p`** is equivalent to (A) on these
+  data (hairpins ≤ 34, failures ≥ 2e4).
+
+A screen (`scr1/`) of (A) and of the band `(0.002, 0.01)` on six regressed hs-pg runs (60 steps)
+and the 9 soft runs of §17p (150 steps): both keep the soft runs off the floor; (A) leaves the hs-pg
+runs bitwise at §17n, `(0.002, 0.01)` changes two of them by 2–5 %.
+
+**Measurements.** 69 runs per candidate, 16 at a time, one thread, the phase-A flags, capped by
+steps so that load does not enter: the 18 regressed runs and the 30-run regression set of §17p at
+`min(§17n steps, 200)`, the 12 runs of §17p and its 9 fold runs at the §17q step count. Ratios are
+the objective `F` at the same step (geometric means):
+
+| | (A) contact band | (F) fold gate |
+|---|---|---|
+| 18 regressed, vs §17n | 17 bitwise for 200 steps (trefoil0073 h1-pg from 129: 0.99); 1.000 | 16 bitwise; 1.004 (knot0001 soft-hs-ncg 1.04, soft-h1-ncg 1.04 = Q10); none > 1.2 |
+| 18 regressed, vs Q10 (15 with a Q10 value) | 0.549 (12 better than 1/1.2) | 0.552 (12 better than 1/1.2) |
+| 12 runs fixed by WP16b: floor / stuck | 0 / 0 | 0 / 0 |
+| same, vs Q10 | 1.170 (knot0115 3.54, trefoil0038 1.27, trefoil0090 1.23) | 0.990 (none above 1.2) |
+| 9 fold runs of §17p: floor / stuck | 0 / 0 (§17n: 3 on the floor) | 0 / 0 |
+| same, vs Q10 | 2.20 (7 above 1.2) | 1.06 (trefoil0065 h1-pg 1.32, trefoil0094 1.20, trefoil0097 1.35 soft-h1-ncg) |
+| regression set (30), changed vs §17n | 0 | 2 (knot0044 soft-hs-ncg from 4: 1.002, trefoil0100 soft-hs-ncg from 5: 0.96) |
+| regression set, changed vs Q10 | the 5 of §17p (three hairpin runs back to §17n) | the same 5 |
+| initial curves where the flow differs from §17n at step 0 (`rule_footprint`) | 0 / 228 (Q10: 24) | 0 / 228 |
+| `TangentInterpolation` | as WP16: guard at step 21 (Q10: 18) | as WP16 |
+| crate tests with the candidate as the default | all pass | all pass |
+| cost | fewer pairs than Q10 | Q10's pairs plus a dot product: run time 1.008× (A) on 48 runs with identical trajectories |
+
+### Recommendation
+
+**(F) the fold gate as the default rule** (`second_neighbour_rule:
+SecondNeighbourRule::fold_gated()`, band unchanged). It removes the hard-flow regression (the
+regressed runs follow §17n bitwise until a Z-fold or a contact appears), keeps every fix of WP16b
+(no floor, no stuck end on the 21 runs; on the soft runs within 0.99 of Q10 on the 12 and 1.06 on
+the fold runs), does not touch any initial curve or the authors' scene, and is proved like the
+other one-sided rules. (A) is simpler (no new code) but gives back much of Q10's gain on the soft
+runs (knot0115 3.5×, the soft-H¹ fold runs 2–4.7× above Q10) while still keeping them off the floor.
+The cause itself (a stiffness the Hs metric does not see) remains for Z-folds under (F); a
+metric term is the open alternative.
+
+**Rerun.** Under (F) a run differs from §17n only from the first step at which a Z-fold enters the
+band or a pair comes within `r < 0.005`; histories cannot show when that happens, so the tables
+need a **full rerun of phases A and B** (expected: the hard flows at their §17n results, the soft
+fold runs near §17q's). With (A) the same holds. Keeping Q10 and rerunning nothing leaves the 18
+regressions of this section (and the `E_ref` of their knots) in §17q.
 
 ## 18. The user's decisions (2026-10-26)
 
