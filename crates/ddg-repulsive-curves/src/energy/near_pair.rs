@@ -90,14 +90,16 @@ pub struct NearPairOptions {
     /// `M`: Gauss–Legendre sub-panels (8 nodes each) per graded half-panel of the outer integral.
     pub subpanels: usize,
     /// Also correct pairs of edges joined by one edge (`I`, `K`, `J` consecutive at a vertex
-    /// each). Default `true` with [`SecondNeighbourRule::OneSided`] (`SPEC.md` §17p, §18 Q10): the
-    /// paper's rule cannot see an accordion fold (`I` and `J` overlapping across `K`), while at a
-    /// corner, where the closest points are at the ends of `K` and Eq. 18 overestimates (a
-    /// barrier the paper's flows and the authors' scenes rely on), the one-sided rule keeps
-    /// Eq. 18. `false`: the pair is the paper's term (WP16, §17o).
+    /// each). Default `true` with [`SecondNeighbourRule::fold_gated`] (`SPEC.md` §17p, §17r,
+    /// §18 Q10, Q11): the paper's rule cannot see an accordion fold (`I` and `J` overlapping
+    /// across `K`), while at a corner, where the closest points are at the ends of `K` and Eq. 18
+    /// overestimates (a barrier the paper's flows and the authors' scenes rely on), the one-sided
+    /// rule keeps Eq. 18; hairpins are corrected only near contact. `false`: the pair is the
+    /// paper's term (WP16, §17o).
     pub second_neighbours: bool,
     /// How second neighbours are corrected when [`NearPairOptions::second_neighbours`] is set
-    /// (WP16b, `SPEC.md` §17p). Default [`SecondNeighbourRule::OneSided`] (never below Eq. 18).
+    /// (WP16b, `SPEC.md` §17p). Default [`SecondNeighbourRule::fold_gated`] (never below Eq. 18;
+    /// §17r, §18 Q11).
     /// Ignored when second neighbours are excluded.
     pub second_neighbour_rule: SecondNeighbourRule,
     /// The band `(c₁, c₂)` in `r = d/ℓ_IJ` for second neighbours; `None` (the default): the
@@ -148,7 +150,8 @@ pub enum SecondNeighbourRule {
     /// `K` (0 for a Z-fold or a straight line, π for a hairpin), `G` the quintic of the blend
     /// rising from 0 at `cos φ = cos_shut` to 1 at `cos φ = cos_open`. Z-folds are corrected as by
     /// [`SecondNeighbourRule::OneSided`]; hairpins only within the contact band. `0 ≤ W ≤ 1`, so
-    /// `E^p ≤ e ≤ max(E^p, E^n)` still holds. **Not a default.** [formula: rc-near-foldgate]
+    /// `E^p ≤ e ≤ max(E^p, E^n)` still holds. The default since §18 Q11, with the parameters of
+    /// [`SecondNeighbourRule::fold_gated`]. [formula: rc-near-foldgate]
     OneSidedFoldGated {
         /// The band `(c₁, c₂)` in `r` within which every second-neighbour pair is corrected
         /// (`0 < c₁ < c₂ ≤` the rule's `c₂`).
@@ -161,7 +164,7 @@ pub enum SecondNeighbourRule {
 }
 
 impl SecondNeighbourRule {
-    /// The candidate of `SPEC.md` §17r: contact band `(0.001, 0.005)`, the fold gate shut at
+    /// The default rule (`SPEC.md` §17r, §18 Q11): contact band `(0.001, 0.005)`, the fold gate shut at
     /// `φ ≥ 90°` and open at `φ ≤ 60°`.
     pub const fn fold_gated() -> SecondNeighbourRule {
         SecondNeighbourRule::OneSidedFoldGated {
@@ -173,15 +176,15 @@ impl SecondNeighbourRule {
 }
 
 impl Default for NearPairOptions {
-    /// `c₁ = 0.25, c₂ = 0.75, M = 4`, second neighbours corrected by the one-sided rule
-    /// (`SPEC.md` §17o, §17p, §18 Q10).
+    /// `c₁ = 0.25, c₂ = 0.75, M = 4`, second neighbours corrected by the fold-gated one-sided
+    /// rule [`SecondNeighbourRule::fold_gated`] (`SPEC.md` §17o, §17p, §17r, §18 Q10, Q11).
     fn default() -> Self {
         NearPairOptions {
             blend_start: 0.25,
             blend_end: 0.75,
             subpanels: 4,
             second_neighbours: true,
-            second_neighbour_rule: SecondNeighbourRule::OneSided,
+            second_neighbour_rule: SecondNeighbourRule::fold_gated(),
             second_neighbour_band: None,
         }
     }

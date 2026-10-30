@@ -188,13 +188,16 @@ initial curves.
 equal lengths), **except** pairs joined by one edge (`I, K, J` consecutive; option
 `second_neighbours`): their closest points are the ends of `K`, where Eq. 18
 has nodes; there it overestimates the pair integral (a corner barrier the paper's flows and the
-authors' scenes rely on, §17o). Since §18 Q10 they are included by default with the one-sided rule
-(never below Eq. 18, so the corner barrier stays; it catches accordion folds, §17p);
+authors' scenes rely on, §17o). Since §18 Q10 they are included by default with a one-sided rule
+(never below Eq. 18, so the corner barrier stays; it catches accordion folds, §17p); since Q11 the
+rule is fold-gated: Z-folds get the one-sided term, hairpins only within the contact band
+`r ∈ (0.001, 0.005)` (§17r);
 `second_neighbours: false` gives WP16's term. Defaults `c₁ = 0.25`, `c₂ = 0.75`, `M = 4` (§17o). Broad phase: a
 uniform grid (cell `(1 + 2c₂) max ℓ`, sorted cell entries), `O(|E|)`; the pair list is sorted.
-Options for second neighbours (WP16b, measured in §17p; default `OneSided`, §18 Q10):
-`second_neighbour_rule` (`TwoSided`, `OneSided` [formula: rc-near-onesided], gated variants
-[formula: rc-near-gate]) and `second_neighbour_band`.
+Options for second neighbours (WP16b/c, measured in §17p, §17r; default
+`SecondNeighbourRule::fold_gated()`, §18 Q11): `second_neighbour_rule` (`TwoSided`, `OneSided`
+[formula: rc-near-onesided], gated variants [formula: rc-near-gate], `OneSidedFoldGated`
+[formula: rc-near-foldgate]) and `second_neighbour_band`.
 
 **The term.** For each such pair and each order `(I, J)` [formula: rc-near-blend]
 
@@ -3467,7 +3470,7 @@ the objective `F` at the same step (geometric means):
 | crate tests with the candidate as the default | all pass | all pass |
 | cost | fewer pairs than Q10 | Q10's pairs plus a dot product: run time 1.008× (A) on 48 runs with identical trajectories |
 
-### Recommendation
+### Recommendation (adopted as §18 Q11, 2026-10-30)
 
 **(F) the fold gate as the default rule** (`second_neighbour_rule:
 SecondNeighbourRule::fold_gated()`, band unchanged). It removes the hard-flow regression (the
@@ -3517,3 +3520,7 @@ regressions of this section (and the `E_ref` of their knots) in §17q.
   `near_pair_second::rules_are_inert_while_second_neighbours_are_excluded` compares against the
   excluded variant explicitly. Phases A and B of the evaluation are rerun in full with these
   defaults (`runs_tmp/rc-eval/runA2`, `runB2`); §17n keeps the earlier results.
+* Q11 (2026-10-30, after WP16c, §17r): the default second-neighbour rule is the fold gate,
+  `SecondNeighbourRule::fold_gated()` (contact band `(0.001, 0.005)`, gate shut at `φ ≥ 90°`, open
+  at `φ ≤ 60°`); `stuck_retry_chord` stays on. Phases A and B are rerun in full
+  (`runs_tmp/rc-eval/runA3`, `runB3`, `runB1-3`); §17q keeps the Q10 results.
