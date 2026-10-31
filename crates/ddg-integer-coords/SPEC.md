@@ -165,7 +165,8 @@ four, in the order ranges, 1, 3, 4, and stops at the first failure. Its cost is 
 about 100 ns per `|E| + Σ n⁺` (I4, measured in WP1: spot 2.1 ms, camelbad 9.8 ms; one certificate
 ≈ 1.7–1.9 |E| signpost flips). **Default (I4 decided):** certify at the end of every public
 operation that does a variable amount of work (Delaunay flipping, refinement, before the common
-subdivision, a FlipOut run) when `IntegerOptions::certify` is set (default on); never per flip or
+subdivision, a FlipOut run), as a `*_certified` variant where the operation is the shared one
+(WP3: `flip_to_delaunay_certified`; an `IntegerOptions::certify` switch does not exist yet); never per flip or
 per split, also not in debug builds (it would make debug Delaunay flipping quadratic); tests
 certify per operation on small meshes and per batch on large ones.
 
@@ -263,7 +264,11 @@ lengths, bitwise: same formula) are identical whichever representation runs it. 
 edges are. This is the provided method `Triangulation::flip_to_delaunay`, written once over the
 trait (it is also `IntrinsicTriangulation::flip_to_delaunay`), so the identical flip sequence holds
 by construction; `DelaunayReport::n_constrained` counts the constrained edges, which the other
-statistics leave out.
+statistics leave out. Only `FlipRefused` counts as a refused flip; any other error of a flip (an
+`Overflow`, `InvalidCoordinates`) ends the flipping and is returned as
+`IntrinsicError::Representation`, the failing flip changing nothing (55b0c3b). Measured (WP3,
+load 3.3): Delaunay flipping 1.63 ms on spot (signposts 1.57), 9.29 ms on camelbad (8.87); random
+flips 3.8 M/s and 3.2 M/s, as the signposts.
 
 ### 4.4 Face split (Sec. 3.3, Supp. Alg. 5, 6, App. A)
 
@@ -291,6 +296,18 @@ curve, `n_mj = n_mi = −1`, `n_mk = max(n_ki, n_jk, 0)` (`ic-split-edge-normal`
 other side when interior; `q⁰_m = u_i q⁰_i + u_j q⁰_j` along the input edge. Boundary edges are
 always of the second kind. Lengths and refusal from `plan_edge_split`, connectivity from
 `Complex::split_edge` (I20: also for `n_ij ≥ 0`, without the face-split-then-flip route).
+**`n_ij ≥ 0`, as built (WP3):** the split needs only `before`, the number of crossings of `ij`
+before the split point (those of `extract_intrinsic_edge(ij)` with `distance/ℓ < t`), and `q⁰_m`,
+interpolated between the two neighbouring crossings inside their input face. The halves get
+`before` and `n_ij − before`; the new edge to the opposite corner `c` of each side
+(`ic-split-crossed-edge`; Eq. 6 is its `n = −1` case, tested):
+
+```
+n_mc = c_c + e_a + e_b + max(0, c_a − before) + max(0, before − (n_ab − c_b))      [formula: ic-split-crossed-edge]
+```
+
+with `a b` the split edge, `c_*`, `e_*` the corner and emanating counts of that side's face. A
+split point within rounding of a crossing is refused (`InsertionRefused`), nothing changed.
 
 ### 4.6 Vertex removal (Sec. 3.5, Alg. 8, Thm. D.1)
 
@@ -299,12 +316,16 @@ analogue (I7: the reference's rule for boundary vertices, `runs_tmp/ic-reference
 delete. No integer data changes beyond the flips. Thm. D.1 proves that a simplicial star with
 angle sum `2π` and degree `≥ 4` has a spoke whose quadrilateral has all angles `≤ π`; it need not
 be strictly convex (Lean `cross_star_no_strict`: in the degree-4 cross every inner corner is `π`),
-so N5's strict flippability can fail, e.g. at an interior vertex made by an edge split (**I27**).
+so N5's strict flippability can fail. At an interior vertex made by an edge split (a straight
+star) the two spokes at angle `π` are never flippable; the others may be (**I27**).
 For a star that is not simplicial the paper conjectures it (open, `ic-vertex-removal-delta`).
-**I8:** the flip choice is deterministic (the flippable edge that lowers the degree with the
-largest minimum angle afterwards; ties by edge index), the loop is bounded by `deg(i)²` flips, and
-a star where no edge is flippable is refused with `RemovalStuck { vertex, degree }`, the state
-restored. Counted over every removal of the evaluation (§10).
+**I8:** the flip choice is deterministic (I24: the reference's score, self-loops first, ties by
+edge index; only flips that lower the degree count; the reference's `checkFlip` gives refused,
+fixed or degree-one edges the score `+∞`), the loop is bounded by `10 deg(i)` flips, and a star
+where no such flip exists is refused with `RemovalStuck { vertex, degree }`, the state restored
+(by a clone of `Complex`, `O(|E|)`; a journal of inverse flips does not restore `vertex_halfedge`).
+Counted over every removal of the evaluation (§10). WP3: 3884 removals with 2.4 flips each (at most
+14); of face-inserted vertices 1148 removed, 12 stuck.
 
 ### 4.7 Moving an inserted vertex (Sec. 3.6)
 
@@ -440,6 +461,9 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-roundabout-update` | Eq. 4 gives the local index after the flip | C |
 | `ic-face-split-normal` | Alg. 5/6: inserting a vertex in any region `R` of a face model and joining it to the corners by arcs disjoint from the others gives the stated counts; hence the result is valid whichever region floating point picks | B |
 | `ic-split-edge-normal` | Eq. 6 | A |
+| `ic-split-crossed-edge` | §4.5: splitting a crossed edge after `before` crossings gives `n_mc` as stated, for any `0 ≤ before ≤ n_ab` of a valid face (Eq. 6 the `n = −1` case) | B (from the face model and chord interleaving; pending) |
+| `ic-strip-intersection` | the straight segment through an unfolded strip meets each interior edge once, at the computed parameters (both directions, §3.1) | A (pending) |
+| `ic-extract-intrinsic-edge` | `ExtractIntrinsicEdge` returns the input edges crossed by the intrinsic edge, in order | C (pending, WP9) |
 | `ic-recover-barycentric` | Eq. 15–16 reproduce `q⁰` exactly for any solution `ξ`, when the corner positions are exact (affine combination) | A |
 | `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (proved equal to `it-point-distances`, which the code evaluates; I25) |
 | `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | the finite identity behind `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
@@ -622,10 +646,15 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   neither input-aligned nor stable under flips. For vertices of `V⁰` an input-aligned frame is
   available from the roundabouts plus one angle within the input wedge; the design is decided in
   WP11 before that consumer switches representation.
-* **I27** *Removal of a vertex with a straight star (open, WP3).* An interior vertex made by an
-  edge split has degree 4 with two angles of `π`, so no spoke is strictly flippable (§4.6). WP3
-  decides between undoing the split (the inverse of `Complex::split_edge`, merging the halves) and
-  `RemovalStuck`, and counts how often refinement meets it.
+* **I27** *Removal of a vertex with a straight star (decided in WP3: `RemovalStuck`, state
+  restored).* An interior vertex made by an edge split has degree 4 with two angles of `π`; those two
+  spokes are refused by `plan_flip` as too thin, and the other two flip only when their
+  quadrilateral is convex at the far end. Measured: right after the split 1728 of 2588 split
+  vertices removed, 860 stuck; after Delaunay flipping 1692 removed, 1898 stuck (1873 straight
+  stars). Refinement removes interior vertices, which are face insertions there, so it rarely meets
+  this; FlipOut's Bézier splits and constrained paths do. **Future:** `Complex::merge_edge` (the
+  inverse of `split_edge`) in `ddg-intrinsic`, so that such a vertex is removed by merging the two
+  halves back.
 
 ## 12. Work packages
 
@@ -634,7 +663,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP0 | **done** (2814e8a–aca460e): `Complex`, `Triangulation`, `plan_*`, `AngleFrames` (I9), `ddg_core::mollify` (I13); 240 bitwise pins unchanged | `crates/ddg-intrinsic/src/…`, `crates/ddg-core` | — | Opus |
 | WP1 | **done** (e2d71da–2fb8762): `IntegerTriangulation` (no `Triangulation` impl yet: needs WP2–WP4), init, §2.3, the oracle's integer formulas, combinatorial Alg. 1–4, `certify`, `from_intrinsic` (conversion from signposts, the differential oracle for WP3), errors | `src/{lib,error,coords,formulas,trace,certify,convert}.rs` | WP0 | Opus |
 | WP2 | **done** (7aa2891–bb56df2): geometric crossings, strip intersection, `extract_intrinsic_edge` (linear), `trace_edge_on_input` wired; same crossed input edges as signposts on all 678 806 edges, 0 clamps | `src/geometry.rs`, `tests/geometry.rs`, `examples/extract_cost.rs` | WP1 | Opus |
-| WP3 | flip (Eq. 3, 4 in `formulas.rs`, checked or `i128`, against the oracle's `flip` fixtures), Delaunay flipping, edge split, removal (I27); differential test: flip the same edges in both representations and compare with `from_intrinsic` exactly | `src/{flip,split,remove}.rs`, `tests/ops.rs` | WP1 | Opus |
+| WP3 | **done** (7b7dcd3–a315f9e): flip (Eq. 3, 4), Delaunay flipping, edge split incl. `n ≥ 0`, removal (I27), `impl Triangulation`; 437 595 flips on 266 states equal `from_intrinsic` of the signposts exactly | `src/{flip,split,remove,interface}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | common subdivision, `P₀`, `P₁`, point queries | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |

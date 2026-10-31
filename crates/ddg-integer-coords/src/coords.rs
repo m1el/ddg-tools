@@ -152,8 +152,10 @@ pub struct InitReport {
 /// tail is an input vertex, and the place `q⁰` of every inserted vertex on the input mesh.
 ///
 /// Vertices `0 … n_input_vertices() − 1` are the input vertices `V⁰` with their ids; the others
-/// are inserted (`V*`). Read-only so far: the operations (flips, splits, removal, extraction of
-/// the geometry) are later work packages; see the crate's README.
+/// are inserted (`V*`). Flips, edge splits, removal and the geometry of the crossings are
+/// implemented, and the type implements [`ddg_intrinsic::Triangulation`]; face splits
+/// (`insert_vertex`), the common subdivision and refinement are later work packages (see the
+/// crate's README).
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegerTriangulation {
     pub(crate) input: Arc<InputSurface>,

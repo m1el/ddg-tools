@@ -218,7 +218,11 @@ conceptually): outer arc `a = n₀, n₁, …, n_k = c`, `k = deg(W)`, and at `n
    only `β_{j−1}` can newly be `< π`, so the scan resumes at `j − 1` (Sec. 4.1, gc: fg.cpp:814).
 2. `γ_shorter = (a, n₁, …, n_{k−1}, c)`; replace the joint by it (gc: fg.cpp:79-183): the new
    segments go innermost (wedge side) on the outer-arc edges; joints at `a`, `c` and the outermost
-   segments that shared `ab`, `bc` are re-queued (gc: fg.cpp:162-182).
+   segments that shared `ab`, `bc` are re-queued (gc: fg.cpp:162-182). **As built (F2):** re-queued
+   are the joint at the tail of every new segment, the joint of the segment that follows, and both
+   joints of every segment that lay next to a removed one in its edge's layer (the reference
+   re-queues only the outermost segment's tail joint, which can leave a joint that became flexible
+   unqueued).
 3. `deg(W) = 1`: `γ_shorter = (a, c)` along the single opposite edge. `deg(W) = 0` (out and back
    along one edge, `α = 0`): the joint contracts, both segments are removed (Sec. 4.1, F12).
 
@@ -235,7 +239,11 @@ counted (`refused_flips`). Before replacing, the new length must be strictly sma
 `ℓ_ab + ℓ_bc` (gc: fg.cpp:836-838); otherwise the path is left as it was, the flips are kept, and
 the joint is counted `stalled` and not re-queued until a neighbour changes. An edge carrying a
 segment is never flipped (F7; the reference's skip at gc: fg.cpp:787-790 is here an invariant
-check returning `FlipError::Internal`).
+check returning `FlipError::Internal`). More than `k₀² + 2k₀ + 8` flips in one call (`k₀` the
+initial wedge degree; Thm A.7–A.8 bound them by `k₀²`) is `Internal`. Any refusal while
+`β_j < π`, including `NotConvex` by rounding, counts as refused. A stalled joint side is remembered
+with the bits of its angle; the sweep skips it until that angle changes or a replacement re-queues
+it. Each `shorten` call starts with a fresh queue and no stall memory.
 
 ### 4.2 Geodesic paths, Alg. 2 `MakePathGeodesic`
 
@@ -248,7 +256,7 @@ every path (both sides when both are `< π − tol`). Loop (gc: fg.cpp:919-975):
 2. Not flexible: drop (gc: fg.cpp:950-952). It is re-queued when a neighbour's replacement makes
    it outermost (step 2 of §4.1).
 3. Alg. 1, then update. Iteration counted.
-4. Stop rules (F14): `max_iterations` (status `IterationLimit`), `stop_length_ratio` (current/initial
+4. Stop rules (F14), checked only on a live, flexible entry: `max_iterations` (status `IterationLimit`), `stop_length_ratio` (current/initial
    `<` ratio, the paper's 0.9 for segmentations, Sec. 6.1; gc: fg.cpp:967-973), `stop_min_angle`
    (all queued `α ≥` threshold, Sec. 4.2 end).
 5. Queue empty: a **final sweep** recomputes every joint and re-queues each flexible one that is
@@ -262,7 +270,7 @@ fg.cpp:962-965); this never changes which joint is processed next.
 
 Closed paths use Alg. 2 unchanged, except the **single-segment loop** `(aa)` with `α < π` on a side:
 replace it by the two other edges of the triangle on that side (`ab`, `ba`), an isotopy inside one
-face (gc: fg.cpp:855-917). The length grows; App. B shows the next step does not undo it
+face (gc: fg.cpp:855-917). "Left" is the face of the halfedge that runs like the segment. The length grows; App. B shows the next step does not undo it
 (`φ₁ + φ₂ < ω`, Eq. 4–6; `fo-loop-perturbation`). A loop that contracts to a vertex (§4.1 step 3
 leaves no segment) is removed and reported in `contracted` (Fig. 20 "contracts to point"; F12).
 Termination for loops is a conjecture (App. B end; Sec. 7), so loops always run under
@@ -389,14 +397,17 @@ the bad meshes of IT §5):
    (unchanged, zero flips), a convex boundary corner (pushed off) and a reflex one (kept).
 4. *Exact distance*: `ddg_intrinsic_apps::exact::exact_distance` (MMP-type, IT-apps N37) between
    the path's ends: `|γ| ≥ d_exact (1 − 1e-9)` always; the fraction with `|γ| ≤ d_exact (1 + 1e-6)`
-   is reported (paper Sec. 6.5: > 95 % minimal). Not gc's `exact_polyhedral_geodesics`, which at
+   is reported (F2: 80.6 % within `1e-6` on 360 random pairs; the others are other local
+   geodesics, e.g. around a torus the long way, all certified. The paper's "> 95 % minimal",
+   Sec. 6.5, is for its single-source tree, not for random pairs). Not gc's `exact_polyhedral_geodesics`, which at
    this commit is a radius-limited greedy unfolding with its MMP code commented out
    (gc: `include/…/exact_polyhedral_geodesics.h:14-21`; F23).
 5. *Monotone length*: each Alg. 1 replacement strictly shortens (paths and networks); for loops the
    App. B moves are the only increases and are counted.
 6. *Isotopy*: §2.1 non-crossing after every iteration (`check_invariants`); multiply covered input
    (Fig. 8 top as an open path spiralling twice around a tube, and as two parallel loops given as
-   two paths; a path pulled around its own end, Fig. 8 bottom). A single closed path winding twice
+   two paths; a path pulled around its own end, Fig. 8 bottom, realised on a flat annulus, since on
+   the waist of a tube it becomes a helix that never touches its start). A single closed path winding twice
    around a tube crosses itself under every layering (a curve in the class `a²` of an annulus is not
    simple), so §2.1 refuses it; the reference does not check.
 7. *Bézier*: on a plane, the pinned points after `r` rounds equal the planar de Casteljau
@@ -513,7 +524,8 @@ model where the signpost extraction breaks and the integer one does not.
 * **F13** Loops run under `max_iterations`, default `100 (|E| + m₀)`; paths have the same default
   limit (the reference has none), reported as `IterationLimit`.
 * **F14** Stop rules `max_iterations`, `stop_length_ratio`, `stop_min_angle`; the length is a running
-  sum (the reference recomputes it every iteration, gc: fg.cpp:968-969).
+  sum (the reference recomputes it every iteration, gc: fg.cpp:968-969), re-summed when a path
+  contracts (otherwise it ends at `−1.1e−16`).
 * **F15** Dijkstra on the current `T`, ties by `(distance, halfedge id)`; errors for same vertex and
   disconnected ends. A boundary edge walked against its only halfedge gets the key
   `n_halfedges + edge` (the reference has exterior halfedges; we don't). `path_from_vertices(tri,
@@ -590,7 +602,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 |---|---|---|---|---|
 | F0 | **done** with IC WP0 (2814e8a–aca460e): R1, R3, R4 | `crates/ddg-intrinsic/src/…` | — | Opus |
 | F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | **done** (2144fed, d3c11e3): `src/{lib,error,network,wedge,certify,init,report}.rs` (`init`: Dijkstra and vertex-sequence paths, F3 adds waypoints and edge sets; `report`: options and reports for F2) | F0 (R1 for signposts only) | Opus |
-| F2 | Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6 on signposts | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy}.rs` | F1 | Opus |
+| F2 | **done** (05f9592–ae935ec): Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6, 10 on signposts; the representation identity test (§7 item 8) on integers | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy,random_paths,identity}.rs` | F1 | Opus |
 | F3 | initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |
 | F4 | Bézier, split bookkeeping, iCDT; tests 7, 8 | `src/{bezier,cdt}.rs`, `tests/{bezier,identity}.rs` | F2, IC WP3/WP4 + R4 | Opus |
 | F5 | Lean tiers A, B; oracle Alg. 1/2 and fixtures; `CITED.md` section | `lean/proofs/DdgProofs/FlipGeodesics/…`, `lean/oracle/DdgOracle/FlipGeodesics…` | this file | Opus |
