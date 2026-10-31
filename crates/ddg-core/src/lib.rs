@@ -11,6 +11,7 @@
 //!   vertex classes.
 //! * [`sparse`] — a small sparse matrix type and direct solvers with reusable symbolic analysis.
 //! * [`io`] — Wavefront OBJ reading and writing, and the cone files of the optimal-cones dataset.
+//! * [`mollify`] — intrinsic mollification of degenerate edge lengths (never applied unasked).
 //! * [`generators`] — small procedural test meshes.
 //!
 //! # Example
@@ -70,6 +71,7 @@ pub mod distance;
 pub mod generators;
 pub mod geometry;
 pub mod io;
+pub mod mollify;
 pub mod operators;
 pub mod sparse;
 pub mod topology;
