@@ -22,10 +22,38 @@ shares.
 | `certify()` | SPEC §2.4, all four items (below). |
 | `from_intrinsic` | integer coordinates read off a signpost triangulation by tracing its edges (below). |
 
-**Not yet** (later work packages): `impl Triangulation for IntegerTriangulation` (needs flips,
-splits and extraction of positions), flips and Delaunay flipping (WP3), edge split and removal
-(WP3), face split and App. A (WP4), the common subdivision (WP5), refinement (WP6), transfer
-(WP7).
+**Not yet** (later work packages): face split and App. A (WP4; `insert_vertex` of the shared
+interface is `Unsupported`), the common subdivision (WP5), refinement (WP6), transfer (WP7).
+
+## Operations (WP3)
+
+| | |
+|---|---|
+| `flip_edge`, `can_flip` | refusals and new length from `ddg_intrinsic::plan_flip` (bitwise as signposts); Eq. 3 with the corrected first terms `c^{ji}_l + c^{ij}_k` in its doubled form (`i128`, an odd value is an error, I14; outside `i64` → `Overflow { edge }`; `n_kl < −1` → `InvalidCoordinates` naming the edge); Eq. 4 for both new halfedges with tails in `V⁰` (`LocalIndices::modulus`, no reduction at the boundary). All from the pre-flip state, then `Complex::flip_edge` + `move_halfedge_data`. |
+| Delaunay flipping | the shared `Triangulation::flip_to_delaunay`; `flip_to_delaunay_certified` certifies after it (I4). |
+| `split_edge` | refusals and lengths from `plan_edge_split`. `n = −1` (all boundary edges): Eq. 6 on both sides, `q⁰ = (1 − t) q⁰_i + t q⁰_j` on the input edge (the signposts' arithmetic). `n ≥ 0` (I20, explicit, also for constrained edges): crossings before the point from `extract_intrinsic_edge` (`distance < t ℓ`), `q⁰` interpolated in the input face between the two neighbouring crossings (refused within rounding of a crossing), the integers by `formulas::split_side` (the arcs separated by the new chord; Eq. 6 is its `n = −1` case). `split_edge_given` takes both decisions from the caller. |
+| `remove_vertex` | inserted interior vertices: flips by I24 (degree must drop; loops first, then `min(A₁, A₂)/(A₁ + A₂)`, ties by edge id; bound `10 deg`), then `Complex::remove_vertex` with `VertexRemoval` moving `n`, `r`, lengths, `q⁰`. Input vertex / constrained spoke: refused before anything changes; boundary: `Unsupported` (I7); no flip left: `RemovalStuck`, with the state restored exactly (connectivity from a copy, the rest from a journal). Returns `Removal` (the flips, the renumbering). |
+| `impl Triangulation` | lengths, angle sums, places, flips, splits, the constrained mask; `trace_edge_on_input` = `extract_intrinsic_edge` (WP2); errors through `to_intrinsic_error` (`IntrinsicError::Representation`, `"integer coordinates"`). |
+
+**I27.** A vertex made by an edge split has two spokes at an angle of `π`: their flips would make
+a triangle without area (`plan_flip` refuses them), and of the two halves the one with the angle
+below `π` at the vertex can be flipped only if its quadrilateral is convex at the far end. When
+it cannot, the removal is `RemovalStuck` (state restored); merging the halves would need an
+inverse of `Complex::split_edge`, which `ddg_intrinsic` does not have. Measured below: about a
+third of fresh split vertices, half after Delaunay flipping; face insertions almost never (12 of
+1 160).
+
+**Timings** (release, one pinned core, load average 3.3, 2026-10-31, best of 5 / 3;
+`cargo test --release --test ops -- --ignored --nocapture timing`):
+
+| mesh | \|E\| | Delaunay flipping (flips) | signposts | integer | certify after | random flips/s, signposts | integer | removal |
+|---|---|---|---|---|---|---|---|---|
+| spot | 8 784 | 281 | 1.57 ms | 1.63 ms | 1.48 ms | 3.74 M | 3.83 M | 7.8 µs |
+| camelbad | 34 116 | 8 110 | 8.87 ms | 9.29 ms | 6.94 ms | 3.27 M | 3.23 M | 25 µs |
+
+Integer flips cost the same as signpost flips (Eq. 3, 4 are a few dozen integer operations; the
+time is in `plan_flip`, shared). A removal copies the connectivity once (O(|E|), most of its
+cost on camelbad) so that a stuck removal can be undone exactly.
 
 ## Geometry of the crossings (WP2)
 
@@ -117,7 +145,28 @@ exact reading was needed.
   equality: `corner` (519 faces), `trace` (192 steps), `tracecurve` (14 curves on the Fig. 5 complex
   and two hand-built Δ-complexes, 2 closed curves), `identify` (168 indices; 34 arguments of the
   random fixture have an invalid face `ija`, where the oracle rounds Eq. 1 and this crate refuses,
-  I14), `splitedge` (52).
+  I14), `splitedge` (52), `flip` (305 quads, 302 roundabout updates, 304 flips back).
+* `tests/ops.rs` (WP3), against the signposts on the 17 shapes, spot and camelbad, 7 scenarios, 2
+  seeds; after every batch the integer state **equals** `from_intrinsic` of the flipped signposts
+  (connectivity, lengths bitwise, every `n`, roundabout and place) and certifies:
+  * flips: 266 states, 1 008 batches, 912 744 attempts, 437 595 flips, 475 149 refusals (all the
+    same in both), then Delaunay flipping with the identical flip sequence and report (183 002
+    flips); Δ-complexes up to 23 self-edges and 46 faces with a repeated vertex in one state
+    (I21); 0 mismatches;
+  * flip then flip back: 10 490 edges, integers restored exactly;
+  * edge splits: 4 256 along input edges known to the signposts (exact, places bitwise), 1 060
+    along input edges the signposts trace (all but the place exact, places within 2e-11), 5 030
+    across input edges with the signposts' crossings and place (exact) and the same 5 030 with this
+    crate's own crossings (all but the place exact, places within 1.5e-10 barycentric); refusals
+    identical;
+  * removals of inserted vertices, the same flips and removal replayed in the signposts, compared
+    exactly: 3 884 removed (9 416 flips, 2.4 per removal, at most 14), 1 301 stuck (1 287 of them at
+    a straight star from an edge split), states restored exactly; refused removals (input vertex,
+    boundary, constrained spoke) change nothing;
+  * I27: 2 588 vertices from splits of interior edges (913 across input edges) removed at once:
+    1 728 removed, 860 stuck; after Delaunay flipping 1 692 removed, 1 898 stuck (1 873 straight);
+  * overflow: hand-built states near `i64::MAX` give `Overflow`, never wrap; Eq. 3 below `−1`
+    (quad `2,0,0,0,0`) is refused as invalid.
 
 ## The reference implementation
 
