@@ -127,6 +127,7 @@ pub mod export;
 mod flip;
 pub mod formulas;
 pub mod frames;
+pub mod generic_ops;
 mod input;
 pub mod insert;
 pub mod interface;
