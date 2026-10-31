@@ -337,3 +337,35 @@ fn the_certificate_rejects_every_mutation() {
     assert!(escaped.is_empty(), "not caught: {escaped:#?}");
     let _ = ValidityItem::Ranges;
 }
+
+/// SPEC §7, I22: mollification only when asked, reported, and the input surface is the
+/// mollified one.
+#[test]
+fn mollification_is_explicit_and_reported() {
+    use ddg_integer_coords::{InitOptions, PAPER_MOLLIFY_EPSILON};
+    for shape in all_shapes() {
+        let lengths = shape.geometry.edge_lengths();
+        let (plain, report) =
+            IntegerTriangulation::with_options(&shape.mesh, lengths, &InitOptions::default())
+                .unwrap();
+        assert!(report.mollified.is_none());
+        assert_eq!(plain.edge_lengths(), lengths);
+        let options = InitOptions {
+            mollify: Some(PAPER_MOLLIFY_EPSILON),
+        };
+        let (t, report) = IntegerTriangulation::with_options(&shape.mesh, lengths, &options)
+            .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
+        let m = report.mollified.unwrap();
+        for (a, b) in t.edge_lengths().iter().zip(lengths) {
+            assert_eq!(*a, b + m.epsilon);
+        }
+        assert_eq!(t.input().geometry().edge_lengths(), t.edge_lengths());
+        t.certify().unwrap();
+        if m.epsilon > 0.0 {
+            eprintln!(
+                "{}: mollified by {:.3e} ({} faces below the margin)",
+                shape.name, m.epsilon, m.n_faces_below_margin
+            );
+        }
+    }
+}
