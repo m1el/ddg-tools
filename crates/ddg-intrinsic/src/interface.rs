@@ -118,6 +118,15 @@ pub trait Triangulation {
         }
     }
 
+    /// Whether a flip has its two corner angles at no extra cost, so that asking for them
+    /// ([`FlipRequest::corner_angles`]) is free (SPEC N52). Provided: `false`; the signposts
+    /// override it with `true` (their signpost update computes the angles), the integer
+    /// coordinates compute two more `corner_angle` per flip. A caller whose gain from the
+    /// angles is smaller than that cost (FlipOut's Alg. 1) asks only when this is `true`.
+    fn flip_corner_angles_are_free(&self) -> bool {
+        false
+    }
+
     /// Inserts a vertex at the point `bary` of face `f` and joins it to the three corners
     /// (paper Alg. 7; ids as [`Complex::split_face`]).
     ///
@@ -370,6 +379,10 @@ impl Triangulation for IntrinsicTriangulation {
     #[inline]
     fn flip_edge_with(&mut self, e: usize, request: FlipRequest) -> Result<Flip, IntrinsicError> {
         IntrinsicTriangulation::flip_edge_with(self, e, request)
+    }
+    #[inline]
+    fn flip_corner_angles_are_free(&self) -> bool {
+        true
     }
     fn insert_vertex(&mut self, f: usize, bary: [f64; 3]) -> Result<Insertion, IntrinsicError> {
         IntrinsicTriangulation::insert_vertex(self, f, bary)

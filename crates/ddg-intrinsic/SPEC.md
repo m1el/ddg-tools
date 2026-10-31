@@ -1019,7 +1019,10 @@ Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesi
   does not matter). The signposts compute exactly these two for their signpost update, so asking
   costs them nothing; the integer coordinates compute them from the plan
   (`FlipPlan::new_corner_angles`, two `corner_angle`), which costs about 60 ns per flip, so only
-  a caller that uses them asks. *Who asks:* FlipOut's Alg. 1 (its memo takes them); Delaunay
+  a caller that uses them asks. `Triangulation::flip_corner_angles_are_free()` says which it is
+  (provided `false`; the signposts `true`). *Who asks:* FlipOut's Alg. 1, only where that is `true`
+  (its memo takes them; on the integer coordinates they cost more than the memo saves, so it
+  does not ask there and the memo computes the angles as before); Delaunay
   flipping, refinement, removal, insertion, the optimal Delaunay iteration and iCDT do not. The
   other two corners at `l` and `k` are not computed.
   *Bitwise.* With the default test nothing changes: `tests/bitwise_pins.rs` and the suites of
@@ -1035,10 +1038,10 @@ Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesi
   1 %): camelbad 9.47 → 8.89 ms (−6 %; before the angles existed 8.99), spot (281 flips) 1.58 →
   1.54 (1.57), tree (594 flips) 8.91 → 8.71 (8.69). FlipOut's shortening (median per pair, 9
   meshes × 500 pairs, best of 4 interleaved rounds, N5 on both sides, against the code before the
-  angles existed, `adf9d80^`): signposts −5.8 % to −7.5 % (the memo takes angles the signpost update
-  computed anyway); integers, which compute them for the memo, +2.4 % to +8.2 % (+0.7 % to +3.2 %
-  when FlipOut does not ask), so the two angles cost an integer flip more than the memo saves.
-  Against the first version of N52 the integers are 2 % to 4 % faster.
+  angles existed, `adf9d80^`; best of 4 interleaved rounds, load 2.2 to 3.0): signposts −4.2 % to
+  −6.7 % (the memo takes angles the signpost update computed anyway); integers, which do not ask,
+  +0.8 % to +2.6 % (if they asked, +2.4 % to +8.2 %: the two angles cost an integer flip more than
+  the memo saves). The remaining integer difference is not the angles.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,

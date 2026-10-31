@@ -299,7 +299,7 @@ pub(crate) fn flip_out<T: Triangulation>(
 
     let request = FlipRequest {
         shape: test,
-        corner_angles: true,
+        corner_angles: tri.flip_corner_angles_are_free(),
     };
     let max_flips = k0 * k0 + 2 * k0 + 8;
     let mut j = 1;

@@ -425,9 +425,6 @@ Landed:
   * the integer oracle with 23 golden fixtures.
 
 Open:
-* FlipOut asks the integer flips for their corner angles too (IT N52): shortening is +2–8 % against
-  the code before R9, +1–3 % if it did not ask there (signposts −6–7 % either way). Undecided:
-  ask only where the angles are free.
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
   replacement puts on the path, where gc reads signposts (FlipOut SPEC §9.1).
 * I27: a vertex made by an edge split usually cannot be removed by flips (`RemovalStuck`). A
