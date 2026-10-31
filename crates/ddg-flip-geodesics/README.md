@@ -11,7 +11,7 @@ run on either intrinsic triangulation of this workspace: the signposts of `ddg-i
 Sharp, Crane 2021). Everything is generic over `ddg_intrinsic::Triangulation`.
 
 The contract of the crate is [`SPEC.md`](SPEC.md): scope, data, the geometry of a joint, the
-algorithm, verification, and every decision the paper leaves open (`F1`–`F27`).
+algorithm, verification, and every decision the paper leaves open (`F1`–`F30`).
 
 ## What is implemented (work package F1)
 
@@ -155,7 +155,74 @@ an edge is the cheap part; the integer walk identifies each crossing). The paper
 Dijkstra on small meshes. In absolute terms every path takes under 2 ms on one thread (paper:
 "a few ms" on an i7-4790K).
 
-Next: geodesic Bézier curves and the intrinsic constrained Delaunay triangulation (F4).
+## What is implemented (work package F4)
+
+- **Geodesic Bézier curves** (`src/bezier.rs`, SPEC §6.1, paper Sec. 6.2, Fig. 23, after
+  Morera, Carvalho, Velho 2008): `geodesic_bezier(tri, control_vertices, rounds, &options)`
+  returns the network (one open path, the curve) and a `BezierReport`;
+  `GeodesicNetwork::bezier_subdivide` works on an existing open path whose pinned vertices
+  are the control points. It follows the reference's recursion (`gc: fg.cpp:1068-1248`):
+  - shorten;
+  - split every part between consecutive control points at arc length `L/2`, snapping to
+    either end of the edge within `1e-4 ℓ` (F19);
+  - unpin the old interior control points, shorten, and repeat on the new points until one
+    part is left;
+  - recurse on both halves.
+
+  After `r` rounds the pinned points (`BezierReport::control_points`, `d 2^r + 1` of them)
+  are the control polygons of the `2^r` pieces. The control points are kept as a list and
+  checked against the pinned vertices along the path after every change. A curve that meets
+  a control point twice is refused (`FlipError::Bezier`); the reference assumes the curve is
+  simple. Two retries the reference does not need, both counted in the report:
+  - **thin split**: when the triangulation refuses a split as too thin (IT N5), the
+    triangulation is flipped to Delaunay with the curve's edges held fixed, and the split is
+    made again. On a flat square a straight geodesic is one long edge between needles.
+  - **point on an input edge**: the integer split refuses a point on an input edge
+    (`NotLocated`), and lattice-like meshes give many. A midpoint within `1e-9 ℓ` of a
+    crossing of its edge with an input edge (`trace_edge_on_input`, on both
+    representations) is moved by `2e-9 ℓ` towards the middle of the edge.
+- **Edge splits that carry the network** (`GeodesicNetwork::split_edge`, `network.rs`):
+  every segment on the split edge, however many share it, becomes two segments on the halves
+  (`Insertion::halves`), each in its old place across the edge. The first part keeps the
+  segment's id.
+- **The iCDT** (`src/cdt.rs`, SPEC §6.3, paper Sec. 6.3, Fig. 25): `make_delaunay(&options)`
+  marks every edge that carries a segment as constrained and runs the shared
+  `flip_to_delaunay` (`gc: fg.cpp:1035-1045`). It returns a `CdtReport`: the
+  `DelaunayReport`, the number of network edges and the number newly constrained. The marks
+  stay, as in the reference; `clear_constraints` removes them before the network changes
+  again.
+- **Certificate on `T⁰` at inserted vertices** (`src/extract.rs`): a joint at an inserted
+  vertex (inside an input face, or on an input edge) is measured in that face, and the face
+  after it is unfolded across the edge. The joint is checked like the others; before, such a
+  bend on an input edge was taken for a crossing. A crossing closer than `1e-8` of the face's
+  size to such a joint belongs to the joint. The integer split can put a vertex within
+  rounding of an input edge (barycentric `7e-16`), and the angle between pieces that short
+  is rounding.
+
+### Results (`tests/bezier.rs`, `tests/cdt.rs`, `tests/identity.rs`)
+
+| test | result |
+|---|---|
+| 7, plane: pinned points = planar de Casteljau subdivision | jittered flat squares 12 × 12 and 24 × 24; `d = 1 … 4`; 0–4 rounds; input and Delaunay start; 75 cases. Places on `T⁰`: integers `≤ 2.2e-14`, signposts `≤ 1.2e-11`. Part lengths: `≤ 1.2e-14`. The bound is `1e-12` for integers and part lengths, `1e-10` for signpost places (the trace of a new vertex carries the rounding of its edge's signpost after many flips) |
+| 7, curved: reversing the control points | icosphere, jittered icosphere, torus, bumpy grid, spot, camelbad; `d = 3`; 3 rounds. Signposts: 22 cases, `≤ 1.3e-13` of the bounding-box diagonal. Integers without a nudge: 20 cases, `≤ 4.6e-15`. Two integer cases had a midpoint exactly on an input edge: the two directions split different edges there and the nudges differ, `2.5e-10` (bound `1e-8`) |
+| Bézier on both representations | both certificates after every curve (`d = 2`, 4 rounds); reports, paths and extraction identical; deterministic; extraction equal at 1 and 8 threads |
+| 8, identity, Bézier + iCDT | 53 curves on 15 shapes (input and Delaunay start): same splits, flips, segments, iCDT flips, faces and lengths bit for bit; integer `certify()` after each |
+| splits of shared edges | three paths side by side on the same edges, two running one way and one the other: after each split both halves list the segments in the old order; valid network; joints straight; layering rebuilt equal. A single-segment loop on a self-edge is split into a two-segment loop. Refused splits change nothing |
+| snapping (F19) | a grid row, 3 rounds: all 7 midpoints snap to grid vertices, nothing is split |
+| iCDT | 59 networks on 16 shapes, plus Bézier curves on spot, camelbad and an icosphere, both representations: paths and lengths unchanged bitwise; every unconstrained interior edge Delaunay (status `Delaunay`); both certificates; integer `certify()`; representations identical; deterministic |
+| refused inputs | too few or repeated control points, too many rounds, bad snap tolerance, a loop or two paths given to `bezier_subdivide`: errors; nothing changed |
+
+Timings (`tests/bezier.rs::timings`, ignored; release, one pinned core, run alone; three runs
+within 1 %; load average 3.2 from other agents' jobs). Ten curves per mesh with `d = 3` and
+4 rounds (90 splits each), then the iCDT of each. Medians:
+
+| mesh | Bézier ms, signposts / integers | iCDT ms, signposts / integers | flips per curve: Bézier / iCDT | plain Delaunay of the input (with building it) ms, sp / ic |
+|---|---|---|---|---|
+| spot | 0.80 / 0.88 | 1.81 / 1.82 | 149 / 567 | 1.85 / 2.07 |
+| camelbad | 3.23 / 3.43 | 9.6 / 9.7 | 451 / 8559 | 11.8 / 13.2 |
+
+The iCDT costs what Delaunay flipping of the whole mesh costs; the curve's 50 edges are a
+small part of it.
 
 ## Speed of the shortening, and runs that stall
 

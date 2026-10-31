@@ -806,6 +806,25 @@ fn timings() {
                 v.sort_by(f64::total_cmp);
                 (v[v.len() / 2], v[v.len() - 1])
             };
+            // For comparison: plain Delaunay flipping of the input, nothing constrained.
+            let t0 = Instant::now();
+            let plain = if rep == "signposts" {
+                shape
+                    .triangulation()
+                    .flip_to_delaunay(&DelaunayOptions::default())
+                    .unwrap()
+            } else {
+                IntegerTriangulation::new(&shape.mesh, &shape.geometry)
+                    .unwrap()
+                    .flip_to_delaunay(&DelaunayOptions::default())
+                    .unwrap()
+            };
+            let plain_ms = t0.elapsed().as_secs_f64() * 1e3;
+            println!(
+                "{} ({rep}): plain Delaunay flipping of the input (with building it): {plain_ms:.2} \
+                 ms, {} flips",
+                shape.name, plain.n_flips
+            );
             let n = bezier_ms.len();
             let (bm, bx) = med(&mut bezier_ms);
             let (cm, cx) = med(&mut cdt_ms);
