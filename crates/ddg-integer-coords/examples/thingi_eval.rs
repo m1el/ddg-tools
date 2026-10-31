@@ -285,7 +285,17 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
         .num("components", mesh.n_components())
         .num("chi", mesh.euler_characteristic())
         .num("seconds_load", t.elapsed().as_secs_f64());
-    let delaunay = DelaunayOptions::default();
+    // "integer-ref": the integers with the authors' Delaunay test (cotan weight below -1e-6),
+    // which the demo uses; the other backends use the crate's default (angle sum, 1e-10).
+    let criterion = if backend == "integer-ref" {
+        ddg_intrinsic::DelaunayCriterion::REFERENCE
+    } else {
+        ddg_intrinsic::DelaunayCriterion::default()
+    };
+    let delaunay = DelaunayOptions {
+        criterion,
+        ..DelaunayOptions::default()
+    };
     // The paper's benchmark runs with --refineMaxInsertions=0: no limit.
     let refine_options = RefineOptions {
         // IC_INSERTION_LIMIT=n: at most n insertions per vertex (for studying runaway refinement).
@@ -296,12 +306,13 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
                 ddg_intrinsic::InsertionLimit::Unlimited,
                 ddg_intrinsic::InsertionLimit::PerVertex,
             ),
+        criterion,
         ..RefineOptions::default()
     };
     let mut idt = Stage::default();
     let mut refn = Stage::default();
 
-    if backend == "integer" {
+    if backend == "integer" || backend == "integer-ref" {
         let t = Instant::now();
         let (mut tri, init) = IntegerTriangulation::with_options(
             &mesh,
@@ -326,6 +337,7 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
         j.num("idt_seconds", idt.seconds)
             .num("idt_flips", d.0.n_flips)
             .num("idt_not_delaunay", d.0.n_not_delaunay)
+            .num("idt_ties", d.0.n_ties)
             .num("idt_certificate_ok", 1)
             .num("idt_sum_nplus", tri.total_crossings());
         let t = Instant::now();
@@ -408,7 +420,8 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
         dump_idt(tri.edge_lengths());
         j.num("idt_seconds", idt.seconds)
             .num("idt_flips", d.n_flips)
-            .num("idt_not_delaunay", d.n_not_delaunay);
+            .num("idt_not_delaunay", d.n_not_delaunay)
+            .num("idt_ties", d.n_ties);
         let t = Instant::now();
         let stage = |tri: &IntrinsicTriangulation| -> Result<(Overlay, usize), String> {
             let traces = tri

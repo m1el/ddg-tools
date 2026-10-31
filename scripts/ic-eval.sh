@@ -6,7 +6,7 @@
 #   scripts/ic-eval.sh summary            # runs_tmp/wp10/summary.md from the job results
 #   scripts/ic-eval.sh cmp [MAX_FACES]    # integer runs with the IDT edge lengths dumped, for the demo comparison
 #
-# BACKENDS: integer sp-ruppert sp-chew (default: all three). Env: IC_JOBS (parallel jobs in the
+# BACKENDS: integer sp-ruppert sp-chew (default: all three); integer-ref = integers with the authors' Delaunay test (cotan weight < -1e-6). Env: IC_JOBS (parallel jobs in the
 # first phase, default 56), IC_TIMEOUT (seconds per job, default 600), IC_IDS (file with ids,
 # default: every kept mesh). Results: runs_tmp/wp10/jobs/<backend>/<id>.json and .log. A job
 # killed by the time cap is recorded as {"status":"timeout"}, one that dies without a result
@@ -69,7 +69,7 @@ case "${1:-}" in
     # (scripts/ic-demo-eval.sh): meshes up to $2 faces (default 20000), results in runs_tmp/wp10/cmp/.
     mkdir -p "$OUT/cmp"
     awk -F'\t' -v m="${2:-20000}" 'NR>1 && $3=="kept" && $8<=m {print $1}' "$ROOT/data/thingi10k/converted.tsv" |
-      xargs -P "${IC_JOBS:-56}" -I{} sh -c 'IC_DUMP_IDT="$1/cmp/{}.idt" timeout 600 "$2/thingi_eval" "$3/{}.obj" --backend integer --id {} > "$1/cmp/{}.json" 2>/dev/null' _ "$OUT" "$BIN" "$CONV" ;;
+      xargs -P "${IC_JOBS:-56}" -I{} sh -c 'IC_DUMP_IDT="$1/cmp/{}.idt" timeout 600 "$2/thingi_eval" "$3/{}.obj" --backend "${IC_CMP_BACKEND:-integer-ref}" --id {} > "$1/cmp/{}.json" 2>/dev/null' _ "$OUT" "$BIN" "$CONV" ;;
   summary)
     uv run --no-project python -I "$ROOT/scripts/ic_eval_summary.py" "$ROOT" ;;
   *) sed -n 2,17p "$0"; exit 2 ;;

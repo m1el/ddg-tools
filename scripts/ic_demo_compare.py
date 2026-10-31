@@ -50,9 +50,10 @@ w("")
 w("Demo failures, integer backend: " + ", ".join(f"{i} ({op}: {demo_state('integer', i, op)})" for i in dem["integer"][0] for op in ("flip", "refine") if demo_state("integer", i, op) not in ("ok", "missing"))[:3000] + "\n")
 w("Demo failures, signpost backend (first 60): " + ", ".join(f"{i} ({op}: {demo_state('signpost', i, op)})" for i in dem["signpost"][0] for op in ("flip", "refine") if demo_state("signpost", i, op) not in ("ok", "missing"))[:1500] + "\n")
 
-# IDT: integer vs integer demo
+# IDT: integer vs integer demo, separately for meshes without Delaunay ties and with
 cmpd = os.path.join(W, "cmp")
-n = same_v = same_cs = same_vef = lens_ok = lens_n = 0; worst = 0.0; bad = []
+from collections import Counter
+res = {0: Counter(), 1: Counter()}; worst = {0: 0.0, 1: 0.0}; bad = []
 for i in kept:
     c = os.path.join(cmpd, f"{i}.json")
     if not os.path.exists(c): continue
@@ -60,38 +61,49 @@ for i in kept:
     except Exception: continue
     s = stats("integer", i, "flip")
     if o.get("status") != "ok" or not s or s["state"] != "ok": continue
-    n += 1
-    same_v += s["V"] == o["v0"]
-    same_cs += s["cs"] == o["idt_sub_v"]
+    t = 1 if o["idt_ties"] > 0 else 0
+    R = res[t]; R["n"] += 1
+    R["V1 equal"] += s["V"] == o["v0"]
+    R["V^S equal"] += s["cs"] == o["idt_sub_v"]
     vp = os.path.join(W, "demo/integer", f"{i}_flip_vef.txt")
     if os.path.exists(vp):
         dv = tuple(int(x) for x in open(vp).read().split())
-        mine = (o["idt_sub_v"], o["idt_sub_tf"] + (o["idt_sub_e"] - o["idt_sub_f"] + o["idt_sub_f"]) * 0, o["idt_sub_tf"])
-        # triangulated: F = tf, E = (3 tf + boundary)/2
         be = int(meta[i]["n_boundary_edges"])
         mine = (o["idt_sub_v"], (3 * o["idt_sub_tf"] + be) // 2, o["idt_sub_tf"])
-        if dv == mine: same_vef += 1
-        else: bad.append((i, "vef", dv, mine))
+        R["vef n"] += 1
+        if dv == mine: R["vef equal"] += 1
+        elif t == 0: bad.append((i, "vef", dv, mine))
     lp = os.path.join(W, "demo/integer", f"{i}_flip_idt_lengths.txt"); op = os.path.join(cmpd, f"{i}.idt")
     if os.path.exists(lp) and os.path.exists(op):
-        a = [float(x) for x in open(lp).read().split()]
-        # the demo lists each edge twice (once per face), ours once per edge
-        a = sorted(set(a)) if False else a
-        b2 = [float(x) for x in open(op).read().split()]
-        # demo: F x 3 lengths = each interior edge twice, boundary edges once
-        from collections import Counter
-        ca = Counter(a); cb = Counter(b2)
-        da = sorted(ca); db = sorted(cb)
-        lens_n += 1
-        if len(da) == len(db):
-            m = max(abs(x - y) / max(abs(y), 1e-300) for x, y in zip(da, db))
-            worst = max(worst, m); lens_ok += m < 1e-9
-            if m >= 1e-9: bad.append((i, "lengths", m))
-        else:
-            bad.append((i, "n_distinct_lengths", len(da), len(db)))
+        da = sorted(set(float(x) for x in open(lp).read().split()))
+        db = sorted(set(float(x) for x in open(op).read().split()))
+        R["lengths n"] += 1
+        # Two-pointer matching of the sorted sets within a relative tolerance: the number of
+        # lengths of either set that have no partner (a different flip of one tie shifts a
+        # positional comparison, so the sets are matched, not zipped).
+        def unmatched(tol):
+            i1 = j1 = 0; miss = 0
+            while i1 < len(da) and j1 < len(db):
+                x, y = da[i1], db[j1]
+                if abs(x - y) <= tol * max(abs(x), abs(y)): i1 += 1; j1 += 1
+                elif x < y: miss += 1; i1 += 1
+                else: miss += 1; j1 += 1
+            return miss + (len(da) - i1) + (len(db) - j1)
+        u9 = unmatched(1e-9); u5 = unmatched(1e-5)
+        R["lengths equal (rel 1e-9)"] += u9 == 0
+        R["lengths equal (rel 1e-5)"] += u5 == 0
+        R["unmatched total"] += u9; R["distinct total"] += len(db)
+        worst[t] = max(worst[t], u9 / max(len(db), 1))
+        if u9 and t == 0: bad.append((i, "unmatched lengths", u9, len(db)))
 w("### IDT, integer coordinates (ours against the demo's integer backend)\n")
-w(f"Meshes compared: {n} (both completed, up to 20000 faces for the edge lengths). `|V1|` (= `|V0|`) equal: {same_v}; `|V^S|` = `|V1| + Sum n+` equal: {same_cs}; subdivision V, E, F of the triangulated subdivision equal: {same_vef}; sorted sets of distinct edge lengths equal within 1e-9 relative: {lens_ok} of {lens_n} (worst relative difference {worst:.2e}).\n")
-if bad: w("Differences (first 15): " + "; ".join(str(x) for x in bad[:15]) + "\n")
+w("The IDT is unique up to flips of ties (cocircular quads, common in CAD meshes), and the normal coordinates, `Sum n+` and the subdivision depend on which way a tie is flipped. `ties` below is the number of interior edges within the Delaunay criterion's tolerance of a tie at the end of our flipping. The sets of distinct edge lengths are compared (the demo writes each interior edge twice).\n")
+w("| subset | meshes | `V1` equal | `V^S` equal | subdivision V/E/F (triangulated) equal | lengths equal 1e-9 | lengths equal 1e-5 | unmatched distinct lengths (1e-9) |")
+w("|---|---|---|---|---|---|---|---|")
+for t, name in ((0, "no ties"), (1, "with ties")):
+    R = res[t]
+    w(f"| {name} | {R['n']} | {R['V1 equal']} | {R['V^S equal']} | {R['vef equal']} of {R['vef n']} | {R['lengths equal (rel 1e-9)']} of {R['lengths n']} | {R['lengths equal (rel 1e-5)']} | {R['unmatched total']} of {R['distinct total']} ({100*worst[t]:.1f} % worst mesh) |")
+w("")
+if bad: w("Differences among the meshes without ties (first 20): " + "; ".join(str(x) for x in bad[:20]) + "\n")
 
 # Refinement statistics
 rows = []
