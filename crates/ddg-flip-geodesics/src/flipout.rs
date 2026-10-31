@@ -38,8 +38,6 @@
 //! `fo-wedge-flip-valid`, `fo-flipout-terminates`); more than `k₀² + 2k₀ + 8` flips is reported
 //! as [`FlipError::Internal`] rather than looping.
 
-use std::f64::consts::PI;
-
 use ddg_intrinsic::{Complex, IntrinsicError, Triangulation};
 
 use crate::error::FlipError;
@@ -142,7 +140,9 @@ pub(crate) struct FlipOutResult {
     pub(crate) stats: FlipOutStats,
 }
 
-/// The edge `b n_j` and `β_j` for `0 < j < k` (see the module documentation). SPEC id
+/// The edge `b n_j` and whether `β_j < π` for `0 < j < k` (see the module documentation):
+/// bitwise the test `θ_prev + θ_this < π` on the two corner angles at `n_j`
+/// ([`Triangulation::corner_angle`]), decided by [`AngleCache::sum_below_pi`]. SPEC id
 /// `fo-outer-arc-angle` (not tagged until work package F5).
 fn interior<T: Triangulation>(
     tri: &T,
@@ -150,17 +150,14 @@ fn interior<T: Triangulation>(
     side: Side,
     corners: &[u32],
     j: usize,
-) -> (usize, f64) {
+) -> (usize, bool) {
     let c = tri.complex();
     let (hp, hj) = (corners[j - 1] as usize, corners[j] as usize);
     let (edge, at_prev, at_this) = match side {
         Side::Right => (c.edge(hj), c.prev(hp), c.next(hj)),
         Side::Left => (c.edge(hp), c.next(hp), c.prev(hj)),
     };
-    (
-        edge,
-        angles.angle(tri, at_prev) + angles.angle(tri, at_this),
-    )
+    (edge, angles.sum_below_pi(tri, at_prev, at_this))
 }
 
 /// Whether the wedge has an edge incident on it twice (an interior edge `b n_j` that occurs
@@ -205,15 +202,26 @@ fn merged_corner(complex: &Complex, side: Side, corners: &[u32], j: usize) -> Op
     if complex.from_vertex(h as usize) == complex.to_vertex(h as usize) {
         return None;
     }
-    let faces = [
-        complex.face(corners[j - 1] as usize),
-        complex.face(corners[j] as usize),
-    ];
-    let elsewhere = corners
-        .iter()
-        .enumerate()
-        .any(|(i, &c)| i != j - 1 && i != j && faces.contains(&complex.face(c as usize)));
-    (!elsewhere).then_some(h)
+    // No other corner of the wedge lies in the two faces when `b` is a corner of each only
+    // once.
+    let b = complex.from_vertex(h as usize);
+    let once = |c: u32| {
+        let f = complex.face(c as usize);
+        (0..3)
+            .filter(|&i| complex.from_vertex(3 * f + i) == b)
+            .count()
+            == 1
+    };
+    (once(corners[j - 1]) && once(corners[j])).then_some(h)
+}
+
+/// What changed in the corners of the wedge since the Δ-complex cases were last evaluated.
+#[derive(Clone, Copy)]
+enum Changed {
+    No,
+    All,
+    /// Two corners were merged into the one at this index.
+    Merged(usize),
 }
 
 /// The outer arc of the wedge as segments in path order, each with the halfedge of its edge
@@ -272,7 +280,7 @@ pub(crate) fn flip_out<T: Triangulation>(
     let run = [joint.incoming.0, joint.outgoing.0];
 
     let vertex = at.vertex;
-    scratch.corners_from_incoming(at, side);
+    scratch.corners_from_incoming(&*tri, at, side);
     let k0 = scratch.corners.len();
     if k0 == 0 {
         network.replace_run(tri.complex(), &run, &[], &mut scratch.replaced)?;
@@ -288,21 +296,41 @@ pub(crate) fn flip_out<T: Triangulation>(
     let max_flips = k0 * k0 + 2 * k0 + 8;
     let mut j = 1;
     // The Δ-complex cases are evaluated whenever the corners change (they only accumulate).
-    let mut changed = true;
+    // After a merge at `m` the wedge's interior edges have lost one and gained none, and only
+    // the pairs of consecutive corners at `m` are new: only those are tested.
+    let mut changed = Changed::All;
     loop {
         let k = scratch.corners.len();
-        if changed {
-            let (twice, degree_one) =
-                delta_cases(tri.complex(), side, &scratch.corners, &mut scratch.edges);
-            stats.twice_incident |= twice;
-            stats.degree_one |= degree_one;
-            changed = false;
+        match changed {
+            Changed::All => {
+                let (twice, degree_one) =
+                    delta_cases(tri.complex(), side, &scratch.corners, &mut scratch.edges);
+                stats.twice_incident |= twice;
+                stats.degree_one |= degree_one;
+            }
+            Changed::Merged(m) => {
+                let c = tri.complex();
+                let face = |i: usize| c.face(scratch.corners[i] as usize);
+                stats.degree_one |=
+                    (m > 0 && face(m - 1) == face(m)) || (m + 1 < k && face(m) == face(m + 1));
+                #[cfg(debug_assertions)]
+                {
+                    let (twice, degree_one) =
+                        delta_cases(c, side, &scratch.corners, &mut scratch.edges);
+                    assert!(
+                        (!twice || stats.twice_incident) && (!degree_one || stats.degree_one),
+                        "Alg. 1 at vertex {vertex}: Δ-complex cases missed after a merge"
+                    );
+                }
+            }
+            Changed::No => {}
         }
+        changed = Changed::No;
         if j >= k {
             break;
         }
-        let (edge, beta) = interior(tri, &mut scratch.angles, side, &scratch.corners, j);
-        if beta < PI {
+        let (edge, beta_below_pi) = interior(tri, &mut scratch.angles, side, &scratch.corners, j);
+        if beta_below_pi {
             if network.carries_segment(edge) {
                 return Err(FlipError::Internal {
                     what: format!(
@@ -324,15 +352,17 @@ pub(crate) fn flip_out<T: Triangulation>(
                             ),
                         });
                     }
+                    changed = Changed::All;
                     match merge {
                         Some(h) => {
+                            changed = Changed::Merged(j - 1);
                             scratch.corners[j - 1] = h;
                             scratch.corners.remove(j);
                             #[cfg(debug_assertions)]
                             {
                                 let kept = scratch.corners.clone();
                                 let at = scratch.locate(tri, network, joint)?;
-                                scratch.corners_from_incoming(at, side);
+                                scratch.corners_from_incoming(&*tri, at, side);
                                 assert_eq!(
                                     kept, scratch.corners,
                                     "Alg. 1 at vertex {vertex}: corners merged after the flip of \
@@ -342,11 +372,10 @@ pub(crate) fn flip_out<T: Triangulation>(
                         }
                         None => {
                             let at = scratch.locate(tri, network, joint)?;
-                            scratch.corners_from_incoming(at, side);
+                            scratch.corners_from_incoming(&*tri, at, side);
                         }
                     }
                     j = (j - 1).max(1);
-                    changed = true;
                     continue;
                 }
                 Err(IntrinsicError::FlipRefused { .. }) => stats.refused += 1,

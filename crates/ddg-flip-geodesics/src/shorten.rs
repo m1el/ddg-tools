@@ -52,8 +52,14 @@ use crate::scratch::{Located, Scratch, sides_to_shorten};
 use crate::wedge::{JointGeometry, Side};
 
 /// `log2` of the number of faces the corner-angle memo of a run holds
-/// ([`crate::scratch::AngleCache`]); collisions cost time only.
-const ANGLE_CACHE_BITS: u32 = 12;
+/// ([`crate::scratch::AngleCache`]) for a network of `m` segments: about `32 m`, between `2^9`
+/// and `2^13`. Collisions cost time only.
+fn angle_cache_bits(m: usize) -> u32 {
+    (32 * m.max(1))
+        .next_power_of_two()
+        .trailing_zeros()
+        .clamp(9, 13)
+}
 
 /// A queue entry: one side of the joint at the tail of `segment`.
 #[derive(Debug, Clone, Copy)]
@@ -161,6 +167,47 @@ struct Run<'a> {
     ids: Vec<u32>,
 }
 
+/// A shortening whose queue is built ([`GeodesicNetwork::start_shorten`]) and whose loop has
+/// not run yet.
+pub struct ShortenSession<'n, T: Triangulation> {
+    network: &'n mut GeodesicNetwork<T>,
+    run: Run<'n>,
+    max_iterations: usize,
+}
+
+impl<T: Triangulation> ShortenSession<'_, T> {
+    /// Runs the rest of [`GeodesicNetwork::shorten`].
+    ///
+    /// # Errors
+    /// As [`GeodesicNetwork::shorten`].
+    pub fn run(self) -> Result<ShortenReport, FlipError> {
+        self.finish::<fn(&ShortenStep, &GeodesicNetwork<T>)>(None)
+    }
+
+    /// Runs the rest of [`GeodesicNetwork::shorten_with`].
+    ///
+    /// # Errors
+    /// As [`GeodesicNetwork::shorten`].
+    pub fn run_with<F>(self, mut observer: F) -> Result<ShortenReport, FlipError>
+    where
+        F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
+    {
+        self.finish(Some(&mut observer))
+    }
+
+    fn finish<F>(self, observer: Option<&mut F>) -> Result<ShortenReport, FlipError>
+    where
+        F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
+    {
+        let ShortenSession {
+            network,
+            run,
+            max_iterations,
+        } = self;
+        network.shorten_loop(run, max_iterations, observer)
+    }
+}
+
 impl<T: Triangulation> GeodesicNetwork<T> {
     /// Makes every path of the network geodesic: Alg. 2 of the paper with the decisions of
     /// SPEC §4.2–§4.4 (see the [module documentation](crate::shorten)). Paths, loops and
@@ -200,11 +247,25 @@ impl<T: Triangulation> GeodesicNetwork<T> {
     fn run_shorten<F>(
         &mut self,
         options: &ShortenOptions,
-        mut observer: Option<&mut F>,
+        observer: Option<&mut F>,
     ) -> Result<ShortenReport, FlipError>
     where
         F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
     {
+        self.start_shorten(options)?.finish(observer)
+    }
+
+    /// The first part of [`shorten`](Self::shorten): checks the options and queues every joint
+    /// of every path; [`ShortenSession::run`] does the rest. `start_shorten(o)?.run()` is
+    /// `shorten(o)`, result for result. For timing the loop alone, as the reference does (it
+    /// builds its queue when the network is made, `gc: fg.cpp:47`).
+    ///
+    /// # Errors
+    /// As [`shorten`](Self::shorten) (nothing is changed).
+    pub fn start_shorten<'n>(
+        &'n mut self,
+        options: &'n ShortenOptions,
+    ) -> Result<ShortenSession<'n, T>, FlipError> {
         options.validate()?;
         let tol = options.straight_tolerance;
         let m0 = self.network.n_segments();
@@ -233,7 +294,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 initial_length,
                 final_length: initial_length,
             },
-            scratch: Scratch::new(ANGLE_CACHE_BITS),
+            scratch: Scratch::new(angle_cache_bits(m0)),
             ids: Vec::new(),
         };
         for p in 0..self.network.n_paths() {
@@ -249,7 +310,26 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 )?;
             }
         }
+        Ok(ShortenSession {
+            network: self,
+            run,
+            max_iterations,
+        })
+    }
 
+    /// The loop of Alg. 2 on a queue built by [`start_shorten`](Self::start_shorten).
+    fn shorten_loop<F>(
+        &mut self,
+        mut run: Run<'_>,
+        max_iterations: usize,
+        mut observer: Option<&mut F>,
+    ) -> Result<ShortenReport, FlipError>
+    where
+        F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
+    {
+        let options = run.options;
+        let tol = options.straight_tolerance;
+        let initial_length = run.report.initial_length;
         let status = 'run: loop {
             while let Some(Reverse(entry)) = run.heap.pop() {
                 let Some(at) = current(&self.tri, &self.network, &mut run.scratch, &entry)? else {
@@ -259,7 +339,10 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 if self.network.is_pinned(at.vertex) {
                     continue;
                 }
-                if !run.scratch.is_flexible(at, entry.side) {
+                if !run
+                    .scratch
+                    .is_flexible(&self.network, &self.tri, at, entry.side)
+                {
                     run.report.blocked_entries += 1;
                     continue;
                 }
@@ -297,6 +380,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             for p in 0..self.network.n_paths() {
                 for joint in self.network.path_joints(p) {
                     let stalled = &run.stalled;
+                    let (network, tri) = (&self.network, &self.tri);
                     for_each_side(
                         &self.tri,
                         &self.network,
@@ -306,7 +390,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                         |entry, scratch, at| {
                             let is_stalled = stalled.get(&(entry.segment, entry.side))
                                 == Some(&entry.angle.to_bits());
-                            if scratch.is_flexible(at, entry.side) && !is_stalled {
+                            if scratch.is_flexible(network, tri, at, entry.side) && !is_stalled {
                                 found.push(entry);
                             }
                         },

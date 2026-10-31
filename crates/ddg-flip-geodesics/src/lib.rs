@@ -127,4 +127,5 @@ pub use network::{
     SegmentRef,
 };
 pub use report::{ShortenOptions, ShortenReport, ShortenStatus, ShortenStep, Shortening};
+pub use shorten::ShortenSession;
 pub use wedge::{EdgeEnd, JointGeometry, Side, Turn, VertexStar, Wedge, wedge_angle};

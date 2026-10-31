@@ -3,9 +3,12 @@
 //!
 //! Usage: `cargo run --release --example fo_pairs -- MESH.obj PAIRS.txt [signposts|integers]`
 //! (`PAIRS.txt`: one `a b` vertex pair per line). Prints one line per pair:
-//! `a b dijkstra_ms construct_ms shorten_ms extract_ms length flips iterations min_angle geodesic points`,
-//! the same columns as the reference driver. `construct` is the clone of the triangulation plus
-//! building the network (the reference builds its signpost triangulation there).
+//! `a b dijkstra_ms construct_ms shorten_ms extract_ms length flips iterations min_angle geodesic points queue_ms`,
+//! the columns of the reference driver plus `queue_ms`. `construct` is the clone of the
+//! triangulation plus building the network (the reference builds its signpost triangulation
+//! there, and its initial queue). `shorten_ms` is all of `shorten`; `queue_ms` is the part of it
+//! that builds the initial queue ([`GeodesicNetwork::start_shorten`]), so `shorten_ms −
+//! queue_ms` is the loop alone, what the reference's `iterativeShorten` times.
 
 use std::time::Instant;
 
@@ -40,15 +43,18 @@ fn run<T: Triangulation + Clone + Sync>(tri: &T, pairs: &[(usize, usize)]) {
         let mut net = GeodesicNetwork::new(tri.clone(), std::slice::from_ref(&path), &[], None)
             .expect("a Dijkstra path is a valid network");
         let t_con = ms(t0);
+        let options = ShortenOptions::default();
         let t0 = Instant::now();
-        let report = net.shorten(&ShortenOptions::default()).expect("shorten");
+        let session = net.start_shorten(&options).expect("shorten");
+        let t_queue = ms(t0);
+        let report = session.run().expect("shorten");
         let t_sh = ms(t0);
         let t0 = Instant::now();
         let poly = net.extract(&extract).expect("extract");
         let t_ex = ms(t0);
         let cert = net.certify(&CertifyOptions::default()).expect("certify");
         println!(
-            "{a} {b} {t_dij:.6} {t_con:.6} {t_sh:.6} {t_ex:.6} {:.17e} {} {} {:.6e} {} {}",
+            "{a} {b} {t_dij:.6} {t_con:.6} {t_sh:.6} {t_ex:.6} {:.17e} {} {} {:.6e} {} {} {t_queue:.6}",
             net.length(),
             report.flips,
             report.iterations,
