@@ -192,6 +192,34 @@ fn refine_fields(j: &mut Json, r: &RefineReport) {
             r.min_angle_reachable.to_degrees(),
         )
         .num("n_below_bound", r.below_bound.len())
+        .num(
+            "below_angle_sum",
+            r.below_bound
+                .iter()
+                .filter(|b| matches!(b.reason, ddg_intrinsic::BelowReason::AngleSum { .. }))
+                .count(),
+        )
+        .num(
+            "below_needle",
+            r.below_bound
+                .iter()
+                .filter(|b| matches!(b.reason, ddg_intrinsic::BelowReason::NeedleVertex { .. }))
+                .count(),
+        )
+        .num(
+            "below_not_insertable",
+            r.below_bound
+                .iter()
+                .filter(|b| matches!(b.reason, ddg_intrinsic::BelowReason::NotInsertable { .. }))
+                .count(),
+        )
+        .num(
+            "below_limit",
+            r.below_bound
+                .iter()
+                .filter(|b| matches!(b.reason, ddg_intrinsic::BelowReason::InsertionLimit))
+                .count(),
+        )
         .num("n_not_delaunay", r.n_not_delaunay)
         .num("n_encroached", r.n_encroached)
         .num("refine_flips", r.n_flips)
@@ -260,7 +288,14 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
     let delaunay = DelaunayOptions::default();
     // The paper's benchmark runs with --refineMaxInsertions=0: no limit.
     let refine_options = RefineOptions {
-        max_insertions: ddg_intrinsic::InsertionLimit::Unlimited,
+        // IC_INSERTION_LIMIT=n: at most n insertions per vertex (for studying runaway refinement).
+        max_insertions: std::env::var("IC_INSERTION_LIMIT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .map_or(
+                ddg_intrinsic::InsertionLimit::Unlimited,
+                ddg_intrinsic::InsertionLimit::PerVertex,
+            ),
         ..RefineOptions::default()
     };
     let mut idt = Stage::default();

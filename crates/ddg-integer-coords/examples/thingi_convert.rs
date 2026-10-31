@@ -176,10 +176,12 @@ fn read_ply(bytes: &[u8]) -> Result<Raw, String> {
     body += 1;
     let header = String::from_utf8_lossy(&bytes[..end]).to_string();
     let mut format = String::new();
+    /// (name, list(count type, item type) or None, scalar type)
+    type Property = (String, Option<(String, String)>, String);
     struct Element {
         name: String,
         count: usize,
-        props: Vec<(String, Option<(String, String)>, String)>, // (name, list(count,item), type)
+        props: Vec<Property>,
     }
     let mut elements: Vec<Element> = Vec::new();
     for line in header.lines() {
@@ -523,7 +525,7 @@ fn main() {
                     }
                     let mut r = rows.lock().unwrap();
                     r.push(row);
-                    if r.len() % 500 == 0 {
+                    if r.len().is_multiple_of(500) {
                         eprintln!("{} files, {:.0} s", r.len(), t0.elapsed().as_secs_f64());
                     }
                 }

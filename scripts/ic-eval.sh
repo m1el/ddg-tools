@@ -32,7 +32,7 @@ job() { # job ID BACKEND MEM_KB
   else
     local code status
     code=$(grep '^exit=' "$d/$id.log" | tail -1 | cut -d= -f2)
-    if [ "$code" = 137 ]; then status=timeout
+    if [ "$code" = 137 ] || [ "$code" = 124 ]; then status=timeout
     elif grep -qiE 'memory allocation|allocat|capacity overflow' "$d/$id.log"; then status=memory
     else status=crash; fi
     echo "{\"id\":\"$id\",\"backend\":\"$backend\",\"status\":\"$status\",\"exit\":$code}" > "$d/$id.json"

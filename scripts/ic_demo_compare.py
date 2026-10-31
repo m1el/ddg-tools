@@ -27,7 +27,7 @@ def demo_state(b, i, op):
     if s["state"] == "ok": return "ok"
     log = os.path.join(W, "demo", b, f"{i}_{op}_out.log")
     txt = open(log).read() if os.path.exists(log) else ""
-    if "exit=137" in txt: return "timeout"
+    if "exit=137" in txt or "exit=124" in txt: return "timeout"
     return "crash"
 
 def ours(b, i):
