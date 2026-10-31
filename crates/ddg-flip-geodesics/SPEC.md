@@ -598,12 +598,12 @@ add-on's sidebar panel:
   curve object, using the drawing of the IC operator (R8).
 * Tests: `blender/tests/test_geodesic.py` in the bpy module (as the other operators).
 
-## 14. Questions for the user
+## 14. The user's decisions (2026-10-31)
 
-* **Q1** Download MPZ (Myles et al. 2014, ~100 models) and the Princeton Shape Benchmark (~600) into
-  `data/` to repeat Fig. 16, Fig. 18 and the 99.4 % / 100 % figures over the paper's three datasets?
-  Without them the evaluation is Thingi10k only (which carries the IntCoords Sec. 5.2 claim).
-* **Q2** Build a small headless C++ driver of gc's `FlipEdgeNetwork` (MIT, at `ab116f1`, signposts
-  only) outside the repository for §7 layer 5? It needs only geometry-central and Eigen (no
-  polyscope).
-* **Q3** The Blender proposal of §13 (curve object, selection order, modes): as written?
+* **Q1** Download MPZ (Myles et al. 2014) and the Princeton Shape Benchmark into `data/` (with
+  Thingi10k, already in `data/thingi10k/`) and repeat Fig. 16, Fig. 18 and the 99.4 % / 100 % figures
+  over the paper's three datasets.
+* **Q2** Build the headless driver of gc's `FlipEdgeNetwork` (`ab116f1`, signposts, geometry-central
+  + Eigen only) outside the repository, for §7 layer 5.
+* **Q3** The Blender proposal of §13 as written: "Geodesic Path" (Path / Smooth / Loop / Bézier,
+  Curve object output) and "Straighten Seams", with "Show triangulation".
