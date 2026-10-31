@@ -88,7 +88,10 @@ fn peak_rss_kb() -> u64 {
 
 /// The N12-style checks of a subdivision: a valid fan-triangulated `TriMesh` with the topology
 /// of the input. Returns `(V, E, F)` of the polygon mesh, or the reason.
-fn check_subdivision(sub: &Overlay, input: &TriMesh) -> Result<(usize, usize, usize), String> {
+fn check_subdivision(
+    sub: &Overlay,
+    input: &TriMesh,
+) -> Result<(usize, usize, usize, usize), String> {
     let nv = sub.vertices.len();
     let nf = sub.n_faces();
     for f in 0..nf {
@@ -150,7 +153,7 @@ fn check_subdivision(sub: &Overlay, input: &TriMesh) -> Result<(usize, usize, us
             input.boundary_loops().len()
         ));
     }
-    Ok((nv, ne, nf))
+    Ok((nv, ne, nf, sub.corners.len() - 2 * nf))
 }
 
 #[derive(Default)]
@@ -163,13 +166,14 @@ struct Stage {
 fn record_subdivision(
     j: &mut Json,
     prefix: &str,
-    r: Result<(usize, usize, usize), String>,
+    r: Result<(usize, usize, usize, usize), String>,
 ) -> Result<(), String> {
     match r {
-        Ok((v, e, f)) => {
+        Ok((v, e, f, tf)) => {
             j.num(&format!("{prefix}_sub_v"), v)
                 .num(&format!("{prefix}_sub_e"), e)
-                .num(&format!("{prefix}_sub_f"), f);
+                .num(&format!("{prefix}_sub_f"), f)
+                .num(&format!("{prefix}_sub_tf"), tf);
             Ok(())
         }
         Err(m) => Err(m),
