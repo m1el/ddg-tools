@@ -766,11 +766,14 @@ fn evaluation() {
             let label = format!("{} seed {seed} pair {k} ({a}->{b})", shape.name);
             pool.install(|| {
                 let mut net =
-                    GeodesicNetwork::new(integers.clone(), std::slice::from_ref(&path), &[], None).unwrap();
+                    GeodesicNetwork::new(integers.clone(), std::slice::from_ref(&path), &[], None)
+                        .unwrap();
                 let t0 = Instant::now();
                 net.shorten(&ShortenOptions::default()).unwrap();
                 t_fo.push(t0.elapsed().as_secs_f64() * 1e3);
-                let mut sp = GeodesicNetwork::new(tri.clone(), std::slice::from_ref(&path), &[], None).unwrap();
+                let mut sp =
+                    GeodesicNetwork::new(tri.clone(), std::slice::from_ref(&path), &[], None)
+                        .unwrap();
                 sp.shorten(&ShortenOptions::default()).unwrap();
                 let t0 = Instant::now();
                 let xi = net.extract(&options).unwrap();
