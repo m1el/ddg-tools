@@ -1,4 +1,4 @@
- both extractions certify and agree (1378 paths, 6210 points compared, `|Δ| sin θ ≤ 9.5e-14`) |# ddg-flip-geodesics
+# ddg-flip-geodesics
 
 Geodesic paths, loops and networks on triangle meshes by intrinsic edge flips, after
 
@@ -12,6 +12,11 @@ Sharp, Crane 2021). Everything is generic over `ddg_intrinsic::Triangulation`.
 
 The contract of the crate is [`SPEC.md`](SPEC.md): scope, data, the geometry of a joint, the
 algorithm, verification, and every decision the paper leaves open (`F1`–`F30`).
+
+Test meshes: Keenan Crane's model repository (CC0) and the optimal-cones examples (Soliman, Slepčev,
+Crane 2018); the evaluation datasets are MPZ (Myles, Pietroni, Zorin 2014), the Princeton Shape
+Benchmark (Shilane, Min, Kazhdan, Funkhouser 2004) and Thingi10K (Zhou, Jacobson 2016). Sources,
+licences and per-model credits: [`DATASETS.md`](../../DATASETS.md).
 
 ## What is implemented (work package F1)
 
@@ -122,7 +127,7 @@ certificate after every run.
 | waypoints, edge sets | legs equal the concatenated Dijkstra paths; tree, tree-cotree cut graphs, random edge sets, boundaries: every masked edge once, ends exactly the vertices of degree `≠ 2`, valid networks; a Dijkstra path or a tube ring round-trips |
 | certificates on `T⁰`, both representations | 223 paths on 17 generated and data shapes (random pairs, three at a time, waypoint loops, self-edge loops, tube loops): all pass; crossing deviation `≤ 2.6e-11` (signposts), `1.3e-12` (integers); length error `≤ 5e-15` |
 | signposts vs integers (§7 layer 2) | same crossed input edges at all 3401 compared points; `|Δ| sin θ ≤ 5.8e-13` (raw `|Δ|` `≤ 3.9e-11`) |
-| seam networks | tree-cotree cut graph of a torus, BFS trees of a sphere and of spot, shortened with junctions pinned: both extractions certify and agree |
+| seam networks | tree-cotree cut graph of a torus, BFS trees of a sphere and of spot, shortened with junctions pinned: both extractions certify and agree (1378 paths, 6210 points compared, `\|Δ\| sin θ ≤ 9.5e-14`) |
 | determinism (§7 test 10) | `Extraction` equal, `t` bitwise, at 1, 3 and 16 threads |
 
 Hunt for signpost trace failures (SPEC §7 test 9): 9 data meshes x 4 seeds x 1000 random pairs

@@ -388,6 +388,10 @@ exact reading was needed.
 
 ## Evaluation on Thingi10k and against the authors' demo (WP10)
 
+Thingi10K: Qingnan Zhou, Alec Jacobson, *Thingi10K: A Dataset of 10,000 3D-Printing Models*,
+arXiv:1605.04797, 2016. Each model is its Thingiverse author's, under the licence they chose; the
+models named below are credited by author and licence in [`DATASETS.md`](../../DATASETS.md).
+
 Everything here is reproduced by `scripts/ic-eval.sh` (conversion, the per-mesh runs, the summary),
 `scripts/ic-demo-build.sh` and `scripts/ic-demo-eval.sh` (the authors' demo, built headless outside
 the repository), `scripts/ic-timings.sh` (single-thread timings) and the examples

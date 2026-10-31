@@ -54,3 +54,4 @@ See `CLAUDE.md` for the conventions shared by all crates and the mathematical co
 ## License
 
 MIT. Ported code keeps its original license notice in the crate that contains it.
+The datasets used, with sources, citations and terms, are listed in [`DATASETS.md`](DATASETS.md).
