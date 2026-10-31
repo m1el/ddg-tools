@@ -156,6 +156,23 @@ impl Triangulation for Recording<'_> {
             Err(err) => Err(self.pass(err, "flip_edge")),
         }
     }
+    fn can_flip_with(
+        &self,
+        e: usize,
+        test: ddg_intrinsic::FlipShapeTest,
+    ) -> Result<Result<(), FlipRefusal>, IntrinsicError> {
+        Triangulation::can_flip_with(&*self.tri, e, test)
+    }
+    fn flip_edge_with(
+        &mut self,
+        e: usize,
+        request: ddg_intrinsic::FlipRequest,
+    ) -> Result<Flip, IntrinsicError> {
+        match self.tri.flip_edge_with(e, request) {
+            Ok(flip) => Ok(flip),
+            Err(err) => Err(self.pass(err, "flip_edge_with")),
+        }
+    }
     fn insert_vertex(&mut self, f: usize, bary: [f64; 3]) -> Result<Insertion, IntrinsicError> {
         match self.tri.split_face(f, bary, &self.face_split) {
             Ok(report) => {
@@ -317,6 +334,7 @@ fn placeholder_report(rules: RefineRules) -> RefineReport {
         n_removal_flips: 0,
         n_removals_refused: 0,
         n_trace_failures: 0,
+        n_thin_flips: 0,
         n_narrow_cone_faces: 0,
         min_angle_valid: f64::INFINITY,
     }

@@ -17,7 +17,8 @@ use std::collections::VecDeque;
 use ddg_core::topology::NONE;
 
 use crate::complex::{Complex, next, prev};
-use crate::error::IntrinsicError;
+use crate::error::{FlipRefusal, IntrinsicError};
+use crate::flip::{FlipRequest, FlipShapeTest};
 use crate::formulas::{delaunay_angle_excess, opposite_cotan_sum};
 use crate::interface::{Triangulation, opposite_cotan};
 use crate::triangulation::IntrinsicTriangulation;
@@ -207,6 +208,9 @@ pub(crate) struct QueueRun {
     pub(crate) n_flips: usize,
     pub(crate) n_tested: usize,
     pub(crate) n_refused: usize,
+    /// Flips that the shape limit of SPEC N5 refused and that were made under the second test
+    /// given to [`run_flip_queue`].
+    pub(crate) n_thin: usize,
     pub(crate) limit_reached: bool,
 }
 
@@ -285,12 +289,18 @@ pub(crate) fn fails_delaunay(
 /// given. A refused flip ([`IntrinsicError::FlipRefused`]) is counted and skipped; any other
 /// error of the representation (e.g. an overflow of integer coordinates) ends the run and is
 /// returned, so it is never mistaken for a refusal.
+///
+/// `thin`: a flip that the shape limit of SPEC N5 refuses ([`FlipRefusal::TooThin`]) is tried
+/// again under this test (refinement, IC-SPEC I30); `None` leaves it refused.
+///
+/// [`FlipRefusal::TooThin`]: crate::FlipRefusal::TooThin
 pub(crate) fn run_flip_queue<T: Triangulation>(
     tri: &mut T,
     queue: &mut EdgeQueue,
     criterion: &DelaunayCriterion,
     budget: usize,
     mut touched: Option<&mut Vec<u32>>,
+    thin: Option<FlipShapeTest>,
 ) -> Result<QueueRun, IntrinsicError> {
     let mut run = QueueRun::default();
     while let Some(e) = queue.pop() {
@@ -303,7 +313,25 @@ pub(crate) fn run_flip_queue<T: Triangulation>(
             run.limit_reached = true;
             break;
         }
-        match tri.flip_edge(e as usize) {
+        let mut flipped = tri.flip_edge(e as usize);
+        if let (
+            Some(shape),
+            Err(IntrinsicError::FlipRefused {
+                reason: FlipRefusal::TooThin { .. },
+                ..
+            }),
+        ) = (thin, &flipped)
+        {
+            flipped = tri.flip_edge_with(
+                e as usize,
+                FlipRequest {
+                    shape,
+                    corner_angles: false,
+                },
+            );
+            run.n_thin += usize::from(flipped.is_ok());
+        }
+        match flipped {
             Ok(_) => {}
             Err(IntrinsicError::FlipRefused { .. }) => {
                 run.n_refused += 1;
@@ -347,7 +375,7 @@ pub(crate) fn flip_to_delaunay<T: Triangulation>(
         FlipLimit::Unlimited => usize::MAX,
     };
     let mut queue = EdgeQueue::all(n_edges);
-    let run = run_flip_queue(tri, &mut queue, &options.criterion, budget, None)?;
+    let run = run_flip_queue(tri, &mut queue, &options.criterion, budget, None, None)?;
 
     let (complex, lengths) = (tri.complex(), tri.edge_lengths());
     let mut n_not_delaunay = 0;

@@ -185,6 +185,7 @@ fn refine_fields(j: &mut Json, r: &RefineReport) {
         .num("removals", r.n_removals)
         .num("removals_refused", r.n_removals_refused)
         .num("trace_failures", r.n_trace_failures)
+        .num("thin_flips", r.n_thin_flips)
         .num("min_angle_deg", r.min_angle.to_degrees())
         .num("min_angle_valid_deg", r.min_angle_valid.to_degrees())
         .num(

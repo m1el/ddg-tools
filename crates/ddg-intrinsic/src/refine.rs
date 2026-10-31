@@ -47,6 +47,16 @@
 //! Under both rules a circumcentre path that does not end inside the surface or on its
 //! boundary skips the triangle and is counted ([`RefineReport::n_trace_failures`]).
 //! Everything that is left below the bound is listed in the report with the reason.
+//!
+//! **Delaunay flips below the shape limit (IC-SPEC I30).** Under both rules the triangulation
+//! is kept Delaunay with flips that the shape limit of SPEC N5 would refuse: an edge that fails
+//! the Delaunay test is flipped whenever its quadrilateral is strictly convex and both new
+//! triangles are valid ([`DELAUNAY_FLIP_SHAPE`]), as the reference's `flipEdgeIfNotDelaunay`
+//! does (it tests nothing but a finite new length). Such a flip never makes the smallest angle of
+//! the two triangles smaller (Lawson), so the limit only kept slivers that were already there;
+//! and a triangle with an edge that is not Delaunay has points of the triangulation inside its
+//! circumcircle, so its circumcentre lands next to one of them, the new edges are much shorter
+//! than the circumradius and refinement runs away (Thingi10k 176193, 190253).
 
 use std::collections::{BinaryHeap, HashMap};
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, TAU};
@@ -56,6 +66,7 @@ use ddg_core::topology::NONE;
 use crate::complex::{VertexRemoval, prev};
 use crate::delaunay::{DelaunayCriterion, EdgeQueue, fails_delaunay, run_flip_queue};
 use crate::error::{InsertRefusal, IntrinsicError};
+use crate::flip::FlipShapeTest;
 use crate::formulas::{circumcenter_barycentric, triangle_layout, unfold_apex};
 use crate::insert::Insertion;
 use crate::interface::Triangulation;
@@ -233,6 +244,9 @@ pub struct RefineReport {
     /// Circumcentre paths that did not end in a face or at the boundary (they ran into a
     /// vertex, or the trace failed); the triangle was skipped.
     pub n_trace_failures: usize,
+    /// Delaunay flips that the shape limit of SPEC N5 refused and that were made under
+    /// [`DELAUNAY_FLIP_SHAPE`] (IC-SPEC I30); included in [`n_flips`](RefineReport::n_flips).
+    pub n_thin_flips: usize,
     /// Faces of the result left by the narrow-cone rule of [`RefineRules::Chew`] (IC-SPEC
     /// I23), whichever rules were followed.
     pub n_narrow_cone_faces: usize,
@@ -247,6 +261,11 @@ enum Verdict {
     Encroaches(u32),
     Needle(u32),
 }
+
+/// The shape test of the Delaunay flips of refinement (IC-SPEC I30): strict convexity and valid
+/// new triangles only, after the flip was refused by SPEC N5's limit. See the
+/// [module documentation](self).
+pub const DELAUNAY_FLIP_SHAPE: FlipShapeTest = FlipShapeTest::Absolute { limit: 0.0 };
 
 /// The extra criterion of [`IntrinsicTriangulation::refine`]: none.
 fn no_extra_criterion<T>(_: &T, _: usize) -> bool {
@@ -287,6 +306,7 @@ struct Refiner<'a, T: Triangulation = IntrinsicTriangulation> {
     n_removal_flips: usize,
     n_removals_refused: usize,
     n_trace_failures: usize,
+    n_thin_flips: usize,
     /// Whether the input mesh has a vertex with an angle sum below 60°: without one, no vertex
     /// is narrow (inserted vertices have `2π` or `π`) and the narrow-cone rule leaves nothing.
     any_narrow: bool,
@@ -420,6 +440,7 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
             n_removal_flips: 0,
             n_removals_refused: 0,
             n_trace_failures: 0,
+            n_thin_flips: 0,
             any_narrow,
             narrow_faces,
         }
@@ -540,8 +561,10 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
             &self.options.criterion,
             usize::MAX,
             Some(&mut self.touched),
+            Some(DELAUNAY_FLIP_SHAPE),
         )?;
         self.n_flips += run.n_flips;
+        self.n_thin_flips += run.n_thin;
         let mut touched = std::mem::take(&mut self.touched);
         touched.sort_unstable();
         touched.dedup();
@@ -1074,6 +1097,19 @@ pub fn refine<T: Triangulation>(
     refiner.rules = rules;
     refiner.extra = extra;
     refiner.n_flips = first.n_flips;
+    if first.status == crate::DelaunayStatus::Blocked {
+        // Edges whose Delaunay flip the shape limit refused: flipped under the test of
+        // refinement (I30).
+        let (complex, lengths) = (refiner.tri.complex(), refiner.tri.edge_lengths());
+        let blocked: Vec<u32> = (0..complex.n_edges())
+            .filter(|&e| fails_delaunay(complex, lengths, e, &options.criterion))
+            .map(|e| e as u32)
+            .collect();
+        for e in blocked {
+            refiner.queue.push(e);
+        }
+        refiner.restore_delaunay()?;
+    }
     let n_faces = refiner.tri.complex().n_faces();
     for f in 0..n_faces {
         refiner.touch(f);
@@ -1194,6 +1230,7 @@ pub fn refine<T: Triangulation>(
         n_removal_flips: refiner.n_removal_flips,
         n_removals_refused: refiner.n_removals_refused,
         n_trace_failures: refiner.n_trace_failures,
+        n_thin_flips: refiner.n_thin_flips,
         n_narrow_cone_faces,
         min_angle_valid,
     };
