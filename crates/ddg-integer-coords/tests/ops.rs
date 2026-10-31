@@ -997,10 +997,13 @@ fn the_interface_reports_what_is_not_there_yet() {
             ..
         })
     ));
-    assert!(matches!(
-        it.trace_edge_on_input(0, &EdgeTraceOptions::default()),
-        Err(IntrinsicError::Unsupported { .. })
-    ));
+    // WP2: ExtractIntrinsicEdge; edge 0 of the input itself runs along input edge 0.
+    assert_eq!(
+        it.trace_edge_on_input(0, &EdgeTraceOptions::default())
+            .unwrap()
+            .along_input_edge,
+        Some(0)
+    );
     assert!(matches!(
         Triangulation::flip_edge(&mut it, usize::MAX),
         Err(IntrinsicError::IndexOutOfRange { .. })

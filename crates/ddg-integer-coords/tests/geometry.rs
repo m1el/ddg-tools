@@ -748,3 +748,25 @@ fn bad_data_never_panics() {
     empty.crossings.clear();
     assert!(t.segment_geometry(&empty, 0, 0.0, 1.0).is_err());
 }
+
+/// The shared interface's `trace_edge_on_input` is `extract_intrinsic_edge`.
+#[test]
+fn the_interface_traces_with_extract_intrinsic_edge() {
+    use ddg_intrinsic::{IntrinsicError, Triangulation};
+    let options = EdgeTraceOptions::default();
+    let mut n = 0;
+    for job in jobs().iter().step_by(5) {
+        let t = &job.tri;
+        for e in (0..t.complex().n_edges()).step_by(7) {
+            let via_trait = Triangulation::trace_edge_on_input(t, e, &options).unwrap();
+            assert_eq!(via_trait, t.extract_intrinsic_edge(e, &options).unwrap());
+            n += 1;
+        }
+        let ne = t.complex().n_edges();
+        assert!(matches!(
+            Triangulation::trace_edge_on_input(t, ne, &options),
+            Err(IntrinsicError::IndexOutOfRange { .. })
+        ));
+    }
+    assert!(n > 1000, "{n}");
+}

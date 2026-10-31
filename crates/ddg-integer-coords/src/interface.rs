@@ -10,8 +10,9 @@
 //! [`IntrinsicError::Representation`] with `representation: "integer coordinates"`, refusals
 //! of the shared kind (flips, splits, removals) as themselves, and operations this crate does
 //! not provide yet as [`IntrinsicError::Unsupported`]: insertion in a face (work package WP4),
-//! splits of edges that cross input edges and the path of an edge over the input mesh (both
-//! need the geometric crossings of WP2).
+//! splits of edges that cross input edges (they need the geometric crossings of WP2). The path
+//! of an edge over the input mesh is `ExtractIntrinsicEdge`
+//! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
 use ddg_intrinsic::{
     Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, InputSurface, Insertion,
@@ -103,20 +104,15 @@ impl Triangulation for IntegerTriangulation {
         self.complex.set_constrained(e, constrained)
     }
 
-    /// Not provided yet: the positions of the crossings of an intrinsic edge with the input
-    /// edges come from `ExtractIntrinsicEdge` (SPEC §3.1, work package WP2).
+    /// `ExtractIntrinsicEdge` (SPEC §3.1, FlipOut contract R2):
+    /// [`IntegerTriangulation::extract_intrinsic_edge`]. The crossed input edges are exact; the
+    /// mismatch and clamps are reported in the [`EdgeTrace`], never a reason to fail.
     fn trace_edge_on_input(
         &self,
         e: usize,
-        _options: &EdgeTraceOptions,
+        options: &EdgeTraceOptions,
     ) -> Result<EdgeTrace, IntrinsicError> {
-        Err(IntrinsicError::Unsupported {
-            representation: REPRESENTATION,
-            operation: "trace_edge_on_input",
-            reason: format!(
-                "the path of edge {e} over the input mesh needs the geometric crossings of \
-                 ExtractIntrinsicEdge (work package WP2)"
-            ),
-        })
+        self.extract_intrinsic_edge(e, options)
+            .map_err(|err| to_intrinsic_error(err, "trace_edge_on_input"))
     }
 }
