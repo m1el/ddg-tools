@@ -793,8 +793,8 @@ Options (both; Python names):
   to *Attribute*) and a point attribute `intrinsic_vertex` (1: a vertex of the triangulation,
   0: a crossing of an intrinsic edge with an input edge).
 - Optionally a curve object `<mesh>_intrinsic_edges` with the intrinsic edges drawn on the input
-  mesh (`intrinsic_draw.draw_intrinsic_edges`, a plain function that FlipOut's "Show
-  triangulation" reuses; the input is `IntrinsicTriangulation.edge_polylines()` or any
+  mesh (`intrinsic_draw.draw_intrinsic_edges`, a plain function that Geodesic Path's "Show
+  Triangulation" reuses; the input is `IntrinsicTriangulation.edge_polylines()` or any
   `points`/`offsets` pair).
 - The input mesh is never changed. Running the operator again replaces the two objects (found
   by the custom properties `ddg_intrinsic_of` and `ddg_intrinsic_kind`, not by name).
@@ -821,6 +821,65 @@ Delaunay shows few or no new vertices; jitter the vertices to see flips and inse
 Tests: `blender/tests/test_intrinsic.py` (11 tests, run by `scripts/blender-test.sh` against the
 installed extension; log `runs_tmp/blender-test-intrinsic.log`).
 
+## Geodesic Path and Straighten Seams
+
+Sharp, Crane, *You Can Find Geodesic Paths in Triangle Meshes by Just Flipping Edges*, ACM TOG
+39(6), 2020 (crate `ddg-flip-geodesics`; `ddg_tools.geodesic_path`, `geodesic_network`,
+`geodesic_bezier`, see `crates/ddg-py/README.md`). Both operators and the panel
+(**sidebar > DDG > Geodesics**) are in `ddg_uv_unwrap/geodesic_operator.py`. The mesh is
+triangulated as Blender does it and never changed.
+
+**Geodesic Path**, `bpy.ops.mesh.ddg_geodesic_path` (Edit mode; **Mesh** menu, panel)
+
+- The **selected vertices in selection order** (`bmesh.select_history`; shift-click them one after
+  the other). Fewer than two vertices, or more than two without a complete history (a box select
+  keeps no order), is an error that says so. Two vertices need no history.
+- Modes: **Path** (a geodesic through the points, which stay on it), **Smooth** (the points only
+  seed the path: one geodesic between the first and the last), **Loop** (closed through the
+  points; *Pin Points* off lets it slide off them), **Bezier** (the points are control points;
+  *Rounds* 1 to 8, default 4: the curve has 2^rounds pieces).
+- A Curve object `<mesh>_geodesic` (poly splines from `polylines`, one per path, cyclic for a
+  loop), parented to the mesh with its transform (so it follows the mesh), round bevel 0.2 % of the
+  bounding-box diagonal. Running again replaces it (found by `ddg_intrinsic_of` and
+  `ddg_intrinsic_kind = "geodesic"`). Edit mode and the selection (with its order) are kept.
+- Custom properties `ddg_*` on the curve: `length`, `initial_length`, `status`, `iterations`,
+  `flips`, `refused_flips`, `stalled`, `representation`, `mode`, `certificate` (`ok` or
+  `FAILED: ...`; the geodesic certificate of the triangulation), `input_certificate` (`not
+  computed` unless *Verify on Input Mesh*), and for Bezier `rounds`, `n_splits`, `n_snapped`,
+  `n_shortenings`, `n_not_geodesic`, `n_control_points`.
+
+**Straighten Seams**, `bpy.ops.mesh.ddg_straighten_seams` (Object mode: **Object** menu; Edit
+mode: **Mesh** menu, **UV** menu, panel)
+
+- The edges marked as seams are shortened as a **network**: vertices where other than two seams meet
+  and seam ends stay, so the topology of the segmentation is kept; **selected vertices (Edit
+  mode) are pinned too**. No seams is an error. Output as above (one path per branch or loop),
+  `ddg_mode = "SEAMS"`.
+- *Stop at Length Ratio* is 0 (shorten to a geodesic) by default; the panel's second button is the
+  preset 0.9 for segmentations (stop once the seams are 90 % of their initial length).
+
+| property | Python name | default | meaning |
+|----------|-------------|---------|---------|
+| Mode | `mode` | Path | Path, Smooth, Loop, Bezier (Geodesic Path only) |
+| Pin Points | `pin_points` | on | Loop only |
+| Rounds | `rounds` | 4 | Bezier only, 1 to 8 |
+| Representation | `representation` | **Signposts** | `SIGNPOSTS` or `INTEGER` |
+| Mollify | `mollify` | off | intrinsic mollification (relative margin 1e-4), integer only |
+| Stop at Length Ratio | `stop_ratio` | 0 | 0: run to a geodesic; else stop below this fraction of the initial length |
+| Show Triangulation | `show_triangulation` | off | also draw the edges of the final intrinsic triangulation on the input as the Curve object `<mesh>_geodesic_triangulation` (`intrinsic_draw.draw_intrinsic_edges`, its own marker `geodesic_triangulation`: Show Intrinsic Refinement's objects are not replaced) |
+| Verify on Input Mesh | `certify_input` | off | also check the result on the input mesh alone (slower) |
+
+**Representation.** The default is signposts, as for every other consumer of the integer
+representation, until the Thingi10k evaluation (Integer Coordinates WP10, SPEC Q3) passes. The
+places that change then: `Representation::DEFAULT` (`ddg-intrinsic-apps`, which the Python
+`representation=None` of the three functions follows), and in this directory
+`geodesic_operator.REPRESENTATION_DEFAULT` (the default of both operators' `representation`).
+There is no silent fallback: when signposts cannot trace a path on the input mesh the operator
+stops with the message from the library, which says to choose *Integer Coordinates*.
+
+Tests: `blender/tests/test_geodesic.py` (run by `scripts/blender-test.sh`; log
+`runs_tmp/blender-test-geodesic.log`).
+
 ## Layout
 
 | path | contents |
@@ -832,6 +891,7 @@ installed extension; log `runs_tmp/blender-test-intrinsic.log`).
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
 | `ddg_uv_unwrap/intrinsic_operator.py`, `intrinsic_draw.py` | Show Intrinsic Refinement; the reusable drawing of intrinsic edges |
+| `ddg_uv_unwrap/geodesic_operator.py` | Geodesic Path (Path, Smooth, Loop, Bezier), Straighten Seams, the panel |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
 

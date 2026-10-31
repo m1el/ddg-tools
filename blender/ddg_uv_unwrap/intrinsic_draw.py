@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Drawing intrinsic triangulations on their input mesh in Blender. No operator here: the
 functions are reused by Show Intrinsic Refinement (``intrinsic_operator``) and, later, by the
-FlipOut operators' "Show triangulation" (FlipOut SPEC R8).
+FlipOut operators' "Show triangulation" (``geodesic_operator``).
 
 ``draw_intrinsic_edges`` turns the polylines of ``ddg_tools.IntrinsicTriangulation.edge_polylines``
 (or any ``points`` / ``offsets`` pair of the same layout, e.g. ``steiner_tree``'s) into a Curve
@@ -20,7 +20,7 @@ KIND_KEY = "ddg_intrinsic_kind"
 
 def remove_previous(source, kind):
     """Removes the objects (and their data) that were made for ``source`` as ``kind``
-    (``"mesh"`` or ``"edges"``). Returns how many were removed."""
+    (``"mesh"``, ``"edges"`` or another ``kind``). Returns how many were removed."""
     removed = 0
     for obj in list(bpy.data.objects):
         if obj.get(SOURCE_KEY) == source.name and obj.get(KIND_KEY) == kind:
@@ -41,7 +41,8 @@ def _link_like(source, obj):
         collection.objects.link(obj)
 
 
-def draw_intrinsic_edges(source, points, offsets, *, name=None, radius=0.0, replace=True):
+def draw_intrinsic_edges(source, points, offsets, *, name=None, radius=0.0, replace=True,
+                         kind="edges"):
     """Creates a Curve object with one poly spline per polyline and returns it.
 
     ``points``: flat sequence of x, y, z (object space of ``source``); ``offsets``: where each
@@ -49,11 +50,13 @@ def draw_intrinsic_edges(source, points, offsets, *, name=None, radius=0.0, repl
     ``IntrinsicTriangulation.edge_polylines``). The object gets ``source``'s transform, so the
     lines lie on ``source``'s surface. ``radius`` > 0 gives the curve a round bevel of that
     radius (otherwise it shows as a thin line). With ``replace`` the curve made earlier for
-    ``source`` is removed first. ``source`` is never changed.
+    ``source`` is removed first. ``source`` is never changed. ``kind`` is the value of the marker
+    property (``"edges"`` for Show Intrinsic Refinement; another operator passes its own so that
+    the two do not replace each other's objects).
     """
     name = name or source.name + "_intrinsic_edges"
     if replace:
-        remove_previous(source, "edges")
+        remove_previous(source, kind)
     curve = bpy.data.curves.new(name, 'CURVE')
     curve.dimensions = '3D'
     curve.bevel_depth = float(radius)
@@ -72,7 +75,7 @@ def draw_intrinsic_edges(source, points, offsets, *, name=None, radius=0.0, repl
     obj = bpy.data.objects.new(name, curve)
     obj.matrix_world = source.matrix_world.copy()
     obj[SOURCE_KEY] = source.name
-    obj[KIND_KEY] = "edges"
+    obj[KIND_KEY] = kind
     obj.hide_select = False
     _link_like(source, obj)
     return obj

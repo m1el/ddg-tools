@@ -19,6 +19,9 @@
 #    pins, obstacles, bad input; log runs_tmp/blender-test-repulsive.log), in parallel with 3b.
 # 3e. blender/tests/test_intrinsic.py runs the same way (Show Intrinsic Refinement and the drawing of
 #    intrinsic edges; log runs_tmp/blender-test-intrinsic.log), in parallel with 3b.
+# 3f. blender/tests/test_geodesic.py runs the same way (Geodesic Path in every mode, Straighten Seams,
+#    Show triangulation, replacement, the mesh unchanged, errors; log
+#    runs_tmp/blender-test-geodesic.log), in parallel with 3b.
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
@@ -111,6 +114,11 @@ int_log="$root/runs_tmp/blender-test-intrinsic.log"
     --python "$root/blender/tests/test_intrinsic.py" -- --module "$module" \
     "${only[@]}" > "$int_log" 2>&1 &
 int_pid=$!
+geo_log="$root/runs_tmp/blender-test-geodesic.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_geodesic.py" -- --module "$module" \
+    "${only[@]}" > "$geo_log" 2>&1 &
+geo_pid=$!
 cut_failed=0
 for i in "${!variants[@]}"; do
     tri="${variants[$i]}"
@@ -138,6 +146,14 @@ echo "intrinsic tests: $(grep -E '^RESULT' "$int_log")"
 grep -E '^(FAIL|  failed|INFO)' "$int_log" || true
 if [ "$int_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$int_log"; then
     echo "Blender intrinsic tests FAILED (exit status $int_status); see $int_log" >&2
+    cut_failed=1
+fi
+geo_status=0
+wait "$geo_pid" || geo_status=$?
+echo "geodesic tests: $(grep -E '^RESULT' "$geo_log")"
+grep -E '^(FAIL|  failed|INFO)' "$geo_log" || true
+if [ "$geo_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$geo_log"; then
+    echo "Blender geodesic tests FAILED (exit status $geo_status); see $geo_log" >&2
     cut_failed=1
 fi
 rep_status=0
