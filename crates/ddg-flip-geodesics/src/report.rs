@@ -1,6 +1,8 @@
 //! Options and report of the shortening (SPEC §4.2–§4.4, F13, F14), and what one step of it
 //! did ([`Shortening`], [`ShortenStep`]).
 
+use ddg_intrinsic::FlipShapeTest;
+
 use crate::error::FlipError;
 use crate::network::{Joint, SegmentId};
 use crate::wedge::Side;
@@ -23,6 +25,14 @@ pub struct ShortenOptions {
     pub max_sweeps: usize,
     /// Run [`Network::check`](crate::Network::check) after every iteration (tests; costly).
     pub check_invariants: bool,
+    /// The shape test of Alg. 1's flips (IT-SPEC N52). Default
+    /// [`FlipShapeTest::REFERENCE`], the reference's relative test
+    /// `min(A₁, A₂) ≥ 1e-6 (A₁ + A₂)` (`gc: signpost_intrinsic_triangulation.cpp:333-338`):
+    /// IT N5's absolute limit refuses the last flip of some joints next to two nearly
+    /// coincident vertices, which then stall (`tests/stalled.rs`).
+    /// [`FlipShapeTest::N5`] gives the results from before this option. Only Alg. 1 uses it;
+    /// every other operation of the triangulation keeps N5.
+    pub flip_shape: FlipShapeTest,
 }
 
 impl Default for ShortenOptions {
@@ -34,6 +44,7 @@ impl Default for ShortenOptions {
             stop_min_angle: None,
             max_sweeps: 4,
             check_invariants: false,
+            flip_shape: FlipShapeTest::REFERENCE,
         }
     }
 }
@@ -60,6 +71,14 @@ impl ShortenOptions {
             && !a.is_finite()
         {
             return bad(format!("stop_min_angle must be finite, got {a}"));
+        }
+        let (FlipShapeTest::Absolute { limit: x } | FlipShapeTest::Relative { ratio: x }) =
+            self.flip_shape;
+        if !(x.is_finite() && x >= 0.0) {
+            return bad(format!(
+                "flip_shape must have a finite limit or ratio >= 0, got {:?}",
+                self.flip_shape
+            ));
         }
         Ok(())
     }

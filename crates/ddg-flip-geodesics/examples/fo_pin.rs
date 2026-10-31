@@ -2,7 +2,8 @@
 //! shortening code keeps every result bitwise (not a timing harness: it observes every
 //! iteration and hashes the final state).
 //!
-//! Usage: `cargo run --release --example fo_pin -- MESH.obj PAIRS.txt [signposts|integers]`.
+//! Usage: `cargo run --release --example fo_pin -- MESH.obj PAIRS.txt [signposts|integers]
+//! [reference|n5]` (the shape test of Alg. 1's flips: the default, or IT N5's).
 //! Prints one line per pair:
 //! `a b length_bits flips iterations status refused stalled sweeps stale blocked loop_moves
 //! contractions twice_incident degree_one min_angle_bits geodesic failures steps_hash state_hash`,
@@ -16,9 +17,9 @@ use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
 use ddg_flip_geodesics::{CertifyOptions, GeodesicNetwork, ShortenOptions, dijkstra_path};
 use ddg_integer_coords::IntegerTriangulation;
-use ddg_intrinsic::{IntrinsicTriangulation, Triangulation};
+use ddg_intrinsic::{FlipShapeTest, IntrinsicTriangulation, Triangulation};
 
-fn run<T: Triangulation + Clone>(tri: &T, pairs: &[(usize, usize)]) {
+fn run<T: Triangulation + Clone>(tri: &T, pairs: &[(usize, usize)], options: &ShortenOptions) {
     for &(a, b) in pairs {
         let path = match dijkstra_path(tri, a, b) {
             Ok(p) => p,
@@ -31,7 +32,7 @@ fn run<T: Triangulation + Clone>(tri: &T, pairs: &[(usize, usize)]) {
             .expect("a Dijkstra path is a valid network");
         let mut steps = DefaultHasher::new();
         let report = net
-            .shorten_with(&ShortenOptions::default(), |step, _| {
+            .shorten_with(options, |step, _| {
                 format!("{step:?}").hash(&mut steps);
             })
             .expect("shorten");
@@ -75,7 +76,7 @@ fn run<T: Triangulation + Clone>(tri: &T, pairs: &[(usize, usize)]) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: fo_pin MESH.obj PAIRS.txt [signposts|integers]");
+        eprintln!("usage: fo_pin MESH.obj PAIRS.txt [signposts|integers] [reference|n5]");
         std::process::exit(2);
     }
     let obj = read_obj(&args[1]).unwrap_or_else(|e| panic!("{e}"));
@@ -97,14 +98,24 @@ fn main() {
             Some((it.next()?.ok()?, it.next()?.ok()?))
         })
         .collect();
+    // The shape test of Alg. 1's flips: the default (the reference's relative test) or IT N5's.
+    let options = match args.get(4).map(String::as_str).unwrap_or("reference") {
+        "n5" => ShortenOptions {
+            flip_shape: FlipShapeTest::N5,
+            ..ShortenOptions::default()
+        },
+        _ => ShortenOptions::default(),
+    };
     match args.get(3).map(String::as_str).unwrap_or("signposts") {
         "integers" => run(
             &IntegerTriangulation::new(&mesh, &geometry).expect("integer triangulation"),
             &pairs,
+            &options,
         ),
         _ => run(
             &IntrinsicTriangulation::new(&mesh, &geometry).expect("signpost triangulation"),
             &pairs,
+            &options,
         ),
     }
 }

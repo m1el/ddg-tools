@@ -19,9 +19,11 @@ use crate::wedge::{Side, VertexStar};
 /// A corner angle is a function of the face's three lengths, which change only when an edge of
 /// the face is flipped; the run that owns the memo flips only through Alg. 1, which calls
 /// [`invalidate`](Self::invalidate) on the two faces of every flipped edge (they keep their
-/// ids, `Complex::flip_edge`). So the memo returns exactly what `corner_angle` returns now
-/// (debug builds check every hit against the face's lengths). Colliding faces evict each other
-/// (only time is lost).
+/// ids, `Complex::flip_edge`), and then stores the two corner angles the flip returned
+/// ([`Flip::new_corner_angles`](ddg_intrinsic::Flip::new_corner_angles), IT-SPEC N52: bitwise
+/// `corner_angle`). So the memo returns exactly what `corner_angle` returns now (debug builds
+/// check every hit against the face's lengths). Colliding faces evict each other (only time is
+/// lost).
 #[derive(Debug, Clone)]
 pub(crate) struct AngleCache {
     slots: Vec<Slot>,
@@ -62,6 +64,37 @@ impl AngleCache {
         if self.slots[i].face == key {
             self.slots[i] = Slot::default();
         }
+    }
+
+    /// Stores `angle` as the corner angle of corner `h`: what a flip returned for a corner it
+    /// created ([`Flip::new_corner_angles`](ddg_intrinsic::Flip::new_corner_angles), bitwise
+    /// [`Triangulation::corner_angle`]; IT-SPEC N52). A slot held by another face is taken
+    /// over (only time is lost); debug builds check the angle.
+    #[inline]
+    pub(crate) fn insert<T: Triangulation>(&mut self, tri: &T, h: usize, angle: f64) {
+        let f = h / 3;
+        let (i, key) = self.index(f);
+        let slot = &mut self.slots[i];
+        if slot.face != key {
+            *slot = Slot {
+                face: key,
+                angles: [0.0; 3],
+                #[cfg(debug_assertions)]
+                lengths: tri.face_lengths(f).map(f64::to_bits),
+            };
+        }
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            (slot.lengths, angle.to_bits()),
+            (
+                tri.face_lengths(f).map(f64::to_bits),
+                tri.corner_angle(h).to_bits()
+            ),
+            "a flip's corner angle of corner {h} differs from corner_angle"
+        );
+        #[cfg(not(debug_assertions))]
+        let _ = tri;
+        slot.angles[h % 3] = angle;
     }
 
     /// [`Triangulation::corner_angle`] of corner `h`, bitwise.

@@ -39,7 +39,7 @@
 //! `fo-wedge-flip-valid`, `fo-flipout-terminates`); more than `k₀² + 2k₀ + 8` flips is reported
 //! as [`FlipError::Internal`] rather than looping.
 
-use ddg_intrinsic::{Complex, IntrinsicError, Triangulation};
+use ddg_intrinsic::{Complex, FlipShapeTest, IntrinsicError, Triangulation};
 
 use crate::error::FlipError;
 use crate::network::{Joint, Network, Segment};
@@ -255,8 +255,9 @@ fn outer_arc(complex: &Complex, side: Side, corners: &[u32], out: &mut Vec<(Segm
 /// their ids, `Complex::flip_edge`), the other corners keep their names; when the flipped edge
 /// is a loop or another corner lies in one of its two faces (Δ-complex cases) the corners are
 /// recomputed from the star of `b` instead, as [`JointGeometry`](crate::JointGeometry) does.
-/// A flip is asked of [`Triangulation::flip_edge`] directly, which refuses exactly when
-/// [`Triangulation::can_flip`] would and then changes nothing.
+/// A flip is asked of [`Triangulation::flip_edge_with`] with the shape test `test`
+/// ([`ShortenOptions::flip_shape`](crate::ShortenOptions::flip_shape)) directly, which refuses
+/// exactly when [`Triangulation::can_flip_with`] would and then changes nothing.
 ///
 /// # Errors
 /// [`FlipError::Internal`] when an edge to be flipped carries a segment (F7) or the flips do
@@ -267,6 +268,7 @@ pub(crate) fn flip_out<T: Triangulation>(
     at: Located,
     side: Side,
     scratch: &mut Scratch,
+    test: FlipShapeTest,
 ) -> Result<FlipOutResult, FlipError> {
     let joint = at.joint;
     if joint.incoming == joint.outgoing {
@@ -346,11 +348,15 @@ pub(crate) fn flip_out<T: Triangulation>(
                 let h = c.edge_halfedge(edge);
                 [c.face(h), c.twin(h).map_or(c.face(h), |t| c.face(t))]
             };
-            match tri.flip_edge(edge) {
-                Ok(_) => {
-                    // The two faces keep their ids and change their lengths.
+            match tri.flip_edge_with(edge, test) {
+                Ok(flip) => {
+                    // The two faces keep their ids and change their lengths; the flip computed
+                    // a corner angle in each (IT-SPEC N52).
                     for f in faces {
                         scratch.angles.invalidate(f);
+                    }
+                    for (h, angle) in flip.new_corners.into_iter().zip(flip.new_corner_angles) {
+                        scratch.angles.insert(&*tri, h as usize, angle);
                     }
                     stats.flips += 1;
                     if stats.flips > max_flips {

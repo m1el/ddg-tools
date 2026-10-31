@@ -452,6 +452,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             at,
             entry.side,
             &mut run.scratch,
+            run.options.flip_shape,
         )?;
         let tol = run.options.straight_tolerance;
         let report = &mut run.report;
@@ -543,8 +544,9 @@ impl<T: Triangulation> GeodesicNetwork<T> {
     }
 
     /// Shortens one joint on one side by Alg. 1 (or the App. B move of a single-segment
-    /// loop), as one iteration of [`shorten`](Self::shorten) does, and updates the running
-    /// length. Nothing else is queued or swept.
+    /// loop), as one iteration of [`shorten`](Self::shorten) with the default
+    /// [`ShortenOptions::flip_shape`] does, and updates the running length. Nothing else is
+    /// queued or swept.
     ///
     /// # Errors
     /// [`FlipError::IndexOutOfRange`] if `joint` is not two consecutive live segments;
@@ -576,7 +578,14 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         }
         let mut scratch = Scratch::new(6);
         let at = scratch.locate(&self.tri, &self.network, joint)?;
-        let result = flip_out(&mut self.tri, &mut self.network, at, side, &mut scratch)?;
+        let result = flip_out(
+            &mut self.tri,
+            &mut self.network,
+            at,
+            side,
+            &mut scratch,
+            ShortenOptions::default().flip_shape,
+        )?;
         self.update_length(result.outcome);
         Ok(result.outcome.shortening(&scratch.replaced.new_ids))
     }

@@ -1,8 +1,9 @@
 //! Times FlipOut on given vertex pairs of a mesh, for comparison with the reference driver
 //! (geometry-central's `FlipEdgeNetwork`, SPEC §7 layer 5) on the same pairs.
 //!
-//! Usage: `cargo run --release --example fo_pairs -- MESH.obj PAIRS.txt [signposts|integers]`
-//! (`PAIRS.txt`: one `a b` vertex pair per line). Prints one line per pair:
+//! Usage: `cargo run --release --example fo_pairs -- MESH.obj PAIRS.txt [signposts|integers]
+//! [reference|n5]` (the shape test of Alg. 1's flips: the default, or IT N5's;
+//! `PAIRS.txt`: one `a b` vertex pair per line). Prints one line per pair:
 //! `a b dijkstra_ms construct_ms shorten_ms extract_ms length flips iterations min_angle geodesic points queue_ms`,
 //! the columns of the reference driver plus `queue_ms`. `construct` is the clone of the
 //! triangulation plus building the network (the reference builds its signpost triangulation
@@ -18,13 +19,17 @@ use ddg_flip_geodesics::{
     CertifyOptions, ExtractOptions, GeodesicNetwork, ShortenOptions, dijkstra_path,
 };
 use ddg_integer_coords::IntegerTriangulation;
-use ddg_intrinsic::{IntrinsicTriangulation, Triangulation};
+use ddg_intrinsic::{FlipShapeTest, IntrinsicTriangulation, Triangulation};
 
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1e3
 }
 
-fn run<T: Triangulation + Clone + Sync>(tri: &T, pairs: &[(usize, usize)]) {
+fn run<T: Triangulation + Clone + Sync>(
+    tri: &T,
+    pairs: &[(usize, usize)],
+    options: &ShortenOptions,
+) {
     let extract = ExtractOptions {
         certify_input: false,
         ..ExtractOptions::default()
@@ -43,9 +48,8 @@ fn run<T: Triangulation + Clone + Sync>(tri: &T, pairs: &[(usize, usize)]) {
         let mut net = GeodesicNetwork::new(tri.clone(), std::slice::from_ref(&path), &[], None)
             .expect("a Dijkstra path is a valid network");
         let t_con = ms(t0);
-        let options = ShortenOptions::default();
         let t0 = Instant::now();
-        let session = net.start_shorten(&options).expect("shorten");
+        let session = net.start_shorten(options).expect("shorten");
         let t_queue = ms(t0);
         let report = session.run().expect("shorten");
         let t_sh = ms(t0);
@@ -68,7 +72,7 @@ fn run<T: Triangulation + Clone + Sync>(tri: &T, pairs: &[(usize, usize)]) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: fo_pairs MESH.obj PAIRS.txt [signposts|integers]");
+        eprintln!("usage: fo_pairs MESH.obj PAIRS.txt [signposts|integers] [reference|n5]");
         std::process::exit(2);
     }
     let obj = read_obj(&args[1]).unwrap_or_else(|e| panic!("{e}"));
@@ -91,14 +95,24 @@ fn main() {
         })
         .collect();
     println!("# V {} F {}", mesh.n_vertices(), mesh.n_faces());
+    // The shape test of Alg. 1's flips: the default (the reference's relative test) or IT N5's.
+    let options = match args.get(4).map(String::as_str).unwrap_or("reference") {
+        "n5" => ShortenOptions {
+            flip_shape: FlipShapeTest::N5,
+            ..ShortenOptions::default()
+        },
+        _ => ShortenOptions::default(),
+    };
     match args.get(3).map(String::as_str).unwrap_or("signposts") {
         "integers" => run(
             &IntegerTriangulation::new(&mesh, &geometry).expect("integer triangulation"),
             &pairs,
+            &options,
         ),
         _ => run(
             &IntrinsicTriangulation::new(&mesh, &geometry).expect("signpost triangulation"),
             &pairs,
+            &options,
         ),
     }
 }
