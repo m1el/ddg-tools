@@ -49,6 +49,7 @@ pub mod contract;
 pub mod cutting;
 pub mod developability;
 pub mod error;
+pub mod integer_coords;
 pub mod intrinsic_apps;
 pub mod intrinsic_vector;
 pub mod measure;

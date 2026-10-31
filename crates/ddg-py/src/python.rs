@@ -24,6 +24,7 @@ use crate::pipeline::{IS_PLACEHOLDER, PIPELINE_NAME};
 mod cut;
 mod developability;
 mod sphere;
+mod integer_coords;
 mod intrinsic_apps;
 mod intrinsic_vector;
 mod repulsive;
@@ -613,6 +614,7 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     cut::register(m)?;
     sphere::register(m)?;
     developability::register(m)?;
+    integer_coords::register(m)?;
     intrinsic_apps::register(m)?;
     intrinsic_vector::register(m)?;
     repulsive::register(m)?;

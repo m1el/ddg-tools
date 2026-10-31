@@ -145,6 +145,7 @@ impl AdaptiveResult {
 ///              of a disk-shaped mesh onto the unit disk, boundary by arc length).
 /// max_vertices the vertex budget of the refinement.
 /// bulk         the fraction of the error estimate the marked triangles carry (default 0.5).
+/// representation "signposts" (default) or "integer" (Gillespie, Sharp, Crane 2021).
 ///
 /// The report has status ("vertex_limit", "tolerance", "iteration_limit", "stalled"),
 /// iterations, n_triangulation_vertices, estimate, oscillation, seconds.
@@ -152,7 +153,7 @@ impl AdaptiveResult {
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a manifold
 /// triangle mesh (or not a disk for "disk"), SolveError if refinement or a solve fails.
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, problem, *, source = 0, time = None, max_vertices = 20000, bulk = 0.5, min_angle_degrees = 25.0))]
+#[pyo3(signature = (positions, triangles, problem, *, source = 0, time = None, max_vertices = 20000, bulk = 0.5, min_angle_degrees = 25.0, representation = "signposts"))]
 #[allow(clippy::too_many_arguments)]
 fn adaptive_solve<'py>(
     py: Python<'py>,
@@ -164,6 +165,7 @@ fn adaptive_solve<'py>(
     max_vertices: usize,
     bulk: f64,
     min_angle_degrees: f64,
+    representation: &str,
 ) -> PyResult<AdaptiveResult> {
     let mesh = TriangleArrays {
         positions: reals("positions", positions, 3, "vertex")?,
@@ -176,6 +178,7 @@ fn adaptive_solve<'py>(
         max_vertices,
         bulk,
         min_angle_degrees,
+        representation: representation.to_owned(),
     };
     let out = py
         .detach(move || adaptive(&mesh, &options))

@@ -6,7 +6,7 @@ element types. Results are ``array.array`` objects.
 
 from array import array
 from collections.abc import Buffer, Callable, Sequence
-from typing import Final, Literal, final
+from typing import Final, Literal, TypedDict, final
 
 __version__: Final[str]
 
@@ -760,6 +760,7 @@ def geodesic_distance(
     triangulation: Literal["refined", "delaunay", "input"] = "refined",
     time_factor: float = 1.0,
     boundary: Literal["neumann", "dirichlet", "average"] = "neumann",
+    representation: Literal["signposts", "integer"] = "signposts",
 ) -> GeodesicDistanceResult:
     """Geodesic distance from the vertices ``sources`` by the heat method (Crane, Weischedel,
     Wardetzky 2013) on the intrinsic Delaunay refinement of the mesh (``"refined"``), its
@@ -789,6 +790,7 @@ def steiner_tree(
     *,
     intrinsic: bool = True,
     steiner_points: bool = True,
+    representation: Literal["signposts", "integer"] = "signposts",
 ) -> SteinerTreeResult:
     """A short cut through all vertices: the minimal spanning tree of the intrinsic Delaunay
     triangulation (``intrinsic=True``) or of the mesh's edges, shortened by Fermat points
@@ -854,6 +856,7 @@ def adaptive_solve(
     max_vertices: int = 20000,
     bulk: float = 0.5,
     min_angle_degrees: float = 25.0,
+    representation: Literal["signposts", "integer"] = "signposts",
 ) -> AdaptiveResult:
     """Solve a model problem with adaptive refinement of an intrinsic triangulation (residual
     error estimator, bulk marking, intrinsic Delaunay refinement): the harmonic Green's
@@ -1211,3 +1214,130 @@ def curve_energy(
     threads: int | None = None,
 ) -> tuple[float, array[float]]:
     """The tangent-point energy and its differential (``array('d')``, 3 per vertex)."""
+
+
+# ---- IntrinsicTriangulation: integer coordinates (Gillespie, Sharp, Crane 2021) -------------
+
+class Places(TypedDict):
+    """Points of a mesh as arrays, one entry per point."""
+
+    kind: array[int]
+    """``array('i')``: 0 vertex, 1 edge, 2 face."""
+    id: array[int]
+    """``array('i')``: the vertex, edge or face id."""
+    params: array[float]
+    """``array('d')``, 3 per point: ``(0, 0, 0)`` for a vertex, ``(t, 0, 0)`` for an edge,
+    barycentric coordinates for a face."""
+
+class VertexPlaces(Places):
+    positions: array[float]
+    """``array('d')``, 3 per vertex of the triangulation: its place in space."""
+
+class Counts(TypedDict):
+    n_vertices: int
+    n_edges: int
+    n_faces: int
+    n_input_vertices: int
+    n_input_faces: int
+    min_angle: float
+    max_angle: float
+    n_crossings: int
+
+class FlipReport(TypedDict):
+    status: Literal["delaunay", "flip_limit", "not_flippable"]
+    n_flips: int
+    n_not_delaunay: int
+
+class RefineReport(TypedDict):
+    status: Literal["done", "insertion_limit"]
+    n_inserted: int
+    n_face_insertions: int
+    n_edge_splits: int
+    n_flips: int
+    n_removals: int
+    n_removals_refused: int
+    min_angle_valid: float
+    """Radians; narrow-cone faces are left out."""
+    n_below_bound: int
+    certified: bool
+
+class CommonSubdivision(TypedDict):
+    positions: array[float]
+    """``array('d')``, 3 per vertex of the subdivision, on the input surface. The vertices of
+    the triangulation come first (``n_intrinsic_vertices`` of them, with their ids), then one
+    per crossing of an intrinsic edge with an input edge."""
+    on_input: Places
+    on_triangulation: Places
+    polygon_starts: array[int]
+    """``array('i')``, where each polygon starts in ``corners``; one more entry at the end."""
+    corners: array[int]
+    input_face: array[int]
+    """Per polygon: the input face it lies in."""
+    intrinsic_face: array[int]
+    """Per polygon: the face of the triangulation it lies in."""
+    n_intrinsic_vertices: int
+
+class EdgePolylines(TypedDict):
+    edges: array[int]
+    points: array[float]
+    """``array('d')``, 3 per point; every polyline lies on the input surface."""
+    offsets: array[int]
+    """``array('i')``, where each polyline starts in ``points``; one more entry at the end."""
+    along_input_edge: list[int]
+    """Per polyline: the input edge it lies along, or -1."""
+    n_crossings: list[int]
+    max_relative_mismatch: float
+
+class Certificate(TypedDict):
+    n_faces: int
+    n_along: int
+    n_crossings: int
+    n_input_edges: int
+    n_inserted_on_edges: int
+    max_crossings_per_input_edge: int
+
+@final
+class IntrinsicTriangulation:
+    """An intrinsic triangulation of a mesh on integer coordinates (default; Gillespie, Sharp,
+    Crane 2021) or signposts (Sharp, Soliman, Crane 2019). Starts as the input mesh; the input
+    is never changed. Vertex ids below ``n_input_vertices`` are the input's. Raises
+    ``InputError``, ``MeshError`` and ``SolveError``."""
+
+    def __init__(
+        self,
+        positions: Buffer,
+        triangles: Buffer,
+        representation: Literal["integer", "signposts"] = "integer",
+        mollify: float | None = None,
+    ) -> None:
+        """``mollify``: relative margin of intrinsic mollification (integer only; the paper
+        uses ``1e-4``)."""
+    @property
+    def representation(self) -> Literal["integer", "signposts"]: ...
+    def counts(self) -> Counts: ...
+    def flip_to_delaunay(self) -> FlipReport: ...
+    def refine(
+        self,
+        min_angle_degrees: float = 25.0,
+        rules: Literal["chew", "ruppert"] = "chew",
+        max_insertions: int | None = None,
+        max_circumradius: float | None = None,
+    ) -> RefineReport:
+        """Delaunay refinement to an angle bound of at most 35 degrees. ``"chew"`` are the
+        integer paper's rules, ``"ruppert"`` the signpost paper's."""
+    def triangles(self) -> tuple[array[int], array[float]]:
+        """(``array('i')`` 3 vertex ids per face, ``array('d')`` one length per edge)."""
+    def vertex_places(self) -> VertexPlaces: ...
+    def common_subdivision(self) -> CommonSubdivision:
+        """The common subdivision of the input mesh and the triangulation (Fig. 12 of the
+        integer paper): convex polygons with their input face and intrinsic face."""
+    def edge_polylines(self, edges: Buffer | None = None) -> EdgePolylines:
+        """The intrinsic edges (default all) as polylines on the input mesh."""
+    def certify(self) -> Certificate:
+        """The certificate of the integer coordinates; ``InputError`` for signposts,
+        ``SolveError`` naming the item that fails."""
+    def to_input(self, values: Buffer) -> array[float]:
+        """Transfer a function on the triangulation's vertices to the input vertices (L2
+        projection). Integer coordinates only."""
+    def to_intrinsic(self, values: Buffer) -> array[float]:
+        """Transfer a function on the input vertices to the triangulation's vertices."""

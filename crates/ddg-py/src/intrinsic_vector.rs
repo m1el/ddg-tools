@@ -8,7 +8,9 @@
 use std::time::Instant;
 
 use ddg_core::{Geometry, TriMesh};
+use ddg_integer_coords::IntegerTriangulation;
 use ddg_intrinsic::{IntrinsicTriangulation, RefineOptions, SurfacePoint};
+use ddg_intrinsic_apps::representation::Representation;
 use ddg_intrinsic_apps::amr::{self, AmrOptions, AmrStatus, Problem};
 use ddg_intrinsic_apps::vector::{
     self, ConnectionLaplacian, DirectionFieldOptions, EigenStatus,
@@ -269,6 +271,8 @@ pub struct AdaptiveOptions {
     pub bulk: f64,
     /// The angle bound of the refinement, degrees.
     pub min_angle_degrees: f64,
+    /// `"signposts"` (default) or `"integer"`.
+    pub representation: String,
 }
 
 /// The solution of [`adaptive`].
@@ -336,12 +340,27 @@ pub fn adaptive(mesh: &TriangleArrays, options: &AdaptiveOptions) -> Result<Adap
         max_vertices: options.max_vertices,
         ..Default::default()
     };
-    let mut tri =
-        IntrinsicTriangulation::new(&tri_mesh, &geometry).map_err(|e| UnwrapError::Mesh(e.to_string()))?;
-    let (solution, report) = amr::adaptive_solve(&mut tri, &problem, &amr_options).map_err(|e| match e {
+    let amr_error = |e: amr::AmrError| match e {
         amr::AmrError::InvalidInput { reason } => UnwrapError::Mesh(reason),
         other => UnwrapError::Solve(other.to_string()),
-    })?;
+    };
+    let (solution, report, n_triangulation_vertices) =
+        match crate::intrinsic_apps::parse_representation(&options.representation)? {
+            Representation::Signposts => {
+                let mut tri = IntrinsicTriangulation::new(&tri_mesh, &geometry)
+                    .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+                let (s, r) =
+                    amr::adaptive_solve(&mut tri, &problem, &amr_options).map_err(amr_error)?;
+                (s, r, tri.complex().n_vertices())
+            }
+            Representation::Integer => {
+                let mut tri = IntegerTriangulation::new(&tri_mesh, &geometry)
+                    .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+                let (s, r) =
+                    amr::adaptive_solve(&mut tri, &problem, &amr_options).map_err(amr_error)?;
+                (s, r, tri.complex().n_vertices())
+            }
+        };
     let n = tri_mesh.n_vertices();
     let k = solution.components.len();
     let mut values = Vec::with_capacity(k * n);
@@ -365,7 +384,7 @@ pub fn adaptive(mesh: &TriangleArrays, options: &AdaptiveOptions) -> Result<Adap
             ),
         ),
         ("iterations", ReportValue::Int(report.iterations.len() as i64)),
-        ("n_triangulation_vertices", ReportValue::Int(tri.n_vertices() as i64)),
+        ("n_triangulation_vertices", ReportValue::Int(n_triangulation_vertices as i64)),
         ("estimate", ReportValue::Float(last.map_or(f64::NAN, |i| i.estimate))),
         ("oscillation", ReportValue::Float(last.map_or(f64::NAN, |i| i.oscillation))),
         ("seconds", ReportValue::Float(start.elapsed().as_secs_f64())),
@@ -441,6 +460,7 @@ mod tests {
             max_vertices: 500,
             bulk: 0.5,
             min_angle_degrees: 25.0,
+            representation: "signposts".to_string(),
         };
         let e = adaptive(&octahedron(), &opts).unwrap_err();
         assert!(e.to_string().contains("source"), "{e}");
@@ -455,6 +475,7 @@ mod tests {
             max_vertices: 800,
             bulk: 0.5,
             min_angle_degrees: 25.0,
+            representation: "signposts".to_string(),
         };
         let out = adaptive(&octahedron(), &opts).unwrap();
         assert_eq!(out.n_components, 1);
@@ -462,5 +483,26 @@ mod tests {
         // The source is the largest value; the opposite pole the smallest.
         assert!(out.values.iter().all(|&x| x <= out.values[4]));
         assert!(out.values.iter().all(|&x| x >= out.values[5]));
+    }
+
+    #[test]
+    fn the_integer_representation_gives_the_same_solution() {
+        let mut opts = AdaptiveOptions {
+            problem: "heat".to_string(),
+            source: 4,
+            time: Some(0.05),
+            max_vertices: 800,
+            bulk: 0.5,
+            min_angle_degrees: 25.0,
+            representation: "signposts".to_string(),
+        };
+        let a = adaptive(&octahedron(), &opts).unwrap();
+        opts.representation = "integer".to_string();
+        let b = adaptive(&octahedron(), &opts).unwrap();
+        for (x, y) in a.values.iter().zip(&b.values) {
+            assert!((x - y).abs() < 1e-9, "{x} {y}");
+        }
+        opts.representation = "nope".to_string();
+        assert!(adaptive(&octahedron(), &opts).unwrap_err().to_string().starts_with("representation"));
     }
 }

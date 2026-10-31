@@ -35,6 +35,8 @@ ddg-bff = { path = "../ddg-bff" }
 # tangent fields and adaptive refinement (src/intrinsic_vector.rs).
 ddg-intrinsic = { path = "../ddg-intrinsic" }
 ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
+# The integer representation (Gillespie, Sharp, Crane 2021): the `representation=` option and src/integer_coords.rs.
+ddg-integer-coords = { path = "../ddg-integer-coords" }
 # Developability of triangle meshes (Stein, Grinspun, Crane 2018): energy, flow, cut and flatten
 # (src/developability.rs).
 ddg-developability = { path = "../ddg-developability" }

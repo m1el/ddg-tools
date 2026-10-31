@@ -13,7 +13,11 @@
 //!   cut leaves a disk.
 
 use ddg_core::{Geometry, TriMesh};
-use ddg_intrinsic::{DelaunayOptions, IntrinsicTriangulation, RefineOptions, SurfacePoint};
+use ddg_integer_coords::IntegerTriangulation;
+use ddg_intrinsic::{
+    DelaunayOptions, IntrinsicTriangulation, RefineOptions, RefineRules, SurfacePoint, Triangulation,
+};
+use ddg_intrinsic_apps::representation::{InputPoints, Representation};
 use ddg_intrinsic_apps::heat::{HeatBoundary, HeatOptions, HeatSolver, HeatSource};
 use ddg_intrinsic_apps::steiner::{SteinerOptions, cut_to_disk};
 
@@ -29,13 +33,17 @@ pub struct MeshInput {
 }
 
 /// The validated mesh with its positions.
-struct Mesh {
-    mesh: TriMesh,
-    geometry: Geometry,
-    positions: Vec<[f64; 3]>,
+pub(crate) struct Mesh {
+    /// The connectivity.
+
+    pub(crate) mesh: TriMesh,
+    /// The geometry.
+    pub(crate) geometry: Geometry,
+    /// The positions.
+    pub(crate) positions: Vec<[f64; 3]>,
 }
 
-fn build(input: &MeshInput) -> Result<Mesh, UnwrapError> {
+pub(crate) fn build(input: &MeshInput) -> Result<Mesh, UnwrapError> {
     if !input.positions.len().is_multiple_of(3) {
         return Err(InputError::LengthNotMultiple {
             name: "positions",
@@ -98,7 +106,7 @@ fn build(input: &MeshInput) -> Result<Mesh, UnwrapError> {
     })
 }
 
-fn bad_option(name: &'static str, value: String, requirement: &'static str) -> UnwrapError {
+pub(crate) fn bad_option(name: &'static str, value: String, requirement: &'static str) -> UnwrapError {
     InputError::BadOption {
         name,
         value,
@@ -107,14 +115,10 @@ fn bad_option(name: &'static str, value: String, requirement: &'static str) -> U
     .into()
 }
 
-/// Which triangulation the heat method runs on.
-fn retriangulate(
-    mesh: &Mesh,
-    triangulation: &str,
-) -> Result<IntrinsicTriangulation, UnwrapError> {
+/// Which triangulation the heat method runs on: the input, its intrinsic Delaunay
+/// triangulation or its Delaunay refinement (Ruppert's rules), on either representation.
+fn retriangulate<T: Triangulation>(tri: &mut T, triangulation: &str) -> Result<(), UnwrapError> {
     let solve = |e: ddg_intrinsic::IntrinsicError| UnwrapError::Solve(e.to_string());
-    let mut tri = IntrinsicTriangulation::new(&mesh.mesh, &mesh.geometry)
-        .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
     match triangulation {
         "input" => {}
         "delaunay" => {
@@ -124,7 +128,8 @@ fn retriangulate(
         "refined" => {
             tri.flip_to_delaunay(&DelaunayOptions::default())
                 .map_err(solve)?;
-            tri.refine(&RefineOptions::default()).map_err(solve)?;
+            tri.refine_with_rules(&RefineOptions::default(), RefineRules::Ruppert)
+                .map_err(solve)?;
         }
         other => {
             return Err(bad_option(
@@ -134,7 +139,7 @@ fn retriangulate(
             ));
         }
     }
-    Ok(tri)
+    Ok(())
 }
 
 /// Options of [`geodesic_distance`].
@@ -148,6 +153,9 @@ pub struct HeatArguments {
     pub time_factor: f64,
     /// `"neumann"`, `"dirichlet"` or `"average"`.
     pub boundary: String,
+    /// `"signposts"` (default) or `"integer"`: the representation of the intrinsic
+    /// triangulation (Integer Coordinates, WP11).
+    pub representation: String,
 }
 
 /// The heat-method distance and what was done.
@@ -207,14 +215,48 @@ pub fn geodesic_distance(input: &MeshInput, args: &HeatArguments) -> Result<Heat
         }
         .into());
     }
-    let tri = retriangulate(&mesh, &args.triangulation)?;
+    match parse_representation(&args.representation)? {
+        Representation::Signposts => {
+            let mut tri = IntrinsicTriangulation::new(&mesh.mesh, &mesh.geometry)
+                .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+            retriangulate(&mut tri, &args.triangulation)?;
+            heat_on(&tri, args, boundary, n)
+        }
+        Representation::Integer => {
+            let mut tri = IntegerTriangulation::new(&mesh.mesh, &mesh.geometry)
+                .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+            retriangulate(&mut tri, &args.triangulation)?;
+            heat_on(&tri, args, boundary, n)
+        }
+    }
+}
+
+/// The representation named by the option `representation`: `"signposts"` or `"integer"`.
+pub(crate) fn parse_representation(name: &str) -> Result<Representation, UnwrapError> {
+    match name {
+        "signposts" => Ok(Representation::Signposts),
+        "integer" => Ok(Representation::Integer),
+        other => Err(bad_option(
+            "representation",
+            format!("{other:?}"),
+            "expected \"signposts\" or \"integer\"",
+        )),
+    }
+}
+
+fn heat_on<T: InputPoints + Clone>(
+    tri: &T,
+    args: &HeatArguments,
+    boundary: HeatBoundary,
+    n: usize,
+) -> Result<HeatOutput, UnwrapError> {
     let options = HeatOptions {
         time_factor: args.time_factor,
         time: None,
         boundary,
     };
     let solver =
-        HeatSolver::new(&tri, &options).map_err(|e| UnwrapError::Solve(e.to_string()))?;
+        HeatSolver::new(tri, &options).map_err(|e| UnwrapError::Solve(e.to_string()))?;
     let sources: Vec<HeatSource> = args
         .sources
         .iter()
@@ -231,7 +273,7 @@ pub fn geodesic_distance(input: &MeshInput, args: &HeatArguments) -> Result<Heat
     })?;
     Ok(HeatOutput {
         distances: result.distances[..n].to_vec(),
-        n_triangulation_vertices: tri.n_vertices(),
+        n_triangulation_vertices: tri.complex().n_vertices(),
         time: solver.setup().time,
         seconds_factor: solver.setup().seconds,
         seconds_solve: result.report.seconds,
@@ -239,12 +281,14 @@ pub fn geodesic_distance(input: &MeshInput, args: &HeatArguments) -> Result<Heat
 }
 
 /// Options of [`steiner_tree`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SteinerArguments {
     /// Over the intrinsic Delaunay triangulation (`true`) or the input edges.
     pub intrinsic: bool,
     /// Insert Fermat points (`false`: the minimal spanning tree).
     pub steiner_points: bool,
+    /// `"signposts"` (default) or `"integer"`.
+    pub representation: String,
 }
 
 /// A tree through all vertices, as polylines in space.
@@ -267,7 +311,7 @@ pub struct SteinerOutput {
     pub max_interior_defect: f64,
 }
 
-fn place(mesh: &Mesh, point: SurfacePoint) -> [f64; 3] {
+pub(crate) fn place(mesh: &Mesh, point: SurfacePoint) -> [f64; 3] {
     let p = &mesh.positions;
     match point {
         SurfacePoint::Vertex(v) => p[v as usize],
@@ -292,14 +336,31 @@ pub fn steiner_tree(
     args: &SteinerArguments,
 ) -> Result<SteinerOutput, UnwrapError> {
     let mesh = build(input)?;
-    let tri = IntrinsicTriangulation::new(&mesh.mesh, &mesh.geometry)
-        .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+    match parse_representation(&args.representation)? {
+        Representation::Signposts => {
+            let tri = IntrinsicTriangulation::new(&mesh.mesh, &mesh.geometry)
+                .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+            steiner_on(&mesh, &tri, args)
+        }
+        Representation::Integer => {
+            let tri = IntegerTriangulation::new(&mesh.mesh, &mesh.geometry)
+                .map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+            steiner_on(&mesh, &tri, args)
+        }
+    }
+}
+
+fn steiner_on<T: Triangulation + Clone>(
+    mesh: &Mesh,
+    tri: &T,
+    args: &SteinerArguments,
+) -> Result<SteinerOutput, UnwrapError> {
     let options = SteinerOptions {
         delaunay: args.intrinsic.then(DelaunayOptions::default),
         steiner_points: args.steiner_points,
         ..SteinerOptions::default()
     };
-    let tree = ddg_intrinsic_apps::steiner::steiner_tree(&tri, &options)
+    let tree = ddg_intrinsic_apps::steiner::steiner_tree(tri, &options)
         .map_err(|e| UnwrapError::Solve(e.to_string()))?;
     let cut = cut_to_disk(&tree.triangulation, &tree.edges)
         .map_err(|e| UnwrapError::Solve(e.to_string()))?;
@@ -313,11 +374,11 @@ pub fn steiner_tree(
             points.extend_from_slice(&p);
             n_points += 1;
         };
-        push(place(&mesh, a));
+        push(place(mesh, a));
         for c in &trace.crossings {
-            push(place(&mesh, SurfacePoint::Edge { edge: c.edge, t: c.t }));
+            push(place(mesh, SurfacePoint::Edge { edge: c.edge, t: c.t }));
         }
-        push(place(&mesh, b));
+        push(place(mesh, b));
     }
     offsets.push(n_points);
     Ok(SteinerOutput {
@@ -355,6 +416,7 @@ mod tests {
                     triangulation: triangulation.into(),
                     time_factor: 1.0,
                     boundary: "neumann".into(),
+                    representation: "signposts".into(),
                 },
             )
             .unwrap();
@@ -367,12 +429,53 @@ mod tests {
     }
 
     #[test]
+    fn the_integer_representation_gives_the_same_results() {
+        let input = sphere();
+        for triangulation in ["input", "delaunay", "refined"] {
+            let run = |representation: &str| {
+                geodesic_distance(
+                    &input,
+                    &HeatArguments {
+                        sources: vec![0],
+                        triangulation: triangulation.into(),
+                        time_factor: 1.0,
+                        boundary: "neumann".into(),
+                        representation: representation.into(),
+                    },
+                )
+                .unwrap()
+            };
+            let (a, b) = (run("signposts"), run("integer"));
+            assert_eq!(a.n_triangulation_vertices, b.n_triangulation_vertices);
+            for (x, y) in a.distances.iter().zip(&b.distances) {
+                assert!((x - y).abs() < 1e-10, "{triangulation}: {x} {y}");
+            }
+        }
+        let tree = |representation: &str| {
+            steiner_tree(
+                &input,
+                &SteinerArguments {
+                    intrinsic: true,
+                    steiner_points: true,
+                    representation: representation.into(),
+                },
+            )
+            .unwrap()
+        };
+        let (a, b) = (tree("signposts"), tree("integer"));
+        assert_eq!(a.n_steiner_points, b.n_steiner_points);
+        assert!((a.length - b.length).abs() < 1e-10);
+        assert_eq!(a.is_disk, b.is_disk);
+    }
+
+    #[test]
     fn steiner_tree_on_a_sphere_cuts_a_disk() {
         let out = steiner_tree(
             &sphere(),
             &SteinerArguments {
                 intrinsic: true,
                 steiner_points: true,
+                representation: "signposts".into(),
             },
         )
         .unwrap();
@@ -402,6 +505,7 @@ mod tests {
             triangulation: "refined".into(),
             time_factor: 1.0,
             boundary: "neumann".into(),
+            representation: "signposts".into(),
         };
         let e = geodesic_distance(&input, &args).unwrap_err().to_string();
         assert!(e.starts_with("sources"), "{e}");

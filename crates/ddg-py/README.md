@@ -478,15 +478,49 @@ returns per-vertex `array.array` results with a `report` dictionary. The triangu
 
 ```python
 geodesic_distance(positions, triangles, sources, *, triangulation="refined", time_factor=1.0,
-                  boundary="neumann")            # -> .distances, .report         (Sec. 5.3)
-steiner_tree(positions, triangles, *, intrinsic=True, steiner_points=True)
+                  boundary="neumann", representation="signposts")
+                                                 # -> .distances, .report         (Sec. 5.3)
+steiner_tree(positions, triangles, *, intrinsic=True, steiner_points=True,
+             representation="signposts")
                                                  # -> .points, .offsets, .report  (Sec. 5.1)
 smoothest_direction_field(positions, triangles, *, n=1, triangulation="delaunay",
                           laplacian="fem", min_angle_degrees=25.0)
                   # -> .vectors, .singularity_points, .singularity_indices, .report (Sec. 5.5)
 adaptive_solve(positions, triangles, problem, *, source=0, time=None, max_vertices=20000,
-               bulk=0.5, min_angle_degrees=25.0)  # -> .values, .n_components, .report (Sec. 5.4)
+               bulk=0.5, min_angle_degrees=25.0, representation="signposts")
+                                                  # -> .values, .n_components, .report (Sec. 5.4)
 ```
+
+`representation=` (`geodesic_distance`, `steiner_tree`, `adaptive_solve`) is `"signposts"` (the
+default, Sharp, Soliman, Crane 2019) or `"integer"` (integer coordinates, Gillespie, Sharp, Crane
+2021; the results agree with the signposts' to rounding, bitwise on the tested meshes, see
+`crates/ddg-intrinsic-apps/README.md`). The default is signposts until the Thingi10k evaluation
+(Integer Coordinates WP10) passes; one later commit then changes it (Q3).
+`smoothest_direction_field` stays on signposts (it needs input-aligned tangent frames, contract
+I26).
+
+### `IntrinsicTriangulation` (integer coordinates)
+
+```python
+t = IntrinsicTriangulation(positions, triangles, representation="integer", mollify=None)
+t.flip_to_delaunay()                                   # -> dict (status, n_flips, ...)
+t.refine(min_angle_degrees=25.0, rules="chew", max_insertions=None, max_circumradius=None)
+t.counts(); t.triangles(); t.vertex_places()
+t.common_subdivision()   # positions, on_input, on_triangulation, polygon_starts, corners,
+                         # input_face, intrinsic_face   (Fig. 12 of the integer paper)
+t.edge_polylines(edges=None)     # intrinsic edges as polylines on the input mesh (for drawing)
+t.certify()                      # SPEC 2.4; integer only
+t.to_input(values); t.to_intrinsic(values)   # L2 transfer between T1 and the input; integer only
+```
+
+A session starts as the input mesh (`T1 = T0`, optionally mollified by the relative margin
+`mollify`; the paper uses `1e-4`), is flipped and refined in place and never changes the input.
+`rules="chew"` are the integer paper's refinement rules, `"ruppert"` the signpost paper's;
+`representation="signposts"` runs the same session on signposts (no certificate, no transfer).
+Vertex ids below `n_input_vertices` are the input's. The common subdivision lists the
+triangulation's vertices first and then the crossings of intrinsic edges with input edges; every
+polygon is convex with its input face and intrinsic face. Types: `ddg_tools.pyi`; tests:
+`python-tests/test_integer_coords.py` (run by `scripts/py-test.sh`).
 
 * `geodesic_distance`: the heat method, factored once; distance 0 at the source vertices.
 * `steiner_tree`: a short cut through all vertices (the MST of the iDT shortened by Fermat
