@@ -181,9 +181,8 @@ pub(crate) fn local_matrices(
     // (x − p_j) · v as a linear form in b.
     let rel_dot = |j: usize, v: [f64; 2]| [0, 1, 2].map(|m| dot(sub(p[m], p[j]), v));
     // a_j · ∇b_k = (κ/2) (x − p_j) · d[k] / (2A).
-    let a_dot_grad = |j: usize, k: usize| {
-        Poly::linear(rel_dot(j, d[k])).scale(kappa / (4.0 * area))
-    };
+    let a_dot_grad =
+        |j: usize, k: usize| Poly::linear(rel_dot(j, d[k])).scale(kappa / (4.0 * area));
     // a_j · a_k = (κ²/4) (x − p_j)·(x − p_k).
     let a_dot_a = |j: usize, k: usize| {
         let mut out = Poly::zero();
@@ -222,7 +221,8 @@ pub(crate) fn local_matrices(
         let imag = b(j)
             .mul(&a_dot_grad(j, k))
             .add(&b(k).mul(&a_dot_grad(k, j)).scale(-1.0));
-        let integral = real.integrate(c, omega, area) + C64::new(0.0, 1.0) * imag.integrate(c, omega, area);
+        let integral =
+            real.integrate(c, omega, area) + C64::new(0.0, 1.0) * imag.integrate(c, omega, area);
         stiff[j][k] = rbar * integral;
         stiff[k][j] = stiff[j][k].conj();
     }
@@ -262,7 +262,10 @@ mod tests {
                         q += f.scale(w * h / 3.0);
                     }
                     let v = beta_exp(p, m, omega);
-                    assert!((v - q).abs() < 1e-12, "p {p} m {m} Ω {omega}: {v:?} vs {q:?}");
+                    assert!(
+                        (v - q).abs() < 1e-12,
+                        "p {p} m {m} Ω {omega}: {v:?} vs {q:?}"
+                    );
                 }
             }
         }
@@ -286,7 +289,12 @@ mod tests {
                 let expected = r[j].conj() * closed;
                 // The closed form cancels for small Ω; compare with a matching tolerance.
                 let tol = if omega.abs() < 0.1 { 1e-8 } else { 1e-13 };
-                assert!((m[j][k] - expected).abs() < tol, "{:?} {:?}", m[j][k], expected);
+                assert!(
+                    (m[j][k] - expected).abs() < tol,
+                    "{:?} {:?}",
+                    m[j][k],
+                    expected
+                );
             }
         }
         let (m, _) = local_matrices(p, area, 0.0, [C64::new(1.0, 0.0); 3]);
@@ -356,7 +364,8 @@ mod tests {
                 - 0.5 * kappa * ((-p[m][0]) * p[m][1] - (-p[m][1]) * p[m][0])
         };
         let bary = |x: [f64; 2]| ddg_intrinsic::formulas::barycentric(&p, x);
-        let psi = |m: usize, x: [f64; 2]| x_frame[m] * C64::from_angle(-chi(m, x)).scale(bary(x)[m]);
+        let psi =
+            |m: usize, x: [f64; 2]| x_frame[m] * C64::from_angle(-chi(m, x)).scale(bary(x)[m]);
         // Transport from corner a to a + 1 along the side, in the gauge at the origin:
         // ∫ A_o along the straight side from p_a to p_b is (κ/2) p_a × p_b.
         let r: [C64; 3] = [0, 1, 2].map(|a| {
@@ -380,9 +389,15 @@ mod tests {
                         continue;
                     }
                     let (s, t) = if up {
-                        ((i as f64 + 1.0 / 3.0) / n as f64, (j as f64 + 1.0 / 3.0) / n as f64)
+                        (
+                            (i as f64 + 1.0 / 3.0) / n as f64,
+                            (j as f64 + 1.0 / 3.0) / n as f64,
+                        )
                     } else {
-                        ((i as f64 + 2.0 / 3.0) / n as f64, (j as f64 + 2.0 / 3.0) / n as f64)
+                        (
+                            (i as f64 + 2.0 / 3.0) / n as f64,
+                            (j as f64 + 2.0 / 3.0) / n as f64,
+                        )
                     };
                     let x = [
                         p[0][0] + s * (p[1][0] - p[0][0]) + t * (p[2][0] - p[0][0]),
@@ -395,7 +410,11 @@ mod tests {
                         xm[dir] -= h;
                         let deriv = (psi(m, xp) - psi(m, xm)).scale(0.5 / h);
                         // ∇ψ = dψ − i A_o ψ, A_o = (κ/2)(−y, x).
-                        let a_o = if dir == 0 { -0.5 * kappa * x[1] } else { 0.5 * kappa * x[0] };
+                        let a_o = if dir == 0 {
+                            -0.5 * kappa * x[1]
+                        } else {
+                            0.5 * kappa * x[0]
+                        };
                         deriv - C64::new(0.0, a_o) * psi(m, x)
                     };
                     for a in 0..3 {
@@ -412,7 +431,12 @@ mod tests {
         for a in 0..3 {
             for b in 0..3 {
                 assert!((mass[a][b] - m_local[a][b]).abs() < 2e-4 * area, "M {a}{b}");
-                assert!((stiff[a][b] - a_local[a][b]).abs() < 2e-3, "A {a}{b}: {:?} {:?}", stiff[a][b], a_local[a][b]);
+                assert!(
+                    (stiff[a][b] - a_local[a][b]).abs() < 2e-3,
+                    "A {a}{b}: {:?} {:?}",
+                    stiff[a][b],
+                    a_local[a][b]
+                );
             }
         }
     }

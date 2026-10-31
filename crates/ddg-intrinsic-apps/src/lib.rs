@@ -30,6 +30,17 @@
 //!   elements, Knöppel, Crane, Pinkall, Schröder 2013, Sec. 6.1.1), harmonic vector fields
 //!   with boundary data and the vector maximum principle, smoothest `n`-direction fields.
 //!
+//! # Representation (Integer Coordinates, WP11)
+//!
+//! [`fem`], [`heat`], [`steiner`] and [`amr`] are generic over [`ddg_intrinsic::Triangulation`]
+//! (heat and the point-error measure of [`amr`] also need [`representation::InputPoints`]), so
+//! they run on signposts and on integer coordinates (`ddg-integer-coords`); the results
+//! agree bit for bit where both representations make the same flips and insertions
+//! (`tests/representation.rs`). [`representation::Representation::DEFAULT`] is **signposts**
+//! until the evaluation of the integer representation passes (contract §13 Q3); one commit
+//! then flips that constant. [`vector`] (tangent fields) stays on signposts:
+//! they read the stored input-aligned signposts (contract I26, open).
+//!
 //! # Conventions
 //!
 //! Those of the workspace (`CLAUDE.md`): `f64`, stored indices `u32`, ids at function
@@ -43,5 +54,6 @@ pub mod amr;
 pub mod exact;
 pub mod fem;
 pub mod heat;
+pub mod representation;
 pub mod steiner;
 pub mod vector;

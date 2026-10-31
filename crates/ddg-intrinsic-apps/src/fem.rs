@@ -10,7 +10,8 @@
 //! What is here:
 //!
 //! * [`stiffness_matrix`], [`galerkin_mass_matrix`], [`lumped_mass`] on an
-//!   [`IntrinsicTriangulation`] (signs and conventions of the workspace: `L` positive
+//!   [`ddg_intrinsic::Triangulation`] (signposts or integer coordinates)
+//!   (signs and conventions of the workspace: `L` positive
 //!   semidefinite with zero row sums).
 //! * [`regular_subdivision`]: the regular 4-1 subdivision of the input mesh, the extrinsic
 //!   refinement of Fig. 17 (every triangle split into four similar ones; the surface and the
@@ -29,7 +30,7 @@ use std::fmt;
 use ddg_core::generators::SplitMix64;
 use ddg_core::sparse::{Factorization, Method, Parallelism, Symbolic};
 use ddg_core::{Geometry, GeometryError, MeshError, SparseError, SparseMatrix, TriMesh};
-use ddg_intrinsic::IntrinsicTriangulation;
+use ddg_intrinsic::{Triangulation, generic_ops};
 
 /// Why a function of this module failed.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,17 +77,17 @@ impl From<GeometryError> for FemError {
 /// The stiffness matrix of piecewise linear elements on the triangulation: the cotan
 /// Laplacian, `L_ij = −½ Σ cot θ` over the corners opposite the edges between `i` and `j`,
 /// `L_ii = −Σ_{j≠i} L_ij` (positive semidefinite). It is
-/// [`IntrinsicTriangulation::cotan_laplacian`].
+/// [`generic_ops::cotan_laplacian`] (any representation; bitwise `IntrinsicTriangulation::cotan_laplacian` on signposts).
 ///
 /// [formula: cotan-fem-stiffness]
-pub fn stiffness_matrix(tri: &IntrinsicTriangulation) -> SparseMatrix {
-    tri.cotan_laplacian()
+pub fn stiffness_matrix<T: Triangulation + ?Sized>(tri: &T) -> SparseMatrix {
+    generic_ops::cotan_laplacian(tri)
 }
 
 /// The lumped mass: a third of the area of every triangle at each of its corners
-/// ([`IntrinsicTriangulation::lumped_mass`]). Not normalized: the masses sum to the area.
-pub fn lumped_mass(tri: &IntrinsicTriangulation) -> Vec<f64> {
-    tri.lumped_mass()
+/// ([`generic_ops::lumped_mass`]). Not normalized: the masses sum to the area.
+pub fn lumped_mass<T: Triangulation + ?Sized>(tri: &T) -> Vec<f64> {
+    generic_ops::lumped_mass(tri)
 }
 
 /// The Galerkin (consistent) mass matrix `M_ij = ∫ φ_i φ_j` of piecewise linear elements:
@@ -96,9 +97,9 @@ pub fn lumped_mass(tri: &IntrinsicTriangulation) -> Vec<f64> {
 /// lumped mass of `i`; the matrix is symmetric positive definite.
 ///
 /// [formula: app-fem-galerkin-mass]
-pub fn galerkin_mass_matrix(tri: &IntrinsicTriangulation) -> SparseMatrix {
-    let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(9 * tri.n_faces());
-    for (f, face) in tri.faces().iter().enumerate() {
+pub fn galerkin_mass_matrix<T: Triangulation + ?Sized>(tri: &T) -> SparseMatrix {
+    let mut triplets: Vec<(u32, u32, f64)> = Vec::with_capacity(9 * tri.complex().n_faces());
+    for (f, face) in tri.complex().faces().iter().enumerate() {
         let area = tri.face_area(f);
         for a in 0..3 {
             for b in 0..3 {
@@ -107,7 +108,7 @@ pub fn galerkin_mass_matrix(tri: &IntrinsicTriangulation) -> SparseMatrix {
             }
         }
     }
-    let n = tri.n_vertices();
+    let n = tri.complex().n_vertices();
     SparseMatrix::from_triplets(n, n, &triplets)
         .expect("vertex indices of a valid triangulation are in range")
 }
@@ -542,8 +543,7 @@ fn lanczos_largest(
     let norm = dot(&q, &q)?.sqrt();
     if norm.is_nan() || norm <= 0.0 {
         return Err(FemError::Invalid(
-            "the start vector vanishes after projection (no eigenvalue outside the kernel)"
-                .into(),
+            "the start vector vanishes after projection (no eigenvalue outside the kernel)".into(),
         ));
     }
     q.iter_mut().for_each(|x| *x /= norm);

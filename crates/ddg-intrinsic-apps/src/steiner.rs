@@ -70,7 +70,7 @@ use ddg_core::geometry::corner_angle;
 use ddg_intrinsic::formulas::{corner_distances, triangle_layout, unfold_apex};
 use ddg_intrinsic::{
     DelaunayOptions, DelaunayReport, EdgeTrace, EdgeTraceOptions, IntrinsicError,
-    IntrinsicTriangulation,
+    IntrinsicTriangulation, Triangulation,
 };
 
 /// Which triangles may contribute a Steiner point. See the [module documentation](self).
@@ -134,10 +134,10 @@ pub struct SteinerReport {
 
 /// A tree through all vertices. See [`steiner_tree`].
 #[derive(Debug, Clone)]
-pub struct SteinerTree {
+pub struct SteinerTree<T = IntrinsicTriangulation> {
     /// The triangulation the tree lives on: the input triangulation, flipped if asked, with the
     /// Fermat points inserted.
-    pub triangulation: IntrinsicTriangulation,
+    pub triangulation: T,
     /// The edges of the tree (ids of `triangulation`), sorted.
     pub edges: Vec<u32>,
     /// The inserted Fermat points (vertex ids of `triangulation`).
@@ -171,7 +171,10 @@ impl fmt::Display for SteinerError {
         match self {
             SteinerError::Intrinsic(e) => write!(f, "{e}"),
             SteinerError::EdgeOutOfRange { edge, n_edges } => {
-                write!(f, "edge {edge} does not exist (the triangulation has {n_edges} edges)")
+                write!(
+                    f,
+                    "edge {edge} does not exist (the triangulation has {n_edges} edges)"
+                )
             }
         }
     }
@@ -211,31 +214,31 @@ impl UnionFind {
 
 /// The vertices joined from the start: those of every boundary loop. Returns the union-find
 /// and the number of loops.
-fn joined_boundary(tri: &IntrinsicTriangulation) -> (UnionFind, usize) {
-    let mut uf = UnionFind::new(tri.n_vertices());
-    let mut loops = UnionFind::new(tri.n_vertices());
-    let mut on_boundary = vec![false; tri.n_vertices()];
-    for e in 0..tri.n_edges() {
-        if tri.is_boundary_edge(e) {
-            let [a, b] = tri.edge_vertices(e);
+fn joined_boundary<T: Triangulation + ?Sized>(tri: &T) -> (UnionFind, usize) {
+    let mut uf = UnionFind::new(tri.complex().n_vertices());
+    let mut loops = UnionFind::new(tri.complex().n_vertices());
+    let mut on_boundary = vec![false; tri.complex().n_vertices()];
+    for e in 0..tri.complex().n_edges() {
+        if tri.complex().is_boundary_edge(e) {
+            let [a, b] = tri.complex().edge_vertices(e);
             uf.union(a, b);
             loops.union(a, b);
             on_boundary[a] = true;
             on_boundary[b] = true;
         }
     }
-    let n_loops = (0..tri.n_vertices())
+    let n_loops = (0..tri.complex().n_vertices())
         .filter(|&v| on_boundary[v] && loops.find(v) == v)
         .count();
     (uf, n_loops)
 }
 
 /// The edges sorted by length (ties by id), self-edges and boundary edges left out.
-fn edges_by_length(tri: &IntrinsicTriangulation) -> Vec<usize> {
-    let mut edges: Vec<usize> = (0..tri.n_edges())
+fn edges_by_length<T: Triangulation + ?Sized>(tri: &T) -> Vec<usize> {
+    let mut edges: Vec<usize> = (0..tri.complex().n_edges())
         .filter(|&e| {
-            let [a, b] = tri.edge_vertices(e);
-            a != b && !tri.is_boundary_edge(e)
+            let [a, b] = tri.complex().edge_vertices(e);
+            a != b && !tri.complex().is_boundary_edge(e)
         })
         .collect();
     edges.sort_by(|&x, &y| {
@@ -249,12 +252,12 @@ fn edges_by_length(tri: &IntrinsicTriangulation) -> Vec<usize> {
 /// The minimal spanning tree (forest, one tree per component; boundary loops joined from the
 /// start) of the triangulation's edges by Kruskal's algorithm: its edges, sorted, and its
 /// length.
-pub fn minimum_spanning_tree(tri: &IntrinsicTriangulation) -> (Vec<u32>, f64) {
+pub fn minimum_spanning_tree<T: Triangulation + ?Sized>(tri: &T) -> (Vec<u32>, f64) {
     let (mut uf, _) = joined_boundary(tri);
     let mut tree = Vec::new();
     let mut length = 0.0;
     for e in edges_by_length(tri) {
-        let [a, b] = tri.edge_vertices(e);
+        let [a, b] = tri.complex().edge_vertices(e);
         if uf.union(a, b) {
             tree.push(e as u32);
             length += tri.edge_length(e);
@@ -299,10 +302,10 @@ struct Candidate {
 /// # Errors
 /// [`SteinerError::Intrinsic`] when the flips, an insertion (other than a refusal, which drops
 /// the triangle) or an edge trace fail.
-pub fn steiner_tree(
-    tri: &IntrinsicTriangulation,
+pub fn steiner_tree<T: Triangulation + Clone>(
+    tri: &T,
     options: &SteinerOptions,
-) -> Result<SteinerTree, SteinerError> {
+) -> Result<SteinerTree<T>, SteinerError> {
     let mut base = tri.clone();
     let delaunay = match &options.delaunay {
         Some(d) => Some(base.flip_to_delaunay(d)?),
@@ -310,17 +313,17 @@ pub fn steiner_tree(
     };
     let (mst, mst_length) = minimum_spanning_tree(&base);
     let (_, n_boundary_loops) = joined_boundary(&base);
-    let mut in_mst = vec![false; base.n_edges()];
+    let mut in_mst = vec![false; base.complex().n_edges()];
     for &e in &mst {
         in_mst[e as usize] = true;
     }
     let mut candidates: Vec<Candidate> = Vec::new();
     if options.steiner_points {
-        for (f, face) in base.faces().iter().enumerate() {
+        for (f, face) in base.complex().faces().iter().enumerate() {
             if face[0] == face[1] || face[1] == face[2] || face[2] == face[0] {
                 continue;
             }
-            let sides = [0, 1, 2].map(|k| base.edge(3 * f + k));
+            let sides = [0, 1, 2].map(|k| base.complex().edge(3 * f + k));
             let n_mst = sides.iter().filter(|&&e| in_mst[e]).count();
             if options.candidates == TriangleCandidates::MstAdjacent && n_mst < 2 {
                 continue;
@@ -341,7 +344,7 @@ pub fn steiner_tree(
     }
     let n_candidates = candidates.len();
     let edges = edges_by_length(&base);
-    let mut excluded = vec![false; base.n_faces()];
+    let mut excluded = vec![false; base.complex().n_faces()];
     let mut n_refused = 0;
     let mut n_rounds = 0;
     loop {
@@ -352,7 +355,7 @@ pub fn steiner_tree(
             if excluded[c.face] {
                 continue;
             }
-            let [a, b, d] = base.faces()[c.face].map(|v| v as usize);
+            let [a, b, d] = base.complex().faces()[c.face].map(|v| v as usize);
             let (ra, rb, rd) = (uf.find(a), uf.find(b), uf.find(d));
             if ra != rb && rb != rd && ra != rd {
                 uf.union(a, b);
@@ -362,7 +365,7 @@ pub fn steiner_tree(
         }
         let mut tree: Vec<u32> = Vec::new();
         for &e in &edges {
-            let [a, b] = base.edge_vertices(e);
+            let [a, b] = base.complex().edge_vertices(e);
             if uf.union(a, b) {
                 tree.push(e as u32);
             }
@@ -393,7 +396,7 @@ pub fn steiner_tree(
         let mut max_trace_mismatch = 0.0f64;
         if let Some(trace_options) = &options.trace {
             for &e in &tree {
-                let t = result.trace_edge(e as usize, trace_options)?;
+                let t = result.trace_edge_on_input(e as usize, trace_options)?;
                 max_trace_mismatch =
                     max_trace_mismatch.max(t.mismatch / result.edge_length(e as usize));
                 traces.push(t);
@@ -462,8 +465,11 @@ pub struct CutReport {
 ///
 /// # Errors
 /// [`SteinerError::EdgeOutOfRange`].
-pub fn cut_to_disk(tri: &IntrinsicTriangulation, edges: &[u32]) -> Result<CutReport, SteinerError> {
-    let n_edges = tri.n_edges();
+pub fn cut_to_disk<T: Triangulation + ?Sized>(
+    tri: &T,
+    edges: &[u32],
+) -> Result<CutReport, SteinerError> {
+    let n_edges = tri.complex().n_edges();
     let mut cut = vec![false; n_edges];
     for &e in edges {
         let e = e as usize;
@@ -473,33 +479,35 @@ pub fn cut_to_disk(tri: &IntrinsicTriangulation, edges: &[u32]) -> Result<CutRep
         cut[e] = true;
     }
     for (e, c) in cut.iter_mut().enumerate() {
-        if tri.is_boundary_edge(e) {
+        if tri.complex().is_boundary_edge(e) {
             *c = true;
         }
     }
     // Vertices of the cut surface: one per wedge of corners between cut edges.
-    let n_h = tri.n_halfedges();
+    let n_h = tri.complex().n_halfedges();
     let mut corner_vertex = vec![u32::MAX; n_h];
     let mut wedge_angle: Vec<f64> = Vec::new();
     let mut wedge_on_boundary: Vec<bool> = Vec::new();
-    for v in 0..tri.n_vertices() {
-        let around: Vec<usize> = tri.outgoing_halfedges(v).collect();
+    for v in 0..tri.complex().n_vertices() {
+        let around: Vec<usize> = tri.complex().outgoing_halfedges(v).collect();
         let d = around.len();
         // Between corner i and corner i + 1 lies edge(prev(h_i)) = edge(h_{i+1}).
-        let boundary = tri.is_boundary_vertex(v);
+        let boundary = tri.complex().is_boundary_vertex(v);
         let start = if boundary {
             0
         } else {
-            (0..d).find(|&i| cut[tri.edge(around[i])]).unwrap_or(0)
+            (0..d)
+                .find(|&i| cut[tri.complex().edge(around[i])])
+                .unwrap_or(0)
         };
-        let any_cut = boundary || around.iter().any(|&h| cut[tri.edge(h)]);
+        let any_cut = boundary || around.iter().any(|&h| cut[tri.complex().edge(h)]);
         let mut current = wedge_angle.len();
         wedge_angle.push(0.0);
         wedge_on_boundary.push(any_cut);
         for step in 0..d {
             let i = (start + step) % d;
             let h = around[i];
-            if step > 0 && cut[tri.edge(h)] {
+            if step > 0 && cut[tri.complex().edge(h)] {
                 current = wedge_angle.len();
                 wedge_angle.push(0.0);
                 wedge_on_boundary.push(true);
@@ -510,15 +518,19 @@ pub fn cut_to_disk(tri: &IntrinsicTriangulation, edges: &[u32]) -> Result<CutRep
     }
     let n_vertices = wedge_angle.len();
     let n_cut_interior = (0..n_edges)
-        .filter(|&e| cut[e] && !tri.is_boundary_edge(e))
+        .filter(|&e| cut[e] && !tri.complex().is_boundary_edge(e))
         .count();
     let n_cut_edges = n_edges + n_cut_interior;
-    let n_faces = tri.n_faces();
+    let n_faces = tri.complex().n_faces();
     let euler_characteristic = n_vertices as i64 - n_cut_edges as i64 + n_faces as i64;
     let boundary_length: f64 = (0..n_edges)
         .filter(|&e| cut[e])
         .map(|e| {
-            let factor = if tri.is_boundary_edge(e) { 1.0 } else { 2.0 };
+            let factor = if tri.complex().is_boundary_edge(e) {
+                1.0
+            } else {
+                2.0
+            };
             factor * tri.edge_length(e)
         })
         .sum();
@@ -546,10 +558,12 @@ pub fn cut_to_disk(tri: &IntrinsicTriangulation, edges: &[u32]) -> Result<CutRep
         while let Some(f) = stack.pop() {
             for k in 0..3 {
                 let h = 3 * f + k;
-                if cut[tri.edge(h)] {
+                if cut[tri.complex().edge(h)] {
                     continue;
                 }
-                let Some(t) = tri.twin(h) else { continue };
+                let Some(t) = tri.complex().twin(h) else {
+                    continue;
+                };
                 let g = t / 3;
                 if placed[g] {
                     continue;
@@ -558,8 +572,8 @@ pub fn cut_to_disk(tri: &IntrinsicTriangulation, edges: &[u32]) -> Result<CutRep
                 let (a, b) = (layout[f][(k + 1) % 3], layout[f][k]);
                 let kt = t % 3;
                 let l = tri.face_lengths(g);
-                let c = unfold_apex(a, b, l[kt], l[(kt + 1) % 3], l[(kt + 2) % 3])
-                    .expect("a triangle");
+                let c =
+                    unfold_apex(a, b, l[kt], l[(kt + 1) % 3], l[(kt + 2) % 3]).expect("a triangle");
                 let mut corners = [[0.0; 2]; 3];
                 corners[kt] = a;
                 corners[(kt + 1) % 3] = b;

@@ -13,7 +13,7 @@
 //! * [`mark`]: the bulk criterion of the supplement (Dörfler marking for `η` and `osc`).
 //! * [`adaptive_solve`]: solve, estimate, mark, refine with `ddg-intrinsic`'s Delaunay
 //!   refinement and the marked faces as an extra criterion
-//!   ([`IntrinsicTriangulation::refine_with`]), until a tolerance, a vertex budget or an
+//!   ([`ddg_intrinsic::refine::refine`] with [`RefineRules::Ruppert`] (`IntrinsicTriangulation::refine_with`)), until a tolerance, a vertex budget or an
 //!   iteration limit; every iteration is reported.
 //!
 //! Conventions: `Δ` is the positive semidefinite Laplace–Beltrami operator and `L` its cotan
@@ -23,12 +23,13 @@
 use std::fmt;
 use std::time::Instant;
 
+use crate::representation::InputPoints;
 use ddg_core::{SparseError, SparseMatrix};
-use ddg_intrinsic::{IntrinsicError, IntrinsicTriangulation, RefineOptions, RefineReport};
+use ddg_intrinsic::{IntrinsicError, RefineOptions, RefineReport, RefineRules, Triangulation};
 
 use crate::fem::galerkin_mass_matrix;
-use crate::vector::linsolve;
 pub use crate::vector::Factorized;
+use crate::vector::linsolve;
 
 /// Errors of this module.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,8 +124,8 @@ pub struct Solution {
     pub residual: f64,
 }
 
-fn check_connected(tri: &IntrinsicTriangulation) -> Result<(), AmrError> {
-    let n = tri.n_vertices();
+fn check_connected<T: Triangulation + ?Sized>(tri: &T) -> Result<(), AmrError> {
+    let n = tri.complex().n_vertices();
     let mut seen = vec![false; n];
     let mut stack = vec![0usize];
     seen[0] = true;
@@ -137,14 +138,16 @@ fn check_connected(tri: &IntrinsicTriangulation) -> Result<(), AmrError> {
                 stack.push(w);
             }
         };
-        for h in tri.outgoing_halfedges(v) {
-            visit(tri.to_vertex(h));
-            visit(tri.to_vertex(tri.next(h)));
+        for h in tri.complex().outgoing_halfedges(v) {
+            visit(tri.complex().to_vertex(h));
+            visit(tri.complex().to_vertex(tri.complex().next(h)));
         }
     }
     if count != n {
         return Err(AmrError::InvalidInput {
-            reason: format!("the surface is not connected: {count} of {n} vertices reachable from vertex 0"),
+            reason: format!(
+                "the surface is not connected: {count} of {n} vertices reachable from vertex 0"
+            ),
         });
     }
     Ok(())
@@ -155,20 +158,20 @@ fn check_connected(tri: &IntrinsicTriangulation) -> Result<(), AmrError> {
 /// # Errors
 /// [`AmrError::InvalidInput`] unless the triangulation has one boundary loop and Euler
 /// characteristic 1.
-pub fn disk_boundary(tri: &IntrinsicTriangulation) -> Result<Vec<(u32, f64)>, AmrError> {
-    let boundary: Vec<usize> = (0..tri.n_vertices())
-        .filter(|&v| tri.is_boundary_vertex(v))
+pub fn disk_boundary<T: Triangulation + ?Sized>(tri: &T) -> Result<Vec<(u32, f64)>, AmrError> {
+    let boundary: Vec<usize> = (0..tri.complex().n_vertices())
+        .filter(|&v| tri.complex().is_boundary_vertex(v))
         .collect();
     let Some(&start) = boundary.first() else {
         return Err(AmrError::InvalidInput {
             reason: "the surface has no boundary; a disk map needs a disk".to_string(),
         });
     };
-    if tri.euler_characteristic() != 1 {
+    if tri.complex().euler_characteristic() != 1 {
         return Err(AmrError::InvalidInput {
             reason: format!(
                 "the surface has Euler characteristic {}, a disk has 1",
-                tri.euler_characteristic()
+                tri.complex().euler_characteristic()
             ),
         });
     }
@@ -177,9 +180,9 @@ pub fn disk_boundary(tri: &IntrinsicTriangulation) -> Result<Vec<(u32, f64)>, Am
     let mut s = 0.0;
     loop {
         out.push((v as u32, s));
-        let h = tri.outgoing_halfedge(v);
-        s += tri.edge_length(tri.edge(h));
-        v = tri.to_vertex(h);
+        let h = tri.complex().outgoing_halfedge(v);
+        s += tri.edge_length(tri.complex().edge(h));
+        v = tri.complex().to_vertex(h);
         if v == start || out.len() > boundary.len() {
             break;
         }
@@ -205,8 +208,8 @@ pub fn disk_boundary(tri: &IntrinsicTriangulation) -> Result<Vec<(u32, f64)>, Am
 /// [`AmrError::InvalidOptions`] for a time step that is not positive and finite;
 /// [`AmrError::InvalidInput`] for a source that is not an input vertex, a disconnected surface,
 /// or a disk map on a surface that is not a disk; [`AmrError::Sparse`].
-pub fn solve(tri: &IntrinsicTriangulation, problem: &Problem) -> Result<Solution, AmrError> {
-    let n = tri.n_vertices();
+pub fn solve<T: Triangulation + ?Sized>(tri: &T, problem: &Problem) -> Result<Solution, AmrError> {
+    let n = tri.complex().n_vertices();
     if let Some(s) = problem.source()
         && s as usize >= tri.n_input_vertices()
     {
@@ -218,12 +221,12 @@ pub fn solve(tri: &IntrinsicTriangulation, problem: &Problem) -> Result<Solution
         });
     }
     check_connected(tri)?;
-    let l = tri.cotan_laplacian();
+    let l = ddg_intrinsic::generic_ops::cotan_laplacian(tri);
     match *problem {
         Problem::GreenFunction { source } => {
             // L u = e_s − m/|M|, pinned at one vertex other than the source, then the mean
             // removed. The right-hand side sums to zero, so pinning changes nothing else.
-            let mass = tri.lumped_mass();
+            let mass = ddg_intrinsic::generic_ops::lumped_mass(tri);
             let total: f64 = mass.iter().sum();
             let mut b: Vec<f64> = mass.iter().map(|m| -m / total).collect();
             b[source as usize] += 1.0;
@@ -337,9 +340,13 @@ pub struct Estimate {
 /// with `o` the opposite corner.
 ///
 /// [formula: app-amr-edge-flux]
-pub fn side_flux(tri: &IntrinsicTriangulation, f: usize, k: usize, u: &[f64]) -> f64 {
-    let v = tri.faces()[f];
-    let (i, j, o) = (v[k] as usize, v[(k + 1) % 3] as usize, v[(k + 2) % 3] as usize);
+pub fn side_flux<T: Triangulation + ?Sized>(tri: &T, f: usize, k: usize, u: &[f64]) -> f64 {
+    let v = tri.complex().faces()[f];
+    let (i, j, o) = (
+        v[k] as usize,
+        v[(k + 1) % 3] as usize,
+        v[(k + 2) % 3] as usize,
+    );
     let l = tri.face_lengths(f);
     let cot = |c: usize| {
         ddg_core::geometry::corner_cotan(l[(c + 1) % 3], l[c], l[(c + 2) % 3])
@@ -365,29 +372,29 @@ pub fn side_flux(tri: &IntrinsicTriangulation, f: usize, k: usize, u: &[f64]) ->
 ///
 /// # Errors
 /// [`AmrError::InvalidInput`] if the solution does not have one value per vertex.
-pub fn estimate(
-    tri: &IntrinsicTriangulation,
+pub fn estimate<T: Triangulation + ?Sized>(
+    tri: &T,
     problem: &Problem,
     solution: &Solution,
 ) -> Result<Estimate, AmrError> {
     for c in &solution.components {
-        if c.len() != tri.n_vertices() {
+        if c.len() != tri.complex().n_vertices() {
             return Err(AmrError::InvalidInput {
                 reason: format!(
                     "a solution with {} values on a triangulation with {} vertices",
                     c.len(),
-                    tri.n_vertices()
+                    tri.complex().n_vertices()
                 ),
             });
         }
     }
-    let nf = tri.n_faces();
+    let nf = tri.complex().n_faces();
     let mut eta2 = vec![0.0; nf];
     let mut osc2 = vec![0.0; nf];
     let total_area = tri.total_area();
     for u in &solution.components {
         // Fluxes per halfedge.
-        let flux: Vec<f64> = (0..tri.n_halfedges())
+        let flux: Vec<f64> = (0..tri.complex().n_halfedges())
             .map(|h| side_flux(tri, h / 3, h % 3, u))
             .collect();
         for f in 0..nf {
@@ -395,20 +402,25 @@ pub fn estimate(
             let area = tri.face_area(f);
             let diameter = l[0].max(l[1]).max(l[2]);
             // The element residual at the corners (linear in the face).
-            let v = tri.faces()[f];
+            let v = tri.complex().faces()[f];
             let r: [f64; 3] = match *problem {
                 Problem::GreenFunction { .. } => [-1.0 / total_area; 3],
                 Problem::HeatKernel { time, .. } => v.map(|x| -u[x as usize] / time),
                 Problem::HarmonicDisk => [0.0; 3],
             };
             let norm2 = area / 6.0
-                * (r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[0] * r[1] + r[1] * r[2] + r[2] * r[0]);
+                * (r[0] * r[0]
+                    + r[1] * r[1]
+                    + r[2] * r[2]
+                    + r[0] * r[1]
+                    + r[1] * r[2]
+                    + r[2] * r[0]);
             let mean = (r[0] + r[1] + r[2]) / 3.0;
             let osc = (norm2 - area * mean * mean).max(0.0);
             let mut jumps = 0.0;
             for k in 0..3 {
                 let h = 3 * f + k;
-                let lj = match tri.twin(h) {
+                let lj = match tri.complex().twin(h) {
                     Some(t) => flux[h] + flux[t],
                     None if problem.dirichlet() => continue,
                     None => flux[h],
@@ -484,31 +496,45 @@ pub fn mark(estimate: &Estimate, bulk: f64, sum: BulkSum) -> Vec<u32> {
 }
 
 /// What identifies a face of a triangulation as unchanged: its id and its three edges.
-fn face_key(tri: &IntrinsicTriangulation, f: usize) -> (u32, [u32; 3]) {
-    (f as u32, [0, 1, 2].map(|k| tri.edge(3 * f + k) as u32))
+fn face_key<T: Triangulation + ?Sized>(tri: &T, f: usize) -> (u32, [u32; 3]) {
+    (
+        f as u32,
+        [0, 1, 2].map(|k| tri.complex().edge(3 * f + k) as u32),
+    )
 }
 
 /// Refines `tri` (Delaunay refinement with `options`) with the faces `marked` as an extra
 /// criterion: a marked face is refined while it is unchanged (same id, same three edges), so
 /// each marked face gets a vertex or is removed by another insertion
-/// ([`IntrinsicTriangulation::refine_with`]).
+/// ([`ddg_intrinsic::refine::refine`] with [`RefineRules::Ruppert`] (`IntrinsicTriangulation::refine_with`)).
 ///
 /// # Errors
 /// [`AmrError::InvalidInput`] for a face id out of range; the errors of refinement.
-pub fn refine_marked(
-    tri: &mut IntrinsicTriangulation,
+pub fn refine_marked<T: Triangulation>(
+    tri: &mut T,
     options: &RefineOptions,
     marked: &[u32],
 ) -> Result<RefineReport, AmrError> {
-    if let Some(&f) = marked.iter().find(|&&f| f as usize >= tri.n_faces()) {
+    if let Some(&f) = marked
+        .iter()
+        .find(|&&f| f as usize >= tri.complex().n_faces())
+    {
         return Err(AmrError::InvalidInput {
-            reason: format!("face {f} does not exist (the triangulation has {})", tri.n_faces()),
+            reason: format!(
+                "face {f} does not exist (the triangulation has {})",
+                tri.complex().n_faces()
+            ),
         });
     }
     let keys: std::collections::HashSet<(u32, [u32; 3])> =
         marked.iter().map(|&f| face_key(tri, f as usize)).collect();
-    let criterion = |t: &IntrinsicTriangulation, f: usize| keys.contains(&face_key(t, f));
-    Ok(tri.refine_with(options, &criterion)?)
+    let criterion = |t: &T, f: usize| keys.contains(&face_key(t, f));
+    Ok(ddg_intrinsic::refine::refine(
+        tri,
+        options,
+        RefineRules::Ruppert,
+        &criterion,
+    )?)
 }
 
 /// Options of [`adaptive_solve`].
@@ -598,14 +624,14 @@ pub struct AmrReport {
 /// Adaptive refinement (paper Sec. 5.4): refine `tri` to the angle bound of
 /// `options.refine`, then repeat: solve, estimate, stop if done, mark (the bulk criterion),
 /// refine the marked faces together with every face below the angle bound
-/// ([`IntrinsicTriangulation::refine_with`], where a face counts as marked while it is
+/// ([`ddg_intrinsic::refine::refine`] with [`RefineRules::Ruppert`] (`IntrinsicTriangulation::refine_with`), where a face counts as marked while it is
 /// unchanged). Returns the last solution, on the final `tri`.
 ///
 /// # Errors
 /// [`AmrError::InvalidOptions`] for `bulk` outside `(0, 1]` or a negative tolerance; the errors
 /// of [`solve`] and of refinement.
-pub fn adaptive_solve(
-    tri: &mut IntrinsicTriangulation,
+pub fn adaptive_solve<T: Triangulation>(
+    tri: &mut T,
     problem: &Problem,
     options: &AmrOptions,
 ) -> Result<(Solution, AmrReport), AmrError> {
@@ -616,11 +642,17 @@ pub fn adaptive_solve(
     }
     if options.tolerance.is_nan() || options.tolerance < 0.0 {
         return Err(AmrError::InvalidOptions {
-            reason: format!("the tolerance must be non-negative, got {}", options.tolerance),
+            reason: format!(
+                "the tolerance must be non-negative, got {}",
+                options.tolerance
+            ),
         });
     }
     let start = Instant::now();
-    let initial = tri.refine(&options.refine)?;
+    let initial =
+        ddg_intrinsic::refine::refine(tri, &options.refine, RefineRules::Ruppert, &|_: &T, _| {
+            false
+        })?;
     let seconds_initial = start.elapsed().as_secs_f64();
     let mut iterations = Vec::new();
     loop {
@@ -629,8 +661,8 @@ pub fn adaptive_solve(
         let t1 = Instant::now();
         let est = estimate(tri, problem, &solution)?;
         let mut it = AmrIteration {
-            n_vertices: tri.n_vertices(),
-            n_faces: tri.n_faces(),
+            n_vertices: tri.complex().n_vertices(),
+            n_faces: tri.complex().n_faces(),
             estimate: est.total,
             oscillation: est.total_oscillation,
             n_marked: 0,
@@ -664,7 +696,7 @@ pub fn adaptive_solve(
         it.n_marked = marked.len();
         let t2 = Instant::now();
         it.seconds_estimate = (t2 - t1).as_secs_f64();
-        let before = tri.n_vertices();
+        let before = tri.complex().n_vertices();
         // Each marked face gets at least one vertex: stop if that alone exceeds the budget.
         if before + marked.len() > options.max_vertices {
             iterations.push(it);
@@ -680,7 +712,7 @@ pub fn adaptive_solve(
             ));
         }
         refine_marked(tri, &options.refine, &marked)?;
-        it.n_inserted = tri.n_vertices() - before;
+        it.n_inserted = tri.complex().n_vertices() - before;
         it.seconds_refine = t2.elapsed().as_secs_f64();
         iterations.push(it);
         if it.n_inserted == 0 {
@@ -708,8 +740,8 @@ pub fn adaptive_solve(
 /// # Errors
 /// [`AmrError::InvalidInput`] if a solution has fewer values than the input has vertices, or
 /// the two have different numbers of components.
-pub fn input_vertex_error(
-    tri_input: &IntrinsicTriangulation,
+pub fn input_vertex_error<T: Triangulation + ?Sized>(
+    tri_input: &T,
     solution: &Solution,
     reference: &Solution,
     exclude: &[u32],
@@ -724,11 +756,15 @@ pub fn input_vertex_error(
             .any(|c| c.len() < n)
     {
         return Err(AmrError::InvalidInput {
-            reason: "the solutions do not cover the input vertices with the same components".to_string(),
+            reason: "the solutions do not cover the input vertices with the same components"
+                .to_string(),
         });
     }
-    let mass = ddg_core::operators::lumped_mass(input.mesh(), input.geometry())
-        .map_err(|e| AmrError::InvalidInput { reason: e.to_string() })?;
+    let mass = ddg_core::operators::lumped_mass(input.mesh(), input.geometry()).map_err(|e| {
+        AmrError::InvalidInput {
+            reason: e.to_string(),
+        }
+    })?;
     let mut num = 0.0;
     let mut den = 0.0;
     for (u, r) in solution.components.iter().zip(&reference.components) {
@@ -744,16 +780,20 @@ pub fn input_vertex_error(
 }
 
 /// The value of a piecewise linear function of `tri` at a point of `tri`.
-fn interpolate(tri: &IntrinsicTriangulation, u: &[f64], point: ddg_intrinsic::SurfacePoint) -> f64 {
+fn interpolate<T: Triangulation + ?Sized>(
+    tri: &T,
+    u: &[f64],
+    point: ddg_intrinsic::SurfacePoint,
+) -> f64 {
     use ddg_intrinsic::SurfacePoint;
     match point {
         SurfacePoint::Vertex(v) => u[v as usize],
         SurfacePoint::Edge { edge, t } => {
-            let [a, b] = tri.edge_vertices(edge as usize);
+            let [a, b] = tri.complex().edge_vertices(edge as usize);
             (1.0 - t) * u[a] + t * u[b]
         }
         SurfacePoint::Face { face, bary } => {
-            let v = tri.faces()[face as usize];
+            let v = tri.complex().faces()[face as usize];
             (0..3).map(|k| bary[k] * u[v[k] as usize]).sum()
         }
     }
@@ -767,10 +807,10 @@ fn interpolate(tri: &IntrinsicTriangulation, u: &[f64], point: ddg_intrinsic::Su
 ///
 /// # Errors
 /// [`AmrError::InvalidInput`] if the components do not match; the errors of a point query.
-pub fn l2_error(
-    reference_tri: &IntrinsicTriangulation,
+pub fn l2_error<R: Triangulation + ?Sized, T: InputPoints + ?Sized>(
+    reference_tri: &R,
     reference: &Solution,
-    tri: &IntrinsicTriangulation,
+    tri: &T,
     solution: &Solution,
 ) -> Result<f64, AmrError> {
     if reference.components.len() != solution.components.len() {
@@ -778,12 +818,12 @@ pub fn l2_error(
             reason: "the solutions have different numbers of components".to_string(),
         });
     }
-    let mass = reference_tri.lumped_mass();
+    let mass = ddg_intrinsic::generic_ops::lumped_mass(reference_tri);
     let mut num = 0.0;
     let mut den = 0.0;
-    for v in 0..reference_tri.n_vertices() {
+    for v in 0..reference_tri.complex().n_vertices() {
         let place = reference_tri.vertex_location(v);
-        let here = tri.point_on_triangulation(place)?;
+        let here = tri.locate_on_triangulation(place)?;
         for (u, r) in solution.components.iter().zip(&reference.components) {
             let x = interpolate(tri, u, here);
             num += mass[v] * (x - r[v]).powi(2);
@@ -813,17 +853,23 @@ pub struct MapQuality {
 /// Jacobian).
 ///
 /// [formula: app-amr-map-distortion]
-pub fn map_quality(tri: &IntrinsicTriangulation, uv: &Solution) -> MapQuality {
+pub fn map_quality<T: Triangulation + ?Sized>(tri: &T, uv: &Solution) -> MapQuality {
     let mut n_flipped = 0;
     let mut min_area_ratio = f64::INFINITY;
-    let mut samples: Vec<(f64, f64)> = Vec::with_capacity(tri.n_faces());
-    for f in 0..tri.n_faces() {
+    let mut samples: Vec<(f64, f64)> = Vec::with_capacity(tri.complex().n_faces());
+    for f in 0..tri.complex().n_faces() {
         let p = ddg_intrinsic::formulas::triangle_layout(tri.face_lengths(f))
             .expect("faces keep the triangle inequalities");
-        let v = tri.faces()[f];
+        let v = tri.complex().faces()[f];
         let q = v.map(|x| [uv.components[0][x as usize], uv.components[1][x as usize]]);
-        let (e1, e2) = ([p[1][0] - p[0][0], p[1][1] - p[0][1]], [p[2][0] - p[0][0], p[2][1] - p[0][1]]);
-        let (g1, g2) = ([q[1][0] - q[0][0], q[1][1] - q[0][1]], [q[2][0] - q[0][0], q[2][1] - q[0][1]]);
+        let (e1, e2) = (
+            [p[1][0] - p[0][0], p[1][1] - p[0][1]],
+            [p[2][0] - p[0][0], p[2][1] - p[0][1]],
+        );
+        let (g1, g2) = (
+            [q[1][0] - q[0][0], q[1][1] - q[0][1]],
+            [q[2][0] - q[0][0], q[2][1] - q[0][1]],
+        );
         let det_p = e1[0] * e2[1] - e1[1] * e2[0];
         let det_q = g1[0] * g2[1] - g1[1] * g2[0];
         let area = 0.5 * det_p;
@@ -833,10 +879,19 @@ pub fn map_quality(tri: &IntrinsicTriangulation, uv: &Solution) -> MapQuality {
             continue;
         }
         // J = G P⁻¹ with P = [e1 e2], G = [g1 g2].
-        let inv = [[e2[1] / det_p, -e2[0] / det_p], [-e1[1] / det_p, e1[0] / det_p]];
+        let inv = [
+            [e2[1] / det_p, -e2[0] / det_p],
+            [-e1[1] / det_p, e1[0] / det_p],
+        ];
         let j = [
-            [g1[0] * inv[0][0] + g2[0] * inv[1][0], g1[0] * inv[0][1] + g2[0] * inv[1][1]],
-            [g1[1] * inv[0][0] + g2[1] * inv[1][0], g1[1] * inv[0][1] + g2[1] * inv[1][1]],
+            [
+                g1[0] * inv[0][0] + g2[0] * inv[1][0],
+                g1[0] * inv[0][1] + g2[0] * inv[1][1],
+            ],
+            [
+                g1[1] * inv[0][0] + g2[1] * inv[1][0],
+                g1[1] * inv[0][1] + g2[1] * inv[1][1],
+            ],
         ];
         // J = conformal part + anticonformal part: σ₁ = |a| + |b|, σ₂ = |a| − |b| (no
         // cancellation for a nearly conformal map, unlike the closed form via the trace).
@@ -845,7 +900,8 @@ pub fn map_quality(tri: &IntrinsicTriangulation, uv: &Solution) -> MapQuality {
         samples.push(((a + b) / (a - b), area));
     }
     let total: f64 = samples.iter().map(|s| s.1).sum();
-    let mean_conformal = samples.iter().map(|s| s.0 * s.1).sum::<f64>() / total.max(f64::MIN_POSITIVE);
+    let mean_conformal =
+        samples.iter().map(|s| s.0 * s.1).sum::<f64>() / total.max(f64::MIN_POSITIVE);
     let max_conformal = samples.iter().fold(0.0f64, |m, s| m.max(s.0));
     samples.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut acc = 0.0;

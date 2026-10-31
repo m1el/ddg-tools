@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+ddg-integer-coords = { path = "../ddg-integer-coords" }
 
 [dev-dependencies]
 # Benches of the heat method (benches/heat.rs); the same version as ddg-intrinsic and ddg-uv.

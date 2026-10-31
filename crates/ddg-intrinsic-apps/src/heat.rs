@@ -45,9 +45,10 @@
 use std::fmt;
 use std::time::Instant;
 
+use crate::representation::InputPoints;
+use ddg_core::SparseError;
 use ddg_core::geometry::corner_cotan;
 use ddg_core::sparse::{Factorization, Method, Parallelism, Symbolic};
-use ddg_core::SparseError;
 use ddg_intrinsic::formulas::{corner_distances, triangle_layout};
 use ddg_intrinsic::{IntrinsicError, IntrinsicTriangulation, SurfacePoint};
 
@@ -214,8 +215,8 @@ pub struct HeatDistance {
 }
 
 /// The heat method on one intrinsic triangulation, with both systems factored.
-pub struct HeatSolver {
-    tri: IntrinsicTriangulation,
+pub struct HeatSolver<T: InputPoints + Clone = IntrinsicTriangulation> {
+    tri: T,
     boundary: HeatBoundary,
     neumann: Option<Factorization>,
     /// The Dirichlet system on the interior vertices, and the row of every vertex
@@ -225,15 +226,15 @@ pub struct HeatSolver {
     setup: HeatSetup,
 }
 
-impl HeatSolver {
+impl<T: InputPoints + Clone> HeatSolver<T> {
     /// Assembles and factors `M + t L` (for the boundary conditions asked for) and `L`.
     ///
     /// # Errors
     /// [`HeatError::InvalidOptions`] for a time or time factor that is not a positive number,
     /// [`HeatError::Sparse`], [`HeatError::Fem`] if a factorization fails.
-    pub fn new(tri: &IntrinsicTriangulation, options: &HeatOptions) -> Result<HeatSolver, HeatError> {
+    pub fn new(tri: &T, options: &HeatOptions) -> Result<HeatSolver<T>, HeatError> {
         let start = Instant::now();
-        let mean = tri.edge_lengths().iter().sum::<f64>() / tri.n_edges().max(1) as f64;
+        let mean = tri.edge_lengths().iter().sum::<f64>() / tri.complex().n_edges().max(1) as f64;
         let time = match options.time {
             Some(t) => t,
             None => {
@@ -251,9 +252,9 @@ impl HeatSolver {
                 "the time step must be a positive number, not {time}"
             )));
         }
-        let n = tri.n_vertices();
-        let l = tri.cotan_laplacian();
-        let mass = tri.lumped_mass();
+        let n = tri.complex().n_vertices();
+        let l = ddg_intrinsic::generic_ops::cotan_laplacian(tri);
+        let mass = ddg_intrinsic::generic_ops::lumped_mass(tri);
         let mut heat = l.clone();
         heat.values_mut().iter_mut().for_each(|x| *x *= time);
         heat.add_to_diagonal(&mass)?;
@@ -266,7 +267,7 @@ impl HeatSolver {
             let mut row = vec![u32::MAX; n];
             let mut keep = Vec::with_capacity(n);
             for (v, r) in row.iter_mut().enumerate() {
-                if !tri.is_boundary_vertex(v) {
+                if !tri.complex().is_boundary_vertex(v) {
                     *r = keep.len() as u32;
                     keep.push(v as u32);
                 }
@@ -288,14 +289,14 @@ impl HeatSolver {
                 time,
                 mean_edge_length: mean,
                 n_vertices: n,
-                n_faces: tri.n_faces(),
+                n_faces: tri.complex().n_faces(),
                 seconds: start.elapsed().as_secs_f64(),
             },
         })
     }
 
     /// The triangulation the solver works on.
-    pub fn triangulation(&self) -> &IntrinsicTriangulation {
+    pub fn triangulation(&self) -> &T {
         &self.tri
     }
 
@@ -308,25 +309,25 @@ impl HeatSolver {
     fn locate(&self, source: &HeatSource) -> Result<(usize, [f64; 3]), HeatError> {
         let point = match *source {
             HeatSource::Vertex(v) => {
-                if v >= self.tri.n_vertices() {
+                if v >= self.tri.complex().n_vertices() {
                     return Err(HeatError::SourceOutOfRange {
                         vertex: v,
-                        n_vertices: self.tri.n_vertices(),
+                        n_vertices: self.tri.complex().n_vertices(),
                     });
                 }
                 SurfacePoint::Vertex(v as u32)
             }
-            HeatSource::Point(p) => self.tri.point_on_triangulation(p)?,
+            HeatSource::Point(p) => self.tri.locate_on_triangulation(p)?,
         };
         Ok(match point {
             SurfacePoint::Vertex(v) => {
-                let h = self.tri.outgoing_halfedge(v as usize);
+                let h = self.tri.complex().outgoing_halfedge(v as usize);
                 let mut bary = [0.0; 3];
                 bary[h % 3] = 1.0;
                 (h / 3, bary)
             }
             SurfacePoint::Edge { edge, t } => {
-                let h = self.tri.edge_halfedge(edge as usize);
+                let h = self.tri.complex().edge_halfedge(edge as usize);
                 let mut bary = [0.0; 3];
                 bary[h % 3] = 1.0 - t;
                 bary[(h + 1) % 3] = t;
@@ -350,13 +351,15 @@ impl HeatSolver {
             return Err(HeatError::NoSource);
         }
         let tri = &self.tri;
-        let n = tri.n_vertices();
-        let located: Vec<(usize, [f64; 3])> =
-            sources.iter().map(|s| self.locate(s)).collect::<Result<_, _>>()?;
+        let n = tri.complex().n_vertices();
+        let located: Vec<(usize, [f64; 3])> = sources
+            .iter()
+            .map(|s| self.locate(s))
+            .collect::<Result<_, _>>()?;
         let mut delta = vec![0.0; n];
         for &(f, bary) in &located {
             for k in 0..3 {
-                delta[tri.faces()[f][k] as usize] += bary[k];
+                delta[tri.complex().faces()[f][k] as usize] += bary[k];
             }
         }
         let u = self.heat(&delta)?;
@@ -372,7 +375,7 @@ impl HeatSolver {
             let d = corner_distances(tri.face_lengths(f), bary)
                 .expect("faces of a triangulation are triangles");
             for k in 0..3 {
-                sum += bary[k] * (phi[tri.faces()[f][k] as usize] - d[k]);
+                sum += bary[k] * (phi[tri.complex().faces()[f][k] as usize] - d[k]);
                 weight += bary[k];
             }
         }
@@ -406,11 +409,20 @@ impl HeatSolver {
                 if let Some(v) = (0..n).find(|&v| row[v] == u32::MAX && delta[v] != 0.0) {
                     return Err(HeatError::SourceOnDirichletBoundary { vertex: v });
                 }
-                let mut rhs: Vec<f64> = (0..n).filter(|&v| row[v] != u32::MAX).map(|v| delta[v]).collect();
+                let mut rhs: Vec<f64> = (0..n)
+                    .filter(|&v| row[v] != u32::MAX)
+                    .map(|v| delta[v])
+                    .collect();
                 factor.solve_in_place(&mut rhs, Parallelism::Sequential)?;
                 Some(
                     (0..n)
-                        .map(|v| if row[v] == u32::MAX { 0.0 } else { rhs[row[v] as usize] })
+                        .map(|v| {
+                            if row[v] == u32::MAX {
+                                0.0
+                            } else {
+                                rhs[row[v] as usize]
+                            }
+                        })
                         .collect::<Vec<f64>>(),
                 )
             }
@@ -433,9 +445,9 @@ impl HeatSolver {
     /// [formula: app-heat-divergence]
     fn divergence(&self, u: &[f64]) -> (Vec<f64>, usize) {
         let tri = &self.tri;
-        let mut div = vec![0.0; tri.n_vertices()];
+        let mut div = vec![0.0; tri.complex().n_vertices()];
         let mut n_flat = 0;
-        for (f, face) in tri.faces().iter().enumerate() {
+        for (f, face) in tri.complex().faces().iter().enumerate() {
             let l = tri.face_lengths(f);
             let p = triangle_layout(l).expect("faces of a triangulation are triangles");
             let x = unit_descent(&p, [0, 1, 2].map(|k| u[face[k] as usize]));
@@ -467,15 +479,15 @@ impl HeatSolver {
     /// # Errors
     /// [`HeatError::ValueCount`], and [`HeatError::Intrinsic`] when the point query fails.
     pub fn value_at(&self, values: &[f64], point: SurfacePoint) -> Result<f64, HeatError> {
-        if values.len() != self.tri.n_vertices() {
+        if values.len() != self.tri.complex().n_vertices() {
             return Err(HeatError::ValueCount {
                 got: values.len(),
-                expected: self.tri.n_vertices(),
+                expected: self.tri.complex().n_vertices(),
             });
         }
         let (f, bary) = self.locate(&HeatSource::Point(point))?;
         Ok((0..3)
-            .map(|k| bary[k] * values[self.tri.faces()[f][k] as usize])
+            .map(|k| bary[k] * values[self.tri.complex().faces()[f][k] as usize])
             .sum())
     }
 }
@@ -508,8 +520,8 @@ fn unit_descent(p: &[[f64; 2]; 3], u: [f64; 3]) -> Option<[f64; 2]> {
 ///
 /// # Errors
 /// Those of [`HeatSolver::new`] and [`HeatSolver::distance`].
-pub fn geodesic_distance(
-    tri: &IntrinsicTriangulation,
+pub fn geodesic_distance<T: InputPoints + Clone>(
+    tri: &T,
     sources: &[HeatSource],
     options: &HeatOptions,
 ) -> Result<HeatDistance, HeatError> {

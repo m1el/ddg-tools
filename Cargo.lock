@@ -452,6 +452,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "ddg-core",
+ "ddg-integer-coords",
  "ddg-intrinsic",
 ]
 

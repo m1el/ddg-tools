@@ -395,7 +395,8 @@ pub fn smoothest_field(
         eps,
         options.seed,
     )?;
-    let (u, lambda, residual, iterations) = (pair.vector, pair.value, pair.residual, pair.iterations);
+    let (u, lambda, residual, iterations) =
+        (pair.vector, pair.value, pair.residual, pair.iterations);
     let status = if pair.converged {
         EigenStatus::Converged
     } else {
@@ -793,7 +794,9 @@ pub fn check_maximum_principle(
 /// The tangent-space scale of every vertex (`2π/Θ` inside, `1` on the boundary), for callers
 /// that convert between corner angles and tangent angles.
 pub fn tangent_scales(tri: &IntrinsicTriangulation) -> Vec<f64> {
-    (0..tri.n_vertices()).map(|v| tangent_scale(tri, v)).collect()
+    (0..tri.n_vertices())
+        .map(|v| tangent_scale(tri, v))
+        .collect()
 }
 
 /// The direction of every halfedge at its tail in the tangent frame of the tail (the signpost,

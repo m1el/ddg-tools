@@ -514,6 +514,30 @@ is a vector parallel to a neighbour's; the few "negative" weights of the iDR are
 smaller, rounding. It holds on the face's input too, despite 6539 negative weights: the
 condition is sufficient, not necessary.
 
+## Representations (Integer Coordinates, WP11)
+
+`fem`, `heat`, `steiner` and `amr` are written over `ddg_intrinsic::Triangulation` and run on
+signposts (`IntrinsicTriangulation`) and on integer coordinates
+(`ddg_integer_coords::IntegerTriangulation`, Gillespie, Sharp, Crane 2021). The matrices come
+from `ddg_intrinsic::generic_ops::{cotan_laplacian, lumped_mass}` (bitwise the signposts'
+methods); point sources of the heat method and the cross-representation error of `amr` need
+`representation::InputPoints` (`T^0 -> T^1`). `representation::Representation::DEFAULT` is
+**`Signposts`** until the Thingi10k evaluation (WP10) passes; the later commit that makes
+integers the default changes that constant and the defaults of the Python and Blender front
+ends, nothing here. This crate depends on `ddg-integer-coords`; the reverse dependency must
+not exist.
+
+Not generic, and why: `vector` (tangent fields and connection Laplacians) reads the stored
+input-aligned signpost frames, which `AngleFrames` are not (contract I26, open); `exact` works
+on the input mesh and has no triangulation.
+
+`tests/representation.rs` (release, jittered grid, jittered icosphere, sheared torus; Delaunay
+flipping and Ruppert refinement on both): connectivity equal; stiffness, lumped and Galerkin
+mass matrices differ by 0 (bitwise); heat distances from two vertex sources differ by 0, from a
+point source by at most 1.8e-15; the Steiner trees have equal length and Steiner points;
+adaptive refinement on the icosphere (1 110 vertices, 17 steps) has the same estimate and a
+solution difference of 0 at the input vertices.
+
 ## Verification
 
 - `tests/exact.rs`: the exact distance equals the Euclidean distance on flat convex domains

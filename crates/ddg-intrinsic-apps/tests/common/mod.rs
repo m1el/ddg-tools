@@ -86,7 +86,11 @@ pub fn sheared_parallelogram(n: usize, sigma: f64) -> Shape {
             faces.push([a, d, c]);
         }
     }
-    Shape::new(&format!("sheared parallelogram {n} sigma {sigma}"), positions, faces)
+    Shape::new(
+        &format!("sheared parallelogram {n} sigma {sigma}"),
+        positions,
+        faces,
+    )
 }
 
 /// A torus of revolution (radii `big`, `small`) on an `nu × nv` lattice of the angles whose
@@ -112,7 +116,11 @@ pub fn sheared_torus(nu: usize, nv: usize, big: f64, small: f64, shift: usize) -
             faces.push([a, c, d]);
         }
     }
-    Shape::new(&format!("sheared torus {nu}x{nv} shift {shift}"), positions, faces)
+    Shape::new(
+        &format!("sheared torus {nu}x{nv} shift {shift}"),
+        positions,
+        faces,
+    )
 }
 
 /// The flat unit square `n × n` with interior vertices moved by up to `amplitude` cells.
@@ -230,7 +238,10 @@ pub fn bumpy_sheared_grid(n: usize, amplitude: f64, shear: f64) -> Shape {
 }
 
 pub fn icosphere(level: u32) -> Shape {
-    Shape::generated(&format!("icosphere_{level}"), generators::icosphere(level).unwrap())
+    Shape::generated(
+        &format!("icosphere_{level}"),
+        generators::icosphere(level).unwrap(),
+    )
 }
 
 /// An icosphere with vertices moved randomly along the sphere (bad triangles, same surface
@@ -301,7 +312,11 @@ pub fn polar_disk(n: usize, twist: f64) -> Shape {
         }
     }
     for f in &mut faces {
-        let (a, b, c) = (positions[f[0] as usize], positions[f[1] as usize], positions[f[2] as usize]);
+        let (a, b, c) = (
+            positions[f[0] as usize],
+            positions[f[1] as usize],
+            positions[f[2] as usize],
+        );
         let cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
         if cross < 0.0 {
             f.swap(1, 2);

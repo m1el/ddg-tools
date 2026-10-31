@@ -7,9 +7,9 @@
 //! vectors converges with the ratio of the smallest and the `(p+1)`-th, and its Ritz vectors
 //! are the best approximations within the block; with `p = 1` this is Alg. 2.
 
+use ddg_core::generators::SplitMix64;
 use ddg_core::sparse::Factorization;
 use ddg_core::{SparseError, SparseMatrix};
-use ddg_core::generators::SplitMix64;
 
 use super::linsolve::{dot, mul, norm, solve};
 
@@ -136,7 +136,11 @@ pub(crate) fn smallest(
         let aq: Vec<Vec<f64>> = q.iter().map(|x| mul(a, x)).collect();
         let p = q.len();
         let b: Vec<Vec<f64>> = (0..p)
-            .map(|i| (0..p).map(|j| 0.5 * (dot(&q[i], &aq[j]) + dot(&q[j], &aq[i]))).collect())
+            .map(|i| {
+                (0..p)
+                    .map(|j| 0.5 * (dot(&q[i], &aq[j]) + dot(&q[j], &aq[i])))
+                    .collect()
+            })
             .collect();
         let (values, vectors) = jacobi(b);
         // Ritz vectors, ascending.
