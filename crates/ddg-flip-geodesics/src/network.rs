@@ -130,7 +130,7 @@ impl EdgePath {
         self.segments
             .iter()
             .map(|s| tri.edge_length(s.edge as usize))
-            .sum()
+            .fold(0.0, |s, l| s + l)
     }
 
     /// The same path traversed backwards.
@@ -1114,7 +1114,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
     pub fn recompute_length(&self) -> f64 {
         (0..self.network.n_paths())
             .map(|p| self.path_length(p))
-            .sum()
+            .fold(0.0, |s, l| s + l)
     }
 
     /// The length of path `p`.
@@ -1129,7 +1129,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 self.tri
                     .edge_length(self.network.node(id.0).segment.edge as usize)
             })
-            .sum()
+            .fold(0.0, |s, l| s + l)
     }
 
     /// Checks the network against the current triangulation ([`Network::check`]).

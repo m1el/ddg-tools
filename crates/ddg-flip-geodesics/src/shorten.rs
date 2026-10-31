@@ -327,7 +327,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             }
             Shortening::Replaced { .. } => {}
         }
-        self.length += result.shortening.length_change();
+        self.update_length(&result.shortening);
         if let Some(replaced) = &result.replaced {
             let mut ids: Vec<u32> = replaced.new_ids.clone();
             ids.extend(replaced.after);
@@ -368,6 +368,19 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         Ok(())
     }
 
+    /// The running length (F14): `length += new − old` per step; when a path contracts to
+    /// nothing the length is summed afresh, so that a network of contracted paths has length
+    /// exactly `0` rather than a rounding residue.
+    fn update_length(&mut self, shortening: &Shortening) {
+        match shortening {
+            Shortening::Contracted {
+                path_contracted: true,
+                ..
+            } => self.length = self.recompute_length(),
+            _ => self.length += shortening.length_change(),
+        }
+    }
+
     /// Shortens one joint on one side by Alg. 1 (or the App. B move of a single-segment
     /// loop), as one iteration of [`shorten`](Self::shorten) does, and updates the running
     /// length. Nothing else is queued or swept.
@@ -401,7 +414,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             return refuse("the wedge angle is not below pi");
         }
         let result = flip_out(&mut self.tri, &mut self.network, joint, side)?;
-        self.length += result.shortening.length_change();
+        self.update_length(&result.shortening);
         Ok(result.shortening)
     }
 }
