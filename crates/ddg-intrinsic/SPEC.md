@@ -891,6 +891,11 @@ those of `crates/ddg-intrinsic-apps/SPEC.md`.
   at the same point, all with the same stop reason.
   *Mollification* (IC I13) moved to `ddg_core::mollify`; `ddg_bff::mollify_edge_lengths` wraps
   it with `BffError`.
+  *Errors of other representations.* The trait's methods return `IntrinsicError`; another
+  implementation passes its own failures as `IntrinsicError::Representation { representation,
+  operation, message }` and an operation it does not provide (yet) as `Unsupported {
+  representation, operation, reason }`, so the provided methods (Delaunay flipping) run over any
+  implementation.
   *Cost.* `benches/retriangulation.rs` (iDT, iDR 25°, iODT, a sweep of moves on four meshes),
   run single-threaded on one pinned core, the code before the split and after it alternately
   twice (load average 3 to 18 from other jobs): the differences are within ±6 % in both

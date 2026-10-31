@@ -188,6 +188,26 @@ pub enum IntrinsicError {
         /// What is wrong and where.
         what: String,
     },
+    /// An error of another implementation of [`Triangulation`](crate::Triangulation) (for
+    /// example the integer-coordinates representation), passed through the shared interface.
+    /// The implementation's own error type has the details; this carries its message.
+    Representation {
+        /// The representation, e.g. `"integer coordinates"`.
+        representation: &'static str,
+        /// The operation that failed.
+        operation: &'static str,
+        /// The representation's error message.
+        message: String,
+    },
+    /// An operation of the shared interface that this implementation does not provide (yet).
+    Unsupported {
+        /// The representation, e.g. `"integer coordinates"`.
+        representation: &'static str,
+        /// The operation.
+        operation: &'static str,
+        /// Why, or what is missing.
+        reason: String,
+    },
 }
 
 /// Why a vertex cannot be inserted at a point.
@@ -679,6 +699,19 @@ impl fmt::Display for IntrinsicError {
             IntrinsicError::Inconsistent { what } => {
                 write!(f, "inconsistent intrinsic triangulation: {what}")
             }
+            IntrinsicError::Representation {
+                representation,
+                operation,
+                message,
+            } => write!(f, "{operation} failed ({representation}): {message}"),
+            IntrinsicError::Unsupported {
+                representation,
+                operation,
+                reason,
+            } => write!(
+                f,
+                "{operation} is not supported by {representation}: {reason}"
+            ),
         }
     }
 }
