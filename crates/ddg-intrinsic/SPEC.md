@@ -823,6 +823,80 @@ written from the paper and the cited papers.
   the nearest edge at that vertex only; a path that arrives at it from a face around the vertex
   that does not have that edge does not meet it.
 
+Entry N50 was added with the second representation of intrinsic triangulations, integer
+coordinates (`crates/ddg-integer-coords/SPEC.md`, decisions I1, I9, I13; work package WP0), and
+FlipOut (`crates/ddg-flip-geodesics/SPEC.md`, requests R1, R3, R4). The numbers N30 to N49 are
+those of `crates/ddg-intrinsic-apps/SPEC.md`.
+
+* **N50** *Connectivity and representation, and the shared interface* (2026-10-31). The
+  triangulation is split in two. `complex::Complex` is the connectivity alone: the halfedge
+  Δ-complex of N9 (faces, twins, the edge of every halfedge, one halfedge per edge and per
+  vertex) and a mask of *constrained* edges, with its topological operations: `flip_edge`,
+  `split_face`, `split_edge`, and `remove_vertex` for an interior vertex of degree three (new:
+  integer coordinates need removal, IC §4.6). Each returns its index bookkeeping (`ComplexFlip`,
+  `FaceSplit`, `EdgeSplit`, `VertexRemoval`): the new vertex, edges and faces, and every
+  halfedge whose data moved (a halfedge *moved* when it leaves the same vertex in the same
+  direction under another id), with helpers that carry a representation's per-halfedge data
+  along. A flip and a split keep every vertex, edge and face id and the direction of every edge
+  they do not flip or split (FlipOut F8); removal is the only renumbering operation: the
+  freed ids are taken by the last vertex, the last three edges and the last two faces, and
+  `VertexRemoval` lists every move (`apply_*_data`). `IntrinsicTriangulation` embeds a
+  `Complex` and keeps only its own data (lengths, signposts, angle sums, places, `edge_on_input`);
+  its flip, insertion and split call the topological operations and then update that data in
+  the same order and with the same arithmetic as before. **Bitwise identical**:
+  `tests/bitwise_pins.rs` pins hashes of every stored bit (connectivity, lengths, signposts,
+  angle sums, places), the fingerprint of N15 and edge lengths as bit patterns after random
+  flips, insertions, splits, Delaunay flipping, edge traces, the overlay, moves, refinement,
+  export and the optimal Delaunay iteration on 8 generated shapes and on spot and camelbad,
+  recorded on the code before the split (commit `3b4ad07`); they are unchanged, and so are the
+  test suites of this crate, `ddg-intrinsic-apps`, `ddg-uv` and `ddg-py` (one match arm for the
+  new refusal was added to `tests/oracle.rs`).
+  *The interface.* `interface::Triangulation` is the trait both representations implement and
+  their consumers program against (IC §2.1, FlipOut R1): `complex()`, `input()`,
+  `edge_lengths()`, `vertex_angle_sum`, `vertex_location`, `can_flip` / `flip_edge` (the
+  refusals of §4 and N5, decided from the lengths alone, plus `FlipRefusal::Constrained`),
+  `insert_vertex`, `split_edge` (the lengths of N10; `Insertion::halves` gives both halves in
+  order from the old tail, directed like the edge), `set_constrained`, `trace_edge_on_input`
+  (`EdgeTrace`), and provided methods for lengths, corner angles, areas, the Delaunay test and
+  Delaunay flipping. Delaunay flipping (N6) is written once over the trait and
+  `IntrinsicTriangulation::flip_to_delaunay` is that function, so both representations flip the
+  same edges in the same order given the same lengths (IC §4.3).
+  *Constrained edges* (FlipOut R3, R4; IC §2.1). A flip refuses them; Delaunay flipping leaves
+  them, counts them as Delaunay and reports their number (`DelaunayReport::n_constrained`; the
+  other numbers of the report are over the interior edges that are not constrained), as it does
+  boundary edges; a split of a constrained edge gives two constrained halves and new edges are
+  not constrained; `remove_vertex` refuses a vertex with a constrained edge. Refinement treats
+  boundary edges specially (encroachment, N1; a circumcentre trace stops at the boundary);
+  doing the same for constrained edges is FlipOut R5, not done yet, so `refine`, `refine_with`
+  and `optimal_delaunay` refuse to run while an edge is constrained
+  (`IntrinsicError::ConstrainedEdges`, nothing changed).
+  *Removal in this crate.* `IntrinsicTriangulation::remove_vertex` removes an inserted interior
+  vertex of degree three: the outer halfedges keep their signposts and the outer edges their
+  lengths, so nothing is computed. None of this crate's operations calls it (N10 stands: they
+  never remove vertices). Inserting a vertex and removing it again restores the triangulation
+  exactly (`tests/complex.rs`).
+  *Tracing without signposts* (IC I9). `frames::AngleFrames` is a view of a connectivity with
+  lengths whose signposts are computed from the corner angles when the tracing kernel asks: at a
+  vertex, direction `0` is its outgoing halfedge (the boundary halfedge at a boundary vertex, as
+  N2), and the `k`-th halfedge counter-clockwise has `s (θ_0 + … + θ_{k−1})` with `s` of
+  `it-angle-normalization` and `Θ` the computed angle sum (a running sum scaled once, as for the
+  input mesh, so no reduction of N18 is needed). A frame belongs to the current connectivity (a
+  flip at an interior vertex can change its outgoing halfedge). Measured on the 17 standard
+  shapes after random flips, insertions and splits (`tests/angle_frames.rs`): computed
+  signposts equal the stored ones, in the stored frame turned to put the outgoing halfedge at
+  `0`, within `6.2e-12` rad (largest on the needle tetrahedron, whose stored input angle sums
+  and the corner angles of its flipped needles differ by `1.2e-11` rad; below `4e-12` on the
+  others, `0` before any operation); 6800 traces from vertices and points of faces end within
+  `6.2e-12` of the mean edge length of the stored-signpost traces, about half of them bitwise
+  at the same point, all with the same stop reason.
+  *Mollification* (IC I13) moved to `ddg_core::mollify`; `ddg_bff::mollify_edge_lengths` wraps
+  it with `BffError`.
+  *Cost.* `benches/retriangulation.rs` (iDT, iDR 25°, iODT, a sweep of moves on four meshes),
+  run single-threaded on one pinned core, the code before the split and after it alternately
+  twice (load average 3 to 18 from other jobs): the differences are within ±6 % in both
+  directions and change sign between the two rounds (e.g. spot iDT +2.1 %, then −6.0 %;
+  camelbad iDT +3.2 %, then −0.6 %); no slowdown is measurable above that noise.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,

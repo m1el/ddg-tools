@@ -52,8 +52,15 @@ every decision the paper leaves open (entries `N1` to `N25`).
   a target length, the area-weighted circumcentre update with a line search, Delaunay flips,
   with a report and the angle and area distribution (SPEC N21 to N25).
 
-Not implemented: vertex removal, and with it the paper's general route for a move beyond the
-star of a vertex (SPEC N20); a refinement that keeps
+- The connectivity on its own (`Complex`: flips, face and edge splits, removal of a vertex of
+  degree three, a constrained-edge mask, each operation with its index bookkeeping), the trait
+  `Triangulation` that this representation and the integer coordinates of Gillespie, Sharp and
+  Crane (2021) share, Delaunay flipping written once over it, and tracing over a triangulation
+  that stores no signposts (`AngleFrames`), SPEC N50.
+
+Not implemented: the paper's general route for a move beyond the star of a vertex (SPEC N20;
+only vertices of degree three can be removed, N50); refinement with constrained edges (N50); a
+refinement that keeps
 the angle bound through the export at spikes (SPEC N15: on thin tubes and handles the export
 can restore it, at vertices with a small angle sum it cannot). Benches: `benches/retriangulation.rs`
 (criterion: iDT, iDR, iODT and a sweep of moves); the tables' timings are those of the example
@@ -138,6 +145,8 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | `cotan_laplacian`, `lumped_mass`, `lumped_mass_normalized`, `corner_angle_sums`, `angle_defects`, `boundary_geodesic_curvatures`, `quality` | operators and statistics |
 | `insert_vertex(f, bary)`, `split_edge(e, t) -> Result<Insertion, _>` | a new vertex in a face / on an edge, placed on the input mesh; or the reason it is refused (`InsertRefusal`) |
 | `point_on_input(point)`, `point_on_triangulation(point)` | a point of one triangulation as a point of the other |
+| `complex() -> &Complex`, `set_constrained(e, bool)`, `is_constrained(e)`, `remove_vertex(v)` | the shared connectivity, constrained edges, removal of an inserted vertex of degree three (SPEC N50) |
+| `Triangulation` (trait), `AngleFrames::of(&t).trace(...)` | the interface shared with integer coordinates; tracing with signposts computed from corner angles (SPEC N50) |
 | `segments_on_input(&nodes, &segments, &EdgeTraceOptions) -> Result<PathsOnInput, _>`, `segment_on_input(f, from, to, _)` | straight segments inside faces of the triangulation as pieces on input faces, checked like edge traces |
 | `overlay(&EdgeTraces) -> Result<Overlay, _>` | the common subdivision: `vertices` (on both triangulations), polygons `face(f)` with `face_input`, `face_triangulation`; `triangles()` |
 | `refine(&RefineOptions) -> Result<RefineReport, _>` | Delaunay refinement; `min_angle` (default 25°), `max_circumradius`, `InsertionLimit`; the report lists `below_bound` with `BelowReason` |
