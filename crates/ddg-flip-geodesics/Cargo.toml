@@ -10,6 +10,8 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+# Extraction runs per edge in parallel (F24).
+rayon = "1.10"
 
 [dev-dependencies]
 # Ground truth for minimality (SPEC §7 test 4, F23).

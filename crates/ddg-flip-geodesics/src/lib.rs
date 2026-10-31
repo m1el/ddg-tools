@@ -99,6 +99,7 @@
 
 pub mod certify;
 mod error;
+pub mod extract;
 pub mod flipout;
 pub mod init;
 pub mod network;
@@ -108,7 +109,13 @@ pub mod wedge;
 
 pub use certify::{CertifyOptions, GeodesicCertificate, JointFailure, JointStatus, certify};
 pub use error::FlipError;
-pub use init::{dijkstra_path, path_from_vertices};
+pub use extract::{
+    EdgeExtraction, ExtractOptions, ExtractReport, Extraction, InputCertificate, crossing_sines,
+    polyline_3d,
+};
+pub use init::{
+    InitialPaths, dijkstra_path, network_from_edges, path_from_vertices, waypoint_path,
+};
 pub use network::{
     EdgePath, GeodesicNetwork, Joint, Layering, Network, Segment, SegmentId, SegmentInfo,
     SegmentRef,

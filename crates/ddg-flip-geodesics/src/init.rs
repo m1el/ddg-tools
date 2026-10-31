@@ -178,3 +178,182 @@ pub fn path_from_vertices<T: Triangulation>(
     }
     Ok(EdgePath { segments, closed })
 }
+
+/// Initial paths and the vertices to pin for them (SPEC §2.2), as returned by
+/// [`waypoint_path`] and [`network_from_edges`]; pass both to
+/// [`GeodesicNetwork::new`](crate::GeodesicNetwork::new).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialPaths {
+    /// The paths, in the order they were found.
+    pub paths: Vec<EdgePath>,
+    /// The vertices to pin, ascending, without repeats. The ends of open paths are pinned by
+    /// the network anyway; they are listed too, so that the list says where the network may
+    /// not bend.
+    pub pinned: Vec<usize>,
+}
+
+/// The edge path through the waypoints, each consecutive pair joined by the shortest edge path
+/// ([`dijkstra_path`]), concatenated (`gc: fg.cpp:283-312`). A closed path joins the last
+/// waypoint back to the first; do not repeat the first waypoint at the end.
+///
+/// With `pin_waypoints` every waypoint is pinned, so the path keeps passing through it (the
+/// reference's `markInterior`, `gc: fg.cpp:293-296`); without, only the ends of an open path
+/// are pinned and the waypoints only seed the path (FlipOut may move it off them).
+///
+/// The concatenation may revisit a vertex or run along an edge twice (the legs are
+/// independent shortest paths); whether that is a valid network is decided by
+/// [`GeodesicNetwork::new`](crate::GeodesicNetwork::new), which refuses crossings.
+///
+/// # Errors
+/// [`FlipError::TooFewVertices`] for fewer than two waypoints (a closed path through one
+/// vertex has no shortest path to itself); [`FlipError::WaypointLeg`] naming the leg and its
+/// two vertices when a leg is out of range, joins a vertex to itself (consecutive equal
+/// waypoints), or the two are not connected.
+pub fn waypoint_path<T: Triangulation>(
+    tri: &T,
+    points: &[usize],
+    closed: bool,
+    pin_waypoints: bool,
+) -> Result<InitialPaths, FlipError> {
+    let n = points.len();
+    if n < 2 {
+        return Err(FlipError::TooFewVertices { n, closed });
+    }
+    let n_legs = if closed { n } else { n - 1 };
+    let mut segments = Vec::new();
+    for leg in 0..n_legs {
+        let (from, to) = (points[leg], points[(leg + 1) % n]);
+        let part = dijkstra_path(tri, from, to).map_err(|cause| FlipError::WaypointLeg {
+            leg,
+            from,
+            to,
+            cause: Box::new(cause),
+        })?;
+        segments.extend(part.segments);
+    }
+    let mut pinned = if pin_waypoints {
+        points.to_vec()
+    } else {
+        Vec::new()
+    };
+    pinned.sort_unstable();
+    pinned.dedup();
+    Ok(InitialPaths {
+        paths: vec![EdgePath { segments, closed }],
+        pinned,
+    })
+}
+
+/// The paths and loops formed by a set of edges (`gc: fg.cpp:315-396`).
+///
+/// A vertex is an **end** if it is in `extra_pinned` or if the number of masked edge ends at it
+/// is not `0` and not `2` (a self-edge counts twice at its vertex). From every end, in the order
+/// of the halfedge ids (then the boundary edges walked against their halfedge, by edge id),
+/// every masked edge not yet walked starts a path that follows the masked edges through
+/// vertices of degree two until it reaches an end (possibly the one it started from: an open
+/// path from `x` to `x`). Masked edges left over form closed loops, in the same order. At a
+/// degree-two vertex the path continues along the other masked edge, the first in the
+/// counter-clockwise order of the outgoing halfedges.
+///
+/// The result pins every end that lies on a masked edge, so junctions keep their topology (Fig. 6,
+/// 19, 22); a path ends nowhere else. Every masked edge appears in exactly one segment of exactly
+/// one path.
+///
+/// # Errors
+/// [`FlipError::MaskSize`] if the mask does not have one entry per edge;
+/// [`FlipError::IndexOutOfRange`] for an `extra_pinned` vertex out of range;
+/// [`FlipError::Internal`] if a walk does not end (a bug).
+pub fn network_from_edges<T: Triangulation>(
+    tri: &T,
+    edge_mask: &[bool],
+    extra_pinned: &[usize],
+) -> Result<InitialPaths, FlipError> {
+    let complex = tri.complex();
+    let (n_edges, n_vertices) = (complex.n_edges(), complex.n_vertices());
+    if edge_mask.len() != n_edges {
+        return Err(FlipError::MaskSize {
+            len: edge_mask.len(),
+            n_edges,
+        });
+    }
+    for &v in extra_pinned {
+        check_vertex(complex, v)?;
+    }
+    let mut count = vec![0u32; n_vertices];
+    for e in (0..n_edges).filter(|&e| edge_mask[e]) {
+        let [a, b] = complex.edge_vertices(e);
+        count[a] += 1;
+        count[b] += 1;
+    }
+    let mut is_end: Vec<bool> = count.iter().map(|&c| c != 0 && c != 2).collect();
+    for &v in extra_pinned {
+        is_end[v] = true;
+    }
+    // Directed edges in the reference's order: halfedges by id, then boundary edges the other
+    // way round.
+    let directed = (0..complex.n_halfedges())
+        .map(|h| Segment::new(complex.edge(h), complex.is_forward(h)))
+        .chain(
+            (0..n_edges)
+                .filter(|&e| complex.is_boundary_edge(e))
+                .map(|e| Segment::new(e, false)),
+        )
+        .filter(|s| edge_mask[s.edge as usize]);
+    let directed: Vec<Segment> = directed.collect();
+    let mut walked = vec![false; n_edges];
+    let mut paths = Vec::new();
+    let next_step = |current: Segment| -> Option<Segment> {
+        let at = current.head(complex);
+        steps(complex, at)
+            .map(|s| s.segment)
+            .find(|&s| s != current.reversed() && edge_mask[s.edge as usize])
+    };
+    let guard = |what: &str, start: Segment| FlipError::Internal {
+        what: format!(
+            "the walk from edge {} did not end ({what})",
+            start.edge
+        ),
+    };
+    for &start in &directed {
+        if walked[start.edge as usize] || !is_end[start.tail(complex)] {
+            continue;
+        }
+        let mut segments = Vec::new();
+        let mut current = start;
+        loop {
+            walked[current.edge as usize] = true;
+            segments.push(current);
+            if is_end[current.head(complex)] {
+                break;
+            }
+            current = next_step(current).ok_or_else(|| guard("no continuation", start))?;
+            if segments.len() > n_edges {
+                return Err(guard("too long", start));
+            }
+        }
+        paths.push(EdgePath::open(segments));
+    }
+    for &start in &directed {
+        if walked[start.edge as usize] {
+            continue;
+        }
+        let mut segments = Vec::new();
+        let mut current = start;
+        loop {
+            walked[current.edge as usize] = true;
+            segments.push(current);
+            current = next_step(current).ok_or_else(|| guard("no continuation", start))?;
+            if current == start {
+                break;
+            }
+            if segments.len() > n_edges {
+                return Err(guard("too long", start));
+            }
+        }
+        paths.push(EdgePath::closed(segments));
+    }
+    let pinned = (0..n_vertices)
+        .filter(|&v| is_end[v] && count[v] != 0)
+        .collect();
+    Ok(InitialPaths { paths, pinned })
+}

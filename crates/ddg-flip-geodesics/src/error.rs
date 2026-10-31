@@ -77,6 +77,37 @@ pub enum FlipError {
         /// The end.
         to: usize,
     },
+    /// A leg of a waypoint path has no shortest path (SPEC §2.2).
+    WaypointLeg {
+        /// The leg: waypoint `leg` to waypoint `leg + 1` (cyclically for a closed path).
+        leg: usize,
+        /// Its first waypoint.
+        from: usize,
+        /// Its second waypoint.
+        to: usize,
+        /// Why there is none.
+        cause: Box<FlipError>,
+    },
+    /// An edge mask does not have one entry per edge.
+    MaskSize {
+        /// The length of the mask.
+        len: usize,
+        /// The number of edges.
+        n_edges: usize,
+    },
+    /// The path of a segment over the input mesh could not be extracted (SPEC §5, F18). Nothing
+    /// is repaired.
+    Extraction {
+        /// The path.
+        path: usize,
+        /// The position of the segment in the path.
+        index: usize,
+        /// The edge of the segment.
+        edge: usize,
+        /// What the triangulation reported (for signposts the failed trace of IT N8, for
+        /// integer coordinates a violated invariant of the integers).
+        cause: Box<FlipError>,
+    },
     /// An explicit layering has not one list per edge.
     LayeringSize {
         /// The number of lists given.
@@ -197,6 +228,29 @@ impl fmt::Display for FlipError {
                 f,
                 "vertices {from} and {to} are not connected by edges (different components)"
             ),
+            FlipError::WaypointLeg {
+                leg,
+                from,
+                to,
+                cause,
+            } => write!(
+                f,
+                "waypoint leg {leg} (vertex {from} to vertex {to}) has no shortest path: {cause}"
+            ),
+            FlipError::MaskSize { len, n_edges } => write!(
+                f,
+                "the edge mask has {len} entries, but the triangulation has {n_edges} edges"
+            ),
+            FlipError::Extraction {
+                path,
+                index,
+                edge,
+                cause,
+            } => write!(
+                f,
+                "extracting segment {index} of path {path} (edge {edge}) on the input mesh \
+                 failed: {cause}"
+            ),
             FlipError::LayeringSize { len, n_edges } => write!(
                 f,
                 "the layering has {len} lists, but the triangulation has {n_edges} edges"
@@ -253,6 +307,7 @@ impl std::error::Error for FlipError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             FlipError::Intrinsic(e) => Some(e),
+            FlipError::WaypointLeg { cause, .. } | FlipError::Extraction { cause, .. } => Some(&**cause),
             _ => None,
         }
     }
