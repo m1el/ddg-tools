@@ -818,8 +818,13 @@ At most three agents at a time; timings alone.
 * **Q3** Consumers use integer coordinates by default once the evaluation passes; signposts stay an
   option (WP11). As built: the switch is `Representation::DEFAULT` in
   `crates/ddg-intrinsic-apps/src/representation.rs` plus the `representation=` defaults of the
-  `ddg-py` bindings (still `Signposts`); flipping it after WP10 is one commit (the defaults, the
-  stubs, and the two tests that assert the default).
+  `ddg-py` bindings (still `Signposts`); flipping it after WP10 is one commit. Checklist:
+  `Representation::DEFAULT`; the literal `representation="signposts"` defaults of
+  `geodesic_distance`, `steiner_tree`, `adaptive_solve` (FlipOut's bindings follow `DEFAULT`
+  through `None`); Blender `geodesic_operator.REPRESENTATION_DEFAULT`; stubs and READMEs; the tests
+  that assert the default (`the_default_representation_is_signposts`, `test_integer_coords.py`,
+  `test_default_representation_is_the_documented_one`). `ddg_tools.IntrinsicTriangulation` and
+  "Show Intrinsic Refinement" already default to integers, by design (they exist to show them).
 * **Q4** FlipOut (Sharp and Crane 2020a) is in scope, as its own crate `ddg-flip-geodesics` with its
   contract `crates/ddg-flip-geodesics/SPEC.md`, on top of the shared triangulation interface
   (PDF downloaded to `../FlipOut/FlipOut.pdf`; reference `gc: src/surface/flip_geodesics.cpp`).

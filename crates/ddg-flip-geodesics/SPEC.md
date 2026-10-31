@@ -754,6 +754,15 @@ add-on's sidebar panel:
   curve object, using the drawing of the IC operator (R8).
 * Tests: `blender/tests/test_geodesic.py` in the bpy module (as the other operators).
 
+**As built (F8, 43bbe26–9368c6b).** `polylines` are flat `array('d')` (3 reals per point; the house
+style, numpy optional) rather than `(n, 3)` arrays; `representation=None` follows
+`Representation::DEFAULT` (signposts until IC Q3 flips it); no automatic fallback: a signpost
+extraction failure is an error that suggests `representation="integer"`. Blender: sidebar panel
+"DDG > Geodesics" plus menu entries; "Show triangulation" draws `<mesh>_geodesic_triangulation`
+through `draw_intrinsic_edges(kind=…)`; `geodesic_operator.REPRESENTATION_DEFAULT = 'SIGNPOSTS'`.
+20 Python tests and 18 Blender tests on both representations; the add-on suites pass in Blender
+5.0.1.
+
 ## 14. The user's decisions (2026-10-31)
 
 * **Q1** Download MPZ (Myles et al. 2014) and the Princeton Shape Benchmark into `data/` (with
