@@ -30,6 +30,17 @@ the angle statement, which is what is proved here, exactly as the paper's proof 
   equal to `π` (`cross_star_no_strict`), as the paper itself remarks ("the equality case … degree four
   cross configuration"). If no inner and no outer corner equals `π`, a strictly convex flip exists
   (`exists_flippable_strict`).
+* **The Δ-complex case** (`ic-vertex-removal-delta`, open; `CITED.md`). `FlatStar` is the cyclic
+  sequence of the `d` triangle corners at `i`; it does not assume that the neighbours `j_k` or the
+  triangles `t_k` are distinct (a triangle with two corners at `i` appears twice, with its three
+  angles permuted). The proof above uses only the corner cycle, so its conclusion holds in a
+  Δ-complex as well: some spoke `i j_k` has a convex quadrilateral. What is not proved, and what the
+  paper leaves as a conjecture, is the combinatorial half: in a Δ-complex that spoke can be a loop
+  (both ends at `i`), `j_{k−1}` or `j_{k+1}` can be `i` itself (the new edge is then a loop at `i`),
+  and `j_k` can have degree one, so the flip may be impossible or may not lower the degree. A proof
+  needs a progress measure beyond the degree, as Sharp and Crane 2020a (FlipOut), App. A, Thm. A.5–A.8,
+  use for a wedge of angle `< π` (the first twice-incident edge moves towards the start); for the full
+  `2π` star the inner corners are not automatically below `π`, which is where that argument stops.
 -/
 
 namespace DdgProofs

@@ -41,16 +41,16 @@ Results.
   no arc cuts that corner. Conversely every admissible `canon n c` is valid (`canon_valid`).
 * **`ic-corner-coordinates`, `ic-emanating`**: in a valid model the numbers of arcs that cut
   corner `k` and that leave corner `k` (`cutCount`, `emCount`) are exactly Eq. 1 and Eq. 2 of the
-  side counts (`Valid.cornerNumerator_eq`, `Valid.cornerCoord_eq`, `Valid.emanating_eq`).
+  side counts (`Valid.counts`).
 * **`ic-face-decoding`** (Fig. 11): the side counts determine the model (`Valid.partner_eq`), and a
   model with given side counts exists if and only if the face is valid in the sense of Eq. 1, i.e.
   the oracle's `faceValid` (`exists_valid_iff`); the oracle's `partner` is the model
-  (`oracle_partner_eq`).
+  (`Valid.oracle_partner`).
 * **`ic-cevians-cross`** (combinatorial half): arcs from two different corners to their opposite
   sides interleave, so at most one corner emanates (`Valid.emanating_unique`), and an emanating
   corner is cut by no arc (`Valid.cut_eq_zero_of_emanating`).
 * **`ic-trace-step`**: Alg. 1's three cases follow the unique arc through the crossing
-  (`Valid.traceStep_correct`).
+  (`Valid.traceStep_eq`).
 -/
 
 namespace DdgProofs

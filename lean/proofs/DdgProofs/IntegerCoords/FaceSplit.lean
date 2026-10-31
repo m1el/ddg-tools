@@ -25,17 +25,21 @@ face model that separate the region of `m` from corner `j`. Everything here is c
 
 Results.
 
-* **`ic-face-split-normal`** — for every gap `g` of a valid face, its region in the oracle's labels
-  (`gapRegion`) is one of the face's regions (`gapRegion_valid`), and the oracle's `splitCount` of
-  that region is the number of arcs separating `g` from each corner (`sepCount_eq_splitCount`); every
-  region label of the oracle is the region of some gap (`exists_gap_of_valid`). The three new faces
-  `(m, k, k + 1)` are valid whichever region is chosen (`splitCount_faceValid`): the counts of SPEC
-  I15 are valid by construction. With `faceSplit?` (`faceSplit?_eq`) this is the oracle's whole face
-  split.
-* **`ic-split-edge-normal`** in the same terms: a vertex on a side without crossings (an edge with
-  `n = −1`) is separated from the opposite corner by every arc, and Eq. 6 is their number
-  (`sepCount_split_edge`).
+* **`ic-face-split-normal`** — for every gap `g` of a valid face, the oracle's `faceSplit?` on the
+  region of `g` (`gapRegion`, in the oracle's labels `corner k t` / `middle s`) returns the numbers
+  of arcs that separate `g` from the three corners (`faceSplit?_gapRegion`; per corner
+  `splitCount_gapRegion`, which also shows that the region is one of the face's). For every region
+  label the three new faces `(k, k + 1, m)` are valid in the sense of Eq. 1 (`splitCount_faceValid`):
+  the counts of SPEC I15 are valid by construction, whichever region floating point picks.
+* Not proved here: that every label of the oracle's `regions` list is the region of some gap (checked
+  by the oracle's `ic-selftest`), and the edge split as a face split at a
+  gap on a side without crossings (Eq. 6 is proved arithmetically, `splitEdgeNormal_eq`).
 -/
+
+set_option linter.unusedSimpArgs false
+set_option linter.unusedTactic false
+set_option linter.unreachableTactic false
+set_option linter.unnecessarySeqFocus false
 
 namespace DdgProofs
 
@@ -177,13 +181,12 @@ lemma sep_cornerArc {n c : Fin 3 → ℕ} (hc : Admissible n c) (k j : Fin 3) {g
 `g` from corner `κ + 1` exactly for `s < φ(g)`, from corner `κ + 2` exactly for the others, and
 from corner `κ` (where it ends) never. -/
 lemma sep_fanArc {n c : Fin 3 → ℕ} (hc : Admissible n c) (κ j : Fin 3) {g : ℕ}
-    (hg : g < total n) {s : ℕ} (hs : s < em n c κ) :
+    (_hg : g < total n) {s : ℕ} (hs : s < em n c κ) :
     Separates (fanArc n c κ s) g (cornerRank n j) ↔
       (if j = κ + 1 then s < phi n c κ g else if j = κ + 2 then phi n c κ g ≤ s else False) := by
   obtain ⟨a0, a1, a2, -⟩ := hc.lits
   obtain ⟨m0, m1, m2⟩ := em_lits n c
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
-  unfold total at hg
   rcases gapSide_cases n g with ⟨hq, hgs⟩ | ⟨hq, hgs⟩ | ⟨hq, hgs⟩ <;>
   rcases fin3_cases κ with rfl | rfl | rfl <;> rcases fin3_cases j with rfl | rfl | rfl <;>
     simp only [Separates, fanArc, phi, hq, Pt.rank, GapIn, Btw, l1, l2, l3, l4, l5, l6,
@@ -260,7 +263,6 @@ def gapRegion (n c : Fin 3 → ℕ) (g : ℕ) : Ddg.IntegerCoords.Region :=
 
 /-! ## The oracle's decoded face -/
 
-set_option linter.unusedSimpArgs false in
 lemma oracle_side (n : Fin 3 → ℕ) :
     Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 0 = n 0 ∧ Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 1 = n 1 ∧
       Ddg.IntegerCoords.side (n 0) (n 1) (n 2) 2 = n 2 := by
@@ -284,7 +286,6 @@ lemma oracle_corner {n c : Fin 3 → ℕ} (hc : Admissible n c) :
   norm_num
   exact ⟨⟨h0.1, h1.1, h2.1⟩, ⟨h0.2, h1.2, h2.2⟩⟩
 
-set_option linter.unusedSimpArgs false in
 /-- **The oracle's decoding of an admissible face**: `n⁺`, `c` per corner, and the emanating corner
 with its count (`κ = 0`, `e = 0` if none). -/
 lemma oracle_decode {n c : Fin 3 → ℕ} (hc : Admissible n c) :

@@ -26,11 +26,15 @@ Face convention: side `k` runs from corner `k` to corner `k + 1`; corner `k` is 
   (`exists_params_of_faceValid`).
 * **`ic-reverse-crossing`** — reversal is an involution on `0 ≤ p < n` (`reverseCrossing_reverseCrossing`,
   `reverseCrossing_mem`).
-* **`ic-flip-involution`** — Eq. 3 applied to the new edge of a flip returns the old normal
-  coordinate, for any two valid faces on the edge (`flipNormal_flipNormal`); the doubled value is even
-  and the result is at least `−1` (`flipDoubled_even`, `flipNormal_ge`).
+* **`ic-flip-normal`** (identity half) — on two faces given by their arcs, every corner quantity of
+  Eq. 3 is the arc count it names (`flipDoubled_eval`); `DdgProofs/IntegerCoords/Flip.lean` turns
+  this into the count of arcs crossing the new diagonal and proves **`ic-flip-involution`**.
 * **`ic-split-edge-normal`** — Eq. 6 counts every arc of a face with a side carrying no
-  crossing (`splitEdgeNormal_eq`; the face-split form is `DdgProofs/IntegerCoords/FaceSplit.lean`).
+  crossing (`splitEdgeNormal_eq`).
+
+Corrections to the paper / SPEC found here: Eq. 3's first term is printed `c^{jk}_l`, which names no
+corner; it is `c^{ji}_l` (corner `l` of `jil`), which is what `Ddg.IntegerCoords.flipDoubled`
+computes. Eq. 6 is `max(n_ki, n_jk, 0)` (SPEC §4.5 drops the `0`, wrong when both are `−1`).
 -/
 
 namespace DdgProofs

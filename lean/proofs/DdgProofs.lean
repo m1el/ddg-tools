@@ -62,3 +62,4 @@ import DdgProofs.Developability.Subdivision
 import DdgProofs.Developability.Remesh
 import DdgProofs.Developability.RegularCone
 import DdgProofs.RepulsiveCurves
+import DdgProofs.IntegerCoords

@@ -830,6 +830,12 @@ an earlier version with another title, were read).
   of Fortune's note. The `O(n²)` planar bound is quoted from the Signpost paper, which cites
   Fortune for it; Indermitte et al. (Sec. 2) cite for the same bound a technical report of
   H. Telley (EPFL, 1992), not Fortune. It is not used by the crate.
+- **Formalized elsewhere (cross-reference only).** The planar case — Lawson flips of a plane
+  triangulation of a fixed point set terminate in a Delaunay triangulation — is machine-checked in
+  Coq: J.-F. Dufourd, Y. Bertot, *Formal study of plane Delaunay triangulation*, ITP 2010
+  (arXiv:1007.3350; termination through a well-founded relation on a finite set, the decreasing
+  quantity being the volume under the triangles lifted to the paraboloid). It is not a proof of the
+  surface statement above (survey of 2026-10-31; the development's source could not be fetched).
 - **Why not formalized.** The argument is about the set of all geodesic triangulations of a
   surface (a function on it that every flip decreases, and finiteness below a bound), which
   rests on the geometry of geodesics on a cone surface.
@@ -1860,6 +1866,178 @@ the multigrid hierarchy) and every tolerance; anything about rounding.
   preconditioned direction `z` itself is a descent direction (`rc-descent-direction`).
 - **What depends on it.** The efficiency of the NCG evaluation method (soft problems only, D22).
 
+## Integer Coordinates
+
+"IC paper" is M. Gillespie, N. Sharp, K. Crane, *Integer Coordinates for Intrinsic Geometry
+Processing*, ACM TOG 40(6), Article 252, 2021 (<https://doi.org/10.1145/3478513.3480522>; the
+13-page paper with the supplement, Appendices B–D, in `../IntegerCoordinates/integer_coordinates.pdf`;
+equation, algorithm and appendix numbers are the paper's). The contract is
+`crates/ddg-integer-coords/SPEC.md` ("SPEC", decisions `I1`–`I26`, theorem table §9.2).
+
+**What the machine-checked part covers, and what it does not.** Machine-checked
+(`DdgProofs/IntegerCoords/*.lean`; the design of the combinatorial model is
+`DdgProofs/IntegerCoords/DESIGN.md`): the arithmetic of Eq. 1, 2, 6 and of crossings; the **face
+model** (one triangle of `T¹` with the pieces of the curves of `T⁰` in it, disjointness as
+non-interleaving on the boundary cycle): every valid model is the canonical pairing of Fig. 11 /
+Alg. 9 for corner counts given by Eq. 1–2, the side counts determine it, a model exists exactly for
+the counts the oracle calls valid, at most one corner emanates, Alg. 1's step follows the arc; the
+face split of I15 (the oracle's counts for a region are the numbers of arcs separating it from the
+corners, and the new faces are valid for every region); Eq. 3 applied twice returns `n_ij` for every
+pair of valid faces (via a quadrilateral model whose arcs are counted by kind); Thm. D.1 in the form
+of its angle argument (and the failure of its strict form); chords of a convex quadrilateral and of
+a triangle cross iff their ends interleave, cevians cross; App. A's recovery of positions for any
+solution of Eq. 15; Eq. 5; Eq. 14 as the minimizer of Eq. 13 and the finite part of the mass
+identity. All statements about integer formulas are about the oracle's own definitions
+(`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
+the complex model (glued face models, curves as chains of arcs, the roundabouts, Alg. 2–4 on a
+whole triangulation; SPEC tier C, work package WP9), and with it `ic-trace-terminates`,
+`ic-identify-edge`, `ic-roundabout-update` and the correctness of Eq. 3 after gluing (the
+quadrilateral model of `Flip.lean` is the local half); the data structure of the Rust crate and that
+it applies the formulas to the right elements; anything about rounding (which region floating point
+picks, I15, is outside the proofs by design: every region is proved to give a valid state).
+
+Sources were checked on 2026-10-31. Bibliographic data from the Crossref records of the DOIs where
+one exists (Haken, Schaefer et al., Erickson–Nayyeri, Xia, Sharp–Crane 2020a and 2020b); Kneser 1929
+has no DOI and is cited as the IC paper cites it. "Read" means the text was read; the IC paper was
+read in full for these entries; the works it cites were not re-read unless the entry says so. No
+formalization of any statement below was found in Lean/Mathlib, Isabelle (AFP), Coq, HOL Light or
+Mizar (survey of 2026-10-31, `runs_tmp/ic-formalization-survey.md`; items of 2026 from that survey
+are not cited here).
+
+### [formula: ic-normal-isotopy] Normal coordinates determine the curves up to normal isotopy
+
+- **Statement.** On a triangulated surface, a family of disjoint simple arcs between vertices that
+  meet every triangle in normal arcs is determined, up to an isotopy that keeps every arc normal, by
+  its normal coordinates (the number of crossings per edge); conversely, every vector of
+  nonnegative integers satisfying the local conditions of every triangle (Eq. 1 integral and
+  nonnegative) is the vector of such a family. Hence the integers `n` (with the roundabouts, which
+  name the curves) encode `T⁰` over `T¹` (IC paper Sec. 2.3; SPEC §1, §2.4 item 4).
+- **Reference.** H. Kneser, *Geschlossene Flächen in dreidimensionalen Mannigfaltigkeiten*,
+  Jahresber. Dtsch. Math.-Ver. 38, 1929; W. Haken, *Theorie der Normalflächen: Ein
+  Isotopiekriterium für den Kreisknoten*, Acta Math. 105, 245–375, 1961,
+  <https://doi.org/10.1007/BF02559591> (normal surfaces, of which normal curves are the
+  two-dimensional case); for curves on surfaces and their algorithms: M. Schaefer, E. Sedgwick,
+  D. Štefankovič, *Algorithms for Normal Curves and Surfaces*, COCOON 2002, LNCS 2387, 370–380,
+  <https://doi.org/10.1007/3-540-45655-4_40>; J. Erickson, A. Nayyeri, *Tracing Compressed Curves in
+  Triangulated Surfaces*, Discrete & Computational Geometry 49(4), 823–863, 2013,
+  <https://doi.org/10.1007/s00454-013-9515-z>, Sec. 2.3 (corner coordinates dual to normal
+  coordinates, cited by the IC paper after Eq. 2). IC paper Sec. 2.3, 3.1.
+- **Source check.** Read: IC paper Sec. 2.3 and its citations (Kneser 1929; Haken 1961; Schaefer et
+  al. 2002; Erickson–Nayyeri 2013, Sec. 2.3). Bibliographic data of Haken, Schaefer et al.,
+  Erickson–Nayyeri from Crossref. Not read: the four works themselves.
+- **Why not formalized.** It is a statement about isotopy classes of curves on a topological
+  surface; neither Δ-complexes, surfaces as gluings, nor isotopy of curves are in Mathlib, and no
+  Jordan–Schoenflies theorem is available. What is proved is its finite combinatorial side for one
+  triangle: the face counts determine the face model and exist exactly for valid counts
+  (`FaceModel.Valid.partner_eq`, `FaceModel.exists_valid_iff`, `[formula: ic-face-decoding]`).
+- **What depends on it.** That `n` and `r` are a complete encoding of the correspondence; the
+  library's exactness claim (SPEC §1) is relative to it. Tested by the certificate (SPEC §2.4 item 4)
+  and the brute-force recount (SPEC §8 layer 3).
+
+### [formula: ic-refinement-termination] Intrinsic Delaunay refinement terminates
+
+- **Statement.** On a closed intrinsic triangulation whose vertex angle sums are at least `60°`,
+  Alg. 10 (Chew's second algorithm on the intrinsic triangulation, circumcentres inserted by tracing,
+  `T¹` kept Delaunay) terminates with all corner angles at least `30°` (IC paper Thm. C.1, with
+  Lemmas C.2–C.5). With boundary (split encroached boundary edges, remove inserted vertices in the
+  Dijkstra ball) the paper proves nothing and reports success on its dataset (Sec. 6.1, Table 1).
+  Removing more inserted interior vertices than the ball requires does not affect termination
+  (App. C.1, citing Shewchuk 1997, Sec. 3.4.2).
+- **Reference.** IC paper App. C.2, Thm. C.1, Lemmas C.2–C.5 (C.2 rests on Indermitte et al. 2001,
+  Proposition 1, C.3 and C.4 on Bobenko–Springborn 2007, Definition 3); the planar argument of
+  J. R. Shewchuk, *Delaunay Refinement Mesh Generation*, PhD thesis, CMU-CS-97-137, 1997,
+  Sec. 3.2.1 and Lemma 12; L. P. Chew, *Guaranteed-quality mesh generation for curved surfaces*,
+  SoCG 1993 (see `it-chew-second-algorithm` above for both).
+- **Source check.** Read: IC paper App. C (Thm. C.1 and its proof, Lemmas C.2–C.5, C.1). The planar
+  sources as in the entries `it-chew-second-algorithm`, `it-ruppert-encroachment` above. Note: the
+  proof of Lemma C.5 (sliding a geodesic loop to a vertex without changing its length) is informal
+  in the paper.
+- **Why not formalized.** It needs geodesics, Delaunay tessellations and packing arguments on
+  piecewise flat surfaces (none in Mathlib); the boundary case is open in the paper itself.
+- **What depends on it.** That refinement stops by itself; the library bounds it by an insertion
+  limit and reports reaching it (SPEC §5, I23).
+
+### [formula: ic-dijkstra-ball] The geodesic ball lies inside the Dijkstra ball of twice the radius
+
+- **Statement.** In a Delaunay triangulation, every vertex within geodesic distance `r` of a vertex
+  `m` is within distance `2r` of `m` along the edge graph (stretch factor below 2). Alg. 10 removes
+  the inserted interior vertices within Dijkstra distance `ℓ_lm` of the midpoint `m` of a split
+  boundary edge `lm`, which contains all those within geodesic distance `ℓ_lm/2` that Chew's
+  algorithm must remove (IC paper Sec. 4.2; SPEC §5 item 4).
+- **Reference.** G. Xia, *The Stretch Factor of the Delaunay Triangulation Is Less than 1.998*,
+  SIAM J. Comput. 42(4), 1620–1659, 2013, <https://doi.org/10.1137/110832458>, Corollary 1, as
+  cited by the IC paper Sec. 4.2, which states that Xia's planar proof (by triangle strips) "applies
+  without modification" to intrinsic Delaunay triangulations of surfaces.
+- **Source check.** Read: IC paper Sec. 4.2. Bibliographic data from Crossref. Not read: Xia's paper
+  (paywalled); the corollary number and the transfer to surfaces are the IC paper's.
+- **Why not formalized.** The stretch-factor bound is a long planar geometric argument; its
+  extension to surfaces is asserted, not proved, in the IC paper.
+- **What depends on it.** Only that refinement with boundary removes enough vertices; removing more
+  is harmless (App. C.1). Not a correctness condition of the integer data.
+
+### [formula: ic-mollify] Intrinsic mollification
+
+- **Statement.** Adding the same `ε ≥ 0` to every edge length, `ε` the smallest value for which
+  every triangle satisfies the triangle inequality with slack `δ` (IC: `δ = 10⁻⁵ h̄`), makes every
+  face nondegenerate and changes the geometry only where a triangle was within `δ` of degenerate
+  (IC paper Sec. 3.9; SPEC §7, I13).
+- **Reference.** N. Sharp, K. Crane, *A Laplacian for Nonmanifold Triangle Meshes*, Computer
+  Graphics Forum 39(5) (SGP 2020), 69–80, <https://doi.org/10.1111/cgf.14069>, intrinsic
+  mollification; IC paper Sec. 3.9.
+- **Source check.** Read: IC paper Sec. 3.9. Bibliographic data from Crossref. Not re-read: Sharp and
+  Crane 2020b.
+- **Why not formalized.** The formula itself **is** machine-checked, under its own id: the code's `ε`
+  is the least feasible value and the mollified faces satisfy the strict triangle inequalities
+  (`[formula: intrinsic-mollification]`, `DdgProofs/Bff/Quality.lean`; the Rust function is
+  `ddg_core::mollify::mollify_edge_lengths`). What is cited is only the claim that this preprocessing
+  makes the later floating-point operations robust, an empirical statement (IC paper Sec. 3.9,
+  Table 1).
+- **What depends on it.** Robustness on near-degenerate inputs, not correctness: the operation is
+  off by default in the library and reported when on (SPEC §7).
+
+### [formula: ic-transfer-mass-integral] The pieces of the common subdivision tile the input triangle
+
+- **Statement.** The faces of the common subdivision inside an input triangle `T` tile it, and the
+  P1 mass formula `Area/12 (1 + δ_ab)` is the integral of `λ_a λ_b` over a triangle; hence
+  `P₀ᵀ M_S P₀ = M₀` exactly (SPEC §6, `ic-transfer-mass-identity`).
+- **Reference.** P. G. Ciarlet, *The Finite Element Method for Elliptic Problems*, North-Holland
+  1978, Sec. 4.1 (exact integration of polynomials over a simplex); IC paper Sec. 4.3.
+- **Source check.** IC paper Sec. 4.3 read; Ciarlet not re-read (standard finite-element fact).
+- **Why not formalized.** Integration over polygons and planar subdivisions are not set up in this
+  tree. Machine-checked instead (`DdgProofs/IntegerCoords/Transfer.lean`, `[formula:
+  ic-transfer-mass-identity]`): the exact finite identity — the piece mass formula, that the whole
+  triangle gives `M₀`, and that it is additive under splitting a triangle at any point of its plane,
+  an edge, and over the fan of a convex polygon from any apex.
+- **What depends on it.** That the transfer system of Eq. 14 uses `M₀`; the Rust code assembles
+  `P₀ᵀ M_S P₀` and checks it against `M₀` numerically (SPEC §6).
+
+### [formula: ic-vertex-removal-delta] Removing an inserted vertex of a Δ-complex by flips (open)
+
+- **Statement (conjecture).** In a Δ-complex (self-edges, repeated vertices and triangles allowed),
+  an inserted interior vertex of angle sum `2π` and degree `> 3` can be brought to degree 3 by flips
+  of convex edges at it.
+- **Reference.** IC paper App. D, the remark after Thm. D.1 ("we conjecture that an analogous
+  technique could be applied"), pointing to N. Sharp, K. Crane, *You Can Find Geodesic Paths in
+  Triangle Meshes by Just Flipping Edges*, ACM TOG 39(6), Article 249, 2020,
+  <https://doi.org/10.1145/3414685.3417839>, App. A, Thm. A.5–A.8 (flips inside a wedge of angle
+  `< π` in a Δ-complex terminate: either the wedge degree drops or the first twice-incident edge moves
+  towards the start).
+- **Source check.** Read: IC paper App. D; FlipOut App. A (Lemmas A.1–A.4, Thm. A.5–A.8). Crossref
+  for the FlipOut bibliographic data.
+- **Why not formalized: open, and the bounded attempt stopped here.** The angle half of Thm. D.1 is
+  proved for any cyclic sequence of triangle corners at the vertex, which includes Δ-complex stars
+  (`FlatStar.exists_flippable`, `[formula: ic-vertex-removal]`): some spoke has a convex
+  quadrilateral. What fails in a Δ-complex is the combinatorial half: the spoke may be a loop (both
+  ends at the vertex, twice incident), its neighbours `j_{k−1}`, `j_{k+1}` may be the vertex itself
+  (the new edge is a loop at it), and `j_k` may have degree one, so the flip may be impossible or may
+  not lower the degree. FlipOut's progress measure needs the wedge angle `< π`, which makes every
+  inner corner `< π` for free; in a full `2π` star the inner corner of the chosen spoke is only
+  known to be `≤ π` when it is chosen by the angle argument, and the first-twice-incident-edge
+  potential is not shown to decrease under that choice. No counterexample was found either.
+- **What depends on it.** Removal in refinement with boundary (SPEC §4.6): the library flips by the
+  rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
+  when no flip helps; refusals are counted in the evaluation.
+
 ---
 
 ## Out of scope of this package
@@ -1878,4 +2056,7 @@ the formulas of the thirty proved `dev-` ids are covered; the flow driver, the r
 algorithms, the evaluation loop and every tolerance are not. For `crates/ddg-repulsive-curves` the
 formulas of the forty-four proved `rc-` ids (and the six `rc-near-` ids of WP16) are covered; the session and step driver, the line
 searches as algorithms, the BVH, block cluster tree and multigrid data structures, the scene
-reader, the evaluation and every tolerance are not.
+reader, the evaluation and every tolerance are not. For `crates/ddg-integer-coords` the integer
+formulas, one face (the face model) and the local statements of the section "Integer Coordinates"
+are covered; the complex model (tier C), the data structure, tracing on a whole triangulation, the
+common subdivision, refinement and every floating-point decision are not.

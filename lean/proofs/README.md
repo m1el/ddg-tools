@@ -532,6 +532,36 @@ Cited for the RC paper (`CITED.md`): `rc-exponent-range`, `rc-differential-order
 `rc-bh-admissibility`, `rc-bct-admissibility`, `rc-multigrid`, `rc-lbfgs-two-loop`,
 `rc-ncg-polak-ribiere`.
 
+### Integer Coordinates (`crates/ddg-integer-coords`)
+
+Gillespie, Sharp, Crane, ACM TOG 40(6), 2021 ("the IC paper"); contract
+`crates/ddg-integer-coords/SPEC.md` §9. Integer formulas are the oracle's definitions
+(`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`, namespace `Ddg.IntegerCoords`); the face model
+and the rest live in `namespace DdgProofs.IntegerCoords`. Design and how tier C extends it:
+`DdgProofs/IntegerCoords/DESIGN.md`. A face has sides `k` from corner `k` to `k + 1`, crossings
+numbered from corner `k`; corner `k` is opposite side `k + 1`.
+
+| id | exact statement | theorems |
+|---|---|---|
+| `ic-normal-sign` | `n⁺ − n⁻ = n`, `n⁺ n⁻ = 0`, both `≥ 0`, `n⁻ = 1 ⟺ n = −1`. | `nPlus_sub_nMinus`, `nPlus_mul_nMinus`, `nPlus_nonneg`, `nMinus_eq_one_iff` |
+| `ic-emanating` | `e ≥ 0`; at most one corner of a face has `e > 0`; in a valid face model Eq. 2 is the number of arcs from the corner to the opposite side. | `emanating_exclusive`, `FaceModel.Valid.counts` |
+| `ic-corner-coordinates` | the numerator of Eq. 1 is never negative; on counts `n_k = c_k + c_{k+1} + e_{k+2}` (admissible `c, e`) Eq. 1–2 return `c, e`; in a valid face model Eq. 1 is the number of arcs cutting the corner. | `cornerNumerator_nonneg`, `coord_eval`, `corner_eval`, `FaceModel.Valid.counts` |
+| `ic-face-validity` | the three numerators are even ⟺ `Σ n⁺` even or a corner emanates; a valid face has the form above. | `faceValid_iff`, `params_of_faceValid` |
+| `ic-face-decoding` | every valid face model is the canonical pairing `canon n c` (Fig. 11, Alg. 9) with admissible `c` equal to Eq. 1; models with the same side counts coincide; one exists ⟺ `faceValid`; the oracle's `decode?`/`partner` return it. | `FaceModel.Valid.eq_canon`, `canon_valid`, `FaceModel.Valid.partner_eq`, `FaceModel.exists_valid_iff`, `FaceModel.Valid.oracle_partner` |
+| `ic-trace-step` | Alg. 1's step on `n_ij, n_ik, n_kj, p` is the other end of the face model's arc through crossing `n_ij − 1 − p` of the entered side. | `FaceModel.Valid.traceStep_eq` |
+| `ic-reverse-crossing` | `p ↦ n − p − 1` is an involution of `[0, n)` reversing the order. | `reverseCrossing_reverseCrossing`, `reverseCrossing_mem` |
+| `ic-cevians-cross` | arcs from two corners to their opposite sides interleave (at most one corner emanates; an emanating corner is cut by no arc); geometrically, two cevians and a corner arc against a cevian cross inside both. | `FaceModel.Valid.emanating_unique`, `FaceModel.Valid.cut_eq_zero_of_emanating`, `cevians_cross`, `corner_arc_crosses_cevian` |
+| `ic-chord-interleave` | chords of a strictly convex quadrilateral cross iff their ends interleave; four boundary points of a triangle in boundary order, no three on a side, are in strictly convex position. | `Convex4.diagonals_cross`, `Convex4.sides_disjoint_ab_cd`, `Convex4.sides_disjoint_ad_bc`, `convex4_bpt`, `bpt_chords` |
+| `ic-face-split-normal` | for every gap `g` of a valid face, `faceSplit?` on the gap's region returns the numbers of arcs separating `g` from the corners; every region gives three valid new faces. | `faceSplit?_gapRegion`, `splitCount_gapRegion`, `splitCount_faceValid`, `sepCount_eq` |
+| `ic-split-edge-normal` | with `n⁺_ij = 0`, Eq. 6 is the number of arcs of the face. | `splitEdgeNormal_eq` |
+| `ic-flip-normal` | Eq. 3's corner quantities are the arc counts they name; Eq. 3 counts the arcs of the quadrilateral crossing `kl`, minus the arcs from `k` to `l`. | `flipDoubled_eval`, `flip_count` |
+| `ic-flip-involution` | for `n_ij ≥ −1` and valid faces `ijk`, `jil`: `flipNormal (flipNormal n_ij n_jk n_ki n_il n_lj) n_ki n_il n_lj n_jk = n_ij`. | `flipNormal_flipNormal`, `Quad.ofFaces_spec` |
+| `ic-vertex-removal` | a flat star of degree `≥ 4` has a spoke with inner and outer corner `≤ π` (Thm. D.1); `< π` if no corner equals `π`; the strict form fails on the degree-4 cross. | `FlatStar.exists_flippable`, `FlatStar.exists_flippable_strict`, `cross_star_no_strict` |
+| `ic-recover-barycentric` | for an affine change `A` of barycentric coordinates and any `ξ` solving Eq. 15, Eq. 16 gives `A v`; `Σ ξ = 1`. | `recover_eq`, `recover_sum_xi`, `changeCoords_sum` |
+| `ic-tangent-length` | Eq. 5 (`‖w‖² = −Σ ℓ² w w` for `Σ w = 0`), the restatement of `cut-barycentric-length`; the face-split lengths. | `tangent_length_sq`, `split_length` |
+| `ic-transfer-normal-equations` | for symmetric PSD `M`, `g` minimizes Eq. 13 ⟺ Eq. 14 holds; unique if `P₀ᵀMP₀` is PD. | `transfer_minimizer_iff`, `transfer_normal_unique`, `transfer_energy_add` |
+| `ic-transfer-mass-identity` | the piece mass formula: the whole triangle gives `M₀/Area`, additive under splits and fans (the tiling itself is cited, `ic-transfer-mass-integral`). | `pieceMass_one`, `pieceMass_split`, `pieceMass_split_edge`, `pieceMass_fan_apex` |
+
 ## Theorems
 
 Sections A and B below index the theorems about the canonical problem and the operators. The
@@ -921,7 +951,7 @@ differential tests against the oracle.
 ## Discrepancies with the papers as printed
 
 Items 1–10 and 14 concern the cone paper, 11–13 BFF, 15–26 the cuts paper, its SPEC and the
-oracle's definitions for it; 46–51 the RC paper and its SPEC. (BFF Proposition 1 is stated for a disk;
+oracle's definitions for it; 46–51 the RC paper and its SPEC; 52–56 the IC paper and its SPEC. (BFF Proposition 1 is stated for a disk;
 `TriMesh.sum_exteriorAngle` gives `2πχ` for any valid manifold mesh.)
 
 1. **Sign of the state equation.** Eq. 17 / B.2 print `L u = Ω − µ` with a positive semidefinite
@@ -1221,6 +1251,22 @@ oracle's definitions for it; 46–51 the RC paper and its SPEC. (BFF Proposition
     `α > 1`, unit `T`) is proved (`tendsto_kgrad`); the derivative of the kernel and of the pair
     terms is proved where every `ν > 0` (`PairRegular`). The SPEC's "continuous extension" is
     exactly what `tendsto_kgrad` states.
+
+52. **IC paper Eq. 3, first term.** Printed `c^{jk}_l`, which names no corner (`l` and `jk` share no
+    face); it must be `c^{ji}_l`, corner `l` of `jil` (the reference computes that,
+    `runs_tmp/ic-reference-map.md` §2.2). With it, Eq. 3 is the count of arcs crossing `kl`
+    (`flip_count`) and applied twice returns `n_ij` (`flipNormal_flipNormal`). SPEC §4.2 copies the
+    misprint and also writes `c^{il}_k` for `c^{ij}_k`.
+53. **IC paper Eq. 3 below `−1`.** On face pairs that are valid but have two or more arcs from `k`
+    to `l` (impossible for straight arcs), Eq. 3 returns `−2, −3, …`; the involution still holds.
+54. **SPEC §4.5, Eq. 6.** The paper has `n_mk = max(n_ki, n_jk, 0)`; the SPEC drops the `0`, which
+    is wrong when both neighbours are shared edges (`−1`).
+55. **IC paper Alg. 3 line 8.** `aj ← Next(Next(ij))` is the halfedge from `a` to `i` (the face of
+    `ij→` is `ija`); the index of line 9 is `r_ai + n⁻_ai + (p − c^{ja}_i)` (the oracle's
+    `identifyIndex`).
+56. **IC paper Thm. D.1.** Its proof shows a quadrilateral with all angles `≤ π`; with strict
+    convexity (IT-SPEC N5) the theorem is false (degree-4 cross, `cross_star_no_strict`), as the
+    paper's remark on the "equality case" says.
 
 ## Caveats on faithfulness
 
