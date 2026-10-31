@@ -1,4 +1,4 @@
-# ddg-flip-geodesics
+ both extractions certify and agree (1378 paths, 6210 points compared, `|Δ| sin θ ≤ 9.5e-14`) |# ddg-flip-geodesics
 
 Geodesic paths, loops and networks on triangle meshes by intrinsic edge flips, after
 
@@ -90,8 +90,71 @@ segments and bitwise-identical lengths on signposts and on `ddg_integer_coords`,
 input and from the Delaunay triangulation (self-edges, degree-one vertices), with the integer
 certificate after every run.
 
-Next: waypoints and edge sets, extraction on the input mesh for both representations (F3);
-geodesic Bézier curves and the intrinsic constrained Delaunay triangulation (F4).
+## What is implemented (work package F3)
+
+- **Initial paths** (`src/init.rs`, SPEC §2.2): `waypoint_path` (Dijkstra between consecutive
+  waypoints, concatenated, waypoints pinned or not; gc: fg.cpp:283-312) and `network_from_edges`
+  (the reference's walk, gc: fg.cpp:315-396: vertices of path degree `≠ 2` and `extra_pinned` are
+  ends and are pinned, paths between ends, the rest closed loops; boundary edges are walked in
+  both directions, which the reference's halfedge loop cannot). Both return `InitialPaths { paths,
+  pinned }` for `GeodesicNetwork::new`. Errors name the leg (`WaypointLeg`), the mask size or the
+  vertex.
+- **Extraction** (`src/extract.rs`, SPEC §5): `GeodesicNetwork::extract(&ExtractOptions)` is one
+  `PathOnInput` per path, segments in path order, each the `trace_edge_on_input` of its edge
+  (reversed for a backward segment, the joint written once; a closed path repeats its first
+  point at the end). The distinct edges are traced in parallel (rayon) and assembled in order:
+  bitwise identical at any thread count. A failed trace is `FlipError::Extraction` naming path,
+  segment and edge. `extract_with_report` adds the per-edge counts, `segment_starts` and the
+  certificate; `polylines_3d(positions)` and `polyline_3d` interpolate barycentrically;
+  `crossing_sines` gives the conditioning `sin θ` of each crossing position.
+- **Certificate on `T⁰`** (`InputCertificate`, SPEC §7 layer 1b), from the input mesh's lengths
+  and corner angles alone: the angle at every crossing of an input edge is `π` (second face unfolded
+  across the edge; tolerance `1e-6`); at every joint both sides measured on `T⁰` are `≥ π − 1e-4`
+  unless the joint is pinned or blocked by an end on `T`; the sides are also compared with the wedge
+  angles `T` computed (`max_wedge_mismatch`); the polyline's length equals the edge path's within
+  `1e-9` relative. The per-edge `length_mismatch` of the integer extraction is
+  `ExtractReport::edges[..].mismatch`.
+
+### Results (`tests/extract.rs`)
+
+| test | result |
+|---|---|
+| waypoints, edge sets | legs equal the concatenated Dijkstra paths; tree, tree-cotree cut graphs, random edge sets, boundaries: every masked edge once, ends exactly the vertices of degree `≠ 2`, valid networks; a Dijkstra path or a tube ring round-trips |
+| certificates on `T⁰`, both representations | 223 paths on 17 generated and data shapes (random pairs, three at a time, waypoint loops, self-edge loops, tube loops): all pass; crossing deviation `≤ 2.6e-11` (signposts), `1.3e-12` (integers); length error `≤ 5e-15` |
+| signposts vs integers (§7 layer 2) | same crossed input edges at all 3401 compared points; `|Δ| sin θ ≤ 5.8e-13` (raw `|Δ|` `≤ 3.9e-11`) |
+| seam networks | tree-cotree cut graph of a torus, BFS trees of a sphere and of spot, shortened with junctions pinned: both extractions certify and agree |
+| determinism (§7 test 10) | `Extraction` equal, `t` bitwise, at 1, 3 and 16 threads |
+
+Hunt for signpost trace failures (SPEC §7 test 9): 9 data meshes x 4 seeds x 1000 random pairs
+(36 000 trials, `FO_MESH`, `FO_SEED`, `FO_TRIALS` of the ignored `evaluation` test): **no
+signpost trace failed**, so there is no committed fixture yet (the failures of IntCoords Fig. 17
+need Thingi10k, F7). Two trials (tree, seed 2, pairs 372 and 934) ended with FlipOut not
+geodesic to `1e-4` (the paper's 99.4 %); the certificate on `T⁰` measured the same angle as `T`
+(`max_wedge_mismatch` 7e-11).
+
+Timings (`evaluation`, release, one thread, 200 random pairs per mesh, median per path; the
+machine was shared: load average 1.4 before, 4.3 after the run):
+
+| mesh | V | Dijkstra ms | FlipOut ms | extraction ms, signposts | extraction ms, integers | (FlipOut + extraction) / Dijkstra |
+|---|---|---|---|---|---|---|
+| spot | 2930 | 0.30 | 0.28 | 0.010 | 0.021 | 1.00 |
+| bob | 5344 | 0.79 | 0.62 | 0.010 | 0.027 | 0.82 |
+| blub | 7106 | 0.79 | 0.62 | 0.012 | 0.030 | 0.82 |
+| CrumpledDevelopable | 289 | 0.026 | 0.052 | 0.002 | 0.005 | 2.2 |
+| camelbad | 11392 | 1.40 | 0.87 | 0.028 | 0.057 | 0.67 |
+| bunny | 14290 | 2.03 | 0.79 | 0.047 | 0.082 | 0.43 |
+| cow1 | 15049 | 1.86 | 0.84 | 0.043 | 0.086 | 0.50 |
+| rhino | 20205 | 2.84 | 1.17 | 0.037 | 0.078 | 0.44 |
+| tree | 16917 | 2.52 | 1.10 | 0.046 | 0.089 | 0.47 |
+
+Extraction costs up to 10 % of FlipOut on the integers and half of that on signposts (the trace of
+an edge is the cheap part; the integer walk identifies each crossing). The paper's total
+(Dijkstra + FlipOut + extraction) is about 1.1 times Dijkstra's time (Fig. 18); ours is
+`1 + (0.4 .. 1.0)` on the large meshes, i.e. 1.4-2 times: FlipOut costs about as much as our
+Dijkstra on small meshes. In absolute terms every path takes under 2 ms on one thread (paper:
+"a few ms" on an i7-4790K).
+
+Next: geodesic Bézier curves and the intrinsic constrained Delaunay triangulation (F4).
 
 ## Credits
 

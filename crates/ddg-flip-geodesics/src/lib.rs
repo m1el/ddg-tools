@@ -19,8 +19,9 @@
 //!   directed edges ([`Segment`], [`EdgePath`]), the order of the segments that share an edge
 //!   (the layering, paper Fig. 11), pinned vertices, and the validity check including
 //!   non-crossing ([`Network::check`]).
-//! * Initial paths: through a vertex sequence ([`path_from_vertices`]) and the shortest path
-//!   in the edge graph ([`dijkstra_path`]).
+//! * Initial paths: through a vertex sequence ([`path_from_vertices`]), the shortest path in the
+//!   edge graph ([`dijkstra_path`]), through waypoints ([`waypoint_path`]) and from a set of
+//!   edges with junctions ([`network_from_edges`]; seams, cut graphs).
 //! * The geometry of a joint ([`JointGeometry`]): both wedge angles summed corner by corner
 //!   (Eq. 1), boundary wedges, the Δ-complex cases (self-edges incident on a wedge twice,
 //!   out-and-back joints of degree zero), the classification of SPEC §3, flexible and
@@ -34,8 +35,12 @@
 //!   ([`GeodesicNetwork::shorten_with`]).
 //! * The geodesic certificate ([`certify()`], SPEC §7 layer 1a), computed on the result.
 //!
-//! Not yet here: waypoint and edge-set initial paths and extraction on the input mesh (work
-//! package F3), Bézier curves and the constrained Delaunay triangulation (F4).
+//! * Extraction on the input mesh ([`GeodesicNetwork::extract`], module [`extract`], SPEC §5):
+//!   one polyline per path, each segment the trace of its edge (parallel per edge, assembled in
+//!   order), the certificate on `T⁰` computed from the input mesh alone ([`InputCertificate`]),
+//!   3D polylines ([`GeodesicNetwork::polylines_3d`]).
+//!
+//! Not yet here: Bézier curves and the constrained Delaunay triangulation (F4).
 //!
 //! # Example
 //!

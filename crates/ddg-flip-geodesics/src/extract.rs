@@ -256,7 +256,10 @@ impl Input<'_> {
     /// of it from `a`.
     fn unfold(&self, a: usize, layout: &Layout, b: usize, edge: usize) -> Option<Layout> {
         let ka = (0..3).find(|&k| self.mesh.edge(3 * a + k) == edge)?;
-        let (u, w) = (self.mesh.faces()[a][ka] as usize, self.mesh.faces()[a][(ka + 1) % 3] as usize);
+        let (u, w) = (
+            self.mesh.faces()[a][ka] as usize,
+            self.mesh.faces()[a][(ka + 1) % 3] as usize,
+        );
         let (pu, pw) = (layout[ka], layout[(ka + 1) % 3]);
         let apex_a = layout[(ka + 2) % 3];
         let (ku, kw) = (self.corner_of(b, u)?, self.corner_of(b, w)?);
@@ -303,7 +306,10 @@ fn pieces_of_edge<T: Triangulation>(
     let mesh = tri.input().mesh();
     let length = tri.edge_length(e);
     let [a, b] = trace.vertices;
-    let (from, to) = (tri.vertex_location(a as usize), tri.vertex_location(b as usize));
+    let (from, to) = (
+        tri.vertex_location(a as usize),
+        tri.vertex_location(b as usize),
+    );
     let info = EdgeExtraction {
         edge: e as u32,
         n_crossings: trace.crossings.len() as u32,
@@ -458,6 +464,7 @@ fn certify_path<T: Triangulation>(
     };
     // Lengths.
     let mut length = 0.0;
+    #[allow(clippy::needless_range_loop)]
     for i in 0..n_pieces {
         match (place(i, i), place(i, i + 1)) {
             (Some(a), Some(b)) => length += norm(sub(a, b)),
@@ -529,7 +536,10 @@ fn certify_path<T: Triangulation>(
         else {
             continue;
         };
-        let (f_in, f_out) = (path.faces[piece_in] as usize, path.faces[piece_out] as usize);
+        let (f_in, f_out) = (
+            path.faces[piece_in] as usize,
+            path.faces[piece_out] as usize,
+        );
         let (Some(towards_a), Some(towards_c)) = (
             input.locate(f_in, l_in, &path.points[before]),
             input.locate(f_out, l_out, &path.points[after]),
@@ -626,7 +636,11 @@ impl<T: Triangulation + Sync> GeodesicNetwork<T> {
             .par_iter()
             .map(|&e| pieces_of_edge(tri, e, &options.trace))
             .collect();
-        let slot = |e: usize| edges.binary_search(&e).expect("every segment's edge was traced");
+        let slot = |e: usize| {
+            edges
+                .binary_search(&e)
+                .expect("every segment's edge was traced")
+        };
         // The first failure in path order.
         for (p, path) in paths.iter().enumerate() {
             for (index, s) in path.segments.iter().enumerate() {
@@ -727,7 +741,8 @@ impl<T: Triangulation + Sync> GeodesicNetwork<T> {
             };
             for part in parts {
                 c.n_crossings += part.n_crossings;
-                c.max_crossing_deviation = c.max_crossing_deviation.max(part.max_crossing_deviation);
+                c.max_crossing_deviation =
+                    c.max_crossing_deviation.max(part.max_crossing_deviation);
                 c.n_joints += part.n_joints;
                 c.n_exempt += part.n_exempt;
                 c.min_joint_angle = c.min_joint_angle.min(part.min_joint_angle);
@@ -860,6 +875,7 @@ pub fn crossing_sines<T: Triangulation>(tri: &T, path: &PathOnInput) -> Vec<Opti
     };
     let n = path.points.len();
     let mut out = vec![None; n];
+    #[allow(clippy::needless_range_loop)]
     for i in 1..n.saturating_sub(1) {
         let SurfacePoint::Edge { edge, .. } = path.points[i] else {
             continue;

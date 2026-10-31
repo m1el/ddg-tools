@@ -72,7 +72,15 @@ fn waypoint_errors_name_the_leg() {
     assert!(matches!(e, FlipError::TooFewVertices { n: 1, .. }), "{e}");
     let e = waypoint_path(&tri, &[0, 6, 6, 24], false, true).unwrap_err();
     assert!(
-        matches!(e, FlipError::WaypointLeg { leg: 1, from: 6, to: 6, .. }),
+        matches!(
+            e,
+            FlipError::WaypointLeg {
+                leg: 1,
+                from: 6,
+                to: 6,
+                ..
+            }
+        ),
         "{e:?}"
     );
     let msg = e.to_string();
@@ -155,6 +163,7 @@ fn prune_leaves(c: &Complex, mask: &mut [bool]) {
     loop {
         let d = degrees(c, mask);
         let mut changed = false;
+        #[allow(clippy::needless_range_loop)]
         for e in 0..c.n_edges() {
             let [a, b] = c.edge_vertices(e);
             if mask[e] && (d[a] == 1 || d[b] == 1) {
@@ -213,16 +222,27 @@ fn check_edge_set(tri: &IntrinsicTriangulation, mask: &[bool], extra: &[usize], 
             assert_eq!(p.segments[0].tail(c), p.segments.last().unwrap().head(c));
         } else {
             open += 1;
-            assert!(is_end(vs[0]) && is_end(*vs.last().unwrap()), "{what}: path {i}");
-            assert!(vs[1..vs.len() - 1].iter().all(|&v| !is_end(v)), "{what}: path {i}");
+            assert!(
+                is_end(vs[0]) && is_end(*vs.last().unwrap()),
+                "{what}: path {i}"
+            );
+            assert!(
+                vs[1..vs.len() - 1].iter().all(|&v| !is_end(v)),
+                "{what}: path {i}"
+            );
         }
         for w in p.segments.windows(2) {
             assert_eq!(w[0].head(c), w[1].tail(c));
         }
     }
-    let end_incidences: usize = (0..c.n_vertices()).filter(|&v| is_end(v)).map(|v| deg[v]).sum();
+    let end_incidences: usize = (0..c.n_vertices())
+        .filter(|&v| is_end(v))
+        .map(|v| deg[v])
+        .sum();
     assert_eq!(2 * open, end_incidences, "{what}: number of open paths");
-    let pinned: Vec<usize> = (0..c.n_vertices()).filter(|&v| is_end(v) && deg[v] != 0).collect();
+    let pinned: Vec<usize> = (0..c.n_vertices())
+        .filter(|&v| is_end(v) && deg[v] != 0)
+        .collect();
     assert_eq!(out.pinned, pinned, "{what}");
     // A valid network: ends pair nothing, other joints are at degree-two vertices.
     Network::new(c, &out.paths, &out.pinned, None).unwrap_or_else(|e| panic!("{what}: {e}"));
@@ -245,8 +265,16 @@ fn edge_sets_become_paths_and_loops() {
             assert!(cut.iter().any(|&b| b), "{}: empty cut graph", shape.name);
             check_edge_set(&tri, &cut, &[], &format!("{} cut graph", shape.name));
             // Extra pinned vertices on it split its loops.
-            let on: Vec<usize> = (0..c.n_edges()).filter(|&e| cut[e]).map(|e| c.edge_vertices(e)[0]).collect();
-            check_edge_set(&tri, &cut, &on[..on.len().min(3)], &format!("{} cut graph pinned", shape.name));
+            let on: Vec<usize> = (0..c.n_edges())
+                .filter(|&e| cut[e])
+                .map(|e| c.edge_vertices(e)[0])
+                .collect();
+            check_edge_set(
+                &tri,
+                &cut,
+                &on[..on.len().min(3)],
+                &format!("{} cut graph pinned", shape.name),
+            );
         }
         // Random subsets, sparse and dense (every degree occurs).
         for (k, p) in [0.05, 0.3, 0.7].into_iter().enumerate() {
@@ -261,7 +289,12 @@ fn edge_sets_become_paths_and_loops() {
             check_edge_set(&tri, &boundary, &[], &format!("{} boundary", shape.name));
             let one = (0..c.n_edges()).find(|&e| boundary[e]).unwrap();
             let v = c.edge_vertices(one)[0];
-            check_edge_set(&tri, &boundary, &[v], &format!("{} boundary pinned", shape.name));
+            check_edge_set(
+                &tri,
+                &boundary,
+                &[v],
+                &format!("{} boundary pinned", shape.name),
+            );
         }
     }
 }
@@ -282,7 +315,11 @@ fn edge_set_of_a_path_or_loop_is_that_path_or_loop() {
             assert_eq!(got.paths.len(), 1, "{}", shape.name);
             let g = &got.paths[0];
             assert!(!g.closed);
-            assert!(*g == path || *g == path.reversed(), "{}: {g:?} vs {path:?}", shape.name);
+            assert!(
+                *g == path || *g == path.reversed(),
+                "{}: {g:?} vs {path:?}",
+                shape.name
+            );
             assert_eq!(got.pinned.len(), 2);
         }
     }
@@ -309,7 +346,10 @@ fn edge_set_errors_name_what_and_where() {
     let tri = shape.triangulation();
     let ne = tri.complex().n_edges();
     let e = network_from_edges(&tri, &vec![false; ne - 1], &[]).unwrap_err();
-    assert!(e.to_string().contains(&format!("{} entries", ne - 1)), "{e}");
+    assert!(
+        e.to_string().contains(&format!("{} entries", ne - 1)),
+        "{e}"
+    );
     assert!(e.to_string().contains(&format!("{ne} edges")), "{e}");
     let e = network_from_edges(&tri, &vec![true; ne], &[1000]).unwrap_err();
     assert!(e.to_string().contains("1000"), "{e}");
@@ -360,8 +400,7 @@ impl Stats {
         let c = x.certificate.as_ref().unwrap();
         self.worst_cross_dev[i] = self.worst_cross_dev[i].max(c.max_crossing_deviation);
         if c.min_joint_angle.is_finite() {
-            self.worst_joint[i] =
-                self.worst_joint[i].max(std::f64::consts::PI - c.min_joint_angle);
+            self.worst_joint[i] = self.worst_joint[i].max(std::f64::consts::PI - c.min_joint_angle);
         }
         self.joints_checked += c.n_joints;
         self.joints_exempt += c.n_exempt;
@@ -436,7 +475,10 @@ fn check_both(
                     let cond = raw * sines[i].unwrap_or(1.0);
                     stats.worst_raw = stats.worst_raw.max(raw);
                     stats.worst_conditioned = stats.worst_conditioned.max(cond);
-                    assert!(cond <= 1e-9, "{label}: path {p} point {i}: |Δ| sin θ = {cond:e}");
+                    assert!(
+                        cond <= 1e-9,
+                        "{label}: path {p} point {i}: |Δ| sin θ = {cond:e}"
+                    );
                 }
                 _ => panic!("{label}: path {p} point {i}: {qa:?} vs {qb:?}"),
             }
@@ -451,7 +493,9 @@ fn model_shapes() -> Vec<Shape> {
     shapes.extend(data_shapes());
     shapes.extend(load_data("models/bob/bob/bob_tri.obj"));
     shapes.extend(load_data("models/blub/blub/blub_triangulated.obj"));
-    shapes.extend(load_data("models/crumpleddevelopable/CrumpledDevelopable.obj"));
+    shapes.extend(load_data(
+        "models/crumpleddevelopable/CrumpledDevelopable.obj",
+    ));
     shapes
 }
 
@@ -476,7 +520,14 @@ fn extraction_certifies_and_representations_agree() {
             .take(3)
             .map(|&(a, b)| dijkstra_path(&tri, a, b).unwrap())
             .collect();
-        check_both(shape, &integers, &format!("{} three paths", shape.name), &paths, &[], &mut stats);
+        check_both(
+            shape,
+            &integers,
+            &format!("{} three paths", shape.name),
+            &paths,
+            &[],
+            &mut stats,
+        );
         let w = [pairs[0].0, pairs[1].0, pairs[2].0];
         if let Ok(init) = waypoint_path(&tri, &w, true, true) {
             check_both(
@@ -491,7 +542,14 @@ fn extraction_certifies_and_representations_agree() {
         // Loops along self-edges.
         for &s in &tri.irregularities().self_edges {
             let path = EdgePath::closed(vec![Segment::new(s as usize, true)]);
-            check_both(shape, &integers, &format!("{} self-edge {s}", shape.name), &[path], &[], &mut stats);
+            check_both(
+                shape,
+                &integers,
+                &format!("{} self-edge {s}", shape.name),
+                &[path],
+                &[],
+                &mut stats,
+            );
         }
     }
     // Loops around a tube with a waist, and two parallel loops.
@@ -500,17 +558,37 @@ fn extraction_certifies_and_representations_agree() {
     let integers = IntegerTriangulation::new(&tube.mesh, &tube.geometry).unwrap();
     let tri = tube.triangulation();
     let ring = |j: usize| vpath(&tri, &(0..n).map(|k| j * n + k).collect::<Vec<_>>(), true);
-    check_both(&tube, &integers, "tube loop", &[ring(w + 2)], &[], &mut stats);
-    check_both(&tube, &integers, "tube two loops", &[ring(w - 2), ring(w + 2)], &[], &mut stats);
+    check_both(
+        &tube,
+        &integers,
+        "tube loop",
+        &[ring(w + 2)],
+        &[],
+        &mut stats,
+    );
+    check_both(
+        &tube,
+        &integers,
+        "tube two loops",
+        &[ring(w - 2), ring(w + 2)],
+        &[],
+        &mut stats,
+    );
     eprintln!("{stats:#?}");
-    assert!(stats.paths > 100 && stats.crossings > 500 && stats.joints_checked > 200, "{stats:?}");
+    assert!(
+        stats.paths > 100 && stats.crossings > 500 && stats.joints_checked > 200,
+        "{stats:?}"
+    );
 }
 
 #[test]
 fn cut_graph_and_seam_networks_extract() {
     let mut stats = Stats::default();
     let mut shapes = vec![
-        Shape::generated("torus 12x6", ddg_core::generators::torus(12, 6, 1.0, 0.3).unwrap()),
+        Shape::generated(
+            "torus 12x6",
+            ddg_core::generators::torus(12, 6, 1.0, 0.3).unwrap(),
+        ),
         Shape::generated("icosphere 2", ddg_core::generators::icosphere(2).unwrap()),
         long_torus(8, 3, 4.0, 0.2, 0.37),
     ];
@@ -519,10 +597,21 @@ fn cut_graph_and_seam_networks_extract() {
         let integers = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
         let tri = shape.triangulation();
         let c = tri.complex();
-        let mask = if c.euler_characteristic() == 0 { cut_graph(c) } else { bfs_tree(c) };
+        let mask = if c.euler_characteristic() == 0 {
+            cut_graph(c)
+        } else {
+            bfs_tree(c)
+        };
         let init = network_from_edges(&tri, &mask, &[]).unwrap();
         assert!(!init.paths.is_empty());
-        check_both(shape, &integers, &format!("{} seams", shape.name), &init.paths, &init.pinned, &mut stats);
+        check_both(
+            shape,
+            &integers,
+            &format!("{} seams", shape.name),
+            &init.paths,
+            &init.pinned,
+            &mut stats,
+        );
     }
     eprintln!("{stats:#?}");
     assert!(stats.paths >= 4);
@@ -537,7 +626,9 @@ fn extraction_is_deterministic_across_thread_counts() {
             .into_iter()
             .map(|(a, b)| dijkstra_path(&tri, a, b).unwrap())
             .collect();
-        let Ok(_) = Network::new(tri.complex(), &paths, &[], None) else { continue };
+        let Ok(_) = Network::new(tri.complex(), &paths, &[], None) else {
+            continue;
+        };
         let net = shorten(integers, &paths, &[], &shape.name);
         let options = ExtractOptions::default();
         let run = |threads: usize| {
@@ -584,14 +675,22 @@ fn polylines_3d_interpolate_the_input() {
     assert_eq!(p, shape.positions[gv(4, 0, 0)]);
     assert_eq!(q, shape.positions[gv(4, 6, 4)]);
     let total: f64 = line.windows(2).map(|w| dist(w[0], w[1])).sum();
-    assert!((total - dist(p, q)).abs() <= 1e-12 * total, "{total} vs {}", dist(p, q));
+    assert!(
+        (total - dist(p, q)).abs() <= 1e-12 * total,
+        "{total} vs {}",
+        dist(p, q)
+    );
     assert!(line.len() > 3);
     for r in line {
         let (u, v) = ([q[0] - p[0], q[1] - p[1]], [r[0] - p[0], r[1] - p[1]]);
         assert!((u[0] * v[1] - u[1] * v[0]).abs() < 1e-12);
     }
     let xs = net.extract(&ExtractOptions::default()).unwrap();
-    let e = polyline_3d(net.triangulation().input().mesh(), &shape.positions[1..], &xs[0]);
+    let e = polyline_3d(
+        net.triangulation().input().mesh(),
+        &shape.positions[1..],
+        &xs[0],
+    );
     assert!(matches!(e, Err(FlipError::IndexOutOfRange { .. })));
 }
 
@@ -601,7 +700,10 @@ fn bad_options_are_refused() {
     let tri = shape.triangulation();
     let path = dijkstra_path(&tri, 0, 15).unwrap();
     let net = GeodesicNetwork::new(tri, &[path], &[], None).unwrap();
-    let options = ExtractOptions { crossing_tolerance: f64::NAN, ..ExtractOptions::default() };
+    let options = ExtractOptions {
+        crossing_tolerance: f64::NAN,
+        ..ExtractOptions::default()
+    };
     let e = net.extract(&options).unwrap_err();
     assert!(e.to_string().contains("crossing_tolerance"), "{e}");
 }
@@ -614,32 +716,61 @@ fn bad_options_are_refused() {
 #[test]
 #[ignore]
 fn evaluation() {
-    let trials: usize = std::env::var("FO_TRIALS").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-    println!("| mesh | V | trials | Dijkstra ms | FlipOut ms | extract ms signposts | extract ms integers | pieces median | signpost failures | worst crossing dev | worst joint | worst |Δ|sinθ | worst raw |Δ| | worst length err | worst int mismatch |");
-    for shape in &model_shapes() {
-        if shape.mesh.n_vertices() < 250 {
-            continue;
-        }
+    let trials: usize = std::env::var("FO_TRIALS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    println!(
+        "| mesh | V | trials | Dijkstra ms | FlipOut ms | extract ms signposts | extract ms integers | pieces median | signpost failures | worst crossing dev | worst joint | worst |Δ|sinθ | worst raw |Δ| | worst length err | worst int mismatch |"
+    );
+    let seed: u64 = std::env::var("FO_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2024);
+    let only = std::env::var("FO_MESH").unwrap_or_default();
+    let files = [
+        "models/spot/spot/spot_triangulated.obj",
+        "models/bob/bob/bob_tri.obj",
+        "models/blub/blub/blub_triangulated.obj",
+        "models/crumpleddevelopable/CrumpledDevelopable.obj",
+        "optimal-cones/optimal-cones-data/data/camelbad.obj",
+        "optimal-cones/optimal-cones-data/data/bunny.obj",
+        "optimal-cones/optimal-cones-data/data/cow1.obj",
+        "optimal-cones/optimal-cones-data/data/rhino.obj",
+        "optimal-cones/optimal-cones-data/data/tree.obj",
+    ];
+    for shape in files
+        .iter()
+        .filter(|f| f.contains(&only))
+        .filter_map(|f| load_data(f))
+    {
         let integers = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
         let tri = shape.triangulation();
         let n = tri.complex().n_vertices();
         let (mut t_dij, mut t_fo, mut t_xs, mut t_xi) = (vec![], vec![], vec![], vec![]);
         let mut pieces = vec![];
         let mut stats = Stats::default();
-        let options = ExtractOptions { certify_input: false, ..ExtractOptions::default() };
+        let options = ExtractOptions {
+            certify_input: false,
+            ..ExtractOptions::default()
+        };
         let cert_options = ExtractOptions::default();
-        for (k, &(a, b)) in random_pairs(n, trials, 2024).iter().enumerate() {
+        for (k, &(a, b)) in random_pairs(n, trials, seed).iter().enumerate() {
             let t0 = Instant::now();
             let path = dijkstra_path(&tri, a, b).unwrap();
             t_dij.push(t0.elapsed().as_secs_f64() * 1e3);
-            let label = format!("{} seed 2024 pair {k} ({a}->{b})", shape.name);
+            let label = format!("{} seed {seed} pair {k} ({a}->{b})", shape.name);
             pool.install(|| {
-                let mut net = GeodesicNetwork::new(integers.clone(), &[path.clone()], &[], None).unwrap();
+                let mut net =
+                    GeodesicNetwork::new(integers.clone(), std::slice::from_ref(&path), &[], None).unwrap();
                 let t0 = Instant::now();
                 net.shorten(&ShortenOptions::default()).unwrap();
                 t_fo.push(t0.elapsed().as_secs_f64() * 1e3);
-                let mut sp = GeodesicNetwork::new(tri.clone(), &[path.clone()], &[], None).unwrap();
+                let mut sp = GeodesicNetwork::new(tri.clone(), std::slice::from_ref(&path), &[], None).unwrap();
                 sp.shorten(&ShortenOptions::default()).unwrap();
                 let t0 = Instant::now();
                 let xi = net.extract(&options).unwrap();
@@ -667,7 +798,12 @@ fn evaluation() {
                         if ca.paths[0].points.len() != cb.paths[0].points.len() {
                             println!("DIFFERENT POINT COUNT: {label}");
                         } else {
-                            for (i, (qa, qb)) in ca.paths[0].points.iter().zip(&cb.paths[0].points).enumerate() {
+                            for (i, (qa, qb)) in ca.paths[0]
+                                .points
+                                .iter()
+                                .zip(&cb.paths[0].points)
+                                .enumerate()
+                            {
                                 if let (
                                     SurfacePoint::Edge { edge: ea, t: ta },
                                     SurfacePoint::Edge { edge: eb, t: tb },
@@ -695,12 +831,24 @@ fn evaluation() {
         pieces.sort_unstable();
         println!(
             "| {} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {} | {} | {:.1e} / {:.1e} | {:.1e} / {:.1e} | {:.1e} | {:.1e} | {:.1e} / {:.1e} | {:.1e} |",
-            shape.name, n, trials, med(&mut t_dij), med(&mut t_fo), med(&mut t_xs), med(&mut t_xi),
-            pieces[pieces.len() / 2], stats.signpost_failures.len(),
-            stats.worst_cross_dev[0], stats.worst_cross_dev[1],
-            stats.worst_joint[0], stats.worst_joint[1],
-            stats.worst_conditioned, stats.worst_raw,
-            stats.worst_length[0], stats.worst_length[1], stats.worst_mismatch[1],
+            shape.name,
+            n,
+            trials,
+            med(&mut t_dij),
+            med(&mut t_fo),
+            med(&mut t_xs),
+            med(&mut t_xi),
+            pieces[pieces.len() / 2],
+            stats.signpost_failures.len(),
+            stats.worst_cross_dev[0],
+            stats.worst_cross_dev[1],
+            stats.worst_joint[0],
+            stats.worst_joint[1],
+            stats.worst_conditioned,
+            stats.worst_raw,
+            stats.worst_length[0],
+            stats.worst_length[1],
+            stats.worst_mismatch[1],
         );
     }
 }

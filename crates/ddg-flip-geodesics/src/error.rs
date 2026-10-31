@@ -307,7 +307,9 @@ impl std::error::Error for FlipError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             FlipError::Intrinsic(e) => Some(e),
-            FlipError::WaypointLeg { cause, .. } | FlipError::Extraction { cause, .. } => Some(&**cause),
+            FlipError::WaypointLeg { cause, .. } | FlipError::Extraction { cause, .. } => {
+                Some(&**cause)
+            }
             _ => None,
         }
     }

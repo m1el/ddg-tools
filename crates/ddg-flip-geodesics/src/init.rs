@@ -309,10 +309,7 @@ pub fn network_from_edges<T: Triangulation>(
             .find(|&s| s != current.reversed() && edge_mask[s.edge as usize])
     };
     let guard = |what: &str, start: Segment| FlipError::Internal {
-        what: format!(
-            "the walk from edge {} did not end ({what})",
-            start.edge
-        ),
+        what: format!("the walk from edge {} did not end ({what})", start.edge),
     };
     for &start in &directed {
         if walked[start.edge as usize] || !is_end[start.tail(complex)] {
