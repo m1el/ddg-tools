@@ -1,6 +1,6 @@
 //! The integer formulas of the paper on plain integers: Eq. 1, 2 (corner coordinates and
 //! emanating counts), the validity of a face, the reversal of a crossing, one step of Supp.
-//! Alg. 1, the index of Supp. Alg. 3 and Eq. 6.
+//! Alg. 1, the index of Supp. Alg. 3, Eq. 3 and 4 (the flip) and Eq. 6.
 //!
 //! Every function here is the Rust counterpart of a definition of the Lean oracle
 //! (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`), which `lean/proofs` proves theorems
@@ -231,6 +231,145 @@ pub fn identify_index(r_ai: i64, n_ai: i64, n_ij: i64, n_ja: i64, p: i64, deg: u
 #[inline]
 pub fn split_edge_normal(n_ki: i64, n_jk: i64) -> i64 {
     n_ki.max(n_jk).max(0)
+}
+
+/// Twice Eq. 3 without `n⁻_ij` (the "doubled form", so that nothing is halved before it is
+/// known to be even, SPEC I14): edge `ij` with the faces `ijk` and `jil`, arguments
+/// `n_ij, n_jk, n_ki, n_il, n_lj`,
+///
+/// ```text
+/// 2c^{ji}_l + 2c^{ij}_k + |c^{il}_j − c^{ki}_j| + |c^{lj}_i − c^{jk}_i| − e^{ji}_l − e^{ij}_k
+///   + 2(e^{lj}_i + e^{jk}_i + e^{il}_j + e^{ki}_j)
+/// ```
+///
+/// with every corner quantity that of one of the two old faces: `c^{ji}_l` is corner `l` of
+/// `jil` and `c^{ij}_k` corner `k` of `ijk` (the paper prints `c^{jk}_l + c^{il}_k`, which name
+/// no corner; SPEC §4.2), `c^{il}_j`, `e^{il}_j` are corner `j` of `jil`, `c^{ki}_j`, `e^{ki}_j`
+/// corner `j` of `ijk`, and so on. `None` when one of the two faces is not valid (an odd
+/// numerator of Eq. 1). Evaluated in `i128`, where it cannot overflow for `i64` arguments.
+///
+/// [formula: ic-flip-normal]
+pub fn flip_doubled(n_ij: i64, n_jk: i64, n_ki: i64, n_il: i64, n_lj: i64) -> Option<i128> {
+    let c = |opp, a, b| corner_coordinate(opp, a, b).map(i128::from);
+    let e = |opp, a, b| i128::from(emanating(opp, a, b));
+    let cl = c(n_ij, n_il, n_lj)?; // c^{ji}_l, corner l of jil
+    let ck = c(n_ij, n_jk, n_ki)?; // c^{ij}_k, corner k of ijk
+    let cj_l = c(n_il, n_ij, n_lj)?; // c^{il}_j, corner j of jil
+    let cj_r = c(n_ki, n_ij, n_jk)?; // c^{ki}_j, corner j of ijk
+    let ci_l = c(n_lj, n_ij, n_il)?; // c^{lj}_i, corner i of jil
+    let ci_r = c(n_jk, n_ij, n_ki)?; // c^{jk}_i, corner i of ijk
+    let el = e(n_ij, n_il, n_lj); // e^{ji}_l
+    let ek = e(n_ij, n_jk, n_ki); // e^{ij}_k
+    let ei_l = e(n_lj, n_ij, n_il); // e^{lj}_i
+    let ei_r = e(n_jk, n_ij, n_ki); // e^{jk}_i
+    let ej_l = e(n_il, n_ij, n_lj); // e^{il}_j
+    let ej_r = e(n_ki, n_ij, n_jk); // e^{ki}_j
+    Some(
+        2 * cl + 2 * ck + (cj_l - cj_r).abs() + (ci_l - ci_r).abs() - el - ek
+            + 2 * (ei_l + ei_r + ej_l + ej_r),
+    )
+}
+
+/// Why [`flip_normal`] has no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlipNormalError {
+    /// One of the two faces `ijk`, `jil` is not valid (an odd numerator of Eq. 1).
+    InvalidFace,
+    /// The doubled form of Eq. 3 is odd (impossible for two valid faces, Lean `flip_count`;
+    /// reported instead of rounded, SPEC I14).
+    OddDoubled(i128),
+    /// The result does not fit an `i64` (SPEC I2).
+    Overflow,
+}
+
+/// Eq. 3: the normal coordinate of the new edge `kl` after flipping `ij` (faces `ijk`, `jil`;
+/// arguments `n_ij, n_jk, n_ki, n_il, n_lj`): [`flip_doubled`] halved, plus `n⁻_ij`. The
+/// result can be below `−1` for face pairs that are combinatorially valid but have two or more
+/// arcs from `k` to `l` (SPEC §4.2); the caller decides what that means. Applying it to the new
+/// edge, `flip_normal(n_kl, n_ki, n_il, n_lj, n_jk)`, returns `n_ij` (`ic-flip-involution`).
+///
+/// [formula: ic-flip-normal]
+pub fn flip_normal(
+    n_ij: i64,
+    n_jk: i64,
+    n_ki: i64,
+    n_il: i64,
+    n_lj: i64,
+) -> Result<i64, FlipNormalError> {
+    let d = flip_doubled(n_ij, n_jk, n_ki, n_il, n_lj).ok_or(FlipNormalError::InvalidFace)?;
+    if d % 2 != 0 {
+        return Err(FlipNormalError::OddDoubled(d));
+    }
+    i64::try_from(d / 2 + i128::from(n_minus(n_ij))).map_err(|_| FlipNormalError::Overflow)
+}
+
+/// Eq. 4, `r_kl = (r_ki + e^{il}_k + n⁻_ki) mod deg₀(k)`: the roundabout of the new halfedge
+/// `k → l` after a flip, from the roundabout of `k → i` (the halfedge just clockwise of it),
+/// the emanating count `e^{il}_k` of corner `k` in the **new** face `kil`, and `n⁻_ki`.
+/// `modulus` is [`LocalIndices::modulus`](crate::LocalIndices::modulus): `deg₀(k)` at an
+/// interior vertex, `0` (no reduction, SPEC I3) at a boundary vertex. `None` when the result
+/// leaves the `i64` range (only possible without reduction). The same with `(l, j, k)` for
+/// `r_lk`.
+///
+/// Formula id `ic-roundabout-update` (SPEC §9.2, tier C: not proved; untagged until it is).
+pub fn roundabout_update(r_ki: i64, e_new: i64, n_minus_ki: i64, modulus: u32) -> Option<i64> {
+    let s = i128::from(r_ki) + i128::from(e_new) + i128::from(n_minus_ki);
+    let s = if modulus == 0 {
+        s
+    } else {
+        s.rem_euclid(i128::from(modulus))
+    };
+    i64::try_from(s).ok()
+}
+
+/// What splitting one side of a face at a point between its crossings does to the face (SPEC
+/// I20): see [`split_side`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SideSplit {
+    /// The number of arcs of the face that cross the new edge from the split point `m` to the
+    /// opposite corner: its normal coordinate (never `−1`: no input edge ends at `m`).
+    pub to_opposite: i64,
+    /// The number of arcs from the opposite corner that end on the split side before `m`
+    /// (counted from the side's tail): the input halfedges at the opposite corner between its
+    /// halfedge to the side's tail and the new edge, for Eq. 4's analogue
+    /// `r_{om} = r_{o,tail} + n⁻ + emanating_before`.
+    pub emanating_before: i64,
+}
+
+/// The integers of a split of side `s` (from corner `s` to corner `s + 1`) of a face with side
+/// counts `n`, at a point with `before` crossings of side `s` between corner `s` and it
+/// (`0 ≤ before ≤ n⁺_s`, the point not on a crossing). With `a, b, c` the corners `s, s + 1,
+/// s + 2` and `m` the point, the straight new edge `mc` crosses exactly the arcs whose ends lie
+/// on different sides of the chord `mc` on the face's boundary (`ic-chord-interleave`):
+///
+/// ```text
+/// n_mc = c_c + e_a + e_b + max(0, c_a − before) + max(0, before − (n⁺_ab − c_b))
+/// ```
+///
+/// (the arcs around `c`, from `a` to `bc`, from `b` to `ca`, the arcs around `a` that reach `ab`
+/// beyond `m`, and those around `b` that reach it before `m`; the arcs from `c` end at an end
+/// of the chord). For a side along an input edge (`n_ab = −1`, `before = 0`) this is Eq. 6,
+/// `max(n_ca, n_bc, 0)`. `None` for a face that is not valid or `before` out of range.
+///
+/// Formula id `ic-split-crossed-edge` (SPEC I20; not in Lean or `CITED.md` yet, untagged).
+pub fn split_side(n: [i64; 3], s: usize, before: i64) -> Option<SideSplit> {
+    let f = FaceCoordinates::of(n).ok()?;
+    let (a, b, c) = (s % 3, (s + 1) % 3, (s + 2) % 3);
+    let n_ab = f.n[a];
+    if !(0..=n_ab).contains(&before) {
+        return None;
+    }
+    let i = |x: i64| i128::from(x);
+    let to_opposite = i(f.c[c])
+        + i(f.e[a])
+        + i(f.e[b])
+        + (i(f.c[a]) - i(before)).max(0)
+        + (i(before) - (i(n_ab) - i(f.c[b]))).max(0);
+    let emanating_before = (before - f.c[a]).clamp(0, f.e[c]);
+    Some(SideSplit {
+        to_opposite: i64::try_from(to_opposite).ok()?,
+        emanating_before,
+    })
 }
 
 #[cfg(test)]

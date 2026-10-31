@@ -134,6 +134,23 @@ pub enum IntegerError {
     },
     /// The integers are not those of any realization; see [`InvalidCoordinates`].
     InvalidCoordinates(Box<InvalidCoordinates>),
+    /// An inserted vertex could not be removed (SPEC §4.6, I8): no edge at it can be flipped
+    /// to lower its degree, and its degree is not three (or its star cannot be merged). The
+    /// state is restored to what it was before the removal.
+    RemovalStuck {
+        /// The vertex.
+        vertex: u32,
+        /// Its degree when no flip was left.
+        degree: usize,
+    },
+    /// An operation this representation does not provide (yet), e.g. the removal of an
+    /// inserted boundary vertex (SPEC I7). Nothing is changed.
+    Unsupported {
+        /// The operation.
+        operation: &'static str,
+        /// Why, or what is missing.
+        reason: String,
+    },
     /// [`IntegerTriangulation::from_intrinsic`](crate::IntegerTriangulation::from_intrinsic)
     /// could not read integers off the signpost representation (floating point decides it).
     Conversion {
@@ -181,6 +198,14 @@ impl fmt::Display for IntegerError {
                 "the state has {total} crossings, more than the certificate handles ({limit})"
             ),
             IntegerError::InvalidCoordinates(x) => write!(f, "{x}"),
+            IntegerError::RemovalStuck { vertex, degree } => write!(
+                f,
+                "vertex {vertex} could not be removed: no edge at it can be flipped to lower its \
+                 degree {degree}"
+            ),
+            IntegerError::Unsupported { operation, reason } => {
+                write!(f, "{operation} is not supported by integer coordinates: {reason}")
+            }
             IntegerError::Conversion { edge, reason } => write!(
                 f,
                 "edge {edge} of the signpost triangulation could not be converted: {reason}"

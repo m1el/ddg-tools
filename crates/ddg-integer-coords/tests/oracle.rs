@@ -1,13 +1,14 @@
 //! Differential tests against the committed fixtures of the Lean oracle
 //! (`lean/oracle/fixtures/ic`, `ddg-oracle ic`; format in `lean/oracle/README.md`): the tasks
-//! `corner`, `trace`, `tracecurve`, `identify` and `splitedge`, compared by exact integer
-//! equality, line by line. The fixtures are read, never regenerated.
+//! `corner`, `trace`, `tracecurve`, `identify`, `splitedge` and `flip` (Eq. 3, 4 and the flip
+//! back), compared by exact integer equality, line by line. The fixtures are read, never regenerated.
 
 use std::path::PathBuf;
 
 use ddg_integer_coords::formulas::{
-    Step, StepError, corner_coordinate, face_corner_numerator, face_emanating, face_valid,
-    identify_index, split_edge_normal, trace_step,
+    Step, StepError, corner_coordinate, emanating, face_corner_numerator, face_emanating,
+    face_valid, flip_doubled, flip_normal, identify_index, n_minus, roundabout_update,
+    split_edge_normal, trace_step,
 };
 use ddg_integer_coords::{Crossing, IntegerError, NormalGluing, trace_with};
 
@@ -291,4 +292,101 @@ fn splitedge() {
         }
     }
     eprintln!("splitedge: {n} agree");
+}
+
+/// One block of the `flip` task: the quad, the optional `roundabout` arguments and `again`.
+struct FlipBlock {
+    quad: [i64; 5],
+    roundabout: Option<[i64; 4]>,
+    again: bool,
+}
+
+#[test]
+fn flip() {
+    let (mut n_quads, mut n_invalid, mut n_roundabouts, mut n_again) = (0, 0, 0, 0);
+    for (input, output) in pairs("flip") {
+        let mut blocks: Vec<FlipBlock> = Vec::new();
+        for l in &input.lines {
+            match l[0].as_str() {
+                "quad" => blocks.push(FlipBlock {
+                    quad: [1, 2, 3, 4, 5].map(|k| int(&l[k])),
+                    roundabout: None,
+                    again: false,
+                }),
+                "roundabout" => {
+                    blocks.last_mut().unwrap().roundabout = Some([1, 2, 3, 4].map(|k| int(&l[k])))
+                }
+                "again" => blocks.last_mut().unwrap().again = true,
+                x => panic!("{}: unexpected input line {x}", input.name),
+            }
+        }
+        // The output lines of each block: from its `quad` echo to the next.
+        let mut out: Vec<Vec<&Vec<String>>> = Vec::new();
+        for l in &output.lines {
+            if l[0] == "quad" {
+                out.push(Vec::new());
+            }
+            out.last_mut().unwrap().push(l);
+        }
+        assert_eq!(blocks.len(), out.len(), "{}", input.name);
+        for (b, lines) in blocks.iter().zip(&out) {
+            let [nij, njk, nki, nil, nlj] = b.quad;
+            let ctx = format!("{} quad {:?}", input.name, b.quad);
+            assert_eq!(lines[0][1..].iter().map(|t| int(t)).collect::<Vec<_>>(), b.quad.to_vec());
+            let v1 = face_valid([nij, njk, nki]);
+            let v2 = face_valid([nij, nil, nlj]);
+            let faces = lines[1];
+            assert_eq!(faces[0], "faces", "{ctx}");
+            assert_eq!((int(&faces[1]) == 1, int(&faces[2]) == 1), (v1, v2), "{ctx}");
+            n_quads += 1;
+            if faces.len() == 4 {
+                assert_eq!(faces[3], "invalid", "{ctx}");
+                assert!(!(v1 && v2));
+                assert_eq!(flip_doubled(nij, njk, nki, nil, nlj), None, "{ctx}");
+                assert!(flip_normal(nij, njk, nki, nil, nlj).is_err(), "{ctx}");
+                assert_eq!(lines.len(), 2, "{ctx}");
+                n_invalid += 1;
+                continue;
+            }
+            let mut rest = lines[2..].iter();
+            let l = rest.next().unwrap();
+            assert_eq!(l[0], "flip", "{ctx}");
+            let d = flip_doubled(nij, njk, nki, nil, nlj).unwrap();
+            let nkl = flip_normal(nij, njk, nki, nil, nlj).unwrap();
+            assert_eq!((d, nkl), (int(&l[1]) as i128, int(&l[2])), "{ctx}");
+            let l = rest.next().unwrap();
+            assert_eq!(l[0], "newfaces", "{ctx}");
+            assert_eq!(
+                (face_valid([nki, nil, nkl]), face_valid([nlj, njk, nkl])),
+                (int(&l[1]) == 1, int(&l[2]) == 1),
+                "{ctx}"
+            );
+            let l = rest.next().unwrap();
+            assert_eq!(l[0], "emanating", "{ctx}");
+            let (ek, el) = (emanating(nil, nki, nkl), emanating(njk, nlj, nkl));
+            assert_eq!((ek, el), (int(&l[1]), int(&l[2])), "{ctx}");
+            if let Some([rki, dk, rlj, dl]) = b.roundabout {
+                let l = rest.next().unwrap();
+                assert_eq!(l[0], "roundabout", "{ctx}");
+                let rkl = roundabout_update(rki, ek, n_minus(nki), dk as u32).unwrap();
+                let rlk = roundabout_update(rlj, el, n_minus(nlj), dl as u32).unwrap();
+                assert_eq!((rkl, rlk), (int(&l[1]), int(&l[2])), "{ctx}");
+                n_roundabouts += 1;
+            }
+            if b.again {
+                let l = rest.next().unwrap();
+                assert_eq!(l[0], "again", "{ctx}");
+                let back = flip_normal(nkl, nki, nil, nlj, njk).unwrap();
+                assert_eq!(back, int(&l[1]), "{ctx}");
+                assert_eq!(back, nij, "{ctx}: ic-flip-involution");
+                n_again += 1;
+            }
+            assert!(rest.next().is_none(), "{ctx}");
+        }
+    }
+    eprintln!(
+        "flip: {n_quads} quads ({n_invalid} with an invalid face), {n_roundabouts} roundabout \
+         updates, {n_again} flips back: all agree"
+    );
+    assert!(n_quads >= 300 && n_roundabouts >= 300 && n_again >= 300);
 }

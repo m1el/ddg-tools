@@ -32,9 +32,22 @@
 //! * [`IntegerTriangulation::from_intrinsic`]: integer coordinates read off a signpost
 //!   triangulation by tracing its edges (floating point decides it; the result is certified).
 //!
-//! Not yet: the operations (flips and Delaunay flipping, WP3; face and edge splits, WP3/WP4;
-//! vertex removal, WP3), the geometry of the crossings (WP2), the common subdivision (WP5), and
-//! the shared [`Triangulation`](ddg_intrinsic::Triangulation) interface, which needs them.
+//!
+//! # Operations (work package WP3)
+//!
+//! * [`flip`]: [`IntegerTriangulation::flip_edge`] (Eq. 3 with the corrected first terms,
+//!   Eq. 4), [`IntegerTriangulation::can_flip`], and Delaunay flipping (the shared
+//!   [`Triangulation::flip_to_delaunay`](ddg_intrinsic::Triangulation::flip_to_delaunay);
+//!   [`IntegerTriangulation::flip_to_delaunay_certified`] certifies the result).
+//! * [`split`]: [`IntegerTriangulation::split_edge`] for edges along input edges (Eq. 6);
+//!   [`IntegerTriangulation::split_edge_given`] for crossed edges with the geometric decisions
+//!   supplied (SPEC I20).
+//! * [`remove`]: [`IntegerTriangulation::remove_vertex`] (Alg. 8, I8, I24, I27).
+//! * [`interface`]: `impl Triangulation for IntegerTriangulation`.
+//!
+//! Not yet: face splits (WP4), splits of crossed edges and the path of an edge over the input
+//! mesh through the shared interface (they need the geometric crossings of WP2), the common
+//! subdivision (WP5).
 //!
 //! # The reference implementation
 //!
@@ -55,7 +68,11 @@ pub mod certify;
 pub mod convert;
 pub mod coords;
 mod error;
+pub mod flip;
 pub mod formulas;
+pub mod interface;
+pub mod remove;
+pub mod split;
 pub mod trace;
 
 pub use certify::CertifyReport;
@@ -66,6 +83,8 @@ pub use coords::{
 };
 pub use error::{IntegerError, InvalidCoordinates, Place, ValidityItem};
 pub use formulas::FaceCoordinates;
+pub use interface::{REPRESENTATION, to_intrinsic_error};
+pub use remove::Removal;
 pub use trace::{
     Arrival, Crossing, CurveEnd, CurveSegment, HalfTrace, InputEdgePath, NormalGluing, PathPiece,
     TracedInputEdge, extract_curve, trace_from, trace_with,
