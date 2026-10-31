@@ -280,10 +280,11 @@ pub struct CurveSegment {
 }
 
 impl CurveSegment {
-    /// The end at the start vertex: the first crossing.
+    /// The end at the start vertex: the first crossing (`None` only for a segment built by
+    /// hand without crossings).
     #[inline]
-    pub fn first(&self) -> Crossing {
-        self.crossings[0]
+    pub fn first(&self) -> Option<Crossing> {
+        self.crossings.first().copied()
     }
 }
 
@@ -609,8 +610,32 @@ impl IntegerTriangulation {
     /// two (on an input edge, made by an edge split) or none (inside an input face).
     ///
     /// # Errors
-    /// Item [`ValidityItem::FaceParity`] for a face around `v` whose Eq. 1 is odd.
+    /// [`IntegerError::IndexOutOfRange`]; item [`ValidityItem::FaceParity`] for a face around
+    /// `v` whose Eq. 1 is odd; item [`ValidityItem::Extraction`] for more ends than a valid
+    /// state has there (`deg₀` at an input vertex, 2 at an inserted one).
     pub fn curve_ends(&self, v: usize) -> Result<Vec<CurveEnd>, IntegerError> {
+        let nv = self.complex.n_vertices();
+        if v >= nv {
+            return Err(IntegerError::IndexOutOfRange {
+                what: "vertex",
+                index: v,
+                bound: nv,
+            });
+        }
+        // A valid state has deg₀ ends at an input vertex and 0 or 2 at an inserted one; more
+        // than that is reported before anything large is built.
+        let limit = if self.is_input_vertex(v) {
+            self.local.degree(v) as i64
+        } else {
+            2
+        };
+        let too_many = || {
+            IntegerError::invalid(
+                ValidityItem::Extraction,
+                Place::Vertex(v as u32),
+                format!("more than {limit} curve ends at the vertex"),
+            )
+        };
         let mut ends = Vec::new();
         let mut last = None;
         for h in self.complex.outgoing_halfedges(v) {
@@ -622,6 +647,9 @@ impl IntegerTriangulation {
             let coords = self.face_coordinates(h / 3)?;
             let slot = h % 3;
             let side = self.complex.next(h);
+            if ends.len() as i64 + coords.e[slot] > limit {
+                return Err(too_many());
+            }
             for q in 0..coords.e[slot] {
                 ends.push(CurveEnd::Arc(Crossing::new(
                     side,
@@ -639,6 +667,9 @@ impl IntegerTriangulation {
                     edge: self.complex.edge(arriving) as u32,
                 });
             }
+        }
+        if ends.len() as i64 > limit {
+            return Err(too_many());
         }
         Ok(ends)
     }
@@ -823,9 +854,25 @@ impl IntegerTriangulation {
         &self,
         segment: &CurveSegment,
     ) -> Result<TracedInputEdge, IntegerError> {
+        let Some(&first) = segment.crossings.first() else {
+            return Err(IntegerError::invalid(
+                ValidityItem::Extraction,
+                Place::Vertex(segment.start_vertex),
+                "a curve segment without crossings".to_string(),
+            ));
+        };
+        self.check_crossing(first)?;
         let mut v = segment.start_vertex as usize;
+        let nv = self.complex.n_vertices();
+        if v >= nv || self.complex.from_vertex(first.opposite_corner()) != v {
+            return Err(IntegerError::invalid(
+                ValidityItem::Extraction,
+                first.place(),
+                format!("the first crossing of the segment is not opposite its start vertex {v}"),
+            ));
+        }
         // The end by which the curve leaves v, looking forward.
-        let mut leaving = CurveEnd::Arc(segment.first());
+        let mut leaving = CurveEnd::Arc(first);
         let mut seen = HashSet::new();
         let mut on_crossing = |z: Crossing| {
             if seen.insert(undirected(self, z)) {

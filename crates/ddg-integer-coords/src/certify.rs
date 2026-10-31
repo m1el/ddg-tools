@@ -46,6 +46,11 @@ pub struct CertifyReport {
     pub max_crossings_per_input_edge: u64,
 }
 
+/// The largest `Σ n⁺` that [`IntegerTriangulation::certify`] accepts: its bitmap then takes
+/// 1 GiB. Beyond it the certificate refuses with [`IntegerError::TooManyCrossings`] instead of
+/// allocating (the paper's largest common subdivision, Fig. 19, has about `3·10⁷` vertices).
+pub const MAX_CERTIFIED_CROSSINGS: u64 = 1 << 33;
+
 /// One bit per crossing and per edge with `n = −1`.
 struct Marks {
     /// Per edge: the first crossing's bit.
@@ -55,19 +60,26 @@ struct Marks {
 }
 
 impl Marks {
-    fn new(t: &IntegerTriangulation) -> Marks {
+    fn new(t: &IntegerTriangulation) -> Result<Marks, IntegerError> {
+        let total = t.total_crossings();
+        if total > MAX_CERTIFIED_CROSSINGS as u128 {
+            return Err(IntegerError::TooManyCrossings {
+                total,
+                limit: MAX_CERTIFIED_CROSSINGS,
+            });
+        }
         let mut offsets = Vec::with_capacity(t.normal.len() + 1);
-        let mut total = 0u64;
+        let mut running = 0u64;
         for &n in &t.normal {
-            offsets.push(total);
-            total += n_plus(n) as u64;
+            offsets.push(running);
+            running += n_plus(n) as u64;
         }
-        offsets.push(total);
-        Marks {
+        offsets.push(running);
+        Ok(Marks {
             offsets,
-            bits: vec![0; total.div_ceil(64) as usize],
+            bits: vec![0; running.div_ceil(64) as usize],
             along: vec![false; t.normal.len()],
-        }
+        })
     }
 
     fn total(&self) -> u64 {
@@ -326,7 +338,7 @@ impl IntegerTriangulation {
         let directions: Vec<Vec<CurveEnd>> = (0..n_input)
             .map(|a| self.input_directions(a))
             .collect::<Result<_, _>>()?;
-        let mut marks = Marks::new(self);
+        let mut marks = Marks::new(self)?;
         let mut n_inserted_on_edges = 0usize;
         let mut max_per_edge = 0u64;
         let mut passed = vec![false; self.complex.n_vertices() - n_input];

@@ -124,6 +124,14 @@ pub enum IntegerError {
         /// The edge whose normal coordinate was being computed or read.
         edge: u32,
     },
+    /// The certificate marks every crossing in a bitmap of `Σ n⁺` bits; this state has more
+    /// crossings than [`MAX_CERTIFIED_CROSSINGS`](crate::certify::MAX_CERTIFIED_CROSSINGS).
+    TooManyCrossings {
+        /// `Σ n⁺`.
+        total: u128,
+        /// The limit.
+        limit: u64,
+    },
     /// The integers are not those of any realization; see [`InvalidCoordinates`].
     InvalidCoordinates(Box<InvalidCoordinates>),
     /// [`IntegerTriangulation::from_intrinsic`](crate::IntegerTriangulation::from_intrinsic)
@@ -167,6 +175,10 @@ impl fmt::Display for IntegerError {
             IntegerError::Overflow { edge } => write!(
                 f,
                 "an integer computation at edge {edge} would leave the range of i64"
+            ),
+            IntegerError::TooManyCrossings { total, limit } => write!(
+                f,
+                "the state has {total} crossings, more than the certificate handles ({limit})"
             ),
             IntegerError::InvalidCoordinates(x) => write!(f, "{x}"),
             IntegerError::Conversion { edge, reason } => write!(
