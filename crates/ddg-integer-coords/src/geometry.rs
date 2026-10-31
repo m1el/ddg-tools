@@ -880,6 +880,12 @@ impl IntegerTriangulation {
     /// `e` whose input edge is known (an earlier index, or a later one an earlier walk passed);
     /// the later crossings of `e` it passes are remembered in a map, so memory grows with the
     /// work done, not with a (possibly corrupt) `n_e`.
+    ///
+    /// No step bound is needed (and none is computed: [`walk_bound`](Self::walk_bound) is
+    /// linear in `|E|`): in a face whose Eq. 1 is integral the arcs pair the crossings
+    /// bijectively, so Alg. 1's step is a bijection of the crossings and the walk from `p`
+    /// either ends at a vertex or comes back to `p`, which is detected; a face whose Eq. 1 is
+    /// odd is an error when it is entered.
     fn identify_crossings_of(&self, e: usize) -> Result<(Vec<u32>, u64), IntegerError> {
         let h = self.complex.edge_halfedge(e);
         let twin = self.complex.twin(h);
@@ -908,7 +914,6 @@ impl IntegerTriangulation {
         }
         let mut labels: Vec<u32> = Vec::with_capacity((n as usize).min(1 << 16));
         let mut later: HashMap<i64, Later> = HashMap::new();
-        let bound = Some(self.walk_bound());
         let mut steps = 0u64;
         for p in 0..n {
             if let Some(Later::Known(label)) = later.remove(&p) {
@@ -919,7 +924,7 @@ impl IntegerTriangulation {
             let mut found: Option<u32> = None;
             let mut closed: Option<Crossing> = None;
             let mut at_start = true;
-            let walked = trace_with(self, Crossing::new(h, p), bound, &mut |z| {
+            let walked = trace_with(self, Crossing::new(h, p), None, &mut |z| {
                 steps += 1;
                 let Some(q) = along(z) else {
                     return Ok(());
