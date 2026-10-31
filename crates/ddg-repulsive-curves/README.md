@@ -10,10 +10,141 @@ its descent in the fractional Sobolev–Slobodeckij metric of the paper, hard co
 penalties for design, collision-guarded time steps, and the Barnes–Hut, hierarchical-matrix and
 multigrid acceleration of the paper's Appendix B.
 
-**Status: contract only.** The specification is [`SPEC.md`](SPEC.md): every discrete formula
-with its equation number and `rc-` formula id, the places where the paper or the reference code
-is wrong or silent (decisions D1–D30), the API, the defaults, the verification and measurement
-plans, and the work packages. The library is not implemented yet.
+**Status: implemented.** The contract is [`SPEC.md`](SPEC.md). It lists:
+* every discrete formula with its equation number and `rc-` formula id;
+* where the paper or the reference code is wrong or silent, and what we do (decisions D1–D30);
+* the API and the defaults;
+* the measurements, in §17 (§17s holds the evaluation's results of record);
+* the user's decisions, in §18.
+
+Python bindings: `ddg_tools.RepulsiveSession` and `repulsive_flow` (`crates/ddg-py`). Blender:
+**Repulsive Flow (Live)** and **Repulsive Flow (Steps)** ([`blender/README.md`](../../blender/README.md)).
+
+## What is in it
+
+| part | paper | module |
+|---|---|---|
+| Curve networks (closed and open curves, junctions), OBJ `l` lines; planar mode | Sec. 3, 8 | `network`, `io` |
+| The tangent-point kernel and the edge-pair energy, exact and parallel; differential | Eq. 3, 17, 18 | `kernel`, `energy` |
+| The fractional Sobolev metric `Ā = B + B⁰` (midpoint or trapezoid rule); L², H¹, H² for comparisons | Eq. 19–21, Supp. 2.1 | `metric` |
+| Constraints: barycenter, edge lengths, total length, points, tangents, implicit surfaces; projected gradient and back-projection | Sec. 5.3, 8.1, Eq. 22–23 | `constraints`, `solve` |
+| Penalties: surface and obstacle potentials, total length, length difference, field alignment, Hencky strain | Sec. 8.1, Supp. 2.2 | `penalties`, `obstacle`, `surfaces` |
+| Target-length schedules and subdivision (packing) | Sec. 8.1 | `step::schedule`, `subdivide` |
+| Time stepping: a line search guarded by continuous collision detection (the curves never cross), or the paper's normalized Armijo search | Sec. 5.4 | `step`, `ccd` |
+| Soft problems: L-BFGS (memory 30) and Polak–Ribière NCG in the Sobolev metric | Supp. 3.2–3.3 | `optimize` |
+| Barnes–Hut energy and differential, block cluster tree, hierarchical metric product | App. B.1–B.2 | `spatial`, `energy::barnes_hut`, `metric::hierarchical` |
+| Multigrid saddle solver on curve networks (coarsening with constraints, V-cycle, FMG, flexible CG) | App. B.3 | `multigrid` |
+| The authors' scenes (reader for their scene format) | Sec. 8 | `scene`, `examples/scenes.rs` |
+
+All runs are deterministic: the same results at any thread count (D25). Bad input returns an
+`RcError` that names what is wrong and where; nothing panics.
+
+### Additions to the paper (all documented, all can be switched off)
+
+* **Near-pair quadrature** (`FlowOptions::near_pair`, §3.4, §17o, §17r). Edge pairs that come
+  closer than `0.75 ℓ` are evaluated with an accurate pair integral, blended into Eq. 18. The
+  endpoint rule cannot see two edges that are close in their interiors. Without the correction,
+  20 of the 228 Hs runs drove edges into each other until the collision guard stopped them.
+  Second neighbours use the fold-gated rule: never below Eq. 18, so the paper's corner barrier
+  stays. Sec. 9 of the paper suggests this ("adaptive quadrature for edge pairs that are close in
+  space"), but did not test it. `None` gives the paper's energy exactly. When no pair is that
+  close, the flow is bitwise the paper's.
+* **Projection.** The constraint projection finishes with Newton steps once the violation is
+  below 100× the tolerance (`newton_polish`). It also stops trials that cannot converge early
+  (`projection_early_abort`). Measured separately on 24 knots, the polish takes 0.69× the time
+  to 1.1 E* of the chord method, and the early abort 0.76× (§17l).
+  A search that gets stuck with the polish is repeated with the paper's chord steps
+  (`stuck_retry_chord`, §17p).
+* **Edge-collapse guard** (`min_edge_length_ratio`, §17j). A step that would shrink an edge
+  below `1e-3` of the mean edge length fails with a named error, before the metric becomes
+  singular.
+* **Dense solve.** A Schur complement replaces the LU of the whole saddle matrix (about 30× fewer
+  flops). `Backend::Auto` picks exact + dense up to 2500 vertices, and Barnes–Hut + multigrid
+  above.
+
+## Use
+
+```rust
+use ddg_repulsive_curves::{FlowOptions, Method, flow, read_curve_obj, soft_options};
+
+let (network, positions) = read_curve_obj("trefoil0002.obj")?;
+
+// Hard constraints (barycenter, edge lengths), the fractional Sobolev metric and the
+// collision-guarded line search: the defaults of SPEC.md §10.
+let options = FlowOptions { max_iterations: 200, ..FlowOptions::default() };
+let result = flow(network.clone(), positions.clone(), options, None)?;
+println!("{:?}: {} steps, energy {:.4}", result.report.status,
+         result.report.iterations, result.report.final_energy);
+
+// The soft problem of the paper's Sec. 7: L-BFGS with a Hencky penalty on the lengths.
+let soft = soft_options(Method::Lbfgs { memory: 30 }, 10.0, &network, &positions)?;
+let result = flow(network, positions, FlowOptions { max_iterations: 200, ..soft }, None)?;
+```
+
+`Session` gives the same flow one step at a time (`Session::step`), as the live Blender
+operator uses it. Every step returns a `StepReport`: energy, gradient norm, line-search trials,
+projection iterations, solver residuals, timings and status. Note that only `Session::run`
+honours `time_limit`; `Session::step` does not check it.
+
+## The paper's Sec. 7 comparison
+
+The comparison is reproduced on all 228 knots (Knot128 perturbed + Trefoil100, 1494–3351
+vertices) with exponents (2, 4.5). It has two phases:
+* phase A: every method, one thread, the paper's 24-minute budget;
+* phase B: a 24-knot subset, 64 threads, the machine alone.
+
+The driver is `examples/eval_knots.rs` with `scripts/rc-eval.sh`. Setup, departures and every
+number are in `SPEC.md` §17n (first run) and §17s (results of record, 2026-10-31).
+
+Failure rates, phase A, against the paper's Fig. 19:
+
+| method | this crate | paper |
+|---|---:|---:|
+| Hs projected gradient, ended stuck | **0 %** | 6.5 % |
+| soft Hs NCG, ended stuck | **0 %** | 3.3 % |
+| soft Hs L-BFGS, ended stuck | **0 %** | 14.8 % |
+| L² failed | 100 % | ≥ 97.7 % |
+| H¹ failed | 68.4 % | 64.5 % |
+| H² failed | 92.5 % | 92.1 % |
+
+All 2052 runs finished with 0 crossings in the audit of every accepted step, 0 invalid curves
+and 0 errors. One soft Hs L-BFGS run (trefoil0016) used up its budget 2.5 % above its target.
+
+Phase B, median seconds to 1.1× the reference energy at 64 threads (24 knots):
+
+| method | seconds | reached |
+|---|---:|---:|
+| Hs projected gradient | 24.2 | 24/24 |
+| soft Hs L-BFGS | 24.4 | 23/24 |
+| soft Hs NCG | 50.1 | 24/24 |
+| H¹ projected gradient | 60.5 | 16/24 |
+| Hs normalized Armijo | 97.1 | 2/24 |
+| L², H² | – | 0/24 |
+
+The videos in `runs_tmp/rc-eval/runB3/videos` follow the authors' video: one column per method,
+frames at equal wall-clock intervals.
+
+## Verification
+
+* **Lean** (`lean/proofs/DdgProofs/RepulsiveCurves/`): 73 `rc-` formula ids, 55 proved with
+  Mathlib and 18 cited in `lean/proofs/CITED.md` (the paper's smooth theory: Blatt's energy space,
+  the order of the differential, and so on). `scripts/check-formulas.sh` cross-checks every
+  `[formula: rc-…]` tag in the Rust code.
+* **Oracle** (`lean/oracle/DdgOracle/RepulsiveCurves*`): an independent Float implementation,
+  with golden fixtures (`tests/oracle.rs`) and a differential fuzz test
+  (`fuzz_against_the_oracle`, ignored by default). The fuzz test reports 47 disagreements in the
+  chord-iteration count of one step. These predate the near-pair work (same 47 at c657176); they
+  are not explained yet.
+* **The authors' program**: Gram matrices, constraint Jacobians and one coarsening level match
+  exactly (see "Comparison with the authors' program" below).
+* **Tests**: 259 tests, in the modules and 25 integration-test files. They cover:
+  * central finite differences of every energy, penalty and constraint;
+  * invariances and scaling;
+  * the metric against its kernel-matrix form;
+  * Barnes–Hut and multigrid against exact and dense;
+  * CCD on constructed crossings;
+  * every stop status;
+  * the application scenes, each with a CCD audit of every step.
 
 ## Benchmarks
 
@@ -37,15 +168,23 @@ knots, `SPEC.md` §17l; the paper's projection is `newton_polish: None`,
 `projection_early_abort: false`). `Backend::Auto` switches from exact + dense to Barnes–Hut +
 multigrid above 2500 vertices (measured crossover 2000 at 8 threads, 3000 at 64).
 
+These timings predate the near-pair default. On these curves no pair is near, and the pass costs
+0.3–1.7 % of an iteration (`benches/nearpair.rs`, `SPEC.md` §17o).
+
 ## Credits
 
 * The method, the discretization, the metric, the constraints and penalties, the acceleration
   scheme, the knot datasets (Knot128, Trefoil100) and the Freedman–He–Wang meshes are by
   **Chris Yu, Henrik Schumacher and Keenan Crane**.
 * The authors' reference implementation (`repulsive-curves`, MIT, Copyright (c) 2019 Christopher
-  Yu) is read and may be ported; its licence notice is in
-  [`LICENSES/repulsive-curves-MIT.txt`](LICENSES/repulsive-curves-MIT.txt). Code ported from one
-  of its dependencies will carry that dependency's notice in `LICENSES/` as well.
+  Yu) was read. The implicit surfaces (`surfaces`) are ported from it, and the block cluster
+  tree (`metric::hierarchical`) follows its structure. Its licence notice is in
+  [`LICENSES/repulsive-curves-MIT.txt`](LICENSES/repulsive-curves-MIT.txt).
+* The V-cycle follows the authors' libgmultigrid (MIT, Copyright (c) 2020 Christopher Yu,
+  [`LICENSES/libgmultigrid-MIT.txt`](LICENSES/libgmultigrid-MIT.txt)).
+* L-BFGS: D. C. Liu, J. Nocedal, *On the limited memory BFGS method for large scale
+  optimization*, Math. Programming 45 (1989). The rate test that stops a chord projection early
+  is from E. Hairer, G. Wanner, *Solving Ordinary Differential Equations II*, §IV.8.
 * The tangent-point energy and its energy space: S. Blatt, *The energy spaces of the tangent
   point energies*, J. Topol. Anal. 5 (2013); S. Blatt, Ph. Reiter, *Regularity theory for
   tangent-point energies: the non-degenerate sub-critical case*, Adv. Calc. Var. 8 (2015).

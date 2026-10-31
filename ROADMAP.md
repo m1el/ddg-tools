@@ -363,8 +363,48 @@ Open:
   creases" of the in-place flows are mostly the hatching of seams that cross triangles in the
   showcase's edge shading.
 
+## Repulsive Curves (`crates/ddg-repulsive-curves`, branch `repulsive-curves`, 2026-10-31)
+
+Landed:
+* the edge-pair tangent-point energy (exact and Barnes–Hut) with its differential;
+* the fractional Sobolev metric, and the L², H¹, H² metrics for comparison;
+* every constraint and penalty of Sec. 8.1, length schedules and subdivision;
+* the collision-guarded and normalized Armijo line searches with CCD;
+* L-BFGS and NCG for the soft problems;
+* the block cluster tree and multigrid on curve networks, and `Backend::Auto`;
+* the near-pair quadrature (not in the paper, on by default; SPEC §3.4);
+* a reader for the authors' scenes, and the application scenes in `showcase/`;
+* Lean: 73 `rc-` ids (55 proved, 18 cited), the Float oracle and golden fixtures;
+* Python `RepulsiveSession` and `repulsive_flow`; Blender "Repulsive Flow (Live)" and "(Steps)".
+
+Fig. 20 is beaten at every size (README, SPEC §17k and §17l). The Sec. 7 comparison on all 228
+knots is in SPEC §17s (results of record): 0 stuck runs for Hs, soft Hs NCG and soft Hs L-BFGS,
+where the paper has 6.5 %, 3.3 % and 14.8 %. The L², H¹ and H² failure rates are within 4 points
+of the paper's.
+
+Open:
+* **Oracle fuzz**: `fuzz_against_the_oracle` (ignored) reports 47 disagreements in the
+  chord-iteration count of one step (0 here, 1 in the oracle). They predate the near-pair work
+  and are not explained (SPEC §17o).
+* `Session::step` ignores `FlowOptions::time_limit`; only `Session::run` honours it.
+* The parameter sweeps of SPEC §14.3 (quadrature, projection tolerance, Barnes–Hut, BCT and
+  multigrid parameters) were not run; the defaults rest on the measurements of §17k–§17l.
+* Multigrid:
+  * the block cluster tree product is slow on the 4,296-vertex vascular scene, and its
+    multigrid diverges there (SPEC §17g);
+  * the solve and the hierarchy build stop scaling past 8–16 threads (capped at 16,
+    `MgOptions::max_threads`);
+  * knot 96 is 2–5× above the paper's multigrid curve at one thread (§17k).
+* Evaluation leftovers (§17s):
+  * one soft Hs L-BFGS run (trefoil0016) ends 2.5 % above its target;
+  * one soft H¹ NCG run (knot0001) ends 1.82× its first-evaluation energy.
+* The authors' `TangentInterpolation` scene collapses an end edge after about 60 steps (the
+  showcase uses its own scene; SPEC §17j).
+* `showcase/media/` is not committed.
+
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
   independently (authors, title, journal, volume, pages, year were).
-* Nothing is pushed; `master` includes the intrinsic-triangulations work (2026-10-14).
+* Nothing is pushed beyond `origin/master` at 29ff52d (developability). `master` includes the
+  repulsive-curves work since 2026-10-31.
