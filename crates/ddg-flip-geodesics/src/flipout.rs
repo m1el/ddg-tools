@@ -206,7 +206,7 @@ pub(crate) fn flip_out<T: Triangulation>(
         .iter()
         .map(|(s, _)| tri.edge_length(s.edge as usize))
         .sum();
-    if !(new_length < old_length) {
+    if new_length.partial_cmp(&old_length) != Some(std::cmp::Ordering::Less) {
         return Ok(FlipOutResult {
             shortening: Shortening::Stalled {
                 old_length,

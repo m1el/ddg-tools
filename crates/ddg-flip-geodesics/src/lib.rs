@@ -25,18 +25,27 @@
 //!   (Eq. 1), boundary wedges, the Δ-complex cases (self-edges incident on a wedge twice,
 //!   out-and-back joints of degree zero), the classification of SPEC §3, flexible and
 //!   blocked wedges.
-//! * The geodesic certificate ([`certify()`], SPEC §7 layer 1a).
+//! * FlipOut ([`GeodesicNetwork::shorten`], modules [`shorten`] and [`flipout`], SPEC §4):
+//!   Alg. 1 on one wedge (flips until the outer arc is an edge path, the out-and-back
+//!   contraction, the App. B move of a single-segment loop;
+//!   [`GeodesicNetwork::shorten_joint`]) and Alg. 2 on paths, loops and networks (the queue
+//!   of F4, stale and blocked entries, stalls, the final sweep, the stop rules), with a
+//!   report ([`ShortenReport`]) and an observer of every iteration
+//!   ([`GeodesicNetwork::shorten_with`]).
+//! * The geodesic certificate ([`certify()`], SPEC §7 layer 1a), computed on the result.
 //!
-//! Not yet here: FlipOut itself (Alg. 1, 2; [`ShortenOptions`] and [`ShortenReport`] are its
-//! interface), extraction on the input mesh, Bézier curves, the constrained Delaunay
-//! triangulation.
+//! Not yet here: waypoint and edge-set initial paths and extraction on the input mesh (work
+//! package F3), Bézier curves and the constrained Delaunay triangulation (F4).
 //!
 //! # Example
 //!
 //! ```
 //! use ddg_core::Geometry;
 //! use ddg_core::generators::grid_disk;
-//! use ddg_flip_geodesics::{CertifyOptions, GeodesicNetwork, dijkstra_path, path_from_vertices};
+//! use ddg_flip_geodesics::{
+//!     CertifyOptions, GeodesicNetwork, ShortenOptions, ShortenStatus, dijkstra_path,
+//!     path_from_vertices,
+//! };
 //! use ddg_intrinsic::IntrinsicTriangulation;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,12 +58,19 @@
 //! // The shortest edge path between two corners, and a path that turns at (2, 2).
 //! let diagonal = dijkstra_path(&tri, 0, 24)?;
 //! let turn = path_from_vertices(&tri, &[7, 12, 13], false)?;
-//! let network = GeodesicNetwork::new(tri, &[diagonal, turn], &[], None)?;
+//! let mut network = GeodesicNetwork::new(tri, &[diagonal, turn], &[], None)?;
 //!
 //! // Not geodesic yet: the turn at (2, 2) bends by 90 degrees.
 //! let certificate = network.certify(&CertifyOptions::default())?;
 //! assert!(!certificate.geodesic);
 //! assert!(certificate.failures.iter().any(|f| f.vertex == 12));
+//!
+//! // FlipOut: flip edges until every joint is straight; the paths stay edge paths.
+//! let before = network.length();
+//! let report = network.shorten(&ShortenOptions::default())?;
+//! assert_eq!(report.status, ShortenStatus::Geodesic);
+//! assert!(network.length() < before);
+//! assert!(network.certify(&CertifyOptions::default())?.geodesic);
 //! # Ok(())
 //! # }
 //! ```
@@ -65,10 +81,14 @@
 //! geometry-central contributors, MIT; notice in `LICENSES/geometry-central-MIT.txt`) was read
 //! for the details the paper leaves out; places that follow it are cited `gc: <file>:<line>`
 //! (SPEC header). Taken from it: the default layering, the outermost-segment convention, the
-//! test for a wedge blocked by a path end, the tolerances and Dijkstra's tie order.
+//! test for a wedge blocked by a path end, the tolerances and Dijkstra's tie order, the flip
+//! scan of Alg. 1 with its length guard, the move of a single-segment loop, stale entries.
 //! Different: wedge angles are summed from corner angles rather than read from signposts (F2),
-//! the out-and-back joint is resolved by the layering, crossing inputs are refused, `closed`
-//! and pinning are explicit (F9, F10).
+//! the out-and-back joint is resolved by the layering and contracted (F12, F26), crossing
+//! inputs are refused, `closed` and pinning are explicit (F9, F10), the queue has a total
+//! order (F4), a final sweep follows the empty queue (F5), edges carrying segments are never
+//! flipped by construction (F7), and the stop rules include an iteration limit for paths
+//! too (F13).
 //!
 //! # Conventions
 //!
@@ -79,7 +99,7 @@
 
 pub mod certify;
 mod error;
-mod flipout;
+pub mod flipout;
 pub mod init;
 pub mod network;
 pub mod report;

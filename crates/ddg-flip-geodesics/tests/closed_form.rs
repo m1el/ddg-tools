@@ -20,6 +20,7 @@ fn rel(a: f64, b: f64) -> f64 {
 /// both wedges smaller than `π`.
 #[test]
 fn pyramid_lateral_surface() {
+    let mut worst = 0.0f64;
     for h in [0.1, 0.2, 0.5, 1.0, 2.0] {
         let shape = open_pyramid(h);
         let s = (2.0 + h * h).sqrt();
@@ -41,6 +42,7 @@ fn pyramid_lateral_surface() {
                     "h {h}: through the apex"
                 );
                 let e = rel(out.network.length(), exact);
+                worst = worst.max(e);
                 assert!(
                     e <= 1e-12,
                     "h {h}, {a} -> {b}: {} vs {exact} ({e:e})",
@@ -49,12 +51,14 @@ fn pyramid_lateral_surface() {
             }
         }
     }
+    eprintln!("pyramid: worst relative error {worst:e}");
 }
 
 /// Corner to opposite corner of the cube of side `a`: `√5 a` (two faces unfolded), on grids of
 /// several sizes; the corners themselves (`Θ = 3π/2`) are never passed.
 #[test]
 fn cube_corner_to_opposite_corner() {
+    let mut worst = 0.0f64;
     for (n, a) in [(1, 1.0), (2, 1.0), (3, 2.5), (4, 1.0), (6, 0.7)] {
         let shape = cube(n, a);
         let corners: Vec<usize> = [[0.0, 0.0, 0.0], [a, a, a], [a, 0.0, 0.0], [0.0, a, a]]
@@ -72,6 +76,7 @@ fn cube_corner_to_opposite_corner() {
                     out.certificate.failures
                 );
                 let e = rel(out.network.length(), exact);
+                worst = worst.max(e);
                 assert!(
                     e <= 1e-12,
                     "cube {n}: {} vs {exact} ({e:e})",
@@ -87,12 +92,14 @@ fn cube_corner_to_opposite_corner() {
             }
         }
     }
+    eprintln!("cube corners: worst relative error {worst:e}");
 }
 
 /// A zig-zag loop around a prism tube (`n`-gon of circumradius 1) shortens to a ring: the
 /// cross-section's perimeter `2 n sin(π/n)`.
 #[test]
 fn loop_around_a_prism_tube() {
+    let mut worst = 0.0f64;
     for n in [3, 4, 6, 8, 12] {
         let shape = tube(n, &[1.0; 5], 0.4);
         let v = |j: usize, k: usize| j * n + k % n;
@@ -119,6 +126,7 @@ fn loop_around_a_prism_tube() {
             );
             assert!(out.report.contracted.is_empty());
             let e = rel(out.network.length(), exact);
+            worst = worst.max(e);
             assert!(
                 e <= 1e-12,
                 "n {n}: {} vs {exact} ({e:e})",
@@ -134,6 +142,7 @@ fn loop_around_a_prism_tube() {
             );
         }
     }
+    eprintln!("prism loops: worst relative error {worst:e}");
 }
 
 /// Through the centre of a fan of six right isosceles triangles (`Θ = 3π`): opposite ring

@@ -258,7 +258,7 @@ fn delta_complex_cases_are_exercised() {
         let shape = spike(factor);
         let mut tri = shape.triangulation();
         let theta = tri.vertex_angle_sum(0);
-        if !(theta > 0.4 * PI && theta < PI) || !flip_to_degree_one(&mut tri, 0) {
+        if !(theta > 0.4 * PI && theta < PI && flip_to_degree_one(&mut tri, 0)) {
             continue;
         }
         n_spikes += 1;

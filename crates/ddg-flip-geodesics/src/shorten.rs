@@ -410,7 +410,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         if !geometry.is_flexible(side) {
             return refuse("the wedge is not flexible (it contains a segment)");
         }
-        if !(wedge.angle < PI) {
+        if wedge.angle.partial_cmp(&PI) != Some(std::cmp::Ordering::Less) {
             return refuse("the wedge angle is not below pi");
         }
         let result = flip_out(&mut self.tri, &mut self.network, joint, side)?;

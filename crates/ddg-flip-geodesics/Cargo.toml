@@ -10,3 +10,9 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+
+[dev-dependencies]
+# Ground truth for minimality (SPEC §7 test 4, F23).
+ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
+# The integer representation, for the differential test (SPEC §7 layer 2, test 8).
+ddg-integer-coords = { path = "../ddg-integer-coords" }
