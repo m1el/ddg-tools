@@ -364,11 +364,29 @@ Loops from a closed edge path or closed waypoints; networks from edge sets (seam
 segmentation boundaries, Fig. 19, 21, 22); early stopping (Fig. 20, 21) by `stop_length_ratio` /
 `stop_min_angle`.
 
+**As built (F4, ca135a5–c8f792b).** `geodesic_bezier(tri, &controls, rounds, &BezierOptions)` and
+`GeodesicNetwork::bezier_subdivide`; `GeodesicNetwork::split_edge(e, t)` keeps every segment on the
+edge in its layer position (each segment's first part keeps its id; halves per `Insertion::halves`).
+The midpoint falls on the first segment whose running length reaches `L/2` (the reference uses
+`(1+ε)·next > half`). Control points are distinct (the first may equal the last); a path meeting a
+control point twice is `FlipError::Bezier`. F31, F32: two retries the reference lacks. Measured:
+planar de Casteljau reproduced to `2.2e-14` (integer places) and `1.2e-14` (part lengths), signpost
+places to `1.2e-11` (the trace of the new vertex carries the rounding of earlier flips); reversal
+symmetric to `1.3e-13` (signposts) and `4.6e-15` (integers) except curves with a nudged midpoint
+(`2.5e-10`); 53 curves bitwise identical on both representations; 4 rounds, `d = 3` take 0.8 / 0.9 ms
+on spot and 3.2 / 3.4 ms on camelbad (signposts / integers).
+
 ### 6.3 Intrinsic constrained Delaunay triangulation (Sec. 6.3, Fig. 25)
 
 After shortening, `make_delaunay(&DelaunayOptions)`: Delaunay flipping (IT N6, IC §4.3) with every
 edge that carries a segment constrained (gc: fg.cpp:1035-1045). Same vertex set, every path an
 edge path. Report as `DelaunayReport`, plus the number of constrained edges. Needs §11 R3.
+As built (F4): `make_delaunay -> CdtReport { delaunay, n_network_edges, n_newly_constrained }`; the
+constraint marks stay on the triangulation as in the reference, `clear_constraints()` removes them
+(F33; a later `shorten` cannot flip an edge still marked). 59 networks on 16 shapes: paths and
+lengths unchanged bitwise, every unconstrained edge Delaunay, both certificates and `certify()`
+pass, both representations identical; about the cost of Delaunay flipping the whole mesh
+(camelbad 9.6 ms).
 
 ### 6.4 Later: refinement conforming to the paths (Sec. 6.4, Fig. 24, 25 right, 29)
 
@@ -625,6 +643,16 @@ and pop, F2); every path is under 2 ms.
 * **F30** *Alg. 1's shape test is gc's relative one* (user decision, 2026-10-31):
   `ShortenOptions::flip_shape = FlipShapeTest::REFERENCE`; `N5` remains an option. Every other
   operation keeps N5.
+* **F31** *Thin midpoint split.* When IT N5 refuses a midpoint split as too thin (on a flat square
+  a straight geodesic is one long edge between needles), flip to Delaunay with the curve's edges
+  held fixed, clear the marks, retry once; counted.
+* **F32** *Midpoint on an input edge.* The integer split refuses a point exactly on an input edge;
+  such a midpoint (decided from the crossing distances of `trace_edge_on_input`, which both
+  representations compute) is moved by `2e-9 ℓ` towards the middle of the edge, from `t` alone, so
+  both representations get the same bits; counted.
+* **F33** *iCDT marks* stay after `make_delaunay` until `clear_constraints()`.
+* **F28 (amended, F4)** The `T⁰` certificate also checks joints at inserted vertices, measured inside
+  their input face; a crossing within `1e-8` of the face size of such a joint belongs to the joint.
 * **F29** *Extraction errors.* The first failing segment in path order is returned, wrapped as
   `FlipError::Extraction` naming path, segment and edge; the extraction is otherwise stateless
   (call it again after any change of `T`).
@@ -686,7 +714,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 | F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | **done** (2144fed, d3c11e3): `src/{lib,error,network,wedge,certify,init,report}.rs` (`init`: Dijkstra and vertex-sequence paths, F3 adds waypoints and edge sets; `report`: options and reports for F2) | F0 (R1 for signposts only) | Opus |
 | F2 | **done** (05f9592–ae935ec): Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6, 10 on signposts; the representation identity test (§7 item 8) on integers | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy,random_paths,identity}.rs` | F1 | Opus |
 | F3 | **done** (e6d83c2–1681598): initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |
-| F4 | Bézier, split bookkeeping, iCDT; tests 7, 8 | `src/{bezier,cdt}.rs`, `tests/{bezier,identity}.rs` | F2, IC WP3/WP4 + R4 | Opus |
+| F4 | **done** (ca135a5–c8f792b): Bézier, split bookkeeping, iCDT; tests 7, 8 | `src/{bezier,cdt}.rs`, `tests/{bezier,cdt,identity}.rs`, `network.rs`, `extract.rs` | F2, IC WP3/WP4 + R4 | Opus |
 | F5 | Lean tiers A, B; oracle Alg. 1/2 and fixtures; `CITED.md` section | `lean/proofs/DdgProofs/FlipGeodesics/…`, `lean/oracle/DdgOracle/FlipGeodesics…` | this file | Opus |
 | F6 | Lean tiers C, D | `lean/proofs/DdgProofs/FlipGeodesics/Wedge/…` | F5 | Opus |
 | F7 | evaluation: Thingi10k both representations, exact distance, timings, benches, reference driver (Q2), MPZ/PSB (Q1) | `examples/fo_thingi.rs`, `benches/`, `scripts/fo-eval.sh` | F3, F4 | Sonnet |
