@@ -25,7 +25,8 @@
 //! [`ComplexFlip::move_halfedge_data`]: ddg_intrinsic::complex::ComplexFlip::move_halfedge_data
 
 use ddg_intrinsic::{
-    DelaunayOptions, DelaunayReport, Flip, FlipRefusal, IntrinsicError, Triangulation, plan_flip,
+    DelaunayOptions, DelaunayReport, Flip, FlipRefusal, FlipShapeTest, IntrinsicError,
+    Triangulation, plan_flip_with,
 };
 
 use crate::certify::CertifyReport;
@@ -46,20 +47,35 @@ pub(crate) struct FlippedIntegers {
 
 impl IntegerTriangulation {
     /// Whether [`flip_edge`](Self::flip_edge) would flip edge `e`, without changing anything:
-    /// the refusals of [`plan_flip`] (boundary, constrained, degree-one end point, not strictly
-    /// convex, too thin), decided from the lengths alone as in the signpost representation.
+    /// the refusals of [`plan_flip`](ddg_intrinsic::plan_flip) (boundary, constrained,
+    /// degree-one end point, not strictly convex, too thin), decided from the lengths alone as
+    /// in the signpost representation.
     ///
     /// # Errors
     /// [`IntegerError::IndexOutOfRange`]; a refusal is the `Err` of the inner result.
+    #[inline]
     pub fn can_flip(&self, e: usize) -> Result<Result<(), FlipRefusal>, IntegerError> {
+        self.can_flip_with(e, FlipShapeTest::N5)
+    }
+
+    /// Whether [`flip_edge_with`](Self::flip_edge_with) would flip edge `e` under the shape
+    /// test `test` ([`plan_flip_with`]; IT-SPEC N52), without changing anything.
+    ///
+    /// # Errors
+    /// As [`can_flip`](Self::can_flip).
+    pub fn can_flip_with(
+        &self,
+        e: usize,
+        test: FlipShapeTest,
+    ) -> Result<Result<(), FlipRefusal>, IntegerError> {
         self.check_edge(e)?;
-        Ok(plan_flip(&self.complex, &self.lengths, e).map(|_| ()))
+        Ok(plan_flip_with(&self.complex, &self.lengths, e, test).map(|_| ()))
     }
 
     /// Flips edge `e` (paper Sec. 3.2): its faces `ijk`, `jil` become `ilk`, `jkl` (ids as
     /// [`Complex::flip_edge`](ddg_intrinsic::Complex::flip_edge)), the new edge `kl` gets the
-    /// length of `it-flip-length` (from [`plan_flip`], bitwise as the signpost
-    /// representation), the normal coordinate of Eq. 3 and, at its ends in `V⁰`, the
+    /// length of `it-flip-length` (from [`plan_flip`](ddg_intrinsic::plan_flip), bitwise as
+    /// the signpost representation), the normal coordinate of Eq. 3 and, at its ends in `V⁰`, the
     /// roundabouts of Eq. 4 (see the [module documentation](crate::flip)). Every other edge
     /// keeps its id, length, direction and normal coordinate, and every other halfedge its
     /// roundabout.
@@ -74,10 +90,25 @@ impl IntegerTriangulation {
     /// face of the quadrilateral that is not valid, an `n_kl < −1`, or a roundabout outside its
     /// range. Nothing is changed in every case.
     ///
+    ///
+    /// [`Flip::new_corner_angles`] are computed from the plan
+    /// ([`FlipPlan::new_corner_angles`](ddg_intrinsic::FlipPlan::new_corner_angles)), bitwise
+    /// as the signpost representation's (IT-SPEC N52).
+    ///
     /// [formula: ic-flip-normal]
+    #[inline]
     pub fn flip_edge(&mut self, e: usize) -> Result<Flip, IntegerError> {
+        self.flip_edge_with(e, FlipShapeTest::N5)
+    }
+
+    /// [`flip_edge`](Self::flip_edge) with the shape test chosen by the caller
+    /// ([`plan_flip_with`]; IT-SPEC N52) instead of that of IT-SPEC N5.
+    ///
+    /// # Errors
+    /// As [`flip_edge`](Self::flip_edge).
+    pub fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntegerError> {
         self.check_edge(e)?;
-        let plan = plan_flip(&self.complex, &self.lengths, e).map_err(|reason| {
+        let plan = plan_flip_with(&self.complex, &self.lengths, e, test).map_err(|reason| {
             let [a, b] = self.complex.edge_vertices(e);
             IntegerError::Intrinsic(IntrinsicError::FlipRefused {
                 edge: e as u32,
@@ -93,12 +124,17 @@ impl IntegerTriangulation {
         self.roundabouts[h_kl] = integers.r_kl;
         self.normal[e] = integers.normal;
         self.lengths[e] = plan.new_length;
+        // The corners of `l → j` and `k → i`: next of `k → l` in `(j, k, l)` and of `l → k` in
+        // `(i, l, k)` (`ComplexFlip`).
+        let next = |h: usize| 3 * (h / 3) + (h + 1) % 3;
         Ok(Flip {
             edge: e as u32,
             old_vertices: flip.old_vertices,
             new_vertices: flip.new_vertices,
             old_length: plan.lengths[0],
             new_length: plan.new_length,
+            new_corner_angles: plan.new_corner_angles(),
+            new_corners: [next(h_kl) as u32, next(h_lk) as u32],
         })
     }
 

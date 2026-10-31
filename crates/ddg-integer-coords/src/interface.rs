@@ -15,8 +15,8 @@
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
 use ddg_intrinsic::{
-    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, InputSurface, InsertedVertexRemoval,
-    Insertion, IntrinsicError, RemovalRefusal, SurfacePoint, Triangulation,
+    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipShapeTest, InputSurface,
+    InsertedVertexRemoval, Insertion, IntrinsicError, RemovalRefusal, SurfacePoint, Triangulation,
 };
 
 use crate::coords::IntegerTriangulation;
@@ -81,6 +81,20 @@ impl Triangulation for IntegerTriangulation {
 
     fn flip_edge(&mut self, e: usize) -> Result<Flip, IntrinsicError> {
         IntegerTriangulation::flip_edge(self, e).map_err(|x| to_intrinsic_error(x, "flip_edge"))
+    }
+
+    fn can_flip_with(
+        &self,
+        e: usize,
+        test: FlipShapeTest,
+    ) -> Result<Result<(), FlipRefusal>, IntrinsicError> {
+        IntegerTriangulation::can_flip_with(self, e, test)
+            .map_err(|x| to_intrinsic_error(x, "can_flip_with"))
+    }
+
+    fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntrinsicError> {
+        IntegerTriangulation::flip_edge_with(self, e, test)
+            .map_err(|x| to_intrinsic_error(x, "flip_edge_with"))
     }
 
     /// The face split of Supp. Alg. 5, 6 with App. A (WP4):

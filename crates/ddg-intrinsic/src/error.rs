@@ -433,7 +433,9 @@ pub enum FlipRefusal {
     /// The quadrilateral is strictly convex, but so barely that a triangle the flip would
     /// create is too thin to be described by its edge lengths: its shape number is below
     /// [`FLIP_SHAPE_LIMIT`](crate::formulas::FLIP_SHAPE_LIMIT), or its lengths fail the
-    /// triangle inequality by rounding.
+    /// triangle inequality by rounding. Under another
+    /// [`FlipShapeTest`](crate::FlipShapeTest) (SPEC N52), also a flip that test refuses; the
+    /// fields are the same.
     TooThin {
         /// The length the new edge would have.
         new_length: f64,
@@ -465,7 +467,8 @@ impl fmt::Display for FlipRefusal {
                 f,
                 "the flip would create a triangle too thin to be described by its edge lengths \
                  (new edge of length {new_length:?}; twice the area is {shape:?} times the product \
-                 of the new edge and the longest side, the limit is {:?})",
+                 of the new edge and the longest side, the limit is {:?}, or the flip's shape \
+                 test refused it)",
                 crate::formulas::FLIP_SHAPE_LIMIT
             ),
         }
