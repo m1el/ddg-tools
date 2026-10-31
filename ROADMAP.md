@@ -402,6 +402,60 @@ Open:
   showcase uses its own scene; SPEC §17j).
 * `showcase/media/` is not committed.
 
+## Integer Coordinates and FlipOut (`crates/ddg-integer-coords`, `crates/ddg-flip-geodesics`, branch `integer-coordinates`, 2026-10-31)
+
+Contracts: `crates/ddg-integer-coords/SPEC.md` (decisions I1–I28) and
+`crates/ddg-flip-geodesics/SPEC.md` (F1–F30).
+
+Landed:
+* the shared connectivity `ddg_intrinsic::Complex` and the trait `Triangulation`, implemented by
+  both representations; Delaunay flipping and refinement are written once over the trait (IT N50–N52);
+* integer coordinates:
+  * flips, edge and face splits, vertex removal and moves; geometric tracing; the common
+    subdivision with `P₀`, `P₁` and point queries;
+  * refinement (the paper's rules) and `L²` transfer;
+  * `certify()`, and exact differential tests against the signposts;
+* FlipOut:
+  * paths, loops and networks, waypoints and edge sets, extraction and the `T⁰` certificate;
+  * on both representations, bitwise identical;
+  * the shortening loop is within 0.97–1.42× of geometry-central's, with the same lengths on all
+    4498 compared pairs;
+* Lean:
+  * the integer formulas (tier A), the one-face model (tier B) and Thm. D.1 (B′);
+  * the integer oracle with 23 golden fixtures.
+
+Open:
+* **Corner angles in `Flip` on request** (R9 follow-up, IT N52): today `Flip::new_corner_angles` is
+  filled on every flip so that both representations return identical `Flip` values. Since the
+  integer flip computes the two angles only for that field, integer flipping costs +3–7 % in
+  FlipOut and +5.7 % in camelbad's Delaunay flipping, although only FlipOut reads the angles.
+  Proposal: a caller requests the angles (e.g. a flag next to the `FlipShapeTest` of
+  `flip_edge_with`); FlipOut requests them, everything else does not, and both representations
+  fill them only when asked. No result changes; the signposts keep their 3–5 % gain.
+* FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
+  replacement puts on the path, where gc reads signposts (FlipOut SPEC §9.1).
+* I27: a vertex made by an edge split usually cannot be removed by flips (`RemovalStuck`). A
+  `Complex::merge_edge` (the inverse of `split_edge`) would remove it by merging the two halves.
+* I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
+  that face where the signposts split and snap (1 of 256 differential runs). Undecided whether to
+  snap to the crossing.
+* FlipOut R5: refinement still refuses constrained edges, so refinement that keeps FlipOut paths as
+  edges (F9) cannot run.
+* Fig. 14: the trends are reproduced, but the factors are not (2.7× and 4.1× against the paper's
+  11.5× and 28.1×), because the paper's random-mesh generator is not published (IC SPEC §10.2).
+* Signpost refinement is about 1 % slower (instruction count) since it was made generic (IT N51).
+* Not yet started:
+  * integer coordinates: WP9 (Lean tier C, the whole-triangulation model), WP10 (the Thingi10k
+    evaluation and the reference demo build), WP11 (consumers by default, Python, Blender "show
+    refinement"; tangent frames I26 to decide);
+  * FlipOut: F4 (Bézier, iCDT), F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
+    reference driver exists in `runs_tmp/fo-reference-driver/`), F8 (Python, Blender), F9.
+* Pending formula ids (untagged in the code until their proofs land): `ic-roundabout-update`,
+  `ic-identify-edge`, `ic-trace-terminates`, `ic-strip-intersection`,
+  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, and the 13 `fo-` ids.
+* `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
+  at run time with `RemovalStuck`.
+
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
