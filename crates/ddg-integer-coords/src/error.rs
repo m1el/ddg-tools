@@ -1,0 +1,207 @@
+//! Errors of this crate.
+
+use std::fmt;
+
+use ddg_core::GeometryError;
+use ddg_core::mollify::MollifyError;
+use ddg_intrinsic::IntrinsicError;
+
+/// Which part of the validity of a state (SPEC §2.4) a check belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValidityItem {
+    /// The ranges of the stored quantities (SPEC §2.2): `n ≥ −1`, `n = −1` on boundary edges,
+    /// a roundabout in `[0, deg₀)` exactly for halfedges whose tail is an input vertex, the
+    /// place `q⁰` of every vertex, array lengths.
+    Ranges,
+    /// Item 1: the numerators of Eq. 1 are even in every face.
+    FaceParity,
+    /// Item 3: an edge with `n = −1` runs along an input edge, and the roundabouts of its
+    /// halfedges leaving input vertices name that input edge.
+    AlongInputEdge,
+    /// Item 4: every input edge is extracted (Supp. Alg. 4) as a curve from its tail to its head
+    /// through inserted vertices on it only, with matching roundabout labels at both ends, and
+    /// every crossing belongs to exactly one such curve. This includes the agreement of the
+    /// roundabouts around every input vertex with the emanating counts (the window of Alg. 4).
+    Extraction,
+}
+
+impl fmt::Display for ValidityItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ValidityItem::Ranges => "ranges of the stored quantities",
+            ValidityItem::FaceParity => "item 1 (Eq. 1 integral)",
+            ValidityItem::AlongInputEdge => "item 3 (edges along input edges)",
+            ValidityItem::Extraction => "item 4 (extraction of the input edges)",
+        })
+    }
+}
+
+/// Where invalid integer data was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// A face of the triangulation.
+    Face(u32),
+    /// An edge of the triangulation.
+    Edge(u32),
+    /// A halfedge of the triangulation (its roundabout, or its corner).
+    Halfedge(u32),
+    /// A vertex of the triangulation.
+    Vertex(u32),
+    /// A combinatorial crossing `(halfedge, index)`: the curve leaves the face of `halfedge`
+    /// through it at the `index`-th crossing from its tail.
+    Crossing {
+        /// The halfedge.
+        halfedge: u32,
+        /// The crossing index from the halfedge's tail.
+        index: i64,
+        /// The face of the halfedge.
+        face: u32,
+    },
+    /// An edge of the input mesh.
+    InputEdge(u32),
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Place::Face(x) => write!(f, "face {x}"),
+            Place::Edge(x) => write!(f, "edge {x}"),
+            Place::Halfedge(x) => write!(f, "halfedge {x}"),
+            Place::Vertex(x) => write!(f, "vertex {x}"),
+            Place::Crossing {
+                halfedge,
+                index,
+                face,
+            } => write!(f, "crossing ({halfedge}, {index}) of face {face}"),
+            Place::InputEdge(x) => write!(f, "input edge {x}"),
+        }
+    }
+}
+
+/// Integer data that is not that of any realization (SPEC §2.4, §3.1): what is wrong, which
+/// item of the validity it violates and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidCoordinates {
+    /// The item of SPEC §2.4.
+    pub item: ValidityItem,
+    /// Where.
+    pub place: Place,
+    /// What, in words, with the values involved.
+    pub detail: String,
+}
+
+impl fmt::Display for InvalidCoordinates {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid integer coordinates at {} ({}): {}",
+            self.place, self.item, self.detail
+        )
+    }
+}
+
+/// The errors of this crate. Nothing is changed when an operation returns one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IntegerError {
+    /// An error of the shared intrinsic-triangulation code (connectivity, input mesh, lengths,
+    /// refusals of flips and splits, traces of the signpost representation).
+    Intrinsic(IntrinsicError),
+    /// The geometry was rejected or not built for the mesh.
+    Geometry(GeometryError),
+    /// Mollification refused its input.
+    Mollify(MollifyError),
+    /// An element id is out of range.
+    IndexOutOfRange {
+        /// What kind of element.
+        what: &'static str,
+        /// The id.
+        index: usize,
+        /// The exclusive upper bound it violates.
+        bound: usize,
+    },
+    /// An integer computation would leave the range of `i64` (SPEC I2); nothing wraps.
+    Overflow {
+        /// The edge whose normal coordinate was being computed or read.
+        edge: u32,
+    },
+    /// The integers are not those of any realization; see [`InvalidCoordinates`].
+    InvalidCoordinates(Box<InvalidCoordinates>),
+    /// [`IntegerTriangulation::from_intrinsic`](crate::IntegerTriangulation::from_intrinsic)
+    /// could not read integers off the signpost representation (floating point decides it).
+    Conversion {
+        /// The edge of the signpost triangulation.
+        edge: u32,
+        /// What went wrong.
+        reason: String,
+    },
+}
+
+impl IntegerError {
+    /// An [`IntegerError::InvalidCoordinates`].
+    pub(crate) fn invalid(item: ValidityItem, place: Place, detail: String) -> IntegerError {
+        IntegerError::InvalidCoordinates(Box::new(InvalidCoordinates {
+            item,
+            place,
+            detail,
+        }))
+    }
+
+    /// The validity item an [`IntegerError::InvalidCoordinates`] names.
+    pub fn validity_item(&self) -> Option<ValidityItem> {
+        match self {
+            IntegerError::InvalidCoordinates(x) => Some(x.item),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for IntegerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IntegerError::Intrinsic(e) => write!(f, "{e}"),
+            IntegerError::Geometry(e) => write!(f, "{e}"),
+            IntegerError::Mollify(e) => write!(f, "mollification: {e}"),
+            IntegerError::IndexOutOfRange { what, index, bound } => {
+                write!(f, "{what} {index} out of range (there are {bound})")
+            }
+            IntegerError::Overflow { edge } => write!(
+                f,
+                "an integer computation at edge {edge} would leave the range of i64"
+            ),
+            IntegerError::InvalidCoordinates(x) => write!(f, "{x}"),
+            IntegerError::Conversion { edge, reason } => write!(
+                f,
+                "edge {edge} of the signpost triangulation could not be converted: {reason}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IntegerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            IntegerError::Intrinsic(e) => Some(e),
+            IntegerError::Geometry(e) => Some(e),
+            IntegerError::Mollify(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<IntrinsicError> for IntegerError {
+    fn from(e: IntrinsicError) -> Self {
+        IntegerError::Intrinsic(e)
+    }
+}
+
+impl From<GeometryError> for IntegerError {
+    fn from(e: GeometryError) -> Self {
+        IntegerError::Geometry(e)
+    }
+}
+
+impl From<MollifyError> for IntegerError {
+    fn from(e: MollifyError) -> Self {
+        IntegerError::Mollify(e)
+    }
+}

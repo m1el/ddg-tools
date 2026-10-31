@@ -1,0 +1,267 @@
+//! The integer formulas of the paper on plain integers: Eq. 1, 2 (corner coordinates and
+//! emanating counts), the validity of a face, the reversal of a crossing, one step of Supp.
+//! Alg. 1, the index of Supp. Alg. 3 and Eq. 6.
+//!
+//! Every function here is the Rust counterpart of a definition of the Lean oracle
+//! (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`), which `lean/proofs` proves theorems
+//! about, and is compared with it by exact integer equality (`tests/oracle.rs`).
+//!
+//! # Face convention (SPEC §2.1, the oracle's)
+//!
+//! A face has corners `0, 1, 2` and sides `0, 1, 2`; side `k` is the halfedge `3f + k`, from
+//! corner `k` to corner `k + 1`, and its crossings are numbered `0, 1, …` from corner `k`. Corner
+//! `k` lies between side `k + 2` (which ends at it) and side `k` (which starts at it); the side
+//! opposite corner `k` is side `k + 1`.
+//!
+//! # Arithmetic
+//!
+//! Normal coordinates are `i64` (SPEC I2). Eq. 1 and 2 are evaluated in `i128`, where no sum of
+//! three `i64` can overflow, and their results always fit an `i64` again (a corner coordinate is at
+//! most the smaller of the two sides at its corner, an emanating count at most the opposite side).
+//! Eq. 1 is **never** a floor division (SPEC I14): its numerator is never negative, and an odd
+//! numerator is reported (`None`), not rounded.
+
+/// `n⁺ = max(n, 0)`: the number of transversal crossings of an edge with `n` as its normal
+/// coordinate.
+///
+/// [formula: ic-normal-sign]
+#[inline]
+pub fn n_plus(n: i64) -> i64 {
+    n.max(0)
+}
+
+/// `n⁻ = −min(n, 0)`: `1` for an edge that runs along an input edge (`n = −1`), `0` otherwise.
+/// Every valid state has `n ≥ −1`; for `n = i64::MIN`, which no state has, the result
+/// saturates at `i64::MAX`.
+///
+/// [formula: ic-normal-sign]
+#[inline]
+pub fn n_minus(n: i64) -> i64 {
+    n.min(0).checked_neg().unwrap_or(i64::MAX)
+}
+
+/// Eq. 2, `e^{ij}_k = max(0, n⁺_ij − n⁺_jk − n⁺_ki)`: the number of arcs from corner `k` to the
+/// opposite side `ij`. Arguments: the opposite side, then the two sides at the corner (in either
+/// order).
+///
+/// [formula: ic-emanating]
+#[inline]
+pub fn emanating(opposite: i64, a: i64, b: i64) -> i64 {
+    let e = n_plus(opposite) as i128 - n_plus(a) as i128 - n_plus(b) as i128;
+    // 0 ≤ e ≤ n⁺(opposite), so it fits.
+    e.max(0) as i64
+}
+
+/// Twice Eq. 1 at corner `k` of the face `ijk`:
+/// `max(0, n⁺_jk + n⁺_ki − n⁺_ij) − e^{jk}_i − e^{ki}_j`. Arguments: the opposite side `ij`, then
+/// the two sides `jk`, `ki` at the corner. Never negative (Lean `cornerNumerator_nonneg`); it can
+/// exceed `i64::MAX` when both sides at the corner are close to it, hence `i128`.
+///
+/// [formula: ic-corner-coordinates]
+#[inline]
+pub fn corner_numerator(opposite: i64, a: i64, b: i64) -> i128 {
+    let (o, x, y) = (
+        n_plus(opposite) as i128,
+        n_plus(a) as i128,
+        n_plus(b) as i128,
+    );
+    (x + y - o).max(0) - emanating(a, opposite, b) as i128 - emanating(b, opposite, a) as i128
+}
+
+/// Eq. 1, `c^{ij}_k`: the number of arcs that cut corner `k`, or `None` when the numerator is odd
+/// (the face is not valid, SPEC §2.4 item 1) or negative (impossible).
+///
+/// [formula: ic-corner-coordinates]
+#[inline]
+pub fn corner_coordinate(opposite: i64, a: i64, b: i64) -> Option<i64> {
+    let m = corner_numerator(opposite, a, b);
+    if m < 0 || m % 2 != 0 {
+        None
+    } else {
+        // m / 2 ≤ min(n⁺a, n⁺b): fits.
+        Some((m / 2) as i64)
+    }
+}
+
+/// Whether the face with side counts `n` (side `k` from corner `k` to `k + 1`) is valid: the
+/// three numerators of Eq. 1 are even (SPEC §2.4 item 1).
+///
+/// [formula: ic-face-validity]
+pub fn face_valid(n: [i64; 3]) -> bool {
+    (0..3).all(|k| corner_numerator(n[(k + 1) % 3], n[k], n[(k + 2) % 3]) % 2 == 0)
+}
+
+/// The numerator of Eq. 1 at corner `k` of the face with side counts `n` (opposite side `k + 1`,
+/// sides `k` and `k + 2` at the corner).
+///
+/// [formula: ic-corner-coordinates]
+#[inline]
+pub fn face_corner_numerator(n: [i64; 3], k: usize) -> i128 {
+    corner_numerator(n[(k + 1) % 3], n[k % 3], n[(k + 2) % 3])
+}
+
+/// Eq. 2 at corner `k` of the face with side counts `n`: the arcs from corner `k` to side `k + 1`.
+///
+/// [formula: ic-emanating]
+#[inline]
+pub fn face_emanating(n: [i64; 3], k: usize) -> i64 {
+    emanating(n[(k + 1) % 3], n[k % 3], n[(k + 2) % 3])
+}
+
+/// The decoded corner data of a valid face: what Supp. Alg. 1, 3, 4 and 9 read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaceCoordinates {
+    /// `n⁺` of side `k`.
+    pub n: [i64; 3],
+    /// `c` of corner `k` (Eq. 1): arcs that cut it, from side `k + 2` to side `k`.
+    pub c: [i64; 3],
+    /// `e` of corner `k` (Eq. 2): arcs from corner `k` to side `k + 1`. At most one is positive
+    /// (SPEC §2.4 item 2, Lean `emanating_exclusive`).
+    pub e: [i64; 3],
+}
+
+impl FaceCoordinates {
+    /// Decodes a face from the normal coordinates of its sides; `Err(k)` names the first corner
+    /// whose numerator of Eq. 1 is odd.
+    ///
+    /// [formula: ic-corner-coordinates]
+    pub fn of(n: [i64; 3]) -> Result<FaceCoordinates, usize> {
+        let mut c = [0i64; 3];
+        for (k, ck) in c.iter_mut().enumerate() {
+            *ck = corner_coordinate(n[(k + 1) % 3], n[k], n[(k + 2) % 3]).ok_or(k)?;
+        }
+        Ok(FaceCoordinates {
+            n: n.map(n_plus),
+            c,
+            e: [0, 1, 2].map(|k| face_emanating(n, k)),
+        })
+    }
+
+    /// The first crossing (from the side's tail) of side `k + 1` that an arc emanating from
+    /// corner `k` reaches: the arcs cutting corner `k + 1` come first. The emanating arcs are the
+    /// crossings `first … first + e_k − 1`.
+    #[inline]
+    pub fn first_emanating(&self, k: usize) -> i64 {
+        self.c[(k + 1) % 3]
+    }
+}
+
+/// The reversal of a combinatorial crossing `(ij→, p) ↦ (ji→, n − p − 1)`: the position part.
+///
+/// [formula: ic-reverse-crossing]
+#[inline]
+pub fn reverse_crossing(n: i64, p: i64) -> i64 {
+    n - p - 1
+}
+
+/// Where a curve that crosses an edge goes next in the face it enters (Supp. Alg. 1, Fig. 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// It leaves through `ik→` at this crossing index (Fig. 7 case 3, "goes right").
+    ToIk(i64),
+    /// It leaves through `kj→` at this crossing index (Fig. 7 case 1, "goes left").
+    ToKj(i64),
+    /// It ends at the opposite vertex `k` (Fig. 7 case 2).
+    Vertex,
+}
+
+/// Why [`trace_step`] has no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepError {
+    /// The face `jik` is not valid (an odd numerator of Eq. 1).
+    InvalidFace,
+    /// `p` is not in `[0, n⁺_ij)`.
+    OutOfRange,
+}
+
+/// One step of Supp. Alg. 1: the curve crosses `ij→` at index `p` (from `i`) and enters the face
+/// `jik` of the twin, whose opposite vertex is `k`. With `c^{kj}_i` the corner `i` and `c^{ik}_j`
+/// the corner `j` of `jik`: `p < c^{kj}_i` goes to `ik→` at `p`; `p ≥ n_ij − c^{ik}_j` goes to
+/// `kj→` at `n_kj + p − n_ij`; otherwise the curve ends at `k`.
+///
+/// [formula: ic-trace-step]
+pub fn trace_step(n_ij: i64, n_ik: i64, n_kj: i64, p: i64) -> Result<Step, StepError> {
+    if !face_valid([n_ij, n_ik, n_kj]) {
+        return Err(StepError::InvalidFace);
+    }
+    let (nij, nkj) = (n_plus(n_ij), n_plus(n_kj));
+    if p < 0 || p >= nij {
+        return Err(StepError::OutOfRange);
+    }
+    let ci = corner_coordinate(n_kj, n_ij, n_ik).ok_or(StepError::InvalidFace)?;
+    let cj = corner_coordinate(n_ik, n_ij, n_kj).ok_or(StepError::InvalidFace)?;
+    Ok(if p < ci {
+        Step::ToIk(p)
+    } else if nij - cj <= p {
+        // p − (n_ij − c_j) < c_j ≤ n_kj, so this is in [n_kj − c_j, n_kj).
+        Step::ToKj(nkj - (nij - p))
+    } else {
+        Step::Vertex
+    })
+}
+
+/// Supp. Alg. 3 line 9: the curve leaves `a ∈ V⁰` and first crosses `ij→` at `p`, where `ija` is
+/// the face of `ij→` and `ai→ = Next(Next(ij→))` (the paper calls it `aj`, SPEC §3.1). Its local
+/// index around `a` is `r_ai + n⁻_ai + (p − c^{ja}_i)`, reduced modulo `deg₀(a)` at an interior
+/// vertex (`deg = 0`: a boundary vertex, whose numbering does not wrap). `None` when the face
+/// `ija` is not valid or a value leaves the `i64` range.
+///
+/// Alg. 4 inverts it: the crossing of the `q`-th input halfedge after `r_ai` is
+/// `p = c^{ja}_i + (k − r_ai − n⁻_ai)`, which the paper writes `k + n_ai − r_ai` (both agree,
+/// since `c^{ja}_i = n⁺_ai` whenever `a` emanates, SPEC §3.1).
+///
+/// Formula id `ic-identify-edge` (SPEC §9.2, tier C: not proved yet, WP9; untagged until it is).
+pub fn identify_index(r_ai: i64, n_ai: i64, n_ij: i64, n_ja: i64, p: i64, deg: u32) -> Option<i64> {
+    let c = corner_coordinate(n_ja, n_ij, n_ai)?;
+    let k = r_ai
+        .checked_add(n_minus(n_ai))?
+        .checked_add(p.checked_sub(c)?)?;
+    Some(if deg == 0 {
+        k
+    } else {
+        k.rem_euclid(deg as i64)
+    })
+}
+
+/// Eq. 6: `n_mk = max(n_ki, n_jk, 0)` for the new edge from the split point `m` of an edge `ij`
+/// with `n_ij = −1` to the opposite corner `k` (the halves keep `n = −1`); the `0` matters when
+/// both other sides run along input edges.
+///
+/// [formula: ic-split-edge-normal]
+#[inline]
+pub fn split_edge_normal(n_ki: i64, n_jk: i64) -> i64 {
+    n_ki.max(n_jk).max(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eq1_never_rounds_and_handles_extremes() {
+        // One arc from corner 2 to side 0 (opposite it), nothing else: valid.
+        assert_eq!(FaceCoordinates::of([1, 0, 0]).unwrap().e, [0, 0, 1]);
+        // Odd sum without an emanating corner: invalid.
+        assert_eq!(FaceCoordinates::of([1, 1, 1]), Err(0));
+        let m = i64::MAX;
+        assert_eq!(corner_numerator(0, m, m), 2 * m as i128);
+        assert_eq!(corner_coordinate(0, m, m), Some(m));
+        assert_eq!(emanating(m, -1, -1), m);
+        assert_eq!(n_minus(i64::MIN), i64::MAX);
+    }
+
+    #[test]
+    fn identify_inverts_the_extraction_offset() {
+        // Face ija with a emanating 3 arcs to ij: n_ij = n_ai + n_ja + 3.
+        let (n_ai, n_ja) = (2, 1);
+        let n_ij = n_ai + n_ja + 3;
+        let c_i = corner_coordinate(n_ja, n_ij, n_ai).unwrap();
+        assert_eq!(c_i, n_ai);
+        for q in 0..3 {
+            assert_eq!(
+                identify_index(5, n_ai, n_ij, n_ja, c_i + q, 7),
+                Some((5 + q) % 7)
+            );
+        }
+    }
+}
