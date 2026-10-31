@@ -1,5 +1,6 @@
 import DdgProofs.IntegerCoords.FaceModel
 import Mathlib.Algebra.BigOperators.Fin
+import Mathlib.Tactic.IntervalCases
 
 /-!
 # Integer coordinates: face split (tier B, SPEC I15)
@@ -462,6 +463,61 @@ theorem splitCount_gapRegion {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : �
   · exact splitCount_gapRegion_side0 hc hg dc0 dc1 dc2 hk j hs hgs
   · exact splitCount_gapRegion_side1 hc hg dc0 dc1 dc2 hk j hs hgs
   · exact splitCount_gapRegion_side2 hc hg dc0 dc1 dc2 hk j hs hgs
+
+/-- **`ic-face-split-normal`: the oracle's face split is the count of separating arcs.** For a valid
+face (admissible corner counts `c`, e.g. those of a valid face model by the structure theorem) and any
+gap `g` of its boundary, the oracle's `faceSplit?` on the region of `g` returns the numbers of arcs
+that separate `g` from the corners `0, 1, 2` — the normal coordinates of the edges from a vertex
+inserted in that region to the corners, joined by arcs disjoint from the others (straight segments).
+[formula: ic-face-split-normal] -/
+theorem faceSplit?_gapRegion {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n) :
+    Ddg.IntegerCoords.faceSplit? (n 0) (n 1) (n 2) (gapRegion n c g) =
+      some (sepCount n c g 0, sepCount n c g 1, sepCount n c g 2) := by
+  obtain ⟨d, hd, -, -, -, dc0, dc1, dc2, hk⟩ := oracle_decode hc
+  have h0 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 0
+  have h1 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 1
+  have h2 := splitCount_gapRegion hc hg dc0 dc1 dc2 hk 2
+  simp only [Fin.val_zero, Fin.val_one, Fin.val_two] at h0 h1 h2
+  unfold Ddg.IntegerCoords.faceSplit?
+  rw [hd]
+  simp only [h0.2, ↓reduceIte, h0.1, h1.1, h2.1]
+
+set_option maxHeartbeats 4000000 in
+/-- **The three new faces are valid, whichever region is chosen** (SPEC I15). For every region `R`
+of a valid face, the new face `(k, k + 1, m)` with the sides `n_k` (old), `n_{m,k+1}`, `n_{mk}`
+(the oracle's `splitCount`) is valid in the sense of Eq. 1 (`faceValid`). [formula: ic-face-split-normal] -/
+theorem splitCount_faceValid {n c : Fin 3 → ℕ} (hc : Admissible n c)
+    {d : Ddg.IntegerCoords.Decoded} (dc0 : d.c 0 = c 0) (dc1 : d.c 1 = c 1) (dc2 : d.c 2 = c 2)
+    (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
+        (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
+        (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
+        (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2))
+    (R : Ddg.IntegerCoords.Region) (hR : R.valid d = true) (k : Fin 3) :
+    faceValid (n k) (Ddg.IntegerCoords.splitCount d R (k + 1).val)
+      (Ddg.IntegerCoords.splitCount d R k.val) = true := by
+  rw [faceValid_iff]
+  have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
+  simp only [emanating, np]
+  obtain ⟨a0, a1, a2, b0, b1, b2, x0, x1, x2⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
+  rcases R with ⟨k0, t⟩ | s
+  · simp only [Ddg.IntegerCoords.Region.valid, Bool.and_eq_true, decide_eq_true_eq] at hR
+    obtain ⟨hk0, ht⟩ := hR
+    interval_cases k0 <;>
+    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+    rcases fin3_cases k with rfl | rfl | rfl <;>
+    simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
+      Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,
+      dc0, dc1, dc2, beq_iff_eq, Bool.and_eq_true, Bool.or_eq_true] at ht ⊢ <;>
+    (try split_ifs) <;> (try contradiction) <;> omega
+  · simp only [Ddg.IntegerCoords.Region.valid, decide_eq_true_eq] at hR
+    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+    rcases fin3_cases k with rfl | rfl | rfl <;>
+    simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
+      Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,
+      dc0, dc1, dc2, beq_iff_eq, Bool.and_eq_true, Bool.or_eq_true] at hR ⊢ <;>
+    (try split_ifs) <;> (try contradiction) <;> omega
 
 end IntegerCoords
 
