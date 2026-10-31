@@ -1294,3 +1294,37 @@ fn timing() {
     let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
     eprintln!("load average after: {}", load.trim());
 }
+
+/// An overflow during Delaunay flipping is returned as an error, never counted as a refused
+/// flip, and the failing flip changes nothing.
+#[test]
+fn overflow_during_delaunay_flipping_is_an_error() {
+    // A flat kite whose diagonal 0–2 is long, so Delaunay flipping must flip it.
+    let mesh = TriMesh::new(4, vec![[0, 1, 2], [0, 2, 3]]).unwrap();
+    let pos = [
+        [0.0, 0.0, 0.0],
+        [1.0, -0.3, 0.0],
+        [2.0, 0.0, 0.0],
+        [1.0, 0.3, 0.0],
+    ];
+    let geometry = Geometry::from_positions(&mesh, &pos).unwrap();
+    let mut parts: Parts = IntegerTriangulation::new(&mesh, &geometry)
+        .unwrap()
+        .into_parts();
+    let diag = (0..parts.complex.n_edges())
+        .find(|&e| !parts.complex.is_boundary_edge(e))
+        .unwrap();
+    for e in 0..parts.complex.n_edges() {
+        parts.normal[e] = if e == diag { 0 } else { i64::MAX };
+    }
+    let mut it = IntegerTriangulation::from_parts(parts).unwrap();
+    let before = it.clone();
+    match Triangulation::flip_to_delaunay(&mut it, &DelaunayOptions::default()) {
+        Err(IntrinsicError::Representation {
+            representation: "integer coordinates",
+            ..
+        }) => {}
+        other => panic!("expected the overflow as an error, got {other:?}"),
+    }
+    assert!(it == before);
+}

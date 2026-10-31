@@ -333,14 +333,14 @@ impl<'a> Refiner<'a> {
     }
 
     /// Flips back to Delaunay from the queue and looks at every face that changed.
-    fn restore_delaunay(&mut self) {
+    fn restore_delaunay(&mut self) -> Result<(), IntrinsicError> {
         self.touched.clear();
         let run = self.tri.run_flip_queue(
             &mut self.queue,
             &self.options.criterion,
             usize::MAX,
             Some(&mut self.touched),
-        );
+        )?;
         self.n_flips += run.n_flips;
         let mut touched = std::mem::take(&mut self.touched);
         touched.sort_unstable();
@@ -349,10 +349,11 @@ impl<'a> Refiner<'a> {
             self.touch(f as usize);
         }
         self.touched = touched;
+        Ok(())
     }
 
     /// After a vertex was inserted: its faces are new, their edges may have to be flipped.
-    fn after_insertion(&mut self, insertion: &Insertion) {
+    fn after_insertion(&mut self, insertion: &Insertion) -> Result<(), IntrinsicError> {
         self.n_snapped += usize::from(insertion.snapped.is_some());
         let v = insertion.vertex as usize;
         let faces: Vec<usize> = self.tri.outgoing_halfedges(v).map(|h| h / 3).collect();
@@ -364,7 +365,7 @@ impl<'a> Refiner<'a> {
         for &f in &faces {
             self.touch(f);
         }
-        self.restore_delaunay();
+        self.restore_delaunay()
     }
 
     /// The parameter at which boundary edge `e` is split: its midpoint, or next to a boundary
@@ -389,7 +390,7 @@ impl<'a> Refiner<'a> {
         match self.tri.split_edge(e, t) {
             Ok(insertion) => {
                 self.n_boundary_splits += 1;
-                self.after_insertion(&insertion);
+                self.after_insertion(&insertion)?;
                 Ok(true)
             }
             Err(IntrinsicError::InsertionRefused { .. }) => Ok(false),
@@ -562,7 +563,7 @@ impl<'a> Refiner<'a> {
         match self.tri.insert_vertex(g, bary) {
             Ok(insertion) => {
                 self.n_face_insertions += 1;
-                self.after_insertion(&insertion);
+                self.after_insertion(&insertion)?;
             }
             Err(IntrinsicError::InsertionRefused {
                 reason:
@@ -590,7 +591,7 @@ impl<'a> Refiner<'a> {
                     match self.tri.split_edge(edge, t) {
                         Ok(insertion) => {
                             self.n_edge_splits += 1;
-                            self.after_insertion(&insertion);
+                            self.after_insertion(&insertion)?;
                             return Ok(());
                         }
                         Err(IntrinsicError::InsertionRefused { .. }) => {}

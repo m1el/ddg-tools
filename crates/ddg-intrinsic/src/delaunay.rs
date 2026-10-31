@@ -264,14 +264,16 @@ pub(crate) fn fails_delaunay(
 
 /// Flips edges from the queue until it is empty or `budget` flips were made, with the flips
 /// of the representation. The two faces of every flipped edge are appended to `touched`, if
-/// given.
+/// given. A refused flip ([`IntrinsicError::FlipRefused`]) is counted and skipped; any other
+/// error of the representation (e.g. an overflow of integer coordinates) ends the run and is
+/// returned, so it is never mistaken for a refusal.
 pub(crate) fn run_flip_queue<T: Triangulation>(
     tri: &mut T,
     queue: &mut EdgeQueue,
     criterion: &DelaunayCriterion,
     budget: usize,
     mut touched: Option<&mut Vec<u32>>,
-) -> QueueRun {
+) -> Result<QueueRun, IntrinsicError> {
     let mut run = QueueRun::default();
     while let Some(e) = queue.pop() {
         run.n_tested += 1;
@@ -283,9 +285,13 @@ pub(crate) fn run_flip_queue<T: Triangulation>(
             run.limit_reached = true;
             break;
         }
-        if tri.flip_edge(e as usize).is_err() {
-            run.n_refused += 1;
-            continue;
+        match tri.flip_edge(e as usize) {
+            Ok(_) => {}
+            Err(IntrinsicError::FlipRefused { .. }) => {
+                run.n_refused += 1;
+                continue;
+            }
+            Err(other) => return Err(other),
         }
         run.n_flips += 1;
         let complex = tri.complex();
@@ -298,7 +304,7 @@ pub(crate) fn run_flip_queue<T: Triangulation>(
             touched.extend([(h / 3) as u32, (t / 3) as u32]);
         }
     }
-    run
+    Ok(run)
 }
 
 /// Delaunay flipping over any representation; see
@@ -323,7 +329,7 @@ pub(crate) fn flip_to_delaunay<T: Triangulation>(
         FlipLimit::Unlimited => usize::MAX,
     };
     let mut queue = EdgeQueue::all(n_edges);
-    let run = run_flip_queue(tri, &mut queue, &options.criterion, budget, None);
+    let run = run_flip_queue(tri, &mut queue, &options.criterion, budget, None)?;
 
     let (complex, lengths) = (tri.complex(), tri.edge_lengths());
     let mut n_not_delaunay = 0;
@@ -413,7 +419,7 @@ impl IntrinsicTriangulation {
         criterion: &DelaunayCriterion,
         budget: usize,
         touched: Option<&mut Vec<u32>>,
-    ) -> QueueRun {
+    ) -> Result<QueueRun, IntrinsicError> {
         run_flip_queue(self, queue, criterion, budget, touched)
     }
 

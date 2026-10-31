@@ -105,12 +105,15 @@ impl IntegerTriangulation {
     /// Delaunay flipping (paper Sec. 4.1, SPEC §4.3) followed by the certificate (SPEC §2.4, I4:
     /// certify at the end of every operation that does a variable amount of work). The
     /// flipping is the shared [`Triangulation::flip_to_delaunay`], so it makes the same flips in
-    /// the same order as the signpost representation on the same input; a flip that fails with
-    /// an error of this crate (an overflow, say) is counted as refused there
-    /// (`DelaunayReport::n_refused`) and changes nothing.
+    /// the same order as the signpost representation on the same input. Refused flips are
+    /// counted (`DelaunayReport::n_refused`); a flip that fails with an error of this crate (an
+    /// overflow, say) changes nothing, ends the flipping and is returned (the flips before it
+    /// are kept).
     ///
     /// # Errors
-    /// [`IntegerError::Intrinsic`] for invalid options (nothing changed); the error of
+    /// [`IntegerError::Intrinsic`] for invalid options (nothing changed) or for an error of this
+    /// crate during a flip, passed through the shared interface as
+    /// `IntrinsicError::Representation` (the earlier flips are done); the error of
     /// [`certify`](Self::certify) if the result does not certify (the flips are then done:
     /// the state is not that of any realization, which would be a bug of this crate).
     pub fn flip_to_delaunay_certified(
