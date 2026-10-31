@@ -66,6 +66,22 @@ BACKEND_ITEMS = [
     ('accelerated', "Accelerated", "Barnes-Hut energy and multigrid solves"),
 ]
 
+METHOD_ITEMS = [
+    ('PROJECTED_GRADIENT', "Projected Gradient", "The paper's flow: fractional Sobolev descent "
+     "with the lengths (and pins) as hard constraints"),
+    ('LBFGS', "L-BFGS", "L-BFGS on the paper's soft problem: no hard constraints, the edge "
+     "lengths are a Hencky penalty. No pins or tangent constraints, no growth"),
+    ('NCG', "Nonlinear CG", "Polak-Ribiere nonlinear conjugate gradients on the same soft "
+     "problem as L-BFGS"),
+]
+SECOND_NEIGHBOUR_ITEMS = [
+    ('FOLD_GATED', "Fold Gated", "Edges two apart are corrected near contact, and in folds "
+     "(the default)"),
+    ('ONE_SIDED', "One Sided", "Edges two apart are corrected but never below the paper's term"),
+    ('TWO_SIDED', "Two Sided", "Edges two apart are corrected like every other pair (lowers "
+     "the energy at corners)"),
+]
+
 STATUS_LABELS = {
     "running": "running",
     "converged": "converged",
@@ -85,6 +101,12 @@ def option_properties():
         "beta": FloatProperty(name="Beta", default=6.0, min=2.0, soft_max=12.0,
                               description="Exponent beta of the tangent-point kernel (beta > "
                                           "alpha; 3 and 6 are the paper's)"),
+        "method": EnumProperty(name="Method", items=METHOD_ITEMS, default='PROJECTED_GRADIENT',
+                               description="The descent method"),
+        "hencky_weight": FloatProperty(
+            name="Length Penalty", default=10.0, min=0.0, soft_max=100.0,
+            description="Weight of the Hencky penalty that keeps the edge lengths of the soft "
+                        "methods (the paper's evaluation uses 10)"),
         "length": EnumProperty(name="Length", items=LENGTH_ITEMS, default='EDGES',
                                description="What the flow keeps constant"),
         "grow_factor": FloatProperty(
@@ -143,6 +165,39 @@ def option_properties():
                                 description="How the energy and the solves are computed"),
         "threads": IntProperty(name="Threads", default=0, min=0, soft_max=64,
                                description="Native threads (0: the library's choice)"),
+        "near_pair": BoolProperty(
+            name="Near-Pair Quadrature", default=True,
+            description="Accurate energy for edges that come close in their interiors (not in "
+                        "the paper). Off: the paper's energy"),
+        "second_neighbour_rule": EnumProperty(
+            name="Second Neighbours", items=SECOND_NEIGHBOUR_ITEMS, default='FOLD_GATED',
+            description="How edges with one edge between them are treated by the near-pair "
+                        "quadrature"),
+        "stuck_retry_chord": BoolProperty(
+            name="Retry Stuck Steps with Chord", default=True,
+            description="A stuck line search is repeated with the paper's chord projection"),
+        "back_projection": BoolProperty(
+            name="Back Projection", default=True,
+            description="Project the trial points back onto the constraints (the paper). Off: "
+                        "the paper's 'without projection' variant"),
+        "newton_polish": BoolProperty(
+            name="Newton Polish", default=True,
+            description="Finish the projection with Newton steps once the violation is small "
+                        "(not in the paper). Off: the paper's chord method throughout"),
+        "newton_polish_threshold": FloatProperty(
+            name="Polish Below", default=100.0, min=1.0, soft_max=1000.0,
+            description="Newton steps start when the violation is at most this many times the "
+                        "projection tolerance"),
+        "projection_early_abort": BoolProperty(
+            name="Early Abort", default=True,
+            description="Give up a chord projection early when it cannot converge in time"),
+        "second_order_correction": BoolProperty(
+            name="Second-Order Correction", default=False,
+            description="Correct the trial points to second order before projecting"),
+        "mg_max_threads": IntProperty(
+            name="Multigrid Max Threads", default=16, min=0, soft_max=64,
+            description="Cap of the multigrid solver's threads (0: no cap; "
+                        "16: the library's default)"),
         "stop_tolerance": FloatProperty(
             name="Stop Tolerance", default=1e-4, min=0.0, precision=6,
             description="The flow has converged when the gradient norm falls below this"),
@@ -196,6 +251,16 @@ def session_options(settings, net, obstacles, steps=None):
     )
     if settings.threads > 0:
         kwargs["threads"] = settings.threads
+    kwargs.update(
+        method=settings.method.lower(), hencky_weight=settings.hencky_weight,
+        near_pair=settings.near_pair,
+        second_neighbour_rule=settings.second_neighbour_rule.lower(),
+        stuck_retry_chord=settings.stuck_retry_chord,
+        back_projection=settings.back_projection,
+        newton_polish=settings.newton_polish_threshold if settings.newton_polish else None,
+        projection_early_abort=settings.projection_early_abort,
+        second_order_correction=settings.second_order_correction,
+        mg_max_threads=settings.mg_max_threads if settings.mg_max_threads > 0 else None)
     if settings.planar:
         kwargs["planar_axis"] = settings.planar_axis.lower()
     if obstacles:
@@ -215,6 +280,21 @@ def read_network(obj, settings):
         keep_groups=settings.subdivide, keep_backup=settings.subdivide)
 
 
+def check_method(settings, net):
+    """A soft method has no hard constraints: pins, tangents and growth are refused."""
+    if settings.method == 'PROJECTED_GRADIENT':
+        return
+    label = dict((i[0], i[1]) for i in METHOD_ITEMS)[settings.method]
+    if net.pinned or net.tangent:
+        raise io.CurveInputError(
+            "{}: pins and tangent constraints need Method: Projected Gradient ({} solves the "
+            "soft problem without hard constraints)".format(net.obj.name, label))
+    if settings.grow_factor != 1.0:
+        raise io.CurveInputError(
+            "Grow/Shrink Factor needs Method: Projected Gradient ({} has no hard length "
+            "constraint to move)".format(label))
+
+
 def make_session(obj, settings, depsgraph, steps=None):
     """``(network, session)`` for ``obj``. Raises ``io.CurveInputError`` (message for the user)
     for unusable input, including everything the library rejects."""
@@ -225,6 +305,7 @@ def make_session(obj, settings, depsgraph, steps=None):
             raise io.CurveInputError(
                 "Live Subdivision needs the whole mesh to be the curve network (no faces, no "
                 "ignored loose vertices); turn it off or clean the mesh")
+        check_method(settings, net)
         objects = io.obstacle_objects(settings.obstacle_object, settings.obstacle_collection)
         obstacles = io.read_obstacles(objects, net, depsgraph)
         options = session_options(settings, net, obstacles, steps)
@@ -426,14 +507,21 @@ def draw_options(layout, settings, obj):
     col = layout.column(heading="Energy")
     col.prop(settings, "alpha")
     col.prop(settings, "beta")
-    layout.prop(settings, "length")
+    soft = settings.method != 'PROJECTED_GRADIENT'
+    layout.prop(settings, "method")
+    if soft:
+        layout.prop(settings, "hencky_weight")
     sub = layout.column()
-    sub.active = settings.length != 'FREE'
+    sub.active = not soft
+    sub.prop(settings, "length")
+    sub = layout.column()
+    sub.active = settings.length != 'FREE' and not soft
     sub.prop(settings, "grow_factor")
     sub.prop(settings, "grow_rate")
     layout.prop(settings, "space")
     box = layout.box()
-    box.label(text="Pins")
+    box.active = not soft
+    box.label(text="Pins" if not soft else "Pins (Projected Gradient only)")
     if is_mesh:
         box.prop_search(settings, "pin_group", obj, "vertex_groups")
         box.prop_search(settings, "tangent_group", obj, "vertex_groups")
@@ -466,6 +554,30 @@ def draw_options(layout, settings, obj):
     layout.prop(settings, "line_search")
     layout.prop(settings, "backend")
     layout.prop(settings, "threads")
+
+
+def draw_advanced(layout, settings):
+    """The advanced options (a sub-panel of the sidebar panel, a closed panel in the redo
+    panel)."""
+    layout.use_property_split = True
+    layout.use_property_decorate = False
+    layout.prop(settings, "near_pair")
+    sub = layout.column()
+    sub.active = settings.near_pair
+    sub.prop(settings, "second_neighbour_rule")
+    layout.prop(settings, "stuck_retry_chord")
+    hard = settings.method == 'PROJECTED_GRADIENT'
+    col = layout.column()
+    col.active = hard
+    col.prop(settings, "back_projection")
+    row = col.row(heading="Newton Polish")
+    row.prop(settings, "newton_polish", text="")
+    sub = row.row()
+    sub.active = settings.newton_polish
+    sub.prop(settings, "newton_polish_threshold", text="")
+    col.prop(settings, "projection_early_abort")
+    col.prop(settings, "second_order_correction")
+    layout.prop(settings, "mg_max_threads")
 
 
 def _report_warnings(operator, warnings):
@@ -511,6 +623,10 @@ class OBJECT_OT_ddg_repulsive_flow(bpy.types.Operator):
     def draw(self, context):
         self.layout.prop(self, "steps")
         draw_options(self.layout, self, context.active_object)
+        header, body = self.layout.panel("ddg_repulsive_advanced", default_closed=True)
+        header.label(text="Advanced")
+        if body is not None:
+            draw_advanced(body, self)
 
     def execute(self, context):
         obj = context.active_object
@@ -690,12 +806,30 @@ class VIEW3D_PT_ddg_repulsive(bpy.types.Panel):
         draw_options(layout, context.scene.ddg_repulsive, context.active_object)
 
 
+class VIEW3D_PT_ddg_repulsive_advanced(bpy.types.Panel):
+    bl_label = "Advanced"
+    bl_idname = "VIEW3D_PT_ddg_repulsive_advanced"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "DDG"
+    bl_parent_id = "VIEW3D_PT_ddg_repulsive"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return _LIVE["flow"] is None
+
+    def draw(self, context):
+        draw_advanced(self.layout, context.scene.ddg_repulsive)
+
+
 CLASSES = (
     DDG_PG_repulsive_settings,
     OBJECT_OT_ddg_repulsive_flow,
     OBJECT_OT_ddg_repulsive_live,
     OBJECT_OT_ddg_repulsive_live_finish,
     VIEW3D_PT_ddg_repulsive,
+    VIEW3D_PT_ddg_repulsive_advanced,
 )
 
 

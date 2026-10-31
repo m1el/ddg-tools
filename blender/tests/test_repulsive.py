@@ -1083,6 +1083,109 @@ def beta_not_above_alpha_is_a_readable_error():
 OPTIONS = ()
 
 
+# ----------------------------------------------------------------------------------------------
+# Method and advanced options
+
+
+@test
+def advanced_defaults_equal_the_library_and_are_mapped():
+    op = module(".repulsive_operator")
+    assert hasattr(bpy.types, "VIEW3D_PT_ddg_repulsive_advanced"), "the sub-panel is not registered"
+    sub = bpy.types.VIEW3D_PT_ddg_repulsive_advanced
+    assert sub.bl_parent_id == "VIEW3D_PT_ddg_repulsive" and 'DEFAULT_CLOSED' in sub.bl_options
+    obj = trefoil(30)
+    settings = bpy.context.scene.ddg_repulsive
+    net = op.read_network(obj, settings)
+    kwargs = op.session_options(settings, net, [])
+    defaults = ddg().repulsive_defaults()
+    for name in ("method", "hencky_weight", "near_pair", "second_neighbour_rule",
+                 "stuck_retry_chord", "back_projection", "newton_polish",
+                 "projection_early_abort", "second_order_correction", "mg_max_threads"):
+        assert kwargs[name] == defaults[name], (name, kwargs[name], defaults[name])
+    # Every setting maps to a different option when changed.
+    settings.method = 'LBFGS'
+    settings.hencky_weight = 3.0
+    settings.near_pair = False
+    settings.second_neighbour_rule = 'TWO_SIDED'
+    settings.stuck_retry_chord = False
+    settings.back_projection = False
+    settings.newton_polish = False
+    settings.projection_early_abort = False
+    settings.second_order_correction = True
+    settings.mg_max_threads = 0
+    kwargs = op.session_options(settings, net, [])
+    assert (kwargs["method"], kwargs["hencky_weight"], kwargs["near_pair"]) == ("lbfgs", 3.0, False)
+    assert kwargs["second_neighbour_rule"] == "two_sided"
+    assert kwargs["newton_polish"] is None and kwargs["mg_max_threads"] is None
+    assert not kwargs["stuck_retry_chord"] and not kwargs["back_projection"]
+    assert not kwargs["projection_early_abort"] and kwargs["second_order_correction"]
+    settings.newton_polish = True
+    settings.newton_polish_threshold = 50.0
+    assert op.session_options(settings, net, [])["newton_polish"] == 50.0
+    net.discard_backup()
+    for name in ("method", "hencky_weight", "near_pair", "second_neighbour_rule",
+                 "stuck_retry_chord", "back_projection", "newton_polish",
+                 "newton_polish_threshold", "projection_early_abort", "second_order_correction",
+                 "mg_max_threads"):
+        settings.property_unset(name)
+
+
+@test
+def soft_methods_lower_the_energy():
+    for method in ('LBFGS', 'NCG'):
+        reset()
+        obj = edge_mesh([(x, y, 0.3 * z) for x, y, z in trefoil_points(40)], ring_edges(40))
+        p0, e = pts_of(obj), edge_array(obj)
+        e0 = energy_of(p0, e)
+        run(steps=15, method=method)
+        e1 = energy_of(pts_of(obj), e)
+        assert e1 < e0, (method, e0, e1)
+        assert max_move(p0, pts_of(obj)) > 1e-3, method
+        print("INFO {} energy {:.4f} -> {:.4f}".format(method, e0, e1))
+
+
+@test
+def advanced_options_run():
+    for options in (
+        dict(near_pair=False), dict(second_neighbour_rule='ONE_SIDED'),
+        dict(second_neighbour_rule='TWO_SIDED'), dict(stuck_retry_chord=False),
+        dict(back_projection=False), dict(newton_polish=False),
+        dict(newton_polish_threshold=10.0), dict(projection_early_abort=False),
+        dict(second_order_correction=True), dict(mg_max_threads=0), dict(mg_max_threads=4),
+        dict(method='LBFGS', hencky_weight=1.0),
+    ):
+        reset()
+        obj = trefoil(30)
+        p0 = pts_of(obj)
+        run(steps=4, **options)
+        assert max_move(p0, pts_of(obj)) > 1e-4, options
+
+
+@test
+def soft_methods_refuse_pins_tangents_and_growth():
+    for method in ('LBFGS', 'NCG'):
+        reset()
+        obj = trefoil(30)
+        group = obj.vertex_groups.new(name="pins")
+        group.add([0, 10], 1.0, 'REPLACE')
+        before = pts_of(obj)
+        text = refused(steps=3, method=method, pin_group="pins")
+        assert "Projected Gradient" in text and "pins" in text, text
+        text = refused(steps=3, method=method, tangent_group="pins")
+        assert "Projected Gradient" in text, text
+        text = refused(steps=3, method=method, grow_factor=1.5)
+        assert "Grow" in text and "Projected Gradient" in text, text
+        assert max_move(before, pts_of(obj)) == 0.0, "a refused run leaves the object alone"
+    # The same pins work with the projected gradient.
+    run(steps=3, pin_group="pins")
+    # Selected control points of a Bezier curve are pins as well.
+    reset()
+    curve = make_bezier_curve(trefoil_points(12))
+    curve.data.splines[0].bezier_points[0].select_control_point = True
+    text = refused(steps=3, method='LBFGS')
+    assert "Projected Gradient" in text, text
+
+
 def main():
     global ARGS, OPTIONS
     parser = argparse.ArgumentParser()
