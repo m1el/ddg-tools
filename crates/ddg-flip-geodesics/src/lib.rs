@@ -7,3 +7,61 @@
 //! > <https://doi.org/10.1145/3414685.3417839>
 //!
 //! The contract of this crate is `SPEC.md` next to its `Cargo.toml`.
+//!
+//! Everything is generic over [`ddg_intrinsic::Triangulation`] (F1), so it runs on the
+//! signposts of `ddg-intrinsic` and on the integer coordinates of `ddg-integer-coords`
+//! alike: it reads the connectivity ([`ddg_intrinsic::Complex`]) and the edge lengths, and
+//! changes the triangulation only by its flips.
+//!
+//! # What is here
+//!
+//! * Edge networks ([`Network`], [`GeodesicNetwork`]): paths and loops as sequences of
+//!   directed edges ([`Segment`], [`EdgePath`]), the order of the segments that share an edge
+//!   (the layering, paper Fig. 11), pinned vertices, and the validity check including
+//!   non-crossing ([`Network::check`]).
+//! * Initial paths: through a vertex sequence ([`path_from_vertices`]) and the shortest path
+//!   in the edge graph ([`dijkstra_path`]).
+//! * The geometry of a joint ([`JointGeometry`]): both wedge angles summed corner by corner
+//!   (Eq. 1), boundary wedges, the Δ-complex cases (self-edges incident on a wedge twice,
+//!   out-and-back joints of degree zero), the classification of SPEC §3, flexible and
+//!   blocked wedges.
+//! * The geodesic certificate ([`certify()`], SPEC §7 layer 1a).
+//!
+//! Not yet here: FlipOut itself (Alg. 1, 2; [`ShortenOptions`] and [`ShortenReport`] are its
+//! interface), extraction on the input mesh, Bézier curves, the constrained Delaunay
+//! triangulation.
+//!
+//! # The reference implementation
+//!
+//! The authors' implementation in geometry-central (© 2017–2019 Nicholas Sharp and the
+//! geometry-central contributors, MIT; notice in `LICENSES/geometry-central-MIT.txt`) was read
+//! for the details the paper leaves out; places that follow it are cited `gc: <file>:<line>`
+//! (SPEC header). Taken from it: the default layering, the outermost-segment convention, the
+//! test for a wedge blocked by a path end, the tolerances and Dijkstra's tie order.
+//! Different: wedge angles are summed from corner angles rather than read from signposts (F2),
+//! the out-and-back joint is resolved by the layering, crossing inputs are refused, `closed`
+//! and pinning are explicit (F9, F10).
+//!
+//! # Conventions
+//!
+//! Those of the workspace (`CLAUDE.md`): `f64`, stored indices `u32`, ids at function
+//! boundaries `usize`; errors name the element; nothing is repaired or normalized silently.
+
+#![warn(missing_docs)]
+
+pub mod certify;
+mod error;
+pub mod init;
+pub mod network;
+pub mod report;
+pub mod wedge;
+
+pub use certify::{CertifyOptions, GeodesicCertificate, JointFailure, JointStatus, certify};
+pub use error::FlipError;
+pub use init::{dijkstra_path, path_from_vertices};
+pub use network::{
+    EdgePath, GeodesicNetwork, Joint, Layering, Network, Segment, SegmentId, SegmentInfo,
+    SegmentRef,
+};
+pub use report::{ShortenOptions, ShortenReport, ShortenStatus};
+pub use wedge::{EdgeEnd, JointGeometry, Side, Turn, VertexStar, Wedge, wedge_angle};
