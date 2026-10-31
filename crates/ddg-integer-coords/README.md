@@ -24,8 +24,35 @@ shares.
 
 **Not yet** (later work packages): `impl Triangulation for IntegerTriangulation` (needs flips,
 splits and extraction of positions), flips and Delaunay flipping (WP3), edge split and removal
-(WP3), face split and App. A (WP4), the geometry of the crossings and strip unfolding (WP2),
-the common subdivision (WP5), refinement (WP6), transfer (WP7).
+(WP3), face split and App. A (WP4), the common subdivision (WP5), refinement (WP6), transfer
+(WP7).
+
+## Geometry of the crossings (WP2)
+
+Connectivity comes from the integers; floating point decides only where the crossings lie. Both
+directions unfold a strip of triangles (`it-unfold-apex`) and cut one straight segment with its
+interior edges (`it-ray-edge-intersection`); a parameter outside `[0, 1]` by rounding is clamped
+and counted (`StripReport::clamped_crossings`, SPEC I5).
+
+| | |
+|---|---|
+| `extract_geometric_curve(ζ)` | Supp. Alg. 2: the segment through a crossing, its input edge (Alg. 3), `u_start`/`u_end` from the places of its ends (I17), `GeometricCrossing { crossing, input_edge, u, v, sin_angle }` (`u` in the input edge's direction, `v` along the crossed halfedge, `sin_angle` the conditioning). `extract_geometric_crossing(ζ)`: one crossing of it. `segment_geometry`: the strip of a given `CurveSegment`. |
+| `extract_edge_geometry(h⁰)` | Alg. 4 with positions: WP1's `InputEdgePath`, the parameter of every vertex on it, the crossings of every piece. |
+| `extract_intrinsic_edge(e, &EdgeTraceOptions)` | `ExtractIntrinsicEdge` (FlipOut R2), returned as the signposts' `EdgeTrace`: each crossing's input edge identified from the integers (Alg. 1 + 3, memoized along the walks), the input faces followed exactly from the tail's roundabout or `q⁰` to the head's (consecutive input edges must bound a common face), positions from the straight segment through those input faces. `mismatch` and `clamp` are reported, never a failure. `_with_report` adds the `StripReport`. It is `trace_edge_on_input` of the shared interface. |
+
+Tests (`tests/geometry.rs`, the 266 states of `tests/states.rs`, 37 of them with self-edges):
+`extract_intrinsic_edge` of all 678 806 edges crosses exactly the input halfedges the signposts'
+`trace_edge` crosses, in the same order (272 651 crossings, first faces and `along` equal); the
+two directions of every crossing (Alg. 2 over `T¹`, `extract_intrinsic_edge` over `T⁰`) and the
+signposts' overlay agree to `|Δ| sin θ ≤ 3.5e-10`; raw `|Δt|` exceeds `1e-9` at 2 grazing
+crossings only (in 3 states; sin θ = 1.4e-4 and 9.3e-4, `|Δt|` up to 5.1e-8); 0 clamps; mutated integers give
+results or errors, never panics.
+
+Cost (`examples/extract_cost.rs`, after Delaunay flipping, release, one pinned core, load
+average 10.7 from other jobs, best of five): all edges by `extract_intrinsic_edge` spot 0.33 ms
+(37 ns per edge + crossing), camelbad 5.3 ms (112 ns); the signposts' `trace_edges` 0.20 / 3.3 ms.
+All input edges by `extract_edge_geometry` 7.0 / 31 ms, of which WP1's combinatorial
+`extract_edge` is 6.4 / 27 ms (`input_directions` at both ends of every edge).
 
 ## The certificate
 

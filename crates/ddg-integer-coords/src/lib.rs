@@ -45,9 +45,17 @@
 //! * [`remove`]: [`IntegerTriangulation::remove_vertex`] (Alg. 8, I8, I24, I27).
 //! * [`interface`]: `impl Triangulation for IntegerTriangulation`.
 //!
-//! Not yet: face splits (WP4), splits of crossed edges and the path of an edge over the input
-//! mesh through the shared interface (they need the geometric crossings of WP2), the common
-//! subdivision (WP5).
+//! # Geometry of the crossings (work package WP2)
+//!
+//! * [`geometry`]: the positions of the crossings, from straight segments through unfolded
+//!   strips (clamps counted, SPEC I5): [`IntegerTriangulation::extract_geometric_curve`]
+//!   (Alg. 2), [`IntegerTriangulation::extract_geometric_crossing`],
+//!   [`IntegerTriangulation::extract_edge_geometry`] (Alg. 4 with positions), and
+//!   [`IntegerTriangulation::extract_intrinsic_edge`] (`ExtractIntrinsicEdge`, the path of an
+//!   edge over the input mesh; the shared interface's `trace_edge_on_input`).
+//!
+//! Not yet: face splits (WP4), splits of crossed edges through the shared interface (they need
+//! the geometric crossings of WP2 wired into the split), the common subdivision (WP5).
 //!
 //! # The reference implementation
 //!
