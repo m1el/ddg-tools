@@ -140,6 +140,131 @@ theorem exists_params_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = tr
     beq_iff_eq] at *
   omega
 
+/-! ## Faces given by their arcs -/
+
+/-- The corner data of a face (`c_A, c_B, c_C`, `e_A, e_B, e_C`) is admissible: nonnegative, at most
+one corner emanates, and no arc cuts an emanating corner. Sides: `AB` carries `c_A + c_B + e_C`
+crossings, and so on. [formula: ic-corner-coordinates] -/
+def FaceParams (cA cB cC eA eB eC : ℤ) : Prop :=
+  0 ≤ cA ∧ 0 ≤ cB ∧ 0 ≤ cC ∧ 0 ≤ eA ∧ 0 ≤ eB ∧ 0 ≤ eC ∧
+    ((eA = 0 ∧ eB = 0 ∧ (eC = 0 ∨ cC = 0)) ∨ (eB = 0 ∧ eC = 0 ∧ (eA = 0 ∨ cA = 0)) ∨
+      (eC = 0 ∧ eA = 0 ∧ (eB = 0 ∨ cB = 0)))
+
+/-- Relabelling the corners keeps admissibility. -/
+theorem FaceParams.swap {cA cB cC eA eB eC : ℤ} (h : FaceParams cA cB cC eA eB eC) :
+    FaceParams cB cA cC eB eA eC := by unfold FaceParams at *; omega
+
+/-- Relabelling the corners keeps admissibility. -/
+theorem FaceParams.rot {cA cB cC eA eB eC : ℤ} (h : FaceParams cA cB cC eA eB eC) :
+    FaceParams cB cC cA eB eC eA := by unfold FaceParams at *; omega
+
+/-- Eq. 2 on a face given by its arcs returns the arcs from the corner. [formula: ic-emanating] -/
+theorem emanating_eval {o x y cA cB cC eA eB eC : ℤ} (hp : FaceParams cA cB cC eA eB eC)
+    (ho : nPlus o = cA + cB + eC) (hx : nPlus x = cC + cA + eB) (hy : nPlus y = cB + cC + eA) :
+    emanating o x y = eC := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, hc⟩ := hp
+  simp only [emanating]
+  rw [ho, hx, hy]
+  omega
+
+/-- Eq. 1 (before halving) on a face given by its arcs is twice the arcs around the corner.
+[formula: ic-corner-coordinates] -/
+theorem numerator_eval {o x y cA cB cC eA eB eC : ℤ} (hp : FaceParams cA cB cC eA eB eC)
+    (ho : nPlus o = cA + cB + eC) (hx : nPlus x = cC + cA + eB) (hy : nPlus y = cB + cC + eA) :
+    cornerNumerator o x y = 2 * cC := by
+  obtain ⟨h1, h2, h3, h4, h5, h6, hc⟩ := hp
+  simp only [cornerNumerator, emanating]
+  rw [ho, hx, hy]
+  omega
+
+/-- [formula: ic-corner-coordinates] -/
+theorem cornerCoord_of_numerator {o x y cC : ℤ} (hn : cornerNumerator o x y = 2 * cC) :
+    cornerCoord o x y = cC := by
+  simp only [cornerCoord]; rw [hn]; omega
+
+/-- **Eq. 1 and 2 on a face given by its arcs**, at corner `C` (opposite the side `o` between `A`
+and `B`; `x` the side between `C` and `A`, `y` between `B` and `C`).
+[formula: ic-corner-coordinates] [formula: ic-emanating] -/
+theorem coord_eval {o x y cA cB cC eA eB eC : ℤ} (hp : FaceParams cA cB cC eA eB eC)
+    (ho : nPlus o = cA + cB + eC) (hx : nPlus x = cC + cA + eB) (hy : nPlus y = cB + cC + eA) :
+    cornerCoord o x y = cC ∧ emanating o x y = eC :=
+  ⟨cornerCoord_of_numerator (numerator_eval hp ho hx hy), emanating_eval hp ho hx hy⟩
+
+/-- [formula: ic-corner-coordinates] -/
+theorem cornerCoord_nonneg (a b c : ℤ) : 0 ≤ cornerCoord a b c := by
+  have := cornerNumerator_nonneg a b c
+  simp only [cornerCoord]; omega
+
+/-- **A valid face is a face given by its arcs**, with `c`, `e` from Eq. 1, 2.
+[formula: ic-face-validity] -/
+theorem params_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
+    ∃ c0 c1 c2 e0 e1 e2, FaceParams c0 c1 c2 e0 e1 e2 ∧ nPlus n0 = c0 + c1 + e2 ∧
+      nPlus n1 = c1 + c2 + e0 ∧ nPlus n2 = c2 + c0 + e1 := by
+  refine ⟨cornerCoord n1 n0 n2, cornerCoord n2 n1 n0, cornerCoord n0 n2 n1, emanating n1 n0 n2,
+    emanating n2 n1 n0, emanating n0 n2 n1, ?_, exists_params_of_faceValid h⟩
+  have k0 : emanating n1 n0 n2 = 0 ∨
+      (cornerCoord n1 n0 n2 = 0 ∧ emanating n0 n2 n1 = 0 ∧ emanating n2 n1 n0 = 0) := by
+    rcases (emanating_nonneg n1 n0 n2).eq_or_lt with h0 | h0
+    · exact Or.inl h0.symm
+    · have := emanating_exclusive h0
+      refine Or.inr ⟨?_, this.1, this.2⟩
+      simp only [cornerCoord, cornerNumerator_eq_zero_of_emanating h0]; rfl
+  have k1 : emanating n2 n1 n0 = 0 ∨
+      (cornerCoord n2 n1 n0 = 0 ∧ emanating n1 n0 n2 = 0 ∧ emanating n0 n2 n1 = 0) := by
+    rcases (emanating_nonneg n2 n1 n0).eq_or_lt with h0 | h0
+    · exact Or.inl h0.symm
+    · have := emanating_exclusive h0
+      refine Or.inr ⟨?_, this.1, this.2⟩
+      simp only [cornerCoord, cornerNumerator_eq_zero_of_emanating h0]; rfl
+  have k2 : emanating n0 n2 n1 = 0 ∨
+      (cornerCoord n0 n2 n1 = 0 ∧ emanating n2 n1 n0 = 0 ∧ emanating n1 n0 n2 = 0) := by
+    rcases (emanating_nonneg n0 n2 n1).eq_or_lt with h0 | h0
+    · exact Or.inl h0.symm
+    · have := emanating_exclusive h0
+      refine Or.inr ⟨?_, this.1, this.2⟩
+      simp only [cornerCoord, cornerNumerator_eq_zero_of_emanating h0]; rfl
+  have g0 := cornerCoord_nonneg n1 n0 n2
+  have g1 := cornerCoord_nonneg n2 n1 n0
+  have g2 := cornerCoord_nonneg n0 n2 n1
+  have f0 := emanating_nonneg n1 n0 n2
+  have f1 := emanating_nonneg n2 n1 n0
+  have f2 := emanating_nonneg n0 n2 n1
+  clear h
+  generalize cornerCoord n1 n0 n2 = c0 at *
+  generalize cornerCoord n2 n1 n0 = c1 at *
+  generalize cornerCoord n0 n2 n1 = c2 at *
+  generalize emanating n1 n0 n2 = e0 at *
+  generalize emanating n2 n1 n0 = e1 at *
+  generalize emanating n0 n2 n1 = e2 at *
+  unfold FaceParams
+  omega
+
+/-! ## Edge flip -/
+
+/-- **Eq. 3 on two faces given by their arcs**: every corner quantity of Eq. 3 is the arc count it
+names. [formula: ic-flip-normal] -/
+theorem flipDoubled_eval {nij njk nki nil nlj ci cj ck ei ej ek cj' ci' cl ej' ei' el : ℤ}
+    (p1 : FaceParams ci cj ck ei ej ek) (p2 : FaceParams cj' ci' cl ej' ei' el)
+    (h_ij : nPlus nij = ci + cj + ek) (h_jk : nPlus njk = cj + ck + ei)
+    (h_ki : nPlus nki = ck + ci + ej) (h_ij' : nPlus nij = cj' + ci' + el)
+    (h_il : nPlus nil = ci' + cl + ej') (h_lj : nPlus nlj = cl + cj' + ei') :
+    flipDoubled nij njk nki nil nlj =
+      2 * cl + 2 * ck + iabs (cj' - cj) + iabs (ci' - ci) - el - ek + 2 * (ei' + ei + ej' + ej) := by
+  have q1 : FaceParams ci' cj' cl ei' ej' el := p2.swap
+  have q2 : FaceParams ci' cl cj' ei' el ej' := p2.rot
+  have q3 : FaceParams cj' cl ci' ej' el ei' := p2.rot.rot.swap
+  have q4 : FaceParams cj ci ck ej ei ek := p1.swap
+  have q5 : FaceParams ci ck cj ei ek ej := p1.rot.rot.swap
+  have q6 : FaceParams cj ck ci ej ek ei := p1.rot
+  have l1 := coord_eval (o := nij) (x := nil) (y := nlj) q1 (by linarith) (by linarith) (by linarith)
+  have l2 := coord_eval (o := nil) (x := nij) (y := nlj) q2 (by linarith) (by linarith) (by linarith)
+  have l3 := coord_eval (o := nlj) (x := nij) (y := nil) q3 (by linarith) (by linarith) (by linarith)
+  have r1 := coord_eval (o := nij) (x := njk) (y := nki) q4 (by linarith) (by linarith) (by linarith)
+  have r2 := coord_eval (o := nki) (x := nij) (y := njk) q5 (by linarith) (by linarith) (by linarith)
+  have r3 := coord_eval (o := njk) (x := nij) (y := nki) q6 (by linarith) (by linarith) (by linarith)
+  simp only [flipDoubled]
+  rw [l1.1, l2.1, l3.1, r1.1, r2.1, r3.1, l1.2, l2.2, l3.2, r1.2, r2.2, r3.2]
+
 /-! ## Crossings -/
 
 /-- Reversal of a combinatorial crossing is an involution. [formula: ic-reverse-crossing] -/

@@ -555,3 +555,314 @@ theorem canon_valid {n c : Fin 3 → ℕ} (h : Admissible n c) : (⟨n, canon n 
   ⟨canon_normal h, canon_symm h, canon_disjoint h⟩
 
 end DdgProofs.IntegerCoords
+
+namespace DdgProofs.IntegerCoords
+
+open Ddg.IntegerCoords (cornerNumerator cornerCoord emanating nPlus faceValid)
+
+/-! ## Counting arcs by type: Eq. 1 and 2 -/
+
+/-- The side of a boundary point (`none` for a corner). -/
+def Pt.sideIdx : Pt → Option (Fin 3)
+  | .corner _ => none
+  | .side k _ => some k
+
+namespace FaceModel
+
+/-- Number of arcs that cut corner `k` (counted on side `k`: crossings whose partner is on side
+`k + 2`). -/
+def cutCount (M : FaceModel) (k : Fin 3) : ℕ :=
+  ((Finset.range (M.n k)).filter (fun p => (M.partner k p).sideIdx = some (k + 2))).card
+
+/-- Number of arcs from corner `k` to the opposite side `k + 1`. -/
+def emCount (M : FaceModel) (k : Fin 3) : ℕ :=
+  ((Finset.range (M.n (k + 1))).filter (fun p => M.partner (k + 1) p = .corner k)).card
+
+end FaceModel
+
+lemma Admissible.le {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) : c k + c (k + 1) ≤ n k :=
+  h.1 k
+
+/-- The side counts of an admissible model in terms of the corner and emanating counts. -/
+lemma Admissible.n_eq {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) :
+    n k = c k + c (k + 1) + em n c (k + 2) := by
+  have := h.1 k
+  unfold em; rw [fin3_add_two_add_one, fin3_add_two_add_two]; omega
+
+/-- The corner data of an admissible model, as integers, satisfies `FaceParams`
+(corners `k, k + 1, k + 2`). -/
+lemma Admissible.faceParams {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) :
+    FaceParams (c k) (c (k + 1)) (c (k + 2)) (em n c k) (em n c (k + 1)) (em n c (k + 2)) := by
+  obtain ⟨-, h2, h3⟩ := h
+  have b0 := h2 k; have b1 := h2 (k + 1); have b2 := h2 (k + 2)
+  have d0 := h3 k; have d1 := h3 (k + 1); have d2 := h3 (k + 2)
+  simp only [fin3_add_one_add_one, fin3_add_one_add_two, fin3_add_two_add_one,
+    fin3_add_two_add_two] at b1 b2 d1 d2
+  unfold FaceParams
+  omega
+
+/-- **Eq. 1 and 2 of an admissible model's side counts are its corner and emanating counts.** -/
+lemma Admissible.coords {n c : Fin 3 → ℕ} (h : Admissible n c) (k : Fin 3) :
+    cornerCoord (n (k + 1)) (n k) (n (k + 2)) = c k ∧
+      emanating (n (k + 1)) (n k) (n (k + 2)) = em n c k := by
+  have hp := (h.faceParams k).rot
+  have e0 := h.n_eq k
+  have e1 := h.n_eq (k + 1)
+  have e2 := h.n_eq (k + 2)
+  simp only [fin3_add_one_add_one, fin3_add_one_add_two, fin3_add_two_add_one,
+    fin3_add_two_add_two] at e1 e2
+  have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
+  refine coord_eval (cA := (c (k + 1) : ℤ)) (cB := (c (k + 2) : ℤ)) hp ?_ ?_ ?_ <;>
+    rw [np] <;> omega
+
+namespace FaceModel
+
+variable {M : FaceModel}
+
+lemma canon_sideIdx {n c : Fin 3 → ℕ} (k : Fin 3) (p : ℕ) :
+    (canon n c k p).sideIdx = some (k + 2) ↔ p < c k := by
+  unfold canon
+  split_ifs with e1 e2
+  · simp [Pt.sideIdx, e1]
+  · simp [Pt.sideIdx, e1]
+  · simp only [Pt.sideIdx, Option.some.injEq, e1, iff_false]
+    exact fun e => fin3_add_two_ne_add_one k e.symm
+
+lemma canon_corner {n c : Fin 3 → ℕ} (k : Fin 3) (p : ℕ) :
+    canon n c (k + 1) p = .corner k ↔ c (k + 1) ≤ p ∧ p + c (k + 2) < n (k + 1) := by
+  unfold canon
+  rw [fin3_add_one_add_two, fin3_add_one_add_one]
+  split_ifs with e1 e2
+  · simp only [false_iff]; omega
+  · simp only [true_iff]; omega
+  · simp only [false_iff]; omega
+
+/-- **`ic-corner-coordinates`, `ic-emanating`: Eq. 1 and 2 count the arcs of a face model by type.**
+In a valid face model, Eq. 1 of the side counts at corner `k` is the number of arcs that cut
+corner `k`, and Eq. 2 the number of arcs from corner `k` to the opposite side; both are
+nonnegative integers (the numerator of Eq. 1 is even).
+[formula: ic-corner-coordinates] [formula: ic-emanating] -/
+theorem Valid.counts (hM : M.Valid) (k : Fin 3) :
+    cornerNumerator (M.n (k + 1)) (M.n k) (M.n (k + 2)) = 2 * (M.cutCount k : ℤ) ∧
+      cornerCoord (M.n (k + 1)) (M.n k) (M.n (k + 2)) = M.cutCount k ∧
+      emanating (M.n (k + 1)) (M.n k) (M.n (k + 2)) = M.emCount k := by
+  obtain ⟨c, hc, hM'⟩ := hM.eq_canon
+  have hcut : M.cutCount k = c k := by
+    unfold cutCount
+    rw [Finset.filter_congr (q := fun p => p < c k)
+      (fun p hp => by rw [hM' k p (Finset.mem_range.mp hp)]; exact canon_sideIdx k p)]
+    have : (Finset.range (M.n k)).filter (fun p => p < c k) = Finset.range (c k) := by
+      ext p; simp only [Finset.mem_filter, Finset.mem_range]; have := hc.le k; omega
+    rw [this, Finset.card_range]
+  have hem : M.emCount k = em M.n c k := by
+    unfold emCount
+    rw [Finset.filter_congr (q := fun p => c (k + 1) ≤ p ∧ p + c (k + 2) < M.n (k + 1))
+      (fun p hp => by rw [hM' (k + 1) p (Finset.mem_range.mp hp)]; exact canon_corner k p)]
+    have : (Finset.range (M.n (k + 1))).filter (fun p => c (k + 1) ≤ p ∧ p + c (k + 2) < M.n (k + 1))
+        = Finset.Ico (c (k + 1)) (M.n (k + 1) - c (k + 2)) := by
+      ext p; simp only [Finset.mem_filter, Finset.mem_range, Finset.mem_Ico]; omega
+    rw [this, Nat.card_Ico]; unfold em; omega
+  have hco := hc.coords k
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hcut]
+    have hn := numerator_eval (o := (M.n (k + 1) : ℤ)) (x := (M.n k : ℤ)) (y := (M.n (k + 2) : ℤ))
+      ((hc.faceParams k).rot) ?_ ?_ ?_
+    · exact hn
+    all_goals
+      have e0 := hc.n_eq k
+      have e1 := hc.n_eq (k + 1)
+      have e2 := hc.n_eq (k + 2)
+      simp only [fin3_add_one_add_one, fin3_add_one_add_two, fin3_add_two_add_one,
+        fin3_add_two_add_two] at e1 e2
+      simp only [nPlus]; omega
+  · rw [hcut]; exact hco.1
+  · rw [hem]; exact hco.2
+
+/-- Admissible corner counts are Eq. 1 of the side counts. -/
+lemma _root_.DdgProofs.IntegerCoords.Admissible.c_eq {n c : Fin 3 → ℕ} (hc : Admissible n c)
+    (k : Fin 3) : (c k : ℤ) = cornerCoord (n (k + 1)) (n k) (n (k + 2)) := (hc.coords k).1.symm
+
+/-- **`ic-face-decoding`, uniqueness (Fig. 11).** Two valid face models with the same side counts
+have the same arcs: the normal coordinates of the three sides determine the face model (up to the
+order-preserving relabelling of the crossings, which is built into the indexing by position).
+[formula: ic-face-decoding] -/
+theorem Valid.partner_eq {M' : FaceModel} (hM : M.Valid) (hM' : M'.Valid) (hn : M.n = M'.n)
+    (k : Fin 3) (p : ℕ) (hp : p < M.n k) : M.partner k p = M'.partner k p := by
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  obtain ⟨c', hc', e'⟩ := hM'.eq_canon
+  have hcc : c = c' := by
+    funext j
+    have h1 := hc.c_eq j
+    have h2 := hc'.c_eq j
+    rw [← hn] at h2
+    exact_mod_cast h1.trans h2.symm
+  rw [e k p hp, e' k p (hn ▸ hp), hn, hcc]
+
+/-- The admissible corner counts of a valid face are unique: they are Eq. 1. -/
+theorem Valid.canon_unique (hM : M.Valid) :
+    ∃! c, Admissible M.n c ∧ ∀ k p, p < M.n k → M.partner k p = canon M.n c k p := by
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  refine ⟨c, ⟨hc, e⟩, fun c' ⟨hc', e'⟩ => ?_⟩
+  funext j
+  have h1 := hc.c_eq j
+  have h2 := hc'.c_eq j
+  exact_mod_cast h2.trans h1.symm
+
+/-- **At most one corner emanates** (the combinatorial half of `ic-cevians-cross`): arcs from two
+different corners to their opposite sides interleave, so a valid model has emanating arcs at no
+more than one corner. [formula: ic-cevians-cross] -/
+theorem Valid.emanating_unique (hM : M.Valid) {k j : Fin 3} (hkj : k ≠ j) (hk : 0 < M.emCount k) :
+    M.emCount j = 0 := by
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  have ek := (hM.counts k).2.2
+  have ej := (hM.counts j).2.2
+  rw [(hc.coords k).2] at ek
+  rw [(hc.coords j).2] at ej
+  have hk' : 0 < em M.n c k := by omega
+  have h3 := hc.2.2 k hk'
+  have hj : j = k + 1 ∨ j = k + 2 := by
+    revert hkj
+    rcases fin3_cases k with rfl | rfl | rfl <;> rcases fin3_cases j with rfl | rfl | rfl <;> decide
+  rcases hj with rfl | rfl
+  · rw [h3.1] at ej; omega
+  · rw [h3.2] at ej; omega
+
+/-- **An emanating corner is cut by no arc** (Fig. 11, case 2). [formula: ic-cevians-cross] -/
+theorem Valid.cut_eq_zero_of_emanating (hM : M.Valid) {k : Fin 3} (hk : 0 < M.emCount k) :
+    M.cutCount k = 0 := by
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  have ek := (hM.counts k).2.2
+  have ck := (hM.counts k).2.1
+  rw [(hc.coords k).2] at ek
+  rw [(hc.coords k).1] at ck
+  have hk' : 0 < em M.n c k := by omega
+  have := hc.2.1 k hk'
+  omega
+
+/-- **`ic-face-decoding`, existence (Fig. 11).** Side counts `n` come from a valid face model if
+and only if the face is valid in the sense of Eq. 1 (the oracle's `faceValid`: the three numerators
+are even). [formula: ic-face-decoding] [formula: ic-face-validity] -/
+theorem exists_valid_iff (n : Fin 3 → ℕ) :
+    (∃ M : FaceModel, M.n = n ∧ M.Valid) ↔ faceValid (n 0) (n 1) (n 2) = true := by
+  constructor
+  · rintro ⟨M, rfl, hM⟩
+    have h0 := (hM.counts 0).1
+    have h1 := (hM.counts 1).1
+    have h2 := (hM.counts 2).1
+    obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
+    simp only [l1, l2, l3, l4, l5, l6] at h0 h1 h2
+    simp only [faceValid, h0, h1, h2, Bool.and_eq_true, beq_iff_eq]
+    omega
+  · intro hv
+    obtain ⟨c0, c1, c2, e0, e1, e2, hp, r0, r1, r2⟩ := params_of_faceValid hv
+    obtain ⟨g0, g1, g2, f0, f1, f2, hx⟩ := hp
+    have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
+    rw [np] at r0 r1 r2
+    let c : Fin 3 → ℕ := fun k => if k = 0 then c0.toNat else if k = 1 then c1.toNat else c2.toNat
+    have hc0 : (c 0 : ℤ) = c0 := by simp [c]; omega
+    have hc1 : (c 1 : ℤ) = c1 := by simp [c]; omega
+    have hc2 : (c 2 : ℤ) = c2 := by simp [c]; omega
+    have hadm : Admissible n c := by
+      obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
+      refine ⟨fun k => ?_, fun k => ?_, fun k => ?_⟩ <;>
+        rcases fin3_cases k with rfl | rfl | rfl <;> simp only [em, l1, l2, l3, l4, l5, l6] <;> omega
+    exact ⟨_, rfl, canon_valid hadm⟩
+
+end FaceModel
+
+/-! ## The oracle's decoding and pairing (Alg. 9) -/
+
+/-- A boundary point as the oracle writes it. -/
+def Pt.toOracle : Pt → Ddg.IntegerCoords.Pt
+  | .corner k => .corner k.val
+  | .side k p => .side k.val p
+
+/-- The oracle's `decode?` of a valid face returns `n⁺` and Eq. 1 per side and corner. -/
+lemma decode?_of_faceValid {n0 n1 n2 : ℤ} (h : faceValid n0 n1 n2 = true) :
+    ∃ d, Ddg.IntegerCoords.decode? n0 n1 n2 = some d ∧
+      d.n = (fun k => (nPlus (Ddg.IntegerCoords.side n0 n1 n2 k)).toNat) ∧
+      d.c = (fun k => (Ddg.IntegerCoords.faceCorner n0 n1 n2 k).toNat) := by
+  unfold Ddg.IntegerCoords.decode?
+  simp only [h, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+  split <;> exact ⟨_, rfl, rfl, rfl⟩
+
+/-- **The oracle's pairing is the face model** (`ic-face-decoding`, Alg. 9): for a valid face
+model, the oracle decodes the side counts and its `partner` returns the other end of every arc.
+[formula: ic-face-decoding] -/
+theorem FaceModel.Valid.oracle_partner {M : FaceModel} (hM : M.Valid) :
+    ∃ d, Ddg.IntegerCoords.decode? (M.n 0) (M.n 1) (M.n 2) = some d ∧
+      ∀ (k : Fin 3) (p : ℕ), p < M.n k →
+        Ddg.IntegerCoords.partner d.n d.c k.val p = (M.partner k p).toOracle := by
+  have hv := (exists_valid_iff M.n).1 ⟨M, rfl, hM⟩
+  obtain ⟨d, hd, hdn, hdc⟩ := decode?_of_faceValid hv
+  refine ⟨d, hd, fun k p hp => ?_⟩
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
+  obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
+  have hc0 := hc.c_eq 0
+  have hc1 := hc.c_eq 1
+  have hc2 := hc.c_eq 2
+  simp only [l1, l2, l3, l4, l5, l6] at hc0 hc1 hc2
+  have dn0 : d.n 0 = M.n 0 := by
+    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+  have dn1 : d.n 1 = M.n 1 := by
+    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+  have dn2 : d.n 2 = M.n 2 := by
+    rw [hdn]; simp [Ddg.IntegerCoords.side, np]
+  have dc0 : d.c 0 = c 0 := by
+    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
+      Ddg.IntegerCoords.prev]; omega
+  have dc1 : d.c 1 = c 1 := by
+    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
+      Ddg.IntegerCoords.prev]; omega
+  have dc2 : d.c 2 = c 2 := by
+    rw [hdc]; simp [Ddg.IntegerCoords.faceCorner, Ddg.IntegerCoords.side, Ddg.IntegerCoords.next,
+      Ddg.IntegerCoords.prev]; omega
+  rw [e k p hp]
+  rcases fin3_cases k with rfl | rfl | rfl <;>
+    simp only [Ddg.IntegerCoords.partner, canon, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev,
+      l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two, dn0, dn1, dn2,
+      dc0, dc1, dc2] <;> norm_num <;> split_ifs <;> rfl
+
+/-! ## Tracing one step (Alg. 1) -/
+
+/-- Where Alg. 1's step sends the curve, as a boundary point of the face it enters through side
+`s`: `ik→` is side `s + 1` (counted from `i`, corner `s + 1`), `kj→` is side `s + 2` (counted from
+`k`, corner `s + 2`), and the vertex `k` is corner `s + 2`. -/
+def stepPt (s : Fin 3) : Ddg.IntegerCoords.Step → Pt
+  | .toIK p => .side (s + 1) p.toNat
+  | .toKJ p => .side (s + 2) p.toNat
+  | .vertex => .corner (s + 2)
+
+lemma cornerCoord_comm (a b c : ℤ) : cornerCoord a b c = cornerCoord a c b := by
+  simp only [cornerCoord]; rw [cornerNumerator_comm]
+
+/-- **`ic-trace-step`: Alg. 1's three cases follow the unique arc through the crossing.** A curve
+crosses the halfedge `ij→` at index `p` (from `i`) and enters the face `jik` of the twin. In that
+face's model the edge is side `s` (from `j` to `i`), so the crossing is position `n_s − 1 − p` of
+side `s` (`ic-reverse-crossing`), `ik` is side `s + 1` and `kj` side `s + 2`. Alg. 1's answer,
+computed from `n_ij, n_ik, n_kj` and `p` alone, is the other end of the arc of the face model
+through that crossing: crossing `p` of `ik→` (Fig. 7 case 3), crossing `n_kj + p − n_ij` of `kj→`
+(case 1), or the vertex `k` (case 2). [formula: ic-trace-step] -/
+theorem FaceModel.Valid.traceStep_eq {M : FaceModel} (hM : M.Valid) (s : Fin 3) (p : ℕ)
+    (hp : p < M.n s) :
+    stepPt s (Ddg.IntegerCoords.traceStep (M.n s) (M.n (s + 1)) (M.n (s + 2)) p) =
+      M.partner s (M.n s - 1 - p) := by
+  obtain ⟨c, hc, e⟩ := hM.eq_canon
+  have hci : cornerCoord (M.n (s + 2)) (M.n s) (M.n (s + 1)) = c (s + 1) := by
+    have := (hc.coords (s + 1)).1
+    rw [fin3_add_one_add_one, fin3_add_one_add_two, cornerCoord_comm] at this
+    exact this
+  have hcj : cornerCoord (M.n (s + 1)) (M.n s) (M.n (s + 2)) = c s := (hc.coords s).1
+  have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
+  have a0 := hc.le s
+  have a1 := hc.le (s + 1)
+  have a2 := hc.le (s + 2)
+  rw [fin3_add_one_add_one] at a1
+  rw [fin3_add_two_add_one] at a2
+  rw [e s _ (by omega)]
+  unfold Ddg.IntegerCoords.traceStep canon
+  rw [hci, hcj, np, np]
+  split_ifs <;> simp only [stepPt] <;> first | omega | rfl | (congr 1; omega)
+
+end DdgProofs.IntegerCoords
