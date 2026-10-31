@@ -23,7 +23,7 @@ shares.
 | `from_intrinsic` | integer coordinates read off a signpost triangulation by tracing its edges (below). |
 
 **Not yet** (later work packages): face split and App. A (WP4; `insert_vertex` of the shared
-interface is `Unsupported`), the common subdivision (WP5), refinement (WP6), transfer (WP7).
+interface is `Unsupported`), refinement (WP6), transfer (WP7).
 
 ## Operations (WP3)
 
@@ -54,6 +54,25 @@ third of fresh split vertices, half after Delaunay flipping; face insertions alm
 Integer flips cost the same as signpost flips (Eq. 3, 4 are a few dozen integer operations; the
 time is in `plan_flip`, shared). A removal copies the connectivity once (O(|E|), most of its
 cost on camelbad) so that a stuck removal can be undone exactly.
+
+## Common subdivision, P0, P1, point queries (WP5)
+
+* `IntegerTriangulation::common_subdivision()` -> `CommonSubdivision { overlay, fingerprint, report }`:
+  the signpost crate's `Overlay` type (same vertex order: `V^1`, then the crossings edge by edge from
+  the tail of the stored halfedge), built per face of `T^1` from the integers (Supp. Alg. 9; `face_arcs`
+  is the per-face pairing, tested exactly against the oracle's `subdivide`) and the crossings of
+  `extract_all_edges` + Alg. 2. `fingerprint()` is computed, never cached (SPEC I19).
+* `interpolation_matrices(&subdivision)` -> `(P0, P1)` as `ddg_core::SparseMatrix`; refuses a
+  subdivision of another state.
+* `point_on_triangulation(point)` / `point_locator()`: `T^0 -> T^1`, pieces of an input face found
+  lazily by a search over the faces of `T^1` (see `subdivision.rs`, deviation from SPEC I10).
+* `extract_all_edges()`: `extract_edge` of every input edge with `input_directions` once per vertex
+  (2.5-3x faster than one by one on spot and camelbad).
+* Results (tests/subdivision.rs, 266 states): same connectivity as labelled polygons as the
+  signposts' overlay (0 mismatches over 863 301 pieces, 272 651 crossings); crossing positions
+  `|d| sin(theta) <= 3.5e-10` (raw up to 6.5e-8 at grazing crossings); the signpost overlay checks
+  pass; `P0 x0` reproduces the positions to 5e-15 edge lengths. Timings (release, one thread, load
+  about 6): spot after Delaunay 4.0 ms (signposts trace + overlay 1.15), camelbad 24 ms (8.7).
 
 ## Geometry of the crossings (WP2)
 
