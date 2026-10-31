@@ -10,6 +10,8 @@ use ddg_core::SparseMatrix;
 use ddg_core::geometry::corner_cotan;
 
 use crate::interface::Triangulation;
+#[allow(unused_imports)]
+use crate::triangulation::IntrinsicTriangulation; // doc links
 
 /// The cotan Laplacian of any triangulation: `n_vertices × n_vertices`, symmetric positive
 /// semidefinite with zero row sums (see [`IntrinsicTriangulation::cotan_laplacian`] for the
