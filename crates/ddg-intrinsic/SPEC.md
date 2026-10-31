@@ -960,6 +960,15 @@ those of `crates/ddg-intrinsic-apps/SPEC.md`.
   circumcentre lies on an interior edge exactly at an input-edge crossing (the integer split
   refuses it, IC I20; this crate snaps the place onto the input edge). Under `Chew` 2 307 vertices
   were removed and 175 removals refused, 0 trace failures.
+  *Cost* (`benches/retriangulation.rs`, `idr25`, the code before the change and after it
+  alternately, one pinned core, load average 0.2 to 3.4 from other jobs, five rounds): within
+  −2.8 % to +3.1 % on the noisy icosphere, the sheared grid and spot, +1.8 % to +3 % on camelbad
+  (one outlier +6 %). Instruction counts (`perf stat`, 20 refinements): +0.5 % on spot, +0.4 % on
+  camelbad, of which the end-of-run narrow-cone statistic was about two thirds; it is now skipped
+  when no vertex is narrow (spot and camelbad have none; 97.2 % of Thingi10k, paper Sec. 4.2) and
+  otherwise evaluated only for faces with a corner it can involve. The remaining ~0.25 M
+  instructions per refinement (spot) are spread over the generic driver; the last two rounds
+  measure −0.9 % to +1.2 % on spot and +2 % on camelbad.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
