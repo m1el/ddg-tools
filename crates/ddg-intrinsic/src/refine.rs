@@ -287,6 +287,12 @@ struct Refiner<'a, T: Triangulation = IntrinsicTriangulation> {
     n_removal_flips: usize,
     n_removals_refused: usize,
     n_trace_failures: usize,
+    /// Whether the input mesh has a vertex with an angle sum below 60°: without one, no vertex
+    /// is narrow (inserted vertices have `2π` or `π`) and the narrow-cone rule leaves nothing.
+    any_narrow: bool,
+    /// Per input face: whether it has a vertex with an angle sum below 60° (empty unless
+    /// `any_narrow`).
+    narrow_faces: Vec<bool>,
 }
 
 /// How far an angle opposite a boundary edge may exceed 90° before the edge counts as
@@ -370,6 +376,23 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
                 .min(lengths[c.halfedge_edge[arriving] as usize]);
             shells.insert(v as u32, unit);
         }
+        let input = tri.input();
+        let any_narrow = (0..input.mesh().n_vertices())
+            .any(|v| input.vertex_angle_sum(v).min(tri.vertex_angle_sum(v)) < NARROW);
+        // Only needed, and only built, when some vertex is narrow.
+        let narrow_faces: Vec<bool> = if any_narrow {
+            input
+                .mesh()
+                .faces()
+                .iter()
+                .map(|g| {
+                    g.iter()
+                        .any(|&w| input.vertex_angle_sum(w as usize) < NARROW)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let n_faces = c.n_faces();
         let n_edges = c.n_edges();
         Refiner {
@@ -397,6 +420,17 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
             n_removal_flips: 0,
             n_removals_refused: 0,
             n_trace_failures: 0,
+            any_narrow,
+            narrow_faces,
+        }
+    }
+
+    /// [`narrow_cone`] of face `f`, `None` at once when no vertex is narrow.
+    fn narrow_cone(&self, f: usize) -> Option<(u32, f64)> {
+        if self.any_narrow {
+            narrow_cone(&*self.tri, f)
+        } else {
+            None
         }
     }
 
@@ -460,7 +494,7 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
                 self.small_corner(f).is_some() || self.too_large(f) || (self.extra)(self.tri, f)
             }
             RefineRules::Chew => {
-                narrow_cone(&*self.tri, f).is_none()
+                self.narrow_cone(f).is_none()
                     && (self.chew_small_corner(f) || self.too_large(f) || (self.extra)(self.tri, f))
             }
         }
@@ -1055,6 +1089,31 @@ pub fn refine<T: Triangulation>(
     let mut min_angle_valid = f64::INFINITY;
     let mut n_narrow_cone_faces = 0;
     let tri = &*refiner.tri;
+    // Per vertex: whether the narrow-cone rule can involve it: it is narrow, or it lies in (or on
+    // an edge of) an input face with a narrow vertex, so that the face containing a face of the
+    // triangulation can be such a face (see `parent_face`). A face none of whose corners can is
+    // not left by the rule; this keeps the statistic to three lookups per face.
+    let involved: Vec<bool> = if refiner.any_narrow {
+        let input = tri.input().mesh();
+        (0..tri.complex().n_vertices())
+            .map(|v| {
+                tri.vertex_angle_sum(v) < NARROW
+                    || match tri.vertex_location(v) {
+                        SurfacePoint::Vertex(_) => false,
+                        SurfacePoint::Face { face, .. } => refiner.narrow_faces[face as usize],
+                        SurfacePoint::Edge { edge, .. } => {
+                            let h = input.edge_halfedge(edge as usize);
+                            [Some(h), input.twin(h)]
+                                .into_iter()
+                                .flatten()
+                                .any(|h| refiner.narrow_faces[h / 3])
+                        }
+                    }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     for f in 0..tri.complex().n_faces() {
         if refiner.too_large(f) {
             too_large.push(f as u32);
@@ -1064,7 +1123,12 @@ pub fn refine<T: Triangulation>(
             .get(&(f as u32))
             .filter(|(stamp, _)| *stamp == refiner.stamps[f])
             .map(|(_, reason)| reason.clone());
-        let narrow = narrow_cone(tri, f);
+        let corners = tri.complex().faces[f];
+        let narrow = if refiner.any_narrow && corners.iter().any(|&v| involved[v as usize]) {
+            narrow_cone(tri, f)
+        } else {
+            None
+        };
         n_narrow_cone_faces += usize::from(narrow.is_some());
         for k in 0..3 {
             let vertex = tri.complex().faces[f][k];
