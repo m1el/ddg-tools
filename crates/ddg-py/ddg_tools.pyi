@@ -922,6 +922,22 @@ class RepulsiveSession:
     ``None`` disables); ``threads`` and
     ``dense_threads``; the projection and the stop rule (``"gradient"`` with ``stop_threshold``
     1e-4, ``"relative"`` 1e-3, or ``"stall"``).
+    ``method``: ``"projected_gradient"`` (the default; hard constraints) or the soft methods
+    ``"lbfgs"`` (``lbfgs_memory`` pairs, the paper's 30) and ``"ncg"``, which solve the paper's
+    soft problem: no barycenter or length constraint, a Hencky length penalty of weight
+    ``hencky_weight`` (the evaluation's 10) at the start lengths. ``pinned``, ``tangent_*``,
+    ``surface`` and a length schedule (``grow_factor != 1``) need the hard constraints and are
+    input errors with a soft method. Not in the paper, all with the library's defaults:
+    ``near_pair`` (accurate quadrature of the energy for close edge pairs, blended between
+    ``near_pair_blend_start`` and ``near_pair_blend_end`` edge lengths, ``near_pair_subpanels``;
+    ``False`` is the paper's energy) with ``second_neighbours`` and ``second_neighbour_rule``
+    (``"fold_gated"`` with ``second_neighbour_contact_band``, ``second_neighbour_cos_shut`` and
+    ``second_neighbour_cos_open``; ``"one_sided"``; ``"two_sided"``; the gated rules
+    ``"gated"``, ``"one_sided_gated"``, ``"one_sided_gated_either"`` require
+    ``second_neighbour_width`` in (0, 1]); ``second_neighbour_band``; ``back_projection``,
+    ``second_order_correction``, ``newton_polish`` (a factor of the projection tolerance, ``None``:
+    the paper's chord method), ``projection_early_abort``, ``stuck_projected_reference``,
+    ``stuck_retry_chord``; ``mg_max_threads`` (cap of the multigrid's thread pool, ``None``: none).
     Raises ``RepulsiveInputError`` (a ``ValueError``) for anything wrong in the input.
     """
 
@@ -1004,6 +1020,27 @@ class RepulsiveSession:
         gradient_norm: Literal["euclidean", "mass"] = "euclidean",
         max_steps: int = 1000,
         time_limit: float | None = None,
+        method: Literal["projected_gradient", "lbfgs", "ncg"] = "projected_gradient",
+        lbfgs_memory: int = 30,
+        hencky_weight: float = 10.0,
+        near_pair: bool = True,
+        near_pair_blend_start: float = 0.25,
+        near_pair_blend_end: float = 0.75,
+        near_pair_subpanels: int = 4,
+        second_neighbours: bool = True,
+        second_neighbour_rule: Literal["fold_gated", "one_sided", "two_sided", "gated", "one_sided_gated", "one_sided_gated_either"] = "fold_gated",
+        second_neighbour_width: float | None = None,
+        second_neighbour_contact_band: tuple[float, float] = (0.001, 0.005),
+        second_neighbour_cos_shut: float = 0.0,
+        second_neighbour_cos_open: float = 0.5,
+        second_neighbour_band: tuple[float, float] | None = None,
+        back_projection: bool = True,
+        second_order_correction: bool = False,
+        newton_polish: float | None = 100.0,
+        projection_early_abort: bool = True,
+        stuck_projected_reference: bool = False,
+        stuck_retry_chord: bool = True,
+        mg_max_threads: int | None = 16,
     ) -> None: ...
     def step(self) -> dict[str, object]:
         """One step. Keys: ``iteration``, ``status`` (``"accepted"``, ``"stuck"``,
@@ -1133,6 +1170,27 @@ def repulsive_flow(
     gradient_norm: Literal["euclidean", "mass"] = "euclidean",
     max_steps: int = 1000,
     time_limit: float | None = None,
+    method: Literal["projected_gradient", "lbfgs", "ncg"] = "projected_gradient",
+    lbfgs_memory: int = 30,
+    hencky_weight: float = 10.0,
+    near_pair: bool = True,
+    near_pair_blend_start: float = 0.25,
+    near_pair_blend_end: float = 0.75,
+    near_pair_subpanels: int = 4,
+    second_neighbours: bool = True,
+    second_neighbour_rule: Literal["fold_gated", "one_sided", "two_sided", "gated", "one_sided_gated", "one_sided_gated_either"] = "fold_gated",
+    second_neighbour_width: float | None = None,
+    second_neighbour_contact_band: tuple[float, float] = (0.001, 0.005),
+    second_neighbour_cos_shut: float = 0.0,
+    second_neighbour_cos_open: float = 0.5,
+    second_neighbour_band: tuple[float, float] | None = None,
+    back_projection: bool = True,
+    second_order_correction: bool = False,
+    newton_polish: float | None = 100.0,
+    projection_early_abort: bool = True,
+    stuck_projected_reference: bool = False,
+    stuck_retry_chord: bool = True,
+    mg_max_threads: int | None = 16,
 ) -> tuple[array[float], array[int], dict[str, object]]:
     """The repulsive flow in one call: ``(positions, edges, report)``. ``steps`` overrides
     ``max_steps``. Report keys: ``status``, ``iterations``, ``energy_initial``,

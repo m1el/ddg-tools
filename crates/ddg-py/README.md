@@ -663,6 +663,20 @@ energy, differential = ddg_tools.curve_energy(positions, edges, alpha=3, beta=6)
   `projection_iterations`; `stop="gradient"|"relative"|"stall"` with `stop_threshold` (default
   1e-4 / 1e-3; required for `"stall"`) and `stall_window`; `max_steps=1000`, `time_limit`
   (seconds, for `run`).
+* **Soft methods** (`method="lbfgs"` with `lbfgs_memory=30`, or `"ncg"`; default
+  `"projected_gradient"`): the paper's soft problem. The barycenter and length constraints are
+  dropped and a Hencky length penalty of weight `hencky_weight=10` at the start lengths is added.
+  `pinned`, `tangent_vertices`, `tangent_edges`, `surface` and `grow_factor != 1` need the hard
+  constraints and raise `RepulsiveInputError` naming the option.
+* **Library options beyond the paper** (defaults are the library's): `near_pair=True` (accurate
+  quadrature for close edge pairs; `False` is the paper's energy) with `near_pair_blend_start`,
+  `near_pair_blend_end`, `near_pair_subpanels`, `second_neighbours`, `second_neighbour_rule=
+  "fold_gated"|"one_sided"|"two_sided"|"gated"|"one_sided_gated"|"one_sided_gated_either"` (the
+  last three need `second_neighbour_width`), `second_neighbour_contact_band`,
+  `second_neighbour_cos_shut`, `second_neighbour_cos_open`, `second_neighbour_band`;
+  `back_projection`, `second_order_correction`, `newton_polish` (`None`: chord method),
+  `projection_early_abort`, `stuck_projected_reference`, `stuck_retry_chord`; `mg_max_threads`
+  (`None`: no cap on the multigrid pool). `time_limit` is honoured by `run` only, not by `step`.
 * **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"converged"`,
   `"retarget_stalled"`, `"cancelled"`), `session_status`, `n_vertices`, `n_edges`,
   `energy_before`, `energy_after`, `tangent_point_after`, `penalties_after`, `gradient_norm`,

@@ -73,7 +73,8 @@ pub use constraints::{
     Constraint, ConstraintSet, ImplicitSurface, RankReport, TangentSite, default_constraints,
 };
 pub use energy::barnes_hut::{BhStats, BhTree};
-pub use energy::{BhOptions, EnergyEval, EnergyReport, energy};
+pub use energy::near_pair::SecondNeighbourRule;
+pub use energy::{BhOptions, EnergyEval, EnergyReport, NearPairOptions, energy};
 pub use error::RcError;
 pub use io::{parse_curve_obj, read_curve_obj, write_curve_obj};
 pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
@@ -102,9 +103,9 @@ pub use step::stop::{GradNorm, Status, StepStatus, StopRule};
 pub use step::{
     Backend, BarnesHutEnergy, Control, DEFAULT_AUTO_DENSE_MAX_VERTICES,
     DEFAULT_DENSE_FALLBACK_MAX_VERTICES, DEFAULT_DENSE_THREADS, DEFAULT_MIN_EDGE_LENGTH_RATIO,
-    DirectSolvers, EnergyModel, ExactEnergy, FlowOptions, FlowReport, FlowResult, PenaltyTerm,
-    RetargetReport, RetargetStatus, Session, Solver, SolverFactory, SolverFallback, SolverRequest,
-    StepReport, Timings, flow, soft_options,
+    DEFAULT_NEWTON_POLISH, DirectSolvers, EnergyModel, ExactEnergy, FlowOptions, FlowReport,
+    FlowResult, PenaltyTerm, RetargetReport, RetargetStatus, Session, Solver, SolverFactory,
+    SolverFallback, SolverRequest, StepReport, Timings, flow, soft_options,
 };
 pub use subdivide::{SubdivisionMap, subdivide};
 pub use surfaces::{

@@ -205,6 +205,19 @@ fn flag(name: &str, v: &Bound<'_, PyAny>) -> PyResult<bool> {
         .map_err(|_| bad(name, format!("expected a bool, got {}", type_name(v))))
 }
 
+fn pair(name: &str, v: &Bound<'_, PyAny>) -> PyResult<(f64, f64)> {
+    let [a, b]: [f64; 2] = v.extract().map_err(|_| {
+        bad(
+            name,
+            format!("expected a pair of numbers, got {}", type_name(v)),
+        )
+    })?;
+    if !(a.is_finite() && b.is_finite()) {
+        return Err(bad(name, "the numbers must be finite"));
+    }
+    Ok((a, b))
+}
+
 fn vec3(name: &str, v: &Bound<'_, PyAny>) -> PyResult<[f64; 3]> {
     let x: Vec<f64> = v.extract().map_err(|_| bad(name, "expected 3 numbers"))?;
     <[f64; 3]>::try_from(x).map_err(|x| bad(name, format!("expected 3 numbers, got {}", x.len())))
@@ -547,6 +560,31 @@ fn parse_options(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<RepulsiveOption
             "gradient_norm" => o.gradient_norm = text(k, &v)?,
             "max_steps" => o.max_steps = count(k, &v)?,
             "time_limit" => o.time_limit = if none { None } else { Some(float(k, &v)?) },
+            "method" => o.method = text(k, &v)?,
+            "lbfgs_memory" => o.lbfgs_memory = count(k, &v)?,
+            "hencky_weight" => o.hencky_weight = float(k, &v)?,
+            "near_pair" => o.near_pair = flag(k, &v)?,
+            "near_pair_blend_start" => o.near_pair_blend_start = float(k, &v)?,
+            "near_pair_blend_end" => o.near_pair_blend_end = float(k, &v)?,
+            "near_pair_subpanels" => o.near_pair_subpanels = count(k, &v)?,
+            "second_neighbours" => o.second_neighbours = flag(k, &v)?,
+            "second_neighbour_rule" => o.second_neighbour_rule = text(k, &v)?,
+            "second_neighbour_width" => {
+                o.second_neighbour_width = if none { None } else { Some(float(k, &v)?) }
+            }
+            "second_neighbour_contact_band" => o.second_neighbour_contact_band = pair(k, &v)?,
+            "second_neighbour_cos_shut" => o.second_neighbour_cos_shut = float(k, &v)?,
+            "second_neighbour_cos_open" => o.second_neighbour_cos_open = float(k, &v)?,
+            "second_neighbour_band" => {
+                o.second_neighbour_band = if none { None } else { Some(pair(k, &v)?) }
+            }
+            "back_projection" => o.back_projection = flag(k, &v)?,
+            "second_order_correction" => o.second_order_correction = flag(k, &v)?,
+            "newton_polish" => o.newton_polish = if none { None } else { Some(float(k, &v)?) },
+            "projection_early_abort" => o.projection_early_abort = flag(k, &v)?,
+            "stuck_projected_reference" => o.stuck_projected_reference = flag(k, &v)?,
+            "stuck_retry_chord" => o.stuck_retry_chord = flag(k, &v)?,
+            "mg_max_threads" => o.mg_max_threads = if none { None } else { Some(count(k, &v)?) },
             other => {
                 return Err(input_err(format!(
                     "unknown option '{other}'; the options are {}",
@@ -1076,5 +1114,29 @@ fn repulsive_defaults(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     d.set_item("gradient_norm", &o.gradient_norm)?;
     d.set_item("max_steps", o.max_steps)?;
     d.set_item("time_limit", o.time_limit)?;
+    d.set_item("method", &o.method)?;
+    d.set_item("lbfgs_memory", o.lbfgs_memory)?;
+    d.set_item("hencky_weight", o.hencky_weight)?;
+    d.set_item("near_pair", o.near_pair)?;
+    d.set_item("near_pair_blend_start", o.near_pair_blend_start)?;
+    d.set_item("near_pair_blend_end", o.near_pair_blend_end)?;
+    d.set_item("near_pair_subpanels", o.near_pair_subpanels)?;
+    d.set_item("second_neighbours", o.second_neighbours)?;
+    d.set_item("second_neighbour_rule", &o.second_neighbour_rule)?;
+    d.set_item("second_neighbour_width", o.second_neighbour_width)?;
+    d.set_item(
+        "second_neighbour_contact_band",
+        o.second_neighbour_contact_band,
+    )?;
+    d.set_item("second_neighbour_cos_shut", o.second_neighbour_cos_shut)?;
+    d.set_item("second_neighbour_cos_open", o.second_neighbour_cos_open)?;
+    d.set_item("second_neighbour_band", o.second_neighbour_band)?;
+    d.set_item("back_projection", o.back_projection)?;
+    d.set_item("second_order_correction", o.second_order_correction)?;
+    d.set_item("newton_polish", o.newton_polish)?;
+    d.set_item("projection_early_abort", o.projection_early_abort)?;
+    d.set_item("stuck_projected_reference", o.stuck_projected_reference)?;
+    d.set_item("stuck_retry_chord", o.stuck_retry_chord)?;
+    d.set_item("mg_max_threads", o.mg_max_threads)?;
     Ok(d)
 }

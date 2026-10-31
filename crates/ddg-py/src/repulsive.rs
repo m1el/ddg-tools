@@ -42,9 +42,10 @@ use ddg_repulsive_curves::surfaces::{
 };
 use rc::{
     Axis, BhOptions, Constraint, Control, CurveNetwork, EnergyEval, Exponents, FlowOptions,
-    GradNorm, GramQuadrature, ImplicitSurface, LengthDifference, LengthSchedule, LineSearch,
-    Metric, Obstacle, PenaltyTerm, ProjectionOptions, RcError, Session, Solver, StartRule, Status,
-    StepReport, StepStatus, StopRule, SurfacePotential, TangentSite, Tolerance, TotalLengthPenalty,
+    GradNorm, GramQuadrature, Hencky, ImplicitSurface, LengthDifference, LengthSchedule,
+    LineSearch, Method, Metric, NearPairOptions, Obstacle, PenaltyTerm, ProjectionOptions, RcError,
+    SecondNeighbourRule, Session, Solver, StartRule, Status, StepReport, StepStatus, StopRule,
+    SurfacePotential, TangentSite, Tolerance, TotalLengthPenalty,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -193,6 +194,27 @@ pub const OPTION_NAMES: &[&str] = &[
     "gradient_norm",
     "max_steps",
     "time_limit",
+    "method",
+    "lbfgs_memory",
+    "hencky_weight",
+    "near_pair",
+    "near_pair_blend_start",
+    "near_pair_blend_end",
+    "near_pair_subpanels",
+    "second_neighbours",
+    "second_neighbour_rule",
+    "second_neighbour_width",
+    "second_neighbour_contact_band",
+    "second_neighbour_cos_shut",
+    "second_neighbour_cos_open",
+    "second_neighbour_band",
+    "back_projection",
+    "second_order_correction",
+    "newton_polish",
+    "projection_early_abort",
+    "stuck_projected_reference",
+    "stuck_retry_chord",
+    "mg_max_threads",
 ];
 
 /// An obstacle: vertices and triangles.
@@ -472,6 +494,51 @@ pub struct RepulsiveOptions {
     pub max_steps: usize,
     /// Wall-time limit of a run, in seconds.
     pub time_limit: Option<f64>,
+    /// `"projected_gradient"` (hard constraints), `"lbfgs"` or `"ncg"` (soft problem: no hard
+    /// constraints; the length constraint becomes a Hencky penalty at the start lengths, see
+    /// [`RepulsiveOptions::session_options`]).
+    pub method: String,
+    /// Number of stored pairs of `"lbfgs"` (the paper: 30).
+    pub lbfgs_memory: usize,
+    /// Weight of the Hencky length penalty of the soft methods (the evaluation: 10).
+    pub hencky_weight: f64,
+    /// The near-pair quadrature of the energy (not in the paper); `false`: the paper's energy.
+    pub near_pair: bool,
+    /// `c1` of the near-pair blend.
+    pub near_pair_blend_start: f64,
+    /// `c2` of the near-pair blend.
+    pub near_pair_blend_end: f64,
+    /// Sub-panels of the near-pair quadrature.
+    pub near_pair_subpanels: usize,
+    /// Also correct pairs of edges joined by one edge.
+    pub second_neighbours: bool,
+    /// `"fold_gated"`, `"one_sided"`, `"two_sided"`, `"gated"`, `"one_sided_gated"`,
+    /// `"one_sided_gated_either"`.
+    pub second_neighbour_rule: String,
+    /// `sigma` of the three gated rules (required for them).
+    pub second_neighbour_width: Option<f64>,
+    /// The contact band of `"fold_gated"`.
+    pub second_neighbour_contact_band: (f64, f64),
+    /// `cos_shut` of `"fold_gated"`.
+    pub second_neighbour_cos_shut: f64,
+    /// `cos_open` of `"fold_gated"`.
+    pub second_neighbour_cos_open: f64,
+    /// The band of second neighbours (`None`: that of every other pair).
+    pub second_neighbour_band: Option<(f64, f64)>,
+    /// Project the trials of the line search back onto the constraints.
+    pub back_projection: bool,
+    /// Second-order correction of the trials.
+    pub second_order_correction: bool,
+    /// Newton polish threshold (`None`: the chord method throughout).
+    pub newton_polish: Option<f64>,
+    /// Stop hopeless chord projections early.
+    pub projection_early_abort: bool,
+    /// Armijo reference of the projected base when stuck.
+    pub stuck_projected_reference: bool,
+    /// Retry a stuck step with chord projection.
+    pub stuck_retry_chord: bool,
+    /// Cap of the multigrid's thread pool (`None`: the session's pool as it is).
+    pub mg_max_threads: Option<usize>,
 }
 
 impl Default for RepulsiveOptions {
@@ -508,6 +575,15 @@ impl Default for RepulsiveOptions {
         };
         let bh = BhOptions::default();
         let mg = MgOptions::default();
+        let np = lib.near_pair.unwrap_or_default();
+        let (contact_band, cos_shut, cos_open) = match SecondNeighbourRule::fold_gated() {
+            SecondNeighbourRule::OneSidedFoldGated {
+                contact_band,
+                cos_shut,
+                cos_open,
+            } => (contact_band, cos_shut, cos_open),
+            _ => unreachable!("fold_gated() is OneSidedFoldGated"),
+        };
         RepulsiveOptions {
             alpha: lib.exponents.alpha(),
             beta: lib.exponents.beta(),
@@ -581,6 +657,27 @@ impl Default for RepulsiveOptions {
             gradient_norm: gradient_norm.into(),
             max_steps: lib.max_iterations,
             time_limit: lib.time_limit.map(|d| d.as_secs_f64()),
+            method: "projected_gradient".into(),
+            lbfgs_memory: 30,
+            hencky_weight: 10.0,
+            near_pair: lib.near_pair.is_some(),
+            near_pair_blend_start: np.blend_start,
+            near_pair_blend_end: np.blend_end,
+            near_pair_subpanels: np.subpanels,
+            second_neighbours: np.second_neighbours,
+            second_neighbour_rule: "fold_gated".into(),
+            second_neighbour_width: None,
+            second_neighbour_contact_band: contact_band,
+            second_neighbour_cos_shut: cos_shut,
+            second_neighbour_cos_open: cos_open,
+            second_neighbour_band: np.second_neighbour_band,
+            back_projection: lib.back_projection,
+            second_order_correction: lib.second_order_correction,
+            newton_polish: lib.newton_polish,
+            projection_early_abort: lib.projection_early_abort,
+            stuck_projected_reference: lib.stuck_projected_reference,
+            stuck_retry_chord: lib.stuck_retry_chord,
+            mg_max_threads: mg.max_threads,
         }
     }
 }
@@ -626,12 +723,49 @@ impl RepulsiveOptions {
             },
         };
 
+        // Method. A soft method has no hard constraints: the options that need them are errors.
+        one_of(
+            "method",
+            &self.method,
+            &["projected_gradient", "lbfgs", "ncg"],
+        )?;
+        let method = match self.method.as_str() {
+            "lbfgs" => Method::Lbfgs {
+                memory: self.lbfgs_memory,
+            },
+            "ncg" => Method::Ncg,
+            _ => Method::ProjectedGradient,
+        };
+        if method.is_soft() {
+            let m = &self.method;
+            let needs_hard = [
+                ("pinned", !self.pinned.is_empty()),
+                ("tangent_vertices", !self.tangent_vertices.is_empty()),
+                ("tangent_edges", !self.tangent_edges.is_empty()),
+                ("surface", self.surface.is_some()),
+                ("grow_factor", self.grow_factor != 1.0),
+            ];
+            if let Some((name, _)) = needs_hard.iter().find(|(_, used)| *used) {
+                return Err(input(
+                    name,
+                    format!(
+                        "needs the hard constraints of method='projected_gradient'; method='{m}' \
+                         solves a soft problem (the lengths are a penalty, nothing is pinned, \
+                         constrained to a surface or scheduled)"
+                    ),
+                ));
+            }
+        }
+
         // Constraints.
         let mut constraints = Vec::new();
-        if self.barycenter.unwrap_or(self.pinned.is_empty()) {
+        if method.is_soft() {
+            // The soft problem has none (the Hencky penalty is added by `session_options`).
+        } else if self.barycenter.unwrap_or(self.pinned.is_empty()) {
             constraints.push(Constraint::Barycenter { target: None });
         }
         match self.length {
+            _ if method.is_soft() => {}
             LengthMode::Edges => constraints.push(Constraint::EdgeLengths {
                 edges: None,
                 targets: None,
@@ -778,6 +912,7 @@ impl RepulsiveOptions {
             max_fixed_fraction: self.mg_max_fixed_fraction,
             energy_check: self.mg_energy_check,
             failure_residual: self.mg_failure_residual,
+            max_threads: self.mg_max_threads,
             ..MgOptions::default()
         };
         mg.validate().map_err(|e| input("multigrid options", e))?;
@@ -844,6 +979,14 @@ impl RepulsiveOptions {
             time_limit,
             schedule,
             max_subdivisions: self.max_subdivisions,
+            method,
+            back_projection: self.back_projection,
+            second_order_correction: self.second_order_correction,
+            newton_polish: self.newton_polish,
+            near_pair: self.near_pair_options()?,
+            projection_early_abort: self.projection_early_abort,
+            stuck_projected_reference: self.stuck_projected_reference,
+            stuck_retry_chord: self.stuck_retry_chord,
             threads: self.threads,
             dense_threads: self.dense_threads,
             min_edge_length_ratio: self.min_edge_length_ratio,
@@ -851,6 +994,76 @@ impl RepulsiveOptions {
             ..FlowOptions::default()
         };
         o.validate()?;
+        Ok(o)
+    }
+
+    /// The near-pair options (`None`: the paper's energy).
+    fn near_pair_options(&self) -> Result<Option<NearPairOptions>, RepError> {
+        one_of(
+            "second_neighbour_rule",
+            &self.second_neighbour_rule,
+            &[
+                "fold_gated",
+                "one_sided",
+                "two_sided",
+                "gated",
+                "one_sided_gated",
+                "one_sided_gated_either",
+            ],
+        )?;
+        let width = || {
+            self.second_neighbour_width.ok_or_else(|| {
+                input(
+                    "second_neighbour_width",
+                    format!(
+                        "required with second_neighbour_rule='{}'",
+                        self.second_neighbour_rule
+                    ),
+                )
+            })
+        };
+        let rule = match self.second_neighbour_rule.as_str() {
+            "one_sided" => SecondNeighbourRule::OneSided,
+            "two_sided" => SecondNeighbourRule::TwoSided,
+            "gated" => SecondNeighbourRule::Gated { width: width()? },
+            "one_sided_gated" => SecondNeighbourRule::OneSidedGated { width: width()? },
+            "one_sided_gated_either" => {
+                SecondNeighbourRule::OneSidedGatedEither { width: width()? }
+            }
+            _ => SecondNeighbourRule::OneSidedFoldGated {
+                contact_band: self.second_neighbour_contact_band,
+                cos_shut: self.second_neighbour_cos_shut,
+                cos_open: self.second_neighbour_cos_open,
+            },
+        };
+        Ok(self.near_pair.then_some(NearPairOptions {
+            blend_start: self.near_pair_blend_start,
+            blend_end: self.near_pair_blend_end,
+            subpanels: self.near_pair_subpanels,
+            second_neighbours: self.second_neighbours,
+            second_neighbour_rule: rule,
+            second_neighbour_band: self.second_neighbour_band,
+        }))
+    }
+
+    /// The options of a session on `network` at `positions`: [`RepulsiveOptions::flow_options`],
+    /// and for a soft method the Hencky penalty at the lengths of `positions` (weight
+    /// `hencky_weight`), which is the soft problem of the library's `soft_options`.
+    ///
+    /// # Errors
+    /// As [`RepulsiveOptions::flow_options`]; `hencky_weight` outside its domain.
+    pub fn session_options(
+        &self,
+        network: &CurveNetwork,
+        positions: &[[f64; 3]],
+    ) -> Result<FlowOptions, RepError> {
+        let mut o = self.flow_options()?;
+        if o.method.is_soft() {
+            let h = Hencky::at_rest(self.hencky_weight, network, positions)
+                .map_err(|e| input("hencky_weight", e))?;
+            o.penalties.push(Arc::new(h));
+            o.validate()?;
+        }
         Ok(o)
     }
 }
@@ -1169,8 +1382,8 @@ impl Engine {
         edges: Vec<[u32; 2]>,
         options: &RepulsiveOptions,
     ) -> Result<Engine, RepError> {
-        let flow = options.flow_options()?;
         let network = CurveNetwork::new(positions.len(), edges)?;
+        let flow = options.session_options(&network, &positions)?;
         let session = Session::new(network.clone(), positions.clone(), flow.clone())?;
         let sources = SourceMap::identity(network.n_vertices(), network.n_edges());
         let snapshot = make_snapshot(&session, sources);
@@ -1385,8 +1598,8 @@ pub fn flow_once(
     options: &RepulsiveOptions,
     mut progress: Option<&mut dyn FnMut(&Val) -> bool>,
 ) -> Result<FlowOutput, RepError> {
-    let flow = options.flow_options()?;
     let network = CurveNetwork::new(positions.len(), edges)?;
+    let flow = options.session_options(&network, &positions)?;
     let mut sources = SourceMap::identity(network.n_vertices(), network.n_edges());
     let mut subdivisions = 0u32;
     let mut cb = |r: &StepReport| {
@@ -1509,6 +1722,12 @@ mod tests {
         assert_eq!(d.stop_threshold, None);
         assert_eq!(d.grow_rate, 0.01);
         assert_eq!(d.grow_factor, 1.0);
+        assert_eq!(
+            (d.method.as_str(), d.lbfgs_memory, d.hencky_weight),
+            ("projected_gradient", 30, 10.0)
+        );
+        assert_eq!(d.mg_max_threads, Some(16));
+        assert_eq!(d.newton_polish, Some(rc::DEFAULT_NEWTON_POLISH));
     }
 
     #[test]
@@ -1626,6 +1845,85 @@ mod tests {
                     ..Default::default()
                 },
             ),
+            (
+                "method",
+                RepulsiveOptions {
+                    method: "newton".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "memory",
+                RepulsiveOptions {
+                    method: "lbfgs".into(),
+                    lbfgs_memory: 0,
+                    ..Default::default()
+                },
+            ),
+            (
+                "second_neighbour_rule",
+                RepulsiveOptions {
+                    second_neighbour_rule: "wild".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "second_neighbour_width",
+                RepulsiveOptions {
+                    second_neighbour_rule: "gated".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "width",
+                RepulsiveOptions {
+                    second_neighbour_rule: "one_sided_gated".into(),
+                    second_neighbour_width: Some(3.0),
+                    ..Default::default()
+                },
+            ),
+            (
+                "blend_start",
+                RepulsiveOptions {
+                    near_pair_blend_start: 0.9,
+                    ..Default::default()
+                },
+            ),
+            (
+                "subpanels",
+                RepulsiveOptions {
+                    near_pair_subpanels: 0,
+                    ..Default::default()
+                },
+            ),
+            (
+                "second_neighbour_band",
+                RepulsiveOptions {
+                    second_neighbour_band: Some((0.5, 0.1)),
+                    ..Default::default()
+                },
+            ),
+            (
+                "contact_band",
+                RepulsiveOptions {
+                    second_neighbour_contact_band: (0.01, 0.9),
+                    ..Default::default()
+                },
+            ),
+            (
+                "newton_polish",
+                RepulsiveOptions {
+                    newton_polish: Some(0.5),
+                    ..Default::default()
+                },
+            ),
+            (
+                "max_threads",
+                RepulsiveOptions {
+                    mg_max_threads: Some(0),
+                    ..Default::default()
+                },
+            ),
         ];
         for (what, o) in bad {
             match o.flow_options() {
@@ -1644,6 +1942,99 @@ mod tests {
         };
         let (p, e) = trefoil(40);
         assert!(matches!(Engine::new(p, e, &o), Err(RepError::Input(_))));
+    }
+
+    #[test]
+    fn soft_methods_lower_the_energy() {
+        let (p, e) = trefoil(40);
+        for method in ["lbfgs", "ncg"] {
+            let o = RepulsiveOptions {
+                method: method.into(),
+                max_steps: 8,
+                threads: Some(2),
+                ..Default::default()
+            };
+            let engine = Engine::new(p.clone(), e.clone(), &o).unwrap();
+            let before = engine.snapshot().unwrap().energy;
+            for _ in 0..8 {
+                engine.step().unwrap();
+            }
+            let after = engine.snapshot().unwrap().energy;
+            assert!(after < before, "{method}: {before} -> {after}");
+            // The one-shot flow takes the same path.
+            let flow = flow_once(p.clone(), e.clone(), &o, None).unwrap();
+            assert_eq!(
+                engine.snapshot().unwrap().positions,
+                flow.positions,
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn soft_methods_reject_hard_constraints() {
+        let (p, e) = trefoil(30);
+        let cases: Vec<(&str, RepulsiveOptions)> = vec![
+            (
+                "pinned",
+                RepulsiveOptions {
+                    pinned: vec![0],
+                    ..Default::default()
+                },
+            ),
+            (
+                "tangent_vertices",
+                RepulsiveOptions {
+                    tangent_vertices: vec![0],
+                    ..Default::default()
+                },
+            ),
+            (
+                "tangent_edges",
+                RepulsiveOptions {
+                    tangent_edges: vec![0],
+                    ..Default::default()
+                },
+            ),
+            (
+                "surface",
+                RepulsiveOptions {
+                    surface: Some((
+                        SurfaceSpec::Sphere {
+                            center: [0.0; 3],
+                            radius: 5.0,
+                        },
+                        None,
+                    )),
+                    ..Default::default()
+                },
+            ),
+            (
+                "grow_factor",
+                RepulsiveOptions {
+                    grow_factor: 1.5,
+                    ..Default::default()
+                },
+            ),
+        ];
+        for method in ["lbfgs", "ncg"] {
+            for (name, o) in &cases {
+                let o = RepulsiveOptions {
+                    method: method.into(),
+                    ..o.clone()
+                };
+                match Engine::new(p.clone(), e.clone(), &o) {
+                    Err(RepError::Input(m)) => assert!(m.starts_with(name), "{m}"),
+                    other => panic!("{method} {name}: {:?}", other.map(|_| ())),
+                }
+            }
+        }
+        // The same options are fine with the projected gradient.
+        let o = RepulsiveOptions {
+            pinned: vec![0],
+            ..Default::default()
+        };
+        Engine::new(p, e, &o).unwrap();
     }
 
     #[test]

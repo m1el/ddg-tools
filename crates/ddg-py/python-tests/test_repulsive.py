@@ -633,6 +633,110 @@ class Multigrid(unittest.TestCase):
             ddg_tools.repulsive_flow(p, e, steps=1, dense_threads=0)
 
 
+class MethodsAndLibraryOptions(unittest.TestCase):
+    def test_soft_methods_lower_the_energy(self):
+        p, e = trefoil(48)
+        e0, _ = ddg_tools.curve_energy(p, e)
+        for method in ("lbfgs", "ncg"):
+            with self.subTest(method=method):
+                q, f, report = ddg_tools.repulsive_flow(p, e, steps=10, method=method)
+                e1, _ = ddg_tools.curve_energy(q, f)
+                self.assertLess(e1, e0)
+                self.assertEqual(report["iterations"], 10)
+                # A session gives the same curve as the one-shot flow.
+                s = ddg_tools.RepulsiveSession(p, e, method=method)
+                for _ in range(10):
+                    s.step()
+                self.assertEqual(list(s.positions), list(q))
+
+    def test_hencky_weight_and_memory_matter(self):
+        p, e = trefoil(48)
+        runs = [
+            ddg_tools.repulsive_flow(p, e, steps=6, method="lbfgs", **kw)[0]
+            for kw in ({}, {"hencky_weight": 1.0}, {"lbfgs_memory": 3})
+        ]
+        self.assertNotEqual(list(runs[0]), list(runs[1]))
+        self.assertNotEqual(list(runs[0]), list(runs[2]))
+
+    def test_soft_methods_reject_hard_constraints(self):
+        p, e = trefoil(30)
+        for method in ("lbfgs", "ncg"):
+            for name, value in (
+                ("pinned", [0]),
+                ("tangent_vertices", [0]),
+                ("tangent_edges", [0]),
+                ("surface", {"type": "sphere", "radius": 5.0}),
+                ("grow_factor", 1.5),
+            ):
+                for call in (ddg_tools.repulsive_flow, ddg_tools.RepulsiveSession):
+                    with self.assertRaises(ddg_tools.RepulsiveInputError) as cm:
+                        call(p, e, method=method, **{name: value})
+                    self.assertIn(name, str(cm.exception))
+
+    def test_bad_method_options(self):
+        p, e = trefoil(30)
+        bad = [
+            ({"method": "newton"}, "method"),
+            ({"method": "lbfgs", "lbfgs_memory": 0}, "memory"),
+            ({"method": "lbfgs", "hencky_weight": -1.0}, "hencky_weight"),
+            ({"second_neighbour_rule": "wild"}, "second_neighbour_rule"),
+            ({"second_neighbour_rule": "gated"}, "second_neighbour_width"),
+            ({"second_neighbour_rule": "gated", "second_neighbour_width": 2.0}, "width"),
+            ({"near_pair_blend_start": 0.9}, "blend"),
+            ({"near_pair_subpanels": 0}, "subpanels"),
+            ({"second_neighbour_band": (0.5, 0.1)}, "band"),
+            ({"second_neighbour_band": 0.5}, "second_neighbour_band"),
+            ({"second_neighbour_cos_shut": 0.9}, "cos_shut"),
+            ({"newton_polish": 0.5}, "newton_polish"),
+            ({"mg_max_threads": 0}, "max_threads"),
+            ({"back_projection": "yes"}, "back_projection"),
+        ]
+        for kwargs, word in bad:
+            with self.subTest(**{k: str(v) for k, v in kwargs.items()}):
+                with self.assertRaises(ddg_tools.RepulsiveInputError) as cm:
+                    ddg_tools.RepulsiveSession(p, e, **kwargs)
+                self.assertIn(word, str(cm.exception))
+
+    def test_library_options_are_accepted_and_change_the_flow(self):
+        p, e = trefoil(48)
+        base = list(ddg_tools.repulsive_flow(p, e, steps=5)[0])
+        # Explicit defaults change nothing.
+        defaults = ddg_tools.repulsive_defaults()
+        keep = ("near_pair", "second_neighbours", "second_neighbour_rule", "back_projection",
+                "newton_polish", "projection_early_abort", "stuck_retry_chord", "mg_max_threads")
+        same = list(ddg_tools.repulsive_flow(p, e, steps=5, **{k: defaults[k] for k in keep})[0])
+        self.assertEqual(base, same)
+        for kwargs in (
+            {"second_neighbour_rule": "one_sided"},
+            {"second_neighbour_rule": "two_sided"},
+            {"second_neighbour_rule": "gated", "second_neighbour_width": 0.1},
+            {"second_neighbour_rule": "one_sided_gated", "second_neighbour_width": 0.1},
+            {"second_neighbour_rule": "one_sided_gated_either", "second_neighbour_width": 0.1},
+            {"second_neighbour_contact_band": (0.002, 0.01), "second_neighbour_cos_open": 0.8},
+            {"second_neighbour_band": (0.1, 0.5)},
+            {"near_pair": False},
+            {"near_pair_subpanels": 2, "near_pair_blend_start": 0.2, "near_pair_blend_end": 0.6},
+            {"second_neighbours": False},
+            {"back_projection": False},
+            {"second_order_correction": True},
+            {"newton_polish": None},
+            {"projection_early_abort": False},
+            {"stuck_projected_reference": True},
+            {"stuck_retry_chord": False},
+            {"mg_max_threads": None},
+        ):
+            with self.subTest(**{k: str(v) for k, v in kwargs.items()}):
+                q, _, report = ddg_tools.repulsive_flow(p, e, steps=5, **kwargs)
+                self.assertEqual(report["iterations"], 5)
+                self.assertTrue(all(math.isfinite(x) for x in q))
+
+    def test_step_ignores_time_limit_but_run_honours_it(self):
+        p, e = trefoil(40)
+        s = ddg_tools.RepulsiveSession(p, e)
+        self.assertEqual(s.run(max_steps=100, time_limit=0.0)["end"], "time_limit")
+        self.assertEqual(s.step()["status"], "accepted")
+
+
 class Errors(unittest.TestCase):
     def setUp(self):
         self.p, self.e = trefoil(30)
