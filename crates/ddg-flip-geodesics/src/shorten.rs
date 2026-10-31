@@ -33,7 +33,9 @@
 //!
 //! When the queue is empty, a **final sweep** recomputes every joint, in path order, and
 //! queues every flexible side `≤ π − tol` that is not remembered as stalled (F5; the
-//! reference stops at an empty queue). A sweep that queues nothing ends the run (`Geodesic`);
+//! reference stops at an empty queue). A sweep that queues nothing ends the run: `Geodesic`
+//! if every side `≤ π − tol` it met is blocked by a path end, else `Stalled` (a remembered
+//! stall that is still bent, or a side blocked by another part of the network);
 //! after `max_sweeps` sweeps that found work, the next one that finds work ends it
 //! (`SweepLimit`). The queue is rebuilt without its stale entries when it holds more than
 //! `4 m + 1024` entries (`m` segments); that never changes which entry is processed next.
@@ -377,8 +379,12 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                     }
                 }
             }
-            // The final sweep.
+            // The final sweep. Bent sides it does not queue are stalled ones (still flexible)
+            // or blocked ones; the run is not `Geodesic` if one of them is not blocked by a
+            // path end.
             let mut found = Vec::new();
+            let mut stuck = false;
+            let mut blocked = Vec::new();
             for p in 0..self.network.n_paths() {
                 for joint in self.network.path_joints(p) {
                     let stalled = &run.stalled;
@@ -392,7 +398,11 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                         |entry, scratch, at| {
                             let is_stalled = stalled.get(&(entry.segment, entry.side))
                                 == Some(&entry.angle.to_bits());
-                            if scratch.is_flexible(network, tri, at, entry.side) && !is_stalled {
+                            if !scratch.is_flexible(network, tri, at, entry.side) {
+                                blocked.push((at.joint, entry.side));
+                            } else if is_stalled {
+                                stuck = true;
+                            } else {
                                 found.push(entry);
                             }
                         },
@@ -400,7 +410,15 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 }
             }
             if found.is_empty() {
-                break 'run ShortenStatus::Geodesic;
+                for (joint, side) in blocked {
+                    stuck |= !JointGeometry::new(&self.tri, &self.network, joint)?
+                        .is_blocked_by_end(&self.network, side);
+                }
+                break 'run if stuck {
+                    ShortenStatus::Stalled
+                } else {
+                    ShortenStatus::Geodesic
+                };
             }
             if run.report.sweeps >= options.max_sweeps {
                 break 'run ShortenStatus::SweepLimit;

@@ -861,8 +861,9 @@ pub(crate) struct Replaced {
 
 impl Network {
     /// Replaces a run of one or two consecutive segments of one path by `new` (in path
-    /// order), writing what it did into `out` (whose buffers are reused), each new segment pushed outermost on the side of the face of the halfedge
-    /// given with it (SPEC §4.1 step 2: the wedge side; §4.3: the side of the face crossed).
+    /// order), writing what it did into `out` (whose buffers are reused), each new segment
+    /// pushed outermost on the side of the face of the halfedge given with it (SPEC §4.1 step
+    /// 2: the wedge side; §4.3: the side of the face crossed).
     ///
     /// The removed segments are taken out of their layers wherever they are (Alg. 1 removes
     /// segments outermost on the wedge side, the contraction of §4.1 step 3 two adjacent

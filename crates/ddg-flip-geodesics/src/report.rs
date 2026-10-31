@@ -68,8 +68,17 @@ impl ShortenOptions {
 /// Why the shortening stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortenStatus {
-    /// A final sweep found no joint to shorten.
+    /// A final sweep found no joint to shorten, and every joint side below `π −
+    /// straight_tolerance` is pinned or blocked by a path end: the final state certifies (SPEC
+    /// §7 layer 1a) for any certificate tolerance `≥ straight_tolerance`.
     Geodesic,
+    /// A final sweep found no joint it could shorten, but some joint side is still below
+    /// `π − straight_tolerance`: one that stalled (the outer arc was not shorter, typically
+    /// because the triangulation refused a flip, F6) and has not changed since, or one blocked
+    /// by another part of the network. The final state does not certify at
+    /// `straight_tolerance` (it may at the certificate's default `1e-4`, when the side is bent
+    /// by less).
+    Stalled,
     /// `max_iterations` was reached.
     IterationLimit,
     /// The length fell below `stop_length_ratio` times the initial length.

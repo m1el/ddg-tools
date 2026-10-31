@@ -9,7 +9,7 @@ use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
 use ddg_flip_geodesics::{
     CertifyOptions, EdgePath, GeodesicCertificate, GeodesicNetwork, Segment, ShortenOptions,
-    ShortenReport, Shortening, path_from_vertices,
+    ShortenReport, ShortenStatus, Shortening, path_from_vertices,
 };
 use ddg_intrinsic::{DelaunayOptions, IntrinsicTriangulation, Triangulation};
 
@@ -548,6 +548,13 @@ pub fn run<T: Triangulation + Clone>(
     let certificate = network
         .certify(&CertifyOptions::default())
         .unwrap_or_else(|e| panic!("certify: {e}"));
+    if report.status == ShortenStatus::Geodesic && options.straight_tolerance <= 1e-4 {
+        assert!(
+            certificate.geodesic,
+            "status Geodesic but the certificate fails: {:?}",
+            certificate.failures
+        );
+    }
     Outcome {
         network,
         report,

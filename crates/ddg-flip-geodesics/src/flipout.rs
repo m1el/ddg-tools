@@ -4,8 +4,9 @@
 //! # The wedge and its outer arc
 //!
 //! The wedge on side `s` of a joint `γ_abc` at `b` is a fan of corners at `b`
-//! ([`JointGeometry::corners_from_incoming`]), ordered from `ba` to `bc`: corner `i` is the
-//! corner at `b` of the triangle `b n_i n_{i+1}`, with `n_0 = a`, `n_k = c`, `k = deg W`. A
+//! ([`JointGeometry::corners_from_incoming`](crate::JointGeometry::corners_from_incoming)),
+//! ordered from `ba` to `bc`: corner `i` is the corner at `b` of the triangle `b n_i n_{i+1}`,
+//! with `n_0 = a`, `n_k = c`, `k = deg W`. A
 //! corner is named by the halfedge `h_i` leaving `b` in its face, so the face's halfedge
 //! opposite `b` is `next(h_i)`: the outer-arc edge `n_i n_{i+1}`. Going counter-clockwise
 //! (the right wedge) `h_i` runs `b → n_i`; going clockwise (the left wedge) `h_i` runs
