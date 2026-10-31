@@ -244,7 +244,10 @@ impl fmt::Display for IntegerError {
                  recovered: {detail}"
             ),
             IntegerError::Unsupported { operation, reason } => {
-                write!(f, "{operation} is not supported by integer coordinates: {reason}")
+                write!(
+                    f,
+                    "{operation} is not supported by integer coordinates: {reason}"
+                )
             }
             IntegerError::Conversion { edge, reason } => write!(
                 f,
