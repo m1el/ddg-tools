@@ -251,7 +251,11 @@ values below `−1` for combinatorially valid quadrilaterals with two or more `k
 `2,0,0,0,0` gives `−2`); straight arcs cannot do that, so the code treats `n_kl < −1` as
 `InvalidCoordinates` naming the edge. The involution (`ic-flip-involution`) holds regardless. In code:
 `plan_flip(&complex, &lengths, e)?` (refusal and `ℓ_kl`), the integers above from the pre-flip
-state, then `complex.flip_edge(e)`, whose `ComplexFlip` says where `n_kl`, `r_kl`, `r_lk` go. Exact: the
+state, then `complex.flip_edge(e)`, whose `ComplexFlip` says where `n_kl`, `r_kl`, `r_lk` go.
+`flip_edge_with` / `can_flip_with` take a `FlipShapeTest` and refuse by `plan_flip_with` (IT N52;
+FlipOut uses gc's relative test); every operation of this crate keeps N5. `Flip::new_corner_angles`
+comes from `FlipPlan::new_corner_angles` (two `corner_angle` per flip), so both representations
+return the same `Flip`; cost +5.7 % on camelbad's Delaunay flipping. Exact: the
 integers after the flip are those of the same realization over the new `T¹` (Lean tier C, §9).
 Flipping back restores `n`, `r`, `ℓ` (integers exactly, lengths to rounding).
 
