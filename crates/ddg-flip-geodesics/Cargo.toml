@@ -1,0 +1,12 @@
+[package]
+name = "ddg-flip-geodesics"
+description = "Geodesic paths, loops and networks by edge flips (Sharp, Crane 2020, FlipOut), generic over the intrinsic triangulation representation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ddg-core = { path = "../ddg-core" }
+ddg-intrinsic = { path = "../ddg-intrinsic" }

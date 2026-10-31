@@ -1,0 +1,12 @@
+[package]
+name = "ddg-integer-coords"
+description = "Intrinsic triangulations with integer coordinates (Gillespie, Sharp, Crane 2021): normal coordinates and roundabouts, flips, splits, removal, common subdivision, Delaunay refinement, attribute transfer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ddg-core = { path = "../ddg-core" }
+ddg-intrinsic = { path = "../ddg-intrinsic" }
