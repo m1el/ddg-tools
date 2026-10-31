@@ -70,6 +70,7 @@ pub mod coords;
 mod error;
 pub mod flip;
 pub mod formulas;
+pub mod geometry;
 pub mod interface;
 pub mod remove;
 pub mod split;
@@ -83,6 +84,7 @@ pub use coords::{
 };
 pub use error::{IntegerError, InvalidCoordinates, Place, ValidityItem};
 pub use formulas::FaceCoordinates;
+pub use geometry::{GeometricCrossing, GeometricCurve, InputEdgeGeometry, StripReport};
 pub use interface::{REPRESENTATION, to_intrinsic_error};
 pub use remove::Removal;
 pub use trace::{
