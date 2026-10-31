@@ -273,9 +273,11 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             .max_iterations
             .unwrap_or(100 * (self.tri.complex().n_edges() + m0));
         let initial_length = self.length;
+        // Room for the segments the run will add (capacity only).
+        self.network.nodes.reserve(2 * m0 + 64);
         let mut run = Run {
             options,
-            heap: BinaryHeap::new(),
+            heap: BinaryHeap::with_capacity(2 * m0 + 64),
             stalled: BTreeMap::new(),
             report: ShortenReport {
                 status: ShortenStatus::Geodesic,
@@ -295,7 +297,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 final_length: initial_length,
             },
             scratch: Scratch::new(angle_cache_bits(m0)),
-            ids: Vec::new(),
+            ids: Vec::with_capacity(32),
         };
         for p in 0..self.network.n_paths() {
             for joint in self.network.path_joints(p) {

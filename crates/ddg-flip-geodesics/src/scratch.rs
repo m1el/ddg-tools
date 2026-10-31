@@ -15,12 +15,13 @@ use crate::network::{Joint, Network, Replaced, Segment};
 use crate::wedge::{Side, VertexStar};
 
 /// A memo of corner angles (F2's cache). One slot per face, direct mapped by a hash of the face
-/// id; a slot holds the bits of the face's three lengths (by slot, as
-/// [`Triangulation::face_lengths`]) and the angles of its corners computed so far with
-/// [`Triangulation::corner_angle`]. A slot is used only when the face's lengths are bitwise the
-/// ones it was filled with; a corner angle is a function of those three lengths, so the memo
-/// returns exactly what `corner_angle` returns now, whatever flipped since. Colliding faces
-/// evict each other (only time is lost).
+/// id, holding the angles of its corners computed so far with [`Triangulation::corner_angle`].
+/// A corner angle is a function of the face's three lengths, which change only when an edge of
+/// the face is flipped; the run that owns the memo flips only through Alg. 1, which calls
+/// [`invalidate`](Self::invalidate) on the two faces of every flipped edge (they keep their
+/// ids, `Complex::flip_edge`). So the memo returns exactly what `corner_angle` returns now
+/// (debug builds check every hit against the face's lengths). Colliding faces evict each other
+/// (only time is lost).
 #[derive(Debug, Clone)]
 pub(crate) struct AngleCache {
     slots: Vec<Slot>,
@@ -31,9 +32,11 @@ pub(crate) struct AngleCache {
 struct Slot {
     /// The face id plus one; `0` for an empty slot.
     face: u32,
-    lengths: [u64; 3],
     /// `0.0` for a corner not computed yet (a corner angle is `> 0`).
     angles: [f64; 3],
+    /// Debug builds: the bits of the face's lengths when the slot was filled.
+    #[cfg(debug_assertions)]
+    lengths: [u64; 3],
 }
 
 impl AngleCache {
@@ -45,36 +48,47 @@ impl AngleCache {
         }
     }
 
+    #[inline]
+    fn index(&self, f: usize) -> (usize, u32) {
+        let key = f as u32 + 1;
+        let i = (u64::from(key).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> self.shift) as usize;
+        (i, key)
+    }
+
+    /// Forgets the angles of face `f` (its lengths are about to change, or have).
+    #[inline]
+    pub(crate) fn invalidate(&mut self, f: usize) {
+        let (i, key) = self.index(f);
+        if self.slots[i].face == key {
+            self.slots[i] = Slot::default();
+        }
+    }
+
     /// [`Triangulation::corner_angle`] of corner `h`, bitwise.
     #[inline]
     pub(crate) fn angle<T: Triangulation>(&mut self, tri: &T, h: usize) -> f64 {
         let f = h / 3;
-        let lengths = tri.face_lengths(f).map(f64::to_bits);
-        let key = f as u32 + 1;
-        let i = (u64::from(key).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> self.shift) as usize;
+        let (i, key) = self.index(f);
         let slot = &mut self.slots[i];
-        if slot.face != key || slot.lengths != lengths {
+        if slot.face != key {
             *slot = Slot {
                 face: key,
-                lengths,
                 angles: [0.0; 3],
+                #[cfg(debug_assertions)]
+                lengths: tri.face_lengths(f).map(f64::to_bits),
             };
         }
+        #[cfg(debug_assertions)]
+        assert_eq!(
+            slot.lengths,
+            tri.face_lengths(f).map(f64::to_bits),
+            "the corner-angle memo holds face {f} with other lengths (a flip not invalidated)"
+        );
         let a = &mut slot.angles[h % 3];
         if *a == 0.0 {
             *a = tri.corner_angle(h);
         }
         *a
-    }
-
-    /// The memoized angle of corner `h` of face `f`, whose lengths have the bits `lengths`.
-    #[inline]
-    fn peek(&self, f: usize, lengths: [u64; 3], k: usize) -> Option<f64> {
-        let key = f as u32 + 1;
-        let i = (u64::from(key).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> self.shift) as usize;
-        let slot = &self.slots[i];
-        (slot.face == key && slot.lengths == lengths && slot.angles[k] != 0.0)
-            .then_some(slot.angles[k])
     }
 
     /// Whether `θ_g + θ_h < π` for the corner angles of corners `g` and `h`
@@ -88,16 +102,9 @@ impl AngleCache {
     /// `θ_g + θ_h < π` exactly, and also the floating-point sum (its error is below `1e-14`:
     /// a few ulps of each angle and of the sum, and `PI` is within `1.3e-16` of `π`). The bound
     /// uses `T ≤ max(1, T²)`; the products carry a relative error below `1e-15`, covered by an
-    /// extra `1e-14 P²`. When both angles are memoized, or the test is inconclusive, the angles
-    /// are summed (and memoized).
+    /// extra `1e-14 P²`. When the test is inconclusive the angles are summed (and memoized).
     pub(crate) fn sum_below_pi<T: Triangulation>(&mut self, tri: &T, g: usize, h: usize) -> bool {
         let (lg, lh) = (tri.face_lengths(g / 3), tri.face_lengths(h / 3));
-        if let (Some(a), Some(b)) = (
-            self.peek(g / 3, lg.map(f64::to_bits), g % 3),
-            self.peek(h / 3, lh.map(f64::to_bits), h % 3),
-        ) {
-            return a + b < PI;
-        }
         let (ng, dg) = kahan_factors(lg, g % 3);
         let (nh, dh) = kahan_factors(lh, h % 3);
         let (sg, sh) = (ng / dg, nh / dh);
@@ -183,13 +190,13 @@ impl Scratch {
             star: VertexStar {
                 vertex: 0,
                 boundary: false,
-                ends: Vec::new(),
-                entries: Vec::new(),
-                first_entry: Vec::new(),
+                ends: Vec::with_capacity(16),
+                entries: Vec::with_capacity(16),
+                first_entry: Vec::with_capacity(17),
             },
-            corners: Vec::new(),
-            edges: Vec::new(),
-            new: Vec::new(),
+            corners: Vec::with_capacity(32),
+            edges: Vec::with_capacity(32),
+            new: Vec::with_capacity(32),
             replaced: Replaced::default(),
             angles: AngleCache::new(bits),
         }

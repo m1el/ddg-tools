@@ -340,8 +340,17 @@ pub(crate) fn flip_out<T: Triangulation>(
                 });
             }
             let merge = merged_corner(tri.complex(), side, &scratch.corners, j);
+            let faces = {
+                let c = tri.complex();
+                let h = c.edge_halfedge(edge);
+                [c.face(h), c.twin(h).map_or(c.face(h), |t| c.face(t))]
+            };
             match tri.flip_edge(edge) {
                 Ok(_) => {
+                    // The two faces keep their ids and change their lengths.
+                    for f in faces {
+                        scratch.angles.invalidate(f);
+                    }
                     stats.flips += 1;
                     if stats.flips > max_flips {
                         return Err(FlipError::Internal {
