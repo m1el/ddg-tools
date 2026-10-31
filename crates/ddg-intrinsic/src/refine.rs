@@ -1141,7 +1141,7 @@ impl IntrinsicTriangulation {
     /// N4 for the rules): flips to Delaunay, then inserts circumcentres and splits boundary
     /// edges until no triangle has a corner below `options.min_angle` (or a circumradius above
     /// `options.max_circumradius`), except for the corners listed in the report. This is
-    /// [`refine`](crate::refine::refine) with [`RefineRules::Ruppert`];
+    /// [`refine`] with [`RefineRules::Ruppert`];
     /// [`Triangulation::refine_with_rules`] chooses the rules.
     ///
     /// The result is a Delaunay triangulation of the same surface with more vertices. The

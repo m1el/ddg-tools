@@ -221,7 +221,7 @@ pub trait Triangulation {
     /// [`removal_flip_choice`](crate::remove::removal_flip_choice) until its degree is three,
     /// then merges its three faces; ids are renumbered as [`Complex::remove_vertex`] says
     /// (SPEC N51; Gillespie, Sharp, Crane 2021, Alg. 8). Refinement by
-    /// [`RefineRules::Chew`](crate::RefineRules::Chew) needs it. A star in which no flip lowers
+    /// [`RefineRules::Chew`] needs it. A star in which no flip lowers
     /// the degree is [`RemovalRefusal::Stuck`](crate::RemovalRefusal::Stuck); every refusal
     /// leaves the triangulation unchanged. Provided: [`IntrinsicError::Unsupported`].
     ///

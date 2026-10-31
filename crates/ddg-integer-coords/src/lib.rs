@@ -69,6 +69,11 @@
 //!
 //! The common subdivision and the point queries `T⁰ → T¹` are [`subdivision`] (WP5).
 //!
+//! Delaunay refinement (Sec. 4.2, Supp. Alg. 10; WP6) is [`refine`]:
+//! [`IntegerTriangulation::refine`] runs `ddg_intrinsic`'s shared driver on this
+//! representation (the paper's rules by default: boundary splits with removal of the Dijkstra
+//! ball, the narrow-cone rule) and certifies the result.
+//!
 //! # The reference implementation
 //!
 //! geometry-central (MIT, © 2017–2019 Nicholas Sharp and the geometry-central contributors) at
@@ -95,6 +100,7 @@ pub mod insert;
 pub mod interface;
 pub mod move_vertex;
 pub mod recover;
+pub mod refine;
 pub mod remove;
 pub mod split;
 pub mod subdivision;
@@ -116,6 +122,7 @@ pub use insert::{
 pub use interface::{REPRESENTATION, to_intrinsic_error};
 pub use move_vertex::{MoveInsertion, VertexMoveReport};
 pub use recover::{RECOVER_ZERO, RecoverReport, RecoveredPoint, recover_barycentric};
+pub use refine::{IntegerRefineOptions, IntegerRefineReport};
 pub use remove::Removal;
 pub use subdivision::{
     ArcEnd, CommonSubdivision, LocatedPiece, PointLocator, SubdivisionReport, face_arcs,

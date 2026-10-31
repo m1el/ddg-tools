@@ -15,8 +15,8 @@
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
 use ddg_intrinsic::{
-    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, InputSurface, Insertion,
-    IntrinsicError, SurfacePoint, Triangulation,
+    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, InputSurface, InsertedVertexRemoval,
+    Insertion, IntrinsicError, RemovalRefusal, SurfacePoint, Triangulation,
 };
 
 use crate::coords::IntegerTriangulation;
@@ -110,5 +110,39 @@ impl Triangulation for IntegerTriangulation {
     ) -> Result<EdgeTrace, IntrinsicError> {
         self.extract_intrinsic_edge(e, options)
             .map_err(|err| to_intrinsic_error(err, "trace_edge_on_input"))
+    }
+
+    /// The removal of Alg. 8 ([`IntegerTriangulation::remove_vertex`]; the flips of
+    /// `ddg_intrinsic`'s [`removal_flip_choice`](ddg_intrinsic::removal_flip_choice), I24).
+    /// [`IntegerError::RemovalStuck`] is passed as [`RemovalRefusal::Stuck`], an inserted
+    /// boundary vertex (I7) as [`RemovalRefusal::BoundaryVertex`]; the state is unchanged then.
+    fn remove_inserted_vertex(
+        &mut self,
+        v: usize,
+    ) -> Result<InsertedVertexRemoval, IntrinsicError> {
+        if v < self.complex.n_vertices()
+            && !self.is_input_vertex(v)
+            && self.complex.is_boundary_vertex(v)
+        {
+            return Err(IntrinsicError::RemovalRefused {
+                vertex: v as u32,
+                reason: RemovalRefusal::BoundaryVertex,
+            });
+        }
+        match self.remove_vertex(v) {
+            Ok(r) => Ok(InsertedVertexRemoval {
+                vertex: r.vertex,
+                degree: r.degree,
+                flips: r.flips,
+                removal: r.removal,
+            }),
+            Err(IntegerError::RemovalStuck { vertex, degree }) => {
+                Err(IntrinsicError::RemovalRefused {
+                    vertex,
+                    reason: RemovalRefusal::Stuck { degree },
+                })
+            }
+            Err(other) => Err(to_intrinsic_error(other, "remove_inserted_vertex")),
+        }
     }
 }

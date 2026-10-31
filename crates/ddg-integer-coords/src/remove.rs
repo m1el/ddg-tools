@@ -28,7 +28,7 @@
 //! **I27** (decided here): an interior vertex made by an edge split has degree four with two
 //! angles of `π`. The two edges to the opposite corners then have a quadrilateral with an angle
 //! of `π` at the vertex and are never flipped (the flip would create a triangle without area,
-//! which [`plan_flip`] refuses as too thin); the two halves of the split edge have angles
+//! which [`plan_flip`](ddg_intrinsic::plan_flip) refuses as too thin); the two halves of the split edge have angles
 //! `θ` and `2π − θ` at the vertex, so one of them can be flipped exactly when its quadrilateral is
 //! also convex at its far end. When it can, the removal goes through (the result has the other
 //! diagonal of the quadrilateral of the old edge); when it cannot, the removal is
@@ -38,8 +38,7 @@
 
 use ddg_core::geometry::triangle_area;
 use ddg_intrinsic::complex::VertexRemoval;
-use ddg_intrinsic::formulas::unfold_diamond;
-use ddg_intrinsic::{Complex, IntrinsicError, RemovalRefusal, plan_flip};
+use ddg_intrinsic::{Complex, IntrinsicError, RemovalRefusal};
 
 use crate::coords::IntegerTriangulation;
 use crate::error::IntegerError;
@@ -214,43 +213,10 @@ impl IntegerTriangulation {
     }
 
     /// The edge at `v` that removal flips next (I24), or `None` if no edge at `v` can be
-    /// flipped so that the degree of `v` drops.
+    /// flipped so that the degree of `v` drops: `ddg_intrinsic`'s
+    /// [`removal_flip_choice`](ddg_intrinsic::removal_flip_choice), which the signpost
+    /// representation uses too, so both remove a vertex by the same flips (I11, WP6).
     fn removal_flip_choice(&self, v: usize) -> Option<usize> {
-        let c = &self.complex;
-        // (is a loop, score, edge): the best is the largest loop flag, then score, then the
-        // smallest edge id.
-        let mut best: Option<(bool, f64, usize)> = None;
-        for h in c.outgoing_halfedges(v) {
-            let e = c.edge(h);
-            let Ok(plan) = plan_flip(c, &self.lengths, e) else {
-                continue;
-            };
-            let h0 = c.edge_halfedge(e);
-            let Some(h1) = c.twin(h0) else { continue };
-            let (i, j) = (c.from_vertex(h0), c.to_vertex(h0));
-            let (k, l) = (c.from_vertex(c.prev(h0)), c.from_vertex(c.prev(h1)));
-            let ends = |a: usize, b: usize| usize::from(a == v) + usize::from(b == v);
-            if ends(k, l) >= ends(i, j) {
-                continue;
-            }
-            let [l_ij, l_jk, l_ki, l_il, l_lj] = plan.lengths;
-            let Some(diamond) = unfold_diamond(l_ij, l_jk, l_ki, l_il, l_lj) else {
-                continue;
-            };
-            let [a1, a2] = diamond.flipped_areas();
-            let score = a1.min(a2) / (a1 + a2);
-            let candidate = (i == j, score, e);
-            let better = match best {
-                None => true,
-                Some((loop_b, score_b, e_b)) => {
-                    (candidate.0, candidate.1) > (loop_b, score_b)
-                        || (candidate.0 == loop_b && candidate.1 == score_b && e < e_b)
-                }
-            };
-            if better {
-                best = Some(candidate);
-            }
-        }
-        best.map(|(_, _, e)| e)
+        ddg_intrinsic::removal_flip_choice(&self.complex, &self.lengths, v)
     }
 }
