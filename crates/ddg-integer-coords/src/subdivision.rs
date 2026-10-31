@@ -1246,7 +1246,11 @@ pub enum ArcEnd {
 /// The arcs of a face with the side counts `n` (only `n⁺` enters): for every crossing
 /// `(side k, p)`, in order of `k` then `p`, the other end of the arc through it. This is the
 /// pairing of Supp. Alg. 9 as [`IntegerTriangulation::common_subdivision`] uses it (read off the
-/// pieces it cuts), and what the oracle's task `subdivide` states.
+/// pieces it cuts), and what the oracle's task `subdivide` states; Lean proves the oracle's
+/// pairing is the unique face model with these counts (`FaceModel.Valid.oracle_partner`), and
+/// `tests/oracle.rs` checks this function against the oracle's fixture exactly.
+///
+/// [formula: ic-face-decoding]
 ///
 /// # Errors
 /// [`IntegerError::InvalidCoordinates`] (naming face 0) if the face is not valid (an odd

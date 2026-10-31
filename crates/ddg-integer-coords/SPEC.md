@@ -350,12 +350,31 @@ every consumer apply unchanged), plus the interpolation matrices `P₀` (`|V^S| 
 pairing is impossible for a valid state; if it happens it is an error naming the face (it would
 mean §2.4 was violated, which `certify` must have caught).
 
+**As built (WP5).** `common_subdivision() -> CommonSubdivision { overlay, fingerprint, report }`;
+`interpolation_matrices(&CommonSubdivision) -> (P₀, P₁)` as `ddg_core::SparseMatrix`, refused when
+the fingerprint is not the current state's. No rotation to make `n_ij` largest is needed: the
+pairing depends only on `c` and `e` (`face_arcs`, `ic-face-decoding`). The input face of a piece
+comes from the orientation of its crossings (the tail side of a `T¹` halfedge lies in the
+right-hand input face, the head side in the left-hand one), with a fallback through
+`extract_intrinsic_edge` for faces whose sides all have `n⁺ = 0`. Overlay vertices: `V¹` first
+(so the first `|V¹|` rows of `P₁` are the identity), then the crossings edge by edge from the tail
+of the stored halfedge, which are the signpost overlay's ids. A self-edge crossing collapses to one
+entry of `P₁`. Measured on the 266 states: connectivity identical to the signposts' overlay as
+labelled polygons, positions `|Δ| · sin θ ≤ 3.5e-10`, the N12 checks pass; 24 ms on camelbad
+against 8.7 ms for the signposts' traces plus overlay (the integers also pay for Alg. 2's strip
+geometry).
+
 ### 4.9 Point queries
 
 `T¹ → T⁰`: a point of a face of `T¹` → the region of the face → `RecoverBarycentric` (as §4.4
-without inserting). `T⁰ → T¹`: by the common subdivision of the containing input face (I10: lazily,
-per input face, from `ExtractEdge` of its three edges). Same signatures as `ddg-intrinsic`'s
-`point_on_input` / `point_on_triangulation`.
+without inserting). `T⁰ → T¹`: by the common subdivision of the containing input face (I10:
+lazily, per input face). `ExtractEdge` of its three edges alone cannot do it, since `T¹` edges
+between inserted vertices inside the face are invisible from them; as built (WP5) a search over
+`T¹` faces starts at the face holding the start of `ExtractEdge(3g)`, uses
+`extract_intrinsic_edge` of each face's sides, and crosses every side of a piece that is not part
+of an input edge (`PointLocator` caches the pieces per input face). Results are snapped:
+a barycentric coordinate `≤ LOCATE_SNAP = 1e-12` makes an edge or vertex point. Same signatures as
+`ddg-intrinsic`'s `point_on_input` / `point_on_triangulation`.
 
 ## 5. Delaunay refinement (Sec. 4.2, Supp. Alg. 10, App. C)
 
@@ -604,8 +623,10 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   detect a repeated `(halfedge, index)` pair, which cannot happen for a valid state (an error
   naming the crossing if it does).
 * **I19** *No cached common subdivision.* The reference caches it and forgets to invalidate it after a
-  face split (`ic:1184-1244`, B1). We compute it on request; a returned `Overlay` carries the
-  state's fingerprint (IT-SPEC N15) so a stale one is detectable.
+  face split (`ic:1184-1244`, B1). We compute it on request; the returned `CommonSubdivision`
+  wraps the `Overlay` (which has no fingerprint field) with the state's fingerprint (FNV over
+  faces, lengths, `n`, `r`, `q⁰`), so a stale one is detectable and `interpolation_matrices`
+  refuses it.
 * **I20** *Splits of non-shared fixed edges.* The reference throws after modifying the mesh when a
   marked edge with `n ≥ 0` is split (face split, then a refused flip; `ic:1479-1509`, B5). Our edge
   split with `n ≥ 0` performs the explicit edge split of the intrinsic edge (as for `n < 0`, with
@@ -665,7 +686,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP2 | **done** (7aa2891–bb56df2): geometric crossings, strip intersection, `extract_intrinsic_edge` (linear), `trace_edge_on_input` wired; same crossed input edges as signposts on all 678 806 edges, 0 clamps | `src/geometry.rs`, `tests/geometry.rs`, `examples/extract_cost.rs` | WP1 | Opus |
 | WP3 | **done** (7b7dcd3–a315f9e): flip (Eq. 3, 4), Delaunay flipping, edge split incl. `n ≥ 0`, removal (I27), `impl Triangulation`; 437 595 flips on 266 states equal `from_intrinsic` of the signposts exactly | `src/{flip,split,remove,interface}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
-| WP5 | common subdivision, `P₀`, `P₁`, point queries | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
+| WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
 | WP7 | transfer (Eq. 13–14), Fig. 14 | `src/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
