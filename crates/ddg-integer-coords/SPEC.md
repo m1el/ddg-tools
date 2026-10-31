@@ -94,7 +94,7 @@ compute bitwise the same lengths.
 | `ℓ_ij > 0` | per edge of `T¹` | `f64` | Sec. 2.2 |
 | `n_ij ≥ −1` | per edge of `T¹` | `i64` (I2) | Sec. 2.3 |
 | `r_{aj} ∈ [0, deg₀(a))` | per halfedge of `T¹` whose tail `a ∈ V⁰` | `u32`, `NONE` for tails in `V*` | Sec. 2.4 |
-| `q⁰_i` | per vertex of `V*` | `ddg_intrinsic::SurfacePoint` on `T⁰` | Sec. 2.2 |
+| `q⁰_i` | per vertex (`V⁰`: `Vertex(v)`, so `vertex_location` is one lookup; `V*`: an `Edge` point with `t ∈ (0,1)` or a `Face` point with all barycentric coordinates in `(0,1)`) | `ddg_intrinsic::SurfacePoint` on `T⁰` | Sec. 2.2 |
 | `T⁰` | shared, immutable | `Arc<ddg_intrinsic::InputSurface>` | — |
 
 * `n_ij` is the number of transversal crossings of edge `ij ∈ T¹` with edges of `T⁰`, or `−1` if
@@ -103,8 +103,9 @@ compute bitwise the same lengths.
   2021 (`n = 0` for parallel edges); we follow this paper.
 * **Local index** (Supp. B): the halfedges of `T⁰` around `a ∈ V⁰` are numbered counter-clockwise
   `0 … deg₀(a) − 1`. **I3:** the start is the vertex's `outgoing` halfedge in `InputSurface`; at a
-  boundary vertex that is the boundary halfedge with the surface on its left (as IT-SPEC N2), and
-  the numbering does not wrap past the other boundary halfedge.
+  boundary vertex that is the boundary halfedge with the surface on its left (as IT-SPEC N2), the
+  last index `deg₀ − 1` is the arriving boundary halfedge (as the reference), and the numbering does
+  not wrap (the modulus is `0` at a boundary vertex, the oracle's `DEG = 0`).
 * `r_{aj}` is the local index of the first halfedge of `T⁰` at or after `aj` counter-clockwise (it
   may be `aj` itself, when `aj` runs along an edge of `T⁰`).
 * Initially `T¹ = T⁰`: same connectivity and lengths, `n ≡ −1`, `r_{ab}` = the local index of
@@ -139,13 +140,31 @@ angle sums):
    roundabouts pointing at the edge of `T⁰` it runs along;
 4. every edge `ab ∈ T⁰` is extracted (Alg. 4) as a curve that starts at `a`, ends at `b`, passes
    only through vertices of `V*` that lie on it, and the roundabout labels agree at both ends;
-   every combinatorial crossing belongs to exactly one such curve.
+   every combinatorial crossing belongs to exactly one such curve. In detail (as `certify` checks
+   it, WP1):
+   * around each `a ∈ V⁰`, counter-clockwise, the next roundabout is `r + n⁻ + e` of the current
+     halfedge (`e` the emanating count of the corner at `a`); at an interior vertex mod `deg₀` with
+     `Σ (n⁻ + e) = deg₀`; at a boundary vertex `r = 0` on the boundary halfedge and the chain ends
+     at `deg₀ − 1`;
+   * each input edge, followed from its tail, arrives at its head by exactly the end that the
+     head's roundabouts give for the reverse direction;
+   * an inserted vertex on an input edge has exactly two curve ends there and the vertices passed
+     appear in the order of their parameter `t`; an inserted vertex inside a face has none;
+   * every crossing and every `n = −1` edge is used exactly once.
 
-Items 1–3 are local and cheap; item 4 is the **certificate** (§8 layer 1): `certify()` checks all
-four and is run at the end of every operation in debug builds and of every public operation that
-changes `n` when `IntegerOptions::certify` is set (default on at the end of refinement and before the
-common subdivision, never per flip, since FlipOut and Delaunay flipping do millions of flips; I4
-measures its cost).
+Before the items, **ranges**: `n ≥ −1`, `n = −1` on boundary edges, no self-edge with `n = −1`; a
+roundabout lies in `[0, deg₀)` exactly when its tail is in `V⁰`; `q⁰` of an inserted vertex as in
+§2.2 (never a `Vertex` point, never a `Face` point with a zero coordinate); input vertices keep
+their boundary status.
+
+Items 1–3 are local and cheap; item 4 is the **certificate** (§8 layer 1). `certify()` checks all
+four, in the order ranges, 1, 3, 4, and stops at the first failure. Its cost is linear,
+about 100 ns per `|E| + Σ n⁺` (I4, measured in WP1: spot 2.1 ms, camelbad 9.8 ms; one certificate
+≈ 1.7–1.9 |E| signpost flips). **Default (I4 decided):** certify at the end of every public
+operation that does a variable amount of work (Delaunay flipping, refinement, before the common
+subdivision, a FlipOut run) when `IntegerOptions::certify` is set (default on); never per flip or
+per split, also not in debug builds (it would make debug Delaunay flipping quadratic); tests
+certify per operation on small meshes and per batch on large ones.
 
 ## 3. Reading the integers
 
@@ -164,7 +183,9 @@ measures its cost).
   reads `roundabouts[he.next().next()]`, `ic:1983-1984`).
 * `ExtractEdge(ab)` (Alg. 4): from the roundabouts at `a`, the halfedge of `T¹` just before `ab`,
   the crossing index `p = k + n_{ai} − r_{ai}`, then `ExtractCurve`, continued through vertices of
-  `V*` that lie on `ab` (only edge splits create those, §4.5).
+  `V*` that lie on `ab` (only edge splits create those, §4.5). The formula is correct as printed:
+  it equals `c^{ja}_i + (k − r_{ai} − n⁻_{ai})`, since `c^{ja}_i = n⁺_{ai}` whenever `a` emanates;
+  when the window wraps at an interior vertex use `k + deg₀`.
 
 * `ExtractIntrinsicEdge(ij)` (the other direction, needed by FlipOut and by `trace_edge_on_input`;
   the reference has no such routine and builds the whole common subdivision instead, `ic:55-88`):
@@ -395,8 +416,8 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-cevians-cross` | segments from two different corners of a triangle to their opposite sides cross | B |
 | `ic-reverse-crossing` | `ζ̄̄ = ζ`, and the gluing respects it | A |
 | `ic-trace-step` | Alg. 1's three cases follow the unique arc of the face model through crossing `p` | B |
-| `ic-trace-terminates` | in a complex model, `TraceFrom` ends at a corner after at most `Σ n⁺` steps and visits each crossing at most once | C |
-| `ic-identify-edge` | Alg. 3's index is the local index of the curve's `T⁰` halfedge | C |
+| `ic-trace-terminates` | in a complex model, `TraceFrom` ends at a corner after at most `Σ n⁺` steps and visits each crossing at most once | C (WP9; `CITED.md` lists it as pending until then) |
+| `ic-identify-edge` | Alg. 3's index is the local index of the curve's `T⁰` halfedge | C (WP9; `CITED.md` lists it as pending until then; tested against signpost traces) |
 | `ic-flip-normal` | in a convex quadrilateral (two glued face models, straight arcs), the arc system re-cut along the other diagonal has the counts of Eq. 3 (with the corrected first terms, §4.2) | A (identity) and the count in a quadrilateral model `Quad` (`flip_count`): proved; gluing two face models and re-cutting: C |
 | `ic-flip-involution` | Eq. 3 applied twice returns `n_ij`, for counts coming from a face-model pair | A |
 | `ic-roundabout-update` | Eq. 4 gives the local index after the flip | C |
@@ -594,9 +615,9 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP | content | files | depends on | model |
 |---|---|---|---|---|
 | WP0 | **done** (2814e8a–aca460e): `Complex`, `Triangulation`, `plan_*`, `AngleFrames` (I9), `ddg_core::mollify` (I13); 240 bitwise pins unchanged | `crates/ddg-intrinsic/src/…`, `crates/ddg-core` | — | Opus |
-| WP1 | crate skeleton; `IntegerTriangulation` implementing `Triangulation`, init, §2.3 derived quantities, `certify`, errors; remove `crates/ddg-integer-coords` from the workspace `exclude` list | `crates/ddg-integer-coords/src/{lib,error,coords,certify}.rs`, `Cargo.toml` | WP0 | Opus |
-| WP2 | tracing: Alg. 1–4, geometric crossings, strip intersection | `src/trace.rs`, `tests/trace.rs` | WP1 | Opus |
-| WP3 | flip, Delaunay flipping, edge split, removal | `src/{flip,split,remove}.rs`, `tests/ops.rs` | WP1 | Opus |
+| WP1 | **done** (e2d71da–2fb8762): `IntegerTriangulation` (no `Triangulation` impl yet: needs WP2–WP4), init, §2.3, the oracle's integer formulas, combinatorial Alg. 1–4, `certify`, `from_intrinsic` (conversion from signposts, the differential oracle for WP3), errors | `src/{lib,error,coords,formulas,trace,certify,convert}.rs` | WP0 | Opus |
+| WP2 | tracing, geometry only: geometric crossings, strip intersection, `ExtractIntrinsicEdge` (positions), over WP1's `CurveSegment` / `InputEdgePath` | `src/trace.rs` (or `src/geometry.rs`), `tests/trace.rs` | WP1 | Opus |
+| WP3 | flip (Eq. 3, 4 in `formulas.rs`, checked or `i128`, against the oracle's `flip` fixtures), Delaunay flipping, edge split, removal (I27); differential test: flip the same edges in both representations and compare with `from_intrinsic` exactly | `src/{flip,split,remove}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | common subdivision, `P₀`, `P₁`, point queries | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |

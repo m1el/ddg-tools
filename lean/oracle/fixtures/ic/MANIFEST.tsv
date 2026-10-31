@@ -19,5 +19,5 @@ ic-regions-all	ok	every face with n in [-1, 6]: its regions
 ic-split-all	ok	every face with n in [-1, 6]: the face-split counts of every region (I15)
 ic-trace-all	ok	every valid face with n in [0, 4] entered through side 0 at every crossing (Alg. 1)
 ic-flip-random	ok	300 random valid quadrilaterals (n in [-1, 8], seed 2021) with Eq. 4 and the flip back
-ic-identify-random	ok	200 random arguments of Alg. 3's index (seed 77), with and without the reduction
+ic-identify-random	ok	200 random arguments of Alg. 3's index on valid faces (seed 77), with and without the reduction
 ic-splitedge-all	ok	Eq. 6 for n in [-1, 5]

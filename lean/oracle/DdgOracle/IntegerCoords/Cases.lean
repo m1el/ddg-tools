@@ -132,15 +132,17 @@ def generatedCases : List (ICCase × String) := Id.run do
       quads := quads ++ [s!"quad {a} {b} {c} {d} {e}",
         s!"roundabout {r[0]!} {(r[1]! + 1).toNat} {r[2]!} {(r[3]! + 1).toNat}", "again"]
       count := count + 1
-  let ws := lcgInts 77 1200 (-1) 9
-  let walks := (List.range 200).map fun i =>
+  -- Only arguments whose face `ija` is valid (Eq. 1 numerator even): Alg. 3 is defined on valid
+  -- states only, and the Rust side refuses an odd numerator (IC SPEC I14).
+  let ws := lcgInts 77 3600 (-1) 9
+  let walks := ((List.range 600).filterMap fun i =>
     let rr := ws[6 * i]! + 1
     let nai := ws[6 * i + 1]!
     let nij := ws[6 * i + 2]! + 1
     let nja := ws[6 * i + 3]!
     let p := ws[6 * i + 4]! % (nij + 1)
     let deg := (ws[6 * i + 5]! + 1).toNat
-    s!"walk {rr} {nai} {nij} {nja} {p} {deg}"
+    if faceValid nij nja nai then some s!"walk {rr} {nai} {nij} {nja} {p} {deg}" else none).take 200
   let edges := ((triples (-1) 5).filter fun (_, _, c) => c == 0).map fun (a, b, _) => s!"edge {a} {b}"
   return [
     (mkCase "ic-corner-all" "corner" faceLines, "every face with n in [-1, 6]: validity, numerators, Eq. 1 (odd when invalid), Eq. 2"),
@@ -149,7 +151,7 @@ def generatedCases : List (ICCase × String) := Id.run do
     (mkCase "ic-split-all" "split" faceLines, "every face with n in [-1, 6]: the face-split counts of every region (I15)"),
     (mkCase "ic-trace-all" "trace" traceLines, "every valid face with n in [0, 4] entered through side 0 at every crossing (Alg. 1)"),
     (mkCase "ic-flip-random" "flip" quads, "300 random valid quadrilaterals (n in [-1, 8], seed 2021) with Eq. 4 and the flip back"),
-    (mkCase "ic-identify-random" "identify" walks, "200 random arguments of Alg. 3's index (seed 77), with and without the reduction"),
+    (mkCase "ic-identify-random" "identify" walks, "200 random arguments of Alg. 3's index on valid faces (seed 77), with and without the reduction"),
     (mkCase "ic-splitedge-all" "splitedge" edges, "Eq. 6 for n in [-1, 5]")
   ]
 

@@ -2038,6 +2038,28 @@ are not cited here).
   rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
   when no flip helps; refusals are counted in the evaluation.
 
+### [formula: ic-identify-edge] The local index of a traced curve (Supp. Alg. 3; pending, tier C)
+
+- **Statement.** For a valid state, the curve through crossing `p` of `ij`, walked back to its start
+  `a ∈ V⁰` across the halfedge `a→i = Next(Next(ij))`, is the input halfedge with local index
+  `r_{ai} + n⁻_{ai} + (p − c^{ja}_i)` (mod `deg₀(a)` at an interior vertex).
+- **Reference.** IC paper, supplement Alg. 3 (IdentifyTracedEdge); geometry-central ab116f1,
+  `integer_coordinates_intrinsic_triangulation.cpp:1970-1986` (the same halfedge).
+- **Why not formalized yet.** It is a statement about a whole triangulation (roundabouts at a vertex
+  and the gluing of faces), i.e. tier C of the IC contract (SPEC §9, work package WP9). The single-face
+  index arithmetic is the oracle's `identifyIndex`. Until WP9: tested in Rust against signpost
+  traces (`crates/ddg-integer-coords/tests/states.rs`: 272 651 crossings on 266 states, each
+  identified as the input edge the signpost trace crosses there).
+
+### [formula: ic-trace-terminates] TraceFrom ends at a corner (pending, tier C)
+
+- **Statement.** In a valid state, `TraceFrom` (Supp. Alg. 1) from any crossing ends at a vertex
+  after at most `Σ n⁺` steps and visits each crossing at most once.
+- **Reference.** IC paper Sec. 2.5 and supplement Alg. 1–2.
+- **Why not formalized yet.** Tier C (WP9): it follows from the face pairing and the edge gluing
+  being involutions on a finite set (`lean/proofs/DdgProofs/IntegerCoords/DESIGN.md` item 9). Until
+  WP9 the Rust tracer detects a repeated `(halfedge, index)` pair (IC SPEC I18) and bounds the walk.
+
 ---
 
 ## Out of scope of this package
