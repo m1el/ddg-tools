@@ -215,7 +215,6 @@ fn signposts_and_integers_make_the_same_bezier_curves_and_icdt() {
     shapes.extend(data_shapes());
     let mut compared = 0;
     let mut splits = 0;
-    let mut nudged = 0;
     for shape in &shapes {
         for delaunay in [false, true] {
             let (signposts, integers) = both(shape, delaunay);
@@ -224,14 +223,6 @@ fn signposts_and_integers_make_the_same_bezier_curves_and_icdt() {
                 let b = bezier_trace(integers.clone(), &controls);
                 let label = format!("{} (delaunay {delaunay}) {controls:?}", shape.name);
                 match (a, b) {
-                    // The integer split refused a point on an input edge and was nudged
-                    // (BezierOptions::unlocated_nudge): the one documented difference.
-                    (Some((a, _)), Some((b, _)))
-                        if a != b && b.steps[0].contains("n_nudged: 0") == false =>
-                    {
-                        eprintln!("NUDGED on integers: {label}");
-                        nudged += 1;
-                    }
                     (Some((a, _)), Some((b, int_after))) => {
                         assert!(a == b, "{label}: the representations differ:\n{a:?}\n{b:?}");
                         int_after
@@ -250,10 +241,6 @@ fn signposts_and_integers_make_the_same_bezier_curves_and_icdt() {
             }
         }
     }
-    eprintln!(
-        "{compared} Bézier curves + iCDT identical, {splits} vertices inserted; {nudged} nudged on \
-         integers"
-    );
-    assert_eq!(nudged, 0, "{nudged} differ by a nudge on integers only");
+    eprintln!("{compared} Bézier curves + iCDT identical, {splits} vertices inserted");
     assert!(compared >= 30, "only {compared} compared");
 }
