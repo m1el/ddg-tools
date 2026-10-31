@@ -268,7 +268,7 @@ every path (both sides when both are `< π − tol`). Loop (gc: fg.cpp:919-975):
    walked directly at interior vertices (the star as fallback, debug-asserted); after a flip the two
    corners merge into the halfedge of `b n_j` leaving `b`; `β < π` decided from Kahan's factors with
    the angle sum as fallback within `1e-13`; one `flip_edge_with` call per flip, and the memo takes
-   the two corner angles each flip returns (R9, bitwise unchanged); no allocation per joint. Results bitwise unchanged on 9 × 500 pairs. Status **`Stalled`**: the final sweep found no
+   the two corner angles a flip returns when they are free (signposts; R9, bitwise unchanged); no allocation per joint. Results bitwise unchanged on 9 × 500 pairs. Status **`Stalled`**: the final sweep found no
    work but a side is still bent (a remembered stall, or a side blocked by something other than a
    path end); `Geodesic` implies the run certifies at `straight_tolerance`. `start_shorten` /
    `ShortenSession` build the queue separately.
@@ -542,9 +542,10 @@ like-for-like column.
 
 After F30 and R9 (adf9d80, 35e6217; three interleaved rounds, load 2.8–7.7), the loop is
 0.97–1.29× gc for signposts and 1.07–1.42× for integers (e.g. tree 0.227 / 0.253 ms against
-0.226; spot 0.057 / 0.060 against 0.043). R9 made signposts 3–5 % faster and integers 3–7 % slower,
-because the integer flip computes the two returned angles even when no caller uses them (see IT
-N52). (All 9 meshes in the crate README.) The same length as gc to `1e-9` on 4497 of 4498 pairs; integers
+0.226; spot 0.057 / 0.060 against 0.043). Since fafd909 and 855c5ad the angles are returned only on request
+(`FlipRequest::corner_angles`), and Alg. 1 requests them only where they are free
+(`Triangulation::flip_corner_angles_are_free`, true for signposts): against the code before R9,
+signposts are 4–7 % faster and integers within +0.8–2.6 % (not the angles; not tracked down). (All 9 meshes in the crate README.) The same length as gc to `1e-9` on 4497 of 4498 pairs; integers
 cost the same as signposts. The remaining gap: F2's corner sums need the corner angles at every
 vertex a replacement puts on the path (about a third of the spot time; gc reads signposts in
 `O(1)`), and the triangulation's flips are about a quarter of the loop (R9).
