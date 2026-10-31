@@ -262,7 +262,15 @@ every path (both sides when both are `< π − tol`). Loop (gc: fg.cpp:919-975):
 4. Stop rules (F14), checked only on a live, flexible entry: `max_iterations` (status `IterationLimit`), `stop_length_ratio` (current/initial
    `<` ratio, the paper's 0.9 for segmentations, Sec. 6.1; gc: fg.cpp:967-973), `stop_min_angle`
    (all queued `α ≥` threshold, Sec. 4.2 end).
-5. Queue empty: a **final sweep** recomputes every joint and re-queues each flexible one that is
+5. **As built (speed work):** a per-face corner-angle memo invalidated by Alg. 1's flips; wedges
+   walked directly at interior vertices (the star as fallback, debug-asserted); after a flip the two
+   corners merge into the halfedge of `b n_j` leaving `b`; `β < π` decided from Kahan's factors with
+   the angle sum as fallback within `1e-13`; one `flip_edge` call per flip; no allocation per
+   joint. Results bitwise unchanged on 9 × 500 pairs. Status **`Stalled`**: the final sweep found no
+   work but a side is still bent (a remembered stall, or a side blocked by something other than a
+   path end); `Geodesic` implies the run certifies at `straight_tolerance`. `start_shorten` /
+   `ShortenSession` build the queue separately.
+6. Queue empty: a **final sweep** recomputes every joint and re-queues each flexible one that is
    not straight (F5, a departure: the reference stops at an empty queue); at most `max_sweeps`
    (default 4) sweeps that find work, reported. Status `Geodesic` when a sweep finds none.
 
@@ -428,8 +436,12 @@ the bad meshes of IT §5):
    certificates. F3: no signpost trace failed in 36 000 trials (9 data meshes × 4 seeds × 1000
    pairs), so there are no fixtures yet; the failures of IntCoords Fig. 17 are expected on
    Thingi10k (F7). **Open:** 2 of those trials (mesh `tree`, seed 2, pairs 372 and 934) ended with
-   FlipOut not geodesic to `1e-4` (the `T⁰` certificate agrees with `T`); not yet investigated,
-   and not yet run on the integer representation.
+   FlipOut not geodesic to `1e-4` (the `T⁰` certificate agrees with `T`). **Explained:** the
+   Dijkstra path passes two nearly coincident vertices (`1e-4` apart); the last flip needed creates
+   a needle that IT N5's absolute `FLIP_SHAPE_LIMIT = 1e-6` refuses, while gc's relative test
+   (`A_min ≥ 1e-6 (A₁ + A₂)`) accepts it; the joint stalls (now status `Stalled`,
+   `tests/stalled.rs`); identical on integers. With gc's relative test (experiment, not committed),
+   99 of 4500 pairs change, all 4500 certify and match gc's length (R10).
 10. *Determinism*: results bitwise identical at 1 and 64 threads; a refused input changes nothing.
 
 ## 8. Lean: model and theorems
@@ -490,6 +502,25 @@ E cited. WP F5 does A, B; WP F6 does C, D and can be cut without blocking anythi
 FlipOut on integer coordinates, the Sec. 5.1 task repeated on Thingi10k: ~62 000 trials (≈ 6200
 meshes × 10, so FlipOut's subset), every one a connected polyline. No timings. Fig. 17 left: a
 model where the signpost extraction breaks and the integer one does not.
+
+**Against the reference on the same pairs (after the speed work, 321ca92–554a83a).** 9 meshes ×
+500 random vertex pairs, one pinned core, load 2.8–3.6; harness `examples/fo_pairs.rs`, the gc
+driver in `runs_tmp/fo-reference-driver/`, raw files in `runs_tmp/fo-speed/final/`. Median ms per
+pair; gc builds its initial queue in the constructor, so "loop" (ours without the queue) is the
+like-for-like column.
+
+| mesh | gc shorten | ours shorten (before → after) | ours loop | ours / gc (loop / gc) | Dijkstra gc / ours | extraction gc / ours (sp, ic) |
+|---|---|---|---|---|---|---|
+| spot | 0.043 | 0.266 → 0.068 | 0.059 | 1.57 (1.34) | 0.49 / 0.31 | 0.029 / 0.015, 0.024 |
+| camelbad | 0.158 | 0.809 → 0.203 | 0.183 | 1.29 (1.18) | 2.16 / 1.31 | 0.079 / 0.020, 0.040 |
+| bunny | 0.163 | 0.728 → 0.185 | 0.165 | 1.13 (1.01) | 2.96 / 1.65 | 0.101 / 0.027, 0.053 |
+| rhino | 0.226 | 1.148 → 0.284 | 0.261 | 1.25 (1.14) | 3.82 / 2.44 | 0.097 / 0.031, 0.057 |
+| tree | 0.226 | 1.047 → 0.258 | 0.237 | 1.14 (1.04) | 3.54 / 2.12 | 0.104 / 0.026, 0.054 |
+
+(All 9 meshes in the crate README.) The same length as gc to `1e-9` on 4497 of 4498 pairs; integers
+cost the same as signposts. The remaining gap: F2's corner sums need the corner angles at every
+vertex a replacement puts on the path (about a third of the spot time; gc reads signposts in
+`O(1)`), and the triangulation's flips are about a quarter of the loop (R9).
 
 **Measured (F3; release, single thread, median per path over 200 pairs, load 1.4–4.3).**
 
@@ -629,6 +660,11 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
   this file (§9.2, §9.3). (§13 Q1: Thingi10k is already in `data/thingi10k/`.)
 * **R8** (§13 Q5) Answered by the user: a visible Blender operator for the refinement / common
   subdivision is wanted; its drawing of `T¹` edges on the input mesh is reused here (§13).
+
+* **R9** (IT-SPEC) `Flip` returns the two corner angles it already computes (at `k` and `l`), so
+  FlipOut's memo avoids recomputing them (about 2 fewer misses per flip; results unchanged).
+* **R10** (IT-SPEC N5, user decision) a relative shape test for flips like gc's, or a limit chosen
+  by the caller; see §7 test 9 for what it changes.
 
 ## 12. Work packages
 
