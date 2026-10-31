@@ -16,15 +16,24 @@
 //! crosses. The halfedges `i → m` and `j → m` leave in the directions of `i → j` and `j → i` and
 //! keep their roundabouts.
 //!
-//! **Across input edges** (`n ≥ 0`, I20): the explicit split, with the crossings of the edge
-//! divided at the split point by their positions along it, needs the geometric crossings
-//! (work package WP2) and is not available yet ([`IntegerError::Unsupported`]).
-//! [`IntegerTriangulation::split_edge_given`] performs it when the caller supplies those
-//! geometric decisions (the number of crossings before the point and its place on the input
-//! mesh), with [`formulas::split_side`] on both sides.
+//! **Across input edges** (`n ≥ 0`, I20): the explicit split of the intrinsic edge (not the
+//! paper's face split then flip, which fails for constrained edges). Floating point decides
+//! two things, from the geometric crossings of the edge
+//! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2): how many crossings lie before the
+//! split point (their `distance` along the edge below `t ℓ`), and the place `q⁰_m`, the point
+//! of the input face between the two neighbouring crossings, interpolated linearly between
+//! them (the edge is straight in that face). A point within rounding of a crossing (a
+//! barycentric coordinate that is not strictly positive) is refused. The integers then follow
+//! exactly ([`formulas::split_side`] on both sides): the halves get `before` and `n − before`,
+//! the edges to the opposite corners count the arcs separated by the new chord, and the
+//! roundabout of `k → m` is that of `k → i` plus `n⁻_ki` plus the arcs from `k` that reach
+//! the edge before `m`. Whatever the rounding, the result is the exact integer data of the
+//! vertex placed between those two crossings. [`IntegerTriangulation::split_edge_given`]
+//! takes both decisions from the caller instead.
 
 use ddg_intrinsic::{
-    EdgeSplitPlan, InsertRefusal, Insertion, IntrinsicError, SurfacePoint, plan_edge_split,
+    EdgeSplitPlan, EdgeTraceOptions, InsertRefusal, Insertion, IntrinsicError, SurfacePoint,
+    plan_edge_split,
 };
 
 use crate::coords::{IntegerTriangulation, NO_ROUNDABOUT};
@@ -50,30 +59,27 @@ impl IntegerTriangulation {
     /// of [`plan_edge_split`] (`t ℓ`, `(1 − t) ℓ`, `it-point-distances`), bitwise as the signpost
     /// representation. A constrained edge gives two constrained halves.
     ///
-    /// Only edges along an input edge (`n = −1`, every boundary edge among them) for now; see the
-    /// [module documentation](crate::split).
+    /// See the [module documentation](crate::split) for the two kinds of edges.
     ///
     /// # Errors
     /// [`IntegerError::Intrinsic`] with the refusals of [`plan_edge_split`] (index, parameter,
-    /// same face on both sides, too thin); [`IntegerError::Unsupported`] for an edge with
-    /// `n ≥ 0`; [`IntegerError::InvalidCoordinates`] when the integers of the edge do not say
-    /// which input edge it runs along. Nothing is changed in every case.
+    /// same face on both sides, too thin) and, for an edge that crosses input edges,
+    /// [`InsertRefusal::NotLocated`] when the point is within rounding of a crossing (its
+    /// place would not be strictly inside an input face); the errors of
+    /// [`extract_intrinsic_edge`](Self::extract_intrinsic_edge);
+    /// [`IntegerError::InvalidCoordinates`] when the integers of the edge do not say which input
+    /// edge it runs along. Nothing is changed in every case.
     ///
     /// [formula: ic-split-edge-normal]
     pub fn split_edge(&mut self, e: usize, t: f64) -> Result<Insertion, IntegerError> {
         let plan = plan_edge_split(&self.complex, &self.lengths, e, t)?;
         let n = self.normal[e];
-        if n >= 0 {
-            return Err(IntegerError::Unsupported {
-                operation: "split_edge",
-                reason: format!(
-                    "edge {e} crosses {n} input edges; splitting it needs the positions of its \
-                     crossings (SPEC I20, work package WP2), which are not available yet"
-                ),
-            });
-        }
-        let location = self.location_along_input_edge(e, t)?;
-        let integers = self.split_integers(e, 0)?;
+        let (before, location) = if n >= 0 {
+            self.crossed_split_place(e, t, plan.halves[0])?
+        } else {
+            (0, self.location_along_input_edge(e, t)?)
+        };
+        let integers = self.split_integers(e, before)?;
         Ok(self.apply_split(e, plan, integers, location))
     }
 
@@ -87,9 +93,9 @@ impl IntegerTriangulation {
     /// `before` must be `0` and the result equals [`split_edge`](Self::split_edge)'s except
     /// for `location`, which is taken as given.
     ///
-    /// [`split_edge`](Self::split_edge) will call this once the geometric crossings (WP2)
-    /// decide `before` and `location`; until then it lets tests and callers that know them
-    /// (e.g. from a signpost trace) perform the split.
+    /// [`split_edge`](Self::split_edge) is this with both decided from the geometric crossings
+    /// of the edge (`ExtractIntrinsicEdge`); this form lets tests and callers that know them
+    /// otherwise (e.g. from a signpost trace) perform the split with their decisions.
     ///
     /// # Errors
     /// As [`split_edge`](Self::split_edge), and [`IntegerError::InvalidCoordinates`] for a
@@ -122,6 +128,98 @@ impl IntegerTriangulation {
         }
         let integers = self.split_integers(e, before)?;
         Ok(self.apply_split(e, plan, integers, location))
+    }
+
+    /// The two floating-point decisions of the split of edge `e` (`n ≥ 0`) at distance `at` from
+    /// the tail of its halfedge: the number of crossings before the point, and the point's place
+    /// on the input mesh (see the [module documentation](crate::split)).
+    fn crossed_split_place(
+        &self,
+        e: usize,
+        t: f64,
+        at: f64,
+    ) -> Result<(i64, SurfacePoint), IntegerError> {
+        let trace = self.extract_intrinsic_edge(e, &EdgeTraceOptions::default())?;
+        let mesh = self.input.mesh();
+        let refused = |detail: String| {
+            IntegerError::Intrinsic(IntrinsicError::InsertionRefused {
+                at: SurfacePoint::Edge { edge: e as u32, t },
+                reason: InsertRefusal::NotLocated { detail },
+            })
+        };
+        let invalid = |detail: String| {
+            IntegerError::invalid(ValidityItem::Extraction, Place::Edge(e as u32), detail)
+        };
+        let x = &trace.crossings;
+        let before = x.iter().filter(|c| c.distance < at).count();
+        // The input face between crossing `before − 1` and crossing `before`.
+        let face = match (x.get(before), before.checked_sub(1).map(|k| &x[k])) {
+            (Some(next), _) => next.halfedge as usize / 3,
+            (None, Some(last)) => {
+                mesh.twin(last.halfedge as usize)
+                    .ok_or_else(|| invalid("its last crossing is a boundary input edge".into()))?
+                    / 3
+            }
+            (None, None) => trace
+                .first_face
+                .ok_or_else(|| invalid("it has no crossing and no first input face".into()))?
+                as usize,
+        };
+        let corners = mesh.faces()[face];
+        let corner_of = |v: usize| corners.iter().position(|&c| c as usize == v);
+        // Barycentric coordinates in `face` of a point on the input mesh.
+        let bary = |q: SurfacePoint| -> Option<[f64; 3]> {
+            let mut b = [0.0; 3];
+            match q {
+                SurfacePoint::Vertex(v) => b[corner_of(v as usize)?] = 1.0,
+                SurfacePoint::Edge { edge, t } => {
+                    let [p, r] = mesh.edge_vertices(edge as usize);
+                    b[corner_of(p)?] = 1.0 - t;
+                    b[corner_of(r)?] = t;
+                }
+                SurfacePoint::Face { face: g, bary } => {
+                    if g as usize != face {
+                        return None;
+                    }
+                    b = bary;
+                }
+            }
+            Some(b)
+        };
+        let crossing_point = |k: usize| SurfacePoint::Edge {
+            edge: x[k].edge,
+            t: x[k].t,
+        };
+        let h = self.complex.edge_halfedge(e);
+        let (a, b) = (self.complex.from_vertex(h), self.complex.to_vertex(h));
+        let (p0, d0) = match before.checked_sub(1) {
+            Some(k) => (crossing_point(k), x[k].distance),
+            None => (self.locations[a], 0.0),
+        };
+        let (p1, d1) = match x.get(before) {
+            Some(c) => (crossing_point(before), c.distance),
+            None => (self.locations[b], self.lengths[e]),
+        };
+        let (Some(b0), Some(b1)) = (bary(p0), bary(p1)) else {
+            return Err(invalid(format!(
+                "the points {p0:?} and {p1:?} around the split point are not in input face {face}"
+            )));
+        };
+        let s = ((at - d0) / (d1 - d0)).clamp(0.0, 1.0);
+        let w = [0, 1, 2].map(|k| (1.0 - s) * b0[k] + s * b1[k]);
+        if !w.iter().all(|&c| c > 0.0 && c < 1.0) {
+            return Err(refused(format!(
+                "the point is within rounding of an input edge (barycentric coordinates {w:?} in \
+                 input face {face})"
+            )));
+        }
+        Ok((
+            before as i64,
+            SurfacePoint::Face {
+                face: face as u32,
+                bary: w,
+            },
+        ))
     }
 
     /// The integers of the split of edge `e` with `before` of its crossings on the half from its

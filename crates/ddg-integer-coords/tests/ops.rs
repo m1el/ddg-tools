@@ -402,6 +402,9 @@ struct SplitStats {
     along_traced: usize,
     along_traced_max_distance: f64,
     crossed_given: usize,
+    crossed_own: usize,
+    crossed_own_max_distance: f64,
+    crossed_own_refused: Vec<String>,
     crossed_skipped: usize,
     refusals_agree: usize,
     mismatches: Vec<String>,
@@ -476,18 +479,6 @@ fn edge_splits_match_the_signposts_exactly() {
                 continue;
             }
             if n >= 0 {
-                // The integer split refuses for now (I20 needs WP2) and changes nothing.
-                match it.split_edge(e, t) {
-                    Err(IntegerError::Unsupported { .. }) => {}
-                    Err(IntegerError::Intrinsic(_)) => {}
-                    other => st
-                        .mismatches
-                        .push(format!("{tag}: split of crossed edge {e}: {other:?}")),
-                }
-                if it != before_state {
-                    st.mismatches
-                        .push(format!("{tag}: refused split changed the state"));
-                }
                 // With the geometric decisions taken from the signposts.
                 let trace = s.trace_edge(e, &opts).unwrap();
                 let at = t * s.edge_lengths()[e];
@@ -501,6 +492,30 @@ fn edge_splits_match_the_signposts_exactly() {
                     continue;
                 }
                 let before = trace.crossings.iter().filter(|x| x.distance < at).count() as i64;
+                // The integer representation's own split (I20 with the crossings of
+                // ExtractIntrinsicEdge): everything but the place exact, on copies.
+                let (mut s2, mut it2) = (s.clone(), it.clone());
+                match (s2.split_edge(e, t), it2.split_edge(e, t)) {
+                    (Ok(xs), Ok(xi)) => {
+                        st.crossed_own += 1;
+                        let (c, _) = convert(&s2).unwrap();
+                        if let Some(d) = differs(&it2, &c, false) {
+                            st.mismatches.push(format!("{tag}: own split {e}: {d}"));
+                        }
+                        if let Err(err) = it2.certify() {
+                            st.mismatches
+                                .push(format!("{tag}: own split {e}: certify: {err}"));
+                        }
+                        let dist = location_distance(xs.location, xi.location);
+                        st.crossed_own_max_distance = st.crossed_own_max_distance.max(dist);
+                    }
+                    (Err(_), Err(IntegerError::Intrinsic(_))) => {}
+                    (Ok(_), Err(err)) => st.crossed_own_refused.push(format!("{tag}: {e}: {err}")),
+                    (rs, ri) => st
+                        .mismatches
+                        .push(format!("{tag}: own split {e}: {rs:?} vs {ri:?}")),
+                }
+                // With the geometric decisions taken from the signposts: exact.
                 match s.split_edge(e, t) {
                     Ok(xs) => match it.split_edge_given(e, t, before, xs.location) {
                         Ok(xi) => {
@@ -569,6 +584,11 @@ fn edge_splits_match_the_signposts_exactly() {
             .along_traced_max_distance
             .max(r.along_traced_max_distance);
         total.crossed_given += r.crossed_given;
+        total.crossed_own += r.crossed_own;
+        total.crossed_own_max_distance = total
+            .crossed_own_max_distance
+            .max(r.crossed_own_max_distance);
+        total.crossed_own_refused.extend(r.crossed_own_refused);
         total.crossed_skipped += r.crossed_skipped;
         total.refusals_agree += r.refusals_agree;
         total.mismatches.extend(r.mismatches);
@@ -576,12 +596,17 @@ fn edge_splits_match_the_signposts_exactly() {
     eprintln!(
         "split differential: {} splits along input edges known to the signposts (exact), {} \
          along input edges the signposts trace (all but the place exact; places within {:e}), \
-         {} splits of crossed edges with the signposts' crossings and place (exact), {} skipped \
-         (a crossing within 1e-9 of the point), {} refusals identical; {} mismatches",
+         {} splits of crossed edges with the signposts' crossings and place (exact), {} with \
+         this crate's own crossings (all but the place exact; places within {:e}; {} refused \
+         where the signposts split), {} skipped (a crossing within 1e-9 of the point), {} \
+         refusals identical; {} mismatches",
         total.along_known,
         total.along_traced,
         total.along_traced_max_distance,
         total.crossed_given,
+        total.crossed_own,
+        total.crossed_own_max_distance,
+        total.crossed_own_refused.len(),
         total.crossed_skipped,
         total.refusals_agree,
         total.mismatches.len()
@@ -589,9 +614,14 @@ fn edge_splits_match_the_signposts_exactly() {
     for m in &total.mismatches {
         eprintln!("  {m}");
     }
+    for m in &total.crossed_own_refused {
+        eprintln!("  refused: {m}");
+    }
     assert!(total.mismatches.is_empty());
-    assert!(total.along_known > 100 && total.crossed_given > 100);
+    assert!(total.along_known > 100 && total.crossed_given > 100 && total.crossed_own > 100);
     assert!(total.along_traced_max_distance < 1e-9);
+    assert!(total.crossed_own_max_distance < 1e-9);
+    assert!(total.crossed_own_refused.is_empty());
 }
 
 #[test]
@@ -627,6 +657,8 @@ struct RemovalStats {
     split_vertices: usize,
     split_removed: usize,
     split_stuck: usize,
+    /// Of `split_vertices`, those on edges crossing input edges.
+    split_crossed: usize,
     mismatches: Vec<String>,
 }
 
@@ -649,6 +681,7 @@ impl RemovalStats {
         self.split_vertices += o.split_vertices;
         self.split_removed += o.split_removed;
         self.split_stuck += o.split_stuck;
+        self.split_crossed += o.split_crossed;
         self.mismatches.extend(o.mismatches);
     }
 }
@@ -858,15 +891,25 @@ fn removal_of_split_vertices_i27() {
         // Right after the split.
         for _ in 0..attempts {
             let e = (rng.next_u64() % it.complex().n_edges() as u64) as usize;
-            if it.normal_coordinate(e) != -1
-                || it.complex().is_boundary_edge(e)
-                || s.edge_on_input(e).is_none()
-            {
+            let n = it.normal_coordinate(e);
+            if it.complex().is_boundary_edge(e) || (n == -1 && s.edge_on_input(e).is_none()) {
                 continue;
             }
             let t = rng.uniform(0.2, 0.8);
-            let (Ok(xs), Ok(_)) = (s.split_edge(e, t), it.split_edge(e, t)) else {
-                continue;
+            let xs = if n == -1 {
+                let (Ok(xs), Ok(_)) = (s.split_edge(e, t), it.split_edge(e, t)) else {
+                    continue;
+                };
+                xs
+            } else {
+                // A crossed edge, with the signposts' decisions so that the states stay equal.
+                let trace = s.trace_edge(e, &EdgeTraceOptions::default()).unwrap();
+                let at = t * s.edge_lengths()[e];
+                let before = trace.crossings.iter().filter(|x| x.distance < at).count() as i64;
+                let Ok(xs) = s.split_edge(e, t) else { continue };
+                it.split_edge_given(e, t, before, xs.location).unwrap();
+                st.split_crossed += 1;
+                xs
             };
             st.split_vertices += 1;
             let v = xs.vertex as usize;
@@ -910,10 +953,12 @@ fn removal_of_split_vertices_i27() {
         total.add(r);
     }
     eprintln!(
-        "I27: {} vertices split from input edges and removed at once: {} removed, {} stuck \
+        "I27: {} vertices split from interior edges ({} of them crossing input edges) and \
+         removed at once: {} removed, {} stuck \
          (state restored); after Delaunay flipping: {} removed ({} flips), {} stuck (degree: \
          {:?}; {} at a straight star), refused {:?}; {} mismatches",
         total.split_vertices,
+        total.split_crossed,
         total.split_removed,
         total.split_stuck,
         total.removed,
@@ -1112,4 +1157,140 @@ fn eq3_below_minus_one_is_invalid() {
         other => panic!("{other:?}"),
     }
     assert!(it == before);
+}
+
+// ----- timing (SPEC §10.1) -----
+
+/// Delaunay flipping and random flips, integer coordinates against signposts, on spot and
+/// camelbad. Run alone, single thread, release:
+/// `cargo test --release -p ddg-integer-coords --test ops -- --ignored --nocapture timing`.
+#[test]
+#[ignore]
+fn timing() {
+    use std::time::Instant;
+    let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    eprintln!("load average before: {}", load.trim());
+    let best = |runs: usize, mut f: Box<dyn FnMut() -> f64 + '_>| {
+        (0..runs).map(|_| f()).fold(f64::INFINITY, f64::min)
+    };
+    for path in [
+        "models/spot/spot/spot_triangulated.obj",
+        "optimal-cones/optimal-cones-data/data/camelbad.obj",
+    ] {
+        let Some(shape) = common::load_data(path) else {
+            eprintln!("{path}: not present");
+            continue;
+        };
+        let s0 = shape.triangulation();
+        let i0 = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
+        let opts = DelaunayOptions::default();
+        let mut n_delaunay = 0;
+        let t_s = best(
+            5,
+            Box::new(|| {
+                let mut s = s0.clone();
+                let t = Instant::now();
+                let r = s.flip_to_delaunay(&opts).unwrap();
+                n_delaunay = r.n_flips;
+                t.elapsed().as_secs_f64()
+            }),
+        );
+        let t_i = best(
+            5,
+            Box::new(|| {
+                let mut it = i0.clone();
+                let t = Instant::now();
+                Triangulation::flip_to_delaunay(&mut it, &opts).unwrap();
+                t.elapsed().as_secs_f64()
+            }),
+        );
+        let mut it = i0.clone();
+        Triangulation::flip_to_delaunay(&mut it, &opts).unwrap();
+        let t_c = best(
+            5,
+            Box::new(|| {
+                let t = Instant::now();
+                it.certify().unwrap();
+                t.elapsed().as_secs_f64()
+            }),
+        );
+        // Random flips: the same 10 |E| attempts on both.
+        let ne = s0.n_edges();
+        let mut rng = SplitMix64::new(1);
+        let edges: Vec<usize> = (0..10 * ne)
+            .map(|_| (rng.next_u64() % ne as u64) as usize)
+            .collect();
+        let mut done_s = 0;
+        let r_s = best(
+            3,
+            Box::new(|| {
+                let mut s = s0.clone();
+                let t = Instant::now();
+                done_s = edges.iter().filter(|&&e| s.flip_edge(e).is_ok()).count();
+                t.elapsed().as_secs_f64()
+            }),
+        );
+        let mut done_i = 0;
+        let mut sum_n = 0u128;
+        let r_i = best(
+            3,
+            Box::new(|| {
+                let mut it = i0.clone();
+                let t = Instant::now();
+                done_i = edges.iter().filter(|&&e| it.flip_edge(e).is_ok()).count();
+                let dt = t.elapsed().as_secs_f64();
+                sum_n = it.total_crossings();
+                dt
+            }),
+        );
+        assert_eq!(done_s, done_i);
+        eprintln!(
+            "{}: |E| {ne}; Delaunay flipping ({n_delaunay} flips): signposts {:.2} ms, integer \
+             {:.2} ms ({:.2}x), certify after it {:.2} ms; random flips ({done_i} of {} \
+             attempts, Σn⁺ after {sum_n}): signposts {:.2} M/s, integer {:.2} M/s ({:.0} / {:.0} \
+             ns per flip)",
+            shape.name,
+            1e3 * t_s,
+            1e3 * t_i,
+            t_i / t_s,
+            1e3 * t_c,
+            edges.len(),
+            done_s as f64 / r_s / 1e6,
+            done_i as f64 / r_i / 1e6,
+            1e9 * r_s / done_s as f64,
+            1e9 * r_i / done_i as f64,
+        );
+        // Removal: insertions by the signposts, converted, then every inserted vertex removed.
+        let s1 = state(&shape, Scenario::Insertions, 5);
+        let (i1, _) = convert(&s1).unwrap();
+        let mut n_removed = 0;
+        let mut n_flips = 0;
+        let t_r = best(
+            3,
+            Box::new(|| {
+                let mut it = i1.clone();
+                let n_input = it.n_input_vertices();
+                let t = Instant::now();
+                let (mut removed, mut flips) = (0, 0);
+                let mut v = it.complex().n_vertices();
+                while v > n_input {
+                    v -= 1;
+                    if let Ok(r) = it.remove_vertex(v) {
+                        removed += 1;
+                        flips += r.flips.len();
+                    }
+                }
+                n_removed = removed;
+                n_flips = flips;
+                t.elapsed().as_secs_f64()
+            }),
+        );
+        eprintln!(
+            "{}: removal of {n_removed} inserted vertices ({n_flips} flips): {:.1} µs per removal",
+            shape.name,
+            1e6 * t_r / n_removed.max(1) as f64
+        );
+    }
+    let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    eprintln!("load average after: {}", load.trim());
 }
