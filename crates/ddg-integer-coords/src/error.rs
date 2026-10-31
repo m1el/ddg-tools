@@ -143,6 +143,28 @@ pub enum IntegerError {
         /// Its degree when no flip was left.
         degree: usize,
     },
+    /// A face split was refused because the point is closer to an arc of the face (an input
+    /// edge crossing it) than [`FaceSplitOptions::too_close`](crate::insert::FaceSplitOptions)
+    /// allows (SPEC §4.4, I6). Nothing is changed.
+    TooCloseToCurve {
+        /// The face of the triangulation.
+        face: u32,
+        /// The distance to the nearest arc, in units of the face's shortest side.
+        distance: f64,
+        /// The option.
+        limit: f64,
+    },
+    /// `RecoverBarycentric` (App. A, SPEC I16) gave no point of the input face of the region:
+    /// the corners of the region do not span it, a corner is not on that input face, or the
+    /// result lies outside it by more than rounding. Nothing is changed.
+    RecoverFailed {
+        /// The face of the triangulation.
+        face: u32,
+        /// The input face of the region.
+        input_face: u32,
+        /// What went wrong, with the values.
+        detail: String,
+    },
     /// An operation this representation does not provide (yet), e.g. the removal of an
     /// inserted boundary vertex (SPEC I7). Nothing is changed.
     Unsupported {
@@ -202,6 +224,24 @@ impl fmt::Display for IntegerError {
                 f,
                 "vertex {vertex} could not be removed: no edge at it can be flipped to lower its \
                  degree {degree}"
+            ),
+            IntegerError::TooCloseToCurve {
+                face,
+                distance,
+                limit,
+            } => write!(
+                f,
+                "the point is {distance:e} (in units of the shortest side) from an input edge \
+                 crossing face {face}, closer than the limit {limit:e}"
+            ),
+            IntegerError::RecoverFailed {
+                face,
+                input_face,
+                detail,
+            } => write!(
+                f,
+                "the place on input face {input_face} of a point of face {face} could not be \
+                 recovered: {detail}"
             ),
             IntegerError::Unsupported { operation, reason } => {
                 write!(f, "{operation} is not supported by integer coordinates: {reason}")

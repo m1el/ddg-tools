@@ -8,8 +8,9 @@
 //! signpost representation runs, so both make the same flips in the same order on the same input
 //! (SPEC §4.3). Errors of this crate are passed through as
 //! [`IntrinsicError::Representation`] with `representation: "integer coordinates"`, refusals
-//! of the shared kind (flips, splits, removals) as themselves, and operations this crate does
-//! not provide yet as [`IntrinsicError::Unsupported`]: insertion in a face (work package WP4).
+//! of the shared kind (flips, splits, insertions, removals) as themselves, and operations this
+//! crate does not provide as [`IntrinsicError::Unsupported`]. Insertion in a face is the face
+//! split of WP4 ([`IntegerTriangulation::insert_vertex`]).
 //! The path of an edge over the input mesh is `ExtractIntrinsicEdge`
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
@@ -82,16 +83,12 @@ impl Triangulation for IntegerTriangulation {
         IntegerTriangulation::flip_edge(self, e).map_err(|x| to_intrinsic_error(x, "flip_edge"))
     }
 
-    /// Not provided yet: insertion in a face is work package WP4 (Supp. Alg. 5, 6, App. A).
-    fn insert_vertex(&mut self, f: usize, _bary: [f64; 3]) -> Result<Insertion, IntrinsicError> {
-        Err(IntrinsicError::Unsupported {
-            representation: REPRESENTATION,
-            operation: "insert_vertex",
-            reason: format!(
-                "inserting a vertex in face {f} needs the face split of Supp. Alg. 5-6 (work \
-                 package WP4)"
-            ),
-        })
+    /// The face split of Supp. Alg. 5, 6 with App. A (WP4):
+    /// [`IntegerTriangulation::insert_vertex`], with the default options (SPEC I6 never
+    /// refuses). Lengths and refusals as the signposts' (`plan_face_split`, I25).
+    fn insert_vertex(&mut self, f: usize, bary: [f64; 3]) -> Result<Insertion, IntrinsicError> {
+        IntegerTriangulation::insert_vertex(self, f, bary)
+            .map_err(|x| to_intrinsic_error(x, "insert_vertex"))
     }
 
     fn split_edge(&mut self, e: usize, t: f64) -> Result<Insertion, IntrinsicError> {

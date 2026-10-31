@@ -463,3 +463,106 @@ fn subdivide() {
     eprintln!("subdivide: {n_faces} faces ({n_invalid} invalid), {n_arcs} arcs: all agree");
     assert!(n_faces >= 500 && n_arcs > 1000);
 }
+
+/// A region label of the oracle (`corner K T` / `middle S`) from its tokens.
+fn region_of(tokens: &[String]) -> ddg_integer_coords::Region {
+    use ddg_integer_coords::Region;
+    match tokens[0].as_str() {
+        "corner" => Region::Corner {
+            corner: int(&tokens[1]) as usize,
+            index: int(&tokens[2]),
+        },
+        "middle" => Region::Middle {
+            index: int(&tokens[1]),
+        },
+        other => panic!("unknown region {other}"),
+    }
+}
+
+/// The task `regions` (SPEC I15): the regions of every face in the oracle's order, exactly.
+#[test]
+fn regions() {
+    use ddg_integer_coords::insert::face_regions;
+    let (mut n_faces, mut n_regions) = (0, 0);
+    for (input, output) in pairs("regions") {
+        let mut out = output.lines.iter();
+        for l in &input.lines {
+            let n = [int(&l[1]), int(&l[2]), int(&l[3])];
+            let ctx = format!("{} face {n:?}", input.name);
+            let o = out.next().unwrap_or_else(|| panic!("{ctx}: output ends"));
+            assert_eq!(&o[..4], &l[..4], "{ctx}");
+            n_faces += 1;
+            let mine = face_regions(n);
+            if o[4] == "invalid" {
+                assert!(mine.is_none(), "{ctx}");
+                continue;
+            }
+            assert_eq!(o[4], "regions", "{ctx}");
+            let mine = mine.unwrap_or_else(|| panic!("{ctx}: invalid here"));
+            let count = int(&o[5]) as usize;
+            assert_eq!(mine.len(), count, "{ctx}");
+            for r in &mine {
+                let line = out.next().unwrap_or_else(|| panic!("{ctx}: missing region"));
+                assert_eq!(line[0], "r", "{ctx}");
+                assert_eq!(region_of(&line[1..]), *r, "{ctx}");
+                n_regions += 1;
+            }
+        }
+        assert!(out.next().is_none(), "{}: extra output", input.name);
+    }
+    eprintln!("regions: {n_faces} faces, {n_regions} regions: all agree");
+    assert!(n_faces >= 500 && n_regions > 1000);
+}
+
+/// The task `split` (SPEC I15, `ic-face-split-normal`): the counts of the new edges for every
+/// region of every face (and for the named regions of the figures), exactly.
+#[test]
+fn split() {
+    use ddg_integer_coords::insert::{FaceArrangement, split_counts};
+    let (mut n_faces, mut n_splits, mut n_none) = (0, 0, 0);
+    for (input, output) in pairs("split") {
+        let mut out = output.lines.iter();
+        for l in &input.lines {
+            let n = [int(&l[1]), int(&l[2]), int(&l[3])];
+            let ctx = format!("{} face {n:?}", input.name);
+            n_faces += 1;
+            let arrangement = FaceArrangement::of(n);
+            let asked: Vec<_> = if l.len() > 4 {
+                vec![region_of(&l[4..])]
+            } else {
+                match &arrangement {
+                    Some(a) => a.regions().collect(),
+                    None => Vec::new(),
+                }
+            };
+            if arrangement.is_none() {
+                let o = out.next().unwrap_or_else(|| panic!("{ctx}: output ends"));
+                assert_eq!(&o[..4], &l[..4], "{ctx}");
+                assert_eq!(o[4], "invalid", "{ctx}");
+                continue;
+            }
+            for r in asked {
+                let o = out.next().unwrap_or_else(|| panic!("{ctx}: output ends"));
+                assert_eq!(o[0], "split", "{ctx}");
+                assert_eq!(&o[1..4], &l[1..4], "{ctx}");
+                let width = if o[4] == "corner" { 3 } else { 2 };
+                assert_eq!(region_of(&o[4..4 + width]), r, "{ctx}");
+                let rest = &o[4 + width..];
+                match split_counts(n, r) {
+                    None => {
+                        assert_eq!(rest, ["none".to_string()], "{ctx} {r}");
+                        n_none += 1;
+                    }
+                    Some(counts) => {
+                        let theirs: Vec<i64> = rest.iter().map(|t| int(t)).collect();
+                        assert_eq!(theirs, counts.to_vec(), "{ctx} {r}");
+                        n_splits += 1;
+                    }
+                }
+            }
+        }
+        assert!(out.next().is_none(), "{}: extra output", input.name);
+    }
+    eprintln!("split: {n_faces} faces, {n_splits} region counts ({n_none} absent regions): all agree");
+    assert!(n_faces >= 500 && n_splits > 1000);
+}

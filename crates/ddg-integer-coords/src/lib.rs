@@ -55,7 +55,19 @@
 //!   [`IntegerTriangulation::extract_intrinsic_edge`] (`ExtractIntrinsicEdge`, the path of an
 //!   edge over the input mesh; the shared interface's `trace_edge_on_input`).
 //!
-//! Not yet: face splits (WP4), the common subdivision (WP5).
+//! # Face splits, App. A, moves (work package WP4)
+//!
+//! * [`insert`]: [`IntegerTriangulation::split_face`] / [`IntegerTriangulation::insert_vertex`]
+//!   (Supp. Alg. 5, 6): the region of the point among the arcs of the face picked by line-side
+//!   tests, the counts derived from that region (SPEC I15, [`insert::FaceArrangement`]), the
+//!   distance to the nearest arc reported and optionally refused (I6), lengths from
+//!   `plan_face_split` (I25); [`IntegerTriangulation::locate_in_face`] without inserting.
+//! * [`recover`]: `RecoverBarycentric` (App. A, Eq. 15–16, every corner of the region, I16) and
+//!   the point query [`IntegerTriangulation::point_on_input`] (SPEC §4.9).
+//! * [`move_vertex`]: [`IntegerTriangulation::move_vertex`] (Sec. 3.6: trace over `T¹` with
+//!   angle frames, I9; insert; remove; a refused removal restores the state).
+//!
+//! The common subdivision and the point queries `T⁰ → T¹` are [`subdivision`] (WP5).
 //!
 //! # The reference implementation
 //!
@@ -79,7 +91,10 @@ mod error;
 pub mod flip;
 pub mod formulas;
 pub mod geometry;
+pub mod insert;
 pub mod interface;
+pub mod move_vertex;
+pub mod recover;
 pub mod remove;
 pub mod split;
 pub mod subdivision;
@@ -94,7 +109,12 @@ pub use coords::{
 pub use error::{IntegerError, InvalidCoordinates, Place, ValidityItem};
 pub use formulas::FaceCoordinates;
 pub use geometry::{GeometricCrossing, GeometricCurve, InputEdgeGeometry, StripReport};
+pub use insert::{
+    FaceArrangement, FaceLocation, FaceSplitOptions, FaceSplitReport, Region, RegionChoice,
+};
 pub use interface::{REPRESENTATION, to_intrinsic_error};
+pub use move_vertex::{MoveInsertion, VertexMoveReport};
+pub use recover::{RECOVER_ZERO, RecoverReport, RecoveredPoint, recover_barycentric};
 pub use remove::Removal;
 pub use subdivision::{
     ArcEnd, CommonSubdivision, LocatedPiece, PointLocator, SubdivisionReport, face_arcs,

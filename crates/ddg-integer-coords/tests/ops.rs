@@ -1031,17 +1031,13 @@ fn refused_removals_change_nothing() {
 // ----- the shared interface -----
 
 #[test]
-fn the_interface_delegates_and_refuses_face_insertion() {
+fn the_interface_delegates() {
     let shape = &standard_shapes()[0];
     let mut it = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
     let before = it.clone();
-    assert!(matches!(
-        Triangulation::insert_vertex(&mut it, 0, [0.2, 0.3, 0.5]),
-        Err(IntrinsicError::Unsupported {
-            representation: "integer coordinates",
-            ..
-        })
-    ));
+    // WP4: insertion in a face is the face split (tests/insert.rs).
+    let mut inserted = it.clone();
+    assert!(Triangulation::insert_vertex(&mut inserted, 0, [0.2, 0.3, 0.5]).is_ok());
     // WP2: ExtractIntrinsicEdge; edge 0 of the input itself runs along input edge 0.
     assert_eq!(
         it.trace_edge_on_input(0, &EdgeTraceOptions::default())
