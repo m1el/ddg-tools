@@ -135,33 +135,51 @@ impl VertexStar {
     /// # Panics
     /// If `v` is out of range or the network's layers do not fit `complex`.
     pub fn new(complex: &Complex, network: &Network, v: usize) -> VertexStar {
-        let mut ends: Vec<EdgeEnd> = complex
-            .outgoing_halfedges(v)
-            .map(|h| EdgeEnd {
+        let mut star = VertexStar {
+            vertex: v,
+            boundary: false,
+            ends: Vec::new(),
+            entries: Vec::new(),
+            first_entry: Vec::new(),
+        };
+        star.rebuild(complex, network, v);
+        star
+    }
+
+    /// Makes this the star of vertex `v` ([`new`](Self::new)), reusing its buffers.
+    ///
+    /// # Panics
+    /// As [`new`](Self::new).
+    pub(crate) fn rebuild(&mut self, complex: &Complex, network: &Network, v: usize) {
+        self.vertex = v;
+        self.ends.clear();
+        self.entries.clear();
+        self.first_entry.clear();
+        self.ends
+            .extend(complex.outgoing_halfedges(v).map(|h| EdgeEnd {
                 edge: complex.edge(h) as u32,
                 at_tail: complex.is_forward(h),
                 halfedge: h as u32,
                 corner: Some(h as u32),
-            })
-            .collect();
-        let boundary = complex.is_boundary_vertex(v);
-        if boundary {
-            let last = ends
+            }));
+        self.boundary = complex.is_boundary_vertex(v);
+        if self.boundary {
+            let last = self
+                .ends
                 .last()
                 .expect("a vertex has an outgoing halfedge")
                 .halfedge as usize;
             let g = complex.prev(last);
-            ends.push(EdgeEnd {
+            self.ends.push(EdgeEnd {
                 edge: complex.edge(g) as u32,
                 at_tail: false,
                 halfedge: g as u32,
                 corner: None,
             });
         }
-        let mut entries = Vec::new();
-        let mut first_entry = Vec::with_capacity(ends.len() + 1);
-        for (i, end) in ends.iter().enumerate() {
-            first_entry.push(entries.len() as u32);
+        let entries = &mut self.entries;
+        for (i, end) in self.ends.iter().enumerate() {
+            self.first_entry.push(entries.len() as u32);
             let layer = &network.layers[end.edge as usize];
             // Index 0 of a layer is next to the face of edge_halfedge. At the tail of
             // edge_halfedge that face is counter-clockwise after the edge, at its head
@@ -180,14 +198,7 @@ impl VertexStar {
                 layer.iter().for_each(|&id| push(id));
             }
         }
-        first_entry.push(entries.len() as u32);
-        VertexStar {
-            vertex: v,
-            boundary,
-            ends,
-            entries,
-            first_entry,
-        }
+        self.first_entry.push(self.entries.len() as u32);
     }
 
     /// The position in [`entries`](Self::entries) of the start (`start = true`) or the end of
@@ -205,12 +216,31 @@ impl VertexStar {
     /// # Panics
     /// If an index is out of range.
     pub fn sweep<T: Triangulation>(&self, tri: &T, from: usize, to: usize) -> Wedge {
+        let mut corners = Vec::new();
+        let boundary = self.sweep_corners(from, to, &mut corners);
+        let angle = if boundary {
+            f64::INFINITY
+        } else {
+            wedge_angle(tri, &corners)
+        };
+        Wedge {
+            angle,
+            corners,
+            boundary,
+            from: from as u32,
+            to: to as u32,
+        }
+    }
+
+    /// The corners of [`sweep`](Self::sweep) written to `corners` (cleared first), in sweep
+    /// order; returns whether the sweep crosses the boundary gap.
+    pub(crate) fn sweep_corners(&self, from: usize, to: usize, corners: &mut Vec<u32>) -> bool {
         let (i, j) = (
             self.entries[from].edge_end as usize,
             self.entries[to].edge_end as usize,
         );
         let n = self.ends.len();
-        let mut corners = Vec::new();
+        corners.clear();
         let mut boundary = false;
         if !(i == j && to > from) {
             let mut k = i;
@@ -225,18 +255,7 @@ impl VertexStar {
                 }
             }
         }
-        let angle = if boundary {
-            f64::INFINITY
-        } else {
-            wedge_angle(tri, &corners)
-        };
-        Wedge {
-            angle,
-            corners,
-            boundary,
-            from: from as u32,
-            to: to as u32,
-        }
+        boundary
     }
 
     /// The entries strictly inside a wedge, counter-clockwise.

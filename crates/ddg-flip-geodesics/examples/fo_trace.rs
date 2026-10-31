@@ -18,6 +18,15 @@ fn run<T: Triangulation + Clone>(tri: &T, a: usize, b: usize) {
         path.segments.len(),
         net.length()
     );
+    let v = path.vertices(tri.complex());
+    println!(
+        "initial {}: {}",
+        v.len() - 1,
+        v.iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let report = net
         .shorten_with(&ShortenOptions::default(), |s, _| {
             println!(
@@ -36,6 +45,16 @@ fn run<T: Triangulation + Clone>(tri: &T, a: usize, b: usize) {
         })
         .expect("shorten");
     println!("# {report:?}");
+    let c = net.triangulation().complex();
+    let v = net.paths()[0].vertices(c);
+    println!(
+        "final {}: {}",
+        v.len() - 1,
+        v.iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let cert = net.certify(&CertifyOptions::default()).expect("certify");
     println!(
         "# geodesic {} min_angle {:.17e} failures {:?}",

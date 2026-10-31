@@ -845,7 +845,7 @@ impl Network {
 }
 
 /// What [`Network::replace_run`] did.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Replaced {
     /// The ids of the new segments, in path order.
     pub(crate) new_ids: Vec<u32>,
@@ -861,7 +861,7 @@ pub(crate) struct Replaced {
 
 impl Network {
     /// Replaces a run of one or two consecutive segments of one path by `new` (in path
-    /// order), each new segment pushed outermost on the side of the face of the halfedge
+    /// order), writing what it did into `out` (whose buffers are reused), each new segment pushed outermost on the side of the face of the halfedge
     /// given with it (SPEC §4.1 step 2: the wedge side; §4.3: the side of the face crossed).
     ///
     /// The removed segments are taken out of their layers wherever they are (Alg. 1 removes
@@ -878,7 +878,10 @@ impl Network {
         complex: &Complex,
         run: &[u32],
         new: &[(Segment, usize)],
-    ) -> Result<Replaced, FlipError> {
+        out: &mut Replaced,
+    ) -> Result<(), FlipError> {
+        out.new_ids.clear();
+        out.layer_neighbours.clear();
         let internal = |what: String| Err(FlipError::Internal { what });
         let live = |id: u32| self.nodes.get(id as usize).copied().flatten();
         let Some(first) = run.first().and_then(|&id| live(id)) else {
@@ -904,7 +907,7 @@ impl Network {
         };
 
         // Out of the layers.
-        let mut layer_neighbours = Vec::new();
+        let layer_neighbours = &mut out.layer_neighbours;
         for &id in run {
             let e = live(id).expect("checked").segment.edge as usize;
             let layer = &mut self.layers[e];
@@ -927,7 +930,7 @@ impl Network {
         }
 
         // The new segments.
-        let mut new_ids = Vec::with_capacity(new.len());
+        let new_ids = &mut out.new_ids;
         for &(segment, h) in new {
             let id = self.nodes.len() as u32;
             self.nodes.push(Some(Node {
@@ -945,8 +948,9 @@ impl Network {
             new_ids.push(id);
         }
         for w in new_ids.windows(2) {
-            self.link(w[0], w[1]);
+            Network::link_nodes(&mut self.nodes, w[0], w[1]);
         }
+        let new_ids = &out.new_ids;
         if whole {
             if let (Some(&a), Some(&b)) = (new_ids.first(), new_ids.last()) {
                 self.link(b, a);
@@ -989,18 +993,19 @@ impl Network {
                 new_ids.first().copied().unwrap_or(after)
             };
         }
-        Ok(Replaced {
-            new_ids,
-            after: (after != NONE).then_some(after),
-            layer_neighbours,
-            contracted: n == 0,
-        })
+        out.after = (after != NONE).then_some(after);
+        out.contracted = n == 0;
+        Ok(())
     }
 
     /// Links `a` → `b`.
     fn link(&mut self, a: u32, b: u32) {
-        self.nodes[a as usize].as_mut().expect("live").next = b;
-        self.nodes[b as usize].as_mut().expect("live").prev = a;
+        Network::link_nodes(&mut self.nodes, a, b);
+    }
+
+    fn link_nodes(nodes: &mut [Option<Node>], a: u32, b: u32) {
+        nodes[a as usize].as_mut().expect("live").next = b;
+        nodes[b as usize].as_mut().expect("live").prev = a;
     }
 }
 

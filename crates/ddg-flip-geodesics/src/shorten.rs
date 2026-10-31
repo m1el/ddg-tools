@@ -45,10 +45,15 @@ use std::f64::consts::PI;
 use ddg_intrinsic::Triangulation;
 
 use crate::error::FlipError;
-use crate::flipout::{FlipOutResult, flip_out};
+use crate::flipout::{FlipOutResult, Outcome, flip_out};
 use crate::network::{GeodesicNetwork, Joint, NONE, Network, SegmentId};
 use crate::report::{ShortenOptions, ShortenReport, ShortenStatus, ShortenStep, Shortening};
+use crate::scratch::{Located, Scratch, sides_to_shorten};
 use crate::wedge::{JointGeometry, Side};
+
+/// `log2` of the number of faces the corner-angle memo of a run holds
+/// ([`crate::scratch::AngleCache`]); collisions cost time only.
+const ANGLE_CACHE_BITS: u32 = 12;
 
 /// A queue entry: one side of the joint at the tail of `segment`.
 #[derive(Debug, Clone, Copy)]
@@ -94,49 +99,55 @@ fn joint_at(network: &Network, id: u32) -> Option<Joint> {
     })
 }
 
-/// The sides of the joint at the tail of `id` to queue (none at a pinned vertex).
-fn entries_for<T: Triangulation>(
+/// Calls `f` with each side of the joint at the tail of `id` to queue
+/// ([`JointGeometry::sides_to_shorten`]; none at a pinned vertex), with the joint located in
+/// `scratch`.
+fn for_each_side<T: Triangulation, F>(
     tri: &T,
     network: &Network,
+    scratch: &mut Scratch,
     id: u32,
     tolerance: f64,
-) -> Result<Vec<(Entry, JointGeometry)>, FlipError> {
+    mut f: F,
+) -> Result<(), FlipError>
+where
+    F: FnMut(Entry, &Scratch, Located),
+{
     let Some(joint) = joint_at(network, id) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     if network.is_pinned(network.joint_vertex(tri.complex(), joint)) {
-        return Ok(Vec::new());
+        return Ok(());
     }
-    let geometry = JointGeometry::new(tri, network, joint)?;
-    Ok(geometry
-        .sides_to_shorten(tolerance)
-        .into_iter()
-        .map(|(side, angle)| {
-            (
-                Entry {
-                    angle,
-                    side,
-                    path: joint.path as u32,
-                    segment: id,
-                },
-                geometry.clone(),
-            )
-        })
-        .collect())
+    let at = scratch.locate(tri, network, joint)?;
+    let (left, right) = scratch.angles(tri, at);
+    let (sides, n) = sides_to_shorten(left, right, tolerance);
+    for &(side, angle) in &sides[..n] {
+        let entry = Entry {
+            angle,
+            side,
+            path: joint.path as u32,
+            segment: id,
+        };
+        f(entry, scratch, at);
+    }
+    Ok(())
 }
 
 /// Whether a popped entry is still current: its joint exists and the angle on its side is
-/// bitwise the key. Returns the joint's geometry if so.
+/// bitwise the key. Returns the joint, located in `scratch`, if so.
 fn current<T: Triangulation>(
     tri: &T,
     network: &Network,
+    scratch: &mut Scratch,
     entry: &Entry,
-) -> Result<Option<JointGeometry>, FlipError> {
+) -> Result<Option<Located>, FlipError> {
     let Some(joint) = joint_at(network, entry.segment) else {
         return Ok(None);
     };
-    let geometry = JointGeometry::new(tri, network, joint)?;
-    Ok((geometry.angle(entry.side).to_bits() == entry.angle.to_bits()).then_some(geometry))
+    let at = scratch.locate(tri, network, joint)?;
+    let angle = scratch.angle(tri, at, entry.side);
+    Ok((angle.to_bits() == entry.angle.to_bits()).then_some(at))
 }
 
 struct Run<'a> {
@@ -145,6 +156,9 @@ struct Run<'a> {
     /// Joint sides that stalled, with the angle they had.
     stalled: BTreeMap<(u32, Side), u64>,
     report: ShortenReport,
+    scratch: Scratch,
+    /// The segments whose joints a replacement re-queues.
+    ids: Vec<u32>,
 }
 
 impl<T: Triangulation> GeodesicNetwork<T> {
@@ -161,7 +175,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
     /// broken invariant (a bug); with [`ShortenOptions::check_invariants`], the errors of
     /// [`Network::check`] after the iteration that broke it.
     pub fn shorten(&mut self, options: &ShortenOptions) -> Result<ShortenReport, FlipError> {
-        self.shorten_with(options, |_, _| {})
+        self.run_shorten::<fn(&ShortenStep, &GeodesicNetwork<T>)>(options, None)
     }
 
     /// [`shorten`](Self::shorten), calling `observer` after every iteration with what it did
@@ -174,6 +188,19 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         &mut self,
         options: &ShortenOptions,
         mut observer: F,
+    ) -> Result<ShortenReport, FlipError>
+    where
+        F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
+    {
+        self.run_shorten(options, Some(&mut observer))
+    }
+
+    /// The shortening, with or without an observer (without one, no [`ShortenStep`] is
+    /// built).
+    fn run_shorten<F>(
+        &mut self,
+        options: &ShortenOptions,
+        mut observer: Option<&mut F>,
     ) -> Result<ShortenReport, FlipError>
     where
         F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
@@ -206,25 +233,33 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 initial_length,
                 final_length: initial_length,
             },
+            scratch: Scratch::new(ANGLE_CACHE_BITS),
+            ids: Vec::new(),
         };
         for p in 0..self.network.n_paths() {
             for joint in self.network.path_joints(p) {
-                for (entry, _) in entries_for(&self.tri, &self.network, joint.outgoing.0, tol)? {
-                    run.heap.push(Reverse(entry));
-                }
+                let heap = &mut run.heap;
+                for_each_side(
+                    &self.tri,
+                    &self.network,
+                    &mut run.scratch,
+                    joint.outgoing.0,
+                    tol,
+                    |entry, _, _| heap.push(Reverse(entry)),
+                )?;
             }
         }
 
         let status = 'run: loop {
             while let Some(Reverse(entry)) = run.heap.pop() {
-                let Some(geometry) = current(&self.tri, &self.network, &entry)? else {
+                let Some(at) = current(&self.tri, &self.network, &mut run.scratch, &entry)? else {
                     run.report.stale_entries += 1;
                     continue;
                 };
-                if self.network.is_pinned(geometry.vertex()) {
+                if self.network.is_pinned(at.vertex) {
                     continue;
                 }
-                if !geometry.is_flexible(entry.side) {
+                if !run.scratch.is_flexible(at, entry.side) {
                     run.report.blocked_entries += 1;
                     continue;
                 }
@@ -240,7 +275,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 if run.report.iterations >= max_iterations {
                     break 'run ShortenStatus::IterationLimit;
                 }
-                self.step(&mut run, &geometry, entry, &mut observer)?;
+                self.step(&mut run, at, entry, &mut observer)?;
                 if let Some(r) = options.stop_length_ratio
                     && self.length < r * initial_length
                 {
@@ -249,7 +284,7 @@ impl<T: Triangulation> GeodesicNetwork<T> {
                 if run.heap.len() > 4 * self.network.n_segments() + 1024 {
                     let entries = std::mem::take(&mut run.heap).into_vec();
                     for Reverse(e) in entries {
-                        if current(&self.tri, &self.network, &e)?.is_some() {
+                        if current(&self.tri, &self.network, &mut run.scratch, &e)?.is_some() {
                             run.heap.push(Reverse(e));
                         } else {
                             run.report.stale_entries += 1;
@@ -261,15 +296,21 @@ impl<T: Triangulation> GeodesicNetwork<T> {
             let mut found = Vec::new();
             for p in 0..self.network.n_paths() {
                 for joint in self.network.path_joints(p) {
-                    for (entry, geometry) in
-                        entries_for(&self.tri, &self.network, joint.outgoing.0, tol)?
-                    {
-                        let stalled = run.stalled.get(&(entry.segment, entry.side))
-                            == Some(&entry.angle.to_bits());
-                        if geometry.is_flexible(entry.side) && !stalled {
-                            found.push(entry);
-                        }
-                    }
+                    let stalled = &run.stalled;
+                    for_each_side(
+                        &self.tri,
+                        &self.network,
+                        &mut run.scratch,
+                        joint.outgoing.0,
+                        tol,
+                        |entry, scratch, at| {
+                            let is_stalled = stalled.get(&(entry.segment, entry.side))
+                                == Some(&entry.angle.to_bits());
+                            if scratch.is_flexible(at, entry.side) && !is_stalled {
+                                found.push(entry);
+                            }
+                        },
+                    )?;
                 }
             }
             if found.is_empty() {
@@ -287,20 +328,27 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         Ok(run.report)
     }
 
-    /// One iteration: Alg. 1 on the popped joint side, the bookkeeping, the observer.
+    /// One iteration: Alg. 1 on the popped joint side (`at`, located last in the scratch), the
+    /// bookkeeping, the observer.
     fn step<F>(
         &mut self,
         run: &mut Run<'_>,
-        geometry: &JointGeometry,
+        at: Located,
         entry: Entry,
-        observer: &mut F,
+        observer: &mut Option<&mut F>,
     ) -> Result<(), FlipError>
     where
         F: FnMut(&ShortenStep, &GeodesicNetwork<T>),
     {
-        let joint = geometry.joint;
+        let joint = at.joint;
         let path = joint.path;
-        let result = flip_out(&mut self.tri, &mut self.network, joint, entry.side)?;
+        let result = flip_out(
+            &mut self.tri,
+            &mut self.network,
+            at,
+            entry.side,
+            &mut run.scratch,
+        )?;
         let tol = run.options.straight_tolerance;
         let report = &mut run.report;
         report.iterations += 1;
@@ -308,76 +356,85 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         report.refused_flips += result.stats.refused;
         report.twice_incident_wedges += usize::from(result.stats.twice_incident);
         report.degree_one_wedges += usize::from(result.stats.degree_one);
-        match &result.shortening {
-            Shortening::Stalled { .. } => {
+        match result.outcome {
+            Outcome::Stalled { .. } => {
                 report.stalled += 1;
                 // Remember the joint side with its angle after the flips.
-                let now = JointGeometry::new(&self.tri, &self.network, joint)?;
+                let now = run.scratch.locate(&self.tri, &self.network, joint)?;
+                let angle = run.scratch.angle(&self.tri, now, entry.side);
                 run.stalled
-                    .insert((entry.segment, entry.side), now.angle(entry.side).to_bits());
+                    .insert((entry.segment, entry.side), angle.to_bits());
             }
-            Shortening::LoopMoved { .. } => report.loop_perturbations += 1,
-            Shortening::Contracted {
+            Outcome::LoopMoved { .. } => report.loop_perturbations += 1,
+            Outcome::Contracted {
                 path_contracted, ..
             } => {
                 report.contractions += 1;
-                if *path_contracted {
+                if path_contracted {
                     report.contracted.push(path);
                 }
             }
-            Shortening::Replaced { .. } => {}
+            Outcome::Replaced { .. } => {}
         }
-        self.update_length(&result.shortening);
-        if let Some(replaced) = &result.replaced {
-            let mut ids: Vec<u32> = replaced.new_ids.clone();
-            ids.extend(replaced.after);
+        self.update_length(result.outcome);
+        if result.outcome.replaced() {
+            let replaced = &run.scratch.replaced;
+            run.ids.clear();
+            run.ids.extend_from_slice(&replaced.new_ids);
+            run.ids.extend(replaced.after);
             for &n in &replaced.layer_neighbours {
-                ids.push(n);
+                run.ids.push(n);
                 if let Some(node) = self.network.nodes.get(n as usize).copied().flatten()
                     && node.next != NONE
                 {
-                    ids.push(node.next);
+                    run.ids.push(node.next);
                 }
             }
-            for id in ids {
+            for &id in &run.ids {
                 run.stalled.remove(&(id, Side::Left));
                 run.stalled.remove(&(id, Side::Right));
-                for (e, _) in entries_for(&self.tri, &self.network, id, tol)? {
-                    run.heap.push(Reverse(e));
-                }
+                let heap = &mut run.heap;
+                for_each_side(
+                    &self.tri,
+                    &self.network,
+                    &mut run.scratch,
+                    id,
+                    tol,
+                    |e, _, _| heap.push(Reverse(e)),
+                )?;
             }
         }
         if run.options.check_invariants {
             self.check_invariants()?;
         }
-        let FlipOutResult {
-            shortening, stats, ..
-        } = result;
-        let step = ShortenStep {
-            iteration: run.report.iterations,
-            joint,
-            side: entry.side,
-            vertex: geometry.vertex(),
-            angle: entry.angle,
-            flips: stats.flips,
-            refused_flips: stats.refused,
-            shortening,
-            length: self.length,
-        };
-        observer(&step, self);
+        if let Some(observer) = observer {
+            let FlipOutResult { outcome, stats } = result;
+            let step = ShortenStep {
+                iteration: run.report.iterations,
+                joint,
+                side: entry.side,
+                vertex: at.vertex,
+                angle: entry.angle,
+                flips: stats.flips,
+                refused_flips: stats.refused,
+                shortening: outcome.shortening(&run.scratch.replaced.new_ids),
+                length: self.length,
+            };
+            observer(&step, self);
+        }
         Ok(())
     }
 
     /// The running length (F14): `length += new − old` per step; when a path contracts to
     /// nothing the length is summed afresh, so that a network of contracted paths has length
     /// exactly `0` rather than a rounding residue.
-    fn update_length(&mut self, shortening: &Shortening) {
-        match shortening {
-            Shortening::Contracted {
+    fn update_length(&mut self, outcome: Outcome) {
+        match outcome {
+            Outcome::Contracted {
                 path_contracted: true,
                 ..
             } => self.length = self.recompute_length(),
-            _ => self.length += shortening.length_change(),
+            _ => self.length += outcome.length_change(),
         }
     }
 
@@ -413,8 +470,10 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         if wedge.angle.partial_cmp(&PI) != Some(std::cmp::Ordering::Less) {
             return refuse("the wedge angle is not below pi");
         }
-        let result = flip_out(&mut self.tri, &mut self.network, joint, side)?;
-        self.update_length(&result.shortening);
-        Ok(result.shortening)
+        let mut scratch = Scratch::new(6);
+        let at = scratch.locate(&self.tri, &self.network, joint)?;
+        let result = flip_out(&mut self.tri, &mut self.network, at, side, &mut scratch)?;
+        self.update_length(result.outcome);
+        Ok(result.outcome.shortening(&scratch.replaced.new_ids))
     }
 }

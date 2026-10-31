@@ -109,6 +109,7 @@ pub mod flipout;
 pub mod init;
 pub mod network;
 pub mod report;
+mod scratch;
 pub mod shorten;
 pub mod wedge;
 
