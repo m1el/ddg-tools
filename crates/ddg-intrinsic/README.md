@@ -39,7 +39,11 @@ every decision the paper leaves open (entries `N1` to `N25`).
   located on both triangulations (SPEC N12).
 - Delaunay refinement (Sec. 4.2) to an angle bound, on closed surfaces and with boundary
   (Ruppert's rule, SPEC N1), with vertices of small angle sum (SPEC N4). Everything left below
-  the bound is listed with its reason.
+  the bound is listed with its reason. The driver is written once over `Triangulation`
+  (`refine::refine`, SPEC N51), so the integer coordinates run the same code; it also has the
+  rules of Gillespie, Sharp and Crane 2021 (`RefineRules::Chew`: midpoint splits of the boundary
+  edge a circumcentre path leaves through, removal of the inserted vertices in its Dijkstra
+  ball, the reference's narrow-cone rule), opt-in here, the default of `ddg-integer-coords`.
 - The simplicial export for code that takes a `TriMesh` with a `Geometry`, the way back for a
   cut found there, and a fingerprint that identifies the state (SPEC §6, N15).
 - The cotan Laplacian (positive semidefinite) and the lumped vertex areas of the triangulation,
@@ -59,7 +63,7 @@ every decision the paper leaves open (entries `N1` to `N25`).
   that stores no signposts (`AngleFrames`), SPEC N50.
 
 Not implemented: the paper's general route for a move beyond the star of a vertex (SPEC N20;
-only vertices of degree three can be removed, N50); refinement with constrained edges (N50); a
+moves do not remove vertices; removal by flips exists since N51); refinement with constrained edges (N50); a
 refinement that keeps
 the angle bound through the export at spikes (SPEC N15: on thin tubes and handles the export
 can restore it, at vertices with a small angle sum it cannot). Benches: `benches/retriangulation.rs`
@@ -150,6 +154,8 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | `segments_on_input(&nodes, &segments, &EdgeTraceOptions) -> Result<PathsOnInput, _>`, `segment_on_input(f, from, to, _)` | straight segments inside faces of the triangulation as pieces on input faces, checked like edge traces |
 | `overlay(&EdgeTraces) -> Result<Overlay, _>` | the common subdivision: `vertices` (on both triangulations), polygons `face(f)` with `face_input`, `face_triangulation`; `triangles()` |
 | `refine(&RefineOptions) -> Result<RefineReport, _>` | Delaunay refinement; `min_angle` (default 25°), `max_circumradius`, `InsertionLimit`; the report lists `below_bound` with `BelowReason` |
+| `refine_with_rules(&RefineOptions, RefineRules)` (trait), `refine::refine(&mut t, _, rules, extra)` | the same driver on any representation; `RefineRules::Ruppert` (default, N1, N4) or `RefineRules::Chew` (IC Alg. 10, SPEC N51); the report also counts removals, refused removals, trace failures and the faces left by the narrow-cone rule (`min_angle_valid`) |
+| `remove_inserted_vertex(v) -> Result<InsertedVertexRemoval, _>`, `removal_flip_choice` | removal of an inserted interior vertex of any degree by flips (IC I24), shared by both representations; `RemovalRefusal::Stuck` (SPEC N51) |
 | `move_vertex(v, [dx, dy]) -> Result<VertexMove, _>`, `odt_target(v, barycenters_at_boundary)`, `star_min_shape(v)` | move an inserted vertex inside its star (or the reason it is refused, `MoveRefusal`); the update of the optimal Delaunay triangulation at a vertex, in its frame |
 | `optimal_delaunay(&OptimalDelaunayOptions) -> Result<OptimalDelaunayReport, _>` | iODT; `TargetLength`, `max_iterations`, `motion_tolerance`, `step`, `max_halvings`, `min_shape`, `BoundaryVertices`, `OdtCenters`, `InsertionLimit`; the report has every `OdtIteration` and `ShapeStatistics` |
 | `shape_statistics() -> ShapeStatistics` | distribution of the corner angles and the face areas (`Summary`: min, max, mean, deviation, quantiles) |

@@ -902,6 +902,65 @@ those of `crates/ddg-intrinsic-apps/SPEC.md`.
   directions and change sign between the two rounds (e.g. spot iDT +2.1 %, then −6.0 %;
   camelbad iDT +3.2 %, then −0.6 %); no slowdown is measurable above that noise.
 
+* **N51** *Refinement over the shared interface, and the rules of the integer-coordinates paper*
+  (2026-10-31, IC-SPEC §5, I11, I23). The driver of N1, N4, N14 is written once over
+  `Triangulation`: `refine::refine(&mut t, &RefineOptions, RefineRules, extra)`;
+  `IntrinsicTriangulation::refine` and `refine_with` are it with `RefineRules::Ruppert`, and the
+  provided `Triangulation::refine_with_rules` chooses the rules. `RefineOptions` is unchanged (its
+  callers list every field); the rules are a separate argument.
+  *What the trait gained* (all provided, so other implementations compile unchanged):
+  `trace_geodesic(start, direction, length, options)` (default: `AngleFrames`; this crate
+  overrides it with its stored signposts; from a point of a face the path, its crossings and its
+  end depend on the lengths alone, so both agree bit for bit), `remove_inserted_vertex(v) ->
+  InsertedVertexRemoval` (default `Unsupported`; here: flips by `removal_flip_choice` until the
+  degree is three, then `remove_vertex`; a star where no flip lowers the degree is
+  `RemovalRefusal::Stuck { degree }`, the triangulation restored from a copy), and
+  `refine_with_rules`. `remove::removal_flip_choice(&Complex, &[f64], v)` is IC I24 (self-edges
+  first, then the largest `min(A₁, A₂)/(A₁ + A₂)`, ties by edge id), decided from the lengths alone
+  and used by both representations, so they remove a vertex by the same flips.
+  `EdgeQueue::apply_removal` keeps the Delaunay queue valid across the renumbering of a removal;
+  the refinement heap skips face ids past the end and re-stamps faces that a removal moved.
+  *The two rules.* `RefineRules::Ruppert` (default; N1, N4): encroached boundary edges (opposite
+  angle `> 90°`) are split first; a circumcentre that would encroach a boundary edge of the
+  triangles its insertion removes splits that edge instead; boundary edges next to a boundary
+  angle below 60° are split at power-of-two distances, others at the midpoint; corners at vertices
+  whose angle sum is below the bound are exempt; the needle guard of N4 (a circumcentre whose loop
+  around an interior vertex of angle sum below 60° would be shorter than the triangle's shortest
+  edge is not inserted); vertices are never removed. `RefineRules::Chew` (Gillespie, Sharp, Crane
+  2021, Supp. Alg. 10, as their reference's `delaunayRefine`): no edge is split for being
+  encroached; when the circumcentre path from the barycentre leaves the surface through a
+  boundary edge `lm`, `lm` is split at its midpoint, the triangulation is flipped to Delaunay,
+  every inserted interior vertex at Dijkstra distance (over the edges) `< ℓ_lm` from the new
+  vertex is removed in decreasing id order (`ic-dijkstra-ball`; the reference uses `≤`), and it is
+  flipped to Delaunay again; a refused removal is counted, not fatal; a circumcentre on an
+  interior edge splits it at the foot as under N14, without removals (the reference removes after
+  every split); the narrow-cone rule of IC I23: a face with exactly one corner at a vertex of angle
+  sum below 60°, or whose vertices' places all lie in one input face with such a vertex (the
+  reference's `getParentFace`, from the places alone), is not refined; a corner at a vertex of
+  degree one or between two boundary edges does not count as small. Under both rules a
+  circumcentre path that ends elsewhere than in a face or at the boundary skips the face and is
+  counted (under `Ruppert` it was skipped silently; an error of the trace itself stays an error
+  there, and is counted under `Chew`). Order, tie-breaking and the insertion limit are N14's under
+  both.
+  *Report.* `RefineReport` gained `rules`, `n_removals`, `n_removal_flips` (flips made by
+  removals, not in `n_flips`), `n_removals_refused`, `n_trace_failures`, `n_narrow_cone_faces` (the
+  faces of the result the I23 rule leaves, whichever rules ran) and `min_angle_valid` (the
+  smallest corner angle over the other faces: the paper's "minimum corner angle of the output
+  mesh"; the reference's statistic leaves out faces with *any* narrow vertex). Under `Chew` a
+  corner below the bound in a face the rule leaves is listed as `BelowReason::NeedleVertex` with
+  the narrow vertex (of the triangulation or of the input face). The existing behaviour that a
+  run whose insertion count reaches the limit exactly reports `InsertionLimit`, not `Done`, is
+  unchanged.
+  *Bitwise.* With `Ruppert` the results are those before the change: `tests/bitwise_pins.rs` and
+  the suites of this crate, `ddg-intrinsic-apps`, `ddg-uv` and `ddg-py` pass unchanged.
+  *Measured* (`ddg-integer-coords/tests/refine.rs`, 256 runs on the generator shapes, spot,
+  camelbad, cones with small angle sums, meshes with boundary and Δ-complex starts, both rules, 25°
+  and 30°): this crate and the integer coordinates make the same operations and reach the same
+  connectivity with bitwise the same lengths in 255 runs; the other one parts where a
+  circumcentre lies on an interior edge exactly at an input-edge crossing (the integer split
+  refuses it, IC I20; this crate snaps the place onto the input edge). Under `Chew` 2 307 vertices
+  were removed and 175 removals refused, 0 trace failures.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,

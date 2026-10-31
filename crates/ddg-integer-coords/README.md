@@ -22,7 +22,7 @@ shares.
 | `certify()` | SPEC §2.4, all four items (below). |
 | `from_intrinsic` | integer coordinates read off a signpost triangulation by tracing its edges (below). |
 
-**Not yet** (later work packages): refinement (WP6), transfer (WP7).
+Delaunay refinement (WP6) and attribute transfer (WP7) are described below.
 
 ## Operations (WP3)
 
@@ -129,6 +129,68 @@ through them); the signposts trace one path over the input mesh.
   `|d| sin(theta) <= 3.5e-10` (raw up to 6.5e-8 at grazing crossings); the signpost overlay checks
   pass; `P0 x0` reproduces the positions to 5e-15 edge lengths. Timings (release, one thread, load
   about 6): spot after Delaunay 4.0 ms (signposts trace + overlay 1.15), camelbad 24 ms (8.7).
+
+## Delaunay refinement (WP6)
+
+| | |
+|---|---|
+| `refine(&IntegerRefineOptions) -> IntegerRefineReport`, `refine_with(_, extra)` | Paper Sec. 4.2, Supp. Alg. 10 (SPEC §5). The driver is `ddg_intrinsic::refine::refine`, written once over `Triangulation` (IT-SPEC N51), so both representations run the same queue, circumcentres, boundary rule and flips (I11). This crate supplies the operations: flips (Eq. 3, 4), the circumcentre traced from the barycentre over `T¹` with angle frames (I9), face splits (Supp. Alg. 5, 6, App. A), edge splits (Alg. 7, I20), removals (Alg. 8 with the shared I24 choice `ddg_intrinsic::removal_flip_choice`). The certificate runs at the end (I4; `certify: false` turns it off). |
+| `IntegerRefineOptions` | `refine: RefineOptions` (25°, no circumradius bound, 10 insertions per vertex and at least 1000, the Delaunay test), `rules` (default `RefineRules::Chew`, the paper's: a boundary edge is split at its midpoint when a circumcentre path leaves through it, then the inserted interior vertices at Dijkstra distance `< ℓ` are removed and the triangulation is flipped to Delaunay; the reference's narrow-cone rule, I23. `RefineRules::Ruppert`: the signpost crate's default rules N1, N4), `face_split` (I6; default never refuses). |
+| `IntegerRefineReport` | the shared `RefineReport` (inserted, boundary and edge splits, flips, removals, refused removals, trace failures, `min_angle_valid`, `n_narrow_cone_faces`, `below_bound` with reasons) plus face splits, those within `NEAR_ARC = 1e-9` of an arc and the nearest distance (I6), face splits refused because App. A put the place outside its input face (`n_recover_failed`: the face is left, as a refused insertion), places moved inside (I16), clamped crossings (I5), the certificate. |
+
+Results (`tests/refine.rs`, release; run with `--nocapture` for the tables):
+
+* **Against the signposts, 256 runs**: the 17 generator shapes, spot, camelbad, bob, blub,
+  camelbadnonuniform, camel_noise1, bump, hand, a bumpy grid 20×20, two closed double cones and
+  two open cones with apex angle sums 20°–59° (narrow) and one at 70°; starts from the input,
+  from random flips (Δ-complexes), from random insertions and from random edge splits; both rules;
+  25° and 30°. **255 runs make the same operations in the same order and end with the same
+  connectivity and bitwise the same lengths**; 242 of them equal `from_intrinsic` of the refined
+  signposts exactly, the other 13 differ only around signpost places snapped onto input edges
+  (129 snaps, by design, WP4). Places within `4.2e-11` mean edge lengths. 33 face splits were
+  within `1e-9` shortest sides of an arc (nearest `9.5e-17`), 3 crossings clamped, 4 places
+  moved inside, 0 App. A refusals, 0 trace failures. The one run that parts (sheared
+  parallelogram 10, σ = 6, Chew, 30°): a circumcentre lies on an interior edge exactly where an
+  input edge crosses it; the integer split refuses a point within rounding of a crossing (I20),
+  the signposts split and snap the place onto the input edge.
+* **Removals** (Chew): 2 307 vertices removed and 175 refused (`RemovalStuck`, mostly I27
+  straight stars) over the differential runs; from starts full of edge-split vertices 450
+  removed, 80 refused. Refused removals are counted, never fatal.
+* **Angles** (Chew, from the input): every run ends `Done`; every corner below the bound is at a
+  vertex whose angle sum is below it or in a face the narrow-cone rule leaves. 25° everywhere else
+  (camelbad 25.000° with 4 169 insertions, spot 25.047°, hand 25.269°, bumpy grid 25.084°).
+  **Thm. C.1**: the closed shapes whose angle sums are all at least 60° reach 30° (spot 30.031°,
+  jittered icosphere 30.013°, the tori, the double cone 70°/300°). Faces left by the narrow-cone
+  rule: needle tetrahedron 4, tube 3×6 8, sheared parallelograms 2, double cones 6 / 6 / 16, open
+  cones 6 / 8; the smallest angle in the other faces there: e.g. double cone 20°/200° 33.3°, open
+  cone 30° 25.55° (the double cone 59°/59° has no other face).
+* **Termination**: insertion limits 0, 1, 7, 40 are honoured on every shape (`InsertionLimit`
+  when the full run needs more; a run that reaches the limit exactly also says
+  `InsertionLimit`, as the signposts); every result certifies. Bad options and constrained edges
+  are refused with nothing changed.
+
+**Timings** (release, one thread pinned, load average 3.0, best of 5; `taskset -c N cargo test
+--release --test refine -- --ignored --nocapture timing`). Refinement to 25° from the input,
+including the first Delaunay flipping:
+
+| mesh | \|V⁰\| | rules | inserted | removed | signposts | integer | integer + certificate |
+|---|---|---|---|---|---|---|---|
+| spot | 2 930 | Ruppert | 255 | – | 4.7 ms | 4.9 ms | 6.5 ms |
+| spot | | Chew | 255 | 0 | 4.5 ms | 4.8 ms | 6.3 ms |
+| camelbad | 11 392 | Ruppert | 4 169 | – | 39.0 ms | 48.7 ms | 57.3 ms |
+| camelbad | | Chew | 4 169 | 0 | 36.8 ms | 45.9 ms | 54.6 ms |
+| bunny | 14 290 | Ruppert | 0 | – | 16.8 ms | 16.4 ms | 30.6 ms |
+| bunny | | Chew | 0 | 0 | 18.1 ms | 18.5 ms | 31.9 ms |
+| bump (boundary) | 3 329 | Ruppert | 0 | – | 3.5 ms | 3.5 ms | 5.3 ms |
+| hand (boundary) | 3 372 | Ruppert | 50 | – | 4.6 ms | 4.5 ms | 6.9 ms |
+| hand | | Chew | 61 | 11 | 4.9 ms | 4.8 ms | 7.0 ms |
+| face (boundary) | 13 746 | Ruppert | 104 | – | 18.1 ms | 18.3 ms | 28.0 ms |
+| face | | Chew | 66 | 2 | 18.7 ms | 17.4 ms | 24.5 ms |
+
+The integers cost 0.93 to 1.25 times the signposts (the paper: about 2.7 times, 4 min against
+1.5 min on Thingi10k 719791, SPEC §10.1); the difference is in the face splits, which extract
+the three sides (WP4). Without insertions the time is the Delaunay flipping and the driver's
+passes over the faces.
 
 ## Attribute transfer, Fig. 14 (WP7)
 
