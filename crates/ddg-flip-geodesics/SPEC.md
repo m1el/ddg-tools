@@ -560,7 +560,9 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
   `InvalidCoordinates` naming the edge), positions from the straight segment in the unfolded strip
   of input faces (input lengths), clamps per I5; `n = −1` handled as an input-edge piece; ends in
   `V*` from `q⁰`. Test: positions agree with those from IC Alg. 2's strip (the other direction) to
-  `1e-9`; the common subdivision's edges agree with it.
+  `|Δ| · sin θ ≤ 1e-9` (`θ` the crossing angle; IC §8); the common subdivision's edges agree with
+  it. **Done** (IC WP2): `IntegerTriangulation::extract_intrinsic_edge`, behind
+  `Triangulation::trace_edge_on_input`.
 * **R3** (§4.3) Delaunay flipping with a set of constrained edges never flipped (iCDT), identical
   on both representations. **Done:** the provided `Triangulation::flip_to_delaunay` (one
   implementation for both); `DelaunayReport::n_constrained`, and the other statistics leave

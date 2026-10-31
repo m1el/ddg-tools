@@ -124,7 +124,10 @@ e^{ij}_k = max(0, n⁺_ij − n⁺_jk − n⁺_ki)                              
 Combinatorial crossing `ζ = (ij→, p)`, `0 ≤ p < n_ij`, the `p`-th crossing along `ij` from `i`; its
 reversal `ζ̄ = (ji→, n_ij − p − 1)` (`ic-reverse-crossing`). Geometric crossing
 `z = (ij→, p, ab→, u, v)` with the barycentric coordinates `u` along `ab ∈ T⁰` and `v` along
-`ij ∈ T¹` (Sec. 2.5).
+`ij ∈ T¹` (Sec. 2.5). **Conventions (WP2):** `u` is measured in the input edge's own direction (as
+`SurfacePoint::Edge`; the paper measures along the curve's direction, i.e. `u` or `1 − u`), `v`
+along the crossed halfedge from its tail; `GeometricCrossing` also carries `sin_angle`, the sine of
+the crossing angle, which says how well `u` and `v` are conditioned.
 
 ### 2.4 Validity (the invariant every operation keeps)
 
@@ -193,11 +196,19 @@ certify per operation on small meshes and per batch on large ones.
   integers (`ExtractCurve` through that crossing, Alg. 1 + 3), consecutive crossings are checked to
   share an input face, and the positions come from the unfolded input strip. The result is a
   polyline on `T⁰` whose connectivity is exact (`ic-extract-intrinsic-edge`). For `n_ij = −1` it is
-  the input edge itself.
+  the input edge itself. **As built (WP2):** the walk from crossing `p` stops at a crossing of `ij`
+  already identified, and crossings of `ij` it passes are kept in a sparse map, so the whole edge
+  costs `O(n⁺_ij + walk steps)`; the first input face comes from the roundabout (the wedge between
+  local indices `r − 1` and `r`) or from `q⁰`, the arrival is checked against the head's roundabout
+  or `q⁰`; the length mismatch of the straight segment and the clamps are reported, never a
+  failure; `EdgeTraceOptions::tolerance` is validated but not used, `max_crossings` is not used.
 
 Every step works on integers and indices; a value outside its range (a crossing index `≥ n`, a
-negative corner coordinate, a walk longer than `Σ n⁺ + |E¹|`) is an error naming the face and the
-crossing, never a panic (`IntegerError::InvalidCoordinates`).
+negative corner coordinate, a walk that revisits its start crossing without reaching a vertex) is
+an error naming the face and the crossing, never a panic (`IntegerError::InvalidCoordinates`).
+Per-edge operations must not compute the global bound `Σ n⁺ + |E¹|` (that makes all-edges work
+quadratic): on valid faces Alg. 1's step is a bijection, so a walk either reaches a vertex or
+returns to its start, which is detected.
 
 ### 3.2 What floating point decides
 
@@ -205,7 +216,9 @@ Only: the edge lengths after an operation (as in IT-SPEC), the positions of geom
 (the parameters `u`, `v` of the strip intersection), the region of a face split (§4.4), the
 circumcenter's location in refinement (§5), and the transfer matrices (§6). **I5:** a strip
 intersection that falls outside `[0, 1]` by rounding is clamped and counted in the report
-(`clamped_crossings`), never used to change connectivity; with exact lengths the straight segment
+(`clamped_crossings`), never used to change connectivity (this covers the parameter along the
+segment too; a halfedge parallel to the segment is cut at its middle and counted as a clamp of
+`0.5`); with exact lengths the straight segment
 lies inside the strip (the strip is the face sequence of the geodesic).
 
 ## 4. Operations
@@ -377,7 +390,11 @@ in the Python/Blender defaults, as the paper uses it.
 2. **Differential test against signposts**: on well-conditioned meshes, the same flips give the
    same `T¹`; the common subdivision from integers and the overlay from `ddg-intrinsic`'s traces
    have the same connectivity (as labelled polygons) and positions within `1e-9` of the total
-   area's square root; the point queries agree.
+   area's square root; the point queries agree. Crossing positions are compared conditioned:
+   `|Δ| · sin θ ≤ 1e-9` with `θ` the crossing angle (WP2: raw differences above `1e-9` occur only at
+   grazing crossings, `sin θ ~ 1e-4`, where the signposts' `~1e-12` rad angle error is amplified;
+   worst conditioned difference `1.8e-10` against signposts, `3.5e-10` between the two directions
+   and against the overlay, over 272 651 crossings on 266 states).
 3. **Brute-force recount**: for small inputs (`< 500` faces), after random sequences of flips,
    splits and removals, recompute every `n_ij` from scratch by tracing every input edge in exact
    rational arithmetic over the unfolded strips (only where the lengths are rational, i.e. on the
@@ -616,7 +633,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 |---|---|---|---|---|
 | WP0 | **done** (2814e8a–aca460e): `Complex`, `Triangulation`, `plan_*`, `AngleFrames` (I9), `ddg_core::mollify` (I13); 240 bitwise pins unchanged | `crates/ddg-intrinsic/src/…`, `crates/ddg-core` | — | Opus |
 | WP1 | **done** (e2d71da–2fb8762): `IntegerTriangulation` (no `Triangulation` impl yet: needs WP2–WP4), init, §2.3, the oracle's integer formulas, combinatorial Alg. 1–4, `certify`, `from_intrinsic` (conversion from signposts, the differential oracle for WP3), errors | `src/{lib,error,coords,formulas,trace,certify,convert}.rs` | WP0 | Opus |
-| WP2 | tracing, geometry only: geometric crossings, strip intersection, `ExtractIntrinsicEdge` (positions), over WP1's `CurveSegment` / `InputEdgePath` | `src/trace.rs` (or `src/geometry.rs`), `tests/trace.rs` | WP1 | Opus |
+| WP2 | **done** (7aa2891–bb56df2): geometric crossings, strip intersection, `extract_intrinsic_edge` (linear), `trace_edge_on_input` wired; same crossed input edges as signposts on all 678 806 edges, 0 clamps | `src/geometry.rs`, `tests/geometry.rs`, `examples/extract_cost.rs` | WP1 | Opus |
 | WP3 | flip (Eq. 3, 4 in `formulas.rs`, checked or `i128`, against the oracle's `flip` fixtures), Delaunay flipping, edge split, removal (I27); differential test: flip the same edges in both representations and compare with `from_intrinsic` exactly | `src/{flip,split,remove}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | common subdivision, `P₀`, `P₁`, point queries | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
