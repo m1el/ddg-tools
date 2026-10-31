@@ -429,6 +429,33 @@ evaluation; Thm. C.1 gives 30° for closed surfaces with cone angles ≥ 60°), 
 bound, insertion limit (the reference's default `−10` = `10 |V⁰|`), and additionally the removals,
 refused removals (I8), clamped crossings (I5) and the certificate's result.
 
+**As built (WP6, 49bac6c, 91ca49b).** One driver for both representations (I11):
+`ddg_intrinsic::refine::refine<T: Triangulation>` with `RefineRules { Ruppert, Chew }`.
+- `Ruppert` is IT-SPEC N1/N4/N14 unchanged and stays the signposts' default (bitwise pins pass).
+- `Chew` is this section and the integer default (`IntegerTriangulation::refine`,
+  `IntegerRefineOptions`, certificate at the end). It splits at the midpoint when the circumcenter
+  path leaves through a boundary edge, then Delaunay, then removes the inserted interior vertices at
+  Dijkstra distance `< ℓ` (strict, as Alg. 10 line 20; the reference uses `≤`), then Delaunay.
+- A circumcenter on an interior edge splits it at the foot without removal (the reference removes
+  after every split).
+- `RecoverFailed` and `TooCloseToCurve` are insertion refusals: the face is skipped, not an error.
+- Trace failures are counted under both rules.
+- Trait additions (provided methods): `trace_geodesic`, `remove_inserted_vertex`,
+  `refine_with_rules`. The I24 removal choice is shared (`ddg_intrinsic::remove::removal_flip_choice`),
+  so both representations remove by identical flips.
+
+Measured over 256 differential runs (17 generator shapes, spot, camelbad, small-angle cones,
+bob, blub, hand, …; both rules; 25° and 30°):
+- 255 made the same operations with the same connectivity, bitwise-equal lengths and counts. Of
+  these, 242 equal `from_intrinsic` of the signposts exactly; 13 differ only by the signposts'
+  snaps onto input edges.
+- The one divergence is a circumcenter exactly on an interior edge at its crossing with an input
+  edge (I28).
+- 25° is reached wherever possible, and 30° on closed shapes with all angle sums `≥ 60°` (Thm. C.1).
+- 2307 removals, 175 refused (mostly I27 straight stars); 0 trace failures.
+- Integer refinement costs 0.93–1.25× the signposts' (the paper: about 2.7×); the certificate adds
+  about 20–80 %.
+
 ## 6. Attribute transfer (Sec. 4.3, Eq. 11–14)
 
 Given `f` on `V¹` (piecewise linear on `T¹`), `f̂` on `V⁰` minimizing
@@ -640,8 +667,11 @@ Built outside this repository (polyscope and happly fetched at the demo's pinned
   Dehn twists, Sec. 3.7). **I3** local index start (§2.2). **I4** cost of the certificate, measured
   before choosing its default. **I5** clamped crossings. **I6** distance of a face split to the
   nearest arc. **I7** boundary removal. **I8** deterministic removal, refusal. **I9** tracing over
-  `T¹` without stored signposts. **I10** lazy point location `T⁰ → T¹`. **I11** refinement order.
-  **I12** narrow-cone rule. **I13** where mollification lives.
+  `T¹` without stored signposts. **I10** lazy point location `T⁰ → T¹`. **I11** refinement order
+  (as built: one shared driver and a shared removal choice, WP6). **I12** narrow-cone rule (decided:
+  the reference's rule, I23; the reported minimum angle is over the faces the rule does not
+  exclude, whereas the reference's statistic excludes faces with any narrow vertex). **I13** where
+  mollification lives.
 
 From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` paths abbreviated
 `nc` = `src/surface/normal_coordinates.cpp`, `ic` = `src/surface/integer_coordinates_intrinsic_triangulation.cpp`,
@@ -739,6 +769,10 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   this; FlipOut's Bézier splits and constrained paths do. **Future:** `Complex::merge_edge` (the
   inverse of `split_edge`) in `ddg-intrinsic`, so that such a vertex is removed by merging the two
   halves back.
+* **I28** *Split point within rounding of a crossing (open).* The integer edge split refuses a
+  point within rounding of a crossing (§4.5), so refinement skips such a face, where the signposts
+  split and snap the place onto the input edge (1 of 256 differential runs, WP6). The alternative
+  is to snap the integer split to the crossing (the new vertex on the input edge); undecided.
 
 ## 12. Work packages
 
@@ -750,7 +784,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP3 | **done** (7b7dcd3–a315f9e): flip (Eq. 3, 4), Delaunay flipping, edge split incl. `n ≥ 0`, removal (I27), `impl Triangulation`; 437 595 flips on 266 states equal `from_intrinsic` of the signposts exactly | `src/{flip,split,remove,interface}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | **done** (548d804, 6080ce8): face split (I6, I15), App. A and the `T¹ → T⁰` point query (I16), moves; `insert_vertex` of the trait | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
-| WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
+| WP6 | **done** (49bac6c, 91ca49b): Delaunay refinement with boundary, one driver over `Triangulation` (`RefineRules::{Ruppert, Chew}`) | `src/refine.rs`, `tests/refine.rs`, `crates/ddg-intrinsic/src/refine.rs` | WP3, WP4 | Opus |
 | WP7 | **done** (b463c96, 406c0e0): transfer (Eq. 13–14); Fig. 14 as the paper's Poisson experiment (trends reproduced, factors depend on the unpublished generator) | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
