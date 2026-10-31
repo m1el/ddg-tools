@@ -353,6 +353,8 @@ fn edge_between(tri: &IntrinsicTriangulation, a: usize, b: usize) -> usize {
 fn refusal_name(reason: &FlipRefusal) -> &'static str {
     match reason {
         FlipRefusal::BoundaryEdge => "boundary",
+        // Not a refusal of the oracle: it has no constrained edges (SPEC N50).
+        FlipRefusal::Constrained => "constrained",
         FlipRefusal::DegreeOneEndpoint { .. } => "degree_one",
         FlipRefusal::NotConvex { .. } => "not_convex",
         FlipRefusal::TooThin { .. } => "too_thin",

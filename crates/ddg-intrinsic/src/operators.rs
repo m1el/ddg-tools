@@ -118,7 +118,9 @@ pub struct ShapeStatistics {
 impl IntrinsicTriangulation {
     /// The distribution of corner angles and face areas.
     pub fn shape_statistics(&self) -> ShapeStatistics {
-        let mut angles: Vec<f64> = (0..self.n_halfedges()).map(|h| self.corner_angle(h)).collect();
+        let mut angles: Vec<f64> = (0..self.n_halfedges())
+            .map(|h| self.corner_angle(h))
+            .collect();
         let mut areas: Vec<f64> = (0..self.n_faces()).map(|f| self.face_area(f)).collect();
         let n = angles.len().max(1) as f64;
         let below = [10.0f64, 20.0, 30.0]
@@ -208,7 +210,7 @@ impl IntrinsicTriangulation {
     /// [formula: lumped-mass]
     pub fn lumped_mass(&self) -> Vec<f64> {
         let mut mass = vec![0.0; self.n_vertices()];
-        for (f, face) in self.faces.iter().enumerate() {
+        for (f, face) in self.complex.faces.iter().enumerate() {
             let third = self.face_area(f) / 3.0;
             for &v in face {
                 mass[v as usize] += third;

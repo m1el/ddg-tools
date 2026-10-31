@@ -34,15 +34,7 @@ pub(crate) trait Surface {
     fn edge_halfedge(&self, e: usize) -> u32;
 }
 
-#[inline]
-pub(crate) fn next(h: usize) -> usize {
-    if h % 3 == 2 { h - 2 } else { h + 1 }
-}
-
-#[inline]
-pub(crate) fn prev(h: usize) -> usize {
-    if h.is_multiple_of(3) { h + 2 } else { h - 1 }
-}
+pub(crate) use crate::complex::{next, prev};
 
 /// The lengths of the three halfedges of a face, by slot.
 #[inline]

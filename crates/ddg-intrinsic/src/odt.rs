@@ -308,7 +308,7 @@ impl IntrinsicTriangulation {
                 }
                 let (mut sum, mut count) = (0.0, 0usize);
                 for h in self.outgoing_halfedges(v) {
-                    sum += self.edge_lengths[self.halfedge_edge[h] as usize];
+                    sum += self.edge_lengths[self.complex.halfedge_edge[h] as usize];
                     count += 1;
                 }
                 let mean_edge = sum / count as f64;

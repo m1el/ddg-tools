@@ -98,7 +98,7 @@ impl IntrinsicTriangulation {
         let u = [v[(k + 1) % 3][0] - v[k][0], v[(k + 1) % 3][1] - v[k][1]];
         let w = [p[0] - v[k][0], p[1] - v[k][1]];
         let inside = (u[0] * w[1] - u[1] * w[0]).atan2(u[0] * w[0] + u[1] * w[1]);
-        let vertex = self.faces[f][k] as usize;
+        let vertex = self.complex.faces[f][k] as usize;
         signpost_update(
             self.signposts[3 * f + k],
             inside.max(0.0),
@@ -163,7 +163,7 @@ impl IntrinsicTriangulation {
 
     /// Places a point of an edge on the input mesh. Direction zero is along the edge.
     fn locate_on_edge(&self, e: usize, t: f64) -> Result<Located, IntrinsicError> {
-        let h = self.edge_halfedge[e] as usize;
+        let h = self.complex.edge_halfedge[e] as usize;
         let (a, b) = (self.from_vertex(h), self.to_vertex(h));
         if let Some(input_edge) = self.edge_on_input(e) {
             let mesh = self.input.mesh();
@@ -223,7 +223,7 @@ impl IntrinsicTriangulation {
         };
         let l = self.face_lengths(f);
         let (point, back) = self.trace_from_vertex(
-            self.faces[f][k] as usize,
+            self.complex.faces[f][k] as usize,
             phi,
             length,
             what,
@@ -258,7 +258,7 @@ impl IntrinsicTriangulation {
             }
             SurfacePoint::Edge { edge, t } => self.locate_on_edge(edge as usize, t)?.point,
             SurfacePoint::Face { face, bary } => match bary.iter().position(|&b| b == 1.0) {
-                Some(k) => self.locations[self.faces[face as usize][k] as usize],
+                Some(k) => self.locations[self.complex.faces[face as usize][k] as usize],
                 None => self.locate_in_face(face as usize, bary)?.point,
             },
         })
@@ -390,14 +390,16 @@ impl IntrinsicTriangulation {
         };
         match node {
             SurfacePoint::Vertex(u) => {
-                let k = (0..3).find(|&k| self.faces[f][k] == u).ok_or(outside)?;
+                let k = (0..3)
+                    .find(|&k| self.complex.faces[f][k] == u)
+                    .ok_or(outside)?;
                 Ok((v[k], NodeKind::Corner(k)))
             }
             SurfacePoint::Edge { edge, t } => {
                 let k = (0..3)
-                    .find(|&k| self.halfedge_edge[3 * f + k] == edge)
+                    .find(|&k| self.complex.halfedge_edge[3 * f + k] == edge)
                     .ok_or(outside)?;
-                let forward = self.edge_halfedge[edge as usize] as usize == 3 * f + k;
+                let forward = self.complex.edge_halfedge[edge as usize] as usize == 3 * f + k;
                 let th = if forward { t } else { 1.0 - t };
                 let (a, b) = (v[k], v[(k + 1) % 3]);
                 Ok((
@@ -566,7 +568,7 @@ impl IntrinsicTriangulation {
         let in_face = d[1].atan2(d[0]);
         let direction = match kind {
             NodeKind::Corner(k) => {
-                let vertex = self.faces[f][k] as usize;
+                let vertex = self.complex.faces[f][k] as usize;
                 self.direction_on_input(vertex, self.direction_from_corner(f, k, v, q))
             }
             NodeKind::Side { slot, forward } => {
@@ -679,7 +681,7 @@ impl IntrinsicTriangulation {
                 [i, j] => {
                     let k = 3 - i - j;
                     let located = Located {
-                        point: self.locations[self.faces[f][k] as usize],
+                        point: self.locations[self.complex.faces[f][k] as usize],
                         zero: 0.0,
                     };
                     (NodeKind::Corner(k), v[k], located)
@@ -688,9 +690,9 @@ impl IntrinsicTriangulation {
                     // On the side opposite corner k: halfedge k + 1.
                     let slot = (k + 1) % 3;
                     let h = 3 * f + slot;
-                    let edge = self.halfedge_edge[h] as usize;
+                    let edge = self.complex.halfedge_edge[h] as usize;
                     let th = bary[(k + 2) % 3] / (bary[(k + 1) % 3] + bary[(k + 2) % 3]);
-                    let forward = self.edge_halfedge[edge] as usize == h;
+                    let forward = self.complex.edge_halfedge[edge] as usize == h;
                     let located = self.locate_on_edge(edge, if forward { th } else { 1.0 - th })?;
                     (NodeKind::Side { slot, forward }, p, located)
                 }
@@ -722,7 +724,7 @@ impl IntrinsicTriangulation {
             .into_iter()
             .flatten()
             .find(|s| kind_to.sides().contains(&Some(*s)))?;
-        let input_edge = self.edge_on_input(self.halfedge_edge[3 * f + side] as usize)?;
+        let input_edge = self.edge_on_input(self.complex.halfedge_edge[3 * f + side] as usize)?;
         let mesh = self.input.mesh();
         let parameter = |point: SurfacePoint| match point {
             SurfacePoint::Vertex(u) => {

@@ -214,18 +214,18 @@ impl IntrinsicTriangulation {
             };
             let sides: [Side<'_>; 3] = [0, 1, 2].map(|k| {
                 let h = 3 * f + k;
-                let edge = self.halfedge_edge[h] as usize;
+                let edge = self.complex.halfedge_edge[h] as usize;
                 Side {
                     tri: self,
                     traces,
                     edge,
-                    forward: self.edge_halfedge[edge] as usize == h,
+                    forward: self.complex.edge_halfedge[edge] as usize == h,
                     n: traces.crossings(edge).len(),
                     offset: offsets[edge],
                 }
             });
             let n = [sides[0].n, sides[1].n, sides[2].n];
-            let corner = |k: usize| self.faces[f][k];
+            let corner = |k: usize| self.complex.faces[f][k];
             // x[k]: segments that cut off corner k; fan: the corner that sends segments to
             // the opposite side, and how many.
             let mut x = [0usize; 3];

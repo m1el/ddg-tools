@@ -178,10 +178,12 @@ impl IntrinsicTriangulation {
         let mut hasher = Hasher::new();
         hasher.word(self.n_vertices() as u64);
         hasher.word(self.n_faces() as u64);
-        for (f, face) in self.faces.iter().enumerate() {
+        for (f, face) in self.complex.faces.iter().enumerate() {
             for (k, &vertex) in face.iter().enumerate() {
                 hasher.word(u64::from(vertex));
-                hasher.word(self.edge_lengths[self.halfedge_edge[3 * f + k] as usize].to_bits());
+                hasher.word(
+                    self.edge_lengths[self.complex.halfedge_edge[3 * f + k] as usize].to_bits(),
+                );
             }
         }
         for location in &self.locations {
@@ -363,7 +365,7 @@ impl IntrinsicTriangulation {
         for e in 0..self.n_edges() {
             let [tail, head] = self.edge_vertices(e);
             // The faces are the same, so the halfedge ids are.
-            let mesh_edge = mesh.edge(self.edge_halfedge[e] as usize);
+            let mesh_edge = mesh.edge(self.complex.edge_halfedge[e] as usize);
             edge[mesh_edge] = e as u32;
             forward[mesh_edge] = tail < head;
         }

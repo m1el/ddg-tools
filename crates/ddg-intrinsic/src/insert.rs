@@ -263,53 +263,6 @@ impl IntrinsicTriangulation {
         }
     }
 
-    /// Appends a face; the data of its halfedges is set by the caller.
-    fn push_face(&mut self, corners: [u32; 3]) -> usize {
-        self.faces.push(corners);
-        self.twin.extend([NONE; 3]);
-        self.halfedge_edge.extend([NONE; 3]);
-        self.signposts.extend([0.0; 3]);
-        self.faces.len() - 1
-    }
-
-    /// Appends an edge of the given length whose direction is that of `halfedge`.
-    fn push_edge(&mut self, length: f64, halfedge: usize, on_input: u32) -> u32 {
-        self.edge_halfedge.push(halfedge as u32);
-        self.edge_lengths.push(length);
-        self.edge_on_input.push(on_input);
-        (self.edge_halfedge.len() - 1) as u32
-    }
-
-    /// Moves the twin, the edge and the signpost of halfedge `from` to the slot `to`, whose
-    /// face already lists the tail, and repairs what pointed at `from`.
-    fn move_halfedge(&mut self, from: usize, to: usize) {
-        let t = self.twin[from];
-        self.twin[to] = t;
-        if t != NONE {
-            self.twin[t as usize] = to as u32;
-        }
-        let e = self.halfedge_edge[from];
-        self.halfedge_edge[to] = e;
-        if self.edge_halfedge[e as usize] == from as u32 {
-            self.edge_halfedge[e as usize] = to as u32;
-        }
-        self.signposts[to] = self.signposts[from];
-        let tail = self.faces[to / 3][to % 3] as usize;
-        if self.vertex_halfedge[tail] == from as u32 {
-            self.vertex_halfedge[tail] = to as u32;
-        }
-    }
-
-    /// Makes `h` and `t` the two halfedges of `edge` (`t` may be [`NONE`]).
-    fn pair(&mut self, h: usize, t: u32, edge: u32) {
-        self.twin[h] = t;
-        self.halfedge_edge[h] = edge;
-        if t != NONE {
-            self.twin[t as usize] = h as u32;
-            self.halfedge_edge[t as usize] = edge;
-        }
-    }
-
     /// The corner angle at the tail of halfedge `h`, which exists: the caller has checked the
     /// face.
     pub(crate) fn angle_at(&self, h: usize) -> f64 {
@@ -381,13 +334,13 @@ impl IntrinsicTriangulation {
         if shape < FLIP_SHAPE_LIMIT || shape.is_nan() {
             return Err(refused(InsertRefusal::TooThin {
                 shape,
-                nearest_edge: Some(self.halfedge_edge[3 * f + thinnest]),
+                nearest_edge: Some(self.complex.halfedge_edge[3 * f + thinnest]),
             }));
         }
         // The place on the input mesh, traced from the nearest corner.
         let x = (0..3).min_by(|&a, &b| d[a].total_cmp(&d[b])).unwrap_or(0);
         let hx = 3 * f + x;
-        let vx = self.faces[f][x] as usize;
+        let vx = self.complex.faces[f][x] as usize;
         let (u, w) = (
             [
                 layout[(x + 1) % 3][0] - layout[x][0],
@@ -410,23 +363,17 @@ impl IntrinsicTriangulation {
         );
         let placed = self.place_by_trace(vx, phi, d[x]).map_err(refused)?;
 
-        // Connectivity. Before: f = (a, b, c). After: f = (a, b, p), f1 = (b, c, p),
-        // f2 = (c, a, p).
-        let [a, b, c] = self.faces[f];
-        let p = self.n_vertices() as u32;
-        let f1 = self.push_face([b, c, p]);
-        let f2 = self.push_face([c, a, p]);
-        self.move_halfedge(3 * f + 1, 3 * f1);
-        self.move_halfedge(3 * f + 2, 3 * f2);
-        self.faces[f] = [a, b, p];
-        // b → p in f and p → b in f1; c → p in f1 and p → c in f2; a → p in f2 and p → a in f.
-        let ea = self.push_edge(d[0], 3 * f2 + 1, NONE);
-        self.pair(3 * f2 + 1, (3 * f + 2) as u32, ea);
-        let eb = self.push_edge(d[1], 3 * f + 1, NONE);
-        self.pair(3 * f + 1, (3 * f1 + 2) as u32, eb);
-        let ec = self.push_edge(d[2], 3 * f1 + 1, NONE);
-        self.pair(3 * f1 + 1, (3 * f2 + 2) as u32, ec);
-        self.vertex_halfedge.push((3 * f + 2) as u32);
+        // Connectivity (see `FaceSplit`). Before: f = (a, b, c). After: f = (a, b, p),
+        // f1 = (b, c, p), f2 = (c, a, p); b → c and c → a move to f1 and f2 with their
+        // signposts.
+        let split = self.complex.split_face_unchecked(f);
+        split.move_halfedge_data(&mut self.signposts, 0.0);
+        let p = split.vertex;
+        let [f1, f2] = split.new_faces.map(|g| g as usize);
+        let [ea, eb, ec] = split.new_edges;
+        // The new edges are appended in this order, from corners a, b, c.
+        self.edge_lengths.extend(d);
+        self.edge_on_input.extend([NONE; 3]);
         self.angle_sums.push(TAU);
         self.locations.push(placed.location);
 
@@ -475,9 +422,9 @@ impl IntrinsicTriangulation {
             });
         }
         let refused = |reason| IntrinsicError::InsertionRefused { at, reason };
-        let h0 = self.edge_halfedge[e] as usize;
+        let h0 = self.complex.edge_halfedge[e] as usize;
         let (f0, k0) = (h0 / 3, h0 % 3);
-        let h1 = self.twin[h0];
+        let h1 = self.complex.twin[h0];
         if h1 != NONE && h1 as usize / 3 == f0 {
             return Err(refused(InsertRefusal::SameFaceOnBothSides));
         }
@@ -531,8 +478,8 @@ impl IntrinsicTriangulation {
                 nearest_edge: None,
             }));
         }
-        let a = self.faces[f0][k0] as usize;
-        let b = self.faces[f0][(k0 + 1) % 3] as usize;
+        let a = self.complex.faces[f0][k0] as usize;
+        let b = self.complex.faces[f0][(k0 + 1) % 3] as usize;
         // The place of the new vertex on the input mesh, and the signpost of one halfedge
         // that leaves it: `Ok(direction to b)` or `Err(direction to a)`.
         let on_input = self.edge_on_input[e];
@@ -578,59 +525,36 @@ impl IntrinsicTriangulation {
             }
         };
 
-        // Connectivity. Before: f0 = (a, b, c) with a → b in slot k0. After: f0 = (a, p, c)
-        // and the new face f2 = (p, b, c).
-        let p = self.n_vertices() as u32;
-        let c = self.faces[f0][(k0 + 2) % 3];
-        let f2 = self.push_face([p, b as u32, c]);
-        self.move_halfedge(3 * f0 + (k0 + 1) % 3, 3 * f2 + 1);
-        self.faces[f0][(k0 + 1) % 3] = p;
-        let p_to_c = 3 * f0 + (k0 + 1) % 3;
-        let mut new_edges = Vec::with_capacity(3);
-        let mut new_faces = vec![f2 as u32];
-        // The half p → b, and its twin b → p in the new face f3 = (b, p, d).
-        let mut out = vec![3 * f2, p_to_c];
-        let e2 = self.push_edge(lb, 3 * f2, on_input);
-        new_edges.push(e2);
-        if h1 == NONE {
-            self.pair(3 * f2, NONE, e2);
-        } else {
-            let h1 = h1 as usize;
-            let (f1, k1) = (h1 / 3, h1 % 3);
-            let phi_b = self.signposts[h1];
-            let d = self.faces[f1][(k1 + 2) % 3];
-            // Before: f1 = (b, a, d) with b → a in slot k1. After: f1 = (p, a, d).
-            let f3 = self.push_face([b as u32, p, d]);
-            self.move_halfedge(3 * f1 + (k1 + 2) % 3, 3 * f3 + 2);
-            self.faces[f1][k1] = p;
-            self.pair(3 * f2, (3 * f3) as u32, e2);
-            self.signposts[3 * f3] = phi_b;
-            if self.vertex_halfedge[b] == h1 as u32 {
-                self.vertex_halfedge[b] = (3 * f3) as u32;
-            }
-            // d → p in f1, p → d in f3.
-            let d_to_p = 3 * f1 + (k1 + 2) % 3;
-            let ed = self.push_edge(dd, d_to_p, NONE);
-            self.pair(d_to_p, (3 * f3 + 1) as u32, ed);
-            new_faces.push(f3 as u32);
-            out.push(h1);
-            out.push(3 * f3 + 1);
-            new_edges.push(ed);
+        // Connectivity (see `EdgeSplit`). Before: f0 = (a, b, c) with a → b in slot k0, and
+        // f1 = (b, a, d). After: f0 = (a, p, c), f2 = (p, b, c), f1 = (p, a, d),
+        // f3 = (b, p, d); b → c, d → b and b → a (as b → p) move with their signposts.
+        let split = self.complex.split_edge_unchecked(e);
+        split.move_halfedge_data(&mut self.signposts, 0.0);
+        let p = split.vertex;
+        let e2 = split.halves[1] as usize;
+        let [ec, ed] = split.to_opposite;
+        let [f2, f3] = split.new_faces;
+        let f2 = f2 as usize;
+        self.edge_lengths.resize(self.complex.n_edges(), 0.0);
+        self.edge_on_input.resize(self.complex.n_edges(), NONE);
+        self.edge_lengths[e2] = lb;
+        self.edge_on_input[e2] = on_input;
+        if ed != NONE {
+            self.edge_lengths[ed as usize] = dd;
         }
-        // c → p in f2, p → c in f0.
-        let ec = self.push_edge(dc, 3 * f2 + 2, NONE);
-        self.pair(3 * f2 + 2, p_to_c as u32, ec);
-        new_edges.insert(1, ec);
+        self.edge_lengths[ec as usize] = dc;
         self.edge_lengths[e] = la;
-        self.vertex_halfedge.push((3 * f2) as u32);
         self.angle_sums.push(if h1 == NONE { PI } else { TAU });
         self.locations.push(location);
+        let out: Vec<usize> = split.outgoing().iter().map(|&h| h as usize).collect();
+        let new_edges = split.new_edges();
+        let new_faces: Vec<u32> = split.new_faces.into_iter().filter(|&g| g != NONE).collect();
 
         // Signposts of the halfedges that arrive from the opposite vertices.
         self.signposts[3 * f2 + 2] = self.signpost_after(3 * f0 + (k0 + 2) % 3);
         if h1 != NONE {
             let h1 = h1 as usize;
-            let f3 = self.faces.len() - 1;
+            let f3 = f3 as usize;
             self.signposts[3 * (h1 / 3) + (h1 % 3 + 2) % 3] = self.signpost_after(3 * f3 + 2);
         }
         // Signposts of the halfedges that leave, counter-clockwise: to b, to c, to a, to d.

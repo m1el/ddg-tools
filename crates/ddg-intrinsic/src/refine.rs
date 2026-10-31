@@ -232,11 +232,11 @@ impl<'a> Refiner<'a> {
             if !tri.is_boundary_vertex(v) || tri.angle_sums[v] >= FRAC_PI_3 {
                 continue;
             }
-            let first_out = tri.vertex_halfedge[v] as usize;
+            let first_out = tri.complex.vertex_halfedge[v] as usize;
             let last_out = tri.outgoing_halfedges(v).last().unwrap_or(first_out);
             let arriving = tri.prev(last_out);
-            let unit = tri.edge_lengths[tri.halfedge_edge[first_out] as usize]
-                .min(tri.edge_lengths[tri.halfedge_edge[arriving] as usize]);
+            let unit = tri.edge_lengths[tri.complex.halfedge_edge[first_out] as usize]
+                .min(tri.edge_lengths[tri.complex.halfedge_edge[arriving] as usize]);
             shells.insert(v as u32, unit);
         }
         let n_faces = tri.n_faces();
@@ -278,7 +278,7 @@ impl<'a> Refiner<'a> {
     fn small_corner(&self, f: usize) -> Option<(f64, u32)> {
         let mut worst: Option<(f64, u32)> = None;
         for k in 0..3 {
-            let v = self.tri.faces[f][k];
+            let v = self.tri.complex.faces[f][k];
             if self.exempt(v as usize) {
                 continue;
             }
@@ -306,8 +306,8 @@ impl<'a> Refiner<'a> {
     }
 
     fn is_encroached(&self, e: usize) -> bool {
-        let h = self.tri.edge_halfedge[e] as usize;
-        self.tri.twin[h] == NONE
+        let h = self.tri.complex.edge_halfedge[e] as usize;
+        self.tri.complex.twin[h] == NONE
             && self.tri.corner_angle(self.tri.prev(h)) > FRAC_PI_2 + ENCROACHMENT_TOLERANCE
     }
 
@@ -323,8 +323,8 @@ impl<'a> Refiner<'a> {
         }
         for k in 0..3 {
             let h = 3 * f + k;
-            if self.tri.twin[h] == NONE {
-                let e = self.tri.halfedge_edge[h];
+            if self.tri.complex.twin[h] == NONE {
+                let e = self.tri.complex.halfedge_edge[h];
                 if self.is_encroached(e as usize) {
                     self.encroached.push(e);
                 }
@@ -358,7 +358,7 @@ impl<'a> Refiner<'a> {
         let faces: Vec<usize> = self.tri.outgoing_halfedges(v).map(|h| h / 3).collect();
         for &f in &faces {
             for k in 0..3 {
-                self.queue.push(self.tri.halfedge_edge[3 * f + k]);
+                self.queue.push(self.tri.complex.halfedge_edge[3 * f + k]);
             }
         }
         for &f in &faces {
@@ -420,7 +420,7 @@ impl<'a> Refiner<'a> {
                 let h = 3 * f + k;
                 let (a, b) = (q[k], q[(k + 1) % 3]);
                 // An interior vertex with a small angle sum: the loop around it.
-                let vertex = tri.faces[f][k] as usize;
+                let vertex = tri.complex.faces[f][k] as usize;
                 let theta = tri.angle_sums[vertex];
                 if theta < FRAC_PI_3 && !tri.is_boundary_vertex(vertex) {
                     let d = (a[0] - c[0]).hypot(a[1] - c[1]);
@@ -428,13 +428,13 @@ impl<'a> Refiner<'a> {
                         return Verdict::Needle(vertex as u32);
                     }
                 }
-                let t = tri.twin[h];
+                let t = tri.complex.twin[h];
                 if t == NONE {
                     // Inside the circle on the boundary edge as diameter: the angle at the
                     // point is obtuse.
                     let dot = (a[0] - c[0]) * (b[0] - c[0]) + (a[1] - c[1]) * (b[1] - c[1]);
                     if dot < 0.0 && encroached.is_none() {
-                        encroached = Some(tri.halfedge_edge[h]);
+                        encroached = Some(tri.complex.halfedge_edge[h]);
                     }
                     continue;
                 }
@@ -582,10 +582,10 @@ impl<'a> Refiner<'a> {
                     }
                 } else {
                     let k = (0..3)
-                        .find(|&k| self.tri.halfedge_edge[3 * g + k] as usize == edge)
+                        .find(|&k| self.tri.complex.halfedge_edge[3 * g + k] as usize == edge)
                         .unwrap_or(0);
                     let from_tail = bary[(k + 1) % 3] / (bary[k] + bary[(k + 1) % 3]);
-                    let forward = self.tri.edge_halfedge[edge] as usize == 3 * g + k;
+                    let forward = self.tri.complex.edge_halfedge[edge] as usize == 3 * g + k;
                     let t = if forward { from_tail } else { 1.0 - from_tail };
                     match self.tri.split_edge(edge, t) {
                         Ok(insertion) => {
@@ -765,7 +765,7 @@ impl IntrinsicTriangulation {
                 .filter(|(stamp, _)| *stamp == refiner.stamps[f])
                 .map(|(_, reason)| reason.clone());
             for k in 0..3 {
-                let vertex = refiner.tri.faces[f][k];
+                let vertex = refiner.tri.complex.faces[f][k];
                 let angle = refiner.tri.corner_angle(3 * f + k);
                 min_angle = min_angle.min(angle);
                 max_angle = max_angle.max(angle);
@@ -921,20 +921,24 @@ mod tests {
         let grid = grid_disk(4, 4).unwrap();
         let mut tri = triangulation(&grid.positions, grid.faces.clone());
         // A face with exactly one boundary edge, on halfedge `h`, whose neighbours have none.
-        let on_boundary = |f: usize| (0..3).filter(|&k| tri.twin[3 * f + k] == NONE).count();
+        let on_boundary = |f: usize| {
+            (0..3)
+                .filter(|&k| tri.complex.twin[3 * f + k] == NONE)
+                .count()
+        };
         let h = (0..tri.n_halfedges())
             .find(|&h| {
                 let f = h / 3;
-                tri.twin[h] == NONE
+                tri.complex.twin[h] == NONE
                     && on_boundary(f) == 1
                     && (0..3).all(|k| {
-                        let t = tri.twin[3 * f + k];
+                        let t = tri.complex.twin[3 * f + k];
                         t == NONE || on_boundary(t as usize / 3) == 0
                     })
             })
             .unwrap();
         let (f, k) = (h / 3, h % 3);
-        let edge = tri.halfedge_edge[h];
+        let edge = tri.complex.halfedge_edge[h];
         let l = tri.face_lengths(f);
         // The point at the fraction `s` of the way from the midpoint of the edge to the
         // opposite corner, which is at the distance `m` from the midpoint.
@@ -970,7 +974,7 @@ mod tests {
         let (a, b) = (v[k], v[(k + 1) % 3]);
         let mut found = None;
         for j in 0..3 {
-            let t = tri.twin[3 * f + j];
+            let t = tri.complex.twin[3 * f + j];
             if t == NONE {
                 continue;
             }

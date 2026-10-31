@@ -206,7 +206,7 @@ impl IntrinsicTriangulation {
     /// # Panics
     /// If `e` is out of range.
     pub fn edge_cotan_weight(&self, e: usize) -> f64 {
-        let h = self.edge_halfedge[e] as usize;
+        let h = self.complex.edge_halfedge[e] as usize;
         let mut sum = self.opposite_cotan(h);
         if let Some(t) = self.twin(h) {
             sum += self.opposite_cotan(t);
@@ -264,10 +264,10 @@ impl IntrinsicTriangulation {
                 continue;
             }
             run.n_flips += 1;
-            let h = self.edge_halfedge[e as usize] as usize;
-            let t = self.twin[h] as usize;
+            let h = self.complex.edge_halfedge[e as usize] as usize;
+            let t = self.complex.twin[h] as usize;
             for g in [self.next(h), self.prev(h), self.next(t), self.prev(t)] {
-                queue.push(self.halfedge_edge[g]);
+                queue.push(self.complex.halfedge_edge[g]);
             }
             if let Some(touched) = touched.as_deref_mut() {
                 touched.extend([(h / 3) as u32, (t / 3) as u32]);

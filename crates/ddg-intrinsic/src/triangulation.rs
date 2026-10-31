@@ -31,6 +31,8 @@ use ddg_core::geometry::{corner_angle, triangle_area};
 use ddg_core::topology::NONE;
 use ddg_core::{Geometry, TriMesh};
 
+use crate::complex::Complex;
+pub use crate::complex::OutgoingHalfedges;
 use crate::error::IntrinsicError;
 use crate::formulas::signpost_update;
 use crate::input::InputSurface;
@@ -49,15 +51,8 @@ use crate::trace::{Trace, TraceOptions, trace_query};
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntrinsicTriangulation {
     pub(crate) input: Arc<InputSurface>,
-    pub(crate) faces: Vec<[u32; 3]>,
-    /// Per halfedge: the opposite halfedge, or `NONE`.
-    pub(crate) twin: Vec<u32>,
-    /// Per halfedge: its edge.
-    pub(crate) halfedge_edge: Vec<u32>,
-    /// Per edge: the halfedge that gives it its direction (the only one on the boundary).
-    pub(crate) edge_halfedge: Vec<u32>,
-    /// Per vertex: an outgoing halfedge; the one without twin at a boundary vertex.
-    pub(crate) vertex_halfedge: Vec<u32>,
+    /// The connectivity (SPEC N50).
+    pub(crate) complex: Complex,
     pub(crate) edge_lengths: Vec<f64>,
     /// Per halfedge: normalized direction at its tail.
     pub(crate) signposts: Vec<f64>,
@@ -67,29 +62,6 @@ pub struct IntrinsicTriangulation {
     pub(crate) locations: Vec<SurfacePoint>,
     /// Per edge: the input edge it lies along, or `NONE`.
     pub(crate) edge_on_input: Vec<u32>,
-}
-
-/// The halfedges leaving a vertex, counter-clockwise. See
-/// [`IntrinsicTriangulation::outgoing_halfedges`].
-#[derive(Debug, Clone)]
-pub struct OutgoingHalfedges<'a> {
-    tri: &'a IntrinsicTriangulation,
-    start: u32,
-    current: u32,
-}
-
-impl Iterator for OutgoingHalfedges<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<usize> {
-        if self.current == NONE {
-            return None;
-        }
-        let h = self.current as usize;
-        let t = self.tri.twin[prev(h)];
-        self.current = if t == self.start { NONE } else { t };
-        Some(h)
-    }
 }
 
 /// The ways in which a triangulation fails to be a simplicial complex. See
@@ -151,23 +123,8 @@ impl IntrinsicTriangulation {
         geometry: &Geometry,
     ) -> Result<IntrinsicTriangulation, IntrinsicError> {
         let input = InputSurface::new(mesh, geometry)?;
-        let n_halfedges = mesh.n_halfedges();
-        let twin = (0..n_halfedges)
-            .map(|h| mesh.twin(h).map_or(NONE, |t| t as u32))
-            .collect();
-        let halfedge_edge = (0..n_halfedges).map(|h| mesh.edge(h) as u32).collect();
-        let edge_halfedge = (0..mesh.n_edges())
-            .map(|e| mesh.edge_halfedge(e) as u32)
-            .collect();
-        let vertex_halfedge = (0..mesh.n_vertices())
-            .map(|v| mesh.outgoing_halfedge(v) as u32)
-            .collect();
         Ok(IntrinsicTriangulation {
-            faces: mesh.faces().to_vec(),
-            twin,
-            halfedge_edge,
-            edge_halfedge,
-            vertex_halfedge,
+            complex: Complex::from_tri_mesh(mesh),
             edge_lengths: geometry.edge_lengths().to_vec(),
             signposts: input.signposts().to_vec(),
             angle_sums: input.vertex_angle_sums().to_vec(),
@@ -177,6 +134,13 @@ impl IntrinsicTriangulation {
             edge_on_input: (0..mesh.n_edges() as u32).collect(),
             input: Arc::new(input),
         })
+    }
+
+    /// The connectivity: a halfedge Δ-complex shared with the other representations of an
+    /// intrinsic triangulation (SPEC N50).
+    #[inline]
+    pub fn complex(&self) -> &Complex {
+        &self.complex
     }
 
     // ----- the input -----
@@ -199,25 +163,25 @@ impl IntrinsicTriangulation {
     /// Number of vertices.
     #[inline]
     pub fn n_vertices(&self) -> usize {
-        self.vertex_halfedge.len()
+        self.complex.vertex_halfedge.len()
     }
 
     /// Number of edges.
     #[inline]
     pub fn n_edges(&self) -> usize {
-        self.edge_halfedge.len()
+        self.complex.edge_halfedge.len()
     }
 
     /// Number of faces.
     #[inline]
     pub fn n_faces(&self) -> usize {
-        self.faces.len()
+        self.complex.faces.len()
     }
 
     /// Number of halfedges, which is also the number of corners: `3 * n_faces`.
     #[inline]
     pub fn n_halfedges(&self) -> usize {
-        self.twin.len()
+        self.complex.twin.len()
     }
 
     /// Euler characteristic `χ = V − E + F`. No operation changes it.
@@ -230,7 +194,7 @@ impl IntrinsicTriangulation {
     /// The faces as vertex triples. A face may list a vertex more than once.
     #[inline]
     pub fn faces(&self) -> &[[u32; 3]] {
-        &self.faces
+        &self.complex.faces
     }
 
     /// The next halfedge in the same face.
@@ -249,7 +213,7 @@ impl IntrinsicTriangulation {
     /// lie in the same face.
     #[inline]
     pub fn twin(&self, h: usize) -> Option<usize> {
-        let t = self.twin[h];
+        let t = self.complex.twin[h];
         (t != NONE).then_some(t as usize)
     }
 
@@ -262,19 +226,19 @@ impl IntrinsicTriangulation {
     /// The vertex halfedge `h` starts at; equivalently the vertex of corner `h`.
     #[inline]
     pub fn from_vertex(&self, h: usize) -> usize {
-        self.faces[h / 3][h % 3] as usize
+        self.complex.faces[h / 3][h % 3] as usize
     }
 
     /// The vertex halfedge `h` points to.
     #[inline]
     pub fn to_vertex(&self, h: usize) -> usize {
-        self.faces[h / 3][(h + 1) % 3] as usize
+        self.complex.faces[h / 3][(h + 1) % 3] as usize
     }
 
     /// The edge halfedge `h` belongs to.
     #[inline]
     pub fn edge(&self, h: usize) -> usize {
-        self.halfedge_edge[h] as usize
+        self.complex.halfedge_edge[h] as usize
     }
 
     // ----- edges -----
@@ -284,21 +248,21 @@ impl IntrinsicTriangulation {
     /// right to the vertex opposite on its left (the edge is turned counter-clockwise).
     #[inline]
     pub fn edge_halfedge(&self, e: usize) -> usize {
-        self.edge_halfedge[e] as usize
+        self.complex.edge_halfedge[e] as usize
     }
 
     /// The end points of edge `e`: tail and head of [`edge_halfedge`](Self::edge_halfedge).
     /// They are equal for a self-edge.
     #[inline]
     pub fn edge_vertices(&self, e: usize) -> [usize; 2] {
-        let h = self.edge_halfedge[e] as usize;
+        let h = self.complex.edge_halfedge[e] as usize;
         [self.from_vertex(h), self.to_vertex(h)]
     }
 
     /// Whether edge `e` has only one incident triangle side.
     #[inline]
     pub fn is_boundary_edge(&self, e: usize) -> bool {
-        self.twin[self.edge_halfedge[e] as usize] == NONE
+        self.complex.twin[self.complex.edge_halfedge[e] as usize] == NONE
     }
 
     /// The length of edge `e`.
@@ -330,13 +294,13 @@ impl IntrinsicTriangulation {
     /// boundary halfedge leaving `v`, whose signpost is zero.
     #[inline]
     pub fn outgoing_halfedge(&self, v: usize) -> usize {
-        self.vertex_halfedge[v] as usize
+        self.complex.vertex_halfedge[v] as usize
     }
 
     /// Whether vertex `v` lies on the boundary.
     #[inline]
     pub fn is_boundary_vertex(&self, v: usize) -> bool {
-        self.twin[self.vertex_halfedge[v] as usize] == NONE
+        self.complex.twin[self.complex.vertex_halfedge[v] as usize] == NONE
     }
 
     /// The halfedges leaving `v`, one per incident corner, counter-clockwise. At a boundary
@@ -344,11 +308,7 @@ impl IntrinsicTriangulation {
     /// neighbour is then reached only by an incoming halfedge. A self-edge at `v` appears with
     /// each of its halfedges.
     pub fn outgoing_halfedges(&self, v: usize) -> OutgoingHalfedges<'_> {
-        OutgoingHalfedges {
-            tri: self,
-            start: self.vertex_halfedge[v],
-            current: self.vertex_halfedge[v],
-        }
+        self.complex.outgoing_halfedges(v)
     }
 
     /// The degree of `v`: the number of edge ends at `v` (a self-edge counts twice).
@@ -403,9 +363,9 @@ impl IntrinsicTriangulation {
     #[inline]
     pub fn face_lengths(&self, f: usize) -> [f64; 3] {
         [
-            self.edge_lengths[self.halfedge_edge[3 * f] as usize],
-            self.edge_lengths[self.halfedge_edge[3 * f + 1] as usize],
-            self.edge_lengths[self.halfedge_edge[3 * f + 2] as usize],
+            self.edge_lengths[self.complex.halfedge_edge[3 * f] as usize],
+            self.edge_lengths[self.complex.halfedge_edge[3 * f + 1] as usize],
+            self.edge_lengths[self.complex.halfedge_edge[3 * f + 2] as usize],
         ]
     }
 
@@ -482,14 +442,14 @@ impl IntrinsicTriangulation {
             i = j;
         }
         out.multi_edges.sort_unstable();
-        for (f, &[a, b, c]) in self.faces.iter().enumerate() {
+        for (f, &[a, b, c]) in self.complex.faces.iter().enumerate() {
             if a == b || b == c || a == c {
                 out.faces_with_repeated_vertex.push(f as u32);
             }
         }
         for v in 0..self.n_vertices() {
-            let h = self.vertex_halfedge[v] as usize;
-            if self.twin[prev(h)] == h as u32 {
+            let h = self.complex.vertex_halfedge[v] as usize;
+            if self.complex.twin[prev(h)] == h as u32 {
                 out.degree_one_vertices.push(v as u32);
             }
         }
@@ -525,12 +485,12 @@ impl IntrinsicTriangulation {
             )));
         }
         if let Some(&f) = irregular.faces_with_repeated_vertex.first() {
-            let [a, b, c] = self.faces[f as usize];
+            let [a, b, c] = self.complex.faces[f as usize];
             return Err(not_simplicial(format!(
                 "face {f} = ({a}, {b}, {c}) uses a vertex more than once"
             )));
         }
-        let mesh = TriMesh::new(self.n_vertices(), self.faces.clone()).map_err(|e| {
+        let mesh = TriMesh::new(self.n_vertices(), self.complex.faces.clone()).map_err(|e| {
             IntrinsicError::NotSimplicial {
                 reason: "its faces are not a valid simplicial mesh".to_string(),
                 mesh_error: Some(e),
@@ -538,7 +498,7 @@ impl IntrinsicTriangulation {
         })?;
         let mut lengths = vec![0.0; mesh.n_edges()];
         for h in 0..self.n_halfedges() {
-            lengths[mesh.edge(h)] = self.edge_lengths[self.halfedge_edge[h] as usize];
+            lengths[mesh.edge(h)] = self.edge_lengths[self.complex.halfedge_edge[h] as usize];
         }
         let geometry = Geometry::from_edge_lengths(&mesh, lengths)?;
         Ok((mesh, geometry))
@@ -573,37 +533,38 @@ impl IntrinsicTriangulation {
             self.n_halfedges(),
         );
         if nh != 3 * nf
-            || self.halfedge_edge.len() != nh
+            || self.complex.halfedge_edge.len() != nh
             || self.signposts.len() != nh
             || self.edge_lengths.len() != ne
             || self.edge_on_input.len() != ne
+            || self.complex.constrained.len() != ne
             || self.angle_sums.len() != nv
             || self.locations.len() != nv
         {
             return bad("array lengths do not match the element counts".to_string());
         }
         // Faces, twins, edges.
-        for (f, face) in self.faces.iter().enumerate() {
+        for (f, face) in self.complex.faces.iter().enumerate() {
             if let Some(&v) = face.iter().find(|&&v| v as usize >= nv) {
                 return bad(format!("face {f} references vertex {v} of {nv}"));
             }
         }
         let mut halfedges_of_edge = vec![0u8; ne];
         for h in 0..nh {
-            let e = self.halfedge_edge[h];
+            let e = self.complex.halfedge_edge[h];
             if e as usize >= ne {
                 return bad(format!("halfedge {h} references edge {e} of {ne}"));
             }
             halfedges_of_edge[e as usize] += 1;
-            let t = self.twin[h];
+            let t = self.complex.twin[h];
             if t == NONE {
                 continue;
             }
             let t = t as usize;
-            if t >= nh || t == h || self.twin[t] != h as u32 {
+            if t >= nh || t == h || self.complex.twin[t] != h as u32 {
                 return bad(format!("the twin of halfedge {h} is not mutual"));
             }
-            if self.halfedge_edge[t] != e {
+            if self.complex.halfedge_edge[t] != e {
                 return bad(format!(
                     "halfedge {h} and its twin {t} have different edges"
                 ));
@@ -616,11 +577,11 @@ impl IntrinsicTriangulation {
             }
         }
         for (e, &n_halfedges) in halfedges_of_edge.iter().enumerate() {
-            let h = self.edge_halfedge[e] as usize;
-            if h >= nh || self.halfedge_edge[h] != e as u32 {
+            let h = self.complex.edge_halfedge[e] as usize;
+            if h >= nh || self.complex.halfedge_edge[h] != e as u32 {
                 return bad(format!("edge {e} does not own its halfedge {h}"));
             }
-            let expected = if self.twin[h] == NONE { 1 } else { 2 };
+            let expected = if self.complex.twin[h] == NONE { 1 } else { 2 };
             if n_halfedges != expected {
                 return bad(format!(
                     "edge {e} has {} halfedges, expected {expected}",
@@ -660,7 +621,7 @@ impl IntrinsicTriangulation {
         }
         // Fans, signposts, angle sums.
         let mut corners_at = vec![0u32; nv];
-        for face in &self.faces {
+        for face in &self.complex.faces {
             for &v in face {
                 corners_at[v as usize] += 1;
             }
@@ -669,7 +630,7 @@ impl IntrinsicTriangulation {
         let mut max_signpost_error = 0.0f64;
         let mut curvature = 0.0;
         for (v, &n_corners) in corners_at.iter().enumerate() {
-            let h0 = self.vertex_halfedge[v] as usize;
+            let h0 = self.complex.vertex_halfedge[v] as usize;
             if h0 >= nh || self.from_vertex(h0) != v {
                 return bad(format!("vertex {v} does not own its halfedge {h0}"));
             }
@@ -677,7 +638,7 @@ impl IntrinsicTriangulation {
             if !(theta.is_finite() && theta > 0.0) {
                 return bad(format!("vertex {v} has angle sum {theta}"));
             }
-            let boundary = self.twin[h0] == NONE;
+            let boundary = self.complex.twin[h0] == NONE;
             let full = if boundary { PI } else { TAU };
             let mut count = 0u32;
             let mut sum = 0.0;
@@ -698,7 +659,7 @@ impl IntrinsicTriangulation {
                         "halfedge {h} at vertex {v} has signpost {phi}, outside [0, {full}]"
                     ));
                 }
-                if h != h0 && self.twin[h] == NONE {
+                if h != h0 && self.complex.twin[h] == NONE {
                     return bad(format!(
                         "boundary halfedge {h} is not the first halfedge of vertex {v}"
                     ));
@@ -706,7 +667,7 @@ impl IntrinsicTriangulation {
                 let corner = self.corner_angle(h);
                 sum += corner;
                 let expected = signpost_update(phi, corner, theta, boundary);
-                let t = self.twin[prev(h)];
+                let t = self.complex.twin[prev(h)];
                 if t == NONE {
                     if !boundary {
                         return bad(format!("the fan of interior vertex {v} is open"));
@@ -779,27 +740,27 @@ impl Surface for IntrinsicTriangulation {
 
     #[inline]
     fn n_vertices(&self) -> usize {
-        self.vertex_halfedge.len()
+        self.complex.vertex_halfedge.len()
     }
     #[inline]
     fn n_edges(&self) -> usize {
-        self.edge_halfedge.len()
+        self.complex.edge_halfedge.len()
     }
     #[inline]
     fn n_faces(&self) -> usize {
-        self.faces.len()
+        self.complex.faces.len()
     }
     #[inline]
     fn twin(&self, h: usize) -> u32 {
-        self.twin[h]
+        self.complex.twin[h]
     }
     #[inline]
     fn tail(&self, h: usize) -> u32 {
-        self.faces[h / 3][h % 3]
+        self.complex.faces[h / 3][h % 3]
     }
     #[inline]
     fn edge(&self, h: usize) -> u32 {
-        self.halfedge_edge[h]
+        self.complex.halfedge_edge[h]
     }
     #[inline]
     fn length(&self, e: usize) -> f64 {
@@ -807,7 +768,7 @@ impl Surface for IntrinsicTriangulation {
     }
     #[inline]
     fn outgoing(&self, v: usize) -> u32 {
-        self.vertex_halfedge[v]
+        self.complex.vertex_halfedge[v]
     }
     #[inline]
     fn signpost(&self, h: usize) -> f64 {
@@ -819,10 +780,10 @@ impl Surface for IntrinsicTriangulation {
     }
     #[inline]
     fn is_forward(&self, h: usize) -> bool {
-        self.edge_halfedge[self.halfedge_edge[h] as usize] == h as u32
+        self.complex.edge_halfedge[self.complex.halfedge_edge[h] as usize] == h as u32
     }
     #[inline]
     fn edge_halfedge(&self, e: usize) -> u32 {
-        self.edge_halfedge[e]
+        self.complex.edge_halfedge[e]
     }
 }

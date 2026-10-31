@@ -97,9 +97,9 @@ impl IntrinsicTriangulation {
         self.outgoing_halfedges(v)
             .map(|h| {
                 let lengths = [
-                    self.edge_lengths[self.halfedge_edge[h] as usize],
-                    self.edge_lengths[self.halfedge_edge[self.prev(h)] as usize],
-                    self.edge_lengths[self.halfedge_edge[self.next(h)] as usize],
+                    self.edge_lengths[self.complex.halfedge_edge[h] as usize],
+                    self.edge_lengths[self.complex.halfedge_edge[self.prev(h)] as usize],
+                    self.edge_lengths[self.complex.halfedge_edge[self.next(h)] as usize],
                 ];
                 let area = triangle_area(lengths[0], lengths[2], lengths[1]).unwrap_or(0.0);
                 StarFace {
@@ -195,7 +195,7 @@ impl IntrinsicTriangulation {
         }
         if let Some(h) = self.outgoing_halfedges(v).find(|&h| self.to_vertex(h) == v) {
             return Err(refused(MoveRefusal::SelfEdge {
-                edge: self.halfedge_edge[h],
+                edge: self.complex.halfedge_edge[h],
             }));
         }
         let from = self.locations[v];
@@ -256,10 +256,14 @@ impl IntrinsicTriangulation {
             leaving.push(la_new);
             arriving_last = lb_new;
         }
-        let shortest_new = leaving
-            .iter()
-            .copied()
-            .fold(if boundary { arriving_last } else { f64::INFINITY }, f64::min);
+        let shortest_new = leaving.iter().copied().fold(
+            if boundary {
+                arriving_last
+            } else {
+                f64::INFINITY
+            },
+            f64::min,
+        );
         if let Some(face) = turned {
             return Err(refused(MoveRefusal::NotInStar { face, fraction }));
         }
@@ -291,7 +295,11 @@ impl IntrinsicTriangulation {
                 )));
             }
             // In the boundary frame the old place is in the direction opposite the motion.
-            let back = if displacement[0] > 0.0 { std::f64::consts::PI } else { 0.0 };
+            let back = if displacement[0] > 0.0 {
+                std::f64::consts::PI
+            } else {
+                0.0
+            };
             (SurfacePoint::Edge { edge, t: t_new }, back, None)
         } else {
             let direction = wrap(phi_v);
@@ -325,7 +333,7 @@ impl IntrinsicTriangulation {
 
         // Apply: lengths, place, signposts.
         for (s, &l) in star.iter().zip(&leaving) {
-            let e = self.halfedge_edge[s.h] as usize;
+            let e = self.complex.halfedge_edge[s.h] as usize;
             self.edge_lengths[e] = l;
             if !boundary {
                 self.edge_on_input[e] = NONE;
@@ -333,7 +341,7 @@ impl IntrinsicTriangulation {
         }
         if boundary {
             let last = star[star.len() - 1].h;
-            let e = self.halfedge_edge[self.prev(last)] as usize;
+            let e = self.complex.halfedge_edge[self.prev(last)] as usize;
             self.edge_lengths[e] = arriving_last;
         }
         self.locations[v] = to;
@@ -351,7 +359,7 @@ impl IntrinsicTriangulation {
         }
         // Incoming: each from the side of the link that leaves the neighbour.
         for s in &star {
-            let t = self.twin[s.h];
+            let t = self.complex.twin[s.h];
             if t != NONE {
                 self.signposts[t as usize] = self.signpost_after(self.next(s.h));
             }
@@ -404,7 +412,7 @@ impl IntrinsicTriangulation {
         }
         if let Some(h) = self.outgoing_halfedges(v).find(|&h| self.to_vertex(h) == v) {
             return Err(refused(MoveRefusal::SelfEdge {
-                edge: self.halfedge_edge[h],
+                edge: self.complex.halfedge_edge[h],
             }));
         }
         let mut weighted = [0.0; 2];
@@ -414,7 +422,7 @@ impl IntrinsicTriangulation {
             let area = 0.5 * s.double_area;
             let f = s.h / 3;
             let touches_boundary = barycenters_at_boundary
-                && self.faces[f]
+                && self.complex.faces[f]
                     .iter()
                     .any(|&u| self.is_boundary_vertex(u as usize));
             let w = if touches_boundary {
@@ -437,4 +445,3 @@ fn shape_number(double_area: f64, l: [f64; 3]) -> f64 {
     let at_vertex = l[0].max(l[1]);
     double_area / (at_vertex * at_vertex.max(l[2]))
 }
-

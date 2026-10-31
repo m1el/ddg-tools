@@ -57,6 +57,14 @@ pub enum IntrinsicError {
         /// Why.
         reason: MoveRefusal,
     },
+    /// A vertex cannot be removed (see
+    /// [`Complex::remove_vertex`](crate::Complex::remove_vertex)). Nothing was changed.
+    RemovalRefused {
+        /// The vertex.
+        vertex: u32,
+        /// Why.
+        reason: RemovalRefusal,
+    },
     /// The new place of a moved vertex on the input mesh could not be found: the straight path
     /// over the input mesh from its old place did not complete, although the move keeps the
     /// vertex inside its flat star. This is an inconsistency between the triangulation and the
@@ -306,11 +314,67 @@ impl fmt::Display for MoveRefusal {
     }
 }
 
+/// Why a vertex cannot be removed (see
+/// [`Complex::remove_vertex`](crate::Complex::remove_vertex)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RemovalRefusal {
+    /// The vertex is a vertex of the input mesh. Removing it would change the surface.
+    InputVertex,
+    /// The vertex lies on the boundary (not supported).
+    BoundaryVertex,
+    /// The vertex does not have degree three (flip edges at it first).
+    Degree {
+        /// Its degree.
+        degree: usize,
+    },
+    /// An edge joins the vertex to itself.
+    SelfEdge {
+        /// The edge.
+        edge: u32,
+    },
+    /// An edge at the vertex is constrained, and removing the vertex would remove it.
+    ConstrainedEdge {
+        /// The edge.
+        edge: u32,
+    },
+    /// The triangle that would replace the star has no positive area by its edge lengths.
+    Degenerate {
+        /// Its three lengths.
+        lengths: [f64; 3],
+    },
+}
+
+impl fmt::Display for RemovalRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RemovalRefusal::InputVertex => write!(f, "it is a vertex of the input mesh"),
+            RemovalRefusal::BoundaryVertex => {
+                write!(f, "it lies on the boundary, which is not supported")
+            }
+            RemovalRefusal::Degree { degree } => {
+                write!(f, "it has degree {degree}, not three")
+            }
+            RemovalRefusal::SelfEdge { edge } => write!(f, "edge {edge} joins it to itself"),
+            RemovalRefusal::ConstrainedEdge { edge } => {
+                write!(f, "its edge {edge} is constrained")
+            }
+            RemovalRefusal::Degenerate { lengths } => write!(
+                f,
+                "the triangle replacing its star would have the lengths {lengths:?}, which form \
+                 no triangle of positive area"
+            ),
+        }
+    }
+}
+
 /// Why an edge cannot be flipped (paper Sec. 3.3.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FlipRefusal {
     /// The edge lies on the boundary: it has one triangle only.
     BoundaryEdge,
+    /// The edge is constrained ([`Complex::is_constrained`](crate::Complex::is_constrained)):
+    /// flips leave it alone, as they leave boundary edges.
+    Constrained,
     /// Both sides of the edge are the same triangle, which happens exactly when one of its end
     /// points has degree one (paper Fig. 6, right).
     DegreeOneEndpoint {
@@ -342,6 +406,7 @@ impl fmt::Display for FlipRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FlipRefusal::BoundaryEdge => write!(f, "it is a boundary edge"),
+            FlipRefusal::Constrained => write!(f, "it is constrained"),
             FlipRefusal::DegreeOneEndpoint { vertex } => write!(
                 f,
                 "its end point {vertex} has degree one (both sides of the edge are the same \
@@ -497,6 +562,9 @@ impl fmt::Display for IntrinsicError {
             }
             IntrinsicError::MoveRefused { vertex, reason } => {
                 write!(f, "vertex {vertex} cannot be moved: {reason}")
+            }
+            IntrinsicError::RemovalRefused { vertex, reason } => {
+                write!(f, "vertex {vertex} cannot be removed: {reason}")
             }
             IntrinsicError::MoveNotLocated { vertex, detail } => write!(
                 f,

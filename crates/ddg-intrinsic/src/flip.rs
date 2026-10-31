@@ -54,25 +54,15 @@ struct Quad {
 }
 
 impl IntrinsicTriangulation {
-    /// The two triangles on edge `e`, or why there are no two.
+    /// The two triangles on edge `e`, or why there are no two (or why the edge is left
+    /// alone).
     fn quad(&self, e: usize) -> Result<Quad, FlipRefusal> {
-        let h0 = self.edge_halfedge[e] as usize;
-        let h1 = self.twin[h0];
-        if h1 == NONE {
-            return Err(FlipRefusal::BoundaryEdge);
+        if let Some(reason) = self.complex.flip_refusal(e) {
+            return Err(reason);
         }
-        let h1 = h1 as usize;
-        if h0 / 3 == h1 / 3 {
-            // The face is glued to itself along the edge. Its third halfedge is a loop at one
-            // end point; the other end point has this one corner only.
-            let loop_halfedge = 3 * (h0 / 3) + (3 - h0 % 3 - h1 % 3);
-            let at_loop = self.from_vertex(loop_halfedge);
-            let [a, b] = [self.from_vertex(h0), self.to_vertex(h0)];
-            return Err(FlipRefusal::DegreeOneEndpoint {
-                vertex: (if a == at_loop { b } else { a }) as u32,
-            });
-        }
-        let len = |h: usize| self.edge_lengths[self.halfedge_edge[h] as usize];
+        let h0 = self.complex.edge_halfedge[e] as usize;
+        let h1 = self.complex.twin[h0] as usize;
+        let len = |h: usize| self.edge_lengths[self.complex.halfedge_edge[h] as usize];
         Ok(Quad {
             h0,
             h1,
@@ -90,13 +80,13 @@ impl IntrinsicTriangulation {
     /// interior edge `e = ij`, or `None` for a boundary edge. For an edge whose two sides are
     /// the same triangle the triangle is listed twice, which is what the angle sums need.
     pub(crate) fn diamond_lengths(&self, e: usize) -> Option<[f64; 5]> {
-        let h0 = self.edge_halfedge[e] as usize;
-        let h1 = self.twin[h0];
+        let h0 = self.complex.edge_halfedge[e] as usize;
+        let h1 = self.complex.twin[h0];
         if h1 == NONE {
             return None;
         }
         let h1 = h1 as usize;
-        let len = |h: usize| self.edge_lengths[self.halfedge_edge[h] as usize];
+        let len = |h: usize| self.edge_lengths[self.complex.halfedge_edge[h] as usize];
         Some([
             self.edge_lengths[e],
             len(self.next(h0)),
@@ -177,72 +167,19 @@ impl IntrinsicTriangulation {
         let (quad, new_length) = self.plan_flip(e)?;
         let [l_ij, l_jk, l_ki, l_il, l_lj] = quad.lengths;
         let (h0, h1) = (quad.h0, quad.h1);
-        let (f0, a) = (h0 / 3, h0 % 3);
-        let (f1, b) = (h1 / 3, h1 % 3);
-        // Before:  f0 = (i, j, k) with halfedges h0 = i→j, h0n = j→k, h0p = k→i,
-        //          f1 = (j, i, l) with halfedges h1 = j→i, h1n = i→l, h1p = l→j.
-        // After:   f0 = (i, l, k) with halfedges h0 = i→l, h0n = l→k, h0p = k→i,
-        //          f1 = (j, k, l) with halfedges h1 = j→k, h1n = k→l, h1p = l→j.
-        // The halfedges k→i and l→j stay where they are; i→l and j→k change faces.
-        let (h0n, h0p) = (3 * f0 + (a + 1) % 3, 3 * f0 + (a + 2) % 3);
-        let (h1n, h1p) = (3 * f1 + (b + 1) % 3, 3 * f1 + (b + 2) % 3);
-        let (i, j) = (self.faces[f0][a], self.faces[f1][b]);
-        let (k, l) = (self.faces[f0][(a + 2) % 3], self.faces[f1][(b + 2) % 3]);
-
-        // Twins, edges and signposts of the two halfedges that move.
-        let moved = |h: u32| {
-            if h == h0n as u32 {
-                h1 as u32
-            } else if h == h1n as u32 {
-                h0 as u32
-            } else {
-                h
-            }
-        };
-        let twin_il = moved(self.twin[h1n]);
-        let twin_jk = moved(self.twin[h0n]);
-        let (edge_il, edge_jk) = (self.halfedge_edge[h1n], self.halfedge_edge[h0n]);
-        let (phi_il, phi_jk) = (self.signposts[h1n], self.signposts[h0n]);
-
-        self.faces[f0][(a + 1) % 3] = l;
-        self.faces[f1][(b + 1) % 3] = k;
-
-        self.twin[h0] = twin_il;
-        if twin_il != NONE {
-            self.twin[twin_il as usize] = h0 as u32;
-        }
-        self.twin[h1] = twin_jk;
-        if twin_jk != NONE {
-            self.twin[twin_jk as usize] = h1 as u32;
-        }
-        self.twin[h0n] = h1n as u32;
-        self.twin[h1n] = h0n as u32;
-
-        self.halfedge_edge[h0] = edge_il;
-        self.halfedge_edge[h1] = edge_jk;
-        self.halfedge_edge[h0n] = e as u32;
-        self.halfedge_edge[h1n] = e as u32;
-        if self.edge_halfedge[edge_il as usize] == h1n as u32 {
-            self.edge_halfedge[edge_il as usize] = h0 as u32;
-        }
-        if self.edge_halfedge[edge_jk as usize] == h0n as u32 {
-            self.edge_halfedge[edge_jk as usize] = h1 as u32;
-        }
-        self.edge_halfedge[e] = h0n as u32;
-
-        if self.vertex_halfedge[i as usize] == h1n as u32 {
-            self.vertex_halfedge[i as usize] = h0 as u32;
-        }
-        if self.vertex_halfedge[j as usize] == h0n as u32 {
-            self.vertex_halfedge[j as usize] = h1 as u32;
-        }
+        // The topology (see `ComplexFlip`): f0 = (i, j, k), f1 = (j, i, l) become
+        // f0 = (i, l, k), f1 = (j, k, l); i→l and j→k change faces, keeping their signposts.
+        let flip = self.complex.flip_unchecked(e);
+        flip.move_halfedge_data(&mut self.signposts);
+        let [i, j] = flip.old_vertices;
+        let [l, k] = flip.new_vertices;
+        let [h0n, h1n] = flip.new_halfedges.map(|h| h as usize);
+        let (h0p, h1p) = (self.prev(h0), self.prev(h1));
 
         self.edge_lengths[e] = new_length;
         self.edge_on_input[e] = NONE;
 
-        // Signposts: i→l and j→k keep theirs; l→k follows l→j, k→l follows k→i.
-        self.signposts[h0] = phi_il;
-        self.signposts[h1] = phi_jk;
+        // Signposts: l→k follows l→j, k→l follows k→i.
         let (k, l) = (k as usize, l as usize);
         // Both angles exist: the two new triangles were checked by `plan_flip`.
         let at_l = corner_angle(l_jk, l_lj, new_length).unwrap_or(0.0);

@@ -156,7 +156,7 @@ impl IntrinsicTriangulation {
         e: usize,
         options: &EdgeTraceOptions,
     ) -> Result<EdgeTrace, EdgeTraceFailure> {
-        let h = self.edge_halfedge[e] as usize;
+        let h = self.complex.edge_halfedge[e] as usize;
         let (a, b) = (self.from_vertex(h), self.to_vertex(h));
         let vertices = [a as u32, b as u32];
         if let Some(input_edge) = self.edge_on_input(e) {
@@ -390,7 +390,7 @@ mod tests {
         let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
         assert!(traces.report.max_relative_mismatch < 1e-13);
         let e = winding_edge(&tri, &traces);
-        let h = tri.edge_halfedge[e] as usize;
+        let h = tri.complex.edge_halfedge[e] as usize;
         // An interior vertex of a flat shape: normalized angles are angles. Turning the
         // signpost by 1e-4 moves the end of the path by 1e-4 of its length.
         tri.signposts[h] += 1e-4;
@@ -474,7 +474,7 @@ mod tests {
         let (mut tri, mesh) = sheared();
         let traces = tri.trace_edges(&EdgeTraceOptions::default()).unwrap();
         let e = winding_edge(&tri, &traces);
-        let h = tri.edge_halfedge[e] as usize;
+        let h = tri.complex.edge_halfedge[e] as usize;
         let [a, b] = tri.edge_vertices(e);
         // Point the signpost along an input edge at the tail that does not lead to the head,
         // and make the edge longer than that input edge.

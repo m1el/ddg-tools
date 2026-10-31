@@ -110,6 +110,7 @@
 
 #![warn(missing_docs)]
 
+pub mod complex;
 pub mod delaunay;
 pub mod edge_trace;
 mod error;
@@ -129,11 +130,12 @@ mod surface;
 pub mod trace;
 pub mod triangulation;
 
+pub use complex::Complex;
 pub use delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport, DelaunayStatus, FlipLimit};
 pub use edge_trace::{EdgeTrace, EdgeTraceOptions, EdgeTraceReport, EdgeTraces};
 pub use error::{
     EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, InsertRefusal, IntrinsicError,
-    MoveRefusal,
+    MoveRefusal, RemovalRefusal,
 };
 pub use export::{ExportOptions, SimplicialExport};
 pub use flip::Flip;
@@ -147,9 +149,9 @@ pub use operators::{Quality, ShapeStatistics, Summary};
 pub use overlay::{Overlay, OverlayVertex};
 pub use point::SurfacePoint;
 pub use query::{PathOnInput, PathsOnInput, Segment};
-pub use reposition::VertexMove;
 pub use refine::{
     BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineStatus,
 };
+pub use reposition::VertexMove;
 pub use trace::{Crossing, Trace, TraceOptions, TraceStop};
 pub use triangulation::{ConsistencyReport, IntrinsicTriangulation, Irregularities};
