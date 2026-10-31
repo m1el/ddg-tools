@@ -54,8 +54,8 @@ non-crossing, Sec. 3.2.2). The result is extracted as polylines on `T⁰`.
 
 What must be true, in one sentence: the returned paths are edge paths of the returned `T` that are
 isotopic to the input relative to the pinned vertices, no longer than the input, and geodesic
-(every interior joint not at a pinned vertex has both wedge angles `≥ π − tol`, or its small wedge
-is blocked by a path end), and the polyline extracted on `T⁰` is that same curve: connected
+(every interior joint not at a pinned vertex has, on each side, a wedge angle `≥ π − tol` or a
+wedge blocked by a path end; F27), and the polyline extracted on `T⁰` is that same curve: connected
 exactly (integer coordinates) or within the trace check of IT N8 (signposts).
 
 ### 1.2 Scope
@@ -158,7 +158,12 @@ gc: fg.cpp:1588-1591, is not needed).
 ## 3. Geometry of a joint (paper Sec. 3.2.3–3.2.5)
 
 For a joint `γ_abc` at `b`, the two **wedges** are the corners at `b` swept counter-clockwise from
-`ba` to `bc` (`W_abc`, left of the path) and from `bc` to `ba` (right). With corner angles `θ` from
+`bc` to `ba` (`W_abc`, left of the path) and from `ba` to `bc` (right), with counter-clockwise
+faces (the reference's `leftAngle = angleIn − angleOut`, gc: fg.cpp:489-521; tested geometrically).
+Corner angles are summed counter-clockwise from the start of the sweep, independent of
+`outgoing_halfedge`, so repeated evaluations are bitwise equal (the oracle sums in the same order).
+**Out-and-back joint** (F26): when `ab` and `bc` lie on the same edge, the layering decides: the
+side between the two segments has no corner and angle `0`, the other side has `Θ_b`. With corner angles `θ` from
 the edge lengths (`ddg_core::geometry::corner_angle`):
 
 ```
@@ -173,14 +178,17 @@ the reference subtracts signposts instead (gc: fg.cpp:489-522), which in `ddg-in
 scaled by `2π/Θ` (IT N2) and would need unscaling.
 
 **Classification** (gc: fg.cpp:524-587): `Straight` if `α^min > π − straight_tolerance` (default
-`1e-5`, gc: fg.h:161; F3), otherwise `Left` or `Right` by the smaller side; the larger side is also
+`1e-5`, gc: fg.h:161; F3), otherwise `Left` if `α_L < α_R` strictly, else `Right` (the reference's
+tie rule); the queue takes sides with `α ≤ π − tol`, the certificate accepts `α ≥ π − tol`; the larger side is also
 queued when it is `< π − tol` too (`Θ_b < 2π`, gc: fg.cpp:1005-1007).
 
 **Flexible** (Sec. 3.2.3; gc: fg.cpp:589-658): the joint's own segments `ab`, `bc` are outermost on
 the wedge side of their edges, and no edge strictly inside the wedge carries a segment. **Blocked
 by an end** (gc: fg.cpp:662-730): some segment in the wedge, or outermost on a bounding edge, is
 the first or last segment of an open path; such a joint is locally shortest in its isotopy class
-(Sec. 4.2, case (b)) and the certificate exempts it.
+(Sec. 4.2, case (b)) and the certificate exempts it. A path end at `b` itself pins `b`, so the
+exemption matters only for end segments whose far vertex is the end. **Flexible** in code: no
+segment end strictly inside the sweep, which also covers the degree-0 wedge and self-edges.
 
 **Vertex cases** (what the definitions imply; tested in §7):
 
@@ -348,9 +356,9 @@ B5). WP F9, after everything else.
 **Layers.**
 
 1. **Certificates** of every run (in tests and the evaluation): (a) on `T`: §2.1 validity, every
-   interior joint not pinned is `Straight` to `certify_tolerance` (default `1e-4` rad, the paper's
-   Sec. 5.3 criterion; the reference only declares `isStraight(1e-4)`, gc: fg.h:188) or blocked by
-   an end; reports the minimum `α^min` and the number of blocked joints; (b) on `T⁰`: §5; (c) for
+   interior joint not pinned has, on each side, `α ≥ π − certify_tolerance` (default `1e-4` rad,
+   the paper's Sec. 5.3 criterion; the reference only declares `isStraight(1e-4)`, gc: fg.h:188) or
+   a wedge blocked by an end (F27); reports the minimum `α^min` and the number of blocked joints; (b) on `T⁰`: §5; (c) for
    integer coordinates, IC `certify()` once at the end of a run (F25).
 2. **Differential, signposts vs integers** (§1.3): same flip sequence, same final segments,
    bitwise-identical lengths; polylines within `1e-9 ·` total length where the signpost trace
@@ -387,7 +395,10 @@ the bad meshes of IT §5):
 5. *Monotone length*: each Alg. 1 replacement strictly shortens (paths and networks); for loops the
    App. B moves are the only increases and are counted.
 6. *Isotopy*: §2.1 non-crossing after every iteration (`check_invariants`); multiply covered input
-   (a doubled loop around a tube, Fig. 8 top; a path pulled around its own end, Fig. 8 bottom).
+   (Fig. 8 top as an open path spiralling twice around a tube, and as two parallel loops given as
+   two paths; a path pulled around its own end, Fig. 8 bottom). A single closed path winding twice
+   around a tube crosses itself under every layering (a curve in the class `a²` of an annulus is not
+   simple), so §2.1 refuses it; the reference does not check.
 7. *Bézier*: on a plane, the pinned points after `r` rounds equal the planar de Casteljau
    subdivision points to `1e-12`; on curved inputs, symmetric under reversing the control points
    (same point set) to `1e-12`.
@@ -504,7 +515,10 @@ model where the signpost extraction breaks and the integer one does not.
 * **F14** Stop rules `max_iterations`, `stop_length_ratio`, `stop_min_angle`; the length is a running
   sum (the reference recomputes it every iteration, gc: fg.cpp:968-969).
 * **F15** Dijkstra on the current `T`, ties by `(distance, halfedge id)`; errors for same vertex and
-  disconnected ends.
+  disconnected ends. A boundary edge walked against its only halfedge gets the key
+  `n_halfedges + edge` (the reference has exterior halfedges; we don't). `path_from_vertices(tri,
+  vertices, closed)`: where two consecutive vertices share several edges the shortest is taken; a
+  closed path through one vertex is a loop along a self-edge.
 * **F16** No rewind (gc: fg.cpp:1250-1313): trials clone the triangulation (input behind an `Arc`,
   IT N9); clone time reported, excluded from FlipOut time.
 * **F17** Integer extraction per edge (§11 R2), not via the whole common subdivision (gc:
@@ -519,6 +533,12 @@ model where the signpost extraction breaks and the integer one does not.
 * **F23** Ground truth for minimality: `ddg_intrinsic_apps::exact`.
 * **F24** Single-threaded algorithm; extraction parallel per edge, assembled in order.
 * **F25** Integer `certify` once per run, not per flip.
+* **F26** *Out-and-back joint.* The reference measures `Θ` on both sides when `ab` and `bc` share an
+  edge (`measureSideAngles` with equal signposts), so it never sees `α = 0`; here the layering puts
+  angle `0` on the side between the two segments (§3), which Alg. 1 then shortens.
+* **F27** *Certificate per side.* "The small wedge is blocked by an end" (the earlier wording)
+  accepts a non-geodesic at `Θ_b < 2π`, where both sides can be `< π` and the large side may still
+  shorten; every side with `α < π − tol` must be blocked by an end.
 
 ## 11. Requests to the other contracts
 
@@ -567,7 +587,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 | WP | content | files | depends on | model |
 |---|---|---|---|---|
 | F0 | **done** with IC WP0 (2814e8a–aca460e): R1, R3, R4 | `crates/ddg-intrinsic/src/…` | — | Opus |
-| F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | `crates/ddg-flip-geodesics/src/{lib,error,network,wedge,certify}.rs` | F0 (R1 for signposts only) | Opus |
+| F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | **done** (2144fed, d3c11e3): `src/{lib,error,network,wedge,certify,init,report}.rs` (`init`: Dijkstra and vertex-sequence paths, F3 adds waypoints and edge sets; `report`: options and reports for F2) | F0 (R1 for signposts only) | Opus |
 | F2 | Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6 on signposts | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy}.rs` | F1 | Opus |
 | F3 | initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |
 | F4 | Bézier, split bookkeeping, iCDT; tests 7, 8 | `src/{bezier,cdt}.rs`, `tests/{bezier,identity}.rs` | F2, IC WP3/WP4 + R4 | Opus |
