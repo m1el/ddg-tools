@@ -473,6 +473,7 @@ dependencies = [
  "ddg-bff",
  "ddg-core",
  "ddg-developability",
+ "ddg-flip-geodesics",
  "ddg-integer-coords",
  "ddg-intrinsic",
  "ddg-intrinsic-apps",

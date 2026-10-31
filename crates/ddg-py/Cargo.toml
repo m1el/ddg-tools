@@ -37,6 +37,8 @@ ddg-intrinsic = { path = "../ddg-intrinsic" }
 ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 # The integer representation (Gillespie, Sharp, Crane 2021): the `representation=` option and src/integer_coords.rs.
 ddg-integer-coords = { path = "../ddg-integer-coords" }
+# Geodesic paths, loops, networks and Bézier curves by edge flips (Sharp, Crane 2020): src/flip_geodesics.rs.
+ddg-flip-geodesics = { path = "../ddg-flip-geodesics" }
 # Developability of triangle meshes (Stein, Grinspun, Crane 2018): energy, flow, cut and flatten
 # (src/developability.rs).
 ddg-developability = { path = "../ddg-developability" }

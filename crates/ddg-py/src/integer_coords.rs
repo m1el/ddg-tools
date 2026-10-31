@@ -131,7 +131,7 @@ pub struct Places {
 }
 
 impl Places {
-    fn push(&mut self, p: SurfacePoint) {
+    pub(crate) fn push(&mut self, p: SurfacePoint) {
         let (kind, id, params) = match p {
             SurfacePoint::Vertex(v) => (0, v, [0.0; 3]),
             SurfacePoint::Edge { edge, t } => (1, edge, [t, 0.0, 0.0]),
