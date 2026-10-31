@@ -130,6 +130,53 @@ through them); the signposts trace one path over the input mesh.
   pass; `P0 x0` reproduces the positions to 5e-15 edge lengths. Timings (release, one thread, load
   about 6): spot after Delaunay 4.0 ms (signposts trace + overlay 1.15), camelbad 24 ms (8.7).
 
+## Attribute transfer, Fig. 14 (WP7)
+
+`Transfer::new(&tri, &common_subdivision)` (or `Transfer::from_state(&tri)`) builds `M_S`, `P₀`,
+`P₁`, `M₀ = P₀ᵀ M_S P₀`, `M₁ = P₁ᵀ M_S P₁` and their Cholesky factorizations once; it refuses a
+stale subdivision (fingerprint, SPEC I19). `to_input(&f)` solves Eq. 14 (`T¹ → T⁰`),
+`to_intrinsic(&g)` the reverse (`M₁ ĝ = P₁ᵀ M_S P₀ g`), the `_report` variants return the relative
+residual of the normal equations and the `L²` distance (Eq. 13); `copy_to_input` /
+`copy_to_intrinsic` are plain copying. `M_S` is the **unnormalized** consistent P1 mass matrix of
+the pieces (`Σ M_S` = total area; the area normalization of `CLAUDE.md` belongs to the cones
+problem), with piece areas from barycentric coordinates in the input face and the face areas, no
+positions needed. The crate does not depend on `ddg-intrinsic-apps`.
+
+Measured (`tests/transfer.rs`, 133 states: the standard shapes, spot and camelbad, 7 scenarios):
+
+* `P₀ᵀ M_S P₀` against the input mesh's own `A/12 (1 + δ)` matrix (`ic-transfer-mass-identity`):
+  worst entry error `2.1e-15`, relative to the larger diagonal entry of the pair; total area of
+  the pieces within `1.1e-14`;
+* constants reproduced to `5.3e-15` (both directions), affine functions on the flat shapes to
+  rounding; normal-equation residual at most `2.6e-16` (relative);
+* the transfer is never farther from `P₁ f` (resp. `P₀ g`) than copying; on camelbad after
+  Delaunay flipping `2.3e-4` against `3.5e-4`;
+* stale subdivisions, wrong lengths and NaN/infinite values are errors.
+
+`examples/fig14.rs` (`cargo run --release -p ddg-integer-coords --example fig14`) refines by
+inserting circumcenters of the largest faces with Delaunay flipping (WP6's refinement was not
+committed yet), samples a smooth function at the vertices of `T¹` and prints relative `L²` errors
+against it on the input surface (PLY with colours in `runs_tmp/wp7-fig14/`):
+
+| mesh | extra vertices | copy | `L²` transfer | `T¹` itself | copy / transfer |
+|---|---|---|---|---|---|
+| spot | 0 | 1.069e-2 | 1.074e-2 | 1.081e-2 | 0.99 |
+| spot | 1465 | 1.069e-2 | 7.248e-3 | 6.572e-3 | 1.47 |
+| spot | 2930 | 1.069e-2 | 6.073e-3 | 4.582e-3 | 1.76 |
+| camelbad | 0 | 5.275e-3 | 5.020e-3 | 4.946e-3 | 1.05 |
+| camelbad | 5696 | 5.275e-3 | 3.071e-3 | 2.158e-3 | 1.72 |
+| camelbad | 11392 | 5.275e-3 | 2.811e-3 | 1.603e-3 | 1.88 |
+
+The transfer beats copying and the gap grows with the refinement, but the factors are far from the
+paper's 28x: the paper's function and refinement size are not reproducible from the text, and our
+sampled function is smooth and low-frequency. The transfer cannot beat the refined triangulation's
+own function here (it projects it to the coarser space).
+
+Timings (release, single thread, pinned core, load average about 3): spot (final level, 5 860
+vertices, `|S|` = 12 720): common subdivision 8.6 ms, `M_S` 7.9 ms, `P₀ P₁` 1.6 ms, `M₀ M₁` 19.5 ms,
+factorize both 11.1 ms, one transfer 0.5 ms. Camelbad (22 784 vertices, `|S|` = 62 825): 38.8,
+42.5, 7.5, 113, 46.9 ms, one transfer 2.8 ms.
+
 ## Geometry of the crossings (WP2)
 
 Connectivity comes from the integers; floating point decides only where the crossings lie. Both

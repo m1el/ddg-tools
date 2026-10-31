@@ -181,6 +181,12 @@ pub enum IntegerError {
         /// What went wrong.
         reason: String,
     },
+    /// An attribute transfer (SPEC §6) was given values of the wrong length or non-finite
+    /// values, or its matrices could not be built or factorized.
+    Transfer {
+        /// What went wrong.
+        reason: String,
+    },
 }
 
 impl IntegerError {
@@ -249,6 +255,7 @@ impl fmt::Display for IntegerError {
                     "{operation} is not supported by integer coordinates: {reason}"
                 )
             }
+            IntegerError::Transfer { reason } => write!(f, "attribute transfer: {reason}"),
             IntegerError::Conversion { edge, reason } => write!(
                 f,
                 "edge {edge} of the signpost triangulation could not be converted: {reason}"

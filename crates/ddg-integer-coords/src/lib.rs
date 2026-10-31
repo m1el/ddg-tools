@@ -99,6 +99,7 @@ pub mod remove;
 pub mod split;
 pub mod subdivision;
 pub mod trace;
+pub mod transfer;
 
 pub use certify::CertifyReport;
 pub use convert::ConversionReport;
@@ -119,6 +120,7 @@ pub use remove::Removal;
 pub use subdivision::{
     ArcEnd, CommonSubdivision, LocatedPiece, PointLocator, SubdivisionReport, face_arcs,
 };
+pub use transfer::{Direction, SolveReport, Transfer, TransferReport};
 pub use trace::{
     Arrival, Crossing, CurveEnd, CurveSegment, HalfTrace, InputEdgePath, NormalGluing, PathPiece,
     TracedInputEdge, extract_curve, trace_from, trace_with,
