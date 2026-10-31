@@ -665,8 +665,15 @@ pub fn assert_consistent(shape: &Shape, tri: &IntrinsicTriangulation, what: &str
     let sums = tri.corner_angle_sums();
     for (v, sum) in sums.iter().enumerate().take(shape.mesh.n_vertices()) {
         let input = tri.input().vertex_angle_sum(v);
-        assert!((sum - input).abs() < 1e-9, "{context}: vertex {v}: {sum} != {input}");
-        assert_eq!(tri.vertex_location(v), SurfacePoint::Vertex(v as u32), "{context}");
+        assert!(
+            (sum - input).abs() < 1e-9,
+            "{context}: vertex {v}: {sum} != {input}"
+        );
+        assert_eq!(
+            tri.vertex_location(v),
+            SurfacePoint::Vertex(v as u32),
+            "{context}"
+        );
     }
     for v in shape.mesh.n_vertices()..tri.n_vertices() {
         let flat = if tri.is_boundary_vertex(v) { PI } else { TAU };
@@ -741,7 +748,10 @@ pub fn assert_consistent(shape: &Shape, tri: &IntrinsicTriangulation, what: &str
         }
     }
     let total = shape.geometry.total_area();
-    assert!((area - total).abs() < 1e-9 * total, "{context}: overlay area {area}");
+    assert!(
+        (area - total).abs() < 1e-9 * total,
+        "{context}: overlay area {area}"
+    );
     traces.report.max_relative_mismatch
 }
 
@@ -763,10 +773,13 @@ pub fn assert_point_queries(shape: &Shape, tri: &IntrinsicTriangulation, rng: &m
             .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
         let again = tri.point_on_input(back).unwrap();
         let d = dist(position(shape, on_input), position(shape, again));
-        assert!(d < 1e-9 * scale, "{}: {point} -> {on_input} -> {back}: {d}", shape.name);
+        assert!(
+            d < 1e-9 * scale,
+            "{}: {point} -> {on_input} -> {back}: {d}",
+            shape.name
+        );
     }
 }
-
 
 /// Random barycentric coordinates, each at least 0.05.
 pub fn inner_bary(rng: &mut SplitMix64) -> [f64; 3] {
