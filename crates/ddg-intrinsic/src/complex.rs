@@ -128,6 +128,21 @@ impl ComplexFlip {
     }
 }
 
+/// What a flip of the complex overwrites ([`Complex::flip_undo`]), so that
+/// [`Complex::undo_flip`] restores the complex exactly, ids and all: the two faces, the twins of
+/// their six halfedges and of the two outer halfedges whose twins change, the edges of the four
+/// halfedges that change edge, the halfedges of three edges and of two vertices. A removal that
+/// fails after some flips undoes them with these in reverse order instead of restoring a copy of
+/// the whole complex (IC-SPEC §4.6; a copy costs `O(n)` per removal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComplexFlipUndo {
+    faces: [(u32, [u32; 3]); 2],
+    twin: [(u32, u32); 6],
+    halfedge_edge: [(u32, u32); 4],
+    edge_halfedge: [(u32, u32); 3],
+    vertex_halfedge: [(u32, u32); 2],
+}
+
 /// What [`Complex::split_face`] did. Before: face `f = (a, b, c)`. After: `f = (a, b, p)`,
 /// `f1 = (b, c, p)`, `f2 = (c, a, p)`, with the new vertex `p`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -754,6 +769,68 @@ impl Complex {
             new_vertices: [l, k],
             new_halfedges: [h0n as u32, h1n as u32],
             moved: [(h1n as u32, h0 as u32), (h0n as u32, h1 as u32)],
+        }
+    }
+
+    /// What [`flip_edge`](Self::flip_edge) of edge `e` would overwrite, for
+    /// [`undo_flip`](Self::undo_flip). Call it right before the flip, with `e` an edge that
+    /// [`flip_refusal`](Self::flip_refusal) accepts (interior).
+    pub fn flip_undo(&self, e: usize) -> ComplexFlipUndo {
+        let h0 = self.edge_halfedge[e] as usize;
+        let h1 = self.twin[h0] as usize;
+        let (f0, a) = (h0 / 3, h0 % 3);
+        let (f1, b) = (h1 / 3, h1 % 3);
+        let (h0n, h1n) = (3 * f0 + (a + 1) % 3, 3 * f1 + (b + 1) % 3);
+        // The outer halfedges whose twins the flip sets (as in `flip_unchecked`).
+        let moved = |h: u32| {
+            if h == h0n as u32 {
+                h1 as u32
+            } else if h == h1n as u32 {
+                h0 as u32
+            } else {
+                h
+            }
+        };
+        let outer = |t: u32| {
+            let t = moved(t);
+            if t == NONE { h0 as u32 } else { t }
+        };
+        let (twin_il, twin_jk) = (outer(self.twin[h1n]), outer(self.twin[h0n]));
+        let twin = [
+            h0 as u32, h1 as u32, h0n as u32, h1n as u32, twin_il, twin_jk,
+        ]
+        .map(|h| (h, self.twin[h as usize]));
+        let halfedge_edge = [h0, h1, h0n, h1n].map(|h| (h as u32, self.halfedge_edge[h]));
+        let edge_halfedge = [self.halfedge_edge[h1n], self.halfedge_edge[h0n], e as u32]
+            .map(|x| (x, self.edge_halfedge[x as usize]));
+        let vertex_halfedge =
+            [self.faces[f0][a], self.faces[f1][b]].map(|v| (v, self.vertex_halfedge[v as usize]));
+        ComplexFlipUndo {
+            faces: [f0, f1].map(|f| (f as u32, self.faces[f])),
+            twin,
+            halfedge_edge,
+            edge_halfedge,
+            vertex_halfedge,
+        }
+    }
+
+    /// Restores what a flip overwrote ([`flip_undo`](Self::flip_undo), taken right before it).
+    /// Flips undone in the reverse order of the flips restore the complex exactly.
+    pub fn undo_flip(&mut self, undo: &ComplexFlipUndo) {
+        for &(f, corners) in &undo.faces {
+            self.faces[f as usize] = corners;
+        }
+        for &(h, t) in &undo.twin {
+            self.twin[h as usize] = t;
+        }
+        for &(h, e) in &undo.halfedge_edge {
+            self.halfedge_edge[h as usize] = e;
+        }
+        for &(e, h) in &undo.edge_halfedge {
+            self.edge_halfedge[e as usize] = h;
+        }
+        for &(v, h) in &undo.vertex_halfedge {
+            self.vertex_halfedge[v as usize] = h;
         }
     }
 

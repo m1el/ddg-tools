@@ -22,8 +22,9 @@
 //! no edge can be flipped to lower the degree: [`IntegerError::RemovalStuck`], and a star of
 //! degree three that cannot be merged (an edge from the vertex to itself, a merged triangle
 //! without area): the refusal of `Complex::remove_vertex`; in both cases every flip done is
-//! undone and the state is **exactly** what it was (the connectivity is restored from a copy
-//! taken before the first flip, the other data from a journal of what the flips overwrote).
+//! undone and the state is **exactly** what it was (from a journal of what the flips overwrote:
+//! the connectivity by [`Complex::undo_flip`](ddg_intrinsic::Complex::undo_flip), the integers
+//! and lengths here; a copy of the whole complex, as before, cost `O(n)` per removal).
 //!
 //! **I27** (decided here): an interior vertex made by an edge split has degree four with two
 //! angles of `π`. The two edges to the opposite corners then have a quadrilateral with an angle
@@ -37,8 +38,8 @@
 //! have; how often refinement meets the case is measured in WP6.
 
 use ddg_core::geometry::triangle_area;
-use ddg_intrinsic::complex::VertexRemoval;
-use ddg_intrinsic::{Complex, IntrinsicError, RemovalRefusal};
+use ddg_intrinsic::complex::{ComplexFlipUndo, VertexRemoval};
+use ddg_intrinsic::{IntrinsicError, RemovalRefusal};
 
 use crate::coords::IntegerTriangulation;
 use crate::error::IntegerError;
@@ -58,6 +59,8 @@ pub struct Removal {
 
 /// What a flip overwrote, to undo it.
 struct Undo {
+    /// What the flip overwrote in the connectivity.
+    complex: ComplexFlipUndo,
     edge: usize,
     normal: i64,
     length: f64,
@@ -115,8 +118,6 @@ impl IntegerTriangulation {
             }));
         }
         let degree = self.complex.vertex_degree(v);
-        // A copy of the connectivity, only if flips will be needed.
-        let snapshot: Option<Complex> = (degree != 3).then(|| self.complex.clone());
         let mut journal: Vec<Undo> = Vec::new();
         let result = self.flip_down_and_remove(v, degree, &mut journal);
         match result {
@@ -127,10 +128,8 @@ impl IntegerTriangulation {
                 removal,
             }),
             Err(err) => {
-                if let Some(complex) = snapshot {
-                    self.complex = complex;
-                }
                 for undo in journal.iter().rev() {
+                    self.complex.undo_flip(&undo.complex);
                     self.normal[undo.edge] = undo.normal;
                     self.lengths[undo.edge] = undo.length;
                     for &(h, r) in &undo.roundabouts {
@@ -178,6 +177,7 @@ impl IntegerTriangulation {
             ]
             .map(|h| (h, self.roundabouts[h]));
             journal.push(Undo {
+                complex: self.complex.flip_undo(e),
                 edge: e,
                 normal: self.normal[e],
                 length: self.lengths[e],

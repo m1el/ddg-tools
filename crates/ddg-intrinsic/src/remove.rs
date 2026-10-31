@@ -11,7 +11,7 @@
 //! which no flip lowers the degree is refused with [`RemovalRefusal::Stuck`], everything
 //! restored.
 
-use crate::complex::{Complex, VertexRemoval};
+use crate::complex::{Complex, ComplexFlipUndo, VertexRemoval};
 use crate::error::{IntrinsicError, RemovalRefusal};
 use crate::flip::plan_flip;
 use crate::formulas::unfold_diamond;
@@ -86,7 +86,7 @@ impl IntrinsicTriangulation {
     /// vertex, a boundary vertex, a constrained edge at `v`, a star where no flip lowers the
     /// degree ([`RemovalRefusal::Stuck`]) and the refusals of
     /// [`remove_vertex`](Self::remove_vertex). The triangulation is unchanged in every case
-    /// (restored from a copy taken before the first flip).
+    /// (the flips are undone exactly from a journal of what they overwrote).
     pub fn remove_inserted_vertex(
         &mut self,
         v: usize,
@@ -119,7 +119,9 @@ impl IntrinsicTriangulation {
             }));
         }
         let degree = self.complex.vertex_degree(v);
-        let snapshot = (degree != 3).then(|| self.clone());
+        // What the flips overwrite, to undo them if the removal fails (a copy of the whole
+        // triangulation would cost O(n) per removal).
+        let mut journal: Vec<FlipUndo> = Vec::new();
         let mut flips = Vec::new();
         let result = (|| {
             let bound = 10 * degree;
@@ -134,7 +136,9 @@ impl IntrinsicTriangulation {
                 let Some(e) = choice else {
                     return Err(refused(RemovalRefusal::Stuck { degree: d }));
                 };
+                let undo = self.flip_undo(e);
                 self.flip_edge(e)?;
+                journal.push(undo);
                 flips.push(e as u32);
             }
             self.remove_vertex(v)
@@ -147,11 +151,55 @@ impl IntrinsicTriangulation {
                 removal,
             }),
             Err(err) => {
-                if let Some(snapshot) = snapshot {
-                    *self = snapshot;
+                for undo in journal.iter().rev() {
+                    self.undo_flip(undo);
                 }
                 Err(err)
             }
+        }
+    }
+}
+
+/// What a signpost flip overwrites: the connectivity, the signposts of the six halfedges of
+/// its two faces, the edge's length and its input edge.
+struct FlipUndo {
+    complex: ComplexFlipUndo,
+    edge: usize,
+    length: f64,
+    on_input: u32,
+    signposts: [(usize, f64); 6],
+}
+
+impl IntrinsicTriangulation {
+    /// What flipping edge `e` (interior) overwrites.
+    fn flip_undo(&self, e: usize) -> FlipUndo {
+        let h0 = self.complex.edge_halfedge[e] as usize;
+        let h1 = self.complex.twin[h0] as usize;
+        let [f0, f1] = [h0 / 3, h1 / 3];
+        let slots = [
+            3 * f0,
+            3 * f0 + 1,
+            3 * f0 + 2,
+            3 * f1,
+            3 * f1 + 1,
+            3 * f1 + 2,
+        ];
+        FlipUndo {
+            complex: self.complex.flip_undo(e),
+            edge: e,
+            length: self.edge_lengths[e],
+            on_input: self.edge_on_input[e],
+            signposts: slots.map(|h| (h, self.signposts[h])),
+        }
+    }
+
+    /// Restores what a flip overwrote.
+    fn undo_flip(&mut self, undo: &FlipUndo) {
+        self.complex.undo_flip(&undo.complex);
+        self.edge_lengths[undo.edge] = undo.length;
+        self.edge_on_input[undo.edge] = undo.on_input;
+        for &(h, x) in &undo.signposts {
+            self.signposts[h] = x;
         }
     }
 }

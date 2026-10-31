@@ -436,3 +436,90 @@ fn the_trait_runs_the_same_code_as_the_signpost_representation() {
         let _: &dyn Fn(&IntrinsicTriangulation) -> &Complex = &|t| Triangulation::complex(t);
     }
 }
+
+/// `Complex::flip_undo` / `undo_flip`: random flips undone in reverse order give back the
+/// complex exactly, ids and all (what a failed removal relies on instead of a copy).
+#[test]
+fn flips_undone_in_reverse_order_restore_the_complex_exactly() {
+    for (i, shape) in standard_shapes().iter().enumerate() {
+        let mut c = Complex::from_tri_mesh(&shape.mesh);
+        let mut rng = SplitMix64::new(700 + i as u64);
+        // Some splits first, so that faces with repeated vertices and loops can occur.
+        for _ in 0..20 {
+            let f = (rng.next_u64() % c.n_faces() as u64) as usize;
+            c.split_face(f).unwrap();
+        }
+        for round in 0..20 {
+            let original = c.clone();
+            let mut undos = Vec::new();
+            for _ in 0..(1 + rng.next_u64() % 12) {
+                let e = (rng.next_u64() % c.n_edges() as u64) as usize;
+                if c.flip_refusal(e).is_some() {
+                    continue;
+                }
+                let undo = c.flip_undo(e);
+                c.flip_edge(e).unwrap();
+                undos.push(undo);
+            }
+            let flipped = c.clone();
+            for undo in undos.iter().rev() {
+                c.undo_flip(undo);
+            }
+            assert_eq!(c, original, "{}: round {round}", shape.name);
+            // Keep the flips for the next round.
+            c = flipped;
+            c.check().unwrap();
+        }
+    }
+}
+
+/// A removal of an inserted vertex that fails leaves the signpost triangulation exactly as it
+/// was (its flips undone from the journal).
+#[test]
+fn a_failed_removal_leaves_the_signpost_triangulation_unchanged() {
+    let mut failures = 0;
+    let mut removals = 0;
+    let mut after_flips = 0;
+    for (i, shape) in standard_shapes().iter().enumerate() {
+        let mut tri = IntrinsicTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
+        let mut rng = SplitMix64::new(900 + i as u64);
+        for _ in 0..30 {
+            let e = (rng.next_u64() % tri.n_edges() as u64) as usize;
+            let t = 0.2 + 0.6 * (rng.next_u64() % 1000) as f64 / 1000.0;
+            let _ = tri.split_edge(e, t);
+            let f = (rng.next_u64() % tri.n_faces() as u64) as usize;
+            let _ = tri.insert_vertex(f, inner_bary(&mut rng));
+        }
+        let n_input = tri.n_input_vertices();
+        let mut v = tri.n_vertices();
+        while v > n_input {
+            v -= 1;
+            if v >= tri.n_vertices() {
+                continue;
+            }
+            let before = tri.clone();
+            let degree = tri.complex().vertex_degree(v);
+            match tri.remove_inserted_vertex(v) {
+                Ok(_) => removals += 1,
+                Err(err) => {
+                    failures += 1;
+                    // Stuck at a lower degree: some flips were made and undone.
+                    if let IntrinsicError::RemovalRefused {
+                        reason: RemovalRefusal::Stuck { degree: d },
+                        ..
+                    } = err
+                        && d < degree
+                    {
+                        after_flips += 1;
+                    }
+                    assert!(tri == before, "{}: failed removal of {v}", shape.name);
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{removals} removed, {failures} refused ({after_flips} after flips), state unchanged \
+         after each refusal"
+    );
+    assert!(removals > 0 && after_flips > 0);
+}
