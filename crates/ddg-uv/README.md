@@ -1246,6 +1246,20 @@ before it); the chain is within the noise of the earlier run (about 10 %).
   `Session::flow_mesh()` is the seam-cut mesh, `Session::engine_mesh()` the triangulation the
   flow runs on.
 
+### Representation of the intrinsic triangulation (Integer Coordinates, WP11)
+
+`Triangulation::Intrinsic` runs on **signposts** (`ddg_intrinsic::IntrinsicTriangulation`) and
+stays there. Everything after the flips and the refinement needs what only the signpost
+representation has: `IntrinsicState::build` ends in `export_simplicial` (the simplicial mesh the
+flow runs on, with `SimplicialExport::edge_point` and the fingerprint that ties the session state
+to it), optionally in `optimal_delaunay`, and the cut insertion uses `segments_on_input`; none of
+these is in the `Triangulation` trait of `ddg-intrinsic`, and the integer representation has no
+export (it stores no signposts, and its `T^1` is not a simplicial complex of the input). So this
+crate has no `representation` option and no dependency on `ddg-integer-coords`. When the integer
+representation becomes the default of the other consumers (contract §13 Q3, after the Thingi10k
+evaluation, WP10), this crate stays on signposts until an export from integer coordinates exists
+(a new work package; the pieces are the common subdivision and `extract_intrinsic_edge`).
+
 ## Benchmarks
 
 `cargo bench -p ddg-uv` (Criterion; `benches/pipeline.rs`). End to end is `unwrap` from the

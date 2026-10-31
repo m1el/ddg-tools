@@ -12,7 +12,8 @@ Crane, Boundary First Flattening (2017), Sec. 7.5; Baden, Crane, Kazhdan, Moebiu
 (2018). Developability: Stein, Grinspun, Crane, Developability of Triangle Meshes (2018),
 implemented clean-room from the text of the paper (Make Developable, Show Developability,
 Developable Seams + UV). Repulsive curves: Yu, Schumacher, Crane, Repulsive Curves (2021): a live
-flow and an N-steps flow of edge meshes and Curve objects.
+flow and an N-steps flow of edge meshes and Curve objects. Show Intrinsic Refinement: Gillespie, Sharp, Crane, Integer
+Coordinates for Intrinsic Geometry Processing (2021), Fig. 12; Sharp, Soliman, Crane (2019).
 """
 
 import bpy
@@ -24,6 +25,7 @@ from .developable_operator import (
     OBJECT_OT_ddg_show_developability,
     UV_OT_ddg_developable_seams,
 )
+from .intrinsic_operator import MESH_OT_ddg_show_intrinsic_refinement
 from .operator import UV_OT_ddg_conformal_unwrap
 from . import repulsive_operator
 from .sphere_operator import OBJECT_OT_ddg_map_to_sphere
@@ -74,6 +76,10 @@ def _draw_developable_uv_entry(self, _context):
     self.layout.operator(UV_OT_ddg_developable_seams.bl_idname)
 
 
+def _draw_intrinsic_entry(self, _context):
+    self.layout.operator(MESH_OT_ddg_show_intrinsic_refinement.bl_idname)
+
+
 # The UV menu of the 3D viewport in Edit mode, and the Object menu.
 _MENUS = (bpy.types.VIEW3D_MT_uv_map, bpy.types.VIEW3D_MT_object)
 
@@ -91,11 +97,17 @@ def register():
     bpy.types.VIEW3D_MT_object.append(_draw_developable_object_entries)
     bpy.types.VIEW3D_MT_edit_mesh.append(_draw_developable_edit_entries)
     bpy.types.VIEW3D_MT_uv_map.append(_draw_developable_uv_entry)
+    bpy.utils.register_class(MESH_OT_ddg_show_intrinsic_refinement)
+    bpy.types.VIEW3D_MT_object.append(_draw_intrinsic_entry)
+    bpy.types.VIEW3D_MT_edit_mesh.append(_draw_intrinsic_entry)
     repulsive_operator.register()
 
 
 def unregister():
     repulsive_operator.unregister()
+    bpy.types.VIEW3D_MT_edit_mesh.remove(_draw_intrinsic_entry)
+    bpy.types.VIEW3D_MT_object.remove(_draw_intrinsic_entry)
+    bpy.utils.unregister_class(MESH_OT_ddg_show_intrinsic_refinement)
     bpy.types.VIEW3D_MT_uv_map.remove(_draw_developable_uv_entry)
     bpy.types.VIEW3D_MT_edit_mesh.remove(_draw_developable_edit_entries)
     bpy.types.VIEW3D_MT_object.remove(_draw_developable_object_entries)

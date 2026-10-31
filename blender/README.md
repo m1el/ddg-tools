@@ -778,6 +778,49 @@ Options (both; Python names):
   (`-b` has no timers or windows). The windowed test covers the loop, keys and undo; the header
   and status-bar *text* is set but cannot be read back, so it is not checked.
 
+## Show Intrinsic Refinement
+
+**Show Intrinsic Refinement**, `bpy.ops.mesh.ddg_show_intrinsic_refinement`
+
+- 3D viewport: **Object** menu (Object mode) and **Mesh** menu (Edit mode). Works on the active
+  mesh object; the mesh is triangulated as Blender does it.
+- Refines an intrinsic Delaunay triangulation of the mesh to an angle bound and shows the
+  **common subdivision** of the input and the triangulation (Fig. 12 of Gillespie, Sharp, Crane,
+  *Integer Coordinates for Intrinsic Geometry Processing*, 2021) as a new mesh object
+  `<mesh>_intrinsic`: every face is one piece, lying in one face of the input and in one face of
+  the intrinsic triangulation. Face attributes `intrinsic_face` and `input_face` (int), a corner
+  color attribute `intrinsic_face_color` (one color per intrinsic face; set the viewport color
+  to *Attribute*) and a point attribute `intrinsic_vertex` (1: a vertex of the triangulation,
+  0: a crossing of an intrinsic edge with an input edge).
+- Optionally a curve object `<mesh>_intrinsic_edges` with the intrinsic edges drawn on the input
+  mesh (`intrinsic_draw.draw_intrinsic_edges`, a plain function that FlipOut's "Show
+  triangulation" reuses; the input is `IntrinsicTriangulation.edge_polylines()` or any
+  `points`/`offsets` pair).
+- The input mesh is never changed. Running the operator again replaces the two objects (found
+  by the custom properties `ddg_intrinsic_of` and `ddg_intrinsic_kind`, not by name).
+- The new objects carry the transform of the input. Custom properties of the mesh object: `ddg_n_*`
+  (input and intrinsic vertices, edges, faces, inserted vertices, flips, crossings),
+  `ddg_min_angle_deg`, `ddg_min_angle_valid_deg` (without the faces next to a narrow cone, which
+  refinement leaves), `ddg_n_below_bound`, `ddg_certificate` (`ok`, `FAILED: ...`, or `none
+  (signposts)`) with the counts of the certificate, and the options used.
+
+| property | Python name | default | meaning |
+|----------|-------------|---------|---------|
+| Angle Bound | `min_angle` | 25 | degrees, 0 to 35 (30 is the provable range on closed surfaces) |
+| Rules | `rules` | Chew (paper) | `CHEW`: the integer paper's rules; `RUPPERT`: the signpost paper's |
+| Representation | `representation` | Integer Coordinates | `INTEGER` or `SIGNPOSTS`; both give the same triangulation where their floating-point decisions agree |
+| Mollify | `mollify` | off | intrinsic mollification of the edge lengths first (relative margin 1e-4); integer coordinates only |
+| Draw Intrinsic Edges | `draw_edges` | on | make the curve object |
+| Edge Radius | `edge_radius` | 0 | bevel of the curve (0: thin lines) |
+
+Integer coordinates are the default here because the operator exists to show them. The other
+consumers of the integer representation (the Python `representation=` options) default to
+signposts until the Thingi10k evaluation passes. A refined sphere or a mesh that is already
+Delaunay shows few or no new vertices; jitter the vertices to see flips and insertions.
+
+Tests: `blender/tests/test_intrinsic.py` (11 tests, run by `scripts/blender-test.sh` against the
+installed extension; log `runs_tmp/blender-test-intrinsic.log`).
+
 ## Layout
 
 | path | contents |
@@ -788,6 +831,7 @@ Options (both; Python names):
 | `ddg_uv_unwrap/cut_operators.py`, `cut.py` | the three cut operators; attributes, preview, flow settings, bmesh insertion |
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
+| `ddg_uv_unwrap/intrinsic_operator.py`, `intrinsic_draw.py` | Show Intrinsic Refinement; the reusable drawing of intrinsic edges |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
 

@@ -25,8 +25,9 @@ every decision the paper leaves open (entries `N1` to `N25`).
 - The edge flip (Alg. 5) with every refusal: boundary edge, end point of degree one, not
   strictly convex, too thin (SPEC N5). The caller can choose the shape test per flip: N5's
   (the default, used by every operation here) or the reference's relative one, which FlipOut
-  uses (`FlipShapeTest`, SPEC N52). A flip returns the two corner angles it computes at the new
-  edge's ends (`Flip::new_corner_angles`).
+  uses (`FlipShapeTest`, SPEC N52). A flip returns the two corner angles at the new edge's ends
+  (`Flip::new_corner_angles`) when the caller asks (`FlipRequest::corner_angles`); only FlipOut
+  does.
 - Delaunay flipping (Sec. 4.1) with a report, a tolerance, a flip limit and the count of ties.
 - Tracing queries (Alg. 2, Sec. 3.2.2) over the input mesh and over the intrinsic
   triangulation, from a vertex, from a point of an edge and from a point of a face, with the
@@ -143,10 +144,11 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | item | what it is |
 |------|------------|
 | `IntrinsicTriangulation::new(&TriMesh, &Geometry)` | the input mesh as an intrinsic triangulation, with the same ids |
+| `generic_ops::{cotan_laplacian, lumped_mass, lumped_mass_normalized}(&impl Triangulation)` | the cotan Laplacian and lumped masses written once over the trait, for signposts and integer coordinates; bitwise the `IntrinsicTriangulation` methods (`tests/generic_ops.rs`). Used by `ddg-intrinsic-apps` (Integer Coordinates WP11) |
 | `n_vertices`, `n_edges`, `n_faces`, `faces`, `next`, `prev`, `twin`, `from_vertex`, `to_vertex`, `edge`, `edge_halfedge`, `edge_vertices`, `outgoing_halfedges`, `vertex_degree`, `is_boundary_edge`, `is_boundary_vertex` | connectivity; halfedge `h = 3 f + k` as in `ddg_core` |
 | `edge_length`, `signpost`, `vertex_angle_sum`, `vertex_location`, `edge_on_input`, `corner_angle`, `face_area`, `total_area` | geometry and the correspondence with the input |
-| `flip_edge(e) -> Result<Flip, IntrinsicError>`, `can_flip(e)` | one flip, or the reason it is refused (`FlipRefusal`); `Flip::new_corner_angles` at `new_corners` (SPEC N52) |
-| `flip_edge_with(e, FlipShapeTest)`, `can_flip_with(e, _)`, `plan_flip_with(&Complex, &lengths, e, _)` | the same with the shape test chosen by the caller: `FlipShapeTest::N5` (default, `Absolute { limit: 1e-6 }`) or `FlipShapeTest::REFERENCE` (`Relative { ratio: 1e-6 }`, the reference's); also on the trait and the integer coordinates (SPEC N52) |
+| `flip_edge(e) -> Result<Flip, IntrinsicError>`, `can_flip(e)` | one flip, or the reason it is refused (`FlipRefusal`); N5's test, no corner angles (`Flip::new_corner_angles` is `None`, SPEC N52) |
+| `flip_edge_with(e, FlipRequest { shape, corner_angles })`, `can_flip_with(e, FlipShapeTest)`, `plan_flip_with(&Complex, &lengths, e, _)` | the same as the caller requests: the shape test, `FlipShapeTest::N5` (default, `Absolute { limit: 1e-6 }`) or `FlipShapeTest::REFERENCE` (`Relative { ratio: 1e-6 }`, the reference's), and whether `Flip::new_corner_angles` is `Some([θ_l, θ_k])` at `new_corners` (`FlipRequest::DEFAULT`: N5, no angles); also on the trait and the integer coordinates, which return the same `Flip` for the same request (SPEC N52) |
 | `flip_to_delaunay(&DelaunayOptions) -> Result<DelaunayReport, _>`, `is_delaunay`, `edge_angle_excess`, `edge_cotan_weight` | Delaunay flipping; `DelaunayCriterion::{AngleSum, CotanWeight, REFERENCE}`, `FlipLimit` |
 | `InputSurface::trace`, `IntrinsicTriangulation::trace` `(start, direction, length, &TraceOptions) -> Result<Trace, _>` | a straight path over the input mesh / over the triangulation from a `SurfacePoint` |
 | `trace_edge(e, &EdgeTraceOptions)`, `trace_edges(&EdgeTraceOptions) -> Result<EdgeTraces, _>` | the checked path of an edge / of all edges over the input mesh |

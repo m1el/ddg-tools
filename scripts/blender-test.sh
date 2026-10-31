@@ -17,6 +17,8 @@
 #    Developable Seams + UV; log runs_tmp/blender-test-developable.log), in parallel with 3b.
 # 3d. blender/tests/test_repulsive.py runs the same way (Repulsive Curves: live flow, N steps, curves,
 #    pins, obstacles, bad input; log runs_tmp/blender-test-repulsive.log), in parallel with 3b.
+# 3e. blender/tests/test_intrinsic.py runs the same way (Show Intrinsic Refinement and the drawing of
+#    intrinsic edges; log runs_tmp/blender-test-intrinsic.log), in parallel with 3b.
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
@@ -104,6 +106,11 @@ rep_log="$root/runs_tmp/blender-test-repulsive.log"
     --python "$root/blender/tests/test_repulsive.py" -- --module "$module" \
     "${only[@]}" > "$rep_log" 2>&1 &
 rep_pid=$!
+int_log="$root/runs_tmp/blender-test-intrinsic.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_intrinsic.py" -- --module "$module" \
+    "${only[@]}" > "$int_log" 2>&1 &
+int_pid=$!
 cut_failed=0
 for i in "${!variants[@]}"; do
     tri="${variants[$i]}"
@@ -123,6 +130,14 @@ echo "developable tests: $(grep -E '^RESULT' "$dev_log")"
 grep -E '^(FAIL|  failed|SPOT)' "$dev_log" || true
 if [ "$dev_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$dev_log"; then
     echo "Blender developable tests FAILED (exit status $dev_status); see $dev_log" >&2
+    cut_failed=1
+fi
+int_status=0
+wait "$int_pid" || int_status=$?
+echo "intrinsic tests: $(grep -E '^RESULT' "$int_log")"
+grep -E '^(FAIL|  failed|INFO)' "$int_log" || true
+if [ "$int_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$int_log"; then
+    echo "Blender intrinsic tests FAILED (exit status $int_status); see $int_log" >&2
     cut_failed=1
 fi
 rep_status=0
