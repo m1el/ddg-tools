@@ -9,6 +9,11 @@
 //! Delaunay flipping ([`Triangulation::flip_to_delaunay`]) is provided here once, on top of the
 //! trait's flips, so that every representation flips the same edges in the same order given
 //! the same lengths (SPEC N6; the flip of [`IntrinsicTriangulation`] uses exactly this code).
+//! What a flip, a face split and an edge split do to the lengths, and when they are refused, is
+//! decided from the connectivity and the lengths alone by [`plan_flip`](crate::plan_flip),
+//! [`plan_face_split`](crate::plan_face_split) and [`plan_edge_split`](crate::plan_edge_split);
+//! [`IntrinsicTriangulation`] uses them, and another representation that uses them too refuses
+//! the same operations and computes bitwise the same lengths.
 
 use ddg_core::geometry::{corner_angle, corner_cotan, triangle_area};
 
@@ -138,6 +143,13 @@ pub trait Triangulation {
     fn face_area(&self, f: usize) -> f64 {
         let [a, b, c] = self.face_lengths(f);
         triangle_area(a, b, c).expect("every face keeps the triangle inequalities")
+    }
+
+    /// The sum of all face areas: the area of the input mesh up to rounding.
+    fn total_area(&self) -> f64 {
+        (0..self.complex().n_faces())
+            .map(|f| self.face_area(f))
+            .sum()
     }
 
     /// Whether edge `e` is constrained.

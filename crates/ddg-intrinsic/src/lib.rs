@@ -47,8 +47,17 @@
 //!   and Holst 2011), with angle and area statistics
 //!   ([`IntrinsicTriangulation::shape_statistics`]).
 //!
-//! Not implemented: vertex removal (and with it the paper's general route for a move beyond
-//! the star, SPEC N20).
+//! * The connectivity on its own, [`Complex`]: the halfedge Δ-complex with its topological
+//!   operations (flip, face split, edge split, removal of a vertex of degree three), each with
+//!   its index bookkeeping, and a mask of constrained edges that flips leave alone. The
+//!   [`Triangulation`] trait is the interface this representation shares with integer
+//!   coordinates (Gillespie, Sharp, Crane 2021); Delaunay flipping is written once over it.
+//!   [`AngleFrames`] traces over a triangulation that stores no signposts, computing them
+//!   from the corner angles (SPEC N50).
+//!
+//! Not implemented: the paper's general route for a move beyond the star (SPEC N20); only
+//! inserted vertices of degree three can be removed
+//! ([`IntrinsicTriangulation::remove_vertex`]); refinement with constrained edges.
 //!
 //! # Example
 //!
@@ -140,10 +149,10 @@ pub use error::{
     MoveRefusal, RemovalRefusal,
 };
 pub use export::{ExportOptions, SimplicialExport};
-pub use flip::Flip;
+pub use flip::{Flip, FlipPlan, plan_flip};
 pub use frames::AngleFrames;
 pub use input::InputSurface;
-pub use insert::Insertion;
+pub use insert::{EdgeSplitPlan, FaceSplitPlan, Insertion, plan_edge_split, plan_face_split};
 pub use interface::Triangulation;
 pub use odt::{
     BoundaryVertices, OdtCenters, OdtIteration, OptimalDelaunayOptions, OptimalDelaunayReport,

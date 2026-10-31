@@ -3,6 +3,7 @@
 use ddg_core::geometry::{corner_angle, corner_cotan, triangle_area};
 use ddg_core::topology::NONE;
 
+use crate::complex::{Complex, next, prev};
 use crate::error::{FlipRefusal, IntrinsicError};
 use crate::formulas::{FLIP_SHAPE_LIMIT, signpost_update, unfold_diamond};
 use crate::triangulation::IntrinsicTriangulation;
@@ -43,39 +44,68 @@ pub(crate) fn triangle_is_valid(a: f64, b: f64, c: f64) -> bool {
         .all(|&(o, s, t)| corner_angle(o, s, t).is_some() && corner_cotan(o, s, t).is_some())
 }
 
-/// The six halfedges of the two triangles on an interior edge and its five lengths.
-struct Quad {
-    /// `i → j`, the edge's halfedge, in face `f0`.
-    h0: usize,
-    /// `j → i`, in face `f1`.
-    h1: usize,
-    /// `[ℓ_ij, ℓ_jk, ℓ_ki, ℓ_il, ℓ_lj]`.
-    lengths: [f64; 5],
+/// What a flip of an edge would do to the lengths, decided before anything changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlipPlan {
+    /// `[ℓ_ij, ℓ_jk, ℓ_ki, ℓ_il, ℓ_lj]`: the edge `ij` and the sides of its two triangles
+    /// `ijk` (on the side of its halfedge) and `jil`.
+    pub lengths: [f64; 5],
+    /// The length of the flipped edge `lk` (`it-flip-length`).
+    pub new_length: f64,
+}
+
+/// Checks that edge `e` (in range) of a triangulation with this connectivity and these
+/// lengths can be flipped, and returns its new length: every refusal of
+/// [`IntrinsicTriangulation::flip_edge`] (the topological ones of
+/// [`Complex::flip_refusal`], then strict convexity and the shape limit of SPEC N5), decided
+/// from the lengths alone, for every representation (SPEC N50).
+///
+/// # Errors
+/// The [`FlipRefusal`].
+pub fn plan_flip(complex: &Complex, lengths: &[f64], e: usize) -> Result<FlipPlan, FlipRefusal> {
+    if let Some(reason) = complex.flip_refusal(e) {
+        return Err(reason);
+    }
+    let h0 = complex.edge_halfedge[e] as usize;
+    let h1 = complex.twin[h0] as usize;
+    let len = |h: usize| lengths[complex.halfedge_edge[h] as usize];
+    let quad = [
+        lengths[e],
+        len(next(h0)),
+        len(prev(h0)),
+        len(next(h1)),
+        len(prev(h1)),
+    ];
+    let [l_ij, l_jk, l_ki, l_il, l_lj] = quad;
+    // The lengths of valid faces always unfold; `None` cannot happen.
+    let diamond = unfold_diamond(l_ij, l_jk, l_ki, l_il, l_lj).ok_or(FlipRefusal::TooThin {
+        new_length: 0.0,
+        shape: 0.0,
+    })?;
+    let [area_at_tail, area_at_head] = diamond.flipped_areas();
+    if !(area_at_tail > 0.0 && area_at_head > 0.0) {
+        return Err(FlipRefusal::NotConvex {
+            area_at_tail,
+            area_at_head,
+        });
+    }
+    let new_length = diamond.flipped_length();
+    // The triangles i l k and j k l that the flip creates (SPEC N5).
+    let shape = (area_at_tail / (new_length * new_length.max(l_il).max(l_ki)))
+        .min(area_at_head / (new_length * new_length.max(l_jk).max(l_lj)));
+    if !(shape >= FLIP_SHAPE_LIMIT
+        && triangle_is_valid(l_il, new_length, l_ki)
+        && triangle_is_valid(l_jk, new_length, l_lj))
+    {
+        return Err(FlipRefusal::TooThin { new_length, shape });
+    }
+    Ok(FlipPlan {
+        lengths: quad,
+        new_length,
+    })
 }
 
 impl IntrinsicTriangulation {
-    /// The two triangles on edge `e`, or why there are no two (or why the edge is left
-    /// alone).
-    fn quad(&self, e: usize) -> Result<Quad, FlipRefusal> {
-        if let Some(reason) = self.complex.flip_refusal(e) {
-            return Err(reason);
-        }
-        let h0 = self.complex.edge_halfedge[e] as usize;
-        let h1 = self.complex.twin[h0] as usize;
-        let len = |h: usize| self.edge_lengths[self.complex.halfedge_edge[h] as usize];
-        Ok(Quad {
-            h0,
-            h1,
-            lengths: [
-                self.edge_lengths[e],
-                len(self.next(h0)),
-                len(self.prev(h0)),
-                len(self.next(h1)),
-                len(self.prev(h1)),
-            ],
-        })
-    }
-
     /// Flips edge `e`: its two triangles `ijk`, `jil` are replaced by `ilk`, `jkl` (paper
     /// Alg. 5). The new length is the other diagonal of the two triangles unfolded into the
     /// plane ([`Diamond::flipped_length`](crate::formulas::Diamond::flipped_length)), and the
@@ -113,40 +143,19 @@ impl IntrinsicTriangulation {
         Ok(self.plan_flip(e).map(|_| ()))
     }
 
-    /// Checks that edge `e` can be flipped and returns its halfedges and its new length.
-    fn plan_flip(&self, e: usize) -> Result<(Quad, f64), FlipRefusal> {
-        let quad = self.quad(e)?;
-        let [l_ij, l_jk, l_ki, l_il, l_lj] = quad.lengths;
-        // The lengths of valid faces always unfold; `None` cannot happen.
-        let diamond = unfold_diamond(l_ij, l_jk, l_ki, l_il, l_lj).ok_or(FlipRefusal::TooThin {
-            new_length: 0.0,
-            shape: 0.0,
-        })?;
-        let [area_at_tail, area_at_head] = diamond.flipped_areas();
-        if !(area_at_tail > 0.0 && area_at_head > 0.0) {
-            return Err(FlipRefusal::NotConvex {
-                area_at_tail,
-                area_at_head,
-            });
-        }
-        let new_length = diamond.flipped_length();
-        // The triangles i l k and j k l that the flip creates (SPEC N5).
-        let shape = (area_at_tail / (new_length * new_length.max(l_il).max(l_ki)))
-            .min(area_at_head / (new_length * new_length.max(l_jk).max(l_lj)));
-        if !(shape >= FLIP_SHAPE_LIMIT
-            && triangle_is_valid(l_il, new_length, l_ki)
-            && triangle_is_valid(l_jk, new_length, l_lj))
-        {
-            return Err(FlipRefusal::TooThin { new_length, shape });
-        }
-        Ok((quad, new_length))
+    /// [`plan_flip`] on this triangulation.
+    fn plan_flip(&self, e: usize) -> Result<FlipPlan, FlipRefusal> {
+        plan_flip(&self.complex, &self.edge_lengths, e)
     }
 
     /// [`flip_edge`](Self::flip_edge) for an edge id that is known to be in range.
     pub(crate) fn try_flip(&mut self, e: usize) -> Result<Flip, FlipRefusal> {
-        let (quad, new_length) = self.plan_flip(e)?;
-        let [l_ij, l_jk, l_ki, l_il, l_lj] = quad.lengths;
-        let (h0, h1) = (quad.h0, quad.h1);
+        let FlipPlan {
+            lengths: [l_ij, l_jk, l_ki, l_il, l_lj],
+            new_length,
+        } = self.plan_flip(e)?;
+        let h0 = self.complex.edge_halfedge[e] as usize;
+        let h1 = self.complex.twin[h0] as usize;
         // The topology (see `ComplexFlip`): f0 = (i, j, k), f1 = (j, i, l) become
         // f0 = (i, l, k), f1 = (j, k, l); i→l and j→k change faces, keeping their signposts.
         let flip = self.complex.flip_unchecked(e);

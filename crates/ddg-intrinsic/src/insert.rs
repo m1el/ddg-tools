@@ -22,10 +22,11 @@ use std::f64::consts::{PI, TAU};
 use ddg_core::geometry::corner_angle;
 use ddg_core::topology::NONE;
 
-use crate::complex::{VertexRemoval, next};
+use crate::complex::{Complex, VertexRemoval, next};
 use crate::error::{InsertRefusal, IntrinsicError, RemovalRefusal};
 use crate::flip::triangle_is_valid;
 use crate::formulas::{FLIP_SHAPE_LIMIT, corner_distances, signpost_update, triangle_layout};
+use crate::interface::face_lengths;
 use crate::point::{SurfacePoint, point_defect};
 use crate::surface::Surface;
 use crate::trace::{Trace, TraceOptions, TraceStop, run};
@@ -304,44 +305,11 @@ impl IntrinsicTriangulation {
             face: f as u32,
             bary,
         };
-        if let Some(reason) = point_defect(&at, self.n_vertices(), self.n_edges(), self.n_faces()) {
-            return Err(IntrinsicError::InvalidPoint { point: at, reason });
-        }
         let refused = |reason| IntrinsicError::InsertionRefused { at, reason };
-        let l = self.face_lengths(f);
-        let layout = triangle_layout(l).ok_or(IntrinsicError::DegenerateFace {
-            surface: Self::NAME,
-            face: f as u32,
-            lengths: l,
-        })?;
-        let d = corner_distances(l, bary).ok_or(IntrinsicError::DegenerateFace {
-            surface: Self::NAME,
-            face: f as u32,
-            lengths: l,
-        })?;
-        // The three triangles: on side k, with the new edges d[k] and d[k + 1]. Twice the area
-        // of the triangle on side k is bary[k + 2] times twice the area of the face.
-        let twice_area = layout[1][0] * layout[2][1];
-        let mut shape = f64::INFINITY;
-        let mut thinnest = 0;
-        for k in 0..3 {
-            let (a, b) = (d[k], d[(k + 1) % 3]);
-            let longest = l[k].max(a).max(b);
-            let s = bary[(k + 2) % 3] * twice_area / (a.max(b) * longest);
-            if !triangle_is_valid(l[k], b, a) {
-                shape = 0.0;
-                thinnest = k;
-            } else if s < shape {
-                shape = s;
-                thinnest = k;
-            }
-        }
-        if shape < FLIP_SHAPE_LIMIT || shape.is_nan() {
-            return Err(refused(InsertRefusal::TooThin {
-                shape,
-                nearest_edge: Some(self.complex.halfedge_edge[3 * f + thinnest]),
-            }));
-        }
+        let FaceSplitPlan {
+            distances: d,
+            layout,
+        } = plan_face_split(&self.complex, &self.edge_lengths, f, bary)?;
         // The place on the input mesh, traced from the nearest corner.
         let x = (0..3).min_by(|&a, &b| d[a].total_cmp(&d[b])).unwrap_or(0);
         let hx = 3 * f + x;
@@ -419,71 +387,15 @@ impl IntrinsicTriangulation {
     /// that is not strictly between 0 and 1, and [`IntrinsicError::InsertionRefused`] as for
     /// [`insert_vertex`](Self::insert_vertex). The triangulation is unchanged in every case.
     pub fn split_edge(&mut self, e: usize, t: f64) -> Result<Insertion, IntrinsicError> {
-        self.check_edge(e)?;
+        let EdgeSplitPlan {
+            halves: [la, lb],
+            to_opposite: [dc, dd],
+        } = plan_edge_split(&self.complex, &self.edge_lengths, e, t)?;
         let at = SurfacePoint::Edge { edge: e as u32, t };
-        if !(t > 0.0 && t < 1.0) {
-            return Err(IntrinsicError::InvalidPoint {
-                point: at,
-                reason: "the edge parameter is not strictly between 0 and 1",
-            });
-        }
         let refused = |reason| IntrinsicError::InsertionRefused { at, reason };
         let h0 = self.complex.edge_halfedge[e] as usize;
         let (f0, k0) = (h0 / 3, h0 % 3);
         let h1 = self.complex.twin[h0];
-        if h1 != NONE && h1 as usize / 3 == f0 {
-            return Err(refused(InsertRefusal::SameFaceOnBothSides));
-        }
-        let length = self.edge_lengths[e];
-        let (la, lb) = (t * length, (1.0 - t) * length);
-        let degenerate = |tri: &Self, f: usize| IntrinsicError::DegenerateFace {
-            surface: Self::NAME,
-            face: f as u32,
-            lengths: tri.face_lengths(f),
-        };
-        // The distance to the opposite vertex of a side: the edge is side `k` of face `f`,
-        // the point at parameter `s` from the tail of that side.
-        let across = |tri: &Self, f: usize, k: usize, s: f64| {
-            let l = tri.face_lengths(f);
-            let l = [l[k], l[(k + 1) % 3], l[(k + 2) % 3]];
-            corner_distances(l, [1.0 - s, s, 0.0])
-                .map(|d| (d[2], l))
-                .ok_or_else(|| degenerate(tri, f))
-        };
-        // Shape of the two triangles a side is cut into: (tail, p, apex) and (p, head, apex).
-        let shapes = |tail: f64, head: f64, to_apex: f64, l: [f64; 3]| {
-            let twice_area = {
-                let v = triangle_layout(l).unwrap_or([[0.0; 2]; 3]);
-                v[1][0] * v[2][1]
-            };
-            let (s, r) = (tail / l[0], head / l[0]);
-            let first = if triangle_is_valid(tail, to_apex, l[2]) {
-                s * twice_area / (tail.max(to_apex) * tail.max(to_apex).max(l[2]))
-            } else {
-                0.0
-            };
-            let second = if triangle_is_valid(head, l[1], to_apex) {
-                r * twice_area / (head.max(to_apex) * head.max(to_apex).max(l[1]))
-            } else {
-                0.0
-            };
-            first.min(second)
-        };
-        let (dc, l0) = across(self, f0, k0, t)?;
-        let mut shape = shapes(la, lb, dc, l0);
-        let mut dd = 0.0;
-        if h1 != NONE {
-            let h1 = h1 as usize;
-            let (d, l1) = across(self, h1 / 3, h1 % 3, 1.0 - t)?;
-            dd = d;
-            shape = shape.min(shapes(lb, la, d, l1));
-        }
-        if shape < FLIP_SHAPE_LIMIT || shape.is_nan() {
-            return Err(refused(InsertRefusal::TooThin {
-                shape,
-                nearest_edge: None,
-            }));
-        }
         let a = self.complex.faces[f0][k0] as usize;
         let b = self.complex.faces[f0][(k0 + 1) % 3] as usize;
         // The place of the new vertex on the input mesh, and the signpost of one halfedge
@@ -632,4 +544,187 @@ impl IntrinsicTriangulation {
         removal.apply_vertex_data(&mut self.locations);
         Ok(removal)
     }
+}
+
+/// The lengths a face split gives the new edges, and the face laid out in the plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceSplitPlan {
+    /// The distances of the new vertex from the three corners of the face, by slot: the
+    /// lengths of the new edges (SPEC N10, `it-point-distances`).
+    pub distances: [f64; 3],
+    /// The corners of the face in the plane (`formulas::triangle_layout`).
+    pub layout: [[f64; 2]; 3],
+}
+
+/// Checks that a vertex can be inserted at the point `bary` of face `f` of a triangulation
+/// with this connectivity and these lengths, and returns the lengths of its edges: what
+/// [`IntrinsicTriangulation::insert_vertex`] decides before it locates the vertex on the input
+/// mesh, for every representation (SPEC N50), so that all of them refuse the same insertions
+/// and give the new edges the same lengths.
+///
+/// # Errors
+/// [`IntrinsicError::InvalidPoint`], [`IntrinsicError::DegenerateFace`], and
+/// [`IntrinsicError::InsertionRefused`] with [`InsertRefusal::TooThin`].
+pub fn plan_face_split(
+    complex: &Complex,
+    lengths: &[f64],
+    f: usize,
+    bary: [f64; 3],
+) -> Result<FaceSplitPlan, IntrinsicError> {
+    let at = SurfacePoint::Face {
+        face: f as u32,
+        bary,
+    };
+    if let Some(reason) = point_defect(
+        &at,
+        complex.n_vertices(),
+        complex.n_edges(),
+        complex.n_faces(),
+    ) {
+        return Err(IntrinsicError::InvalidPoint { point: at, reason });
+    }
+    let refused = |reason| IntrinsicError::InsertionRefused { at, reason };
+    let l = face_lengths(complex, lengths, f);
+    let layout = triangle_layout(l).ok_or(IntrinsicError::DegenerateFace {
+        surface: IntrinsicTriangulation::NAME,
+        face: f as u32,
+        lengths: l,
+    })?;
+    let d = corner_distances(l, bary).ok_or(IntrinsicError::DegenerateFace {
+        surface: IntrinsicTriangulation::NAME,
+        face: f as u32,
+        lengths: l,
+    })?;
+    // The three triangles: on side k, with the new edges d[k] and d[k + 1]. Twice the area
+    // of the triangle on side k is bary[k + 2] times twice the area of the face.
+    let twice_area = layout[1][0] * layout[2][1];
+    let mut shape = f64::INFINITY;
+    let mut thinnest = 0;
+    for k in 0..3 {
+        let (a, b) = (d[k], d[(k + 1) % 3]);
+        let longest = l[k].max(a).max(b);
+        let s = bary[(k + 2) % 3] * twice_area / (a.max(b) * longest);
+        if !triangle_is_valid(l[k], b, a) {
+            shape = 0.0;
+            thinnest = k;
+        } else if s < shape {
+            shape = s;
+            thinnest = k;
+        }
+    }
+    if shape < FLIP_SHAPE_LIMIT || shape.is_nan() {
+        return Err(refused(InsertRefusal::TooThin {
+            shape,
+            nearest_edge: Some(complex.halfedge_edge[3 * f + thinnest]),
+        }));
+    }
+    Ok(FaceSplitPlan {
+        distances: d,
+        layout,
+    })
+}
+
+/// The lengths an edge split gives the new edges.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeSplitPlan {
+    /// The lengths of the two halves, from the tail of the edge's halfedge: `t ℓ` and
+    /// `(1 − t) ℓ`.
+    pub halves: [f64; 2],
+    /// The lengths of the new edges to the vertex opposite the edge in the face of its
+    /// halfedge and in the other face (`0` on the boundary): `it-point-distances` with the
+    /// point on a side (SPEC N10).
+    pub to_opposite: [f64; 2],
+}
+
+/// Checks that edge `e` can be split at the parameter `t` from the tail of its halfedge, in a
+/// triangulation with this connectivity and these lengths, and returns the lengths of the new
+/// edges: what [`IntrinsicTriangulation::split_edge`] decides before it locates the new vertex
+/// on the input mesh, for every representation (SPEC N50; FlipOut R4).
+///
+/// # Errors
+/// [`IntrinsicError::IndexOutOfRange`], [`IntrinsicError::InvalidPoint`] for a parameter
+/// that is not strictly between 0 and 1, [`IntrinsicError::DegenerateFace`], and
+/// [`IntrinsicError::InsertionRefused`] with [`InsertRefusal::SameFaceOnBothSides`] or
+/// [`InsertRefusal::TooThin`].
+pub fn plan_edge_split(
+    complex: &Complex,
+    lengths: &[f64],
+    e: usize,
+    t: f64,
+) -> Result<EdgeSplitPlan, IntrinsicError> {
+    if e >= complex.n_edges() {
+        return Err(IntrinsicError::IndexOutOfRange {
+            what: "edge",
+            index: e,
+            bound: complex.n_edges(),
+        });
+    }
+    let at = SurfacePoint::Edge { edge: e as u32, t };
+    if !(t > 0.0 && t < 1.0) {
+        return Err(IntrinsicError::InvalidPoint {
+            point: at,
+            reason: "the edge parameter is not strictly between 0 and 1",
+        });
+    }
+    let refused = |reason| IntrinsicError::InsertionRefused { at, reason };
+    let h0 = complex.edge_halfedge[e] as usize;
+    let (f0, k0) = (h0 / 3, h0 % 3);
+    let h1 = complex.twin[h0];
+    if h1 != NONE && h1 as usize / 3 == f0 {
+        return Err(refused(InsertRefusal::SameFaceOnBothSides));
+    }
+    let length = lengths[e];
+    let (la, lb) = (t * length, (1.0 - t) * length);
+    let degenerate = |f: usize| IntrinsicError::DegenerateFace {
+        surface: IntrinsicTriangulation::NAME,
+        face: f as u32,
+        lengths: face_lengths(complex, lengths, f),
+    };
+    // The distance to the opposite vertex of a side: the edge is side `k` of face `f`,
+    // the point at parameter `s` from the tail of that side.
+    let across = |f: usize, k: usize, s: f64| {
+        let l = face_lengths(complex, lengths, f);
+        let l = [l[k], l[(k + 1) % 3], l[(k + 2) % 3]];
+        corner_distances(l, [1.0 - s, s, 0.0])
+            .map(|d| (d[2], l))
+            .ok_or_else(|| degenerate(f))
+    };
+    // Shape of the two triangles a side is cut into: (tail, p, apex) and (p, head, apex).
+    let shapes = |tail: f64, head: f64, to_apex: f64, l: [f64; 3]| {
+        let twice_area = {
+            let v = triangle_layout(l).unwrap_or([[0.0; 2]; 3]);
+            v[1][0] * v[2][1]
+        };
+        let (s, r) = (tail / l[0], head / l[0]);
+        let first = if triangle_is_valid(tail, to_apex, l[2]) {
+            s * twice_area / (tail.max(to_apex) * tail.max(to_apex).max(l[2]))
+        } else {
+            0.0
+        };
+        let second = if triangle_is_valid(head, l[1], to_apex) {
+            r * twice_area / (head.max(to_apex) * head.max(to_apex).max(l[1]))
+        } else {
+            0.0
+        };
+        first.min(second)
+    };
+    let (dc, l0) = across(f0, k0, t)?;
+    let mut shape = shapes(la, lb, dc, l0);
+    let mut dd = 0.0;
+    if h1 != NONE {
+        let h1 = h1 as usize;
+        let (d, l1) = across(h1 / 3, h1 % 3, 1.0 - t)?;
+        dd = d;
+        shape = shape.min(shapes(lb, la, d, l1));
+    }
+    if shape < FLIP_SHAPE_LIMIT || shape.is_nan() {
+        return Err(refused(InsertRefusal::TooThin {
+            shape,
+            nearest_edge: None,
+        }));
+    }
+    Ok(EdgeSplitPlan {
+        halves: [la, lb],
+        to_opposite: [dc, dd],
+    })
 }
