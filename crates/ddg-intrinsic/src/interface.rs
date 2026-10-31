@@ -25,6 +25,9 @@ use crate::flip::Flip;
 use crate::input::InputSurface;
 use crate::insert::Insertion;
 use crate::point::SurfacePoint;
+use crate::refine::{RefineOptions, RefineReport, RefineRules};
+use crate::remove::InsertedVertexRemoval;
+use crate::trace::{Trace, TraceOptions};
 use crate::triangulation::IntrinsicTriangulation;
 
 /// An intrinsic triangulation of an input mesh, whatever its representation.
@@ -190,6 +193,71 @@ pub trait Triangulation {
     {
         crate::delaunay::flip_to_delaunay(self, options)
     }
+
+    /// Follows the straight path that leaves `start` in `direction` for `length` over the
+    /// triangulation (the exponential map; SPEC N7, [`SurfacePoint`] for the frames), as
+    /// [`IntrinsicTriangulation::trace`] does. Provided: [`AngleFrames`](crate::AngleFrames),
+    /// whose signposts are computed from the corner angles (IC-SPEC I9);
+    /// [`IntrinsicTriangulation`] uses its stored signposts instead. From a point of a face or
+    /// an edge the path, its crossings and its end depend on the lengths alone, so both give
+    /// the same result bit for bit (SPEC N51).
+    ///
+    /// # Errors
+    /// As [`IntrinsicTriangulation::trace`].
+    fn trace_geodesic(
+        &self,
+        start: SurfacePoint,
+        direction: f64,
+        length: f64,
+        options: &TraceOptions,
+    ) -> Result<Trace, IntrinsicError>
+    where
+        Self: Sized,
+    {
+        crate::frames::AngleFrames::of(self).trace(start, direction, length, options)
+    }
+
+    /// Removes the inserted interior vertex `v` of any degree: flips edges at it by
+    /// [`removal_flip_choice`](crate::remove::removal_flip_choice) until its degree is three,
+    /// then merges its three faces; ids are renumbered as [`Complex::remove_vertex`] says
+    /// (SPEC N51; Gillespie, Sharp, Crane 2021, Alg. 8). Refinement by
+    /// [`RefineRules::Chew`](crate::RefineRules::Chew) needs it. A star in which no flip lowers
+    /// the degree is [`RemovalRefusal::Stuck`](crate::RemovalRefusal::Stuck); every refusal
+    /// leaves the triangulation unchanged. Provided: [`IntrinsicError::Unsupported`].
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`], [`IntrinsicError::RemovalRefused`] (input vertex,
+    /// boundary vertex, constrained edge, stuck, the refusals of [`Complex::remove_vertex`]),
+    /// [`IntrinsicError::Unsupported`], and the representation's errors of its flips.
+    fn remove_inserted_vertex(
+        &mut self,
+        v: usize,
+    ) -> Result<InsertedVertexRemoval, IntrinsicError> {
+        Err(IntrinsicError::Unsupported {
+            representation: "this representation",
+            operation: "remove_inserted_vertex",
+            reason: format!("cannot remove vertex {v}: removal is not implemented"),
+        })
+    }
+
+    /// Delaunay refinement by the given rules (SPEC N1, N4, N14 for [`RefineRules::Ruppert`],
+    /// what [`IntrinsicTriangulation::refine`] does; IC-SPEC §5 for [`RefineRules::Chew`]),
+    /// written once over this trait ([`crate::refine::refine`]), so every representation
+    /// inserts the same points on the same input where its floating-point decisions agree.
+    ///
+    /// # Errors
+    /// As [`IntrinsicTriangulation::refine`]; for [`RefineRules::Chew`] also the errors of
+    /// [`remove_inserted_vertex`](Self::remove_inserted_vertex) other than refusals.
+    fn refine_with_rules(
+        &mut self,
+        options: &RefineOptions,
+        rules: RefineRules,
+    ) -> Result<RefineReport, IntrinsicError>
+    where
+        Self: Sized,
+    {
+        crate::refine::refine(self, options, rules, &|_: &Self, _| false)
+    }
 }
 
 /// The lengths of the three halfedges of face `f`, by slot.
@@ -264,5 +332,20 @@ impl Triangulation for IntrinsicTriangulation {
     }
     fn face_area(&self, f: usize) -> f64 {
         IntrinsicTriangulation::face_area(self, f)
+    }
+    fn trace_geodesic(
+        &self,
+        start: SurfacePoint,
+        direction: f64,
+        length: f64,
+        options: &TraceOptions,
+    ) -> Result<Trace, IntrinsicError> {
+        IntrinsicTriangulation::trace(self, start, direction, length, options)
+    }
+    fn remove_inserted_vertex(
+        &mut self,
+        v: usize,
+    ) -> Result<InsertedVertexRemoval, IntrinsicError> {
+        IntrinsicTriangulation::remove_inserted_vertex(self, v)
     }
 }

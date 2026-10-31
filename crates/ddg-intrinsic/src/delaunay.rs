@@ -176,6 +176,24 @@ impl EdgeQueue {
         }
     }
 
+    /// Follows a removal of a vertex: its removed edges leave the queue, the edges it
+    /// renumbered keep their places under their new ids.
+    pub(crate) fn apply_removal(&mut self, removal: &crate::complex::VertexRemoval) {
+        let n_edges = removal.counts[1] as usize;
+        let mut queued = vec![false; n_edges];
+        self.queue.retain_mut(|e| {
+            if removal.removed_edges.contains(e) {
+                return false;
+            }
+            if let Some(&(_, new)) = removal.edge_moves.iter().find(|m| m.0 == *e) {
+                *e = new;
+            }
+            queued[*e as usize] = true;
+            true
+        });
+        self.queued = queued;
+    }
+
     fn pop(&mut self) -> Option<u32> {
         let e = self.queue.pop_front()?;
         self.queued[e as usize] = false;
@@ -409,18 +427,6 @@ impl IntrinsicTriangulation {
     /// Whether every interior edge that is not constrained satisfies the criterion.
     pub fn is_delaunay(&self, criterion: &DelaunayCriterion) -> bool {
         (0..self.n_edges()).all(|e| !self.fails_delaunay(e, criterion))
-    }
-
-    /// Flips edges from the queue until it is empty or `budget` flips were made. The two
-    /// faces of every flipped edge are appended to `touched`, if given.
-    pub(crate) fn run_flip_queue(
-        &mut self,
-        queue: &mut EdgeQueue,
-        criterion: &DelaunayCriterion,
-        budget: usize,
-        touched: Option<&mut Vec<u32>>,
-    ) -> Result<QueueRun, IntrinsicError> {
-        run_flip_queue(self, queue, criterion, budget, touched)
     }
 
     /// Flips edges until the triangulation is an intrinsic Delaunay triangulation (paper

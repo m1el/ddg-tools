@@ -4,8 +4,12 @@
 //! The algorithm is the planar one carried to the surface. On a closed surface without sharp
 //! cone points it is the paper's: flip to Delaunay, take a triangle with an angle below the
 //! bound, insert its circumcentre, repeat. The circumcentre is found by tracing from the
-//! triangle over the triangulation. Two things the paper leaves open are decided here and
-//! written out in SPEC N1 and N4:
+//! triangle over the triangulation. The driver is written once over the shared interface
+//! ([`refine`], [`Triangulation`]), so that every representation of an intrinsic triangulation
+//! runs the same code (SPEC N51). It follows one of two sets of rules ([`RefineRules`]) for
+//! what the paper leaves open.
+//!
+//! # [`RefineRules::Ruppert`] (the default; SPEC N1, N4)
 //!
 //! **Boundary (N1).** Ruppert's rule. A boundary edge is *encroached* when the angle opposite
 //! it exceeds 90° (a vertex lies inside the circle on the edge as diameter). Encroached
@@ -15,7 +19,7 @@
 //! midpoint, except next to a boundary vertex with an interior angle below 60°, where it is
 //! split at a distance from that vertex that is a power of two times a fixed length (so that
 //! the two boundary edges at the vertex are cut at the same distances and stop encroaching on
-//! each other).
+//! each other). Vertices are never removed.
 //!
 //! **Small cone angles (N4).** A corner at a vertex whose angle sum is below the bound can
 //! never meet the bound; it is exempt. A circumcentre next to an interior vertex with an
@@ -23,6 +27,25 @@
 //! every edge of the triangle it was meant to improve; it is not inserted (this contains the
 //! paper's rule, which is the case of a vertex of degree one).
 //!
+//! # [`RefineRules::Chew`] (Gillespie, Sharp, Crane 2021, Sec. 4.2, Supp. Alg. 10; IC-SPEC §5)
+//!
+//! Chew's second algorithm with boundary, as the integer-coordinates paper and its reference
+//! implementation do it. No edge is split for being encroached. The circumcentre is traced
+//! from the barycentre; when the path leaves the surface through a boundary edge `lm`, `lm` is
+//! split at its midpoint, the triangulation is flipped to Delaunay, every inserted interior
+//! vertex at a Dijkstra distance (over the edges) below `ℓ_lm` from the new vertex is removed
+//! ([`Triangulation::remove_inserted_vertex`]; Xia 2013, Cor. 1: the geodesic ball of radius
+//! `ℓ_lm / 2` lies inside that Dijkstra ball), and it is flipped to Delaunay again. A removal
+//! that is refused (a star in which no flip lowers the degree) is counted, not fatal.
+//!
+//! **Narrow cones (IC-SPEC I12, I23; the reference's `delaunayRefine`).** A vertex is narrow
+//! when its angle sum is below 60°. A triangle with exactly one narrow corner, or whose
+//! vertices all lie in one input triangle that has a narrow vertex, is not refined and is left
+//! out of [`RefineReport::min_angle_valid`]; a corner of a vertex of degree one and a corner
+//! between two boundary edges do not count as small.
+//!
+//! Under both rules a circumcentre path that does not end inside the surface or on its
+//! boundary skips the triangle and is counted ([`RefineReport::n_trace_failures`]).
 //! Everything that is left below the bound is listed in the report with the reason.
 
 use std::collections::{BinaryHeap, HashMap};
@@ -30,11 +53,14 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, TAU};
 
 use ddg_core::topology::NONE;
 
-use crate::delaunay::{DelaunayCriterion, EdgeQueue};
+use crate::complex::{VertexRemoval, prev};
+use crate::delaunay::{DelaunayCriterion, EdgeQueue, fails_delaunay, run_flip_queue};
 use crate::error::{InsertRefusal, IntrinsicError};
 use crate::formulas::{circumcenter_barycentric, triangle_layout, unfold_apex};
 use crate::insert::Insertion;
+use crate::interface::Triangulation;
 use crate::point::SurfacePoint;
+use crate::remove::InsertedVertexRemoval;
 use crate::trace::{TraceOptions, TraceStop};
 use crate::triangulation::IntrinsicTriangulation;
 
@@ -86,6 +112,23 @@ impl Default for RefineOptions {
     }
 }
 
+/// The rules refinement follows where the planar algorithm says nothing (see the
+/// [module documentation](self)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RefineRules {
+    /// SPEC N1, N4: encroached boundary edges are split first (Ruppert), a circumcentre that
+    /// would encroach a boundary edge splits it instead, boundary edges next to small boundary
+    /// angles are split at power-of-two distances, the needle guard; vertices are never
+    /// removed. What [`IntrinsicTriangulation::refine`] does.
+    #[default]
+    Ruppert,
+    /// Gillespie, Sharp, Crane 2021, Supp. Alg. 10 (IC-SPEC §5, I23): a boundary edge is split
+    /// at its midpoint only when a circumcentre path leaves the surface through it, then the
+    /// inserted interior vertices in its Dijkstra ball are removed; the reference's
+    /// narrow-cone rule.
+    Chew,
+}
+
 /// How refinement ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefineStatus {
@@ -105,11 +148,13 @@ pub enum BelowReason {
         /// The angle sum of the vertex.
         angle_sum: f64,
     },
-    /// The circumcentre of the triangle would lie so close to an interior vertex with an
-    /// angle sum below 60° that the new vertex would get an edge to itself around that vertex
-    /// shorter than the shortest edge of the triangle.
+    /// [`RefineRules::Ruppert`]: the circumcentre of the triangle would lie so close to an
+    /// interior vertex with an angle sum below 60° that the new vertex would get an edge to
+    /// itself around that vertex shorter than the shortest edge of the triangle.
+    /// [`RefineRules::Chew`]: the triangle is left by the narrow-cone rule: `vertex` is its
+    /// one narrow corner, or a narrow vertex of the input triangle that contains it.
     NeedleVertex {
-        /// The vertex with the small angle sum.
+        /// The vertex with the small angle sum (for an input triangle: an input vertex).
         vertex: u32,
         /// Its angle sum.
         angle_sum: f64,
@@ -151,7 +196,8 @@ pub struct RefineReport {
     pub n_edge_splits: usize,
     /// Boundary edges split.
     pub n_boundary_splits: usize,
-    /// Number of flips, including those of the first flip to Delaunay.
+    /// Number of flips, including those of the first flip to Delaunay (not those that
+    /// removals make).
     pub n_flips: usize,
     /// Number of new vertices whose traced place was moved onto an input edge
     /// ([`LOCATION_SNAP`](crate::insert::LOCATION_SNAP)).
@@ -174,6 +220,25 @@ pub struct RefineReport {
     /// Boundary edges that are encroached at the end (zero unless a split was refused or the
     /// limit was reached).
     pub n_encroached: usize,
+    /// The rules that were followed.
+    pub rules: RefineRules,
+    /// Inserted vertices removed again ([`RefineRules::Chew`]; zero for
+    /// [`RefineRules::Ruppert`]).
+    pub n_removals: usize,
+    /// Flips made by those removals.
+    pub n_removal_flips: usize,
+    /// Removals refused, the vertex left in place (a star in which no flip lowers the degree,
+    /// IC-SPEC I8, I27).
+    pub n_removals_refused: usize,
+    /// Circumcentre paths that did not end in a face or at the boundary (they ran into a
+    /// vertex, or the trace failed); the triangle was skipped.
+    pub n_trace_failures: usize,
+    /// Faces of the result left by the narrow-cone rule of [`RefineRules::Chew`] (IC-SPEC
+    /// I23), whichever rules were followed.
+    pub n_narrow_cone_faces: usize,
+    /// The smallest corner angle over the faces not left by that rule (`+∞` if there is
+    /// none): the paper's "minimum corner angle of the output mesh" (Sec. 4.2).
+    pub min_angle_valid: f64,
 }
 
 /// What the triangles around a candidate point say about inserting it.
@@ -184,16 +249,17 @@ enum Verdict {
 }
 
 /// The extra criterion of [`IntrinsicTriangulation::refine`]: none.
-fn no_extra_criterion(_: &IntrinsicTriangulation, _: usize) -> bool {
+fn no_extra_criterion<T>(_: &T, _: usize) -> bool {
     false
 }
 
-struct Refiner<'a> {
-    tri: &'a mut IntrinsicTriangulation,
+struct Refiner<'a, T: Triangulation = IntrinsicTriangulation> {
+    tri: &'a mut T,
     options: RefineOptions,
+    rules: RefineRules,
     /// An extra criterion: a face for which it returns true is refined as well
     /// ([`IntrinsicTriangulation::refine_with`]).
-    extra: &'a dyn Fn(&IntrinsicTriangulation, usize) -> bool,
+    extra: &'a dyn Fn(&T, usize) -> bool,
     queue: EdgeQueue,
     /// Faces to look at: (area, face, stamp of the face when it was put here).
     heap: BinaryHeap<(u64, u32, u32)>,
@@ -217,34 +283,100 @@ struct Refiner<'a> {
     n_boundary_splits: usize,
     n_flips: usize,
     n_snapped: usize,
+    n_removals: usize,
+    n_removal_flips: usize,
+    n_removals_refused: usize,
+    n_trace_failures: usize,
 }
 
 /// How far an angle opposite a boundary edge may exceed 90° before the edge counts as
 /// encroached.
 const ENCROACHMENT_TOLERANCE: f64 = 1e-9;
 
-impl<'a> Refiner<'a> {
-    fn new(tri: &'a mut IntrinsicTriangulation, options: RefineOptions, budget: usize) -> Self {
+/// The angle sum below which a vertex is narrow (IC-SPEC I23; paper Sec. 4.2: 60°).
+const NARROW: f64 = FRAC_PI_3;
+
+/// The input face that contains every vertex of face `f`, as the reference's `getParentFace`
+/// decides it from the places of the vertices alone: the input face of a vertex inside an
+/// input face, if every other vertex is compatible with it (a corner of it, on one of its
+/// edges, or inside it); else one of the two input faces of a vertex on an input edge; `None`
+/// if all three vertices are input vertices or nothing fits.
+fn parent_face<T: Triangulation>(tri: &T, f: usize) -> Option<usize> {
+    let input = tri.input().mesh();
+    let corners = tri.complex().faces()[f];
+    let compatible = |p: SurfacePoint, g: usize| match p {
+        SurfacePoint::Vertex(v) => input.faces()[g].contains(&v),
+        SurfacePoint::Edge { edge, .. } => (0..3).any(|k| input.edge(3 * g + k) == edge as usize),
+        SurfacePoint::Face { face, .. } => face as usize == g,
+    };
+    let fits = |g: usize| {
+        corners
+            .iter()
+            .all(|&w| compatible(tri.vertex_location(w as usize), g))
+    };
+    for &v in &corners {
+        if let SurfacePoint::Face { face, .. } = tri.vertex_location(v as usize) {
+            return fits(face as usize).then_some(face as usize);
+        }
+    }
+    for &v in &corners {
+        if let SurfacePoint::Edge { edge, .. } = tri.vertex_location(v as usize) {
+            let h = input.edge_halfedge(edge as usize);
+            let sides = [Some(h), input.twin(h)];
+            return sides
+                .into_iter()
+                .flatten()
+                .map(|h| h / 3)
+                .find(|&g| fits(g));
+        }
+    }
+    None
+}
+
+/// IC-SPEC I23: whether face `f` is left by the narrow-cone rule, and the narrow vertex that
+/// leaves it (a vertex of the triangulation, or of the input triangle containing it).
+fn narrow_cone<T: Triangulation>(tri: &T, f: usize) -> Option<(u32, f64)> {
+    let corners = tri.complex().faces()[f];
+    let mut narrow = corners
+        .iter()
+        .map(|&v| (v, tri.vertex_angle_sum(v as usize)))
+        .filter(|&(_, theta)| theta < NARROW);
+    if let (Some(only), None) = (narrow.next(), narrow.next()) {
+        return Some(only);
+    }
+    let input = tri.input();
+    let g = parent_face(tri, f)?;
+    input.mesh().faces()[g]
+        .iter()
+        .map(|&w| (w, input.vertex_angle_sum(w as usize)))
+        .find(|&(_, theta)| theta < NARROW)
+}
+
+impl<'a, T: Triangulation> Refiner<'a, T> {
+    fn new(tri: &'a mut T, options: RefineOptions, budget: usize) -> Self {
         // Boundary vertices with a small angle between their two boundary edges: the unit of
         // their split distances is the shorter of the two.
         let mut shells = HashMap::new();
-        for v in 0..tri.n_vertices() {
-            if !tri.is_boundary_vertex(v) || tri.angle_sums[v] >= FRAC_PI_3 {
+        let c = tri.complex();
+        for v in 0..c.n_vertices() {
+            if !c.is_boundary_vertex(v) || tri.vertex_angle_sum(v) >= FRAC_PI_3 {
                 continue;
             }
-            let first_out = tri.complex.vertex_halfedge[v] as usize;
-            let last_out = tri.outgoing_halfedges(v).last().unwrap_or(first_out);
-            let arriving = tri.prev(last_out);
-            let unit = tri.edge_lengths[tri.complex.halfedge_edge[first_out] as usize]
-                .min(tri.edge_lengths[tri.complex.halfedge_edge[arriving] as usize]);
+            let first_out = c.vertex_halfedge[v] as usize;
+            let last_out = c.outgoing_halfedges(v).last().unwrap_or(first_out);
+            let arriving = prev(last_out);
+            let lengths = tri.edge_lengths();
+            let unit = lengths[c.halfedge_edge[first_out] as usize]
+                .min(lengths[c.halfedge_edge[arriving] as usize]);
             shells.insert(v as u32, unit);
         }
-        let n_faces = tri.n_faces();
-        let n_edges = tri.n_edges();
+        let n_faces = c.n_faces();
+        let n_edges = c.n_edges();
         Refiner {
             tri,
             options,
-            extra: &no_extra_criterion,
+            rules: RefineRules::Ruppert,
+            extra: &no_extra_criterion::<T>,
             queue: EdgeQueue::empty(n_edges),
             heap: BinaryHeap::new(),
             stamps: vec![0; n_faces],
@@ -261,6 +393,10 @@ impl<'a> Refiner<'a> {
             n_boundary_splits: 0,
             n_flips: 0,
             n_snapped: 0,
+            n_removals: 0,
+            n_removal_flips: 0,
+            n_removals_refused: 0,
+            n_trace_failures: 0,
         }
     }
 
@@ -270,7 +406,7 @@ impl<'a> Refiner<'a> {
 
     /// Whether a corner at vertex `v` can never meet the bound.
     fn exempt(&self, v: usize) -> bool {
-        self.tri.angle_sums[v] < self.options.min_angle
+        self.tri.vertex_angle_sum(v) < self.options.min_angle
     }
 
     /// The smallest angle of face `f` among the corners that are not exempt, with its
@@ -278,7 +414,7 @@ impl<'a> Refiner<'a> {
     fn small_corner(&self, f: usize) -> Option<(f64, u32)> {
         let mut worst: Option<(f64, u32)> = None;
         for k in 0..3 {
-            let v = self.tri.complex.faces[f][k];
+            let v = self.tri.complex().faces[f][k];
             if self.exempt(v as usize) {
                 continue;
             }
@@ -288,6 +424,23 @@ impl<'a> Refiner<'a> {
             }
         }
         worst
+    }
+
+    /// [`RefineRules::Chew`]: whether face `f` has a corner below the bound that counts (not
+    /// at a vertex of degree one, not between two boundary edges; the reference's rule).
+    fn chew_small_corner(&self, f: usize) -> bool {
+        let c = self.tri.complex();
+        (0..3).any(|k| {
+            let h = 3 * f + k;
+            if self.tri.corner_angle(h) >= self.options.min_angle {
+                return false;
+            }
+            let degree_one = c.twin[h] != NONE && prev(h) == c.twin[h] as usize;
+            let fixed = |e: usize| c.is_boundary_edge(e) || c.is_constrained(e);
+            let fixed_corner =
+                fixed(c.halfedge_edge[h] as usize) && fixed(c.halfedge_edge[prev(h)] as usize);
+            !degree_one && !fixed_corner
+        })
     }
 
     fn circumradius(&self, f: usize) -> f64 {
@@ -302,13 +455,21 @@ impl<'a> Refiner<'a> {
     }
 
     fn needs_refinement(&self, f: usize) -> bool {
-        self.small_corner(f).is_some() || self.too_large(f) || (self.extra)(self.tri, f)
+        match self.rules {
+            RefineRules::Ruppert => {
+                self.small_corner(f).is_some() || self.too_large(f) || (self.extra)(self.tri, f)
+            }
+            RefineRules::Chew => {
+                narrow_cone(&*self.tri, f).is_none()
+                    && (self.chew_small_corner(f) || self.too_large(f) || (self.extra)(self.tri, f))
+            }
+        }
     }
 
     fn is_encroached(&self, e: usize) -> bool {
-        let h = self.tri.complex.edge_halfedge[e] as usize;
-        self.tri.complex.twin[h] == NONE
-            && self.tri.corner_angle(self.tri.prev(h)) > FRAC_PI_2 + ENCROACHMENT_TOLERANCE
+        let c = self.tri.complex();
+        let h = c.edge_halfedge[e] as usize;
+        c.twin[h] == NONE && self.tri.corner_angle(prev(h)) > FRAC_PI_2 + ENCROACHMENT_TOLERANCE
     }
 
     /// Notes that face `f` changed: it is looked at again.
@@ -321,10 +482,14 @@ impl<'a> Refiner<'a> {
             self.heap
                 .push((self.tri.face_area(f).to_bits(), f as u32, self.stamps[f]));
         }
+        if self.rules == RefineRules::Chew {
+            return;
+        }
         for k in 0..3 {
             let h = 3 * f + k;
-            if self.tri.complex.twin[h] == NONE {
-                let e = self.tri.complex.halfedge_edge[h];
+            let c = self.tri.complex();
+            if c.twin[h] == NONE {
+                let e = c.halfedge_edge[h];
                 if self.is_encroached(e as usize) {
                     self.encroached.push(e);
                 }
@@ -335,7 +500,8 @@ impl<'a> Refiner<'a> {
     /// Flips back to Delaunay from the queue and looks at every face that changed.
     fn restore_delaunay(&mut self) -> Result<(), IntrinsicError> {
         self.touched.clear();
-        let run = self.tri.run_flip_queue(
+        let run = run_flip_queue(
+            &mut *self.tri,
             &mut self.queue,
             &self.options.criterion,
             usize::MAX,
@@ -356,10 +522,11 @@ impl<'a> Refiner<'a> {
     fn after_insertion(&mut self, insertion: &Insertion) -> Result<(), IntrinsicError> {
         self.n_snapped += usize::from(insertion.snapped.is_some());
         let v = insertion.vertex as usize;
-        let faces: Vec<usize> = self.tri.outgoing_halfedges(v).map(|h| h / 3).collect();
+        let c = self.tri.complex();
+        let faces: Vec<usize> = c.outgoing_halfedges(v).map(|h| h / 3).collect();
         for &f in &faces {
             for k in 0..3 {
-                self.queue.push(self.tri.complex.halfedge_edge[3 * f + k]);
+                self.queue.push(c.halfedge_edge[3 * f + k]);
             }
         }
         for &f in &faces {
@@ -371,8 +538,8 @@ impl<'a> Refiner<'a> {
     /// The parameter at which boundary edge `e` is split: its midpoint, or next to a boundary
     /// vertex with a small angle the nearest power-of-two distance.
     fn boundary_split_parameter(&self, e: usize) -> f64 {
-        let [a, b] = self.tri.edge_vertices(e);
-        let length = self.tri.edge_lengths[e];
+        let [a, b] = self.tri.complex().edge_vertices(e);
+        let length = self.tri.edge_lengths()[e];
         let shell = |unit: f64| {
             let exponent = (0.5 * length / unit).log2().round();
             (unit * exponent.exp2() / length).clamp(0.25, 0.75)
@@ -384,17 +551,133 @@ impl<'a> Refiner<'a> {
         }
     }
 
-    /// Splits boundary edge `e`. Returns whether it was split.
+    /// Splits boundary edge `e`. Returns whether it was split. [`RefineRules::Chew`]: at the
+    /// midpoint, then the inserted interior vertices in its Dijkstra ball are removed.
     fn split_boundary(&mut self, e: usize) -> Result<bool, IntrinsicError> {
-        let t = self.boundary_split_parameter(e);
+        let (t, length) = match self.rules {
+            RefineRules::Ruppert => (self.boundary_split_parameter(e), 0.0),
+            RefineRules::Chew => (0.5, self.tri.edge_lengths()[e]),
+        };
         match self.tri.split_edge(e, t) {
             Ok(insertion) => {
                 self.n_boundary_splits += 1;
                 self.after_insertion(&insertion)?;
+                if self.rules == RefineRules::Chew {
+                    self.remove_ball(insertion.vertex as usize, length)?;
+                }
                 Ok(true)
             }
             Err(IntrinsicError::InsertionRefused { .. }) => Ok(false),
             Err(other) => Err(other),
+        }
+    }
+
+    /// The inserted interior vertices other than `m` whose distance from `m` over the edges is
+    /// below `radius` (Supp. Alg. 10 line 20), in decreasing order of their ids.
+    ///
+    /// [formula: ic-dijkstra-ball]
+    fn dijkstra_ball(&self, m: usize, radius: f64) -> Vec<u32> {
+        let c = self.tri.complex();
+        let lengths = self.tri.edge_lengths();
+        let n_input = self.tri.n_input_vertices();
+        let mut best: HashMap<usize, f64> = HashMap::new();
+        // Distances are not negative, so the order of their bit patterns is theirs.
+        let mut heap = BinaryHeap::new();
+        heap.push(std::cmp::Reverse((0f64.to_bits(), m)));
+        let mut ball = Vec::new();
+        while let Some(std::cmp::Reverse((bits, v))) = heap.pop() {
+            if best.contains_key(&v) {
+                continue;
+            }
+            let d = f64::from_bits(bits);
+            best.insert(v, d);
+            if v != m && v >= n_input && !c.is_boundary_vertex(v) {
+                ball.push(v as u32);
+            }
+            // Every edge at `v`: those of the outgoing halfedges and of the halfedges arriving
+            // in the same corners (which include the arriving boundary edge).
+            for h in c.outgoing_halfedges(v) {
+                let p = prev(h);
+                for (e, w) in [
+                    (c.halfedge_edge[h] as usize, c.to_vertex(h)),
+                    (c.halfedge_edge[p] as usize, c.from_vertex(p)),
+                ] {
+                    let dw = d + lengths[e];
+                    if dw < radius && !best.contains_key(&w) {
+                        heap.push(std::cmp::Reverse((dw.to_bits(), w)));
+                    }
+                }
+            }
+        }
+        ball.sort_unstable_by(|a, b| b.cmp(a));
+        ball
+    }
+
+    /// [`RefineRules::Chew`] after the split of a boundary edge of length `radius` at its
+    /// midpoint `m` (the triangulation is Delaunay): removes the inserted interior vertices of
+    /// the Dijkstra ball, then flips to Delaunay (Supp. Alg. 10 lines 17–23).
+    fn remove_ball(&mut self, m: usize, radius: f64) -> Result<(), IntrinsicError> {
+        let mut ball = self.dijkstra_ball(m, radius);
+        let mut i = 0;
+        while i < ball.len() {
+            let v = ball[i] as usize;
+            i += 1;
+            match self.tri.remove_inserted_vertex(v) {
+                Ok(removal) => {
+                    self.n_removals += 1;
+                    self.n_removal_flips += removal.flips.len();
+                    if let Some((old, new)) = removal.removal.vertex_move {
+                        for w in &mut ball[i..] {
+                            if *w == old {
+                                *w = new;
+                            }
+                        }
+                    }
+                    self.after_removal(&removal);
+                }
+                Err(IntrinsicError::RemovalRefused { .. }) => self.n_removals_refused += 1,
+                Err(other) => return Err(other),
+            }
+        }
+        self.restore_delaunay()
+    }
+
+    /// After a removal: the edges of the faces it changed go on the queue, those faces are
+    /// looked at again, and ids it renumbered are followed.
+    fn after_removal(&mut self, removal: &InsertedVertexRemoval) {
+        let r: &VertexRemoval = &removal.removal;
+        self.queue.apply_removal(r);
+        let edge_now = |e: u32| -> Option<u32> {
+            if r.removed_edges.contains(&e) {
+                return None;
+            }
+            Some(r.edge_moves.iter().find(|m| m.0 == e).map_or(e, |m| m.1))
+        };
+        let c = self.tri.complex();
+        let mut faces: Vec<usize> = vec![r.face as usize];
+        for &e in &removal.flips {
+            if let Some(e) = edge_now(e) {
+                let h = c.edge_halfedge[e as usize] as usize;
+                faces.push(h / 3);
+                if c.twin[h] != NONE {
+                    faces.push(c.twin[h] as usize / 3);
+                }
+            }
+        }
+        faces.sort_unstable();
+        faces.dedup();
+        for &f in &faces {
+            for k in 0..3 {
+                self.queue.push(c.halfedge_edge[3 * f + k]);
+            }
+        }
+        // Faces that only changed their ids are looked at again under the new ones.
+        let mut looked: Vec<usize> = r.face_moves.iter().map(|m| m.1 as usize).collect();
+        looked.extend(faces);
+        looked.sort_unstable();
+        looked.dedup();
+        for f in looked {
+            self.touch(f);
         }
     }
 
@@ -403,13 +686,14 @@ impl<'a> Refiner<'a> {
     fn examine(&mut self, g: usize, bary: [f64; 3], shortest: f64) -> Verdict {
         self.search += 1;
         let search = self.search;
-        self.mark.resize(self.tri.n_faces(), 0);
-        let mark = &mut self.mark;
         let tri = &*self.tri;
+        let c = tri.complex();
+        self.mark.resize(c.n_faces(), 0);
+        let mark = &mut self.mark;
         let Some(v) = triangle_layout(tri.face_lengths(g)) else {
             return Verdict::Clear;
         };
-        let c = [
+        let p = [
             bary[1] * v[1][0] + bary[2] * v[2][0],
             bary[1] * v[1][1] + bary[2] * v[2][1],
         ];
@@ -421,21 +705,21 @@ impl<'a> Refiner<'a> {
                 let h = 3 * f + k;
                 let (a, b) = (q[k], q[(k + 1) % 3]);
                 // An interior vertex with a small angle sum: the loop around it.
-                let vertex = tri.complex.faces[f][k] as usize;
-                let theta = tri.angle_sums[vertex];
-                if theta < FRAC_PI_3 && !tri.is_boundary_vertex(vertex) {
-                    let d = (a[0] - c[0]).hypot(a[1] - c[1]);
+                let vertex = c.faces[f][k] as usize;
+                let theta = tri.vertex_angle_sum(vertex);
+                if theta < FRAC_PI_3 && !c.is_boundary_vertex(vertex) {
+                    let d = (a[0] - p[0]).hypot(a[1] - p[1]);
                     if 2.0 * d * (0.5 * theta).sin() < shortest * (1.0 - 1e-9) {
                         return Verdict::Needle(vertex as u32);
                     }
                 }
-                let t = tri.complex.twin[h];
+                let t = c.twin[h];
                 if t == NONE {
                     // Inside the circle on the boundary edge as diameter: the angle at the
                     // point is obtuse.
-                    let dot = (a[0] - c[0]) * (b[0] - c[0]) + (a[1] - c[1]) * (b[1] - c[1]);
+                    let dot = (a[0] - p[0]) * (b[0] - p[0]) + (a[1] - p[1]) * (b[1] - p[1]);
                     if dot < 0.0 && encroached.is_none() {
-                        encroached = Some(tri.complex.halfedge_edge[h]);
+                        encroached = Some(c.halfedge_edge[h]);
                     }
                     continue;
                 }
@@ -449,8 +733,8 @@ impl<'a> Refiner<'a> {
                     continue;
                 };
                 // Whether the point is inside the circumcircle of (b, a, apex).
-                let rel = [b, a, apex].map(|p| {
-                    let d = [p[0] - c[0], p[1] - c[1]];
+                let rel = [b, a, apex].map(|x| {
+                    let d = [x[0] - p[0], x[1] - p[1]];
                     [d[0], d[1], d[0] * d[0] + d[1] * d[1]]
                 });
                 let det = rel[0][0] * (rel[1][1] * rel[2][2] - rel[1][2] * rel[2][1])
@@ -474,6 +758,12 @@ impl<'a> Refiner<'a> {
 
     fn block(&mut self, f: usize, reason: BelowReason) {
         self.blocked.insert(f as u32, (self.stamps[f], reason));
+    }
+
+    /// A circumcentre path that ended elsewhere than in a face or at the boundary.
+    fn trace_failed(&mut self, f: usize, detail: String) {
+        self.n_trace_failures += 1;
+        self.block(f, BelowReason::NotInsertable { detail });
     }
 
     /// One step for face `f`, which needs refinement.
@@ -506,9 +796,20 @@ impl<'a> Refiner<'a> {
                 face: f as u32,
                 bary: [third; 3],
             };
-            let trace =
-                self.tri
-                    .trace(start, direction, d[0].hypot(d[1]), &TraceOptions::default())?;
+            let traced = self.tri.trace_geodesic(
+                start,
+                direction,
+                d[0].hypot(d[1]),
+                &TraceOptions::default(),
+            );
+            let trace = match (traced, self.rules) {
+                (Ok(trace), _) => trace,
+                (Err(err), RefineRules::Chew) => {
+                    self.trace_failed(f, format!("the path to the circumcentre failed: {err}"));
+                    return Ok(());
+                }
+                (Err(err), RefineRules::Ruppert) => return Err(err),
+            };
             match (trace.stop, trace.end) {
                 (TraceStop::Completed, SurfacePoint::Face { face, bary }) => (face as usize, bary),
                 (TraceStop::Boundary, SurfacePoint::Edge { edge, .. }) => {
@@ -527,37 +828,35 @@ impl<'a> Refiner<'a> {
                     return Ok(());
                 }
                 (stop, end) => {
-                    self.block(
+                    self.trace_failed(
                         f,
-                        BelowReason::NotInsertable {
-                            detail: format!(
-                                "the path to the circumcentre ended at {end} ({stop:?})"
-                            ),
-                        },
+                        format!("the path to the circumcentre ended at {end} ({stop:?})"),
                     );
                     return Ok(());
                 }
             }
         };
-        match self.examine(g, bary, shortest) {
-            Verdict::Clear => {}
-            Verdict::Encroaches(edge) => {
-                if self.split_boundary(edge as usize)? {
-                    self.retry(f);
-                } else {
-                    self.block(
-                        f,
-                        BelowReason::NotInsertable {
-                            detail: format!("boundary edge {edge} could not be split"),
-                        },
-                    );
+        if self.rules == RefineRules::Ruppert {
+            match self.examine(g, bary, shortest) {
+                Verdict::Clear => {}
+                Verdict::Encroaches(edge) => {
+                    if self.split_boundary(edge as usize)? {
+                        self.retry(f);
+                    } else {
+                        self.block(
+                            f,
+                            BelowReason::NotInsertable {
+                                detail: format!("boundary edge {edge} could not be split"),
+                            },
+                        );
+                    }
+                    return Ok(());
                 }
-                return Ok(());
-            }
-            Verdict::Needle(vertex) => {
-                let angle_sum = self.tri.angle_sums[vertex as usize];
-                self.block(f, BelowReason::NeedleVertex { vertex, angle_sum });
-                return Ok(());
+                Verdict::Needle(vertex) => {
+                    let angle_sum = self.tri.vertex_angle_sum(vertex as usize);
+                    self.block(f, BelowReason::NeedleVertex { vertex, angle_sum });
+                    return Ok(());
+                }
             }
         }
         match self.tri.insert_vertex(g, bary) {
@@ -576,17 +875,18 @@ impl<'a> Refiner<'a> {
                 // The circumcentre lies on an edge of the face it is in: split that edge at
                 // the point's foot (a boundary edge: by the boundary rule).
                 let edge = edge as usize;
-                if self.tri.is_boundary_edge(edge) {
+                if self.tri.complex().is_boundary_edge(edge) {
                     if self.split_boundary(edge)? {
                         self.retry(f);
                         return Ok(());
                     }
                 } else {
+                    let c = self.tri.complex();
                     let k = (0..3)
-                        .find(|&k| self.tri.complex.halfedge_edge[3 * g + k] as usize == edge)
+                        .find(|&k| c.halfedge_edge[3 * g + k] as usize == edge)
                         .unwrap_or(0);
                     let from_tail = bary[(k + 1) % 3] / (bary[k] + bary[(k + 1) % 3]);
-                    let forward = self.tri.complex.edge_halfedge[edge] as usize == 3 * g + k;
+                    let forward = c.edge_halfedge[edge] as usize == 3 * g + k;
                     let t = if forward { from_tail } else { 1.0 - from_tail };
                     match self.tri.split_edge(edge, t) {
                         Ok(insertion) => {
@@ -625,6 +925,10 @@ impl<'a> Refiner<'a> {
     /// often, each time after a boundary edge was split for it, is given up.
     fn retry(&mut self, f: usize) {
         const MAX_RETRIES: u32 = 64;
+        // A removal can renumber faces; a face id past the end is gone.
+        if f >= self.tri.complex().n_faces() {
+            return;
+        }
         let stamp = self.stamps[f];
         let entry = self.retries.entry(f as u32).or_insert((stamp, 0));
         if entry.0 != stamp {
@@ -655,7 +959,7 @@ impl<'a> Refiner<'a> {
                 return Ok(RefineStatus::InsertionLimit);
             }
             if let Some(e) = self.encroached.pop() {
-                if (e as usize) < self.tri.n_edges() && self.is_encroached(e as usize) {
+                if (e as usize) < self.tri.complex().n_edges() && self.is_encroached(e as usize) {
                     self.split_boundary(e as usize)?;
                 }
                 continue;
@@ -664,7 +968,11 @@ impl<'a> Refiner<'a> {
                 return Ok(RefineStatus::Done);
             };
             let f = f as usize;
-            if self.stamps[f] != stamp || !self.needs_refinement(f) {
+            // Removals renumber faces: an id past the end is stale.
+            if f >= self.tri.complex().n_faces()
+                || self.stamps[f] != stamp
+                || !self.needs_refinement(f)
+            {
                 continue;
             }
             if self
@@ -679,11 +987,162 @@ impl<'a> Refiner<'a> {
     }
 }
 
+/// Delaunay refinement of any representation by the given rules (see the
+/// [module documentation](self)): flips to Delaunay, then inserts circumcentres and splits
+/// boundary edges until no triangle needs refinement (a corner below `options.min_angle`, a
+/// circumradius above `options.max_circumradius`, or `extra(triangulation, f)`), except for the
+/// corners listed in the report. With [`RefineRules::Ruppert`] and
+/// [`IntrinsicTriangulation`] this is [`IntrinsicTriangulation::refine_with`], bit for bit.
+///
+/// # Errors
+/// [`IntrinsicError::InvalidOptions`] for an angle bound that is not in `[0, 35°]`, a
+/// circumradius bound that is not positive, or an invalid Delaunay tolerance;
+/// [`IntrinsicError::ConstrainedEdges`] if an edge is constrained (not supported yet); errors
+/// of the representation's operations other than refusals. Reaching the insertion limit is
+/// not an error.
+pub fn refine<T: Triangulation>(
+    tri: &mut T,
+    options: &RefineOptions,
+    rules: RefineRules,
+    extra: &dyn Fn(&T, usize) -> bool,
+) -> Result<RefineReport, IntrinsicError> {
+    let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
+    if !(options.min_angle >= 0.0 && options.min_angle <= 35f64.to_radians()) {
+        return invalid(format!(
+            "the angle bound of refinement must be between 0 and 35 degrees, got {} degrees",
+            options.min_angle.to_degrees()
+        ));
+    }
+    if let Some(r) = options.max_circumradius
+        && !(r.is_finite() && r > 0.0)
+    {
+        return invalid(format!(
+            "the circumradius bound of refinement must be positive and finite, got {r}"
+        ));
+    }
+    let n_constrained = tri.complex().n_constrained();
+    if n_constrained > 0 {
+        return Err(IntrinsicError::ConstrainedEdges {
+            operation: "Delaunay refinement",
+            n_constrained,
+        });
+    }
+    let first = tri.flip_to_delaunay(&crate::DelaunayOptions {
+        criterion: options.criterion,
+        ..Default::default()
+    })?;
+    let budget = match options.max_insertions {
+        InsertionLimit::PerVertex(k) => k.saturating_mul(tri.complex().n_vertices()).max(1000),
+        InsertionLimit::Vertices(n) => n,
+        InsertionLimit::Unlimited => usize::MAX,
+    };
+    let mut refiner = Refiner::new(tri, *options, budget);
+    refiner.rules = rules;
+    refiner.extra = extra;
+    refiner.n_flips = first.n_flips;
+    let n_faces = refiner.tri.complex().n_faces();
+    for f in 0..n_faces {
+        refiner.touch(f);
+    }
+    let status = refiner.run()?;
+
+    // What is left.
+    let mut below_bound = Vec::new();
+    let mut too_large = Vec::new();
+    let mut min_angle = f64::INFINITY;
+    let mut max_angle = 0.0f64;
+    let mut min_angle_reachable = f64::INFINITY;
+    let mut min_angle_valid = f64::INFINITY;
+    let mut n_narrow_cone_faces = 0;
+    let tri = &*refiner.tri;
+    for f in 0..tri.complex().n_faces() {
+        if refiner.too_large(f) {
+            too_large.push(f as u32);
+        }
+        let blocked = refiner
+            .blocked
+            .get(&(f as u32))
+            .filter(|(stamp, _)| *stamp == refiner.stamps[f])
+            .map(|(_, reason)| reason.clone());
+        let narrow = narrow_cone(tri, f);
+        n_narrow_cone_faces += usize::from(narrow.is_some());
+        for k in 0..3 {
+            let vertex = tri.complex().faces[f][k];
+            let angle = tri.corner_angle(3 * f + k);
+            min_angle = min_angle.min(angle);
+            max_angle = max_angle.max(angle);
+            if !refiner.exempt(vertex as usize) {
+                min_angle_reachable = min_angle_reachable.min(angle);
+            }
+            if narrow.is_none() {
+                min_angle_valid = min_angle_valid.min(angle);
+            }
+            if angle >= options.min_angle {
+                continue;
+            }
+            let reason = if refiner.exempt(vertex as usize) {
+                BelowReason::AngleSum {
+                    angle_sum: tri.vertex_angle_sum(vertex as usize),
+                }
+            } else if let (RefineRules::Chew, Some((vertex, angle_sum))) = (rules, narrow) {
+                BelowReason::NeedleVertex { vertex, angle_sum }
+            } else if let Some(reason) = &blocked {
+                reason.clone()
+            } else if rules == RefineRules::Chew && !refiner.chew_small_corner(f) {
+                // A corner of a vertex of degree one or between two boundary edges: its angle
+                // is the vertex's angle sum.
+                BelowReason::AngleSum {
+                    angle_sum: tri.vertex_angle_sum(vertex as usize),
+                }
+            } else {
+                BelowReason::InsertionLimit
+            };
+            below_bound.push(BelowBound {
+                face: f as u32,
+                vertex,
+                angle,
+                reason,
+            });
+        }
+    }
+    let (complex, lengths) = (tri.complex(), tri.edge_lengths());
+    let report = RefineReport {
+        status,
+        n_inserted: refiner.n_inserted(),
+        n_face_insertions: refiner.n_face_insertions,
+        n_edge_splits: refiner.n_edge_splits,
+        n_boundary_splits: refiner.n_boundary_splits,
+        n_flips: refiner.n_flips,
+        n_snapped: refiner.n_snapped,
+        min_angle,
+        max_angle,
+        min_angle_reachable,
+        below_bound,
+        too_large,
+        n_not_delaunay: (0..complex.n_edges())
+            .filter(|&e| fails_delaunay(complex, lengths, e, &options.criterion))
+            .count(),
+        n_encroached: (0..complex.n_edges())
+            .filter(|&e| refiner.is_encroached(e))
+            .count(),
+        rules,
+        n_removals: refiner.n_removals,
+        n_removal_flips: refiner.n_removal_flips,
+        n_removals_refused: refiner.n_removals_refused,
+        n_trace_failures: refiner.n_trace_failures,
+        n_narrow_cone_faces,
+        min_angle_valid,
+    };
+    Ok(report)
+}
+
 impl IntrinsicTriangulation {
     /// Delaunay refinement (paper Sec. 4.2; see the [module documentation](self) and SPEC N1,
     /// N4 for the rules): flips to Delaunay, then inserts circumcentres and splits boundary
     /// edges until no triangle has a corner below `options.min_angle` (or a circumradius above
-    /// `options.max_circumradius`), except for the corners listed in the report.
+    /// `options.max_circumradius`), except for the corners listed in the report. This is
+    /// [`refine`](crate::refine::refine) with [`RefineRules::Ruppert`];
+    /// [`Triangulation::refine_with_rules`] chooses the rules.
     ///
     /// The result is a Delaunay triangulation of the same surface with more vertices. The
     /// new vertices are appended; their places on the input mesh are
@@ -719,109 +1178,7 @@ impl IntrinsicTriangulation {
         options: &RefineOptions,
         extra: &dyn Fn(&IntrinsicTriangulation, usize) -> bool,
     ) -> Result<RefineReport, IntrinsicError> {
-        let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
-        if !(options.min_angle >= 0.0 && options.min_angle <= 35f64.to_radians()) {
-            return invalid(format!(
-                "the angle bound of refinement must be between 0 and 35 degrees, got {} degrees",
-                options.min_angle.to_degrees()
-            ));
-        }
-        if let Some(r) = options.max_circumradius
-            && !(r.is_finite() && r > 0.0)
-        {
-            return invalid(format!(
-                "the circumradius bound of refinement must be positive and finite, got {r}"
-            ));
-        }
-        let n_constrained = self.complex.n_constrained();
-        if n_constrained > 0 {
-            return Err(IntrinsicError::ConstrainedEdges {
-                operation: "Delaunay refinement",
-                n_constrained,
-            });
-        }
-        let first = self.flip_to_delaunay(&crate::DelaunayOptions {
-            criterion: options.criterion,
-            ..Default::default()
-        })?;
-        let budget = match options.max_insertions {
-            InsertionLimit::PerVertex(k) => k.saturating_mul(self.n_vertices()).max(1000),
-            InsertionLimit::Vertices(n) => n,
-            InsertionLimit::Unlimited => usize::MAX,
-        };
-        let mut refiner = Refiner::new(self, *options, budget);
-        refiner.extra = extra;
-        refiner.n_flips = first.n_flips;
-        let n_faces = refiner.tri.n_faces();
-        for f in 0..n_faces {
-            refiner.touch(f);
-        }
-        let status = refiner.run()?;
-
-        // What is left.
-        let mut below_bound = Vec::new();
-        let mut too_large = Vec::new();
-        let mut min_angle = f64::INFINITY;
-        let mut max_angle = 0.0f64;
-        let mut min_angle_reachable = f64::INFINITY;
-        for f in 0..refiner.tri.n_faces() {
-            if refiner.too_large(f) {
-                too_large.push(f as u32);
-            }
-            let blocked = refiner
-                .blocked
-                .get(&(f as u32))
-                .filter(|(stamp, _)| *stamp == refiner.stamps[f])
-                .map(|(_, reason)| reason.clone());
-            for k in 0..3 {
-                let vertex = refiner.tri.complex.faces[f][k];
-                let angle = refiner.tri.corner_angle(3 * f + k);
-                min_angle = min_angle.min(angle);
-                max_angle = max_angle.max(angle);
-                if !refiner.exempt(vertex as usize) {
-                    min_angle_reachable = min_angle_reachable.min(angle);
-                }
-                if angle >= options.min_angle {
-                    continue;
-                }
-                let reason = if refiner.exempt(vertex as usize) {
-                    BelowReason::AngleSum {
-                        angle_sum: refiner.tri.angle_sums[vertex as usize],
-                    }
-                } else if let Some(reason) = &blocked {
-                    reason.clone()
-                } else {
-                    BelowReason::InsertionLimit
-                };
-                below_bound.push(BelowBound {
-                    face: f as u32,
-                    vertex,
-                    angle,
-                    reason,
-                });
-            }
-        }
-        let report = RefineReport {
-            status,
-            n_inserted: refiner.n_inserted(),
-            n_face_insertions: refiner.n_face_insertions,
-            n_edge_splits: refiner.n_edge_splits,
-            n_boundary_splits: refiner.n_boundary_splits,
-            n_flips: refiner.n_flips,
-            n_snapped: refiner.n_snapped,
-            min_angle,
-            max_angle,
-            min_angle_reachable,
-            below_bound,
-            too_large,
-            n_not_delaunay: (0..refiner.tri.n_edges())
-                .filter(|&e| refiner.tri.fails_delaunay(e, &options.criterion))
-                .count(),
-            n_encroached: (0..refiner.tri.n_edges())
-                .filter(|&e| refiner.is_encroached(e))
-                .count(),
-        };
-        Ok(report)
+        refine(self, options, RefineRules::Ruppert, extra)
     }
 }
 

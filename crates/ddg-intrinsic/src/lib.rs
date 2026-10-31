@@ -136,6 +136,7 @@ pub mod overlay;
 mod point;
 pub mod query;
 pub mod refine;
+pub mod remove;
 pub mod reposition;
 mod surface;
 pub mod trace;
@@ -163,8 +164,9 @@ pub use overlay::{Overlay, OverlayVertex};
 pub use point::SurfacePoint;
 pub use query::{PathOnInput, PathsOnInput, Segment};
 pub use refine::{
-    BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineStatus,
+    BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineRules, RefineStatus,
 };
+pub use remove::{InsertedVertexRemoval, removal_flip_choice};
 pub use reposition::VertexMove;
 pub use trace::{Crossing, Trace, TraceOptions, TraceStop};
 pub use triangulation::{ConsistencyReport, IntrinsicTriangulation, Irregularities};

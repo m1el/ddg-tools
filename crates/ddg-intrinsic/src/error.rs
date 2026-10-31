@@ -371,6 +371,13 @@ pub enum RemovalRefusal {
         /// Its three lengths.
         lengths: [f64; 3],
     },
+    /// Removal of a vertex of any degree
+    /// ([`Triangulation::remove_inserted_vertex`](crate::Triangulation::remove_inserted_vertex)):
+    /// no edge at the vertex can be flipped so that its degree drops (IC-SPEC I8, I27).
+    Stuck {
+        /// Its degree when no flip was left.
+        degree: usize,
+    },
 }
 
 impl fmt::Display for RemovalRefusal {
@@ -391,6 +398,11 @@ impl fmt::Display for RemovalRefusal {
                 f,
                 "the triangle replacing its star would have the lengths {lengths:?}, which form \
                  no triangle of positive area"
+            ),
+            RemovalRefusal::Stuck { degree } => write!(
+                f,
+                "it has degree {degree} and no edge at it can be flipped so that its degree \
+                 drops"
             ),
         }
     }
