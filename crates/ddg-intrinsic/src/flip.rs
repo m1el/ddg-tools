@@ -76,26 +76,6 @@ impl IntrinsicTriangulation {
         })
     }
 
-    /// The five lengths `[ℓ_ij, ℓ_jk, ℓ_ki, ℓ_il, ℓ_lj]` of the two triangles `ijk`, `jil` on
-    /// interior edge `e = ij`, or `None` for a boundary edge. For an edge whose two sides are
-    /// the same triangle the triangle is listed twice, which is what the angle sums need.
-    pub(crate) fn diamond_lengths(&self, e: usize) -> Option<[f64; 5]> {
-        let h0 = self.complex.edge_halfedge[e] as usize;
-        let h1 = self.complex.twin[h0];
-        if h1 == NONE {
-            return None;
-        }
-        let h1 = h1 as usize;
-        let len = |h: usize| self.edge_lengths[self.complex.halfedge_edge[h] as usize];
-        Some([
-            self.edge_lengths[e],
-            len(self.next(h0)),
-            len(self.prev(h0)),
-            len(self.next(h1)),
-            len(self.prev(h1)),
-        ])
-    }
-
     /// Flips edge `e`: its two triangles `ijk`, `jil` are replaced by `ilk`, `jkl` (paper
     /// Alg. 5). The new length is the other diagonal of the two triangles unfolded into the
     /// plane ([`Diamond::flipped_length`](crate::formulas::Diamond::flipped_length)), and the

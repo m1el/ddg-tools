@@ -117,8 +117,10 @@ mod error;
 pub mod export;
 mod flip;
 pub mod formulas;
+pub mod frames;
 mod input;
 pub mod insert;
+pub mod interface;
 pub mod odt;
 mod operators;
 pub mod overlay;
@@ -139,8 +141,10 @@ pub use error::{
 };
 pub use export::{ExportOptions, SimplicialExport};
 pub use flip::Flip;
+pub use frames::AngleFrames;
 pub use input::InputSurface;
 pub use insert::Insertion;
+pub use interface::Triangulation;
 pub use odt::{
     BoundaryVertices, OdtCenters, OdtIteration, OptimalDelaunayOptions, OptimalDelaunayReport,
     OptimalDelaunayStatus, TargetLength,

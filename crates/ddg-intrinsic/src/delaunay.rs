@@ -14,8 +14,12 @@
 
 use std::collections::VecDeque;
 
+use ddg_core::topology::NONE;
+
+use crate::complex::{Complex, next, prev};
 use crate::error::IntrinsicError;
 use crate::formulas::{delaunay_angle_excess, opposite_cotan_sum};
+use crate::interface::{Triangulation, opposite_cotan};
 use crate::triangulation::IntrinsicTriangulation;
 
 /// When an interior edge counts as not Delaunay, and is flipped.
@@ -130,6 +134,10 @@ pub struct DelaunayReport {
     /// The smallest cotan weight `½ (cot α + cot β)` over the interior edges at the end (`+∞`
     /// if there is no interior edge).
     pub min_cotan_weight: f64,
+    /// Number of constrained edges ([`Complex::is_constrained`]). They are left alone and are
+    /// not counted in the numbers above, which are over the interior edges that are not
+    /// constrained.
+    pub n_constrained: usize,
 }
 
 /// A first-in first-out queue of edges that holds every edge at most once.
@@ -184,6 +192,187 @@ pub(crate) struct QueueRun {
     pub(crate) limit_reached: bool,
 }
 
+/// The five lengths `[ℓ_ij, ℓ_jk, ℓ_ki, ℓ_il, ℓ_lj]` of the two triangles `ijk`, `jil` on
+/// interior edge `e = ij`, or `None` for a boundary edge. For an edge whose two sides are the
+/// same triangle the triangle is listed twice, which is what the angle sums need.
+#[inline]
+pub(crate) fn diamond_lengths(complex: &Complex, lengths: &[f64], e: usize) -> Option<[f64; 5]> {
+    let h0 = complex.edge_halfedge[e] as usize;
+    let h1 = complex.twin[h0];
+    if h1 == NONE {
+        return None;
+    }
+    let h1 = h1 as usize;
+    let len = |h: usize| lengths[complex.halfedge_edge[h] as usize];
+    Some([
+        lengths[e],
+        len(next(h0)),
+        len(prev(h0)),
+        len(next(h1)),
+        len(prev(h1)),
+    ])
+}
+
+/// See [`IntrinsicTriangulation::edge_angle_excess`].
+pub(crate) fn edge_angle_excess(complex: &Complex, lengths: &[f64], e: usize) -> Option<f64> {
+    let [l_ij, l_jk, l_ki, l_il, l_lj] = diamond_lengths(complex, lengths, e)?;
+    Some(
+        delaunay_angle_excess(l_ij, l_jk, l_ki, l_il, l_lj)
+            .expect("every face keeps the triangle inequalities"),
+    )
+}
+
+/// See [`IntrinsicTriangulation::edge_cotan_weight`].
+pub(crate) fn edge_cotan_weight(complex: &Complex, lengths: &[f64], e: usize) -> f64 {
+    let h = complex.edge_halfedge[e] as usize;
+    let mut sum = opposite_cotan(complex, lengths, h);
+    if let Some(t) = complex.twin(h) {
+        sum += opposite_cotan(complex, lengths, t);
+    }
+    0.5 * sum
+}
+
+/// Whether interior edge `e` fails the criterion. `false` for a boundary edge and for a
+/// constrained edge.
+#[inline]
+pub(crate) fn fails_delaunay(
+    complex: &Complex,
+    lengths: &[f64],
+    e: usize,
+    criterion: &DelaunayCriterion,
+) -> bool {
+    if complex.constrained[e] {
+        return false;
+    }
+    let Some([l_ij, l_jk, l_ki, l_il, l_lj]) = diamond_lengths(complex, lengths, e) else {
+        return false;
+    };
+    let Some(cotans) = opposite_cotan_sum(l_ij, l_jk, l_ki, l_il, l_lj) else {
+        return false;
+    };
+    match *criterion {
+        DelaunayCriterion::CotanWeight { tolerance } => 0.5 * cotans < -tolerance,
+        DelaunayCriterion::AngleSum { tolerance } => {
+            // The cotangent sum has the sign of π − (α + β); only when it is negative are
+            // the angles themselves needed.
+            cotans < 0.0
+                && delaunay_angle_excess(l_ij, l_jk, l_ki, l_il, l_lj)
+                    .is_some_and(|excess| excess > tolerance)
+        }
+    }
+}
+
+/// Flips edges from the queue until it is empty or `budget` flips were made, with the flips
+/// of the representation. The two faces of every flipped edge are appended to `touched`, if
+/// given.
+pub(crate) fn run_flip_queue<T: Triangulation>(
+    tri: &mut T,
+    queue: &mut EdgeQueue,
+    criterion: &DelaunayCriterion,
+    budget: usize,
+    mut touched: Option<&mut Vec<u32>>,
+) -> QueueRun {
+    let mut run = QueueRun::default();
+    while let Some(e) = queue.pop() {
+        run.n_tested += 1;
+        if !fails_delaunay(tri.complex(), tri.edge_lengths(), e as usize, criterion) {
+            continue;
+        }
+        if run.n_flips >= budget {
+            queue.push(e);
+            run.limit_reached = true;
+            break;
+        }
+        if tri.flip_edge(e as usize).is_err() {
+            run.n_refused += 1;
+            continue;
+        }
+        run.n_flips += 1;
+        let complex = tri.complex();
+        let h = complex.edge_halfedge[e as usize] as usize;
+        let t = complex.twin[h] as usize;
+        for g in [next(h), prev(h), next(t), prev(t)] {
+            queue.push(complex.halfedge_edge[g]);
+        }
+        if let Some(touched) = touched.as_deref_mut() {
+            touched.extend([(h / 3) as u32, (t / 3) as u32]);
+        }
+    }
+    run
+}
+
+/// Delaunay flipping over any representation; see
+/// [`IntrinsicTriangulation::flip_to_delaunay`].
+pub(crate) fn flip_to_delaunay<T: Triangulation>(
+    tri: &mut T,
+    options: &DelaunayOptions,
+) -> Result<DelaunayReport, IntrinsicError> {
+    let tolerance = options.criterion.tolerance();
+    if !(tolerance.is_finite() && tolerance >= 0.0) {
+        return Err(IntrinsicError::InvalidOptions {
+            reason: format!(
+                "the tolerance of the Delaunay criterion must be finite and not negative, got \
+                 {tolerance}"
+            ),
+        });
+    }
+    let n_edges = tri.complex().n_edges();
+    let budget = match options.max_flips {
+        FlipLimit::PerEdge(k) => k.saturating_mul(n_edges),
+        FlipLimit::Flips(n) => n,
+        FlipLimit::Unlimited => usize::MAX,
+    };
+    let mut queue = EdgeQueue::all(n_edges);
+    let run = run_flip_queue(tri, &mut queue, &options.criterion, budget, None);
+
+    let (complex, lengths) = (tri.complex(), tri.edge_lengths());
+    let mut n_not_delaunay = 0;
+    let mut n_ties = 0;
+    let mut n_constrained = 0;
+    let mut max_angle_excess = f64::NEG_INFINITY;
+    let mut min_cotan_weight = f64::INFINITY;
+    for e in 0..complex.n_edges() {
+        if complex.constrained[e] {
+            n_constrained += 1;
+            continue;
+        }
+        let Some(excess) = edge_angle_excess(complex, lengths, e) else {
+            continue;
+        };
+        let weight = edge_cotan_weight(complex, lengths, e);
+        max_angle_excess = max_angle_excess.max(excess);
+        min_cotan_weight = min_cotan_weight.min(weight);
+        if fails_delaunay(complex, lengths, e, &options.criterion) {
+            n_not_delaunay += 1;
+        }
+        let tie = match options.criterion {
+            DelaunayCriterion::AngleSum { tolerance } => excess.abs() <= tolerance,
+            DelaunayCriterion::CotanWeight { tolerance } => weight.abs() <= tolerance,
+        };
+        if tie {
+            n_ties += 1;
+        }
+    }
+    let status = if n_not_delaunay == 0 {
+        DelaunayStatus::Delaunay
+    } else if run.limit_reached {
+        DelaunayStatus::FlipLimit
+    } else {
+        DelaunayStatus::Blocked
+    };
+    Ok(DelaunayReport {
+        status,
+        n_flips: run.n_flips,
+        n_tested: run.n_tested,
+        n_refused: run.n_refused,
+        n_not_delaunay,
+        n_ties,
+        max_angle_excess,
+        min_cotan_weight,
+        n_constrained,
+    })
+}
+
 impl IntrinsicTriangulation {
     /// The sum of the two angles opposite edge `e` minus `π`, in radians; `None` for a
     /// boundary edge. The edge is Delaunay exactly when this is not positive (paper Eq. 4).
@@ -192,11 +381,7 @@ impl IntrinsicTriangulation {
     /// # Panics
     /// If `e` is out of range.
     pub fn edge_angle_excess(&self, e: usize) -> Option<f64> {
-        let [l_ij, l_jk, l_ki, l_il, l_lj] = self.diamond_lengths(e)?;
-        Some(
-            delaunay_angle_excess(l_ij, l_jk, l_ki, l_il, l_lj)
-                .expect("every face keeps the triangle inequalities"),
-        )
+        edge_angle_excess(&self.complex, &self.edge_lengths, e)
     }
 
     /// The cotan weight of edge `e`: half the sum of the cotangents of the one or two angles
@@ -206,35 +391,16 @@ impl IntrinsicTriangulation {
     /// # Panics
     /// If `e` is out of range.
     pub fn edge_cotan_weight(&self, e: usize) -> f64 {
-        let h = self.complex.edge_halfedge[e] as usize;
-        let mut sum = self.opposite_cotan(h);
-        if let Some(t) = self.twin(h) {
-            sum += self.opposite_cotan(t);
-        }
-        0.5 * sum
+        edge_cotan_weight(&self.complex, &self.edge_lengths, e)
     }
 
-    /// Whether interior edge `e` fails the criterion. `false` for a boundary edge.
+    /// Whether interior edge `e` fails the criterion. `false` for a boundary edge and for a
+    /// constrained edge.
     pub(crate) fn fails_delaunay(&self, e: usize, criterion: &DelaunayCriterion) -> bool {
-        let Some([l_ij, l_jk, l_ki, l_il, l_lj]) = self.diamond_lengths(e) else {
-            return false;
-        };
-        let Some(cotans) = opposite_cotan_sum(l_ij, l_jk, l_ki, l_il, l_lj) else {
-            return false;
-        };
-        match *criterion {
-            DelaunayCriterion::CotanWeight { tolerance } => 0.5 * cotans < -tolerance,
-            DelaunayCriterion::AngleSum { tolerance } => {
-                // The cotangent sum has the sign of π − (α + β); only when it is negative are
-                // the angles themselves needed.
-                cotans < 0.0
-                    && delaunay_angle_excess(l_ij, l_jk, l_ki, l_il, l_lj)
-                        .is_some_and(|excess| excess > tolerance)
-            }
-        }
+        fails_delaunay(&self.complex, &self.edge_lengths, e, criterion)
     }
 
-    /// Whether every interior edge satisfies the criterion.
+    /// Whether every interior edge that is not constrained satisfies the criterion.
     pub fn is_delaunay(&self, criterion: &DelaunayCriterion) -> bool {
         (0..self.n_edges()).all(|e| !self.fails_delaunay(e, criterion))
     }
@@ -246,34 +412,9 @@ impl IntrinsicTriangulation {
         queue: &mut EdgeQueue,
         criterion: &DelaunayCriterion,
         budget: usize,
-        mut touched: Option<&mut Vec<u32>>,
+        touched: Option<&mut Vec<u32>>,
     ) -> QueueRun {
-        let mut run = QueueRun::default();
-        while let Some(e) = queue.pop() {
-            run.n_tested += 1;
-            if !self.fails_delaunay(e as usize, criterion) {
-                continue;
-            }
-            if run.n_flips >= budget {
-                queue.push(e);
-                run.limit_reached = true;
-                break;
-            }
-            if self.try_flip(e as usize).is_err() {
-                run.n_refused += 1;
-                continue;
-            }
-            run.n_flips += 1;
-            let h = self.complex.edge_halfedge[e as usize] as usize;
-            let t = self.complex.twin[h] as usize;
-            for g in [self.next(h), self.prev(h), self.next(t), self.prev(t)] {
-                queue.push(self.complex.halfedge_edge[g]);
-            }
-            if let Some(touched) = touched.as_deref_mut() {
-                touched.extend([(h / 3) as u32, (t / 3) as u32]);
-            }
-        }
-        run
+        run_flip_queue(self, queue, criterion, budget, touched)
     }
 
     /// Flips edges until the triangulation is an intrinsic Delaunay triangulation (paper
@@ -281,10 +422,12 @@ impl IntrinsicTriangulation {
     /// first edge is taken off and, if it fails the criterion, flipped, and the four other
     /// edges of its two triangles are put back on the queue unless they are on it.
     ///
-    /// Boundary edges are never flipped. An edge that fails the criterion but cannot be
-    /// flipped ([`FlipRefusal`](crate::FlipRefusal)) is left and counted; it is tested again
-    /// when one of its neighbours is flipped.
+    /// Boundary edges and constrained edges ([`Complex::is_constrained`]) are never flipped
+    /// and count as Delaunay. An edge that fails the criterion but cannot be flipped
+    /// ([`FlipRefusal`](crate::FlipRefusal)) is left and counted; it is tested again when one
+    /// of its neighbours is flipped.
     ///
+    /// The same code runs for every representation ([`Triangulation::flip_to_delaunay`]).
     /// The report says how it ended; reaching the flip limit is not an error.
     ///
     /// # Errors
@@ -293,61 +436,6 @@ impl IntrinsicTriangulation {
         &mut self,
         options: &DelaunayOptions,
     ) -> Result<DelaunayReport, IntrinsicError> {
-        let tolerance = options.criterion.tolerance();
-        if !(tolerance.is_finite() && tolerance >= 0.0) {
-            return Err(IntrinsicError::InvalidOptions {
-                reason: format!(
-                    "the tolerance of the Delaunay criterion must be finite and not negative, \
-                     got {tolerance}"
-                ),
-            });
-        }
-        let budget = match options.max_flips {
-            FlipLimit::PerEdge(k) => k.saturating_mul(self.n_edges()),
-            FlipLimit::Flips(n) => n,
-            FlipLimit::Unlimited => usize::MAX,
-        };
-        let mut queue = EdgeQueue::all(self.n_edges());
-        let run = self.run_flip_queue(&mut queue, &options.criterion, budget, None);
-
-        let mut n_not_delaunay = 0;
-        let mut n_ties = 0;
-        let mut max_angle_excess = f64::NEG_INFINITY;
-        let mut min_cotan_weight = f64::INFINITY;
-        for e in 0..self.n_edges() {
-            let Some(excess) = self.edge_angle_excess(e) else {
-                continue;
-            };
-            let weight = self.edge_cotan_weight(e);
-            max_angle_excess = max_angle_excess.max(excess);
-            min_cotan_weight = min_cotan_weight.min(weight);
-            if self.fails_delaunay(e, &options.criterion) {
-                n_not_delaunay += 1;
-            }
-            let tie = match options.criterion {
-                DelaunayCriterion::AngleSum { tolerance } => excess.abs() <= tolerance,
-                DelaunayCriterion::CotanWeight { tolerance } => weight.abs() <= tolerance,
-            };
-            if tie {
-                n_ties += 1;
-            }
-        }
-        let status = if n_not_delaunay == 0 {
-            DelaunayStatus::Delaunay
-        } else if run.limit_reached {
-            DelaunayStatus::FlipLimit
-        } else {
-            DelaunayStatus::Blocked
-        };
-        Ok(DelaunayReport {
-            status,
-            n_flips: run.n_flips,
-            n_tested: run.n_tested,
-            n_refused: run.n_refused,
-            n_not_delaunay,
-            n_ties,
-            max_angle_excess,
-            min_cotan_weight,
-        })
+        flip_to_delaunay(self, options)
     }
 }

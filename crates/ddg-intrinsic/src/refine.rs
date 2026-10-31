@@ -690,8 +690,9 @@ impl IntrinsicTriangulation {
     ///
     /// # Errors
     /// [`IntrinsicError::InvalidOptions`] for an angle bound that is not in `[0, 35°]`, a
-    /// circumradius bound that is not positive, or an invalid Delaunay tolerance. Reaching the
-    /// insertion limit is not an error.
+    /// circumradius bound that is not positive, or an invalid Delaunay tolerance;
+    /// [`IntrinsicError::ConstrainedEdges`] if an edge is constrained (not supported yet).
+    /// Reaching the insertion limit is not an error.
     pub fn refine(&mut self, options: &RefineOptions) -> Result<RefineReport, IntrinsicError> {
         self.refine_with(options, &no_extra_criterion)
     }
@@ -730,6 +731,13 @@ impl IntrinsicTriangulation {
             return invalid(format!(
                 "the circumradius bound of refinement must be positive and finite, got {r}"
             ));
+        }
+        let n_constrained = self.complex.n_constrained();
+        if n_constrained > 0 {
+            return Err(IntrinsicError::ConstrainedEdges {
+                operation: "Delaunay refinement",
+                n_constrained,
+            });
         }
         let first = self.flip_to_delaunay(&crate::DelaunayOptions {
             criterion: options.criterion,

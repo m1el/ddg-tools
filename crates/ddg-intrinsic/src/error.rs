@@ -65,6 +65,15 @@ pub enum IntrinsicError {
         /// Why.
         reason: RemovalRefusal,
     },
+    /// The operation does not support constrained edges yet (SPEC N50: refinement and the
+    /// optimal Delaunay iteration would have to treat them as boundary edges; FlipOut contract
+    /// R5). Nothing was changed.
+    ConstrainedEdges {
+        /// The operation.
+        operation: &'static str,
+        /// The number of constrained edges.
+        n_constrained: usize,
+    },
     /// The new place of a moved vertex on the input mesh could not be found: the straight path
     /// over the input mesh from its old place did not complete, although the move keeps the
     /// vertex inside its flat star. This is an inconsistency between the triangulation and the
@@ -563,6 +572,14 @@ impl fmt::Display for IntrinsicError {
             IntrinsicError::MoveRefused { vertex, reason } => {
                 write!(f, "vertex {vertex} cannot be moved: {reason}")
             }
+            IntrinsicError::ConstrainedEdges {
+                operation,
+                n_constrained,
+            } => write!(
+                f,
+                "{operation} does not support constrained edges yet, and {n_constrained} edges \
+                 are constrained"
+            ),
             IntrinsicError::RemovalRefused { vertex, reason } => {
                 write!(f, "vertex {vertex} cannot be removed: {reason}")
             }

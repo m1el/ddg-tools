@@ -287,6 +287,25 @@ impl IntrinsicTriangulation {
         (i != NONE).then_some(i as usize)
     }
 
+    /// Whether edge `e` is constrained: flips and Delaunay flipping leave it alone, as they
+    /// leave boundary edges (SPEC N50).
+    #[inline]
+    pub fn is_constrained(&self, e: usize) -> bool {
+        self.complex.is_constrained(e)
+    }
+
+    /// Marks edge `e` as constrained or not. [`flip_edge`](Self::flip_edge) refuses a
+    /// constrained edge ([`FlipRefusal::Constrained`](crate::FlipRefusal::Constrained)),
+    /// [`flip_to_delaunay`](Self::flip_to_delaunay) leaves it and counts it as Delaunay, a
+    /// split gives two constrained halves; refinement and the optimal Delaunay iteration
+    /// refuse to run while an edge is constrained ([`IntrinsicError::ConstrainedEdges`]).
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`].
+    pub fn set_constrained(&mut self, e: usize, constrained: bool) -> Result<(), IntrinsicError> {
+        self.complex.set_constrained(e, constrained)
+    }
+
     // ----- vertices -----
 
     /// An outgoing halfedge of vertex `v`: the first one of

@@ -22,7 +22,8 @@ use std::f64::consts::{PI, TAU};
 use ddg_core::geometry::corner_angle;
 use ddg_core::topology::NONE;
 
-use crate::error::{InsertRefusal, IntrinsicError};
+use crate::complex::{VertexRemoval, next};
+use crate::error::{InsertRefusal, IntrinsicError, RemovalRefusal};
 use crate::flip::triangle_is_valid;
 use crate::formulas::{FLIP_SHAPE_LIMIT, corner_distances, signpost_update, triangle_layout};
 use crate::point::{SurfacePoint, point_defect};
@@ -55,6 +56,10 @@ pub struct Insertion {
     /// The new faces (two, or one for a split of a boundary edge). The face the point was in,
     /// or the faces of the split edge, keep their ids.
     pub new_faces: Vec<u32>,
+    /// For an edge split: the two halves of the edge in order from the tail of its old
+    /// halfedge, both directed like it (`[e, new_edges[0]]`); `None` for an insertion in a
+    /// face.
+    pub halves: Option<[u32; 2]>,
     /// The barycentric coordinate that the traced place had opposite the input edge it was
     /// moved onto ([`LOCATION_SNAP`]); `None` if it was not moved.
     pub snapped: Option<f64>,
@@ -393,6 +398,7 @@ impl IntrinsicTriangulation {
             location: placed.location,
             new_edges: vec![ea, eb, ec],
             new_faces: vec![f1 as u32, f2 as u32],
+            halves: None,
             snapped: placed.snapped,
         })
     }
@@ -578,7 +584,52 @@ impl IntrinsicTriangulation {
             location,
             new_edges,
             new_faces,
+            halves: Some(split.halves),
             snapped,
         })
+    }
+
+    /// Removes vertex `v`, an inserted interior vertex of degree three: its three edges are
+    /// deleted and its three triangles become one ([`Complex::remove_vertex`](crate::Complex::remove_vertex), whose result
+    /// says how ids are renumbered: the last vertex, edges and faces take the freed ids). The
+    /// outer edges keep their lengths and the outer halfedges their signposts (they leave
+    /// their tails in the same directions); nothing else changes. To remove a vertex of
+    /// higher degree, flip edges at it first (Gillespie, Sharp and Crane 2021, Alg. 8).
+    ///
+    /// Inserted vertices are never removed by the operations of this crate (SPEC N10); this is
+    /// for callers that need it (SPEC N50).
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`], and [`IntrinsicError::RemovalRefused`] for an
+    /// input vertex, a boundary vertex, a degree other than three, a self-edge, a constrained
+    /// edge at `v`, or a merged triangle without positive area. The triangulation is
+    /// unchanged then.
+    pub fn remove_vertex(&mut self, v: usize) -> Result<VertexRemoval, IntrinsicError> {
+        if v >= self.n_vertices() {
+            return Err(IntrinsicError::IndexOutOfRange {
+                what: "vertex",
+                index: v,
+                bound: self.n_vertices(),
+            });
+        }
+        let refused = |reason| IntrinsicError::RemovalRefused {
+            vertex: v as u32,
+            reason,
+        };
+        if v < self.n_input_vertices() {
+            return Err(refused(RemovalRefusal::InputVertex));
+        }
+        let star = self.complex.removal_star(v).map_err(refused)?;
+        let lengths = star.map(|h| self.edge_lengths[self.complex.halfedge_edge[next(h)] as usize]);
+        if !triangle_is_valid(lengths[0], lengths[1], lengths[2]) {
+            return Err(refused(RemovalRefusal::Degenerate { lengths }));
+        }
+        let removal = self.complex.remove_vertex_unchecked(v, star);
+        removal.apply_halfedge_data(&mut self.signposts);
+        removal.apply_edge_data(&mut self.edge_lengths);
+        removal.apply_edge_data(&mut self.edge_on_input);
+        removal.apply_vertex_data(&mut self.angle_sums);
+        removal.apply_vertex_data(&mut self.locations);
+        Ok(removal)
     }
 }

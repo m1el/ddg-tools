@@ -190,13 +190,21 @@ impl IntrinsicTriangulation {
     /// # Errors
     /// [`IntrinsicError::InvalidOptions`] for a target length that is not positive and finite,
     /// a step outside `(0, 1]`, a negative or non-finite motion tolerance, or invalid Delaunay
-    /// options; [`IntrinsicError::MoveNotLocated`] and the errors of the flips and splits if
+    /// options; [`IntrinsicError::ConstrainedEdges`] if an edge is constrained (not supported
+    /// yet); [`IntrinsicError::MoveNotLocated`] and the errors of the flips and splits if
     /// the triangulation turns out to be inconsistent (nothing is repaired). Reaching a limit
     /// is not an error.
     pub fn optimal_delaunay(
         &mut self,
         options: &OptimalDelaunayOptions,
     ) -> Result<OptimalDelaunayReport, IntrinsicError> {
+        let n_constrained = self.complex.n_constrained();
+        if n_constrained > 0 {
+            return Err(IntrinsicError::ConstrainedEdges {
+                operation: "the optimal Delaunay iteration",
+                n_constrained,
+            });
+        }
         let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
         let target = match options.target_length {
             TargetLength::NoSplits => None,
