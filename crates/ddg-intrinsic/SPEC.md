@@ -243,7 +243,12 @@ flipping, tracing); N2 and N3 were completed there. The numbers are those of
   reference's test leaves: 6 edges on `bob`, none on the other 14 inputs of the comparison.
   The queue is the reference's: all edges in ascending order, first in first out, the four
   neighbours of a flipped edge appended unless queued. An edge that fails the test but whose
-  flip is refused (N5) is left and counted (`n_refused`, status `Blocked`); none occurred.
+  flip is refused (N5) is left and counted (`n_refused`, status `Blocked`); none occurred on the
+  test meshes (on Thingi10k 9 IDTs end `Blocked`, 23 edges). Refinement (both rules) retries a
+  Delaunay flip refused by N5's limit under `Absolute { limit: 0 }` (`DELAUNAY_FLIP_SHAPE`: strict
+  convexity and valid triangles only), in its own flips and once after a `Blocked` initial
+  `flip_to_delaunay`; counted as `RefineReport::n_thin_flips` (IC-SPEC I30, a589919). Plain
+  `flip_to_delaunay` keeps N5.
   Limit: `FlipLimit`, default 64 flips per edge of the triangulation, reported as status
   `FlipLimit` (the reference has none).
   *Ties* (§5 item 4): an interior edge is counted as a tie when `|α + β − π|` (or `|weight|`)

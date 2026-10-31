@@ -346,7 +346,11 @@ For a star that is not simplicial the paper conjectures it (open, `ic-vertex-rem
 edge index; only flips that lower the degree count; the reference's `checkFlip` gives refused,
 fixed or degree-one edges the score `+∞`), the loop is bounded by `10 deg(i)` flips, and a star
 where no such flip exists is refused with `RemovalStuck { vertex, degree }`, the state restored
-(by a clone of `Complex`, `O(|E|)`; a journal of inverse flips does not restore `vertex_halfedge`).
+by undoing its flips in reverse from a journal (`Complex::flip_undo`/`undo_flip` record what a flip
+overwrites, `vertex_halfedge` included, plus the representation's own data; 16210ca). Before, a clone
+of the whole state cost `O(|E|)` per removal: 87 % of Thingi10k 54621's 28.9 s in `memcpy`, now 1.16 s,
+results bit-identical. Refinement keeps Alg. 10 line 20's removal schedule (Dijkstra ball `< ℓ` after
+the split's Delaunay flips; gc removes in its split callback with `≤ ℓ`): it was not the cost.
 Counted over every removal of the evaluation (§10). WP3: 3884 removals with 2.4 flips each (at most
 14); of face-inserted vertices 1148 removed, 12 stuck.
 
@@ -602,9 +606,8 @@ Tiers: A formulas, B one face, B′ Thm. D.1, C the complex model, D and E cited
   triangulation and refinement to 25°, success = the common subdivision's connectivity recovered:
   explicit overlay 100 % / –, signposts 96.0 % / 69.1 %, integer coordinates 100 % / 100 % (one
   refinement's subdivision, ~30 M vertices, not extractable for memory, Fig. 19). Signposts
-  evaluated without boundary. **Reproduced (WP10):** integers 99.97 % / 99.97 % of our 7745
-  meshes; the two misses are non-terminating refinements in the shared driver (I30), not
-  representation failures (§10.2).
+  evaluated without boundary. **Reproduced (WP10, I30):** integers 100 % / 100 % of our 7745
+  meshes (§10.2).
 * Size: the common subdivision after refinement has mean `|V^S| / |V⁰|` 20, 95th percentile 45;
   the refined `T¹` has 3.7 and 7.8.
 * Fig. 14: Poisson `Δf = g`, `g = sin(πx) sin(πy)` on the unit square, random low-quality meshes
@@ -627,18 +630,18 @@ Tiers: A formulas, B one face, B′ Thm. D.1, C the complex model, D and E cited
 
   | | IDT | refinement |
   |---|---|---|
-  | integers (default Delaunay test / the authors') | 99.97 % / 99.97 % | 99.97 % / 99.97 % |
-  | signposts, Ruppert / Chew rules (with boundary) | 100.00 % / 99.97 % | 99.78 % / 99.78 % |
+  | integers (default Delaunay test / the authors') | 100.00 % / 100.00 % | 100.00 % / 100.00 % |
+  | signposts, Ruppert / Chew rules (with boundary) | 100.00 % / 100.00 % | 99.81 % / 99.81 % |
   | demo, integer backend (7444 meshes ≤ 200k faces) | 100.00 % | 99.97 % |
   | demo, signpost backend (same set, not mollified) | 87.86 % | 20.71 % |
 
-  Integer failures: only 176193 and 190253, 10-minute time-outs of a refinement that does not
-  terminate (I30). No certificate failure, invalid subdivision, trace failure, overflow or
-  out-of-memory; 100 % on the 406 meshes with boundary. Signpost Ruppert failures: 15 trace
-  failures plus the same two. Sizes after refinement: `|V^S|/|V⁰|` mean 19.83, p95 46.37 (paper 20,
-  45); `|V¹|/|V⁰|` 3.80, 8.00 (paper 3.7, 7.8). Counters over the integer runs: 140 M insertions,
-  184 706 removals, 1266 removals refused (110 meshes), 2840 clamped crossings in refinement and
-  10 353 in the refined subdivisions (0 in the IDT ones), 791 moves (I16), 7 face splits refused
+  Integer failures: none (WP10 had two time-outs, 176193 and 190253, fixed by I30; numbers here are
+  the rerun after a589919 and 16210ca, `runs_tmp/i30/`). No certificate failure, invalid subdivision,
+  trace failure, overflow or out-of-memory. Signpost Ruppert failures: 15 trace failures. Sizes after
+  refinement: `|V^S|/|V⁰|` mean 19.82, p95 46.35 (paper 20, 45); `|V¹|/|V⁰|` 3.80, 8.00 (paper 3.7,
+  7.8). Counters over the integer runs: 140.07 M insertions, 184 706 removals, 1266 removals refused
+  (110 meshes), 756 thin flips (I30, 105 meshes), 2840 clamped crossings in refinement and 10 338 in
+  the refined subdivisions (0 in the IDT ones), 791 moves (I16), 7 face splits refused
   (`RecoverFailed`, meshes 551019 and 97660; 551019 ends at 21.17° with the default Delaunay test
   and reaches 25° with the authors'). 169 meshes end with corners below 25° at narrow cones;
   Chew's rules leave 16 059 diametrally encroached boundary edges on 276 of the 406 boundary
@@ -647,10 +650,10 @@ Tiers: A formulas, B one face, B′ Thm. D.1, C the complex model, D and E cited
   719791 58.6 s (paper 0.2 s, 0.6 s, 4 min); signposts 0.021, 0.064, 36.1 s. 719791's common
   subdivision (33.9 M vertices, the one the paper could not extract) extracts in 16.1 s at 12 GB
   peak. On the 50-mesh subset our integer refinement costs 1.7× the signposts' (paper 2.7×) and
-  the demo's integer refinement a median 2.8× ours. Performance outlier: mesh 54621 (1450 boundary
-  edges, 12 951 Chew removals) takes 28 s with integers and 65 s with Chew signposts against 0.6 s
-  Ruppert and 2.1 s in the demo; the removal follows Alg. 10 line 20 (Dijkstra ball `< ℓ` after the
-  insertion loop) where the reference removes after every split with `≤`.
+  the demo's integer refinement a median 2.8× ours. Mesh 54621 (12 951 Chew removals) took 28.9 s
+  with integers (demo 2.1 s): a whole-state copy per removal, replaced by an undo journal (§4.6,
+  16210ca), now 1.16 s. I30's meshes: 176193 0.048 s, 190253 0.177 s (demo 0.17, 0.52). Total integer
+  refinement time over Thingi10k 5 999 s → 3 488 s (56 jobs); Fig. 15/16/19 unchanged.
 * **Fig. 14** reproduced exactly as described (§13 has no question: the generator is ours, the
   random seeds are listed).
   **Result (WP7, 406c0e0, `examples/fig14.rs`).** Sizes `round(2^(k/2))`, `k = 12 … 22` (the
@@ -831,7 +834,18 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   `export_simplicial` and its cut transfer uses `SimplicialExport::edge_point` and
   `segments_on_input`; the integer representation has no export yet (it would be the common
   subdivision plus `extract_intrinsic_edge`), so `ddg-uv` stays on signposts until it exists.
-* **I30** *Non-terminating refinement on Thingi10k 176193 and 190253 (open).* Both closed, about
+* **I30** *Non-terminating refinement on Thingi10k 176193 and 190253 (resolved, a589919).*
+  Cause: Delaunay flips refused by IT-SPEC N5's shape limit (shape ~2e-7 from mollified
+  near-duplicate vertices; 4 IDT edges on 176193, 35 refinement flips on 190253) left edges that
+  are not Delaunay. The circumcentres of their triangles are not in empty circles: on 176193,
+  4 057 of the first 16 244 insertions landed closer than the circumradius to an existing vertex
+  (down to 6e-4 R; the reference: 0 of 1 592), each making short edges to refine in turn.
+  Refinement now retries such a flip under `DELAUNAY_FLIP_SHAPE` (strict convexity and valid
+  triangles; gc's `flipEdgeIfNotDelaunay` tests only a finite length), in its own flips and after
+  a `Blocked` initial flip; by Lawson, a Delaunay flip never lowers the pair's smallest angle.
+  `RefineReport::n_thin_flips`. 176193: 1 595 insertions, 25.04° (demo 1 592); 190253: 21 695,
+  25.01° (demo 21 704). Thingi10k: thin flips on 105 meshes (756); results changed only there.
+  `tests/thingi_regressions.rs` passes. The original report: both closed, about
   16k faces, with input angles near `1e-5°`. The shared driver `ddg_intrinsic::refine` keeps
   inserting: at 10 insertions per vertex 176193 stops after 162 790 insertions at minimum angle
   `6.7e-6°` with 18 671 corners below 25°; signposts make the identical insertions; the demo
@@ -853,7 +867,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP7 | **done** (b463c96, 406c0e0): transfer (Eq. 13–14); Fig. 14 as the paper's Poisson experiment (trends reproduced, factors depend on the unpublished generator) | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
-| WP10 | **done** (307308a–a9fa390): Thingi10k (Table 1 integers 99.97 %, two time-outs, I30), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
+| WP10 | **done** (307308a–a9fa390; I30 fix a589919, 16210ca): Thingi10k (Table 1 integers 100 %), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
 | WP11 | **done, default still signposts** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `optimal_delaunay`, `move_vertex`, `odt_target`, `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input` (so `ddg-uv`, I29), `signpost` (tangent fields, I26) | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.

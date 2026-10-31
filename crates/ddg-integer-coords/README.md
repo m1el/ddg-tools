@@ -436,39 +436,40 @@ refinement to 25° (no insertion limit, as the paper's benchmark; mollified `1e-
 |---|---|---|---|---|
 | explicit overlay | 100 % | – | – | – |
 | signposts (paper) | 96.0 % | 69.1 % | | |
-| signposts, Ruppert rules (this workspace) | | | 100.00 % (7745) | 99.78 % (7728) |
-| signposts, Chew rules (this workspace) | | | 99.97 % (7743) | 99.78 % (7728) |
-| integer coordinates | 100 % | 100 % | **99.97 % (7743)** | **99.97 % (7743)** |
-| integer coordinates, the authors' Delaunay test | | | 99.97 % (7743) | 99.97 % (7743) |
+| signposts, Ruppert rules (this workspace) | | | 100.00 % (7745) | 99.81 % (7730) |
+| signposts, Chew rules (this workspace) | | | 100.00 % (7745) | 99.81 % (7730) |
+| integer coordinates | 100 % | 100 % | **100.00 % (7745)** | **100.00 % (7745)** |
+| integer coordinates, the authors' Delaunay test | | | 100.00 % (7745) | 100.00 % (7745) |
 | the authors' demo, integer backend (7 444 meshes up to 200 000 faces) | | | 100.00 % (7444) | 99.97 % (7442) |
 | the authors' demo, signpost backend (same) | | | 87.86 % (6540) | 20.71 % (1542) |
 
 Signposts were run on every mesh, with their boundary if any (the paper's signposts were
 evaluated without boundary): on the 7 339 closed meshes the numbers are the same to within a mesh
-(integers 99.97 %/99.97 %, signposts Ruppert 100.00 %/99.77 %, demo signposts 87.76 %/20.68 %). The
+(integers 100.00 %/100.00 %; in the WP10 run, before I30's fix, signposts Ruppert 100.00 %/99.77 %, demo
+signposts 87.76 %/20.68 %). The
 demo's signpost backend does not mollify its input (the integer backend does, `1e-5`); ours use
 the same mollified lengths as our integers, which is why they do so much better than the paper's and
 the demo's signposts. The demo's failures are its own assertions in the common-subdivision recovery
 (over both operations: `could not identify source face on mesh A` 5 336, `normal coordinates ... must
 sum to an even number` 1 213, `non finite edge length` 8, 40 segmentation faults and 200 time-outs).
 
-**Integer failures (every one).**
+**Integer failures: none** (after I30's fix, a589919; the WP10 run had two). No certificate failure
+(7 745 IDTs, 7 745 refinements), no invalid subdivision, no trace failure, no overflow, no
+out-of-memory. The signposts' 15 failures under Ruppert's rules are trace failures (the same meshes
+as in WP10).
 
-| mesh | what | cause |
-|---|---|---|
-| 176193 (16 279 faces, closed) | refinement does not end (time-out at 600 s; 162 790 insertions at 10 per vertex and still going) | refinement driver, see below |
-| 190253 (15 374 faces, closed) | the same | the same |
-
-No certificate failure (0 of 7 743 completed IDTs and 0 of 7 743 refinements), no invalid
-subdivision, no trace failure, no overflow, no out-of-memory. The two failures are the same with the
-authors' Delaunay test, with the signposts under Chew's rules (also a time-out) and with Ruppert's
-rules (the signposts' trace of a circumcenter path gives up at its crossing limit); the authors'
-demo, integer backend, finishes both in 0.6 s and 1.4 s (17 871 and 37 078 vertices, minimum angle
-25.04° and 25.01°). Reproduction: `cargo test --release -p ddg-integer-coords --test
-thingi_regressions -- --ignored` (needs `data/thingi10k/converted/`): even with 60 000 insertions
-allowed the minimum angle is 1e-5° and the limit is reached. Both meshes have input angles near
-1e-5°. The cause is in the shared driver (`ddg_intrinsic::refine`), not in the integers: the
-signposts make the same insertions. Not diagnosed further (the library is not in WP10's files).
+The two meshes of the WP10 run, 176193 and 190253 (about 16 000 faces, closed), did not finish their
+refinement, with integers and signposts alike. Cause (SPEC I30): mollified near-duplicate input
+vertices make Delaunay flips whose shape number (about 2e-7) is below IT-SPEC N5's limit `1e-6`;
+refused, they left edges that are not Delaunay (4 in 176193's IDT, 35 flips during 190253's
+refinement), and the circumcentres of their triangles are not in empty circles: 4 057 of the first
+16 244 insertions on 176193 landed closer than the circumradius to an existing vertex (the reference:
+0 of 1 592), each making short edges to refine in turn. Refinement now retries such a flip with only
+strict convexity and valid triangles required (geometry-central's `flipEdgeIfNotDelaunay` has no
+shape test; by Lawson, a Delaunay flip never lowers the pair's smallest angle). 176193: 1 595
+insertions, 25.04° (the demo 1 592); 190253: 21 695, 25.01° (the demo 21 704). `RefineReport::
+n_thin_flips` counts these flips: 756 on 105 meshes, and results changed only on those (`|V¹|` by
+tens of vertices). `tests/thingi_regressions.rs` runs both (needs `data/thingi10k/converted/`).
 Reaching 25° but not on every face: with the default Delaunay test mesh 551019 has 6 face splits
 refused by App. A's recovery (`RecoverFailed`, minimum angle 21.17°); with the authors' test it reaches
 25°. The other 169 meshes with corners below 25° at the end are narrow cones (angle sum below 60°, the
@@ -476,23 +477,24 @@ narrow-cone rule of Chew's rules: 3 000 corners at needle vertices, 871 at angle
 bound). Chew's rules leave the boundary edges encroached by the diametral circles (16 059 edges on
 276 of the 406 meshes with boundary: not a failure, the minimum angle is reached).
 
-Counters over the completed integer runs: 140 M vertices inserted, 184 706 removed, 1 266 removals
-refused (I8, I27; on 110 meshes), 2 840 crossings clamped in the refinements (I5; 385 meshes) and
-10 353 more in the refined subdivisions (624 meshes), 0 clamps in the IDT subdivisions, 791 places
+Counters over the integer runs: 140.07 M vertices inserted, 184 706 removed, 1 266 removals
+refused (I8, I27; on 110 meshes), 756 thin flips (I30; 105 meshes), 2 840 crossings clamped in the
+refinements (I5; 385 meshes) and 10 338 more in the refined subdivisions, 0 clamps in the IDT subdivisions, 791 places
 moved into their face (I16), 7 face splits refused (551019: 6, 97660: 1; the I28 refusal of an edge
 split is not counted separately by the driver), 0 trace failures. The Delaunay test of the
 reference (`DelaunayCriterion::REFERENCE`) gives the same picture (1 refusal).
 
 Integers against signposts under the same rules: the IDTs have the same flips and the same
 `Σ n⁺` on all 7 743 meshes where both completed; after refinement `|V¹|` is equal on 7 712 of 7 728
-(the differences are the signposts' snaps onto input edges, I28/N10), and `|V¹|` and `|V^S|` both on 6 734.
+(the differences are the signposts' snaps onto input edges, I28/N10), and `|V¹|` and `|V^S|` both on 6 734
+(WP10 run).
 
 ### Sizes
 
 | | `|V^S|/|V⁰|` mean | 95th percentile | `|V¹|/|V⁰|` mean | 95th percentile |
 |---|---|---|---|---|
 | paper, after refinement | 20 | 45 | 3.7 | 7.8 |
-| integer coordinates, after refinement (7 743 meshes) | 19.83 | 46.37 | 3.80 | 8.00 |
+| integer coordinates, after refinement (7 745 meshes) | 19.82 | 46.35 | 3.80 | 8.00 |
 | after the IDT | 5.17 | 15.04 | 1 | 1 |
 
 ### Against the authors' demo
@@ -516,8 +518,8 @@ does (`--refineMaxInsertions=0`), on the 7 444 converted meshes up to 200 000 fa
   0.9992; `Σ|V^S|` −0.14 %. Minimum angle over valid faces: the demo ends below 25° on 9 meshes
   (56527, 78735, 106830, 106839, 106840, 107202, 264708, 521601, 521603), ours on none (with the
   authors' test).
-* Success disagrees on 4 meshes: the demo time-outs on 65399 and 106831 where ours finishes, ours on 176193
-  and 190253 where the demo finishes.
+* Success disagrees on 2 meshes: the demo times out on 65399 and 106831, where ours finishes (in the WP10
+  run also on 176193 and 190253, where ours did not finish before I30's fix).
 * **Reference tests** ported in `tests/reference_ports.rs` on `fox.ply` and `cat_head.obj`
   (`tests/assets/`, MIT notice): `IntegerFlip`, `DelaunayTriangulationsAgree` (lengths equal to 0, the
   reference's bound is 1e-5), `IntegerTrace`, `IntegerRefine` (fox: 313 → 516 vertices, 25.04°;
@@ -537,6 +539,9 @@ was an i9-9980XE. 'refine' includes the certificate (integers).
 | 44395 (Fig. 15, 2 948 vertices) | 0.2 s | 0.029 | 0.021 | 0.084 | 0.031 |
 | 54674 (Fig. 16, 9 389) | 0.6 s | 0.096 | 0.064 | 0.305 | 0.101 |
 | 719791 (Fig. 19, 871 434) | 4 min / 1.5 min | 58.6 s | 36.1 s | 181.1 s | 50.9 s |
+| 176193 (I30, after the fix) | – | 0.048 | 0.028 | 0.17 | – |
+| 190253 (I30, after the fix) | – | 0.177 | 0.136 | 0.52 | – |
+| 54621 (after the undo journal) | – | 1.16 | 0.604 | 2.14 | – |
 
 719791: `|V¹|` 3 349 214, **`|V^S|` 33 873 704** (the paper: about 30 M and not extractable for memory);
 the common subdivision of the integers took 16.1 s and 12.1 GB peak resident (24 GB limit), the demo's 229 s.
@@ -563,30 +568,33 @@ The certificate roughly doubles the IDT's cost and the integers' subdivision 1.5
 (it also recovers the crossings' geometry from the integers); the integer IDT itself costs the signposts'.
 
 
-**A slow case.** Mesh 54621 (159 858 vertices, 1 450 boundary edges): under Chew's rules the refinement
-removes 12 951 inserted vertices and takes 28 s alone (439 s in the 56-job run, memory bandwidth), the
-signposts under Chew's rules 65 s, the signposts under Ruppert's rules 0.6 s, and the authors' demo, integer
-backend, 2.1 s (224 718 vertices against our 225 812). The removal step of boundary splits (the Dijkstra
-ball of radius `ℓ`, strict as Alg. 10 line 20; the reference removes after every split with `≤`) costs
-the difference; it is in the shared driver. The same mesh is the maximum of the 56-job run (450 s).
+**A slow case, fixed.** Mesh 54621 (159 858 vertices, 1 450 boundary edges, 12 951 removals under
+Chew's rules) took 28.9 s with integers, 64.9 s with signposts under Chew's rules, 0.6 s under Ruppert's
+(no removals) and 2.1 s in the authors' demo; 439 s in the 56-job run. `perf`: 87 % of the time was
+`memcpy`. A removal that might need flips first copied the whole state to restore it on a refusal
+(about 20 MB with integers, 50 MB with signposts at 226 000 vertices), O(n) per removal. Now a refused
+removal undoes its flips from a journal (`Complex::flip_undo`/`undo_flip` plus the representation's
+own data, 16210ca), with bit-identical results: 1.16 s with integers, 0.80 s with signposts under
+Chew's rules. The removal schedule (Alg. 10 line 20, Dijkstra ball `< ℓ` after the split's flips;
+the reference removes in its split callback with `≤ ℓ`) was not the cost and is kept. Over the whole
+Thingi10k run the integer refinement time went from 5 999 s to 3 488 s; the slowest mesh is now
+719791.
 
 ### Verdict on SPEC §13 Q3
 
-**The gate passes, with two listed exceptions.** Q3 asks for integer success at least the paper's
-100 %/100 % minus explained exceptions such as time-outs or memory, and no certificate failure.
+**The gate passes.** Q3 asks for integer success at least the paper's 100 %/100 % minus explained
+exceptions such as time-outs or memory, and no certificate failure.
 
-* Integer coordinates: 7 743 of 7 745 meshes complete the IDT and the refinement with a valid common
-  subdivision (99.97 % in both columns, 100.00 % on the 406 meshes with boundary).
-* Certificate failures: **none** (7 743 IDT, 7 743 refinement certificates), no invalid subdivision, no
+* Integer coordinates: 7 745 of 7 745 meshes complete the IDT and the refinement with a valid common
+  subdivision (100.00 % in both columns).
+* Certificate failures: **none** (7 745 IDT, 7 745 refinement certificates), no invalid subdivision, no
   trace failure, no overflow, no memory failure; the 30 M-vertex subdivision of 719791 is extracted
   (33.9 M vertices, 12 GB, 58.6 s + 16.1 s, against the paper's 4 min and "not extractable").
-* The two exceptions, 176193 and 190253, are time-outs of a non-terminating refinement. They are
-  explained (shared refinement driver, independent of the representation: the signposts do the same
-  and the authors' demo does not) but they are a defect to fix, not load: they are `#[ignore]`d
-  failing tests in `tests/thingi_regressions.rs`.
-* The integers do better than the paper's signposts (96.0 %/69.1 %) and as well as our own signposts
-  (100.00 %/99.78 % under Ruppert's rules, whose 17 failures are 15 trace failures and the same two
-  meshes); the demo's signposts reach 87.9 %/20.7 % unmollified.
+* The WP10 run's two exceptions (176193, 190253) were a defect of the shared refinement driver,
+  fixed in a589919 (SPEC I30); their tests in `tests/thingi_regressions.rs` pass.
+* The integers do better than the paper's signposts (96.0 %/69.1 %) and than our own signposts
+  (100.00 %/99.81 % under Ruppert's rules, whose 15 failures are trace failures); the demo's
+  signposts reach 87.9 %/20.7 % unmollified.
 
 The switch of Q3 is `Representation::DEFAULT` and the `representation=` defaults (WP11); this WP does not
 touch them.
