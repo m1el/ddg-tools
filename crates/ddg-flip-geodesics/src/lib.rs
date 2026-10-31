@@ -31,6 +31,34 @@
 //! interface), extraction on the input mesh, Bézier curves, the constrained Delaunay
 //! triangulation.
 //!
+//! # Example
+//!
+//! ```
+//! use ddg_core::Geometry;
+//! use ddg_core::generators::grid_disk;
+//! use ddg_flip_geodesics::{CertifyOptions, GeodesicNetwork, dijkstra_path, path_from_vertices};
+//! use ddg_intrinsic::IntrinsicTriangulation;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // A flat 4 x 4 grid; vertex (i, j) is 5 i + j.
+//! let shape = grid_disk(4, 4)?;
+//! let mesh = shape.topology()?;
+//! let geometry = Geometry::from_positions(&mesh, &shape.positions)?;
+//! let tri = IntrinsicTriangulation::new(&mesh, &geometry)?;
+//!
+//! // The shortest edge path between two corners, and a path that turns at (2, 2).
+//! let diagonal = dijkstra_path(&tri, 0, 24)?;
+//! let turn = path_from_vertices(&tri, &[7, 12, 13], false)?;
+//! let network = GeodesicNetwork::new(tri, &[diagonal, turn], &[], None)?;
+//!
+//! // Not geodesic yet: the turn at (2, 2) bends by 90 degrees.
+//! let certificate = network.certify(&CertifyOptions::default())?;
+//! assert!(!certificate.geodesic);
+//! assert!(certificate.failures.iter().any(|f| f.vertex == 12));
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # The reference implementation
 //!
 //! The authors' implementation in geometry-central (© 2017–2019 Nicholas Sharp and the

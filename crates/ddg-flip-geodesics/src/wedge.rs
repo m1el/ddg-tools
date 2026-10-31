@@ -198,7 +198,9 @@ impl VertexStar {
             .position(|e| e.segment == id && e.start == start)
     }
 
-    /// The sweep counter-clockwise from entry `from` to entry `to` (distinct).
+    /// The sweep counter-clockwise from entry `from` to entry `to` (distinct). Its angle is
+    /// [`wedge_angle`] of its corners, or `+∞` across the boundary gap (SPEC id
+    /// `fo-boundary-wedge`, not tagged until F5).
     ///
     /// # Panics
     /// If an index is out of range.
@@ -290,6 +292,7 @@ impl VertexStar {
     /// Checks that the joints at this vertex do not cross (SPEC §2.1): every joint pairs the
     /// end of its incoming segment with the start of its outgoing one, and no two pairs
     /// interleave in the cyclic order of [`entries`](Self::entries). Path ends pair nothing.
+    /// SPEC id `fo-non-crossing` (not tagged until F5).
     ///
     /// # Errors
     /// [`FlipError::Crossing`] naming the vertex and the paths of two interleaving joints.
@@ -361,7 +364,8 @@ impl VertexStar {
 
 /// The angle of a wedge, Eq. 1: the sum of its corner angles `θ` (from the edge lengths,
 /// `ddg_core::geometry::corner_angle` through [`Triangulation::corner_angle`]), in the order
-/// given (F2).
+/// given (F2). SPEC id `fo-wedge-angle` (no `formula` tag yet: the id is not in Lean or
+/// `CITED.md` until work package F5).
 pub fn wedge_angle<T: Triangulation>(tri: &T, corners: &[u32]) -> f64 {
     corners.iter().map(|&h| tri.corner_angle(h as usize)).sum()
 }
@@ -453,7 +457,8 @@ impl JointGeometry {
 
     /// The classification (SPEC §3): [`Turn::Straight`] if `α^min > π − tolerance`
     /// (`gc: fg.cpp:534-543`, default tolerance `1e-5`, F3), otherwise the side of the
-    /// smaller wedge.
+    /// smaller wedge. Eq. 2 with a tolerance: SPEC id `fo-locally-shortest` (not tagged until
+    /// F5).
     pub fn turn(&self, tolerance: f64) -> Turn {
         if self.min_angle() > PI - tolerance {
             Turn::Straight
