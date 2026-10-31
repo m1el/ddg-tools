@@ -289,6 +289,24 @@ split, the distance of `m` to the nearest arc in units of the face's shortest ed
 is refused with `TooCloseToCurve` when it is below an option (default 0: never refused; set by the
 callers that need the inserted point exactly, see §5).
 
+**As built (WP4).** `split_face(f, bary, &FaceSplitOptions { too_close })` (and the trait's
+`insert_vertex`; `locate_in_face` without inserting). Regions are enumerated from the integers
+alone (`FaceArrangement`); the side tests are barycentric determinants in each chord's corner frame
+(`ab − b·v₁ − a·v₂` for an arc around a corner, `β·v₁ − (1−β)·v₂` for a fan arc; computing them in
+the plane picked a wrong region when an arc's ends were within `1e-12` of a corner). The region
+with the largest margin wins, ties in the oracle's order, and the counts are `split_counts` of that
+region (I15), so the result is valid whichever region is picked. Crossing parameters are clamped
+to `[0, 1]` and counted (as I5). The I6 measure `curve_distance` is the distance of `m` to the
+nearest bounding chord, in shortest sides. The region's input face is read from a gap of the region
+on a side, or from the roundabout when all three sides run along input edges. Errors:
+`TooCloseToCurve { face, distance, limit }`, `RecoverFailed { face, input_face, detail }`.
+Measured: of 26 099 insertions (17 shapes, spot, camelbad, 7 scenarios), the integers equal
+`from_intrinsic` of the signposts in all but 9, all within `1.2e-10` shortest sides of an arc
+where rounding puts the point on different sides in the two representations (both valid);
+the signposts snap places within `1e-12` of an input edge onto it (816 cases), so those states
+differ by design; refusals identical; `q⁰` within `5.6e-10` mean edge lengths. Insertion costs
+1–3.5 µs (signposts 0.9–1.7 µs; the integers run `extract_intrinsic_edge` on the three sides).
+
 ### 4.5 Edge split (Sec. 3.4, Alg. 7, Eq. 6)
 
 `n_ij ≥ 0`: face split then flip (Fig. 10 top). `n_ij = −1`: explicit split along the shared
@@ -337,7 +355,15 @@ with signposts computed from corner angles. Frame convention: direction 0 at a v
 the boundary), `Θ` from the lengths; a frame is valid only for the current connectivity, since a
 flip at an interior vertex can move its outgoing halfedge. Measured against stored signposts:
 within 6.2e-12 rad on 17 shapes, traces end within 6.2e-12 of the mean edge length), then `SplitFace(x)`, then `RemoveVertex(i)`. The optimal Delaunay
-iteration of IT-SPEC N21 then runs on this representation unchanged.
+iteration of IT-SPEC N21 then runs on this representation unchanged (not ported yet).
+
+**As built (WP4).** `move_vertex(v, displacement, &FaceSplitOptions) -> VertexMoveReport`: the
+displacement is given in the `AngleFrames` frame of `v` (direction wrapped into `[0, 2π)`); a path
+that ends on an edge is an edge split; the moved vertex keeps its id (removal renumbers the last
+vertex into the freed one); boundary vertices are `Unsupported` (I7); a refused move
+(`RemovalStuck`, a path leaving the surface) restores the whole state from a copy. Measured: 1603
+moves inside the star agree with the signposts' `move_vertex` within `7.6e-13` mean edge lengths;
+951 moves beyond the star (which the signposts cannot do) certify.
 
 ### 4.8 Common subdivision (Sec. 3.7, Supp. Alg. 9)
 
@@ -609,8 +635,13 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 * **I16** *App. A uses every corner of the region* (`3 ≤ ρ ≤ 6`), as the paper says; the reference
   picks 3–4 per case and rescues coordinates outside `[−0.5, 1.5]` by heuristics, then clamps
   (`ic:918-1158`). We solve the minimum-norm system (Eq. 15) by QR of the `3 × ρ` matrix, report the
-  smallest barycentric coordinate before any clamp, clamp only coordinates within `1e-12` of 0, and
-  return `RecoverFailed { face }` otherwise.
+  smallest barycentric coordinate before any clamp, and return `RecoverFailed` beyond `1e-12`.
+  As built (WP4): an insertion place within `1e-12` outside `(0, 1)` is moved towards the region's
+  centroid by the smallest fraction that makes it a valid `Face` point, and the fraction is
+  reported (12 cases in the tests, smallest coordinate `−2.2e-13`); point queries instead snap
+  coordinates `≤ 1e-12` to an edge or vertex point (`LOCATE_SNAP`, as §4.9). On flat meshes the
+  recovered place is within `8.6e-14` mean edge lengths of the true one; the number of corners used
+  always equals the region's (3/4/5/6).
 * **I17** *Alg. 2 and 3 in full.* The reference omits Alg. 3's walk-back past inserted vertices
   (asserts the curve starts in `V⁰`, `ic:1980`) and Alg. 2's `uStart/uEnd` remapping of the input
   parameter for a piece of a split input edge (stores the piece's own parameter, `ic:292-299`; map
@@ -685,7 +716,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP1 | **done** (e2d71da–2fb8762): `IntegerTriangulation` (no `Triangulation` impl yet: needs WP2–WP4), init, §2.3, the oracle's integer formulas, combinatorial Alg. 1–4, `certify`, `from_intrinsic` (conversion from signposts, the differential oracle for WP3), errors | `src/{lib,error,coords,formulas,trace,certify,convert}.rs` | WP0 | Opus |
 | WP2 | **done** (7aa2891–bb56df2): geometric crossings, strip intersection, `extract_intrinsic_edge` (linear), `trace_edge_on_input` wired; same crossed input edges as signposts on all 678 806 edges, 0 clamps | `src/geometry.rs`, `tests/geometry.rs`, `examples/extract_cost.rs` | WP1 | Opus |
 | WP3 | **done** (7b7dcd3–a315f9e): flip (Eq. 3, 4), Delaunay flipping, edge split incl. `n ≥ 0`, removal (I27), `impl Triangulation`; 437 595 flips on 266 states equal `from_intrinsic` of the signposts exactly | `src/{flip,split,remove,interface}.rs`, `tests/ops.rs` | WP1 | Opus |
-| WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
+| WP4 | **done** (548d804, 6080ce8): face split (I6, I15), App. A and the `T¹ → T⁰` point query (I16), moves; `insert_vertex` of the trait | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
 | WP7 | transfer (Eq. 13–14), Fig. 14 | `src/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
