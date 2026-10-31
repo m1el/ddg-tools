@@ -499,6 +499,49 @@ default, Sharp, Soliman, Crane 2019) or `"integer"` (integer coordinates, Gilles
 `smoothest_direction_field` stays on signposts (it needs input-aligned tangent frames, contract
 I26).
 
+### Geodesics by edge flips (`geodesic_path`, `geodesic_network`, `geodesic_bezier`)
+
+Crate `ddg-flip-geodesics` (Sharp, Crane, *You Can Find Geodesic Paths in Triangle Meshes by Just
+Flipping Edges*, ACM TOG 39(6), 2020; contract `crates/ddg-flip-geodesics/SPEC.md` section 13).
+
+```python
+geodesic_path(positions, triangles, vertices, *, closed=False, pin_waypoints=True,
+              representation=None, mollify=None, tolerance=1e-5, max_iterations=None,
+              stop_length_ratio=None, certify_input=True, triangulation_edges=False)
+geodesic_network(positions, triangles, edges, *, pinned=None, <same options>)   # edges: (m, 2)
+geodesic_bezier(positions, triangles, control_vertices, *, rounds=4, <same options>)
+# -> GeodesicResult: .polylines (list of array('d'), 3 per point), .surface_points (list of
+#    kind/id/params dicts), .lengths, .closed, .report, .control_polygon (Bezier),
+#    .triangulation_edges (dict as IntrinsicTriangulation.edge_polylines, or None)
+```
+
+* Path: the shortest edge path through the waypoints, shortened to a geodesic (`pin_waypoints=True`
+  keeps it through every waypoint; `False`: they seed it, the ends stay; `closed=True`: a loop).
+  Network: mesh edges (vertex pairs) shortened together without crossing; junctions and `pinned`
+  vertices stay (seams, cut graphs). Bezier: midpoint subdivision, `rounds` 0 to 24 (1 to 8 for
+  interactive use); `report["bezier"]` has the control points (vertices of the final
+  triangulation) and the counts, `control_polygon` their positions.
+* `polylines` are on the input surface; a closed path repeats its first point; with numpy,
+  `asarray(p).reshape(-1, 3)`. `surface_points[i]` places each point on the input mesh: kind 0
+  vertex, 1 edge (`t` from the lower-numbered vertex), 2 face (barycentric).
+* `report`: `representation`, `status` (`"geodesic"`, `"stalled"`, `"iteration_limit"`,
+  `"length_ratio"`, ...), `length`, `initial_length`, `iterations`, `flips`, `refused_flips`, `stalled`,
+  `n_crossings`, `max_relative_mismatch`, `certificate` (the geodesic certificate of the
+  triangulation: `geodesic`, `min_angle`, `failures`, ...) and `input_certificate` (computed on the
+  input mesh alone: `passed`, `max_crossing_deviation`, `min_joint_angle`, `max_length_error`,
+  `faults`; `None` with `certify_input=False`, which is faster).
+* `representation=None` is the default of every consumer: **signposts** until the integer
+  representation passes the Thingi10k evaluation (Integer Coordinates WP10, Q3). It is
+  `ddg_intrinsic_apps::representation::Representation::DEFAULT`, so flipping the default is one
+  constant. Nothing falls back silently: a failed extraction on signposts is a `SolveError` that
+  says to try `representation="integer"`. `mollify` is for integer coordinates only.
+* Errors: `InputError` names the parameter (fewer than two waypoints, two equal consecutive ones,
+  an index out of range, a pair that is not an edge); `SolveError` for paths that touch or cross
+  ("move a control point") and for a repeated Bezier control point.
+* The GIL is released while the paths are shortened and extracted (rayon, global pool).
+
+Tests: `python-tests/test_flip_geodesics.py` (run by `scripts/py-test.sh`).
+
 ### `IntrinsicTriangulation` (integer coordinates)
 
 ```python

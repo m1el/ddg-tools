@@ -1341,3 +1341,147 @@ class IntrinsicTriangulation:
         projection). Integer coordinates only."""
     def to_intrinsic(self, values: Buffer) -> array[float]:
         """Transfer a function on the input vertices to the triangulation's vertices."""
+
+
+# ---- Geodesics by edge flips: "You Can Find Geodesic Paths in Triangle Meshes by Just Flipping
+# Edges" (Sharp, Crane 2020), crate ddg-flip-geodesics ------------------------------------------
+
+class GeodesicCertificate(TypedDict):
+    """The certificate of the triangulation ``T`` (every joint straight or exempt)."""
+
+    geodesic: bool
+    tolerance: float
+    n_joints: int
+    n_pinned: int
+    n_straight: int
+    n_blocked: int
+    min_angle: float
+    failures: list[tuple[int, float, bool]]
+    """Failing joints: (vertex of ``T``, angle in radians, flexible)."""
+
+class InputGeodesicCertificate(TypedDict):
+    """The certificate on the input mesh, computed from the input alone."""
+
+    passed: bool
+    n_crossings: int
+    max_crossing_deviation: float
+    n_joints: int
+    n_exempt: int
+    min_joint_angle: float
+    max_wedge_mismatch: float
+    max_length_error: float
+    n_faults: int
+    faults: list[str]
+
+class BezierReport(TypedDict):
+    rounds: int
+    control_points: array[int]
+    """Vertices of the final triangulation: the control polygon of the result."""
+    n_splits: int
+    n_snapped: int
+    n_delaunay_retries: int
+    n_nudged: int
+    n_shortenings: int
+    n_not_geodesic: int
+
+class GeodesicReport(TypedDict):
+    representation: Literal["signposts", "integer"]
+    status: Literal[
+        "geodesic", "stalled", "iteration_limit", "length_ratio", "min_angle", "sweep_limit"
+    ]
+    length: float
+    initial_length: float
+    iterations: int
+    flips: int
+    refused_flips: int
+    stalled: int
+    n_paths: int
+    n_crossings: int
+    max_relative_mismatch: float
+    n_triangulation_vertices: int
+    certificate: GeodesicCertificate
+    input_certificate: InputGeodesicCertificate | None
+    """None with ``certify_input=False``."""
+    bezier: BezierReport | None
+    """Only for ``geodesic_bezier``."""
+
+@final
+class GeodesicResult:
+    @property
+    def polylines(self) -> list[array[float]]:
+        """Per path ``array('d')``, 3 per point on the input surface (numpy:
+        ``asarray(p).reshape(-1, 3)``). A closed path repeats its first point."""
+    @property
+    def surface_points(self) -> list[Places]:
+        """Per path the places of its points on the input mesh (vertex, edge with ``t`` from the
+        lower-numbered vertex, face with barycentric coordinates)."""
+    @property
+    def lengths(self) -> array[float]: ...
+    @property
+    def closed(self) -> list[bool]: ...
+    @property
+    def report(self) -> GeodesicReport: ...
+    @property
+    def control_polygon(self) -> array[float] | None:
+        """Bézier: ``array('d')``, 3 per control point of the result."""
+    @property
+    def triangulation_edges(self) -> EdgePolylines | None:
+        """With ``triangulation_edges=True``: the edges of the final triangulation as polylines
+        on the input mesh."""
+
+def geodesic_path(
+    positions: Buffer,
+    triangles: Buffer,
+    vertices: Buffer,
+    *,
+    closed: bool = False,
+    pin_waypoints: bool = True,
+    representation: Literal["signposts", "integer"] | None = None,
+    mollify: float | None = None,
+    tolerance: float = 1e-5,
+    max_iterations: int | None = None,
+    stop_length_ratio: float | None = None,
+    certify_input: bool = True,
+    triangulation_edges: bool = False,
+) -> GeodesicResult:
+    """A geodesic path (or loop, ``closed=True``) through the waypoints ``vertices`` by FlipOut.
+    ``representation=None`` is the default of all consumers (signposts until the integer
+    representation passes its evaluation). ``pin_waypoints=False``: the waypoints only seed the
+    path. Raises ``InputError`` (the message names the parameter), ``MeshError`` and
+    ``SolveError`` (the path crosses itself; a failed extraction on signposts says to try
+    ``representation="integer"``)."""
+
+def geodesic_network(
+    positions: Buffer,
+    triangles: Buffer,
+    edges: Buffer,
+    *,
+    pinned: Buffer | None = None,
+    representation: Literal["signposts", "integer"] | None = None,
+    mollify: float | None = None,
+    tolerance: float = 1e-5,
+    max_iterations: int | None = None,
+    stop_length_ratio: float | None = None,
+    certify_input: bool = True,
+    triangulation_edges: bool = False,
+) -> GeodesicResult:
+    """The network of mesh edges ``edges`` (vertex pairs, shape ``(m, 2)``) shortened without
+    crossings; junctions and ``pinned`` vertices stay. One path per branch or loop."""
+
+def geodesic_bezier(
+    positions: Buffer,
+    triangles: Buffer,
+    control_vertices: Buffer,
+    *,
+    rounds: int = 4,
+    representation: Literal["signposts", "integer"] | None = None,
+    mollify: float | None = None,
+    tolerance: float = 1e-5,
+    max_iterations: int | None = None,
+    stop_length_ratio: float | None = None,
+    certify_input: bool = True,
+    triangulation_edges: bool = False,
+) -> GeodesicResult:
+    """The geodesic Bézier curve with the given control points, ``rounds`` of midpoint
+    subdivision (1 to 8 suit interactive use). ``SolveError`` when the shortest paths between
+    control points touch or cross, or a control point is repeated."""

@@ -5,7 +5,7 @@
 #
 # Builds the wheel (scripts/py-build-wheel.sh; skipped with --no-build, then the newest
 # dist/wheels/ddg_tools-<version>-*.whl is used) and runs
-# crates/ddg-py/python-tests/test_ddg_tools.py, test_cut_session.py, test_sphere.py, test_developability.py and test_repulsive.py with `uv run` in throw-away environments:
+# crates/ddg-py/python-tests/test_ddg_tools.py, test_cut_session.py, test_sphere.py, test_developability.py, test_repulsive.py and test_flip_geodesics.py with `uv run` in throw-away environments:
 #
 #   Python 3.11 with numpy     what official Blender builds bundle
 #   Python 3.14 without numpy  what this machine's distribution build of Blender runs
@@ -34,7 +34,7 @@ for entry in $matrix; do
     log="$root/runs_tmp/py-test-$python${extra:+-$extra}.log"
     # --refresh-package: never test a stale copy of a wheel that was rebuilt under the same name.
     # -I and a neutral working directory keep the repository out of the import path.
-    if (cd "$root/runs_tmp" && for test in test_ddg_tools test_cut_session test_intrinsic_apps test_integer_coords test_sphere test_intrinsic_vector test_developability test_repulsive; do
+    if (cd "$root/runs_tmp" && for test in test_ddg_tools test_cut_session test_intrinsic_apps test_integer_coords test_sphere test_intrinsic_vector test_developability test_repulsive test_flip_geodesics; do
             DDG_WHEEL="$wheel" uv run --quiet --no-project --python "$python" \
                 --refresh-package ddg-tools "${with[@]}" \
                 python -I "$root/crates/ddg-py/python-tests/$test.py" || exit 1
