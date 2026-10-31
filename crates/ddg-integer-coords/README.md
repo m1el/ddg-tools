@@ -153,10 +153,45 @@ Measured (`tests/transfer.rs`, 133 states: the standard shapes, spot and camelba
   Delaunay flipping `2.3e-4` against `3.5e-4`;
 * stale subdivisions, wrong lengths and NaN/infinite values are errors.
 
-`examples/fig14.rs` (`cargo run --release -p ddg-integer-coords --example fig14`) refines by
-inserting circumcenters of the largest faces with Delaunay flipping (WP6's refinement was not
-committed yet), samples a smooth function at the vertices of `T¹` and prints relative `L²` errors
-against it on the input surface (PLY with colours in `runs_tmp/wp7-fig14/`):
+`examples/fig14.rs` (`cargo run --release -p ddg-integer-coords --example fig14 [trials [generator]]`)
+is the paper's Fig. 14: `Δf = g`, `g = sin(πx) sin(πy)` on the unit square, `f = 0` on the boundary,
+exact `f = −g / (2π²)`, solved as `L f = −M g` (positive semidefinite cotan `L`, Galerkin `M`, `g`
+sampled at the vertices) on random low-quality meshes of the square, 100 trials per size, `2⁶ … 2¹¹`
+vertices in half octaves like the figure's axis (the paper marks about `2^7.5`). The generator is
+ours (the paper gives none): the diagonal-cut square, then repeated splitting of the edge of a
+random point's face that is nearest to it, at the projection of the point (seeds `1000 k + t`).
+The IDT (same vertices) is `flip_to_delaunay` of the integer triangulation, with `L` and `M`
+assembled in the example from its edge lengths. All errors are absolute `‖f − f̃‖_{L²}` over the
+unit square (`‖f‖ = 0.0253`), by quadrature on the pieces of the common subdivision, where `f̃` is
+`P₀` of the nodal vector for `original` (the P1 solution on `T⁰`), `IDT - copy values` (the IDT's
+nodal values on the same vertices) and `IDT - L²` (`Transfer::to_input`), and `P₁` of it for
+`IDT itself` (not in the paper). Means over the 100 trials (the paper plots means), and the ratio
+of the means against `original`:
+
+| `\|V\|` | original | IDT copy | IDT `L²` | IDT itself | original / copy | original / `L²` |
+|---|---|---|---|---|---|---|
+| 64 | 9.36e-3 | 5.18e-3 | 3.89e-3 | 3.13e-3 | 1.81 | 2.41 |
+| 128 | 7.91e-3 | 3.28e-3 | 2.26e-3 | 1.62e-3 | 2.41 | 3.50 |
+| 181 (`2^7.5`) | 6.93e-3 | 2.54e-3 | 1.70e-3 | 1.15e-3 | 2.73 | 4.09 |
+| 256 | 6.57e-3 | 2.02e-3 | 1.32e-3 | 8.13e-4 | 3.26 | 4.99 |
+| 512 | 5.90e-3 | 1.34e-3 | 8.36e-4 | 4.13e-4 | 4.40 | 7.06 |
+| 1024 | 5.45e-3 | 8.90e-4 | 5.45e-4 | 2.06e-4 | 6.13 | 10.01 |
+| 2048 | 5.51e-3 | 6.30e-4 | 3.89e-4 | 1.02e-4 | 8.76 | 14.18 |
+
+The medians per trial ratio are a little lower (181: 2.27 and 3.41; 2048: 7.20 and 12.10); the
+normal-equation residual is at most `5e-16`. The qualitative picture of the paper is reproduced:
+the error on the original mesh stays almost flat, the IDT converges at rate `~1/|V|`, and the
+`L²` transfer beats copying at every size (by 1.3 to 1.6; the paper's marked size shows 2.4). The
+numbers are not: at the paper's marked size the IDT is 11.5x and the transfer 28.1x more accurate
+than the original, ours 2.7x and 4.1x, and the factors grow with `|V|` (8.8x and 14.2x at 2048) but do not reach the paper's. Our meshes are less bad than the paper's (original error
+`≈ 7e-3` against its `3e-2`, whose figure shows long fans from the corners), and the ratio depends on
+that: the generator is the free parameter, not the transfer. The transfer is never more accurate
+than the IDT's own function, as it must be.
+
+`examples/refined_transfer.rs` is the other experiment (on spot and camelbad): refine by inserting
+circumcenters of the largest faces with Delaunay flipping (WP6's refinement was not committed
+then), sample a smooth function at the vertices of `T¹`, and print relative `L²` errors against it
+on the input surface (PLY with colours in `runs_tmp/wp7-refined/`):
 
 | mesh | extra vertices | copy | `L²` transfer | `T¹` itself | copy / transfer |
 |---|---|---|---|---|---|
@@ -167,10 +202,8 @@ against it on the input surface (PLY with colours in `runs_tmp/wp7-fig14/`):
 | camelbad | 5696 | 5.275e-3 | 3.071e-3 | 2.158e-3 | 1.72 |
 | camelbad | 11392 | 5.275e-3 | 2.811e-3 | 1.603e-3 | 1.88 |
 
-The transfer beats copying and the gap grows with the refinement, but the factors are far from the
-paper's 28x: the paper's function and refinement size are not reproducible from the text, and our
-sampled function is smooth and low-frequency. The transfer cannot beat the refined triangulation's
-own function here (it projects it to the coarser space).
+The transfer beats copying and the gap grows with the refinement; it cannot beat the refined
+triangulation's own function (it projects it to the coarser space).
 
 Timings (release, single thread, pinned core, load average about 3): spot (final level, 5 860
 vertices, `|S|` = 12 720): common subdivision 8.6 ms, `M_S` 7.9 ms, `P₀ P₁` 1.6 ms, `M₀ M₁` 19.5 ms,
