@@ -332,12 +332,19 @@ fn flip() {
         for (b, lines) in blocks.iter().zip(&out) {
             let [nij, njk, nki, nil, nlj] = b.quad;
             let ctx = format!("{} quad {:?}", input.name, b.quad);
-            assert_eq!(lines[0][1..].iter().map(|t| int(t)).collect::<Vec<_>>(), b.quad.to_vec());
+            assert_eq!(
+                lines[0][1..].iter().map(|t| int(t)).collect::<Vec<_>>(),
+                b.quad.to_vec()
+            );
             let v1 = face_valid([nij, njk, nki]);
             let v2 = face_valid([nij, nil, nlj]);
             let faces = lines[1];
             assert_eq!(faces[0], "faces", "{ctx}");
-            assert_eq!((int(&faces[1]) == 1, int(&faces[2]) == 1), (v1, v2), "{ctx}");
+            assert_eq!(
+                (int(&faces[1]) == 1, int(&faces[2]) == 1),
+                (v1, v2),
+                "{ctx}"
+            );
             n_quads += 1;
             if faces.len() == 4 {
                 assert_eq!(faces[3], "invalid", "{ctx}");
@@ -389,4 +396,70 @@ fn flip() {
          updates, {n_again} flips back: all agree"
     );
     assert!(n_quads >= 300 && n_roundabouts >= 300 && n_again >= 300);
+}
+
+/// The task `subdivide` (Supp. Alg. 9's per-face pairing): the decoded corner data and, for every
+/// crossing of every side, where its arc ends, against `face_arcs` (the pairing the common
+/// subdivision cuts its pieces with), exactly.
+#[test]
+fn subdivide() {
+    use ddg_integer_coords::{ArcEnd, FaceCoordinates, face_arcs};
+    let (mut n_faces, mut n_invalid, mut n_arcs) = (0, 0, 0);
+    for (input, output) in pairs("subdivide") {
+        let mut out = output.lines.iter().peekable();
+        for l in &input.lines {
+            let n = [int(&l[1]), int(&l[2]), int(&l[3])];
+            let o = out
+                .next()
+                .unwrap_or_else(|| panic!("{}: output ends", input.name));
+            assert_eq!(
+                &o[..4],
+                &["face".to_string(), l[1].clone(), l[2].clone(), l[3].clone()]
+            );
+            let ctx = format!("{} face {n:?}", input.name);
+            n_faces += 1;
+            if o[4] == "invalid" {
+                assert!(face_arcs(n).is_err(), "{ctx}");
+                n_invalid += 1;
+                continue;
+            }
+            assert_eq!(o[4], "decoded", "{ctx}");
+            let fc = FaceCoordinates::of(n.map(|x| x.max(0)))
+                .unwrap_or_else(|k| panic!("{ctx}: odd at {k}"));
+            let kappa = (0..3).find(|&k| fc.e[k] > 0);
+            let mine = [
+                fc.c[0],
+                fc.c[1],
+                fc.c[2],
+                kappa.unwrap_or(0) as i64,
+                kappa.map_or(0, |k| fc.e[k]),
+            ];
+            let theirs: Vec<i64> = o[5..].iter().map(|t| int(t)).collect();
+            assert_eq!(&mine[..], &theirs[..], "{ctx}: decoded");
+            let arcs = face_arcs(n).unwrap_or_else(|e| panic!("{ctx}: {e}"));
+            let mut it = arcs.iter();
+            while out.peek().is_some_and(|l| l[0] == "arc") {
+                let a = out.next().unwrap();
+                let (s, p) = (int(&a[1]) as u8, int(&a[2]) as u32);
+                let want = if a[3] == "side" {
+                    ArcEnd::Side {
+                        k: int(&a[4]) as u8,
+                        p: int(&a[5]) as u32,
+                    }
+                } else {
+                    assert_eq!(a[3], "corner", "{ctx}");
+                    ArcEnd::Corner(int(&a[4]) as u8)
+                };
+                let got = it
+                    .next()
+                    .unwrap_or_else(|| panic!("{ctx}: missing arc {s} {p}"));
+                assert_eq!(*got, (s, p, want), "{ctx}");
+                n_arcs += 1;
+            }
+            assert!(it.next().is_none(), "{ctx}: extra arcs");
+        }
+        assert!(out.next().is_none(), "{}: extra output", input.name);
+    }
+    eprintln!("subdivide: {n_faces} faces ({n_invalid} invalid), {n_arcs} arcs: all agree");
+    assert!(n_faces >= 500 && n_arcs > 1000);
 }

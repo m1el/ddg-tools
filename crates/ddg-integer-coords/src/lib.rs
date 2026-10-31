@@ -82,6 +82,7 @@ pub mod geometry;
 pub mod interface;
 pub mod remove;
 pub mod split;
+pub mod subdivision;
 pub mod trace;
 
 pub use certify::CertifyReport;
@@ -95,6 +96,9 @@ pub use formulas::FaceCoordinates;
 pub use geometry::{GeometricCrossing, GeometricCurve, InputEdgeGeometry, StripReport};
 pub use interface::{REPRESENTATION, to_intrinsic_error};
 pub use remove::Removal;
+pub use subdivision::{
+    ArcEnd, CommonSubdivision, LocatedPiece, PointLocator, SubdivisionReport, face_arcs,
+};
 pub use trace::{
     Arrival, Crossing, CurveEnd, CurveSegment, HalfTrace, InputEdgePath, NormalGluing, PathPiece,
     TracedInputEdge, extract_curve, trace_from, trace_with,

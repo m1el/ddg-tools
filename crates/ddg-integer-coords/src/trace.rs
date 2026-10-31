@@ -781,7 +781,6 @@ impl IntegerTriangulation {
                 bound: mesh.n_halfedges(),
             });
         }
-        let input_edge = mesh.edge(input_halfedge);
         let (a, b) = (
             mesh.from_vertex(input_halfedge),
             mesh.to_vertex(input_halfedge),
@@ -789,9 +788,55 @@ impl IntegerTriangulation {
         let start = self.input_directions(a)?[self.local.of_halfedge(input_halfedge) as usize];
         let k_b = self
             .local
-            .of_edge_at(mesh, input_edge, b)
+            .of_edge_at(mesh, mesh.edge(input_halfedge), b)
             .expect("the head of an input halfedge is an end point of its edge");
         let expected = self.input_directions(b)?[k_b as usize];
+        self.extract_edge_between(input_halfedge, start, expected)
+    }
+
+    /// [`extract_edge`](Self::extract_edge) for the `edge_halfedge` of every input edge, in the
+    /// order of the input edges, with `input_directions` computed once per input vertex instead
+    /// of twice per edge.
+    ///
+    /// # Errors
+    /// The first error of [`extract_edge`](Self::extract_edge) (edges in order), or of
+    /// [`input_directions`](Self::input_directions).
+    pub fn extract_all_edges(&self) -> Result<Vec<InputEdgePath>, IntegerError> {
+        let mesh = self.input.mesh();
+        let directions = (0..self.n_input_vertices())
+            .map(|a| self.input_directions(a))
+            .collect::<Result<Vec<_>, _>>()?;
+        (0..mesh.n_edges())
+            .map(|e| {
+                let h = mesh.edge_halfedge(e);
+                let (a, b) = (mesh.from_vertex(h), mesh.to_vertex(h));
+                let k_b = self
+                    .local
+                    .of_edge_at(mesh, e, b)
+                    .expect("the head of an input halfedge is an end point of its edge");
+                self.extract_edge_between(
+                    h,
+                    directions[a][self.local.of_halfedge(h) as usize],
+                    directions[b][k_b as usize],
+                )
+            })
+            .collect()
+    }
+
+    /// The walk of [`extract_edge`](Self::extract_edge), given the end at the tail where the
+    /// curve starts and the end at the head where it must arrive.
+    fn extract_edge_between(
+        &self,
+        input_halfedge: usize,
+        start: CurveEnd,
+        expected: CurveEnd,
+    ) -> Result<InputEdgePath, IntegerError> {
+        let mesh = self.input.mesh();
+        let input_edge = mesh.edge(input_halfedge);
+        let (a, b) = (
+            mesh.from_vertex(input_halfedge),
+            mesh.to_vertex(input_halfedge),
+        );
         let mut seen = HashSet::new();
         let mut on_crossing = |z: Crossing| {
             if seen.insert(undirected(self, z)) {
