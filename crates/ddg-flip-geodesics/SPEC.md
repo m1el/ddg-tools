@@ -477,7 +477,7 @@ model where the signpost extraction breaks and the integer one does not.
 
 ## 10. Decisions
 
-* **F1** One generic algorithm (`GeodesicNetwork<T: FlipSurface>`), the trait in the shared layer
+* **F1** One generic algorithm (`GeodesicNetwork<T: Triangulation>`), the trait in the shared layer
   (§11 R1); no representation-specific code outside extraction.
 * **F2** Wedge angles by summing corner angles (Eq. 1), not signpost differences (gc:
   fg.cpp:489-522): identical on both representations; ddg-intrinsic's signposts are scaled (IT N2).
@@ -529,6 +529,11 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
   refusals, `split_edge(e, t)` returning both halves oriented like `e`, the constrained-edge mask
   (R3), `trace_edge_on_input(e) -> ddg_intrinsic::EdgeTrace`, `vertex_location(v)`. Guarantee: a
   flip keeps the direction of every edge it does not flip (ddg-intrinsic does, `flip.rs:225-231`).
+  **Done (IC WP0, IT N50):** the trait is `ddg_intrinsic::Triangulation` over the connectivity
+  `ddg_intrinsic::Complex`; `trace_edge_on_input(e, &EdgeTraceOptions)`; `split_edge` returns
+  `Insertion` with `halves: Some([e, e2])`; flips of constrained edges are refused with
+  `FlipRefusal::Constrained`. The direction guarantee (F8) is documented on `flip_edge` and tested
+  in `crates/ddg-intrinsic/tests/complex.rs`.
 * **R2** (§3.1, new operation) `ExtractIntrinsicEdge(e)`: an edge of `T¹` as a path over `T⁰`,
   returning `ddg_intrinsic::EdgeTrace`; each crossing's input edge identified exactly (Alg. 1 + 3,
   memoized along each walk), consecutive input edges checked to share an input face (else
@@ -537,13 +542,19 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
   `V*` from `q⁰`. Test: positions agree with those from IC Alg. 2's strip (the other direction) to
   `1e-9`; the common subdivision's edges agree with it.
 * **R3** (§4.3) Delaunay flipping with a set of constrained edges never flipped (iCDT), identical
-  on both representations.
+  on both representations. **Done:** the provided `Triangulation::flip_to_delaunay` (one
+  implementation for both); `DelaunayReport::n_constrained`, and the other statistics leave
+  constrained edges out.
 * **R4** (§4.5) Edge split: accepts constrained edges (the flip inside "face split then flip" is part
   of the split, fixing reference bug B5); returns both halves; assigns lengths `tℓ`, `(1 − t)ℓ` and
   `it-point-distances`, exactly as ddg-intrinsic's `split_edge` (IT N10), so both representations
-  stay bitwise identical through Bézier subdivision.
+  stay bitwise identical through Bézier subdivision. **Done:** `ddg_intrinsic::plan_edge_split`
+  decides refusal and lengths from connectivity and lengths alone; both crates call it; splitting a
+  constrained edge gives two constrained halves.
 * **R5** (§5, later) Refinement treats constrained interior edges as boundary edges (IT N1's
-  encroachment and splitting rules), in both crates.
+  encroachment and splitting rules), in both crates. **Open:** until then `refine`, `refine_with`
+  and `optimal_delaunay` refuse a triangulation with constrained edges
+  (`IntrinsicError::ConstrainedEdges`) and change nothing.
 * **R6** (§2.4, I4) `certify` is not run per flip by default; FlipOut makes thousands of flips per
   path and certifies once at the end.
 * **R7** (§10.1 last bullet, §13 Q4) Answered: FlipOut is in scope; the Sec. 5.2 benchmark lives in
@@ -555,7 +566,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 
 | WP | content | files | depends on | model |
 |---|---|---|---|---|
-| F0 | R1, R3, R4 in the shared layer and ddg-intrinsic (part of IC WP0) | `crates/ddg-intrinsic/src/…` | — | Opus |
+| F0 | **done** with IC WP0 (2814e8a–aca460e): R1, R3, R4 | `crates/ddg-intrinsic/src/…` | — | Opus |
 | F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | `crates/ddg-flip-geodesics/src/{lib,error,network,wedge,certify}.rs` | F0 (R1 for signposts only) | Opus |
 | F2 | Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6 on signposts | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy}.rs` | F1 | Opus |
 | F3 | initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |

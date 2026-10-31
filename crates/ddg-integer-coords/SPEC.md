@@ -71,6 +71,22 @@ flips and Delaunay flipping leave alone, like boundary edges); `trace_edge_on_in
 (the path of an intrinsic edge over `T⁰`); `vertex_location`. Guarantee: a flip keeps the stored
 direction of every edge it does not flip.
 
+**As built (WP0, `ddg-intrinsic` N50).** The connectivity is `ddg_intrinsic::Complex` (faces, twins,
+halfedge↔edge maps, vertex→halfedge, the constrained mask); the interface is the trait
+`ddg_intrinsic::Triangulation`. Every topological operation of `Complex` returns its index
+bookkeeping: `flip_edge -> ComplexFlip` (refusal reasons from `flip_refusal(e)`, in the order
+boundary, constrained, degree-one endpoint), `split_face -> FaceSplit`, `split_edge -> EdgeSplit`
+(`halves = [e, e2]` from the old tail, both directed like the old edge), `remove_vertex ->
+VertexRemoval` (interior, degree 3, no self-edge, no constrained spoke). **Removal renumbers:** the
+merged face takes the smallest of the three face ids, and the last vertex, edges and faces move
+into the freed ids; `VertexRemoval` lists every move (`apply_{halfedge,edge,face,vertex}_data`),
+and this crate moves `n`, `r` and `q⁰` with it. The constrained mask lives in `Complex`; splitting
+a constrained edge gives two constrained halves; flips refuse it with `FlipRefusal::Constrained`.
+`Insertion::halves` carries the two halves of an edge split. The refusals and new lengths of flips
+and splits are decided from `(&Complex, &[f64])` alone by `plan_flip`, `plan_face_split` and
+`plan_edge_split`, which this crate calls, so both representations refuse the same operations and
+compute bitwise the same lengths.
+
 ### 2.2 Stored quantities (paper Sec. 2)
 
 | quantity | where | type | paper |
@@ -189,7 +205,9 @@ n_kl = c^{jk}_l + c^{il}_k + ½|c^{il}_j − c^{ki}_j| + ½|c^{lj}_i − c^{jk}_
 r_{kl} = (r_{ki} + e^{il}_k + n⁻_{ki}) mod deg₀(k)                           [formula: ic-roundabout-update]
 ```
 
-(and `r_{lk}` symmetrically, only for tails in `V⁰`); `ℓ_kl` by `it-flip-length`. Exact: the
+(and `r_{lk}` symmetrically, only for tails in `V⁰`); `ℓ_kl` by `it-flip-length`. In code:
+`plan_flip(&complex, &lengths, e)?` (refusal and `ℓ_kl`), the integers above from the pre-flip
+state, then `complex.flip_edge(e)`, whose `ComplexFlip` says where `n_kl`, `r_kl`, `r_lk` go. Exact: the
 integers after the flip are those of the same realization over the new `T¹` (Lean tier C, §9).
 Flipping back restores `n`, `r`, `ℓ` (integers exactly, lengths to rounding).
 
@@ -199,7 +217,10 @@ IT-SPEC §4 and N6 unchanged (queue, tolerance, ties, limit), over this represen
 input and the same queue order, the sequence of flips and the resulting `T¹` (connectivity and
 lengths, bitwise: same formula) are identical whichever representation runs it. Tested against
 `ddg-intrinsic`. Constrained edges (§2.1) are never flipped and are treated as Delaunay, as boundary
-edges are.
+edges are. This is the provided method `Triangulation::flip_to_delaunay`, written once over the
+trait (it is also `IntrinsicTriangulation::flip_to_delaunay`), so the identical flip sequence holds
+by construction; `DelaunayReport::n_constrained` counts the constrained edges, which the other
+statistics leave out.
 
 ### 4.4 Face split (Sec. 3.3, Supp. Alg. 5, 6, App. A)
 
@@ -207,8 +228,9 @@ Insert `m` at barycentric `v` in `ijk ∈ F¹`. Gather the geometric crossings o
 (`ExtractGeometricCrossing`), find the region `R` of the face cut by the arcs that contains `m` by
 line-side tests, and from it the new `n_{mi}, n_{mj}, n_{mk}` (Alg. 5 for `e = 0`, Alg. 6 for the
 corner with `e > 0`; `ic-face-split-normal`), the roundabouts of new halfedges with tails in `V⁰`
-(Eq. 4), the lengths by Eq. 5 (`ic-tangent-length`, `‖w‖² = −ℓ²_ij w_i w_j − ℓ²_jk w_j w_k −
-ℓ²_ki w_k w_i`), and `q⁰_m` by `RecoverBarycentric` (App. A: minimum-norm `ξ` of the 3×ρ system of
+(Eq. 4), the lengths from `plan_face_split` (`it-point-distances`, **I25**; the paper's Eq. 5,
+`ic-tangent-length`, `‖w‖² = −ℓ²_ij w_i w_j − ℓ²_jk w_j w_k − ℓ²_ki w_k w_i`, is the same quantity
+and is proved equal in Lean, but is not evaluated), and `q⁰_m` by `RecoverBarycentric` (App. A: minimum-norm `ξ` of the 3×ρ system of
 Eq. 15, then Eq. 16; `ic-recover-barycentric`).
 
 **Floating point.** The region test may pick a region next to the true one when `m` is within
@@ -224,7 +246,8 @@ callers that need the inserted point exactly, see §5).
 `n_ij ≥ 0`: face split then flip (Fig. 10 top). `n_ij = −1`: explicit split along the shared
 curve, `n_mj = n_mi = −1`, `n_mk = max(n_ki, n_jk)` (`ic-split-edge-normal`), and the same on the
 other side when interior; `q⁰_m = u_i q⁰_i + u_j q⁰_j` along the input edge. Boundary edges are
-always of the second kind.
+always of the second kind. Lengths and refusal from `plan_edge_split`, connectivity from
+`Complex::split_edge` (I20: also for `n_ij ≥ 0`, without the face-split-then-flip route).
 
 ### 4.6 Vertex removal (Sec. 3.5, Alg. 8, Thm. D.1)
 
@@ -241,8 +264,12 @@ restored. Counted over every removal of the evaluation (§10).
 
 `x = exp_i(v)` traced on `T¹` (IT-SPEC tracing over the intrinsic triangulation needs signposts;
 here **I9:** the tangent vector is laid out in the faces around `i` from the edge lengths, i.e.
-the trace is `ddg_intrinsic`'s kernel over a `Surface` view whose signposts are computed from
-corner angles on demand), then `SplitFace(x)`, then `RemoveVertex(i)`. The optimal Delaunay
+the trace is `ddg_intrinsic::AngleFrames::of(&t).trace(start, dir, len, &opts)`, the same kernel
+with signposts computed from corner angles. Frame convention: direction 0 at a vertex is
+`Complex::outgoing_halfedge`, the others the running sum of corner angles times `2π/Θ` (`π/Θ` at
+the boundary), `Θ` from the lengths; a frame is valid only for the current connectivity, since a
+flip at an interior vertex can move its outgoing halfedge. Measured against stored signposts:
+within 6.2e-12 rad on 17 shapes, traces end within 6.2e-12 of the mean edge length), then `SplitFace(x)`, then `RemoveVertex(i)`. The optimal Delaunay
 iteration of IT-SPEC N21 then runs on this representation unchanged.
 
 ### 4.8 Common subdivision (Sec. 3.7, Supp. Alg. 9)
@@ -304,8 +331,8 @@ Fig. 14. The factorization of `M₀` is kept for repeated transfers. Report: res
 ## 7. Robustness preprocessing (Sec. 3.9)
 
 Intrinsic mollification (Sharp and Crane 2020b) with `ε = 10⁻⁵ h̄` (`h̄` the mean edge length) by
-default, as in the evaluation; reuses `ddg_bff::mollify_edge_lengths` (I13: moved to `ddg-core`
-in WP0 if the dependency on `ddg-bff` is unwanted). The lengths it changes are reported; the
+default, as in the evaluation; uses `ddg_core::mollify::mollify_edge_lengths` (I13: moved there in
+WP0, errors as `MollifyError`; `ddg_bff` keeps a wrapper). The lengths it changes are reported; the
 operation is off by default in the library (nothing silently changed) and on in the evaluation and
 in the Python/Blender defaults, as the paper uses it.
 
@@ -363,7 +390,7 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-face-split-normal` | Alg. 5/6: inserting a vertex in any region `R` of a face model and joining it to the corners by arcs disjoint from the others gives the stated counts; hence the result is valid whichever region floating point picks | B |
 | `ic-split-edge-normal` | Eq. 6 | A |
 | `ic-recover-barycentric` | Eq. 15–16 reproduce `q⁰` exactly for any solution `ξ`, when the corner positions are exact (affine combination) | A |
-| `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (may be `it-point-distances`) |
+| `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (proved equal to `it-point-distances`, which the code evaluates; I25) |
 | `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
 | `ic-vertex-removal` | Thm. D.1: a simplicial star of angle sum `2π` and degree `> 3` has a flippable edge that lowers the degree | B′ |
 | `ic-vertex-removal-delta` | the Δ-complex case (paper: conjecture) | attempt, bounded; else CITED as open with I8's runtime refusal |
@@ -534,13 +561,22 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 * **Departures of the reference kept for reference only**: mollification on and silent
   (`ic:38`; ours explicit, §7); `moveVertex` ignores a failed removal (ours refuses the move and
   restores); leftover debug output (`ic:773`) and `exit(1)` (`nc:930`) are not ported.
+* **I25** *Face-split lengths.* Taken from `ddg_intrinsic::plan_face_split` (`it-point-distances`),
+  not evaluated by Eq. 5, so that both representations insert the same points with bitwise the same
+  lengths (I11). Eq. 5 (`ic-tangent-length`) stays a formula id: Lean proves it equal to
+  `it-point-distances`.
+* **I26** *Tangent frames for consumers (open, WP11).* `ddg-intrinsic-apps`' tangent fields
+  (`vector/connection.rs`) use the signpost crate's stored input-aligned frames; `AngleFrames` are
+  neither input-aligned nor stable under flips. For vertices of `V⁰` an input-aligned frame is
+  available from the roundabouts plus one angle within the input wedge; the design is decided in
+  WP11 before that consumer switches representation.
 
 ## 12. Work packages
 
 | WP | content | files | depends on | model |
 |---|---|---|---|---|
-| WP0 | shared Δ-complex connectivity out of `ddg-intrinsic` (bitwise identical results); a `Surface` view computing signposts from corner angles (I9); mollification location (I13) | `crates/ddg-intrinsic/src/…`, `crates/ddg-core` if I13 | — | Opus |
-| WP1 | crate skeleton; `IntegerTriangulation`, init, §2.3 derived quantities, `certify`, errors | `crates/ddg-integer-coords/src/{lib,error,coords,certify}.rs` | WP0 | Opus |
+| WP0 | **done** (2814e8a–aca460e): `Complex`, `Triangulation`, `plan_*`, `AngleFrames` (I9), `ddg_core::mollify` (I13); 240 bitwise pins unchanged | `crates/ddg-intrinsic/src/…`, `crates/ddg-core` | — | Opus |
+| WP1 | crate skeleton; `IntegerTriangulation` implementing `Triangulation`, init, §2.3 derived quantities, `certify`, errors; remove `crates/ddg-integer-coords` from the workspace `exclude` list | `crates/ddg-integer-coords/src/{lib,error,coords,certify}.rs`, `Cargo.toml` | WP0 | Opus |
 | WP2 | tracing: Alg. 1–4, geometric crossings, strip intersection | `src/trace.rs`, `tests/trace.rs` | WP1 | Opus |
 | WP3 | flip, Delaunay flipping, edge split, removal | `src/{flip,split,remove}.rs`, `tests/ops.rs` | WP1 | Opus |
 | WP4 | face split, App. A, moves | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
@@ -550,7 +586,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP8 | Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | evaluation: Thingi10k, benches, the reference comparison | `examples/thingi.rs`, `benches/`, `scripts/ic-eval.sh` | WP6, Q1, Q2 | Sonnet |
-| WP11 | consumers: `ddg-intrinsic-apps`, `ddg-uv`, Python, Blender (§13 Q3, Q5) | per crate | WP5, WP6 | Sonnet |
+| WP11 | consumers: `ddg-intrinsic-apps`, `ddg-uv`, Python, Blender (§13 Q3, Q5). Not in the trait yet (WP0 survey): `cotan_laplacian`, `lumped_mass` (could be provided methods); `refine`, `refine_with`; `optimal_delaunay`, `move_vertex`, `odt_target`; `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input`; `point_on_input`, `point_on_triangulation`; `overlay`, `check`; `signpost` (I26) | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.
 
