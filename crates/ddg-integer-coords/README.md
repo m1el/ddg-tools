@@ -386,6 +386,207 @@ exact reading was needed.
   * overflow: hand-built states near `i64::MAX` give `Overflow`, never wrap; Eq. 3 below `−1`
     (quad `2,0,0,0,0`) is refused as invalid.
 
+## Evaluation on Thingi10k and against the authors' demo (WP10)
+
+Everything here is reproduced by `scripts/ic-eval.sh` (conversion, the per-mesh runs, the summary),
+`scripts/ic-demo-build.sh` and `scripts/ic-demo-eval.sh` (the authors' demo, built headless outside
+the repository), `scripts/ic-timings.sh` (single-thread timings) and the examples
+`thingi_convert.rs`, `thingi_eval.rs`; the tables below are `runs_tmp/wp10/summary.md` and
+`timings.md`. One process per mesh and representation, 56 at a time, a 10-minute cap and an
+address-space limit per job (4 GB up to 100 000 faces, 12 GB up to 1 M, 24 GB beyond); one log and
+one JSON per job under `runs_tmp/wp10/jobs/`.
+
+### Conversion (SPEC §13 Q1)
+
+`thingi_convert` reads the 10 000 raw files (9 956 STL, binary and ASCII; 42 OBJ, 1 OFF, 1 PLY),
+merges vertices whose coordinates are exactly equal, fan-triangulates polygons, drops unused
+vertices and keeps the meshes that `TriMesh::new` accepts (no repair, no removal of degenerate or
+duplicate faces). 39 s on 56 threads. **7 745 kept**, 2 255 excluded:
+
+| excluded | files |
+|---|---|
+| vertex shared by several fans (non-manifold vertex) | 649 |
+| two faces with the same three vertices | 616 |
+| face with a repeated vertex after the merge | 482 |
+| edge on 3 or more faces | 343 |
+| inconsistent orientation (95 of them would be repaired by `orient_faces`, not done) | 160 |
+| no faces (empty or points/lines only) | 3 |
+| unreadable (truncated ASCII STL: 49911, 77942) | 2 |
+
+Against the dataset's own metadata (`geometry_data.csv`: 7 754 vertex- and edge-manifold, all
+oriented): 7 744 of those are kept; the 10 that are not: 5 repeated vertex after the merge
+(285440, 298321, 298322, 298323, 376253), 3 without faces (74463, 81313, 286163), 1 duplicate face
+(527631), 1 non-manifold vertex (82541). One mesh is kept that the metadata calls non-manifold
+(73178). The paper's 7 696 (MeshLab conversion to PLY, rule not published) is 49 fewer than ours; the
+difference cannot be attributed without MeshLab's rules.
+
+### Table 1 as reproduced
+
+Success = the common subdivision's connectivity is recovered (integers: certificate, then
+`common_subdivision`; signposts: traces of all edges, then `overlay`, IT-SPEC N12's refusals), and
+the pieces, fan-triangulated, form a valid `TriMesh` with the Euler characteristic, components and
+boundary loops of the input. Both after the intrinsic Delaunay triangulation (IDT) and after
+refinement to 25° (no insertion limit, as the paper's benchmark; mollified `1e-5`).
+
+| | paper (7 696) IDT | paper refinement | ours (7 745) IDT | ours refinement |
+|---|---|---|---|---|
+| explicit overlay | 100 % | – | – | – |
+| signposts (paper) | 96.0 % | 69.1 % | | |
+| signposts, Ruppert rules (this workspace) | | | 100.00 % (7745) | 99.78 % (7728) |
+| signposts, Chew rules (this workspace) | | | 99.97 % (7743) | 99.78 % (7728) |
+| integer coordinates | 100 % | 100 % | **99.97 % (7743)** | **99.97 % (7743)** |
+| integer coordinates, the authors' Delaunay test | | | 99.97 % (7743) | 99.97 % (7743) |
+| the authors' demo, integer backend (7 444 meshes up to 200 000 faces) | | | 100.00 % (7444) | 99.97 % (7442) |
+| the authors' demo, signpost backend (same) | | | 87.86 % (6540) | 20.71 % (1542) |
+
+Signposts were run on every mesh, with their boundary if any (the paper's signposts were
+evaluated without boundary): on the 7 339 closed meshes the numbers are the same to within a mesh
+(integers 99.97 %/99.97 %, signposts Ruppert 100.00 %/99.77 %, demo signposts 87.76 %/20.68 %). The
+demo's signpost backend does not mollify its input (the integer backend does, `1e-5`); ours use
+the same mollified lengths as our integers, which is why they do so much better than the paper's and
+the demo's signposts. The demo's failures are its own assertions in the common-subdivision recovery
+(over both operations: `could not identify source face on mesh A` 5 336, `normal coordinates ... must
+sum to an even number` 1 213, `non finite edge length` 8, 40 segmentation faults and 200 time-outs).
+
+**Integer failures (every one).**
+
+| mesh | what | cause |
+|---|---|---|
+| 176193 (16 279 faces, closed) | refinement does not end (time-out at 600 s; 162 790 insertions at 10 per vertex and still going) | refinement driver, see below |
+| 190253 (15 374 faces, closed) | the same | the same |
+
+No certificate failure (0 of 7 743 completed IDTs and 0 of 7 743 refinements), no invalid
+subdivision, no trace failure, no overflow, no out-of-memory. The two failures are the same with the
+authors' Delaunay test, with the signposts under Chew's rules (also a time-out) and with Ruppert's
+rules (the signposts' trace of a circumcenter path gives up at its crossing limit); the authors'
+demo, integer backend, finishes both in 0.6 s and 1.4 s (17 871 and 37 078 vertices, minimum angle
+25.04° and 25.01°). Reproduction: `cargo test --release -p ddg-integer-coords --test
+thingi_regressions -- --ignored` (needs `data/thingi10k/converted/`): even with 60 000 insertions
+allowed the minimum angle is 1e-5° and the limit is reached. Both meshes have input angles near
+1e-5°. The cause is in the shared driver (`ddg_intrinsic::refine`), not in the integers: the
+signposts make the same insertions. Not diagnosed further (the library is not in WP10's files).
+Reaching 25° but not on every face: with the default Delaunay test mesh 551019 has 6 face splits
+refused by App. A's recovery (`RecoverFailed`, minimum angle 21.17°); with the authors' test it reaches
+25°. The other 169 meshes with corners below 25° at the end are narrow cones (angle sum below 60°, the
+narrow-cone rule of Chew's rules: 3 000 corners at needle vertices, 871 at angle sums below the
+bound). Chew's rules leave the boundary edges encroached by the diametral circles (16 059 edges on
+276 of the 406 meshes with boundary: not a failure, the minimum angle is reached).
+
+Counters over the completed integer runs: 140 M vertices inserted, 184 706 removed, 1 266 removals
+refused (I8, I27; on 110 meshes), 2 840 crossings clamped in the refinements (I5; 385 meshes) and
+10 353 more in the refined subdivisions (624 meshes), 0 clamps in the IDT subdivisions, 791 places
+moved into their face (I16), 7 face splits refused (551019: 6, 97660: 1; the I28 refusal of an edge
+split is not counted separately by the driver), 0 trace failures. The Delaunay test of the
+reference (`DelaunayCriterion::REFERENCE`) gives the same picture (1 refusal).
+
+Integers against signposts under the same rules: the IDTs have the same flips and the same
+`Σ n⁺` on all 7 743 meshes where both completed; after refinement `|V¹|` is equal on 7 712 of 7 728
+(the differences are the signposts' snaps onto input edges, I28/N10), and `|V¹|` and `|V^S|` both on 6 734.
+
+### Sizes
+
+| | `|V^S|/|V⁰|` mean | 95th percentile | `|V¹|/|V⁰|` mean | 95th percentile |
+|---|---|---|---|---|
+| paper, after refinement | 20 | 45 | 3.7 | 7.8 |
+| integer coordinates, after refinement (7 743 meshes) | 19.83 | 46.37 | 3.80 | 8.00 |
+| after the IDT | 5.17 | 15.04 | 1 | 1 |
+
+### Against the authors' demo
+
+Built headless (`--noGUI`) with `scripts/ic-demo-build.sh` in `runs_tmp/ic-demo-build/`, geometry-central
+`ab116f1`, polyscope `56b82cd`, happly `88f7972`; nothing is written into the reference tree. Needed:
+`GC_EIGEN_LOCATION` (Eigen 3.4.0), `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` (polyscope's glad), the demo's
+`deps/happly` on the include path (geometry-central's own is an empty submodule). `setMarkedEdges`
+is not needed to link; no system package was missing. Run as the paper's `benchmark/run_benchmark.py`
+does (`--refineMaxInsertions=0`), on the 7 444 converted meshes up to 200 000 faces.
+
+* **IDT** (integers, 6 004 meshes up to 20 000 faces; ours with the demo's Delaunay test `cotan weight <
+  −1e-6`): `|V¹|` equal on all; the subdivision's `|V^S| = |V¹| + Σ n⁺` and its triangulated V/E/F equal
+  on 4 899 (81.6 %), and on 1 392 of 1 393 meshes without ties; the rest differ by the direction in
+  which a near-tie was flipped (the two flip sequences are not the same, I23). The sets of distinct
+  edge lengths agree to 1e-9 relative on 4 581 meshes; 9 516 of 22.5 M distinct lengths (0.04 %) have
+  no partner. With the default test (tolerance `1e-10` on the angle sum instead of the demo's `1e-6`
+  on the cotan weight) the agreement is lower, which is why the table uses the demo's test.
+* **Refinement** (7 440 meshes, statistics, I23): `|V¹|` ours/demo mean 0.9998, median 1.0000, equal on 805,
+  within 1 % on 6 531, within 5 % on 7 389; `Σ|V¹|` −0.03 %; `|V^S|` ours/demo mean 0.994, median
+  0.9992; `Σ|V^S|` −0.14 %. Minimum angle over valid faces: the demo ends below 25° on 9 meshes
+  (56527, 78735, 106830, 106839, 106840, 107202, 264708, 521601, 521603), ours on none (with the
+  authors' test).
+* Success disagrees on 4 meshes: the demo time-outs on 65399 and 106831 where ours finishes, ours on 176193
+  and 190253 where the demo finishes.
+* **Reference tests** ported in `tests/reference_ports.rs` on `fox.ply` and `cat_head.obj`
+  (`tests/assets/`, MIT notice): `IntegerFlip`, `DelaunayTriangulationsAgree` (lengths equal to 0, the
+  reference's bound is 1e-5), `IntegerTrace`, `IntegerRefine` (fox: 313 → 516 vertices, 25.04°;
+  cat_head: 131 → 147, 25.13°, with boundary), `IntegerCommonSubdivision`,
+  `CommonSubdivisionCompareIntegerSignpost`, `FunctionTransfer` (L² error 4.3e2 against 9.1e2 for
+  pointwise transfer; normal equations to 1e-6). Not ported: the two trace-versus-bulk comparisons
+  and `CommonSubdivisionGeometry`.
+
+### Timings
+
+One core (`taskset -c 7`), one job after the other, nothing else of ours running; 1-minute load
+average median 1.03, 90th percentile 1.34 (the other agent's work). Seconds; the paper's machine
+was an i9-9980XE. 'refine' includes the certificate (integers).
+
+| mesh | paper | ours integers refine | ours signposts refine | demo integers refine | demo signposts refine |
+|---|---|---|---|---|---|
+| 44395 (Fig. 15, 2 948 vertices) | 0.2 s | 0.029 | 0.021 | 0.084 | 0.031 |
+| 54674 (Fig. 16, 9 389) | 0.6 s | 0.096 | 0.064 | 0.305 | 0.101 |
+| 719791 (Fig. 19, 871 434) | 4 min / 1.5 min | 58.6 s | 36.1 s | 181.1 s | 50.9 s |
+
+719791: `|V¹|` 3 349 214, **`|V^S|` 33 873 704** (the paper: about 30 M and not extractable for memory);
+the common subdivision of the integers took 16.1 s and 12.1 GB peak resident (24 GB limit), the demo's 229 s.
+The 50-mesh subset (every 155th kept mesh by id; the ids are in `runs_tmp/wp10/timings.md`): totals over the
+subset ours integers IDT 1.65 s, refine 8.79 s, subdivision 4.29 s; ours signposts 0.83 / 5.24 / 2.56 s;
+demo integers 1.68 / 24.10 / 28.71 s; demo signposts 0.94 / 7.66 s. The demo's integer refinement takes
+a median 2.8 times ours (1.3 to 6.7). Integer refinement (with certificate) costs about 1.7 times the signposts' here, the IDT 2 times (the paper: about 2.7 times).
+
+Criterion benches (`cargo bench -p ddg-integer-coords --bench representation`, single thread pinned to a
+core, nothing else running; medians in ms; the signposts' own benches are `-p ddg-intrinsic --bench
+retriangulation`: spot IDT 1.50, refinement 4.26, camelbad IDT 8.50, refinement 37.2). 1 000 edges flipped and flipped back
+cost (2 000 flips) 0.33 ms on every mesh, integers and signposts alike (a flip is O(1) in both).
+
+| mesh (`|V0|`) | IDT ints, certified | IDT ints | IDT signposts | refine ints (Chew, certified) | refine signposts (Ruppert) | subdivision ints | subdivision signposts (traces + overlay) | transfer operators (ints) | transfer solve |
+|---|---|---|---|---|---|---|---|---|---|
+| spot | 2.95 | 1.56 | 1.50 | 5.88 | 4.22 | 4.11 | 1.63 | 18.6 | 0.27 |
+| bob | 3.09 | 1.54 | 1.49 | 4.71 | 3.10 | 3.92 | 1.15 | 16.0 | 0.24 |
+| blub | 7.81 | 4.23 | 4.08 | 23.5 | 17.4 | 18.4 | 6.90 | 79.7 | 0.99 |
+| camelbad | 15.5 | 8.92 | 8.58 | 50.4 | 35.5 | 28.5 | 15.6 | 190.5 | 2.15 |
+| 44395 (Fig. 15, 2 948) | 3.95 | 2.29 | 2.23 | 28.5 | 19.2 | 9.30 | 6.32 | 58.7 | 0.77 |
+| 54674 (Fig. 16, 9 389) | 12.6 | 7.51 | 7.21 | 93.7 | 59.3 | 30.9 | 19.9 | 231 | 2.40 |
+
+The certificate roughly doubles the IDT's cost and the integers' subdivision 1.5 to 2.5 times the signposts'
+(it also recovers the crossings' geometry from the integers); the integer IDT itself costs the signposts'.
+
+
+**A slow case.** Mesh 54621 (159 858 vertices, 1 450 boundary edges): under Chew's rules the refinement
+removes 12 951 inserted vertices and takes 28 s alone (439 s in the 56-job run, memory bandwidth), the
+signposts under Chew's rules 65 s, the signposts under Ruppert's rules 0.6 s, and the authors' demo, integer
+backend, 2.1 s (224 718 vertices against our 225 812). The removal step of boundary splits (the Dijkstra
+ball of radius `ℓ`, strict as Alg. 10 line 20; the reference removes after every split with `≤`) costs
+the difference; it is in the shared driver. The same mesh is the maximum of the 56-job run (450 s).
+
+### Verdict on SPEC §13 Q3
+
+**The gate passes, with two listed exceptions.** Q3 asks for integer success at least the paper's
+100 %/100 % minus explained exceptions such as time-outs or memory, and no certificate failure.
+
+* Integer coordinates: 7 743 of 7 745 meshes complete the IDT and the refinement with a valid common
+  subdivision (99.97 % in both columns, 100.00 % on the 406 meshes with boundary).
+* Certificate failures: **none** (7 743 IDT, 7 743 refinement certificates), no invalid subdivision, no
+  trace failure, no overflow, no memory failure; the 30 M-vertex subdivision of 719791 is extracted
+  (33.9 M vertices, 12 GB, 58.6 s + 16.1 s, against the paper's 4 min and "not extractable").
+* The two exceptions, 176193 and 190253, are time-outs of a non-terminating refinement. They are
+  explained (shared refinement driver, independent of the representation: the signposts do the same
+  and the authors' demo does not) but they are a defect to fix, not load: they are `#[ignore]`d
+  failing tests in `tests/thingi_regressions.rs`.
+* The integers do better than the paper's signposts (96.0 %/69.1 %) and as well as our own signposts
+  (100.00 %/99.78 % under Ruppert's rules, whose 17 failures are 15 trace failures and the same two
+  meshes); the demo's signposts reach 87.9 %/20.7 % unmollified.
+
+The switch of Q3 is `Representation::DEFAULT` and the `representation=` defaults (WP11); this WP does not
+touch them.
+
 ## The reference implementation
 
 geometry-central (MIT, © 2017–2019 Nicholas Sharp and the geometry-central contributors), commit

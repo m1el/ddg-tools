@@ -1,5 +1,5 @@
 //! WP10, SPEC 10.2: benchmarks of the integer representation next to the signposts' on the same
-//! inputs: a run of flips, Delaunay flipping (IDT), Delaunay refinement to 25 degrees, the common
+//! inputs: a run of flips (1000 edges, each flipped and back), Delaunay flipping (IDT), Delaunay refinement to 25 degrees, the common
 //! subdivision, and attribute transfer (integers only: `Transfer`). The inputs are mollified
 //! (`1e-5`) as in the paper's evaluation. Meshes: `data/models` (spot, bob, blub), the optimal
 //! cones dataset's camelbad, and the converted Thingi10k meshes 44395 (Fig. 15) and 54674
@@ -99,20 +99,21 @@ fn bench(c: &mut Criterion) {
         let mut g = c.benchmark_group(format!("representation/{}", inp.name));
         g.sample_size(10).measurement_time(Duration::from_secs(8));
 
-        // Flips of edges that can flip, from the Delaunay state.
+        // Each of 1000 flippable edges flipped and flipped back (2000 flips), from the Delaunay state.
         let mut flat_i = ints.clone();
         flat_i.flip_to_delaunay(&delaunay).unwrap();
         let mut flat_s = sign.clone();
         flat_s.flip_to_delaunay(&delaunay).unwrap();
         let flippable: Vec<usize> = (0..flat_i.complex().n_edges())
             .filter(|&e| matches!(Triangulation::can_flip(&flat_i, e), Ok(Ok(()))))
-            .take(2000)
+            .take(1000)
             .collect();
-        g.bench_function("flip x2000 integers", |b| {
+        g.bench_function("2000 flips and flips back, integers", |b| {
             b.iter_batched(
                 || flat_i.clone(),
                 |mut t| {
                     for &e in &flippable {
+                        t.flip_edge(e).unwrap();
                         t.flip_edge(e).unwrap();
                     }
                     t
@@ -120,11 +121,12 @@ fn bench(c: &mut Criterion) {
                 BatchSize::LargeInput,
             )
         });
-        g.bench_function("flip x2000 signposts", |b| {
+        g.bench_function("2000 flips and flips back, signposts", |b| {
             b.iter_batched(
                 || flat_s.clone(),
                 |mut t| {
                     for &e in &flippable {
+                        t.flip_edge(e).unwrap();
                         t.flip_edge(e).unwrap();
                     }
                     t

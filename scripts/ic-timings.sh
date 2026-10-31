@@ -17,7 +17,7 @@ printf '44395\n54674\n719791\n' > "$OUT/paper.txt"
 case "${1:-all}" in subset) lists=(subset50) ;; paper) lists=(paper) ;; *) lists=(paper subset50) ;; esac
 for l in "${lists[@]}"; do
   while read -r id; do
-    echo "$id load_before $(cut -d' ' -f1-3 /proc/loadavg)" >> "$OUT/load.log"
+    echo "$id load_before $(uptime | sed "s/.*load average: //")" >> "$OUT/load.log"
     for b in integer sp-ruppert; do
       taskset -c "$CORE" timeout --signal=KILL 1800 "$EX/thingi_eval" "$CONV/$id.obj" --backend "$b" --id "$id" > "$OUT/${id}_ours_$b.json" 2> "$OUT/${id}_ours_$b.err"
     done
@@ -27,6 +27,6 @@ for l in "${lists[@]}"; do
         taskset -c "$CORE" timeout --signal=KILL 1800 "$DEMO" "$CONV/$id.obj" --backend "$b" --${op}Delaunay --noGUI --logStats --refineMaxInsertions=0 --outputPrefix="$p" > "${p}out.log" 2>&1
       done
     done
-    echo "$id load_after $(cut -d' ' -f1-3 /proc/loadavg)" >> "$OUT/load.log"
+    echo "$id load_after $(uptime | sed "s/.*load average: //")" >> "$OUT/load.log"
   done < "$OUT/$l.txt"
 done

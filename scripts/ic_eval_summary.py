@@ -5,7 +5,7 @@ root = sys.argv[1]
 out_path = os.path.join(root, "runs_tmp/wp10/summary.md")
 meta = {r["id"]: r for r in csv.DictReader(open(os.path.join(root, "data/thingi10k/converted.tsv")), delimiter="\t")}
 kept = [i for i, r in meta.items() if r["status"] == "kept"]
-BACKENDS = [("integer", "integer coordinates (Chew)"), ("sp-ruppert", "signposts (Ruppert rules)"), ("sp-chew", "signposts (Chew rules)")]
+BACKENDS = [("integer", "integer coordinates (Chew)"), ("integer-ref", "integer coordinates (Chew), authors' Delaunay test"), ("sp-ruppert", "signposts (Ruppert rules)"), ("sp-chew", "signposts (Chew rules)")]
 data = {}
 for b, _ in BACKENDS:
     d = {}
@@ -111,15 +111,16 @@ for b, name in BACKENDS:
     w(f"| {name} | {statistics.median(t):.3f} | {q(t, .95):.2f} | {mt['seconds_total']:.1f} ({mt['id']}) | {mm['peak_rss_mb']} ({mm['id']}) |")
 w("")
 w("## Integers against signposts (same operations?)\n")
-same = diff = 0; ex = []
+v1same = vsame = diff = 0; ex = []
 for i in kept:
     a = data["integer"].get(i); b2 = data["sp-chew"].get(i)
     if ref_ok(a) and ref_ok(b2):
-        if a["v1"] == b2["v1"] and a["refine_sub_v"] == b2["refine_sub_v"]: same += 1
-        else:
+        v1same += a["v1"] == b2["v1"]
+        vsame += a["v1"] == b2["v1"] and a["refine_sub_v"] == b2["refine_sub_v"]
+        if a["v1"] != b2["v1"]:
             diff += 1
             if len(ex) < 15: ex.append(f"{i} ({a['v1']}/{b2['v1']})")
-w(f"Both Chew: refined `|V1|` and `|V^S|` equal on {same} meshes, differ on {diff}; first differing (integer/signpost `|V1|`): {', '.join(ex)}\n")
+w(f"Both Chew rules, both successful: refined `|V1|` equal on {v1same}, `|V1|` and `|V^S|` equal on {vsame}, `|V1|` different on {diff} (first: integer/signpost {', '.join(ex)}). Equal `|V1|` with different `|V^S|` is the signposts snapping inserted vertices onto input edges (the crate's README, I28).\n")
 idts = [(i, data['integer'][i], data['sp-chew'][i]) for i in kept if idt_ok(data['integer'].get(i)) and idt_ok(data['sp-chew'].get(i))]
 bad = [(i, a['idt_sum_nplus'], b2['idt_sum_nplus']) for i, a, b2 in idts if a['idt_sum_nplus'] != b2['idt_sum_nplus'] or a['idt_flips'] != b2['idt_flips']]
 w(f"IDT: flips and `Sum n+` equal on {len(idts) - len(bad)} of {len(idts)} meshes; differences: {bad[:15]}\n")
