@@ -844,6 +844,166 @@ impl Network {
     }
 }
 
+/// What [`Network::replace_run`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Replaced {
+    /// The ids of the new segments, in path order.
+    pub(crate) new_ids: Vec<u32>,
+    /// The segment that now follows the new ones (when nothing was added: the one that
+    /// followed the removed run), if any: the joint at its tail changed.
+    pub(crate) after: Option<u32>,
+    /// The segments that were next to a removed one in the layer of its edge: the wedges at
+    /// their ends may have become flexible.
+    pub(crate) layer_neighbours: Vec<u32>,
+    /// Whether the path has no segment left (it contracted, F12).
+    pub(crate) contracted: bool,
+}
+
+impl Network {
+    /// Replaces a run of one or two consecutive segments of one path by `new` (in path
+    /// order), each new segment pushed outermost on the side of the face of the halfedge
+    /// given with it (SPEC §4.1 step 2: the wedge side; §4.3: the side of the face crossed).
+    ///
+    /// The removed segments are taken out of their layers wherever they are (Alg. 1 removes
+    /// segments outermost on the wedge side, the contraction of §4.1 step 3 two adjacent
+    /// ones). When the run is the whole of a closed path the new segments form the loop by
+    /// themselves. When nothing is added the neighbours of the run are joined; a path left
+    /// without segments has contracted (`first = NONE`, F12).
+    ///
+    /// # Errors
+    /// [`FlipError::Internal`] if `run` is not one or two consecutive live segments of one
+    /// path, or a removed segment is missing from its layer.
+    pub(crate) fn replace_run(
+        &mut self,
+        complex: &Complex,
+        run: &[u32],
+        new: &[(Segment, usize)],
+    ) -> Result<Replaced, FlipError> {
+        let internal = |what: String| Err(FlipError::Internal { what });
+        let live = |id: u32| self.nodes.get(id as usize).copied().flatten();
+        let Some(first) = run.first().and_then(|&id| live(id)) else {
+            return internal(format!("replace_run: bad run {run:?}"));
+        };
+        let p = first.path as usize;
+        if run.len() > 2
+            || (run.len() == 2
+                && (first.next != run[1] || live(run[1]).is_none_or(|n| n.prev != run[0])))
+        {
+            return internal(format!(
+                "replace_run: {run:?} are not consecutive segments of path {p}"
+            ));
+        }
+        let last_id = *run.last().expect("non-empty");
+        let last = live(last_id).expect("checked");
+        let data = self.paths[p];
+        let whole = data.closed && data.n_segments as usize == run.len();
+        let (before, after) = if whole {
+            (NONE, NONE)
+        } else {
+            (first.prev, last.next)
+        };
+
+        // Out of the layers.
+        let mut layer_neighbours = Vec::new();
+        for &id in run {
+            let e = live(id).expect("checked").segment.edge as usize;
+            let layer = &mut self.layers[e];
+            let Some(pos) = layer.iter().position(|&x| x == id) else {
+                return internal(format!(
+                    "segment {id} of path {p} is not in the layer of its edge {e}"
+                ));
+            };
+            layer.remove(pos);
+            for q in [pos.checked_sub(1), Some(pos)].into_iter().flatten() {
+                if let Some(&x) = layer.get(q)
+                    && !run.contains(&x)
+                {
+                    layer_neighbours.push(x);
+                }
+            }
+        }
+        for &id in run {
+            self.nodes[id as usize] = None;
+        }
+
+        // The new segments.
+        let mut new_ids = Vec::with_capacity(new.len());
+        for &(segment, h) in new {
+            let id = self.nodes.len() as u32;
+            self.nodes.push(Some(Node {
+                path: p as u32,
+                segment,
+                prev: NONE,
+                next: NONE,
+            }));
+            let e = segment.edge as usize;
+            if complex.edge_halfedge(e) == h {
+                self.layers[e].push_front(id);
+            } else {
+                self.layers[e].push_back(id);
+            }
+            new_ids.push(id);
+        }
+        for w in new_ids.windows(2) {
+            self.link(w[0], w[1]);
+        }
+        if whole {
+            if let (Some(&a), Some(&b)) = (new_ids.first(), new_ids.last()) {
+                self.link(b, a);
+            }
+        } else {
+            match (new_ids.first(), new_ids.last()) {
+                (Some(&a), Some(&b)) => {
+                    if before != NONE {
+                        self.link(before, a);
+                    } else {
+                        self.nodes[a as usize].as_mut().expect("new").prev = NONE;
+                    }
+                    if after != NONE {
+                        self.link(b, after);
+                    }
+                }
+                _ => {
+                    if before != NONE && after != NONE {
+                        self.link(before, after);
+                    } else if before != NONE {
+                        self.nodes[before as usize].as_mut().expect("live").next = NONE;
+                    } else if after != NONE {
+                        self.nodes[after as usize].as_mut().expect("live").prev = NONE;
+                    }
+                }
+            }
+        }
+
+        // The path's bookkeeping.
+        let n = data.n_segments as usize - run.len() + new.len();
+        let data = &mut self.paths[p];
+        data.n_segments = n as u32;
+        if n == 0 {
+            data.first = NONE;
+        } else if run.contains(&data.first) {
+            data.first = if !data.closed && before != NONE {
+                // An open path whose first segment was removed has no `before`.
+                return internal(format!("path {p}: its first segment has a predecessor"));
+            } else {
+                new_ids.first().copied().unwrap_or(after)
+            };
+        }
+        Ok(Replaced {
+            new_ids,
+            after: (after != NONE).then_some(after),
+            layer_neighbours,
+            contracted: n == 0,
+        })
+    }
+
+    /// Links `a` → `b`.
+    fn link(&mut self, a: u32, b: u32) {
+        self.nodes[a as usize].as_mut().expect("live").next = b;
+        self.nodes[b as usize].as_mut().expect("live").prev = a;
+    }
+}
+
 /// Checks that consecutive segments of `path` share a vertex, and that a loop is closed.
 fn check_connected(complex: &Complex, p: usize, path: &EdgePath) -> Result<(), FlipError> {
     let s = &path.segments;

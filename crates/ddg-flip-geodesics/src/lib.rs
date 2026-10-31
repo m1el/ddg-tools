@@ -79,9 +79,11 @@
 
 pub mod certify;
 mod error;
+mod flipout;
 pub mod init;
 pub mod network;
 pub mod report;
+pub mod shorten;
 pub mod wedge;
 
 pub use certify::{CertifyOptions, GeodesicCertificate, JointFailure, JointStatus, certify};
@@ -91,5 +93,5 @@ pub use network::{
     EdgePath, GeodesicNetwork, Joint, Layering, Network, Segment, SegmentId, SegmentInfo,
     SegmentRef,
 };
-pub use report::{ShortenOptions, ShortenReport, ShortenStatus};
+pub use report::{ShortenOptions, ShortenReport, ShortenStatus, ShortenStep, Shortening};
 pub use wedge::{EdgeEnd, JointGeometry, Side, Turn, VertexStar, Wedge, wedge_angle};

@@ -1,7 +1,9 @@
-//! Options and report of the shortening (SPEC §4.2–§4.4, F13, F14). The shortening itself
-//! (Alg. 1, Alg. 2) is work package F2; these types fix what it takes and returns.
+//! Options and report of the shortening (SPEC §4.2–§4.4, F13, F14), and what one step of it
+//! did ([`Shortening`], [`ShortenStep`]).
 
 use crate::error::FlipError;
+use crate::network::{Joint, SegmentId};
+use crate::wedge::Side;
 
 /// Options of the shortening (Alg. 2).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,12 +97,110 @@ pub struct ShortenReport {
     pub sweeps: usize,
     /// Single-segment loops moved across a face (App. B); the only steps that lengthen.
     pub loop_perturbations: usize,
-    /// Wedges with a twice-incident edge met by Alg. 1 (App. A; SPEC §7 layer 3).
+    /// Out-and-back joints contracted (`deg W = 0`, SPEC §4.1 step 3, F12, F26).
+    pub contractions: usize,
+    /// Alg. 1 calls whose wedge had, at some point of the flipping, an edge incident on it
+    /// twice (a self-edge at `b` with both ends inside the wedge; App. A; SPEC §7 layer 3).
     pub twice_incident_wedges: usize,
-    /// Paths that contracted to nothing and were removed (F12).
+    /// Alg. 1 calls whose outer arc had, at some point of the flipping, an interior vertex of
+    /// degree one (App. A, Thm A.5).
+    pub degree_one_wedges: usize,
+    /// Queue entries skipped because their segment is gone or their angle changed (F5).
+    pub stale_entries: usize,
+    /// Queue entries dropped because their wedge was not flexible (F5).
+    pub blocked_entries: usize,
+    /// Paths that contracted to nothing (F12), ascending. They keep their index and have no
+    /// segment.
     pub contracted: Vec<usize>,
     /// Length before.
     pub initial_length: f64,
     /// Length after (the running sum, F14).
     pub final_length: f64,
+}
+
+/// What one shortening step did to a joint (one Alg. 1 call, or the App. B move of a
+/// single-segment loop).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Shortening {
+    /// The joint was replaced by the outer arc of its wedge (Alg. 1, `deg W ≥ 1`): two
+    /// segments of total length `old_length` by `new_segments` of total length
+    /// `new_length < old_length`.
+    Replaced {
+        /// The new segments, in path order.
+        new_segments: Vec<SegmentId>,
+        /// `ℓ_ab + ℓ_bc`.
+        old_length: f64,
+        /// The length of the outer arc, summed in path order.
+        new_length: f64,
+    },
+    /// An out-and-back joint (`deg W = 0`) was contracted: both segments removed (SPEC §4.1
+    /// step 3, F12, F26).
+    Contracted {
+        /// `ℓ_ab + ℓ_bc`, the length removed.
+        old_length: f64,
+        /// Whether the path has no segment left.
+        path_contracted: bool,
+    },
+    /// A single-segment loop was moved across the face on the side of its wedge (SPEC §4.3,
+    /// App. B). The length grows.
+    LoopMoved {
+        /// The new segments, in path order.
+        new_segments: Vec<SegmentId>,
+        /// The length of the loop before.
+        old_length: f64,
+        /// The length after.
+        new_length: f64,
+    },
+    /// The outer arc was not shorter (refused flips, F6): the path was left as it was; the
+    /// flips made are kept.
+    Stalled {
+        /// `ℓ_ab + ℓ_bc`.
+        old_length: f64,
+        /// The length of the outer arc.
+        new_length: f64,
+    },
+}
+
+impl Shortening {
+    /// The change of the network's length (negative when it shortened).
+    pub fn length_change(&self) -> f64 {
+        match self {
+            Shortening::Replaced {
+                old_length,
+                new_length,
+                ..
+            }
+            | Shortening::LoopMoved {
+                old_length,
+                new_length,
+                ..
+            } => new_length - old_length,
+            Shortening::Contracted { old_length, .. } => -old_length,
+            Shortening::Stalled { .. } => 0.0,
+        }
+    }
+}
+
+/// One step of the shortening, as passed to the observer of
+/// [`GeodesicNetwork::shorten_with`](crate::GeodesicNetwork::shorten_with).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShortenStep {
+    /// The iteration (from `1`).
+    pub iteration: usize,
+    /// The joint shortened.
+    pub joint: Joint,
+    /// The side of its wedge.
+    pub side: Side,
+    /// The joint's vertex.
+    pub vertex: usize,
+    /// The wedge angle on that side before the step.
+    pub angle: f64,
+    /// Flips made by the step.
+    pub flips: usize,
+    /// Flips the triangulation refused in the step.
+    pub refused_flips: usize,
+    /// What happened.
+    pub shortening: Shortening,
+    /// The network's length after the step (the running sum, F14).
+    pub length: f64,
 }

@@ -128,6 +128,18 @@ pub enum FlipError {
         /// The vertex.
         vertex: usize,
     },
+    /// A joint given to
+    /// [`GeodesicNetwork::shorten_joint`](crate::GeodesicNetwork::shorten_joint) cannot be
+    /// shortened on the side asked for. Nothing is changed.
+    NotShortenable {
+        /// The joint's vertex.
+        vertex: usize,
+        /// The side.
+        side: crate::wedge::Side,
+        /// Why: the vertex is pinned, the wedge is not flexible, crosses the boundary, or its
+        /// angle is not below `π`.
+        reason: &'static str,
+    },
     /// An option is out of its range.
     InvalidOptions {
         /// What is wrong.
@@ -222,6 +234,14 @@ impl fmt::Display for FlipError {
             FlipError::UnpinnedEnd { path, vertex } => write!(
                 f,
                 "path {path} is open and ends at vertex {vertex}, which is not pinned"
+            ),
+            FlipError::NotShortenable {
+                vertex,
+                side,
+                reason,
+            } => write!(
+                f,
+                "the joint at vertex {vertex} cannot be shortened on its {side:?} side: {reason}"
             ),
             FlipError::InvalidOptions { what } => write!(f, "invalid options: {what}"),
             FlipError::Internal { what } => write!(f, "internal error (a bug): {what}"),

@@ -7,7 +7,10 @@ use std::path::PathBuf;
 use ddg_core::generators::{self, GeneratedMesh, SplitMix64};
 use ddg_core::io::read_obj;
 use ddg_core::{Geometry, TriMesh};
-use ddg_flip_geodesics::{EdgePath, Segment, path_from_vertices};
+use ddg_flip_geodesics::{
+    CertifyOptions, EdgePath, GeodesicCertificate, GeodesicNetwork, Segment, ShortenOptions,
+    ShortenReport, Shortening, path_from_vertices,
+};
 use ddg_intrinsic::{DelaunayOptions, IntrinsicTriangulation, Triangulation};
 
 /// A mesh with its positions.
@@ -315,4 +318,250 @@ pub fn random_flips(tri: &mut IntrinsicTriangulation, n: usize, seed: u64) -> us
         }
     }
     done
+}
+
+// ----- generators for the shortening tests (F2) -----
+
+/// The surface of the cube `[0, a]³`, every face an `n × n` grid of squares split into two
+/// triangles (diagonals alternating); as `ddg-intrinsic-apps/tests/common`.
+pub fn cube(n: usize, a: f64) -> Shape {
+    let mut positions: Vec<[f64; 3]> = Vec::new();
+    let mut index = std::collections::HashMap::new();
+    let mut id = |p: [i64; 3], positions: &mut Vec<[f64; 3]>| -> u32 {
+        *index.entry(p).or_insert_with(|| {
+            positions.push(p.map(|c| a * c as f64 / n as f64));
+            (positions.len() - 1) as u32
+        })
+    };
+    let n = n as i64;
+    let mut faces = Vec::new();
+    let sides: [([i64; 3], [i64; 3], [i64; 3]); 6] = [
+        ([0, 0, 0], [0, 1, 0], [1, 0, 0]),
+        ([0, 0, n], [1, 0, 0], [0, 1, 0]),
+        ([0, 0, 0], [1, 0, 0], [0, 0, 1]),
+        ([0, n, 0], [0, 0, 1], [1, 0, 0]),
+        ([0, 0, 0], [0, 0, 1], [0, 1, 0]),
+        ([n, 0, 0], [0, 1, 0], [0, 0, 1]),
+    ];
+    for (o, u, v) in sides {
+        let at = |i: i64, j: i64| [0, 1, 2].map(|k| o[k] + i * u[k] + j * v[k]);
+        for i in 0..n {
+            for j in 0..n {
+                let p = id(at(i, j), &mut positions);
+                let q = id(at(i + 1, j), &mut positions);
+                let r = id(at(i + 1, j + 1), &mut positions);
+                let s = id(at(i, j + 1), &mut positions);
+                if (i + j) % 2 == 0 {
+                    faces.push([p, q, r]);
+                    faces.push([p, r, s]);
+                } else {
+                    faces.push([p, q, s]);
+                    faces.push([q, r, s]);
+                }
+            }
+        }
+    }
+    Shape::new(&format!("cube {n} side {a}"), positions, faces)
+}
+
+/// The vertex of [`cube`] at a position (exact lattice point), by search.
+pub fn vertex_at(shape: &Shape, p: [f64; 3]) -> usize {
+    shape
+        .positions
+        .iter()
+        .position(|&q| dist(p, q) < 1e-12)
+        .unwrap_or_else(|| panic!("{}: no vertex at {p:?}", shape.name))
+}
+
+/// The lateral surface of the square pyramid of [`pyramid`] (no base): a polyhedral cone
+/// with apex 4 and the base square as its boundary.
+pub fn open_pyramid(h: f64) -> Shape {
+    let positions = vec![
+        [1.0, 1.0, 0.0],
+        [-1.0, 1.0, 0.0],
+        [-1.0, -1.0, 0.0],
+        [1.0, -1.0, 0.0],
+        [0.0, 0.0, h],
+    ];
+    let faces = vec![[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]];
+    Shape::new(&format!("open pyramid h {h}"), positions, faces)
+}
+
+/// A planar L: the square `[0, 2]²` without the open quadrant `(1, 2]²`, `n` cells per unit,
+/// diagonals alternating. The reflex corner `(1, 1)` is a boundary vertex with interior angle
+/// `3π/2`.
+pub fn l_shape(n: usize) -> Shape {
+    let h = 1.0 / n as f64;
+    let m = 2 * n;
+    let inside = |i: usize, j: usize| !(i > n && j > n); // lattice points of the L
+    let mut index = vec![u32::MAX; (m + 1) * (m + 1)];
+    let mut positions = Vec::new();
+    for i in 0..=m {
+        for j in 0..=m {
+            if inside(i, j) {
+                index[i * (m + 1) + j] = positions.len() as u32;
+                positions.push([i as f64 * h, j as f64 * h, 0.0]);
+            }
+        }
+    }
+    let at = |i: usize, j: usize| index[i * (m + 1) + j];
+    let mut faces = Vec::new();
+    for i in 0..m {
+        for j in 0..m {
+            if i >= n && j >= n {
+                continue;
+            }
+            let (p, q, r, s) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            if (i + j) % 2 == 0 {
+                faces.push([p, q, r]);
+                faces.push([p, r, s]);
+            } else {
+                faces.push([p, q, s]);
+                faces.push([q, r, s]);
+            }
+        }
+    }
+    Shape::new(&format!("L-shape {n}"), positions, faces)
+}
+
+/// The distance in the plane L of [`l_shape`] between two of its points: straight if the
+/// segment stays in the L (it misses the open quadrant `(1, 2)²`), else through the reflex
+/// corner `(1, 1)` (the visibility graph of a polygon with one reflex vertex).
+pub fn l_distance(p: [f64; 3], q: [f64; 3]) -> f64 {
+    // Clip the segment against the open square (1, 2)² (Liang-Barsky).
+    let (mut t0, mut t1) = (0.0f64, 1.0f64);
+    let d = [q[0] - p[0], q[1] - p[1]];
+    let mut visible = false;
+    for k in 0..2 {
+        for (lo, hi) in [(1.0, 2.0)] {
+            if d[k].abs() < 1e-300 {
+                if p[k] <= lo || p[k] >= hi {
+                    visible = true;
+                }
+            } else {
+                let (a, b) = ((lo - p[k]) / d[k], (hi - p[k]) / d[k]);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+        }
+    }
+    if visible || t1 - t0 <= 1e-12 {
+        dist(p, q)
+    } else {
+        let r = [1.0, 1.0, 0.0];
+        dist(p, r) + dist(r, q)
+    }
+}
+
+/// A tube of revolution around the `z` axis: ring `j` has radius `radii[j]` at height
+/// `j · dz`, `n` vertices; vertex `(j, k)` is `j n + k`. Ring neighbours `(j, k)–(j, k + 1)`,
+/// verticals `(j, k)–(j + 1, k)` and diagonals `(j, k)–(j + 1, k + 1)` are edges. With
+/// constant radii it is a prism tube.
+pub fn tube(n: usize, radii: &[f64], dz: f64) -> Shape {
+    let mut positions = Vec::new();
+    for (j, &r) in radii.iter().enumerate() {
+        for k in 0..n {
+            let w = 2.0 * PI * k as f64 / n as f64;
+            positions.push([r * w.cos(), r * w.sin(), j as f64 * dz]);
+        }
+    }
+    let v = |j: usize, k: usize| (j * n + k % n) as u32;
+    let mut faces = Vec::new();
+    for j in 0..radii.len() - 1 {
+        for k in 0..n {
+            let (a, b, c, d) = (v(j, k), v(j, k + 1), v(j + 1, k), v(j + 1, k + 1));
+            faces.push([a, b, d]);
+            faces.push([a, d, c]);
+        }
+    }
+    Shape::new(&format!("tube {n}x{}", radii.len()), positions, faces)
+}
+
+/// A tube with a waist: `2 w + 1` rings, radius `1 + 0.15 (j − w)²`, so ring `w` is the
+/// shortest closed geodesic around it.
+pub fn waist_tube(n: usize, w: usize) -> Shape {
+    let radii: Vec<f64> = (0..=2 * w)
+        .map(|j| 1.0 + 0.15 * (j as f64 - w as f64).powi(2))
+        .collect();
+    tube(n, &radii, 0.3)
+}
+
+// ----- running the shortening (F2) -----
+
+/// A shortened network with its report and certificate.
+pub struct Outcome<T: Triangulation> {
+    pub network: GeodesicNetwork<T>,
+    pub report: ShortenReport,
+    pub certificate: GeodesicCertificate,
+    /// Iterations seen by the observer, by kind.
+    pub replaced: usize,
+    pub contracted: usize,
+    pub loop_moves: usize,
+    pub stalled: usize,
+}
+
+/// Shortens `paths` on `tri` with `options` (and `check_invariants`), checking after every
+/// iteration (SPEC §7 tests 5, 6): a replacement strictly shortens, nothing but an App. B
+/// move lengthens, the running length agrees with the length summed afresh; then certifies.
+pub fn run<T: Triangulation + Clone>(
+    tri: T,
+    paths: &[EdgePath],
+    pinned: &[usize],
+    options: &ShortenOptions,
+) -> Outcome<T> {
+    let mut network =
+        GeodesicNetwork::new(tri, paths, pinned, None).unwrap_or_else(|e| panic!("network: {e}"));
+    let mut last = network.length();
+    let (mut replaced, mut contracted, mut loop_moves, mut stalled) = (0, 0, 0, 0);
+    let options = ShortenOptions {
+        check_invariants: true,
+        ..*options
+    };
+    let report = network
+        .shorten_with(&options, |step, net| {
+            match &step.shortening {
+                Shortening::Replaced {
+                    old_length,
+                    new_length,
+                    ..
+                } => {
+                    assert!(new_length < old_length, "step {}: {step:?}", step.iteration);
+                    replaced += 1;
+                }
+                Shortening::Contracted { .. } => contracted += 1,
+                Shortening::LoopMoved { .. } => loop_moves += 1,
+                Shortening::Stalled { .. } => stalled += 1,
+            }
+            let fresh = net.recompute_length();
+            assert!(
+                (fresh - step.length).abs() <= 1e-9 * fresh.max(1.0),
+                "step {}: running length {} vs {fresh}",
+                step.iteration,
+                step.length
+            );
+            if !matches!(step.shortening, Shortening::LoopMoved { .. }) {
+                assert!(step.length <= last, "step {}: length grew", step.iteration);
+            }
+            last = step.length;
+        })
+        .unwrap_or_else(|e| panic!("shorten: {e}"));
+    let certificate = network
+        .certify(&CertifyOptions::default())
+        .unwrap_or_else(|e| panic!("certify: {e}"));
+    Outcome {
+        network,
+        report,
+        certificate,
+        replaced,
+        contracted,
+        loop_moves,
+        stalled,
+    }
+}
+
+/// The vertices of path `p` of a network.
+pub fn path_vertices<T: Triangulation>(net: &GeodesicNetwork<T>, p: usize) -> Vec<usize> {
+    net.network()
+        .path(p)
+        .vertices(net.triangulation().complex())
 }
