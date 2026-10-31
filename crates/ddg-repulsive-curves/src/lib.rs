@@ -15,33 +15,33 @@
 //! (decisions `D1`, `D2`, ...), the public API, the defaults, the verification and measurement
 //! plans and the work packages.
 //!
-//! # Implemented so far (work packages WP1–WP5 and the line-search follow-up)
+//! # Contents
 //!
-//! * WP1: [`CurveNetwork`]: validated topology, components, edge quantities, geometric
-//!   validation (`SPEC.md` §2); [`read_curve_obj`] and [`write_curve_obj`]; [`Exponents`],
+//! * [`CurveNetwork`]: validated topology, components, edge quantities, geometric validation
+//!   (`SPEC.md` §2); [`read_curve_obj`] and [`write_curve_obj`]; [`Exponents`],
 //!   [`kernel`](mod@kernel): the tangent-point kernel and gradients (§3); the exact `O(|E|²)`
-//!   [`energy`](fn@energy::energy), parallel and deterministic.
-//! * WP2: constraints and their projection ([`constraints`], [`solve`], §5–6), the fractional
-//!   Sobolev metric and Gram matrices ([`metric`]), subdivision ([`mod@subdivide`]).
-//! * WP3: the gradient flow ([`step`]): [`Session`] and [`flow`], the line searches
-//!   ([`LineSearch`], with the start rules of [`StartRule`]), the stopping rules, length
-//!   schedules, L-BFGS and NCG ([`optimize`]) and the continuous collision detection of
-//!   [`ccd`] that guards the isotopy class.
-//! * WP4: the Barnes–Hut energy ([`BhTree`]), wired into the session as [`BarnesHutEnergy`]
-//!   (the tree is built once per step and refitted in the line search).
-//! * WP5: the block cluster tree and the hierarchical metric product ([`BlockClusterTree`],
-//!   [`HierarchicalMetric`], [`HierarchicalCgSaddle`]).
-//! * WP7: obstacles ([`Obstacle`]), penalties ([`SurfacePotential`], [`TotalLengthPenalty`],
-//!   [`LengthDifference`], [`FieldAlignment`]) and the implicit surfaces and vector fields of
-//!   [`surfaces`].
-//! * Follow-up: the grow-previous start of the guarded search (`SPEC.md` §17f).
-//! * WP6 and WP6b: the multigrid saddle solver for curves and curve networks ([`mod@multigrid`]:
-//!   [`MgOptions`], [`CurveHierarchy`], [`MultigridSaddle`], [`MultigridSolvers`], the
-//!   near-contact correction of [`NearCorrection`]; `SPEC.md` §8.4, §17g).
-//! * WP3c: multigrid in the session ([`Solver::Multigrid`]), the dense fallback, and
-//!   [`Backend::Auto`] with a measured crossover (`SPEC.md` §17h).
+//!   [`energy`](fn@energy::energy), parallel and deterministic, with the near-pair quadrature
+//!   of §3.4 ([`NearPairOptions`], [`SecondNeighbourRule`]; not in the paper, on by default).
+//! * Constraints and their projection ([`constraints`], [`solve`], §5–6), the fractional Sobolev
+//!   metric and Gram matrices ([`metric`]), subdivision ([`mod@subdivide`]).
+//! * The gradient flow ([`step`]): [`Session`] and [`flow`], the line searches ([`LineSearch`],
+//!   with the start rules of [`StartRule`]), the stopping rules, length schedules, L-BFGS and
+//!   NCG for the soft problems ([`optimize`], [`soft_options`]) and the continuous collision
+//!   detection of [`ccd`] that guards the isotopy class.
+//! * The Barnes–Hut energy ([`BhTree`], in the session as [`BarnesHutEnergy`]), the block cluster
+//!   tree and the hierarchical metric product ([`BlockClusterTree`], [`HierarchicalMetric`],
+//!   [`HierarchicalCgSaddle`]).
+//! * The multigrid saddle solver for curves and curve networks ([`mod@multigrid`]: [`MgOptions`],
+//!   [`CurveHierarchy`], [`MultigridSaddle`], [`MultigridSolvers`], the near-contact correction
+//!   of [`NearCorrection`]; §8.4, §17g), in the session as [`Solver::Multigrid`] with a dense
+//!   fallback, and [`Backend::Auto`] with a measured crossover (§17h).
+//! * Obstacles ([`Obstacle`]), penalties ([`SurfacePotential`], [`TotalLengthPenalty`],
+//!   [`LengthDifference`], [`FieldAlignment`], [`Hencky`]) and the implicit surfaces and vector
+//!   fields of [`surfaces`].
+//! * A reader for the authors' scene format ([`scene`]).
 //!
-//! The remaining modules are filled by the later work packages of `SPEC.md` §15.
+//! Measurements, including the paper's Fig. 20 and Sec. 7 comparisons, are in `SPEC.md` §17
+//! (§17s holds the Sec. 7 results of record) and in the crate's README.
 
 #![warn(missing_docs)]
 #![allow(clippy::needless_range_loop)]

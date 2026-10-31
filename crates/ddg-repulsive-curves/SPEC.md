@@ -878,6 +878,21 @@ Arrays in and out as elsewhere in `ddg_tools` (buffer protocol, `array.array` re
   initial curve), `report()`. Keys of the report dict mirror `StepReport`.
 * `ddg_tools.repulsive_flow(positions, edges, steps, **options) -> (positions, edges, report)`:
   `flow` in one call.
+* Options added after WP10 (2026-10-31; `ddg_tools.repulsive_defaults()` lists every option with
+  the library's default):
+  * `method="projected_gradient"|"lbfgs"|"ncg"`, `lbfgs_memory=30`, `hencky_weight=10.0`. A soft
+    method drops the length and barycenter constraints and adds the Hencky penalty at the start
+    lengths (as `soft_options`). Pins, tangents, a surface constraint or `grow_factor != 1` with a
+    soft method are input errors.
+  * `near_pair=True`, `near_pair_blend_start`, `near_pair_blend_end`, `near_pair_subpanels`,
+    `second_neighbours`, `second_neighbour_rule="fold_gated"|"one_sided"|"two_sided"|"gated"|
+    "one_sided_gated"|"one_sided_gated_either"`. `second_neighbour_width` is required by the
+    gated rules. Also `second_neighbour_contact_band`, `second_neighbour_cos_shut`,
+    `second_neighbour_cos_open` and `second_neighbour_band`.
+  * `back_projection`, `second_order_correction`, `newton_polish` (a float or None),
+    `projection_early_abort`, `stuck_projected_reference`, `stuck_retry_chord`, `mg_max_threads`.
+  * `time_limit` bounds `repulsive_flow` and `run`; `step` does not check it (an open item in
+    `ROADMAP.md`).
 
 ### 9.3 Blender
 
@@ -901,6 +916,12 @@ object's scale matters as it would physically) and writes back in object space.
   obstacles: the mesh objects of a collection, with weight; planar (object-local axis); line
   search; back end; threads. Status line: steps, energy before/after, time per step (native and
   Blender side), largest constraint violation.
+* Method (2026-10-31): Projected Gradient (default), L-BFGS or Nonlinear CG with the Hencky
+  weight. A soft method greys out Length, Grow and Pins, and refuses pins, tangents and growth
+  with a report. An **Advanced** sub-panel (closed) holds near-pair quadrature, the second-neighbour
+  rule (Fold Gated, One Sided, Two Sided), stuck retry with chord steps, back projection, Newton
+  polish and its threshold, early abort, second-order correction and multigrid max threads
+  (16; 0 = no cap). The defaults equal the library's (tested).
 
 Code: `blender/ddg_uv_unwrap/repulsive_operator.py` (+ `repulsive_io.py` for reading/writing
 meshes and curves), registration in `__init__.py`, tests `blender/tests/test_repulsive.py`, an
