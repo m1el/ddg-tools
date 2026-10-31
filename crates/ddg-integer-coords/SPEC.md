@@ -777,6 +777,10 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   point within rounding of a crossing (§4.5), so refinement skips such a face, where the signposts
   split and snap the place onto the input edge (1 of 256 differential runs, WP6). The alternative
   is to snap the integer split to the crossing (the new vertex on the input edge); undecided.
+* **I29** *An integer simplicial export (open).* `ddg-uv`'s intrinsic path ends in
+  `export_simplicial` and its cut transfer uses `SimplicialExport::edge_point` and
+  `segments_on_input`; the integer representation has no export yet (it would be the common
+  subdivision plus `extract_intrinsic_edge`), so `ddg-uv` stays on signposts until it exists.
 
 ## 12. Work packages
 
@@ -793,7 +797,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | evaluation: Thingi10k, benches, the reference comparison | `examples/thingi.rs`, `benches/`, `scripts/ic-eval.sh` | WP6, Q1, Q2 | Sonnet |
-| WP11 | consumers: `ddg-intrinsic-apps`, `ddg-uv`, Python, Blender (§13 Q3, Q5). Not in the trait yet (WP0 survey): `cotan_laplacian`, `lumped_mass` (could be provided methods); `refine`, `refine_with`; `optimal_delaunay`, `move_vertex`, `odt_target`; `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input`; `point_on_input`, `point_on_triangulation`; `overlay`, `check`; `signpost` (I26) | per crate | WP5, WP6 | Sonnet |
+| WP11 | **done, default still signposts** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `optimal_delaunay`, `move_vertex`, `odt_target`, `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input` (so `ddg-uv`, I29), `signpost` (tangent fields, I26) | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.
 
@@ -811,7 +815,10 @@ At most three agents at a time; timings alone.
   fetched into the demo's `deps/`; geometry-central at `ab116f1`. Built outside the repository,
   `--noGUI` (WP10).
 * **Q3** Consumers use integer coordinates by default once the evaluation passes; signposts stay an
-  option (WP11).
+  option (WP11). As built: the switch is `Representation::DEFAULT` in
+  `crates/ddg-intrinsic-apps/src/representation.rs` plus the `representation=` defaults of the
+  `ddg-py` bindings (still `Signposts`); flipping it after WP10 is one commit (the defaults, the
+  stubs, and the two tests that assert the default).
 * **Q4** FlipOut (Sharp and Crane 2020a) is in scope, as its own crate `ddg-flip-geodesics` with its
   contract `crates/ddg-flip-geodesics/SPEC.md`, on top of the shared triangulation interface
   (PDF downloaded to `../FlipOut/FlipOut.pdf`; reference `gc: src/surface/flip_geodesics.cpp`).
