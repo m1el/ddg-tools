@@ -589,6 +589,26 @@ Tiers: A formulas, B one face, B′ Thm. D.1, C the complex model, D and E cited
   timings of a 50-mesh subset alone, single thread.
 * **Fig. 14** reproduced exactly as described (§13 has no question: the generator is ours, the
   random seeds are listed).
+  **Result (WP7, 406c0e0, `examples/fig14.rs`).** Sizes `round(2^(k/2))`, `k = 12 … 22` (the
+  figure's half-octave steps), 100 trials each, seeds `1000k + t`. Generator (the paper gives none,
+  and the demo's `benchmark/` has only the Thingi10k run): the square cut by a diagonal, then
+  repeated splits of the nearest edge of the face containing a uniform random point, at its
+  projection clamped to `[0.05, 0.95]`. Absolute `L²` error against `f = −g/(2π²)`, by degree-4
+  quadrature on the common subdivision; means over trials:
+
+  | `|V|` | original | IDT copied back | IDT, `L²` transfer | IDT itself | orig / copy | orig / `L²` |
+  |---|---|---|---|---|---|---|
+  | 64 | 9.36e-3 | 5.18e-3 | 3.89e-3 | 3.13e-3 | 1.81 | 2.41 |
+  | 181 (marked, `2^7.5`) | 6.93e-3 | 2.54e-3 | 1.70e-3 | 1.15e-3 | 2.73 | 4.09 |
+  | 512 | 5.90e-3 | 1.34e-3 | 8.36e-4 | 4.13e-4 | 4.40 | 7.06 |
+  | 2048 | 5.51e-3 | 6.30e-4 | 3.89e-4 | 1.02e-4 | 8.76 | 14.18 |
+
+  The trends are the paper's (the original's error nearly flat, the IDT's falling like `1/|V|`,
+  the transfer better than copying by 1.3–1.6 at every size, never better than the IDT itself);
+  the factors at the marked size are 2.7× and 4.1× instead of 11.5× and 28.1×. The paper's
+  original-mesh error is about `3e-2` (its meshes show long fans from the corners), ours about
+  `7e-3`: our generator makes less degenerate meshes, and the ratios against the original depend
+  on it. Not a defect of the transfer; matching the factors would need guessing the generator.
 * **Benches**: flip, Delaunay flipping, refinement, common subdivision, transfer, on `data/models`,
   `data/intrinsic-reference` and the Fig. 15/16/19 Thingi models, single thread alone; the same
   benches for `ddg-intrinsic` side by side.
@@ -731,7 +751,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP4 | **done** (548d804, 6080ce8): face split (I6, I15), App. A and the `T¹ → T⁰` point query (I16), moves; `insert_vertex` of the trait | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
-| WP7 | transfer (Eq. 13–14) **done** (b463c96); Fig. 14 as the paper's Poisson experiment in progress | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
+| WP7 | **done** (b463c96, 406c0e0): transfer (Eq. 13–14); Fig. 14 as the paper's Poisson experiment (trends reproduced, factors depend on the unpublished generator) | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | evaluation: Thingi10k, benches, the reference comparison | `examples/thingi.rs`, `benches/`, `scripts/ic-eval.sh` | WP6, Q1, Q2 | Sonnet |
