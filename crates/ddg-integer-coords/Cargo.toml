@@ -10,3 +10,11 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+
+[dev-dependencies]
+# Benches against the signposts (benches/representation.rs); the version of ddg-intrinsic.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "representation"
+harness = false
