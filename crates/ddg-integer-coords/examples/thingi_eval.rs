@@ -254,7 +254,11 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
         .num("chi", mesh.euler_characteristic())
         .num("seconds_load", t.elapsed().as_secs_f64());
     let delaunay = DelaunayOptions::default();
-    let refine_options = RefineOptions::default();
+    // The paper's benchmark runs with --refineMaxInsertions=0: no limit.
+    let refine_options = RefineOptions {
+        max_insertions: ddg_intrinsic::InsertionLimit::Unlimited,
+        ..RefineOptions::default()
+    };
     let mut idt = Stage::default();
     let mut refn = Stage::default();
 
@@ -279,6 +283,7 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
             .flip_to_delaunay_certified(&delaunay)
             .map_err(|e| format!("idt: {e}"))?;
         idt.seconds = t.elapsed().as_secs_f64();
+        dump_idt(tri.edge_lengths());
         j.num("idt_seconds", idt.seconds)
             .num("idt_flips", d.0.n_flips)
             .num("idt_not_delaunay", d.0.n_not_delaunay)
@@ -361,6 +366,7 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
             .flip_to_delaunay(&delaunay)
             .map_err(|e| format!("idt: {e}"))?;
         idt.seconds = t.elapsed().as_secs_f64();
+        dump_idt(tri.edge_lengths());
         j.num("idt_seconds", idt.seconds)
             .num("idt_flips", d.n_flips)
             .num("idt_not_delaunay", d.n_not_delaunay);
@@ -418,4 +424,19 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
     j.num("refine_ok", u8::from(refn.ok))
         .str("refine_error", &refn.error);
     Ok(())
+}
+
+/// With `IC_DUMP_IDT=path` in the environment: the sorted edge lengths of the intrinsic
+/// Delaunay triangulation, one per line (compared with the reference demo's `faceLengths.dmat`
+/// as sets, SPEC 10.3).
+fn dump_idt(lengths: &[f64]) {
+    if let Ok(path) = std::env::var("IC_DUMP_IDT") {
+        let mut l = lengths.to_vec();
+        l.sort_by(f64::total_cmp);
+        let mut s = String::with_capacity(l.len() * 24);
+        for x in l {
+            let _ = writeln!(s, "{x:e}");
+        }
+        let _ = std::fs::write(path, s);
+    }
 }
