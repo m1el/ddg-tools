@@ -1031,7 +1031,7 @@ fn refused_removals_change_nothing() {
 // ----- the shared interface -----
 
 #[test]
-fn the_interface_reports_what_is_not_there_yet() {
+fn the_interface_delegates_and_refuses_face_insertion() {
     let shape = &standard_shapes()[0];
     let mut it = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
     let before = it.clone();

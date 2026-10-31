@@ -32,16 +32,17 @@
 //! * [`IntegerTriangulation::from_intrinsic`]: integer coordinates read off a signpost
 //!   triangulation by tracing its edges (floating point decides it; the result is certified).
 //!
-//!
 //! # Operations (work package WP3)
 //!
 //! * [`flip`]: [`IntegerTriangulation::flip_edge`] (Eq. 3 with the corrected first terms,
 //!   Eq. 4), [`IntegerTriangulation::can_flip`], and Delaunay flipping (the shared
 //!   [`Triangulation::flip_to_delaunay`](ddg_intrinsic::Triangulation::flip_to_delaunay);
 //!   [`IntegerTriangulation::flip_to_delaunay_certified`] certifies the result).
-//! * [`split`]: [`IntegerTriangulation::split_edge`] for edges along input edges (Eq. 6);
-//!   [`IntegerTriangulation::split_edge_given`] for crossed edges with the geometric decisions
-//!   supplied (SPEC I20).
+//! * [`split`]: [`IntegerTriangulation::split_edge`], explicit for every edge: along input
+//!   edges by Eq. 6, across them (SPEC I20) with the crossings divided at the split point
+//!   ([`formulas::split_side`], positions from `ExtractIntrinsicEdge`);
+//!   [`IntegerTriangulation::split_edge_given`] takes the two geometric decisions from the
+//!   caller.
 //! * [`remove`]: [`IntegerTriangulation::remove_vertex`] (Alg. 8, I8, I24, I27).
 //! * [`interface`]: `impl Triangulation for IntegerTriangulation`.
 //!
@@ -54,8 +55,7 @@
 //!   [`IntegerTriangulation::extract_intrinsic_edge`] (`ExtractIntrinsicEdge`, the path of an
 //!   edge over the input mesh; the shared interface's `trace_edge_on_input`).
 //!
-//! Not yet: face splits (WP4), splits of crossed edges through the shared interface (they need
-//! the geometric crossings of WP2 wired into the split), the common subdivision (WP5).
+//! Not yet: face splits (WP4), the common subdivision (WP5).
 //!
 //! # The reference implementation
 //!

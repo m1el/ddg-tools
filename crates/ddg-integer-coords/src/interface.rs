@@ -9,9 +9,8 @@
 //! (SPEC §4.3). Errors of this crate are passed through as
 //! [`IntrinsicError::Representation`] with `representation: "integer coordinates"`, refusals
 //! of the shared kind (flips, splits, removals) as themselves, and operations this crate does
-//! not provide yet as [`IntrinsicError::Unsupported`]: insertion in a face (work package WP4),
-//! splits of edges that cross input edges (they need the geometric crossings of WP2). The path
-//! of an edge over the input mesh is `ExtractIntrinsicEdge`
+//! not provide yet as [`IntrinsicError::Unsupported`]: insertion in a face (work package WP4).
+//! The path of an edge over the input mesh is `ExtractIntrinsicEdge`
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
 use ddg_intrinsic::{
