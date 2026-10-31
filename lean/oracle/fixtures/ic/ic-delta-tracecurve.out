@@ -1,0 +1,8 @@
+case ic-delta-tracecurve
+task tracecurve
+status ok
+curve 0 0 0
+x 0 0
+x 0 0
+stop error crossing (0, 0) visited twice: the curve is closed
+end

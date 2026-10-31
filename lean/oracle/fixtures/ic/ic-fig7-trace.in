@@ -1,0 +1,6 @@
+case ic-fig7-trace
+task trace
+cross 7 2 4 4
+cross 7 2 3 2
+cross 2 4 1 1
+end

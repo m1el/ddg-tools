@@ -1698,3 +1698,102 @@ subdivision, Barnes-Hut and multigrid back ends.
 **Rust side.** `crates/ddg-repulsive-curves/tests/oracle.rs` replays the fixtures (always) and fuzzes
 (`#[ignore]`) against the executable; its module docs state the tolerances and how to run it
 (`DDG_RC_FUZZ_CASES=200000 cargo test --release -p ddg-repulsive-curves --test oracle -- --ignored --nocapture`).
+
+## Integer coordinates (sixth paper): `ddg-oracle ic`
+
+> Mark Gillespie, Nicholas Sharp, Keenan Crane. *Integer Coordinates for Intrinsic Geometry
+> Processing.* ACM TOG 40(6), Article 252, 2021. Contract: `crates/ddg-integer-coords/SPEC.md`.
+
+The integer formulas of the paper (Eq. 1–4, 6; Supp. Alg. 1, the integer part of Alg. 3, the
+per-face pairing of Alg. 9, and the face-split counts of a chosen region, SPEC I15), written from
+the paper, not from the authors' code. Everything is exact integer arithmetic, so the Rust code is
+compared with **exact equality**, no tolerance. Every number printed comes from the definitions in
+`DdgOracle/IntegerCoords/Formulas.lean`, which are the definitions `lean/proofs/DdgProofs/
+IntegerCoords/` proves theorems about (Eq. 1 never divides a negative integer, SPEC I14; an odd
+numerator is reported, not rounded).
+
+| command | |
+|---|---|
+| `ddg-oracle ic [IN [OUT]]` | batch stream of cases (tasks below), one block per case, flushed per case |
+| `ddg-oracle ic-selftest` | internal checks (below), about 0.3 s |
+| `ddg-oracle ic-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/ic`, 23 cases, 0.4 MB; byte-for-byte check) |
+
+### Conventions
+
+* **Face.** Corners `0, 1, 2`; side `k` runs from corner `k` to corner `k + 1` (the halfedge
+  `3f + k`). The crossings of side `k` are numbered `0, 1, …` from corner `k` (the paper's
+  combinatorial crossing `(ij→, p)` counts from the tail `i`; the twin counts the same crossing as
+  `n − p − 1`). Corner `k` lies between side `k + 2` and side `k`; the side opposite corner `k` is
+  side `k + 1`. A `face N0 N1 N2` line gives the three normal coordinates in this order (any
+  integers ≥ −1; `−1` = the edge runs along an input edge; only `n⁺` enters Eq. 1–2).
+* **Corner quantities.** `c_k` = Eq. 1 at corner `k` (arcs cutting corner `k`), `e_k` = Eq. 2 at
+  corner `k` (arcs from corner `k` to side `k + 1`). A face is valid when the three numerators of
+  Eq. 1 are even.
+* **Arcs** (`subdivide`): the other end of the arc through crossing `p` of side `k` is `side K' P'`
+  or `corner K'`: crossings `p < c_k` reach side `k + 2` at `n_{k+2} − 1 − p`, crossings
+  `p ≥ n_k − c_{k+1}` reach side `k + 1` at `n_k − 1 − p`, the others come from corner `k + 2`.
+* **Regions** (`regions`, `split`): `corner K T` (`T < c_K`) is the region between the `(T−1)`-st
+  and `T`-th arc around corner `K` counted from the corner (`T = 0` contains the corner);
+  `middle S` is the rest: the central region (`S = 0`) when no corner emanates, or the `S`-th
+  region of the fan (`0 ≤ S ≤ e`, counted from corner `κ + 1`) when corner `κ` emanates `e > 0`
+  arcs. Order of `regions`: corners 0, 1, 2 by `T`, then `middle 0 … e`.
+* **Quad of a flip.** Edge `ij` with the faces `ijk` and `jil`; inputs `n_ij n_jk n_ki n_il n_lj`.
+  The new edge is `kl` with the faces `kil` and `ljk`; flipping it back is Eq. 3 with
+  `(i, j, k, l) → (l, k, i, j)`, i.e. `flipNormal n_kl n_ki n_il n_lj n_jk`.
+
+### Input and output per task
+
+Every case is `case NAME`, `task T`, the lines below, `end`; the output repeats `case`/`task`, then
+`status ok` (or `status error MESSAGE` for a malformed case: wrong token count, not an integer,
+unknown task or tag, inconsistent complex) and the lines below, then `end`. Input lines are
+echoed so that the outputs can be diffed line by line.
+
+| task | input lines | output lines |
+|---|---|---|
+| `corner` | `face N0 N1 N2` × any | `face N0 N1 N2 VALID NUM0 NUM1 NUM2 C0 C1 C2 E0 E1 E2` (`VALID` 0/1; `NUMk` the numerator of Eq. 1 at corner `k`, never negative; `Ck` = Eq. 1, or `odd`; `Ek` = Eq. 2) |
+| `flip` | `quad NIJ NJK NKI NIL NLJ`, optionally followed by `roundabout RKI DEGK RLJ DEGL` and `again` (each `quad` starts a block) | `quad …` (echo); `faces V1 V2` (validity of `ijk`, `jil`; with ` invalid` appended and nothing else when one is invalid); `flip DOUBLED NKL` (twice Eq. 3 without `n⁻_ij`, and Eq. 3); `newfaces W1 W2` (validity of `kil`, `ljk`); `emanating EK EL` (`e^{il}_k` of `kil`, `e^{jk}_l` of `ljk`); `roundabout RKL RLK` (Eq. 4 for both new halfedges, `DEG = 0` = boundary vertex: no reduction); `again NIJ` (Eq. 3 on the new edge) |
+| `splitedge` | `edge NKI NJK` × any | `edge NKI NJK NMK` (Eq. 6, `max(n_ki, n_jk, 0)`) |
+| `trace` | `cross NIJ NIK NKJ P` × any: the curve crosses `ij→` at `P` (from `i`) into the face `jik` | `cross … step ik P'` / `step kj P'` / `step vertex` (Alg. 1, one step), or `cross … error face not valid` / `error crossing out of range` |
+| `tracecurve` | `faces NF`; per face `f F A B C` (vertex labels of its corners), `tw F T0 T1 T2` (twin of halfedge `3F + k`, `−1` on the boundary), `nf F N0 N1 N2` (`n` of its halfedges, equal on twins); `start H P` × any; optional `bound B` (default `Σ n⁺ + #halfedges`) | per start: `curve I H P`, then `x H P` for every crossing visited (the start first), then `stop vertex V F K STEPS` (vertex label, its face and corner) or `stop error MESSAGE` (a crossing visited twice in either direction, i.e. a closed curve, SPEC I18; out of range; boundary; step bound) |
+| `identify` | `walk RAI NAI NIJ NJA P DEG` × any (Alg. 3 line 9: `ai→ = Next(Next(ij→))`, face `ija`) | `walk … index K` (`r_ai + n⁻_ai + (P − c^{ja}_i)`, modulo `DEG` unless `DEG = 0`) |
+| `subdivide` | `face N0 N1 N2` × any | `face … invalid`, or `face … decoded C0 C1 C2 KAPPA E` followed by `arc K P side K' P'` / `arc K P corner K'` for every crossing, side by side |
+| `regions` | `face N0 N1 N2` × any | `face … invalid`, or `face … regions COUNT` followed by `r corner K T` / `r middle S` |
+| `split` | `face N0 N1 N2` (all regions) or `face N0 N1 N2 corner K T` / `face N0 N1 N2 middle S` × any | `face … invalid`, or per region `split N0 N1 N2 REGION NM0 NM1 NM2` (the normal coordinates of the edges from the new vertex to corners 0, 1, 2), or `split … REGION none` for a region the face does not have |
+
+### Self-test (`ic-selftest`)
+
+Over small exhaustive ranges: Eq. 3 applied to the new edge returns the old count for all 13 061
+valid quads with entries in `[−1, 5]`, its doubled value is even and the new faces are valid; for
+the 846 valid faces with entries in `[−1, 8]` the pairing is normal, an involution, and its arcs do
+not interleave on the boundary cycle; `decode?` fails exactly on invalid faces; the face-split
+counts of every region equal the number of arcs that separate a gap of that region from each
+corner, counted by brute force on the boundary cycle, and the three new faces are valid; Alg. 1's
+step agrees with the pairing; no fixture case produces an error block.
+
+### Fixtures `fixtures/ic/`
+
+`MANIFEST.tsv` says, per case, where it comes from and what was checked by hand. From the paper's
+figures (read off the 200 dpi rendering): Fig. 5 right (a complete `T¹` with an inserted vertex
+and an edge split, its labels as normal coordinates: corner data, the pairing, seven curves traced
+through the whole complex, the flip of `m–r`, Alg. 3 at the boundary vertex `BM`), Fig. 7 (the
+three cases of Alg. 1), Fig. 9 / the inset of Eq. 4 (`e^{il}_k = 3`, `n⁻_lj = 1`: `r_kl = r_ki + 3`,
+`r_lk = r_lj + 1`), Fig. 10 (split counts 1, 2, 1 then the flip to 2; the shared-edge failure and
+Eq. 6), Fig. 11 (both cases of Alg. 9), Fig. 22 (both cases of Alg. 5/6 with the printed counts);
+two hand-built Δ-complexes (a face with two of its sides glued and a self-edge: a closed curve is
+reported, other curves wind through the cone). Fig. 3 and Fig. 6 were not used: their labels are
+legible but the faces they belong to are not determined by the drawing. Generated: all faces with
+entries in `[−1, 6]` for `corner`, `subdivide`, `regions`, `split`; Alg. 1 on every valid face with
+entries in `[0, 4]`; 300 random valid quads (seed 2021) with Eq. 4 and the flip back; 200 random
+Alg. 3 arguments (seed 77); Eq. 6 on `[−1, 5]²`.
+
+### Readings of the paper (also reported for the SPEC)
+
+* Eq. 3's first term is printed `c^{jk}_l`; `l` and `jk` share no face. It must be `c^{ji}_l`,
+  corner `l` of `jil` (the second term is `c^{ij}_k`, corner `k` of `ijk`; the SPEC's `c^{il}_k`
+  is a typo). The oracle uses the corner quantities of the two old faces throughout.
+* Eq. 6 is `n_mk = max(n_ki, n_jk, 0)`; the SPEC drops the `0` (with both other sides `−1` the
+  new edge crosses nothing and must get `0`, not `−1`).
+* Alg. 3 line 8, `aj ← Next(Next(ij))`, names the halfedge `a→i` (the face is `ija`); the index
+  is `r_ai + n⁻_ai + (p − c^{ja}_i)`.
+* Eq. 3 can return `n < −1` for a pair of valid faces that no straight geometry realizes (two arcs
+  from `k` to `l`); flipping back still restores the old count.

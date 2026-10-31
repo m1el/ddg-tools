@@ -1,0 +1,2104 @@
+case ic-flip-random
+task flip
+status ok
+quad 5 4 7 -1 3
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 0 2
+again 5
+quad 6 5 1 7 0
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 6
+quad 0 5 2 4 5
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 0
+quad -1 8 -1 3 1
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again -1
+quad 2 2 2 1 3
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 2
+quad 1 3 0 7 5
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 1
+quad 7 1 5 8 3
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 1 0
+roundabout 0 1
+again 7
+quad 6 -1 -1 5 7
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 2 0
+roundabout 0 2
+again 6
+quad -1 2 6 0 1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 1 4 0 1 2
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 0 3 3 -1 8
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 5 -1 1 3 0
+faces 1 1
+flip -4 -2
+newfaces 1 1
+emanating 2 0
+roundabout 8 1
+again 5
+quad 3 0 6 5 -1
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 6 0
+again 3
+quad -1 0 -1 4 7
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 6 2
+again -1
+quad -1 3 5 4 3
+faces 1 1
+flip 18 10
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again -1
+quad 2 0 1 5 5
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad -1 3 5 3 8
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 8 6 8 4 3
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 8
+quad -1 8 8 8 -1
+faces 1 1
+flip 32 17
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again -1
+quad 1 3 2 0 3
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 1
+quad -1 7 3 4 6
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 1 8 1 3 6
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad -1 0 7 5 3
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 2 7 4 0 7
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 2
+quad 1 7 6 8 7
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 7 3 6 4 0
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 2
+roundabout 2 1
+again 7
+quad 6 2 2 1 1
+faces 1 1
+flip -4 -2
+newfaces 1 1
+emanating 0 1
+roundabout 2 1
+again 6
+quad 7 2 0 2 5
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 2 0
+roundabout 5 0
+again 7
+quad 3 3 2 6 7
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 3
+quad 7 3 8 2 0
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 1
+roundabout 2 2
+again 7
+quad 8 2 3 5 2
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 2 0
+roundabout 3 1
+again 8
+quad 0 1 8 7 7
+faces 1 1
+flip 30 15
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 0
+quad 3 -1 5 8 7
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 3
+quad 2 6 0 7 -1
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad 7 2 7 5 0
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 1
+roundabout 0 1
+again 7
+quad 5 2 7 5 4
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again 5
+quad -1 6 1 1 2
+faces 1 1
+flip 16 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 1 0 -1 -1 3
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 5 1 0 8 7
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 3 0
+roundabout 2 1
+again 5
+quad 2 6 8 -1 4
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 2
+quad 7 4 0 8 3
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 3 0
+roundabout 0 1
+again 7
+quad 0 -1 -1 -1 2
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 5 -1 -1 6 5
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 3 0
+roundabout 3 0
+again 5
+quad 1 1 6 2 5
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 8 0
+again 1
+quad 3 0 8 8 2
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 3
+quad 8 6 4 0 5
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 8
+quad 1 0 8 6 7
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 1
+quad 3 2 5 4 0
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 2 2
+again 3
+quad 0 3 5 7 3
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 0
+quad -1 2 8 0 5
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again -1
+quad 1 4 2 3 5
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 1
+quad 2 6 0 6 1
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 2
+quad 2 0 4 3 8
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 2
+quad -1 5 2 6 2
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again -1
+quad -1 1 7 6 4
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 5 5 2 2 5
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 6 0
+again 5
+quad 0 4 5 1 3
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad -1 4 2 6 2
+faces 1 1
+flip 20 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again -1
+quad 2 0 3 4 6
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again 2
+quad -1 4 3 7 8
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 5 1
+again -1
+quad 2 0 7 3 8
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 2
+quad 4 1 -1 0 3
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 0 0
+roundabout 6 2
+again 4
+quad 0 5 7 0 -1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 0
+quad 0 7 2 2 6
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 0
+quad 5 0 7 2 5
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 5
+quad 1 8 2 7 5
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 1
+quad -1 -1 1 1 2
+faces 1 1
+flip 6 4
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again -1
+quad -1 1 2 8 8
+faces 1 1
+flip 20 11
+newfaces 1 1
+emanating 0 0
+roundabout 3 1
+again -1
+quad -1 6 8 3 3
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again -1
+quad 1 3 -1 -1 5
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad -1 0 3 4 -1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 7 0 6 1 8
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 7
+quad 2 7 5 5 3
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad 3 5 8 8 2
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 3
+quad 8 8 2 2 8
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 8
+quad 5 -1 0 6 -1
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 5 0
+roundabout 5 1
+again 5
+quad 3 3 -1 8 2
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 3
+quad -1 5 4 5 1
+faces 1 1
+flip 20 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again -1
+quad 0 8 5 -1 7
+faces 1 1
+flip 30 15
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again 0
+quad -1 6 4 2 -1
+faces 1 1
+flip 16 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again -1
+quad 4 6 -1 -1 1
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 3
+roundabout 1 0
+again 4
+quad 7 4 -1 8 3
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 3 0
+roundabout 0 1
+again 7
+quad 1 5 4 3 8
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 8 8 6 5 1
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 2
+roundabout 6 0
+again 8
+quad -1 3 5 8 8
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 8 -1 5 5 3
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 8
+quad 6 3 2 1 2
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 0 1
+roundabout 6 0
+again 6
+quad 0 -1 5 5 3
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 6 1
+again 0
+quad 3 2 8 0 6
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 5 0
+again 3
+quad 4 1 3 1 8
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 5 0
+again 4
+quad 1 5 3 7 4
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again 1
+quad 0 8 3 3 1
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again 0
+quad 6 5 3 1 7
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 6
+quad 7 4 0 2 -1
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 2 4
+roundabout 2 0
+again 7
+quad 7 6 7 4 7
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 7
+quad 2 5 -1 5 -1
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 2
+quad 4 0 6 6 1
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again 4
+quad 0 0 1 5 3
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 4 2 1 1 -1
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 0 2
+roundabout 0 1
+again 4
+quad 0 6 6 0 4
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 2 1
+again 0
+quad 3 5 2 2 5
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 3
+quad 3 1 2 4 8
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 3
+quad 1 1 -1 1 4
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 1
+quad 2 8 3 7 3
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 2
+quad 0 3 7 2 6
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 1 8
+again 0
+quad 1 5 6 -1 1
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 1
+quad 2 8 8 1 8
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 2
+quad -1 1 0 6 3
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again -1
+quad 5 0 0 3 4
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 2 0
+roundabout 2 7
+again 5
+quad 3 8 2 0 8
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 3
+quad 3 2 7 5 -1
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 3
+quad -1 3 4 8 6
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 1 5
+again -1
+quad 0 6 4 5 6
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 0 -1 3 2 3
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 8 -1 4 8 -1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 4 0
+roundabout 3 0
+again 8
+quad 0 7 -1 0 2
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 0 2 1 6 6
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 7 0
+again 0
+quad 1 8 0 0 -1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 1
+roundabout 8 0
+again 1
+quad -1 3 7 8 1
+faces 1 1
+flip 30 16
+newfaces 1 1
+emanating 0 0
+roundabout 7 1
+again -1
+quad 3 -1 7 0 5
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 8 0
+again 3
+quad 2 0 3 3 7
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 7 1
+again 2
+quad 5 6 1 1 0
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 4
+roundabout 0 0
+again 5
+quad 2 1 5 6 -1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 2
+quad 7 -1 6 5 4
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 7
+quad 2 2 8 7 5
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 2
+quad 2 8 3 4 0
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 2 7
+again 2
+quad 6 1 8 0 3
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again 6
+quad -1 3 -1 2 -1
+faces 1 1
+flip 10 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 2 6 4 3 5
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad 8 7 -1 6 4
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 1 0
+roundabout 1 4
+again 8
+quad 4 6 2 5 0
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 4
+quad 4 6 2 7 3
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 4
+quad 6 -1 3 5 0
+faces 1 1
+flip -2 -1
+newfaces 1 1
+emanating 2 0
+roundabout 6 0
+again 6
+quad 0 -1 8 3 8
+faces 1 1
+flip 32 16
+newfaces 1 1
+emanating 0 0
+roundabout 5 0
+again 0
+quad 1 8 6 0 4
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 4 3
+again 1
+quad 0 3 5 5 3
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 0 7 2 -1 7
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 0
+quad 0 8 2 3 7
+faces 1 1
+flip 30 15
+newfaces 1 1
+emanating 0 0
+roundabout 3 1
+again 0
+quad 8 -1 7 2 2
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again 8
+quad 6 8 1 3 7
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 6
+quad -1 7 8 -1 3
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again -1
+quad 1 2 0 2 6
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 1
+quad 0 1 5 3 5
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 0
+quad 3 4 5 -1 3
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 3
+quad 5 2 2 8 1
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 1 0
+roundabout 2 0
+again 5
+quad 1 5 7 6 4
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 2 6
+again 1
+quad 0 5 3 3 6
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 8 7 3 -1 2
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 4
+roundabout 2 0
+again 8
+quad 0 5 3 -1 4
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 8
+again 0
+quad 8 5 2 -1 8
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 8
+quad 2 0 1 1 5
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad 8 0 -1 4 -1
+faces 1 1
+flip -8 -4
+newfaces 1 1
+emanating 4 0
+roundabout 6 0
+again 8
+quad 4 6 8 2 0
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 1
+roundabout 0 8
+again 4
+quad 5 7 2 7 0
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 5
+quad 6 0 0 7 0
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 6 0
+roundabout 0 4
+again 6
+quad 2 4 7 2 5
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 9 0
+again 2
+quad 8 1 0 7 -1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 7 1
+roundabout 7 4
+again 8
+quad 2 2 2 6 6
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again 2
+quad 2 0 7 1 7
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad -1 3 6 2 -1
+faces 1 1
+flip 16 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 4
+again -1
+quad 1 5 1 7 -1
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 1
+quad 5 -1 8 6 5
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 5
+quad 1 0 1 3 7
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 1
+quad -1 7 4 7 0
+faces 1 1
+flip 28 15
+newfaces 1 1
+emanating 0 0
+roundabout 3 2
+again -1
+quad 2 1 3 2 0
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 2
+quad -1 2 -1 2 0
+faces 1 1
+flip 8 5
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad -1 8 4 0 1
+faces 1 1
+flip 18 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 1
+again -1
+quad 2 8 1 -1 0
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 2
+roundabout 1 0
+again 2
+quad -1 8 2 -1 0
+faces 1 1
+flip 16 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again -1
+quad 1 -1 4 8 0
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 6
+again 1
+quad -1 0 0 6 4
+faces 1 1
+flip 12 7
+newfaces 1 1
+emanating 0 0
+roundabout 6 0
+again -1
+quad -1 8 -1 3 -1
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 6 0
+again -1
+quad 3 1 0 4 8
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 6 5
+again 3
+quad 6 1 2 7 -1
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 3 0
+roundabout 0 0
+again 6
+quad -1 0 2 0 3
+faces 1 1
+flip 10 6
+newfaces 1 1
+emanating 0 0
+roundabout 6 3
+again -1
+quad 3 -1 4 8 2
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 3
+quad 2 2 5 6 4
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 5 4
+again 2
+quad 1 -1 -1 6 2
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 1 0
+roundabout 6 0
+again 1
+quad 3 8 1 8 7
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 5 2
+again 3
+quad 3 2 1 5 2
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 3 9
+again 3
+quad 6 8 -1 5 0
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 1
+roundabout 5 4
+again 6
+quad 7 4 7 8 1
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 4 1
+again 7
+quad -1 3 -1 4 -1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 3 9
+again -1
+quad 2 1 8 0 3
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad 7 4 -1 3 3
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 1
+roundabout 0 0
+again 7
+quad 0 0 6 8 3
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 7 0 3 3 0
+faces 1 1
+flip -8 -4
+newfaces 1 1
+emanating 0 0
+roundabout 0 7
+again 7
+quad 1 8 5 2 8
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again 1
+quad -1 4 8 -1 4
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 1 5
+again -1
+quad 3 8 -1 -1 6
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 3 9
+again 3
+quad 0 0 6 3 2
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 8 1 -1 7 1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 7 0
+roundabout 2 6
+again 8
+quad 6 8 0 5 7
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 6
+quad 0 3 3 -1 1
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad 3 5 8 6 1
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 1 5
+again 3
+quad 5 7 0 8 2
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 5
+quad 7 8 7 5 0
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 2
+roundabout 2 5
+again 7
+quad 1 2 4 6 4
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 1 2 8 1 3
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 1
+quad -1 -1 0 1 3
+faces 1 1
+flip 6 4
+newfaces 1 1
+emanating 0 0
+roundabout 4 0
+again -1
+quad 8 -1 4 -1 8
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 0 2
+again 8
+quad 1 3 7 0 4
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 6 8 1 6 0
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 2 9
+again 6
+quad -1 -1 2 1 3
+faces 1 1
+flip 10 6
+newfaces 1 1
+emanating 0 0
+roundabout 1 3
+again -1
+quad 3 8 5 3 4
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 3
+quad 0 8 4 5 2
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 7 8
+again 0
+quad -1 1 4 0 0
+faces 1 1
+flip 8 5
+newfaces 1 1
+emanating 0 0
+roundabout 8 2
+again -1
+quad -1 2 1 4 7
+faces 1 1
+flip 18 10
+newfaces 1 1
+emanating 0 0
+roundabout 7 6
+again -1
+quad 2 3 5 0 1
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 8 0
+again 2
+quad 1 0 7 3 2
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 6 5
+again 1
+quad -1 4 5 2 1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 7 0
+again -1
+quad 1 4 5 7 -1
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 6 0
+again 1
+quad 0 5 5 7 2
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 5 6
+again 0
+quad 3 5 2 2 -1
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 1
+roundabout 6 0
+again 3
+quad 8 7 1 0 6
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 0 1
+roundabout 5 3
+again 8
+quad 4 6 -1 5 0
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 2 5
+again 4
+quad 7 5 0 6 -1
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 2 1
+roundabout 2 5
+again 7
+quad 1 5 -1 7 2
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 4
+again 1
+quad -1 1 -1 -1 8
+faces 1 1
+flip 18 10
+newfaces 1 1
+emanating 0 0
+roundabout 1 8
+again -1
+quad 3 8 1 7 8
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again 3
+quad 1 4 1 6 -1
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 1
+quad 0 7 5 8 7
+faces 1 1
+flip 30 15
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad -1 4 4 3 1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 3 7
+again -1
+quad 0 1 8 6 2
+faces 1 1
+flip 28 14
+newfaces 1 1
+emanating 0 0
+roundabout 2 1
+again 0
+quad 8 -1 3 2 8
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 0
+roundabout 3 5
+again 8
+quad 1 5 7 8 3
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 1
+quad -1 2 8 8 0
+faces 1 1
+flip 32 17
+newfaces 1 1
+emanating 0 0
+roundabout 2 4
+again -1
+quad 8 3 -1 3 5
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 0
+roundabout 6 0
+again 8
+quad 1 5 4 5 8
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 1 5
+again 1
+quad -1 1 2 5 1
+faces 1 1
+flip 14 8
+newfaces 1 1
+emanating 0 0
+roundabout 2 0
+again -1
+quad 5 3 0 6 3
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 2 0
+roundabout 3 3
+again 5
+quad 7 4 -1 4 0
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 3 3
+roundabout 1 3
+again 7
+quad 3 8 2 6 2
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 4
+again 3
+quad 0 1 5 2 4
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 7 7 -1 7 -1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again 7
+quad 8 0 5 6 0
+faces 1 1
+flip -4 -2
+newfaces 1 1
+emanating 1 0
+roundabout 0 5
+again 8
+quad 5 7 0 0 1
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 4
+roundabout 0 3
+again 5
+quad 4 7 -1 2 2
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 0 3
+again 4
+quad 6 -1 2 1 0
+faces 1 1
+flip -8 -4
+newfaces 1 1
+emanating 0 0
+roundabout 9 0
+again 6
+quad 8 5 5 6 0
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 0 2
+roundabout 0 0
+again 8
+quad 7 2 2 5 6
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 1 0
+roundabout 1 2
+again 7
+quad 4 4 8 6 -1
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 8 0
+again 4
+quad 3 2 -1 8 2
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 1 0
+roundabout 0 3
+again 3
+quad 8 3 2 2 1
+faces 1 1
+flip -6 -3
+newfaces 1 1
+emanating 0 2
+roundabout 0 9
+again 8
+quad 0 -1 1 7 0
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 7 1
+again 0
+quad 8 0 5 0 3
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 0 0
+roundabout 1 4
+again 8
+quad 6 6 -1 1 -1
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 5
+roundabout 1 4
+again 6
+quad 8 5 -1 3 -1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 5
+roundabout 5 2
+again 8
+quad 0 4 7 2 2
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 0
+quad 6 7 5 0 7
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 2 3
+again 6
+quad 0 1 5 0 -1
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 2 8
+again 0
+quad 5 3 8 6 5
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 5
+again 5
+quad 0 3 -1 -1 7
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 0
+quad -1 1 1 -1 -1
+faces 1 1
+flip 2 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 1
+again -1
+quad 2 3 -1 5 0
+faces 1 1
+flip 12 6
+newfaces 1 1
+emanating 0 0
+roundabout 0 4
+again 2
+quad 6 5 7 -1 6
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 5 2
+again 6
+quad 4 0 8 0 7
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 4 5
+again 4
+quad 8 2 8 -1 4
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 5 9
+again 8
+quad 3 4 8 8 0
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 3 0
+again 3
+quad 1 2 4 8 3
+faces 1 1
+flip 20 10
+newfaces 1 1
+emanating 0 0
+roundabout 4 8
+again 1
+quad 0 1 6 3 2
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 4 6
+again 0
+quad 4 1 1 6 2
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 2 0
+roundabout 6 0
+again 4
+quad -1 2 7 5 0
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 4 7
+again -1
+quad 1 6 0 7 8
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 4 5
+again 1
+quad 1 7 6 3 1
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 3 8
+again 1
+quad -1 4 6 5 1
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 3 6
+again -1
+quad 8 3 2 0 -1
+faces 1 1
+flip -6 -3
+newfaces 1 1
+emanating 0 3
+roundabout 1 8
+again 8
+quad 0 7 3 1 5
+faces 1 1
+flip 24 12
+newfaces 1 1
+emanating 0 0
+roundabout 0 7
+again 0
+quad -1 1 5 -1 1
+faces 1 1
+flip 12 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 6
+again -1
+quad 1 5 2 7 -1
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 1 2
+again 1
+quad -1 7 7 5 6
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 0 5
+again -1
+quad -1 1 4 7 4
+faces 1 1
+flip 22 12
+newfaces 1 1
+emanating 0 0
+roundabout 1 9
+again -1
+quad 6 2 2 -1 6
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 0 0
+roundabout 0 3
+again 6
+quad 1 7 0 7 0
+faces 1 1
+flip 26 13
+newfaces 1 1
+emanating 0 0
+roundabout 2 7
+again 1
+quad 2 1 5 8 8
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 0
+again 2
+quad -1 5 7 0 2
+faces 1 1
+flip 18 10
+newfaces 1 1
+emanating 0 0
+roundabout 3 4
+again -1
+quad 2 0 5 4 2
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 0 8
+again 2
+quad 3 3 7 6 1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 4 2
+again 3
+quad 1 -1 4 -1 8
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 1 0
+again 1
+quad -1 2 -1 0 8
+faces 1 1
+flip 20 11
+newfaces 1 1
+emanating 0 0
+roundabout 0 3
+again -1
+quad 7 6 1 -1 2
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 0 4
+roundabout 0 5
+again 7
+quad -1 7 2 5 2
+faces 1 1
+flip 24 13
+newfaces 1 1
+emanating 0 0
+roundabout 0 8
+again -1
+quad 4 -1 1 8 3
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 3 0
+roundabout 0 2
+again 4
+quad -1 8 6 8 -1
+faces 1 1
+flip 32 17
+newfaces 1 1
+emanating 0 0
+roundabout 8 7
+again -1
+quad 4 0 1 0 4
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 0 0
+roundabout 7 0
+again 4
+quad 2 5 1 1 8
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 8 3
+again 2
+quad 8 -1 -1 2 1
+faces 1 1
+flip -10 -5
+newfaces 1 1
+emanating 2 0
+roundabout 1 1
+again 8
+quad 2 1 6 0 4
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 7 5
+again 2
+quad -1 7 7 -1 7
+faces 1 1
+flip 28 15
+newfaces 1 1
+emanating 0 0
+roundabout 6 7
+again -1
+quad 3 -1 3 7 0
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 0 0
+roundabout 7 0
+again 3
+quad 2 2 8 7 0
+faces 1 1
+flip 22 11
+newfaces 1 1
+emanating 0 0
+roundabout 6 4
+again 2
+quad 5 2 0 3 0
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 2
+roundabout 1 0
+again 5
+quad 6 7 7 8 4
+faces 1 1
+flip 18 9
+newfaces 1 1
+emanating 0 0
+roundabout 6 2
+again 6
+quad -1 2 5 7 8
+faces 1 1
+flip 26 14
+newfaces 1 1
+emanating 0 0
+roundabout 5 5
+again -1
+quad 5 -1 3 8 3
+faces 1 1
+flip 6 3
+newfaces 1 1
+emanating 2 0
+roundabout 2 0
+again 5
+quad 6 -1 5 0 6
+faces 1 1
+flip 10 5
+newfaces 1 1
+emanating 0 0
+roundabout 4 7
+again 6
+quad 6 0 2 7 7
+faces 1 1
+flip 8 4
+newfaces 1 1
+emanating 1 0
+roundabout 1 4
+again 6
+quad 2 0 7 4 1
+faces 1 1
+flip 14 7
+newfaces 1 1
+emanating 0 0
+roundabout 1 6
+again 2
+quad 7 2 2 7 0
+faces 1 1
+flip 4 2
+newfaces 1 1
+emanating 3 0
+roundabout 0 3
+again 7
+quad 3 6 0 5 0
+faces 1 1
+flip 16 8
+newfaces 1 1
+emanating 0 0
+roundabout 0 7
+again 3
+end

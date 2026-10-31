@@ -1,0 +1,7 @@
+case ic-fig10-splitedge
+task splitedge
+status ok
+edge -1 -1 0
+edge 2 -1 2
+edge 0 3 3
+end

@@ -1,0 +1,2526 @@
+case ic-split-all
+task split
+status ok
+split -1 -1 -1 middle 0 0 0 0
+split -1 -1 0 middle 0 0 0 0
+split -1 -1 1 middle 0 1 0 0
+split -1 -1 1 middle 1 0 0 1
+split -1 -1 2 middle 0 2 0 0
+split -1 -1 2 middle 1 1 0 1
+split -1 -1 2 middle 2 0 0 2
+split -1 -1 3 middle 0 3 0 0
+split -1 -1 3 middle 1 2 0 1
+split -1 -1 3 middle 2 1 0 2
+split -1 -1 3 middle 3 0 0 3
+split -1 -1 4 middle 0 4 0 0
+split -1 -1 4 middle 1 3 0 1
+split -1 -1 4 middle 2 2 0 2
+split -1 -1 4 middle 3 1 0 3
+split -1 -1 4 middle 4 0 0 4
+split -1 -1 5 middle 0 5 0 0
+split -1 -1 5 middle 1 4 0 1
+split -1 -1 5 middle 2 3 0 2
+split -1 -1 5 middle 3 2 0 3
+split -1 -1 5 middle 4 1 0 4
+split -1 -1 5 middle 5 0 0 5
+split -1 -1 6 middle 0 6 0 0
+split -1 -1 6 middle 1 5 0 1
+split -1 -1 6 middle 2 4 0 2
+split -1 -1 6 middle 3 3 0 3
+split -1 -1 6 middle 4 2 0 4
+split -1 -1 6 middle 5 1 0 5
+split -1 -1 6 middle 6 0 0 6
+split -1 0 -1 middle 0 0 0 0
+split -1 0 0 middle 0 0 0 0
+split -1 0 1 middle 0 1 0 0
+split -1 0 1 middle 1 0 0 1
+split -1 0 2 middle 0 2 0 0
+split -1 0 2 middle 1 1 0 1
+split -1 0 2 middle 2 0 0 2
+split -1 0 3 middle 0 3 0 0
+split -1 0 3 middle 1 2 0 1
+split -1 0 3 middle 2 1 0 2
+split -1 0 3 middle 3 0 0 3
+split -1 0 4 middle 0 4 0 0
+split -1 0 4 middle 1 3 0 1
+split -1 0 4 middle 2 2 0 2
+split -1 0 4 middle 3 1 0 3
+split -1 0 4 middle 4 0 0 4
+split -1 0 5 middle 0 5 0 0
+split -1 0 5 middle 1 4 0 1
+split -1 0 5 middle 2 3 0 2
+split -1 0 5 middle 3 2 0 3
+split -1 0 5 middle 4 1 0 4
+split -1 0 5 middle 5 0 0 5
+split -1 0 6 middle 0 6 0 0
+split -1 0 6 middle 1 5 0 1
+split -1 0 6 middle 2 4 0 2
+split -1 0 6 middle 3 3 0 3
+split -1 0 6 middle 4 2 0 4
+split -1 0 6 middle 5 1 0 5
+split -1 0 6 middle 6 0 0 6
+split -1 1 -1 middle 0 0 0 1
+split -1 1 -1 middle 1 0 1 0
+split -1 1 0 middle 0 0 0 1
+split -1 1 0 middle 1 0 1 0
+split -1 1 1 corner 2 0 1 1 0
+split -1 1 1 middle 0 0 0 1
+split -1 1 2 corner 2 0 2 1 0
+split -1 1 2 middle 0 1 0 1
+split -1 1 2 middle 1 0 0 2
+split -1 1 3 corner 2 0 3 1 0
+split -1 1 3 middle 0 2 0 1
+split -1 1 3 middle 1 1 0 2
+split -1 1 3 middle 2 0 0 3
+split -1 1 4 corner 2 0 4 1 0
+split -1 1 4 middle 0 3 0 1
+split -1 1 4 middle 1 2 0 2
+split -1 1 4 middle 2 1 0 3
+split -1 1 4 middle 3 0 0 4
+split -1 1 5 corner 2 0 5 1 0
+split -1 1 5 middle 0 4 0 1
+split -1 1 5 middle 1 3 0 2
+split -1 1 5 middle 2 2 0 3
+split -1 1 5 middle 3 1 0 4
+split -1 1 5 middle 4 0 0 5
+split -1 1 6 corner 2 0 6 1 0
+split -1 1 6 middle 0 5 0 1
+split -1 1 6 middle 1 4 0 2
+split -1 1 6 middle 2 3 0 3
+split -1 1 6 middle 3 2 0 4
+split -1 1 6 middle 4 1 0 5
+split -1 1 6 middle 5 0 0 6
+split -1 2 -1 middle 0 0 0 2
+split -1 2 -1 middle 1 0 1 1
+split -1 2 -1 middle 2 0 2 0
+split -1 2 0 middle 0 0 0 2
+split -1 2 0 middle 1 0 1 1
+split -1 2 0 middle 2 0 2 0
+split -1 2 1 corner 2 0 1 2 0
+split -1 2 1 middle 0 0 0 2
+split -1 2 1 middle 1 0 1 1
+split -1 2 2 corner 2 0 2 2 0
+split -1 2 2 corner 2 1 1 1 1
+split -1 2 2 middle 0 0 0 2
+split -1 2 3 corner 2 0 3 2 0
+split -1 2 3 corner 2 1 2 1 1
+split -1 2 3 middle 0 1 0 2
+split -1 2 3 middle 1 0 0 3
+split -1 2 4 corner 2 0 4 2 0
+split -1 2 4 corner 2 1 3 1 1
+split -1 2 4 middle 0 2 0 2
+split -1 2 4 middle 1 1 0 3
+split -1 2 4 middle 2 0 0 4
+split -1 2 5 corner 2 0 5 2 0
+split -1 2 5 corner 2 1 4 1 1
+split -1 2 5 middle 0 3 0 2
+split -1 2 5 middle 1 2 0 3
+split -1 2 5 middle 2 1 0 4
+split -1 2 5 middle 3 0 0 5
+split -1 2 6 corner 2 0 6 2 0
+split -1 2 6 corner 2 1 5 1 1
+split -1 2 6 middle 0 4 0 2
+split -1 2 6 middle 1 3 0 3
+split -1 2 6 middle 2 2 0 4
+split -1 2 6 middle 3 1 0 5
+split -1 2 6 middle 4 0 0 6
+split -1 3 -1 middle 0 0 0 3
+split -1 3 -1 middle 1 0 1 2
+split -1 3 -1 middle 2 0 2 1
+split -1 3 -1 middle 3 0 3 0
+split -1 3 0 middle 0 0 0 3
+split -1 3 0 middle 1 0 1 2
+split -1 3 0 middle 2 0 2 1
+split -1 3 0 middle 3 0 3 0
+split -1 3 1 corner 2 0 1 3 0
+split -1 3 1 middle 0 0 0 3
+split -1 3 1 middle 1 0 1 2
+split -1 3 1 middle 2 0 2 1
+split -1 3 2 corner 2 0 2 3 0
+split -1 3 2 corner 2 1 1 2 1
+split -1 3 2 middle 0 0 0 3
+split -1 3 2 middle 1 0 1 2
+split -1 3 3 corner 2 0 3 3 0
+split -1 3 3 corner 2 1 2 2 1
+split -1 3 3 corner 2 2 1 1 2
+split -1 3 3 middle 0 0 0 3
+split -1 3 4 corner 2 0 4 3 0
+split -1 3 4 corner 2 1 3 2 1
+split -1 3 4 corner 2 2 2 1 2
+split -1 3 4 middle 0 1 0 3
+split -1 3 4 middle 1 0 0 4
+split -1 3 5 corner 2 0 5 3 0
+split -1 3 5 corner 2 1 4 2 1
+split -1 3 5 corner 2 2 3 1 2
+split -1 3 5 middle 0 2 0 3
+split -1 3 5 middle 1 1 0 4
+split -1 3 5 middle 2 0 0 5
+split -1 3 6 corner 2 0 6 3 0
+split -1 3 6 corner 2 1 5 2 1
+split -1 3 6 corner 2 2 4 1 2
+split -1 3 6 middle 0 3 0 3
+split -1 3 6 middle 1 2 0 4
+split -1 3 6 middle 2 1 0 5
+split -1 3 6 middle 3 0 0 6
+split -1 4 -1 middle 0 0 0 4
+split -1 4 -1 middle 1 0 1 3
+split -1 4 -1 middle 2 0 2 2
+split -1 4 -1 middle 3 0 3 1
+split -1 4 -1 middle 4 0 4 0
+split -1 4 0 middle 0 0 0 4
+split -1 4 0 middle 1 0 1 3
+split -1 4 0 middle 2 0 2 2
+split -1 4 0 middle 3 0 3 1
+split -1 4 0 middle 4 0 4 0
+split -1 4 1 corner 2 0 1 4 0
+split -1 4 1 middle 0 0 0 4
+split -1 4 1 middle 1 0 1 3
+split -1 4 1 middle 2 0 2 2
+split -1 4 1 middle 3 0 3 1
+split -1 4 2 corner 2 0 2 4 0
+split -1 4 2 corner 2 1 1 3 1
+split -1 4 2 middle 0 0 0 4
+split -1 4 2 middle 1 0 1 3
+split -1 4 2 middle 2 0 2 2
+split -1 4 3 corner 2 0 3 4 0
+split -1 4 3 corner 2 1 2 3 1
+split -1 4 3 corner 2 2 1 2 2
+split -1 4 3 middle 0 0 0 4
+split -1 4 3 middle 1 0 1 3
+split -1 4 4 corner 2 0 4 4 0
+split -1 4 4 corner 2 1 3 3 1
+split -1 4 4 corner 2 2 2 2 2
+split -1 4 4 corner 2 3 1 1 3
+split -1 4 4 middle 0 0 0 4
+split -1 4 5 corner 2 0 5 4 0
+split -1 4 5 corner 2 1 4 3 1
+split -1 4 5 corner 2 2 3 2 2
+split -1 4 5 corner 2 3 2 1 3
+split -1 4 5 middle 0 1 0 4
+split -1 4 5 middle 1 0 0 5
+split -1 4 6 corner 2 0 6 4 0
+split -1 4 6 corner 2 1 5 3 1
+split -1 4 6 corner 2 2 4 2 2
+split -1 4 6 corner 2 3 3 1 3
+split -1 4 6 middle 0 2 0 4
+split -1 4 6 middle 1 1 0 5
+split -1 4 6 middle 2 0 0 6
+split -1 5 -1 middle 0 0 0 5
+split -1 5 -1 middle 1 0 1 4
+split -1 5 -1 middle 2 0 2 3
+split -1 5 -1 middle 3 0 3 2
+split -1 5 -1 middle 4 0 4 1
+split -1 5 -1 middle 5 0 5 0
+split -1 5 0 middle 0 0 0 5
+split -1 5 0 middle 1 0 1 4
+split -1 5 0 middle 2 0 2 3
+split -1 5 0 middle 3 0 3 2
+split -1 5 0 middle 4 0 4 1
+split -1 5 0 middle 5 0 5 0
+split -1 5 1 corner 2 0 1 5 0
+split -1 5 1 middle 0 0 0 5
+split -1 5 1 middle 1 0 1 4
+split -1 5 1 middle 2 0 2 3
+split -1 5 1 middle 3 0 3 2
+split -1 5 1 middle 4 0 4 1
+split -1 5 2 corner 2 0 2 5 0
+split -1 5 2 corner 2 1 1 4 1
+split -1 5 2 middle 0 0 0 5
+split -1 5 2 middle 1 0 1 4
+split -1 5 2 middle 2 0 2 3
+split -1 5 2 middle 3 0 3 2
+split -1 5 3 corner 2 0 3 5 0
+split -1 5 3 corner 2 1 2 4 1
+split -1 5 3 corner 2 2 1 3 2
+split -1 5 3 middle 0 0 0 5
+split -1 5 3 middle 1 0 1 4
+split -1 5 3 middle 2 0 2 3
+split -1 5 4 corner 2 0 4 5 0
+split -1 5 4 corner 2 1 3 4 1
+split -1 5 4 corner 2 2 2 3 2
+split -1 5 4 corner 2 3 1 2 3
+split -1 5 4 middle 0 0 0 5
+split -1 5 4 middle 1 0 1 4
+split -1 5 5 corner 2 0 5 5 0
+split -1 5 5 corner 2 1 4 4 1
+split -1 5 5 corner 2 2 3 3 2
+split -1 5 5 corner 2 3 2 2 3
+split -1 5 5 corner 2 4 1 1 4
+split -1 5 5 middle 0 0 0 5
+split -1 5 6 corner 2 0 6 5 0
+split -1 5 6 corner 2 1 5 4 1
+split -1 5 6 corner 2 2 4 3 2
+split -1 5 6 corner 2 3 3 2 3
+split -1 5 6 corner 2 4 2 1 4
+split -1 5 6 middle 0 1 0 5
+split -1 5 6 middle 1 0 0 6
+split -1 6 -1 middle 0 0 0 6
+split -1 6 -1 middle 1 0 1 5
+split -1 6 -1 middle 2 0 2 4
+split -1 6 -1 middle 3 0 3 3
+split -1 6 -1 middle 4 0 4 2
+split -1 6 -1 middle 5 0 5 1
+split -1 6 -1 middle 6 0 6 0
+split -1 6 0 middle 0 0 0 6
+split -1 6 0 middle 1 0 1 5
+split -1 6 0 middle 2 0 2 4
+split -1 6 0 middle 3 0 3 3
+split -1 6 0 middle 4 0 4 2
+split -1 6 0 middle 5 0 5 1
+split -1 6 0 middle 6 0 6 0
+split -1 6 1 corner 2 0 1 6 0
+split -1 6 1 middle 0 0 0 6
+split -1 6 1 middle 1 0 1 5
+split -1 6 1 middle 2 0 2 4
+split -1 6 1 middle 3 0 3 3
+split -1 6 1 middle 4 0 4 2
+split -1 6 1 middle 5 0 5 1
+split -1 6 2 corner 2 0 2 6 0
+split -1 6 2 corner 2 1 1 5 1
+split -1 6 2 middle 0 0 0 6
+split -1 6 2 middle 1 0 1 5
+split -1 6 2 middle 2 0 2 4
+split -1 6 2 middle 3 0 3 3
+split -1 6 2 middle 4 0 4 2
+split -1 6 3 corner 2 0 3 6 0
+split -1 6 3 corner 2 1 2 5 1
+split -1 6 3 corner 2 2 1 4 2
+split -1 6 3 middle 0 0 0 6
+split -1 6 3 middle 1 0 1 5
+split -1 6 3 middle 2 0 2 4
+split -1 6 3 middle 3 0 3 3
+split -1 6 4 corner 2 0 4 6 0
+split -1 6 4 corner 2 1 3 5 1
+split -1 6 4 corner 2 2 2 4 2
+split -1 6 4 corner 2 3 1 3 3
+split -1 6 4 middle 0 0 0 6
+split -1 6 4 middle 1 0 1 5
+split -1 6 4 middle 2 0 2 4
+split -1 6 5 corner 2 0 5 6 0
+split -1 6 5 corner 2 1 4 5 1
+split -1 6 5 corner 2 2 3 4 2
+split -1 6 5 corner 2 3 2 3 3
+split -1 6 5 corner 2 4 1 2 4
+split -1 6 5 middle 0 0 0 6
+split -1 6 5 middle 1 0 1 5
+split -1 6 6 corner 2 0 6 6 0
+split -1 6 6 corner 2 1 5 5 1
+split -1 6 6 corner 2 2 4 4 2
+split -1 6 6 corner 2 3 3 3 3
+split -1 6 6 corner 2 4 2 2 4
+split -1 6 6 corner 2 5 1 1 5
+split -1 6 6 middle 0 0 0 6
+split 0 -1 -1 middle 0 0 0 0
+split 0 -1 0 middle 0 0 0 0
+split 0 -1 1 middle 0 1 0 0
+split 0 -1 1 middle 1 0 0 1
+split 0 -1 2 middle 0 2 0 0
+split 0 -1 2 middle 1 1 0 1
+split 0 -1 2 middle 2 0 0 2
+split 0 -1 3 middle 0 3 0 0
+split 0 -1 3 middle 1 2 0 1
+split 0 -1 3 middle 2 1 0 2
+split 0 -1 3 middle 3 0 0 3
+split 0 -1 4 middle 0 4 0 0
+split 0 -1 4 middle 1 3 0 1
+split 0 -1 4 middle 2 2 0 2
+split 0 -1 4 middle 3 1 0 3
+split 0 -1 4 middle 4 0 0 4
+split 0 -1 5 middle 0 5 0 0
+split 0 -1 5 middle 1 4 0 1
+split 0 -1 5 middle 2 3 0 2
+split 0 -1 5 middle 3 2 0 3
+split 0 -1 5 middle 4 1 0 4
+split 0 -1 5 middle 5 0 0 5
+split 0 -1 6 middle 0 6 0 0
+split 0 -1 6 middle 1 5 0 1
+split 0 -1 6 middle 2 4 0 2
+split 0 -1 6 middle 3 3 0 3
+split 0 -1 6 middle 4 2 0 4
+split 0 -1 6 middle 5 1 0 5
+split 0 -1 6 middle 6 0 0 6
+split 0 0 -1 middle 0 0 0 0
+split 0 0 0 middle 0 0 0 0
+split 0 0 1 middle 0 1 0 0
+split 0 0 1 middle 1 0 0 1
+split 0 0 2 middle 0 2 0 0
+split 0 0 2 middle 1 1 0 1
+split 0 0 2 middle 2 0 0 2
+split 0 0 3 middle 0 3 0 0
+split 0 0 3 middle 1 2 0 1
+split 0 0 3 middle 2 1 0 2
+split 0 0 3 middle 3 0 0 3
+split 0 0 4 middle 0 4 0 0
+split 0 0 4 middle 1 3 0 1
+split 0 0 4 middle 2 2 0 2
+split 0 0 4 middle 3 1 0 3
+split 0 0 4 middle 4 0 0 4
+split 0 0 5 middle 0 5 0 0
+split 0 0 5 middle 1 4 0 1
+split 0 0 5 middle 2 3 0 2
+split 0 0 5 middle 3 2 0 3
+split 0 0 5 middle 4 1 0 4
+split 0 0 5 middle 5 0 0 5
+split 0 0 6 middle 0 6 0 0
+split 0 0 6 middle 1 5 0 1
+split 0 0 6 middle 2 4 0 2
+split 0 0 6 middle 3 3 0 3
+split 0 0 6 middle 4 2 0 4
+split 0 0 6 middle 5 1 0 5
+split 0 0 6 middle 6 0 0 6
+split 0 1 -1 middle 0 0 0 1
+split 0 1 -1 middle 1 0 1 0
+split 0 1 0 middle 0 0 0 1
+split 0 1 0 middle 1 0 1 0
+split 0 1 1 corner 2 0 1 1 0
+split 0 1 1 middle 0 0 0 1
+split 0 1 2 corner 2 0 2 1 0
+split 0 1 2 middle 0 1 0 1
+split 0 1 2 middle 1 0 0 2
+split 0 1 3 corner 2 0 3 1 0
+split 0 1 3 middle 0 2 0 1
+split 0 1 3 middle 1 1 0 2
+split 0 1 3 middle 2 0 0 3
+split 0 1 4 corner 2 0 4 1 0
+split 0 1 4 middle 0 3 0 1
+split 0 1 4 middle 1 2 0 2
+split 0 1 4 middle 2 1 0 3
+split 0 1 4 middle 3 0 0 4
+split 0 1 5 corner 2 0 5 1 0
+split 0 1 5 middle 0 4 0 1
+split 0 1 5 middle 1 3 0 2
+split 0 1 5 middle 2 2 0 3
+split 0 1 5 middle 3 1 0 4
+split 0 1 5 middle 4 0 0 5
+split 0 1 6 corner 2 0 6 1 0
+split 0 1 6 middle 0 5 0 1
+split 0 1 6 middle 1 4 0 2
+split 0 1 6 middle 2 3 0 3
+split 0 1 6 middle 3 2 0 4
+split 0 1 6 middle 4 1 0 5
+split 0 1 6 middle 5 0 0 6
+split 0 2 -1 middle 0 0 0 2
+split 0 2 -1 middle 1 0 1 1
+split 0 2 -1 middle 2 0 2 0
+split 0 2 0 middle 0 0 0 2
+split 0 2 0 middle 1 0 1 1
+split 0 2 0 middle 2 0 2 0
+split 0 2 1 corner 2 0 1 2 0
+split 0 2 1 middle 0 0 0 2
+split 0 2 1 middle 1 0 1 1
+split 0 2 2 corner 2 0 2 2 0
+split 0 2 2 corner 2 1 1 1 1
+split 0 2 2 middle 0 0 0 2
+split 0 2 3 corner 2 0 3 2 0
+split 0 2 3 corner 2 1 2 1 1
+split 0 2 3 middle 0 1 0 2
+split 0 2 3 middle 1 0 0 3
+split 0 2 4 corner 2 0 4 2 0
+split 0 2 4 corner 2 1 3 1 1
+split 0 2 4 middle 0 2 0 2
+split 0 2 4 middle 1 1 0 3
+split 0 2 4 middle 2 0 0 4
+split 0 2 5 corner 2 0 5 2 0
+split 0 2 5 corner 2 1 4 1 1
+split 0 2 5 middle 0 3 0 2
+split 0 2 5 middle 1 2 0 3
+split 0 2 5 middle 2 1 0 4
+split 0 2 5 middle 3 0 0 5
+split 0 2 6 corner 2 0 6 2 0
+split 0 2 6 corner 2 1 5 1 1
+split 0 2 6 middle 0 4 0 2
+split 0 2 6 middle 1 3 0 3
+split 0 2 6 middle 2 2 0 4
+split 0 2 6 middle 3 1 0 5
+split 0 2 6 middle 4 0 0 6
+split 0 3 -1 middle 0 0 0 3
+split 0 3 -1 middle 1 0 1 2
+split 0 3 -1 middle 2 0 2 1
+split 0 3 -1 middle 3 0 3 0
+split 0 3 0 middle 0 0 0 3
+split 0 3 0 middle 1 0 1 2
+split 0 3 0 middle 2 0 2 1
+split 0 3 0 middle 3 0 3 0
+split 0 3 1 corner 2 0 1 3 0
+split 0 3 1 middle 0 0 0 3
+split 0 3 1 middle 1 0 1 2
+split 0 3 1 middle 2 0 2 1
+split 0 3 2 corner 2 0 2 3 0
+split 0 3 2 corner 2 1 1 2 1
+split 0 3 2 middle 0 0 0 3
+split 0 3 2 middle 1 0 1 2
+split 0 3 3 corner 2 0 3 3 0
+split 0 3 3 corner 2 1 2 2 1
+split 0 3 3 corner 2 2 1 1 2
+split 0 3 3 middle 0 0 0 3
+split 0 3 4 corner 2 0 4 3 0
+split 0 3 4 corner 2 1 3 2 1
+split 0 3 4 corner 2 2 2 1 2
+split 0 3 4 middle 0 1 0 3
+split 0 3 4 middle 1 0 0 4
+split 0 3 5 corner 2 0 5 3 0
+split 0 3 5 corner 2 1 4 2 1
+split 0 3 5 corner 2 2 3 1 2
+split 0 3 5 middle 0 2 0 3
+split 0 3 5 middle 1 1 0 4
+split 0 3 5 middle 2 0 0 5
+split 0 3 6 corner 2 0 6 3 0
+split 0 3 6 corner 2 1 5 2 1
+split 0 3 6 corner 2 2 4 1 2
+split 0 3 6 middle 0 3 0 3
+split 0 3 6 middle 1 2 0 4
+split 0 3 6 middle 2 1 0 5
+split 0 3 6 middle 3 0 0 6
+split 0 4 -1 middle 0 0 0 4
+split 0 4 -1 middle 1 0 1 3
+split 0 4 -1 middle 2 0 2 2
+split 0 4 -1 middle 3 0 3 1
+split 0 4 -1 middle 4 0 4 0
+split 0 4 0 middle 0 0 0 4
+split 0 4 0 middle 1 0 1 3
+split 0 4 0 middle 2 0 2 2
+split 0 4 0 middle 3 0 3 1
+split 0 4 0 middle 4 0 4 0
+split 0 4 1 corner 2 0 1 4 0
+split 0 4 1 middle 0 0 0 4
+split 0 4 1 middle 1 0 1 3
+split 0 4 1 middle 2 0 2 2
+split 0 4 1 middle 3 0 3 1
+split 0 4 2 corner 2 0 2 4 0
+split 0 4 2 corner 2 1 1 3 1
+split 0 4 2 middle 0 0 0 4
+split 0 4 2 middle 1 0 1 3
+split 0 4 2 middle 2 0 2 2
+split 0 4 3 corner 2 0 3 4 0
+split 0 4 3 corner 2 1 2 3 1
+split 0 4 3 corner 2 2 1 2 2
+split 0 4 3 middle 0 0 0 4
+split 0 4 3 middle 1 0 1 3
+split 0 4 4 corner 2 0 4 4 0
+split 0 4 4 corner 2 1 3 3 1
+split 0 4 4 corner 2 2 2 2 2
+split 0 4 4 corner 2 3 1 1 3
+split 0 4 4 middle 0 0 0 4
+split 0 4 5 corner 2 0 5 4 0
+split 0 4 5 corner 2 1 4 3 1
+split 0 4 5 corner 2 2 3 2 2
+split 0 4 5 corner 2 3 2 1 3
+split 0 4 5 middle 0 1 0 4
+split 0 4 5 middle 1 0 0 5
+split 0 4 6 corner 2 0 6 4 0
+split 0 4 6 corner 2 1 5 3 1
+split 0 4 6 corner 2 2 4 2 2
+split 0 4 6 corner 2 3 3 1 3
+split 0 4 6 middle 0 2 0 4
+split 0 4 6 middle 1 1 0 5
+split 0 4 6 middle 2 0 0 6
+split 0 5 -1 middle 0 0 0 5
+split 0 5 -1 middle 1 0 1 4
+split 0 5 -1 middle 2 0 2 3
+split 0 5 -1 middle 3 0 3 2
+split 0 5 -1 middle 4 0 4 1
+split 0 5 -1 middle 5 0 5 0
+split 0 5 0 middle 0 0 0 5
+split 0 5 0 middle 1 0 1 4
+split 0 5 0 middle 2 0 2 3
+split 0 5 0 middle 3 0 3 2
+split 0 5 0 middle 4 0 4 1
+split 0 5 0 middle 5 0 5 0
+split 0 5 1 corner 2 0 1 5 0
+split 0 5 1 middle 0 0 0 5
+split 0 5 1 middle 1 0 1 4
+split 0 5 1 middle 2 0 2 3
+split 0 5 1 middle 3 0 3 2
+split 0 5 1 middle 4 0 4 1
+split 0 5 2 corner 2 0 2 5 0
+split 0 5 2 corner 2 1 1 4 1
+split 0 5 2 middle 0 0 0 5
+split 0 5 2 middle 1 0 1 4
+split 0 5 2 middle 2 0 2 3
+split 0 5 2 middle 3 0 3 2
+split 0 5 3 corner 2 0 3 5 0
+split 0 5 3 corner 2 1 2 4 1
+split 0 5 3 corner 2 2 1 3 2
+split 0 5 3 middle 0 0 0 5
+split 0 5 3 middle 1 0 1 4
+split 0 5 3 middle 2 0 2 3
+split 0 5 4 corner 2 0 4 5 0
+split 0 5 4 corner 2 1 3 4 1
+split 0 5 4 corner 2 2 2 3 2
+split 0 5 4 corner 2 3 1 2 3
+split 0 5 4 middle 0 0 0 5
+split 0 5 4 middle 1 0 1 4
+split 0 5 5 corner 2 0 5 5 0
+split 0 5 5 corner 2 1 4 4 1
+split 0 5 5 corner 2 2 3 3 2
+split 0 5 5 corner 2 3 2 2 3
+split 0 5 5 corner 2 4 1 1 4
+split 0 5 5 middle 0 0 0 5
+split 0 5 6 corner 2 0 6 5 0
+split 0 5 6 corner 2 1 5 4 1
+split 0 5 6 corner 2 2 4 3 2
+split 0 5 6 corner 2 3 3 2 3
+split 0 5 6 corner 2 4 2 1 4
+split 0 5 6 middle 0 1 0 5
+split 0 5 6 middle 1 0 0 6
+split 0 6 -1 middle 0 0 0 6
+split 0 6 -1 middle 1 0 1 5
+split 0 6 -1 middle 2 0 2 4
+split 0 6 -1 middle 3 0 3 3
+split 0 6 -1 middle 4 0 4 2
+split 0 6 -1 middle 5 0 5 1
+split 0 6 -1 middle 6 0 6 0
+split 0 6 0 middle 0 0 0 6
+split 0 6 0 middle 1 0 1 5
+split 0 6 0 middle 2 0 2 4
+split 0 6 0 middle 3 0 3 3
+split 0 6 0 middle 4 0 4 2
+split 0 6 0 middle 5 0 5 1
+split 0 6 0 middle 6 0 6 0
+split 0 6 1 corner 2 0 1 6 0
+split 0 6 1 middle 0 0 0 6
+split 0 6 1 middle 1 0 1 5
+split 0 6 1 middle 2 0 2 4
+split 0 6 1 middle 3 0 3 3
+split 0 6 1 middle 4 0 4 2
+split 0 6 1 middle 5 0 5 1
+split 0 6 2 corner 2 0 2 6 0
+split 0 6 2 corner 2 1 1 5 1
+split 0 6 2 middle 0 0 0 6
+split 0 6 2 middle 1 0 1 5
+split 0 6 2 middle 2 0 2 4
+split 0 6 2 middle 3 0 3 3
+split 0 6 2 middle 4 0 4 2
+split 0 6 3 corner 2 0 3 6 0
+split 0 6 3 corner 2 1 2 5 1
+split 0 6 3 corner 2 2 1 4 2
+split 0 6 3 middle 0 0 0 6
+split 0 6 3 middle 1 0 1 5
+split 0 6 3 middle 2 0 2 4
+split 0 6 3 middle 3 0 3 3
+split 0 6 4 corner 2 0 4 6 0
+split 0 6 4 corner 2 1 3 5 1
+split 0 6 4 corner 2 2 2 4 2
+split 0 6 4 corner 2 3 1 3 3
+split 0 6 4 middle 0 0 0 6
+split 0 6 4 middle 1 0 1 5
+split 0 6 4 middle 2 0 2 4
+split 0 6 5 corner 2 0 5 6 0
+split 0 6 5 corner 2 1 4 5 1
+split 0 6 5 corner 2 2 3 4 2
+split 0 6 5 corner 2 3 2 3 3
+split 0 6 5 corner 2 4 1 2 4
+split 0 6 5 middle 0 0 0 6
+split 0 6 5 middle 1 0 1 5
+split 0 6 6 corner 2 0 6 6 0
+split 0 6 6 corner 2 1 5 5 1
+split 0 6 6 corner 2 2 4 4 2
+split 0 6 6 corner 2 3 3 3 3
+split 0 6 6 corner 2 4 2 2 4
+split 0 6 6 corner 2 5 1 1 5
+split 0 6 6 middle 0 0 0 6
+split 1 -1 -1 middle 0 0 1 0
+split 1 -1 -1 middle 1 1 0 0
+split 1 -1 0 middle 0 0 1 0
+split 1 -1 0 middle 1 1 0 0
+split 1 -1 1 corner 0 0 0 1 1
+split 1 -1 1 middle 0 1 0 0
+split 1 -1 2 corner 0 0 0 1 2
+split 1 -1 2 middle 0 2 0 0
+split 1 -1 2 middle 1 1 0 1
+split 1 -1 3 corner 0 0 0 1 3
+split 1 -1 3 middle 0 3 0 0
+split 1 -1 3 middle 1 2 0 1
+split 1 -1 3 middle 2 1 0 2
+split 1 -1 4 corner 0 0 0 1 4
+split 1 -1 4 middle 0 4 0 0
+split 1 -1 4 middle 1 3 0 1
+split 1 -1 4 middle 2 2 0 2
+split 1 -1 4 middle 3 1 0 3
+split 1 -1 5 corner 0 0 0 1 5
+split 1 -1 5 middle 0 5 0 0
+split 1 -1 5 middle 1 4 0 1
+split 1 -1 5 middle 2 3 0 2
+split 1 -1 5 middle 3 2 0 3
+split 1 -1 5 middle 4 1 0 4
+split 1 -1 6 corner 0 0 0 1 6
+split 1 -1 6 middle 0 6 0 0
+split 1 -1 6 middle 1 5 0 1
+split 1 -1 6 middle 2 4 0 2
+split 1 -1 6 middle 3 3 0 3
+split 1 -1 6 middle 4 2 0 4
+split 1 -1 6 middle 5 1 0 5
+split 1 0 -1 middle 0 0 1 0
+split 1 0 -1 middle 1 1 0 0
+split 1 0 0 middle 0 0 1 0
+split 1 0 0 middle 1 1 0 0
+split 1 0 1 corner 0 0 0 1 1
+split 1 0 1 middle 0 1 0 0
+split 1 0 2 corner 0 0 0 1 2
+split 1 0 2 middle 0 2 0 0
+split 1 0 2 middle 1 1 0 1
+split 1 0 3 corner 0 0 0 1 3
+split 1 0 3 middle 0 3 0 0
+split 1 0 3 middle 1 2 0 1
+split 1 0 3 middle 2 1 0 2
+split 1 0 4 corner 0 0 0 1 4
+split 1 0 4 middle 0 4 0 0
+split 1 0 4 middle 1 3 0 1
+split 1 0 4 middle 2 2 0 2
+split 1 0 4 middle 3 1 0 3
+split 1 0 5 corner 0 0 0 1 5
+split 1 0 5 middle 0 5 0 0
+split 1 0 5 middle 1 4 0 1
+split 1 0 5 middle 2 3 0 2
+split 1 0 5 middle 3 2 0 3
+split 1 0 5 middle 4 1 0 4
+split 1 0 6 corner 0 0 0 1 6
+split 1 0 6 middle 0 6 0 0
+split 1 0 6 middle 1 5 0 1
+split 1 0 6 middle 2 4 0 2
+split 1 0 6 middle 3 3 0 3
+split 1 0 6 middle 4 2 0 4
+split 1 0 6 middle 5 1 0 5
+split 1 1 -1 corner 1 0 1 0 1
+split 1 1 -1 middle 0 0 1 0
+split 1 1 0 corner 1 0 1 0 1
+split 1 1 0 middle 0 0 1 0
+face 1 1 1 invalid
+split 1 1 2 corner 0 0 0 1 2
+split 1 1 2 corner 2 0 2 1 0
+split 1 1 2 middle 0 1 0 1
+split 1 1 3 corner 0 0 0 1 3
+split 1 1 3 corner 2 0 3 1 0
+split 1 1 3 middle 0 2 0 1
+split 1 1 3 middle 1 1 0 2
+split 1 1 4 corner 0 0 0 1 4
+split 1 1 4 corner 2 0 4 1 0
+split 1 1 4 middle 0 3 0 1
+split 1 1 4 middle 1 2 0 2
+split 1 1 4 middle 2 1 0 3
+split 1 1 5 corner 0 0 0 1 5
+split 1 1 5 corner 2 0 5 1 0
+split 1 1 5 middle 0 4 0 1
+split 1 1 5 middle 1 3 0 2
+split 1 1 5 middle 2 2 0 3
+split 1 1 5 middle 3 1 0 4
+split 1 1 6 corner 0 0 0 1 6
+split 1 1 6 corner 2 0 6 1 0
+split 1 1 6 middle 0 5 0 1
+split 1 1 6 middle 1 4 0 2
+split 1 1 6 middle 2 3 0 3
+split 1 1 6 middle 3 2 0 4
+split 1 1 6 middle 4 1 0 5
+split 1 2 -1 corner 1 0 1 0 2
+split 1 2 -1 middle 0 0 1 1
+split 1 2 -1 middle 1 0 2 0
+split 1 2 0 corner 1 0 1 0 2
+split 1 2 0 middle 0 0 1 1
+split 1 2 0 middle 1 0 2 0
+split 1 2 1 corner 1 0 1 0 2
+split 1 2 1 corner 2 0 1 2 0
+split 1 2 1 middle 0 0 1 1
+face 1 2 2 invalid
+split 1 2 3 corner 0 0 0 1 3
+split 1 2 3 corner 2 0 3 2 0
+split 1 2 3 corner 2 1 2 1 1
+split 1 2 3 middle 0 1 0 2
+split 1 2 4 corner 0 0 0 1 4
+split 1 2 4 corner 2 0 4 2 0
+split 1 2 4 corner 2 1 3 1 1
+split 1 2 4 middle 0 2 0 2
+split 1 2 4 middle 1 1 0 3
+split 1 2 5 corner 0 0 0 1 5
+split 1 2 5 corner 2 0 5 2 0
+split 1 2 5 corner 2 1 4 1 1
+split 1 2 5 middle 0 3 0 2
+split 1 2 5 middle 1 2 0 3
+split 1 2 5 middle 2 1 0 4
+split 1 2 6 corner 0 0 0 1 6
+split 1 2 6 corner 2 0 6 2 0
+split 1 2 6 corner 2 1 5 1 1
+split 1 2 6 middle 0 4 0 2
+split 1 2 6 middle 1 3 0 3
+split 1 2 6 middle 2 2 0 4
+split 1 2 6 middle 3 1 0 5
+split 1 3 -1 corner 1 0 1 0 3
+split 1 3 -1 middle 0 0 1 2
+split 1 3 -1 middle 1 0 2 1
+split 1 3 -1 middle 2 0 3 0
+split 1 3 0 corner 1 0 1 0 3
+split 1 3 0 middle 0 0 1 2
+split 1 3 0 middle 1 0 2 1
+split 1 3 0 middle 2 0 3 0
+split 1 3 1 corner 1 0 1 0 3
+split 1 3 1 corner 2 0 1 3 0
+split 1 3 1 middle 0 0 1 2
+split 1 3 1 middle 1 0 2 1
+split 1 3 2 corner 1 0 1 0 3
+split 1 3 2 corner 2 0 2 3 0
+split 1 3 2 corner 2 1 1 2 1
+split 1 3 2 middle 0 0 1 2
+face 1 3 3 invalid
+split 1 3 4 corner 0 0 0 1 4
+split 1 3 4 corner 2 0 4 3 0
+split 1 3 4 corner 2 1 3 2 1
+split 1 3 4 corner 2 2 2 1 2
+split 1 3 4 middle 0 1 0 3
+split 1 3 5 corner 0 0 0 1 5
+split 1 3 5 corner 2 0 5 3 0
+split 1 3 5 corner 2 1 4 2 1
+split 1 3 5 corner 2 2 3 1 2
+split 1 3 5 middle 0 2 0 3
+split 1 3 5 middle 1 1 0 4
+split 1 3 6 corner 0 0 0 1 6
+split 1 3 6 corner 2 0 6 3 0
+split 1 3 6 corner 2 1 5 2 1
+split 1 3 6 corner 2 2 4 1 2
+split 1 3 6 middle 0 3 0 3
+split 1 3 6 middle 1 2 0 4
+split 1 3 6 middle 2 1 0 5
+split 1 4 -1 corner 1 0 1 0 4
+split 1 4 -1 middle 0 0 1 3
+split 1 4 -1 middle 1 0 2 2
+split 1 4 -1 middle 2 0 3 1
+split 1 4 -1 middle 3 0 4 0
+split 1 4 0 corner 1 0 1 0 4
+split 1 4 0 middle 0 0 1 3
+split 1 4 0 middle 1 0 2 2
+split 1 4 0 middle 2 0 3 1
+split 1 4 0 middle 3 0 4 0
+split 1 4 1 corner 1 0 1 0 4
+split 1 4 1 corner 2 0 1 4 0
+split 1 4 1 middle 0 0 1 3
+split 1 4 1 middle 1 0 2 2
+split 1 4 1 middle 2 0 3 1
+split 1 4 2 corner 1 0 1 0 4
+split 1 4 2 corner 2 0 2 4 0
+split 1 4 2 corner 2 1 1 3 1
+split 1 4 2 middle 0 0 1 3
+split 1 4 2 middle 1 0 2 2
+split 1 4 3 corner 1 0 1 0 4
+split 1 4 3 corner 2 0 3 4 0
+split 1 4 3 corner 2 1 2 3 1
+split 1 4 3 corner 2 2 1 2 2
+split 1 4 3 middle 0 0 1 3
+face 1 4 4 invalid
+split 1 4 5 corner 0 0 0 1 5
+split 1 4 5 corner 2 0 5 4 0
+split 1 4 5 corner 2 1 4 3 1
+split 1 4 5 corner 2 2 3 2 2
+split 1 4 5 corner 2 3 2 1 3
+split 1 4 5 middle 0 1 0 4
+split 1 4 6 corner 0 0 0 1 6
+split 1 4 6 corner 2 0 6 4 0
+split 1 4 6 corner 2 1 5 3 1
+split 1 4 6 corner 2 2 4 2 2
+split 1 4 6 corner 2 3 3 1 3
+split 1 4 6 middle 0 2 0 4
+split 1 4 6 middle 1 1 0 5
+split 1 5 -1 corner 1 0 1 0 5
+split 1 5 -1 middle 0 0 1 4
+split 1 5 -1 middle 1 0 2 3
+split 1 5 -1 middle 2 0 3 2
+split 1 5 -1 middle 3 0 4 1
+split 1 5 -1 middle 4 0 5 0
+split 1 5 0 corner 1 0 1 0 5
+split 1 5 0 middle 0 0 1 4
+split 1 5 0 middle 1 0 2 3
+split 1 5 0 middle 2 0 3 2
+split 1 5 0 middle 3 0 4 1
+split 1 5 0 middle 4 0 5 0
+split 1 5 1 corner 1 0 1 0 5
+split 1 5 1 corner 2 0 1 5 0
+split 1 5 1 middle 0 0 1 4
+split 1 5 1 middle 1 0 2 3
+split 1 5 1 middle 2 0 3 2
+split 1 5 1 middle 3 0 4 1
+split 1 5 2 corner 1 0 1 0 5
+split 1 5 2 corner 2 0 2 5 0
+split 1 5 2 corner 2 1 1 4 1
+split 1 5 2 middle 0 0 1 4
+split 1 5 2 middle 1 0 2 3
+split 1 5 2 middle 2 0 3 2
+split 1 5 3 corner 1 0 1 0 5
+split 1 5 3 corner 2 0 3 5 0
+split 1 5 3 corner 2 1 2 4 1
+split 1 5 3 corner 2 2 1 3 2
+split 1 5 3 middle 0 0 1 4
+split 1 5 3 middle 1 0 2 3
+split 1 5 4 corner 1 0 1 0 5
+split 1 5 4 corner 2 0 4 5 0
+split 1 5 4 corner 2 1 3 4 1
+split 1 5 4 corner 2 2 2 3 2
+split 1 5 4 corner 2 3 1 2 3
+split 1 5 4 middle 0 0 1 4
+face 1 5 5 invalid
+split 1 5 6 corner 0 0 0 1 6
+split 1 5 6 corner 2 0 6 5 0
+split 1 5 6 corner 2 1 5 4 1
+split 1 5 6 corner 2 2 4 3 2
+split 1 5 6 corner 2 3 3 2 3
+split 1 5 6 corner 2 4 2 1 4
+split 1 5 6 middle 0 1 0 5
+split 1 6 -1 corner 1 0 1 0 6
+split 1 6 -1 middle 0 0 1 5
+split 1 6 -1 middle 1 0 2 4
+split 1 6 -1 middle 2 0 3 3
+split 1 6 -1 middle 3 0 4 2
+split 1 6 -1 middle 4 0 5 1
+split 1 6 -1 middle 5 0 6 0
+split 1 6 0 corner 1 0 1 0 6
+split 1 6 0 middle 0 0 1 5
+split 1 6 0 middle 1 0 2 4
+split 1 6 0 middle 2 0 3 3
+split 1 6 0 middle 3 0 4 2
+split 1 6 0 middle 4 0 5 1
+split 1 6 0 middle 5 0 6 0
+split 1 6 1 corner 1 0 1 0 6
+split 1 6 1 corner 2 0 1 6 0
+split 1 6 1 middle 0 0 1 5
+split 1 6 1 middle 1 0 2 4
+split 1 6 1 middle 2 0 3 3
+split 1 6 1 middle 3 0 4 2
+split 1 6 1 middle 4 0 5 1
+split 1 6 2 corner 1 0 1 0 6
+split 1 6 2 corner 2 0 2 6 0
+split 1 6 2 corner 2 1 1 5 1
+split 1 6 2 middle 0 0 1 5
+split 1 6 2 middle 1 0 2 4
+split 1 6 2 middle 2 0 3 3
+split 1 6 2 middle 3 0 4 2
+split 1 6 3 corner 1 0 1 0 6
+split 1 6 3 corner 2 0 3 6 0
+split 1 6 3 corner 2 1 2 5 1
+split 1 6 3 corner 2 2 1 4 2
+split 1 6 3 middle 0 0 1 5
+split 1 6 3 middle 1 0 2 4
+split 1 6 3 middle 2 0 3 3
+split 1 6 4 corner 1 0 1 0 6
+split 1 6 4 corner 2 0 4 6 0
+split 1 6 4 corner 2 1 3 5 1
+split 1 6 4 corner 2 2 2 4 2
+split 1 6 4 corner 2 3 1 3 3
+split 1 6 4 middle 0 0 1 5
+split 1 6 4 middle 1 0 2 4
+split 1 6 5 corner 1 0 1 0 6
+split 1 6 5 corner 2 0 5 6 0
+split 1 6 5 corner 2 1 4 5 1
+split 1 6 5 corner 2 2 3 4 2
+split 1 6 5 corner 2 3 2 3 3
+split 1 6 5 corner 2 4 1 2 4
+split 1 6 5 middle 0 0 1 5
+face 1 6 6 invalid
+split 2 -1 -1 middle 0 0 2 0
+split 2 -1 -1 middle 1 1 1 0
+split 2 -1 -1 middle 2 2 0 0
+split 2 -1 0 middle 0 0 2 0
+split 2 -1 0 middle 1 1 1 0
+split 2 -1 0 middle 2 2 0 0
+split 2 -1 1 corner 0 0 0 2 1
+split 2 -1 1 middle 0 1 1 0
+split 2 -1 1 middle 1 2 0 0
+split 2 -1 2 corner 0 0 0 2 2
+split 2 -1 2 corner 0 1 1 1 1
+split 2 -1 2 middle 0 2 0 0
+split 2 -1 3 corner 0 0 0 2 3
+split 2 -1 3 corner 0 1 1 1 2
+split 2 -1 3 middle 0 3 0 0
+split 2 -1 3 middle 1 2 0 1
+split 2 -1 4 corner 0 0 0 2 4
+split 2 -1 4 corner 0 1 1 1 3
+split 2 -1 4 middle 0 4 0 0
+split 2 -1 4 middle 1 3 0 1
+split 2 -1 4 middle 2 2 0 2
+split 2 -1 5 corner 0 0 0 2 5
+split 2 -1 5 corner 0 1 1 1 4
+split 2 -1 5 middle 0 5 0 0
+split 2 -1 5 middle 1 4 0 1
+split 2 -1 5 middle 2 3 0 2
+split 2 -1 5 middle 3 2 0 3
+split 2 -1 6 corner 0 0 0 2 6
+split 2 -1 6 corner 0 1 1 1 5
+split 2 -1 6 middle 0 6 0 0
+split 2 -1 6 middle 1 5 0 1
+split 2 -1 6 middle 2 4 0 2
+split 2 -1 6 middle 3 3 0 3
+split 2 -1 6 middle 4 2 0 4
+split 2 0 -1 middle 0 0 2 0
+split 2 0 -1 middle 1 1 1 0
+split 2 0 -1 middle 2 2 0 0
+split 2 0 0 middle 0 0 2 0
+split 2 0 0 middle 1 1 1 0
+split 2 0 0 middle 2 2 0 0
+split 2 0 1 corner 0 0 0 2 1
+split 2 0 1 middle 0 1 1 0
+split 2 0 1 middle 1 2 0 0
+split 2 0 2 corner 0 0 0 2 2
+split 2 0 2 corner 0 1 1 1 1
+split 2 0 2 middle 0 2 0 0
+split 2 0 3 corner 0 0 0 2 3
+split 2 0 3 corner 0 1 1 1 2
+split 2 0 3 middle 0 3 0 0
+split 2 0 3 middle 1 2 0 1
+split 2 0 4 corner 0 0 0 2 4
+split 2 0 4 corner 0 1 1 1 3
+split 2 0 4 middle 0 4 0 0
+split 2 0 4 middle 1 3 0 1
+split 2 0 4 middle 2 2 0 2
+split 2 0 5 corner 0 0 0 2 5
+split 2 0 5 corner 0 1 1 1 4
+split 2 0 5 middle 0 5 0 0
+split 2 0 5 middle 1 4 0 1
+split 2 0 5 middle 2 3 0 2
+split 2 0 5 middle 3 2 0 3
+split 2 0 6 corner 0 0 0 2 6
+split 2 0 6 corner 0 1 1 1 5
+split 2 0 6 middle 0 6 0 0
+split 2 0 6 middle 1 5 0 1
+split 2 0 6 middle 2 4 0 2
+split 2 0 6 middle 3 3 0 3
+split 2 0 6 middle 4 2 0 4
+split 2 1 -1 corner 1 0 2 0 1
+split 2 1 -1 middle 0 0 2 0
+split 2 1 -1 middle 1 1 1 0
+split 2 1 0 corner 1 0 2 0 1
+split 2 1 0 middle 0 0 2 0
+split 2 1 0 middle 1 1 1 0
+split 2 1 1 corner 0 0 0 2 1
+split 2 1 1 corner 1 0 2 0 1
+split 2 1 1 middle 0 1 1 0
+face 2 1 2 invalid
+split 2 1 3 corner 0 0 0 2 3
+split 2 1 3 corner 0 1 1 1 2
+split 2 1 3 corner 2 0 3 1 0
+split 2 1 3 middle 0 2 0 1
+split 2 1 4 corner 0 0 0 2 4
+split 2 1 4 corner 0 1 1 1 3
+split 2 1 4 corner 2 0 4 1 0
+split 2 1 4 middle 0 3 0 1
+split 2 1 4 middle 1 2 0 2
+split 2 1 5 corner 0 0 0 2 5
+split 2 1 5 corner 0 1 1 1 4
+split 2 1 5 corner 2 0 5 1 0
+split 2 1 5 middle 0 4 0 1
+split 2 1 5 middle 1 3 0 2
+split 2 1 5 middle 2 2 0 3
+split 2 1 6 corner 0 0 0 2 6
+split 2 1 6 corner 0 1 1 1 5
+split 2 1 6 corner 2 0 6 1 0
+split 2 1 6 middle 0 5 0 1
+split 2 1 6 middle 1 4 0 2
+split 2 1 6 middle 2 3 0 3
+split 2 1 6 middle 3 2 0 4
+split 2 2 -1 corner 1 0 2 0 2
+split 2 2 -1 corner 1 1 1 1 1
+split 2 2 -1 middle 0 0 2 0
+split 2 2 0 corner 1 0 2 0 2
+split 2 2 0 corner 1 1 1 1 1
+split 2 2 0 middle 0 0 2 0
+face 2 2 1 invalid
+split 2 2 2 corner 0 0 0 2 2
+split 2 2 2 corner 1 0 2 0 2
+split 2 2 2 corner 2 0 2 2 0
+split 2 2 2 middle 0 1 1 1
+face 2 2 3 invalid
+split 2 2 4 corner 0 0 0 2 4
+split 2 2 4 corner 0 1 1 1 3
+split 2 2 4 corner 2 0 4 2 0
+split 2 2 4 corner 2 1 3 1 1
+split 2 2 4 middle 0 2 0 2
+split 2 2 5 corner 0 0 0 2 5
+split 2 2 5 corner 0 1 1 1 4
+split 2 2 5 corner 2 0 5 2 0
+split 2 2 5 corner 2 1 4 1 1
+split 2 2 5 middle 0 3 0 2
+split 2 2 5 middle 1 2 0 3
+split 2 2 6 corner 0 0 0 2 6
+split 2 2 6 corner 0 1 1 1 5
+split 2 2 6 corner 2 0 6 2 0
+split 2 2 6 corner 2 1 5 1 1
+split 2 2 6 middle 0 4 0 2
+split 2 2 6 middle 1 3 0 3
+split 2 2 6 middle 2 2 0 4
+split 2 3 -1 corner 1 0 2 0 3
+split 2 3 -1 corner 1 1 1 1 2
+split 2 3 -1 middle 0 0 2 1
+split 2 3 -1 middle 1 0 3 0
+split 2 3 0 corner 1 0 2 0 3
+split 2 3 0 corner 1 1 1 1 2
+split 2 3 0 middle 0 0 2 1
+split 2 3 0 middle 1 0 3 0
+split 2 3 1 corner 1 0 2 0 3
+split 2 3 1 corner 1 1 1 1 2
+split 2 3 1 corner 2 0 1 3 0
+split 2 3 1 middle 0 0 2 1
+face 2 3 2 invalid
+split 2 3 3 corner 0 0 0 2 3
+split 2 3 3 corner 1 0 2 0 3
+split 2 3 3 corner 2 0 3 3 0
+split 2 3 3 corner 2 1 2 2 1
+split 2 3 3 middle 0 1 1 2
+face 2 3 4 invalid
+split 2 3 5 corner 0 0 0 2 5
+split 2 3 5 corner 0 1 1 1 4
+split 2 3 5 corner 2 0 5 3 0
+split 2 3 5 corner 2 1 4 2 1
+split 2 3 5 corner 2 2 3 1 2
+split 2 3 5 middle 0 2 0 3
+split 2 3 6 corner 0 0 0 2 6
+split 2 3 6 corner 0 1 1 1 5
+split 2 3 6 corner 2 0 6 3 0
+split 2 3 6 corner 2 1 5 2 1
+split 2 3 6 corner 2 2 4 1 2
+split 2 3 6 middle 0 3 0 3
+split 2 3 6 middle 1 2 0 4
+split 2 4 -1 corner 1 0 2 0 4
+split 2 4 -1 corner 1 1 1 1 3
+split 2 4 -1 middle 0 0 2 2
+split 2 4 -1 middle 1 0 3 1
+split 2 4 -1 middle 2 0 4 0
+split 2 4 0 corner 1 0 2 0 4
+split 2 4 0 corner 1 1 1 1 3
+split 2 4 0 middle 0 0 2 2
+split 2 4 0 middle 1 0 3 1
+split 2 4 0 middle 2 0 4 0
+split 2 4 1 corner 1 0 2 0 4
+split 2 4 1 corner 1 1 1 1 3
+split 2 4 1 corner 2 0 1 4 0
+split 2 4 1 middle 0 0 2 2
+split 2 4 1 middle 1 0 3 1
+split 2 4 2 corner 1 0 2 0 4
+split 2 4 2 corner 1 1 1 1 3
+split 2 4 2 corner 2 0 2 4 0
+split 2 4 2 corner 2 1 1 3 1
+split 2 4 2 middle 0 0 2 2
+face 2 4 3 invalid
+split 2 4 4 corner 0 0 0 2 4
+split 2 4 4 corner 1 0 2 0 4
+split 2 4 4 corner 2 0 4 4 0
+split 2 4 4 corner 2 1 3 3 1
+split 2 4 4 corner 2 2 2 2 2
+split 2 4 4 middle 0 1 1 3
+face 2 4 5 invalid
+split 2 4 6 corner 0 0 0 2 6
+split 2 4 6 corner 0 1 1 1 5
+split 2 4 6 corner 2 0 6 4 0
+split 2 4 6 corner 2 1 5 3 1
+split 2 4 6 corner 2 2 4 2 2
+split 2 4 6 corner 2 3 3 1 3
+split 2 4 6 middle 0 2 0 4
+split 2 5 -1 corner 1 0 2 0 5
+split 2 5 -1 corner 1 1 1 1 4
+split 2 5 -1 middle 0 0 2 3
+split 2 5 -1 middle 1 0 3 2
+split 2 5 -1 middle 2 0 4 1
+split 2 5 -1 middle 3 0 5 0
+split 2 5 0 corner 1 0 2 0 5
+split 2 5 0 corner 1 1 1 1 4
+split 2 5 0 middle 0 0 2 3
+split 2 5 0 middle 1 0 3 2
+split 2 5 0 middle 2 0 4 1
+split 2 5 0 middle 3 0 5 0
+split 2 5 1 corner 1 0 2 0 5
+split 2 5 1 corner 1 1 1 1 4
+split 2 5 1 corner 2 0 1 5 0
+split 2 5 1 middle 0 0 2 3
+split 2 5 1 middle 1 0 3 2
+split 2 5 1 middle 2 0 4 1
+split 2 5 2 corner 1 0 2 0 5
+split 2 5 2 corner 1 1 1 1 4
+split 2 5 2 corner 2 0 2 5 0
+split 2 5 2 corner 2 1 1 4 1
+split 2 5 2 middle 0 0 2 3
+split 2 5 2 middle 1 0 3 2
+split 2 5 3 corner 1 0 2 0 5
+split 2 5 3 corner 1 1 1 1 4
+split 2 5 3 corner 2 0 3 5 0
+split 2 5 3 corner 2 1 2 4 1
+split 2 5 3 corner 2 2 1 3 2
+split 2 5 3 middle 0 0 2 3
+face 2 5 4 invalid
+split 2 5 5 corner 0 0 0 2 5
+split 2 5 5 corner 1 0 2 0 5
+split 2 5 5 corner 2 0 5 5 0
+split 2 5 5 corner 2 1 4 4 1
+split 2 5 5 corner 2 2 3 3 2
+split 2 5 5 corner 2 3 2 2 3
+split 2 5 5 middle 0 1 1 4
+face 2 5 6 invalid
+split 2 6 -1 corner 1 0 2 0 6
+split 2 6 -1 corner 1 1 1 1 5
+split 2 6 -1 middle 0 0 2 4
+split 2 6 -1 middle 1 0 3 3
+split 2 6 -1 middle 2 0 4 2
+split 2 6 -1 middle 3 0 5 1
+split 2 6 -1 middle 4 0 6 0
+split 2 6 0 corner 1 0 2 0 6
+split 2 6 0 corner 1 1 1 1 5
+split 2 6 0 middle 0 0 2 4
+split 2 6 0 middle 1 0 3 3
+split 2 6 0 middle 2 0 4 2
+split 2 6 0 middle 3 0 5 1
+split 2 6 0 middle 4 0 6 0
+split 2 6 1 corner 1 0 2 0 6
+split 2 6 1 corner 1 1 1 1 5
+split 2 6 1 corner 2 0 1 6 0
+split 2 6 1 middle 0 0 2 4
+split 2 6 1 middle 1 0 3 3
+split 2 6 1 middle 2 0 4 2
+split 2 6 1 middle 3 0 5 1
+split 2 6 2 corner 1 0 2 0 6
+split 2 6 2 corner 1 1 1 1 5
+split 2 6 2 corner 2 0 2 6 0
+split 2 6 2 corner 2 1 1 5 1
+split 2 6 2 middle 0 0 2 4
+split 2 6 2 middle 1 0 3 3
+split 2 6 2 middle 2 0 4 2
+split 2 6 3 corner 1 0 2 0 6
+split 2 6 3 corner 1 1 1 1 5
+split 2 6 3 corner 2 0 3 6 0
+split 2 6 3 corner 2 1 2 5 1
+split 2 6 3 corner 2 2 1 4 2
+split 2 6 3 middle 0 0 2 4
+split 2 6 3 middle 1 0 3 3
+split 2 6 4 corner 1 0 2 0 6
+split 2 6 4 corner 1 1 1 1 5
+split 2 6 4 corner 2 0 4 6 0
+split 2 6 4 corner 2 1 3 5 1
+split 2 6 4 corner 2 2 2 4 2
+split 2 6 4 corner 2 3 1 3 3
+split 2 6 4 middle 0 0 2 4
+face 2 6 5 invalid
+split 2 6 6 corner 0 0 0 2 6
+split 2 6 6 corner 1 0 2 0 6
+split 2 6 6 corner 2 0 6 6 0
+split 2 6 6 corner 2 1 5 5 1
+split 2 6 6 corner 2 2 4 4 2
+split 2 6 6 corner 2 3 3 3 3
+split 2 6 6 corner 2 4 2 2 4
+split 2 6 6 middle 0 1 1 5
+split 3 -1 -1 middle 0 0 3 0
+split 3 -1 -1 middle 1 1 2 0
+split 3 -1 -1 middle 2 2 1 0
+split 3 -1 -1 middle 3 3 0 0
+split 3 -1 0 middle 0 0 3 0
+split 3 -1 0 middle 1 1 2 0
+split 3 -1 0 middle 2 2 1 0
+split 3 -1 0 middle 3 3 0 0
+split 3 -1 1 corner 0 0 0 3 1
+split 3 -1 1 middle 0 1 2 0
+split 3 -1 1 middle 1 2 1 0
+split 3 -1 1 middle 2 3 0 0
+split 3 -1 2 corner 0 0 0 3 2
+split 3 -1 2 corner 0 1 1 2 1
+split 3 -1 2 middle 0 2 1 0
+split 3 -1 2 middle 1 3 0 0
+split 3 -1 3 corner 0 0 0 3 3
+split 3 -1 3 corner 0 1 1 2 2
+split 3 -1 3 corner 0 2 2 1 1
+split 3 -1 3 middle 0 3 0 0
+split 3 -1 4 corner 0 0 0 3 4
+split 3 -1 4 corner 0 1 1 2 3
+split 3 -1 4 corner 0 2 2 1 2
+split 3 -1 4 middle 0 4 0 0
+split 3 -1 4 middle 1 3 0 1
+split 3 -1 5 corner 0 0 0 3 5
+split 3 -1 5 corner 0 1 1 2 4
+split 3 -1 5 corner 0 2 2 1 3
+split 3 -1 5 middle 0 5 0 0
+split 3 -1 5 middle 1 4 0 1
+split 3 -1 5 middle 2 3 0 2
+split 3 -1 6 corner 0 0 0 3 6
+split 3 -1 6 corner 0 1 1 2 5
+split 3 -1 6 corner 0 2 2 1 4
+split 3 -1 6 middle 0 6 0 0
+split 3 -1 6 middle 1 5 0 1
+split 3 -1 6 middle 2 4 0 2
+split 3 -1 6 middle 3 3 0 3
+split 3 0 -1 middle 0 0 3 0
+split 3 0 -1 middle 1 1 2 0
+split 3 0 -1 middle 2 2 1 0
+split 3 0 -1 middle 3 3 0 0
+split 3 0 0 middle 0 0 3 0
+split 3 0 0 middle 1 1 2 0
+split 3 0 0 middle 2 2 1 0
+split 3 0 0 middle 3 3 0 0
+split 3 0 1 corner 0 0 0 3 1
+split 3 0 1 middle 0 1 2 0
+split 3 0 1 middle 1 2 1 0
+split 3 0 1 middle 2 3 0 0
+split 3 0 2 corner 0 0 0 3 2
+split 3 0 2 corner 0 1 1 2 1
+split 3 0 2 middle 0 2 1 0
+split 3 0 2 middle 1 3 0 0
+split 3 0 3 corner 0 0 0 3 3
+split 3 0 3 corner 0 1 1 2 2
+split 3 0 3 corner 0 2 2 1 1
+split 3 0 3 middle 0 3 0 0
+split 3 0 4 corner 0 0 0 3 4
+split 3 0 4 corner 0 1 1 2 3
+split 3 0 4 corner 0 2 2 1 2
+split 3 0 4 middle 0 4 0 0
+split 3 0 4 middle 1 3 0 1
+split 3 0 5 corner 0 0 0 3 5
+split 3 0 5 corner 0 1 1 2 4
+split 3 0 5 corner 0 2 2 1 3
+split 3 0 5 middle 0 5 0 0
+split 3 0 5 middle 1 4 0 1
+split 3 0 5 middle 2 3 0 2
+split 3 0 6 corner 0 0 0 3 6
+split 3 0 6 corner 0 1 1 2 5
+split 3 0 6 corner 0 2 2 1 4
+split 3 0 6 middle 0 6 0 0
+split 3 0 6 middle 1 5 0 1
+split 3 0 6 middle 2 4 0 2
+split 3 0 6 middle 3 3 0 3
+split 3 1 -1 corner 1 0 3 0 1
+split 3 1 -1 middle 0 0 3 0
+split 3 1 -1 middle 1 1 2 0
+split 3 1 -1 middle 2 2 1 0
+split 3 1 0 corner 1 0 3 0 1
+split 3 1 0 middle 0 0 3 0
+split 3 1 0 middle 1 1 2 0
+split 3 1 0 middle 2 2 1 0
+split 3 1 1 corner 0 0 0 3 1
+split 3 1 1 corner 1 0 3 0 1
+split 3 1 1 middle 0 1 2 0
+split 3 1 1 middle 1 2 1 0
+split 3 1 2 corner 0 0 0 3 2
+split 3 1 2 corner 0 1 1 2 1
+split 3 1 2 corner 1 0 3 0 1
+split 3 1 2 middle 0 2 1 0
+face 3 1 3 invalid
+split 3 1 4 corner 0 0 0 3 4
+split 3 1 4 corner 0 1 1 2 3
+split 3 1 4 corner 0 2 2 1 2
+split 3 1 4 corner 2 0 4 1 0
+split 3 1 4 middle 0 3 0 1
+split 3 1 5 corner 0 0 0 3 5
+split 3 1 5 corner 0 1 1 2 4
+split 3 1 5 corner 0 2 2 1 3
+split 3 1 5 corner 2 0 5 1 0
+split 3 1 5 middle 0 4 0 1
+split 3 1 5 middle 1 3 0 2
+split 3 1 6 corner 0 0 0 3 6
+split 3 1 6 corner 0 1 1 2 5
+split 3 1 6 corner 0 2 2 1 4
+split 3 1 6 corner 2 0 6 1 0
+split 3 1 6 middle 0 5 0 1
+split 3 1 6 middle 1 4 0 2
+split 3 1 6 middle 2 3 0 3
+split 3 2 -1 corner 1 0 3 0 2
+split 3 2 -1 corner 1 1 2 1 1
+split 3 2 -1 middle 0 0 3 0
+split 3 2 -1 middle 1 1 2 0
+split 3 2 0 corner 1 0 3 0 2
+split 3 2 0 corner 1 1 2 1 1
+split 3 2 0 middle 0 0 3 0
+split 3 2 0 middle 1 1 2 0
+split 3 2 1 corner 0 0 0 3 1
+split 3 2 1 corner 1 0 3 0 2
+split 3 2 1 corner 1 1 2 1 1
+split 3 2 1 middle 0 1 2 0
+face 3 2 2 invalid
+split 3 2 3 corner 0 0 0 3 3
+split 3 2 3 corner 0 1 1 2 2
+split 3 2 3 corner 1 0 3 0 2
+split 3 2 3 corner 2 0 3 2 0
+split 3 2 3 middle 0 2 1 1
+face 3 2 4 invalid
+split 3 2 5 corner 0 0 0 3 5
+split 3 2 5 corner 0 1 1 2 4
+split 3 2 5 corner 0 2 2 1 3
+split 3 2 5 corner 2 0 5 2 0
+split 3 2 5 corner 2 1 4 1 1
+split 3 2 5 middle 0 3 0 2
+split 3 2 6 corner 0 0 0 3 6
+split 3 2 6 corner 0 1 1 2 5
+split 3 2 6 corner 0 2 2 1 4
+split 3 2 6 corner 2 0 6 2 0
+split 3 2 6 corner 2 1 5 1 1
+split 3 2 6 middle 0 4 0 2
+split 3 2 6 middle 1 3 0 3
+split 3 3 -1 corner 1 0 3 0 3
+split 3 3 -1 corner 1 1 2 1 2
+split 3 3 -1 corner 1 2 1 2 1
+split 3 3 -1 middle 0 0 3 0
+split 3 3 0 corner 1 0 3 0 3
+split 3 3 0 corner 1 1 2 1 2
+split 3 3 0 corner 1 2 1 2 1
+split 3 3 0 middle 0 0 3 0
+face 3 3 1 invalid
+split 3 3 2 corner 0 0 0 3 2
+split 3 3 2 corner 1 0 3 0 3
+split 3 3 2 corner 1 1 2 1 2
+split 3 3 2 corner 2 0 2 3 0
+split 3 3 2 middle 0 1 2 1
+face 3 3 3 invalid
+split 3 3 4 corner 0 0 0 3 4
+split 3 3 4 corner 0 1 1 2 3
+split 3 3 4 corner 1 0 3 0 3
+split 3 3 4 corner 2 0 4 3 0
+split 3 3 4 corner 2 1 3 2 1
+split 3 3 4 middle 0 2 1 2
+face 3 3 5 invalid
+split 3 3 6 corner 0 0 0 3 6
+split 3 3 6 corner 0 1 1 2 5
+split 3 3 6 corner 0 2 2 1 4
+split 3 3 6 corner 2 0 6 3 0
+split 3 3 6 corner 2 1 5 2 1
+split 3 3 6 corner 2 2 4 1 2
+split 3 3 6 middle 0 3 0 3
+split 3 4 -1 corner 1 0 3 0 4
+split 3 4 -1 corner 1 1 2 1 3
+split 3 4 -1 corner 1 2 1 2 2
+split 3 4 -1 middle 0 0 3 1
+split 3 4 -1 middle 1 0 4 0
+split 3 4 0 corner 1 0 3 0 4
+split 3 4 0 corner 1 1 2 1 3
+split 3 4 0 corner 1 2 1 2 2
+split 3 4 0 middle 0 0 3 1
+split 3 4 0 middle 1 0 4 0
+split 3 4 1 corner 1 0 3 0 4
+split 3 4 1 corner 1 1 2 1 3
+split 3 4 1 corner 1 2 1 2 2
+split 3 4 1 corner 2 0 1 4 0
+split 3 4 1 middle 0 0 3 1
+face 3 4 2 invalid
+split 3 4 3 corner 0 0 0 3 3
+split 3 4 3 corner 1 0 3 0 4
+split 3 4 3 corner 1 1 2 1 3
+split 3 4 3 corner 2 0 3 4 0
+split 3 4 3 corner 2 1 2 3 1
+split 3 4 3 middle 0 1 2 2
+face 3 4 4 invalid
+split 3 4 5 corner 0 0 0 3 5
+split 3 4 5 corner 0 1 1 2 4
+split 3 4 5 corner 1 0 3 0 4
+split 3 4 5 corner 2 0 5 4 0
+split 3 4 5 corner 2 1 4 3 1
+split 3 4 5 corner 2 2 3 2 2
+split 3 4 5 middle 0 2 1 3
+face 3 4 6 invalid
+split 3 5 -1 corner 1 0 3 0 5
+split 3 5 -1 corner 1 1 2 1 4
+split 3 5 -1 corner 1 2 1 2 3
+split 3 5 -1 middle 0 0 3 2
+split 3 5 -1 middle 1 0 4 1
+split 3 5 -1 middle 2 0 5 0
+split 3 5 0 corner 1 0 3 0 5
+split 3 5 0 corner 1 1 2 1 4
+split 3 5 0 corner 1 2 1 2 3
+split 3 5 0 middle 0 0 3 2
+split 3 5 0 middle 1 0 4 1
+split 3 5 0 middle 2 0 5 0
+split 3 5 1 corner 1 0 3 0 5
+split 3 5 1 corner 1 1 2 1 4
+split 3 5 1 corner 1 2 1 2 3
+split 3 5 1 corner 2 0 1 5 0
+split 3 5 1 middle 0 0 3 2
+split 3 5 1 middle 1 0 4 1
+split 3 5 2 corner 1 0 3 0 5
+split 3 5 2 corner 1 1 2 1 4
+split 3 5 2 corner 1 2 1 2 3
+split 3 5 2 corner 2 0 2 5 0
+split 3 5 2 corner 2 1 1 4 1
+split 3 5 2 middle 0 0 3 2
+face 3 5 3 invalid
+split 3 5 4 corner 0 0 0 3 4
+split 3 5 4 corner 1 0 3 0 5
+split 3 5 4 corner 1 1 2 1 4
+split 3 5 4 corner 2 0 4 5 0
+split 3 5 4 corner 2 1 3 4 1
+split 3 5 4 corner 2 2 2 3 2
+split 3 5 4 middle 0 1 2 3
+face 3 5 5 invalid
+split 3 5 6 corner 0 0 0 3 6
+split 3 5 6 corner 0 1 1 2 5
+split 3 5 6 corner 1 0 3 0 5
+split 3 5 6 corner 2 0 6 5 0
+split 3 5 6 corner 2 1 5 4 1
+split 3 5 6 corner 2 2 4 3 2
+split 3 5 6 corner 2 3 3 2 3
+split 3 5 6 middle 0 2 1 4
+split 3 6 -1 corner 1 0 3 0 6
+split 3 6 -1 corner 1 1 2 1 5
+split 3 6 -1 corner 1 2 1 2 4
+split 3 6 -1 middle 0 0 3 3
+split 3 6 -1 middle 1 0 4 2
+split 3 6 -1 middle 2 0 5 1
+split 3 6 -1 middle 3 0 6 0
+split 3 6 0 corner 1 0 3 0 6
+split 3 6 0 corner 1 1 2 1 5
+split 3 6 0 corner 1 2 1 2 4
+split 3 6 0 middle 0 0 3 3
+split 3 6 0 middle 1 0 4 2
+split 3 6 0 middle 2 0 5 1
+split 3 6 0 middle 3 0 6 0
+split 3 6 1 corner 1 0 3 0 6
+split 3 6 1 corner 1 1 2 1 5
+split 3 6 1 corner 1 2 1 2 4
+split 3 6 1 corner 2 0 1 6 0
+split 3 6 1 middle 0 0 3 3
+split 3 6 1 middle 1 0 4 2
+split 3 6 1 middle 2 0 5 1
+split 3 6 2 corner 1 0 3 0 6
+split 3 6 2 corner 1 1 2 1 5
+split 3 6 2 corner 1 2 1 2 4
+split 3 6 2 corner 2 0 2 6 0
+split 3 6 2 corner 2 1 1 5 1
+split 3 6 2 middle 0 0 3 3
+split 3 6 2 middle 1 0 4 2
+split 3 6 3 corner 1 0 3 0 6
+split 3 6 3 corner 1 1 2 1 5
+split 3 6 3 corner 1 2 1 2 4
+split 3 6 3 corner 2 0 3 6 0
+split 3 6 3 corner 2 1 2 5 1
+split 3 6 3 corner 2 2 1 4 2
+split 3 6 3 middle 0 0 3 3
+face 3 6 4 invalid
+split 3 6 5 corner 0 0 0 3 5
+split 3 6 5 corner 1 0 3 0 6
+split 3 6 5 corner 1 1 2 1 5
+split 3 6 5 corner 2 0 5 6 0
+split 3 6 5 corner 2 1 4 5 1
+split 3 6 5 corner 2 2 3 4 2
+split 3 6 5 corner 2 3 2 3 3
+split 3 6 5 middle 0 1 2 4
+face 3 6 6 invalid
+split 4 -1 -1 middle 0 0 4 0
+split 4 -1 -1 middle 1 1 3 0
+split 4 -1 -1 middle 2 2 2 0
+split 4 -1 -1 middle 3 3 1 0
+split 4 -1 -1 middle 4 4 0 0
+split 4 -1 0 middle 0 0 4 0
+split 4 -1 0 middle 1 1 3 0
+split 4 -1 0 middle 2 2 2 0
+split 4 -1 0 middle 3 3 1 0
+split 4 -1 0 middle 4 4 0 0
+split 4 -1 1 corner 0 0 0 4 1
+split 4 -1 1 middle 0 1 3 0
+split 4 -1 1 middle 1 2 2 0
+split 4 -1 1 middle 2 3 1 0
+split 4 -1 1 middle 3 4 0 0
+split 4 -1 2 corner 0 0 0 4 2
+split 4 -1 2 corner 0 1 1 3 1
+split 4 -1 2 middle 0 2 2 0
+split 4 -1 2 middle 1 3 1 0
+split 4 -1 2 middle 2 4 0 0
+split 4 -1 3 corner 0 0 0 4 3
+split 4 -1 3 corner 0 1 1 3 2
+split 4 -1 3 corner 0 2 2 2 1
+split 4 -1 3 middle 0 3 1 0
+split 4 -1 3 middle 1 4 0 0
+split 4 -1 4 corner 0 0 0 4 4
+split 4 -1 4 corner 0 1 1 3 3
+split 4 -1 4 corner 0 2 2 2 2
+split 4 -1 4 corner 0 3 3 1 1
+split 4 -1 4 middle 0 4 0 0
+split 4 -1 5 corner 0 0 0 4 5
+split 4 -1 5 corner 0 1 1 3 4
+split 4 -1 5 corner 0 2 2 2 3
+split 4 -1 5 corner 0 3 3 1 2
+split 4 -1 5 middle 0 5 0 0
+split 4 -1 5 middle 1 4 0 1
+split 4 -1 6 corner 0 0 0 4 6
+split 4 -1 6 corner 0 1 1 3 5
+split 4 -1 6 corner 0 2 2 2 4
+split 4 -1 6 corner 0 3 3 1 3
+split 4 -1 6 middle 0 6 0 0
+split 4 -1 6 middle 1 5 0 1
+split 4 -1 6 middle 2 4 0 2
+split 4 0 -1 middle 0 0 4 0
+split 4 0 -1 middle 1 1 3 0
+split 4 0 -1 middle 2 2 2 0
+split 4 0 -1 middle 3 3 1 0
+split 4 0 -1 middle 4 4 0 0
+split 4 0 0 middle 0 0 4 0
+split 4 0 0 middle 1 1 3 0
+split 4 0 0 middle 2 2 2 0
+split 4 0 0 middle 3 3 1 0
+split 4 0 0 middle 4 4 0 0
+split 4 0 1 corner 0 0 0 4 1
+split 4 0 1 middle 0 1 3 0
+split 4 0 1 middle 1 2 2 0
+split 4 0 1 middle 2 3 1 0
+split 4 0 1 middle 3 4 0 0
+split 4 0 2 corner 0 0 0 4 2
+split 4 0 2 corner 0 1 1 3 1
+split 4 0 2 middle 0 2 2 0
+split 4 0 2 middle 1 3 1 0
+split 4 0 2 middle 2 4 0 0
+split 4 0 3 corner 0 0 0 4 3
+split 4 0 3 corner 0 1 1 3 2
+split 4 0 3 corner 0 2 2 2 1
+split 4 0 3 middle 0 3 1 0
+split 4 0 3 middle 1 4 0 0
+split 4 0 4 corner 0 0 0 4 4
+split 4 0 4 corner 0 1 1 3 3
+split 4 0 4 corner 0 2 2 2 2
+split 4 0 4 corner 0 3 3 1 1
+split 4 0 4 middle 0 4 0 0
+split 4 0 5 corner 0 0 0 4 5
+split 4 0 5 corner 0 1 1 3 4
+split 4 0 5 corner 0 2 2 2 3
+split 4 0 5 corner 0 3 3 1 2
+split 4 0 5 middle 0 5 0 0
+split 4 0 5 middle 1 4 0 1
+split 4 0 6 corner 0 0 0 4 6
+split 4 0 6 corner 0 1 1 3 5
+split 4 0 6 corner 0 2 2 2 4
+split 4 0 6 corner 0 3 3 1 3
+split 4 0 6 middle 0 6 0 0
+split 4 0 6 middle 1 5 0 1
+split 4 0 6 middle 2 4 0 2
+split 4 1 -1 corner 1 0 4 0 1
+split 4 1 -1 middle 0 0 4 0
+split 4 1 -1 middle 1 1 3 0
+split 4 1 -1 middle 2 2 2 0
+split 4 1 -1 middle 3 3 1 0
+split 4 1 0 corner 1 0 4 0 1
+split 4 1 0 middle 0 0 4 0
+split 4 1 0 middle 1 1 3 0
+split 4 1 0 middle 2 2 2 0
+split 4 1 0 middle 3 3 1 0
+split 4 1 1 corner 0 0 0 4 1
+split 4 1 1 corner 1 0 4 0 1
+split 4 1 1 middle 0 1 3 0
+split 4 1 1 middle 1 2 2 0
+split 4 1 1 middle 2 3 1 0
+split 4 1 2 corner 0 0 0 4 2
+split 4 1 2 corner 0 1 1 3 1
+split 4 1 2 corner 1 0 4 0 1
+split 4 1 2 middle 0 2 2 0
+split 4 1 2 middle 1 3 1 0
+split 4 1 3 corner 0 0 0 4 3
+split 4 1 3 corner 0 1 1 3 2
+split 4 1 3 corner 0 2 2 2 1
+split 4 1 3 corner 1 0 4 0 1
+split 4 1 3 middle 0 3 1 0
+face 4 1 4 invalid
+split 4 1 5 corner 0 0 0 4 5
+split 4 1 5 corner 0 1 1 3 4
+split 4 1 5 corner 0 2 2 2 3
+split 4 1 5 corner 0 3 3 1 2
+split 4 1 5 corner 2 0 5 1 0
+split 4 1 5 middle 0 4 0 1
+split 4 1 6 corner 0 0 0 4 6
+split 4 1 6 corner 0 1 1 3 5
+split 4 1 6 corner 0 2 2 2 4
+split 4 1 6 corner 0 3 3 1 3
+split 4 1 6 corner 2 0 6 1 0
+split 4 1 6 middle 0 5 0 1
+split 4 1 6 middle 1 4 0 2
+split 4 2 -1 corner 1 0 4 0 2
+split 4 2 -1 corner 1 1 3 1 1
+split 4 2 -1 middle 0 0 4 0
+split 4 2 -1 middle 1 1 3 0
+split 4 2 -1 middle 2 2 2 0
+split 4 2 0 corner 1 0 4 0 2
+split 4 2 0 corner 1 1 3 1 1
+split 4 2 0 middle 0 0 4 0
+split 4 2 0 middle 1 1 3 0
+split 4 2 0 middle 2 2 2 0
+split 4 2 1 corner 0 0 0 4 1
+split 4 2 1 corner 1 0 4 0 2
+split 4 2 1 corner 1 1 3 1 1
+split 4 2 1 middle 0 1 3 0
+split 4 2 1 middle 1 2 2 0
+split 4 2 2 corner 0 0 0 4 2
+split 4 2 2 corner 0 1 1 3 1
+split 4 2 2 corner 1 0 4 0 2
+split 4 2 2 corner 1 1 3 1 1
+split 4 2 2 middle 0 2 2 0
+face 4 2 3 invalid
+split 4 2 4 corner 0 0 0 4 4
+split 4 2 4 corner 0 1 1 3 3
+split 4 2 4 corner 0 2 2 2 2
+split 4 2 4 corner 1 0 4 0 2
+split 4 2 4 corner 2 0 4 2 0
+split 4 2 4 middle 0 3 1 1
+face 4 2 5 invalid
+split 4 2 6 corner 0 0 0 4 6
+split 4 2 6 corner 0 1 1 3 5
+split 4 2 6 corner 0 2 2 2 4
+split 4 2 6 corner 0 3 3 1 3
+split 4 2 6 corner 2 0 6 2 0
+split 4 2 6 corner 2 1 5 1 1
+split 4 2 6 middle 0 4 0 2
+split 4 3 -1 corner 1 0 4 0 3
+split 4 3 -1 corner 1 1 3 1 2
+split 4 3 -1 corner 1 2 2 2 1
+split 4 3 -1 middle 0 0 4 0
+split 4 3 -1 middle 1 1 3 0
+split 4 3 0 corner 1 0 4 0 3
+split 4 3 0 corner 1 1 3 1 2
+split 4 3 0 corner 1 2 2 2 1
+split 4 3 0 middle 0 0 4 0
+split 4 3 0 middle 1 1 3 0
+split 4 3 1 corner 0 0 0 4 1
+split 4 3 1 corner 1 0 4 0 3
+split 4 3 1 corner 1 1 3 1 2
+split 4 3 1 corner 1 2 2 2 1
+split 4 3 1 middle 0 1 3 0
+face 4 3 2 invalid
+split 4 3 3 corner 0 0 0 4 3
+split 4 3 3 corner 0 1 1 3 2
+split 4 3 3 corner 1 0 4 0 3
+split 4 3 3 corner 1 1 3 1 2
+split 4 3 3 corner 2 0 3 3 0
+split 4 3 3 middle 0 2 2 1
+face 4 3 4 invalid
+split 4 3 5 corner 0 0 0 4 5
+split 4 3 5 corner 0 1 1 3 4
+split 4 3 5 corner 0 2 2 2 3
+split 4 3 5 corner 1 0 4 0 3
+split 4 3 5 corner 2 0 5 3 0
+split 4 3 5 corner 2 1 4 2 1
+split 4 3 5 middle 0 3 1 2
+face 4 3 6 invalid
+split 4 4 -1 corner 1 0 4 0 4
+split 4 4 -1 corner 1 1 3 1 3
+split 4 4 -1 corner 1 2 2 2 2
+split 4 4 -1 corner 1 3 1 3 1
+split 4 4 -1 middle 0 0 4 0
+split 4 4 0 corner 1 0 4 0 4
+split 4 4 0 corner 1 1 3 1 3
+split 4 4 0 corner 1 2 2 2 2
+split 4 4 0 corner 1 3 1 3 1
+split 4 4 0 middle 0 0 4 0
+face 4 4 1 invalid
+split 4 4 2 corner 0 0 0 4 2
+split 4 4 2 corner 1 0 4 0 4
+split 4 4 2 corner 1 1 3 1 3
+split 4 4 2 corner 1 2 2 2 2
+split 4 4 2 corner 2 0 2 4 0
+split 4 4 2 middle 0 1 3 1
+face 4 4 3 invalid
+split 4 4 4 corner 0 0 0 4 4
+split 4 4 4 corner 0 1 1 3 3
+split 4 4 4 corner 1 0 4 0 4
+split 4 4 4 corner 1 1 3 1 3
+split 4 4 4 corner 2 0 4 4 0
+split 4 4 4 corner 2 1 3 3 1
+split 4 4 4 middle 0 2 2 2
+face 4 4 5 invalid
+split 4 4 6 corner 0 0 0 4 6
+split 4 4 6 corner 0 1 1 3 5
+split 4 4 6 corner 0 2 2 2 4
+split 4 4 6 corner 1 0 4 0 4
+split 4 4 6 corner 2 0 6 4 0
+split 4 4 6 corner 2 1 5 3 1
+split 4 4 6 corner 2 2 4 2 2
+split 4 4 6 middle 0 3 1 3
+split 4 5 -1 corner 1 0 4 0 5
+split 4 5 -1 corner 1 1 3 1 4
+split 4 5 -1 corner 1 2 2 2 3
+split 4 5 -1 corner 1 3 1 3 2
+split 4 5 -1 middle 0 0 4 1
+split 4 5 -1 middle 1 0 5 0
+split 4 5 0 corner 1 0 4 0 5
+split 4 5 0 corner 1 1 3 1 4
+split 4 5 0 corner 1 2 2 2 3
+split 4 5 0 corner 1 3 1 3 2
+split 4 5 0 middle 0 0 4 1
+split 4 5 0 middle 1 0 5 0
+split 4 5 1 corner 1 0 4 0 5
+split 4 5 1 corner 1 1 3 1 4
+split 4 5 1 corner 1 2 2 2 3
+split 4 5 1 corner 1 3 1 3 2
+split 4 5 1 corner 2 0 1 5 0
+split 4 5 1 middle 0 0 4 1
+face 4 5 2 invalid
+split 4 5 3 corner 0 0 0 4 3
+split 4 5 3 corner 1 0 4 0 5
+split 4 5 3 corner 1 1 3 1 4
+split 4 5 3 corner 1 2 2 2 3
+split 4 5 3 corner 2 0 3 5 0
+split 4 5 3 corner 2 1 2 4 1
+split 4 5 3 middle 0 1 3 2
+face 4 5 4 invalid
+split 4 5 5 corner 0 0 0 4 5
+split 4 5 5 corner 0 1 1 3 4
+split 4 5 5 corner 1 0 4 0 5
+split 4 5 5 corner 1 1 3 1 4
+split 4 5 5 corner 2 0 5 5 0
+split 4 5 5 corner 2 1 4 4 1
+split 4 5 5 corner 2 2 3 3 2
+split 4 5 5 middle 0 2 2 3
+face 4 5 6 invalid
+split 4 6 -1 corner 1 0 4 0 6
+split 4 6 -1 corner 1 1 3 1 5
+split 4 6 -1 corner 1 2 2 2 4
+split 4 6 -1 corner 1 3 1 3 3
+split 4 6 -1 middle 0 0 4 2
+split 4 6 -1 middle 1 0 5 1
+split 4 6 -1 middle 2 0 6 0
+split 4 6 0 corner 1 0 4 0 6
+split 4 6 0 corner 1 1 3 1 5
+split 4 6 0 corner 1 2 2 2 4
+split 4 6 0 corner 1 3 1 3 3
+split 4 6 0 middle 0 0 4 2
+split 4 6 0 middle 1 0 5 1
+split 4 6 0 middle 2 0 6 0
+split 4 6 1 corner 1 0 4 0 6
+split 4 6 1 corner 1 1 3 1 5
+split 4 6 1 corner 1 2 2 2 4
+split 4 6 1 corner 1 3 1 3 3
+split 4 6 1 corner 2 0 1 6 0
+split 4 6 1 middle 0 0 4 2
+split 4 6 1 middle 1 0 5 1
+split 4 6 2 corner 1 0 4 0 6
+split 4 6 2 corner 1 1 3 1 5
+split 4 6 2 corner 1 2 2 2 4
+split 4 6 2 corner 1 3 1 3 3
+split 4 6 2 corner 2 0 2 6 0
+split 4 6 2 corner 2 1 1 5 1
+split 4 6 2 middle 0 0 4 2
+face 4 6 3 invalid
+split 4 6 4 corner 0 0 0 4 4
+split 4 6 4 corner 1 0 4 0 6
+split 4 6 4 corner 1 1 3 1 5
+split 4 6 4 corner 1 2 2 2 4
+split 4 6 4 corner 2 0 4 6 0
+split 4 6 4 corner 2 1 3 5 1
+split 4 6 4 corner 2 2 2 4 2
+split 4 6 4 middle 0 1 3 3
+face 4 6 5 invalid
+split 4 6 6 corner 0 0 0 4 6
+split 4 6 6 corner 0 1 1 3 5
+split 4 6 6 corner 1 0 4 0 6
+split 4 6 6 corner 1 1 3 1 5
+split 4 6 6 corner 2 0 6 6 0
+split 4 6 6 corner 2 1 5 5 1
+split 4 6 6 corner 2 2 4 4 2
+split 4 6 6 corner 2 3 3 3 3
+split 4 6 6 middle 0 2 2 4
+split 5 -1 -1 middle 0 0 5 0
+split 5 -1 -1 middle 1 1 4 0
+split 5 -1 -1 middle 2 2 3 0
+split 5 -1 -1 middle 3 3 2 0
+split 5 -1 -1 middle 4 4 1 0
+split 5 -1 -1 middle 5 5 0 0
+split 5 -1 0 middle 0 0 5 0
+split 5 -1 0 middle 1 1 4 0
+split 5 -1 0 middle 2 2 3 0
+split 5 -1 0 middle 3 3 2 0
+split 5 -1 0 middle 4 4 1 0
+split 5 -1 0 middle 5 5 0 0
+split 5 -1 1 corner 0 0 0 5 1
+split 5 -1 1 middle 0 1 4 0
+split 5 -1 1 middle 1 2 3 0
+split 5 -1 1 middle 2 3 2 0
+split 5 -1 1 middle 3 4 1 0
+split 5 -1 1 middle 4 5 0 0
+split 5 -1 2 corner 0 0 0 5 2
+split 5 -1 2 corner 0 1 1 4 1
+split 5 -1 2 middle 0 2 3 0
+split 5 -1 2 middle 1 3 2 0
+split 5 -1 2 middle 2 4 1 0
+split 5 -1 2 middle 3 5 0 0
+split 5 -1 3 corner 0 0 0 5 3
+split 5 -1 3 corner 0 1 1 4 2
+split 5 -1 3 corner 0 2 2 3 1
+split 5 -1 3 middle 0 3 2 0
+split 5 -1 3 middle 1 4 1 0
+split 5 -1 3 middle 2 5 0 0
+split 5 -1 4 corner 0 0 0 5 4
+split 5 -1 4 corner 0 1 1 4 3
+split 5 -1 4 corner 0 2 2 3 2
+split 5 -1 4 corner 0 3 3 2 1
+split 5 -1 4 middle 0 4 1 0
+split 5 -1 4 middle 1 5 0 0
+split 5 -1 5 corner 0 0 0 5 5
+split 5 -1 5 corner 0 1 1 4 4
+split 5 -1 5 corner 0 2 2 3 3
+split 5 -1 5 corner 0 3 3 2 2
+split 5 -1 5 corner 0 4 4 1 1
+split 5 -1 5 middle 0 5 0 0
+split 5 -1 6 corner 0 0 0 5 6
+split 5 -1 6 corner 0 1 1 4 5
+split 5 -1 6 corner 0 2 2 3 4
+split 5 -1 6 corner 0 3 3 2 3
+split 5 -1 6 corner 0 4 4 1 2
+split 5 -1 6 middle 0 6 0 0
+split 5 -1 6 middle 1 5 0 1
+split 5 0 -1 middle 0 0 5 0
+split 5 0 -1 middle 1 1 4 0
+split 5 0 -1 middle 2 2 3 0
+split 5 0 -1 middle 3 3 2 0
+split 5 0 -1 middle 4 4 1 0
+split 5 0 -1 middle 5 5 0 0
+split 5 0 0 middle 0 0 5 0
+split 5 0 0 middle 1 1 4 0
+split 5 0 0 middle 2 2 3 0
+split 5 0 0 middle 3 3 2 0
+split 5 0 0 middle 4 4 1 0
+split 5 0 0 middle 5 5 0 0
+split 5 0 1 corner 0 0 0 5 1
+split 5 0 1 middle 0 1 4 0
+split 5 0 1 middle 1 2 3 0
+split 5 0 1 middle 2 3 2 0
+split 5 0 1 middle 3 4 1 0
+split 5 0 1 middle 4 5 0 0
+split 5 0 2 corner 0 0 0 5 2
+split 5 0 2 corner 0 1 1 4 1
+split 5 0 2 middle 0 2 3 0
+split 5 0 2 middle 1 3 2 0
+split 5 0 2 middle 2 4 1 0
+split 5 0 2 middle 3 5 0 0
+split 5 0 3 corner 0 0 0 5 3
+split 5 0 3 corner 0 1 1 4 2
+split 5 0 3 corner 0 2 2 3 1
+split 5 0 3 middle 0 3 2 0
+split 5 0 3 middle 1 4 1 0
+split 5 0 3 middle 2 5 0 0
+split 5 0 4 corner 0 0 0 5 4
+split 5 0 4 corner 0 1 1 4 3
+split 5 0 4 corner 0 2 2 3 2
+split 5 0 4 corner 0 3 3 2 1
+split 5 0 4 middle 0 4 1 0
+split 5 0 4 middle 1 5 0 0
+split 5 0 5 corner 0 0 0 5 5
+split 5 0 5 corner 0 1 1 4 4
+split 5 0 5 corner 0 2 2 3 3
+split 5 0 5 corner 0 3 3 2 2
+split 5 0 5 corner 0 4 4 1 1
+split 5 0 5 middle 0 5 0 0
+split 5 0 6 corner 0 0 0 5 6
+split 5 0 6 corner 0 1 1 4 5
+split 5 0 6 corner 0 2 2 3 4
+split 5 0 6 corner 0 3 3 2 3
+split 5 0 6 corner 0 4 4 1 2
+split 5 0 6 middle 0 6 0 0
+split 5 0 6 middle 1 5 0 1
+split 5 1 -1 corner 1 0 5 0 1
+split 5 1 -1 middle 0 0 5 0
+split 5 1 -1 middle 1 1 4 0
+split 5 1 -1 middle 2 2 3 0
+split 5 1 -1 middle 3 3 2 0
+split 5 1 -1 middle 4 4 1 0
+split 5 1 0 corner 1 0 5 0 1
+split 5 1 0 middle 0 0 5 0
+split 5 1 0 middle 1 1 4 0
+split 5 1 0 middle 2 2 3 0
+split 5 1 0 middle 3 3 2 0
+split 5 1 0 middle 4 4 1 0
+split 5 1 1 corner 0 0 0 5 1
+split 5 1 1 corner 1 0 5 0 1
+split 5 1 1 middle 0 1 4 0
+split 5 1 1 middle 1 2 3 0
+split 5 1 1 middle 2 3 2 0
+split 5 1 1 middle 3 4 1 0
+split 5 1 2 corner 0 0 0 5 2
+split 5 1 2 corner 0 1 1 4 1
+split 5 1 2 corner 1 0 5 0 1
+split 5 1 2 middle 0 2 3 0
+split 5 1 2 middle 1 3 2 0
+split 5 1 2 middle 2 4 1 0
+split 5 1 3 corner 0 0 0 5 3
+split 5 1 3 corner 0 1 1 4 2
+split 5 1 3 corner 0 2 2 3 1
+split 5 1 3 corner 1 0 5 0 1
+split 5 1 3 middle 0 3 2 0
+split 5 1 3 middle 1 4 1 0
+split 5 1 4 corner 0 0 0 5 4
+split 5 1 4 corner 0 1 1 4 3
+split 5 1 4 corner 0 2 2 3 2
+split 5 1 4 corner 0 3 3 2 1
+split 5 1 4 corner 1 0 5 0 1
+split 5 1 4 middle 0 4 1 0
+face 5 1 5 invalid
+split 5 1 6 corner 0 0 0 5 6
+split 5 1 6 corner 0 1 1 4 5
+split 5 1 6 corner 0 2 2 3 4
+split 5 1 6 corner 0 3 3 2 3
+split 5 1 6 corner 0 4 4 1 2
+split 5 1 6 corner 2 0 6 1 0
+split 5 1 6 middle 0 5 0 1
+split 5 2 -1 corner 1 0 5 0 2
+split 5 2 -1 corner 1 1 4 1 1
+split 5 2 -1 middle 0 0 5 0
+split 5 2 -1 middle 1 1 4 0
+split 5 2 -1 middle 2 2 3 0
+split 5 2 -1 middle 3 3 2 0
+split 5 2 0 corner 1 0 5 0 2
+split 5 2 0 corner 1 1 4 1 1
+split 5 2 0 middle 0 0 5 0
+split 5 2 0 middle 1 1 4 0
+split 5 2 0 middle 2 2 3 0
+split 5 2 0 middle 3 3 2 0
+split 5 2 1 corner 0 0 0 5 1
+split 5 2 1 corner 1 0 5 0 2
+split 5 2 1 corner 1 1 4 1 1
+split 5 2 1 middle 0 1 4 0
+split 5 2 1 middle 1 2 3 0
+split 5 2 1 middle 2 3 2 0
+split 5 2 2 corner 0 0 0 5 2
+split 5 2 2 corner 0 1 1 4 1
+split 5 2 2 corner 1 0 5 0 2
+split 5 2 2 corner 1 1 4 1 1
+split 5 2 2 middle 0 2 3 0
+split 5 2 2 middle 1 3 2 0
+split 5 2 3 corner 0 0 0 5 3
+split 5 2 3 corner 0 1 1 4 2
+split 5 2 3 corner 0 2 2 3 1
+split 5 2 3 corner 1 0 5 0 2
+split 5 2 3 corner 1 1 4 1 1
+split 5 2 3 middle 0 3 2 0
+face 5 2 4 invalid
+split 5 2 5 corner 0 0 0 5 5
+split 5 2 5 corner 0 1 1 4 4
+split 5 2 5 corner 0 2 2 3 3
+split 5 2 5 corner 0 3 3 2 2
+split 5 2 5 corner 1 0 5 0 2
+split 5 2 5 corner 2 0 5 2 0
+split 5 2 5 middle 0 4 1 1
+face 5 2 6 invalid
+split 5 3 -1 corner 1 0 5 0 3
+split 5 3 -1 corner 1 1 4 1 2
+split 5 3 -1 corner 1 2 3 2 1
+split 5 3 -1 middle 0 0 5 0
+split 5 3 -1 middle 1 1 4 0
+split 5 3 -1 middle 2 2 3 0
+split 5 3 0 corner 1 0 5 0 3
+split 5 3 0 corner 1 1 4 1 2
+split 5 3 0 corner 1 2 3 2 1
+split 5 3 0 middle 0 0 5 0
+split 5 3 0 middle 1 1 4 0
+split 5 3 0 middle 2 2 3 0
+split 5 3 1 corner 0 0 0 5 1
+split 5 3 1 corner 1 0 5 0 3
+split 5 3 1 corner 1 1 4 1 2
+split 5 3 1 corner 1 2 3 2 1
+split 5 3 1 middle 0 1 4 0
+split 5 3 1 middle 1 2 3 0
+split 5 3 2 corner 0 0 0 5 2
+split 5 3 2 corner 0 1 1 4 1
+split 5 3 2 corner 1 0 5 0 3
+split 5 3 2 corner 1 1 4 1 2
+split 5 3 2 corner 1 2 3 2 1
+split 5 3 2 middle 0 2 3 0
+face 5 3 3 invalid
+split 5 3 4 corner 0 0 0 5 4
+split 5 3 4 corner 0 1 1 4 3
+split 5 3 4 corner 0 2 2 3 2
+split 5 3 4 corner 1 0 5 0 3
+split 5 3 4 corner 1 1 4 1 2
+split 5 3 4 corner 2 0 4 3 0
+split 5 3 4 middle 0 3 2 1
+face 5 3 5 invalid
+split 5 3 6 corner 0 0 0 5 6
+split 5 3 6 corner 0 1 1 4 5
+split 5 3 6 corner 0 2 2 3 4
+split 5 3 6 corner 0 3 3 2 3
+split 5 3 6 corner 1 0 5 0 3
+split 5 3 6 corner 2 0 6 3 0
+split 5 3 6 corner 2 1 5 2 1
+split 5 3 6 middle 0 4 1 2
+split 5 4 -1 corner 1 0 5 0 4
+split 5 4 -1 corner 1 1 4 1 3
+split 5 4 -1 corner 1 2 3 2 2
+split 5 4 -1 corner 1 3 2 3 1
+split 5 4 -1 middle 0 0 5 0
+split 5 4 -1 middle 1 1 4 0
+split 5 4 0 corner 1 0 5 0 4
+split 5 4 0 corner 1 1 4 1 3
+split 5 4 0 corner 1 2 3 2 2
+split 5 4 0 corner 1 3 2 3 1
+split 5 4 0 middle 0 0 5 0
+split 5 4 0 middle 1 1 4 0
+split 5 4 1 corner 0 0 0 5 1
+split 5 4 1 corner 1 0 5 0 4
+split 5 4 1 corner 1 1 4 1 3
+split 5 4 1 corner 1 2 3 2 2
+split 5 4 1 corner 1 3 2 3 1
+split 5 4 1 middle 0 1 4 0
+face 5 4 2 invalid
+split 5 4 3 corner 0 0 0 5 3
+split 5 4 3 corner 0 1 1 4 2
+split 5 4 3 corner 1 0 5 0 4
+split 5 4 3 corner 1 1 4 1 3
+split 5 4 3 corner 1 2 3 2 2
+split 5 4 3 corner 2 0 3 4 0
+split 5 4 3 middle 0 2 3 1
+face 5 4 4 invalid
+split 5 4 5 corner 0 0 0 5 5
+split 5 4 5 corner 0 1 1 4 4
+split 5 4 5 corner 0 2 2 3 3
+split 5 4 5 corner 1 0 5 0 4
+split 5 4 5 corner 1 1 4 1 3
+split 5 4 5 corner 2 0 5 4 0
+split 5 4 5 corner 2 1 4 3 1
+split 5 4 5 middle 0 3 2 2
+face 5 4 6 invalid
+split 5 5 -1 corner 1 0 5 0 5
+split 5 5 -1 corner 1 1 4 1 4
+split 5 5 -1 corner 1 2 3 2 3
+split 5 5 -1 corner 1 3 2 3 2
+split 5 5 -1 corner 1 4 1 4 1
+split 5 5 -1 middle 0 0 5 0
+split 5 5 0 corner 1 0 5 0 5
+split 5 5 0 corner 1 1 4 1 4
+split 5 5 0 corner 1 2 3 2 3
+split 5 5 0 corner 1 3 2 3 2
+split 5 5 0 corner 1 4 1 4 1
+split 5 5 0 middle 0 0 5 0
+face 5 5 1 invalid
+split 5 5 2 corner 0 0 0 5 2
+split 5 5 2 corner 1 0 5 0 5
+split 5 5 2 corner 1 1 4 1 4
+split 5 5 2 corner 1 2 3 2 3
+split 5 5 2 corner 1 3 2 3 2
+split 5 5 2 corner 2 0 2 5 0
+split 5 5 2 middle 0 1 4 1
+face 5 5 3 invalid
+split 5 5 4 corner 0 0 0 5 4
+split 5 5 4 corner 0 1 1 4 3
+split 5 5 4 corner 1 0 5 0 5
+split 5 5 4 corner 1 1 4 1 4
+split 5 5 4 corner 1 2 3 2 3
+split 5 5 4 corner 2 0 4 5 0
+split 5 5 4 corner 2 1 3 4 1
+split 5 5 4 middle 0 2 3 2
+face 5 5 5 invalid
+split 5 5 6 corner 0 0 0 5 6
+split 5 5 6 corner 0 1 1 4 5
+split 5 5 6 corner 0 2 2 3 4
+split 5 5 6 corner 1 0 5 0 5
+split 5 5 6 corner 1 1 4 1 4
+split 5 5 6 corner 2 0 6 5 0
+split 5 5 6 corner 2 1 5 4 1
+split 5 5 6 corner 2 2 4 3 2
+split 5 5 6 middle 0 3 2 3
+split 5 6 -1 corner 1 0 5 0 6
+split 5 6 -1 corner 1 1 4 1 5
+split 5 6 -1 corner 1 2 3 2 4
+split 5 6 -1 corner 1 3 2 3 3
+split 5 6 -1 corner 1 4 1 4 2
+split 5 6 -1 middle 0 0 5 1
+split 5 6 -1 middle 1 0 6 0
+split 5 6 0 corner 1 0 5 0 6
+split 5 6 0 corner 1 1 4 1 5
+split 5 6 0 corner 1 2 3 2 4
+split 5 6 0 corner 1 3 2 3 3
+split 5 6 0 corner 1 4 1 4 2
+split 5 6 0 middle 0 0 5 1
+split 5 6 0 middle 1 0 6 0
+split 5 6 1 corner 1 0 5 0 6
+split 5 6 1 corner 1 1 4 1 5
+split 5 6 1 corner 1 2 3 2 4
+split 5 6 1 corner 1 3 2 3 3
+split 5 6 1 corner 1 4 1 4 2
+split 5 6 1 corner 2 0 1 6 0
+split 5 6 1 middle 0 0 5 1
+face 5 6 2 invalid
+split 5 6 3 corner 0 0 0 5 3
+split 5 6 3 corner 1 0 5 0 6
+split 5 6 3 corner 1 1 4 1 5
+split 5 6 3 corner 1 2 3 2 4
+split 5 6 3 corner 1 3 2 3 3
+split 5 6 3 corner 2 0 3 6 0
+split 5 6 3 corner 2 1 2 5 1
+split 5 6 3 middle 0 1 4 2
+face 5 6 4 invalid
+split 5 6 5 corner 0 0 0 5 5
+split 5 6 5 corner 0 1 1 4 4
+split 5 6 5 corner 1 0 5 0 6
+split 5 6 5 corner 1 1 4 1 5
+split 5 6 5 corner 1 2 3 2 4
+split 5 6 5 corner 2 0 5 6 0
+split 5 6 5 corner 2 1 4 5 1
+split 5 6 5 corner 2 2 3 4 2
+split 5 6 5 middle 0 2 3 3
+face 5 6 6 invalid
+split 6 -1 -1 middle 0 0 6 0
+split 6 -1 -1 middle 1 1 5 0
+split 6 -1 -1 middle 2 2 4 0
+split 6 -1 -1 middle 3 3 3 0
+split 6 -1 -1 middle 4 4 2 0
+split 6 -1 -1 middle 5 5 1 0
+split 6 -1 -1 middle 6 6 0 0
+split 6 -1 0 middle 0 0 6 0
+split 6 -1 0 middle 1 1 5 0
+split 6 -1 0 middle 2 2 4 0
+split 6 -1 0 middle 3 3 3 0
+split 6 -1 0 middle 4 4 2 0
+split 6 -1 0 middle 5 5 1 0
+split 6 -1 0 middle 6 6 0 0
+split 6 -1 1 corner 0 0 0 6 1
+split 6 -1 1 middle 0 1 5 0
+split 6 -1 1 middle 1 2 4 0
+split 6 -1 1 middle 2 3 3 0
+split 6 -1 1 middle 3 4 2 0
+split 6 -1 1 middle 4 5 1 0
+split 6 -1 1 middle 5 6 0 0
+split 6 -1 2 corner 0 0 0 6 2
+split 6 -1 2 corner 0 1 1 5 1
+split 6 -1 2 middle 0 2 4 0
+split 6 -1 2 middle 1 3 3 0
+split 6 -1 2 middle 2 4 2 0
+split 6 -1 2 middle 3 5 1 0
+split 6 -1 2 middle 4 6 0 0
+split 6 -1 3 corner 0 0 0 6 3
+split 6 -1 3 corner 0 1 1 5 2
+split 6 -1 3 corner 0 2 2 4 1
+split 6 -1 3 middle 0 3 3 0
+split 6 -1 3 middle 1 4 2 0
+split 6 -1 3 middle 2 5 1 0
+split 6 -1 3 middle 3 6 0 0
+split 6 -1 4 corner 0 0 0 6 4
+split 6 -1 4 corner 0 1 1 5 3
+split 6 -1 4 corner 0 2 2 4 2
+split 6 -1 4 corner 0 3 3 3 1
+split 6 -1 4 middle 0 4 2 0
+split 6 -1 4 middle 1 5 1 0
+split 6 -1 4 middle 2 6 0 0
+split 6 -1 5 corner 0 0 0 6 5
+split 6 -1 5 corner 0 1 1 5 4
+split 6 -1 5 corner 0 2 2 4 3
+split 6 -1 5 corner 0 3 3 3 2
+split 6 -1 5 corner 0 4 4 2 1
+split 6 -1 5 middle 0 5 1 0
+split 6 -1 5 middle 1 6 0 0
+split 6 -1 6 corner 0 0 0 6 6
+split 6 -1 6 corner 0 1 1 5 5
+split 6 -1 6 corner 0 2 2 4 4
+split 6 -1 6 corner 0 3 3 3 3
+split 6 -1 6 corner 0 4 4 2 2
+split 6 -1 6 corner 0 5 5 1 1
+split 6 -1 6 middle 0 6 0 0
+split 6 0 -1 middle 0 0 6 0
+split 6 0 -1 middle 1 1 5 0
+split 6 0 -1 middle 2 2 4 0
+split 6 0 -1 middle 3 3 3 0
+split 6 0 -1 middle 4 4 2 0
+split 6 0 -1 middle 5 5 1 0
+split 6 0 -1 middle 6 6 0 0
+split 6 0 0 middle 0 0 6 0
+split 6 0 0 middle 1 1 5 0
+split 6 0 0 middle 2 2 4 0
+split 6 0 0 middle 3 3 3 0
+split 6 0 0 middle 4 4 2 0
+split 6 0 0 middle 5 5 1 0
+split 6 0 0 middle 6 6 0 0
+split 6 0 1 corner 0 0 0 6 1
+split 6 0 1 middle 0 1 5 0
+split 6 0 1 middle 1 2 4 0
+split 6 0 1 middle 2 3 3 0
+split 6 0 1 middle 3 4 2 0
+split 6 0 1 middle 4 5 1 0
+split 6 0 1 middle 5 6 0 0
+split 6 0 2 corner 0 0 0 6 2
+split 6 0 2 corner 0 1 1 5 1
+split 6 0 2 middle 0 2 4 0
+split 6 0 2 middle 1 3 3 0
+split 6 0 2 middle 2 4 2 0
+split 6 0 2 middle 3 5 1 0
+split 6 0 2 middle 4 6 0 0
+split 6 0 3 corner 0 0 0 6 3
+split 6 0 3 corner 0 1 1 5 2
+split 6 0 3 corner 0 2 2 4 1
+split 6 0 3 middle 0 3 3 0
+split 6 0 3 middle 1 4 2 0
+split 6 0 3 middle 2 5 1 0
+split 6 0 3 middle 3 6 0 0
+split 6 0 4 corner 0 0 0 6 4
+split 6 0 4 corner 0 1 1 5 3
+split 6 0 4 corner 0 2 2 4 2
+split 6 0 4 corner 0 3 3 3 1
+split 6 0 4 middle 0 4 2 0
+split 6 0 4 middle 1 5 1 0
+split 6 0 4 middle 2 6 0 0
+split 6 0 5 corner 0 0 0 6 5
+split 6 0 5 corner 0 1 1 5 4
+split 6 0 5 corner 0 2 2 4 3
+split 6 0 5 corner 0 3 3 3 2
+split 6 0 5 corner 0 4 4 2 1
+split 6 0 5 middle 0 5 1 0
+split 6 0 5 middle 1 6 0 0
+split 6 0 6 corner 0 0 0 6 6
+split 6 0 6 corner 0 1 1 5 5
+split 6 0 6 corner 0 2 2 4 4
+split 6 0 6 corner 0 3 3 3 3
+split 6 0 6 corner 0 4 4 2 2
+split 6 0 6 corner 0 5 5 1 1
+split 6 0 6 middle 0 6 0 0
+split 6 1 -1 corner 1 0 6 0 1
+split 6 1 -1 middle 0 0 6 0
+split 6 1 -1 middle 1 1 5 0
+split 6 1 -1 middle 2 2 4 0
+split 6 1 -1 middle 3 3 3 0
+split 6 1 -1 middle 4 4 2 0
+split 6 1 -1 middle 5 5 1 0
+split 6 1 0 corner 1 0 6 0 1
+split 6 1 0 middle 0 0 6 0
+split 6 1 0 middle 1 1 5 0
+split 6 1 0 middle 2 2 4 0
+split 6 1 0 middle 3 3 3 0
+split 6 1 0 middle 4 4 2 0
+split 6 1 0 middle 5 5 1 0
+split 6 1 1 corner 0 0 0 6 1
+split 6 1 1 corner 1 0 6 0 1
+split 6 1 1 middle 0 1 5 0
+split 6 1 1 middle 1 2 4 0
+split 6 1 1 middle 2 3 3 0
+split 6 1 1 middle 3 4 2 0
+split 6 1 1 middle 4 5 1 0
+split 6 1 2 corner 0 0 0 6 2
+split 6 1 2 corner 0 1 1 5 1
+split 6 1 2 corner 1 0 6 0 1
+split 6 1 2 middle 0 2 4 0
+split 6 1 2 middle 1 3 3 0
+split 6 1 2 middle 2 4 2 0
+split 6 1 2 middle 3 5 1 0
+split 6 1 3 corner 0 0 0 6 3
+split 6 1 3 corner 0 1 1 5 2
+split 6 1 3 corner 0 2 2 4 1
+split 6 1 3 corner 1 0 6 0 1
+split 6 1 3 middle 0 3 3 0
+split 6 1 3 middle 1 4 2 0
+split 6 1 3 middle 2 5 1 0
+split 6 1 4 corner 0 0 0 6 4
+split 6 1 4 corner 0 1 1 5 3
+split 6 1 4 corner 0 2 2 4 2
+split 6 1 4 corner 0 3 3 3 1
+split 6 1 4 corner 1 0 6 0 1
+split 6 1 4 middle 0 4 2 0
+split 6 1 4 middle 1 5 1 0
+split 6 1 5 corner 0 0 0 6 5
+split 6 1 5 corner 0 1 1 5 4
+split 6 1 5 corner 0 2 2 4 3
+split 6 1 5 corner 0 3 3 3 2
+split 6 1 5 corner 0 4 4 2 1
+split 6 1 5 corner 1 0 6 0 1
+split 6 1 5 middle 0 5 1 0
+face 6 1 6 invalid
+split 6 2 -1 corner 1 0 6 0 2
+split 6 2 -1 corner 1 1 5 1 1
+split 6 2 -1 middle 0 0 6 0
+split 6 2 -1 middle 1 1 5 0
+split 6 2 -1 middle 2 2 4 0
+split 6 2 -1 middle 3 3 3 0
+split 6 2 -1 middle 4 4 2 0
+split 6 2 0 corner 1 0 6 0 2
+split 6 2 0 corner 1 1 5 1 1
+split 6 2 0 middle 0 0 6 0
+split 6 2 0 middle 1 1 5 0
+split 6 2 0 middle 2 2 4 0
+split 6 2 0 middle 3 3 3 0
+split 6 2 0 middle 4 4 2 0
+split 6 2 1 corner 0 0 0 6 1
+split 6 2 1 corner 1 0 6 0 2
+split 6 2 1 corner 1 1 5 1 1
+split 6 2 1 middle 0 1 5 0
+split 6 2 1 middle 1 2 4 0
+split 6 2 1 middle 2 3 3 0
+split 6 2 1 middle 3 4 2 0
+split 6 2 2 corner 0 0 0 6 2
+split 6 2 2 corner 0 1 1 5 1
+split 6 2 2 corner 1 0 6 0 2
+split 6 2 2 corner 1 1 5 1 1
+split 6 2 2 middle 0 2 4 0
+split 6 2 2 middle 1 3 3 0
+split 6 2 2 middle 2 4 2 0
+split 6 2 3 corner 0 0 0 6 3
+split 6 2 3 corner 0 1 1 5 2
+split 6 2 3 corner 0 2 2 4 1
+split 6 2 3 corner 1 0 6 0 2
+split 6 2 3 corner 1 1 5 1 1
+split 6 2 3 middle 0 3 3 0
+split 6 2 3 middle 1 4 2 0
+split 6 2 4 corner 0 0 0 6 4
+split 6 2 4 corner 0 1 1 5 3
+split 6 2 4 corner 0 2 2 4 2
+split 6 2 4 corner 0 3 3 3 1
+split 6 2 4 corner 1 0 6 0 2
+split 6 2 4 corner 1 1 5 1 1
+split 6 2 4 middle 0 4 2 0
+face 6 2 5 invalid
+split 6 2 6 corner 0 0 0 6 6
+split 6 2 6 corner 0 1 1 5 5
+split 6 2 6 corner 0 2 2 4 4
+split 6 2 6 corner 0 3 3 3 3
+split 6 2 6 corner 0 4 4 2 2
+split 6 2 6 corner 1 0 6 0 2
+split 6 2 6 corner 2 0 6 2 0
+split 6 2 6 middle 0 5 1 1
+split 6 3 -1 corner 1 0 6 0 3
+split 6 3 -1 corner 1 1 5 1 2
+split 6 3 -1 corner 1 2 4 2 1
+split 6 3 -1 middle 0 0 6 0
+split 6 3 -1 middle 1 1 5 0
+split 6 3 -1 middle 2 2 4 0
+split 6 3 -1 middle 3 3 3 0
+split 6 3 0 corner 1 0 6 0 3
+split 6 3 0 corner 1 1 5 1 2
+split 6 3 0 corner 1 2 4 2 1
+split 6 3 0 middle 0 0 6 0
+split 6 3 0 middle 1 1 5 0
+split 6 3 0 middle 2 2 4 0
+split 6 3 0 middle 3 3 3 0
+split 6 3 1 corner 0 0 0 6 1
+split 6 3 1 corner 1 0 6 0 3
+split 6 3 1 corner 1 1 5 1 2
+split 6 3 1 corner 1 2 4 2 1
+split 6 3 1 middle 0 1 5 0
+split 6 3 1 middle 1 2 4 0
+split 6 3 1 middle 2 3 3 0
+split 6 3 2 corner 0 0 0 6 2
+split 6 3 2 corner 0 1 1 5 1
+split 6 3 2 corner 1 0 6 0 3
+split 6 3 2 corner 1 1 5 1 2
+split 6 3 2 corner 1 2 4 2 1
+split 6 3 2 middle 0 2 4 0
+split 6 3 2 middle 1 3 3 0
+split 6 3 3 corner 0 0 0 6 3
+split 6 3 3 corner 0 1 1 5 2
+split 6 3 3 corner 0 2 2 4 1
+split 6 3 3 corner 1 0 6 0 3
+split 6 3 3 corner 1 1 5 1 2
+split 6 3 3 corner 1 2 4 2 1
+split 6 3 3 middle 0 3 3 0
+face 6 3 4 invalid
+split 6 3 5 corner 0 0 0 6 5
+split 6 3 5 corner 0 1 1 5 4
+split 6 3 5 corner 0 2 2 4 3
+split 6 3 5 corner 0 3 3 3 2
+split 6 3 5 corner 1 0 6 0 3
+split 6 3 5 corner 1 1 5 1 2
+split 6 3 5 corner 2 0 5 3 0
+split 6 3 5 middle 0 4 2 1
+face 6 3 6 invalid
+split 6 4 -1 corner 1 0 6 0 4
+split 6 4 -1 corner 1 1 5 1 3
+split 6 4 -1 corner 1 2 4 2 2
+split 6 4 -1 corner 1 3 3 3 1
+split 6 4 -1 middle 0 0 6 0
+split 6 4 -1 middle 1 1 5 0
+split 6 4 -1 middle 2 2 4 0
+split 6 4 0 corner 1 0 6 0 4
+split 6 4 0 corner 1 1 5 1 3
+split 6 4 0 corner 1 2 4 2 2
+split 6 4 0 corner 1 3 3 3 1
+split 6 4 0 middle 0 0 6 0
+split 6 4 0 middle 1 1 5 0
+split 6 4 0 middle 2 2 4 0
+split 6 4 1 corner 0 0 0 6 1
+split 6 4 1 corner 1 0 6 0 4
+split 6 4 1 corner 1 1 5 1 3
+split 6 4 1 corner 1 2 4 2 2
+split 6 4 1 corner 1 3 3 3 1
+split 6 4 1 middle 0 1 5 0
+split 6 4 1 middle 1 2 4 0
+split 6 4 2 corner 0 0 0 6 2
+split 6 4 2 corner 0 1 1 5 1
+split 6 4 2 corner 1 0 6 0 4
+split 6 4 2 corner 1 1 5 1 3
+split 6 4 2 corner 1 2 4 2 2
+split 6 4 2 corner 1 3 3 3 1
+split 6 4 2 middle 0 2 4 0
+face 6 4 3 invalid
+split 6 4 4 corner 0 0 0 6 4
+split 6 4 4 corner 0 1 1 5 3
+split 6 4 4 corner 0 2 2 4 2
+split 6 4 4 corner 1 0 6 0 4
+split 6 4 4 corner 1 1 5 1 3
+split 6 4 4 corner 1 2 4 2 2
+split 6 4 4 corner 2 0 4 4 0
+split 6 4 4 middle 0 3 3 1
+face 6 4 5 invalid
+split 6 4 6 corner 0 0 0 6 6
+split 6 4 6 corner 0 1 1 5 5
+split 6 4 6 corner 0 2 2 4 4
+split 6 4 6 corner 0 3 3 3 3
+split 6 4 6 corner 1 0 6 0 4
+split 6 4 6 corner 1 1 5 1 3
+split 6 4 6 corner 2 0 6 4 0
+split 6 4 6 corner 2 1 5 3 1
+split 6 4 6 middle 0 4 2 2
+split 6 5 -1 corner 1 0 6 0 5
+split 6 5 -1 corner 1 1 5 1 4
+split 6 5 -1 corner 1 2 4 2 3
+split 6 5 -1 corner 1 3 3 3 2
+split 6 5 -1 corner 1 4 2 4 1
+split 6 5 -1 middle 0 0 6 0
+split 6 5 -1 middle 1 1 5 0
+split 6 5 0 corner 1 0 6 0 5
+split 6 5 0 corner 1 1 5 1 4
+split 6 5 0 corner 1 2 4 2 3
+split 6 5 0 corner 1 3 3 3 2
+split 6 5 0 corner 1 4 2 4 1
+split 6 5 0 middle 0 0 6 0
+split 6 5 0 middle 1 1 5 0
+split 6 5 1 corner 0 0 0 6 1
+split 6 5 1 corner 1 0 6 0 5
+split 6 5 1 corner 1 1 5 1 4
+split 6 5 1 corner 1 2 4 2 3
+split 6 5 1 corner 1 3 3 3 2
+split 6 5 1 corner 1 4 2 4 1
+split 6 5 1 middle 0 1 5 0
+face 6 5 2 invalid
+split 6 5 3 corner 0 0 0 6 3
+split 6 5 3 corner 0 1 1 5 2
+split 6 5 3 corner 1 0 6 0 5
+split 6 5 3 corner 1 1 5 1 4
+split 6 5 3 corner 1 2 4 2 3
+split 6 5 3 corner 1 3 3 3 2
+split 6 5 3 corner 2 0 3 5 0
+split 6 5 3 middle 0 2 4 1
+face 6 5 4 invalid
+split 6 5 5 corner 0 0 0 6 5
+split 6 5 5 corner 0 1 1 5 4
+split 6 5 5 corner 0 2 2 4 3
+split 6 5 5 corner 1 0 6 0 5
+split 6 5 5 corner 1 1 5 1 4
+split 6 5 5 corner 1 2 4 2 3
+split 6 5 5 corner 2 0 5 5 0
+split 6 5 5 corner 2 1 4 4 1
+split 6 5 5 middle 0 3 3 2
+face 6 5 6 invalid
+split 6 6 -1 corner 1 0 6 0 6
+split 6 6 -1 corner 1 1 5 1 5
+split 6 6 -1 corner 1 2 4 2 4
+split 6 6 -1 corner 1 3 3 3 3
+split 6 6 -1 corner 1 4 2 4 2
+split 6 6 -1 corner 1 5 1 5 1
+split 6 6 -1 middle 0 0 6 0
+split 6 6 0 corner 1 0 6 0 6
+split 6 6 0 corner 1 1 5 1 5
+split 6 6 0 corner 1 2 4 2 4
+split 6 6 0 corner 1 3 3 3 3
+split 6 6 0 corner 1 4 2 4 2
+split 6 6 0 corner 1 5 1 5 1
+split 6 6 0 middle 0 0 6 0
+face 6 6 1 invalid
+split 6 6 2 corner 0 0 0 6 2
+split 6 6 2 corner 1 0 6 0 6
+split 6 6 2 corner 1 1 5 1 5
+split 6 6 2 corner 1 2 4 2 4
+split 6 6 2 corner 1 3 3 3 3
+split 6 6 2 corner 1 4 2 4 2
+split 6 6 2 corner 2 0 2 6 0
+split 6 6 2 middle 0 1 5 1
+face 6 6 3 invalid
+split 6 6 4 corner 0 0 0 6 4
+split 6 6 4 corner 0 1 1 5 3
+split 6 6 4 corner 1 0 6 0 6
+split 6 6 4 corner 1 1 5 1 5
+split 6 6 4 corner 1 2 4 2 4
+split 6 6 4 corner 1 3 3 3 3
+split 6 6 4 corner 2 0 4 6 0
+split 6 6 4 corner 2 1 3 5 1
+split 6 6 4 middle 0 2 4 2
+face 6 6 5 invalid
+split 6 6 6 corner 0 0 0 6 6
+split 6 6 6 corner 0 1 1 5 5
+split 6 6 6 corner 0 2 2 4 4
+split 6 6 6 corner 1 0 6 0 6
+split 6 6 6 corner 1 1 5 1 5
+split 6 6 6 corner 1 2 4 2 4
+split 6 6 6 corner 2 0 6 6 0
+split 6 6 6 corner 2 1 5 5 1
+split 6 6 6 corner 2 2 4 4 2
+split 6 6 6 middle 0 3 3 3
+end

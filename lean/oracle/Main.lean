@@ -37,6 +37,11 @@ usage:
   ddg-oracle rc-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `rc` to standard output
   ddg-oracle rc-selftest [N]        internal checks of the repulsive-curves oracle (N seeded networks, default 120)
   ddg-oracle rc-fixtures write DIR | check DIR   golden fixtures (fixtures/rc)
+  ddg-oracle ic [IN [OUT]]          integer formulas of 'Integer Coordinates for Intrinsic Geometry Processing'
+                                    (Gillespie, Sharp, Crane 2021); tasks corner, flip, splitedge, trace,
+                                    tracecurve, identify, subdivide, regions, split
+  ddg-oracle ic-selftest            internal checks of the integer-coordinates oracle
+  ddg-oracle ic-fixtures write DIR | check DIR   golden fixtures (fixtures/ic, exact equality)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -173,6 +178,18 @@ def main (args : List String) : IO UInt32 := do
     | none => IO.eprintln usage; return 2
   | ["rc-fixtures", "write", dir] => RepulsiveCurves.writeFixtures dir; return 0
   | ["rc-fixtures", "check", dir] => return if (← RepulsiveCurves.checkFixtures dir) == 0 then 0 else 1
+  | "ic" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← IntegerCoords.runStream input output
+    output.flush
+    return 0
+  | ["ic-selftest"] => return if (← IntegerCoords.selftest) == 0 then 0 else 1
+  | ["ic-fixtures", "write", dir] => IntegerCoords.writeFixtures dir; return 0
+  | ["ic-fixtures", "check", dir] => return if (← IntegerCoords.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

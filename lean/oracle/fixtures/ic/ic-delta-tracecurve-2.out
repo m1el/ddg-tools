@@ -1,0 +1,28 @@
+case ic-delta-tracecurve-2
+task tracecurve
+status ok
+curve 0 5 0
+x 5 0
+x 2 0
+x 1 0
+stop vertex 2 1 1 3
+curve 1 5 1
+x 5 1
+x 0 1
+x 1 1
+stop vertex 2 1 1 3
+curve 2 1 0
+x 1 0
+stop vertex 2 1 1 1
+curve 3 1 1
+x 1 1
+stop vertex 2 1 1 1
+curve 4 0 0
+x 0 0
+x 0 0
+stop error crossing (0, 0) visited twice: the curve is closed
+curve 5 0 1
+x 0 1
+x 1 1
+stop vertex 2 1 1 2
+end

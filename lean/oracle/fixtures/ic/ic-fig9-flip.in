@@ -1,0 +1,8 @@
+case ic-fig9-flip
+task flip
+quad 3 0 0 3 -1
+roundabout 2 8 4 6
+again
+quad 3 0 0 3 -1
+roundabout 6 8 5 6
+end

@@ -1,0 +1,193 @@
+case ic-trace-all
+task trace
+status ok
+cross 1 0 0 0 step vertex
+cross 1 0 1 0 step kj 0
+cross 1 0 2 0 step kj 1
+cross 1 0 3 0 step kj 2
+cross 1 0 4 0 step kj 3
+cross 1 1 0 0 step ik 0
+cross 1 1 2 0 step kj 1
+cross 1 1 3 0 step kj 2
+cross 1 1 4 0 step kj 3
+cross 1 2 0 0 step ik 0
+cross 1 2 1 0 step ik 0
+cross 1 2 3 0 step kj 2
+cross 1 2 4 0 step kj 3
+cross 1 3 0 0 step ik 0
+cross 1 3 1 0 step ik 0
+cross 1 3 2 0 step ik 0
+cross 1 3 4 0 step kj 3
+cross 1 4 0 0 step ik 0
+cross 1 4 1 0 step ik 0
+cross 1 4 2 0 step ik 0
+cross 1 4 3 0 step ik 0
+cross 2 0 0 0 step vertex
+cross 2 0 0 1 step vertex
+cross 2 0 1 0 step vertex
+cross 2 0 1 1 step kj 0
+cross 2 0 2 0 step kj 0
+cross 2 0 2 1 step kj 1
+cross 2 0 3 0 step kj 1
+cross 2 0 3 1 step kj 2
+cross 2 0 4 0 step kj 2
+cross 2 0 4 1 step kj 3
+cross 2 1 0 0 step ik 0
+cross 2 1 0 1 step vertex
+cross 2 1 1 0 step ik 0
+cross 2 1 1 1 step kj 0
+cross 2 1 3 0 step kj 1
+cross 2 1 3 1 step kj 2
+cross 2 1 4 0 step kj 2
+cross 2 1 4 1 step kj 3
+cross 2 2 0 0 step ik 0
+cross 2 2 0 1 step ik 1
+cross 2 2 2 0 step ik 0
+cross 2 2 2 1 step kj 1
+cross 2 2 4 0 step kj 2
+cross 2 2 4 1 step kj 3
+cross 2 3 0 0 step ik 0
+cross 2 3 0 1 step ik 1
+cross 2 3 1 0 step ik 0
+cross 2 3 1 1 step ik 1
+cross 2 3 3 0 step ik 0
+cross 2 3 3 1 step kj 2
+cross 2 4 0 0 step ik 0
+cross 2 4 0 1 step ik 1
+cross 2 4 1 0 step ik 0
+cross 2 4 1 1 step ik 1
+cross 2 4 2 0 step ik 0
+cross 2 4 2 1 step ik 1
+cross 2 4 4 0 step ik 0
+cross 2 4 4 1 step kj 3
+cross 3 0 0 0 step vertex
+cross 3 0 0 1 step vertex
+cross 3 0 0 2 step vertex
+cross 3 0 1 0 step vertex
+cross 3 0 1 1 step vertex
+cross 3 0 1 2 step kj 0
+cross 3 0 2 0 step vertex
+cross 3 0 2 1 step kj 0
+cross 3 0 2 2 step kj 1
+cross 3 0 3 0 step kj 0
+cross 3 0 3 1 step kj 1
+cross 3 0 3 2 step kj 2
+cross 3 0 4 0 step kj 1
+cross 3 0 4 1 step kj 2
+cross 3 0 4 2 step kj 3
+cross 3 1 0 0 step ik 0
+cross 3 1 0 1 step vertex
+cross 3 1 0 2 step vertex
+cross 3 1 1 0 step ik 0
+cross 3 1 1 1 step vertex
+cross 3 1 1 2 step kj 0
+cross 3 1 2 0 step ik 0
+cross 3 1 2 1 step kj 0
+cross 3 1 2 2 step kj 1
+cross 3 1 4 0 step kj 1
+cross 3 1 4 1 step kj 2
+cross 3 1 4 2 step kj 3
+cross 3 2 0 0 step ik 0
+cross 3 2 0 1 step ik 1
+cross 3 2 0 2 step vertex
+cross 3 2 1 0 step ik 0
+cross 3 2 1 1 step ik 1
+cross 3 2 1 2 step kj 0
+cross 3 2 3 0 step ik 0
+cross 3 2 3 1 step kj 1
+cross 3 2 3 2 step kj 2
+cross 3 3 0 0 step ik 0
+cross 3 3 0 1 step ik 1
+cross 3 3 0 2 step ik 2
+cross 3 3 2 0 step ik 0
+cross 3 3 2 1 step ik 1
+cross 3 3 2 2 step kj 1
+cross 3 3 4 0 step ik 0
+cross 3 3 4 1 step kj 2
+cross 3 3 4 2 step kj 3
+cross 3 4 0 0 step ik 0
+cross 3 4 0 1 step ik 1
+cross 3 4 0 2 step ik 2
+cross 3 4 1 0 step ik 0
+cross 3 4 1 1 step ik 1
+cross 3 4 1 2 step ik 2
+cross 3 4 3 0 step ik 0
+cross 3 4 3 1 step ik 1
+cross 3 4 3 2 step kj 2
+cross 4 0 0 0 step vertex
+cross 4 0 0 1 step vertex
+cross 4 0 0 2 step vertex
+cross 4 0 0 3 step vertex
+cross 4 0 1 0 step vertex
+cross 4 0 1 1 step vertex
+cross 4 0 1 2 step vertex
+cross 4 0 1 3 step kj 0
+cross 4 0 2 0 step vertex
+cross 4 0 2 1 step vertex
+cross 4 0 2 2 step kj 0
+cross 4 0 2 3 step kj 1
+cross 4 0 3 0 step vertex
+cross 4 0 3 1 step kj 0
+cross 4 0 3 2 step kj 1
+cross 4 0 3 3 step kj 2
+cross 4 0 4 0 step kj 0
+cross 4 0 4 1 step kj 1
+cross 4 0 4 2 step kj 2
+cross 4 0 4 3 step kj 3
+cross 4 1 0 0 step ik 0
+cross 4 1 0 1 step vertex
+cross 4 1 0 2 step vertex
+cross 4 1 0 3 step vertex
+cross 4 1 1 0 step ik 0
+cross 4 1 1 1 step vertex
+cross 4 1 1 2 step vertex
+cross 4 1 1 3 step kj 0
+cross 4 1 2 0 step ik 0
+cross 4 1 2 1 step vertex
+cross 4 1 2 2 step kj 0
+cross 4 1 2 3 step kj 1
+cross 4 1 3 0 step ik 0
+cross 4 1 3 1 step kj 0
+cross 4 1 3 2 step kj 1
+cross 4 1 3 3 step kj 2
+cross 4 2 0 0 step ik 0
+cross 4 2 0 1 step ik 1
+cross 4 2 0 2 step vertex
+cross 4 2 0 3 step vertex
+cross 4 2 1 0 step ik 0
+cross 4 2 1 1 step ik 1
+cross 4 2 1 2 step vertex
+cross 4 2 1 3 step kj 0
+cross 4 2 2 0 step ik 0
+cross 4 2 2 1 step ik 1
+cross 4 2 2 2 step kj 0
+cross 4 2 2 3 step kj 1
+cross 4 2 4 0 step ik 0
+cross 4 2 4 1 step kj 1
+cross 4 2 4 2 step kj 2
+cross 4 2 4 3 step kj 3
+cross 4 3 0 0 step ik 0
+cross 4 3 0 1 step ik 1
+cross 4 3 0 2 step ik 2
+cross 4 3 0 3 step vertex
+cross 4 3 1 0 step ik 0
+cross 4 3 1 1 step ik 1
+cross 4 3 1 2 step ik 2
+cross 4 3 1 3 step kj 0
+cross 4 3 3 0 step ik 0
+cross 4 3 3 1 step ik 1
+cross 4 3 3 2 step kj 1
+cross 4 3 3 3 step kj 2
+cross 4 4 0 0 step ik 0
+cross 4 4 0 1 step ik 1
+cross 4 4 0 2 step ik 2
+cross 4 4 0 3 step ik 3
+cross 4 4 2 0 step ik 0
+cross 4 4 2 1 step ik 1
+cross 4 4 2 2 step ik 2
+cross 4 4 2 3 step kj 1
+cross 4 4 4 0 step ik 0
+cross 4 4 4 1 step ik 1
+cross 4 4 4 2 step kj 2
+cross 4 4 4 3 step kj 3
+end

@@ -17,3 +17,4 @@ import DdgOracle.Regions
 import DdgOracle.Intrinsic
 import DdgOracle.Developability
 import DdgOracle.RepulsiveCurves
+import DdgOracle.IntegerCoords

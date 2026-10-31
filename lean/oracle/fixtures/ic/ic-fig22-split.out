@@ -1,0 +1,6 @@
+case ic-fig22-split
+task split
+status ok
+split 4 3 5 corner 0 2 2 2 3
+split 2 5 1 middle 1 0 3 2
+end

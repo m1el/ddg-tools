@@ -1,0 +1,6 @@
+case ic-fig10-split
+task split
+status ok
+split 3 1 2 corner 0 1 1 2 1
+split -1 -1 -1 middle 0 0 0 0
+end

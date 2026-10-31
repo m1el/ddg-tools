@@ -1,0 +1,7 @@
+case ic-fig7-trace
+task trace
+status ok
+cross 7 2 4 4 step kj 1
+cross 7 2 3 2 step vertex
+cross 2 4 1 1 step ik 1
+end

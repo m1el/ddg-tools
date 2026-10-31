@@ -1,0 +1,5 @@
+case ic-fig11-subdivide
+task subdivide
+face 4 3 5
+face 3 8 2
+end

@@ -1,0 +1,903 @@
+case ic-flip-random
+task flip
+quad 5 4 7 -1 3
+roundabout 8 4 8 3
+again
+quad 6 5 1 7 0
+roundabout 9 3 2 2
+again
+quad 0 5 2 4 5
+roundabout 8 3 6 3
+again
+quad -1 8 -1 3 1
+roundabout 7 2 9 2
+again
+quad 2 2 2 1 3
+roundabout 8 2 3 2
+again
+quad 1 3 0 7 5
+roundabout 7 1 7 3
+again
+quad 7 1 5 8 3
+roundabout 8 3 1 2
+again
+quad 6 -1 -1 5 7
+roundabout 7 2 5 3
+again
+quad -1 2 6 0 1
+roundabout 6 2 8 2
+again
+quad 1 4 0 1 2
+roundabout 7 1 2 1
+again
+quad 0 3 3 -1 8
+roundabout 6 1 6 3
+again
+quad 5 -1 1 3 0
+roundabout 6 10 4 3
+again
+quad 3 0 6 5 -1
+roundabout 6 7 9 2
+again
+quad -1 0 -1 4 7
+roundabout 5 7 2 3
+again
+quad -1 3 5 4 3
+roundabout 4 5 2 2
+again
+quad 2 0 1 5 5
+roundabout 5 5 6 1
+again
+quad -1 3 5 3 8
+roundabout 4 4 9 3
+again
+quad 8 6 8 4 3
+roundabout 5 4 3 2
+again
+quad -1 8 8 8 -1
+roundabout 4 3 7 3
+again
+quad 1 3 2 0 3
+roundabout 3 3 1 2
+again
+quad -1 7 3 4 6
+roundabout 4 2 5 1
+again
+quad 1 8 1 3 6
+roundabout 4 1 2 2
+again
+quad -1 0 7 5 3
+roundabout 3 3 6 3
+again
+quad 2 7 4 0 7
+roundabout 3 2 0 2
+again
+quad 1 7 6 8 7
+roundabout 4 2 3 3
+again
+quad 7 3 6 4 0
+roundabout 2 9 9 2
+again
+quad 6 2 2 1 1
+roundabout 2 8 6 2
+again
+quad 7 2 0 2 5
+roundabout 3 8 0 1
+again
+quad 3 3 2 6 7
+roundabout 1 7 8 2
+again
+quad 7 3 8 2 0
+roundabout 2 6 1 3
+again
+quad 8 2 3 5 2
+roundabout 1 6 5 2
+again
+quad 0 1 8 7 7
+roundabout 2 5 9 1
+again
+quad 3 -1 5 8 7
+roundabout 1 5 3 2
+again
+quad 2 6 0 7 -1
+roundabout 0 4 7 1
+again
+quad 7 2 7 5 0
+roundabout 0 3 4 2
+again
+quad 5 2 7 5 4
+roundabout 1 3 8 3
+again
+quad -1 6 1 1 2
+roundabout 0 2 2 2
+again
+quad 1 0 -1 -1 3
+roundabout 1 2 5 1
+again
+quad 5 1 0 8 7
+roundabout 9 10 3 2
+again
+quad 2 6 8 -1 4
+roundabout 0 2 7 3
+again
+quad 7 4 0 8 3
+roundabout 9 1 1 2
+again
+quad 0 -1 -1 -1 2
+roundabout 0 1 4 1
+again
+quad 5 -1 -1 6 5
+roundabout 9 10 8 2
+again
+quad 1 1 6 2 5
+roundabout 8 10 2 1
+again
+quad 3 0 8 8 2
+roundabout 7 7 1 1
+again
+quad 8 6 4 0 5
+roundabout 8 7 5 2
+again
+quad 1 0 8 6 7
+roundabout 7 6 8 2
+again
+quad 3 2 5 4 0
+roundabout 8 6 2 3
+again
+quad 0 3 5 7 3
+roundabout 7 5 6 2
+again
+quad -1 2 8 0 5
+roundabout 6 5 0 1
+again
+quad 1 4 2 3 5
+roundabout 7 4 4 2
+again
+quad 2 6 0 6 1
+roundabout 7 3 1 3
+again
+quad 2 0 4 3 8
+roundabout 5 2 9 1
+again
+quad -1 5 2 6 2
+roundabout 6 1 1 2
+again
+quad -1 1 7 6 4
+roundabout 5 1 4 1
+again
+quad 5 5 2 2 5
+roundabout 6 10 8 2
+again
+quad 0 4 5 1 3
+roundabout 6 1 6 1
+again
+quad -1 4 2 6 2
+roundabout 5 1 9 2
+again
+quad 2 0 3 4 6
+roundabout 4 10 3 1
+again
+quad -1 4 3 7 8
+roundabout 5 10 7 2
+again
+quad 2 0 7 3 8
+roundabout 4 9 1 2
+again
+quad 4 1 -1 0 3
+roundabout 5 9 5 3
+again
+quad 0 5 7 0 -1
+roundabout 4 8 8 2
+again
+quad 0 7 2 2 6
+roundabout 3 8 2 1
+again
+quad 5 0 7 2 5
+roundabout 3 7 0 1
+again
+quad 1 8 2 7 5
+roundabout 4 6 4 3
+again
+quad -1 -1 1 1 2
+roundabout 2 5 1 1
+again
+quad -1 1 2 8 8
+roundabout 3 4 5 2
+again
+quad -1 6 8 3 3
+roundabout 2 3 6 2
+again
+quad 1 3 -1 -1 5
+roundabout 1 1 8 1
+again
+quad -1 0 3 4 -1
+roundabout 2 1 1 2
+again
+quad 7 0 6 1 8
+roundabout 1 1 3 2
+again
+quad 2 7 5 5 3
+roundabout 0 1 7 1
+again
+quad 3 5 8 8 2
+roundabout 1 10 0 2
+again
+quad 8 8 2 2 8
+roundabout 0 10 4 1
+again
+quad 5 -1 0 6 -1
+roundabout 0 9 2 2
+again
+quad 3 3 -1 8 2
+roundabout 0 7 9 2
+again
+quad -1 5 4 5 1
+roundabout 0 6 7 2
+again
+quad 0 8 5 -1 7
+roundabout 9 5 8 2
+again
+quad -1 6 4 2 -1
+roundabout 7 3 3 2
+again
+quad 4 6 -1 -1 1
+roundabout 8 2 7 2
+again
+quad 7 4 -1 8 3
+roundabout 8 1 5 2
+again
+quad 1 5 4 3 8
+roundabout 7 1 8 1
+again
+quad 8 8 6 5 1
+roundabout 6 10 2 2
+again
+quad -1 3 5 8 8
+roundabout 6 1 0 1
+again
+quad 8 -1 5 5 3
+roundabout 7 1 4 2
+again
+quad 6 3 2 1 2
+roundabout 6 10 7 1
+again
+quad 0 -1 5 5 3
+roundabout 6 8 1 2
+again
+quad 3 2 8 0 6
+roundabout 5 7 4 1
+again
+quad 4 1 3 1 8
+roundabout 5 6 2 1
+again
+quad 1 5 3 7 4
+roundabout 4 6 6 2
+again
+quad 0 8 3 3 1
+roundabout 4 5 3 1
+again
+quad 6 5 3 1 7
+roundabout 5 4 7 2
+again
+quad 7 4 0 2 -1
+roundabout 4 4 1 1
+again
+quad 7 6 7 4 7
+roundabout 3 3 5 2
+again
+quad 2 5 -1 5 -1
+roundabout 4 3 8 1
+again
+quad 4 0 6 6 1
+roundabout 3 2 2 10
+again
+quad 0 0 1 5 3
+roundabout 4 2 6 2
+again
+quad 4 2 1 1 -1
+roundabout 2 1 4 2
+again
+quad 0 6 6 0 4
+roundabout 2 9 1 10
+again
+quad 3 5 2 2 5
+roundabout 3 1 5 1
+again
+quad 3 1 2 4 8
+roundabout 2 10 9 1
+again
+quad 1 1 -1 1 4
+roundabout 2 9 6 1
+again
+quad 2 8 3 7 3
+roundabout 1 9 0 2
+again
+quad 0 3 7 2 6
+roundabout 1 8 8 10
+again
+quad 1 5 6 -1 1
+roundabout 1 7 5 1
+again
+quad 2 8 8 1 8
+roundabout 0 6 9 2
+again
+quad -1 1 0 6 3
+roundabout 1 6 3 1
+again
+quad 5 0 0 3 4
+roundabout 0 5 7 10
+again
+quad 3 8 2 0 8
+roundabout 1 5 0 1
+again
+quad 3 2 7 5 -1
+roundabout 0 3 2 1
+again
+quad -1 3 4 8 6
+roundabout 9 2 5 10
+again
+quad 0 6 4 5 6
+roundabout 0 2 9 1
+again
+quad 0 -1 3 2 3
+roundabout 9 1 3 1
+again
+quad 8 -1 4 8 -1
+roundabout 9 10 1 1
+again
+quad 0 7 -1 0 2
+roundabout 9 9 8 1
+again
+quad 0 2 1 6 6
+roundabout 7 10 6 2
+again
+quad 1 8 0 0 -1
+roundabout 8 10 0 1
+again
+quad -1 3 7 8 1
+roundabout 7 9 3 2
+again
+quad 3 -1 7 0 5
+roundabout 8 9 7 1
+again
+quad 2 0 3 3 7
+roundabout 7 8 1 10
+again
+quad 5 6 1 1 0
+roundabout 7 7 8 1
+again
+quad 2 1 5 6 -1
+roundabout 7 6 6 1
+again
+quad 7 -1 6 5 4
+roundabout 6 6 0 10
+again
+quad 2 2 8 7 5
+roundabout 7 5 4 1
+again
+quad 2 8 3 4 0
+roundabout 6 4 7 10
+again
+quad 6 1 8 0 3
+roundabout 5 4 9 2
+again
+quad -1 3 -1 2 -1
+roundabout 5 3 7 2
+again
+quad 2 6 4 3 5
+roundabout 6 2 1 1
+again
+quad 8 7 -1 6 4
+roundabout 5 2 4 10
+again
+quad 4 6 2 5 0
+roundabout 4 1 8 1
+again
+quad 4 6 2 7 3
+roundabout 5 1 2 1
+again
+quad 6 -1 3 5 0
+roundabout 4 10 6 2
+again
+quad 0 -1 8 3 8
+roundabout 5 10 9 1
+again
+quad 1 8 6 0 4
+roundabout 4 9 3 10
+again
+quad 0 3 5 5 3
+roundabout 3 1 7 1
+again
+quad 0 7 2 -1 7
+roundabout 4 10 1 10
+again
+quad 0 8 2 3 7
+roundabout 3 10 5 2
+again
+quad 8 -1 7 2 2
+roundabout 4 9 8 1
+again
+quad 6 8 1 3 7
+roundabout 2 8 6 1
+again
+quad -1 7 8 -1 3
+roundabout 3 8 0 10
+again
+quad 1 2 0 2 6
+roundabout 2 7 4 1
+again
+quad 0 1 5 3 5
+roundabout 3 6 7 1
+again
+quad 3 4 5 -1 3
+roundabout 1 5 5 1
+again
+quad 5 2 2 8 1
+roundabout 1 4 2 1
+again
+quad 1 5 7 6 4
+roundabout 2 4 6 10
+again
+quad 0 5 3 3 6
+roundabout 1 3 0 2
+again
+quad 8 7 3 -1 2
+roundabout 2 3 4 1
+again
+quad 0 5 3 -1 4
+roundabout 1 2 8 10
+again
+quad 8 5 2 -1 8
+roundabout 0 2 1 1
+again
+quad 2 0 1 1 5
+roundabout 0 1 9 1
+again
+quad 8 0 -1 4 -1
+roundabout 1 10 3 1
+again
+quad 4 6 8 2 0
+roundabout 0 10 7 10
+again
+quad 5 7 2 7 0
+roundabout 9 9 0 1
+again
+quad 6 0 0 7 0
+roundabout 0 1 4 10
+again
+quad 2 4 7 2 5
+roundabout 9 10 8 1
+again
+quad 8 1 0 7 -1
+roundabout 0 10 2 10
+again
+quad 2 2 2 6 6
+roundabout 9 9 5 2
+again
+quad 2 0 7 1 7
+roundabout 8 8 9 1
+again
+quad -1 3 6 2 -1
+roundabout 9 8 3 10
+again
+quad 1 5 1 7 -1
+roundabout 8 7 7 1
+again
+quad 5 -1 8 6 5
+roundabout 8 6 4 1
+again
+quad 1 0 1 3 7
+roundabout 7 6 8 1
+again
+quad -1 7 4 7 0
+roundabout 8 5 2 10
+again
+quad 2 1 3 2 0
+roundabout 7 5 6 1
+again
+quad -1 2 -1 2 0
+roundabout 7 4 3 1
+again
+quad -1 8 4 0 1
+roundabout 7 3 1 10
+again
+quad 2 8 1 -1 0
+roundabout 7 2 8 10
+again
+quad -1 8 2 -1 0
+roundabout 6 1 2 1
+again
+quad 1 -1 4 8 0
+roundabout 7 1 6 10
+again
+quad -1 0 0 6 4
+roundabout 6 10 0 1
+again
+quad -1 8 -1 3 -1
+roundabout 5 9 2 1
+again
+quad 3 1 0 4 8
+roundabout 6 9 5 10
+again
+quad 6 1 2 7 -1
+roundabout 5 8 9 1
+again
+quad -1 0 2 0 3
+roundabout 6 10 3 10
+again
+quad 3 -1 4 8 2
+roundabout 4 9 1 10
+again
+quad 2 2 5 6 4
+roundabout 5 8 4 10
+again
+quad 1 -1 -1 6 2
+roundabout 4 8 8 1
+again
+quad 3 8 1 8 7
+roundabout 5 7 2 10
+again
+quad 3 2 1 5 2
+roundabout 3 6 9 10
+again
+quad 6 8 -1 5 0
+roundabout 4 6 3 10
+again
+quad 7 4 7 8 1
+roundabout 4 5 1 10
+again
+quad -1 3 -1 4 -1
+roundabout 2 4 8 10
+again
+quad 2 1 8 0 3
+roundabout 3 3 2 1
+again
+quad 7 4 -1 3 3
+roundabout 2 3 6 1
+again
+quad 0 0 6 8 3
+roundabout 3 2 0 10
+again
+quad 7 0 3 3 0
+roundabout 3 1 7 10
+again
+quad 1 8 5 2 8
+roundabout 2 10 1 1
+again
+quad -1 4 8 -1 4
+roundabout 1 10 5 10
+again
+quad 3 8 -1 -1 6
+roundabout 2 9 9 10
+again
+quad 0 0 6 3 2
+roundabout 1 9 2 1
+again
+quad 8 1 -1 7 1
+roundabout 2 8 6 10
+again
+quad 6 8 0 5 7
+roundabout 1 10 0 1
+again
+quad 0 3 3 -1 1
+roundabout 0 8 1 1
+again
+quad 3 5 8 6 1
+roundabout 1 8 5 10
+again
+quad 5 7 0 8 2
+roundabout 0 7 9 1
+again
+quad 7 8 7 5 0
+roundabout 9 7 3 10
+again
+quad 1 2 4 6 4
+roundabout 0 6 7 1
+again
+quad 1 2 8 1 3
+roundabout 9 6 0 10
+again
+quad -1 -1 0 1 3
+roundabout 9 5 8 1
+again
+quad 8 -1 4 -1 8
+roundabout 8 4 2 10
+again
+quad 1 3 7 0 4
+roundabout 9 3 6 1
+again
+quad 6 8 1 6 0
+roundabout 8 3 9 10
+again
+quad -1 -1 2 1 3
+roundabout 9 2 3 9
+again
+quad 3 8 5 3 4
+roundabout 8 1 4 1
+again
+quad 0 8 4 5 2
+roundabout 7 10 8 10
+again
+quad -1 1 4 0 0
+roundabout 8 10 2 9
+again
+quad -1 2 1 4 7
+roundabout 7 9 6 10
+again
+quad 2 3 5 0 1
+roundabout 8 9 0 10
+again
+quad 1 0 7 3 2
+roundabout 6 9 5 10
+again
+quad -1 4 5 2 1
+roundabout 7 8 9 9
+again
+quad 1 4 5 7 -1
+roundabout 6 8 2 1
+again
+quad 0 5 5 7 2
+roundabout 5 7 6 10
+again
+quad 3 5 2 2 -1
+roundabout 6 7 8 1
+again
+quad 8 7 1 0 6
+roundabout 5 6 2 10
+again
+quad 4 6 -1 5 0
+roundabout 6 5 5 9
+again
+quad 7 5 0 6 -1
+roundabout 4 4 3 10
+again
+quad 1 5 -1 7 2
+roundabout 5 3 4 9
+again
+quad -1 1 -1 -1 8
+roundabout 4 2 8 10
+again
+quad 3 8 1 7 8
+roundabout 3 2 2 9
+again
+quad 1 4 1 6 -1
+roundabout 4 1 6 1
+again
+quad 0 7 5 8 7
+roundabout 3 1 0 10
+again
+quad -1 4 4 3 1
+roundabout 3 10 7 10
+again
+quad 0 1 8 6 2
+roundabout 2 9 1 9
+again
+quad 8 -1 3 2 8
+roundabout 3 9 5 10
+again
+quad 1 5 7 8 3
+roundabout 3 10 2 1
+again
+quad -1 2 8 8 0
+roundabout 2 8 4 10
+again
+quad 8 3 -1 3 5
+roundabout 2 7 1 1
+again
+quad 1 5 4 5 8
+roundabout 1 6 5 10
+again
+quad -1 1 2 5 1
+roundabout 2 6 9 9
+again
+quad 5 3 0 6 3
+roundabout 1 5 3 10
+again
+quad 7 4 -1 4 0
+roundabout 1 4 0 10
+again
+quad 3 8 2 6 2
+roundabout 0 4 4 10
+again
+quad 0 1 5 2 4
+roundabout 1 3 8 1
+again
+quad 7 7 -1 7 -1
+roundabout 0 3 1 10
+again
+quad 8 0 5 6 0
+roundabout 9 2 5 9
+again
+quad 5 7 0 0 1
+roundabout 0 2 9 10
+again
+quad 4 7 -1 2 2
+roundabout 9 1 3 9
+again
+quad 6 -1 2 1 0
+roundabout 9 10 0 10
+again
+quad 8 5 5 6 0
+roundabout 9 9 8 10
+again
+quad 7 2 2 5 6
+roundabout 8 8 2 9
+again
+quad 4 4 8 6 -1
+roundabout 8 9 9 10
+again
+quad 3 2 -1 8 2
+roundabout 7 9 3 9
+again
+quad 8 3 2 2 1
+roundabout 8 8 7 10
+again
+quad 0 -1 1 7 0
+roundabout 7 8 1 9
+again
+quad 8 0 5 0 3
+roundabout 8 7 4 10
+again
+quad 6 6 -1 1 -1
+roundabout 7 7 8 10
+again
+quad 8 5 -1 3 -1
+roundabout 7 6 6 10
+again
+quad 0 4 7 2 2
+roundabout 6 5 0 9
+again
+quad 6 7 5 0 7
+roundabout 7 5 3 10
+again
+quad 0 1 5 0 -1
+roundabout 6 4 7 9
+again
+quad 5 3 8 6 5
+roundabout 6 3 5 10
+again
+quad 0 3 -1 -1 7
+roundabout 5 3 9 9
+again
+quad -1 1 1 -1 -1
+roundabout 6 2 0 10
+again
+quad 2 3 -1 5 0
+roundabout 5 2 4 9
+again
+quad 6 5 7 -1 6
+roundabout 5 10 2 10
+again
+quad 4 0 8 0 7
+roundabout 4 10 5 9
+again
+quad 8 2 8 -1 4
+roundabout 5 9 9 10
+again
+quad 3 4 8 8 0
+roundabout 3 7 4 1
+again
+quad 1 2 4 8 3
+roundabout 4 9 8 10
+again
+quad 0 1 6 3 2
+roundabout 4 8 6 10
+again
+quad 4 1 1 6 2
+roundabout 4 7 0 9
+again
+quad -1 2 7 5 0
+roundabout 4 6 7 10
+again
+quad 1 6 0 7 8
+roundabout 4 5 5 10
+again
+quad 1 7 6 3 1
+roundabout 3 5 8 9
+again
+quad -1 4 6 5 1
+roundabout 3 4 6 9
+again
+quad 8 3 2 0 -1
+roundabout 3 2 4 10
+again
+quad 0 7 3 1 5
+roundabout 2 2 7 9
+again
+quad -1 1 5 -1 1
+roundabout 1 9 6 9
+again
+quad 1 5 2 7 -1
+roundabout 1 7 1 9
+again
+quad -1 7 7 5 6
+roundabout 0 9 5 9
+again
+quad -1 1 4 7 4
+roundabout 1 8 9 10
+again
+quad 6 2 2 -1 6
+roundabout 0 8 3 9
+again
+quad 1 7 0 7 0
+roundabout 9 7 7 10
+again
+quad 2 1 5 8 8
+roundabout 0 7 0 9
+again
+quad -1 5 7 0 2
+roundabout 9 6 4 8
+again
+quad 2 0 5 4 2
+roundabout 0 5 8 10
+again
+quad 3 3 7 6 1
+roundabout 9 5 2 9
+again
+quad 1 -1 4 -1 8
+roundabout 9 4 9 9
+again
+quad -1 2 -1 0 8
+roundabout 8 3 3 10
+again
+quad 7 6 1 -1 2
+roundabout 8 2 1 9
+again
+quad -1 7 2 5 2
+roundabout 8 1 8 9
+again
+quad 4 -1 1 8 3
+roundabout 7 1 2 10
+again
+quad -1 8 6 8 -1
+roundabout 8 10 6 9
+again
+quad 4 0 1 0 4
+roundabout 7 10 0 8
+again
+quad 2 5 1 1 8
+roundabout 8 9 3 10
+again
+quad 8 -1 -1 2 1
+roundabout 6 8 1 10
+again
+quad 2 1 6 0 4
+roundabout 7 8 5 9
+again
+quad -1 7 7 -1 7
+roundabout 6 7 7 8
+again
+quad 3 -1 3 7 0
+roundabout 7 9 0 9
+again
+quad 2 2 8 7 0
+roundabout 6 8 4 9
+again
+quad 5 2 0 3 0
+roundabout 5 7 8 10
+again
+quad 6 7 7 8 4
+roundabout 6 7 2 9
+again
+quad -1 2 5 7 8
+roundabout 5 6 5 10
+again
+quad 5 -1 3 8 3
+roundabout 6 6 9 9
+again
+quad 6 -1 5 0 6
+roundabout 4 5 7 10
+again
+quad 6 0 2 7 7
+roundabout 4 4 4 10
+again
+quad 2 0 7 4 1
+roundabout 5 2 6 10
+again
+quad 7 2 2 7 0
+roundabout 3 1 3 10
+again
+quad 3 6 0 5 0
+roundabout 4 1 7 9
+again
+end

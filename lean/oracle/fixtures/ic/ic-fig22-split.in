@@ -1,0 +1,5 @@
+case ic-fig22-split
+task split
+face 4 3 5 corner 0 2
+face 2 5 1 middle 1
+end

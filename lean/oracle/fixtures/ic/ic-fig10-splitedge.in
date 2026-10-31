@@ -1,0 +1,6 @@
+case ic-fig10-splitedge
+task splitedge
+edge -1 -1
+edge 2 -1
+edge 0 3
+end

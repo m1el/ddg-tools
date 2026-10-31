@@ -1,0 +1,7 @@
+case ic-fig10-flip
+task flip
+quad 3 2 1 1 4
+again
+quad -1 0 0 -1 -1
+again
+end

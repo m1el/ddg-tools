@@ -1,0 +1,16 @@
+case ic-delta-tracecurve-2
+task tracecurve
+faces 2
+f 0 0 1 1
+f 1 1 2 1
+tw 0 2 5 0
+tw 1 -1 -1 1
+nf 0 2 2 2
+nf 1 -1 -1 2
+start 5 0
+start 5 1
+start 1 0
+start 1 1
+start 0 0
+start 0 1
+end

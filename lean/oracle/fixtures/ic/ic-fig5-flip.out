@@ -1,0 +1,10 @@
+case ic-fig5-flip
+task flip
+status ok
+quad 3 1 0 3 -1
+faces 1 1
+flip 2 1
+newfaces 1 1
+emanating 2 0
+again 3
+end

@@ -1,0 +1,32 @@
+case ic-fig5-tracecurve
+task tracecurve
+faces 7
+f 0 6 4 5
+f 1 6 5 7
+f 2 6 7 1
+f 3 1 7 2
+f 4 3 4 6
+f 5 0 3 6
+f 6 0 6 1
+tw 0 13 -1 3
+tw 1 2 -1 6
+tw 2 5 9 19
+tw 3 7 -1 -1
+tw 4 -1 0 16
+tw 5 -1 14 18
+tw 6 17 8 -1
+nf 0 1 -1 3
+nf 1 3 -1 3
+nf 2 3 1 0
+nf 3 1 -1 -1
+nf 4 -1 1 0
+nf 5 -1 0 0
+nf 6 0 0 -1
+start 3 0
+start 3 1
+start 3 2
+start 13 0
+start 7 0
+start 2 0
+start 6 0
+end

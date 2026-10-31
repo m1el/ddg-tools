@@ -1,0 +1,6 @@
+case ic-fig5-identify
+task identify
+status ok
+walk 0 -1 3 1 0 0 index 1
+walk 0 -1 3 1 1 0 index 2
+end

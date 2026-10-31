@@ -1,0 +1,5 @@
+case ic-fig10-split
+task split
+face 3 1 2 corner 0 1
+face -1 -1 -1 middle 0
+end

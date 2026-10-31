@@ -1,0 +1,17 @@
+case ic-fig9-flip
+task flip
+status ok
+quad 3 0 0 3 -1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 0
+roundabout 5 5
+again 3
+quad 3 0 0 3 -1
+faces 1 1
+flip 0 0
+newfaces 1 1
+emanating 3 0
+roundabout 1 0
+end

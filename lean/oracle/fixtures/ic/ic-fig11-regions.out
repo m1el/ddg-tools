@@ -1,0 +1,22 @@
+case ic-fig11-regions
+task regions
+status ok
+face 4 3 5 regions 7
+r corner 0 0
+r corner 0 1
+r corner 0 2
+r corner 1 0
+r corner 2 0
+r corner 2 1
+r middle 0
+face 3 8 2 regions 9
+r corner 1 0
+r corner 1 1
+r corner 1 2
+r corner 2 0
+r corner 2 1
+r middle 0
+r middle 1
+r middle 2
+r middle 3
+end
