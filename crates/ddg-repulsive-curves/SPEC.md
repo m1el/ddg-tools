@@ -3488,6 +3488,77 @@ need a **full rerun of phases A and B** (expected: the hard flows at their §17n
 fold runs near §17q's). With (A) the same holds. Keeping Q10 and rerunning nothing leaves the 18
 regressions of this section (and the `E_ref` of their knots) in §17q.
 
+## 17s. The Sec. 7 comparison with the Q11 defaults (2026-10-30/31)
+
+The flags, knots, budgets and scripts are the same as §17n and §17q. Build da6bd89, binary frozen in
+`runs_tmp/rc-eval/bin-da6bd89`. The run directories are:
+
+* phase A: `runA3` (2052 runs, 13.4 h);
+* phase B: `runB3` (216 runs, alone, 64 threads);
+* the one-thread check: `runB1-3`;
+* the load log, one line per minute: `rerun3-loads.txt`;
+* tables: `report3/`, `phaseA3-summary.md`, `phaseB3-summary.md`, `check1-3-summary.md`;
+* videos: `runB3/videos`, with the still sheet `runB3/sheet.png`.
+
+A power cut at about 23:01 UTC stopped phase B after 158 of its 216 runs. Every saved result was
+intact. The one interrupted run's partial frames went to `runB3-interrupted/`, and the run
+resumed from there (`resume3.sh`; finished jobs are skipped).
+
+**Load.** Phase B is clean: per step it is 0.96–1.13 of §17n for every knot. Phase A had an
+outside burst from about 12:56 to 13:35 UTC, with a load average up to 247. 196 runs overlapped it.
+Their median time per step is 0.99 of §17n (at most 3.5×), and only 3 of them change their
+"reached 1.1 E_ref" status against §17n (knot0112 hs-armijo, knot0054 h1-pg, trefoil0025 h2-pg).
+They were not rerun.
+
+**Failures.** None of the 2052 runs ended stuck or on the contact floor. There were 0 audit
+violations, 0 invalid curves and 0 errors.
+
+| method (phase A) | §17n | §17q (Q10) | Q11 | paper |
+|---|---:|---:|---:|---|
+| hs-pg, ended stuck | 1.3 % | 0 % | **0 %** | 6.5 % stuck |
+| L2 failed | 100 % | 100 % | 100 % | ≥ 97.7 % |
+| H1 failed | 68.0 % | 68.4 % | 68.4 % | 64.5 % |
+| H2 failed | 92.1 % | 92.5 % | 92.5 % | 92.1 % |
+| Hs normalized Armijo failed | 95.2 % | 93.9 % | 94.3 % | – |
+| soft Hs NCG, ended stuck | 1.3 % | 0 % | **0 %** | 3.3 % stuck |
+| soft Hs L-BFGS, ended stuck | 2.6 % | 0 % | **0 %** | 14.8 % stuck |
+| soft Hs L-BFGS, not reached | 0 % | 0 % | 0.4 % (1) | – |
+| soft H1 NCG failed | 28.1 % | 28.1 % | 28.1 % | – |
+| soft H1 L-BFGS failed | 6.6 % | 6.6 % | 5.3 % | – |
+
+The one soft Hs L-BFGS run that missed its target is trefoil0016. It reached 14.68 against a target of 14.32
+(2.5 % above) in its 135 steps before the cap. trefoil0016 is the knot whose multigrid needs many
+V-cycles (§17r), and its NCG reference reached a lower minimum than in §17n.
+
+**Final energies (Eq. 17), Q11 over §17n, phase A (geometric means):**
+* hard flows: hs-pg 0.997, h1-pg 1.001, h2-pg 1.009, hs-armijo 1.000, L2 1.000;
+* soft flows: soft-hs-ncg 0.969, soft-hs-lbfgs 0.945, soft-h1-ncg 0.962, soft-h1-lbfgs 0.990.
+* The 37 runs of §17r: 0.976 (Q10: 2.126). One run is still above 1.5×: knot0001 soft-h1-ncg at
+  1.82, whose history matches §17n for 51 steps and then diverges.
+* The 12 runs of §17p: 8 hit the cap and 4 stopped on the energy rate, with none stuck or on the
+  floor. Their final energies are 0.919 of Q10's.
+
+**Phase B** (median seconds to 1.1 E_ref, 64 threads; §17n in brackets):
+
+| method | seconds | reached |
+|---|---|---|
+| hs-pg | 24.2 (24.2) | 24/24 |
+| soft-hs-lbfgs | 24.4 (23.6) | 23/24 |
+| soft-hs-ncg | 50.1 (49.6) | 24/24 |
+| h1-pg | 60.5 (60.1) | 16/24 |
+| soft-h1-lbfgs | 48.5 (47.7) | 19/24 |
+| soft-h1-ncg | 63.0 (55.8) | 12/24 |
+| hs-armijo | 97.1 (108.2) | 2/24 (3/24) |
+
+L2 and H2 reached 0/24, as before.
+
+One thread against 64 threads: for hs-pg, the median phase-A time over the time alone is 1.69, and the time alone over
+64 threads is 7.36.
+
+**Summary.** Q11 keeps every fix of Q10 (no stuck or floor ends). It puts the hard flows back on
+§17n's results and keeps most of Q10's gain on the soft flows. These are the evaluation's results
+of record. §17n and §17q remain for comparison.
+
 ## 18. The user's decisions (2026-10-26)
 
 * Q1: the paper's edge-pair energy only (D1); the reference's vertex-pair variant is not
