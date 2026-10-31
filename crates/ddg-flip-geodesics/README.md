@@ -156,6 +156,74 @@ Dijkstra on small meshes. In absolute terms every path takes under 2 ms on one t
 
 Next: geodesic Bézier curves and the intrinsic constrained Delaunay triangulation (F4).
 
+## Speed of the shortening, and runs that stall
+
+**Speed.** `shorten` keeps its working memory in `src/scratch.rs` and no longer allocates per
+call. Each item below keeps every result bitwise:
+
+- **Corner angles** are memoized per face (F2's cache). Alg. 1 invalidates the two faces of
+  every flip, and debug builds check every hit against the face's lengths.
+- **Interior joints** whose two segment ends lie on different edge ends are walked around their
+  vertex (`h → twin(prev(h))`). Their flexibility is tested as `gc: fg.cpp:589-658` does. The
+  star stays the fallback, and debug builds assert both agree.
+- **β tests:** Alg. 1 decides `β_j < π` from Kahan's factors without computing angles, since
+  `θ₁ + θ₂ − π = 2 atan((P − 1)/(T₁ + T₂))` with `T = tan(θ/2)` and `P = T₁T₂`. The angles are
+  summed only within `1e-13` of `π`, and debug builds assert the decision.
+- **After a flip** Alg. 1 merges the two corners of the flipped edge instead of rebuilding the
+  wedge, and checks the Δ-complex cases (App. A) only where they can change.
+- **Flips** call `flip_edge` once; it refuses exactly when `can_flip` would.
+
+`examples/fo_pin` fingerprints every result: lengths, counts, every `ShortenStep`, the final
+triangulation and the layering. The fingerprints of 9 meshes × 500 pairs × 2 representations are
+unchanged by all of this.
+
+`start_shorten` + `ShortenSession::run` is `shorten` split after the initial queue.
+`examples/fo_pairs` prints the queue's share as a last column, `queue_ms`. The reference builds
+its queue when the network is made, so its `iterativeShorten` time compares with
+`shorten − queue`.
+
+Same pairs as the reference driver of SPEC §7 layer 5 (geometry-central at `ab116f1`). Release
+build, one pinned core, everything run one after another; load average 2.8–3.6 from other jobs
+on the machine. Columns: "sp" = signposts, "ic" = integers; "before" = commit `e8d9682`.
+
+| mesh | Dijkstra ms gc / sp / ic | shorten ms gc / sp before→after / ic before→after | loop alone ms sp / ic | extract ms gc / sp / ic | shorten ratio sp/gc per pair (median, p90) | loop ratio sp/gc (median) | same length as gc (1e-9) sp / ic | geodesic gc / sp / ic |
+|---|---|---|---|---|---|---|---|---|
+| spot | 0.489 / 0.306 / 0.299 | 0.0434 / 0.2662→0.0683 / 0.2454→0.0669 | 0.0592 / 0.0571 | 0.0289 / 0.0149 / 0.0237 | 1.57, 1.81 | 1.34 | 500 / 500 of 500 | 500 / 500 / 500 |
+| bob | 0.845 / 0.517 / 0.518 | 0.0859 / 0.5005→0.1276 / 0.4979→0.1262 | 0.1142 / 0.1153 | 0.0412 / 0.0101 / 0.0237 | 1.48, 1.65 | 1.34 | 500 / 500 of 500 | 500 / 500 / 500 |
+| blub | 1.216 / 0.735 / 0.729 | 0.1129 / 0.6407→0.1595 / 0.6268→0.1590 | 0.1424 / 0.1427 | 0.0565 / 0.0129 / 0.0277 | 1.40, 1.51 | 1.27 | 500 / 500 of 500 | 500 / 500 / 500 |
+| crumpled | 0.040 / 0.026 / 0.026 | 0.0104 / 0.0633→0.0175 / 0.0618→0.0172 | 0.0138 / 0.0137 | 0.0108 / 0.0021 / 0.0045 | 1.69, 2.14 | 1.31 | 498 / 498 of 498 | 498 / 498 / 498 |
+| camelbad | 2.163 / 1.312 / 1.337 | 0.1581 / 0.8091→0.2028 / 0.8052→0.2018 | 0.1829 / 0.1843 | 0.0794 / 0.0199 / 0.0403 | 1.29, 1.36 | 1.18 | 500 / 500 of 500 | 500 / 500 / 500 |
+| bunny | 2.955 / 1.649 / 1.673 | 0.1632 / 0.7283→0.1845 / 0.7184→0.1846 | 0.1651 / 0.1658 | 0.1006 / 0.0267 / 0.0534 | 1.13, 1.20 | 1.01 | 500 / 500 of 500 | 500 / 500 / 500 |
+| cow1 | 2.869 / 1.717 / 1.699 | 0.1740 / 0.8151→0.2061 / 0.8004→0.2040 | 0.1837 / 0.1816 | 0.0976 / 0.0303 / 0.0498 | 1.18, 1.26 | 1.05 | 500 / 500 of 500 | 500 / 500 / 500 |
+| rhino | 3.822 / 2.435 / 2.408 | 0.2261 / 1.1484→0.2835 / 1.1205→0.2788 | 0.2607 / 0.2590 | 0.0972 / 0.0308 / 0.0570 | 1.25, 1.33 | 1.14 | 500 / 500 of 500 | 500 / 500 / 500 |
+| tree | 3.536 / 2.116 / 2.109 | 0.2259 / 1.0467→0.2577 / 1.0297→0.2564 | 0.2369 / 0.2355 | 0.1036 / 0.0263 / 0.0539 | 1.14, 1.21 | 1.04 | 499 / 499 of 500 | 500 / 499 / 499 |
+
+The shortening is 3.6–4.1 times faster than before on both representations. It is still
+1.13–1.69 times the reference per pair, or 1.01–1.34 times for the loop alone.
+
+- **Corner angles.** The reference reads wedge angles from signposts in `O(1)`. Here they are
+  sums of corner angles (F2), which need the corners at every vertex a replacement puts on the
+  path; those corners are about a third of the remaining time on spot.
+- **The flips themselves.** The triangulation's flips (`plan_flip`, the flip, two corner angles
+  for the signposts) are about a quarter of it.
+
+**Runs that stall** (`tests/stalled.rs`).
+- On the `tree` mesh, three pairs end with a joint bent by `6e-4`–`4e-3` rad: 12804 → 1144,
+  and pairs 372 and 934 of seed 2 (F3's open trials).
+- Each Dijkstra path passes two vertices `1e-4`–`6e-4` apart. Straightening the joint next to
+  them needs a last flip that makes a needle triangle of shape `1.2e-7`–`6.9e-7`.
+- `plan_flip` refuses it (IT N5, `FLIP_SHAPE_LIMIT = 1e-6`). The outer arc is then longer than
+  the joint, and the joint stalls (F6).
+- The reference's test is relative, `A ≥ 1e-6 (A₁ + A₂)` (ratios `5e-5`–`1e-3` here), so it
+  makes the flip and its paths skip both close vertices.
+- Such a run now ends with status `Stalled` instead of `Geodesic`, which the stall memory used
+  to give. Of the 9 × 500 pairs, only the statuses of tree 12804 → 1144 and 10499 → 1703 change.
+  The latter is bent by less than `1e-4`, so the default certificate passes.
+- With the reference's relative test in place of the shape limit (an experiment, not in this
+  crate): 99 of 4500 pairs change; every one certifies; all 4500 agree with the reference's
+  length to `1e-9`. Tree 1938 → 8644 now ends on the reference's geodesic, `4.6e-8` longer than
+  before. The two F3 pairs certify and match the reference to `1e-13`.
+
 ## Credits
 
 The algorithm is the paper's. The authors' implementation in geometry-central (MIT,
