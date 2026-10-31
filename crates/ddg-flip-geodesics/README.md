@@ -172,9 +172,11 @@ call. Each item below keeps every result bitwise:
   summed only within `1e-13` of `π`, and debug builds assert the decision.
 - **After a flip** Alg. 1 merges the two corners of the flipped edge instead of rebuilding the
   wedge, and checks the Δ-complex cases (App. A) only where they can change.
-- **Flips** call `flip_edge_with` once; it refuses exactly when `can_flip_with` would.
-- **The flip's corner angles** (`Flip::new_corner_angles`, IT N52): the two corner angles a
-  flip computes at the new edge's ends go into the memo instead of being recomputed.
+- **Flips** call `flip_edge_with` once, with a `FlipRequest` for the shape test and the corner
+  angles; it refuses exactly when `can_flip_with` would.
+- **The flip's corner angles** (`Flip::new_corner_angles`, IT N52): Alg. 1 requests the two
+  corner angles at the new edge's ends (`FlipRequest::corner_angles`; no other caller does), and
+  they go into the memo instead of being recomputed.
 
 `examples/fo_pin` fingerprints every result: lengths, counts, every `ShortenStep`, the final
 triangulation and the layering. The fingerprints of 9 meshes × 500 pairs × 2 representations are
@@ -232,9 +234,12 @@ table above.
 - Signposts: shortening −2.7 % to −4.9 %; the loop alone is 0.97–1.29 times the reference.
 - Integers: +3.4 % to +7.4 %. Their flip computes the two corner angles only for `Flip` (the
   signposts compute them anyway for their signpost update), and that costs more than the memo
-  saves. A variant whose integer flip returns no angles measured −1.1 % to +1.3 % on the
-  integers, but it would make the two representations return different `Flip` values, which
-  `ddg-integer-coords/tests/ops.rs` forbids.
+  saves. Since then a flip returns the angles only when asked (`FlipRequest::corner_angles`,
+  IT N52), so Delaunay flipping, refinement and the other operations no longer pay for them
+  (integer Delaunay flipping on camelbad 9.47 → 8.89 ms). Alg. 1 asks on both representations;
+  against the code before the angles (`adf9d80^`, N5 on both sides, best of 4 interleaved rounds,
+  load 1.7–8.7), shortening is −5.8 % to −7.5 % on the signposts and +2.4 % to +8.2 % on the
+  integers (+0.7 % to +3.2 % if Alg. 1 did not ask on the integers).
 - The relative test alone moves the times by −2.2 % to +1.3 %.
 - All 4498 pairs now have the reference's length to `1e-9` on both representations, and all
   are geodesic (tree 12804 → 1144 was the one exception before).

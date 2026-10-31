@@ -425,13 +425,9 @@ Landed:
   * the integer oracle with 23 golden fixtures.
 
 Open:
-* **Corner angles in `Flip` on request** (R9 follow-up, IT N52): today `Flip::new_corner_angles` is
-  filled on every flip so that both representations return identical `Flip` values. Since the
-  integer flip computes the two angles only for that field, integer flipping costs +3–7 % in
-  FlipOut and +5.7 % in camelbad's Delaunay flipping, although only FlipOut reads the angles.
-  Proposal: a caller requests the angles (e.g. a flag next to the `FlipShapeTest` of
-  `flip_edge_with`); FlipOut requests them, everything else does not, and both representations
-  fill them only when asked. No result changes; the signposts keep their 3–5 % gain.
+* FlipOut asks the integer flips for their corner angles too (IT N52): shortening is +2–8 % against
+  the code before R9, +1–3 % if it did not ask there (signposts −6–7 % either way). Undecided:
+  ask only where the angles are free.
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
   replacement puts on the path, where gc reads signposts (FlipOut SPEC §9.1).
 * I27: a vertex made by an edge split usually cannot be removed by flips (`RemovalStuck`). A

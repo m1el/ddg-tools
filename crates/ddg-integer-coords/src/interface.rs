@@ -15,8 +15,9 @@
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
 use ddg_intrinsic::{
-    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipShapeTest, InputSurface,
-    InsertedVertexRemoval, Insertion, IntrinsicError, RemovalRefusal, SurfacePoint, Triangulation,
+    Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipRequest, FlipShapeTest,
+    InputSurface, InsertedVertexRemoval, Insertion, IntrinsicError, RemovalRefusal, SurfacePoint,
+    Triangulation,
 };
 
 use crate::coords::IntegerTriangulation;
@@ -92,8 +93,8 @@ impl Triangulation for IntegerTriangulation {
             .map_err(|x| to_intrinsic_error(x, "can_flip_with"))
     }
 
-    fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntrinsicError> {
-        IntegerTriangulation::flip_edge_with(self, e, test)
+    fn flip_edge_with(&mut self, e: usize, request: FlipRequest) -> Result<Flip, IntrinsicError> {
+        IntegerTriangulation::flip_edge_with(self, e, request)
             .map_err(|x| to_intrinsic_error(x, "flip_edge_with"))
     }
 

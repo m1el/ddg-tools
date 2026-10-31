@@ -22,24 +22,55 @@ pub struct Flip {
     pub old_length: f64,
     /// Its length after the flip.
     pub new_length: f64,
-    /// The two corner angles the flip computes at the new edge's end points (SPEC N52), in the
-    /// order of [`new_vertices`](Self::new_vertices): the angle at `l` in the new face
-    /// `(j, k, l)` (the corner of the halfedge `l → j`, [`new_corners`](Self::new_corners)`[0]`)
-    /// and the angle at `k` in the new face `(i, l, k)` (the corner of the halfedge `k → i`,
-    /// `new_corners[1]`). Each is bitwise what
+    /// The two corner angles at the new edge's end points (SPEC N52), only when the caller
+    /// asked for them ([`FlipRequest::corner_angles`]; `None` otherwise, for both
+    /// representations alike). In the order of [`new_vertices`](Self::new_vertices): the angle
+    /// at `l` in the new face `(j, k, l)` (the corner of the halfedge `l → j`,
+    /// [`new_corners`](Self::new_corners)`[0]`) and the angle at `k` in the new face
+    /// `(i, l, k)` (the corner of the halfedge `k → i`, `new_corners[1]`). Each is bitwise what
     /// [`Triangulation::corner_angle`](crate::Triangulation::corner_angle) gives for that
     /// corner after the flip. The other two corners at `l` and `k` (of the halfedges `l → k`
     /// and `k → l`) are not computed.
-    pub new_corner_angles: [f64; 2],
-    /// The halfedges whose corners [`new_corner_angles`](Self::new_corner_angles) are: `l → j`
+    pub new_corner_angles: Option<[f64; 2]>,
+    /// The halfedges whose corners [`new_corner_angles`](Self::new_corner_angles) are (always
+    /// given): `l → j`
     /// in face `(j, k, l)` and `k → i` in face `(i, l, k)`, ids after the flip (they are the
     /// halfedges that stayed in place, [`ComplexFlip`](crate::complex::ComplexFlip)).
     pub new_corners: [u32; 2],
 }
 
+/// What a caller asks of a flip besides the edge
+/// ([`Triangulation::flip_edge_with`](crate::Triangulation::flip_edge_with), SPEC N52): the
+/// shape test, and whether the flip returns the corner angles it creates
+/// ([`Flip::new_corner_angles`]). The default is N5's test and no angles, which is what
+/// [`flip_edge`](crate::Triangulation::flip_edge) does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlipRequest {
+    /// The test the two new triangles must pass.
+    pub shape: FlipShapeTest,
+    /// Whether [`Flip::new_corner_angles`] is filled. The signposts get the angles from their
+    /// signpost update at no cost; the integer coordinates compute two more `corner_angle`
+    /// per flip, so only a caller that uses them (FlipOut's Alg. 1) asks.
+    pub corner_angles: bool,
+}
+
+impl FlipRequest {
+    /// N5's shape test, no corner angles.
+    pub const DEFAULT: FlipRequest = FlipRequest {
+        shape: FlipShapeTest::N5,
+        corner_angles: false,
+    };
+}
+
+impl Default for FlipRequest {
+    fn default() -> Self {
+        FlipRequest::DEFAULT
+    }
+}
+
 /// The test a flip's two new triangles must pass besides strict convexity and the triangle
 /// inequalities (SPEC N5, N52). The caller chooses it per flip
-/// ([`Triangulation::flip_edge_with`](crate::Triangulation::flip_edge_with),
+/// ([`FlipRequest`], [`Triangulation::flip_edge_with`](crate::Triangulation::flip_edge_with),
 /// [`plan_flip_with`]); every operation of this crate, and
 /// [`flip_edge`](crate::Triangulation::flip_edge), use the default, [`FlipShapeTest::N5`].
 ///
@@ -225,21 +256,21 @@ impl IntrinsicTriangulation {
     /// ([`FLIP_SHAPE_LIMIT`]). The triangulation is unchanged when the flip is refused.
     #[inline]
     pub fn flip_edge(&mut self, e: usize) -> Result<Flip, IntrinsicError> {
-        self.flip_edge_with(e, FlipShapeTest::N5)
+        self.flip_edge_with(e, FlipRequest::DEFAULT)
     }
 
-    /// [`flip_edge`](Self::flip_edge) with the shape test chosen by the caller (SPEC N52)
-    /// instead of that of N5.
+    /// [`flip_edge`](Self::flip_edge) with what the caller requests (SPEC N52): the shape test
+    /// instead of that of N5, and the corner angles in [`Flip::new_corner_angles`].
     ///
     /// # Errors
     /// As [`flip_edge`](Self::flip_edge).
     pub fn flip_edge_with(
         &mut self,
         e: usize,
-        test: FlipShapeTest,
+        request: FlipRequest,
     ) -> Result<Flip, IntrinsicError> {
         self.check_edge(e)?;
-        self.try_flip(e, test).map_err(|reason| {
+        self.try_flip(e, request).map_err(|reason| {
             let [a, b] = self.edge_vertices(e);
             IntrinsicError::FlipRefused {
                 edge: e as u32,
@@ -278,11 +309,11 @@ impl IntrinsicTriangulation {
     }
 
     /// [`flip_edge_with`](Self::flip_edge_with) for an edge id that is known to be in range.
-    pub(crate) fn try_flip(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, FlipRefusal> {
+    pub(crate) fn try_flip(&mut self, e: usize, request: FlipRequest) -> Result<Flip, FlipRefusal> {
         let FlipPlan {
             lengths: [l_ij, l_jk, l_ki, l_il, l_lj],
             new_length,
-        } = self.plan_flip(e, test)?;
+        } = self.plan_flip(e, request.shape)?;
         let h0 = self.complex.edge_halfedge[e] as usize;
         let h1 = self.complex.twin[h0] as usize;
         // The topology (see `ComplexFlip`): f0 = (i, j, k), f1 = (j, i, l) become
@@ -321,7 +352,7 @@ impl IntrinsicTriangulation {
             new_vertices: [l as u32, k as u32],
             old_length: l_ij,
             new_length,
-            new_corner_angles: [at_l, at_k],
+            new_corner_angles: request.corner_angles.then_some([at_l, at_k]),
             new_corners: [h1p as u32, h0p as u32],
         })
     }

@@ -25,7 +25,7 @@
 //! [`ComplexFlip::move_halfedge_data`]: ddg_intrinsic::complex::ComplexFlip::move_halfedge_data
 
 use ddg_intrinsic::{
-    DelaunayOptions, DelaunayReport, Flip, FlipRefusal, FlipShapeTest, IntrinsicError,
+    DelaunayOptions, DelaunayReport, Flip, FlipRefusal, FlipRequest, FlipShapeTest, IntrinsicError,
     Triangulation, plan_flip_with,
 };
 
@@ -91,31 +91,34 @@ impl IntegerTriangulation {
     /// range. Nothing is changed in every case.
     ///
     ///
-    /// [`Flip::new_corner_angles`] are computed from the plan
-    /// ([`FlipPlan::new_corner_angles`](ddg_intrinsic::FlipPlan::new_corner_angles)), bitwise
-    /// as the signpost representation's (IT-SPEC N52).
+    /// [`Flip::new_corner_angles`] is `None`; [`flip_edge_with`](Self::flip_edge_with) can ask
+    /// for the angles (IT-SPEC N52).
     ///
     /// [formula: ic-flip-normal]
     #[inline]
     pub fn flip_edge(&mut self, e: usize) -> Result<Flip, IntegerError> {
-        self.flip_edge_with(e, FlipShapeTest::N5)
+        self.flip_edge_with(e, FlipRequest::DEFAULT)
     }
 
-    /// [`flip_edge`](Self::flip_edge) with the shape test chosen by the caller
-    /// ([`plan_flip_with`]; IT-SPEC N52) instead of that of IT-SPEC N5.
+    /// [`flip_edge`](Self::flip_edge) as the caller requests (IT-SPEC N52): the shape test
+    /// ([`plan_flip_with`]) instead of that of IT-SPEC N5, and the corner angles, computed from
+    /// the plan ([`FlipPlan::new_corner_angles`](ddg_intrinsic::FlipPlan::new_corner_angles),
+    /// two `corner_angle`) only when `request.corner_angles`, bitwise as the signpost
+    /// representation's.
     ///
     /// # Errors
     /// As [`flip_edge`](Self::flip_edge).
-    pub fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntegerError> {
+    pub fn flip_edge_with(&mut self, e: usize, request: FlipRequest) -> Result<Flip, IntegerError> {
         self.check_edge(e)?;
-        let plan = plan_flip_with(&self.complex, &self.lengths, e, test).map_err(|reason| {
-            let [a, b] = self.complex.edge_vertices(e);
-            IntegerError::Intrinsic(IntrinsicError::FlipRefused {
-                edge: e as u32,
-                vertices: [a as u32, b as u32],
-                reason,
-            })
-        })?;
+        let plan =
+            plan_flip_with(&self.complex, &self.lengths, e, request.shape).map_err(|reason| {
+                let [a, b] = self.complex.edge_vertices(e);
+                IntegerError::Intrinsic(IntrinsicError::FlipRefused {
+                    edge: e as u32,
+                    vertices: [a as u32, b as u32],
+                    reason,
+                })
+            })?;
         let integers = self.flipped_integers(e)?;
         let flip = self.complex.flip_edge(e)?;
         flip.move_halfedge_data(&mut self.roundabouts);
@@ -133,7 +136,7 @@ impl IntegerTriangulation {
             new_vertices: flip.new_vertices,
             old_length: plan.lengths[0],
             new_length: plan.new_length,
-            new_corner_angles: plan.new_corner_angles(),
+            new_corner_angles: request.corner_angles.then(|| plan.new_corner_angles()),
             new_corners: [next(h_kl) as u32, next(h_lk) as u32],
         })
     }

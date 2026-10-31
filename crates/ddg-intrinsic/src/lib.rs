@@ -151,7 +151,7 @@ pub use error::{
     MoveRefusal, RemovalRefusal,
 };
 pub use export::{ExportOptions, SimplicialExport};
-pub use flip::{Flip, FlipPlan, FlipShapeTest, plan_flip, plan_flip_with};
+pub use flip::{Flip, FlipPlan, FlipRequest, FlipShapeTest, plan_flip, plan_flip_with};
 pub use frames::AngleFrames;
 pub use input::InputSurface;
 pub use insert::{EdgeSplitPlan, FaceSplitPlan, Insertion, plan_edge_split, plan_face_split};

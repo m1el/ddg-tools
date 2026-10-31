@@ -19,8 +19,9 @@ use ddg_core::{Geometry, TriMesh};
 use ddg_integer_coords::formulas::{self, FlipNormalError};
 use ddg_integer_coords::{IntegerError, IntegerTriangulation, Parts};
 use ddg_intrinsic::{
-    Complex, DelaunayOptions, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, InputSurface,
-    Insertion, IntrinsicError, IntrinsicTriangulation, RemovalRefusal, SurfacePoint, Triangulation,
+    Complex, DelaunayOptions, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipRequest,
+    FlipShapeTest, InputSurface, Insertion, IntrinsicError, IntrinsicTriangulation, RemovalRefusal,
+    SurfacePoint, Triangulation,
 };
 
 // ----- helpers -----
@@ -234,14 +235,46 @@ fn flips_and_delaunay_match_the_signposts_exactly() {
             for _ in 0..per_batch {
                 let e = (rng.next_u64() % s.n_edges() as u64) as usize;
                 st.attempts += 1;
-                let rs = s.flip_edge(e);
-                let ri = it.flip_edge(e);
+                // One in three flips by `flip_edge` (no angles), the others by `flip_edge_with`
+                // with the corner angles requested, under N5's test and the reference's
+                // (IT N52): the same `Flip` from both representations, `Some` angles exactly
+                // when requested, and bitwise `corner_angle` after the flip.
+                let request = [
+                    None,
+                    Some(FlipRequest {
+                        shape: FlipShapeTest::N5,
+                        corner_angles: true,
+                    }),
+                    Some(FlipRequest {
+                        shape: FlipShapeTest::REFERENCE,
+                        corner_angles: true,
+                    }),
+                ][(rng.next_u64() % 3) as usize];
+                let (rs, ri) = match request {
+                    None => (s.flip_edge(e), it.flip_edge(e)),
+                    Some(q) => (
+                        s.flip_edge_with(e, q),
+                        it.flip_edge_with(e, q),
+                    ),
+                };
                 match (&rs, &ri) {
                     (Ok(fs), Ok(fi)) => {
                         st.flips += 1;
                         if fs != fi {
                             st.mismatches
                                 .push(format!("{tag}: flip {e}: {fs:?} vs {fi:?}"));
+                        }
+                        if fs.new_corner_angles.is_some() != request.is_some() {
+                            st.mismatches
+                                .push(format!("{tag}: flip {e}: angles {fs:?} for {request:?}"));
+                        }
+                        if let Some(angles) = fs.new_corner_angles {
+                            let now = fs.new_corners.map(|h| s.corner_angle(h as usize));
+                            if angles.map(f64::to_bits) != now.map(f64::to_bits) {
+                                st.mismatches.push(format!(
+                                    "{tag}: flip {e}: angles {angles:?} vs corner_angle {now:?}"
+                                ));
+                            }
                         }
                     }
                     (Err(es), Err(IntegerError::Intrinsic(ei))) if es == ei => {
@@ -1172,6 +1205,7 @@ fn timing() {
     for path in [
         "models/spot/spot/spot_triangulated.obj",
         "optimal-cones/optimal-cones-data/data/camelbad.obj",
+        "optimal-cones/optimal-cones-data/data/tree.obj",
     ] {
         let Some(shape) = common::load_data(path) else {
             eprintln!("{path}: not present");

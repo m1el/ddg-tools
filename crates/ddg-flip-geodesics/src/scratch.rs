@@ -20,7 +20,7 @@ use crate::wedge::{Side, VertexStar};
 /// the face is flipped; the run that owns the memo flips only through Alg. 1, which calls
 /// [`invalidate`](Self::invalidate) on the two faces of every flipped edge (they keep their
 /// ids, `Complex::flip_edge`), and then stores the two corner angles the flip returned
-/// ([`Flip::new_corner_angles`](ddg_intrinsic::Flip::new_corner_angles), IT-SPEC N52: bitwise
+/// (requested by Alg. 1: [`Flip::new_corner_angles`](ddg_intrinsic::Flip::new_corner_angles), IT-SPEC N52: bitwise
 /// `corner_angle`). So the memo returns exactly what `corner_angle` returns now (debug builds
 /// check every hit against the face's lengths). Colliding faces evict each other (only time is
 /// lost).

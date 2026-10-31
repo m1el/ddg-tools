@@ -976,7 +976,7 @@ those of `crates/ddg-intrinsic-apps/SPEC.md`.
 Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesics/SPEC.md` §11,
 §7 test 9).
 
-* **N52** *The shape test of a flip, chosen by the caller, and the corner angles a flip returns*
+* **N52** *The shape test of a flip, chosen by the caller, and the corner angles a flip returns on request*
   (2026-10-31, user decision on R10 and R9).
   *The test.* `FlipShapeTest` is the test a flip's two new triangles must pass after strict
   convexity (the signs of `it-flip-convexity`) and before the triangle inequalities of both new
@@ -996,40 +996,49 @@ Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesi
   needles have angles that are uncertain by `ε / shape ≈ 1e-9` rad, which is what FlipOut's
   certificate tolerates (`1e-4`).
   *Interface.* `plan_flip_with(complex, lengths, e, test)`; `plan_flip` is it with
-  `FlipShapeTest::N5`. `IntrinsicTriangulation::{flip_edge_with, can_flip_with}` and the same in
-  `ddg-integer-coords`; `Triangulation::{flip_edge_with, can_flip_with}` are provided (the
-  default test goes to `flip_edge` / `can_flip`, any other is `IntrinsicError::Unsupported`, so
-  wrappers that implement the trait compile unchanged) and overridden by both representations.
-  `flip_edge` and `can_flip` keep N5. *Who uses which:* every operation of this crate and of the
+  `FlipShapeTest::N5`. `can_flip_with(e, test)` takes the test; `flip_edge_with(e, request)` takes
+  a `FlipRequest { shape: FlipShapeTest, corner_angles: bool }` (`FlipRequest::DEFAULT` = N5, no
+  angles; it is `Default`), on `IntrinsicTriangulation` and in `ddg-integer-coords`;
+  `Triangulation::{flip_edge_with, can_flip_with}` are provided (the default test, and for
+  `flip_edge_with` the default request, go to `can_flip` / `flip_edge`, anything else is
+  `IntrinsicError::Unsupported`, so wrappers that implement the trait compile unchanged) and
+  overridden by both representations. `flip_edge` and `can_flip` keep N5 and return no angles. *Who uses which:* every operation of this crate and of the
   integer coordinates (Delaunay flipping, refinement, removal, insertion, the optimal Delaunay
   iteration, the export) keeps N5; only FlipOut's Alg. 1 asks for `REFERENCE`, by default
   (`ShortenOptions::flip_shape`, which can be set back to `N5`); FlipOut's iCDT is Delaunay
   flipping and keeps N5.
-  *Corner angles* (R9). `Flip::new_corner_angles = [θ_l, θ_k]`, in the order of
+  *Corner angles* (R9), on request. `Flip::new_corner_angles` is an `Option<[f64; 2]>`: `None`
+  unless `FlipRequest::corner_angles` was set, then `Some([θ_l, θ_k])`, in the order of
   `new_vertices = [l, k]`: the angle at `l` in the new face `(j, k, l)` and the angle at `k` in
-  the new face `(i, l, k)`; `Flip::new_corners` are their halfedges after the flip, `l → j` and
-  `k → i` (the two that stay in place, `ComplexFlip`). Each is bitwise `Triangulation::
-  corner_angle` of that corner (`ddg_core::geometry::corner_angle` orders its two sides, so the
-  argument order does not matter). The signposts compute exactly these two for their signpost
-  update; the integer coordinates compute them from the plan (`FlipPlan::new_corner_angles`), so
-  both representations return the same `Flip` (`ddg-integer-coords/tests/ops.rs` compares them).
-  The other two corners at `l` and `k` are not computed.
+  the new face `(i, l, k)`. Both representations fill them if and only if they are asked, so the
+  same request gives the same `Flip` from both (`ddg-integer-coords/tests/ops.rs` compares them
+  for plain `flip_edge` and for requests with N5 and with the reference's test).
+  `Flip::new_corners` (their halfedges after the flip, `l → j` and `k → i`, the two that stay in
+  place, `ComplexFlip`) is always given. Each angle is bitwise `Triangulation::corner_angle` of
+  that corner (`ddg_core::geometry::corner_angle` orders its two sides, so the argument order
+  does not matter). The signposts compute exactly these two for their signpost update, so asking
+  costs them nothing; the integer coordinates compute them from the plan
+  (`FlipPlan::new_corner_angles`, two `corner_angle`), which costs about 60 ns per flip, so only
+  a caller that uses them asks. *Who asks:* FlipOut's Alg. 1 (its memo takes them); Delaunay
+  flipping, refinement, removal, insertion, the optimal Delaunay iteration and iCDT do not. The
+  other two corners at `l` and `k` are not computed.
   *Bitwise.* With the default test nothing changes: `tests/bitwise_pins.rs` and the suites of
   this crate, `ddg-intrinsic-apps`, `ddg-uv`, `ddg-py` and `ddg-integer-coords` pass unchanged.
   FlipOut's fingerprints (9 meshes × 500 pairs × 2 representations, `examples/fo_pin`) with
   `flip_shape = N5` are those from before; with `REFERENCE` 99 pairs change on both
   representations alike, all 4500 certify; using the returned angles in FlipOut's memo changes
   no fingerprint.
-  *Cost* (one pinned core, three rounds, load average 2.8 to 7.7 from other jobs). Delaunay
-  flipping from the input mesh (median of 21): unchanged for the signposts (within 0.5 %); for the
-  integer coordinates, which now compute two corner angles per flip, camelbad (8110 flips)
-  8.84 → 9.35 ms (+5.7 %, about 60 ns per flip), spot (281 flips) +1.3 %, tree (594 flips)
-  +0.8 %. FlipOut's shortening (median per pair, 9 meshes × 500 pairs, against the code
-  before): the relative test alone −2.2 % to +1.3 %; with the memo taking the returned angles,
-  signposts −2.7 % to −4.9 % and integers +3.4 % to +7.4 % (the two angles cost more there than
-  the memo saves). A variant in which the integer flip returns no angles (`Option`) measured
-  integers −1.1 % to +1.3 % and signposts −5.7 % to −7.5 %, but gives the two representations
-  different `Flip` values, which `ddg-integer-coords/tests/ops.rs` rejects; not taken.
+  *Cost* (one pinned core, load average 1.7 to 8.7 from other jobs). Computing the angles in every
+  flip, as the first version of N52 did, cost the integer coordinates +5.7 % in camelbad's Delaunay
+  flipping (8110 flips, 8.84 → 9.35 ms) and +3 % to +7 % in FlipOut. With the request: Delaunay
+  flipping from the input mesh (best of 3 interleaved rounds, integers; signposts unchanged within
+  1 %): camelbad 9.47 → 8.89 ms (−6 %; before the angles existed 8.99), spot (281 flips) 1.58 →
+  1.54 (1.57), tree (594 flips) 8.91 → 8.71 (8.69). FlipOut's shortening (median per pair, 9
+  meshes × 500 pairs, best of 4 interleaved rounds, N5 on both sides, against the code before the
+  angles existed, `adf9d80^`): signposts −5.8 % to −7.5 % (the memo takes angles the signpost update
+  computed anyway); integers, which compute them for the memo, +2.4 % to +8.2 % (+0.7 % to +3.2 %
+  when FlipOut does not ask), so the two angles cost an integer flip more than the memo saves.
+  Against the first version of N52 the integers are 2 % to 4 % faster.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,

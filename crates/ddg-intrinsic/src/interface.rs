@@ -21,7 +21,7 @@ use crate::complex::Complex;
 use crate::delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport};
 use crate::edge_trace::{EdgeTrace, EdgeTraceOptions};
 use crate::error::{FlipRefusal, IntrinsicError};
-use crate::flip::{Flip, FlipShapeTest};
+use crate::flip::{Flip, FlipRequest, FlipShapeTest};
 use crate::input::InputSurface;
 use crate::insert::Insertion;
 use crate::point::SurfacePoint;
@@ -73,9 +73,8 @@ pub trait Triangulation {
     fn can_flip(&self, e: usize) -> Result<Result<(), FlipRefusal>, IntrinsicError>;
 
     /// Flips edge `e` (see the guarantees above), with the shape test of SPEC N5
-    /// ([`FlipShapeTest::N5`]). [`Flip::new_corner_angles`] are the corner angles at the new
-    /// edge's end points that the flip creates (SPEC N52), bitwise those of
-    /// [`corner_angle`](Self::corner_angle).
+    /// ([`FlipShapeTest::N5`]) and without the corner angles ([`Flip::new_corner_angles`] is
+    /// `None`; [`flip_edge_with`](Self::flip_edge_with) can ask for them).
     ///
     /// # Errors
     /// [`IntrinsicError::IndexOutOfRange`], [`IntrinsicError::FlipRefused`] with the reason.
@@ -100,19 +99,22 @@ pub trait Triangulation {
         }
     }
 
-    /// Flips edge `e` as [`flip_edge`](Self::flip_edge) does, but refuses by the shape test
-    /// `test` instead of that of SPEC N5 (SPEC N52; every other refusal and the arithmetic are
-    /// the same, [`plan_flip_with`](crate::plan_flip_with)). Provided:
-    /// [`flip_edge`](Self::flip_edge) for the default test, [`IntrinsicError::Unsupported`]
-    /// for any other; both representations of this workspace implement it.
+    /// Flips edge `e` as [`flip_edge`](Self::flip_edge) does, but as the caller requests
+    /// (SPEC N52): it refuses by the shape test `request.shape` instead of that of SPEC N5
+    /// (every other refusal and the arithmetic are the same,
+    /// [`plan_flip_with`](crate::plan_flip_with)), and `Flip::new_corner_angles` is
+    /// `Some([θ_l, θ_k])` exactly when `request.corner_angles`, bitwise those of
+    /// [`corner_angle`](Self::corner_angle) after the flip. Provided: [`flip_edge`](Self::flip_edge)
+    /// for [`FlipRequest::DEFAULT`], [`IntrinsicError::Unsupported`] for any other request; both
+    /// representations of this workspace implement it.
     ///
     /// # Errors
     /// As [`flip_edge`](Self::flip_edge); [`IntrinsicError::Unsupported`].
-    fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntrinsicError> {
-        if test == FlipShapeTest::N5 {
+    fn flip_edge_with(&mut self, e: usize, request: FlipRequest) -> Result<Flip, IntrinsicError> {
+        if request == FlipRequest::DEFAULT {
             self.flip_edge(e)
         } else {
-            Err(unsupported_shape_test(e, test))
+            Err(unsupported_shape_test(e, request))
         }
     }
 
@@ -299,13 +301,13 @@ pub trait Triangulation {
 }
 
 /// The error of the provided [`Triangulation::flip_edge_with`] and
-/// [`Triangulation::can_flip_with`] for a test other than the default.
-fn unsupported_shape_test(e: usize, test: FlipShapeTest) -> IntrinsicError {
+/// [`Triangulation::can_flip_with`] for a request other than the default.
+fn unsupported_shape_test(e: usize, test: impl std::fmt::Debug) -> IntrinsicError {
     IntrinsicError::Unsupported {
         representation: "this representation",
         operation: "flip_edge_with",
         reason: format!(
-            "cannot flip edge {e} under the shape test {test:?}: only the default (SPEC N5) is \
+            "cannot flip edge {e} under {test:?}: only the default (SPEC N5, no corner angles) is \
              implemented"
         ),
     }
@@ -366,8 +368,8 @@ impl Triangulation for IntrinsicTriangulation {
         IntrinsicTriangulation::can_flip_with(self, e, test)
     }
     #[inline]
-    fn flip_edge_with(&mut self, e: usize, test: FlipShapeTest) -> Result<Flip, IntrinsicError> {
-        IntrinsicTriangulation::flip_edge_with(self, e, test)
+    fn flip_edge_with(&mut self, e: usize, request: FlipRequest) -> Result<Flip, IntrinsicError> {
+        IntrinsicTriangulation::flip_edge_with(self, e, request)
     }
     fn insert_vertex(&mut self, f: usize, bary: [f64; 3]) -> Result<Insertion, IntrinsicError> {
         IntrinsicTriangulation::insert_vertex(self, f, bary)

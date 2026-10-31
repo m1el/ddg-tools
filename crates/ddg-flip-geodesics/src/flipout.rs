@@ -39,7 +39,7 @@
 //! `fo-wedge-flip-valid`, `fo-flipout-terminates`); more than `k₀² + 2k₀ + 8` flips is reported
 //! as [`FlipError::Internal`] rather than looping.
 
-use ddg_intrinsic::{Complex, FlipShapeTest, IntrinsicError, Triangulation};
+use ddg_intrinsic::{Complex, FlipRequest, FlipShapeTest, IntrinsicError, Triangulation};
 
 use crate::error::FlipError;
 use crate::network::{Joint, Network, Segment};
@@ -256,7 +256,8 @@ fn outer_arc(complex: &Complex, side: Side, corners: &[u32], out: &mut Vec<(Segm
 /// is a loop or another corner lies in one of its two faces (Δ-complex cases) the corners are
 /// recomputed from the star of `b` instead, as [`JointGeometry`](crate::JointGeometry) does.
 /// A flip is asked of [`Triangulation::flip_edge_with`] with the shape test `test`
-/// ([`ShortenOptions::flip_shape`](crate::ShortenOptions::flip_shape)) directly, which refuses
+/// ([`ShortenOptions::flip_shape`](crate::ShortenOptions::flip_shape)) and the request for its
+/// two corner angles (IT-SPEC N52; the only caller that asks) directly, which refuses
 /// exactly when [`Triangulation::can_flip_with`] would and then changes nothing.
 ///
 /// # Errors
@@ -296,6 +297,10 @@ pub(crate) fn flip_out<T: Triangulation>(
         });
     }
 
+    let request = FlipRequest {
+        shape: test,
+        corner_angles: true,
+    };
     let max_flips = k0 * k0 + 2 * k0 + 8;
     let mut j = 1;
     // The Δ-complex cases are evaluated whenever the corners change (they only accumulate).
@@ -348,15 +353,17 @@ pub(crate) fn flip_out<T: Triangulation>(
                 let h = c.edge_halfedge(edge);
                 [c.face(h), c.twin(h).map_or(c.face(h), |t| c.face(t))]
             };
-            match tri.flip_edge_with(edge, test) {
+            match tri.flip_edge_with(edge, request) {
                 Ok(flip) => {
                     // The two faces keep their ids and change their lengths; the flip computed
                     // a corner angle in each (IT-SPEC N52).
                     for f in faces {
                         scratch.angles.invalidate(f);
                     }
-                    for (h, angle) in flip.new_corners.into_iter().zip(flip.new_corner_angles) {
-                        scratch.angles.insert(&*tri, h as usize, angle);
+                    if let Some(angles) = flip.new_corner_angles {
+                        for (h, angle) in flip.new_corners.into_iter().zip(angles) {
+                            scratch.angles.insert(&*tri, h as usize, angle);
+                        }
                     }
                     stats.flips += 1;
                     if stats.flips > max_flips {
