@@ -441,6 +441,18 @@ cited, Ciarlet 1978), and is checked numerically. Also the reverse direction (`T
 Fig. 14. The factorization of `M₀` is kept for repeated transfers. Report: residual, the size of
 `S`.
 
+**As built (WP7, b463c96).** `Transfer::new(&tri, &CommonSubdivision)` (or `from_state`) builds
+`M_S`, `P₀`, `P₁`, `M₀ = P₀ᵀ M_S P₀`, `M₁ = P₁ᵀ M_S P₁` and Cholesky-factorizes `M₀`, `M₁` once;
+`to_input` (Eq. 14) and `to_intrinsic` (`M₁ ĝ = P₁ᵀ M_S P₀ g`), `copy_to_input`,
+`copy_to_intrinsic`; a stale subdivision (fingerprint) is refused. `M_S` is unnormalized
+(`Σ M_S` = total area; the area normalization of CLAUDE.md belongs to the cones problem); piece
+areas are `|det β| · Area(T)` with `β` the barycentric rows of the fan triangle in its input face,
+so no positions are needed. Measured on 133 states: `P₀ᵀ M_S P₀` equals the input mesh's own
+Galerkin mass matrix to `2.1e-15` (relative to the larger diagonal entry), piece areas sum to the
+total area within `1.1e-14`; constants reproduced to `5e-15` both ways, normal-equation residual
+`≤ 2.6e-16`. Building everything on camelbad (`|S|` 62 825) takes about 250 ms, one transfer
+2.8 ms.
+
 ## 7. Robustness preprocessing (Sec. 3.9)
 
 Intrinsic mollification (Sharp and Crane 2020b) with `ε = 10⁻⁵ h̄` (`h̄` the mean edge length) by
@@ -719,7 +731,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP4 | **done** (548d804, 6080ce8): face split (I6, I15), App. A and the `T¹ → T⁰` point query (I16), moves; `insert_vertex` of the trait | `src/{insert,recover,move_vertex}.rs`, `tests/insert.rs` | WP2 | Opus |
 | WP5 | **done** (432e0ea, 9cbd214): common subdivision, `P₀`, `P₁`, `T⁰ → T¹` point queries, batch `extract_all_edges` | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
-| WP7 | transfer (Eq. 13–14), Fig. 14 | `src/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
+| WP7 | transfer (Eq. 13–14) **done** (b463c96); Fig. 14 as the paper's Poisson experiment in progress | `src/transfer.rs`, `tests/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | evaluation: Thingi10k, benches, the reference comparison | `examples/thingi.rs`, `benches/`, `scripts/ic-eval.sh` | WP6, Q1, Q2 | Sonnet |
