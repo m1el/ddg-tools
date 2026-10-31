@@ -24,6 +24,16 @@
 //! (Morera et al. 2008, `fo-geodesic-bezier`, cited). In the plane they are the points of
 //! planar de Casteljau subdivision (`fo-de-casteljau-midpoint`; `tests/bezier.rs`).
 //!
+//! **Refused splits.** The triangulation may refuse a midpoint's split. When a new triangle
+//! would be too thin (IT N5; a geodesic across a flat region is often one long edge between
+//! needles), the triangulation is flipped to Delaunay with the edges of the curve held fixed
+//! and the split is made again ([`BezierOptions::delaunay_on_thin_split`]). When the integer
+//! representation cannot place the vertex because it lies within rounding of an input edge
+//! (it places such vertices strictly inside input faces), the point is moved by `2e-9 ℓ`
+//! along the edge, towards its middle; this is decided before the split from the crossings of the edge, which
+//! both representations compute ([`BezierOptions::unlocated_nudge`]). Both are counted in the report; the reference has
+//! neither refusal.
+//!
 //! **Bookkeeping.** The control points are kept as a list in curve order and checked, after
 //! every change, against the pinned vertices met along the path: a curve that passes through
 //! a control point a second time (pinning is per vertex, F10) cannot be subdivided and is an
@@ -37,7 +47,9 @@
 //! splits, flips and segments (SPEC §7 test 8). Only the place of a new vertex on the input
 //! mesh is computed differently.
 
-use ddg_intrinsic::{DelaunayOptions, InsertRefusal, IntrinsicError, Triangulation};
+use ddg_intrinsic::{
+    DelaunayOptions, EdgeTraceOptions, InsertRefusal, IntrinsicError, Triangulation,
+};
 
 use crate::error::FlipError;
 use crate::init::waypoint_path;
@@ -64,6 +76,15 @@ pub struct BezierOptions {
     /// no such refusal; a geodesic across a flat region is often one long edge between
     /// needles.
     pub delaunay_on_thin_split: Option<DelaunayOptions>,
+    /// A midpoint within `unlocated_nudge · ℓ` of a point where the split edge crosses an input
+    /// edge is moved along the edge by `2 unlocated_nudge · ℓ`, towards the middle of the
+    /// edge. The integer representation places a new vertex strictly inside
+    /// an input face and refuses a point on an input edge ([`InsertRefusal::NotLocated`],
+    /// IC-SPEC §4.4), which lattice-like meshes produce often; the crossings come from
+    /// [`Triangulation::trace_edge_on_input`] on both representations, so both move the same
+    /// points. A split still refused that way is made again once at `t ± unlocated_nudge`.
+    /// Default `1e-9`, far below the snap tolerance; `0` turns both off. In `[0, 1e-3]`.
+    pub unlocated_nudge: f64,
 }
 
 impl Default for BezierOptions {
@@ -72,6 +93,7 @@ impl Default for BezierOptions {
             shorten: ShortenOptions::default(),
             snap_tolerance: 1e-4,
             delaunay_on_thin_split: Some(DelaunayOptions::default()),
+            unlocated_nudge: 1e-9,
         }
     }
 }
@@ -87,6 +109,12 @@ impl BezierOptions {
         if !(s.is_finite() && (0.0..0.5).contains(&s)) {
             return Err(FlipError::InvalidOptions {
                 what: format!("snap_tolerance must be in [0, 0.5), got {s}"),
+            });
+        }
+        let x = self.unlocated_nudge;
+        if !(x.is_finite() && (0.0..=1e-3).contains(&x)) {
+            return Err(FlipError::InvalidOptions {
+                what: format!("unlocated_nudge must be in [0, 1e-3], got {x}"),
             });
         }
         Ok(())
@@ -142,6 +170,9 @@ pub struct BezierReport {
     pub n_delaunay_retries: usize,
     /// Flips made by those Delaunay flippings.
     pub delaunay_flips: usize,
+    /// Midpoints moved off a crossing with an input edge before the split, or after a split
+    /// refused as not locatable ([`BezierOptions::unlocated_nudge`]).
+    pub n_nudged: usize,
     /// Shortenings run (Alg. 2 calls).
     pub n_shortenings: usize,
     /// Shortenings that did not end [`ShortenStatus::Geodesic`].
@@ -172,6 +203,7 @@ impl BezierReport {
             n_snapped: 0,
             n_delaunay_retries: 0,
             delaunay_flips: 0,
+            n_nudged: 0,
             n_shortenings: 0,
             n_not_geodesic: 0,
             other_statuses: Vec::new(),
@@ -431,6 +463,32 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         )
     }
 
+    /// The parameter to split edge `e` at instead of `t` when the point `t ℓ` is within
+    /// `nudge · ℓ` of a crossing of `e` with an input edge ([`EdgeTrace`]'s `distance`s, which
+    /// both representations compute to rounding): `t ± 2 nudge`, towards the middle of `e`
+    /// (computed from `t` alone, so both representations get the same bits; the point is then
+    /// between `nudge ℓ` and `3 nudge ℓ` from the crossing). `None` when no crossing is that
+    /// close, `nudge` is `0`, or the edge cannot be traced (a signpost trace that fails IT N8;
+    /// the split decides then).
+    ///
+    /// [`EdgeTrace`]: ddg_intrinsic::EdgeTrace
+    fn off_crossings(&self, e: usize, t: f64, nudge: f64) -> Option<f64> {
+        if nudge <= 0.0 {
+            return None;
+        }
+        let l = self.tri.edge_length(e);
+        let at = t * l;
+        let trace = self
+            .tri
+            .trace_edge_on_input(e, &EdgeTraceOptions::default())
+            .ok()?;
+        trace
+            .crossings
+            .iter()
+            .any(|c| (at - c.distance).abs() <= nudge * l)
+            .then(|| towards_middle(t, 2.0 * nudge))
+    }
+
     /// Finds the midpoint of the geodesic part from `controls[i]` to `controls[i + 1]`, splits
     /// its edge there (or snaps to an end), pins it and returns its vertex.
     fn insert_midpoint(
@@ -464,31 +522,43 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         let (e, forward) = part[k];
         let l = lengths[e];
         let u = (half - before) / l;
-        let t = if forward { u } else { 1.0 - u };
+        let mut t = if forward { u } else { 1.0 - u };
         let snap = options.snap_tolerance;
         let (vertex, kind) = if u <= snap {
             (curve.vertices[at[i] + k], MidpointKind::SnappedToTail)
         } else if u >= 1.0 - snap {
             (curve.vertices[at[i] + k + 1], MidpointKind::SnappedToHead)
         } else {
-            let split = match (self.split_edge(e, t), &options.delaunay_on_thin_split) {
-                (
-                    Err(FlipError::Intrinsic(IntrinsicError::InsertionRefused {
-                        reason: InsertRefusal::TooThin { .. },
-                        ..
-                    })),
-                    Some(delaunay),
-                ) => {
-                    // Edges that carry segments keep their ids and directions, so `e` and `t`
-                    // still name the point.
-                    let cdt = self.constrained_delaunay(delaunay, false)?;
-                    report.n_delaunay_retries += 1;
-                    report.delaunay_flips += cdt.delaunay.n_flips;
-                    self.split_edge(e, t)?
-                }
-                (result, _) => result?,
-            };
-            (split.insertion.vertex as usize, MidpointKind::Split)
+            if let Some(moved) = self.off_crossings(e, t, options.unlocated_nudge) {
+                t = moved;
+                report.n_nudged += 1;
+            }
+            let mut split = self.split_edge(e, t);
+            if let (
+                Err(FlipError::Intrinsic(IntrinsicError::InsertionRefused { reason, .. })),
+                Some(delaunay),
+            ) = (&split, &options.delaunay_on_thin_split)
+                && matches!(reason, InsertRefusal::TooThin { .. })
+            {
+                // Edges that carry segments keep their ids and directions, so `e` and `t`
+                // still name the point.
+                let cdt = self.constrained_delaunay(delaunay, false)?;
+                report.n_delaunay_retries += 1;
+                report.delaunay_flips += cdt.delaunay.n_flips;
+                split = self.split_edge(e, t);
+            }
+            if let Err(FlipError::Intrinsic(IntrinsicError::InsertionRefused { reason, .. })) =
+                &split
+                && matches!(reason, InsertRefusal::NotLocated { .. })
+                && options.unlocated_nudge > 0.0
+            {
+                // Still within rounding of an input edge (not caught by `off_crossings`): move
+                // it along the edge.
+                t = towards_middle(t, options.unlocated_nudge);
+                report.n_nudged += 1;
+                split = self.split_edge(e, t);
+            }
+            (split?.insertion.vertex as usize, MidpointKind::Split)
         };
         if kind == MidpointKind::Split {
             report.n_splits += 1;
@@ -506,4 +576,9 @@ impl<T: Triangulation> GeodesicNetwork<T> {
         });
         Ok(vertex)
     }
+}
+
+/// `t` moved by `delta` towards `½`.
+fn towards_middle(t: f64, delta: f64) -> f64 {
+    if t < 0.5 { t + delta } else { t - delta }
 }

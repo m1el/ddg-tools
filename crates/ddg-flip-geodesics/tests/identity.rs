@@ -7,7 +7,10 @@
 mod common;
 
 use common::{Shape, data_shapes, generated_shapes, random_pairs, vpath, waist_tube};
-use ddg_flip_geodesics::{EdgePath, GeodesicNetwork, Segment, ShortenOptions, dijkstra_path};
+use ddg_flip_geodesics::{
+    BezierOptions, EdgePath, FlipError, GeodesicNetwork, Segment, ShortenOptions, dijkstra_path,
+    geodesic_bezier,
+};
 use ddg_integer_coords::IntegerTriangulation;
 use ddg_intrinsic::{DelaunayOptions, IntrinsicTriangulation, Triangulation};
 
@@ -133,4 +136,124 @@ fn signposts_and_integers_shorten_identically() {
         &[vec![ring(w + 2)], vec![ring(w - 2), ring(w + 2)]],
     );
     assert!(total > 50, "only {total} iterations compared");
+}
+
+// ----- F4: Bézier curves and the iCDT -----
+
+/// Control polygons for `tri`: the ends of a shortest edge path between a random pair, and
+/// one-ring neighbours of its vertices at a third and two thirds (distinct, so a gentle
+/// polygon off the path).
+fn polygons(tri: &IntrinsicTriangulation, count: usize, seed: u64) -> Vec<Vec<usize>> {
+    let complex = tri.complex();
+    let mut out = Vec::new();
+    for (a, b) in random_pairs(complex.n_vertices(), 4 * count, seed) {
+        if out.len() == count {
+            break;
+        }
+        let vs = dijkstra_path(tri, a, b).unwrap().vertices(complex);
+        if vs.len() < 7 {
+            continue;
+        }
+        let off = |i: usize| {
+            let v = vs[i * (vs.len() - 1) / 3];
+            complex
+                .outgoing_halfedges(v)
+                .map(|h| complex.to_vertex(h))
+                .find(|w| !vs.contains(w))
+        };
+        let (Some(p1), Some(p2)) = (off(1), off(2)) else {
+            continue;
+        };
+        let poly = vec![a, p1, p2, b];
+        let mut sorted = poly.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() == 4 {
+            out.push(poly);
+        }
+    }
+    out
+}
+
+/// A Bézier curve (3 rounds), then the iCDT, as bits.
+fn bezier_trace<T: Triangulation + Clone>(tri: T, controls: &[usize]) -> Option<(Trace, T)> {
+    let (mut net, report) = match geodesic_bezier(tri, controls, 3, &BezierOptions::default()) {
+        Ok(x) => x,
+        // A waypoint path that touches itself, refused on both (compared by the caller).
+        Err(FlipError::Crossing { .. } | FlipError::Bezier { .. }) => return None,
+        Err(e) => panic!("{controls:?} on {}: {e}", std::any::type_name::<T>()),
+    };
+    let mut steps = vec![format!("{report:?}")];
+    steps.push(format!(
+        "{:?}",
+        net.paths()
+            .iter()
+            .map(|p| p.length(net.triangulation()).to_bits())
+            .collect::<Vec<_>>()
+    ));
+    let cdt = net.make_delaunay(&DelaunayOptions::default()).unwrap();
+    steps.push(format!("{cdt:?}"));
+    let t = Trace {
+        steps,
+        report: format!("{:?}", net.network().pinned_vertices()),
+        paths: net.paths(),
+        faces: net.triangulation().complex().faces().to_vec(),
+        lengths: net
+            .triangulation()
+            .edge_lengths()
+            .iter()
+            .map(|x| x.to_bits())
+            .collect(),
+        length: net.length().to_bits(),
+    };
+    Some((t, net.into_triangulation()))
+}
+
+#[test]
+fn signposts_and_integers_make_the_same_bezier_curves_and_icdt() {
+    let mut shapes = generated_shapes();
+    shapes.extend(data_shapes());
+    let mut compared = 0;
+    let mut splits = 0;
+    let mut nudged = 0;
+    for shape in &shapes {
+        for delaunay in [false, true] {
+            let (signposts, integers) = both(shape, delaunay);
+            for controls in polygons(&signposts, 3, 17) {
+                let a = bezier_trace(signposts.clone(), &controls);
+                let b = bezier_trace(integers.clone(), &controls);
+                let label = format!("{} (delaunay {delaunay}) {controls:?}", shape.name);
+                match (a, b) {
+                    // The integer split refused a point on an input edge and was nudged
+                    // (BezierOptions::unlocated_nudge): the one documented difference.
+                    (Some((a, _)), Some((b, _)))
+                        if a != b && b.steps[0].contains("n_nudged: 0") == false =>
+                    {
+                        eprintln!("NUDGED on integers: {label}");
+                        nudged += 1;
+                    }
+                    (Some((a, _)), Some((b, int_after))) => {
+                        assert!(a == b, "{label}: the representations differ:\n{a:?}\n{b:?}");
+                        int_after
+                            .certify()
+                            .unwrap_or_else(|e| panic!("{label}: integer certificate: {e}"));
+                        splits += int_after.complex().n_vertices() - shape.mesh.n_vertices();
+                        compared += 1;
+                    }
+                    (None, None) => {}
+                    (a, b) => panic!(
+                        "{label}: refused on one representation only ({}, {})",
+                        a.is_some(),
+                        b.is_some()
+                    ),
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{compared} Bézier curves + iCDT identical, {splits} vertices inserted; {nudged} nudged on \
+         integers"
+    );
+    assert_eq!(nudged, 0, "{nudged} differ by a nudge on integers only");
+    assert!(compared >= 30, "only {compared} compared");
 }

@@ -403,60 +403,101 @@ fn bbox_diagonal(shape: &Shape) -> f64 {
     dist(lo, hi)
 }
 
+/// One curve and its reversal on `tri`: the largest distance between corresponding pinned
+/// points over the bounding box diagonal, and whether a midpoint was nudged; `None` for an
+/// input refused in either direction (a waypoint path that crosses itself or meets a control
+/// point twice; Dijkstra's legs may differ in the two directions).
+fn reversal_error<T: Triangulation + Sync + Clone>(
+    tri: &T,
+    shape: &Shape,
+    controls: &[usize],
+    options: &BezierOptions,
+    label: &str,
+) -> Option<(f64, bool)> {
+    let rounds = 3;
+    let reversed: Vec<usize> = controls.iter().rev().copied().collect();
+    let run = |c: &[usize]| geodesic_bezier(tri.clone(), c, rounds, options);
+    let refused =
+        |e: &FlipError| matches!(e, FlipError::Bezier { .. } | FlipError::Crossing { .. });
+    let (fwd, rf, bwd, rb) = match (run(controls), run(&reversed)) {
+        (Ok((fwd, rf)), Ok((bwd, rb))) => (fwd, rf, bwd, rb),
+        (Err(e), _) | (_, Err(e)) if refused(&e) => {
+            eprintln!("SKIPPED {label}: {e}");
+            return None;
+        }
+        (Err(e), _) | (_, Err(e)) => panic!("{label}: {e}"),
+    };
+    check_result(&fwd, &rf, controls.len() - 1, rounds, label);
+    check_result(
+        &bwd,
+        &rb,
+        controls.len() - 1,
+        rounds,
+        &format!("{label} reversed"),
+    );
+    let a = positions_of(fwd.triangulation(), shape, &rf.control_points);
+    let mut b = positions_of(bwd.triangulation(), shape, &rb.control_points);
+    b.reverse();
+    assert_eq!(a.len(), b.len());
+    let scale = bbox_diagonal(shape);
+    let err = a
+        .iter()
+        .zip(&b)
+        .map(|(p, q)| dist(*p, *q) / scale)
+        .fold(0.0, f64::max);
+    let nudged = rf.n_nudged + rb.n_nudged > 0;
+    let length_err = (fwd.length() - bwd.length()).abs() / fwd.length();
+    assert!(
+        length_err <= if nudged { 1e-8 } else { 1e-12 },
+        "{label}: lengths {} vs {}",
+        fwd.length(),
+        bwd.length()
+    );
+    Some((err, nudged))
+}
+
+/// SPEC §7 test 7 on curved surfaces: reversing the control points gives the same points.
+///
+/// Signposts run with `unlocated_nudge = 0` (they never need it): `1e-12`. The integers run
+/// with the default: a midpoint that lies on an input edge is moved by `2e-9 ℓ` towards the
+/// middle of the edge it falls on, and the two directions may split different edges there, so
+/// such curves agree to `1e-8` only (counted); the others to `1e-12`.
 #[test]
 fn bezier_is_symmetric_under_reversal() {
-    let mut worst = 0.0f64;
-    let mut cases = 0;
-    let mut skipped = Vec::new();
+    let mut worst = [0.0f64; 3];
+    let mut cases = [0usize; 3];
     for shape in curved_shapes() {
-        let scale = bbox_diagonal(&shape);
+        let integers = IntegerTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
+        let signposts = shape.triangulation();
         for (k, controls) in local_polygons(&shape, 3, 4, 41).into_iter().enumerate() {
-            let reversed: Vec<usize> = controls.iter().rev().copied().collect();
-            let rounds = 3;
             let label = format!("{} polygon {k} {controls:?}", shape.name);
-            let run =
-                |c: &[usize]| geodesic_bezier(shape.triangulation(), c, rounds, &options_checked());
-            // A waypoint path that crosses itself, or meets a control point twice, is refused
-            // (never repaired); Dijkstra's legs may differ in the two directions.
-            let refused =
-                |e: &FlipError| matches!(e, FlipError::Bezier { .. } | FlipError::Crossing { .. });
-            let (fwd, rf, bwd, rb) = match (run(&controls), run(&reversed)) {
-                (Ok((fwd, rf)), Ok((bwd, rb))) => (fwd, rf, bwd, rb),
-                (Err(e), _) | (_, Err(e)) if refused(&e) => {
-                    skipped.push(format!("{label}: {e}"));
-                    continue;
-                }
-                (Err(e), _) | (_, Err(e)) => panic!("{label}: {e}"),
+            let no_nudge = BezierOptions {
+                unlocated_nudge: 0.0,
+                ..options_checked()
             };
-            check_result(&fwd, &rf, 3, rounds, &label);
-            check_result(&bwd, &rb, 3, rounds, &format!("{label} reversed"));
-            let a = positions_of(fwd.triangulation(), &shape, &rf.control_points);
-            let mut b = positions_of(bwd.triangulation(), &shape, &rb.control_points);
-            b.reverse();
-            assert_eq!(a.len(), b.len());
-            for (i, (p, q)) in a.iter().zip(&b).enumerate() {
-                let err = dist(*p, *q) / scale;
-                worst = worst.max(err);
-                assert!(err <= 1e-12, "{label}: point {i}: {p:?} vs {q:?} ({err:e})");
+            if let Some((err, _)) = reversal_error(&signposts, &shape, &controls, &no_nudge, &label)
+            {
+                assert!(err <= 1e-12, "{label}: {err:e}");
+                worst[0] = worst[0].max(err);
+                cases[0] += 1;
             }
-            assert!(
-                (fwd.length() - bwd.length()).abs() <= 1e-12 * fwd.length(),
-                "{label}: lengths {} vs {}",
-                fwd.length(),
-                bwd.length()
-            );
-            cases += 1;
+            let label = format!("{label} (integers)");
+            if let Some((err, nudged)) =
+                reversal_error(&integers, &shape, &controls, &options_checked(), &label)
+            {
+                let (i, tol) = if nudged { (2, 1e-8) } else { (1, 1e-12) };
+                assert!(err <= tol, "{label}: {err:e} (nudged {nudged})");
+                worst[i] = worst[i].max(err);
+                cases[i] += 1;
+            }
         }
     }
-    for s in &skipped {
-        eprintln!("SKIPPED {s}");
-    }
     eprintln!(
-        "{cases} curved cases symmetric, worst distance {worst:e} of the bounding box \
-         diagonal; {} skipped",
-        skipped.len()
+        "reversal: signposts {} cases, worst {:e}; integers {} cases, worst {:e}, and {} with a \
+         nudged midpoint, worst {:e} (of the bounding box diagonal)",
+        cases[0], worst[0], cases[1], worst[1], cases[2], worst[2]
     );
-    assert!(cases >= 12, "only {cases} cases");
+    assert!(cases[0] >= 12 && cases[1] >= 10, "only {cases:?} cases");
 }
 
 // ----- extraction, both representations, determinism -----
