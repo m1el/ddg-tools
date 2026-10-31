@@ -141,7 +141,9 @@ gc: fg.cpp:1588-1591, is not needed).
   concatenated (gc: fg.cpp:283-312, `markInterior`).
 * `network_from_edges(tri, edge_mask, extra_pinned)`: the reference's walk (gc: fg.cpp:315-396):
   vertices of path degree `≠ 2` and `extra_pinned` are ends (pinned); paths between ends; the rest
-  closed loops. Used for seams and cut graphs (Fig. 19, 22).
+  closed loops. Used for seams and cut graphs (Fig. 19, 22). Also walks a boundary edge against its
+  only halfedge (the reference's halfedge loop cannot). Both return
+  `InitialPaths { paths, pinned }`, passed as is to `GeodesicNetwork::new`.
 * Explicit: `GeodesicNetwork::new(tri, paths, pinned, layering: Option<…>)`. Without a layering,
   each segment is pushed outermost on the side of its own halfedge in path order (gc:
   fg.cpp:29-32, F11), then the non-crossing check runs; inputs that cross are refused, never
@@ -150,7 +152,8 @@ gc: fg.cpp:1588-1591, is not needed).
 ### 2.3 Output
 
 `GeodesicNetwork<T>` owns `T` and `Γ`; `paths()`, `length()` (running sum, F14),
-`certify(tol) -> GeodesicCertificate` (§7 layer 1), `extract(&ExtractOptions) -> Vec<PathOnInput>`
+`certify(tol) -> GeodesicCertificate` (§7 layer 1), `extract(&ExtractOptions) -> Result<Vec<PathOnInput>, FlipError>`
+(and `extract_with_report -> Extraction { paths, segment_starts, report, certificate }`)
 (`ddg_intrinsic::PathOnInput`: points on `T⁰`, the input face of every piece, mismatch),
 `polylines_3d(positions)` (barycentric interpolation, for Python/Blender), `triangulation()` /
 `into_triangulation()` (the conforming `T`, Fig. 1 bottom), and the iCDT (§6.3).
@@ -300,8 +303,14 @@ with a reported status; the certificate (§7) is computed on the final state, ne
 
 `extract(options)` returns one `PathOnInput` per path, segments in path order, as described in
 §1.3. Per edge the work is independent, so edges are extracted in parallel and assembled in order
-(F24). Options: the representation's trace options (IT `EdgeTraceOptions`; IC `IntegerOptions`),
-`certify_input: bool` (default on in tests and the evaluation).
+(F24). Options (`ExtractOptions`): the trace options (`EdgeTraceOptions`; only validated by the
+integer representation), `certify_input: bool` (default on in tests and the evaluation),
+`crossing_tolerance` (`1e-6` rad), `input_tolerance` (`1e-4` rad, joints), `length_tolerance`
+(`1e-9` relative). The first failing segment in path order is the error, as
+`FlipError::Extraction { path, index, edge, cause }` (F29). A closed path's polyline repeats its
+first point at the end; `PathOnInput::mismatch` is the maximum over the path's segments. The input
+face of each piece is rebuilt from `EdgeTrace::first_face` and the twins of the crossed halfedges
+(both representations).
 
 **Certificate on `T⁰`** (independent of `T`, §7 layer 1b): along the polyline, at every crossing
 of an input edge the two adjacent pieces, unfolded across that edge (`it-unfold-diamond`), make an
@@ -416,7 +425,11 @@ the bad meshes of IT §5):
 8. *Representation identity* (layer 2) on every input of items 1–7.
 9. *Robustness* (IntCoords Fig. 17 left): the evaluation's trials where a signpost trace fails are
    committed as fixtures (mesh id, seed); on them the integer extraction must succeed and pass both
-   certificates.
+   certificates. F3: no signpost trace failed in 36 000 trials (9 data meshes × 4 seeds × 1000
+   pairs), so there are no fixtures yet; the failures of IntCoords Fig. 17 are expected on
+   Thingi10k (F7). **Open:** 2 of those trials (mesh `tree`, seed 2, pairs 372 and 934) ended with
+   FlipOut not geodesic to `1e-4` (the `T⁰` certificate agrees with `T`); not yet investigated,
+   and not yet run on the integer representation.
 10. *Determinism*: results bitwise identical at 1 and 64 threads; a refused input changes nothing.
 
 ## 8. Lean: model and theorems
@@ -477,6 +490,21 @@ E cited. WP F5 does A, B; WP F6 does C, D and can be cut without blocking anythi
 FlipOut on integer coordinates, the Sec. 5.1 task repeated on Thingi10k: ~62 000 trials (≈ 6200
 meshes × 10, so FlipOut's subset), every one a connected polyline. No timings. Fig. 17 left: a
 model where the signpost extraction breaks and the integer one does not.
+
+**Measured (F3; release, single thread, median per path over 200 pairs, load 1.4–4.3).**
+
+| mesh | Dijkstra ms | FlipOut ms | extraction ms (signposts / integers) | (FlipOut + extraction) / Dijkstra |
+|---|---|---|---|---|
+| spot | 0.30 | 0.28 | 0.010 / 0.021 | 1.00 |
+| bob | 0.79 | 0.62 | 0.010 / 0.027 | 0.82 |
+| camelbad | 1.40 | 0.87 | 0.028 / 0.057 | 0.67 |
+| bunny | 2.03 | 0.79 | 0.047 / 0.082 | 0.43 |
+| rhino | 2.84 | 1.17 | 0.037 / 0.078 | 0.44 |
+| tree | 2.52 | 1.10 | 0.046 / 0.089 | 0.47 |
+
+The paper's total (Dijkstra + FlipOut + extraction) is about `1.1×` Dijkstra; ours is `1.4–2×`
+because FlipOut costs about as much as our Dijkstra (the vertex star is rebuilt after every flip
+and pop, F2); every path is under 2 ms.
 
 ### 9.3 Our plan
 
@@ -551,6 +579,12 @@ model where the signpost extraction breaks and the integer one does not.
 * **F27** *Certificate per side.* "The small wedge is blocked by an end" (the earlier wording)
   accepts a non-geodesic at `Θ_b < 2π`, where both sides can be `< π` and the large side may still
   shorten; every side with `α < π − tol` must be blocked by an end.
+* **F28** *Exemptions on `T⁰`.* The certificate on `T⁰` exempts the same joints as on `T`: pinned
+  joints and sides blocked by an end; it also compares each joint's two sides with `T`'s wedge
+  angles (`max_wedge_mismatch`).
+* **F29** *Extraction errors.* The first failing segment in path order is returned, wrapped as
+  `FlipError::Extraction` naming path, segment and edge; the extraction is otherwise stateless
+  (call it again after any change of `T`).
 
 ## 11. Requests to the other contracts
 
@@ -603,7 +637,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 | F0 | **done** with IC WP0 (2814e8a–aca460e): R1, R3, R4 | `crates/ddg-intrinsic/src/…` | — | Opus |
 | F1 | crate skeleton: network, segments, layering, pinning, validity and non-crossing check, wedge angles, errors, reports | **done** (2144fed, d3c11e3): `src/{lib,error,network,wedge,certify,init,report}.rs` (`init`: Dijkstra and vertex-sequence paths, F3 adds waypoints and edge sets; `report`: options and reports for F2) | F0 (R1 for signposts only) | Opus |
 | F2 | **done** (05f9592–ae935ec): Alg. 1, Alg. 2, loops, contraction, stop rules, final sweep; tests 1–6, 10 on signposts; the representation identity test (§7 item 8) on integers | `src/{flipout,shorten}.rs`, `tests/{flat,closed_form,loops,isotopy,random_paths,identity}.rs` | F1 | Opus |
-| F3 | initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |
+| F3 | **done** (e6d83c2–1681598): initial paths (Dijkstra, waypoints, edge sets); extraction both ways; `T⁰` certificate; 3D polylines | `src/{init,extract}.rs`, `tests/extract.rs` | F1; IC WP2 + R2 for the integer half | Sonnet |
 | F4 | Bézier, split bookkeeping, iCDT; tests 7, 8 | `src/{bezier,cdt}.rs`, `tests/{bezier,identity}.rs` | F2, IC WP3/WP4 + R4 | Opus |
 | F5 | Lean tiers A, B; oracle Alg. 1/2 and fixtures; `CITED.md` section | `lean/proofs/DdgProofs/FlipGeodesics/…`, `lean/oracle/DdgOracle/FlipGeodesics…` | this file | Opus |
 | F6 | Lean tiers C, D | `lean/proofs/DdgProofs/FlipGeodesics/Wedge/…` | F5 | Opus |
