@@ -30,7 +30,13 @@
 //!   yet) must hold for both sides within `input_tolerance` unless the joint is exempt on `T`
 //!   (pinned, or every bent side blocked by a path end, [`classify`]). Independently of
 //!   that, the sides measured here are compared with the wedge angles `T` computed
-//!   (`max_wedge_mismatch`).
+//!   (`max_wedge_mismatch`). A joint at a vertex inserted into `T` (an edge split, e.g. a
+//!   Bézier control point, F4) lies inside an input face or on an input edge: its sides are
+//!   measured in that face (the second piece's face unfolded across the edge), the angle sum
+//!   being `2π`, and checked the same way; such a point is not a crossing. A crossing closer
+//!   to such a joint than `1e-8` of its input face's size (a vertex the integer split placed
+//!   within rounding of an input edge) belongs to the joint, which is then measured from the
+//!   point beyond it. (On a boundary edge of the input mesh the joint is not checked.)
 //! * **Lengths.** The length of the polyline equals the length of the edge path on `T`
 //!   within `length_tolerance` relative.
 
@@ -479,11 +485,16 @@ fn certify_path<T: Triangulation>(
         }
     }
     cert.length_error = (length - edge_path_length).abs() / edge_path_length;
-    // Crossings of input edges.
+    // Crossings of input edges. A point that is a joint (an inserted vertex of `T` on an input
+    // edge, e.g. a Bézier control point) is checked with the joints below, not as a crossing.
+    let is_joint = |i: usize| starts.binary_search(&i).is_ok();
     for i in 1..n_pieces {
         let SurfacePoint::Edge { edge, .. } = path.points[i] else {
             continue;
         };
+        if is_joint(i) {
+            continue;
+        }
         let (fa, fb) = (path.faces[i - 1] as usize, path.faces[i] as usize);
         let (Some(la), Some(_)) = (layouts[i - 1].as_ref(), layouts[i].as_ref()) else {
             continue;
@@ -506,6 +517,12 @@ fn certify_path<T: Triangulation>(
             continue;
         };
         let (u, w) = (sub(before, at), sub(after, at));
+        // A crossing within rounding of a joint at an inserted vertex (one placed just off an
+        // input edge) is part of that joint, which is measured from beyond it.
+        let tiny = ABSORB * layout_size(la);
+        if (norm(u) < tiny && is_joint(i - 1)) || (norm(w) < tiny && is_joint(i + 1)) {
+            continue;
+        }
         let angle = cross(u, w).abs().atan2(dot(u, w));
         cert.n_crossings += 1;
         cert.max_crossing_deviation = cert.max_crossing_deviation.max((PI - angle).abs());
@@ -528,13 +545,26 @@ fn certify_path<T: Triangulation>(
         } else {
             (j - 1, j, j - 1, j + 1)
         };
-        let SurfacePoint::Vertex(v) = path.points[j] else {
-            continue;
-        };
-        let v = v as usize;
         let (Some(l_in), Some(l_out)) = (layouts[piece_in].as_ref(), layouts[piece_out].as_ref())
         else {
             continue;
+        };
+        let v = match path.points[j] {
+            SurfacePoint::Vertex(v) => v as usize,
+            point => {
+                // An inserted vertex of `T` inside an input face or on an input edge.
+                let pieces = (piece_in, piece_out, before, after);
+                match inserted_joint_sides(input, path, j, pieces, l_in, l_out) {
+                    Ok(Some((left, right))) => {
+                        cert.compare_joint(tri, network, joint, left, right, options, p, i);
+                    }
+                    Ok(None) => {}
+                    Err(what) => {
+                        cert.fault(format!("path {p}, joint {i} at {point:?}: {what}"));
+                    }
+                }
+                continue;
+            }
         };
         let (f_in, f_out) = (
             path.faces[piece_in] as usize,
@@ -570,16 +600,36 @@ fn certify_path<T: Triangulation>(
             let left = (pos_in - pos_out).rem_euclid(theta);
             (left, theta - left)
         };
-        // Compare with T and decide whether the joint is exempt.
+        cert.compare_joint(tri, network, joint, left, right, options, p, i);
+    }
+    cert
+}
+
+impl PathCertificate {
+    /// Compares the two sides of a joint measured on `T⁰` with `T`'s wedge angles and checks
+    /// Eq. 2 unless the joint is exempt on `T`.
+    #[allow(clippy::too_many_arguments)]
+    fn compare_joint<T: Triangulation>(
+        &mut self,
+        tri: &T,
+        network: &Network,
+        joint: Joint,
+        left: f64,
+        right: f64,
+        options: &ExtractOptions,
+        p: usize,
+        i: usize,
+    ) {
         match JointGeometry::new(tri, network, joint) {
             Ok(geometry) => {
+                let v = geometry.vertex();
                 for (mine, side) in [(left, Side::Left), (right, Side::Right)] {
                     let theirs = geometry.angle(side);
                     if mine.is_finite() && theirs.is_finite() {
-                        cert.max_wedge_mismatch =
-                            cert.max_wedge_mismatch.max((mine - theirs).abs());
+                        self.max_wedge_mismatch =
+                            self.max_wedge_mismatch.max((mine - theirs).abs());
                     } else if mine.is_finite() != theirs.is_finite() {
-                        cert.fault(format!(
+                        self.fault(format!(
                             "path {p}, joint {i} at vertex {v}: the {side:?} wedge crosses the \
                              boundary on only one of T and T0"
                         ));
@@ -587,16 +637,103 @@ fn certify_path<T: Triangulation>(
                 }
                 let (status, _) = classify(&geometry, network, options.input_tolerance);
                 if matches!(status, JointStatus::Pinned | JointStatus::BlockedByEnd) {
-                    cert.n_exempt += 1;
+                    self.n_exempt += 1;
                 } else {
-                    cert.n_joints += 1;
-                    cert.min_joint_angle = cert.min_joint_angle.min(left.min(right));
+                    self.n_joints += 1;
+                    self.min_joint_angle = self.min_joint_angle.min(left.min(right));
                 }
             }
-            Err(e) => cert.fault(format!("path {p}, joint {i}: {e}")),
+            Err(e) => self.fault(format!("path {p}, joint {i}: {e}")),
         }
     }
-    cert
+}
+
+/// A crossing closer than this times the size of its input face to a joint at an inserted
+/// vertex is taken as part of the joint (the angle between pieces that short is rounding).
+const ABSORB: f64 = 1e-8;
+
+/// The longest side of a laid-out face.
+fn layout_size(l: &Layout) -> f64 {
+    norm(sub(l[1], l[0]))
+        .max(norm(sub(l[2], l[1])))
+        .max(norm(sub(l[0], l[2])))
+}
+
+/// The two sides `(left, right)` on `T⁰` of a joint at point `j` of `path` that is not an input
+/// vertex: an inserted vertex of `T` inside an input face (both pieces in that face) or on an
+/// interior input edge (the second piece's face unfolded across it); the angle sum there is
+/// `2π`. `None` for a point on a boundary edge of the input mesh (not checked).
+fn inserted_joint_sides(
+    input: &Input<'_>,
+    path: &PathOnInput,
+    j: usize,
+    (piece_in, piece_out, before, after): (usize, usize, usize, usize),
+    l_in: &Layout,
+    l_out: &Layout,
+) -> Result<Option<(f64, f64)>, String> {
+    let (f_in, f_out) = (
+        path.faces[piece_in] as usize,
+        path.faces[piece_out] as usize,
+    );
+    let point = &path.points[j];
+    let unfolded;
+    let l_after = match *point {
+        SurfacePoint::Edge { edge, .. } => {
+            let edge = edge as usize;
+            if input.mesh.is_boundary_edge(edge) {
+                return Ok(None);
+            }
+            if f_in == f_out {
+                l_in
+            } else {
+                unfolded = input.unfold(f_in, l_in, f_out, edge).ok_or_else(|| {
+                    format!("input faces {f_in} and {f_out} do not share input edge {edge}")
+                })?;
+                &unfolded
+            }
+        }
+        _ => {
+            if f_in != f_out {
+                return Err(format!(
+                    "the pieces around it lie in input faces {f_in} and {f_out}"
+                ));
+            }
+            l_out
+        }
+    };
+    let at = input.locate(f_in, l_in, point);
+    let a = input.locate(f_in, l_in, &path.points[before]);
+    let c = input.locate(f_out, l_after, &path.points[after]);
+    let (Some(at), Some(mut a), Some(mut c)) = (at, a, c) else {
+        return Err("a neighbouring point is not in the face of its piece".to_string());
+    };
+    // A neighbouring crossing within rounding of the joint (the vertex lies just off an input
+    // edge): measure from the point beyond it, its face unfolded across the crossed edge.
+    let tiny = ABSORB * layout_size(l_in);
+    let n_pieces = path.faces.len();
+    let beyond =
+        |piece: usize, point: usize, layout: &Layout, next_piece: usize, next_point: usize| {
+            let SurfacePoint::Edge { edge, .. } = path.points[point] else {
+                return Err(format!("point {point} next to it is not a crossing"));
+            };
+            let (f, g) = (path.faces[piece] as usize, path.faces[next_piece] as usize);
+            let lg = input
+                .unfold(f, layout, g, edge as usize)
+                .ok_or_else(|| format!("input faces {f} and {g} do not share input edge {edge}"))?;
+            input
+                .locate(g, &lg, &path.points[next_point])
+                .ok_or_else(|| format!("point {next_point} is not in input face {g}"))
+        };
+    if norm(sub(c, at)) < tiny && piece_out + 1 < n_pieces {
+        c = beyond(piece_out, after, l_after, piece_out + 1, after + 1)?;
+    }
+    if norm(sub(a, at)) < tiny && piece_in >= 1 && before >= 1 {
+        a = beyond(piece_in, before, l_in, piece_in - 1, before - 1)?;
+    }
+    // The left wedge sweeps counter-clockwise from bc to ba.
+    let (u, w) = (sub(a, at), sub(c, at));
+    let left = cross(w, u).atan2(dot(w, u)).rem_euclid(2.0 * PI);
+    Ok(Some((left, 2.0 * PI - left)))
 }
 
 // ----- the network -----

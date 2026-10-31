@@ -26,7 +26,7 @@
 
 use std::collections::VecDeque;
 
-use ddg_intrinsic::{Complex, Triangulation};
+use ddg_intrinsic::{Complex, Insertion, Triangulation};
 
 use crate::certify::{CertifyOptions, GeodesicCertificate};
 use crate::error::FlipError;
@@ -999,6 +999,80 @@ impl Network {
         Ok(())
     }
 
+    /// After the triangulation split edge `e` into the halves `[e, e2]` (in order from the old
+    /// tail, both directed like the old edge: [`Insertion::halves`]): every segment on `e`
+    /// becomes two segments, one on each half, and keeps its place across the edge (SPEC §6.1,
+    /// F19). The segment keeps its id for the half it runs along first (`e` if it is forward,
+    /// `e2` if backward); the other half gets a new id, linked after it in its path. Both
+    /// halves list their segments in the old order of `e`: an unchanged direction means an
+    /// unchanged side of `edge_halfedge`, so the layering of the halves is that of `e`.
+    ///
+    /// The layers and the pinned mask grow to the triangulation's new size first. Returns the
+    /// pairs `(first, second)` of ids in path order, in the old layer order of `e`.
+    ///
+    /// # Errors
+    /// [`FlipError::Internal`] if `e2` already carries segments or a segment on `e` is not
+    /// live.
+    pub(crate) fn split_segments(
+        &mut self,
+        complex: &Complex,
+        e: usize,
+        e2: usize,
+    ) -> Result<Vec<(SegmentId, SegmentId)>, FlipError> {
+        self.layers.resize(complex.n_edges(), VecDeque::new());
+        if self.pinned.len() < complex.n_vertices() {
+            self.pinned.resize(complex.n_vertices(), false);
+        }
+        if !self.layers[e2].is_empty() {
+            return Err(FlipError::Internal {
+                what: format!("split of edge {e}: the new half {e2} already carries segments"),
+            });
+        }
+        let old = std::mem::take(&mut self.layers[e]);
+        let mut on_e = VecDeque::with_capacity(old.len());
+        let mut on_e2 = VecDeque::with_capacity(old.len());
+        let mut pairs = Vec::with_capacity(old.len());
+        for &id in &old {
+            let Some(node) = self.nodes.get(id as usize).copied().flatten() else {
+                return Err(FlipError::Internal {
+                    what: format!("split of edge {e}: its layer lists segment {id}, not live"),
+                });
+            };
+            let forward = node.segment.forward;
+            let new = self.nodes.len() as u32;
+            // In path order: forward a → m (e) then m → b (e2); backward b → m (e2) then
+            // m → a (e).
+            let (first_edge, second_edge) = if forward { (e, e2) } else { (e2, e) };
+            self.nodes.push(Some(Node {
+                path: node.path,
+                segment: Segment::new(second_edge, forward),
+                prev: id,
+                next: node.next,
+            }));
+            let first = self.nodes[id as usize].as_mut().expect("live");
+            first.segment = Segment::new(first_edge, forward);
+            first.next = new;
+            // `node.next` is read now, so a run of segments of one path on `e` (out and back)
+            // links through the halves made before.
+            let after = node.next;
+            if after != NONE {
+                self.nodes[after as usize].as_mut().expect("live").prev = new;
+            }
+            if forward {
+                on_e.push_back(id);
+                on_e2.push_back(new);
+            } else {
+                on_e.push_back(new);
+                on_e2.push_back(id);
+            }
+            self.paths[node.path as usize].n_segments += 1;
+            pairs.push((SegmentId(id), SegmentId(new)));
+        }
+        self.layers[e] = on_e;
+        self.layers[e2] = on_e2;
+        Ok(pairs)
+    }
+
     /// Links `a` → `b`.
     fn link(&mut self, a: u32, b: u32) {
         Network::link_nodes(&mut self.nodes, a, b);
@@ -1162,4 +1236,69 @@ impl<T: Triangulation> GeodesicNetwork<T> {
     pub fn certify(&self, options: &CertifyOptions) -> Result<GeodesicCertificate, FlipError> {
         crate::certify::certify(&self.tri, &self.network, options)
     }
+
+    /// Splits edge `e` of the triangulation at the parameter `t` from the tail of its
+    /// halfedge ([`Triangulation::split_edge`], paper Alg. 8) and carries the network along
+    /// (SPEC §6.1, F19): every segment on `e`, however many share it, becomes two segments,
+    /// one on each half ([`Insertion::halves`]), in the same place across the edge as before.
+    /// The new vertex is not pinned; the joint there is straight (both sides `π` up to
+    /// rounding). The length is summed afresh (the halves' lengths `t ℓ` and `(1 − t) ℓ` add up
+    /// to `ℓ` only up to rounding).
+    ///
+    /// # Errors
+    /// [`FlipError::IndexOutOfRange`] for an edge out of range; the refusals of the
+    /// triangulation's split as [`FlipError::Intrinsic`] (a parameter not strictly between 0
+    /// and 1, an edge with the same face on both sides, a split too thin to be described by
+    /// its lengths, ...). Nothing is changed then. [`FlipError::Internal`] if the split did
+    /// not give two halves directed like the old edge (a bug of the triangulation).
+    pub fn split_edge(&mut self, e: usize, t: f64) -> Result<NetworkSplit, FlipError> {
+        let n_edges = self.tri.complex().n_edges();
+        if e >= n_edges {
+            return Err(FlipError::IndexOutOfRange {
+                what: "edge",
+                index: e,
+                bound: n_edges,
+            });
+        }
+        let [a, b] = self.tri.complex().edge_vertices(e);
+        let insertion = self.tri.split_edge(e, t)?;
+        let m = insertion.vertex as usize;
+        let complex = self.tri.complex();
+        let halves = match insertion.halves {
+            Some([h0, h1])
+                if h0 as usize == e
+                    && complex.edge_vertices(h0 as usize) == [a, m]
+                    && complex.edge_vertices(h1 as usize) == [m, b] =>
+            {
+                [h0, h1]
+            }
+            other => {
+                return Err(FlipError::Internal {
+                    what: format!(
+                        "the split of edge {e} ({a} → {b}) at vertex {m} gave the halves \
+                         {other:?}, not [{e}, _] directed like the old edge"
+                    ),
+                });
+            }
+        };
+        let segments = self
+            .network
+            .split_segments(complex, e, halves[1] as usize)?;
+        self.length = self.recompute_length();
+        Ok(NetworkSplit {
+            insertion,
+            segments,
+        })
+    }
+}
+
+/// What [`GeodesicNetwork::split_edge`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NetworkSplit {
+    /// What the triangulation did: the new vertex, its place on the input mesh, the new edges
+    /// and faces, the two halves.
+    pub insertion: Insertion,
+    /// Per segment that lay on the split edge, in its old layer order: the ids of its two
+    /// parts in path order (the first keeps the old id).
+    pub segments: Vec<(SegmentId, SegmentId)>,
 }

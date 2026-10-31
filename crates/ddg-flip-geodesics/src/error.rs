@@ -171,6 +171,12 @@ pub enum FlipError {
         /// angle is not below `π`.
         reason: &'static str,
     },
+    /// A network that Bézier subdivision cannot work on (SPEC §6.1): not one open path, or a
+    /// path that meets a control point more than once.
+    Bezier {
+        /// What is wrong, naming the vertex.
+        reason: String,
+    },
     /// An option is out of its range.
     InvalidOptions {
         /// What is wrong.
@@ -297,6 +303,7 @@ impl fmt::Display for FlipError {
                 f,
                 "the joint at vertex {vertex} cannot be shortened on its {side:?} side: {reason}"
             ),
+            FlipError::Bezier { reason } => write!(f, "Bézier subdivision: {reason}"),
             FlipError::InvalidOptions { what } => write!(f, "invalid options: {what}"),
             FlipError::Internal { what } => write!(f, "internal error (a bug): {what}"),
         }

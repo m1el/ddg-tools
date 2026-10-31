@@ -40,7 +40,11 @@
 //!   order), the certificate on `T⁰` computed from the input mesh alone ([`InputCertificate`]),
 //!   3D polylines ([`GeodesicNetwork::polylines_3d`]).
 //!
-//! Not yet here: Bézier curves and the constrained Delaunay triangulation (F4).
+//! * Geodesic Bézier curves by midpoint subdivision ([`geodesic_bezier`],
+//!   [`GeodesicNetwork::bezier_subdivide`], module [`bezier`], SPEC §6.1), with edge splits
+//!   that carry the network along ([`GeodesicNetwork::split_edge`]).
+//! * The intrinsic constrained Delaunay triangulation of a network
+//!   ([`GeodesicNetwork::make_delaunay`], module [`cdt`], SPEC §6.3).
 //!
 //! # Example
 //!
@@ -102,6 +106,8 @@
 
 #![warn(missing_docs)]
 
+pub mod bezier;
+pub mod cdt;
 pub mod certify;
 mod error;
 pub mod extract;
@@ -113,6 +119,10 @@ mod scratch;
 pub mod shorten;
 pub mod wedge;
 
+pub use bezier::{
+    BezierMidpoint, BezierOptions, BezierReport, MAX_BEZIER_ROUNDS, MidpointKind, geodesic_bezier,
+};
+pub use cdt::CdtReport;
 pub use certify::{CertifyOptions, GeodesicCertificate, JointFailure, JointStatus, certify};
 pub use error::FlipError;
 pub use extract::{
@@ -123,8 +133,8 @@ pub use init::{
     InitialPaths, dijkstra_path, network_from_edges, path_from_vertices, waypoint_path,
 };
 pub use network::{
-    EdgePath, GeodesicNetwork, Joint, Layering, Network, Segment, SegmentId, SegmentInfo,
-    SegmentRef,
+    EdgePath, GeodesicNetwork, Joint, Layering, Network, NetworkSplit, Segment, SegmentId,
+    SegmentInfo, SegmentRef,
 };
 pub use report::{ShortenOptions, ShortenReport, ShortenStatus, ShortenStep, Shortening};
 pub use shorten::ShortenSession;
