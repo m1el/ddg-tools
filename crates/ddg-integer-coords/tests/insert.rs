@@ -1385,9 +1385,17 @@ fn timing() {
         .into_iter()
         .filter(|s| s.name.starts_with("spot") || s.name == "camelbad")
         .collect();
-    for shape in &shapes {
+    for (shape, crowded) in shapes.iter().flat_map(|s| [(s, false), (s, true)]) {
         let mut s = shape.triangulation();
-        s.flip_to_delaunay(&DelaunayOptions::default()).unwrap();
+        if crowded {
+            let mut rng = SplitMix64::new(2);
+            for _ in 0..5 * s.n_edges() {
+                let e = (rng.next_u64() % s.n_edges() as u64) as usize;
+                let _ = s.flip_edge(e);
+            }
+        } else {
+            s.flip_to_delaunay(&DelaunayOptions::default()).unwrap();
+        }
         let (it, _) = convert(&s).unwrap();
         let mut rng = SplitMix64::new(1);
         let n = 2000;
@@ -1424,10 +1432,15 @@ fn timing() {
             }
         }
         eprintln!(
-            "{}: |E| {}, {n} insertions after Delaunay flipping (mean {:.1} crossings per face): \
+            "{}: |E| {}, {n} insertions after {} (mean {:.1} crossings per face): \
              signposts {:.2} µs, integer {:.2} µs, point query {:.2} µs",
             shape.name,
             s.n_edges(),
+            if crowded {
+                "5 |E| random flips"
+            } else {
+                "Delaunay flipping"
+            },
             crossings as f64 / n as f64,
             best[0] * 1e6,
             best[1] * 1e6,

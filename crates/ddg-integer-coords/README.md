@@ -22,8 +22,7 @@ shares.
 | `certify()` | SPEC §2.4, all four items (below). |
 | `from_intrinsic` | integer coordinates read off a signpost triangulation by tracing its edges (below). |
 
-**Not yet** (later work packages): face split and App. A (WP4; `insert_vertex` of the shared
-interface is `Unsupported`), refinement (WP6), transfer (WP7).
+**Not yet** (later work packages): refinement (WP6), transfer (WP7).
 
 ## Operations (WP3)
 
@@ -54,6 +53,63 @@ third of fresh split vertices, half after Delaunay flipping; face insertions alm
 Integer flips cost the same as signpost flips (Eq. 3, 4 are a few dozen integer operations; the
 time is in `plan_flip`, shared). A removal copies the connectivity once (O(|E|), most of its
 cost on camelbad) so that a stuck removal can be undone exactly.
+
+## Face split, App. A, moves (WP4)
+
+| | |
+|---|---|
+| `split_face(f, bary, &FaceSplitOptions)`, `insert_vertex(f, bary)` | Supp. Alg. 5, 6. Lengths and refusals from `plan_face_split` (I25, bitwise as signposts). The arcs of the face come from the integers (`insert::FaceArrangement`: `c` arcs around each corner, the fan of `e` arcs); their end points from `extract_intrinsic_edge` of the three sides (`distance / ℓ`, clamped into `[0, 1]` and counted). The regions are enumerated in the oracle's labels (`Region::Corner { corner, index }`, `Region::Middle { index }`); floating point only **picks** one: the largest margin of side tests against its bounding chords, evaluated in barycentric form in the frame of each chord's corner (`ab − b v₁ − a v₂`, accurate however close a chord is to its corner); the counts are then `FaceArrangement::split_counts` of that region (I15; Lean `faceSplit?_gapRegion`, valid whichever region). New roundabouts at input-vertex corners: `r + n⁻ + the arcs the corner emanates before m`. `FaceSplitReport` has the `Insertion`, the region choice (`margin`, `runner_up`, `curve_distance`: distance to the nearest arc in units of the shortest side, I6) and the recovery. `too_close > distance` → `TooCloseToCurve`, nothing changed (default 0: never). |
+| `locate_in_face`, `point_on_input` | the same without inserting (SPEC §4.9, `T¹ → T⁰`; same signature as the signposts'); edge points between neighbouring crossings, points along input edges interpolated; results within `1e-12` of a side of the input face are returned as points of the input edge (vertex), as WP5's `LOCATE_SNAP`. |
+| `recover::recover_barycentric` | App. A: minimum-norm `ξ` of Eq. 15 by QR (MGS with reorthogonalization) over **every** corner of the region (3 to 6, I16), then Eq. 16. The input face of the region is read off a gap of the region on a side (the input face `ExtractIntrinsicEdge` says the side runs through there), or the roundabout when all three sides run along input edges. An insertion place within `1e-12` outside `(0, 1)` is moved towards the region's centroid by the smallest fraction (`RecoverReport::moved`), farther is `RecoverFailed`. |
+| `move_vertex(v, displacement, &options)` | Sec. 3.6: `AngleFrames::of(&t).trace` from `v` (I9; frame 0 = `outgoing_halfedge`), face split (or edge split if the path ends on an edge), `remove_vertex(v)`; the moved vertex keeps id `v`. Any refusal (incl. `RemovalStuck`, I27) restores the whole state (the reference ignores a failed removal). Boundary vertices: `Unsupported` (I7). |
+
+Results (`tests/insert.rs`, release; the 17 shapes, spot, camelbad, 7 scenarios, 2 seeds; points
+inside faces, near sides down to `1e-7`, near corners, in the most crowded faces (up to 70
+crossings), and at `1e-3 … 1e-16` from the middle of an arc; 834 insertions in faces with a
+repeated vertex):
+
+* **26 099 insertions in both representations: the integer state equals `from_intrinsic` of the
+  signposts exactly in all but 9**, all 9 within `1.2e-10` shortest sides of an arc (7 below
+  `3.2e-14`): there the two representations put the point on different sides of the arc by
+  rounding, and both states are valid. 816 further insertions at `≤ 1e-12` from an arc are snapped
+  by the signposts onto the input edge (a vertex on the input edge, by design different). Refusals
+  identical (3 581); neither side refused what the other inserted. Places `q⁰` within `5.6e-10`
+  mean edge lengths of the signposts' `vertex_location` (worst on a jittered icosphere face with
+  20 crossings). App. A used 3 / 4 / 5 / 6 corners 16 975 / 7 520 / 1 592 / 12 times, always
+  exactly the corners of the region; 12 places moved inside (smallest coordinate `−2.2e-13`);
+  residual of Eq. 15 `≤ 5.6e-16`.
+* Before the corner-frame side tests, one insertion in a face whose arc around a corner had both
+  ends within `1e-12` of it (a vertex `4e-12` from an input edge) got the wrong region by `0.04`
+  shortest sides from side tests in the plane, and App. A refused it (`RecoverFailed`): the
+  integers stay valid whichever region, the place shows the error.
+* App. A on flat meshes (the place is known): within `8.6e-14` mean edge lengths over 2 652
+  insertions; on `T¹ = T⁰` the place is the point itself (error 0). Random affine maps, 3–6
+  corners: `4e-14`.
+* Many insertions (8 691) in 3 batches with Delaunay flipping (54 939 flips) and certification
+  per batch, then removal of all inserted vertices: 8 639 removed, 52 `RemovalStuck`.
+* Point queries: 10 640 agree with the signposts' `point_on_input` within `6e-12` mean edge
+  lengths; a vertex inserted at a point is where the query says (`1e-14` barycentric).
+* I6: the reported distance refuses with a limit above it (561, state unchanged) and not below.
+* Moves: 1 603 inside the star against the signposts' local `move_vertex`: new places within
+  `7.6e-13` mean edge lengths, after Delaunay flipping both the lengths agree within `1.4e-13`
+  and the normal coordinates as multisets agree (2 more differ where Delaunay ties were broken
+  differently); 951 moves beyond the star (the signposts cannot), all certify; 71 refused as
+  `RemovalStuck`, 606 because the path leaves the surface, every refused move restores the state.
+* Oracle (`tests/oracle.rs`): `regions` (514 faces, 2 469 regions) and `split` (516 faces, 2 457
+  region counts) exactly.
+
+**Timings** (release, one pinned core, load average 4.7 from other jobs, best of 5, 2 000 random
+points; `cargo test --release --test insert -- --ignored --nocapture timing`):
+
+| mesh | state | crossings per face | signposts' insertion | integer insertion | point query |
+|---|---|---|---|---|---|
+| spot | Delaunay | 0.1 | 0.90 µs | 1.17 µs | 0.72 µs |
+| spot | 5 \|E\| random flips | 3.0 | 0.96 µs | 2.63 µs | 2.15 µs |
+| camelbad | Delaunay | 1.1 | 1.67 µs | 2.64 µs | 1.59 µs |
+| camelbad | 5 \|E\| random flips | 2.8 | 1.56 µs | 3.39 µs | 2.47 µs |
+
+The integer insertion pays for `ExtractIntrinsicEdge` of the three sides (walks along the curves
+through them); the signposts trace one path over the input mesh.
 
 ## Common subdivision, P0, P1, point queries (WP5)
 
