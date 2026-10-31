@@ -23,7 +23,10 @@ every decision the paper leaves open (entries `N1` to `N25`).
   place of every vertex on the input mesh (paper Sec. 3.1).
 - Building it from a `ddg_core::TriMesh` with a `Geometry` (Alg. 4).
 - The edge flip (Alg. 5) with every refusal: boundary edge, end point of degree one, not
-  strictly convex, too thin (SPEC N5).
+  strictly convex, too thin (SPEC N5). The caller can choose the shape test per flip: N5's
+  (the default, used by every operation here) or the reference's relative one, which FlipOut
+  uses (`FlipShapeTest`, SPEC N52). A flip returns the two corner angles it computes at the new
+  edge's ends (`Flip::new_corner_angles`).
 - Delaunay flipping (Sec. 4.1) with a report, a tolerance, a flip limit and the count of ties.
 - Tracing queries (Alg. 2, Sec. 3.2.2) over the input mesh and over the intrinsic
   triangulation, from a vertex, from a point of an edge and from a point of a face, with the
@@ -142,7 +145,8 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | `IntrinsicTriangulation::new(&TriMesh, &Geometry)` | the input mesh as an intrinsic triangulation, with the same ids |
 | `n_vertices`, `n_edges`, `n_faces`, `faces`, `next`, `prev`, `twin`, `from_vertex`, `to_vertex`, `edge`, `edge_halfedge`, `edge_vertices`, `outgoing_halfedges`, `vertex_degree`, `is_boundary_edge`, `is_boundary_vertex` | connectivity; halfedge `h = 3 f + k` as in `ddg_core` |
 | `edge_length`, `signpost`, `vertex_angle_sum`, `vertex_location`, `edge_on_input`, `corner_angle`, `face_area`, `total_area` | geometry and the correspondence with the input |
-| `flip_edge(e) -> Result<Flip, IntrinsicError>`, `can_flip(e)` | one flip, or the reason it is refused (`FlipRefusal`) |
+| `flip_edge(e) -> Result<Flip, IntrinsicError>`, `can_flip(e)` | one flip, or the reason it is refused (`FlipRefusal`); `Flip::new_corner_angles` at `new_corners` (SPEC N52) |
+| `flip_edge_with(e, FlipShapeTest)`, `can_flip_with(e, _)`, `plan_flip_with(&Complex, &lengths, e, _)` | the same with the shape test chosen by the caller: `FlipShapeTest::N5` (default, `Absolute { limit: 1e-6 }`) or `FlipShapeTest::REFERENCE` (`Relative { ratio: 1e-6 }`, the reference's); also on the trait and the integer coordinates (SPEC N52) |
 | `flip_to_delaunay(&DelaunayOptions) -> Result<DelaunayReport, _>`, `is_delaunay`, `edge_angle_excess`, `edge_cotan_weight` | Delaunay flipping; `DelaunayCriterion::{AngleSum, CotanWeight, REFERENCE}`, `FlipLimit` |
 | `InputSurface::trace`, `IntrinsicTriangulation::trace` `(start, direction, length, &TraceOptions) -> Result<Trace, _>` | a straight path over the input mesh / over the triangulation from a `SurfacePoint` |
 | `trace_edge(e, &EdgeTraceOptions)`, `trace_edges(&EdgeTraceOptions) -> Result<EdgeTraces, _>` | the checked path of an edge / of all edges over the input mesh |
@@ -208,7 +212,8 @@ What the signatures do not say:
 - **Three numbers decide what is accepted** (all in SPEC §8): an edge is flipped by Delaunay
   flipping when its opposite angles sum to more than `π + 1e-10`; a flip is refused when it
   would create a triangle with `2 A < 1e-6 · ℓ_new · ℓ_max`; an edge trace must arrive within
-  `1e-6` of the edge's length of its vertex. The first and the third are options.
+  `1e-6` of the edge's length of its vertex. The first and the third are options; the second
+  can be chosen per flip with `flip_edge_with` (SPEC N52), and no operation of this crate does.
 
 ## What was measured
 

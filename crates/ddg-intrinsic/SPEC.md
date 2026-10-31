@@ -231,6 +231,9 @@ flipping, tracing); N2 and N3 were completed there. The numbers are those of
   area is below `1e-6` of the two together and tests nothing in `flipEdgeIfNotDelaunay`.
   The length of the flipped edge is computed from the unfolded quadrilateral with heights from
   Kahan's area formula (`it-flip-length`), not by the paper's law of cosines (Fig. 9).
+  *Chosen by the caller since N52:* this test is `FlipShapeTest::N5`, the default of every flip
+  and of every operation of this crate; a caller may ask a single flip for the reference's
+  relative test instead (FlipOut's Alg. 1 does by default).
 * **N6** *The Delaunay test, its tolerance, ties, the limit.* The paper's Eq. 4 has no
   tolerance; in floating point both diagonals of a cocircular quadrilateral can fail it in turn.
   Default (`DelaunayCriterion::AngleSum`): flip when `α + β > π + 1e-10`. The reference flips
@@ -969,6 +972,64 @@ those of `crates/ddg-intrinsic-apps/SPEC.md`.
   otherwise evaluated only for faces with a corner it can involve. The remaining ~0.25 M
   instructions per refinement (spot) are spread over the generic driver; the last two rounds
   measure −0.9 % to +1.2 % on spot and +2 % on camelbad.
+
+Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesics/SPEC.md` §11,
+§7 test 9).
+
+* **N52** *The shape test of a flip, chosen by the caller, and the corner angles a flip returns*
+  (2026-10-31, user decision on R10 and R9).
+  *The test.* `FlipShapeTest` is the test a flip's two new triangles must pass after strict
+  convexity (the signs of `it-flip-convexity`) and before the triangle inequalities of both new
+  triangles, which stay under every test. With `A_tail`, `A_head` twice the areas of the new
+  triangles `ilk` and `jkl` (`Diamond::flipped_areas`): `Absolute { limit }` is N5, refused
+  unless `A_T ≥ limit · ℓ_new · ℓ_max(T)` for both; `FlipShapeTest::N5 = Absolute { limit:
+  FLIP_SHAPE_LIMIT }` is the default. `Relative { ratio }` is the reference's
+  (`flipEdgeIfPossible`, geometry-central `signpost_intrinsic_triangulation.cpp:333-338`), refused
+  unless `min(A_tail, A_head) ≥ ratio · (A_tail + A_head)`; `FlipShapeTest::REFERENCE` has its
+  `ratio = 1e-6`. Both are invariant under scaling. A flip the test refuses is
+  `FlipRefusal::TooThin` with N5's shape number, whichever test refused it. The two differ where
+  a new triangle is a needle whose short side is not the new edge and the two areas are
+  comparable (the relative test accepts it; on `tree` shapes `1.2e-7` to `6.9e-7` with ratios
+  `5e-5` to `1e-3`), and where one new triangle is far smaller than the other but not thin (the
+  relative test refuses it: camelbad 8294 → 9415 of FlipOut's 9 × 500 pairs has one refused flip
+  under it and none under N5). By N5's argument the accepted
+  needles have angles that are uncertain by `ε / shape ≈ 1e-9` rad, which is what FlipOut's
+  certificate tolerates (`1e-4`).
+  *Interface.* `plan_flip_with(complex, lengths, e, test)`; `plan_flip` is it with
+  `FlipShapeTest::N5`. `IntrinsicTriangulation::{flip_edge_with, can_flip_with}` and the same in
+  `ddg-integer-coords`; `Triangulation::{flip_edge_with, can_flip_with}` are provided (the
+  default test goes to `flip_edge` / `can_flip`, any other is `IntrinsicError::Unsupported`, so
+  wrappers that implement the trait compile unchanged) and overridden by both representations.
+  `flip_edge` and `can_flip` keep N5. *Who uses which:* every operation of this crate and of the
+  integer coordinates (Delaunay flipping, refinement, removal, insertion, the optimal Delaunay
+  iteration, the export) keeps N5; only FlipOut's Alg. 1 asks for `REFERENCE`, by default
+  (`ShortenOptions::flip_shape`, which can be set back to `N5`); FlipOut's iCDT is Delaunay
+  flipping and keeps N5.
+  *Corner angles* (R9). `Flip::new_corner_angles = [θ_l, θ_k]`, in the order of
+  `new_vertices = [l, k]`: the angle at `l` in the new face `(j, k, l)` and the angle at `k` in
+  the new face `(i, l, k)`; `Flip::new_corners` are their halfedges after the flip, `l → j` and
+  `k → i` (the two that stay in place, `ComplexFlip`). Each is bitwise `Triangulation::
+  corner_angle` of that corner (`ddg_core::geometry::corner_angle` orders its two sides, so the
+  argument order does not matter). The signposts compute exactly these two for their signpost
+  update; the integer coordinates compute them from the plan (`FlipPlan::new_corner_angles`), so
+  both representations return the same `Flip` (`ddg-integer-coords/tests/ops.rs` compares them).
+  The other two corners at `l` and `k` are not computed.
+  *Bitwise.* With the default test nothing changes: `tests/bitwise_pins.rs` and the suites of
+  this crate, `ddg-intrinsic-apps`, `ddg-uv`, `ddg-py` and `ddg-integer-coords` pass unchanged.
+  FlipOut's fingerprints (9 meshes × 500 pairs × 2 representations, `examples/fo_pin`) with
+  `flip_shape = N5` are those from before; with `REFERENCE` 99 pairs change on both
+  representations alike, all 4500 certify; using the returned angles in FlipOut's memo changes
+  no fingerprint.
+  *Cost* (one pinned core, three rounds, load average 2.8 to 7.7 from other jobs). Delaunay
+  flipping from the input mesh (median of 21): unchanged for the signposts (within 0.5 %); for the
+  integer coordinates, which now compute two corner angles per flip, camelbad (8110 flips)
+  8.84 → 9.35 ms (+5.7 %, about 60 ns per flip), spot (281 flips) +1.3 %, tree (594 flips)
+  +0.8 %. FlipOut's shortening (median per pair, 9 meshes × 500 pairs, against the code
+  before): the relative test alone −2.2 % to +1.3 %; with the memo taking the returned angles,
+  signposts −2.7 % to −4.9 % and integers +3.4 % to +7.4 % (the two angles cost more there than
+  the memo saves). A variant in which the integer flip returns no angles (`Option`) measured
+  integers −1.1 % to +1.3 % and signposts −5.7 % to −7.5 %, but gives the two representations
+  different `Flip` values, which `ddg-integer-coords/tests/ops.rs` rejects; not taken.
 
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,

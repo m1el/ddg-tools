@@ -130,7 +130,8 @@ Hunt for signpost trace failures (SPEC §7 test 9): 9 data meshes x 4 seeds x 10
 signpost trace failed**, so there is no committed fixture yet (the failures of IntCoords Fig. 17
 need Thingi10k, F7). Two trials (tree, seed 2, pairs 372 and 934) ended with FlipOut not
 geodesic to `1e-4` (the paper's 99.4 %); the certificate on `T⁰` measured the same angle as `T`
-(`max_wedge_mismatch` 7e-11).
+(`max_wedge_mismatch` 7e-11). Both were IT N5's shape test refusing a needle flip; with the
+reference's relative test, now the default, they certify (see "Runs that stall" below).
 
 Timings (`evaluation`, release, one thread, 200 random pairs per mesh, median per path; the
 machine was shared: load average 1.4 before, 4.3 after the run):
@@ -171,7 +172,9 @@ call. Each item below keeps every result bitwise:
   summed only within `1e-13` of `π`, and debug builds assert the decision.
 - **After a flip** Alg. 1 merges the two corners of the flipped edge instead of rebuilding the
   wedge, and checks the Δ-complex cases (App. A) only where they can change.
-- **Flips** call `flip_edge` once; it refuses exactly when `can_flip` would.
+- **Flips** call `flip_edge_with` once; it refuses exactly when `can_flip_with` would.
+- **The flip's corner angles** (`Flip::new_corner_angles`, IT N52): the two corner angles a
+  flip computes at the new edge's ends go into the memo instead of being recomputed.
 
 `examples/fo_pin` fingerprints every result: lengths, counts, every `ShortenStep`, the final
 triangulation and the layering. The fingerprints of 9 meshes × 500 pairs × 2 representations are
@@ -207,22 +210,57 @@ The shortening is 3.6–4.1 times faster than before on both representations. It
 - **The flips themselves.** The triangulation's flips (`plan_flip`, the flip, two corner angles
   for the signposts) are about a quarter of it.
 
+**The flip test and the flip's corner angles** (IT N52). Alg. 1's flips now use the reference's
+relative shape test (`ShortenOptions::flip_shape`, below), and the memo takes the two corner
+angles each flip returns. Same harness and pairs, one pinned core, three interleaved rounds
+(median per pair over the rounds, then over the pairs), load average 2.8–7.7 from other jobs;
+"before" = commit `3afbe2c`, "after" = both changes; the gc column is the reference's from the
+table above.
+
+| mesh | gc shorten | sp shorten before → after | sp loop before → after | ic shorten before → after | ic loop before → after | loop / gc sp, ic (median per pair) |
+|---|---|---|---|---|---|---|
+| spot | 0.0434 | 0.0679 → 0.0660 | 0.0578 → 0.0569 | 0.0669 → 0.0692 | 0.0577 → 0.0599 | 1.28, 1.38 |
+| bob | 0.0859 | 0.1297 → 0.1234 | 0.1155 → 0.1101 | 0.1268 → 0.1338 | 0.1150 → 0.1221 | 1.28, 1.42 |
+| blub | 0.1129 | 0.1607 → 0.1533 | 0.1436 → 0.1362 | 0.1574 → 0.1684 | 0.1417 → 0.1503 | 1.22, 1.35 |
+| crumpled | 0.0104 | 0.0180 → 0.0173 | 0.0141 → 0.0135 | 0.0174 → 0.0185 | 0.0139 → 0.0148 | 1.29, 1.41 |
+| camelbad | 0.1581 | 0.2063 → 0.1968 | 0.1849 → 0.1740 | 0.2018 → 0.2167 | 0.1826 → 0.1960 | 1.13, 1.26 |
+| bunny | 0.1632 | 0.1867 → 0.1796 | 0.1681 → 0.1594 | 0.1848 → 0.1941 | 0.1666 → 0.1748 | 0.97, 1.07 |
+| cow1 | 0.1740 | 0.2073 → 0.1973 | 0.1848 → 0.1739 | 0.2036 → 0.2147 | 0.1824 → 0.1923 | 1.00, 1.10 |
+| rhino | 0.2261 | 0.2895 → 0.2778 | 0.2653 → 0.2536 | 0.2828 → 0.2999 | 0.2618 → 0.2783 | 1.10, 1.22 |
+| tree | 0.2259 | 0.2591 → 0.2479 | 0.2369 → 0.2268 | 0.2571 → 0.2719 | 0.2357 → 0.2525 | 1.00, 1.11 |
+
+- Signposts: shortening −2.7 % to −4.9 %; the loop alone is 0.97–1.29 times the reference.
+- Integers: +3.4 % to +7.4 %. Their flip computes the two corner angles only for `Flip` (the
+  signposts compute them anyway for their signpost update), and that costs more than the memo
+  saves. A variant whose integer flip returns no angles measured −1.1 % to +1.3 % on the
+  integers, but it would make the two representations return different `Flip` values, which
+  `ddg-integer-coords/tests/ops.rs` forbids.
+- The relative test alone moves the times by −2.2 % to +1.3 %.
+- All 4498 pairs now have the reference's length to `1e-9` on both representations, and all
+  are geodesic (tree 12804 → 1144 was the one exception before).
+
 **Runs that stall** (`tests/stalled.rs`).
-- On the `tree` mesh, three pairs end with a joint bent by `6e-4`–`4e-3` rad: 12804 → 1144,
-  and pairs 372 and 934 of seed 2 (F3's open trials).
+- On the `tree` mesh, three pairs ended with a joint bent by `6e-4`–`4e-3` rad under IT N5's
+  shape test: 12804 → 1144, and pairs 372 and 934 of seed 2 (F3's open trials).
 - Each Dijkstra path passes two vertices `1e-4`–`6e-4` apart. Straightening the joint next to
   them needs a last flip that makes a needle triangle of shape `1.2e-7`–`6.9e-7`.
-- `plan_flip` refuses it (IT N5, `FLIP_SHAPE_LIMIT = 1e-6`). The outer arc is then longer than
-  the joint, and the joint stalls (F6).
+- N5 refuses it (`FLIP_SHAPE_LIMIT = 1e-6`). The outer arc is then longer than the joint, and
+  the joint stalls (F6). Such a run ends with status `Stalled`, not `Geodesic`.
 - The reference's test is relative, `A ≥ 1e-6 (A₁ + A₂)` (ratios `5e-5`–`1e-3` here), so it
   makes the flip and its paths skip both close vertices.
-- Such a run now ends with status `Stalled` instead of `Geodesic`, which the stall memory used
-  to give. Of the 9 × 500 pairs, only the statuses of tree 12804 → 1144 and 10499 → 1703 change.
-  The latter is bent by less than `1e-4`, so the default certificate passes.
-- With the reference's relative test in place of the shape limit (an experiment, not in this
-  crate): 99 of 4500 pairs change; every one certifies; all 4500 agree with the reference's
-  length to `1e-9`. Tree 1938 → 8644 now ends on the reference's geodesic, `4.6e-8` longer than
-  before. The two F3 pairs certify and match the reference to `1e-13`.
+- **Now the default** (`ShortenOptions::flip_shape = FlipShapeTest::REFERENCE`): the three
+  pairs certify, end `Geodesic`, and have the reference's length to `1e-12` on both
+  representations (`tree_pairs_certify_with_the_reference_flip_test`).
+- With `flip_shape = FlipShapeTest::N5` the results are bitwise those from before (9 × 500 pairs
+  × 2 representations), and the three pairs still stall
+  (`tree_pairs_with_a_refused_needle_flip_stall_under_n5`).
+- What the default changes, against N5: 99 of the 4500 pairs, identically on both
+  representations; every one certifies. Mostly a flip or two more and a length within `1e-10`
+  (tree 1938 → 8644 now ends on the reference's geodesic, `4.6e-8` longer); two statuses change
+  from `Stalled` to `Geodesic` (tree 12804 → 1144 and 10499 → 1703); on camelbad
+  8294 → 9415 the relative test refuses one flip that N5 makes, with the same length. Only
+  Alg. 1's flips use the relative test; the triangulation's own operations (and the iCDT, which
+  is Delaunay flipping) keep N5.
 
 ## Credits
 
