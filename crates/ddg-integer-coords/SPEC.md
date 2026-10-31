@@ -130,9 +130,11 @@ reversal `ζ̄ = (ji→, n_ij − p − 1)` (`ic-reverse-crossing`). Geometric c
 A state is **valid** when, in addition to IT-SPEC §5 items 1–2 (strict triangle inequalities,
 angle sums):
 
-1. every corner coordinate is a non-negative integer: the bracket of Eq. 1 is even and at least
-   the subtracted emanating counts (`ic-face-validity`);
-2. in every face at most one corner has `e > 0` (two cevians from different corners cross);
+1. every corner coordinate is an integer: the bracket of Eq. 1 is even (`ic-face-validity`).
+   It is never negative, and is even exactly when `Σ n⁺` over the face is even or some corner
+   emanates (Lean `faceValid_iff`);
+2. in every face at most one corner has `e > 0` (two cevians from different corners cross). This
+   follows from Eq. 2 (Lean `emanating_exclusive`) and is not checked separately;
 3. an edge with `n = −1` has no crossings and both its halfedges with tails in `V⁰` have
    roundabouts pointing at the edge of `T⁰` it runs along;
 4. every edge `ab ∈ T⁰` is extracted (Alg. 4) as a curve that starts at `a`, ends at `b`, passes
@@ -157,8 +159,9 @@ measures its cost).
   interior edge (`ic-strip-intersection`). The strip unfolding reuses `ddg_intrinsic::formulas`
   (`it-unfold-diamond`, `it-ray-edge-intersection`).
 * `IdentifyTracedEdge` (Alg. 3): walk back to a vertex of `V⁰`, then the local index
-  `k = r_{aj} + (p − c^{ja}_i) + n⁻_{aj}` (`ic-identify-edge`), modulo `deg₀(a)` at an interior
-  vertex.
+  `k = r_{ai} + (p − c^{ja}_i) + n⁻_{ai}` (`ic-identify-edge`), modulo `deg₀(a)` at an interior
+  vertex. The halfedge is `Next(Next(ij)) = a→i` (Alg. 3's `aj` is a misnomer; the reference
+  reads `roundabouts[he.next().next()]`, `ic:1983-1984`).
 * `ExtractEdge(ab)` (Alg. 4): from the roundabouts at `a`, the halfedge of `T¹` just before `ab`,
   the crossing index `p = k + n_{ai} − r_{ai}`, then `ExtractCurve`, continued through vertices of
   `V*` that lie on `ab` (only edge splits create those, §4.5).
@@ -200,12 +203,18 @@ Flippability as IT-SPEC §4 and N5 (strictly convex unfolded quadrilateral, both
 degree ≥ 1, not a boundary edge). Then, for `ij` shared by `ijk`, `jil`, the new edge `kl`:
 
 ```
-n_kl = c^{jk}_l + c^{il}_k + ½|c^{il}_j − c^{ki}_j| + ½|c^{lj}_i − c^{jk}_i| − ½e^{ji}_l − ½e^{ij}_k
+n_kl = c^{ji}_l + c^{ij}_k + ½|c^{il}_j − c^{ki}_j| + ½|c^{lj}_i − c^{jk}_i| − ½e^{ji}_l − ½e^{ij}_k
        + e^{lj}_i + e^{jk}_i + e^{il}_j + e^{ki}_j + n⁻_ij                     [formula: ic-flip-normal]
 r_{kl} = (r_{ki} + e^{il}_k + n⁻_{ki}) mod deg₀(k)                           [formula: ic-roundabout-update]
 ```
 
-(and `r_{lk}` symmetrically, only for tails in `V⁰`); `ℓ_kl` by `it-flip-length`. In code:
+(and `r_{lk}` symmetrically, only for tails in `V⁰`); `ℓ_kl` by `it-flip-length`. **Correction
+to the paper:** its first two terms read `c^{jk}_l + c^{il}_k`, which name no corner of the two
+faces; they are the corners at `l` of `jil` and at `k` of `ijk`, `c^{ji}_l + c^{ij}_k`, as the
+reference computes (`nc:724-764`, `Clji`, `Ckij`) and Lean proves (`flip_count`). Eq. 3 can return
+values below `−1` for combinatorially valid quadrilaterals with two or more `k`–`l` arcs (quad
+`2,0,0,0,0` gives `−2`); straight arcs cannot do that, so the code treats `n_kl < −1` as
+`InvalidCoordinates` naming the edge. The involution (`ic-flip-involution`) holds regardless. In code:
 `plan_flip(&complex, &lengths, e)?` (refusal and `ℓ_kl`), the integers above from the pre-flip
 state, then `complex.flip_edge(e)`, whose `ComplexFlip` says where `n_kl`, `r_kl`, `r_lk` go. Exact: the
 integers after the flip are those of the same realization over the new `T¹` (Lean tier C, §9).
@@ -244,7 +253,7 @@ callers that need the inserted point exactly, see §5).
 ### 4.5 Edge split (Sec. 3.4, Alg. 7, Eq. 6)
 
 `n_ij ≥ 0`: face split then flip (Fig. 10 top). `n_ij = −1`: explicit split along the shared
-curve, `n_mj = n_mi = −1`, `n_mk = max(n_ki, n_jk)` (`ic-split-edge-normal`), and the same on the
+curve, `n_mj = n_mi = −1`, `n_mk = max(n_ki, n_jk, 0)` (`ic-split-edge-normal`; the `0` matters when both are `−1`), and the same on the
 other side when interior; `q⁰_m = u_i q⁰_i + u_j q⁰_j` along the input edge. Boundary edges are
 always of the second kind. Lengths and refusal from `plan_edge_split`, connectivity from
 `Complex::split_edge` (I20: also for `n_ij ≥ 0`, without the face-split-then-flip route).
@@ -253,8 +262,11 @@ always of the second kind. Lengths and refusal from `plan_edge_split`, connectiv
 
 Only `i ∈ V*`. Flip flippable edges at `i` until its degree is 3 (interior) or the boundary
 analogue (I7: the reference's rule for boundary vertices, `runs_tmp/ic-reference-map.md`), then
-delete. No integer data changes beyond the flips. Thm. D.1 proves a flippable edge exists in a
-simplicial star with angle sum `2π`; for a star that is not simplicial the paper conjectures it.
+delete. No integer data changes beyond the flips. Thm. D.1 proves that a simplicial star with
+angle sum `2π` and degree `≥ 4` has a spoke whose quadrilateral has all angles `≤ π`; it need not
+be strictly convex (Lean `cross_star_no_strict`: in the degree-4 cross every inner corner is `π`),
+so N5's strict flippability can fail, e.g. at an interior vertex made by an edge split (**I27**).
+For a star that is not simplicial the paper conjectures it (open, `ic-vertex-removal-delta`).
 **I8:** the flip choice is deterministic (the flippable edge that lowers the degree with the
 largest minimum angle afterwards; ties by edge index), the loop is bounded by `deg(i)²` flips, and
 a star where no edge is flippable is refused with `RemovalStuck { vertex, degree }`, the state
@@ -323,8 +335,9 @@ Given `f` on `V¹` (piecewise linear on `T¹`), `f̂` on `V⁰` minimizing
 `‖f − f̂‖²_{L²} = (P₁f − P₀f̂)ᵀ M_S (P₁f − P₀f̂)` (Eq. 13) solves `P₀ᵀ M_S P₀ f̂ = P₀ᵀ M_S P₁ f`
 (Eq. 14), `M_S` the Galerkin mass matrix of the common subdivision (`ddg_intrinsic_apps::fem`
 conventions). The paper writes `M₀ f̂ = P₀ᵀ M_S P₁ f`; `P₀ᵀ M_S P₀ = M₀` holds exactly because the
-pieces of an input triangle are linear on it (`ic-transfer-mass-identity`, proved), and is checked
-numerically. Also the reverse direction (`T⁰ → T¹`) and plain copying, for the comparison of
+pieces of an input triangle are linear on it (`ic-transfer-mass-identity`: the finite identity
+for the pieces of Alg. 9, proved; `ic-transfer-mass-integral`: the tiling and the P1 integral,
+cited, Ciarlet 1978), and is checked numerically. Also the reverse direction (`T⁰ → T¹`) and plain copying, for the comparison of
 Fig. 14. The factorization of `M₀` is kept for repeated transfers. Report: residual, the size of
 `S`.
 
@@ -384,20 +397,21 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-trace-step` | Alg. 1's three cases follow the unique arc of the face model through crossing `p` | B |
 | `ic-trace-terminates` | in a complex model, `TraceFrom` ends at a corner after at most `Σ n⁺` steps and visits each crossing at most once | C |
 | `ic-identify-edge` | Alg. 3's index is the local index of the curve's `T⁰` halfedge | C |
-| `ic-flip-normal` | in a convex quadrilateral (two glued face models, straight arcs), the arc system re-cut along the other diagonal has the counts of Eq. 3 | A (identity) / C (correctness) |
+| `ic-flip-normal` | in a convex quadrilateral (two glued face models, straight arcs), the arc system re-cut along the other diagonal has the counts of Eq. 3 (with the corrected first terms, §4.2) | A (identity) and the count in a quadrilateral model `Quad` (`flip_count`): proved; gluing two face models and re-cutting: C |
 | `ic-flip-involution` | Eq. 3 applied twice returns `n_ij`, for counts coming from a face-model pair | A |
 | `ic-roundabout-update` | Eq. 4 gives the local index after the flip | C |
 | `ic-face-split-normal` | Alg. 5/6: inserting a vertex in any region `R` of a face model and joining it to the corners by arcs disjoint from the others gives the stated counts; hence the result is valid whichever region floating point picks | B |
 | `ic-split-edge-normal` | Eq. 6 | A |
 | `ic-recover-barycentric` | Eq. 15–16 reproduce `q⁰` exactly for any solution `ξ`, when the corner positions are exact (affine combination) | A |
 | `ic-tangent-length` | Eq. 5 (law of cosines in barycentric form) | A (proved equal to `it-point-distances`, which the code evaluates; I25) |
-| `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
-| `ic-vertex-removal` | Thm. D.1: a simplicial star of angle sum `2π` and degree `> 3` has a flippable edge that lowers the degree | B′ |
+| `ic-transfer-mass-identity`, `ic-transfer-normal-equations` | the finite identity behind `P₀ᵀ M_S P₀ = M₀`; Eq. 14 is the minimizer of Eq. 13 | A |
+| `ic-transfer-mass-integral` | the pieces tile the input triangle and the P1 mass integral | CITED (Ciarlet 1978) |
+| `ic-vertex-removal` | Thm. D.1: a simplicial star of angle sum `2π` and degree `> 3` has a spoke whose quadrilateral has all angles `≤ π` (strictly convex when no inner corner is `π`; the strict version is false in general) | B′ |
 | `ic-vertex-removal-delta` | the Δ-complex case (paper: conjecture) | attempt, bounded; else CITED as open with I8's runtime refusal |
 | `ic-normal-isotopy` | complex models ↔ normal isotopy classes of curves on the surface (Kneser 1929, Haken 1961; Schaefer, Sedgwick, Štefankovič 2002; Erickson, Nayyeri 2013) | D, CITED |
 | `ic-refinement-termination` | Thm. C.1 with Lemmas C.2–C.5; Chew 1993, Shewchuk 1997; boundary unproved in the paper | E, CITED |
 | `ic-dijkstra-ball` | Xia 2013 Cor. 1 | E, CITED |
-| `ic-mollify` | Sharp, Crane 2020b | CITED (as `bff-` mollification if already listed) |
+| `ic-mollify` | Sharp, Crane 2020b | CITED; the formula itself is proved as `intrinsic-mollification` |
 
 ### 9.3 Existing formalizations (survey of 2026-10-31, `runs_tmp/ic-formalization-survey.md`)
 
@@ -570,6 +584,10 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   neither input-aligned nor stable under flips. For vertices of `V⁰` an input-aligned frame is
   available from the roundabouts plus one angle within the input wedge; the design is decided in
   WP11 before that consumer switches representation.
+* **I27** *Removal of a vertex with a straight star (open, WP3).* An interior vertex made by an
+  edge split has degree 4 with two angles of `π`, so no spoke is strictly flippable (§4.6). WP3
+  decides between undoing the split (the inverse of `Complex::split_edge`, merging the halves) and
+  `RemovalStuck`, and counts how often refinement meets it.
 
 ## 12. Work packages
 
@@ -583,7 +601,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP5 | common subdivision, `P₀`, `P₁`, point queries | `src/subdivision.rs`, `tests/subdivision.rs` | WP2 | Sonnet |
 | WP6 | Delaunay refinement with boundary | `src/refine.rs`, `tests/refine.rs` | WP3, WP4 | Opus |
 | WP7 | transfer (Eq. 13–14), Fig. 14 | `src/transfer.rs`, `examples/fig14.rs` | WP5 | Sonnet |
-| WP8 | Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
+| WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | evaluation: Thingi10k, benches, the reference comparison | `examples/thingi.rs`, `benches/`, `scripts/ic-eval.sh` | WP6, Q1, Q2 | Sonnet |
 | WP11 | consumers: `ddg-intrinsic-apps`, `ddg-uv`, Python, Blender (§13 Q3, Q5). Not in the trait yet (WP0 survey): `cotan_laplacian`, `lumped_mass` (could be provided methods); `refine`, `refine_with`; `optimal_delaunay`, `move_vertex`, `odt_target`; `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input`; `point_on_input`, `point_on_triangulation`; `overlay`, `check`; `signpost` (I26) | per crate | WP5, WP6 | Sonnet |
