@@ -38,3 +38,28 @@ of the reference's larger meshes. The meshes live in the gitignored `data/` (`da
 `data/intrinsic-simplification/`, see its `README.md`); missing files are skipped with a notice.
 Timing: `cargo run --release -p ddg-intrinsic-simplification --example remove_all -- MESH.obj`
 removes every removable vertex by ascending id (no error metric) and prints the time.
+
+## The map and the prolongation (WP4; SPEC §7)
+
+* `CoarseMesh::compact()` returns a `CoarseOutput`: the coarse faces in compacted vertex ids
+  (with the map to the fine ids), the side lengths and corner angles of every face, the angular
+  coordinates, and every tracked point as `CoarsePoint::Vertex(v̄)` or `Face { face, bary }`.
+* `scalar_prolongation()` is `P` (`|V| × |V̄|`, rows sum to one); `point_prolongation()` the same
+  for every tracked point (texels, centroids).
+* `vector_prolongation(&FineFrames, n)` is `P^vec` (complex, `ComplexSparse`) with a
+  `VectorProlongationReport` of how each row was found. It is the paper's construction with
+  the unnormalization (`unnormalize_field` / `normalize_field`, `unnormalize` / `normalize`),
+  the coarse interpolation `β`, `w`, `z` and the fine sampling `ψ`, with fallbacks that never
+  leave a row empty (same face, edge-adjacent face, average of the neighbours' rows). `FineFrames`
+  holds the fine mesh's normalized frames (those of `IntrinsicTriangulation::new` on the input);
+  `n` takes `n`-direction fields. Note that the vector code of `ddg-intrinsic-apps` stores the
+  vectors of a boundary vertex in the unnormalized frame, `P^vec` takes and gives the normalized
+  one (`π/Θ`); `unnormalize`/`normalize` convert.
+* `colour_faces()` is a deterministic greedy colouring of the coarse faces, distinct across faces
+  that share a vertex, with no palette limit; `face_of_points()` and `point_colours()` give the
+  coarse face and colour of every tracked point (paper Sec. 8.1).
+
+Tests: `cargo test --release -p ddg-intrinsic-simplification --test prolongation` (flat grids:
+linear functions and constant vector/line/cross fields reproduced to 1e-13; row sums; rotation
+consistency; no empty rows on the models; the smoothest field of `ddg-intrinsic-apps` on the
+coarse mesh against the fine one; the colouring).
