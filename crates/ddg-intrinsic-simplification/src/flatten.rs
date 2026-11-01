@@ -3,7 +3,7 @@
 //! method on the extended angles of Springborn, Schröder and Pinkall (2008), safeguarded by a
 //! bracket.
 
-use crate::formulas::{face_angle_sum_and_derivative, projective_interpolation};
+use crate::formulas::{face_angle_sum_and_derivative, projective_interpolation_signed};
 use crate::mesh::{CoarseMesh, Location, face_lengths};
 
 /// The largest `|u|` the bracket may expand to: lengths change by at most `e^{|u|/2}`
@@ -252,7 +252,13 @@ impl CoarseMesh {
                 for slot in 0..n {
                     let p = self.face_points[sf.face][slot];
                     if let Location::Face { bary, .. } = self.points[p as usize] {
-                        self.set_bary(p, projective_interpolation(bary, sf.at, u));
+                        let b = projective_interpolation_signed(
+                            bary,
+                            sf.at,
+                            u,
+                            self.options.projective_sign,
+                        );
+                        self.set_bary(p, b);
                     }
                 }
             }
