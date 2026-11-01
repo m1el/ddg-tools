@@ -478,7 +478,12 @@ Open:
   `Complex/SplitAtCrossing.lean`): `n_mc` counts the arcs crossing the chord `mc`, `−1` exactly
   when the arc through `m` comes from `c`; the new faces are valid with one end at `m` and merge
   back to `n` (`merge_normal`); the split as an operation on `Cx` is not built.
-* Lean, not yet proved: `ic-input-aligned-frame` (needs angles in the complex model), the flip's
+* `ic-input-aligned-frame` proved (`IntegerCoords/Frames/`): for the straight segment of the
+  strip, the Rust direction is the signposts' frame angle at input and inserted vertices (the
+  clamp never acts), the wedge `wedge_at` picks follows from `RoundaboutsOK`, a flip keeps the
+  other halfedges' frame data; that the geodesic edge is that segment stays cited
+  (`it-straightest-geodesic`, `ic-normal-isotopy`).
+* Lean, not yet proved: that a flip keeps the input edge of every crossing (frames), the flip's
   same-curves statement at the level of `Cx.next` (proved on the glued quadrilateral), Alg. 3's
   walk back past inserted vertices; and the 13 `fo-` ids (FlipOut F5/F6).
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused

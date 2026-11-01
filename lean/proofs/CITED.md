@@ -1898,7 +1898,11 @@ crossing on exactly one curve from a vertex, found by walking back), and the mer
 merged faces are valid and the Rust formula counts the merged edge's crossings, given the curve ends
 at the inserted vertex as the realization has them); tier B: the split of a crossed edge
 (`ic-split-crossed-edge`) and the split exactly at a crossing (`ic-split-at-crossing`: the new edge's
-count as the arcs crossing it, the two new faces valid, the merge back); tier A: the strip intersection of Alg. 2 (`ic-strip-intersection`). All statements
+count as the arcs crossing it, the two new faces valid, the merge back); tier A: the strip intersection of Alg. 2 (`ic-strip-intersection`); and the
+input-aligned frames (`ic-input-aligned-frame`, `DdgProofs/IntegerCoords/Frames/`: for the straight
+segment of the strip, the Rust direction is the signposts' frame angle, at input and inserted
+vertices; that the geodesic edge is that segment is `it-straightest-geodesic` with
+`ic-normal-isotopy`). All statements
 about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
 the data structure of the Rust crate and that
@@ -1940,7 +1944,8 @@ are not cited here).
   triangle: the face counts determine the face model and exist exactly for valid counts
   (`FaceModel.Valid.partner_eq`, `FaceModel.exists_valid_iff`, `[formula: ic-face-decoding]`).
 - **What depends on it.** That `n` and `r` are a complete encoding of the correspondence; the
-  library's exactness claim (SPEC §1) is relative to it. Tested by the certificate (SPEC §2.4 item 4)
+  library's exactness claim (SPEC §1) is relative to it; so is the strip of input faces from which
+  the input-aligned frames are read (`ic-input-aligned-frame`, proved for that strip). Tested by the certificate (SPEC §2.4 item 4)
   and the brute-force recount (SPEC §8 layer 3).
 
 ### [formula: ic-refinement-termination] Intrinsic Delaunay refinement terminates
@@ -1983,27 +1988,6 @@ are not cited here).
   extension to surfaces is asserted, not proved, in the IC paper.
 - **What depends on it.** Only that refinement with boundary removes enough vertices; removing more
   is harmless (App. C.1). Not a correctness condition of the integer data.
-
-### [formula: ic-input-aligned-frame] Input-aligned tangent frames from integer coordinates
-
-- **Statement.** In a valid state, for a halfedge `h = a→b` of the triangulation, the direction
-  of IC SPEC §4.12 (the input signpost of the input halfedge the roundabout names for `n = −1`; else
-  the input signpost of the wedge's first input halfedge plus `s_a` times the angle from it to the
-  straight segment of the edge in its unfolded strip of input faces, or the angle of that segment
-  in the frame of the input face or edge of an inserted vertex) is the direction in which the
-  geodesic edge leaves `a`, measured in the frame the signposts define (IT-SPEC N2, N7, N9, N10),
-  i.e. the signpost `φ_h` of the same triangulation.
-- **Reference.** Sharp, Soliman, Crane 2019, Sec. 2.3 and 3.1 (signposts: the direction of an edge
-  at its tail in a frame normalized by `2π/Θ`); Gillespie, Sharp, Crane 2021, Sec. 2.4 (roundabouts)
-  and Sec. 2.5 with Supp. Alg. 2 (the edge is the straight segment of the unfolded strip of the input
-  faces it crosses, `ic-strip-intersection`, `ic-extract-intrinsic-edge`).
-- **Why cited.** The statement is the definition of the signposts' frame composed with the fact that
-  an edge is straight in the unfolding of the input faces it crosses, which needs the realization
-  of the whole triangulation (tier C of the IC contract, SPEC §9; WP9 owns that model). The angle
-  arithmetic is elementary. Tested in Rust against the stored signposts
-  (`crates/ddg-integer-coords/tests/frames.rs`: 1 352 388 halfedges of 266 converted states within
-  `1.14e-10` rad; 806 346 halfedges after the same operations on both representations) and through
-  the tangent fields (`crates/ddg-intrinsic-apps/tests/vector_representation.rs`).
 
 ### [formula: ic-mollify] Intrinsic mollification
 

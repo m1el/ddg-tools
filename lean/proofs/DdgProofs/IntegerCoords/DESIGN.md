@@ -27,6 +27,10 @@ changing them.
 | `Complex/Merge.lean` | one side of a straight merge (two faces glued along the spoke) gives a valid face; the Rust `merge_edge_normal` | `ic-merge-edge-normal` |
 | `Complex/SplitAtCrossing.lean` | the two faces of a split at a crossing (explicit admissible corner counts), straight with one curve end at `m` (`Merge.Side`, `Merge.Straight`, `Merge.ends = 1`), merging back to the original face; both sides and `Merge.merge_normal` | `ic-split-at-crossing` |
 | `Complex/Extract.lean` | every crossing on the curve of exactly one end (walk back), ends are arcs of corners | `ic-extract-intrinsic-edge` (combinatorial) |
+| `Frames/Angle.lean` | `angleFrom` (the Rust `angle_from`, `atan2` as `Complex.arg`), the angle turning `u` into `d` and the only one; half-plane and corner bounds; `wrap` | `ic-input-aligned-frame` |
+| `Frames/Input.lean` | the signposts' frame at an input vertex (`Star`: corners from the reference, `angleScale`, input signposts = Alg. 4's fold); the Rust corner and along values are its frame angles; the cone from `Chord::hit` | `ic-input-aligned-frame` |
+| `Frames/Inserted.lean` | frames at inserted vertices (face, interior and boundary input edge, along an edge): the Rust value is the unique direction of `d` (`IsDir`) | `ic-input-aligned-frame` |
+| `Frames/Wedge.lean` | `wedge_at`'s index is the label of the input direction before `h` (`RoundaboutsOK`); a flip keeps the frame data of the other edges | `ic-input-aligned-frame` |
 
 Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-termination`,
 `ic-dijkstra-ball`, `ic-mollify`, `ic-transfer-mass-integral`, `ic-vertex-removal-delta` (open).
