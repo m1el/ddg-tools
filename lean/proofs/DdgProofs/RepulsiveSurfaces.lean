@@ -2,6 +2,7 @@ import DdgProofs.RepulsiveSurfaces.Basic
 import DdgProofs.RepulsiveSurfaces.Geometry
 import DdgProofs.RepulsiveSurfaces.Kernel
 import DdgProofs.RepulsiveSurfaces.Energy
+import DdgProofs.RepulsiveSurfaces.Metric
 
 /-!
 # Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021)
