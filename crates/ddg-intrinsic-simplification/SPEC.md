@@ -219,9 +219,11 @@ removal and are reverted with it if the removal fails.
 **Commit.** Lengths of the star scaled; `K_j` of the neighbours updated (their angle sums change,
 `iem-flatten-conserves-curvature`: `Σ_{j ∈ N_i} K̃_j = Σ_{j ∈ N_i} K_j + K_i`); the angular
 coordinates of `i` and of every neighbour recomputed from their references (S4); tracked points
-of the star faces moved by Eq. 10, `b̃ = (e^{u_i} b_i, b_j, b_k)/(e^{u_i} b_i + b_j + b_k)` with the
-factor applied to every corner equal to `i` (`iem-projective-interpolation`: continuous across
-edges and a bijection of each face onto itself).
+of the star faces moved by the projective interpolation of Springborn et al. 2008 Sec. 3.4,
+`b̃ = (e^{−u_i} b_i, b_j, b_k)/(e^{−u_i} b_i + b_j + b_k)` with the factor applied to every corner
+equal to `i` (the paper cites this map but prints Eq. 10 with `e^{+u_i}`, its inverse; S25:
+`ProjectiveSign::Negative` is the default, `Positive` an option; `iem-projective-interpolation`: either is continuous
+across edges and a bijection of each face onto itself).
 
 *As built (WP2).* The bracket starts open on both sides at `u = 0`; while one side is open a
 step leaving the bracket moves `1, 2, 4, …` past the known end; `|u| ≤ 60`
@@ -971,8 +973,8 @@ lengths `ℓ̂` against the input triangle: with `γ_max ≥ γ_min` the eigenva
   triangle inequality are counted (`n_invalid_faces`, `invalid_area_fraction`) and excluded from
   the statistics. The **mean of `γ_max/γ_min` is dominated by a few near-degenerate images**
   (QEM has faces of `10^15`); read it with the median and the 99th percentile.
-* **Eq. 10 sign (S25).** `CoarseMeshOptions::projective_sign: ProjectiveSign { Paper, Cetm }`
-  (default `Paper`), `formulas::projective_interpolation_signed`; the coarse mesh and the removal
+* **Eq. 10 sign (S25).** `CoarseMeshOptions::projective_sign: ProjectiveSign { Positive, Negative }`
+  (default `Negative` since the user's decision of 2026-11-01, S25), `formulas::projective_interpolation_signed`; the coarse mesh and the removal
   order do not depend on it (tested), only the map.
 * **Successive self-parameterization (S23)** in `baseline::successive`, switched on by
   `QemOptions::successive_map` (`QemResult::successive`: face and barycentric coordinates of each
@@ -1025,53 +1027,53 @@ below is a timing except in the scaling tables.
 mean, median, 99th percentile and maximum over the fine faces), "abs log-area" is the mean of
 `|log(σ₁σ₂)|`, "area err" is `100 |A_coarse − A_fine|/A_fine` with the coarse area from the coarse
 lengths (ICE: intrinsic; QEM: extrinsic). "invalid" are faces whose `ℓ̂` violate the triangle
-inequality (not in the statistics). The `ice-cetm` rows are S25's other sign (same coarse mesh).
+inequality (not in the statistics). The `ice-negative` rows are S25's other sign (same coarse mesh).
 Edge distances: no pair needed the exact-vertex fallback or was unresolved in any run.
 
 | mesh | n | method | area err % | aniso mean | median | p99 | max | abs log-area mean | max | invalid faces (area) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| blub_triangulated | 142 | ice-paper | 2.26 | 1.138 | 1.117 | 1.942 | 7.489 | 0.055 | 0.917 | 0 (0.0e+00) |
-| blub_triangulated | 142 | ice-cetm | 2.26 | 1.052 | 1.036 | 1.465 | 4.485 | 0.059 | 0.781 | 0 (0.0e+00) |
+| blub_triangulated | 142 | ice-positive | 2.26 | 1.138 | 1.117 | 1.942 | 7.489 | 0.055 | 0.917 | 0 (0.0e+00) |
+| blub_triangulated | 142 | ice-negative | 2.26 | 1.052 | 1.036 | 1.465 | 4.485 | 0.059 | 0.781 | 0 (0.0e+00) |
 | blub_triangulated | 142 | qem-closest | 0.11 | 6.6e+10 | 1.038 | 6.375 | 2.5e+15 | 0.045 | 17.752 | 6 (2.4e-04) |
 | blub_triangulated | 142 | qem-successive | 0.11 | 1.382 | 1.107 | 6.917 | 945 | 0.056 | 2.554 | 0 (0.0e+00) |
-| blub_triangulated | 200 | ice-paper | 1.56 | 1.091 | 1.078 | 1.582 | 11.016 | 0.039 | 1.239 | 0 (0.0e+00) |
+| blub_triangulated | 200 | ice-positive | 1.56 | 1.091 | 1.078 | 1.582 | 11.016 | 0.039 | 1.239 | 0 (0.0e+00) |
 | blub_triangulated | 200 | qem-closest | 0.24 | 6.6e+10 | 1.027 | 3.436 | 2.5e+15 | 0.031 | 17.752 | 4 (1.7e-04) |
 | blub_triangulated | 200 | qem-successive | 0.24 | 1.136 | 1.070 | 2.970 | 178 | 0.033 | 2.489 | 0 (0.0e+00) |
-| blub_triangulated | 711 | ice-paper | 0.42 | 1.018 | 1.017 | 1.107 | 1.213 | 0.009 | 0.144 | 0 (0.0e+00) |
-| blub_triangulated | 711 | ice-cetm | 0.42 | 1.010 | 1.008 | 1.087 | 1.187 | 0.010 | 0.115 | 0 (0.0e+00) |
+| blub_triangulated | 711 | ice-positive | 0.42 | 1.018 | 1.017 | 1.107 | 1.213 | 0.009 | 0.144 | 0 (0.0e+00) |
+| blub_triangulated | 711 | ice-negative | 0.42 | 1.010 | 1.008 | 1.087 | 1.187 | 0.010 | 0.115 | 0 (0.0e+00) |
 | blub_triangulated | 711 | qem-closest | 0.03 | 1.019 | 1.009 | 1.428 | 3.569 | 0.008 | 0.636 | 0 (0.0e+00) |
 | blub_triangulated | 711 | qem-successive | 0.03 | 1.022 | 1.015 | 1.307 | 2.968 | 0.008 | 0.469 | 0 (0.0e+00) |
-| bob_tri | 107 | ice-paper | 0.83 | 1.183 | 1.157 | 2.051 | 10.491 | 0.082 | 1.420 | 0 (0.0e+00) |
-| bob_tri | 107 | ice-cetm | 0.83 | 1.060 | 1.045 | 1.521 | 6.184 | 0.089 | 1.624 | 0 (0.0e+00) |
+| bob_tri | 107 | ice-positive | 0.83 | 1.183 | 1.157 | 2.051 | 10.491 | 0.082 | 1.420 | 0 (0.0e+00) |
+| bob_tri | 107 | ice-negative | 0.83 | 1.060 | 1.045 | 1.521 | 6.184 | 0.089 | 1.624 | 0 (0.0e+00) |
 | bob_tri | 107 | qem-closest | 0.62 | 1.197 | 1.080 | 3.530 | 27.289 | 0.063 | 1.639 | 0 (0.0e+00) |
 | bob_tri | 107 | qem-successive | 0.62 | 1.208 | 1.152 | 3.216 | 28.724 | 0.056 | 1.306 | 0 (0.0e+00) |
-| bob_tri | 200 | ice-paper | 0.47 | 1.094 | 1.084 | 1.429 | 3.242 | 0.047 | 0.632 | 0 (0.0e+00) |
+| bob_tri | 200 | ice-positive | 0.47 | 1.094 | 1.084 | 1.429 | 3.242 | 0.047 | 0.632 | 0 (0.0e+00) |
 | bob_tri | 200 | qem-closest | 0.44 | 1.086 | 1.046 | 1.790 | 4.971 | 0.032 | 0.702 | 0 (0.0e+00) |
 | bob_tri | 200 | qem-successive | 0.44 | 1.094 | 1.075 | 1.654 | 4.309 | 0.028 | 0.478 | 0 (0.0e+00) |
-| bob_tri | 534 | ice-paper | 0.18 | 1.031 | 1.028 | 1.121 | 1.778 | 0.017 | 0.268 | 0 (0.0e+00) |
-| bob_tri | 534 | ice-cetm | 0.18 | 1.016 | 1.011 | 1.078 | 1.354 | 0.017 | 0.250 | 0 (0.0e+00) |
+| bob_tri | 534 | ice-positive | 0.18 | 1.031 | 1.028 | 1.121 | 1.778 | 0.017 | 0.268 | 0 (0.0e+00) |
+| bob_tri | 534 | ice-negative | 0.18 | 1.016 | 1.011 | 1.078 | 1.354 | 0.017 | 0.250 | 0 (0.0e+00) |
 | bob_tri | 534 | qem-closest | 0.13 | 1.026 | 1.018 | 1.181 | 1.669 | 0.010 | 0.248 | 0 (0.0e+00) |
 | bob_tri | 534 | qem-successive | 0.13 | 1.030 | 1.025 | 1.190 | 1.784 | 0.010 | 0.202 | 0 (0.0e+00) |
-| spot_subdiv | 200 | ice-paper | 2.01 | 1.195 | 1.134 | 2.135 | 9.786 | 0.075 | 1.248 | 0 (0.0e+00) |
+| spot_subdiv | 200 | ice-positive | 2.01 | 1.195 | 1.134 | 2.135 | 9.786 | 0.075 | 1.248 | 0 (0.0e+00) |
 | spot_subdiv | 200 | qem-closest | 1.10 | 1.663 | 1.032 | 5.561 | 23125 | 0.055 | 4.026 | 6 (1.0e-04) |
 | spot_subdiv | 200 | qem-successive | 1.10 | 1.307 | 1.111 | 4.220 | 426 | 0.058 | 2.528 | 0 (0.0e+00) |
-| spot_subdiv | 495 | ice-paper | 0.93 | 1.071 | 1.050 | 1.342 | 2.074 | 0.033 | 0.419 | 0 (0.0e+00) |
-| spot_subdiv | 495 | ice-cetm | 0.93 | 1.025 | 1.015 | 1.167 | 1.669 | 0.035 | 0.336 | 0 (0.0e+00) |
+| spot_subdiv | 495 | ice-positive | 0.93 | 1.071 | 1.050 | 1.342 | 2.074 | 0.033 | 0.419 | 0 (0.0e+00) |
+| spot_subdiv | 495 | ice-negative | 0.93 | 1.025 | 1.015 | 1.167 | 1.669 | 0.035 | 0.336 | 0 (0.0e+00) |
 | spot_subdiv | 495 | qem-closest | 0.27 | 1.063 | 1.015 | 1.830 | 349 | 0.022 | 2.929 | 0 (0.0e+00) |
 | spot_subdiv | 495 | qem-successive | 0.27 | 1.076 | 1.038 | 1.670 | 7.816 | 0.021 | 0.957 | 0 (0.0e+00) |
-| spot_subdiv | 2476 | ice-paper | 0.22 | 1.011 | 1.008 | 1.047 | 1.113 | 0.006 | 0.060 | 0 (0.0e+00) |
-| spot_subdiv | 2476 | ice-cetm | 0.22 | 1.006 | 1.003 | 1.033 | 1.078 | 0.006 | 0.052 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | ice-positive | 0.22 | 1.011 | 1.008 | 1.047 | 1.113 | 0.006 | 0.060 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | ice-negative | 0.22 | 1.006 | 1.003 | 1.033 | 1.078 | 0.006 | 0.052 | 0 (0.0e+00) |
 | spot_subdiv | 2476 | qem-closest | 0.03 | 1.009 | 1.004 | 1.085 | 3.535 | 0.004 | 0.629 | 0 (0.0e+00) |
 | spot_subdiv | 2476 | qem-successive | 0.03 | 1.011 | 1.006 | 1.081 | 2.263 | 0.004 | 0.392 | 0 (0.0e+00) |
-| spot_triangulated | 59 | ice-paper | 7.58 | 1.734 | 1.413 | 10.209 | 239 | 0.187 | 2.806 | 0 (0.0e+00) |
-| spot_triangulated | 59 | ice-cetm | 7.58 | 1.250 | 1.139 | 3.677 | 23.598 | 0.223 | 2.307 | 0 (0.0e+00) |
+| spot_triangulated | 59 | ice-positive | 7.58 | 1.734 | 1.413 | 10.209 | 239 | 0.187 | 2.806 | 0 (0.0e+00) |
+| spot_triangulated | 59 | ice-negative | 7.58 | 1.250 | 1.139 | 3.677 | 23.598 | 0.223 | 2.307 | 0 (0.0e+00) |
 | spot_triangulated | 59 | qem-closest | 1.26 | 9.5e+11 | 1.163 | 73.476 | 1.1e+16 | 0.168 | 18.485 | 50 (2.8e-03) |
 | spot_triangulated | 59 | qem-successive | 1.26 | 17.734 | 1.652 | 667 | 2.9e+05 | 0.205 | 5.654 | 0 (0.0e+00) |
-| spot_triangulated | 200 | ice-paper | 1.85 | 1.155 | 1.134 | 2.027 | 6.860 | 0.060 | 0.990 | 0 (0.0e+00) |
+| spot_triangulated | 200 | ice-positive | 1.85 | 1.155 | 1.134 | 2.027 | 6.860 | 0.060 | 0.990 | 0 (0.0e+00) |
 | spot_triangulated | 200 | qem-closest | 0.53 | 1.113 | 1.054 | 3.979 | 18.696 | 0.038 | 1.440 | 0 (0.0e+00) |
 | spot_triangulated | 200 | qem-successive | 0.53 | 1.170 | 1.116 | 3.275 | 19.023 | 0.048 | 1.497 | 0 (0.0e+00) |
-| spot_triangulated | 293 | ice-paper | 1.26 | 1.101 | 1.090 | 1.544 | 2.245 | 0.042 | 0.431 | 2 (3.2e-04) |
-| spot_triangulated | 293 | ice-cetm | 1.26 | 1.056 | 1.041 | 1.378 | 1.969 | 0.047 | 0.594 | 2 (3.2e-04) |
+| spot_triangulated | 293 | ice-positive | 1.26 | 1.101 | 1.090 | 1.544 | 2.245 | 0.042 | 0.431 | 2 (3.2e-04) |
+| spot_triangulated | 293 | ice-negative | 1.26 | 1.056 | 1.041 | 1.378 | 1.969 | 0.047 | 0.594 | 2 (3.2e-04) |
 | spot_triangulated | 293 | qem-closest | 0.36 | 1.073 | 1.037 | 2.513 | 6.209 | 0.027 | 0.909 | 0 (0.0e+00) |
 | spot_triangulated | 293 | qem-successive | 0.36 | 1.102 | 1.073 | 2.287 | 5.612 | 0.033 | 0.745 | 0 (0.0e+00) |
 
@@ -1111,14 +1113,13 @@ CrumpledDevelopable  vertices  method       area_err_%  aniso_mean  aniso_max  |
 (`area_crumpled.log`, `area_bs_rest.log`.)
 
 **Eq. 10 sign (S25).** Same coarse mesh, same area error and lengths; only the map differs
-(`ice-paper` against `ice-cetm` rows above, at 10 % and 2 % of spot, bob, blub and spot_subdiv):
-the `e^{−u}` map (`Cetm`) has the smaller anisotropic mean *and* maximum in all 8 of 8
+(`ice-positive` against `ice-negative` rows above, at 10 % and 2 % of spot, bob, blub and spot_subdiv):
+the `e^{−u}` map (`Negative`) has the smaller anisotropic mean *and* maximum in all 8 of 8
 configurations (spot 293: 1.101 → 1.056, max 2.25 → 1.97; spot 59: 1.734 → 1.250, max 239 → 23.6;
 bob 107: 1.183 → 1.060, max 10.5 → 6.2; blub 142: 1.138 → 1.052, max 7.5 → 4.5; spot_subdiv 495:
 1.071 → 1.025), while the mean `|log σ₁σ₂|` is 3–19 % *larger* in 8 of 8 (spot 59: 0.187 → 0.223).
-The default stays `Paper` (the contract's S25); **proposal: make `Cetm` the default for consumers
-of the map** (the Blender view, prolongation) — the anisotropy is what spoils `P`. The
-applications of §10.1 were not rerun with `Cetm`.
+Decision (the user's, 2026-11-01): `Negative` is the default, `Positive` an option (S25). The
+applications of §10.1 were not rerun with `Negative`.
 
 **Applications (Fig. 21, 22, 23, 24, 25; `applications --method`).** Errors are against the fine
 solution: exact geodesic and heat method = mean relative L1 error of the prolongated distance over
@@ -1468,14 +1469,19 @@ star), fixtures `lean/oracle/fixtures/iem/` (format in `lean/oracle/README.md`);
   successive maps (§10.4); not in the reference (R43).
 * **S24 Hierarchy from one run with snapshots** (masses carry across levels); the reference's fresh
   per-level runs (R33) as an option.
-* **S25 Eq. 10 as printed** (`b̃_i ∝ e^{+u} b_i`): the paper's and the reference's map, which is
-  the *inverse* of Springborn et al.'s circumcircle-preserving projective interpolation (`e^{−u}`,
-  CETM Sec. 3.4, App. D; found by WP10). Both are continuous bijections of each face
-  (`iem-projective-interpolation`), so tracking is correct either way; the default follows the
-  paper; the option `CoarseMeshOptions::projective_sign` selects the other; WP9a measured the
-  distortion (§10.5): `Cetm` has the lower anisotropic distortion in 8 of 8 configurations (mean
-  and maximum), `Paper` a 3–19 % lower area distortion in 8 of 8; proposal: `Cetm` as the default
-  for consumers of the map.
+* **S25 The map through a flattening: Springborn et al.'s `e^{−u}` (default), Eq. 10 as printed
+  an option.** The paper cites the circumcircle-preserving projective interpolation of Springborn
+  et al. 2008 (Sec. 3.4, App. D: linear interpolation of `(x, 1)` and `e^{−u}(s, 1)`), but prints
+  Eq. 10 with `e^{+u}` (and the reference implements that): its inverse, under the same length
+  convention (Eq. 3). Found by WP10. Both are continuous bijections of each face
+  (`iem-projective-interpolation`), so tracking is correct either way; the coarse mesh and the
+  removal order do not depend on it. WP9a measured the distortion (§10.5): `Negative` has the lower
+  anisotropic distortion in 8 of 8 configurations (mean and maximum), `Positive` a 3–19 % lower area
+  distortion in 8 of 8. **Decision (the user's, 2026-11-01): `ProjectiveSign::Negative` (`e^{−u}`) is the
+  default, `Positive` (`e^{+u}`) an option** (`CoarseMeshOptions::projective_sign`; Python
+  `projective_sign="negative"|"positive"`; Blender "Point Map"); `ReferenceCompat` comparisons use
+  `Positive`. The circumcircle property of
+  `e^{−u}` is checked numerically (oracle self-test), not proved.
 * **R55** (new, found by WP10): the reference's Newton denominator sums `cot` per corner also in
   faces with a self-edge, which is not the derivative there; S9 drops the cotangent opposite the
   self-edge. The root is the same.

@@ -51,6 +51,13 @@ REPRESENTATION_ITEMS = (
     ('SIGNPOSTS', "Signposts", "Sharp, Soliman, Crane 2019 (for the refinements)"),
 )
 
+POINT_MAP_ITEMS = (
+    ('NEGATIVE', "Negative (e^-u)",
+     "The circumcircle-preserving map of Springborn et al. 2008 that the paper cites; much less "
+     "distortion"),
+    ('POSITIVE', "Positive (e^+u)", "Eq. 10 as printed in the paper, as the authors' code does"),
+)
+
 
 class Result:
     """What ``intrinsic_simplify`` made."""
@@ -79,7 +86,8 @@ def _check_attribute(mesh, name, domain, data_type):
 
 def intrinsic_simplify(
         obj, *, target_mode='PERCENT', percent=10.0, count=100, area_weight=0.0, memory=True,
-        fix_selected=False, refine_before=False, refine_after=False, representation='INTEGER'):
+        fix_selected=False, refine_before=False, refine_after=False, representation='INTEGER',
+        point_map='NEGATIVE'):
     """Simplifies the mesh of ``obj`` (library ``ddg_tools.simplify``) without changing it and
     writes the corner color attribute, the face id attribute and the vertex group. Returns a
     ``Result``. Raises ``core.UnwrapFailed`` with a message for the user."""
@@ -102,7 +110,7 @@ def intrinsic_simplify(
     points = (array('i', range(n_triangles)), array('d', [1.0 / 3.0] * (3 * n_triangles)))
     options = dict(weights=float(area_weight), memory=memory, points=points,
                    refine_before=refine_before, refine_after=refine_after,
-                   representation=representation.lower())
+                   representation=representation.lower(), projective_sign=point_map.lower())
     if len(fixed):
         options["fixed"] = fixed
     if target_mode == 'PERCENT':
@@ -248,6 +256,9 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
     representation: EnumProperty(
         name="Representation", items=REPRESENTATION_ITEMS, default='INTEGER',
         description="The intrinsic triangulation of the refinements")
+    point_map: EnumProperty(
+        name="Point Map", items=POINT_MAP_ITEMS, default='NEGATIVE',
+        description="How the fine faces move through each flattening (paper Eq. 10)")
 
     @classmethod
     def poll(cls, context):
@@ -266,6 +277,7 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
         row = layout.row()
         row.enabled = self.refine_before or self.refine_after
         row.prop(self, "representation")
+        layout.prop(self, "point_map")
 
     def execute(self, context):
         obj = context.active_object
@@ -280,7 +292,8 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
                 obj, target_mode=self.target_mode, percent=self.percent, count=self.count,
                 area_weight=self.area_weight, memory=self.memory,
                 fix_selected=self.fix_selected, refine_before=self.refine_before,
-                refine_after=self.refine_after, representation=self.representation)
+                refine_after=self.refine_after, representation=self.representation,
+                point_map=self.point_map)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}

@@ -167,6 +167,7 @@ def defaults_and_registration():
     assert props["fix_selected"].default is False
     assert props["refine_before"].default is False and props["refine_after"].default is False
     assert props["representation"].default == 'INTEGER'
+    assert props["point_map"].default == 'NEGATIVE'
     assert hasattr(bpy.types, "VIEW3D_PT_ddg_intrinsic_simplify")
     assert bpy.ops.object.ddg_intrinsic_simplify.poll() is False, "no active object"
 

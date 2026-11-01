@@ -520,8 +520,9 @@ Landed (all work packages WP0–WP11):
   geodesics 16–37 % *worse* than QEM (the paper's 4× is against Lee et al.); scaling exponent 0.95.
 
 Open:
-* Eq. 10's sign (S25): `Cetm` (Springborn's circumcircle-preserving map) gives far lower anisotropic
-  distortion, the paper's sign 3–19 % lower area distortion; the default (paper) awaits the user.
+* Eq. 10's sign (S25), decided 2026-11-01: `ProjectiveSign::Negative` (`e^{−u}`, Springborn's
+  circumcircle-preserving map, which the paper cites; far lower anisotropic distortion) is the
+  default, `Positive` (`e^{+u}`, Eq. 10 as printed; 3–19 % lower area distortion) an option.
 * Flattening failures: 7–11 % of Thingi10k meshes keep a few vertices unremovable
   (`flatten_failed`, `not_flattenable`; the paper reports 0.1 % floating-point failures); not yet
   analysed.

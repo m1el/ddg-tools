@@ -842,6 +842,9 @@ Jacobson, Crane, *Surface Simplification using Intrinsic Error Metrics*, ACM TOG
   - the vertex group **`IntrinsicSimplifyVertices`** (weight 1): the vertices that stay.
   Set the viewport color to *Attribute* to see the colors (as for Show Developability, the
   operator does not change the viewport). Running again overwrites the attributes and the group.
+- **Point Map**: how the faces move through each flattening (paper Eq. 10): *Negative (e^-u)*
+  (default; the circumcircle-preserving map of Springborn et al. 2008 that the paper cites, much
+  less distortion) or *Positive (e^+u)* (Eq. 10 as printed, as the authors' code does). The coarse mesh is the same either way.
 - The report is a line in the info area (vertex counts, removals by kind, colors, seconds) and
   custom properties `ddg_simplify_*` of the mesh (counts, the stop reason, the options).
 

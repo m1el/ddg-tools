@@ -209,9 +209,11 @@ real order; `greedy` is the WP6 stand-in).
   `baseline::successive` lists the gaps). `extrinsic_applications` wraps either as a
   `CoarseApplications`, so Poisson, geodesics, all pairs and Voronoi run on the QEM mesh with the
   same code as on the ICE mesh.
-* **Eq. 10 sign** (`CoarseMeshOptions::projective_sign`, SPEC S25): `ProjectiveSign::Paper`
-  (default, `e^{+u}`) or `Cetm` (`e^{-u}`, Springborn et al.); both are valid bijections of the
-  tracking, they differ in the distortion of the map (measured in SPEC §10 "Results of record").
+* **Eq. 10 sign** (`CoarseMeshOptions::projective_sign`, SPEC S25): `ProjectiveSign::Negative`
+  (default, `e^{-u}`: the circumcircle-preserving map of Springborn et al. 2008 that the paper
+  cites) or `Positive` (`e^{+u}`, Eq. 10 as printed and as the reference implements it, its
+  inverse); both are valid bijections of the tracking, `Negative` distorts the map much less (SPEC §10 "Results
+  of record").
 * Examples: `evaluate` (distortion and area error, ICE against QEM, per target and method),
   `applications --method …` (Poisson, geodesics, all pairs, Voronoi), `scaling` (Fig. 16: one size
   per process, run it pinned with `taskset`).

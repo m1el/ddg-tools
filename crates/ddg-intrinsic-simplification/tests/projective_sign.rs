@@ -32,8 +32,8 @@ fn the_two_signs_are_inverse_maps_of_a_face() {
     let b = [0.2, 0.5, 0.3];
     let at = [true, false, false];
     for u in [-1.5, 0.3, 2.0] {
-        let p = projective_interpolation_signed(b, at, u, ProjectiveSign::Paper);
-        let q = projective_interpolation_signed(p, at, u, ProjectiveSign::Cetm);
+        let p = projective_interpolation_signed(b, at, u, ProjectiveSign::Positive);
+        let q = projective_interpolation_signed(p, at, u, ProjectiveSign::Negative);
         for k in 0..3 {
             assert!((q[k] - b[k]).abs() < 1e-14, "u = {u}: {q:?} vs {b:?}");
         }
@@ -43,8 +43,8 @@ fn the_two_signs_are_inverse_maps_of_a_face() {
 
 #[test]
 fn both_signs_give_the_same_coarse_mesh_and_valid_different_maps() {
-    let a = run(ProjectiveSign::Paper);
-    let b = run(ProjectiveSign::Cetm);
+    let a = run(ProjectiveSign::Positive);
+    let b = run(ProjectiveSign::Negative);
     a.certify(false).unwrap();
     b.certify(false).unwrap();
     assert_eq!(a.edge_lengths(), b.edge_lengths());
@@ -63,4 +63,14 @@ fn both_signs_give_the_same_coarse_mesh_and_valid_different_maps() {
         }
     }
     assert!(differ > 0, "the two signs gave identical maps");
+}
+
+/// The default is Springborn et al.'s circumcircle-preserving map (SPEC S25, the user's decision).
+#[test]
+fn the_default_is_negative() {
+    assert_eq!(
+        ddg_intrinsic_simplification::CoarseMeshOptions::default().projective_sign,
+        ProjectiveSign::Negative
+    );
+    assert_eq!(ProjectiveSign::default(), ProjectiveSign::Negative);
 }

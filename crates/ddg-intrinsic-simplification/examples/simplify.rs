@@ -249,6 +249,8 @@ fn replay(
             "--replay-flatten-tol",
         )
         .unwrap_or(r.flatten_tolerance.unwrap_or(1e-12)),
+        // The reference tracks points with Eq. 10 as printed (S25).
+        projective_sign: ddg_intrinsic_simplification::ProjectiveSign::Positive,
         ..CoarseMeshOptions::default()
     };
     let mut mesh = CoarseMesh::from_positions(positions, faces, &[], mesh_options)

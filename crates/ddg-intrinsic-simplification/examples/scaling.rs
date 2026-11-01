@@ -57,8 +57,8 @@ fn main() {
         .and_then(|x| x.parse().ok())
         .unwrap_or(0.1);
     let sign = match arg(&args, "--sign").as_deref() {
-        None | Some("paper") => ProjectiveSign::Paper,
-        Some("cetm") => ProjectiveSign::Cetm,
+        Some("positive") => ProjectiveSign::Positive,
+        None | Some("negative") => ProjectiveSign::Negative,
         Some(x) => die(format!("--sign: paper or cetm, not {x}")),
     };
     let obj = read_obj(path).unwrap_or_else(|e| die(format!("{path}: {e}")));

@@ -114,18 +114,20 @@ pub fn face_angle_sum_and_derivative(l: [f64; 3], at_i: [bool; 3]) -> Option<(f6
 
 /// Which sign of the exponent the projective interpolation of Eq. 10 uses (SPEC S25).
 ///
-/// `Paper`: `b̃_k ∝ e^{+u} b_k` at the slots of the flattened vertex, as the paper prints it and
-/// as the reference implements it. `Cetm`: `e^{−u}`, the circumcircle-preserving projective
-/// interpolation of Springborn, Schröder, Pinkall 2008 (Sec. 3.4, App. D). Both are continuous
+/// `Negative` (default): `b̃_k ∝ e^{−u} b_k` at the slots of the flattened vertex, the
+/// circumcircle-preserving projective interpolation of Springborn, Schröder, Pinkall 2008
+/// (Sec. 3.4, App. D), which the paper cites for this step. `Positive`: `e^{+u}`, Eq. 10 as the
+/// paper prints it and as the reference implements it — the inverse of that map. Both are continuous
 /// bijections of every face onto itself ([`projective_interpolation_signed`]), so the tracking
-/// is correct with either; they differ in where interior points land.
+/// is correct with either; they differ in where interior points land (`Negative`: much lower
+/// anisotropic distortion of the map; `Positive`: 3–19 % lower area distortion; SPEC §10.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProjectiveSign {
-    /// `e^{+u}` (the paper's Eq. 10 as printed; default).
+    /// `e^{+u}` (the paper's Eq. 10 as printed and the reference's).
+    Positive,
+    /// `e^{−u}` (Springborn et al. 2008; default).
     #[default]
-    Paper,
-    /// `e^{−u}` (Springborn et al. 2008).
-    Cetm,
+    Negative,
 }
 
 /// Eq. 10 of the paper, as printed: the barycentric coordinates of a point of a face after the
@@ -139,7 +141,7 @@ pub enum ProjectiveSign {
 /// [formula: iem-projective-interpolation]
 #[inline]
 pub fn projective_interpolation(b: [f64; 3], at_i: [bool; 3], u: f64) -> [f64; 3] {
-    projective_interpolation_signed(b, at_i, u, ProjectiveSign::Paper)
+    projective_interpolation_signed(b, at_i, u, ProjectiveSign::Positive)
 }
 
 /// [`projective_interpolation`] with the sign of the exponent chosen by `sign` (SPEC S25).
@@ -153,8 +155,8 @@ pub fn projective_interpolation_signed(
     sign: ProjectiveSign,
 ) -> [f64; 3] {
     let s = match sign {
-        ProjectiveSign::Paper => u.exp(),
-        ProjectiveSign::Cetm => (-u).exp(),
+        ProjectiveSign::Positive => u.exp(),
+        ProjectiveSign::Negative => (-u).exp(),
     };
     let w = [0, 1, 2].map(|k| if at_i[k] { s * b[k] } else { b[k] });
     let sum = w[0] + w[1] + w[2];

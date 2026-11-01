@@ -609,6 +609,9 @@ s = simplify(positions, triangles, ratio=0.1)          # or target=500
 s = simplify(positions, triangles, target=500, weights=0.3,   # 30 % area in the metric
              fixed=[0, 17], refine_before=True, refine_after=True,
              points=(face_ids, barycentric))           # extra tracked points
+# projective_sign="negative" (default, e^-u: Springborn et al.'s map, which the paper cites) or
+# "positive" (e^+u, Eq. 10 as printed, the reference's): how tracked points move through a
+# flattening (SPEC S25)
 s.vertices, s.faces, s.faces_compact, s.lengths        # the coarse mesh (fine ids / compact ids)
 s.point_face, s.point_bary, s.point_vertex             # where every tracked point lies
 s.face_colours, s.point_colours, s.n_colours           # Fig. 1 colouring, deterministic

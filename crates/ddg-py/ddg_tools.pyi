@@ -1594,11 +1594,14 @@ def simplify(
     anisotropy_direction: Literal["max", "min"] | Buffer | None = None,
     anisotropy_clamp: bool = False,
     representation: Literal["signposts", "integer"] = "integer",
+    projective_sign: Literal["negative", "positive"] = "negative",
 ) -> Simplification:
     """Simplifies a mesh by intrinsic vertex removal with the intrinsic error metric (Alg. 1).
     Exactly one of ``target`` (vertex count) and ``ratio`` is required. ``weights`` is the
     curvature/area weight ``w`` (0: curvature, 1: area). ``points`` is ``(faces, bary)``: extra
-    tracked points. Raises ``InputError``, ``MeshError``, ``SolveError``."""
+    tracked points. ``projective_sign`` is how tracked points move through a flattening:
+    ``"negative"`` (``e^-u``, Springborn et al. 2008, the map the paper cites) or ``"positive"``
+    (``e^+u``, Eq. 10 as printed). Raises ``InputError``, ``MeshError``, ``SolveError``."""
 
 @final
 class MultigridSolver:

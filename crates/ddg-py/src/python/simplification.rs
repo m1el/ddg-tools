@@ -566,12 +566,17 @@ impl Simplification {
 ///                lines) or 3 reals per vertex; anisotropy_clamp lowers tau to the largest valid
 ///                value instead of failing.
 /// representation "integer" (default) or "signposts": the refinements' representation.
+/// projective_sign "negative" (default) or "positive": the sign of the exponent in how tracked
+///                points move through a flattening (SPEC S25): "negative" (e^-u) is the
+///                circumcircle-preserving map of Springborn et al. 2008 that the paper cites,
+///                "positive" (e^+u) is Eq. 10 as printed (the reference's). Same coarse mesh;
+///                "negative" distorts the map much less.
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a valid manifold
 /// triangle mesh, SolveError when a refinement or the simplification fails.
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, *, target = None, ratio = None, weights = 0.0, memory = true, fixed = None, masses = None, mass_weight = 1.0, points = None, refine_before = false, refine_after = false, repair_simplicial = true, anisotropy = None, anisotropy_direction = None, anisotropy_clamp = false, representation = "integer"))]
+#[pyo3(signature = (positions, triangles, *, target = None, ratio = None, weights = 0.0, memory = true, fixed = None, masses = None, mass_weight = 1.0, points = None, refine_before = false, refine_after = false, repair_simplicial = true, anisotropy = None, anisotropy_direction = None, anisotropy_clamp = false, representation = "integer", projective_sign = "negative"))]
 fn simplify<'py>(
     py: Python<'py>,
     positions: &Bound<'py, PyAny>,
@@ -591,6 +596,7 @@ fn simplify<'py>(
     anisotropy_direction: Option<&Bound<'py, PyAny>>,
     anisotropy_clamp: bool,
     representation: &str,
+    projective_sign: &str,
 ) -> PyResult<Simplification> {
     let input = mesh_input(positions, triangles)?;
     let (point_faces, point_bary) = match points {
@@ -648,6 +654,7 @@ fn simplify<'py>(
             clamp: anisotropy_clamp,
         }),
         representation: representation.to_owned(),
+        projective_sign: projective_sign.to_owned(),
     };
     let out = py
         .detach(move || RustSimplification::new(&input, &args))

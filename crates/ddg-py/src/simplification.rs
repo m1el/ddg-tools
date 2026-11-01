@@ -37,6 +37,7 @@ use ddg_intrinsic_simplification::multigrid::{
 use ddg_intrinsic_simplification::refine::{RefinementOptions, RefinementReport};
 use ddg_intrinsic_simplification::{
     ChannelSource, ChannelWeights, CoarseMesh, CoarseMeshOptions, CoarseOutput, CoarsePoint,
+    ProjectiveSign,
     FineFrames, InputPoint, MetricOptions, SimplifyOptions, SimplifyReport, Target,
     VectorProlongationReport, simplify,
 };
@@ -72,6 +73,18 @@ fn app_error(e: ddg_intrinsic_simplification::applications::AppError) -> UnwrapE
     match e {
         E::Invalid(text) => message(text),
         other => UnwrapError::Solve(other.to_string()),
+    }
+}
+
+fn projective_sign(name: &str) -> Result<ProjectiveSign, UnwrapError> {
+    match name {
+        "negative" => Ok(ProjectiveSign::Negative),
+        "positive" => Ok(ProjectiveSign::Positive),
+        other => Err(bad_option(
+            "projective_sign",
+            format!("{other:?}"),
+            "must be \"negative\" or \"positive\"",
+        )),
     }
 }
 
@@ -143,6 +156,9 @@ pub struct SimplifyArguments {
     pub anisotropy: Option<AnisotropyArguments>,
     /// `"integer"` or `"signposts"`: the refinement's representation.
     pub representation: String,
+    /// `"negative"` (default, `e^{-u}`) or `"positive"` (`e^{+u}`): the sign of Eq. 10, the map of the tracked points
+    /// through a flattening (SPEC S25).
+    pub projective_sign: String,
 }
 
 impl Default for SimplifyArguments {
@@ -162,6 +178,7 @@ impl Default for SimplifyArguments {
             repair_simplicial: true,
             anisotropy: None,
             representation: "integer".to_owned(),
+            projective_sign: "negative".to_owned(),
         }
     }
 }
@@ -398,7 +415,10 @@ impl Simplification {
                 (g, Some(report))
             }
         };
-        let mesh_options = CoarseMeshOptions::default();
+        let mesh_options = CoarseMeshOptions {
+            projective_sign: projective_sign(&args.projective_sign)?,
+            ..CoarseMeshOptions::default()
+        };
         let refinement = RefinementOptions {
             representation: rep,
             make_simplicial_flips: args.repair_simplicial.then_some(1000),

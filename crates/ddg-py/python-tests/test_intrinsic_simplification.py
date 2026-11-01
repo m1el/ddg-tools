@@ -122,6 +122,22 @@ class SimplifyTest(unittest.TestCase):
         d = ddg_tools.simplify(positions, triangles, ratio=0.15, weights=1.0)
         self.assertEqual(d.n_vertices, a.n_vertices)
 
+    def test_projective_sign(self):
+        positions, triangles = icosphere(3)
+        faces, bary = centroid_points(triangles)
+        a = ddg_tools.simplify(positions, triangles, ratio=0.1, points=(faces, bary))
+        c = ddg_tools.simplify(positions, triangles, ratio=0.1, points=(faces, bary),
+                               projective_sign="negative")
+        p = ddg_tools.simplify(positions, triangles, ratio=0.1, points=(faces, bary),
+                               projective_sign="positive")
+        # The default is "negative"; the coarse mesh does not depend on the sign, the map does.
+        self.assertEqual(list(a.point_bary), list(c.point_bary))
+        self.assertEqual(list(c.vertices), list(p.vertices))
+        self.assertEqual(list(c.faces), list(p.faces))
+        self.assertNotEqual(list(c.point_bary), list(p.point_bary))
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.simplify(positions, triangles, ratio=0.1, projective_sign="plus")
+
     def test_fixed_vertices_stay(self):
         positions, triangles = icosphere(3)
         fixed = array.array('i', [0, 3, 40, 100])
