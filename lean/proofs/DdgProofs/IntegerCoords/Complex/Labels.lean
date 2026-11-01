@@ -86,13 +86,14 @@ def lab (L : Labels F) (c : F × Fin 3) (j : ℕ) : ℕ := (L.r c + j) % L.md c
 
 /-- **The roundabouts are consistent** (SPEC §2.4 item 4, first bullet; `input_directions`):
 labels depend only on the vertex; `r < deg₀`; the next corner's roundabout is `r + n⁻ + e`
-(reduced at an interior vertex); at a boundary vertex the boundary halfedge leaving it has `r = 0`
-and the last corner ends at `deg₀ − 1` (the arriving boundary edge). -/
+(reduced at an interior vertex); at a boundary vertex (modulus `0`, I3) the boundary halfedge
+leaving it has `r = 0` and the last corner ends at `deg₀ − 1` (the arriving boundary edge). -/
 structure RoundaboutsOK (L : Labels F) : Prop where
   input_rot : ∀ c c', C.rot c = some c' → (L.input c' ↔ L.input c)
   deg_rot : ∀ c c', C.rot c = some c' → L.deg c' = L.deg c
   md_rot : ∀ c c', C.rot c = some c' → L.md c' = L.md c
   md_eq : ∀ c, L.input c → L.md c = 0 ∨ L.md c = L.deg c
+  md_bdry : ∀ c, L.input c → C.rot c = none → L.md c = 0
   r_lt : ∀ c, L.input c → L.r c < L.deg c
   r_next : ∀ c c', L.input c → C.rot c = some c' → (L.r c + C.w c) % L.md c = L.r c'
   r_last : ∀ c, L.input c → C.rot c = none → L.r c + C.w c + 1 = L.deg c

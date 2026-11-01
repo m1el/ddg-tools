@@ -311,7 +311,7 @@ pub fn flip_normal(
 /// leaves the `i64` range (only possible without reduction). The same with `(l, j, k)` for
 /// `r_lk`.
 ///
-/// Formula id `ic-roundabout-update` (SPEC §9.2, tier C: not proved; untagged until it is).
+/// [formula: ic-roundabout-update]
 pub fn roundabout_update(r_ki: i64, e_new: i64, n_minus_ki: i64, modulus: u32) -> Option<i64> {
     let s = i128::from(r_ki) + i128::from(e_new) + i128::from(n_minus_ki);
     let s = if modulus == 0 {

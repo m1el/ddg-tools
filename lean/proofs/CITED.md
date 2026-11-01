@@ -1891,11 +1891,12 @@ identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **c
 (faces glued by a side pairing, Δ-complexes allowed, one face model per face, crossings glued by
 `p ↦ n − 1 − p`, curves as the orbits of Alg. 1's step), `ic-trace-terminates`, and the labels
 at the input vertices with `ic-identify-edge` (Alg. 3 computes the label of the arc; the walk back
-past inserted vertices, Alg. 3 lines 1–5, is not modelled). All statements
+past inserted vertices, Alg. 3 lines 1–5, is not modelled), the flip of a complex model with the
+correctness of Eq. 3 after gluing two face models (`ic-flip-normal`, C part: same curves through the
+quadrilateral) and `ic-roundabout-update`. All statements
 about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
-`ic-roundabout-update` and the correctness of Eq. 3 after gluing (the
-quadrilateral model of `Flip.lean` is the local half); the data structure of the Rust crate and that
+the data structure of the Rust crate and that
 it applies the formulas to the right elements; anything about rounding (which region floating point
 picks, I15, is outside the proofs by design: every region is proved to give a valid state).
 

@@ -1188,3 +1188,13 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Cx.identify_along
 #print axioms DdgProofs.IntegerCoords.Cx.Valid.alg4_index
 #print axioms DdgProofs.IntegerCoords.Cx.RoundaboutsOK.lab_next
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.admissible1
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.admissible2
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.flipNormal_eq
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.outer
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.em_k
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.em_l
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.em_i
+#print axioms DdgProofs.IntegerCoords.Glue.Hyp.em_j
+#print axioms DdgProofs.IntegerCoords.Cx.flip_valid
+#print axioms DdgProofs.IntegerCoords.Cx.flip_roundabouts
