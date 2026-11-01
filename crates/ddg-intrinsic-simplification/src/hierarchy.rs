@@ -1,7 +1,7 @@
 //! The intrinsic mesh hierarchy of the paper's Sec. 8.7 (SPEC §9.1, S24): a sequence of coarse
 //! intrinsic triangulations of one input mesh, with the cotan Laplacian and lumped masses of
 //! every level and the scalar prolongations between consecutive levels, ready for
-//! [`Multigrid`](crate::multigrid::Multigrid).
+//! [`Multigrid`].
 //!
 //! > Surface Simplification using Intrinsic Error Metrics (Liu, Gillespie, Chislett, Sharp,
 //! > Jacobson, Crane 2023), Sec. 8.7, Fig. 29-31; and Liu, Zhang, Ben-Chen, Jacobson,
@@ -46,11 +46,11 @@ use std::time::Instant;
 use ddg_core::geometry::{corner_cotan, triangle_area};
 use ddg_core::{SparseError, SparseMatrix};
 
+use crate::PointLocation;
 use crate::error::IemError;
 use crate::mesh::CoarseMesh;
 use crate::multigrid::{Multigrid, MultigridError, MultigridOptions};
 use crate::simplify::{SimplifyOptions, SimplifyReport, Snapshot, Target, simplify};
-use crate::PointLocation;
 
 /// Errors of [`build_hierarchy`].
 #[derive(Debug, Clone, PartialEq)]
@@ -84,7 +84,9 @@ impl std::fmt::Display for HierarchyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HierarchyError::Simplify(e) => write!(f, "hierarchy: {e}"),
-            HierarchyError::BadOptions { reason } => write!(f, "invalid hierarchy options: {reason}"),
+            HierarchyError::BadOptions { reason } => {
+                write!(f, "invalid hierarchy options: {reason}")
+            }
             HierarchyError::BadLevel {
                 level,
                 face,

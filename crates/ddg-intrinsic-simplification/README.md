@@ -93,3 +93,21 @@ coarse triangles are isotropic in the scaled metric, hence **elongated across `u
 gives triangles long along the minimum direction (a cylinder's axis). Study:
 `cargo run --release -p ddg-intrinsic-simplification --example anisotropy_study -- MESH.obj
 max|min 300 0 0.2 0.4 0.6`; tests: `tests/anisotropy.rs`. Numbers: SPEC §8, "As built (WP8)".
+
+## Hierarchy, multigrid and conformalized mean curvature flow (WP7; SPEC §9, paper Sec. 8.7, Fig. 29-31)
+
+`hierarchy::build_hierarchy(&CoarseMesh, &HierarchyOptions)`: one `simplify` run with snapshots at
+`n0, n0/4, n0/16, …` down to at most 500 vertices (or the reference's fresh run per level,
+`fresh_levels`), giving per level the faces, side lengths, cotan Laplacian and lumped masses
+(Δ-complex safe) and the scalar prolongations `P_k` (`n_k x n_{k+1}`, rows sum to 1). The Galerkin
+multigrid of Liu et al. 2021 (`multigrid`) runs on it: `Hierarchy::multigrid(A, known, options)`; with
+2+2 symmetric Gauss-Seidel sweeps the V-cycle contracts by 0.23-0.30 (spot, bob) and 0.6 (blub,
+spot_subdiv), and PCG with the V-cycle as the preconditioner needs 10-22 iterations for `1e-10`
+(SPEC §9.3 "As built (WP7)" has the table). `cmcf::CmcfFlow`: the conformalized mean curvature flow of
+Kazhdan, Solomon, Ben-Chen 2012, `(M_t + h L0) X_{t+1} = M_t X_t`, by a direct Cholesky solve
+(`step_direct`) or PCG + multigrid on the input's intrinsic hierarchy (`step_multigrid`); the two agree to
+`1e-11` per step. Against this crate's supernodal Cholesky the multigrid step is not faster up to 187k
+vertices (0.3x at 3k, 0.8x at 187k); the paper's 20x is against a slower direct solver. Studies:
+`cargo run --release -p ddg-intrinsic-simplification --example multigrid_study -- MESH.obj` and
+`--example cmcf -- MESH.obj --steps 100 --out runs_tmp/cmcf_x` (OBJ per step); tests:
+`tests/hierarchy.rs`.

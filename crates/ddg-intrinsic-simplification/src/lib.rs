@@ -49,6 +49,9 @@
 //! * [`anisotropy`]: anisotropic edge-length scaling from principal directions (paper Sec. 8.6.2,
 //!   SPEC §8) and the coarse mesh of the scaled metric.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
+//! * [`hierarchy`]: the intrinsic mesh hierarchy (one run with snapshots, or fresh levels) with
+//!   its level operators and prolongations; [`cmcf`]: conformalized mean curvature flow
+//!   (Kazhdan, Solomon, Ben-Chen 2012) accelerated by multigrid on it (WP7, SPEC §9).
 
 pub mod anisotropy;
 pub mod baseline;

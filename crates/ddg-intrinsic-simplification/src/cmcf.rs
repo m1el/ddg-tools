@@ -138,6 +138,7 @@ pub struct CmcfFlow {
     step: f64,
     symbolic: Symbolic,
     steps_done: usize,
+    initial_area: f64,
 }
 
 fn masses(mesh: &TriMesh, pos: &[[f64; 3]]) -> Result<Vec<f64>, CmcfError> {
@@ -167,7 +168,9 @@ impl CmcfFlow {
         let l0 = cotan_laplacian(mesh, &g).map_err(|e| CmcfError::BadInput {
             reason: e.to_string(),
         })?;
-        let a = Self::system_matrix(&l0, step, &masses(mesh, positions)?)?;
+        let m0 = masses(mesh, positions)?;
+        let initial_area: f64 = m0.iter().sum();
+        let a = Self::system_matrix(&l0, step, &m0)?;
         let symbolic = Symbolic::analyze(&a, Method::Llt)?;
         Ok(CmcfFlow {
             mesh: mesh.clone(),
@@ -176,6 +179,7 @@ impl CmcfFlow {
             step,
             symbolic,
             steps_done: 0,
+            initial_area,
         })
     }
 
@@ -211,6 +215,33 @@ impl CmcfFlow {
     /// Steps taken.
     pub fn steps_done(&self) -> usize {
         self.steps_done
+    }
+
+    /// Translates the surface so that its mass-weighted centroid is the origin and scales it
+    /// about the origin to the surface area of the input. The flow shrinks to a point in finite
+    /// time (a sphere of area `A` vanishes at `t = A / 16π`, see the module docs); with this
+    /// after every step the shape converges to a round sphere instead (the common practice;
+    /// the stiffness matrix `L₀` is scale invariant, only `h` changes meaning: it becomes
+    /// relative to the input's area). Never applied by the steps themselves.
+    ///
+    /// # Errors
+    /// [`CmcfError::BadInput`] if the current mesh is degenerate.
+    pub fn normalize(&mut self) -> Result<(), CmcfError> {
+        let m = masses(&self.mesh, &self.positions)?;
+        let total: f64 = m.iter().sum();
+        let mut c = [0.0; 3];
+        for (p, w) in self.positions.iter().zip(&m) {
+            for k in 0..3 {
+                c[k] += w * p[k] / total;
+            }
+        }
+        let scale = (self.initial_area / total).sqrt();
+        for p in &mut self.positions {
+            for k in 0..3 {
+                p[k] = (p[k] - c[k]) * scale;
+            }
+        }
+        Ok(())
     }
 
     /// The system of the next step: `A` and the three right-hand sides `M_t X_t`, column after

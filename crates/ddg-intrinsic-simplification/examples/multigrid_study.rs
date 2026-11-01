@@ -12,10 +12,10 @@
 
 use std::time::Instant;
 
+use ddg_core::SparseMatrix;
 use ddg_core::generators::SplitMix64;
 use ddg_core::io::read_obj;
 use ddg_core::sparse::{Method, Parallelism, Symbolic};
-use ddg_core::SparseMatrix;
 use ddg_intrinsic_simplification::hierarchy::{HierarchyOptions, build_hierarchy};
 use ddg_intrinsic_simplification::multigrid::MultigridOptions;
 use ddg_intrinsic_simplification::{CoarseMesh, CoarseMeshOptions, SimplifyOptions, Target};
@@ -65,7 +65,12 @@ fn direct(a: &SparseMatrix, b: &[f64], known: &[u32], vals: &[f64]) -> (Vec<f64>
 }
 
 fn rel_diff(x: &[f64], y: &[f64]) -> f64 {
-    let d: f64 = x.iter().zip(y).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+    let d: f64 = x
+        .iter()
+        .zip(y)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        .sqrt();
     d / y.iter().map(|v| v * v).sum::<f64>().sqrt()
 }
 
@@ -90,8 +95,9 @@ fn main() {
     let name = std::path::Path::new(path)
         .file_stem()
         .map_or("mesh".to_string(), |s| s.to_string_lossy().to_string());
-    let mesh = CoarseMesh::from_positions(&obj.positions, &faces, &[], CoarseMeshOptions::default())
-        .unwrap_or_else(|e| die(format!("{path}: {e}")));
+    let mesh =
+        CoarseMesh::from_positions(&obj.positions, &faces, &[], CoarseMeshOptions::default())
+            .unwrap_or_else(|e| die(format!("{path}: {e}")));
     for fresh in [false, true] {
         let variant = if fresh { "fresh" } else { "snapshots" };
         let options = HierarchyOptions {
@@ -103,7 +109,6 @@ fn main() {
             } else {
                 SimplifyOptions::default()
             },
-            ..HierarchyOptions::default()
         };
         let t = Instant::now();
         let h = build_hierarchy(&mesh, &options).unwrap_or_else(|e| die(format!("{name}: {e}")));
