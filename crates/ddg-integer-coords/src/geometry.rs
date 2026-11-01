@@ -1234,3 +1234,160 @@ impl IntegerTriangulation {
         })
     }
 }
+
+// ----- the straight segment of an intrinsic edge at its ends (for `crate::frames`, I26) -----
+
+/// Where an end of an intrinsic edge lies in the input face its straight segment leaves it in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ChordEndPlace {
+    /// At an input vertex, in the corner of the outgoing input halfedge `out` (slot `out % 3`).
+    Corner { out: usize },
+    /// On the input edge of the face's halfedge `side` (`3 face + slot`).
+    OnEdge { side: usize },
+    /// Inside the face.
+    InFace,
+}
+
+/// One end of the straight segment of an intrinsic edge in its unfolded strip of input faces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ChordEnd {
+    /// The input face at this end.
+    pub face: usize,
+    /// Its corners in the plane of the strip, by slot.
+    pub corners: Corners,
+    /// The end's point in that plane.
+    pub point: [f64; 2],
+    /// Where the end lies in the face.
+    pub place: ChordEndPlace,
+}
+
+/// The straight segment of an intrinsic edge with `n ≥ 0` over the input mesh, at both ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct InputChord {
+    /// The end at the tail of the edge's `edge_halfedge`.
+    pub tail: ChordEnd,
+    /// The end at its head.
+    pub head: ChordEnd,
+    /// `|length in the strip − ℓ| / ℓ`.
+    pub relative_mismatch: f64,
+}
+
+impl IntegerTriangulation {
+    /// The straight segment of edge `e` (`n_e ≥ 0`) in the strip of input faces it crosses, laid
+    /// out with the input lengths as [`extract_intrinsic_edge`](Self::extract_intrinsic_edge)
+    /// lays it out, but returned at its two ends instead of intersected with the strip's edges
+    /// (the input-aligned frames of `crate::frames`, SPEC §4.12). `labels` are the input edges
+    /// of its crossings from the tail of `edge_halfedge(e)` (`None`: identified here by Alg. 1
+    /// and 3). Returns the segment and the walk steps.
+    ///
+    /// # Errors
+    /// As [`extract_intrinsic_edge`](Self::extract_intrinsic_edge); an edge with `n_e = −1`
+    /// (it has no strip) or labels of the wrong count are `InvalidCoordinates`.
+    pub(crate) fn input_chord(
+        &self,
+        e: usize,
+        labels: Option<&[u32]>,
+    ) -> Result<(InputChord, u64), IntegerError> {
+        let ne = self.complex.n_edges();
+        if e >= ne {
+            return Err(IntegerError::IndexOutOfRange {
+                what: "edge",
+                index: e,
+                bound: ne,
+            });
+        }
+        let n = self.normal[e];
+        if n < 0 {
+            return Err(invalid_edge(
+                e,
+                format!("normal coordinate {n}: the edge has no strip of input faces"),
+            ));
+        }
+        let (owned, steps) = match labels {
+            Some(_) => (Vec::new(), 0),
+            None => self.identify_crossings_of(e)?,
+        };
+        let labels = labels.unwrap_or(&owned);
+        if labels.len() as i64 != n {
+            return Err(invalid_edge(
+                e,
+                format!("{} input edges given for its {n} crossings", labels.len()),
+            ));
+        }
+        let strip = self.input_strip_of(e, labels)?;
+        let mesh = self.input.mesh();
+        let input_lengths = self.input.geometry().edge_lengths();
+        let laid = lay_out_strip(
+            &|f| [0, 1, 2].map(|k| input_lengths[mesh.edge(3 * f + k)]),
+            &|g| mesh.twin(g),
+            strip.first_face,
+            &strip.exits,
+        )
+        .map_err(|fault| match fault {
+            StripFault::Degenerate { face, lengths } => {
+                IntegerError::Intrinsic(IntrinsicError::DegenerateFace {
+                    surface: "input mesh",
+                    face: face as u32,
+                    lengths,
+                })
+            }
+            StripFault::NotInFace(i) | StripFault::Boundary(i) => invalid_edge(
+                e,
+                format!("crossing {i}: the strip of input faces is broken"),
+            ),
+        })?;
+        let end = |at: EndPlace, corners: Corners, face: usize| -> Result<ChordEnd, IntegerError> {
+            let (point, place) = match at {
+                EndPlace::Corner { out } => (corners[out % 3], ChordEndPlace::Corner { out }),
+                EndPlace::OnEdge { edge, t } => {
+                    let s = (0..3)
+                        .find(|&s| mesh.edge(3 * face + s) == edge)
+                        .ok_or_else(|| {
+                            invalid_edge(
+                                e,
+                                format!("input edge {edge} is not a side of input face {face}"),
+                            )
+                        })?;
+                    let g = 3 * face + s;
+                    let forward = mesh.from_vertex(g) == mesh.edge_vertices(edge)[0];
+                    let th = if forward { t } else { 1.0 - t };
+                    (
+                        lerp(corners[s], corners[(s + 1) % 3], th),
+                        ChordEndPlace::OnEdge { side: g },
+                    )
+                }
+                EndPlace::InFace { bary } => (
+                    [0, 1].map(|c| {
+                        bary[0] * corners[0][c] + bary[1] * corners[1][c] + bary[2] * corners[2][c]
+                    }),
+                    ChordEndPlace::InFace,
+                ),
+            };
+            Ok(ChordEnd {
+                face,
+                corners,
+                point,
+                place,
+            })
+        };
+        let tail = end(strip.start, laid.first, strip.first_face)?;
+        let head = end(strip.end, laid.last, laid.last_face)?;
+        let d = [head.point[0] - tail.point[0], head.point[1] - tail.point[1]];
+        let len = d[0].hypot(d[1]);
+        if !(len > 0.0 && len.is_finite()) {
+            return Err(invalid_edge(
+                e,
+                "the tail and the head are the same point of the unfolded input faces".into(),
+            ));
+        }
+        let relative_mismatch = (len - self.lengths[e]).abs() / self.lengths[e];
+        Ok((
+            InputChord {
+                tail,
+                head,
+                relative_mismatch,
+            },
+            steps,
+        ))
+    }
+}
