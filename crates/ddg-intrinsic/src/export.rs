@@ -118,6 +118,11 @@ pub struct SimplicialExport {
     pub max_angle: f64,
     /// What identifies this export (see the [module documentation](self)).
     pub fingerprint: u64,
+    /// Splits made off the midpoint of their edge because the midpoint was refused
+    /// ([`Exportable::split_for_export`]): integer coordinates refuse a point within rounding
+    /// of a crossing with an input edge (Integer Coordinates SPEC I28) and split near it
+    /// instead. Always `0` on signposts.
+    pub n_off_midpoint_splits: usize,
     /// Per edge of `mesh`: the edge of the triangulation.
     edge: Vec<u32>,
     /// Per edge of `mesh`: whether its lower-numbered vertex is the tail of that edge.
@@ -258,6 +263,19 @@ impl IntrinsicTriangulation {
 /// between representations is the refinement between rounds of splits, what identifies a
 /// state, and how a segment is found on the input mesh.
 pub trait Exportable: Triangulation + Clone {
+    /// Splits edge `e` to make the triangulation simplicial; returns whether the split is off
+    /// the midpoint. Provided: [`Triangulation::split_edge`] at `t = ½` (the signposts). A
+    /// representation that refuses the midpoint for a reason of its own (integer coordinates:
+    /// within rounding of a crossing, SPEC I28) may split at another parameter instead and say
+    /// so.
+    ///
+    /// # Errors
+    /// As [`Triangulation::split_edge`]; a refusal ([`IntrinsicError::InsertionRefused`]) is
+    /// not fatal for the export (another edge may be split first).
+    fn split_for_export(&mut self, e: usize) -> Result<bool, IntrinsicError> {
+        self.split_edge(e, 0.5).map(|_| false)
+    }
+
     /// The refinement [`ExportOptions::refine`] asks for. The signposts:
     /// [`IntrinsicTriangulation::refine`]. Every representation of this workspace refines by
     /// the same rules ([`RefineRules::Ruppert`](crate::RefineRules::Ruppert), IT-SPEC N1, N4),
@@ -328,6 +346,7 @@ pub fn export_simplicial<T: Exportable>(
     options: &ExportOptions,
 ) -> Result<SimplicialExport, IntrinsicError> {
     let mut n_splits = 0;
+    let mut n_off_midpoint_splits = 0;
     let mut n_flips = 0;
     let mut n_refine_rounds = 0;
     let mut n_refined = 0;
@@ -380,9 +399,10 @@ pub fn export_simplicial<T: Exportable>(
                         reason: format!("more than {} splits would be needed", options.max_splits),
                     });
                 }
-                match tri.split_edge(e as usize, 0.5) {
-                    Ok(_) => {
+                match tri.split_for_export(e as usize) {
+                    Ok(off_midpoint) => {
                         n_splits += 1;
+                        n_off_midpoint_splits += usize::from(off_midpoint);
                         progress = true;
                     }
                     Err(IntrinsicError::InsertionRefused { reason, .. }) => {
@@ -481,6 +501,7 @@ pub fn export_simplicial<T: Exportable>(
         min_angle,
         max_angle,
         fingerprint: tri.state_fingerprint(),
+        n_off_midpoint_splits,
         edge,
         forward,
     })

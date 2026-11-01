@@ -211,6 +211,18 @@ impl IntrinsicTriangulation {
 /// (Gillespie, Sharp, Crane 2021, Sec. 3.6) after the same star test
 /// ([`check_star_move`](crate::reposition::check_star_move)), so that both halve the same steps.
 pub trait OdtMoves: Triangulation {
+    /// Splits the long edge `e` (step 1). Provided: [`Triangulation::split_edge`] at its
+    /// midpoint (the signposts). A representation that refuses the midpoint for a reason of its
+    /// own (integer coordinates: within rounding of a crossing, IC-SPEC I28) may split near it
+    /// instead, as its export does ([`Exportable::split_for_export`](crate::Exportable::split_for_export)).
+    ///
+    /// # Errors
+    /// As [`Triangulation::split_edge`]; a refusal is counted
+    /// ([`OdtIteration::n_split_refused`]), not fatal.
+    fn split_for_odt(&mut self, e: usize) -> Result<(), IntrinsicError> {
+        self.split_edge(e, 0.5).map(|_| ())
+    }
+
     /// The vector from `v` to the target of its update, in the frame of `v` that
     /// [`move_vertex_with_shape`](Self::move_vertex_with_shape) takes
     /// ([`IntrinsicTriangulation::odt_target`]).
@@ -233,9 +245,10 @@ pub trait OdtMoves: Triangulation {
     ///
     /// # Errors
     /// [`IntrinsicError::MoveRefused`] (the iteration halves the step for `NotInStar`,
-    /// `TooThin`, `OnInputVertex`), [`IntrinsicError::RemovalRefused`] (also halved: the
-    /// removal of the old place got stuck; the signposts never return it), and the
-    /// representation's errors.
+    /// `TooThin`, `OnInputVertex`), [`IntrinsicError::RemovalRefused`] and
+    /// [`IntrinsicError::InsertionRefused`] (also halved: the removal of the old place got
+    /// stuck, or the insertion at the new place was refused; the signposts never return
+    /// either), and the representation's errors.
     fn move_vertex_with_shape(
         &mut self,
         v: usize,
@@ -358,7 +371,7 @@ pub fn optimal_delaunay<T: OdtMoves>(
                     limit_reached = true;
                     break;
                 }
-                match tri.split_edge(e as usize, 0.5) {
+                match tri.split_for_odt(e as usize) {
                     Ok(_) => {
                         it.n_split += 1;
                         n_inserted += 1;
@@ -420,7 +433,8 @@ pub fn optimal_delaunay<T: OdtMoves>(
                                 | MoveRefusal::OnInputVertex { .. },
                             ..
                         }
-                        | IntrinsicError::RemovalRefused { .. },
+                        | IntrinsicError::RemovalRefused { .. }
+                        | IntrinsicError::InsertionRefused { .. },
                     ) => alpha *= 0.5,
                     Err(other) => return Err(other),
                 }

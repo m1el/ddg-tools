@@ -360,7 +360,11 @@ pub(crate) fn recover_in_input_face(
 impl IntegerTriangulation {
     /// The input face that contains `region` of the face `arcs` (see the
     /// [module documentation](crate::recover)).
-    fn region_input_face(&self, arcs: &FaceArcs, region: Region) -> Result<usize, IntegerError> {
+    pub(crate) fn region_input_face(
+        &self,
+        arcs: &FaceArcs,
+        region: Region,
+    ) -> Result<usize, IntegerError> {
         let f = arcs.face;
         let mesh = self.input.mesh();
         let invalid = |detail: String| {
@@ -530,7 +534,7 @@ impl IntegerTriangulation {
 
     /// The input edge along which edge `e` (`n = −1`) runs: named by the place of an inserted
     /// end, else by the roundabout at an input-vertex end.
-    fn input_edge_of_along(&self, e: usize) -> Result<usize, IntegerError> {
+    pub(crate) fn input_edge_of_along(&self, e: usize) -> Result<usize, IntegerError> {
         let c = &self.complex;
         let h = c.edge_halfedge(e);
         let (a, b) = (c.from_vertex(h), c.to_vertex(h));
