@@ -1896,7 +1896,7 @@ correctness of Eq. 3 after gluing two face models (`ic-flip-normal`, C part: sam
 quadrilateral), `ic-roundabout-update`, and the merge of two halves (`ic-merge-edge-normal`: the
 merged faces are valid and the Rust formula counts the merged edge's crossings, given the curve ends
 at the inserted vertex as the realization has them); tier B: the split of a crossed edge
-(`ic-split-crossed-edge`). All statements
+(`ic-split-crossed-edge`); tier A: the strip intersection of Alg. 2 (`ic-strip-intersection`). All statements
 about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
 the data structure of the Rust crate and that

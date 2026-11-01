@@ -7,6 +7,7 @@ import DdgProofs.IntegerCoords.Chords
 import DdgProofs.IntegerCoords.Recover
 import DdgProofs.IntegerCoords.Transfer
 import DdgProofs.IntegerCoords.SplitEdge
+import DdgProofs.IntegerCoords.Strip
 import DdgProofs.IntegerCoords.Complex.Basic
 import DdgProofs.IntegerCoords.Complex.Trace
 import DdgProofs.IntegerCoords.Complex.Labels

@@ -1202,3 +1202,7 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Merge.merge_normal
 #print axioms DdgProofs.IntegerCoords.splitSide_eq
 #print axioms DdgProofs.IntegerCoords.emanatingBefore_eq
+#print axioms DdgProofs.IntegerCoords.Strip.hit_point
+#print axioms DdgProofs.IntegerCoords.Strip.hit_unique
+#print axioms DdgProofs.IntegerCoords.Strip.hit_mem
+#print axioms DdgProofs.IntegerCoords.Strip.hit_reverse
