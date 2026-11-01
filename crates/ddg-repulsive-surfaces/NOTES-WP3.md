@@ -49,7 +49,18 @@ Build: `CARGO_TARGET_DIR=$PWD/target-wp3 cargo test -p ddg-repulsive-surfaces --
   | 0.0625 | 1.3e-6 | 3.4e-6 | 651638 | 8.12e7 |
 
   Rates per halving (energy): 1.85, 2.52, 4.29, 7.37 — at least O(θ²).
-- Timing: see below.
+- Timing (release, `timing_40k_faces`, 40k-face torus, θ = 0.5, leaf 8, best of 3; run alone,
+  outside load average ≈ 4.7 from other sessions): 2.0e6 lumped, 1.42e7 exact pairs.
+
+  | threads | build + lists | energy + gradient | refit + energy |
+  |---|---|---|---|
+  | 1 | 0.114 s | 0.574 s | 0.220 s |
+  | 8 | 0.058 s | 0.151 s | 0.031 s |
+
+  The gradient's sequential parts (flattening, downward pass, pull-back) limit the 8-thread
+  speedup to 3.8×; not worth optimizing yet (paper: ≈ 2.5 s per whole step at 45k faces).
+- clippy `--all-targets` clean; rustdoc `-D warnings` clean; the debug test run takes ~23 s
+  (FD on ~80 sampled vertices per mesh in debug, all vertices in release).
 
 ## Remaining
 Nothing planned. Possible speedups (not needed so far): share `r^{-β}` between the two
