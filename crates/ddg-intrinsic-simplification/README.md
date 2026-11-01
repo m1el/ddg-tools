@@ -63,3 +63,16 @@ Tests: `cargo test --release -p ddg-intrinsic-simplification --test prolongation
 linear functions and constant vector/line/cross fields reproduced to 1e-13; row sums; rotation
 consistency; no empty rows on the models; the smoothest field of `ddg-intrinsic-apps` on the
 coarse mesh against the fine one; the colouring).
+
+## Anisotropic coarsening (WP8; SPEC §8, paper Sec. 8.6.2, Fig. 27)
+
+`anisotropy`: edge lengths scaled by `(1 - tau) + (tau/2)((u_i.e_ij)^2 + (u_j.e_ji)^2)` for per-vertex
+direction lines `u` (angles in the normalized frames, from `curvature::direction_angles` or
+`principal_direction_field(positions, faces, Max | Min, options)`), the strict triangle inequality
+checked per face (an error listing the faces, or `clamp_tau`: the exact largest valid `tau`,
+reported), `anisotropic_coarse_mesh` (= `CoarseMesh::from_lengths` of the scaled lengths, tracked
+points still on the input faces), and `coarse_face_alignment`, the measurement of Fig. 27. The
+coarse triangles are isotropic in the scaled metric, hence **elongated across `u`**: `u = d_max`
+gives triangles long along the minimum direction (a cylinder's axis). Study:
+`cargo run --release -p ddg-intrinsic-simplification --example anisotropy_study -- MESH.obj
+max|min 300 0 0.2 0.4 0.6`; tests: `tests/anisotropy.rs`. Numbers: SPEC §8, "As built (WP8)".
