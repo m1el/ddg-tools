@@ -623,6 +623,78 @@ iterations, insertions, halvings and the last motion are unchanged on every run 
 (0.65 → 0.79 s), 1.27× blub (1.37 → 1.74 s), 1.24× camelbad (2.61 → 3.24 s); before, 3.4–4.2×
 (spot 1.31 s, camelbad 10.06 s).
 
+### 4.12 Input-aligned tangent frames (I26)
+
+The tangent fields of `ddg-intrinsic-apps` (`vector`) measure every vector in an input-aligned
+frame at its vertex. The signposts store that frame (IT-SPEC N2, N7, N9, N10): at `a ∈ V⁰` the
+input mesh's (`InputSurface::signpost`: 0 along the outgoing input halfedge of signpost 0, the
+others at the sum of the input corner angles before them times `s_a = 2π/Θ_a`, `π/Θ_a` on the
+boundary); at an inserted vertex inside input face `g` the face's (0 along halfedge `3g`,
+unscaled); on an interior input edge `E` the edge's (0 along `E` towards `edge_vertices(E)[1]`); on
+a boundary input edge the boundary frame (0 along the input boundary halfedge, which leaves the
+vertex, `π` along the arriving one). Directions are stored normalized, in `[0, 2π)` inside and
+`[0, π]` on the boundary. `IntegerTriangulation::frame_directions() -> (Vec<f64>, FrameReport)`
+(`src/frames.rs`) gives the same direction for every halfedge from what the integers store.
+For `h = a→b` on edge `e` (`[formula: ic-input-aligned-frame]`):
+
+* `n_e = −1` (along an input edge, from the integers alone): `a ∈ V⁰` with roundabout `r`:
+  `φ = φ⁰(g_r)`, the input signpost of the outgoing input halfedge of local index `r` (`π` for
+  `r = deg₀ − 1` at a boundary vertex: the arriving boundary edge); `a ∈ V*` at `t` on `E`: `0` for
+  the boundary halfedge, else `0` if the head's parameter on `E` is larger than `t`, `π` if smaller.
+* `n_e ≥ 0`: the straight segment of `e` in its strip of input faces, laid out with the input
+  lengths exactly as `ExtractIntrinsicEdge` lays it out (§3.1: the input faces decided by the
+  integers, the ends at `q⁰`); `d` its direction at the end at `a`, in the layout of the input face
+  `g` at that end (`d = q − p` at the tail, `p − q` at the head), `∠(x, d) ∈ (−π, π]` the angle from
+  the side `x` of `g` to `d`:
+  - `a ∈ V⁰`: `x = g_{r−1}`, the input halfedge of the wedge the roundabout names (§3.1), and
+    `φ = φ⁰(x) + s_a α`, `α = ∠(x, d)` clamped to `[0, θ⁰_x]` (the input corner; counted, I5);
+  - `a ∈ V*` inside `g`: `φ = ∠(3g, d)`;
+  - `a ∈ V*` on interior input edge `E`, `x` the side of `g` on `E`: `φ = β + ∠(x, d)`, `β = 0` if
+    `x` runs from `edge_vertices(E)[0]`, else `π`;
+  - `a ∈ V*` on a boundary input edge: `φ = ∠(x, d)`, `x` the input boundary halfedge;
+
+  reduced to `[0, 2π)` at an interior vertex, kept in `[0, π]` at a boundary vertex.
+
+The roundabout gives the input halfedge just before `h`; the angle inside that wedge is the
+direction of the first piece of the extracted edge, here taken from the whole segment rather than
+from its first crossing, so that its rounding is that of the strip's layout divided by `ℓ_e`, not
+by the length of the first piece (an edge that leaves an inserted vertex next to an input edge is
+as well conditioned as any other; `place_in_input_face`, §4.11, reads the first piece for the same
+purpose and has to skip short ones). **Cost:** one `extract_all_edges` labels every crossing with
+its input edge (no walks of `ExtractIntrinsicEdge`), then one strip layout per edge with `n ≥ 0`:
+`O(|E⁰| + |E¹| + Σ n⁺)`. **Errors:** integers that are not those of a realization (a crossing on
+no or two input edges, a broken strip, a wrong roundabout) are `InvalidCoordinates` naming the
+halfedge, edge or crossing, never a panic. **Invariance:** the directions of an edge depend on its
+own `n`, roundabouts, crossing labels and length and on `q⁰` of its ends, so a flip changes the
+directions of the flipped edge only, bitwise. The formula is cited (`CITED.md`: it is the
+signposts' definition of the frame evaluated on the realization the integers encode), not proved.
+
+On `ddg-intrinsic-apps`: `vector::TangentFrames` (signposts borrow their stored angles, integers
+call `frame_directions`); every function of `vector` is generic over it, the signposts' results
+bitwise as before (`tests/vector_pins.rs`), and the representation is the caller's
+(`Representation::DEFAULT`, integers; `ddg_tools.smoothest_direction_field(representation=
+"integer")`).
+
+*Measured* (`tests/frames.rs`, release): 266 states converted from signposts (19 shapes, spot,
+camelbad, 7 scenarios, 2 seeds; 1 352 388 halfedges): the directions equal the signposts within
+`1.14e-10` rad at input vertices and `7.5e-11` at inserted vertices, no clamp, segment lengths
+within `3.4e-11` relative. The same operations on both representations from the input (Delaunay
+flipping; random insertions and edge splits then Delaunay flipping; Ruppert refinement to 25°; the
+optimal Delaunay iteration; the meshes above plus bob and blub): 86 of 88 runs end on the same
+triangulation, 806 346 halfedges within `3.5e-11` rad (spot refined, places within `1.1e-14`),
+except `2.6e-9` on the sheared parallelogram 10 σ6 after the optimal Delaunay iteration, whose
+places differ by `1.4e-8` (its off-midpoint splits, §4.11). 363 flips of `Mixed` states: the other
+1 329 398 edge directions unchanged bitwise. Of 200 mutated states (one `n` or one roundabout
+changed), 164 are errors, none panics. In `ddg-intrinsic-apps` (`tests/vector_representation.rs`,
+22 pairs on the same triangulation): transport within `3.5e-11` rad, smoothest fields
+(`n` = 1, 2, 4, both Laplacians, 68 runs) within `5.7e-10` after aligning the phase, the same
+singular faces and indices in every run, harmonic fields (120 runs) within `2e-13`. *Cost*
+(`examples/vector_cost.rs`, one core, best of 5 interleaved rounds; load 4.7 rising to 19.6 from
+other agents during the run): the frames take 2.7 ms (spot, iDT) to 38 ms (camelbad refined, 15 561
+vertices), 1–2.5 % of a smoothest vector field (0.23–2.03 s); a field on integers takes 0.98–1.04×
+the signposts', with its singularities (frames computed twice) 1.00–1.06×, on spot, bob, blub and
+camelbad, iDT and refined to 25°.
+
 ## 5. Delaunay refinement (Sec. 4.2, Supp. Alg. 10, App. C)
 
 Chew's second algorithm, intrinsic, with boundary:
@@ -1036,11 +1108,19 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   not evaluated by Eq. 5, so that both representations insert the same points with bitwise the same
   lengths (I11). Eq. 5 (`ic-tangent-length`) stays a formula id: Lean proves it equal to
   `it-point-distances`.
-* **I26** *Tangent frames for consumers (open, WP11).* `ddg-intrinsic-apps`' tangent fields
-  (`vector/connection.rs`) use the signpost crate's stored input-aligned frames; `AngleFrames` are
-  neither input-aligned nor stable under flips. For vertices of `V⁰` an input-aligned frame is
-  available from the roundabouts plus one angle within the input wedge; the design is decided in
-  WP11 before that consumer switches representation.
+* **I26** *Tangent frames for consumers (resolved, a492320, 4d535fa, abf5eb7, eb84b11, 9b23213:
+  §4.12).* `ddg-intrinsic-apps`' tangent fields (`vector/connection.rs`) used the signpost crate's
+  stored input-aligned frames; `AngleFrames` are neither input-aligned nor stable under flips. For
+  vertices of `V⁰` an input-aligned frame is available from the roundabouts plus one angle within
+  the input wedge. *Decided:* `IntegerTriangulation::frame_directions` computes, for every
+  halfedge, the signposts' direction from the roundabouts (the wedge, or the input edge for
+  `n = −1`) and the direction of the edge's straight segment in its unfolded strip of input faces
+  (the angle inside the wedge, or inside the input face or on the input edge an inserted vertex
+  lies in), `ic-input-aligned-frame`; on the same triangulation within `1.1e-10` rad of the
+  signposts, a flip changes only the flipped edge's directions. `vector` is generic over
+  `TangentFrames` (signposts bitwise unchanged, pinned); `ddg_tools.smoothest_direction_field`
+  takes `representation=` with default `"integer"`; no Blender operator uses the tangent fields.
+  Cost: a field 0.98–1.04× the signposts'.
 * **I27** *Removal of a vertex with a straight star (resolved, aa096cb: merged, §4.6).* An interior vertex
   made by an edge split has degree 4 with two angles of `π`; those two spokes are refused by
   `plan_flip` as too thin, and the other two flip only when their quadrilateral is convex at the
@@ -1139,7 +1219,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | **done** (307308a–a9fa390; I30 fix a589919, 16210ca): Thingi10k (Table 1 integers 100 %), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
-| WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `signpost` (tangent fields, I26); the export, the way back, the optimal Delaunay iteration and `ddg-uv` moved to integers with I29 | per crate | WP5, WP6 | Sonnet |
+| WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: none (the tangent fields became generic with I26, §4.12: `vector::TangentFrames`, `smoothest_direction_field(representation="integer")`); the export, the way back, the optimal Delaunay iteration and `ddg-uv` moved to integers with I29 | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.
 

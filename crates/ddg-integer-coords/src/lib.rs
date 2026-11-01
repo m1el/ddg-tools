@@ -69,6 +69,10 @@
 //!
 //! The common subdivision and the point queries `T⁰ → T¹` are [`subdivision`] (WP5).
 //!
+//! Input-aligned tangent frames (SPEC §4.12, I26) are [`frames`]:
+//! [`IntegerTriangulation::frame_directions`], the direction of every halfedge at its tail in the
+//! frame the signposts use, from the roundabouts and the straight segments of the edges.
+//!
 //! Delaunay refinement (Sec. 4.2, Supp. Alg. 10; WP6) is [`refine`]:
 //! [`IntegerTriangulation::refine`] runs `ddg_intrinsic`'s shared driver on this
 //! representation (the paper's rules by default: boundary splits with removal of the Dijkstra
@@ -96,6 +100,7 @@ mod error;
 pub mod export;
 pub mod flip;
 pub mod formulas;
+pub mod frames;
 pub mod geometry;
 pub mod insert;
 pub mod interface;
@@ -120,6 +125,7 @@ pub use coords::{
 };
 pub use error::{IntegerError, InvalidCoordinates, Place, ValidityItem};
 pub use formulas::FaceCoordinates;
+pub use frames::FrameReport;
 pub use geometry::{GeometricCrossing, GeometricCurve, InputEdgeGeometry, StripReport};
 pub use insert::{
     FaceArrangement, FaceLocation, FaceSplitOptions, FaceSplitReport, Region, RegionChoice,

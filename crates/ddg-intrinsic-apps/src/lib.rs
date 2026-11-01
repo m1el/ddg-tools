@@ -37,8 +37,11 @@
 //! they run on signposts and on integer coordinates (`ddg-integer-coords`); the results
 //! agree bit for bit where both representations make the same flips and insertions
 //! (`tests/representation.rs`). [`representation::Representation::DEFAULT`] is **integer
-//! coordinates** (contract §13 Q3, since the Thingi10k evaluation passed). [`vector`] (tangent fields) stays on signposts:
-//! they read the stored input-aligned signposts (contract I26, open).
+//! coordinates** (contract §13 Q3, since the Thingi10k evaluation passed). [`vector`] (tangent
+//! fields) is generic over [`vector::TangentFrames`]: signposts read their stored input-aligned
+//! frames (bitwise as before, `tests/vector_pins.rs`), integer coordinates compute the same
+//! frames from the integers (contract §4.12, I26); the fields agree to rounding and the
+//! singularities exactly (`tests/vector_representation.rs`).
 //!
 //! # Conventions
 //!

@@ -70,15 +70,19 @@ impl DirectionFieldResult {
 /// triangulation   "delaunay" (default: the intrinsic Delaunay triangulation), "refined"
 ///                 (intrinsic Delaunay refinement to min_angle_degrees) or "input".
 /// laplacian       "fem" (finite elements, default) or "fd" (cotan weights and transport).
+/// representation  "integer" (default: integer coordinates, Gillespie, Sharp, Crane 2021, with
+///                 input-aligned frames computed from the integers) or "signposts" (the stored
+///                 signpost angles); both give the same field to rounding.
 ///
 /// The report has status ("converged" or "iteration_limit"), iterations, eigenvalue, energy
 /// (eigenvalue times area), residual, n_triangulation_vertices, index_sum (n times the Euler
-/// characteristic on a closed surface), euler_characteristic, seconds.
+/// characteristic on a closed surface), euler_characteristic, representation, seconds.
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a manifold
 /// triangle mesh, SolveError if the eigenproblem fails.
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, *, n = 1, triangulation = "delaunay", laplacian = "fem", min_angle_degrees = 25.0))]
+#[pyo3(signature = (positions, triangles, *, n = 1, triangulation = "delaunay", laplacian = "fem", min_angle_degrees = 25.0, representation = "integer"))]
+#[allow(clippy::too_many_arguments)]
 fn smoothest_direction_field<'py>(
     py: Python<'py>,
     positions: &Bound<'py, PyAny>,
@@ -87,6 +91,7 @@ fn smoothest_direction_field<'py>(
     triangulation: &str,
     laplacian: &str,
     min_angle_degrees: f64,
+    representation: &str,
 ) -> PyResult<DirectionFieldResult> {
     let mesh = TriangleArrays {
         positions: reals("positions", positions, 3, "vertex")?,
@@ -97,6 +102,7 @@ fn smoothest_direction_field<'py>(
         triangulation: triangulation.to_owned(),
         laplacian: laplacian.to_owned(),
         min_angle_degrees,
+        representation: representation.to_owned(),
     };
     let out = py
         .detach(move || direction_field(&mesh, &options))
