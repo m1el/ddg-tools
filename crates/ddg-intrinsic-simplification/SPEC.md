@@ -115,6 +115,12 @@ angle sums `Θ_i`, `K_i = 2π − Θ_i` (interior, Eq. 1), `κ_i = π − Θ_i` 
 IT-SPEC / `ddg_core`, here over a Δ-complex: per halfedge, so repeated vertices and self-edges are
 handled as in `ddg_intrinsic::generic_ops`).
 
+*As built (WP1).* The angle sum `Θ_i` is cached per vertex and refreshed (from the lengths,
+summed counter-clockwise from the reference halfedge) whenever the lengths at `i` change
+(flattening) or its corners change (the corners of a merged face after a removal); flips keep it
+(they do not change the metric). `K_i`, `κ_i` and the scale `s_i` of the angular coordinates come
+from the cache, so every operation sees bitwise the same values.
+
 ### 2.4 Validity (`certify()`)
 
 1. `Complex::check()`; the fine/complex vertex maps are inverse bijections on live vertices.
@@ -131,6 +137,10 @@ handled as in `ddg_intrinsic::generic_ops`).
    edge (the test of §3.3).
 
 `certify()` is cheap enough to run after every operation in tests (`O(|F| + #points)`).
+*As built:* `certify(delaunay: bool)` checks item 7 only when asked and always measures it
+(`Certificate::{max_delaunay_excess, n_not_delaunay}`); item 3 recomputes the angle sums from the
+lengths (not the cache); item 6 covers lengths, angular coordinates and point coordinates (masses
+come with WP3).
 
 ---------------------------------------------------------------------------------------------------
 
@@ -157,6 +167,15 @@ halfedge gets `φ` from its CW neighbour plus `s ×` the corner angle between th
 (`it-signpost-update`, the signposts' rule), wrapped (S4). If a flipped halfedge was a reference,
 the reference passes to its CW neighbour (whose `φ` is kept). Tracked points of the two faces are
 re-expressed in the new faces through the planar layout of the diamond (S16).
+
+*As built (WP1).* Flippable is `ddg_intrinsic::plan_flip_with` with the option `flip_test`,
+default IT-SPEC N5's shape test (strict convexity plus the shape limit `1e-6`, so that no flip
+creates a triangle its lengths do not describe). Point relocation: the diamond is laid out by
+`it-unfold-diamond`; the end point of the old edge that a new face lacks is expressed in that
+face (`it-barycentric-coordinates`), and a point's coordinates in both new faces follow by linear
+substitution. The inside test of S16 uses the signed distances `b_k h_k` to the sides (`h_k` the
+heights of the new face from its lengths) against `−point_slack · L`, `L` the mean of the five
+diamond lengths, `point_slack = 1e-12`.
 
 ### 3.3 Delaunay flipping
 
@@ -200,6 +219,18 @@ of the star faces moved by Eq. 10, `b̃ = (e^{u_i} b_i, b_j, b_k)/(e^{u_i} b_i +
 factor applied to every corner equal to `i` (`iem-projective-interpolation`: continuous across
 edges and a bijection of each face onto itself).
 
+*As built (WP2).* The bracket starts open on both sides at `u = 0`; while one side is open a
+step leaving the bracket moves `1, 2, 4, …` past the known end; `|u| ≤ 60`
+(`FLATTEN_MAX_FACTOR`, a factor `e^{30}` on the lengths) else the solve fails. For a Δ-face with
+`i` at several slots the derivative is the sum of Springborn's `∂θ_a/∂u_s` over the slots `a, s`
+of `i` (`∂θ_a/∂u_a = −½(cot θ_b + cot θ_c)`, `∂θ_a/∂u_b = ½ cot θ_c`), which is Eq. 4 for a
+simplicial face. A bracket shrunk to adjacent doubles is accepted if the residual is within
+`1000 ×` the tolerance, reported. Fallback candidates: in every scaled face that violates the
+triangle inequality, its longest side; spokes first, then non-boundary outer edges, each by edge
+id; the first flippable one is flipped; at most `vertex_degree(i) + 3` solves. The scaled
+lengths of the solve and of the commit are bitwise equal, so the validity found by the solve
+holds after the commit.
+
 ### 3.5 Vertex removal (paper Sec. 4.2)
 
 After flattening, the star of `i` is flat (angle sum `2π`, or `π` on the boundary), so the
@@ -233,12 +264,39 @@ following steps do not change the geometry.
 Every removal reports what it did (flattening iterations, fallback flips, flips to degree 3,
 Delaunay flips after it) and can be undone exactly (S5).
 
+*As built (WP2).* Order: an ear's flip, then the flattening with its fallback flips, then the flips
+to degree 3/2, then the checks that the removal can complete (the complex accepts it; the merged
+triangle — the outer lengths, or `ℓ_bi + ℓ_ic, ℓ_ca, ℓ_ab` on the boundary — is strictly valid,
+else `Degenerate`), all on the undo log. `N_i` is the set of distinct vertices `≠ i` of the star
+at flattening (after any fallback flips); its curvature before and after, and for each neighbour
+the shortest connecting edge after flattening with `φ_ij`, `φ_ji` (`π` for the virtual direction
+of an arriving boundary edge, S4), are in the `PreparedRemoval` for the metric. Flip choice (S14):
+scores first, then the flip test in order (self-edges, then the larger opposite-angle sum, then the
+lower edge id); the first flippable spoke is flipped; at most `4 vertex_degree(i) + 8` flips, else
+`Stuck`. Degree 3 (2) reached with a self-edge at `i` is the refusal `SelfEdge`. Removal from the
+complex: `Complex::remove_vertex` (interior) or `Complex::remove_boundary_vertex` (IT-SPEC N54);
+a reference halfedge that dies passes to its clockwise neighbour, all per-halfedge, per-edge,
+per-face and per-vertex data and the point lists follow the reported moves; the removed fine
+vertex becomes a point of the merged face (degree three: `iem-degree-three-barycentric`;
+boundary: `(1 − t, t)` on `bc` with `t = ℓ_bi/(ℓ_bi + ℓ_ic)`, `iem-boundary-merge`); the points of
+the star are re-expressed by linear substitution (exact for a flat star, no clamping); the angle
+sums and angular coordinates of the merged face's corners are refreshed from their references.
+Delaunay seeding (S15): the interior edges with both end points in `N_i`.
+
 ### 3.6 Tentative removal
 
 The cost of removing `i` (§4) is evaluated by performing flattening, the flips to degree 3/2 and
 the mass/vector transport **on an undo log** and reverting (paper Sec. 6.1). The tentative and the
 committed removal run the same code, so the queued key equals the cost of the removal if the
 neighbourhood is unchanged (S5, R16).
+
+*As built (WP2).* Two phases: `begin_removal(v) -> PreparedRemoval` (everything up to the removal
+from the complex, on the undo log) and then `finish_removal()` (the removal, the points, local
+Delaunay; not undoable) or `revert_removal()` (bitwise restore, including the order of the
+per-face point lists and the clamp counter). `tentative_removal(v)` is the first phase without
+point tracking followed by the revert: points do not enter the cost, so the `PreparedRemoval` is
+the committed one's (asserted, `tests/removal.rs`). While a removal is pending every other
+mutation is refused (`RemovalPending`).
 
 ---------------------------------------------------------------------------------------------------
 
@@ -552,6 +610,7 @@ Formula ids `iem-…`; tiers as IC-SPEC §9: A (algebraic/analytic identities), 
 | `iem-degree-three-barycentric` | in a flat degree-3 star, the barycentric coordinates of `i` in the merged face are the normalized sub-triangle areas, and the points of the three faces map affinely | A |
 | `iem-boundary-merge` | a flat boundary vertex of degree 2 lies on the segment `bc` of the merged triangle, at the coordinate given by the layout | A |
 | `iem-flip-to-degree-three` | = `ic-vertex-removal` (Thm. D.1) for simplicial stars; the boundary analogue (flat half-star of degree > 2 has a flippable spoke) | B′ (proved / to prove) |
+| `iem-wrap` | S4: the wrap of an angular coordinate to `[0, 2π)` inside / `[0, π]` on the boundary preserves the direction (`e^{iφ}` inside) and the CCW order of the fan | A |
 | `iem-redistribution-weights` | Eq. 9: `α_ij ≥ 0`, `Σ α = 1`, and the denominator is ≥ `|K_i| > 0` for a non-flat vertex | A |
 | `iem-memoryless-cost` | Eq. 6: `Σ m̃_j‖t̃_j‖ = Σ α_ij m_i ℓ_ij` when `t = 0`, and this is the 1-Wasserstein distance of moving the mass `m_i` at `i` to the neighbours (a single source: every coupling is the forced one; distances along the flat star are `ℓ_ij`) | A |
 | `iem-center-of-mass-update` | Eq. 7/8 in the plane: `t̃_j` points from `x_j` to the combined centre of mass when `t_i`, `t_j` point to the centres of mass of `m_i`, `m_j` | A |
