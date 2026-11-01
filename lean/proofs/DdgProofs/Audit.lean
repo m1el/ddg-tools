@@ -1200,3 +1200,5 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Cx.flip_roundabouts
 #print axioms DdgProofs.IntegerCoords.Merge.Side.admissible
 #print axioms DdgProofs.IntegerCoords.Merge.merge_normal
+#print axioms DdgProofs.IntegerCoords.splitSide_eq
+#print axioms DdgProofs.IntegerCoords.emanatingBefore_eq

@@ -351,7 +351,7 @@ pub struct SideSplit {
 /// of the chord). For a side along an input edge (`n_ab = −1`, `before = 0`) this is Eq. 6,
 /// `max(n_ca, n_bc, 0)`. `None` for a face that is not valid or `before` out of range.
 ///
-/// Formula id `ic-split-crossed-edge` (SPEC I20; not in Lean or `CITED.md` yet, untagged).
+/// [formula: ic-split-crossed-edge]
 pub fn split_side(n: [i64; 3], s: usize, before: i64) -> Option<SideSplit> {
     let f = FaceCoordinates::of(n).ok()?;
     let (a, b, c) = (s % 3, (s + 1) % 3, (s + 2) % 3);
