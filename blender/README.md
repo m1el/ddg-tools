@@ -1005,7 +1005,7 @@ edge, junctions of any degree), so nothing else changes for the user.
   an option without the suffix runs on integer coordinates, also one stored before the property
   existed (then signposts): a per-corner state gives the same cut to rounding, a state in the bytes
   of `ddg_cut_state` carries its own representation. The setup costs 1.1× on integers with
-  Intrinsic, 1.2–1.4× with Intrinsic, Refined and 3.4–4.2× with Optimal Delaunay (`crates/ddg-uv`
+  Intrinsic, 1.2–1.4× with Intrinsic, Refined and 1.2–1.3× with Optimal Delaunay (`crates/ddg-uv`
   README). Greyed out and ignored with Mesh's Own.
 * **State.** The per-corner attributes `ddg_cut_region_k` are the whole state when the
   triangulation added no vertex (the usual case of the default). When it did (Refined, or an

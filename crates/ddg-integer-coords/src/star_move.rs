@@ -24,6 +24,11 @@
 //!   ([`IntegerTriangulation::point_on_input`], App. A); a place on an input edge or vertex is
 //!   refused.
 //!
+//! **A move inside one input face** (most moves of the optimal Delaunay iteration: 97.5 % on
+//! camelbad) crosses no input edge, so no chord separates `v'` from `v` and no integer changes;
+//! `IntegerTriangulation::place_in_input_face` finds such a place from one spoke's extraction
+//! and the general path above is skipped (SPEC §4.11).
+//!
 //! Every new face is checked for Eq. 1's parity before anything changes. Unlike
 //! [`IntegerTriangulation::move_vertex`] (Sec. 3.6: trace, insert, remove) this never needs a
 //! removal, so it is not refused by the straight stars of I27 (every vertex an edge split made,
@@ -32,17 +37,18 @@
 use std::collections::BTreeMap as HashMap;
 use std::f64::consts::TAU;
 
-use ddg_intrinsic::formulas::moved_length;
+use ddg_intrinsic::formulas::{moved_length, triangle_layout};
 use ddg_intrinsic::reposition::{VertexMove, check_star_move};
 use ddg_intrinsic::{
-    AngleFrames, InsertRefusal, IntrinsicError, SurfacePoint, TraceOptions, TraceStop,
+    AngleFrames, EdgeTraceOptions, InsertRefusal, IntrinsicError, SurfacePoint, TraceOptions,
+    TraceStop,
 };
 
 use crate::coords::{IntegerTriangulation, NO_ROUNDABOUT};
 use crate::error::{IntegerError, Place, ValidityItem};
 use crate::formulas::{face_emanating, face_valid, n_minus, roundabout_update};
 use crate::insert::{ExtractionCache, FaceArcs, RegionPoint};
-use crate::recover::recover_in_input_face;
+use crate::recover::{bary_in_input_face, recover_in_input_face};
 
 /// A point of the link of the star where a chord ends: link vertex `u_edge` (`sub = 0`) or
 /// crossing `sub − 1` of link edge `edge` (from `u_edge` towards `u_{edge+1}`). The order of the
@@ -140,20 +146,39 @@ impl IntegerTriangulation {
             return Ok(unchanged);
         }
         let phi_v = displacement[1].atan2(displacement[0]);
+        let len = |h: usize| self.lengths[c.edge(h)];
+        let new_lengths: Vec<f64> = o
+            .iter()
+            .map(|&h| moved_length(len(h), r, phi(h) - phi_v))
+            .collect();
+        let mean_spoke = o.iter().map(|&h| len(h)).sum::<f64>() / d as f64;
+
+        // A move inside the input face of v crosses no input edge, so no chord separates v'
+        // from v: the integers stay, only the lengths and q⁰ change (module documentation).
+        if let Some(to) = self.place_in_input_face(v, &o, &phi, phi_v, r, mean_spoke)? {
+            drop(frames);
+            for (j, &h) in o.iter().enumerate() {
+                let e = self.complex.edge(h);
+                self.lengths[e] = new_lengths[j];
+            }
+            self.locations[v] = to;
+            return Ok(VertexMove {
+                to,
+                distance: r,
+                back_direction: f64::NAN,
+                within_height_bound: star.within_height_bound,
+                ..unchanged
+            });
+        }
+
         // The unfolded star: spoke j to u_j at a[j]; face j = (v, u_j, u_{j+1}) with u_{j+1}
         // at b[j] in its own layout.
-        let len = |h: usize| self.lengths[c.edge(h)];
         let polar = |l: f64, angle: f64| [l * angle.cos(), l * angle.sin()];
         let a: Vec<[f64; 2]> = o.iter().map(|&h| polar(len(h), phi(h))).collect();
         let b: Vec<[f64; 2]> = o
             .iter()
             .map(|&h| polar(len(c.prev(h)), phi(h) + self.corner_angle_of(h)))
             .collect();
-        let new_lengths: Vec<f64> = o
-            .iter()
-            .map(|&h| moved_length(len(h), r, phi(h) - phi_v))
-            .collect();
-        let mean_spoke = o.iter().map(|&h| len(h)).sum::<f64>() / d as f64;
 
         // The new place: the end of the path from v, located on the input mesh.
         let direction = phi_v.rem_euclid(TAU);
@@ -485,8 +510,104 @@ impl IntegerTriangulation {
         })
     }
 
+    /// The place of `v` moved by `r` in direction `phi_v` (its [`AngleFrames`] frame) when that
+    /// place lies inside the input face `g` of `v`, clear of its sides; `None` otherwise (or when
+    /// `v` is not inside an input face), and the caller takes the general path.
+    ///
+    /// The segment from `v` stays in `g` up to the boundary of `g`, and `g` is convex, so a new
+    /// place inside `g` is reached without crossing an input edge. The direction of a spoke
+    /// `v → u` in the layout of `g` is that of its first piece on the input mesh (its extraction,
+    /// SPEC §3.1): from `q⁰(v)` to the first crossing, or to `q⁰(u)` when it crosses nothing. A
+    /// spoke whose first piece is shorter than `1e-3` mean spoke lengths is not used (the
+    /// direction would be ill-conditioned); the new place must have every barycentric coordinate
+    /// above `1e-9` (the general path decides the places near a side: snapping, refusal).
+    fn place_in_input_face(
+        &self,
+        v: usize,
+        spokes: &[usize],
+        phi: &dyn Fn(usize) -> f64,
+        phi_v: f64,
+        r: f64,
+        mean_spoke: f64,
+    ) -> Result<Option<SurfacePoint>, IntegerError> {
+        const MIN_FIRST_PIECE: f64 = 1e-3;
+        const MIN_BARY: f64 = 1e-9;
+        let SurfacePoint::Face { face: g, bary: bv } = self.locations[v] else {
+            return Ok(None);
+        };
+        let g = g as usize;
+        let mesh = self.input.mesh();
+        let input_lengths = self.input.geometry().edge_lengths();
+        let Some(layout) = triangle_layout([0, 1, 2].map(|s| input_lengths[mesh.edge(3 * g + s)]))
+        else {
+            return Ok(None);
+        };
+        let at = |b: [f64; 3]| {
+            [
+                b[1] * layout[1][0] + b[2] * layout[2][0],
+                b[1] * layout[1][1] + b[2] * layout[2][1],
+            ]
+        };
+        let x_v = at(bv);
+        let options = EdgeTraceOptions::default();
+        for &h in spokes {
+            let e = self.complex.edge(h);
+            if self.normal[e] < 0 {
+                return Ok(None);
+            }
+            let trace = self.extract_intrinsic_edge(e, &options)?;
+            let from_v = trace.vertices[0] as usize == v;
+            let first = if from_v {
+                trace.crossings.first()
+            } else {
+                trace.crossings.last()
+            };
+            let point = match first {
+                Some(x) => SurfacePoint::Edge {
+                    edge: x.edge,
+                    t: x.t,
+                },
+                None => self.locations[self.complex.to_vertex(h)],
+            };
+            let Some(bp) = bary_in_input_face(self, g, point) else {
+                return Ok(None);
+            };
+            let x_p = at(bp);
+            let (dx, dy) = (x_p[0] - x_v[0], x_p[1] - x_v[1]);
+            if dx.hypot(dy) < MIN_FIRST_PIECE * mean_spoke {
+                continue;
+            }
+            let theta = dy.atan2(dx) + (phi_v - phi(h));
+            let x_new = [x_v[0] + r * theta.cos(), x_v[1] + r * theta.sin()];
+            let Some(b) = barycentric_in_layout(&layout, x_new) else {
+                return Ok(None);
+            };
+            if b.iter().all(|&x| x > MIN_BARY) {
+                return Ok(Some(SurfacePoint::Face {
+                    face: g as u32,
+                    bary: b,
+                }));
+            }
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
     /// The corner angle at the tail of halfedge `h`, from the lengths.
     fn corner_angle_of(&self, h: usize) -> f64 {
         ddg_intrinsic::Triangulation::corner_angle(self, h)
     }
+}
+
+/// The barycentric coordinates of the point `x` in the triangle `layout` (corner 0 at the
+/// origin, as [`triangle_layout`] lays it out); `None` for a degenerate layout.
+fn barycentric_in_layout(layout: &[[f64; 2]; 3], x: [f64; 2]) -> Option<[f64; 3]> {
+    let ([ax, ay], [bx, by]) = (layout[1], layout[2]);
+    let det = ax * by - ay * bx;
+    if det.is_nan() || det <= 0.0 {
+        return None;
+    }
+    let b1 = (x[0] * by - x[1] * bx) / det;
+    let b2 = (ax * x[1] - ay * x[0]) / det;
+    Some([1.0 - b1 - b2, b1, b2])
 }

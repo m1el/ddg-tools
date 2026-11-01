@@ -1015,13 +1015,14 @@ chooses the triangulation it runs on:
 
   | mesh | flips, signposts / integers | refined | optimized |
   |---|---|---|---|
-  | spot quads (2 930 vertices) | 7.5 / 8.1 ms | 14.6 / 17.8 ms | 0.38 / 1.31 s |
-  | bob quads (5 344) | 11.9 / 13.6 ms | 22.1 / 28.2 ms | 0.64 / 2.33 s |
-  | blub quads (7 106) | 16.2 / 17.2 ms | 42.5 / 57.7 ms | 1.36 / 5.64 s |
-  | camelbad (11 392) | 30.9 / 33.0 ms | 82.1 / 106.9 ms | 2.58 / 10.87 s |
+  | spot quads (2 930 vertices) | 7.8 / 8.2 ms | 15.0 / 18.2 ms | 0.40 / 0.47 s |
+  | bob quads (5 344) | 12.1 / 13.5 ms | 22.4 / 27.2 ms | 0.65 / 0.79 s |
+  | blub quads (7 106) | 16.4 / 17.1 ms | 44.1 / 57.9 ms | 1.37 / 1.74 s |
+  | camelbad (11 392) | 31.0 / 32.5 ms | 82.6 / 107.0 ms | 2.61 / 3.24 s |
 
   Flips and refinement cost 1.1× and 1.2–1.4× on integers, the optimal Delaunay triangulation
-  3.4–4.2× (its moves extract the arcs of every star; Integer Coordinates SPEC §4.11).
+  1.2–1.3× (a move that stays inside its input face changes no integer and skips the arcs of the
+  star; 3.4–4.2× before, Integer Coordinates SPEC §4.11).
 
 `Session::intrinsic_report()` gives `IntrinsicReport`: vertices of the mesh and of the
 triangulation, **vertices added** (`n_added`), flips (first pass, export), refined, inserted by

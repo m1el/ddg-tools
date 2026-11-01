@@ -10,7 +10,7 @@
 //!   `Complex::outgoing_halfedge`, the others from the corner angles); the update (the
 //!   area-weighted mean of the vectors to the circumcentres, barycentres at the boundary) is
 //!   [`odt_target_of`] in that frame, the signposts' formula.
-//! * **The test of a step** is the signposts' ([`check_star_move`]): the moved star must keep
+//! * **The test of a step** is the signposts' ([`check_star_move`](ddg_intrinsic::reposition::check_star_move)): the moved star must keep
 //!   every triangle's area positive and its shape number above the bound, or the step is
 //!   halved. The integers could move a vertex farther (Sec. 3.6 is not limited to the star);
 //!   the same test keeps the iteration the signposts' one.

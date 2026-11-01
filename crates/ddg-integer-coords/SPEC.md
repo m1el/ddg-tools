@@ -561,12 +561,28 @@ steps, the places of the exported vertices within `3.3e-13` mean edge lengths (`
 sheared parallelogram 10 σ6, where 3 splits were off the midpoint); bumpy grid 12×12 makes the same
 counts on another trajectory from iteration 2 on, where a tie in the order of the long edges is
 broken by a last-bit difference of the moved lengths (`|Δℓ| = 5.6e-17`; the frames differ by
-rounding); the thin tube 4×12 has 34 moves refused on integers only (a new place within rounding of an input
-edge or vertex; the final places still agree within `4.5e-15`). Every result certifies. Cost: 2.0–2.4× the
-signposts' on these runs; in `ddg-uv` sessions with `IntrinsicOptions::optimized()` (example
-`representations`, one pinned core, best of 3, load average 1.4–5.0) 3.4× on spot quads
-(0.38 → 1.31 s), 3.9× on camelbad (2.58 → 10.06 s): extraction of the star's arcs, trigonometry of
-the frames and allocations, no single hot spot (perf).
+rounding); the thin tube 4×12 refuses no move (34 refused on integers only in a first version; the final places
+agree within `4.5e-15`). Every result certifies. Cost: 1.1–1.6× the signposts' on these runs (test
+threads in parallel).
+
+**Moves inside one input face (2026-11-01).** On camelbad 97.5 % of the 668 147 moves of a `ddg-uv`
+session end in the input face they start in, and none of them changes an integer (instrumented
+run); the other 2.5 % change `n` or `r` every time. The general move above extracted the arcs of
+every face of the star for each of them (perf: 35 % of the build in extraction, 26 % in the
+bookkeeping of the arcs; 3.4–4.2× the signposts). So a move of a `v` inside input face `g` first
+tries `place_in_input_face`: the direction of one spoke in the layout of `g` is that of its first
+piece on the input mesh (one extraction: `q⁰(v)` to the first crossing, or to `q⁰(u)`; a first
+piece shorter than `1e-3` mean spoke lengths is skipped for the next spoke), the new place
+`q⁰(v) + r (cos, sin)(θ + φ_v − φ_h)` in that layout, accepted when all its barycentric
+coordinates exceed `1e-9`. The segment from `v` stays in `g` until it reaches the boundary of `g`
+and `g` is convex, so such a move crosses no input edge, no chord separates `v'` from `v`, and the
+integers stay; only the lengths (`it-moved-length`, as before) and `q⁰` change. Anything else (a
+place near a side or outside `g`, `v` on an input edge) takes the general path. Measured: the
+iterations, insertions, halvings and the last motion are unchanged on every run above and on the
+`ddg-uv` meshes; in `ddg-uv` sessions with `IntrinsicOptions::optimized()` (example
+`representations`, one core, best of 3) 1.18× on spot quads (0.40 → 0.47 s), 1.22× bob
+(0.65 → 0.79 s), 1.27× blub (1.37 → 1.74 s), 1.24× camelbad (2.61 → 3.24 s); before, 3.4–4.2×
+(spot 1.31 s, camelbad 10.06 s).
 
 ## 5. Delaunay refinement (Sec. 4.2, Supp. Alg. 10, App. C)
 

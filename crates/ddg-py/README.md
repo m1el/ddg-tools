@@ -378,7 +378,7 @@ state carries its flag; read it back from `CutSession.optimal_delaunay`). The re
 Integer Coordinates SPEC Q3, I29), `"signposts"` the signposts. Both make the same flips, splits
 and refinement, so the flow and the cut agree to rounding (tested: the same vertices, energies
 within `1e-9`, the same cut points within `1e-9`); on integers the setup costs 1.1× with flips,
-1.2–1.4× refined and 3.4–4.2× with `optimal_delaunay` (`crates/ddg-uv` README). `InputError` with
+1.2–1.4× refined and 1.2–1.3× with `optimal_delaunay` (`crates/ddg-uv` README). `InputError` with
 `"caller"` or with `state=` (a state carries its representation; read it from
 `CutSession.representation`, `None` on `"caller"`). The fingerprints of the two differ, so
 `restore` refuses a state of the other (`StaleStateError`). The cut comes back onto the caller's

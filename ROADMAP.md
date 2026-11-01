@@ -441,8 +441,8 @@ Open:
   the export, the way back of segments and the optimal Delaunay iteration on integer coordinates
   (written once over `Exportable` / `OdtMoves`, signposts bitwise unchanged); `ddg-uv`, Python
   `CutSession` and the Blender cut default to integer coordinates (`representation`). The cut is
-  the signposts' to rounding on every measured case; the optimal Delaunay setup costs 3.4–4.2× on
-  integers (IC SPEC §4.10, §4.11).
+  the signposts' to rounding on every measured case; the optimal Delaunay setup costs 1.2–1.3× on
+  integers (3.4–4.2× before moves inside one input face skipped the arcs; IC SPEC §4.10, §4.11).
 * FlipOut R5: refinement still refuses constrained edges, so refinement that keeps FlipOut paths as
   edges (F9) cannot run.
 * Fig. 14: the trends are reproduced, but the factors are not (2.7× and 4.1× against the paper's

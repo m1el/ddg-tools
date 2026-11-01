@@ -298,10 +298,11 @@ Against the signposts (`tests/export.rs`, 27 meshes, flips and refined to 25°):
 identical in connectivity, bitwise lengths and counts (places within `3.3e-13` mean edge lengths;
 the other 2 split off the midpoint on the torus 5×3); 30 041 of 30 042 segments cross the same
 input edges in the same order and all lie within `1e-9` mean edge lengths of the signposts' traces;
-the optimal Delaunay iteration makes the same iterations, insertions and halvings on 26 of 27 meshes,
+the optimal Delaunay iteration makes the same iterations, insertions and halvings on all 27 meshes,
 places within `3.3e-13` (the bumpy grid takes another trajectory from a last-bit tie). Cost, in
 `ddg-uv` session builds (its README): flips and export 1.1×, with refinement 1.2–1.4×, with the
-optimal Delaunay iteration 3.4–4.2× the signposts' (SPEC §4.11); the way back was not timed
+optimal Delaunay iteration 1.2–1.3× the signposts' (SPEC §4.11: a move that stays in its input
+face changes no integer and skips the arcs; 3.4–4.2× before); the way back was not timed
 separately.
 
 ## Geometry of the crossings (WP2)
