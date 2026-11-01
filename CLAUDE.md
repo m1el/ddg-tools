@@ -34,6 +34,13 @@ notice (Copyright (c) 2019 Christopher Yu) in the crate's `LICENSES/`, and credi
 Datasets (Knot128, Trefoil100, Freedman–He–Wang unknot) unpacked in `data/repulsive-curves/`.
 Contract: `crates/ddg-repulsive-curves/SPEC.md`; formula ids start with `rc-`.
 
+Repulsive Surfaces: Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021
+(`../RepulsiveSurfaces/RepulsiveSurfaces.pdf`; reference: `../RepulsiveSurfaces/repulsive-surfaces`, MIT,
+"Copyright (c) 2019 Nick Sharp", which may be read and ported; keep its notice in the crate's `LICENSES/`
+and credit all four authors). Crate `crates/ddg-repulsive-surfaces` (depends on `ddg-repulsive-curves`
+for the BVH, block cluster tree, L-BFGS, implicit surfaces and CCD primitives). Contract:
+`crates/ddg-repulsive-surfaces/SPEC.md`; formula ids start with `rs-`.
+
 ## Layout
 
 ```
@@ -50,6 +57,8 @@ crates/ddg-developability  the developability flow of the fourth paper (energies
                            remeshing, cut and flatten); `SPEC.md` is its contract
 crates/ddg-repulsive-curves  tangent-point energy, fractional Sobolev descent, constraints, Barnes-Hut,
                            hierarchical matrices and multigrid for curve networks; `SPEC.md` is its contract
+crates/ddg-repulsive-surfaces  tangent-point energy on triangle meshes, Hs descent (Barnes-Hut, hierarchical
+                           matrices, GMRES), constraints, penalties, remeshing; `SPEC.md` is its contract
 crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> cut -> flatten -> per-corner UVs;
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
