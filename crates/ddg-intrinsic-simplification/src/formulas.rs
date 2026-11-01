@@ -5,7 +5,7 @@
 
 use std::f64::consts::{PI, TAU};
 
-use ddg_core::geometry::{corner_angle, corner_cotan, triangle_area};
+use ddg_core::geometry::{corner_angle, triangle_area};
 
 /// An angular coordinate brought to its range (SPEC S4): `[0, 2π)` at an interior vertex,
 /// unchanged at a boundary vertex (where the coordinates lie in `[0, π]` by construction and
@@ -76,20 +76,24 @@ pub fn extended_face_angles(l: [f64; 3]) -> Option<([f64; 3], bool)> {
 ///
 /// [formula: iem-flatten-newton]
 pub fn face_angle_sum_and_derivative(l: [f64; 3], at_i: [bool; 3]) -> Option<(f64, f64, bool)> {
-    let (angles, valid) = extended_face_angles(l)?;
+    // Only the angles at the slots of i are needed (bitwise those of `extended_face_angles`).
     let mut sum = 0.0;
     for k in 0..3 {
         if at_i[k] {
-            sum += angles[k];
+            sum += extended_corner_angle(l[(k + 1) % 3], l[(k + 2) % 3], l[k])?;
         }
     }
-    if !valid {
+    let Some(area) = triangle_area(l[0], l[1], l[2]) else {
         return Some((sum, 0.0, false));
-    }
-    // cot at slot k: opposite side l[(k + 1) % 3].
+    };
+    // cot at slot k (opposite side l[(k + 1) % 3]), with the one area of the face: bitwise
+    // `ddg_core::geometry::corner_cotan`.
     let mut cot = [0.0; 3];
     for (k, c) in cot.iter_mut().enumerate() {
-        *c = corner_cotan(l[(k + 1) % 3], l[(k + 2) % 3], l[k]).unwrap_or(0.0);
+        let (a, s1, s2) = (l[(k + 1) % 3], l[(k + 2) % 3], l[k]);
+        let (b, cc) = if s1 >= s2 { (s1, s2) } else { (s2, s1) };
+        let x = (cc * cc + (b - a) * (b + a)) / (4.0 * area);
+        *c = if x.is_finite() { x } else { 0.0 };
     }
     let mut d = 0.0;
     for a in 0..3 {

@@ -146,6 +146,8 @@ pub struct CoarseMesh {
     pub(crate) vertex_mark: Vec<u32>,
     pub(crate) edge_mark: Vec<u32>,
     pub(crate) epoch: u32,
+    /// Scratch: a fan with its corner angles.
+    pub(crate) scratch_fan: Vec<(u32, f64)>,
 }
 
 /// The corner angle at the tail of halfedge `h` of a complex with these lengths, `None` if its
@@ -248,6 +250,7 @@ impl CoarseMesh {
             vertex_mark: vec![0; n],
             edge_mark: vec![0; complex.n_edges()],
             epoch: 0,
+            scratch_fan: Vec::new(),
             complex,
             length,
         };
@@ -534,27 +537,27 @@ impl CoarseMesh {
     /// others follow counter-clockwise by `s ×` the corner angles. Writes are recorded.
     pub(crate) fn refresh_vertex(&mut self, v: usize) {
         let boundary = self.complex.is_boundary_vertex(v);
-        let theta: f64 = self.angle_sum(v);
+        // One pass for the corner angles, summed in fan order (bitwise `angle_sum(v)`).
+        let mut fan = std::mem::take(&mut self.scratch_fan);
+        fan.clear();
+        let mut theta = 0.0;
+        for h in self.fan(v) {
+            let corner = corner_at(&self.complex, &self.length, h).unwrap_or(f64::NAN);
+            theta += corner;
+            fan.push((h as u32, corner));
+        }
         self.set_angle_sum(v, theta);
         let s = ddg_intrinsic::formulas::angle_scale(theta, boundary);
-        let start = self.reference[v] as usize;
+        let start = fan[0].0 as usize;
         if boundary && self.phi[start] != 0.0 {
             self.set_phi(start, 0.0);
         }
-        let mut h = start;
         let mut phi = self.phi[start];
-        loop {
-            let corner = corner_at(&self.complex, &self.length, h).unwrap_or(f64::NAN);
-            let Some(n) = ccw(&self.complex, h) else {
-                break;
-            };
-            if n == start {
-                break;
-            }
-            phi = wrap_angle(phi + s * corner, boundary);
-            self.set_phi(n, phi);
-            h = n;
+        for k in 1..fan.len() {
+            phi = wrap_angle(phi + s * fan[k - 1].1, boundary);
+            self.set_phi(fan[k].0 as usize, phi);
         }
+        self.scratch_fan = fan;
     }
 
     /// A new epoch for the scratch marks.

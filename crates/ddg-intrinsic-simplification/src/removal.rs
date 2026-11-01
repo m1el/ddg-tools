@@ -162,7 +162,7 @@ impl CoarseMesh {
     // ----- public API -----
 
     /// The first phase of removing fine vertex `v` with point tracking (see the
-    /// [module documentation](self)). Afterwards a removal is pending: only
+    /// [crate documentation](crate)). Afterwards a removal is pending: only
     /// [`finish_removal`](Self::finish_removal) or [`revert_removal`](Self::revert_removal)
     /// may change the mesh.
     ///
@@ -214,7 +214,7 @@ impl CoarseMesh {
         self.finish_removal()
     }
 
-    /// The second phase of the pending removal (see the [module documentation](self)).
+    /// The second phase of the pending removal (see the [crate documentation](crate)).
     ///
     /// # Errors
     /// [`IemError::NoRemovalPending`]; [`IemError::Internal`] if the complex refuses the
@@ -579,7 +579,9 @@ impl CoarseMesh {
     /// lower edge id. `None` if no spoke can be flipped.
     fn degree_flip_choice(&self, v: usize, fan: &[usize]) -> Option<usize> {
         let c = &self.complex;
-        let mut best: Option<(bool, f64, usize)> = None;
+        // Scores first (cheap), then the flip test in the order of preference: the first
+        // flippable spoke is the best flippable one.
+        let mut candidates: Vec<(bool, f64, usize)> = Vec::with_capacity(fan.len());
         for &h in fan {
             let e = c.edge(h);
             let Some(t) = c.twin(h) else { continue };
@@ -587,22 +589,15 @@ impl CoarseMesh {
             if is_self && c.edge_halfedge(e) != h {
                 continue; // each self-edge once
             }
-            if plan_flip_with(c, &self.length, e, self.options.flip_test).is_err() {
-                continue;
-            }
             let score = corner_at(c, &self.length, c.prev(h)).unwrap_or(0.0)
                 + corner_at(c, &self.length, c.prev(t)).unwrap_or(0.0);
-            let better = match best {
-                None => true,
-                Some((bs, bscore, be)) => {
-                    (is_self, score) > (bs, bscore) || (is_self == bs && score == bscore && e < be)
-                }
-            };
-            if better {
-                best = Some((is_self, score, e));
-            }
+            candidates.push((is_self, score, e));
         }
-        best.map(|b| b.2)
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.total_cmp(&a.1)).then(a.2.cmp(&b.2)));
+        candidates
+            .into_iter()
+            .find(|&(_, _, e)| plan_flip_with(c, &self.length, e, self.options.flip_test).is_ok())
+            .map(|b| b.2)
     }
 
     // ----- phase two -----
