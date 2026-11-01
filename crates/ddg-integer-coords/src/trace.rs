@@ -896,7 +896,7 @@ impl IntegerTriangulation {
     /// # Errors
     /// [`IntegerError::InvalidCoordinates`] naming the vertex or crossing where the walk fails.
     ///
-    /// Formula id `ic-identify-edge` (SPEC §9.2, tier C: not proved yet, WP9; untagged until it is).
+    /// [formula: ic-identify-edge]
     pub fn identify_traced_edge(
         &self,
         segment: &CurveSegment,

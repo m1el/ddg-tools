@@ -8,6 +8,7 @@ import DdgProofs.IntegerCoords.Recover
 import DdgProofs.IntegerCoords.Transfer
 import DdgProofs.IntegerCoords.Complex.Basic
 import DdgProofs.IntegerCoords.Complex.Trace
+import DdgProofs.IntegerCoords.Complex.Labels
 
 /-!
 # Integer Coordinates for Intrinsic Geometry Processing (Gillespie, Sharp, Crane 2021)

@@ -1182,3 +1182,9 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_terminates
 #print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_from_end
 #print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_terminates_of_noClosed
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.emList_eq
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.emc_eq_emanating
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.identify_arc
+#print axioms DdgProofs.IntegerCoords.Cx.identify_along
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.alg4_index
+#print axioms DdgProofs.IntegerCoords.Cx.RoundaboutsOK.lab_next

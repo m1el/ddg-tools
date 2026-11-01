@@ -1889,10 +1889,12 @@ a triangle cross iff their ends interleave, cevians cross; App. A's recovery of 
 solution of Eq. 15; Eq. 5; Eq. 14 as the minimizer of Eq. 13 and the finite part of the mass
 identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **complex model**
 (faces glued by a side pairing, Δ-complexes allowed, one face model per face, crossings glued by
-`p ↦ n − 1 − p`, curves as the orbits of Alg. 1's step) and `ic-trace-terminates`. All statements
+`p ↦ n − 1 − p`, curves as the orbits of Alg. 1's step), `ic-trace-terminates`, and the labels
+at the input vertices with `ic-identify-edge` (Alg. 3 computes the label of the arc; the walk back
+past inserted vertices, Alg. 3 lines 1–5, is not modelled). All statements
 about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
-`ic-identify-edge`, `ic-roundabout-update` and the correctness of Eq. 3 after gluing (the
+`ic-roundabout-update` and the correctness of Eq. 3 after gluing (the
 quadrilateral model of `Flip.lean` is the local half); the data structure of the Rust crate and that
 it applies the formulas to the right elements; anything about rounding (which region floating point
 picks, I15, is outside the proofs by design: every region is proved to give a valid state).
@@ -2038,19 +2040,6 @@ are not cited here).
 - **What depends on it.** Removal in refinement with boundary (SPEC §4.6): the library flips by the
   rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
   when no flip helps; refusals are counted in the evaluation.
-
-### [formula: ic-identify-edge] The local index of a traced curve (Supp. Alg. 3; pending, tier C)
-
-- **Statement.** For a valid state, the curve through crossing `p` of `ij`, walked back to its start
-  `a ∈ V⁰` across the halfedge `a→i = Next(Next(ij))`, is the input halfedge with local index
-  `r_{ai} + n⁻_{ai} + (p − c^{ja}_i)` (mod `deg₀(a)` at an interior vertex).
-- **Reference.** IC paper, supplement Alg. 3 (IdentifyTracedEdge); geometry-central ab116f1,
-  `integer_coordinates_intrinsic_triangulation.cpp:1970-1986` (the same halfedge).
-- **Why not formalized yet.** It is a statement about a whole triangulation (roundabouts at a vertex
-  and the gluing of faces), i.e. tier C of the IC contract (SPEC §9, work package WP9). The single-face
-  index arithmetic is the oracle's `identifyIndex`. Until WP9: tested in Rust against signpost
-  traces (`crates/ddg-integer-coords/tests/states.rs`: 272 651 crossings on 266 states, each
-  identified as the input edge the signpost trace crosses there).
 
 ### [formula: ic-merge-edge-normal] The normal coordinate of two merged halves (pending, tier C)
 

@@ -210,7 +210,7 @@ pub fn trace_step(n_ij: i64, n_ik: i64, n_kj: i64, p: i64) -> Result<Step, StepE
 /// `p = c^{ja}_i + (k − r_ai − n⁻_ai)`, which the paper writes `k + n_ai − r_ai` (both agree,
 /// since `c^{ja}_i = n⁺_ai` whenever `a` emanates, SPEC §3.1).
 ///
-/// Formula id `ic-identify-edge` (SPEC §9.2, tier C: not proved yet, WP9; untagged until it is).
+/// [formula: ic-identify-edge]
 pub fn identify_index(r_ai: i64, n_ai: i64, n_ij: i64, n_ja: i64, p: i64, deg: u32) -> Option<i64> {
     let c = corner_coordinate(n_ja, n_ij, n_ai)?;
     let k = r_ai
