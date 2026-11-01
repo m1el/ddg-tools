@@ -11,7 +11,13 @@ triangulation of the same surface. It is shown as
   coarse face its centroid lands in (the coarse faces are colored greedily so that faces that
   share a vertex differ, from a fixed palette that is cycled; deterministic),
 * a face integer attribute ``IntrinsicSimplifyFaceId`` with that coarse face's id, and
-* a vertex group ``IntrinsicSimplifyVertices`` with the vertices that stay (weight 1).
+* a vertex group ``IntrinsicSimplifyVertices`` with the vertices that stay (weight 1),
+* and, with Create Coarse Mesh, a new object ``<name>_coarse``: the vertices that stay at their
+  original positions, joined by flat triangles with the coarse connectivity. This is an
+  approximation for display: the coarse edges are geodesics on the surface, the flat triangles
+  cut across it. Faces that a mesh cannot hold (a face using a vertex twice, the same three
+  vertices twice, a self-edge) are left out and counted; the coarse mesh is not made when
+  vertices inserted by a refinement stay (they have no 3D position here).
 
 One tracked point per face of Blender's tessellation (the centroid, in barycentric coordinates of
 that triangle) is carried through the vertex removals; a corner takes the color of the triangle
@@ -34,6 +40,8 @@ COLOR_ATTRIBUTE = "IntrinsicSimplifyFaces"
 FACE_ID_ATTRIBUTE = "IntrinsicSimplifyFaceId"
 VERTEX_GROUP = "IntrinsicSimplifyVertices"
 PREFIX = "ddg_simplify_"
+COARSE_SUFFIX = "_coarse"
+COARSE_OF = PREFIX + "coarse_of"
 
 # A fixed qualitative palette (Tableau 20 without the grays and pale tints), cycled by color index.
 PALETTE = (
@@ -72,6 +80,12 @@ class Result:
         self.n_fixed = 0
         self.coarse_face = None  # per face of the tessellation
         self.colours = None  # per face of the tessellation
+        self.coarse_object = None  # the object of Create Coarse Mesh
+        self.coarse_skipped = None  # why it was not made
+        self.n_coarse_faces = 0
+        self.n_dropped_repeated = 0
+        self.n_dropped_duplicate = 0
+        self.n_dropped_invalid = 0
         self.seconds_native = 0.0
         self.seconds = 0.0
 
@@ -87,7 +101,7 @@ def _check_attribute(mesh, name, domain, data_type):
 def intrinsic_simplify(
         obj, *, target_mode='PERCENT', percent=10.0, count=100, area_weight=0.0, memory=True,
         fix_selected=False, refine_before=False, refine_after=False, representation='INTEGER',
-        point_map='NEGATIVE'):
+        point_map='NEGATIVE', create_coarse_mesh=False):
     """Simplifies the mesh of ``obj`` (library ``ddg_tools.simplify``) without changing it and
     writes the corner color attribute, the face id attribute and the vertex group. Returns a
     ``Result``. Raises ``core.UnwrapFailed`` with a message for the user."""
@@ -177,6 +191,14 @@ def intrinsic_simplify(
     result.n_group_vertices = len(kept)
     if kept:
         group.add(kept, 1.0, 'REPLACE')
+    result.coarse_object = None
+    result.coarse_skipped = None
+    result.n_coarse_faces = 0
+    result.n_dropped_repeated = 0
+    result.n_dropped_duplicate = 0
+    result.n_dropped_invalid = 0
+    if create_coarse_mesh:
+        _create_coarse_mesh(obj, s, n_vertices, result)
     result.seconds = perf_counter() - start
 
     properties = {
@@ -199,6 +221,64 @@ def intrinsic_simplify(
     return result
 
 
+def _create_coarse_mesh(obj, s, n_vertices, result):
+    """The coarse mesh as an object: kept vertices at their original positions, flat triangles
+    with the coarse connectivity. Fills ``result.coarse_object`` (or ``result.coarse_skipped``
+    with the reason) and the drop counts."""
+    vertices = list(s.vertices)
+    inserted = sum(1 for v in vertices if v >= n_vertices)
+    if inserted:
+        result.coarse_skipped = (
+            "{} vertices inserted by the refinement stay; they have no 3D position, so no coarse "
+            "mesh was made (turn off Refine Before/After)".format(inserted))
+        return
+    index = {v: i for i, v in enumerate(vertices)}
+    co = obj.data.vertices
+    verts = [tuple(co[v].co) for v in vertices]
+    fine = list(s.faces)
+    faces = []
+    seen = set()
+    for f in range(len(fine) // 3):
+        a, b, c = fine[3 * f:3 * f + 3]
+        if a == b or b == c or c == a:
+            result.n_dropped_repeated += 1
+            continue
+        key = frozenset((a, b, c))
+        if key in seen:
+            result.n_dropped_duplicate += 1
+            continue
+        seen.add(key)
+        faces.append((index[a], index[b], index[c]))
+    name = obj.name + COARSE_SUFFIX
+    target = None
+    for other in bpy.data.objects:
+        if other.type == 'MESH' and other.get(COARSE_OF) == obj.name:
+            target = other
+            break
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate(clean_customdata=False)
+    result.n_dropped_invalid = len(faces) - len(mesh.polygons)
+    mesh.update()
+    if target is None:
+        target = bpy.data.objects.new(name, mesh)
+        collections = obj.users_collection or (bpy.context.scene.collection,)
+        for collection in collections:
+            collection.objects.link(target)
+        target[COARSE_OF] = obj.name
+    else:
+        old = target.data
+        target.data = mesh
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+    target.matrix_world = obj.matrix_world.copy()
+    mesh[PREFIX + "dropped_repeated_vertex"] = result.n_dropped_repeated
+    mesh[PREFIX + "dropped_duplicate"] = result.n_dropped_duplicate
+    mesh[PREFIX + "dropped_invalid"] = result.n_dropped_invalid
+    result.coarse_object = target
+    result.n_coarse_faces = len(mesh.polygons)
+
+
 def summary(result, name):
     r = result.report
     parts = [
@@ -213,6 +293,11 @@ def summary(result, name):
     if result.n_vertices > result.n_group_vertices:
         parts.append("{} inserted vertices not in the group".format(
             result.n_vertices - result.n_group_vertices))
+    if result.coarse_object is not None:
+        dropped = result.n_dropped_repeated + result.n_dropped_duplicate + result.n_dropped_invalid
+        parts.append("coarse mesh '{}' ({} faces{})".format(
+            result.coarse_object.name, result.n_coarse_faces,
+            ", {} faces left out".format(dropped) if dropped else ""))
     parts.append("{:.3f} s".format(result.seconds))
     return "Intrinsic simplify of '{}': ".format(name) + " | ".join(parts)
 
@@ -224,7 +309,8 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
         "Simplify the active mesh by intrinsic vertex removal with the intrinsic error metric and "
         "show the coarse mesh on it: a corner color attribute colors every face by the coarse face "
         "its centroid lands in, and a vertex group holds the coarse vertices. The mesh geometry is "
-        "not changed (set the viewport color to Attribute to see the colors). Liu, Gillespie, "
+        "not changed (set the viewport color to Attribute to see the colors); Create Coarse Mesh "
+        "also makes a new object of flat triangles between the vertices that stay. Liu, Gillespie, "
         "Chislett, Sharp, Jacobson, Crane: Surface Simplification using Intrinsic Error Metrics "
         "(2023)"
     )
@@ -256,6 +342,11 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
     representation: EnumProperty(
         name="Representation", items=REPRESENTATION_ITEMS, default='INTEGER',
         description="The intrinsic triangulation of the refinements")
+    create_coarse_mesh: BoolProperty(
+        name="Create Coarse Mesh", default=False,
+        description="Also make a new object from the vertices that stay, joined by flat "
+        "triangles with the coarse connectivity (an approximation for display: coarse edges are "
+        "geodesics on the surface). Faces a mesh cannot hold are left out and counted")
     point_map: EnumProperty(
         name="Point Map", items=POINT_MAP_ITEMS, default='NEGATIVE',
         description="How the fine faces move through each flattening (paper Eq. 10)")
@@ -278,6 +369,7 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
         row.enabled = self.refine_before or self.refine_after
         row.prop(self, "representation")
         layout.prop(self, "point_map")
+        layout.prop(self, "create_coarse_mesh")
 
     def execute(self, context):
         obj = context.active_object
@@ -293,7 +385,7 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
                 area_weight=self.area_weight, memory=self.memory,
                 fix_selected=self.fix_selected, refine_before=self.refine_before,
                 refine_after=self.refine_after, representation=self.representation,
-                point_map=self.point_map)
+                point_map=self.point_map, create_coarse_mesh=self.create_coarse_mesh)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
@@ -302,6 +394,16 @@ class OBJECT_OT_ddg_intrinsic_simplify(bpy.types.Operator):
                 bpy.ops.object.mode_set(mode='EDIT')
         if self.fix_selected and result.n_fixed == 0:
             self.report({'WARNING'}, "Fix Selected Vertices: no vertex is selected")
+        if result.coarse_skipped:
+            self.report({'WARNING'}, "Create Coarse Mesh: " + result.coarse_skipped)
+        elif result.coarse_object is not None:
+            dropped = (result.n_dropped_repeated + result.n_dropped_duplicate
+                       + result.n_dropped_invalid)
+            if dropped:
+                self.report({'WARNING'}, "Create Coarse Mesh: {} coarse faces left out ({} with a "
+                            "repeated vertex, {} duplicates, {} invalid)".format(
+                                dropped, result.n_dropped_repeated, result.n_dropped_duplicate,
+                                result.n_dropped_invalid))
         if result.report["stop"] != "targetreached":
             self.report({'WARNING'}, "Stopped at {} vertices: {}".format(
                 result.n_vertices, result.report["stop"]))

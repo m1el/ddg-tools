@@ -842,6 +842,16 @@ Jacobson, Crane, *Surface Simplification using Intrinsic Error Metrics*, ACM TOG
   - the vertex group **`IntrinsicSimplifyVertices`** (weight 1): the vertices that stay.
   Set the viewport color to *Attribute* to see the colors (as for Show Developability, the
   operator does not change the viewport). Running again overwrites the attributes and the group.
+- **Create Coarse Mesh** (off by default): also makes a new object `<name>_coarse` from the
+  vertices that stay, at their original positions, joined by flat triangles with the coarse
+  connectivity, in the same collections and with the same transform; running again replaces its
+  mesh. This is an approximation for display: the coarse mesh is intrinsic (its edges are
+  geodesics across the surface), so the flat triangles cut corners, and it chooses vertices to
+  preserve intrinsic geometry rather than the silhouette (Blender's Decimate is the tool for a
+  visual reduction). Faces a mesh cannot hold (a vertex used twice, the same three vertices twice,
+  a self-edge) are left out and counted (custom properties `ddg_simplify_dropped_*` on the new
+  mesh, a warning in the info area); with Refine Before/After, if inserted vertices stay, no coarse
+  mesh is made (they have no 3D position here) and a warning says so.
 - **Point Map**: how the faces move through each flattening (paper Eq. 10): *Negative (e^-u)*
   (default; the circumcircle-preserving map of Springborn et al. 2008 that the paper cites, much
   less distortion) or *Positive (e^+u)* (Eq. 10 as printed, as the authors' code does). The coarse mesh is the same either way.

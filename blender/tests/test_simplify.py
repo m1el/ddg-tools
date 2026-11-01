@@ -168,6 +168,7 @@ def defaults_and_registration():
     assert props["refine_before"].default is False and props["refine_after"].default is False
     assert props["representation"].default == 'INTEGER'
     assert props["point_map"].default == 'NEGATIVE'
+    assert props["create_coarse_mesh"].default is False
     assert hasattr(bpy.types, "VIEW3D_PT_ddg_intrinsic_simplify")
     assert bpy.ops.object.ddg_intrinsic_simplify.poll() is False, "no active object"
 
@@ -303,6 +304,78 @@ def refinement_before_and_after():
     ids = face_ids(source.data)
     assert min(ids) >= 0 and max(ids) < source.data["ddg_simplify_n_faces"]
     assert len(source.data.polygons) > 0 and n_v > 0
+
+
+def coarse_object(source):
+    found = [o for o in bpy.data.objects
+             if o.type == 'MESH' and o.get("ddg_simplify_coarse_of") == source.name]
+    assert len(found) <= 1, [o.name for o in found]
+    return found[0] if found else None
+
+
+@test
+def coarse_mesh_object():
+    source = sphere()
+    mesh = source.data
+    before = fingerprint(mesh)
+    run(percent=20.0)
+    assert coarse_object(source) is None, "made without Create Coarse Mesh"
+    run(percent=20.0, create_coarse_mesh=True)
+    assert fingerprint(mesh) == before, "the input geometry changed"
+    coarse = coarse_object(source)
+    assert coarse is not None and coarse.name == source.name + "_coarse", coarse
+    s = library_run(mesh, ratio=0.2)
+    kept = list(s.vertices)
+    assert len(coarse.data.vertices) == len(kept)
+    for i, v in enumerate(kept):
+        assert tuple(coarse.data.vertices[i].co) == tuple(mesh.vertices[v].co)
+    cm = coarse.data
+    dropped = (cm["ddg_simplify_dropped_repeated_vertex"] + cm["ddg_simplify_dropped_duplicate"]
+               + cm["ddg_simplify_dropped_invalid"])
+    assert len(cm.polygons) + dropped == s.n_faces
+    assert all(len(p.vertices) == 3 for p in cm.polygons)
+    assert coarse.matrix_world == source.matrix_world
+    # Every flat triangle is a coarse face of the library's result, in input vertex ids.
+    fine = list(s.faces)
+    faces = {frozenset(fine[3 * f:3 * f + 3]) for f in range(len(fine) // 3)}
+    for p in cm.polygons:
+        assert frozenset(kept[i] for i in p.vertices) in faces
+    # Running again replaces the coarse object's mesh instead of adding objects.
+    n_objects = len(bpy.data.objects)
+    run(percent=10.0, create_coarse_mesh=True)
+    assert len(bpy.data.objects) == n_objects
+    assert coarse_object(source) is coarse
+    assert len(coarse.data.vertices) == mesh["ddg_simplify_n_vertices"]
+
+
+@test
+def coarse_mesh_leaves_out_what_a_mesh_cannot_hold():
+    source = sphere(2)
+    run(target_mode='COUNT', count=3, create_coarse_mesh=True)
+    coarse = coarse_object(source)
+    assert coarse is not None
+    cm = coarse.data
+    if source.data["ddg_simplify_n_vertices"] == 3:
+        # A closed surface with three vertices is two faces on the same three vertices.
+        assert cm["ddg_simplify_dropped_duplicate"] >= 1, dict(cm)
+        assert len(cm.polygons) <= 1
+
+
+@test
+def coarse_mesh_is_not_made_with_inserted_vertices():
+    made_case = False
+    for percent in (30.0, 10.0, 5.0):
+        source = grid(8)
+        run(percent=percent, refine_after=True, create_coarse_mesh=True)
+        inserted = source.data["ddg_simplify_n_vertices"] - len(group_vertices(source))
+        coarse = coarse_object(source)
+        if inserted > 0:
+            assert coarse is None, "a coarse mesh was made with inserted vertices"
+            made_case = True
+        else:
+            assert coarse is not None
+        reset()
+    assert made_case, "no configuration kept an inserted vertex"
 
 
 @test
