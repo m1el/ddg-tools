@@ -2145,6 +2145,173 @@ results below.
 - **What depends on it.** Element quality of the optional post-refinement (SPEC §6.2), reported as
   best effort when the hypotheses fail.
 
+## Repulsive Surfaces
+
+"RS paper" is C. Yu, C. Brakensiek, H. Schumacher, K. Crane, *Repulsive Surfaces*, ACM TOG 40(6),
+Article 268, 2021 (<https://doi.org/10.1145/3478513.3480521>); section, equation and figure
+numbers are the paper's. The contract is `crates/ddg-repulsive-surfaces/SPEC.md` ("SPEC",
+decisions `D1`–`D31`, formula table §12). "N&W" is J. Nocedal, S. J. Wright, *Numerical
+Optimization*, 2nd ed., Springer 2006.
+
+**What the machine-checked part covers, and what it does not.** There is no certifiable minimizer:
+the library runs a descent method on a nonconvex energy. Machine-checked
+(`DdgProofs/RepulsiveSurfaces/*.lean`, namespace `DdgProofs.RS`, 35 `rs-` ids): the exponent
+bookkeeping; the face quantities and dual areas; the derivatives of face area, unit normal and
+barycenter along any differentiable motion; the kernel (Eq. 16), its invariances, homogeneity and
+projector form, and its gradient for `α > 1` everywhere off the diagonal, **including `ν = 0`**;
+the discrete energy (Eq. 10), its invariance under translations, orthogonal maps and face flips,
+its homogeneity `c^{4+α−β}`, its exact gradient along any regular motion (nondegenerate faces,
+distinct barycenters) and the identities `Σ g = 0`, `Σ f × g = 0`, `Σ f·g = (4+α−β)Ê`; the
+Barnes–Hut energy with the leaf rule (exact up to the lumping of admissible clusters under an
+exact cover; exact at `θ = 0`), the aggregate adjoint of D4, the box-distance lower bound; `D_f`
+as the P1 gradient (with a counterexample to the printed unit-edge form); the operators of
+Eq. 11–13 assembled by increments, symmetric PSD with the constants in their kernel; the
+symmetrisation of `B⁰`; the App. A kernel-matrix form for `U` and `V` and the null space of the
+compressed operator; the projector average; the preconditioner's order bookkeeping and its
+symmetry, positivity and range; the Schur block inverse, direction, Newton correction (least
+norm, row scaling, the sign) and the nested saddle; the constraint Jacobians (area, volume with
+the factor 3 on closed fans, per-component barycenter and its exact translation projection); the
+penalties of §5.2 and the structure of the Willmore derivative; the reference's Armijo test; the
+circumcenter weights, smoothing weights and Delaunay test of the remesher; conservative
+advancement with moving triangles; the L-BFGS two-loop recursion and positive definiteness of the
+update. **Not** machine-checked: the entries below; anything about the discrete energy as an
+approximation of the smooth one; the derivatives of the cotan weights and masses inside the
+Willmore gradient (finite differences, SPEC §13.2); the turning-angle gradient at `θ_v = 0`
+(the formula is proved for `0 < θ_v < π`); the error of Barnes–Hut and of the block cluster tree;
+the convergence of GMRES, of the Newton projection, of the flow and of the comparison
+optimizers; the data structures (BVH, BCT, remeshing mesh) and every tolerance; rounding.
+
+**SPEC errors found while proving.** SPEC §6.2 prints the Newton correction as
+"`h = A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` subtracted (`rs-schur-correction`: `C_N h = Φ`)". With
+`S = −C_N A′⁻¹ C_Nᵀ` that `h` satisfies `C_N h = −Φ` (`RS.schur_correction`), so it must be
+**added** (paper Eq. 21, "which we add to the updated embedding"); subtracting it doubles the
+linearized violation (`RS.schur_correction_sign`). SPEC §6.3 tags `rs-fractional-preconditioner`,
+which §12 does not list; it is proved (`RS.frac_precond_props`).
+
+### [formula: rs-exponent-range] The energy space of the tangent-point energy of surfaces
+
+- **Statement.** For an `n`-dimensional set `Σ ⊂ R^m` with finite tangent-point energy
+  `ℰ_p(Σ)`, `p > 2n`, `Σ` is an embedded `C^{1,1−2n/p}` submanifold (Strzelecki–von der Mosel);
+  `ℰ_p(Σ) < ∞` iff `Σ` is an embedded submanifold of class `W^{s,p}`, `s = 2 − n/p` (Blatt).
+  For surfaces (`n = 2`), `p > 4` makes the energy a barrier against self-contact, and the
+  energy space is `W^{s,p}` with `s ∈ (3/2, 2)`.
+- **Reference.** RS paper Sec. 2.1 (units `m^{2n−p}`, "`p > 2n` is required for the energy to be
+  truly repulsive") and Sec. 2.3; P. Strzelecki, H. von der Mosel, *Tangent-point repulsive
+  potentials for a class of non-smooth m-dimensional sets in R^n. Part I*, J. Geom. Anal. 23(3),
+  1085–1139, 2013; S. Blatt, *The energy spaces of the tangent point energies*, J. Topol. Anal.
+  5(3), 261–270, 2013. The two-exponent form `(α, β)`: S. Blatt, P. Reiter, *Regularity theory for
+  tangent-point energies: the non-degenerate sub-critical case*, Adv. Calc. Var. 8(2), 93–116,
+  2015 (cited in Sec. 2.1).
+- **Source check.** Read in the RS paper (Sec. 2.1, 2.3); the cited articles were not re-read, and
+  the paper gives no theorem numbers for them.
+- **Why not formalized.** Fractional Sobolev–Slobodeckij spaces on surfaces and the regularity
+  theory of the energy are not in Mathlib.
+- **What depends on it.** Only the admissible exponent range and the "subcritical" flag of
+  `Exponents` (SPEC §2.2, D3): `s = (β − 2)/α ∈ (1, 2)` (the bookkeeping is machine-checked,
+  `rs-exponents`), subcritical `β − α ≤ 4`. The discrete formulas and their proofs hold for any
+  real exponents.
+
+### [formula: rs-differential-order] The differential has order `2s`; `B` matches it
+
+- **Statement.** `dℰ_p` maps `W^{s,p}` to its dual `W^{−s,p′}`; in this sense it is a nonlocal
+  differential operator of order `2s = 2(2 − n/p)` (`∈ (3, 4)` for surfaces and `p > 4`); the
+  operator `B` of Eq. 7 with `σ = s − 1` has the same order `2s`, and `B⁰` (Eq. 8) lower order.
+- **Reference.** RS paper Sec. 2.3 ("Order of the Differential") and Sec. 2.4, Eq. 5–8.
+- **Source check.** Read in the RS paper.
+- **Why not formalized.** A heuristic statement about smooth operators between fractional spaces;
+  it motivates the choice of the metric and is not used by any formula.
+- **What depends on it.** The efficiency of the `Hs` descent, not its correctness: the metric is
+  symmetric PSD (`rs-sobolev-forms`), and every accepted step decreases the energy (checked by
+  the line search, SPEC §7.2).
+
+### [formula: rs-fractional-operator] The fractional Laplacian and `L_σ` have order `2σ`
+
+- **Statement.** For `0 < 2σ < 2`, `⟨(−Δ)^σ u, v⟩ = c ∬_{R^n×R^n} (u(x) − u(y))(v(x) − v(y))
+  |x − y|^{−(2σ+n)} dx dy` (up to a constant), and its analogue `L_σ` (Eq. 6) on the immersed
+  surface is an operator of order `2σ`.
+- **Reference.** RS paper Sec. 2.4, Eq. 5 and 6, citing M. Kwaśnicki, *Ten equivalent definitions
+  of the fractional Laplace operator*, Fract. Calc. Appl. Anal. 20(1), 7–51, 2017.
+- **Source check.** Read in the RS paper; Kwaśnicki's article was not re-read (journal data from
+  memory, not from the paper's reference list, which is cut off in the text extraction).
+- **Why not formalized.** Fractional Laplacians and their integral representations are not in
+  Mathlib.
+- **What depends on it.** The interpretation of `L_{2−s}` in the preconditioner and of the order of
+  `B`. The discrete operators are defined by their formulas (Eq. 11–13), whose quadratic forms,
+  symmetry, positivity and kernels are machine-checked (`rs-sobolev-forms`,
+  `rs-kernel-matrix-form`).
+
+### [formula: rs-preconditioner-approx] `(−Δ)⁻¹ L_{2−s} (−Δ)⁻¹` approximates the inverse of the high-order term
+
+- **Statement.** Since `B` has order `2s` and `L_{2−s}` order `2(2 − s)`, the operator
+  `Ã⁻¹ = (−Δ_M)⁻¹ L_{2−s} (−Δ_M)⁻¹` has order `−2s` and approximates `B⁻¹` well enough to be an
+  effective preconditioner for GMRES on `A` (plus auxiliary terms), though not by itself a good
+  inner product.
+- **Reference.** RS paper Sec. 5.2 (the factorization `(−Δ)^{−s} = (−Δ)⁻¹(−Δ)^{2−s}(−Δ)⁻¹` and
+  the replacement of `(−Δ)^{2−s}` by `L_{2−s}`, "as per Sec. 2.4"), and Fig. 13 for the measured
+  iteration counts.
+- **Source check.** Read in the RS paper.
+- **Why not formalized.** A statement about spectral equivalence of nonlocal operators under
+  refinement; the paper gives a heuristic and measurements. The exact matrix identity
+  `W⁻¹ (M Δ^{2−s}) W⁻¹ = Δ^{−s} M⁻¹` is machine-checked (`rs-preconditioner-order`), as are the
+  symmetry and positivity of the preconditioner (`rs-fractional-preconditioner`).
+- **What depends on it.** The number of GMRES iterations (SPEC §6.3, §14.5), not the solution:
+  GMRES stops on the true residual of `A′` (right preconditioning, D13).
+
+### [formula: rs-aqp] Accelerated quadratic proxy
+
+- **Statement.** AQP minimizes a quadratic proxy (here the cotan Laplacian `W`) with a Nesterov
+  acceleration step from the previous two configurations and a line search on the true energy;
+  it supports linear constraints only.
+- **Reference.** S. Z. Kovalsky, M. Galun, Y. Lipman, *Accelerated Quadratic Proxy for Geometric
+  Optimization*, ACM TOG 35(4), Article 134, 2016, Sec. 2 (as cited in RS paper Sec. 8.2.1).
+- **Source check.** RS paper Sec. 8.2.1 read; Kovalsky et al. not re-read (the momentum constants
+  are the SPEC's D28 reading of it).
+- **Why not formalized.** A convergence-acceleration heuristic for nonconvex energies; there is no
+  formula whose correctness the comparison depends on beyond the saddle solve (machine-checked,
+  `rs-schur-direction`, `rs-nested-saddle`).
+- **What depends on it.** Only the comparison runs of SPEC §14.2 (D28); not the main flow.
+
+### [formula: rs-bcqn] Blended cured quasi-Newton
+
+- **Statement.** BCQN interpolates between the `H¹` (Laplacian) step and the `H¹`-initialized
+  L-BFGS step with a weight driven by the measured curvature, and adds inversion barriers
+  (omitted here, RS paper Sec. 8.2.1).
+- **Reference.** Y. Zhu, R. Bridson, D. M. Kaufman, *Blended Cured Quasi-Newton for Distortion
+  Optimization*, ACM TOG 37(4), Article 40, 2018 (as cited in RS paper Sec. 8.2.1).
+- **Source check.** RS paper Sec. 8.2.1 read; Zhu et al. not re-read (the blend with a
+  spectral-norm estimate is the SPEC's D27 reading of it).
+- **Why not formalized.** An optimization heuristic; the L-BFGS part is machine-checked
+  (`rs-lbfgs-two-loop`).
+- **What depends on it.** Only the comparison runs of SPEC §14.2 (D27).
+
+### [formula: rs-energy-consistency] The discrete energy approximates the smooth one
+
+- **Statement.** For a smooth embedded surface `f` and sampled triangulations `f_h`, the discrete
+  energy `Ê(f_h)` of Eq. 10 converges to `ℰ_p(f)` at an empirical rate between `O(h)` and
+  `O(h²)`, and the Barnes–Hut energy `Ẽ` converges to `Ê` as `O(θ²)`.
+- **Reference.** RS paper Sec. 8.1 and Fig. 10 (and the supplemental examples cited there).
+- **Source check.** Read in the RS paper.
+- **Why not formalized.** An empirical observation; the paper gives no proof (it notes that face
+  normals alone would suggest `O(h)`).
+- **What depends on it.** That minimizers of the discrete energy resemble those of the smooth one;
+  SPEC §14.1 re-measures it. The flow minimizes the discrete energy as defined (`rs-energy`), whose
+  gradient is machine-checked (`rs-energy-gradient`); at `θ = 0` the Barnes–Hut energy is exact
+  (`rs-bh-energy`).
+
+### [formula: rs-chen-holst] The remeshing scheme
+
+- **Statement.** Splitting long and collapsing short edges, Delaunay flips and tangential
+  smoothing toward the area-weighted circumcenters (optimal Delaunay triangulation smoothing)
+  improve triangle quality while keeping the surface.
+- **Reference.** RS paper Sec. 6, citing L. Chen, M. Holst, *Efficient mesh optimization schemes
+  based on Optimal Delaunay Triangulations*, Comput. Methods Appl. Mech. Engrg. 200(9), 967–984,
+  2011.
+- **Source check.** RS paper Sec. 6 read; Chen–Holst not re-read.
+- **Why not formalized.** Mesh quality improvement is a heuristic; its local formulas are
+  machine-checked (`rs-circumcenter`, `rs-smoothing-weights`, `rs-delaunay-test`).
+- **What depends on it.** The triangle quality during long flows (SPEC §10); every remeshing result
+  is revalidated as a manifold `Surface`, and foldovers are refused by explicit checks.
+
 ---
 
 ## Out of scope of this package

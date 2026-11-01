@@ -71,14 +71,14 @@ def ExactCover (leafOf : F → L) (nodeFaces : N → Finset F) (adm : L → Fins
   ∀ ℓ T, (∑ C ∈ adm ℓ, if T ∈ nodeFaces C then (1 : ℝ) else 0) +
     (∑ ℓ' ∈ near ℓ, if leafOf T = ℓ' then (1 : ℝ) else 0) = 1
 
-omit [Fintype L] in
+omit [Fintype L] [DecidableEq F] in
 theorem sum_leafFaces (leafOf : F → L) (s : Finset L) (g : F → ℝ) :
     ∑ ℓ' ∈ s, ∑ T ∈ leafFaces leafOf ℓ', g T =
       ∑ T, (∑ ℓ' ∈ s, if leafOf T = ℓ' then (1 : ℝ) else 0) * g T := by
   simp only [leafFaces, Finset.sum_filter, Finset.sum_mul, ite_mul, one_mul, zero_mul]
   exact Finset.sum_comm
 
-omit [Fintype L] [DecidableEq L] in
+omit [Fintype L] [DecidableEq L] [Fintype N] in
 theorem sum_nodeFaces (nodeFaces : N → Finset F) (s : Finset N) (g : F → ℝ) :
     ∑ C ∈ s, ∑ T ∈ nodeFaces C, g T =
       ∑ T, (∑ C ∈ s, if T ∈ nodeFaces C then (1 : ℝ) else 0) * g T := by
@@ -87,6 +87,7 @@ theorem sum_nodeFaces (nodeFaces : N → Finset F) (s : Finset N) (g : F → ℝ
   refine Finset.sum_congr rfl fun C _ => ?_
   rw [Finset.sum_ite_mem, Finset.univ_inter]
 
+omit [Fintype N] in
 /-- **The Barnes–Hut energy is the exact energy plus the lumping error** (SPEC §3.4): under an
 exact cover, `Ẽ = Ê + Σ_ℓ Σ_{S∈ℓ} Σ_{C ∈ adm ℓ} (K(X_S, N_S; X_C) a_S A_C −
 Σ_{T∈C} [S ≠ T] K(X_S, N_S; X_T) a_S a_T)`.
@@ -135,6 +136,7 @@ theorem no_admissible_theta_zero {rℓ rC d : ℝ} (hℓ : 0 ≤ rℓ) : ¬ max 
   rw [zero_mul, not_lt]
   exact le_max_of_le_left hℓ
 
+omit [Fintype N] in
 /-- **`θ = 0` is the exact energy** (SPEC §3.4): with no admissible node and every leaf near every
 leaf, `Ẽ = Ê`.
 

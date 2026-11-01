@@ -77,6 +77,7 @@ theorem schur_block_inverse {A : Matrix n n ℝ} {C : Matrix k n ℝ} (hA : IsUn
       simp only [Matrix.mul_assoc]
     rw [this, hCAC, Matrix.neg_mul, neg_neg, hSS]
 
+omit [DecidableEq n] [DecidableEq k] in
 /-- Evaluating `M (Sum.elim x λ)` blockwise. -/
 theorem saddle_mulVec (A : Matrix n n ℝ) (C : Matrix k n ℝ) (x : n → ℝ) (μ : k → ℝ) :
     fromBlocks A Cᵀ C 0 *ᵥ Sum.elim x μ = Sum.elim (A *ᵥ x + Cᵀ *ᵥ μ) (C *ᵥ x) := by
@@ -161,7 +162,7 @@ unchanged and turns the correction `A⁻¹CᵀS⁻¹Φ` into `A⁻¹CᵀS⁻¹D�
 
 [formula: rs-schur-correction] -/
 theorem schur_row_scaling {A : Matrix n n ℝ} {C : Matrix k n ℝ} {D : Matrix k k ℝ}
-    (hD : IsUnit D.det) (hS : IsUnit (schur A C).det) :
+    (hD : IsUnit D.det) :
     (A⁻¹ * (D * C)ᵀ * (schur A (D * C))⁻¹ * (D * C) * A⁻¹ =
         A⁻¹ * Cᵀ * (schur A C)⁻¹ * C * A⁻¹) ∧
       A⁻¹ * (D * C)ᵀ * (schur A (D * C))⁻¹ = A⁻¹ * Cᵀ * (schur A C)⁻¹ * D⁻¹ := by
@@ -195,7 +196,7 @@ def innerSaddle (A : Matrix n n ℝ) (CQ : Matrix q n ℝ) : Matrix (n ⊕ q) (n
 /-- `C̃_N = [C_N 0]`: the nonlinear rows padded with zeros on the multiplier columns. -/
 def padRows (CN : Matrix k n ℝ) : Matrix k (n ⊕ q) ℝ := fun r j => Sum.elim (CN r) 0 j
 
-omit [DecidableEq k] in
+omit [DecidableEq k] [DecidableEq n] [DecidableEq q] in
 /-- **The nested saddle is the full saddle** (Sec. 7.2, SPEC §6.1):
 `[A′ C̃_Nᵀ; C̃_N 0] (x, λ_Q, λ_N) = (b, r, s)` iff `A₃x + C_Qᵀλ_Q + C_Nᵀλ_N = b`, `C_Q x = r`,
 `C_N x = s`.

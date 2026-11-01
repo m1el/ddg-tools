@@ -242,7 +242,7 @@ theorem gramOf_form (R : Matrix (F × ι) V ℝ) (w : F → F → ℝ) (u v : V 
   refine Finset.sum_congr rfl fun S _ => Finset.sum_congr rfl fun T _ => ?_
   congr 1
   refine Finset.sum_congr rfl fun c _ => ?_
-  simp only [mulVec, dotProduct_sub, sub_dotProduct, dotProduct_comm u]
+  simp only [mulVec, sub_dotProduct, dotProduct_comm u]
 
 omit [Fintype V] [DecidableEq V] in
 theorem pairForm_symm (w : F → F → ℝ) (x y : F → ι → ℝ) : pairForm w x y = pairForm w y x := by
@@ -252,7 +252,7 @@ omit [Fintype V] [DecidableEq V] in
 theorem pairForm_self_nonneg {w : F → F → ℝ} (hw : ∀ S T, 0 ≤ w S T) (x : F → ι → ℝ) :
     0 ≤ pairForm w x x :=
   Finset.sum_nonneg fun S _ => Finset.sum_nonneg fun T _ =>
-    mul_nonneg (hw S T) (Finset.sum_nonneg fun c _ => mul_self_nonneg _)
+    mul_nonneg (hw S T) (Finset.sum_nonneg fun _ _ => mul_self_nonneg _)
 
 /-- **The assembled operator is symmetric positive semidefinite** for nonnegative weights (whether
 or not `w` is symmetric: `B⁰`'s `K₂` is not).
@@ -284,7 +284,7 @@ theorem avgMat_mulVec (fv : F → Fin 3 → V) (u : V → ℝ) (S : F) (c : Unit
     (avgMat fv *ᵥ u) (S, c) = (1 / 3) * ∑ a, u (fv S a) := by
   simp only [avgMat, mulVec, dotProduct, Finset.sum_mul, ite_mul, zero_mul]
   rw [Finset.sum_comm]
-  simp [Finset.sum_ite_eq', Finset.mul_sum]
+  simp [Finset.mul_sum]
 
 /-- The component rows of `D_f`: `(D u)(S, c) = (D_f u(S))_c`. -/
 def dfMat (f : V → V3) (fv : F → Fin 3 → V) : Matrix (F × Fin 3) V ℝ :=
@@ -297,7 +297,7 @@ theorem dfMat_mulVec (f : V → V3) (fv : F → Fin 3 → V) (u : V → ℝ) (S 
   simp only [dfMat, mulVec, dotProduct, Finset.sum_mul, ite_mul, zero_mul, Finset.sum_apply,
     Pi.smul_apply, smul_eq_mul]
   rw [Finset.sum_comm]
-  simp [Finset.sum_ite_eq', mul_comm]
+  simp [mul_comm]
 
 /-- The fractional operator `L_τ` of Eq. 11 (weights `a_S a_T ρ^{−(2τ+2)}`, `S ≠ T`). -/
 def opL [DecidableEq F] (f : V → V3) (fv : F → Fin 3 → V) (τ : ℝ) : Matrix V V ℝ :=
@@ -356,7 +356,7 @@ theorem sobolev_forms [DecidableEq F] (f : V → V3) (fv : F → Fin 3 → V) (�
   · rw [opB, gramOf_form, pairForm]
     refine Finset.sum_congr rfl fun S _ => Finset.sum_congr rfl fun T _ => ?_
     by_cases h : S ≠ T
-    · simp only [feat, dfMat_mulVec, dotProduct, Pi.sub_apply, ρ, h, if_true, ne_eq,
+    · simp only [feat, dfMat_mulVec, dotProduct, Pi.sub_apply, ρ, h, ite_true, ne_eq,
         not_false_eq_true]; ring
     · simp [h]
   · rw [opB0, gramOf_form, pairForm]
@@ -379,11 +379,11 @@ theorem sobolev_forms [DecidableEq F] (f : V → V3) (fv : F → Fin 3 → V) (�
           (area_nonneg _ _ _)) (hρ S T _)
       · exact le_rfl
   · exact gramOf_const _ _ (k := fun _ => 1) fun S c => by
-      rw [avgMat_mulVec]; simp [Fin.sum_univ_three]
+      rw [avgMat_mulVec]; simp
   · exact gramOf_const _ _ (k := fun _ => 0) fun S c => by
       rw [dfMat_mulVec, dfGrad_const]; rfl
   · exact gramOf_const _ _ (k := fun _ => 1) fun S c => by
-      rw [avgMat_mulVec]; simp [Fin.sum_univ_three]
+      rw [avgMat_mulVec]; simp
 
 end forms
 
@@ -434,7 +434,7 @@ theorem kernel_matrix_form {H : Matrix F F ℝ} (hH : Hᵀ = H) {a : F → ℝ} 
     · simp only [dotProduct, Pi.mul_apply, mulVec, Finset.mul_sum, Finset.sum_mul]
       refine Finset.sum_congr rfl fun S _ => Finset.sum_congr rfl fun T _ => ?_
       field_simp [ha S]
-    · simp only [dotProduct, Pi.mul_apply, mulVec, Finset.mul_sum, Finset.sum_mul]
+    · simp only [dotProduct, Pi.mul_apply, mulVec, Finset.mul_sum]
       refine Finset.sum_congr rfl fun S _ => Finset.sum_congr rfl fun T _ => ?_
       ring
   have e2 : ∑ S, ∑ T, a S * H S T * a T * (x T * y T) =
@@ -525,9 +525,10 @@ theorem hierarchical_null_space (H : Matrix F F ℝ) {a : F → ℝ} (ha : ∀ S
     (fv : F → Fin 3 → V) :
     ((Umat a fv)ᵀ * appA H a * Umat a fv) *ᵥ (fun _ => 1) = 0 := by
   have hU : Umat a fv *ᵥ (fun _ => (1 : ℝ)) = a := by
-    funext S; rw [Umat_mulVec]; simp [Fin.sum_univ_three]
+    funext S; rw [Umat_mulVec]; simp
   rw [← mulVec_mulVec, hU, ← mulVec_mulVec, appA_mulVec_self H ha, mulVec_zero]
 
+omit [Fintype V] [Fintype F] [DecidableEq V] [DecidableEq F] in
 /-- **The `V` operator annihilates constants**: `V 1 = a ⊙ D_f 1 = 0`, so `B 1 = 0` for any
 compressed kernel.
 

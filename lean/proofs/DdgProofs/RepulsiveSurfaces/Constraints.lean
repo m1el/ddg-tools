@@ -112,6 +112,7 @@ theorem cross_next_eq (f : V → V3) (fv : F → Fin 3 → V) (S : F) (a : Fin 3
       nvec f fv S - corner f fv S a ⨯₃ (corner f fv S (a + 1) - corner f fv S (a + 2)) := by
   fin_cases a <;> apply v3_ext <;> simp [nvec, cross_apply] <;> ring
 
+omit [Fintype V] in
 /-- **The factor 3** (SPEC D9): if the fan around `v` is closed and consistently oriented in the
 sense `Σ_{(S,a) : fv S a = v} (f_{a+1} − f_{a+2}) = 0` (`closedFan_of_equiv`), then
 `∇_v V = ⅙ Σ_{S∋v} n_S = ⅓ Σ_{S∋v} a_S N_S`; the reference's row `Σ_{S∋v} a_S N_S` is `3 ∇_v V`.
@@ -180,6 +181,7 @@ def compWeight (comp : V → K) (w : V → ℝ) (c : K) : ℝ := ∑ v, if comp 
 def compBary (comp : V → K) (w : V → ℝ) (f : V → V3) (c : K) : V3 :=
   (compWeight comp w c)⁻¹ • ∑ v, if comp v = c then w v • f v else 0
 
+omit [DecidableEq V] in
 /-- **The barycenter Jacobian** (SPEC §5.1, frozen weights): `d/ds X_c(Γ s) =
 Σ_{v ∈ c} (w_v/W_c) Γ'_v`, the rows `w_v/W_c ⊗ I₃`.
 
@@ -202,6 +204,7 @@ theorem hasDerivAt_compBary (comp : V → K) (w : V → ℝ) {Γ : ℝ → V →
   · rw [smul_smul, div_eq_inv_mul]
   · simp
 
+omit [DecidableEq V] in
 /-- **The translation projection is exact** (SPEC §5.1, §6.2): translating the vertices of
 component `c` by `X₀ − X_c` (with `W_c ≠ 0`) makes `X_c = X₀` and leaves the barycenter of every
 other component unchanged.

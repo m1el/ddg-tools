@@ -173,6 +173,7 @@ theorem hasDerivAt_turning {c ℓ : ℝ → ℝ} {c' ℓ' : ℝ} (hc : HasDerivA
   · refine hθ2.congr_deriv ?_
     push_cast; ring
 
+omit [Fintype E] in
 /-- **Boundary turning angle at a vertex** (Sec. 7.3.4): with the incoming boundary edge `I` and
 the outgoing one `J` (positive lengths, `T_I·T_J ∈ (−1, 1)`), `θ = arccos(T_I·T_J)` and
 `ℓ_v = (ℓ_I + ℓ_J)/2`, `d/ds θ²/ℓ_v` is given by `hasDerivAt_turning` with
@@ -299,6 +300,7 @@ theorem hasDerivAt_willmore (I : Finset V) {Wc : ℝ → V → V → ℝ} {W' : 
   field_simp
   ring
 
+omit [DecidableEq V] in
 /-- **Frozen `W` and `M`**: the gradient of `E_W` is `g_w = 2 Σ_{v∈I} W_vw y_v/m_v`, i.e.
 `2 Wᵀ M_I⁻¹ W f` (`= 2 W M_I⁻¹ W f` for the symmetric cotan matrix).
 
