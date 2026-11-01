@@ -507,6 +507,39 @@ holds `P`, `P^vec`, `FineFrames` and the helpers. Decisions where the text left 
   `k_max`, `k_min`, unit directions per vertex.
 * **Boundary preservation / constraints** (8.6.3, Fig. 28): fixed vertices (§2.2).
 
+*As built (WP8; `src/anisotropy.rs`).*
+* **Frames.** `u_i` is a normalized frame angle (`curvature::direction_angles`). The edge angle at
+  `i` is rebuilt from the corner angles of the input lengths, counter-clockwise from
+  `outgoing_halfedge(i)` (the unnormalized angle `θ`; the closing edge of a boundary fan is at
+  `Θ`); `u` is unnormalized by `Θ/2π` (interior) or `Θ/π` (boundary), so the scalar product is
+  taken in the real tangent plane. At a cone vertex the angle between `u` and the edge is the
+  smaller of the two ways round, `min(δ, Θ − δ)`; on the boundary `|δ|`. `(u·ê)² = cos²` is
+  invariant under `u → −u` at flat vertices. A direction pointing out of a boundary vertex's fan is
+  snapped to the nearest boundary edge by `direction_angles`; this is its rule, not ours.
+* **Direction of the effect.** The factor is `1` for edges parallel to `u` and `1 − τ` for edges
+  orthogonal to it, so coarse triangles (isotropic in the scaled metric) are **elongated across
+  `u`**: `u = d_max` → long along `d_min`.
+* **Validity is exact, not bisected.** Each scaled length is affine in `τ`, so every triangle
+  inequality is affine in `τ` and holds on `[0, τ*)`; `max_valid_tau` is the minimum of the roots
+  (a test compares it with bisection to `1e-9`). `clamp_tau` uses `τ_max (1 − clamp_safety)`
+  (default `1e-6`) and reports `tau_used`, `tau_max`, the violating-face count and the factor
+  range in `AnisotropyReport`; without it, `AnisotropyError::TriangleInequality` names all faces.
+  `τ = 0` returns the input lengths bitwise.
+* **Tracking** needs no change: `CoarseMesh::from_lengths` takes the scaled lengths and the
+  points as (input face, barycentric coordinates), which are metric independent. Tests: the
+  `τ = 0` mesh is `bitwise_eq` to the plain one; `certify` passes after coarsening; every point is
+  located; the total area equals that of the scaled mesh.
+* **Measured** (`examples/anisotropy_study.rs`, 300 coarse vertices, stand-in order
+  `coarsen_by_area`: lightest lumped area first, in rounds; mean angle in degrees between the
+  long axis of the coarse faces, from the covariance of their tracked fine vertices, and the
+  direction line; 45 = no relation, 90 = across). Open cylinder 96x60 (`Max`): 31 at τ = 0 →
+  74 at τ = 0.6, and 16 to `d_min`. Spot `Max`: `τ_max = 0.275`, 46 → 55 (τ = 0.2) → 57 (clamped);
+  `Min`: `τ_max = 0.360`, 44 → 61. Bob `Max`: `τ_max = 0.463`, 48 → 69 (τ = 0.4) → 71;
+  `Min`: `τ_max = 0.498`, 42 → 74. Capsule (reference): `τ_max = 3e-4` for both (the input has
+  nearly degenerate triangles), no effect possible. Mean aspect of the faces 1.7 → 2.1-2.4 (cylinder
+  3-4.5); mean minimum corner angle of the coarse faces in the scaled metric stays 41 degrees, in
+  3D (chord triangles) it falls from 41 to 34.
+
 ---------------------------------------------------------------------------------------------------
 
 ## 9. Hierarchies, multigrid, mean curvature flow (paper Sec. 8.7)
