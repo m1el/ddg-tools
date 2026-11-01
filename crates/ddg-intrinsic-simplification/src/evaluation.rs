@@ -63,6 +63,9 @@
 //! the output are those of the extrinsic lengths with the reference halfedge of each vertex
 //! (they are not used by the scalar applications).
 
+// `!(x > 0.0)` is deliberate: it also rejects NaN.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -733,6 +736,7 @@ pub fn extrinsic_applications(
         ));
     }
     out.n_fine_vertices = n_fine;
+    out.vertices = qem.origin.clone();
     out.coarse_of_fine = vec![None; n_fine];
     out.points = images
         .iter()

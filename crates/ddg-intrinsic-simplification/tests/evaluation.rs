@@ -194,6 +194,14 @@ fn distortion_of_the_qem_maps_runs_and_is_finite() {
     let q = qem_simplify(&s.positions, &s.faces, &o).unwrap();
     for map in [ExtrinsicMap::ClosestPoint, ExtrinsicMap::Successive] {
         let app = extrinsic_applications(&q, s.positions.len(), map).unwrap();
+        // `sample` reads the data at the fine vertex that each coarse vertex is.
+        assert_eq!(q.origin.len(), q.positions.len());
+        let f: Vec<f64> = (0..s.positions.len()).map(|v| v as f64).collect();
+        let sampled = app.sample(&f).unwrap();
+        for (c, &o) in q.origin.iter().enumerate() {
+            assert_eq!(sampled[c], o as f64);
+            assert_eq!(q.positions.len(), app.output().n_vertices());
+        }
         let area = coarse_area(&app).unwrap();
         assert!((area - q.report.coarse_area).abs() < 1e-9 * area);
         let r = distortion(

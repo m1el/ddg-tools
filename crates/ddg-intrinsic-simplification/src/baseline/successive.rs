@@ -39,6 +39,9 @@
 //!   after-face with the largest minimal barycentric coordinate. A point whose best face has a
 //!   coordinate below `−1e-9` (rounding of a valid embedding) is clamped and counted.
 
+// `!(x > 0.0)` is deliberate: it also rejects NaN.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use std::collections::BTreeSet;
 
 type V3 = [f64; 3];

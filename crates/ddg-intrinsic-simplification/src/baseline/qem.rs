@@ -338,6 +338,9 @@ pub struct QemResult {
     pub positions: Vec<V3>,
     /// The coarse faces (orientation of the input kept).
     pub faces: Vec<[u32; 3]>,
+    /// The fine (input) vertex that each coarse vertex is: a survivor of the collapses keeps its
+    /// id, and its position is the placement of the last collapse into it.
+    pub origin: Vec<u32>,
     /// For every fine vertex, the coarse vertex it collapsed into (a surviving vertex maps to
     /// itself).
     pub vertex_map: Vec<u32>,
@@ -852,9 +855,11 @@ pub fn qem_simplify(
     // Compact.
     let mut new_id = vec![u32::MAX; n];
     let mut out_pos = Vec::with_capacity(w.n_alive);
+    let mut origin = Vec::with_capacity(w.n_alive);
     for (v, id) in new_id.iter_mut().enumerate() {
         if w.alive[v] {
             *id = out_pos.len() as u32;
+            origin.push(v as u32);
             out_pos.push(w.pos[v]);
         }
     }
@@ -914,6 +919,7 @@ pub fn qem_simplify(
     Ok(QemResult {
         positions: out_pos,
         faces: out_faces,
+        origin,
         vertex_map,
         projection,
         successive,
