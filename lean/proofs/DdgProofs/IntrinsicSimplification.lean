@@ -3,6 +3,9 @@ import DdgProofs.IntrinsicSimplification.Monotone
 import DdgProofs.IntrinsicSimplification.Curvature
 import DdgProofs.IntrinsicSimplification.Interpolation
 import DdgProofs.IntrinsicSimplification.Removal
+import DdgProofs.IntrinsicSimplification.Wasserstein
+import DdgProofs.IntrinsicSimplification.Transport
+import DdgProofs.IntrinsicSimplification.Operators
 
 /-!
 # Surface Simplification using Intrinsic Error Metrics (Liu, Gillespie, Chislett, Sharp, Jacobson, Crane, ACM TOG 42(4), 2023)
