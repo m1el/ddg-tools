@@ -7,6 +7,20 @@
 //! (VHM), Eq. 10). The frame of an input vertex is that of the input mesh, so a field computed
 //! on any triangulation is read off at the input vertices as it is.
 //!
+//! # Representations (Integer Coordinates I26)
+//!
+//! Everything here runs on any representation with input-aligned frames ([`TangentFrames`]):
+//! signposts read their stored angles (bitwise as before the code became generic,
+//! `tests/vector_pins.rs`); integer coordinates compute the same frames from the roundabouts and
+//! the straight segments of the edges over the input mesh
+//! (`IntegerTriangulation::frame_directions`, Integer Coordinates SPEC §4.12), equal to the
+//! signposts' to rounding on the same triangulation (`tests/vector_representation.rs`). The
+//! functions that cannot fail on signposts keep their signpost signatures ([`transport_angle`],
+//! [`halfedge_directions`], [`check_maximum_principle`]) and have generic counterparts that
+//! return the error of the frames ([`transport_angles`], [`halfedge_directions_of`],
+//! [`check_maximum_principle_of`]). The callers choose the representation
+//! (`representation::Representation::DEFAULT`, integers).
+//!
 //! * [`connection_matrices`]: the connection Laplacian and its mass matrix, by finite
 //!   differences (VHM Sec. 5.3: cotan weights times transport, lumped mass) or by finite
 //!   elements (Knöppel, Crane, Pinkall, Schröder 2013, "Globally Optimal Direction Fields"
@@ -34,7 +48,7 @@ use std::f64::consts::{PI, TAU};
 use std::fmt;
 
 use ddg_core::{SparseError, SparseMatrix};
-use ddg_intrinsic::IntrinsicTriangulation;
+use ddg_intrinsic::{IntrinsicTriangulation, Triangulation};
 
 mod complex;
 mod connection;
@@ -43,11 +57,11 @@ mod knoeppel;
 pub(crate) mod linsolve;
 
 pub use complex::C64;
-pub use connection::{face_holonomy, transport_angle};
+pub use connection::{TangentFrames, face_holonomy, transport_angle, transport_angles};
 pub use linsolve::Factorized;
 
 use complex::{from_real, to_real};
-use connection::{fd_laplacian, fe_matrices, frame_factor, lumped_mass, tangent_scale, transport};
+use connection::{Framed, fd_laplacian, fe_matrices, lumped_mass, tangent_scale};
 
 /// Errors of this module.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +85,12 @@ pub enum VectorError {
         /// Which matrix.
         what: String,
     },
+    /// The representation could not compute its tangent frames ([`TangentFrames`]: integer
+    /// coordinates that are not those of a realization).
+    Frames {
+        /// What is wrong.
+        reason: String,
+    },
 }
 
 impl fmt::Display for VectorError {
@@ -82,6 +102,7 @@ impl fmt::Display for VectorError {
             VectorError::NotPositiveDefinite { what } => {
                 write!(f, "{what} is not positive definite")
             }
+            VectorError::Frames { reason } => write!(f, "tangent frames: {reason}"),
         }
     }
 }
@@ -138,9 +159,9 @@ impl ConnectionMatrices {
 ///
 /// # Errors
 /// [`VectorError::InvalidOptions`] for `n_sym = 0`; [`VectorError::Sparse`] if the matrix is
-/// too large.
-pub fn connection_matrices(
-    tri: &IntrinsicTriangulation,
+/// too large; [`VectorError::Frames`] (see [`TangentFrames`]).
+pub fn connection_matrices<T: TangentFrames + ?Sized>(
+    tri: &T,
     n_sym: u32,
     kind: ConnectionLaplacian,
 ) -> Result<ConnectionMatrices, VectorError> {
@@ -149,12 +170,26 @@ pub fn connection_matrices(
             reason: "the symmetry n must be at least 1".to_string(),
         });
     }
+    connection_matrices_framed(&Framed::new(tri)?, n_sym, kind)
+}
+
+fn connection_matrices_framed<T: TangentFrames + ?Sized>(
+    framed: &Framed<'_, T>,
+    n_sym: u32,
+    kind: ConnectionLaplacian,
+) -> Result<ConnectionMatrices, VectorError> {
+    let tri = framed.tri;
+    if n_sym == 0 {
+        return Err(VectorError::InvalidOptions {
+            reason: "the symmetry n must be at least 1".to_string(),
+        });
+    }
     let (stiffness, mass) = match kind {
         ConnectionLaplacian::FiniteDifference => {
-            connection::build_pair(&fd_laplacian(tri, n_sym), &lumped_mass(tri))?
+            connection::build_pair(&fd_laplacian(framed, n_sym), &lumped_mass(tri))?
         }
         ConnectionLaplacian::FiniteElement => {
-            let (m, a) = fe_matrices(tri, n_sym);
+            let (m, a) = fe_matrices(framed, n_sym);
             connection::build_pair(&a, &m)?
         }
     };
@@ -195,9 +230,9 @@ impl TangentField {
     /// # Errors
     /// [`VectorError::InvalidInput`] if `positions` does not have one entry per input vertex
     /// or the field does not have one value per vertex of `tri`.
-    pub fn input_vectors_3d(
+    pub fn input_vectors_3d<T: Triangulation + ?Sized>(
         &self,
-        tri: &IntrinsicTriangulation,
+        tri: &T,
         positions: &[[f64; 3]],
     ) -> Result<Vec<[f64; 3]>, VectorError> {
         let input = tri.input();
@@ -211,12 +246,12 @@ impl TangentField {
                 ),
             });
         }
-        if self.values.len() != tri.n_vertices() {
+        if self.values.len() != tri.complex().n_vertices() {
             return Err(VectorError::InvalidInput {
                 reason: format!(
                     "a field with {} values on a triangulation with {} vertices",
                     self.values.len(),
-                    tri.n_vertices()
+                    tri.complex().n_vertices()
                 ),
             });
         }
@@ -351,9 +386,9 @@ pub struct DirectionFieldReport {
 /// # Errors
 /// [`VectorError::InvalidOptions`]; [`VectorError::NotPositiveDefinite`] if `A + εM` is not
 /// (the finite-difference energy on a triangulation with negative cotan weights);
-/// [`VectorError::Sparse`].
-pub fn smoothest_field(
-    tri: &IntrinsicTriangulation,
+/// [`VectorError::Sparse`]; [`VectorError::Frames`] (see [`TangentFrames`]).
+pub fn smoothest_field<T: TangentFrames + ?Sized>(
+    tri: &T,
     options: &DirectionFieldOptions,
 ) -> Result<(TangentField, DirectionFieldReport), VectorError> {
     if !(options.tolerance > 0.0 && options.shift >= 0.0 && options.shift.is_finite()) {
@@ -450,27 +485,30 @@ pub struct Singularities {
 /// [formula: app-vector-singularity-index]
 ///
 /// # Errors
-/// [`VectorError::InvalidInput`] if the field does not have one value per vertex.
-pub fn singularities(
-    tri: &IntrinsicTriangulation,
+/// [`VectorError::InvalidInput`] if the field does not have one value per vertex;
+/// [`VectorError::Frames`] (see [`TangentFrames`]).
+pub fn singularities<T: TangentFrames + ?Sized>(
+    tri: &T,
     field: &TangentField,
 ) -> Result<Singularities, VectorError> {
-    if field.values.len() != tri.n_vertices() {
+    let c = tri.complex();
+    if field.values.len() != c.n_vertices() {
         return Err(VectorError::InvalidInput {
             reason: format!(
                 "a field with {} values on a triangulation with {} vertices",
                 field.values.len(),
-                tri.n_vertices()
+                c.n_vertices()
             ),
         });
     }
+    let framed = Framed::new(tri)?;
     let n = field.n_sym;
     let mut faces = Vec::new();
     let mut index_sum = 0i64;
     let mut n_skipped = 0;
     let mut max_rounding = 0.0f64;
-    for f in 0..tri.n_faces() {
-        let verts = tri.faces()[f];
+    for f in 0..c.n_faces() {
+        let verts = c.faces()[f];
         if verts.iter().any(|&v| field.values[v as usize].abs() == 0.0) {
             n_skipped += 1;
             continue;
@@ -478,10 +516,10 @@ pub fn singularities(
         let mut total = n as f64 * face_holonomy(tri, f);
         for k in 0..3 {
             let h = 3 * f + k;
-            let (i, j) = (tri.from_vertex(h), tri.to_vertex(h));
+            let (i, j) = (c.from_vertex(h), c.to_vertex(h));
             let ui = field.values[i];
             let uj = field.values[j];
-            total += (uj / (transport(tri, h, n) * ui)).arg();
+            total += (uj / (framed.transport(h, n) * ui)).arg();
         }
         let x = total / TAU;
         let index = x.round();
@@ -555,15 +593,17 @@ pub struct HarmonicFieldReport {
 }
 
 /// The boundary value of every boundary vertex of `tri` (zero elsewhere).
-fn boundary_values(
-    tri: &IntrinsicTriangulation,
+fn boundary_values<T: TangentFrames + ?Sized>(
+    framed: &Framed<'_, T>,
     n_sym: u32,
     values: &BoundaryValues,
 ) -> Result<Vec<C64>, VectorError> {
+    let tri = framed.tri;
+    let c = tri.complex();
     let n = n_sym as f64;
-    let mut out = vec![C64::default(); tri.n_vertices()];
-    let boundary: Vec<usize> = (0..tri.n_vertices())
-        .filter(|&v| tri.is_boundary_vertex(v))
+    let mut out = vec![C64::default(); c.n_vertices()];
+    let boundary: Vec<usize> = (0..c.n_vertices())
+        .filter(|&v| c.is_boundary_vertex(v))
         .collect();
     match values {
         BoundaryValues::Tangent | BoundaryValues::InwardNormal => {
@@ -581,7 +621,7 @@ fn boundary_values(
             let mut set = vec![false; n_input];
             for &(v, u) in given {
                 let v = v as usize;
-                if v >= n_input || !tri.is_boundary_vertex(v) {
+                if v >= n_input || !c.is_boundary_vertex(v) {
                     return Err(VectorError::InvalidInput {
                         reason: format!("vertex {v} is not a boundary vertex of the input mesh"),
                     });
@@ -599,7 +639,7 @@ fn boundary_values(
                 set[v] = true;
                 out[v] = u;
             }
-            if let Some(v) = (0..n_input).find(|&v| tri.is_boundary_vertex(v) && !set[v]) {
+            if let Some(v) = (0..n_input).find(|&v| c.is_boundary_vertex(v) && !set[v]) {
                 return Err(VectorError::InvalidInput {
                     reason: format!("no value given for input boundary vertex {v}"),
                 });
@@ -612,15 +652,15 @@ fn boundary_values(
                 let mut length = 0.0;
                 let mut carry = C64::new(1.0, 0.0);
                 loop {
-                    let h = tri.outgoing_halfedge(v);
-                    length += tri.edge_length(tri.edge(h));
-                    carry = transport(tri, h, n_sym) * carry;
-                    v = tri.to_vertex(h);
+                    let h = c.outgoing_halfedge(v);
+                    length += tri.edge_length(c.edge(h));
+                    carry = framed.transport(h, n_sym) * carry;
+                    v = c.to_vertex(h);
                     if v < n_input {
                         break;
                     }
                     run.push((v, length, carry));
-                    if run.len() > tri.n_vertices() {
+                    if run.len() > c.n_vertices() {
                         return Err(VectorError::InvalidInput {
                             reason: "a boundary loop of inserted vertices only".to_string(),
                         });
@@ -649,18 +689,26 @@ fn boundary_values(
 ///
 /// # Errors
 /// [`VectorError::InvalidInput`] for a closed surface, a surface without interior vertices,
-/// or boundary values that do not fit; [`VectorError::Sparse`].
-pub fn harmonic_field(
-    tri: &IntrinsicTriangulation,
+/// or boundary values that do not fit; [`VectorError::Sparse`]; [`VectorError::Frames`] (see
+/// [`TangentFrames`]).
+pub fn harmonic_field<T: TangentFrames + ?Sized>(
+    tri: &T,
     options: &HarmonicFieldOptions,
 ) -> Result<(TangentField, HarmonicFieldReport), VectorError> {
-    let matrices = connection_matrices(tri, options.n_sym, options.laplacian)?;
-    let ub = boundary_values(tri, options.n_sym, &options.boundary)?;
-    let interior: Vec<usize> = (0..tri.n_vertices())
-        .filter(|&v| !tri.is_boundary_vertex(v))
+    if options.n_sym == 0 {
+        return Err(VectorError::InvalidOptions {
+            reason: "the symmetry n must be at least 1".to_string(),
+        });
+    }
+    let framed = Framed::new(tri)?;
+    let matrices = connection_matrices_framed(&framed, options.n_sym, options.laplacian)?;
+    let ub = boundary_values(&framed, options.n_sym, &options.boundary)?;
+    let c = tri.complex();
+    let interior: Vec<usize> = (0..c.n_vertices())
+        .filter(|&v| !c.is_boundary_vertex(v))
         .collect();
-    let bnd: Vec<usize> = (0..tri.n_vertices())
-        .filter(|&v| tri.is_boundary_vertex(v))
+    let bnd: Vec<usize> = (0..c.n_vertices())
+        .filter(|&v| c.is_boundary_vertex(v))
         .collect();
     if bnd.is_empty() {
         return Err(VectorError::InvalidInput {
@@ -741,14 +789,47 @@ pub fn check_maximum_principle(
     field: &TangentField,
     tolerance: f64,
 ) -> MaximumPrincipleReport {
+    let framed =
+        Framed::new(tri).expect("the signposts are the frames of a signpost triangulation");
+    maximum_principle(&framed, field, tolerance)
+}
+
+/// [`check_maximum_principle`] on any representation with input-aligned frames.
+///
+/// # Errors
+/// [`VectorError::InvalidInput`] if the field does not have one value per vertex;
+/// [`VectorError::Frames`] (see [`TangentFrames`]).
+pub fn check_maximum_principle_of<T: TangentFrames + ?Sized>(
+    tri: &T,
+    field: &TangentField,
+    tolerance: f64,
+) -> Result<MaximumPrincipleReport, VectorError> {
+    let n = tri.complex().n_vertices();
+    if field.values.len() != n {
+        return Err(VectorError::InvalidInput {
+            reason: format!(
+                "a field with {} values on a triangulation with {n} vertices",
+                field.values.len()
+            ),
+        });
+    }
+    Ok(maximum_principle(&Framed::new(tri)?, field, tolerance))
+}
+
+fn maximum_principle<T: TangentFrames + ?Sized>(
+    framed: &Framed<'_, T>,
+    field: &TangentField,
+    tolerance: f64,
+) -> MaximumPrincipleReport {
+    let c = framed.tri.complex();
     let mut report = MaximumPrincipleReport {
         n_checked: 0,
         n_outside_cone: 0,
         min_margin: f64::INFINITY,
         worst_vertex: None,
     };
-    for i in 0..tri.n_vertices() {
-        if tri.is_boundary_vertex(i) {
+    for i in 0..c.n_vertices() {
+        if c.is_boundary_vertex(i) {
             continue;
         }
         let ui = field.values[i];
@@ -758,9 +839,9 @@ pub fn check_maximum_principle(
         report.n_checked += 1;
         let mut a_plus = f64::INFINITY;
         let mut a_minus = f64::NEG_INFINITY;
-        for h in tri.outgoing_halfedges(i) {
-            let j = tri.to_vertex(h);
-            let vj = transport(tri, h, field.n_sym).conj() * field.values[j];
+        for h in c.outgoing_halfedges(i) {
+            let j = c.to_vertex(h);
+            let vj = framed.transport(h, field.n_sym).conj() * field.values[j];
             if vj.abs() == 0.0 {
                 continue;
             }
@@ -793,16 +874,26 @@ pub fn check_maximum_principle(
 
 /// The tangent-space scale of every vertex (`2π/Θ` inside, `1` on the boundary), for callers
 /// that convert between corner angles and tangent angles.
-pub fn tangent_scales(tri: &IntrinsicTriangulation) -> Vec<f64> {
-    (0..tri.n_vertices())
+pub fn tangent_scales<T: Triangulation + ?Sized>(tri: &T) -> Vec<f64> {
+    (0..tri.complex().n_vertices())
         .map(|v| tangent_scale(tri, v))
         .collect()
 }
 
 /// The direction of every halfedge at its tail in the tangent frame of the tail (the signpost,
-/// unnormalized at boundary vertices).
+/// unnormalized at boundary vertices). On signposts; for any representation,
+/// [`halfedge_directions_of`].
 pub fn halfedge_directions(tri: &IntrinsicTriangulation) -> Vec<f64> {
-    (0..tri.n_halfedges())
-        .map(|h| tri.signpost(h) * frame_factor(tri, tri.from_vertex(h)))
-        .collect()
+    halfedge_directions_of(tri).expect("the signposts are the frames of a signpost triangulation")
+}
+
+/// [`halfedge_directions`] on any representation with input-aligned frames.
+///
+/// # Errors
+/// [`VectorError::Frames`] (see [`TangentFrames`]).
+pub fn halfedge_directions_of<T: TangentFrames + ?Sized>(tri: &T) -> Result<Vec<f64>, VectorError> {
+    let framed = Framed::new(tri)?;
+    Ok((0..tri.complex().n_halfedges())
+        .map(|h| framed.tail_angle(h))
+        .collect())
 }

@@ -137,6 +137,19 @@ through them); the signposts trace one path over the input mesh.
   pass; `P0 x0` reproduces the positions to 5e-15 edge lengths. Timings (release, one thread, load
   about 6): spot after Delaunay 4.0 ms (signposts trace + overlay 1.15), camelbad 24 ms (8.7).
 
+## Input-aligned tangent frames (I26)
+
+* `IntegerTriangulation::frame_directions()` -> `(Vec<f64>, FrameReport)`: the direction of every
+  halfedge at its tail in the frame the signposts use (input mesh at `V^0`, input face or edge at
+  `V*`), normalized as `IntrinsicTriangulation::signpost`, from the roundabouts and the straight
+  segment of each edge in its unfolded strip of input faces (SPEC §4.12, `ic-input-aligned-frame`);
+  one `extract_all_edges` plus one strip layout per edge. What `ddg-intrinsic-apps`' tangent fields
+  (`vector::TangentFrames`) read on integers.
+* Results (`tests/frames.rs`): within `1.14e-10` rad of the signposts on 266 converted states
+  (1 352 388 halfedges), within `3.5e-11` after the same operations on both representations where
+  the places agree; a flip leaves every other edge's directions bitwise unchanged; mutated integers
+  are errors. 2.7 ms on spot (iDT) to 38 ms on camelbad refined (one core).
+
 ## Delaunay refinement (WP6)
 
 | | |
@@ -288,7 +301,7 @@ What `ddg-uv`'s cut flow needs, so that it runs on integer coordinates by defaul
 
 | | |
 |---|---|
-| `export_simplicial(&ExportOptions)` | `ddg_intrinsic::export::export_simplicial` on this representation (`impl Exportable`): the signposts' splits and flips; a midpoint within rounding of a crossing (I28) is split at `½ ± 2⁻¹⁶` instead (`n_off_midpoint_splits`); refinement between rounds by the signposts' rules, certified; places are the stored `q⁰`; the fingerprint hashes `n` and `r` too. |
+| `export_simplicial(&ExportOptions)` | `ddg_intrinsic::export::export_simplicial` on this representation (`impl Exportable`): the signposts' splits and flips; a midpoint within rounding of a crossing is split at that crossing (I28, `ic-split-at-crossing`: the vertex on the input edge, as the signposts snap it; `n_off_midpoint_splits` is 0 now); refinement between rounds by the signposts' rules, certified; places are the stored `q⁰`; the fingerprint hashes `n` and `r` too. |
 | `segments_on_input(nodes, segments, &EdgeTraceOptions)` | the signposts' signature, output and errors. The input edges a segment crosses are the arcs on the path between the regions of its ends in the tree of a face's arcs (from the integers); positions by intersecting two lines in the face's layout. Checked: every piece lies in its input face, the path's length equals the segment's within the tolerance (`mismatch`). |
 | `optimal_delaunay(&IntegerOdtOptions)` | `ddg_intrinsic::odt::optimal_delaunay` (`impl OdtMoves`) in `AngleFrames` frames, certified. |
 | `move_vertex_in_star(v, displacement, min_shape)` | the signposts' local move on integers: the star keeps its triangles; new `n` of the spokes from the chords of the star polygon that separate the new place from each link vertex, roundabouts by `ic-roundabout-update`, `q⁰` by App. A. Never needs a removal, so the straight stars of I27 do not stop it. |

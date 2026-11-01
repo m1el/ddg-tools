@@ -1983,6 +1983,27 @@ are not cited here).
 - **What depends on it.** Only that refinement with boundary removes enough vertices; removing more
   is harmless (App. C.1). Not a correctness condition of the integer data.
 
+### [formula: ic-input-aligned-frame] Input-aligned tangent frames from integer coordinates
+
+- **Statement.** In a valid state, for a halfedge `h = a→b` of the triangulation, the direction
+  of IC SPEC §4.12 (the input signpost of the input halfedge the roundabout names for `n = −1`; else
+  the input signpost of the wedge's first input halfedge plus `s_a` times the angle from it to the
+  straight segment of the edge in its unfolded strip of input faces, or the angle of that segment
+  in the frame of the input face or edge of an inserted vertex) is the direction in which the
+  geodesic edge leaves `a`, measured in the frame the signposts define (IT-SPEC N2, N7, N9, N10),
+  i.e. the signpost `φ_h` of the same triangulation.
+- **Reference.** Sharp, Soliman, Crane 2019, Sec. 2.3 and 3.1 (signposts: the direction of an edge
+  at its tail in a frame normalized by `2π/Θ`); Gillespie, Sharp, Crane 2021, Sec. 2.4 (roundabouts)
+  and Sec. 2.5 with Supp. Alg. 2 (the edge is the straight segment of the unfolded strip of the input
+  faces it crosses, `ic-strip-intersection`, `ic-extract-intrinsic-edge`).
+- **Why cited.** The statement is the definition of the signposts' frame composed with the fact that
+  an edge is straight in the unfolding of the input faces it crosses, which needs the realization
+  of the whole triangulation (tier C of the IC contract, SPEC §9; WP9 owns that model). The angle
+  arithmetic is elementary. Tested in Rust against the stored signposts
+  (`crates/ddg-integer-coords/tests/frames.rs`: 1 352 388 halfedges of 266 converted states within
+  `1.14e-10` rad; 806 346 halfedges after the same operations on both representations) and through
+  the tangent fields (`crates/ddg-intrinsic-apps/tests/vector_representation.rs`).
+
 ### [formula: ic-mollify] Intrinsic mollification
 
 - **Statement.** Adding the same `ε ≥ 0` to every edge length, `ε` the smallest value for which
@@ -2052,6 +2073,38 @@ are not cited here).
 - **What depends on it.** Removal in refinement with boundary (SPEC §4.6): the library flips by the
   rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
   when no flip helps; refusals are counted in the evaluation.
+
+### [formula: ic-split-at-crossing] The normal coordinates of a split exactly at a crossing (pending, tier B)
+
+- **Statement.** In a valid state let `ab` be an edge with `n_ab ≥ 1` crossing an input edge `E`
+  at its crossing number `j` (`0 ≤ j < n_ab`, counted from `a`), and let `m` be the vertex put on
+  that crossing (on `E`, as the signposts do for a point within `LOCATION_SNAP` of it; IC SPEC
+  §4.5, I28). The split has halves `am`, `mb` with `n = j` and `n_ab − 1 − j` (`E` passes through
+  `m`, where its curve has two ends and is counted by neither half: `ic-merge-edge-normal` with
+  `n₁ + n₂ + 1`), and in each of the one or two faces `abc` (side `ab` from `a`, counts
+  `c_*`, `e_*` of Eq. 1, 2) the new edge `mc` has
+  `n_mc = split_side(n, ab, j + 1)` if `j < c_a` (the arc through `m` cuts `a`), `n_mc = −1` if
+  `c_a ≤ j < c_a + e_c` (the arc through `m` is an arc from `c`: `mc` runs along `E`), and
+  `n_mc = split_side(n, ab, j)` if `j ≥ c_a + e_c` (it cuts `b`), where `split_side` is
+  `ic-split-crossed-edge`; the roundabout of the halfedge `c → m` for `c ∈ V⁰` is that of `c → a`
+  plus `n⁻_ca` plus the number `(before − c_a)` clamped to `[0, e_c]` of arcs from `c` that end
+  on `ab` before `m` (`before = j + 1`, `j`, `j` in the three cases). Every other normal
+  coordinate and roundabout is unchanged, and the state is valid (§2.4).
+- **Reference.** IC SPEC §4.5 (derivation); the limit of `ic-split-crossed-edge` as the split
+  point tends to the crossing from the side where the new edge does not cross the arc `A`
+  through `m` (the arc and the new edge share the end `m` and so do not cross; the two limits
+  differ by `A` alone, and by `A` only when `A` does not end at `c`). The paper has no such
+  split (its Alg. 7 splits at a face point of the intrinsic edge, and its Appendix A recovers a
+  barycentric place: a point on an input edge is not covered), geometry-central's
+  `splitInteriorEdge` (`integer_coordinates_intrinsic_triangulation.cpp:1442-1510`) is that face
+  split followed by a flip of the old edge, with no case for a point on an input edge.
+- **Why not formalized yet.** Tier B (SPEC §9): it follows from the face model (the chord count
+  `ic-chord-interleave` for the two limits, and the arc `A` as the one arc through the point) and
+  the merge statement; WP9 owns `lean/`. Until then: tested in Rust against the signposts,
+  `tests/snap.rs` (157 076 splits at crossings, in every shape and scenario, first and last
+  crossings, boundary and self-glued faces, spokes along the input edge, chained splits: connectivity, lengths
+  bitwise, every `n` and roundabout equal to `from_intrinsic` of the signposts that made the
+  same split; `certify` after each).
 
 ---
 

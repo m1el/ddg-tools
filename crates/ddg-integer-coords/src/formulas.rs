@@ -372,6 +372,53 @@ pub fn split_side(n: [i64; 3], s: usize, before: i64) -> Option<SideSplit> {
     })
 }
 
+/// What splitting one side of a face **at** its crossing number `j` does to the face (SPEC
+/// I28): see [`split_side_at_crossing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SideSplitAtCrossing {
+    /// The normal coordinate of the new edge `mc` from the split point `m` to the opposite
+    /// corner `c`: `−1` when the arc through `m` is one of the arcs from `c` (the edge then runs
+    /// along that input edge), else the number of other arcs it crosses.
+    pub to_opposite: i64,
+    /// The number of arcs from `c` that end on the split side before `m`, as
+    /// [`SideSplit::emanating_before`] (the arc through `m` itself not counted).
+    pub emanating_before: i64,
+}
+
+/// The integers of a split of side `s` (from corner `s`) of a face with side counts `n` **at**
+/// its crossing number `j` (`0 ≤ j < n⁺_s`, counted from corner `s`): the new vertex `m` lies on
+/// the arc `A` of the input curve that crosses the side there, so `A` now starts at `m`. With
+/// `a, b, c` the corners `s, s + 1, s + 2` and `c_*`, `e_*` the corner and emanating counts:
+///
+/// ```text
+/// j <  c_a             (A cuts a):   n_mc = split_side(n, s, j + 1).to_opposite
+/// c_a ≤ j < c_a + e_c  (A is from c): n_mc = −1,  e_before = j − c_a
+/// j ≥  c_a + e_c       (A cuts b):   n_mc = split_side(n, s, j).to_opposite
+/// ```
+///
+/// The curve `A` shares its end `m` with the new edge, so it does not cross it: of the two sides
+/// of `A` on which `m` may be put (`before = j` or `j + 1`, [`split_side`]) it takes the one
+/// where `A` separates `m` from the rest of the face less than from `c`, and for an arc ending
+/// at `c` the new edge is `A` itself. `None` for a face that is not valid or `j` out of range.
+///
+/// Formula id `ic-split-at-crossing` (SPEC I28; `CITED.md`).
+///
+/// [formula: ic-split-at-crossing]
+pub fn split_side_at_crossing(n: [i64; 3], s: usize, j: i64) -> Option<SideSplitAtCrossing> {
+    let f = FaceCoordinates::of(n).ok()?;
+    let (a, c) = (s % 3, (s + 2) % 3);
+    if !(0..f.n[a]).contains(&j) {
+        return None;
+    }
+    let fan = j >= f.c[a] && j < f.c[a] + f.e[c];
+    let before = if j < f.c[a] { j + 1 } else { j };
+    let x = split_side(n, s, before)?;
+    Some(SideSplitAtCrossing {
+        to_opposite: if fan { -1 } else { x.to_opposite },
+        emanating_before: x.emanating_before,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

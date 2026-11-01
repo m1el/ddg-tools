@@ -74,12 +74,37 @@ class DirectionFieldTest(unittest.TestCase):
             self.assertAlmostEqual(v[3 * k] * v[0] + v[3 * k + 1] * v[1], 1.0, places=6)
             self.assertAlmostEqual(v[3 * k + 2], 0.0, places=12)
 
+    def test_default_representation_is_integer(self):
+        positions, triangles = octahedron()
+        r = ddg_tools.smoothest_direction_field(positions, triangles)
+        self.assertEqual(r.report["representation"], "integer")
+
+    def test_both_representations_give_the_same_field(self):
+        for mesh in (octahedron(), sheared_grid()):
+            positions, triangles = mesh
+            for triangulation in ("delaunay", "refined"):
+                for n in (1, 4):
+                    with self.subTest(triangulation=triangulation, n=n):
+                        a, b = (ddg_tools.smoothest_direction_field(
+                            positions, triangles, n=n, triangulation=triangulation,
+                            representation=representation)
+                            for representation in ("signposts", "integer"))
+                        self.assertEqual(a.report["representation"], "signposts")
+                        self.assertEqual(b.report["representation"], "integer")
+                        self.assertEqual(list(a.singularity_indices),
+                                         list(b.singularity_indices))
+                        self.assertAlmostEqual(a.report["eigenvalue"], b.report["eigenvalue"],
+                                               delta=1e-9 * max(1.0, abs(a.report["eigenvalue"])))
+                        for x, y in zip(a.singularity_points, b.singularity_points):
+                            self.assertAlmostEqual(x, y, places=9)
+
     def test_bad_options(self):
         positions, triangles = octahedron()
         for kwargs, name in (({"n": 0}, "n"), ({"triangulation": "nope"}, "triangulation"),
                              ({"laplacian": "spectral"}, "laplacian"),
                              ({"triangulation": "refined", "min_angle_degrees": 50.0},
-                              "min_angle_degrees")):
+                              "min_angle_degrees"),
+                             ({"representation": "halfedges"}, "representation")):
             with self.subTest(**kwargs):
                 with self.assertRaises(ddg_tools.InputError) as cm:
                     ddg_tools.smoothest_direction_field(positions, triangles, **kwargs)

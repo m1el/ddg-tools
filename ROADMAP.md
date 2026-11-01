@@ -432,6 +432,18 @@ Landed:
     bitwise unchanged). The cut is the signposts' to rounding on every measured case; optimal
     Delaunay costs 1.2–1.3× the signposts' (1b4ec07: a move inside one input face changes no
     integer; 3.4–4.2× before; IC SPEC §4.10, §4.11);
+  * I28 (7d21c7e–0733b79, 259f1dc): an integer edge split within rounding of a crossing snaps onto
+    it, as the signposts do (`ic-split-at-crossing`, cited until its proof); 157 k snapped splits
+    give exactly the signposts' integers, 256 of 256 refinement runs and 54 of 54 exports equal
+    the signposts' (the `½ ± 2⁻¹⁶` off-midpoint splits of I29 no longer occur); Thingi10k in
+    full: no status change, 2 111 snapped splits in 307 meshes, the 14 meshes whose insertions
+    changed now equal the signposts' exactly;
+  * I26 (a492320–4be6fae): input-aligned tangent frames on integer coordinates
+    (`IntegerTriangulation::frame_directions`, `ic-input-aligned-frame`, IC SPEC §4.12), within
+    1.1e-10 rad of the signposts; the tangent fields of `ddg-intrinsic-apps` are generic
+    (`vector::TangentFrames`, signposts bitwise unchanged) and `smoothest_direction_field`
+    defaults to integers; a field costs 0.98–1.04× the signposts'. No consumer is signposts-only
+    any more;
 * FlipOut:
   * paths, loops and networks, waypoints and edge sets, extraction and the `T⁰` certificate;
   * on both representations, bitwise identical;
@@ -442,13 +454,7 @@ Landed:
   * the integer oracle with 23 golden fixtures.
 
 In progress (2026-11-01):
-* WP9: Lean tier C, the model of the whole triangulation, and the pending proofs below;
-* I26: input-aligned tangent frames on integer coordinates, so the tangent fields of
-  `ddg-intrinsic-apps` (the last consumer that is signposts-only) can switch;
-* I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
-  that face where the signposts split and snap (1 of 256 differential runs); the export and the
-  optimal Delaunay iteration split such an edge at `½ ± 2⁻¹⁶` instead (torus 5×3). Being changed
-  to snap the integer split to the crossing.
+* WP9: Lean tier C, the model of the whole triangulation, and the pending proofs below.
 
 Open:
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
@@ -458,16 +464,17 @@ Open:
 * Fig. 14: the trends are reproduced, but the factors are not (2.7× and 4.1× against the paper's
   11.5× and 28.1×), because the paper's random-mesh generator is not published (IC SPEC §10.2).
 * Signpost refinement is about 1 % slower (instruction count) since it was made generic (IT N51).
-* Thingi10k leftovers: 7 face splits refused (`RecoverFailed`, meshes 551019 and 97660; 551019
-  ends at 21.17° with the default Delaunay test); 74 split vertices not removable (stars with a
-  self-edge, I27).
+* The integer face split does not snap a point within the signposts' snapping distance of an
+  input edge (I28 covers edge splits only): on Thingi10k 6 face splits refused (`RecoverFailed`,
+  mesh 551019, which ends at 21.17° with the default Delaunay test; 97660's one refusal went away
+  with I28). 74 split vertices are not removable (stars with a self-edge, I27).
 * Not yet started (FlipOut): F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
   reference driver exists in `runs_tmp/fo-reference-driver/`), F9. F4 (Bézier, iCDT) and F8
   (Python, Blender) are done.
 * Pending formula ids (untagged in the code until their proofs land): `ic-roundabout-update`,
   `ic-identify-edge`, `ic-trace-terminates`, `ic-strip-intersection`,
-  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, `ic-merge-edge-normal`, and the 13 `fo-`
-  ids.
+  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, `ic-merge-edge-normal`,
+  `ic-split-at-crossing`, `ic-input-aligned-frame`, and the 13 `fo-` ids.
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
   at run time with `RemovalStuck`.
 
