@@ -730,6 +730,7 @@ impl CutSession {
         triangulation = "intrinsic",
         refine_bound = None,
         optimal_delaunay = false,
+        representation = None,
         min_offset = None,
         merge_tolerance = None,
         state = None,
@@ -755,6 +756,7 @@ impl CutSession {
         triangulation: &str,
         refine_bound: Option<f64>,
         optimal_delaunay: bool,
+        representation: Option<&str>,
         min_offset: Option<f64>,
         merge_tolerance: Option<f64>,
         state: Option<&Bound<'py, PyAny>>,
@@ -815,6 +817,22 @@ impl CutSession {
                 )));
             }
         };
+        let representation = match representation {
+            None => None,
+            Some("integer") => Some(ddg_uv::cutting::Representation::Integer),
+            Some("signposts") => Some(ddg_uv::cutting::Representation::Signposts),
+            Some(other) => {
+                return Err(InputError::new_err(format!(
+                    "representation: {other:?} is not one of \"integer\", \"signposts\""
+                )));
+            }
+        };
+        if state.is_some() && representation.is_some() {
+            return Err(InputError::new_err(
+                "state carries its own triangulation, its representation included: do not pass \
+                 representation with it (read CutSession.representation afterwards)",
+            ));
+        }
         if state.is_some() && optimal_delaunay {
             return Err(InputError::new_err(
                 "state carries its own triangulation, optimal_delaunay included: do not pass \
@@ -860,12 +878,13 @@ impl CutSession {
             py.detach(move || {
                 let input = UnwrapInput::from_buffers(buffers)
                     .map_err(|e| BindError::Input(e.to_string()))?;
-                RustCutSession::new(
+                RustCutSession::new_on(
                     &input,
                     n_regions,
                     &start,
                     &spec,
                     optimal_delaunay,
+                    representation,
                     min_offset,
                     merge_tolerance,
                 )
@@ -882,6 +901,13 @@ impl CutSession {
     #[getter]
     fn triangulation(&self) -> PyResult<&'static str> {
         Ok(self.lock()?.triangulation_name())
+    }
+    /// The representation of the intrinsic triangulation: "integer" (the default; Gillespie,
+    /// Sharp, Crane 2021) or "signposts" (Sharp, Soliman, Crane 2019); None on "caller". After
+    /// `state=` this is the state's.
+    #[getter]
+    fn representation(&self) -> PyResult<Option<&'static str>> {
+        Ok(self.lock()?.representation_name())
     }
     /// Whether the intrinsic optimal Delaunay triangulation is on (False on "caller"). After
     /// `state=` this is the flag the state was made with.

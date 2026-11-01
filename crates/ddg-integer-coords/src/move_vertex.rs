@@ -18,12 +18,16 @@
 //!
 //! **A refused move changes nothing.** In particular a removal that gets stuck
 //! ([`IntegerError::RemovalStuck`], e.g. the straight star of I27 when the path ends on an edge)
-//! refuses the move and the whole state is restored from a copy taken before the insertion (the
-//! reference ignores the failed removal and leaves both vertices, `ic:1717-1738`, SPEC §11).
+//! refuses the move and the state is restored (the reference ignores the failed removal and
+//! leaves both vertices, `ic:1717-1738`, SPEC §11): the removal undoes its own flips, and the
+//! inserted vertex, of degree three after a face split, is removed again, which restores every
+//! id and value (I29: this replaced a copy of the whole state per move, `O(|E|)`, which made
+//! the optimal Delaunay iteration quadratic); after an edge split (a path that ends on an edge)
+//! the state is still copied first.
 //! Inserted vertices on the boundary cannot be removed (I7) and so are not moved
 //! ([`IntegerError::Unsupported`]).
 //!
-//! The optimal Delaunay iteration of IT-SPEC N21 is not ported here.
+//! The optimal Delaunay iteration of IT-SPEC N21 runs on these moves ([`crate::odt`]).
 
 use std::f64::consts::TAU;
 
@@ -155,39 +159,65 @@ impl IntegerTriangulation {
                 trace.stop, trace.end, trace.length
             )));
         }
-        let snapshot = self.clone();
-        let result = (|| -> Result<(MoveInsertion, Removal), IntegerError> {
-            let insertion = match trace.end {
-                SurfacePoint::Face { face, bary } => {
-                    MoveInsertion::Face(Box::new(self.split_face(face as usize, bary, options)?))
+        // A refused insertion changes nothing. A refused removal (it restores what it flipped)
+        // is undone by removing the inserted vertex again: after a face split it has degree
+        // three, and the merge restores the face, its halfedges and every id exactly (the
+        // split appended the vertex, its edges and faces, so nothing is renumbered). After an
+        // edge split (a path that ends on an edge, rare) the whole state is copied first.
+        let mut snapshot = None;
+        let end = self.snap_move_end(trace.end);
+        let insertion = match end {
+            SurfacePoint::Face { face, bary } => {
+                MoveInsertion::Face(Box::new(self.split_face(face as usize, bary, options)?))
+            }
+            SurfacePoint::Edge { edge, t } => {
+                snapshot = Some(self.clone());
+                match self.split_edge(edge as usize, t) {
+                    Ok(insertion) => MoveInsertion::Edge(insertion),
+                    Err(err) => {
+                        if let Some(s) = snapshot {
+                            *self = s;
+                        }
+                        return Err(err);
+                    }
                 }
-                SurfacePoint::Edge { edge, t } => {
-                    MoveInsertion::Edge(self.split_edge(edge as usize, t)?)
-                }
-                SurfacePoint::Vertex(u) => {
-                    return Err(if self.is_input_vertex(u as usize) {
-                        refused(MoveRefusal::OnInputVertex { vertex: u })
-                    } else {
-                        not_located(format!("the path from vertex {v} ends at vertex {u}"))
-                    });
-                }
-            };
-            let removal = self.remove_vertex(v)?;
-            Ok((insertion, removal))
-        })();
-        match result {
-            Ok((insertion, removal)) => Ok(VertexMoveReport {
+            }
+            SurfacePoint::Vertex(u) => {
+                return Err(if self.is_input_vertex(u as usize) {
+                    refused(MoveRefusal::OnInputVertex { vertex: u })
+                } else {
+                    not_located(format!("the path from vertex {v} ends at vertex {u}"))
+                });
+            }
+        };
+        match self.remove_vertex(v) {
+            Ok(removal) => Ok(VertexMoveReport {
                 vertex: v as u32,
                 from,
                 to: self.locations[v],
                 distance,
-                end: trace.end,
+                end,
                 n_crossings: trace.n_crossings,
                 insertion: Some(insertion),
                 removal: Some(removal),
             }),
             Err(err) => {
-                *self = snapshot;
+                match (snapshot, &insertion) {
+                    (Some(s), _) => *self = s,
+                    (None, MoveInsertion::Face(split)) => {
+                        let m = split.insertion.vertex as usize;
+                        self.remove_vertex(m).map_err(|undo| {
+                            IntegerError::Intrinsic(IntrinsicError::Inconsistent {
+                                what: format!(
+                                    "the move of vertex {v} could not be undone: removing the \
+                                     inserted vertex {m} again failed ({undo}) after the \
+                                     removal of {v} failed ({err})"
+                                ),
+                            })
+                        })?;
+                    }
+                    (None, MoveInsertion::Edge(_)) => {}
+                }
                 Err(err)
             }
         }
@@ -200,4 +230,42 @@ impl IntegerTriangulation {
     pub fn frame_direction(&self, h: usize) -> f64 {
         AngleFrames::of(self).signpost(h)
     }
+
+    /// The end of a move's path as the point to insert at: a point of a face with exactly one
+    /// barycentric coordinate at most [`MOVE_END_SNAP`] is the point of the side opposite that
+    /// corner, if that is a point strictly inside the side (a path along an edge ends a
+    /// rounding error inside one of its faces, and a face split there would be refused as too
+    /// thin). Other points as they are (near a corner the insertion is refused as too thin).
+    fn snap_move_end(&self, end: SurfacePoint) -> SurfacePoint {
+        let SurfacePoint::Face { face, bary } = end else {
+            return end;
+        };
+        let small: Vec<usize> = (0..3).filter(|&k| bary[k] <= MOVE_END_SNAP).collect();
+        let f = face as usize;
+        match small[..] {
+            [k] => {
+                // The side opposite corner k: halfedge k + 1, from corner k + 1 to k + 2.
+                let (i, j) = ((k + 1) % 3, (k + 2) % 3);
+                let h = 3 * f + i;
+                let th = bary[j] / (bary[i] + bary[j]);
+                let e = self.complex.edge(h);
+                let t = if self.complex.edge_halfedge(e) == h {
+                    th
+                } else {
+                    1.0 - th
+                };
+                if t > 0.0 && t < 1.0 {
+                    SurfacePoint::Edge { edge: e as u32, t }
+                } else {
+                    end
+                }
+            }
+            _ => end,
+        }
+    }
 }
+
+/// The barycentric coordinate below which the end of a move's path is taken as a point of a
+/// side of its face ([`IntegerTriangulation::move_vertex`]); the `LOCATE_SNAP` of the point
+/// queries (SPEC §4.9).
+pub const MOVE_END_SNAP: f64 = 1e-12;

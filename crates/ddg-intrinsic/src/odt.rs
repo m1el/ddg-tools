@@ -27,8 +27,10 @@
 
 use crate::delaunay::{DelaunayOptions, DelaunayReport};
 use crate::error::{IntrinsicError, MoveRefusal};
+use crate::interface::Triangulation;
 use crate::operators::ShapeStatistics;
 use crate::refine::InsertionLimit;
+use crate::reposition::VertexMove;
 use crate::triangulation::IntrinsicTriangulation;
 
 /// Which edges [`IntrinsicTriangulation::optimal_delaunay`] splits.
@@ -198,188 +200,281 @@ impl IntrinsicTriangulation {
         &mut self,
         options: &OptimalDelaunayOptions,
     ) -> Result<OptimalDelaunayReport, IntrinsicError> {
-        let n_constrained = self.complex.n_constrained();
-        if n_constrained > 0 {
-            return Err(IntrinsicError::ConstrainedEdges {
-                operation: "the optimal Delaunay iteration",
-                n_constrained,
-            });
+        optimal_delaunay(self, options)
+    }
+}
+
+/// What the optimal Delaunay iteration ([`optimal_delaunay`]) needs from a representation
+/// beyond the shared interface: the update of a vertex in its own frame, the shape of its star,
+/// and the move. The signposts ([`IntrinsicTriangulation`]) move a vertex inside its flat star
+/// (paper Sec. 3.3.3); integer coordinates (`ddg-integer-coords`) trace, insert and remove
+/// (Gillespie, Sharp, Crane 2021, Sec. 3.6) after the same star test
+/// ([`check_star_move`](crate::reposition::check_star_move)), so that both halve the same steps.
+pub trait OdtMoves: Triangulation {
+    /// Splits the long edge `e` (step 1). Provided: [`Triangulation::split_edge`] at its
+    /// midpoint (the signposts). A representation that refuses the midpoint for a reason of its
+    /// own (integer coordinates: within rounding of a crossing, IC-SPEC I28) may split near it
+    /// instead, as its export does ([`Exportable::split_for_export`](crate::Exportable::split_for_export)).
+    ///
+    /// # Errors
+    /// As [`Triangulation::split_edge`]; a refusal is counted
+    /// ([`OdtIteration::n_split_refused`]), not fatal.
+    fn split_for_odt(&mut self, e: usize) -> Result<(), IntrinsicError> {
+        self.split_edge(e, 0.5).map(|_| ())
+    }
+
+    /// The vector from `v` to the target of its update, in the frame of `v` that
+    /// [`move_vertex_with_shape`](Self::move_vertex_with_shape) takes
+    /// ([`IntrinsicTriangulation::odt_target`]).
+    ///
+    /// # Errors
+    /// As [`IntrinsicTriangulation::odt_target`].
+    fn odt_target(
+        &self,
+        v: usize,
+        barycenters_at_boundary: bool,
+    ) -> Result<[f64; 2], IntrinsicError>;
+
+    /// The smallest shape number of the star of `v` ([`IntrinsicTriangulation::star_min_shape`]).
+    fn star_min_shape(&self, v: usize) -> Option<f64>;
+
+    /// Moves the inserted vertex `v` by `displacement` (in the frame of
+    /// [`odt_target`](Self::odt_target)), refusing a move that leaves the star or makes a
+    /// triangle of it thinner than `min_shape` ([`IntrinsicTriangulation::move_vertex`]). A
+    /// refused move changes nothing.
+    ///
+    /// # Errors
+    /// [`IntrinsicError::MoveRefused`] (the iteration halves the step for `NotInStar`,
+    /// `TooThin`, `OnInputVertex`), [`IntrinsicError::RemovalRefused`] and
+    /// [`IntrinsicError::InsertionRefused`] (also halved: the removal of the old place got
+    /// stuck, or the insertion at the new place was refused; the signposts never return
+    /// either), and the representation's errors.
+    fn move_vertex_with_shape(
+        &mut self,
+        v: usize,
+        displacement: [f64; 2],
+        min_shape: f64,
+    ) -> Result<VertexMove, IntrinsicError>;
+}
+
+impl OdtMoves for IntrinsicTriangulation {
+    fn odt_target(
+        &self,
+        v: usize,
+        barycenters_at_boundary: bool,
+    ) -> Result<[f64; 2], IntrinsicError> {
+        IntrinsicTriangulation::odt_target(self, v, barycenters_at_boundary)
+    }
+
+    fn star_min_shape(&self, v: usize) -> Option<f64> {
+        IntrinsicTriangulation::star_min_shape(self, v)
+    }
+
+    fn move_vertex_with_shape(
+        &mut self,
+        v: usize,
+        displacement: [f64; 2],
+        min_shape: f64,
+    ) -> Result<VertexMove, IntrinsicError> {
+        IntrinsicTriangulation::move_vertex_with_shape(self, v, displacement, min_shape)
+    }
+}
+
+/// The intrinsic optimal Delaunay triangulation on any representation: what
+/// [`IntrinsicTriangulation::optimal_delaunay`] describes, which is this function, written over
+/// [`OdtMoves`] (the shared interface plus the moves). Splits, flips and the order of the moves
+/// are the same on every representation.
+///
+/// # Errors
+/// As [`IntrinsicTriangulation::optimal_delaunay`], and the representation's errors.
+pub fn optimal_delaunay<T: OdtMoves>(
+    tri: &mut T,
+    options: &OptimalDelaunayOptions,
+) -> Result<OptimalDelaunayReport, IntrinsicError> {
+    let n_constrained = tri.complex().n_constrained();
+    if n_constrained > 0 {
+        return Err(IntrinsicError::ConstrainedEdges {
+            operation: "the optimal Delaunay iteration",
+            n_constrained,
+        });
+    }
+    let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
+    let target = match options.target_length {
+        TargetLength::NoSplits => None,
+        TargetLength::Absolute(h) => Some(h),
+        TargetLength::MeanInputEdge(k) => {
+            let lengths = tri.input().geometry().edge_lengths();
+            Some(k * lengths.iter().sum::<f64>() / lengths.len() as f64)
         }
-        let invalid = |reason: String| Err(IntrinsicError::InvalidOptions { reason });
-        let target = match options.target_length {
-            TargetLength::NoSplits => None,
-            TargetLength::Absolute(h) => Some(h),
-            TargetLength::MeanInputEdge(k) => {
-                let lengths = self.input.geometry().edge_lengths();
-                Some(k * lengths.iter().sum::<f64>() / lengths.len() as f64)
+    };
+    if let Some(h) = target
+        && !(h.is_finite() && h > 0.0)
+    {
+        return invalid(format!(
+            "the target length of the optimal Delaunay triangulation must be positive and \
+             finite, got {h}"
+        ));
+    }
+    if !(options.step > 0.0 && options.step <= 1.0) {
+        return invalid(format!(
+            "the step of the optimal Delaunay update must be in (0, 1], got {}",
+            options.step
+        ));
+    }
+    if !(options.min_shape.is_finite() && options.min_shape >= 0.0 && options.min_shape < 1.0) {
+        return invalid(format!(
+            "the shape bound of a move must be in [0, 1), got {}",
+            options.min_shape
+        ));
+    }
+    if !(options.motion_tolerance.is_finite() && options.motion_tolerance >= 0.0) {
+        return invalid(format!(
+            "the motion tolerance must be finite and not negative, got {}",
+            options.motion_tolerance
+        ));
+    }
+    let first = tri.flip_to_delaunay(&options.delaunay)?;
+    let mut n_flips = first.n_flips;
+    let mut last_delaunay = first;
+    let budget = match options.max_insertions {
+        InsertionLimit::PerVertex(k) => k.saturating_mul(tri.complex().n_vertices()).max(1000),
+        InsertionLimit::Vertices(n) => n,
+        InsertionLimit::Unlimited => usize::MAX,
+    };
+    let barycenters = options.centers == OdtCenters::BarycentersAtBoundary;
+    let mut n_inserted = 0;
+    let mut iterations = Vec::new();
+    let mut status = OptimalDelaunayStatus::IterationLimit;
+    for _ in 0..options.max_iterations {
+        let mut it = OdtIteration {
+            n_split: 0,
+            n_split_refused: 0,
+            n_moved: 0,
+            n_halved: 0,
+            n_not_moved: 0,
+            n_snapped: 0,
+            n_skipped: 0,
+            n_flips: 0,
+            max_motion: 0.0,
+            max_relative_motion: 0.0,
+        };
+        let mut limit_reached = false;
+        // 1. Splits, longest edge first.
+        if let Some(h) = target {
+            let mut long: Vec<(f64, u32)> = (0..tri.complex().n_edges())
+                .filter(|&e| tri.edge_lengths()[e] > h)
+                .map(|e| (tri.edge_lengths()[e], e as u32))
+                .collect();
+            long.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+            for (_, e) in long {
+                if n_inserted >= budget {
+                    limit_reached = true;
+                    break;
+                }
+                match tri.split_for_odt(e as usize) {
+                    Ok(_) => {
+                        it.n_split += 1;
+                        n_inserted += 1;
+                    }
+                    Err(IntrinsicError::InsertionRefused { .. }) => it.n_split_refused += 1,
+                    Err(other) => return Err(other),
+                }
             }
-        };
-        if let Some(h) = target
-            && !(h.is_finite() && h > 0.0)
-        {
-            return invalid(format!(
-                "the target length of the optimal Delaunay triangulation must be positive and \
-                 finite, got {h}"
-            ));
+            if it.n_split > 0 {
+                let report = tri.flip_to_delaunay(&options.delaunay)?;
+                it.n_flips += report.n_flips;
+            }
         }
-        if !(options.step > 0.0 && options.step <= 1.0) {
-            return invalid(format!(
-                "the step of the optimal Delaunay update must be in (0, 1], got {}",
-                options.step
-            ));
-        }
-        if !(options.min_shape.is_finite() && options.min_shape >= 0.0 && options.min_shape < 1.0) {
-            return invalid(format!(
-                "the shape bound of a move must be in [0, 1), got {}",
-                options.min_shape
-            ));
-        }
-        if !(options.motion_tolerance.is_finite() && options.motion_tolerance >= 0.0) {
-            return invalid(format!(
-                "the motion tolerance must be finite and not negative, got {}",
-                options.motion_tolerance
-            ));
-        }
-        let first = self.flip_to_delaunay(&options.delaunay)?;
-        let mut n_flips = first.n_flips;
-        let mut last_delaunay = first;
-        let budget = match options.max_insertions {
-            InsertionLimit::PerVertex(k) => k.saturating_mul(self.n_vertices()).max(1000),
-            InsertionLimit::Vertices(n) => n,
-            InsertionLimit::Unlimited => usize::MAX,
-        };
-        let barycenters = options.centers == OdtCenters::BarycentersAtBoundary;
-        let mut n_inserted = 0;
-        let mut iterations = Vec::new();
-        let mut status = OptimalDelaunayStatus::IterationLimit;
-        for _ in 0..options.max_iterations {
-            let mut it = OdtIteration {
-                n_split: 0,
-                n_split_refused: 0,
-                n_moved: 0,
-                n_halved: 0,
-                n_not_moved: 0,
-                n_snapped: 0,
-                n_skipped: 0,
-                n_flips: 0,
-                max_motion: 0.0,
-                max_relative_motion: 0.0,
+        // 2. Moves, Gauss–Seidel in the order of the ids.
+        for v in tri.n_input_vertices()..tri.complex().n_vertices() {
+            let boundary = tri.complex().is_boundary_vertex(v);
+            if boundary && options.boundary == BoundaryVertices::Fixed {
+                continue;
+            }
+            let goal = match tri.odt_target(v, barycenters) {
+                Ok(goal) => goal,
+                Err(IntrinsicError::MoveRefused {
+                    reason: MoveRefusal::SelfEdge { .. },
+                    ..
+                }) => {
+                    it.n_skipped += 1;
+                    continue;
+                }
+                Err(other) => return Err(other),
             };
-            let mut limit_reached = false;
-            // 1. Splits, longest edge first.
-            if let Some(h) = target {
-                let mut long: Vec<(f64, u32)> = (0..self.n_edges())
-                    .filter(|&e| self.edge_lengths[e] > h)
-                    .map(|e| (self.edge_lengths[e], e as u32))
-                    .collect();
-                long.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-                for (_, e) in long {
-                    if n_inserted >= budget {
-                        limit_reached = true;
+            let goal = if boundary { [goal[0], 0.0] } else { goal };
+            let length = goal[0].hypot(goal[1]) * options.step;
+            if length == 0.0 {
+                continue;
+            }
+            let (mut sum, mut count) = (0.0, 0usize);
+            for h in tri.complex().outgoing_halfedges(v) {
+                sum += tri.edge_lengths()[tri.complex().edge(h)];
+                count += 1;
+            }
+            let mean_edge = sum / count as f64;
+            let floor = tri
+                .star_min_shape(v)
+                .map_or(options.min_shape, |current| options.min_shape.min(current));
+            let mut alpha = options.step;
+            let mut moved = None;
+            for halving in 0..=options.max_halvings {
+                match tri.move_vertex_with_shape(v, [alpha * goal[0], alpha * goal[1]], floor) {
+                    Ok(m) => {
+                        it.n_snapped += usize::from(m.snapped.is_some());
+                        moved = Some((m.distance, halving > 0));
                         break;
                     }
-                    match self.split_edge(e as usize, 0.5) {
-                        Ok(_) => {
-                            it.n_split += 1;
-                            n_inserted += 1;
-                        }
-                        Err(IntrinsicError::InsertionRefused { .. }) => it.n_split_refused += 1,
-                        Err(other) => return Err(other),
-                    }
-                }
-                if it.n_split > 0 {
-                    let report = self.flip_to_delaunay(&options.delaunay)?;
-                    it.n_flips += report.n_flips;
-                }
-            }
-            // 2. Moves, Gauss–Seidel in the order of the ids.
-            for v in self.n_input_vertices()..self.n_vertices() {
-                let boundary = self.is_boundary_vertex(v);
-                if boundary && options.boundary == BoundaryVertices::Fixed {
-                    continue;
-                }
-                let goal = match self.odt_target(v, barycenters) {
-                    Ok(goal) => goal,
-                    Err(IntrinsicError::MoveRefused {
-                        reason: MoveRefusal::SelfEdge { .. },
-                        ..
-                    }) => {
-                        it.n_skipped += 1;
-                        continue;
-                    }
-                    Err(other) => return Err(other),
-                };
-                let goal = if boundary { [goal[0], 0.0] } else { goal };
-                let length = goal[0].hypot(goal[1]) * options.step;
-                if length == 0.0 {
-                    continue;
-                }
-                let (mut sum, mut count) = (0.0, 0usize);
-                for h in self.outgoing_halfedges(v) {
-                    sum += self.edge_lengths[self.complex.halfedge_edge[h] as usize];
-                    count += 1;
-                }
-                let mean_edge = sum / count as f64;
-                let floor = self
-                    .star_min_shape(v)
-                    .map_or(options.min_shape, |current| options.min_shape.min(current));
-                let mut alpha = options.step;
-                let mut moved = None;
-                for halving in 0..=options.max_halvings {
-                    match self.move_vertex_with_shape(v, [alpha * goal[0], alpha * goal[1]], floor)
-                    {
-                        Ok(m) => {
-                            it.n_snapped += usize::from(m.snapped.is_some());
-                            moved = Some((m.distance, halving > 0));
-                            break;
-                        }
-                        Err(IntrinsicError::MoveRefused {
+                    Err(
+                        IntrinsicError::MoveRefused {
                             reason:
                                 MoveRefusal::NotInStar { .. }
                                 | MoveRefusal::TooThin { .. }
                                 | MoveRefusal::OnInputVertex { .. },
                             ..
-                        }) => alpha *= 0.5,
-                        Err(other) => return Err(other),
-                    }
-                }
-                match moved {
-                    Some((distance, halved)) => {
-                        it.n_moved += 1;
-                        it.n_halved += usize::from(halved);
-                        it.max_motion = it.max_motion.max(distance);
-                        it.max_relative_motion = it.max_relative_motion.max(distance / mean_edge);
-                    }
-                    None => it.n_not_moved += 1,
+                        }
+                        | IntrinsicError::RemovalRefused { .. }
+                        | IntrinsicError::InsertionRefused { .. },
+                    ) => alpha *= 0.5,
+                    Err(other) => return Err(other),
                 }
             }
-            // 3. Back to Delaunay.
-            let report = self.flip_to_delaunay(&options.delaunay)?;
-            it.n_flips += report.n_flips;
-            last_delaunay = report;
-            n_flips += it.n_flips;
-            iterations.push(it);
-            if limit_reached {
-                status = OptimalDelaunayStatus::InsertionLimit;
-                break;
-            }
-            if it.n_split == 0 && it.max_relative_motion <= options.motion_tolerance {
-                status = OptimalDelaunayStatus::Converged;
-                break;
+            match moved {
+                Some((distance, halved)) => {
+                    it.n_moved += 1;
+                    it.n_halved += usize::from(halved);
+                    it.max_motion = it.max_motion.max(distance);
+                    it.max_relative_motion = it.max_relative_motion.max(distance / mean_edge);
+                }
+                None => it.n_not_moved += 1,
             }
         }
-        let last = iterations.last().copied();
-        Ok(OptimalDelaunayReport {
-            status,
-            n_iterations: iterations.len(),
-            n_inserted,
-            target_length: target,
-            last_max_motion: last.map_or(0.0, |it| it.max_motion),
-            last_max_relative_motion: last.map_or(0.0, |it| it.max_relative_motion),
-            iterations,
-            n_flips,
-            delaunay: last_delaunay,
-            statistics: self.shape_statistics(),
-        })
+        // 3. Back to Delaunay.
+        let report = tri.flip_to_delaunay(&options.delaunay)?;
+        it.n_flips += report.n_flips;
+        last_delaunay = report;
+        n_flips += it.n_flips;
+        iterations.push(it);
+        if limit_reached {
+            status = OptimalDelaunayStatus::InsertionLimit;
+            break;
+        }
+        if it.n_split == 0 && it.max_relative_motion <= options.motion_tolerance {
+            status = OptimalDelaunayStatus::Converged;
+            break;
+        }
     }
+    let last = iterations.last().copied();
+    Ok(OptimalDelaunayReport {
+        status,
+        n_iterations: iterations.len(),
+        n_inserted,
+        target_length: target,
+        last_max_motion: last.map_or(0.0, |it| it.max_motion),
+        last_max_relative_motion: last.map_or(0.0, |it| it.max_relative_motion),
+        iterations,
+        n_flips,
+        delaunay: last_delaunay,
+        statistics: crate::generic_ops::shape_statistics(tri),
+    })
 }

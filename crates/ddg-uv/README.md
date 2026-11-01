@@ -996,7 +996,32 @@ chooses the triangulation it runs on:
   intrinsic optimal Delaunay triangulation with the defaults of `ddg-intrinsic`) is a third
   explicit choice; the comparison with the others on the cut flow is in
   `crates/ddg-intrinsic/README.md` ("The optimal Delaunay triangulation"). The stored options
-  are part of a `SessionState` (format version 3; versions 1 and 2 are read with none).
+  are part of a `SessionState` (format version 4; versions 1 and 2 are read with no optimal
+  Delaunay options, versions 1 to 3 as signposts).
+* **Representation** (`IntrinsicOptions::representation`, 2026-11-01): the intrinsic
+  triangulation is stored as integer coordinates (Gillespie, Sharp, Crane, *Integer Coordinates
+  for Intrinsic Geometry Processing*, 2021; crate `ddg-integer-coords`) by default
+  (`Representation::DEFAULT`, re-exported here from `ddg-intrinsic-apps`; Integer Coordinates
+  SPEC Q3, I29), or as signposts (`Representation::Signposts`). Both make the same flips, splits
+  and refinement (the signposts' rules, also on integers), so the export has bitwise the same
+  lengths and the places of its inserted vertices agree to rounding; the way back
+  (`segments_on_input`) is read off the integers on the default. Measured
+  (`tests/cutting.rs`, `the_cut_on_signposts_and_on_integers`; uv sphere, torus, grid cube and
+  spot quads; flips, refined, optimized; 20 steps): the same numbers of vertices, cut points and
+  polygons after insertion, and the same final energy to the printed 7 digits. The fingerprints
+  of the two differ (the integers' hashes the normal coordinates too), so a state is refused by
+  a session on the other representation. Cost of building the triangulation (example
+  `representations`, one pinned core, best of 3):
+
+  | mesh | flips, signposts / integers | refined | optimized |
+  |---|---|---|---|
+  | spot quads (2 930 vertices) | 7.5 / 8.1 ms | 14.6 / 17.8 ms | 0.38 / 1.31 s |
+  | bob quads (5 344) | 11.9 / 13.6 ms | 22.1 / 28.2 ms | 0.64 / 2.33 s |
+  | blub quads (7 106) | 16.2 / 17.2 ms | 42.5 / 57.7 ms | 1.36 / 5.64 s |
+  | camelbad (11 392) | 30.9 / 33.0 ms | 82.1 / 106.9 ms | 2.58 / 10.87 s |
+
+  Flips and refinement cost 1.1× and 1.2–1.4× on integers, the optimal Delaunay triangulation
+  3.4–4.2× (its moves extract the arcs of every star; Integer Coordinates SPEC §4.11).
 
 `Session::intrinsic_report()` gives `IntrinsicReport`: vertices of the mesh and of the
 triangulation, **vertices added** (`n_added`), flips (first pass, export), refined, inserted by

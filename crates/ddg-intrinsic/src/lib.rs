@@ -151,15 +151,15 @@ pub use error::{
     EdgeTraceFailure, EdgeTraceFailureReason, FlipRefusal, InsertRefusal, IntrinsicError,
     MoveRefusal, RemovalRefusal,
 };
-pub use export::{ExportOptions, SimplicialExport};
+pub use export::{ExportOptions, Exportable, SimplicialExport};
 pub use flip::{Flip, FlipPlan, FlipRequest, FlipShapeTest, plan_flip, plan_flip_with};
 pub use frames::AngleFrames;
 pub use input::InputSurface;
 pub use insert::{EdgeSplitPlan, FaceSplitPlan, Insertion, plan_edge_split, plan_face_split};
 pub use interface::Triangulation;
 pub use odt::{
-    BoundaryVertices, OdtCenters, OdtIteration, OptimalDelaunayOptions, OptimalDelaunayReport,
-    OptimalDelaunayStatus, TargetLength,
+    BoundaryVertices, OdtCenters, OdtIteration, OdtMoves, OptimalDelaunayOptions,
+    OptimalDelaunayReport, OptimalDelaunayStatus, TargetLength,
 };
 pub use operators::{Quality, ShapeStatistics, Summary};
 pub use overlay::{Overlay, OverlayVertex};

@@ -39,6 +39,7 @@ use crate::error::{IntrinsicError, MoveRefusal};
 use crate::flip::triangle_is_valid;
 use crate::formulas::{FLIP_SHAPE_LIMIT, moved_double_area, moved_length};
 use crate::insert::wrap;
+use crate::interface::Triangulation;
 use crate::point::SurfacePoint;
 use crate::trace::{TraceOptions, TraceStop, run};
 use crate::triangulation::IntrinsicTriangulation;
@@ -142,18 +143,7 @@ impl IntrinsicTriangulation {
     /// of `v` as it is, or `None` for a vertex that cannot be moved (an input vertex, an edge to
     /// itself, an index out of range).
     pub fn star_min_shape(&self, v: usize) -> Option<f64> {
-        if v >= self.n_vertices()
-            || v < self.n_input_vertices()
-            || self.outgoing_halfedges(v).any(|h| self.to_vertex(h) == v)
-        {
-            return None;
-        }
-        Some(
-            self.star(v)
-                .iter()
-                .map(|s| shape_number(s.double_area, s.lengths))
-                .fold(f64::INFINITY, f64::min),
-        )
+        star_min_shape_of(self, v)
     }
 
     /// [`move_vertex`](Self::move_vertex) with another lower bound for the shape number of the
@@ -393,49 +383,7 @@ impl IntrinsicTriangulation {
         v: usize,
         barycenters_at_boundary: bool,
     ) -> Result<[f64; 2], IntrinsicError> {
-        use crate::formulas::{
-            odt_displacement, weighted_barycenter_vector, weighted_circumcenter_vector,
-        };
-        if v >= self.n_vertices() {
-            return Err(IntrinsicError::IndexOutOfRange {
-                what: "vertex",
-                index: v,
-                bound: self.n_vertices(),
-            });
-        }
-        let refused = |reason| IntrinsicError::MoveRefused {
-            vertex: v as u32,
-            reason,
-        };
-        if v < self.n_input_vertices() {
-            return Err(refused(MoveRefusal::InputVertex));
-        }
-        if let Some(h) = self.outgoing_halfedges(v).find(|&h| self.to_vertex(h) == v) {
-            return Err(refused(MoveRefusal::SelfEdge {
-                edge: self.complex.halfedge_edge[h],
-            }));
-        }
-        let mut weighted = [0.0; 2];
-        let mut total = 0.0;
-        for s in self.star(v) {
-            let [la, lb, lc] = s.lengths;
-            let area = 0.5 * s.double_area;
-            let f = s.h / 3;
-            let touches_boundary = barycenters_at_boundary
-                && self.complex.faces[f]
-                    .iter()
-                    .any(|&u| self.is_boundary_vertex(u as usize));
-            let w = if touches_boundary {
-                weighted_barycenter_vector(la, lb, lc, area)
-            } else {
-                weighted_circumcenter_vector(la, lb, lc, area)
-            };
-            let (sin, cos) = s.phi.sin_cos();
-            weighted[0] += cos * w[0] - sin * w[1];
-            weighted[1] += sin * w[0] + cos * w[1];
-            total += area;
-        }
-        Ok(odt_displacement(weighted, total, 1.0))
+        odt_target_of(self, v, barycenters_at_boundary, &|h| self.signposts[h])
     }
 }
 
@@ -444,4 +392,201 @@ impl IntrinsicTriangulation {
 fn shape_number(double_area: f64, l: [f64; 3]) -> f64 {
     let at_vertex = l[0].max(l[1]);
     double_area / (at_vertex * at_vertex.max(l[2]))
+}
+
+// ----- the same, for any representation (Integer Coordinates SPEC I29) -----
+
+/// The triangles of the star of `v` of any representation, counter-clockwise from its first
+/// halfedge: the halfedge leaving `v`, the lengths of the side leaving `v`, of the side
+/// arriving at it and of the side opposite, twice the area. The same numbers as the signposts'
+/// own star.
+fn star_of<T: Triangulation + ?Sized>(tri: &T, v: usize) -> Vec<(usize, [f64; 3], f64)> {
+    let (c, l) = (tri.complex(), tri.edge_lengths());
+    c.outgoing_halfedges(v)
+        .map(|h| {
+            let lengths = [l[c.edge(h)], l[c.edge(c.prev(h))], l[c.edge(c.next(h))]];
+            let area = triangle_area(lengths[0], lengths[2], lengths[1]).unwrap_or(0.0);
+            (h, lengths, 2.0 * area)
+        })
+        .collect()
+}
+
+/// The checks of [`star_min_shape_of`], [`odt_target_of`] and [`check_star_move`] that do not
+/// depend on the displacement: index, input vertex, self-edge.
+fn movable<T: Triangulation + ?Sized>(tri: &T, v: usize) -> Result<(), IntrinsicError> {
+    let c = tri.complex();
+    if v >= c.n_vertices() {
+        return Err(IntrinsicError::IndexOutOfRange {
+            what: "vertex",
+            index: v,
+            bound: c.n_vertices(),
+        });
+    }
+    let refused = |reason| IntrinsicError::MoveRefused {
+        vertex: v as u32,
+        reason,
+    };
+    if v < tri.n_input_vertices() {
+        return Err(refused(MoveRefusal::InputVertex));
+    }
+    if let Some(h) = c.outgoing_halfedges(v).find(|&h| c.to_vertex(h) == v) {
+        return Err(refused(MoveRefusal::SelfEdge {
+            edge: c.edge(h) as u32,
+        }));
+    }
+    Ok(())
+}
+
+/// [`IntrinsicTriangulation::star_min_shape`] for any representation (it depends on the
+/// lengths alone; on signposts it is that function).
+pub fn star_min_shape_of<T: Triangulation + ?Sized>(tri: &T, v: usize) -> Option<f64> {
+    movable(tri, v).ok()?;
+    Some(
+        star_of(tri, v)
+            .iter()
+            .map(|&(_, lengths, double_area)| shape_number(double_area, lengths))
+            .fold(f64::INFINITY, f64::min),
+    )
+}
+
+/// [`IntrinsicTriangulation::odt_target`] for any representation, in the frame at `v` whose
+/// direction of the halfedge `h` leaving `v` is `phi(h)` (the signposts' stored directions, or
+/// [`AngleFrames`](crate::AngleFrames) laid out from the corner angles). On signposts with
+/// `phi = signpost` it is that function.
+///
+/// # Errors
+/// As [`IntrinsicTriangulation::odt_target`].
+pub fn odt_target_of<T: Triangulation + ?Sized>(
+    tri: &T,
+    v: usize,
+    barycenters_at_boundary: bool,
+    phi: &dyn Fn(usize) -> f64,
+) -> Result<[f64; 2], IntrinsicError> {
+    use crate::formulas::{
+        odt_displacement, weighted_barycenter_vector, weighted_circumcenter_vector,
+    };
+    movable(tri, v)?;
+    let c = tri.complex();
+    let mut weighted = [0.0; 2];
+    let mut total = 0.0;
+    for (h, [la, lb, lc], double_area) in star_of(tri, v) {
+        let area = 0.5 * double_area;
+        let f = h / 3;
+        let touches_boundary = barycenters_at_boundary
+            && c.faces()[f]
+                .iter()
+                .any(|&u| c.is_boundary_vertex(u as usize));
+        let w = if touches_boundary {
+            weighted_barycenter_vector(la, lb, lc, area)
+        } else {
+            weighted_circumcenter_vector(la, lb, lc, area)
+        };
+        let (sin, cos) = phi(h).sin_cos();
+        weighted[0] += cos * w[0] - sin * w[1];
+        weighted[1] += sin * w[0] + cos * w[1];
+        total += area;
+    }
+    Ok(odt_displacement(weighted, total, 1.0))
+}
+
+/// What [`check_star_move`] found for a move that stays inside the star.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StarMove {
+    /// The smallest shape number of the triangles of the moved star (as
+    /// [`VertexMove::min_shape`]).
+    pub min_shape: f64,
+    /// As [`VertexMove::within_height_bound`].
+    pub within_height_bound: bool,
+}
+
+/// The refusals of [`IntrinsicTriangulation::move_vertex`] that the geometry of the star
+/// decides, for any representation, without moving anything: the moved star (the vertex at
+/// `displacement` in the frame `phi`, see [`odt_target_of`]) must keep every triangle's area
+/// positive ([`MoveRefusal::NotInStar`]) and every shape number at least `min_shape` (raised
+/// to [`FLIP_SHAPE_LIMIT`]; [`MoveRefusal::TooThin`]). A representation that moves a vertex by
+/// another route (integer coordinates: trace, insert, remove; Gillespie et al. 2021, Sec. 3.6)
+/// uses it so that the optimal Delaunay iteration halves the same steps as on signposts. The
+/// arithmetic is that of the signposts' move. Boundary vertices are not handled here.
+///
+/// # Errors
+/// [`IntrinsicError::IndexOutOfRange`]; [`IntrinsicError::MoveRefused`] for an input vertex,
+/// a self-edge, a displacement that is not finite, a vertex on the boundary
+/// ([`MoveRefusal::LeavesBoundary`] if the displacement has a normal component), a moved
+/// star that turns a triangle over or makes one too thin.
+pub fn check_star_move<T: Triangulation + ?Sized>(
+    tri: &T,
+    v: usize,
+    displacement: [f64; 2],
+    min_shape: f64,
+    phi: &dyn Fn(usize) -> f64,
+) -> Result<StarMove, IntrinsicError> {
+    let min_shape = min_shape.max(FLIP_SHAPE_LIMIT);
+    movable(tri, v)?;
+    let refused = |reason| IntrinsicError::MoveRefused {
+        vertex: v as u32,
+        reason,
+    };
+    if !(displacement[0].is_finite() && displacement[1].is_finite()) {
+        return Err(refused(MoveRefusal::NotFinite));
+    }
+    if tri.complex().is_boundary_vertex(v) && displacement[1] != 0.0 {
+        return Err(refused(MoveRefusal::LeavesBoundary {
+            normal: displacement[1],
+        }));
+    }
+    let star = star_of(tri, v);
+    let r = displacement[0].hypot(displacement[1]);
+    if r == 0.0 {
+        return Ok(StarMove {
+            min_shape: star
+                .iter()
+                .map(|&(_, lengths, double_area)| shape_number(double_area, lengths))
+                .fold(f64::INFINITY, f64::min),
+            within_height_bound: true,
+        });
+    }
+    let phi_v = displacement[1].atan2(displacement[0]);
+    let mut fraction = f64::INFINITY;
+    let mut turned: Option<u32> = None;
+    let mut thinnest = (f64::INFINITY, 0u32);
+    let mut min_height = f64::INFINITY;
+    for &(h, [la, lb, lc], double_area) in &star {
+        let (pa, pb) = (phi(h), phi(h) + tri.corner_angle(h));
+        let a = [la * pa.cos(), la * pa.sin()];
+        let b = [lb * pb.cos(), lb * pb.sin()];
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let new_double_area = moved_double_area(double_area, displacement, d);
+        let push = displacement[0] * d[1] - displacement[1] * d[0];
+        if push > 0.0 {
+            fraction = fraction.min(double_area / push);
+        }
+        min_height = min_height.min(double_area / lc);
+        let face = (h / 3) as u32;
+        if new_double_area <= 0.0 && turned.is_none() {
+            turned = Some(face);
+        }
+        let la_new = moved_length(la, r, pa - phi_v);
+        let lb_new = moved_length(lb, r, pb - phi_v);
+        let shape = if triangle_is_valid(la_new, lc, lb_new) {
+            shape_number(new_double_area, [la_new, lb_new, lc])
+        } else {
+            0.0
+        };
+        if shape < thinnest.0 || shape.is_nan() {
+            thinnest = (shape, face);
+        }
+    }
+    if let Some(face) = turned {
+        return Err(refused(MoveRefusal::NotInStar { face, fraction }));
+    }
+    if thinnest.0 < min_shape || thinnest.0.is_nan() {
+        return Err(refused(MoveRefusal::TooThin {
+            face: thinnest.1,
+            shape: thinnest.0,
+        }));
+    }
+    Ok(StarMove {
+        min_shape: thinnest.0,
+        within_height_bound: r < min_height,
+    })
 }

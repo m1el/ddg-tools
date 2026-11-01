@@ -3,7 +3,10 @@
 //! "Variational Surface Cutting" is sensitive to badly shaped triangles. With
 //! [`Triangulation::Intrinsic`] the session builds, from the seam-cut triangle mesh it already
 //! makes (so the seams stay boundary), an intrinsic triangulation of the same surface
-//! (Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, 2019; crate `ddg-intrinsic`):
+//! (Sharp, Soliman, Crane, *Navigating Intrinsic Triangulations*, 2019; crate `ddg-intrinsic`),
+//! stored by default as integer coordinates (Gillespie, Sharp, Crane, *Integer Coordinates for
+//! Intrinsic Geometry Processing*, 2021; crate `ddg-integer-coords`;
+//! [`IntrinsicOptions::representation`]):
 //! it is flipped to Delaunay, optionally refined (vertices are inserted, also on boundary
 //! edges) and/or improved as an optimal Delaunay triangulation (edges split to a target length,
 //! inserted vertices moved), and exported as a simplicial mesh with a geometry. The flow runs on that export. Its
@@ -19,12 +22,17 @@
 use std::time::Instant;
 
 use ddg_core::{Geometry, TriMesh};
-use ddg_intrinsic::{
-    BelowBound, BoundaryVertices, DelaunayCriterion, DelaunayOptions, EdgeTraceOptions,
-    ExportOptions, FlipLimit, InsertionLimit, IntrinsicTriangulation, OdtCenters,
-    OptimalDelaunayOptions, OptimalDelaunayStatus, RefineOptions, RefineReport, SimplicialExport,
-    SurfacePoint, TargetLength,
+use ddg_integer_coords::{
+    IntegerOdtOptions, IntegerRefineOptions, IntegerTriangulation, to_intrinsic_error,
 };
+use ddg_intrinsic::{
+    BelowBound, BoundaryVertices, DelaunayCriterion, DelaunayOptions, DelaunayReport,
+    EdgeTraceOptions, ExportOptions, Exportable, FlipLimit, InsertionLimit, IntrinsicError,
+    IntrinsicTriangulation, OdtCenters, OptimalDelaunayOptions, OptimalDelaunayReport,
+    OptimalDelaunayStatus, PathsOnInput, RefineOptions, RefineReport, RefineRules, Segment,
+    SimplicialExport, SurfacePoint, TargetLength,
+};
+pub use ddg_intrinsic_apps::representation::Representation;
 
 use super::error::CuttingError;
 
@@ -44,6 +52,14 @@ pub enum Triangulation {
 /// Options of [`Triangulation::Intrinsic`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IntrinsicOptions {
+    /// How the intrinsic triangulation is stored: integer coordinates
+    /// ([`Representation::DEFAULT`], the consumers' default since the Thingi10k evaluation,
+    /// Integer Coordinates SPEC §13 Q3) or signposts. The flips, splits and refinements are the
+    /// same in both (the refinement uses the signposts' rules, IT-SPEC N1/N4, also on integers,
+    /// so that the representation does not change which points are inserted); the lengths of
+    /// the export agree bitwise wherever both make the same operations, the places of inserted
+    /// vertices and the way back of the cut to rounding (SPEC I29).
+    pub representation: Representation,
     /// The Delaunay flips made first.
     pub delaunay: DelaunayOptions,
     /// Refinement to an angle bound after the flips (`None`: only flips).
@@ -97,6 +113,7 @@ impl IntrinsicOptions {
     /// the refinement kept between the rounds of splits. Refinement is an explicit choice.
     pub fn refined() -> IntrinsicOptions {
         IntrinsicOptions {
+            representation: Representation::DEFAULT,
             delaunay: DelaunayOptions::default(),
             refine: Some(RefineOptions::default()),
             optimal_delaunay: None,
@@ -215,11 +232,101 @@ pub struct IntrinsicReport {
     pub fingerprint: u64,
 }
 
+/// The intrinsic triangulation of a session in one of its representations.
+#[derive(Debug, Clone)]
+pub(super) enum Representations {
+    Signposts(IntrinsicTriangulation),
+    Integer(IntegerTriangulation),
+}
+
+impl Representations {
+    /// The triangulation of `mesh` with `geometry` in the representation `representation`.
+    fn new(
+        mesh: &TriMesh,
+        geometry: &Geometry,
+        representation: Representation,
+    ) -> Result<Representations, CuttingError> {
+        Ok(match representation {
+            Representation::Signposts => {
+                Representations::Signposts(IntrinsicTriangulation::new(mesh, geometry)?)
+            }
+            Representation::Integer => Representations::Integer(
+                IntegerTriangulation::new(mesh, geometry)
+                    .map_err(|e| to_intrinsic_error(e, "new"))?,
+            ),
+        })
+    }
+
+    fn flip_to_delaunay(&mut self, o: &DelaunayOptions) -> Result<DelaunayReport, IntrinsicError> {
+        match self {
+            Representations::Signposts(t) => t.flip_to_delaunay(o),
+            Representations::Integer(t) => ddg_intrinsic::Triangulation::flip_to_delaunay(t, o),
+        }
+    }
+
+    /// Refinement by the signposts' rules (IT-SPEC N1/N4) in both representations; integer
+    /// coordinates certify the result.
+    fn refine(&mut self, o: &RefineOptions) -> Result<RefineReport, IntrinsicError> {
+        match self {
+            Representations::Signposts(t) => t.refine(o),
+            Representations::Integer(t) => t
+                .refine(&IntegerRefineOptions {
+                    refine: *o,
+                    rules: RefineRules::Ruppert,
+                    ..IntegerRefineOptions::default()
+                })
+                .map(|r| r.refine)
+                .map_err(|e| to_intrinsic_error(e, "refine")),
+        }
+    }
+
+    /// The optimal Delaunay iteration; integer coordinates certify the result.
+    fn optimal_delaunay(
+        &mut self,
+        o: &OptimalDelaunayOptions,
+    ) -> Result<OptimalDelaunayReport, IntrinsicError> {
+        match self {
+            Representations::Signposts(t) => t.optimal_delaunay(o),
+            Representations::Integer(t) => t
+                .optimal_delaunay(&IntegerOdtOptions {
+                    odt: *o,
+                    certify: true,
+                })
+                .map(|r| r.odt)
+                .map_err(|e| to_intrinsic_error(e, "optimal_delaunay")),
+        }
+    }
+
+    fn export_simplicial(&mut self, o: &ExportOptions) -> Result<SimplicialExport, IntrinsicError> {
+        match self {
+            Representations::Signposts(t) => t.export_simplicial(o),
+            Representations::Integer(t) => ddg_intrinsic::export::export_simplicial(t, o),
+        }
+    }
+
+    /// The way back of segments of the export (`segments_on_input` of the representation).
+    pub fn segments_on_input(
+        &self,
+        nodes: &[SurfacePoint],
+        segments: &[Segment],
+        options: &EdgeTraceOptions,
+    ) -> Result<PathsOnInput, IntrinsicError> {
+        match self {
+            Representations::Signposts(t) => {
+                Exportable::segments_on_input(t, nodes, segments, options)
+            }
+            Representations::Integer(t) => {
+                Exportable::segments_on_input(t, nodes, segments, options)
+            }
+        }
+    }
+}
+
 /// The intrinsic triangulation of a session, in the state of its export.
 #[derive(Debug, Clone)]
 pub(super) struct IntrinsicState {
     pub options: IntrinsicOptions,
-    pub triangulation: IntrinsicTriangulation,
+    pub triangulation: Representations,
     pub export: SimplicialExport,
     pub report: IntrinsicReport,
 }
@@ -233,7 +340,7 @@ impl IntrinsicState {
     ) -> Result<IntrinsicState, CuttingError> {
         options.validate()?;
         let start = Instant::now();
-        let mut tri = IntrinsicTriangulation::new(mesh, geometry)?;
+        let mut tri = Representations::new(mesh, geometry, options.representation)?;
         let initial = tri.flip_to_delaunay(&options.delaunay)?;
         let refinement: Option<RefineReport> = match &options.refine {
             Some(r) => Some(tri.refine(r)?),
@@ -359,8 +466,9 @@ pub struct SessionState {
 
 const MAGIC: &[u8; 4] = b"DDGS";
 /// Version 3 (2026-10-14) adds the options of the optimal Delaunay triangulation; versions 1 and
-/// 2 are read with none.
-const VERSION: u8 = 3;
+/// 2 are read with none. Version 4 (2026-11-01) adds the representation; versions 1 to 3 were
+/// all made on signposts and are read as such, so their fingerprints still match.
+const VERSION: u8 = 4;
 
 impl SessionState {
     /// The fingerprint of the triangulation the state was made for.
@@ -591,6 +699,10 @@ impl Writer {
             }
             None => self.u8(0),
         }
+        self.u8(match o.representation {
+            Representation::Signposts => 0,
+            Representation::Integer => 1,
+        });
     }
     fn odt(&mut self, o: &OptimalDelaunayOptions) {
         match o.target_length {
@@ -787,7 +899,17 @@ impl Reader<'_> {
         } else {
             None
         };
+        let representation = if version >= 4 {
+            match self.u8()? {
+                0 => Representation::Signposts,
+                1 => Representation::Integer,
+                t => return Err(bad(&format!("unknown representation tag {t}"))),
+            }
+        } else {
+            Representation::Signposts
+        };
         Ok(IntrinsicOptions {
+            representation,
             delaunay,
             refine,
             optimal_delaunay,

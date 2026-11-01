@@ -16,17 +16,27 @@
 //!   its place on the input mesh and every segment its pieces, each inside one input face.
 //! * **State.** Values on the vertices of an exported mesh (the level-set functions of the cut
 //!   flow) belong to that export. [`SimplicialExport::fingerprint`] identifies it: a hash of
-//!   its connectivity, its edge lengths and the places of its vertices. Refinement and export
-//!   are deterministic, so the same input and options give the same fingerprint again;
-//!   [`SimplicialExport::check_state`] refuses a state made for another one.
+//!   its connectivity, its edge lengths and the places of its vertices (for integer
+//!   coordinates also the normal coordinates and roundabouts, see
+//!   [`Exportable::state_fingerprint`]). Refinement and export are deterministic, so the same
+//!   input and options give the same fingerprint again; [`SimplicialExport::check_state`]
+//!   refuses a state made for another one.
+//! * **Representations.** The export is written once over the shared interface
+//!   ([`export_simplicial`], generic over [`Exportable`]: [`Triangulation`] plus the
+//!   refinement, the fingerprint and the way back of the representation), so the signposts and
+//!   integer coordinates (Gillespie, Sharp, Crane 2021, crate `ddg-integer-coords`) split and
+//!   flip the same edges in the same order wherever their lengths agree.
 
 use ddg_core::{Geometry, TriMesh};
 
 use crate::delaunay::DelaunayOptions;
+use crate::edge_trace::EdgeTraceOptions;
 use crate::error::IntrinsicError;
+use crate::interface::Triangulation;
 use crate::point::SurfacePoint;
+use crate::query::{PathsOnInput, Segment};
 use crate::refine::{RefineOptions, RefineReport};
-use crate::triangulation::IntrinsicTriangulation;
+use crate::triangulation::{IntrinsicTriangulation, irregularities, simplicial_mesh};
 
 /// Options of [`IntrinsicTriangulation::export_simplicial`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -108,6 +118,11 @@ pub struct SimplicialExport {
     pub max_angle: f64,
     /// What identifies this export (see the [module documentation](self)).
     pub fingerprint: u64,
+    /// Splits made off the midpoint of their edge because the midpoint was refused
+    /// ([`Exportable::split_for_export`]): integer coordinates refuse a point within rounding
+    /// of a crossing with an input edge (Integer Coordinates SPEC I28) and split near it
+    /// instead. Always `0` on signposts.
+    pub n_off_midpoint_splits: usize,
     /// Per edge of `mesh`: the edge of the triangulation.
     edge: Vec<u32>,
     /// Per edge of `mesh`: whether its lower-numbered vertex is the tail of that edge.
@@ -210,7 +225,7 @@ impl IntrinsicTriangulation {
     }
 
     /// Makes the triangulation a simplicial complex by splitting edges, and hands it out as a
-    /// `TriMesh` with a `Geometry` (SPEC §6).
+    /// `TriMesh` with a `Geometry` (SPEC §6): [`export_simplicial`] on this representation.
     ///
     /// Every edge from a vertex to itself is split at its midpoint, and of every group of
     /// edges between the same two vertices all but one. This is repeated (a split can make a
@@ -234,163 +249,260 @@ impl IntrinsicTriangulation {
         &mut self,
         options: &ExportOptions,
     ) -> Result<SimplicialExport, IntrinsicError> {
-        let mut n_splits = 0;
-        let mut n_flips = 0;
-        let mut n_refine_rounds = 0;
-        let mut n_refined = 0;
-        let mut refinement = None;
-        let mut refining = options.refine.is_some();
-        let mut stalled = 0;
-        let offending = |tri: &IntrinsicTriangulation| {
-            let irregular = tri.irregularities();
-            irregular.self_edges.len() + irregular.multi_edges.len()
-        };
+        export_simplicial(self, options)
+    }
+}
+
+/// A representation of an intrinsic triangulation that can be exported as a simplicial mesh
+/// ([`export_simplicial`]) and that can carry straight segments of the export back to the
+/// input mesh (SPEC §6, N15; Integer Coordinates SPEC I29). Implemented by the signposts
+/// ([`IntrinsicTriangulation`]) and by integer coordinates (`ddg-integer-coords`).
+///
+/// The export itself needs only the shared interface ([`Triangulation`]: splits, Delaunay
+/// flips, the connectivity, the lengths, [`Triangulation::vertex_location`]); what differs
+/// between representations is the refinement between rounds of splits, what identifies a
+/// state, and how a segment is found on the input mesh.
+pub trait Exportable: Triangulation + Clone {
+    /// Splits edge `e` to make the triangulation simplicial; returns whether the split is off
+    /// the midpoint. Provided: [`Triangulation::split_edge`] at `t = ½` (the signposts). A
+    /// representation that refuses the midpoint for a reason of its own (integer coordinates:
+    /// within rounding of a crossing, SPEC I28) may split at another parameter instead and say
+    /// so.
+    ///
+    /// # Errors
+    /// As [`Triangulation::split_edge`]; a refusal ([`IntrinsicError::InsertionRefused`]) is
+    /// not fatal for the export (another edge may be split first).
+    fn split_for_export(&mut self, e: usize) -> Result<bool, IntrinsicError> {
+        self.split_edge(e, 0.5).map(|_| false)
+    }
+
+    /// The refinement [`ExportOptions::refine`] asks for. The signposts:
+    /// [`IntrinsicTriangulation::refine`]. Every representation of this workspace refines by
+    /// the same rules ([`RefineRules::Ruppert`](crate::RefineRules::Ruppert), IT-SPEC N1, N4),
+    /// so that the export is the same function of the triangulation in each.
+    ///
+    /// # Errors
+    /// The refinement's.
+    fn refine_for_export(
+        &mut self,
+        options: &RefineOptions,
+    ) -> Result<RefineReport, IntrinsicError>;
+
+    /// What identifies the state of the triangulation ([`SimplicialExport::fingerprint`]): a
+    /// hash of everything that determines the export and the way back. The signposts:
+    /// [`IntrinsicTriangulation::fingerprint`] (faces, lengths per halfedge, places of the
+    /// vertices).
+    fn state_fingerprint(&self) -> u64;
+
+    /// Straight segments of the triangulation as paths over the input mesh: the contract of
+    /// [`IntrinsicTriangulation::segments_on_input`] (the same nodes, segments, output and
+    /// errors).
+    ///
+    /// # Errors
+    /// As [`IntrinsicTriangulation::segments_on_input`].
+    fn segments_on_input(
+        &self,
+        nodes: &[SurfacePoint],
+        segments: &[Segment],
+        options: &EdgeTraceOptions,
+    ) -> Result<PathsOnInput, IntrinsicError>;
+}
+
+impl Exportable for IntrinsicTriangulation {
+    fn refine_for_export(
+        &mut self,
+        options: &RefineOptions,
+    ) -> Result<RefineReport, IntrinsicError> {
+        self.refine(options)
+    }
+
+    fn state_fingerprint(&self) -> u64 {
+        self.fingerprint()
+    }
+
+    fn segments_on_input(
+        &self,
+        nodes: &[SurfacePoint],
+        segments: &[Segment],
+        options: &EdgeTraceOptions,
+    ) -> Result<PathsOnInput, IntrinsicError> {
+        IntrinsicTriangulation::segments_on_input(self, nodes, segments, options)
+    }
+}
+
+/// Makes any representation of an intrinsic triangulation a simplicial complex by splitting
+/// edges, and hands it out as a `TriMesh` with a `Geometry` (SPEC §6, N15). What it does is
+/// described at [`IntrinsicTriangulation::export_simplicial`], which is this function; it uses
+/// only the shared interface ([`Triangulation`]) and the three operations of [`Exportable`],
+/// in the same order on every representation. The places of the vertices are
+/// [`Triangulation::vertex_location`] (for integer coordinates the stored `q⁰`), the
+/// fingerprint is [`Exportable::state_fingerprint`].
+///
+/// # Errors
+/// As [`IntrinsicTriangulation::export_simplicial`]; the representation's errors of its
+/// splits, flips and refinement.
+pub fn export_simplicial<T: Exportable>(
+    tri: &mut T,
+    options: &ExportOptions,
+) -> Result<SimplicialExport, IntrinsicError> {
+    let mut n_splits = 0;
+    let mut n_off_midpoint_splits = 0;
+    let mut n_flips = 0;
+    let mut n_refine_rounds = 0;
+    let mut n_refined = 0;
+    let mut refinement = None;
+    let mut refining = options.refine.is_some();
+    let mut stalled = 0;
+    let offending = |tri: &T| {
+        let irregular = irregularities(tri.complex());
+        irregular.self_edges.len() + irregular.multi_edges.len()
+    };
+    loop {
+        let offending_before = offending(tri);
+        // Split until simplicial.
         loop {
-            let offending_before = offending(self);
-            // Split until simplicial.
-            loop {
-                let irregular = self.irregularities();
-                let mut to_split: Vec<u32> = irregular.self_edges.clone();
-                // Of each group of parallel edges, all but the first.
-                let mut pairs: Vec<([usize; 2], u32)> = irregular
-                    .multi_edges
-                    .iter()
-                    .map(|&e| {
-                        let [a, b] = self.edge_vertices(e as usize);
-                        ([a.min(b), a.max(b)], e)
-                    })
-                    .collect();
-                pairs.sort_unstable();
-                for w in pairs.windows(2) {
-                    if w[0].0 == w[1].0 {
-                        to_split.push(w[1].1);
-                    }
+            let irregular = irregularities(tri.complex());
+            let mut to_split: Vec<u32> = irregular.self_edges.clone();
+            // Of each group of parallel edges, all but the first.
+            let mut pairs: Vec<([usize; 2], u32)> = irregular
+                .multi_edges
+                .iter()
+                .map(|&e| {
+                    let [a, b] = tri.complex().edge_vertices(e as usize);
+                    ([a.min(b), a.max(b)], e)
+                })
+                .collect();
+            pairs.sort_unstable();
+            for w in pairs.windows(2) {
+                if w[0].0 == w[1].0 {
+                    to_split.push(w[1].1);
                 }
-                if to_split.is_empty() {
-                    if let Some(&f) = irregular.faces_with_repeated_vertex.first() {
-                        return Err(IntrinsicError::ExportFailed {
-                            n_splits,
-                            reason: format!(
-                                "face {f} uses a vertex more than once although no edge is a \
-                                 self-edge or one of several between two vertices"
-                            ),
-                        });
-                    }
-                    break;
-                }
-                let mut progress = false;
-                let mut last_refusal = String::new();
-                for e in to_split {
-                    if n_splits >= options.max_splits {
-                        return Err(IntrinsicError::ExportFailed {
-                            n_splits,
-                            reason: format!(
-                                "more than {} splits would be needed",
-                                options.max_splits
-                            ),
-                        });
-                    }
-                    match self.split_edge(e as usize, 0.5) {
-                        Ok(_) => {
-                            n_splits += 1;
-                            progress = true;
-                        }
-                        Err(IntrinsicError::InsertionRefused { reason, .. }) => {
-                            last_refusal = format!("edge {e} cannot be split: {reason}");
-                        }
-                        Err(other) => return Err(other),
-                    }
-                }
-                if !progress {
+            }
+            if to_split.is_empty() {
+                if let Some(&f) = irregular.faces_with_repeated_vertex.first() {
                     return Err(IntrinsicError::ExportFailed {
                         n_splits,
-                        reason: last_refusal,
+                        reason: format!(
+                            "face {f} uses a vertex more than once although no edge is a \
+                             self-edge or one of several between two vertices"
+                        ),
                     });
                 }
+                break;
             }
-            if let Some(refine) = &options.refine
-                && refining
-                && n_refine_rounds < options.max_refine_rounds
-            {
-                let before = self.clone();
-                let report = self.refine(refine)?;
-                let offending_after = offending(self);
-                if offending_after > 2 * offending_before + 16 {
-                    // Around a spike a refinement brings back the edges that were split and
-                    // adds vertices that need more: it is undone, and the export ends with
-                    // splits and flips.
-                    *self = before;
-                    refining = false;
-                } else {
-                    n_refine_rounds += 1;
-                    n_flips += report.n_flips;
-                    n_refined += report.n_inserted;
-                    if offending_after == 0 {
-                        refinement = Some(report);
-                        break;
+            let mut progress = false;
+            let mut last_refusal = String::new();
+            for e in to_split {
+                if n_splits >= options.max_splits {
+                    return Err(IntrinsicError::ExportFailed {
+                        n_splits,
+                        reason: format!("more than {} splits would be needed", options.max_splits),
+                    });
+                }
+                match tri.split_for_export(e as usize) {
+                    Ok(off_midpoint) => {
+                        n_splits += 1;
+                        n_off_midpoint_splits += usize::from(off_midpoint);
+                        progress = true;
                     }
-                    // Two rounds in a row that leave no fewer edges to split: no more.
-                    stalled = if offending_after >= offending_before {
-                        stalled + 1
-                    } else {
-                        0
-                    };
-                    refining = stalled < 2;
-                    continue;
+                    Err(IntrinsicError::InsertionRefused { reason, .. }) => {
+                        last_refusal = format!("edge {e} cannot be split: {reason}");
+                    }
+                    Err(other) => return Err(other),
                 }
             }
-            let Some(delaunay) = &options.delaunay else {
-                break;
-            };
-            let report = self.flip_to_delaunay(delaunay)?;
-            n_flips += report.n_flips;
-            if report.n_flips == 0 || self.irregularities().is_empty() {
-                break;
+            if !progress {
+                return Err(IntrinsicError::ExportFailed {
+                    n_splits,
+                    reason: last_refusal,
+                });
             }
         }
-        let criterion = match (&refinement, &options.refine, &options.delaunay) {
-            (Some(_), Some(refine), _) => refine.criterion,
-            (_, _, Some(delaunay)) => delaunay.criterion,
-            _ => Default::default(),
+        if let Some(refine) = &options.refine
+            && refining
+            && n_refine_rounds < options.max_refine_rounds
+        {
+            let before = tri.clone();
+            let report = tri.refine_for_export(refine)?;
+            let offending_after = offending(tri);
+            if offending_after > 2 * offending_before + 16 {
+                // Around a spike a refinement brings back the edges that were split and
+                // adds vertices that need more: it is undone, and the export ends with
+                // splits and flips.
+                *tri = before;
+                refining = false;
+            } else {
+                n_refine_rounds += 1;
+                n_flips += report.n_flips;
+                n_refined += report.n_inserted;
+                if offending_after == 0 {
+                    refinement = Some(report);
+                    break;
+                }
+                // Two rounds in a row that leave no fewer edges to split: no more.
+                stalled = if offending_after >= offending_before {
+                    stalled + 1
+                } else {
+                    0
+                };
+                refining = stalled < 2;
+                continue;
+            }
+        }
+        let Some(delaunay) = &options.delaunay else {
+            break;
         };
-        let is_delaunay = self.is_delaunay(&criterion);
-        let (mesh, geometry) = self
-            .to_tri_mesh()
-            .map_err(|e| IntrinsicError::ExportFailed {
-                n_splits,
-                reason: e.to_string(),
-            })?;
-        let mut edge = vec![0u32; mesh.n_edges()];
-        let mut forward = vec![true; mesh.n_edges()];
-        for e in 0..self.n_edges() {
-            let [tail, head] = self.edge_vertices(e);
-            // The faces are the same, so the halfedge ids are.
-            let mesh_edge = mesh.edge(self.complex.edge_halfedge[e] as usize);
-            edge[mesh_edge] = e as u32;
-            forward[mesh_edge] = tail < head;
+        let report = tri.flip_to_delaunay(delaunay)?;
+        n_flips += report.n_flips;
+        if report.n_flips == 0 || irregularities(tri.complex()).is_empty() {
+            break;
         }
-        let (mut min_angle, mut max_angle) = (f64::INFINITY, 0.0f64);
-        for angles in geometry.corner_angles() {
-            for &angle in angles {
-                min_angle = min_angle.min(angle);
-                max_angle = max_angle.max(angle);
-            }
-        }
-        Ok(SimplicialExport {
-            mesh,
-            geometry,
-            locations: self.locations.clone(),
-            n_splits,
-            n_flips,
-            n_refine_rounds,
-            n_refined,
-            refinement,
-            is_delaunay,
-            min_angle,
-            max_angle,
-            fingerprint: self.fingerprint(),
-            edge,
-            forward,
-        })
     }
+    let criterion = match (&refinement, &options.refine, &options.delaunay) {
+        (Some(_), Some(refine), _) => refine.criterion,
+        (_, _, Some(delaunay)) => delaunay.criterion,
+        _ => Default::default(),
+    };
+    let is_delaunay = tri.is_delaunay(&criterion);
+    let complex = tri.complex();
+    let (mesh, geometry) =
+        simplicial_mesh(complex, tri.edge_lengths()).map_err(|e| IntrinsicError::ExportFailed {
+            n_splits,
+            reason: e.to_string(),
+        })?;
+    let mut edge = vec![0u32; mesh.n_edges()];
+    let mut forward = vec![true; mesh.n_edges()];
+    for e in 0..complex.n_edges() {
+        let [tail, head] = complex.edge_vertices(e);
+        // The faces are the same, so the halfedge ids are.
+        let mesh_edge = mesh.edge(complex.edge_halfedge(e));
+        edge[mesh_edge] = e as u32;
+        forward[mesh_edge] = tail < head;
+    }
+    let (mut min_angle, mut max_angle) = (f64::INFINITY, 0.0f64);
+    for angles in geometry.corner_angles() {
+        for &angle in angles {
+            min_angle = min_angle.min(angle);
+            max_angle = max_angle.max(angle);
+        }
+    }
+    Ok(SimplicialExport {
+        mesh,
+        geometry,
+        locations: (0..complex.n_vertices())
+            .map(|v| tri.vertex_location(v))
+            .collect(),
+        n_splits,
+        n_flips,
+        n_refine_rounds,
+        n_refined,
+        refinement,
+        is_delaunay,
+        min_angle,
+        max_angle,
+        fingerprint: tri.state_fingerprint(),
+        n_off_midpoint_splits,
+        edge,
+        forward,
+    })
 }

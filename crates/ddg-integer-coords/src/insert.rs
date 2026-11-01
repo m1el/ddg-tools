@@ -301,6 +301,9 @@ pub struct FaceSplitReport {
     pub recover: RecoverReport,
 }
 
+/// The paths over the input mesh of edges already extracted (`ExtractIntrinsicEdge`), by edge.
+pub(crate) type ExtractionCache = std::collections::BTreeMap<usize, (EdgeTrace, StripReport)>;
+
 /// One side of the face being split: its crossings in order from the side's tail.
 pub(crate) struct Side {
     /// `n` of the side's edge.
@@ -324,8 +327,8 @@ pub(crate) enum RegionPoint {
 }
 
 /// A chord of the face: the `t`-th arc around corner `k`, or the `s`-th arc of the fan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Chord {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Chord {
     Around(usize, usize),
     Fan(usize),
 }
@@ -344,13 +347,45 @@ pub(crate) struct FaceArcs {
 }
 
 impl FaceArcs {
+    /// Every arc of the face: those around each corner, then the fan.
+    pub(crate) fn chords(&self) -> Vec<Chord> {
+        let mut out: Vec<Chord> = (0..3)
+            .flat_map(|k| (0..self.c(k)).map(move |t| Chord::Around(k, t)))
+            .collect();
+        out.extend((0..self.arrangement.fan as usize).map(Chord::Fan));
+        out
+    }
+
+    /// The two ends of an arc: the `t`-th arc around corner `k` runs from crossing `t` of side
+    /// `k` to crossing `n_{k+2} − 1 − t` of side `k + 2`; the `s`-th arc of the fan from the
+    /// emanating corner `κ` to crossing `c_{κ+1} + s` of side `κ + 1`.
+    pub(crate) fn chord_ends(&self, chord: Chord) -> (RegionPoint, RegionPoint) {
+        match chord {
+            Chord::Around(k, t) => {
+                let k2 = (k + 2) % 3;
+                (
+                    RegionPoint::Crossing(k, t),
+                    RegionPoint::Crossing(k2, self.n(k2) - 1 - t),
+                )
+            }
+            Chord::Fan(s) => {
+                let kappa = self.arrangement.kappa;
+                let j1 = (kappa + 1) % 3;
+                (
+                    RegionPoint::Corner(kappa),
+                    RegionPoint::Crossing(j1, self.c(j1) + s),
+                )
+            }
+        }
+    }
+
     /// `n⁺` of side `k` as an index bound.
-    fn n(&self, k: usize) -> usize {
+    pub(crate) fn n(&self, k: usize) -> usize {
         self.sides[k].params.len()
     }
 
     /// `c_k` as an index.
-    fn c(&self, k: usize) -> usize {
+    pub(crate) fn c(&self, k: usize) -> usize {
         self.arrangement.coords.c[k] as usize
     }
 
@@ -421,7 +456,7 @@ impl FaceArcs {
 
     /// The chords that bound `region`, each with the sign of the region's side (`+1`: the
     /// positive side).
-    fn bounds(&self, region: Region) -> Vec<(Chord, f64)> {
+    pub(crate) fn bounds(&self, region: Region) -> Vec<(Chord, f64)> {
         let mut out = Vec::with_capacity(5);
         match region {
             Region::Corner { corner, index } => {
@@ -556,7 +591,7 @@ impl FaceArcs {
 
     /// The region of the point `v` (barycentric), by the largest margin (I15), and the distance
     /// to the nearest arc (I6).
-    fn choose_region(&self, v: [f64; 3]) -> RegionChoice {
+    pub(crate) fn choose_region(&self, v: [f64; 3]) -> RegionChoice {
         let a = &self.arrangement;
         let l = [0, 1, 2].map(|k| {
             let (p, q) = (self.layout[k], self.layout[(k + 1) % 3]);
@@ -638,6 +673,16 @@ impl IntegerTriangulation {
     /// The arcs of face `f`: its arrangement from the integers, its layout in the plane, and
     /// the crossings of its sides from `ExtractIntrinsicEdge`.
     pub(crate) fn face_arcs(&self, f: usize) -> Result<FaceArcs, IntegerError> {
+        self.face_arcs_cached(f, &mut ExtractionCache::new())
+    }
+
+    /// [`face_arcs`](Self::face_arcs), taking the paths of the sides from `cache` and keeping
+    /// the ones it extracts there: for several faces that share edges (the star of a vertex).
+    pub(crate) fn face_arcs_cached(
+        &self,
+        f: usize,
+        cache: &mut ExtractionCache,
+    ) -> Result<FaceArcs, IntegerError> {
         let nf = self.complex.n_faces();
         if f >= nf {
             return Err(IntegerError::IndexOutOfRange {
@@ -677,8 +722,15 @@ impl IntegerTriangulation {
                     reversed,
                 });
             }
-            let (trace, r) =
-                self.extract_intrinsic_edge_with_report(e, &EdgeTraceOptions::default())?;
+            let (trace, r) = match cache.get(&e) {
+                Some(known) => known.clone(),
+                None => {
+                    let x =
+                        self.extract_intrinsic_edge_with_report(e, &EdgeTraceOptions::default())?;
+                    cache.insert(e, x.clone());
+                    x
+                }
+            };
             report.merge(&r);
             let x = &trace.crossings;
             if x.len() != n as usize {

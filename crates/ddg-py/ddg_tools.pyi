@@ -519,6 +519,7 @@ class CutSession:
         triangulation: Literal["intrinsic", "caller", "refined"] = "intrinsic",
         refine_bound: float | None = None,
         optimal_delaunay: bool = False,
+        representation: Literal["integer", "signposts"] | None = None,
         min_offset: float | None = None,
         merge_tolerance: float | None = None,
         state: Buffer | None = None,
@@ -542,7 +543,11 @@ class CutSession:
         much slower setup (seconds on 10k vertices, tens of seconds on 50k) and flow steps about 2.5
         times as slow;
         ``ValueError`` (``InputError``) with ``"caller"`` or together with ``state`` (the state
-        carries its own flag). ``state``: bytes from
+        carries its own flag). ``representation``: how the intrinsic triangulation is stored,
+        ``"integer"`` (``None``, the default: integer coordinates, Gillespie, Sharp, Crane 2021) or
+        ``"signposts"`` (Sharp, Soliman, Crane 2019); both make the same flips, splits and
+        refinement (the signposts' rules), so the cut agrees to rounding; ``InputError`` with
+        ``"caller"`` or together with ``state`` (the state carries its own). ``state``: bytes from
         ``snapshot()``, instead of a start (the triangulation and ``n_regions`` come from it;
         ``StaleStateError`` if the mesh or seams changed). ``min_offset`` (intrinsic and refined
         only; default the library's 1e-6): every point of the cut keeps at least this fraction of
@@ -558,6 +563,10 @@ class CutSession:
         this."""
     @property
     def triangulation(self) -> Literal["intrinsic", "caller", "refined"]: ...
+    @property
+    def representation(self) -> Literal["integer", "signposts"] | None:
+        """The representation of the intrinsic triangulation (the state's after ``state=``;
+        None for ``"caller"``)."""
     @property
     def optimal_delaunay(self) -> bool:
         """Whether the intrinsic optimal Delaunay triangulation is on (the state's flag after

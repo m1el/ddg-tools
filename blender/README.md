@@ -863,7 +863,7 @@ mode: **Mesh** menu, **UV** menu, panel)
 | Mode | `mode` | Path | Path, Smooth, Loop, Bezier (Geodesic Path only) |
 | Pin Points | `pin_points` | on | Loop only |
 | Rounds | `rounds` | 4 | Bezier only, 1 to 8 |
-| Representation | `representation` | **Signposts** | `SIGNPOSTS` or `INTEGER` |
+| Representation | `representation` | **Integer Coordinates** | `SIGNPOSTS` or `INTEGER` |
 | Mollify | `mollify` | off | intrinsic mollification (relative margin 1e-4), integer only |
 | Stop at Length Ratio | `stop_ratio` | 0 | 0: run to a geodesic; else stop below this fraction of the initial length |
 | Show Triangulation | `show_triangulation` | off | also draw the edges of the final intrinsic triangulation on the input as the Curve object `<mesh>_geodesic_triangulation` (`intrinsic_draw.draw_intrinsic_edges`, its own marker `geodesic_triangulation`: Show Intrinsic Refinement's objects are not replaced) |
@@ -996,6 +996,17 @@ edge, junctions of any degree), so nothing else changes for the user.
   greyed out and ignored, with the warning "Optimal Delaunay needs an intrinsic triangulation and
   is ignored with 'Mesh's Own'" (nothing is stored). The advanced Flow line reports the iODT
   status, vertices inserted and iterations.
+* **Representation** (`representation`, on Start, next to Optimal Delaunay): how the hidden
+  intrinsic triangulation is stored, **Integer Coordinates** (the default,
+  `geodesic_operator.REPRESENTATION_DEFAULT`, as for every consumer since the Thingi10k evaluation;
+  Integer Coordinates SPEC Q3, I29) or Signposts. Both make the same flips, splits and refinement,
+  so the cut is the same to rounding (tested: the attributes after 3 flow steps within `1e-5`,
+  float32). Signposts are stored in the option (`intrinsic+signposts`, `refined:25+odt+signposts`);
+  an option without the suffix runs on integer coordinates, also one stored before the property
+  existed (then signposts): a per-corner state gives the same cut to rounding, a state in the bytes
+  of `ddg_cut_state` carries its own representation. The setup costs 1.1× on integers with
+  Intrinsic, 1.2–1.4× with Intrinsic, Refined and 3.4–4.2× with Optimal Delaunay (`crates/ddg-uv`
+  README). Greyed out and ignored with Mesh's Own.
 * **State.** The per-corner attributes `ddg_cut_region_k` are the whole state when the
   triangulation added no vertex (the usual case of the default). When it did (Refined, or an
   export that had to split an edge) the whole state is the bytes of `CutSession.snapshot()` in the

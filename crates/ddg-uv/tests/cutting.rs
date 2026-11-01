@@ -9,8 +9,9 @@ use std::path::PathBuf;
 use ddg_core::io::read_obj;
 use ddg_uv::cutting::{
     ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
-    EdgePoint, FlowKind, Inserted, InteriorPoint, IntrinsicOptions, PathEnd, PolygonPath, Session,
-    SessionState, Start, Triangulation, VertexSource, insert, unwrap_with_cut,
+    EdgePoint, FlowKind, Inserted, InteriorPoint, IntrinsicOptions, PathEnd, PolygonPath,
+    Representation, Session, SessionState, Start, Triangulation, VertexSource, insert,
+    unwrap_with_cut,
 };
 use ddg_uv::primitives::{capsule, cylinder, grid_cube, torus, uv_sphere};
 use ddg_uv::{MeshInput, PolygonMesh, UnwrapOptions, prepare};
@@ -2050,10 +2051,50 @@ fn the_caller_triangulation_is_unchanged_by_the_option() {
 
 #[test]
 fn the_intrinsic_session_is_the_direct_run() {
+    for representation in [Representation::Signposts, Representation::Integer] {
+        the_intrinsic_session_is_the_direct_run_on(representation);
+    }
+}
+
+/// The export of the direct construction with the session's options, in one representation:
+/// the signposts' calls, or the integer coordinates' with the signposts' refinement rules (as
+/// the session makes them).
+fn direct_export(
+    sphere: &ddg_core::generators::GeneratedMesh,
+    options: &IntrinsicOptions,
+) -> ddg_intrinsic::SimplicialExport {
+    let tri_mesh = ddg_core::TriMesh::new(sphere.positions.len(), sphere.faces.clone()).unwrap();
+    let geometry = ddg_core::Geometry::from_positions(&tri_mesh, &sphere.positions).unwrap();
+    match options.representation {
+        Representation::Signposts => {
+            let mut tri = ddg_intrinsic::IntrinsicTriangulation::new(&tri_mesh, &geometry).unwrap();
+            tri.flip_to_delaunay(&options.delaunay).unwrap();
+            tri.refine(&options.refine.unwrap()).unwrap();
+            tri.export_simplicial(&options.export).unwrap()
+        }
+        Representation::Integer => {
+            let mut tri =
+                ddg_integer_coords::IntegerTriangulation::new(&tri_mesh, &geometry).unwrap();
+            ddg_intrinsic::Triangulation::flip_to_delaunay(&mut tri, &options.delaunay).unwrap();
+            tri.refine(&ddg_integer_coords::IntegerRefineOptions {
+                refine: options.refine.unwrap(),
+                rules: ddg_intrinsic::RefineRules::Ruppert,
+                ..Default::default()
+            })
+            .unwrap();
+            tri.export_simplicial(&options.export).unwrap()
+        }
+    }
+}
+
+fn the_intrinsic_session_is_the_direct_run_on(representation: Representation) {
     // A triangle mesh without seams: the session's mesh is the mesh itself.
     let sphere = ddg_core::generators::icosphere(3).unwrap();
     let mesh = PolygonMesh::from_triangles(sphere.positions.clone(), &sphere.faces);
-    let options = IntrinsicOptions::refined();
+    let options = IntrinsicOptions {
+        representation,
+        ..IntrinsicOptions::refined()
+    };
     let mut session = two_session(
         &mesh,
         &[],
@@ -2064,12 +2105,7 @@ fn the_intrinsic_session_is_the_direct_run() {
         &Triangulation::Intrinsic(options),
     );
     // The direct construction with the same options.
-    let tri_mesh = ddg_core::TriMesh::new(sphere.positions.len(), sphere.faces.clone()).unwrap();
-    let geometry = ddg_core::Geometry::from_positions(&tri_mesh, &sphere.positions).unwrap();
-    let mut tri = ddg_intrinsic::IntrinsicTriangulation::new(&tri_mesh, &geometry).unwrap();
-    tri.flip_to_delaunay(&options.delaunay).unwrap();
-    tri.refine(&options.refine.unwrap()).unwrap();
-    let export = tri.export_simplicial(&options.export).unwrap();
+    let export = direct_export(&sphere, &options);
     assert_eq!(export.fingerprint, session.fingerprint());
     assert_eq!(export.mesh.n_vertices(), session.engine_mesh().n_vertices());
     let state = session.snapshot();
@@ -2599,6 +2635,80 @@ fn bad_mesh_camelbad() {
     compare("camelbad", &mesh, 20, None, None);
 }
 
+/// The whole chain (flow, way back, insertion, unwrap) on signposts and on integer coordinates
+/// (the default): the same triangulation to rounding, so the same cut. Where both make the same
+/// operations the exports have bitwise the same lengths and the places of inserted vertices
+/// agree to rounding; the flow starts from the same values, and its energies agree to the
+/// accuracy the steps amplify rounding to.
+#[test]
+fn the_cut_on_signposts_and_on_integers() {
+    let steps = if debug_build() { 3 } else { 20 };
+    let mut meshes = vec![
+        ("uv_sphere", uv_sphere(24, 12, 1.0).unwrap()),
+        ("torus", torus(24, 10, 1.0, 0.35).unwrap()),
+        ("grid_cube", grid_cube(5, 2.0)),
+    ];
+    if let Some(mesh) = load_polygons("spot_quadrangulated.obj") {
+        meshes.push(("spot quads", mesh));
+    }
+    println!(
+        "{:<12} {:<9} {:>6} {:>6} {:>12} {:>12} {:>6} {:>6} {:>6} {:>6}",
+        "mesh",
+        "options",
+        "verts",
+        "verts",
+        "energy s",
+        "energy i",
+        "cuts",
+        "cuts",
+        "polys",
+        "polys"
+    );
+    for (name, mesh) in &meshes {
+        for (label, options) in [
+            ("flips", IntrinsicOptions::flips_only()),
+            ("refined", IntrinsicOptions::refined()),
+            ("optimized", IntrinsicOptions::optimized()),
+        ] {
+            let on = |representation| {
+                let tri = Triangulation::Intrinsic(IntrinsicOptions {
+                    representation,
+                    ..options
+                });
+                run_chain(&format!("{name}/{label}"), mesh, &tri, steps, None, None)
+            };
+            let (s, i) = (on(Representation::Signposts), on(Representation::Integer));
+            println!(
+                "{:<12} {:<9} {:>6} {:>6} {:>12.6e} {:>12.6e} {:>6} {:>6} {:>6} {:>6}",
+                name,
+                label,
+                s.n_vertices,
+                i.n_vertices,
+                s.energy.1,
+                i.energy.1,
+                s.cut_points,
+                i.cut_points,
+                s.polygons_after,
+                i.polygons_after
+            );
+            assert_eq!(s.n_vertices, i.n_vertices, "{name} {label}");
+            assert!(
+                (s.energy.0 - i.energy.0).abs() <= 1e-9 * s.energy.0.abs(),
+                "{name} {label}: initial energies {:?} {:?}",
+                s.energy,
+                i.energy
+            );
+            assert!(
+                (s.energy.1 - i.energy.1).abs() <= 1e-6 * s.energy.1.abs(),
+                "{name} {label}: final energies {:?} {:?}",
+                s.energy,
+                i.energy
+            );
+            assert_eq!(i.flipped, 0, "{name} {label}: flipped UV triangles");
+        }
+    }
+}
+
 #[test]
 fn intrinsic_on_generated_meshes_and_spot() {
     let steps = if debug_build() { 3 } else { 40 };
@@ -2779,16 +2889,35 @@ fn the_optimal_delaunay_option_runs_the_chain_and_is_stored() {
     let back = SessionState::from_bytes(&bytes).unwrap();
     assert_eq!(back.triangulation(), tri);
     assert_eq!(back, state);
-    // The same state without the option, written as version 2: the optimal Delaunay block is
-    // the last byte (0: none) and the version byte follows the magic.
-    let plain = Triangulation::Intrinsic(IntrinsicOptions::flips_only());
+    // The same state without the option on signposts, written as version 2: the representation
+    // is the last byte (0: signposts), the optimal Delaunay block the one before (0: none), and
+    // the version byte follows the magic. Versions before 4 are read as signposts.
+    let options = IntrinsicOptions {
+        representation: Representation::Signposts,
+        ..IntrinsicOptions::flips_only()
+    };
+    let plain = Triangulation::Intrinsic(options);
     let plain_session = two_session(&mesh, &[], &start, &plain);
     let mut v2 = plain_session.snapshot().to_bytes();
-    assert_eq!(v2[4], 3);
+    assert_eq!(v2[4], 4);
+    assert_eq!(v2.pop(), Some(0));
     assert_eq!(v2.pop(), Some(0));
     v2[4] = 2;
     let read = SessionState::from_bytes(&v2).unwrap();
     assert_eq!(read.triangulation(), plain);
+    // The integer default is written as 1 and read back.
+    let integer = two_session(
+        &mesh,
+        &[],
+        &start,
+        &Triangulation::Intrinsic(IntrinsicOptions::flips_only()),
+    );
+    let bytes = integer.snapshot().to_bytes();
+    assert_eq!(bytes.last(), Some(&1));
+    assert_eq!(
+        SessionState::from_bytes(&bytes).unwrap().triangulation(),
+        Triangulation::Intrinsic(IntrinsicOptions::flips_only())
+    );
     // Invalid options are refused when the session is built.
     let bad = Triangulation::Intrinsic(IntrinsicOptions {
         optimal_delaunay: Some(ddg_intrinsic::OptimalDelaunayOptions {
