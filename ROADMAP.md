@@ -451,10 +451,13 @@ Landed:
     4498 compared pairs;
 * Lean:
   * the integer formulas (tier A), the one-face model (tier B) and Thm. D.1 (B′);
+  * WP9, tier C (824dd36–783bbeb, 127df14): the complex model `Cx` (Δ-complexes glued face by
+    face) and `ic-trace-terminates`, `ic-identify-edge`, the C part of `ic-flip-normal`,
+    `ic-roundabout-update`, `ic-merge-edge-normal`, `ic-extract-intrinsic-edge` (the
+    combinatorial part), `ic-split-crossed-edge`, `ic-strip-intersection`; no `sorry`, only the
+    three standard axioms (8757 declarations audited). Build: FaceSplit 151 → ~60 s, the IC
+    modules split into files that build in parallel, full clean build of `DdgProofs` ~155 s;
   * the integer oracle with 23 golden fixtures.
-
-In progress (2026-11-01):
-* WP9: Lean tier C, the model of the whole triangulation, and the pending proofs below.
 
 Open:
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
@@ -471,10 +474,10 @@ Open:
 * Not yet started (FlipOut): F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
   reference driver exists in `runs_tmp/fo-reference-driver/`), F9. F4 (Bézier, iCDT) and F8
   (Python, Blender) are done.
-* Pending formula ids (untagged in the code until their proofs land): `ic-roundabout-update`,
-  `ic-identify-edge`, `ic-trace-terminates`, `ic-strip-intersection`,
-  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, `ic-merge-edge-normal`,
-  `ic-split-at-crossing`, `ic-input-aligned-frame`, and the 13 `fo-` ids.
+* Lean, not yet proved: `ic-split-at-crossing` (tier B, pending; likely cheap on top of
+  `SplitEdge`), `ic-input-aligned-frame` (needs angles in the complex model), the flip's
+  same-curves statement at the level of `Cx.next` (proved on the glued quadrilateral), Alg. 3's
+  walk back past inserted vertices; and the 13 `fo-` ids (FlipOut F5/F6).
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
   at run time with `RemovalStuck`.
 
