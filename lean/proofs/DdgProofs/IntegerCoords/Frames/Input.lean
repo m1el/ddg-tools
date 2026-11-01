@@ -25,6 +25,13 @@ does not depend on how a direction on the seam between two corners is written
 (`pre_succ`: end of corner `j` = start of corner `j + 1`; `frameAngle_full_turn`: the end of the
 last corner is the reference again).
 
+**Indices.** `j` is the position in the signposts' fan (from the reference halfedge); the
+integers number the input halfedges by their local index (SPEC §2.2), another counter-clockwise
+numbering. The Rust code reads `signpost(out)` and the corner angle of the halfedge `out` itself,
+so only the halfedge matters: the local index `wedgeIndex r` names the halfedge `out`
+(`Frames/Wedge.lean`), and `j` is its position in the fan; the corner of `out` is the one
+counter-clockwise after it in both numberings.
+
 **What the Rust code computes** for `h = a → b` (`rustCorner`, `rustAlong`):
 * `n ≥ 0`: `φ = inSign(x) + s · clamp(angle_from(x, d), 0, θ_x)`, then `wrap` inside and
   `min(·, π)` on the boundary, with `x` the input halfedge of the wedge the roundabout names
@@ -153,7 +160,8 @@ theorem frameAngle_full_turn (h : S.Ok) (hb : S.bdry = false) :
   exact ⟨wrap_two_pi, wrap_eq_self le_rfl Real.two_pi_pos⟩
 
 /-- **The input signposts are Alg. 4's fold** from the reference halfedge (`φ = 0`) over the
-corners before it (`it-signpost-update`), for every outgoing input halfedge `j < deg`. -/
+corners before it (`it-signpost-update`), for every outgoing input halfedge `j < deg`.
+[formula: ic-input-aligned-frame] -/
 theorem inSign_eq_fold (h : S.Ok) {j : ℕ} (hj : j < S.θs.length) :
     S.inSign j = (S.θs.take j).foldl (fun φ θ => Ddg.signpostUpdate S.bdry φ θ S.Θ) 0 := by
   cases hb : S.bdry
@@ -193,7 +201,7 @@ theorem rustAlong_eq (h : S.Ok) {r : ℕ} (hr : r < S.θs.length ∨ (S.bdry = t
 /-- **The arithmetic of the corner case**: for `0 ≤ α ≤ θ_j` in a corner `j` of the star, the Rust
 value (`inSign j + s · clamp(α, 0, θ_j)`, wrapped inside, `min(·, π)` on the boundary) is the
 signposts' frame angle of the polar angle `θ₀ + … + θ_{j−1} + α`; it lies in `[0, 2π)` inside
-and in `[0, π]` on the boundary. -/
+and in `[0, π]` on the boundary. [formula: ic-input-aligned-frame] -/
 theorem rustCorner_eq (h : S.Ok) {j : ℕ} (hj : j < S.θs.length) {α : ℝ} (h0 : 0 ≤ α)
     (h1 : α ≤ S.θ j) :
     S.rustCorner j α = S.frameAngle (S.pre j + α) ∧
@@ -221,7 +229,8 @@ theorem rustCorner_eq (h : S.Ok) {j : ℕ} (hj : j < S.θs.length) {α : ℝ} (h
 /-- **The corner angle of the lengths is `angleFrom`**: in a counter-clockwise layout of a
 triangle with the corner at `p`, sides `x = b − p`, `y = c − p` of lengths `ℓ_x`, `ℓ_y` and
 opposite side `‖y − x‖ = ℓ_o`, the corner angle (`cornerAngle`, law of cosines, which the Rust
-`corner_angle` evaluates in Kahan's form, `corner-angle`) is `angleFrom x y`. -/
+`corner_angle` evaluates in Kahan's form, `corner-angle`) is `angleFrom x y`.
+[formula: ic-input-aligned-frame] -/
 theorem cornerAngle_eq_angleFrom {x y : ℝ × ℝ} (hxy : 0 < cross x y) {lo lx ly : ℝ}
     (hx : ‖toC x‖ = lx) (hy : ‖toC y‖ = ly) (ho : ‖toC (y - x)‖ = lo) :
     cornerAngle lo lx ly = angleFrom x y := by
@@ -243,7 +252,9 @@ theorem cornerAngle_eq_angleFrom {x y : ℝ × ℝ} (hxy : 0 < cross x y) {lo lx
 
 /-- **A segment that crosses the side opposite the corner** (`Chord::hit` on the first exit, tail
 `b` strictly below the segment's line, head `c` strictly above, at a positive segment parameter;
-`ic-strip-intersection`) **leaves the corner into it**: `d = λ(b − p) + μ(c − p)`, `λ, μ ≥ 0`. -/
+`ic-strip-intersection`) **leaves the corner into it**: `d = λ(b − p) + μ(c − p)`, `λ, μ ≥ 0`.
+At the head of the edge the same holds for the reversed segment and the last crossing
+(`Strip.hit_reverse`). [formula: ic-input-aligned-frame] -/
 theorem cone_of_hit {p d b c : ℝ × ℝ} {len : ℝ} (hlen : 0 < len) (hd : len ^ 2 = d.1 ^ 2 + d.2 ^ 2)
     (ha : (Strip.frame p d len b).2 < 0) (hb : 0 < (Strip.frame p d len c).2)
     (hs : 0 < Strip.hitS len (Strip.frame p d len b) (Strip.frame p d len c)) :

@@ -69,7 +69,7 @@ lemma norm_pair (u d : ℝ × ℝ) : ‖(⟨dot u d, cross u d⟩ : ℂ)‖ = �
 lemma toC_mul_conj (u : ℝ × ℝ) : toC u * (starRingEnd ℂ) (toC u) = ((‖toC u‖ ^ 2 : ℝ) : ℂ) := by
   rw [Complex.mul_conj, Complex.sq_norm]
 
-/-- **`α` turns `u` into `d`**: `‖u‖ d = ‖d‖ e^{iα} u`. -/
+/-- **`α` turns `u` into `d`**: `‖u‖ d = ‖d‖ e^{iα} u`. [formula: ic-input-aligned-frame] -/
 theorem angleFrom_spec (u d : ℝ × ℝ) :
     (‖toC u‖ : ℂ) * toC d = ‖toC d‖ * cexp (angleFrom u d * I) * toC u := by
   have key := Complex.norm_mul_exp_arg_mul_I (⟨dot u d, cross u d⟩ : ℂ)
@@ -88,7 +88,7 @@ theorem angleFrom_spec (u d : ℝ × ℝ) :
   linear_combination -e2
 
 /-- **The only such angle**: an angle `α ∈ (−π, π]` with `‖u‖ d = ‖d‖ e^{iα} u` (`u, d ≠ 0`) is
-`angleFrom u d`. -/
+`angleFrom u d`. [formula: ic-input-aligned-frame] -/
 theorem angleFrom_unique {u d : ℝ × ℝ} (hu : u ≠ 0) (hd : d ≠ 0) {α : ℝ}
     (hα : α ∈ Set.Ioc (-Real.pi) Real.pi)
     (h : (‖toC u‖ : ℂ) * toC d = ‖toC d‖ * cexp (α * I) * toC u) : angleFrom u d = α := by
@@ -124,7 +124,8 @@ lemma cross_comb (u y : ℝ × ℝ) (l m : ℝ) :
   simp only [cross]; ring
 
 /-- **Inside a corner the angle is at most the corner**: for `u × y > 0` and
-`d = λu + μy ≠ 0` with `λ, μ ≥ 0`, `0 ≤ angleFrom u d ≤ angleFrom u y`. -/
+`d = λu + μy ≠ 0` with `λ, μ ≥ 0`, `0 ≤ angleFrom u d ≤ angleFrom u y`.
+[formula: ic-input-aligned-frame] -/
 theorem angleFrom_le_of_cone {u y d : ℝ × ℝ} (hy : 0 < cross u y) {l m : ℝ} (hl : 0 ≤ l)
     (hm : 0 ≤ m) (hd : d = (l * u.1 + m * y.1, l * u.2 + m * y.2)) (hne : d ≠ 0) :
     0 ≤ angleFrom u d ∧ angleFrom u d ≤ angleFrom u y := by
