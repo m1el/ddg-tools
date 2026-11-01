@@ -292,6 +292,7 @@ impl Chord {
     /// the segment (no finite parameter) is cut at its middle, reported as a clamp of `0.5`.
     ///
     /// [formula: it-ray-edge-intersection]
+    /// [formula: ic-strip-intersection]
     fn hit(&self, tail: [f64; 2], head: [f64; 2]) -> Hit {
         let (a, b) = (self.frame(tail), self.frame(head));
         let (raw, _) = axis_crossing(a, b);
@@ -658,6 +659,8 @@ impl IntegerTriangulation {
     /// [`IntegerError::IndexOutOfRange`]; [`IntegerError::Intrinsic`] for invalid options or a
     /// degenerate input face; [`IntegerError::InvalidCoordinates`] naming the edge, a crossing,
     /// a vertex or a face when the integers are not those of a realization.
+    ///
+    /// [formula: ic-extract-intrinsic-edge]
     pub fn extract_intrinsic_edge(
         &self,
         e: usize,

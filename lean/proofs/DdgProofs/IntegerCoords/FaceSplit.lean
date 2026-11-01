@@ -161,6 +161,31 @@ lemma em_lits (n c : Fin 3 → ℕ) :
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   refine ⟨?_, ?_, ?_⟩ <;> simp only [em, l1, l2, l3, l4, l5, l6]
 
+/-- The emanation cases of an admissible face with the oracle's decoding, as equalities (no
+implications left for `omega` to split). -/
+lemma Admissible.split_cases {n c : Fin 3 → ℕ} (hc : Admissible n c) {d : Ddg.IntegerCoords.Decoded}
+    (hk : (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
+        (0 < em n c 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
+        (0 < em n c 1 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
+        (0 < em n c 2 ∧ d.kappa = 2 ∧ d.e = em n c 2)) :
+    (em n c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = 0) ∨
+      (0 < em n c 0 ∧ c 0 = 0 ∧ em n c 1 = 0 ∧ em n c 2 = 0 ∧ d.kappa = 0 ∧ d.e = em n c 0) ∨
+      (0 < em n c 1 ∧ c 1 = 0 ∧ em n c 2 = 0 ∧ em n c 0 = 0 ∧ d.kappa = 1 ∧ d.e = em n c 1) ∨
+      (0 < em n c 2 ∧ c 2 = 0 ∧ em n c 0 = 0 ∧ em n c 1 = 0 ∧ d.kappa = 2 ∧ d.e = em n c 2) := by
+  obtain ⟨-, -, -, b0, b1, b2, x0, x1, x2⟩ := hc.lits
+  rcases hk with h | ⟨e, h1, h2⟩ | ⟨e, h1, h2⟩ | ⟨e, h1, h2⟩
+  · exact Or.inl h
+  · exact Or.inr (Or.inl ⟨e, b0 e, (x0 e).1, (x0 e).2, h1, h2⟩)
+  · exact Or.inr (Or.inr (Or.inl ⟨e, b1 e, (x1 e).1, (x1 e).2, h1, h2⟩))
+  · exact Or.inr (Or.inr (Or.inr ⟨e, b2 e, (x2 e).1, (x2 e).2, h1, h2⟩))
+
+/-- The em values, additively (no truncated subtraction). -/
+lemma Admissible.em_add {n c : Fin 3 → ℕ} (hc : Admissible n c) :
+    em n c 0 + c 1 + c 2 = n 1 ∧ em n c 1 + c 2 + c 0 = n 2 ∧ em n c 2 + c 0 + c 1 = n 0 := by
+  obtain ⟨a0, a1, a2, -⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  omega
+
 /-- **Separation by an arc around a corner.** For `t < c_k`, the arc `cornerArc k t` separates
 gap `g` from corner `k` exactly for the `τ_k(g)` innermost arcs (`t < τ`), and from the two other
 corners exactly for the others. -/
@@ -374,23 +399,25 @@ lemma splitCount_gapRegion_side0 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
     Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
-  obtain ⟨a0, a1, a2, b0, b1, b2, x0, x1, x2⟩ := hc.lits
-  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  obtain ⟨a0, a1, a2, -⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := hc.em_add
+  have hk := hc.split_cases hk
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   unfold total at hg
   simp only [Fin.sum_univ_three]
   obtain ⟨t0, t1, t2, f0, f1, f2, hr⟩ := values_side0 (c := c) hs
   rw [t0, t1, t2, f0, f1, f2, hr]
   clear t0 t1 t2 f0 f1 f2 hr
-  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
+    ⟨e0, z0, z1, z2, hκ, he⟩ <;>
   rcases fin3_cases j with rfl | rfl | rfl <;>
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
-    Fin.val_one, Fin.val_two, min_def] <;>
+    Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
   simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
     Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
-  (try split_ifs) <;> (try contradiction) <;> omega
+  (try split_ifs) <;> first | omega | contradiction
 
 set_option maxHeartbeats 2000000 in
 lemma splitCount_gapRegion_side1 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
@@ -403,23 +430,25 @@ lemma splitCount_gapRegion_side1 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
     Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
-  obtain ⟨a0, a1, a2, b0, b1, b2, x0, x1, x2⟩ := hc.lits
-  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  obtain ⟨a0, a1, a2, -⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := hc.em_add
+  have hk := hc.split_cases hk
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   unfold total at hg
   simp only [Fin.sum_univ_three]
   obtain ⟨t0, t1, t2, f0, f1, f2, hr⟩ := values_side1 (c := c) hs
   rw [t0, t1, t2, f0, f1, f2, hr]
   clear t0 t1 t2 f0 f1 f2 hr
-  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
+    ⟨e0, z0, z1, z2, hκ, he⟩ <;>
   rcases fin3_cases j with rfl | rfl | rfl <;>
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
-    Fin.val_one, Fin.val_two, min_def] <;>
+    Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
   simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
     Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
-  (try split_ifs) <;> (try contradiction) <;> omega
+  (try split_ifs) <;> first | omega | contradiction
 
 set_option maxHeartbeats 2000000 in
 lemma splitCount_gapRegion_side2 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g : ℕ} (hg : g < total n)
@@ -432,23 +461,25 @@ lemma splitCount_gapRegion_side2 {n c : Fin 3 → ℕ} (hc : Admissible n c) {g 
     Ddg.IntegerCoords.splitCount d (gapRegion n c g) j.val = sepCount n c g j ∧
       (gapRegion n c g).valid d = true := by
   rw [sepCount_eq hc hg]
-  obtain ⟨a0, a1, a2, b0, b1, b2, x0, x1, x2⟩ := hc.lits
-  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  obtain ⟨a0, a1, a2, -⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := hc.em_add
+  have hk := hc.split_cases hk
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   unfold total at hg
   simp only [Fin.sum_univ_three]
   obtain ⟨t0, t1, t2, f0, f1, f2, hr⟩ := values_side2 (c := c) hs
   rw [t0, t1, t2, f0, f1, f2, hr]
   clear t0 t1 t2 f0 f1 f2 hr
-  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+  rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
+    ⟨e0, z0, z1, z2, hκ, he⟩ <;>
   rcases fin3_cases j with rfl | rfl | rfl <;>
   simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.reduceEq, reduceIte, Fin.val_zero,
-    Fin.val_one, Fin.val_two, min_def] <;>
+    Fin.val_one, Fin.val_two] <;>
   split_ifs <;>
   simp only [Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.Region.valid,
     Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he, dc0, dc1, dc2, beq_iff_eq,
     Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true] <;>
-  (try split_ifs) <;> (try contradiction) <;> omega
+  (try split_ifs) <;> first | omega | contradiction
 
 /-- The oracle's counts for the region of a gap are the separation counts, and the region is one of
 the face's. -/
@@ -499,21 +530,24 @@ theorem splitCount_faceValid {n c : Fin 3 → ℕ} (hc : Admissible n c)
   rw [faceValid_iff]
   have np : ∀ m : ℕ, nPlus (m : ℤ) = m := fun m => by simp only [nPlus]; omega
   simp only [emanating, np]
-  obtain ⟨a0, a1, a2, b0, b1, b2, x0, x1, x2⟩ := hc.lits
-  obtain ⟨m0, m1, m2⟩ := em_lits n c
+  obtain ⟨a0, a1, a2, -⟩ := hc.lits
+  obtain ⟨m0, m1, m2⟩ := hc.em_add
+  have hk := hc.split_cases hk
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   rcases R with ⟨k0, t⟩ | s
   · simp only [Ddg.IntegerCoords.Region.valid, Bool.and_eq_true, decide_eq_true_eq] at hR
     obtain ⟨hk0, ht⟩ := hR
     interval_cases k0 <;>
-    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
+      ⟨e0, z0, z1, z2, hκ, he⟩ <;>
     rcases fin3_cases k with rfl | rfl | rfl <;>
     simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
       Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,
       dc0, dc1, dc2, beq_iff_eq, Bool.and_eq_true, Bool.or_eq_true] at ht ⊢ <;>
     (try split_ifs) <;> (try contradiction) <;> omega
   · simp only [Ddg.IntegerCoords.Region.valid, decide_eq_true_eq] at hR
-    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ | ⟨e0, hκ, he⟩ <;>
+    rcases hk with ⟨e0, e1, e2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ | ⟨e0, z0, z1, z2, hκ, he⟩ |
+      ⟨e0, z0, z1, z2, hκ, he⟩ <;>
     rcases fin3_cases k with rfl | rfl | rfl <;>
     simp only [l1, l2, l3, l4, l5, l6, Fin.isValue, Fin.val_zero, Fin.val_one, Fin.val_two,
       Ddg.IntegerCoords.splitCount, Ddg.IntegerCoords.next, Ddg.IntegerCoords.prev, hκ, he,

@@ -244,6 +244,8 @@ fn undirected<G: NormalGluing>(g: &G, z: Crossing) -> (u32, i64) {
 /// a face whose Eq. 1 is odd, a boundary halfedge, a crossing visited twice (the curve is
 /// closed), the bound exceeded; [`IntegerError::IndexOutOfRange`] for a halfedge that does not
 /// exist.
+///
+/// [formula: ic-trace-terminates]
 pub fn trace_from<G: NormalGluing>(
     g: &G,
     start: Crossing,
@@ -894,7 +896,7 @@ impl IntegerTriangulation {
     /// # Errors
     /// [`IntegerError::InvalidCoordinates`] naming the vertex or crossing where the walk fails.
     ///
-    /// Formula id `ic-identify-edge` (SPEC §9.2, tier C: not proved yet, WP9; untagged until it is).
+    /// [formula: ic-identify-edge]
     pub fn identify_traced_edge(
         &self,
         segment: &CurveSegment,

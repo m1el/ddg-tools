@@ -16,6 +16,15 @@ changing them.
 | `Chords.lean` | chords of a convex quadrilateral / of a triangle cross iff their ends interleave; cevians | `ic-chord-interleave`, `ic-cevians-cross` |
 | `Recover.lean` | App. A (Eq. 15–16), Eq. 5 | `ic-recover-barycentric`, `ic-tangent-length` |
 | `Transfer.lean` | Eq. 13–14, the finite part of `P₀ᵀ M_S P₀ = M₀` | `ic-transfer-normal-equations`, `ic-transfer-mass-identity` |
+| `SplitEdge.lean` | splitting a crossed edge: `split_side`'s `n_mc` as a separation count | `ic-split-crossed-edge` |
+| `Strip.lean` | `Chord::hit`: the two parameters name one point, uniqueness, both directions | `ic-strip-intersection` |
+| `Complex/Basic.lean` | tier C: the complex model `Cx` (gluing, `n` per halfedge, face models = canonical models of the counts), crossings, `rev`, Alg. 1's step `next` = `traceStep` | `ic-trace-step` (on the complex) |
+| `Complex/Trace.lean` | walks: end at a corner or return to the start, no crossing twice or in both directions, `2m ≤ Σ n⁺` | `ic-trace-terminates` |
+| `Complex/Labels.lean` | corners around a vertex (`rot`), the ends of a corner (`emList`), labels and `RoundaboutsOK` (certify's check), Alg. 3, Alg. 4 | `ic-identify-edge` |
+| `Complex/Quad*.lean` | two face models glued on `ij` and re-cut along `kl` (`Glue`): Eq. 3 = arcs crossing `kl` − arcs `k`–`l`, new faces valid, the curves through the quadrilateral unchanged (one file per outer side), the arcs at the corners | `ic-flip-normal` (C part) |
+| `Complex/Flip.lean` | the flip of a complex model (`Complex::flip_edge`'s slots) is valid; consistent roundabouts stay consistent with Eq. 4 | `ic-flip-normal`, `ic-roundabout-update` |
+| `Complex/Merge.lean` | one side of a straight merge (two faces glued along the spoke) gives a valid face; the Rust `merge_edge_normal` | `ic-merge-edge-normal` |
+| `Complex/Extract.lean` | every crossing on the curve of exactly one end (walk back), ends are arcs of corners | `ic-extract-intrinsic-edge` (combinatorial) |
 
 Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-termination`,
 `ic-dijkstra-ball`, `ic-mollify`, `ic-transfer-mass-integral`, `ic-vertex-removal-delta` (open).
@@ -44,7 +53,23 @@ Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-t
   separates a gap from a boundary point; `sepCount` counts the arcs separating a gap from a corner,
   over the families `cornerArc`/`fanArc`, which enumerate the arcs once each.
 
-## How tier C should extend it
+## Tier C as built (WP9)
+
+The complex model follows the plan below with one change: the face model of a face is not data but
+the canonical model of its counts (`model`, valid by `model_valid`; by `Valid.partner_eq` every
+valid model with these counts has the same arcs). Curves are the orbits of `Cx.next`; vertices are
+not a type: the labels of an input vertex are functions of its corners that `rot` preserves
+(`Labels`, `RoundaboutsOK`). Not modelled: the walk back past inserted vertices (Alg. 3 lines
+1–5), the face split as a complex operation, and the flip's effect on the curves at the level of
+`Cx.next` (it is stated on the glued quadrilateral, `Glue.Hyp.outer`).
+
+**Build time.** The case analyses are `omega` problems; they are fast only when the facts are linear
+and contain no implication: split by the emanating corner of each face first (16 cases), keep
+`min`/`max` definitions out of the context unless needed, and try `omega` before `contradiction`.
+`Complex/QuadOuter*.lean` are one file per side so that lake builds them in parallel (about a
+minute each); the whole IntegerCoords tree builds in about 2.5 minutes from scratch on 64 cores.
+
+## How tier C was planned
 
 1. **Complex model.** A structure with a finite face type `F`, the side gluing
    `twin : F × Fin 3 → F × Fin 3` (an involution without fixed points on interior sides; boundary

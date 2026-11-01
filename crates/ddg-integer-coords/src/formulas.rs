@@ -210,7 +210,7 @@ pub fn trace_step(n_ij: i64, n_ik: i64, n_kj: i64, p: i64) -> Result<Step, StepE
 /// `p = c^{ja}_i + (k − r_ai − n⁻_ai)`, which the paper writes `k + n_ai − r_ai` (both agree,
 /// since `c^{ja}_i = n⁺_ai` whenever `a` emanates, SPEC §3.1).
 ///
-/// Formula id `ic-identify-edge` (SPEC §9.2, tier C: not proved yet, WP9; untagged until it is).
+/// [formula: ic-identify-edge]
 pub fn identify_index(r_ai: i64, n_ai: i64, n_ij: i64, n_ja: i64, p: i64, deg: u32) -> Option<i64> {
     let c = corner_coordinate(n_ja, n_ij, n_ai)?;
     let k = r_ai
@@ -311,7 +311,7 @@ pub fn flip_normal(
 /// leaves the `i64` range (only possible without reduction). The same with `(l, j, k)` for
 /// `r_lk`.
 ///
-/// Formula id `ic-roundabout-update` (SPEC §9.2, tier C: not proved; untagged until it is).
+/// [formula: ic-roundabout-update]
 pub fn roundabout_update(r_ki: i64, e_new: i64, n_minus_ki: i64, modulus: u32) -> Option<i64> {
     let s = i128::from(r_ki) + i128::from(e_new) + i128::from(n_minus_ki);
     let s = if modulus == 0 {
@@ -351,7 +351,7 @@ pub struct SideSplit {
 /// of the chord). For a side along an input edge (`n_ab = −1`, `before = 0`) this is Eq. 6,
 /// `max(n_ca, n_bc, 0)`. `None` for a face that is not valid or `before` out of range.
 ///
-/// Formula id `ic-split-crossed-edge` (SPEC I20; not in Lean or `CITED.md` yet, untagged).
+/// [formula: ic-split-crossed-edge]
 pub fn split_side(n: [i64; 3], s: usize, before: i64) -> Option<SideSplit> {
     let f = FaceCoordinates::of(n).ok()?;
     let (a, b, c) = (s % 3, (s + 1) % 3, (s + 2) % 3);
