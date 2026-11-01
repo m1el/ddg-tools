@@ -5,13 +5,13 @@
 //! [`crate::energy::energy`]; WP3 replaces its body (and may change everything else in this
 //! file).
 
-use crate::energy::BhOptions;
+use crate::energy::{BhOptions, EnergyEvaluation};
 use crate::error::RsError;
 use crate::geometry::FaceGeometry;
 use crate::kernel::Exponents;
 use crate::surface::Surface;
 
-/// Hook for [`crate::energy::energy`]: returns `(Ẽ, ∂Ẽ/∂f_v, pairs_exact, nodes_lumped)`.
+/// Hook for [`crate::energy::energy`]: `Ẽ`, `∂Ẽ/∂f_v` and the pair/node counts.
 /// `geom` holds the validated face quantities of `positions`; `options` are validated.
 ///
 /// # Errors
@@ -23,7 +23,7 @@ pub(crate) fn energy_and_differential(
     geom: &FaceGeometry,
     exponents: &Exponents,
     options: &BhOptions,
-) -> Result<(f64, Vec<[f64; 3]>, u64, u64), RsError> {
+) -> Result<EnergyEvaluation, RsError> {
     let _ = (pool, surface, positions, geom, exponents, options);
     Err(RsError::Unsupported {
         what: "the Barnes–Hut energy (SPEC §15 WP3)",

@@ -173,8 +173,7 @@ pub(crate) fn culprit_pair(geom: &FaceGeometry, e: &Exponents) -> [u32; 2] {
             let v = sub(geom.barycenters[s], geom.barycenters[t]);
             let k = kernel_with_gradient_of_v(e, v, geom.normals[s]);
             let term = k.value * geom.areas[s] * geom.areas[t];
-            let finite = term.is_finite()
-                && k.d_v.iter().chain(&k.d_n).all(|x| x.is_finite());
+            let finite = term.is_finite() && k.d_v.iter().chain(&k.d_n).all(|x| x.is_finite());
             if !finite {
                 return [s as u32, t as u32];
             }

@@ -55,7 +55,7 @@ pub mod spatial;
 pub mod step;
 pub mod surface;
 
-pub use energy::{BhOptions, Energy, EnergyEval, EnergyReport, energy};
+pub use energy::{BhOptions, Energy, EnergyEval, EnergyEvaluation, EnergyReport, energy};
 pub use error::RsError;
 pub use geometry::FaceGeometry;
 pub use io::{obj_to_string, parse_obj, read_obj, write_obj};

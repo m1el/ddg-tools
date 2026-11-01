@@ -111,6 +111,20 @@ pub enum EnergyEval {
     BarnesHut(BhOptions),
 }
 
+/// Energy, differential and counts of one evaluation without penalties (what the exact and
+/// the Barnes–Hut evaluations return).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyEvaluation {
+    /// `ℰ̂(f)` or `Ẽ(f)`.
+    pub energy: f64,
+    /// Its differential `∂/∂f_v`.
+    pub differential: Vec<[f64; 3]>,
+    /// Number of ordered face pairs evaluated exactly.
+    pub pairs_exact: u64,
+    /// Number of (leaf, node) interactions lumped (0 for the exact evaluation).
+    pub nodes_lumped: u64,
+}
+
 /// Result of [`energy`] (`SPEC.md` §9.1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnergyReport {
@@ -162,17 +176,25 @@ pub fn energy(
     let t0 = Instant::now();
     let geom = FaceGeometry::new(surface, positions)?;
     let pool = exact::make_pool(threads)?;
-    let (value, mut differential, pairs_exact, nodes_lumped) = match eval {
+    let EnergyEvaluation {
+        energy: value,
+        mut differential,
+        pairs_exact,
+        nodes_lumped,
+    } = match eval {
         EnergyEval::Exact => {
-            let (value, g) =
+            let (energy, differential) =
                 exact::energy_and_differential(&pool, surface, positions, &geom, &exponents)?;
-            (value, g, exact::exact_pair_count(surface.n_faces()), 0)
+            EnergyEvaluation {
+                energy,
+                differential,
+                pairs_exact: exact::exact_pair_count(surface.n_faces()),
+                nodes_lumped: 0,
+            }
         }
         EnergyEval::BarnesHut(opts) => {
             opts.validate()?;
-            barnes_hut::energy_and_differential(
-                &pool, surface, positions, &geom, &exponents, opts,
-            )?
+            barnes_hut::energy_and_differential(&pool, surface, positions, &geom, &exponents, opts)?
         }
     };
     let penalty_values =

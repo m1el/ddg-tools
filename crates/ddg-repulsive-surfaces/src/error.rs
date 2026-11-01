@@ -252,7 +252,10 @@ impl fmt::Display for RsError {
                 f,
                 "faces {first} and {second} are duplicates: both have the vertices ({a}, {b}, {c})"
             ),
-            NonManifoldEdge { edge: [a, b], faces } => {
+            NonManifoldEdge {
+                edge: [a, b],
+                faces,
+            } => {
                 write!(f, "edge ({a}, {b}) is shared by {} faces: ", faces.len())?;
                 write_list(f, faces)
             }

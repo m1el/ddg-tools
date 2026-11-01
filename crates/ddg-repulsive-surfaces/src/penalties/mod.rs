@@ -3,7 +3,7 @@
 //! point-cloud obstacles).
 //!
 //! Stub created by WP1; filled by WP7 (SPEC §15). [`Penalty`] is empty until then; the hook
-//! [`evaluate`] is called by [`crate::energy::energy`], and WP7 replaces both (and may change
+//! `evaluate` is called by [`crate::energy::energy`], and WP7 replaces both (and may change
 //! everything else in this file).
 
 use crate::error::RsError;

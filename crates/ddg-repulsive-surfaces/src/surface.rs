@@ -375,7 +375,8 @@ impl Surface {
                         continue;
                     }
                     // Consistent: (forward(f) ^ flip f) != (forward(g) ^ flip g).
-                    let want = forward(f, e as usize) ^ flip[f as usize] ^ forward(g, e as usize) ^ true;
+                    let want =
+                        forward(f, e as usize) ^ flip[f as usize] ^ forward(g, e as usize) ^ true;
                     if face_component[g as usize] == NONE {
                         face_component[g as usize] = c;
                         flip[g as usize] = want;
