@@ -1,0 +1,10 @@
+case iem-flatten-boundary-1
+task flatten
+status ok
+theta0 40041b2f769cf0de
+solve ok 4 bfd7327b19bcab3a 400921fb54442d40
+hess 3fff2e8f3f98ac01
+face 0 3fee0c77ffb072ec 3fe8420f533c8171 3fe81ec0b598c24c 1
+face 1 3fe0fbef7cd9d135 3ff0540be571b0d5 3fe8420f533c8171 1
+face 2 3ff108ffc8abbc0f 3fe75aebb528426d 3ff0540be571b0d5 1
+end

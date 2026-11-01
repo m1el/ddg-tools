@@ -2061,6 +2061,92 @@ are not cited here).
 
 ---
 
+## Intrinsic Simplification
+
+"IEM paper" is H.-T. D. Liu, M. Gillespie, B. Chislett, N. Sharp, A. Jacobson, K. Crane, *Surface
+Simplification using Intrinsic Error Metrics*, ACM TOG 42(4), Article 118, 2023
+(<https://doi.org/10.1145/3592403>; `../IntrinsicErrorMetric/IntrinsicErrorMetric.pdf`; equation,
+figure and section numbers are the paper's). "CETM" is B. Springborn, P. Schröder, U. Pinkall,
+*Conformal Equivalence of Triangle Meshes*, ACM TOG 27(3), Article 77, 2008
+(`../IntrinsicErrorMetric/papers/springborn2008_cetm.pdf`). The contract is
+`crates/ddg-intrinsic-simplification/SPEC.md` ("SPEC", decisions `S1`–`S24`, theorem table §13).
+
+**What the machine-checked part covers, and what it does not.** Machine-checked
+(`DdgProofs/IntrinsicSimplification/*.lean`, README section "Intrinsic Simplification"): one
+flattening (the derivative behind Eq. 4 for stars with one, two or three corners per face at the
+vertex, monotonicity, limits and roots of the angle sum with extended angles, conservation of
+curvature), one removal (degree-3 and boundary layouts and barycentric coordinates, the strict
+boundary analogue of the flip lemma), the per-removal metric (Eq. 5–9, the 1-Wasserstein reading of
+the memoryless cost, centres of mass, the transport between frames of a flat region), Eq. 10, the
+wrap of angular coordinates, Sec. 7.3.1's angles, the anisotropic factor, the Galerkin operators of
+the hierarchy, the distortion measures and the QEM quadrics. Not covered: the greedy algorithm
+(queue, re-evaluation, stopping), the data structure, Springborn's flip fallback (its success is
+not guaranteed by the paper either), the Δ-complex flip lemma (`ic-vertex-removal-delta`, open),
+the circumcircle property of CETM's projective interpolation (CETM App. D, Proposition; checked
+in floating point by the oracle's `iem-selftest`), the quality of the result, and the three
+results below.
+
+### [formula: iem-wasserstein-memory] The memory-based metric approximates the transport cost of the fine mass
+
+- **Statement.** After many removals, `Σ_j m_j ‖t_j‖` (Eq. 6 with the error vectors of Eq. 7/8)
+  approximates the 1-Wasserstein distance between the initial fine mass distribution and the
+  current coarse one. The paper says the cost "is only approximate since the 1-Wasserstein
+  distance to the center of mass is not in general equal to the distance to the original fine
+  distribution—but it is usually quite close" (Sec. 5.2), and on surfaces the transported vector
+  "merely approximates the center of mass" (Sec. 5.3).
+- **Reference.** IEM paper Sec. 5.1–5.3, Fig. 9; G. Peyré, M. Cuturi, *Computational Optimal
+  Transport*, Foundations and Trends in Machine Learning 11(5–6), 2019, Ch. 2 (cited there for
+  the 1-Wasserstein distance).
+- **Source check.** Read: IEM paper Sec. 5 and Sec. 9 (the first of the three "basic
+  approximations"). Not re-read: Peyré–Cuturi (standard definitions only).
+- **Why not formalized.** It is an empirical approximation claim with no stated bound. What is
+  machine-checked: for **one** removal the memoryless cost **is** the 1-Wasserstein distance
+  between the old and the new distribution (`wasserstein_eq`, `[formula: iem-memoryless-cost]`),
+  and in the plane Eq. 7 keeps `x_j + t_j` **exactly** at the centre of mass of all the fine mass
+  merged into `j` (`eq7_centerOfMass`, `centerOfMass_combine`, `eq8_eq_eq7`,
+  `[formula: iem-center-of-mass-update]`); the gap between "distance to the centre of mass" and
+  "transport distance" is what the paper accepts.
+- **What depends on it.** The meaning of the priority (which vertex goes first), not correctness:
+  every removal is valid whatever its cost.
+
+### [formula: iem-cetm-existence] Conformally equivalent metrics with prescribed angle sums: convex energy, uniqueness
+
+- **Statement.** CETM's energy `E(u)` is convex, extended to all of `ℝ^V` by the extended angles
+  (`C¹`, gradient `Θ̃ − Θ(u)`, Hessian the cotan Laplacian), so a solution with prescribed angle
+  sums is the unique minimizer up to the constants of the problem when it exists; triangle
+  inequality violations at the minimizer are handled by flips (Sec. 3.2), and the boundary
+  condition `u = 0` gives the least distorted flat metric (App. E).
+- **Reference.** CETM Sec. 2–3 (the energy, Eq. 8–10), Sec. 3.1 "Convex Optimization", Sec. 3.2
+  "Violation of the Triangle Inequality", Sec. 4.2 (fixed `u`), App. E (the natural boundary
+  condition, a smooth theorem).
+- **Source check.** Read: CETM Sec. 2–4, App. D, E.
+- **Why not formalized.** The multi-vertex energy and its convexity on `ℝ^V` (built from Milnor's
+  Lobachevsky function) are not set up here. The **one-vertex case that the IEM paper uses** is
+  machine-checked directly, without the energy: with extended angles `Θ_i(u)` is continuous and
+  non-increasing, tends to `deg·π` and `0`, so a root exists for every target in `(0, deg·π)`,
+  is unique where some face is a strict triangle, and any bracket of S9 contains one
+  (`[formula: iem-flatten-monotone]`); Eq. 4 is Newton's step for it, its denominator the
+  (corrected) derivative (`[formula: iem-flatten-newton]`). App. E's optimality of `u = 0` on the
+  boundary of the star (IEM paper Sec. 4.1) is the reason for the choice, not a correctness
+  condition.
+- **What depends on it.** Nothing in the code beyond the one-vertex statements above.
+
+### [formula: iem-delaunay-quality] Corner angles of at least 30° after Delaunay refinement of the coarse mesh
+
+- **Statement.** Intrinsic Delaunay refinement of the coarse mesh yields corner angles of at least
+  `30°` (hence at most `120°`) when the mesh is closed and every input angle sum is at least
+  `60°` (IEM paper Sec. 6.3, "Post-refinement", citing Gillespie et al. 2021a). This is
+  `[formula: ic-refinement-termination]` (IC paper Thm. C.1), applied to the coarse mesh as an
+  input (SPEC §6.2); SPEC's default bound is `25°`, inside the guarantee.
+- **Reference.** IEM paper Sec. 6.3; IC paper App. C.2, Thm. C.1 (see that entry above).
+- **Source check.** Read: IEM paper Sec. 6.3; IC paper App. C as recorded under
+  `ic-refinement-termination`.
+- **Why not formalized.** As for `ic-refinement-termination`.
+- **What depends on it.** Element quality of the optional post-refinement (SPEC §6.2), reported as
+  best effort when the hypotheses fail.
+
+---
+
 ## Out of scope of this package
 
 The end-to-end pipeline (`crates/ddg-uv`: charts, packing), the Python bindings and the Blender

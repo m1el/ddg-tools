@@ -1,0 +1,10 @@
+case iem-flatten-cone-6-0.900000
+task flatten
+target interior
+face 0 1 2 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+face 0 2 3 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+face 0 3 4 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+face 0 4 5 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+face 0 5 6 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+face 0 6 1 3feccccccccccccd 3ff0000000000000 3ff0000000000000
+end

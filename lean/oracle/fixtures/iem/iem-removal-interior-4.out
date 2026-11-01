@@ -1,0 +1,20 @@
+case iem-removal-interior-4
+task removal
+status ok
+flatten ok 5 3fc0c06355c0bf44
+ki bff128211ee0a1c0
+nbr 1 bfdd07100ae51086 3fdb120a439019dc 3ff26cac0e2be287
+nbr 2 bfd6618dca803f50 3fd4df406dd3eb00 3feea0e789e021d3
+nbr 3 bfd137e6a61d371c 3fd00eb54e9bfb26 3ff48f4d65a43d86
+new 0 1 3fd14e3fd002dfde bfbef0146db68260 bfb2913e6c8adb0e
+new 0 2 3fc279178d7f2776 3fabb06b015639f0 3fbc137909893780
+new 0 3 3fc74a1f66654ad5 3fb7997a5c9840f8 3fb6e383dfe90c9f
+new 1 1 3fe3a2698e50afb5 3fe67e6e898ea1a3 3fe2971bbe813efd
+new 1 2 3fe48906576890ee bfdb7e7b0b1d0c96 bfd764a196d0edf6
+new 1 3 3fe1439a5cdd7096 3fccb2f0d7e3d429 3fe1417ca8aba7e6
+new 2 1 3fc55855027f3a20 3fd8061d419b14f4 3fc32e6ff539de9c
+new 2 2 3fd37acca043b162 bfc68792034c1465 bfbd960bb09c33af
+new 2 3 3fcbf436906f8c84 bfb30edeb0c0b2ee 3f9d56422e1ab5b2
+cost 3ff5a595b13efdd0
+memoryless 3ff3b1268141f3bc
+end

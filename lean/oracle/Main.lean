@@ -42,6 +42,10 @@ usage:
                                     tracecurve, identify, subdivide, regions, split
   ddg-oracle ic-selftest            internal checks of the integer-coordinates oracle
   ddg-oracle ic-fixtures write DIR | check DIR   golden fixtures (fixtures/ic, exact equality)
+  ddg-oracle iem [IN [OUT]]         one star of 'Surface Simplification using Intrinsic Error Metrics'
+                                    (Liu et al. 2023); tasks step, flatten, weights, removal
+  ddg-oracle iem-selftest           internal checks of the intrinsic-simplification oracle
+  ddg-oracle iem-fixtures write DIR | check DIR   golden fixtures (fixtures/iem)
   ddg-oracle version
 
 IN and OUT default to standard input and output ('-'). All three processing commands read any
@@ -190,6 +194,18 @@ def main (args : List String) : IO UInt32 := do
   | ["ic-selftest"] => return if (← IntegerCoords.selftest) == 0 then 0 else 1
   | ["ic-fixtures", "write", dir] => IntegerCoords.writeFixtures dir; return 0
   | ["ic-fixtures", "check", dir] => return if (← IntegerCoords.checkFixtures dir) == 0 then 0 else 1
+  | "iem" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← IEM.runStream input output
+    output.flush
+    return 0
+  | ["iem-selftest"] => return if (← IEM.selftest) == 0 then 0 else 1
+  | ["iem-fixtures", "write", dir] => IEM.writeFixtures dir; return 0
+  | ["iem-fixtures", "check", dir] => return if (← IEM.checkFixtures dir) == 0 then 0 else 1
   | ["bench"] => bench; return 0
   | ["version"] => IO.println "ddg-oracle 0.1.0 (text format 1)"; return 0
   | _ => IO.eprintln usage; return 2

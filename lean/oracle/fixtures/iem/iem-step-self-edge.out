@@ -1,0 +1,9 @@
+case iem-step-self-edge
+task step
+status ok
+step 3fb999999999999a 400a71c81c36fcaa 3ffe14b59ff4c68d bff7bda258485dc3
+paperhess 3fff50a0267e1633
+face 0 3ff2809b67bfb49f 3fee46cfc10b278f 3ff6fcd069283447 1
+face 1 3fe999999999999a 3ff0d201a422a433 3ff42f352b5cc50a 1
+face 2 3ff0cccccccccccd 3feff56984a837fa 3ff357e8498e3cd4 1
+end

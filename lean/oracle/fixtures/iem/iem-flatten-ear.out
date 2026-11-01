@@ -1,0 +1,8 @@
+case iem-flatten-ear
+task flatten
+status ok
+theta0 4000000000000000
+solve invalid 1 bfe478697b8235a1 400921fb54442d18
+hess 0000000000000000
+face 0 3ff886631da80415 3feb1ff9efc91d90 3fdcd48c9b4cf61c 0
+end

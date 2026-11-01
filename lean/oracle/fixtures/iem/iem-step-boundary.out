@@ -1,0 +1,10 @@
+case iem-step-boundary
+task step
+status ok
+step bfc999999999999a 400721e7ffe2a48b 3fff6eaa47d7045f bfd4f218f14b724e
+paperhess 3fff6eaa47d7045e
+face 0 3fe80c70d678d123 3ff2f16537fc1948 3ff3c184707c698d 1
+face 1 3fe9425b2d365ef7 3fe5cb7738469a94 3ff2f16537fc1948 1
+face 2 3fe2a0e6d552a2a5 3fe3f32fd9e9aeed 3fe5cb7738469a94 1
+face 3 3fe4473b355b0c2b 3ff01aba123982e0 3fe3f32fd9e9aeed 1
+end

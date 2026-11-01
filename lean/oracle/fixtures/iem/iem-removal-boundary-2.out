@@ -1,0 +1,28 @@
+case iem-removal-boundary-2
+task removal
+status ok
+flatten ok 4 3fd47b441cc691aa
+ki bfe41b2f769cf0e4
+nbr 1 bfa273cc234f7ec0 3fad5e2836c4c63a 3fefce15752d4c47
+nbr 2 bfc685465f758350 3fd1ebdc2832f814 3fe9394ed39d1e00
+nbr 3 bfcbe5905a1435f0 3fd6331372200d92 3fe7ca732d49371d
+nbr 4 bfb19cf188d4caa0 3fbc0834da0bea3a 3fefbf85661e2b54
+nbr 5 bfc0967b53abc558 3fca667c50a2ce08 3fe9cb77a4b139e9
+new 0 1 3fc08c24f647d2d6 bfc82ee43504baf5 3fc3c113351a82b6
+new 0 2 3fc7c0c59cc5422a 3fc6e8e0c7c9aa1f 3fb1f687c37cbde8
+new 0 3 3fb02dcce82e1715 bfbd804137b616d0 bfa61809487ef148
+new 0 4 3fbe6946e764bdf8 3fba7a0dcbaf91fc 3fc786ce6a23c6fe
+new 0 5 3fc2e4b6847900c7 3fb8b6fed6b29d30 bfc981ab7e64cee5
+new 1 1 3fb0463f94499a55 3fe00fb2b83b7a35 3fa53fd9e20312a7
+new 1 2 3fd9d49d3722ed84 bfcda726ffc214bb bfc847e6a81dcc0e
+new 1 3 3fdb8e63dde92cd7 3fc6043d8be45854 3fe0e0abd2f58c23
+new 1 4 3fb28134a42a7d2c bfe79209636d842c bfee91da7a7b6728
+new 1 5 3fd7d5b4b46be170 3f6593224eb369a2 bfd106a84b345235
+new 2 1 3fc17145f7a34d5a bfc1deac648dc0b5 bfa253f0dbceb22c
+new 2 2 3fad3cc94fec7276 bfd78dedf74451e9 bfc5242d51902af3
+new 2 3 3fd255652b47c780 bfa7dfd3159a39a0 3fd0dbfb2aa903f0
+new 2 4 3fd1f2d7d75ef73a bfab05d2917fbd71 3fb19755aacbb193
+new 2 5 3fd299997ebefde4 3fb666ea88a6d1ff 3f7eeef98fd2be86
+cost 3fe818abd53b7210
+memoryless 3fe0f1db8934c2eb
+end

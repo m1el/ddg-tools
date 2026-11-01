@@ -1,0 +1,7 @@
+case iem-flatten-boundary-5
+task flatten
+target boundary
+face 0 1 2 3fe77f66ef4e1a17 3ff4ef6926eec3f6 3ff5d56bcc1ecb66
+face 0 2 3 3fee7f25ecd4fec2 3fe816436338af61 3ff4ef6926eec3f6
+face 0 3 4 3fd86b9913709858 3fe60c50802e1dc0 3fe816436338af61
+end

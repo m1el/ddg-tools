@@ -1,0 +1,7 @@
+case iem-weights-basic
+task weights
+status ok
+w 1 3fd0000000000000
+w 2 3fc0000000000000
+w 3 3fe4000000000000
+end

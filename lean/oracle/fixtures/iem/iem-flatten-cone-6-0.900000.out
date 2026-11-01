@@ -1,0 +1,13 @@
+case iem-flatten-cone-6-0.900000
+task flatten
+status ok
+theta0 4016679ccbe57edb
+solve ok 4 bfcaf8e8210a4154 401921fb54442d17
+hess 400bb67ae8584ca7
+face 0 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+face 1 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+face 2 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+face 3 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+face 4 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+face 5 3feccccccccccccd 3fecccccccccccce 3fecccccccccccce 1
+end
