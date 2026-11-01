@@ -81,6 +81,49 @@ linear functions and constant vector/line/cross fields reproduced to 1e-13; row 
 consistency; no empty rows on the models; the smoothest field of `ddg-intrinsic-apps` on the
 coarse mesh against the fine one; the colouring).
 
+## Pre- and post-refinement (WP5; SPEC §6, paper Sec. 6.3)
+
+`refine` module (the workspace's own Delaunay refinement, integer coordinates by default, signposts
+as an option; the reference's refinement is slow and has bugs and is not ported):
+
+* `CoarseMesh::from_refined(mesh, geometry, points, mesh_options, &RefinementOptions)`:
+  pre-refinement (Fig. 12). Refines the input, makes the coarse mesh of the refined `T¹` with the
+  input vertices and `points` tracked (located by the `T⁰ → T¹` query). Inserted vertices have fine
+  ids `>= |V|`, are ordinary removable vertices (loop over `CoarseMesh::vertices()` to remove them
+  too), are not rows of `P`, and are columns if they stay. `CoarseMesh::from_intrinsic(&T, ...)` is the
+  same from a triangulation you refined yourself.
+* `CoarseMesh::post_refine(&options)`: refines a coarse mesh to a minimum angle (default 25°) as a
+  new intrinsic triangulation and composes the maps (Fig. 13); the result is a `CoarseMesh` with the
+  same tracked points, rebuilt frames and fresh ids for the new vertices. The report has the minimum
+  angle reached and `guarantee_applies` (closed and all input angle sums >= 60°, Gillespie et al.
+  2021a).
+* A coarse mesh must be simplicial to be refined (the refinement's input is a `TriMesh`): a
+  self-edge, a bigon or two faces on the same three vertices is refused with a message naming them
+  (`RefineError::NotSimplicial`); `RefinementOptions::make_simplicial_flips` tries tracked edge flips
+  first (`CoarseMesh::make_simplicial`).
+
+Measured with `cargo run --release -p ddg-intrinsic-simplification --example refine_study -- MESH
+--points [--signposts] [--repair]` (single thread; random removal order down to the fraction, no error
+metric; other agents' load 3 to 5 on 64 cores):
+
+| mesh | pre-refinement | post-refinement of 50 / 25 / 10 / 5 / 2 % of the pre-refined vertices |
+|---|---|---|
+| blub (7106 v) | +1771 v in 0.029 s (reference: 33 s) | +1278 / +1360 / +863 / +497 / refused (4-face edge), repaired by 1 flip |
+| spot (2930 v) | +255 v in 0.008 s | +428 / +519 / +402 / refused (duplicate faces), repaired by 1 flip / +106 |
+| bob (5344 v) | +93 v in 0.012 s | all five fractions accepted |
+| capsule (10658 v) | +38 v in 0.022 s | all five accepted |
+| boxpart (451 v) | +1029 v in 0.009 s | refused at all five without repair; with repair: 50 % (3 flips), 25 % (11 flips) accepted, 10 / 5 / 2 % still refused |
+
+After every post-refinement the minimum angle is 25.00 to 25.10 degrees on these (closed, all angle
+sums >= 60°). Signposts give the same vertex counts and angles; their point query fails for points
+exactly on a boundary edge of a coarse mesh (see SPEC §6.2, "As built").
+
+Tests: `cargo test --release -p ddg-intrinsic-simplification --test refine`: a planar grid through
+pre-refinement, removal of all but a scattering of vertices and post-refinement (every vertex and
+extra point reproduced to 1e-13, 3 grids x 2 representations), `P` rows summing to 1 after each
+step, certificates, small shapes and the models (spot, bob, blub, boxpart, capsule, ...), the
+refusals, the flip repair, both rules on a closed torus.
+
 ## Anisotropic coarsening (WP8; SPEC §8, paper Sec. 8.6.2, Fig. 27)
 
 `anisotropy`: edge lengths scaled by `(1 - tau) + (tau/2)((u_i.e_ij)^2 + (u_j.e_ji)^2)` for per-vertex
