@@ -500,9 +500,37 @@ driver (`runs_tmp/iem/reference-driver.md`). Scope (the user's choice): the full
 applications, the multigrid hierarchy and cMCF, anisotropic coarsening, the evaluation with a QEM
 baseline; Blender: a coarse-mesh view.
 
-* Landed: the contract and the crate skeleton.
-* In progress: WP0/WP1 (data model, flips, tracking), WP10 (Lean tiers A/B), the exact distance on
-  Δ-complexes and the QEM baseline.
+Landed (all work packages WP0–WP11):
+* the core: `CoarseMesh` (Δ-complex, lengths, angular coordinates, tracked points), flips, Delaunay,
+  flattening by bracketed Newton with Springborn's fallback, removal (interior, boundary via the new
+  `Complex::remove_boundary_vertex`, IT N54, ears), undo and tentative removal; the ICE metric and
+  Alg. 1 (`simplify`: channels, memory, fixed vertices, targets, snapshots); 14.5–16.4k removals/s,
+  1.10–1.17× the reference; queued keys equal commit costs (S5);
+* the map and prolongation (`P`, `P^vec` without empty rows), colouring; pre/post refinement on
+  integer coordinates (blub +1771 vertices in 0.03 s, reference 33 s; `refine_then_simplify`);
+  applications (Poisson, exact and heat geodesics, all pairs, Voronoi, exp map); anisotropic
+  coarsening with principal curvatures (Panozzo et al. 2010); hierarchy and multigrid; cMCF;
+  exact distance on Δ-complexes (`exact_distance_complex`); QEM with closest-point and Liu 2021 maps;
+* Lean: every `iem-` formula (tiers A/B/B′, incl. a strict boundary flip lemma), the oracle with 50
+  fixtures; Python (`simplify`, `build_hierarchy`, `qem_simplify`) and the Blender "Intrinsic
+  Simplify" view;
+* evaluation (SPEC §10.5, §10.2): Thingi10k 7745/7745 (97.3 % reach ≤ 10 %, 76.5 % ≤ 1 %; paper 98 %,
+  84 %; 99.6 % / 89.4 % among |V| ≥ 300, the gap being the 3-vertex floor of small components);
+  developable area error reproduced (Fig. 19); Poisson and heat better than QEM in 8 of 11; exact
+  geodesics 16–37 % *worse* than QEM (the paper's 4× is against Lee et al.); scaling exponent 0.95.
+
+Open:
+* Eq. 10's sign (S25): `Cetm` (Springborn's circumcircle-preserving map) gives far lower anisotropic
+  distortion, the paper's sign 3–19 % lower area distortion; the default (paper) awaits the user.
+* Flattening failures: 7–11 % of Thingi10k meshes keep a few vertices unremovable
+  (`flatten_failed`, `not_flattenable`; the paper reports 0.1 % floating-point failures); not yet
+  analysed.
+* cMCF with multigrid is 0.28–0.8× a direct supernodal Cholesky up to 187k vertices (paper: 20×).
+* Post-refinement needs a simplicial coarse mesh (flip repair is opt-in; boxpart ≤ 10 % refused);
+  the signposts' `T⁰ → T¹` query fails for points on straight input boundary edges (integers fine).
+* Exact removal-order agreement with the reference would need its frame anchors (R4) and convexity
+  tolerance (R22); the order agrees to the first near-tie only.
+* Timings of record (Fig. 16) were taken on a loaded machine; rerun alone.
 
 ## Housekeeping
 
