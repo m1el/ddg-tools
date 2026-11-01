@@ -606,26 +606,32 @@ Formula ids `iem-…`; tiers as IC-SPEC §9: A (algebraic/analytic identities), 
 
 | id | statement | tier |
 |---|---|---|
-| `iem-flatten-newton` | Eq. 4 is Newton's step for `E(u_i)` (Springborn et al. Eq. 9, 10 restricted to one vertex): `∂Θ_i/∂u_i = −½ Σ (cot θ^k_ij + cot θ^j_ki)` | A |
-| `iem-flatten-monotone` | with extended angles, `Θ_i(u)` is continuous, non-increasing, `→ deg·π` at `−∞`, `→ 0` at `+∞`; a root exists; strictly decreasing where some face is valid | A/B |
-| `iem-flatten-conserves-curvature` | flattening `i` changes only `Θ` of `i` and `N_i`, and `Σ_{N_i} K̃ = Σ_{N_i} K + K_i` (local Gauss–Bonnet: each face's angles sum to π) | A |
-| `iem-projective-interpolation` | Eq. 10 maps each face bijectively onto itself, fixes the corners, and agrees on a shared edge for the two faces (C⁰) | A |
-| `iem-degree-three-barycentric` | in a flat degree-3 star, the barycentric coordinates of `i` in the merged face are the normalized sub-triangle areas, and the points of the three faces map affinely | A |
-| `iem-boundary-merge` | a flat boundary vertex of degree 2 lies on the segment `bc` of the merged triangle, at the coordinate given by the layout | A |
-| `iem-flip-to-degree-three` | = `ic-vertex-removal` (Thm. D.1) for simplicial stars; the boundary analogue (flat half-star of degree > 2 has a flippable spoke) | B′ (proved / to prove) |
-| `iem-wrap` | S4: the wrap of an angular coordinate to `[0, 2π)` inside / `[0, π]` on the boundary preserves the direction (`e^{iφ}` inside) and the CCW order of the fan | A |
-| `iem-redistribution-weights` | Eq. 9: `α_ij ≥ 0`, `Σ α = 1`, and the denominator is ≥ `|K_i| > 0` for a non-flat vertex | A |
-| `iem-memoryless-cost` | Eq. 6: `Σ m̃_j‖t̃_j‖ = Σ α_ij m_i ℓ_ij` when `t = 0`, and this is the 1-Wasserstein distance of moving the mass `m_i` at `i` to the neighbours (a single source: every coupling is the forced one; distances along the flat star are `ℓ_ij`) | A |
-| `iem-center-of-mass-update` | Eq. 7/8 in the plane: `t̃_j` points from `x_j` to the combined centre of mass when `t_i`, `t_j` point to the centres of mass of `m_i`, `m_j` | A |
-| `iem-transport-rotation` | `R_ij = e^{i(φ_ji + π − φ_ij)}` maps the frame of `i` to the frame of `j` along the edge (= `app-vector-transport` of the apps crate) | A (reuse) |
-| `iem-vector-interpolation` | Sec. 7.3.1: the `β` angles of the three edges in the face frame and the rotations `z` | A |
-| `iem-anisotropic-scale` | the length factor is in `[1 − τ, 1]` for unit `u`, `ê` | A |
-| `iem-galerkin-spd` | `Pᵀ A P` is SPD for SPD `A` and full-column-rank `P` | A |
-| `iem-distortion` | the singular values of the affine map between two triangles from their lengths; `σ₁σ₂ =` area ratio | A |
-| `iem-qem-quadric` | the quadric of a plane gives the squared distance; the optimal point solves the 3×3 system | A |
+| `iem-flatten-newton` | Eq. 4 is Newton's step for `Θ_i(u) = Θ̃_i` (Springborn et al. Eq. 9, 10 restricted to one vertex): `∂Θ_i/∂u_i = −½ Σ_f Σ_{corners a at i}` (cotangents of the angles opposite the sides of `a` that are not self-edges); for a face with one corner at `i` this is `cot θ^k_ij + cot θ^j_ki`; with a self-edge `ii` the per-corner sum of §3.4 / Eq. 4 is **not** the derivative (the cotangent opposite the self-edge is dropped, as the Rust `face_angle_sum_and_derivative` does); positive for valid faces without a self-face | A (proved) |
+| `iem-flatten-monotone` | with extended angles, `Θ_i(u)` is continuous, non-increasing, `→ deg·π` at `−∞` (`deg` = faces of the star), `→ 0` at `+∞` (no self-face); a bracket `Θ(lo) ≥ Θ̃ ≥ Θ(hi)` contains a root; a root exists for `0 < Θ̃ < deg·π`; strictly decreasing between `u₁ < u₂` when some face (not a self-face) is valid at `u₁` or `u₂`; the root is unique if some face is valid at it | A/B (proved) |
+| `iem-flatten-conserves-curvature` | flattening `i` changes only `Θ` of `i` and `N_i`, and `Σ_{N_i} K̃ = Σ_{N_i} K + K_i` (local Gauss–Bonnet: each face's angles sum to π) | A (proved) |
+| `iem-projective-interpolation` | Eq. 10 maps each face bijectively onto itself, fixes the corners, and agrees on a shared edge for the two faces (C⁰), for any positive per-vertex weights. Note: Eq. 10's `e^{+u}` is the *inverse* of CETM's circumcircle-preserving map (`e^{−u}`, CETM Sec. 3.4, App. D); both are valid bijective tracking maps | A (proved) |
+| `iem-degree-three-barycentric` | in a flat degree-3 star, the barycentric coordinates of `i` in the merged face are the normalized sub-triangle areas, and the points of the three faces map affinely | A (proved) |
+| `iem-boundary-merge` | a flat boundary vertex of degree 2 lies on the segment `bc` of the merged triangle, at the coordinate given by the layout | A (proved) |
+| `iem-flip-to-degree-three` | = `ic-vertex-removal` (Thm. D.1) for simplicial stars (corners `≤ π`; the strict version is false: the cross star); the boundary analogue: a flat half-star of degree `> 2` has an interior spoke with a **strictly** convex quadrilateral; Δ-complexes: `ic-vertex-removal-delta` (open) | B′ (proved) |
+| `iem-wrap` | S4: the wrap of an angular coordinate to `[0, 2π)` inside / `[0, π]` on the boundary preserves the direction (`e^{iφ}` inside) and the CCW order of the fan | A (proved) |
+| `iem-redistribution-weights` | Eq. 9: `α_ij ≥ 0`, `Σ α = 1`, and the denominator is ≥ `|K_i| > 0` for a non-flat vertex | A (proved) |
+| `iem-memoryless-cost` | Eq. 6: `Σ m̃_j‖t̃_j‖ = Σ α_ij m_i ℓ_ij` when `t = 0`, and this is the 1-Wasserstein distance of moving the mass `m_i` at `i` to the neighbours (a single source: every coupling is the forced one; distances along the flat star are `ℓ_ij`) | A (proved) |
+| `iem-center-of-mass-update` | Eq. 7/8 in the plane: `t̃_j` points from `x_j` to the combined centre of mass when `t_i`, `t_j` point to the centres of mass of `m_i`, `m_j` | A (proved) |
+| `iem-transport-rotation` | `R_ij = e^{i(φ_ji + π − φ_ij)}` maps the frame of `i` to the frame of `j` along the edge, in a flat region (on a curved surface it is the definition, `app-vector-transport`, cited) | A (proved) |
+| `iem-vector-interpolation` | Sec. 7.3.1: the `β` angles of the three edges in the face frame and the rotations `z` | A (proved) |
+| `iem-anisotropic-scale` | the length factor is in `[1 − τ, 1]` for unit `u`, `ê` | A (proved) |
+| `iem-galerkin-spd` | `Pᵀ A P` is SPD for SPD `A` and full-column-rank `P` (also on the free unknowns after Dirichlet elimination); unit rows of the coarse vertices give full column rank | A (proved) |
+| `iem-distortion` | the singular values of the affine map between two triangles from their lengths (`‖J‖²_F = Σ cot θ_k ℓ̂_k²/(2A)`, `|det J| =` area ratio, `σ² = (s ± √(s² − 4d²))/2`); `σ₁σ₂ =` area ratio. Khodakovsky et al. Sec. 2 define the measures from the eigenvalues `γ = σ²` of the metric tensor (`γ_max/γ_min`, `γ_max γ_min`); §10.3's `σ₁/σ₂`, `log(σ₁σ₂)` are monotone in them | A (proved) |
+| `iem-qem-quadric` | the quadric of a plane gives the squared distance (weighted: `w (n·(x − p))²`); quadrics add; a solution of `A v = −b` (the cofactor formula of `optimal_point`) minimizes a quadric with symmetric PSD `A` (uniquely for PD); along a segment the clamped vertex `clamp(−β/α, 0, 1)` minimizes it for `α > 0` | A (proved) |
 | `iem-wasserstein-memory` | the memory-based cost approximates the transport cost (paper Sec. 5.2: "only approximate") | cited |
 | `iem-cetm-existence` | Springborn et al. 2008 Thm. (convex energy, uniqueness up to constants) | cited |
 | `iem-delaunay-quality` | 30°/120° corner bound after post-refinement (Gillespie et al. 2021a) | cited (`ic-refinement-termination`) |
+
+Lean (WP10): `lean/proofs/DdgProofs/IntrinsicSimplification/*.lean`; the exact statements and theorem
+names are in `lean/proofs/README.md`, section "Intrinsic Simplification"; the cited ids in
+`lean/proofs/CITED.md`. Oracle: `ddg-oracle iem` (tasks `step`, `flatten`, `weights`, `removal` on one
+star), fixtures `lean/oracle/fixtures/iem/` (format in `lean/oracle/README.md`); its side `k` is
+**opposite** corner `k`, i.e. Rust's `l[(k + 1) % 3]`.
 
 ---------------------------------------------------------------------------------------------------
 
