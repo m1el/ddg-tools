@@ -2042,6 +2042,13 @@ are not cited here).
   inner corner `< π` for free; in a full `2π` star the inner corner of the chosen spoke is only
   known to be `≤ π` when it is chosen by the angle argument, and the first-twice-incident-edge
   potential is not shown to decrease under that choice. No counterexample was found either.
+  WP9 (tier C) did not reopen it: the complex model now has the flip (`Cx.flip_valid`), so the
+  combinatorial half is statable, but the angle half would have to be carried through a sequence of
+  flips whose geometry the model does not have. The runs of SPEC §4.6 (after I27's merge) leave
+  stuck removals only at vertices with an edge from the vertex to itself (70 of 4 609 in
+  `removals_match_the_signposts_exactly`; 74 after Delaunay flipping), where neither a
+  degree-lowering flip nor a merge applies; whether some other flip sequence removes them (whether
+  they are counterexamples) is not known.
 - **What depends on it.** Removal in refinement with boundary (SPEC §4.6): the library flips by the
   rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
   when no flip helps; refusals are counted in the evaluation.
