@@ -141,15 +141,15 @@ for m, name in MODES:
 
     # worst table
     w("### Worst cases (by ratio)\n")
-    w("| id | |V| | comps | chi | bdry edges | final | ratio | skips | commit fails | status |")
-    w("|---|---|---|---|---|---|---|---|---|---|---|")
+    w("| id | V | comps | chi | bdry edges | final | ratio | skips | commit fails | status |")
+    w("|---|---|---|---|---|---|---|---|---|---|")
     worst = sorted(ok, key=lambda r: -(r.get("ratio") or 0))[:25]
     for r in worst:
         sk = ",".join(f"{k}:{v}" for k, v in (r.get("skips") or {}).items())
         w(f"| {r['id']} | {r.get('v0')} | {r.get('components')} | {r.get('chi')} | {r.get('boundary_edges')} | {r.get('v_final')} | {fmt(r.get('ratio'))} | {sk} | {r.get('commit_failures_total')} | {r['status']} |")
     w("")
     w("Slowest meshes:\n")
-    w("| id | |V| | t_total (s) | removals | RSS MB |")
+    w("| id | V | t_total (s) | removals | RSS MB |")
     w("|---|---|---|---|---|")
     for r in sorted(ok, key=lambda r: -r["t_total"])[:10]:
         w(f"| {r['id']} | {r.get('v0')} | {fmt(r['t_total'])} | {r.get('removals')} | {r.get('peak_rss_mb')} |")

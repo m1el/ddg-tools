@@ -2,8 +2,11 @@
 //! for one mesh.
 //!
 //! ```text
-//! thingi_simplify MESH.obj [--id ID] [--no-refine] [--signposts] [--target-ratio R]
+//! thingi_simplify MESH.obj [--id ID] [--no-refine] [--signposts] [--target-ratio R] [--no-mollify]
 //! ```
+//!
+//! The edge lengths are mollified by default (`eps = 1e-5` of the mean edge length, as in the
+//! integer-coordinates evaluation): Thingi10k has faces of zero area, which `Geometry` refuses.
 //!
 //! One process, one mesh; prints one JSON line on stdout (also on failure). With pre-refinement
 //! (default: integer coordinates, Chew's rules, 25 degrees; `--signposts`: the signpost
@@ -22,7 +25,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::Instant;
 
 use ddg_core::io::parse_obj;
+use ddg_core::mollify::mollify_edge_lengths;
 use ddg_core::{Geometry, TriMesh};
+use ddg_integer_coords::PAPER_MOLLIFY_EPSILON;
 use ddg_intrinsic_simplification::refine::{
     RefinementOptions, Representation, refine_then_simplify,
 };
@@ -190,8 +195,26 @@ fn run(path: &str, args: &[String], j: &mut Json) -> Result<(), String> {
     let obj = parse_obj(&String::from_utf8_lossy(&text)).map_err(|e| format!("parse: {e}"))?;
     let faces = obj.triangles().ok_or("not all triangles")?;
     let mesh = TriMesh::new(obj.positions.len(), faces.clone()).map_err(|e| format!("mesh: {e}"))?;
-    let geometry =
-        Geometry::from_positions(&mesh, &obj.positions).map_err(|e| format!("geometry: {e}"))?;
+    // Intrinsic mollification (paper Sec. 3.9 of Gillespie et al. 2021, eps = 1e-5 mean edge
+    // length), as the integer-coordinates evaluation: Thingi10k has zero-area faces.
+    let lengths: Vec<f64> = mesh
+        .edges()
+        .iter()
+        .map(|&[a, b]| {
+            let (a, b) = (obj.positions[a as usize], obj.positions[b as usize]);
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        })
+        .collect();
+    let geometry = if args.iter().any(|a| a == "--no-mollify") {
+        Geometry::from_edge_lengths(&mesh, lengths)
+    } else {
+        let m = mollify_edge_lengths(&mesh, &lengths, PAPER_MOLLIFY_EPSILON)
+            .map_err(|e| format!("mollify: {e}"))?;
+        j.num("mollify_epsilon", m.epsilon)
+            .num("mollify_faces_below", m.n_faces_below_margin);
+        Geometry::from_edge_lengths(&mesh, m.edge_lengths)
+    }
+    .map_err(|e| format!("geometry: {e}"))?;
     drop(text);
     let v0 = mesh.n_vertices();
     let comp_in = component_sizes(v0, &faces);
