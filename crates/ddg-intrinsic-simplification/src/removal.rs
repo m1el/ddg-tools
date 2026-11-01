@@ -56,6 +56,11 @@ pub struct NeighbourChange {
     /// The angular coordinate of that edge at `j`, `φ_ji` (`π` if it is the boundary edge
     /// arriving at `j`).
     pub phi_ji: f64,
+    /// `φ_ij` of the same edge before flattening (the frame the reference's tentative cost
+    /// uses, R16, and its commit at `i`, R19; for `ReferenceCompat`).
+    pub phi_ij_before: f64,
+    /// `φ_ji` of the same edge before flattening (R16).
+    pub phi_ji_before: f64,
 }
 
 impl NeighbourChange {
@@ -429,12 +434,41 @@ impl CoarseMesh {
         // The neighbours and their curvature, before and after.
         let neighbours = self.star_neighbours(v, &faces);
         let before: Vec<f64> = neighbours.iter().map(|&w| self.curvature(w)).collect();
+        // The angular coordinates of the spokes (both ends) before flattening.
+        let mut phi_before: Vec<(u32, f64)> = Vec::with_capacity(16);
+        {
+            let c = &self.complex;
+            let mut last = None;
+            for h in self.fan(v) {
+                last = Some(h);
+                phi_before.push((h as u32, self.phi[h]));
+                if let Some(t) = c.twin(h) {
+                    phi_before.push((t as u32, self.phi[t]));
+                }
+            }
+            if c.is_boundary_vertex(v)
+                && let Some(h) = last
+            {
+                let g = c.prev(h);
+                phi_before.push((g as u32, self.phi[g]));
+            }
+        }
+        let lookup = |h: usize| {
+            if h == NONE as usize {
+                PI
+            } else {
+                phi_before
+                    .iter()
+                    .find(|x| x.0 as usize == h)
+                    .map_or(f64::NAN, |x| x.1)
+            }
+        };
         self.commit_flattening(v, &faces, solution.u, track);
         let mut changes: Vec<NeighbourChange> = neighbours
             .iter()
             .zip(&before)
             .map(|(&w, &kb)| {
-                let (length, phi_ij, phi_ji) = self.connecting_edge(v, w);
+                let (length, phi_ij, phi_ji, h_ij, h_ji) = self.connecting_edge(v, w);
                 NeighbourChange {
                     vertex: self.fine_of[w],
                     boundary: self.complex.is_boundary_vertex(w),
@@ -443,6 +477,8 @@ impl CoarseMesh {
                     length,
                     phi_ij,
                     phi_ji,
+                    phi_ij_before: lookup(h_ij),
+                    phi_ji_before: lookup(h_ji),
                 }
             })
             .collect();
@@ -452,6 +488,8 @@ impl CoarseMesh {
         let wanted = if boundary { 2 } else { 3 };
         let mut degree_flips = Vec::new();
         let cap = 4 * self.complex.vertex_degree(v) + 8;
+        // Spoke scores by edge id: a flip changes only the scores of the edges of its two faces.
+        let mut scores: Vec<(usize, f64)> = Vec::with_capacity(16);
         loop {
             let fan: Vec<usize> = self.fan(v).collect();
             let self_edge = fan.iter().any(|&h| self.complex.to_vertex(h) == v);
@@ -468,11 +506,23 @@ impl CoarseMesh {
             if degree_flips.len() >= cap {
                 return Err(RemovalRefusal::Stuck { faces: fan.len() });
             }
-            let Some(e) = self.degree_flip_choice(v, &fan) else {
+            let Some(e) = self.degree_flip_choice(v, &fan, &mut scores) else {
                 return Err(RemovalRefusal::Stuck { faces: fan.len() });
             };
             match self.flip_for_removal(e, track, &mut n_clamped)? {
-                Some(f) => degree_flips.push(f),
+                Some(f) => {
+                    degree_flips.push(f);
+                    let c = &self.complex;
+                    let h0 = c.edge_halfedge(e);
+                    let mut stale = [usize::MAX; 6];
+                    for (k, h) in [h0, c.twin(h0).unwrap_or(h0)].into_iter().enumerate() {
+                        let f = 3 * (h / 3);
+                        for s in 0..3 {
+                            stale[3 * k + s] = c.edge(f + s);
+                        }
+                    }
+                    scores.retain(|x| !stale.contains(&x.0));
+                }
                 None => {
                     return Err(RemovalRefusal::Internal {
                         what: format!("edge {e} was flippable and then refused"),
@@ -535,18 +585,20 @@ impl CoarseMesh {
 
     /// The shortest edge between `v` and its neighbour `w` (ties: lower edge id): its length,
     /// its angular coordinate at `v` and at `w` (`π` for the virtual direction of an arriving
-    /// boundary edge).
-    fn connecting_edge(&self, v: usize, w: usize) -> (f64, f64, f64) {
+    /// boundary edge), and the halfedges these coordinates belong to (`NONE` for the virtual
+    /// direction).
+    fn connecting_edge(&self, v: usize, w: usize) -> (f64, f64, f64, usize, usize) {
         let c = &self.complex;
-        let mut best: Option<(f64, usize, f64, f64)> = None;
-        let mut consider = |e: usize, phi_v: f64, phi_w: f64| {
+        let none = NONE as usize;
+        let mut best: Option<(f64, usize, usize, usize)> = None;
+        let mut consider = |e: usize, h_v: usize, h_w: usize| {
             let l = self.length[e];
             let better = match best {
                 None => true,
                 Some((bl, be, _, _)) => l < bl || (l == bl && e < be),
             };
             if better {
-                best = Some((l, e, phi_v, phi_w));
+                best = Some((l, e, h_v, h_w));
             }
         };
         let mut last = None;
@@ -555,11 +607,7 @@ impl CoarseMesh {
             if c.to_vertex(h) != w {
                 continue;
             }
-            let phi_w = match c.twin(h) {
-                Some(t) => self.phi[t],
-                None => PI,
-            };
-            consider(c.edge(h), self.phi[h], phi_w);
+            consider(c.edge(h), h, c.twin(h).unwrap_or(none));
         }
         if c.is_boundary_vertex(v)
             && let Some(h) = last
@@ -567,17 +615,25 @@ impl CoarseMesh {
             // The boundary edge arriving at v.
             let g = c.prev(h);
             if c.from_vertex(g) == w {
-                consider(c.edge(g), PI, self.phi[g]);
+                consider(c.edge(g), none, g);
             }
         }
-        let (l, _, a, b) = best.unwrap_or((f64::NAN, 0, f64::NAN, f64::NAN));
-        (l, a, b)
+        let phi = |h: usize| if h == none { PI } else { self.phi[h] };
+        match best {
+            Some((l, _, a, b)) => (l, phi(a), phi(b), a, b),
+            None => (f64::NAN, f64::NAN, f64::NAN, none, none),
+        }
     }
 
     /// The spoke of `v` to flip next on the way to degree three or two (S14): among the
     /// flippable spokes, self-edges first, then the largest opposite-angle sum, ties by the
     /// lower edge id. `None` if no spoke can be flipped.
-    fn degree_flip_choice(&self, v: usize, fan: &[usize]) -> Option<usize> {
+    fn degree_flip_choice(
+        &self,
+        v: usize,
+        fan: &[usize],
+        scores: &mut Vec<(usize, f64)>,
+    ) -> Option<usize> {
         let c = &self.complex;
         // Scores first (cheap), then the flip test in the order of preference: the first
         // flippable spoke is the best flippable one.
@@ -589,8 +645,17 @@ impl CoarseMesh {
             if is_self && c.edge_halfedge(e) != h {
                 continue; // each self-edge once
             }
-            let score = corner_at(c, &self.length, c.prev(h)).unwrap_or(0.0)
-                + corner_at(c, &self.length, c.prev(t)).unwrap_or(0.0);
+            // Cached by edge id (the caller drops the edges a flip changes): the same value
+            // as computing it again.
+            let score = match scores.iter().find(|x| x.0 == e) {
+                Some(&(_, s)) => s,
+                None => {
+                    let s = corner_at(c, &self.length, c.prev(h)).unwrap_or(0.0)
+                        + corner_at(c, &self.length, c.prev(t)).unwrap_or(0.0);
+                    scores.push((e, s));
+                    s
+                }
+            };
             candidates.push((is_self, score, e));
         }
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.total_cmp(&a.1)).then(a.2.cmp(&b.2)));

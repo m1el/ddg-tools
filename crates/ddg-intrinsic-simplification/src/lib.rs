@@ -12,7 +12,7 @@
 //!
 //! Work in progress: see `SPEC.md` §15 for the work packages.
 //!
-//! # What is here (WP0–WP2)
+//! # What is here (WP0–WP3)
 //!
 //! * [`CoarseMesh`] (SPEC §2): the connectivity ([`ddg_intrinsic::Complex`], a Δ-complex),
 //!   one length per edge, the angular coordinate of every halfedge at its tail with a
@@ -33,6 +33,10 @@
 //!   error metric ([`CoarseMesh::tentative_removal`]) runs the same code as the committed one
 //!   and leaves the mesh bitwise unchanged (S5). [`PreparedRemoval`] carries what the ICE
 //!   metric (WP3) needs.
+//! * The ICE error metric ([`metric`], SPEC §4: channels, Eq. 5–9, memoryless or memory-based)
+//!   and intrinsic coarsening ([`simplify()`], paper Alg. 1, SPEC §5: the queue, targets, fixed
+//!   vertices, snapshots, the report), with [`SimplifyOptions::reference_compat`] for
+//!   differential tests against the reference (SPEC §12.2).
 //! * [`baseline`]: the extrinsic baseline of Sec. 8.4, quadric error metrics (Garland, Heckbert 1997)
 //!   with a closest-point projection map (SPEC §10.4).
 //! * [`curvature`]: principal curvatures (Panozzo, Puppo, Rocca 2010) for anisotropic
@@ -54,10 +58,12 @@ mod flatten;
 mod flip;
 pub mod formulas;
 mod mesh;
+pub mod metric;
 pub mod multigrid;
 mod output;
 pub mod prolongation;
 mod removal;
+mod simplify;
 mod undo;
 
 pub use error::{IemError, RemovalFailure, RemovalRefusal};
@@ -66,9 +72,17 @@ pub use flip::{DelaunayFlipReport, FlippedEdge};
 pub use mesh::{
     ANGLE_CHECK_TOLERANCE, Certificate, CoarseMesh, CoarseMeshOptions, InputPoint, PointLocation,
 };
+pub use metric::{
+    BoundaryFrames, Channel, ChannelSource, ChannelState, ChannelWeights, FlatRule, Frames,
+    MetricOptions,
+};
 pub use output::{CoarseOutput, CoarsePoint, FaceColouring};
 pub use prolongation::{
     C64, ComplexSparse, FineFrames, FineNeighbour, ProlongationError, VectorProlongationReport,
     normalize, unnormalize,
 };
 pub use removal::{NeighbourChange, PreparedRemoval, RemovalKind, RemovalReport};
+pub use simplify::{
+    ComponentCount, KeyCheck, ReferenceCompat, RemovalRecord, Requeue, SimplifyOptions,
+    SimplifyReport, SimplifyTimings, Snapshot, StopReason, Target, refusal_name, simplify,
+};
