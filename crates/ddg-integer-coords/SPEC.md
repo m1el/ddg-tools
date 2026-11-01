@@ -991,7 +991,11 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   and refuses vertices on fixed edges and boundary vertices, `ic:1603-1714`). Refinement (Chew)
   removes face-inserted vertices, so it rarely met this: its removal count on the 256 differential
   runs went from 2307 removed and 175 refused to 2304 removed and 0 refused, see §5. FlipOut never
-  removes vertices; its results are unchanged.
+  removes vertices; its results are unchanged. Thingi10k rerun on dc67888 (all 7745 meshes,
+  against the I30 run): refused removals of Alg. 10 line 20 1266 → 157 on integers and on the
+  signposts with Chew's rules alike; 99 meshes change (insertions 140 069 652 → 140 071 706 in
+  all, removals 184 706 → 184 596); no mesh changes status, the refinement certificate holds on
+  all; the signposts with Ruppert's rules (no removals) are identical. Table 1 is unchanged.
 * **I28** *Split point within rounding of a crossing (open).* The integer edge split refuses a
   point within rounding of a crossing (§4.5), so refinement skips such a face, where the signposts
   split and snap the place onto the input edge (1 of 256 differential runs, WP6). The alternative
