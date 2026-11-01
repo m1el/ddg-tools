@@ -489,6 +489,21 @@ Open:
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
   at run time with `RemovalStuck`.
 
+## Intrinsic Simplification (`crates/ddg-intrinsic-simplification`, branch `intrinsic-error-metrics`, 2026-11-01)
+
+"Surface Simplification using Intrinsic Error Metrics" (Liu, Gillespie, Chislett, Sharp, Jacobson,
+Crane 2023). Contract: `crates/ddg-intrinsic-simplification/SPEC.md` (decisions S1–S24, work
+packages WP0–WP11). Reference: the authors' MIT code, cloned at
+`../IntrinsicErrorMetric/ref/intrinsic-simplification` (708bc7c), mapped in
+`runs_tmp/iem/reference-map.md` (R1–R54: differences from the paper and defects), with a headless
+driver (`runs_tmp/iem/reference-driver.md`). Scope (the user's choice): the full method plus the
+applications, the multigrid hierarchy and cMCF, anisotropic coarsening, the evaluation with a QEM
+baseline; Blender: a coarse-mesh view.
+
+* Landed: the contract and the crate skeleton.
+* In progress: WP0/WP1 (data model, flips, tracking), WP10 (Lean tiers A/B), the exact distance on
+  Δ-complexes and the QEM baseline.
+
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
