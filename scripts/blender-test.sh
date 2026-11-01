@@ -22,6 +22,9 @@
 # 3f. blender/tests/test_geodesic.py runs the same way (Geodesic Path in every mode, Straighten Seams,
 #    Show triangulation, replacement, the mesh unchanged, errors; log
 #    runs_tmp/blender-test-geodesic.log), in parallel with 3b.
+# 3g. blender/tests/test_simplify.py runs the same way (Intrinsic Simplify: attributes, vertex group,
+#    colours by coarse face, fixed vertices, refinement, errors; log
+#    runs_tmp/blender-test-simplify.log), in parallel with 3b.
 # 4. blender/tests/ui_smoke.py runs in a windowed Blender on a private virtual display
 #    (xvfb-run): operator from the viewport, redo panel, menus, undo and redo. Skipped with a
 #    notice when xvfb-run is not installed, or with --no-ui.
@@ -119,6 +122,11 @@ geo_log="$root/runs_tmp/blender-test-geodesic.log"
     --python "$root/blender/tests/test_geodesic.py" -- --module "$module" \
     "${only[@]}" > "$geo_log" 2>&1 &
 geo_pid=$!
+sim_log="$root/runs_tmp/blender-test-simplify.log"
+"$BLENDER" -b --factory-startup --python-exit-code 1 \
+    --python "$root/blender/tests/test_simplify.py" -- --module "$module" \
+    "${only[@]}" > "$sim_log" 2>&1 &
+sim_pid=$!
 cut_failed=0
 for i in "${!variants[@]}"; do
     tri="${variants[$i]}"
@@ -154,6 +162,14 @@ echo "geodesic tests: $(grep -E '^RESULT' "$geo_log")"
 grep -E '^(FAIL|  failed|INFO)' "$geo_log" || true
 if [ "$geo_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$geo_log"; then
     echo "Blender geodesic tests FAILED (exit status $geo_status); see $geo_log" >&2
+    cut_failed=1
+fi
+sim_status=0
+wait "$sim_pid" || sim_status=$?
+echo "simplify tests: $(grep -E '^RESULT' "$sim_log")"
+grep -E '^(FAIL|  failed|INFO)' "$sim_log" || true
+if [ "$sim_status" != 0 ] || ! grep -q '^ALL TESTS PASSED$' "$sim_log"; then
+    echo "Blender simplify tests FAILED (exit status $sim_status); see $sim_log" >&2
     cut_failed=1
 fi
 rep_status=0

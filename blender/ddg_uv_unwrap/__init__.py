@@ -15,7 +15,9 @@ Developable Seams + UV). Repulsive curves: Yu, Schumacher, Crane, Repulsive Curv
 flow and an N-steps flow of edge meshes and Curve objects. Show Intrinsic Refinement: Gillespie, Sharp, Crane, Integer
 Coordinates for Intrinsic Geometry Processing (2021), Fig. 12; Sharp, Soliman, Crane (2019).
 Geodesic Path, Straighten Seams: Sharp, Crane, You Can Find Geodesic Paths in Triangle Meshes by
-Just Flipping Edges (2020).
+Just Flipping Edges (2020). Intrinsic Simplify: Liu, Gillespie, Chislett, Sharp, Jacobson, Crane,
+Surface Simplification using Intrinsic Error Metrics (2023); the authors' MIT reference code
+(Copyright (c) 2023 Hsueh-Ti Derek Liu) is credited in the crate ddg-intrinsic-simplification.
 """
 
 import bpy
@@ -29,7 +31,7 @@ from .developable_operator import (
 )
 from .intrinsic_operator import MESH_OT_ddg_show_intrinsic_refinement
 from .operator import UV_OT_ddg_conformal_unwrap
-from . import geodesic_operator, repulsive_operator
+from . import geodesic_operator, repulsive_operator, simplify_operator
 from .sphere_operator import OBJECT_OT_ddg_map_to_sphere
 
 _CUT_OPERATORS = (UV_OT_ddg_cut_start, UV_OT_ddg_cut_flow, UV_OT_ddg_cut_apply)
@@ -104,9 +106,11 @@ def register():
     bpy.types.VIEW3D_MT_edit_mesh.append(_draw_intrinsic_entry)
     repulsive_operator.register()
     geodesic_operator.register()
+    simplify_operator.register()
 
 
 def unregister():
+    simplify_operator.unregister()
     geodesic_operator.unregister()
     repulsive_operator.unregister()
     bpy.types.VIEW3D_MT_edit_mesh.remove(_draw_intrinsic_entry)

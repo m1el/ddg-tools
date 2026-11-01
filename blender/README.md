@@ -821,6 +821,46 @@ Delaunay shows few or no new vertices; jitter the vertices to see flips and inse
 Tests: `blender/tests/test_intrinsic.py` (11 tests, run by `scripts/blender-test.sh` against the
 installed extension; log `runs_tmp/blender-test-intrinsic.log`).
 
+## Intrinsic Simplify
+
+**Intrinsic Simplify**, `bpy.ops.object.ddg_intrinsic_simplify`; Liu, Gillespie, Chislett, Sharp,
+Jacobson, Crane, *Surface Simplification using Intrinsic Error Metrics*, ACM TOG 42(4), 2023
+(crate `ddg-intrinsic-simplification`, `ddg_tools.simplify`; `ddg_uv_unwrap/simplify_operator.py`).
+
+- 3D viewport: **Object** menu, **Mesh** menu (Edit mode) and the sidebar panel **DDG > Intrinsic
+  Simplify**. Works on the active mesh object; the mesh is triangulated as Blender does it.
+- A **coarse-mesh view**: the mesh is simplified by intrinsic vertex removal with the intrinsic
+  error metric, but its geometry is never changed (the coarse mesh is an intrinsic triangulation
+  of the same surface). One point per face of the tessellation, the centroid, is tracked through
+  the removals and the result is written to the mesh:
+  - the corner color attribute **`IntrinsicSimplifyFaces`**: every face takes the color of the
+    coarse face its centroid lands in (Fig. 1 of the paper). The coarse faces are colored greedily
+    so that faces sharing a vertex differ, from a fixed 12-color palette that is cycled;
+    deterministic. An n-gon is colored by the triangles Blender splits it into;
+  - the face attribute **`IntrinsicSimplifyFaceId`** (int): the coarse face id (its first triangle
+    for an n-gon);
+  - the vertex group **`IntrinsicSimplifyVertices`** (weight 1): the vertices that stay.
+  Set the viewport color to *Attribute* to see the colors (as for Show Developability, the
+  operator does not change the viewport). Running again overwrites the attributes and the group.
+- The report is a line in the info area (vertex counts, removals by kind, colors, seconds) and
+  custom properties `ddg_simplify_*` of the mesh (counts, the stop reason, the options).
+
+| property | Python name | default | meaning |
+|----------|-------------|---------|---------|
+| Target | `target_mode` | Percent | `PERCENT` or `COUNT` |
+| Percent | `percent` | 10 | percentage of the vertices kept |
+| Vertices | `count` | 100 | vertices kept with `COUNT` |
+| Area Weight | `area_weight` | 0 | `w` of `mixture(w)`: 0 keeps curvature (the paper's metric), 1 keeps area |
+| Memory | `memory` | on | the memory-based metric; off: the memoryless one |
+| Fix Selected Vertices | `fix_selected` | off | the vertices selected (as stored) stay |
+| Refine Before / After | `refine_before`, `refine_after` | off | Delaunay refinement before simplifying (Fig. 12) and of the coarse mesh at the end (Fig. 13); inserted vertices are not in the group |
+| Representation | `representation` | Integer Coordinates | for the refinements |
+
+Errors (empty mesh, non-manifold mesh with the edge and its faces, a target the library
+refuses, an attribute of the same name with another type) are reported, not raised, and make
+nothing. Tests: `blender/tests/test_simplify.py` (run by `scripts/blender-test.sh`; log
+`runs_tmp/blender-test-simplify.log`).
+
 ## Geodesic Path and Straighten Seams
 
 Sharp, Crane, *You Can Find Geodesic Paths in Triangle Meshes by Just Flipping Edges*, ACM TOG
@@ -891,6 +931,7 @@ Tests: `blender/tests/test_geodesic.py` (run by `scripts/blender-test.sh`; log
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
 | `ddg_uv_unwrap/intrinsic_operator.py`, `intrinsic_draw.py` | Show Intrinsic Refinement; the reusable drawing of intrinsic edges |
+| `ddg_uv_unwrap/simplify_operator.py` | Intrinsic Simplify (the coarse-mesh view: color attribute, face ids, vertex group) and its panel |
 | `ddg_uv_unwrap/geodesic_operator.py` | Geodesic Path (Path, Smooth, Loop, Bezier), Straighten Seams, the panel |
 | `ddg_uv_unwrap/core.py` | mesh to buffers, the call into `ddg_tools`, UVs and seams back to the mesh |
 | `tests/` | the tests described above |
