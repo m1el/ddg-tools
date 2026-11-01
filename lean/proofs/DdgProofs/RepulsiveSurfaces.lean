@@ -6,6 +6,7 @@ import DdgProofs.RepulsiveSurfaces.Metric
 import DdgProofs.RepulsiveSurfaces.Saddle
 import DdgProofs.RepulsiveSurfaces.Constraints
 import DdgProofs.RepulsiveSurfaces.BarnesHut
+import DdgProofs.RepulsiveSurfaces.Precond
 
 /-!
 # Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021)
