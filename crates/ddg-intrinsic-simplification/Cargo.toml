@@ -10,6 +10,5 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
-
-[dev-dependencies]
+# The exact geodesic distance on a Δ-complex (SPEC S20) for the applications of §10.1.
 ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }

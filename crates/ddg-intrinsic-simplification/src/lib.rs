@@ -48,9 +48,12 @@
 //!   the coarse faces ([`CoarseOutput::colour_faces`]).
 //! * [`anisotropy`]: anisotropic edge-length scaling from principal directions (paper Sec. 8.6.2,
 //!   SPEC §8) and the coarse mesh of the scaled metric.
+//! * [`applications`] (WP6, SPEC §10.1): Poisson, single-source geodesic distance (exact and heat),
+//!   all pairs, Voronoi and the exponential map on the coarse mesh, prolongated with `P`.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
 pub mod anisotropy;
+pub mod applications;
 pub mod baseline;
 pub mod curvature;
 mod error;

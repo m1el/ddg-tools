@@ -93,3 +93,36 @@ coarse triangles are isotropic in the scaled metric, hence **elongated across `u
 gives triangles long along the minimum direction (a cylinder's axis). Study:
 `cargo run --release -p ddg-intrinsic-simplification --example anisotropy_study -- MESH.obj
 max|min 300 0 0.2 0.4 0.6`; tests: `tests/anisotropy.rs`. Numbers: SPEC §8, "As built (WP8)".
+
+## Applications on the coarse mesh (WP6; SPEC §10.1)
+
+`applications::CoarseApplications::new(&CoarseMesh)` compacts the mesh and builds `P`, the coarse
+cotan Laplacian `L̄` and lumped mass `M̄` (from the lengths, per halfedge, safe for Δ-complexes:
+`CoarseOutput::cotan_laplacian` / `lumped_mass`). On it:
+
+* **Poisson** (Fig. 21): `PoissonSolver` solves `L x = b` with Dirichlet values or, on a closed
+  surface, the mean-zero problem (compatible right-hand side, `M`-mean-zero solution); it takes any
+  `L`, `M`, so the fine problem uses the same code. `poisson(f̄, fixed, values)` solves
+  `L̄ x̄ = M̄ f̄` and returns `x = P x̄`. Fine data are restricted pointwise (`sample`) or as a load
+  (`restrict_load`, `b̄ = Pᵀ M f`).
+* **Geodesic distance** (Fig. 22, 23): the source (a tracked point: a coarse vertex or a point of
+  a coarse face) goes to `ddg_intrinsic_apps::exact::exact_distance_complex` on the coarse
+  Δ-complex (`geodesic_exact`), or through `CoarseHeat`, the heat method reimplemented for a
+  Δ-complex with lengths (the heat solver of `ddg-intrinsic-apps` needs positions and an
+  `IntrinsicTriangulation`); the result is prolongated with `P`.
+* **All pairs** (Fig. 24): `all_pairs(pool, ..)` is `D̄` (one exact run per coarse vertex, over a
+  `ThreadPool`, bitwise independent of the thread count); `prolongate_rows` / `prolongate_dense`
+  evaluate `D̃ = P D̄ Pᵀ`.
+* **Voronoi** (Fig. 25): `voronoi(sources, pool, ..)` labels the fine vertices by the nearest source
+  in the prolongated exact distances (and the coarse vertices by the coarse ones).
+* **Exponential map** (Sec. 8.5.4): `exp_map_face` / `exp_map_vertex` trace the straightest geodesic
+  on the coarse mesh by unfolding faces; at a vertex the ray continues by the equal-angle rule. The
+  result is a coarse point (the map is fine → coarse, S21), reversible.
+* `greedy_coarsening(&mut CoarseMesh, target)` is a stand-in removal order (smallest memoryless
+  cost) for tests and the example until `simplify` is merged; **numbers measured with it are not
+  those of the ICE order**.
+
+Tests: `cargo test --release -p ddg-intrinsic-simplification --test applications`. Example (errors
+and speedups against the fine solutions, one row per coarse size):
+`cargo run --release -p ddg-intrinsic-simplification --example applications -- MESH.obj
+[--fractions 0.5,0.1,0.02]`; to rerun with ICE, replace `make_coarse` in the example.
