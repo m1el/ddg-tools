@@ -1,0 +1,4 @@
+case rs-strip-collapse-link
+task remesh-ops
+status error LinkCondition (2, 3) is an interior edge between two boundary vertices
+end

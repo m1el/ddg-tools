@@ -1,0 +1,4 @@
+case rs-error-same-barycenter
+task energy
+status error NonFiniteEnergy faces (0, 1) have the same barycenter
+end

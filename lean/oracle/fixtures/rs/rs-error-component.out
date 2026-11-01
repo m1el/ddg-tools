@@ -1,0 +1,4 @@
+case rs-error-component
+task constraints
+status error ConstraintOutOfRange component 3, 1 components
+end

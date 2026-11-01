@@ -1,0 +1,4 @@
+case rs-error-volume-mobius
+task constraints
+status error NonOrientable component 0 is not consistently oriented: edge (0, 1) is traversed in the same direction by faces 0 and 15
+end

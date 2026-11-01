@@ -1,0 +1,4 @@
+case rs-error-nonmanifold
+task energy
+status error NonManifoldEdge edge (0, 1) is shared by 3 faces: 0, 1, 2
+end

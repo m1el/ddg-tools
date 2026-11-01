@@ -1,0 +1,4 @@
+case rs-patch-collapse-both-pinned
+task remesh-ops
+status error BothPinned both ends of (5, 6) are pinned
+end

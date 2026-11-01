@@ -1,0 +1,4 @@
+case rs-error-unreferenced
+task energy
+status error UnreferencedVertex vertex 4
+end

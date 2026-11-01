@@ -1,0 +1,4 @@
+case rs-patch-flip-boundary
+task remesh-ops
+status error BoundaryEdge (0, 1) has 1 face(s); only interior edges flip
+end
