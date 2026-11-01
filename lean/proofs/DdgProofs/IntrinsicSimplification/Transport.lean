@@ -16,7 +16,7 @@ is the plane vector `ρ v`.
   to the centre of mass of `α m_i` at `c_i` and `m_j` at `c_j` (`eq7_centerOfMass`), which is the
   centre of mass of the combined distributions (`centerOfMass_combine`). Eq. 8, written in the
   frames (`R_ij = ρ_j⁻¹ ρ_i`, `e_ji = ρ_j⁻¹(x_i − x_j)`), is Eq. 7 (`eq8_eq_eq7`); with SPEC §4.3's
-  `vectorUpdate` (`t̃_j = t_j` when `m̃_j = 0`) the same holds whenever `m̃_j > 0`.
+  `vectorUpdate` (`t̃_j = t_j` unless `m̃_j > 0`) the same holds whenever `m̃_j > 0`.
 * **`iem-transport-rotation`** — in a flat region, if the edge `ij` leaves `i` at the angle `φ_ij`
   of the frame of `i` and arrives at `j` from the angle `φ_ji` of the frame of `j` (it leaves `j`
   in the opposite direction), then `ρ_j⁻¹ ρ_i = e^{i(φ_ji + π − φ_ij)} = R_ij`, so `R_ij` maps the
@@ -103,11 +103,11 @@ theorem eq8_eq_eq7 {a mi mj : ℝ} {ρi ρj : ℂ} (hj : ρj ≠ 0) (xi xj ti tj
   field_simp
 
 /-- SPEC §4.3's update (`vectorUpdate`, Eq. 8 with `R` and `e` given) is Eq. 7's formula when
-`m̃_j ≠ 0`. -/
-theorem vectorUpdate_eq_eq7 {mj a mi : ℝ} (h : massUpdate mj a mi ≠ 0) (R ti e tj : ℂ) :
+`m̃_j > 0`. -/
+theorem vectorUpdate_eq_eq7 {mj a mi : ℝ} (h : 0 < massUpdate mj a mi) (R ti e tj : ℂ) :
     vectorUpdate mj a mi R ti e tj = eq7 a mi mj (R * ti) tj e := by
   unfold vectorUpdate eq7
-  simp only [h, ite_false]
+  simp only [h, ite_true]
   unfold massUpdate
   push_cast
   ring_nf

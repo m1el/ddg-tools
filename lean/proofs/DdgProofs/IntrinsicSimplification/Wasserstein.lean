@@ -42,11 +42,12 @@ open Finset
 /-- Eq. 5: `m̃_j = m_j + α_j m_i`. -/
 def massUpdate (mj a mi : ℝ) : ℝ := mj + a * mi
 
-/-- Eq. 8 with the convention of SPEC §4.3 (`t̃_j = t_j` when `m̃_j = 0`):
+/-- Eq. 8 with the convention of SPEC §4.3 (`t̃_j = t_j` unless `m̃_j > 0`):
 `t̃_j = (α_j m_i (R t_i + e_ji) + m_j t_j)/m̃_j`. -/
 def vectorUpdate (mj a mi : ℝ) (R ti e tj : ℂ) : ℂ :=
-  if massUpdate mj a mi = 0 then tj
-  else ((a * mi : ℝ) * (R * ti + e) + (mj : ℂ) * tj) / (massUpdate mj a mi : ℂ)
+  if 0 < massUpdate mj a mi then
+    ((a * mi : ℝ) * (R * ti + e) + (mj : ℂ) * tj) / (massUpdate mj a mi : ℂ)
+  else tj
 
 variable {ι : Type*} [Fintype ι]
 
@@ -63,9 +64,11 @@ theorem memorylessCost_eq {mi : ℝ} (hmi : 0 ≤ mi) {m a ℓ : ι → ℝ} (hm
   have hM : 0 ≤ massUpdate (m j) (a j) mi := add_nonneg (hm j) (mul_nonneg (ha j) hmi)
   unfold vectorUpdate
   split_ifs with h
-  · rw [h, zero_mul]
+  swap
+  · have h0 : massUpdate (m j) (a j) mi = 0 := le_antisymm (not_lt.mp h) hM
+    rw [h0, zero_mul]
     have : a j * mi = 0 := by
-      unfold massUpdate at h
+      unfold massUpdate at h0
       have := mul_nonneg (ha j) hmi
       linarith [hm j]
     rw [this, zero_mul]
