@@ -190,7 +190,12 @@ Machine-checked: `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-m
   `ρ_ij = (φ_ji + π) − φ_ij` (VHM Eq. 10; `app-vector-transport`), `r_ij = e^{inρ_ij}`. Complex
   matrices are stored in real form (`a + ib` as `[[a, −b], [b, a]]`) so that the workspace's
   real sparse Cholesky applies. `TangentField::input_vectors_3d` puts one of the `n` vectors in
-  the plane of the input face its direction points into.
+  the plane of the input face its direction points into. *Representations* (Integer
+  Coordinates I26): the frames are those of the signposts on either representation; integer
+  coordinates compute them (`vector::TangentFrames`, Integer Coordinates SPEC §4.12,
+  `ic-input-aligned-frame`), equal to the stored signposts to rounding on the same
+  triangulation; the signposts' results are bitwise those of the signpost-only code
+  (`tests/vector_pins.rs`).
 * **N41** *Boundary frames.* At an interior vertex the signposts are normalized to `2π`. At a
   boundary vertex the tangent angles are **not** normalized (`s = 1`, GODF Eq. 11): angle 0 is
   the boundary halfedge leaving the vertex, `Θ` the boundary edge arriving. Normalizing by

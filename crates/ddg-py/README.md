@@ -494,20 +494,23 @@ steiner_tree(positions, triangles, *, intrinsic=True, steiner_points=True,
              representation="integer")
                                                  # -> .points, .offsets, .report  (Sec. 5.1)
 smoothest_direction_field(positions, triangles, *, n=1, triangulation="delaunay",
-                          laplacian="fem", min_angle_degrees=25.0)
+                          laplacian="fem", min_angle_degrees=25.0, representation="integer")
                   # -> .vectors, .singularity_points, .singularity_indices, .report (Sec. 5.5)
 adaptive_solve(positions, triangles, problem, *, source=0, time=None, max_vertices=20000,
                bulk=0.5, min_angle_degrees=25.0, representation="integer")
                                                   # -> .values, .n_components, .report (Sec. 5.4)
 ```
 
-`representation=` (`geodesic_distance`, `steiner_tree`, `adaptive_solve`) is `"integer"` (the
+`representation=` (`geodesic_distance`, `steiner_tree`, `smoothest_direction_field`,
+`adaptive_solve`) is `"integer"` (the
 default: integer coordinates, Gillespie, Sharp, Crane 2021) or `"signposts"` (Sharp, Soliman,
 Crane 2019); the results agree to rounding, bitwise on the tested meshes, see
 `crates/ddg-intrinsic-apps/README.md`. Integers are the default since the Thingi10k evaluation
 (Integer Coordinates WP10, Q3) passed on all 7745 meshes.
-`smoothest_direction_field` stays on signposts (it needs input-aligned tangent frames, contract
-I26).
+`smoothest_direction_field` needs input-aligned tangent frames: signposts store them, integer
+coordinates compute them from the roundabouts and the straight segments of the edges over the
+input mesh (contract I26, Integer Coordinates SPEC §4.12); the fields agree to rounding and the
+singularities exactly (`crates/ddg-intrinsic-apps/tests/vector_representation.rs`).
 
 ### Geodesics by edge flips (`geodesic_path`, `geodesic_network`, `geodesic_bezier`)
 

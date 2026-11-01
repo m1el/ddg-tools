@@ -9,11 +9,13 @@ use std::time::Instant;
 
 use ddg_core::{Geometry, TriMesh};
 use ddg_integer_coords::IntegerTriangulation;
-use ddg_intrinsic::{IntrinsicTriangulation, RefineOptions, SurfacePoint};
-use ddg_intrinsic_apps::representation::Representation;
+use ddg_intrinsic::{
+    IntrinsicTriangulation, RefineOptions, RefineRules, SurfacePoint, Triangulation,
+};
 use ddg_intrinsic_apps::amr::{self, AmrOptions, AmrStatus, Problem};
+use ddg_intrinsic_apps::representation::{InputPoints, Representation};
 use ddg_intrinsic_apps::vector::{
-    self, ConnectionLaplacian, DirectionFieldOptions, EigenStatus,
+    self, ConnectionLaplacian, DirectionFieldOptions, EigenStatus, TangentFrames,
 };
 
 use crate::contract::ReportValue;
@@ -93,15 +95,14 @@ fn bad_option(name: &'static str, value: String, requirement: &'static str) -> U
     .into()
 }
 
-/// Which triangulation a computation runs on.
-fn triangulation(
-    mesh: &TriMesh,
-    geometry: &Geometry,
+/// Makes `tri` the triangulation a computation runs on: the input, its intrinsic Delaunay
+/// triangulation, or its refinement by the signposts' rules (`RefineRules::Ruppert`, which is
+/// `IntrinsicTriangulation::refine`), the same operations on either representation.
+fn retriangulate<T: Triangulation>(
+    tri: &mut T,
     which: &str,
     min_angle_degrees: f64,
-) -> Result<IntrinsicTriangulation, UnwrapError> {
-    let mut tri =
-        IntrinsicTriangulation::new(mesh, geometry).map_err(|e| UnwrapError::Mesh(e.to_string()))?;
+) -> Result<(), UnwrapError> {
     let solve = |e: ddg_intrinsic::IntrinsicError| UnwrapError::Solve(e.to_string());
     match which {
         "input" => {}
@@ -109,7 +110,8 @@ fn triangulation(
             tri.flip_to_delaunay(&Default::default()).map_err(solve)?;
         }
         "refined" => {
-            tri.refine(&refine_options(min_angle_degrees)?).map_err(solve)?;
+            tri.refine_with_rules(&refine_options(min_angle_degrees)?, RefineRules::Ruppert)
+                .map_err(solve)?;
         }
         other => {
             return Err(bad_option(
@@ -119,7 +121,7 @@ fn triangulation(
             ));
         }
     }
-    Ok(tri)
+    Ok(())
 }
 
 fn refine_options(min_angle_degrees: f64) -> Result<RefineOptions, UnwrapError> {
@@ -162,6 +164,9 @@ pub struct FieldOptions {
     pub laplacian: String,
     /// The angle bound of "refined", in degrees.
     pub min_angle_degrees: f64,
+    /// `"integer"` (default) or `"signposts"`: the representation of the intrinsic
+    /// triangulation (Integer Coordinates I26: input-aligned frames on both).
+    pub representation: String,
 }
 
 /// The smoothest field.
@@ -195,14 +200,40 @@ pub fn direction_field(mesh: &TriangleArrays, options: &FieldOptions) -> Result<
             return Err(bad_option("laplacian", other.to_string(), "must be \"fem\" or \"fd\""));
         }
     };
+    let representation = crate::intrinsic_apps::parse_representation(&options.representation)?;
     let (tri_mesh, geometry, positions) = mesh.build()?;
-    let tri = triangulation(&tri_mesh, &geometry, &options.triangulation, options.min_angle_degrees)?;
     let field_options = DirectionFieldOptions {
         n_sym: options.n,
         laplacian,
         ..Default::default()
     };
-    let (field, report) = vector::smoothest_field(&tri, &field_options)
+    let mesh_error = |e: String| UnwrapError::Mesh(e);
+    match representation {
+        Representation::Signposts => {
+            let mut tri = IntrinsicTriangulation::new(&tri_mesh, &geometry)
+                .map_err(|e| mesh_error(e.to_string()))?;
+            retriangulate(&mut tri, &options.triangulation, options.min_angle_degrees)?;
+            field_on(&tri, &tri_mesh, &positions, &field_options, "signposts", start)
+        }
+        Representation::Integer => {
+            let mut tri = IntegerTriangulation::new(&tri_mesh, &geometry)
+                .map_err(|e| mesh_error(e.to_string()))?;
+            retriangulate(&mut tri, &options.triangulation, options.min_angle_degrees)?;
+            field_on(&tri, &tri_mesh, &positions, &field_options, "integer", start)
+        }
+    }
+}
+
+/// [`direction_field`] on a triangulation of either representation.
+fn field_on<T: TangentFrames + InputPoints>(
+    tri: &T,
+    tri_mesh: &TriMesh,
+    positions: &[[f64; 3]],
+    field_options: &DirectionFieldOptions,
+    representation: &'static str,
+    start: Instant,
+) -> Result<FieldOutput, UnwrapError> {
+    let (field, report) = vector::smoothest_field(tri, field_options)
         .map_err(|e| UnwrapError::Solve(e.to_string()))?;
     let normalized = vector::TangentField {
         n_sym: field.n_sym,
@@ -213,19 +244,19 @@ pub fn direction_field(mesh: &TriangleArrays, options: &FieldOptions) -> Result<
             .collect(),
     };
     let vectors = normalized
-        .input_vectors_3d(&tri, &positions)
+        .input_vectors_3d(tri, positions)
         .map_err(|e| UnwrapError::Solve(e.to_string()))?;
-    let sing = vector::singularities(&tri, &field).map_err(|e| UnwrapError::Solve(e.to_string()))?;
+    let sing = vector::singularities(tri, &field).map_err(|e| UnwrapError::Solve(e.to_string()))?;
     let mut singularity_points = Vec::with_capacity(3 * sing.faces.len());
     let mut singularity_indices = Vec::with_capacity(sing.faces.len());
     for s in &sing.faces {
         let place = tri
-            .point_on_input(SurfacePoint::Face {
+            .locate_on_input(SurfacePoint::Face {
                 face: s.face,
                 bary: [1.0 / 3.0; 3],
             })
             .map_err(|e| UnwrapError::Solve(e.to_string()))?;
-        singularity_points.extend(position_of(&tri_mesh, &positions, place));
+        singularity_points.extend(position_of(tri_mesh, positions, place));
         singularity_indices.push(s.index);
     }
     let report = vec![
@@ -243,9 +274,10 @@ pub fn direction_field(mesh: &TriangleArrays, options: &FieldOptions) -> Result<
         ("eigenvalue", ReportValue::Float(report.eigenvalue)),
         ("energy", ReportValue::Float(report.energy)),
         ("residual", ReportValue::Float(report.residual)),
-        ("n_triangulation_vertices", ReportValue::Int(tri.n_vertices() as i64)),
+        ("n_triangulation_vertices", ReportValue::Int(tri.complex().n_vertices() as i64)),
         ("index_sum", ReportValue::Int(sing.index_sum)),
-        ("euler_characteristic", ReportValue::Int(tri.euler_characteristic())),
+        ("euler_characteristic", ReportValue::Int(tri.complex().euler_characteristic())),
+        ("representation", ReportValue::Text(representation.to_string())),
         ("seconds", ReportValue::Float(start.elapsed().as_secs_f64())),
     ];
     Ok(FieldOutput {
@@ -422,6 +454,7 @@ mod tests {
                     triangulation: "refined".to_string(),
                     laplacian: "fem".to_string(),
                     min_angle_degrees: 25.0,
+                    representation: "integer".to_string(),
                 },
             )
             .unwrap();
@@ -450,6 +483,7 @@ mod tests {
             triangulation: "nope".to_string(),
             laplacian: "fem".to_string(),
             min_angle_degrees: 25.0,
+            representation: "integer".to_string(),
         };
         let e = direction_field(&octahedron(), &opts).unwrap_err();
         assert!(e.to_string().contains("triangulation"), "{e}");
@@ -464,6 +498,40 @@ mod tests {
         };
         let e = adaptive(&octahedron(), &opts).unwrap_err();
         assert!(e.to_string().contains("source"), "{e}");
+    }
+
+    #[test]
+    fn both_representations_give_the_same_field() {
+        for triangulation in ["input", "delaunay", "refined"] {
+            for n in [1u32, 4] {
+                let mut opts = FieldOptions {
+                    n,
+                    triangulation: triangulation.to_string(),
+                    laplacian: "fem".to_string(),
+                    min_angle_degrees: 25.0,
+                    representation: "signposts".to_string(),
+                };
+                let a = direction_field(&octahedron(), &opts).unwrap();
+                opts.representation = "integer".to_string();
+                let b = direction_field(&octahedron(), &opts).unwrap();
+                assert_eq!(a.singularity_indices, b.singularity_indices);
+                for (x, y) in a.singularity_points.iter().zip(&b.singularity_points) {
+                    assert!((x - y).abs() < 1e-9, "{triangulation} n {n}: {x} {y}");
+                }
+                let eigenvalue = |o: &FieldOutput| {
+                    o.report.iter().find(|(k, _)| *k == "eigenvalue").map(|(_, v)| v.clone())
+                };
+                match (eigenvalue(&a), eigenvalue(&b)) {
+                    (Some(ReportValue::Float(x)), Some(ReportValue::Float(y))) => {
+                        assert!((x - y).abs() < 1e-9 * x.abs(), "{x} {y}");
+                    }
+                    other => panic!("{other:?}"),
+                }
+                opts.representation = "nope".to_string();
+                let e = direction_field(&octahedron(), &opts).unwrap_err();
+                assert!(e.to_string().starts_with("representation"), "{e}");
+            }
+        }
     }
 
     #[test]

@@ -833,13 +833,17 @@ def smoothest_direction_field(
     triangulation: Literal["delaunay", "refined", "input"] = "delaunay",
     laplacian: Literal["fem", "fd"] = "fem",
     min_angle_degrees: float = 25.0,
+    representation: Literal["integer", "signposts"] = "integer",
 ) -> DirectionFieldResult:
     """The smoothest ``n``-direction field (``n`` = 1 vectors, 2 lines, 4 crosses; Knöppel,
     Crane, Pinkall, Schröder 2013) on the intrinsic Delaunay triangulation of the mesh
     (``"delaunay"``), its intrinsic Delaunay refinement to ``min_angle_degrees``
     (``"refined"``) or the mesh itself (``"input"``), with the finite element (``"fem"``) or
-    finite difference (``"fd"``) connection Laplacian. Raises ``InputError``, ``MeshError``
-    and ``SolveError``."""
+    finite difference (``"fd"``) connection Laplacian. ``representation``: integer coordinates
+    (the default; input-aligned frames computed from the integers, Integer Coordinates I26) or
+    signposts (the stored angles); the field agrees to rounding, the singularities exactly.
+    ``report["representation"]`` says which ran. Raises ``InputError``, ``MeshError`` and
+    ``SolveError``."""
 
 @final
 class AdaptiveResult:

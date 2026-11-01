@@ -443,7 +443,8 @@ prescribed boundary vectors, the harmonic field with the finite difference conne
 Laplacian satisfies the vector maximum principle on the iDT (every vector in the convex cone of
 its transported neighbours) and may not on the input.
 
-`connection_matrices` builds both Laplacians from the signposts (transport
+`connection_matrices` builds both Laplacians from the signposts, or from the same
+input-aligned frames computed on integer coordinates (`vector::TangentFrames`, below; transport
 `ρ_ij = φ_ji + π − φ_ij`, SPEC N40 to N43), `smoothest_field` the smallest eigenvector by block
 inverse iteration (N44), `singularities` the indices, `harmonic_field` and
 `check_maximum_principle` the rest (N45).
@@ -527,9 +528,22 @@ Coordinates SPEC §13 Q3); the Python and Blender front ends follow it. Signpost
 (`Representation::Signposts`). This crate depends on `ddg-integer-coords`; the reverse dependency must
 not exist.
 
-Not generic, and why: `vector` (tangent fields and connection Laplacians) reads the stored
-input-aligned signpost frames, which `AngleFrames` are not (contract I26, open); `exact` works
-on the input mesh and has no triangulation.
+`vector` (tangent fields and connection Laplacians) is generic over `vector::TangentFrames`,
+the direction of every halfedge at its tail in the input-aligned frame of the tail: signposts
+borrow their stored angles (every bit as before, pinned by `tests/vector_pins.rs`); integer
+coordinates compute them from the roundabouts and the straight segments of the edges over the
+input mesh (`IntegerTriangulation::frame_directions`, Integer Coordinates SPEC §4.12, I26;
+`AngleFrames` are not input-aligned). The functions that cannot fail on signposts keep their
+signatures (`transport_angle`, `halfedge_directions`, `check_maximum_principle`) next to
+generic ones that can (`transport_angles`, `halfedge_directions_of`,
+`check_maximum_principle_of`). `tests/vector_representation.rs` (release; jittered icospheres,
+bumpy and sheared grids, sheared torus, polar disk, face, camelbad, spot; iDT and Ruppert
+refinement on both, 22 pairs with the same triangulation): directions and transport within
+`3.5e-11` rad (spot refined; `1e-13` or less on the others), stiffness matrices within `2.8e-11`
+relative, smoothest fields (`n` = 1, 2, 4, both Laplacians, 68 runs) within `5.7e-10` after
+aligning the phase with the same eigenvalues (relative `1e-14`) and **the same singular faces and
+indices in every run**, harmonic fields (120 runs) within `2e-13`, the same vertices outside the
+cone. `exact` works on the input mesh and has no triangulation.
 
 `tests/representation.rs` (release, jittered grid, jittered icosphere, sheared torus; Delaunay
 flipping and Ruppert refinement on both): connectivity equal; stiffness, lumped and Galerkin
@@ -586,7 +600,10 @@ solution difference of 0 at the input vertices.
   or the interior defects (with boundary); smoothest `n`-fields on spheres have index sum `2n`,
   and on a round sphere the minimal number of singularities; the vector maximum principle holds
   on the iDT; boundary values are interpolated along the boundary (a constant field on a flat
-  domain stays constant). Unit tests of `vector/knoeppel.rs`: Knöppel's mass entry and
+  domain stays constant). `tests/vector_pins.rs`: hashes of every bit the tangent fields
+  compute on signposts (9 triangulations), recorded before the code became generic;
+  `tests/vector_representation.rs`: the same on integer coordinates (above). Unit tests of
+  `vector/knoeppel.rs`: Knöppel's mass entry and
   diagonal, the flat limit (cotan matrix), the nine local entries against a quadrature of the
   model; of `vector/eigen.rs`: the Jacobi eigensolver of the Rayleigh–Ritz step.
 - Formula tags (`scripts/check-formulas.sh`): `app-heat-gradient`, `app-heat-divergence`,
