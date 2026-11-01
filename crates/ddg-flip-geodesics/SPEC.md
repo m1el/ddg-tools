@@ -719,7 +719,7 @@ To IC-SPEC (and, for R1, R3, R4, R5, IT-SPEC's crate through IC WP0):
 | F5 | Lean tiers A, B; oracle Alg. 1/2 and fixtures; `CITED.md` section | `lean/proofs/DdgProofs/FlipGeodesics/…`, `lean/oracle/DdgOracle/FlipGeodesics…` | this file | Opus |
 | F6 | Lean tiers C, D | `lean/proofs/DdgProofs/FlipGeodesics/Wedge/…` | F5 | Opus |
 | F7 | evaluation: Thingi10k both representations, exact distance, timings, benches, reference driver (Q2), MPZ/PSB (Q1) | `examples/fo_thingi.rs`, `benches/`, `scripts/fo-eval.sh` | F3, F4 | Sonnet |
-| F8 | Python and Blender (§13) | `crates/ddg-py/src/flip_geodesics.rs`, `blender/ddg_uv_unwrap/geodesic_operator.py`, `blender/tests/test_geodesic.py` | F3, F4 | Sonnet |
+| F8 | **done** (43bbe26, f789983, 9368c6b, f86fafe): Python and Blender (§13) | `crates/ddg-py/src/flip_geodesics.rs`, `blender/ddg_uv_unwrap/geodesic_operator.py`, `blender/tests/test_geodesic.py` | F3, F4 | Sonnet |
 | F9 | later: conforming refinement (§6.4, R5) | both intrinsic crates + `src/refine.rs` | F4, IC WP6 | Opus |
 
 F1–F3 run on signposts before the integer crate exists; the integer half of F3/F4 waits for IC

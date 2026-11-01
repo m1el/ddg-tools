@@ -402,9 +402,9 @@ Open:
   showcase uses its own scene; SPEC §17j).
 * `showcase/media/` is not committed.
 
-## Integer Coordinates and FlipOut (`crates/ddg-integer-coords`, `crates/ddg-flip-geodesics`, branch `integer-coordinates`, 2026-10-31)
+## Integer Coordinates and FlipOut (`crates/ddg-integer-coords`, `crates/ddg-flip-geodesics`, branch `integer-coordinates`, updated 2026-11-01)
 
-Contracts: `crates/ddg-integer-coords/SPEC.md` (decisions I1–I28) and
+Contracts: `crates/ddg-integer-coords/SPEC.md` (decisions I1–I30, work packages WP0–WP11) and
 `crates/ddg-flip-geodesics/SPEC.md` (F1–F30).
 
 Landed:
@@ -415,48 +415,59 @@ Landed:
     subdivision with `P₀`, `P₁` and point queries;
   * refinement (the paper's rules) and `L²` transfer;
   * `certify()`, and exact differential tests against the signposts;
+  * the Thingi10k evaluation (WP10): Table 1 on integers for 7745 of 7745 meshes, benches, the
+    reference demo built and compared, ported reference tests; I30 (refinement that did not
+    terminate on two meshes) resolved in a589919, 16210ca;
+  * consumers (WP11, Q3): integer coordinates are the default of `ddg-intrinsic-apps`, the Python
+    bindings and Blender since fc7e36b, and of `ddg-uv`, `CutSession` and the Blender cut since
+    I29; signposts stay an option;
+  * I27 (aa096cb): a vertex with a straight star (made by an edge split) where removal by flips is
+    stuck, and an inserted boundary vertex, are removed by merging the two halves
+    (`Complex::merge_edge`, the inverse of `split_edge`, IT N53; integers by
+    `ic-merge-edge-normal`, cited until tier C); both representations alike. Split vertices
+    stuck: 860 of 2588 right after the split → 0; after Delaunay flipping 1898 → 74, all at stars
+    with an edge from the vertex to itself;
+  * I29 (bb5f92c–e1ebbde, d5f9613): the export, the way back of segments and the optimal Delaunay
+    iteration on integer coordinates, written once over `Exportable` / `OdtMoves` (signposts
+    bitwise unchanged). The cut is the signposts' to rounding on every measured case; optimal
+    Delaunay costs 1.2–1.3× the signposts' (1b4ec07: a move inside one input face changes no
+    integer; 3.4–4.2× before; IC SPEC §4.10, §4.11);
 * FlipOut:
   * paths, loops and networks, waypoints and edge sets, extraction and the `T⁰` certificate;
   * on both representations, bitwise identical;
   * the shortening loop is within 0.97–1.42× of geometry-central's, with the same lengths on all
     4498 compared pairs;
-* I27 resolved (aa096cb): a vertex with a straight star (made by an edge split) where removal by flips is
-  stuck, and an inserted boundary vertex, are removed by merging the two halves
-  (`Complex::merge_edge`, the inverse of `split_edge`, IT N53; integers by `ic-merge-edge-normal`,
-  cited until tier C); both representations alike. Split vertices stuck: 860 of 2588 right after
-  the split → 0; after Delaunay flipping 1898 → 74, all at stars with an edge from the vertex to
-  itself;
 * Lean:
   * the integer formulas (tier A), the one-face model (tier B) and Thm. D.1 (B′);
   * the integer oracle with 23 golden fixtures.
 
+In progress (2026-11-01):
+* WP9: Lean tier C, the model of the whole triangulation, and the pending proofs below;
+* I26: input-aligned tangent frames on integer coordinates, so the tangent fields of
+  `ddg-intrinsic-apps` (the last consumer that is signposts-only) can switch;
+* I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
+  that face where the signposts split and snap (1 of 256 differential runs); the export and the
+  optimal Delaunay iteration split such an edge at `½ ± 2⁻¹⁶` instead (torus 5×3). Being changed
+  to snap the integer split to the crossing.
+
 Open:
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
   replacement puts on the path, where gc reads signposts (FlipOut SPEC §9.1).
-* I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
-  that face where the signposts split and snap (1 of 256 differential runs). Undecided whether to
-  snap to the crossing. The export and the optimal Delaunay iteration split such an edge at
-  `½ ± 2⁻¹⁶` instead (I29; torus 5×3).
-* I29 **done** (2026-11-01, bb5f92c, d3c3999, 0e6c3a6, 7bf6014, e1ebbde, and the docs commit after them):
-  the export, the way back of segments and the optimal Delaunay iteration on integer coordinates
-  (written once over `Exportable` / `OdtMoves`, signposts bitwise unchanged); `ddg-uv`, Python
-  `CutSession` and the Blender cut default to integer coordinates (`representation`). The cut is
-  the signposts' to rounding on every measured case; the optimal Delaunay setup costs 1.2–1.3× on
-  integers (3.4–4.2× before moves inside one input face skipped the arcs; IC SPEC §4.10, §4.11).
 * FlipOut R5: refinement still refuses constrained edges, so refinement that keeps FlipOut paths as
   edges (F9) cannot run.
 * Fig. 14: the trends are reproduced, but the factors are not (2.7× and 4.1× against the paper's
   11.5× and 28.1×), because the paper's random-mesh generator is not published (IC SPEC §10.2).
 * Signpost refinement is about 1 % slower (instruction count) since it was made generic (IT N51).
-* Not yet started:
-  * integer coordinates: WP9 (Lean tier C, the whole-triangulation model), WP10 (the Thingi10k
-    evaluation and the reference demo build), WP11 (consumers by default, Python, Blender "show
-    refinement"; tangent frames I26 to decide);
-  * FlipOut: F4 (Bézier, iCDT), F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
-    reference driver exists in `runs_tmp/fo-reference-driver/`), F8 (Python, Blender), F9.
+* Thingi10k leftovers: 7 face splits refused (`RecoverFailed`, meshes 551019 and 97660; 551019
+  ends at 21.17° with the default Delaunay test); 74 split vertices not removable (stars with a
+  self-edge, I27).
+* Not yet started (FlipOut): F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
+  reference driver exists in `runs_tmp/fo-reference-driver/`), F9. F4 (Bézier, iCDT) and F8
+  (Python, Blender) are done.
 * Pending formula ids (untagged in the code until their proofs land): `ic-roundabout-update`,
   `ic-identify-edge`, `ic-trace-terminates`, `ic-strip-intersection`,
-  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, and the 13 `fo-` ids.
+  `ic-extract-intrinsic-edge`, `ic-split-crossed-edge`, `ic-merge-edge-normal`, and the 13 `fo-`
+  ids.
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
   at run time with `RemovalStuck`.
 
