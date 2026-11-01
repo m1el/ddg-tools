@@ -1,5 +1,8 @@
 import DdgProofs.IntrinsicSimplification.Flatten
 import DdgProofs.IntrinsicSimplification.Monotone
+import DdgProofs.IntrinsicSimplification.Curvature
+import DdgProofs.IntrinsicSimplification.Interpolation
+import DdgProofs.IntrinsicSimplification.Removal
 
 /-!
 # Surface Simplification using Intrinsic Error Metrics (Liu, Gillespie, Chislett, Sharp, Jacobson, Crane, ACM TOG 42(4), 2023)
