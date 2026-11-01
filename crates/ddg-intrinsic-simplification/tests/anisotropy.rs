@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 //! Tests of the anisotropic coarsening (paper Sec. 8.6.2, Fig. 27; SPEC §8).
 
 mod common;

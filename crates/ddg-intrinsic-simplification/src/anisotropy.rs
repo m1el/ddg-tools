@@ -50,6 +50,8 @@
 //! naming the faces; with `true` the largest valid `τ' = min(τ, τ_max (1 − clamp_safety))` is
 //! used and reported ([`AnisotropyReport`]); the clamp is never silent.
 
+#![allow(clippy::needless_range_loop, clippy::neg_cmp_op_on_partial_ord)]
+
 use std::f64::consts::{PI, TAU};
 
 use ddg_core::geometry::{corner_angle, triangle_area};
