@@ -108,7 +108,10 @@ fn saddle_at_origin() {
     let _ = h;
     let m = mesh(&g);
     let o = nearest(&g, [0.0; 3]);
-    assert!(dot(g.positions[o], g.positions[o]) < 1e-12, "origin vertex exists");
+    assert!(
+        dot(g.positions[o], g.positions[o]) < 1e-12,
+        "origin vertex exists"
+    );
     let c = principal_curvatures(&m, &g.positions, &CurvatureOptions::default()).unwrap();
     // Normal +z (counter-clockwise from +z): z = x^2 curves toward the normal along x ...
     // the surface bends toward +z along x, i.e. concave seen from outside: k = -2 along x,
@@ -131,7 +134,11 @@ fn torus_inner_and_outer() {
     let c = principal_curvatures(&m, &g.positions, &opt).unwrap();
     // Outer equator: curvatures 1/small (meridian) and 1/(R + r) (parallel).
     let o = nearest(&g, [big + small, 0.0, 0.0]);
-    assert!((c.k_max[o] - 1.0 / small).abs() < 0.05 / small, "outer {}", c.k_max[o]);
+    assert!(
+        (c.k_max[o] - 1.0 / small).abs() < 0.05 / small,
+        "outer {}",
+        c.k_max[o]
+    );
     assert!(
         (c.k_min[o] - 1.0 / (big + small)).abs() < 0.04,
         "outer min {}",
@@ -139,7 +146,11 @@ fn torus_inner_and_outer() {
     );
     // Inner equator: saddle, 1/small and -1/(R - r).
     let i = nearest(&g, [big - small, 0.0, 0.0]);
-    assert!((c.k_max[i] - 1.0 / small).abs() < 0.05 / small, "inner {}", c.k_max[i]);
+    assert!(
+        (c.k_max[i] - 1.0 / small).abs() < 0.05 / small,
+        "inner {}",
+        c.k_max[i]
+    );
     assert!(
         (c.k_min[i] + 1.0 / (big - small)).abs() < 0.08,
         "inner min {}",
@@ -215,7 +226,11 @@ fn degenerate_inputs_do_not_panic() {
     let m = mesh(&g);
     let pts = vec![[0.5, 0.5, 0.5]; m.n_vertices()];
     let c = principal_curvatures(&m, &pts, &CurvatureOptions::default()).unwrap();
-    assert!(c.status.iter().all(|&s| s == CurvatureStatus::DegenerateNormal));
+    assert!(
+        c.status
+            .iter()
+            .all(|&s| s == CurvatureStatus::DegenerateNormal)
+    );
     assert!(c.k_max.iter().all(|k| *k == 0.0));
     assert!(c.d_max.iter().all(|d| d.iter().all(|t| t.is_finite())));
     // A single triangle: too few points for a fit.
@@ -226,7 +241,11 @@ fn degenerate_inputs_do_not_panic() {
         &CurvatureOptions::default(),
     )
     .unwrap();
-    assert!(c.status.iter().all(|&s| s == CurvatureStatus::Underdetermined));
+    assert!(
+        c.status
+            .iter()
+            .all(|&s| s == CurvatureStatus::Underdetermined)
+    );
     // Bad input.
     assert!(matches!(
         principal_curvatures(&m, &pts[..3], &CurvatureOptions::default()),
@@ -263,7 +282,11 @@ fn boundary_vertices_are_fitted_one_sided() {
         if c.is_boundary[v] {
             nb += 1;
             // Cylinder is exactly representable by the one-sided quadric well enough.
-            assert!((c.k_max[v] - 1.0).abs() < 0.1, "boundary k_max {}", c.k_max[v]);
+            assert!(
+                (c.k_max[v] - 1.0).abs() < 0.1,
+                "boundary k_max {}",
+                c.k_max[v]
+            );
         }
     }
     assert_eq!(nb, 2 * 48);

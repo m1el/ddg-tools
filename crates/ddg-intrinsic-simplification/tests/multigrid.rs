@@ -98,7 +98,12 @@ fn direct(a: &SparseMatrix, b: &[f64], known: &[u32], vals: &[f64]) -> Vec<f64> 
 }
 
 fn rel_diff(x: &[f64], y: &[f64]) -> f64 {
-    let d: f64 = x.iter().zip(y).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt();
+    let d: f64 = x
+        .iter()
+        .zip(y)
+        .map(|(a, b)| (a - b).powi(2))
+        .sum::<f64>()
+        .sqrt();
     d / y.iter().map(|v| v * v).sum::<f64>().sqrt()
 }
 
@@ -123,10 +128,18 @@ fn flat_grid_matches_direct_solve_and_converges_fast() {
     let xd = direct(&a, &b, &[], &[]);
     assert!(rep.converged);
     assert!(rel_diff(&x, &xd) < 1e-9, "rel diff {}", rel_diff(&x, &xd));
-    assert!(rep.convergence_factor < 0.2, "factor {}", rep.convergence_factor);
+    assert!(
+        rep.convergence_factor < 0.2,
+        "factor {}",
+        rep.convergence_factor
+    );
     println!(
         "flat grid: levels {:?}, {} cycles, factor {:.3}, setup {:.3}s solve {:.3}s",
-        rep.level_sizes, rep.cycles, rep.convergence_factor, mg.info().setup_seconds, rep.solve_seconds
+        rep.level_sizes,
+        rep.cycles,
+        rep.convergence_factor,
+        mg.info().setup_seconds,
+        rep.solve_seconds
     );
     // Residual decreases at every cycle.
     assert!(rep.residuals.windows(2).all(|w| w[1] < w[0]));
@@ -136,7 +149,10 @@ fn spot_hierarchy(splits: usize) -> Option<Hierarchy> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../data/models/spot/spot/spot_triangulated.obj");
     if !path.is_file() {
-        eprintln!("SKIPPED: {} not found; nothing was checked for spot", path.display());
+        eprintln!(
+            "SKIPPED: {} not found; nothing was checked for spot",
+            path.display()
+        );
         return None;
     }
     let obj = read_obj(&path).unwrap();
@@ -159,7 +175,11 @@ fn spot_matches_direct_solve_and_converges_fast() {
     // it keeps that: with 2 + 2 point Gauss-Seidel sweeps the factor is about 0.6 (measured),
     // with 8 + 8 about 0.1; 2 + 2 sweeps give < 0.2 on regular meshes (the grid and sphere
     // tests). Conjugate gradients with the V-cycle needs about 16 iterations.
-    assert!(rep.convergence_factor < 0.7, "factor {}", rep.convergence_factor);
+    assert!(
+        rep.convergence_factor < 0.7,
+        "factor {}",
+        rep.convergence_factor
+    );
     let strong = MultigridOptions {
         pre_sweeps: 8,
         post_sweeps: 8,
@@ -167,13 +187,25 @@ fn spot_matches_direct_solve_and_converges_fast() {
     };
     let mg8 = Multigrid::new(&a, &h.p, &[], strong).unwrap();
     let (_, rep8) = mg8.solve(&b, &[], None).unwrap();
-    assert!(rep8.convergence_factor < 0.2, "8/8 factor {}", rep8.convergence_factor);
+    assert!(
+        rep8.convergence_factor < 0.2,
+        "8/8 factor {}",
+        rep8.convergence_factor
+    );
     let (xp, repp) = mg.pcg(&b, &[], None, 100).unwrap();
-    assert!(repp.converged && repp.cycles <= 25, "pcg {} its", repp.cycles);
+    assert!(
+        repp.converged && repp.cycles <= 25,
+        "pcg {} its",
+        repp.cycles
+    );
     assert!(rel_diff(&xp, &xd) < 1e-8);
     println!(
         "spot: levels {:?}, {} cycles, factor {:.3}, setup {:.3}s solve {:.3}s",
-        rep.level_sizes, rep.cycles, rep.convergence_factor, mg.info().setup_seconds, rep.solve_seconds
+        rep.level_sizes,
+        rep.cycles,
+        rep.convergence_factor,
+        mg.info().setup_seconds,
+        rep.solve_seconds
     );
 }
 
@@ -188,7 +220,11 @@ fn icosphere_matches_direct_solve_and_converges_fast() {
     let xd = direct(&a, &b, &[], &[]);
     assert!(rep.converged);
     assert!(rel_diff(&x, &xd) < 1e-9);
-    assert!(rep.convergence_factor < 0.2, "factor {}", rep.convergence_factor);
+    assert!(
+        rep.convergence_factor < 0.2,
+        "factor {}",
+        rep.convergence_factor
+    );
     // With fixed vertices (Laplacian alone, no mass term).
     let (l, m) = system(&h, 0.0);
     let known = [0u32, 17, 5000];
@@ -197,8 +233,15 @@ fn icosphere_matches_direct_solve_and_converges_fast() {
     let (x, rep) = mg.solve(&m, &vals, None).unwrap();
     assert!(rep.converged);
     assert!(rel_diff(&x, &direct(&l, &m, &known, &vals)) < 1e-9);
-    assert!(rep.convergence_factor < 0.2, "dirichlet factor {}", rep.convergence_factor);
-    println!("icosphere: {:?} factor {:.3}", rep.level_sizes, rep.convergence_factor);
+    assert!(
+        rep.convergence_factor < 0.2,
+        "dirichlet factor {}",
+        rep.convergence_factor
+    );
+    println!(
+        "icosphere: {:?} factor {:.3}",
+        rep.level_sizes, rep.convergence_factor
+    );
 }
 
 #[test]
@@ -220,7 +263,11 @@ fn dirichlet_three_fixed_vertices_like_reference_example_04() {
     for (&k, &v) in known.iter().zip(&vals) {
         assert_eq!(x[k as usize], v);
     }
-    assert!(rep.convergence_factor < 0.7, "factor {}", rep.convergence_factor);
+    assert!(
+        rep.convergence_factor < 0.7,
+        "factor {}",
+        rep.convergence_factor
+    );
     assert_eq!(mg.info().n_known, 3);
     assert_eq!(mg.info().level_sizes[0], l.nrows() - 3);
 }
@@ -261,7 +308,10 @@ fn every_level_is_symmetric_positive_definite() {
     let mut rng = SplitMix64::new(9);
     for (lv, m) in mg.level_matrices().iter().enumerate() {
         let scale = m.values().iter().fold(0.0f64, |s, v| s.max(v.abs()));
-        assert!(m.symmetry_defect().unwrap() < 1e-12 * scale, "level {lv} symmetry");
+        assert!(
+            m.symmetry_defect().unwrap() < 1e-12 * scale,
+            "level {lv} symmetry"
+        );
         Symbolic::analyze(m, Method::Llt)
             .unwrap()
             .factor(m, Parallelism::Sequential)
@@ -383,7 +433,11 @@ fn bad_input_is_an_error_not_a_panic() {
     let neg = SparseMatrix::from_triplets(2, 2, &[(0, 0, -2.0), (1, 1, 2.0)]).unwrap();
     assert!(matches!(
         Multigrid::new(&neg, &[], &[], opts()),
-        Err(MultigridError::BadDiagonal { level: 0, row: 0, .. })
+        Err(MultigridError::BadDiagonal {
+            level: 0,
+            row: 0,
+            ..
+        })
     ));
     let bad = MultigridOptions {
         tolerance: f64::NAN,
@@ -417,7 +471,9 @@ fn bad_input_is_an_error_not_a_panic() {
     let mut x = vec![0.0; 3];
     assert!(mg.vcycle(&b, &mut x).is_err());
     // Messages are readable.
-    let msg = Multigrid::new(&rect, &[], &[], opts()).unwrap_err().to_string();
+    let msg = Multigrid::new(&rect, &[], &[], opts())
+        .unwrap_err()
+        .to_string();
     assert!(msg.contains("3 x 4"));
 }
 

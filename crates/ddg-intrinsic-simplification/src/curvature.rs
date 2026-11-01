@@ -67,9 +67,9 @@
 
 use std::f64::consts::{PI, TAU};
 
-use ddg_core::{GeometryError, TriMesh};
-use ddg_core::generators::SplitMix64;
 use ddg_core::Geometry;
+use ddg_core::generators::SplitMix64;
+use ddg_core::{GeometryError, TriMesh};
 use ddg_intrinsic::{IntrinsicError, IntrinsicTriangulation};
 
 type V3 = [f64; 3];
@@ -348,7 +348,10 @@ pub fn principal_curvatures(
             got: positions.len(),
         });
     }
-    if let Some(vertex) = positions.iter().position(|q| q.iter().any(|t| !t.is_finite())) {
+    if let Some(vertex) = positions
+        .iter()
+        .position(|q| q.iter().any(|t| !t.is_finite()))
+    {
         return Err(CurvatureError::NonFinitePosition { vertex });
     }
     if !(options.scale > 0.0 && options.scale.is_finite()) {
@@ -431,15 +434,14 @@ pub fn principal_curvatures(
         let mut set: Vec<u32> = queue
             .iter()
             .copied()
-            .filter(|&q| {
-                q as usize != v && normals[q as usize].is_some_and(|nq| dot(nq, w) >= 0.0)
-            })
+            .filter(|&q| q as usize != v && normals[q as usize].is_some_and(|nq| dot(nq, w) >= 0.0))
             .collect();
         // 3. Monte-Carlo.
         if let Some(m) = options.max_samples
             && set.len() > m
         {
-            let mut rng = SplitMix64::new(options.seed ^ (v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            let mut rng =
+                SplitMix64::new(options.seed ^ (v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
             for i in 0..m {
                 let j = i + (rng.next_u64() % (set.len() - i) as u64) as usize;
                 set.swap(i, j);

@@ -121,7 +121,10 @@ impl std::fmt::Display for MultigridError {
                 write!(f, "the system matrix is {rows} x {cols}, not square")
             }
             MultigridError::NotSymmetric { defect } => {
-                write!(f, "the system matrix is not symmetric (max |a_ij - a_ji| = {defect:e})")
+                write!(
+                    f,
+                    "the system matrix is not symmetric (max |a_ij - a_ji| = {defect:e})"
+                )
             }
             MultigridError::SizeMismatch {
                 what,
@@ -130,7 +133,10 @@ impl std::fmt::Display for MultigridError {
             } => write!(f, "{what}: expected {expected}, got {got}"),
             MultigridError::BadKnown { reason } => write!(f, "bad fixed vertices: {reason}"),
             MultigridError::EmptyLevel { level, reason } => {
-                write!(f, "the level below prolongation P_{level} has no unknowns: {reason}")
+                write!(
+                    f,
+                    "the level below prolongation P_{level} has no unknowns: {reason}"
+                )
             }
             MultigridError::BadDiagonal { level, row, value } => write!(
                 f,
@@ -325,7 +331,10 @@ impl Multigrid {
         }
         if !(options.tolerance >= 0.0 && options.tolerance.is_finite()) {
             return Err(MultigridError::BadOption {
-                reason: format!("tolerance must be finite and non-negative, got {}", options.tolerance),
+                reason: format!(
+                    "tolerance must be finite and non-negative, got {}",
+                    options.tolerance
+                ),
             });
         }
         if !(options.coarsest_shift >= 0.0 && options.coarsest_shift.is_finite()) {
@@ -443,7 +452,11 @@ impl Multigrid {
         let mut diag = Vec::with_capacity(mats.len());
         for (lv, m) in mats.iter().enumerate() {
             let d = m.diagonal();
-            if let Some((row, &value)) = d.iter().enumerate().find(|(_, v)| !(**v > 0.0 && v.is_finite())) {
+            if let Some((row, &value)) = d
+                .iter()
+                .enumerate()
+                .find(|(_, v)| !(**v > 0.0 && v.is_finite()))
+            {
                 return Err(MultigridError::BadDiagonal {
                     level: lv,
                     row,
@@ -460,7 +473,12 @@ impl Multigrid {
             match first {
                 Ok(f) => f,
                 Err(SparseError::NotPositiveDefinite { .. }) if options.coarsest_shift > 0.0 => {
-                    let dmax = diag.last().expect("level").iter().cloned().fold(0.0, f64::max);
+                    let dmax = diag
+                        .last()
+                        .expect("level")
+                        .iter()
+                        .cloned()
+                        .fold(0.0, f64::max);
                     shift = options.coarsest_shift;
                     let mut shifted = last.clone();
                     shifted.add_to_diagonal(&vec![shift * dmax; last.nrows()])?;
@@ -570,7 +588,8 @@ impl Multigrid {
     fn vcycle_level(&self, lv: usize, b: &[f64], x: &mut [f64]) -> Result<(), MultigridError> {
         if lv + 1 == self.a.len() {
             let mut r = self.residual(lv, b, x);
-            self.coarse.solve_in_place(&mut r, Parallelism::Sequential)?;
+            self.coarse
+                .solve_in_place(&mut r, Parallelism::Sequential)?;
             for (xi, di) in x.iter_mut().zip(&r) {
                 *xi += di;
             }
