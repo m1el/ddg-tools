@@ -438,41 +438,7 @@ impl IntrinsicTriangulation {
 
     /// Lists what keeps the triangulation from being a simplicial complex.
     pub fn irregularities(&self) -> Irregularities {
-        let mut out = Irregularities::default();
-        let mut pairs: Vec<(u32, u32, u32)> = Vec::with_capacity(self.n_edges());
-        for e in 0..self.n_edges() {
-            let [a, b] = self.edge_vertices(e);
-            if a == b {
-                out.self_edges.push(e as u32);
-            } else {
-                pairs.push((a.min(b) as u32, a.max(b) as u32, e as u32));
-            }
-        }
-        pairs.sort_unstable();
-        let mut i = 0;
-        while i < pairs.len() {
-            let mut j = i + 1;
-            while j < pairs.len() && pairs[j].0 == pairs[i].0 && pairs[j].1 == pairs[i].1 {
-                j += 1;
-            }
-            if j - i > 1 {
-                out.multi_edges.extend(pairs[i..j].iter().map(|p| p.2));
-            }
-            i = j;
-        }
-        out.multi_edges.sort_unstable();
-        for (f, &[a, b, c]) in self.complex.faces.iter().enumerate() {
-            if a == b || b == c || a == c {
-                out.faces_with_repeated_vertex.push(f as u32);
-            }
-        }
-        for v in 0..self.n_vertices() {
-            let h = self.complex.vertex_halfedge[v] as usize;
-            if self.complex.twin[prev(h)] == h as u32 {
-                out.degree_one_vertices.push(v as u32);
-            }
-        }
-        out
+        irregularities(&self.complex)
     }
 
     /// The triangulation as a `TriMesh` with a `Geometry`, if it is a simplicial complex.
@@ -483,44 +449,7 @@ impl IntrinsicTriangulation {
     /// [`IntrinsicError::NotSimplicial`] naming the first self-edge, double edge or repeated
     /// vertex, or the reason `TriMesh::new` gives (two faces with the same three vertices).
     pub fn to_tri_mesh(&self) -> Result<(TriMesh, Geometry), IntrinsicError> {
-        let irregular = self.irregularities();
-        let not_simplicial = |reason: String| IntrinsicError::NotSimplicial {
-            reason,
-            mesh_error: None,
-        };
-        if let Some(&e) = irregular.self_edges.first() {
-            let [a, _] = self.edge_vertices(e as usize);
-            return Err(not_simplicial(format!(
-                "edge {e} joins vertex {a} to itself ({} self-edges in total)",
-                irregular.self_edges.len()
-            )));
-        }
-        if let Some(&e) = irregular.multi_edges.first() {
-            let [a, b] = self.edge_vertices(e as usize);
-            return Err(not_simplicial(format!(
-                "edge {e} = ({a}, {b}) is one of several edges between its end points ({} such \
-                 edges in total)",
-                irregular.multi_edges.len()
-            )));
-        }
-        if let Some(&f) = irregular.faces_with_repeated_vertex.first() {
-            let [a, b, c] = self.complex.faces[f as usize];
-            return Err(not_simplicial(format!(
-                "face {f} = ({a}, {b}, {c}) uses a vertex more than once"
-            )));
-        }
-        let mesh = TriMesh::new(self.n_vertices(), self.complex.faces.clone()).map_err(|e| {
-            IntrinsicError::NotSimplicial {
-                reason: "its faces are not a valid simplicial mesh".to_string(),
-                mesh_error: Some(e),
-            }
-        })?;
-        let mut lengths = vec![0.0; mesh.n_edges()];
-        for h in 0..self.n_halfedges() {
-            lengths[mesh.edge(h)] = self.edge_lengths[self.complex.halfedge_edge[h] as usize];
-        }
-        let geometry = Geometry::from_edge_lengths(&mesh, lengths)?;
-        Ok((mesh, geometry))
+        simplicial_mesh(&self.complex, &self.edge_lengths)
     }
 
     // ----- consistency -----
@@ -805,4 +734,98 @@ impl Surface for IntrinsicTriangulation {
     fn edge_halfedge(&self, e: usize) -> u32 {
         self.complex.edge_halfedge[e]
     }
+}
+
+/// What keeps the connectivity `complex` from being a simplicial complex (see
+/// [`IntrinsicTriangulation::irregularities`], which is this function): it depends on the
+/// connectivity alone, so every representation of a triangulation shares it.
+pub fn irregularities(complex: &Complex) -> Irregularities {
+    let mut out = Irregularities::default();
+    let mut pairs: Vec<(u32, u32, u32)> = Vec::with_capacity(complex.n_edges());
+    for e in 0..complex.n_edges() {
+        let [a, b] = complex.edge_vertices(e);
+        if a == b {
+            out.self_edges.push(e as u32);
+        } else {
+            pairs.push((a.min(b) as u32, a.max(b) as u32, e as u32));
+        }
+    }
+    pairs.sort_unstable();
+    let mut i = 0;
+    while i < pairs.len() {
+        let mut j = i + 1;
+        while j < pairs.len() && pairs[j].0 == pairs[i].0 && pairs[j].1 == pairs[i].1 {
+            j += 1;
+        }
+        if j - i > 1 {
+            out.multi_edges.extend(pairs[i..j].iter().map(|p| p.2));
+        }
+        i = j;
+    }
+    out.multi_edges.sort_unstable();
+    for (f, &[a, b, c]) in complex.faces.iter().enumerate() {
+        if a == b || b == c || a == c {
+            out.faces_with_repeated_vertex.push(f as u32);
+        }
+    }
+    for v in 0..complex.n_vertices() {
+        let h = complex.vertex_halfedge[v] as usize;
+        if complex.twin[prev(h)] == h as u32 {
+            out.degree_one_vertices.push(v as u32);
+        }
+    }
+    out
+}
+
+/// The connectivity `complex` with one length per edge as a `TriMesh` with a `Geometry`, if it
+/// is a simplicial complex (see [`IntrinsicTriangulation::to_tri_mesh`], which is this
+/// function). Vertices, faces, corners and halfedges keep their ids; edges are renumbered by
+/// the `TriMesh`.
+///
+/// # Errors
+/// [`IntrinsicError::NotSimplicial`] naming the first irregularity, or with the mesh error if
+/// the faces are not a valid `TriMesh`; the geometry's error for lengths that do not form
+/// triangles.
+pub fn simplicial_mesh(
+    complex: &Complex,
+    edge_lengths: &[f64],
+) -> Result<(TriMesh, Geometry), IntrinsicError> {
+    let irregular = irregularities(complex);
+    let not_simplicial = |reason: String| IntrinsicError::NotSimplicial {
+        reason,
+        mesh_error: None,
+    };
+    if let Some(&e) = irregular.self_edges.first() {
+        let [a, _] = complex.edge_vertices(e as usize);
+        return Err(not_simplicial(format!(
+            "edge {e} joins vertex {a} to itself ({} self-edges in total)",
+            irregular.self_edges.len()
+        )));
+    }
+    if let Some(&e) = irregular.multi_edges.first() {
+        let [a, b] = complex.edge_vertices(e as usize);
+        return Err(not_simplicial(format!(
+            "edge {e} = ({a}, {b}) is one of several edges between its end points ({} such \
+             edges in total)",
+            irregular.multi_edges.len()
+        )));
+    }
+    if let Some(&f) = irregular.faces_with_repeated_vertex.first() {
+        let [a, b, c] = complex.faces[f as usize];
+        return Err(not_simplicial(format!(
+            "face {f} = ({a}, {b}, {c}) uses a vertex more than once"
+        )));
+    }
+    let mesh = TriMesh::new(complex.n_vertices(), complex.faces.clone()).map_err(|e| {
+        IntrinsicError::NotSimplicial {
+            reason: "its faces are not a valid simplicial mesh".to_string(),
+            mesh_error: Some(e),
+        }
+    })?;
+    let mut lengths = vec![0.0; mesh.n_edges()];
+    for h in 0..complex.n_halfedges() {
+        lengths[mesh.edge(h)] = edge_lengths[complex.halfedge_edge[h] as usize];
+    }
+    let geometry = Geometry::from_edge_lengths(&mesh, lengths)?;
+    Ok((mesh, geometry))
 }

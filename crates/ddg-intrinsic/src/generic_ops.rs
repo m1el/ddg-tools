@@ -86,3 +86,33 @@ pub fn lumped_mass_normalized<T: Triangulation + ?Sized>(t: &T) -> Vec<f64> {
     }
     mass
 }
+
+/// The distribution of corner angles and face areas of any triangulation
+/// ([`IntrinsicTriangulation::shape_statistics`], the same operations in the same order).
+pub fn shape_statistics<T: Triangulation + ?Sized>(t: &T) -> crate::ShapeStatistics {
+    use crate::Summary;
+    let mut angles: Vec<f64> = (0..t.complex().n_halfedges())
+        .map(|h| t.corner_angle(h))
+        .collect();
+    let mut areas: Vec<f64> = (0..t.complex().n_faces()).map(|f| t.face_area(f)).collect();
+    let n = angles.len().max(1) as f64;
+    let below = [10.0f64, 20.0, 30.0]
+        .map(|d| angles.iter().filter(|&&a| a < d.to_radians()).count() as f64 / n);
+    let above = [90.0f64, 120.0, 150.0].map(|d| {
+        angles
+            .iter()
+            .filter(|&&a| a > d.to_radians() + 1e-9)
+            .count() as f64
+            / n
+    });
+    let angles = Summary::of(&mut angles);
+    let areas = Summary::of(&mut areas);
+    crate::ShapeStatistics {
+        angles,
+        angles_below: below,
+        angles_above: above,
+        areas,
+        area_ratio: areas.max / areas.min,
+        area_cv: areas.std_dev / areas.mean,
+    }
+}
