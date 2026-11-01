@@ -292,7 +292,10 @@ impl ChannelState {
         weights: &ChannelWeights,
         fold_weights: bool,
     ) -> Result<ChannelState, IemError> {
-        let n_fine = mesh.n_fine_vertices();
+        let n_input = mesh.n_fine_vertices();
+        // Masses are indexed by fine id, the vertices inserted by pre-refinement included
+        // (user-supplied per-vertex values are 0 there).
+        let n_fine = mesh.fine_id_bound();
         let bad = |what: String| Err(IemError::InvalidOptions { what });
         // Per channel: label, weight, values over the fine ids.
         let mut columns: Vec<(String, f64, Vec<f64>)> = Vec::new();
@@ -328,9 +331,9 @@ impl ChannelState {
                     columns.push(("area".into(), ch.weight, x));
                 }
                 ChannelSource::PerVertex(values) => {
-                    if values.len() != n_fine {
+                    if values.len() != n_input {
                         return bad(format!(
-                            "channel {index} has {} values, but the mesh has {n_fine} fine \
+                            "channel {index} has {} values, but the mesh has {n_input} fine \
                              vertices",
                             values.len()
                         ));
@@ -345,8 +348,9 @@ impl ChannelState {
                     let mut neg = vec![0.0; n_fine];
                     for v in 0..mesh.n_vertices() {
                         let f = mesh.fine_vertex(v) as usize;
-                        pos[f] = values[f].max(0.0);
-                        neg[f] = (-values[f]).max(0.0);
+                        let x = values.get(f).copied().unwrap_or(0.0);
+                        pos[f] = x.max(0.0);
+                        neg[f] = (-x).max(0.0);
                     }
                     let signed = neg.iter().any(|&x| x > 0.0);
                     columns.push((format!("user{index}+"), ch.weight, pos));

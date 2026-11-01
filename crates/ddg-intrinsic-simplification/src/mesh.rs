@@ -326,6 +326,13 @@ impl CoarseMesh {
         self.n_input as usize
     }
 
+    /// One more than the largest fine id ever used: `n_fine_vertices()` plus the vertices that
+    /// pre-refinement inserted (their ids follow the input's). Per-vertex state indexed by fine
+    /// id has this length.
+    pub fn fine_id_bound(&self) -> usize {
+        self.complex_of.len()
+    }
+
     /// The number of vertices of the coarse mesh.
     pub fn n_vertices(&self) -> usize {
         self.complex.n_vertices()
