@@ -782,6 +782,53 @@ Delaunay refinement at 25°, coarsened as far as possible (target 0, stop at `�
 peak memory. Fig. 16: time against `|V|` on a subdivided cow/spot (`10³…10⁶`) and against the
 percent reduction on a 750k-vertex subdivision. Runs in parallel per mesh (64 cores; timings alone).
 
+**As built (WP9b).** `refine::refine_then_simplify` (pre-refinement then `simplify`, one combined
+report); `examples/thingi_simplify.rs` (one mesh, one JSON line: modes `refine`, `--no-refine`,
+`--signposts`; edge lengths intrinsically mollified with `ε = 1e-5 h̄` as in the integer-coordinates
+evaluation, because Thingi10k has zero-area faces which `Geometry` refuses; target `AllRemovable`);
+`scripts/iem-thingi.sh run|summary` (phases by size, ≤ 24 jobs, `ulimit -v`, `timeout`) and
+`scripts/iem_thingi_summary.py`. The ratio is `|V̄|/|V|` (the paper's normalization of both counts by
+the number of components cancels); `ratio_mean_component` (mean of per-component final/input) is
+reported too. A failure of a mesh is counted when the job gives no result; the vertices left
+unremovable are "skips" by reason, commit failures (reverted) separately.
+
+**Results of record** (7745 meshes, default ICE metric, 24 parallel jobs on a shared machine; load
+about 24 from this run, plus other agents'; timings indicative only; JSON per mesh and
+`summary.md` in `runs_tmp/iem/thingi/`):
+
+| | pre-refinement (integer, Chew, 25°) | none |
+|---|---|---|
+| completed, no crash/panic/timeout | 7745 | 7745 |
+| certificate failures | 0 | 0 |
+| `|V̄|/|V|` ≤ 10 % (paper 98 %) | 97.29 % | 97.24 % |
+| `|V̄|/|V|` ≤ 1 % (paper 84 %) | 76.48 % | 76.50 % |
+| same, meshes with `|V|` ≥ 300 (6366) | 99.62 %, 89.38 % | 99.59 %, 89.32 % |
+| same, meshes with `|V|` ≥ 10⁴ (1745) | 99.66 %, 98.45 % | 99.66 %, 98.45 % |
+| mean per-component ratio ≤ 10 % / ≤ 1 % | 94.47 % / 72.47 % | 94.42 % / 72.54 % |
+| median / p90 / p99 ratio | 0.0027 / 0.027 / 0.214 | 0.0026 / 0.026 / 0.214 |
+| meshes with a skip by flattening failure (`flatten_failed`) | 836 (10.8 %) | 814 (10.5 %) |
+| meshes with reverted commit failures | 679 (8.8 %) | 619 (8.0 %) |
+| removals per second, simplify phase (median / p10) | 12.0k / 9.7k | 12.4k / 10.3k |
+| total time per mesh, median / p99 / max | 0.59 s / 51 s / 671 s | 0.15 s / 33 s / 340 s |
+| peak RSS, median / max | 8 MB / 2.1 GB | 5 MB / 1.4 GB |
+
+Findings. (1) All meshes finish; every coarse mesh passes `certify`. (2) The shares below the paper's
+are the floor of 3 vertices per closed component (a tetrahedron cannot go below 0.75, a mesh of
+100 vertices not below 3 %), not failures: the sets that can reach the bound do (99.6 % ≤ 10 %,
+89 %-98 % ≤ 1 %). The remaining 10 %-outliers are tiny meshes, many-component meshes (3 vertices
+each), and a few high-genus ones (13 closed meshes of total genus ≥ 10 above 10 %), as the paper
+says for Fig. 17. (3) Numerical trouble is not at the paper's 0.1 %: 7-11 % of the meshes
+leave at least one vertex unremovable because its flattening failed (`flatten_failed`, a
+non-convergent Newton iteration) or is `not_flattenable` (a triangle inequality on the star
+violated after the flips); most of them are meshes that still reach ≤ 10 %; only 14-19 of the
+meshes above 1 % are dominated by these reasons. We did not separate floating point from true
+topological obstruction for `not_flattenable` (the paper does not say how it counted). (4)
+Pre-refinement changes the ratio on 2186 of 7745 meshes (smaller on 1051, larger on 1135), the
+share ≤ 10 % by 0.05 %: it gives candidate locations but does not help the ratio on average; it
+costs 2.4× the total CPU time (8.7 h against 3.7 h; median per mesh 4×; 9 % of it the refinement
+itself, the rest simplifying the inserted vertices) and inserts a median 2.2× `|V|`. (5) Speed matches the paper's "about 10 000 vertices per
+second". Slowest: 719791 (871k vertices, 671 s with pre-refinement).
+
 ### 10.3 Distortion (Sec. 8.3, Fig. 18)
 
 For every fine edge `ij`: `ℓ̂_ij` = the length of the image path, approximated (paper) by the
