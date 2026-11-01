@@ -200,13 +200,13 @@ class IntrinsicTriangulationTest(unittest.TestCase):
 
 
 class RepresentationOptionTest(unittest.TestCase):
-    def test_default_is_signposts_and_both_agree(self):
+    def test_default_is_integer_and_both_agree(self):
         positions, triangles = icosahedron()
         sources = array.array('i', [0])
         default = ddg_tools.geodesic_distance(positions, triangles, sources)
         a = ddg_tools.geodesic_distance(positions, triangles, sources, representation="signposts")
         b = ddg_tools.geodesic_distance(positions, triangles, sources, representation="integer")
-        self.assertEqual(list(default.distances), list(a.distances))
+        self.assertEqual(list(default.distances), list(b.distances))
         self.assertLess(max(abs(x - y) for x, y in zip(a.distances, b.distances)), 1e-10)
         self.assertEqual(a.report["n_triangulation_vertices"], b.report["n_triangulation_vertices"])
 

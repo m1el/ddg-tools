@@ -47,14 +47,14 @@ pub struct GeodesicDistanceResult {
 ///                Delaunay triangulation) or "input" (the mesh as it is).
 /// time_factor    m in the time step t = m h^2, h the mean edge length (default 1).
 /// boundary       "neumann" (default), "dirichlet" or "average": conditions of the heat step.
-/// representation "signposts" (default) or "integer": the intrinsic triangulation's representation
+/// representation "integer" (default) or "signposts": the intrinsic triangulation's representation
 ///                (Gillespie, Sharp, Crane 2021); the distances agree to rounding.
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a valid
 /// manifold triangle mesh, SolveError when the triangulation or a solve fails.
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, sources, *, triangulation = "refined", time_factor = 1.0, boundary = "neumann", representation = "signposts"))]
+#[pyo3(signature = (positions, triangles, sources, *, triangulation = "refined", time_factor = 1.0, boundary = "neumann", representation = "integer"))]
 fn geodesic_distance<'py>(
     py: Python<'py>,
     positions: &Bound<'py, PyAny>,
@@ -109,12 +109,12 @@ pub struct SteinerTreeResult {
 /// triangles       3 vertex indices per triangle.
 /// intrinsic       over the intrinsic Delaunay triangulation (default True) or the input edges.
 /// steiner_points  insert Fermat points (default True); False gives the minimal spanning tree.
-/// representation "signposts" (default) or "integer" (Gillespie, Sharp, Crane 2021).
+/// representation "integer" (default; Gillespie, Sharp, Crane 2021) or "signposts".
 ///
 /// Raises InputError for malformed arguments, MeshError for a mesh that is not a valid
 /// manifold triangle mesh, SolveError when the triangulation or a trace fails.
 #[pyfunction]
-#[pyo3(signature = (positions, triangles, *, intrinsic = true, steiner_points = true, representation = "signposts"))]
+#[pyo3(signature = (positions, triangles, *, intrinsic = true, steiner_points = true, representation = "integer"))]
 fn steiner_tree<'py>(
     py: Python<'py>,
     positions: &Bound<'py, PyAny>,

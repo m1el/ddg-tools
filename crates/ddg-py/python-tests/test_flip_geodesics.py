@@ -120,7 +120,7 @@ class GeodesicPathTest(unittest.TestCase):
     def test_default_representation_is_the_documented_one(self):
         positions, triangles = grid(4)
         r = geodesic_path(positions, triangles, [0, 24])
-        self.assertEqual(r.report["representation"], "signposts")
+        self.assertEqual(r.report["representation"], "integer")
 
     def test_surface_points(self):
         positions, triangles = grid()

@@ -756,10 +756,10 @@ add-on's sidebar panel:
 
 **As built (F8, 43bbe26–9368c6b).** `polylines` are flat `array('d')` (3 reals per point; the house
 style, numpy optional) rather than `(n, 3)` arrays; `representation=None` follows
-`Representation::DEFAULT` (signposts until IC Q3 flips it); no automatic fallback: a signpost
+`Representation::DEFAULT` (integer coordinates since IC Q3); no automatic fallback: a signpost
 extraction failure is an error that suggests `representation="integer"`. Blender: sidebar panel
 "DDG > Geodesics" plus menu entries; "Show triangulation" draws `<mesh>_geodesic_triangulation`
-through `draw_intrinsic_edges(kind=…)`; `geodesic_operator.REPRESENTATION_DEFAULT = 'SIGNPOSTS'`.
+through `draw_intrinsic_edges(kind=…)`; `geodesic_operator.REPRESENTATION_DEFAULT = 'INTEGER'` (`'SIGNPOSTS'` until IC Q3).
 20 Python tests and 18 Blender tests on both representations; the add-on suites pass in Blender
 5.0.1.
 

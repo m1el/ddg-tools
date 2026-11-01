@@ -596,8 +596,9 @@ exceptions such as time-outs or memory, and no certificate failure.
   (100.00 %/99.81 % under Ruppert's rules, whose 15 failures are trace failures); the demo's
   signposts reach 87.9 %/20.7 % unmollified.
 
-The switch of Q3 is `Representation::DEFAULT` and the `representation=` defaults (WP11); this WP does not
-touch them.
+With the gate passed, the consumers' default is now integer coordinates (Q3):
+`Representation::DEFAULT`, the Python `representation=` defaults and Blender's
+`REPRESENTATION_DEFAULT`. Signposts stay an option.
 
 ## The reference implementation
 

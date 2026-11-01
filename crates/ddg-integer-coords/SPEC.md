@@ -868,7 +868,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | **done** (307308a–a9fa390; I30 fix a589919, 16210ca): Thingi10k (Table 1 integers 100 %), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
-| WP11 | **done, default still signposts** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `optimal_delaunay`, `move_vertex`, `odt_target`, `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input` (so `ddg-uv`, I29), `signpost` (tangent fields, I26) | per crate | WP5, WP6 | Sonnet |
+| WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `optimal_delaunay`, `move_vertex`, `odt_target`, `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input` (so `ddg-uv`, I29), `signpost` (tangent fields, I26) | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.
 
@@ -893,13 +893,13 @@ At most three agents at a time; timings alone.
   `GC_EIGEN_LOCATION`, `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` (polyscope's glad), the demo's
   `deps/happly` on `CPLUS_INCLUDE_PATH` (geometry-central's copy is an empty submodule).
 * **Q3** Consumers use integer coordinates by default once the evaluation passes; signposts stay an
-  option (WP11). As built: the switch is `Representation::DEFAULT` in
-  `crates/ddg-intrinsic-apps/src/representation.rs` plus the `representation=` defaults of the
-  `ddg-py` bindings (still `Signposts`); flipping it after WP10 is one commit. Checklist:
+  option (WP11). **Flipped (2026-11-01)** after WP10 passed (7745/7745): the switch is
+  `Representation::DEFAULT` in `crates/ddg-intrinsic-apps/src/representation.rs` plus the
+  `representation=` defaults of the `ddg-py` bindings, now `Integer`. Checklist (all done):
   `Representation::DEFAULT`; the literal `representation="signposts"` defaults of
   `geodesic_distance`, `steiner_tree`, `adaptive_solve` (FlipOut's bindings follow `DEFAULT`
   through `None`); Blender `geodesic_operator.REPRESENTATION_DEFAULT`; stubs and READMEs; the tests
-  that assert the default (`the_default_representation_is_signposts`, `test_integer_coords.py`,
+  that assert the default (`the_default_representation_is_integer`, `test_integer_coords.py`,
   `test_default_representation_is_the_documented_one`). `ddg_tools.IntrinsicTriangulation` and
   "Show Intrinsic Refinement" already default to integers, by design (they exist to show them).
 * **Q4** FlipOut (Sharp and Crane 2020a) is in scope, as its own crate `ddg-flip-geodesics` with its

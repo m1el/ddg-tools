@@ -3,9 +3,10 @@
 //!
 //! The applications that need only the lengths and the connectivity are generic over
 //! [`ddg_intrinsic::Triangulation`]; the ones that also locate points of the input mesh take
-//! an [`InputPoints`]. [`Representation::DEFAULT`] is **signposts** for now. After the
-//! evaluation of the integer representation (WP10) one commit changes this constant to
-//! [`Representation::Integer`]; nothing else here depends on it.
+//! an [`InputPoints`]. [`Representation::DEFAULT`] is **integer coordinates**, since their
+//! evaluation on Thingi10k passed (WP10: 7745/7745 meshes; Integer Coordinates SPEC §13 Q3).
+//! Signposts stay available as [`Representation::Signposts`]; nothing else here depends on the
+//! constant.
 
 use ddg_integer_coords::IntegerTriangulation;
 use ddg_intrinsic::{IntrinsicError, IntrinsicTriangulation, SurfacePoint, Triangulation};
@@ -20,9 +21,9 @@ pub enum Representation {
 }
 
 impl Representation {
-    /// The default of the consumers. Signposts until the evaluation (WP10) passes; then
-    /// `Integer` (Integer Coordinates SPEC §13 Q3).
-    pub const DEFAULT: Representation = Representation::Signposts;
+    /// The default of the consumers: `Integer`, since the evaluation (WP10) passed (Integer
+    /// Coordinates SPEC §13 Q3).
+    pub const DEFAULT: Representation = Representation::Integer;
 }
 
 impl Default for Representation {

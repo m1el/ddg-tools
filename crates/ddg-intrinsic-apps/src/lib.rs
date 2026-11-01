@@ -36,9 +36,8 @@
 //! (heat and the point-error measure of [`amr`] also need [`representation::InputPoints`]), so
 //! they run on signposts and on integer coordinates (`ddg-integer-coords`); the results
 //! agree bit for bit where both representations make the same flips and insertions
-//! (`tests/representation.rs`). [`representation::Representation::DEFAULT`] is **signposts**
-//! until the evaluation of the integer representation passes (contract §13 Q3); one commit
-//! then flips that constant. [`vector`] (tangent fields) stays on signposts:
+//! (`tests/representation.rs`). [`representation::Representation::DEFAULT`] is **integer
+//! coordinates** (contract §13 Q3, since the Thingi10k evaluation passed). [`vector`] (tangent fields) stays on signposts:
 //! they read the stored input-aligned signposts (contract I26, open).
 //!
 //! # Conventions

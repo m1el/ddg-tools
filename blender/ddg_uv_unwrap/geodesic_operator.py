@@ -16,10 +16,10 @@ in custom properties (``ddg_*``). Running again replaces it. With *Show triangul
 of the final intrinsic triangulation are drawn on the input mesh as a second Curve object
 ``<mesh>_geodesic_triangulation`` (``intrinsic_draw``). The mesh is never changed.
 
-The default representation is signposts, as for every other consumer, until the integer
-coordinates pass their evaluation (Integer Coordinates SPEC Q3); ``REPRESENTATION_DEFAULT`` and the
-``representation`` properties are the places that change then. Nothing falls back silently: when
-signposts fail to trace a path on the input mesh the message says to choose Integer Coordinates.
+The default representation is integer coordinates, as for every other consumer, since they passed
+their evaluation (Integer Coordinates SPEC Q3); ``REPRESENTATION_DEFAULT`` names it. Signposts stay
+an option. Nothing falls back silently: when signposts fail to trace a path on the input mesh the
+message says to choose Integer Coordinates.
 """
 
 import math
@@ -44,7 +44,7 @@ MOLLIFY = 1e-4
 
 # The one place that names the default representation of these operators (see the module
 # documentation).
-REPRESENTATION_DEFAULT = 'SIGNPOSTS'
+REPRESENTATION_DEFAULT = 'INTEGER'
 REPRESENTATION_ITEMS = (
     ('SIGNPOSTS', "Signposts", "Sharp, Soliman, Crane 2019: edge lengths and signpost angles"),
     ('INTEGER', "Integer Coordinates",

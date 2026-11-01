@@ -271,7 +271,7 @@ pub struct AdaptiveOptions {
     pub bulk: f64,
     /// The angle bound of the refinement, degrees.
     pub min_angle_degrees: f64,
-    /// `"signposts"` (default) or `"integer"`.
+    /// `"integer"` (default) or `"signposts"`.
     pub representation: String,
 }
 

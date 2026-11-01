@@ -153,7 +153,7 @@ pub struct HeatArguments {
     pub time_factor: f64,
     /// `"neumann"`, `"dirichlet"` or `"average"`.
     pub boundary: String,
-    /// `"signposts"` (default) or `"integer"`: the representation of the intrinsic
+    /// `"integer"` (default) or `"signposts"`: the representation of the intrinsic
     /// triangulation (Integer Coordinates, WP11).
     pub representation: String,
 }
@@ -287,7 +287,7 @@ pub struct SteinerArguments {
     pub intrinsic: bool,
     /// Insert Fermat points (`false`: the minimal spanning tree).
     pub steiner_points: bool,
-    /// `"signposts"` (default) or `"integer"`.
+    /// `"integer"` (default) or `"signposts"`.
     pub representation: String,
 }
 

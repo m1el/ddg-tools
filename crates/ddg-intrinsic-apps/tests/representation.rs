@@ -55,8 +55,8 @@ fn max_diff(a: &[f64], b: &[f64]) -> f64 {
 }
 
 #[test]
-fn the_default_representation_is_signposts() {
-    assert_eq!(Representation::default(), Representation::Signposts);
+fn the_default_representation_is_integer() {
+    assert_eq!(Representation::default(), Representation::Integer);
 }
 
 #[test]

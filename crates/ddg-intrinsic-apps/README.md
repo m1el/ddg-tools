@@ -522,9 +522,9 @@ signposts (`IntrinsicTriangulation`) and on integer coordinates
 from `ddg_intrinsic::generic_ops::{cotan_laplacian, lumped_mass}` (bitwise the signposts'
 methods); point sources of the heat method and the cross-representation error of `amr` need
 `representation::InputPoints` (`T^0 -> T^1`). `representation::Representation::DEFAULT` is
-**`Signposts`** until the Thingi10k evaluation (WP10) passes; the later commit that makes
-integers the default changes that constant and the defaults of the Python and Blender front
-ends, nothing here. This crate depends on `ddg-integer-coords`; the reverse dependency must
+**`Integer`**, since the Thingi10k evaluation (WP10) passed on all 7745 meshes (Integer
+Coordinates SPEC §13 Q3); the Python and Blender front ends follow it. Signposts stay an option
+(`Representation::Signposts`). This crate depends on `ddg-integer-coords`; the reverse dependency must
 not exist.
 
 Not generic, and why: `vector` (tangent fields and connection Laplacians) reads the stored

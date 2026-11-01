@@ -869,11 +869,11 @@ mode: **Mesh** menu, **UV** menu, panel)
 | Show Triangulation | `show_triangulation` | off | also draw the edges of the final intrinsic triangulation on the input as the Curve object `<mesh>_geodesic_triangulation` (`intrinsic_draw.draw_intrinsic_edges`, its own marker `geodesic_triangulation`: Show Intrinsic Refinement's objects are not replaced) |
 | Verify on Input Mesh | `certify_input` | off | also check the result on the input mesh alone (slower) |
 
-**Representation.** The default is signposts, as for every other consumer of the integer
-representation, until the Thingi10k evaluation (Integer Coordinates WP10, SPEC Q3) passes. The
-places that change then: `Representation::DEFAULT` (`ddg-intrinsic-apps`, which the Python
-`representation=None` of the three functions follows), and in this directory
-`geodesic_operator.REPRESENTATION_DEFAULT` (the default of both operators' `representation`).
+**Representation.** The default is integer coordinates, as for every other consumer, since the
+Thingi10k evaluation (Integer Coordinates WP10, SPEC Q3) passed on all 7745 meshes. It is
+`Representation::DEFAULT` (`ddg-intrinsic-apps`, which the Python `representation=None` of the
+three functions follows), and in this directory `geodesic_operator.REPRESENTATION_DEFAULT` (the
+default of both operators' `representation`). Signposts stay an option.
 There is no silent fallback: when signposts cannot trace a path on the input mesh the operator
 stops with the message from the library, which says to choose *Integer Coordinates*.
 

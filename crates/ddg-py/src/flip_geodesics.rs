@@ -11,8 +11,8 @@
 //!
 //! # The representation
 //!
-//! [`GeodesicArguments::representation`] is `None` for [`Representation::DEFAULT`] (signposts
-//! until the evaluation of the integer representation passes), `Some("signposts")` or
+//! [`GeodesicArguments::representation`] is `None` for [`Representation::DEFAULT`] (integer
+//! coordinates, since their evaluation passed), `Some("signposts")` or
 //! `Some("integer")`. Nothing falls back silently: an extraction that fails on signposts is an
 //! error that says to try `representation="integer"`.
 

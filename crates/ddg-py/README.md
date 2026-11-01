@@ -478,24 +478,24 @@ returns per-vertex `array.array` results with a `report` dictionary. The triangu
 
 ```python
 geodesic_distance(positions, triangles, sources, *, triangulation="refined", time_factor=1.0,
-                  boundary="neumann", representation="signposts")
+                  boundary="neumann", representation="integer")
                                                  # -> .distances, .report         (Sec. 5.3)
 steiner_tree(positions, triangles, *, intrinsic=True, steiner_points=True,
-             representation="signposts")
+             representation="integer")
                                                  # -> .points, .offsets, .report  (Sec. 5.1)
 smoothest_direction_field(positions, triangles, *, n=1, triangulation="delaunay",
                           laplacian="fem", min_angle_degrees=25.0)
                   # -> .vectors, .singularity_points, .singularity_indices, .report (Sec. 5.5)
 adaptive_solve(positions, triangles, problem, *, source=0, time=None, max_vertices=20000,
-               bulk=0.5, min_angle_degrees=25.0, representation="signposts")
+               bulk=0.5, min_angle_degrees=25.0, representation="integer")
                                                   # -> .values, .n_components, .report (Sec. 5.4)
 ```
 
-`representation=` (`geodesic_distance`, `steiner_tree`, `adaptive_solve`) is `"signposts"` (the
-default, Sharp, Soliman, Crane 2019) or `"integer"` (integer coordinates, Gillespie, Sharp, Crane
-2021; the results agree with the signposts' to rounding, bitwise on the tested meshes, see
-`crates/ddg-intrinsic-apps/README.md`). The default is signposts until the Thingi10k evaluation
-(Integer Coordinates WP10) passes; one later commit then changes it (Q3).
+`representation=` (`geodesic_distance`, `steiner_tree`, `adaptive_solve`) is `"integer"` (the
+default: integer coordinates, Gillespie, Sharp, Crane 2021) or `"signposts"` (Sharp, Soliman,
+Crane 2019); the results agree to rounding, bitwise on the tested meshes, see
+`crates/ddg-intrinsic-apps/README.md`. Integers are the default since the Thingi10k evaluation
+(Integer Coordinates WP10, Q3) passed on all 7745 meshes.
 `smoothest_direction_field` stays on signposts (it needs input-aligned tangent frames, contract
 I26).
 
@@ -530,10 +530,9 @@ geodesic_bezier(positions, triangles, control_vertices, *, rounds=4, <same optio
   triangulation: `geodesic`, `min_angle`, `failures`, ...) and `input_certificate` (computed on the
   input mesh alone: `passed`, `max_crossing_deviation`, `min_joint_angle`, `max_length_error`,
   `faults`; `None` with `certify_input=False`, which is faster).
-* `representation=None` is the default of every consumer: **signposts** until the integer
-  representation passes the Thingi10k evaluation (Integer Coordinates WP10, Q3). It is
-  `ddg_intrinsic_apps::representation::Representation::DEFAULT`, so flipping the default is one
-  constant. Nothing falls back silently: a failed extraction on signposts is a `SolveError` that
+* `representation=None` is the default of every consumer: **integer coordinates**, since the
+  Thingi10k evaluation passed (Integer Coordinates WP10, Q3). It is
+  `ddg_intrinsic_apps::representation::Representation::DEFAULT`. Nothing falls back silently: a failed extraction on signposts is a `SolveError` that
   says to try `representation="integer"`. `mollify` is for integer coordinates only.
 * Errors: `InputError` names the parameter (fewer than two waypoints, two equal consecutive ones,
   an index out of range, a pair that is not an edge); `SolveError` for paths that touch or cross

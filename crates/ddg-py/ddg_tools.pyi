@@ -760,7 +760,7 @@ def geodesic_distance(
     triangulation: Literal["refined", "delaunay", "input"] = "refined",
     time_factor: float = 1.0,
     boundary: Literal["neumann", "dirichlet", "average"] = "neumann",
-    representation: Literal["signposts", "integer"] = "signposts",
+    representation: Literal["signposts", "integer"] = "integer",
 ) -> GeodesicDistanceResult:
     """Geodesic distance from the vertices ``sources`` by the heat method (Crane, Weischedel,
     Wardetzky 2013) on the intrinsic Delaunay refinement of the mesh (``"refined"``), its
@@ -790,7 +790,7 @@ def steiner_tree(
     *,
     intrinsic: bool = True,
     steiner_points: bool = True,
-    representation: Literal["signposts", "integer"] = "signposts",
+    representation: Literal["signposts", "integer"] = "integer",
 ) -> SteinerTreeResult:
     """A short cut through all vertices: the minimal spanning tree of the intrinsic Delaunay
     triangulation (``intrinsic=True``) or of the mesh's edges, shortened by Fermat points
@@ -856,7 +856,7 @@ def adaptive_solve(
     max_vertices: int = 20000,
     bulk: float = 0.5,
     min_angle_degrees: float = 25.0,
-    representation: Literal["signposts", "integer"] = "signposts",
+    representation: Literal["signposts", "integer"] = "integer",
 ) -> AdaptiveResult:
     """Solve a model problem with adaptive refinement of an intrinsic triangulation (residual
     error estimator, bulk marking, intrinsic Delaunay refinement): the harmonic Green's
@@ -1445,8 +1445,8 @@ def geodesic_path(
     triangulation_edges: bool = False,
 ) -> GeodesicResult:
     """A geodesic path (or loop, ``closed=True``) through the waypoints ``vertices`` by FlipOut.
-    ``representation=None`` is the default of all consumers (signposts until the integer
-    representation passes its evaluation). ``pin_waypoints=False``: the waypoints only seed the
+    ``representation=None`` is the default of all consumers (integer coordinates; signposts
+    on request). ``pin_waypoints=False``: the waypoints only seed the
     path. Raises ``InputError`` (the message names the parameter), ``MeshError`` and
     ``SolveError`` (the path crosses itself; a failed extraction on signposts says to try
     ``representation="integer"``)."""

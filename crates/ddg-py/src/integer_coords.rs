@@ -17,8 +17,8 @@
 //!   ([`Session::to_input`], [`Session::to_intrinsic`], integer coordinates only);
 //! * the **certificate** ([`Session::certify`], integer coordinates only).
 //!
-//! The default representation of the existing bindings is signposts; the representation of a
-//! session is chosen by the caller (`"integer"` or `"signposts"`).
+//! The default representation of the bindings is integer coordinates (contract Q3); the
+//! representation of a session is chosen by the caller (`"integer"` or `"signposts"`).
 
 use ddg_integer_coords::{InitOptions, IntegerRefineOptions, IntegerTriangulation, Transfer};
 use ddg_intrinsic::{

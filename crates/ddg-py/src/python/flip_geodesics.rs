@@ -236,7 +236,7 @@ fn execute(
 /// closed          join the last waypoint back to the first (a loop).
 /// pin_waypoints   keep the path through every waypoint (default True); False: they only seed the
 ///                 path, which may leave them (the ends of an open path stay).
-/// representation  None (default: signposts, Sharp-Soliman-Crane 2019), "signposts" or "integer"
+/// representation  None (default: integer coordinates, Gillespie-Sharp-Crane 2021), "signposts" or "integer"
 ///                 (Gillespie-Sharp-Crane 2021).
 /// mollify         relative intrinsic mollification (integer only; e.g. 1e-4).
 /// tolerance       a joint is straight when its smaller side exceeds pi - tolerance (1e-5).
