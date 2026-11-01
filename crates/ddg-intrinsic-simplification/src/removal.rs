@@ -488,6 +488,8 @@ impl CoarseMesh {
         let wanted = if boundary { 2 } else { 3 };
         let mut degree_flips = Vec::new();
         let cap = 4 * self.complex.vertex_degree(v) + 8;
+        // Spoke scores by edge id: a flip changes only the scores of the edges of its two faces.
+        let mut scores: Vec<(usize, f64)> = Vec::with_capacity(16);
         loop {
             let fan: Vec<usize> = self.fan(v).collect();
             let self_edge = fan.iter().any(|&h| self.complex.to_vertex(h) == v);
@@ -504,11 +506,23 @@ impl CoarseMesh {
             if degree_flips.len() >= cap {
                 return Err(RemovalRefusal::Stuck { faces: fan.len() });
             }
-            let Some(e) = self.degree_flip_choice(v, &fan) else {
+            let Some(e) = self.degree_flip_choice(v, &fan, &mut scores) else {
                 return Err(RemovalRefusal::Stuck { faces: fan.len() });
             };
             match self.flip_for_removal(e, track, &mut n_clamped)? {
-                Some(f) => degree_flips.push(f),
+                Some(f) => {
+                    degree_flips.push(f);
+                    let c = &self.complex;
+                    let h0 = c.edge_halfedge(e);
+                    let mut stale = [usize::MAX; 6];
+                    for (k, h) in [h0, c.twin(h0).unwrap_or(h0)].into_iter().enumerate() {
+                        let f = 3 * (h / 3);
+                        for s in 0..3 {
+                            stale[3 * k + s] = c.edge(f + s);
+                        }
+                    }
+                    scores.retain(|x| !stale.contains(&x.0));
+                }
                 None => {
                     return Err(RemovalRefusal::Internal {
                         what: format!("edge {e} was flippable and then refused"),
@@ -614,7 +628,12 @@ impl CoarseMesh {
     /// The spoke of `v` to flip next on the way to degree three or two (S14): among the
     /// flippable spokes, self-edges first, then the largest opposite-angle sum, ties by the
     /// lower edge id. `None` if no spoke can be flipped.
-    fn degree_flip_choice(&self, v: usize, fan: &[usize]) -> Option<usize> {
+    fn degree_flip_choice(
+        &self,
+        v: usize,
+        fan: &[usize],
+        scores: &mut Vec<(usize, f64)>,
+    ) -> Option<usize> {
         let c = &self.complex;
         // Scores first (cheap), then the flip test in the order of preference: the first
         // flippable spoke is the best flippable one.
@@ -626,8 +645,17 @@ impl CoarseMesh {
             if is_self && c.edge_halfedge(e) != h {
                 continue; // each self-edge once
             }
-            let score = corner_at(c, &self.length, c.prev(h)).unwrap_or(0.0)
-                + corner_at(c, &self.length, c.prev(t)).unwrap_or(0.0);
+            // Cached by edge id (the caller drops the edges a flip changes): the same value
+            // as computing it again.
+            let score = match scores.iter().find(|x| x.0 == e) {
+                Some(&(_, s)) => s,
+                None => {
+                    let s = corner_at(c, &self.length, c.prev(h)).unwrap_or(0.0)
+                        + corner_at(c, &self.length, c.prev(t)).unwrap_or(0.0);
+                    scores.push((e, s));
+                    s
+                }
+            };
             candidates.push((is_self, score, e));
         }
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.total_cmp(&a.1)).then(a.2.cmp(&b.2)));

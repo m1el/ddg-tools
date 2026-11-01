@@ -450,24 +450,26 @@ snapshot) in this one: `P_k` of §9.1 is built from it.
 *Performance (WP3).* `examples/simplify.rs --repeat 3` (best of 3, default options, fine vertices
 tracked, `simplify` from the initial Delaunay to the end) against `iem_ref --unlogged`
 (`coarsen_mesh` alone, best of 3), both pinned to one core, one run at a time, load average
-2–3 on 64 cores from other work:
+2.7–2.8 on 64 cores from other work (`runs_tmp/iem/wp3/bench1/`); "compat" is
+`reference_compat(0, …)`:
 
-| mesh, target | removals | ours s | ours removals/s | reference s | reference removals/s | ratio |
-|---|---|---|---|---|---|---|
-| spot → 500 | 2430 | 0.170 | 14 300 | 0.190 | 12 800 | 1.12 |
-| spot → min | 2927 | 0.192 | 15 300 | 0.219 | 13 400 | 1.14 |
-| bob → 500 | 4844 | 0.297 | 16 300 | 0.325 | 14 900 | 1.09 |
-| bob → min | 5343 | 0.329 | 16 200 | 0.365 | 14 600 | 1.11 |
-| blub → 500 | 6606 | 0.417 | 15 900 | 0.520 | 12 700 | 1.25 |
-| blub → min | 7103 | 0.490 | 14 500 | 0.542 | 13 100 | 1.11 |
-| spot_subdiv → 500 | 24255 | 1.544 | 15 700 | 1.760 | 13 800 | 1.14 |
-| spot_subdiv → min | 24752 | 1.554 | 15 900 | 1.802 | 13 700 | 1.16 |
+| mesh, target | removals | ours s | ours removals/s | reference s | reference removals/s | ratio | compat ratio |
+|---|---|---|---|---|---|---|---|
+| spot → 500 | 2430 | 0.168 | 14 500 | 0.190 | 12 800 | 1.14 | 1.17 |
+| spot → min | 2927 | 0.190 | 15 400 | 0.219 | 13 400 | 1.15 | 1.19 |
+| bob → 500 | 4844 | 0.297 | 16 300 | 0.326 | 14 800 | 1.10 | 1.12 |
+| bob → min | 5343 | 0.326 | 16 400 | 0.366 | 14 600 | 1.12 | 1.15 |
+| blub → 500 | 6606 | 0.413 | 16 000 | 0.474 | 13 900 | 1.15 | 1.17 |
+| blub → min | 7103 | 0.444 | 16 000 | 0.517 | 13 800 | 1.16 | 1.19 |
+| spot_subdiv → 500 | 24255 | 1.500 | 16 200 | 1.735 | 14 000 | 1.16 | 1.18 |
+| spot_subdiv → min | 24752 | 1.540 | 16 100 | 1.798 | 13 800 | 1.17 | 1.19 |
 
 Two thirds of the time is the re-queue (≈ 6 tentative removals per removal, ≈ 7 µs each) and
 13 % the initial costs; the
 profile is dominated by corner angles (Kahan's `atan2` form: ≈ 35 %), computed again when a
 neighbour's fan is refreshed after the tentative flattening and when the spokes are scored for
-the flips to degree 3. A per-halfedge cache of corner angles (kept through flips, flattening and
+the flips to degree 3 (the spoke scores are cached between the rounds of one removal: 2–3 %). A
+per-halfedge cache of corner angles (kept through flips, flattening and
 the undo log) would remove most of them; it changes the core's cache contract (§2.3) and is left
 for later.
 
