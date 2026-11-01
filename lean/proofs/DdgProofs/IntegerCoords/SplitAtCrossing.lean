@@ -241,7 +241,7 @@ lemma fin3_rot_lits : (∀ s : Fin 3, 0 + s = s) ∧ (∀ k s : Fin 3, k + 1 + s
     (∀ k s : Fin 3, k + 2 + s = k + s + 2) ∧ (∀ s : Fin 3, 1 + s = s + 1) ∧
     (∀ s : Fin 3, 2 + s = s + 2) := by decide
 
-lemma faceValid_rot (n : Fin 3 → ℤ) (s : Fin 3) :
+lemma faceValid_rotSide (n : Fin 3 → ℤ) (s : Fin 3) :
     faceValid (n (0 + s)) (n (1 + s)) (n (2 + s)) = faceValid (n 0) (n 1) (n 2) := by
   obtain ⟨l1, l2, l3, l4, l5, l6⟩ := fin3_lits
   have z : (0 : Fin 3) + 0 = 0 ∧ (1 : Fin 3) + 0 = 1 ∧ (2 : Fin 3) + 0 = 2 := by decide
@@ -260,7 +260,7 @@ theorem splitSideAtCrossingR_rot (n : Fin 3 → ℤ) (s : Fin 3) (j : ℤ) :
   have he : ∀ k, fcE (fun k => n (k + s)) k = fcE n (k + s) := fun k => by
     simp only [fcE, r1, r2]
   simp only [splitSideAtCrossingR, splitSideR, hc, he]
-  rw [faceValid_rot]
+  rw [faceValid_rotSide]
   simp only [r0, r3, r4]
 
 lemma cornerCoord_nPlus (a b c : ℤ) :
@@ -353,7 +353,7 @@ theorem splitSideAtCrossingR_eq {n : Fin 3 → ℤ} (s : Fin 3)
   obtain ⟨r0, -⟩ := fin3_rot_lits
   rw [splitSideAtCrossingR_rot]
   refine splitSideAtCrossingR_side0 (n := fun k => n (k + s)) ?_ ?_
-  · rw [faceValid_rot]; exact hv
+  · rw [faceValid_rotSide]; exact hv
   · simp only [r0]; exact hj
 
 /-- **`none` exactly for an invalid face or a crossing out of range** (`0 ≤ j < n⁺_s`).

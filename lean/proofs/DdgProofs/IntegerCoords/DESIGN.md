@@ -17,6 +17,7 @@ changing them.
 | `Recover.lean` | App. A (Eq. 15–16), Eq. 5 | `ic-recover-barycentric`, `ic-tangent-length` |
 | `Transfer.lean` | Eq. 13–14, the finite part of `P₀ᵀ M_S P₀ = M₀` | `ic-transfer-normal-equations`, `ic-transfer-mass-identity` |
 | `SplitEdge.lean` | splitting a crossed edge: `split_side`'s `n_mc` as a separation count | `ic-split-crossed-edge` |
+| `SplitAtCrossing.lean` | splitting an edge at its crossing `j`: the arcs crossing the new chord `mc` (`chordCount`, ends interleaving) are `sepCount` at the gap where the arc through `m` does not separate; the Rust `split_side_at_crossing` (`splitSideAtCrossingR`, any side) | `ic-split-at-crossing` |
 | `Strip.lean` | `Chord::hit`: the two parameters name one point, uniqueness, both directions | `ic-strip-intersection` |
 | `Complex/Basic.lean` | tier C: the complex model `Cx` (gluing, `n` per halfedge, face models = canonical models of the counts), crossings, `rev`, Alg. 1's step `next` = `traceStep` | `ic-trace-step` (on the complex) |
 | `Complex/Trace.lean` | walks: end at a corner or return to the start, no crossing twice or in both directions, `2m ≤ Σ n⁺` | `ic-trace-terminates` |
@@ -24,6 +25,7 @@ changing them.
 | `Complex/Quad*.lean` | two face models glued on `ij` and re-cut along `kl` (`Glue`): Eq. 3 = arcs crossing `kl` − arcs `k`–`l`, new faces valid, the curves through the quadrilateral unchanged (one file per outer side), the arcs at the corners | `ic-flip-normal` (C part) |
 | `Complex/Flip.lean` | the flip of a complex model (`Complex::flip_edge`'s slots) is valid; consistent roundabouts stay consistent with Eq. 4 | `ic-flip-normal`, `ic-roundabout-update` |
 | `Complex/Merge.lean` | one side of a straight merge (two faces glued along the spoke) gives a valid face; the Rust `merge_edge_normal` | `ic-merge-edge-normal` |
+| `Complex/SplitAtCrossing.lean` | the two faces of a split at a crossing (explicit admissible corner counts), straight with one curve end at `m` (`Merge.Side`, `Merge.Straight`, `Merge.ends = 1`), merging back to the original face; both sides and `Merge.merge_normal` | `ic-split-at-crossing` |
 | `Complex/Extract.lean` | every crossing on the curve of exactly one end (walk back), ends are arcs of corners | `ic-extract-intrinsic-edge` (combinatorial) |
 
 Cited (`CITED.md`, "Integer Coordinates"): `ic-normal-isotopy`, `ic-refinement-termination`,
