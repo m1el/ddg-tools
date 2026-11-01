@@ -31,6 +31,23 @@ Work in progress. The contract is [`SPEC.md`](SPEC.md).
 * `Complex::remove_boundary_vertex` in `ddg-intrinsic` (IT-SPEC N54) merges the two faces of a
   boundary vertex.
 
+## The ICE metric and intrinsic coarsening (WP3)
+
+* `metric` (SPEC §4): channels of mass (`ChannelWeights::curvature()` by default,
+  `::mixture(w)`, area, per-vertex user arrays split by sign) with weights; `ChannelState` holds
+  the masses and error vectors per vertex and evaluates or commits a removal's cost from its
+  `PreparedRemoval` (Eq. 9 weights, Eq. 5/8 transport or the memoryless Eq. 6).
+* `simplify(&mut mesh, &SimplifyOptions) -> SimplifyReport` (paper Alg. 1, SPEC §5): initial
+  Delaunay, a queue keyed by `(cost, vertex)` with lazy deletion, targets (`Vertices`, `Ratio`,
+  `PerComponent`, `MaxCost`, `AllRemovable`), fixed vertices, snapshots at given vertex counts
+  for a hierarchy, and a report (removals by kind, skips and commit failures by reason, the
+  check that a fresh key equals the commit cost, timings, the optional removal sequence).
+* `SimplifyOptions::reference_compat(w, target)` reproduces the reference's non-bug choices for
+  differential tests (SPEC §12.2, §12.3).
+* `cargo run --release -p ddg-intrinsic-simplification --example simplify -- MESH.obj --target N`
+  prints the report and quality statistics; `--compat --ref DIR --replay` compares with a run of
+  the reference driver.
+
 Tests: `cargo test --release -p ddg-intrinsic-simplification` (certificate after every flip and
 removal on generated shapes, Keenan Crane's models and the reference's meshes, the planar-grid
 test, curvature conservation, bitwise reverts, ears); `-- --ignored` adds every removable vertex

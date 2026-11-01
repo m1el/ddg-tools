@@ -244,7 +244,8 @@ fn replay(
         delaunay: DelaunayCriterion::AngleSum {
             tolerance: r.delaunay_tolerance.unwrap_or(1e-10),
         },
-        flatten_tolerance: r.flatten_tolerance.unwrap_or(1e-12),
+        flatten_tolerance: arg(&std::env::args().collect::<Vec<_>>(), "--replay-flatten-tol")
+            .unwrap_or(r.flatten_tolerance.unwrap_or(1e-12)),
         ..CoarseMeshOptions::default()
     };
     let mut mesh = CoarseMesh::from_positions(positions, faces, &[], mesh_options)

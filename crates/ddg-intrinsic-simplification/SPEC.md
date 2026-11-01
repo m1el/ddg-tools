@@ -140,7 +140,8 @@ from the cache, so every operation sees bitwise the same values.
 *As built:* `certify(delaunay: bool)` checks item 7 only when asked and always measures it
 (`Certificate::{max_delaunay_excess, n_not_delaunay}`); item 3 recomputes the angle sums from the
 lengths (not the cache); item 6 covers lengths, angular coordinates and point coordinates (masses
-come with WP3).
+come with WP3; they live in the run's `ChannelState`, not in `CoarseMesh`, and are checked
+by the tests of `simplify`).
 
 ---------------------------------------------------------------------------------------------------
 
@@ -355,6 +356,24 @@ that receive no mass (their existing `m_j‖t_j‖` counts; paper Eq. 6, S11 aga
 `C_i = ∞` when `i` is skipped (§3.5) or the tentative removal fails. After a removal the vertex's
 own masses and vectors are dropped (they now live at the neighbours).
 
+*As built (WP3, `src/metric.rs`).* `ChannelWeights { channels: Vec<Channel { source, weight }> }`
+with `ChannelWeights::curvature()` (the default, S10), `::mixture(w)` and `.with(source, w)`;
+sources `CurvaturePositive`, `CurvatureNegative`, `Area`, `PerVertex(values)` (one value per fine
+vertex; split into `user<k>+`, `user<k>−` only if a value is negative). The state of a run is a
+`ChannelState` (masses and vectors per fine id and channel, outside `CoarseMesh`, so `certify`
+does not see them; the tests check `m ≥ 0`, finite, zero at removed vertices, conserved totals).
+Channels of weight 0 are not tracked (they cannot change a cost). `fold_weights` multiplies the
+weights into the masses (R2; `t̃` is invariant under a common factor, so the cost is the same up to
+rounding). The plain formulas are public: `metric::redistribution_weights` (Eq. 9,
+`iem-redistribution-weights`), `metric::transport_update` (Eq. 5 and 8, `iem-center-of-mass-update`;
+`m̃_j = 0` keeps `t_j`), `metric::memoryless_cost` (Eq. 6 second form, `iem-memoryless-cost`). If
+`|K_i| > 1e-12` but `Σ|K̃_l − K_l|` is not a positive finite number (rounding only), the shares are
+equal too. A NaN cost is queued as `∞`. `MetricOptions { memory, flat: FlatRule, receiving_only,
+boundary_frames }`; `FlatRule::{Threshold(1e-12), ReferenceEpsilon}` (R12),
+`BoundaryFrames::{Paper, Reference}` (R3), `Frames::{AfterFlattening, BeforeFlattening,
+ReferenceCommit}` (R16, R19) select the angular coordinates of the transport: `NeighbourChange`
+carries `φ_ij`, `φ_ji` of the connecting edge both after and before flattening.
+
 ---------------------------------------------------------------------------------------------------
 
 ## 5. Simplification (paper Sec. 6, Alg. 1)
@@ -388,6 +407,66 @@ giving the hierarchy of §9 from one run (the masses and vectors carry across le
 **Performance.** The paper decimates ≈ 10 000 vertices/s (i7-8750H), the reference ≈ 12–15 000/s
 on this machine (single thread). Floor: ≥ the reference's rate on spot, bob, blub, spot_subdiv
 with tracking on; near-linear scaling with `|V|` (Fig. 16).
+
+*As built (WP3, `src/simplify.rs`).* `simplify(&mut CoarseMesh, &SimplifyOptions) ->
+Result<SimplifyReport, IemError>`. Options: `target: Target::{Vertices(n), Ratio(r),
+PerComponent(r), MaxCost(c), AllRemovable}` (`Vertices` is the `TargetVertices` above; `Ratio` and
+`PerComponent` round `r ·` the count when `simplify` starts; a popped vertex of a component at its
+target is discarded; `MaxCost` stops when the minimum valid key exceeds `c`), `channels`,
+`metric`, `initial_delaunay`, `requeue: Requeue::{StarsChanged, OneRing}`, `fixed` (added to the
+mesh's mask and left set), `snapshots` (strictly descending counts), `record_sequence`,
+`check_keys`, `reference: Option<ReferenceCompat>` (§12.2). Bad options are
+`IemError::InvalidOptions` and change nothing. The queue holds `(cost, stamp, fine id, version)`
+ordered by `f64::total_cmp`, then stamp (always 0 unless the reference's ties are asked for), then
+id; an entry is valid iff its version is the vertex's current one and the vertex is alive. Every
+live vertex is evaluated once at the start (ascending fine id). A popped valid vertex whose
+removal fails at commit is counted by reason and not re-queued (S7: it comes back when a
+re-queue reaches it). **Re-queue (S6, as built):** `N_i` plus the four vertices (old and new end
+points) of every flip of the removal — the ear flip, Springborn's fallback flips, the flips to
+degree 3/2 and the Delaunay flips after it. **Key check (S5, as built):** each vertex records the
+removal count of its last change (it is the removed vertex, in `N_i`, or a vertex of one of those
+flips) and of its last key; a key is *clean* if neither the vertex nor any of its neighbours
+changed since the key was computed, and a clean key must equal the commit cost bitwise
+(`KeyCheck::n_clean_mismatch = 0`, asserted on all test shapes in default and `OneRing` modes;
+keys that are not clean differ when a 2-ring vertex's masses changed, the paper's approximation).
+Report (`SimplifyReport`): stop reason, counts before/after, initial Delaunay flips and status,
+removals by kind, `skips` (live vertices at the end whose last evaluation was `∞`, by reason),
+`infinite_evaluations` and `commit_failures` by reason (`refusal_name`), pops, stale pops,
+component-done pops, evaluations, flattening steps (max, mean), fallback/degree/Delaunay flips,
+refused Delaunay flips, clamped points, per-component counts, `KeyCheck`, `SimplifyTimings`
+(initial Delaunay, channels, initial costs, removals, re-queue, snapshots, total), the optional
+`(vertex, kind, key, cost)` sequence, the snapshots, the final `ChannelState`.
+**Snapshots (S24, as built):** `Snapshot { n_removed, vertices (fine ids; index = compact id),
+faces (compact ids), lengths (per face side k → k+1), previous_vertices, previous:
+Vec<PointLocation> }`, taken when the vertex count first drops to each requested count (also at
+the start if it is already there; counts never reached are not taken). The compact ids are the
+complex's (the complex keeps its ids dense), i.e. the ids of WP4's `CoarseMesh::compact()`.
+`previous` locates the previous level's vertices (the vertices at the start for the first
+snapshot) in this one: `P_k` of §9.1 is built from it.
+
+*Performance (WP3).* `examples/simplify.rs --repeat 3` (best of 3, default options, fine vertices
+tracked, `simplify` from the initial Delaunay to the end) against `iem_ref --unlogged`
+(`coarsen_mesh` alone, best of 3), both pinned to one core, one run at a time, load average
+2–3 on 64 cores from other work:
+
+| mesh, target | removals | ours s | ours removals/s | reference s | reference removals/s | ratio |
+|---|---|---|---|---|---|---|
+| spot → 500 | 2430 | 0.170 | 14 300 | 0.190 | 12 800 | 1.12 |
+| spot → min | 2927 | 0.192 | 15 300 | 0.219 | 13 400 | 1.14 |
+| bob → 500 | 4844 | 0.297 | 16 300 | 0.325 | 14 900 | 1.09 |
+| bob → min | 5343 | 0.329 | 16 200 | 0.365 | 14 600 | 1.11 |
+| blub → 500 | 6606 | 0.417 | 15 900 | 0.520 | 12 700 | 1.25 |
+| blub → min | 7103 | 0.490 | 14 500 | 0.542 | 13 100 | 1.11 |
+| spot_subdiv → 500 | 24255 | 1.544 | 15 700 | 1.760 | 13 800 | 1.14 |
+| spot_subdiv → min | 24752 | 1.554 | 15 900 | 1.802 | 13 700 | 1.16 |
+
+Two thirds of the time is the re-queue (≈ 6 tentative removals per removal, ≈ 7 µs each) and
+13 % the initial costs; the
+profile is dominated by corner angles (Kahan's `atan2` form: ≈ 35 %), computed again when a
+neighbour's fan is refreshed after the tentative flattening and when the spokes are scored for
+the flips to degree 3. A per-halfedge cache of corner angles (kept through flips, flattening and
+the undo log) would remove most of them; it changes the core's cache contract (§2.3) and is left
+for later.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -592,10 +671,98 @@ clamping; clamps are counted (S16). No absolute `1e-5` as in the reference (R26)
    normalization `2π/(Θ+π)` R3, tentative keys before the frame update R16, 2-ring Delaunay
    seeding R21, the sum over receiving neighbours R11, the `+1e-6` R12, degree-1 boundary removal
    R9). On spot, bob, blub, capsule, crumpled developable: the same removal order and coarse
-   lengths to `1e-9` in compat mode; statistics compared in default mode.
+   lengths to `1e-9` in compat mode; statistics compared in default mode. *(The same order is
+   not reachable; see §12.3 for what is reached and why.)*
+
+   *As built (WP3).* `SimplifyOptions::reference_compat(w, target)`: no initial Delaunay (R1);
+   `mixture(w)` with the weights folded into the masses (R2); the reference's boundary frames
+   `2π/(Θ + π)` in the transport (R3: feasible without touching the mesh, as `A = φ · 2Θ/(Θ + π)`
+   from the crate's `φ = (π/Θ) θ`, the virtual direction `π` becoming `2πΘ/(Θ + π)`; the
+   reference's ear range `π` is not reproduced); the sum over receiving neighbours only (R11);
+   `ReferenceEpsilon` (R12); keys in the frames before flattening and the commit before flattening
+   at `i`, after at `j` (R16, R19); `Requeue::OneRing`; and in `ReferenceCompat`: 2-ring Delaunay
+   seeding (R21: every edge of the faces within two edge steps of the merged face), the Delaunay
+   tolerance `1e-5` (R22, the angle-sum test only; the reference's looser convexity test is not
+   reproduced), the flattening tolerance `|K| < 1e-7` (`1e-7/2π` relative), ties by push time then
+   vertex (the reference's `(cost, stamp, v)`). **R9 needs no option:** after the flips to degree 2
+   the reference flips the last spoke `ia` of the flat star (the quad `i, c, a, b` with the angle
+   `π` at `i`), giving the faces `(i, c, b)` (degenerate, deleted) and `(c, a, b)` with
+   `ℓ_bc = ℓ_bi + ℓ_ic`; our merge gives the same face `abc`, length and point layout, and the
+   flips before it follow the same greedy rule (R9 vs S13 differ only in rounding: confirmed by
+   the replays of §12.3, which end in the same connectivity with 48 boundary and 13 ear
+   removals). Not reproduced: R4 (the reference halfedge is the face side of least `A`,
+   re-chosen after flips and removals; ours is held fixed and passed clockwise), R13 (first CCW
+   edge instead of the shortest; only multi-edges), R23 (permanent zero scores), the convexity
+   tolerance of R22, R5/R6 (the tentative removal tests the flips; never differs in practice).
 3. **Lean oracle** (`lean/oracle`): Float implementations of the flattening step, the transport
    update and the cost of one removal on small stars; golden fixtures checked against the crate.
 4. **Lean proofs** (`lean/proofs`, §13).
+
+### 12.3 Against the reference (WP3)
+
+Runs (2026-11-01; logs and tables in `runs_tmp/iem/wp3/`, driver in `runs_tmp/iem/reference-driver.md`):
+the fixed reference `iem_ref_fixed` (R8, R10, R18 fixed in copies) against
+`examples/simplify.rs --compat --ref DIR --replay`. Three comparisons: the removal order of both
+runs; a **replay** that removes the vertices in the reference's order with the compat metric
+(public API only) and compares every commit cost and the final lengths, which does not depend on
+how near-ties are broken; and default-mode statistics.
+
+| run | removals | first divergence (step) | prefix sets equal (steps) / max diff / at end | key rel. diff. before it | replay: commit cost rel. diff. median / 90% / 99% | replay: final edges matched, max rel. length diff. |
+|---|---|---|---|---|---|---|
+| spot_500 | 2430 | 4 | 1526 / 4 / 2 | 1.0e-9 | 1.3e-4 / 1.6e-3 / 9.3e-3 | 1494/1494, 1.4e-6 |
+| spot_min | 2927 | 4 | 1526 / 36 / 3 | 1.0e-9 | 2.1e-4 / 3.7e-3 / 2.1e-2 | 3/3, 1.1e-8 |
+| bob_500 | 4844 | 5 | 1013 / 105 / 95 | 1.5e-9 | stops at step 1501 (Stuck, see below) | – |
+| blub_500 | 6606 | 3 | 66 / 214 / 187 | 5.4e-9 | 5.9e-5 / 6.0e-4 / 7.0e-3 | 1493/1494, 1.2e-4 |
+| blub_min | 7103 | 3 | 66 / 214 / 3 | 5.4e-9 | 7.0e-5 / 9.5e-4 / 1.8e-2 | 3/3, 2.9e-7 |
+| capsule_500 (w 0) | 10158 | 23 | 174 / 154 / 128 | 1.6e-7 | 1.0e-5 / 3.4e-4 / 1.7e-2 | 1494/1494, 1.8e-15 |
+| capsule_w0.8 | 10158 | 3 | 1031 / 227 / 193 | 1.8e-11 | 3.4e-5 / 4.9e-4 / 5.5e-2 | 1494/1494, 1.1e-15 |
+| crumpled_50 | 239 | 91 | 236 / 1 / 0 | 3.6e-3 | 1.4e-7 / 9.7e-5 / 1.5e-1 | 97/97, 5.6e-9 |
+| crumpled_min | 286 | 91 | 258 / 4 / 3 | 3.6e-3 | 3.7e-7 / 8.1e-2 / 4.3e-1 | 3/3, 2.1e-10 |
+| spot_subdiv_500 | 24255 | 1 | 619 / 326 / 226 | – | 2.8e-5 / 4.0e-4 / 2.8e-3 | 1494/1494, 3.1e-6 |
+
+Why they differ:
+* **The order diverges at near-ties.** Up to the first divergence the keys agree to `1e-9`
+  relative (the first removals are almost flat vertices whose masses `K = 2π − Θ ≈ 1e-7` carry
+  the rounding of `Θ`: Kahan's angle formula here, `acos` of normalized lengths there). The
+  first divergence is always a pair of keys within that noise (spot: `3.07849016166e-7` against
+  `3.07849016176e-7`, a mirrored pair; spot_subdiv at step 1, `2.49266761e-10` against
+  `2.49266748e-10`); the swapped pair is removed one step later. The prefix sets then stay close
+  (spot: never more than 4 vertices apart) but drift on larger meshes as keys diverge.
+* **Commit costs in the replay** (same order, same connectivity, same masses): the transport
+  itself is exact — on a planar grid with rigid frames the error vectors point to the mass
+  centroids to `1e-15` (`tests/simplify.rs`), for interior and boundary vertices. On the same
+  grid the reference's costs differ at most steps because R12 makes the shares of a flat vertex
+  rounding noise (`Σ|ΔK| ≈ 1e-16` is not exactly 0); with a diagnostic build `iem_ref_flat`
+  (S11's `|K_i| ≤ 1e-12` rule in the reference) the grid replays agree to a median of
+  `1e-13`–`1e-15` until a corner is removed and curvature appears. On curved meshes the
+  remaining differences (median `1e-5`–`2e-4`) come from how the error vectors are carried when
+  a neighbour's frame changes: the frames are anchored at a reference halfedge whose `φ` is held
+  fixed, and the reference's anchor (R4: the face side of least `A`, re-chosen after flips) is
+  not ours (fixed, passed clockwise). The flattening tolerance is not the cause (a replay with
+  `1e-14` changes nothing); masses agree.
+* **Lengths** agree to `1e-15` where no flattening is inexact (capsule), else to the reference's
+  flattening tolerance `|K| < 1e-7` (`1e-6`). blub_500: one edge differs (a Delaunay
+  co-circular tie). bob: at replay step 1501 vertex 1160 cannot be flipped to degree 3 here (our
+  flip shape test, IT-SPEC N5, refuses a nearly degenerate flip that the reference's convexity
+  test `< π + 1e-5` allows, R22).
+* crumpled: the keys before the divergence differ by up to `3.6e-3` at four interior vertices
+  of the developable sheet, where `K` is close to rounding size (R12's shares) and the vectors
+  already carry frames (R4); the order still agrees for 90 steps and the prefix sets end equal.
+
+Default mode against the reference (`mixture(w)` with `w` as given, else the curvature channels;
+initial Delaunay; S6; S11), at the same counts — the quality is the reference's:
+
+| run | ours: min angle °, \|K\| median / 90% / max, Σ\|K\| | reference (fixed) |
+|---|---|---|
+| spot_500 | 9.9, 0.187 / 0.415 / 0.925, 108.27 | 6.9, 0.188 / 0.396 / 0.802, 107.79 |
+| bob_500 | 16.8, 0.085 / 0.146 / 0.473, 46.82 | 15.0, 0.085 / 0.151 / 0.364, 46.92 |
+| blub_500 | 8.2, 0.090 / 0.309 / 1.306, 70.67 | 9.7, 0.089 / 0.309 / 1.296, 70.74 |
+| capsule_500 | 6.6, 0.028 / 0.035 / 0.048, 12.57 | 7.9, 0.028 / 0.035 / 0.045, 12.57 |
+| capsule_w0.8 | 17.2, 0.032 / 0.045 / 0.058, 12.57 | 14.1, 0.032 / 0.045 / 0.058, 12.57 |
+| crumpled_50 | 4.3, 0.323 / 1.234 / 2.357, 24.67 | 4.3, 0.318 / 1.234 / 2.357, 24.67 |
+| spot_subdiv_500 | 7.0, 0.182 / 0.401 / 0.771, 103.60 | 11.3, 0.181 / 0.396 / 0.807, 103.96 |
+
+Distortion (§10.3) is not compared yet (WP4/WP9).
 
 ---------------------------------------------------------------------------------------------------
 
@@ -645,6 +812,7 @@ Formula ids `iem-…`; tiers as IC-SPEC §9: A (algebraic/analytic identities), 
   unchanged neighbourhood; tests assert it (R16, R5).
 * **S6 Re-queue set**: `N_i` (paper) plus the endpoints of every edge flipped by the Delaunay pass
   after the removal (their stars changed). Option `requeue = OneRing` for the paper's literal set.
+  As built: the four vertices (old and new end points) of every flip of the removal (§5).
 * **S7 Failures revert and skip** (paper; R6, R17): never a panic or an abort.
 * **S8 Stop at the first `∞`** (paper, R17).
 * **S9 Flattening**: bracketed Newton on the extended angles (§3.4), Springborn's flip fallback
