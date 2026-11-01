@@ -16,3 +16,4 @@
 //!   with a closest-point projection map (SPEC §10.4).
 
 pub mod baseline;
+pub mod curvature;
