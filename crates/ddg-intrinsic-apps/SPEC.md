@@ -166,6 +166,21 @@ Machine-checked: `app-heat-gradient`, `app-heat-divergence`, `app-fem-galerkin-m
   convex domains (Euclidean distance, `1e-10`), an annulus against Dijkstra on the visibility
   graph (`1e-10`), a cube (`1e-12`), and by invariance: the same distances at the input
   vertices on the input, the exported iDT and the exported iDR (`1e-9` of the largest).
+* **N37b** *The exact distance on a Δ-complex* (Intrinsic Simplification S20).
+  `exact::exact_distance_complex(&Complex, &[edge lengths], &[ExactSource], &ExactOptions)`
+  shares the propagation of N37 through a private adjacency trait, so the `TriMesh` entry point
+  is bit-for-bit unchanged (`tests/exact_pins.rs`: hashes of distances and report on seven
+  meshes, recorded before the refactoring) and the `Complex` entry point on `from_tri_mesh`
+  gives the same bits (`tests/exact_complex.rs`). Lengths must be positive and form triangles
+  of positive area (errors `Lengths`, `InvalidPoint`). Sources: `Vertex(v)` or
+  `Point { face, bary }` (corners `faces()[f][0..3]`); a point seeds the three corners at
+  their in-face distances and one window per edge across it; on an edge it is moved off by a
+  relative `1e-13`, at a corner it is the vertex. Validated by: brute-force unfolding with
+  Dijkstra over vertices on complexes coarsened by flips and removals (self-edges, doubled
+  edges, repeated corners present; `1e-7`), the lattice distance on a flat 5x4 torus
+  coarsened to 8, 4, 3, 2 vertices (`1e-9`), and a face-point source against the vertex source
+  of `Complex::split_face` (`1e-11`). The heat method has no Δ-complex form, so there is no
+  heat comparison on Δ-complexes.
 * **N38** *Measurement of 5.3.* Errors at the input vertices against `exact`, three sources
   per mesh (vertices `0`, `n/3`, `2n/3`): mean relative error over vertices with `d* > 0`, mean
   and largest absolute error over the largest distance. The paper's "iDR" is refinement to an
