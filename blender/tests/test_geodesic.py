@@ -559,7 +559,8 @@ def the_selection_survives_the_operators():
     source = grid()
     a, b, c = (vertex_at(source, *p) for p in ((-0.8, -0.8), (0.8, -0.8), (0.0, 0.8)))
     for work in (lambda: bpy.ops.mesh.ddg_geodesic_path(mode='PATH'),
-                 lambda: expect_error(lambda: bpy.ops.mesh.ddg_geodesic_path(mollify=True), "Mollify")):
+                 lambda: expect_error(lambda: bpy.ops.mesh.ddg_geodesic_path(
+                     mollify=True, representation='SIGNPOSTS'), "Mollify")):
         select_in_order(source, [c, a, b])
         work()
         bm = bmesh.from_edit_mesh(source.data)

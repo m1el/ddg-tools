@@ -678,8 +678,11 @@ def operators_are_registered_with_the_agreed_properties():
     properties = {p.identifier: p for p in rna.properties if p.identifier != "rna_type"}
     assert set(properties) == {"mode", "radius", "vertex", "regions", "cluster_iterations",
                                "attribute", "cut_offset", "triangulation", "refine_bound",
-                               "optimal_delaunay", "merge_tolerance"}, \
+                               "optimal_delaunay", "merge_tolerance", "representation"}, \
         sorted(properties)
+    assert properties["representation"].default == 'INTEGER'
+    assert [i.identifier for i in properties["representation"].enum_items] == [
+        'SIGNPOSTS', 'INTEGER']
     assert properties["triangulation"].default == ARGS.triangulation.upper()
     assert properties["refine_bound"].default == 25.0
     assert properties["optimal_delaunay"].default == ARGS.optimal_delaunay
@@ -1578,6 +1581,36 @@ def optimal_delaunay_is_one_bool_that_is_part_of_the_option_and_the_session_key(
     token = cutmod.gather(obj)[1]
     assert cutmod.cache_key(mesh, token, "intrinsic", 1e-3, 0.1) != cutmod.cache_key(
         mesh, token, "intrinsic+odt", 1e-3, 0.1)
+
+
+@test
+def the_representation_is_part_of_the_option_and_reaches_the_session():
+    cutmod = importlib.import_module(ARGS.module + ".cut")
+    assert cutmod.option_of('INTRINSIC', representation='INTEGER') == "intrinsic"
+    assert cutmod.option_of('INTRINSIC', representation='SIGNPOSTS') == "intrinsic+signposts"
+    assert cutmod.option_of('REFINED', 30.0, True, 'SIGNPOSTS') == "refined:30+odt+signposts"
+    assert cutmod.option_of('CALLER', representation='SIGNPOSTS') == "caller"
+    assert cutmod.option_keywords("refined:30+odt+signposts") == {
+        "triangulation": "refined", "refine_bound": 30.0, "optimal_delaunay": True,
+        "representation": "signposts"}
+    assert "representation" not in cutmod.option_keywords("intrinsic")
+    obj = primitive("uv_sphere", segments=24, ring_count=12)
+    mesh = obj.data
+    states = {}
+    for representation, option in (('INTEGER', "intrinsic"),
+                                   ('SIGNPOSTS', "intrinsic+signposts")):
+        assert bpy.ops.uv.ddg_cut_start(mode='CIRCLE', radius=0.9, vertex=5,
+                                        triangulation='INTRINSIC', optimal_delaunay=False,
+                                        representation=representation) == {'FINISHED'}
+        assert mesh["ddg_cut_option"] == option
+        session, _, _ = cutmod.open_session(obj, 1e-3, 0.1)
+        assert session.representation == representation.lower(), session.representation
+        assert flow(steps=3) == {'FINISHED'}
+        states[representation] = state(mesh)
+    # The same flips: the same cut to rounding (the attributes are float32).
+    worst = max(abs(a - b) for ra, rb in zip(states['INTEGER'], states['SIGNPOSTS'])
+                for a, b in zip(ra, rb))
+    assert worst < 1e-5, worst
 
 
 @test

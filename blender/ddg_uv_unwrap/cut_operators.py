@@ -11,6 +11,7 @@ from bpy.props import (BoolProperty, EnumProperty, FloatProperty, FloatVectorPro
                        IntProperty, StringProperty)
 
 from . import cut, core
+from .geodesic_operator import REPRESENTATION_DEFAULT, REPRESENTATION_ITEMS
 
 _CITATION = ("Method: Sharp, Crane, Variational Surface Cutting (2018); the implementation is "
              "clean-room, from the text of the paper")
@@ -138,6 +139,16 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
             "ignored with Mesh's Own. Off by default"),
         default=False,
     )
+    representation: EnumProperty(
+        name="Representation",
+        description=(
+            "How the hidden intrinsic triangulation is stored. Both make the same flips, "
+            "splits and refinement, so the cut is the same to rounding; integer coordinates "
+            "(Gillespie, Sharp, Crane 2021) are the default since their evaluation on "
+            "Thingi10k; with Optimal Delaunay their setup is about 4 times as slow. Ignored "
+            "with Mesh's Own"),
+        items=REPRESENTATION_ITEMS, default=REPRESENTATION_DEFAULT,
+    )
     merge_tolerance: FloatProperty(
         name="Merge Bends",
         description=(
@@ -184,6 +195,9 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
         row.prop(self, "optimal_delaunay")
         if self.optimal_delaunay and self.triangulation == 'CALLER':
             layout.label(text="Optimal Delaunay is ignored with Mesh's Own", icon='INFO')
+        row = layout.row()
+        row.active = self.triangulation != 'CALLER'
+        row.prop(self, "representation")
         if self.mode == 'CIRCLE':
             layout.prop(self, "radius")
             layout.prop(self, "vertex")
@@ -213,7 +227,8 @@ class UV_OT_ddg_cut_start(bpy.types.Operator):
                     cut_offset=self.cut_offset, merge_tolerance=self.merge_tolerance,
                     triangulation=self.triangulation,
                     refine_bound=self.refine_bound,
-                    optimal_delaunay=self.optimal_delaunay)
+                    optimal_delaunay=self.optimal_delaunay,
+                    representation=self.representation)
         except core.UnwrapFailed as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}

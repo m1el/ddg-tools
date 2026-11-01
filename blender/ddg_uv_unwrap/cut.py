@@ -34,6 +34,7 @@ from mathutils import Vector
 from mathutils.kdtree import KDTree
 
 from . import core
+from .geodesic_operator import REPRESENTATION_DEFAULT
 
 # The smallest distance of a point of the cut from a vertex, as a fraction of its edge, in the
 # cut that is shown (preview) and inserted (Apply): the library's own default for the flow. It
@@ -130,14 +131,25 @@ def read_state(mesh):
 
 
 ODT_SUFFIX = "+odt"
+# The intrinsic triangulation on signposts instead of integer coordinates (the default,
+# ``geodesic_operator.REPRESENTATION_DEFAULT``). An option without it, also one stored before
+# the representation existed (2026-11-01, then signposts), runs on integer coordinates: the
+# same flips, splits and refinement, so a state kept per corner gives the same cut to rounding;
+# a state kept in bytes carries its own representation.
+SIGNPOSTS_SUFFIX = "+signposts"
 
 
-def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False):
+def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False,
+              representation=REPRESENTATION_DEFAULT):
     """The option string for the operator's enum value ('INTRINSIC', 'REFINED', 'CALLER').
-    ``optimal_delaunay`` appends ``"+odt"``; it needs an intrinsic triangulation."""
+    ``optimal_delaunay`` appends ``"+odt"``; it needs an intrinsic triangulation.
+    ``representation`` 'SIGNPOSTS' appends ``"+signposts"`` (intrinsic triangulations; ignored
+    for 'CALLER')."""
     if optimal_delaunay and triangulation == 'CALLER':
         raise CutFailed("Optimal Delaunay needs an intrinsic triangulation, not the mesh's own")
     suffix = ODT_SUFFIX if optimal_delaunay else ""
+    if representation == 'SIGNPOSTS' and triangulation != 'CALLER':
+        suffix += SIGNPOSTS_SUFFIX
     if triangulation == 'REFINED':
         return "refined:{:g}".format(refine_bound) + suffix
     return {'INTRINSIC': "intrinsic", 'CALLER': "caller"}[triangulation] + suffix
@@ -146,6 +158,9 @@ def option_of(triangulation, refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay
 def option_keywords(option, offset=None, merge=None):
     """The keywords of ``CutSession`` for an option string; ``offset`` is the smallest distance
     of a point of the cut from a vertex of the caller's triangles (intrinsic sessions)."""
+    signposts = option.endswith(SIGNPOSTS_SUFFIX)
+    if signposts:
+        option = option[:-len(SIGNPOSTS_SUFFIX)]
     optimal = option.endswith(ODT_SUFFIX)
     if optimal:
         option = option[:-len(ODT_SUFFIX)]
@@ -155,6 +170,8 @@ def option_keywords(option, offset=None, merge=None):
         keywords["refine_bound"] = float(bound or DEFAULT_REFINE_BOUND)
     if optimal:
         keywords["optimal_delaunay"] = True
+    if signposts and kind != "caller":
+        keywords["representation"] = "signposts"
     if kind != "caller" and offset is not None:
         keywords["min_offset"] = offset
     if kind != "caller" and merge is not None:
@@ -401,7 +418,8 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
               selected_vertices=(), cluster_iterations=50, attribute="",
               cut_offset=DEFAULT_CUT_OFFSET, merge_tolerance=DEFAULT_MERGE_TOLERANCE,
               triangulation='INTRINSIC',
-              refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False):
+              refine_bound=DEFAULT_REFINE_BOUND, optimal_delaunay=False,
+              representation=REPRESENTATION_DEFAULT):
     """Creates the state of a cut on ``obj`` and its preview.
 
     ``mode`` is ``'SELECTED'`` (the selected faces against the rest, two regions), ``'CIRCLE'``
@@ -415,7 +433,9 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
     ``optimal_delaunay`` adds the intrinsic optimal Delaunay triangulation to the intrinsic or
     refined triangulation: more even triangle areas in the hidden intrinsic triangulation, a
     slower setup and slower flow steps. It is ignored, with a warning in the result, for
-    ``'CALLER'``.
+    ``'CALLER'``. ``representation`` ('INTEGER', the default, or 'SIGNPOSTS') is how the hidden
+    intrinsic triangulation is stored; both give the same cut to rounding (ignored for
+    ``'CALLER'``).
 
     Returns a dict with the session's sizes and timings.
     """
@@ -475,7 +495,7 @@ def start_cut(obj, *, mode, radius=0.0, vertex=-1, n_regions=2, active_vertex=No
         n_regions = 2
     else:
         raise CutFailed("Unknown start mode {!r}".format(mode))
-    option = option_of(triangulation, refine_bound, optimal_delaunay)
+    option = option_of(triangulation, refine_bound, optimal_delaunay, representation)
     forget(mesh)
     gathered, token = gather(obj)
     session, seconds_extract = make_session(obj, start, n_regions, option, cut_offset,
