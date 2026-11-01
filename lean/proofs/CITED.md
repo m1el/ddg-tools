@@ -2181,12 +2181,14 @@ Willmore gradient (finite differences, SPEC §13.2); the turning-angle gradient 
 the convergence of GMRES, of the Newton projection, of the flow and of the comparison
 optimizers; the data structures (BVH, BCT, remeshing mesh) and every tolerance; rounding.
 
-**SPEC errors found while proving.** SPEC §6.2 prints the Newton correction as
-"`h = A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` subtracted (`rs-schur-correction`: `C_N h = Φ`)". With
+**SPEC errors found while proving (both fixed in the SPEC).** The first SPEC version printed the
+Newton correction as "`h = A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` subtracted (`C_N h = Φ`)". With
 `S = −C_N A′⁻¹ C_Nᵀ` that `h` satisfies `C_N h = −Φ` (`RS.schur_correction`), so it must be
 **added** (paper Eq. 21, "which we add to the updated embedding"); subtracting it doubles the
-linearized violation (`RS.schur_correction_sign`). SPEC §6.3 tags `rs-fractional-preconditioner`,
-which §12 does not list; it is proved (`RS.frac_precond_props`).
+linearized violation (`RS.schur_correction_sign`). The SPEC (§6.2, since 5ead321) now defines the
+Rust step as the negation, `h = −A′⁻¹ C_Nᵀ S⁻¹ Φ`, with `C_N h = Φ`, applied as `f ← f − h`: the
+same update. SPEC §6.3 tagged `rs-fractional-preconditioner` without a §12 row; the row is added,
+and the id is proved (`RS.frac_precond_props`).
 
 ### [formula: rs-exponent-range] The energy space of the tangent-point energy of surfaces
 

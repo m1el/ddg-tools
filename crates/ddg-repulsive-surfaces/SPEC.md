@@ -710,6 +710,7 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rs-projector-average` | `vᵀP̄v = Σ w_S |P_S v|²` for a convex combination | `hierarchical` | proved, `Metric.lean` |
 | `rs-fractional-operator` | Eq. 5/6 fractional Laplacian | docs | cited |
 | `rs-preconditioner-order` | `W⁻¹(M Δ^{2−s})W⁻¹ = Δ^{−s} M⁻¹` for `Δ = M⁻¹W` (commuting powers of a diagonalizable `Δ`) | `precond` | proved, `Precond.lean` (matrix identity; the approximation of `B` cited) |
+| `rs-fractional-preconditioner` | `P⁻¹ = L′⁻¹ blockdiag(L_{2−s}⊗I₃, 0) L′⁻¹` is symmetric, PSD, and `C_Q P⁻¹ r = 0` | `solve::precond` | proved, `Precond.lean` |
 | `rs-preconditioner-approx` | `Ã⁻¹` approximates the inverse of the high-order term (Sec. 5.2) | docs | cited |
 | `rs-schur-direction` | Eq. 19–20: `x` solves the saddle, `Cx = 0` | `solve::schur` | proved, `Saddle.lean` |
 | `rs-schur-correction` | Eq. 21: `C h = Φ` | `solve::schur` | proved, `Saddle.lean` |
