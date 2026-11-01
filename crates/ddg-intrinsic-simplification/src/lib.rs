@@ -50,6 +50,9 @@
 //!   SPEC §8) and the coarse mesh of the scaled metric.
 //! * [`applications`] (WP6, SPEC §10.1): Poisson, single-source geodesic distance (exact and heat),
 //!   all pairs, Voronoi and the exponential map on the coarse mesh, prolongated with `P`.
+//! * [`refine`] (WP5, SPEC §6): pre-refinement ([`CoarseMesh::from_refined`],
+//!   [`CoarseMesh::from_intrinsic`]) and post-refinement ([`CoarseMesh::post_refine`]) with the
+//!   workspace's Delaunay refinement, tracked points composed through the `T⁰ → T¹` query.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
 pub mod anisotropy;
@@ -65,6 +68,7 @@ pub mod metric;
 pub mod multigrid;
 mod output;
 pub mod prolongation;
+pub mod refine;
 mod removal;
 mod simplify;
 mod undo;

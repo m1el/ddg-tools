@@ -492,10 +492,73 @@ first); the default weights are kept and the recipe is documented, not imposed.
 Delaunay refinement of the coarse mesh for element quality (corner angles ≥ 25° when `M̄` is closed
 and every input angle sum `Θ_i ≥ 60°`, Gillespie et al. 2021a; otherwise best effort, reported).
 Done by treating the coarse mesh as the input of a new intrinsic triangulation (its `Complex` and
-lengths are a valid Δ-complex input of `ddg-integer-coords` / `ddg-intrinsic`), refining it, and
+lengths, **if it is simplicial**: the input of `ddg-integer-coords` / `ddg-intrinsic` is a `TriMesh`,
+not a Δ-complex, see "As built" below for what is refused), refining it, and
 composing the maps: a tracked point `Face(f, b)` of the coarse mesh is a point of that input and is
 located in the refined triangulation by its `T⁰ → T¹` query. The result is again a `CoarseMesh`
 (lengths, angular coordinates rebuilt, inserted vertices get new ids `≥` all previous ids).
+
+*As built (WP5; `src/refine.rs`, `tests/refine.rs`, `examples/refine_study.rs`).*
+
+* **API.** `CoarseMesh::from_intrinsic<T: LocatedTriangulation>(&T, &[InputPoint], options)`
+  (§3.1; `LocatedTriangulation: ddg_intrinsic_apps::representation::InputPoints` with a batch
+  query, implemented for `IntegerTriangulation`, which caches the common subdivision per input
+  face, and `IntrinsicTriangulation`); `CoarseMesh::from_refined(mesh, geometry, points,
+  mesh_options, &RefinementOptions)` = build `T⁰`, refine, `from_intrinsic`; `CoarseMesh::post_refine(&self,
+  &RefinementOptions) -> (CoarseMesh, RefinementReport)` (`self` unchanged). `RefinementOptions`:
+  `representation` (default `Representation::DEFAULT`), the shared driver's `RefineOptions`
+  (25°), `rules` (`None`: the representation's default, `Chew` for integers, `Ruppert` for
+  signposts), `certify`, `make_simplicial_flips`. Errors: `RefineError`
+  (`Coarse(IemError)`, `NotSimplicial`, `Integer`, `Intrinsic`, `Locate { point, what }`).
+  Dependencies added: `ddg-integer-coords` and `ddg-intrinsic-apps` (the `InputPoints` trait and
+  `Representation`; moved from dev-dependencies), both workspace crates.
+* **Ids (S2).** Pre-refinement: fine ids are the ids of `T¹` (the input vertices `0..|V|`, then the
+  inserted ones in the order of `T¹`'s vertices; Chew's removals renumber, so "creation order"
+  means the final order). `n_fine_vertices` stays `|V|`; the tracked points are the input vertices
+  (as `Vertex`) and the extra points (as `Face`); inserted vertices are neither tracked nor fixed
+  (`removal.rs` already only re-expresses a removed vertex that is `< n_input`). Post-refinement:
+  old vertices keep their fine ids, inserted ones get `complex_of.len() + (v − m)` for the vertex
+  `v` of `T¹` (`m` = old vertex count), all tracked points keep their ids, the fixed mask is
+  carried over (new vertices free).
+* **Located points** are put in a face (S16 style): a result on a vertex goes to the face of the
+  vertex's outgoing halfedge with a unit barycentric vector, one on an edge to the face of the edge's
+  halfedge; negatives down to `−1e-9` are clamped to 0 and counted (`n_clamped`), further out is
+  `RefineError::Locate`; coordinates are renormalized to sum 1.
+* **Frames.** The angular coordinates are rebuilt from scratch (S4: the reference halfedge is the
+  new complex's outgoing halfedge, `φ = 0` there). The new frames are not the old ones and no
+  rotation is kept; `P` and `P^vec` of the new mesh are computed from its own frames and the fine
+  frames, so they are consistent without it (a coarse vector field expressed in the old frames
+  would need re-expressing; not provided).
+* **What is refused (post-refinement).** The refinement crates take a `TriMesh` (distinct vertices
+  in a face, no two faces on the same three vertices, one edge per vertex pair), a coarse mesh is a
+  Δ-complex. `as_simplicial_input()` returns `NotSimplicial { what }` naming the face or edge (fine
+  ids) for: a face with a repeated vertex (self-edge/loop), two faces on the same three vertices,
+  two different edges between the same two vertices (bigon), any other `TriMesh` error. Nothing is
+  repaired silently. Option `make_simplicial_flips: Some(n)`: on a working copy,
+  `CoarseMesh::make_simplicial(n)` greedily flips (tracked, metric and map unchanged) an edge at
+  or next to a defect when that lowers the number of defects (self-faces + surplus parallel edges +
+  surplus faces) and the flip is geometrically possible; the report has the flips and defects; if
+  defects remain the refusal stands. Pre-refinement has no such restriction (its input is a
+  `TriMesh`). Measured (random removal order down to a fraction of the pre-refined mesh, README):
+  refused without the option on blub only at 2 %, on spot at 5 %, on boxpart at every fraction
+  (up to 50 %); with the option all but boxpart at ≤ 10 %.
+* **Guarantee.** `RefinementReport::guarantee_applies` = the input of the refinement is closed and
+  every angle sum ≥ 60°; then the bound is reached (tested: 25.00–25.10° on every closed model).
+  `min_angle` is reported either way, as are `refine.min_angle_reachable` (the smallest angle at
+  vertices that are not narrow) and the shared driver's report.
+* **Measured** (single thread, release, machine load ≈ 3–5 from other agents): blub (7106 vertices):
+  pre-refinement +1771 vertices (the same count as the reference; reference 33 s, here 0.029 s
+  refine + 0.015 s build/locate, signposts 0.027 s), 14208 extra points located in 0.07 s
+  (integers); post-refinement of 2219 coarse vertices +1360 in 0.043 s.
+* **Convenience.** "Refine, then coarsen" in one call is `from_refined` followed by `simplify`
+  (WP3); it is to be wired when `simplify` lands. The reference recipe's area weight 0.1 is not
+  imposed.
+* **Signposts limitation found.** The signposts' `T⁰ → T¹` query fails ("ran into a vertex") for a
+  point exactly on an input boundary edge of a coarse mesh whose boundary vertices are straight only
+  to rounding (it continues through a vertex only if the angle sum `== π`): the planar-grid
+  tests locate such points (removed boundary vertices) and so run post-refinement on integer
+  coordinates only, signposts report `RefineError::Locate` naming the point. The integer
+  representation has no such failure.
 
 ---------------------------------------------------------------------------------------------------
 
