@@ -57,8 +57,11 @@
 //! coarsening it can have a **self-edge or a face that uses a vertex twice**, **two edges between
 //! the same two vertices** (a bigon), or **two faces on the same three vertices**.
 //! [`CoarseMesh::post_refine`] checks this first and returns [`RefineError::NotSimplicial`]
-//! naming the faces, edges and fine ids; nothing is repaired, subdivided or changed. (The
-//! measured frequency is in the README.) Other refusals: a pending removal
+//! naming the faces, edges and fine ids; nothing is repaired, subdivided or changed. With
+//! [`RefinementOptions::make_simplicial_flips`] it first tries [`CoarseMesh::make_simplicial`] on
+//! a working copy: tracked edge flips (metric and map unchanged) that lower the number of
+//! defects, greedily; if defects remain the refusal stands. (The measured frequencies are in the
+//! README.) Other refusals: a pending removal
 //! ([`IemError::RemovalPending`]), and the errors of the refinement and of the point queries,
 //! which name the point.
 //!
