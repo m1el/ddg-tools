@@ -70,7 +70,7 @@ use ddg_core::sparse::ThreadPool;
 use ddg_intrinsic_apps::exact::{ExactOptions, ExactSource};
 
 use crate::applications::{AppError, CoarseApplications};
-use crate::baseline::qem::{ProjectedPoint, QemResult};
+use crate::baseline::qem::{ProjectedPoint, QemError, QemOptions, QemResult, qem_simplify};
 use crate::mesh::{CoarseMesh, CoarseMeshOptions};
 use crate::output::{CoarseOutput, CoarsePoint};
 
@@ -760,4 +760,48 @@ pub fn extrinsic_applications(
 /// [`EvalError::App`] for a degenerate face.
 pub fn coarse_area(app: &CoarseApplications) -> Result<f64, EvalError> {
     Ok(app.output().face_areas()?.iter().sum())
+}
+
+/// QEM down to `target` vertices for a comparison at equal vertex counts. The defaults of
+/// [`QemOptions`] first; if they stop short of the target (the normal-flip test of Garland and
+/// Heckbert Sec. 6 and the link condition leave no allowed collapse), a ladder of relaxations:
+/// the normal-flip test off (`min_normal_cos = −1`), then also the placement bounded to
+/// `placement_radius = 1` edge length of the midpoint (the unbounded optimum of a nearly singular
+/// quadric throws vertices far away, which folds the mesh until the link condition forbids every
+/// collapse). Returns the result and the rung used (`0` defaults, `1`, `2`); the caller must
+/// check `report.reached_target`.
+///
+/// # Errors
+/// As [`qem_simplify`].
+pub fn qem_to_target(
+    positions: &[[f64; 3]],
+    faces: &[[u32; 3]],
+    target: usize,
+    successive_map: bool,
+) -> Result<(QemResult, usize), QemError> {
+    let base = QemOptions {
+        successive_map,
+        ..QemOptions::new(target)
+    };
+    let ladder = [
+        base,
+        QemOptions {
+            min_normal_cos: -1.0,
+            ..base
+        },
+        QemOptions {
+            min_normal_cos: -1.0,
+            placement_radius: 1.0,
+            ..base
+        },
+    ];
+    let mut last = None;
+    for (rung, o) in ladder.iter().enumerate() {
+        let r = qem_simplify(positions, faces, o)?;
+        if r.report.reached_target {
+            return Ok((r, rung));
+        }
+        last = Some((r, rung));
+    }
+    Ok(last.expect("three rungs"))
 }

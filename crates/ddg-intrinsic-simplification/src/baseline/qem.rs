@@ -505,13 +505,21 @@ impl Work {
         if common != opposite {
             return Err(Reject::Link);
         }
-        // No face at u (or v) between two common neighbours: the edge of the link would be in
-        // both links (the tetrahedron, or a triangle that the collapse would double).
-        for &w in &[u, v] {
+        // A face (w, a, b) at one end whose other two corners are common neighbours (so they
+        // are the two opposite vertices) is fine on its own (a vertex of degree three collapses
+        // into any neighbour: the face turns into (x, a, b)), but not if the other end x already
+        // has the face (x, a, b): the collapse would double it (the tetrahedron).
+        for &(w, x) in &[(u, v), (v, u)] {
             for &f in &self.vfaces[w as usize] {
                 let [a, b, c] = self.faces[f as usize];
-                let others: Vec<u32> = [a, b, c].into_iter().filter(|&x| x != w).collect();
-                if others.len() == 2 && others.iter().all(|x| common.contains(x)) {
+                let others: Vec<u32> = [a, b, c].into_iter().filter(|&y| y != w).collect();
+                if others.len() == 2
+                    && others.iter().all(|y| common.contains(y))
+                    && self.vfaces[x as usize].iter().any(|&g| {
+                        let t = self.faces[g as usize];
+                        others.iter().all(|y| t.contains(y))
+                    })
+                {
                     return Err(Reject::Link);
                 }
             }
@@ -710,15 +718,30 @@ pub fn qem_simplify(
             versions: (w.version[u as usize], w.version[v as usize]),
         });
     };
-    for v in 0..n as u32 {
-        for &x in &w.nbrs[v as usize] {
-            if v < x {
-                push(&w, &mut heap, &mut seq, v, x);
+    // A rejected collapse is dropped from the queue and only comes back when a neighbour changes,
+    // so the queue can run dry before the target: the edges are then queued again (a "sweep")
+    // as long as the last sweep made progress.
+    let mut sweep_collapses = usize::MAX;
+    while w.n_alive > options.target_vertices {
+        if heap.is_empty() {
+            if sweep_collapses == 0 {
+                break;
+            }
+            sweep_collapses = 0;
+            for v in 0..n as u32 {
+                if !w.alive[v as usize] {
+                    continue;
+                }
+                for &x in &w.nbrs[v as usize] {
+                    if v < x {
+                        push(&w, &mut heap, &mut seq, v, x);
+                    }
+                }
+            }
+            if heap.is_empty() {
+                break;
             }
         }
-    }
-
-    while w.n_alive > options.target_vertices {
         let Some(entry) = heap.pop() else { break };
         let (u, v) = entry.edge;
         let (iu, iv) = (u as usize, v as usize);
@@ -801,6 +824,7 @@ pub fn qem_simplify(
             w.recompute_nbrs(a);
         }
         report.n_collapses += 1;
+        sweep_collapses = sweep_collapses.saturating_add(1);
         if kind == 3 {
             report.n_placed_segment += 1;
         } else {

@@ -418,3 +418,15 @@ fn singular_systems_use_the_segment_placement() {
     assert!(r.report.n_collapses > 0);
     assert!(r.report.n_placed_segment > 0, "{:?}", r.report);
 }
+
+/// A vertex of degree three collapses into any neighbour (its three faces become two and one that
+/// is not doubled); the link test must not reject it, or the run stalls far above a small target.
+#[test]
+fn a_sphere_collapses_to_a_handful_of_vertices() {
+    let g = icosphere(3).unwrap();
+    let r = qem_simplify(&g.positions, &g.faces, &QemOptions::new(8)).unwrap();
+    assert!(r.report.reached_target, "{:?}", r.report);
+    assert_eq!(r.positions.len(), 8);
+    // Euler: V - E + F = 2 with E = 3F/2.
+    assert_eq!(r.faces.len(), 2 * 8 - 4);
+}
