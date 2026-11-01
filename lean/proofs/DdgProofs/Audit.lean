@@ -1305,3 +1305,13 @@ open DdgProofs
 #print axioms DdgProofs.IntrinsicSimplification.iemMassUpdate_eq
 #print axioms DdgProofs.IntrinsicSimplification.iemVectorUpdate_eq
 #print axioms DdgProofs.IntrinsicSimplification.iemProjInterp_eq
+#print axioms DdgProofs.IntrinsicSimplification.wrapAngle_eq_toIcoMod
+#print axioms DdgProofs.IntrinsicSimplification.wrapAngle_mem
+#print axioms DdgProofs.IntrinsicSimplification.exp_wrapAngle
+#print axioms DdgProofs.IntrinsicSimplification.wrapAngle_of_mem
+#print axioms DdgProofs.IntrinsicSimplification.wrapAngle_ccw
+#print axioms DdgProofs.IntrinsicSimplification.galerkin_posDef_free
+#print axioms DdgProofs.IntrinsicSimplification.Quadric.planeAt_eval
+#print axioms DdgProofs.IntrinsicSimplification.Quadric.optimalPoint_solves
+#print axioms DdgProofs.IntrinsicSimplification.Quadric.eval_segment
+#print axioms DdgProofs.IntrinsicSimplification.Quadric.segment_min

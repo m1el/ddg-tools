@@ -7,6 +7,7 @@ import DdgProofs.IntrinsicSimplification.Wasserstein
 import DdgProofs.IntrinsicSimplification.Transport
 import DdgProofs.IntrinsicSimplification.Operators
 import DdgProofs.IntrinsicSimplification.Oracle
+import DdgProofs.IntrinsicSimplification.Wrap
 
 /-!
 # Surface Simplification using Intrinsic Error Metrics (Liu, Gillespie, Chislett, Sharp, Jacobson, Crane, ACM TOG 42(4), 2023)

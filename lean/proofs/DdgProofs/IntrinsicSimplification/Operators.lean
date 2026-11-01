@@ -80,6 +80,17 @@ theorem galerkin_posDef {n m : Type*} [Fintype n] [Fintype m] {A : Matrix n n �
   have := hA.conjTranspose_mul_mul_same hP
   rwa [conjTranspose_eq_transpose_of_trivial] at this
 
+/-- **With Dirichlet elimination** (SPEC §9.2): the free unknowns `e : m → n` (injective) of an SPD
+`A` give the SPD block `A_ff`, and a prolongation `P_ff` of full column rank between the free
+unknowns of two levels gives the SPD coarse block `P_ffᵀ A_ff P_ff`.
+
+[formula: iem-galerkin-spd] -/
+theorem galerkin_posDef_free {n m k : Type*} [Fintype n] [Fintype m] [Fintype k]
+    {A : Matrix n n ℝ} (hA : A.PosDef) {e : m → n} (he : Function.Injective e)
+    {P : Matrix m k ℝ} (hP : Function.Injective P.mulVec) :
+    (Pᵀ * A.submatrix e e * P).PosDef :=
+  galerkin_posDef (hA.submatrix he) hP
+
 /-- **The rows of the coarse vertices give full column rank**: if every column `c` (coarse vertex)
 has a row (the fine vertex that is `c`) equal to the unit vector `e_c`, then `P` is injective.
 
@@ -317,6 +328,81 @@ theorem evalQ_optimal (Q : Quadric) (hsym : Q.Aᵀ = Q.A) {vs : Fin 3 → ℝ}
   · have := hA.dotProduct_mulVec_pos (sub_ne_zero.mpr hne)
     simp only [star_trivial] at this
     linarith
+
+
+/-- The weighted quadric of the plane through `p` with normal `n` (`qem::plane_quadric`):
+`A = w n nᵀ`, `b = w d n`, `c = w d²` with `d = −n·p`. -/
+def planeAt (p n : Fin 3 → ℝ) (w : ℝ) : Quadric :=
+  ⟨w • vecMulVec n n, (w * -(n ⬝ᵥ p)) • n, w * (-(n ⬝ᵥ p)) ^ 2⟩
+
+/-- **`plane_quadric` evaluates to `w (n·(x − p))²`**, `w` times the squared distance to the plane
+for a unit normal (`planeQuadric_dist`).
+
+[formula: iem-qem-quadric] -/
+theorem planeAt_eval (p n : Fin 3 → ℝ) (w : ℝ) (x : Fin 3 → ℝ) :
+    (planeAt p n w).eval x = w * (n ⬝ᵥ (x - p)) ^ 2 := by
+  simp only [eval, planeAt, smul_mulVec, vecMulVec_mulVec, dotProduct_smul, smul_dotProduct,
+    smul_eq_mul, op_smul_eq_mul, dotProduct_sub]
+  rw [dotProduct_comm x n]
+  ring
+
+/-- The symmetric 3×3 matrix stored as `[a b c d e f]` (`[[a b c] [b d e] [c e f]]`). -/
+def sym6 (a b c d e f : ℝ) : Matrix (Fin 3) (Fin 3) ℝ := !![a, b, c; b, d, e; c, e, f]
+
+/-- **`optimal_point` solves the 3×3 system**: with the cofactors `cᵢⱼ` and the determinant
+`D = a c₀₀ + b c₀₁ + c c₀₂` of the Rust code, `p = −(C b)/D` satisfies `A p = −b` when `D ≠ 0` (so it
+is the minimizer of `evalQ_optimal`).
+
+[formula: iem-qem-quadric] -/
+theorem optimalPoint_solves (a b c d e f : ℝ) (q : Fin 3 → ℝ) {D : ℝ}
+    (hD : D = a * (d * f - e * e) + b * (c * e - b * f) + c * (b * e - c * d)) (hD0 : D ≠ 0) :
+    sym6 a b c d e f *ᵥ ![-((d * f - e * e) * q 0 + (c * e - b * f) * q 1 + (b * e - c * d) * q 2) / D,
+      -((c * e - b * f) * q 0 + (a * f - c * c) * q 1 + (b * c - a * e) * q 2) / D,
+      -((b * e - c * d) * q 0 + (b * c - a * e) * q 1 + (a * d - b * b) * q 2) / D] = -q := by
+  funext k
+  fin_cases k <;>
+    simp [sym6, mulVec, dotProduct, Fin.sum_univ_three] <;>
+    field_simp <;> subst hD <;> ring
+
+/-- Along a segment the quadric is the parabola `α t² + 2βt + γ` with `α = dᵀAd`,
+`β = dᵀ(A p₁ + b)`, `γ = Q(p₁)` (`optimal_point_on_segment`; `A` symmetric).
+
+[formula: iem-qem-quadric] -/
+theorem eval_segment (Q : Quadric) (hsym : Q.Aᵀ = Q.A) (p₁ dd : Fin 3 → ℝ) (t : ℝ) :
+    Q.eval (p₁ + t • dd) = (dd ⬝ᵥ (Q.A *ᵥ dd)) * t ^ 2 +
+      2 * (dd ⬝ᵥ (Q.A *ᵥ p₁ + Q.b)) * t + Q.eval p₁ := by
+  have hsymm : ∀ x y : Fin 3 → ℝ, x ⬝ᵥ (Q.A *ᵥ y) = y ⬝ᵥ (Q.A *ᵥ x) := fun x y => by
+    rw [dotProduct_mulVec, ← mulVec_transpose, hsym, dotProduct_comm]
+  simp only [eval, mulVec_add, mulVec_smul, dotProduct_add, add_dotProduct, dotProduct_smul,
+    smul_dotProduct, smul_eq_mul]
+  rw [hsymm p₁ dd, dotProduct_comm Q.b dd]
+  ring
+
+/-- **The clamped vertex of the parabola minimizes it on `[0, 1]`**: for `α > 0`,
+`t* = clamp(−β/α, 0, 1)` has `f(t*) ≤ f(t)` for every `t ∈ [0, 1]`, `f(t) = αt² + 2βt + γ`.
+
+[formula: iem-qem-quadric] -/
+theorem segment_min {α β γ : ℝ} (hα : 0 < α) {t : ℝ} (ht0 : 0 ≤ t) (ht1 : t ≤ 1) :
+    let s := max 0 (min 1 (-β / α))
+    α * s ^ 2 + 2 * β * s + γ ≤ α * t ^ 2 + 2 * β * t + γ := by
+  intro s
+  have hv : α * (-β / α) = -β := by field_simp
+  rcases le_or_gt (-β / α) 0 with h | h
+  · have hs : s = 0 := by simp only [s]; rw [min_eq_right (by linarith), max_eq_left h]
+    rw [hs]
+    have : 0 ≤ β := by
+      have := mul_le_mul_of_nonneg_left h hα.le; rw [hv] at this; linarith
+    nlinarith
+  rcases le_or_gt (-β / α) 1 with h' | h'
+  · have hs : s = -β / α := by simp only [s]; rw [min_eq_right h', max_eq_right h.le]
+    rw [hs]
+    nlinarith [sq_nonneg (t - -β / α), hv]
+  · have hs : s = 1 := by simp only [s]; rw [min_eq_left h'.le, max_eq_right (by norm_num)]
+    rw [hs]
+    have : α < -β := by
+      have := mul_lt_mul_of_pos_left h' hα; rw [hv] at this; linarith
+    have h2 : α * (t + 1) + 2 * β ≤ 0 := by nlinarith
+    nlinarith [mul_nonneg (sub_nonneg.mpr ht1) (neg_nonneg.mpr h2)]
 
 end Quadric
 
