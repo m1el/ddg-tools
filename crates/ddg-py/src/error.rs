@@ -186,6 +186,9 @@ pub enum InputError {
         /// The second set it is in.
         second: &'static str,
     },
+    /// A message that names its own parameter (the simplification bindings pass the crate's
+    /// messages on unchanged).
+    Message(String),
     /// An option is outside its domain.
     BadOption {
         /// Parameter name.
@@ -441,6 +444,7 @@ impl fmt::Display for InputError {
                 "vertex {vertex} is both {first} and {second}; a vertex can be in only one of \
                  the pinned, prescribed and forbidden sets"
             ),
+            InputError::Message(message) => f.write_str(message),
             InputError::BadOption {
                 name,
                 value,

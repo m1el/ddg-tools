@@ -26,6 +26,9 @@
 //!   Schumacher, Crane, *Repulsive Curves* (ACM TOG 40(2), 2021) on curve networks.
 //! * [`flip_geodesics`] — `geodesic_path`, `geodesic_network`, `geodesic_bezier`: the edge-flip
 //!   geodesics of Sharp and Crane (ACM TOG 39(6), 2020) on either representation.
+//! * [`simplification`] — `simplify`, `build_hierarchy`, `qem_simplify`: surface simplification with
+//!   intrinsic error metrics (Liu, Gillespie, Chislett, Sharp, Jacobson, Crane, ACM TOG 42(4), 2023),
+//!   its prolongations, applications and multigrid.
 //! * `python` (cargo feature `python`) — the PyO3 glue. It contains no logic of its own:
 //!   it turns Python buffers into [`buffers::BufferView`]s, calls the functions above and
 //!   turns the results into Python objects.
@@ -59,6 +62,7 @@ pub mod measure;
 pub mod pack;
 pub mod pipeline;
 pub mod repulsive;
+pub mod simplification;
 pub mod sphere;
 
 #[cfg(feature = "python")]

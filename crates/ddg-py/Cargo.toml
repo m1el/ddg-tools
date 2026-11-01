@@ -45,4 +45,7 @@ ddg-developability = { path = "../ddg-developability" }
 # Repulsive Curves (Yu, Schumacher, Crane 2021): tangent-point energy, fractional Sobolev flow,
 # constraints and penalties for curve networks (src/repulsive.rs).
 ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
+# Surface simplification using intrinsic error metrics (Liu et al. 2023): simplify, hierarchy and multigrid,
+# applications, QEM (src/simplification.rs).
+ddg-intrinsic-simplification = { path = "../ddg-intrinsic-simplification" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }
