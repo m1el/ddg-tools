@@ -1198,3 +1198,5 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Glue.Hyp.em_j
 #print axioms DdgProofs.IntegerCoords.Cx.flip_valid
 #print axioms DdgProofs.IntegerCoords.Cx.flip_roundabouts
+#print axioms DdgProofs.IntegerCoords.Merge.Side.admissible
+#print axioms DdgProofs.IntegerCoords.Merge.merge_normal

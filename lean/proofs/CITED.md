@@ -1893,7 +1893,9 @@ identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **c
 at the input vertices with `ic-identify-edge` (Alg. 3 computes the label of the arc; the walk back
 past inserted vertices, Alg. 3 lines 1–5, is not modelled), the flip of a complex model with the
 correctness of Eq. 3 after gluing two face models (`ic-flip-normal`, C part: same curves through the
-quadrilateral) and `ic-roundabout-update`. All statements
+quadrilateral), `ic-roundabout-update`, and the merge of two halves (`ic-merge-edge-normal`: the
+merged faces are valid and the Rust formula counts the merged edge's crossings, given the curve ends
+at the inserted vertex as the realization has them). All statements
 about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
 the data structure of the Rust crate and that
@@ -2042,29 +2044,6 @@ are not cited here).
   rule of I8/I24, bounds the loop by `10 deg` flips and refuses with `RemovalStuck` (state restored)
   when no flip helps; refusals are counted in the evaluation.
 
-### [formula: ic-merge-edge-normal] The normal coordinate of two merged halves (pending, tier C)
-
-- **Statement.** In a valid state, let `m ∈ V*` have two edges (the halves) on one geodesic
-  through it, with normal coordinates `n₁`, `n₂`, merged into one edge (the inverse of an edge
-  split, `Complex::merge_edge`). If the input edges cross the star of `m` as they cross one
-  straight edge (no arc runs through the spoke next to `m` from one half or its far end to the
-  other half or its far end, and an input edge through `m` has one end on each side; IC SPEC
-  §4.6), the merged edge has `n = −1` when `n₁ = n₂ = −1`, `n₁ + n₂ + 1` when `m` lies on an
-  input edge the halves do not run along, and `n₁ + n₂` when `m` lies inside an input face; every
-  other normal coordinate and every roundabout of the surviving halfedges is unchanged, and the
-  state is valid.
-- **Reference.** IC SPEC §4.6 (derivation); the inverse of the paper's Eq. 6
-  (`ic-split-edge-normal`) and of `ic-split-crossed-edge` (SPEC §4.5). The paper and
-  geometry-central ab116f1 have no merge (`removeInsertedVertex` gives up on a vertex it cannot
-  flip down to degree three, `integer_coordinates_intrinsic_triangulation.cpp:1603-1714`).
-- **Why not formalized yet.** The count is a statement about the gluing of four faces around a
-  vertex and the curves through them, i.e. tier C (SPEC §9, WP9). The case split itself is the
-  Rust unit test `merge::tests::merge_inverts_the_splits`. Until WP9: tested in Rust, where every
-  state after a merge is certified (SPEC §2.4 item 4) and equals `from_intrinsic` of the
-  signposts that did the same merge (`crates/ddg-integer-coords/tests/merge.rs`, `ops.rs`:
-  18 672 splits merged at once give back the state exactly; 1 045, 595 and 700 merges in the
-  removal tests, all certified and equal to the signposts').
-
 ---
 
 ## Out of scope of this package
@@ -2085,5 +2064,6 @@ formulas of the forty-four proved `rc-` ids (and the six `rc-near-` ids of WP16)
 searches as algorithms, the BVH, block cluster tree and multigrid data structures, the scene
 reader, the evaluation and every tolerance are not. For `crates/ddg-integer-coords` the integer
 formulas, one face (the face model) and the local statements of the section "Integer Coordinates"
-are covered; the complex model (tier C), the data structure, tracing on a whole triangulation, the
+are covered, and the tier C statements of the complex model (trace termination, Alg. 3's index,
+the flip with Eq. 3 and 4, the merge); the data structure, the walks of Alg. 2–4 as programs, the
 common subdivision, refinement and every floating-point decision are not.

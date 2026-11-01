@@ -368,7 +368,7 @@ vertex (I7) is removed the same way, flipping its interior edges down to degree 
 two boundary edges. Removals that Alg. 8 completes are unchanged (also those at straight stars,
 which then leave the other diagonal of the old edge's quadrilateral). `IntegerTriangulation::
 merge_edge(m, e)` merges directly (also `Triangulation::merge_edge`).
-*The integers of the merge* (`ic-merge-edge-normal`, cited, CITED.md). The merged edge is the
+*The integers of the merge* (`ic-merge-edge-normal`, proved in Lean tier C, `Complex/Merge.lean`, WP9). The merged edge is the
 union of the halves as curves and every other edge of the two merged faces is an edge of the
 old faces, so the realization of `T⁰` is unchanged and only the merged edge gets a new `n`; its
 crossings are the halves' plus one at `m` when `m` lies on an input edge `E` that the halves do
@@ -731,6 +731,7 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-roundabout-update` | Eq. 4 gives the local index after the flip | C, **proved** (WP9, `Complex/Flip.lean`, `Cx.flip_roundabouts`): consistent roundabouts stay consistent with Eq. 4 at `k→l`, `l→k` and every other roundabout kept |
 | `ic-face-split-normal` | Alg. 5/6: inserting a vertex in any region `R` of a face model and joining it to the corners by arcs disjoint from the others gives the stated counts; hence the result is valid whichever region floating point picks | B |
 | `ic-split-edge-normal` | Eq. 6 | A |
+| `ic-merge-edge-normal` | §4.6: merging two straight halves gives `n = −1` (both along), `n₁ + n₂ + 1` (vertex on an input edge), `n₁ + n₂` (inside a face) | C, **proved** (WP9, `Complex/Merge.lean`): on each side the merged face (two faces glued along the spoke) is valid under `check_straight_arcs`' condition with `n⁺₁ + n⁺₂ + ends at m` crossings; with one end per side (or none) the Rust formula is that count |
 | `ic-split-crossed-edge` | §4.5: splitting a crossed edge after `before` crossings gives `n_mc` as stated, for any `0 ≤ before ≤ n_ab` of a valid face (Eq. 6 the `n = −1` case) | B (from the face model and chord interleaving; pending) |
 | `ic-strip-intersection` | the straight segment through an unfolded strip meets each interior edge once, at the computed parameters (both directions, §3.1) | A (pending) |
 | `ic-extract-intrinsic-edge` | `ExtractIntrinsicEdge` returns the input edges crossed by the intrinsic edge, in order | C (pending, WP9) |
