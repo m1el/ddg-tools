@@ -1,0 +1,5 @@
+case iem-flatten-self-face
+task flatten
+target interior
+face 0 0 0 3ff0000000000000 3ff199999999999a 3feccccccccccccd
+end

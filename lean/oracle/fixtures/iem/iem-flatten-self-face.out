@@ -1,0 +1,8 @@
+case iem-flatten-self-face
+task flatten
+status ok
+theta0 400921fb54442d18
+solve noroot 0 0000000000000000 400921fb54442d18
+hess 0000000000000000
+face 0 3ff0000000000000 3ff199999999999a 3feccccccccccccd 1
+end

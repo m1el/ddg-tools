@@ -1,0 +1,10 @@
+case iem-flatten-self-edge
+task flatten
+status ok
+theta0 400bf01fde605031
+solve ok 5 bff3b797bc7d6b7a 401921fb54442d18
+hess 400e3205397f7626
+face 0 3fe3022b5471d997 3fdf1ad28a2ea9df 3fd8432800b1f7ce 1
+face 1 3fe999999999999a 3fe147ca4cc49743 3fe4bc8c5c1f1bea 1
+face 2 3ff0cccccccccccd 3fe06a99c8edf619 3fe3df5bd8487ac0 1
+end

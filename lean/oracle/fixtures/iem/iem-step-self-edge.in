@@ -1,0 +1,8 @@
+case iem-step-self-edge
+task step
+target interior
+face 0 0 1 3ff199999999999a 3feccccccccccccd 3ff4cccccccccccd
+face 0 1 2 3fe999999999999a 3ff0000000000000 3ff3333333333333
+face 0 2 1 3ff0cccccccccccd 3fee666666666666 3ff2666666666666
+u 3fb999999999999a
+end

@@ -1,0 +1,15 @@
+case iem-flatten-interior-11
+task flatten
+status ok
+theta0 40169e9565708efa
+solve ok 4 bfc2f88ee93d1dc1 401921fb54442d18
+hess 4011785f2c13693f
+face 0 3fe4b873b79e0f17 3ff15c28d37da0ec 3fe3289d1ad49ae9 1
+face 1 3fe8c3fa53cc1c89 3fe4af84823f7142 3ff15c28d37da0ec 1
+face 2 3fe399025dacca6d 3fe9fc07ca2f56a9 3fe4af84823f7142 1
+face 3 3ff1a2188afce227 3ff357361a83e3d5 3fe9fc07ca2f56a9 1
+face 4 3fe2a6bcd9cc4129 3feb930baa0f7a33 3ff357361a83e3d5 1
+face 5 3ff07ac9cf0866c7 3fed515f3241b0f4 3feb930baa0f7a33 1
+face 6 3fe5efe843474096 3feda883c2a0308b 3fed515f3241b0f4 1
+face 7 3fe1243be294377b 3fe3289d1ad49ae9 3feda883c2a0308b 1
+end

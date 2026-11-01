@@ -1,0 +1,9 @@
+case iem-flatten-degree-two
+task flatten
+status ok
+theta0 4011666fe2cf61c8
+solve invalid 3 bfeac79f82caee68 401921fb54442d18
+hess 0000000000000000
+face 0 3ff049239ff43fae 3fdbf6f8d4db9e09 3fe0eef8b8d64475 0
+face 1 3ff733f88192bdbf 3fe0eef8b8d64475 3fdbf6f8d4db9e09 0
+end

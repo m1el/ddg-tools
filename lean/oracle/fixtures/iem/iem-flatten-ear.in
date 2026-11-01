@@ -1,0 +1,5 @@
+case iem-flatten-ear
+task flatten
+target boundary
+face 0 1 2 3ff886631da80415 3ff2aca6af72928e 3fe3d936d505da92
+end
