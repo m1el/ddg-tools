@@ -25,6 +25,12 @@ pub enum IemError {
         /// What is wrong.
         what: String,
     },
+    /// An option of [`simplify`](crate::simplify()) is not valid (a negative or non-finite
+    /// weight, a per-vertex array of the wrong length, snapshot counts not descending, ...).
+    InvalidOptions {
+        /// What is wrong.
+        what: String,
+    },
     /// An index is out of range.
     IndexOutOfRange {
         /// What kind of element.
@@ -75,6 +81,9 @@ impl fmt::Display for IemError {
             IemError::Geometry(e) => write!(f, "invalid input geometry: {e}"),
             IemError::InvalidPoint { index, what } => {
                 write!(f, "extra tracked point {index}: {what}")
+            }
+            IemError::InvalidOptions { what } => {
+                write!(f, "invalid simplification options: {what}")
             }
             IemError::IndexOutOfRange { what, index, bound } => {
                 write!(f, "{what} {index} is out of range (there are {bound})")

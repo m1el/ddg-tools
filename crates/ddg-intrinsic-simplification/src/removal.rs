@@ -56,6 +56,11 @@ pub struct NeighbourChange {
     /// The angular coordinate of that edge at `j`, `φ_ji` (`π` if it is the boundary edge
     /// arriving at `j`).
     pub phi_ji: f64,
+    /// `φ_ij` of the same edge before flattening (the frame the reference's tentative cost
+    /// uses, R16, and its commit at `i`, R19; for `ReferenceCompat`).
+    pub phi_ij_before: f64,
+    /// `φ_ji` of the same edge before flattening (R16).
+    pub phi_ji_before: f64,
 }
 
 impl NeighbourChange {
@@ -429,12 +434,41 @@ impl CoarseMesh {
         // The neighbours and their curvature, before and after.
         let neighbours = self.star_neighbours(v, &faces);
         let before: Vec<f64> = neighbours.iter().map(|&w| self.curvature(w)).collect();
+        // The angular coordinates of the spokes (both ends) before flattening.
+        let mut phi_before: Vec<(u32, f64)> = Vec::with_capacity(16);
+        {
+            let c = &self.complex;
+            let mut last = None;
+            for h in self.fan(v) {
+                last = Some(h);
+                phi_before.push((h as u32, self.phi[h]));
+                if let Some(t) = c.twin(h) {
+                    phi_before.push((t as u32, self.phi[t]));
+                }
+            }
+            if c.is_boundary_vertex(v)
+                && let Some(h) = last
+            {
+                let g = c.prev(h);
+                phi_before.push((g as u32, self.phi[g]));
+            }
+        }
+        let lookup = |h: usize| {
+            if h == NONE as usize {
+                PI
+            } else {
+                phi_before
+                    .iter()
+                    .find(|x| x.0 as usize == h)
+                    .map_or(f64::NAN, |x| x.1)
+            }
+        };
         self.commit_flattening(v, &faces, solution.u, track);
         let mut changes: Vec<NeighbourChange> = neighbours
             .iter()
             .zip(&before)
             .map(|(&w, &kb)| {
-                let (length, phi_ij, phi_ji) = self.connecting_edge(v, w);
+                let (length, phi_ij, phi_ji, h_ij, h_ji) = self.connecting_edge(v, w);
                 NeighbourChange {
                     vertex: self.fine_of[w],
                     boundary: self.complex.is_boundary_vertex(w),
@@ -443,6 +477,8 @@ impl CoarseMesh {
                     length,
                     phi_ij,
                     phi_ji,
+                    phi_ij_before: lookup(h_ij),
+                    phi_ji_before: lookup(h_ji),
                 }
             })
             .collect();
@@ -535,18 +571,20 @@ impl CoarseMesh {
 
     /// The shortest edge between `v` and its neighbour `w` (ties: lower edge id): its length,
     /// its angular coordinate at `v` and at `w` (`π` for the virtual direction of an arriving
-    /// boundary edge).
-    fn connecting_edge(&self, v: usize, w: usize) -> (f64, f64, f64) {
+    /// boundary edge), and the halfedges these coordinates belong to (`NONE` for the virtual
+    /// direction).
+    fn connecting_edge(&self, v: usize, w: usize) -> (f64, f64, f64, usize, usize) {
         let c = &self.complex;
-        let mut best: Option<(f64, usize, f64, f64)> = None;
-        let mut consider = |e: usize, phi_v: f64, phi_w: f64| {
+        let none = NONE as usize;
+        let mut best: Option<(f64, usize, usize, usize)> = None;
+        let mut consider = |e: usize, h_v: usize, h_w: usize| {
             let l = self.length[e];
             let better = match best {
                 None => true,
                 Some((bl, be, _, _)) => l < bl || (l == bl && e < be),
             };
             if better {
-                best = Some((l, e, phi_v, phi_w));
+                best = Some((l, e, h_v, h_w));
             }
         };
         let mut last = None;
@@ -555,11 +593,7 @@ impl CoarseMesh {
             if c.to_vertex(h) != w {
                 continue;
             }
-            let phi_w = match c.twin(h) {
-                Some(t) => self.phi[t],
-                None => PI,
-            };
-            consider(c.edge(h), self.phi[h], phi_w);
+            consider(c.edge(h), h, c.twin(h).unwrap_or(none));
         }
         if c.is_boundary_vertex(v)
             && let Some(h) = last
@@ -567,11 +601,14 @@ impl CoarseMesh {
             // The boundary edge arriving at v.
             let g = c.prev(h);
             if c.from_vertex(g) == w {
-                consider(c.edge(g), PI, self.phi[g]);
+                consider(c.edge(g), none, g);
             }
         }
-        let (l, _, a, b) = best.unwrap_or((f64::NAN, 0, f64::NAN, f64::NAN));
-        (l, a, b)
+        let phi = |h: usize| if h == none { PI } else { self.phi[h] };
+        match best {
+            Some((l, _, a, b)) => (l, phi(a), phi(b), a, b),
+            None => (f64::NAN, f64::NAN, f64::NAN, none, none),
+        }
     }
 
     /// The spoke of `v` to flip next on the way to degree three or two (S14): among the

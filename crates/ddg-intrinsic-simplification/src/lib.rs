@@ -46,8 +46,10 @@ mod flatten;
 mod flip;
 pub mod formulas;
 mod mesh;
+pub mod metric;
 pub mod multigrid;
 mod removal;
+mod simplify;
 mod undo;
 
 pub use error::{IemError, RemovalFailure, RemovalRefusal};
@@ -56,4 +58,12 @@ pub use flip::{DelaunayFlipReport, FlippedEdge};
 pub use mesh::{
     ANGLE_CHECK_TOLERANCE, Certificate, CoarseMesh, CoarseMeshOptions, InputPoint, PointLocation,
 };
+pub use metric::{
+    BoundaryFrames, Channel, ChannelSource, ChannelState, ChannelWeights, FlatRule, Frames,
+    MetricOptions,
+};
 pub use removal::{NeighbourChange, PreparedRemoval, RemovalKind, RemovalReport};
+pub use simplify::{
+    ComponentCount, KeyCheck, ReferenceCompat, RemovalRecord, Requeue, SimplifyOptions,
+    SimplifyReport, SimplifyTimings, Snapshot, StopReason, Target, refusal_name, simplify,
+};
