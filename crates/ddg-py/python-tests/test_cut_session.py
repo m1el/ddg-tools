@@ -622,6 +622,45 @@ class IntrinsicTest(unittest.TestCase):
         with self.assertRaises(ddg_tools.InputError):
             ddg_tools.CutSession(*self.buffers, state=off.snapshot(), optimal_delaunay=True)
 
+    def test_representation(self):
+        """Integer coordinates by default; signposts on request. Both make the same flips,
+        splits and refinement, so the flow and the cut agree to rounding; the fingerprints
+        differ (the integers' hashes the normal coordinates too), so a state keeps its own."""
+        default = self.make()
+        self.assertEqual(default.representation, "integer")
+        self.assertIsNone(self.make(triangulation="caller").representation)
+        kw = dict(length_weight=0.05, max_steps=4, motion_tolerance=0.0, energy_tolerance=0.0)
+        for name in ("intrinsic", "refined"):
+            with self.subTest(triangulation=name):
+                a = self.make(triangulation=name, representation="signposts")
+                b = self.make(triangulation=name, representation="integer")
+                self.assertEqual((a.representation, b.representation), ("signposts", "integer"))
+                self.assertEqual(a.intrinsic_report["n_vertices"],
+                                 b.intrinsic_report["n_vertices"])
+                self.assertNotEqual(a.fingerprint, b.fingerprint)
+                ra, rb = a.run(**kw), b.run(**kw)
+                self.assertLessEqual(abs(ra["energy_after"] - rb["energy_after"]),
+                                     1e-9 * abs(ra["energy_after"]))
+                self.assertLess(self.worst(a, b), 1e-9)
+                ca, cb = a.describe_cut(), b.describe_cut()
+                self.assertEqual((ca.n_edge_points, ca.n_paths), (cb.n_edge_points, cb.n_paths))
+                self.assertEqual(ca.edge_vertices.tolist(), cb.edge_vertices.tolist())
+                self.assertLess(max(abs(x - y) for x, y in zip(ca.edge_t, cb.edge_t)), 1e-9)
+                again = ddg_tools.CutSession(*self.buffers, state=a.snapshot())
+                self.assertEqual(again.representation, "signposts")
+                self.assertEqual(again.fingerprint, a.fingerprint)
+                with self.assertRaises(ddg_tools.StaleStateError):
+                    b.restore(a.snapshot())
+        optimized = self.make(optimal_delaunay=True, representation="signposts")
+        self.assertEqual(optimized.intrinsic_report["n_vertices"],
+                         self.make(optimal_delaunay=True).intrinsic_report["n_vertices"])
+        for bad in (dict(representation="bogus"),
+                    dict(triangulation="caller", representation="integer")):
+            with self.assertRaises(ddg_tools.InputError, msg=str(bad)):
+                self.make(**bad)
+        with self.assertRaises(ddg_tools.InputError):
+            ddg_tools.CutSession(*self.buffers, state=default.snapshot(), representation="integer")
+
     def test_the_old_expectations_hold_on_every_triangulation(self):
         kw = dict(length_weight=0.05, max_steps=6, motion_tolerance=0.0, energy_tolerance=0.0)
         for name in ("caller", "intrinsic", "refined"):

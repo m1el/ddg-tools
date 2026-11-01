@@ -26,8 +26,8 @@ use std::time::Instant;
 use ddg_core::TriMesh;
 use ddg_uv::cutting::{
     ConePlacement, CutOnPolygons, CutUnwrapOptions, CuttingError, DEFAULT_CROSSING_OFFSET,
-    FlowKind, Inserted, IntrinsicOptions, PathEnd, PreviewPolyline, Session, SessionState, Start,
-    Triangulation, VertexSource, insert,
+    FlowKind, Inserted, IntrinsicOptions, PathEnd, PreviewPolyline, Representation, Session,
+    SessionState, Start, Triangulation, VertexSource, insert,
 };
 use ddg_uv::{BoundaryValues, ConeSigns, ErrorKind, MeshInput, PolygonMesh};
 use ddg_variational_cuts as vc;
@@ -681,6 +681,31 @@ fn with_optimal_delaunay(
     }
 }
 
+/// `t` on the representation `representation` (`None`: the option's own, by default integer
+/// coordinates, `Representation::DEFAULT`).
+///
+/// # Errors
+/// [`BindError::Input`] on the caller's triangulation: the option needs an intrinsic one.
+fn with_representation(
+    t: Triangulation,
+    representation: Option<Representation>,
+) -> Result<Triangulation, BindError> {
+    let Some(representation) = representation else {
+        return Ok(t);
+    };
+    match t {
+        Triangulation::Intrinsic(mut o) => {
+            o.representation = representation;
+            Ok(Triangulation::Intrinsic(o))
+        }
+        Triangulation::Caller => Err(input_error(
+            "representation needs an intrinsic triangulation: use triangulation=\"intrinsic\" \
+             or \"refined\", not \"caller\""
+                .to_owned(),
+        )),
+    }
+}
+
 /// `t` with another `min_offset` (intrinsic triangulations only): how far from the vertices and
 /// sides of the caller's triangles the points of the cut are kept when it is carried back.
 fn with_min_offset(
@@ -801,7 +826,39 @@ impl CutSession {
         min_offset: Option<f64>,
         merge_tolerance: Option<f64>,
     ) -> Result<CutSession, BindError> {
-        let triangulation = with_optimal_delaunay(triangulation.option()?, optimal_delaunay)?;
+        CutSession::new_on(
+            input,
+            n_regions,
+            start,
+            triangulation,
+            optimal_delaunay,
+            None,
+            min_offset,
+            merge_tolerance,
+        )
+    }
+
+    /// [`CutSession::new`] on the representation `representation` of the intrinsic
+    /// triangulation (`None`: integer coordinates, `Representation::DEFAULT`).
+    ///
+    /// # Errors
+    /// As [`CutSession::new`]; [`BindError::Input`] for a representation on the caller's
+    /// triangulation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on(
+        input: &UnwrapInput,
+        n_regions: usize,
+        start: &StartSpec,
+        triangulation: &TriangulationSpec,
+        optimal_delaunay: bool,
+        representation: Option<Representation>,
+        min_offset: Option<f64>,
+        merge_tolerance: Option<f64>,
+    ) -> Result<CutSession, BindError> {
+        let triangulation = with_representation(
+            with_optimal_delaunay(triangulation.option()?, optimal_delaunay)?,
+            representation,
+        )?;
         let prescribed = prescribed_cones(input);
         let mesh = mesh_input(input, &prescribed);
         let start = start_of(start, n_regions, input.n_corners())?;
@@ -870,6 +927,19 @@ impl CutSession {
             Triangulation::Caller => "caller",
             Triangulation::Intrinsic(o) if o.refine.is_some() => "refined",
             Triangulation::Intrinsic(_) => "intrinsic",
+        }
+    }
+
+    /// The representation of the intrinsic triangulation, `"integer"` or `"signposts"`
+    /// (`None` on the caller's triangulation). Read from the session, so it is the state's
+    /// after [`CutSession::from_state`].
+    pub fn representation_name(&self) -> Option<&'static str> {
+        match self.inner.triangulation() {
+            Triangulation::Caller => None,
+            Triangulation::Intrinsic(o) => Some(match o.representation {
+                Representation::Integer => "integer",
+                Representation::Signposts => "signposts",
+            }),
         }
     }
 
