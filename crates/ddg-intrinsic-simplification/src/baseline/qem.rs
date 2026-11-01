@@ -160,7 +160,7 @@ pub fn optimal_point(q: &Quadric, tolerance: f64) -> Option<V3> {
     let c02 = b * e - c * d;
     let det = a * c00 + b * c01 + c * c02;
     let mean = trace / 3.0;
-    if !(det > tolerance * mean * mean * mean) {
+    if det.is_nan() || det <= tolerance * mean * mean * mean {
         return None;
     }
     let c11 = a * f - c * c;
@@ -716,9 +716,9 @@ pub fn qem_simplify(
     // Compact.
     let mut new_id = vec![u32::MAX; n];
     let mut out_pos = Vec::with_capacity(w.n_alive);
-    for v in 0..n {
+    for (v, id) in new_id.iter_mut().enumerate() {
         if w.alive[v] {
-            new_id[v] = out_pos.len() as u32;
+            *id = out_pos.len() as u32;
             out_pos.push(w.pos[v]);
         }
     }

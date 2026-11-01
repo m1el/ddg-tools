@@ -189,6 +189,8 @@ impl From<GeometryError> for ExactError {
 trait Topology {
     fn next(&self, h: usize) -> usize;
     fn twin(&self, h: usize) -> Option<usize>;
+    // Named after `ddg_core::topology` and `Complex`, whose methods it forwards to.
+    #[allow(clippy::wrong_self_convention)]
     fn from_vertex(&self, h: usize) -> usize;
     fn to_vertex(&self, h: usize) -> usize;
     fn edge(&self, h: usize) -> usize;

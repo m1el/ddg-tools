@@ -274,8 +274,8 @@ fn strips(s: &Surface, start: Start, depth: usize) -> Vec<f64> {
         best: vec![f64::INFINITY; c.n_vertices()],
         lo_hi_eps: 1e-9,
     };
-    for k in 0..3 {
-        b.offer(c.faces()[face][k] as usize, pos[k]);
+    for (k, &q) in pos.iter().enumerate() {
+        b.offer(c.faces()[face][k] as usize, q);
     }
     for k in 0..3 {
         let (q1, q2) = (pos[k], pos[(k + 1) % 3]);
@@ -391,8 +391,8 @@ fn split_at(s: &Surface, face: usize, bary: [f64; 3]) -> (Surface, usize) {
     let mut t = s.clone();
     let split = t.c.split_face(face).unwrap();
     t.l.resize(t.c.n_edges(), 0.0);
-    for k in 0..3 {
-        t.l[split.new_edges[k] as usize] = norm(sub(pos[k], p));
+    for (k, &q) in pos.iter().enumerate() {
+        t.l[split.new_edges[k] as usize] = norm(sub(q, p));
     }
     t.orig.push(usize::MAX);
     (t, split.vertex as usize)
