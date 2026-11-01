@@ -1171,6 +1171,13 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   the input edge. Snapping a face split is a different derivation (a vertex on an arc of the
   face, spokes along it) and 6 of 140 million insertions; left open, counted by
   `n_recover_failed` (551019: 6, the signposts insert 6 more vertices there).
+  *Thingi10k in full* (integers, binary of 259f1dc, against the I27 run, `runs_tmp/i28full/`):
+  7745 of 7745 ok, no status change, 7575 refined to the bound before and after, every
+  certificate passes; 2 111 edge splits snapped in 307 meshes, 0 refused; insertions change in
+  14 meshes (140 071 706 → 140 071 737 in all), and in all 14 they now equal the signposts'
+  (Chew) exactly, where none did before; meshes whose integer insertions equal the signposts':
+  7714 → 7728 of the 7730 that both refine; removals (184 596) and refused removals (157)
+  unchanged; face splits refused 7 → 6 (551019). Table 1 is unchanged.
 * **I29** *An integer simplicial export (resolved: bb5f92c, d3c3999, 0e6c3a6, 7bf6014, e1ebbde;
   this documentation in the commit after them).* `ddg-uv`'s intrinsic path ends in
   `export_simplicial` and its cut transfer uses `SimplicialExport::edge_point` and

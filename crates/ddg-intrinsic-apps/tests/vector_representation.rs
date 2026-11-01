@@ -66,7 +66,7 @@ fn max_diff(a: &[f64], b: &[f64]) -> f64 {
 fn aligned_difference(a: &[C64], b: &[C64]) -> f64 {
     let mut dot = C64::default();
     for (x, y) in a.iter().zip(b) {
-        dot = dot + *x * y.conj();
+        dot += *x * y.conj();
     }
     let phase = C64::from_angle(dot.arg());
     let scale = a.iter().fold(0.0f64, |m, x| m.max(x.abs()));
