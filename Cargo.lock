@@ -462,6 +462,7 @@ name = "ddg-intrinsic-simplification"
 version = "0.1.0"
 dependencies = [
  "ddg-core",
+ "ddg-integer-coords",
  "ddg-intrinsic",
  "ddg-intrinsic-apps",
 ]

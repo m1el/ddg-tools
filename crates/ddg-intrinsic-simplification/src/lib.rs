@@ -57,6 +57,7 @@ mod mesh;
 pub mod multigrid;
 mod output;
 pub mod prolongation;
+pub mod refine;
 mod removal;
 mod undo;
 

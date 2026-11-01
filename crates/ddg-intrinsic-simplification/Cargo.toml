@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 ddg-core = { path = "../ddg-core" }
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+ddg-integer-coords = { path = "../ddg-integer-coords" }
+ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 
 [dev-dependencies]
-ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
