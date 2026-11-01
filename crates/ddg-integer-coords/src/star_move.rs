@@ -29,7 +29,7 @@
 //! removal, so it is not refused by the straight stars of I27 (every vertex an edge split made,
 //! which is what the optimal Delaunay iteration's splits make).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap as HashMap;
 use std::f64::consts::TAU;
 
 use ddg_intrinsic::formulas::moved_length;
@@ -41,7 +41,8 @@ use ddg_intrinsic::{
 use crate::coords::{IntegerTriangulation, NO_ROUNDABOUT};
 use crate::error::{IntegerError, Place, ValidityItem};
 use crate::formulas::{face_emanating, face_valid, n_minus, roundabout_update};
-use crate::insert::RegionPoint;
+use crate::insert::{ExtractionCache, FaceArcs, RegionPoint};
+use crate::recover::recover_in_input_face;
 
 /// A point of the link of the star where a chord ends: link vertex `u_edge` (`sub = 0`) or
 /// crossing `sub − 1` of link edge `edge` (from `u_edge` towards `u_{edge+1}`). The order of the
@@ -181,34 +182,29 @@ impl IntegerTriangulation {
                 reason: InsertRefusal::NotLocated { detail },
             })
         };
-        let end = trace.end;
-        let to = match end {
-            SurfacePoint::Vertex(u) => {
-                return Err(refused(end, format!("the new place is vertex {u}")));
-            }
-            _ => self.point_on_input(end)?,
-        };
-        // On an input edge (the point query snaps within rounding, as the signposts snap a
-        // moved vertex, SPEC N24): that edge's chord passes through the new place.
-        let on_edge = match to {
-            SurfacePoint::Face { .. } => None,
-            SurfacePoint::Edge { edge, .. } => Some(edge),
-            SurfacePoint::Vertex(u) => {
-                return Err(refused(end, format!("the new place is input vertex {u}")));
-            }
-        };
-
         // The chords of the star polygon.
         let invalid = |detail: String| {
             IntegerError::invalid(ValidityItem::Extraction, Place::Vertex(v as u32), detail)
         };
+        let mut cache = ExtractionCache::new();
+        let mut arcs_of: HashMap<usize, FaceArcs> = HashMap::new();
         let mut pieces: Vec<[End; 2]> = Vec::new();
         let mut piece_edge: Vec<u32> = Vec::new();
         let mut at_link: HashMap<LinkKey, [f64; 2]> = HashMap::new();
+        // No input edge crosses a star whose edges all have n = 0 (it lies in one input face):
+        // its arcs are not extracted.
+        let quiet = o
+            .iter()
+            .all(|&h| self.normal[c.edge(h)] == 0 && self.normal[c.edge(c.next(h))] == 0);
         for (j, &h) in o.iter().enumerate() {
+            if quiet {
+                break;
+            }
             let f = h / 3;
             let k0 = h % 3;
-            let arcs = self.face_arcs(f)?;
+            let arcs = arcs_of
+                .entry(f)
+                .or_insert(self.face_arcs_cached(f, &mut cache)?);
             let next = (j + 1) % d;
             let n_next = arcs.n((k0 + 2) % 3);
             at_link.insert((j, 0), a[j]);
@@ -337,6 +333,37 @@ impl IntegerTriangulation {
                 )));
             }
         }
+
+        let end = trace.end;
+        let to = match end {
+            SurfacePoint::Vertex(u) => {
+                return Err(refused(end, format!("the new place is vertex {u}")));
+            }
+            // The point query of a point inside a face (SPEC §4.9), with the arcs of the star
+            // already extracted.
+            SurfacePoint::Face { face, bary }
+                if bary.iter().all(|&x| x > 0.0) && o.iter().any(|&h| h / 3 == face as usize) =>
+            {
+                let f = face as usize;
+                if !arcs_of.contains_key(&f) {
+                    let arcs = self.face_arcs_cached(f, &mut cache)?;
+                    arcs_of.insert(f, arcs);
+                }
+                let arcs = &arcs_of[&f];
+                let region = arcs.choose_region(bary).region;
+                recover_in_input_face(self, arcs, region, bary)?.on_input(self, face as usize)?
+            }
+            _ => self.point_on_input(end)?,
+        };
+        // On an input edge (the point query snaps within rounding, as the signposts snap a
+        // moved vertex, SPEC N24): that edge's chord passes through the new place.
+        let on_edge = match to {
+            SurfacePoint::Face { .. } => None,
+            SurfacePoint::Edge { edge, .. } => Some(edge),
+            SurfacePoint::Vertex(u) => {
+                return Err(refused(end, format!("the new place is input vertex {u}")));
+            }
+        };
 
         // The new normal coordinates of the spokes.
         let p = displacement;

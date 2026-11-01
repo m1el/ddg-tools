@@ -301,6 +301,9 @@ pub struct FaceSplitReport {
     pub recover: RecoverReport,
 }
 
+/// The paths over the input mesh of edges already extracted (`ExtractIntrinsicEdge`), by edge.
+pub(crate) type ExtractionCache = std::collections::BTreeMap<usize, (EdgeTrace, StripReport)>;
+
 /// One side of the face being split: its crossings in order from the side's tail.
 pub(crate) struct Side {
     /// `n` of the side's edge.
@@ -670,6 +673,16 @@ impl IntegerTriangulation {
     /// The arcs of face `f`: its arrangement from the integers, its layout in the plane, and
     /// the crossings of its sides from `ExtractIntrinsicEdge`.
     pub(crate) fn face_arcs(&self, f: usize) -> Result<FaceArcs, IntegerError> {
+        self.face_arcs_cached(f, &mut ExtractionCache::new())
+    }
+
+    /// [`face_arcs`](Self::face_arcs), taking the paths of the sides from `cache` and keeping
+    /// the ones it extracts there: for several faces that share edges (the star of a vertex).
+    pub(crate) fn face_arcs_cached(
+        &self,
+        f: usize,
+        cache: &mut ExtractionCache,
+    ) -> Result<FaceArcs, IntegerError> {
         let nf = self.complex.n_faces();
         if f >= nf {
             return Err(IntegerError::IndexOutOfRange {
@@ -709,8 +722,15 @@ impl IntegerTriangulation {
                     reversed,
                 });
             }
-            let (trace, r) =
-                self.extract_intrinsic_edge_with_report(e, &EdgeTraceOptions::default())?;
+            let (trace, r) = match cache.get(&e) {
+                Some(known) => known.clone(),
+                None => {
+                    let x =
+                        self.extract_intrinsic_edge_with_report(e, &EdgeTraceOptions::default())?;
+                    cache.insert(e, x.clone());
+                    x
+                }
+            };
             report.merge(&r);
             let x = &trace.crossings;
             if x.len() != n as usize {

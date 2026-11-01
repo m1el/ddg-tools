@@ -16,6 +16,10 @@ ddg-optimal-cones = { path = "../ddg-optimal-cones" }
 ddg-variational-cuts = { path = "../ddg-variational-cuts" }
 # The intrinsic triangulation the cut flow can run on (src/cutting/intrinsic.rs).
 ddg-intrinsic = { path = "../ddg-intrinsic" }
+# Its integer-coordinates representation (Gillespie, Sharp, Crane 2021), the default
+# (IntrinsicOptions::representation), and the consumers' representation switch.
+ddg-integer-coords = { path = "../ddg-integer-coords" }
+ddg-intrinsic-apps = { path = "../ddg-intrinsic-apps" }
 
 [dev-dependencies]
 proptest = "1"
