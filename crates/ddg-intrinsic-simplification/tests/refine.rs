@@ -9,7 +9,7 @@ use common::{Shape, crane_models, dist, planar_grid, reference_meshes, small_sha
 use ddg_core::geometry::triangle_area;
 use ddg_core::{Geometry, TriMesh};
 use ddg_intrinsic::RefineRules;
-use ddg_intrinsic_simplification::refine::{RefineError, Representation, RefinementOptions};
+use ddg_intrinsic_simplification::refine::{RefineError, RefinementOptions, Representation};
 use ddg_intrinsic_simplification::{CoarseMesh, CoarseMeshOptions, CoarseOutput, CoarsePoint};
 
 fn tri_mesh(shape: &Shape) -> (TriMesh, Geometry) {
@@ -62,12 +62,15 @@ fn layout(out: &CoarseOutput, a: u32, b: u32, pa: [f64; 2], pb: [f64; 2]) -> Vec
     pos[out.faces[0][0] as usize] = Some([0.0, 0.0]);
     pos[out.faces[0][1] as usize] = Some([l[0], 0.0]);
     let x = (l[0] * l[0] + l[2] * l[2] - l[1] * l[1]) / (2.0 * l[0]);
-    pos[out.faces[0][2] as usize] = Some([x, 2.0 * triangle_area(l[0], l[1], l[2]).unwrap() / l[0]]);
+    pos[out.faces[0][2] as usize] =
+        Some([x, 2.0 * triangle_area(l[0], l[1], l[2]).unwrap() / l[0]]);
     seen[0] = true;
     let mut queue = std::collections::VecDeque::from([0usize]);
     while let Some(f) = queue.pop_front() {
         for k in 0..3 {
-            let Some(t) = out.twin[3 * f + k] else { continue };
+            let Some(t) = out.twin[3 * f + k] else {
+                continue;
+            };
             let g = t as usize / 3;
             if seen[g] {
                 continue;
@@ -145,7 +148,10 @@ fn check_prolongation(mesh: &CoarseMesh, name: &str) {
     let mut y = vec![0.0; q.nrows()];
     q.mul_vec(&vec![1.0; q.ncols()], &mut y).unwrap();
     let worst = y.iter().map(|s| (s - 1.0).abs()).fold(0.0, f64::max);
-    assert!(worst < 1e-13, "{name}: point rows sum to 1 within {worst:e}");
+    assert!(
+        worst < 1e-13,
+        "{name}: point rows sum to 1 within {worst:e}"
+    );
 }
 
 /// Pre-refinement, removal of everything but the four corners, post-refinement on a planar
@@ -178,11 +184,17 @@ fn planar_grid_through_pre_refinement_removals_and_post_refinement() {
             }
             check_prolongation(&coarse, &name);
             // Planar already after pre-refinement.
-            let corners = [0u32, n as u32, (n * (n + 1)) as u32, ((n + 1) * (n + 1) - 1) as u32];
+            let corners = [
+                0u32,
+                n as u32,
+                (n * (n + 1)) as u32,
+                ((n + 1) * (n + 1) - 1) as u32,
+            ];
             // The corners and a scattering of other input vertices stay (a mesh with thin
             // triangles for the post-refinement to repair).
             let keep = |v: u32| {
-                corners.contains(&v) || (v as u64).wrapping_mul(2654435761).wrapping_add(seed) % 7 == 0
+                corners.contains(&v)
+                    || (v as u64).wrapping_mul(2654435761).wrapping_add(seed) % 7 == 0
             };
             for v in 0..n_fine as u32 {
                 coarse.set_fixed(v, keep(v)).unwrap();
@@ -203,21 +215,37 @@ fn planar_grid_through_pre_refinement_removals_and_post_refinement() {
                     .fold(0.0, f64::max)
             };
             let w0 = worst_of(&coarse);
-            assert!(w0 < 1e-9, "{name}: after pre-refinement, worst point error {w0:e}");
+            assert!(
+                w0 < 1e-9,
+                "{name}: after pre-refinement, worst point error {w0:e}"
+            );
             // The edges of T¹ between two input vertices are the straight segments.
             for e in 0..coarse.n_edges() {
                 let [a, b] = coarse.complex().edge_vertices(e);
-                let (fa, fb) = (coarse.fine_vertex(a) as usize, coarse.fine_vertex(b) as usize);
+                let (fa, fb) = (
+                    coarse.fine_vertex(a) as usize,
+                    coarse.fine_vertex(b) as usize,
+                );
                 if fa < n_fine && fb < n_fine {
                     let d = dist(shape.positions[fa], shape.positions[fb]);
-                    assert!((d - coarse.edge_lengths()[e]).abs() < 1e-12, "{name}: edge {e}");
+                    assert!(
+                        (d - coarse.edge_lengths()[e]).abs() < 1e-12,
+                        "{name}: edge {e}"
+                    );
                 }
             }
             let removed = remove_in_passes(&mut coarse, n_kept, 25, &name);
-            assert_eq!(coarse.n_vertices(), n_kept, "{name}: only the kept vertices remain");
+            assert_eq!(
+                coarse.n_vertices(),
+                n_kept,
+                "{name}: only the kept vertices remain"
+            );
             coarse.certify(true).unwrap();
             let w1 = worst_of(&coarse);
-            assert!(w1 < 1e-9, "{name}: after {removed} removals, worst point error {w1:e}");
+            assert!(
+                w1 < 1e-9,
+                "{name}: after {removed} removals, worst point error {w1:e}"
+            );
             // Post-refinement of the 4-vertex square.
             let before = coarse.clone();
             let (refined, post) = match coarse.post_refine(&options(representation)) {
@@ -244,12 +272,15 @@ fn planar_grid_through_pre_refinement_removals_and_post_refinement() {
             let used = n_fine + pre.n_added;
             for &v in refined.vertices() {
                 assert!(
-                    ((v as usize) < used && keep(v)) || v as usize >= used,
+                    (v as usize) >= used || keep(v),
                     "{name}: vertex {v}"
                 );
             }
             let w2 = worst_of(&refined);
-            assert!(w2 < 1e-9, "{name}: after post-refinement, worst point error {w2:e}");
+            assert!(
+                w2 < 1e-9,
+                "{name}: after post-refinement, worst point error {w2:e}"
+            );
             // Quality: a flat disk, every input angle sum is 90° (< 60° never), not closed.
             assert!(!post.closed && !post.guarantee_applies);
             eprintln!(
@@ -275,7 +306,11 @@ fn planar_grid_through_pre_refinement_removals_and_post_refinement() {
 #[test]
 fn models_pre_and_post_refinement() {
     let mut shapes = small_shapes();
-    shapes.extend(crane_models().into_iter().filter(|s| s.positions.len() < 8_000));
+    shapes.extend(
+        crane_models()
+            .into_iter()
+            .filter(|s| s.positions.len() < 8_000),
+    );
     shapes.extend(reference_meshes(8_000));
     let mut n_post = 0usize;
     let mut n_refused = 0usize;
@@ -294,7 +329,9 @@ fn models_pre_and_post_refinement() {
             )
             .unwrap_or_else(|e| panic!("{name}: {e}"));
             let n_fine = shape.positions.len();
-            coarse.certify(true).unwrap_or_else(|e| panic!("{name}: {e}"));
+            coarse
+                .certify(true)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(coarse.n_points(), n_fine + points.len());
             assert_eq!(coarse.n_vertices(), n_fine + pre.n_added);
             assert!(pre.certificate.n_not_delaunay == 0, "{name}");
@@ -309,7 +346,9 @@ fn models_pre_and_post_refinement() {
             // Coarsen to a quarter of the vertices in a fixed order (inserted ones included).
             let target = (coarse.n_vertices() / 4).max(8);
             let removed = remove_in_passes(&mut coarse, target, 40, &name);
-            coarse.certify(false).unwrap_or_else(|e| panic!("{name}: {e}"));
+            coarse
+                .certify(false)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             check_prolongation(&coarse, &name);
             let kept_inserted = coarse
                 .vertices()
@@ -336,7 +375,9 @@ fn models_pre_and_post_refinement() {
             match coarse.post_refine(&options(representation)) {
                 Ok((refined, post)) => {
                     n_post += 1;
-                    refined.certify(true).unwrap_or_else(|e| panic!("{name}: post: {e}"));
+                    refined
+                        .certify(true)
+                        .unwrap_or_else(|e| panic!("{name}: post: {e}"));
                     assert_eq!(refined.n_points(), coarse.n_points());
                     check_prolongation(&refined, &name);
                     // Vertices of the coarse mesh stay.
@@ -404,7 +445,10 @@ fn delta_complex_is_refused_with_a_reason() {
 /// Both rules and both representations on a closed model, and the guarantee flag.
 #[test]
 fn closed_surface_reaches_the_bound() {
-    let shape = small_shapes().into_iter().find(|s| s.name == "torus 12x6").unwrap();
+    let shape = small_shapes()
+        .into_iter()
+        .find(|s| s.name == "torus 12x6")
+        .unwrap();
     let (mesh, geometry) = tri_mesh(&shape);
     for representation in [Representation::Integer, Representation::Signposts] {
         for rules in [RefineRules::Chew, RefineRules::Ruppert] {
@@ -413,9 +457,14 @@ fn closed_surface_reaches_the_bound() {
                 rules: Some(rules),
                 ..RefinementOptions::default()
             };
-            let (coarse, rep) =
-                CoarseMesh::from_refined(&mesh, &geometry, &[], CoarseMeshOptions::default(), &opts)
-                    .unwrap();
+            let (coarse, rep) = CoarseMesh::from_refined(
+                &mesh,
+                &geometry,
+                &[],
+                CoarseMeshOptions::default(),
+                &opts,
+            )
+            .unwrap();
             coarse.certify(true).unwrap();
             assert!(rep.closed);
             assert_eq!(rep.guarantee_applies, rep.min_input_angle_sum >= PI / 3.0);
@@ -426,3 +475,62 @@ fn closed_surface_reaches_the_bound() {
     }
 }
 
+/// A coarse Δ-complex that is refused becomes acceptable after `make_simplicial` flips (the
+/// metric and the tracked map are kept), and the caller's mesh is not changed by the option.
+#[test]
+fn flips_make_a_refused_mesh_acceptable() {
+    use ddg_core::generators::SplitMix64;
+    let Some(shape) = common::load_data("intrinsic-simplification/boxpart.obj") else {
+        return;
+    };
+    let (mesh, geometry) = tri_mesh(&shape);
+    let points = shape.random_points(9);
+    let (pre, _) = CoarseMesh::from_refined(
+        &mesh,
+        &geometry,
+        &points,
+        CoarseMeshOptions::default(),
+        &RefinementOptions::default(),
+    )
+    .unwrap();
+    let mut repaired = 0;
+    for fraction in [0.5, 0.25] {
+        let mut coarse = pre.clone();
+        let mut order = coarse.vertices().to_vec();
+        let mut rng = SplitMix64::new(42);
+        for i in (1..order.len()).rev() {
+            order.swap(i, (rng.next_u64() % (i as u64 + 1)) as usize);
+        }
+        let target = (pre.n_vertices() as f64 * fraction) as usize;
+        for v in order {
+            if coarse.n_vertices() <= target {
+                break;
+            }
+            let _ = coarse.remove_vertex(v);
+        }
+        let plain = coarse.post_refine(&RefinementOptions::default());
+        let Err(RefineError::NotSimplicial { .. }) = plain else {
+            continue;
+        };
+        let before = coarse.clone();
+        let opts = RefinementOptions {
+            make_simplicial_flips: Some(100_000),
+            ..RefinementOptions::default()
+        };
+        let (refined, report) = coarse.post_refine(&opts).unwrap();
+        assert!(coarse.bitwise_eq(&before), "post_refine changed its input");
+        let repair = report.repair.expect("the mesh needed the repair");
+        assert!(repair.defects_before > 0 && repair.defects_after == 0 && repair.n_flips > 0);
+        refined.certify(true).unwrap();
+        assert!((refined.total_area() - coarse.total_area()).abs() < 1e-9 * coarse.total_area());
+        check_prolongation(&refined, "boxpart repaired");
+        repaired += 1;
+        // The flips alone keep the metric: the repaired copy certifies with the same area.
+        let mut copy = coarse.clone();
+        let again = copy.make_simplicial(100_000).unwrap();
+        assert_eq!(again.defects_after, 0);
+        copy.certify(false).unwrap();
+        assert!((copy.total_area() - coarse.total_area()).abs() < 1e-9 * coarse.total_area());
+    }
+    assert!(repaired > 0, "no coarse boxpart needed the repair");
+}

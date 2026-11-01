@@ -75,13 +75,15 @@ use std::time::Instant;
 
 use ddg_core::topology::NONE;
 use ddg_core::{Geometry, TriMesh};
-use ddg_integer_coords::{IntegerError, IntegerRefineOptions, IntegerRefineReport, IntegerTriangulation};
+use ddg_integer_coords::{
+    IntegerError, IntegerRefineOptions, IntegerRefineReport, IntegerTriangulation,
+};
 use ddg_intrinsic::{
     Complex, IntrinsicError, IntrinsicTriangulation, RefineOptions, RefineReport, RefineRules,
     SurfacePoint, Triangulation,
 };
-pub use ddg_intrinsic_apps::representation::Representation;
 use ddg_intrinsic_apps::representation::InputPoints;
+pub use ddg_intrinsic_apps::representation::Representation;
 
 use crate::error::IemError;
 use crate::mesh::{Certificate, CoarseMesh, CoarseMeshOptions, InputPoint, Location};
@@ -192,6 +194,10 @@ pub struct RefinementOptions {
     /// Whether the integer triangulation certifies itself at the end of refinement (its own
     /// default, yes). Ignored for signposts.
     pub certify: bool,
+    /// Post-refinement only: if the coarse mesh is not simplicial, first try
+    /// [`CoarseMesh::make_simplicial`] (at most this many flips; on a working copy, the caller's
+    /// mesh is not changed) instead of refusing. `None` (the default): refuse.
+    pub make_simplicial_flips: Option<usize>,
 }
 
 impl Default for RefinementOptions {
@@ -201,6 +207,7 @@ impl Default for RefinementOptions {
             refine: RefineOptions::default(),
             rules: None,
             certify: true,
+            make_simplicial_flips: None,
         }
     }
 }
@@ -246,6 +253,9 @@ pub struct RefinementReport {
     pub seconds_refine: f64,
     /// Seconds spent locating the tracked points.
     pub seconds_locate: f64,
+    /// Post-refinement with [`RefinementOptions::make_simplicial_flips`] on a mesh that needed
+    /// it: what the flips did.
+    pub repair: Option<SimplicialRepair>,
 }
 
 /// The raw pieces of a coarse mesh (see [`CoarseMesh::assemble`]).
@@ -441,20 +451,34 @@ impl CoarseMesh {
         &self,
         options: &RefinementOptions,
     ) -> Result<(CoarseMesh, RefinementReport), RefineError> {
-        let (mesh, geometry) = self.as_simplicial_input()?;
+        let mut repaired: Option<(CoarseMesh, SimplicialRepair)> = None;
+        let input = match (self.as_simplicial_input(), options.make_simplicial_flips) {
+            (Err(RefineError::NotSimplicial { .. }), Some(max_flips)) => {
+                let mut work = self.clone();
+                let repair = work.make_simplicial(max_flips)?;
+                let input = work.as_simplicial_input()?;
+                repaired = Some((work, repair));
+                input
+            }
+            (other, _) => other?,
+        };
+        let (mesh, geometry) = input;
+        let source = repaired.as_ref().map_or(self, |r| &r.0);
         let t0 = Instant::now();
-        match options.representation {
+        let mut result = match options.representation {
             Representation::Integer => {
                 let mut tri = IntegerTriangulation::new(&mesh, &geometry)?;
                 let report = refine_integer(&mut tri, options)?;
-                self.finish_post(&tri, options, report, t0)
+                source.finish_post(&tri, options, report, t0)?
             }
             Representation::Signposts => {
                 let mut tri = IntrinsicTriangulation::new(&mesh, &geometry)?;
                 let report = refine_signposts(&mut tri, options)?;
-                self.finish_post(&tri, options, report, t0)
+                source.finish_post(&tri, options, report, t0)?
             }
-        }
+        };
+        result.1.repair = repaired.map(|r| r.1);
+        Ok(result)
     }
 
     fn finish_post<T: LocatedTriangulation>(
@@ -598,7 +622,10 @@ fn make_report(
         lo = lo.min(a);
         hi = hi.max(a);
     }
-    let min_sum = input_angle_sums.iter().copied().fold(f64::INFINITY, f64::min);
+    let min_sum = input_angle_sums
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
     RefinementReport {
         representation: options.representation,
         rules: refined.rules,
@@ -618,6 +645,7 @@ fn make_report(
         certificate,
         seconds_refine,
         seconds_locate,
+        repair: None,
     }
 }
 
@@ -781,4 +809,122 @@ fn place(
         *b /= sum;
     }
     Ok((face, bary))
+}
+
+// ----- making a coarse mesh simplicial by flips -----
+
+/// The defects that keep a Δ-complex from being a simplicial mesh ([`TriMesh`]): faces with a
+/// repeated vertex, self-edges, edges beyond the first between the same two vertices, faces
+/// beyond the first on the same three vertices; and the edges that take part in one.
+fn simplicial_defects(c: &Complex) -> (usize, Vec<usize>) {
+    use std::collections::HashMap;
+    let mut count = 0usize;
+    let mut involved: Vec<usize> = Vec::new();
+    let mut pairs: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+    for e in 0..c.n_edges() {
+        let [a, b] = c.edge_vertices(e).map(|v| v as u32);
+        if a == b {
+            count += 1;
+            involved.push(e);
+        } else {
+            pairs.entry((a.min(b), a.max(b))).or_default().push(e);
+        }
+    }
+    for edges in pairs.values().filter(|e| e.len() > 1) {
+        count += edges.len() - 1;
+        involved.extend(edges);
+    }
+    let mut triples: HashMap<[u32; 3], Vec<usize>> = HashMap::new();
+    for (f, face) in c.faces().iter().enumerate() {
+        let mut key = *face;
+        key.sort_unstable();
+        if key[0] == key[1] || key[1] == key[2] {
+            count += 1;
+            involved.extend((0..3).map(|k| c.edge(3 * f + k)));
+        } else {
+            triples.entry(key).or_default().push(f);
+        }
+    }
+    for faces in triples.values().filter(|f| f.len() > 1) {
+        count += faces.len() - 1;
+        for &f in faces {
+            involved.extend((0..3).map(|k| c.edge(3 * f + k)));
+        }
+    }
+    involved.sort_unstable();
+    involved.dedup();
+    (count, involved)
+}
+
+/// What [`CoarseMesh::make_simplicial`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimplicialRepair {
+    /// Defects before (faces with a repeated vertex, self-edges, surplus parallel edges, surplus
+    /// faces on the same three vertices).
+    pub defects_before: usize,
+    /// Defects after (zero on success).
+    pub defects_after: usize,
+    /// Edge flips made (each a tracked intrinsic flip: the metric and the map are unchanged).
+    pub n_flips: usize,
+}
+
+impl CoarseMesh {
+    /// Tries to make the coarse mesh a simplicial mesh by edge flips alone (so that
+    /// [`post_refine`](Self::post_refine) accepts it): repeatedly flips an edge at or next to a
+    /// defect when the flip lowers the number of defects (see [`SimplicialRepair`]) and is
+    /// geometrically possible ([`flip_edge`](Self::flip_edge): a strictly convex quadrilateral),
+    /// at most `max_flips` times. Flips keep the metric and the tracked map, but the mesh is
+    /// no longer Delaunay. A greedy search: it can stop with defects left (tiny meshes), and
+    /// then the mesh has the flips it made and the report says how many defects remain.
+    ///
+    /// # Errors
+    /// [`IemError::RemovalPending`], and the errors of the flips other than refusals.
+    pub fn make_simplicial(&mut self, max_flips: usize) -> Result<SimplicialRepair, RefineError> {
+        if self.pending.is_some() {
+            return Err(IemError::RemovalPending.into());
+        }
+        let (before, _) = simplicial_defects(&self.complex);
+        let mut report = SimplicialRepair {
+            defects_before: before,
+            defects_after: before,
+            n_flips: 0,
+        };
+        let mut current = before;
+        'pass: while current > 0 && report.n_flips < max_flips {
+            let (_, involved) = simplicial_defects(&self.complex);
+            // The defective edges and the edges of their faces.
+            let mut candidates = involved.clone();
+            for &e in &involved {
+                let h = self.complex.edge_halfedge(e);
+                candidates.extend((0..3).map(|k| self.complex.edge(3 * (h / 3) + k)));
+                if let Some(t) = self.complex.twin(h) {
+                    candidates.extend((0..3).map(|k| self.complex.edge(3 * (t / 3) + k)));
+                }
+            }
+            candidates.sort_unstable();
+            candidates.dedup();
+            for e in candidates {
+                let mut trial = self.complex.clone();
+                if trial.flip_edge(e).is_err() {
+                    continue;
+                }
+                let (after, _) = simplicial_defects(&trial);
+                if after >= current {
+                    continue;
+                }
+                match self.flip_edge(e) {
+                    Ok(_) => {
+                        report.n_flips += 1;
+                        current = after;
+                        continue 'pass;
+                    }
+                    Err(IemError::FlipRefused { .. }) => {}
+                    Err(other) => return Err(other.into()),
+                }
+            }
+            break;
+        }
+        report.defects_after = current;
+        Ok(report)
+    }
 }
