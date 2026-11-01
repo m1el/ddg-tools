@@ -357,7 +357,7 @@ spoke mc, per side (c_a, e_c from that face, j counted from that side's tail):
 may be put, `before = j` or `j + 1`, the one where the chord does not cross `A`; if `A` ends at `c`
 the chord is `A`, which is the usual case on symmetric meshes: the other diagonal of a quad is an
 input edge.) The roundabout of `c → m` is Eq. 4's analogue with `e_before`, as for any split.
-`formulas::split_side_at_crossing`; CITED.md has the statement (pending, tier B). Like every
+`formulas::split_side_at_crossing`; proved in Lean (tier B, `IntegerCoords/SplitAtCrossing.lean`, `Complex/SplitAtCrossing.lean`). Like every
 split, the result is valid by construction; `certify` passes after each (`tests/snap.rs`).
 *Measured* (`tests/snap.rs`, 17 shapes + spot + camelbad, 7 scenarios, every crossing of every
 edge across input edges, strided to 300 edges on the big states, at the crossing and `+1e-14`,
@@ -1152,7 +1152,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   signposts' by `1.5e-5` of an edge). Decision (the user's): snap, so that both representations
   make the same insertion. Done (§4.5): the split puts the new vertex on the crossing under the
   signposts' rule and tolerance (`LOCATION_SNAP`), with the integers derived
-  (`ic-split-at-crossing`, CITED.md pending tier B) and differentially tested (157 076 snapped
+  (`ic-split-at-crossing`, proved in Lean, tier B) and differentially tested (157 076 snapped
   splits equal to the signposts', 0 failures). The reference (geometry-central ab116f1)
   has no such case: `splitInteriorEdge` is a face split plus a flip. The export and the iteration
   now split at the midpoint, snapped when needed: torus 5×3 `0` off-midpoint splits, its export

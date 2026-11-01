@@ -474,8 +474,11 @@ Open:
 * Not yet started (FlipOut): F5/F6 (Lean), F7 (evaluation: Thingi10k, MPZ, Princeton; the
   reference driver exists in `runs_tmp/fo-reference-driver/`), F9. F4 (Bézier, iCDT) and F8
   (Python, Blender) are done.
-* Lean, not yet proved: `ic-split-at-crossing` (tier B, pending; likely cheap on top of
-  `SplitEdge`), `ic-input-aligned-frame` (needs angles in the complex model), the flip's
+* `ic-split-at-crossing` proved (tier B, `IntegerCoords/SplitAtCrossing.lean`,
+  `Complex/SplitAtCrossing.lean`): `n_mc` counts the arcs crossing the chord `mc`, `−1` exactly
+  when the arc through `m` comes from `c`; the new faces are valid with one end at `m` and merge
+  back to `n` (`merge_normal`); the split as an operation on `Cx` is not built.
+* Lean, not yet proved: `ic-input-aligned-frame` (needs angles in the complex model), the flip's
   same-curves statement at the level of `Cx.next` (proved on the glued quadrilateral), Alg. 3's
   walk back past inserted vertices; and the 13 `fo-` ids (FlipOut F5/F6).
 * `ic-vertex-removal-delta` (removal by flips in a Δ-complex): open in the paper and here; refused
