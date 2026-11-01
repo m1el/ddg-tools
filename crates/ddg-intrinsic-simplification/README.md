@@ -187,3 +187,33 @@ vertices (0.3x at 3k, 0.8x at 187k); the paper's 20x is against a slower direct 
 `cargo run --release -p ddg-intrinsic-simplification --example multigrid_study -- MESH.obj` and
 `--example cmcf -- MESH.obj --steps 100 --out runs_tmp/cmcf_x` (OBJ per step); tests:
 `tests/hierarchy.rs`.
+
+[--fractions 0.5,0.1,0.02] [--method ice|greedy|qem-closest|qem-successive]` (default `ice`, the
+real order; `greedy` is the WP6 stand-in).
+
+## Evaluation: distortion, the extrinsic baseline with maps, scaling (WP9a; SPEC §10.3, §10.4)
+
+* **Distortion** (`evaluation::distortion`, paper Sec. 8.3, Fig. 18): for the map from the fine
+  vertices to the coarse mesh, the length `ℓ̂_ij` of every fine edge is the distance between the
+  images on the coarse mesh (planar in one face, else a local unfolding search that is the exact
+  geodesic for paths through at most 16 faces with at most one vertex bend, an upper bound
+  otherwise; exact vertex-to-vertex fallback counted in the report); per fine face, the singular
+  values of the affine map to the triangle of lengths `ℓ̂`, as Khodakovsky et al. 2003 Sec. 2:
+  anisotropic distortion `γ_max/γ_min` and area distortion `log(σ₁σ₂)`; mean (area-weighted) and
+  max; faces whose `ℓ̂` violate the triangle inequality are counted, not dropped silently.
+  `PointDistance` is the distance on its own.
+* **QEM with maps** (`baseline`, `evaluation::extrinsic_applications`): the Garland–Heckbert
+  collapses with either the closest-point projection or, with `QemOptions::successive_map`, the
+  successive self-parameterization of Liu, Zhang, Ben-Chen, Jacobson 2021 (joint LSCM flattening of
+  the patch before and after each collapse, Tutte fallback, closed meshes only; module
+  `baseline::successive` lists the gaps). `extrinsic_applications` wraps either as a
+  `CoarseApplications`, so Poisson, geodesics, all pairs and Voronoi run on the QEM mesh with the
+  same code as on the ICE mesh.
+* **Eq. 10 sign** (`CoarseMeshOptions::projective_sign`, SPEC S25): `ProjectiveSign::Paper`
+  (default, `e^{+u}`) or `Cetm` (`e^{-u}`, Springborn et al.); both are valid bijections of the
+  tracking, they differ in the distortion of the map (measured in SPEC §10 "Results of record").
+* Examples: `evaluate` (distortion and area error, ICE against QEM, per target and method),
+  `applications --method …` (Poisson, geodesics, all pairs, Voronoi), `scaling` (Fig. 16: one size
+  per process, run it pinned with `taskset`).
+* Tests: `cargo test --release -p ddg-intrinsic-simplification --test evaluation --test successive
+  --test qem`.

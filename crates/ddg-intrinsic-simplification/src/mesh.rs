@@ -38,6 +38,9 @@ pub struct CoarseMeshOptions {
     /// Whether a committed removal flips the edges among the neighbours to Delaunay
     /// (SPEC §3.3, S15; paper Alg. 1 line 12).
     pub delaunay_after_removal: bool,
+    /// The sign of the exponent of Eq. 10, the map of the tracked points through a flattening
+    /// (SPEC S25). Default: the paper's `e^{+u}`.
+    pub projective_sign: crate::formulas::ProjectiveSign,
 }
 
 impl Default for CoarseMeshOptions {
@@ -50,6 +53,7 @@ impl Default for CoarseMeshOptions {
             flatten_tolerance: 1e-12,
             flatten_max_iterations: 100,
             delaunay_after_removal: true,
+            projective_sign: crate::formulas::ProjectiveSign::Paper,
         }
     }
 }

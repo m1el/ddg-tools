@@ -64,6 +64,7 @@ pub mod baseline;
 pub mod cmcf;
 pub mod curvature;
 mod error;
+pub mod evaluation;
 mod flatten;
 mod flip;
 pub mod formulas;
@@ -81,6 +82,7 @@ mod undo;
 pub use error::{IemError, RemovalFailure, RemovalRefusal};
 pub use flatten::{FLATTEN_MAX_FACTOR, FlattenReport};
 pub use flip::{DelaunayFlipReport, FlippedEdge};
+pub use formulas::ProjectiveSign;
 pub use mesh::{
     ANGLE_CHECK_TOLERANCE, Certificate, CoarseMesh, CoarseMeshOptions, InputPoint, PointLocation,
 };

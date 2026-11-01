@@ -112,17 +112,50 @@ pub fn face_angle_sum_and_derivative(l: [f64; 3], at_i: [bool; 3]) -> Option<(f6
     Some((sum, d, true))
 }
 
+/// Which sign of the exponent the projective interpolation of Eq. 10 uses (SPEC S25).
+///
+/// `Paper`: `b̃_k ∝ e^{+u} b_k` at the slots of the flattened vertex, as the paper prints it and
+/// as the reference implements it. `Cetm`: `e^{−u}`, the circumcircle-preserving projective
+/// interpolation of Springborn, Schröder, Pinkall 2008 (Sec. 3.4, App. D). Both are continuous
+/// bijections of every face onto itself ([`projective_interpolation_signed`]), so the tracking
+/// is correct with either; they differ in where interior points land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectiveSign {
+    /// `e^{+u}` (the paper's Eq. 10 as printed; default).
+    #[default]
+    Paper,
+    /// `e^{−u}` (Springborn et al. 2008).
+    Cetm,
+}
+
 /// Eq. 10 of the paper, as printed: the barycentric coordinates of a point of a face after the
 /// vertex `i` with conformal factor `u` is flattened: `b̃_k ∝ e^{u} b_k` at the slots of `i`,
 /// `b_k` elsewhere, normalized to sum one. It maps the face bijectively onto itself, fixes its
 /// corners and agrees along a shared side with the neighbouring face. It is the *inverse* of
 /// the circumcircle-preserving projective interpolation of Springborn et al. 2008 (Sec. 3.4,
-/// App. D), which uses `e^{−u}`; both are valid tracking maps (SPEC S25).
+/// App. D), which uses `e^{−u}`; both are valid tracking maps (SPEC S25, option
+/// [`ProjectiveSign`]).
 ///
 /// [formula: iem-projective-interpolation]
 #[inline]
 pub fn projective_interpolation(b: [f64; 3], at_i: [bool; 3], u: f64) -> [f64; 3] {
-    let s = u.exp();
+    projective_interpolation_signed(b, at_i, u, ProjectiveSign::Paper)
+}
+
+/// [`projective_interpolation`] with the sign of the exponent chosen by `sign` (SPEC S25).
+///
+/// [formula: iem-projective-interpolation]
+#[inline]
+pub fn projective_interpolation_signed(
+    b: [f64; 3],
+    at_i: [bool; 3],
+    u: f64,
+    sign: ProjectiveSign,
+) -> [f64; 3] {
+    let s = match sign {
+        ProjectiveSign::Paper => u.exp(),
+        ProjectiveSign::Cetm => (-u).exp(),
+    };
     let w = [0, 1, 2].map(|k| if at_i[k] { s * b[k] } else { b[k] });
     let sum = w[0] + w[1] + w[2];
     w.map(|x| x / sum)

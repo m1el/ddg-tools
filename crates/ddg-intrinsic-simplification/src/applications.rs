@@ -586,6 +586,32 @@ impl CoarseApplications {
     /// [`AppError::Prolongation`].
     pub fn new(mesh: &CoarseMesh) -> Result<CoarseApplications, AppError> {
         let output = mesh.compact().map_err(AppError::Mesh)?;
+        CoarseApplications::from_output(
+            output,
+            mesh.complex().clone(),
+            mesh.edge_lengths().to_vec(),
+        )
+    }
+
+    /// Builds the applications on an already compacted coarse mesh with its Δ-complex and edge
+    /// lengths: what [`new`](Self::new) does after `compact`. The extrinsic baseline uses it
+    /// (`crate::evaluation`), with the images of its fine vertices as the tracked points.
+    ///
+    /// # Errors
+    /// As [`new`](Self::new); [`AppError::Invalid`] if `lengths` has not one entry per edge of
+    /// the output.
+    pub fn from_output(
+        output: CoarseOutput,
+        complex: Complex,
+        lengths: Vec<f64>,
+    ) -> Result<CoarseApplications, AppError> {
+        if lengths.len() != output.edge_lengths.len() {
+            return Err(AppError::Invalid(format!(
+                "{} edge lengths for {} edges",
+                lengths.len(),
+                output.edge_lengths.len()
+            )));
+        }
         let prolongation = output
             .scalar_prolongation()
             .map_err(AppError::Prolongation)?;
@@ -613,8 +639,8 @@ impl CoarseApplications {
             .collect();
         let (corner_ptr, corners) = output.vertex_slots();
         Ok(CoarseApplications {
-            lengths: mesh.edge_lengths().to_vec(),
-            complex: mesh.complex().clone(),
+            lengths,
+            complex,
             output,
             prolongation,
             laplacian,

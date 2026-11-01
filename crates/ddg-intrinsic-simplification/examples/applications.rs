@@ -8,11 +8,14 @@
 //!     [--exp 100] [--threads 8]
 //! ```
 //!
-//! The coarse mesh comes from `make_coarse` below, which uses the stand-in order
-//! `greedy_coarsening` (smallest memoryless cost). **Swap that one function for `simplify` (the
-//! ICE order) to rerun the numbers with the paper's method**: nothing else here depends on how the
-//! coarse mesh was made (it takes a `CoarseMesh` with the fine endpoints of the exponential-map
-//! test tracked as extra points).
+//! `--method` chooses how the coarse mesh is made (default `ice`):
+//! * `ice`: `simplify` with the defaults (the ICE order, SPEC §5), the endpoints of the
+//!   exponential-map test tracked as extra points;
+//! * `greedy`: the WP6 stand-in order `greedy_coarsening` (kept for comparison);
+//! * `qem-closest`, `qem-successive`: the QEM baseline (SPEC §10.4) at the same vertex count with
+//!   the closest-point projection, or the successive self-parameterization of Liu et al. 2021
+//!   (closed meshes). Their coarse meshes have extrinsic edge lengths; the exponential-map
+//!   column is empty for them (no tracked extras).
 
 use std::time::Instant;
 
@@ -24,20 +27,51 @@ use ddg_intrinsic_apps::exact::{ExactOptions, ExactSource, exact_distance};
 use ddg_intrinsic_simplification::applications::{
     CoarseApplications, CoarseHeat, DistanceError, PoissonSolver, greedy_coarsening,
 };
-use ddg_intrinsic_simplification::{CoarseMesh, CoarseMeshOptions, CoarsePoint, InputPoint};
+use ddg_intrinsic_simplification::evaluation::{
+    ExtrinsicMap, extrinsic_applications, qem_to_target,
+};
+use ddg_intrinsic_simplification::{
+    CoarseMesh, CoarseMeshOptions, CoarsePoint, InputPoint, SimplifyOptions, Target, simplify,
+};
 
 /// The one place that decides how the coarse mesh is made.
-fn make_coarse(
+fn make_app(
+    method: &str,
     positions: &[[f64; 3]],
     faces: &[[u32; 3]],
     points: &[InputPoint],
     target: usize,
-) -> CoarseMesh {
-    let mut mesh =
-        CoarseMesh::from_positions(positions, faces, points, CoarseMeshOptions::default())
-            .unwrap_or_else(|e| panic!("{e}"));
-    greedy_coarsening(&mut mesh, target).unwrap_or_else(|e| panic!("{e}"));
-    mesh
+) -> CoarseApplications {
+    match method {
+        "ice" | "greedy" => {
+            let mut mesh =
+                CoarseMesh::from_positions(positions, faces, points, CoarseMeshOptions::default())
+                    .unwrap_or_else(|e| panic!("{e}"));
+            if method == "ice" {
+                let opts = SimplifyOptions {
+                    target: Target::Vertices(target),
+                    ..SimplifyOptions::default()
+                };
+                simplify(&mut mesh, &opts).unwrap_or_else(|e| panic!("{e}"));
+            } else {
+                greedy_coarsening(&mut mesh, target).unwrap_or_else(|e| panic!("{e}"));
+            }
+            mesh.certify(false).unwrap();
+            CoarseApplications::new(&mesh).unwrap()
+        }
+        "qem-closest" | "qem-successive" => {
+            let successive = method == "qem-successive";
+            let (q, _) = qem_to_target(positions, faces, target, successive)
+                .unwrap_or_else(|e| panic!("{e}"));
+            let map = if successive {
+                ExtrinsicMap::Successive
+            } else {
+                ExtrinsicMap::ClosestPoint
+            };
+            extrinsic_applications(&q, positions.len(), map).unwrap_or_else(|e| panic!("{e}"))
+        }
+        other => panic!("--method: ice, greedy, qem-closest or qem-successive, not {other}"),
+    }
 }
 
 fn arg<T: std::str::FromStr>(args: &[String], name: &str, default: T) -> T {
@@ -61,7 +95,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let Some(path) = args.get(1) else {
         eprintln!(
-            "usage: applications MESH.obj [--fractions a,b,c] [--sources n] [--rows n] [--voronoi n] [--exp n] [--threads n]"
+            "usage: applications MESH.obj [--fractions a,b,c] [--sources n] [--rows n] [--voronoi n] [--exp n] [--threads n] [--method m]"
         );
         std::process::exit(2);
     };
@@ -76,6 +110,7 @@ fn main() {
     let n_voronoi: usize = arg(&args, "--voronoi", 20);
     let n_exp: usize = arg(&args, "--exp", 100);
     let threads: usize = arg(&args, "--threads", 8);
+    let method: String = arg(&args, "--method", "ice".to_string());
     let obj = read_obj(path).unwrap_or_else(|e| {
         eprintln!("{path}: {e}");
         std::process::exit(1);
@@ -98,7 +133,10 @@ fn main() {
         std::process::exit(1);
     });
     let opts = ExactOptions::default();
-    println!("# {path}: {n} vertices, {} faces", faces.len());
+    println!(
+        "# {path}: {n} vertices, {} faces, method {method}",
+        faces.len()
+    );
 
     // ----- fine references (computed once) -----
     let step = (n / n_sources.max(1)).max(1);
@@ -214,9 +252,7 @@ fn main() {
     let pool_n = ThreadPool::new(threads).unwrap();
     for &fraction in &fractions {
         let target = ((n as f64) * fraction).ceil() as usize;
-        let coarse = make_coarse(&positions, &faces, &exp_end_points, target);
-        coarse.certify(false).unwrap();
-        let app = CoarseApplications::new(&coarse).unwrap();
+        let app = make_app(&method, &positions, &faces, &exp_end_points, target);
         let nc = app.output().n_vertices();
         // Single-source geodesic, exact and heat (setup included for heat, excluded as "prefact").
         let (mut e_exact, mut e_heat) = (0.0, 0.0);
