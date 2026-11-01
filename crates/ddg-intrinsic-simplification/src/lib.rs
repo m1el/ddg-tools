@@ -11,3 +11,8 @@
 //! contract is `SPEC.md` in this crate.
 //!
 //! Work in progress: see `SPEC.md` §15 for the work packages.
+//!
+//! * [`baseline`]: the extrinsic baseline of Sec. 8.4, quadric error metrics (Garland, Heckbert 1997)
+//!   with a closest-point projection map (SPEC §10.4).
+
+pub mod baseline;

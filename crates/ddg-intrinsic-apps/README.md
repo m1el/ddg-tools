@@ -15,7 +15,7 @@ Sec. 5.1 to 5.5 are:
 | 5.1 | `steiner` | a short cut through all vertices: the minimal spanning tree of the intrinsic Delaunay triangulation, shortened by Fermat points inserted as intrinsic vertices; its paths on the input mesh; the check that the cut leaves a flat disk |
 | 5.2 | `fem` | stiffness, Galerkin and lumped mass matrices on an intrinsic triangulation; the regular 4-1 subdivision; extreme eigenvalues and condition numbers (Lanczos) |
 | 5.3 | `heat` | geodesic distance by the heat method on an intrinsic triangulation, factored once, values at input vertices, inserted vertices and any point of the input mesh |
-| — | `exact` | the exact polyhedral distance from vertices (window propagation), the ground truth of 5.3 |
+| — | `exact` | the exact polyhedral distance from vertices (window propagation), the ground truth of 5.3; also on a `ddg_intrinsic::Complex` Δ-complex with edge lengths and face-point sources (N37b) |
 | 5.4 | `amr` | adaptive refinement: residual error estimator, bulk marking, refinement of the marked faces (`ddg_intrinsic::refine_with`), for the harmonic Green's function, the short-time heat kernel and a harmonic disk map |
 | 5.5 | `vector` | tangent fields: transport from the signposts, finite difference and finite element connection Laplacians, harmonic fields with boundary values and the vector maximum principle, smoothest `n`-direction fields and their singularities |
 
