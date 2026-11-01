@@ -143,6 +143,14 @@ pub struct Row {
 /// `1e-8` for a zero target.
 pub const NONLINEAR_TOLERANCE: f64 = 1e-8;
 
+/// [`ConstraintSet::project_positional`] repeats translation and pin reset on a component with
+/// both a barycenter and pins until the barycenter error is at most this times the largest
+/// coordinate magnitude (at least 1).
+pub const POSITIONAL_TOLERANCE: f64 = 1e-14;
+
+/// The cap on those repetitions.
+pub const POSITIONAL_MAX_ROUNDS: usize = 100;
+
 /// The resolved constraints of one surface, their rows and the rows dropped by the rank check.
 #[derive(Debug, Clone)]
 pub struct ConstraintSet {
@@ -633,8 +641,11 @@ impl ConstraintSet {
     /// The exact projection onto the active positional rows (`SPEC.md` §5.1, §6.2): every
     /// active barycenter group translates its component (or the whole mesh) by `−Φ` (a
     /// translation keeps the areas, so the barycenter then equals its target exactly), then every
-    /// active pin is reset to its target (pins last, so they hold exactly; a component with both
-    /// pins and a barycenter keeps the pins and its barycenter is off by the pins' share).
+    /// active pin is reset to its target (pins last, so they hold exactly). When a group also
+    /// contains pins, resetting them moves its barycenter by the pins' share of the area; the
+    /// two steps are then repeated (the barycenter error shrinks by that share each time) until
+    /// the barycenter is within [`POSITIONAL_TOLERANCE`] of the coordinates' scale, at most
+    /// [`POSITIONAL_MAX_ROUNDS`] times.
     ///
     /// [formula: rs-barycenter]
     ///
@@ -642,6 +653,55 @@ impl ConstraintSet {
     /// [`RsError::PositionCountMismatch`].
     pub fn project_positional(&self, positions: &mut [[f64; 3]]) -> Result<(), RsError> {
         self.check_len(positions)?;
+        let mixed = self.mixed_groups();
+        for _ in 0..POSITIONAL_MAX_ROUNDS {
+            self.translate_and_reset(positions);
+            if mixed.is_empty() {
+                return Ok(());
+            }
+            let scale = positions
+                .iter()
+                .flatten()
+                .fold(1.0f64, |m, x| m.max(x.abs()));
+            let va = self.vertex_areas(positions);
+            let worst = mixed.iter().fold(0.0f64, |m, &r| {
+                let RowKind::Barycenter { component, .. } = self.rows[r].kind else {
+                    return m;
+                };
+                let b = self.barycenter(&va, positions, component);
+                (0..3).fold(m, |m, k| m.max((b[k] - self.rows[r + k].target).abs()))
+            });
+            if !(worst > POSITIONAL_TOLERANCE * scale) {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// First rows of the active barycenter groups that contain an active pin.
+    fn mixed_groups(&self) -> Vec<usize> {
+        let mut pinned = vec![false; self.n_vertices];
+        for (row, &act) in self.rows.iter().zip(&self.active) {
+            if let RowKind::Pin { vertex, .. } = row.kind
+                && act
+            {
+                pinned[vertex as usize] = true;
+            }
+        }
+        (0..self.rows.len())
+            .filter(|&r| {
+                self.active[r]
+                    && match self.rows[r].kind {
+                        RowKind::Barycenter { component, axis: 0 } => (0..self.n_vertices)
+                            .any(|v| pinned[v] && self.in_component(v, component)),
+                        _ => false,
+                    }
+            })
+            .collect()
+    }
+
+    /// One translation of every active barycenter group, then every active pin reset.
+    fn translate_and_reset(&self, positions: &mut [[f64; 3]]) {
         let mut r = 0;
         while r < self.rows.len() {
             if let RowKind::Barycenter { component, axis: 0 } = self.rows[r].kind
@@ -673,7 +733,6 @@ impl ConstraintSet {
                 positions[vertex as usize][axis as usize] = row.target;
             }
         }
-        Ok(())
     }
 
     /// The vertex component numbers.
