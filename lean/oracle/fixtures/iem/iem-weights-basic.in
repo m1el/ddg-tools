@@ -1,0 +1,7 @@
+case iem-weights-basic
+task weights
+ki 3fd3333333333333
+dk 1 3fb999999999999a
+dk 2 bfa999999999999a
+dk 3 3fd0000000000000
+end

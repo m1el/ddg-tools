@@ -1,0 +1,20 @@
+case iem-removal-boundary-0
+task removal
+status ok
+flatten ok 5 bfe2b1aab3394f3a
+ki 3fee28c731eb6950
+nbr 1 3fc0a4822f4291ac 3fc1a88a3a797a5e 3fe53aea92a7b6a6
+nbr 2 3fe2a3b3dc808594 3fe3c6ef062277d9 3fe16eacd8174abd
+nbr 3 3fcd6fcb2668fd18 3fcf3bb9acfca63d 3fe4674035900a47
+new 0 1 3fd18ebc540fdef8 bfbd68e870d89582 bfcaa9d18a0b077d
+new 0 2 3fe9e8c5babc67c4 3fd279511e7700b0 bfd15cc5712b47b3
+new 0 3 3fd1b1a580ac89d2 bfddfd933a79fdb3 bfd3c76ba1fa5673
+new 1 1 3fa70d8b8f4c6513 3fb5277908e7723c bfc1e50ae1a9629d
+new 1 2 3fcfabb662589b2e bf6181a847430140 3fc8a47371497040
+new 1 3 3fceaa2f61f9ef00 bfc74f342e0820fc 3fb53342d4668c4c
+new 2 1 3fd15907770c20a2 bfc1d6a1133e37db bfc09418edd63de6
+new 2 2 3fcad600535378fa 3f7249b75ea8a1f7 bfc0116c9ea1351c
+new 2 3 3fcd28770c4c4320 3fa14f919de688e2 bf8568a0770ec254
+cost 3fe54c313eafdaae
+memoryless 3fe212db1edebad3
+end

@@ -198,7 +198,10 @@ triangle inequality has angles `π, 0, 0`), `Θ_i(u)` is continuous and non-incr
 `Θ_i(u) → deg(i)·π` (`≥ 2π`; boundary: `≥ π`) as `u → −∞` and `→ 0` as `u → +∞`
 (`iem-flatten-monotone`), so a root exists. Newton's step is Eq. 4,
 `u ← u − (Θ̃_i − Θ_i)/(½ Σ_{ijk ∋ i} (cot θ^k_ij + cot θ^j_ki))` (sum over the faces of the star,
-each face once per corner at `i`), safeguarded by a bracket `[u_lo, u_hi]` with
+each face once per corner at `i`; in a face with a self-edge `ii` the cotangent opposite the
+self-edge is dropped, since that corner's angle does not depend on `u` — the per-corner sum of Eq. 4,
+which the reference uses (R55), is not the derivative there: a gap of 0.42 on a self-edge star in
+the oracle's self-test; only Newton's speed is affected, not the root), safeguarded by a bracket `[u_lo, u_hi]` with
 `Θ_i(u_lo) ≥ Θ̃_i ≥ Θ_i(u_hi)` that is expanded geometrically from `u = 0` and replaced by
 bisection whenever the Newton step leaves it or the Hessian is not positive (cot terms of
 degenerate corners count 0). Stop when `|Θ_i − Θ̃_i| ≤ 1e-12 · Θ̃_i`; iteration cap 100 (the
@@ -523,12 +526,44 @@ output is in the fine mesh's normalized frames, the frames of `ddg_intrinsic::In
 on the input (so the result plugs into `ddg-intrinsic-apps`' vector code). n-direction fields
 (Knöppel encoding) use `z^n`, `ψ^n`.
 
+*As built (WP4).* `CoarseMesh::compact() -> CoarseOutput` (`src/output.rs`; the complex's ids
+are already dense, so the compacted ids are its vertex and face ids); `src/prolongation.rs`
+holds `P`, `P^vec`, `FineFrames` and the helpers. Decisions where the text left room:
+
+* **Fine frames.** The fine side of `ψ` is `e^{iφ_ij}` with `φ_ij` the *normalized* signpost of
+  the fine edge in the frame of `i` (the paper's "unit vector along the fine edge in the
+  normalized coordinate system at `i`"), so the output is in the normalized frames
+  (`2π/Θ` inside, `π/Θ` on the boundary), and the matrix acts on *unnormalized* coarse vectors.
+  `ddg-intrinsic-apps` stores a boundary vertex's vectors in the unnormalized frame; the
+  conversion is `unnormalize`/`normalize` (boundary scale `π/Θ`).
+* **Boundary unnormalization** generalizes the paper's `Θ/2π` to `Θ/π` at a boundary vertex:
+  `w = e^{iφ/s}`, `s` the scale of S4.
+* **Neighbours that are coarse vertices** count as lying in every face around them (at the
+  corner); the reference ignores them (R29). A coarse vertex's row has one entry, the average
+  over the faces around it and the neighbours in them of `ψ z`, normalized.
+* **Fallback 3 differs from S18's text:** instead of averaging the `ψ` of the known neighbours
+  (which live in the frames of different coarse faces, so their average has no meaning) the row
+  is the average of the known neighbours' *rows*, each carried to the frame of `i` by the fine
+  transport `e^{i n (φ_ij − φ_ji − π)}` (the paper's "average of known interpolated values"),
+  breadth-first in rounds. A tier whose `Σ ψ_ij` cancels (`< 1e-8` per neighbour) counts as
+  failed. A last resort (no row known in a component) takes the face's own corners with
+  `ψ = 1` and is counted in `n_default` (never happened).
+* Edge-adjacent faces are laid out across the shared side from the two faces' lengths (no
+  obtuse-sign bug, R31); a face adjacent to itself (Δ-complex) is unfolded the same way.
+* Fallback 3 uses the normalized angles as they are, which is exact only where the scale is one
+  (boundary vertices of cone angle `≠ π`); it fires for a handful of rows only.
+* The `β` of the paper are the angles of the sides in the face frame (`0`, `π − θ_j`,
+  `π + θ_i`), the printed subscripts of the paper being garbled.
+
 ### 7.4 Drawing the coarse mesh on the fine mesh (Sec. 8.1)
 
 * `face_of_points(points)`: coarse face per tracked point; a greedy colouring of the coarse faces
   (adjacent through a vertex → different colours; deterministic; no fixed palette size: the
   colouring returns colour indices, the caller maps them) — the reference's 24-colour overflow
   (R40) cannot occur.
+* *As built (WP4).* `CoarseOutput::{face_of_point, face_of_points, colour_faces, point_colours}`:
+  a point that is a coarse vertex belongs to its incident face of lowest id; the colouring visits
+  the faces in id order and gives each the smallest colour absent around its corners.
 * The Blender view (§11) tracks one point per fine face (its centroid) and colours each fine face
   by its coarse face; with a UV map it can instead bake texels (Sec. 8.1, Fig. 15).
 
@@ -550,6 +585,39 @@ on the input (so the result plugs into `ddg-intrinsic-apps`' vector code). n-dir
   length; implemented from the paper; libigl's `principal_curvature` is not copied, S22). Output:
   `k_max`, `k_min`, unit directions per vertex.
 * **Boundary preservation / constraints** (8.6.3, Fig. 28): fixed vertices (§2.2).
+
+*As built (WP8; `src/anisotropy.rs`).*
+* **Frames.** `u_i` is a normalized frame angle (`curvature::direction_angles`). The edge angle at
+  `i` is rebuilt from the corner angles of the input lengths, counter-clockwise from
+  `outgoing_halfedge(i)` (the unnormalized angle `θ`; the closing edge of a boundary fan is at
+  `Θ`); `u` is unnormalized by `Θ/2π` (interior) or `Θ/π` (boundary), so the scalar product is
+  taken in the real tangent plane. At a cone vertex the angle between `u` and the edge is the
+  smaller of the two ways round, `min(δ, Θ − δ)`; on the boundary `|δ|`. `(u·ê)² = cos²` is
+  invariant under `u → −u` at flat vertices. A direction pointing out of a boundary vertex's fan is
+  snapped to the nearest boundary edge by `direction_angles`; this is its rule, not ours.
+* **Direction of the effect.** The factor is `1` for edges parallel to `u` and `1 − τ` for edges
+  orthogonal to it, so coarse triangles (isotropic in the scaled metric) are **elongated across
+  `u`**: `u = d_max` → long along `d_min`.
+* **Validity is exact, not bisected.** Each scaled length is affine in `τ`, so every triangle
+  inequality is affine in `τ` and holds on `[0, τ*)`; `max_valid_tau` is the minimum of the roots
+  (a test compares it with bisection to `1e-9`). `clamp_tau` uses `τ_max (1 − clamp_safety)`
+  (default `1e-6`) and reports `tau_used`, `tau_max`, the violating-face count and the factor
+  range in `AnisotropyReport`; without it, `AnisotropyError::TriangleInequality` names all faces.
+  `τ = 0` returns the input lengths bitwise.
+* **Tracking** needs no change: `CoarseMesh::from_lengths` takes the scaled lengths and the
+  points as (input face, barycentric coordinates), which are metric independent. Tests: the
+  `τ = 0` mesh is `bitwise_eq` to the plain one; `certify` passes after coarsening; every point is
+  located; the total area equals that of the scaled mesh.
+* **Measured** (`examples/anisotropy_study.rs`, 300 coarse vertices, stand-in order
+  `coarsen_by_area`: lightest lumped area first, in rounds; mean angle in degrees between the
+  long axis of the coarse faces, from the covariance of their tracked fine vertices, and the
+  direction line; 45 = no relation, 90 = across). Open cylinder 96x60 (`Max`): 31 at τ = 0 →
+  74 at τ = 0.6, and 16 to `d_min`. Spot `Max`: `τ_max = 0.275`, 46 → 55 (τ = 0.2) → 57 (clamped);
+  `Min`: `τ_max = 0.360`, 44 → 61. Bob `Max`: `τ_max = 0.463`, 48 → 69 (τ = 0.4) → 71;
+  `Min`: `τ_max = 0.498`, 42 → 74. Capsule (reference): `τ_max = 3e-4` for both (the input has
+  nearly degenerate triangles), no effect possible. Mean aspect of the faces 1.7 → 2.1-2.4 (cylinder
+  3-4.5); mean minimum corner angle of the coarse faces in the scaled metric stays 41 degrees, in
+  3D (chord triangles) it falls from 41 to 34.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -614,8 +682,10 @@ percent reduction on a 750k-vertex subdivision. Runs in parallel per mesh (64 co
 For every fine edge `ij`: `ℓ̂_ij` = the length of the image path, approximated (paper) by the
 distance between `φ(i)` and `φ(j)` on `M̄`: in the layout of the coarse face if both are in one
 face, else the exact geodesic distance on `M̄` (§10.1). For each fine face, the triangle with
-lengths `ℓ̂` against the input triangle: the anisotropic distortion `σ₁/σ₂` and the area distortion
-`log(σ₁σ₂)` of the affine map (Khodakovsky et al. 2003 Sec. 2), mean and max (`iem-distortion`).
+lengths `ℓ̂` against the input triangle: with `γ_max ≥ γ_min` the eigenvalues of the metric tensor
+`JᵀJ` of the affine map (`γ = σ²`), the anisotropic distortion `γ_max/γ_min` and the area distortion
+`log(γ_max γ_min)`/2 `= log(σ₁σ₂)` as Khodakovsky et al. 2003 Sec. 2 define them (the paper says
+"as defined by Khodakovsky et al."); `σ₁/σ₂` is reported too. Mean and max (`iem-distortion`).
 
 ### 10.4 Extrinsic baselines (Sec. 8.4; Fig. 18, 19, 21, 22)
 
@@ -773,26 +843,32 @@ Formula ids `iem-…`; tiers as IC-SPEC §9: A (algebraic/analytic identities), 
 
 | id | statement | tier |
 |---|---|---|
-| `iem-flatten-newton` | Eq. 4 is Newton's step for `E(u_i)` (Springborn et al. Eq. 9, 10 restricted to one vertex): `∂Θ_i/∂u_i = −½ Σ (cot θ^k_ij + cot θ^j_ki)` | A |
-| `iem-flatten-monotone` | with extended angles, `Θ_i(u)` is continuous, non-increasing, `→ deg·π` at `−∞`, `→ 0` at `+∞`; a root exists; strictly decreasing where some face is valid | A/B |
-| `iem-flatten-conserves-curvature` | flattening `i` changes only `Θ` of `i` and `N_i`, and `Σ_{N_i} K̃ = Σ_{N_i} K + K_i` (local Gauss–Bonnet: each face's angles sum to π) | A |
-| `iem-projective-interpolation` | Eq. 10 maps each face bijectively onto itself, fixes the corners, and agrees on a shared edge for the two faces (C⁰) | A |
-| `iem-degree-three-barycentric` | in a flat degree-3 star, the barycentric coordinates of `i` in the merged face are the normalized sub-triangle areas, and the points of the three faces map affinely | A |
-| `iem-boundary-merge` | a flat boundary vertex of degree 2 lies on the segment `bc` of the merged triangle, at the coordinate given by the layout | A |
-| `iem-flip-to-degree-three` | = `ic-vertex-removal` (Thm. D.1) for simplicial stars; the boundary analogue (flat half-star of degree > 2 has a flippable spoke) | B′ (proved / to prove) |
-| `iem-wrap` | S4: the wrap of an angular coordinate to `[0, 2π)` inside / `[0, π]` on the boundary preserves the direction (`e^{iφ}` inside) and the CCW order of the fan | A |
-| `iem-redistribution-weights` | Eq. 9: `α_ij ≥ 0`, `Σ α = 1`, and the denominator is ≥ `|K_i| > 0` for a non-flat vertex | A |
-| `iem-memoryless-cost` | Eq. 6: `Σ m̃_j‖t̃_j‖ = Σ α_ij m_i ℓ_ij` when `t = 0`, and this is the 1-Wasserstein distance of moving the mass `m_i` at `i` to the neighbours (a single source: every coupling is the forced one; distances along the flat star are `ℓ_ij`) | A |
-| `iem-center-of-mass-update` | Eq. 7/8 in the plane: `t̃_j` points from `x_j` to the combined centre of mass when `t_i`, `t_j` point to the centres of mass of `m_i`, `m_j` | A |
-| `iem-transport-rotation` | `R_ij = e^{i(φ_ji + π − φ_ij)}` maps the frame of `i` to the frame of `j` along the edge (= `app-vector-transport` of the apps crate) | A (reuse) |
-| `iem-vector-interpolation` | Sec. 7.3.1: the `β` angles of the three edges in the face frame and the rotations `z` | A |
-| `iem-anisotropic-scale` | the length factor is in `[1 − τ, 1]` for unit `u`, `ê` | A |
-| `iem-galerkin-spd` | `Pᵀ A P` is SPD for SPD `A` and full-column-rank `P` | A |
-| `iem-distortion` | the singular values of the affine map between two triangles from their lengths; `σ₁σ₂ =` area ratio | A |
-| `iem-qem-quadric` | the quadric of a plane gives the squared distance; the optimal point solves the 3×3 system | A |
+| `iem-flatten-newton` | Eq. 4 is Newton's step for `Θ_i(u) = Θ̃_i` (Springborn et al. Eq. 9, 10 restricted to one vertex): `∂Θ_i/∂u_i = −½ Σ_f Σ_{corners a at i}` (cotangents of the angles opposite the sides of `a` that are not self-edges); for a face with one corner at `i` this is `cot θ^k_ij + cot θ^j_ki`; with a self-edge `ii` the per-corner sum of §3.4 / Eq. 4 is **not** the derivative (the cotangent opposite the self-edge is dropped, as the Rust `face_angle_sum_and_derivative` does); positive for valid faces without a self-face | A (proved) |
+| `iem-flatten-monotone` | with extended angles, `Θ_i(u)` is continuous, non-increasing, `→ deg·π` at `−∞` (`deg` = faces of the star), `→ 0` at `+∞` (no self-face); a bracket `Θ(lo) ≥ Θ̃ ≥ Θ(hi)` contains a root; a root exists for `0 < Θ̃ < deg·π`; strictly decreasing between `u₁ < u₂` when some face (not a self-face) is valid at `u₁` or `u₂`; the root is unique if some face is valid at it | A/B (proved) |
+| `iem-flatten-conserves-curvature` | flattening `i` changes only `Θ` of `i` and `N_i`, and `Σ_{N_i} K̃ = Σ_{N_i} K + K_i` (local Gauss–Bonnet: each face's angles sum to π) | A (proved) |
+| `iem-projective-interpolation` | Eq. 10 maps each face bijectively onto itself, fixes the corners, and agrees on a shared edge for the two faces (C⁰), for any positive per-vertex weights. Note: Eq. 10's `e^{+u}` is the *inverse* of CETM's circumcircle-preserving map (`e^{−u}`, CETM Sec. 3.4, App. D); both are valid bijective tracking maps | A (proved) |
+| `iem-degree-three-barycentric` | in a flat degree-3 star, the barycentric coordinates of `i` in the merged face are the normalized sub-triangle areas, and the points of the three faces map affinely | A (proved) |
+| `iem-boundary-merge` | a flat boundary vertex of degree 2 lies on the segment `bc` of the merged triangle, at the coordinate given by the layout | A (proved) |
+| `iem-flip-to-degree-three` | = `ic-vertex-removal` (Thm. D.1) for simplicial stars (corners `≤ π`; the strict version is false: the cross star); the boundary analogue: a flat half-star of degree `> 2` has an interior spoke with a **strictly** convex quadrilateral; Δ-complexes: `ic-vertex-removal-delta` (open) | B′ (proved) |
+| `iem-wrap` | S4: the wrap of an angular coordinate to `[0, 2π)` inside / `[0, π]` on the boundary preserves the direction (`e^{iφ}` inside) and the CCW order of the fan | A (proved) |
+| `iem-redistribution-weights` | Eq. 9: `α_ij ≥ 0`, `Σ α = 1`, and the denominator is ≥ `|K_i| > 0` for a non-flat vertex | A (proved) |
+| `iem-memoryless-cost` | Eq. 6: `Σ m̃_j‖t̃_j‖ = Σ α_ij m_i ℓ_ij` when `t = 0`, and this is the 1-Wasserstein distance of moving the mass `m_i` at `i` to the neighbours (a single source: every coupling is the forced one; distances along the flat star are `ℓ_ij`) | A (proved) |
+| `iem-center-of-mass-update` | Eq. 7/8 in the plane: `t̃_j` points from `x_j` to the combined centre of mass when `t_i`, `t_j` point to the centres of mass of `m_i`, `m_j` | A (proved) |
+| `iem-transport-rotation` | `R_ij = e^{i(φ_ji + π − φ_ij)}` maps the frame of `i` to the frame of `j` along the edge, in a flat region (on a curved surface it is the definition, `app-vector-transport`, cited) | A (proved) |
+| `iem-vector-interpolation` | Sec. 7.3.1: the `β` angles of the three edges in the face frame and the rotations `z` | A (proved) |
+| `iem-anisotropic-scale` | the length factor is in `[1 − τ, 1]` for unit `u`, `ê` | A (proved) |
+| `iem-galerkin-spd` | `Pᵀ A P` is SPD for SPD `A` and full-column-rank `P` (also on the free unknowns after Dirichlet elimination); unit rows of the coarse vertices give full column rank | A (proved) |
+| `iem-distortion` | the singular values of the affine map between two triangles from their lengths (`‖J‖²_F = Σ cot θ_k ℓ̂_k²/(2A)`, `|det J| =` area ratio, `σ² = (s ± √(s² − 4d²))/2`); `σ₁σ₂ =` area ratio. Khodakovsky et al. Sec. 2 define the measures from the eigenvalues `γ = σ²` of the metric tensor (`γ_max/γ_min`, `γ_max γ_min`); §10.3's `σ₁/σ₂`, `log(σ₁σ₂)` are monotone in them | A (proved) |
+| `iem-qem-quadric` | the quadric of a plane gives the squared distance (weighted: `w (n·(x − p))²`); quadrics add; a solution of `A v = −b` (the cofactor formula of `optimal_point`) minimizes a quadric with symmetric PSD `A` (uniquely for PD); along a segment the clamped vertex `clamp(−β/α, 0, 1)` minimizes it for `α > 0` | A (proved) |
 | `iem-wasserstein-memory` | the memory-based cost approximates the transport cost (paper Sec. 5.2: "only approximate") | cited |
 | `iem-cetm-existence` | Springborn et al. 2008 Thm. (convex energy, uniqueness up to constants) | cited |
 | `iem-delaunay-quality` | 30°/120° corner bound after post-refinement (Gillespie et al. 2021a) | cited (`ic-refinement-termination`) |
+
+Lean (WP10): `lean/proofs/DdgProofs/IntrinsicSimplification/*.lean`; the exact statements and theorem
+names are in `lean/proofs/README.md`, section "Intrinsic Simplification"; the cited ids in
+`lean/proofs/CITED.md`. Oracle: `ddg-oracle iem` (tasks `step`, `flatten`, `weights`, `removal` on one
+star), fixtures `lean/oracle/fixtures/iem/` (format in `lean/oracle/README.md`); its side `k` is
+**opposite** corner `k`, i.e. Rust's `l[(k + 1) % 3]`.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -839,6 +915,14 @@ Formula ids `iem-…`; tiers as IC-SPEC §9: A (algebraic/analytic identities), 
   successive maps (§10.4); not in the reference (R43).
 * **S24 Hierarchy from one run with snapshots** (masses carry across levels); the reference's fresh
   per-level runs (R33) as an option.
+* **S25 Eq. 10 as printed** (`b̃_i ∝ e^{+u} b_i`): the paper's and the reference's map, which is
+  the *inverse* of Springborn et al.'s circumcircle-preserving projective interpolation (`e^{−u}`,
+  CETM Sec. 3.4, App. D; found by WP10). Both are continuous bijections of each face
+  (`iem-projective-interpolation`), so tracking is correct either way; the default follows the
+  paper, and WP9 measures the distortion (§10.3) with both (an option `projective_sign`).
+* **R55** (new, found by WP10): the reference's Newton denominator sums `cot` per corner also in
+  faces with a self-edge, which is not the derivative there; S9 drops the cotangent opposite the
+  self-edge. The root is the same.
 * **Reference bugs not reproduced**: R8, R10, R14, R18, R25, R26, R30, R31, R35, R36, R39, R40,
   R41, R42, R44 (each fixed in the fixed driver build where it affects a comparison, §12.2).
 

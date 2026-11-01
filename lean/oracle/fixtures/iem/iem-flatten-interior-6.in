@@ -1,0 +1,7 @@
+case iem-flatten-interior-6
+task flatten
+target interior
+face 0 1 2 3ff455987a986d5d 3fe9bb561e40cd18 3ff2aca6af72928e
+face 0 2 3 3ff733f88192bdbf 3fe53f50c9fec9a5 3fe9bb561e40cd18
+face 0 3 1 3ff34c34dc0aa317 3ff2aca6af72928e 3fe53f50c9fec9a5
+end

@@ -41,8 +41,16 @@
 //!   with a closest-point projection map (SPEC §10.4).
 //! * [`curvature`]: principal curvatures (Panozzo, Puppo, Rocca 2010) for anisotropic
 //!   coarsening (SPEC §8), and 3D directions as angles in the intrinsic frames.
+//! * [`CoarseMesh::compact`] and the map (WP4, SPEC §7): [`CoarseOutput`] with every tracked
+//!   point in the compacted coarse ids, the scalar prolongation `P`
+//!   ([`CoarseOutput::scalar_prolongation`]), the vector prolongation `P^vec`
+//!   ([`CoarseOutput::vector_prolongation`], module [`prolongation`]) and the greedy colouring of
+//!   the coarse faces ([`CoarseOutput::colour_faces`]).
+//! * [`anisotropy`]: anisotropic edge-length scaling from principal directions (paper Sec. 8.6.2,
+//!   SPEC §8) and the coarse mesh of the scaled metric.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
+pub mod anisotropy;
 pub mod baseline;
 pub mod curvature;
 mod error;
@@ -52,6 +60,8 @@ pub mod formulas;
 mod mesh;
 pub mod metric;
 pub mod multigrid;
+mod output;
+pub mod prolongation;
 mod removal;
 mod simplify;
 mod undo;
@@ -65,6 +75,11 @@ pub use mesh::{
 pub use metric::{
     BoundaryFrames, Channel, ChannelSource, ChannelState, ChannelWeights, FlatRule, Frames,
     MetricOptions,
+};
+pub use output::{CoarseOutput, CoarsePoint, FaceColouring};
+pub use prolongation::{
+    C64, ComplexSparse, FineFrames, FineNeighbour, ProlongationError, VectorProlongationReport,
+    normalize, unnormalize,
 };
 pub use removal::{NeighbourChange, PreparedRemoval, RemovalKind, RemovalReport};
 pub use simplify::{

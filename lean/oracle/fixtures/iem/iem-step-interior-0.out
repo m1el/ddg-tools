@@ -1,0 +1,12 @@
+case iem-step-interior-0
+task step
+status ok
+step 0000000000000000 401ce7143a819a40 4012e7af671aa983 3fc9865f6fe0b06e
+paperhess 4012e7af671aa984
+face 0 3ff39ac2e06265da 3fe9bb561e40cd18 3ff2aca6af72928e 1
+face 1 3fe560e18d864acb 3fe53f50c9fec9a5 3fe9bb561e40cd18 1
+face 2 3fea615a65ae1731 3fedae61ec0b305c 3fe53f50c9fec9a5 1
+face 3 3fec7727c0cee969 3ff01e8216f3eec2 3fedae61ec0b305c 1
+face 4 3ffef63ada89ef91 3ff3dabe2f3d452e 3ff01e8216f3eec2 1
+face 5 3ff180867e7502bf 3ff2aca6af72928e 3ff3dabe2f3d452e 1
+end

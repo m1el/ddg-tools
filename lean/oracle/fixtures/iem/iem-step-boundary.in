@@ -1,0 +1,9 @@
+case iem-step-boundary
+task step
+target boundary
+face 0 1 2 3fe80c70d678d123 3ff4ef6926eec3f6 3ff5d56bcc1ecb66
+face 0 2 3 3fe9425b2d365ef7 3fe816436338af61 3ff4ef6926eec3f6
+face 0 3 4 3fe2a0e6d552a2a5 3fe60c50802e1dc0 3fe816436338af61
+face 0 4 5 3fe4473b355b0c2b 3ff1cc515bd32800 3fe60c50802e1dc0
+u bfc999999999999a
+end

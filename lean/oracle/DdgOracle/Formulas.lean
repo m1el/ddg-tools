@@ -7,6 +7,7 @@ import DdgOracle.Formulas.Optimality
 import DdgOracle.Formulas.Cuts
 import DdgOracle.Formulas.Intrinsic
 import DdgOracle.Formulas.Developability
+import DdgOracle.Formulas.IntrinsicSimplification
 
 /-!
 # Scalar-generic formulas

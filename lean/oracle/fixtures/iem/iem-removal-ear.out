@@ -1,0 +1,6 @@
+case iem-removal-ear
+task removal
+status ok
+flatten invalid 1 bfe478697b8235a1
+cost 7ff0000000000000
+end

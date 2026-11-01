@@ -1,0 +1,6 @@
+case iem-flatten-degree-two
+task flatten
+target interior
+face 0 1 2 3ff049239ff43fae 3fe53f50c9fec9a5 3fe9bb561e40cd18
+face 0 2 1 3ff733f88192bdbf 3fe9bb561e40cd18 3fe53f50c9fec9a5
+end

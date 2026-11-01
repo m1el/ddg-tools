@@ -1797,3 +1797,83 @@ Alg. 3 arguments (seed 77); Eq. 6 on `[−1, 5]²`.
   is `r_ai + n⁻_ai + (p − c^{ja}_i)`.
 * Eq. 3 can return `n < −1` for a pair of valid faces that no straight geometry realizes (two arcs
   from `k` to `l`); flipping back still restores the old count.
+
+## Intrinsic simplification (seventh paper): `ddg-oracle iem`
+
+> Hsueh-Ti Derek Liu, Mark Gillespie, Benjamin Chislett, Nicholas Sharp, Alec Jacobson, Keenan
+> Crane. *Surface Simplification using Intrinsic Error Metrics.* ACM TOG 42(4), Article 118, 2023.
+> Contract: `crates/ddg-intrinsic-simplification/SPEC.md`.
+
+One star at a time, written from the paper and SPEC §3.4, §4 (not from the authors' code): one
+Newton step of the flattening, the flattening itself, the redistribution weights, and one whole
+removal (flattening, curvature changes, Eq. 9, Eq. 5 and Eq. 8 per channel, the cost of Eq. 6).
+Every number printed comes from the scalar-generic definitions of
+`DdgOracle/Formulas/IntrinsicSimplification.lean` (and `cornerAngle`, `cornerCot` of
+`Formulas/Triangle.lean`), which `lean/proofs/DdgProofs/IntrinsicSimplification/Oracle.lean`
+identifies at `ℝ` with the definitions of the theorems; `exp`, `cos`, `sin` are the C library's.
+
+| command | |
+|---|---|
+| `ddg-oracle iem [IN [OUT]]` | batch stream of cases (tasks below), one block per case, flushed per case |
+| `ddg-oracle iem-selftest` | internal checks (below), about 0.2 s |
+| `ddg-oracle iem-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/iem`, 50 cases, 0.4 MB; byte-for-byte check on this machine) |
+
+### Conventions
+
+* Floats are 16-digit hex bit patterns (text format 1, above); labels and counts are decimal.
+* **The star.** `face V0 V1 V2 L0 L1 L2`: the corner labels (`0` is the vertex `i` being removed,
+  `≥ 1` its neighbours; labels may repeat, e.g. `face 0 0 1 …` has a self-edge `ii`) and the sides,
+  side `k` **opposite** corner `k` (it joins corners `k + 1` and `k + 2`). Rust's
+  `extended_face_angles` stores `l[k]` from slot `k` to `k + 1`, i.e. the side opposite slot `k + 2`:
+  `L_k(oracle) = l[(k + 1) % 3](Rust)`. Every face must have a corner `0`.
+* `target interior` (`Θ̃ = 2π`), `target boundary` (`π`) or `target X` (hex).
+* Flattening with scale `u` multiplies side `k` by `e^{u m/2}`, `m` the number of its ends labelled
+  `0`. Angles are extended (`π` opposite a side `≥` the sum of the others, `0` at the other corners).
+  The Newton denominator is `H = ½ Σ` over corners at `i` of the cotangents opposite their sides
+  that are not self-edges (`iem-flatten-newton`; the cotangents of a face that is not a strict
+  triangle count `0`); `paperhess` is the per-corner sum printed in Eq. 4 (different only with a
+  self-edge).
+* **Solver** (`flatten`): bracket from `u = 0` by doubling steps up to `|u| = 256`, then Eq. 4's step
+  when it stays strictly inside the bracket and `H > 0`, bisection otherwise; stop at
+  `|Θ − Θ̃| ≤ 1e-12 Θ̃` or when the bracket is below `1e-15 (1 + |u|)`; at most 100 steps. The
+  iteration count is not part of the contract (compare `u`, to about `1e-12` relative).
+  Status: `ok`; `invalid` (converged, but some face is not a strict triangle at the root:
+  Springborn's flip fallback would be needed); `noroot` (no bracket: e.g. a self-face, or
+  `Θ̃ ≥ deg·π`); `maxiter`.
+
+### Input and output per task
+
+Every case is `case NAME`, `task T`, the lines below, `end`; the output repeats `case`/`task`, then
+`status ok` (or `status error MESSAGE`: wrong token count, not a hex float, no corner `0`, a
+non-positive side, inconsistent neighbours or masses) and the lines below, then `end`.
+
+| task | input lines | output lines |
+|---|---|---|
+| `step` | `target`, `face` × any, `u U` | `step U THETA HESS NEXT` (`Θ_i(U)`, `H(U)`, Eq. 4's `U − (Θ̃ − Θ)/H`); `paperhess H'`; per face `face K L0 L1 L2 VALID` (sides at `U`, `VALID` 1 for a strict triangle) |
+| `flatten` | `target`, `face` × any | `theta0 Θ_i(0)`; `solve STATUS ITERS U THETA`; `hess H(U)`; per face `face K L0 L1 L2 VALID` at `U` |
+| `weights` | `ki K_i`, optional `tol T` (default `1e-12`), `dk J DK` × any | per `dk`: `w J ALPHA` (Eq. 9, or `1/count` when `|K_i| ≤ tol`) |
+| `removal` | `target`, `face` × any; `nbr J PHIIJ PHIJI LEN` per neighbour (each label `≠ 0` once): the angular coordinates `φ_ij` at `i` and `φ_ji` at `j` of the edge used for the transport **after** flattening, and its length **before** (scaled by `e^{u/2}` here); `channel W MI TIX TIY` (weight, mass and error vector at `i`) each followed by `mass J MJ TJX TJY` per neighbour in the order of the `nbr` lines; optional `memory 0` (error vectors taken as 0) | `flatten STATUS ITERS U`; if not `ok`: `cost +∞` and nothing else; else `ki K_i` (`Θ̃ − Θ_i(0)`); per neighbour `nbr J DK ALPHA LEN` (`K̃_j − K_j = −(Θ_j(U) − Θ_j(0))` over the star's corners, Eq. 9's weight, `ℓ̃_ij`); per channel `P` (from 0) and neighbour `new P J MJ TJX TJY` (Eq. 5, Eq. 8 with `R_ij = e^{i(φ_ji + π − φ_ij)}`, `e_ji = ℓ̃_ij e^{iφ_ji}`, `t̃_j = t_j` unless `m̃_j > 0`); `cost C` (`Σ_p w_p Σ_j m̃_j ‖t̃_j‖`); `memoryless C0` (`Σ_p w_p Σ_j α_j m_i ℓ̃_ij`) |
+
+For Rust: parse with `f64::from_bits(u64::from_str_radix(tok, 16)?)`, match lines by their first
+token; the `.in` files are valid input of the Rust side's own star-level functions after the side
+permutation above.
+
+### Self-test (`iem-selftest`)
+
+Regular cones flatten to `u = 2 log(s/(2 r sin(π/n)))` (to `1e-12`); `−H` equals the central
+difference of `Θ_i` (relative `1e-6`) on interior, boundary and self-edge stars, `paperhess` equals
+it on simplicial stars and misses it by 0.42 on the self-edge star; `Θ_i` is non-increasing on
+`u ∈ [−8, 8]` (step 0.05); on the removal fixtures `Σ_j ΔK_j = K_i` (`1e-10`), the weights are
+non-negative and sum to one, `memory 0` gives `cost = memoryless`; the projective weights `e^{−u}`
+keep the circumcircle of a face (error `0`), Eq. 10's `e^{+u}` do not (2.18); every fixture case
+gives a block without error and round-trips through its printed input.
+
+### Fixtures `fixtures/iem/`
+
+`MANIFEST.tsv` (name, status, what): 6 regular cones (closed form), 12 random interior and 8
+random boundary stars (spokes in `[0.6, 1.4]`, angles at the vertex summing to `0.8–1.2 × 2π`
+resp. `0.6–1.4 × π`, outer sides by the law of cosines), a self-edge star, an ear and an interior
+vertex of degree 2 (`invalid`), a self-face (`noroot`); 6 Newton steps (one with a self-edge);
+2 weight cases (one flat); 11 removals (interior, boundary, memoryless, an already flat hexagon
+with equal weights, an ear with cost `+∞`). One random interior star of degree 3
+(`iem-flatten-interior-6`) is `invalid`: its root degenerates a face.

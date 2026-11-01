@@ -1,0 +1,51 @@
+name	status	what
+iem-flatten-cone-3-1.200000	ok	regular cone, degree 3, spokes 1, outer sides 1.200000: flattening u = 2 log(s/(2 sin(π/3)))
+iem-flatten-cone-4-1.000000	ok	regular cone, degree 4, spokes 1, outer sides 1.000000: flattening u = 2 log(s/(2 sin(π/4)))
+iem-flatten-cone-5-1.000000	ok	regular cone, degree 5, spokes 1, outer sides 1.000000: flattening u = 2 log(s/(2 sin(π/5)))
+iem-flatten-cone-6-0.900000	ok	regular cone, degree 6, spokes 1, outer sides 0.900000: flattening u = 2 log(s/(2 sin(π/6)))
+iem-flatten-cone-8-1.000000	ok	regular cone, degree 8, spokes 1, outer sides 1.000000: flattening u = 2 log(s/(2 sin(π/8)))
+iem-flatten-cone-6-1.000000	ok	regular cone, degree 6, spokes 1, outer sides 1.000000: flattening u = 2 log(s/(2 sin(π/6)))
+iem-flatten-interior-0	ok	random interior star, degree 3, angle sum 5.026548
+iem-flatten-interior-1	ok	random interior star, degree 4, angle sum 5.654867
+iem-flatten-interior-2	ok	random interior star, degree 5, angle sum 6.283185
+iem-flatten-interior-3	ok	random interior star, degree 6, angle sum 6.911504
+iem-flatten-interior-4	ok	random interior star, degree 7, angle sum 7.539822
+iem-flatten-interior-5	ok	random interior star, degree 8, angle sum 5.026548
+iem-flatten-interior-6	invalid	random interior star, degree 3, angle sum 5.654867
+iem-flatten-interior-7	ok	random interior star, degree 4, angle sum 6.283185
+iem-flatten-interior-8	ok	random interior star, degree 5, angle sum 6.911504
+iem-flatten-interior-9	ok	random interior star, degree 6, angle sum 7.539822
+iem-flatten-interior-10	ok	random interior star, degree 7, angle sum 5.026548
+iem-flatten-interior-11	ok	random interior star, degree 8, angle sum 5.654867
+iem-flatten-boundary-0	ok	random boundary star, degree 2, angle sum 1.884956
+iem-flatten-boundary-1	ok	random boundary star, degree 3, angle sum 2.513274
+iem-flatten-boundary-2	ok	random boundary star, degree 4, angle sum 3.141593
+iem-flatten-boundary-3	ok	random boundary star, degree 5, angle sum 3.769911
+iem-flatten-boundary-4	ok	random boundary star, degree 2, angle sum 4.398230
+iem-flatten-boundary-5	ok	random boundary star, degree 3, angle sum 1.884956
+iem-flatten-boundary-6	ok	random boundary star, degree 4, angle sum 2.513274
+iem-flatten-boundary-7	ok	random boundary star, degree 5, angle sum 3.141593
+iem-flatten-self-edge	ok	a face with two corners at i (self-edge ii) and two ordinary faces
+iem-flatten-ear	invalid	an ear (boundary vertex of degree 1): the root makes the face degenerate (status invalid)
+iem-flatten-degree-two	invalid	an interior vertex of degree 2: the root makes both faces degenerate (status invalid)
+iem-flatten-self-face	noroot	a self-face: its angle sum is pi for every u, target 2 pi (status noroot)
+iem-step-interior-0	ok	one Newton step of a random interior star (degree 6) at u = 0
+iem-step-interior-0.3	ok	one Newton step of a random interior star (degree 6) at u = 0.3
+iem-step-interior--0.4	ok	one Newton step of a random interior star (degree 6) at u = -0.4
+iem-step-interior-2.5	ok	one Newton step of a random interior star (degree 6) at u = 2.5
+iem-step-self-edge	ok	Newton step of the self-edge star: hess (the derivative) differs from the per-corner sum of Eq. 4 (paperhess)
+iem-step-boundary	ok	Newton step of a random boundary star
+iem-weights-basic	ok	Eq. 9: |dK_j| / sum |dK_l|
+iem-weights-flat	ok	a flat vertex (|K_i| <= 1e-12): equal shares
+iem-removal-interior-0	ok	one removal of a random interior star (degree 3), three channels, memory
+iem-removal-interior-1	ok	one removal of a random interior star (degree 4), three channels, memory
+iem-removal-interior-2	ok	one removal of a random interior star (degree 5), three channels, memory
+iem-removal-interior-3	ok	one removal of a random interior star (degree 6), three channels, memory
+iem-removal-interior-4	ok	one removal of a random interior star (degree 3), three channels, memory
+iem-removal-interior-5	ok	one removal of a random interior star (degree 4), three channels, memory
+iem-removal-boundary-0	ok	one removal of a random boundary star (degree 2), three channels, memory
+iem-removal-boundary-1	ok	one removal of a random boundary star (degree 3), three channels, memory
+iem-removal-boundary-2	ok	one removal of a random boundary star (degree 4), three channels, memory
+iem-removal-memoryless	ok	memory 0: cost equals the memoryless form sum alpha m_i l_ij
+iem-removal-flat	ok	an already flat vertex (regular hexagon): equal weights 1/6
+iem-removal-ear	invalid	an ear: the flattening is invalid, cost +inf
