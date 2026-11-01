@@ -98,6 +98,7 @@ pub mod formulas;
 pub mod geometry;
 pub mod insert;
 pub mod interface;
+pub mod merge;
 pub mod move_vertex;
 pub mod recover;
 pub mod refine;

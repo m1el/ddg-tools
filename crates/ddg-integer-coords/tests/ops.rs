@@ -16,12 +16,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::{SCENARIOS, Scenario, Shape, all_shapes, convert, standard_shapes, state};
 use ddg_core::generators::SplitMix64;
 use ddg_core::{Geometry, TriMesh};
+use ddg_integer_coords::Removal;
 use ddg_integer_coords::formulas::{self, FlipNormalError};
 use ddg_integer_coords::{IntegerError, IntegerTriangulation, Parts};
 use ddg_intrinsic::{
     Complex, DelaunayOptions, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipRequest,
     FlipShapeTest, InputSurface, Insertion, IntrinsicError, IntrinsicTriangulation, RemovalRefusal,
-    SurfacePoint, Triangulation,
+    RemovalStep, SurfacePoint, Triangulation,
 };
 
 // ----- helpers -----
@@ -252,10 +253,7 @@ fn flips_and_delaunay_match_the_signposts_exactly() {
                 ][(rng.next_u64() % 3) as usize];
                 let (rs, ri) = match request {
                     None => (s.flip_edge(e), it.flip_edge(e)),
-                    Some(q) => (
-                        s.flip_edge_with(e, q),
-                        it.flip_edge_with(e, q),
-                    ),
+                    Some(q) => (s.flip_edge_with(e, q), it.flip_edge_with(e, q)),
                 };
                 match (&rs, &ri) {
                     (Ok(fs), Ok(fi)) => {
@@ -686,9 +684,15 @@ struct RemovalStats {
     stuck_by_degree: BTreeMap<usize, usize>,
     /// Stuck at a star with two spokes on one straight line (angle π between them).
     stuck_straight: usize,
+    /// Of `stuck_straight`: why the merge did not apply (I27).
+    straight_why: BTreeMap<String, usize>,
     refused: BTreeMap<String, usize>,
     split_vertices: usize,
     split_removed: usize,
+    /// Of `split_removed`, by merging the halves (I27).
+    split_merged: usize,
+    /// Of `removed`, by merging two halves (I27).
+    merged: usize,
     split_stuck: usize,
     /// Of `split_vertices`, those on edges crossing input edges.
     split_crossed: usize,
@@ -705,6 +709,9 @@ impl RemovalStats {
         }
         self.stuck += o.stuck;
         self.stuck_straight += o.stuck_straight;
+        for (k, v) in o.straight_why {
+            *self.straight_why.entry(k).or_default() += v;
+        }
         for (k, v) in o.stuck_by_degree {
             *self.stuck_by_degree.entry(k).or_default() += v;
         }
@@ -713,6 +720,8 @@ impl RemovalStats {
         }
         self.split_vertices += o.split_vertices;
         self.split_removed += o.split_removed;
+        self.split_merged += o.split_merged;
+        self.merged += o.merged;
         self.split_stuck += o.split_stuck;
         self.split_crossed += o.split_crossed;
         self.mismatches.extend(o.mismatches);
@@ -735,6 +744,56 @@ fn straight_star(t: &IntegerTriangulation, v: usize) -> bool {
             (sum - std::f64::consts::PI).abs() < 1e-9
         })
     })
+}
+
+/// Why a stuck straight star at `v` was not merged (I27): the refusal of a merge of its
+/// straight pair at degree four, or that the other spokes could not be flipped away.
+fn why_not_merged(t: &IntegerTriangulation, v: usize) -> String {
+    let Some(pair) = ddg_intrinsic::straight_pair(t.complex(), t.edge_lengths(), v) else {
+        let c = t.complex();
+        let self_edge = c.outgoing_halfedges(v).any(|h| c.to_vertex(h) == v);
+        return if self_edge {
+            "an edge from the vertex to itself".into()
+        } else {
+            "no straight pair within the tolerance".into()
+        };
+    };
+    if t.complex().vertex_degree(v) != 4 {
+        return format!(
+            "degree {} (other spokes not flippable)",
+            t.complex().vertex_degree(v)
+        );
+    }
+    match t.clone().merge_edge(v, pair[0] as usize) {
+        Ok(_) => "merge would succeed".into(),
+        Err(IntegerError::Intrinsic(IntrinsicError::RemovalRefused { reason, .. })) => {
+            format!("{reason:?}")
+                .split([' ', '{', '('])
+                .next()
+                .unwrap()
+                .to_string()
+        }
+        Err(e) => format!("{e}"),
+    }
+}
+
+/// Does in the signposts what the integer removal `r` of vertex `v` did: its flips, then the
+/// star removal or the merge (I27), whose result must be the same renumbering.
+fn replay_removal(s: &mut IntrinsicTriangulation, v: usize, r: &Removal) -> Result<(), String> {
+    for &e in &r.flips {
+        s.flip_edge(e as usize)
+            .map_err(|err| format!("signposts refuse flip {e}: {err}"))?;
+    }
+    match &r.removal {
+        RemovalStep::Star(x) => match s.remove_vertex(v) {
+            Ok(y) if &y == x => Ok(()),
+            other => Err(format!("signposts' removal of {v}: {other:?}")),
+        },
+        RemovalStep::Merge(m) => match s.merge_edge(v, m.halves[0] as usize) {
+            Ok(y) if &y == m => Ok(()),
+            other => Err(format!("signposts' merge at {v}: {other:?}")),
+        },
+    }
 }
 
 /// Removes inserted vertices from the integer state one by one (random order), doing the same
@@ -764,20 +823,12 @@ fn removals(
                 st.flips += r.flips.len();
                 st.max_flips = st.max_flips.max(r.flips.len());
                 *st.by_degree.entry(r.degree).or_default() += 1;
-                for &e in &r.flips {
-                    if let Err(err) = s.flip_edge(e as usize) {
-                        st.mismatches
-                            .push(format!("{tag}: signposts refuse flip {e}: {err}"));
-                        return;
-                    }
+                if matches!(r.removal, RemovalStep::Merge(_)) {
+                    st.merged += 1;
                 }
-                match s.remove_vertex(v) {
-                    Ok(x) if x == r.removal => {}
-                    other => {
-                        st.mismatches
-                            .push(format!("{tag}: signposts' removal of {v}: {other:?}"));
-                        return;
-                    }
+                if let Err(m) = replay_removal(s, v, &r) {
+                    st.mismatches.push(format!("{tag}: {m}"));
+                    return;
                 }
                 match difference(it, s) {
                     Ok(None) => {}
@@ -811,6 +862,7 @@ fn removals(
                         *st.stuck_by_degree.entry(degree).or_default() += 1;
                         if straight_star(it, v) {
                             st.stuck_straight += 1;
+                            *st.straight_why.entry(why_not_merged(it, v)).or_default() += 1;
                         }
                     }
                     other => {
@@ -875,10 +927,11 @@ fn removals_match_the_signposts_exactly() {
     }
     eprintln!("removal per scenario [removed, stuck, stuck at a straight star]: {per_scenario:?}");
     eprintln!(
-        "removal differential: {} removed ({} flips, {:.2} per removal, at most {}; by degree \
-         before: {:?}), {} stuck (state restored; degree when stuck: {:?}; {} of them at a star with two \
-         spokes on a straight line), refused: {:?}; {} mismatches",
+        "removal differential: {} removed ({} by merging two halves; {} flips, {:.2} per \
+         removal, at most {}; by degree before: {:?}), {} stuck (state restored; degree when stuck: {:?}; {} of them at a star with two \
+         spokes on a straight line: {:?}), refused: {:?}; {} mismatches",
         total.removed,
+        total.merged,
         total.flips,
         total.flips as f64 / total.removed.max(1) as f64,
         total.max_flips,
@@ -886,6 +939,7 @@ fn removals_match_the_signposts_exactly() {
         total.stuck,
         total.stuck_by_degree,
         total.stuck_straight,
+        total.straight_why,
         total.refused,
         total.mismatches.len()
     );
@@ -950,10 +1004,13 @@ fn removal_of_split_vertices_i27() {
             match it.remove_vertex(v) {
                 Ok(r) => {
                     st.split_removed += 1;
-                    for &f in &r.flips {
-                        s.flip_edge(f as usize).unwrap();
+                    if matches!(r.removal, RemovalStep::Merge(_)) {
+                        st.split_merged += 1;
                     }
-                    s.remove_vertex(v).unwrap();
+                    if let Err(m) = replay_removal(&mut s, v, &r) {
+                        st.mismatches.push(format!("{tag}: split vertex {v}: {m}"));
+                        return st;
+                    }
                     if let Ok(Some(d)) | Err(d) = difference(&it, &s) {
                         st.mismatches.push(format!("{tag}: split vertex {v}: {d}"));
                         return st;
@@ -987,18 +1044,21 @@ fn removal_of_split_vertices_i27() {
     }
     eprintln!(
         "I27: {} vertices split from interior edges ({} of them crossing input edges) and \
-         removed at once: {} removed, {} stuck \
-         (state restored); after Delaunay flipping: {} removed ({} flips), {} stuck (degree: \
-         {:?}; {} at a straight star), refused {:?}; {} mismatches",
+         removed at once: {} removed ({} by merging the halves), {} stuck \
+         (state restored); after Delaunay flipping: {} removed ({} by a merge; {} flips), {} \
+         stuck (degree: {:?}; {} at a straight star: {:?}), refused {:?}; {} mismatches",
         total.split_vertices,
         total.split_crossed,
         total.split_removed,
+        total.split_merged,
         total.split_stuck,
         total.removed,
+        total.merged,
         total.flips,
         total.stuck,
         total.stuck_by_degree,
         total.stuck_straight,
+        total.straight_why,
         total.refused,
         total.mismatches.len()
     );
@@ -1007,6 +1067,17 @@ fn removal_of_split_vertices_i27() {
     }
     assert!(total.mismatches.is_empty());
     assert!(total.split_vertices > 100);
+    // I27 resolved: right after the split nothing is stuck; later, a straight star stays stuck
+    // only with an edge from the vertex to itself (which neither a flip nor a merge removes).
+    assert_eq!(total.split_stuck, 0);
+    assert!(
+        total
+            .straight_why
+            .keys()
+            .all(|k| k == "an edge from the vertex to itself"),
+        "{:?}",
+        total.straight_why
+    );
 }
 
 #[test]
@@ -1033,13 +1104,20 @@ fn refused_removals_change_nothing() {
         ));
         for v in it.n_input_vertices()..it.complex().n_vertices() {
             if it.complex().is_boundary_vertex(v) {
-                match it.remove_vertex(v) {
-                    Err(IntegerError::Unsupported { .. }) => {
-                        *counts.entry("boundary (unsupported)").or_default() += 1
+                // Since I27 an inserted boundary vertex is removed by merging its two boundary
+                // edges (it used to be `Unsupported`).
+                let mut t = it.clone();
+                match t.remove_vertex(v) {
+                    Ok(r) => {
+                        assert!(matches!(r.removal, RemovalStep::Merge(_)));
+                        t.certify().unwrap();
+                        *counts.entry("boundary (merged)").or_default() += 1
                     }
-                    other => panic!("{}: {other:?}", shape.name),
+                    Err(err) => {
+                        assert!(t == it, "{}: {err}", shape.name);
+                        *counts.entry("boundary (refused)").or_default() += 1
+                    }
                 }
-                assert!(it == before);
             } else {
                 // A constrained edge at the vertex.
                 let e = it.complex().edge(it.complex().outgoing_halfedge(v));
@@ -1058,7 +1136,8 @@ fn refused_removals_change_nothing() {
         }
     }
     eprintln!("refused removals (state unchanged): {counts:?}");
-    assert!(counts.len() == 3);
+    assert!(counts.contains_key("input vertex") && counts.contains_key("constrained edge"));
+    assert!(counts.contains_key("boundary (merged)"));
 }
 
 // ----- the shared interface -----

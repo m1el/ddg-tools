@@ -4,7 +4,7 @@
 //! halfedge, the edge of every halfedge, one halfedge per edge and per vertex, and a mask of
 //! *constrained* edges. It knows nothing of lengths, signposts or integers. Its topological
 //! operations ([`Complex::flip_edge`], [`Complex::split_face`], [`Complex::split_edge`],
-//! [`Complex::remove_vertex`]) change only these arrays and return what they did to the ids
+//! [`Complex::remove_vertex`], [`Complex::merge_edge`]) change only these arrays and return what they did to the ids
 //! (which halfedges moved where, which edges, faces and vertices are new, renumbered or gone),
 //! so that a representation can bring its own per-halfedge, per-edge, per-face and per-vertex
 //! data along. [`IntrinsicTriangulation`](crate::IntrinsicTriangulation) (signposts) embeds
@@ -36,7 +36,8 @@
 //! * **Directions.** An operation never changes the direction of an edge it does not flip or
 //!   split ([`Complex::edge_halfedge`] may change id, never tail and head). A flipped edge
 //!   turns counter-clockwise; the two halves of a split edge keep its direction.
-//! * Removal of a vertex ([`Complex::remove_vertex`]) is the only operation that renumbers:
+//! * Removal of a vertex ([`Complex::remove_vertex`]) and the merge of an edge's two halves
+//!   ([`Complex::merge_edge`], the inverse of a split) are the only operations that renumber:
 //!   the last vertex, the last edges and the last faces take the ids that became free.
 
 use ddg_core::TriMesh;
@@ -303,6 +304,73 @@ impl VertexRemoval {
     }
 
     /// Brings per-face data along (`data` indexed by the old face ids). The merged face keeps
+    /// the data of the face whose id it has.
+    pub fn apply_face_data<T: Copy>(&self, data: &mut Vec<T>) {
+        permute(data, &self.face_moves, self.counts[2]);
+    }
+
+    /// Brings per-vertex data along (`data` indexed by the old vertex ids).
+    pub fn apply_vertex_data<T: Copy>(&self, data: &mut Vec<T>) {
+        let moves: Vec<(u32, u32)> = self.vertex_move.into_iter().collect();
+        permute(data, &moves, self.counts[3]);
+    }
+}
+
+/// What [`Complex::merge_edge`] did: the vertex between the two halves of an edge is gone, the
+/// halves are one edge again, and on each side the two faces at the vertex are one face. The
+/// inverse of [`EdgeSplit`]. Merging frees one vertex id, three edge ids and two face ids (two
+/// edge ids and one face id on the boundary); the elements with the highest ids take them
+/// (`*_moves`, `(old, new)`), as in [`VertexRemoval`], so ids stay contiguous.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeMerge {
+    /// The removed vertex (its id before the merge; after it, the id belongs to the vertex in
+    /// [`vertex_move`](Self::vertex_move), if any).
+    pub vertex: u32,
+    /// The merged edge (its id after renumbering).
+    pub edge: u32,
+    /// Tail and head of the merged edge's halfedge (vertex ids after renumbering).
+    pub ends: [u32; 2],
+    /// The two halves before the merge: the one whose id and direction the merged edge kept
+    /// (the smaller id), then the removed one.
+    pub halves: [u32; 2],
+    /// The merged faces, one on each side of the merged edge (ids after renumbering): that of
+    /// the merged edge's halfedge ([`Complex::edge_halfedge`]) first, the second [`NONE`] on
+    /// the boundary.
+    pub faces: [u32; 2],
+    /// The removed edges (ids before the merge): the other half, then the edges from the
+    /// vertex to the opposite corners, ascending (the last [`NONE`] on the boundary).
+    pub removed_edges: [u32; 3],
+    /// The removed faces (ids before the merge), ascending; the second [`NONE`] on the boundary.
+    pub removed_faces: [u32; 2],
+    /// Every surviving halfedge whose id changed, `(old, new)`.
+    pub halfedge_moves: Vec<(u32, u32)>,
+    /// Every surviving edge whose id changed, `(old, new)`.
+    pub edge_moves: Vec<(u32, u32)>,
+    /// Every surviving face whose id changed, `(old, new)`.
+    pub face_moves: Vec<(u32, u32)>,
+    /// The vertex that took the freed id, `(old, new)`.
+    pub vertex_move: Option<(u32, u32)>,
+    /// The numbers of halfedges, edges, faces and vertices after the merge.
+    pub counts: [u32; 4],
+}
+
+impl EdgeMerge {
+    /// Brings per-halfedge data along (`data` indexed by the old halfedge ids). Every surviving
+    /// halfedge leaves its tail in the same direction as before (the halfedge from the far end
+    /// of a half towards the vertex is the merged edge's halfedge from that end), so its data
+    /// is kept as it was.
+    pub fn apply_halfedge_data<T: Copy>(&self, data: &mut Vec<T>) {
+        permute(data, &self.halfedge_moves, self.counts[0]);
+    }
+
+    /// Brings per-edge data along (`data` indexed by the old edge ids). The merged edge gets
+    /// what is stored for the kept half ([`halves`](Self::halves)`[0]`): set the merged
+    /// values there before calling this.
+    pub fn apply_edge_data<T: Copy>(&self, data: &mut Vec<T>) {
+        permute(data, &self.edge_moves, self.counts[1]);
+    }
+
+    /// Brings per-face data along (`data` indexed by the old face ids). Each merged face keeps
     /// the data of the face whose id it has.
     pub fn apply_face_data<T: Copy>(&self, data: &mut Vec<T>) {
         permute(data, &self.face_moves, self.counts[2]);
@@ -1135,20 +1203,67 @@ impl Complex {
         }
         // Halfedges of the removed faces that are not outer ones are dead; a move into the
         // merged face from a dead slot was recorded above.
-        let mut dead_faces: Vec<usize> = f.iter().copied().filter(|&g| g != keep).collect();
+        let dead_faces: Vec<usize> = f.iter().copied().filter(|&g| g != keep).collect();
+        let (dead_faces, face_moves, edge_moves, vertex_move) =
+            self.compact(v, dead_faces, spokes.to_vec(), &mut halfedge_moves);
+        let last = self.n_vertices();
+        let rename_vertex = |u: u32| if u as usize == last { v as u32 } else { u };
+        let mut removed_faces = [0u32; 2];
+        for (slot, &d) in removed_faces.iter_mut().zip(&dead_faces) {
+            *slot = d as u32;
+        }
+        removed_faces.sort_unstable();
+        let mut removed_edges = spokes;
+        removed_edges.sort_unstable();
+        VertexRemoval {
+            vertex: v as u32,
+            face: keep as u32,
+            corners: x.map(rename_vertex),
+            removed_edges,
+            removed_faces,
+            halfedge_moves,
+            edge_moves,
+            face_moves,
+            vertex_move,
+            counts: [
+                self.n_halfedges() as u32,
+                self.n_edges() as u32,
+                self.n_faces() as u32,
+                self.n_vertices() as u32,
+            ],
+        }
+    }
+
+    /// Deletes the faces `dead_faces`, the edges `dead_edges` and the vertex `v`, which nothing
+    /// alive refers to any more, and fills the freed ids with the last faces, edges and vertex
+    /// (in decreasing order of the freed ids, so ids stay contiguous). The halfedge moves of the
+    /// faces that moved are composed into `halfedge_moves`. Returns the dead faces in decreasing
+    /// order, the face moves, the edge moves and the vertex move (all `(old, new)`).
+    #[allow(clippy::type_complexity)]
+    fn compact(
+        &mut self,
+        v: usize,
+        mut dead_faces: Vec<usize>,
+        mut dead_edges: Vec<u32>,
+        halfedge_moves: &mut Vec<(u32, u32)>,
+    ) -> (
+        Vec<usize>,
+        Vec<(u32, u32)>,
+        Vec<(u32, u32)>,
+        Option<(u32, u32)>,
+    ) {
         dead_faces.sort_unstable_by(|a, b| b.cmp(a));
         let mut face_moves = Vec::new();
         for &d in &dead_faces {
             let last = self.n_faces() - 1;
             if d != last {
-                self.move_face(last, d, &mut halfedge_moves);
+                self.move_face(last, d, halfedge_moves);
                 record_move(&mut face_moves, last as u32, d as u32);
             }
             self.faces.truncate(last);
             self.twin.truncate(3 * last);
             self.halfedge_edge.truncate(3 * last);
         }
-        let mut dead_edges = spokes;
         dead_edges.sort_unstable_by(|a, b| b.cmp(a));
         let mut edge_moves = Vec::new();
         for &d in &dead_edges {
@@ -1168,7 +1283,6 @@ impl Complex {
         }
         let last = self.n_vertices() - 1;
         let mut vertex_move = None;
-        let rename_vertex = |u: u32| if u as usize == last { v as u32 } else { u };
         if v != last {
             let fan: Vec<usize> = self.outgoing_halfedges(last).collect();
             for h in fan {
@@ -1178,17 +1292,271 @@ impl Complex {
             vertex_move = Some((last as u32, v as u32));
         }
         self.vertex_halfedge.truncate(last);
-        let mut removed_faces = [0u32; 2];
+        (dead_faces, face_moves, edge_moves, vertex_move)
+    }
+
+    // ----- merge (the inverse of an edge split) -----
+
+    /// The star of vertex `v` (in range) as [`merge_edge`](Self::merge_edge) of the half `e`
+    /// needs it, or why it is not one. Interior: the four outgoing halfedges `[u0, u1, u2, u3]`
+    /// counter-clockwise with `e` the edge of `u0`; the halves are the edges of `u0` and `u2`.
+    /// Boundary: `[u0, u1]`, `u0` the boundary halfedge leaving `v`; the halves are the edges of
+    /// `u0` and of the halfedge before `u1` (the arriving boundary halfedge), `e` one of them.
+    pub(crate) fn merge_star(&self, v: usize, e: usize) -> Result<Vec<usize>, RemovalRefusal> {
+        let boundary = self.is_boundary_vertex(v);
+        let out: Vec<usize> = self.outgoing_halfedges(v).take(5).collect();
+        let wanted = if boundary { 2 } else { 4 };
+        if out.len() != wanted {
+            return Err(RemovalRefusal::MergeDegree {
+                degree: self.vertex_degree(v),
+                boundary,
+            });
+        }
+        for &h in &out {
+            if self.to_vertex(h) == v {
+                return Err(RemovalRefusal::SelfEdge {
+                    edge: self.halfedge_edge[h],
+                });
+            }
+        }
+        let star = if boundary {
+            let halves = [self.halfedge_edge[out[0]], self.halfedge_edge[prev(out[1])]];
+            if !halves.contains(&(e as u32)) {
+                return Err(RemovalRefusal::NotAHalf { edge: e as u32 });
+            }
+            out
+        } else {
+            let Some(i) = out
+                .iter()
+                .position(|&h| self.halfedge_edge[h] as usize == e)
+            else {
+                return Err(RemovalRefusal::NotAHalf { edge: e as u32 });
+            };
+            (0..4).map(|k| out[(i + k) % 4]).collect()
+        };
+        // The spokes that disappear must not be constrained; the halves must agree.
+        let n_spokes = if boundary { 1 } else { 2 };
+        for s in 0..n_spokes {
+            let spoke = self.halfedge_edge[star[2 * s + 1]];
+            if self.constrained[spoke as usize] {
+                return Err(RemovalRefusal::ConstrainedEdge { edge: spoke });
+            }
+        }
+        let [h0, h1] = self.merge_halves(&star);
+        if self.constrained[h0] != self.constrained[h1] {
+            let edge = if self.constrained[h0] { h0 } else { h1 };
+            return Err(RemovalRefusal::ConstrainedEdge { edge: edge as u32 });
+        }
+        Ok(star)
+    }
+
+    /// The two halves of a star of [`merge_star`](Self::merge_star): the edge of `u0` and the
+    /// edge of the halfedge before `u1`.
+    pub(crate) fn merge_halves(&self, star: &[usize]) -> [usize; 2] {
+        [
+            self.halfedge_edge[star[0]] as usize,
+            self.halfedge_edge[prev(star[1])] as usize,
+        ]
+    }
+
+    /// Merges the two halves of an edge at vertex `v` back into one edge and deletes `v`: the
+    /// inverse of [`split_edge`](Self::split_edge) (SPEC N53). `v` is an interior vertex of
+    /// degree four, `e` one of its edges and the other half the edge opposite it (two steps
+    /// around `v`); or a boundary vertex of degree three, `e` one of its two boundary edges and
+    /// the other half the other one. On each side of the merged edge the two faces at `v`
+    /// become one triangle, and the edge from `v` to the opposite corner is deleted. Whether the
+    /// halves are straight is for the representation to decide first
+    /// ([`plan_edge_merge`](crate::merge::plan_edge_merge)).
+    ///
+    /// **Ids.** The merged edge takes the smaller of the two halves' ids and the direction of
+    /// that half; on each side the merged face takes the smaller of the two face ids, with the
+    /// corner `v` replaced by the far end of the other half (its other two corners keep their
+    /// slots). Then, as in [`remove_vertex`](Self::remove_vertex), the freed ids (one vertex,
+    /// three edges and two faces; two edges and one face on the boundary) are filled by the last
+    /// vertex, the last edges and the last faces, and [`EdgeMerge`] lists every move. The
+    /// halfedges that survive leave their tails in the same directions: the outer halfedges of
+    /// the four (two) faces, and the halfedge from the far end of each half towards `v`, which
+    /// becomes the merged edge's halfedge from that end; [`EdgeMerge::apply_halfedge_data`]
+    /// carries their data. Merging the vertex of a [`split_edge`](Self::split_edge) right after
+    /// the split gives back the complex exactly, ids included. Two constrained halves give a
+    /// constrained edge.
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`], and [`IntrinsicError::RemovalRefused`] with
+    /// [`RemovalRefusal::MergeDegree`] (not degree four, or three on the boundary),
+    /// [`RemovalRefusal::SelfEdge`], [`RemovalRefusal::NotAHalf`] (`e` is not an edge at `v`, or
+    /// not a boundary edge at a boundary vertex), [`RemovalRefusal::ConstrainedEdge`] (an edge
+    /// that would disappear is constrained, or only one half is). The complex is unchanged then.
+    pub fn merge_edge(&mut self, v: usize, e: usize) -> Result<EdgeMerge, IntrinsicError> {
+        self.check_index("vertex", v, self.n_vertices())?;
+        self.check_index("edge", e, self.n_edges())?;
+        let star = self
+            .merge_star(v, e)
+            .map_err(|reason| IntrinsicError::RemovalRefused {
+                vertex: v as u32,
+                reason,
+            })?;
+        Ok(self.merge_edge_unchecked(v, &star))
+    }
+
+    /// [`merge_edge`](Self::merge_edge) for a star that [`merge_star`](Self::merge_star)
+    /// returned.
+    pub(crate) fn merge_edge_unchecked(&mut self, v: usize, star: &[usize]) -> EdgeMerge {
+        let interior = star.len() == 4;
+        // Side s has the faces of a = u_{2s}, (v, X0, X1), and of b = u_{2s+1}, (v, X1, X2)
+        // (X0..X2 named per side). They become (X0, X1, X2) with the halfedges next(a),
+        // next(b) and prev(b); the last, X2 → v, becomes the merged edge's halfedge X2 → X0.
+        let n_sides = if interior { 2 } else { 1 };
+        let halves = self.merge_halves(star).map(|x| x as u32);
+        let keep_edge = halves[0].min(halves[1]);
+        let dead_half = halves[0].max(halves[1]);
+        let mut dead_edges = vec![dead_half];
+        for s in 0..n_sides {
+            dead_edges.push(self.halfedge_edge[star[2 * s + 1]]);
+        }
+        // (old slot, new slot) of every surviving halfedge, three per side, the merged
+        // halfedge last; the corner of the kept face that changes from v; the dead halfedge
+        // X1 → v with the survivor X1 → X2 that replaces it as X1's outgoing halfedge.
+        let mut survivors: Vec<(usize, usize)> = Vec::with_capacity(6);
+        let mut kept_faces = [NONE; 2];
+        let mut dead_faces = Vec::with_capacity(2);
+        let mut corner_change = Vec::with_capacity(2);
+        let mut apex_replacement = Vec::with_capacity(2);
+        for s in 0..n_sides {
+            let (a, b) = (star[2 * s], star[2 * s + 1]);
+            let (fa, fb) = (a / 3, b / 3);
+            let (s1, s2, s3) = (next(a), next(b), prev(b));
+            let x0 = self.faces[s1 / 3][s1 % 3];
+            let x2 = self.faces[s3 / 3][s3 % 3];
+            if fa < fb {
+                // Face fa = (v, X0, X1) keeps next(a) in its slot; v becomes X2.
+                survivors.extend([(s1, s1), (s2, prev(a)), (s3, a)]);
+                kept_faces[s] = fa as u32;
+                dead_faces.push(fb);
+                corner_change.push((a, x2));
+            } else {
+                // Face fb = (v, X1, X2) keeps next(b) and prev(b) in their slots; v becomes X0.
+                survivors.extend([(s1, b), (s2, s2), (s3, s3)]);
+                kept_faces[s] = fb as u32;
+                dead_faces.push(fa);
+                corner_change.push((b, x0));
+            }
+            apex_replacement.push((prev(a), s2));
+        }
+        let merged_slots: Vec<usize> = (0..n_sides).map(|s| survivors[3 * s + 2].1).collect();
+        let star_faces: Vec<usize> = star.iter().map(|&h| h / 3).collect();
+        let in_star = |h: u32| h != NONE && star_faces.contains(&(h as usize / 3));
+        let renamed = |h: u32| -> u32 {
+            match survivors.iter().find(|m| m.0 as u32 == h) {
+                Some(&(_, n)) => n as u32,
+                None => h,
+            }
+        };
+        // Everything is read before anything is written.
+        let old: Vec<(u32, u32, u32)> = survivors
+            .iter()
+            .map(|&(o, _)| {
+                let e = self.halfedge_edge[o];
+                (self.twin[o], e, self.edge_halfedge[e as usize])
+            })
+            .collect();
+        // The merged edge keeps the direction of the kept half. The half of u0 (towards X0 of
+        // side 0) directed away from v runs like side 0's merged halfedge X2 → X0, directed
+        // towards v like side 1's; the half before u1 (towards X2 of side 0) the other way
+        // round. On the boundary both halves run like side 0's.
+        let keep_halfedge = self.edge_halfedge[keep_edge as usize] as usize;
+        let away_from_v = self.faces[keep_halfedge / 3][keep_halfedge % 3] as usize == v;
+        let side = if keep_edge == halves[0] {
+            usize::from(!away_from_v)
+        } else {
+            usize::from(away_from_v)
+        };
+        let merged_direction = merged_slots[side.min(n_sides - 1)];
+        let vertex_fix: Vec<(usize, u32)> = {
+            let mut corners: Vec<usize> = survivors
+                .iter()
+                .map(|&(o, _)| self.faces[o / 3][o % 3] as usize)
+                .collect();
+            corners.sort_unstable();
+            corners.dedup();
+            corners
+                .into_iter()
+                .map(|x| {
+                    let h = self.vertex_halfedge[x];
+                    let h = match apex_replacement.iter().find(|m| m.0 as u32 == h) {
+                        Some(&(_, r)) => r as u32,
+                        None => h,
+                    };
+                    (x, renamed(h))
+                })
+                .collect()
+        };
+
+        for &(slot, corner) in &corner_change {
+            self.faces[slot / 3][slot % 3] = corner;
+        }
+        for (&(_, n), &(t, e, eh)) in survivors.iter().zip(&old) {
+            if merged_slots.contains(&n) {
+                continue;
+            }
+            let t_new = if t == NONE { NONE } else { renamed(t) };
+            self.twin[n] = t_new;
+            self.halfedge_edge[n] = e;
+            if t != NONE && !in_star(t) {
+                self.twin[t as usize] = n as u32;
+            }
+            self.edge_halfedge[e as usize] = renamed(eh);
+        }
+        if interior {
+            let [m0, m1] = [merged_slots[0], merged_slots[1]];
+            self.twin[m0] = m1 as u32;
+            self.twin[m1] = m0 as u32;
+            self.halfedge_edge[m1] = keep_edge;
+        } else {
+            self.twin[merged_slots[0]] = NONE;
+        }
+        self.halfedge_edge[merged_slots[0]] = keep_edge;
+        self.edge_halfedge[keep_edge as usize] = merged_direction as u32;
+        for &(x, h) in &vertex_fix {
+            self.vertex_halfedge[x] = h;
+        }
+        let mut halfedge_moves: Vec<(u32, u32)> = survivors
+            .iter()
+            .filter(|m| m.0 != m.1)
+            .map(|&(o, n)| (o as u32, n as u32))
+            .collect();
+        let mut removed_edges = [NONE; 3];
+        removed_edges[..dead_edges.len()].copy_from_slice(&dead_edges);
+        removed_edges[1..].sort_unstable();
+        let mut removed_faces = [NONE; 2];
         for (slot, &d) in removed_faces.iter_mut().zip(&dead_faces) {
             *slot = d as u32;
         }
         removed_faces.sort_unstable();
-        let mut removed_edges = spokes;
-        removed_edges.sort_unstable();
-        VertexRemoval {
+        let (_, face_moves, edge_moves, vertex_move) =
+            self.compact(v, dead_faces, dead_edges, &mut halfedge_moves);
+        let moved = |moves: &[(u32, u32)], x: u32| {
+            if x == NONE {
+                NONE
+            } else {
+                moves.iter().find(|m| m.0 == x).map_or(x, |m| m.1)
+            }
+        };
+        let edge = moved(&edge_moves, keep_edge);
+        let h = self.edge_halfedge[edge as usize] as usize;
+        // Independent of which half was given: the face of the merged edge's halfedge first,
+        // the moves by old id.
+        let mut faces = kept_faces.map(|f| moved(&face_moves, f));
+        if faces[0] as usize != h / 3 {
+            faces.swap(0, 1);
+        }
+        halfedge_moves.sort_unstable();
+        EdgeMerge {
             vertex: v as u32,
-            face: keep as u32,
-            corners: x.map(rename_vertex),
+            edge,
+            ends: [self.from_vertex(h) as u32, self.to_vertex(h) as u32],
+            halves: [keep_edge, dead_half],
+            faces,
             removed_edges,
             removed_faces,
             halfedge_moves,

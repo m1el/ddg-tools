@@ -14,6 +14,7 @@
 //! The path of an edge over the input mesh is `ExtractIntrinsicEdge`
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2).
 
+use ddg_intrinsic::complex::EdgeMerge;
 use ddg_intrinsic::{
     Complex, EdgeTrace, EdgeTraceOptions, Flip, FlipRefusal, FlipRequest, FlipShapeTest,
     InputSurface, InsertedVertexRemoval, Insertion, IntrinsicError, RemovalRefusal, SurfacePoint,
@@ -128,22 +129,14 @@ impl Triangulation for IntegerTriangulation {
     }
 
     /// The removal of Alg. 8 ([`IntegerTriangulation::remove_vertex`]; the flips of
-    /// `ddg_intrinsic`'s [`removal_flip_choice`](ddg_intrinsic::removal_flip_choice), I24).
-    /// [`IntegerError::RemovalStuck`] is passed as [`RemovalRefusal::Stuck`], an inserted
-    /// boundary vertex (I7) as [`RemovalRefusal::BoundaryVertex`]; the state is unchanged then.
+    /// `ddg_intrinsic`'s [`removal_flip_choice`](ddg_intrinsic::removal_flip_choice), I24),
+    /// with the merge of a straight star where Alg. 8 is stuck and at an inserted boundary
+    /// vertex (I27). [`IntegerError::RemovalStuck`] is passed as [`RemovalRefusal::Stuck`]; the
+    /// state is unchanged then.
     fn remove_inserted_vertex(
         &mut self,
         v: usize,
     ) -> Result<InsertedVertexRemoval, IntrinsicError> {
-        if v < self.complex.n_vertices()
-            && !self.is_input_vertex(v)
-            && self.complex.is_boundary_vertex(v)
-        {
-            return Err(IntrinsicError::RemovalRefused {
-                vertex: v as u32,
-                reason: RemovalRefusal::BoundaryVertex,
-            });
-        }
         match self.remove_vertex(v) {
             Ok(r) => Ok(InsertedVertexRemoval {
                 vertex: r.vertex,
@@ -159,5 +152,11 @@ impl Triangulation for IntegerTriangulation {
             }
             Err(other) => Err(to_intrinsic_error(other, "remove_inserted_vertex")),
         }
+    }
+
+    /// [`IntegerTriangulation::merge_edge`] (I27).
+    fn merge_edge(&mut self, v: usize, e: usize) -> Result<EdgeMerge, IntrinsicError> {
+        IntegerTriangulation::merge_edge(self, v, e)
+            .map_err(|err| to_intrinsic_error(err, "merge_edge"))
     }
 }

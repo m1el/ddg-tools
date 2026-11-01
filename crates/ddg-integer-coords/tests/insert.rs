@@ -1245,8 +1245,8 @@ fn moves_match_the_signposts_and_refusals_restore() {
 }
 
 /// Refused moves: an input vertex, a vertex on the boundary, a displacement that is not finite;
-/// a removal that gets stuck (the straight star of an edge-split vertex, I27) restores the
-/// whole state.
+/// a removal that gets stuck restores the whole state. The moved vertices are edge-split ones
+/// (straight stars, I27), which the removal now merges where Alg. 8 is stuck.
 #[test]
 fn refused_moves_change_nothing() {
     let shape = &standard_shapes()[0];
@@ -1292,8 +1292,8 @@ fn refused_moves_change_nothing() {
         Err(IntegerError::Unsupported { .. })
     ));
     assert!(g == gb);
-    // Stuck removals: vertices made by splitting interior edges (straight stars, I27), moved a
-    // little; whenever the removal is stuck the state must be exactly as before.
+    // Vertices made by splitting interior edges (straight stars, I27), moved a little; whenever
+    // the removal is stuck the state must be exactly as before.
     let mut stuck = 0;
     let mut moved = 0;
     for shape in standard_shapes() {
@@ -1347,7 +1347,8 @@ fn refused_moves_change_nothing() {
     eprintln!(
         "moves of edge-split vertices: {moved} done, {stuck} refused as RemovalStuck (state restored)"
     );
-    assert!(stuck > 0 && moved > 0);
+    // Since I27 was resolved (the straight star is merged) a stuck move is rare.
+    assert!(moved > 0);
 }
 
 // ----- the shared interface -----

@@ -131,6 +131,7 @@ pub mod generic_ops;
 mod input;
 pub mod insert;
 pub mod interface;
+pub mod merge;
 pub mod odt;
 mod operators;
 pub mod overlay;
@@ -167,7 +168,8 @@ pub use query::{PathOnInput, PathsOnInput, Segment};
 pub use refine::{
     BelowBound, BelowReason, InsertionLimit, RefineOptions, RefineReport, RefineRules, RefineStatus,
 };
-pub use remove::{InsertedVertexRemoval, removal_flip_choice};
+pub use merge::{EdgeMergePlan, MERGE_STRAIGHT_TOLERANCE, plan_edge_merge, straight_pair};
+pub use remove::{InsertedVertexRemoval, RemovalStep, removal_flip_choice};
 pub use reposition::VertexMove;
 pub use trace::{Crossing, Trace, TraceOptions, TraceStop};
 pub use triangulation::{ConsistencyReport, IntrinsicTriangulation, Irregularities};

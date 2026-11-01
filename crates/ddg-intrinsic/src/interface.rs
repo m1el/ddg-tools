@@ -17,7 +17,7 @@
 
 use ddg_core::geometry::{corner_angle, corner_cotan, triangle_area};
 
-use crate::complex::Complex;
+use crate::complex::{Complex, EdgeMerge};
 use crate::delaunay::{DelaunayCriterion, DelaunayOptions, DelaunayReport};
 use crate::edge_trace::{EdgeTrace, EdgeTraceOptions};
 use crate::error::{FlipRefusal, IntrinsicError};
@@ -266,18 +266,22 @@ pub trait Triangulation {
         crate::frames::AngleFrames::of(self).trace(start, direction, length, options)
     }
 
-    /// Removes the inserted interior vertex `v` of any degree: flips edges at it by
+    /// Removes the inserted vertex `v` of any degree: flips edges at it by
     /// [`removal_flip_choice`](crate::remove::removal_flip_choice) until its degree is three,
     /// then merges its three faces; ids are renumbered as [`Complex::remove_vertex`] says
-    /// (SPEC N51; Gillespie, Sharp, Crane 2021, Alg. 8). Refinement by
-    /// [`RefineRules::Chew`] needs it. A star in which no flip lowers
-    /// the degree is [`RemovalRefusal::Stuck`](crate::RemovalRefusal::Stuck); every refusal
-    /// leaves the triangulation unchanged. Provided: [`IntrinsicError::Unsupported`].
+    /// (SPEC N51; Gillespie, Sharp, Crane 2021, Alg. 8). Where no flip lowers the degree and
+    /// `v` has two edges on a straight line, and at an inserted boundary vertex, it merges those
+    /// two edges into one instead ([`merge_edge`](Self::merge_edge), SPEC N53; the
+    /// [`crate::remove`] module documentation). Refinement by [`RefineRules::Chew`] needs it.
+    /// A star in which no flip lowers the degree and no merge applies is
+    /// [`RemovalRefusal::Stuck`](crate::RemovalRefusal::Stuck); every refusal leaves the
+    /// triangulation unchanged. Provided: [`IntrinsicError::Unsupported`].
     ///
     /// # Errors
     /// [`IntrinsicError::IndexOutOfRange`], [`IntrinsicError::RemovalRefused`] (input vertex,
-    /// boundary vertex, constrained edge, stuck, the refusals of [`Complex::remove_vertex`]),
-    /// [`IntrinsicError::Unsupported`], and the representation's errors of its flips.
+    /// boundary vertex, constrained edge, stuck, the refusals of [`Complex::remove_vertex`] and
+    /// of the merge), [`IntrinsicError::Unsupported`], and the representation's errors of its
+    /// flips.
     fn remove_inserted_vertex(
         &mut self,
         v: usize,
@@ -286,6 +290,26 @@ pub trait Triangulation {
             representation: "this representation",
             operation: "remove_inserted_vertex",
             reason: format!("cannot remove vertex {v}: removal is not implemented"),
+        })
+    }
+
+    /// Merges the two halves at the inserted vertex `v` of which `e` is one back into one edge
+    /// and removes `v` (SPEC N53): [`plan_edge_merge`](crate::merge::plan_edge_merge) decides
+    /// (degree four, or three on the boundary; the halves straight within
+    /// [`MERGE_STRAIGHT_TOLERANCE`](crate::merge::MERGE_STRAIGHT_TOLERANCE); merged triangles
+    /// valid) and gives the length `ℓ₁ + ℓ₂`, [`Complex::merge_edge`] the connectivity and the
+    /// renumbering. The inverse of [`split_edge`](Self::split_edge). Provided:
+    /// [`IntrinsicError::Unsupported`].
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`], [`IntrinsicError::RemovalRefused`] (input vertex,
+    /// the refusals of the plan and of the representation), [`IntrinsicError::Unsupported`].
+    /// The triangulation is unchanged then.
+    fn merge_edge(&mut self, v: usize, e: usize) -> Result<EdgeMerge, IntrinsicError> {
+        Err(IntrinsicError::Unsupported {
+            representation: "this representation",
+            operation: "merge_edge",
+            reason: format!("cannot merge the halves {e} at vertex {v}: not implemented"),
         })
     }
 
@@ -424,5 +448,8 @@ impl Triangulation for IntrinsicTriangulation {
         v: usize,
     ) -> Result<InsertedVertexRemoval, IntrinsicError> {
         IntrinsicTriangulation::remove_inserted_vertex(self, v)
+    }
+    fn merge_edge(&mut self, v: usize, e: usize) -> Result<EdgeMerge, IntrinsicError> {
+        IntrinsicTriangulation::merge_edge(self, v, e)
     }
 }

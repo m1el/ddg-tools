@@ -63,7 +63,7 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, TAU};
 
 use ddg_core::topology::NONE;
 
-use crate::complex::{VertexRemoval, prev};
+use crate::complex::prev;
 use crate::delaunay::{DelaunayCriterion, EdgeQueue, fails_delaunay, run_flip_queue};
 use crate::error::{InsertRefusal, IntrinsicError};
 use crate::flip::FlipShapeTest;
@@ -71,7 +71,7 @@ use crate::formulas::{circumcenter_barycentric, triangle_layout, unfold_apex};
 use crate::insert::Insertion;
 use crate::interface::Triangulation;
 use crate::point::SurfacePoint;
-use crate::remove::InsertedVertexRemoval;
+use crate::remove::{InsertedVertexRemoval, RemovalStep};
 use crate::trace::{TraceOptions, TraceStop};
 use crate::triangulation::IntrinsicTriangulation;
 
@@ -683,7 +683,7 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
                 Ok(removal) => {
                     self.n_removals += 1;
                     self.n_removal_flips += removal.flips.len();
-                    if let Some((old, new)) = removal.removal.vertex_move {
+                    if let Some((old, new)) = removal.removal.vertex_move() {
                         for w in &mut ball[i..] {
                             if *w == old {
                                 *w = new;
@@ -702,16 +702,17 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
     /// After a removal: the edges of the faces it changed go on the queue, those faces are
     /// looked at again, and ids it renumbered are followed.
     fn after_removal(&mut self, removal: &InsertedVertexRemoval) {
-        let r: &VertexRemoval = &removal.removal;
+        let r: &RemovalStep = &removal.removal;
         self.queue.apply_removal(r);
+        let removed = r.removed_edges();
         let edge_now = |e: u32| -> Option<u32> {
-            if r.removed_edges.contains(&e) {
+            if removed.contains(&e) {
                 return None;
             }
-            Some(r.edge_moves.iter().find(|m| m.0 == e).map_or(e, |m| m.1))
+            Some(r.edge_moves().iter().find(|m| m.0 == e).map_or(e, |m| m.1))
         };
         let c = self.tri.complex();
-        let mut faces: Vec<usize> = vec![r.face as usize];
+        let mut faces: Vec<usize> = r.faces().iter().map(|&f| f as usize).collect();
         for &e in &removal.flips {
             if let Some(e) = edge_now(e) {
                 let h = c.edge_halfedge[e as usize] as usize;
@@ -729,7 +730,7 @@ impl<'a, T: Triangulation> Refiner<'a, T> {
             }
         }
         // Faces that only changed their ids are looked at again under the new ones.
-        let mut looked: Vec<usize> = r.face_moves.iter().map(|m| m.1 as usize).collect();
+        let mut looked: Vec<usize> = r.face_moves().iter().map(|m| m.1 as usize).collect();
         looked.extend(faces);
         looked.sort_unstable();
         looked.dedup();
