@@ -1975,6 +1975,27 @@ are not cited here).
 - **What depends on it.** Only that refinement with boundary removes enough vertices; removing more
   is harmless (App. C.1). Not a correctness condition of the integer data.
 
+### [formula: ic-input-aligned-frame] Input-aligned tangent frames from integer coordinates
+
+- **Statement.** In a valid state, for a halfedge `h = a→b` of the triangulation, the direction
+  of IC SPEC §4.12 (the input signpost of the input halfedge the roundabout names for `n = −1`; else
+  the input signpost of the wedge's first input halfedge plus `s_a` times the angle from it to the
+  straight segment of the edge in its unfolded strip of input faces, or the angle of that segment
+  in the frame of the input face or edge of an inserted vertex) is the direction in which the
+  geodesic edge leaves `a`, measured in the frame the signposts define (IT-SPEC N2, N7, N9, N10),
+  i.e. the signpost `φ_h` of the same triangulation.
+- **Reference.** Sharp, Soliman, Crane 2019, Sec. 2.3 and 3.1 (signposts: the direction of an edge
+  at its tail in a frame normalized by `2π/Θ`); Gillespie, Sharp, Crane 2021, Sec. 2.4 (roundabouts)
+  and Sec. 2.5 with Supp. Alg. 2 (the edge is the straight segment of the unfolded strip of the input
+  faces it crosses, `ic-strip-intersection`, `ic-extract-intrinsic-edge`).
+- **Why cited.** The statement is the definition of the signposts' frame composed with the fact that
+  an edge is straight in the unfolding of the input faces it crosses, which needs the realization
+  of the whole triangulation (tier C of the IC contract, SPEC §9; WP9 owns that model). The angle
+  arithmetic is elementary. Tested in Rust against the stored signposts
+  (`crates/ddg-integer-coords/tests/frames.rs`: 1 352 388 halfedges of 266 converted states within
+  `1.14e-10` rad; 806 346 halfedges after the same operations on both representations) and through
+  the tangent fields (`crates/ddg-intrinsic-apps/tests/vector_representation.rs`).
+
 ### [formula: ic-mollify] Intrinsic mollification
 
 - **Statement.** Adding the same `ε ≥ 0` to every edge length, `ε` the smallest value for which

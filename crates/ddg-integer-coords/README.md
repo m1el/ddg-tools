@@ -137,6 +137,19 @@ through them); the signposts trace one path over the input mesh.
   pass; `P0 x0` reproduces the positions to 5e-15 edge lengths. Timings (release, one thread, load
   about 6): spot after Delaunay 4.0 ms (signposts trace + overlay 1.15), camelbad 24 ms (8.7).
 
+## Input-aligned tangent frames (I26)
+
+* `IntegerTriangulation::frame_directions()` -> `(Vec<f64>, FrameReport)`: the direction of every
+  halfedge at its tail in the frame the signposts use (input mesh at `V^0`, input face or edge at
+  `V*`), normalized as `IntrinsicTriangulation::signpost`, from the roundabouts and the straight
+  segment of each edge in its unfolded strip of input faces (SPEC §4.12, `ic-input-aligned-frame`);
+  one `extract_all_edges` plus one strip layout per edge. What `ddg-intrinsic-apps`' tangent fields
+  (`vector::TangentFrames`) read on integers.
+* Results (`tests/frames.rs`): within `1.14e-10` rad of the signposts on 266 converted states
+  (1 352 388 halfedges), within `3.5e-11` after the same operations on both representations where
+  the places agree; a flip leaves every other edge's directions bitwise unchanged; mutated integers
+  are errors. 2.7 ms on spot (iDT) to 38 ms on camelbad refined (one core).
+
 ## Delaunay refinement (WP6)
 
 | | |
