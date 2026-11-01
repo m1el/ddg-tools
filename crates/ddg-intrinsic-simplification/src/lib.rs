@@ -35,13 +35,18 @@
 //!   metric (WP3) needs.
 //! * [`baseline`]: the extrinsic baseline of Sec. 8.4, quadric error metrics (Garland, Heckbert 1997)
 //!   with a closest-point projection map (SPEC §10.4).
+//! * [`curvature`]: principal curvatures (Panozzo, Puppo, Rocca 2010) for anisotropic
+//!   coarsening (SPEC §8), and 3D directions as angles in the intrinsic frames.
+//! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
 pub mod baseline;
+pub mod curvature;
 mod error;
 mod flatten;
 mod flip;
 pub mod formulas;
 mod mesh;
+pub mod multigrid;
 mod removal;
 mod undo;
 

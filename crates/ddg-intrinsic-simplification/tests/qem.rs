@@ -2,9 +2,10 @@
 //! counts, the maps, bad input.
 
 use ddg_core::TriMesh;
-use ddg_core::generators::{grid_disk, icosphere, torus};
+use ddg_core::generators::{grid_disk, icosphere, open_cylinder, torus};
 use ddg_intrinsic_simplification::baseline::{
-    QemError, QemOptions, Quadric, optimal_point, plane_quadric, qem_simplify,
+    QemError, QemOptions, Quadric, optimal_point, optimal_point_on_segment, plane_quadric,
+    qem_simplify,
 };
 
 fn norm(p: [f64; 3]) -> f64 {
@@ -318,4 +319,102 @@ fn projection_equals_brute_force() {
             pr.distance
         );
     }
+}
+
+// ---- review against Garland and Heckbert 1997 ----
+
+#[test]
+fn defaults_follow_the_1997_paper() {
+    let o = QemOptions::new(10);
+    // Sec. 5: every plane has weight 1 (area weighting is a later variant).
+    assert!(!o.area_weighted);
+    // Sec. 4: the optimal point is not bounded.
+    assert!(o.placement_radius.is_infinite());
+    // Sec. 6: a large penalty on the boundary constraint planes.
+    assert!(o.boundary_weight >= 100.0);
+    // Infinity is allowed for the radius, NaN and negative values are not.
+    let g = icosphere(2).unwrap();
+    assert!(qem_simplify(&g.positions, &g.faces, &o).is_ok());
+    for bad in [f64::NAN, -1.0] {
+        let mut b = o;
+        b.placement_radius = bad;
+        assert!(matches!(
+            qem_simplify(&g.positions, &g.faces, &b),
+            Err(QemError::InvalidOptions(_))
+        ));
+    }
+}
+
+#[test]
+fn weighting_changes_the_costs() {
+    let g = icosphere(3).unwrap();
+    let plain = QemOptions::new(60);
+    let weighted = QemOptions {
+        area_weighted: true,
+        ..plain
+    };
+    let a = qem_simplify(&g.positions, &g.faces, &plain).unwrap();
+    let b = qem_simplify(&g.positions, &g.faces, &weighted).unwrap();
+    // Unit weights against face areas (about 1e-2 on this sphere): the costs differ by the
+    // order of magnitude of the areas.
+    assert!(
+        a.report.total_cost > 10.0 * b.report.total_cost,
+        "{} vs {}",
+        a.report.total_cost,
+        b.report.total_cost
+    );
+    assert!(a.report.reached_target && b.report.reached_target);
+}
+
+#[test]
+fn optimum_on_the_segment() {
+    // The plane z = 0 only: the 3x3 system is singular; on a segment crossing the plane the
+    // minimizer is the crossing.
+    let q = plane_quadric([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    assert_eq!(optimal_point(&q, 1e-8), None);
+    let p = optimal_point_on_segment(&q, [1.0, 2.0, 1.0], [1.0, 2.0, -3.0], 1e-8).unwrap();
+    for (x, e) in p.iter().zip([1.0, 2.0, 0.0]) {
+        assert!((x - e).abs() < 1e-14, "{p:?}");
+    }
+    // Clamped to the segment: the plane is beyond the end.
+    let p = optimal_point_on_segment(&q, [0.0, 0.0, 2.0], [0.0, 0.0, 1.0], 1e-8).unwrap();
+    assert_eq!(p, [0.0, 0.0, 1.0]);
+    // A segment inside the plane: the quadric is constant along it.
+    assert_eq!(
+        optimal_point_on_segment(&q, [0.0; 3], [1.0, 1.0, 0.0], 1e-8),
+        None
+    );
+    // The result is never worse than the endpoints or the midpoint.
+    let q2 = plane_quadric([0.0; 3], [0.6, 0.0, 0.8], 1.0).plus(&plane_quadric(
+        [0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        1.0,
+    ));
+    let (a, b) = ([2.0, 3.0, -1.0], [-1.0, 0.5, 2.5]);
+    let p = optimal_point_on_segment(&q2, a, b, 1e-8).unwrap();
+    let mid = [0.5, 1.75, 0.75];
+    assert!(
+        q2.error(p) <= q2.error(a) && q2.error(p) <= q2.error(b) && q2.error(p) <= q2.error(mid)
+    );
+}
+
+#[test]
+fn singular_systems_use_the_segment_placement() {
+    // A prism over a wavy closed curve: every face plane is parallel to the axis, so A has rank
+    // 2 and the 3x3 system is singular (no boundary penalty here). Collapses along a ring edge
+    // go to the optimum on the segment, which lies strictly inside it.
+    let mut g = open_cylinder(30, 6, 1.0, 4.0).unwrap();
+    for p in &mut g.positions {
+        let theta = p[1].atan2(p[0]);
+        let r = 1.0 + 0.2 * (5.0 * theta).sin();
+        p[0] *= r;
+        p[1] *= r;
+    }
+    let o = QemOptions {
+        boundary_weight: 0.0,
+        ..QemOptions::new(30)
+    };
+    let r = qem_simplify(&g.positions, &g.faces, &o).unwrap();
+    assert!(r.report.n_collapses > 0);
+    assert!(r.report.n_placed_segment > 0, "{:?}", r.report);
 }

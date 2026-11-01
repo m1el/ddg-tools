@@ -3,36 +3,60 @@
 //!
 //! Michael Garland and Paul S. Heckbert, *Surface Simplification Using Quadric Error Metrics*,
 //! SIGGRAPH 1997, <https://doi.org/10.1145/258734.258849> (`papers/garland1997_qem.pdf`).
-//! Written for this crate from the paper; the reference implementation of the intrinsic paper
+//! First written from memory, then reviewed against the paper (read in full; see below). The
+//! reference implementation of the intrinsic paper
 //! has no QEM comparison (R43).
 //!
-//! # The algorithm
+//! # The algorithm, against the paper
 //!
-//! * **Quadrics.** Every face plane `n·x + d = 0` (unit `n`) gives the quadric
-//!   `w (n·x + d)²`, the squared distance to the plane times a weight; a vertex gets the sum
-//!   over its faces ([`plane_quadric`], [`Quadric::error`]). The weight is the face area by
-//!   default ([`QemOptions::area_weighted`]; the original paper has weight 1): then the error is
-//!   an area-weighted integral of the squared distance and does not depend on how the same
-//!   surface happens to be triangulated. A boundary edge adds the plane through the edge
-//!   perpendicular to its face, with weight [`QemOptions::boundary_weight`] (times the squared
-//!   edge length when area weighted), so that moving the boundary off itself is expensive.
-//! * **Candidates** are the mesh edges only (no pairs of non-adjacent vertices). The collapse of
-//!   `(u, v)` has the quadric `Q_u + Q_v` and goes to the point `p` that minimizes it
-//!   ([`optimal_point`], the solution of a 3×3 system) when the system is well conditioned and
-//!   `p` is within [`QemOptions::placement_radius`] edge lengths of the edge midpoint; otherwise
-//!   to the best of `u`, `v` and the midpoint. Ties take the first of: the optimum, `u`, `v`,
-//!   the midpoint.
+//! Checked against the paper (read in full for this review); section numbers are the paper's.
+//!
+//! * **Quadrics** (Sec. 4, 5; Eq. 2). A face plane `p = (n, d)`, `n·x + d = 0` with unit `n`,
+//!   gives `K_p = p pᵀ`, the squared distance to the plane; a vertex starts with the sum of the
+//!   `K_p` of its incident faces (initial error 0), and a contraction `(v₁, v₂) → v̄` gets
+//!   `Q̄ = Q₁ + Q₂` (the "simple additive rule", Sec. 4). Here [`plane_quadric`], [`Quadric`].
+//!   **Unweighted by default**, as in the paper (every plane has weight 1);
+//!   [`QemOptions::area_weighted`] selects the later area-weighted variant (weight = face area),
+//!   which makes the error independent of the triangulation of the same surface. Not in the
+//!   paper.
+//! * **Boundary constraints** (Sec. 6, "Preserving Boundaries"). For the face next to a boundary
+//!   edge, the plane through the edge perpendicular to the face, as a quadric with a large
+//!   penalty weight ([`QemOptions::boundary_weight`], default 1000, times the squared edge
+//!   length when area weighted), added to the quadrics of both endpoints of the edge. The
+//!   paper does not fix the factor.
+//! * **Placement** (Sec. 4, Eq. 1, and the three lines after it). `v̄` is the minimizer of
+//!   `v̄ᵀ Q̄ v̄`, from the 3×3 system, if it is invertible ([`optimal_point`]; "invertible" is a
+//!   conditioning test, [`QemOptions::singular_tolerance`]). Otherwise the minimizer *on the
+//!   segment* `v₁v₂` ([`optimal_point_on_segment`]), and if that fails the best of `v₁`, `v₂` and
+//!   the midpoint. (The segment minimizer has cost at most that of its endpoints and midpoint,
+//!   so taking the best of all of them is the same rule.) The first version of this file skipped
+//!   the segment step and bounded `v̄` to [`QemOptions::placement_radius`] edge lengths of the
+//!   midpoint (default 4); the paper has no bound, so the **default is now unbounded**
+//!   (`f64::INFINITY`); a finite radius remains available as a safeguard.
+//! * **Pairs** (Sec. 3.2): valid pairs are the edges and the pairs closer than a threshold `t`.
+//!   This implementation uses **edges only, `t = 0`**, the paper's "simple edge contraction"
+//!   setting; no aggregation of unconnected parts (Sec. 3.1), which would break the surface
+//!   topology the comparisons of the intrinsic paper need.
+//! * **Cost** (Sec. 4, step 3): `v̄ᵀ (Q₁ + Q₂) v̄`, kept in a heap; after a contraction the costs
+//!   of the pairs at the new vertex are recomputed (step 5).
+//! * **Mesh inversion** (Sec. 6): the normal of each neighbouring face is compared before and
+//!   after; a contraction that turns a normal by [`QemOptions::min_normal_cos`] or more is
+//!   disallowed (the paper allows "heavily penalized or disallowed"; we disallow).
+//! * **Additions beyond the paper**: the link condition and the pinch test below keep the result
+//!   a manifold with the input's topology (the paper deliberately allows non-manifold results
+//!   when pairs are aggregated); the order of ties is fixed so the run is deterministic.
+//!
+//! The rest of the machinery:
+//!
 //! * **Rejected collapses.** The link condition (the common neighbours of `u` and `v` are the
 //!   opposite vertices of the edge, and no face at `u` or at `v` joins two common neighbours),
 //!   two boundary vertices joined by an interior edge (the collapse would pinch the surface),
 //!   and a collapse that turns the normal of a surviving face by more than
-//!   [`QemOptions::min_normal_cos`] allows (or makes a face degenerate). These keep the
-//!   result a manifold with the topology of the input.
-//! * **Order.** A priority queue on the cost `Q(p)`, lazy deletion by per-vertex version stamps;
-//!   after a collapse the edges at the new vertex and at its neighbours are queued again with
-//!   new costs. Ties are broken by the vertex ids of the edge, then by insertion order: the
-//!   result is deterministic. The run stops at the target number of vertices or when no
-//!   collapse is allowed ([`QemReport::reached_target`]).
+//!   [`QemOptions::min_normal_cos`] allows (or makes a face degenerate).
+//! * **Order.** A priority queue on the cost `Q̄(v̄)`, lazy deletion by per-vertex version stamps.
+//!   Ties are broken by the vertex ids of the edge, then by insertion order: the result is
+//!   deterministic. The run stops at the target number of vertices or when no collapse is
+//!   allowed ([`QemReport::reached_target`]).
 //!
 //! # The maps
 //!
@@ -176,12 +200,44 @@ pub fn optimal_point(q: &Quadric, tolerance: f64) -> Option<V3> {
     p.iter().all(|x| x.is_finite()).then_some(p)
 }
 
+/// The point of the segment `p1 p2` that minimizes the quadric (Garland and Heckbert Sec. 4: the
+/// fallback "along the segment" when the 3×3 system is singular), or `None` when the quadric is
+/// constant along the segment (`dᵀ A d ≤ tolerance · |d|² · tr(A) / 3`, `d = p2 − p1`) or the
+/// result is not finite. With `f(t) = q(p1 + t d) = α t² + 2 β t + γ`, `α = dᵀ A d`,
+/// `β = dᵀ (A p1 + b)`, the minimizer is `t = −β / α` clamped to `[0, 1]`.
+///
+/// [formula: iem-qem-quadric]
+pub fn optimal_point_on_segment(q: &Quadric, p1: V3, p2: V3, tolerance: f64) -> Option<V3> {
+    let [a00, a01, a02, a11, a12, a22] = q.a;
+    let d = sub(p2, p1);
+    let ad = [
+        a00 * d[0] + a01 * d[1] + a02 * d[2],
+        a01 * d[0] + a11 * d[1] + a12 * d[2],
+        a02 * d[0] + a12 * d[1] + a22 * d[2],
+    ];
+    let alpha = dot(d, ad);
+    let trace = a00 + a11 + a22;
+    if !(alpha > tolerance * dot(d, d) * trace / 3.0 && alpha.is_finite() && alpha > 0.0) {
+        return None;
+    }
+    let ap1 = [
+        a00 * p1[0] + a01 * p1[1] + a02 * p1[2],
+        a01 * p1[0] + a11 * p1[1] + a12 * p1[2],
+        a02 * p1[0] + a12 * p1[1] + a22 * p1[2],
+    ];
+    let beta = dot(d, add(ap1, q.b));
+    let t = (-beta / alpha).clamp(0.0, 1.0);
+    let p = add(p1, scale(d, t));
+    p.iter().all(|x| x.is_finite()).then_some(p)
+}
+
 /// Options of [`qem_simplify`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QemOptions {
     /// The number of vertices to stop at (the run stops earlier if no collapse is allowed).
     pub target_vertices: usize,
-    /// Weight the plane of a face by its area (default `true`), else by 1 (Garland–Heckbert).
+    /// Weight the plane of a face by its area (default `false`: weight 1, as in Garland and
+    /// Heckbert 1997, Sec. 5). `true` is the later area-weighted variant.
     pub area_weighted: bool,
     /// The weight of the boundary constraint planes (default `1000`); times the squared edge
     /// length when [`area_weighted`](Self::area_weighted).
@@ -192,7 +248,8 @@ pub struct QemOptions {
     /// The conditioning test of [`optimal_point`] (default `1e-8`).
     pub singular_tolerance: f64,
     /// The optimal point is used only within this many edge lengths of the midpoint of the edge
-    /// (default `4`); a nearly singular system otherwise throws vertices far away.
+    /// (default `f64::INFINITY`: unbounded, as in the paper; a finite radius guards against a
+    /// nearly singular system throwing the vertex far away).
     pub placement_radius: f64,
 }
 
@@ -201,11 +258,11 @@ impl QemOptions {
     pub fn new(target_vertices: usize) -> QemOptions {
         QemOptions {
             target_vertices,
-            area_weighted: true,
+            area_weighted: false,
             boundary_weight: 1000.0,
             min_normal_cos: 0.0,
             singular_tolerance: 1e-8,
-            placement_radius: 4.0,
+            placement_radius: f64::INFINITY,
         }
     }
 }
@@ -247,6 +304,8 @@ pub struct QemReport {
     pub n_rejected_other: usize,
     /// Collapses that went to the optimal point, to an endpoint, to the midpoint.
     pub n_placed: [usize; 3],
+    /// Collapses that went to the optimum on the segment (the 3×3 system was singular).
+    pub n_placed_segment: usize,
     /// The sum of the costs `Q(p)` of the collapses done.
     pub total_cost: f64,
     /// Total area of the input and of the output.
@@ -381,7 +440,7 @@ impl Work {
     }
 
     /// The placement of the collapse of `(u, v)`: the point, its cost and its kind (0 optimum,
-    /// 1 endpoint, 2 midpoint).
+    /// 1 endpoint, 2 midpoint, 3 optimum on the segment).
     fn placement(&self, u: u32, v: u32, o: &QemOptions) -> (V3, f64, usize) {
         let (pu, pv) = (self.pos[u as usize], self.pos[v as usize]);
         let q = self.quad[u as usize].plus(&self.quad[v as usize]);
@@ -398,6 +457,8 @@ impl Work {
             && norm(sub(p, mid)) <= o.placement_radius * len
         {
             consider(p, 0);
+        } else if let Some(p) = optimal_point_on_segment(&q, pu, pv, o.singular_tolerance) {
+            consider(p, 3);
         }
         consider(pu, 1);
         consider(pv, 1);
@@ -508,11 +569,10 @@ pub fn qem_simplify(
     if !(options.min_normal_cos.is_finite()
         && options.singular_tolerance.is_finite()
         && options.singular_tolerance >= 0.0
-        && options.placement_radius.is_finite()
         && options.placement_radius >= 0.0)
     {
         return Err(QemError::InvalidOptions(
-            "min_normal_cos, singular_tolerance (>= 0) and placement_radius (>= 0) must be finite"
+            "min_normal_cos must be finite, singular_tolerance finite and >= 0, placement_radius >= 0 (infinity allowed)"
                 .to_string(),
         ));
     }
@@ -603,6 +663,7 @@ pub fn qem_simplify(
         n_rejected_flip: 0,
         n_rejected_other: 0,
         n_placed: [0; 3],
+        n_placed_segment: 0,
         total_cost: 0.0,
         fine_area: total_area(positions, faces),
         coarse_area: 0.0,
@@ -693,7 +754,11 @@ pub fn qem_simplify(
             w.recompute_nbrs(a);
         }
         report.n_collapses += 1;
-        report.n_placed[kind] += 1;
+        if kind == 3 {
+            report.n_placed_segment += 1;
+        } else {
+            report.n_placed[kind] += 1;
+        }
         report.total_cost += cost;
         // Re-queue the edges at the new vertex and at its neighbours.
         let ring: Vec<u32> = w.nbrs[iu].iter().copied().collect();
