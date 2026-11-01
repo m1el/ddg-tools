@@ -22,8 +22,14 @@
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2): how many crossings lie before the
 //! split point (their `distance` along the edge below `t ℓ`), and the place `q⁰_m`, the point
 //! of the input face between the two neighbouring crossings, interpolated linearly between
-//! them (the edge is straight in that face). A point within rounding of a crossing (a
-//! barycentric coordinate that is not strictly positive) is refused. The integers then follow
+//! them (the edge is straight in that face). A point within
+//! [`LOCATION_SNAP`] times the longest side of that face from a side is **snapped onto the
+//! crossing** of the edge with that side's input edge, as the signposts snap it (SPEC I28,
+//! `ic-split-at-crossing`, [`formulas::split_side_at_crossing`]): the new vertex lies on the
+//! input edge, the halves get `j` and `n − 1 − j` for crossing number `j`, and a new edge to
+//! an opposite corner that the input edge ends at runs along it (`n = −1`); [`Insertion::snapped`]
+//! is set. Near a side that the edge does not cross there, or a corner, the split is refused
+//! (`NotLocated`). The integers then follow
 //! exactly ([`formulas::split_side`] on both sides): the halves get `before` and `n − before`,
 //! the edges to the opposite corners count the arcs separated by the new chord, and the
 //! roundabout of `k → m` is that of `k → i` plus `n⁻_ki` plus the arcs from `k` that reach
@@ -81,8 +87,9 @@ impl IntegerTriangulation {
     /// # Errors
     /// [`IntegerError::Intrinsic`] with the refusals of [`plan_edge_split`] (index, parameter,
     /// same face on both sides, too thin) and, for an edge that crosses input edges,
-    /// [`InsertRefusal::NotLocated`] when the point is within rounding of a crossing (its
-    /// place would not be strictly inside an input face); the errors of
+    /// [`InsertRefusal::NotLocated`] when the point is within rounding of an input edge that the edge
+    /// does not cross there or of a corner of the input face (within rounding of a crossing it
+    /// is split at the crossing, [`Insertion::snapped`]); the errors of
     /// [`extract_intrinsic_edge`](Self::extract_intrinsic_edge);
     /// [`IntegerError::InvalidCoordinates`] when the integers of the edge do not say which input
     /// edge it runs along. Nothing is changed in every case.
@@ -159,12 +166,7 @@ impl IntegerTriangulation {
     /// The two floating-point decisions of the split of edge `e` (`n ≥ 0`) at distance `at` from
     /// the tail of its halfedge: the number of crossings before the point, and the point's place
     /// on the input mesh (see the [module documentation](crate::split)).
-    fn crossed_split_place(
-        &self,
-        e: usize,
-        t: f64,
-        at: f64,
-    ) -> Result<CrossedPlace, IntegerError> {
+    fn crossed_split_place(&self, e: usize, t: f64, at: f64) -> Result<CrossedPlace, IntegerError> {
         let trace = self.extract_intrinsic_edge(e, &EdgeTraceOptions::default())?;
         let mesh = self.input.mesh();
         let refused = |detail: String| {

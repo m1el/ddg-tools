@@ -330,8 +330,45 @@ interpolated between the two neighbouring crossings inside their input face. The
 n_mc = c_c + e_a + e_b + max(0, c_a − before) + max(0, before − (n_ab − c_b))      [formula: ic-split-crossed-edge]
 ```
 
-with `a b` the split edge, `c_*`, `e_*` the corner and emanating counts of that side's face. A
-split point within rounding of a crossing is refused (`InsertionRefused`), nothing changed.
+with `a b` the split edge, `c_*`, `e_*` the corner and emanating counts of that side's face.
+
+**At a crossing (I28, `ic-split-at-crossing`, 7d21c7e).** A split point within `LOCATION_SNAP`
+(`1e-12`, `ddg_intrinsic::insert`) times the longest side of its input face from a side of that
+face is put on that side, by the signposts' rule (`snap_onto_input_edge`, IT-SPEC N10: the distance
+`w_k · 2A / ℓ_k` of the barycentric coordinate `w_k` opposite side `k`, nearest side, the corner
+refused). The integer split does the same, from the crossings it already extracts: the point is
+between crossings `j − 1` and `j` of the edge, in the input face between them, with the barycentric
+coordinates interpolated as before; if the nearest side is the input edge `E` of one of those two
+crossings, the new vertex `m` lies on that crossing (`q⁰_m` = the point of `E` there, `Insertion::
+snapped` = `w_k`), else (a side the edge does not cross there, or a corner) the split is refused
+as before (`NotLocated`; the export keeps its `½ ± 2⁻¹⁶` retries for that, none occur in the
+evaluation). The arc `A` of `E` through crossing `j` now starts at `m`, where §2.4 item 4 counts it
+for neither half, so:
+
+```
+halves:  n_am = j,  n_mb = n_ab − 1 − j                                       (a merge, §4.6, inverts it with +1)
+spoke mc, per side (c_a, e_c from that face, j counted from that side's tail):
+  j <  c_a             (A cuts a)      n_mc = split_side(before = j + 1)
+  c_a ≤ j < c_a + e_c  (A is from c)   n_mc = −1, mc runs along E;  e_before = j − c_a
+  j ≥  c_a + e_c       (A cuts b)      n_mc = split_side(before = j)
+```
+
+(`A` and `mc` share the end `m`, so they do not cross: of the two sides of `A` on which the point
+may be put, `before = j` or `j + 1`, the one where the chord does not cross `A`; if `A` ends at `c`
+the chord is `A`, which is the usual case on symmetric meshes: the other diagonal of a quad is an
+input edge.) The roundabout of `c → m` is Eq. 4's analogue with `e_before`, as for any split.
+`formulas::split_side_at_crossing`; CITED.md has the statement (pending, tier B). Like every
+split, the result is valid by construction; `certify` passes after each (`tests/snap.rs`).
+*Measured* (`tests/snap.rs`, 17 shapes + spot + camelbad, 7 scenarios, every crossing of every
+edge across input edges, strided to 300 edges on the big states, at the crossing and `+1e-14`,
+`−3e-14` of an edge off it, then a second split at a crossing of another edge): 157 228 splits,
+157 076 at a crossing, each equal to `from_intrinsic` of the signposts that made the same split
+(connectivity, lengths bitwise, every `n` and roundabout, the place on the same input edge within
+`1e-9` of it), `certify` after each: 31 299 at the first crossing, 31 260 at the last, 21 within
+`1e-3` of an end of the edge, 8 748 on a boundary face, 208 on a self-glued face, 86 602 with a
+spoke along the input edge, 78 445 chained second splits; 0 failures. 109 splits within rounding
+of the tolerance itself (the traces of the two representations decide `1e-16`–`1e-11` either
+side of it) are counted and skipped. 96 splits are refused by both.
 
 ### 4.6 Vertex removal (Sec. 3.5, Alg. 8, Thm. D.1)
 
@@ -391,7 +428,7 @@ through the spoke `m X1` next to `m` from the half `m X0` or the corner `X0` to 
 the corner `X2` (`min(c_m + e_X0, c'_m + e'_X2) = 0`, Eq. 1, 2), and that an input edge through
 `m` has one end on each side; otherwise `RemovalRefusal::CurvesBend` (the removal stays
 `RemovalStuck`). The signposts cannot see this and merge there: the one place where the two
-representations part (as I28; it did not occur in the differential tests).
+representations part (as the face-split case of I28; it did not occur in the differential tests).
 *Measured* (`tests/{ops,insert,merge}.rs`, spot and camelbad included; before → after):
 `removal_of_split_vertices_i27` right after the split 1 728 of 2 588 removed, 860 stuck → 2 461 of
 2 461 removed (657 by a merge), 0 stuck; after Delaunay flipping 1 692 removed, 1 898 stuck (1 873
@@ -477,11 +514,12 @@ unchanged. On integers (`IntegerTriangulation::export_simplicial`):
   edges in the same order with bitwise the same lengths; `irregularities` and the `TriMesh`
   (`ddg_intrinsic::triangulation::{irregularities, simplicial_mesh}`) depend on the connectivity
   alone;
-* `Exportable::split_for_export`: the midpoint, or, when the midpoint is refused for being within
-  rounding of a crossing (I28; symmetric meshes, where an edge crosses an input edge exactly at its
-  middle), the first of `½ ± 2⁻¹⁶, ½ ± 2⁻¹²` that is not (`OFF_MIDPOINT`), counted in
-  `SimplicialExport::n_off_midpoint_splits` (always 0 on signposts, which snap the vertex onto the
-  input edge instead);
+* `Exportable::split_for_export`: the midpoint. A midpoint within rounding of a crossing (symmetric
+  meshes, where an edge crosses an input edge exactly at its middle) is split at that crossing
+  (I28, §4.5), as the signposts snap it. Only if the midpoint is still refused (`NotLocated`:
+  near an input edge the edge does not cross there, or a corner) the first of
+  `½ ± 2⁻¹⁶, ½ ± 2⁻¹²` that is not (`OFF_MIDPOINT`), counted in
+  `SimplicialExport::n_off_midpoint_splits` (0 in the evaluation, and always on signposts);
 * `Exportable::refine_for_export` (`ExportOptions::refine`): `IntegerTriangulation::refine` with
   the signposts' rules (`RefineRules::Ruppert`, IT-SPEC N1/N4), certified, so that the export is
   the same function of the triangulation in both representations;
@@ -558,7 +596,8 @@ and value; the copy remains for the rare path that ends on an edge.
 Measured (`tests/export.rs`, 27 meshes as above, default options with at most 3 000 insertions
 and 20 iterations): 26 identical to the signposts in iterations, insertions, halved and unmoved
 steps, the places of the exported vertices within `3.3e-13` mean edge lengths (`4.3e-10` on the
-sheared parallelogram 10 σ6, where 3 splits were off the midpoint); bumpy grid 12×12 makes the same
+sheared parallelogram 10 σ6 before I28, where 3 splits were off the midpoint; `2.3e-14` after, on
+the snapped splits; no split is off the midpoint now); bumpy grid 12×12 makes the same
 counts on another trajectory from iteration 2 on, where a tie in the order of the long edges is
 broken by a last-bit difference of the moved lengths (`|Δℓ| = 5.6e-17`; the frames differ by
 rounding); the thin tube 4×12 refuses no move (34 refused on integers only in a first version; the final places
@@ -641,6 +680,15 @@ bob, blub, hand, …; both rules; 25° and 30°):
   sides from an input edge, reached on the new path after 9 removals that used to be refused.
 - Integer refinement costs 0.93–1.25× the signposts' (the paper: about 2.7×); the certificate adds
   about 20–80 %.
+- **I28 (snapped edge splits, 7d21c7e, a8bb456).** Rerun of the 256: all 256 make the same
+  operations and the same triangulation (245 equal to the conversion exactly, 136 signpost snaps;
+  places within `4.2e-11` mean edge lengths; 52 628 insertions, 2 322 removals, 0 refused, 0 trace
+  failures; before: 255 + the two divergences above, which were I28). The report has
+  `IntegerRefineReport::n_edge_splits_snapped` (edge splits put on a crossing; the shared
+  `RefineReport::n_snapped` counts these too, as the signposts' do) and `n_edge_splits_refused`
+  (`NotLocated` refusals of an edge split: the near-corner and wrong-edge cases, 0 in the
+  evaluation); `n_recover_failed` stays the face-split refusals. The Thingi10k example prints
+  `edge_split_snapped` and `edge_split_refused`.
 
 ## 6. Attribute transfer (Sec. 4.3, Eq. 11–14)
 
@@ -1012,21 +1060,44 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   signposts with Chew's rules alike; 99 meshes change (insertions 140 069 652 → 140 071 706 in
   all, removals 184 706 → 184 596); no mesh changes status, the refinement certificate holds on
   all; the signposts with Ruppert's rules (no removals) are identical. Table 1 is unchanged.
-* **I28** *Split point within rounding of a crossing (open).* The integer edge split refuses a
-  point within rounding of a crossing (§4.5), so refinement skips such a face, where the signposts
-  split and snap the place onto the input edge (1 of 256 differential runs, WP6). The alternative
-  is to snap the integer split to the crossing (the new vertex on the input edge); undecided.
-  The refine driver has no counter for these edge-split refusals (WP10); face-split refusals are
-  `n_recover_failed` (7 on Thingi10k, in 2 meshes). The export and the optimal Delaunay iteration
-  (I29) split such an edge at `½ ± 2⁻¹⁶` instead (`SimplicialExport::n_off_midpoint_splits`;
-  torus 5×3: 1 and 3 splits, so its export differs from the signposts' by `1.5e-5` of an edge
-  there).
+* **I28** *Split point within rounding of a crossing (resolved: 7d21c7e, a8bb456, this
+  documentation in the commit after them).* The integer edge split refused a point within rounding
+  of a crossing (`InsertRefusal::NotLocated`), so refinement skipped such a face where the signposts
+  split and snap the place onto the input edge (1 of 256 differential runs, WP6, and a second after
+  I27), the refine driver counted nothing, and the export and the optimal Delaunay iteration (I29)
+  split such an edge at `½ ± 2⁻¹⁶` (torus 5×3: 1 and 3 splits, its export differing from the
+  signposts' by `1.5e-5` of an edge). Decision (the user's): snap, so that both representations
+  make the same insertion. Done (§4.5): the split puts the new vertex on the crossing under the
+  signposts' rule and tolerance (`LOCATION_SNAP`), with the integers derived
+  (`ic-split-at-crossing`, CITED.md pending tier B) and differentially tested (157 076 snapped
+  splits equal to the signposts', 0 failures). The reference (geometry-central ab116f1)
+  has no such case: `splitInteriorEdge` is a face split plus a flip. The export and the iteration
+  now split at the midpoint, snapped when needed: torus 5×3 `0` off-midpoint splits, its export
+  equal to the signposts' (`max |Δq|` 4e-16 mean edge lengths); all 54 export comparisons and the
+  27-mesh optimal Delaunay table agree as before (the sheared parallelogram 10 σ6: `4.3e-10` →
+  `2.3e-14`). Refinement (§5): 256 of 256 differential runs now make the signposts' operations.
+  *Thingi10k subset* (302 random meshes up to 100k faces, plus 551019 and 97660; integers and
+  the signposts with Chew's rules; against the I27 run): no status change; 45 edge splits snapped
+  in 13 meshes (a split point inside the tolerance band was kept as a face point before when
+  it was strictly inside, refused otherwise), 0 refused; in 3 of them the trajectory changed
+  (49546 by one flip); the insertions of 45813 (2 963 → 2 960)
+  and 97660 (8 102 → 8 049) now equal the signposts' exactly (they differed by 3 and 53: the
+  skipped faces of an I28 refusal change the trajectory, and the counter that would have shown
+  them did not exist); the signposts' results are unchanged. **Remaining face-split refusals:**
+  97660's single `RecoverFailed` is gone (it was a consequence). 551019's 6 are the same kind of
+  event for the face split, not handled: two points, in 3 faces each, whose recovered place
+  has a barycentric coordinate `−3e-12` on an input face (outside by more than the `1e-12`
+  of I16), within the signposts' snapping distance of a side of it, so the signposts put them on
+  the input edge. Snapping a face split is a different derivation (a vertex on an arc of the
+  face, spokes along it) and 6 of 140 million insertions; left open, counted by
+  `n_recover_failed` (551019: 6, the signposts insert 6 more vertices there).
 * **I29** *An integer simplicial export (resolved: bb5f92c, d3c3999, 0e6c3a6, 7bf6014, e1ebbde;
   this documentation in the commit after them).* `ddg-uv`'s intrinsic path ends in
   `export_simplicial` and its cut transfer uses `SimplicialExport::edge_point` and
   `segments_on_input`. Now: the export and the optimal Delaunay iteration are written once over
   traits (`Exportable`, `OdtMoves`) with signposts bitwise unchanged; integer coordinates export
-  with off-midpoint splits where I28 refuses the midpoint, carry segments back from the integers
+  with the midpoint snapped onto a crossing where needed (I28; first built with off-midpoint
+  splits), carry segments back from the integers
   (the region tree of a face's arcs) and move vertices inside their star (§4.10, §4.11).
   `ddg-uv`'s `IntrinsicOptions::representation` defaults to `Representation::DEFAULT` (integers;
   refinement by the signposts' rules on both; state format v4, older states read as signposts);

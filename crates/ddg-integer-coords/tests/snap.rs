@@ -157,7 +157,10 @@ fn split_and_compare(
             Err(err) => return Err(format!("edge {e}: conversion of the signposts: {err}")),
         }
         let spokes = &xi.new_edges[1..];
-        if spokes.iter().any(|&x| it.normal_coordinate(x as usize) == -1) {
+        if spokes
+            .iter()
+            .any(|&x| it.normal_coordinate(x as usize) == -1)
+        {
             st.spokes_along += 1;
         }
         Ok(true)
@@ -216,7 +219,8 @@ fn split_at_a_crossing_equals_the_signposts() {
                                     };
                                     let f = h / 3;
                                     (0..3).any(|c| {
-                                        it0.complex().is_boundary_edge(it0.complex().edge(3 * f + c))
+                                        it0.complex()
+                                            .is_boundary_edge(it0.complex().edge(3 * f + c))
                                     })
                                 });
                             st.boundary += usize::from(dv);
@@ -224,7 +228,9 @@ fn split_at_a_crossing_equals_the_signposts() {
                             let c0 = it0.complex();
                             let h0 = c0.edge_halfedge(e);
                             let glued = [Some(h0), c0.twin(h0)].into_iter().flatten().any(|h| {
-                                (0..3).any(|k| c0.twin(3 * (h / 3) + k).is_some_and(|g| g / 3 == h / 3))
+                                (0..3).any(|k| {
+                                    c0.twin(3 * (h / 3) + k).is_some_and(|g| g / 3 == h / 3)
+                                })
                             });
                             st.self_glued += usize::from(glued);
                             let near = x.distance < 1e-3 * len || len - x.distance < 1e-3 * len;
@@ -234,8 +240,7 @@ fn split_at_a_crossing_equals_the_signposts() {
                                 .skip(e % 7)
                                 .step_by(11)
                                 .find(|&e2| it.normal_coordinate(e2) > 0)
-                                && let Ok(tr) =
-                                    s.trace_edge(e2, &EdgeTraceOptions::default())
+                                && let Ok(tr) = s.trace_edge(e2, &EdgeTraceOptions::default())
                                 && let Some(x2) = tr.crossings.get(tr.crossings.len() / 2)
                             {
                                 let l2 = s.edge_lengths()[e2];
