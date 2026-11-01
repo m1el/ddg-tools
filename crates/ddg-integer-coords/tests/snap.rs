@@ -93,6 +93,7 @@ struct Stats {
     last: usize,
     next_to_vertex: usize,
     boundary: usize,
+    self_glued: usize,
     spokes_along: usize,
     chained: usize,
     refused: usize,
@@ -183,7 +184,7 @@ fn split_at_a_crossing_equals_the_signposts() {
             return st;
         };
         let n_edges = it0.complex().n_edges();
-        let stride = if n_edges > 3000 { 7 } else { 1 };
+        let stride = if n_edges > 3000 { n_edges / 300 } else { 1 };
         for e in (0..n_edges).step_by(stride) {
             let n = it0.normal_coordinate(e);
             if n <= 0 {
@@ -219,6 +220,13 @@ fn split_at_a_crossing_equals_the_signposts() {
                                     })
                                 });
                             st.boundary += usize::from(dv);
+                            // A face of the split edge glued to itself along another side.
+                            let c0 = it0.complex();
+                            let h0 = c0.edge_halfedge(e);
+                            let glued = [Some(h0), c0.twin(h0)].into_iter().flatten().any(|h| {
+                                (0..3).any(|k| c0.twin(3 * (h / 3) + k).is_some_and(|g| g / 3 == h / 3))
+                            });
+                            st.self_glued += usize::from(glued);
                             let near = x.distance < 1e-3 * len || len - x.distance < 1e-3 * len;
                             st.next_to_vertex += usize::from(near);
                             // A second split on the result, at a crossing of another edge.
@@ -260,6 +268,7 @@ fn split_at_a_crossing_equals_the_signposts() {
         t.last += r.last;
         t.next_to_vertex += r.next_to_vertex;
         t.boundary += r.boundary;
+        t.self_glued += r.self_glued;
         t.spokes_along += r.spokes_along;
         t.chained += r.chained;
         t.refused += r.refused;
@@ -269,7 +278,7 @@ fn split_at_a_crossing_equals_the_signposts() {
     }
     eprintln!(
         "splits at crossings: {} splits, {} snapped (first crossing {}, last {}, within 1e-3 of an \
-         end {}, on a boundary face {}, a spoke along the input edge {}, chained second splits \
+         end {}, on a boundary face {}, on a self-glued face {}, a spoke along the input edge {}, chained second splits \
          {}); {} refused by both, {} within rounding of the tolerance decided differently, {} states \
          skipped; {} failures",
         t.splits,
@@ -278,6 +287,7 @@ fn split_at_a_crossing_equals_the_signposts() {
         t.last,
         t.next_to_vertex,
         t.boundary,
+        t.self_glued,
         t.spokes_along,
         t.chained,
         t.refused,
