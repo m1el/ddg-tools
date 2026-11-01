@@ -22,6 +22,9 @@
 //! All parallel loops write disjoint rows in a fixed order: results are bitwise independent of
 //! the size of the pool.
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use ddg_core::SparseMatrix;
 use rayon::prelude::*;
 
@@ -461,6 +464,66 @@ pub fn fractional_operator(
 ) -> Result<DenseMatrix, RsError> {
     let h = fractional_kernel(pool, ops, tau)?;
     kernel_matrix_form(pool, ops, &h, Channel::Average)
+}
+
+/// The fractional operator over **vertex** pairs (`FractionalPairs::Vertices`, §6.3 option):
+/// `uᵀ L u = Σ_{v≠w} (u_v − u_w)² a_v a_w |f_v − f_w|^{−(2τ+2)}`, i.e. the kernel-matrix form
+/// `2 (diag(a ⊙ H a) − diag(a) H diag(a))` with `H_vw = |f_v − f_w|^{−(2τ+2)}` and the vertex
+/// areas `a`. Parallel over rows; bitwise independent of the pool size.
+///
+/// [formula: rs-kernel-matrix-form]
+///
+/// # Errors
+/// [`RsError::InvalidOption`] for a non-finite `τ`, mismatched lengths or two vertices at the
+/// same position.
+pub fn vertex_fractional_operator(
+    pool: &rayon::ThreadPool,
+    positions: &[[f64; 3]],
+    mass: &[f64],
+    tau: f64,
+) -> Result<DenseMatrix, RsError> {
+    let n = positions.len();
+    if !tau.is_finite() || mass.len() != n {
+        return Err(RsError::InvalidOption {
+            name: "vertex fractional operator",
+            value: format!("tau {tau}, {} masses for {n} vertices", mass.len()),
+            requirement: "a finite order and one mass per vertex",
+        });
+    }
+    let e = -(tau + 1.0);
+    for v in 0..n {
+        for w in v + 1..n {
+            let d = sub(positions[v], positions[w]);
+            if !(dot(d, d) > 0.0) {
+                return Err(RsError::InvalidOption {
+                    name: "positions",
+                    value: format!("vertices {v} and {w} coincide"),
+                    requirement: "distinct vertex positions for the vertex-pair operator",
+                });
+            }
+        }
+    }
+    let mut out = zero_matrix(n);
+    pool.install(|| {
+        out.as_mut_slice()
+            .par_chunks_mut(n.max(1))
+            .enumerate()
+            .for_each(|(v, row)| {
+                let mut diag = 0.0;
+                for w in 0..n {
+                    if w == v {
+                        continue;
+                    }
+                    let (a, b) = if v < w { (v, w) } else { (w, v) };
+                    let d = sub(positions[a], positions[b]);
+                    let h = 2.0 * mass[v] * mass[w] * dot(d, d).powf(e);
+                    row[w] = -h;
+                    diag += h;
+                }
+                row[v] = diag;
+            });
+    });
+    Ok(out)
 }
 
 /// The high-order operator `B` (Eq. 12, kernel `ρ^{−2s}`, through `D_f`), dense.

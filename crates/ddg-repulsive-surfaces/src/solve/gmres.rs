@@ -21,6 +21,9 @@
 //! not an error, unless the true relative residual is above [`DIVERGENCE_THRESHOLD`]
 //! ([`RsError::SolverDiverged`]).
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use std::time::Instant;
 
 use super::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord, check_rhs, norm2};

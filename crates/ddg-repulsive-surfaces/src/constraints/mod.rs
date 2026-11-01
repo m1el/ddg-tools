@@ -19,6 +19,9 @@
 //! three rows per component, in component order ([`BarycenterMode::PerComponent`], the paper)
 //! or one group for the whole mesh ([`BarycenterMode::Global`], the reference).
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 pub mod rank;
 
 pub use rank::{RANK_TOLERANCE, RankReport};

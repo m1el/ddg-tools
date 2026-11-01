@@ -17,6 +17,9 @@
 //! ([`RsError::TranslationNotFixed`]). In [`super::BarycenterMode::Global`] a global barycenter
 //! counts for every component (the reference's convention).
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use super::{BarycenterMode, ConstraintSet, RowKind};
 use crate::error::RsError;
 

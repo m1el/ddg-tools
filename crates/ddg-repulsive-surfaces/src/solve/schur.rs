@@ -21,6 +21,9 @@
 //! (§6.2, D10): area and volume together on a near-sphere keep one row instead of producing a
 //! huge correction.
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use super::{LinearReport, SaddleSolver, SolveRecord};
 use crate::constraints::ConstraintSet;
 use crate::error::RsError;
@@ -32,6 +35,8 @@ pub const SCHUR_DROP_TOLERANCE: f64 = 1e-10;
 /// The Schur complement of the nonlinear rows of one step.
 #[derive(Debug, Clone)]
 pub struct SchurComplement {
+    /// `3|V|`.
+    n_dofs: usize,
     /// The constraint-set rows of `C_N`, in order (all candidates).
     rows: Vec<usize>,
     /// `C_N` (`k × 3|V|`).
@@ -103,6 +108,7 @@ impl SchurComplement {
             }
         }
         let mut out = SchurComplement {
+            n_dofs: nd,
             rows,
             c,
             z,
@@ -223,8 +229,7 @@ impl SchurComplement {
 
     /// `Σ_r c_r Z_r`.
     fn combine(&self, c: &[f64]) -> Vec<f64> {
-        let nd = self.z.first().map_or(0, Vec::len);
-        let mut out = vec![0.0; nd];
+        let mut out = vec![0.0; self.n_dofs];
         for (cr, zr) in c.iter().zip(&self.z) {
             if *cr != 0.0 {
                 for (o, x) in out.iter_mut().zip(zr) {

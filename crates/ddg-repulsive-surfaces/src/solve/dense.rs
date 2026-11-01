@@ -12,6 +12,9 @@
 //! tests and the oracle (WP6 builds the sparse one); [`DenseSaddleOperator`] multiplies by `A′`
 //! for GMRES on dense problems.
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use std::time::Instant;
 
 use ddg_core::SparseMatrix;
@@ -25,8 +28,8 @@ use super::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord, check_rhs, 
 use crate::error::RsError;
 use crate::geometry::{FaceGeometry, cotan_stiffness, vertex_areas};
 use crate::kernel::Exponents;
-use crate::metric::dense::{fractional_operator, to_dense};
-use crate::metric::{DenseMatrix, FaceOperators};
+use crate::metric::dense::{fractional_operator, to_dense, vertex_fractional_operator};
+use crate::metric::{DenseMatrix, FaceOperators, FractionalPairs};
 use crate::surface::Surface;
 
 /// The equilibrated LU is singular when `min |u_ii| / max |u_ii|` is at most this (the oracle's
@@ -134,7 +137,7 @@ impl Lu {
 /// `C_Q = C₁ ⊗ I₃` in groups of three rows? Returns `C₁` (`k_Q/3 × |V|`) if so.
 fn per_axis_rows(c: &SparseMatrix, nv: usize) -> Option<SparseMatrix> {
     let k = c.nrows();
-    if k % 3 != 0 || c.ncols() != 3 * nv {
+    if !k.is_multiple_of(3) || c.ncols() != 3 * nv {
         return None;
     }
     let ct = c.transpose(); // column r = row r of C
@@ -549,7 +552,8 @@ pub struct DensePreconditioner {
 
 impl DensePreconditioner {
     /// Builds `L′` and `L_{2−s}` at `positions` for the positional Jacobian `c`
-    /// (`k_Q × 3|V|`).
+    /// (`k_Q × 3|V|`), `L_{2−s}` over face pairs (the SPEC) or vertex pairs
+    /// ([`FractionalPairs`]).
     ///
     /// # Errors
     /// The errors of [`Surface::validate_positions`]; [`RsError::NonFiniteEnergy`] for
@@ -563,6 +567,7 @@ impl DensePreconditioner {
         exponents: &Exponents,
         c: &SparseMatrix,
         eps_rel: f64,
+        pairs: FractionalPairs,
     ) -> Result<DensePreconditioner, RsError> {
         if !(eps_rel.is_finite() && eps_rel >= 0.0) {
             return Err(RsError::InvalidOption {
@@ -581,7 +586,11 @@ impl DensePreconditioner {
         for v in 0..nv {
             lap.as_mut_slice()[v * nv + v] += eps * mass[v];
         }
-        let lfr = fractional_operator(pool, &ops, 2.0 - exponents.s())?;
+        let tau = 2.0 - exponents.s();
+        let lfr = match pairs {
+            FractionalPairs::Faces => fractional_operator(pool, &ops, tau)?,
+            FractionalPairs::Vertices => vertex_fractional_operator(pool, positions, &mass, tau)?,
+        };
         let lprime = DenseSaddle::new(pool, &lap, c)?;
         Ok(DensePreconditioner { lprime, lfr, eps })
     }

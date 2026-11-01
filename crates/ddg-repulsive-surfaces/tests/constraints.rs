@@ -453,8 +453,8 @@ fn oracle_constraint_error_fixtures() {
         ("rs-error-component", "ConstraintOutOfRange"),
         ("rs-error-translation", "TranslationNotFixed"),
     ] {
-        let c = fixture::read_case(&name);
-        let o = fixture::read_output(&name);
+        let c = fixture::read_case(name);
+        let o = fixture::read_output(name);
         assert!(o.status.starts_with("error"), "{name}");
         let s = Surface::new(c.positions.len(), c.faces.clone()).unwrap();
         let e = ConstraintSet::new(&s, &c.positions, &c.constraints, Default::default())

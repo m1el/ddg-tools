@@ -266,6 +266,26 @@ impl Channel {
     }
 }
 
+/// How the fractional operator `L_{2−s}` of the preconditioner (§6.3) is discretized.
+///
+/// * `Faces` (SPEC §4.2 and §6.3 as printed, the paper and the reference): the double sum over
+///   face pairs of the face averages `ū_S`. Measured (`tests/gmres.rs`,
+///   `preconditioner_spectrum`): the averaging nearly annihilates mesh-scale oscillations, so
+///   this `L_{2−s}` is far below `M Δ^{2−s}` on them; its condition number relative to
+///   `M Δ^{2−s}` grows with refinement (12.6, 68, 224 on icospheres of 80, 320, 1280 faces) and
+///   so does that of the preconditioned metric (11, 64, 222).
+/// * `Vertices`: `Σ_{v≠w} (u_v − u_w)² a_v a_w |f_v − f_w|^{−(2τ+2)}` over vertex pairs with the
+///   dual areas (no averaging). Relative condition number 1.3–2.1 and preconditioned metric ≈ 2
+///   at every size measured (an option until the SPEC decides).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FractionalPairs {
+    /// Face pairs with face averages (the SPEC, paper, reference).
+    #[default]
+    Faces,
+    /// Vertex pairs with dual areas.
+    Vertices,
+}
+
 /// The hook for the mesh-obstacle term `O_diag` of §4.4 (D23; filled by WP6/WP7): per face,
 /// `d_S = Σ_𝒪 w_𝒪 Σ_{T∈𝒪} h(S, T) a_T` for the high-order kernel (`hi`, acting through `V`)
 /// and the low-order kernel (`lo`, through `U`). The metric adds
