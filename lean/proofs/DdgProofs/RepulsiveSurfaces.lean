@@ -11,6 +11,7 @@ import DdgProofs.RepulsiveSurfaces.Step
 import DdgProofs.RepulsiveSurfaces.Remesh
 import DdgProofs.RepulsiveSurfaces.Ccd
 import DdgProofs.RepulsiveSurfaces.Optimize
+import DdgProofs.RepulsiveSurfaces.Penalties
 
 /-!
 # Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021)
