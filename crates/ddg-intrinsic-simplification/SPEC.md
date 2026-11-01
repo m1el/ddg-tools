@@ -444,12 +444,44 @@ output is in the fine mesh's normalized frames, the frames of `ddg_intrinsic::In
 on the input (so the result plugs into `ddg-intrinsic-apps`' vector code). n-direction fields
 (Knöppel encoding) use `z^n`, `ψ^n`.
 
+*As built (WP4).* `CoarseMesh::compact() -> CoarseOutput` (`src/output.rs`; the complex's ids
+are already dense, so the compacted ids are its vertex and face ids); `src/prolongation.rs`
+holds `P`, `P^vec`, `FineFrames` and the helpers. Decisions where the text left room:
+
+* **Fine frames.** The fine side of `ψ` is `e^{iφ_ij}` with `φ_ij` the *normalized* signpost of
+  the fine edge in the frame of `i` (the paper's "unit vector along the fine edge in the
+  normalized coordinate system at `i`"), so the output is in the normalized frames
+  (`2π/Θ` inside, `π/Θ` on the boundary), and the matrix acts on *unnormalized* coarse vectors.
+  `ddg-intrinsic-apps` stores a boundary vertex's vectors in the unnormalized frame; the
+  conversion is `unnormalize`/`normalize` (boundary scale `π/Θ`).
+* **Boundary unnormalization** generalizes the paper's `Θ/2π` to `Θ/π` at a boundary vertex:
+  `w = e^{iφ/s}`, `s` the scale of S4.
+* **Neighbours that are coarse vertices** count as lying in every face around them (at the
+  corner); the reference ignores them (R29). A coarse vertex's row has one entry, the average
+  over the faces around it and the neighbours in them of `ψ z`, normalized.
+* **Fallback 3 differs from S18's text:** instead of averaging the `ψ` of the known neighbours
+  (which live in the frames of different coarse faces, so their average has no meaning) the row
+  is the average of the known neighbours' *rows*, each carried to the frame of `i` by the fine
+  transport `e^{i n (φ_ij − φ_ji − π)}` (the paper's "average of known interpolated values"),
+  breadth-first in rounds. A tier whose `Σ ψ_ij` cancels (`< 1e-8` per neighbour) counts as
+  failed. A last resort (no row known in a component) takes the face's own corners with
+  `ψ = 1` and is counted in `n_default` (never happened).
+* Edge-adjacent faces are laid out across the shared side from the two faces' lengths (no
+  obtuse-sign bug, R31); a face adjacent to itself (Δ-complex) is unfolded the same way.
+* Fallback 3 uses the normalized angles as they are, which is exact only where the scale is one
+  (boundary vertices of cone angle `≠ π`); it fires for a handful of rows only.
+* The `β` of the paper are the angles of the sides in the face frame (`0`, `π − θ_j`,
+  `π + θ_i`), the printed subscripts of the paper being garbled.
+
 ### 7.4 Drawing the coarse mesh on the fine mesh (Sec. 8.1)
 
 * `face_of_points(points)`: coarse face per tracked point; a greedy colouring of the coarse faces
   (adjacent through a vertex → different colours; deterministic; no fixed palette size: the
   colouring returns colour indices, the caller maps them) — the reference's 24-colour overflow
   (R40) cannot occur.
+* *As built (WP4).* `CoarseOutput::{face_of_point, face_of_points, colour_faces, point_colours}`:
+  a point that is a coarse vertex belongs to its incident face of lowest id; the colouring visits
+  the faces in id order and gives each the smallest colour absent around its corners.
 * The Blender view (§11) tracks one point per fine face (its centroid) and colours each fine face
   by its coarse face; with a UV map it can instead bake texels (Sec. 8.1, Fig. 15).
 
