@@ -200,14 +200,7 @@ impl SuccessiveMap {
 
     /// Plans the collapse of `(u, v)` (v removed, `u` moves to `p`; `ef` the faces on the edge).
     /// `Err` rejects the collapse.
-    pub fn plan(
-        &self,
-        w: &View,
-        u: u32,
-        v: u32,
-        p: V3,
-        ef: &[u32],
-    ) -> Result<Plan, PlanError> {
+    pub fn plan(&self, w: &View, u: u32, v: u32, p: V3, ef: &[u32]) -> Result<Plan, PlanError> {
         let mut patch: Vec<u32> = w.vfaces[u as usize]
             .union(&w.vfaces[v as usize])
             .copied()
@@ -242,7 +235,13 @@ impl SuccessiveMap {
             }
         };
         let pos_before = |x: u32| w.pos[x as usize];
-        let pos_after = |x: u32| if x == u || x == v { p } else { w.pos[x as usize] };
+        let pos_after = |x: u32| {
+            if x == u || x == v {
+                p
+            } else {
+                w.pos[x as usize]
+            }
+        };
         let mut before = Vec::new();
         let mut after = Vec::new();
         for &f in &patch {
@@ -385,9 +384,18 @@ impl SuccessiveMap {
                 return None;
             }
             let g = [
-                [(q[1][1] - q[2][1]) / (2.0 * area), (q[2][0] - q[1][0]) / (2.0 * area)],
-                [(q[2][1] - q[0][1]) / (2.0 * area), (q[0][0] - q[2][0]) / (2.0 * area)],
-                [(q[0][1] - q[1][1]) / (2.0 * area), (q[1][0] - q[0][0]) / (2.0 * area)],
+                [
+                    (q[1][1] - q[2][1]) / (2.0 * area),
+                    (q[2][0] - q[1][0]) / (2.0 * area),
+                ],
+                [
+                    (q[2][1] - q[0][1]) / (2.0 * area),
+                    (q[0][0] - q[2][0]) / (2.0 * area),
+                ],
+                [
+                    (q[0][1] - q[1][1]) / (2.0 * area),
+                    (q[1][0] - q[0][0]) / (2.0 * area),
+                ],
             ];
             let sw = area.sqrt();
             // Two residual rows over the six unknowns (U_a, V_a).

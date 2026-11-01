@@ -60,6 +60,7 @@ pub mod applications;
 pub mod baseline;
 pub mod curvature;
 mod error;
+pub mod evaluation;
 mod flatten;
 mod flip;
 pub mod formulas;
