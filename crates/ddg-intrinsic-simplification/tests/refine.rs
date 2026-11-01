@@ -534,3 +534,24 @@ fn flips_make_a_refused_mesh_acceptable() {
     }
     assert!(repaired > 0, "no coarse boxpart needed the repair");
 }
+
+/// `refine_then_simplify` equals `from_refined` followed by `simplify` and reaches the same mesh.
+#[test]
+fn refine_then_simplify_matches_the_two_steps() {
+    use ddg_intrinsic_simplification::refine::refine_then_simplify;
+    use ddg_intrinsic_simplification::{SimplifyOptions, simplify};
+    let g = ddg_core::generators::icosphere(2).unwrap();
+    let mesh = g.topology().unwrap();
+    let geometry = Geometry::from_positions(&mesh, &g.positions).unwrap();
+    let ro = RefinementOptions::default();
+    let so = SimplifyOptions::default();
+    let (a, rep) = refine_then_simplify(&mesh, &geometry, &[], &ro, &so).unwrap();
+    let (mut b, _) =
+        CoarseMesh::from_refined(&mesh, &geometry, &[], CoarseMeshOptions::default(), &ro).unwrap();
+    let sb = simplify(&mut b, &so).unwrap();
+    assert_eq!(a.n_vertices(), b.n_vertices());
+    assert_eq!(rep.simplify.n_vertices_after, sb.n_vertices_after);
+    assert_eq!(rep.simplify.n_vertices_before, rep.refinement.n_vertices);
+    assert!(a.n_vertices() < rep.refinement.n_vertices / 4);
+    a.certify(false).unwrap();
+}
