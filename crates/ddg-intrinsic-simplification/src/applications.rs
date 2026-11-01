@@ -211,9 +211,8 @@ impl CoarseOutput {
             .iter()
             .enumerate()
             .map(|(f, l)| {
-                ddg_core::geometry::triangle_area(l[0], l[1], l[2]).ok_or_else(|| {
-                    AppError::Degenerate(format!("face {f} has side lengths {l:?}"))
-                })
+                ddg_core::geometry::triangle_area(l[0], l[1], l[2])
+                    .ok_or_else(|| AppError::Degenerate(format!("face {f} has side lengths {l:?}")))
             })
             .collect()
     }
@@ -309,7 +308,9 @@ impl PoissonSolver {
                 )));
             }
             if is_held[v as usize] {
-                return Err(AppError::Invalid(format!("fixed vertex {v} is listed twice")));
+                return Err(AppError::Invalid(format!(
+                    "fixed vertex {v} is listed twice"
+                )));
             }
             is_held[v as usize] = true;
         }
@@ -528,7 +529,8 @@ impl DistanceError {
                 "a reference value is not finite (unreached vertex)".into(),
             ));
         }
-        let (mut e1, mut e2, mut r1, mut r2, mut emax, mut rmax) = (0.0, 0.0, 0.0, 0.0, 0.0f64, 0.0f64);
+        let (mut e1, mut e2, mut r1, mut r2, mut emax, mut rmax) =
+            (0.0, 0.0, 0.0, 0.0, 0.0f64, 0.0f64);
         for (a, r) in approx.iter().zip(reference) {
             let e = (a - r).abs();
             e1 += e;
@@ -594,9 +596,8 @@ impl CoarseApplications {
             .iter()
             .enumerate()
             .map(|(f, l)| {
-                triangle_layout(*l).ok_or_else(|| {
-                    AppError::Degenerate(format!("face {f} has side lengths {l:?}"))
-                })
+                triangle_layout(*l)
+                    .ok_or_else(|| AppError::Degenerate(format!("face {f} has side lengths {l:?}")))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let p_rows = output
@@ -682,7 +683,12 @@ impl CoarseApplications {
                 self.output.n_fine_vertices
             )));
         }
-        Ok(self.output.vertices.iter().map(|&v| f[v as usize]).collect())
+        Ok(self
+            .output
+            .vertices
+            .iter()
+            .map(|&v| f[v as usize])
+            .collect())
     }
 
     /// Galerkin restriction of a fine load: `b̄ = Pᵀ b` (with `b = M f` for data `f`; sums are
@@ -915,9 +921,7 @@ impl CoarseApplications {
             .iter()
             .map(|&s| self.source_of(s))
             .collect::<Result<_, _>>()?;
-        let runs = pool.map(exact.len(), |k| {
-            self.exact_distance(&exact[k..=k], options)
-        });
+        let runs = pool.map(exact.len(), |k| self.exact_distance(&exact[k..=k], options));
         let mut coarse_d = Vec::with_capacity(sources.len());
         for r in runs {
             coarse_d.push(r?);
@@ -976,7 +980,9 @@ pub struct CoarseHeat<'a> {
 
 impl fmt::Debug for CoarseHeat<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CoarseHeat").field("time", &self.time).finish()
+        f.debug_struct("CoarseHeat")
+            .field("time", &self.time)
+            .finish()
     }
 }
 
@@ -1037,7 +1043,14 @@ impl<'a> CoarseHeat<'a> {
         let mut div = vec![0.0; n];
         for (f, face) in out.faces.iter().enumerate() {
             let p = self.app.layouts[f];
-            let x = unit_negative_gradient(&p, [u[face[0] as usize], u[face[1] as usize], u[face[2] as usize]]);
+            let x = unit_negative_gradient(
+                &p,
+                [
+                    u[face[0] as usize],
+                    u[face[1] as usize],
+                    u[face[2] as usize],
+                ],
+            );
             let l = out.face_lengths[f];
             for k in 0..3 {
                 let ea = sub(p[(k + 1) % 3], p[k]);
@@ -1209,10 +1222,9 @@ impl CoarseApplications {
         vector: [f64; 2],
     ) -> Result<ExpMapResult, AppError> {
         self.face_layout(face)?;
-        if !(bary.iter().all(|b| b.is_finite() && *b >= -1e-9)
-            && (bary.iter().sum::<f64>() - 1.0).abs() <= 1e-9)
-            || !vector.iter().all(|x| x.is_finite())
-        {
+        let bary_ok = bary.iter().all(|b| b.is_finite() && *b >= -1e-9)
+            && (bary.iter().sum::<f64>() - 1.0).abs() <= 1e-9;
+        if !bary_ok || !vector.iter().all(|x| x.is_finite()) {
             return Err(AppError::Invalid(format!(
                 "barycentric coordinates {bary:?} and vector {vector:?} must be finite, the \
                  coordinates non-negative and summing to one"
@@ -1616,7 +1628,12 @@ pub fn greedy_coarsening(mesh: &mut CoarseMesh, target: usize) -> Result<usize, 
         };
         removed += 1;
         // Recompute the neighbours and their neighbours.
-        let mut touched: Vec<u32> = report.prepared.neighbours.iter().map(|n| n.vertex).collect();
+        let mut touched: Vec<u32> = report
+            .prepared
+            .neighbours
+            .iter()
+            .map(|n| n.vertex)
+            .collect();
         let first = touched.clone();
         for &u in &first {
             if let Some(c) = mesh.complex_vertex(u) {

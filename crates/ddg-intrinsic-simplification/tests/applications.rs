@@ -226,7 +226,11 @@ fn all_pairs_is_deterministic_and_accurate() {
             ref_sum += b;
         }
     }
-    eprintln!("all pairs {} coarse verts: rel L1 {:.4}", n, err_sum / ref_sum);
+    eprintln!(
+        "all pairs {} coarse verts: rel L1 {:.4}",
+        n,
+        err_sum / ref_sum
+    );
     assert!(err_sum / ref_sum < 0.05);
 }
 
@@ -268,9 +272,8 @@ fn heat_distance_on_a_flat_grid_is_close_to_euclidean() {
     let d = heat.distance(&[ExactSource::Vertex(c)]).unwrap();
     let mut worst: f64 = 0.0;
     for (v, p) in shape.positions.iter().enumerate() {
-        let e = ((p[0] - shape.positions[c][0]).powi(2)
-            + (p[1] - shape.positions[c][1]).powi(2))
-        .sqrt();
+        let e = ((p[0] - shape.positions[c][0]).powi(2) + (p[1] - shape.positions[c][1]).powi(2))
+            .sqrt();
         worst = worst.max((d[v] - e).abs());
     }
     eprintln!("flat heat: max error {worst:.4} (domain size 1)");
@@ -295,7 +298,13 @@ fn exp_map_on_a_flat_grid_is_the_straight_line() {
     let pa = shape.positions[out.vertices[c[0] as usize] as usize];
     let pb = shape.positions[out.vertices[c[1] as usize] as usize];
     let ang = (pb[1] - pa[1]).atan2(pb[0] - pa[0]);
-    for (dx, dy) in [(0.15, 0.05), (-0.2, 0.1), (0.05, -0.12), (0.0, 0.3), (0.3, 0.3)] {
+    for (dx, dy) in [
+        (0.15, 0.05),
+        (-0.2, 0.1),
+        (0.05, -0.12),
+        (0.0, 0.3),
+        (0.3, 0.3),
+    ] {
         let r = app.exp_map_face(f, bary, [dx, dy]).unwrap();
         assert_eq!(r.stop, ExpStop::Completed);
         let (c, s) = (ang.cos(), ang.sin());
@@ -361,7 +370,10 @@ fn exp_map_on_a_coarse_delta_complex_is_reversible() {
     let out = app.output();
     let mut checked = 0;
     for f in (0..out.n_faces() as u32).step_by(3) {
-        for (bary, vec) in [([0.3, 0.3, 0.4], [0.7, 0.4]), ([0.1, 0.2, 0.7], [-1.1, 0.5])] {
+        for (bary, vec) in [
+            ([0.3, 0.3, 0.4], [0.7, 0.4]),
+            ([0.1, 0.2, 0.7], [-1.1, 0.5]),
+        ] {
             let r = app.exp_map_face(f, bary, vec).unwrap();
             assert_eq!(r.stop, ExpStop::Completed);
             let (face, b) = match r.point {
@@ -373,13 +385,13 @@ fn exp_map_on_a_coarse_delta_complex_is_reversible() {
                 .exp_map_face(face, b, [-r.direction[0] * len, -r.direction[1] * len])
                 .unwrap();
             let p0 = app.face_position(f, bary).unwrap();
-            if let CoarsePoint::Face { face: f2, bary: b2 } = back.point {
-                if f2 == f {
-                    let p = app.face_position(f2, b2).unwrap();
-                    let e = ((p[0] - p0[0]).powi(2) + (p[1] - p0[1]).powi(2)).sqrt();
-                    assert!(e < 1e-8, "face {f}: round trip error {e}");
-                    checked += 1;
-                }
+            if let CoarsePoint::Face { face: f2, bary: b2 } = back.point
+                && f2 == f
+            {
+                let p = app.face_position(f2, b2).unwrap();
+                let e = ((p[0] - p0[0]).powi(2) + (p[1] - p0[1]).powi(2)).sqrt();
+                assert!(e < 1e-8, "face {f}: round trip error {e}");
+                checked += 1;
             }
         }
     }

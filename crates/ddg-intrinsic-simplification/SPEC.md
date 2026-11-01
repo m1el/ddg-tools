@@ -556,6 +556,46 @@ On the coarse mesh, prolongated with `P`:
   *not* available (the map is fine → coarse): the result is reported as coarse points and compared
   on coarse points (S21).
 
+*As built (WP6).* `src/applications.rs`: `CoarseApplications::new(&CoarseMesh)` (output, Δ-complex,
+`P`, `L̄`, `M̄`); everything takes a `CoarseMesh`, independent of `simplify`.
+* `CoarseOutput::{cotan_laplacian, lumped_mass, face_areas}`: per halfedge, self-edges skipped,
+  as `ddg_intrinsic::generic_ops`; equal to `CoarseMesh::cotan_laplacian` (tested).
+* **Poisson**: `PoissonSolver::new(L, M, fixed)` (Cholesky, any `L`, `M`: the fine problem uses it
+  too). No fixed vertices: Neumann/mean-zero (the load is projected to sum zero, `rhs_shift`
+  reported; `x` has `M`-mean zero; internally vertex 0 is pinned). `poisson(f̄, fixed, values)` is
+  `L̄ x̄ = M̄ f̄`, `x = P x̄`. Fine data: `sample` (`f̄_i` = `f` at the fine vertex of `i`) or
+  `restrict_load` (`b̄ = Pᵀ M f`, sums conserved); both measured, similar errors; the example uses
+  `sample`.
+* **Geodesics**: `geodesic_exact` = `source_of` (vertex or face point, S20) →
+  `exact_distance_complex` → `P`. Heat: **reimplemented** as `CoarseHeat` for a Δ-complex with
+  lengths (the heat solver of `ddg-intrinsic-apps` needs a `Triangulation`): `(M̄ + tL̄)u = δ`,
+  `X = −∇u/|∇u|` from the planar layout of each face, `L̄φ = −∇·X`, `t = (factor)·h̄²` (factor 1),
+  `φ` shifted to zero at the sources (mean of `φ` at their barycentric vertices). Factorizations
+  once per `CoarseHeat`.
+* **All pairs**: `all_pairs(pool, opts)` (a `ddg_core::sparse::ThreadPool`, one exact run per row,
+  bitwise equal for 1 and 4 threads, tested); `prolongate_rows` (rows of `P D̄ Pᵀ`),
+  `prolongate_dense` (`8|V|²` bytes). **Voronoi**: `voronoi(sources, pool, opts)`, one exact run per
+  source, prolongated, argmin, ties to the lower index; coarse labels returned too. (The paper
+  computes the diagram on the coarse mesh; the fine labels here come from the prolongated
+  distances, as the brief of WP6 asks.)
+* **Exponential map**: `exp_map_face(face, bary, vector in the face's planar frame)` and
+  `exp_map_vertex(v, angle, length)` (the *unnormalized* angle `φ/s` of the angular coordinates, SPEC
+  §2.2). Unfolding across faces from their lengths; a ray that hits a vertex (relative `1e-10`)
+  continues at `θ_back + Θ/2` (Polthier–Schmies straightest geodesics); stops at the boundary
+  (`ExpStop::Boundary`). Returns a coarse point, traced length, faces crossed, vertices hit and the
+  final unit direction in the last face's frame (reversible, tested on a Δ-complex and on a flat
+  grid against the straight line). It is written on the output's `twin`/`face_lengths`, not on
+  `ddg-intrinsic`'s tracer (which needs a `Triangulation` with positions or signposts).
+* `greedy_coarsening(&mut CoarseMesh, target)`: stand-in order (smallest memoryless cost with
+  `α_ij = (K̃_j − K_j)/K_i`); not the ICE order.
+* Measured numbers (greedy order, not ICE; the example `applications`) are in the WP6 report; the
+  paper's ≈1 % at three orders of magnitude (20k-vertex mesh) is not reproduced by the stand-in
+  order, to be rerun with `simplify`.
+* The exponential-map comparison of the example is weak: the coarse and fine start directions are
+  matched by the normalized angular coordinate (valid while the reference halfedge's direction is
+  kept), and the endpoint distance is an upper bound (distance on the coarse mesh to the corners of
+  the tracked endpoint's face plus the planar distance).
+
 ### 10.2 Benchmark (Sec. 8.2; Fig. 16, 17)
 
 Thingi10k (`data/thingi10k/`, the 7745 manifold meshes of IC-SPEC Q1), preprocessed by intrinsic
