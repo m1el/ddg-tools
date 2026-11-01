@@ -154,7 +154,11 @@ overlap, so overlapping boxes are never admissible). Admissible: every face `S �
 `K(X_S, N_S; X_C) a_S A_C`. Inadmissible leaf × leaf: exact face sum, `S ≠ T`. Default
 `θ = 0.5`; `θ = 0` is the exact energy (every node inadmissible). The admissibility lists are
 built once per step and frozen during the line search (paper Sec. 4.1); trials refresh only the
-face data and the node aggregates (`Bvh::refit`).
+face data and the node aggregates `A`, `X`, `P̄` (`refit`); boxes and radii stay those of the
+build. Leaves may be lumped too (as the reference). Measured (WP3, 10k-face torus): relative
+energy error 8.4e-2 / 2.3e-2 / 4.1e-3 / 2.1e-4 at `θ` = 1 / 0.5 / 0.25 / 0.125 (at least
+`O(θ²)`); 40k faces, energy + gradient 0.57 s on 1 thread, 0.15 s on 8. The default `θ` is
+revisited in §14.3 (2.3 % energy error at 0.5 is large for the line search's comparisons).
 
 **Gradient (D4).** The gradient is the **exact gradient of `Ẽ` for the frozen lists**, including
 the terms through the cluster aggregates `A_C`, `A_C X_C` (pushed down the tree to the member
