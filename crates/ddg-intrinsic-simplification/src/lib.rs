@@ -42,8 +42,11 @@
 //!   ([`CoarseOutput::scalar_prolongation`]), the vector prolongation `P^vec`
 //!   ([`CoarseOutput::vector_prolongation`], module [`prolongation`]) and the greedy colouring of
 //!   the coarse faces ([`CoarseOutput::colour_faces`]).
+//! * [`applications`] (WP6, SPEC §10.1): Poisson, single-source geodesic distance (exact and heat),
+//!   all pairs, Voronoi and the exponential map on the coarse mesh, prolongated with `P`.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
+pub mod applications;
 pub mod baseline;
 pub mod curvature;
 mod error;
