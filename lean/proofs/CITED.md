@@ -2060,6 +2060,29 @@ are not cited here).
   being involutions on a finite set (`lean/proofs/DdgProofs/IntegerCoords/DESIGN.md` item 9). Until
   WP9 the Rust tracer detects a repeated `(halfedge, index)` pair (IC SPEC I18) and bounds the walk.
 
+### [formula: ic-merge-edge-normal] The normal coordinate of two merged halves (pending, tier C)
+
+- **Statement.** In a valid state, let `m ∈ V*` have two edges (the halves) on one geodesic
+  through it, with normal coordinates `n₁`, `n₂`, merged into one edge (the inverse of an edge
+  split, `Complex::merge_edge`). If the input edges cross the star of `m` as they cross one
+  straight edge (no arc runs through the spoke next to `m` from one half or its far end to the
+  other half or its far end, and an input edge through `m` has one end on each side; IC SPEC
+  §4.6), the merged edge has `n = −1` when `n₁ = n₂ = −1`, `n₁ + n₂ + 1` when `m` lies on an
+  input edge the halves do not run along, and `n₁ + n₂` when `m` lies inside an input face; every
+  other normal coordinate and every roundabout of the surviving halfedges is unchanged, and the
+  state is valid.
+- **Reference.** IC SPEC §4.6 (derivation); the inverse of the paper's Eq. 6
+  (`ic-split-edge-normal`) and of `ic-split-crossed-edge` (SPEC §4.5). The paper and
+  geometry-central ab116f1 have no merge (`removeInsertedVertex` gives up on a vertex it cannot
+  flip down to degree three, `integer_coordinates_intrinsic_triangulation.cpp:1603-1714`).
+- **Why not formalized yet.** The count is a statement about the gluing of four faces around a
+  vertex and the curves through them, i.e. tier C (SPEC §9, WP9). The case split itself is the
+  Rust unit test `merge::tests::merge_inverts_the_splits`. Until WP9: tested in Rust, where every
+  state after a merge is certified (SPEC §2.4 item 4) and equals `from_intrinsic` of the
+  signposts that did the same merge (`crates/ddg-integer-coords/tests/merge.rs`, `ops.rs`:
+  18 672 splits merged at once give back the state exactly; 1 045, 595 and 700 merges in the
+  removal tests, all certified and equal to the signposts').
+
 ---
 
 ## Out of scope of this package

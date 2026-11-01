@@ -1048,6 +1048,64 @@ Entry N52 was added with FlipOut's requests R9 and R10 (`crates/ddg-flip-geodesi
   +0.8 % to +2.6 % (if they asked, +2.4 % to +8.2 %: the two angles cost an integer flip more than
   the memo saves). The remaining integer difference is not the angles.
 
+Entry N53 was added with the integer coordinates' decision I27 (`crates/ddg-integer-coords/SPEC.md`
+§4.6).
+
+* **N53** *Merging the two halves of a split edge* (2026-11-01, aa096cb, IC I27). An inserted vertex made by
+  an edge split has a straight star: its edges to the opposite corners have an angle of `π` and are
+  never flipped (N5), so removal by flips (N51, IC Alg. 8) is often `Stuck`. Such a vertex is
+  removed by undoing the split.
+  *Connectivity.* `Complex::merge_edge(v, e) -> EdgeMerge`: `v` interior of degree 4 with `e` one
+  of its edges and the other half the edge opposite it (two steps around `v`), or a boundary vertex
+  of degree 3 with `e` one of its two boundary edges. On each side the two faces at `v` become one;
+  the merged edge keeps the smaller of the halves' ids and the direction of that half, each merged
+  face the smaller face id with `v` replaced by the far end of the other half (its other corners
+  keep their slots); the freed ids (1 vertex, 3 edges, 2 faces; 2 edges, 1 face on the boundary) are
+  filled by the last elements as in `remove_vertex` (the compaction is one shared function, so
+  `remove_vertex` is bitwise unchanged). Surviving halfedges leave their tails in the same
+  directions (the halfedge from each far end towards `v` becomes the merged edge's halfedge from
+  that end), so per-halfedge data is carried unchanged by `EdgeMerge::apply_*_data`. `EdgeMerge`
+  does not depend on which half is given (faces ordered by the merged edge's halfedge, moves
+  sorted). Refusals (`RemovalRefusal`): `MergeDegree`, `SelfEdge`, `NotAHalf`, `ConstrainedEdge`
+  (a deleted spoke, or only one half constrained; two constrained halves give a constrained edge).
+  The exact inverse: merging right after `split_edge` restores the complex, ids included (2 469
+  interior and 112 boundary splits after random flips, face and edge splits, `tests/merge.rs`;
+  many splits merged in reverse order; tails and edge directions carried through 281 + 16 merges of
+  arbitrary degree-4 and boundary degree-3 vertices in random order).
+  *Decision and length.* `merge::plan_edge_merge(&Complex, &[f64], v, e) -> EdgeMergePlan`: the
+  pattern above, the corner angles at `v` between the halves summing to `π` on each side within
+  `MERGE_STRAIGHT_TOLERANCE = 1e-9` rad (`NotStraight` otherwise), the merged length `ℓ₁ + ℓ₂`
+  (for halves `π ± δ` apart the true distance is shorter by `≈ ℓ₁ℓ₂δ²/(2ℓ)`, `≤ 1.3e-19 ℓ` at the
+  tolerance), each merged triangle strictly valid (`Degenerate`). From lengths alone, so both
+  representations merge the same vertices with bitwise the same length. A split vertex is straight
+  within `5.0e-11` rad over 3 397 splits of the test shapes after random flips (thin needles
+  included). `merge::straight_pair(&Complex, &[f64], v)`: the pair of edges at `v`, any degree, on
+  one straight line (both sides `π`, smallest largest excess, ties by the outgoing order; at a
+  boundary vertex the two boundary edges if the angle sum is `π`; none with a self-edge at `v`).
+  *Signposts.* `IntrinsicTriangulation::merge_edge(v, e)` (and the trait's provided
+  `Triangulation::merge_edge`, default `Unsupported`): an input vertex is refused; the merged edge
+  lies along the input edge both halves lie along, or that of one half when the other is not known
+  to lie along any and `v` is on that input edge (else `HalvesDisagree`); signposts, angle sums
+  and places move with the renumbering. Split then merge gives back the triangulation bitwise
+  except the merged length `t ℓ + (1 − t) ℓ`: 2 997 of 3 397 bitwise, the others one ulp off.
+  *Removal* (`remove_inserted_vertex`, N51). Unchanged where Alg. 8 completes. Where it is `Stuck`:
+  its flips are undone, and if `straight_pair` finds two halves, the other edges are flipped by the
+  same choice except the halves (`removal_flip_choice_except`) down to degree 4 and the halves are
+  merged; if that fails too, the refusal is the old `Stuck`, everything restored. An inserted
+  boundary vertex (refused as `BoundaryVertex` before) is removed the same way down to degree 3
+  (still `BoundaryVertex` if its corner angles do not sum to `π`). `InsertedVertexRemoval::removal`
+  is now a `RemovalStep` (`Star(VertexRemoval)` or `Merge(EdgeMerge)`, with the common accessors);
+  the Delaunay queue and refinement's bookkeeping take either. The integer coordinates do the same
+  through the same functions (IC §4.6; their merged normal coordinate is `ic-merge-edge-normal`).
+  *Bitwise.* `tests/bitwise_pins.rs` and every test of this crate pass unchanged except
+  `a_failed_removal_leaves_the_signpost_triangulation_unchanged`, whose failures after flips were
+  all straight stars that are now merged (1 020 of 1 020 removed): it now also checks that a merge
+  after an undone Alg. 8 equals the merge replayed on the state before. FlipOut (which never
+  removes) gives bitwise the same `fo_pin` fingerprints on spot and camelbad (300 pairs, both
+  representations) and passes its suite; `ddg-intrinsic-apps` passes unchanged. Measured removal
+  of split vertices after Delaunay flipping (17 shapes): 648 by flips, 137 by a merge, 47 boundary
+  vertices merged, 16 `Stuck` (face insertions, no straight pair).
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,

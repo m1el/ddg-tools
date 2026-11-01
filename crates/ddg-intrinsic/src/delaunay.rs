@@ -179,14 +179,15 @@ impl EdgeQueue {
 
     /// Follows a removal of a vertex: its removed edges leave the queue, the edges it
     /// renumbered keep their places under their new ids.
-    pub(crate) fn apply_removal(&mut self, removal: &crate::complex::VertexRemoval) {
-        let n_edges = removal.counts[1] as usize;
+    pub(crate) fn apply_removal(&mut self, removal: &crate::remove::RemovalStep) {
+        let n_edges = removal.counts()[1] as usize;
+        let removed = removal.removed_edges();
         let mut queued = vec![false; n_edges];
         self.queue.retain_mut(|e| {
-            if removal.removed_edges.contains(e) {
+            if removed.contains(e) {
                 return false;
             }
-            if let Some(&(_, new)) = removal.edge_moves.iter().find(|m| m.0 == *e) {
+            if let Some(&(_, new)) = removal.edge_moves().iter().find(|m| m.0 == *e) {
                 *e = new;
             }
             queued[*e as usize] = true;

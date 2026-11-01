@@ -61,7 +61,8 @@ every decision the paper leaves open (entries `N1` to `N25`).
   with a report and the angle and area distribution (SPEC N21 to N25).
 
 - The connectivity on its own (`Complex`: flips, face and edge splits, removal of a vertex of
-  degree three, a constrained-edge mask, each operation with its index bookkeeping), the trait
+  degree three, the merge of a split edge's two halves (`merge_edge`, the inverse of `split_edge`,
+  SPEC N53), a constrained-edge mask, each operation with its index bookkeeping), the trait
   `Triangulation` that this representation and the integer coordinates of Gillespie, Sharp and
   Crane (2021) share, Delaunay flipping written once over it, and tracing over a triangulation
   that stores no signposts (`AngleFrames`), SPEC N50.
@@ -161,7 +162,8 @@ let paths = triangulation.segments_on_input(&nodes, &segments, &EdgeTraceOptions
 | `overlay(&EdgeTraces) -> Result<Overlay, _>` | the common subdivision: `vertices` (on both triangulations), polygons `face(f)` with `face_input`, `face_triangulation`; `triangles()` |
 | `refine(&RefineOptions) -> Result<RefineReport, _>` | Delaunay refinement; `min_angle` (default 25°), `max_circumradius`, `InsertionLimit`; the report lists `below_bound` with `BelowReason` |
 | `refine_with_rules(&RefineOptions, RefineRules)` (trait), `refine::refine(&mut t, _, rules, extra)` | the same driver on any representation; `RefineRules::Ruppert` (default, N1, N4) or `RefineRules::Chew` (IC Alg. 10, SPEC N51); the report also counts removals, refused removals, trace failures and the faces left by the narrow-cone rule (`min_angle_valid`) |
-| `remove_inserted_vertex(v) -> Result<InsertedVertexRemoval, _>`, `removal_flip_choice` | removal of an inserted interior vertex of any degree by flips (IC I24), shared by both representations; `RemovalRefusal::Stuck` (SPEC N51) |
+| `remove_inserted_vertex(v) -> Result<InsertedVertexRemoval, _>`, `removal_flip_choice` | removal of an inserted vertex of any degree by flips (IC I24), shared by both representations; where it is stuck at a straight star, and at an inserted boundary vertex, by merging two halves (`RemovalStep::Merge`, SPEC N53); `RemovalRefusal::Stuck` (SPEC N51) |
+| `merge_edge(v, e) -> Result<EdgeMerge, _>`, `plan_edge_merge(&Complex, &lengths, v, e)`, `straight_pair` | the inverse of `split_edge`: the two straight halves at `v` (degree 4, or 3 on the boundary; `MERGE_STRAIGHT_TOLERANCE = 1e-9` rad) become one edge of length `ℓ₁ + ℓ₂`; ids renumbered as by `remove_vertex` (SPEC N53) |
 | `move_vertex(v, [dx, dy]) -> Result<VertexMove, _>`, `odt_target(v, barycenters_at_boundary)`, `star_min_shape(v)` | move an inserted vertex inside its star (or the reason it is refused, `MoveRefusal`); the update of the optimal Delaunay triangulation at a vertex, in its frame |
 | `optimal_delaunay(&OptimalDelaunayOptions) -> Result<OptimalDelaunayReport, _>` | iODT; `TargetLength`, `max_iterations`, `motion_tolerance`, `step`, `max_halvings`, `min_shape`, `BoundaryVertices`, `OdtCenters`, `InsertionLimit`; the report has every `OdtIteration` and `ShapeStatistics` |
 | `shape_statistics() -> ShapeStatistics` | distribution of the corner angles and the face areas (`Summary`: min, max, mean, deviation, quantiles) |

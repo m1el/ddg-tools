@@ -378,6 +378,45 @@ pub enum RemovalRefusal {
         /// Its degree when no flip was left.
         degree: usize,
     },
+    /// Merging two halves at the vertex ([`Complex::merge_edge`](crate::Complex::merge_edge)):
+    /// it does not have degree four (an interior vertex) or three (a boundary vertex).
+    MergeDegree {
+        /// Its degree.
+        degree: usize,
+        /// Whether it lies on the boundary.
+        boundary: bool,
+    },
+    /// Merging two halves at the vertex: the edge is not one of its edges (interior), or not
+    /// one of its two boundary edges (boundary).
+    NotAHalf {
+        /// The edge.
+        edge: u32,
+    },
+    /// Merging two halves at the vertex: the corner angles between them do not sum to `π` on
+    /// each side within [`MERGE_STRAIGHT_TOLERANCE`](crate::merge::MERGE_STRAIGHT_TOLERANCE)
+    /// (one side on the boundary).
+    NotStraight {
+        /// The two halves.
+        edges: [u32; 2],
+        /// The angle sums minus `π` on the two sides (the second `0` on the boundary).
+        excess: [f64; 2],
+    },
+    /// Merging two halves at the vertex: the representation's data of the halves disagree
+    /// about the merged edge (one runs along an input edge and the other does not, or they run
+    /// along different input edges).
+    HalvesDisagree {
+        /// The two halves.
+        edges: [u32; 2],
+    },
+    /// Merging two halves at the vertex: they are straight by their angles, but the input
+    /// edges cross them as they would not cross one straight edge (the vertex lies within
+    /// rounding of a straight line through it, and the integer coordinates see the bend: an
+    /// input edge crosses both halves on one side, or leaves a far end between them, or is the
+    /// merged edge itself).
+    CurvesBend {
+        /// The two halves.
+        edges: [u32; 2],
+    },
 }
 
 impl fmt::Display for RemovalRefusal {
@@ -403,6 +442,38 @@ impl fmt::Display for RemovalRefusal {
                 f,
                 "it has degree {degree} and no edge at it can be flipped so that its degree \
                  drops"
+            ),
+            RemovalRefusal::MergeDegree { degree, boundary } => write!(
+                f,
+                "it has degree {degree}; merging two halves needs degree {}",
+                if *boundary {
+                    "three at a boundary vertex"
+                } else {
+                    "four at an interior vertex"
+                }
+            ),
+            RemovalRefusal::NotAHalf { edge } => write!(
+                f,
+                "edge {edge} is not one of its edges that could be half of a merged edge (an \
+                 edge at it, a boundary edge at a boundary vertex)"
+            ),
+            RemovalRefusal::NotStraight { edges, excess } => write!(
+                f,
+                "its edges {} and {} are not on one straight line: the angle sums between them \
+                 differ from pi by {:e} and {:e}",
+                edges[0], edges[1], excess[0], excess[1]
+            ),
+            RemovalRefusal::CurvesBend { edges } => write!(
+                f,
+                "its edges {} and {} are on one straight line by their angles, but the input \
+                 edges cross them as they would not cross one straight edge",
+                edges[0], edges[1]
+            ),
+            RemovalRefusal::HalvesDisagree { edges } => write!(
+                f,
+                "its edges {} and {} are on one straight line, but only one of them runs along \
+                 an input edge (or they run along different ones)",
+                edges[0], edges[1]
             ),
         }
     }

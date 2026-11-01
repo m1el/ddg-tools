@@ -420,6 +420,12 @@ Landed:
   * on both representations, bitwise identical;
   * the shortening loop is within 0.97–1.42× of geometry-central's, with the same lengths on all
     4498 compared pairs;
+* I27 resolved (aa096cb): a vertex with a straight star (made by an edge split) where removal by flips is
+  stuck, and an inserted boundary vertex, are removed by merging the two halves
+  (`Complex::merge_edge`, the inverse of `split_edge`, IT N53; integers by `ic-merge-edge-normal`,
+  cited until tier C); both representations alike. Split vertices stuck: 860 of 2588 right after
+  the split → 0; after Delaunay flipping 1898 → 74, all at stars with an edge from the vertex to
+  itself;
 * Lean:
   * the integer formulas (tier A), the one-face model (tier B) and Thm. D.1 (B′);
   * the integer oracle with 23 golden fixtures.
@@ -427,8 +433,6 @@ Landed:
 Open:
 * FlipOut's loop is still 1.0–1.4× gc: F2's corner sums need the corner angles at every vertex a
   replacement puts on the path, where gc reads signposts (FlipOut SPEC §9.1).
-* I27: a vertex made by an edge split usually cannot be removed by flips (`RemovalStuck`). A
-  `Complex::merge_edge` (the inverse of `split_edge`) would remove it by merging the two halves.
 * I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
   that face where the signposts split and snap (1 of 256 differential runs). Undecided whether to
   snap to the crossing.

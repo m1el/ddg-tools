@@ -6,7 +6,7 @@ Intrinsic triangulations stored by integer coordinates, after
 > Processing.* ACM Transactions on Graphics 40(6), Article 252, 2021.
 > <https://doi.org/10.1145/3478513.3480522>
 
-The contract is [`SPEC.md`](SPEC.md) (decisions `I1`–`I27`, work packages in §12). This crate is
+The contract is [`SPEC.md`](SPEC.md) (decisions `I1`–`I30`, work packages in §12). This crate is
 the second representation of intrinsic triangulations in the workspace; the first, signposts
 (Sharp, Soliman, Crane 2019), is `crates/ddg-intrinsic`, whose `Complex` (the connectivity) it
 shares.
@@ -32,16 +32,18 @@ Delaunay refinement (WP6) and attribute transfer (WP7) are described below.
 | `flip_edge_with(e, FlipRequest)`, `can_flip_with(e, FlipShapeTest)` | the same with the caller's shape test (`plan_flip_with`; FlipOut uses the reference's relative one) and, when `corner_angles` is requested, `Flip::new_corner_angles` from `FlipPlan::new_corner_angles` (two `corner_angle`), bitwise the signposts'; `flip_edge` and every operation of this crate (Delaunay flipping, refinement, removal, insertion) use N5 and request no angles, so they pay nothing for them (IT-SPEC N52) |
 | Delaunay flipping | the shared `Triangulation::flip_to_delaunay`; `flip_to_delaunay_certified` certifies after it (I4). |
 | `split_edge` | refusals and lengths from `plan_edge_split`. `n = −1` (all boundary edges): Eq. 6 on both sides, `q⁰ = (1 − t) q⁰_i + t q⁰_j` on the input edge (the signposts' arithmetic). `n ≥ 0` (I20, explicit, also for constrained edges): crossings before the point from `extract_intrinsic_edge` (`distance < t ℓ`), `q⁰` interpolated in the input face between the two neighbouring crossings (refused within rounding of a crossing), the integers by `formulas::split_side` (the arcs separated by the new chord; Eq. 6 is its `n = −1` case). `split_edge_given` takes both decisions from the caller. |
-| `remove_vertex` | inserted interior vertices: flips by I24 (degree must drop; loops first, then `min(A₁, A₂)/(A₁ + A₂)`, ties by edge id; bound `10 deg`), then `Complex::remove_vertex` with `VertexRemoval` moving `n`, `r`, lengths, `q⁰`. Input vertex / constrained spoke: refused before anything changes; boundary: `Unsupported` (I7); no flip left: `RemovalStuck`, with the state restored exactly (connectivity from a copy, the rest from a journal). Returns `Removal` (the flips, the renumbering). |
+| `remove_vertex` | inserted vertices: flips by I24 (degree must drop; loops first, then `min(A₁, A₂)/(A₁ + A₂)`, ties by edge id; bound `10 deg`), then `Complex::remove_vertex` with `VertexRemoval` moving `n`, `r`, lengths, `q⁰`. Where no flip is left at a straight star, and for an inserted boundary vertex: the halves are merged (I27, `merge_edge` below). Input vertex / constrained spoke: refused before anything changes; no flip and no merge: `RemovalStuck`, with the state restored exactly (from a journal of the flips). Returns `Removal` (the flips, the last step `RemovalStep::{Star, Merge}` with its renumbering). |
+| `merge_edge(m, e)` | the inverse of `split_edge` (I27, SPEC §4.6): `plan_edge_merge` (degree 4, or 3 on the boundary; the halves straight within `1e-9` rad; `ℓ₁ + ℓ₂`), `Complex::merge_edge` (`EdgeMerge`: smaller ids kept, the last elements fill the freed ones); `n` of the merged edge by `ic-merge-edge-normal` (`−1` along an input edge, `n₁ + n₂ + 1` through a vertex on an input edge, `n₁ + n₂` through a vertex in a face), roundabouts unchanged; refused where the integers see a bend (`CurvesBend`). Split then merge restores the state, the merged length within an ulp. |
 | `impl Triangulation` | lengths, angle sums, places, flips, splits, the constrained mask; `trace_edge_on_input` = `extract_intrinsic_edge` (WP2); errors through `to_intrinsic_error` (`IntrinsicError::Representation`, `"integer coordinates"`). |
 
-**I27.** A vertex made by an edge split has two spokes at an angle of `π`: their flips would make
-a triangle without area (`plan_flip` refuses them), and of the two halves the one with the angle
-below `π` at the vertex can be flipped only if its quadrilateral is convex at the far end. When
-it cannot, the removal is `RemovalStuck` (state restored); merging the halves would need an
-inverse of `Complex::split_edge`, which `ddg_intrinsic` does not have. Measured below: about a
-third of fresh split vertices, half after Delaunay flipping; face insertions almost never (12 of
-1 160).
+**I27 (resolved).** A vertex made by an edge split has two spokes at an angle of `π`: their flips
+would make a triangle without area (`plan_flip` refuses them), and of the two halves the one with
+the angle below `π` at the vertex can be flipped only if its quadrilateral is convex at the far
+end. When it cannot, Alg. 8 is stuck; the removal then merges the halves back into one edge
+(`ddg_intrinsic::Complex::merge_edge`, the inverse of `split_edge`, after flipping the other edges
+down to degree four), in both representations alike. Before: about a third of fresh split
+vertices and half after Delaunay flipping were `RemovalStuck`; now none of the fresh ones, and
+after Delaunay flipping only stars with an edge from the vertex to itself (74 of 1 574).
 
 **Timings** (release, one pinned core, load average 3.3, 2026-10-31, best of 5 / 3;
 `cargo test --release --test ops -- --ignored --nocapture timing`):
@@ -87,7 +89,9 @@ repeated vertex):
   insertions; on `T¹ = T⁰` the place is the point itself (error 0). Random affine maps, 3–6
   corners: `4e-14`.
 * Many insertions (8 691) in 3 batches with Delaunay flipping (54 939 flips) and certification
-  per batch, then removal of all inserted vertices: 8 639 removed, 52 `RemovalStuck`.
+  per batch, then removal of all inserted vertices: 8 639 removed, 52 `RemovalStuck` (with the
+  merge of I27: 8 640, 51; 6 straight-by-angle stars within rounding of an input edge are refused
+  by the integers, `CurvesBend`).
 * Point queries: 10 640 agree with the signposts' `point_on_input` within `6e-12` mean edge
   lengths; a vertex inserted at a point is where the query says (`1e-14` barycentric).
 * I6: the reported distance refuses with a limit above it (561, state unchanged) and not below.
@@ -96,6 +100,8 @@ repeated vertex):
   and the normal coordinates as multisets agree (2 more differ where Delaunay ties were broken
   differently); 951 moves beyond the star (the signposts cannot), all certify; 71 refused as
   `RemovalStuck`, 606 because the path leaves the surface, every refused move restores the state.
+  With the merge of I27 no move is `RemovalStuck` (1 021 beyond the star); of moved edge-split
+  vertices 463 done, 0 stuck (before 453, 10).
 * Oracle (`tests/oracle.rs`): `regions` (514 faces, 2 469 regions) and `split` (516 faces, 2 457
   region counts) exactly.
 
@@ -156,7 +162,9 @@ Results (`tests/refine.rs`, release; run with `--nocapture` for the tables):
   the signposts split and snap the place onto the input edge.
 * **Removals** (Chew): 2 307 vertices removed and 175 refused (`RemovalStuck`, mostly I27
   straight stars) over the differential runs; from starts full of edge-split vertices 450
-  removed, 80 refused. Refused removals are counted, never fatal.
+  removed, 80 refused. Refused removals are counted, never fatal. Since straight stars are
+  merged (I27, below): 2 304 removed, 0 refused; from split starts 441 removed, 0 refused; 254
+  runs identical, the new divergence (needles and caps 6, Chew, 30°) is I28 again.
 * **Angles** (Chew, from the input): every run ends `Done`; every corner below the bound is at a
   vertex whose angle sum is below it or in a face the narrow-cone rule leaves. 25° everywhere else
   (camelbad 25.000° with 4 169 insertions, spot 25.047°, hand 25.269°, bumpy grid 25.084°).
@@ -377,12 +385,21 @@ exact reading was needed.
     across input edges with the signposts' crossings and place (exact) and the same 5 030 with this
     crate's own crossings (all but the place exact, places within 1.5e-10 barycentric); refusals
     identical;
-  * removals of inserted vertices, the same flips and removal replayed in the signposts, compared
-    exactly: 3 884 removed (9 416 flips, 2.4 per removal, at most 14), 1 301 stuck (1 287 of them at
-    a straight star from an edge split), states restored exactly; refused removals (input vertex,
-    boundary, constrained spoke) change nothing;
+  * removals of inserted vertices, the same flips and removal (or merge) replayed in the
+    signposts, compared exactly: 3 884 removed (9 416 flips, 2.4 per removal, at most 14), 1 301
+    stuck (1 287 of them at a straight star from an edge split), states restored exactly; refused
+    removals (input vertex, constrained spoke) change nothing. With the merge (I27): 4 539 removed
+    (595 by a merge), 70 stuck (56 at straight stars, all with an edge from the vertex to itself),
+    0 mismatches; inserted boundary vertices are merged and certify;
   * I27: 2 588 vertices from splits of interior edges (913 across input edges) removed at once:
-    1 728 removed, 860 stuck; after Delaunay flipping 1 692 removed, 1 898 stuck (1 873 straight);
+    1 728 removed, 860 stuck; after Delaunay flipping 1 692 removed, 1 898 stuck (1 873 straight).
+    With the merge: 2 461 of 2 461 removed at once (657 merged); after Delaunay flipping 1 500
+    removed (388 merged), 74 stuck (all with a self-edge);
+  * merge (`tests/merge.rs`): 18 672 splits merged at once (along interior input edges, on the
+    boundary, across input edges) give back the state exactly, the merged length bitwise in 16 330
+    and one ulp off otherwise; 2 340 splits of the iDT, Delaunay flipping, every split vertex
+    removed (700 by a merge), each state equal to the signposts' and certified, and flipped to
+    Delaunay again the iDT itself in the 15 runs without ties (lengths within `9.2e-13`);
   * overflow: hand-built states near `i64::MAX` give `Overflow`, never wrap; Eq. 3 below `−1`
     (quad `2,0,0,0,0`) is refused as invalid.
 

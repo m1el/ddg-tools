@@ -474,12 +474,15 @@ fn flips_undone_in_reverse_order_restore_the_complex_exactly() {
 }
 
 /// A removal of an inserted vertex that fails leaves the signpost triangulation exactly as it
-/// was (its flips undone from the journal).
+/// was (its flips undone from the journal). Since N53 the stars where Alg. 8 is stuck after
+/// flips are mostly straight and removed by a merge after those flips were undone: the result
+/// must then be exactly that of the merge's own flips and the merge on the state before.
 #[test]
 fn a_failed_removal_leaves_the_signpost_triangulation_unchanged() {
     let mut failures = 0;
     let mut removals = 0;
     let mut after_flips = 0;
+    let mut merged_after_undo = 0;
     for (i, shape) in standard_shapes().iter().enumerate() {
         let mut tri = IntrinsicTriangulation::new(&shape.mesh, &shape.geometry).unwrap();
         let mut rng = SplitMix64::new(900 + i as u64);
@@ -500,7 +503,27 @@ fn a_failed_removal_leaves_the_signpost_triangulation_unchanged() {
             let before = tri.clone();
             let degree = tri.complex().vertex_degree(v);
             match tri.remove_inserted_vertex(v) {
-                Ok(_) => removals += 1,
+                Ok(r) => {
+                    removals += 1;
+                    // Alg. 8 would have flipped first and got stuck: its flips were undone.
+                    if let ddg_intrinsic::RemovalStep::Merge(m) = &r.removal
+                        && !before.is_boundary_vertex(v)
+                        && ddg_intrinsic::removal_flip_choice(
+                            before.complex(),
+                            before.edge_lengths(),
+                            v,
+                        )
+                        .is_some()
+                    {
+                        let mut replay = before.clone();
+                        for &e in &r.flips {
+                            replay.flip_edge(e as usize).unwrap();
+                        }
+                        replay.merge_edge(v, m.halves[0] as usize).unwrap();
+                        assert!(replay == tri, "{}: merge of {v} after undo", shape.name);
+                        merged_after_undo += 1;
+                    }
+                }
                 Err(err) => {
                     failures += 1;
                     // Stuck at a lower degree: some flips were made and undone.
@@ -518,8 +541,9 @@ fn a_failed_removal_leaves_the_signpost_triangulation_unchanged() {
         }
     }
     eprintln!(
-        "{removals} removed, {failures} refused ({after_flips} after flips), state unchanged \
-         after each refusal"
+        "{removals} removed ({merged_after_undo} by a merge after Alg. 8's flips were undone, \
+         equal to the replayed merge), {failures} refused ({after_flips} after flips), state \
+         unchanged after each refusal"
     );
-    assert!(removals > 0 && after_flips > 0);
+    assert!(removals > 0 && after_flips + merged_after_undo > 0);
 }
