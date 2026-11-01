@@ -542,7 +542,7 @@ fn components(mesh: &CoarseMesh) -> (Vec<u32>, usize) {
     order.sort_unstable();
     let mut label = vec![u32::MAX; n];
     let mut n_comp = 0;
-    let mut out = vec![u32::MAX; mesh.n_fine_vertices()];
+    let mut out = vec![u32::MAX; mesh.fine_id_bound()];
     for (fine, v) in order {
         let r = find(&mut parent, v);
         if label[r] == u32::MAX {
@@ -599,7 +599,8 @@ fn run(mesh: &mut CoarseMesh, options: &SimplifyOptions) -> Result<SimplifyRepor
         mesh.set_fixed(v, true)?;
     }
     let n_before = mesh.n_vertices();
-    let n_fine = mesh.n_fine_vertices();
+    // Per-vertex state is indexed by fine id, pre-refinement's inserted vertices included.
+    let n_fine = mesh.fine_id_bound();
     let (component, n_components) = components(mesh);
     let mut comp_count = vec![0usize; n_components];
     for &v in mesh.vertices() {

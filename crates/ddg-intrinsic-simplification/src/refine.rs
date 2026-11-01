@@ -24,8 +24,8 @@
 //! * The reference recipe pairs pre-refinement with an area weight of `0.1` (otherwise all the
 //!   zero-curvature inserted vertices go first); the default weights are kept here and the
 //!   recipe is not imposed.
-//! * The one-call convenience "refine, then coarsen" is `from_refined` followed by `simplify`
-//!   (WP3); it is wired once `simplify` is merged.
+//! * The one-call convenience "refine, then coarsen" is [`refine_then_simplify`]
+//!   (`from_refined` followed by `simplify`, one combined report).
 //!
 //! # Post-refinement (SPEC §6.2)
 //!
@@ -90,6 +90,7 @@ pub use ddg_intrinsic_apps::representation::Representation;
 
 use crate::error::IemError;
 use crate::mesh::{Certificate, CoarseMesh, CoarseMeshOptions, InputPoint, Location};
+use crate::simplify::{SimplifyOptions, SimplifyReport};
 use crate::undo::UndoLog;
 
 /// The tolerance with which a located barycentric coordinate may be negative before it is an
@@ -930,4 +931,49 @@ impl CoarseMesh {
         report.defects_after = current;
         Ok(report)
     }
+}
+
+/// What [`refine_then_simplify`] did: the pre-refinement's report and the simplification's.
+#[derive(Debug, Clone)]
+pub struct RefineSimplifyReport {
+    /// The pre-refinement ([`CoarseMesh::from_refined`]).
+    pub refinement: RefinementReport,
+    /// The coarsening. Its `components` and `n_vertices_before` count the vertices of the
+    /// **refined** mesh.
+    pub simplify: SimplifyReport,
+    /// Seconds for both phases together.
+    pub seconds_total: f64,
+}
+
+/// The one-call recipe of the paper's Sec. 6.3 and 8.2: pre-refinement
+/// ([`CoarseMesh::from_refined`], integer coordinates and Chew's rules by default, 25 degrees),
+/// then [`crate::simplify()`] with `simplify_options`. Returns the coarse mesh and the combined
+/// report; the inserted vertices have fine ids `|V|, |V|+1, ...` and are removable like the others.
+///
+/// # Errors
+/// Those of [`CoarseMesh::from_refined`]; an error of `simplify` is [`RefineError::Coarse`].
+pub fn refine_then_simplify(
+    mesh: &TriMesh,
+    geometry: &Geometry,
+    points: &[InputPoint],
+    refinement: &RefinementOptions,
+    simplify_options: &SimplifyOptions,
+) -> Result<(CoarseMesh, RefineSimplifyReport), RefineError> {
+    let t0 = Instant::now();
+    let (mut coarse, refinement) = CoarseMesh::from_refined(
+        mesh,
+        geometry,
+        points,
+        CoarseMeshOptions::default(),
+        refinement,
+    )?;
+    let simplify = crate::simplify::simplify(&mut coarse, simplify_options)?;
+    Ok((
+        coarse,
+        RefineSimplifyReport {
+            refinement,
+            simplify,
+            seconds_total: t0.elapsed().as_secs_f64(),
+        },
+    ))
 }
