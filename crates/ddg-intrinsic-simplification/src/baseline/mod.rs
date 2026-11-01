@@ -9,5 +9,5 @@ pub mod qem;
 
 pub use qem::{
     ProjectedPoint, QemError, QemOptions, QemReport, QemResult, Quadric, optimal_point,
-    plane_quadric, qem_simplify,
+    optimal_point_on_segment, plane_quadric, qem_simplify,
 };

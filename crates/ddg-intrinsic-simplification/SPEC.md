@@ -482,9 +482,12 @@ lengths `ℓ̂` against the input triangle: the anisotropic distortion `σ₁/σ
 
 ### 10.4 Extrinsic baselines (Sec. 8.4; Fig. 18, 19, 21, 22)
 
-* **QEM** (Garland, Heckbert 1997): edge collapse by quadrics with optimal placement (fallback to
-  the endpoints and the midpoint), boundary planes for open meshes, rejecting collapses that break
-  the link condition or flip a face normal; to a target vertex count. Area error (Fig. 19).
+* **QEM** (Garland, Heckbert 1997): edge collapse by quadrics with optimal placement (the 3×3
+  system, else the optimum on the segment, else the best of the endpoints and the midpoint; Sec. 4),
+  boundary planes for open meshes with a large penalty (Sec. 6), rejecting collapses that break
+  the link condition or flip a face normal; to a target vertex count. Defaults as in the paper:
+  unweighted plane quadrics (area weighting is an option), unbounded optimal placement, candidate
+  pairs are the edges only (`t = 0`, Sec. 3.2). Area error (Fig. 19).
 * **Map for the extrinsic result**, for prolongation-based comparisons: closest-point projection of
   the fine vertices onto the coarse extrinsic mesh (simple, documented as ours), and the successive
   self-parameterization of Liu et al. 2021 (the paper's Fig. 18 and 21 baseline) built during the
