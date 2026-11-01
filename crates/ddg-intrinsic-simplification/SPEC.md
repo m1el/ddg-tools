@@ -197,7 +197,10 @@ triangle inequality has angles `π, 0, 0`), `Θ_i(u)` is continuous and non-incr
 `Θ_i(u) → deg(i)·π` (`≥ 2π`; boundary: `≥ π`) as `u → −∞` and `→ 0` as `u → +∞`
 (`iem-flatten-monotone`), so a root exists. Newton's step is Eq. 4,
 `u ← u − (Θ̃_i − Θ_i)/(½ Σ_{ijk ∋ i} (cot θ^k_ij + cot θ^j_ki))` (sum over the faces of the star,
-each face once per corner at `i`), safeguarded by a bracket `[u_lo, u_hi]` with
+each face once per corner at `i`; in a face with a self-edge `ii` the cotangent opposite the
+self-edge is dropped, since that corner's angle does not depend on `u` — the per-corner sum of Eq. 4,
+which the reference uses (R55), is not the derivative there: a gap of 0.42 on a self-edge star in
+the oracle's self-test; only Newton's speed is affected, not the root), safeguarded by a bracket `[u_lo, u_hi]` with
 `Θ_i(u_lo) ≥ Θ̃_i ≥ Θ_i(u_hi)` that is expanded geometrically from `u = 0` and replaced by
 bisection whenever the Newton step leaves it or the Hessian is not positive (cot terms of
 degenerate corners count 0). Stop when `|Θ_i − Θ̃_i| ≤ 1e-12 · Θ̃_i`; iteration cap 100 (the
@@ -535,8 +538,10 @@ percent reduction on a 750k-vertex subdivision. Runs in parallel per mesh (64 co
 For every fine edge `ij`: `ℓ̂_ij` = the length of the image path, approximated (paper) by the
 distance between `φ(i)` and `φ(j)` on `M̄`: in the layout of the coarse face if both are in one
 face, else the exact geodesic distance on `M̄` (§10.1). For each fine face, the triangle with
-lengths `ℓ̂` against the input triangle: the anisotropic distortion `σ₁/σ₂` and the area distortion
-`log(σ₁σ₂)` of the affine map (Khodakovsky et al. 2003 Sec. 2), mean and max (`iem-distortion`).
+lengths `ℓ̂` against the input triangle: with `γ_max ≥ γ_min` the eigenvalues of the metric tensor
+`JᵀJ` of the affine map (`γ = σ²`), the anisotropic distortion `γ_max/γ_min` and the area distortion
+`log(γ_max γ_min)`/2 `= log(σ₁σ₂)` as Khodakovsky et al. 2003 Sec. 2 define them (the paper says
+"as defined by Khodakovsky et al."); `σ₁/σ₂` is reported too. Mean and max (`iem-distortion`).
 
 ### 10.4 Extrinsic baselines (Sec. 8.4; Fig. 18, 19, 21, 22)
 
@@ -677,6 +682,14 @@ star), fixtures `lean/oracle/fixtures/iem/` (format in `lean/oracle/README.md`);
   successive maps (§10.4); not in the reference (R43).
 * **S24 Hierarchy from one run with snapshots** (masses carry across levels); the reference's fresh
   per-level runs (R33) as an option.
+* **S25 Eq. 10 as printed** (`b̃_i ∝ e^{+u} b_i`): the paper's and the reference's map, which is
+  the *inverse* of Springborn et al.'s circumcircle-preserving projective interpolation (`e^{−u}`,
+  CETM Sec. 3.4, App. D; found by WP10). Both are continuous bijections of each face
+  (`iem-projective-interpolation`), so tracking is correct either way; the default follows the
+  paper, and WP9 measures the distortion (§10.3) with both (an option `projective_sign`).
+* **R55** (new, found by WP10): the reference's Newton denominator sums `cot` per corner also in
+  faces with a self-edge, which is not the derivative there; S9 drops the cotangent opposite the
+  self-edge. The root is the same.
 * **Reference bugs not reproduced**: R8, R10, R14, R18, R25, R26, R30, R31, R35, R36, R39, R40,
   R41, R42, R44 (each fixed in the fixed driver build where it affects a comparison, §12.2).
 

@@ -112,11 +112,12 @@ pub fn face_angle_sum_and_derivative(l: [f64; 3], at_i: [bool; 3]) -> Option<(f6
     Some((sum, d, true))
 }
 
-/// Eq. 10 (Springborn et al. 2008, Sec. 3.4, projective interpolation): the barycentric
-/// coordinates of a point of a face after the vertex `i` with conformal factor `u` is
-/// flattened: `b̃_k ∝ e^{u} b_k` at the slots of `i`, `b_k` elsewhere, normalized to sum one.
-/// It maps the face bijectively onto itself, fixes its corners and agrees along a shared side
-/// with the neighbouring face.
+/// Eq. 10 of the paper, as printed: the barycentric coordinates of a point of a face after the
+/// vertex `i` with conformal factor `u` is flattened: `b̃_k ∝ e^{u} b_k` at the slots of `i`,
+/// `b_k` elsewhere, normalized to sum one. It maps the face bijectively onto itself, fixes its
+/// corners and agrees along a shared side with the neighbouring face. It is the *inverse* of
+/// the circumcircle-preserving projective interpolation of Springborn et al. 2008 (Sec. 3.4,
+/// App. D), which uses `e^{−u}`; both are valid tracking maps (SPEC S25).
 ///
 /// [formula: iem-projective-interpolation]
 #[inline]
