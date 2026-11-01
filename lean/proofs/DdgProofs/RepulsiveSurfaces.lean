@@ -7,6 +7,10 @@ import DdgProofs.RepulsiveSurfaces.Saddle
 import DdgProofs.RepulsiveSurfaces.Constraints
 import DdgProofs.RepulsiveSurfaces.BarnesHut
 import DdgProofs.RepulsiveSurfaces.Precond
+import DdgProofs.RepulsiveSurfaces.Step
+import DdgProofs.RepulsiveSurfaces.Remesh
+import DdgProofs.RepulsiveSurfaces.Ccd
+import DdgProofs.RepulsiveSurfaces.Optimize
 
 /-!
 # Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane, ACM TOG 40(6), 2021)
