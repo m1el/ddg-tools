@@ -1887,10 +1887,11 @@ pair of valid faces (via a quadrilateral model whose arcs are counted by kind); 
 of its angle argument (and the failure of its strict form); chords of a convex quadrilateral and of
 a triangle cross iff their ends interleave, cevians cross; App. A's recovery of positions for any
 solution of Eq. 15; Eq. 5; Eq. 14 as the minimizer of Eq. 13 and the finite part of the mass
-identity. All statements about integer formulas are about the oracle's own definitions
+identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **complex model**
+(faces glued by a side pairing, Δ-complexes allowed, one face model per face, crossings glued by
+`p ↦ n − 1 − p`, curves as the orbits of Alg. 1's step) and `ic-trace-terminates`. All statements
+about integer formulas are about the oracle's own definitions
 (`lean/oracle/DdgOracle/IntegerCoords/Formulas.lean`). **Not** machine-checked: the entries below;
-the complex model (glued face models, curves as chains of arcs, the roundabouts, Alg. 2–4 on a
-whole triangulation; SPEC tier C, work package WP9), and with it `ic-trace-terminates`,
 `ic-identify-edge`, `ic-roundabout-update` and the correctness of Eq. 3 after gluing (the
 quadrilateral model of `Flip.lean` is the local half); the data structure of the Rust crate and that
 it applies the formulas to the right elements; anything about rounding (which region floating point
@@ -2050,15 +2051,6 @@ are not cited here).
   index arithmetic is the oracle's `identifyIndex`. Until WP9: tested in Rust against signpost
   traces (`crates/ddg-integer-coords/tests/states.rs`: 272 651 crossings on 266 states, each
   identified as the input edge the signpost trace crosses there).
-
-### [formula: ic-trace-terminates] TraceFrom ends at a corner (pending, tier C)
-
-- **Statement.** In a valid state, `TraceFrom` (Supp. Alg. 1) from any crossing ends at a vertex
-  after at most `Σ n⁺` steps and visits each crossing at most once.
-- **Reference.** IC paper Sec. 2.5 and supplement Alg. 1–2.
-- **Why not formalized yet.** Tier C (WP9): it follows from the face pairing and the edge gluing
-  being involutions on a finite set (`lean/proofs/DdgProofs/IntegerCoords/DESIGN.md` item 9). Until
-  WP9 the Rust tracer detects a repeated `(halfedge, index)` pair (IC SPEC I18) and bounds the walk.
 
 ### [formula: ic-merge-edge-normal] The normal coordinate of two merged halves (pending, tier C)
 

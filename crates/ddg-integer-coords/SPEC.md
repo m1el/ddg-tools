@@ -724,7 +724,7 @@ glued through sides; their ends are corners. Labels: at each vertex of `V⁰`, t
 | `ic-cevians-cross` | segments from two different corners of a triangle to their opposite sides cross | B |
 | `ic-reverse-crossing` | `ζ̄̄ = ζ`, and the gluing respects it | A |
 | `ic-trace-step` | Alg. 1's three cases follow the unique arc of the face model through crossing `p` | B |
-| `ic-trace-terminates` | in a complex model, `TraceFrom` ends at a corner after at most `Σ n⁺` steps and visits each crossing at most once | C (WP9; `CITED.md` lists it as pending until then) |
+| `ic-trace-terminates` | in a complex model, `TraceFrom` ends at a corner after at most `Σ n⁺` steps and visits each crossing at most once | C, **proved** (WP9, `Complex/Trace.lean`): from any crossing the walk either ends at a corner or returns to its start (same direction), never repeating a crossing in either direction before; `2m ≤ Σ_sides n⁺`; from an end, or with no closed curves (§2.4 item 4), always a corner |
 | `ic-identify-edge` | Alg. 3's index is the local index of the curve's `T⁰` halfedge | C (WP9; `CITED.md` lists it as pending until then; tested against signpost traces) |
 | `ic-flip-normal` | in a convex quadrilateral (two glued face models, straight arcs), the arc system re-cut along the other diagonal has the counts of Eq. 3 (with the corrected first terms, §4.2) | A (identity) and the count in a quadrilateral model `Quad` (`flip_count`): proved; gluing two face models and re-cutting: C |
 | `ic-flip-involution` | Eq. 3 applied twice returns `n_ij`, for counts coming from a face-model pair | A |

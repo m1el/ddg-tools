@@ -1174,3 +1174,11 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.pieceMass_one
 #print axioms DdgProofs.IntegerCoords.pieceMass_split
 #print axioms DdgProofs.IntegerCoords.pieceMass_fan_apex
+-- Integer coordinates, tier C (the complex model, WP9)
+#print axioms DdgProofs.IntegerCoords.model_valid
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.next_eq_oracle
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.next_rev
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.next_inj
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_terminates
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_from_end
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.trace_terminates_of_noClosed
