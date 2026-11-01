@@ -72,6 +72,8 @@ use std::fmt;
 
 use ddg_core::TriMesh;
 
+use super::successive::{Plan, SuccessiveMap, SuccessiveStats, View};
+
 type V3 = [f64; 3];
 
 fn sub(a: V3, b: V3) -> V3 {
@@ -251,6 +253,11 @@ pub struct QemOptions {
     /// (default `f64::INFINITY`: unbounded, as in the paper; a finite radius guards against a
     /// nearly singular system throwing the vertex far away).
     pub placement_radius: f64,
+    /// Also build the successive self-parameterization of Liu et al. 2021 during the collapses
+    /// ([`QemResult::successive`]; closed meshes only; default `false`). A collapse whose two
+    /// patches cannot be flattened to a common embedding is rejected
+    /// ([`QemReport::n_rejected_map`]).
+    pub successive_map: bool,
 }
 
 impl QemOptions {
@@ -263,6 +270,7 @@ impl QemOptions {
             min_normal_cos: 0.0,
             singular_tolerance: 1e-8,
             placement_radius: f64::INFINITY,
+            successive_map: false,
         }
     }
 }
@@ -302,6 +310,9 @@ pub struct QemReport {
     /// Collapses whose edge was not shared by one or two faces, or whose placement was not
     /// finite.
     pub n_rejected_other: usize,
+    /// Collapses rejected because the successive map could not be built (see
+    /// [`QemOptions::successive_map`]).
+    pub n_rejected_map: usize,
     /// Collapses that went to the optimal point, to an endpoint, to the midpoint.
     pub n_placed: [usize; 3],
     /// Collapses that went to the optimum on the segment (the 3×3 system was singular).
@@ -332,6 +343,12 @@ pub struct QemResult {
     pub vertex_map: Vec<u32>,
     /// For every fine vertex, its closest point on the coarse mesh.
     pub projection: Vec<ProjectedPoint>,
+    /// With [`QemOptions::successive_map`]: for every fine vertex its image under the
+    /// successive self-parameterization (a coarse face and barycentric coordinates;
+    /// `distance` is the distance in space from the fine vertex to that point).
+    pub successive: Option<Vec<ProjectedPoint>>,
+    /// The counts of the successive map.
+    pub successive_stats: Option<SuccessiveStats>,
     /// Counts and measurements.
     pub report: QemReport,
 }
@@ -584,6 +601,7 @@ pub fn qem_simplify(
     }
     let n = positions.len();
     TriMesh::new(n, faces.to_vec()).map_err(|e| QemError::InvalidMesh(e.to_string()))?;
+    let mut succ = options.successive_map.then(|| SuccessiveMap::new(n, faces));
     // Quadrics.
     let mut quad = vec![Quadric::ZERO; n];
     let mut edge_faces: BTreeMap<(u32, u32), Vec<u32>> = BTreeMap::new();
@@ -604,6 +622,12 @@ pub fn qem_simplify(
                 .or_default()
                 .push(fi as u32);
         }
+    }
+    if options.successive_map && edge_faces.values().any(|fs| fs.len() == 1) {
+        return Err(QemError::InvalidOptions(
+            "successive_map needs a closed mesh (boundary edges, Liu et al. 2021 Sec. 4.3, are not implemented)"
+                .to_string(),
+        ));
     }
     for (&(a, b), fs) in &edge_faces {
         if fs.len() != 1 {
@@ -662,6 +686,7 @@ pub fn qem_simplify(
         n_rejected_link: 0,
         n_rejected_flip: 0,
         n_rejected_other: 0,
+        n_rejected_map: 0,
         n_placed: [0; 3],
         n_placed_segment: 0,
         total_cost: 0.0,
@@ -722,6 +747,25 @@ pub fn qem_simplify(
                 continue;
             }
         };
+        let planned: Option<Result<Plan, _>> = succ.as_ref().map(|sm| {
+            let view = View {
+                pos: &w.pos,
+                faces: &w.faces,
+                vfaces: &w.vfaces,
+            };
+            sm.plan(&view, u, v, p, &ef)
+        });
+        let plan: Option<Plan> = match planned {
+            None => None,
+            Some(Ok(pl)) => Some(pl),
+            Some(Err(_)) => {
+                report.n_rejected_map += 1;
+                if let Some(sm) = succ.as_mut() {
+                    sm.stats.n_rejected += 1;
+                }
+                continue;
+            }
+        };
         // Collapse v into u.
         let mut affected: BTreeSet<u32> = w.nbrs[iu].union(&w.nbrs[iv]).copied().collect();
         affected.remove(&v);
@@ -750,6 +794,9 @@ pub fn qem_simplify(
         w.quad[iu] = w.quad[iu].plus(&w.quad[iv]);
         w.pos[iu] = p;
         w.version[iu] += 1;
+        if let (Some(sm), Some(pl)) = (succ.as_mut(), plan) {
+            sm.commit(pl);
+        }
         for &a in &affected {
             w.recompute_nbrs(a);
         }
@@ -805,6 +852,30 @@ pub fn qem_simplify(
         .collect();
 
     let projection = project_onto(&out_pos, &out_faces, positions);
+    let successive_stats = succ.as_ref().map(|s| s.stats);
+    let successive = succ.map(|sm| {
+        let mut face_new = vec![u32::MAX; w.faces.len()];
+        let mut next = 0u32;
+        for (f, &alive) in w.face_alive.iter().enumerate() {
+            if alive {
+                face_new[f] = next;
+                next += 1;
+            }
+        }
+        sm.locations()
+            .iter()
+            .enumerate()
+            .map(|(v, &(f, b))| {
+                let t = w.faces[f as usize].map(|x| out_pos[new_id[x as usize] as usize]);
+                let q = [0, 1, 2].map(|c| b[0] * t[0][c] + b[1] * t[1][c] + b[2] * t[2][c]);
+                ProjectedPoint {
+                    face: face_new[f as usize],
+                    bary: b,
+                    distance: norm(sub(q, positions[v])),
+                }
+            })
+            .collect::<Vec<_>>()
+    });
     report.n_output_vertices = out_pos.len();
     report.n_output_faces = out_faces.len();
     report.coarse_area = total_area(&out_pos, &out_faces);
@@ -821,6 +892,8 @@ pub fn qem_simplify(
         faces: out_faces,
         vertex_map,
         projection,
+        successive,
+        successive_stats,
         report,
     })
 }
