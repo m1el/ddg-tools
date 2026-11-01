@@ -68,8 +68,8 @@ pub struct IntegerOdtReport {
 }
 
 impl OdtMoves for IntegerTriangulation {
-    /// The export's split ([`Exportable::split_for_export`]): the midpoint, or near it when the
-    /// midpoint is within rounding of a crossing (SPEC I28).
+    /// The export's split ([`Exportable::split_for_export`]): the midpoint, snapped onto the
+    /// crossing when it is within rounding of one (SPEC I28), as the signposts do.
     fn split_for_odt(&mut self, e: usize) -> Result<(), IntrinsicError> {
         Exportable::split_for_export(self, e).map(|_| ())
     }

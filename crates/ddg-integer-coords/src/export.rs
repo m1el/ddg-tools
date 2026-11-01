@@ -28,8 +28,12 @@ use crate::error::IntegerError;
 use crate::interface::to_intrinsic_error;
 use crate::refine::IntegerRefineOptions;
 
-/// The parameters tried, in order, when the midpoint of an edge is refused for being within
-/// rounding of a crossing (SPEC I28): `½ ± 2⁻¹⁶`, then `½ ± 2⁻¹²`.
+/// The parameters tried, in order, when the midpoint of an edge is still refused as
+/// [`NotLocated`](ddg_intrinsic::InsertRefusal::NotLocated) (SPEC I28): `½ ± 2⁻¹⁶`, then
+/// `½ ± 2⁻¹²`. Since I28 a midpoint within rounding of a crossing is not refused (the split
+/// snaps onto the crossing, as the signposts do), so this is left for a midpoint within rounding
+/// of an input edge that the edge does not cross there, or of a corner of the input face: none
+/// in the evaluation.
 pub const OFF_MIDPOINT: [f64; 4] = [
     0.5 + 1.0 / 65536.0,
     0.5 - 1.0 / 65536.0,
@@ -38,10 +42,12 @@ pub const OFF_MIDPOINT: [f64; 4] = [
 ];
 
 impl Exportable for IntegerTriangulation {
-    /// The midpoint, or, if it is within rounding of a crossing (I28: the integer split refuses
-    /// it with `InsertRefusal::NotLocated`, where the signposts would snap the vertex onto the
-    /// input edge), the first of [`OFF_MIDPOINT`] that is not. Seen on symmetric meshes, where
-    /// an edge crosses an input edge exactly at its middle (torus 5×3).
+    /// The midpoint (SPEC I28): a midpoint within rounding of a crossing of the edge with an
+    /// input edge, as on symmetric meshes where an edge crosses an input edge exactly at its
+    /// middle (torus 5×3), is split at that crossing (`ic-split-at-crossing`), the vertex on the
+    /// input edge, which is what the signposts do. Only if the midpoint is still refused with
+    /// `InsertRefusal::NotLocated`, the first of [`OFF_MIDPOINT`] that is not (`Ok(true)`,
+    /// counted in `SimplicialExport::n_off_midpoint_splits`; 0 in the evaluation).
     fn split_for_export(&mut self, e: usize) -> Result<bool, IntrinsicError> {
         let near_crossing = |err: &IntegerError| {
             matches!(
