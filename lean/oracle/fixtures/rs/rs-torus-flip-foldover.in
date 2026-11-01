@@ -1,0 +1,51 @@
+case rs-torus-flip-foldover
+task remesh-ops
+op flip 0 1
+legality foldover
+mesh 15 30
+p 4006c58657154a55 3f957a1c0abd68ac 3f8da2ad7816a748
+p 3ffa1ff397485cef 3f994a47a2d52b54 3fe7b42a5f148a01
+p 3ff9dbce72e010c8 bf9dbcad4ad6f1b4 bfe6219c2461f6b1
+p 3fec258371028fcb 4005a69863cd35b1 3fa7459c255277a0
+p 3fdefafa0de0a84e 3ff91e23555b5dd5 3fe5bd33d5349786
+p 3fde9e73965215eb 3ff86bfb6fcd8e03 bfe5ce6388d04292
+p c0025af31279c86f 3ffa8aec6ced8d8c 3f880a0540b5c3b8
+p bff53cfe333f2c13 3fef68c637b97aa7 3fe69970323e0926
+p bff493af4afde52d 3fedbef9656b3b42 bfe49cd77afcc536
+p c001d9dcdd0ab543 bffab4e791ad6912 3f941de5fb4adfac
+p bff45742df8dd926 bfef483a6b855d9b 3fe58177cf48fc39
+p bff4a108096e007a bfee38812e5a5434 bfe7048459890a67
+p 3fecf5948f63bdbd c005a134f925a3b3 bf97bae10559584d
+p 3fe03490baa38227 bff81ff19c7ab079 3fe4cfaebc217e13
+p 3fde8185ee1e5d54 bff82e7b7f27a2ee bfe492b0d7e5fe26
+f 0 3 4
+f 0 4 1
+f 1 4 5
+f 1 5 2
+f 2 5 3
+f 2 3 0
+f 3 6 7
+f 3 7 4
+f 4 7 8
+f 4 8 5
+f 5 8 6
+f 5 6 3
+f 6 9 10
+f 6 10 7
+f 7 10 11
+f 7 11 8
+f 8 11 9
+f 8 9 6
+f 9 12 13
+f 9 13 10
+f 10 13 14
+f 10 14 11
+f 11 14 12
+f 11 12 9
+f 12 0 1
+f 12 1 13
+f 13 1 2
+f 13 2 14
+f 14 2 0
+f 14 0 12
+end

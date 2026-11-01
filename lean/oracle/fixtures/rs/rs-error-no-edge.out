@@ -1,0 +1,4 @@
+case rs-error-no-edge
+task remesh-ops
+status error NoSuchEdge (0, 3) is not an edge
+end

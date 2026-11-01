@@ -37,6 +37,12 @@ usage:
   ddg-oracle rc-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `rc` to standard output
   ddg-oracle rc-selftest [N]        internal checks of the repulsive-curves oracle (N seeded networks, default 120)
   ddg-oracle rc-fixtures write DIR | check DIR   golden fixtures (fixtures/rc)
+  ddg-oracle rs [IN [OUT]]          dense tangent-point energy, metric, constraints, saddle, preconditioner, one step and
+                                    remeshing operations of 'Repulsive Surfaces' (Yu, Brakensiek, Schumacher, Crane 2021);
+                                    tasks energy, df, metric, constraints, saddle, precond, step, remesh-ops
+  ddg-oracle rs-gen SEED COUNT [FIRST]   write COUNT seeded random cases for `rs` to standard output
+  ddg-oracle rs-selftest [N]        internal checks of the repulsive-surfaces oracle (N seeded meshes, default 120)
+  ddg-oracle rs-fixtures write DIR | check DIR   golden fixtures (fixtures/rs)
   ddg-oracle ic [IN [OUT]]          integer formulas of 'Integer Coordinates for Intrinsic Geometry Processing'
                                     (Gillespie, Sharp, Crane 2021); tasks corner, flip, splitedge, trace,
                                     tracecurve, identify, subdivide, regions, split
@@ -182,6 +188,31 @@ def main (args : List String) : IO UInt32 := do
     | none => IO.eprintln usage; return 2
   | ["rc-fixtures", "write", dir] => RepulsiveCurves.writeFixtures dir; return 0
   | ["rc-fixtures", "check", dir] => return if (← RepulsiveCurves.checkFixtures dir) == 0 then 0 else 1
+  | "rs" :: rest =>
+    if rest.length > 2 then
+      IO.eprintln usage
+      return 2
+    let input ← openInput (rest.getD 0 "-")
+    let output ← openOutput (rest.getD 1 "-")
+    let _ ← RepulsiveSurfaces.runStream input output
+    output.flush
+    return 0
+  | "rs-gen" :: seed :: count :: rest =>
+    match seed.toNat?, count.toNat?, (rest.getD 0 "0").toNat? with
+    | some s, some n, some first =>
+      let out ← IO.getStdout
+      for i in [first:first + n] do
+        out.putStr (RepulsiveSurfaces.printCase (RepulsiveSurfaces.genCase s i))
+      out.flush
+      return 0
+    | _, _, _ => IO.eprintln usage; return 2
+  | ["rs-selftest"] => return if (← RepulsiveSurfaces.selftest) == 0 then 0 else 1
+  | ["rs-selftest", n] =>
+    match n.toNat? with
+    | some k => return if (← RepulsiveSurfaces.selftest k) == 0 then 0 else 1
+    | none => IO.eprintln usage; return 2
+  | ["rs-fixtures", "write", dir] => RepulsiveSurfaces.writeFixtures dir; return 0
+  | ["rs-fixtures", "check", dir] => return if (← RepulsiveSurfaces.checkFixtures dir) == 0 then 0 else 1
   | "ic" :: rest =>
     if rest.length > 2 then
       IO.eprintln usage

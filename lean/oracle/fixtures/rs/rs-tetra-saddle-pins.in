@@ -1,0 +1,17 @@
+case rs-tetra-saddle-pins
+task saddle
+exponents 4008000000000000 4018000000000000
+weights 3ff0000000000000 3ff0000000000000 0000000000000000
+c pins 1 0
+c pins 2 1 2 3ff1c89950144616 bfecca0ab264fe8c bfeee37fe518c020 bfed7b1cd7ec5669 3ff0f2c9161b31a0 bfec51cdf8a13385
+c volume all 4004a9384eabd4d2
+mesh 4 4
+p 3fec96aba0e5519a 3fed2cfa108635c2 3feeb56c250d3acc
+p 3ff1c89950144616 bfee63a44bfe9826 bfeee37fe518c020
+p bfed7b1cd7ec5669 3ff0f2c9161b31a0 bfec51cdf8a13385
+p bfeec23586adc3e7 bff11d79b2ce75dd 3ff00bf80f8d4a85
+f 0 1 2
+f 0 3 1
+f 0 2 3
+f 1 3 2
+end

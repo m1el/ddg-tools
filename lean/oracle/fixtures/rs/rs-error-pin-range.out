@@ -1,0 +1,4 @@
+case rs-error-pin-range
+task constraints
+status error ConstraintOutOfRange pinned vertex 99, 12 vertices
+end

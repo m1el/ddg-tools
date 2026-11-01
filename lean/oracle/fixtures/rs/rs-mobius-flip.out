@@ -1,0 +1,4 @@
+case rs-mobius-flip
+task remesh-ops
+status error InconsistentOrientation faces 0 and 15 traverse (0, 1) in the same direction
+end

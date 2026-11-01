@@ -1,0 +1,4 @@
+case rs-error-degenerate
+task energy
+status error DegenerateFace face 0 has zero area
+end

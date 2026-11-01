@@ -1,0 +1,37 @@
+case rs-error-pin-range
+task constraints
+c pins 1 99
+mesh 12 20
+p bff0a549ed79629a 3ffbac10ebac3abe 3fa9c5bb40167d9c
+p 3ff08e400d739ff0 3ffb25e92fa1c973 3fae5922c36633fc
+p bfec51cdf8a13385 bff944925eeed69b bfb1d79b2ce75dd2
+p 3ff00bf80f8d4a85 bff95694b86040b5 3fbaa8337e92bd20
+p 3fbbed21c662f5f2 bff065d4bc035c47 3ffbbcf91041f538
+p bfa08ea76baacac0 3feec54ec54e3164 3ffa11661c8735ac
+p 3f9bf565c23bddd0 bff11eaaf1baa08a bff96282a5259325
+p 3f9cd8d31a73b7a8 3fed77e869bc1f9c bff84f99c7af2db5
+p 3ffa674acfdf8d12 3f9492cbc514e228 bff06b17f541eb83
+p 3ffbc1f54338475b 3fb4cf2db8dbb842 3fee3493c91bec06
+p bff92258955ebf78 3fac69ec8427a740 bff16ccfabaa3db5
+p bffaaf9b44766bc1 3f89217fd06f6af0 3fefb283a1df9b22
+f 0 11 5
+f 0 5 1
+f 0 1 7
+f 0 7 10
+f 0 10 11
+f 1 5 9
+f 5 11 4
+f 11 10 2
+f 10 7 6
+f 7 1 8
+f 3 9 4
+f 3 4 2
+f 3 2 6
+f 3 6 8
+f 3 8 9
+f 4 9 5
+f 2 4 11
+f 6 2 10
+f 8 6 7
+f 9 8 1
+end

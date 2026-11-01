@@ -1,0 +1,4 @@
+case rs-icosa-flip-delaunay
+task remesh-ops
+status error NotDelaunay opposite angles 1.073025 + 1.064067 do not exceed pi
+end

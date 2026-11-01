@@ -1,0 +1,4 @@
+case rs-torus-flip-foldover
+task remesh-ops
+status error Foldover a new face turns its normal by more than pi - 2
+end

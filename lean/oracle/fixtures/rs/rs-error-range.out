@@ -1,0 +1,4 @@
+case rs-error-range
+task energy
+status error VertexOutOfRange face 2 = (0, 2, 9), 4 vertices
+end

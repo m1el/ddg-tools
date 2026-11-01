@@ -1,0 +1,4 @@
+case rs-tetra-collapse-link
+task remesh-ops
+status error NonManifoldResult faces 2 and 3 would have the same three vertices
+end

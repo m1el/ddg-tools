@@ -1,0 +1,4 @@
+case rs-error-exponents
+task energy
+status error InvalidExponents beta must be greater than alpha + 2
+end

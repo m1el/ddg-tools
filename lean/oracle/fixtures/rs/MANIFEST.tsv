@@ -1,0 +1,70 @@
+rs-tetra-energy	energy	ok	perturbed tetrahedron, (6,12)	
+rs-octa-energy-48	energy	ok	perturbed octahedron, (4,8) subcritical	
+rs-icosa-energy	energy	ok	perturbed icosahedron, (6,12)	
+rs-icosa-energy-36	energy	ok	perturbed icosahedron, (3,6)	
+rs-torus-energy	energy	ok	perturbed 5x3 torus, (6,12)	
+rs-patch-energy-25	energy	ok	open patch with boundary, (2,5)	
+rs-mobius-energy	energy	ok	Moebius band (non-orientable), (6,12)	
+rs-two-energy-375	energy	ok	two components (tetrahedron and octahedron), (3,7.5)	
+rs-flat-energy	energy	ok	flat 3x3 patch: N.(X-Y) = 0, energy and gradient exactly 0	
+rs-tetra-df	df	ok	tetrahedron: a linear function (tangential part of c) and a random one	
+rs-icosa-df	df	ok	icosahedron: random u, and u = 1 (D_f 1 = 0)	
+rs-patch-df	df	ok	patch with boundary: random u	
+rs-mobius-df	df	ok	Moebius band: random u (D_f is orientation free)	
+rs-tetra-metric	metric	ok	tetrahedron: L_0.6, B, B0, A, W, M, (6,12)	
+rs-octa-metric-nolow	metric	ok	octahedron: low_order off (A = B), (4,8), tau 0.25	
+rs-icosa-metric-willmore	metric	ok	icosahedron: weights 2, 1, 0.3 (adds W M^-1 W), tau 1.2	
+rs-torus-metric	metric	ok	torus 5x3, (3,6)	
+rs-patch-metric	metric	ok	open patch, (2,5): boundary vertices	
+rs-mobius-metric	metric	ok	Moebius band, (6,12)	
+rs-two-metric-375	metric	ok	two components: block structure through the kernel	
+rs-two-cons-bary	constraints	ok	per-component barycenters of two components (6 rows), target = current	
+rs-icosa-cons-pins	constraints	ok	two pins with targets and a barycenter with target	
+rs-icosa-cons-area-volume	constraints	ok	total area x1.05 and volume x0.9: values and Jacobians	
+rs-two-cons-comp	constraints	ok	area of component 1, volume of component 0 (target 1)	
+rs-patch-cons-open	constraints	ok	open patch: area and the signed cone volume over the origin	
+rs-mobius-cons-area	constraints	ok	Moebius band: area and barycenter (volume would be refused)	
+rs-icosa-saddle	saddle	ok	icosahedron: barycenter in A', area and volume as Schur rows	
+rs-tetra-saddle-pins	saddle	ok	tetrahedron: three pins and a volume row, (3,6)	
+rs-torus-saddle	saddle	ok	torus: low_order off, barycenter and volume	
+rs-patch-saddle	saddle	ok	open patch: two pinned vertices and an area row, (2,5)	
+rs-two-saddle	saddle	ok	two components: per-component barycenters, one total-area row	
+rs-mobius-saddle	saddle	ok	Moebius band: barycenter and area	
+rs-octa-saddle-none	saddle	ok	octahedron: no Schur rows (k = 0), (4,8)	
+rs-icosa-precond	precond	ok	icosahedron: eps_rel 1e-10, barycenter in L'	
+rs-patch-precond	precond	ok	open patch: pin and barycenter, eps_rel 1e-6, (2,5)	
+rs-two-precond	precond	ok	two components: per-component barycenter rows	
+rs-icosa-step	step	ok	icosahedron: area and volume held, start: farthest vertex moves one mean edge	result accepted 40333dbed4169d59 2
+rs-torus-step-ref	step	ok	torus: reference start 2/|x|, one Newton step, volume target x1.02	result accepted 3fc42888deda72ca 1
+rs-patch-step	step	ok	open patch: pins and area target x1.01	result accepted 3fdaa294b4dfb4f3 0
+rs-mobius-step	step	ok	Moebius band: area held	result accepted 3fea4b8b7806b681 0
+rs-two-step	step	ok	two components: Armijo c = 0.3	result accepted 3fd95949c4c38f79 0
+rs-icosa-step-stuck	step	ok	huge start, 3 halvings allowed: stuck, positions unchanged	result stuck 0000000000000000 4
+rs-tetra-step-flatmix	step	ok	tetrahedron: fixed start 0.05, one pin, area held	result accepted 3fa999999999999a 0
+rs-icosa-split	remesh-ops	ok	split an interior edge of the icosahedron: new vertex 12, faces 20..21 appended	
+rs-patch-split-boundary	remesh-ops	ok	split a boundary edge of the patch (one face)	
+rs-icosa-collapse	remesh-ops	ok	collapse an edge of the icosahedron to its midpoint (vertex 1 removed)	
+rs-icosa-collapse-pinned	remesh-ops	ok	collapse with vertex 4 pinned: survivor 3 sits at vertex 4	
+rs-patch-collapse-boundary	remesh-ops	ok	collapse an interior edge from a boundary vertex: the boundary vertex keeps its position	
+rs-patch-collapse-both-pinned	remesh-ops	error	both ends pinned: BothPinned	status error BothPinned both ends of (5, 6) are pinned
+rs-tetra-collapse-link	remesh-ops	error	collapse on a tetrahedron: the result would repeat a face (NonManifoldResult)	status error NonManifoldResult faces 2 and 3 would have the same three vertices
+rs-strip-collapse-link	remesh-ops	error	rung of a one-quad-wide strip joins two boundary vertices: LinkCondition	status error LinkCondition (2, 3) is an interior edge between two boundary vertices
+rs-icosa-flip	remesh-ops	ok	flip an interior edge of the icosahedron (no legality checks)	
+rs-icosa-flip-delaunay	remesh-ops	error	same flip with the Delaunay check: result depends on the opposite angles	status error NotDelaunay opposite angles 1.073025 + 1.064067 do not exceed pi
+rs-patch-flip-boundary	remesh-ops	error	boundary edge: BoundaryEdge	status error BoundaryEdge (0, 1) has 1 face(s); only interior edges flip
+rs-mobius-flip	remesh-ops	error	Moebius band seam edge: its two faces traverse it the same way, InconsistentOrientation	status error InconsistentOrientation faces 0 and 15 traverse (0, 1) in the same direction
+rs-mobius-flip-ok	remesh-ops	ok	Moebius band diagonal edge: an ordinary flip	
+rs-icosa-split-pinned-note	remesh-ops	ok	split (pins play no role in a split)	
+rs-torus-flip-foldover	remesh-ops	error	torus flip with the foldover check	status error Foldover a new face turns its normal by more than pi - 2
+rs-error-no-edge	remesh-ops	error	vertices 0 and 3 of the icosahedron share no edge: NoSuchEdge	status error NoSuchEdge (0, 3) is not an edge
+rs-error-degenerate	energy	error	a face with collinear vertices: DegenerateFace	status error DegenerateFace face 0 has zero area
+rs-error-nonmanifold	energy	error	three faces on one edge: NonManifoldEdge	status error NonManifoldEdge edge (0, 1) is shared by 3 faces: 0, 1, 2
+rs-error-unreferenced	energy	error	a vertex without faces: UnreferencedVertex	status error UnreferencedVertex vertex 4
+rs-error-range	energy	error	face index 9: VertexOutOfRange	status error VertexOutOfRange face 2 = (0, 2, 9), 4 vertices
+rs-error-exponents	energy	error	beta = alpha + 2 is not allowed: InvalidExponents	status error InvalidExponents beta must be greater than alpha + 2
+rs-error-same-barycenter	energy	error	two faces with the same barycenter: NonFiniteEnergy	status error NonFiniteEnergy faces (0, 1) have the same barycenter
+rs-error-volume-mobius	constraints	error	volume on a non-orientable band: NonOrientable	status error NonOrientable component 0 is not consistently oriented: edge (0, 1) is traversed in the same direction by faces 0 and 15
+rs-error-translation	saddle	error	no barycenter or pin: TranslationNotFixed	status error TranslationNotFixed component 0
+rs-error-singular	saddle	error	the same pin twice: SingularSaddle	status error SingularSaddle the saddle matrix is singular
+rs-error-pin-range	constraints	error	pin at vertex 99: ConstraintOutOfRange	status error ConstraintOutOfRange pinned vertex 99, 12 vertices
+rs-error-component	constraints	error	component 3 of a connected mesh: ConstraintOutOfRange	status error ConstraintOutOfRange component 3, 1 components

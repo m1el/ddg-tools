@@ -1699,6 +1699,80 @@ subdivision, Barnes-Hut and multigrid back ends.
 (`#[ignore]`) against the executable; its module docs state the tolerances and how to run it
 (`DDG_RC_FUZZ_CASES=200000 cargo test --release -p ddg-repulsive-curves --test oracle -- --ignored --nocapture`).
 
+## Repulsive surfaces (eighth paper): `ddg-oracle rs`
+
+An independent Float implementation, from `crates/ddg-repulsive-surfaces/SPEC.md` §2-§6, §7.2, §10
+only, of *Repulsive Surfaces* (Yu, Brakensiek, Schumacher, Crane 2021): the exact tangent-point
+energy and its gradient, `D_f`, the dense metric (`L_τ`, `B`, `B⁰`, `A`, `W`, `M`), the constraint
+values and Jacobians, the nested saddle (positional rows inside `A′`, Schur rows outside), the
+preconditioner, one projected-gradient step with Armijo, and one remeshing operation. Plain `Float`
+(only the 3-vector type of the `rc` oracle is reused); it shares no formula code with the Rust crate.
+Code: `DdgOracle/RepulsiveSurfaces/` (`Basic` meshes, topology, validation; `Energy`; `Metric`;
+`Constraints`; `Saddle`; `Step`; `Remesh`; `Format`; `Gen`; `Selftest`; `Fixtures`); notes and open
+points in `DdgOracle/RepulsiveSurfaces/NOTES-WP11.md`.
+
+| command | |
+|---|---|
+| `ddg-oracle rs [IN [OUT]]` | answer every case of the stream (tasks `energy`, `df`, `metric`, `constraints`, `saddle`, `precond`, `step`, `remesh-ops`) |
+| `ddg-oracle rs-gen SEED COUNT [FIRST]` | write `COUNT` seeded random cases (case `i` depends on `(SEED, i)` only): perturbed tetrahedra, octahedra, icosahedra, tori, a patch with boundary, Möbius bands, two components |
+| `ddg-oracle rs-selftest [N]` | central differences of the gradient and of the area and volume Jacobians, the pair-sum matrices against the kernel-matrix form of §4.3, symmetry / null space / PSD, scaling and Euler identities, the nested saddle against the full saddle (Gauss-Jordan), `C_N x = 0`, `C_N h = Φ`, preconditioner symmetry, the step, the remeshing invariants, a flat patch (energy exactly 0), print/parse round trips, on `N` seeded meshes (default 120) |
+| `ddg-oracle rs-fixtures write DIR \| check DIR` | golden fixtures (`fixtures/rs`, 70 cases, 0.7 MB) |
+
+**Input** (`case NAME`, lines, `end`; floats are 16 hex digits, indices 0-based):
+
+```
+task energy|df|metric|constraints|saddle|precond|step|remesh-ops
+exponents ALPHA BETA            energy, metric, saddle, precond, step (default 6, 12); α > 1, α+2 < β < 2α+2
+u X0 X1 ...                     df: one vertex function per line (NV values)
+tau T                           metric: the order τ of L_τ (default 0.75)
+weights WTP CLO WW              metric, saddle, step: A = WTP (B + CLO B0) + WW W M^-1 W (default 1 1 0)
+matrices all|a                  metric, precond: a prints only A (resp. Lfr, z)
+eps-rel E                       precond: ε = E tr W / tr M
+r V X Y Z                       precond: the vector r, one line per vertex in order
+c barycenter all|C [X Y Z]      constraints, in this order. `all` = every component separately (same target on each)
+c pins N V ... [X Y Z ...]      N pinned vertices, optional 3N target coordinates
+c area all|C [A]                total area of a component (all = the whole mesh)
+c volume all|C [V]
+armijo C | start abs T|maxdisp L|reference | maxhalv N | newton fixed|tol N     step
+op split|collapse|flip A B      remesh-ops: the edge (A, B)
+pinned V ...                    remesh-ops: pinned vertices
+legality delaunay foldover      remesh-ops: optional refusals (flip must be Delaunay; no foldover by more than π−2)
+mesh NV NF
+p X Y Z                         NV lines
+f A B C                         NF lines
+```
+
+**Output**, after `status ok` and `mesh NV NF NCOMP` (or `status error KIND MESSAGE`; `KIND` is one of
+`InvalidExponents`, `VertexOutOfRange`, `DegenerateFace` (repeated vertex or zero area),
+`UnreferencedVertex`, `NonManifoldEdge`, `NonManifoldVertex`, `NonFinitePosition`, `NonFiniteEnergy`,
+`NonOrientable` (volume on a component whose faces disagree), `ConstraintOutOfRange`,
+`TranslationNotFixed`, `SingularSaddle`, `Unsupported`, `ValueCount`, and for remeshing `NoSuchEdge`,
+`BothPinned`, `LinkCondition`, `NonManifoldResult`, `Foldover`, `NotDelaunay`, `BoundaryEdge`,
+`InconsistentOrientation`, `FlipNonManifold`):
+
+* `energy`: `energy E`, `d V GX GY GZ` (`∂ℰ̂/∂f_v`).
+* `df`: `df K S UBAR DX DY DZ` for function `K`, face `S` (`ū_S` and `D_f u(S)`).
+* `metric`: `tau`, `s`, rows `L i ...`, `B i ...`, `B0 i ...`, `W i ...`, `WMW i ...`, `A i ...` (`|V| × |V|`), `M ...` (the `a_v`).
+* `constraints`: `rows R 3NV`, `vcomp` (component of every vertex), `row I KIND positional|nonlinear PHI`, `J I ...` (dense Jacobian, column `3 v + axis`). Barycenter: 3 rows per component, axis fastest; pins: 3 rows per pin.
+* `saddle`: `rows KQ KN`, `pivot` (equilibrated smallest/largest LU pivot of `A′`; below `1e-13` the case is `SingularSaddle`), `phin` (`Φ` of the Schur rows), `g V ...` (the energy gradient), `x V ...` (the direction), `S i ...` (`KN × KN`), `h V ...` (the Newton correction), `gx` (`⟨g, x⟩`), `cnx`, `cqx` (`max |C x|` on the Schur / positional rows).
+* `precond`: `rows`, `pivot`, `eps`, `Lfr i ...` (`L_{2−s}`), `Lp i ...` (`L′`, `(3NV+KQ)²`), `z V ...` (`P⁻¹ r`).
+* `step`: `pivot`, `energy0`, `slope` (`⟨g, x⟩`), `xnorm` (Frobenius), `lbar`, `tau0`, `trial I TAU OUTCOME ENERGY MARGIN` (`accepted`, `armijo-failed`, `non-finite`), `result accepted|stuck TAU HALVINGS`, `energy1` (after the search), `newton K` (iterations), `phi-before` / `phi` (all rows after the search / at the end), `energy-final`, `x V ...` (final positions).
+* `remesh-ops`: `mesh NV NF`, `p`, `f`, `parent I OLD` (old face of new face `I`), `vmap V OLD...` (old vertices of new vertex `V`).
+
+**Choices where the SPEC leaves room.** See `NOTES-WP11.md`. In short: components are numbered by
+smallest face index; `all` barycenter applies one target to every component; redundant rows are not
+dropped (a rank-deficient `A′` is `SingularSaddle`, no D10 report); the Newton correction is
+`h = −Z S⁻¹ Φ` so that `C_N h = Φ` (SPEC §6.2 as printed gives `−Φ`); Newton stops at `|Φ_r| ≤ 1e-8 |target|`
+(`1e-8` when the target is 0) or after `newton N` iterations, positional projection first and after
+every iteration; split/collapse/flip numbering is fixed in `Remesh.lean`.
+
+**Not modelled.** Penalties, Barnes-Hut, hierarchical products, GMRES, CCD, `Global` barycenter mode,
+`GrowPrevious`, `Reference` Armijo, the other metrics of §4.5, obstacles, the full remeshing pass
+(edge-length rules, smoothing, flip loops).
+
+**Rust side.** `crates/ddg-repulsive-surfaces/tests/oracle.rs` (written after the crate exists) replays
+the fixtures and fuzzes against the executable, as for `rc`.
+
 ## Integer coordinates (sixth paper): `ddg-oracle ic`
 
 > Mark Gillespie, Nicholas Sharp, Keenan Crane. *Integer Coordinates for Intrinsic Geometry

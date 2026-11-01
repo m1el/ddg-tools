@@ -1,0 +1,51 @@
+case rs-icosa-precond
+task precond
+exponents 4018000000000000 4028000000000000
+eps-rel 3ddb7cdfd9d7bdbb
+r 0 3fab9ade54718200 3feb0d52629477e8 3fec437c0cf68c64
+r 1 bfef04b285f23d1c bfed4493a7d23b2c bfe798adee7ec2d2
+r 2 3fcd3fe59ba369e8 3fd3db4c5b92d694 3fd2051ca46844bc
+r 3 3fcbd662c09e30f8 3fd6e69ebf7b111c 3fe74baf3d2a5674
+r 4 bfe2bd4a66f6ee68 bfdeae17ce6c6704 3fc95f76e7c5d6f8
+r 5 3fdc048693a63638 3fe6a510b68fdeb4 3fe135146055b60e
+r 6 bfefbec657cfbac4 bfdd15ba0b70a43c 3fef61bcbe3c5f74
+r 7 bfe75ac2866e5cd2 3fbbd20ca6139190 3fbcb1c246833f30
+r 8 bfd440a217a6bbc0 3fd8ccf496d1a04c 3fda74abbfe28fdc
+r 9 bfe8c1879213c038 3fd490e872f0afec bfdc4174b645a66c
+r 10 3fd372d0e0741ea4 bfd7db62f3313438 bfef81db15fb9486
+r 11 bfe7c32d9aa09676 3fe7b7e75b462df4 bfc390c3d55f8ee0
+c barycenter all
+mesh 12 20
+p bff0a549ed79629a 3ffbac10ebac3abe 3fa9c5bb40167d9c
+p 3ff08e400d739ff0 3ffb25e92fa1c973 3fae5922c36633fc
+p bfec51cdf8a13385 bff944925eeed69b bfb1d79b2ce75dd2
+p 3ff00bf80f8d4a85 bff95694b86040b5 3fbaa8337e92bd20
+p 3fbbed21c662f5f2 bff065d4bc035c47 3ffbbcf91041f538
+p bfa08ea76baacac0 3feec54ec54e3164 3ffa11661c8735ac
+p 3f9bf565c23bddd0 bff11eaaf1baa08a bff96282a5259325
+p 3f9cd8d31a73b7a8 3fed77e869bc1f9c bff84f99c7af2db5
+p 3ffa674acfdf8d12 3f9492cbc514e228 bff06b17f541eb83
+p 3ffbc1f54338475b 3fb4cf2db8dbb842 3fee3493c91bec06
+p bff92258955ebf78 3fac69ec8427a740 bff16ccfabaa3db5
+p bffaaf9b44766bc1 3f89217fd06f6af0 3fefb283a1df9b22
+f 0 11 5
+f 0 5 1
+f 0 1 7
+f 0 7 10
+f 0 10 11
+f 1 5 9
+f 5 11 4
+f 11 10 2
+f 10 7 6
+f 7 1 8
+f 3 9 4
+f 3 4 2
+f 3 2 6
+f 3 6 8
+f 3 8 9
+f 4 9 5
+f 2 4 11
+f 6 2 10
+f 8 6 7
+f 9 8 1
+end

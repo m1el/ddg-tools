@@ -1,0 +1,12 @@
+case rs-octa-energy-48
+task energy
+status ok
+mesh 6 8 1
+energy 4038b1bc8bee8e4e
+d 0 c020ea902fb3ad7e bfd9585575e6b920 40017f8935f353ec
+d 1 40117e93d54de218 bff72dfbfb45ba4c 3fffb966e4e702fc
+d 2 3fe3ff5e3154d320 40160f2ea2d33fff 3fef9b3436772088
+d 3 bfcd83192d801800 c00b37830c6a2b16 bfbb365b1170bd80
+d 4 3fffdbc15369f3e0 3fdc1f571ae47520 bffb06da7c27b18b
+d 5 3ffb2f24e2018944 bfe6a2f1c0e4bcf8 c00ae5e99f653ee4
+end

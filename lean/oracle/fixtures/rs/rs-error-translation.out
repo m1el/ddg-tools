@@ -1,0 +1,4 @@
+case rs-error-translation
+task saddle
+status error TranslationNotFixed component 0
+end
