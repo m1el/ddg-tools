@@ -49,11 +49,23 @@ fn triangulations() -> Vec<(String, IntrinsicTriangulation, Vec<[f64; 3]>)> {
         sheared_torus(12, 6, 1.0, 0.4, 2),
     ] {
         let mut tri = shape.triangulation();
-        out.push((format!("{} input", shape.name), tri.clone(), shape.positions.clone()));
+        out.push((
+            format!("{} input", shape.name),
+            tri.clone(),
+            shape.positions.clone(),
+        ));
         tri.flip_to_delaunay(&DelaunayOptions::default()).unwrap();
-        out.push((format!("{} iDT", shape.name), tri.clone(), shape.positions.clone()));
+        out.push((
+            format!("{} iDT", shape.name),
+            tri.clone(),
+            shape.positions.clone(),
+        ));
         tri.refine(&RefineOptions::default()).unwrap();
-        out.push((format!("{} refined", shape.name), tri, shape.positions.clone()));
+        out.push((
+            format!("{} refined", shape.name),
+            tri,
+            shape.positions.clone(),
+        ));
     }
     out
 }
@@ -63,13 +75,18 @@ fn fields_hash(tri: &IntrinsicTriangulation, positions: &[[f64; 3]]) -> u64 {
     let mut h = Hash::new();
     h.reals(&halfedge_directions(tri));
     h.reals(&tangent_scales(tri));
-    let transport: Vec<f64> = (0..tri.n_halfedges()).map(|e| transport_angle(tri, e)).collect();
+    let transport: Vec<f64> = (0..tri.n_halfedges())
+        .map(|e| transport_angle(tri, e))
+        .collect();
     h.reals(&transport);
     let holonomy: Vec<f64> = (0..tri.n_faces()).map(|f| face_holonomy(tri, f)).collect();
     h.reals(&holonomy);
     let boundary = (0..tri.n_vertices()).any(|v| tri.is_boundary_vertex(v));
     for n_sym in [1u32, 2, 4] {
-        for kind in [ConnectionLaplacian::FiniteDifference, ConnectionLaplacian::FiniteElement] {
+        for kind in [
+            ConnectionLaplacian::FiniteDifference,
+            ConnectionLaplacian::FiniteElement,
+        ] {
             let m = connection_matrices(tri, n_sym, kind).unwrap();
             h.reals(m.stiffness.values());
             h.reals(m.mass.values());
