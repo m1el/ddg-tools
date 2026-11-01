@@ -83,6 +83,9 @@ the flip set reported) or `NonOrientable` (Klein bottle, Fig. 26).
 * Triangles only. Blender passes its loop triangles; polygons are never triangulated here.
 * Degenerate faces (zero area) are errors at validation of positions; non-finite positions too.
 * Unreferenced vertices are an error (they have no area and break the metric).
+* Components are numbered by their lowest face index (WP1, oracle). `Orientable { flips }` keeps
+  the component's lowest face fixed; `Component::inconsistent_edge()` names the edge reported by
+  `VolumeNeedsOrientation`.
 
 Per face: area `a_S = ½|n_S|`, `n_S = (f_j − f_i) × (f_k − f_i)`, unit normal `N_S = n_S/|n_S|`,
 barycenter `X_S = (f_i + f_j + f_k)/3`. Edge vectors `e_jk = f_k − f_j`, `e_ki = f_i − f_k`,
@@ -162,6 +165,8 @@ and `∂Ẽ/∂(a_T X_T) = Σ_{C∋T} ∂Ẽ/∂M_C`.
 
 ### 3.5 Other energies
 
+`energy()` (§9.1) evaluates the tangent-point energy (exact or Barnes–Hut) plus penalties; the
+session (WP5) dispatches `Energy::Coulomb` and `Energy::Willmore` to WP7's code.
 `Energy::TangentPoint` (default). `Energy::Coulomb { alpha }` (Fig. 2, evaluation only, exact
 dense, small meshes): `Σ_{v ≠ w} a_v a_w |f_v − f_w|^{−α}` over ordered vertex pairs with dual
 areas (the paper's "penalizing the distance between all pairs of vertices"; the reference's
@@ -256,7 +261,9 @@ preconditioner's Laplacian), **nonlinear** ones go through the Schur complement.
   the barycenter (paper Sec. 7.1.1, Fig. 8, D8). The reference constrains one global barycenter and
   regularizes the preconditioner with `1e-2·M` on multi-component meshes instead; available as
   `BarycenterMode::Global` for comparison.
-* `target: None` = the initial value. Volume on an open component is the signed volume of the
+* `target: None` = the initial value. A barycenter target with `component: None` applies to every
+  component (e.g. concentric envelopes); use one constraint per component for different targets.
+  Volume on an open component is the signed volume of the
   cone over the origin (origin-dependent; used by the eversion of Fig. 20 with a fixed barycenter).
 * **Volume Jacobian (D9).** We use the exact gradient. The reference's row is `Σ a_S N_S = 3∇V`
   (`ref: total_volume.cpp:30`): the descent direction is unchanged but its one Newton step removes
@@ -331,12 +338,22 @@ solves with `A′`; `A′⁻¹ C_Nᵀ` is kept for the projection. `C x = 0` up 
 ### 6.2 Constraint projection (Eq. 15, 21; D12)
 
 After the line search: positional constraints exactly (translate each constrained component, reset
-pins). Nonlinear ones by the Newton step `h = A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` subtracted (`rs-schur-correction`:
-`C_N h = Φ`), reusing `S` and `A′⁻¹C_Nᵀ` of the step (old Jacobian; the paper: "repeated several
-times if the violation is not sufficiently small"). Default: repeat while
-`|Φ_r| > tol_r` (relative `1e-8` of the target for area/volume) up to 5 times; then the positional
-projection again (Newton moves the barycenter). The reference does exactly one step; option
-`newton_steps: Fixed(1)`. A violation above `tol` after the cap is reported, not an error.
+pins). Nonlinear ones by the Newton step `h = −A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` (position block; with `S` as in
+§6.1 this gives `C_N h = Φ`, `rs-schur-correction`), applied as `f ← f − h`, reusing `S` and
+`A′⁻¹C_Nᵀ` of the step (old Jacobian; the paper: "repeated several times if the violation is not
+sufficiently small"), each round followed by the positional projection (Newton moves the
+barycenter). Default: repeat while `|Φ_r| > tol_r` (`1e-8 |target|`, or `1e-8` for a zero target)
+up to 5 times. The reference does exactly one step; option `newton_steps: Fixed(1)`.
+
+**Safeguard (found by the oracle's selftest).** The frozen-Jacobian iteration can diverge: on a
+near-sphere `∇A ≈ (2/r)∇V`, so `S` is nearly singular when both area and volume are constrained,
+and one round moved vertices by a mean edge length (violations of 1e80 after a few rounds). A
+round is kept only if it lowers `max_r |Φ_r|/tol_r`; otherwise it is undone, the rounds stop and
+the step reports `ProjectionStatus::NotImproving`. Before the solve, `S` is equilibrated and
+rows whose pivot falls below `1e-10` relative are dropped for this step (reported in
+`dropped_rows`, D10), so area and volume together on a sphere keep the better-conditioned row
+instead of producing a huge correction. A violation above `tol` after the cap is reported, not an
+error.
 
 ### 6.3 Solver for `A′` (Sec. 5, D13, D14)
 
@@ -462,7 +479,7 @@ pub struct Surface { /* validated topology: edges, fans, components, boundary lo
 impl Surface {
     pub fn new(n_vertices: usize, faces: Vec<[u32; 3]>) -> Result<Self, RsError>;
     pub fn validate_positions(&self, positions: &[[f64; 3]]) -> Result<(), RsError>;
-    pub fn components(&self) -> &[Component]; pub fn orientation(&self, c: usize) -> Orientation;
+    pub fn components(&self) -> &[Component]; pub fn orientation(&self, c: usize) -> &Orientation;
     pub fn boundary_loops(&self) -> &[Vec<u32>]; /* faces(), edges(), n_* ... */
 }
 pub fn read_obj(path) -> Result<(Surface, Vec<[f64; 3]>), RsError>;   // triangles only (ddg_core::io)
@@ -507,6 +524,7 @@ pub struct FlowOptions {
     pub time_limit: Option<Duration>, pub stuck_limit: usize, pub threads: Option<usize>,
     pub reference_compat: bool,        // sets every "reference mode" of §11 at once (comparisons only)
 }
+// `energy` = ℰ̂ (or Ẽ) without penalties; `penalties[i]` = w_i P_i; `differential` = d(energy + Σ penalties).
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
                           pub subcritical: bool, pub pairs_exact: u64, pub nodes_lumped: u64, pub seconds: f64 }
 pub fn energy(surface, positions, exponents, eval: &EnergyEval, penalties, threads) -> Result<EnergyReport, RsError>;
@@ -539,6 +557,9 @@ pub struct StepReport {
 `InvalidExponents`, `InvalidOption { name, value, requirement }`, `TranslationNotFixed
 { component }`, `VolumeNeedsOrientation { component, edge }`, `InfeasibleConstraint`,
 `ConstraintOutOfRange`, `MethodNeedsSoftProblem`, `SingularSaddle`, `SolverDiverged { residual }`,
+`NonFiniteEnergy { faces: [u32; 2] }` (the first non-finite pair, or the largest term if the sum
+overflows), `PolygonFace { face, corners }` (OBJ), `Parse { path, line, message }`,
+`Unsupported { what }` (a feature of a later work package, during development only),
 `ObstacleError`, `Io`, `Parse { line }`, `Curves(RcError)` (errors from the curves crate's generic
 parts, wrapped), `Cancelled`.
 
@@ -590,6 +611,20 @@ the **initial** mesh, fixed for the run (paper, reference).
    move that flips a face normal by more than `π − 2` is halved up to 3 times, then refused
    (reported). The paper's order (flip, then smooth); the reference smooths first (reference mode
    available).
+**Single-operation conventions** (fixed by the oracle's `remesh-ops`, `Remesh.lean`; the Rust
+operations follow them so the fixtures replay exactly): a split appends the midpoint as vertex
+`|V|` and each cut face's new face is appended in increasing parent order; a collapse of `(a, b)`
+keeps `min(a, b)`, removes `max(a, b)` and shifts higher indices down; its position is the pinned
+endpoint, else the single boundary endpoint, else the midpoint (both boundary: midpoint; both
+pinned: refused); a flip of edge `p q` with faces `F1 < F2`, `F1` traversing `p → q` and the
+opposite vertices `c` (in `F1`) and `d` (in `F2`), gives `F1 := (p, d, c)`, `F2 := (d, q, c)`.
+Always checked: the link condition (an interior edge between two boundary vertices fails), no
+repeated face, a valid manifold afterwards; a flip that would create an existing edge `c d` is
+refused. On a non-orientable surface the two faces of a flip may traverse the edge in the same
+direction: the Rust remesher reorders one of them locally first (the oracle refuses such a flip;
+fixtures avoid it). The full pass of steps 1–2 may renumber freely (only the vertex map and face
+parents are contractual).
+
 3. Per-vertex data through the vertex map: pins stay pinned (never removed; a split edge between
    two pins gives an unpinned midpoint); squared-error targets and attractor membership
    interpolate (the reference does not update the targets, D17).
