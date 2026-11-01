@@ -913,6 +913,30 @@ lengths `ℓ̂` against the input triangle: with `γ_max ≥ γ_min` the eigenva
   face by its coarse face (Fig. 1 style), plus the coarse vertices as a vertex group, and the
   report in the info area. No change to the mesh geometry. Tests in `blender/tests/`.
 
+**As built (WP11).** Python (`crates/ddg-py/src/simplification.rs`, glue `src/python/simplification.rs`,
+stubs, README, `python-tests/test_intrinsic_simplification.py`): `simplify(positions, triangles, *,
+target | ratio, weights=0.0 (w of mixture(w)), memory, fixed, masses + mass_weight, points=(faces,
+bary), refine_before, refine_after, repair_simplicial=True, anisotropy=tau + anisotropy_direction
+("max" | "min" | 3 reals per vertex) + anisotropy_clamp, representation="integer")` returns a
+`Simplification`: `vertices`/`faces` (fine ids), `faces_compact`, `lengths`, `point_face`/`point_bary`/
+`point_vertex` for every tracked point (input vertices, then the extra points), `face_colours`/
+`point_colours`/`n_colours`, `report` (dict), `prolongation()` and `point_prolongation()` as COO,
+`vector_prolongation(n)` as COO with `re`/`im` (refused with refinement or anisotropy: the coarse
+frames are not those of the input mesh), `*_scipy()` helpers (CSR; ImportError without scipy and
+numpy), and the applications `poisson`, `geodesic(source, "exact" | "heat")`, `voronoi`.
+`ratio` is relative to the input's vertex count (also with `refine_before`). `build_hierarchy`
+returns a `Hierarchy` (levels, `P_k`, `L_k`, masses, report) whose `multigrid(matrix | shift,
+known, ...)` gives a `MultigridSolver` (`solve`, `pcg`, `info`). `qem_simplify(target, ...)` is the
+baseline with its closest-point projection. Errors: `InputError` (message starts with the
+parameter), `MeshError`, `SolveError`; the GIL is released in every long call. Blender
+(`blender/ddg_uv_unwrap/simplify_operator.py`): `object.ddg_intrinsic_simplify`, panel DDG >
+Intrinsic Simplify, Object and Mesh menu entries; one centroid per face of Blender's tessellation
+is tracked; writes the corner colour attribute `IntrinsicSimplifyFaces` (12-colour palette cycled
+over the greedy colouring), the face attribute `IntrinsicSimplifyFaceId` and the vertex group
+`IntrinsicSimplifyVertices` (vertices of the input that stay, weight 1); like Show Developability it
+does not change the viewport shading. Post-refinement with signposts can fail to locate a point
+that lies exactly on an edge (§6.2); the integer representation is the default.
+
 ---------------------------------------------------------------------------------------------------
 
 ## 12. Numerics and verification
