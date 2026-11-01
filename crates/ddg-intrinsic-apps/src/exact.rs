@@ -41,6 +41,19 @@
 //! method (Surazhsky et al. measure `O(n^1.5)` windows for MMP); it is meant for meshes of up to
 //! some ten thousand vertices.
 //!
+//! # Δ-complexes and face points
+//!
+//! [`exact_distance_complex`] runs the same propagation on a [`ddg_intrinsic::Complex`] with
+//! edge lengths: a Δ-complex may have several edges between two vertices, self-edges, faces
+//! that use a vertex twice and faces glued to themselves. Nothing in the propagation is
+//! global: a window lives on a halfedge and is unfolded one face at a time, and a vertex lights
+//! the faces at its corners, so only the adjacency is abstracted (a private trait implemented
+//! by `TriMesh` and `Complex`); the `TriMesh` entry point is bit for bit what it was. A source
+//! may be a point of a face (barycentric): the corners get their straight distances inside the
+//! face, and a pseudo-source at the point lights the face across each of its three edges. A
+//! point on an edge is moved off it by a relative `1e-13` of the edge (a pseudo-source needs a
+//! positive height), a point at a corner (barycentric coordinate `>= 1 - 1e-12`) is that vertex.
+//!
 //! # References
 //!
 //! J. S. B. Mitchell, D. M. Mount, C. H. Papadimitriou. *The discrete geodesic problem.* SIAM
@@ -59,8 +72,9 @@ use std::collections::BinaryHeap;
 use std::f64::consts::TAU;
 use std::fmt;
 
-use ddg_core::geometry::triangle_area;
+use ddg_core::geometry::{corner_angle, triangle_area};
 use ddg_core::{Geometry, GeometryError, TriMesh};
+use ddg_intrinsic::Complex;
 
 /// Options of [`exact_distance`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,6 +143,11 @@ pub enum ExactError {
     },
     /// An option is out of range.
     InvalidOptions(String),
+    /// The edge lengths do not fit the complex (count, a non-positive or non-finite length, a
+    /// face that is not a triangle).
+    Lengths(String),
+    /// A point source is not a point of the complex.
+    InvalidPoint(String),
     /// The limit on popped windows was reached.
     WindowLimit {
         /// The limit.
@@ -146,6 +165,8 @@ impl fmt::Display for ExactError {
                 "source {source} is not a vertex (the mesh has {n_vertices} vertices)"
             ),
             ExactError::InvalidOptions(m) => write!(f, "invalid options: {m}"),
+            ExactError::Lengths(m) => write!(f, "invalid edge lengths: {m}"),
+            ExactError::InvalidPoint(m) => write!(f, "invalid point source: {m}"),
             ExactError::WindowLimit { limit } => write!(
                 f,
                 "the exact distance stopped after {limit} windows (ExactOptions::max_windows)"
@@ -159,6 +180,61 @@ impl std::error::Error for ExactError {}
 impl From<GeometryError> for ExactError {
     fn from(e: GeometryError) -> Self {
         ExactError::Geometry(e)
+    }
+}
+
+/// The adjacency the propagation needs, with the halfedge conventions of `ddg_core::topology`
+/// (halfedge `3f + k` runs from corner `k` of face `f` to corner `k + 1`). Implemented by
+/// [`TriMesh`] and by [`Complex`], so that both entry points share the propagation.
+trait Topology {
+    fn next(&self, h: usize) -> usize;
+    fn twin(&self, h: usize) -> Option<usize>;
+    fn from_vertex(&self, h: usize) -> usize;
+    fn to_vertex(&self, h: usize) -> usize;
+    fn edge(&self, h: usize) -> usize;
+    /// The halfedges leaving `v`, one per corner at `v`, in the order of the mesh.
+    fn outgoing(&self, v: usize) -> Vec<usize>;
+}
+
+impl Topology for TriMesh {
+    fn next(&self, h: usize) -> usize {
+        TriMesh::next(self, h)
+    }
+    fn twin(&self, h: usize) -> Option<usize> {
+        TriMesh::twin(self, h)
+    }
+    fn from_vertex(&self, h: usize) -> usize {
+        TriMesh::from_vertex(self, h)
+    }
+    fn to_vertex(&self, h: usize) -> usize {
+        TriMesh::to_vertex(self, h)
+    }
+    fn edge(&self, h: usize) -> usize {
+        TriMesh::edge(self, h)
+    }
+    fn outgoing(&self, v: usize) -> Vec<usize> {
+        self.outgoing_halfedges(v).collect()
+    }
+}
+
+impl Topology for Complex {
+    fn next(&self, h: usize) -> usize {
+        Complex::next(self, h)
+    }
+    fn twin(&self, h: usize) -> Option<usize> {
+        Complex::twin(self, h)
+    }
+    fn from_vertex(&self, h: usize) -> usize {
+        Complex::from_vertex(self, h)
+    }
+    fn to_vertex(&self, h: usize) -> usize {
+        Complex::to_vertex(self, h)
+    }
+    fn edge(&self, h: usize) -> usize {
+        Complex::edge(self, h)
+    }
+    fn outgoing(&self, v: usize) -> Vec<usize> {
+        self.outgoing_halfedges(v).collect()
     }
 }
 
@@ -237,8 +313,8 @@ fn window_key(w: &Window) -> f64 {
     w.sigma + dx.hypot(w.s[1])
 }
 
-struct State<'a> {
-    mesh: &'a TriMesh,
+struct State<'a, T: Topology> {
+    mesh: &'a T,
     lengths: &'a [f64],
     /// Whether a vertex may be a pseudo-source (saddle, flat or boundary).
     bends: Vec<bool>,
@@ -251,7 +327,7 @@ struct State<'a> {
     max_distance: f64,
 }
 
-impl State<'_> {
+impl<T: Topology> State<'_, T> {
     fn push(&mut self, key: f64, event: Event) {
         self.order += 1;
         self.queue.push(Entry {
@@ -297,7 +373,7 @@ impl State<'_> {
     /// Lights every face around `v` from `v` at distance `d`.
     fn emit(&mut self, v: usize, d: f64) {
         self.report.n_pseudo_sources += 1;
-        let outgoing: Vec<usize> = self.mesh.outgoing_halfedges(v).collect();
+        let outgoing: Vec<usize> = self.mesh.outgoing(v);
         for h0 in outgoing {
             let o = self.mesh.next(h0);
             let back = self.mesh.next(o);
@@ -400,6 +476,117 @@ impl State<'_> {
     }
 }
 
+/// A source of [`exact_distance_complex`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExactSource {
+    /// A vertex of the complex.
+    Vertex(usize),
+    /// A point of a face: barycentric coordinates `[b0, b1, b2]` (non-negative, summing to 1)
+    /// with respect to the corners `faces()[face][0..3]`. A point on an edge or at a corner is
+    /// allowed (see the module documentation for the nudge off an edge).
+    Point {
+        /// The face.
+        face: usize,
+        /// The barycentric coordinates.
+        bary: [f64; 3],
+    },
+}
+
+fn check_options(options: &ExactOptions) -> Result<(), ExactError> {
+    if !(options.min_window_width.is_finite() && options.min_window_width >= 0.0) {
+        return Err(ExactError::InvalidOptions(format!(
+            "min_window_width must be a finite number >= 0, not {}",
+            options.min_window_width
+        )));
+    }
+    Ok(())
+}
+
+impl<T: Topology> State<'_, T> {
+    /// Seeds a vertex source.
+    fn seed_vertex(&mut self, s: usize) {
+        if self.distance[s] > 0.0 {
+            self.distance[s] = 0.0;
+            self.n_unreached -= 1;
+            self.push(0.0, Event::Vertex(s as u32));
+        }
+    }
+
+    /// Seeds a point of face `f` (barycentric `bary`): the three corners at their straight
+    /// distances inside the face, and a window over every edge of the face with a
+    /// pseudo-source at the point, in the frame of the halfedge across the edge.
+    fn seed_point(&mut self, f: usize, bary: [f64; 3], corners: [u32; 3]) {
+        // At a corner the point is the vertex: the windows of a source this close to a vertex
+        // would be too thin to light the faces around it.
+        if let Some(k) = (0..3).find(|&k| bary[k] >= 1.0 - 1e-12) {
+            self.seed_vertex(corners[k] as usize);
+            return;
+        }
+        for k in 0..3 {
+            let h = 3 * f + k;
+            let o = self.mesh.next(h);
+            let back = self.mesh.next(o);
+            // In the frame of h (corner k at the origin, corner k + 1 at (l, 0), corner k + 2
+            // above) the point is (b_{k+1} l + b_{k+2} c_x, b_{k+2} c_y).
+            let l = self.length(h);
+            let c = apex(l, self.length(o), self.length(back));
+            let (bk1, bk2) = (bary[(k + 1) % 3], bary[(k + 2) % 3]);
+            let x = bk1 * l + bk2 * c[0];
+            // A point on the edge itself would give a degenerate window (the pseudo-source
+            // needs a positive height); it is moved off by a relative 1e-13.
+            let y = (bk2 * c[1]).max(1e-13 * l);
+            self.reach(self.mesh.from_vertex(h), x.hypot(y));
+            if let Some(t) = self.mesh.twin(h) {
+                self.push_window(Window {
+                    h: t as u32,
+                    b0: 0.0,
+                    b1: l,
+                    s: [l - x, -y],
+                    sigma: 0.0,
+                });
+            }
+        }
+    }
+
+    /// Runs the queue to exhaustion.
+    fn run(&mut self, max_windows: Option<usize>) -> Result<(), ExactError> {
+        let mut n_popped = 0usize;
+        let mut since_max = 0usize;
+        while let Some(entry) = self.queue.pop() {
+            match entry.event {
+                Event::Vertex(v) => {
+                    let v = v as usize;
+                    // A stale entry: the vertex was reached by a shorter path since.
+                    if entry.key == self.distance[v] {
+                        self.emit(v, entry.key);
+                    }
+                }
+                Event::Window(w) => {
+                    n_popped += 1;
+                    if let Some(limit) = max_windows
+                        && n_popped > limit
+                    {
+                        return Err(ExactError::WindowLimit { limit });
+                    }
+                    if self.n_unreached == 0 {
+                        since_max += 1;
+                        if since_max >= 4096 {
+                            since_max = 0;
+                            self.max_distance = self.distance.iter().fold(0.0, |m, &x| m.max(x));
+                        }
+                        if entry.key >= self.max_distance {
+                            self.report.n_beyond += 1;
+                            continue;
+                        }
+                    }
+                    self.propagate(w);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The exact geodesic distance on the polyhedral surface `(mesh, geometry)` from the nearest of
 /// `sources` (vertex ids) to every vertex. See the [module documentation](self).
 ///
@@ -423,12 +610,7 @@ pub fn exact_distance(
             n_vertices: mesh.n_vertices(),
         });
     }
-    if !(options.min_window_width.is_finite() && options.min_window_width >= 0.0) {
-        return Err(ExactError::InvalidOptions(format!(
-            "min_window_width must be a finite number >= 0, not {}",
-            options.min_window_width
-        )));
-    }
+    check_options(options)?;
     let n = mesh.n_vertices();
     let mut angle_sum = vec![0.0; n];
     for (f, face) in mesh.faces().iter().enumerate() {
@@ -452,45 +634,118 @@ pub fn exact_distance(
         max_distance: f64::INFINITY,
     };
     for &s in sources {
-        if state.distance[s] > 0.0 {
-            state.distance[s] = 0.0;
-            state.n_unreached -= 1;
-            state.push(0.0, Event::Vertex(s as u32));
-        }
+        state.seed_vertex(s);
     }
-    let mut n_popped = 0usize;
-    let mut since_max = 0usize;
-    while let Some(entry) = state.queue.pop() {
-        match entry.event {
-            Event::Vertex(v) => {
-                let v = v as usize;
-                // A stale entry: the vertex was reached by a shorter path since.
-                if entry.key == state.distance[v] {
-                    state.emit(v, entry.key);
-                }
+    state.run(options.max_windows)?;
+    Ok(ExactDistance {
+        distances: state.distance,
+        report: state.report,
+    })
+}
+
+/// The exact geodesic distance on the Δ-complex `complex` with edge lengths `lengths`
+/// (indexed by edge), from the nearest of `sources` to every vertex. The complex may have
+/// several edges between the same two vertices, self-edges, faces that use a vertex twice
+/// and faces glued to themselves; every face must be a triangle of positive area. With
+/// vertex sources on a complex from [`Complex::from_tri_mesh`] the result equals that of
+/// [`exact_distance`] bit for bit. See the [module documentation](self).
+///
+/// # Errors
+/// [`ExactError::NoSource`], [`ExactError::SourceOutOfRange`], [`ExactError::InvalidPoint`],
+/// [`ExactError::Lengths`], [`ExactError::InvalidOptions`] and [`ExactError::WindowLimit`].
+pub fn exact_distance_complex(
+    complex: &Complex,
+    lengths: &[f64],
+    sources: &[ExactSource],
+    options: &ExactOptions,
+) -> Result<ExactDistance, ExactError> {
+    let n = complex.n_vertices();
+    if lengths.len() != complex.n_edges() {
+        return Err(ExactError::Lengths(format!(
+            "{} lengths for {} edges",
+            lengths.len(),
+            complex.n_edges()
+        )));
+    }
+    if let Some(e) = lengths.iter().position(|l| !(l.is_finite() && *l > 0.0)) {
+        return Err(ExactError::Lengths(format!(
+            "edge {e} (vertices {:?}) has length {}, not a positive finite number",
+            complex.edge_vertices(e),
+            lengths[e]
+        )));
+    }
+    if sources.is_empty() {
+        return Err(ExactError::NoSource);
+    }
+    for src in sources {
+        match *src {
+            ExactSource::Vertex(v) if v >= n => {
+                return Err(ExactError::SourceOutOfRange {
+                    source: v,
+                    n_vertices: n,
+                });
             }
-            Event::Window(w) => {
-                n_popped += 1;
-                if let Some(limit) = options.max_windows
-                    && n_popped > limit
+            ExactSource::Point { face, bary } => {
+                if face >= complex.n_faces() {
+                    return Err(ExactError::InvalidPoint(format!(
+                        "face {face} does not exist (the complex has {} faces)",
+                        complex.n_faces()
+                    )));
+                }
+                let sum: f64 = bary.iter().sum();
+                if !(bary.iter().all(|b| b.is_finite() && *b >= -1e-12)
+                    && (sum - 1.0).abs() <= 1e-9)
                 {
-                    return Err(ExactError::WindowLimit { limit });
+                    return Err(ExactError::InvalidPoint(format!(
+                        "barycentric coordinates {bary:?} in face {face} are not non-negative \
+                         numbers summing to 1"
+                    )));
                 }
-                if state.n_unreached == 0 {
-                    since_max += 1;
-                    if since_max >= 4096 {
-                        since_max = 0;
-                        state.max_distance = state.distance.iter().fold(0.0, |m, &x| m.max(x));
-                    }
-                    if entry.key >= state.max_distance {
-                        state.report.n_beyond += 1;
-                        continue;
-                    }
-                }
-                state.propagate(w);
+            }
+            _ => {}
+        }
+    }
+    check_options(options)?;
+    let mut angle_sum = vec![0.0; n];
+    for f in 0..complex.n_faces() {
+        let l = [0, 1, 2].map(|k| lengths[complex.edge(3 * f + k)]);
+        if triangle_area(l[0], l[1], l[2]).is_none() {
+            return Err(ExactError::Lengths(format!(
+                "face {f} (vertices {:?}) with edge lengths {l:?} is not a triangle of positive area",
+                complex.faces()[f]
+            )));
+        }
+        for k in 0..3 {
+            let angle = corner_angle(l[(k + 1) % 3], l[k], l[(k + 2) % 3]).ok_or_else(|| {
+                ExactError::Lengths(format!("face {f}: no angle at corner {k} (lengths {l:?})"))
+            })?;
+            angle_sum[complex.faces()[f][k] as usize] += angle;
+        }
+    }
+    let bends: Vec<bool> = (0..n)
+        .map(|v| complex.is_boundary_vertex(v) || angle_sum[v] >= TAU - 1e-9)
+        .collect();
+    let mut state = State {
+        mesh: complex,
+        lengths,
+        bends,
+        distance: vec![f64::INFINITY; n],
+        queue: BinaryHeap::new(),
+        order: 0,
+        report: ExactReport::default(),
+        min_width: options.min_window_width,
+        n_unreached: n,
+        max_distance: f64::INFINITY,
+    };
+    for src in sources {
+        match *src {
+            ExactSource::Vertex(v) => state.seed_vertex(v),
+            ExactSource::Point { face, bary } => {
+                state.seed_point(face, bary, complex.faces()[face])
             }
         }
     }
+    state.run(options.max_windows)?;
     Ok(ExactDistance {
         distances: state.distance,
         report: state.report,

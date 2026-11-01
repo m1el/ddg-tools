@@ -17,8 +17,13 @@ fn fnv(h: &mut u64, x: u64) {
 
 /// A hash of the bits of the distances and of every field of the report.
 fn digest(shape: &Shape, sources: &[usize]) -> u64 {
-    let r = exact_distance(&shape.mesh, &shape.geometry, sources, &ExactOptions::default())
-        .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
+    let r = exact_distance(
+        &shape.mesh,
+        &shape.geometry,
+        sources,
+        &ExactOptions::default(),
+    )
+    .unwrap_or_else(|e| panic!("{}: {e}", shape.name));
     let mut h = 0xcbf29ce484222325u64;
     for d in &r.distances {
         fnv(&mut h, d.to_bits());
@@ -41,9 +46,18 @@ fn digest(shape: &Shape, sources: &[usize]) -> u64 {
 
 fn pinned_cases() -> Vec<(Shape, Vec<usize>)> {
     vec![
-        (Shape::generated("icosphere2", icosphere(2).unwrap()), vec![0]),
-        (Shape::generated("icosphere3", icosphere(3).unwrap()), vec![3, 100]),
-        (Shape::generated("torus", torus(12, 7, 1.0, 0.4).unwrap()), vec![5]),
+        (
+            Shape::generated("icosphere2", icosphere(2).unwrap()),
+            vec![0],
+        ),
+        (
+            Shape::generated("icosphere3", icosphere(3).unwrap()),
+            vec![3, 100],
+        ),
+        (
+            Shape::generated("torus", torus(12, 7, 1.0, 0.4).unwrap()),
+            vec![5],
+        ),
         (
             Shape::generated("bumpy", bumpy_grid_disk(14, 9, 0.3).unwrap()),
             vec![0, 40],
