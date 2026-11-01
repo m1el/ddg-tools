@@ -52,11 +52,13 @@
 
 pub mod anisotropy;
 pub mod baseline;
+pub mod cmcf;
 pub mod curvature;
 mod error;
 mod flatten;
 mod flip;
 pub mod formulas;
+pub mod hierarchy;
 mod mesh;
 pub mod metric;
 pub mod multigrid;
