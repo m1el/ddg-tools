@@ -1893,7 +1893,8 @@ identity. Tier C (`DdgProofs/IntegerCoords/Complex/`, work package WP9): the **c
 at the input vertices with `ic-identify-edge` (Alg. 3 computes the label of the arc; the walk back
 past inserted vertices, Alg. 3 lines 1–5, is not modelled), the flip of a complex model with the
 correctness of Eq. 3 after gluing two face models (`ic-flip-normal`, C part: same curves through the
-quadrilateral), `ic-roundabout-update`, and the merge of two halves (`ic-merge-edge-normal`: the
+quadrilateral), `ic-roundabout-update`, the combinatorial part of `ic-extract-intrinsic-edge` (each
+crossing on exactly one curve from a vertex, found by walking back), and the merge of two halves (`ic-merge-edge-normal`: the
 merged faces are valid and the Rust formula counts the merged edge's crossings, given the curve ends
 at the inserted vertex as the realization has them); tier B: the split of a crossed edge
 (`ic-split-crossed-edge`); tier A: the strip intersection of Alg. 2 (`ic-strip-intersection`). All statements

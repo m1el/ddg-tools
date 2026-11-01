@@ -1206,3 +1206,6 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Strip.hit_unique
 #print axioms DdgProofs.IntegerCoords.Strip.hit_mem
 #print axioms DdgProofs.IntegerCoords.Strip.hit_reverse
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.end_of_crossing
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.end_unique
+#print axioms DdgProofs.IntegerCoords.Cx.Valid.end_is_arc

@@ -14,6 +14,7 @@ import DdgProofs.IntegerCoords.Complex.Labels
 import DdgProofs.IntegerCoords.Complex.QuadFlip
 import DdgProofs.IntegerCoords.Complex.Flip
 import DdgProofs.IntegerCoords.Complex.Merge
+import DdgProofs.IntegerCoords.Complex.Extract
 
 /-!
 # Integer Coordinates for Intrinsic Geometry Processing (Gillespie, Sharp, Crane 2021)

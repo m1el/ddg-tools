@@ -659,6 +659,8 @@ impl IntegerTriangulation {
     /// [`IntegerError::IndexOutOfRange`]; [`IntegerError::Intrinsic`] for invalid options or a
     /// degenerate input face; [`IntegerError::InvalidCoordinates`] naming the edge, a crossing,
     /// a vertex or a face when the integers are not those of a realization.
+    ///
+    /// [formula: ic-extract-intrinsic-edge]
     pub fn extract_intrinsic_edge(
         &self,
         e: usize,
