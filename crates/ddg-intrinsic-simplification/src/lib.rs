@@ -54,15 +54,20 @@
 //!   [`CoarseMesh::from_intrinsic`]) and post-refinement ([`CoarseMesh::post_refine`]) with the
 //!   workspace's Delaunay refinement, tracked points composed through the `T⁰ → T¹` query.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
+//! * [`hierarchy`]: the intrinsic mesh hierarchy (one run with snapshots, or fresh levels) with
+//!   its level operators and prolongations; [`cmcf`]: conformalized mean curvature flow
+//!   (Kazhdan, Solomon, Ben-Chen 2012) accelerated by multigrid on it (WP7, SPEC §9).
 
 pub mod anisotropy;
 pub mod applications;
 pub mod baseline;
+pub mod cmcf;
 pub mod curvature;
 mod error;
 mod flatten;
 mod flip;
 pub mod formulas;
+pub mod hierarchy;
 mod mesh;
 pub mod metric;
 pub mod multigrid;

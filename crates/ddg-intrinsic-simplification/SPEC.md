@@ -713,6 +713,97 @@ matrix `M_t` of the current positions (Kazhdan et al. Sec. 5), solved per step b
 §9.2 on the **intrinsic** hierarchy of the input (built once). Reported: time per step against a
 direct solve, and the difference of the results.
 
+*As built (WP7, `src/hierarchy.rs`, `src/cmcf.rs`; study `examples/multigrid_study.rs`, flow
+`examples/cmcf.rs`; tests `tests/hierarchy.rs`).*
+
+**Hierarchy.** `build_hierarchy(&CoarseMesh, &HierarchyOptions) -> Result<Hierarchy, HierarchyError>`;
+options `ratio` (0.25), `n_min` (500), `fresh_levels` (false), `simplify` (channels, metric, fixed
+vertices; `target`, `snapshots` and `record_sequence` are overwritten). The mesh is cloned, not changed.
+Level counts as the reference (`mg_precompute.cpp`): `n_{k+1} = round(ρ n_k)` while `n_k > n_min`, so the
+coarsest level is the first with at most `n_min` vertices (spot 2930, 733, 183; bob 5344, 1336, 334;
+blub 7106, 1777, 444; spot_subdiv 24755, 6189, 1547, 387). One run: `Target::Vertices(last)` with
+`snapshots = [n_1, …]` (S24); `fresh_levels`: one `simplify` call per level on the previous result with
+one snapshot at its target (each call recomputes masses and error vectors from the current curvature, which
+is R33; the tracked fine vertices carry the locations). `Hierarchy`: `levels()` (`Level { vertices (fine
+ids), faces, lengths, laplacian, mass }`), `prolongations()` (`P_k`, `n_k × n_{k+1}`), `report()`
+(targets, counts, the `SimplifyReport`s, nnz of the `P_k`, seconds), `multigrid(A, known, options)`
+(= `Multigrid::new(A, P_k, …)`). Level 0 is the mesh as given, **before** the initial Delaunay flips of the
+run (its Laplacian is that of the input connectivity); `P_0` rows are indexed by the mesh's vertices.
+Level Laplacians and lumped masses are computed from each snapshot's faces and side lengths (self-edges
+contribute nothing, so they are safe on Δ-complexes); the test compares them with
+`CoarseMesh::cotan_laplacian`/`lumped_mass` of the same run stopped at that count. `P_k` rows: 1 at the own
+column for a kept vertex, else the barycentric coordinates of the coarse face (summed on a repeated
+corner); `HierarchyError` for a ratio outside (0,1), a refused/failed `simplify`, a level whose lengths are
+not a triangulation, an inconsistent snapshot.
+
+**Multigrid on it** (`examples/multigrid_study.rs`; V-cycle `ν₁ = ν₂ = 2` symmetric Gauss–Seidel, tolerance
+`1e-10` relative; `A = L + M/Σm` or the reference's Dirichlet example `L z = M 1`, `z = 0` at 0, 1, 2,
+random start; 1 thread; load average 2–3 from other work). Cycles to `1e-10`, convergence factor (geometric
+mean), and PCG iterations (the V-cycle as preconditioner), one-run snapshots:
+
+| mesh (levels) | problem | V-cycles / factor | PCG its (factor) | V 1+1 | V 3+3 |
+|---|---|---|---|---|---|
+| spot (2930, 733, 183) | `L+M` | 19 / 0.29 | 11 (0.11) | 45 / 0.59 | 13 / 0.17 |
+| spot | Dirichlet | 26 / 0.30 | 14 (0.10) | 65 / 0.62 | 20 / 0.20 |
+| bob (5344, 1336, 334) | `L+M` | 16 / 0.23 | 10 (0.08) | 43 / 0.58 | 11 / 0.12 |
+| bob | Dirichlet | 22 / 0.23 | 12 (0.07) | 58 / 0.59 | 19 / 0.19 |
+| blub (7106, 1777, 444) | `L+M` | 49 / 0.62 | 17 (0.25) | 138 / 0.85 | 31 / 0.47 |
+| blub | Dirichlet | 66 / 0.63 | 22 (0.23) | 186 / 0.85 | 42 / 0.48 |
+| spot_subdiv (24755 … 387) | `L+M` | 46 / 0.61 | 16 (0.24) | 102 / 0.80 | 31 / 0.47 |
+| spot_subdiv | Dirichlet | 60 / 0.58 | 21 (0.21) | 138 / 0.79 | 37 / 0.42 |
+
+The solutions agree with the direct solve to `1e-11` relative or better on every row.
+The reference's example (spot, Dirichlet): residual `157 → 4.2e-11` in 19 cycles (factor 0.22); here
+`149 → 4.2e-11` in 23 cycles (0.29; the reference uses forward sweeps twice, this solver forward then
+backward so that the cycle can precondition CG). The earlier subdivision hierarchy of spot gave 0.58 per
+cycle with 2+2 sweeps: on the intrinsic hierarchy it is 0.29. Blub (low-quality triangles) is the hardest,
+as expected. **One run (S24) against fresh levels (R33): no measurable difference** (cycle counts equal or
+within one on all rows; e.g. spot Dirichlet 26 / 26, bob 22 / 23, blub 66 / 66, spot_subdiv 60 / 60), also
+with `reference_compat(0, …)` on spot (23 / 23 cycles to `4.2e-11`). The one-run hierarchy is kept as the
+default (no repeated curvature computation). **Defaults:** 2+2 sweeps (the paper's), and PCG with one
+V-cycle as the preconditioner as the recommended driver (a third to a half of the iterations of stand-alone
+V-cycles at the same cost per iteration; 3+3 sweeps cut iterations further, but the PCG solve time is
+44-48 ms for 1+1, 2+2 and 3+3 on spot_subdiv, so 2+2 stays). Timing of one solve (spot_subdiv, 24.7k, PCG 2+2): setup 16 ms, solve
+44 ms, against 38 ms for submatrix + sparse Cholesky + solve of `ddg_core` (supernodal, fill-reducing):
+this multigrid is not faster than the direct solve for a *single* system at these sizes; it pays when the
+system changes per solve and the factorization cannot be reused (cMCF below), and at sizes where
+`O(n^{3/2})` factorization dominates.
+
+**cMCF** (`cmcf::CmcfFlow`): `(M_t + h L₀) X_{t+1} = M_t X_t` with this crate's PSD `L₀` (§9.3 prints
+`M_t − h L₀` for a negative semidefinite stiffness matrix; same system), `M_t` the **unnormalized** lumped
+mass of the current positions, so `h` is an area (the unit sphere obeys `r² = 1 − 4t`; tested within 3 %
+for 10 backward-Euler steps, `h = 0.002`). `step_direct` (symbolic Cholesky once, numeric every step) and
+`step_multigrid(&Hierarchy, &CmcfMultigridOptions)` (PCG + V-cycle per coordinate, previous positions as
+the initial guess, Galerkin products and coarsest factorization rebuilt per step with the hierarchy's
+`P_k`; tolerance `1e-10` relative, cap 100); `normalize()` re-centres and rescales to the input's area
+(the flow otherwise reaches a point in finite time, a unit-area sphere at `t = 1/16π`, after which `M_t` is
+singular; the example applies it after every step). Reports per step: assembly, setup, solve seconds, PCG
+iterations per coordinate, convergence, the relative residual. Results (unit-area input, `h = 1e-3`,
+rescaled each step, 2+2, load average 2–3):
+
+| mesh | steps | direct s/step | multigrid s/step (assemble + Galerkin + PCG) | PCG its | one-step diff | 100-step trajectory diff |
+|---|---|---|---|---|---|---|
+| spot 2930 | 100 | 0.0028 | 0.0092 (0.0008 + 0.0019 + 0.0065) | 8 | `3e-11` | `6e-10` |
+| bob 5344 | 100 | 0.0097 | 0.0155 (0.0014 + 0.0035 + 0.0106) | 7 | `4e-11` | `3e-10` |
+| blub 7106 | 100 | 0.0110 | 0.0295 (0.0020 + 0.0045 + 0.0230) | 11-12 | `2e-11` | `2e-10` |
+| spot_subdiv 24755 | 50 | 0.033 | 0.12 (0.007 + 0.015 + 0.10) | 11-12 | `1e-11` | `4e-11` |
+| spot ×16 (46850, tol `1e-10`) | 3 | 0.063 | 0.165 | 10 | `1e-12` | `1e-12` |
+| spot ×16 (tol `1e-5`) | 3 | 0.061 | 0.09 | 4 | `1.7e-7` | `2e-7` |
+| spot ×64 (187394, tol `1e-5`) | 3 | 0.41 | 0.51 (0.05 + 0.19 + 0.27) | 4-5 | `1e-7` | `1.5e-7` |
+
+Reusing the input hierarchy's `P_k` with fresh Galerkin products is enough: the iteration count is
+constant over 100 steps while the shape goes from the input to a sphere (spot 9 → 8, bob 7 → 7, blub
+15 → 11), and the multigrid steps agree with the direct steps to `1e-11` (one step from the same state) and
+`≤ 6e-10` after 100 steps (the test asserts `1e-8`). The Galerkin rebuild is 20-25 % of a multigrid step
+(0.19 s of 0.51 s at 187k; the same order as one numeric factorization, 0.29 s). **The paper's 20× speedup
+is not reproduced**: against this crate's sequential supernodal Cholesky (0.41 s per step at 187k vertices,
+which is much faster than the Eigen `SimplicialLDLT` of the authors' stack) the multigrid step is 0.3-0.6×
+at 3-25k vertices and 0.8× at 187k with `1e-5`; the trend (0.27 → 0.5 → 0.8 from 3k to 187k) says a
+crossover somewhere near a million vertices. What would help, not done: the split
+`P^T(M_t + hL₀)P = h·P^T L₀ P (once) + P^T M_t P` (about a third of the setup), a threaded or colour-ordered
+Gauss–Seidel, solving the three coordinates together. Meshes: `runs_tmp/cmcf_*/step_XXXX.obj` (every 10th
+step) from `examples/cmcf.rs`.
+
 ---------------------------------------------------------------------------------------------------
 
 ## 10. Applications and evaluation (paper Sec. 8.2–8.5)
