@@ -4,11 +4,12 @@
 //! halfedge, the edge of every halfedge, one halfedge per edge and per vertex, and a mask of
 //! *constrained* edges. It knows nothing of lengths, signposts or integers. Its topological
 //! operations ([`Complex::flip_edge`], [`Complex::split_face`], [`Complex::split_edge`],
-//! [`Complex::remove_vertex`], [`Complex::merge_edge`]) change only these arrays and return what they did to the ids
-//! (which halfedges moved where, which edges, faces and vertices are new, renumbered or gone),
-//! so that a representation can bring its own per-halfedge, per-edge, per-face and per-vertex
-//! data along. [`IntrinsicTriangulation`](crate::IntrinsicTriangulation) (signposts) embeds
-//! one; the integer coordinates of Gillespie, Sharp and Crane (2021) embed the same type.
+//! [`Complex::remove_vertex`], [`Complex::merge_edge`], [`Complex::remove_boundary_vertex`])
+//! change only these arrays and return what they did to the ids (which halfedges moved where,
+//! which edges, faces and vertices are new, renumbered or gone), so that a representation can
+//! bring its own per-halfedge, per-edge, per-face and per-vertex data along.
+//! [`IntrinsicTriangulation`](crate::IntrinsicTriangulation) (signposts) embeds one; the integer
+//! coordinates of Gillespie, Sharp and Crane (2021) embed the same type.
 //!
 //! # Conventions (SPEC N9)
 //!
@@ -36,9 +37,10 @@
 //! * **Directions.** An operation never changes the direction of an edge it does not flip or
 //!   split ([`Complex::edge_halfedge`] may change id, never tail and head). A flipped edge
 //!   turns counter-clockwise; the two halves of a split edge keep its direction.
-//! * Removal of a vertex ([`Complex::remove_vertex`]) and the merge of an edge's two halves
-//!   ([`Complex::merge_edge`], the inverse of a split) are the only operations that renumber:
-//!   the last vertex, the last edges and the last faces take the ids that became free.
+//! * Removal of a vertex ([`Complex::remove_vertex`], [`Complex::remove_boundary_vertex`]) and
+//!   the merge of an edge's two halves ([`Complex::merge_edge`], the inverse of a split) are the
+//!   only operations that renumber: the last vertex, the last edges and the last faces take the
+//!   ids that became free.
 
 use ddg_core::TriMesh;
 use ddg_core::topology::NONE;
@@ -1397,6 +1399,64 @@ impl Complex {
                 reason,
             })?;
         Ok(self.merge_edge_unchecked(v, &star))
+    }
+
+    /// Removes boundary vertex `v` that lies on exactly two faces (SPEC N54; Liu et al. 2023,
+    /// Sec. 4.2, inset right): with `b` the boundary neighbour before `v` (the boundary edge
+    /// `b → v` arrives at `v`), `c` the one after it (the boundary edge `v → c` leaves it) and
+    /// `a` the far end of the one interior edge at `v`, the faces `vab` and `vca` become the one
+    /// face `abc`, the spoke `va` is deleted and the boundary edges `bv`, `vc` become the one
+    /// boundary edge `bc`. The outer edges `ab`, `ca` are kept. The length of `bc` is the
+    /// caller's business (`ℓ_bv + ℓ_vc` if the corner angles at `v` sum to `π`).
+    ///
+    /// This is [`merge_edge`](Self::merge_edge) of the boundary edge leaving `v`, with the
+    /// edge chosen here: the merged edge keeps the smaller of the two boundary edges' ids, the
+    /// merged face the smaller face id, and the freed ids (one vertex, two edges, one face) are
+    /// filled by the last ones as in [`remove_vertex`](Self::remove_vertex); the returned
+    /// [`EdgeMerge`] lists every move ([`faces`](EdgeMerge::faces)`[0]` is the merged face,
+    /// [`edge`](EdgeMerge::edge) the boundary edge `bc`). Every surviving halfedge leaves its
+    /// tail in the same direction as before; the merged boundary halfedge `b → c` takes the
+    /// data of `b → v`. Removing the vertex of a boundary [`split_edge`](Self::split_edge)
+    /// right after the split gives back the complex exactly, ids included.
+    ///
+    /// Not supported: an interior vertex, a vertex on another number of faces, a vertex with an
+    /// edge to itself (which includes the only vertex of a boundary loop), a vertex whose spoke
+    /// is constrained or one of whose two boundary edges is constrained and the other not.
+    ///
+    /// # Errors
+    /// [`IntrinsicError::IndexOutOfRange`], and [`IntrinsicError::RemovalRefused`] with
+    /// [`RemovalRefusal::InteriorVertex`], [`RemovalRefusal::BoundaryFaces`],
+    /// [`RemovalRefusal::SelfEdge`] or [`RemovalRefusal::ConstrainedEdge`]; the complex is
+    /// unchanged then.
+    pub fn remove_boundary_vertex(&mut self, v: usize) -> Result<EdgeMerge, IntrinsicError> {
+        self.check_index("vertex", v, self.n_vertices())?;
+        let star =
+            self.boundary_removal_star(v)
+                .map_err(|reason| IntrinsicError::RemovalRefused {
+                    vertex: v as u32,
+                    reason,
+                })?;
+        Ok(self.merge_edge_unchecked(v, &star))
+    }
+
+    /// Why vertex `v` (in range) cannot be removed by
+    /// [`remove_boundary_vertex`](Self::remove_boundary_vertex), if it cannot.
+    pub fn boundary_removal_refusal(&self, v: usize) -> Option<RemovalRefusal> {
+        self.boundary_removal_star(v).err()
+    }
+
+    fn boundary_removal_star(&self, v: usize) -> Result<Vec<usize>, RemovalRefusal> {
+        let h0 = self.vertex_halfedge[v] as usize;
+        if self.twin[h0] != NONE {
+            return Err(RemovalRefusal::InteriorVertex);
+        }
+        let n_faces = self.outgoing_halfedges(v).take(3).count();
+        if n_faces != 2 {
+            return Err(RemovalRefusal::BoundaryFaces {
+                faces: self.outgoing_halfedges(v).count(),
+            });
+        }
+        self.merge_star(v, self.halfedge_edge[h0] as usize)
     }
 
     /// [`merge_edge`](Self::merge_edge) for a star that [`merge_star`](Self::merge_star)

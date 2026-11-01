@@ -1123,6 +1123,33 @@ Entry N53 was added with the integer coordinates' decision I27 (`crates/ddg-inte
   of split vertices after Delaunay flipping (17 shapes): 648 by flips, 137 by a merge, 47 boundary
   vertices merged, 16 `Stuck` (face insertions, no straight pair).
 
+Entry N54 was added with intrinsic simplification (`crates/ddg-intrinsic-simplification/SPEC.md`
+§2.1, §3.5, S13).
+
+* **N54** *Removing a boundary vertex on two faces* (2026-11-01, IEM WP0). Liu et al. 2023
+  (Sec. 4.2, inset right) remove a flat boundary vertex by flipping it down to two faces and
+  merging them. `Complex::remove_boundary_vertex(v) -> EdgeMerge`: `v` a boundary vertex on
+  exactly two faces, `b → v` the arriving boundary edge, `v → c` the leaving one, `v a` the one
+  spoke; the faces `vab`, `vca` become `abc`, the spoke is deleted, `bv` and `vc` become the
+  boundary edge `bc` (outer edges `ab`, `ca` kept). It is `merge_edge` (N53) of the boundary edge
+  leaving `v` with the edge chosen by the complex, so the ids are N53's: the merged edge keeps the
+  smaller of the two boundary edges' ids, the merged face the smaller face id, the freed ids (1
+  vertex, 2 edges, 1 face) are filled by the last ones as in `remove_vertex`, every move is in the
+  `EdgeMerge` (`faces[0]` the merged face, `faces[1] = NONE`, `edge` = `bc` directed `b → c`);
+  surviving halfedges keep their tails and directions (`b → c` carries the data of `b → v`). The
+  length of `bc` is the caller's (`ℓ_bv + ℓ_vc` for a flat `v`); the complex looks at no
+  geometry. Refusals (`RemovalRefusal`, two new variants): `InteriorVertex`, `BoundaryFaces {
+  faces }` (not two faces), `SelfEdge` (an edge from `v` to itself, which includes the only vertex
+  of a boundary loop: removing it would leave a loop without vertices), `ConstrainedEdge` (the
+  spoke, or only one of the two boundary edges); `Complex::boundary_removal_refusal(v)` asks
+  without changing anything. Two edges `b = c` (a boundary loop of two vertices) are allowed and
+  leave a boundary self-edge at `b`. *Tests* (`tests/boundary_removal.rs`): a boundary
+  `split_edge` followed by the removal gives back the complex exactly, ids included (1 084 times
+  after random flips, face splits and splits); tails, edge ends and vertex ids carried through
+  232 random removals with flips in between (4 leaving a boundary self-edge), the merged face is
+  `abc`, χ unchanged; the refusals change nothing. `remove_vertex`, `merge_edge` and every other
+  operation are unchanged (no shared code changed); `tests/bitwise_pins.rs` passes unchanged.
+
 Formula ids in use: `it-angle-normalization`, `it-signpost-update`, `it-unfold-diamond`,
 `it-flip-length`, `it-flip-convexity`, `it-delaunay-condition`, `it-cotan-weight`,
 `it-unfold-apex`, `it-ray-edge-intersection`, `it-barycentric-coordinates`,

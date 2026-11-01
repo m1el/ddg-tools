@@ -417,6 +417,17 @@ pub enum RemovalRefusal {
         /// The two halves.
         edges: [u32; 2],
     },
+    /// Removing a boundary vertex
+    /// ([`Complex::remove_boundary_vertex`](crate::Complex::remove_boundary_vertex)): the
+    /// vertex is interior.
+    InteriorVertex,
+    /// Removing a boundary vertex
+    /// ([`Complex::remove_boundary_vertex`](crate::Complex::remove_boundary_vertex)): it is in
+    /// another number of faces than two.
+    BoundaryFaces {
+        /// The number of faces (corners) at the vertex.
+        faces: usize,
+    },
 }
 
 impl fmt::Display for RemovalRefusal {
@@ -474,6 +485,14 @@ impl fmt::Display for RemovalRefusal {
                 "its edges {} and {} are on one straight line, but only one of them runs along \
                  an input edge (or they run along different ones)",
                 edges[0], edges[1]
+            ),
+            RemovalRefusal::InteriorVertex => {
+                write!(f, "it is an interior vertex, not a boundary vertex")
+            }
+            RemovalRefusal::BoundaryFaces { faces } => write!(
+                f,
+                "it lies on {faces} faces; removing a boundary vertex needs two (flip edges at \
+                 it first)"
             ),
         }
     }
