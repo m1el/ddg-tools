@@ -92,6 +92,15 @@ pub struct IntegerRefineReport {
     /// rounding ([`IntegerError::RecoverFailed`]) or, with a positive
     /// [`FaceSplitOptions::too_close`], because it was too near an arc; the face was left.
     pub n_recover_failed: usize,
+    /// Edge splits that were snapped onto a crossing of the edge with an input edge (the point
+    /// was within [`LOCATION_SNAP`](ddg_intrinsic::insert::LOCATION_SNAP) of it; SPEC I28,
+    /// `ic-split-at-crossing`): the same splits that the signposts snap
+    /// ([`RefineReport::n_snapped`] counts these and the snapped face splits).
+    pub n_edge_splits_snapped: usize,
+    /// Edge splits refused as [`InsertRefusal::NotLocated`] (within rounding of an input edge
+    /// that the edge does not cross there, or of a corner of the input face; SPEC I28); the
+    /// driver left the face.
+    pub n_edge_splits_refused: usize,
     /// Places `q⁰` within rounding outside their input face that were moved inside (I16).
     pub n_places_moved: usize,
     /// Crossings whose parameters were clamped into `[0, 1]` in the face and edge splits
@@ -220,7 +229,19 @@ impl Triangulation for Recording<'_> {
             }
         }
         match self.tri.split_edge(e, t) {
-            Ok(insertion) => Ok(insertion),
+            Ok(insertion) => {
+                self.stats.n_edge_splits_snapped += usize::from(insertion.snapped.is_some());
+                Ok(insertion)
+            }
+            Err(
+                err @ IntegerError::Intrinsic(IntrinsicError::InsertionRefused {
+                    reason: InsertRefusal::NotLocated { .. },
+                    ..
+                }),
+            ) => {
+                self.stats.n_edge_splits_refused += 1;
+                Err(self.pass(err, "split_edge"))
+            }
             Err(err) => Err(self.pass(err, "split_edge")),
         }
     }
@@ -282,6 +303,8 @@ impl IntegerTriangulation {
                 n_near_arc: 0,
                 min_curve_distance: f64::INFINITY,
                 n_recover_failed: 0,
+                n_edge_splits_snapped: 0,
+                n_edge_splits_refused: 0,
                 n_places_moved: 0,
                 clamped_crossings: 0,
                 max_clamp: 0.0,

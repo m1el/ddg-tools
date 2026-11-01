@@ -22,8 +22,14 @@
 //! ([`IntegerTriangulation::extract_intrinsic_edge`], WP2): how many crossings lie before the
 //! split point (their `distance` along the edge below `t ℓ`), and the place `q⁰_m`, the point
 //! of the input face between the two neighbouring crossings, interpolated linearly between
-//! them (the edge is straight in that face). A point within rounding of a crossing (a
-//! barycentric coordinate that is not strictly positive) is refused. The integers then follow
+//! them (the edge is straight in that face). A point within
+//! [`LOCATION_SNAP`] times the longest side of that face from a side is **snapped onto the
+//! crossing** of the edge with that side's input edge, as the signposts snap it (SPEC I28,
+//! `ic-split-at-crossing`, [`formulas::split_side_at_crossing`]): the new vertex lies on the
+//! input edge, the halves get `j` and `n − 1 − j` for crossing number `j`, and a new edge to
+//! an opposite corner that the input edge ends at runs along it (`n = −1`); [`Insertion::snapped`]
+//! is set. Near a side that the edge does not cross there, or a corner, the split is refused
+//! (`NotLocated`). The integers then follow
 //! exactly ([`formulas::split_side`] on both sides): the halves get `before` and `n − before`,
 //! the edges to the opposite corners count the arcs separated by the new chord, and the
 //! roundabout of `k → m` is that of `k → i` plus `n⁻_ki` plus the arcs from `k` that reach
@@ -31,6 +37,8 @@
 //! vertex placed between those two crossings. [`IntegerTriangulation::split_edge_given`]
 //! takes both decisions from the caller instead.
 
+use ddg_intrinsic::formulas::triangle_layout;
+use ddg_intrinsic::insert::LOCATION_SNAP;
 use ddg_intrinsic::{
     EdgeSplitPlan, EdgeTraceOptions, InsertRefusal, Insertion, IntrinsicError, SurfacePoint,
     plan_edge_split,
@@ -39,6 +47,21 @@ use ddg_intrinsic::{
 use crate::coords::{IntegerTriangulation, NO_ROUNDABOUT};
 use crate::error::{IntegerError, Place, ValidityItem};
 use crate::formulas::{self, n_minus, split_edge_normal};
+
+/// Where the split point is on the input mesh, from floating point (see
+/// [`IntegerTriangulation::crossed_split_place`]).
+enum CrossedPlace {
+    /// Strictly inside an input face, between two crossings: `before` of them lie before it.
+    Inside { before: i64, location: SurfacePoint },
+    /// Within [`LOCATION_SNAP`] of crossing number `crossing` (0-based from the tail of the
+    /// edge's halfedge), which the vertex is put on (SPEC I28).
+    AtCrossing {
+        crossing: i64,
+        location: SurfacePoint,
+        /// The barycentric coordinate of the point opposite the input edge, in its input face.
+        coordinate: f64,
+    },
+}
 
 /// The integers of the two faces of a split, computed before anything changes.
 struct SplitIntegers {
@@ -64,8 +87,9 @@ impl IntegerTriangulation {
     /// # Errors
     /// [`IntegerError::Intrinsic`] with the refusals of [`plan_edge_split`] (index, parameter,
     /// same face on both sides, too thin) and, for an edge that crosses input edges,
-    /// [`InsertRefusal::NotLocated`] when the point is within rounding of a crossing (its
-    /// place would not be strictly inside an input face); the errors of
+    /// [`InsertRefusal::NotLocated`] when the point is within rounding of an input edge that the edge
+    /// does not cross there or of a corner of the input face (within rounding of a crossing it
+    /// is split at the crossing, [`Insertion::snapped`]); the errors of
     /// [`extract_intrinsic_edge`](Self::extract_intrinsic_edge);
     /// [`IntegerError::InvalidCoordinates`] when the integers of the edge do not say which input
     /// edge it runs along. Nothing is changed in every case.
@@ -74,13 +98,22 @@ impl IntegerTriangulation {
     pub fn split_edge(&mut self, e: usize, t: f64) -> Result<Insertion, IntegerError> {
         let plan = plan_edge_split(&self.complex, &self.lengths, e, t)?;
         let n = self.normal[e];
-        let (before, location) = if n >= 0 {
-            self.crossed_split_place(e, t, plan.halves[0])?
+        let (before, at_crossing, location, snapped) = if n >= 0 {
+            match self.crossed_split_place(e, t, plan.halves[0])? {
+                CrossedPlace::Inside { before, location } => (before, false, location, None),
+                CrossedPlace::AtCrossing {
+                    crossing,
+                    location,
+                    coordinate,
+                } => (crossing, true, location, Some(coordinate)),
+            }
         } else {
-            (0, self.location_along_input_edge(e, t)?)
+            (0, false, self.location_along_input_edge(e, t)?, None)
         };
-        let integers = self.split_integers(e, before)?;
-        Ok(self.apply_split(e, plan, integers, location))
+        let integers = self.split_integers(e, before, at_crossing)?;
+        let mut insertion = self.apply_split(e, plan, integers, location);
+        insertion.snapped = snapped;
+        Ok(insertion)
     }
 
     /// The edge split of [`split_edge`](Self::split_edge) for an edge with `n ≥ 0` (SPEC I20),
@@ -126,19 +159,14 @@ impl IntegerTriangulation {
                 format!("{location:?} is not a place for a vertex inserted on an edge"),
             ));
         }
-        let integers = self.split_integers(e, before)?;
+        let integers = self.split_integers(e, before, false)?;
         Ok(self.apply_split(e, plan, integers, location))
     }
 
     /// The two floating-point decisions of the split of edge `e` (`n ≥ 0`) at distance `at` from
     /// the tail of its halfedge: the number of crossings before the point, and the point's place
     /// on the input mesh (see the [module documentation](crate::split)).
-    fn crossed_split_place(
-        &self,
-        e: usize,
-        t: f64,
-        at: f64,
-    ) -> Result<(i64, SurfacePoint), IntegerError> {
+    fn crossed_split_place(&self, e: usize, t: f64, at: f64) -> Result<CrossedPlace, IntegerError> {
         let trace = self.extract_intrinsic_edge(e, &EdgeTraceOptions::default())?;
         let mesh = self.input.mesh();
         let refused = |detail: String| {
@@ -207,30 +235,71 @@ impl IntegerTriangulation {
         };
         let s = ((at - d0) / (d1 - d0)).clamp(0.0, 1.0);
         let w = [0, 1, 2].map(|k| (1.0 - s) * b0[k] + s * b1[k]);
-        if !w.iter().all(|&c| c > 0.0 && c < 1.0) {
+        // The rule of the signposts (`snap_onto_input_edge`, IT-SPEC N10): a point within
+        // `LOCATION_SNAP` times the longest side of its input face from a side is on that side.
+        let l = [0, 1, 2].map(|k| self.input.geometry().edge_lengths()[mesh.edge(3 * face + k)]);
+        if let Some(v) = triangle_layout(l) {
+            let double_area = v[1][0] * v[2][1];
+            let distance = [0, 1, 2].map(|k| w[k] * double_area / l[(k + 1) % 3]);
+            let k = (0..3)
+                .min_by(|&a, &b| distance[a].total_cmp(&distance[b]))
+                .unwrap_or(0);
+            let longest = l[0].max(l[1]).max(l[2]);
+            if distance[k] <= LOCATION_SNAP * longest {
+                // On the side opposite corner `k`, which must be an input edge that `e` crosses
+                // at one of the two crossings around the point.
+                let (i, j) = ((k + 1) % 3, (k + 2) % 3);
+                let t_side = w[j] / (w[i] + w[j]);
+                let input_edge = mesh.edge(3 * face + i);
+                let crossing = [Some(before), before.checked_sub(1)]
+                    .into_iter()
+                    .flatten()
+                    .find(|&c| x.get(c).is_some_and(|c| c.edge as usize == input_edge));
+                return match crossing {
+                    Some(c) if t_side > 0.0 && t_side < 1.0 => Ok(CrossedPlace::AtCrossing {
+                        crossing: c as i64,
+                        location: crossing_point(c),
+                        coordinate: w[k],
+                    }),
+                    _ => Err(refused(format!(
+                        "the point is within rounding of input edge {input_edge} (barycentric \
+                         coordinates {w:?} in input face {face}), which edge {e} does not cross \
+                         there, or of a corner of the face"
+                    ))),
+                };
+            }
+        } else if !w.iter().all(|&c| c > 0.0 && c < 1.0) {
             return Err(refused(format!(
                 "the point is within rounding of an input edge (barycentric coordinates {w:?} in \
                  input face {face})"
             )));
         }
-        Ok((
-            before as i64,
-            SurfacePoint::Face {
+        Ok(CrossedPlace::Inside {
+            before: before as i64,
+            location: SurfacePoint::Face {
                 face: face as u32,
                 bary: w,
             },
-        ))
+        })
     }
 
     /// The integers of the split of edge `e` with `before` of its crossings on the half from its
     /// tail, from the current state.
-    fn split_integers(&self, e: usize, before: i64) -> Result<SplitIntegers, IntegerError> {
+    ///
+    /// With `at_crossing` the new vertex lies on crossing number `before` (SPEC I28,
+    /// [`formulas::split_side_at_crossing`]): the halves get `before` and `n − 1 − before`.
+    fn split_integers(
+        &self,
+        e: usize,
+        before: i64,
+        at_crossing: bool,
+    ) -> Result<SplitIntegers, IntegerError> {
         let c = &self.complex;
         let n = self.normal[e];
         let invalid = |detail: String| {
             IntegerError::invalid(ValidityItem::Ranges, Place::Edge(e as u32), detail)
         };
-        if !(0..=n.max(0)).contains(&before) {
+        if !(0..=n.max(0) - i64::from(at_crossing)).contains(&before) {
             return Err(invalid(format!(
                 "{before} crossings before the split point of an edge with n = {n}"
             )));
@@ -240,6 +309,13 @@ impl IntegerTriangulation {
         // One side: halfedge g (from the side's tail), the number of crossings before the point
         // counted from g's tail.
         let side = |g: usize, before: i64| -> Result<(i64, u32), IntegerError> {
+            let invalid_face = |f: usize, n_face: [i64; 3]| {
+                IntegerError::invalid(
+                    ValidityItem::FaceParity,
+                    Place::Face(f as u32),
+                    format!("face {f} with side counts {n_face:?} is not valid"),
+                )
+            };
             let f = g / 3;
             let n_face = self.face_normal(f);
             let s = g % 3;
@@ -249,14 +325,13 @@ impl IntegerTriangulation {
                     split_edge_normal(n_face[(s + 2) % 3], n_face[(s + 1) % 3]),
                     0,
                 )
+            } else if at_crossing {
+                let x = formulas::split_side_at_crossing(n_face, s, before)
+                    .ok_or_else(|| invalid_face(f, n_face))?;
+                (x.to_opposite, x.emanating_before)
             } else {
-                let x = formulas::split_side(n_face, s, before).ok_or_else(|| {
-                    IntegerError::invalid(
-                        ValidityItem::FaceParity,
-                        Place::Face(f as u32),
-                        format!("face {f} with side counts {n_face:?} is not valid"),
-                    )
-                })?;
+                let x = formulas::split_side(n_face, s, before)
+                    .ok_or_else(|| invalid_face(f, n_face))?;
                 (x.to_opposite, x.emanating_before)
             };
             // The halfedge from the opposite corner to the side's tail, just clockwise of the
@@ -296,13 +371,13 @@ impl IntegerTriangulation {
         };
         let (n_c, r_c) = side(h0, before)?;
         let (n_d, r_d) = match h1 {
-            Some(h1) => side(h1, n.max(0) - before)?,
+            Some(h1) => side(h1, n.max(0) - before - i64::from(at_crossing))?,
             None => (0, NO_ROUNDABOUT),
         };
         let halves = if n == -1 {
             [-1, -1]
         } else {
-            [before, n - before]
+            [before, n - before - i64::from(at_crossing)]
         };
         Ok(SplitIntegers {
             halves,

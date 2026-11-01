@@ -372,6 +372,8 @@ fn run(path: &str, backend: &str, j: &mut Json) -> Result<(), String> {
                     .num("refine_certificate_ok", u8::from(r.certificate.is_some()))
                     .num("clamped_crossings", r.clamped_crossings)
                     .num("face_split_refused", r.n_recover_failed)
+                    .num("edge_split_snapped", r.n_edge_splits_snapped)
+                    .num("edge_split_refused", r.n_edge_splits_refused)
                     .num("near_arc", r.n_near_arc)
                     .num("places_moved", r.n_places_moved);
                 refine_fields(j, &r.refine);
