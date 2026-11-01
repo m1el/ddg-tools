@@ -42,8 +42,11 @@
 //!   ([`CoarseOutput::scalar_prolongation`]), the vector prolongation `P^vec`
 //!   ([`CoarseOutput::vector_prolongation`], module [`prolongation`]) and the greedy colouring of
 //!   the coarse faces ([`CoarseOutput::colour_faces`]).
+//! * [`anisotropy`]: anisotropic edge-length scaling from principal directions (paper Sec. 8.6.2,
+//!   SPEC §8) and the coarse mesh of the scaled metric.
 //! * [`multigrid`]: the Galerkin multigrid solver of Liu et al. 2021 (SPEC §9.2).
 
+pub mod anisotropy;
 pub mod baseline;
 pub mod curvature;
 mod error;
