@@ -187,6 +187,9 @@ fn main() {
                     if relaxed > 0 {
                         eprintln!("# {m}: relaxation rung {relaxed} needed to reach {target}");
                     }
+                    if let Some(st) = q.successive_stats {
+                        eprintln!("# {m}: successive map {st:?}");
+                    }
                     if !q.report.reached_target {
                         eprintln!(
                             "# {m}: stopped at {} vertices (target {target}): {:?}",

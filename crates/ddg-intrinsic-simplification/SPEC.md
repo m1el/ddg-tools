@@ -767,7 +767,8 @@ On the coarse mesh, prolongated with `P`:
   `α_ij = (K̃_j − K_j)/K_i`); not the ICE order.
 * Measured numbers (greedy order, not ICE; the example `applications`) are in the WP6 report; the
   paper's ≈1 % at three orders of magnitude (20k-vertex mesh) is not reproduced by the stand-in
-  order, to be rerun with `simplify`.
+  order. Rerun with the ICE order (`simplify`): §10.5 (WP9a); the example's `--method` picks the
+  order (`ice` default).
 * The exponential-map comparison of the example is weak: the coarse and fine start directions are
   matched by the normalized angular coordinate (valid while the reference halfedge's direction is
   kept), and the endpoint distance is an upper bound (distance on the coarse mesh to the corners of
@@ -806,6 +807,291 @@ lengths `ℓ̂` against the input triangle: with `γ_max ≥ γ_min` the eigenva
   QEM collapses.
 * Comparisons of record (Fig. 18, 19, 21, 22): distortion, area error, Poisson error, geodesic
   distance error, at equal vertex counts, ICE against QEM.
+
+*As built (WP9a).* `src/evaluation.rs`, `src/baseline/successive.rs`, examples `evaluate`,
+`applications --method`, `scaling`.
+
+* **Distortion** (`evaluation::distortion(positions, faces, &CoarseApplications, pool, opts)`,
+  `[formula: iem-distortion]`): the map is the tracked points `output.points[..n_fine]`.
+  `ℓ̂_ij` per unique fine edge by `PointDistance`, a **local unfolding search** instead of one
+  exact run per fine vertex (too slow, and `exact_distance_complex` gives distances to
+  vertices, not between face points): from the image `s` faces are unfolded across their sides
+  carrying the visibility cone (an exact-window propagation without merging), the target image
+  `t` is tested inside each unfolded copy of its face (straight paths touching no vertex);
+  vertices seen inside a cone give `d_s(c)`, the same search from `t` gives `d_t(c)`, and
+  `min_c d_s(c) + d_t(c)` is the best path with one bend at a vertex; branches farther than the
+  best length are pruned; a pair in one face is searched too (on a sharp cone the way round the
+  apex can be shorter than the segment). It is **exact** for shortest paths crossing at most
+  `max_depth = 16` faces with at most one bend and an **upper bound** otherwise; if nothing is
+  found the vertex route `|s − a| + d(a, b) + |b − t|` through exact vertex distances is used
+  (`n_fallback`; zero in every run of record). Points on a side or corner are nudged `1e-9` into
+  the face. Tested against the closed forms on a plane and on cones of angle sum below and above
+  `2π` (400 random pairs, error `< 1e-6`). Per fine face: `J` from the planar layout of the input
+  lengths to that of `ℓ̂` (both counter-clockwise), `σ₁ ≥ σ₂` of `J`, `γ = σ²`; reported:
+  `γ_max/γ_min`, `log(σ₁σ₂)` (signed and absolute) and `σ₁/σ₂`; mean weighted by the input face
+  area, maximum, median and 99th percentile in the example; faces with `ℓ̂` violating the strict
+  triangle inequality are counted (`n_invalid_faces`, `invalid_area_fraction`) and excluded from
+  the statistics. The **mean of `γ_max/γ_min` is dominated by a few near-degenerate images**
+  (QEM has faces of `10^15`); read it with the median and the 99th percentile.
+* **Eq. 10 sign (S25).** `CoarseMeshOptions::projective_sign: ProjectiveSign { Paper, Cetm }`
+  (default `Paper`), `formulas::projective_interpolation_signed`; the coarse mesh and the removal
+  order do not depend on it (tested), only the map.
+* **Successive self-parameterization (S23)** in `baseline::successive`, switched on by
+  `QemOptions::successive_map` (`QemResult::successive`: face and barycentric coordinates of each
+  fine vertex, `QemResult::successive_stats`). Per collapse `(u, v) → k` of the QEM run: the faces
+  around `u` and `v` before and around `k` after are flattened jointly by the **least-squares
+  conformal energy** (the variant Liu et al. found best; the boundary vertices are shared
+  unknowns, two far apart ones pinned), every tracked point is lifted to the shared plane and
+  dropped into the after-face that contains it, so the maps compose over the run. Gaps against
+  Liu et al. 2021 (the validity test is in their earlier paper, App. B, which we did not have):
+  *closed meshes only* (the boundary cases of Sec. 4.3 are not built; an open mesh is an error);
+  a layout with a non-positive triangle falls back to the **Tutte embedding** (circle, chord-length
+  parameter, uniform weights), and if that fails too the collapse is rejected; no ARAP. In
+  the runs of record (114.8k collapses) the Tutte fallback fired 5 times, no collapse was rejected
+  and no point was clamped. Cost: the relocation
+  of all points in the patch per collapse (the mean fine-to-image distance equals the
+  closest-point projection's to `5 %` on the sphere test).
+* **Extrinsic result as applications:** `evaluation::extrinsic_applications(&QemResult, n_fine,
+  ExtrinsicMap::{ClosestPoint, Successive})` builds a `CoarseMesh` from the QEM mesh (extrinsic
+  lengths), replaces the tracked points by the images and `QemResult::origin` (the fine vertex
+  each coarse vertex is, for `sample`), and wraps it with `CoarseApplications::from_output`
+  (new, a split of `CoarseApplications::new`). `qem_to_target` runs QEM to a target with a
+  ladder of relaxations if the defaults stop short.
+* **QEM changes made on the way (WP9a):** (1) the link test rejected every collapse of a vertex of
+  degree three (its face `(u, a, b)` between the two opposite vertices): it now rejects only if the
+  other end already has the face `(x, a, b)` (the tetrahedron); before, runs stalled far above the
+  target (spot_subdiv: at 318 of 200). (2) When the queue runs dry before the target, the edges are
+  queued again while the last sweep collapsed something (a rejected edge only came back when a
+  neighbour changed). (3) `QemResult::origin`.
+
+### 10.5 Results of record (WP9a)
+
+Raw outputs: `runs_tmp/iem/wp9/` (gitignored; `dist_*.log` distortion and area, `perface/` the
+per-face distortions, `app_*.log` applications, `area_*.log`, `scaling_*.tsv`; the driver scripts
+are next to them). Commands: `examples/evaluate`, `examples/applications --method …`,
+`examples/scaling`. Meshes: `data/models/{spot,bob,blub}` (triangulated), `spot_subdiv` (24 755
+vertices) and `bs_rest`, `CrumpledDevelopable` as named. Not here: the Thingi10k benchmark (§10.2,
+WP9b, waits for the pre-refinement of WP5). **Substitutions** (the bunny and the paper's meshes
+are not in the tree): Fig. 18's 28k bunny at 200 vertices is replaced by `spot_subdiv` (24.7k) and
+`blub` (7.1k) at 200; Fig. 19's developable of Rabinovich et al. 2018 by `CrumpledDevelopable`
+(289 vertices, Crane's repository) and by `bs_rest` (an open sheet of 19 985 vertices from the
+reference's meshes; it may be the reference's cloth, not verified); Fig. 21's cloth mesh by
+`bs_rest` at 500 vertices and by closed meshes. ICE is `simplify` with the defaults; QEM is the
+unweighted Garland–Heckbert of §10.4 (reached every target here with its defaults after the fixes
+listed there); "QEM-s" is the successive self-parameterization (closed meshes), "QEM-c" the
+closest-point projection. Equal vertex counts (ICE's target is `ceil`, so ICE may have one more
+vertex). The machine was loaded by another job (load average 14–33) for all of this; no number
+below is a timing except in the scaling tables.
+
+**Distortion and area error (Fig. 18, 19; `evaluate`).** "aniso" is `γ_max/γ_min` (area-weighted
+mean, median, 99th percentile and maximum over the fine faces), "abs log-area" is the mean of
+`|log(σ₁σ₂)|`, "area err" is `100 |A_coarse − A_fine|/A_fine` with the coarse area from the coarse
+lengths (ICE: intrinsic; QEM: extrinsic). "invalid" are faces whose `ℓ̂` violate the triangle
+inequality (not in the statistics). The `ice-cetm` rows are S25's other sign (same coarse mesh).
+Edge distances: no pair needed the exact-vertex fallback or was unresolved in any run.
+
+| mesh | n | method | area err % | aniso mean | median | p99 | max | abs log-area mean | max | invalid faces (area) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| blub_triangulated | 142 | ice-paper | 2.26 | 1.138 | 1.117 | 1.942 | 7.489 | 0.055 | 0.917 | 0 (0.0e+00) |
+| blub_triangulated | 142 | ice-cetm | 2.26 | 1.052 | 1.036 | 1.465 | 4.485 | 0.059 | 0.781 | 0 (0.0e+00) |
+| blub_triangulated | 142 | qem-closest | 0.11 | 6.6e+10 | 1.038 | 6.375 | 2.5e+15 | 0.045 | 17.752 | 6 (2.4e-04) |
+| blub_triangulated | 142 | qem-successive | 0.11 | 1.382 | 1.107 | 6.917 | 945 | 0.056 | 2.554 | 0 (0.0e+00) |
+| blub_triangulated | 200 | ice-paper | 1.56 | 1.091 | 1.078 | 1.582 | 11.016 | 0.039 | 1.239 | 0 (0.0e+00) |
+| blub_triangulated | 200 | qem-closest | 0.24 | 6.6e+10 | 1.027 | 3.436 | 2.5e+15 | 0.031 | 17.752 | 4 (1.7e-04) |
+| blub_triangulated | 200 | qem-successive | 0.24 | 1.136 | 1.070 | 2.970 | 178 | 0.033 | 2.489 | 0 (0.0e+00) |
+| blub_triangulated | 711 | ice-paper | 0.42 | 1.018 | 1.017 | 1.107 | 1.213 | 0.009 | 0.144 | 0 (0.0e+00) |
+| blub_triangulated | 711 | ice-cetm | 0.42 | 1.010 | 1.008 | 1.087 | 1.187 | 0.010 | 0.115 | 0 (0.0e+00) |
+| blub_triangulated | 711 | qem-closest | 0.03 | 1.019 | 1.009 | 1.428 | 3.569 | 0.008 | 0.636 | 0 (0.0e+00) |
+| blub_triangulated | 711 | qem-successive | 0.03 | 1.022 | 1.015 | 1.307 | 2.968 | 0.008 | 0.469 | 0 (0.0e+00) |
+| bob_tri | 107 | ice-paper | 0.83 | 1.183 | 1.157 | 2.051 | 10.491 | 0.082 | 1.420 | 0 (0.0e+00) |
+| bob_tri | 107 | ice-cetm | 0.83 | 1.060 | 1.045 | 1.521 | 6.184 | 0.089 | 1.624 | 0 (0.0e+00) |
+| bob_tri | 107 | qem-closest | 0.62 | 1.197 | 1.080 | 3.530 | 27.289 | 0.063 | 1.639 | 0 (0.0e+00) |
+| bob_tri | 107 | qem-successive | 0.62 | 1.208 | 1.152 | 3.216 | 28.724 | 0.056 | 1.306 | 0 (0.0e+00) |
+| bob_tri | 200 | ice-paper | 0.47 | 1.094 | 1.084 | 1.429 | 3.242 | 0.047 | 0.632 | 0 (0.0e+00) |
+| bob_tri | 200 | qem-closest | 0.44 | 1.086 | 1.046 | 1.790 | 4.971 | 0.032 | 0.702 | 0 (0.0e+00) |
+| bob_tri | 200 | qem-successive | 0.44 | 1.094 | 1.075 | 1.654 | 4.309 | 0.028 | 0.478 | 0 (0.0e+00) |
+| bob_tri | 534 | ice-paper | 0.18 | 1.031 | 1.028 | 1.121 | 1.778 | 0.017 | 0.268 | 0 (0.0e+00) |
+| bob_tri | 534 | ice-cetm | 0.18 | 1.016 | 1.011 | 1.078 | 1.354 | 0.017 | 0.250 | 0 (0.0e+00) |
+| bob_tri | 534 | qem-closest | 0.13 | 1.026 | 1.018 | 1.181 | 1.669 | 0.010 | 0.248 | 0 (0.0e+00) |
+| bob_tri | 534 | qem-successive | 0.13 | 1.030 | 1.025 | 1.190 | 1.784 | 0.010 | 0.202 | 0 (0.0e+00) |
+| spot_subdiv | 200 | ice-paper | 2.01 | 1.195 | 1.134 | 2.135 | 9.786 | 0.075 | 1.248 | 0 (0.0e+00) |
+| spot_subdiv | 200 | qem-closest | 1.10 | 1.663 | 1.032 | 5.561 | 23125 | 0.055 | 4.026 | 6 (1.0e-04) |
+| spot_subdiv | 200 | qem-successive | 1.10 | 1.307 | 1.111 | 4.220 | 426 | 0.058 | 2.528 | 0 (0.0e+00) |
+| spot_subdiv | 495 | ice-paper | 0.93 | 1.071 | 1.050 | 1.342 | 2.074 | 0.033 | 0.419 | 0 (0.0e+00) |
+| spot_subdiv | 495 | ice-cetm | 0.93 | 1.025 | 1.015 | 1.167 | 1.669 | 0.035 | 0.336 | 0 (0.0e+00) |
+| spot_subdiv | 495 | qem-closest | 0.27 | 1.063 | 1.015 | 1.830 | 349 | 0.022 | 2.929 | 0 (0.0e+00) |
+| spot_subdiv | 495 | qem-successive | 0.27 | 1.076 | 1.038 | 1.670 | 7.816 | 0.021 | 0.957 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | ice-paper | 0.22 | 1.011 | 1.008 | 1.047 | 1.113 | 0.006 | 0.060 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | ice-cetm | 0.22 | 1.006 | 1.003 | 1.033 | 1.078 | 0.006 | 0.052 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | qem-closest | 0.03 | 1.009 | 1.004 | 1.085 | 3.535 | 0.004 | 0.629 | 0 (0.0e+00) |
+| spot_subdiv | 2476 | qem-successive | 0.03 | 1.011 | 1.006 | 1.081 | 2.263 | 0.004 | 0.392 | 0 (0.0e+00) |
+| spot_triangulated | 59 | ice-paper | 7.58 | 1.734 | 1.413 | 10.209 | 239 | 0.187 | 2.806 | 0 (0.0e+00) |
+| spot_triangulated | 59 | ice-cetm | 7.58 | 1.250 | 1.139 | 3.677 | 23.598 | 0.223 | 2.307 | 0 (0.0e+00) |
+| spot_triangulated | 59 | qem-closest | 1.26 | 9.5e+11 | 1.163 | 73.476 | 1.1e+16 | 0.168 | 18.485 | 50 (2.8e-03) |
+| spot_triangulated | 59 | qem-successive | 1.26 | 17.734 | 1.652 | 667 | 2.9e+05 | 0.205 | 5.654 | 0 (0.0e+00) |
+| spot_triangulated | 200 | ice-paper | 1.85 | 1.155 | 1.134 | 2.027 | 6.860 | 0.060 | 0.990 | 0 (0.0e+00) |
+| spot_triangulated | 200 | qem-closest | 0.53 | 1.113 | 1.054 | 3.979 | 18.696 | 0.038 | 1.440 | 0 (0.0e+00) |
+| spot_triangulated | 200 | qem-successive | 0.53 | 1.170 | 1.116 | 3.275 | 19.023 | 0.048 | 1.497 | 0 (0.0e+00) |
+| spot_triangulated | 293 | ice-paper | 1.26 | 1.101 | 1.090 | 1.544 | 2.245 | 0.042 | 0.431 | 2 (3.2e-04) |
+| spot_triangulated | 293 | ice-cetm | 1.26 | 1.056 | 1.041 | 1.378 | 1.969 | 0.047 | 0.594 | 2 (3.2e-04) |
+| spot_triangulated | 293 | qem-closest | 0.36 | 1.073 | 1.037 | 2.513 | 6.209 | 0.027 | 0.909 | 0 (0.0e+00) |
+| spot_triangulated | 293 | qem-successive | 0.36 | 1.102 | 1.073 | 2.287 | 5.612 | 0.033 | 0.745 | 0 (0.0e+00) |
+
+Reading (all from the table; mean aniso of QEM-c is dominated by a few degenerate images, use the
+median/p99/max):
+* **Anisotropic distortion:** against QEM-s, ICE has the smaller or equal mean at the smallest
+  target of every mesh (spot_subdiv 200: 1.195 against 1.307; blub 200: 1.091 against 1.136; blub
+  142: 1.138 against 1.382; spot 59: 1.73 against 17.7; bob 200 equal), and a smaller or equal p99
+  and maximum in every 2 %/200-vertex row (blub 142 max 7.5 against 945; spot_subdiv 200: 9.8
+  against 426; QEM-c has maxima of 10⁴–10¹⁵ and invalid faces). But ICE's *median* is slightly
+  larger at 200 vertices (spot 1.134 against 1.054 QEM-c / 1.116 QEM-s; bob 1.084 against 1.046 /
+  1.075; blub 1.078 against 1.027 / 1.070), and at 10 % the means are comparable (bob 534:
+  1.031 / 1.026 / 1.030). The paper's "modest reduction" holds for the tails and for the mean at
+  strong reductions, not for the median.
+* **Area distortion (`|log σ₁σ₂|`):** *not reproduced*: ICE's mean is larger than QEM's in every row
+  except blub 142 and spot 59 against QEM-s (where QEM-s has degenerate faces; ICE's maximum is
+  smaller there: spot 59 `2.8` against `5.7`; blub 200 `1.24` against `2.5`). Example: spot_subdiv
+  200 `0.075` ICE against `0.055` / `0.058`; blub 200 `0.039` against `0.031` / `0.033`. ICE's
+  `log σ₁σ₂` is biased low (signed mean −0.006 … −0.026 at 200 vertices, QEM ≈ 0): the intrinsic
+  coarse mesh is smaller than the fine surface, by the area error (0.5–2.0 % at 200 vertices;
+  QEM's 0.2–1.1 %). On closed smooth surfaces QEM's area error is the smaller (spot 293: 1.26 %
+  ICE against 0.36 % QEM; blub 711: 0.42 against 0.03).
+* **Developable (Fig. 19):** the result of the paper is reproduced. `CrumpledDevelopable` (289):
+  area error ICE / QEM at 100 vertices `0.0001 %` / `5.05 %`, at 50 `0.023 %` / `9.46 %`, at 25
+  `0.46 %` / `15.2 %`; aniso at 100: `1.0000` (an isometric coarse mesh) against 3.0 (max 674).
+  `bs_rest`: 2000 `0.15 %` / `0.44 %`, 500 `0.46 %` / `2.10 %`, 200 `0.075 %` / `1.38 %`.
+
+```
+CrumpledDevelopable  vertices  method       area_err_%  aniso_mean  aniso_max  |logarea|_mean
+                     100       ice          0.0001      1.0000      1.0000     0.0000
+                     100       qem-closest  5.0473      3.0074      673.6      0.1350
+                     50        ice          0.0227      1.0176      1.166      0.0050
+                     50        qem-closest  9.4590      4280        2.0e6      0.3208
+                     25        ice          0.4583      1.2244      3.348      0.0510
+                     25        qem-closest  15.181      435.3       2.0e5      0.4226
+```
+(`area_crumpled.log`, `area_bs_rest.log`.)
+
+**Eq. 10 sign (S25).** Same coarse mesh, same area error and lengths; only the map differs
+(`ice-paper` against `ice-cetm` rows above, at 10 % and 2 % of spot, bob, blub and spot_subdiv):
+the `e^{−u}` map (`Cetm`) has the smaller anisotropic mean *and* maximum in all 8 of 8
+configurations (spot 293: 1.101 → 1.056, max 2.25 → 1.97; spot 59: 1.734 → 1.250, max 239 → 23.6;
+bob 107: 1.183 → 1.060, max 10.5 → 6.2; blub 142: 1.138 → 1.052, max 7.5 → 4.5; spot_subdiv 495:
+1.071 → 1.025), while the mean `|log σ₁σ₂|` is 3–19 % *larger* in 8 of 8 (spot 59: 0.187 → 0.223).
+The default stays `Paper` (the contract's S25); **proposal: make `Cetm` the default for consumers
+of the map** (the Blender view, prolongation) — the anisotropy is what spoils `P`. The
+applications of §10.1 were not rerun with `Cetm`.
+
+**Applications (Fig. 21, 22, 23, 24, 25; `applications --method`).** Errors are against the fine
+solution: exact geodesic and heat method = mean relative L1 error of the prolongated distance over
+the fine vertices (5 sources); Poisson = relative L2 error (`f` smooth in the coordinates, `sample`
+restriction); all pairs = relative L1 on 8 sampled rows of `P D̄ Pᵀ`; Voronoi = share of fine
+vertices with a different nearest source (20 sources). Speedups are ratios of wall times, single
+thread, on a loaded machine (indicative). Rows with the same size are the same row of the example
+(ICE's target rounds up). `bs_rest` is open: QEM-s is not available, the QEM row is QEM-c.
+
+### blub
+# fine: exact distance 528.3 ms/source, Poisson 13.9 ms, Voronoi (20 sources) 10.81 s, all-pairs (extrapolated) 4319.4 s, exp map 0.00 ms (100 traces)
+| n̄ | method | exact geod. L1 % | heat geod. L1 % | Poisson L2 % | all-pairs L1 % | Voronoi wrong % | speedup exact / Poisson / all-pairs / Voronoi |
+|---|---|---|---|---|---|---|---|
+| 143 | ice | 2.508 | 6.302 | 10.533 | 2.333 | 4.10 | 719 / 110.1 / 5596 / 613 |
+| 143 | qem-closest | 1.579 | 8.679 | 9.427 | 1.843 | 4.78 | 754 / 99.7 / 5917 / 741 |
+| 143 | qem-successive | 1.643 | 8.598 | 9.359 | 1.777 | 4.12 | 727 / 95.4 / 6787 / 755 |
+| 200 | ice | 1.884 | 5.259 | 6.935 | 1.861 | 3.39 | 448 / 78.9 / 4595 / 442 |
+| 200 | qem-closest | 1.314 | 9.344 | 7.532 | 1.414 | 2.69 | 466 / 72.7 / 5130 / 472 |
+| 200 | qem-successive | 1.330 | 9.277 | 7.523 | 1.417 | 2.84 | 445 / 69.1 / 4683 / 468 |
+| 711 | ice | 0.537 | 3.135 | 2.384 | 0.519 | 0.90 | 65 / 20.3 / 688 / 68 |
+| 711 | qem-closest | 0.449 | 15.588 | 2.925 | 0.466 | 1.13 | 63 / 19.7 / 677 / 62 |
+| 711 | qem-successive | 0.453 | 15.588 | 2.925 | 0.464 | 1.07 | 62 / 18.4 / 681 / 68 |
+
+### bob
+# fine: exact distance 508.3 ms/source, Poisson 44.7 ms, Voronoi (20 sources) 9.95 s, all-pairs (extrapolated) 2665.6 s, exp map 0.00 ms (100 traces)
+| n̄ | method | exact geod. L1 % | heat geod. L1 % | Poisson L2 % | all-pairs L1 % | Voronoi wrong % | speedup exact / Poisson / all-pairs / Voronoi |
+|---|---|---|---|---|---|---|---|
+| 107 | ice | 5.045 | 11.207 | 6.169 | 5.368 | 6.12 | 965 / 347.2 / 5572 / 894 |
+| 107 | qem-closest | 3.703 | 12.238 | 17.011 | 4.796 | 5.88 | 644 / 288.5 / 6648 / 611 |
+| 107 | qem-successive | 3.635 | 12.228 | 17.048 | 4.735 | 6.34 | 794 / 402.8 / 7285 / 743 |
+| 200 | ice | 3.039 | 7.525 | 2.850 | 3.497 | 2.86 | 418 / 175.8 / 3990 / 392 |
+| 200 | qem-closest | 2.088 | 8.093 | 9.488 | 3.130 | 3.61 | 341 / 216.0 / 3790 / 265 |
+| 200 | qem-successive | 2.099 | 8.038 | 9.505 | 3.111 | 3.65 | 346 / 217.9 / 4173 / 327 |
+| 535 | ice | 1.213 | 4.526 | 1.105 | 1.455 | 1.35 | 88 / 65.1 / 751 / 70 |
+| 535 | qem-closest | 0.898 | 6.623 | 4.267 | 1.111 | 1.50 | 70 / 76.4 / 677 / 67 |
+| 535 | qem-successive | 0.888 | 6.608 | 4.268 | 1.105 | 1.48 | 70 / 75.9 / 662 / 56 |
+
+### bs_rest
+# fine: exact distance 1822.3 ms/source, Poisson 40.5 ms, Voronoi (20 sources) 36.85 s, all-pairs (extrapolated) 34838.2 s, exp map 0.01 ms (99 traces)
+| n̄ | method | exact geod. L1 % | heat geod. L1 % | Poisson L2 % | all-pairs L1 % | Voronoi wrong % | speedup exact / Poisson / all-pairs / Voronoi |
+|---|---|---|---|---|---|---|---|
+| 200 | ice | 2.742 | 9.556 | 7.557 | 3.293 | 4.95 | 1808 / 177.3 / 6683 / 1399 |
+| 200 | qem-closest | 2.108 | 5.943 | 5.440 | 2.014 | 4.62 | 1883 / 100.3 / 7322 / 1800 |
+| 500 | ice | 1.590 | 4.733 | 2.102 | 1.889 | 2.34 | 531 / 80.1 / 5219 / 523 |
+| 500 | qem-closest | 1.037 | 4.177 | 2.602 | 2.172 | 2.36 | 587 / 87.4 / 5204 / 565 |
+
+### spot_subdiv
+# fine: exact distance 6637.7 ms/source, Poisson 72.4 ms, Voronoi (20 sources) 126.85 s, all-pairs (extrapolated) 156045.7 s, exp map 0.01 ms (100 traces)
+| n̄ | method | exact geod. L1 % | heat geod. L1 % | Poisson L2 % | all-pairs L1 % | Voronoi wrong % | speedup exact / Poisson / all-pairs / Voronoi |
+|---|---|---|---|---|---|---|---|
+| 201 | ice | 1.699 | 4.806 | 11.838 | 2.887 | 3.55 | 5430 / 307.0 / 22935 / 4530 |
+| 201 | qem-closest | 1.423 | 6.006 | 11.930 | 2.547 | 2.84 | 5458 / 325.3 / 24995 / 5372 |
+| 201 | qem-successive | 1.442 | 6.004 | 11.895 | 2.586 | 3.11 | 6038 / 318.7 / 24228 / 5256 |
+| 496 | ice | 0.786 | 4.716 | 6.775 | 1.455 | 1.46 | 1564 / 132.4 / 18411 / 1593 |
+| 496 | qem-closest | 0.600 | 4.473 | 15.636 | 1.228 | 1.28 | 1488 / 140.5 / 19377 / 1494 |
+| 496 | qem-successive | 0.596 | 4.465 | 15.626 | 1.230 | 1.34 | 1631 / 137.0 / 17505 / 1429 |
+| 2476 | ice | 0.172 | 2.366 | 1.275 | 0.292 | 0.31 | 110 / 25.2 / 1012 / 117 |
+| 2476 | qem-closest | 0.140 | 9.842 | 2.709 | 0.278 | 0.29 | 97 / 23.7 / 956 / 101 |
+| 2476 | qem-successive | 0.140 | 9.840 | 2.709 | 0.278 | 0.28 | 103 / 23.4 / 973 / 103 |
+
+Reading: **Poisson (Fig. 21): ICE is better** in 8 of 11 rows, equal in 1 (spot_subdiv 201), QEM
+better in 2 (blub 143: `10.5` against `9.4`; bs_rest 200: `7.6` against `5.4`); where the size is
+not tiny by a factor 2–4 (bob 535 `1.1 %` against `4.3 %`, bob 200 `2.9` against `9.5`, spot_subdiv
+496 `6.8` against `15.6`, 2476 `1.3` against `2.7`; bs_rest 500 `2.1` against `2.6`).
+**Heat-method geodesics: ICE is better** in 8 of 11 rows by 1.1–5× (blub 711 `3.1` against `15.6`,
+spot_subdiv 2476 `2.4` against `9.8`; QEM's extrinsic coarse mesh has the wrong lengths for the
+diffusion), QEM in bs_rest (both rows) and spot_subdiv 496. **Exact geodesics (Fig. 22): QEM is
+better in all 11 rows, by 16–37 %** (blub 711 `0.54` ICE / `0.45` QEM; spot_subdiv 2476 `0.17` /
+`0.14`; bob 535 `1.2` / `0.9`; bob 200 `3.0` / `2.1`): the paper's 4× advantage for geodesics
+(against the earlier method of Lee et al., not against QEM) is *not reproduced against QEM*.
+All pairs: QEM lower in 10 of 11 rows by 5–40 % (bs_rest 500 the exception); Voronoi: mixed,
+within ±1 point. The absolute ICE numbers agree with Fig. 23/25 (spot_subdiv 496 vertices:
+`0.79 %` exact error at a 1564× speedup; Voronoi 1.5 % wrong at a 1593× speedup; all pairs `1.5 %`
+at 18 000×). The exponential-map column is only produced for ICE (median endpoint distance
+`0.10–0.33` of the traced length: a loose upper bound, §10.1).
+
+**Fig. 16 scaling (`scaling`).** `simplify` to 10 % of the vertices with a tracked point per
+vertex, plus the compaction and `P`, spot 4-1-subdivided (`regular_subdivision`; the first row is
+`spot_control_mesh` subdivided once, the others `spot_triangulated` subdivided 0…5 times), one
+process per size, single thread, pinned (`taskset -c 63`), sequential. **The machine was loaded**
+(another job, up to 24 threads, load average 14–33 during the runs; the early rows overlapped
+with this agent's own application jobs): the numbers are *indicative*, to be rerun on a quiet
+machine.
+
+| mesh | levels | \|V\| | \|V̄\| | build s | simplify s | P s | total s | s per 10⁶ vertices | load avg (1/5/15 min) at start |
+|---|---|---|---|---|---|---|---|---|---|
+| spot_control_mesh | 1 | 746 | 75 | 0.001 | 0.077 | 0.000 | 0.078 | 104.6 | 32.39/23.93/13.12 |
+| spot_triangulated | 0 | 2930 | 293 | 0.003 | 0.286 | 0.000 | 0.290 | 99.0 | 32.39/23.93/13.12 |
+| spot_triangulated | 1 | 11714 | 1171 | 0.012 | 1.132 | 0.001 | 1.145 | 97.7 | 32.39/23.93/13.12 |
+| spot_triangulated | 2 | 46850 | 4685 | 0.055 | 4.248 | 0.005 | 4.308 | 92.0 | 32.39/23.93/13.12 |
+| spot_triangulated | 3 | 187394 | 18739 | 0.172 | 12.801 | 0.019 | 12.992 | 69.3 | 32.43/24.08/13.22 |
+| spot_triangulated | 4 | 749570 | 74957 | 0.735 | 55.935 | 0.131 | 56.801 | 75.8 | 32.60/24.53/13.55 |
+| spot_triangulated | 5 | 2998274 | 299827 | 2.849 | 220.828 | 0.591 | 224.269 | 74.8 | 32.09/25.63/14.55 |
+
+Log–log least-squares fit of the total time against `|V|` over the seven sizes (7.5·10² … 3.0·10⁶):
+**exponent 0.95** (`t ≈ 1.5·10⁻⁴ |V|^0.95` s; 0.95 for `simplify` alone; 0.947 from 11 714 up;
+0.935 up to 187 394): linear to within the noise (the per-vertex time falls from 105 to 75 µs as
+the caches stop mattering, as the removal count is `0.9 |V|` here). Throughput at 750k vertices:
+674 613 removals in 55.9 s = 12.1·10³ per second (paper: about 10 000 per second on its machine).
+Against the percent reduction (spot subdivided 4 times, 749 570 vertices):
+
+| target | \|V̄\| | simplify s | P s | total s | load avg at start |
+|---|---|---|---|---|---|
+| 90.0 % of \|V\| | 674613 | 9.857 | 0.389 | 10.974 | 21.89/24.70/16.78 |
+| 50.0 % of \|V\| | 374785 | 27.805 | 0.243 | 28.744 | 22.26/24.67/16.86 |
+| 10.0 % of \|V\| | 74957 | 51.452 | 0.115 | 52.254 | 23.86/24.81/17.15 |
+| 1.0 % of \|V\| | 7496 | 55.844 | 0.085 | 56.611 | 21.00/23.94/17.30 |
+| 0.1 % of \|V\| | 750 | 56.746 | 0.076 | 57.532 | 16.25/22.12/17.06 |
+
+The time grows with the number of removals (10 s for 10 %, 28 s for 50 %, 51 s for 90 %) and
+saturates (57 s at 99.9 %), the queue work being done up front.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -1024,7 +1310,10 @@ star), fixtures `lean/oracle/fixtures/iem/` (format in `lean/oracle/README.md`);
   the *inverse* of Springborn et al.'s circumcircle-preserving projective interpolation (`e^{−u}`,
   CETM Sec. 3.4, App. D; found by WP10). Both are continuous bijections of each face
   (`iem-projective-interpolation`), so tracking is correct either way; the default follows the
-  paper, and WP9 measures the distortion (§10.3) with both (an option `projective_sign`).
+  paper; the option `CoarseMeshOptions::projective_sign` selects the other; WP9a measured the
+  distortion (§10.5): `Cetm` has the lower anisotropic distortion in 8 of 8 configurations (mean
+  and maximum), `Paper` a 3–19 % lower area distortion in 8 of 8; proposal: `Cetm` as the default
+  for consumers of the map.
 * **R55** (new, found by WP10): the reference's Newton denominator sums `cot` per corner also in
   faces with a self-edge, which is not the derivative there; S9 drops the cotangent opposite the
   self-edge. The root is the same.

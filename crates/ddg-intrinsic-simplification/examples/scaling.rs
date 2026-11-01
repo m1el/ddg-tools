@@ -71,8 +71,8 @@ fn main() {
     }
     let load0 = loadavg();
     let mesh0 = TriMesh::new(obj.positions.len(), faces).unwrap_or_else(|e| die(format!("{e}")));
-    let geo0 = Geometry::from_positions(&mesh0, &obj.positions)
-        .unwrap_or_else(|e| die(format!("{e}")));
+    let geo0 =
+        Geometry::from_positions(&mesh0, &obj.positions).unwrap_or_else(|e| die(format!("{e}")));
     let (mesh, geo) =
         regular_subdivision(&mesh0, &geo0, levels).unwrap_or_else(|e| die(format!("{e}")));
     let n = mesh.n_vertices();
