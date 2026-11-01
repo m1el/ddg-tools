@@ -1,0 +1,15 @@
+[package]
+name = "ddg-repulsive-surfaces"
+description = "Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane 2021): tangent-point energy of triangle meshes, fractional Sobolev descent, constraints, penalties, Barnes-Hut, hierarchical matrices and remeshing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Dependencies are set by WP1 (SPEC.md §15); `[[bench]]` entries are added by WP17.
+[dependencies]
+ddg-core = { path = "../ddg-core" }
+ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
+faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
+rayon = "1.10"
