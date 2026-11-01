@@ -273,6 +273,29 @@ vertices, `|S|` = 12 720): common subdivision 8.6 ms, `M_S` 7.9 ms, `P₀ P₁` 
 factorize both 11.1 ms, one transfer 0.5 ms. Camelbad (22 784 vertices, `|S|` = 62 825): 38.8,
 42.5, 7.5, 113, 46.9 ms, one transfer 2.8 ms.
 
+## Simplicial export, the way back of segments, the optimal Delaunay iteration (I29)
+
+What `ddg-uv`'s cut flow needs, so that it runs on integer coordinates by default (SPEC §4.10,
+§4.11):
+
+| | |
+|---|---|
+| `export_simplicial(&ExportOptions)` | `ddg_intrinsic::export::export_simplicial` on this representation (`impl Exportable`): the signposts' splits and flips; a midpoint within rounding of a crossing (I28) is split at `½ ± 2⁻¹⁶` instead (`n_off_midpoint_splits`); refinement between rounds by the signposts' rules, certified; places are the stored `q⁰`; the fingerprint hashes `n` and `r` too. |
+| `segments_on_input(nodes, segments, &EdgeTraceOptions)` | the signposts' signature, output and errors. The input edges a segment crosses are the arcs on the path between the regions of its ends in the tree of a face's arcs (from the integers); positions by intersecting two lines in the face's layout. Checked: every piece lies in its input face, the path's length equals the segment's within the tolerance (`mismatch`). |
+| `optimal_delaunay(&IntegerOdtOptions)` | `ddg_intrinsic::odt::optimal_delaunay` (`impl OdtMoves`) in `AngleFrames` frames, certified. |
+| `move_vertex_in_star(v, displacement, min_shape)` | the signposts' local move on integers: the star keeps its triangles; new `n` of the spokes from the chords of the star polygon that separate the new place from each link vertex, roundabouts by `ic-roundabout-update`, `q⁰` by App. A. Never needs a removal, so the straight stars of I27 do not stop it. |
+| `move_vertex` | unchanged route (Sec. 3.6), but a refused removal after a face split is undone by removing the inserted vertex again instead of restoring a copy of the whole state. |
+
+Against the signposts (`tests/export.rs`, 27 meshes, flips and refined to 25°): 52 of 54 exports
+identical in connectivity, bitwise lengths and counts (places within `3.3e-13` mean edge lengths;
+the other 2 split off the midpoint on the torus 5×3); 30 041 of 30 042 segments cross the same
+input edges in the same order and all lie within `1e-9` mean edge lengths of the signposts' traces;
+the optimal Delaunay iteration makes the same iterations, insertions and halvings on 26 of 27 meshes,
+places within `3.3e-13` (the bumpy grid takes another trajectory from a last-bit tie). Cost, in
+`ddg-uv` session builds (its README): flips and export 1.1×, with refinement 1.2–1.4×, with the
+optimal Delaunay iteration 3.4–4.2× the signposts' (SPEC §4.11); the way back was not timed
+separately.
+
 ## Geometry of the crossings (WP2)
 
 Connectivity comes from the integers; floating point decides only where the crossings lie. Both

@@ -345,9 +345,8 @@ impl IntegerTriangulation {
                 if bary.iter().all(|&x| x > 0.0) && o.iter().any(|&h| h / 3 == face as usize) =>
             {
                 let f = face as usize;
-                if !arcs_of.contains_key(&f) {
-                    let arcs = self.face_arcs_cached(f, &mut cache)?;
-                    arcs_of.insert(f, arcs);
+                if let std::collections::btree_map::Entry::Vacant(slot) = arcs_of.entry(f) {
+                    slot.insert(self.face_arcs_cached(f, &mut cache)?);
                 }
                 let arcs = &arcs_of[&f];
                 let region = arcs.choose_region(bary).region;
@@ -384,7 +383,7 @@ impl IntegerTriangulation {
             let e = [y[0] - x[0], y[1] - x[1]];
             let side = e[0] * (p[1] - x[1]) - e[1] * (p[0] - x[0]);
             let length = e[0].hypot(e[1]);
-            if !(side.abs() > 1e-12 * mean_spoke * length) {
+            if side.is_nan() || side.abs() <= 1e-12 * mean_spoke * length {
                 return Err(refused(
                     end,
                     format!(

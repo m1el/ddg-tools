@@ -489,6 +489,15 @@ and from `crates/ddg-intrinsic/README.md`.
   gives another (collisions of the hash are not excluded). A state of the flow is kept with
   the fingerprint of the export it was made for; `SimplicialExport::check_state` refuses
   another fingerprint (`StaleState`, both values in the message) and a wrong number of values.
+  *Representations* (Integer Coordinates SPEC I29, §4.10). The export is written once,
+  `export::export_simplicial<T: Exportable>`; `Exportable` is `Triangulation + Clone` with
+  `split_for_export` (provided: the midpoint), `refine_for_export` (here `refine`, Ruppert's
+  rules), `state_fingerprint` (here `fingerprint`) and `segments_on_input`. The places of the
+  vertices are `Triangulation::vertex_location`; `irregularities` and `simplicial_mesh` are free
+  functions of the connectivity. `IntrinsicTriangulation::export_simplicial` is this function, the
+  same operations in the same order: the pins (`tests/bitwise_pins.rs`) are unchanged.
+  `SimplicialExport::n_off_midpoint_splits` counts splits a representation made off the midpoint
+  (0 here).
 * **N16** *§5 item 5, "better after refinement": measured, not found as stated.* On sheared
   lattices with known distances (`distances_after_refinement`, errors of the first-order solver
   at the input vertices in lattice widths): on the input mesh the mean error is 1 to 7 widths,
@@ -663,6 +672,14 @@ written from the paper and the cited papers.
   for `0 < α < 2`, the minimum at `α = 1`; that the optimal Delaunay triangulation minimizes the
   interpolation error is cited, `it-odt-energy`). Chen and Holst halve `α` to keep the elements
   valid, not for descent; so does N21's line search.
+  *Representations* (Integer Coordinates SPEC I29, §4.11): the iteration is written once,
+  `odt::optimal_delaunay<T: OdtMoves>` (`odt_target`, `star_min_shape`, `move_vertex_with_shape`,
+  `split_for_odt`; `reposition::{odt_target_of, star_min_shape_of, check_star_move}` and
+  `generic_ops::shape_statistics` are the shared parts, in a frame given per halfedge). The
+  method `optimal_delaunay` is this function with the signposts' moves; `odt_target` and
+  `star_min_shape` call the shared functions with the stored signposts (pins unchanged). The
+  iteration also halves a step refused with `InsertionRefused` or `RemovalRefused`, which only
+  another representation's moves return.
   *One iteration*: (1) split every edge longer than the target length at its midpoint, longest
   first (ties by id; edges made by these splits wait for the next iteration); a refused split
   (N10, too thin) is counted, not an error; (2) flip to Delaunay if anything was split;

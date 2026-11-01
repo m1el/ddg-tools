@@ -370,7 +370,7 @@ impl IntegerTriangulation {
                     }));
                 }
             };
-            if !(mismatch <= tolerance) {
+            if mismatch.is_nan() || mismatch > tolerance {
                 return Err(shared(IntrinsicError::SegmentTrace {
                     face: f as u32,
                     length,

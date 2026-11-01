@@ -327,7 +327,8 @@ array).
 ```python
 s = ddg_tools.CutSession(
     positions, corner_vertices, polygon_starts, triangles, *,
-    n_regions=None, triangulation="intrinsic", refine_bound=None, optimal_delaunay=False, state=None, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
+    n_regions=None, triangulation="intrinsic", refine_bound=None, optimal_delaunay=False,
+    representation=None, state=None, seam_edges=None, pinned_vertices=None, forbidden_vertices=None,
     prescribed_vertices=None, prescribed_angles=None,
     # exactly one start:
     circle_vertex=None, circle_radius=None,     # geodesic disk around a vertex (region 0)
@@ -371,8 +372,17 @@ vertices; `"caller"` is the caller's triangulation, as the versions before this 
 on top of `"intrinsic"` or `"refined"`: more even triangle areas, much slower (setup 4.5 s at 11.7k
 vertices and 20 s at 46.9k against 0.15 s and 0.55 s without, flow steps about 2.5x); `ValueError` with `"caller"` or with `state=` (a
 state carries its flag; read it back from `CutSession.optimal_delaunay`). The report gains
-`n_optimized` and, with the flag, `optimal_delaunay_status`/`_iterations`/`_last_motion`. The cut
-comes back onto the caller's polygons whatever the choice. `intrinsic_report` is a dictionary
+`n_optimized` and, with the flag, `optimal_delaunay_status`/`_iterations`/`_last_motion`.
+`representation` is how the intrinsic triangulation is stored: `None` (the default) or
+`"integer"` is integer coordinates (Gillespie, Sharp, Crane 2021; `Representation::DEFAULT`,
+Integer Coordinates SPEC Q3, I29), `"signposts"` the signposts. Both make the same flips, splits
+and refinement, so the flow and the cut agree to rounding (tested: the same vertices, energies
+within `1e-9`, the same cut points within `1e-9`); on integers the setup costs 1.1× with flips,
+1.2–1.4× refined and 3.4–4.2× with `optimal_delaunay` (`crates/ddg-uv` README). `InputError` with
+`"caller"` or with `state=` (a state carries its representation; read it from
+`CutSession.representation`, `None` on `"caller"`). The fingerprints of the two differ, so
+`restore` refuses a state of the other (`StaleStateError`). The cut comes back onto the caller's
+polygons whatever the choice. `intrinsic_report` is a dictionary
 (`n_added`, `n_initial_flips`, `n_splits`, `min_angle_degrees`, `max_angle_degrees`,
 `is_delaunay`, `seconds`, `fingerprint`, ...; `None` for `"caller"`). **State.** `state` (the
 `(n_regions, n_corners)` array) is the whole state exactly when `state_is_per_corner` is true

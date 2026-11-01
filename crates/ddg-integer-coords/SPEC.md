@@ -364,7 +364,7 @@ with signposts computed from corner angles. Frame convention: direction 0 at a v
 the boundary), `Θ` from the lengths; a frame is valid only for the current connectivity, since a
 flip at an interior vertex can move its outgoing halfedge. Measured against stored signposts:
 within 6.2e-12 rad on 17 shapes, traces end within 6.2e-12 of the mean edge length), then `SplitFace(x)`, then `RemoveVertex(i)`. The optimal Delaunay
-iteration of IT-SPEC N21 then runs on this representation unchanged (not ported yet).
+iteration of IT-SPEC N21 runs on this representation with another move (§4.11).
 
 **As built (WP4).** `move_vertex(v, displacement, &FaceSplitOptions) -> VertexMoveReport`: the
 displacement is given in the `AngleFrames` frame of `v` (direction wrapped into `[0, 2π)`); a path
@@ -410,6 +410,109 @@ between inserted vertices inside the face are invisible from them; as built (WP5
 of an input edge (`PointLocator` caches the pieces per input face). Results are snapped:
 a barycentric coordinate `≤ LOCATE_SNAP = 1e-12` makes an edge or vertex point. Same signatures as
 `ddg-intrinsic`'s `point_on_input` / `point_on_triangulation`.
+
+### 4.10 Simplicial export and the way back of segments (I29)
+
+**The export** is IT-SPEC N15, written once over the shared interface:
+`ddg_intrinsic::export::export_simplicial<T: Exportable>` (`Exportable = Triangulation + Clone`
+plus three operations of the representation). The signpost method
+`IntrinsicTriangulation::export_simplicial` is this function; its pins (`bitwise_pins`) are
+unchanged. On integers (`IntegerTriangulation::export_simplicial`):
+
+* splits and Delaunay flips are the shared ones, so both representations split and flip the same
+  edges in the same order with bitwise the same lengths; `irregularities` and the `TriMesh`
+  (`ddg_intrinsic::triangulation::{irregularities, simplicial_mesh}`) depend on the connectivity
+  alone;
+* `Exportable::split_for_export`: the midpoint, or, when the midpoint is refused for being within
+  rounding of a crossing (I28; symmetric meshes, where an edge crosses an input edge exactly at its
+  middle), the first of `½ ± 2⁻¹⁶, ½ ± 2⁻¹²` that is not (`OFF_MIDPOINT`), counted in
+  `SimplicialExport::n_off_midpoint_splits` (always 0 on signposts, which snap the vertex onto the
+  input edge instead);
+* `Exportable::refine_for_export` (`ExportOptions::refine`): `IntegerTriangulation::refine` with
+  the signposts' rules (`RefineRules::Ruppert`, IT-SPEC N1/N4), certified, so that the export is
+  the same function of the triangulation in both representations;
+* `SimplicialExport::locations` are `Triangulation::vertex_location`: the stored `q⁰` (§4.5
+  interpolation for edge splits, App. A for face splits);
+* `SimplicialExport::fingerprint` is `Exportable::state_fingerprint`: on signposts
+  `IntrinsicTriangulation::fingerprint` (faces, lengths per halfedge, places), on integers
+  `IntegerTriangulation::fingerprint` (the same plus `n` and `r`, FNV-1a over 64-bit words, I19).
+  The two differ for the same mesh, so a state made on one representation is refused by the
+  other (`StaleState`).
+
+**The way back** (`IntegerTriangulation::segments_on_input`, `src/segments.rs`; the signature,
+output `PathsOnInput` and errors of the signposts'). A straight segment inside a face `f` of `T¹`
+crosses only the arcs of `f` (§4.4: chords between crossings of its sides, positions from
+`ExtractIntrinsicEdge`, or from an emanating corner); they cut `f` into regions, each inside one
+input face, and form a tree with the regions. **Which input edges it crosses, and in which order,
+is decided from the integers:** the region of each end (inside: the region the face split would
+pick, I15, so that it agrees with `point_on_input`; on a side: the gap between that side's
+crossings, counted as `point_on_input` counts it, `distance < t ℓ`; at a corner: the region at the
+corner nearest in the tree to the other end's), then the arcs on the tree path. Floating point
+decides only where the segment meets each arc (two lines in the face's layout, clamped into the
+arc, I5) and so the parameter on the input edge (interpolated between the arc's ends). A segment
+along a side is the piece of that side's `ExtractIntrinsicEdge` path between its ends (or of the
+input edge an `n = −1` side runs along). **Checks:** both ends of every piece must lie in the
+closure of its input face, and the length of the path measured piece by piece in the input faces
+must equal the segment's length within `EdgeTraceOptions::tolerance` times it
+(`PathOnInput::mismatch` is the difference); either failure is `SegmentTrace`, as a trace that
+does not arrive is on signposts. `max_crossings` is not used.
+
+Measured (`tests/export.rs`, release; the 19 shapes of `all_shapes`, spot, bob, blub and the five
+bad meshes of the cones data set; flips only and refined to 25°):
+
+* exports: 52 of 54 identical to the signposts' in connectivity, lengths (bitwise) and counts,
+  places within `3.3e-13` mean edge lengths; the 2 others (torus 5×3) split 1 and 3 edges off the
+  midpoint (above). The exported integers certify;
+* segments (between points of two sides, inside to side, corner to side, corner to inside, along a
+  side; up to 60 faces per export): of 30 042 on the exports that agree, 30 041 cross the same input
+  edges in the same order as the signposts' traces, all 30 042 lie within `1e-9` mean edge lengths
+  of them; the one difference is a vertex `1.1e-14` from an input edge that the signposts snapped
+  onto it (a crossing at the start of the path). Nodes within `5.3e-12`, crossings within
+  `2.5e-13` mean edge lengths except at small crossing angles (camelshotnoise refined: `2.4e-7`);
+  relative length mismatch at most `1.9e-11`; no signpost trace failed. Bad nodes give the
+  signposts' errors with the same messages.
+
+### 4.11 The optimal Delaunay iteration (I29)
+
+IT-SPEC N21–N25 written once over `ddg_intrinsic::odt::OdtMoves` (`optimal_delaunay<T: OdtMoves>`;
+the signposts' method is this function, pins unchanged): `odt_target`, `star_min_shape`,
+`move_vertex_with_shape`, and `split_for_odt` (provided: the midpoint; integers: as
+`split_for_export`). The iteration also halves the step when a move is refused with
+`InsertionRefused` or `RemovalRefused` (the signposts return neither).
+
+On integers (`IntegerTriangulation::optimal_delaunay(&IntegerOdtOptions)`, certified at the end):
+the frame is `AngleFrames` (I9), the update `ddg_intrinsic::reposition::odt_target_of` in it, the
+step test the signposts' (`check_star_move`: turned or too thin triangles). **The move keeps the
+star** (`IntegerTriangulation::move_vertex_in_star`, `src/star_move.rs`), as the signposts' does:
+the star of an inserted interior vertex is flat and unfolds into a polygon; the input edges across
+it are chords between points of its link (arcs of the star's faces joined across the spokes, plus
+an input edge through `v`, along two `n = −1` spokes or emanating from `v`); the new `n` of a spoke
+`v' → u` is the number of chords that separate `v'` from `u` (the side of `u` from the order of the
+chord's ends on the link, the side of `v'` from one orientation test; a `v'` within `1e-12` mean
+spoke lengths of a chord is refused, the step halved; a `v'` that the point query puts on an input
+edge (as the signposts snap) makes that chord pass through `v'`, and the spokes to its ends get
+`n = −1`); the roundabouts of `u → v'` follow by `ic-roundabout-update` with Eq. 2 of the new face;
+lengths by `it-moved-length`; `q⁰` by the point query of the old state at the end of the path from
+`v` (App. A in the arcs already extracted). Every new face is checked for Eq. 1's parity before
+anything changes. The first version moved by Sec. 3.6 (trace, insert, remove): the iteration's
+own splits make straight stars, whose removal is `RemovalStuck` (I27), and 106 of 240 vertices
+never moved on the icosphere (smallest angle 14.0° against the signposts' 35.6°).
+`move_vertex` (Sec. 3.6) no longer copies the whole state per move: a refused removal after a face
+split is undone by removing the inserted vertex of degree three again, which restores every id
+and value; the copy remains for the rare path that ends on an edge.
+
+Measured (`tests/export.rs`, 27 meshes as above, default options with at most 3 000 insertions
+and 20 iterations): 26 identical to the signposts in iterations, insertions, halved and unmoved
+steps, the places of the exported vertices within `3.3e-13` mean edge lengths (`4.3e-10` on the
+sheared parallelogram 10 σ6, where 3 splits were off the midpoint); bumpy grid 12×12 makes the same
+counts on another trajectory from iteration 2 on, where a tie in the order of the long edges is
+broken by a last-bit difference of the moved lengths (`|Δℓ| = 5.6e-17`; the frames differ by
+rounding); the thin tube 4×12 has 34 moves refused on integers only (a new place within rounding of an input
+edge or vertex; the final places still agree within `4.5e-15`). Every result certifies. Cost: 2.0–2.4× the
+signposts' on these runs; in `ddg-uv` sessions with `IntrinsicOptions::optimized()` (example
+`representations`, one pinned core, best of 3, load average 1.4–5.0) 3.4× on spot quads
+(0.38 → 1.31 s), 3.9× on camelbad (2.58 → 10.06 s): extraction of the star's arcs, trigonometry of
+the frames and allocations, no single hot spot (perf).
 
 ## 5. Delaunay refinement (Sec. 4.2, Supp. Alg. 10, App. C)
 
@@ -829,11 +932,23 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
   split and snap the place onto the input edge (1 of 256 differential runs, WP6). The alternative
   is to snap the integer split to the crossing (the new vertex on the input edge); undecided.
   The refine driver has no counter for these edge-split refusals (WP10); face-split refusals are
-  `n_recover_failed` (7 on Thingi10k, in 2 meshes).
-* **I29** *An integer simplicial export (open).* `ddg-uv`'s intrinsic path ends in
+  `n_recover_failed` (7 on Thingi10k, in 2 meshes). The export and the optimal Delaunay iteration
+  (I29) split such an edge at `½ ± 2⁻¹⁶` instead (`SimplicialExport::n_off_midpoint_splits`;
+  torus 5×3: 1 and 3 splits, so its export differs from the signposts' by `1.5e-5` of an edge
+  there).
+* **I29** *An integer simplicial export (resolved: bb5f92c, d3c3999, 0e6c3a6, 7bf6014, e1ebbde;
+  this documentation in the commit after them).* `ddg-uv`'s intrinsic path ends in
   `export_simplicial` and its cut transfer uses `SimplicialExport::edge_point` and
-  `segments_on_input`; the integer representation has no export yet (it would be the common
-  subdivision plus `extract_intrinsic_edge`), so `ddg-uv` stays on signposts until it exists.
+  `segments_on_input`. Now: the export and the optimal Delaunay iteration are written once over
+  traits (`Exportable`, `OdtMoves`) with signposts bitwise unchanged; integer coordinates export
+  with off-midpoint splits where I28 refuses the midpoint, carry segments back from the integers
+  (the region tree of a face's arcs) and move vertices inside their star (§4.10, §4.11).
+  `ddg-uv`'s `IntrinsicOptions::representation` defaults to `Representation::DEFAULT` (integers;
+  refinement by the signposts' rules on both; state format v4, older states read as signposts);
+  Python `CutSession(representation=…)` and the Blender cut's Representation follow it. On
+  4 meshes × 3 options the cut on integers has the signposts' vertex counts, cut points and
+  polygons, and its final energy to the printed 7 digits (`ddg-uv` test
+  `the_cut_on_signposts_and_on_integers`).
 * **I30** *Non-terminating refinement on Thingi10k 176193 and 190253 (resolved, a589919).*
   Cause: Delaunay flips refused by IT-SPEC N5's shape limit (shape ~2e-7 from mollified
   near-duplicate vertices; 4 IDT edges on 176193, 35 refinement flips on 190253) left edges that
@@ -868,7 +983,7 @@ From the map of the reference (`runs_tmp/ic-reference-map.md`, "map §n"; `gc` p
 | WP8 | **done** (1149fdf–854e042; `ic-vertex-removal-delta` open, cited): Lean tiers A, B, B′; oracle | `lean/proofs/DdgProofs/IntegerCoords/…`, `lean/oracle/DdgOracle/IntegerCoords…`, `CITED.md` section | this file | Opus |
 | WP9 | Lean tier C, the complex model | `lean/proofs/DdgProofs/IntegerCoords/Complex/…` | WP8 | Opus |
 | WP10 | **done** (307308a–a9fa390; I30 fix a589919, 16210ca): Thingi10k (Table 1 integers 100 %), benches, the demo comparison, ported reference tests (§10.2, §10.3) | `examples/{thingi_convert,thingi_eval}.rs`, `benches/representation.rs`, `tests/{reference_ports,thingi_regressions}.rs`, `scripts/{ic-eval,ic-demo-eval,ic-demo-build,ic-timings}.sh` | WP6, Q1, Q2 | Sonnet |
-| WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `optimal_delaunay`, `move_vertex`, `odt_target`, `export_simplicial`, `fingerprint`, `SimplicialExport::edge_point`, `segments_on_input` (so `ddg-uv`, I29), `signpost` (tangent fields, I26) | per crate | WP5, WP6 | Sonnet |
+| WP11 | **done; default integers since Q3 was flipped** (b1fe875–bebb60b): `ddg_intrinsic::generic_ops` (`cotan_laplacian`, `lumped_mass`, bitwise as the signpost methods); `ddg-intrinsic-apps` fem, steiner, amr, heat generic (`Representation`, `InputPoints`); Python `IntrinsicTriangulation(…, representation="integer")` with refine, common subdivision, edge polylines, transfer, certify, and `representation=` on `geodesic_distance`, `steiner_tree`, `adaptive_solve`; Blender "Show Intrinsic Refinement" (`intrinsic_draw.py` reusable). Still signposts-only: `signpost` (tangent fields, I26); the export, the way back, the optimal Delaunay iteration and `ddg-uv` moved to integers with I29 | per crate | WP5, WP6 | Sonnet |
 
 At most three agents at a time; timings alone.
 
@@ -902,6 +1017,9 @@ At most three agents at a time; timings alone.
   that assert the default (`the_default_representation_is_integer`, `test_integer_coords.py`,
   `test_default_representation_is_the_documented_one`). `ddg_tools.IntrinsicTriangulation` and
   "Show Intrinsic Refinement" already default to integers, by design (they exist to show them).
+  With I29 the cut flow follows: `ddg-uv`'s `IntrinsicOptions::representation`
+  (`Representation::DEFAULT`), `CutSession(representation=None)`, the Blender cut's
+  Representation (`REPRESENTATION_DEFAULT`).
 * **Q4** FlipOut (Sharp and Crane 2020a) is in scope, as its own crate `ddg-flip-geodesics` with its
   contract `crates/ddg-flip-geodesics/SPEC.md`, on top of the shared triangulation interface
   (PDF downloaded to `../FlipOut/FlipOut.pdf`; reference `gc: src/surface/flip_geodesics.cpp`).

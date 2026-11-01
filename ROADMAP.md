@@ -431,7 +431,14 @@ Open:
   `Complex::merge_edge` (the inverse of `split_edge`) would remove it by merging the two halves.
 * I28: the integer edge split refuses a point within rounding of a crossing, so refinement skips
   that face where the signposts split and snap (1 of 256 differential runs). Undecided whether to
-  snap to the crossing.
+  snap to the crossing. The export and the optimal Delaunay iteration split such an edge at
+  `½ ± 2⁻¹⁶` instead (I29; torus 5×3).
+* I29 **done** (2026-11-01, bb5f92c, d3c3999, 0e6c3a6, 7bf6014, e1ebbde, and the docs commit after them):
+  the export, the way back of segments and the optimal Delaunay iteration on integer coordinates
+  (written once over `Exportable` / `OdtMoves`, signposts bitwise unchanged); `ddg-uv`, Python
+  `CutSession` and the Blender cut default to integer coordinates (`representation`). The cut is
+  the signposts' to rounding on every measured case; the optimal Delaunay setup costs 3.4–4.2× on
+  integers (IC SPEC §4.10, §4.11).
 * FlipOut R5: refinement still refuses constrained edges, so refinement that keeps FlipOut paths as
   edges (F9) cannot run.
 * Fig. 14: the trends are reproduced, but the factors are not (2.7× and 4.1× against the paper's
