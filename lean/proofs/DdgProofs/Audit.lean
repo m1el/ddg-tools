@@ -1202,6 +1202,17 @@ open DdgProofs
 #print axioms DdgProofs.IntegerCoords.Merge.merge_normal
 #print axioms DdgProofs.IntegerCoords.splitSide_eq
 #print axioms DdgProofs.IntegerCoords.emanatingBefore_eq
+#print axioms DdgProofs.IntegerCoords.chordCount_eq_sepCount
+#print axioms DdgProofs.IntegerCoords.chordCount_closed
+#print axioms DdgProofs.IntegerCoords.chordCount_fan
+#print axioms DdgProofs.IntegerCoords.canon_side0_eq_corner
+#print axioms DdgProofs.IntegerCoords.splitSideAtCrossingR_side0
+#print axioms DdgProofs.IntegerCoords.splitSideAtCrossingR_eq
+#print axioms DdgProofs.IntegerCoords.splitSideAtCrossingR_eq_none
+#print axioms DdgProofs.IntegerCoords.SplitAtCrossing.admissible_halves
+#print axioms DdgProofs.IntegerCoords.SplitAtCrossing.split_side
+#print axioms DdgProofs.IntegerCoords.SplitAtCrossing.emanatingBefore_eq_newFace
+#print axioms DdgProofs.IntegerCoords.SplitAtCrossing.split_at_crossing_merge
 #print axioms DdgProofs.IntegerCoords.Strip.hit_point
 #print axioms DdgProofs.IntegerCoords.Strip.hit_unique
 #print axioms DdgProofs.IntegerCoords.Strip.hit_mem

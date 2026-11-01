@@ -7,6 +7,7 @@ import DdgProofs.IntegerCoords.Chords
 import DdgProofs.IntegerCoords.Recover
 import DdgProofs.IntegerCoords.Transfer
 import DdgProofs.IntegerCoords.SplitEdge
+import DdgProofs.IntegerCoords.SplitAtCrossing
 import DdgProofs.IntegerCoords.Strip
 import DdgProofs.IntegerCoords.Complex.Basic
 import DdgProofs.IntegerCoords.Complex.Trace
@@ -14,6 +15,7 @@ import DdgProofs.IntegerCoords.Complex.Labels
 import DdgProofs.IntegerCoords.Complex.QuadFlip
 import DdgProofs.IntegerCoords.Complex.Flip
 import DdgProofs.IntegerCoords.Complex.Merge
+import DdgProofs.IntegerCoords.Complex.SplitAtCrossing
 import DdgProofs.IntegerCoords.Complex.Extract
 
 /-!
