@@ -596,6 +596,46 @@ manifold triangle mesh; not a disk for `"disk"`), `SolveError`. Glue: `src/pytho
 `src/intrinsic_apps.rs`, `src/intrinsic_vector.rs`; tests of the wheel:
 `python-tests/test_intrinsic_apps.py`, `python-tests/test_intrinsic_vector.py`.
 
+## Surface simplification with intrinsic error metrics
+
+`simplify`, `build_hierarchy` and `qem_simplify` over the crate `ddg-intrinsic-simplification`
+(Liu, Gillespie, Chislett, Sharp, Jacobson, Crane, *Surface Simplification using Intrinsic Error
+Metrics*, ACM TOG 42(4), 2023; contract `crates/ddg-intrinsic-simplification/SPEC.md`). Arguments
+are buffers as everywhere else (numpy optional); the long calls release the GIL; errors are
+`InputError` (the message starts with the parameter), `MeshError`, `SolveError`.
+
+```python
+s = simplify(positions, triangles, ratio=0.1)          # or target=500
+s = simplify(positions, triangles, target=500, weights=0.3,   # 30 % area in the metric
+             fixed=[0, 17], refine_before=True, refine_after=True,
+             points=(face_ids, barycentric))           # extra tracked points
+s.vertices, s.faces, s.faces_compact, s.lengths        # the coarse mesh (fine ids / compact ids)
+s.point_face, s.point_bary, s.point_vertex             # where every tracked point lies
+s.face_colours, s.point_colours, s.n_colours           # Fig. 1 colouring, deterministic
+s.report                                               # dict: removals, flips, skips, timings, ...
+rows, cols, values = s.prolongation()                  # P (COO); s.prolongation_scipy() if scipy
+s.vector_prolongation(n=1)                             # P^vec: rows, cols, re, im, shape, report
+s.poisson(f, fixed=None, values=None)                  # Fig. 21: Poisson solved on the coarse mesh
+s.geodesic(source, method="exact" | "heat")            # distance on the coarse mesh, prolongated
+s.voronoi(sources)                                     # Fig. 25
+
+h = build_hierarchy(positions, triangles, ratio=0.25, n_min=500)
+h.level_sizes, h.prolongation(k), h.laplacian(k), h.mass(k)
+mg = h.multigrid(shift=1.0)                            # or matrix=(rows, cols, values), known=[...]
+x, report = mg.pcg(b)                                  # or mg.solve(b)
+
+q = qem_simplify(positions, triangles, target=500)     # the extrinsic baseline of Sec. 8.4
+```
+
+Choices the contract left open. The metric is `mixture(w)` with `weights=w` (0: the paper's
+curvature metric, 1: area); `masses` adds a per-vertex channel (its sign splits it into two).
+`ratio` is relative to the input's vertex count, also with `refine_before`. `P^vec` is computed in
+the normalized frames of the input mesh and is refused with refinement or anisotropy, where the
+coarse frames are not those of the input. `refine_after` first repairs a non-simplicial coarse
+mesh with tracked flips (`repair_simplicial`, default on). Coarse vertices inserted by refinement
+have ids at or above `n_input_vertices`. The anisotropy is `anisotropy=tau` with
+`anisotropy_direction` `"max"`, `"min"` (principal curvature directions) or 3 reals per vertex.
+
 ## Developability of triangle meshes
 
 Four functions over the crate `ddg-developability` (Stein, Grinspun, Crane, *Developability of
@@ -865,6 +905,10 @@ This crate contains no algorithm of its own. The pipeline it calls (`ddg-uv`) im
   <https://doi.org/10.1145/3197517.3201367>
 - Rohan Sawhney, Keenan Crane. *Boundary First Flattening.* ACM Transactions on Graphics 37(1),
   2017. <https://doi.org/10.1145/3132705>
+- Hsueh-Ti Derek Liu, Mark Gillespie, Benjamin Chislett, Nicholas Sharp, Alec Jacobson, Keenan
+  Crane. *Surface Simplification using Intrinsic Error Metrics.* ACM Transactions on Graphics
+  42(4), 2023. <https://doi.org/10.1145/3592403> (`simplify`, through
+  `ddg-intrinsic-simplification`; the authors' MIT reference code is credited there)
 - Oded Stein, Eitan Grinspun, Keenan Crane. *Developability of Triangle Meshes.* ACM Transactions
   on Graphics 37(4), 2018. <https://doi.org/10.1145/3197517.3201303> (the developability functions,
   through `ddg-developability`)

@@ -6,7 +6,7 @@ element types. Results are ``array.array`` objects.
 
 from array import array
 from collections.abc import Buffer, Callable, Sequence
-from typing import Final, Literal, TypedDict, final
+from typing import Final, Literal, TypeAlias, TypedDict, final
 
 __version__: Final[str]
 
@@ -1498,3 +1498,186 @@ def geodesic_bezier(
     """The geodesic Bézier curve with the given control points, ``rounds`` of midpoint
     subdivision (1 to 8 suit interactive use). ``SolveError`` when the shortest paths between
     control points touch or cross, or a control point is repeated."""
+
+# Surface simplification using intrinsic error metrics (Liu, Gillespie, Chislett, Sharp, Jacobson,
+# Crane, ACM TOG 42(4), 2023; crate ddg-intrinsic-simplification).
+
+Coo: TypeAlias = tuple[array[int], array[int], array[float]]
+"""A sparse matrix as triplets ``(rows, cols, values)``."""
+
+@final
+class Simplification:
+    """A coarse intrinsic triangulation of a surface and the map from the input onto it. Tracked
+    points are the input vertices (ids ``0 .. n_input_vertices - 1``) followed by the extra
+    ``points`` given to ``simplify``."""
+    @property
+    def n_input_vertices(self) -> int: ...
+    @property
+    def n_vertices(self) -> int: ...
+    @property
+    def n_faces(self) -> int: ...
+    @property
+    def vertices(self) -> array[int]:
+        """Fine id of every coarse vertex (ids at or above ``n_input_vertices`` were inserted
+        by refinement)."""
+    @property
+    def faces(self) -> array[int]:
+        """3 fine vertex ids per coarse face (a face of the Δ-complex may repeat a vertex)."""
+    @property
+    def faces_compact(self) -> array[int]:
+        """3 coarse vertex ids (``0 .. n_vertices - 1``, the index into ``vertices``) per face."""
+    @property
+    def lengths(self) -> array[float]:
+        """3 side lengths per face: corner ``k`` to corner ``k + 1``."""
+    @property
+    def point_face(self) -> array[int]:
+        """The coarse face of every tracked point (a point that is a coarse vertex: its lowest
+        incident face), -1 for none."""
+    @property
+    def point_bary(self) -> array[float]:
+        """3 barycentric coordinates per tracked point, in the corners of ``point_face``."""
+    @property
+    def point_vertex(self) -> array[int]:
+        """The compacted coarse vertex a tracked point is, -1 for a point inside a face."""
+    @property
+    def face_colours(self) -> array[int]:
+        """Greedy colouring of the coarse faces: faces that share a vertex differ."""
+    @property
+    def n_colours(self) -> int: ...
+    @property
+    def point_colours(self) -> array[int]:
+        """The colour of the coarse face of every tracked point, -1 for none."""
+    @property
+    def report(self) -> dict[str, object]:
+        """``stop``, vertex counts, removals by kind, flips, skips and failures by reason,
+        ``components``, ``keys``, ``timings``, ``seconds``, and ``anisotropy``,
+        ``pre_refinement``, ``post_refinement`` (dicts or None)."""
+    def prolongation(self) -> Coo:
+        """``P`` (input vertices by coarse vertices), rows sum to one."""
+    def prolongation_scipy(self) -> object:
+        """``P`` as a ``scipy.sparse`` CSR matrix; ``ImportError`` without scipy and numpy."""
+    def point_prolongation(self) -> Coo:
+        """``P`` for every tracked point (extra points included)."""
+    def vector_prolongation(self, n: int = 1) -> dict[str, object]:
+        """``P^vec`` for ``n``-direction fields: ``rows``, ``cols``, ``re``, ``im``, ``shape``,
+        ``report``. Not available with refinement or anisotropy (``InputError``)."""
+    def vector_prolongation_scipy(self, n: int = 1) -> object:
+        """``P^vec`` as a complex ``scipy.sparse`` CSR matrix."""
+    def poisson(
+        self, f: Buffer, fixed: Buffer | None = None, values: Buffer | None = None
+    ) -> dict[str, object]:
+        """Poisson's equation on the coarse mesh, prolongated: ``coarse``, ``fine``,
+        ``report``. Without ``fixed`` the mean-zero problem on a closed surface."""
+    def geodesic(
+        self, source: int, method: Literal["exact", "heat"] = "exact", time_factor: float = 1.0
+    ) -> dict[str, array[float]]:
+        """Geodesic distance from a tracked point on the coarse mesh: ``coarse``, ``fine``."""
+    def voronoi(self, sources: Buffer, threads: int = 4) -> dict[str, array[float] | array[int]]:
+        """Geodesic Voronoi labels: ``fine_labels``, ``coarse_labels``, ``fine_distance``."""
+
+def simplify(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    target: int | None = None,
+    ratio: float | None = None,
+    weights: float = 0.0,
+    memory: bool = True,
+    fixed: Buffer | None = None,
+    masses: Buffer | None = None,
+    mass_weight: float = 1.0,
+    points: tuple[Buffer, Buffer] | None = None,
+    refine_before: bool = False,
+    refine_after: bool = False,
+    repair_simplicial: bool = True,
+    anisotropy: float | None = None,
+    anisotropy_direction: Literal["max", "min"] | Buffer | None = None,
+    anisotropy_clamp: bool = False,
+    representation: Literal["signposts", "integer"] = "integer",
+) -> Simplification:
+    """Simplifies a mesh by intrinsic vertex removal with the intrinsic error metric (Alg. 1).
+    Exactly one of ``target`` (vertex count) and ``ratio`` is required. ``weights`` is the
+    curvature/area weight ``w`` (0: curvature, 1: area). ``points`` is ``(faces, bary)``: extra
+    tracked points. Raises ``InputError``, ``MeshError``, ``SolveError``."""
+
+@final
+class MultigridSolver:
+    @property
+    def info(self) -> dict[str, object]: ...
+    def solve(
+        self, b: Buffer, known_values: Buffer | None = None, x0: Buffer | None = None
+    ) -> tuple[array[float], dict[str, object]]: ...
+    def pcg(
+        self,
+        b: Buffer,
+        known_values: Buffer | None = None,
+        x0: Buffer | None = None,
+        max_iterations: int = 100,
+    ) -> tuple[array[float], dict[str, object]]: ...
+
+@final
+class Hierarchy:
+    @property
+    def n_levels(self) -> int: ...
+    @property
+    def level_sizes(self) -> list[int]: ...
+    @property
+    def report(self) -> dict[str, object]: ...
+    def level_vertices(self, level: int) -> array[int]: ...
+    def faces(self, level: int) -> array[int]: ...
+    def laplacian(self, level: int) -> Coo: ...
+    def mass(self, level: int) -> array[float]: ...
+    def prolongation(self, level: int) -> Coo:
+        """``P_k``: level ``k`` by level ``k + 1``."""
+    def multigrid(
+        self,
+        matrix: tuple[Buffer, Buffer, Buffer] | None = None,
+        *,
+        shift: float = 0.0,
+        known: Buffer | None = None,
+        pre_sweeps: int = 2,
+        post_sweeps: int = 2,
+        tolerance: float = 1e-10,
+        max_cycles: int = 50,
+    ) -> MultigridSolver:
+        """The multigrid solver for ``matrix`` (default ``L + shift M`` of level 0)."""
+
+def build_hierarchy(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    ratio: float = 0.25,
+    n_min: int = 500,
+    fresh_levels: bool = False,
+    weights: float = 0.0,
+    memory: bool = True,
+    fixed: Buffer | None = None,
+) -> Hierarchy: ...
+
+@final
+class QemResult:
+    @property
+    def positions(self) -> array[float]: ...
+    @property
+    def triangles(self) -> array[int]: ...
+    @property
+    def vertex_map(self) -> array[int]: ...
+    @property
+    def projection_face(self) -> array[int]: ...
+    @property
+    def projection_bary(self) -> array[float]: ...
+    @property
+    def projection_distance(self) -> array[float]: ...
+    @property
+    def report(self) -> dict[str, int | float | bool]: ...
+
+def qem_simplify(
+    positions: Buffer,
+    triangles: Buffer,
+    *,
+    target: int,
+    area_weighted: bool = False,
+    boundary_weight: float = 1000.0,
+) -> QemResult:
+    """Quadric error metric simplification (Garland, Heckbert 1997), the paper's extrinsic
+    baseline, with the closest-point projection of every input vertex."""
