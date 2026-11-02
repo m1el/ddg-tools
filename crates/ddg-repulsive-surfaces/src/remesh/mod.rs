@@ -112,6 +112,19 @@ pub struct RemeshOptions {
     pub order: RemeshOrder,
     /// Which parts run.
     pub enabled_ops: EnabledOps,
+    /// The splits of one pass may multiply the face count by at most this factor (default
+    /// 2; `≥ 1`, `f64::INFINITY` disables it). When the long edges would exceed it, only the
+    /// longest ones within the budget are split (the rest wait for later passes,
+    /// [`RemeshReport::splits_deferred`]). A legitimate pass grows a mesh by a few percent
+    /// (the remesher keeps `L₀` fixed); a pass that would double it means the surface itself
+    /// is exploding (`NOTES-SOLVERFIX.md`: a lost area constraint grew a subcritical flow from
+    /// 4k to 122k faces and the dense solver then asked for 118 GB).
+    pub max_growth: f64,
+    /// Check collapses against the CCD gap rule also when the line search runs without CCD
+    /// (default `true`; the default `CcdOptions`, with the exempt band of the faces that
+    /// intersect at the start of the pass). With CCD on, the session's CCD options are used
+    /// whatever this flag says.
+    pub guard_collapses: bool,
 }
 
 impl Default for RemeshOptions {
@@ -124,6 +137,8 @@ impl Default for RemeshOptions {
             flip_cap_per_vertex: 100,
             order: RemeshOrder::FlipThenSmooth,
             enabled_ops: EnabledOps::default(),
+            max_growth: 2.0,
+            guard_collapses: true,
         }
     }
 }
@@ -163,6 +178,9 @@ impl RemeshOptions {
         if self.flip_cap_per_vertex == 0 {
             return bad("flip_cap_per_vertex", 0.0, "must be at least 1");
         }
+        if self.max_growth.is_nan() || self.max_growth < 1.0 {
+            return bad("max_growth", self.max_growth, "must be at least 1 (f64::INFINITY disables it)");
+        }
         Ok(())
     }
 }
@@ -178,6 +196,8 @@ pub struct RemeshReport {
     pub flips: u64,
     /// Long edges whose split was refused, by reason (only a degenerate half).
     pub refused_splits: RefusalCounts,
+    /// Long edges not split in this pass because of [`RemeshOptions::max_growth`].
+    pub splits_deferred: u64,
     /// Short edges whose collapse was refused, by reason.
     pub refused_collapses: RefusalCounts,
     /// Non-Delaunay edges whose flip was refused, by reason (all rounds).
@@ -234,12 +254,39 @@ pub fn remesh(
 
     if options.enabled_ops.split {
         let thr = options.split * l0;
-        for &[a, b] in surface.edges() {
-            if edge_len(&mesh, a, b) > thr {
-                match mesh.split(a, b) {
-                    Ok(_) => rep.splits += 1,
-                    Err(r) => rep.refused_splits.add(r.kind),
+        // Long edges (lexicographic order) with their lengths and the faces a split adds.
+        let mut long: Vec<(usize, f64, u64)> = Vec::new();
+        for (e, &[a, b]) in surface.edges().iter().enumerate() {
+            let l = edge_len(&mesh, a, b);
+            if l > thr {
+                let added = if surface.edge_faces()[e][1] == crate::surface::NONE { 1 } else { 2 };
+                long.push((e, l, added));
+            }
+        }
+        let nf = surface.n_faces() as f64;
+        let budget = (options.max_growth - 1.0) * nf;
+        let total: u64 = long.iter().map(|x| x.2).sum();
+        if total as f64 > budget {
+            // Longest first within the budget, then split in the usual order.
+            let mut order: Vec<usize> = (0..long.len()).collect();
+            order.sort_by(|&i, &j| long[j].1.total_cmp(&long[i].1).then(long[i].0.cmp(&long[j].0)));
+            let mut keep = vec![false; long.len()];
+            let mut used = 0.0;
+            for i in order {
+                if used + long[i].2 as f64 > budget {
+                    continue;
                 }
+                used += long[i].2 as f64;
+                keep[i] = true;
+            }
+            rep.splits_deferred = keep.iter().filter(|k| !**k).count() as u64;
+            long = long.into_iter().zip(keep).filter(|(_, k)| *k).map(|(x, _)| x).collect();
+        }
+        for (e, _, _) in long {
+            let [a, b] = surface.edges()[e];
+            match mesh.split(a, b) {
+                Ok(_) => rep.splits += 1,
+                Err(r) => rep.refused_splits.add(r.kind),
             }
         }
     }

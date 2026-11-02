@@ -1,7 +1,7 @@
 //! The applications of Sec. 9 of "Repulsive Surfaces" (Yu, Brakensiek, Schumacher, Crane 2021),
 //! `SPEC.md` §14.4. Shared by `examples/apps/main.rs` (full runs, OBJ sequences) and
 //! `tests/applications.rs` (smoke sizes). Every application returns [`Outcome`]s.
-#![allow(dead_code, clippy::too_many_arguments)]
+#![allow(dead_code, clippy::too_many_arguments, clippy::needless_range_loop)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -565,6 +565,12 @@ fn subdivide(m: &Mesh, levels: u32, sharp: &[(u32, u32)]) -> (Mesh, Vec<u32>) {
     (m, v)
 }
 
+/// The H of Fig. 22 subdivided `levels` times (sharp prism edges kept), and the vertices on
+/// the sharp edges.
+pub fn h_mesh(levels: u32) -> (Mesh, Vec<u32>) {
+    subdivide(&primitives::h_shape_coarse(), levels, &h_sharp_edges())
+}
+
 /// The prism edges of `h_shape_coarse`: outline edges at both caps and the vertical edges.
 fn h_sharp_edges() -> Vec<(u32, u32)> {
     let mut e = Vec::new();
@@ -732,7 +738,10 @@ pub fn nested_envelopes(cfg: &Cfg, levels: usize) -> R<Vec<Outcome>> {
         let steps = if cfg.smoke { 3 } else { 150 };
         o.max_iterations = steps;
         o.constraints = vec![Constraint::Barycenter { component: None, target: None }, Constraint::Volume { component: None, target: None }];
-        o.schedules.push(Schedule { constraint: 1, factor: 0.0, offset: 1.15 * vprev, steps: (steps * 2 / 3).max(1) });
+        // Smoke: the schedule outlasts the 3 steps (the full x1.15 in two steps pushes the
+        // envelope into its obstacle; the projection guard then keeps the volume behind).
+        let sched = if cfg.smoke { 20 } else { (steps * 2 / 3).max(1) };
+        o.schedules.push(Schedule { constraint: 1, factor: 0.0, offset: 1.15 * vprev, steps: sched });
         o.penalties.push(pen);
         o.ccd_obstacles.push(ob);
         o.remesh = Some(RemeshOptions { collapse: 1.0, split: 2.5, ..RemeshOptions::default() });
@@ -770,7 +779,9 @@ pub fn cobblestones(cfg: &Cfg) -> R<Outcome> {
     let (s, x) = mesh_pair(&c.spheres)?;
     let nc = s.n_components();
     let steps = if cfg.smoke { 3 } else { 400 };
-    let growth = 2.5;
+    // Smoke: a feasible growth in two scheduled steps (x2.5 in two steps would push the spheres
+    // into each other; the projection guard then keeps the area behind its target).
+    let growth = if cfg.smoke { 1.2 } else { 2.5 };
     let mut o = base_opts();
     o.max_iterations = steps;
     o.constraints = vec![Constraint::Barycenter { component: None, target: None }];

@@ -632,6 +632,12 @@ pub struct DenseMetric {
     pub weights: SobolevWeights,
 }
 
+/// The largest vertex count [`dense_metric`] assembles: it keeps three to five `|V| × |V|`
+/// matrices (`B`, `B⁰`, `A`, and the LU of the saddle), 2 GB each at this size. Above it the
+/// dense back end returns [`RsError::InvalidOption`] instead of failing to allocate
+/// (`NOTES-SOLVERFIX.md`: an exploding remeshed flow asked for 118 GB).
+pub const DENSE_MAX_VERTICES: usize = 16_384;
+
 /// Assembles the dense Sobolev metric `A = w_TP (B + c_lo B⁰) + w_W W M⁻¹ W + O_diag` (§4.4).
 /// `obstacle` is the hook for WP6/WP7's mesh-obstacle diagonal ([`FaceDiagonal`]). `B⁰` is
 /// assembled (and reported) also when `low_order` is off.
@@ -642,7 +648,7 @@ pub struct DenseMetric {
 /// # Errors
 /// The errors of [`Surface::validate_positions`]; [`RsError::NonFiniteEnergy`] for coincident
 /// barycenters; [`RsError::InvalidOption`] for invalid weights or an obstacle diagonal of the
-/// wrong length.
+/// wrong length, and for more than [`DENSE_MAX_VERTICES`] vertices.
 pub fn dense_metric(
     pool: &rayon::ThreadPool,
     surface: &Surface,
@@ -652,6 +658,16 @@ pub fn dense_metric(
     obstacle: Option<&FaceDiagonal>,
 ) -> Result<DenseMetric, RsError> {
     weights.validate()?;
+    let nv = surface.n_vertices();
+    if nv > DENSE_MAX_VERTICES {
+        let gb = (nv as f64).powi(2) * 8.0 / 1e9;
+        return Err(RsError::InvalidOption {
+            name: "dense metric",
+            value: format!("{nv} vertices ({gb:.1} GB per |V| x |V| matrix, three to five of them)"),
+            requirement: "at most DENSE_MAX_VERTICES = 16384 vertices for the dense back end; use \
+                          Backend::Auto or Backend::Hierarchical",
+        });
+    }
     let geom = FaceGeometry::new(surface, positions)?;
     let mass = vertex_areas(surface, &geom.areas);
     let ops = FaceOperators::from_geometry(surface, positions, geom);

@@ -586,6 +586,7 @@ fn run_step(c: &Case, o: &Output) -> Result<Run, RsError> {
             tau_min_rel: 1e-12,
             max_halvings: Some(max_halvings),
             ccd: None,
+            guard_projection: false,
         },
         newton_steps: newton,
         remesh: None,
