@@ -1,0 +1,7 @@
+alpha 6
+beta 12
+theta 0.5
+nV 252
+nF 504
+tpe_all_pairs 316.65410366304218
+tpe_barnes_hut 316.65014240256511
