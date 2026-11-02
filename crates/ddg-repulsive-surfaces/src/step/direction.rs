@@ -279,8 +279,10 @@ impl RobustHierarchical {
         };
         if matches!(self.active, Active::Primary) {
             let c = &self.ctx;
-            let mut o = HierarchicalOptions::default();
-            o.cluster = c.options.cluster;
+            let mut o = HierarchicalOptions {
+                cluster: c.options.cluster,
+                ..HierarchicalOptions::default()
+            };
             o.gmres.tolerance = c.options.gmres.tolerance;
             o.gmres.max_iterations = (4 * c.options.gmres.max_iterations).max(800);
             o.gmres.restart = 60;
@@ -353,6 +355,19 @@ impl SaddleSolver for RobustHierarchical {
         }
     }
 
+    /// The primary solver's batch (one pass of the tree for all right-hand sides); if a solve of
+    /// the batch diverges, the right-hand sides are solved one by one through
+    /// [`SaddleSolver::solve`] (the recovery chain, with the same results as without batching).
+    fn solve_many(&mut self, rhs: &[(&[f64], &[f64])]) -> Result<Vec<SaddleSolution>, RsError> {
+        if matches!(self.active, Active::Primary) {
+            match self.primary.solve_many(rhs) {
+                Err(RsError::SolverDiverged { .. }) => {}
+                r => return r,
+            }
+        }
+        rhs.iter().map(|(a, b)| self.solve(a, b)).collect()
+    }
+
     fn base_report(&self) -> LinearReport {
         let mut r = self.primary.base_report();
         r.fallbacks = self.events.clone();
@@ -381,6 +396,23 @@ impl StepSolver {
     pub fn products(&self) -> Option<(usize, f64)> {
         match self {
             StepSolver::Hierarchical(s) => Some(s.primary.operator().usage()),
+            _ => None,
+        }
+    }
+
+    /// Seconds of the hierarchical back end: `[metric tree build, fractional tree build, L′
+    /// factorization, preconditioner applications]`.
+    pub fn build_timings(&self) -> Option<[f64; 4]> {
+        match self {
+            StepSolver::Hierarchical(s) => {
+                let p = s.primary.preconditioner();
+                Some([
+                    s.primary.operator().tree().build_seconds(),
+                    p.fractional_seconds(),
+                    p.factor_seconds(),
+                    p.usage().1,
+                ])
+            }
             _ => None,
         }
     }

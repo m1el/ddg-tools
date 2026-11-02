@@ -17,3 +17,11 @@ rayon = "1.10"
 [[bench]]
 name = "ccd"
 harness = false
+
+[[bench]]
+name = "step"
+harness = false
+
+[[bench]]
+name = "product"
+harness = false

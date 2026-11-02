@@ -291,28 +291,38 @@ impl CoarseSpace {
             .collect()
     }
 
-    /// The balancing preconditioner (module docs) around the fine `P⁻¹` given as `fine`.
+    /// The balancing preconditioner (module docs) around the fine `P⁻¹` (`fine`, applied to
+    /// all right sides in one batch).
     ///
     /// # Errors
     /// The errors of `fine`.
-    pub fn apply<F>(&self, r: &[f64], fine: F) -> Result<Vec<f64>, RsError>
+    pub fn apply_many<F>(&self, rs: &[&[f64]], fine: F) -> Result<Vec<Vec<f64>>, RsError>
     where
-        F: FnOnce(&[f64]) -> Result<Vec<f64>, RsError>,
+        F: FnOnce(&[&[f64]]) -> Result<Vec<Vec<f64>>, RsError>,
     {
-        let dim = r.len();
-        let yc = self.e_solve(&self.zt(r));
-        let mut rp = r.to_vec();
-        for (j, &yj) in yc.iter().enumerate() {
-            if yj != 0.0 {
-                for (ri, a) in rp.iter_mut().zip(&self.az[j * dim..(j + 1) * dim]) {
-                    *ri -= yj * a;
+        let mut ycs = Vec::with_capacity(rs.len());
+        let mut rps = Vec::with_capacity(rs.len());
+        for r in rs {
+            let dim = r.len();
+            let yc = self.e_solve(&self.zt(r));
+            let mut rp = r.to_vec();
+            for (j, &yj) in yc.iter().enumerate() {
+                if yj != 0.0 {
+                    for (ri, a) in rp.iter_mut().zip(&self.az[j * dim..(j + 1) * dim]) {
+                        *ri -= yj * a;
+                    }
                 }
             }
+            ycs.push(yc);
+            rps.push(rp);
         }
-        let mut z = fine(&rp)?;
-        let t2 = self.e_solve(&self.azt(&z));
-        let corr: Vec<f64> = yc.iter().zip(&t2).map(|(a, b)| a - b).collect();
-        self.add_z(&corr, &mut z);
-        Ok(z)
+        let rpr: Vec<&[f64]> = rps.iter().map(Vec::as_slice).collect();
+        let mut zs = fine(&rpr)?;
+        for (z, yc) in zs.iter_mut().zip(&ycs) {
+            let t2 = self.e_solve(&self.azt(z));
+            let corr: Vec<f64> = yc.iter().zip(&t2).map(|(a, b)| a - b).collect();
+            self.add_z(&corr, z);
+        }
+        Ok(zs)
     }
 }

@@ -86,7 +86,8 @@ fn hard_pins_on_the_h_converge() {
         Constraint::Pins { vertices: (0..24).collect(), targets: None },
         Constraint::Volume { component: None, target: None },
     ];
-    let o = HierarchicalOptions::default();
+    // The solver settings of the WP15 failure (tolerance 1e-4, restart 30), not the flow's.
+    let o = HierarchicalOptions { gmres: ddg_repulsive_surfaces::solve::GmresOptions::default(), ..HierarchicalOptions::default() };
     let its = direction_iterations(&s, &p, &cons, BarycenterMode::PerComponent, &o).unwrap();
     eprintln!("scaled: iterations {its:?}");
     assert!(its.iter().all(|&i| i <= 120), "{its:?}");
@@ -108,7 +109,8 @@ fn many_components_with_a_global_barycenter() {
     for k in 0..s.n_components() {
         cons.push(Constraint::Area { component: Some(k as u32), target: None });
     }
-    let o = HierarchicalOptions::default();
+    // The solver settings of the WP15 failure (tolerance 1e-4, restart 30), not the flow's.
+    let o = HierarchicalOptions { gmres: ddg_repulsive_surfaces::solve::GmresOptions::default(), ..HierarchicalOptions::default() };
     let its = direction_iterations(&s, &p, &cons, BarycenterMode::Global, &o).unwrap();
     eprintln!("coarse: {its:?}");
     assert!(its.iter().all(|&i| i <= 15), "{its:?}");

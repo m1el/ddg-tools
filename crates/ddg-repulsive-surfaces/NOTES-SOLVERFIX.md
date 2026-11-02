@@ -167,6 +167,30 @@ on 51b1963.
 | `RS_REMESH=1 subcritical` | 62k faces + 30 GB at step 93, 118 GB request next | 198 steps, ≤ 5k faces, area ≤ 1e-7, F 48–66 to step 100, ≈ 1e4 by 160 |
 | envelope level 1 (auto) | 400 its/step at 4–9e-2 (WP15, never converged) | 1000 its/step at 4e-2 (retry stage), ≈ 3× slower (§2) |
 
+## After merging WP17 (52a8e04)
+
+Conflicts: `solve/precond.rs` (options struct: `scale`, `coarse` and WP17's `refine` all kept; `apply_many`:
+WP17's batched 3-column `L′` solves with the fractional scale applied per vector, wrapped by the coarse
+correction, now batched too, `CoarseSpace::apply_many`) and `solve/iterative.rs` (WP17's obstacle term in the
+preconditioner's Laplacian block, then `with_metric_weight` and `attach_coarse`). Every hierarchical path
+(primary, retry stage, `saddle_solver`) goes through `hierarchical_saddle`; `reference_compat` sets the
+congruence form, where neither the scale nor the coarse space applies (the printed preconditioner).
+`tests/solverfix.rs` pins `GmresOptions::default()` (1e-4, restart 30: the setting of the WP15 failure),
+since the flow default is now 1e-3 / restart 60.
+
+| run (default back end) | before merge | after merge |
+|---|---|---|
+| H pins + volume, one direction (`solverfix gmres h:3:pins --schur`) | 81 + 54 (1e-4) | 65 + 42 (flow default 1e-3) |
+| `h_sparse_volume`, 30 steps | 202 its/step, 0 fallbacks, 162 s | 117 its/step, 0 fallbacks, 22 s |
+| `h_dense_volume`, 30 steps | 84.5 its/step, 88 s | 59.4 its/step, 18 s |
+| 14 spheres, one direction (`gmres cobble:14:2 --schur`) | 7–9 per solve | 5–7 per solve |
+| `cobblestones`, 400 steps | 134 its/step, 511 s, 0 outside, area ×1.23 | 102 its/step, 201 s, 0 outside (max \|z\| 0.893), area ×1.23 |
+| `RS_REMESH=1 subcritical`, 200 steps | ≤ 5k faces, area ≤ 1e-7 after each projection | (3.5, 7): 5.7k faces, violation ≤ 5e-5; (3, 6): 4.9k faces |
+
+Times are with 6–9 jobs in parallel. The last remeshing pass of the (3.5, 7) run changes the area by 30 %
+(52.3 against the target 40.2; the next projection would restore it): remeshing a crumpled immersed surface
+does not preserve area (open, §2/§4).
+
 ## Proposed SPEC edits
 
 * **§6.3** (D33, after "The augmented form"): "The fractional factor is divided by `w_TP · 4 I(σ) I(2−s)`,
