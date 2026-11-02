@@ -258,6 +258,23 @@ impl StepSolver {
         }
     }
 
+    /// Seconds of the hierarchical back end: `[metric tree build, fractional tree build, L′
+    /// factorization, preconditioner applications]`.
+    pub fn build_timings(&self) -> Option<[f64; 4]> {
+        match self {
+            StepSolver::Hierarchical(s) => {
+                let p = s.preconditioner();
+                Some([
+                    s.operator().tree().build_seconds(),
+                    p.fractional_seconds(),
+                    p.factor_seconds(),
+                    p.usage().1,
+                ])
+            }
+            _ => None,
+        }
+    }
+
     /// Builds the solver of one step.
     #[allow(clippy::too_many_arguments)]
     pub fn build(

@@ -113,8 +113,16 @@ pub struct Timings {
     /// The solver of `A′`: dense assembly + LU, or the block cluster tree, `L′` factorization
     /// and the fractional tree; the constraint set.
     pub factor: f64,
+    /// Part of `factor`: the block cluster tree of `B`, `B⁰` (hierarchical back end).
+    pub metric_tree: f64,
+    /// Part of `factor`: the tree of the preconditioner's `L_{2−s}` (hierarchical back end).
+    pub fractional_tree: f64,
+    /// Part of `factor`: assembly and sparse `LDLᵀ` of the preconditioner's `L′`.
+    pub lprime: f64,
     /// The Schur columns and the direction (GMRES or back substitutions).
     pub solve: f64,
+    /// Part of `solve`: the applications of the preconditioner (hierarchical back end).
+    pub preconditioner: f64,
     /// The line search (all trials).
     pub line_search: f64,
     /// Continuous collision detection.
@@ -1012,6 +1020,12 @@ impl Session {
         };
         seconds.projection = t.elapsed().as_secs_f64();
         let products = solver.products();
+        if let Some(t) = solver.build_timings() {
+            seconds.metric_tree = t[0];
+            seconds.fractional_tree = t[1];
+            seconds.lprime = t[2];
+            seconds.preconditioner = t[3];
+        }
         let mut dropped_rows: Vec<usize> = set.dropped_rows().to_vec();
         dropped_rows.extend(proj.dropped_rows.iter().copied());
         dropped_rows.sort_unstable();

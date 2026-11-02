@@ -8,7 +8,8 @@
 //! ```
 //!
 //! with a symmetric kernel matrix `H` (zero diagonal) replaced by its block-cluster-tree
-//! approximation `H̃` (the curves crate's [`BlockClusterTree`], 0th-order multipole: rank one per
+//! approximation `H̃` (the curves crate's block cluster tree, stored as [`BlockTree`]: 0th-order
+//! multipole, rank one per
 //! admissible block, exact near field), and `H̃ a` computed **once per tree with the same `H̃`**
 //! (`ref: optimized_bct.cpp:936–1019`), so that `L 1 = 0` holds exactly for the compressed
 //! operator when `M 1 = 1` (`rs-hierarchical-null-space`): the product evaluates
@@ -45,7 +46,7 @@
 
 use std::time::Instant;
 
-use ddg_repulsive_curves::spatial::bct::{BctStats, BlockClusterTree, ClusterKernel};
+use ddg_repulsive_curves::spatial::bct::{BctStats, ClusterKernel};
 use ddg_repulsive_curves::spatial::{Aabb, Bvh, Element};
 use rayon::prelude::*;
 
@@ -54,6 +55,7 @@ use crate::error::RsError;
 use crate::geometry::v3::{dot, sub};
 use crate::geometry::{FaceGeometry, vertex_areas};
 use crate::kernel::Exponents;
+use crate::spatial::block_tree::BlockTree;
 use crate::spatial::{FaceTree, box_distance_sq, farthest_corner_distance};
 use crate::surface::Surface;
 
@@ -280,9 +282,11 @@ struct FaceTerms<'a> {
 pub struct FaceMetricTree {
     face_tree: FaceTree,
     ops: FaceOperators,
-    bct: BlockClusterTree<2>,
+    bct: BlockTree<2>,
     /// `H̃ a` per face for `h_hi`, `h_lo`.
     ha: Vec<[f64; 2]>,
+    /// `H̃ a` in BVH order.
+    ha_perm: Vec<[f64; 2]>,
     incidence: Incidence,
     options: ClusterTreeOptions,
     build_seconds: f64,
@@ -337,18 +341,20 @@ impl FaceMetricTree {
             chi: options.chi,
             neg_s: -exponents.s(),
         };
-        let bct = BlockClusterTree::<2>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
+        let bct = BlockTree::<2>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 2]> = ops.areas.iter().map(|&a| [a, a]).collect();
-        let ha = bct.multiply(pool, &[0, 1], &psi)?;
+        let ha = bct.multiply(pool, &[0, 1], &psi);
         if let Some(s) = ha.iter().position(|h| !(h[0].is_finite() && h[1].is_finite())) {
             return Err(coincident_faces(&ops, s));
         }
+        let ha_perm: Vec<[f64; 2]> = bct.order().iter().map(|&s| ha[s as usize]).collect();
         let incidence = Incidence::new(&ops.faces, ops.n_vertices);
         Ok(FaceMetricTree {
             face_tree,
             ops,
             bct,
             ha,
+            ha_perm,
             incidence,
             options: *options,
             build_seconds: t0.elapsed().as_secs_f64(),
@@ -487,12 +493,14 @@ impl FaceMetricTree {
         for (c, m) in map.iter_mut().enumerate() {
             *m = if c < off { 0 } else { 1 };
         }
-        // m = M x per face (D_f per axis, face averages per axis), psi = a m.
+        // m = M x per face (D_f per axis, face averages per axis), psi = a m; in BVH order.
+        let order = self.bct.order();
         let m: Vec<[f64; C]> = pool.install(|| {
-            (0..nf)
-                .into_par_iter()
+            order
+                .par_iter()
                 .with_min_len(256)
-                .map(|s| {
+                .map(|&s| {
+                    let s = s as usize;
                     let t = ops.faces[s];
                     let mut out = [0.0; C];
                     if hi {
@@ -520,20 +528,22 @@ impl FaceMetricTree {
         });
         let psi: Vec<[f64; C]> = m
             .iter()
-            .zip(&ops.areas)
-            .map(|(mm, &a)| {
+            .zip(order)
+            .map(|(mm, &s)| {
+                let a = ops.areas[s as usize];
                 let mut p = *mm;
                 p.iter_mut().for_each(|v| *v *= a);
                 p
             })
             .collect();
-        let hx = self.bct_multiply(pool, &map, &psi);
-        // z = w (diag(H̃a) m − H̃ (a m)) + d m.
+        let hx = self.bct.multiply_permuted(pool, &map, &psi);
+        // z = w (diag(H̃a) m − H̃ (a m)) + d m, in BVH order.
         let z: Vec<[f64; C]> = pool.install(|| {
             (0..nf)
                 .into_par_iter()
                 .with_min_len(256)
-                .map(|s| {
+                .map(|p| {
+                    let s = order[p] as usize;
                     let mut out = [0.0; C];
                     for c in 0..C {
                         let (w, kern, d) = if c < off {
@@ -541,12 +551,13 @@ impl FaceMetricTree {
                         } else {
                             (terms.w_lo, 1, terms.d_lo.get(s).copied().unwrap_or(0.0))
                         };
-                        out[c] = w * (self.ha[s][kern] * m[s][c] - hx[s][c]) + d * m[s][c];
+                        out[c] = w * (self.ha_perm[p][kern] * m[p][c] - hx[p][c]) + d * m[p][c];
                     }
                     out
                 })
                 .collect()
         });
+        let position = self.bct.position();
         // y_v = 2 Σ_{S∋v} a_S (Mᵀ row of S at v) · z_S, faces ascending.
         let inc = &self.incidence;
         pool.install(|| {
@@ -558,7 +569,7 @@ impl FaceMetricTree {
                     for &(s, c) in inc.of(v) {
                         let (s, c) = (s as usize, c as usize);
                         let a = ops.areas[s];
-                        let zs = &z[s];
+                        let zs = &z[position[s] as usize];
                         if hi {
                             let g = ops.df[s][c];
                             for k in 0..3 {
@@ -578,18 +589,6 @@ impl FaceMetricTree {
                 });
         });
     }
-
-    fn bct_multiply<const C: usize>(
-        &self,
-        pool: &rayon::ThreadPool,
-        map: &[usize; C],
-        psi: &[[f64; C]],
-    ) -> Vec<[f64; C]> {
-        // Lengths and the map are correct by construction.
-        self.bct
-            .multiply(pool, map, psi)
-            .expect("face tree product: one value per face, kernels 0 and 1")
-    }
 }
 
 /// The face form of the fractional operator `L_τ` (`SPEC.md` §4.2, §6.3; `τ = 2 − s` in the
@@ -597,7 +596,7 @@ impl FaceMetricTree {
 /// averages, hierarchical on a face tree.
 #[derive(Debug, Clone)]
 pub struct FaceFractionalTree {
-    bct: BlockClusterTree<1>,
+    bct: BlockTree<1>,
     faces: Vec<[u32; 3]>,
     areas: Vec<f64>,
     ha: Vec<f64>,
@@ -641,9 +640,9 @@ impl FaceFractionalTree {
             chi: options.chi,
             exponent: -(tau + 1.0),
         };
-        let bct = BlockClusterTree::<1>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
+        let bct = BlockTree::<1>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 1]> = ops.areas.iter().map(|&a| [a]).collect();
-        let ha: Vec<f64> = bct.multiply(pool, &[0], &psi)?.into_iter().map(|h| h[0]).collect();
+        let ha: Vec<f64> = bct.multiply(pool, &[0], &psi).into_iter().map(|h| h[0]).collect();
         if let Some(s) = ha.iter().position(|h| !h.is_finite()) {
             return Err(coincident_faces(ops, s));
         }
@@ -694,10 +693,7 @@ impl FaceFractionalTree {
             .zip(&self.areas)
             .map(|(mm, &a)| [a * mm[0], a * mm[1], a * mm[2]])
             .collect();
-        let hx = self
-            .bct
-            .multiply(pool, &[0, 0, 0], &psi)
-            .expect("face tree product: one value per face");
+        let hx = self.bct.multiply(pool, &[0, 0, 0], &psi);
         let z: Vec<[f64; 3]> = (0..nf)
             .map(|s| std::array::from_fn(|k| self.ha[s] * m[s][k] - hx[s][k]))
             .collect();
@@ -784,7 +780,7 @@ impl ClusterKernel<1> for VertexKernel<'_> {
 /// (point `f_v`, mass `a_v`, leaf size and `χ` from [`ClusterTreeOptions`]).
 #[derive(Debug, Clone)]
 pub struct VertexFractionalTree {
-    bct: BlockClusterTree<1>,
+    bct: BlockTree<1>,
     mass: Vec<f64>,
     ha: Vec<f64>,
     build_seconds: f64,
@@ -845,9 +841,9 @@ impl VertexFractionalTree {
             chi: options.chi,
             exponent: -(tau + 1.0),
         };
-        let bct = BlockClusterTree::<1>::build(pool, &bvh, &kernel, options.leaf_pairs)?;
+        let bct = BlockTree::<1>::build(pool, &bvh, &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 1]> = mass.iter().map(|&a| [a]).collect();
-        let ha: Vec<f64> = bct.multiply(pool, &[0], &psi)?.into_iter().map(|h| h[0]).collect();
+        let ha: Vec<f64> = bct.multiply(pool, &[0], &psi).into_iter().map(|h| h[0]).collect();
         if let Some(v) = ha.iter().position(|h| !h.is_finite()) {
             let w = (0..n)
                 .find(|&w| w != v && positions[w] == positions[v])
@@ -909,10 +905,7 @@ impl VertexFractionalTree {
             .zip(&self.mass)
             .map(|(xv, &a)| [a * xv[0], a * xv[1], a * xv[2]])
             .collect();
-        let hx = self
-            .bct
-            .multiply(pool, &[0, 0, 0], &psi)
-            .expect("vertex tree product: one value per vertex");
+        let hx = self.bct.multiply(pool, &[0, 0, 0], &psi);
         pool.install(|| {
             y.par_chunks_mut(3)
                 .with_min_len(512)
