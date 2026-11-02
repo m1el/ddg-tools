@@ -319,11 +319,11 @@ fn area_constraints() -> Vec<Constraint> {
 
 /// Fig. 15 (`plane = None`), Fig. 17 (attracting plane of the given weight).
 pub fn genus(cfg: &Cfg, g: u32, plane: Option<f64>) -> R<Outcome> {
-    let faces = cfg.faces(4000 + 800 * g as usize, 2500);
+    let faces = cfg.faces(3000 + 600 * g as usize, 2500);
     let mesh = shapes::genus_surface(g, faces)?;
     let (s, x) = mesh_pair(&mesh)?;
     let mut o = base_opts();
-    o.max_iterations = 1200;
+    o.max_iterations = 800;
     o.constraints = area_constraints();
     if let Some(w) = plane {
         o.penalties.push(plane_attractor(0.0, w, 2.0)?);
@@ -467,7 +467,7 @@ pub fn eversion(cfg: &Cfg) -> R<Outcome> {
     o.remesh = None;
     o.constraints = area_constraints();
     o.penalties = vec![
-        Penalty::TotalVolume { weight: 30.0, power: 2.0 },
+        Penalty::TotalVolume { weight: 1.0e4, power: 2.0 },
         Penalty::BoundaryLength { weight: 30.0, target: blen },
         Penalty::BoundaryCurvature { weight: 1.0, dual_length: true },
     ];
@@ -476,21 +476,28 @@ pub fn eversion(cfg: &Cfg) -> R<Outcome> {
     let mid = sess.positions().to_vec();
     let (a, v) = area_volume(&faces, &mid);
     let (_, v0) = area_volume(&faces, &x);
-    // the transformation that best maps the midsurface to itself
-    let mut best = (f64::MAX, 0, 0);
-    let diam = mid.iter().map(|p| norm(*p)).fold(0.0, f64::max);
-    for refl in 0..3 { for q in 0..4 {
-        let c = chamfer(&mid, &transform(&mid, refl, q));
-        if c < best.0 { best = (c, refl, q); }
-    } }
-    // winding of the second half: the one whose vertex normals agree with the midsurface's
+    // The transformation T (a reflection and a quarter-turn rotation) with T(M) = M as oriented
+    // surfaces: small chamfer distance, and the winding-based normals of the (unflipped) image
+    // agree with the midsurface's. Candidates whose normals disagree would need a flipped
+    // winding: the end of the path would then not be inside-out (reported as `flipped=true`).
     let n_mid = vertex_normals(&faces, &mid);
-    let tm = transform(&mid, best.1, best.2);
-    let n_t = vertex_normals(&faces, &tm);
-    let agree: f64 = (0..mid.len()).map(|i| {
-        let j = (0..mid.len()).min_by(|&p, &q| norm(sub(tm[p], mid[i])).partial_cmp(&norm(sub(tm[q], mid[i]))).unwrap()).unwrap();
-        dot(n_mid[i], n_t[j])
-    }).sum::<f64>() / mid.len() as f64;
+    let diam = mid.iter().map(|p| norm(*p)).fold(0.0, f64::max);
+    let mut best: Option<(f64, usize, usize, f64)> = None;
+    let mut best_any: Option<(f64, usize, usize, f64)> = None;
+    for refl in 0..3 { for q in 0..4 {
+        let tm = transform(&mid, refl, q);
+        let c = chamfer(&mid, &tm);
+        let n_t = vertex_normals(&faces, &tm);
+        let agree: f64 = (0..mid.len()).map(|i| {
+            let j = (0..mid.len()).min_by(|&p, &q| norm(sub(tm[p], mid[i])).partial_cmp(&norm(sub(tm[q], mid[i]))).unwrap()).unwrap();
+            dot(n_mid[i], n_t[j])
+        }).sum::<f64>() / mid.len() as f64;
+        let cand = (c, refl, q, agree);
+        if best_any.is_none_or(|b| c < b.0) { best_any = Some(cand); }
+        if agree > 0.0 && best.is_none_or(|b| c < b.0) { best = Some(cand); }
+    } }
+    let (cham, brefl, bq, agree) = best.or(best_any).unwrap();
+    let best = (cham, brefl, bq);
     let flip = agree < 0.0;
     let last = transform(&x, best.1, best.2);
     let fl: Vec<[u32; 3]> = if flip { faces.iter().map(|f| [f[0], f[2], f[1]]).collect() } else { faces.clone() };
@@ -611,6 +618,7 @@ pub fn h_shape(cfg: &Cfg, v: HVariant) -> R<Outcome> {
     let mut o = base_opts();
     o.max_iterations = steps;
     o.remesh = None;
+    if std::env::var("RS_AUTO_BACKEND").is_err() { o.backend = ddg_repulsive_surfaces::Backend::Dense; }
     o.constraints = vec![];
     let pins = |idx: &[u32]| Constraint::Pins { vertices: idx.to_vec(), targets: None };
     use HVariant::*;
@@ -728,6 +736,7 @@ pub fn nested_envelopes(cfg: &Cfg, levels: usize) -> R<Vec<Outcome>> {
         o.penalties.push(pen);
         o.ccd_obstacles.push(ob);
         o.remesh = Some(RemeshOptions { collapse: 1.0, split: 2.5, ..RemeshOptions::default() });
+        if k >= 2 && std::env::var("RS_AUTO_BACKEND").is_err() { o.backend = ddg_repulsive_surfaces::Backend::Dense; }
         let (mut out, sess, _) = run(cfg, &format!("envelope_level{k}"), surf.clone(), start, o, false)?;
         let (_, v1) = area_volume(sess.surface().faces(), sess.positions());
         let inside_frac = pos.iter().filter(|p| inside(sess.surface().faces(), sess.positions(), **p)).count() as f64 / pos.len() as f64;
@@ -769,16 +778,30 @@ pub fn cobblestones(cfg: &Cfg) -> R<Outcome> {
         o.constraints.push(Constraint::Area { component: Some(k as u32), target: None });
         o.schedules.push(Schedule { constraint: 1 + k, factor: growth, offset: 0.0, steps: (steps * 3 / 4).max(1) });
     }
-    let (pen, ob) = mesh_obstacle(&c.slab, 1.0)?;
+    let slab_w: f64 = std::env::var("RS_SLAB_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+    let (pen, ob) = mesh_obstacle(&c.slab, slab_w)?;
+    if std::env::var("RS_AUTO_BACKEND").is_err() { o.backend = ddg_repulsive_surfaces::Backend::Dense; }
     o.penalties.push(pen);
     o.ccd_obstacles.push(ob);
-    let (mut out, sess, _) = run(cfg, "cobblestones", s, x, o, false)?;
+    let no_remesh = std::env::var("RS_NO_REMESH").is_ok();
+    if no_remesh {
+        o.remesh = None;
+    }
+    let tag = if no_remesh { "cobblestones_noremesh".to_string() } else if slab_w == 1.0 { "cobblestones".to_string() } else { format!("cobblestones_w{slab_w}") };
+    let (mut out, sess, _) = run(cfg, &tag, s, x, o, false)?;
     let areas: Vec<f64> = sess.surface().components().iter().map(|cm| cm.faces().iter().map(|&f| {
         let t = sess.surface().faces()[f as usize].map(|i| sess.positions()[i as usize]);
         0.5 * norm(cross(sub(t[1], t[0]), sub(t[2], t[0])))
     }).sum()).collect();
     let zmax = sess.positions().iter().map(|p| p[2].abs()).fold(0.0, f64::max);
-    out.extra = format!("components={nc} component_area_min={:.3} max={:.3} (target {:.3}) max|z|={zmax:.3} (slab half {})", areas.iter().cloned().fold(f64::MAX, f64::min), areas.iter().cloned().fold(0.0, f64::max), growth * 4.0 * std::f64::consts::PI * 0.25, half[2]);
+    let a_each = out.area0 / nc as f64;
+    let nout = sess.positions().iter().filter(|p| p[2].abs() > half[2]).count();
+    out.extra = format!(
+        "components={nc} component_area_ratio_min={:.4} max={:.4} (schedule x{growth}) max|z|={zmax:.3} (slab half {}) vertices_outside_slab={nout}",
+        areas.iter().cloned().fold(f64::MAX, f64::min) / a_each,
+        areas.iter().cloned().fold(0.0, f64::max) / a_each,
+        half[2]
+    );
     Ok(out)
 }
 
@@ -788,6 +811,7 @@ fn sub_opts(alpha: f64, beta: f64) -> R<FlowOptions> {
     o.metric = Metric::Sobolev { low_order: false };
     o.line_search.ccd = None;
     if std::env::var("RS_AUTO_BACKEND").is_err() { o.backend = ddg_repulsive_surfaces::Backend::Dense; }
+    if std::env::var("RS_REMESH").is_err() { o.remesh = None; }
     Ok(o)
 }
 
@@ -817,7 +841,8 @@ pub fn subcritical_small(cfg: &Cfg) -> R<Vec<Outcome>> {
         let mut o = sub_opts(a, b)?;
         o.max_iterations = 600;
         o.constraints = area_constraints();
-        let (mut out, sess, _) = run(cfg, tag, surf.clone(), positions.clone(), o, false)?;
+        let tag = if r == 1.02 { tag.to_string() } else { format!("{tag}_r{r}") };
+        let (mut out, sess, _) = run(cfg, &tag, surf.clone(), positions.clone(), o, false)?;
         let pairs1 = ccd::intersecting_pairs(sess.surface(), sess.positions())?.len();
         out.extra = format!("exponents=({a},{b}) intersecting_pairs {pairs0}->{pairs1}");
         res.push(out);
@@ -833,6 +858,7 @@ pub fn klein(cfg: &Cfg) -> R<Outcome> {
     let steps = if cfg.smoke { 3 } else { 700 };
     let (mut out, sess, _) = scene_run(cfg, "klein_subcritical", spec, None, steps, |o| {
         o.metric = Metric::Sobolev { low_order: false };
+        if std::env::var("RS_AUTO_BACKEND").is_err() { o.backend = ddg_repulsive_surfaces::Backend::Dense; }
         o.line_search.ccd = None;
     }, false)?;
     let pairs1 = ccd::intersecting_pairs(sess.surface(), sess.positions())?.len();
@@ -866,6 +892,7 @@ pub fn by_name(cfg: &Cfg, name: &str) -> R<Vec<Outcome>> {
         "cobblestones" => vec![cobblestones(cfg)?],
         "subcritical" => subcritical_small(cfg)?,
         "klein" => vec![klein(cfg)?],
+        "control_torus" => vec![control_torus(cfg)?],
         _ => return Err(RsError::Unsupported { what: "unknown application name" }),
     })
 }
@@ -875,8 +902,22 @@ pub fn all_names() -> Vec<String> {
     v.extend((2..=6).map(|g| format!("genus{g:02}_plane5")));
     v.extend((2..=6).map(|g| format!("genus{g:02}_plane100")));
     v.extend(HVariant::ALL.iter().map(|h| h.name().to_string()));
-    for n in ["handcuffs", "pole", "slideoff", "eversion", "shrinkwrap_bunny", "shrinkwrap_spot", "shrinkwrap_soup", "envelopes", "walnut", "cobblestones", "subcritical", "klein"] {
+    for n in ["handcuffs", "pole", "slideoff", "eversion", "shrinkwrap_bunny", "shrinkwrap_spot", "shrinkwrap_soup", "envelopes", "walnut", "cobblestones", "subcritical", "klein", "control_torus"] {
         v.push(n.to_string());
     }
     v
+}
+
+/// Control for Fig. 15, g = 1: a torus of revolution (R/r = 2.5) with the area of `genus01`,
+/// flowed with the same options; shows whether the genus-1 run's plateau is a minimizer.
+pub fn control_torus(cfg: &Cfg) -> R<Outcome> {
+    let m = primitives::torus(64, 32, 1.0555, 0.4222)?;
+    let (s, x) = mesh_pair(&m)?;
+    let mut o = base_opts();
+    o.max_iterations = 800;
+    o.constraints = area_constraints();
+    let (mut out, sess, _) = run(cfg, "control_torus", s, x, o, false)?;
+    let (_, _, d) = inertia_indicators(sess.surface().faces(), sess.positions());
+    out.extra = d;
+    Ok(out)
 }
