@@ -619,7 +619,7 @@ the existing mesh and polygons are kept (as `ddg-developability` D24).
 
 ## 10. Remeshing (Sec. 6; D16, D17)
 
-Own mutable half-edge mesh (`remesh` module), built from `Surface` + positions, returning a new
+A mutable face-slot mesh with per-vertex face lists (a half-edge is a `(face, side)` pair; `remesh` module), built from `Surface` + positions, returning a new
 `Surface`, positions, a vertex map (new vertex → old vertices and weights; for per-vertex data)
 and a face parent (new face → old face, for Blender's material index). `L₀` = mean edge length of
 the **initial** mesh, fixed for the run (paper, reference).
@@ -659,6 +659,16 @@ parents are contractual).
 3. Per-vertex data through the vertex map: pins stay pinned (never removed; a split edge between
    two pins gives an unpinned midpoint); squared-error targets and attractor membership
    interpolate (the reference does not update the targets, D17).
+
+**As built (WP4).** The foldover test measures how far the **same** face's normal turns under the
+operation (`> π − 2` refuses), as the oracle does; the reference instead measures the dihedral angle
+to the face across each link edge. A `DegenerateFace` refusal (a zero-area result) is always on for
+split, collapse and flip (the stress test produced zero-area faces without it); the report counts
+refused splits too. Validation requires `split > 2 · collapse`. A failed revalidation of the
+output is `RsError::Internal { what, detail }` (never observed; WP5 adds the variant). Measured: a
+stretched icosphere(3) scaled (4, 1, 0.5) goes from 43.5 % of edges outside `[L₀/2, 3L₀/2]` and a
+9.2° minimum angle to 0 % and 25.3° after one pass (32.3° after 8); one pass on 40–55k faces takes
+0.13–0.20 s on one thread.
 
 `RemeshOptions { split: 1.5, collapse: 0.5, rounds: 5, rho: 0.5, flip_cap_per_vertex: 100,
 order: FlipThenSmooth, enabled_ops }`; `remesh: None` disables it (Fig. 7 "without remeshing", and
