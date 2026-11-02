@@ -30,7 +30,8 @@ use ddg_repulsive_surfaces::{
     Backend, Constraint, FlowOptions, Session, StepReport, StopRule, Surface, read_obj, scene_options, write_obj,
 };
 
-const SCENES: &str = "data/repulsive-surfaces/scenes";
+/// The reference scenes (`scripts/rs-fetch-scenes.sh`).
+const SCENES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/repulsive-surfaces/scenes");
 
 struct Args {
     header: bool,
@@ -283,6 +284,8 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         o.metric = ddg_repulsive_surfaces::Metric::Sobolev { low_order: false };
     }
     let mut session = Session::new(surface, positions, o).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let spec = spec.replace(SCENES, "scenes");
+    let spec = spec.as_str();
     let mut log = a.log.as_ref().map(|p| {
         let mut f = std::fs::File::create(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         use std::io::Write;

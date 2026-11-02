@@ -298,12 +298,25 @@ impl LinearOperator for HierarchicalOperator {
     }
 }
 
+/// GMRES of the flow's hierarchical back end (WP17, `NOTES-WP17.md`): right preconditioned,
+/// relative true-residual tolerance `1e-3`, restart 60, at most 200 iterations. The tolerance is
+/// below the error of the compressed operator itself (`χ = 0.5`: directions within 4e-3–2e-2 of
+/// the exact ones, `NOTES-WP6.md`); against `1e-4` it saves 20 % of the iterations with the same
+/// energies after 200 steps on 10 scenes. Restart 60 instead of 30 halves the iterations where
+/// GMRES needs more than one cycle (Walnut) and changes nothing elsewhere.
+pub const FLOW_GMRES: GmresOptions = GmresOptions {
+    restart: 60,
+    tolerance: 1e-3,
+    max_iterations: 200,
+    side: super::gmres::GmresSide::Right,
+};
+
 /// Options of the hierarchical back end (`SPEC.md` §6.3, §8.4).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HierarchicalOptions {
     /// The block cluster trees of `B`, `B⁰` and `L_{2−s}` (`χ`, leaf size).
     pub cluster: ClusterTreeOptions,
-    /// GMRES (right, restart 30, tolerance `1e-4`, 200 iterations).
+    /// GMRES (default [`FLOW_GMRES`]: right, restart 60, tolerance `1e-3`, 200 iterations).
     pub gmres: GmresOptions,
     /// `ε_rel`, `ε_multi_rel`, the fractional form (vertex pairs) — the cluster options of the
     /// preconditioner are replaced by [`HierarchicalOptions::cluster`].
@@ -324,8 +337,23 @@ impl HierarchicalOptions {
         let mut o = Self::default();
         o.preconditioner.fractional = FractionalForm::FacePairs;
         o.preconditioner.form = super::precond::PreconditionerForm::Congruence;
+        o.gmres = GmresOptions::default();
         o.gmres.side = super::gmres::GmresSide::Left;
         o
+    }
+}
+
+impl Default for HierarchicalOptions {
+    /// `χ = 0.5`, leaf size 8, [`FLOW_GMRES`], the default preconditioner, no Willmore or
+    /// obstacle term in the preconditioner.
+    fn default() -> Self {
+        HierarchicalOptions {
+            cluster: ClusterTreeOptions::default(),
+            gmres: FLOW_GMRES,
+            preconditioner: PreconditionerOptions::default(),
+            willmore_in_preconditioner: false,
+            obstacle_in_preconditioner: false,
+        }
     }
 }
 

@@ -526,9 +526,12 @@ impl FlowOptions {
         let reference_hier = |h: HierarchicalOptions| {
             let mut r = HierarchicalOptions::reference();
             r.cluster = h.cluster;
-            r.gmres.restart = h.gmres.restart;
-            r.gmres.tolerance = h.gmres.tolerance;
-            r.gmres.max_iterations = h.gmres.max_iterations;
+            // The reference's restart 30 and tolerance 1e-4 unless the caller changed the flow's.
+            if h.gmres != crate::solve::iterative::FLOW_GMRES {
+                r.gmres.restart = h.gmres.restart;
+                r.gmres.tolerance = h.gmres.tolerance;
+                r.gmres.max_iterations = h.gmres.max_iterations;
+            }
             r.gmres.side = GmresSide::Left;
             r.preconditioner.fractional = FractionalForm::FacePairs;
             r.preconditioner.form = PreconditionerForm::Congruence;
