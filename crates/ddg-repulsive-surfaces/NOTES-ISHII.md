@@ -73,7 +73,7 @@ self-intersection by `check::self_intersections` and `ccd::intersects`). All run
 (13 800 to 14 400 as meshed). A thicker tube (radius up to 0.12) was not tried: the clearance is 0.3 to 0.44, so the
 blended tubes would nearly touch.
 
-## Flow
+## Flow (first run; superseded by the 6000-step rerun at the end of this file)
 
 `ishii run NAME --faces 14000 --threads 3` (21 jobs in parallel, `runs_tmp/ishii/full3/`): barycenter + area constraints,
 `FlowOptions::default()` otherwise (Hs descent, Barnes-Hut, CCD on, remeshing on), `StopRule::Off` in the library and
@@ -122,3 +122,58 @@ Reading.
 * The 4_1 run stops at 497 steps after the energy plateaus at 2524.7 from step 150 on (2525.1 at 125): a very flat
   start, but it is a converged state under the stated rule, not verified as a global minimizer (one start per entry).
 * OBJ start and final meshes: `runs_tmp/ishii/obj/<name>_{start,final}.obj` (not committed).
+
+
+## Rerun to 6000 steps and determinism check (2026-11-02, `runs_tmp/ishii2/`)
+
+`ishii run NAME --faces 14000 --threads 3 --max-steps 6000 --out runs_tmp/ishii2/NAME`: the previous rerun
+(`runs_tmp/ishii/`) with the cap raised from 3000 to 6000. `--out` now also writes `NAME/steps.csv` (one line per step, `step::CSV_HEADER`:
+energy, faces, tau, tau_ccd, halvings, remesh counts, ...). All 21 jobs ran in one queue with the 12 genus runs (NOTES-GENUS.md), at
+most 63 threads at once; load average 10.8 at start, 2.4 at the end (about 50 during the runs). Times are wall minutes at that load.
+
+| entry | faces | steps | status | min | final energy | moment eigenvalues | self-intersects |
+|---|---|---|---|---|---|---|---|
+| 4_1 | 13876->15238 | 766 | Converged | 34 | 2526.8 | 0.1003 0.1601 0.2712 | false |
+| 5_1 | 13880->14918 | 3358 | Converged | 123 | 3078.8 | 0.1104 0.1613 0.3162 | false |
+| 5_2 | 14048->15422 | 3356 | Converged | 122 | 3109.5 | 0.1273 0.1715 0.2169 | false |
+| 5_3 | 14036->14854 | 3844 | Converged | 129 | 3076.8 | 0.1774 0.1811 0.1823 | false |
+| 5_4 | 13984->15160 | 2210 | Converged | 97 | 3424.4 | 0.1182 0.1467 0.4017 | false |
+| 6_1 | 13944->15080 | 3342 | Converged | 129 | 3847.6 | 0.1131 0.1367 0.4108 | false |
+| 6_2 | 14052->15350 | 2568 | Converged | 114 | 4005.6 | 0.1180 0.1448 0.2986 | false |
+| 6_3 | 13948->14672 | 1653 | Converged | 83 | 3989.2 | 0.1407 0.1690 0.2559 | false |
+| 6_4 | 13976->14966 | 1162 | Converged | 58 | 3387.9 | 0.1287 0.2188 0.2374 | false |
+| 6_5 | 13940->15010 | 2221 | Converged | 97 | 3878.4 | 0.1145 0.1686 0.3249 | false |
+| 6_6 | 13772->14790 | 1872 | Converged | 95 | 4298.7 | 0.0891 0.1854 0.3212 | false |
+| 6_7 | 14076->14640 | 1043 | Converged | 55 | 4046.8 | 0.1452 0.1978 0.2001 | false |
+| 6_8 | 13992->14856 | 1019 | Converged | 51 | 3843.3 | 0.1006 0.2096 0.2991 | false |
+| 6_9 | 14128->14980 | 1191 | Converged | 62 | 3658.9 | 0.1471 0.1843 0.2933 | false |
+| 6_10 | 13920->15218 | 3113 | Converged | 124 | 3473.9 | 0.1111 0.2131 0.3542 | false |
+| 6_11 | 14028->14650 | 1422 | Converged | 68 | 4080.4 | 0.1237 0.1530 0.2972 | false |
+| 6_12 | 14040->15114 | 2491 | Converged | 94 | 3684.9 | 0.1321 0.2093 0.3032 | false |
+| 6_13 | 13872->15184 | 2492 | Converged | 90 | 3355.6 | 0.1266 0.2160 0.2999 | false |
+| 6_14 | 14388->15768 | 1908 | Converged | 80 | 4242.2 | 0.0682 0.1857 0.4849 | false |
+| 6_15 | 14132->15270 | 1088 | Converged | 54 | 4228.2 | 0.1132 0.1743 0.3965 | false |
+| 6_16 | 13804->14858 | 1896 | Converged | 75 | 4192.9 | 0.1507 0.1566 0.4076 | false |
+
+* **21 of 21 converged** (windowed rule, 1e-5 over 200 steps). The five that capped at 3000 (5_1, 5_2, 5_3, 6_1, 6_10)
+  converged at 3358, 3356, 3844, 3342 and 3113 steps; nothing reaches the new cap. Final surfaces: genus 2, one component,
+  `ccd::intersects` false for all.
+* Moment spreads stay anisotropic except 5_3 (0.1774 0.1811 0.1823, triple within 3 %) and 6_7 (double, 0.1978 0.2001).
+* Wall time 34 to 129 minutes per run.
+
+### Determinism
+
+The previous rerun printed energy and face count every 25 steps (`PROGRESS` lines). For each entry the new run's `steps.csv`
+(`energy_after`, `faces`) was compared at every multiple of 25 that both runs have (up to 3000 for the capped ones, up to the
+converged step otherwise; 25 to 120 points per entry, 1670 in total; energies compared after rounding to the 7 significant
+digits of the log):
+
+**All 21 entries are identical at every common checkpoint** (energy and face count), and every entry that converged before
+also stops at the same step with the same status (4_1 766, 5_4 2210, 6_2 2568, 6_3 1653, ... 6_16 1896). So the long flow is
+reproducible run to run for this binary, 3 threads, and different machine load (about 50 here against 2 to 150 before); no divergence was
+found, hence nothing to locate with a two-run diff. What the check cannot say: (a) only every 25th step was compared, so a
+difference that heals within 25 steps would be missed (it is unlikely to heal exactly in a chaotic flow); (b) the table of the "Flow" section (17 converged, 4_1 at 497
+steps, 6_8 capped) is the first run, whose logs are lost; it differs from the second run (4_1 at 766, 6_8 at 1019) and from this
+one, which agree with each other. Two runs of the same build agree to the 7 printed digits at every checkpoint, so the first-versus-second
+difference is not load noise within a build; a different build or start mesh in the first run is the remaining explanation, and
+it cannot be checked now. Not investigated further.
