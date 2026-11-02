@@ -960,7 +960,13 @@ likely made with it. **Comparison variant (user, 2026-11-02):** a second binary,
 Klein-bottle change is the only difference from the main binary). On non-orientable meshes the
 comparison runs our flow with splits and collapses off too (`RemeshOptions::enabled_ops`), so both
 sides remesh alike; a second run of ours with full remeshing shows what the published code cannot
-do.
+do. Built (2026-11-02): `ce89c2c` applied to the build's sources with one
+hand-resolved hunk (the two reader calls in `rsurface_types.h`), the driver compiles unchanged
+against `SurfaceMesh`. Smoke, 20 steps, 1 thread, |V| and |F| constant throughout:
+`klein_bottle_blocky.obj` (1,800 faces) 559 ms/step, energy 793.91 → 206.31;
+`klein_bottle_2.obj` (16,384) 10,991 ms/step, 387.20 → 171.24; `klein_bottle.obj` (16,384): the
+energy **rose** at step 1 (309.77 → 323.29) and step 2 ran over 8 minutes at full CPU (killed, not
+investigated); EntangledDoubleTorus 377.047 → 194.4899 (main binary 194.4891).
 
 ## 15. Work packages
 
