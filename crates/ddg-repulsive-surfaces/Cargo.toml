@@ -13,3 +13,7 @@ ddg-core = { path = "../ddg-core" }
 ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
 rayon = "1.10"
+
+[[bench]]
+name = "ccd"
+harness = false
