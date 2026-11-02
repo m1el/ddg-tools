@@ -142,7 +142,7 @@ pub fn implicit_attractor(
 /// (including the variation of `a_v`). Coincident vertices give a non-finite energy; the caller
 /// decides. Rows are summed in order, so the result is independent of the thread count.
 ///
-/// [formula: rs-coulomb-energy]
+/// [formula: rs-penalties]
 ///
 /// # Errors
 /// The errors of [`Surface::validate_positions`]; [`RsError::InvalidOption`] for a non-finite

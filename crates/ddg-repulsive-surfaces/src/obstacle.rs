@@ -25,7 +25,7 @@
 //!
 //! [`CrossEvaluator::metric_diagonal`] returns the data of `O_diag` (`SPEC.md` §4.4).
 //!
-//! [formula: rs-mesh-obstacle]
+//! [formula: rs-bh-energy]
 
 use std::sync::Arc;
 
@@ -514,7 +514,7 @@ impl CrossEvaluator {
     /// The approximate cross energy at the current positions on the frozen lists. May be
     /// non-finite (coincident points): the caller decides.
     ///
-    /// [formula: rs-mesh-obstacle]
+    /// [formula: rs-bh-energy]
     pub fn energy(&self, pool: &rayon::ThreadPool) -> f64 {
         let n1 = self.l1_lumped.len();
         let n2 = self.l2_lumped.len();
@@ -608,7 +608,7 @@ impl CrossEvaluator {
 
     /// The energy and its exact differential `∂Ẽ/∂f_v` on the frozen lists.
     ///
-    /// [formula: rs-mesh-obstacle]
+    /// [formula: rs-bh-energy]
     /// [formula: rs-bh-aggregate-adjoint]
     pub fn energy_and_differential(&self, pool: &rayon::ThreadPool) -> (f64, Vec<[f64; 3]>) {
         let nf = self.faces.len();
@@ -694,7 +694,6 @@ impl CrossEvaluator {
     /// # Errors
     /// [`RsError::ObstacleError`] for a point cloud (no normals) or a Coulomb obstacle.
     ///
-    /// [formula: rs-obstacle-diagonal]
     pub fn metric_diagonal(
         &self,
         pool: &rayon::ThreadPool,

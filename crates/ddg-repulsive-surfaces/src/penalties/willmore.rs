@@ -94,9 +94,10 @@ pub fn willmore_and_gradient(
             // ∂cot/∂u, ∂cot/∂w.
             let du = sub(scale(w, 1.0 / s), scale(cross(w, nh), cot / s));
             let dw = sub(scale(u, 1.0 / s), scale(cross(nh, u), cot / s));
-            g[ia] = axpy(g[ia], coef, du);
-            g[ib] = axpy(g[ib], coef, dw);
-            g[c] = axpy(g[c], -coef, add(du, dw));
+            g[a] = axpy(g[a], coef, du);
+            g[b] = axpy(g[b], coef, dw);
+            let vc = t[c] as usize;
+            g[vc] = axpy(g[vc], -coef, add(du, dw));
         }
     }
     Ok((value, g))
