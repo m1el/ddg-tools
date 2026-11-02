@@ -1165,13 +1165,18 @@ Rounds (≤ 3 agents; timed work alone at the end):
 * Fig. 16 (Ishii et al. 2012 table): no arXiv version exists; the user supplied the PDF
   (`/var/data/discrete-geometry/ishii2012.pdf`, not in the repository); all 21 entries transcribed
   and flowed (17 converged, 4 at the 3000-step cap; `NOTES-ISHII.md`).
-* **Reproducibility of long runs (open, observed 2026-11-02):** the Fig. 16 flows were rerun with the
-  same settings (`ishii run NAME --faces 14000 --threads 3 --max-steps 3000`) after their outputs were
-  lost; the first run had 17 converged (capped: 5₁, 6₁, 6₈, 6₁₀), the rerun 16 (capped: 5₁, 5₂, 5₃, 6₁,
-  6₁₀). Only docs, tests and a module wrapper changed in between, and the flow is meant to be bitwise
-  independent of the thread count and load, so some part of a long run (remeshing order, CCD, a
-  time- or address-dependent choice) may not be deterministic. Not investigated; a two-run diff of
-  one entry's per-step CSV would locate the first divergence.
+* **Reproducibility of long runs (checked 2026-11-02):** a third run of the Fig. 16 flows (cap 6000,
+  `runs_tmp/ishii2/`) is identical to the second (`runs_tmp/ishii/`) in energy (7 printed digits) and
+  face count at every 25th step up to 3000 (1670 checkpoints), and stops at the same steps: two runs
+  of one build agree. The first run's convergence set (17 converged; capped 5₁, 6₁, 6₈, 6₁₀) differs
+  from the two later ones (16; capped 5₁, 5₂, 5₃, 6₁, 6₁₀); its logs were lost, so the cause (an
+  earlier build or start mesh) is not established. At 6000 steps all 21 converge (the formerly
+  capped ones at 3113–3844 steps). The genus series g = 0–11 converges in 521–2500 steps
+  (`NOTES-GENUS.md`): g = 0 round, g = 1 a torus of revolution, g = 3 near-tetrahedral (9 % moment
+  spread), g = 5 near-cubic (moments within 1 %), g = 6 with a double moment; g = 2 is a bent saddle
+  shape (both programs agree on it, `NOTES-FIDELITY.md`), and g = 8, 10, 11 end elongated — not the
+  paper's polyhedral symmetries for those genera (one start per genus; the linear start may lead to
+  a different local minimizer).
 * **Showcase (2026-11-02, `showcase/repulsive-surfaces/render.py`, `showcase/README.md`):** the Fig. 16
   sheet is from the rerun; the genus sheet uses WP15's 800-step frames (g = 3, 7–11 not converged; the
   converged g = 3 run of the fidelity study kept no frames); the handle-off-the-pole isotopy (Fig. 18)
