@@ -243,12 +243,15 @@ impl LaplacianSaddle {
 
     /// Solves `M X = B` for `ncols` stacked columns at once (one pass over the factor for all
     /// of them) with one refinement step.
-    fn solve_block(&self, b: &[f64], ncols: usize) -> Result<Vec<f64>, RsError> {
+    fn solve_block(&self, b: &[f64], ncols: usize, refine: bool) -> Result<Vec<f64>, RsError> {
         let n = self.matrix.nrows();
         let mut x = b.to_vec();
         self.factor
             .solve_many_in_place(&mut x, ncols, Parallelism::Sequential)
             .map_err(|e| sparse_error(e, "preconditioner solve"))?;
+        if !refine {
+            return Ok(x);
+        }
         let mut r = vec![0.0; b.len()];
         for c in 0..ncols {
             let cols = c * n..(c + 1) * n;
@@ -277,6 +280,7 @@ impl LaplacianSaddle {
         b: &[f64],
         nrhs: usize,
         group: usize,
+        refine: bool,
     ) -> Result<Vec<f64>, RsError> {
         use rayon::prelude::*;
         let n = self.matrix.nrows();
@@ -285,7 +289,7 @@ impl LaplacianSaddle {
         let solve = |g: usize| {
             let c0 = g * group;
             let c1 = (c0 + group).min(nrhs);
-            self.solve_block(&b[c0 * n..c1 * n], c1 - c0)
+            self.solve_block(&b[c0 * n..c1 * n], c1 - c0, refine)
         };
         let cols: Vec<Result<Vec<f64>, RsError>> = match pool {
             Some(pool) if ng > 1 => pool.install(|| (0..ng).into_par_iter().map(solve).collect()),
@@ -314,13 +318,14 @@ impl LaplacianSaddle {
     /// # Errors
     /// As [`LaplacianSaddle::solve`].
     pub fn solve_on(&self, pool: Option<&rayon::ThreadPool>, r: &[f64]) -> Result<Vec<f64>, RsError> {
-        let mut out = self.solve_many_on(pool, &[r])?;
+        let mut out = self.solve_many_on(pool, &[r], true)?;
         Ok(out.pop().expect("one solution"))
     }
 
-    /// [`LaplacianSaddle::solve`] for several vectors, all their columns (three per vector in
-    /// the per-axis case) in parallel on `pool`; bitwise the results of
-    /// [`LaplacianSaddle::solve`].
+    /// [`LaplacianSaddle::solve`] for several vectors: the three axis columns of a vector (per-axis
+    /// case) in one pass over the factor, the vectors in parallel on `pool`; with `refine` (as
+    /// [`LaplacianSaddle::solve`]) one refinement step, without it the plain back substitution.
+    /// A vector's result does not depend on the pool or on the other vectors.
     ///
     /// # Errors
     /// As [`LaplacianSaddle::solve`].
@@ -328,6 +333,7 @@ impl LaplacianSaddle {
         &self,
         pool: Option<&rayon::ThreadPool>,
         rs: &[&[f64]],
+        refine: bool,
     ) -> Result<Vec<Vec<f64>>, RsError> {
         let nv = self.n_vertices;
         let nd = 3 * nv;
@@ -355,7 +361,7 @@ impl LaplacianSaddle {
                         }
                     }
                 }
-                let x = self.solve_columns(pool, &b, 3 * rs.len(), self.group)?;
+                let x = self.solve_columns(pool, &b, 3 * rs.len(), self.group, refine)?;
                 Ok((0..rs.len())
                     .map(|q| {
                         let mut out = vec![0.0; self.dim()];
@@ -375,7 +381,7 @@ impl LaplacianSaddle {
             None => {
                 let n = self.dim();
                 let b: Vec<f64> = rs.iter().flat_map(|r| r.iter().copied()).collect();
-                let x = self.solve_columns(pool, &b, rs.len(), 1)?;
+                let x = self.solve_columns(pool, &b, rs.len(), 1, refine)?;
                 Ok(x.chunks(n).map(<[f64]>::to_vec).collect())
             }
         }
@@ -396,6 +402,11 @@ pub struct PreconditionerOptions {
     pub cluster: ClusterTreeOptions,
     /// How `L′⁻¹` and `L_{2−s}` are combined (default [`PreconditionerForm::Augmented`]).
     pub form: PreconditionerForm,
+    /// One step of iterative refinement in every `L′` solve of an application (default
+    /// `false`: the plain back substitution; the refinement doubles the cost of the solves and
+    /// changed neither the GMRES iteration counts nor the solutions beyond the GMRES tolerance,
+    /// `NOTES-WP17.md`). [`LaplacianSaddle::solve`] always refines.
+    pub refine: bool,
 }
 
 impl Default for PreconditionerOptions {
@@ -406,6 +417,7 @@ impl Default for PreconditionerOptions {
             fractional: FractionalForm::VertexPairs,
             cluster: ClusterTreeOptions::default(),
             form: PreconditionerForm::Augmented,
+            refine: false,
         }
     }
 }
@@ -477,6 +489,7 @@ pub struct SparsePreconditioner {
     /// The Laplacian block `K = W + εM + E` (for the augmented form).
     laplacian: SparseMatrix,
     form: PreconditionerForm,
+    refine: bool,
     fractional: FractionalFactor,
     eps: f64,
     multi: bool,
@@ -564,6 +577,7 @@ impl SparsePreconditioner {
             lprime,
             laplacian: k,
             form: options.form,
+            refine: options.refine,
             fractional,
             eps,
             multi,
@@ -654,7 +668,7 @@ impl SparsePreconditioner {
     pub fn apply_many(&self, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
         let t0 = Instant::now();
         let nd = 3 * self.lprime.n_vertices;
-        let ys = self.lprime.solve_many_on(Some(&self.pool), rs)?;
+        let ys = self.lprime.solve_many_on(Some(&self.pool), rs, self.refine)?;
         let mut vs: Vec<Vec<f64>> = rs.iter().map(|r| vec![0.0; r.len()]).collect();
         {
             let yp: Vec<&[f64]> = ys.iter().map(|y| &y[..nd]).collect();
@@ -688,7 +702,7 @@ impl SparsePreconditioner {
             }
         }
         let vr: Vec<&[f64]> = vs.iter().map(Vec::as_slice).collect();
-        let mut zs = self.lprime.solve_many_on(Some(&self.pool), &vr)?;
+        let mut zs = self.lprime.solve_many_on(Some(&self.pool), &vr, self.refine)?;
         if self.form == PreconditionerForm::Augmented {
             for (z, y) in zs.iter_mut().zip(&ys) {
                 for (zi, yi) in z.iter_mut().zip(y) {

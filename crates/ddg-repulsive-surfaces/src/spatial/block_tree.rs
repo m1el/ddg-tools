@@ -494,45 +494,111 @@ impl<const N: usize> BlockTree<N> {
             chunks.push((li, head));
             rest = tail;
         }
+        let avx = simd::avx_available();
         pool.install(|| {
             chunks.into_par_iter().with_min_len(8).for_each(|(li, rows)| {
-                let l = self.leaves[li] as usize;
-                let s = self.start[l] as usize;
-                let g = &acc[l];
-                for (r, o) in rows.iter_mut().enumerate() {
-                    let w = self.weight[s + r];
-                    for c in 0..C {
-                        o[c] = w * g[c];
-                    }
-                }
-                for &a in &self.chain[self.chain_ptr[li]..self.chain_ptr[li + 1]] {
-                    let a = a as usize;
-                    let ra = (self.end[a] - self.start[a]) as usize;
-                    let r0 = s - self.start[a] as usize;
-                    for q in self.near_ptr[a]..self.near_ptr[a + 1] {
-                        let b = self.near_col[q] as usize;
-                        let sb = self.start[b] as usize;
-                        let cb = (self.end[b] - self.start[b]) as usize;
-                        let blk = &self.near_val[self.near_off[q]..self.near_off[q] + ra * cb];
-                        let xs = &psi[sb..sb + cb];
-                        for (r, o) in rows.iter_mut().enumerate() {
-                            let row = &blk[(r0 + r) * cb..(r0 + r + 1) * cb];
-                            let mut acc = *o;
-                            if a == b {
-                                // Skip the diagonal entry (the element itself).
-                                let d = r0 + r;
-                                accumulate::<N, C, H>(&mut acc, &row[..d], &xs[..d], map);
-                                accumulate::<N, C, H>(&mut acc, &row[d + 1..], &xs[d + 1..], map);
-                            } else {
-                                accumulate::<N, C, H>(&mut acc, row, xs, map);
-                            }
-                            *o = acc;
-                        }
-                    }
+                if avx {
+                    // SAFETY: the CPU supports AVX (checked at run time just above).
+                    unsafe { self.leaf_rows_avx::<C, H>(li, rows, psi, &acc, map) }
+                } else {
+                    self.leaf_rows::<C, H>(li, rows, psi, &acc, map);
                 }
             });
         });
         out
+    }
+
+    /// [`BlockTree::leaf_rows`] compiled with AVX (no FMA: the same roundings as without).
+    ///
+    /// # Safety
+    /// The CPU must support AVX.
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx")]
+    unsafe fn leaf_rows_avx<const C: usize, const H: usize>(
+        &self,
+        li: usize,
+        rows: &mut [[f64; C]],
+        psi: &[[f64; C]],
+        far: &[[f64; C]],
+        map: Option<&[usize; C]>,
+    ) {
+        self.leaf_rows::<C, H>(li, rows, psi, far, map);
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    unsafe fn leaf_rows_avx<const C: usize, const H: usize>(
+        &self,
+        li: usize,
+        rows: &mut [[f64; C]],
+        psi: &[[f64; C]],
+        far: &[[f64; C]],
+        map: Option<&[usize; C]>,
+    ) {
+        self.leaf_rows::<C, H>(li, rows, psi, far, map);
+    }
+
+    /// The rows of leaf `li`: the far part `w_I G_leaf`, then the near blocks of the chain
+    /// root → leaf, in order.
+    #[inline(always)]
+    fn leaf_rows<const C: usize, const H: usize>(
+        &self,
+        li: usize,
+        rows: &mut [[f64; C]],
+        psi: &[[f64; C]],
+        far: &[[f64; C]],
+        map: Option<&[usize; C]>,
+    ) {
+        let l = self.leaves[li] as usize;
+        let s = self.start[l] as usize;
+        let g = &far[l];
+        for (r, o) in rows.iter_mut().enumerate() {
+            let w = self.weight[s + r];
+            for c in 0..C {
+                o[c] = w * g[c];
+            }
+        }
+        for &a in &self.chain[self.chain_ptr[li]..self.chain_ptr[li + 1]] {
+            let a = a as usize;
+            let ra = (self.end[a] - self.start[a]) as usize;
+            let r0 = s - self.start[a] as usize;
+            for q in self.near_ptr[a]..self.near_ptr[a + 1] {
+                let b = self.near_col[q] as usize;
+                let sb = self.start[b] as usize;
+                let cb = (self.end[b] - self.start[b]) as usize;
+                let blk = &self.near_val[self.near_off[q]..self.near_off[q] + ra * cb];
+                let xs = &psi[sb..sb + cb];
+                for (r, o) in rows.iter_mut().enumerate() {
+                    let row = &blk[(r0 + r) * cb..(r0 + r + 1) * cb];
+                    let mut acc = *o;
+                    if a == b {
+                        // Skip the diagonal entry (the element itself).
+                        let d = r0 + r;
+                        accumulate::<N, C, H>(&mut acc, &row[..d], &xs[..d], map);
+                        accumulate::<N, C, H>(&mut acc, &row[d + 1..], &xs[d + 1..], map);
+                    } else {
+                        accumulate::<N, C, H>(&mut acc, row, xs, map);
+                    }
+                    *o = acc;
+                }
+            }
+        }
+    }
+}
+
+/// Run-time CPU features for the vectorized loops (AVX without FMA: wider registers, the same
+/// roundings, so results do not depend on the CPU).
+pub(crate) mod simd {
+    /// Whether AVX may be used.
+    #[inline]
+    pub fn avx_available() -> bool {
+        #[cfg(target_arch = "x86_64")]
+        {
+            std::arch::is_x86_feature_detected!("avx")
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            false
+        }
     }
 }
 

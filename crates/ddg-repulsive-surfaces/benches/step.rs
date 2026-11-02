@@ -7,6 +7,8 @@
 //!     [--gmres-tol X] [--chi X]
 //! ```
 //!
+//! `--log PATH` writes every step (`step::csv_line`, all steps including the warm-up) to a CSV.
+//!
 //! `SPEC`: `genus:G:FACES`, `handcuffs:K:FACES`, `tunnel8:FACES`, `tunnel3:FACES`, `fig12:I`,
 //! `punctured:FACES`, `torus:FACES`, `obj:PATH` (barycenter + area constraints, as the paper's
 //! runs), or `scene:PATH` (the scene's own constraints and penalties). `--suite fig13` runs the 14
@@ -23,6 +25,7 @@ use ddg_repulsive_surfaces::generate::Mesh;
 use ddg_repulsive_surfaces::generate::primitives::{punctured_torus, torus};
 use ddg_repulsive_surfaces::generate::shapes::{Knot, fig12, genus_surface, handcuffs, knotted_tunnel};
 use ddg_repulsive_surfaces::scene::{SceneFile, SceneSpec};
+use ddg_repulsive_surfaces::step::{CSV_HEADER, csv_line};
 use ddg_repulsive_surfaces::{
     Backend, Constraint, FlowOptions, Session, StepReport, StopRule, Surface, read_obj, scene_options, write_obj,
 };
@@ -42,6 +45,7 @@ struct Args {
     chi: Option<f64>,
     restart: Option<usize>,
     no_lo: bool,
+    log: Option<PathBuf>,
 }
 
 fn parse_args() -> Args {
@@ -58,6 +62,7 @@ fn parse_args() -> Args {
         chi: None,
         restart: None,
         no_lo: false,
+        log: None,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -96,6 +101,10 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--no-lo" => a.no_lo = true,
+            "--log" => {
+                a.log = Some(PathBuf::from(next(i)));
+                i += 1;
+            }
             "--restart" => {
                 a.restart = Some(next(i).parse().expect("--restart N"));
                 i += 1;
@@ -268,11 +277,21 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         o.metric = ddg_repulsive_surfaces::Metric::Sobolev { low_order: false };
     }
     let mut session = Session::new(surface, positions, o).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let mut log = a.log.as_ref().map(|p| {
+        let mut f = std::fs::File::create(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        use std::io::Write;
+        writeln!(f, "{CSV_HEADER},energy_after_bits").expect("log");
+        f
+    });
     let mut reps: Vec<StepReport> = Vec::new();
     let mut status = "ok".to_string();
     for k in 0..a.warmup + a.steps {
         match session.step() {
             Ok(r) => {
+                if let Some(f) = log.as_mut() {
+                    use std::io::Write;
+                    writeln!(f, "{},{:016x}", csv_line(&r), r.energy_after.to_bits()).expect("log");
+                }
                 if std::env::var_os("WP17_HISTORY").is_some() {
                     for (i, s) in r.linear.solves.iter().enumerate() {
                         if let Some(g) = &s.gmres {
