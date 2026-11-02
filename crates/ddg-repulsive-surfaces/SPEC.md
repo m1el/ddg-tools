@@ -420,8 +420,7 @@ error.
 
   (same cost: two back-substitutions and one fractional product); symmetric, nonsingular, and
   `C_Q`-consistent: `C_Q (P⁻¹[r; b])_x = b`. The printed form stays as `PreconditionerForm::Printed`
-  (reference mode). `rs-fractional-preconditioner` is restated for this form (Lean update pending,
-  §16). Not added to `L′`: the Willmore term (D7: with it GMRES needed 154 iterations or diverged,
+  (reference mode). `rs-fractional-preconditioner` names this form (proved, `RS.aug_precond_props`). Not added to `L′`: the Willmore term (D7: with it GMRES needed 154 iterations or diverged,
   5–20 without) and the obstacle diagonal (the reference adds its `fr` part; not implemented, §16). `ε = ε_rel · tr(W)/tr(M)` (scale-invariant; default `ε_rel = 1e-10`; the reference uses
   absolute `1e-8`, and `1e-2` with several components because its global barycenter row leaves
   per-component constants in the kernel — with per-component barycenters we need no large `ε`).
@@ -781,7 +780,7 @@ Rust functions carry `[formula: <id>]`; each id is a Lean theorem in
 | `rs-projector-average` | `vᵀP̄v = Σ w_S |P_S v|²` for a convex combination | `hierarchical` | proved, `Metric.lean` |
 | `rs-fractional-operator` | Eq. 5/6 fractional Laplacian | docs | cited |
 | `rs-preconditioner-order` | `W⁻¹(M Δ^{2−s})W⁻¹ = Δ^{−s} M⁻¹` for `Δ = M⁻¹W` (commuting powers of a diagonalizable `Δ`) | `precond` | proved, `Precond.lean` (matrix identity; the approximation of `B` cited) |
-| `rs-fractional-preconditioner` | `P⁻¹ = L′⁻¹ blockdiag(L_{2−s}⊗I₃, 0) L′⁻¹` is symmetric, PSD, and `C_Q P⁻¹ r = 0` | `solve::precond` | proved, `Precond.lean` |
+| `rs-fractional-preconditioner` | augmented `P⁻¹ = L′⁻¹ N L′⁻¹`, `N = [[L_{2−s}, C_Qᵀ],[C_Q, 0]]` (D33): equals `L′⁻¹ + L′⁻¹ blockdiag(L_{2−s} − K, 0) L′⁻¹`, symmetric, nonsingular iff `N` is, `C_Q (P⁻¹[r; b])_x = b` | `solve::precond` | proved, `Precond.lean` (`RS.aug_precond_props`; the printed form's `frac_precond_props` kept untagged) |
 | `rs-preconditioner-approx` | `Ã⁻¹` approximates the inverse of the high-order term (Sec. 5.2) | docs | cited |
 | `rs-schur-direction` | Eq. 19–20: `x` solves the saddle, `Cx = 0` | `solve::schur` | proved, `Saddle.lean` |
 | `rs-schur-correction` | Eq. 21: `C h = Φ` | `solve::schur` | proved, `Saddle.lean` |
@@ -967,8 +966,8 @@ Rounds (≤ 3 agents; timed work alone at the end):
 
 (Filled in as work packages report.)
 
-* Lean: restate `rs-fractional-preconditioner` for the augmented form (D33): symmetric,
-  nonsingular, `C_Q (P⁻¹[r; b])_x = b` (WP10 proved the printed form's properties).
+* ~~Lean: restate `rs-fractional-preconditioner` for the augmented form~~ — done (WP10b,
+  `RS.aug_precond_props`, exactly as §6.3 states it).
 * The obstacle part of the preconditioner (reference `fr` diagonal) is not implemented (WP6).
 * Naming after WP6: WP2's `FractionalPairs` still defaults to `Faces` in its own options (WP6's
   options use `Vertices`); the SPEC's `FractionalForm` name is not used yet; `Backend` lives in
