@@ -4,7 +4,6 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use std::path::PathBuf;
 use std::time::Instant;
 
 use ddg_core::generators::{SplitMix64, bumpy_grid_disk, icosphere, perturb, torus};
@@ -142,71 +141,10 @@ fn percentile(v: &[f64], q: f64) -> f64 {
 
 struct Case {
     name: String,
-    op: (String, u32, u32),
     pinned: Vec<u32>,
     delaunay: bool,
     foldover: bool,
     mesh: Mesh,
-}
-
-fn hexf(s: &str) -> f64 {
-    f64::from_bits(u64::from_str_radix(s, 16).unwrap())
-}
-
-fn parse_mesh_lines(lines: &[&str]) -> (Vec<[f64; 3]>, Vec<[u32; 3]>) {
-    let mut pos = Vec::new();
-    let mut faces = Vec::new();
-    for l in lines {
-        let w: Vec<&str> = l.split_whitespace().collect();
-        match w.first().copied() {
-            Some("p") => pos.push([hexf(w[1]), hexf(w[2]), hexf(w[3])]),
-            Some("f") => faces.push([w[1], w[2], w[3]].map(|x| x.parse::<u32>().unwrap())),
-            _ => {}
-        }
-    }
-    (pos, faces)
-}
-
-fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean/oracle/fixtures/rs")
-}
-
-fn read_case(path: &PathBuf) -> Option<Case> {
-    let text = std::fs::read_to_string(path).unwrap();
-    if !text.contains("task remesh-ops") {
-        return None;
-    }
-    let lines: Vec<&str> = text.lines().collect();
-    let mut c = Case {
-        name: String::new(),
-        op: (String::new(), 0, 0),
-        pinned: Vec::new(),
-        delaunay: false,
-        foldover: false,
-        mesh: (Surface::new(3, vec![[0, 1, 2]]).unwrap(), vec![]),
-    };
-    for l in &lines {
-        let w: Vec<&str> = l.split_whitespace().collect();
-        match w.first().copied() {
-            Some("case") => c.name = w[1].to_string(),
-            Some("op") => {
-                c.op = (
-                    w[1].to_string(),
-                    w[2].parse().unwrap(),
-                    w[3].parse().unwrap(),
-                )
-            }
-            Some("pinned") => c.pinned = w[1..].iter().map(|x| x.parse().unwrap()).collect(),
-            Some("legality") => {
-                c.delaunay = w.contains(&"delaunay");
-                c.foldover = w.contains(&"foldover");
-            }
-            _ => {}
-        }
-    }
-    let (pos, faces) = parse_mesh_lines(&lines);
-    c.mesh = mk(pos, faces);
-    Some(c)
 }
 
 struct Expected {
@@ -217,51 +155,41 @@ struct Expected {
     vmap: Vec<Vec<u32>>,
 }
 
-fn read_expected(path: &PathBuf) -> Expected {
-    let text = std::fs::read_to_string(path).unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    let mut e = Expected {
-        error: None,
-        pos: vec![],
-        faces: vec![],
-        parent: vec![],
-        vmap: vec![],
-    };
-    for l in &lines {
-        let w: Vec<&str> = l.split_whitespace().collect();
-        match w.first().copied() {
-            Some("status") if w[1] == "error" => e.error = Some(w[2].to_string()),
-            Some("parent") => e.parent.push(w[2].parse().unwrap()),
-            Some("vmap") => e
-                .vmap
-                .push(w[2..].iter().map(|x| x.parse().unwrap()).collect()),
-            _ => {}
-        }
-    }
-    let (p, f) = parse_mesh_lines(&lines);
-    e.pos = p;
-    e.faces = f;
-    e
-}
+#[path = "wp2_fixture/mod.rs"]
+mod fixture;
 
 #[test]
 fn oracle_remesh_ops_fixtures_replay_exactly() {
     let mut n = 0;
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(fixture_dir())
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|x| x == "in"))
-        .collect();
-    entries.sort();
-    for input in entries {
-        let Some(case) = read_case(&input) else {
+    for (name, task, _) in fixture::manifest() {
+        if task != "remesh-ops" {
             continue;
-        };
+        }
         n += 1;
-        let exp = read_expected(&input.with_extension("out"));
+        let c = fixture::read_case(&name);
+        let o = fixture::read_output(&name);
+        let case = Case {
+            name: name.clone(),
+            pinned: c.pinned.clone(),
+            delaunay: c.delaunay,
+            foldover: c.foldover,
+            mesh: mk(c.positions.clone(), c.faces.clone()),
+        };
+        let exp = Expected {
+            error: o.error_kind().map(str::to_string),
+            pos: o.mesh_positions(),
+            faces: o.mesh_faces(),
+            parent: o.get("parent").iter().map(|l| l[1].parse().unwrap()).collect(),
+            vmap: o
+                .get("vmap")
+                .iter()
+                .map(|l| l[1..].iter().map(|x| x.parse().unwrap()).collect())
+                .collect(),
+        };
         let (s, p) = &case.mesh;
         let mut m = EditMesh::new(s, p, &case.pinned).unwrap();
-        let (op, a, b) = (case.op.0.as_str(), case.op.1, case.op.2);
+        let (op, a, b) = c.op.clone().unwrap();
+        let (op, a, b) = (op.as_str(), a, b);
         let res: Result<bool, ddg_repulsive_surfaces::remesh::Refused> = match op {
             "split" => m.split(a, b).map(|_| false),
             "collapse" => m

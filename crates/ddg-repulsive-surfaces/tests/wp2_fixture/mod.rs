@@ -1,6 +1,8 @@
 //! A small reader of the `rs` golden fixtures of the Lean oracle (`lean/oracle/fixtures/rs/`,
 //! protocol in `lean/oracle/README.md`, "Repulsive surfaces") for the WP2 checks of `df`,
-//! `metric`, `constraints`, `saddle` and `precond`. The full replay is `tests/oracle.rs` (WP11).
+//! `metric`, `constraints`, `saddle` and `precond`, shared by the replay of every task in
+//! `tests/oracle.rs` (WP11) and by the per-task tests. The parsers take text, so that the fuzz
+//! test can parse the streams of `ddg-oracle rs-gen` and `ddg-oracle rs`.
 
 #![allow(dead_code)]
 
@@ -35,6 +37,21 @@ pub struct Case {
     pub constraints: Vec<Constraint>,
     pub positions: Vec<[f64; 3]>,
     pub faces: Vec<[u32; 3]>,
+    /// `remesh-ops`: `op NAME A B`.
+    pub op: Option<(String, u32, u32)>,
+    /// `remesh-ops`: pinned vertices.
+    pub pinned: Vec<u32>,
+    pub delaunay: bool,
+    pub foldover: bool,
+    /// Every line of the case as tokens (for the `step` options).
+    pub lines: Vec<Vec<String>>,
+}
+
+impl Case {
+    /// The tokens of the first line with key `k`.
+    pub fn line(&self, k: &str) -> Option<&[String]> {
+        self.lines.iter().find(|l| l[0] == k).map(|l| l.as_slice())
+    }
 }
 
 fn comp(tok: &str) -> Option<u32> {
@@ -47,14 +64,47 @@ fn comp(tok: &str) -> Option<u32> {
 
 /// Parses `NAME.in`.
 pub fn read_case(name: &str) -> Case {
-    let text = std::fs::read_to_string(dir().join(format!("{name}.in"))).unwrap();
+    parse_case(&std::fs::read_to_string(dir().join(format!("{name}.in"))).unwrap())
+}
+
+/// Splits a stream of `case NAME … end` blocks into `(name, text)` (the text keeps the
+/// `case` line and drops `end`).
+pub fn blocks(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut cur: Option<(String, String)> = None;
+    for line in text.lines() {
+        let t: Vec<&str> = line.split_whitespace().collect();
+        match t.first().copied() {
+            Some("case") => cur = Some((t[1].to_string(), format!("{line}\n"))),
+            Some("end") => out.extend(cur.take()),
+            Some(_) => {
+                if let Some((_, s)) = cur.as_mut() {
+                    s.push_str(line);
+                    s.push('\n');
+                }
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+/// Parses the text of one input case.
+pub fn parse_case(text: &str) -> Case {
     let mut c = Case::default();
     for line in text.lines() {
         let t: Vec<&str> = line.split_whitespace().collect();
         if t.is_empty() {
             continue;
         }
+        c.lines.push(t.iter().map(|s| s.to_string()).collect());
         match t[0] {
+            "op" => c.op = Some((t[1].into(), t[2].parse().unwrap(), t[3].parse().unwrap())),
+            "pinned" => c.pinned = t[1..].iter().map(|s| s.parse().unwrap()).collect(),
+            "legality" => {
+                c.delaunay = t.contains(&"delaunay");
+                c.foldover = t.contains(&"foldover");
+            }
             "case" => c.name = t[1].into(),
             "task" => c.task = t[1].into(),
             "exponents" => c.exponents = Some((hex(t[1]), hex(t[2]))),
@@ -117,6 +167,24 @@ impl Output {
         self.lines.get(k).map_or(&[], |v| v.as_slice())
     }
 
+    /// `error KIND …`: the kind of an error status.
+    pub fn error_kind(&self) -> Option<&str> {
+        self.status.strip_prefix("error ").map(|r| r.split_whitespace().next().unwrap_or(""))
+    }
+
+    /// Lines `p X Y Z` (the mesh of a `remesh-ops` answer).
+    pub fn mesh_positions(&self) -> Vec<[f64; 3]> {
+        self.get("p").iter().map(|l| [hex(&l[0]), hex(&l[1]), hex(&l[2])]).collect()
+    }
+
+    /// Lines `f A B C`.
+    pub fn mesh_faces(&self) -> Vec<[u32; 3]> {
+        self.get("f")
+            .iter()
+            .map(|l| [l[0].parse().unwrap(), l[1].parse().unwrap(), l[2].parse().unwrap()])
+            .collect()
+    }
+
     /// A one-line float value.
     pub fn scalar(&self, k: &str) -> f64 {
         hex(&self.get(k)[0][0])
@@ -141,7 +209,11 @@ impl Output {
 
 /// Parses `NAME.out`.
 pub fn read_output(name: &str) -> Output {
-    let text = std::fs::read_to_string(dir().join(format!("{name}.out"))).unwrap();
+    parse_output(&std::fs::read_to_string(dir().join(format!("{name}.out"))).unwrap())
+}
+
+/// Parses the text of one output case.
+pub fn parse_output(text: &str) -> Output {
     let mut o = Output::default();
     for line in text.lines() {
         let t: Vec<&str> = line.split_whitespace().collect();
@@ -179,4 +251,15 @@ pub fn rel_err(a: &[f64], b: &[f64], floor: f64) -> f64 {
         .zip(b)
         .fold(0.0f64, |m, (x, y)| m.max((x - y).abs()))
         / scale
+}
+
+/// Every case of `MANIFEST.tsv` as `(name, task, is_ok)`.
+pub fn manifest() -> Vec<(String, String, bool)> {
+    let text = std::fs::read_to_string(dir().join("MANIFEST.tsv")).unwrap();
+    text.lines()
+        .filter_map(|l| {
+            let t: Vec<&str> = l.split('\t').collect();
+            (t.len() >= 3).then(|| (t[0].to_string(), t[1].to_string(), t[2] == "ok"))
+        })
+        .collect()
 }
