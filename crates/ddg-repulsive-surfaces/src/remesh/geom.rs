@@ -21,11 +21,15 @@ pub fn tri_normal(p: [[f64; 3]; 3]) -> [f64; 3] {
 /// Does a face whose (unnormalized) normal was `before` and is `after` fold over: the new
 /// triangle is degenerate (zero or non-finite area) or its normal turned by more than `π − 2`?
 /// Both normals must come from the same vertex order (the test is then orientation-free).
+/// Evaluated as `before · after < cos(π − 2) |before| |after|` (no `atan2`).
 #[inline]
 pub fn folds(before: [f64; 3], after: [f64; 3]) -> bool {
     let a = norm(after);
-    !(a > 0.0 && a.is_finite()) || angle_between(before, after) > FOLDOVER_LIMIT
+    !(a > 0.0 && a.is_finite()) || dot(before, after) < COS_FOLDOVER_LIMIT * norm(before) * a
 }
+
+/// `cos(π − 2) = −cos 2`.
+pub const COS_FOLDOVER_LIMIT: f64 = 0.4161468365471424;
 
 /// The corner angle at `v` between `w − v` and `x − v`.
 #[inline]
@@ -34,15 +38,21 @@ pub fn corner_angle(v: [f64; 3], w: [f64; 3], x: [f64; 3]) -> f64 {
 }
 
 /// The Delaunay test of an interior edge `p q` with opposite vertices `c` and `d`: the edge
-/// must be flipped iff the two opposite angles sum to more than `π`. Equivalently the cotan
-/// weight `½(cot ∠c + cot ∠d)` of the edge is negative (`cot α + cot β = sin(α + β)/(sin α
-/// sin β)`, and both sines are positive). Evaluated in `f64` with `atan2` angles (the
-/// reference uses `float`, D16).
+/// must be flipped iff the two opposite angles sum to more than `π`, equivalently iff its
+/// cotan weight `½(cot ∠c + cot ∠d)` is negative (`cot α + cot β = sin(α + β)/(sin α sin β)`
+/// and both sines are positive). Evaluated in `f64` (the reference uses `float`, D16) in the
+/// cotan form without divisions: with `cot ∠c = d_c/s_c` (`d_c` the dot product and `s_c > 0`
+/// the cross-product length of the two edge vectors at `c`), the test is
+/// `d_c s_d + d_d s_c < 0`. A degenerate corner (`s = 0`) never asks for a flip.
 ///
 /// [formula: rs-delaunay-test]
 #[inline]
 pub fn violates_delaunay(p: [f64; 3], q: [f64; 3], c: [f64; 3], d: [f64; 3]) -> bool {
-    corner_angle(c, p, q) + corner_angle(d, p, q) > std::f64::consts::PI
+    let (uc, vc) = (sub(p, c), sub(q, c));
+    let (ud, vd) = (sub(p, d), sub(q, d));
+    let (dc, sc) = (dot(uc, vc), norm(cross(uc, vc)));
+    let (dd, sd) = (dot(ud, vd), norm(cross(ud, vd)));
+    sc > 0.0 && sd > 0.0 && dc * sd + dd * sc < 0.0
 }
 
 /// The circumcenter of a triangle from its barycentric weights

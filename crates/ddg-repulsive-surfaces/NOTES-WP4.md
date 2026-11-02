@@ -21,6 +21,16 @@ Build: `CARGO_TARGET_DIR=$PWD/target-wp4 cargo test -p ddg-repulsive-surfaces --
   2 anisotropic scalings on every mesh; stretched icosphere quality; pins; boundary; flat-patch
   Delaunay; determinism (both orders); transport of linear data; 40k timing (ignored).
 
+## Measurements (release, 1 thread)
+- Stretched icosphere(3) scaled (4, 1, 0.5), L₀ = 1.5 × the unscaled mean edge: edges outside
+  [L₀/2, 3L₀/2] 43.5 % → 0.00 % after 8 passes (one pass already splits 784, collapses 426);
+  min angle 9.19° → 25.3° (1 pass) → 32.3° (8 passes); 1st percentile 11.0° → 35.2°.
+- Stress: 24 runs × 1500 random ops (≈ 10k splits, 8k collapses, 7.5k flips, 10k refusals,
+  reordered flips on Möbius/Klein), valid after every op.
+- One pass on torus 200×100 (40 000 faces) scaled (1.3, 1, 0.8): 0.20 s (11k splits, 3.5k
+  collapses, 11.7k flips → 54 882 faces); steady state on 48 000 faces: 0.13 s.
+  (Profile: smoothing ≈ ½ — fans and the angle-weighted normals; flips ≈ ¼.)
+
 ## Decisions
 - **Representation.** Not a pointer-based half-edge structure: face slots + per-vertex face lists;
   a half-edge is (face, side), its twin found through the vertex lists. This is orientation-free
@@ -44,6 +54,9 @@ Build: `CARGO_TARGET_DIR=$PWD/target-wp4 cargo test -p ddg-repulsive-surfaces --
   edges queued again, stale entries skipped. Splits: input edges in lexicographic order.
 - **Flips**: FIFO of all edges (lexicographic), the 4 quad edges re-queued after a flip; the cap
   `flip_cap_per_vertex · |V|` per round; `flip_cap_hits` counts rounds that hit it.
+- **Delaunay test** in the cotan form `d_c s_d + d_d s_c < 0` (no `atan2`), the foldover test as
+  `before·after < cos(π − 2)|before||after|`; both are the tagged equivalences, and replay the
+  oracle fixtures.
 - **Options**: `split > 2 · collapse` required (halves of a split edge must not be collapsible);
   `rho ∈ (0, 1]`; `flip_cap_per_vertex ≥ 1`; `l0` finite > 0.
 - **Pins**: `Remeshed::pinned[i]` is the new id of input pin `i` (same order). A collapse into a

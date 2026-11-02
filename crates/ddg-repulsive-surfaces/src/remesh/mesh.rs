@@ -393,18 +393,41 @@ impl EditMesh {
 
     /// All live edges as `[min, max]`, ascending.
     pub fn edges(&self) -> Vec<[u32; 2]> {
-        let mut e = Vec::with_capacity(self.faces.len() * 3 / 2 + 1);
-        for (f, t) in self.faces.iter().enumerate() {
-            if self.face_alive[f] {
-                for k in 0..3 {
-                    let (a, b) = (t[k], t[(k + 1) % 3]);
-                    e.push([a.min(b), a.max(b)]);
+        self.edges_with_counts()
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect()
+    }
+
+    /// All live edges as `[min, max]`, ascending, with their number of faces (1 on the
+    /// boundary).
+    pub fn edges_with_counts(&self) -> Vec<([u32; 2], u32)> {
+        let mut out = Vec::with_capacity(self.faces.len() * 3 / 2 + 1);
+        let mut buf: Vec<u32> = Vec::with_capacity(16);
+        for v in 0..self.pos.len() as u32 {
+            if !self.v_alive[v as usize] {
+                continue;
+            }
+            buf.clear();
+            for &f in &self.vfaces[v as usize] {
+                for &w in &self.faces[f as usize] {
+                    if w > v {
+                        buf.push(w);
+                    }
                 }
             }
+            buf.sort_unstable();
+            let mut i = 0;
+            while i < buf.len() {
+                let mut j = i + 1;
+                while j < buf.len() && buf[j] == buf[i] {
+                    j += 1;
+                }
+                out.push(([v, buf[i]], (j - i) as u32));
+                i = j;
+            }
         }
-        e.sort_unstable();
-        e.dedup();
-        e
+        out
     }
 
     /// The neighbours of `v`, ascending.
@@ -646,11 +669,12 @@ impl EditMesh {
         }
     }
 
-    /// Collapses the edge `{a, b}` (`SPEC.md` §10): `min(a, b)` survives at the position of
-    /// [the collapse rule](Self::collapse_target), `max(a, b)` dies, the faces on the edge are
-    /// deleted. Checked in this order: the edge exists, not both pinned, the link condition
-    /// (the common neighbours are exactly the opposite vertices; an interior edge between two
-    /// boundary vertices fails), the foldover test if asked, no repeated face, the guard if
+    /// Collapses the edge `{a, b}` (`SPEC.md` §10): `min(a, b)` survives at the pinned
+    /// endpoint, else the single boundary endpoint, else the midpoint; `max(a, b)` dies, the
+    /// faces on the edge are deleted. Checked in this order: the edge exists, not both pinned,
+    /// the link condition (the common neighbours are exactly the opposite vertices; an interior
+    /// edge between two boundary vertices fails), the foldover test if asked, no degenerate
+    /// face, no repeated face, the guard if
     /// given, and the stars of the touched vertices afterwards. Returns the survivor.
     pub fn collapse<'g>(
         &mut self,

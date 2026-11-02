@@ -31,7 +31,7 @@
 //!    degenerate), the move is halved, up to 3 times, then refused (counted). Order
 //!    [`RemeshOrder::FlipThenSmooth`] (the paper, default) or
 //!    [`RemeshOrder::SmoothThenFlip`] (the reference).
-//! 3. The result is revalidated as a [`Surface`](crate::Surface) with positions, and returned
+//! 3. The result is revalidated as a [`Surface`] with positions, and returned
 //!    with the [`VertexMap`] (new vertex → old vertices and weights), the face parents and the
 //!    remapped pins ([`Remeshed`]); per-vertex data follow with [`VertexMap::transport`].
 //!
@@ -48,8 +48,8 @@ use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::time::Instant;
 
 pub use geom::{
-    FOLDOVER_LIMIT, angle_between, barycenter, circumcenter, corner_angle, folds,
-    smoothing_displacement, tri_normal, violates_delaunay,
+    COS_FOLDOVER_LIMIT, FOLDOVER_LIMIT, angle_between, barycenter, circumcenter, corner_angle,
+    folds, smoothing_displacement, tri_normal, violates_delaunay,
 };
 pub use mesh::{
     CollapseChecks, CollapseGuard, CollapseQuery, EditMesh, Fan, FlipChecks, FlipOutcome,
@@ -377,10 +377,18 @@ fn delaunay_flips(mesh: &mut EditMesh, cap_per_vertex: usize, rep: &mut RemeshRe
 fn smooth(mesh: &mut EditMesh, rho: f64, rep: &mut RemeshReport) {
     let nf = mesh.n_face_slots();
     let nv = mesh.n_vertex_slots();
-    // per-vertex boundary flags and per-face data at the start of the smoothing
-    let boundary: Vec<bool> = (0..nv as u32)
-        .map(|v| mesh.is_vertex_alive(v) && mesh.is_boundary_vertex(v))
-        .collect();
+    // boundary vertices and faces with a boundary edge (an edge with one face)
+    let mut boundary = vec![false; nv];
+    let mut face_on_boundary = vec![false; nf];
+    for ([a, b], n) in mesh.edges_with_counts() {
+        if n == 1 {
+            boundary[a as usize] = true;
+            boundary[b as usize] = true;
+            for f in mesh.edge_faces(a, b) {
+                face_on_boundary[f as usize] = true;
+            }
+        }
+    }
     let mut normal0 = vec![[0.0; 3]; nf];
     let mut center = vec![[0.0; 3]; nf];
     let mut area = vec![0.0; nf];
@@ -388,13 +396,11 @@ fn smooth(mesh: &mut EditMesh, rho: f64, rep: &mut RemeshReport) {
         if !mesh.is_face_alive(f) {
             continue;
         }
-        let t = mesh.face(f);
         let p = mesh.corners(f);
         let n = tri_normal(p);
         normal0[f as usize] = n;
         area[f as usize] = 0.5 * norm(n);
-        let has_boundary_edge = (0..3).any(|k| mesh.edge_faces(t[k], t[(k + 1) % 3]).len() == 1);
-        center[f as usize] = if has_boundary_edge {
+        center[f as usize] = if face_on_boundary[f as usize] {
             barycenter(p)
         } else {
             circumcenter(p)

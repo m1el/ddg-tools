@@ -11,7 +11,8 @@ use ddg_core::generators::{SplitMix64, bumpy_grid_disk, icosphere, perturb, toru
 use ddg_repulsive_surfaces::geometry::mean_edge_length;
 use ddg_repulsive_surfaces::remesh::{
     CollapseChecks, CollapseGuard, CollapseQuery, EditMesh, EnabledOps, FlipChecks, RefusalKind,
-    RemeshOptions, RemeshOrder, Remeshed, VertexMap, corner_angle, remesh, violates_delaunay,
+    RemeshOptions, RemeshOrder, Remeshed, VertexMap, circumcenter, corner_angle, remesh,
+    smoothing_displacement, violates_delaunay,
 };
 use ddg_repulsive_surfaces::{RsError, Surface, read_obj};
 
@@ -1061,6 +1062,59 @@ fn vertex_map_transports_linear_data_and_face_parents_point_back() {
     assert!(r.face_parents.iter().all(|&f| (f as usize) < m.0.n_faces()));
 }
 
+#[test]
+fn circumcenter_smoothing_weights_and_delaunay_test() {
+    let mut rng = SplitMix64::new(4);
+    for _ in 0..200 {
+        let p = [0; 3].map(|_| [0; 3].map(|_| rng.uniform(-1.0, 1.0)));
+        let c = circumcenter(p);
+        let r: Vec<f64> = p
+            .iter()
+            .map(|q| (0..3).map(|k| (q[k] - c[k]).powi(2)).sum::<f64>().sqrt())
+            .collect();
+        assert!((r[0] - r[1]).abs() < 1e-8 * r[0] && (r[0] - r[2]).abs() < 1e-8 * r[0]);
+        // the center lies in the triangle's plane
+        let n = ddg_repulsive_surfaces::remesh::tri_normal(p);
+        let d: f64 = (0..3).map(|k| n[k] * (c[k] - p[0][k])).sum();
+        assert!(d.abs() < 1e-9 * r[0] * r[0]);
+        // Delaunay test = sign of the cotan weight
+        let q = [
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+        ];
+        let cot = |v: [f64; 3], a: [f64; 3], b: [f64; 3]| {
+            let t = corner_angle(v, a, b);
+            t.cos() / t.sin()
+        };
+        let w = cot(p[2], p[0], p[1]) + cot(q, p[0], p[1]);
+        assert_eq!(violates_delaunay(p[0], p[1], p[2], q), w < 0.0);
+    }
+    use ddg_repulsive_surfaces::remesh::{COS_FOLDOVER_LIMIT, FOLDOVER_LIMIT, folds};
+    assert!((FOLDOVER_LIMIT.cos() - COS_FOLDOVER_LIMIT).abs() < 1e-15);
+    for k in 0..=100 {
+        let t = std::f64::consts::PI * k as f64 / 100.0;
+        if (t - FOLDOVER_LIMIT).abs() > 1e-9 {
+            assert_eq!(
+                folds([1.0, 0.0, 0.0], [t.cos(), t.sin(), 0.0]),
+                t > FOLDOVER_LIMIT
+            );
+        }
+    }
+    assert!(folds([1.0, 0.0, 0.0], [0.0; 3]));
+    // rho/Σa normalization: one face, rho 1 moves to its center
+    let u = smoothing_displacement([1.0, 2.0, 3.0], 1.0, [(2.0, [0.0; 3])].into_iter()).unwrap();
+    assert_eq!(u, [-1.0, -2.0, -3.0]);
+    let u = smoothing_displacement(
+        [0.0; 3],
+        0.5,
+        [(1.0, [1.0, 0.0, 0.0]), (3.0, [0.0, 1.0, 0.0])].into_iter(),
+    )
+    .unwrap();
+    assert_eq!(u, [0.125, 0.375, 0.0]);
+    assert!(smoothing_displacement([0.0; 3], 0.5, std::iter::empty()).is_none());
+}
+
 /// One full pass on a ~40k-face mesh (release build; `cargo test --release -- --ignored
 /// timing --nocapture`).
 #[test]
@@ -1070,6 +1124,27 @@ fn timing_one_pass_40k_faces() {
     let mut m = scaled(&base, [1.3, 1.0, 0.8]);
     perturb(&mut m.1, [0.002; 3], 1);
     let l0 = mean_edge_length(&base.0, &base.1);
+    // steady state: a mesh whose edges are already near L0
+    let (q, qrep) = remesh(&base.0, &base.1, &[], l0, &RemeshOptions::default(), None).unwrap();
+    let t = Instant::now();
+    let (_, srep) = remesh(
+        &q.surface,
+        &q.positions,
+        &[],
+        l0,
+        &RemeshOptions::default(),
+        None,
+    )
+    .unwrap();
+    println!(
+        "steady state ({} faces): {:.3}s; split {} collapse {} flip {} (first pass {:.3}s)",
+        q.surface.n_faces(),
+        t.elapsed().as_secs_f64(),
+        srep.splits,
+        srep.collapses,
+        srep.flips,
+        qrep.seconds
+    );
     let t = Instant::now();
     let (r, rep) = remesh(&m.0, &m.1, &[], l0, &RemeshOptions::default(), None).unwrap();
     println!(
