@@ -1,0 +1,262 @@
+//! The genus-two handlebody-knots of Table 1 of Ishii, Kishimoto, Moriuchi, Suzuki, "A table of
+//! genus two handlebody-knots up to six crossings", J. Knot Theory Ramifications 21(4), 2012
+//! (`4_1`, `5_1`..`5_4`, `6_1`..`6_16`: the entries shown in Fig. 16 of "Repulsive Surfaces"), as
+//! spatial trivalent graphs, and the tube surfaces around them.
+//!
+//! Each entry is the printed diagram, traced by `tools/ishii_extract.py` (skeleton of the
+//! rendered page, strand pieces, under-crossing gaps paired, edges followed from vertex to vertex)
+//! and lifted: the over-strand of a crossing is at `z = +0.22`, the under-strand at `z = -0.22`
+//! (the diagram is about 4 wide; a tube is thinner than 0.1), with a cosine ramp between
+//! consecutive crossings and `z = 0` at the two vertices. Nothing is invented: the point lists
+//! are the traced curves (decimated). [`check_projection`] recomputes the crossings of the stored
+//! 3D polylines in the `xy` plane and compares their number and the over/under sequence along
+//! every edge with what the diagram showed.
+//!
+//! The graph is a theta curve (three edges between the two vertices) or a handcuff graph (a loop
+//! at each vertex and a bridge). The tube around it has genus 2 either way.
+
+use super::check::self_intersections;
+use super::shapes::graph_tube;
+use super::{Mesh, bad};
+use crate::error::RsError;
+
+type P = [f64; 3];
+
+include!("ishii_data.rs");
+
+/// The entries of the table shown in Fig. 16, in the paper's order.
+pub const NAMES: [&str; 21] = [
+    "4_1", "5_1", "5_2", "5_3", "5_4", "6_1", "6_2", "6_3", "6_4", "6_5", "6_6", "6_7", "6_8", "6_9", "6_10", "6_11",
+    "6_12", "6_13", "6_14", "6_15", "6_16",
+];
+
+/// Theta curve or handcuff graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphKind {
+    /// Three edges between the two vertices.
+    Theta,
+    /// A loop at each vertex and a bridge between them.
+    Handcuff,
+}
+
+/// An edge of the graph: a polyline from vertex `from` to vertex `to` (the same point for a loop).
+#[derive(Debug, Clone)]
+pub struct IshiiEdge {
+    /// Start vertex (0 or 1).
+    pub from: u8,
+    /// End vertex.
+    pub to: u8,
+    /// Polyline in 3D (the diagram's plane is `xy`, the diagram is about 4 wide).
+    pub points: Vec<P>,
+    /// The crossings along the edge as recorded from the diagram: `(over, other edge)`.
+    pub recorded: Vec<(bool, usize)>,
+}
+
+/// One entry of the table.
+#[derive(Debug, Clone)]
+pub struct Entry {
+    /// `"4_1"`, `"6_12"`, ...
+    pub name: &'static str,
+    /// The crossing number of the entry (the diagram's count; `4`, `5` or `6`).
+    pub crossings: usize,
+    /// Theta curve or handcuff graph.
+    pub kind: GraphKind,
+    /// The three edges.
+    pub edges: Vec<IshiiEdge>,
+}
+
+/// A crossing of the `xy` projection of an entry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Crossing {
+    /// Edge and parameter (segment index + fraction) of the first strand.
+    pub a: (usize, f64),
+    /// Edge and parameter of the second strand (the same edge for a self-crossing).
+    pub b: (usize, f64),
+    /// True if the strand of `a` is the over-strand.
+    pub a_over: bool,
+}
+
+/// The entry of the given name (`"4_1"`..`"6_16"`).
+///
+/// # Errors
+/// Unknown name.
+pub fn entry(name: &str) -> Result<Entry, RsError> {
+    let key = name.replace('_', "");
+    let (_, edges) = DATA.iter().find(|(n, _)| *n == key).ok_or_else(|| bad("name", name, "one of ishii::NAMES"))?;
+    let edges: Vec<IshiiEdge> = edges
+        .iter()
+        .map(|(f, t, seq, pts)| IshiiEdge {
+            from: *f,
+            to: *t,
+            points: pts.to_vec(),
+            recorded: seq.split_whitespace().map(|w| (w.starts_with('O'), w[1..].parse().unwrap())).collect(),
+        })
+        .collect();
+    let kind = if edges.iter().any(|e| e.from == e.to) { GraphKind::Handcuff } else { GraphKind::Theta };
+    let crossings = key.chars().next().unwrap().to_digit(10).unwrap() as usize;
+    let name = NAMES.iter().find(|x| x.replace('_', "") == key).unwrap();
+    Ok(Entry { name, crossings, kind, edges })
+}
+
+/// All entries, in the order of [`NAMES`].
+pub fn all_entries() -> Vec<Entry> {
+    NAMES.iter().map(|n| entry(n).unwrap()).collect()
+}
+
+fn seg_inter(p: [f64; 2], d: [f64; 2], q: [f64; 2], e: [f64; 2]) -> Option<(f64, f64)> {
+    let den = d[0] * e[1] - d[1] * e[0];
+    if den.abs() < 1e-14 {
+        return None;
+    }
+    let w = [q[0] - p[0], q[1] - p[1]];
+    let u = (w[0] * e[1] - w[1] * e[0]) / den;
+    let v = (w[0] * d[1] - w[1] * d[0]) / den;
+    ((0.0..1.0).contains(&u) && (0.0..1.0).contains(&v)).then_some((u, v))
+}
+
+/// The crossings of the `xy` projection (intersections at the vertices, where edges meet, are not
+/// crossings).
+pub fn projection_crossings(e: &Entry) -> Vec<Crossing> {
+    let mut out = Vec::new();
+    let near_end = |pts: &[P], x: [f64; 2]| {
+        let d = |p: &P| ((p[0] - x[0]).powi(2) + (p[1] - x[1]).powi(2)).sqrt();
+        d(&pts[0]).min(d(pts.last().unwrap())) < 0.08
+    };
+    for a in 0..e.edges.len() {
+        for b in a..e.edges.len() {
+            let (pa, pb) = (&e.edges[a].points, &e.edges[b].points);
+            for i in 0..pa.len() - 1 {
+                for j in 0..pb.len() - 1 {
+                    if a == b && j <= i + 1 {
+                        continue;
+                    }
+                    let d = [pa[i + 1][0] - pa[i][0], pa[i + 1][1] - pa[i][1]];
+                    let f = [pb[j + 1][0] - pb[j][0], pb[j + 1][1] - pb[j][1]];
+                    let Some((u, v)) = seg_inter([pa[i][0], pa[i][1]], d, [pb[j][0], pb[j][1]], f) else { continue };
+                    let x = [pa[i][0] + u * d[0], pa[i][1] + u * d[1]];
+                    if near_end(pa, x) && near_end(pb, x) {
+                        continue;
+                    }
+                    let za = pa[i][2] + u * (pa[i + 1][2] - pa[i][2]);
+                    let zb = pb[j][2] + v * (pb[j + 1][2] - pb[j][2]);
+                    out.push(Crossing { a: (a, i as f64 + u), b: (b, j as f64 + v), a_over: za > zb });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The over/under sequence along every edge from the projection: `(over, other edge)`.
+pub fn projection_sequences(e: &Entry) -> Vec<Vec<(bool, usize)>> {
+    let mut seq: Vec<Vec<(f64, bool, usize)>> = vec![Vec::new(); e.edges.len()];
+    for c in projection_crossings(e) {
+        seq[c.a.0].push((c.a.1, c.a_over, c.b.0));
+        seq[c.b.0].push((c.b.1, !c.a_over, c.a.0));
+    }
+    seq.into_iter()
+        .map(|mut v| {
+            v.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+            v.into_iter().map(|(_, o, k)| (o, k)).collect()
+        })
+        .collect()
+}
+
+/// Checks that the projection of the stored polylines reproduces the diagram: the number of
+/// crossings equals the entry's crossing number, and the over/under sequence along every edge
+/// (with the edge it crosses) equals the one recorded from the diagram.
+///
+/// # Errors
+/// A message naming the first mismatch.
+pub fn check_projection(e: &Entry) -> Result<(), String> {
+    let cr = projection_crossings(e);
+    if cr.len() != e.crossings {
+        return Err(format!("{}: {} projected crossings, expected {}", e.name, cr.len(), e.crossings));
+    }
+    let seq = projection_sequences(e);
+    for (k, edge) in e.edges.iter().enumerate() {
+        if seq[k] != edge.recorded {
+            return Err(format!("{}: edge {k}: projected {:?}, diagram {:?}", e.name, seq[k], edge.recorded));
+        }
+    }
+    Ok(())
+}
+
+/// A readable list of the crossings: for each edge the sequence `O1 U2 ...` from its start vertex.
+pub fn describe(e: &Entry) -> String {
+    let kind = match e.kind {
+        GraphKind::Theta => "theta curve",
+        GraphKind::Handcuff => "handcuff graph",
+    };
+    let mut s = format!("{} ({kind}, {} crossings)", e.name, e.crossings);
+    for (k, edge) in e.edges.iter().enumerate() {
+        let seq: Vec<String> = edge.recorded.iter().map(|(o, j)| format!("{}{j}", if *o { 'O' } else { 'U' })).collect();
+        s.push_str(&format!("; e{k} v{}->v{}: {}", edge.from, edge.to, seq.join(" ")));
+    }
+    s
+}
+
+fn arclengths(pts: &[P]) -> Vec<f64> {
+    let mut s = vec![0.0];
+    for w in pts.windows(2) {
+        let d = (0..3).map(|k| (w[1][k] - w[0][k]).powi(2)).sum::<f64>().sqrt();
+        s.push(s.last().unwrap() + d);
+    }
+    s
+}
+
+/// A clearance estimate of the graph: the smallest 3D distance between two sample points that
+/// are at least 1.2 apart along the graph (the path through a vertex counts).
+pub fn clearance(e: &Entry) -> f64 {
+    let arcs: Vec<Vec<f64>> = e.edges.iter().map(|x| arclengths(&x.points)).collect();
+    let mut m = f64::INFINITY;
+    let dist = |p: &P, q: &P| (0..3).map(|k| (p[k] - q[k]).powi(2)).sum::<f64>().sqrt();
+    for a in 0..e.edges.len() {
+        let la = *arcs[a].last().unwrap();
+        for b in a..e.edges.len() {
+            let lb = *arcs[b].last().unwrap();
+            for (i, p) in e.edges[a].points.iter().enumerate() {
+                let ea = [(e.edges[a].from, arcs[a][i]), (e.edges[a].to, la - arcs[a][i])];
+                for (j, q) in e.edges[b].points.iter().enumerate() {
+                    if a == b && (arcs[a][i] - arcs[a][j]).abs() < 1.2 {
+                        continue;
+                    }
+                    let eb = [(e.edges[b].from, arcs[b][j]), (e.edges[b].to, lb - arcs[b][j])];
+                    if ea.iter().any(|(va, da)| eb.iter().any(|(vb, db)| va == vb && da + db < 1.2)) {
+                        continue;
+                    }
+                    m = m.min(dist(p, q));
+                }
+            }
+        }
+    }
+    m
+}
+
+/// The tube radius used for an entry: 0.3 of the clearance estimate, at most 0.08.
+pub fn tube_radius(e: &Entry) -> f64 {
+    (0.3 * clearance(e)).min(0.08)
+}
+
+/// A tube around the graph (radius [`tube_radius`]), meshed with about `faces` triangles.
+///
+/// # Errors
+/// Meshing errors; a mesh that is not one component of genus 2, or that self-intersects (the grid
+/// does not resolve the tube: ask for more faces).
+pub fn tube(e: &Entry, faces: usize) -> Result<(Mesh, f64), RsError> {
+    let radius = tube_radius(e);
+    let curves: Vec<(Vec<P>, bool)> = e.edges.iter().map(|x| (x.points.clone(), false)).collect();
+    let mesh = graph_tube(&curves, radius, faces)?;
+    let s = mesh.surface()?;
+    if s.n_components() != 1 || s.euler_characteristic() != -2 {
+        return Err(bad(
+            "faces",
+            format!("{}: {} faces, {} components, chi {}", e.name, mesh.faces.len(), s.n_components(), s.euler_characteristic()),
+            "more faces (the tube is not resolved by the grid: one component of genus 2 expected)",
+        ));
+    }
+    if !self_intersections(&mesh, 1).is_empty() {
+        return Err(bad("faces", format!("{}: {} faces", e.name, mesh.faces.len()), "more faces (the tube mesh self-intersects)"));
+    }
+    Ok((mesh, radius))
+}
