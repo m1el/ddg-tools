@@ -38,7 +38,7 @@ pub use options::{
     ArmijoRule, FlowOptions, LbfgsVariant, LineSearch, Method, PinSchedule, Schedule,
     ScheduleTiming, StartRule, StopRule,
 };
-pub use scene_run::{RunReport, RunSceneOptions, run_scene, scene_options};
+pub use scene_run::{CSV_HEADER, RunReport, RunSceneOptions, csv_line, run_scene, scene_options};
 pub use session::{
     Control, FlowReport, FlowResult, Session, Status, StepReport, StepStatus, Timings, Trial,
     TrialOutcome, flow,
