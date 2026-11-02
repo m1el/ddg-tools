@@ -401,7 +401,7 @@ fn obstacle_floor() {
     let l = mean_edge_length(&m.0, &m.1);
     let ob = CcdObstacle::new(&floor(), 4).unwrap();
     let vel = vec![[0.0, 0.0, -1.0]; m.1.len()];
-    let r = first_contact(&pool(3), &m.0, &m.1, &vel, 5.0, &[ob.clone()], &opts(l)).unwrap();
+    let r = first_contact(&pool(3), &m.0, &m.1, &vel, 5.0, std::slice::from_ref(&ob), &opts(l)).unwrap();
     let zmin = m.1.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
     let want = zmin - 0.05 * l;
     assert!(r.tau_max <= want + 1e-9 && r.tau_max > want - 1e-6, "{} vs {want}", r.tau_max);
@@ -411,7 +411,7 @@ fn obstacle_floor() {
     ));
     // Moving away or sideways: free.
     let up = vec![[0.0, 0.0, 1.0]; m.1.len()];
-    let r = first_contact(&pool(3), &m.0, &m.1, &up, 5.0, &[ob.clone()], &opts(l)).unwrap();
+    let r = first_contact(&pool(3), &m.0, &m.1, &up, 5.0, std::slice::from_ref(&ob), &opts(l)).unwrap();
     assert_eq!(r.tau_max, 5.0);
     let side = vec![[1.0, 0.0, 0.0]; m.1.len()];
     let r = first_contact(&pool(3), &m.0, &m.1, &side, 5.0, &[ob], &opts(l)).unwrap();
@@ -491,10 +491,10 @@ fn bitwise_independent_of_threads() {
     }
     let l = mean_edge_length(&m.0, &m.1);
     let ob = CcdObstacle::new(&floor(), 4).unwrap();
-    let base = first_contact(&pool(1), &m.0, &m.1, &vel, 3.0, &[ob.clone()], &opts(l)).unwrap();
+    let base = first_contact(&pool(1), &m.0, &m.1, &vel, 3.0, std::slice::from_ref(&ob), &opts(l)).unwrap();
     assert!(base.contact.is_some());
     for n in [2, 3, 8, 16] {
-        let r = first_contact(&pool(n), &m.0, &m.1, &vel, 3.0, &[ob.clone()], &opts(l)).unwrap();
+        let r = first_contact(&pool(n), &m.0, &m.1, &vel, 3.0, std::slice::from_ref(&ob), &opts(l)).unwrap();
         assert!(same(&base, &r), "{n} threads: {base:?} vs {r:?}");
         assert_eq!(base.tau_max.to_bits(), r.tau_max.to_bits());
     }

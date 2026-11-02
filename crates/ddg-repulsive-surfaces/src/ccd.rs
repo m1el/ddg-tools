@@ -491,6 +491,7 @@ fn advance(
 /// tests and other callers; [`first_contact`] uses the same step with per-pair targets.
 ///
 /// [formula: rs-ccd-advancement]
+#[allow(clippy::too_many_arguments)]
 pub fn vertex_triangle_advance(
     p: [f64; 3],
     u: [f64; 3],
@@ -516,6 +517,7 @@ pub fn vertex_triangle_advance(
 /// As [`vertex_triangle_advance`] for two moving segments.
 ///
 /// [formula: rs-ccd-advancement]
+#[allow(clippy::too_many_arguments)]
 pub fn edge_edge_advance(
     p: [[f64; 3]; 2],
     u: [[f64; 3]; 2],
