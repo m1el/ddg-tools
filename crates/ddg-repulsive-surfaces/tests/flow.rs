@@ -552,3 +552,104 @@ fn global_and_per_component_barycenters() {
         assert!(r.energy_trial < r.energy_before);
     }
 }
+
+// ----- CCD on inputs that already intersect (SPEC 7.3, the intersection band) -----
+
+const KLEIN_SCENE: &str =
+    "/var/data/discrete-geometry/RepulsiveSurfaces/repulsive-surfaces/scenes/KleinBottle/scene.txt";
+
+/// Two tori that cross each other (an immersion-like input).
+fn crossing_tori() -> (Surface, Vec<[f64; 3]>) {
+    let a = torus(24, 8, 1.0, 0.3);
+    let mut b = torus(24, 8, 1.0, 0.3);
+    // b is a copy of a rotated by 90 degrees about x and shifted by 0.5 in x: its tube passes
+    // through a's tube.
+    for p in &mut b.positions {
+        *p = [p[0] + 0.5, -p[2], p[1]];
+    }
+    surface_of(&a.merged(&b))
+}
+
+fn ccd_flow_options(threads: usize) -> FlowOptions {
+    FlowOptions {
+        constraints: vec![Constraint::Barycenter { component: None, target: None }],
+        remesh: Some(RemeshOptions::default()),
+        energy_eval: EnergyEval::BarnesHut(BhOptions::default()),
+        backend: Backend::default(),
+        threads: Some(threads),
+        line_search: ddg_repulsive_surfaces::LineSearch {
+            ccd: Some(CcdOptions::default()),
+            start: ddg_repulsive_surfaces::StartRule::MaxDisplacement { lengths: 2.0 },
+            ..Default::default()
+        },
+        ..dense_options()
+    }
+}
+
+fn bits(p: &[[f64; 3]]) -> Vec<u64> {
+    p.iter().flatten().map(|x| x.to_bits()).collect()
+}
+
+#[test]
+fn ccd_on_an_intersecting_input_exempts_and_is_deterministic() {
+    let (s, p) = crossing_tori();
+    assert!(intersects(&s, &p).unwrap());
+    let mut ends = Vec::new();
+    for threads in [1, 3] {
+        let mut sess = Session::new(s.clone(), p.clone(), ccd_flow_options(threads)).unwrap();
+        let reps = run(&mut sess, 5);
+        let exempt: Vec<u64> = reps.iter().map(|r| r.ccd.as_ref().unwrap().exempt_pairs).collect();
+        assert!(exempt[0] > 0, "{exempt:?}");
+        assert!(reps.iter().all(|r| r.status == StepStatus::Accepted));
+        // The flow moves: the energy goes down.
+        assert!(reps.last().unwrap().energy_after < reps[0].energy_before);
+        ends.push((bits(sess.positions()), exempt));
+    }
+    assert_eq!(ends[0], ends[1], "trajectory differs between 1 and 3 threads");
+}
+
+#[test]
+fn ccd_on_an_embedded_input_has_an_empty_exemption_and_is_deterministic() {
+    let (s, p) = hopf(24, 8);
+    assert!(!intersects(&s, &p).unwrap());
+    let mut ends = Vec::new();
+    for threads in [1, 3] {
+        let mut sess = Session::new(s.clone(), p.clone(), ccd_flow_options(threads)).unwrap();
+        let reps = run(&mut sess, 6);
+        // Embedded at every step start: no pair is ever exempt.
+        assert!(reps.iter().all(|r| r.ccd.as_ref().unwrap().exempt_pairs == 0));
+        assert!(!intersects(sess.surface(), sess.positions()).unwrap());
+        ends.push(bits(sess.positions()));
+    }
+    assert_eq!(ends[0], ends[1]);
+}
+
+/// The Klein bottle scene (an immersion, exponents (3.5, 7)): the CCD stays on, and after 200
+/// steps the objective is comparable to the run without CCD (SPEC 16: the forced CCD without the
+/// rule reached 631 against 156). Release build: `cargo test --release -p ddg-repulsive-surfaces
+/// --test flow -- --ignored klein`.
+#[test]
+#[ignore = "200 steps of the Klein bottle; run in release"]
+fn klein_bottle_with_ccd_reaches_the_objective_of_the_run_without() {
+    let spec = ddg_repulsive_surfaces::SceneSpec::load(KLEIN_SCENE).unwrap();
+    let base = ddg_repulsive_surfaces::scene_options(&spec).unwrap();
+    assert!(base.line_search.ccd.is_some(), "CCD is on for subcritical exponents too");
+    let mut finals = Vec::new();
+    for ccd_on in [true, false] {
+        let mut o = base.clone();
+        o.max_iterations = 200;
+        o.stop = StopRule::Off;
+        o.threads = Some(8);
+        if !ccd_on {
+            o.line_search.ccd = None;
+        }
+        let mut sess = Session::new(spec.surface.clone(), spec.positions.clone(), o).unwrap();
+        let reps = run(&mut sess, 200);
+        let f = reps.last().unwrap().energy_after;
+        let exempt: u64 = reps.iter().map(|r| r.ccd.as_ref().map_or(0, |c| c.exempt_pairs)).sum();
+        eprintln!("klein ccd_on={ccd_on}: F(200) = {f:.3}, exempt pairs summed = {exempt}");
+        finals.push(f);
+    }
+    // The immersion is free to move with the rule (631 vs 156 without it).
+    assert!(finals[0] < 2.0 * finals[1], "{finals:?}");
+}

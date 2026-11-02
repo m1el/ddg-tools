@@ -6,6 +6,7 @@
 //!   --steps N        overrides the scene's iteration_limit
 //!   --threads T      thread count (default: all cores)
 //!   --no-remesh      keep the topology
+//!   --no-ccd         turn the CCD off (on by default)
 //!   --ccd [GAP]      continuous collision detection in the line search (gap in mean edge lengths, 0.05)
 //!   --no-stop        no energy-stall stop rule
 //!   --csv PATH       per-step CSV log (default: the scene's `log`)
@@ -23,7 +24,7 @@ use ddg_repulsive_surfaces::CcdOptions;
 fn main() {
     let mut args = std::env::args().skip(1);
     let Some(scene) = args.next() else {
-        eprintln!("usage: run_scene SCENE [--steps N] [--threads T] [--no-remesh] [--ccd [GAP]] [--no-stop] [--csv PATH] [--obj PATH]");
+        eprintln!("usage: run_scene SCENE [--steps N] [--threads T] [--no-remesh] [--ccd [GAP]] [--no-ccd] [--no-stop] [--csv PATH] [--obj PATH]");
         std::process::exit(2);
     };
     let mut o = RunSceneOptions::default();
@@ -43,6 +44,7 @@ fn main() {
             }
             "--no-remesh" => o.no_remesh = true,
             "--no-stop" => o.no_stop_rule = true,
+            "--no-ccd" => o.no_ccd = true,
             "--ccd" => {
                 let mut c = CcdOptions::default();
                 if let Some(g) = rest.get(i + 1).and_then(|s| s.parse::<f64>().ok()) {
