@@ -21,8 +21,8 @@
 //! **`ε` (D14, §5.1).** `ε_rel` (default `1e-10`) when every component's translations are fixed
 //! by positional rows that touch only that component (per-component barycenters, pins); otherwise
 //! (a global barycenter on several components, `BarycenterMode::Global`) the per-component
-//! constants of `W` would stay a near-null space of `L′`, and `ε_multi_rel` (default `1e-2`, the
-//! reference's absolute `1e-2` made scale-invariant) is used. [`SparsePreconditioner::epsilon`]
+//! constants of `W` would stay a near-null space of `L′`, and `ε_multi_rel` (default `1e-4`; the
+//! reference uses an absolute `1e-2`, measured worse, `NOTES-WP6.md`) is used. [`SparsePreconditioner::epsilon`]
 //! reports which.
 //!
 //! **The fractional factor (D32).** [`FractionalPairs::Vertices`] (the default of
@@ -348,7 +348,7 @@ pub struct PreconditionerOptions {
     /// `ε_rel` of `ε = ε_rel tr W / tr M` (default `1e-10`).
     pub eps_rel: f64,
     /// `ε_multi_rel`, used when some component's translations are not fixed on their own
-    /// (default `1e-2`).
+    /// (default `1e-4`; `1e-2` costs 1.5–6× the iterations, `NOTES-WP6.md`).
     pub eps_multi_rel: f64,
     /// The discretization of `L_{2−s}` (default [`FractionalPairs::Vertices`], D32).
     pub fractional: FractionalPairs,
@@ -362,7 +362,7 @@ impl Default for PreconditionerOptions {
     fn default() -> Self {
         PreconditionerOptions {
             eps_rel: 1e-10,
-            eps_multi_rel: 1e-2,
+            eps_multi_rel: 1e-4,
             fractional: FractionalPairs::Vertices,
             cluster: ClusterTreeOptions::default(),
             form: PreconditionerForm::Augmented,

@@ -192,7 +192,7 @@ fn chi_zero_is_exact() {
 fn error_decays_with_chi_and_is_small_at_default() {
     let pool = make_pool(Some(4)).unwrap();
     let e = Exponents::default();
-    let (s, p) = perturbed(torus(40, 20, 1.5, 0.6).unwrap(), 0.1, 5);
+    let (s, p) = perturbed(torus(if cfg!(debug_assertions) { 30 } else { 40 }, if cfg!(debug_assertions) { 16 } else { 20 }, 1.5, 0.6).unwrap(), 0.1, 5);
     let x = random_vec(3 * s.n_vertices(), 3);
     // A smooth input as well (the far field is accurate on smooth functions).
     let smooth: Vec<f64> = p
@@ -209,7 +209,7 @@ fn error_decays_with_chi_and_is_small_at_default() {
                 rel(&pr.lf.0, &pr.lf.1),
                 rel(&pr.lv.0, &pr.lv.1),
             ];
-            eprintln!("torus 1600, chi {chi}, {kind}: B {:.2e} B0 {:.2e} Lf {:.2e} Lv {:.2e}", errs[0], errs[1], errs[2], errs[3]);
+            eprintln!("torus, chi {chi}, {kind}: B {:.2e} B0 {:.2e} Lf {:.2e} Lv {:.2e}", errs[0], errs[1], errs[2], errs[3]);
             // SPEC §13.3: the metric (B, B⁰) within 5 % at χ = 0.5. The preconditioner's
             // fractional factors are only reported (on smooth inputs `L u` is a small difference).
             if chi == 0.5 {

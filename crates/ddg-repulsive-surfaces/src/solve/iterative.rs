@@ -285,7 +285,9 @@ pub struct HierarchicalOptions {
     /// `ε_rel`, `ε_multi_rel`, the fractional form (vertex pairs) — the cluster options of the
     /// preconditioner are replaced by [`HierarchicalOptions::cluster`].
     pub preconditioner: PreconditionerOptions,
-    /// Add the weighted Willmore term to the preconditioner's Laplacian block too (D7).
+    /// Add the weighted Willmore term to the preconditioner's Laplacian block too (D7; default
+    /// `false`: measured harmful, 6 → 154 iterations at `w_W = 0.01` and divergence at `w_W ≥ 1` on
+    /// a 10k torus, while without it the iterations stay 5–20, `NOTES-WP6.md`).
     pub willmore_in_preconditioner: bool,
 }
 
@@ -295,16 +297,17 @@ impl Default for HierarchicalOptions {
             cluster: ClusterTreeOptions::default(),
             gmres: GmresOptions::default(),
             preconditioner: PreconditionerOptions::default(),
-            willmore_in_preconditioner: true,
+            willmore_in_preconditioner: false,
         }
     }
 }
 
 impl HierarchicalOptions {
-    /// The options with the reference's preconditioner factor (face pairs) and left GMRES.
+    /// The reference's preconditioner: face pairs, the congruence form, left GMRES.
     pub fn reference() -> Self {
         let mut o = Self::default();
         o.preconditioner.fractional = FractionalPairs::Faces;
+        o.preconditioner.form = super::precond::PreconditionerForm::Congruence;
         o.gmres.side = super::gmres::GmresSide::Left;
         o
     }
