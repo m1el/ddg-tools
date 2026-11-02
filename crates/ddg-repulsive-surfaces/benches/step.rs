@@ -46,6 +46,7 @@ struct Args {
     restart: Option<usize>,
     no_lo: bool,
     log: Option<PathBuf>,
+    obstacle_prec: bool,
 }
 
 fn parse_args() -> Args {
@@ -63,6 +64,7 @@ fn parse_args() -> Args {
         restart: None,
         no_lo: false,
         log: None,
+        obstacle_prec: false,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -101,6 +103,7 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--no-lo" => a.no_lo = true,
+            "--obstacle-prec" => a.obstacle_prec = true,
             "--log" => {
                 a.log = Some(PathBuf::from(next(i)));
                 i += 1;
@@ -271,6 +274,9 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         }
         if let Some(r) = a.restart {
             h.gmres.restart = r;
+        }
+        if a.obstacle_prec {
+            h.obstacle_in_preconditioner = true;
         }
     }
     if a.no_lo {

@@ -312,6 +312,10 @@ pub struct HierarchicalOptions {
     /// `false`: measured harmful, 6 → 154 iterations at `w_W = 0.01` and divergence at `w_W ≥ 1` on
     /// a 10k torus, while without it the iterations stay 5–20, `NOTES-WP6.md`).
     pub willmore_in_preconditioner: bool,
+    /// Add the mesh-obstacle term `O_diag` (as the sparse vertex matrix
+    /// [`obstacle_vertex_matrix`]) to the preconditioner's Laplacian block (default `false`,
+    /// `NOTES-WP17.md`).
+    pub obstacle_in_preconditioner: bool,
 }
 
 impl HierarchicalOptions {
@@ -404,11 +408,25 @@ pub fn hierarchical_saddle(
     let willmore = extras.weighted_willmore(surface, positions, weights)?;
     let mut popts = options.preconditioner;
     popts.cluster = options.cluster;
-    let extra = if options.willmore_in_preconditioner {
-        willmore.as_ref()
+    let mut extra = if options.willmore_in_preconditioner {
+        willmore.clone()
     } else {
         None
     };
+    if options.obstacle_in_preconditioner
+        && let Some(o) = &extras.obstacle
+    {
+        let om = obstacle_vertex_matrix(tree.operators(), o)?;
+        extra = Some(match extra {
+            None => om,
+            Some(w) => {
+                let mut t: Vec<(u32, u32, f64)> = w.triplets().collect();
+                t.extend(om.triplets());
+                SparseMatrix::from_triplets(w.nrows(), w.ncols(), &t)
+                    .map_err(|e| sparse_err(e, "preconditioner extra term"))?
+            }
+        });
+    }
     let prec = SparsePreconditioner::with_metric_tree(
         pool.clone(),
         surface,
@@ -416,12 +434,47 @@ pub fn hierarchical_saddle(
         exponents,
         c_q,
         &popts,
-        extra,
+        extra.as_ref(),
         &tree,
     )?;
     let op = HierarchicalOperator::new(pool, tree, weights, willmore, extras.obstacle.clone(), c_q)?;
     let nd = op.n_dofs();
     Ok(GmresSaddle::new(op, prec, nd, options.gmres)?.with_label("gmres (hierarchical)"))
+}
+
+/// The obstacle term `O_diag = 2 Vᵀ diag(hi/a) V + 2 Uᵀ diag(lo/a) U` of `SPEC.md` §4.4 as a
+/// scalar sparse vertex matrix `O` (`O_diag = O ⊗ I₃`):
+/// `O_vw = 2 Σ_S a_S (hi_S g_c(v)(S) · g_c(w)(S) + lo_S / 9)` over the faces `S ∋ v, w`.
+///
+/// # Errors
+/// [`RsError::InvalidOption`] for a diagonal of the wrong length.
+pub fn obstacle_vertex_matrix(ops: &FaceOperators, d: &FaceDiagonal) -> Result<SparseMatrix, RsError> {
+    let nf = ops.n_faces();
+    for (name, v) in [("obstacle diagonal hi", &d.hi), ("obstacle diagonal lo", &d.lo)] {
+        if !v.is_empty() && v.len() != nf {
+            return Err(RsError::InvalidOption {
+                name,
+                value: format!("{} entries", v.len()),
+                requirement: "one entry per face",
+            });
+        }
+    }
+    let mut trip = Vec::with_capacity(9 * nf);
+    for s in 0..nf {
+        let hi = d.hi.get(s).copied().unwrap_or(0.0);
+        let lo = d.lo.get(s).copied().unwrap_or(0.0);
+        let a = ops.areas[s];
+        let g = &ops.df[s];
+        let t = ops.faces[s];
+        for i in 0..3 {
+            for j in 0..3 {
+                let gg = g[i][0] * g[j][0] + g[i][1] * g[j][1] + g[i][2] * g[j][2];
+                trip.push((t[i], t[j], 2.0 * a * (hi * gg + lo / 9.0)));
+            }
+        }
+    }
+    SparseMatrix::from_triplets(ops.n_vertices, ops.n_vertices, &trip)
+        .map_err(|e| sparse_err(e, "obstacle vertex matrix"))
 }
 
 /// The dense metric `A` with the extras (the supplied Willmore matrix replaces the computed one).

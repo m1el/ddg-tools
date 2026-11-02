@@ -353,6 +353,19 @@ impl SaddleSolver for RobustHierarchical {
         }
     }
 
+    /// The primary solver's batch (one pass of the tree for all right-hand sides); if a solve of
+    /// the batch diverges, the right-hand sides are solved one by one through
+    /// [`SaddleSolver::solve`] (the recovery chain, with the same results as without batching).
+    fn solve_many(&mut self, rhs: &[(&[f64], &[f64])]) -> Result<Vec<SaddleSolution>, RsError> {
+        if matches!(self.active, Active::Primary) {
+            match self.primary.solve_many(rhs) {
+                Err(RsError::SolverDiverged { .. }) => {}
+                r => return r,
+            }
+        }
+        rhs.iter().map(|(a, b)| self.solve(a, b)).collect()
+    }
+
     fn base_report(&self) -> LinearReport {
         let mut r = self.primary.base_report();
         r.fallbacks = self.events.clone();
@@ -390,9 +403,9 @@ impl StepSolver {
     pub fn build_timings(&self) -> Option<[f64; 4]> {
         match self {
             StepSolver::Hierarchical(s) => {
-                let p = s.preconditioner();
+                let p = s.primary.preconditioner();
                 Some([
-                    s.operator().tree().build_seconds(),
+                    s.primary.operator().tree().build_seconds(),
                     p.fractional_seconds(),
                     p.factor_seconds(),
                     p.usage().1,
