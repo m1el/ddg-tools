@@ -28,7 +28,8 @@ ROOT = SHOW.parent
 MAIN = Path(os.environ.get("DDG_MAIN", "/var/data/discrete-geometry/ddg-tools"))
 RUNS = MAIN / "showcase" / "media" / "repulsive-surfaces"
 MEDIA = MAIN / "showcase" / "media"
-ISHII = MAIN / "runs_tmp" / "ishii"
+ISHII = MAIN / "runs_tmp" / "ishii2"
+GENUS = MAIN / "runs_tmp" / "genus2"
 UNLINK = MAIN / "runs_tmp" / "handcuffs-unlink"
 LOGS = MAIN / "runs_tmp" / "rs-showcase"
 SCENES = ROOT / "data" / "repulsive-surfaces" / "scenes"
@@ -126,18 +127,18 @@ def anim(name, panels, labels, fps, W=960, H=720, az=-35, el=25, margin=1.1, gif
 
 
 # ---------------------------------------------------------------------------------------- genus
-# Exact energies and status after 800 steps (NOTES-FIDELITY, with the fixed eigen-solver).
-GENUS_E = [2.234, 31.58, 38.59, 52.21, 55.92, 54.31, 55.87, 65.60, 71.91, 72.44, 93.72, 90.76]
-GENUS_NOTE = {
-    0: "round", 1: "torus, 1.6 %", 2: "same shape at conv.", 3: "not converged",
-    4: "not checked", 5: "not checked", 6: "sym. to 1.9 %", 7: "not converged", 8: "not converged",
-    9: "not converged", 10: "not converged", 11: "not converged",
-}
-
-
+# Converged runs of `ishii genus G` (runs_tmp/genus2/g<G>.log, g<G>/final.obj); E is the flow's energy at the last step.
 def do_genus():
-    panels = [panel([{"obj": str(RUNS / f"genus{g:02d}" / "final.obj")}], az=-35, el=30) for g in range(12)]
-    labels = [f"g = {g}   E {GENUS_E[g]:.4g}\n{GENUS_NOTE[g]}" for g in range(12)]
+    panels, labels = [], []
+    for g in range(12):
+        line = [l for l in open(GENUS / f"g{g}.log") if l.startswith("RESULT")][-1]
+        kv = dict(t.split("=", 1) for t in line.split()[1:] if "=" in t)
+        e = float(kv["energy"].split("->")[1])
+        lab = f"g = {g}   E {e:.4g}\n{kv['steps']} steps"
+        if kv["status"] != "Converged":
+            lab += "   not converged"
+        panels.append(panel([{"obj": str(GENUS / f"g{g}" / "final.obj")}], az=-35, el=30))
+        labels.append(lab)
     sheet("genus", panels, labels, 4, 800, 400, ps=26)
 
 
