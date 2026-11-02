@@ -279,8 +279,10 @@ impl RobustHierarchical {
         };
         if matches!(self.active, Active::Primary) {
             let c = &self.ctx;
-            let mut o = HierarchicalOptions::default();
-            o.cluster = c.options.cluster;
+            let mut o = HierarchicalOptions {
+                cluster: c.options.cluster,
+                ..HierarchicalOptions::default()
+            };
             o.gmres.tolerance = c.options.gmres.tolerance;
             o.gmres.max_iterations = (4 * c.options.gmres.max_iterations).max(800);
             o.gmres.restart = 60;
