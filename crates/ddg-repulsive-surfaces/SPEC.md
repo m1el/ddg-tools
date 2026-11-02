@@ -238,8 +238,10 @@ A = w_TP (B + c_lo B⁰) + w_W (W M⁻¹ W) + O_diag,        A₃ = A ⊗ I₃
   diagonal `2 w_𝒪 Uᵀ diag(Σ_{T∈𝒪} h(S,T) a_T / a_S) U` and its `V` analogue — the metric of
   mesh ∪ obstacle with the obstacle fixed. Every obstacle contributes (the reference keeps only the
   last one added, `ref: surface_flow.cpp:47`).
-* No mass term (paper, reference). `A₃` has the translations (per component) in its kernel; the
-  constraints remove them (§6.1).
+* No mass term (paper, reference). Kernel of `A₃` (WP2): with `B⁰` on, only the **global**
+  translations (`B⁰` couples components: `ū_S − ū_T ≠ 0` across components for per-component
+  constants); with `low_order: false`, the translations of each component. The constraints remove
+  it (§6.1, D8).
 
 ### 4.5 The comparison metrics (Sec. 8.2.1, D25)
 
@@ -261,10 +263,22 @@ preconditioner's Laplacian), **nonlinear** ones go through the Schur complement.
 | `Area { component, target }` | `Σ a_S − A₀` | `Σ_{S∋v} ½ N_S × e_opp` | Schur, 1 row | Newton (§6.2) |
 | `Volume { component, target }` | `⅙ Σ f_i·(f_j × f_k) − V₀` | `⅙ Σ_{S∋v} f_j × f_k` (= ⅓ Σ a_S N_S on a closed fan) | Schur, 1 row | Newton |
 
-* `component: None` means the whole mesh for area/volume and **every component separately** for
-  the barycenter (paper Sec. 7.1.1, Fig. 8, D8). The reference constrains one global barycenter and
-  regularizes the preconditioner with `1e-2·M` on multi-component meshes instead; available as
-  `BarycenterMode::Global` for comparison.
+* `component: None` means the whole mesh for area/volume. For the barycenter it follows
+  `BarycenterMode` (D8, revised after WP2): `Auto` (default) uses **one global barycenter** when
+  `B⁰` is on — the kernel of `A₃` is then the global translations only, and components move
+  relative to each other through the metric itself (the true `Hs` gradient; also what the
+  reference does) — and **per-component barycenters plus the per-component L² mean-motion shift**
+  (paper Fig. 8, Sec. 7.1.1) when `low_order: false`, where each component's translations are in
+  the kernel. `Global` and `PerComponent` force one or the other (`PerComponent` without the shift
+  freezes the components' barycenters: a real constraint, e.g. for packing scenes). In `Global`
+  mode on several components the preconditioner's `W` keeps per-component constants in its kernel:
+  `L′` then uses `ε_multi = 1e-2 · tr W / tr M` (the reference's absolute `1e-2`, made
+  scale-invariant). WP6 measures `Auto` against `PerComponent` + shift on Hopf link, Borromean
+  rings and the keys/double-torus-and-ring scene (GMRES iterations, energy per step).
+* A barycenter together with pins on a component is not linearly dependent (only a fully pinned
+  component is), but it constrains more than the pins alone; the projection iterates
+  translate-then-reset until both hold (WP2). The paper: "if any pins are used, a barycenter
+  constraint is unneeded".
 * `target: None` = the initial value. A barycenter target with `component: None` applies to every
   component (e.g. concentric envelopes); use one constraint per component for different targets.
   Volume on an open component is the signed volume of the
@@ -371,7 +385,20 @@ error.
   ```
 
   (the multiplier part is zeroed between the two solves; `L′` factored once per step by sparse
-  LDLT). `ε = ε_rel · tr(W)/tr(M)` (scale-invariant; default `ε_rel = 1e-10`; the reference uses
+  LDLT).
+
+  **The fractional factor (D32, after WP2).** The paper/reference evaluate `L_{2−s}` as the face
+  form of §4.2 (`ū_S − ū_T`, face pairs). Face averaging nearly annihilates high-frequency vertex
+  functions, so this `L_{2−s}` is a poor stand-in for `M Δ^{2−s}` there: condition numbers
+  12.6 / 68 / 224 against `M Δ^{2−s}` on 80 / 320 / 1280 faces, and GMRES to `1e-4` needs 38 / 74 /
+  > 200 right-preconditioned iterations on icosphere 320 / 1280 / torus 1500 and stalls at `4e-2` on a
+  bumpy disk. Left-preconditioned GMRES (the reference) stops after 13–19 iterations but its true
+  residual is then 0.1–0.2: the reference's solves are much less accurate than its tolerance
+  says. The **vertex-pair** form
+  `uᵀ L^V_{2−s} u = Σ_{v≠w} (u_v − u_w)² a_v a_w |f_v − f_w|^{−(2(2−s)+2)}` (dual areas, ordered
+  pairs) has condition 1.3–2.1 against `M Δ^{2−s}` and GMRES needs 5 / 5 / 7 / 27 iterations on the
+  same meshes. Default: `FractionalForm::VertexPairs` (hierarchical on a vertex BVH, WP6);
+  `FractionalForm::FacePairs` is the reference mode. WP6 confirms at 10k–100k faces (§14.3). `ε = ε_rel · tr(W)/tr(M)` (scale-invariant; default `ε_rel = 1e-10`; the reference uses
   absolute `1e-8`, and `1e-2` with several components because its global barycenter row leaves
   per-component constants in the kernel — with per-component barycenters we need no large `ε`).
   The order bookkeeping is `rs-preconditioner-order` (`(−Δ)⁻¹ (−Δ)^{2−s} (−Δ)⁻¹ = (−Δ)^{−s}`, with
@@ -380,7 +407,7 @@ error.
 * **GMRES** (D13): restarted, **right** preconditioned (it minimizes the true residual; the
   reference's Eigen GMRES is left preconditioned and stops on the preconditioned residual —
   `GmresSide::Left` reproduces it), initial guess 0, restart 30, relative true-residual tolerance
-  `1e-4`, at most `max(200, …)` iterations (the reference: `2n`), modified Gram–Schmidt, all
+  `1e-4`, at most 200 iterations by default (the reference: `2n`), modified Gram–Schmidt, all
   `x`/`y`/`z` columns as one `|V| × 3` block where the operator allows (App. B). Not converging is
   a reported condition (`LinearReport`), not an error, unless the residual is above `1e-1`
   (`SolverDiverged`). With `Backend::Auto` the dense path is used up to `dense_max_faces`
@@ -649,7 +676,7 @@ internal error with the step's data (never silently repaired).
 | D5 | BH admissibility | per face `S` | per leaf, AABB distance | per leaf (reference) |
 | D6 | metric weight | — | × TP weight | × `tp_weight` |
 | D7 | Willmore H² term | in `A` | unweighted, GMRES only | weighted, in `A` and preconditioner (measured) |
-| D8 | barycenter | per component, "copies of I" | global, weights `a_v/A`, ε = 1e-2 | per component, weights `a_v/A_c`; `Global` option |
+| D8 | barycenter | per component + mean-motion shift (Fig. 8), "copies of I" | global, weights `a_v/A`, ε = 1e-2 | `Auto`: global with `B⁰` on, per component + shift with `low_order: false`; weights `a_v/A_c` (§5.1) |
 | D9 | volume gradient | "∝ Σ aN" | `Σ aN` (3×) | exact (`⅓ Σ aN` on closed fans) |
 | D10 | redundant rows | — | — | rank check, drop + report |
 | D11 | growth schedule | "gradually" | after projection | before the step's projection; reference option |
@@ -672,6 +699,7 @@ internal error with the step's data (never silently repaired).
 | D28 | AQP | Kovalsky et al. 2016 | κ = 100 fixed, current Laplacian, no safeguards | κ = 100, current Laplacian (remeshing changes the rest pose), momentum reset on energy increase and remeshing |
 | D29 | stop rule | — | iteration/time limit only | + energy stall (§7.4) |
 | D30 | shared code | — | — | depend on `ddg-repulsive-curves` (its SPEC §16 had proposed extracting a shared crate; the generic parts are public and stable, so we use them in place and do not edit that verified crate) |
+| D32 | preconditioner's `L_{2−s}` | face form | face form, left GMRES | vertex pairs (§6.3); face form as reference mode |
 | D31 | Fig. 12 meshes | not published | not in the repo | generated analogues at the paper's face counts (§14.4), recorded as such |
 
 `reference_compat: true` sets D8 `Global` + ε 1e-2, D9 3×, D11, D12 `Fixed(1)`, D13 left, D14
