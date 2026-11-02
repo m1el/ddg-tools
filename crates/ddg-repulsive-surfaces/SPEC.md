@@ -911,6 +911,24 @@ AQP's energy spiked to ≈ 6e6 on mesh 3 (reproducer in the notes; the paper als
 blow-ups). The paper's wall-clock claim is therefore only partly reproduced under these conditions;
 a rerun of the two tunnels with fewer concurrent jobs would separate method from machine load.
 
+**Rerun of the two tunnels on a quiet machine (2026-11-02, `runs_tmp/wp16c/`, user's request).** The
+same 14 runs (7 methods × 2 tunnels, identical meshes, 1 thread, 3600 s) alone; load average 2.2 at
+the start, 5.0 at the end. `E · A/A₀` at 300 s / 1200 s / end:
+
+| tunnel | Hs | BCQN | H¹ L-BFGS | AQP | H¹ | L² | H² |
+|---|---|---|---|---|---|---|---|
+| figure-8 | **419.5** / **306.1** / 241.7 | 442.3 / 356.7 / **239.2** | 443.1 / 375.9 / 239.6 | 447.0 / 386.4 / 255.9 | 459.6 / 397.8 / 264.7 | 971.8 / 875.4 / 773.0 | 3218 / 1528 / 957 |
+| trefoil | **162.1** / 156.9 / 157.4 | 171.5 / 153.7 / **152.3** | 170.5 / **153.4** / 152.4 | 170.6 / 154.8 / 155.7 | 173.4 / 157.0 / 157.5 | 385.5 / 296.2 / 231.0 | 530.6 / 329.5 / 225.2 |
+
+`Hs` took 480 steps (7.5 s/step at 1 thread, 44.8k → 48.4k faces) and 1045 steps (3.45 s/step); the
+quasi-Newton methods 1095–2462 steps. `Hs` is clearly lowest early on both tunnels and still well
+ahead at 1200 s on the figure-8 tunnel; by the end BCQN and H¹ L-BFGS reach it within 1 %
+(figure-8) or end ≈ 3 % lower (trefoil, ahead from before 1200 s). The `A/A₀` normalization is
+exact only for uniform scaling, so gaps of a few percent between the soft (area ×1.39–1.55) and hard
+methods are within its uncertainty. Conclusion: on a quiet machine the paper's claim holds early on
+all five meshes and to the end on four of five; the trefoil tunnel's end state is a tie within the
+normalization's uncertainty or a slight loss.
+
 ### 14.3 Defaults confirmed by measurement
 
 Line-search start rule (§7.2), CCD default (§7.3), `dense_max_faces`, GMRES side and tolerance,

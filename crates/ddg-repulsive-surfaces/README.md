@@ -152,7 +152,11 @@ to an area constraint, because a free flow inflates the surface. See `blender/RE
   Fig. 5: `Hs` progress per step is resolution-independent (41.1 / 39.5 / 39.1 at step 100 on
   11k / 40k / 135k faces); L² slows 2.6×; H¹, H², AQP are flat on that easy surface. So the paper's
   per-iteration claim holds and its wall-clock claim holds on three of five meshes under these
-  conditions (SPEC §14.2).
+  conditions (SPEC §14.2). Rerun of the two tunnels on a quiet machine (load 2–5): `Hs` is clearly
+  lowest early (at 300 s: 419.5 vs 442.3 and 162.1 vs 170.5) and at 1200 s on the figure-8 tunnel
+  (306 vs 357); at 3600 s BCQN / H¹ L-BFGS are level with it on the figure-8 tunnel (239.2 vs 241.7)
+  and ≈ 3 % lower on the trefoil (152.3 vs 157.4) — within the uncertainty of the area normalization
+  of the soft methods.
 * **Knotted genus-2 table (Fig. 16, Ishii et al. 2012).** All 21 entries of Table 1 (4₁, 5₁–5₄,
   6₁–6₁₆) transcribed from the paper (supplied by the user; kept outside the repository) as spatial
   trivalent graphs (`generate::ishii`, traced by `tools/ishii_extract.py`; each entry's crossing count
