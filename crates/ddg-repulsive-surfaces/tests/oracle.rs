@@ -37,13 +37,13 @@
 //! | quantity | tolerance |
 //! |---|---|
 //! | energy value | `1e-12` |
-//! | energy gradient | `1e-11` |
+//! | energy gradient | `1e-12` |
 //! | `D_f` (`ū`, gradient) | `1e-12` |
 //! | `L_τ`, `B`, `B⁰`, `A`, `W`, `W M⁻¹ W`, `M` | `1e-12` |
 //! | constraint values `Φ` | `1e-12` of `max(1, targets, |Φ|)` |
 //! | Jacobian `C` | `1e-12` |
-//! | saddle: `g` | `1e-11`; `x`, `⟨g,x⟩`, `Φ_N`, `S`, `h` | `1e-9` (solves; `A′` is a Sobolev matrix of condition number up to ~1e4) |
-//! | precond: `ε`, `L_{2−s}` | `1e-12`; `L′`, `P⁻¹ r` | `1e-9` |
+//! | saddle: `g` | `1e-12`; `x`, `⟨g,x⟩`, `Φ_N`, `S`, `h` | `1e-10` (solves; observed worst ~1.6e-11) |
+//! | precond: `ε`, `L_{2−s}` | `1e-12`; `L′`, `P⁻¹ r` | `1e-10` |
 //! | remesh-ops | connectivity, parents, vertex map exactly; positions `1e-14` |
 //! | error cases | the oracle names the kind; this crate must return the matching `RsError` variant (table in `error_matches`) |
 //!
@@ -91,12 +91,12 @@ use fixture::{Case, Output};
 // ----- tolerances (see the table in the module docs) -----
 
 const ENERGY: f64 = 1e-12;
-const GRADIENT: f64 = 1e-11;
+const GRADIENT: f64 = 1e-12;
 const DF: f64 = 1e-12;
 const MATRIX: f64 = 1e-12;
 const PHI: f64 = 1e-12;
 const JACOBIAN: f64 = 1e-12;
-const SOLVE: f64 = 1e-9;
+const SOLVE: f64 = 1e-10;
 const POSITION: f64 = 1e-14;
 
 /// One comparison: `max |got − want| / max(max |want|, floor)` against `tol`.
@@ -643,7 +643,7 @@ fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
             w.0 = w.0.max(ratio);
             w.1 = w.1.max(err);
         }
-        if !(ratio <= 1.0) {
+        if ratio.is_nan() || ratio > 1.0 {
             stats.problem(name, format!("{}: relative error {err:.3e} > tolerance {:.0e}", ck.what, ck.tol));
         }
     }
