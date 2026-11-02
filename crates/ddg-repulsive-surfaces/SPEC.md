@@ -1091,8 +1091,44 @@ Rounds (≤ 3 agents; timed work alone at the end):
   Blender's `BVHTree.overlap` before the band rule existed — with the band rule CCD can stay on;
   a free flow without an area constraint inflates the surface (the energy decreases with scale) —
   the panel defaults to an area constraint. Proposed: `ddg_tools.surface_intersects(positions, faces)`.
-* Fig. 16 (Ishii et al. 2012 table) is not transcribed (WP12): the cited paper may be downloaded
-  (CLAUDE.md rule for cited papers) for WP15. WP12 read "figure-8 / trefoil tunnel" as knotted
+* **Performance (WP17, `NOTES-WP17.md`, `benches/`):** `BlockTree` (BVH-ordered near blocks,
+  parallel symmetric build, AVX near-field rows; products bitwise equal), batched GMRES (Schur
+  columns + direction in one pass), 3-column `L′` solves, parallel GMRES vector operations. Flow
+  defaults changed with measurements: GMRES tolerance 1e-3 (was 1e-4; 11 scenes × 200 steps, every
+  step accepted, energies within trajectory noise, ≈ 20 % fewer iterations; still below the
+  compressed operator's own error) and restart 60; `reference_compat` keeps 1e-4 / 30. Fig. 13 at 4
+  threads: 12 of 14 models at or below the paper; above: #3 broken figure-8 0.50 s vs ≈ 0.37 s, #14
+  figure-8 tunnel 3.15 s vs ≈ 2.7 s (remeshed to 53.5k faces, 59 GMRES iterations; the reference on the
+  same mesh and machine 4.0–5.2 s) — **the 2.5 s at 45k target is not met** (machine load 6–16 from
+  outside jobs during the timings). 1 thread vs the reference: faster on 5 of 8 scenes (walnut 140 vs
+  259 ms, lung 482 vs 506, bunny 3522 vs 4205, reconstruction 7638 vs 9764, blocky Klein 237 vs 403),
+  slower on EDT 1.09×, handcuffs 1.18×, Hopf 1.45× (ours 30/27/24 GMRES iterations vs the reference's
+  21/13/9, which stop on the preconditioned residual). Thread scaling (40k torus): 3.32 / 2.08 / 1.44
+  / 1.14 / 0.97 / 0.93 / 1.03 s at 1–64 threads; past 16 threads the back-substitutions, remeshing and
+  Barnes–Hut gradient passes are sequential. The obstacle term in the preconditioner does not help
+  (option, off).
+* **Flow fidelity (`NOTES-FIDELITY.md`):** WP15's "torus drift" and symmetry table came from a bug in
+  the example's `eig3` (fixed); a torus of revolution stays one within 0.6 % (reference 0.78 %);
+  ablation of the symmetry error per layer: exact + dense 7e-15, hierarchical 2e-6, Barnes–Hut
+  θ = 0.25 / 0.5 2e-4 / 1.6e-3, remeshing 4e-3. Remeshing every step sets an energy noise floor
+  (tangential smoothing undoes ≈ the step's decrease near a minimum; polishing without remeshing
+  lowers `E` by 2–6 %). Genus-g: 800 steps are too few (the linear arrangement is a slow saddle);
+  g = 3 converges in ≈ 2080 steps to a near-tetrahedral shape (E 39.91; reference at 1000 steps
+  39.54), g = 2 to E 38.59 (reference 38.40, same shape). Handcuffs unlink with and without CCD, in
+  both programs, without the plane attractor; a strong plane (our weight 5 ≈ the reference's 150; the
+  reference's plane is not area-weighted) keeps them linked — use weight ≤ 0.5. Eversion: the setup
+  needs a gradually raised volume weight ≈ ℰ₀/V₀² and a symmetry search over principal axes; not
+  reproduced yet. Bug fixed: `ccd::intersecting_pairs` flagged coplanar neighbours (orientation
+  noise ±1e-20) — embedded meshes got a non-empty CCD band.
+* **Solver robustness (in progress, `NOTES-SOLVERFIX.md`):** preconditioner scale `L_{2−s}/(w_TP ·
+  4 I(σ) I(2−s))` (pins: GMRES stalled at 0.965 → converges), coarse correction on per-component
+  translations (cobblestones 2800 → 134 iterations per step), remeshing growth cap and projection
+  admissibility (remesh explosion and slab breach fixed); open: Klein bottle remeshing inside the
+  CCD band at step ≈ 184, needle inputs of the subcritical spindle, envelopes (obstacle not in the
+  preconditioner), punctured torus diverges after 38–80 steps (WP17), open surfaces without
+  remeshing need 225–678 GMRES iterations.
+* Fig. 16 (Ishii et al. 2012 table): no arXiv version exists; the user supplied the PDF
+  (`/var/data/discrete-geometry/ishii2012.pdf`, not in the repository); transcription in progress. WP12 read "figure-8 / trefoil tunnel" as knotted
   tori (tubes around the knot); recorded as an interpretation.
 
 ## 17. The user's decisions (2026-11-01)
