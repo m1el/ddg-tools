@@ -105,6 +105,11 @@ impl SparseSaddle {
         })
     }
 
+    /// The sparse metric `K` (without the regularization), `K ⊗ I₃` being the metric.
+    pub fn metric_matrix(&self) -> &SparseMatrix {
+        &self.k
+    }
+
     /// The regularization `ε` used in the factorization (0 for L²).
     pub fn epsilon(&self) -> f64 {
         self.epsilon
@@ -234,6 +239,14 @@ impl StepSolver {
             StepSolver::Dense(s) => s,
             StepSolver::Hierarchical(s) => s.as_mut(),
             StepSolver::Sparse(s) => s,
+        }
+    }
+
+    /// The sparse comparison-metric solver (comparison optimizers, WP9).
+    pub fn as_sparse(&mut self) -> Option<&mut SparseSaddle> {
+        match self {
+            StepSolver::Sparse(s) => Some(s),
+            _ => None,
         }
     }
 

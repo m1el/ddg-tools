@@ -75,7 +75,7 @@ pub use scene::SceneSpec;
 pub use solve::iterative::{Backend, HierarchicalOptions};
 pub use solve::{GmresOptions, GmresSide, LinearReport, NewtonSteps, ProjectionStatus};
 pub use step::{
-    ArmijoRule, Control, FlowOptions, FlowReport, FlowResult, LbfgsVariant, LineSearch, Method,
+    ArmijoRule, BcqnVariant, Control, FlowOptions, FlowReport, FlowResult, LbfgsVariant, LineSearch, Method,
     PinSchedule, RunReport, RunSceneOptions, Schedule, ScheduleTiming, Session, StartRule,
     Status, StepReport, StepStatus, StopRule, Timings, Trial, TrialOutcome, flow, run_scene,
     scene_options,

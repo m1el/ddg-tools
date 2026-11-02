@@ -252,11 +252,11 @@ fn setup_errors() {
     ] {
         assert!(matches!(new(o).unwrap_err(), RsError::InvalidOption { .. }));
     }
-    // The comparison optimizers need a soft problem, and are WP9's.
+    // The comparison optimizers need a soft problem.
     let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, ..base() };
     assert!(matches!(new(o).unwrap_err(), RsError::MethodNeedsSoftProblem { .. }));
-    let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, constraints: vec![], ..base() };
-    assert!(matches!(new(o).unwrap_err(), RsError::Unsupported { .. }));
+    let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, constraints: vec![Constraint::Barycenter { component: None, target: None }], ..base() };
+    assert!(new(o).is_ok());
     // Pins out of range.
     let o = FlowOptions { constraints: vec![Constraint::Pins { vertices: vec![10_000], targets: None }], ..base() };
     assert!(matches!(new(o).unwrap_err(), RsError::ConstraintOutOfRange { constraint: 0, index: 10_000 }));

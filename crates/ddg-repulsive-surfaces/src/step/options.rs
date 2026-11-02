@@ -224,8 +224,20 @@ pub enum LbfgsVariant {
     Reference,
 }
 
-/// The optimizer (`SPEC.md` §14.2). Only [`Method::ProjectedGradient`] is implemented by the
-/// session; the comparison optimizers are WP9's.
+/// The BCQN variants (`SPEC.md` D27; WP9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BcqnVariant {
+    /// Zhu et al.'s blend with a spectral-norm estimate of the Laplacian (power iteration) and
+    /// the standard two-loop recursion.
+    #[default]
+    Standard,
+    /// The reference's: Frobenius norm of the constrained Laplacian, `B = A^{4/3}`, and its
+    /// `L`-inner-product two-loop.
+    Reference,
+}
+
+/// The optimizer (`SPEC.md` §14.2). The last three are the comparison optimizers of `optimize`
+/// (WP9); they use the H¹ proxy (the session sets `metric = H1`) and need a soft problem.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Method {
     /// Projected gradient descent in the chosen metric (the paper).
@@ -247,6 +259,8 @@ pub enum Method {
     Bcqn {
         /// Number of stored pairs.
         memory: usize,
+        /// The variant.
+        variant: BcqnVariant,
     },
 }
 
@@ -464,14 +478,25 @@ impl FlowOptions {
             }
         }
         if self.method != Method::ProjectedGradient {
-            if !self.constraints.is_empty() {
+            for (i, c) in self.constraints.iter().enumerate() {
+                let name = match c {
+                    Constraint::Area { .. } => "Area",
+                    Constraint::Volume { .. } => "Volume",
+                    _ => continue,
+                };
                 return Err(RsError::MethodNeedsSoftProblem {
                     method: self.method.name(),
+                    constraint: format!("{name} (constraint {i})"),
                 });
             }
-            return Err(RsError::Unsupported {
-                what: "the comparison optimizers (AQP, H1 L-BFGS, BCQN) are WP9's",
-            });
+            let bad = match self.method {
+                Method::H1Lbfgs { memory, .. } | Method::Bcqn { memory, .. } => memory == 0,
+                Method::Aqp { kappa } => !(kappa.is_finite() && kappa >= 1.0),
+                Method::ProjectedGradient => false,
+            };
+            if bad {
+                return Err(invalid("method", format!("{:?}", self.method), "memory >= 1, kappa >= 1"));
+            }
         }
         Ok(())
     }
@@ -488,6 +513,10 @@ impl FlowOptions {
     /// conventions (D24), and the comparison optimizers' variants (WP9).
     pub fn effective(&self) -> FlowOptions {
         let mut o = self.clone();
+        if self.method != Method::ProjectedGradient {
+            // The comparison optimizers use the cotan Laplacian as their proxy (D26-D28).
+            o.metric = Metric::H1;
+        }
         if !self.reference_compat {
             return o;
         }
