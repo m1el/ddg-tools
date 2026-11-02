@@ -894,6 +894,23 @@ one thread, energy against wall time, exact energy for the plots. Runs in parall
 memory permitting) with one log per run; a timed subset alone afterwards (as the curves
 evaluation, user decisions Q4/Q7 there).
 
+**Results of record (WP16b, `examples/compare_methods.rs`, `scripts/rs-eval.sh`,
+`NOTES-WP16B.md`).** One thread per run, 56 runs (35 Fig. 12 + 21 Fig. 5) in parallel; the
+machine's load average was 79 before the runs started and 51 at the end (outside jobs), so absolute
+times are inflated and per-second comparisons favour the methods with cheaper steps. Energies are
+reported as `E · A/A₀` (exact energy at the end), because the soft-penalty methods let the area grow
+up to 2.2×. Fig. 12 end values, `Hs` vs the best other method: linked handcuffs 7.7 vs 26.0,
+doubly-wound 7.2 vs 60.0, 6×-wound 902 vs 1179 (BCQN), figure-8 tunnel 353 vs 341 (BCQN), trefoil
+tunnel 158 vs 154 (H¹ L-BFGS). `Hs` is lowest **per iteration** on all five meshes and lowest **per
+second** on the first three; on the two tunnels H¹ L-BFGS / BCQN are as good or slightly better per
+second (`Hs` 20–36 s/step on 24–54k faces under that load, 20–30 GMRES iterations per solve on meshes
+3–5). Fig. 5: `Hs` progress at step 100 is resolution-independent (41.1 / 39.5 / 39.1 at 11k / 40k /
+135k faces); L² slows 2.6×; L-BFGS/BCQN slow mildly; H¹, H² and AQP are flat on this easy genus-2
+surface, so that part of the paper's claim is not reproduced. No run ended Stuck or with an error;
+AQP's energy spiked to ≈ 6e6 on mesh 3 (reproducer in the notes; the paper also reports AQP
+blow-ups). The paper's wall-clock claim is therefore only partly reproduced under these conditions;
+a rerun of the two tunnels with fewer concurrent jobs would separate method from machine load.
+
 ### 14.3 Defaults confirmed by measurement
 
 Line-search start rule (§7.2), CCD default (§7.3), `dense_max_faces`, GMRES side and tolerance,
