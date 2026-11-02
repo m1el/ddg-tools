@@ -342,7 +342,9 @@ with Barnes–Hut (same `θ`) plus the metric term `O_diag` (§4.4). We implemen
 `ObstacleKind::TangentPoint` (default; it is what produced the walnut, lung and hamburger scenes,
 and it keeps the barrier property) and `ObstacleKind::Coulomb { power }` (the printed formula,
 integrated over the mesh with `a_S` at barycenters: `Σ_{S∈M} Σ_{T∈𝒪} a_S a_T |X_S − X_T|^{−p}`, mesh barycenters against obstacle-triangle centroids; no metric term). `penalties::evaluate` takes the energy's `Exponents` and `EnergyEval` (the TP obstacle uses the same exponents and `θ`; `θ = 0` for `Exact`). In the line search the session keeps an `obstacle::CrossEvaluator` per obstacle (built per step, refit per trial, lists frozen), as for the energy (WP7). The obstacle code carries the existing ids (`rs-kernel`, `rs-energy-gradient`, `rs-bh-*`); no separate ids. Obstacles are static
-triangle soups (`Obstacle` of the curves crate), need not be manifold.
+triangle soups (`Obstacle` of the curves crate), need not be manifold. A point-cloud obstacle (one-sided, unit weights) also has the metric term `O_diag`
+in the reference (zero obstacle projectors, so `K₂(T,S) = 0`); we add it in `reference_compat` only (`CrossEvaluator::metric_diagonal`;
+the preconditioner lacks it and default-mode GMRES then needs ≈ 1600 iterations per step on the Reconstruction scene).
 
 ## 6. Descent direction and projection
 
@@ -433,7 +435,10 @@ error.
   `1e-4`, at most 200 iterations by default (the reference: `2n`), modified Gram–Schmidt, all
   `x`/`y`/`z` columns as one `|V| × 3` block where the operator allows (App. B). Not converging is
   a reported condition (`LinearReport`), not an error, unless the residual is above `1e-1`
-  (`SolverDiverged`). With `Backend::Auto` the dense path is used up to `dense_max_faces`
+  (`SolverDiverged`). **Recovery:** a diverged solve of the hierarchical back end is repeated by right
+  GMRES with the augmented preconditioner on vertex pairs (restart 60, ≥ 800 iterations, rebuilt preconditioner),
+  then by a dense LU of the metric (≤ 6000 vertices); the escalation is listed in `LinearReport::fallbacks`
+  and `SolverDiverged` is returned only when both fail. With `Backend::Auto` the dense path is used up to `dense_max_faces`
   (default 1000: WP6 measured the hierarchical path faster from about 500 faces).
 
 ## 7. Time stepping
@@ -1073,12 +1078,14 @@ Rounds (≤ 3 agents; timed work alone at the end):
   (`reference_compat`), 1.2–2.3× (defaults); Hopf link 2.4–4.4× because we run 59 GMRES iterations
   per step against the reference's ≈ 11 (its left GMRES stops early with a large true residual,
   D32/D33); faster on walnut (0.7×) and the blocky Klein bottle (0.8×). Target of WP17.
-* **Open defects from WP18b:** (1) `reference_compat` with splits/collapses off on the blocky Klein
-  bottle stops at step 300 with `SolverDiverged { residual: 1.466e3 }` (deterministic; reproducer
-  `examples/compare_reference run …/KleinBottle/scene.txt --mode compat-noedge --steps 300
-  --threads 1`, state at step 299 in `runs_tmp/wp18b/repro/kbb_cn_00299.obj`); (2) Reconstruction
-  (point-cloud bunny): objectives within 1–7 %, but the final self-energy is 449 (compat) / 161
-  (default) vs the reference's 14.7 — the obstacle models differ (D23), not yet explained.
+* **Defects from WP18b (`NOTES-DEFECTS.md`):** (1) fixed: `reference_compat` with splits/collapses off on
+  the blocky Klein bottle aborted at step 300 with `SolverDiverged { residual: 1.466e3 }`; cause: a flip at
+  the end of step 299 made needle faces out of an edge the flow had shrunk to 7e-4, on which the printed
+  preconditioner's left GMRES fails; a diverged hierarchical solve now falls back to right/augmented GMRES,
+  then a dense LU (§6.3, `LinearReport::fallbacks`). (2) Reconstruction: the reference adds the metric
+  diagonal `O_diag` for point clouds too (zero obstacle normals); `reference_compat` now does (first step
+  `τ` 3.40e-4 against 3.37e-4, objective within 1.5 % to step 125); the final self-energy (4267 against
+  14.9 at step 150, concentrated in creases near the cloud) is still unexplained.
 * **Blender (WP14) notes:** `Mesh.clear_geometry()` in Blender 5 also deletes vertex groups (the
   pin group is rebuilt, others restored on Cancel); CCD auto-off on intersecting input used
   Blender's `BVHTree.overlap` before the band rule existed — with the band rule CCD can stay on;
