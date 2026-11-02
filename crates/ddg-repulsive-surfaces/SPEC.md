@@ -1164,7 +1164,21 @@ Rounds (≤ 3 agents; timed work alone at the end):
   remeshing need 225–678 GMRES iterations.
 * Fig. 16 (Ishii et al. 2012 table): no arXiv version exists; the user supplied the PDF
   (`/var/data/discrete-geometry/ishii2012.pdf`, not in the repository); all 21 entries transcribed
-  and flowed (17 converged, 4 at the 3000-step cap; `NOTES-ISHII.md`). WP12 read "figure-8 / trefoil tunnel" as knotted
+  and flowed (17 converged, 4 at the 3000-step cap; `NOTES-ISHII.md`).
+* **Reproducibility of long runs (open, observed 2026-11-02):** the Fig. 16 flows were rerun with the
+  same settings (`ishii run NAME --faces 14000 --threads 3 --max-steps 3000`) after their outputs were
+  lost; the first run had 17 converged (capped: 5₁, 6₁, 6₈, 6₁₀), the rerun 16 (capped: 5₁, 5₂, 5₃, 6₁,
+  6₁₀). Only docs, tests and a module wrapper changed in between, and the flow is meant to be bitwise
+  independent of the thread count and load, so some part of a long run (remeshing order, CCD, a
+  time- or address-dependent choice) may not be deterministic. Not investigated; a two-run diff of
+  one entry's per-step CSV would locate the first divergence.
+* **Showcase (2026-11-02, `showcase/repulsive-surfaces/render.py`, `showcase/README.md`):** the Fig. 16
+  sheet is from the rerun; the genus sheet uses WP15's 800-step frames (g = 3, 7–11 not converged; the
+  converged g = 3 run of the fidelity study kept no frames); the handle-off-the-pole isotopy (Fig. 18)
+  is **not reproduced** (the loop is still threaded on the pole after both stages; WP15's
+  distance-based claim was wrong); the handcuffs unlinking was rerun without the plane attractor
+  (400 steps, 187 → 8.07); cobblestones rerun with the current solver (0 vertices outside the slab,
+  1.23× of the area target); shrink-wrap not converged at 220 steps; the eversion has no medium. WP12 read "figure-8 / trefoil tunnel" as knotted
   tori (tubes around the knot); recorded as an interpretation.
 
 ## 17. The user's decisions (2026-11-01)
