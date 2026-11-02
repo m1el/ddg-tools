@@ -11,9 +11,13 @@ import DdgProofs.RepulsiveSurfaces.Saddle
   `powFamily_props`; for symmetric positive definite `M`, `W` this is the generalized eigenbasis).
   That `L_{2−s}` approximates `M Δ^{2−s}`, and the resulting quality of the preconditioner, is cited
   (`rs-preconditioner-approx`).
-* `rs-fractional-preconditioner` (SPEC §6.3): `P⁻¹ = L′⁻¹ · blockdiag(L_frac, 0) · L′⁻¹` with the
-  symmetric saddle `L′ = [W′ C_Qᵀ; C_Q 0]` is symmetric, positive semidefinite when `L_frac` is,
-  and its output `z` satisfies the positional rows `C_Q z = 0` (`frac_precond_props`).
+* `rs-fractional-preconditioner` (SPEC §6.3, D33, the default augmented form
+  `P = L′⁻¹ [[F, C_Qᵀ],[C_Q, 0]] L′⁻¹`): equal to `L′⁻¹ + L′⁻¹ blockdiag(F − K, 0) L′⁻¹`,
+  symmetric, nonsingular iff the middle factor is, and `C_Q (P [r; b])_x = b` for all `r, b`
+  (`aug_precond_props`).
+* The printed form `P⁻¹ = L′⁻¹ · blockdiag(L_frac, 0) · L′⁻¹` (`PreconditionerForm::Printed`,
+  reference mode) is symmetric, positive semidefinite when `L_frac` is, and its output satisfies
+  `C_Q z = 0` (`frac_precond_props`, untagged since D33: the id names the default form).
 -/
 
 noncomputable section
@@ -82,18 +86,15 @@ section frac
 variable {q : Type*} [Fintype q] [DecidableEq q]
 
 /-- `P⁻¹ = L′⁻¹ · blockdiag(L_frac, 0) · L′⁻¹` (SPEC §6.3; the multiplier part is zeroed between
-the two solves).
-
-[formula: rs-fractional-preconditioner] -/
+the two solves). The printed form (reference mode). -/
 def fracPrecond (Lw : Matrix n n ℝ) (CQ : Matrix q n ℝ) (Lfrac : Matrix n n ℝ) :
     Matrix (n ⊕ q) (n ⊕ q) ℝ :=
   (fromBlocks Lw CQᵀ CQ 0)⁻¹ * fromBlocks Lfrac 0 0 0 * (fromBlocks Lw CQᵀ CQ 0)⁻¹
 
 /-- **The preconditioner is symmetric, PSD, and lands in the positional tangent space**
 (SPEC §6.3): for symmetric `W′` and `L_frac` and invertible `L′`, `P⁻¹` is symmetric; if `L_frac`
-is PSD, so is `P⁻¹`; and `z = P⁻¹ r` satisfies `C_Q z_x = 0`.
-
-[formula: rs-fractional-preconditioner] -/
+is PSD, so is `P⁻¹`; and `z = P⁻¹ r` satisfies `C_Q z_x = 0`. This is the printed form; the default form is
+`aug_precond_props`. -/
 theorem frac_precond_props {Lw : Matrix n n ℝ} {CQ : Matrix q n ℝ} {Lfrac : Matrix n n ℝ}
     (hLw : Lwᵀ = Lw) (hLf : Lfracᵀ = Lfrac) (hL : IsUnit (fromBlocks Lw CQᵀ CQ 0).det) :
     (fracPrecond Lw CQ Lfrac)ᵀ = fracPrecond Lw CQ Lfrac ∧
@@ -127,6 +128,54 @@ theorem frac_precond_props {Lw : Matrix n n ℝ} {CQ : Matrix q n ℝ} {Lfrac : 
     have := congrArg (fun v => fun j => v (Sum.inr j)) hz
     simp only [hLdef, fromBlocks_mulVec, Sum.elim_inr, zero_mulVec, add_zero] at this
     exact this
+
+/-- **The augmented preconditioner** (D33): `P = L′⁻¹ N L′⁻¹` with `L′ = [[K, Cᵀ],[C, 0]]` and
+`N = [[F, Cᵀ],[C, 0]]`. -/
+def augPrecond (K : Matrix n n ℝ) (C : Matrix q n ℝ) (F : Matrix n n ℝ) :
+    Matrix (n ⊕ q) (n ⊕ q) ℝ :=
+  (fromBlocks K Cᵀ C 0)⁻¹ * fromBlocks F Cᵀ C 0 * (fromBlocks K Cᵀ C 0)⁻¹
+
+/-- **The augmented fractional preconditioner** (SPEC §6.3, D33): for symmetric `K`, `F` and
+invertible `L′ = [[K, Cᵀ],[C, 0]]`, with `N = [[F, Cᵀ],[C, 0]]`, `P = L′⁻¹ N L′⁻¹`
+(a) equals `L′⁻¹ + L′⁻¹ blockdiag(F − K, 0) L′⁻¹`, (b) is symmetric, (c) is nonsingular iff `N`
+is, and (d) reproduces the constraint rows for every right-hand side `[r; b]`:
+`C (P [r; b])_x = b` (no further hypothesis).
+
+[formula: rs-fractional-preconditioner] -/
+theorem aug_precond_props {K F : Matrix n n ℝ} {C : Matrix q n ℝ}
+    (hK : Kᵀ = K) (hF : Fᵀ = F) (hL : IsUnit (fromBlocks K Cᵀ C 0).det) :
+    augPrecond K C F = (fromBlocks K Cᵀ C 0)⁻¹ +
+        (fromBlocks K Cᵀ C 0)⁻¹ * fromBlocks (F - K) 0 0 0 * (fromBlocks K Cᵀ C 0)⁻¹ ∧
+      (augPrecond K C F)ᵀ = augPrecond K C F ∧
+      (IsUnit (augPrecond K C F).det ↔ IsUnit (fromBlocks F Cᵀ C 0).det) ∧
+      ∀ (r : n → ℝ) (b : q → ℝ),
+        C *ᵥ (fun i => (augPrecond K C F *ᵥ Sum.elim r b) (Sum.inl i)) = b := by
+  set L := fromBlocks K Cᵀ C 0 with hLdef
+  set N := fromBlocks F Cᵀ C 0 with hNdef
+  have hLs : Lᵀ = L := by
+    rw [hLdef, fromBlocks_transpose, hK, transpose_transpose, transpose_zero]
+  have hNs : Nᵀ = N := by
+    rw [hNdef, fromBlocks_transpose, hF, transpose_transpose, transpose_zero]
+  have hLinvs : L⁻¹ᵀ = L⁻¹ := by rw [transpose_nonsing_inv, hLs]
+  have hLi : IsUnit L⁻¹.det := by rw [det_nonsing_inv]; exact hL.ringInverse
+  refine ⟨?_, ?_, ?_, fun r b => ?_⟩
+  · have hN : N = L + fromBlocks (F - K) 0 0 0 := by
+      rw [hLdef, hNdef, fromBlocks_add]; simp
+    have hLLL : L⁻¹ * L * L⁻¹ = L⁻¹ := by rw [nonsing_inv_mul _ hL, Matrix.one_mul]
+    rw [augPrecond, ← hLdef, ← hNdef, hN, Matrix.mul_add, Matrix.add_mul, hLLL]
+  · rw [augPrecond, ← hLdef, ← hNdef, transpose_mul, transpose_mul, hLinvs, hNs, Matrix.mul_assoc]
+  · rw [augPrecond, ← hLdef, ← hNdef]
+    simp only [Matrix.det_mul, IsUnit.mul_iff, hLi, and_true, true_and]
+  · set v : n ⊕ q → ℝ := Sum.elim r b with hv
+    set y := L⁻¹ *ᵥ v with hy
+    have hLy : L *ᵥ y = v := by rw [hy, mulVec_mulVec, mul_nonsing_inv _ hL, one_mulVec]
+    have hz : L *ᵥ (augPrecond K C F *ᵥ v) = N *ᵥ y := by
+      rw [augPrecond, ← hLdef, ← hNdef, ← mulVec_mulVec, ← mulVec_mulVec, mulVec_mulVec,
+        mul_nonsing_inv _ hL, one_mulVec]
+    have h1 := congrArg (fun w => fun j => w (Sum.inr j)) hz
+    have h2 := congrArg (fun w => fun j => w (Sum.inr j)) hLy
+    simp only [hLdef, hNdef, fromBlocks_mulVec, Sum.elim_inr, zero_mulVec, add_zero, hv] at h1 h2
+    exact h1.trans h2
 
 end frac
 

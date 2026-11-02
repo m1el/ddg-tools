@@ -1352,6 +1352,7 @@ open DdgProofs
 #print axioms RS.face_quantities
 #print axioms RS.sum_dualArea
 #print axioms RS.frac_precond_props
+#print axioms RS.aug_precond_props
 #print axioms RS.energy_gradient_identities
 #print axioms RS.appA_mulVec_self
 #print axioms RS.hierarchical_null_space

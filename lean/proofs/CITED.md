@@ -2188,7 +2188,8 @@ Newton correction as "`h = A′⁻¹ C_Nᵀ S⁻¹ Φ(f)` subtracted (`C_N h = �
 linearized violation (`RS.schur_correction_sign`). The SPEC (§6.2, since 5ead321) now defines the
 Rust step as the negation, `h = −A′⁻¹ C_Nᵀ S⁻¹ Φ`, with `C_N h = Φ`, applied as `f ← f − h`: the
 same update. SPEC §6.3 tagged `rs-fractional-preconditioner` without a §12 row; the row is added,
-and the id is proved (`RS.frac_precond_props`).
+and the id is proved (`RS.aug_precond_props`, the default augmented form of D33; the printed form
+`RS.frac_precond_props` is kept untagged as the reference mode).
 
 ### [formula: rs-exponent-range] The energy space of the tangent-point energy of surfaces
 
@@ -2255,7 +2256,9 @@ and the id is proved (`RS.frac_precond_props`).
 - **Why not formalized.** A statement about spectral equivalence of nonlocal operators under
   refinement; the paper gives a heuristic and measurements. The exact matrix identity
   `W⁻¹ (M Δ^{2−s}) W⁻¹ = Δ^{−s} M⁻¹` is machine-checked (`rs-preconditioner-order`), as are the
-  symmetry and positivity of the preconditioner (`rs-fractional-preconditioner`).
+  symmetry and nonsingularity of the augmented preconditioner and its reproduction of the constraint
+  rows (`rs-fractional-preconditioner`, `RS.aug_precond_props`; positivity of the printed form is
+  `RS.frac_precond_props`).
 - **What depends on it.** The number of GMRES iterations (SPEC §6.3, §14.5), not the solution:
   GMRES stops on the true residual of `A′` (right preconditioning, D13).
 
