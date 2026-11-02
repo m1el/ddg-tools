@@ -2,7 +2,7 @@
 //! boundary length and curvature, Willmore, implicit obstacles and attractors, mesh and
 //! point-cloud obstacles), each `w · P(f)` with an exact gradient (D24).
 //!
-//! [`evaluate`] is the hook of [`crate::energy::energy`]; [`evaluate_one`] evaluates a single
+//! `evaluate` is the hook of [`crate::energy::energy`]; [`evaluate_one`] evaluates a single
 //! penalty (weighted value and weighted gradient). **A penalty whose value is not finite
 //! (an implicit obstacle with `d ≤ 0` gives `+∞`; coincident points of an obstacle) adds no
 //! gradient**: the caller (line search) rejects the trial.

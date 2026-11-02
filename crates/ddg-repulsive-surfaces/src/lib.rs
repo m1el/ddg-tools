@@ -15,7 +15,7 @@
 //!
 //! The contract of this crate is `SPEC.md` next to its `Cargo.toml`: every discrete formula
 //! with its `rs-` formula id, every place where the paper or the reference is wrong or silent
-//! (decisions `D1`–`D31`), the public API, the verification and measurement plans and the work
+//! (decisions `D1`–`D33`), the public API, the verification and measurement plans and the work
 //! packages (§15).
 //!
 //! # Contents
