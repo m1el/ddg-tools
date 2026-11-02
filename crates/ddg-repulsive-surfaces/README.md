@@ -152,9 +152,12 @@ to an area constraint, because a free flow inflates the surface. See `blender/RE
   frozen lists), every penalty and constraint, the Willmore term; relative error < 1e-6.
 * **Invariances and operator checks:** scaling, kernel of `A`, hierarchical against dense products
   (1e-12 at `χ = 0`), dense Schur against the full saddle LU, quadratic Newton correction.
-* **Lean proofs** (`lean/proofs/DdgProofs/RepulsiveSurfaces/`): 35 `rs-` ids proved and 8 cited at
-  WP10, then the augmented preconditioner (`rs-fractional-preconditioner`, WP10b); the cited ones are
-  in `lean/proofs/CITED.md`. `scripts/check-formulas.sh` cross-checks the `[formula: rs-…]` tags.
+* **Lean proofs** (`lean/proofs/DdgProofs/RepulsiveSurfaces/`): 44 `rs-` ids, 35 proved (among them
+  the augmented preconditioner, `rs-fractional-preconditioner`) and 9 cited in `lean/proofs/CITED.md`
+  (smooth theory, empirical results, optimizer heuristics, the preconditioner scale constant).
+  `scripts/check-formulas.sh` cross-checks the `[formula: rs-…]` tags (0 missing, no `sorry`/axioms).
+* **Tests:** 182 Rust tests (`cargo test -p ddg-repulsive-surfaces --release`, 2026-11-02), 30
+  Python tests on three interpreters, 22 headless + 35 windowed Blender checks.
 * **Oracle** (`lean/oracle/DdgOracle/RepulsiveSurfaces*`): an independent Float implementation of
   energy, `D_f`, metric, constraints, saddle, preconditioner, one dense step and the remeshing
   operations; 70 golden fixtures replayed by `tests/oracle.rs`, plus a differential fuzz test (ignored
