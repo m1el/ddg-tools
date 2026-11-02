@@ -1029,9 +1029,19 @@ Rounds (≤ 3 agents; timed work alone at the end):
 * **CCD default (D20), measured by WP5:** the median CCD share of a step is 0.5–2.0 % on the five
   smoke scenes, so CCD is **on** by default, per the user's rule. Two effects to watch:
   (1) on EntangledDoubleTorus the run with CCD reaches `F = 42` after 200 steps, without CCD 8.2
-  (no intersection at any step end in either) — under investigation: either the cap is too
-  conservative, or the run without CCD passed through itself inside a step (an isotopy change the
-  step-end check cannot see); (2) an immersed input (the Klein bottle) has touching pairs, which
+  (no intersection at any step end in either). **Resolved (CCD investigation,
+  `NOTES-CCDINV.md`): the run without CCD tunnels.** Steps 1–5 are identical; in step 6 it
+  accepts `τ = 3.72` (a vertex moves 14.3 `ℓ̄₀`) and an exact swept test finds 2226 crossings in
+  that step (488 vertex–triangle, 1738 edge–edge): the small ring, linked through the large ring,
+  is pulled straight through the large ring's tube. No other step, line-search trial, projection
+  or remeshing pass crosses (remeshing moves vertices ≤ 0.49 `ℓ̄₀`, sheets stay ≥ 2 `ℓ̄₀` apart).
+  The end states are very likely in the same isotopy class (the linked-ring start is still a
+  standard genus-2 surface); the run with CCD untangles legitimately by step ≈ 270, and at the
+  scene's 700 steps `F` = 7.633 (CCD) vs 7.607 (none), same shape. So the paper's algorithm as
+  printed (no CCD) can pass a surface through itself on the paper's own kind of example; CCD keeps
+  all 200 steps crossing-free at ≈ 0.9 % of a step (17 ms of 1.9 s). Gap 0.02 / 0.01, cap 0.9 or
+  no collapse guard change `F` after 200 steps only within trajectory noise (35.6–41.8), so the
+  defaults stay (gap 0.05 `ℓ̄₀`, cap ⅔, guard on). (2) an immersed input (the Klein bottle) has touching pairs, which
   stall CCD; `scene_options` turns CCD off for subcritical exponents. WP5 smoke runs (4 threads,
   without CCD): HopfLink 9.2k faces 563 ms/step, 32 GMRES iterations/step; EntangledDoubleTorus
   10.5k 609 ms, 21; KleinBottle 1.8k 147 ms, 46; HandcuffsPole 10.7k 703 ms, 31; Bunny 28.6k
@@ -1040,6 +1050,15 @@ Rounds (≤ 3 agents; timed work alone at the end):
   + energy/gradient 0.32 s, face BCT build 0.57 s, factorization 0.04 s, vertex tree 0.10 s, GMRES
   1.15 s (29 products at 25 ms) — 2.2 s for the direction against the paper's 2.5 s for a whole
   step (`χ = 1`: 1.6 s). The BCT build and the products are the targets of WP17.
+* **CCD on inputs that already intersect** (Klein bottle immersion; Fig. 26 subcritical runs):
+  forcing CCD on stalls the flow (Klein bottle `F` 793 → 631 after 200 steps vs 156 without; in
+  191 of the 193 capped steps the limiting pair touches faces that intersect at `t = 0`).
+  Proposed rule (CCD investigation, not implemented): let `I` be the vertices of faces that
+  intersect at the start of the step, widened by one ring; a pair whose two elements both have a
+  vertex in `I` is unconstrained, every other pair keeps the gap rule (removes every limiting
+  contact on that run; crossings outside the band in 3 of 200 steps). Until implemented, the
+  switch is "CCD off when the input intersects at the start" (detected with `ccd::intersects`), not
+  "off for subcritical exponents".
 * Fig. 16 (Ishii et al. 2012 table) is not transcribed (WP12): the cited paper may be downloaded
   (CLAUDE.md rule for cited papers) for WP15. WP12 read "figure-8 / trefoil tunnel" as knotted
   tori (tubes around the knot); recorded as an interpretation.
