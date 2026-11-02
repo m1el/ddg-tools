@@ -21,13 +21,13 @@ use crate::penalties::{Penalty, willmore_matrix};
 use crate::remesh::{CollapseGuard, RemeshReport, Remeshed, remesh};
 use crate::solve::iterative::MetricExtras;
 use crate::solve::{
-    LinearReport, ProjectionOptions, ProjectionStatus, SchurComplement, project,
+    LinearReport, Projection, ProjectionOptions, ProjectionStatus, SchurComplement, project,
 };
 use crate::surface::Surface;
 
 use crate::optimize::{MethodDiagnostics, MethodState};
 use super::direction::StepSolver;
-use super::objective::{Objective, component_means, is_geometric};
+use super::objective::{Evaluation, Objective, component_means, is_geometric};
 use super::options::{ArmijoRule, FlowOptions, Method, ScheduleTiming, StartRule, StopRule};
 
 // =============================================================================================
@@ -90,6 +90,10 @@ pub enum TrialOutcome {
     /// The trial's objective was not finite (a degenerate face, coincident barycenters, an
     /// implicit obstacle crossed); the step was halved.
     NonFinite,
+    /// The Armijo test held but the projection of the trial was not admissible (`F` not
+    /// finite after it, or its motion crosses the CCD gap: `LineSearch::guard_projection`);
+    /// the step was halved.
+    ProjectionBlocked,
 }
 
 /// One line-search trial.
@@ -176,6 +180,11 @@ pub struct StepReport {
     pub newton_steps: u32,
     /// How the projection ended.
     pub projection_status: ProjectionStatus,
+    /// Projections that were not admissible (`LineSearch::guard_projection`): rejected trials,
+    /// plus one if the stuck step's projection had to be limited.
+    pub projection_blocked: u32,
+    /// The fraction of the projection's motion applied (1 unless `ProjectionStatus::Blocked`).
+    pub projection_fraction: f64,
     /// `max |Φ_r|` over the active rows after the projection.
     pub max_violation: f64,
     /// Constraint rows dropped for this step: by the rank check and from the Schur complement
@@ -187,6 +196,9 @@ pub struct StepReport {
     pub products: Option<(usize, f64)>,
     /// The remeshing (when on).
     pub remesh: Option<RemeshReport>,
+    /// The remeshing pass was computed but not applied: its moves met a CCD obstacle
+    /// (`LineSearch::guard_projection`).
+    pub remesh_rejected: bool,
     /// `|V|` after the step (and the remeshing).
     pub vertices: usize,
     /// `|F|` after the step.
@@ -930,7 +942,35 @@ impl Session {
         let gnorm = gradient_norm;
         let mut trials = Vec::new();
         let mut halvings = 0u32;
-        let mut accepted: Option<(f64, f64, Vec<[f64; 3]>)> = None;
+        // The projection guard (§6.2, §7.3): an Armijo-accepted trial is kept only if its
+        // projection is admissible too (finite F, no contact along the projection's motion).
+        let ccd_opts = eff.line_search.ccd.map(|mut o| {
+            if o.reference_length.is_none() {
+                o.reference_length = Some(self.l0);
+            }
+            o
+        });
+        let mut pguard = ProjectionGuard {
+            enabled: eff.line_search.guard_projection,
+            pool: &self.pool,
+            surface: &self.surface,
+            ccd: ccd_opts,
+            obstacles: &self.ccd_obstacles,
+            band: band.as_ref(),
+            schur: (!nrows.is_empty()).then_some(&schur),
+            newton: eff.newton_steps,
+            barycenter_shift: eff.barycenter_shift,
+            n_penalties: self.penalties.len(),
+            base_measure: 0.0,
+        };
+        pguard.base_measure = pguard.measure(&set, &set.values(&self.positions)?);
+        let mut projection_blocked = 0u32;
+        let mut projection_fraction = 1.0;
+        // Whether the projection of the unmoved positions already meets a contact (computed
+        // when a trial's projection does): then halving cannot help.
+        let mut base_contact: Option<bool> = None;
+        let mut accepted: Option<AcceptedTrial> = None;
+        let mut t_projection = 0.0;
         if slope > 0.0 && tau0.is_finite() && tau0 > 0.0 {
             let mut tau = tau0;
             loop {
@@ -960,69 +1000,79 @@ impl Session {
                         ArmijoRule::Standard { c } => ft <= f0 - c * tau * slope,
                         ArmijoRule::Reference { c } => f0 - ft >= c * tau * slope / gnorm,
                     };
-                let outcome = if !ft.is_finite() {
+                let mut outcome = if !ft.is_finite() {
                     TrialOutcome::NonFinite
                 } else if ok {
                     TrialOutcome::Accepted
                 } else {
                     TrialOutcome::ArmijoFailed
                 };
+                if ok {
+                    let tp = Instant::now();
+                    let checked = pguard.project(&mut set, &mut resolved, &mut obj, &trial)?;
+                    if checked.admissible || !pguard.enabled {
+                        t_projection += tp.elapsed().as_secs_f64();
+                        trials.push(Trial { tau, energy: ft, outcome });
+                        accepted = Some((tau, ft, trial, checked.projection, checked.after));
+                        break;
+                    }
+                    projection_blocked += 1;
+                    if checked.contact {
+                        let base = match base_contact {
+                            Some(b) => b,
+                            None => {
+                                let c = pguard.project(&mut set, &mut resolved, &mut obj, &self.positions)?;
+                                let b = !c.admissible && c.contact;
+                                base_contact = Some(b);
+                                b
+                            }
+                        };
+                        if base {
+                            // The contact blocks the projection whatever the step: keep the
+                            // descent (CCD-capped above) and apply the admissible part of the
+                            // projection.
+                            let (p, a, frac) = pguard.limit(&set, &mut obj, &trial, checked)?;
+                            projection_fraction = frac;
+                            t_projection += tp.elapsed().as_secs_f64();
+                            trials.push(Trial { tau, energy: ft, outcome });
+                            accepted = Some((tau, ft, trial, p, a));
+                            break;
+                        }
+                    }
+                    t_projection += tp.elapsed().as_secs_f64();
+                    outcome = TrialOutcome::ProjectionBlocked;
+                }
                 trials.push(Trial {
                     tau,
                     energy: if ft.is_finite() { ft } else { f64::NAN },
                     outcome,
                 });
-                if ok {
-                    accepted = Some((tau, ft, trial));
-                    break;
-                }
                 tau *= 0.5;
                 halvings += 1;
             }
         }
-        seconds.line_search = t.elapsed().as_secs_f64();
-        let (status, tau, energy_trial, moved) = match accepted {
-            Some((tau, ft, p)) => (StepStatus::Accepted, tau, ft, p),
-            None => (StepStatus::Stuck, 0.0, f0, self.positions.clone()),
-        };
+        seconds.line_search = t.elapsed().as_secs_f64() - t_projection;
 
-        // 4. Projection (§6.2). The barycenter shift frees the barycenter: its targets follow.
+        // 4. Projection (§6.2), done above for the accepted trial. A stuck step projects the
+        // unmoved positions; if that projection is not admissible either, only the largest
+        // admissible fraction of its motion is applied (`ProjectionStatus::Blocked`).
         let t = Instant::now();
-        if eff.barycenter_shift {
-            let phi = set.values(&moved)?;
-            let rows = set.rows().to_vec();
-            for (r, row) in rows.iter().enumerate() {
-                if let RowKind::Barycenter { .. } = row.kind {
-                    set.set_target(r, row.target + phi[r])?;
+        let (status, tau, energy_trial, proj, after) = match accepted {
+            Some((tau, ft, _, p, a)) => (StepStatus::Accepted, tau, ft, p, a),
+            None => {
+                let moved = self.positions.clone();
+                let checked = pguard.project(&mut set, &mut resolved, &mut obj, &moved)?;
+                if checked.admissible || !pguard.enabled {
+                    (StepStatus::Stuck, 0.0, f0, checked.projection, checked.after)
+                } else {
+                    projection_blocked += 1;
+                    let (p, a, frac) = pguard.limit(&set, &mut obj, &moved, checked)?;
+                    projection_fraction = frac;
+                    (StepStatus::Stuck, 0.0, f0, p, a)
                 }
             }
-            for (r, row) in set.rows().iter().enumerate() {
-                if let (RowKind::Barycenter { axis, .. }, Constraint::Barycenter { target: Some(t), .. }) =
-                    (row.kind, &mut resolved[row.constraint].constraint)
-                {
-                    t[axis as usize] = set.rows()[r].target;
-                }
-            }
-        }
-        let proj = project(
-            &set,
-            (!nrows.is_empty()).then_some(&schur),
-            &moved,
-            &ProjectionOptions {
-                newton: eff.newton_steps,
-            },
-        )?;
-        let after = match obj.evaluate(&proj.positions, false) {
-            Ok(e) => e,
-            Err(e) if is_geometric(&e) => super::objective::Evaluation {
-                energy: f64::NAN,
-                penalties: vec![f64::NAN; self.penalties.len()],
-                total: f64::NAN,
-                differential: None,
-            },
-            Err(e) => return Err(e),
         };
-        seconds.projection = t.elapsed().as_secs_f64();
+        seconds.projection = t.elapsed().as_secs_f64() + t_projection;
         let products = solver.products();
         if let Some(t) = solver.build_timings() {
             seconds.metric_tree = t[0];
@@ -1039,6 +1089,7 @@ impl Session {
         // 5. Remeshing (§10) of the projected positions, with the per-vertex data.
         let t = Instant::now();
         let mut remesh_report = None;
+        let mut remesh_rejected = false;
         let mut new_state = None;
         if let Some(ropts) = &eff.remesh {
             let pinned = pinned_of(&resolved);
@@ -1048,6 +1099,15 @@ impl Session {
                     if let Some(b) = &band {
                         g.set_band(b);
                     }
+                    Some(g)
+                }
+                // Without CCD the collapses are still checked (default gap, with the band of
+                // the faces that intersect now): unguarded collapses on a self-intersecting
+                // subcritical flow raised F by up to 1e6 in one pass (SOLVERFIX §4).
+                None if ropts.guard_collapses => {
+                    let mut g = CcdCollapseGuard::new(&CcdOptions::default(), self.l0)?;
+                    let b = IntersectionBand::new(&self.pool, &self.surface, &proj.positions)?;
+                    g.set_band(&b);
                     Some(g)
                 }
                 None => None,
@@ -1072,7 +1132,38 @@ impl Session {
                     ),
                 },
             })?;
-            new_state = Some(self.transport(out, &pinned, &mut resolved)?);
+            // The remeshing's moves (split midpoints, collapses, smoothing) must not take the
+            // surface into a CCD obstacle either: the motion from the old surface (the new
+            // vertices at their vertex-map positions on it) to the new positions is checked
+            // against the obstacles; a pass that meets one is not applied this step.
+            let keep = match &pguard.ccd {
+                Some(o) if pguard.enabled && !self.ccd_obstacles.is_empty() => {
+                    let start = out.vertex_map.transport_vec3(&proj.positions)?;
+                    let velocity: Vec<[f64; 3]> = start
+                        .iter()
+                        .zip(&out.positions)
+                        .map(|(a, b)| [b[0] - a[0], b[1] - a[1], b[2] - a[2]])
+                        .collect();
+                    let all = IntersectionBand::all(out.surface.n_vertices());
+                    let r = first_contact_with_band(
+                        &self.pool,
+                        &out.surface,
+                        &start,
+                        &velocity,
+                        1.0,
+                        &self.ccd_obstacles,
+                        o,
+                        Some(&all),
+                    )?;
+                    r.contact.is_none()
+                }
+                _ => true,
+            };
+            if keep {
+                new_state = Some(self.transport(out, &pinned, &mut resolved)?);
+            } else {
+                remesh_rejected = true;
+            }
             remesh_report = Some(rep);
         }
         seconds.remesh = t.elapsed().as_secs_f64();
@@ -1155,11 +1246,14 @@ impl Session {
             trials,
             newton_steps: proj.rounds,
             projection_status: proj.status,
+            projection_blocked,
+            projection_fraction,
             max_violation: proj.max_violation,
             dropped_rows,
             linear,
             products,
             remesh: remesh_report,
+            remesh_rejected,
             vertices: self.surface.n_vertices(),
             faces: self.surface.n_faces(),
             seconds,
@@ -1302,6 +1396,193 @@ impl Session {
 }
 
 /// `τ₀` of a start rule (`SPEC.md` §7.2).
+/// An accepted line-search trial: `τ`, `F` at the trial, the trial, its projection and `F`
+/// after the projection.
+type AcceptedTrial = (f64, f64, Vec<[f64; 3]>, Projection, Evaluation);
+
+/// The projection of one line-search trial and whether it is admissible.
+struct Checked {
+    projection: Projection,
+    after: Evaluation,
+    admissible: bool,
+    /// Not admissible because of a contact (CCD) or a non-finite `F`, rather than the
+    /// constraint test.
+    contact: bool,
+    /// The CCD's `τ_max` along the projection's motion when it found a contact.
+    tau_ccd: Option<f64>,
+}
+
+/// The projection with its admissibility test (`SPEC.md` §6.2, §7.3): after the projection,
+/// `F` must be finite (implicit obstacles, degenerate faces) and, with CCD on, the linear motion
+/// from the trial to the projected positions must keep the gap rule of the line search against
+/// the surface itself and the CCD obstacles. The Newton projection onto area/volume targets
+/// and the positional resets are not descent steps: without the test a growing area target
+/// pushes a surface jammed against an obstacle through it (cobblestones, WP15).
+struct ProjectionGuard<'a> {
+    enabled: bool,
+    pool: &'a rayon::ThreadPool,
+    surface: &'a Surface,
+    ccd: Option<CcdOptions>,
+    obstacles: &'a [CcdObstacle],
+    band: Option<&'a IntersectionBand>,
+    schur: Option<&'a SchurComplement>,
+    newton: crate::solve::NewtonSteps,
+    barycenter_shift: bool,
+    n_penalties: usize,
+    /// `max_r |Φ_r| / tol_r` over the nonlinear rows at the step's base positions.
+    base_measure: f64,
+}
+
+impl ProjectionGuard<'_> {
+    /// `max_r |Φ_r| / tol_r` over all nonlinear rows of the step, including those the Schur
+    /// complement dropped for this step (a dropped row is not corrected by the projection, so
+    /// the line search must not let it drift; 0 without nonlinear rows).
+    fn measure(&self, set: &ConstraintSet, phi: &[f64]) -> f64 {
+        let Some(s) = self.schur else { return 0.0 };
+        s.rows().iter().fold(0.0f64, |m, &r| {
+            let v = phi[r].abs() / set.tolerance(r);
+            if v.is_nan() || m.is_nan() { f64::NAN } else { m.max(v) }
+        })
+    }
+
+    fn evaluate(&self, obj: &mut Objective<'_>, positions: &[[f64; 3]]) -> Result<Evaluation, RsError> {
+        match obj.evaluate(positions, false) {
+            Ok(e) => Ok(e),
+            Err(e) if is_geometric(&e) => Ok(Evaluation {
+                energy: f64::NAN,
+                penalties: vec![f64::NAN; self.n_penalties],
+                total: f64::NAN,
+                differential: None,
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Projects `moved` (the barycenter shift first moves the barycenter targets to `moved`)
+    /// and tests the result.
+    fn project(
+        &self,
+        set: &mut ConstraintSet,
+        resolved: &mut [Resolved],
+        obj: &mut Objective<'_>,
+        moved: &[[f64; 3]],
+    ) -> Result<Checked, RsError> {
+        if self.barycenter_shift {
+            let phi = set.values(moved)?;
+            let rows = set.rows().to_vec();
+            for (r, row) in rows.iter().enumerate() {
+                if let RowKind::Barycenter { .. } = row.kind {
+                    set.set_target(r, row.target + phi[r])?;
+                }
+            }
+            for (r, row) in set.rows().iter().enumerate() {
+                if let (RowKind::Barycenter { axis, .. }, Constraint::Barycenter { target: Some(t), .. }) =
+                    (row.kind, &mut resolved[row.constraint].constraint)
+                {
+                    t[axis as usize] = set.rows()[r].target;
+                }
+            }
+        }
+        let projection = project(set, self.schur, moved, &ProjectionOptions { newton: self.newton })?;
+        let after = self.evaluate(obj, &projection.positions)?;
+        // The projection must not leave the kept nonlinear rows further from their targets
+        // than the base positions are (the curves crate's `ProjectionFailed`): a lost area or
+        // volume constraint lets the surface grow without bound (WP15, subcritical + remeshing).
+        let m_after = self.measure(set, &projection.phi);
+        let finite = after.total.is_finite();
+        let mut admissible = finite && (!self.enabled || m_after <= self.base_measure.max(1.0));
+        let mut contact = !finite;
+        let mut tau_ccd = None;
+        if self.enabled
+            && finite
+            && let Some(o) = &self.ccd
+        {
+            let velocity: Vec<[f64; 3]> = moved
+                .iter()
+                .zip(&projection.positions)
+                .map(|(a, b)| [b[0] - a[0], b[1] - a[1], b[2] - a[2]])
+                .collect();
+            if velocity.iter().any(|v| v.iter().any(|&c| c != 0.0)) {
+                let rep = first_contact_with_band(
+                    self.pool,
+                    self.surface,
+                    moved,
+                    &velocity,
+                    1.0,
+                    self.obstacles,
+                    o,
+                    self.band,
+                )?;
+                if rep.contact.is_some() {
+                    admissible = false;
+                    contact = true;
+                    tau_ccd = Some(rep.tau_max);
+                }
+            }
+        }
+        Ok(Checked {
+            projection,
+            after,
+            admissible,
+            contact,
+            tau_ccd,
+        })
+    }
+
+    /// The largest admissible fraction of an inadmissible projection of `moved`: `⅔ τ_max` of
+    /// its motion (as the line search's CCD cap), halved while `F` is not finite (at most 12
+    /// times, then 0). The result has `ProjectionStatus::Blocked` and the values at the
+    /// positions actually used.
+    fn limit(
+        &self,
+        set: &ConstraintSet,
+        obj: &mut Objective<'_>,
+        moved: &[[f64; 3]],
+        checked: Checked,
+    ) -> Result<(Projection, Evaluation, f64), RsError> {
+        let target = &checked.projection.positions;
+        let mut frac = checked.tau_ccd.map_or(0.5, |t| (2.0 / 3.0 * t).min(1.0));
+        let lerp = |f: f64| -> Vec<[f64; 3]> {
+            moved
+                .iter()
+                .zip(target)
+                .map(|(a, b)| [0, 1, 2].map(|k| a[k] + f * (b[k] - a[k])))
+                .collect()
+        };
+        let mut chosen = None;
+        for _ in 0..12 {
+            if !(frac > 0.0) {
+                break;
+            }
+            let pos = lerp(frac);
+            let ev = self.evaluate(obj, &pos)?;
+            if ev.total.is_finite() {
+                chosen = Some((pos, ev));
+                break;
+            }
+            frac *= 0.5;
+        }
+        let (positions, after) = match chosen {
+            Some(x) => x,
+            None => {
+                frac = 0.0;
+                let ev = self.evaluate(obj, moved)?;
+                (moved.to_vec(), ev)
+            }
+        };
+        let phi = set.values(&positions)?;
+        let max_violation = (0..set.n_rows())
+            .filter(|&r| set.is_active(r))
+            .fold(0.0f64, |acc, r| acc.max(phi[r].abs()));
+        let mut p = checked.projection;
+        p.positions = positions;
+        p.phi = phi;
+        p.max_violation = max_violation;
+        p.status = ProjectionStatus::Blocked;
+        Ok((p, after, frac))
+    }
+}
+
 fn start_tau(rule: &StartRule, previous: Option<f64>, xnorm: f64, max_disp: f64, l0: f64) -> f64 {
     match rule {
         StartRule::Reference => 2.0 / xnorm,

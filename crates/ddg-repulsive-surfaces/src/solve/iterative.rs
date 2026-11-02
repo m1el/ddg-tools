@@ -455,7 +455,7 @@ pub fn hierarchical_saddle(
             }
         });
     }
-    let prec = SparsePreconditioner::with_metric_tree(
+    let mut prec = SparsePreconditioner::with_metric_tree(
         pool.clone(),
         surface,
         positions,
@@ -464,8 +464,10 @@ pub fn hierarchical_saddle(
         &popts,
         extra.as_ref(),
         &tree,
-    )?;
+    )?
+    .with_metric_weight(weights.tp_weight);
     let op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
+    prec.attach_coarse(&op, surface, c_q)?;
     let nd = op.n_dofs();
     Ok(GmresSaddle::new(op, prec, nd, options.gmres)?
         .with_label("gmres (hierarchical)")

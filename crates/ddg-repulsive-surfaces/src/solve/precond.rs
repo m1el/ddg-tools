@@ -51,6 +51,7 @@ use ddg_core::sparse::{
     fill_reducing_ordering,
 };
 
+use super::coarse::CoarseSpace;
 use super::dense::preconditioner_epsilon;
 use super::gmres::Preconditioner;
 use crate::error::RsError;
@@ -402,11 +403,78 @@ pub struct PreconditionerOptions {
     pub cluster: ClusterTreeOptions,
     /// How `L′⁻¹` and `L_{2−s}` are combined (default [`PreconditionerForm::Augmented`]).
     pub form: PreconditionerForm,
+    /// The scale of `L_{2−s}` against the metric in the augmented form (default
+    /// [`FractionalScale::Symbol`]; no effect on the congruence form, where it is a global factor).
+    pub scale: FractionalScale,
+    /// Add the coarse correction on the translations of components without positional rows
+    /// of their own ([`super::coarse::CoarseSpace`]; default `true`; augmented form only).
+    pub coarse: bool,
     /// One step of iterative refinement in every `L′` solve of an application (default
     /// `false`: the plain back substitution; the refinement doubles the cost of the solves and
     /// changed neither the GMRES iteration counts nor the solutions beyond the GMRES tolerance,
     /// `NOTES-WP17.md`). [`LaplacianSaddle::solve`] always refines.
     pub refine: bool,
+}
+
+/// The scale of the fractional factor in the augmented preconditioner (`SPEC.md` §6.3,
+/// `NOTES-SOLVERFIX.md`).
+///
+/// `L′⁻¹ L_{2−s} L′⁻¹` approximates `A⁻¹` only up to a constant: on a plane the symbols of
+/// `B` (`Σ_{S≠T} |D u(S) − D u(T)|² a_S a_T ρ^{−2s}`), `L_{2−s}` and `W` are
+/// `2 I(σ) |k|^{2s}`, `2 I(2−s) |k|^{2(2−s)}` and `|k|²` (`σ = s − 1`,
+/// `I(t) = ∫_{R²} (1 − cos z₁) |z|^{−2−2t} dz = π Γ(1−t) / (t 4^t Γ(1+t))`), so
+/// `W⁻¹ L_{2−s} W⁻¹ B ≈ 4 I(σ) I(2−s)` (≈ 200 at `s = 5/3`). The congruence form is blind to
+/// it (a global factor), but the augmented form adds the exact constraint part (eigenvalue 1 on
+/// the `2 k_Q` constraint directions) to the fractional part (eigenvalues ≈ that constant):
+/// with many positional rows (pins) GMRES must resolve two clusters two orders of magnitude
+/// apart, and restarted GMRES stagnates (the H of Fig. 22 with 24 pins: relative residual 0.96
+/// after 200 iterations).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FractionalScale {
+    /// `L_{2−s} / (w_TP · 4 I(σ) I(2−s))` (default).
+    #[default]
+    Symbol,
+    /// `L_{2−s}` unscaled (WP6's augmented form).
+    Unit,
+}
+
+/// `Γ(x)` for `x > 0` (Lanczos, g = 7, 9 terms; relative error below `1e-13` on `(0, 3]`).
+fn gamma(x: f64) -> f64 {
+    const G: f64 = 7.0;
+    const C: [f64; 9] = [
+        0.999_999_999_999_809_9,
+        676.520_368_121_885_1,
+        -1_259.139_216_722_402_8,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
+        12.507_343_278_686_905,
+        -0.138_571_095_265_720_12,
+        9.984_369_578_019_572e-6,
+        1.505_632_735_149_311_6e-7,
+    ];
+    if x < 0.5 {
+        return std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma(1.0 - x));
+    }
+    let x = x - 1.0;
+    let mut a = C[0];
+    let t = x + G + 0.5;
+    for (i, c) in C.iter().enumerate().skip(1) {
+        a += c / (x + i as f64);
+    }
+    (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * a
+}
+
+/// `I(t) = ∫_{R²} (1 − cos z₁) |z|^{−2−2t} dz = π Γ(1−t) / (t 4^t Γ(1+t))`, `t ∈ (0, 1)`.
+fn gagliardo_constant(t: f64) -> f64 {
+    std::f64::consts::PI * gamma(1.0 - t) / (t * 4f64.powf(t) * gamma(1.0 + t))
+}
+
+/// The planar symbol ratio `4 I(σ) I(2 − s)` of `W⁻¹ L_{2−s} W⁻¹ B` ([`FractionalScale`]).
+///
+/// [formula: rs-preconditioner-scale]
+pub fn fractional_symbol_ratio(exponents: &Exponents) -> f64 {
+    let s = exponents.s();
+    4.0 * gagliardo_constant(s - 1.0) * gagliardo_constant(2.0 - s)
 }
 
 impl Default for PreconditionerOptions {
@@ -417,6 +485,8 @@ impl Default for PreconditionerOptions {
             fractional: FractionalForm::VertexPairs,
             cluster: ClusterTreeOptions::default(),
             form: PreconditionerForm::Augmented,
+            scale: FractionalScale::Symbol,
+            coarse: true,
             refine: false,
         }
     }
@@ -491,6 +561,11 @@ pub struct SparsePreconditioner {
     form: PreconditionerForm,
     refine: bool,
     fractional: FractionalFactor,
+    /// The factor applied to `L_{2−s}` in the augmented form ([`FractionalScale`]).
+    fractional_scale: f64,
+    /// Whether [`SparsePreconditioner::attach_coarse`] may build a coarse space.
+    coarse_enabled: bool,
+    coarse: Option<CoarseSpace>,
     eps: f64,
     multi: bool,
     fractional_seconds: f64,
@@ -572,6 +647,10 @@ impl SparsePreconditioner {
                 FractionalFactor::Faces(tree)
             }
         };
+        let fractional_scale = match options.scale {
+            FractionalScale::Symbol => 1.0 / fractional_symbol_ratio(exponents),
+            FractionalScale::Unit => 1.0,
+        };
         Ok(SparsePreconditioner {
             pool,
             lprime,
@@ -579,6 +658,9 @@ impl SparsePreconditioner {
             form: options.form,
             refine: options.refine,
             fractional,
+            fractional_scale,
+            coarse_enabled: options.coarse && options.form == PreconditionerForm::Augmented,
+            coarse: None,
             eps,
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
@@ -613,6 +695,49 @@ impl SparsePreconditioner {
             extra_laplacian,
             Some((tree.face_tree(), tree.operators())),
         )
+    }
+
+    /// Divides the fractional factor by the metric's weight `w_TP` too (`A = w_TP (B + …)`;
+    /// [`FractionalScale::Symbol`] only).
+    #[must_use]
+    pub fn with_metric_weight(mut self, tp_weight: f64) -> Self {
+        if tp_weight.is_finite() && tp_weight > 0.0 && self.fractional_scale != 1.0 {
+            self.fractional_scale /= tp_weight;
+        }
+        self
+    }
+
+    /// The factor applied to `L_{2−s}` in the augmented form.
+    pub fn fractional_scale(&self) -> f64 {
+        self.fractional_scale
+    }
+
+    /// Builds the coarse correction on the translations of the components whose
+    /// translations are not fixed by rows of their own ([`CoarseSpace`]), for the saddle
+    /// operator `op` with positional rows `c`; nothing when disabled, when every component is
+    /// fixed, or above [`super::coarse::COARSE_MAX_ENTRIES`]. Returns whether a coarse space
+    /// is in use.
+    ///
+    /// # Errors
+    /// The errors of [`CoarseSpace::build`].
+    pub fn attach_coarse(
+        &mut self,
+        op: &dyn super::gmres::LinearOperator,
+        surface: &Surface,
+        c: &SparseMatrix,
+    ) -> Result<bool, RsError> {
+        self.coarse = None;
+        if !self.coarse_enabled {
+            return Ok(false);
+        }
+        let (free, rows) = CoarseSpace::free_components(surface, c);
+        self.coarse = CoarseSpace::build(op, surface, c, &free, &rows)?;
+        Ok(self.coarse.is_some())
+    }
+
+    /// The coarse space, if one is attached.
+    pub fn coarse(&self) -> Option<&CoarseSpace> {
+        self.coarse.as_ref()
     }
 
     /// `(ε, multi)`: the `ε` used in `L′` and whether it is the several-components value.
@@ -667,6 +792,18 @@ impl SparsePreconditioner {
     /// As [`SparsePreconditioner::apply_full`].
     pub fn apply_many(&self, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
         let t0 = Instant::now();
+        let zs = match &self.coarse {
+            Some(cs) => cs.apply_many(rs, |xs| self.apply_fine(xs))?,
+            None => self.apply_fine(rs)?,
+        };
+        self.applications.fetch_add(rs.len(), Ordering::Relaxed);
+        self.nanos
+            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        Ok(zs)
+    }
+
+    /// `P⁻¹ r` for several vectors without the coarse correction.
+    fn apply_fine(&self, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
         let nd = 3 * self.lprime.n_vertices;
         let ys = self.lprime.solve_many_on(Some(&self.pool), rs, self.refine)?;
         let mut vs: Vec<Vec<f64>> = rs.iter().map(|r| vec![0.0; r.len()]).collect();
@@ -683,10 +820,13 @@ impl SparsePreconditioner {
             }
         }
         if self.form == PreconditionerForm::Augmented {
-            // v −= (K ⊗ I₃) y (K symmetric: column j = row j).
+            // v = s L y − (K ⊗ I₃) y (s the fractional scale; K symmetric: column j = row j).
             let k = &self.laplacian;
             let (cp, ri, val) = (k.col_ptr(), k.row_idx(), k.values());
             for (y, v) in ys.iter().zip(vs.iter_mut()) {
+                if self.fractional_scale != 1.0 {
+                    v[..nd].iter_mut().for_each(|x| *x *= self.fractional_scale);
+                }
                 for j in 0..k.ncols() {
                     let mut acc = [0.0; 3];
                     for p in cp[j]..cp[j + 1] {
@@ -710,9 +850,6 @@ impl SparsePreconditioner {
                 }
             }
         }
-        self.applications.fetch_add(rs.len(), Ordering::Relaxed);
-        self.nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         Ok(zs)
     }
 }

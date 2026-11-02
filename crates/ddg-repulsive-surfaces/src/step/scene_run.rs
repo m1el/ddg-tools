@@ -183,7 +183,7 @@ pub struct RunReport {
 pub const CSV_HEADER: &str = "iteration,status,vertices,faces,energy_before,energy_after,energy_term,\
 gradient_norm,sobolev_norm_sq,tau0,tau,tau_ccd,halvings,solver,solves,gmres_iterations,max_residual,\
 newton,max_violation,splits,collapses,flips,ms_total,ms_bvh,ms_energy,ms_factor,ms_solve,\
-ms_line_search,ms_ccd,ms_projection,ms_remesh";
+ms_line_search,ms_ccd,ms_projection,ms_remesh,fallbacks,projection_blocked";
 
 /// One CSV line of a step (see [`CSV_HEADER`]).
 pub fn csv_line(r: &StepReport) -> String {
@@ -195,7 +195,7 @@ pub fn csv_line(r: &StepReport) -> String {
         .map_or((0, 0, 0), |m| (m.splits, m.collapses, m.flips));
     let _ = write!(
         s,
-        "{},{:?},{},{},{:.17e},{:.17e},{:.17e},{:.6e},{:.6e},{:.6e},{:.6e},{},{},{},{},{},{:.3e},{},{:.3e},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+        "{},{:?},{},{},{:.17e},{:.17e},{:.17e},{:.6e},{:.6e},{:.6e},{:.6e},{},{},{},{},{},{:.3e},{},{:.3e},{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{}",
         r.iteration,
         r.status,
         r.vertices,
@@ -227,6 +227,8 @@ pub fn csv_line(r: &StepReport) -> String {
         ms(r.seconds.ccd),
         ms(r.seconds.projection),
         ms(r.seconds.remesh),
+        r.linear.fallbacks.len(),
+        r.projection_blocked,
     );
     s
 }

@@ -454,6 +454,10 @@ pub enum ProjectionStatus {
     MaxRounds,
     /// A round did not lower `max_r |Φ_r|/tol_r`; it was undone and the rounds stopped.
     NotImproving,
+    /// The projection would have crossed an obstacle or the surface itself (or made the
+    /// objective infinite); only part of its motion was applied (the step's
+    /// `projection_fraction`; set by the session, `SPEC.md` §6.2).
+    Blocked,
 }
 
 /// Result of [`project`].

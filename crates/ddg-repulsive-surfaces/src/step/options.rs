@@ -132,6 +132,12 @@ pub struct LineSearch {
     /// on purpose (immersed Klein bottles, subcritical exponents): pairs closer than the gap
     /// may only halve their distance per step, which stalls such a flow.
     pub ccd: Option<CcdOptions>,
+    /// Guard the constraint projection like a trial (default `true`; `SPEC.md` §6.2, §7.3): an
+    /// Armijo-accepted trial is kept only if `F` stays finite after its projection and, with
+    /// CCD on, the projection's motion keeps the gap rule against the surface and the CCD
+    /// obstacles; otherwise the step is halved (`TrialOutcome::ProjectionBlocked`). A stuck
+    /// step applies only the admissible part of its projection (`ProjectionStatus::Blocked`).
+    pub guard_projection: bool,
 }
 
 impl Default for LineSearch {
@@ -142,6 +148,7 @@ impl Default for LineSearch {
             tau_min_rel: 1e-12,
             max_halvings: None,
             ccd: Some(CcdOptions::default()),
+            guard_projection: true,
         }
     }
 }

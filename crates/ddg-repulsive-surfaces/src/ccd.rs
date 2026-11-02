@@ -1322,6 +1322,16 @@ impl IntersectionBand {
         self.n_vertices == 0
     }
 
+    /// The band of every vertex of a surface with `n_vertices` vertices: every mesh–mesh pair
+    /// is exempt, so [`first_contact_with_band`] tests the obstacle pairs only.
+    pub fn all(n_vertices: usize) -> IntersectionBand {
+        IntersectionBand {
+            in_band: vec![true; n_vertices],
+            n_pairs: 0,
+            n_vertices,
+        }
+    }
+
     /// Number of intersecting face pairs at the start.
     pub fn intersecting_pairs(&self) -> usize {
         self.n_pairs

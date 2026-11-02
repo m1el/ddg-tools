@@ -14,6 +14,7 @@
 //!
 //! Filled by WP2 (`dense`, `schur`, `gmres`) and WP6 (`iterative`, `precond`, SPEC §15).
 
+pub mod coarse;
 pub mod dense;
 pub mod gmres;
 pub mod iterative;
