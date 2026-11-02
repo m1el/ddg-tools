@@ -330,6 +330,8 @@ fn sparse_preconditioner_matches_the_dense_one() {
                 fractional: pairs,
                 cluster: opts(0.0, 8),
                 form: PreconditionerForm::Congruence,
+                // The exact preconditioner (refined L' solves), compared to round-off.
+                refine: true,
                 ..Default::default()
             };
             let sp = SparsePreconditioner::new(pool.clone(), &s, &p, &e, &cq, &po, None, None).unwrap();
@@ -642,7 +644,11 @@ fn augmented_form_reaches_the_multipliers() {
         for form in [PreconditionerForm::Augmented, PreconditionerForm::Congruence] {
             for side in [GmresSide::Right, GmresSide::Left] {
                 let mut ho = HierarchicalOptions::default();
+                // The solver defaults this test was written for (tolerance 1e-4, restart 30).
+                ho.gmres = ddg_repulsive_surfaces::solve::GmresOptions::default();
                 ho.preconditioner.form = form;
+                // The exact preconditioner (refined L' solves): the D33 property of the forms.
+                ho.preconditioner.refine = true;
                 ho.gmres.side = side;
                 ho.gmres.max_iterations = 300;
                 let it = hierarchical_saddle(pool.clone(), &s, &p, &e, &SobolevWeights::default(), &MetricExtras::default(), &cq, &ho, None).unwrap();

@@ -83,16 +83,74 @@ impl SchurComplement {
             });
         }
         let ct = c.transpose();
-        let (cp, ri, val) = (ct.col_ptr(), ct.row_idx(), ct.values());
         let zero_b = vec![0.0; solver.n_constraints()];
+        let cols = Self::columns(&ct, k, nd);
+        let rhs: Vec<(&[f64], &[f64])> = cols.iter().map(|a| (a.as_slice(), zero_b.as_slice())).collect();
+        let sols = solver.solve_many(&rhs)?;
+        Ok(Self::from_solutions(nd, rows, c, ct, sols))
+    }
+
+    /// [`SchurComplement::new`] and [`SchurComplement::direction`] for `g` together: the `k`
+    /// Schur columns and `y = A′⁻¹ g` are solved as one batch ([`SaddleSolver::solve_many`]),
+    /// with the same results.
+    ///
+    /// [formula: rs-schur-direction]
+    ///
+    /// # Errors
+    /// As [`SchurComplement::new`] and [`SchurComplement::direction`].
+    pub fn with_direction(
+        solver: &mut dyn SaddleSolver,
+        rows: Vec<usize>,
+        c: SparseMatrix,
+        g: &[f64],
+    ) -> Result<(SchurComplement, Direction), RsError> {
+        let nd = solver.n_dofs();
+        let k = rows.len();
+        if c.nrows() != k || c.ncols() != nd {
+            return Err(RsError::InvalidOption {
+                name: "Schur Jacobian",
+                value: format!("{} x {}", c.nrows(), c.ncols()),
+                requirement: "one row per nonlinear row, 3|V| columns",
+            });
+        }
+        let ct = c.transpose();
+        let zero_b = vec![0.0; solver.n_constraints()];
+        let cols = Self::columns(&ct, k, nd);
+        let mut rhs: Vec<(&[f64], &[f64])> = cols.iter().map(|a| (a.as_slice(), zero_b.as_slice())).collect();
+        rhs.push((g, zero_b.as_slice()));
+        let mut sols = solver.solve_many(&rhs)?;
+        let ysol = sols.pop().expect("the direction's solve");
+        let schur = Self::from_solutions(nd, rows, c, ct, sols);
+        let dir = schur.direction_from(ysol);
+        Ok((schur, dir))
+    }
+
+    /// The right-hand sides `C_Nᵀ e_r` (dense, `3|V|`).
+    fn columns(ct: &SparseMatrix, k: usize, nd: usize) -> Vec<Vec<f64>> {
+        let (cp, ri, val) = (ct.col_ptr(), ct.row_idx(), ct.values());
+        (0..k)
+            .map(|r| {
+                let mut a = vec![0.0; nd];
+                for p in cp[r]..cp[r + 1] {
+                    a[ri[p] as usize] = val[p];
+                }
+                a
+            })
+            .collect()
+    }
+
+    fn from_solutions(
+        nd: usize,
+        rows: Vec<usize>,
+        c: SparseMatrix,
+        ct: SparseMatrix,
+        sols: Vec<super::SaddleSolution>,
+    ) -> SchurComplement {
+        let k = rows.len();
+        let (cp, ri, val) = (ct.col_ptr(), ct.row_idx(), ct.values());
         let mut z = Vec::with_capacity(k);
         let mut records = Vec::with_capacity(k);
-        for r in 0..k {
-            let mut a = vec![0.0; nd];
-            for p in cp[r]..cp[r + 1] {
-                a[ri[p] as usize] = val[p];
-            }
-            let sol = solver.solve(&a, &zero_b)?;
+        for sol in sols {
             z.push(sol.x);
             records.push(sol.record);
         }
@@ -121,7 +179,7 @@ impl SchurComplement {
             records,
         };
         out.factor();
-        Ok(out)
+        out
     }
 
     /// Equilibrated, pivoted Cholesky of `N = −½(S + Sᵀ)` with row dropping (module docs).
@@ -260,6 +318,11 @@ impl SchurComplement {
     pub fn direction(&self, solver: &mut dyn SaddleSolver, g: &[f64]) -> Result<Direction, RsError> {
         let zero_b = vec![0.0; solver.n_constraints()];
         let sol = solver.solve(g, &zero_b)?;
+        Ok(self.direction_from(sol))
+    }
+
+    /// The direction from the solution `y = A′⁻¹ g`.
+    fn direction_from(&self, sol: super::SaddleSolution) -> Direction {
         let y = sol.x;
         // S⁻¹ = −N⁻¹: x = y − Z N⁻¹ C_N y.
         let cy = self.apply_c(&y);
@@ -271,12 +334,12 @@ impl SchurComplement {
             .kept
             .iter()
             .fold(0.0f64, |m, &i| m.max(cnx[i].abs()));
-        Ok(Direction {
+        Direction {
             x,
             lambda: sol.lambda,
             record: sol.record,
             max_nonlinear_residual: max_cnx,
-        })
+        }
     }
 
     /// The Newton correction `h = −Z S⁻¹ Φ_N` (`C_N h = Φ_N` on the kept rows, `C_Q h = 0`), to

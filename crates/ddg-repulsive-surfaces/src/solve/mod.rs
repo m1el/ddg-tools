@@ -23,7 +23,7 @@ pub mod schur;
 pub use dense::{DensePreconditioner, DenseSaddle, DenseSaddleOperator};
 pub use gmres::{
     GmresOptions, GmresReport, GmresSaddle, GmresSide, IdentityPreconditioner, LinearOperator,
-    Preconditioner, gmres,
+    Preconditioner, gmres, gmres_batch, gmres_batch_on,
 };
 pub use schur::{
     Direction, NewtonSteps, Projection, ProjectionOptions, ProjectionStatus, SchurComplement,
@@ -113,6 +113,15 @@ pub trait SaddleSolver {
     /// [`RsError::InvalidOption`] for wrong lengths; back-end failures
     /// ([`RsError::SolverDiverged`], …).
     fn solve(&mut self, a: &[f64], b: &[f64]) -> Result<SaddleSolution, RsError>;
+    /// Solves for several right-hand sides `(a, b)` (default: one [`SaddleSolver::solve`]
+    /// each, in order). Iterative back ends advance the solves together and batch their
+    /// products ([`gmres::gmres_batch`]); every solution is the one `solve` would return.
+    ///
+    /// # Errors
+    /// As [`SaddleSolver::solve`] (the first failing solve).
+    fn solve_many(&mut self, rhs: &[(&[f64], &[f64])]) -> Result<Vec<SaddleSolution>, RsError> {
+        rhs.iter().map(|(a, b)| self.solve(a, b)).collect()
+    }
     /// The report of the back end so far (factorization data; the solves are collected by the
     /// caller from [`SaddleSolution::record`]).
     fn base_report(&self) -> LinearReport;

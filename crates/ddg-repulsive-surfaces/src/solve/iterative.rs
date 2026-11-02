@@ -245,42 +245,78 @@ impl LinearOperator for HierarchicalOperator {
     }
 
     fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
+        self.apply_batch(&[x], &mut [y])
+    }
+
+    /// One pass of the block cluster tree for all vectors (App. B); every output is bitwise
+    /// that of [`LinearOperator::apply`].
+    fn apply_batch(&self, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
         let t0 = Instant::now();
         let nd = self.n_dofs();
         let n = self.dim();
-        if x.len() != n || y.len() != n {
+        if xs.len() != ys.len() || xs.iter().zip(ys.iter()).any(|(x, y)| x.len() != n || y.len() != n) {
             return Err(RsError::InvalidOption {
                 name: "saddle operator vector",
-                value: format!("({}, {})", x.len(), y.len()),
-                requirement: "3|V| + k_Q entries",
+                value: format!("{} inputs, {} outputs", xs.len(), ys.len()),
+                requirement: "3|V| + k_Q entries, one output per input",
             });
         }
-        let (xp, xl) = x.split_at(nd);
-        let (yp, yl) = y.split_at_mut(nd);
-        self.apply_metric(xp, yp)?;
-        if !xl.is_empty() {
-            let mut ctl = vec![0.0; nd];
-            self.ct
-                .mul_vec(xl, &mut ctl)
-                .map_err(|e| sparse_err(e, "C^T"))?;
-            for (a, b) in yp.iter_mut().zip(&ctl) {
-                *a += b;
-            }
-            self.c.mul_vec(xp, yl).map_err(|e| sparse_err(e, "C"))?;
+        {
+            let xp: Vec<&[f64]> = xs.iter().map(|x| &x[..nd]).collect();
+            let mut yp: Vec<&mut [f64]> = ys.iter_mut().map(|y| &mut y[..nd]).collect();
+            let w = self.weights.tp_weight;
+            self.tree.apply_batch(
+                &self.pool,
+                w,
+                w * self.weights.c_lo(),
+                self.obstacle.as_ref(),
+                &xp,
+                &mut yp,
+            )?;
         }
-        self.applications.fetch_add(1, Ordering::Relaxed);
+        for (x, y) in xs.iter().zip(ys.iter_mut()) {
+            let (xp, xl) = x.split_at(nd);
+            let (yp, yl) = y.split_at_mut(nd);
+            if let Some(m) = &self.willmore {
+                add_kron3(m, xp, yp);
+            }
+            if !xl.is_empty() {
+                let mut ctl = vec![0.0; nd];
+                self.ct
+                    .mul_vec(xl, &mut ctl)
+                    .map_err(|e| sparse_err(e, "C^T"))?;
+                for (a, b) in yp.iter_mut().zip(&ctl) {
+                    *a += b;
+                }
+                self.c.mul_vec(xp, yl).map_err(|e| sparse_err(e, "C"))?;
+            }
+        }
+        self.applications.fetch_add(xs.len(), Ordering::Relaxed);
         self.nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         Ok(())
     }
 }
 
+/// GMRES of the flow's hierarchical back end (WP17, `NOTES-WP17.md`): right preconditioned,
+/// relative true-residual tolerance `1e-3`, restart 60, at most 200 iterations. The tolerance is
+/// below the error of the compressed operator itself (`χ = 0.5`: directions within 4e-3–2e-2 of
+/// the exact ones, `NOTES-WP6.md`); against `1e-4` it saves 20 % of the iterations with the same
+/// energies after 200 steps on 10 scenes. Restart 60 instead of 30 halves the iterations where
+/// GMRES needs more than one cycle (Walnut) and changes nothing elsewhere.
+pub const FLOW_GMRES: GmresOptions = GmresOptions {
+    restart: 60,
+    tolerance: 1e-3,
+    max_iterations: 200,
+    side: super::gmres::GmresSide::Right,
+};
+
 /// Options of the hierarchical back end (`SPEC.md` §6.3, §8.4).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HierarchicalOptions {
     /// The block cluster trees of `B`, `B⁰` and `L_{2−s}` (`χ`, leaf size).
     pub cluster: ClusterTreeOptions,
-    /// GMRES (right, restart 30, tolerance `1e-4`, 200 iterations).
+    /// GMRES (default [`FLOW_GMRES`]: right, restart 60, tolerance `1e-3`, 200 iterations).
     pub gmres: GmresOptions,
     /// `ε_rel`, `ε_multi_rel`, the fractional form (vertex pairs) — the cluster options of the
     /// preconditioner are replaced by [`HierarchicalOptions::cluster`].
@@ -289,6 +325,10 @@ pub struct HierarchicalOptions {
     /// `false`: measured harmful, 6 → 154 iterations at `w_W = 0.01` and divergence at `w_W ≥ 1` on
     /// a 10k torus, while without it the iterations stay 5–20, `NOTES-WP6.md`).
     pub willmore_in_preconditioner: bool,
+    /// Add the mesh-obstacle term `O_diag` (as the sparse vertex matrix
+    /// [`obstacle_vertex_matrix`]) to the preconditioner's Laplacian block (default `false`,
+    /// `NOTES-WP17.md`).
+    pub obstacle_in_preconditioner: bool,
 }
 
 impl HierarchicalOptions {
@@ -297,8 +337,23 @@ impl HierarchicalOptions {
         let mut o = Self::default();
         o.preconditioner.fractional = FractionalForm::FacePairs;
         o.preconditioner.form = super::precond::PreconditionerForm::Congruence;
+        o.gmres = GmresOptions::default();
         o.gmres.side = super::gmres::GmresSide::Left;
         o
+    }
+}
+
+impl Default for HierarchicalOptions {
+    /// `χ = 0.5`, leaf size 8, [`FLOW_GMRES`], the default preconditioner, no Willmore or
+    /// obstacle term in the preconditioner.
+    fn default() -> Self {
+        HierarchicalOptions {
+            cluster: ClusterTreeOptions::default(),
+            gmres: FLOW_GMRES,
+            preconditioner: PreconditionerOptions::default(),
+            willmore_in_preconditioner: false,
+            obstacle_in_preconditioner: false,
+        }
     }
 }
 
@@ -381,11 +436,25 @@ pub fn hierarchical_saddle(
     let willmore = extras.weighted_willmore(surface, positions, weights)?;
     let mut popts = options.preconditioner;
     popts.cluster = options.cluster;
-    let extra = if options.willmore_in_preconditioner {
-        willmore.as_ref()
+    let mut extra = if options.willmore_in_preconditioner {
+        willmore.clone()
     } else {
         None
     };
+    if options.obstacle_in_preconditioner
+        && let Some(o) = &extras.obstacle
+    {
+        let om = obstacle_vertex_matrix(tree.operators(), o)?;
+        extra = Some(match extra {
+            None => om,
+            Some(w) => {
+                let mut t: Vec<(u32, u32, f64)> = w.triplets().collect();
+                t.extend(om.triplets());
+                SparseMatrix::from_triplets(w.nrows(), w.ncols(), &t)
+                    .map_err(|e| sparse_err(e, "preconditioner extra term"))?
+            }
+        });
+    }
     let prec = SparsePreconditioner::with_metric_tree(
         pool.clone(),
         surface,
@@ -393,12 +462,49 @@ pub fn hierarchical_saddle(
         exponents,
         c_q,
         &popts,
-        extra,
+        extra.as_ref(),
         &tree,
     )?;
-    let op = HierarchicalOperator::new(pool, tree, weights, willmore, extras.obstacle.clone(), c_q)?;
+    let op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
     let nd = op.n_dofs();
-    Ok(GmresSaddle::new(op, prec, nd, options.gmres)?.with_label("gmres (hierarchical)"))
+    Ok(GmresSaddle::new(op, prec, nd, options.gmres)?
+        .with_label("gmres (hierarchical)")
+        .with_pool(pool))
+}
+
+/// The obstacle term `O_diag = 2 Vᵀ diag(hi/a) V + 2 Uᵀ diag(lo/a) U` of `SPEC.md` §4.4 as a
+/// scalar sparse vertex matrix `O` (`O_diag = O ⊗ I₃`):
+/// `O_vw = 2 Σ_S a_S (hi_S g_c(v)(S) · g_c(w)(S) + lo_S / 9)` over the faces `S ∋ v, w`.
+///
+/// # Errors
+/// [`RsError::InvalidOption`] for a diagonal of the wrong length.
+pub fn obstacle_vertex_matrix(ops: &FaceOperators, d: &FaceDiagonal) -> Result<SparseMatrix, RsError> {
+    let nf = ops.n_faces();
+    for (name, v) in [("obstacle diagonal hi", &d.hi), ("obstacle diagonal lo", &d.lo)] {
+        if !v.is_empty() && v.len() != nf {
+            return Err(RsError::InvalidOption {
+                name,
+                value: format!("{} entries", v.len()),
+                requirement: "one entry per face",
+            });
+        }
+    }
+    let mut trip = Vec::with_capacity(9 * nf);
+    for s in 0..nf {
+        let hi = d.hi.get(s).copied().unwrap_or(0.0);
+        let lo = d.lo.get(s).copied().unwrap_or(0.0);
+        let a = ops.areas[s];
+        let g = &ops.df[s];
+        let t = ops.faces[s];
+        for i in 0..3 {
+            for j in 0..3 {
+                let gg = g[i][0] * g[j][0] + g[i][1] * g[j][1] + g[i][2] * g[j][2];
+                trip.push((t[i], t[j], 2.0 * a * (hi * gg + lo / 9.0)));
+            }
+        }
+    }
+    SparseMatrix::from_triplets(ops.n_vertices, ops.n_vertices, &trip)
+        .map_err(|e| sparse_err(e, "obstacle vertex matrix"))
 }
 
 /// The dense metric `A` with the extras (the supplied Willmore matrix replaces the computed one).

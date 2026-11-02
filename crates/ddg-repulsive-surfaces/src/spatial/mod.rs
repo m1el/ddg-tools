@@ -21,6 +21,8 @@
 //! node `C` for leaf `ℓ` is [`bh_admissible`]: `max(r_ℓ, r_C) < θ · d_box(ℓ, C)` with
 //! [`box_distance_sq`]. The block cluster tree (WP6) uses `≤` on the same quantities.
 
+pub mod block_tree;
+
 use ddg_repulsive_curves::spatial::{Aabb, Bvh, Element};
 
 use crate::error::RsError;

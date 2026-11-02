@@ -119,6 +119,29 @@ pub struct BhTree {
     geom: FaceGeometry,
     tree: FaceTree,
     lists: InteractionLists,
+    /// The face data in BVH order (`tree.bvh().order()`), so that a leaf's faces are contiguous
+    /// in memory (the same values as `geom`).
+    packed: Vec<Packed>,
+}
+
+/// Barycenter, normal and area of a face, stored in BVH order.
+#[derive(Debug, Clone, Copy, Default)]
+struct Packed {
+    x: [f64; 3],
+    n: [f64; 3],
+    a: f64,
+}
+
+fn pack(tree: &FaceTree, geom: &FaceGeometry, out: &mut Vec<Packed>) {
+    out.clear();
+    out.extend(tree.bvh().order().iter().map(|&f| {
+        let f = f as usize;
+        Packed {
+            x: geom.barycenters[f],
+            n: geom.normals[f],
+            a: geom.areas[f],
+        }
+    }));
 }
 
 impl BhTree {
@@ -154,6 +177,8 @@ impl BhTree {
         opts.validate()?;
         let tree = FaceTree::build(surface, positions, &geom, opts.leaf_size)?;
         let lists = build_lists(pool, &tree, opts.theta);
+        let mut packed = Vec::new();
+        pack(&tree, &geom, &mut packed);
         Ok(BhTree {
             opts,
             faces: surface.faces().to_vec(),
@@ -162,6 +187,7 @@ impl BhTree {
             geom,
             tree,
             lists,
+            packed,
         })
     }
 
@@ -195,6 +221,7 @@ impl BhTree {
             g.normals[f] = n;
             g.barycenters[f] = x;
         }
+        pack(&self.tree, &self.geom, &mut self.packed);
         self.tree.refit_faces(&self.faces, positions, &self.geom)
     }
 
@@ -387,36 +414,42 @@ impl BhTree {
     /// The same operations as [`BhTree::leaf_with_gradient`] for the value.
     fn leaf_energy(&self, k: usize, e: &Exponents) -> f64 {
         let tree = &self.tree;
-        let g = &self.geom;
-        let sfaces = tree.faces_of(tree.leaves()[k] as usize);
+        let pk = &self.packed;
+        let srange = self.range(tree.leaves()[k] as usize);
         let mut energy = 0.0;
         for &c in self.lists.lumped_of(k) {
             let cl = &tree.clusters()[c as usize];
             let mut b = 0.0;
-            for &s in sfaces {
-                let s = s as usize;
-                let v = sub(g.barycenters[s], cl.centroid);
-                b += g.areas[s] * kernel_of_v(e, v, g.normals[s]);
+            for fs in &pk[srange.clone()] {
+                let v = sub(fs.x, cl.centroid);
+                b += fs.a * kernel_of_v(e, v, fs.n);
             }
             energy += b * cl.area;
         }
         for &c in self.lists.exact_of(k) {
-            let tfaces = tree.faces_of(c as usize);
-            for &s in sfaces {
-                let s = s as usize;
-                let (xs, ns) = (g.barycenters[s], g.normals[s]);
+            let trange = self.range(c as usize);
+            for ps in srange.clone() {
+                let fs = &pk[ps];
+                let (xs, ns) = (fs.x, fs.n);
                 let mut row = 0.0;
-                for &t in tfaces {
-                    let t = t as usize;
-                    if t == s {
+                for pt in trange.clone() {
+                    if pt == ps {
                         continue;
                     }
-                    row += g.areas[t] * kernel_of_v(e, sub(xs, g.barycenters[t]), ns);
+                    let ft = &pk[pt];
+                    row += ft.a * kernel_of_v(e, sub(xs, ft.x), ns);
                 }
-                energy += g.areas[s] * row;
+                energy += fs.a * row;
             }
         }
         energy
+    }
+
+    /// The BVH positions of node `n`'s faces.
+    #[inline]
+    fn range(&self, n: usize) -> std::ops::Range<usize> {
+        let nd = &self.tree.bvh().nodes()[n];
+        nd.start as usize..nd.end as usize
     }
 
     /// Leaf `k`: its energy (as [`BhTree::leaf_energy`]), the own partials of its faces, the
@@ -425,9 +458,9 @@ impl BhTree {
     /// [formula: rs-bh-aggregate-adjoint]
     fn leaf_with_gradient(&self, k: usize, e: &Exponents) -> LeafOut {
         let tree = &self.tree;
-        let g = &self.geom;
-        let sfaces = tree.faces_of(tree.leaves()[k] as usize);
-        let ns_len = sfaces.len();
+        let pk = &self.packed;
+        let srange = self.range(tree.leaves()[k] as usize);
+        let ns_len = srange.len();
         let mut out = LeafOut {
             energy: 0.0,
             own: vec![(0.0, [0.0; 3], [0.0; 3]); ns_len],
@@ -439,11 +472,10 @@ impl BhTree {
             let ac = cl.area;
             let mut b = 0.0;
             let mut u = [0.0; 3];
-            for (i, &s) in sfaces.iter().enumerate() {
-                let s = s as usize;
-                let a_s = g.areas[s];
-                let v = sub(g.barycenters[s], cl.centroid);
-                let kv = kernel_with_gradient_of_v(e, v, g.normals[s]);
+            for (i, fs) in pk[srange.clone()].iter().enumerate() {
+                let a_s = fs.a;
+                let v = sub(fs.x, cl.centroid);
+                let kv = kernel_with_gradient_of_v(e, v, fs.n);
                 b += a_s * kv.value;
                 let o = &mut out.own[i];
                 o.0 += kv.value * ac;
@@ -455,22 +487,22 @@ impl BhTree {
             out.node.push((b, u));
         }
         for &c in self.lists.exact_of(k) {
-            let tfaces = tree.faces_of(c as usize);
+            let trange = self.range(c as usize);
             let base = out.partner.len();
-            out.partner.resize(base + tfaces.len(), (0.0, [0.0; 3]));
-            for (i, &s) in sfaces.iter().enumerate() {
-                let s = s as usize;
-                let (xs, ns, a_s) = (g.barycenters[s], g.normals[s], g.areas[s]);
+            out.partner.resize(base + trange.len(), (0.0, [0.0; 3]));
+            for (i, ps) in srange.clone().enumerate() {
+                let fs = &pk[ps];
+                let (xs, ns, a_s) = (fs.x, fs.n, fs.a);
                 let mut row = 0.0;
                 let mut dx = [0.0; 3];
                 let mut dn = [0.0; 3];
-                for (j, &t) in tfaces.iter().enumerate() {
-                    let t = t as usize;
-                    if t == s {
+                for (j, pt) in trange.clone().enumerate() {
+                    if pt == ps {
                         continue;
                     }
-                    let a_t = g.areas[t];
-                    let kv = kernel_with_gradient_of_v(e, sub(xs, g.barycenters[t]), ns);
+                    let ft = &pk[pt];
+                    let a_t = ft.a;
+                    let kv = kernel_with_gradient_of_v(e, sub(xs, ft.x), ns);
                     row += a_t * kv.value;
                     dx = axpy(dx, a_t, kv.d_v);
                     dn = axpy(dn, a_t, kv.d_n);

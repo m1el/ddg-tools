@@ -113,8 +113,16 @@ pub struct Timings {
     /// The solver of `A′`: dense assembly + LU, or the block cluster tree, `L′` factorization
     /// and the fractional tree; the constraint set.
     pub factor: f64,
+    /// Part of `factor`: the block cluster tree of `B`, `B⁰` (hierarchical back end).
+    pub metric_tree: f64,
+    /// Part of `factor`: the tree of the preconditioner's `L_{2−s}` (hierarchical back end).
+    pub fractional_tree: f64,
+    /// Part of `factor`: assembly and sparse `LDLᵀ` of the preconditioner's `L′`.
+    pub lprime: f64,
     /// The Schur columns and the direction (GMRES or back substitutions).
     pub solve: f64,
+    /// Part of `solve`: the applications of the preconditioner (hierarchical back end).
+    pub preconditioner: f64,
     /// The line search (all trials).
     pub line_search: f64,
     /// Continuous collision detection.
@@ -802,17 +810,21 @@ impl Session {
         )?;
         seconds.factor += t.elapsed().as_secs_f64();
         let t = Instant::now();
-        let schur = SchurComplement::new(solver.as_dyn(), nrows.clone(), c_n)?;
         let mut guard = self.method_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let dir_res = match (guard.as_mut(), solver.as_sparse()) {
-            (Some(m), Some(sp)) => {
-                let geom = crate::geometry::FaceGeometry::new(&self.surface, &self.positions)?;
-                let area: f64 = geom.areas.iter().sum();
-                m.direction(sp, &self.positions, &g, &c_q, area)
-            }
-            _ => schur
-                .direction(solver.as_dyn(), &g)
-                .map(|d| (d.x, d.record)),
+        let quasi_newton = guard.is_some() && solver.as_sparse().is_some();
+        let (schur, dir_res) = if quasi_newton {
+            let schur = SchurComplement::new(solver.as_dyn(), nrows.clone(), c_n)?;
+            let (Some(m), Some(sp)) = (guard.as_mut(), solver.as_sparse()) else {
+                unreachable!("checked above")
+            };
+            let geom = crate::geometry::FaceGeometry::new(&self.surface, &self.positions)?;
+            let area: f64 = geom.areas.iter().sum();
+            let d = m.direction(sp, &self.positions, &g, &c_q, area);
+            (schur, d)
+        } else {
+            // The Schur columns and the direction's solve as one batch (same results).
+            let (schur, d) = SchurComplement::with_direction(solver.as_dyn(), nrows.clone(), c_n, &g)?;
+            (schur, Ok((d.x, d.record)))
         };
         drop(guard);
         let (dir_x, dir_record) = dir_res?;
@@ -1012,6 +1024,12 @@ impl Session {
         };
         seconds.projection = t.elapsed().as_secs_f64();
         let products = solver.products();
+        if let Some(t) = solver.build_timings() {
+            seconds.metric_tree = t[0];
+            seconds.fractional_tree = t[1];
+            seconds.lprime = t[2];
+            seconds.preconditioner = t[3];
+        }
         let mut dropped_rows: Vec<usize> = set.dropped_rows().to_vec();
         dropped_rows.extend(proj.dropped_rows.iter().copied());
         dropped_rows.sort_unstable();
