@@ -1145,7 +1145,8 @@ Rounds (≤ 3 agents; timed work alone at the end):
   preconditioner), punctured torus diverges after 38–80 steps (WP17), open surfaces without
   remeshing need 225–678 GMRES iterations.
 * Fig. 16 (Ishii et al. 2012 table): no arXiv version exists; the user supplied the PDF
-  (`/var/data/discrete-geometry/ishii2012.pdf`, not in the repository); transcription in progress. WP12 read "figure-8 / trefoil tunnel" as knotted
+  (`/var/data/discrete-geometry/ishii2012.pdf`, not in the repository); all 21 entries transcribed
+  and flowed (17 converged, 4 at the 3000-step cap; `NOTES-ISHII.md`). WP12 read "figure-8 / trefoil tunnel" as knotted
   tori (tubes around the knot); recorded as an interpretation.
 
 ## 17. The user's decisions (2026-11-01)

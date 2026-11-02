@@ -153,7 +153,15 @@ to an area constraint, because a free flow inflates the surface. See `blender/RE
   11k / 40k / 135k faces); L² slows 2.6×; H¹, H², AQP are flat on that easy surface. So the paper's
   per-iteration claim holds and its wall-clock claim holds on three of five meshes under these
   conditions (SPEC §14.2).
-* **Knotted genus-2 table (Fig. 16, Ishii et al. 2012).** (results pending: Fig. 16 transcription)
+* **Knotted genus-2 table (Fig. 16, Ishii et al. 2012).** All 21 entries of Table 1 (4₁, 5₁–5₄,
+  6₁–6₁₆) transcribed from the paper (supplied by the user; kept outside the repository) as spatial
+  trivalent graphs (`generate::ishii`, traced by `tools/ishii_extract.py`; each entry's crossing count
+  and per-edge over/under sequence checked against the diagram, a mirror image fails the check),
+  meshed as tubes at ≈ 14k faces (genus 2, embedded). Flowed with barycenter + area constraints and
+  the defaults: all 21 stay genus 2 and embedded; 17 converge in 497–2551 steps, 5₁, 6₁, 6₈ and 6₁₀
+  were still slowly decreasing at the 3000-step cap. One start per entry: these are minimizers
+  reached by the flow, not shown to be global ones; no invariant confirms the entries are mutually
+  inequivalent (`NOTES-ISHII.md`).
 
 ## Verification
 
