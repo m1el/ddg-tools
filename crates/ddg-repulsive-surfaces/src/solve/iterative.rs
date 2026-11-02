@@ -465,9 +465,11 @@ pub fn hierarchical_saddle(
         extra.as_ref(),
         &tree,
     )?;
-    let op = HierarchicalOperator::new(pool, tree, weights, willmore, extras.obstacle.clone(), c_q)?;
+    let op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
     let nd = op.n_dofs();
-    Ok(GmresSaddle::new(op, prec, nd, options.gmres)?.with_label("gmres (hierarchical)"))
+    Ok(GmresSaddle::new(op, prec, nd, options.gmres)?
+        .with_label("gmres (hierarchical)")
+        .with_pool(pool))
 }
 
 /// The obstacle term `O_diag = 2 Vᵀ diag(hi/a) V + 2 Uᵀ diag(lo/a) U` of `SPEC.md` §4.4 as a

@@ -26,7 +26,7 @@
 
 use std::time::Instant;
 
-use super::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord, check_rhs, norm2};
+use super::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord, check_rhs};
 use crate::error::RsError;
 
 /// A square linear operator `y = A x`.
@@ -222,8 +222,58 @@ pub struct GmresReport {
     pub seconds: f64,
 }
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
+/// Length of the fixed chunks of the vector reductions: a dot product is the sum, in chunk
+/// order, of the sequential dot products of the chunks, whatever the pool (deterministic).
+const CHUNK: usize = 4096;
+
+fn dot_seq(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// The vector operations of GMRES, in parallel on an optional pool, with results that do not
+/// depend on it (fixed chunks, partial sums added in chunk order).
+#[derive(Clone, Copy)]
+struct Vecs<'p> {
+    pool: Option<&'p rayon::ThreadPool>,
+}
+
+impl Vecs<'_> {
+    fn dot(&self, a: &[f64], b: &[f64]) -> f64 {
+        use rayon::prelude::*;
+        let parts: Vec<f64> = match self.pool {
+            Some(pool) if a.len() > CHUNK => pool.install(|| {
+                a.par_chunks(CHUNK)
+                    .zip(b.par_chunks(CHUNK))
+                    .map(|(x, y)| dot_seq(x, y))
+                    .collect()
+            }),
+            _ => a.chunks(CHUNK).zip(b.chunks(CHUNK)).map(|(x, y)| dot_seq(x, y)).collect(),
+        };
+        parts.iter().sum()
+    }
+
+    fn norm(&self, a: &[f64]) -> f64 {
+        self.dot(a, a).sqrt()
+    }
+
+    /// `w −= h v` and then `w · next` in one pass (`next` = `None`: no dot, returns 0).
+    fn axpy_dot(&self, w: &mut [f64], h: f64, v: &[f64], next: Option<&[f64]>) -> f64 {
+        use rayon::prelude::*;
+        let chunk = |(k, wc): (usize, &mut [f64])| -> f64 {
+            let r = k * CHUNK..(k * CHUNK + wc.len());
+            for (wk, vk) in wc.iter_mut().zip(&v[r.clone()]) {
+                *wk -= h * vk;
+            }
+            next.map_or(0.0, |nx| dot_seq(wc, &nx[r]))
+        };
+        let parts: Vec<f64> = match self.pool {
+            Some(pool) if w.len() > CHUNK => {
+                pool.install(|| w.par_chunks_mut(CHUNK).enumerate().map(chunk).collect())
+            }
+            _ => w.chunks_mut(CHUNK).enumerate().map(chunk).collect(),
+        };
+        parts.iter().sum()
+    }
 }
 
 /// What a [`GmresRun`] needs next.
@@ -259,6 +309,7 @@ enum Pending {
 /// or preconditioner product at a time, so that several solves can share batched products
 /// ([`gmres_batch`]). The arithmetic of a run does not depend on how its products are batched.
 struct GmresRun<'a> {
+    vecs: Vecs<'a>,
     b: &'a [f64],
     options: GmresOptions,
     left: bool,
@@ -282,10 +333,16 @@ struct GmresRun<'a> {
 
 impl<'a> GmresRun<'a> {
     /// Starts a solve of dimension `n`; returns the run and its first request.
-    fn start(n: usize, b: &'a [f64], options: &GmresOptions) -> Result<(GmresRun<'a>, Request), RsError> {
+    fn start(
+        n: usize,
+        b: &'a [f64],
+        options: &GmresOptions,
+        vecs: Vecs<'a>,
+    ) -> Result<(GmresRun<'a>, Request), RsError> {
         options.validate()?;
         let t0 = Instant::now();
         let mut run = GmresRun {
+            vecs,
             b,
             options: *options,
             left: options.side == GmresSide::Left,
@@ -297,7 +354,7 @@ impl<'a> GmresRun<'a> {
                 ..Default::default()
             },
             x: vec![0.0; n],
-            bnorm: norm2(b),
+            bnorm: vecs.norm(b),
             ref_norm: 0.0,
             true_rel: 0.0,
             basis: Vec::new(),
@@ -351,7 +408,7 @@ impl<'a> GmresRun<'a> {
     }
 
     fn after_residual(&mut self, r: Vec<f64>) -> Request {
-        self.true_rel = norm2(&r) / self.bnorm;
+        self.true_rel = self.vecs.norm(&r) / self.bnorm;
         if self.left {
             self.rep.preconditioner_applications += 1;
             self.pending = Pending::Measure;
@@ -361,7 +418,7 @@ impl<'a> GmresRun<'a> {
     }
 
     fn after_measure(&mut self, measure: Vec<f64>) -> Request {
-        let beta = norm2(&measure);
+        let beta = self.vecs.norm(&measure);
         let rel = beta / self.ref_norm;
         self.rep.cycle_residuals.push(rel);
         if !rel.is_finite() {
@@ -396,15 +453,15 @@ impl<'a> GmresRun<'a> {
     /// Modified Gram–Schmidt, the Givens rotations, the stop test of one Arnoldi step.
     fn after_arnoldi(&mut self, mut w: Vec<f64>) -> Request {
         let j = self.j;
+        // Modified Gram–Schmidt: each update fused with the next projection's dot product.
         let mut col = vec![0.0; j + 2];
+        let mut hij = self.vecs.dot(&w, &self.basis[0]);
         for i in 0..=j {
-            let hij = dot(&w, &self.basis[i]);
             col[i] = hij;
-            for (wk, vk) in w.iter_mut().zip(&self.basis[i]) {
-                *wk -= hij * vk;
-            }
+            let next = (i < j).then(|| self.basis[i + 1].as_slice());
+            hij = self.vecs.axpy_dot(&mut w, col[i], &self.basis[i], next);
         }
-        let hn = norm2(&w);
+        let hn = self.vecs.norm(&w);
         col[j + 1] = hn;
         let (cs, sn) = (&mut self.cs, &mut self.sn);
         for i in 0..j {
@@ -477,7 +534,7 @@ impl<'a> GmresRun<'a> {
     fn advance(&mut self, out: Vec<f64>) -> Result<Request, RsError> {
         Ok(match self.pending {
             Pending::RefNorm => {
-                self.ref_norm = norm2(&out);
+                self.ref_norm = self.vecs.norm(&out);
                 return self.after_ref_norm();
             }
             Pending::Residual => {
@@ -542,6 +599,22 @@ pub fn gmres(
     out.pop().expect("one solve")
 }
 
+/// [`gmres_batch`] with its vector operations (Gram–Schmidt, norms) in parallel on `pool`; the
+/// results do not depend on the pool.
+///
+/// # Errors
+/// As [`gmres_batch`].
+#[allow(clippy::type_complexity)]
+pub fn gmres_batch_on(
+    pool: Option<&rayon::ThreadPool>,
+    op: &dyn LinearOperator,
+    prec: &dyn Preconditioner,
+    bs: &[&[f64]],
+    options: &GmresOptions,
+) -> Result<Vec<Result<(Vec<f64>, GmresReport), RsError>>, RsError> {
+    batch_impl(Vecs { pool }, op, prec, bs, options)
+}
+
 /// [`gmres`] for several right-hand sides at once: independent solves (each exactly as
 /// [`gmres`] would do it) that advance in lockstep, so that the products they need at the same
 /// time go through [`LinearOperator::apply_batch`] and [`Preconditioner::apply_batch`] together
@@ -559,6 +632,17 @@ pub fn gmres_batch(
     bs: &[&[f64]],
     options: &GmresOptions,
 ) -> Result<Vec<Result<(Vec<f64>, GmresReport), RsError>>, RsError> {
+    batch_impl(Vecs { pool: None }, op, prec, bs, options)
+}
+
+#[allow(clippy::type_complexity)]
+fn batch_impl<'a>(
+    vecs: Vecs<'a>,
+    op: &dyn LinearOperator,
+    prec: &dyn Preconditioner,
+    bs: &[&'a [f64]],
+    options: &GmresOptions,
+) -> Result<Vec<Result<(Vec<f64>, GmresReport), RsError>>, RsError> {
     options.validate()?;
     let n = op.dim();
     for b in bs {
@@ -573,7 +657,7 @@ pub fn gmres_batch(
     let mut runs = Vec::with_capacity(bs.len());
     let mut reqs = Vec::with_capacity(bs.len());
     for b in bs {
-        let (r, q) = GmresRun::start(n, b, options)?;
+        let (r, q) = GmresRun::start(n, b, options, vecs)?;
         runs.push(r);
         reqs.push(q);
     }
@@ -636,6 +720,7 @@ pub struct GmresSaddle<O, P> {
     n_dofs: usize,
     options: GmresOptions,
     label: &'static str,
+    pool: Option<std::sync::Arc<rayon::ThreadPool>>,
 }
 
 impl<O: LinearOperator, P: Preconditioner> GmresSaddle<O, P> {
@@ -659,7 +744,14 @@ impl<O: LinearOperator, P: Preconditioner> GmresSaddle<O, P> {
             n_dofs,
             options,
             label: "gmres",
+            pool: None,
         })
+    }
+
+    /// Runs the vector operations of GMRES on `pool` ([`gmres_batch_on`]; same results).
+    pub fn with_pool(mut self, pool: std::sync::Arc<rayon::ThreadPool>) -> Self {
+        self.pool = Some(pool);
+        self
     }
 
     /// Sets the solver name of the report.
@@ -691,7 +783,9 @@ impl<O: LinearOperator, P: Preconditioner> SaddleSolver for GmresSaddle<O, P> {
     fn solve(&mut self, a: &[f64], b: &[f64]) -> Result<SaddleSolution, RsError> {
         check_rhs(self, a, b)?;
         let rhs: Vec<f64> = a.iter().chain(b).copied().collect();
-        let (y, rep) = gmres(&self.op, &self.prec, &rhs, &self.options)?;
+        let (y, rep) = gmres_batch_on(self.pool.as_deref(), &self.op, &self.prec, &[&rhs], &self.options)?
+            .pop()
+            .expect("one solve")?;
         Ok(SaddleSolution {
             x: y[..self.n_dofs].to_vec(),
             lambda: y[self.n_dofs..].to_vec(),
@@ -711,7 +805,7 @@ impl<O: LinearOperator, P: Preconditioner> SaddleSolver for GmresSaddle<O, P> {
             full.push(a.iter().chain(b.iter()).copied().collect::<Vec<f64>>());
         }
         let refs: Vec<&[f64]> = full.iter().map(Vec::as_slice).collect();
-        let outs = gmres_batch(&self.op, &self.prec, &refs, &self.options)?;
+        let outs = gmres_batch_on(self.pool.as_deref(), &self.op, &self.prec, &refs, &self.options)?;
         outs.into_iter()
             .map(|r| {
                 let (y, rep) = r?;

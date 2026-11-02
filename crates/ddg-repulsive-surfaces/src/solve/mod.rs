@@ -23,7 +23,7 @@ pub mod schur;
 pub use dense::{DensePreconditioner, DenseSaddle, DenseSaddleOperator};
 pub use gmres::{
     GmresOptions, GmresReport, GmresSaddle, GmresSide, IdentityPreconditioner, LinearOperator,
-    Preconditioner, gmres, gmres_batch,
+    Preconditioner, gmres, gmres_batch, gmres_batch_on,
 };
 pub use schur::{
     Direction, NewtonSteps, Projection, ProjectionOptions, ProjectionStatus, SchurComplement,
