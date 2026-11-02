@@ -179,43 +179,11 @@ fn coincident_faces(ops: &FaceOperators, bad: usize) -> RsError {
     }
 }
 
-/// `x^e` for a fixed exponent `e`: through `cbrt` and integer powers when `3e` is an integer
-/// (the default exponents: `−s = −5/3`, `−(τ + 1) = −4/3`), `powf` otherwise. The two agree to a
-/// few units in the last place; the `cbrt` form is about twice as fast (the kernels of the block
-/// tree builds, WP17).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RealPow {
-    e: f64,
-    thirds: Option<i32>,
-}
-
-impl RealPow {
-    pub(crate) fn new(e: f64) -> RealPow {
-        let k = (3.0 * e).round();
-        let thirds = (k.abs() <= 60.0 && (k / 3.0 - e).abs() <= 4.0 * f64::EPSILON * e.abs().max(1.0))
-            .then_some(k as i32);
-        RealPow { e, thirds }
-    }
-
-    #[inline]
-    pub(crate) fn of(&self, x: f64) -> f64 {
-        match self.thirds {
-            Some(k) => {
-                let (q, m) = (k.div_euclid(3), k.rem_euclid(3));
-                let c = x.cbrt();
-                let cm = if m == 0 { 1.0 } else if m == 1 { c } else { c * c };
-                x.powi(q) * cm
-            }
-            None => x.powf(self.e),
-        }
-    }
-}
-
 /// `ρ²`-based face kernels, shared by the near and far fields.
 #[inline]
-fn hi_lo(d: [f64; 3], qa: f64, qb: f64, neg_s: &RealPow) -> [f64; 2] {
+fn hi_lo(d: [f64; 3], qa: f64, qb: f64, neg_s: f64) -> [f64; 2] {
     let r2 = dot(d, d);
-    let hi = neg_s.of(r2);
+    let hi = r2.powf(neg_s);
     [hi, 0.5 * (qa + qb) / (r2 * r2) * hi]
 }
 
@@ -225,7 +193,7 @@ struct FaceKernels<'a> {
     ops: &'a FaceOperators,
     chi: f64,
     /// `−s`, applied to `ρ²`.
-    neg_s: RealPow,
+    neg_s: f64,
 }
 
 impl ClusterKernel<2> for FaceKernels<'_> {
@@ -246,7 +214,7 @@ impl ClusterKernel<2> for FaceKernels<'_> {
             d,
             ca.projector_quadratic_form(d),
             cb.projector_quadratic_form(d),
-            &self.neg_s,
+            self.neg_s,
         )
     }
 
@@ -258,7 +226,7 @@ impl ClusterKernel<2> for FaceKernels<'_> {
         let d = sub(ops.barycenters[a], ops.barycenters[b]);
         let ns = dot(ops.normals[a], d);
         let nt = dot(ops.normals[b], d);
-        Some(hi_lo(d, ns * ns, nt * nt, &self.neg_s))
+        Some(hi_lo(d, ns * ns, nt * nt, self.neg_s))
     }
 
     fn weight(&self, _i: usize) -> f64 {
@@ -272,7 +240,7 @@ struct FaceFractionalKernel<'a> {
     ops: &'a FaceOperators,
     chi: f64,
     /// `−(τ + 1)` for `L_τ`, applied to `ρ²`.
-    exponent: RealPow,
+    exponent: f64,
 }
 
 impl ClusterKernel<1> for FaceFractionalKernel<'_> {
@@ -285,13 +253,13 @@ impl ClusterKernel<1> for FaceFractionalKernel<'_> {
         let (a, b) = if a <= b { (a, b) } else { (b, a) };
         let (ca, cb) = (&self.tree.clusters()[a], &self.tree.clusters()[b]);
         let d = sub(ca.centroid, cb.centroid);
-        [self.exponent.of(dot(d, d))]
+        [dot(d, d).powf(self.exponent)]
     }
 
     fn near(&self, i: usize, j: usize) -> Option<[f64; 1]> {
         let (a, b) = if i <= j { (i, j) } else { (j, i) };
         let d = sub(self.ops.barycenters[a], self.ops.barycenters[b]);
-        Some([self.exponent.of(dot(d, d))])
+        Some([dot(d, d).powf(self.exponent)])
     }
 
     fn weight(&self, _i: usize) -> f64 {
@@ -371,7 +339,7 @@ impl FaceMetricTree {
             tree: &face_tree,
             ops: &ops,
             chi: options.chi,
-            neg_s: RealPow::new(-exponents.s()),
+            neg_s: -exponents.s(),
         };
         let bct = BlockTree::<2>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 2]> = ops.areas.iter().map(|&a| [a, a]).collect();
@@ -722,7 +690,7 @@ impl FaceFractionalTree {
             tree: face_tree,
             ops,
             chi: options.chi,
-            exponent: RealPow::new(-(tau + 1.0)),
+            exponent: -(tau + 1.0),
         };
         let bct = BlockTree::<1>::build(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 1]> = ops.areas.iter().map(|&a| [a]).collect();
@@ -831,7 +799,7 @@ struct VertexKernel<'a> {
     clusters: &'a [VertexCluster],
     positions: &'a [[f64; 3]],
     chi: f64,
-    exponent: RealPow,
+    exponent: f64,
 }
 
 impl ClusterKernel<1> for VertexKernel<'_> {
@@ -843,14 +811,14 @@ impl ClusterKernel<1> for VertexKernel<'_> {
     fn far(&self, a: usize, b: usize) -> [f64; 1] {
         let (a, b) = if a <= b { (a, b) } else { (b, a) };
         let d = sub(self.clusters[a].centroid, self.clusters[b].centroid);
-        [self.exponent.of(dot(d, d))]
+        [dot(d, d).powf(self.exponent)]
     }
 
     /// The entries of [`super::dense::vertex_fractional_operator`] (same expression).
     fn near(&self, i: usize, j: usize) -> Option<[f64; 1]> {
         let (a, b) = if i <= j { (i, j) } else { (j, i) };
         let d = sub(self.positions[a], self.positions[b]);
-        Some([self.exponent.of(dot(d, d))])
+        Some([dot(d, d).powf(self.exponent)])
     }
 
     fn weight(&self, _i: usize) -> f64 {
@@ -923,7 +891,7 @@ impl VertexFractionalTree {
             clusters: &clusters,
             positions,
             chi: options.chi,
-            exponent: RealPow::new(-(tau + 1.0)),
+            exponent: -(tau + 1.0),
         };
         let bct = BlockTree::<1>::build(pool, &bvh, &kernel, options.leaf_pairs)?;
         let psi: Vec<[f64; 1]> = mass.iter().map(|&a| [a]).collect();
