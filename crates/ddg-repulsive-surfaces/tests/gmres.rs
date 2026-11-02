@@ -490,12 +490,18 @@ fn gmres_on_the_saddle_with_the_dense_preconditioner() {
     // The paper expects few iterations with P⁻¹ = L′⁻¹ L_{2−s} L′⁻¹ (Sec. 5.2; SPEC §13.3:
     // fewer than 50 at 1e-4). Meshes up to 1500 faces, barycenter constraint, right side the
     // energy differential; L_{2−s} over face pairs (the SPEC) and over vertex pairs.
-    let meshes: Vec<(&str, (Surface, Vec<[f64; 3]>))> = vec![
+    let mut meshes: Vec<(&str, (Surface, Vec<[f64; 3]>))> = vec![
         ("icosphere 320", perturbed(icosphere(2).unwrap(), 0.2, 1)),
-        ("icosphere 1280", perturbed(icosphere(3).unwrap(), 0.2, 2)),
-        ("torus 1500", perturbed(torus(30, 25, 1.5, 0.6).unwrap(), 0.1, 3)),
-        ("bumpy disk 1250", perturbed(bumpy_grid_disk(25, 25, 0.3).unwrap(), 0.1, 4)),
+        ("bumpy disk 200", perturbed(bumpy_grid_disk(10, 10, 0.3).unwrap(), 0.1, 4)),
     ];
+    // The large meshes in optimized builds only (seconds there, minutes unoptimized).
+    if !cfg!(debug_assertions) {
+        meshes.extend([
+            ("icosphere 1280", perturbed(icosphere(3).unwrap(), 0.2, 2)),
+            ("torus 1500", perturbed(torus(30, 25, 1.5, 0.6).unwrap(), 0.1, 3)),
+            ("bumpy disk 1250", perturbed(bumpy_grid_disk(25, 25, 0.3).unwrap(), 0.1, 4)),
+        ]);
+    }
     let results: Vec<String> = std::thread::scope(|scope| {
         let handles: Vec<_> = meshes
             .into_iter()
