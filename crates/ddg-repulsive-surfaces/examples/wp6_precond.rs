@@ -26,7 +26,7 @@ use ddg_repulsive_surfaces::geometry::{FaceGeometry, mean_edge_length, vertex_ar
 use ddg_repulsive_surfaces::metric::hierarchical::{
     ClusterTreeOptions, FaceFractionalTree, FaceMetricTree, VertexFractionalTree,
 };
-use ddg_repulsive_surfaces::metric::{FractionalPairs, SobolevWeights};
+use ddg_repulsive_surfaces::metric::{FractionalForm, SobolevWeights};
 use ddg_repulsive_surfaces::solve::iterative::{
     HierarchicalOptions, MetricExtras, dense_metric_with_extras, hierarchical_saddle,
 };
@@ -74,7 +74,7 @@ struct Args {
     mesh: String,
     threads: usize,
     chi: f64,
-    pairs: FractionalPairs,
+    pairs: FractionalForm,
     side: GmresSide,
     form: PreconditionerForm,
     mode: BarycenterMode,
@@ -91,7 +91,7 @@ fn args() -> Args {
         mesh: a[2].clone(),
         threads: 4,
         chi: 0.5,
-        pairs: FractionalPairs::Vertices,
+        pairs: FractionalForm::VertexPairs,
         side: GmresSide::Right,
         form: PreconditionerForm::Augmented,
         mode: BarycenterMode::PerComponent,
@@ -106,7 +106,7 @@ fn args() -> Args {
         match a[i].as_str() {
             "--threads" => out.threads = v.parse().unwrap(),
             "--chi" => out.chi = v.parse().unwrap(),
-            "--pairs" => out.pairs = if v == "F" { FractionalPairs::Faces } else { FractionalPairs::Vertices },
+            "--pairs" => out.pairs = if v == "F" { FractionalForm::FacePairs } else { FractionalForm::VertexPairs },
             "--side" => out.side = if v == "L" { GmresSide::Left } else { GmresSide::Right },
             "--form" => out.form = if v == "C" { PreconditionerForm::Congruence } else { PreconditionerForm::Augmented },
             "--mode" => out.mode = if v == "global" { BarycenterMode::Global } else { BarycenterMode::PerComponent },

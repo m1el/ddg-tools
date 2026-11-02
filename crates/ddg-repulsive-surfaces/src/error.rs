@@ -203,6 +203,14 @@ pub enum RsError {
     Curves(RcError),
     /// The operation was cancelled.
     Cancelled,
+    /// An internal invariant failed (a bug, never bad input): e.g. the remeshed surface failed
+    /// its revalidation (`SPEC.md` §10). `what` names the stage, `detail` the step's data.
+    Internal {
+        /// The stage that failed.
+        what: &'static str,
+        /// What went wrong, with the data needed to reproduce it.
+        detail: String,
+    },
 }
 
 fn write_list(f: &mut fmt::Formatter<'_>, items: &[u32]) -> fmt::Result {
@@ -352,6 +360,7 @@ impl fmt::Display for RsError {
             } => write!(f, "line {line}: {message}"),
             Curves(e) => write!(f, "{e}"),
             Cancelled => write!(f, "cancelled"),
+            Internal { what, detail } => write!(f, "internal error in {what}: {detail}"),
         }
     }
 }

@@ -29,7 +29,7 @@ use crate::error::RsError;
 use crate::geometry::{FaceGeometry, cotan_stiffness, vertex_areas};
 use crate::kernel::Exponents;
 use crate::metric::dense::{fractional_operator, to_dense, vertex_fractional_operator};
-use crate::metric::{DenseMatrix, FaceOperators, FractionalPairs};
+use crate::metric::{DenseMatrix, FaceOperators, FractionalForm};
 use crate::surface::Surface;
 
 /// The equilibrated LU is singular when `min |u_ii| / max |u_ii|` is at most this (the oracle's
@@ -553,7 +553,7 @@ pub struct DensePreconditioner {
 impl DensePreconditioner {
     /// Builds `L′` and `L_{2−s}` at `positions` for the positional Jacobian `c`
     /// (`k_Q × 3|V|`), `L_{2−s}` over face pairs (the SPEC) or vertex pairs
-    /// ([`FractionalPairs`]).
+    /// ([`FractionalForm`]).
     ///
     /// # Errors
     /// The errors of [`Surface::validate_positions`]; [`RsError::NonFiniteEnergy`] for
@@ -567,7 +567,7 @@ impl DensePreconditioner {
         exponents: &Exponents,
         c: &SparseMatrix,
         eps_rel: f64,
-        pairs: FractionalPairs,
+        pairs: FractionalForm,
     ) -> Result<DensePreconditioner, RsError> {
         if !(eps_rel.is_finite() && eps_rel >= 0.0) {
             return Err(RsError::InvalidOption {
@@ -588,8 +588,8 @@ impl DensePreconditioner {
         }
         let tau = 2.0 - exponents.s();
         let lfr = match pairs {
-            FractionalPairs::Faces => fractional_operator(pool, &ops, tau)?,
-            FractionalPairs::Vertices => vertex_fractional_operator(pool, positions, &mass, tau)?,
+            FractionalForm::FacePairs => fractional_operator(pool, &ops, tau)?,
+            FractionalForm::VertexPairs => vertex_fractional_operator(pool, positions, &mass, tau)?,
         };
         let lprime = DenseSaddle::new(pool, &lap, c)?;
         Ok(DensePreconditioner { lprime, lfr, eps })

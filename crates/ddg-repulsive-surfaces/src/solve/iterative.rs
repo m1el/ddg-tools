@@ -41,7 +41,7 @@ use crate::geometry::{FaceGeometry, cotan_stiffness, vertex_areas};
 use crate::kernel::Exponents;
 use crate::metric::dense::{dense_metric, willmore_matrix};
 use crate::metric::hierarchical::{ClusterTreeOptions, FaceMetricTree};
-use crate::metric::{FaceDiagonal, FaceOperators, FractionalPairs, SobolevWeights};
+use crate::metric::{FaceDiagonal, FaceOperators, FractionalForm, SobolevWeights};
 use crate::spatial::FaceTree;
 use crate::surface::Surface;
 
@@ -295,7 +295,7 @@ impl HierarchicalOptions {
     /// The reference's preconditioner: face pairs, the congruence form, left GMRES.
     pub fn reference() -> Self {
         let mut o = Self::default();
-        o.preconditioner.fractional = FractionalPairs::Faces;
+        o.preconditioner.fractional = FractionalForm::FacePairs;
         o.preconditioner.form = super::precond::PreconditionerForm::Congruence;
         o.gmres.side = super::gmres::GmresSide::Left;
         o
@@ -320,7 +320,7 @@ pub enum Backend {
 
 /// The default of [`Backend::Auto`]'s `dense_max_faces` (`SPEC.md` §6.3; measured by WP6,
 /// `NOTES-WP6.md`).
-pub const DEFAULT_DENSE_MAX_FACES: usize = 2000;
+pub const DEFAULT_DENSE_MAX_FACES: usize = 1000;
 
 impl Default for Backend {
     fn default() -> Self {

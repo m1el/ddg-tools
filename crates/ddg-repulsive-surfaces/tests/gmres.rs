@@ -13,7 +13,7 @@ use ddg_repulsive_surfaces::constraints::{BarycenterMode, Constraint, Constraint
 use ddg_repulsive_surfaces::energy::exact::{energy_and_differential, make_pool};
 use ddg_repulsive_surfaces::geometry::{FaceGeometry, mean_edge_length};
 use ddg_repulsive_surfaces::metric::dense::dense_metric;
-use ddg_repulsive_surfaces::metric::{DenseMatrix, FractionalPairs, SobolevWeights};
+use ddg_repulsive_surfaces::metric::{DenseMatrix, FractionalForm, SobolevWeights};
 use ddg_repulsive_surfaces::solve::gmres::FnOperator;
 use ddg_repulsive_surfaces::solve::{
     DensePreconditioner, DenseSaddle, DenseSaddleOperator, GmresOptions, GmresSaddle, GmresSide,
@@ -526,7 +526,7 @@ fn gmres_on_the_saddle_with_the_dense_preconditioner() {
                     rhs.extend(vec![0.0; q.len()]);
                     let nd = 3 * pr.s.n_vertices();
                     let mut out = format!("{name} ({} faces):", pr.s.n_faces());
-                    for pairs in [FractionalPairs::Faces, FractionalPairs::Vertices] {
+                    for pairs in [FractionalForm::FacePairs, FractionalForm::VertexPairs] {
                         let prec =
                             DensePreconditioner::new(&pool, &pr.s, &pr.p, &e, &cq, 1e-10, pairs)
                                 .unwrap();
@@ -556,7 +556,7 @@ fn gmres_on_the_saddle_with_the_dense_preconditioner() {
                                     if rep.converged { "" } else { " (not converged)" },
                                     rep.relative_residual
                                 );
-                                if pairs == FractionalPairs::Vertices && side == GmresSide::Right {
+                                if pairs == FractionalForm::VertexPairs && side == GmresSide::Right {
                                     assert!(rep.converged, "{name} {tol}");
                                     assert!(err < 30.0 * tol, "{name} {tol}: {err:e}");
                                     if tol == 1e-4 {
@@ -613,7 +613,7 @@ fn schur_on_gmres_matches_dense() {
     let sd = SchurComplement::new(&mut dense, nl.clone(), cn.clone()).unwrap();
     let xd = sd.direction(&mut dense, &pr.g).unwrap();
     let op = DenseSaddleOperator::new(&pr.a, &cq).unwrap();
-    let prec = DensePreconditioner::new(&pool, &pr.s, &pr.p, &e, &cq, 1e-10, FractionalPairs::Vertices)
+    let prec = DensePreconditioner::new(&pool, &pr.s, &pr.p, &e, &cq, 1e-10, FractionalForm::VertexPairs)
         .unwrap();
     for side in [GmresSide::Right, GmresSide::Left] {
         let mut gs = GmresSaddle::new(
@@ -722,7 +722,7 @@ fn oracle_precond_fixtures() {
             &e,
             &cq,
             c.eps_rel.unwrap(),
-            FractionalPairs::Faces,
+            FractionalForm::FacePairs,
         )
         .unwrap();
         let mut r = flat(&c.r);
