@@ -23,9 +23,10 @@ use crate::solve::{
 };
 use crate::surface::Surface;
 
+use crate::optimize::{MethodDiagnostics, MethodState};
 use super::direction::StepSolver;
 use super::objective::{Objective, component_means, is_geometric};
-use super::options::{ArmijoRule, FlowOptions, ScheduleTiming, StartRule, StopRule};
+use super::options::{ArmijoRule, FlowOptions, Method, ScheduleTiming, StartRule, StopRule};
 
 // =============================================================================================
 // Reports
@@ -274,6 +275,7 @@ pub struct Session {
     stuck_count: usize,
     status: Status,
     cancel: Arc<AtomicBool>,
+    method_state: std::sync::Mutex<Option<MethodState>>,
 }
 
 impl std::fmt::Debug for Session {
@@ -489,6 +491,7 @@ impl Session {
         }
         let l0 = mean_edge_length(&surface, &positions);
         let pinned = pinned_of(&resolved);
+        let method_state = (eff.method != Method::ProjectedGradient).then(|| MethodState::new(eff.method));
         let mut s = Session {
             penalties: eff.penalties.clone(),
             options,
@@ -509,6 +512,7 @@ impl Session {
             first_sobolev: None,
             accepted_energies: VecDeque::new(),
             stuck_count: 0,
+            method_state: std::sync::Mutex::new(method_state),
             status: Status::Running,
             cancel: Arc::new(AtomicBool::new(false)),
         };
@@ -584,6 +588,11 @@ impl Session {
     /// The resolved barycenter mode.
     pub fn barycenter_mode(&self) -> BarycenterMode {
         self.mode
+    }
+
+    /// What the comparison optimizer did so far (`None` for projected gradient).
+    pub fn method_diagnostics(&self) -> Option<MethodDiagnostics> {
+        self.method_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().map(MethodState::diagnostics)
     }
 
     /// Steps taken.
@@ -675,7 +684,21 @@ impl Session {
     /// [`RsError::Cancelled`]; [`RsError::NonFiniteEnergy`]; constraint, solver and remeshing
     /// errors ([`RsError::Internal`] if a remeshed surface fails its revalidation).
     pub fn step(&mut self) -> Result<StepReport, RsError> {
+        let e_before = self.last_energy;
+        if let Some(m) = self.method_state.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+            m.begin_step(&mut self.positions);
+        }
         let r = self.step_inner();
+        if let Some(m) = self.method_state.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+            match &r {
+                Ok(rep) => m.end_step(
+                    rep.remesh.as_ref().is_some_and(|x| x.splits + x.collapses + x.flips > 0),
+                    e_before,
+                    self.last_energy,
+                ),
+                Err(_) => m.abort_step(&mut self.positions),
+            }
+        }
         match &r {
             Err(RsError::Cancelled) => self.status = Status::Cancelled,
             Err(e) => self.status = Status::Error(e.clone()),
@@ -778,16 +801,28 @@ impl Session {
         seconds.factor += t.elapsed().as_secs_f64();
         let t = Instant::now();
         let schur = SchurComplement::new(solver.as_dyn(), nrows.clone(), c_n)?;
-        let dir = schur.direction(solver.as_dyn(), &g)?;
+        let mut guard = self.method_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir_res = match (guard.as_mut(), solver.as_sparse()) {
+            (Some(m), Some(sp)) => {
+                let geom = crate::geometry::FaceGeometry::new(&self.surface, &self.positions)?;
+                let area: f64 = geom.areas.iter().sum();
+                m.direction(sp, &self.positions, &g, &c_q, area)
+            }
+            _ => schur
+                .direction(solver.as_dyn(), &g)
+                .map(|d| (d.x, d.record)),
+        };
+        drop(guard);
+        let (dir_x, dir_record) = dir_res?;
         seconds.solve = t.elapsed().as_secs_f64();
         let mut linear = solver.as_dyn().base_report();
         if linear.factor_seconds == 0.0 {
             linear.factor_seconds = seconds.factor;
         }
         schur.fill_report(&mut linear);
-        linear.solves.push(dir.record.clone());
+        linear.solves.push(dir_record);
         linear.solve_seconds = seconds.solve;
-        let mut x = dir.x;
+        let mut x = dir_x;
         if eff.barycenter_shift {
             match self.mode {
                 BarycenterMode::Global => {
@@ -826,6 +861,16 @@ impl Session {
 
         // 3. Line search (§7.2) with the CCD cap (§7.3).
         let mut tau0 = start_tau(&eff.line_search.start, self.last_tau, xnorm, max_disp, self.l0);
+        // Quasi-Newton directions with stored pairs have a natural unit step (WP9).
+        if self
+            .method_state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(MethodState::unit_step)
+        {
+            tau0 = 1.0;
+        }
         let mut ccd_report = None;
         if let Some(copts) = &eff.line_search.ccd
             && tau0.is_finite()

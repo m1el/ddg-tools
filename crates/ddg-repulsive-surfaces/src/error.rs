@@ -161,6 +161,8 @@ pub enum RsError {
     MethodNeedsSoftProblem {
         /// The method.
         method: &'static str,
+        /// The nonlinear constraint that must become a penalty.
+        constraint: String,
     },
     // ---- solves (WP2/WP6) ----
     /// The saddle-point matrix has a zero pivot.
@@ -334,9 +336,9 @@ impl fmt::Display for RsError {
                 f,
                 "constraint {constraint} refers to element {index}, which does not exist"
             ),
-            MethodNeedsSoftProblem { method } => write!(
+            MethodNeedsSoftProblem { method, constraint } => write!(
                 f,
-                "the method {method} needs a problem without hard constraints (use penalties)"
+                "the method {method} needs a soft problem: replace the nonlinear constraint {constraint} by a penalty"
             ),
             SingularSaddle { pivot } => write!(
                 f,

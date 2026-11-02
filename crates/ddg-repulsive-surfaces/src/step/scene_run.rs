@@ -16,7 +16,7 @@ use crate::metric::{L2Kind, Metric};
 use crate::scene::{SceneMethod, SceneSpec, ScheduleSpec};
 use crate::surface::Surface;
 
-use super::options::{FlowOptions, LbfgsVariant, Method, PinSchedule, Schedule};
+use super::options::{BcqnVariant, FlowOptions, LbfgsVariant, Method, PinSchedule, Schedule};
 use super::session::{Control, FlowReport, Session, StepReport};
 
 /// The [`FlowOptions`] of a scene: exponents, constraints with their growth schedules and pin
@@ -83,10 +83,10 @@ pub fn scene_options(spec: &SceneSpec) -> Result<FlowOptions, RsError> {
             o.metric = Metric::H2;
         }
         SceneMethod::Aqp => o.method = Method::Aqp { kappa: 100.0 },
-        SceneMethod::Bqn => o.method = Method::Bcqn { memory: 10 },
+        SceneMethod::Bqn => o.method = Method::Bcqn { memory: 20, variant: BcqnVariant::Standard },
         SceneMethod::H1Lbfgs => {
             o.method = Method::H1Lbfgs {
-                memory: 10,
+                memory: 20,
                 variant: LbfgsVariant::Standard,
             }
         }

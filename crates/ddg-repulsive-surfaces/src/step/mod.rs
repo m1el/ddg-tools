@@ -35,7 +35,7 @@ mod session;
 
 pub use direction::{COMPARISON_EPS_REL, REFINEMENT_STEPS, REFINEMENT_TOLERANCE, SparseSaddle};
 pub use options::{
-    ArmijoRule, FlowOptions, LbfgsVariant, LineSearch, Method, PinSchedule, Schedule,
+    ArmijoRule, BcqnVariant, FlowOptions, LbfgsVariant, LineSearch, Method, PinSchedule, Schedule,
     ScheduleTiming, StartRule, StopRule,
 };
 pub use scene_run::{CSV_HEADER, RunReport, RunSceneOptions, csv_line, run_scene, scene_options};
