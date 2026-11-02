@@ -778,6 +778,68 @@ Options (both; Python names):
   (`-b` has no timers or windows). The windowed test covers the loop, keys and undo; the header
   and status-bar *text* is set but cannot be read back, so it is not checked.
 
+## Repulsive Surfaces: live flow and N steps
+
+Two operators after Yu, Brakensiek, Schumacher, Crane, *Repulsive Surfaces* (ACM TOG 40(6), 2021;
+crates `ddg-repulsive-surfaces`, `ddg-py`; contract `crates/ddg-repulsive-surfaces/SPEC.md`
+section 9.3). They decrease the tangent-point energy of the active triangle mesh (n-gons are split
+by Blender's loop triangles; the polygons are never changed) by fractional Sobolev descent, so a
+surface spreads out and untangles. Sidebar: **DDG > Repulsive Surfaces** (all options; Penalties
+and Advanced sub-panels); menu: **Object**. Code: `repulsive_surface_operator.py` (options,
+operators, `LiveFlow`), `repulsive_surface_io.py` (reading, write-back, obstacles).
+
+| operator | id | |
+|---|---|---|
+| Repulsive Surface Flow (Live) | `object.ddg_repulsive_surface_live` | modal, as for the curves: worker thread, 1/30 s timer, **Enter** / **right click** / **Accept** keep (one undo step), **Esc** / **Cancel** restore the original mesh exactly (polygons, UVs, vertex groups). Options: `scene.ddg_repulsive_surface` |
+| Repulsive Surface Flow (Steps) | `object.ddg_repulsive_surface_flow` | N steps (`steps = 0`: until convergence, at most Step Limit), one undo step, Adjust Last Operation |
+
+**Input and space.** The object's *evaluated* mesh (modifiers applied) is triangulated by loop
+triangles; every vertex is a vertex of the flow. The flow runs in **World** space (default: the
+object's transform counts as it would physically, obstacles are used as they stand) or in the
+object's **Local** space. A mesh the library rejects (an edge shared by three faces, a loose
+vertex, ...) gives its located message and leaves the object untouched; so do shape keys and a
+missing pin group or collection.
+
+**Options.** Exponents alpha, beta (6, 12), accuracy theta (Barnes-Hut opening angle, 0.5),
+**Remesh** (on), **Collision Detection** (CCD, on; turned off with a warning when the input
+already intersects itself), metric (Hs by default; L2, H1, H2 for experiments), step limit,
+threads. **Pins**: a vertex group (weights above 0); pinned vertices never move or vanish,
+also under remeshing. **Constraints**: barycenter (Auto: fixed unless pins are used), optional
+barycenter shift, area and volume, each with a growth factor and the number of steps it takes
+(a volume needs a closed, oriented surface). **Penalties** (Sec. 7.3, weight 0 = off): area and
+volume deviation, boundary length and curvature, Willmore, squared error.
+
+**Obstacles.** *Obstacles*: the mesh objects of a collection are tangent-point obstacles (weight;
+optionally also guarded by collision detection in the line search). *Empties*: the empties of a
+collection are implicit obstacles or attractors, the shape given by the display type and the
+size by the display size times the scale: Sphere = sphere, Cone = infinite cylinder along local Z,
+Circle = torus around local Z (tube ratio 0.25), any other type (Plain Axes, Arrows, Cube, ...) =
+plane through the empty with its local Z as normal (the free side). Per empty, the custom
+properties `ddg_mode` (`"repel"` / `"attract"`), `ddg_power`, `ddg_weight` and `ddg_minor_ratio`
+override the panel's defaults.
+
+**Output.** *Remesh off* (and CCD, pins, ... as you like): the triangles stay, the new positions
+are written into the existing mesh; polygons, UVs, colours and vertex groups are kept. *Remesh on*
+(or modifiers that add faces): the mesh data is **replaced** by the result's triangles (as the
+developability operators, SPEC D24 there). The material index and the smooth flag of each triangle
+come from the polygon it descends from (`face_origin`); UV maps, colour attributes, other
+attributes and other vertex groups are **dropped**, and the report says so (no attribute
+transfer, the user's decision); the pin group is rebuilt on the pinned vertices with their
+weights. Cancel restores everything from a backup.
+
+### Repulsive surface tests
+
+- `blender/tests/test_repulsive_surface.py` (headless): N steps with and without remeshing
+  (positions-only writes keep polygons, UVs, groups; remeshing replaces the data and keeps
+  material indices and smooth flags), pins, `steps = 0`, area and volume constraints with growth,
+  penalties, metrics, mesh obstacles from a collection, implicit empties (repel, attract, shape by
+  display type, custom properties), world and local space, CCD off for an intersecting input,
+  the live flow through `LiveFlow` (accept; cancel restores the exact original, also after
+  remeshing), bad input. Undo tests skip themselves headless (no undo stack in `-b`).
+- `blender/tests/ui_repulsive_surface.py` (windowed on Xvfb, `--enable-event-simulate`): the
+  modal operator with the real timer and events (Cancel, Esc, Accept, Enter, right click), undo
+  and redo of the remeshed result, the N-steps operator with Adjust Last Operation.
+
 ## Show Intrinsic Refinement
 
 **Show Intrinsic Refinement**, `bpy.ops.mesh.ddg_show_intrinsic_refinement`
@@ -943,6 +1005,7 @@ Tests: `blender/tests/test_geodesic.py` (run by `scripts/blender-test.sh`; log
 | `ddg_uv_unwrap/cut_operators.py`, `cut.py` | the three cut operators; attributes, preview, flow settings, bmesh insertion |
 | `ddg_uv_unwrap/developable_operator.py` | Make Developable, Show Developability, Developable Seams + UV |
 | `ddg_uv_unwrap/repulsive_operator.py`, `repulsive_io.py` | Repulsive Curves: live and N-steps operators, sidebar panel; reading and writing meshes and curves |
+| `ddg_uv_unwrap/repulsive_surface_operator.py`, `repulsive_surface_io.py` | Repulsive Surfaces: live and N-steps operators, sidebar panel; reading the triangulated mesh, write-back, obstacles |
 | `ddg_uv_unwrap/intrinsic_operator.py`, `intrinsic_draw.py` | Show Intrinsic Refinement; the reusable drawing of intrinsic edges |
 | `ddg_uv_unwrap/simplify_operator.py` | Intrinsic Simplify (the coarse-mesh view: color attribute, face ids, vertex group) and its panel |
 | `ddg_uv_unwrap/geodesic_operator.py` | Geodesic Path (Path, Smooth, Loop, Bezier), Straighten Seams, the panel |
@@ -975,6 +1038,11 @@ The add-on is a front end for these papers:
 - Chris Yu, Henrik Schumacher, Keenan Crane. *Repulsive Curves.*
   ACM Transactions on Graphics 40(2), 2021.
   (the repulsive-curves operators)
+
+- Chris Yu, Caleb Brakensiek, Henrik Schumacher, Keenan Crane. *Repulsive Surfaces.*
+  ACM Transactions on Graphics 40(6), 2021.
+  (the repulsive-surfaces operators; the Rust port follows the authors' reference implementation,
+  MIT, Copyright (c) 2019 Nick Sharp, whose notice is in `crates/ddg-repulsive-surfaces/LICENSES/`)
 
 The flattening code (`crates/ddg-bff`) is a port of the authors' MIT-licensed reference
 implementation; its licence notice is in `crates/ddg-bff/LICENSES/BFF-MIT.txt`. The operator's
