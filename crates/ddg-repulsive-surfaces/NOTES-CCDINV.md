@@ -138,3 +138,65 @@ off the other, which the no-CCD run skipped by passing it through the tube in st
 +            let _ = std::fs::write(format!("{dir}/step_{iteration:05}.bin"), b);
 +        }
 ```
+
+## Implementation of the proposed rule (branch of this worktree, 2026-11-02)
+
+`ccd::IntersectionBand::new(pool, surface, positions)` runs `intersecting_pairs` (exact triangle test,
+Morton box tree, parallel on the session pool) at the start of every step and marks the vertices of the
+intersecting faces plus one ring (edge neighbours). `first_contact_with_band` (and `first_contact`, which
+passes `None`) leaves a vertex-triangle or edge-edge pair unconstrained when both elements have a vertex
+in the band (`CcdReport::exempt_pairs`, counted on the first window); mesh-obstacle pairs are never
+exempt. `CcdCollapseGuard::set_band` skips a (new star triangle, triangle) pair when both have a band
+vertex (a survivor counts as in the band if either end of its edge is; vertices created by the remesher
+in the same pass are not). An empty band is `None`, so an embedded input runs exactly the old code path
+(tests: empty band == `None` bitwise; `exempt_pairs == 0` at every step of an embedded flow).
+`scene_options` no longer turns the CCD off for subcritical exponents; `RunSceneOptions::no_ccd` /
+`run_scene --no-ccd` switch it off for comparison.
+
+Klein bottle (`scene.txt`, 200 steps, `--no-stop`, 8 threads, remeshing on), objective `F`:
+
+| run | F(200) | ms/step | GMRES its/step | CCD median share of a step |
+|---|---|---|---|---|
+| CCD on, with the rule | **25.29** | 97.8 | 34.0 | 2.2 % (includes the intersection test) |
+| CCD off | 155.73 | 117.1 | 45.5 | - |
+| CCD forced on, no rule (investigation) | 631 | - | - | - |
+
+So the rule does not only remove the stall, it ends lower than the run without CCD (the unconstrained
+run takes tiny Armijo steps in several steps: tau 1.6e-2 at step 200 against 2.9e-1). Sum of exempt
+pairs over the 200 steps: 51,992.
+
+Cost of the start-of-step test (`examples/ccd_band_cost.rs`, tori, best of 7, machine not otherwise
+idle; `IntersectionBand::new` including the dilation; the CCD column is `first_contact_with_band` for
+a push of 0.3 mean edge lengths):
+
+| faces | input | 1 thread | 8 threads | CCD 1 / 8 threads |
+|---|---|---|---|---|
+| 10,000 | embedded | 19.4 ms | 7.3 ms | 46.8 / 16.4 ms |
+| 25,600 | embedded | 36.6 | 12.3 | 111 / 22.6 |
+| 50,000 | embedded | 69.7 | 16.5 | 216 / 80.7 |
+| 20,000 | crossing (330 pairs) | 30.2 | 11.8 | 71 / 25.6 |
+| 51,200 | crossing (522 pairs) | 78.9 | 28.7 | 215 / 61 |
+| 100,000 | crossing (714 pairs) | 190 | 33.9 | 560 / 120 |
+
+About 0.35 of the CCD itself, which is 1-2 % of a step, so ~0.5 % per step; there is no early exit to
+take (proving that nothing intersects needs the whole tree traversal), the box test rejects almost all
+face pairs and the common-vertex bookkeeping no longer allocates.
+
+Tests: `tests/ccd.rs` (band empty for embedded meshes and bitwise equal to no band; the band frees a
+sliding overlap but C-D contact of two disjoint spheres is found at the contact time of the pair alone;
+random pushes of 3 of 4 bodies never leave a crossing outside the band at tau_max; threads 1/2/3/8
+bitwise; guard refuses less with a band), `tests/flow.rs` (intersecting tori and embedded Hopf link,
+threads 1 vs 3 bitwise, Klein bottle 200 steps `--ignored`, release, 6 min for both runs).
+
+### Proposed SPEC text for 7.3 (append after "The collapse guard also refuses ...") and 16
+
+> **Inputs that already intersect.** At the start of each step the faces that intersect (exact
+> triangle-triangle test, BVH) are found; `I` is the set of their vertices widened by one ring. In
+> the CCD a vertex-triangle or edge-edge pair whose two elements both have a vertex in `I` is
+> unconstrained (counted in `CcdReport::exempt_pairs`); every other pair, including every pair between two
+> regions that were disjoint at the start, keeps the gap rule. The collapse guard applies the same
+> exemption to a (new star triangle, triangle) pair. For an embedded mesh `I` is empty and the CCD is
+> bitwise unchanged. Mesh-obstacle pairs are never exempt. CCD is on for every exponent
+> (`scene_options` no longer turns it off); an immersion is therefore free to slide its intersection curve
+> (at most one ring per step) but cannot create a crossing elsewhere. Cost: the test is ~35 % of the CCD (7-16 ms on 10k-50k faces, 8 threads).
+> Measured: Klein bottle, 200 steps, `F` = 25.3 (CCD on) against 155.7 (off) and 631 (forced on, no rule).

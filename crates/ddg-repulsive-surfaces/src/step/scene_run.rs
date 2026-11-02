@@ -24,7 +24,8 @@ use super::session::{Control, FlowReport, Session, StepReport};
 /// `l2`/`h1`/`h2` the comparison metrics; `willmore` = the Willmore energy with the `H²` metric;
 /// `aqp`/`bqn`/`h1_lbfgs` the comparison optimizers of WP9), the barycenter shift, the limits.
 /// `autotarget_volume r` makes the growing volume constraint end at `r ×` the obstacles' volume.
-/// The mesh obstacles become the CCD's obstacles; with subcritical exponents the CCD is off.
+/// The mesh obstacles become the CCD's obstacles; the CCD stays on for every exponent (an input that
+/// intersects itself, such as the Klein bottle, is handled by the CCD's intersection band).
 /// Everything else keeps its default.
 ///
 /// # Errors
@@ -96,11 +97,6 @@ pub fn scene_options(spec: &SceneSpec) -> Result<FlowOptions, RsError> {
             o.ccd_obstacles.push(Arc::new(ccd_obstacle(spec, &ob.value.path, ob.value.centered)?));
         }
     }
-    // Subcritical exponents (paper Fig. 26) are not a barrier: such scenes (the Klein bottle)
-    // self-intersect on purpose, and the CCD would stall them.
-    if spec.exponents.subcritical() {
-        o.line_search.ccd = None;
-    }
     if let Some(n) = spec.iteration_limit {
         o.max_iterations = n as usize;
     }
@@ -154,6 +150,8 @@ pub struct RunSceneOptions {
     pub no_remesh: bool,
     /// Turns the CCD of the line search on with these options.
     pub ccd: Option<CcdOptions>,
+    /// Turns the CCD off (it is on by default; wins over `ccd`).
+    pub no_ccd: bool,
     /// Turns the energy-stall stop rule off (run the full step count).
     pub no_stop_rule: bool,
     /// The per-step CSV log (default: the scene's `log`, if any).
@@ -254,6 +252,9 @@ pub fn run_scene(path: impl AsRef<Path>, run: &RunSceneOptions) -> Result<RunRep
     }
     if run.ccd.is_some() {
         options.line_search.ccd = run.ccd;
+    }
+    if run.no_ccd {
+        options.line_search.ccd = None;
     }
     if run.no_stop_rule {
         options.stop = super::options::StopRule::Off;

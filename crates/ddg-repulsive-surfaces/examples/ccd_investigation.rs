@@ -17,6 +17,8 @@
 //!     CCD on an immersed input: touching / intersecting pairs at t = 0 and what the CCD reports.
 //! ```
 
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::{HashMap, VecDeque};
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -547,8 +549,8 @@ fn rings_within(adj: &[Vec<u32>], src: &[u32], k: usize) -> Vec<u32> {
             continue;
         }
         for &w in &adj[v as usize] {
-            if !seen.contains_key(&w) {
-                seen.insert(w, d + 1);
+            if let std::collections::hash_map::Entry::Vacant(e) = seen.entry(w) {
+                e.insert(d + 1);
                 q.push_back(w);
             }
         }

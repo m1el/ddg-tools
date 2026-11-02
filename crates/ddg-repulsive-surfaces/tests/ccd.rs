@@ -9,7 +9,8 @@ use ddg_repulsive_curves::Obstacle;
 use ddg_repulsive_curves::ccd::{point_triangle_distance, segment_segment_distance};
 use ddg_repulsive_surfaces::Surface;
 use ddg_repulsive_surfaces::ccd::{
-    CcdCollapseGuard, CcdObstacle, CcdOptions, CcdReport, Primitive, first_contact,
+    CcdCollapseGuard, CcdObstacle, CcdOptions, CcdReport, IntersectionBand, Primitive, first_contact,
+    first_contact_with_band,
     intersecting_pairs, intersects, min_distance, triangle_distance,
 };
 use ddg_repulsive_surfaces::energy::exact::make_pool;
@@ -627,4 +628,176 @@ fn collapse_guard_in_a_remesh_pass() {
     assert!(out.surface.n_faces() < m.0.n_faces());
     assert_eq!(g.refused(), 0);
     assert!(g.pairs_tested() > 0 || out.surface.n_faces() > 0);
+}
+
+// -------------------------------------------------------------------- intersection band
+
+fn translated(m: &Mesh, d: [f64; 3]) -> Mesh {
+    let p: Vec<[f64; 3]> = m.1.iter().map(|q| [q[0] + d[0], q[1] + d[1], q[2] + d[2]]).collect();
+    (m.0.clone(), p)
+}
+
+#[test]
+fn band_of_an_embedded_mesh_changes_nothing() {
+    let m = union(&sphere(2, [0.0; 3], 1.0), &sphere(2, [4.0, 0.0, 0.0], 1.0));
+    let l = mean_edge_length(&m.0, &m.1);
+    let p = pool(2);
+    let band = IntersectionBand::new(&p, &m.0, &m.1).unwrap();
+    assert!(band.is_empty() && band.intersecting_pairs() == 0 && band.n_vertices() == 0);
+    // The spheres move towards each other: a contact, identical with, without and with an
+    // empty band.
+    let n = m.1.len() / 2;
+    let vel: Vec<[f64; 3]> =
+        (0..m.1.len()).map(|i| if i < n { [1.0, 0.0, 0.0] } else { [-1.0, 0.0, 0.0] }).collect();
+    let o = opts(l);
+    let a = first_contact(&p, &m.0, &m.1, &vel, 3.0, &[], &o).unwrap();
+    let b = first_contact_with_band(&p, &m.0, &m.1, &vel, 3.0, &[], &o, Some(&band)).unwrap();
+    let c = first_contact_with_band(&p, &m.0, &m.1, &vel, 3.0, &[], &o, None).unwrap();
+    assert!(a.contact.is_some());
+    assert!(same(&a, &b) && same(&a, &c));
+    assert_eq!(a.exempt_pairs, 0);
+}
+
+/// Two overlapping spheres A, B (an intersecting input) and two spheres C, D far from them.
+fn overlapping_and_apart() -> (Mesh, [std::ops::Range<usize>; 4]) {
+    let a = sphere(2, [0.0; 3], 1.0);
+    let b = sphere(2, [1.2, 0.0, 0.0], 1.0);
+    let c = sphere(2, [0.0, 0.0, 6.0], 1.0);
+    let d = sphere(2, [0.0, 0.0, 9.0], 1.0);
+    let n = a.1.len();
+    let m = union(&union(&union(&a, &b), &c), &d);
+    (m, [0..n, n..2 * n, 2 * n..3 * n, 3 * n..4 * n])
+}
+
+#[test]
+fn exemption_frees_the_intersection_curve_but_not_other_regions() {
+    let (m, r) = overlapping_and_apart();
+    let l = mean_edge_length(&m.0, &m.1);
+    let p = pool(2);
+    let band = IntersectionBand::new(&p, &m.0, &m.1).unwrap();
+    assert!(!band.is_empty() && band.intersecting_pairs() > 0);
+    // Only vertices of A and B are in the band.
+    assert!(band.flags().iter().enumerate().all(|(i, &f)| !f || i < r[1].end));
+    let o = opts(l);
+
+    // B slides along A (the existing intersection curve moves): the plain CCD stops it at once
+    // (pairs of A and B are close or crossing), the band frees it.
+    let mut vel = vec![[0.0; 3]; m.1.len()];
+    for i in r[1].clone() {
+        vel[i] = [0.0, 0.0, 0.4];
+    }
+    let plain = first_contact(&p, &m.0, &m.1, &vel, 1.0, &[], &o).unwrap();
+    let banded = first_contact_with_band(&p, &m.0, &m.1, &vel, 1.0, &[], &o, Some(&band)).unwrap();
+    assert!(banded.exempt_pairs > 0);
+    assert!(banded.tau_max > plain.tau_max, "{} vs {}", banded.tau_max, plain.tau_max);
+
+    // C moves into D (two regions disjoint at the start, none in the band): the contact is found
+    // and is the contact of C and D alone.
+    let mut vel = vec![[0.0; 3]; m.1.len()];
+    for i in r[2].clone() {
+        vel[i] = [0.0, 0.0, 1.0];
+    }
+    let banded = first_contact_with_band(&p, &m.0, &m.1, &vel, 3.0, &[], &o, Some(&band)).unwrap();
+    let cd = union(&sphere(2, [0.0, 0.0, 6.0], 1.0), &sphere(2, [0.0, 0.0, 9.0], 1.0));
+    let n = r[2].len();
+    let vel_cd: Vec<[f64; 3]> =
+        (0..cd.1.len()).map(|i| if i < n { [0.0, 0.0, 1.0] } else { [0.0; 3] }).collect();
+    let alone = first_contact(&p, &cd.0, &cd.1, &vel_cd, 3.0, &[], &o).unwrap();
+    assert!(alone.contact.is_some());
+    assert!(banded.contact.is_some(), "{banded:?}");
+    assert!(
+        (banded.tau_max - alone.tau_max).abs() < 1e-6 * alone.tau_max,
+        "{} vs {}",
+        banded.tau_max,
+        alone.tau_max
+    );
+    let _ = translated;
+}
+
+#[test]
+fn the_exemption_never_hides_a_new_crossing_between_disjoint_regions() {
+    // Random rigid pushes of B, C and D, mostly C and D towards each other. At the CCD's
+    // tau_max (and before) the faces that cross are only pairs that both touch the band: a
+    // crossing between regions that were both disjoint at the start is never allowed.
+    let (m, r) = overlapping_and_apart();
+    let l = mean_edge_length(&m.0, &m.1);
+    let p = pool(2);
+    let band = IntersectionBand::new(&p, &m.0, &m.1).unwrap();
+    let o = opts(l);
+    let mut rng = SplitMix64::new(77);
+    let mut capped = 0;
+    for _ in 0..12 {
+        let mut vel = vec![[0.0; 3]; m.1.len()];
+        for k in 1..4 {
+            let s = [rng.next_f64() - 0.5, rng.next_f64() - 0.5, rng.next_f64() - 0.5];
+            let s = match k {
+                2 => [s[0], s[1], s[2] + 0.8],
+                3 => [s[0], s[1], s[2] - 0.8],
+                _ => s,
+            };
+            for i in r[k].clone() {
+                vel[i] = s;
+            }
+        }
+        let rep = first_contact_with_band(&p, &m.0, &m.1, &vel, 3.0, &[], &o, Some(&band)).unwrap();
+        capped += usize::from(rep.contact.is_some());
+        let tau = rep.tau_max;
+        for t in [0.0, 0.5 * tau, tau] {
+            let x = moved(&m.1, &vel, t);
+            for [f, g] in intersecting_pairs(&m.0, &x).unwrap() {
+                let touches = |h: u32| m.0.faces()[h as usize].iter().any(|&v| band.flags()[v as usize]);
+                assert!(touches(f) && touches(g), "t = {t} (tau {tau}): faces {f},{g} cross outside the band");
+            }
+        }
+    }
+    assert!(capped >= 6, "{capped}");
+}
+
+#[test]
+fn band_report_is_bitwise_independent_of_threads() {
+    let (m, r) = overlapping_and_apart();
+    let l = mean_edge_length(&m.0, &m.1);
+    let mut vel = vec![[0.0; 3]; m.1.len()];
+    for i in r[1].clone() {
+        vel[i] = [0.0, 0.0, 0.4];
+    }
+    for i in r[2].clone() {
+        vel[i] = [0.0, 0.0, 1.0];
+    }
+    let o = opts(l);
+    let b1 = IntersectionBand::new(&pool(1), &m.0, &m.1).unwrap();
+    let base = first_contact_with_band(&pool(1), &m.0, &m.1, &vel, 3.0, &[], &o, Some(&b1)).unwrap();
+    for n in [2, 3, 8] {
+        let bn = IntersectionBand::new(&pool(n), &m.0, &m.1).unwrap();
+        assert_eq!(bn, b1);
+        let r = first_contact_with_band(&pool(n), &m.0, &m.1, &vel, 3.0, &[], &o, Some(&bn)).unwrap();
+        assert!(same(&base, &r), "threads {n}");
+    }
+}
+
+#[test]
+fn collapse_guard_with_a_band() {
+    // Two overlapping spheres: a pass that collapses a lot is refused near the intersection
+    // without the band, and less with it.
+    let m = union(&sphere(2, [0.0; 3], 1.0), &sphere(2, [1.2, 0.0, 0.0], 1.0));
+    let l0 = mean_edge_length(&m.0, &m.1);
+    let ro = RemeshOptions {
+        split: 100.0,
+        collapse: 0.99,
+        rounds: 1,
+        enabled_ops: EnabledOps { split: false, collapse: true, flip: false, smooth: false },
+        ..Default::default()
+    };
+    let o = CcdOptions::default();
+    let band = IntersectionBand::new(&pool(2), &m.0, &m.1).unwrap();
+    assert!(!band.is_empty());
+    let mut plain = CcdCollapseGuard::new(&o, l0).unwrap();
+    remesh(&m.0, &m.1, &[], l0, &ro, Some(&mut plain)).unwrap();
+    let mut banded = CcdCollapseGuard::new(&o, l0).unwrap();
+    banded.set_band(&band);
+    remesh(&m.0, &m.1, &[], l0, &ro, Some(&mut banded)).unwrap();
+    assert!(plain.refused() > 0, "{}", plain.refused());
+    assert!(banded.refused() < plain.refused(), "{} vs {}", banded.refused(), plain.refused());
+    assert!(banded.exempt_pairs() > 0);
+    assert_eq!(plain.exempt_pairs(), 0);
 }

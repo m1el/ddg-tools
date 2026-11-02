@@ -24,6 +24,18 @@
 //! (the mesh already touches itself or the obstacle) cannot be measured; it is not constrained
 //! and counted in [`CcdReport::touching_pairs`]. Both counts are in the report.
 //!
+//! # Inputs that already intersect: the exempt band
+//!
+//! A mesh that intersects itself at `t = 0` (an immersed Klein bottle, the subcritical runs of the
+//! paper's Fig. 26) cannot be held to the gap rule: the intersection curve slides along the mesh
+//! and every pair near it closes. [`IntersectionBand::new`] finds the faces that intersect
+//! (exactly, [`intersecting_pairs`], BVH-accelerated), takes their vertices widened by one ring
+//! (`I`), and [`first_contact_with_band`] leaves a pair unconstrained when both of its elements
+//! have a vertex in `I` (counted in [`CcdReport::exempt_pairs`]); every other pair, in particular
+//! one between two regions that were disjoint at the start, keeps the gap rule. A band of an
+//! embedded mesh is empty and changes nothing (bitwise). [`CcdCollapseGuard::set_band`] applies
+//! the same rule to collapses. Mesh-obstacle pairs are never exempt.
+//!
 //! # Narrow phase: conservative advancement with moving triangles
 //!
 //! The distance `d(t)` of two linearly moving primitives (convex hulls of their corners) is
@@ -217,6 +229,9 @@ pub struct CcdReport {
     pub close_pairs: u64,
     /// Number of pairs at distance 0 at `t = 0` (not constrained).
     pub touching_pairs: u64,
+    /// Number of broad-phase candidate pairs left unconstrained by the [`IntersectionBand`]
+    /// (both elements have a vertex in the band; counted on the first window).
+    pub exempt_pairs: u64,
     /// Wall time.
     pub seconds: f64,
 }
@@ -488,6 +503,7 @@ struct Tally {
     pairs: u64,
     close: u64,
     touching: u64,
+    exempt: u64,
 }
 
 impl Tally {
@@ -496,6 +512,7 @@ impl Tally {
         self.pairs += o.pairs;
         self.close += o.close;
         self.touching += o.touching;
+        self.exempt += o.exempt;
         self
     }
 }
@@ -702,6 +719,7 @@ struct Motion<'a> {
     speed: &'a [f64],
     gap_abs: f64,
     opts: &'a CcdOptions,
+    band: Option<&'a [bool]>,
 }
 
 impl Motion<'_> {
@@ -712,6 +730,11 @@ impl Motion<'_> {
     #[inline]
     fn tri_at(&self, f: u32, t: f64) -> [[f64; 3]; 3] {
         self.surface.faces()[f as usize].map(|v| self.pos(v, t))
+    }
+    /// Is any of `vs` in the exempt band?
+    #[inline]
+    fn in_band(&self, vs: &[u32]) -> bool {
+        self.band.is_some_and(|b| vs.iter().any(|&v| b[v as usize]))
     }
     /// The largest corner speed of face `f` (with the rounding margin).
     #[inline]
@@ -745,6 +768,36 @@ pub fn first_contact(
     obstacles: &[CcdObstacle],
     opts: &CcdOptions,
 ) -> Result<CcdReport, RsError> {
+    first_contact_with_band(pool, surface, start, velocity, tau_end, obstacles, opts, None)
+}
+
+/// [`first_contact`] with an exempt band: a mesh-mesh pair whose two elements both have a vertex
+/// in `band` is unconstrained (see the module documentation). `None` (or an empty band) is
+/// bitwise [`first_contact`].
+///
+/// # Errors
+/// As [`first_contact`]; [`RsError::InvalidOption`] for a band of another surface.
+#[allow(clippy::too_many_arguments)]
+pub fn first_contact_with_band(
+    pool: &rayon::ThreadPool,
+    surface: &Surface,
+    start: &[[f64; 3]],
+    velocity: &[[f64; 3]],
+    tau_end: f64,
+    obstacles: &[CcdObstacle],
+    opts: &CcdOptions,
+    band: Option<&IntersectionBand>,
+) -> Result<CcdReport, RsError> {
+    let band = match band {
+        Some(b) if b.is_empty() => None,
+        Some(b) => {
+            if b.in_band.len() != surface.n_vertices() {
+                return Err(bad("band", format!("{} flags", b.in_band.len()), "one flag per vertex"));
+            }
+            Some(&b.in_band[..])
+        }
+        None => None,
+    };
     let t_begin = Instant::now();
     opts.validate()?;
     surface.validate_positions(start)?;
@@ -773,6 +826,7 @@ pub fn first_contact(
         speed: &speed,
         gap_abs,
         opts,
+        band,
     };
     let vmax = velocity.iter().map(|&v| norm(v)).fold(0.0f64, f64::max);
     let mut report = CcdReport {
@@ -784,6 +838,7 @@ pub fn first_contact(
         windows: 0,
         close_pairs: 0,
         touching_pairs: 0,
+        exempt_pairs: 0,
         seconds: 0.0,
     };
     // Time in which the fastest vertex moves one mean edge length.
@@ -806,6 +861,7 @@ pub fn first_contact(
         if lo == 0.0 {
             report.close_pairs = found.tally.close;
             report.touching_pairs = found.tally.touching;
+            report.exempt_pairs = found.tally.exempt;
         }
         if let Some(c) = found.best {
             report.tau_max = c.tau;
@@ -891,6 +947,10 @@ fn window(
                     if tri.contains(&v) {
                         return;
                     }
+                    if m.in_band(&[v]) && m.in_band(&tri) {
+                        fnd.tally.exempt += 1;
+                        return;
+                    }
                     let (p, u) = (m.start[v as usize], m.vel[v as usize]);
                     let (tp, tu) = (m.tri_at(f, 0.0), m.tri_vel(f));
                     let lc = (m.speed[v as usize] + m.tri_speed(f)) * MARGIN;
@@ -937,6 +997,10 @@ fn window(
                     }
                     let [c, d] = edges[e2 as usize];
                     if c == a || c == b || d == a || d == b {
+                        return;
+                    }
+                    if m.in_band(&[a, b]) && m.in_band(&[c, d]) {
+                        fnd.tally.exempt += 1;
                         return;
                     }
                     let pp = [m.start[a as usize], m.start[b as usize]];
@@ -1173,8 +1237,15 @@ pub fn intersecting_pairs(
                     return;
                 }
                 let (a, b) = (faces[f as usize], faces[g as usize]);
-                let common: Vec<usize> = (0..3).filter(|&i| b.contains(&a[i])).collect();
-                let hit = match common.len() {
+                let mut common = [0usize; 3];
+                let mut n_common = 0;
+                for i in 0..3 {
+                    if b.contains(&a[i]) {
+                        common[n_common] = i;
+                        n_common += 1;
+                    }
+                }
+                let hit = match n_common {
                     0 => triangles_intersect(tri(f), tri(g)),
                     1 => {
                         let i = common[0];
@@ -1194,6 +1265,70 @@ pub fn intersecting_pairs(
         .collect();
     out.sort_unstable();
     Ok(out)
+}
+
+/// The vertices `I` that are exempt from the gap rule because the mesh intersects itself near
+/// them: the vertices of the faces in [`intersecting_pairs`], widened by one ring (every vertex
+/// that shares an edge with one of them). Empty for an embedded mesh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntersectionBand {
+    in_band: Vec<bool>,
+    n_pairs: usize,
+    n_vertices: usize,
+}
+
+impl IntersectionBand {
+    /// The band of `positions`; the intersection test runs on `pool`.
+    ///
+    /// # Errors
+    /// The errors of [`Surface::validate_positions`].
+    pub fn new(
+        pool: &rayon::ThreadPool,
+        surface: &Surface,
+        positions: &[[f64; 3]],
+    ) -> Result<IntersectionBand, RsError> {
+        let pairs = pool.install(|| intersecting_pairs(surface, positions))?;
+        let nv = surface.n_vertices();
+        let mut core = vec![false; nv];
+        for &[f, g] in &pairs {
+            for &fid in &[f, g] {
+                for &v in &surface.faces()[fid as usize] {
+                    core[v as usize] = true;
+                }
+            }
+        }
+        let mut in_band = core.clone();
+        if !pairs.is_empty() {
+            for &[a, b] in surface.edges() {
+                if core[a as usize] || core[b as usize] {
+                    in_band[a as usize] = true;
+                    in_band[b as usize] = true;
+                }
+            }
+        }
+        let n_vertices = in_band.iter().filter(|&&x| x).count();
+        Ok(IntersectionBand { in_band, n_pairs: pairs.len(), n_vertices })
+    }
+
+    /// No vertex in the band (the mesh is embedded).
+    pub fn is_empty(&self) -> bool {
+        self.n_vertices == 0
+    }
+
+    /// Number of intersecting face pairs at the start.
+    pub fn intersecting_pairs(&self) -> usize {
+        self.n_pairs
+    }
+
+    /// Number of vertices in the band.
+    pub fn n_vertices(&self) -> usize {
+        self.n_vertices
+    }
+
+    /// Per-vertex flags.
+    pub fn flags(&self) -> &[bool] {
+        &self.in_band
+    }
 }
 
 /// Does the mesh intersect itself? (see [`intersecting_pairs`]).
@@ -1301,6 +1436,8 @@ pub struct CcdCollapseGuard {
     last: Option<(u32, u32, [f64; 3])>,
     refused: u64,
     tested: u64,
+    band: Option<Vec<bool>>,
+    exempt: u64,
 }
 
 impl CcdCollapseGuard {
@@ -1322,7 +1459,21 @@ impl CcdCollapseGuard {
             last: None,
             refused: 0,
             tested: 0,
+            band: None,
+            exempt: 0,
         })
+    }
+
+    /// Exempts triangle pairs that both have a vertex in `band` (indices of the surface passed
+    /// to the remesher; vertices created by the remesher are not in the band, a collapse's
+    /// survivor is when either end of its edge is). An empty band is ignored.
+    pub fn set_band(&mut self, band: &IntersectionBand) {
+        self.band = if band.is_empty() { None } else { Some(band.in_band.clone()) };
+    }
+
+    /// Number of triangle pairs skipped because of the band.
+    pub fn exempt_pairs(&self) -> u64 {
+        self.exempt
     }
 
     /// Number of collapses refused so far.
@@ -1425,7 +1576,14 @@ impl CollapseGuard for CcdCollapseGuard {
         faces.sort_unstable();
         faces.dedup();
         let mut tested = 0;
+        let mut exempt = 0;
         let mut refuse = false;
+        let flag = |v: u32| self.band.as_ref().is_some_and(|b| b.get(v as usize).copied().unwrap_or(false));
+        let star_in: Vec<bool> = q
+            .new_star
+            .iter()
+            .map(|t| t.iter().any(|&v| flag(v) || (v == q.survivor && (flag(ea) || flag(eb)))))
+            .collect();
         'outer: for &g in &faces {
             let gv = mesh.face(g);
             if gv.contains(&ea) || gv.contains(&eb) {
@@ -1433,8 +1591,13 @@ impl CollapseGuard for CcdCollapseGuard {
             }
             let gt = gv.map(|v| pos[v as usize]);
             let gbox = inflate(&hull(&gt), self.gap_abs);
-            for t in q.new_star {
+            let g_in = self.band.is_some() && gv.iter().any(|&v| flag(v));
+            for (ti, t) in q.new_star.iter().enumerate() {
                 if t.iter().any(|v| gv.contains(v)) {
+                    continue;
+                }
+                if g_in && star_in[ti] {
+                    exempt += 1;
                     continue;
                 }
                 let tt = t.map(at_new);
@@ -1449,6 +1612,7 @@ impl CollapseGuard for CcdCollapseGuard {
             }
         }
         self.tested += tested;
+        self.exempt += exempt;
         if refuse {
             self.refused += 1;
         }

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use crate::ccd::{CcdCollapseGuard, CcdObstacle, CcdOptions, CcdReport, first_contact};
+use crate::ccd::{
+    CcdCollapseGuard, CcdObstacle, CcdOptions, CcdReport, IntersectionBand, first_contact_with_band,
+};
 use crate::constraints::{BarycenterMode, Constraint, ConstraintSet, RowKind};
 use crate::energy::exact::make_pool;
 use crate::energy::{Energy, EnergyEval};
@@ -872,6 +874,17 @@ impl Session {
             tau0 = 1.0;
         }
         let mut ccd_report = None;
+        // The faces that intersect at the start of the step exempt their neighbourhood from the
+        // gap rule (SPEC 7.3); `None` for an embedded mesh.
+        let mut band: Option<IntersectionBand> = None;
+        if eff.line_search.ccd.is_some() {
+            let t = Instant::now();
+            let b = IntersectionBand::new(&self.pool, &self.surface, &self.positions)?;
+            if !b.is_empty() {
+                band = Some(b);
+            }
+            seconds.ccd = t.elapsed().as_secs_f64();
+        }
         if let Some(copts) = &eff.line_search.ccd
             && tau0.is_finite()
             && tau0 > 0.0
@@ -884,7 +897,7 @@ impl Session {
             let velocity: Vec<[f64; 3]> = (0..nv)
                 .map(|v| [-x[3 * v], -x[3 * v + 1], -x[3 * v + 2]])
                 .collect();
-            let rep = first_contact(
+            let rep = first_contact_with_band(
                 &self.pool,
                 &self.surface,
                 &self.positions,
@@ -892,12 +905,13 @@ impl Session {
                 tau0,
                 &self.ccd_obstacles,
                 &o,
+                band.as_ref(),
             )?;
             if rep.contact.is_some() {
                 tau0 = tau0.min(2.0 / 3.0 * rep.tau_max);
             }
             ccd_report = Some(rep);
-            seconds.ccd = t.elapsed().as_secs_f64();
+            seconds.ccd += t.elapsed().as_secs_f64();
         }
         let t = Instant::now();
         let tau_min = eff.line_search.tau_min_rel * self.l0 / xinf;
@@ -1011,7 +1025,13 @@ impl Session {
         if let Some(ropts) = &eff.remesh {
             let pinned = pinned_of(&resolved);
             let mut guard = match &eff.line_search.ccd {
-                Some(o) => Some(CcdCollapseGuard::new(o, self.l0)?),
+                Some(o) => {
+                    let mut g = CcdCollapseGuard::new(o, self.l0)?;
+                    if let Some(b) = &band {
+                        g.set_band(b);
+                    }
+                    Some(g)
+                }
                 None => None,
             };
             let (out, rep) = remesh(
