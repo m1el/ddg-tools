@@ -479,7 +479,15 @@ Backtracking on `F` along `f − τ x`, halving.
 elements (and mesh–obstacle pairs) at distance ≥ `gap · ℓ̄₀` (default `gap = 0.05`). The test is
 conservative advancement (the curves crate's `rc-ccd-advancement`, extended to moving triangles:
 relative motion bound `max |u_p| + max |u_tri|`), with a BVH over swept boxes as broad phase. The start becomes
-`min(τ₀, ⅔ τ_max)` (as the curves crate). Remeshing can create intersections too (a collapse
+`min(τ₀, ⅔ τ_max)` (as the curves crate). **As built (WP8):** the gap is `gap · ℓ̄₀` absolute; a pair already
+closer than the gap at `t = 0` may close to `close_factor · d₀` (default 0.5) and a pair at distance
+0 is unconstrained, both counted in the report (`close_pairs`, `touching_pairs`), so the flow never
+freezes; the motion bound is the smaller of `max |u_p| + max |u_tri|` and the same bound in the
+pair's mean-velocity frame; the broad phase is a parallel Morton box tree (the curves crate's
+`Bvh<3>` builds sequentially and has no per-element box test). The collapse guard also refuses a
+collapse next to a pair already closer than the gap. Cost (WP8, 21 cases, 5k–50k faces, machine
+load 10–18): median CCD time / Barnes–Hut energy+gradient time 0.29 (1 thread), 0.19 (8 threads);
+the share of a whole step is measured by WP5. Remeshing can create intersections too (a collapse
 moves vertices): the remesher checks its own moves (§10). Default: **off until measured**; WP8
 measures the per-step cost on the Fig. 13 set and the number of runs where the energy alone lets
 surfaces cross (coarse meshes, Fig. 27); if the median cost is below 10 % of a step, it becomes
