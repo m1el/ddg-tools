@@ -28,9 +28,12 @@
 //! * [`Exponents`] and the [`kernel`](mod@kernel) `K(X, N; Y) = |N·(X − Y)|^α |X − Y|^{−β}`.
 //! * The exact energy and its differential ([`energy`](fn@energy::energy), [`energy::exact`]),
 //!   parallel and bitwise independent of the thread count.
-//! * Later work packages (`SPEC.md` §15) fill: [`metric`], [`constraints`], [`solve`],
-//!   [`spatial`], [`energy::barnes_hut`], [`remesh`], [`step`], [`penalties`], [`obstacle`],
-//!   [`implicit`], [`ccd`], [`optimize`], [`generate`], [`scene`].
+//! * The flow ([`step`]): [`FlowOptions`], [`Session`] (step by step, cancellable, the
+//!   surface changes with remeshing), [`flow`], [`run_scene`] for the reference's scene files.
+//! * The parts it is made of: [`metric`] (the Sobolev and comparison metrics), [`constraints`],
+//!   [`solve`] (dense, hierarchical GMRES, Schur complement, projection), [`spatial`] and
+//!   [`energy::barnes_hut`], [`remesh`], [`penalties`], [`obstacle`], [`implicit`], [`ccd`],
+//!   [`generate`] (test meshes), [`scene`]; [`optimize`] (the comparison optimizers, WP9).
 
 #![warn(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -55,10 +58,26 @@ pub mod spatial;
 pub mod step;
 pub mod surface;
 
+pub use ccd::CcdOptions;
+pub use constraints::{BarycenterMode, Constraint};
 pub use energy::{BhOptions, Energy, EnergyEval, EnergyEvaluation, EnergyReport, energy};
 pub use error::RsError;
 pub use geometry::FaceGeometry;
+pub use implicit::{Cylinder, ImplicitSurface};
 pub use io::{obj_to_string, parse_obj, read_obj, write_obj};
 pub use kernel::{Exponents, KernelEval, kernel, kernel_with_gradient};
-pub use penalties::Penalty;
+pub use metric::dense::{DenseMetric, dense_metric};
+pub use metric::{FractionalForm, L2Kind, Metric, SobolevWeights};
+pub use obstacle::{ObstacleKind, StaticSet};
+pub use penalties::{Penalty, Quadrature};
+pub use remesh::{RemeshOptions, RemeshOrder, RemeshReport};
+pub use scene::SceneSpec;
+pub use solve::iterative::{Backend, HierarchicalOptions};
+pub use solve::{GmresOptions, GmresSide, LinearReport, NewtonSteps, ProjectionStatus};
+pub use step::{
+    ArmijoRule, Control, FlowOptions, FlowReport, FlowResult, LbfgsVariant, LineSearch, Method,
+    PinSchedule, RunReport, RunSceneOptions, Schedule, ScheduleTiming, Session, StartRule,
+    Status, StepReport, StepStatus, StopRule, Timings, Trial, TrialOutcome, flow, run_scene,
+    scene_options,
+};
 pub use surface::{Component, NONE, Orientation, Surface};

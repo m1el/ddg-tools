@@ -466,7 +466,7 @@ pub fn fractional_operator(
     kernel_matrix_form(pool, ops, &h, Channel::Average)
 }
 
-/// The fractional operator over **vertex** pairs (`FractionalPairs::Vertices`, §6.3 option):
+/// The fractional operator over **vertex** pairs (`FractionalForm::VertexPairs`, §6.3 option):
 /// `uᵀ L u = Σ_{v≠w} (u_v − u_w)² a_v a_w |f_v − f_w|^{−(2τ+2)}`, i.e. the kernel-matrix form
 /// `2 (diag(a ⊙ H a) − diag(a) H diag(a))` with `H_vw = |f_v − f_w|^{−(2τ+2)}` and the vertex
 /// areas `a`. Parallel over rows; bitwise independent of the pool size.

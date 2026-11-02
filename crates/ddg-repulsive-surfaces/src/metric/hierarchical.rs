@@ -22,7 +22,7 @@
 //!   is the area average of `(N_S·v)²`); near blocks use the face data, with the same expressions
 //!   as the dense kernels of [`super::dense`] (so `χ = 0` reproduces them to round-off).
 //! * [`FaceFractionalTree`]: the face form of `L_{2−s}` (`h_fr = ρ^{2s−6}`, face averages; the
-//!   paper's and the reference's preconditioner factor, `FractionalPairs::Faces`).
+//!   paper's and the reference's preconditioner factor, `FractionalForm::FacePairs`).
 //! * [`VertexFractionalTree`]: the vertex-pair form `L^V_{2−s}` of D32 (`SPEC.md` §6.3): a BVH over
 //!   the vertices (point `f_v`, mass the dual area `a_v`), kernel `|f_v − f_w|^{2s−6}`,
 //!   `M = I`, weights `a_v`.
@@ -593,7 +593,7 @@ impl FaceMetricTree {
 }
 
 /// The face form of the fractional operator `L_τ` (`SPEC.md` §4.2, §6.3; `τ = 2 − s` in the
-/// preconditioner, `FractionalPairs::Faces`): kernel `ρ^{−(2τ+2)}` on face pairs, through the face
+/// preconditioner, `FractionalForm::FacePairs`): kernel `ρ^{−(2τ+2)}` on face pairs, through the face
 /// averages, hierarchical on a face tree.
 #[derive(Debug, Clone)]
 pub struct FaceFractionalTree {

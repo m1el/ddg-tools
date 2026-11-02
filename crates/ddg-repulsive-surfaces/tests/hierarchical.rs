@@ -20,7 +20,7 @@ use ddg_repulsive_surfaces::metric::hierarchical::{
     ClusterTreeOptions, FaceFractionalTree, FaceMetricTree, VertexFractionalTree,
 };
 use ddg_repulsive_surfaces::metric::{
-    Channel, DenseMatrix, FaceDiagonal, FaceOperators, FractionalPairs, SobolevWeights,
+    Channel, DenseMatrix, FaceDiagonal, FaceOperators, FractionalForm, SobolevWeights,
 };
 use ddg_repulsive_surfaces::solve::iterative::{
     Backend, HierarchicalOptions, MetricExtras, dense_metric_with_extras, hierarchical_saddle,
@@ -325,7 +325,7 @@ fn sparse_preconditioner_matches_the_dense_one() {
         ];
         let set = ConstraintSet::new(&s, &p, &cons, BarycenterMode::PerComponent).unwrap();
         let cq = set.jacobian(&p, &set.positional_rows()).unwrap();
-        for pairs in [FractionalPairs::Vertices, FractionalPairs::Faces] {
+        for pairs in [FractionalForm::VertexPairs, FractionalForm::FacePairs] {
             let mut po = PreconditionerOptions {
                 fractional: pairs,
                 cluster: opts(0.0, 8),
@@ -491,8 +491,8 @@ fn gmres_schur_equals_the_dense_direct_solve() {
         let dh = dschur.correction(&phin);
 
         for (chi, tol, bound) in [(0.0, 1e-12, 1e-8), (0.5, 1e-4, 5e-2)] {
-            for pairs in [FractionalPairs::Vertices, FractionalPairs::Faces] {
-                if pairs == FractionalPairs::Faces && case.name.starts_with("disk") {
+            for pairs in [FractionalForm::VertexPairs, FractionalForm::FacePairs] {
+                if pairs == FractionalForm::FacePairs && case.name.starts_with("disk") {
                     // The face form stalls on the bumpy disk (D32; WP2 measured a stall at 4e-2).
                     continue;
                 }
@@ -542,7 +542,7 @@ fn bitwise_independent_of_threads() {
         let (_, g) = energy_and_differential(&pool, &s, &p, &geom, &e).unwrap();
         let g = flat(&g);
         let mut out = Vec::new();
-        for pairs in [FractionalPairs::Vertices, FractionalPairs::Faces] {
+        for pairs in [FractionalForm::VertexPairs, FractionalForm::FacePairs] {
             let mut ho = HierarchicalOptions::default();
             ho.preconditioner.fractional = pairs;
             let mut it = hierarchical_saddle(pool.clone(), &s, &p, &e, &SobolevWeights::default(), &MetricExtras::default(), &cq, &ho, None).unwrap();
@@ -602,7 +602,7 @@ fn vertex_pairs_precondition_better_than_face_pairs() {
     let (_, g) = energy_and_differential(&pool, &s, &p, &geom, &e).unwrap();
     let g = flat(&g);
     let mut iters = Vec::new();
-    for pairs in [FractionalPairs::Vertices, FractionalPairs::Faces] {
+    for pairs in [FractionalForm::VertexPairs, FractionalForm::FacePairs] {
         let mut ho = HierarchicalOptions::default();
         ho.preconditioner.fractional = pairs;
         let mut it = hierarchical_saddle(pool.clone(), &s, &p, &e, &SobolevWeights::default(), &MetricExtras::default(), &cq, &ho, None).unwrap();

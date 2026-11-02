@@ -45,6 +45,7 @@
 //! | saddle: `g` | `1e-12`; `x`, `⟨g,x⟩`, `Φ_N`, `S`, `h` | `1e-10` (solves; observed worst ~1.6e-11) |
 //! | precond: `ε`, `L_{2−s}` | `1e-12`; `L′`, `P⁻¹ r` | `1e-10` |
 //! | remesh-ops | connectivity, parents, vertex map exactly; positions `1e-14` |
+//! | step | `F₀`, trial energies, `F₁`, `F_final`, `‖x‖`, `⟨g,x⟩`, `τ`: `1e-10`; `ℓ̄₀` `1e-12`; positions, `Φ`: `1e-10`; outcomes, halvings, Newton rounds exactly |
 //! | error cases | the oracle names the kind; this crate must return the matching `RsError` variant (table in `error_matches`) |
 //!
 //! # Skips and special readings (all justified)
@@ -58,9 +59,16 @@
 //! * `constraints` cases that leave a component's translation free: the oracle's translation check
 //!   belongs to the saddle, this crate checks it when the constraint set is built; the test adds a
 //!   pin on every component and compares the rows of the oracle only.
-//! * `step` (one dense projected-gradient step with Armijo): needs the session (WP5), which is not
-//!   merged. The cases are counted as pending; `step_fixtures_are_reproduced` is `#[ignore]`d with
-//!   that reason and to be enabled by the orchestrator (see the `// WP5` note).
+//! * `step` (one dense projected-gradient step with the standard Armijo rule, WP5): replayed with
+//!   [`Session`] (`Backend::Dense`, `EnergyEval::Exact`, per-component barycenters, no remeshing,
+//!   `StartRule::{Absolute, MaxDisplacement, Reference}`, `max_halvings`, `NewtonSteps`). The
+//!   oracle's objective is `ℰ̂` with the metric `w_TP A`; the crate's is `w_TP ℰ̂` with `w_TP A`
+//!   (the reference's reading of the weight, D6), whose trajectory is the same with `τ` scaled by
+//!   `1/w_TP`: the replay passes `τ_abs / w_TP` for the absolute start and compares `F / w_TP`,
+//!   `⟨g, x⟩ / w_TP²`, `‖x‖ / w_TP`, `τ w_TP`. Cases with a Willmore term in the metric but no
+//!   Willmore energy (`w_W > 0`; the session adds the term only with a Willmore penalty) are
+//!   skipped. If a trial's Armijo outcome differs within a margin of `1e-9` (rounding), the case is
+//!   recorded as a special reading and its remaining comparisons are skipped.
 //! * Oracle answers `Unsupported` are skipped.
 
 #![allow(clippy::needless_range_loop)]
@@ -80,12 +88,18 @@ use ddg_repulsive_surfaces::geometry::FaceGeometry;
 use ddg_repulsive_surfaces::metric::dense::{
     dense_metric, fractional_operator, to_dense, willmore_matrix,
 };
-use ddg_repulsive_surfaces::metric::{FaceOperators, FractionalPairs, SobolevWeights};
+use ddg_repulsive_surfaces::metric::{FaceOperators, FractionalForm, SobolevWeights};
 use ddg_repulsive_surfaces::remesh::{CollapseChecks, EditMesh, FlipChecks, RefusalKind};
 use ddg_repulsive_surfaces::solve::{
     DensePreconditioner, DenseSaddle, LinearOperator, SchurComplement,
 };
-use ddg_repulsive_surfaces::{Exponents, RsError, Surface};
+use ddg_repulsive_surfaces::constraints::BarycenterMode;
+use ddg_repulsive_surfaces::solve::NewtonSteps;
+use ddg_repulsive_surfaces::solve::iterative::Backend;
+use ddg_repulsive_surfaces::{
+    ArmijoRule, EnergyEval, Exponents, FlowOptions, LineSearch, Metric, RsError, Session,
+    StartRule, StepStatus, StopRule, Surface, TrialOutcome,
+};
 use fixture::{Case, Output};
 
 // ----- tolerances (see the table in the module docs) -----
@@ -122,6 +136,8 @@ struct Run {
     reordered: bool,
     /// Problems found while building `checks` (structural mismatches).
     problems: Vec<String>,
+    /// A special reading of the case (module docs).
+    special: Option<String>,
 }
 
 // ----- statistics -----
@@ -133,7 +149,6 @@ struct Stats {
     ok_cases: usize,
     error_cases: usize,
     skipped: usize,
-    pending_step: usize,
     special: Vec<String>,
     comparisons: usize,
     /// per quantity: (largest ratio error / tolerance, largest relative error, comparisons)
@@ -151,7 +166,6 @@ impl Stats {
         self.ok_cases += o.ok_cases;
         self.error_cases += o.error_cases;
         self.skipped += o.skipped;
-        self.pending_step += o.pending_step;
         self.special.extend(o.special);
         self.comparisons += o.comparisons;
         for (k, (r, e, n)) in o.worst {
@@ -169,12 +183,11 @@ impl Stats {
 
     fn report(&self) -> String {
         let mut s = format!(
-            "{} cases ({} answered ok, {} oracle errors, {} skipped, {} step cases pending WP5), {} comparisons, {} disagreements\n  by task: {:?}\n",
+            "{} cases ({} answered ok, {} oracle errors, {} skipped), {} comparisons, {} disagreements\n  by task: {:?}\n",
             self.cases,
             self.ok_cases,
             self.error_cases,
             self.skipped,
-            self.pending_step,
             self.comparisons,
             self.problems.len(),
             self.by_task
@@ -428,7 +441,7 @@ fn run_precond(c: &Case, o: &Output) -> Result<Run, RsError> {
         &e,
         &cq,
         c.eps_rel.unwrap_or(1e-10),
-        FractionalPairs::Faces,
+        FractionalForm::FacePairs,
     )?;
     let mut rv = flat3(&c.r);
     rv.extend(vec![0.0; q.len()]);
@@ -540,6 +553,118 @@ fn run_remesh(c: &Case, o: &Output) -> Result<Run, String> {
     Ok(r)
 }
 
+/// One dense projected-gradient step through [`Session`] (module docs for the mapping).
+fn run_step(c: &Case, o: &Output) -> Result<Run, RsError> {
+    let s = mesh(c)?;
+    let e = exponents(c)?;
+    let w = weights(c);
+    let wtp = w.tp_weight;
+    let armijo = c.line("armijo").map_or(1e-2, |l| fixture::hex(&l[1]));
+    let start = match c.line("start") {
+        Some(l) if l[1] == "abs" => StartRule::Absolute { tau: fixture::hex(&l[2]) / wtp },
+        Some(l) if l[1] == "maxdisp" => StartRule::MaxDisplacement { lengths: fixture::hex(&l[2]) },
+        Some(l) if l[1] == "reference" => StartRule::Reference,
+        _ => StartRule::MaxDisplacement { lengths: 0.1 },
+    };
+    let max_halvings = c.line("maxhalv").map_or(60, |l| l[1].parse().unwrap());
+    let newton = match c.line("newton") {
+        Some(l) if l[1] == "fixed" => NewtonSteps::Fixed(l[2].parse().unwrap()),
+        Some(l) => NewtonSteps::UntilTolerance { max: l[2].parse().unwrap() },
+        None => NewtonSteps::UntilTolerance { max: 5 },
+    };
+    let options = FlowOptions {
+        exponents: e,
+        energy_eval: EnergyEval::Exact,
+        tp_weight: wtp,
+        metric: Metric::Sobolev { low_order: w.low_order },
+        backend: Backend::Dense,
+        constraints: c.constraints.clone(),
+        barycenter_mode: Some(BarycenterMode::PerComponent),
+        line_search: LineSearch {
+            armijo: ArmijoRule::Standard { c: armijo },
+            start,
+            tau_min_rel: 1e-12,
+            max_halvings: Some(max_halvings),
+            ccd: None,
+        },
+        newton_steps: newton,
+        remesh: None,
+        stop: StopRule::Off,
+        max_iterations: 1,
+        threads: Some(1),
+        ..FlowOptions::default()
+    };
+    let mut session = Session::new(s, c.positions.clone(), options)?;
+    let rep = session.step()?;
+    let mut r = Run::default();
+    if o.error_kind().is_some() {
+        return Ok(r);
+    }
+    let lbar = session.mean_edge_length0();
+    r.checks.push(check("F", vec![rep.energy_before / wtp], vec![o.scalar("energy0")], SOLVE, 1e-300));
+    r.checks.push(check("slope", vec![rep.sobolev_norm_sq / (wtp * wtp)], vec![o.scalar("slope")], SOLVE, 1e-300));
+    r.checks.push(check("xnorm", vec![rep.direction_norm / wtp], vec![o.scalar("xnorm")], SOLVE, 1e-300));
+    r.checks.push(check("lbar", vec![lbar], vec![o.scalar("lbar")], MATRIX, 1e-300));
+    let trials = o.get("trial");
+    let result = &o.get("result")[0];
+    let accepted = result[0] == "accepted";
+    let halvings: u32 = result[2].parse().unwrap();
+    if !trials.is_empty() {
+        r.checks.push(check("tau", vec![rep.tau0 * wtp], vec![o.scalar("tau0")], SOLVE, 1e-300));
+    }
+    // Trials: outcome exactly (borderline Armijo margins excepted), step sizes and energies.
+    let n = trials.len().min(rep.trials.len());
+    for (i, t) in trials.iter().enumerate().take(n) {
+        let got = &rep.trials[i];
+        let want_outcome = match t[2].as_str() {
+            "accepted" => TrialOutcome::Accepted,
+            "armijo-failed" => TrialOutcome::ArmijoFailed,
+            _ => TrialOutcome::NonFinite,
+        };
+        if got.outcome != want_outcome {
+            let margin = fixture::hex(&t[4]);
+            if margin.abs() < 1e-9 {
+                r.special = Some(format!("borderline Armijo (margin {margin:.1e})"));
+                return Ok(r);
+            }
+            r.problems.push(format!("trial {i}: {:?} vs oracle {}", got.outcome, t[2]));
+            return Ok(r);
+        }
+        r.checks.push(check("tau", vec![got.tau * wtp], vec![fixture::hex(&t[1])], SOLVE, 1e-300));
+        if want_outcome != TrialOutcome::NonFinite {
+            r.checks.push(check("F", vec![got.energy / wtp], vec![fixture::hex(&t[3])], SOLVE, 1e-300));
+        }
+    }
+    if trials.len() != rep.trials.len() {
+        r.problems.push(format!("{} trials vs oracle {}", rep.trials.len(), trials.len()));
+    }
+    if (rep.status == StepStatus::Accepted) != accepted || rep.halvings != halvings {
+        r.problems.push(format!(
+            "result {:?} after {} halvings vs oracle {} after {halvings}",
+            rep.status, rep.halvings, result[0]
+        ));
+    }
+    r.checks.push(check("F", vec![rep.energy_trial / wtp], vec![o.scalar("energy1")], SOLVE, 1e-300));
+    let newton: u32 = o.get("newton")[0][0].parse().unwrap();
+    if rep.newton_steps != newton {
+        r.problems.push(format!("{} Newton rounds vs oracle {newton}", rep.newton_steps));
+    }
+    let set = ConstraintSet::new(
+        session.surface(),
+        session.positions(),
+        &session.constraints(),
+        BarycenterMode::PerComponent,
+    )?;
+    let phi = set.values(session.positions())?;
+    let want_phi = hexes(&o.get("phi")[0]);
+    let scale = set.rows().iter().fold(1.0f64, |m, row| m.max(row.target.abs()));
+    r.checks.push(check("phi", phi, want_phi, SOLVE, scale));
+    r.checks.push(check("F", vec![rep.energy_after / wtp], vec![o.scalar("energy-final")], SOLVE, 1e-300));
+    let want_x = o.vectors("x");
+    r.checks.push(check("pos", flat3(session.positions()), want_x, SOLVE, 1.0));
+    Ok(r)
+}
+
 // ----- the replay of one case -----
 
 fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
@@ -547,9 +672,9 @@ fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
     let o = fixture::parse_output(output);
     stats.cases += 1;
     *stats.by_task.entry(c.task.clone()).or_default() += 1;
-    if c.task == "step" {
-        // WP5: the session is not merged; see `step_fixtures_are_reproduced`.
-        stats.pending_step += 1;
+    if c.task == "step" && c.weights.is_some_and(|w| w.2 != 0.0) {
+        // A Willmore term in the metric without a Willmore energy: not expressible (module docs).
+        stats.skipped += 1;
         return;
     }
     let oracle_error = o.error_kind().map(str::to_string);
@@ -573,6 +698,7 @@ fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
                     "constraints" => run_constraints(&c, &o),
                     "saddle" => run_saddle(&c, &o),
                     "precond" => run_precond(&c, &o),
+                    "step" => run_step(&c, &o),
                     other => return Err(format!("unknown task {other}")),
                 };
                 match (&oracle_error, r) {
@@ -586,7 +712,7 @@ fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
                     (Some(kind), Ok(run)) => {
                         if kind == "SingularSaddle" && run.dropped_rows {
                             // D10: the rank check repairs the redundancy the oracle refuses.
-                            Ok(Run { problems: vec![], checks: vec![], dropped_rows: true, reordered: false })
+                            Ok(Run { dropped_rows: true, ..Run::default() })
                         } else {
                             Err(format!("oracle error {kind}, Rust succeeded"))
                         }
@@ -618,6 +744,9 @@ fn replay_case(name: &str, input: &str, output: &str, stats: &mut Stats) {
     }
     if run.reordered {
         stats.special.push("flip reordered by Rust".into());
+    }
+    if let Some(sp) = &run.special {
+        stats.special.push(sp.clone());
     }
     for p in &run.problems {
         stats.problem(name, p.clone());
@@ -681,7 +810,7 @@ fn fixtures_are_reproduced() {
     assert!(stats.problems.is_empty(), "{} disagreements", stats.problems.len());
     // Minimum counts (the fixtures of the oracle: 70 cases, 7 of them `step`).
     let replayed = stats.ok_cases + stats.error_cases;
-    assert!(replayed >= 60, "only {replayed} fixtures replayed");
+    assert!(replayed >= 67, "only {replayed} fixtures replayed");
     for (task, min) in [
         ("energy", 14),
         ("df", 4),
@@ -690,6 +819,7 @@ fn fixtures_are_reproduced() {
         ("saddle", 8),
         ("precond", 3),
         ("remesh-ops", 16),
+        ("step", 7),
     ] {
         assert!(per_task.get(task).copied().unwrap_or(0) >= min, "too few {task} fixtures");
     }
@@ -697,20 +827,28 @@ fn fixtures_are_reproduced() {
     assert!(stats.special.iter().any(|s| s.starts_with("flip")), "rs-mobius-flip");
 }
 
-// WP5: enable when `Session` (one dense projected-gradient step with standard Armijo and the
-// fixture's start rule `abs T | maxdisp L | reference`, `newton fixed N | tol N`) is merged. The
-// fixtures are `rs-*-step*` (7 cases): compare `energy0`, `slope`, `xnorm`, `lbar`, `tau0`, the
-// trials, `result`, `energy1`, `phi`, `energy-final`, `x`.
+/// The `step` fixtures (7) replayed alone: every one answered and reproduced.
 #[test]
-#[ignore = "WP5: the session is not merged; no public API runs one dense projected-gradient step yet"]
 fn step_fixtures_are_reproduced() {
-    let steps: Vec<String> = fixture::manifest()
-        .into_iter()
-        .filter(|(_, t, _)| t == "step")
-        .map(|(n, _, _)| n)
-        .collect();
-    assert_eq!(steps.len(), 7);
-    unimplemented!("WP5");
+    let mut stats = Stats::default();
+    let mut n = 0;
+    for (name, task, _) in fixture::manifest() {
+        if task != "step" {
+            continue;
+        }
+        n += 1;
+        let input = std::fs::read_to_string(fixture::dir().join(format!("{name}.in"))).unwrap();
+        let output = std::fs::read_to_string(fixture::dir().join(format!("{name}.out"))).unwrap();
+        replay_case(&name, &input, &output, &mut stats);
+    }
+    println!("{}", stats.report());
+    for (n, m) in &stats.problems {
+        println!("DISAGREEMENT {n}: {m}");
+    }
+    assert_eq!(n, 7);
+    assert!(stats.problems.is_empty(), "{} disagreements", stats.problems.len());
+    assert_eq!(stats.ok_cases, 7, "every step fixture is answered ok and reproduced");
+    assert!(stats.special.is_empty(), "no special readings expected: {:?}", stats.special);
 }
 
 fn oracle_path() -> PathBuf {

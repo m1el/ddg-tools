@@ -25,9 +25,9 @@
 //! reference uses an absolute `1e-2`, measured worse, `NOTES-WP6.md`) is used. [`SparsePreconditioner::epsilon`]
 //! reports which.
 //!
-//! **The fractional factor (D32).** [`FractionalPairs::Vertices`] (the default of
+//! **The fractional factor (D32).** [`FractionalForm::VertexPairs`] (the default of
 //! [`PreconditionerOptions`]) uses the vertex-pair `L^V_{2−s}` ([`VertexFractionalTree`]);
-//! [`FractionalPairs::Faces`] the face form of the paper and the reference
+//! [`FractionalForm::FacePairs`] the face form of the paper and the reference
 //! ([`FaceFractionalTree`]). Both hierarchical with the options' `χ`.
 //!
 //! **The form (proposed D33, WP6).** As printed (`PreconditionerForm::Congruence`), `P⁻¹` is
@@ -59,7 +59,7 @@ use crate::kernel::Exponents;
 use crate::metric::hierarchical::{
     ClusterTreeOptions, FaceFractionalTree, FaceMetricTree, VertexFractionalTree,
 };
-use crate::metric::{FaceOperators, FractionalPairs};
+use crate::metric::{FaceOperators, FractionalForm};
 use crate::spatial::FaceTree;
 use crate::surface::Surface;
 
@@ -350,8 +350,8 @@ pub struct PreconditionerOptions {
     /// `ε_multi_rel`, used when some component's translations are not fixed on their own
     /// (default `1e-4`; `1e-2` costs 1.5–6× the iterations, `NOTES-WP6.md`).
     pub eps_multi_rel: f64,
-    /// The discretization of `L_{2−s}` (default [`FractionalPairs::Vertices`], D32).
-    pub fractional: FractionalPairs,
+    /// The discretization of `L_{2−s}` (default [`FractionalForm::VertexPairs`], D32).
+    pub fractional: FractionalForm,
     /// The block cluster tree of `L_{2−s}` (`χ`, leaf size).
     pub cluster: ClusterTreeOptions,
     /// How `L′⁻¹` and `L_{2−s}` are combined (default [`PreconditionerForm::Augmented`]).
@@ -363,7 +363,7 @@ impl Default for PreconditionerOptions {
         PreconditionerOptions {
             eps_rel: 1e-10,
             eps_multi_rel: 1e-4,
-            fractional: FractionalPairs::Vertices,
+            fractional: FractionalForm::VertexPairs,
             cluster: ClusterTreeOptions::default(),
             form: PreconditionerForm::Augmented,
         }
@@ -450,7 +450,7 @@ impl SparsePreconditioner {
     /// positional rows `c` (`k_Q × 3|V|`). `extra_laplacian` (`|V| × |V|`, symmetric positive
     /// semidefinite, already weighted) is added to the Laplacian block (the Willmore hook, D7).
     /// `faces`: a face tree and the face operators of the same positions to reuse for
-    /// [`FractionalPairs::Faces`] (built here otherwise; unused for vertex pairs).
+    /// [`FractionalForm::FacePairs`] (built here otherwise; unused for vertex pairs).
     ///
     /// # Errors
     /// The errors of [`Surface::validate_positions`]; [`RsError::InvalidOption`] for invalid
@@ -500,14 +500,14 @@ impl SparsePreconditioner {
         let t0 = Instant::now();
         let tau = 2.0 - exponents.s();
         let fractional = match options.fractional {
-            FractionalPairs::Vertices => FractionalFactor::Vertices(VertexFractionalTree::build(
+            FractionalForm::VertexPairs => FractionalFactor::Vertices(VertexFractionalTree::build(
                 &pool,
                 positions,
                 &mass,
                 tau,
                 &options.cluster,
             )?),
-            FractionalPairs::Faces => {
+            FractionalForm::FacePairs => {
                 let tree = match faces {
                     Some((t, ops)) => FaceFractionalTree::build(&pool, t, ops, tau, &options.cluster)?,
                     None => {
@@ -534,7 +534,7 @@ impl SparsePreconditioner {
     }
 
     /// As [`SparsePreconditioner::new`], reusing the face tree of a [`FaceMetricTree`] for
-    /// [`FractionalPairs::Faces`].
+    /// [`FractionalForm::FacePairs`].
     ///
     /// # Errors
     /// As [`SparsePreconditioner::new`].
