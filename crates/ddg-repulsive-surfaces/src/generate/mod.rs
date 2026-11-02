@@ -10,18 +10,19 @@
 //! | [`field`] | distance fields: tubes around polylines and networks, smooth union / difference, boxes, spheres |
 //! | [`tetra`] | marching tetrahedra on a grid (manifold by construction), clamping and projected smoothing; [`tetra::mesh_with_faces`] hits a face count |
 //! | [`shapes`] | genus-g surfaces (Fig. 15), handcuffs, tunnels (Fig. 12), tube around a trivalent graph (for Fig. 16) |
+//! | [`ishii`] | the 21 handlebody-knots of Fig. 16 (Ishii et al. 2012, Table 1) as tubes around trivalent graphs |
 //! | [`perturbed`] | the smooth perturbed torus of Sec. 8.1 (Fig. 10) |
 //! | [`check`] | self-intersection test, linking number of closed polylines |
 //!
 //! # Not done
-//! * The knotted genus-2 surfaces of Ishii et al. 2012 (Fig. 16): the table's diagrams are not
-//!   available offline and were not transcribed (never invented); [`shapes::graph_tube`] meshes
-//!   any trivalent spatial graph given as polylines, so entries can be added from the paper.
+//! * (done) The genus-2 handlebody-knots of Ishii et al. 2012 (Fig. 16) are in [`ishii`]: the 21 diagrams traced into
+//!   trivalent graphs, meshed with [`shapes::graph_tube`].
 //! * No remeshing: the meshes come out of marching tetrahedra with clamped vertices and
 //!   projected smoothing ([`tetra`]); callers who need better triangles use the WP4 remesher.
 
 pub mod check;
 pub mod field;
+pub mod ishii;
 pub mod perturbed;
 pub mod primitives;
 pub mod shapes;
