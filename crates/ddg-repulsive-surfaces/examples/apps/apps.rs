@@ -136,7 +136,7 @@ pub fn eig3(mut a: [[f64; 3]; 3]) -> [f64; 3] {
             }
         }
         if m < 1e-14 * (a[0][0].abs() + a[1][1].abs() + a[2][2].abs()).max(1e-300) { break; }
-        let th = 0.5 * (a[q][q] - a[p][p]).atan2(2.0 * a[p][q]);
+        let th = 0.5 * (2.0 * a[p][q]).atan2(a[q][q] - a[p][p]);
         let (c, s) = (th.cos(), th.sin());
         for k in 0..3 {
             let (akp, akq) = (a[k][p], a[k][q]);

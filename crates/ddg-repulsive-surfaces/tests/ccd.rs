@@ -801,3 +801,34 @@ fn collapse_guard_with_a_band() {
     assert!(banded.exempt_pairs() > 0);
     assert_eq!(plain.exempt_pairs(), 0);
 }
+
+/// Coplanar faces with one common vertex (flat regions): rounding left `orient` at ±1e-20 for
+/// points in the plane, and the non-coplanar branch of the segment–triangle test then reported
+/// a hit (the genus-2 start mesh of `apps genus02`, faces 1795 and 1988; NOTES-FIDELITY.md).
+#[test]
+fn coplanar_neighbours_do_not_intersect() {
+    use ddg_repulsive_surfaces::generate::shapes::genus_surface;
+    let m = genus_surface(2, 4200).unwrap();
+    let s = m.surface().unwrap();
+    assert_eq!(intersecting_pairs(&s, &m.positions).unwrap(), Vec::<[u32; 2]>::new());
+    // flat grids in generic planes
+    let g = grid_disk(24, 24).unwrap();
+    let s = Surface::new(g.positions.len(), g.faces.clone()).unwrap();
+    let mut rng = SplitMix64::new(7);
+    let mut hits = 0;
+    for _ in 0..50 {
+        let mut r = || rng.next_f64() - 0.5;
+        let (u, w) = ([r(), r(), r()], [r(), r(), r()]);
+        let x: Vec<[f64; 3]> =
+            g.positions.iter().map(|p| [0, 1, 2].map(|k| 0.3 + p[0] * u[k] + p[1] * w[k])).collect();
+        hits += intersecting_pairs(&s, &x).unwrap().len();
+    }
+    assert_eq!(hits, 0);
+    // a genuine coplanar overlap is still found
+    let tris = [
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        [[0.2, 0.2, 0.0], [1.2, 0.2, 0.0], [0.2, 1.2, 0.0]],
+    ];
+    let (s, x) = soup(&tris);
+    assert_eq!(intersecting_pairs(&s, &x).unwrap(), vec![[0, 1]]);
+}
