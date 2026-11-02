@@ -30,8 +30,13 @@
 //! [`FractionalPairs::Faces`] the face form of the paper and the reference
 //! ([`FaceFractionalTree`]). Both hierarchical with the options' `χ`.
 //!
-//! `P⁻¹` is symmetric positive semidefinite and its output satisfies `C_Q z = 0`
-//! (`rs-fractional-preconditioner`); its order is that of `A⁻¹` (`rs-preconditioner-order`).
+//! **The form (proposed D33, WP6).** As printed (`PreconditionerForm::Congruence`), `P⁻¹` is
+//! symmetric positive semidefinite and its output satisfies `C_Q z = 0`
+//! (`rs-fractional-preconditioner`), but it is singular on `A′`: GMRES cannot produce the
+//! multipliers (pin reaction forces, the net force of a non-translation-invariant gradient). The
+//! default [`PreconditionerForm::Augmented`] adds the coupling of `L′⁻¹` back (see there): same
+//! cost, nonsingular, `C_Q P⁻¹ [r; b] = b`. Its position block is the same `E L E`, of the order of
+//! `A⁻¹` (`rs-preconditioner-order`).
 
 // `!(x > tol)` is deliberate throughout: a NaN must fail the test.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -316,6 +321,8 @@ pub struct PreconditionerOptions {
     pub fractional: FractionalPairs,
     /// The block cluster tree of `L_{2−s}` (`χ`, leaf size).
     pub cluster: ClusterTreeOptions,
+    /// How `L′⁻¹` and `L_{2−s}` are combined (default [`PreconditionerForm::Augmented`]).
+    pub form: PreconditionerForm,
 }
 
 impl Default for PreconditionerOptions {
@@ -325,8 +332,36 @@ impl Default for PreconditionerOptions {
             eps_multi_rel: 1e-2,
             fractional: FractionalPairs::Vertices,
             cluster: ClusterTreeOptions::default(),
+            form: PreconditionerForm::Augmented,
         }
     }
+}
+
+/// How the preconditioner combines `L′⁻¹` and `L_{2−s}` (`SPEC.md` §6.3; module docs).
+///
+/// With `L′⁻¹ = [[E, F], [Fᵀ, G]]`:
+///
+/// * `Congruence` (§6.3 as printed, the paper, the reference): `P⁻¹ = L′⁻¹ D L′⁻¹`,
+///   `D = blockdiag(L_{2−s} ⊗ I₃, 0)`. Symmetric PSD, `C_Q P⁻¹ r = 0`, but **singular on
+///   `A′`**: its range has no multiplier component (`D` zeroes it, and `L_{2−s} 1 = 0` removes
+///   the translations), so right-preconditioned GMRES cannot reach a solution with nonzero
+///   multipliers (pins: the reaction forces; any force with `Σ g ≠ 0`) and stalls at the
+///   residual of that component; left GMRES stops early with that true residual (measured:
+///   0.08–0.7).
+/// * `Augmented` (default): `P⁻¹ = L′⁻¹ + L′⁻¹ blockdiag((L_{2−s} − K) ⊗ I₃, 0) L′⁻¹
+///   = [[E L E, F + E L F], [Fᵀ + Fᵀ L E, 2G + Fᵀ L F]]` (`L′⁻¹ blockdiag(K, 0) L′⁻¹ =
+///   [[E, 0], [0, −G]]`, so the `E` block is replaced by `E L E` and the coupling `F` of the
+///   positions to the multipliers is kept). It has the structure of `A′⁻¹` (the constraint
+///   preconditioner of `Ã = K L⁻¹ K`, up to rank `k_Q`), is nonsingular and symmetric, and
+///   reproduces the constraint rows: `C_Q P⁻¹ [r; b] = b`. Same cost (two `L′` solves, one
+///   `L_{2−s}` product, one sparse product with `K`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreconditionerForm {
+    /// `L′⁻¹ + L′⁻¹ blockdiag(L_{2−s} − K, 0) L′⁻¹` (proposed, D33).
+    #[default]
+    Augmented,
+    /// `L′⁻¹ blockdiag(L_{2−s}, 0) L′⁻¹` (the SPEC/paper/reference form).
+    Congruence,
 }
 
 impl PreconditionerOptions {
@@ -366,6 +401,9 @@ pub enum FractionalFactor {
 pub struct SparsePreconditioner {
     pool: Arc<rayon::ThreadPool>,
     lprime: LaplacianSaddle,
+    /// The Laplacian block `K = W + εM + E` (for the augmented form).
+    laplacian: SparseMatrix,
+    form: PreconditionerForm,
     fractional: FractionalFactor,
     eps: f64,
     multi: bool,
@@ -451,6 +489,8 @@ impl SparsePreconditioner {
         Ok(SparsePreconditioner {
             pool,
             lprime,
+            laplacian: k,
+            form: options.form,
             fractional,
             eps,
             multi,
@@ -537,7 +577,29 @@ impl SparsePreconditioner {
             FractionalFactor::Vertices(t) => t.apply(&self.pool, &y[..nd], &mut v[..nd])?,
             FractionalFactor::Faces(t) => t.apply(&self.pool, &y[..nd], &mut v[..nd])?,
         }
-        let z = self.lprime.solve(&v)?;
+        if self.form == PreconditionerForm::Augmented {
+            // v −= (K ⊗ I₃) y (K symmetric: column j = row j).
+            let k = &self.laplacian;
+            let (cp, ri, val) = (k.col_ptr(), k.row_idx(), k.values());
+            for j in 0..k.ncols() {
+                let mut acc = [0.0; 3];
+                for p in cp[j]..cp[j + 1] {
+                    let i = 3 * ri[p] as usize;
+                    for a in 0..3 {
+                        acc[a] += val[p] * y[i + a];
+                    }
+                }
+                for a in 0..3 {
+                    v[3 * j + a] -= acc[a];
+                }
+            }
+        }
+        let mut z = self.lprime.solve(&v)?;
+        if self.form == PreconditionerForm::Augmented {
+            for (zi, yi) in z.iter_mut().zip(&y) {
+                *zi += yi;
+            }
+        }
         self.applications.fetch_add(1, Ordering::Relaxed);
         self.nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
