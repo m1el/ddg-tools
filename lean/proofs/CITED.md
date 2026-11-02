@@ -2262,6 +2262,27 @@ and the id is proved (`RS.aug_precond_props`, the default augmented form of D33;
 - **What depends on it.** The number of GMRES iterations (SPEC §6.3, §14.5), not the solution:
   GMRES stops on the true residual of `A′` (right preconditioning, D13).
 
+### [formula: rs-preconditioner-scale] The constant between `W⁻¹ L_{2−s} W⁻¹` and `B⁻¹`
+
+- **Statement.** On a plane, for `u = e^{ik·x}`, the quadratic forms of `B` (Eq. 12, kernel
+  `|x − y|^{−2s}`, `σ = s − 1`), of the vertex-pair `L_{2−s}` (kernel `|x − y|^{−2(2−s)−2}`) and of the
+  cotan stiffness `W` have the symbols `2 I(σ) |k|^{2s}`, `2 I(2−s) |k|^{2(2−s)}` and `|k|²` per unit
+  area, with `I(t) = ∫_{R²} (1 − cos z₁) |z|^{−2−2t} dz = π Γ(1−t) / (t 4^t Γ(1+t))`, `t ∈ (0, 1)`;
+  hence `W⁻¹ L_{2−s} W⁻¹ B` has the symbol `4 I(σ) I(2−s)` (≈ 199.86 at `s = 5/3`), and the augmented
+  preconditioner divides `L_{2−s}` by `w_TP · 4 I(σ) I(2−s)` (SPEC §6.3, `FractionalScale::Symbol`).
+- **Reference.** E. Di Nezza, G. Palatucci, E. Valdinoci, *Hitchhiker's guide to the fractional
+  Sobolev spaces*, Bull. Sci. Math. 136 (2012), Sec. 3 (Prop. 3.3: the Gagliardo seminorm equals
+  `2 C(n,s)⁻¹ ∫ |ξ|^{2s} |û|²` with `C(n,s)⁻¹ = ∫ (1 − cos ζ₁) |ζ|^{−n−2s} dζ`, and the closed form
+  of `C(n,s)`), with `n = 2`.
+- **Source check.** Not re-read in this session; the closed form of `I(t)` was checked against an
+  adaptive quadrature at `t = 1/3, 2/3, 0.4286, 0.5714` (agreement to 6 digits;
+  `crates/ddg-repulsive-surfaces/NOTES-SOLVERFIX.md`).
+- **Why not formalized.** A Fourier-symbol computation for the continuous operators; the discrete
+  operators only approximate it (measured: the preconditioned spectrum of a 900-face torus lies in
+  0.59–1.94 with it, in 120–300 without).
+- **What depends on it.** Only the iteration count (the relative position of the constraint part,
+  eigenvalue 1, and the fractional part of the preconditioned spectrum), never the solution.
+
 ### [formula: rs-aqp] Accelerated quadratic proxy
 
 - **Statement.** AQP minimizes a quadratic proxy (here the cotan Laplacian `W`) with a Nesterov
