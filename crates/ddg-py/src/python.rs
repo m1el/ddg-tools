@@ -29,6 +29,7 @@ mod flip_geodesics;
 mod intrinsic_apps;
 mod intrinsic_vector;
 mod repulsive;
+mod repulsive_surfaces;
 mod simplification;
 
 pyo3::create_exception!(
@@ -598,6 +599,10 @@ fn reoptimize_cones<'py>(
 /// RepulsiveSession(...), repulsive_flow(...), curve_energy(...), repulsive_defaults()
 ///                   the repulsive-curves flow of Yu, Schumacher, Crane (2021)
 ///
+/// RepulsiveSurfaceSession(...), repulsive_surface_flow(...), surface_energy(...),
+/// repulsive_surface_defaults(), repulsive_surface_scene(...)
+///                   the repulsive-surfaces flow of Yu, Brakensiek, Schumacher, Crane (2021)
+///
 /// PIPELINE          name of the unwrap pipeline this build contains
 /// IS_PLACEHOLDER    False: the linked pipeline is the real unwrap (`ddg-uv`), not a stand-in
 ///                   (the flag exists so that a build with a stand-in would label itself)
@@ -621,6 +626,7 @@ fn ddg_tools_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     intrinsic_apps::register(m)?;
     intrinsic_vector::register(m)?;
     repulsive::register(m)?;
+    repulsive_surfaces::register(m)?;
     simplification::register(m)?;
     m.add("DdgError", py.get_type::<DdgError>())?;
     m.add("InputError", py.get_type::<InputError>())?;

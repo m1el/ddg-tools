@@ -24,6 +24,8 @@
 //!   developability energy, flow and cut-and-flatten of Stein, Grinspun, Crane (2018).
 //! * [`repulsive`] — `RepulsiveSession`, `repulsive_flow`, `curve_energy`: the flow of Yu,
 //!   Schumacher, Crane, *Repulsive Curves* (ACM TOG 40(2), 2021) on curve networks.
+//! * [`repulsive_surfaces`] — `RepulsiveSurfaceSession`, `repulsive_surface_flow`, `surface_energy`: the
+//!   flow of Yu, Brakensiek, Schumacher, Crane, *Repulsive Surfaces* (ACM TOG 40(6), 2021) on triangle meshes.
 //! * [`flip_geodesics`] — `geodesic_path`, `geodesic_network`, `geodesic_bezier`: the edge-flip
 //!   geodesics of Sharp and Crane (ACM TOG 39(6), 2020) on either representation.
 //! * [`simplification`] — `simplify`, `build_hierarchy`, `qem_simplify`: surface simplification with
@@ -62,6 +64,7 @@ pub mod measure;
 pub mod pack;
 pub mod pipeline;
 pub mod repulsive;
+pub mod repulsive_surfaces;
 pub mod simplification;
 pub mod sphere;
 
