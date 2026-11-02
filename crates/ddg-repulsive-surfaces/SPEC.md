@@ -865,6 +865,19 @@ independent rules must agree to 6 digits) — no Mathematica. Discrete energies 
 back), and the Barnes–Hut error against `θ`. Expected: rate between `O(h)` and `O(h²)`, and
 `O(θ²)`.
 
+**Results of record (WP16a, `examples/consistency.rs`, `NOTES-WP16A.md`).** Perturbed torus
+`R = 1`, `r = 1/3`, `PerturbedTorus(degree 2, amplitude 0.2, seed 16)` (embedded, area 13.1631).
+Smooth energy by our own cubature over `[0, 2π]⁴` (offset coordinates, trapezoid in the base point,
+Duffy and geometric-cell rules for the diagonal, which agree to 4e-8): `ℰ(6,12) = 460.71622`,
+`ℰ(4,8) = 96.400663`; torus of revolution `ℰ(6,12) = 103.770432`, `ℰ(4,8) = 61.645093`. Discrete
+energy on squeezed grids remeshed 4 passes with projection, 648–85,554 faces (`h` 0.29–0.033):
+relative error 2.0 → 2.7e-2, fitted rate 1.97 (1.86 over the last four points), torus 2.05, (4, 8)
+1.97 — at the `O(h²)` end of the paper's "between `O(h)` and `O(h²)`". Barnes–Hut (leaf 8): error
+`~ θ²` for `θ ≥ 0.35` (fits 1.9–2.4; at `θ = 0.5`: 1e-4 / 4.8e-3 / 8.2e-3 on 11k / 43k / 86k
+faces); for `θ ≤ 0.25` the signed error changes sign and is not monotone (`|error| ≤ 2e-4` at
+`θ = 0.125`) — cancellation between over- and under-estimated far fields, not investigated
+further.
+
 ### 14.2 Comparisons (Fig. 5, 12; Sec. 8.2)
 
 Methods: `Hs` (ours), L², H¹, H² projected gradient, AQP, H¹ L-BFGS, BCQN; all with the same
