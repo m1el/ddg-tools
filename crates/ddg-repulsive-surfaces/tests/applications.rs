@@ -55,6 +55,45 @@ fn inertia_indicators_of_a_sphere_and_a_torus() {
     assert!(e[2] / e[0] > 1.5 || e[0] / e[2] < 0.7);
 }
 
+/// `eig3` on non-diagonal input (the torus test above is already diagonal): Q diag(1, 2, 5) Qᵀ
+/// for a generic rotation Q, and a tilted torus keeps its double moment. A swapped `atan2`
+/// in the Jacobi angle left the off-diagonal entries unreduced (NOTES-FIDELITY.md).
+#[test]
+fn eig3_and_inertia_of_rotated_input() {
+    let (c1, s1, c2, s2) = (0.3f64.cos(), 0.3f64.sin(), 1.1f64.cos(), 1.1f64.sin());
+    let rx = [[1.0, 0.0, 0.0], [0.0, c1, -s1], [0.0, s1, c1]];
+    let rz = [[c2, -s2, 0.0], [s2, c2, 0.0], [0.0, 0.0, 1.0]];
+    let mut q = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                q[i][j] += rz[i][k] * rx[k][j];
+            }
+        }
+    }
+    let d = [1.0, 2.0, 5.0];
+    let mut a = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                a[i][j] += q[i][k] * d[k] * q[j][k];
+            }
+        }
+    }
+    let e = apps::eig3(a);
+    for k in 0..3 {
+        assert!((e[k] - d[k]).abs() < 1e-12, "{e:?}");
+    }
+    let t = ddg_repulsive_surfaces::generate::primitives::torus(48, 24, 2.0, 0.7).unwrap();
+    let x: Vec<[f64; 3]> = t
+        .positions
+        .iter()
+        .map(|p| [0, 1, 2].map(|i| q[i][0] * p[0] + q[i][1] * p[1] + q[i][2] * p[2]))
+        .collect();
+    let (_, mult, desc) = apps::inertia_indicators(&t.faces, &x);
+    assert_eq!(mult, 2, "{desc}");
+}
+
 #[test]
 fn handcuffs_linked_and_unlinked() {
     let v = apps::handcuffs(&cfg()).unwrap();
