@@ -198,7 +198,15 @@ pub fn energy(
         }
     };
     let penalty_values =
-        crate::penalties::evaluate(&pool, surface, positions, penalties, &mut differential)?;
+        crate::penalties::evaluate(
+            &pool,
+            surface,
+            positions,
+            penalties,
+            &exponents,
+            eval,
+            &mut differential,
+        )?;
     Ok(EnergyReport {
         energy: value,
         penalties: penalty_values,
