@@ -123,6 +123,14 @@ pub struct LineSearch {
     /// `min(τ₀, ⅔ τ_max)` when a contact closer than the gap is found along `f − t x`. The
     /// `reference_length` of the options defaults to `ℓ̄₀` of the run. Obstacles are
     /// [`FlowOptions::ccd_obstacles`]; remeshing collapses are guarded too.
+    ///
+    /// **On by default** (gap `0.05 ℓ̄₀`), decided by the measurement of D20 (WP5 smoke runs on
+    /// the reference scenes, 9–34k faces, 4 threads: the median share of the CCD in a step was
+    /// 0.5–2.0 % run alone, below the 10 % threshold). It can slow a flow down: on the entangled
+    /// double torus the capped steps left `F` at 42 after 200 steps against 8.2 without CCD
+    /// (neither run intersected itself at any step end). Turn it off for surfaces that intersect themselves
+    /// on purpose (immersed Klein bottles, subcritical exponents): pairs closer than the gap
+    /// may only halve their distance per step, which stalls such a flow.
     pub ccd: Option<CcdOptions>,
 }
 
@@ -133,7 +141,7 @@ impl Default for LineSearch {
             start: StartRule::default(),
             tau_min_rel: 1e-12,
             max_halvings: None,
-            ccd: None,
+            ccd: Some(CcdOptions::default()),
         }
     }
 }

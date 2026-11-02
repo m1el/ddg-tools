@@ -64,7 +64,8 @@ fn bits(p: &[[f64; 3]]) -> Vec<u64> {
 fn trajectories_do_not_depend_on_the_thread_count() {
     // Hierarchical back end (1280 faces > dense_max_faces), Barnes–Hut, remeshing every step.
     let (s, p) = bumpy_sphere(3, 0.08, 1);
-    let mut reference: Option<(Vec<[u32; 3]>, Vec<u64>, Vec<u64>)> = None;
+    type Trajectory = (Vec<[u32; 3]>, Vec<u64>, Vec<u64>);
+    let mut reference: Option<Trajectory> = None;
     for threads in [1, 3, 8] {
         let o = FlowOptions {
             threads: Some(threads),
@@ -203,6 +204,8 @@ fn stuck_steps_end_the_run() {
         line_search: LineSearch {
             start: StartRule::Absolute { tau: 1e6 },
             max_halvings: Some(2),
+            // Without CCD (it would cap the huge start).
+            ccd: None,
             ..LineSearch::default()
         },
         remesh: None,

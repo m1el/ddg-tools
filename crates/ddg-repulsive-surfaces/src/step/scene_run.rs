@@ -3,7 +3,10 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+
+use ddg_repulsive_curves::obstacle::Obstacle;
 
 use crate::ccd::CcdOptions;
 use crate::constraints::Constraint;
@@ -21,10 +24,12 @@ use super::session::{Control, FlowReport, Session, StepReport};
 /// `l2`/`h1`/`h2` the comparison metrics; `willmore` = the Willmore energy with the `H²` metric;
 /// `aqp`/`bqn`/`h1_lbfgs` the comparison optimizers of WP9), the barycenter shift, the limits.
 /// `autotarget_volume r` makes the growing volume constraint end at `r ×` the obstacles' volume.
+/// The mesh obstacles become the CCD's obstacles; with subcritical exponents the CCD is off.
 /// Everything else keeps its default.
 ///
 /// # Errors
-/// [`RsError::Unsupported`] for normal constraints (`constrain normals`, `boundary_normals`).
+/// [`RsError::Unsupported`] for normal constraints (`constrain normals`, `boundary_normals`);
+/// [`RsError::Io`] / [`RsError::Curves`] for an obstacle that cannot be read again.
 pub fn scene_options(spec: &SceneSpec) -> Result<FlowOptions, RsError> {
     if !spec.normal_pins.is_empty() {
         return Err(RsError::Unsupported {
@@ -86,11 +91,56 @@ pub fn scene_options(spec: &SceneSpec) -> Result<FlowOptions, RsError> {
             }
         }
     }
+    for ob in &spec.file.obstacles {
+        if !ob.value.point_cloud {
+            o.ccd_obstacles.push(Arc::new(ccd_obstacle(spec, &ob.value.path, ob.value.centered)?));
+        }
+    }
+    // Subcritical exponents (paper Fig. 26) are not a barrier: such scenes (the Klein bottle)
+    // self-intersect on purpose, and the CCD would stall them.
+    if spec.exponents.subcritical() {
+        o.line_search.ccd = None;
+    }
     if let Some(n) = spec.iteration_limit {
         o.max_iterations = n as usize;
     }
     o.time_limit = spec.time_limit_ms.map(Duration::from_millis);
     Ok(o)
+}
+
+/// The triangle obstacle of a scene's `obstacle` statement, read again for the CCD (the
+/// penalty keeps only centroids and areas), recentred like the scene reader does.
+fn ccd_obstacle(spec: &SceneSpec, path: &str, centered: bool) -> Result<Obstacle, RsError> {
+    let path = spec.file.resolve_path(path);
+    let mut mesh = ddg_core::io::read_obj(&path).map_err(|e| match RsError::from(e) {
+        RsError::Io { message, .. } => RsError::Io {
+            path: path.display().to_string(),
+            message,
+        },
+        e => e,
+    })?;
+    if centered {
+        let (mut c, mut w) = ([0.0; 3], 0.0);
+        for f in 0..mesh.n_faces() {
+            let cv = &mesh.corner_verts[mesh.face_corners(f)];
+            for i in 1..cv.len().saturating_sub(1) {
+                let [a, b, d] = [cv[0], cv[i], cv[i + 1]].map(|v| mesh.positions[v as usize]);
+                let (area, _, x) = crate::geometry::face_quantities([a, b, d]);
+                for k in 0..3 {
+                    c[k] += area * x[k];
+                }
+                w += area;
+            }
+        }
+        if w > 0.0 {
+            for p in &mut mesh.positions {
+                for k in 0..3 {
+                    p[k] -= c[k] / w;
+                }
+            }
+        }
+    }
+    Ok(Obstacle::from_obj_mesh(&mesh)?)
 }
 
 /// Options of [`run_scene`].

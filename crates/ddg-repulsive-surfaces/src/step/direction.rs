@@ -7,6 +7,9 @@
 //! * The comparison metrics `L2`, `H1`, `H2` (§4.5): [`SparseSaddle`], a sparse `LDLᵀ` of
 //!   `[[K ⊗ I₃, C_Qᵀ], [C_Q, 0]]` with iterative refinement against the exact matrix.
 
+// `!(x > tol)` is deliberate throughout: a NaN must fail the test.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 use std::sync::Arc;
 use std::time::Instant;
 
