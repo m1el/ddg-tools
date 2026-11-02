@@ -41,7 +41,7 @@ use rs::remesh::{EnabledOps, RemeshOptions, RemeshOrder};
 use rs::solve::iterative::HierarchicalOptions;
 use rs::{
     ArmijoRule, Backend, BarycenterMode, BhOptions, CcdOptions, Constraint, Control, Energy,
-    EnergyEval, Exponents, FlowOptions, GmresSide, L2Kind, LbfgsVariant, LineSearch, Method,
+    BcqnVariant, EnergyEval, Exponents, FlowOptions, GmresSide, L2Kind, LbfgsVariant, LineSearch, Method,
     Metric, NewtonSteps, ObstacleKind, PinSchedule, Penalty, Quadrature, RsError, Schedule,
     ScheduleTiming, Session, StartRule, StaticSet, Status, StepReport, StepStatus, StopRule,
     Surface,
@@ -866,7 +866,14 @@ pub fn flow_options(
         "projected_gradient" => Method::ProjectedGradient,
         "aqp" => Method::Aqp { kappa },
         "h1_lbfgs" => Method::H1Lbfgs { memory, variant },
-        _ => Method::Bcqn { memory },
+        _ => Method::Bcqn {
+            memory,
+            variant: if variant == LbfgsVariant::Standard {
+                BcqnVariant::Standard
+            } else {
+                BcqnVariant::Reference
+            },
+        },
     };
 
     // Constraints.
@@ -1185,7 +1192,12 @@ pub fn options_val(o: &FlowOptions) -> Val {
         Method::ProjectedGradient => ("projected_gradient", DEFAULT_AQP_KAPPA, DEFAULT_LBFGS_MEMORY, LbfgsVariant::Standard),
         Method::Aqp { kappa } => ("aqp", kappa, DEFAULT_LBFGS_MEMORY, LbfgsVariant::Standard),
         Method::H1Lbfgs { memory, variant } => ("h1_lbfgs", DEFAULT_AQP_KAPPA, memory, variant),
-        Method::Bcqn { memory } => ("bcqn", DEFAULT_AQP_KAPPA, memory, LbfgsVariant::Standard),
+        Method::Bcqn { memory, variant } => (
+            "bcqn",
+            DEFAULT_AQP_KAPPA,
+            memory,
+            if variant == BcqnVariant::Standard { LbfgsVariant::Standard } else { LbfgsVariant::Reference },
+        ),
     };
     items.push(("method", Val::s(method)));
     items.push(("aqp_kappa", Val::Float(kappa)));

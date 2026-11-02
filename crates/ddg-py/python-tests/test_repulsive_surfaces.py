@@ -490,10 +490,16 @@ class Options(unittest.TestCase):
     def test_methods(self):
         self.build()  # projected gradient
         for method in ("aqp", "h1_lbfgs", "bcqn"):
-            # The comparison optimizers parse; the library reports them as not available yet or
-            # rejects the hard constraints: either way a ValueError that names them.
-            with self.assertRaises(ValueError):
-                self.build(method=method, aqp_kappa=50.0, lbfgs_memory=5, lbfgs_variant="reference")
+            # The comparison optimizers (SPEC D26-D28) run on soft problems: positional
+            # constraints only, both variants.
+            for variant in ("standard", "reference"):
+                self.build(step=True, method=method, aqp_kappa=50.0, lbfgs_memory=5,
+                           lbfgs_variant=variant)
+            # A hard nonlinear constraint is refused with an error naming the method.
+            with self.assertRaises(ValueError) as cm:
+                self.build(method=method,
+                           constraints=[{"type": "barycenter"}, {"type": "area", "target": 12.0}])
+            self.assertIn("area", str(cm.exception).lower())
 
     def test_array_and_numpy_inputs(self):
         p, f = SPHERE
