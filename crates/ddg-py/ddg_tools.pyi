@@ -1229,6 +1229,355 @@ def curve_energy(
     """The tangent-point energy and its differential (``array('d')``, 3 per vertex)."""
 
 
+# ---------------------------------------------------------------------------------------------
+# Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane 2021)
+# ---------------------------------------------------------------------------------------------
+
+RepulsiveSurfaceConstraint = dict[str, object]
+"""A hard constraint: ``{"type": "barycenter", "component": None, "target": None}``;
+``{"type": "pins", "vertices": [...], "targets": None, "move": None, "steps": None}`` (``targets``:
+3 per pin, default the start positions; ``move``: a displacement ``(dx, dy, dz)`` or 3 per pin,
+reached after ``steps`` steps); ``{"type": "area" | "volume", "component": None, "target": None,
+"factor": None, "offset": None, "steps": None}`` (``target`` ``None``: the initial value; with
+``factor`` or ``offset`` the target moves linearly to ``factor * initial + offset`` in ``steps``
+steps; a volume needs a closed, consistently oriented component)."""
+
+RepulsiveSurfacePenalty = dict[str, object]
+"""A soft penalty ``weight * P``: ``{"type": ..., "weight": 1.0, ...}`` with ``"area_deviation"`` /
+``"volume_deviation"`` (``target``: default the initial value), ``"total_area"`` /
+``"total_volume"`` (``power``), ``"squared_error"`` (``targets``: default the start positions),
+``"boundary_length"`` (``target``), ``"boundary_curvature"`` (``dual_length``), ``"willmore"``,
+``"implicit_obstacle"`` / ``"implicit_attractor"`` (``surface``: ``{"type": "sphere", "center",
+"radius"}``, ``"cylinder"`` (``point``, ``axis``, ``radius``), ``"torus"`` (``center``, ``axis``,
+``major``, ``minor``) or ``"plane"`` (``point``, ``normal``); ``power``; ``quadrature``:
+``"dual_area"`` or ``"per_vertex"``; attractors: ``vertices``), ``"mesh_obstacle"`` (``vertices``,
+``triangles``, ``kind``: ``"tangent_point"`` or ``"coulomb"`` with ``power``; ``ccd``: also guard
+the line search against it) and ``"point_cloud_obstacle"`` (``points``). An unknown key is an
+error."""
+
+class RepulsiveSurfaceInputError(InputError, ValueError):
+    """An argument or an option of the repulsive-surfaces functions is invalid (the message is
+    the library's). Both an ``InputError`` and a ``ValueError``."""
+
+@final
+class RepulsiveSurfaceHandle:
+    """An opaque penalty or obstacle produced by ``repulsive_surface_scene``; pass it back in
+    ``penalties`` or ``ccd_obstacles``."""
+
+def repulsive_surface_defaults() -> dict[str, object]:
+    """The defaults of all options, read from the Rust library; the stubs below equal them.
+    Passing the dict back as keywords gives the default flow."""
+
+class RepulsiveSurfaceSnapshot(TypedDict):
+    positions: array[float]
+    faces: array[int]
+    pinned: array[int]
+    face_origin: array[int]
+    iteration: int
+    energy: float
+    status: str
+    error: str | None
+    mean_edge_length0: float
+    report: dict[str, object] | None
+
+@final
+class RepulsiveSurfaceSession:
+    """The repulsive-surface flow of a triangle mesh, one step at a time (the engine of a live
+    Blender operator). ``step`` and ``run`` release the GIL; ``snapshot``, ``positions``,
+    ``status``, ... never wait for a running step; ``cancel`` is safe from any thread.
+
+    Remeshing (``remesh=True``, the default) changes the vertex and face counts in every step:
+    take ``positions``, ``faces``, ``pinned`` and ``face_origin`` (per face, the face of the input
+    it descends from) from one ``snapshot()``. Pinned vertices are never moved or removed.
+
+    Options (``repulsive_surface_defaults()`` lists them): ``alpha``, ``beta``; ``energy``,
+    ``tp_weight``; ``metric`` (``low_order``, ``l2_kind``); ``backend`` / ``energy_eval`` with
+    ``theta``, ``chi``, ``dense_max_faces`` and ``gmres_*``; ``method`` (the comparison optimizers
+    are parsed, the library does not run them yet); ``constraints`` (list of dicts; default the
+    barycenter) or the shorthands ``pins`` (+ ``pin_targets``, ``pin_move``, ``pin_move_steps``)
+    and ``barycenter``; ``penalties`` (list of dicts) and ``ccd_obstacles``; the line search
+    (``armijo*``, ``start*``, ``tau_min_rel``, ``max_halvings``) with continuous collision
+    detection (``ccd``, ``ccd_gap``, ...); ``newton_steps``; ``remesh*``; ``stop*``,
+    ``max_iterations``, ``time_limit`` (seconds, per ``run``), ``stuck_limit``, ``threads``;
+    ``reference_compat``. Raises ``RepulsiveSurfaceInputError`` (a ``ValueError``) naming an
+    unknown option, and with the library's message for a bad value.
+    """
+
+    def __init__(
+        self,
+        positions: Reals,
+        faces: Indices,
+        *,
+        alpha: float = 6.0,
+        beta: float = 12.0,
+        energy: Literal["tangent_point", "coulomb", "willmore"] = "tangent_point",
+        coulomb_alpha: float | None = None,
+        tp_weight: float = 1.0,
+        metric: Literal["sobolev", "l2", "h1", "h2"] = "sobolev",
+        low_order: bool = True,
+        l2_kind: Literal["mass", "identity"] = "mass",
+        backend: Literal["auto", "dense", "hierarchical"] = "auto",
+        dense_max_faces: int = 1000,
+        energy_eval: Literal["barnes_hut", "exact"] = "barnes_hut",
+        theta: float = 0.5,
+        leaf_size: int = 8,
+        chi: float = 0.5,
+        cluster_leaf_size: int = 8,
+        gmres_restart: int = 30,
+        gmres_tolerance: float = 0.0001,
+        gmres_max_iterations: int = 200,
+        gmres_side: Literal["right", "left"] = "right",
+        method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
+        aqp_kappa: float = 100.0,
+        lbfgs_memory: int = 10,
+        lbfgs_variant: Literal["standard", "reference"] = "standard",
+        constraints: Sequence[RepulsiveSurfaceConstraint] | None = None,
+        barycenter: bool | None = None,
+        barycenter_mode: Literal["auto", "global", "per_component"] = "auto",
+        barycenter_shift: bool = False,
+        pins: Indices | None = None,
+        pin_targets: Reals | None = None,
+        pin_move: Reals | None = None,
+        pin_move_steps: int | None = None,
+        schedule_timing: Literal["before_projection", "after_projection"] = "before_projection",
+        penalties: Sequence[RepulsiveSurfacePenalty | RepulsiveSurfaceHandle] | None = None,
+        ccd_obstacles: Sequence[RepulsiveSurfaceHandle] | None = None,
+        armijo: Literal["standard", "reference"] = "standard",
+        armijo_c: float = 0.01,
+        start: Literal["grow_previous", "max_displacement", "reference", "absolute"] = "grow_previous",
+        start_lengths: float = 1.0,
+        start_factor: float = 2.0,
+        start_tau: float | None = None,
+        tau_min_rel: float = 1e-12,
+        max_halvings: int | None = None,
+        ccd: bool = True,
+        ccd_gap: float = 0.05,
+        ccd_max_iterations: int = 100,
+        ccd_close_factor: float = 0.5,
+        newton_steps: int | None = None,
+        newton_max: int = 5,
+        remesh: bool = True,
+        remesh_split: float = 1.5,
+        remesh_collapse: float = 0.5,
+        remesh_rounds: int = 5,
+        remesh_rho: float = 0.5,
+        remesh_flip_cap: int = 100,
+        remesh_order: Literal["flip_then_smooth", "smooth_then_flip"] = "flip_then_smooth",
+        remesh_ops: Sequence[Literal["split", "collapse", "flip", "smooth"]] = ["split", "collapse", "flip", "smooth"],
+        stop: Literal["energy_stall", "sobolev", "off"] = "energy_stall",
+        stop_relative: float = 1e-07,
+        stop_window: int = 10,
+        stop_eps: float | None = None,
+        max_iterations: int = 1000,
+        time_limit: float | None = None,
+        stuck_limit: int = 5,
+        threads: int | None = None,
+        reference_compat: bool = False,
+    ) -> None: ...
+    def step(self) -> dict[str, object]:
+        """One step (GIL released). Keys: ``iteration``, ``status`` (``"accepted"``, ``"stuck"``,
+        ``"cancelled"``), ``session_status``, ``n_vertices``, ``n_faces``, ``energy_before``,
+        ``energy_after``, ``tangent_point_after``, ``penalties_after``, ``gradient_norm``,
+        ``sobolev_norm_sq``, ``tau``, ``tau0``, ``tau_ccd``, ``halvings``, ``newton_steps``,
+        ``projection``, ``max_violation``, ``dropped_rows``, ``linear``, ``remesh``, ``seconds``."""
+    def run(
+        self,
+        max_steps: int | None = None,
+        progress: Callable[[dict[str, object]], bool | None] | None = None,
+        time_limit: float | None = None,
+    ) -> dict[str, object]:
+        """Steps until final, ``max_steps`` of this call, ``cancel()``, ``time_limit`` seconds or
+        ``progress`` returns ``False``. Keys: ``end``, ``status``, ``steps_taken``, ``iteration``,
+        ``energy_before``, ``energy_after``, ``seconds``, ``steps``."""
+    def snapshot(self) -> RepulsiveSurfaceSnapshot:
+        """The last completed state; never waits for a running step."""
+    def cancel(self) -> None:
+        """Stops a running step between line-search trials; later steps report ``"cancelled"``.
+        Any thread; never waits."""
+    def reset(self) -> None:
+        """Back to the input mesh with the same options (clears ``cancel``)."""
+    @property
+    def positions(self) -> array[float]: ...
+    @property
+    def faces(self) -> array[int]: ...
+    @property
+    def energy(self) -> float: ...
+    @property
+    def iteration(self) -> int: ...
+    @property
+    def status(self) -> str: ...
+    @property
+    def error(self) -> str | None: ...
+    @property
+    def n_vertices(self) -> int: ...
+    @property
+    def n_faces(self) -> int: ...
+    @property
+    def report(self) -> dict[str, object] | None:
+        """The dict of the last step."""
+
+def repulsive_surface_flow(
+    positions: Reals,
+    faces: Indices,
+    steps: int | None = None,
+    progress: Callable[[dict[str, object]], bool | None] | None = None,
+    *,
+    alpha: float = 6.0,
+    beta: float = 12.0,
+    energy: Literal["tangent_point", "coulomb", "willmore"] = "tangent_point",
+    coulomb_alpha: float | None = None,
+    tp_weight: float = 1.0,
+    metric: Literal["sobolev", "l2", "h1", "h2"] = "sobolev",
+    low_order: bool = True,
+    l2_kind: Literal["mass", "identity"] = "mass",
+    backend: Literal["auto", "dense", "hierarchical"] = "auto",
+    dense_max_faces: int = 1000,
+    energy_eval: Literal["barnes_hut", "exact"] = "barnes_hut",
+    theta: float = 0.5,
+    leaf_size: int = 8,
+    chi: float = 0.5,
+    cluster_leaf_size: int = 8,
+    gmres_restart: int = 30,
+    gmres_tolerance: float = 0.0001,
+    gmres_max_iterations: int = 200,
+    gmres_side: Literal["right", "left"] = "right",
+    method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
+    aqp_kappa: float = 100.0,
+    lbfgs_memory: int = 10,
+    lbfgs_variant: Literal["standard", "reference"] = "standard",
+    constraints: Sequence[RepulsiveSurfaceConstraint] | None = None,
+    barycenter: bool | None = None,
+    barycenter_mode: Literal["auto", "global", "per_component"] = "auto",
+    barycenter_shift: bool = False,
+    pins: Indices | None = None,
+    pin_targets: Reals | None = None,
+    pin_move: Reals | None = None,
+    pin_move_steps: int | None = None,
+    schedule_timing: Literal["before_projection", "after_projection"] = "before_projection",
+    penalties: Sequence[RepulsiveSurfacePenalty | RepulsiveSurfaceHandle] | None = None,
+    ccd_obstacles: Sequence[RepulsiveSurfaceHandle] | None = None,
+    armijo: Literal["standard", "reference"] = "standard",
+    armijo_c: float = 0.01,
+    start: Literal["grow_previous", "max_displacement", "reference", "absolute"] = "grow_previous",
+    start_lengths: float = 1.0,
+    start_factor: float = 2.0,
+    start_tau: float | None = None,
+    tau_min_rel: float = 1e-12,
+    max_halvings: int | None = None,
+    ccd: bool = True,
+    ccd_gap: float = 0.05,
+    ccd_max_iterations: int = 100,
+    ccd_close_factor: float = 0.5,
+    newton_steps: int | None = None,
+    newton_max: int = 5,
+    remesh: bool = True,
+    remesh_split: float = 1.5,
+    remesh_collapse: float = 0.5,
+    remesh_rounds: int = 5,
+    remesh_rho: float = 0.5,
+    remesh_flip_cap: int = 100,
+    remesh_order: Literal["flip_then_smooth", "smooth_then_flip"] = "flip_then_smooth",
+    remesh_ops: Sequence[Literal["split", "collapse", "flip", "smooth"]] = ["split", "collapse", "flip", "smooth"],
+    stop: Literal["energy_stall", "sobolev", "off"] = "energy_stall",
+    stop_relative: float = 1e-07,
+    stop_window: int = 10,
+    stop_eps: float | None = None,
+    max_iterations: int = 1000,
+    time_limit: float | None = None,
+    stuck_limit: int = 5,
+    threads: int | None = None,
+    reference_compat: bool = False,
+) -> tuple[array[float], array[int], dict[str, object]]:
+    """The repulsive-surface flow in one call: ``(positions, faces, report)``; the mesh differs
+    from the input with remeshing. ``steps`` overrides ``max_iterations``. Report keys:
+    ``status``, ``iterations``, ``energy_initial``, ``energy_final``, ``seconds``, ``pinned``,
+    ``face_origin`` (``array('i')``), ``steps`` (the dicts of ``step``). A session stepped the
+    same number of times gives bitwise the same mesh."""
+
+def surface_energy(
+    positions: Reals,
+    faces: Indices,
+    *,
+    alpha: float = 6.0,
+    beta: float = 12.0,
+    energy: Literal["tangent_point", "coulomb", "willmore"] = "tangent_point",
+    coulomb_alpha: float | None = None,
+    tp_weight: float = 1.0,
+    metric: Literal["sobolev", "l2", "h1", "h2"] = "sobolev",
+    low_order: bool = True,
+    l2_kind: Literal["mass", "identity"] = "mass",
+    backend: Literal["auto", "dense", "hierarchical"] = "auto",
+    dense_max_faces: int = 1000,
+    energy_eval: Literal["barnes_hut", "exact"] = "barnes_hut",
+    theta: float = 0.5,
+    leaf_size: int = 8,
+    chi: float = 0.5,
+    cluster_leaf_size: int = 8,
+    gmres_restart: int = 30,
+    gmres_tolerance: float = 0.0001,
+    gmres_max_iterations: int = 200,
+    gmres_side: Literal["right", "left"] = "right",
+    method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
+    aqp_kappa: float = 100.0,
+    lbfgs_memory: int = 10,
+    lbfgs_variant: Literal["standard", "reference"] = "standard",
+    constraints: Sequence[RepulsiveSurfaceConstraint] | None = None,
+    barycenter: bool | None = None,
+    barycenter_mode: Literal["auto", "global", "per_component"] = "auto",
+    barycenter_shift: bool = False,
+    pins: Indices | None = None,
+    pin_targets: Reals | None = None,
+    pin_move: Reals | None = None,
+    pin_move_steps: int | None = None,
+    schedule_timing: Literal["before_projection", "after_projection"] = "before_projection",
+    penalties: Sequence[RepulsiveSurfacePenalty | RepulsiveSurfaceHandle] | None = None,
+    ccd_obstacles: Sequence[RepulsiveSurfaceHandle] | None = None,
+    armijo: Literal["standard", "reference"] = "standard",
+    armijo_c: float = 0.01,
+    start: Literal["grow_previous", "max_displacement", "reference", "absolute"] = "grow_previous",
+    start_lengths: float = 1.0,
+    start_factor: float = 2.0,
+    start_tau: float | None = None,
+    tau_min_rel: float = 1e-12,
+    max_halvings: int | None = None,
+    ccd: bool = True,
+    ccd_gap: float = 0.05,
+    ccd_max_iterations: int = 100,
+    ccd_close_factor: float = 0.5,
+    newton_steps: int | None = None,
+    newton_max: int = 5,
+    remesh: bool = True,
+    remesh_split: float = 1.5,
+    remesh_collapse: float = 0.5,
+    remesh_rounds: int = 5,
+    remesh_rho: float = 0.5,
+    remesh_flip_cap: int = 100,
+    remesh_order: Literal["flip_then_smooth", "smooth_then_flip"] = "flip_then_smooth",
+    remesh_ops: Sequence[Literal["split", "collapse", "flip", "smooth"]] = ["split", "collapse", "flip", "smooth"],
+    stop: Literal["energy_stall", "sobolev", "off"] = "energy_stall",
+    stop_relative: float = 1e-07,
+    stop_window: int = 10,
+    stop_eps: float | None = None,
+    max_iterations: int = 1000,
+    time_limit: float | None = None,
+    stuck_limit: int = 5,
+    threads: int | None = None,
+    reference_compat: bool = False,
+) -> tuple[float, array[float], dict[str, object]]:
+    """``(total, differential, report)``: the tangent-point energy plus the penalties and the
+    differential of the total (``array('d')``, 3 per vertex). Reads ``alpha``, ``beta``,
+    ``energy_eval``, ``theta``, ``leaf_size``, ``penalties``, ``threads``; the other options are
+    validated and ignored. Report keys: ``energy`` (without penalties), ``total``, ``penalties``
+    (``[{"name", "value"}]``), ``subcritical``, ``pairs_exact``, ``nodes_lumped``, ``seconds``."""
+
+def repulsive_surface_scene(
+    path: str,
+) -> tuple[array[float], array[int], dict[str, object]]:
+    """Loads a scene file of the reference program: ``(positions, faces, options)``; pass
+    ``**options`` to the session or the flow. The scene's penalties and obstacles are opaque
+    ``RepulsiveSurfaceHandle`` objects in ``options["penalties"]`` / ``["ccd_obstacles"]``."""
+
+
 # ---- IntrinsicTriangulation: integer coordinates (Gillespie, Sharp, Crane 2021) -------------
 
 class Places(TypedDict):

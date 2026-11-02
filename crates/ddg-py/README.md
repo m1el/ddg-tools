@@ -825,6 +825,104 @@ defaults equal the library's): `src/repulsive.rs`; tests of the wheel:
 `python-tests/test_repulsive.py` (which also checks the `.pyi` defaults against
 `repulsive_defaults()`).
 
+## Repulsive surfaces: `RepulsiveSurfaceSession`, `repulsive_surface_flow`, `surface_energy`
+
+The flow of Yu, Brakensiek, Schumacher, Crane, *Repulsive Surfaces*, ACM TOG 40(6), 2021, over the
+crate `ddg-repulsive-surfaces` (contract `crates/ddg-repulsive-surfaces/SPEC.md`, section 9.2): the
+tangent-point energy of a manifold triangle mesh is decreased by fractional Sobolev descent
+(Barnes-Hut energy, hierarchical-matrix GMRES for large meshes), with hard constraints (barycenter,
+area, volume with growth schedules, pins and moving pins), penalties, mesh and implicit obstacles
+and attractors, continuous collision detection and remeshing. `positions` is 3 reals per vertex,
+`faces` 3 vertex indices per triangle; both take any buffer (`array.array`, numpy, 2-d arrays
+included) and plain Python sequences. Results are `array.array` objects (`numpy.frombuffer`
+makes a view) and dicts.
+
+```python
+import ddg_tools
+s = ddg_tools.RepulsiveSurfaceSession(positions, faces, pins=[0, 1], remesh=True)
+report = s.step()                      # one step, GIL released; a dict
+s.run(max_steps=50, progress=lambda r: True)   # until final / 50 steps / progress -> False
+snap = s.snapshot()                    # positions, faces, pinned, face_origin, status, report ...
+s.cancel()                             # from any thread; reset() starts again
+positions, faces, report = ddg_tools.repulsive_surface_flow(positions, faces, steps=100)
+energy, differential, report = ddg_tools.surface_energy(positions, faces, penalties=[...])
+positions, faces, options = ddg_tools.repulsive_surface_scene("scene.txt")  # the paper's scenes
+```
+
+* **Remeshing changes everything.** With `remesh=True` (the default) vertices and faces are created
+  and removed every step. Take `positions`, `faces`, `pinned` (the pinned vertices' current ids, in
+  the order of the constraints) and `face_origin` (for each current face, the face of the *input*
+  mesh it descends from: the source of a material index) from one `snapshot()`. Pinned vertices are
+  never moved or removed. Attributes of the input (UVs, colours) have no counterpart afterwards.
+* **Live use (Blender).** A worker thread calls `step()` (or `run`), a timer reads `snapshot()`
+  or the properties `positions`, `faces`, `energy`, `iteration`, `status`; they come from the last
+  completed step and never wait. `cancel()` ends a running step between line-search trials; the
+  mesh is that of the last completed step. After `cancel()` further `step()` calls compute nothing
+  and return `status == "cancelled"`; `reset()` returns to the input mesh. A session stepped *n*
+  times gives bitwise the same mesh as `repulsive_surface_flow(..., steps=n)`, whatever `threads`
+  is.
+* **Status.** `"running"`, `"converged"`, `"max_iterations"`, `"time_limit"`, `"stuck"`,
+  `"cancelled"`, `"error"` (then `error` holds the message). A final session does not step in
+  `run()`, but `step()` always tries.
+* **Options** (keywords; `repulsive_surface_defaults()` lists them all with the library's
+  defaults, `ddg_tools.pyi` has them typed; an unknown name is an error naming it; a bad value
+  carries the library's message):
+  `alpha=6`, `beta=12`; `energy="tangent_point"|"coulomb"|"willmore"` (`coulomb_alpha`),
+  `tp_weight`; `metric="sobolev"|"l2"|"h1"|"h2"` (`low_order`, `l2_kind`);
+  `backend="auto"|"dense"|"hierarchical"` (`dense_max_faces=1000`, `chi=0.5`, `gmres_*`),
+  `energy_eval="barnes_hut"|"exact"` (`theta=0.5`, `leaf_size`); `method` (`"projected_gradient"`;
+  `"aqp"`, `"h1_lbfgs"`, `"bcqn"` are parsed but the library does not run them yet);
+  `reference_compat` (the reference program's variants, for comparisons only);
+  `threads`, `max_iterations=1000`, `time_limit` (seconds, per `run`), `stuck_limit`;
+  `stop="energy_stall"|"sobolev"|"off"` (`stop_relative`, `stop_window`, `stop_eps`);
+  line search `armijo`, `armijo_c`, `start` (`"grow_previous"`, `"max_displacement"`,
+  `"reference"`, `"absolute"` with `start_tau`), `start_lengths`, `start_factor`, `tau_min_rel`,
+  `max_halvings`; collision detection `ccd=True`, `ccd_gap=0.05` (a fraction of the mean edge
+  length), `ccd_max_iterations`, `ccd_close_factor`; `newton_steps` (`None`: until tolerance, at
+  most `newton_max`); remeshing `remesh=True`, `remesh_split=1.5`, `remesh_collapse=0.5`,
+  `remesh_rounds`, `remesh_rho`, `remesh_flip_cap`, `remesh_order`, `remesh_ops` (a subset of
+  `"split"`, `"collapse"`, `"flip"`, `"smooth"`).
+* **Constraints.** By default the barycenter is fixed (not when `pins` are given:
+  `barycenter=True` forces it). `pins=[ids]` with optional `pin_targets` (3 per pin; default the
+  start positions) and a motion `pin_move=(dx, dy, dz)` (or 3 per pin) over `pin_move_steps`
+  steps. `constraints=[...]` replaces the list: dicts `{"type": "barycenter"}`,
+  `{"type": "pins", "vertices": [...], "targets": ..., "move": ..., "steps": n}`,
+  `{"type": "area"|"volume", "target": None, "component": None, "factor": 3.0, "offset": 0.0,
+  "steps": 200}` (a growth schedule to `factor * initial + offset`; the target `None` is the
+  initial value; a volume needs a closed oriented component). `barycenter_mode="auto"|"global"|
+  "per_component"`, `barycenter_shift`, `schedule_timing`.
+* **Penalties** (`penalties=[...]`, dicts with `"type"` and `"weight"` (default 1)):
+  `area_deviation`, `volume_deviation` (`target`: default the initial value), `total_area`,
+  `total_volume` (`power`), `squared_error` (`targets`: default the start positions),
+  `boundary_length` (`target`), `boundary_curvature` (`dual_length`), `willmore`,
+  `implicit_obstacle` / `implicit_attractor` (`surface`: `{"type": "sphere", "center", "radius"}`,
+  `"cylinder"` (`point`, `axis`, `radius`), `"torus"` (`center`, `axis`, `major`, `minor`),
+  `"plane"` (`point`, `normal`); `power`, `quadrature="dual_area"|"per_vertex"`, attractors:
+  `vertices`), `mesh_obstacle` (`vertices`, `triangles`, `kind="tangent_point"|"coulomb"`,
+  `power`, `ccd=True` also keeps the surface out of it), `point_cloud_obstacle` (`points`).
+  `surface_energy` evaluates the energy and the penalties (it reads `alpha`, `beta`,
+  `energy_eval`, `theta`, `leaf_size`, `penalties`, `threads`) and returns the total, its
+  differential and a report with the value of each penalty.
+* **Scenes.** `repulsive_surface_scene(path)` reads a scene file of the reference program and
+  returns `(positions, faces, options)`; `**options` runs it. The scene's penalties and obstacles
+  are opaque `RepulsiveSurfaceHandle` objects inside `options["penalties"]` and
+  `options["ccd_obstacles"]`; everything else is plain values that can be edited. Normal
+  constraints (`constrain normals`) are not supported by the library.
+* **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"cancelled"`),
+  `session_status`, `n_vertices`, `n_faces`, `energy_before`, `energy_after`,
+  `tangent_point_after`, `penalties_after`, `gradient_norm`, `sobolev_norm_sq`, `tau`, `tau0`,
+  `tau_ccd`, `halvings`, `newton_steps`, `projection`, `max_violation`, `dropped_rows`,
+  `linear` (solver, iterations, residual), `remesh` (splits, collapses, flips, ...), `seconds`
+  (per phase).
+* **Errors.** Anything wrong in the input or the options raises
+  `ddg_tools.RepulsiveSurfaceInputError`, which is both a `ValueError` and a
+  `ddg_tools.InputError`, with the library's message; a failed solve raises `SolveError`.
+
+Glue: `src/python/repulsive_surfaces.rs`; logic (pure Rust, tested by `cargo test`, including that
+the defaults equal the library's): `src/repulsive_surfaces.rs`; tests of the wheel:
+`python-tests/test_repulsive_surfaces.py` (which also checks the `.pyi` defaults against
+`repulsive_surface_defaults()`).
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the

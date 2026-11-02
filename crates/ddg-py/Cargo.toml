@@ -48,4 +48,7 @@ ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
 # Surface simplification using intrinsic error metrics (Liu et al. 2023): simplify, hierarchy and multigrid,
 # applications, QEM (src/simplification.rs).
 ddg-intrinsic-simplification = { path = "../ddg-intrinsic-simplification" }
+# Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane 2021): tangent-point energy, fractional Sobolev
+# flow, constraints, penalties, obstacles and remeshing for triangle meshes (src/repulsive_surfaces.rs).
+ddg-repulsive-surfaces = { path = "../ddg-repulsive-surfaces" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }
