@@ -38,7 +38,7 @@
 //! # Broad phase
 //!
 //! The time range is cut into windows `[0, t₁], [t₁, 2t₁], [2t₁, 4t₁], …` where `t₁` is the time
-//! in which the fastest vertex moves one mean edge length. In each window two [`Bvh`]s are built
+//! in which the fastest vertex moves one mean edge length. In each window two box trees (Morton-sorted blocks merged into a binary tree, built in parallel) are built
 //! over the swept boxes (hull of the corner positions at both ends of the window, inflated by
 //! `gap/2`) of the triangles and of the edges; vertices and edges query them, obstacle trees are
 //! static. The first window that contains a contact gives `τ_max` (the minimum over its pairs).
@@ -56,7 +56,7 @@ use std::time::Instant;
 
 use ddg_repulsive_curves::Obstacle;
 use ddg_repulsive_curves::ccd::{point_triangle_distance, segment_segment_distance};
-use ddg_repulsive_curves::spatial::{Aabb, Bvh, Element};
+use ddg_repulsive_curves::spatial::Aabb;
 use rayon::prelude::*;
 
 use crate::error::RsError;
@@ -225,21 +225,6 @@ pub struct CcdReport {
 // Obstacles
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy)]
-struct BoxEl(Aabb<3>);
-
-impl Element<3> for BoxEl {
-    fn point(&self) -> [f64; 3] {
-        center(&self.0)
-    }
-    fn bounds(&self) -> Aabb<3> {
-        self.0
-    }
-    fn mass(&self) -> f64 {
-        1.0
-    }
-}
-
 fn center(b: &Aabb<3>) -> [f64; 3] {
     [
         0.5 * (b.lo[0] + b.hi[0]),
@@ -260,38 +245,127 @@ fn overlaps(a: &Aabb<3>, b: &Aabb<3>) -> bool {
     (0..3).all(|k| a.lo[k] <= b.hi[k] && b.lo[k] <= a.hi[k])
 }
 
-fn build_tree(boxes: &[Aabb<3>], leaf: usize) -> Result<Option<Bvh<3>>, RsError> {
+/// A static tree over boxes: the boxes are sorted along a Morton curve of their centres (ties by
+/// index), cut into blocks of `leaf` boxes, and the blocks are merged pairwise into a complete
+/// binary tree (`levels[0]` the blocks, the last level the root). The build is parallel
+/// (sort, box unions) and deterministic.
+#[derive(Debug, Clone)]
+struct BoxTree {
+    order: Vec<u32>,
+    sboxes: Vec<Aabb<3>>,
+    levels: Vec<Vec<Aabb<3>>>,
+    leaf: usize,
+}
+
+fn split3(mut x: u64) -> u64 {
+    x &= 0x1f_ffff;
+    x = (x | x << 32) & 0x001f_0000_0000_ffff;
+    x = (x | x << 16) & 0x001f_0000_ff00_00ff;
+    x = (x | x << 8) & 0x100f_00f0_0f00_f00f;
+    x = (x | x << 4) & 0x10c3_0c30_c30c_30c3;
+    x = (x | x << 2) & 0x1249_2492_4924_9249;
+    x
+}
+
+fn build_tree(boxes: &[Aabb<3>], leaf: usize) -> Result<Option<BoxTree>, RsError> {
     if boxes.is_empty() {
         return Ok(None);
     }
-    let el: Vec<BoxEl> = boxes.iter().map(|&b| BoxEl(b)).collect();
-    Ok(Some(Bvh::build(&el, leaf)?))
+    let centers: Vec<[f64; 3]> = boxes.par_iter().map(center).collect();
+    let (lo, hi) = centers
+        .par_iter()
+        .fold(
+            || ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |(mut lo, mut hi), c| {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(c[k]);
+                    hi[k] = hi[k].max(c[k]);
+                }
+                (lo, hi)
+            },
+        )
+        .reduce(
+            || ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+            |a, b| {
+                let mut lo = a.0;
+                let mut hi = a.1;
+                for k in 0..3 {
+                    lo[k] = lo[k].min(b.0[k]);
+                    hi[k] = hi[k].max(b.1[k]);
+                }
+                (lo, hi)
+            },
+        );
+    let q = |c: &[f64; 3], k: usize| -> u64 {
+        let w = hi[k] - lo[k];
+        if w > 0.0 {
+            (((c[k] - lo[k]) / w) * 2097151.0) as u64
+        } else {
+            0
+        }
+    };
+    let mut keys: Vec<(u64, u32)> = centers
+        .par_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            (
+                split3(q(c, 0)) | split3(q(c, 1)) << 1 | split3(q(c, 2)) << 2,
+                i as u32,
+            )
+        })
+        .collect();
+    keys.par_sort_unstable();
+    let order: Vec<u32> = keys.iter().map(|k| k.1).collect();
+    let sboxes: Vec<Aabb<3>> = order.par_iter().map(|&i| boxes[i as usize]).collect();
+    let mut levels = vec![
+        sboxes
+            .par_chunks(leaf)
+            .map(|c| c.iter().fold(Aabb::<3>::empty(), |a, b| a.union(b)))
+            .collect::<Vec<_>>(),
+    ];
+    while levels.last().expect("a level").len() > 1 {
+        let next: Vec<Aabb<3>> = levels
+            .last()
+            .expect("a level")
+            .par_chunks(2)
+            .map(|c| c.iter().fold(Aabb::<3>::empty(), |a, b| a.union(b)))
+            .collect();
+        levels.push(next);
+    }
+    Ok(Some(BoxTree {
+        order,
+        sboxes,
+        levels,
+        leaf,
+    }))
 }
 
-/// Calls `f(e)` for every element whose box overlaps `q`, in tree order.
-fn query(tree: &Bvh<3>, q: &Aabb<3>, mut f: impl FnMut(u32)) {
-    let nodes = tree.nodes();
-    let mut stack = [0usize; 128];
+/// Calls `f(e)` for every element whose box overlaps `q`.
+fn query(tree: &BoxTree, q: &Aabb<3>, mut f: impl FnMut(u32)) {
+    let mut stack = [(0u8, 0u32); 96];
+    stack[0] = ((tree.levels.len() - 1) as u8, 0);
     let mut sp = 1;
     while sp > 0 {
         sp -= 1;
-        let i = stack[sp];
-        let nd = &nodes[i];
-        if !overlaps(&nd.bbox, q) {
+        let (k, i) = stack[sp];
+        if !overlaps(&tree.levels[k as usize][i as usize], q) {
             continue;
         }
-        if nd.is_leaf() {
-            for &e in tree.elements_of(i) {
-                f(e);
+        if k == 0 {
+            let a = i as usize * tree.leaf;
+            let b = (a + tree.leaf).min(tree.order.len());
+            for pos in a..b {
+                if overlaps(&tree.sboxes[pos], q) {
+                    f(tree.order[pos]);
+                }
             }
-        } else if sp + 2 <= stack.len() {
-            stack[sp] = nd.right as usize;
-            stack[sp + 1] = i + 1;
-            sp += 2;
         } else {
-            // Degenerate depth: fall back to scanning the subtree's elements.
-            for &e in tree.elements_of(i) {
-                f(e);
+            let below = &tree.levels[k as usize - 1];
+            stack[sp] = (k - 1, 2 * i);
+            sp += 1;
+            if ((2 * i + 1) as usize) < below.len() {
+                stack[sp] = (k - 1, 2 * i + 1);
+                sp += 1;
             }
         }
     }
@@ -303,9 +377,9 @@ pub struct CcdObstacle {
     vertices: Vec<[f64; 3]>,
     triangles: Vec<[u32; 3]>,
     edges: Vec<[u32; 2]>,
-    tri_tree: Bvh<3>,
-    edge_tree: Bvh<3>,
-    vert_tree: Bvh<3>,
+    tri_tree: BoxTree,
+    edge_tree: BoxTree,
+    vert_tree: BoxTree,
 }
 
 impl CcdObstacle {
@@ -404,6 +478,9 @@ fn lipschitz(ua: &[[f64; 3]], ub: &[[f64; 3]]) -> f64 {
     l_of([0.0; 3]).min(l_of(mean)) * (1.0 + 1e-12)
 }
 
+/// Relative margin against rounding in the speeds.
+const MARGIN: f64 = 1.0 + 1e-12;
+
 /// Counters of the narrow phase.
 #[derive(Debug, Clone, Copy, Default)]
 struct Tally {
@@ -431,9 +508,11 @@ impl Tally {
 /// `d₀ = 0` is unconstrained.
 ///
 /// [formula: rs-ccd-advancement]
+#[allow(clippy::too_many_arguments)]
 fn advance(
     dist: impl Fn(f64) -> f64,
-    l: f64,
+    l_cheap: f64,
+    l_refined: impl Fn() -> f64,
     gap_abs: f64,
     opts: &CcdOptions,
     lo: f64,
@@ -459,12 +538,9 @@ fn advance(
     } else {
         opts.close_factor * d0
     };
-    if l <= 0.0 {
-        // Stationary relative to each other: the distance never changes; it is below the
-        // target only if the pair is "close" with target < d0, which is never reached.
-        return None;
-    }
     let slack = 1e-9 * d0;
+    let mut l = l_cheap;
+    let mut refined = false;
     let mut tau = lo;
     let mut d = if lo == 0.0 { d0 } else { dist(lo) };
     if lo != 0.0 {
@@ -474,8 +550,15 @@ fn advance(
         if d.is_nan() || d - target <= slack {
             return Some(tau);
         }
-        let next = tau + (d - target) / l;
-        if next >= hi {
+        let mut next = tau + (d - target) / l;
+        if next >= hi && !refined {
+            // The cheap bound (largest speeds, no common frame) did not clear the pair: try
+            // the better one.
+            l = l.min(l_refined());
+            refined = true;
+            next = tau + (d - target) / l;
+        }
+        if next >= hi || next.is_nan() {
             return None;
         }
         tau = next;
@@ -616,6 +699,7 @@ struct Motion<'a> {
     surface: &'a Surface,
     start: &'a [[f64; 3]],
     vel: &'a [[f64; 3]],
+    speed: &'a [f64],
     gap_abs: f64,
     opts: &'a CcdOptions,
 }
@@ -628,6 +712,14 @@ impl Motion<'_> {
     #[inline]
     fn tri_at(&self, f: u32, t: f64) -> [[f64; 3]; 3] {
         self.surface.faces()[f as usize].map(|v| self.pos(v, t))
+    }
+    /// The largest corner speed of face `f` (with the rounding margin).
+    #[inline]
+    fn tri_speed(&self, f: u32) -> f64 {
+        let t = self.surface.faces()[f as usize];
+        self.speed[t[0] as usize]
+            .max(self.speed[t[1] as usize])
+            .max(self.speed[t[2] as usize])
     }
     fn tri_vel(&self, f: u32) -> [[f64; 3]; 3] {
         self.surface.faces()[f as usize].map(|v| self.vel[v as usize])
@@ -673,10 +765,12 @@ pub fn first_contact(
         .reference_length
         .unwrap_or_else(|| mean_edge_length(surface, start));
     let gap_abs = opts.gap * ell;
+    let speed: Vec<f64> = velocity.iter().map(|&v| norm(v)).collect();
     let motion = Motion {
         surface,
         start,
         vel: velocity,
+        speed: &speed,
         gap_abs,
         opts,
     };
@@ -799,13 +893,22 @@ fn window(
                     }
                     let (p, u) = (m.start[v as usize], m.vel[v as usize]);
                     let (tp, tu) = (m.tri_at(f, 0.0), m.tri_vel(f));
-                    let l = lipschitz(&[u], &tu);
+                    let lc = (m.speed[v as usize] + m.tri_speed(f)) * MARGIN;
                     let dist = |t: f64| {
                         let c = [at(tp[0], tu[0], t), at(tp[1], tu[1], t), at(tp[2], tu[2], t)];
                         point_triangle_distance(at(p, u, t), c[0], c[1], c[2])
                     };
                     let hz = fnd.horizon(hi);
-                    let r = advance(dist, l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
+                    let r = advance(
+                        dist,
+                        lc,
+                        || lipschitz(&[u], &tu),
+                        m.gap_abs,
+                        m.opts,
+                        lo,
+                        hz,
+                        &mut fnd.tally,
+                    );
                     fnd.offer(
                         r,
                         Primitive::VertexTriangle {
@@ -840,7 +943,9 @@ fn window(
                     let uu = [m.vel[a as usize], m.vel[b as usize]];
                     let qq = [m.start[c as usize], m.start[d as usize]];
                     let ww = [m.vel[c as usize], m.vel[d as usize]];
-                    let l = lipschitz(&uu, &ww);
+                    let lc = (m.speed[a as usize].max(m.speed[b as usize])
+                        + m.speed[c as usize].max(m.speed[d as usize]))
+                        * MARGIN;
                     let dist = |t: f64| {
                         segment_segment_distance(
                             at(pp[0], uu[0], t),
@@ -850,7 +955,16 @@ fn window(
                         )
                     };
                     let hz = fnd.horizon(hi);
-                    let r = advance(dist, l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
+                    let r = advance(
+                        dist,
+                        lc,
+                        || lipschitz(&uu, &ww),
+                        m.gap_abs,
+                        m.opts,
+                        lo,
+                        hz,
+                        &mut fnd.tally,
+                    );
                     fnd.offer(r, Primitive::EdgeEdge { a: e, b: e2 });
                 });
                 fnd
@@ -879,7 +993,6 @@ fn obstacle_window(
 ) -> Found {
     let s = m.surface;
     let g = m.gap_abs * (1.0 + 1e-6);
-    let zero = [0.0; 3];
     // Mesh vertex against obstacle triangle.
     let a = pool.install(|| {
         (0..s.n_vertices() as u32)
@@ -889,10 +1002,10 @@ fn obstacle_window(
                 query(&ob.tri_tree, &inflate(&vbox[v as usize], g), |t| {
                     let tri = ob.tri(t);
                     let (p, u) = (m.start[v as usize], m.vel[v as usize]);
-                    let l = lipschitz(&[u], &[zero; 3]);
+                    let l = m.speed[v as usize] * MARGIN;
                     let dist = |tm: f64| point_triangle_distance(at(p, u, tm), tri[0], tri[1], tri[2]);
                     let hz = fnd.horizon(hi);
-                    let r = advance(dist, l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
+                    let r = advance(dist, l, || l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
                     fnd.offer(
                         r,
                         Primitive::VertexObstacleTriangle {
@@ -915,13 +1028,13 @@ fn obstacle_window(
                 query(&ob.vert_tree, &inflate(&fbox[f as usize], g), |ov| {
                     let p = ob.vertices[ov as usize];
                     let (tp, tu) = (m.tri_at(f, 0.0), m.tri_vel(f));
-                    let l = lipschitz(&[zero], &tu);
+                    let l = m.tri_speed(f) * MARGIN;
                     let dist = |t: f64| {
                         let c = [at(tp[0], tu[0], t), at(tp[1], tu[1], t), at(tp[2], tu[2], t)];
                         point_triangle_distance(p, c[0], c[1], c[2])
                     };
                     let hz = fnd.horizon(hi);
-                    let r = advance(dist, l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
+                    let r = advance(dist, l, || l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
                     fnd.offer(
                         r,
                         Primitive::TriangleObstacleVertex {
@@ -947,12 +1060,12 @@ fn obstacle_window(
                     let q = [ob.vertices[oa as usize], ob.vertices[obb as usize]];
                     let pp = [m.start[ea as usize], m.start[eb as usize]];
                     let uu = [m.vel[ea as usize], m.vel[eb as usize]];
-                    let l = lipschitz(&uu, &[zero; 2]);
+                    let l = m.speed[ea as usize].max(m.speed[eb as usize]) * MARGIN;
                     let dist = |t: f64| {
                         segment_segment_distance(at(pp[0], uu[0], t), at(pp[1], uu[1], t), q[0], q[1])
                     };
                     let hz = fnd.horizon(hi);
-                    let r = advance(dist, l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
+                    let r = advance(dist, l, || l, m.gap_abs, m.opts, lo, hz, &mut fnd.tally);
                     fnd.offer(
                         r,
                         Primitive::EdgeObstacleEdge {
