@@ -773,7 +773,7 @@ impl Session {
                     },
                     MetricExtras {
                         willmore,
-                        obstacle: obj.obstacle_diagonal(&self.positions, low_order)?,
+                        obstacle: obj.obstacle_diagonal(&self.positions, low_order, self.options.reference_compat)?,
                     },
                 )
             }

@@ -240,19 +240,31 @@ impl<'a> Objective<'a> {
 
     /// `O_diag` of the tangent-point mesh obstacles (`SPEC.md` §4.4, D23), summed, at the base
     /// positions (`None` without such obstacles). `low_order: false` drops its `B⁰` part.
+    /// `point_clouds` includes the point-cloud obstacles (zero obstacle normals), which the
+    /// reference does (`reference_compat`); off by default (SPEC §5.3: the preconditioner does
+    /// not contain the term and GMRES needs 1600 iterations per step on the Reconstruction scene).
     pub fn obstacle_diagonal(
         &self,
         positions: &[[f64; 3]],
         low_order: bool,
+        point_clouds: bool,
     ) -> Result<Option<FaceDiagonal>, RsError> {
         let mut out: Option<FaceDiagonal> = None;
         let mut areas: Option<Vec<f64>> = None;
         for (i, p) in self.penalties.iter().enumerate() {
-            let (Penalty::MeshObstacle {
-                kind: ObstacleKind::TangentPoint,
-                weight,
-                ..
-            }, Some(ev)) = (p, self.cross[i].as_ref())
+            let (weight, Some(ev)) = (match p {
+                Penalty::MeshObstacle {
+                    kind: ObstacleKind::TangentPoint,
+                    weight,
+                    ..
+                }
+                | Penalty::PointCloudObstacle { weight, .. }
+                    if point_clouds || matches!(p, Penalty::MeshObstacle { .. }) =>
+                {
+                    weight
+                }
+                _ => continue,
+            }, self.cross[i].as_ref())
             else {
                 continue;
             };

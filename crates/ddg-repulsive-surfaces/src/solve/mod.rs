@@ -64,6 +64,10 @@ pub struct LinearReport {
     pub factor_seconds: f64,
     /// Seconds spent in solves.
     pub solve_seconds: f64,
+    /// Recoverable solver failures of this step and what was done about them (empty normally):
+    /// e.g. `"gmres diverged (relative residual 1.5e3): retried with right GMRES, …"` or
+    /// `"…: dense LU of the 900 x 900 metric"` (`SPEC.md` §6.3).
+    pub fallbacks: Vec<String>,
 }
 
 impl LinearReport {

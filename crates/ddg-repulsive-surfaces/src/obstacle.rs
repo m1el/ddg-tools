@@ -700,12 +700,14 @@ impl CrossEvaluator {
         s: f64,
         weight: f64,
     ) -> Result<ObstacleDiagonal, RsError> {
+        // A point cloud has no normals: the reference gives it zero projectors, so the obstacle
+        // side of `K₂` vanishes (`point_cloud` below).
         let normals = match (&self.pair, &self.set.normals) {
-            (Pair::Tp(_), Some(n)) => n,
+            (Pair::Tp(_), n) => n.as_ref(),
             _ => {
                 return Err(RsError::ObstacleError {
                     obstacle: 0,
-                    message: "the metric term needs a tangent-point obstacle with triangles".into(),
+                    message: "the metric term needs a tangent-point obstacle".into(),
                 });
             }
         };
@@ -725,9 +727,12 @@ impl CrossEvaluator {
                                 let v = sub(xs, cl.centroid);
                                 let r2 = dot(v, v);
                                 let rs = r2.powf(-s);
-                                let k2 = 0.5
-                                    * (dot(ns, v).powi(2) + cl.projector_quadratic_form(v))
-                                    / (r2 * r2);
+                                let q = if normals.is_some() {
+                                    cl.projector_quadratic_form(v)
+                                } else {
+                                    0.0
+                                };
+                                let k2 = 0.5 * (dot(ns, v).powi(2) + q) / (r2 * r2);
                                 hi += cl.area * rs;
                                 lo += cl.area * rs * k2;
                             }
@@ -737,9 +742,8 @@ impl CrossEvaluator {
                                     let v = sub(xs, self.set.points[t]);
                                     let r2 = dot(v, v);
                                     let rs = r2.powf(-s);
-                                    let k2 = 0.5
-                                        * (dot(ns, v).powi(2) + dot(normals[t], v).powi(2))
-                                        / (r2 * r2);
+                                    let q = normals.map_or(0.0, |n| dot(n[t], v).powi(2));
+                                    let k2 = 0.5 * (dot(ns, v).powi(2) + q) / (r2 * r2);
                                     hi += self.set.weights[t] * rs;
                                     lo += self.set.weights[t] * rs * k2;
                                 }

@@ -653,3 +653,35 @@ fn klein_bottle_with_ccd_reaches_the_objective_of_the_run_without() {
     // The immersion is free to move with the rule (631 vs 156 without it).
     assert!(finals[0] < 2.0 * finals[1], "{finals:?}");
 }
+
+/// Regression (WP18b defect 1): the blocky Klein bottle in `reference_compat` with splits and
+/// collapses off, state after step 299 (the flow had shrunk an edge to 7e-4 and the final flip
+/// of the step made two needle faces: min angle 0.1 degrees, `F` 24.7 -> 4.4e9). The
+/// printed-preconditioner left GMRES ends at relative residual 1.466e3 there (above 1e-1), which
+/// used to abort the run with `SolverDiverged`. The step now recovers (right GMRES with the
+/// augmented preconditioner, else a dense LU), says so in `linear.fallbacks`, and the flow goes
+/// on and brings `F` down. Release build: `cargo test --release -p ddg-repulsive-surfaces
+/// --test flow -- solver_fallback`.
+#[test]
+fn solver_fallback_recovers_the_klein_bottle_needle_state() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/solver_fallback");
+    let spec = ddg_repulsive_surfaces::SceneSpec::load(dir.join("scene.txt")).unwrap();
+    let mut o = ddg_repulsive_surfaces::scene_options(&spec).unwrap();
+    o.max_iterations = 4;
+    o.stop = StopRule::Off;
+    o.threads = Some(2);
+    o.reference_compat = true;
+    o.line_search.ccd = None;
+    let r = o.remesh.as_mut().expect("the scene remeshes");
+    r.enabled_ops.split = false;
+    r.enabled_ops.collapse = false;
+    let mut sess = Session::new(spec.surface.clone(), spec.positions.clone(), o).unwrap();
+    let f0 = sess.energy();
+    assert!(f0 > 1e9, "the needle state: F = {f0:e}");
+    let reps = run(&mut sess, 4);
+    assert!(!reps[0].linear.fallbacks.is_empty(), "step 1 used a fallback: {:?}", reps[0].linear);
+    assert!(reps[0].linear.fallbacks[0].contains("diverged"));
+    assert!(reps[0].linear.max_relative_residual() < 1e-1);
+    let f = reps.last().unwrap().energy_after;
+    assert!(f < 1e3, "F after the recovery steps: {f}");
+}

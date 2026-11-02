@@ -726,9 +726,34 @@ fn obstacle_diagonal_matches_the_brute_force_formula() {
         assert!(b.high[f] > 0.0 && b.low[f] >= 0.0);
         assert!((b.high[f] / d.high[f] - 1.0).abs() < 0.2);
     }
-    // Point clouds and Coulomb have no metric term.
+    // A point cloud has the metric term too (the reference builds the obstacle BCT for it): unit
+    // weights and zero obstacle projectors, so `K₂(T, S) = 0`.
     let cloud = Arc::new(StaticSet::from_points(ob.vertices(), 4).unwrap());
-    assert!(obstacle_diagonal(&pool, &s, &pos, cloud, &e, bh(0.5, 4), w).is_err());
+    for theta in [0.0, 0.5] {
+        let d = obstacle_diagonal(&pool, &s, &pos, cloud.clone(), &e, bh(theta, 4), w).unwrap();
+        for f in 0..s.n_faces() {
+            let (mut hi, mut lo) = (0.0, 0.0);
+            for t in 0..cloud.len() {
+                let p = cloud.points()[t];
+                let v = [
+                    g.barycenters[f][0] - p[0],
+                    g.barycenters[f][1] - p[1],
+                    g.barycenters[f][2] - p[2],
+                ];
+                let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+                let nv = g.normals[f];
+                let dn = (nv[0] * v[0] + nv[1] * v[1] + nv[2] * v[2]).powi(2);
+                let rs = r2.powf(-sx);
+                hi += rs;
+                lo += rs * 0.5 * dn / (r2 * r2);
+            }
+            let c = 2.0 * w / g.areas[f];
+            let tol = if theta == 0.0 { 1e-12 } else { 0.2 };
+            assert!(d.high[f].is_finite() && d.low[f].is_finite());
+            assert!((d.high[f] / (c * hi) - 1.0).abs() < tol, "{theta} {f}");
+            assert!((d.low[f] / (c * lo) - 1.0).abs() < tol.max(0.3) || theta == 0.0, "{theta} {f}");
+        }
+    }
 }
 
 #[test]
