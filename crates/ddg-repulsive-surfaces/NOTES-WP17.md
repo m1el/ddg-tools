@@ -126,9 +126,105 @@ with or without the obstacle term; restart 60 halves it. Reconstruction in defau
 iterations per step, no slowdown (the 1600 iterations came from the point-cloud `O_diag`, now
 `reference_compat` only).
 
-## Results (timed pass)
+## Results (timed pass, 2026-11-02, `runs_tmp/wp17/timed/`)
 
-(filled from `runs_tmp/wp17/timed/`)
+Machine: AMD Ryzen Threadripper 3970X (32 cores, Zen 2 — the paper's 3990X is the 64-core part of the
+same family). One run at a time; outside load (another session's application runs, `load.txt`): 1-minute
+load average 16–17 during the A/B, 6.5–12 during Fig. 13 and scaling, 8–13 during the 1-thread
+comparison, 6–11 during the base 1-thread runs. "Before" = the branch at `31f9057` (with only the
+bench and the timing fields added), "after" = this branch.
+
+**45k figure-8 tunnel, 4 threads, barycenter + area (44,848 faces, 53.5k after the first remeshing),
+interleaved A B A B (`ab45k.csv`):**
+
+| | step | GMRES its | solve | products | preconditioner | metric tree | energy | F after 4 steps |
+|---|---|---|---|---|---|---|---|---|
+| before | 9.30 / 9.48 s | 94.3 | 7.32 s | 4.5 s (98) | 2.6 s | 0.78 s | 0.37 s | 886.175015813004 |
+| after | 4.16 / 3.82 s | 62.3 | 2.47 s | 1.46 s (64) | 0.90 s | 0.31 s | 0.40 s | 886.843721243789 |
+
+(The energies differ by 0.08 % through the tolerance change; with changes 1–2 alone they were bitwise
+equal.)
+
+**Fig. 13, 4 threads, warm-up 2, mean of 5 steps (`fig13.csv`)** — paper values read off Fig. 13:
+
+| # | model (analogue) | faces (input → after remeshing) | paper s/step | ours s/step | GMRES its/step | solve | metric tree | energy | remesh |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | triple torus (genus-3 slab) | 6,200 → 6,758 | ≈0.25 | 0.23 | 17 | 0.08 | 0.04 | 0.03 | 0.03 |
+| 2 | moving bars (HandcuffsPole scene) | 10,688 | ≈0.45 | 0.40 | 23 | 0.14 | 0.05 | 0.04 | 0.05 |
+| 3 | broken figure-8 (reference mesh) | 11,740 → 11,416 | ≈0.37 | 0.50 | 37 | 0.23 | 0.07 | 0.04 | 0.04 |
+| 4 | punctured torus | 9,886 → 10,046 | ≈0.65 | 0.43 | 37 | 0.22 | 0.04 | 0.03 | 0.03 |
+| 5 | handcuffs (k = 1) | 10,960 → 12,340 | ≈0.45 | 0.41 | 22 | 0.14 | 0.06 | 0.04 | 0.05 |
+| 6 | 2×-wound handcuffs | 16,020 → 18,270 | ≈0.75 (14k) | 0.70 | 31 | 0.29 | 0.10 | 0.09 | 0.07 |
+| 7 | point cloud (sphere 20k + bunny cloud, volume) | 20,480 | ≈1.6 | 0.73 | 17 | 0.21 | 0.10 | 0.09 | 0.05 |
+| 8 | nested cages (sphere 20k + bunny mesh obstacle) | 20,480 | ≈1.75 | 0.83 | 19 | 0.22 | 0.10 | 0.12 | 0.06 |
+| 9 | walnut (genus-0 slab) | 23,328 → 25,634 | ≈1.4 | 0.76 | 13 | 0.21 | 0.12 | 0.11 | 0.09 |
+| 10 | trefoil tunnel | 23,344 → 26,586 | ≈1.4 | 1.16 | 39 | 0.59 | 0.13 | 0.13 | 0.09 |
+| 11 | 6×-wound handcuffs | 21,640 → 24,372 | ≈1.35 | 1.41 | 63 | 0.79 | 0.14 | 0.13 | 0.10 |
+| 12 | double torus (`scene-bench.txt`, 35k) | 35,454 → 35,520 | ≈1.8 | 1.70 | 31 | 0.62 | 0.22 | 0.23 | 0.17 |
+| 13 | keys (genus-4 slab) | 37,312 → 39,772 | ≈2.05 | 1.47 | 19 | 0.48 | 0.22 | 0.25 | 0.13 |
+| 14 | figure-8 tunnel | 44,848 → 53,542 | ≈2.7 | 3.15 | 59 | 1.85 | 0.27 | 0.31 | 0.22 |
+
+At or below the paper on 12 of 14; above on #3 (0.50 vs ≈0.37 s, 37 GMRES iterations/step) and #14
+(3.15 s vs ≈2.7 s). #14 is our analogue of the paper's mesh: it is remeshed from 44.8k to 53.5k faces
+in the first step (the generator's edge lengths are uneven) and needs 59 iterations/step for 2
+solves; per face it is 0.059 ms (paper ≈0.060 ms/face at 45.2k), i.e. on a 45k mesh of the same
+difficulty about 2.65 s. The reference program on the same mesh, same machine, 4 threads, before
+WP17's runs (`ref_f8/`, load ≈5): 4.0–5.2 s/step (it remeshes to 57–58k faces; 13 + 26 GMRES
+iterations per step, left preconditioned).
+
+**Thread scaling, 40k torus (40,050 faces, barycenter + area, 14 iterations/step), warm-up 1, mean of
+3 (`scaling.csv`):** 1 / 2 / 4 / 8 / 16 / 32 / 64 threads: 3.32 / 2.08 / 1.44 / 1.14 / 0.97 / 0.93 /
+1.03 s (speed-up 1.6 / 2.3 / 2.9 / 3.4 / 3.5 / 3.2). Parts that stop scaling at 8–16 threads: the
+preconditioner (≈150–160 ms: the `L′` back substitutions are sequential per vector), remeshing
+(≈150 ms, sequential), the energy (≈140 ms: the Barnes–Hut gradient's sequential passes), the metric
+tree build (≈105–115 ms). Products scale to 16 threads (621 → 149 ms for 16).
+
+**1 thread against the reference (WP18b scenes; 30 steps, Bunny 15, Reconstruction 6; mean ms/step,
+median in brackets; `ref1t/`, `base1t/`; the blocky Klein bottle with the reference's non-orientable
+build):**
+
+| scene | faces | reference | ours before | ours after | after / reference | GMRES its/step before → after |
+|---|---|---|---|---|---|---|
+| EntangledDoubleTorus | 10,506 | 1149 (1139) | 2367 (2381) | 1257 (1238) | 1.09 | 36.0 → 29.8 |
+| HopfLink | 9,216 | 667 (666) | 1617 (1614) | 967 (954) | 1.45 | 30.0 → 24.0 |
+| HandcuffsPole | 10,688 | 955 (973) | 2126 (2163) | 1127 (1138) | 1.18 | 32.0 → 27.4 |
+| Walnut | 1,280 | 259 (149) | 186 (166) | 140 (132) | 0.54 | 14.1 → 9.6 |
+| LungGrowing | 5,120 | 506 (508) | 694 (688) | 482 (483) | 0.95 | 23.8 → 18.7 |
+| Bunny | 28,576 | 4205 (4026) | 7657 (7701) | 3522 (3463) | 0.84 | 45.8 → 38.1 |
+| Reconstruction | 81,920 | 9764 (9672) | 11496 (11546) | 7638 (7706) | 0.78 | 20.0 → 18.0 |
+| KleinBottle (blocky) | 1,800 | 403 (412) | 464 (420) | 237 (225) | 0.59 | 69.3 → 42.8 |
+
+Faster than the reference on 5 of 8 scenes; slower on EntangledDoubleTorus (1.09×), HandcuffsPole
+(1.18×) and HopfLink (1.45×). Why: those three spend 29.8 / 27.4 / 24 GMRES iterations per step on a
+true residual of `1e-3` where the reference stops after 20.7 / 13.0 / 9.3 iterations per step (counted
+in its stdout of these runs) on its preconditioned residual (true residuals 0.1–0.2, `NOTES-WP6.md`); and at 9–11k faces a 1-thread step of ours is
+≈ 1/4 tree builds (metric tree 0.15–0.2 s, vertex tree), ≈ 1/3 solve, the rest energy, line-search
+trials, CCD (Hopf: factor 212, solve 345, energy 122, line search 120, projection 66, CCD 50 ms).
+
+## Tried and not kept
+
+* Rows outer / blocks inner in the near-field loop (accumulator kept for a whole row): 1.3–2× slower
+  (the argument blocks are no longer reused across the rows of a leaf).
+* `cbrt`-based kernel powers (`ρ^{−5/3}`, `ρ^{−4/3}`) in the tree builds: slower than `powf` (Rust's
+  software `cbrt`), reverted.
+* The obstacle term in the preconditioner (above).
+
+## Proposed SPEC §14.5 "Results of record" (WP17)
+
+> Benches `benches/step.rs` (whole steps, breakdown; `--suite fig13`, `--suite wp18b`) and
+> `benches/product.rs`. Threadripper 3970X, 4 threads (Fig. 13's setting), barycenter + area: the 14
+> Fig. 13 models (analogues where the paper's meshes are not published) at 0.23–1.70 s/step up to
+> 40k faces, at or below the paper on 12 of 14; the figure-8 tunnel analogue (44.8k faces, 53.5k after
+> its first remeshing, 59 GMRES iterations/step) 3.15 s against the paper's ≈2.7 s (0.059 ms/face, the
+> paper's per-face rate), the reference program on the same mesh and machine 4.0–5.2 s. Thread
+> scaling (40k torus): 3.3 s at 1 thread, 1.44 s at 4, 0.97 s at 16, no gain past 16 (sequential `L′`
+> back substitutions, remeshing, Barnes–Hut gradient passes). One thread against the reference on the
+> WP18b scenes: 0.54–0.95× on Walnut, LungGrowing, Bunny, Reconstruction, blocky Klein bottle; 1.09×,
+> 1.18×, 1.45× on EntangledDoubleTorus, HandcuffsPole, HopfLink (more GMRES iterations: ours stops on
+> the true residual). WP17 changed the defaults of the flow's GMRES to tolerance `1e-3` and restart
+> 60 (§6.3; measured: same energies after 200 steps on 10 scenes, 20 % fewer iterations; `1e-4`/30
+> stays the solver default and the `reference_compat` setting) and the preconditioner's `L′` solves to
+> no refinement step (iterations unchanged); all other changes are bitwise or round-off.
 
 ## Not done / possible next steps
 
@@ -136,4 +232,9 @@ iterations per step, no slowdown (the 1600 iterations came from the point-cloud 
   `f32` storage of the near field (a result change beyond round-off; not done) or a higher-order far field
   with a larger admissibility (fewer near entries).
 * Remeshing (serial) and the Barnes–Hut gradient's sequential parts limit the scaling past 8 threads.
-* The two `needless_range_loop` clippy warnings of `examples/compare_reference.rs` (WP18's file) remain.
+* The three `needless_range_loop` clippy warnings of `examples/compare_reference.rs` (WP18's file,
+  not in WP17's paths) remain; the library, tests and benches are clippy-clean.
+* The preconditioner's 3-column block solves (one pass over the factor per vector) were chosen without
+  a clean A/B (the machine was loaded at that time); with more than ~8 threads one task per column may
+  scale better.
+* Allocation churn: fresh `|F| × C` buffers per product (≈4 % of a 4-thread step in page faults).
