@@ -924,6 +924,21 @@ logs energy/time and writes OBJs. Run with `--threads 1` (its squared-error race
 as parity fixtures (`tests/reference_fixtures.rs`), and trajectories/final shapes on the shared
 scenes side by side (not matched step for step: remeshing amplifies round-off).
 
+**Built (WP18a, 2026-11-02).** `/var/data/discrete-geometry/RepulsiveSurfaces-build/` (README there):
+GCC 15.2, Release `-O3 -march=native`, MKL 2026.0.2 from `uv` wheels with `mkl_gnu_thread` +
+libgomp (no libiomp5), geometry-central only (polyscope cloned, not built); submodules
+geometry-central `00d09a5`, polyscope `feaf66b`, libgmultigrid `8d01391`, all MIT (licences in
+`licenses/`). One patch (`gcc-compat.patch`): the reference compiles only with clang; the patch
+removes `aligned(...)` hints from `#pragma omp` lines and a duplicated `P_min` in a `shared()`
+clause — no numerics. Driver `build/bin/rsurfaces_headless` (`--scene`, `--iterations`,
+`--obj-every`, `--out`, `--threads` (1), `--theta` (0.5), `--no-remesh`, `--dump-initial`
+[`--dump-metric`], `--coulomb`, `--mult-alg`; writes `steps.csv`, OBJs, the reference's stdout).
+Smoke, 20 steps, 1 thread: EntangledDoubleTorus 1036 ms/step, energy 377.0 → 194.5; HopfLink
+609 ms/step, 849.3 → 313.7; Bunny 3501 ms/step, 162452 → 100.06. **The reference cannot load the
+Klein bottle meshes of its own `scenes/KleinBottle/`** (its geometry-central version aborts with
+"duplicate edge in list" on non-orientable input): Fig. 26 (bottom) is not reproducible with the
+published code; our `Surface` accepts them (D1).
+
 ## 15. Work packages
 
 Each package is one agent, on its own worktree branch merged by the orchestrator. "Files" are the
