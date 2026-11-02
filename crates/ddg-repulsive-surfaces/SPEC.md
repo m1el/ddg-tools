@@ -272,9 +272,15 @@ preconditioner's Laplacian), **nonlinear** ones go through the Schur complement.
   the kernel. `Global` and `PerComponent` force one or the other (`PerComponent` without the shift
   freezes the components' barycenters: a real constraint, e.g. for packing scenes). In `Global`
   mode on several components the preconditioner's `W` keeps per-component constants in its kernel:
-  `L′` then uses `ε_multi = 1e-2 · tr W / tr M` (the reference's absolute `1e-2`, made
-  scale-invariant). WP6 measures `Auto` against `PerComponent` + shift on Hopf link, Borromean
-  rings and the keys/double-torus-and-ring scene (GMRES iterations, energy per step).
+  `L′` then uses `ε_multi = 1e-4 · tr W / tr M` (WP6: the reference's `1e-2`, made scale-invariant,
+  costs up to 6× more GMRES iterations; at `1e-4` Global costs about what PerComponent does). WP6 measures `Auto` against `PerComponent` + shift on Hopf link, Borromean
+  rings and the keys/double-torus-and-ring scene (GMRES iterations, energy per step). **Measured
+  (WP6):** Global and PerComponent directions differ by 46 % (Hopf) and 67 % (Borromean): freezing
+  the components' barycenters is a real constraint. The paper's L² mean-motion shift is not
+  scale-consistent: on the Borromean rings it made the direction a rigid translation (the shift
+  was 2e4 × ‖x‖). Hence `Auto` = `Global` with `B⁰` on (default), and with `low_order: false`
+  `PerComponent` **without** the shift; `barycenter_shift: true` stays available as the paper's
+  option (Fig. 8, Fig. 18 free barycenter), documented as unit-inconsistent.
 * A barycenter together with pins on a component is not linearly dependent (only a fully pinned
   component is), but it constrains more than the pins alone; the projection iterates
   translate-then-reset until both hold (WP2). The paper: "if any pins are used, a barycenter
@@ -398,7 +404,25 @@ error.
   `uᵀ L^V_{2−s} u = Σ_{v≠w} (u_v − u_w)² a_v a_w |f_v − f_w|^{−(2(2−s)+2)}` (dual areas, ordered
   pairs) has condition 1.3–2.1 against `M Δ^{2−s}` and GMRES needs 5 / 5 / 7 / 27 iterations on the
   same meshes. Default: `FractionalForm::VertexPairs` (hierarchical on a vertex BVH, WP6);
-  `FractionalForm::FacePairs` is the reference mode. WP6 confirms at 10k–100k faces (§14.3). `ε = ε_rel · tr(W)/tr(M)` (scale-invariant; default `ε_rel = 1e-10`; the reference uses
+  `FractionalForm::FacePairs` is the reference mode. Confirmed by WP6 at 2k–100k faces: vertex
+  pairs, right GMRES to `1e-4` in 4–16 iterations (Borromean rings 37); face pairs, right GMRES does
+  not converge in 200 on most meshes, left stops after 4–16 with true residuals 0.2–2.2.
+
+  **The augmented form (D33, after WP6).** As printed, `P⁻¹ = L′⁻¹ blockdiag(L_{2−s}⊗I₃, 0) L′⁻¹`
+  is singular (the middle factor zeroes the multiplier block), so its range cannot represent the
+  multiplier part of the solution: whenever pins or per-component barycenters carry a force, right
+  GMRES stalls (Hopf link 8.6e-4 after 200 iterations; 3 pins on a torus 0.12) and left GMRES stops
+  with true residuals 0.04–0.11. Default:
+
+  ```
+  P⁻¹ = L′⁻¹ · [[L_{2−s}⊗I₃, C_Qᵀ], [C_Q, 0]] · L′⁻¹  =  L′⁻¹ + L′⁻¹ blockdiag((L_{2−s} − (W+εM))⊗I₃, 0) L′⁻¹
+  ```
+
+  (same cost: two back-substitutions and one fractional product); symmetric, nonsingular, and
+  `C_Q`-consistent: `C_Q (P⁻¹[r; b])_x = b`. The printed form stays as `PreconditionerForm::Printed`
+  (reference mode). `rs-fractional-preconditioner` is restated for this form (Lean update pending,
+  §16). Not added to `L′`: the Willmore term (D7: with it GMRES needed 154 iterations or diverged,
+  5–20 without) and the obstacle diagonal (the reference adds its `fr` part; not implemented, §16). `ε = ε_rel · tr(W)/tr(M)` (scale-invariant; default `ε_rel = 1e-10`; the reference uses
   absolute `1e-8`, and `1e-2` with several components because its global barycenter row leaves
   per-component constants in the kernel — with per-component barycenters we need no large `ε`).
   The order bookkeeping is `rs-preconditioner-order` (`(−Δ)⁻¹ (−Δ)^{2−s} (−Δ)⁻¹ = (−Δ)^{−s}`, with
@@ -411,7 +435,7 @@ error.
   `x`/`y`/`z` columns as one `|V| × 3` block where the operator allows (App. B). Not converging is
   a reported condition (`LinearReport`), not an error, unless the residual is above `1e-1`
   (`SolverDiverged`). With `Backend::Auto` the dense path is used up to `dense_max_faces`
-  (default 2000, set by measurement).
+  (default 1000: WP6 measured the hierarchical path faster from about 500 faces).
 
 ## 7. Time stepping
 
@@ -685,7 +709,7 @@ internal error with the step's data (never silently repaired).
 | D4 | BH gradient | forward terms only (4.2) | exact gradient of `Ẽ` | exact gradient of `Ẽ` |
 | D5 | BH admissibility | per face `S` | per leaf, AABB distance | per leaf (reference) |
 | D6 | metric weight | — | × TP weight | × `tp_weight` |
-| D7 | Willmore H² term | in `A` | unweighted, GMRES only | weighted, in `A` and preconditioner (measured) |
+| D7 | Willmore H² term | in `A` | unweighted, GMRES only | weighted, in `A` only (in the preconditioner it diverged, WP6) |
 | D8 | barycenter | per component + mean-motion shift (Fig. 8), "copies of I" | global, weights `a_v/A`, ε = 1e-2 | `Auto`: global with `B⁰` on, per component + shift with `low_order: false`; weights `a_v/A_c` (§5.1) |
 | D9 | volume gradient | "∝ Σ aN" | `Σ aN` (3×) | exact (`⅓ Σ aN` on closed fans) |
 | D10 | redundant rows | — | — | rank check, drop + report |
@@ -709,6 +733,7 @@ internal error with the step's data (never silently repaired).
 | D28 | AQP | Kovalsky et al. 2016 | κ = 100 fixed, current Laplacian, no safeguards | κ = 100, current Laplacian (remeshing changes the rest pose), momentum reset on energy increase and remeshing |
 | D29 | stop rule | — | iteration/time limit only | + energy stall (§7.4) |
 | D30 | shared code | — | — | depend on `ddg-repulsive-curves` (its SPEC §16 had proposed extracting a shared crate; the generic parts are public and stable, so we use them in place and do not edit that verified crate) |
+| D33 | preconditioner form | `L′⁻¹ L_{2−s} L′⁻¹` | same, multipliers zeroed | augmented `L′⁻¹ [[L_{2−s}, C_Qᵀ],[C_Q, 0]] L′⁻¹` (§6.3); printed form as reference mode |
 | D32 | preconditioner's `L_{2−s}` | face form | face form, left GMRES | vertex pairs (§6.3); face form as reference mode |
 | D31 | Fig. 12 meshes | not published | not in the repo | generated analogues at the paper's face counts (§14.4), recorded as such |
 
@@ -933,6 +958,20 @@ Rounds (≤ 3 agents; timed work alone at the end):
 ## 16. Open items
 
 (Filled in as work packages report.)
+
+* Lean: restate `rs-fractional-preconditioner` for the augmented form (D33): symmetric,
+  nonsingular, `C_Q (P⁻¹[r; b])_x = b` (WP10 proved the printed form's properties).
+* The obstacle part of the preconditioner (reference `fr` diagonal) is not implemented (WP6).
+* Naming after WP6: WP2's `FractionalPairs` still defaults to `Faces` in its own options (WP6's
+  options use `Vertices`); the SPEC's `FractionalForm` name is not used yet; `Backend` lives in
+  `solve/iterative.rs`. WP5 unifies the option names with §9.1.
+* Step time (WP6, 45k faces, 4 threads, run alone; barycenter + area + volume = 3 solves): BH build
+  + energy/gradient 0.32 s, face BCT build 0.57 s, factorization 0.04 s, vertex tree 0.10 s, GMRES
+  1.15 s (29 products at 25 ms) — 2.2 s for the direction against the paper's 2.5 s for a whole
+  step (`χ = 1`: 1.6 s). The BCT build and the products are the targets of WP17.
+* Fig. 16 (Ishii et al. 2012 table) is not transcribed (WP12): the cited paper may be downloaded
+  (CLAUDE.md rule for cited papers) for WP15. WP12 read "figure-8 / trefoil tunnel" as knotted
+  tori (tubes around the knot); recorded as an interpretation.
 
 ## 17. The user's decisions (2026-11-01)
 
