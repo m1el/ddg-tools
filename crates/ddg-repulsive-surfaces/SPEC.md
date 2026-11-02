@@ -1013,9 +1013,29 @@ Rounds (≤ 3 agents; timed work alone at the end):
 * ~~Lean: restate `rs-fractional-preconditioner` for the augmented form~~ — done (WP10b,
   `RS.aug_precond_props`, exactly as §6.3 states it).
 * The obstacle part of the preconditioner (reference `fr` diagonal) is not implemented (WP6).
-* Naming after WP6: WP2's `FractionalPairs` still defaults to `Faces` in its own options (WP6's
-  options use `Vertices`); the SPEC's `FractionalForm` name is not used yet; `Backend` lives in
-  `solve/iterative.rs`. WP5 unifies the option names with §9.1.
+* ~~Naming after WP6~~ — done by WP5: `FractionalForm::{FacePairs, VertexPairs}` (default
+  `VertexPairs`) everywhere; `DEFAULT_DENSE_MAX_FACES = 1000`; `RsError::Internal` added.
+* **As built (WP5), API differences from §9.1:** `FlowOptions::barycenter_mode:
+  Option<BarycenterMode>` (`None` = `Auto`); `Backend` as WP6 built it (`solve/iterative.rs`) plus
+  `FlowOptions::energy_eval`; added `StartRule::Absolute`, `StopRule::Off`,
+  `LineSearch::max_halvings`, `schedule_timing`, `ccd_obstacles: Vec<Arc<Obstacle>>`,
+  `Session::{face_origin, constraints}`, `FlowOptions::effective()`; scene runs via
+  `scene_options`/`run_scene` (per-step CSV) and `examples/run_scene.rs`. `w_TP` weights both the
+  energy and the metric (the reference's reading; the oracle's `metric` task weights only the
+  metric — its fixtures use `w_TP = 1`, so they agree). The ⅔ `τ_max` cap of §7.3 applies only when
+  CCD finds a contact before `τ₀` (otherwise every start would shrink). `reference_compat` cannot
+  reproduce D9 (3× volume row), the absolute `ε` and `τ_min`, or the D24 value conventions; the
+  black-box comparison states this per scene.
+* **CCD default (D20), measured by WP5:** the median CCD share of a step is 0.5–2.0 % on the five
+  smoke scenes, so CCD is **on** by default, per the user's rule. Two effects to watch:
+  (1) on EntangledDoubleTorus the run with CCD reaches `F = 42` after 200 steps, without CCD 8.2
+  (no intersection at any step end in either) — under investigation: either the cap is too
+  conservative, or the run without CCD passed through itself inside a step (an isotopy change the
+  step-end check cannot see); (2) an immersed input (the Klein bottle) has touching pairs, which
+  stall CCD; `scene_options` turns CCD off for subcritical exponents. WP5 smoke runs (4 threads,
+  without CCD): HopfLink 9.2k faces 563 ms/step, 32 GMRES iterations/step; EntangledDoubleTorus
+  10.5k 609 ms, 21; KleinBottle 1.8k 147 ms, 46; HandcuffsPole 10.7k 703 ms, 31; Bunny 28.6k
+  2357 ms, 34 (GMRES 1.33 s of it); every step remeshed, none stuck.
 * Step time (WP6, 45k faces, 4 threads, run alone; barycenter + area + volume = 3 solves): BH build
   + energy/gradient 0.32 s, face BCT build 0.57 s, factorization 0.04 s, vertex tree 0.10 s, GMRES
   1.15 s (29 products at 25 ms) — 2.2 s for the direction against the paper's 2.5 s for a whole
