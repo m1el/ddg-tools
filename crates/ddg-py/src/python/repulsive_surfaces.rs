@@ -229,12 +229,16 @@ fn to_val(name: &str, obj: &Bound<'_, PyAny>) -> PyResult<Val> {
     if let Ok(h) = obj.extract::<PyRef<'_, RepulsiveSurfaceHandle>>() {
         return Ok(h.val.clone());
     }
-    // A buffer: floats, or integers (indices travel as reals).
-    if let Ok(v) = reals(leak(name), obj, 1, "number") {
-        return Ok(Val::Array(v));
+    // A buffer: floats, or integers (indices travel as reals); 2-d arrays are read flat.
+    for width in [1, 3, 2] {
+        if let Ok(v) = reals(leak(name), obj, width, "number") {
+            return Ok(Val::Array(v));
+        }
     }
-    if let Ok(v) = indices(leak(name), obj, 1, "number") {
-        return Ok(Val::Array(v.into_iter().map(f64::from).collect()));
+    for width in [1, 3, 2] {
+        if let Ok(v) = indices(leak(name), obj, width, "number") {
+            return Ok(Val::Array(v.into_iter().map(f64::from).collect()));
+        }
     }
     // numpy scalars and other numbers.
     if let Ok(i) = obj.extract::<i64>() {
