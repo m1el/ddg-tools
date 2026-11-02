@@ -181,19 +181,20 @@ fn status_codes() {
     let r = flow(s.clone(), p.clone(), o, None).unwrap();
     assert_eq!(r.report.status, Status::Converged);
     assert!(r.report.iterations >= 6, "converged at {} while the schedule moved", r.report.iterations);
-    // Error: a step error ends the run with `Status::Error` (GMRES with one iteration and a
-    // tiny tolerance diverges, `SolverDiverged`), `run` itself succeeds.
+    // A crippled GMRES (one iteration, tiny tolerance) no longer ends the run: the fallback chain
+    // of SPEC §6.3 (right GMRES with the augmented preconditioner, then a dense LU) recovers the
+    // step and reports it in `LinearReport::fallbacks`.
     let mut h = HierarchicalOptions::default();
     h.gmres.max_iterations = 1;
     h.gmres.tolerance = 1e-12;
     let o = FlowOptions { backend: Backend::Hierarchical(h), ..base() };
     let r = flow(s, p, o, None).unwrap();
-    match &r.report.status {
-        Status::Error(RsError::SolverDiverged { .. }) => {}
-        other => panic!("expected a solver error, got {other:?}"),
-    }
-    assert!(r.report.error().is_some());
-    assert!(r.report.steps.is_empty());
+    assert!(r.report.error().is_none(), "the fallback should recover: {:?}", r.report.status);
+    assert!(!r.report.steps.is_empty());
+    assert!(
+        r.report.steps.iter().any(|st| !st.linear.fallbacks.is_empty()),
+        "no step reported a solver fallback"
+    );
 }
 
 #[test]
