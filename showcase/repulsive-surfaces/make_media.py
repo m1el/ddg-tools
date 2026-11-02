@@ -249,7 +249,7 @@ def do_envelopes():
 
 
 def do_cobblestones():
-    layers = [{"obj": str(RUNS / "cobblestones" / "final.obj"), "color": "components"},
+    layers = [{"obj": str(MAIN / "runs_tmp" / "rs-cobble" / "cobblestones" / "final.obj"), "color": "components"},
               {"box": {"center": [0, 0, 0], "half": [3.2, 3.2, 0.9]}, "alpha": 0.12, "color": [0.55, 0.65, 0.85],
                "roughness": 0.2}]
     still("cobblestones", panel(layers, az=-30, el=32), 1600, 1000)
