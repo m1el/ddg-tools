@@ -21,6 +21,8 @@
 //! * `swept` runs the exact-time CCD (gap 1e-6 ℓ̄) on the linear motion from mesh A to mesh B (same
 //!   connectivity) and says whether any pair of elements meets in between (tunnelling).
 
+#![allow(clippy::needless_range_loop)]
+
 use std::io::Write;
 use std::time::Instant;
 

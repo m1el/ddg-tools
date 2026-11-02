@@ -94,7 +94,7 @@ fn run(args: &[String]) {
                 }
                 e1 = r.energy_after;
                 hist.push(e1);
-                if s.iteration() % 25 == 0 {
+                if s.iteration().is_multiple_of(25) {
                     println!("PROGRESS step={} faces={} energy={e1:.6e} t={:.0}s", s.iteration(), s.surface().n_faces(), t0.elapsed().as_secs_f64());
                 }
                 if s.status().is_terminal() {
