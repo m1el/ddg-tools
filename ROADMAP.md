@@ -533,6 +533,10 @@ Open:
   tolerance (R22); the order agrees to the first near-tie only.
 * Timings of record (Fig. 16) were taken on a loaded machine; rerun alone.
 
+## Repulsive Surfaces (`crates/ddg-repulsive-surfaces`, branch `repulsive-surfaces`, 2026-11-02, not yet merged to master)
+
+Landed: the face-pair tangent-point energy (exact and Barnes-Hut with the exact adjoint gradient), the fractional Sobolev metric and the L2/H1/H2 comparison metrics, dense and hierarchical-matrix operators with right-preconditioned GMRES (vertex-pair, augmented preconditioner with scale and coarse correction; D32/D33), barycenter/area/volume/pin constraints, penalties, mesh/point/implicit obstacles, remeshing, CCD (on by default: the paper's algorithm tunnels on EntangledDoubleTorus step 6, 2226 crossings), AQP/H1 L-BFGS/BCQN, generators, a reader of the authors' scenes, Python `RepulsiveSurfaceSession`, Blender "Repulsive Surface Flow (Live)" and "(Steps)", 70 oracle fixtures, Lean proofs (35 proved + 8 cited ids, plus the augmented preconditioner) and a black-box comparison with the authors' program (parity to 1e-14 except the reference's 3x volume row; trajectories within about 1 %). Fig. 10: fitted rate 1.97. Fig. 13: 12 of 14 models at or below the paper at 4 threads, but the 2.5 s at 45k faces is not met (3.15 s on the figure-8 tunnel); 1 thread against the reference: faster on 5 of 8 scenes, slower on EDT 1.09x, handcuffs 1.18x, Hopf 1.45x. Open: the method comparison (Fig. 5, 12) and the Fig. 16 table (transcription from the user-supplied Ishii et al. PDF) are pending; Klein bottle remeshing inside the CCD band fails near step 184; the punctured torus diverges after 38-80 steps; envelopes (obstacle not in the preconditioner) and needle inputs of the subcritical spindle; eversion (Fig. 20) not reproduced; open surfaces without remeshing need 225-678 GMRES iterations (SPEC section 16).
+
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed

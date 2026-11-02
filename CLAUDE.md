@@ -63,7 +63,7 @@ crates/ddg-uv              end-to-end pipeline: polygons -> charts -> cones -> c
                            `cutting`: the cut flow on polygon meshes with seams, insertion of the cut, unwrap
 crates/ddg-py              PyO3 bindings (Python module `ddg_tools`)
 blender/                   Blender extension: mesh -> UV map; cut operators (Start, Flow, Apply); map to sphere;
-                           Make Developable, Show Developability, Developable Seams + UV
+                           Make Developable, Show Developability, Developable Seams + UV; Repulsive Flow, Repulsive Surface Flow
 lean/oracle/               Lake package, no Mathlib: scalar-generic formula definitions and a Float
                            executable used as a differential-testing oracle
 lean/proofs/               Lake package on Mathlib: machine-checked derivations of the formulas the Rust code uses
