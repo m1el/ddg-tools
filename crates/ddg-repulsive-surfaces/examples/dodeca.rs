@@ -8,13 +8,18 @@
 //! dodeca flow OBJ --out DIR [--threads T] [--max-steps S] [--window W] [--rel R] [--frame-every K]
 //!                 [--perturb EPS --seed N] [--compat] [--no-ccd] [--armijo-ref] [--start-ref]
 //!                 [--precond-ref] [--gmres-left] [--gmres-tol X] [--theta X] [--smooth-first]
-//!                 [--bary global|percomp] [--newton1]
+//!                 [--bary global|percomp] [--newton1] [--no-remesh]
 //!     Area + barycenter constraints, defaults unless stated; the stop rule of `ishii genus` (mean F over the
 //!     last W = 200 steps within R = 1e-5 relative of the W before; cap S = 8000). Writes DIR/steps.csv,
 //!     DIR/frame_NNNNN.obj (every K = 100), DIR/final.obj; prints PROGRESS every 25 steps and SYM (moments,
 //!     Q2 Q4 Q6) every 100.
 //!     --perturb: every vertex moved by EPS mean edge lengths in a random direction (xorshift seeded by N),
 //!     then rescaled to the input area.
+//! dodeca ladder ROW_OBJ OUT_OBJ [--radius R] [--faces F]
+//!     A row of 11 rings (tube of radius R = 0.22 around the ladder graph with 12 rungs, unit spacing),
+//!     scaled to the area of ROW_OBJ.
+//! dodeca perturb IN_OBJ OUT_OBJ --perturb EPS --seed N
+//!     The perturbed start of `flow --perturb EPS --seed N`, as OBJ.
 //! dodeca measure OBJ... [--area A] [--threads T]
 //!     Exact all-pairs energy, area, the energy at area A (E * area / A: E ~ area^-1 at (6, 12)), moments,
 //!     Q2 Q4 Q6, genus, self-intersection.
@@ -262,6 +267,9 @@ fn cmd_flow(path: &str, a: &FlowArgs, args: &[String]) {
         Some(m) => panic!("unknown barycenter mode {m}"),
         None => {}
     }
+    if has("--no-remesh") {
+        o.remesh = None;
+    }
     if has("--newton1") {
         o.newton_steps = NewtonSteps::Fixed(1);
     }
@@ -349,6 +357,33 @@ fn main() {
             get("--faces").map_or(10136, |v| v.parse().unwrap()),
             get("--radius").map_or(0.3, |v| v.parse().unwrap()),
         ),
+        Some("ladder") => {
+            // a chain of 11 rings: the ladder graph with 12 rungs (24 vertices, 34 edges, genus 11), unit spacing
+            let r = get("--radius").map_or(0.22, |v| v.parse().unwrap());
+            let (s0, x0) = read_obj(&args[1]).unwrap();
+            let (a0, _) = apps::area_volume(s0.faces(), &x0);
+            let seg = |a: P, b: P| ((0..=8).map(|k| [0, 1, 2].map(|c| a[c] + (b[c] - a[c]) * k as f64 / 8.0)).collect(), false);
+            let mut curves: Vec<(Vec<P>, bool)> = Vec::new();
+            for i in 0..12 {
+                let x = i as f64 - 5.5;
+                curves.push(seg([x, -0.5, 0.0], [x, 0.5, 0.0]));
+                if i < 11 {
+                    curves.push(seg([x, -0.5, 0.0], [x + 1.0, -0.5, 0.0]));
+                    curves.push(seg([x, 0.5, 0.0], [x + 1.0, 0.5, 0.0]));
+                }
+            }
+            let m = shapes::graph_tube(&curves, r, get("--faces").map_or(10136, |v| v.parse().unwrap())).unwrap();
+            let m = m.clone().transformed((a0 / m.area()).sqrt(), [0.0; 3]);
+            let s = m.surface().unwrap();
+            write_obj(&args[2], &s, &m.positions).unwrap();
+            println!("LADDER {} faces={} genus={} area={:.6} intersects={}", args[2], s.n_faces(), 1 - s.euler_characteristic() / 2, m.area(), ccd::intersects(&s, &m.positions).unwrap());
+        }
+        Some("perturb") => {
+            // the start of `flow --perturb EPS --seed N`, written as OBJ (for the reference program)
+            let (s, mut x) = read_obj(&args[1]).unwrap();
+            perturb(&s, &mut x, get("--perturb").unwrap().parse().unwrap(), get("--seed").unwrap().parse().unwrap());
+            write_obj(&args[2], &s, &x).unwrap();
+        }
         Some("measure") => {
             let paths: Vec<String> = args[1..].iter().take_while(|a| !a.starts_with("--")).cloned().collect();
             cmd_measure(&paths, get("--area").map(|v| v.parse().unwrap()), threads)
