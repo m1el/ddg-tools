@@ -238,28 +238,52 @@ impl LaplacianSaddle {
         &self.matrix
     }
 
-    /// Solves `M X = B` for `nrhs` stacked columns with one refinement step.
-    fn solve_columns(&self, b: &[f64], nrhs: usize) -> Result<Vec<f64>, RsError> {
-        let n = self.matrix.nrows();
+    /// Solves `M x = b` for one column with one refinement step.
+    fn solve_column(&self, b: &[f64]) -> Result<Vec<f64>, RsError> {
         let mut x = b.to_vec();
         self.factor
-            .solve_many_in_place(&mut x, nrhs, Parallelism::Sequential)
+            .solve_in_place(&mut x, Parallelism::Sequential)
             .map_err(|e| sparse_error(e, "preconditioner solve"))?;
-        let mut r = vec![0.0; n * nrhs];
-        for col in 0..nrhs {
-            let (xs, rs) = (&x[col * n..(col + 1) * n], &mut r[col * n..(col + 1) * n]);
-            self.matrix
-                .mul_vec(xs, rs)
-                .map_err(|e| sparse_error(e, "preconditioner residual"))?;
-            for (ri, bi) in rs.iter_mut().zip(&b[col * n..(col + 1) * n]) {
-                *ri = bi - *ri;
-            }
+        let mut r = vec![0.0; b.len()];
+        self.matrix
+            .mul_vec(&x, &mut r)
+            .map_err(|e| sparse_error(e, "preconditioner residual"))?;
+        for (ri, bi) in r.iter_mut().zip(b) {
+            *ri = bi - *ri;
         }
         self.factor
-            .solve_many_in_place(&mut r, nrhs, Parallelism::Sequential)
+            .solve_in_place(&mut r, Parallelism::Sequential)
             .map_err(|e| sparse_error(e, "preconditioner solve"))?;
         for (xi, di) in x.iter_mut().zip(&r) {
             *xi += di;
+        }
+        Ok(x)
+    }
+
+    /// Solves `M X = B` for `nrhs` stacked columns (in parallel on `pool` if given; each column
+    /// sequential, so the result does not depend on the pool).
+    fn solve_columns(
+        &self,
+        pool: Option<&rayon::ThreadPool>,
+        b: &[f64],
+        nrhs: usize,
+    ) -> Result<Vec<f64>, RsError> {
+        use rayon::prelude::*;
+        let n = self.matrix.nrows();
+        let cols: Vec<Result<Vec<f64>, RsError>> = match pool {
+            Some(pool) if nrhs > 1 => pool.install(|| {
+                (0..nrhs)
+                    .into_par_iter()
+                    .map(|c| self.solve_column(&b[c * n..(c + 1) * n]))
+                    .collect()
+            }),
+            _ => (0..nrhs)
+                .map(|c| self.solve_column(&b[c * n..(c + 1) * n]))
+                .collect(),
+        };
+        let mut x = Vec::with_capacity(n * nrhs);
+        for c in cols {
+            x.extend(c?);
         }
         Ok(x)
     }
@@ -271,6 +295,15 @@ impl LaplacianSaddle {
     /// [`RsError::InvalidOption`] for a wrong length; [`RsError::SingularSaddle`] for a
     /// non-finite solution.
     pub fn solve(&self, r: &[f64]) -> Result<Vec<f64>, RsError> {
+        self.solve_on(None, r)
+    }
+
+    /// As [`LaplacianSaddle::solve`], the three axes in parallel on `pool` (bitwise the same
+    /// result).
+    ///
+    /// # Errors
+    /// As [`LaplacianSaddle::solve`].
+    pub fn solve_on(&self, pool: Option<&rayon::ThreadPool>, r: &[f64]) -> Result<Vec<f64>, RsError> {
         let nv = self.n_vertices;
         let nd = 3 * nv;
         if r.len() != self.dim() {
@@ -292,7 +325,7 @@ impl LaplacianSaddle {
                         b[axis * n + nv + g] = r[nd + 3 * g + axis];
                     }
                 }
-                let x = self.solve_columns(&b, 3)?;
+                let x = self.solve_columns(pool, &b, 3)?;
                 let mut out = vec![0.0; r.len()];
                 for axis in 0..3 {
                     for v in 0..nv {
@@ -304,7 +337,7 @@ impl LaplacianSaddle {
                 }
                 Ok(out)
             }
-            None => self.solve_columns(r, 1),
+            None => self.solve_columns(pool, r, 1),
         }
     }
 }
@@ -571,7 +604,7 @@ impl SparsePreconditioner {
     pub fn apply_full(&self, r: &[f64]) -> Result<Vec<f64>, RsError> {
         let t0 = Instant::now();
         let nd = 3 * self.lprime.n_vertices;
-        let y = self.lprime.solve(r)?;
+        let y = self.lprime.solve_on(Some(&self.pool), r)?;
         let mut v = vec![0.0; r.len()];
         match &self.fractional {
             FractionalFactor::Vertices(t) => t.apply(&self.pool, &y[..nd], &mut v[..nd])?,
@@ -594,7 +627,7 @@ impl SparsePreconditioner {
                 }
             }
         }
-        let mut z = self.lprime.solve(&v)?;
+        let mut z = self.lprime.solve_on(Some(&self.pool), &v)?;
         if self.form == PreconditionerForm::Augmented {
             for (zi, yi) in z.iter_mut().zip(&y) {
                 *zi += yi;
