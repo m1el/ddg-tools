@@ -38,6 +38,17 @@ pub trait LinearOperator {
     /// # Errors
     /// Back-end failures.
     fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), RsError>;
+    /// `y_k = A x_k` for several vectors (default: one [`LinearOperator::apply`] each).
+    /// Implementations that batch must give every `y_k` exactly as `apply` would.
+    ///
+    /// # Errors
+    /// Back-end failures.
+    fn apply_batch(&self, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
+        for (x, y) in xs.iter().zip(ys.iter_mut()) {
+            self.apply(x, y)?;
+        }
+        Ok(())
+    }
 }
 
 /// A preconditioner `z = P⁻¹ r`.
@@ -49,6 +60,16 @@ pub trait Preconditioner {
     /// # Errors
     /// Back-end failures.
     fn apply(&self, r: &[f64], z: &mut [f64]) -> Result<(), RsError>;
+    /// `z_k = P⁻¹ r_k` for several vectors (default: one [`Preconditioner::apply`] each).
+    ///
+    /// # Errors
+    /// Back-end failures.
+    fn apply_batch(&self, rs: &[&[f64]], zs: &mut [&mut [f64]]) -> Result<(), RsError> {
+        for (r, z) in rs.iter().zip(zs.iter_mut()) {
+            self.apply(r, z)?;
+        }
+        Ok(())
+    }
 }
 
 /// `P = I`.
@@ -205,6 +226,305 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// What a [`GmresRun`] needs next.
+enum Request {
+    /// `A v`.
+    Op(Vec<f64>),
+    /// `P⁻¹ v`.
+    Prec(Vec<f64>),
+    /// Finished.
+    Done,
+}
+
+/// Where a [`GmresRun`] waits for the product it requested.
+#[derive(Clone, Copy)]
+enum Pending {
+    /// Left: `P⁻¹ b`, the reference norm.
+    RefNorm,
+    /// `A x` for the explicit residual of a cycle.
+    Residual,
+    /// Left: `P⁻¹ r`, the measure of a cycle.
+    Measure,
+    /// The first factor of an Arnoldi step (`P⁻¹ v_j` right, `A v_j` left).
+    ArnoldiFirst,
+    /// The second factor (`A P⁻¹ v_j` right, `P⁻¹ A v_j` left).
+    ArnoldiSecond,
+    /// Right: `P⁻¹ u`, the update of `x` at the end of a cycle.
+    Update,
+    /// Finished.
+    Done,
+}
+
+/// One restarted GMRES solve as a resumable computation (module docs): it asks for one operator
+/// or preconditioner product at a time, so that several solves can share batched products
+/// ([`gmres_batch`]). The arithmetic of a run does not depend on how its products are batched.
+struct GmresRun<'a> {
+    b: &'a [f64],
+    options: GmresOptions,
+    left: bool,
+    n: usize,
+    m: usize,
+    t0: Instant,
+    rep: GmresReport,
+    x: Vec<f64>,
+    bnorm: f64,
+    ref_norm: f64,
+    true_rel: f64,
+    basis: Vec<Vec<f64>>,
+    h: Vec<Vec<f64>>,
+    cs: Vec<f64>,
+    sn: Vec<f64>,
+    g: Vec<f64>,
+    j: usize,
+    pending: Pending,
+    error: Option<RsError>,
+}
+
+impl<'a> GmresRun<'a> {
+    /// Starts a solve of dimension `n`; returns the run and its first request.
+    fn start(n: usize, b: &'a [f64], options: &GmresOptions) -> Result<(GmresRun<'a>, Request), RsError> {
+        options.validate()?;
+        let t0 = Instant::now();
+        let mut run = GmresRun {
+            b,
+            options: *options,
+            left: options.side == GmresSide::Left,
+            n,
+            m: options.restart.min(n.max(1)),
+            t0,
+            rep: GmresReport {
+                side: options.side,
+                ..Default::default()
+            },
+            x: vec![0.0; n],
+            bnorm: norm2(b),
+            ref_norm: 0.0,
+            true_rel: 0.0,
+            basis: Vec::new(),
+            h: Vec::new(),
+            cs: Vec::new(),
+            sn: Vec::new(),
+            g: Vec::new(),
+            j: 0,
+            pending: Pending::Done,
+            error: None,
+        };
+        if run.bnorm == 0.0 {
+            run.rep.converged = true;
+            run.rep.preconditioned_relative_residual = run.left.then_some(0.0);
+            return Ok((run, Request::Done));
+        }
+        let m = run.m;
+        run.basis = Vec::with_capacity(m + 1);
+        run.h = Vec::with_capacity(m);
+        run.cs = vec![0.0; m];
+        run.sn = vec![0.0; m];
+        run.g = vec![0.0; m + 1];
+        if run.left {
+            run.rep.preconditioner_applications += 1;
+            run.pending = Pending::RefNorm;
+            return Ok((run, Request::Prec(b.to_vec())));
+        }
+        run.ref_norm = run.bnorm;
+        let req = run.after_ref_norm()?;
+        Ok((run, req))
+    }
+
+    fn after_ref_norm(&mut self) -> Result<Request, RsError> {
+        if !(self.ref_norm > 0.0 && self.ref_norm.is_finite()) {
+            return Err(RsError::SolverDiverged {
+                residual: f64::NAN,
+            });
+        }
+        Ok(self.cycle_start())
+    }
+
+    /// The explicit residual `r = b − A x` of a cycle (`x = 0` in the first).
+    fn cycle_start(&mut self) -> Request {
+        if self.rep.cycles > 0 {
+            self.rep.operator_applications += 1;
+            self.pending = Pending::Residual;
+            return Request::Op(self.x.clone());
+        }
+        let r = self.b.to_vec();
+        self.after_residual(r)
+    }
+
+    fn after_residual(&mut self, r: Vec<f64>) -> Request {
+        self.true_rel = norm2(&r) / self.bnorm;
+        if self.left {
+            self.rep.preconditioner_applications += 1;
+            self.pending = Pending::Measure;
+            return Request::Prec(r);
+        }
+        self.after_measure(r)
+    }
+
+    fn after_measure(&mut self, measure: Vec<f64>) -> Request {
+        let beta = norm2(&measure);
+        let rel = beta / self.ref_norm;
+        self.rep.cycle_residuals.push(rel);
+        if !rel.is_finite() {
+            return self.done();
+        }
+        if rel <= self.options.tolerance {
+            self.rep.converged = true;
+            return self.done();
+        }
+        if self.rep.iterations >= self.options.max_iterations {
+            return self.done();
+        }
+        self.rep.cycles += 1;
+        self.basis.clear();
+        self.h.clear();
+        self.basis.push(measure.iter().map(|v| v / beta).collect());
+        self.g.iter_mut().for_each(|v| *v = 0.0);
+        self.g[0] = beta;
+        self.j = 0;
+        self.arnoldi_first()
+    }
+
+    /// `w = A P⁻¹ v_j` (right) or `P⁻¹ A v_j` (left), first factor.
+    fn arnoldi_first(&mut self) -> Request {
+        self.rep.operator_applications += 1;
+        self.rep.preconditioner_applications += 1;
+        self.pending = Pending::ArnoldiFirst;
+        let v = self.basis[self.j].clone();
+        if self.left { Request::Op(v) } else { Request::Prec(v) }
+    }
+
+    /// Modified Gram–Schmidt, the Givens rotations, the stop test of one Arnoldi step.
+    fn after_arnoldi(&mut self, mut w: Vec<f64>) -> Request {
+        let j = self.j;
+        let mut col = vec![0.0; j + 2];
+        for i in 0..=j {
+            let hij = dot(&w, &self.basis[i]);
+            col[i] = hij;
+            for (wk, vk) in w.iter_mut().zip(&self.basis[i]) {
+                *wk -= hij * vk;
+            }
+        }
+        let hn = norm2(&w);
+        col[j + 1] = hn;
+        let (cs, sn) = (&mut self.cs, &mut self.sn);
+        for i in 0..j {
+            let t = cs[i] * col[i] + sn[i] * col[i + 1];
+            col[i + 1] = -sn[i] * col[i] + cs[i] * col[i + 1];
+            col[i] = t;
+        }
+        let denom = col[j].hypot(col[j + 1]);
+        if denom == 0.0 {
+            cs[j] = 1.0;
+            sn[j] = 0.0;
+        } else {
+            cs[j] = col[j] / denom;
+            sn[j] = col[j + 1] / denom;
+        }
+        col[j] = denom;
+        col[j + 1] = 0.0;
+        self.g[j + 1] = -sn[j] * self.g[j];
+        self.g[j] *= cs[j];
+        self.h.push(col);
+        self.rep.iterations += 1;
+        let est = self.g[j + 1].abs() / self.ref_norm;
+        self.rep.history.push(est);
+        if hn == 0.0
+            || !hn.is_finite()
+            || est <= self.options.tolerance
+            || self.rep.iterations >= self.options.max_iterations
+            || j + 1 >= self.m
+        {
+            return self.cycle_end(j + 1);
+        }
+        self.basis.push(w.iter().map(|v| v / hn).collect());
+        self.j = j + 1;
+        self.arnoldi_first()
+    }
+
+    /// Back substitution `H y = g` (`k × k`), `u = V y`, and the update of `x`.
+    fn cycle_end(&mut self, k: usize) -> Request {
+        let mut y = vec![0.0; k];
+        for i in (0..k).rev() {
+            let mut s = self.g[i];
+            for l in i + 1..k {
+                s -= self.h[l][i] * y[l];
+            }
+            y[i] = if self.h[i][i] != 0.0 { s / self.h[i][i] } else { 0.0 };
+        }
+        let mut u = vec![0.0; self.n];
+        for (l, yl) in y.iter().enumerate() {
+            for (ui, vi) in u.iter_mut().zip(&self.basis[l]) {
+                *ui += yl * vi;
+            }
+        }
+        if self.left {
+            for (xi, ui) in self.x.iter_mut().zip(&u) {
+                *xi += ui;
+            }
+            return self.cycle_start();
+        }
+        self.rep.preconditioner_applications += 1;
+        self.pending = Pending::Update;
+        Request::Prec(u)
+    }
+
+    fn done(&mut self) -> Request {
+        self.pending = Pending::Done;
+        Request::Done
+    }
+
+    /// Continues with the product that was requested.
+    fn advance(&mut self, out: Vec<f64>) -> Result<Request, RsError> {
+        Ok(match self.pending {
+            Pending::RefNorm => {
+                self.ref_norm = norm2(&out);
+                return self.after_ref_norm();
+            }
+            Pending::Residual => {
+                let mut r = self.b.to_vec();
+                for (ri, ai) in r.iter_mut().zip(&out) {
+                    *ri -= ai;
+                }
+                self.after_residual(r)
+            }
+            Pending::Measure => self.after_measure(out),
+            Pending::ArnoldiFirst => {
+                self.pending = Pending::ArnoldiSecond;
+                if self.left { Request::Prec(out) } else { Request::Op(out) }
+            }
+            Pending::ArnoldiSecond => self.after_arnoldi(out),
+            Pending::Update => {
+                for (xi, ti) in self.x.iter_mut().zip(&out) {
+                    *xi += ti;
+                }
+                self.cycle_start()
+            }
+            Pending::Done => Request::Done,
+        })
+    }
+
+    fn finish(mut self) -> Result<(Vec<f64>, GmresReport), RsError> {
+        if let Some(e) = self.error {
+            return Err(e);
+        }
+        if self.bnorm == 0.0 {
+            self.rep.seconds = self.t0.elapsed().as_secs_f64();
+            return Ok((self.x, self.rep));
+        }
+        self.rep.relative_residual = self.true_rel;
+        if self.left {
+            self.rep.preconditioned_relative_residual = self.rep.cycle_residuals.last().copied();
+        }
+        self.rep.seconds = self.t0.elapsed().as_secs_f64();
+        if !self.rep.converged && !(self.true_rel <= DIVERGENCE_THRESHOLD) {
+            return Err(RsError::SolverDiverged {
+                residual: self.true_rel,
+            });
+        }
+        Ok((self.x, self.rep))
+    }
+}
+
 /// Solves `A x = b` by restarted GMRES (module docs); returns `x` and the report.
 ///
 /// # Errors
@@ -218,179 +538,92 @@ pub fn gmres(
     b: &[f64],
     options: &GmresOptions,
 ) -> Result<(Vec<f64>, GmresReport), RsError> {
+    let mut out = gmres_batch(op, prec, &[b], options)?;
+    out.pop().expect("one solve")
+}
+
+/// [`gmres`] for several right-hand sides at once: independent solves (each exactly as
+/// [`gmres`] would do it) that advance in lockstep, so that the products they need at the same
+/// time go through [`LinearOperator::apply_batch`] and [`Preconditioner::apply_batch`] together
+/// (one pass over the hierarchical matrix for all of them, App. B). One result per right-hand
+/// side.
+///
+/// # Errors
+/// [`RsError::InvalidOption`] for invalid options or mismatched dimensions (the whole batch);
+/// operator and preconditioner errors (the whole batch). A solve that diverges is an `Err` in its
+/// own slot.
+#[allow(clippy::type_complexity)]
+pub fn gmres_batch(
+    op: &dyn LinearOperator,
+    prec: &dyn Preconditioner,
+    bs: &[&[f64]],
+    options: &GmresOptions,
+) -> Result<Vec<Result<(Vec<f64>, GmresReport), RsError>>, RsError> {
     options.validate()?;
-    let t0 = Instant::now();
     let n = op.dim();
-    if prec.dim() != n || b.len() != n {
-        return Err(RsError::InvalidOption {
-            name: "gmres dimensions",
-            value: format!("operator {n}, preconditioner {}, rhs {}", prec.dim(), b.len()),
-            requirement: "equal dimensions",
-        });
+    for b in bs {
+        if prec.dim() != n || b.len() != n {
+            return Err(RsError::InvalidOption {
+                name: "gmres dimensions",
+                value: format!("operator {n}, preconditioner {}, rhs {}", prec.dim(), b.len()),
+                requirement: "equal dimensions",
+            });
+        }
     }
-    let mut rep = GmresReport {
-        side: options.side,
-        ..Default::default()
-    };
-    let mut x = vec![0.0; n];
-    let bnorm = norm2(b);
-    if bnorm == 0.0 {
-        rep.converged = true;
-        rep.preconditioned_relative_residual =
-            (options.side == GmresSide::Left).then_some(0.0);
-        rep.seconds = t0.elapsed().as_secs_f64();
-        return Ok((x, rep));
+    let mut runs = Vec::with_capacity(bs.len());
+    let mut reqs = Vec::with_capacity(bs.len());
+    for b in bs {
+        let (r, q) = GmresRun::start(n, b, options)?;
+        runs.push(r);
+        reqs.push(q);
     }
-    let left = options.side == GmresSide::Left;
-    // Reference norm of the stopping measure.
-    let mut tmp = vec![0.0; n];
-    let ref_norm = if left {
-        prec.apply(b, &mut tmp)?;
-        rep.preconditioner_applications += 1;
-        norm2(&tmp)
-    } else {
-        bnorm
-    };
-    if !(ref_norm > 0.0 && ref_norm.is_finite()) {
-        return Err(RsError::SolverDiverged {
-            residual: f64::NAN,
-        });
-    }
-    let m = options.restart.min(n.max(1));
-    let tol = options.tolerance;
-    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-    // Hessenberg columns (j+2 entries each), Givens rotations, rhs of the LS problem.
-    let mut h: Vec<Vec<f64>> = Vec::with_capacity(m);
-    let mut cs = vec![0.0; m];
-    let mut sn = vec![0.0; m];
-    let mut g = vec![0.0; m + 1];
-    let mut w = vec![0.0; n];
-    let mut true_rel;
+    let mut ys: Vec<Vec<f64>> = Vec::new();
     loop {
-        // Explicit residual r = b − A x (x = 0 in the first cycle).
-        let mut r = b.to_vec();
-        if rep.cycles > 0 {
-            op.apply(&x, &mut tmp)?;
-            rep.operator_applications += 1;
-            for (ri, ai) in r.iter_mut().zip(&tmp) {
-                *ri -= ai;
+        let mut progressed = false;
+        for want_op in [false, true] {
+            let idx: Vec<usize> = (0..runs.len())
+                .filter(|&i| match &reqs[i] {
+                    Request::Op(_) => want_op,
+                    Request::Prec(_) => !want_op,
+                    Request::Done => false,
+                })
+                .collect();
+            if idx.is_empty() {
+                continue;
             }
-        }
-        true_rel = norm2(&r) / bnorm;
-        let measure_vec = if left {
-            prec.apply(&r, &mut tmp)?;
-            rep.preconditioner_applications += 1;
-            tmp.clone()
-        } else {
-            r
-        };
-        let beta = norm2(&measure_vec);
-        let rel = beta / ref_norm;
-        rep.cycle_residuals.push(rel);
-        if !rel.is_finite() {
-            break;
-        }
-        if rel <= tol {
-            rep.converged = true;
-            break;
-        }
-        if rep.iterations >= options.max_iterations {
-            break;
-        }
-        rep.cycles += 1;
-        basis.clear();
-        h.clear();
-        basis.push(measure_vec.iter().map(|v| v / beta).collect());
-        g.iter_mut().for_each(|v| *v = 0.0);
-        g[0] = beta;
-        let mut k = 0;
-        for j in 0..m {
-            // w = A P⁻¹ v_j (right) or P⁻¹ A v_j (left).
-            if left {
-                op.apply(&basis[j], &mut tmp)?;
-                prec.apply(&tmp, &mut w)?;
-            } else {
-                prec.apply(&basis[j], &mut tmp)?;
-                op.apply(&tmp, &mut w)?;
-            }
-            rep.operator_applications += 1;
-            rep.preconditioner_applications += 1;
-            // Modified Gram–Schmidt.
-            let mut col = vec![0.0; j + 2];
-            for i in 0..=j {
-                let hij = dot(&w, &basis[i]);
-                col[i] = hij;
-                for (wk, vk) in w.iter_mut().zip(&basis[i]) {
-                    *wk -= hij * vk;
+            progressed = true;
+            ys.resize_with(idx.len(), || vec![0.0; n]);
+            {
+                let xs: Vec<&[f64]> = idx
+                    .iter()
+                    .map(|&i| match &reqs[i] {
+                        Request::Op(v) | Request::Prec(v) => v.as_slice(),
+                        Request::Done => unreachable!(),
+                    })
+                    .collect();
+                let mut outs: Vec<&mut [f64]> = ys.iter_mut().map(|y| y.as_mut_slice()).collect();
+                if want_op {
+                    op.apply_batch(&xs, &mut outs)?;
+                } else {
+                    prec.apply_batch(&xs, &mut outs)?;
                 }
             }
-            let hn = norm2(&w);
-            col[j + 1] = hn;
-            // Previous rotations, then a new one to zero col[j+1].
-            for i in 0..j {
-                let t = cs[i] * col[i] + sn[i] * col[i + 1];
-                col[i + 1] = -sn[i] * col[i] + cs[i] * col[i + 1];
-                col[i] = t;
-            }
-            let denom = col[j].hypot(col[j + 1]);
-            if denom == 0.0 {
-                cs[j] = 1.0;
-                sn[j] = 0.0;
-            } else {
-                cs[j] = col[j] / denom;
-                sn[j] = col[j + 1] / denom;
-            }
-            col[j] = denom;
-            col[j + 1] = 0.0;
-            g[j + 1] = -sn[j] * g[j];
-            g[j] *= cs[j];
-            h.push(col);
-            rep.iterations += 1;
-            k = j + 1;
-            let est = g[j + 1].abs() / ref_norm;
-            rep.history.push(est);
-            if hn == 0.0 || !hn.is_finite() || est <= tol || rep.iterations >= options.max_iterations
-            {
-                break;
-            }
-            basis.push(w.iter().map(|v| v / hn).collect());
-        }
-        // Back substitution H y = g (k × k upper triangular).
-        let mut y = vec![0.0; k];
-        for i in (0..k).rev() {
-            let mut s = g[i];
-            for l in i + 1..k {
-                s -= h[l][i] * y[l];
-            }
-            y[i] = if h[i][i] != 0.0 { s / h[i][i] } else { 0.0 };
-        }
-        let mut u = vec![0.0; n];
-        for (l, yl) in y.iter().enumerate() {
-            for (ui, vi) in u.iter_mut().zip(&basis[l]) {
-                *ui += yl * vi;
+            for (k, &i) in idx.iter().enumerate() {
+                let out = std::mem::replace(&mut ys[k], vec![0.0; n]);
+                reqs[i] = match runs[i].advance(out) {
+                    Ok(q) => q,
+                    Err(e) => {
+                        runs[i].error = Some(e);
+                        Request::Done
+                    }
+                };
             }
         }
-        if left {
-            for (xi, ui) in x.iter_mut().zip(&u) {
-                *xi += ui;
-            }
-        } else {
-            prec.apply(&u, &mut tmp)?;
-            rep.preconditioner_applications += 1;
-            for (xi, ti) in x.iter_mut().zip(&tmp) {
-                *xi += ti;
-            }
+        if !progressed {
+            break;
         }
     }
-    rep.relative_residual = true_rel;
-    if left {
-        rep.preconditioned_relative_residual = rep.cycle_residuals.last().copied();
-    }
-    rep.seconds = t0.elapsed().as_secs_f64();
-    if !rep.converged && !(true_rel <= DIVERGENCE_THRESHOLD) {
-        return Err(RsError::SolverDiverged { residual: true_rel });
-    }
-    Ok((x, rep))
+    Ok(runs.into_iter().map(GmresRun::finish).collect())
 }
 
 /// A [`SaddleSolver`] that applies `A′⁻¹` by [`gmres`] with a matrix-free operator `A′`
@@ -471,6 +704,31 @@ impl<O: LinearOperator, P: Preconditioner> SaddleSolver for GmresSaddle<O, P> {
         })
     }
 
+    fn solve_many(&mut self, rhs: &[(&[f64], &[f64])]) -> Result<Vec<SaddleSolution>, RsError> {
+        let mut full = Vec::with_capacity(rhs.len());
+        for (a, b) in rhs {
+            check_rhs(self, a, b)?;
+            full.push(a.iter().chain(b.iter()).copied().collect::<Vec<f64>>());
+        }
+        let refs: Vec<&[f64]> = full.iter().map(Vec::as_slice).collect();
+        let outs = gmres_batch(&self.op, &self.prec, &refs, &self.options)?;
+        outs.into_iter()
+            .map(|r| {
+                let (y, rep) = r?;
+                Ok(SaddleSolution {
+                    x: y[..self.n_dofs].to_vec(),
+                    lambda: y[self.n_dofs..].to_vec(),
+                    record: SolveRecord {
+                        iterations: rep.iterations,
+                        relative_residual: rep.relative_residual,
+                        converged: rep.converged,
+                        gmres: Some(rep),
+                    },
+                })
+            })
+            .collect()
+    }
+
     fn base_report(&self) -> LinearReport {
         LinearReport {
             solver: self.label,
@@ -489,6 +747,10 @@ impl<T: LinearOperator + ?Sized> LinearOperator for &T {
     fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
         (**self).apply(x, y)
     }
+
+    fn apply_batch(&self, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
+        (**self).apply_batch(xs, ys)
+    }
 }
 
 impl<T: Preconditioner + ?Sized> Preconditioner for &T {
@@ -498,5 +760,9 @@ impl<T: Preconditioner + ?Sized> Preconditioner for &T {
 
     fn apply(&self, r: &[f64], z: &mut [f64]) -> Result<(), RsError> {
         (**self).apply(r, z)
+    }
+
+    fn apply_batch(&self, rs: &[&[f64]], zs: &mut [&mut [f64]]) -> Result<(), RsError> {
+        (**self).apply_batch(rs, zs)
     }
 }

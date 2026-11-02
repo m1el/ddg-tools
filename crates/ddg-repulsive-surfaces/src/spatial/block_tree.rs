@@ -409,9 +409,33 @@ impl<const N: usize> BlockTree<N> {
         map: &[usize; C],
         psi: &[[f64; C]],
     ) -> Vec<[f64; C]> {
+        assert!(map.iter().all(|&m| m < N), "kernel index below N");
+        self.multiply_core::<C, 0>(pool, Some(map), psi)
+    }
+
+    /// [`BlockTree::multiply_permuted`] with the channels `0..H` on kernel 0 and `H..C` on
+    /// kernel `N − 1` (`N ≤ 2`): the same operations with the channel split known at compile
+    /// time (vectorized).
+    ///
+    /// # Panics
+    /// If `psi` does not have one entry per element, `N > 2` or `H > C`.
+    pub fn multiply_split<const C: usize, const H: usize>(
+        &self,
+        pool: &rayon::ThreadPool,
+        psi: &[[f64; C]],
+    ) -> Vec<[f64; C]> {
+        assert!(N <= 2 && H <= C, "a split of at most two kernels");
+        self.multiply_core::<C, H>(pool, None, psi)
+    }
+
+    fn multiply_core<const C: usize, const H: usize>(
+        &self,
+        pool: &rayon::ThreadPool,
+        map: Option<&[usize; C]>,
+        psi: &[[f64; C]],
+    ) -> Vec<[f64; C]> {
         let n = self.n_elements();
         assert_eq!(psi.len(), n, "one value per element");
-        assert!(map.iter().all(|&m| m < N), "kernel index below N");
         let n_nodes = self.start.len();
         // 1. Upward sums.
         let mut up = vec![[0.0f64; C]; n_nodes];
@@ -442,9 +466,7 @@ impl<const N: usize> BlockTree<N> {
                     let mut f = [0.0; C];
                     for p in self.far_ptr[a]..self.far_ptr[a + 1] {
                         let (k, u) = (&self.far_coef[p], &up[self.far_col[p] as usize]);
-                        for c in 0..C {
-                            f[c] += k[map[c]] * u[c];
-                        }
+                        accumulate::<N, C, H>(&mut f, std::slice::from_ref(k), std::slice::from_ref(u), map);
                     }
                     f
                 })
@@ -495,21 +517,53 @@ impl<const N: usize> BlockTree<N> {
                         let xs = &psi[sb..sb + cb];
                         for (r, o) in rows.iter_mut().enumerate() {
                             let row = &blk[(r0 + r) * cb..(r0 + r + 1) * cb];
-                            let skip = if a == b { r0 + r } else { usize::MAX };
-                            for (j, (k, x)) in row.iter().zip(xs).enumerate() {
-                                if j == skip {
-                                    continue;
-                                }
-                                for c in 0..C {
-                                    o[c] += k[map[c]] * x[c];
-                                }
+                            let mut acc = *o;
+                            if a == b {
+                                // Skip the diagonal entry (the element itself).
+                                let d = r0 + r;
+                                accumulate::<N, C, H>(&mut acc, &row[..d], &xs[..d], map);
+                                accumulate::<N, C, H>(&mut acc, &row[d + 1..], &xs[d + 1..], map);
+                            } else {
+                                accumulate::<N, C, H>(&mut acc, row, xs, map);
                             }
+                            *o = acc;
                         }
                     }
                 }
             });
         });
         out
+    }
+}
+
+/// `acc[c] += k[map[c]] · x[c]` over the entries, in order; without `map`, kernel 0 on the
+/// channels `0..H` and kernel `N − 1` on `H..C` (the same operations, vectorizable).
+#[inline(always)]
+fn accumulate<const N: usize, const C: usize, const H: usize>(
+    acc: &mut [f64; C],
+    ks: &[[f64; N]],
+    xs: &[[f64; C]],
+    map: Option<&[usize; C]>,
+) {
+    match map {
+        None => {
+            for (k, x) in ks.iter().zip(xs) {
+                let (k0, k1) = (k[0], k[N - 1]);
+                for c in 0..H {
+                    acc[c] += k0 * x[c];
+                }
+                for c in H..C {
+                    acc[c] += k1 * x[c];
+                }
+            }
+        }
+        Some(map) => {
+            for (k, x) in ks.iter().zip(xs) {
+                for c in 0..C {
+                    acc[c] += k[map[c]] * x[c];
+                }
+            }
+        }
     }
 }
 

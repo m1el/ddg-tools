@@ -21,3 +21,7 @@ harness = false
 [[bench]]
 name = "step"
 harness = false
+
+[[bench]]
+name = "product"
+harness = false

@@ -245,30 +245,53 @@ impl LinearOperator for HierarchicalOperator {
     }
 
     fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
+        self.apply_batch(&[x], &mut [y])
+    }
+
+    /// One pass of the block cluster tree for all vectors (App. B); every output is bitwise
+    /// that of [`LinearOperator::apply`].
+    fn apply_batch(&self, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
         let t0 = Instant::now();
         let nd = self.n_dofs();
         let n = self.dim();
-        if x.len() != n || y.len() != n {
+        if xs.len() != ys.len() || xs.iter().zip(ys.iter()).any(|(x, y)| x.len() != n || y.len() != n) {
             return Err(RsError::InvalidOption {
                 name: "saddle operator vector",
-                value: format!("({}, {})", x.len(), y.len()),
-                requirement: "3|V| + k_Q entries",
+                value: format!("{} inputs, {} outputs", xs.len(), ys.len()),
+                requirement: "3|V| + k_Q entries, one output per input",
             });
         }
-        let (xp, xl) = x.split_at(nd);
-        let (yp, yl) = y.split_at_mut(nd);
-        self.apply_metric(xp, yp)?;
-        if !xl.is_empty() {
-            let mut ctl = vec![0.0; nd];
-            self.ct
-                .mul_vec(xl, &mut ctl)
-                .map_err(|e| sparse_err(e, "C^T"))?;
-            for (a, b) in yp.iter_mut().zip(&ctl) {
-                *a += b;
-            }
-            self.c.mul_vec(xp, yl).map_err(|e| sparse_err(e, "C"))?;
+        {
+            let xp: Vec<&[f64]> = xs.iter().map(|x| &x[..nd]).collect();
+            let mut yp: Vec<&mut [f64]> = ys.iter_mut().map(|y| &mut y[..nd]).collect();
+            let w = self.weights.tp_weight;
+            self.tree.apply_batch(
+                &self.pool,
+                w,
+                w * self.weights.c_lo(),
+                self.obstacle.as_ref(),
+                &xp,
+                &mut yp,
+            )?;
         }
-        self.applications.fetch_add(1, Ordering::Relaxed);
+        for (x, y) in xs.iter().zip(ys.iter_mut()) {
+            let (xp, xl) = x.split_at(nd);
+            let (yp, yl) = y.split_at_mut(nd);
+            if let Some(m) = &self.willmore {
+                add_kron3(m, xp, yp);
+            }
+            if !xl.is_empty() {
+                let mut ctl = vec![0.0; nd];
+                self.ct
+                    .mul_vec(xl, &mut ctl)
+                    .map_err(|e| sparse_err(e, "C^T"))?;
+                for (a, b) in yp.iter_mut().zip(&ctl) {
+                    *a += b;
+                }
+                self.c.mul_vec(xp, yl).map_err(|e| sparse_err(e, "C"))?;
+            }
+        }
+        self.applications.fetch_add(xs.len(), Ordering::Relaxed);
         self.nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         Ok(())

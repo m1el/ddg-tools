@@ -810,17 +810,21 @@ impl Session {
         )?;
         seconds.factor += t.elapsed().as_secs_f64();
         let t = Instant::now();
-        let schur = SchurComplement::new(solver.as_dyn(), nrows.clone(), c_n)?;
         let mut guard = self.method_state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let dir_res = match (guard.as_mut(), solver.as_sparse()) {
-            (Some(m), Some(sp)) => {
-                let geom = crate::geometry::FaceGeometry::new(&self.surface, &self.positions)?;
-                let area: f64 = geom.areas.iter().sum();
-                m.direction(sp, &self.positions, &g, &c_q, area)
-            }
-            _ => schur
-                .direction(solver.as_dyn(), &g)
-                .map(|d| (d.x, d.record)),
+        let quasi_newton = guard.is_some() && solver.as_sparse().is_some();
+        let (schur, dir_res) = if quasi_newton {
+            let schur = SchurComplement::new(solver.as_dyn(), nrows.clone(), c_n)?;
+            let (Some(m), Some(sp)) = (guard.as_mut(), solver.as_sparse()) else {
+                unreachable!("checked above")
+            };
+            let geom = crate::geometry::FaceGeometry::new(&self.surface, &self.positions)?;
+            let area: f64 = geom.areas.iter().sum();
+            let d = m.direction(sp, &self.positions, &g, &c_q, area);
+            (schur, d)
+        } else {
+            // The Schur columns and the direction's solve as one batch (same results).
+            let (schur, d) = SchurComplement::with_direction(solver.as_dyn(), nrows.clone(), c_n, &g)?;
+            (schur, Ok((d.x, d.record)))
         };
         drop(guard);
         let (dir_x, dir_record) = dir_res?;

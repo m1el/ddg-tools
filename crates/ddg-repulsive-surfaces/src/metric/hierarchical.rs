@@ -416,9 +416,37 @@ impl FaceMetricTree {
         x: &[f64],
         y: &mut [f64],
     ) -> Result<(), RsError> {
+        self.apply_batch(pool, w_hi, w_lo, diagonal, &[x], &mut [y])
+    }
+
+    /// [`FaceMetricTree::apply`] for several vectors through one pass over the tree (App. B:
+    /// 12 channels per vector). Every output is bitwise the one of [`FaceMetricTree::apply`].
+    ///
+    /// [formula: rs-kernel-matrix-form]
+    ///
+    /// # Errors
+    /// As [`FaceMetricTree::apply`]; also for `xs`, `ys` of different counts.
+    pub fn apply_batch(
+        &self,
+        pool: &rayon::ThreadPool,
+        w_hi: f64,
+        w_lo: f64,
+        diagonal: Option<&FaceDiagonal>,
+        xs: &[&[f64]],
+        ys: &mut [&mut [f64]],
+    ) -> Result<(), RsError> {
         let n = 3 * self.ops.n_vertices;
-        check_len("hierarchical product input", x.len(), n)?;
-        check_len("hierarchical product output", y.len(), n)?;
+        if xs.len() != ys.len() {
+            return Err(RsError::InvalidOption {
+                name: "hierarchical product batch",
+                value: format!("{} inputs, {} outputs", xs.len(), ys.len()),
+                requirement: "one output per input",
+            });
+        }
+        for (x, y) in xs.iter().zip(ys.iter()) {
+            check_len("hierarchical product input", x.len(), n)?;
+            check_len("hierarchical product output", y.len(), n)?;
+        }
         if !(w_hi.is_finite() && w_lo.is_finite()) {
             return Err(RsError::InvalidOption {
                 name: "metric weights",
@@ -449,11 +477,29 @@ impl FaceMetricTree {
         };
         let hi = w_hi != 0.0 || !d_hi.is_empty();
         let lo = w_lo != 0.0 || !d_lo.is_empty();
-        match (hi, lo) {
-            (true, true) => self.product::<12>(pool, true, true, &terms, x, y),
-            (true, false) => self.product::<9>(pool, true, false, &terms, x, y),
-            (false, true) => self.product::<3>(pool, false, true, &terms, x, y),
-            (false, false) => y.iter_mut().for_each(|v| *v = 0.0),
+        let mut start = 0;
+        while start < xs.len() {
+            let k = (xs.len() - start).min(4);
+            let xb = &xs[start..start + k];
+            let yb = &mut ys[start..start + k];
+            macro_rules! go {
+                ($(($c:literal, $h:literal)),*) => {{
+                    let mut it = 0;
+                    $(
+                        it += 1;
+                        if it == k {
+                            self.product::<$c, $h>(pool, hi, lo, &terms, xb, yb);
+                        }
+                    )*
+                }};
+            }
+            match (hi, lo) {
+                (true, true) => go!((12, 9), (24, 18), (36, 27), (48, 36)),
+                (true, false) => go!((9, 9), (18, 18), (27, 27), (36, 36)),
+                (false, true) => go!((3, 0), (6, 0), (9, 0), (12, 0)),
+                (false, false) => yb.iter_mut().for_each(|y| y.iter_mut().for_each(|v| *v = 0.0)),
+            }
+            start += k;
         }
         Ok(())
     }
@@ -474,25 +520,25 @@ impl FaceMetricTree {
         self.apply(pool, 0.0, 1.0, None, x, y)
     }
 
-    /// The face product with `C` channels: `9` gradient channels (`3k + component` for axis `k`)
-    /// if `hi`, then `3` average channels if `lo`.
-    fn product<const C: usize>(
+    /// The face product of `xs.len()` vectors with `C` channels: if `hi`, `9` gradient channels
+    /// per vector (`9q + 3k + component` for vector `q`, axis `k`), then, if `lo`, `3` average
+    /// channels per vector (`h + 3q + k`, `h` the number of gradient channels): the channels of
+    /// each kernel are contiguous.
+    fn product<const C: usize, const H: usize>(
         &self,
         pool: &rayon::ThreadPool,
         hi: bool,
         lo: bool,
         terms: &FaceTerms<'_>,
-        x: &[f64],
-        y: &mut [f64],
+        xs: &[&[f64]],
+        ys: &mut [&mut [f64]],
     ) {
-        debug_assert_eq!(C, 9 * hi as usize + 3 * lo as usize);
+        let nb = xs.len();
+        debug_assert_eq!(C, nb * (9 * hi as usize + 3 * lo as usize));
         let ops = &self.ops;
         let nf = ops.n_faces();
-        let off = if hi { 9 } else { 0 };
-        let mut map = [0usize; C];
-        for (c, m) in map.iter_mut().enumerate() {
-            *m = if c < off { 0 } else { 1 };
-        }
+        let off = if hi { 9 * nb } else { 0 };
+        debug_assert_eq!(off, H);
         // m = M x per face (D_f per axis, face averages per axis), psi = a m; in BVH order.
         let order = self.bct.order();
         let m: Vec<[f64; C]> = pool.install(|| {
@@ -503,23 +549,26 @@ impl FaceMetricTree {
                     let s = s as usize;
                     let t = ops.faces[s];
                     let mut out = [0.0; C];
-                    if hi {
-                        let g = &ops.df[s];
-                        for k in 0..3 {
-                            for c in 0..3 {
-                                let xc = x[3 * t[c] as usize + k];
-                                for r in 0..3 {
-                                    out[3 * k + r] += xc * g[c][r];
+                    for (q, x) in xs.iter().enumerate() {
+                        if hi {
+                            let g = &ops.df[s];
+                            let o = &mut out[9 * q..9 * q + 9];
+                            for k in 0..3 {
+                                for c in 0..3 {
+                                    let xc = x[3 * t[c] as usize + k];
+                                    for r in 0..3 {
+                                        o[3 * k + r] += xc * g[c][r];
+                                    }
                                 }
                             }
                         }
-                    }
-                    if lo {
-                        for k in 0..3 {
-                            out[off + k] = (x[3 * t[0] as usize + k]
-                                + x[3 * t[1] as usize + k]
-                                + x[3 * t[2] as usize + k])
-                                / 3.0;
+                        if lo {
+                            for k in 0..3 {
+                                out[off + 3 * q + k] = (x[3 * t[0] as usize + k]
+                                    + x[3 * t[1] as usize + k]
+                                    + x[3 * t[2] as usize + k])
+                                    / 3.0;
+                            }
                         }
                     }
                     out
@@ -536,7 +585,7 @@ impl FaceMetricTree {
                 p
             })
             .collect();
-        let hx = self.bct.multiply_permuted(pool, &map, &psi);
+        let hx = self.bct.multiply_split::<C, H>(pool, &psi);
         // z = w (diag(H̃a) m − H̃ (a m)) + d m, in BVH order.
         let z: Vec<[f64; C]> = pool.install(|| {
             (0..nf)
@@ -560,34 +609,37 @@ impl FaceMetricTree {
         let position = self.bct.position();
         // y_v = 2 Σ_{S∋v} a_S (Mᵀ row of S at v) · z_S, faces ascending.
         let inc = &self.incidence;
-        pool.install(|| {
-            y.par_chunks_mut(3)
-                .with_min_len(256)
-                .enumerate()
-                .for_each(|(v, yv)| {
-                    let mut acc = [0.0; 3];
-                    for &(s, c) in inc.of(v) {
-                        let (s, c) = (s as usize, c as usize);
-                        let a = ops.areas[s];
-                        let zs = &z[position[s] as usize];
-                        if hi {
-                            let g = ops.df[s][c];
-                            for k in 0..3 {
-                                acc[k] += a
-                                    * (g[0] * zs[3 * k] + g[1] * zs[3 * k + 1] + g[2] * zs[3 * k + 2]);
+        for (q, y) in ys.iter_mut().enumerate() {
+            pool.install(|| {
+                y.par_chunks_mut(3)
+                    .with_min_len(256)
+                    .enumerate()
+                    .for_each(|(v, yv)| {
+                        let mut acc = [0.0; 3];
+                        for &(s, c) in inc.of(v) {
+                            let (s, c) = (s as usize, c as usize);
+                            let a = ops.areas[s];
+                            let zs = &z[position[s] as usize];
+                            if hi {
+                                let g = ops.df[s][c];
+                                let zh = &zs[9 * q..9 * q + 9];
+                                for k in 0..3 {
+                                    acc[k] += a
+                                        * (g[0] * zh[3 * k] + g[1] * zh[3 * k + 1] + g[2] * zh[3 * k + 2]);
+                                }
+                            }
+                            if lo {
+                                for k in 0..3 {
+                                    acc[k] += a / 3.0 * zs[off + 3 * q + k];
+                                }
                             }
                         }
-                        if lo {
-                            for k in 0..3 {
-                                acc[k] += a / 3.0 * zs[off + k];
-                            }
+                        for k in 0..3 {
+                            yv[k] = 2.0 * acc[k];
                         }
-                    }
-                    for k in 0..3 {
-                        yv[k] = 2.0 * acc[k];
-                    }
-                });
-        });
+                    });
+            });
+        }
     }
 }
 
@@ -897,26 +949,78 @@ impl VertexFractionalTree {
     /// # Errors
     /// [`RsError::InvalidOption`] for wrong lengths.
     pub fn apply(&self, pool: &rayon::ThreadPool, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
+        self.apply_batch(pool, &[x], &mut [y])
+    }
+
+    /// [`VertexFractionalTree::apply`] for several vectors through one pass over the tree;
+    /// every output is bitwise the one of [`VertexFractionalTree::apply`].
+    ///
+    /// # Errors
+    /// [`RsError::InvalidOption`] for wrong lengths or counts.
+    pub fn apply_batch(
+        &self,
+        pool: &rayon::ThreadPool,
+        xs: &[&[f64]],
+        ys: &mut [&mut [f64]],
+    ) -> Result<(), RsError> {
         let n = 3 * self.mass.len();
-        check_len("fractional product input", x.len(), n)?;
-        check_len("fractional product output", y.len(), n)?;
-        let psi: Vec<[f64; 3]> = x
-            .chunks(3)
-            .zip(&self.mass)
-            .map(|(xv, &a)| [a * xv[0], a * xv[1], a * xv[2]])
-            .collect();
-        let hx = self.bct.multiply(pool, &[0, 0, 0], &psi);
-        pool.install(|| {
-            y.par_chunks_mut(3)
-                .with_min_len(512)
-                .enumerate()
-                .for_each(|(v, yv)| {
-                    let a = self.mass[v];
-                    for k in 0..3 {
-                        yv[k] = 2.0 * a * (self.ha[v] * x[3 * v + k] - hx[v][k]);
-                    }
-                });
-        });
+        if xs.len() != ys.len() {
+            return Err(RsError::InvalidOption {
+                name: "fractional product batch",
+                value: format!("{} inputs, {} outputs", xs.len(), ys.len()),
+                requirement: "one output per input",
+            });
+        }
+        for (x, y) in xs.iter().zip(ys.iter()) {
+            check_len("fractional product input", x.len(), n)?;
+            check_len("fractional product output", y.len(), n)?;
+        }
+        let mut start = 0;
+        while start < xs.len() {
+            let k = (xs.len() - start).min(4);
+            let (xb, yb) = (&xs[start..start + k], &mut ys[start..start + k]);
+            match k {
+                1 => self.product::<3>(pool, xb, yb),
+                2 => self.product::<6>(pool, xb, yb),
+                3 => self.product::<9>(pool, xb, yb),
+                _ => self.product::<12>(pool, xb, yb),
+            }
+            start += k;
+        }
         Ok(())
+    }
+
+    fn product<const C: usize>(&self, pool: &rayon::ThreadPool, xs: &[&[f64]], ys: &mut [&mut [f64]]) {
+        let order = self.bct.order();
+        let psi: Vec<[f64; C]> = order
+            .iter()
+            .map(|&v| {
+                let v = v as usize;
+                let a = self.mass[v];
+                let mut p = [0.0; C];
+                for (q, x) in xs.iter().enumerate() {
+                    for k in 0..3 {
+                        p[3 * q + k] = a * x[3 * v + k];
+                    }
+                }
+                p
+            })
+            .collect();
+        let hx = self.bct.multiply_split::<C, C>(pool, &psi);
+        let position = self.bct.position();
+        for (q, (x, y)) in xs.iter().zip(ys.iter_mut()).enumerate() {
+            pool.install(|| {
+                y.par_chunks_mut(3)
+                    .with_min_len(512)
+                    .enumerate()
+                    .for_each(|(v, yv)| {
+                        let a = self.mass[v];
+                        let h = &hx[position[v] as usize];
+                        for k in 0..3 {
+                            yv[k] = 2.0 * a * (self.ha[v] * x[3 * v + k] - h[3 * q + k]);
+                        }
+                    });
+            });
+        }
     }
 }
