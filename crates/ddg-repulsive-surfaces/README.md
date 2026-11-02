@@ -143,8 +143,17 @@ to an area constraint, because a free flow inflates the surface. See `blender/RE
   at 1000 steps 39.54), g = 2 to 38.59 (reference 38.40). Handcuffs unlink in both programs without
   the plane attractor; a strong plane keeps them linked (use weight ≤ 0.5). Remeshing every step sets
   an energy noise floor; polishing without remeshing lowers `E` by 2–6 %.
-* **Method comparison (Fig. 5, 12; Sec. 8.2).** (results pending: WP16 method comparison; Fig. 16 transcription)
-* **Knotted genus-2 table (Fig. 16, Ishii et al. 2012).** (results pending: WP16 method comparison; Fig. 16 transcription)
+* **Method comparison (Fig. 5, 12; Sec. 8.2).** Seven methods (`Hs`, L², H¹, H² projected gradient,
+  AQP, H¹ L-BFGS, BCQN) on the five Fig. 12 analogues, one thread per run, the paper's 2400/3600 s
+  budgets, on a heavily loaded machine (load average 51–79 from outside jobs; absolute times
+  inflated). `Hs` is lowest per iteration on all five meshes and lowest per second on the three
+  handcuff meshes (end energy 7.7 vs 26.0, 7.2 vs 60.0, 902 vs 1179); on the figure-8 and trefoil
+  tunnels BCQN / H¹ L-BFGS end level with or slightly below it per second (353 vs 341, 158 vs 154).
+  Fig. 5: `Hs` progress per step is resolution-independent (41.1 / 39.5 / 39.1 at step 100 on
+  11k / 40k / 135k faces); L² slows 2.6×; H¹, H², AQP are flat on that easy surface. So the paper's
+  per-iteration claim holds and its wall-clock claim holds on three of five meshes under these
+  conditions (SPEC §14.2).
+* **Knotted genus-2 table (Fig. 16, Ishii et al. 2012).** (results pending: Fig. 16 transcription)
 
 ## Verification
 
