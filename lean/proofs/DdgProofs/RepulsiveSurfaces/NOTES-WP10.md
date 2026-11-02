@@ -16,7 +16,11 @@ from §12):
 - `Metric.lean`: rs-df-gradient (+ unit-edge counterexample), rs-sobolev-forms,
   rs-low-order-symmetrisation, rs-kernel-matrix-form, rs-hierarchical-null-space,
   rs-projector-average.
-- `Precond.lean`: rs-preconditioner-order, rs-fractional-preconditioner.
+- `Precond.lean`: rs-preconditioner-order, rs-fractional-preconditioner. After D33 the id names the
+  default augmented form `P = L′⁻¹ [[F, Cᵀ],[C, 0]] L′⁻¹` (`aug_precond_props`: equals
+  `L′⁻¹ + L′⁻¹ blockdiag(F−K, 0) L′⁻¹`, symmetric, nonsingular iff the middle factor is,
+  `C (P [r; b])_x = b` for all `r, b`, no extra hypothesis). The WP10 theorem for the printed form
+  (`frac_precond_props`: symmetric, PSD, `C z_x = 0`) is kept, untagged (reference mode).
 - `Saddle.lean`: rs-schur-direction, rs-schur-correction, rs-nested-saddle.
 - `Constraints.lean`: rs-area-gradient, rs-volume-gradient (factor 3 on closed fans), rs-barycenter.
 - `Penalties.lean`: rs-penalties, rs-willmore (structure; cotan/mass derivatives by FD).
