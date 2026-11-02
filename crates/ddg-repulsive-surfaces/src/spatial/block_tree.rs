@@ -346,7 +346,7 @@ impl<const N: usize> BlockTree<N> {
         for (k, m) in map.iter_mut().enumerate() {
             *m = k;
         }
-        tree.row_sums = tree.multiply(pool, &map, &vec![[1.0; N]; n]);
+        tree.row_sums = tree.multiply(pool, &map, &vec![[1.0; N]; n])?;
         tree.build_seconds = t0.elapsed().as_secs_f64();
         Ok(tree)
     }
@@ -381,50 +381,66 @@ impl<const N: usize> BlockTree<N> {
         &self.row_sums
     }
 
-    /// `φ = K ψ` (original element order), channel `c` with kernel `map[c]` (all `< N`).
+    /// `φ = K ψ` (original element order), channel `c` with kernel `map[c]`.
     ///
-    /// # Panics
-    /// If `psi` does not have one entry per element or `map` names a kernel `≥ N`.
+    /// # Errors
+    /// [`RsError::InvalidOption`] if `psi` does not have one entry per element or `map` names a
+    /// kernel `≥ N`.
     pub fn multiply<const C: usize>(
         &self,
         pool: &rayon::ThreadPool,
         map: &[usize; C],
         psi: &[[f64; C]],
-    ) -> Vec<[f64; C]> {
-        assert_eq!(psi.len(), self.n_elements(), "one value per element");
+    ) -> Result<Vec<[f64; C]>, RsError> {
+        self.check(map, psi)?;
         let pp: Vec<[f64; C]> = self.order.iter().map(|&e| psi[e as usize]).collect();
-        let out = self.multiply_permuted(pool, map, &pp);
-        self.position.iter().map(|&p| out[p as usize]).collect()
+        let out = self.multiply_core::<C, 0>(pool, Some(map), &pp);
+        Ok(self.position.iter().map(|&p| out[p as usize]).collect())
     }
 
     /// `φ = K ψ` with `ψ` and `φ` in BVH order (`psi[p]` belongs to element `order()[p]`).
     ///
     /// [formula: rc-bct-lowrank]
     ///
-    /// # Panics
-    /// If `psi` does not have one entry per element or `map` names a kernel `≥ N`.
+    /// # Errors
+    /// As [`BlockTree::multiply`].
     pub fn multiply_permuted<const C: usize>(
         &self,
         pool: &rayon::ThreadPool,
         map: &[usize; C],
         psi: &[[f64; C]],
-    ) -> Vec<[f64; C]> {
-        assert!(map.iter().all(|&m| m < N), "kernel index below N");
-        self.multiply_core::<C, 0>(pool, Some(map), psi)
+    ) -> Result<Vec<[f64; C]>, RsError> {
+        self.check(map, psi)?;
+        Ok(self.multiply_core::<C, 0>(pool, Some(map), psi))
+    }
+
+    fn check<const C: usize>(&self, map: &[usize; C], psi: &[[f64; C]]) -> Result<(), RsError> {
+        if psi.len() != self.n_elements() {
+            return Err(RsError::InvalidOption {
+                name: "block tree argument",
+                value: format!("{} values", psi.len()),
+                requirement: "one value per element",
+            });
+        }
+        if let Some(&m) = map.iter().find(|&&m| m >= N) {
+            return Err(RsError::InvalidOption {
+                name: "channel map",
+                value: m.to_string(),
+                requirement: "kernel indices below the number of kernels",
+            });
+        }
+        Ok(())
     }
 
     /// [`BlockTree::multiply_permuted`] with the channels `0..H` on kernel 0 and `H..C` on
-    /// kernel `N − 1` (`N ≤ 2`): the same operations with the channel split known at compile
-    /// time (vectorized).
-    ///
-    /// # Panics
-    /// If `psi` does not have one entry per element, `N > 2` or `H > C`.
-    pub fn multiply_split<const C: usize, const H: usize>(
+    /// kernel `N − 1`: the same operations with the channel split known at compile time
+    /// (vectorized). The callers guarantee `psi.len() = n`, `N ≤ 2`, `H ≤ C`.
+    pub(crate) fn multiply_split<const C: usize, const H: usize>(
         &self,
         pool: &rayon::ThreadPool,
         psi: &[[f64; C]],
     ) -> Vec<[f64; C]> {
-        assert!(N <= 2 && H <= C, "a split of at most two kernels");
+        debug_assert!(N <= 2 && H <= C && psi.len() == self.n_elements());
         self.multiply_core::<C, H>(pool, None, psi)
     }
 
@@ -435,7 +451,6 @@ impl<const N: usize> BlockTree<N> {
         psi: &[[f64; C]],
     ) -> Vec<[f64; C]> {
         let n = self.n_elements();
-        assert_eq!(psi.len(), n, "one value per element");
         let n_nodes = self.start.len();
         // 1. Upward sums.
         let mut up = vec![[0.0f64; C]; n_nodes];

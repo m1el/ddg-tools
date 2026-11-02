@@ -96,11 +96,11 @@ fn products_are_bitwise_those_of_the_curves_crate() {
                     let ours = BlockTree::<2>::build(&pool, &bvh, &k, 64).unwrap();
                     assert_eq!(ours.stats(), reference.stats(), "stats, leaf {leaf}, chi {chi}");
                     assert_eq!(bits(ours.row_sums()), bits(reference.row_sums()));
-                    let got = ours.multiply(&pool, &map, &psi);
+                    let got = ours.multiply(&pool, &map, &psi).unwrap();
                     assert_eq!(bits(&got), bits(&want), "leaf {leaf}, chi {chi}, {threads} threads");
                     // One channel at a time gives the same bits as the batch.
                     let one: Vec<[f64; 1]> = psi.iter().map(|x| [x[4]]).collect();
-                    let g1 = ours.multiply(&pool, &[1], &one);
+                    let g1 = ours.multiply(&pool, &[1], &one).unwrap();
                     assert!(g1.iter().zip(&got).all(|(a, b)| a[0].to_bits() == b[4].to_bits()));
                 }
             }
