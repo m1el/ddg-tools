@@ -1050,15 +1050,40 @@ Rounds (≤ 3 agents; timed work alone at the end):
   + energy/gradient 0.32 s, face BCT build 0.57 s, factorization 0.04 s, vertex tree 0.10 s, GMRES
   1.15 s (29 products at 25 ms) — 2.2 s for the direction against the paper's 2.5 s for a whole
   step (`χ = 1`: 1.6 s). The BCT build and the products are the targets of WP17.
-* **CCD on inputs that already intersect** (Klein bottle immersion; Fig. 26 subcritical runs):
-  forcing CCD on stalls the flow (Klein bottle `F` 793 → 631 after 200 steps vs 156 without; in
-  191 of the 193 capped steps the limiting pair touches faces that intersect at `t = 0`).
-  Proposed rule (CCD investigation, not implemented): let `I` be the vertices of faces that
-  intersect at the start of the step, widened by one ring; a pair whose two elements both have a
-  vertex in `I` is unconstrained, every other pair keeps the gap rule (removes every limiting
-  contact on that run; crossings outside the band in 3 of 200 steps). Until implemented, the
-  switch is "CCD off when the input intersects at the start" (detected with `ccd::intersects`), not
-  "off for subcritical exponents".
+* **CCD on inputs that already intersect** (Klein bottle immersion; Fig. 26): implemented (band
+  rule). At the start of each step the faces that intersect are found (exact triangle–triangle
+  test over a BVH, `ccd::intersecting_pairs`); `I` = their vertices widened by one ring; a pair whose
+  two elements both have a vertex in `I` is unconstrained (`exempt_pairs` in the report), every
+  other pair keeps the gap rule; the collapse guard does the same. An embedded mesh has an empty
+  band and the old behaviour (bitwise). CCD now stays on for every exponent. Klein bottle, 200 steps:
+  `F` = 25.3 with CCD + band, 155.7 without CCD (631 with CCD and no band). Cost of the start test:
+  7–17 ms at 10–50k faces on 8 threads (≈ 0.35 of the CCD itself).
+* **Black-box comparison (WP18b, `COMPARISON.md`).** Parity: all-pairs energy 2e-16–7e-16, its
+  differential ≤ 1.1e-14, the dense constrained metric ≤ 1.1e-14 of its largest entry, barycenter
+  and area rows ≤ 2e-16; the volume row differs by exactly 3× (D9); Barnes–Hut at `θ = 0.5` differs
+  by 3e-6–3e-5 (different tree splits). Trajectories (11 scenes): `reference_compat` tracks the
+  reference's energy curve to ≈ 1 % and the final shape to ≈ 0.5 % (EDT, Hopf, handcuffs, bunny,
+  walnut, blocky Klein bottle, lung); our defaults reach the same plateaus sooner (EDT `F` 8.3 vs
+  19.9 at 300 steps); Borromean rings: the reference stalls at `F ≈ 7302` from step 50 and its mesh
+  self-intersects in steps 1–9, ours reaches ≈ 4540 with a symmetric shape and no intersection.
+  The reference's volume lags its target by −4.5e-6 (ours −4e-8). Klein bottles: master cannot load
+  any; the non-orientable variant flows the blocky one (ours within 0.2 % with splits/collapses off),
+  stalls on `klein_bottle.obj` (ours runs it), and on `klein_bottle_2.obj` reaches 161.7 vs ours
+  117.9 (full remeshing). **Speed (1 thread, alone): ours is slower per step** — 1.1–1.8×
+  (`reference_compat`), 1.2–2.3× (defaults); Hopf link 2.4–4.4× because we run 59 GMRES iterations
+  per step against the reference's ≈ 11 (its left GMRES stops early with a large true residual,
+  D32/D33); faster on walnut (0.7×) and the blocky Klein bottle (0.8×). Target of WP17.
+* **Open defects from WP18b:** (1) `reference_compat` with splits/collapses off on the blocky Klein
+  bottle stops at step 300 with `SolverDiverged { residual: 1.466e3 }` (deterministic; reproducer
+  `examples/compare_reference run …/KleinBottle/scene.txt --mode compat-noedge --steps 300
+  --threads 1`, state at step 299 in `runs_tmp/wp18b/repro/kbb_cn_00299.obj`); (2) Reconstruction
+  (point-cloud bunny): objectives within 1–7 %, but the final self-energy is 449 (compat) / 161
+  (default) vs the reference's 14.7 — the obstacle models differ (D23), not yet explained.
+* **Blender (WP14) notes:** `Mesh.clear_geometry()` in Blender 5 also deletes vertex groups (the
+  pin group is rebuilt, others restored on Cancel); CCD auto-off on intersecting input used
+  Blender's `BVHTree.overlap` before the band rule existed — with the band rule CCD can stay on;
+  a free flow without an area constraint inflates the surface (the energy decreases with scale) —
+  the panel defaults to an area constraint. Proposed: `ddg_tools.surface_intersects(positions, faces)`.
 * Fig. 16 (Ishii et al. 2012 table) is not transcribed (WP12): the cited paper may be downloaded
   (CLAUDE.md rule for cited papers) for WP15. WP12 read "figure-8 / trefoil tunnel" as knotted
   tori (tubes around the knot); recorded as an interpretation.
