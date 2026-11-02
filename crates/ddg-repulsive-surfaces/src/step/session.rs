@@ -692,7 +692,7 @@ impl Session {
         if let Some(m) = self.method_state.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
             match &r {
                 Ok(rep) => m.end_step(
-                    rep.remesh.as_ref().is_some_and(|x| x.splits + x.collapses + x.flips > 0),
+                    rep.remesh.as_ref().is_some_and(|x| x.splits + x.collapses > 0),
                     e_before,
                     self.last_energy,
                 ),

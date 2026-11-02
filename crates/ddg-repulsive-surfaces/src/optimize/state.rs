@@ -111,7 +111,7 @@ pub(crate) fn blend_beta(norm: f64, y_ws: f64, b: f64) -> f64 {
 pub type InverseMetric<'a> = dyn FnMut(&[f64]) -> Result<Vec<f64>, RsError> + 'a;
 
 /// The reference's recursion: every inner product is taken in `W` (`ρ = 1/yᵀWs`,
-
+/// `α = ρ sᵀWq`, `γ = sᵀWy / yᵀWy`, `z = γ H₀ q`, `β = ρ yᵀWz`). `None` for a degenerate pair.
 pub fn two_loop_reference(
     pairs: &VecDeque<(Vec<f64>, Vec<f64>)>,
     g: &[f64],

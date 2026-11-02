@@ -255,7 +255,7 @@ fn setup_errors() {
     // The comparison optimizers need a soft problem.
     let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, ..base() };
     assert!(matches!(new(o).unwrap_err(), RsError::MethodNeedsSoftProblem { .. }));
-    let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, constraints: vec![], ..base() };
+    let o = FlowOptions { method: Method::Aqp { kappa: 100.0 }, constraints: vec![Constraint::Barycenter { component: None, target: None }], ..base() };
     assert!(new(o).is_ok());
     // Pins out of range.
     let o = FlowOptions { constraints: vec![Constraint::Pins { vertices: vec![10_000], targets: None }], ..base() };
