@@ -276,7 +276,7 @@ impl LinearOperator for HierarchicalOperator {
 }
 
 /// Options of the hierarchical back end (`SPEC.md` §6.3, §8.4).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HierarchicalOptions {
     /// The block cluster trees of `B`, `B⁰` and `L_{2−s}` (`χ`, leaf size).
     pub cluster: ClusterTreeOptions,
@@ -289,17 +289,6 @@ pub struct HierarchicalOptions {
     /// `false`: measured harmful, 6 → 154 iterations at `w_W = 0.01` and divergence at `w_W ≥ 1` on
     /// a 10k torus, while without it the iterations stay 5–20, `NOTES-WP6.md`).
     pub willmore_in_preconditioner: bool,
-}
-
-impl Default for HierarchicalOptions {
-    fn default() -> Self {
-        HierarchicalOptions {
-            cluster: ClusterTreeOptions::default(),
-            gmres: GmresOptions::default(),
-            preconditioner: PreconditionerOptions::default(),
-            willmore_in_preconditioner: false,
-        }
-    }
 }
 
 impl HierarchicalOptions {
