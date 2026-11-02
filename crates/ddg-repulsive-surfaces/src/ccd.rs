@@ -1162,7 +1162,14 @@ fn segment_meets_triangle(p: [f64; 3], q: [f64; 3], tri: [[f64; 3]; 3]) -> bool 
     if (d1 > 0.0 && d2 > 0.0) || (d1 < 0.0 && d2 < 0.0) {
         return false;
     }
-    if d1 == 0.0 && d2 == 0.0 {
+    // Coplanar up to rounding: both endpoints within 1e-12 of the longest length involved from
+    // the plane (`|orient| = |n| · distance`). Exact zeros are not enough: points in the plane
+    // of a generic triangle give `orient` = ±1e-20, and the sign test below is then arbitrary
+    // (it reported coplanar neighbours with one common vertex as intersecting).
+    let n = norm(cross(sub(b, a), sub(c, a)));
+    let len = norm(sub(q, p)).max(norm(sub(b, a))).max(norm(sub(c, a))).max(norm(sub(c, b)));
+    let flat = 1e-12 * n * len;
+    if d1.abs() <= flat && d2.abs() <= flat {
         // Coplanar: touching up to rounding.
         let eps = 1e-14 * (norm(sub(b, a)) + norm(sub(c, a)));
         return point_triangle_distance(p, a, b, c) <= eps
