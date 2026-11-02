@@ -950,7 +950,17 @@ Smoke, 20 steps, 1 thread: EntangledDoubleTorus 1036 ms/step, energy 377.0 → 1
 609 ms/step, 849.3 → 313.7; Bunny 3501 ms/step, 162452 → 100.06. **The reference cannot load the
 Klein bottle meshes of its own `scenes/KleinBottle/`** (its geometry-central version aborts with
 "duplicate edge in list" on non-orientable input): Fig. 26 (bottom) is not reproducible with the
-published code; our `Surface` accepts them (D1).
+published `master`; our `Surface` accepts them (D1). The authors' unmerged branch `nonorientable`
+(9 commits ahead of `master`, 45 behind, same geometry-central `00d09a5`) has commit `ce89c2c`
+("changes necessary to run nonorientable meshes"): geometry-central's general `SurfaceMesh` instead
+of the orientable `ManifoldSurfaceMesh`, and edge splits and collapses switched off (the general mesh
+type of that version does not support them; flips and smoothing stay). Fig. 26 (bottom) was most
+likely made with it. **Comparison variant (user, 2026-11-02):** a second binary,
+`rsurfaces_headless_nonorientable`, built from `master` + `ce89c2c` only (not the whole branch, so the
+Klein-bottle change is the only difference from the main binary). On non-orientable meshes the
+comparison runs our flow with splits and collapses off too (`RemeshOptions::enabled_ops`), so both
+sides remesh alike; a second run of ours with full remeshing shows what the published code cannot
+do.
 
 ## 15. Work packages
 
