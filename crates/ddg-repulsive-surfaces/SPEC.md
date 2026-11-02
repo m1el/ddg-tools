@@ -335,7 +335,7 @@ The paper prints a Coulomb-like potential `E_obs(x) = Σ_{S∈F_𝒪} |f_𝒪(S)
 with Barnes–Hut (same `θ`) plus the metric term `O_diag` (§4.4). We implement both:
 `ObstacleKind::TangentPoint` (default; it is what produced the walnut, lung and hamburger scenes,
 and it keeps the barrier property) and `ObstacleKind::Coulomb { power }` (the printed formula,
-integrated over the mesh with `a_S` at barycenters; no metric term). Obstacles are static
+integrated over the mesh with `a_S` at barycenters: `Σ_{S∈M} Σ_{T∈𝒪} a_S a_T |X_S − X_T|^{−p}`, mesh barycenters against obstacle-triangle centroids; no metric term). `penalties::evaluate` takes the energy's `Exponents` and `EnergyEval` (the TP obstacle uses the same exponents and `θ`; `θ = 0` for `Exact`). In the line search the session keeps an `obstacle::CrossEvaluator` per obstacle (built per step, refit per trial, lists frozen), as for the energy (WP7). The obstacle code carries the existing ids (`rs-kernel`, `rs-energy-gradient`, `rs-bh-*`); no separate ids. Obstacles are static
 triangle soups (`Obstacle` of the curves crate), need not be manifold.
 
 ## 6. Descent direction and projection
