@@ -9,7 +9,8 @@
 //! ```
 //! `run`: area + barycenter constraints, default options (CCD on, remeshing), no attractor; stops when the mean of
 //! the energy over the last `W` steps (default 200) differs from the mean over the `W` before by less than `R`
-//! (default 1e-5) relative, or after `S` steps (default 3000). Prints one `RESULT` line.
+//! (default 1e-5) relative, or after `S` steps (default 3000), or when the file named by `ISHII_STOP_FILE` exists.
+//! Prints `PROGRESS` lines every 25 steps and one `RESULT` line.
 #[path = "apps/apps.rs"]
 mod apps;
 
@@ -80,7 +81,12 @@ fn run(args: &[String]) {
     let (mut e0, mut e1) = (f64::NAN, f64::NAN);
     let mut hist: Vec<f64> = Vec::new();
     let mut status = "MaxSteps".to_string();
+    let stop_file = std::env::var("ISHII_STOP_FILE").ok();
     while s.iteration() < max_steps {
+        if stop_file.as_ref().is_some_and(|f| std::path::Path::new(f).exists()) {
+            status = "StoppedByFile".into();
+            break;
+        }
         match s.step() {
             Ok(r) => {
                 if e0.is_nan() {
@@ -88,6 +94,9 @@ fn run(args: &[String]) {
                 }
                 e1 = r.energy_after;
                 hist.push(e1);
+                if s.iteration() % 25 == 0 {
+                    println!("PROGRESS step={} faces={} energy={e1:.6e} t={:.0}s", s.iteration(), s.surface().n_faces(), t0.elapsed().as_secs_f64());
+                }
                 if s.status().is_terminal() {
                     status = format!("{:?}", s.status());
                     break;
