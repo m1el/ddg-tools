@@ -22,7 +22,7 @@ use crate::metric::dense::comparison_metric;
 use crate::metric::{Metric, SobolevWeights};
 use crate::solve::dense::DenseSaddle;
 use crate::solve::iterative::{
-    Backend, HierarchicalSaddle, MetricExtras, dense_metric_with_extras, hierarchical_saddle,
+    Backend, HierarchicalOptions, HierarchicalSaddle, MetricExtras, dense_metric_with_extras, hierarchical_saddle,
 };
 use crate::solve::precond::LaplacianSaddle;
 use crate::solve::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord};
@@ -229,8 +229,135 @@ impl SaddleSolver for SparseSaddle {
 /// The solver of one step.
 pub(crate) enum StepSolver {
     Dense(DenseSaddle),
-    Hierarchical(Box<HierarchicalSaddle>),
+    Hierarchical(Box<RobustHierarchical>),
     Sparse(SparseSaddle),
+}
+
+/// The largest vertex count for which a failed GMRES solve falls back to a dense LU
+/// (`|V|² · 8` bytes for the metric plus the same for the factor: 6000 vertices ≈ 600 MB).
+pub const DENSE_FALLBACK_MAX_VERTICES: usize = 6000;
+
+/// Everything needed to rebuild the step's saddle system with other options.
+struct FallbackContext {
+    pool: Arc<rayon::ThreadPool>,
+    surface: Surface,
+    positions: Vec<[f64; 3]>,
+    exponents: Exponents,
+    weights: SobolevWeights,
+    extras: MetricExtras,
+    c_q: SparseMatrix,
+    options: HierarchicalOptions,
+}
+
+enum Active {
+    Primary,
+    Retry(Box<HierarchicalSaddle>),
+    Dense(Box<DenseSaddle>),
+}
+
+/// The hierarchical saddle solver with the recovery chain of `SPEC.md` §6.3: when GMRES ends
+/// above the divergence threshold ([`RsError::SolverDiverged`]) the solve is repeated by
+///
+/// 1. right GMRES with the augmented preconditioner on vertex pairs (the defaults, replacing a
+///    reference-style left/printed/face-pair solver) with at least four times the iteration cap
+///    and restart 60, on a rebuilt preconditioner; then
+/// 2. a dense LU of the metric (at most [`DENSE_FALLBACK_MAX_VERTICES`] vertices).
+///
+/// The first stage that works stays active for the rest of the step. Every escalation is
+/// recorded in [`LinearReport::fallbacks`]. Only when no stage works is the error returned.
+pub(crate) struct RobustHierarchical {
+    primary: HierarchicalSaddle,
+    ctx: FallbackContext,
+    active: Active,
+    events: Vec<String>,
+}
+
+impl RobustHierarchical {
+    fn escalate(&mut self, err: RsError, a: &[f64], b: &[f64]) -> Result<SaddleSolution, RsError> {
+        let RsError::SolverDiverged { residual } = err else {
+            return Err(err);
+        };
+        if matches!(self.active, Active::Primary) {
+            let c = &self.ctx;
+            let mut o = HierarchicalOptions::default();
+            o.cluster = c.options.cluster;
+            o.gmres.tolerance = c.options.gmres.tolerance;
+            o.gmres.max_iterations = (4 * c.options.gmres.max_iterations).max(800);
+            o.gmres.restart = 60;
+            let built = hierarchical_saddle(
+                c.pool.clone(),
+                &c.surface,
+                &c.positions,
+                &c.exponents,
+                &c.weights,
+                &c.extras,
+                &c.c_q,
+                &o,
+                None,
+            );
+            if let Ok(mut g) = built {
+                match g.solve(a, b) {
+                    Ok(sol) => {
+                        self.events.push(format!(
+                            "gmres diverged (relative residual {residual:.3e}): retried with right GMRES, \
+                             augmented preconditioner on vertex pairs, restart 60, at most {} iterations \
+                             (final residual {:.3e})",
+                            o.gmres.max_iterations, sol.record.relative_residual
+                        ));
+                        self.active = Active::Retry(Box::new(g));
+                        return Ok(sol);
+                    }
+                    Err(RsError::SolverDiverged { .. }) | Err(RsError::SingularSaddle { .. }) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        let nv = self.ctx.surface.n_vertices();
+        if nv <= DENSE_FALLBACK_MAX_VERTICES && !matches!(self.active, Active::Dense(_)) {
+            let c = &self.ctx;
+            let dense = dense_metric_with_extras(&c.pool, &c.surface, &c.positions, &c.exponents, &c.weights, &c.extras)
+                .and_then(|m| DenseSaddle::new(&c.pool, &m, &c.c_q));
+            if let Ok(mut d) = dense {
+                let sol = d.solve(a, b)?;
+                self.events.push(format!(
+                    "gmres diverged (relative residual {residual:.3e}): dense LU of the {nv} x {nv} metric \
+                     (residual {:.3e})",
+                    sol.record.relative_residual
+                ));
+                self.active = Active::Dense(Box::new(d));
+                return Ok(sol);
+            }
+        }
+        Err(RsError::SolverDiverged { residual })
+    }
+}
+
+impl SaddleSolver for RobustHierarchical {
+    fn n_dofs(&self) -> usize {
+        self.primary.n_dofs()
+    }
+
+    fn n_constraints(&self) -> usize {
+        self.primary.n_constraints()
+    }
+
+    fn solve(&mut self, a: &[f64], b: &[f64]) -> Result<SaddleSolution, RsError> {
+        let r = match &mut self.active {
+            Active::Primary => self.primary.solve(a, b),
+            Active::Retry(g) => g.solve(a, b),
+            Active::Dense(d) => d.solve(a, b),
+        };
+        match r {
+            Err(e @ RsError::SolverDiverged { .. }) => self.escalate(e, a, b),
+            r => r,
+        }
+    }
+
+    fn base_report(&self) -> LinearReport {
+        let mut r = self.primary.base_report();
+        r.fallbacks = self.events.clone();
+        r
+    }
 }
 
 impl StepSolver {
@@ -253,7 +380,7 @@ impl StepSolver {
     /// Operator applications and their seconds (hierarchical only).
     pub fn products(&self) -> Option<(usize, f64)> {
         match self {
-            StepSolver::Hierarchical(s) => Some(s.operator().usage()),
+            StepSolver::Hierarchical(s) => Some(s.primary.operator().usage()),
             _ => None,
         }
     }
@@ -284,7 +411,7 @@ impl StepSolver {
                         (Some(t), Some(l)) if l == o.cluster.leaf_size => Some(t.clone()),
                         _ => None,
                     };
-                    Ok(StepSolver::Hierarchical(Box::new(hierarchical_saddle(
+                    let primary = hierarchical_saddle(
                         pool.clone(),
                         surface,
                         positions,
@@ -294,7 +421,22 @@ impl StepSolver {
                         c_q,
                         &o,
                         donor,
-                    )?)))
+                    )?;
+                    Ok(StepSolver::Hierarchical(Box::new(RobustHierarchical {
+                        primary,
+                        ctx: FallbackContext {
+                            pool: pool.clone(),
+                            surface: surface.clone(),
+                            positions: positions.to_vec(),
+                            exponents: *exponents,
+                            weights: *weights,
+                            extras: extras.clone(),
+                            c_q: c_q.clone(),
+                            options: o,
+                        },
+                        active: Active::Primary,
+                        events: Vec::new(),
+                    })))
                 }
             },
             _ => Ok(StepSolver::Sparse(SparseSaddle::new(surface, positions, metric, c_q)?)),
