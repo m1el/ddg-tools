@@ -31,7 +31,7 @@ from .developable_operator import (
 )
 from .intrinsic_operator import MESH_OT_ddg_show_intrinsic_refinement
 from .operator import UV_OT_ddg_conformal_unwrap
-from . import geodesic_operator, repulsive_operator, simplify_operator
+from . import geodesic_operator, repulsive_operator, repulsive_surface_operator, simplify_operator
 from .sphere_operator import OBJECT_OT_ddg_map_to_sphere
 
 _CUT_OPERATORS = (UV_OT_ddg_cut_start, UV_OT_ddg_cut_flow, UV_OT_ddg_cut_apply)
@@ -105,6 +105,7 @@ def register():
     bpy.types.VIEW3D_MT_object.append(_draw_intrinsic_entry)
     bpy.types.VIEW3D_MT_edit_mesh.append(_draw_intrinsic_entry)
     repulsive_operator.register()
+    repulsive_surface_operator.register()
     geodesic_operator.register()
     simplify_operator.register()
 
@@ -112,6 +113,7 @@ def register():
 def unregister():
     simplify_operator.unregister()
     geodesic_operator.unregister()
+    repulsive_surface_operator.unregister()
     repulsive_operator.unregister()
     bpy.types.VIEW3D_MT_edit_mesh.remove(_draw_intrinsic_entry)
     bpy.types.VIEW3D_MT_object.remove(_draw_intrinsic_entry)
