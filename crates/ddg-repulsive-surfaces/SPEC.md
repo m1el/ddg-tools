@@ -1192,6 +1192,20 @@ Rounds (≤ 3 agents; timed work alone at the end):
   came from a different (symmetric) start; the paper gives no start mesh or step count. Remeshing
   every step stretches the dodecahedral states by 7–9 % along a wandering axis in both programs;
   polishing removes most of it (moments within 0.8 % for the reference, 2 % for ours).
+  **The paper video's start (`NOTES-DODECA.md` "The video's start", `runs_tmp/dodeca2/`).** The paper's
+  video (2:21–2:29) shows genus 3, 5 and 11 flowing from a chain of fused rings to the tetrahedron, cube and
+  dodecahedron ("the method does not easily get stuck in local minima"). Measured from the frame at
+  2:22.5: 11 round tori, outer diameter 0.86 of the spacing, hole ≈ 0.25, necks 0.30 wide. From that start
+  (hole 0.25) both programs follow the video's path — chain → flat bar with small holes (steps 100–300)
+  → bending and folding (300–700) → blob → cage (1000–2000) — and end on the dodecahedral minimizer
+  (exact energy at equal area: ours 76.48, reference 75.81; polished 68.51 / 68.21, the same minimizer
+  as the dodecahedral start). With holes 0.15, 0.2 or 0.3 both end in elongated or flattened cages
+  (79–88). Overall the video-style chain reached the dodecahedron in 3 of 18 runs (ours 1 of 11,
+  reference 2 of 7; one reference run from a perturbed hole-0.3 start), the row and ladder starts in 0
+  of 16. A finer mesh (30k faces) did not help; without the area constraint the chain only inflates
+  (the blob growing on screen in the video is camera zoom). So the paper's claim holds for its kind of
+  start, but the outcome depends on the start's proportions: the two programs behave alike, and
+  neither is robust to the hole size.
 * **Showcase (2026-11-02, `showcase/repulsive-surfaces/render.py`, `showcase/README.md`):** the Fig. 16
   sheet is from the rerun; the genus sheet uses WP15's 800-step frames (g = 3, 7–11 not converged; the
   converged g = 3 run of the fidelity study kept no frames); the handle-off-the-pole isotopy (Fig. 18)
