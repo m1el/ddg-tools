@@ -124,3 +124,30 @@ and cuda-oxide is on crates.io / stable.
   level 2.
 * `flow_trajectories_match_cpu`: whole flows (above).
 * `pairwise_dot_matches_cpu`, `device_selection` (bad ordinal: `Cuda` is an error, `Auto` falls back).
+
+## GMRES vector operations: not moved (plan step 3), why
+
+With right preconditioning every Arnoldi step needs `P⁻¹ v` on the CPU (the `L′` back
+substitutions), so each iteration crosses PCIe twice whatever happens to the Gram–Schmidt; the
+transfers are ≈ 0.65 MB per vector at 45k faces (≈ 30 µs each, included in the product times
+below). What GMRES itself costs on the CPU (solve − products − preconditioner) is ≈ 65 ms of a
+step at 45k faces, 4 threads (≈ 4 % of the GPU step). On the GPU, modified Gram–Schmidt with the
+fixed-shape tree reduction is one reduction (≈ 17 dependent launches) per basis vector and
+iteration: ≈ 60 iterations × 30 basis vectors × 17 launches ≈ 30k launches per step, more than
+the CPU's 65 ms. Classical Gram–Schmidt (one batched pass) would change the arithmetic (a
+numerical change, not round-off). So the vectors stay on the CPU; the pairwise-tree reduction is in
+place (`GpuContext::dot`) for when the preconditioner moves.
+
+## How to resume
+
+* Build/test: `CARGO_TARGET_DIR=$PWD/target-gpu cargo test --release -p ddg-repulsive-surfaces
+  --features cuda --test gpu` (`DDG_REQUIRE_GPU=1` makes a missing device a failure).
+* Benches: `cargo bench -p ddg-repulsive-surfaces --features cuda --bench product -- --threads 1,4,16
+  --gpu` (CPU rows, then `gpu-L1` / `gpu-L2` rows); `--bench step -- --mesh fig12:3 --gpu L1`
+  (`--suite fig13`; the scene cases need `scripts/rs-fetch-scenes.sh`). Scripts and logs of the runs
+  below: `runs_tmp/gpu/` (not committed).
+* Code: `src/gpu/{mod.rs, cuda.rs, kernels.cu}`; hooks in `metric/hierarchical.rs` (`upload`,
+  `build_on_gpu`), `spatial/block_tree.rs` (`build_structure`, `parts`), `solve/iterative.rs`
+  (`HierarchicalOptions::device`, `hierarchical_saddle_with`, `HierarchicalOperator::with_gpu`),
+  `solve/precond.rs` (`new_on`, `with_gpu`), `energy/barnes_hut.rs` (`attach_gpu`, `try_energy`,
+  `try_face_partials`), `step/{session.rs, objective.rs, direction.rs}`.
