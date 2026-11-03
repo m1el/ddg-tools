@@ -77,3 +77,11 @@ README. Summary: every Fig. 20 configuration 6–21 % faster on one thread (Barn
 5.76 → 4.91 s, knot 16384 28.5 → 22.9 s), 5–6 % at 4–64 threads; 24 knots × 200 steps: no stuck
 step or isotopy violation, trials per step 1.93 → 1.45, lower energy at equal wall time on 23/24.
 Defaults: `recycle_projections = true`, `growth_backoff = true`.
+
+## Open (pre-existing, found during this work, 2026-11-03)
+
+The oracle fuzz replay (`tests/oracle.rs`, `fuzz_against_the_oracle`, 4000 cases, the main checkout's
+oracle binary) reports 40 disagreements of one kind, identical before and after these changes: a step
+accepted after 0 projection iterations in Rust where the oracle needs 1. Not investigated; likely a
+difference in the convergence test of the projection at the first iteration (tolerance comparison `<`
+vs `≤`, or the residual measured before vs after the first correction).
