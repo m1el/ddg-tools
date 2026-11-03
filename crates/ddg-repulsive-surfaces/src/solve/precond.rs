@@ -569,6 +569,9 @@ pub struct SparsePreconditioner {
     eps: f64,
     multi: bool,
     fractional_seconds: f64,
+    /// The GPU copy of the vertex-pair tree ([`SparsePreconditioner::with_gpu`]).
+    gpu_fractional: Option<crate::gpu::GpuVertexFractional>,
+    upload_seconds: f64,
     applications: AtomicUsize,
     nanos: AtomicU64,
 }
@@ -664,6 +667,8 @@ impl SparsePreconditioner {
             eps,
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
+            gpu_fractional: None,
+            upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
             nanos: AtomicU64::new(0),
         })
@@ -705,6 +710,26 @@ impl SparsePreconditioner {
             self.fractional_scale /= tp_weight;
         }
         self
+    }
+
+    /// Runs the vertex-pair fractional products on the GPU of `gpu` (uploads the tree;
+    /// `NOTES-GPU.md`). The face-pair form ([`FractionalForm::FacePairs`], the reference mode)
+    /// stays on the CPU; so do the sparse `L′` solves.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn with_gpu(mut self, gpu: &Arc<crate::gpu::GpuContext>) -> Result<SparsePreconditioner, RsError> {
+        if let FractionalFactor::Vertices(t) = &self.fractional {
+            let t0 = Instant::now();
+            self.gpu_fractional = Some(t.upload(gpu)?);
+            self.upload_seconds = t0.elapsed().as_secs_f64();
+        }
+        Ok(self)
+    }
+
+    /// Seconds of the GPU upload (0 on the CPU).
+    pub fn upload_seconds(&self) -> f64 {
+        self.upload_seconds
     }
 
     /// The factor applied to `L_{2−s}` in the augmented form.
@@ -810,9 +835,10 @@ impl SparsePreconditioner {
         {
             let yp: Vec<&[f64]> = ys.iter().map(|y| &y[..nd]).collect();
             let mut vp: Vec<&mut [f64]> = vs.iter_mut().map(|v| &mut v[..nd]).collect();
-            match &self.fractional {
-                FractionalFactor::Vertices(t) => t.apply_batch(&self.pool, &yp, &mut vp)?,
-                FractionalFactor::Faces(t) => {
+            match (&self.fractional, &self.gpu_fractional) {
+                (_, Some(g)) => g.apply_batch(&yp, &mut vp)?,
+                (FractionalFactor::Vertices(t), None) => t.apply_batch(&self.pool, &yp, &mut vp)?,
+                (FractionalFactor::Faces(t), None) => {
                     for (y, v) in yp.iter().zip(vp.iter_mut()) {
                         t.apply(&self.pool, y, v)?;
                     }

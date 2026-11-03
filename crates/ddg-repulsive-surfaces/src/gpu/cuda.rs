@@ -226,6 +226,12 @@ fn to_u32(v: &[usize], what: &'static str) -> Result<Vec<u32>, RsError> {
         .collect()
 }
 
+/// `[[f64; N]]` as the `[f64]` it is in memory (no copy).
+fn flat<const N: usize>(v: &[[f64; N]]) -> &[f64] {
+    // SAFETY: `[f64; N]` has the size and alignment of `N` consecutive `f64`s, without padding.
+    unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<f64>(), v.len() * N) }
+}
+
 impl DeviceBlockTree {
     pub(crate) fn upload<const N: usize>(g: &CudaBackend, p: &BlockTreeParts<'_, N>, n: usize) -> Result<Self, RsError> {
         let n_nodes = p.start.len();
@@ -252,8 +258,8 @@ impl DeviceBlockTree {
                 leaf_of[q as usize] = li as u32;
             }
         }
-        let far_coef: Vec<f64> = p.far_coef.iter().flatten().copied().collect();
-        let near_val: Vec<f64> = p.near_val.iter().flatten().copied().collect();
+        let far_coef = flat(p.far_coef);
+        let near_val = flat(p.near_val);
         let near_off: Vec<u64> = p.near_off.iter().map(|&x| x as u64).collect();
         let bytes = 8 * (far_coef.len() + near_val.len() + near_off.len() + n)
             + 4 * (5 * n_nodes + p.chain.len() + p.far_col.len() + p.near_col.len() + 2 * n);
@@ -274,11 +280,11 @@ impl DeviceBlockTree {
             weight: g.upload(p.weight, 0.0)?,
             far_ptr: g.upload(&to_u32(p.far_ptr, "far pointer")?, 0)?,
             far_col: g.upload(p.far_col, 0)?,
-            far_coef: g.upload(&far_coef, 0.0)?,
+            far_coef: g.upload(far_coef, 0.0)?,
             near_ptr: g.upload(&to_u32(p.near_ptr, "near pointer")?, 0)?,
             near_col: g.upload(p.near_col, 0)?,
             near_off: g.upload(&near_off, 0)?,
-            near_val: g.upload(&near_val, 0.0)?,
+            near_val: g.upload(near_val, 0.0)?,
             bytes,
         })
     }
@@ -404,7 +410,7 @@ impl DeviceFaceMetric {
         let nf = h.faces.len();
         let faces: Vec<u32> = h.faces.iter().flatten().copied().collect();
         let df: Vec<f64> = h.df.iter().flatten().flatten().copied().collect();
-        let ha: Vec<f64> = h.ha_perm.iter().flatten().copied().collect();
+        let ha = flat(h.ha_perm);
         let inc_face: Vec<u32> = h.inc.iter().map(|e| e.0).collect();
         let inc_corner: Vec<u8> = h.inc.iter().map(|e| e.1).collect();
         Ok(DeviceFaceMetric {
@@ -417,7 +423,7 @@ impl DeviceFaceMetric {
             faces: g.upload(&faces, 0)?,
             df: g.upload(&df, 0.0)?,
             areas: g.upload(h.areas, 0.0)?,
-            ha_perm: g.upload(&ha, 0.0)?,
+            ha_perm: g.upload(ha, 0.0)?,
             d_hi: g.upload(h.d_hi, 0.0)?,
             d_lo: g.upload(h.d_lo, 0.0)?,
             has_d_hi: !h.d_hi.is_empty(),

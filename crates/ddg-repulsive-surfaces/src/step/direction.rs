@@ -22,7 +22,7 @@ use crate::metric::dense::comparison_metric;
 use crate::metric::{Metric, SobolevWeights};
 use crate::solve::dense::DenseSaddle;
 use crate::solve::iterative::{
-    Backend, HierarchicalOptions, HierarchicalSaddle, MetricExtras, dense_metric_with_extras, hierarchical_saddle,
+    Backend, HierarchicalOptions, HierarchicalSaddle, MetricExtras, dense_metric_with_extras, hierarchical_saddle_with,
 };
 use crate::solve::precond::LaplacianSaddle;
 use crate::solve::{LinearReport, SaddleSolution, SaddleSolver, SolveRecord};
@@ -247,6 +247,7 @@ struct FallbackContext {
     extras: MetricExtras,
     c_q: SparseMatrix,
     options: HierarchicalOptions,
+    gpu: Option<Arc<crate::gpu::GpuContext>>,
 }
 
 enum Active {
@@ -286,7 +287,8 @@ impl RobustHierarchical {
             o.gmres.tolerance = c.options.gmres.tolerance;
             o.gmres.max_iterations = (4 * c.options.gmres.max_iterations).max(800);
             o.gmres.restart = 60;
-            let built = hierarchical_saddle(
+            o.device = c.options.device;
+            let built = hierarchical_saddle_with(
                 c.pool.clone(),
                 &c.surface,
                 &c.positions,
@@ -296,6 +298,7 @@ impl RobustHierarchical {
                 &c.c_q,
                 &o,
                 None,
+                c.gpu.as_ref(),
             );
             if let Ok(mut g) = built {
                 match g.solve(a, b) {
@@ -401,8 +404,8 @@ impl StepSolver {
     }
 
     /// Seconds of the hierarchical back end: `[metric tree build, fractional tree build, L′
-    /// factorization, preconditioner applications]`.
-    pub fn build_timings(&self) -> Option<[f64; 4]> {
+    /// factorization, preconditioner applications, GPU uploads]`.
+    pub fn build_timings(&self) -> Option<[f64; 5]> {
         match self {
             StepSolver::Hierarchical(s) => {
                 let p = s.primary.preconditioner();
@@ -411,6 +414,7 @@ impl StepSolver {
                     p.fractional_seconds(),
                     p.factor_seconds(),
                     p.usage().1,
+                    s.primary.operator().upload_seconds() + p.upload_seconds(),
                 ])
             }
             _ => None,
@@ -431,6 +435,7 @@ impl StepSolver {
         backend: &Backend,
         face_tree: Option<&FaceTree>,
         bh_leaf_size: Option<usize>,
+        gpu: Option<&Arc<crate::gpu::GpuContext>>,
     ) -> Result<StepSolver, RsError> {
         match metric {
             Metric::Sobolev { .. } => match backend.resolve(surface.n_faces()) {
@@ -443,7 +448,7 @@ impl StepSolver {
                         (Some(t), Some(l)) if l == o.cluster.leaf_size => Some(t.clone()),
                         _ => None,
                     };
-                    let primary = hierarchical_saddle(
+                    let primary = hierarchical_saddle_with(
                         pool.clone(),
                         surface,
                         positions,
@@ -453,6 +458,7 @@ impl StepSolver {
                         c_q,
                         &o,
                         donor,
+                        gpu,
                     )?;
                     Ok(StepSolver::Hierarchical(Box::new(RobustHierarchical {
                         primary,
@@ -465,6 +471,7 @@ impl StepSolver {
                             extras: extras.clone(),
                             c_q: c_q.clone(),
                             options: o,
+                            gpu: gpu.cloned(),
                         },
                         active: Active::Primary,
                         events: Vec::new(),

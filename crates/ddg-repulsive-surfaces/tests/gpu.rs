@@ -185,3 +185,70 @@ fn device_selection() {
     assert!(matches!(Device::Cuda(bad).resolve(), Err(ddg_repulsive_surfaces::RsError::Gpu { .. })));
     assert!(Device::Auto(bad).resolve().unwrap().is_none());
 }
+
+struct Trajectory {
+    energies: Vec<u64>,
+    iterations: Vec<usize>,
+    faces: Vec<usize>,
+    positions: Vec<[f64; 3]>,
+}
+
+fn flow(device: Device, steps: usize, faces: usize) -> Trajectory {
+    use ddg_repulsive_surfaces::{Backend, Constraint, FlowOptions, HierarchicalOptions, Session, StopRule};
+    let (s, p) = mesh(faces, 11);
+    let o = FlowOptions {
+        constraints: vec![
+            Constraint::Barycenter { component: None, target: None },
+            Constraint::Area { component: None, target: None },
+        ],
+        backend: Backend::Hierarchical(HierarchicalOptions { device, ..HierarchicalOptions::default() }),
+        threads: Some(3),
+        stop: StopRule::Off,
+        ..FlowOptions::default()
+    };
+    let mut session = Session::new(s, p, o).unwrap();
+    let mut t = Trajectory { energies: Vec::new(), iterations: Vec::new(), faces: Vec::new(), positions: Vec::new() };
+    for _ in 0..steps {
+        let r = session.step().unwrap();
+        t.energies.push(r.energy_after.to_bits());
+        t.iterations.push(r.linear.total_iterations());
+        t.faces.push(session.surface().n_faces());
+    }
+    t.positions = session.positions().to_vec();
+    t
+}
+
+/// Whole flows (remeshing on): level 2 gives the CPU trajectory bit for bit (energies, GMRES
+/// iterations, face counts, positions); level 1 is bitwise reproducible and stays within
+/// round-off effects of the CPU (iterations within ±2 per step, energies within 1e-6 relative
+/// over a few steps).
+#[test]
+fn flow_trajectories_match_cpu() {
+    if gpu(Determinism::MatchCpu).is_none() {
+        return;
+    }
+    let (steps, faces) = (6, 4000);
+    let cpu = flow(Device::Cpu, steps, faces);
+    let l2 = flow(Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::MatchCpu }), steps, faces);
+    assert_eq!(cpu.energies, l2.energies, "level 2 energies");
+    assert_eq!(cpu.iterations, l2.iterations, "level 2 GMRES iterations");
+    assert_eq!(cpu.faces, l2.faces);
+    assert!(cpu.positions.iter().flatten().zip(l2.positions.iter().flatten()).all(|(a, b)| a.to_bits() == b.to_bits()));
+    let l1 = flow(Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::RunToRun }), steps, faces);
+    let l1b = flow(Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::RunToRun }), steps, faces);
+    assert_eq!(l1.energies, l1b.energies, "level 1 reproducible");
+    assert_eq!(l1.iterations, l1b.iterations);
+    assert!(l1.positions.iter().flatten().zip(l1b.positions.iter().flatten()).all(|(a, b)| a.to_bits() == b.to_bits()));
+    for k in 0..steps {
+        let (a, b) = (f64::from_bits(cpu.energies[k]), f64::from_bits(l1.energies[k]));
+        assert!((a - b).abs() <= 1e-6 * a.abs(), "step {k}: energy {a} vs {b}");
+        assert!(cpu.iterations[k].abs_diff(l1.iterations[k]) <= 2, "step {k}: iterations {:?} vs {:?}", cpu.iterations, l1.iterations);
+    }
+    eprintln!(
+        "cpu iterations {:?}, level 1 {:?}; final energy cpu {} level 1 {}",
+        cpu.iterations,
+        l1.iterations,
+        f64::from_bits(cpu.energies[steps - 1]),
+        f64::from_bits(l1.energies[steps - 1])
+    );
+}

@@ -7,6 +7,9 @@
 //!     [--gmres-tol X] [--chi X]
 //! ```
 //!
+//! `--gpu L1|L2` runs the tree products on CUDA device 0 at determinism level 1 or 2
+//! (`NOTES-GPU.md`; needs `--features cuda`); the last columns name the device and the upload time.
+//!
 //! `--log PATH` writes every step (`step::csv_line`, all steps including the warm-up) to a CSV.
 //!
 //! `SPEC`: `genus:G:FACES`, `handcuffs:K:FACES`, `tunnel8:FACES`, `tunnel3:FACES`, `fig12:I`,
@@ -22,6 +25,7 @@
 use std::path::{Path, PathBuf};
 
 use ddg_repulsive_surfaces::generate::Mesh;
+use ddg_repulsive_surfaces::gpu::{CudaOptions, Determinism, Device};
 use ddg_repulsive_surfaces::generate::primitives::{punctured_torus, torus};
 use ddg_repulsive_surfaces::generate::shapes::{Knot, fig12, genus_surface, handcuffs, knotted_tunnel};
 use ddg_repulsive_surfaces::scene::{SceneFile, SceneSpec};
@@ -48,6 +52,7 @@ struct Args {
     no_lo: bool,
     log: Option<PathBuf>,
     obstacle_prec: bool,
+    gpu: Option<Determinism>,
 }
 
 fn parse_args() -> Args {
@@ -66,6 +71,7 @@ fn parse_args() -> Args {
         no_lo: false,
         log: None,
         obstacle_prec: false,
+        gpu: None,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -104,6 +110,14 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--no-lo" => a.no_lo = true,
+            "--gpu" => {
+                a.gpu = Some(match next(i).as_str() {
+                    "L1" => Determinism::RunToRun,
+                    "L2" => Determinism::MatchCpu,
+                    other => panic!("--gpu L1|L2, not {other}"),
+                });
+                i += 1;
+            }
             "--obstacle-prec" => a.obstacle_prec = true,
             "--log" => {
                 a.log = Some(PathBuf::from(next(i)));
@@ -257,7 +271,7 @@ fn median(mut v: Vec<f64>) -> f64 {
 
 const HEADER: &str = "case,spec,threads,faces0,faces_end,steps,step_ms,step_med_ms,bvh_ms,energy_ms,factor_ms,\
 bct_ms,fractional_ms,lprime_ms,solve_ms,products,product_ms,precond_ms,gmres_its,solves,line_search_ms,trials,\
-ccd_ms,projection_ms,remesh_ms,max_residual,energy_end,status";
+ccd_ms,projection_ms,remesh_ms,max_residual,energy_end,status,device,gpu_upload_ms";
 
 fn run_case(name: &str, spec: &str, a: &Args) {
     let (surface, positions, mut o) = setup(spec, a.cache.as_deref());
@@ -278,6 +292,9 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         }
         if a.obstacle_prec {
             h.obstacle_in_preconditioner = true;
+        }
+        if let Some(d) = a.gpu {
+            h.device = Device::Cuda(CudaOptions { ordinal: 0, determinism: d });
         }
     }
     if a.no_lo {
@@ -331,7 +348,7 @@ fn run_case(name: &str, spec: &str, a: &Args) {
     let cnt = |f: &dyn Fn(&StepReport) -> f64| reps.iter().map(f).sum::<f64>() / n;
     let s = |r: &StepReport| r.seconds;
     println!(
-        "{name},{spec},{},{faces0},{},{},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.2},{:.1},{:.1},{:.1},{:.2e},{:.17e},{status}",
+        "{name},{spec},{},{faces0},{},{},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.2},{:.1},{:.1},{:.1},{:.2e},{:.17e},{status},{},{:.1}",
         a.threads,
         session.surface().n_faces(),
         reps.len(),
@@ -356,6 +373,8 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         mean(&|r| s(r).remesh),
         reps.iter().map(|r| r.linear.max_relative_residual()).fold(0.0, f64::max),
         session.energy(),
+        a.gpu.map_or("cpu".to_string(), |d| format!("{d:?}")),
+        mean(&|r| s(r).gpu_upload),
     );
 }
 
