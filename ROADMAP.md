@@ -24,7 +24,14 @@ including three misplaced in the authors' demo repository, were removed the same
 
 ## Scheduled
 
-Nothing (item 1, the feedback loop of the cones solver, landed on 2026-10-26; see below).
+Proposed, not started (2026-11-03; details in the Repulsive Surfaces section below and in
+`crates/ddg-repulsive-surfaces/SPEC.md` §16, `NOTES-GPU.md`, `NOTES-GPU2.md`):
+
+1. **Parallel remeshing** (`ddg-repulsive-surfaces`, also useful to any crate that remeshes every step).
+2. **Further GPU speed-ups for Repulsive Surfaces** (the vertex-pair product kernel, CUDA graphs,
+   GMRES vectors on the device, then the CPU-side setup).
+
+Item 1 of the earlier list, the feedback loop of the cones solver, landed on 2026-10-26; see below.
 
 ## Landed since the first version of this file
 
@@ -401,6 +408,11 @@ Open:
 * The authors' `TangentInterpolation` scene collapses an end edge after about 60 steps (the
   showcase uses its own scene; SPEC §17j).
 * `showcase/media/` is not committed.
+* Landed 2026-11-03 (`NOTES-SPEED.md`, SPEC §17t): faster dense products and Schur build, vectorized
+  near field, warm-started projection solves and a growth back-off (both new defaults, switchable):
+  Fig. 20 6–21 % faster at one thread, the 24-knot check as reliable as before (lower energy at equal
+  wall time on 23 of 24). The oracle fuzz disagreement (40 of 4000 cases, 0 vs 1 projection iterations)
+  is resolved: the direction is exactly 0 at `Point`-pinned coordinates (SPEC §6.2), 0 of 16,000 now.
 
 ## Integer Coordinates and FlipOut (`crates/ddg-integer-coords`, `crates/ddg-flip-geodesics`, branch `integer-coordinates`, updated 2026-11-01)
 
@@ -533,13 +545,87 @@ Open:
   tolerance (R22); the order agrees to the first near-tie only.
 * Timings of record (Fig. 16) were taken on a loaded machine; rerun alone.
 
-## Repulsive Surfaces (`crates/ddg-repulsive-surfaces`, branch `repulsive-surfaces`, 2026-11-02, not yet merged to master)
+## Repulsive Surfaces (`crates/ddg-repulsive-surfaces`, branch `repulsive-surfaces`, merged to master 2026-11-03)
 
-Landed: the face-pair tangent-point energy (exact and Barnes-Hut with the exact adjoint gradient), the fractional Sobolev metric and the L2/H1/H2 comparison metrics, dense and hierarchical-matrix operators with right-preconditioned GMRES (vertex-pair, augmented preconditioner with scale and coarse correction; D32/D33), barycenter/area/volume/pin constraints, penalties, mesh/point/implicit obstacles, remeshing, CCD (on by default: the paper's algorithm tunnels on EntangledDoubleTorus step 6, 2226 crossings), AQP/H1 L-BFGS/BCQN, generators, a reader of the authors' scenes, Python `RepulsiveSurfaceSession`, Blender "Repulsive Surface Flow (Live)" and "(Steps)", 70 oracle fixtures, Lean proofs (35 proved + 8 cited ids, plus the augmented preconditioner) and a black-box comparison with the authors' program (parity to 1e-14 except the reference's 3x volume row; trajectories within about 1 %). Fig. 10: fitted rate 1.97. Fig. 13: 12 of 14 models at or below the paper at 4 threads, but the 2.5 s at 45k faces is not met (3.15 s on the figure-8 tunnel); 1 thread against the reference: faster on 5 of 8 scenes, slower on EDT 1.09x, handcuffs 1.18x, Hopf 1.45x. Open: the method comparison (Fig. 5, 12) and the Fig. 16 table (transcription from the user-supplied Ishii et al. PDF) are pending; Klein bottle remeshing inside the CCD band fails near step 184; the punctured torus diverges after 38-80 steps; envelopes (obstacle not in the preconditioner) and needle inputs of the subcritical spindle; eversion (Fig. 20) not reproduced; open surfaces without remeshing need 225-678 GMRES iterations (SPEC section 16).
+Landed: the face-pair tangent-point energy (exact and Barnes-Hut with the exact adjoint gradient), the
+fractional Sobolev metric and the L2/H1/H2 comparison metrics, dense and hierarchical-matrix operators
+with right-preconditioned GMRES (vertex-pair, augmented preconditioner with scale and coarse correction;
+D32/D33), barycenter/area/volume/pin constraints, penalties, mesh/point/implicit obstacles, remeshing,
+CCD (on by default: the paper's algorithm tunnels on EntangledDoubleTorus step 6, 2226 crossings),
+AQP/H1 L-BFGS/BCQN, generators, a reader of the authors' scenes, Python `RepulsiveSurfaceSession`,
+Blender "Repulsive Surface Flow (Live)" and "(Steps)", 70 oracle fixtures, Lean proofs (35 proved, 9
+cited `rs-` ids) and a black-box comparison with the authors' program (parity to 1e-14 except the
+reference's 3x volume row; trajectories within about 1 %; the authors' unmerged `nonorientable` branch
+as a second binary for the Klein bottles). Optional CUDA back end (D34, D35; `cuda` feature, `Device`
+in Rust, Python and Blender): products, near fields, Barnes-Hut and the whole preconditioner on the
+GPU, level 1 bitwise run to run, level 2 bitwise the CPU.
+
+Results: Fig. 10 fitted rate 1.97. Fig. 13 at 4 threads: 12 of 14 models at or below the paper on the
+CPU, all 14 with the GPU (45k figure-8 tunnel: CPU 2.83 s, GPU 1.09 s, paper ≈ 2.7 s; 135k: CPU 10.1 s,
+GPU 3.43 s). Fig. 5/12: Hs lowest per iteration on all five meshes; per second lowest early on all and
+at the end on four of five (quiet-machine rerun; the trefoil tunnel ends ≈ 3 % above BCQN / H1 L-BFGS,
+within the area normalization's uncertainty). Fig. 16: all 21 Ishii et al. entries transcribed from the
+user's PDF and converged; long runs reproducible bitwise. Fig. 15: genus 0–11 converge from a row of
+handles, but genus 2, 4, 8, 10, 11 end in different local minima than the paper's; the paper video's
+start (a chain of fused fat rings, hole ≈ 0.25 of the spacing) reaches the genus-11 dodecahedron in
+both programs, other hole sizes do not (3 of 18 chain runs) — the outcome depends on the start's
+proportions, in the authors' program as in ours (`NOTES-DODECA.md`).
+
+Open: Klein bottle remeshing inside the CCD band fails near step 184 on the default backend; the
+punctured torus diverges after 38-80 steps; envelopes (obstacle not in the preconditioner) and needle
+inputs of the subcritical spindle; a surface pressed against an obstacle freezes (cobblestones reach
+1.23x of their 2.5x area target); the eversion (Fig. 20) and the handle-off-the-pole isotopy (Fig. 18)
+are not reproduced; open surfaces without remeshing need 225-678 GMRES iterations; Fig. 13 #3 needs 37
+GMRES iterations per step (unexplained); the genus sheet uses row starts (SPEC section 16).
+
+### Proposed next: parallel remeshing
+
+Remeshing (`src/remesh/`) runs serially: ≈ 0.1–0.2 s per pass at 40–55k faces on one thread, which is
+≈ 17 % of a GPU step at 45k (1.09 s) and the largest single CPU share after the per-step setup. It is
+also why thread scaling stops past ≈ 16 threads on the CPU path. Plan: split, collapse and Delaunay-flip
+passes over **independent sets** of edges (a fixed greedy coloring of the edge-conflict graph — edges
+whose one-rings overlap get different colors — computed in a fixed order), each color processed in
+parallel, colors in a fixed order; the smoothing pass is already a Jacobi update and parallelizes
+directly. Requirements: results bitwise independent of the thread count (the coloring, the order within
+a color and the renumbering of new vertices/faces must not depend on scheduling), the same legality
+checks (link condition, foldover, pins, boundary, the CCD collapse guard), the same vertex map and face
+parents; the single-operation conventions fixed by the oracle stay. The pass's outcome will differ from
+today's serial order (a different but equally valid remeshing), so trajectories change: measure the
+regression set (Fig. 13, pins, components, obstacles, Klein bottle) for energies, iterations, quality
+and speed, and keep the serial order as an option. Expected: the remeshing share drops by about the
+core count used, i.e. 0.15 → ≈ 0.02 s per step at 45k.
+
+### Proposed next: further GPU speed-ups
+
+Measured remaining shares of a GPU step (45k / 135k faces, level 1, `NOTES-GPU2.md`): per-step setup
+(block structure, far coefficients, `L′` factorization) 22 / 24 %, remeshing 17 %, Barnes-Hut tree 9 /
+10 %, CCD 7 / 6 %, GMRES vectors 5 %, projection 5 / 4 %; the rest (products, preconditioner, energy)
+already runs on the GPU. Candidates, in order of expected value per effort:
+
+1. **The vertex-pair product kernel** (part of the preconditioner): latency-bound, 2.0 ms for one vector
+   at 45k; batching the columns, fusing it with the triangular solves, and a better launch shape.
+2. **CUDA graphs** for the per-iteration sequence of launches (GMRES iteration = products + two
+   triangular solves + small kernels), to remove launch overhead, which dominates below ≈ 50k faces.
+3. **GMRES vectors on the device** (≈ 5 %, saves two PCIe transfers per iteration): needs the CPU's dot
+   products and the dense constraint rows to switch to the same fixed reduction tree to keep level 2
+   (a round-off change of every CPU flow), so it goes together with a decision on the CPU default.
+4. **The per-step setup on the device** (≈ 22–24 %): the far-field coefficients and the near-field
+   block structure from the BVH, and the tree builds (parallel LBVH/Morton build; the BVH order must stay
+   deterministic). The `L′` factorization (≈ 0.04 s) stays on the CPU unless cuDSS is installed (not
+   installed; needs the user's approval).
+5. **CCD on the device** (≈ 6–7 %): a broad phase over swept boxes and the advancement kernels; must keep
+   the exact conservative-advancement guarantee and determinism.
+6. A preconditioner cheap by construction (FSAI or algebraic multigrid) was judged not worth it after
+   GPU-2 (≤ 5 % estimated; the preconditioner is ≈ 16 % of a step and ≈ 40 % of that is the vertex-pair
+   product): revisit only if the other items make it the bottleneck.
+
+With 1–3 the GPU step at 45k could drop from 1.09 s to roughly 0.8–0.9 s; with 4, 5 and parallel
+remeshing to roughly 0.4–0.5 s (estimates, to be measured). All of it under the standing determinism
+requirement (fixed-shape tree reductions, gathers, fixed orders; level 2 = bitwise the CPU).
 
 ## Housekeeping
 
 * `ddg_core::distance`: the DOI and issue of Bornemann, Rasch 2006 were not confirmed
   independently (authors, title, journal, volume, pages, year were).
 * Nothing is pushed beyond `origin/master` at 29ff52d (developability). `master` includes the
-  repulsive-curves work since 2026-10-31.
+  repulsive-curves work since 2026-10-31 and the repulsive-surfaces work since 2026-11-03.
