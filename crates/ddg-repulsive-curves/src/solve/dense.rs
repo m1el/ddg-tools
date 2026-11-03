@@ -178,6 +178,78 @@ fn cholesky(pool: &rayon::ThreadPool, m: &mut Mat<f64>) -> Option<()> {
     Some(())
 }
 
+/// Lanes of the dot products of [`symmetric_kron_apply`]: independent partial sums, added in a
+/// fixed order at the end (vectorizable, and the same order whatever the thread count, D25).
+const LANES: usize = 8;
+
+/// `Σ_w row[w] xs[s][w]` for every `s < D`, in a fixed order: `LANES` partial sums per `s`
+/// over the full chunks, the tail into the first lanes, then the lanes summed pairwise.
+#[inline]
+fn lane_dots<const D: usize>(row: &[f64], xs: &[&[f64]; D]) -> [f64; D] {
+    let n = row.len();
+    let mut acc = [[0.0f64; LANES]; D];
+    let chunks = n / LANES;
+    for c in 0..chunks {
+        let base = c * LANES;
+        let r: &[f64; LANES] = row[base..base + LANES].try_into().expect("chunk");
+        for s in 0..D {
+            let xv: &[f64; LANES] = xs[s][base..base + LANES].try_into().expect("chunk");
+            for l in 0..LANES {
+                acc[s][l] += r[l] * xv[l];
+            }
+        }
+    }
+    for (l, w) in (chunks * LANES..n).enumerate() {
+        for s in 0..D {
+            acc[s][l] += row[w] * xs[s][w];
+        }
+    }
+    let mut out = [0.0; D];
+    for s in 0..D {
+        let a = &acc[s];
+        out[s] = ((a[0] + a[4]) + (a[2] + a[6])) + ((a[1] + a[5]) + (a[3] + a[7]));
+    }
+    out
+}
+
+/// `(K ⊗ I_d) x` for a symmetric `n × n` matrix `K` given by its rows (`row(v)`, contiguous), `x`
+/// interleaved (D29): the coordinates of `x` are separated first, so every row is one pass of
+/// contiguous dot products ([`lane_dots`]); parallel over vertices on `pool`, each entry summed
+/// in a fixed order, so the result is bitwise independent of the pool size (D25).
+fn symmetric_kron_apply<'m>(
+    pool: &rayon::ThreadPool,
+    n: usize,
+    d: usize,
+    row: impl Fn(usize) -> &'m [f64] + Sync,
+    x: &[f64],
+) -> Vec<f64> {
+    let mut y = vec![0.0; n * d];
+    let cols: Vec<Vec<f64>> = (0..d).map(|s| (0..n).map(|w| x[w * d + s]).collect()).collect();
+    pool.install(|| match d {
+        3 => {
+            let xs = [&cols[0][..], &cols[1][..], &cols[2][..]];
+            y.par_chunks_mut(3).enumerate().for_each(|(v, yv)| {
+                yv.copy_from_slice(&lane_dots::<3>(row(v), &xs));
+            });
+        }
+        2 => {
+            let xs = [&cols[0][..], &cols[1][..]];
+            y.par_chunks_mut(2).enumerate().for_each(|(v, yv)| {
+                yv.copy_from_slice(&lane_dots::<2>(row(v), &xs));
+            });
+        }
+        _ => {
+            y.par_chunks_mut(d).enumerate().for_each(|(v, yv)| {
+                let r = row(v);
+                for (s, ys) in yv.iter_mut().enumerate() {
+                    *ys = lane_dots::<1>(r, &[&cols[s][..]])[0];
+                }
+            });
+        }
+    });
+    y
+}
+
 impl DenseSaddle {
     /// Builds and factors the saddle matrix of the metric `a` (`|V| × |V|`, symmetric) and the
     /// constraint Jacobian `c` (`k × d|V|`) on `pool`, by the Schur method with the LU as its
@@ -286,39 +358,16 @@ impl DenseSaddle {
 
     /// `Ā x` (`A ⊗ I_d` times an interleaved vector), parallel over vertices, fixed order.
     pub fn apply_metric(&self, x: &[f64]) -> Vec<f64> {
-        let d = self.layout.dim();
-        let n = self.n_vertices;
-        let mut y = vec![0.0; n * d];
-        self.pool.install(|| {
-            y.par_chunks_mut(d).enumerate().for_each(|(v, yv)| {
-                let row = self.a.row(v);
-                for (w, &aw) in row.iter().enumerate() {
-                    for s in 0..d {
-                        yv[s] += aw * x[w * d + s];
-                    }
-                }
-            });
-        });
-        y
+        // A is symmetric and row-major: row v is contiguous.
+        symmetric_kron_apply(&self.pool, self.n_vertices, self.layout.dim(), |v| self.a.row(v), x)
     }
 
     /// `(M⁻¹ ⊗ I_d) x`, parallel over vertices, fixed order.
     fn apply_minv(&self, f: &SchurFactor, x: &[f64]) -> Vec<f64> {
-        let d = self.layout.dim();
-        let n = self.n_vertices;
-        let mut y = vec![0.0; n * d];
-        self.pool.install(|| {
-            y.par_chunks_mut(d).enumerate().for_each(|(v, yv)| {
-                // M⁻¹ is symmetric: row v = column v (contiguous).
-                let col = f.minv.col_as_slice(v);
-                for (w, &mw) in col.iter().enumerate() {
-                    for s in 0..d {
-                        yv[s] += mw * x[w * d + s];
-                    }
-                }
-            });
-        });
-        y
+        // M⁻¹ is symmetric: row v = column v (contiguous).
+        symmetric_kron_apply(&self.pool, self.n_vertices, self.layout.dim(), |v| {
+            f.minv.col_as_slice(v)
+        }, x)
     }
 
     /// One solve of the Schur system (module docs), without refinement.
@@ -548,31 +597,38 @@ fn factor_schur(
         return None;
     }
     // S = C M̄⁻¹ Cᵀ: column i of S is C (M̄⁻¹ c_iᵀ), c_i the i-th row of C (= column i of Cᵀ).
+    // g = M̄⁻¹ c_iᵀ is kept per coordinate (`g[s n + w]`), so that every nonzero of c_i is one
+    // contiguous axpy with a column of M⁻¹; then `S[r, i] = c_r · g`. Each entry is summed in a
+    // fixed order (D25).
     let (tcp, tri, tval) = (ct.col_ptr(), ct.row_idx(), ct.values());
-    let mut sm = Mat::<f64>::zeros(k, k);
+    // Interleaved unknown `j = v d + s` → its place `s n + v` in `g`.
+    let gidx: Vec<usize> = (0..n * d).map(|j| (j % d) * n + j / d).collect();
+    // Only the lower triangle is computed (faer's Cholesky reads nothing else); the strict
+    // upper one starts as NaN, so a factorization that did read it would fail its pivot check
+    // and fall back to the LU instead of returning a wrong factor (`tests/dense_schur.rs` checks
+    // that the Schur method is kept).
+    let mut sm = Mat::<f64>::from_fn(k, k, |_, _| f64::NAN);
     pool.install(|| {
         sm.par_col_iter_mut().enumerate().for_each_init(
-            || (vec![0.0; n * d], vec![0.0; k]),
-            |(g, out), (i, mut col)| {
+            || vec![0.0; n * d],
+            |g, (i, mut col)| {
                 g.iter_mut().for_each(|x| *x = 0.0);
                 for p in tcp[i]..tcp[i + 1] {
                     let (j, val) = (tri[p] as usize, tval[p]);
                     let (v, s) = (j / d, j % d);
                     let mcol = minv.col_as_slice(v);
-                    for (w, &mw) in mcol.iter().enumerate() {
-                        g[w * d + s] += val * mw;
+                    for (gw, &mw) in g[s * n..(s + 1) * n].iter_mut().zip(mcol) {
+                        *gw += val * mw;
                     }
                 }
-                // out = C g, row by row through Cᵀ's columns (fixed order).
-                for (r, o) in out.iter_mut().enumerate() {
+                // S[r, i] = c_r · g for r ≥ i, row by row through Cᵀ's columns (fixed order);
+                // the Cholesky factorization reads the lower triangle only.
+                for r in i..k {
                     let mut t = 0.0;
                     for p in tcp[r]..tcp[r + 1] {
-                        t += tval[p] * g[tri[p] as usize];
+                        t += tval[p] * g[gidx[tri[p] as usize]];
                     }
-                    *o = t;
-                }
-                for r in 0..k {
-                    col[r] = out[r];
+                    col[r] = t;
                 }
             },
         );
