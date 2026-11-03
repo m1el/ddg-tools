@@ -93,6 +93,28 @@ the surface changes with remeshing, `face_origin` maps faces to the input's). `r
 copied into `data/repulsive-surfaces/` by `scripts/rs-fetch-scenes.sh`). Each application of Sec. 9
 is an example in `examples/apps/`.
 
+### GPU (optional, CUDA)
+
+Built with `--features cuda` (off by default; `cudarc` with the driver and NVRTC opened at run time,
+so the build needs no CUDA installation), a flow can run its heavy parts on an NVIDIA GPU: the
+block-cluster-tree products of the metric and of the preconditioner's fractional operator (their near
+fields are evaluated on the device) and the Barnes–Hut energy with its gradient. The device is
+chosen explicitly in the options; the CPU path is unchanged and stays the reference:
+
+```rust
+use ddg_repulsive_surfaces::gpu::{CudaOptions, Determinism, Device};
+let mut h = HierarchicalOptions::default();
+h.device = Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::RunToRun });
+let options = FlowOptions { backend: Backend::Hierarchical(h), ..FlowOptions::default() };
+```
+
+`Device::Cuda` is an error (`RsError::Gpu`) when the GPU is not usable (built without the feature, no
+driver, no device); `Device::Auto` falls back to the CPU. Results are bitwise reproducible from run to
+run (`RunToRun`); `Determinism::MatchCpu` gives the CPU flow bit for bit (integer exponents), at some
+speed. Running needs an NVIDIA driver and `libnvrtc.so.12`; the step bench takes `--gpu L1|L2`
+(`cargo bench -p ddg-repulsive-surfaces --features cuda --bench step -- --mesh fig12:3 --gpu L1`).
+Design, determinism argument and measurements: [`NOTES-GPU.md`](NOTES-GPU.md).
+
 ### Python
 
 ```python
