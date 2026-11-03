@@ -110,6 +110,7 @@ def fixtures : Array (RCCase × String) := Id.run do
   fs := add fs { mk "rc-bumpy-step-sphere" "step" ({ bumpy with pos := bumpy.pos.mapIdx fun i p => if [0, 3, 6, 9, 12].contains i then c0 + ((r0 / (p - c0).norm) * (p - c0)) else p }) with cons := #[.barycenter none, .sphere c0 r0 (some #[0, 3, 6, 9, 12])], search := { nSteps := 2 }, tolVal := 1e-6, maxit := 5 } "five vertices kept on a sphere"
   fs := add fs { mk "rc-planar-step" "step" planar with planar := some 2, cons := #[.barycenter none, .edgeLengths none], search := { nSteps := 2 } } "planar loop"
   fs := add fs { mk "rc-wobble-step-maxit" "step" wob with cons := #[.barycenter none, .edgeLengths none], tolVal := 1e-9, maxit := 1, search := { maxHalvings := 4 } } "projection limit 1 with a tight tolerance: every trial fails its projection, the search is stuck"
+  fs := add fs { mk "rc-wobble-step-pinned" "step" wob with cons := #[.point 3 none, .point 11 none], search := { nSteps := 2 } } "two pinned vertices, no other row: the direction is exactly 0 there, so the trial is exactly on its targets and is accepted after 0 projection steps (SPEC 6.2; was rounding-dependent)"
   -- errors (status error KIND ...)
   fs := add fs { mk "rc-error-exponents" "energy" circ with ex := ⟨3.0, 4.5⟩ } "beta < alpha + 2: InvalidExponents"
   fs := add fs { mk "rc-error-exponents-upper" "energy" circ with ex := ⟨2.0, 5.0⟩ } "beta >= 2 alpha + 1: InvalidExponents"

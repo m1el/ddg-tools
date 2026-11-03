@@ -51,6 +51,7 @@ rc-hopf-step	step	ok	Hopf link, strict Armijo constant, shrink 1/4	result 0 acce
 rc-bumpy-step-sphere	step	ok	five vertices kept on a sphere	result 0 accepted 3ff05ba9926a8b9b 0 4026d822d7590085
 rc-planar-step	step	ok	planar loop	result 0 accepted 3fd7f7248892873b 1 402110ca4c560db6
 rc-wobble-step-maxit	step	ok	projection limit 1 with a tight tolerance: every trial fails its projection, the search is stuck	result 0 stuck 0000000000000000 5 402b065067984893
+rc-wobble-step-pinned	step	ok	two pinned vertices, no other row: the direction is exactly 0 there, so the trial is exactly on its targets and is accepted after 0 projection steps (SPEC 6.2; was rounding-dependent)	result 0 accepted 3fe31e8e70964a9f 0 401e49a86c60b71e
 rc-error-exponents	energy	error	beta < alpha + 2: InvalidExponents	status error InvalidExponents beta must be at least alpha + 2
 rc-error-exponents-upper	energy	error	beta >= 2 alpha + 1: InvalidExponents	status error InvalidExponents beta must be smaller than 2 alpha + 1
 rc-error-selfloop	energy	error	edge (3,3): SelfLoop	status error SelfLoop edge 3 at vertex 3

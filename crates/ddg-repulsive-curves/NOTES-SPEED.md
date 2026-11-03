@@ -78,10 +78,21 @@ README. Summary: every Fig. 20 configuration 6–21 % faster on one thread (Barn
 step or isotopy violation, trials per step 1.93 → 1.45, lower energy at equal wall time on 23/24.
 Defaults: `recycle_projections = true`, `growth_backoff = true`.
 
-## Open (pre-existing, found during this work, 2026-11-03)
+## Resolved: oracle fuzz disagreement, 0 vs 1 projection iterations (2026-11-03)
 
-The oracle fuzz replay (`tests/oracle.rs`, `fuzz_against_the_oracle`, 4000 cases, the main checkout's
-oracle binary) reports 40 disagreements of one kind, identical before and after these changes: a step
-accepted after 0 projection iterations in Rust where the oracle needs 1. Not investigated; likely a
-difference in the convergence test of the projection at the first iteration (tolerance comparison `<`
-vs `≤`, or the residual measured before vs after the first correction).
+Cause: all 40 cases (seed 1, 4000 cases) have only `Point` rows. The exact direction `g̃` of a pinned
+vertex is 0, but both solvers leave rounding noise there (the oracle's full-saddle LU ~2^-55, the
+dense Schur solve usually less). `pos - τ g̃` then equals the target exactly in one implementation
+and is off by an ulp in the other, so the SPEC §6.2 rule "a trial already within tolerance is
+projected once, unless Φ = 0 exactly" took the 0-iteration branch in Rust and the 1-iteration
+branch in the oracle. The tolerance test, norm, `<` vs `≤`, and tolerance scale are identical on
+both sides (checked). First attempt, zeroing in the oracle only, reversed the split (15 cases the
+other way), which shows neither side was more right: the rule was hostage to roundoff.
+
+Fix (both sides, same rule): the direction at a `Point`-pinned vertex coordinate is set to exactly 0
+(`step/mod.rs`, after `projected_gradient`, with `‖g̃‖` and `dF·g̃` recomputed; `Saddle.projectedGradient`
+in the oracle). Only scenes with `Point` constraints change, by noise of ~1e-17 in the direction; the
+knot/Freedman results of record use no `Point` rows and are unchanged. Regression: fixture
+`rc-wobble-step-pinned` (accepted after 0 iterations); 5 other fixtures' `.out` regenerated (their
+`g` at pinned vertices went from ~1e-18 to 0). Fuzz, 4000 cases each, seeds 1-4: 0 disagreements
+(before: 40 on seed 1).
