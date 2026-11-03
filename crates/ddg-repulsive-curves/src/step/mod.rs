@@ -82,8 +82,8 @@ pub mod stop;
 pub use fallback::SolverFallback;
 use fallback::{FallbackSaddle, FallbackSlot};
 use line_search::{
-    LineSearch, LineSearchReport, SearchEnv, SearchInput, Trial, line_search,
-    project_with_path_polished,
+    LineSearch, LineSearchReport, SearchEnv, SearchInput, StartRule, Trial, TrialOutcome,
+    line_search, project_with_path_polished,
 };
 pub use schedule::ScheduleProgress;
 use schedule::{LengthSchedule, ScheduleState};
@@ -787,7 +787,19 @@ pub struct FlowOptions {
     /// orthogonal to the direction to first order). **Not in the paper.** Default `true`
     /// (`SPEC.md` §18 Q10); steps that are not stuck are unchanged either way.
     pub stuck_retry_chord: bool,
+    /// Back-off of the grow-previous start ([`StartRule::GrowPrevious`], `SPEC.md` §17t): when the
+    /// first trial of a step was grown beyond the previous accepted step size and rejected, the
+    /// next `w` steps start at the previous accepted step size (no growth; `min(⅔ τ_max,
+    /// τ_prev)`), `w = 1` after the first such rejection and doubled after each further one
+    /// (at most [`GROWTH_BACKOFF_MAX`]), back to 0 once a grown trial is accepted. It only lowers
+    /// the first trial of some steps (every trial is still projected, CCD-checked and tested by
+    /// Armijo), so the guarantees are those of the search. **Not in the paper** (whose start is
+    /// `⅔ τ_max`). `false`: grow every step.
+    pub growth_backoff: bool,
 }
+
+/// The longest wait of [`FlowOptions::growth_backoff`] (steps without growth).
+pub const GROWTH_BACKOFF_MAX: u32 = 8;
 
 impl fmt::Debug for FlowOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -822,6 +834,7 @@ impl fmt::Debug for FlowOptions {
             .field("projection_early_abort", &self.projection_early_abort)
             .field("stuck_projected_reference", &self.stuck_projected_reference)
             .field("stuck_retry_chord", &self.stuck_retry_chord)
+            .field("growth_backoff", &self.growth_backoff)
             .finish()
     }
 }
@@ -857,6 +870,7 @@ impl Default for FlowOptions {
             projection_early_abort: true,
             stuck_projected_reference: false,
             stuck_retry_chord: true,
+            growth_backoff: true,
         }
     }
 }
@@ -1177,6 +1191,9 @@ pub struct Session {
     schedule_length0: f64,
     subdivisions: u32,
     previous_tau: Option<f64>,
+    /// [`FlowOptions::growth_backoff`]: steps left without growth, and the current wait.
+    growth_wait: u32,
+    growth_backoff: u32,
     stop: StopState,
     soft: SoftState,
     last_energy: f64,
@@ -1400,6 +1417,8 @@ impl Session {
             schedule_length0: network_length,
             subdivisions: 0,
             previous_tau: None,
+            growth_wait: 0,
+            growth_backoff: 0,
             stop: StopState::default(),
             last_energy: f64::NAN,
             stalled_in_a_row: 0,
@@ -1777,10 +1796,23 @@ impl Session {
         if !converged {
             // 3. Line search.
             let t = Instant::now();
-            let max_start = match (&self.options.method, &self.soft.lbfgs) {
+            let mut max_start = match (&self.options.method, &self.soft.lbfgs) {
                 (Method::Lbfgs { .. }, Some(l)) if !l.is_empty() => Some(1.0),
                 _ => None,
             };
+            // The growth back-off (`SPEC.md` §17t): hold the start at τ_prev while waiting.
+            let backoff = self.options.growth_backoff
+                && matches!(
+                    self.options.line_search,
+                    LineSearch::CollisionGuarded {
+                        start: StartRule::GrowPrevious { .. },
+                        ..
+                    }
+                );
+            let holding = backoff && self.growth_wait > 0;
+            if holding && let Some(prev) = self.previous_tau {
+                max_start = Some(max_start.map_or(prev, |m: f64| m.min(prev)));
+            }
             let project = !soft && self.options.back_projection;
             let correction = if project && self.options.second_order_correction {
                 let t = Instant::now();
@@ -1864,6 +1896,26 @@ impl Session {
                 .fold(0.0, f64::max);
             report.ccd = ls.ccd.clone();
             report.ccd_checks = ls.ccd_checks;
+            if backoff {
+                if holding {
+                    self.growth_wait -= 1;
+                } else if let Some(prev) = self.previous_tau
+                    && ls.tau_start > prev
+                {
+                    // The first trial was grown: accepted (reset) or rejected (wait longer).
+                    let first_ok = ls
+                        .trials
+                        .first()
+                        .is_some_and(|t| t.outcome == TrialOutcome::Accepted);
+                    if first_ok {
+                        self.growth_backoff = 0;
+                    } else {
+                        self.growth_backoff =
+                            (2 * self.growth_backoff).clamp(1, GROWTH_BACKOFF_MAX);
+                        self.growth_wait = self.growth_backoff;
+                    }
+                }
+            }
             report.max_violation = ls.max_violation;
             report.trials = ls.trials;
             report.contact_floor = ls.contact_floor;

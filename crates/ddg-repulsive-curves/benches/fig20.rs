@@ -5,6 +5,7 @@
 //! cargo bench --bench fig20 -- --curve fhw|fhw-r|knot --size N --config exact|bh|mg|mg-noproj|mg-bary
 //!     [--threads T] [--dense-threads D] [--steps 20] [--min-steps 5] [--cap-s 240] [--trace 1]
 //!     [--soc 0|1] [--proj-it 3] [--polish F] [--abort 0|1] [--bct-tt 2] [--bct-tx 0.25] [--mg-threads 16]
+//!     [--recycle 0|1] [--backoff 0|1]
 //! ```
 //!
 //! `--trace 1` prints one line per step on stderr (phases, cycles, every trial of the line
@@ -70,6 +71,10 @@ fn main() {
             if let Some(t) = a.get("mg-threads").and_then(|s| s.parse::<usize>().ok()) {
                 mg.max_threads = (t > 0).then_some(t);
             }
+            // --recycle 0|1: warm starts of the projection solves (SPEC §17t)
+            if let Some(v) = a.get("recycle") {
+                mg.recycle_projections = v != "0";
+            }
             (
                 EnergyEval::BarnesHut(BhOptions::default()),
                 Solver::Multigrid(mg),
@@ -104,6 +109,10 @@ fn main() {
     // --abort 0|1: the early abort of hopeless chord projections (default: the library's)
     if let Some(v) = a.get("abort") {
         opts.projection_early_abort = v != "0";
+    }
+    // --backoff 0|1: the growth back-off of the start rule (SPEC §17t; default: the library's)
+    if let Some(v) = a.get("backoff") {
+        opts.growth_backoff = v != "0";
     }
     // --proj-it N: chord iterations of the projection
     opts.projection.max_iterations = get(&a, "proj-it", opts.projection.max_iterations);

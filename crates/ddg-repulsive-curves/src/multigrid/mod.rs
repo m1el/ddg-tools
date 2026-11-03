@@ -126,7 +126,18 @@ pub struct MgOptions {
     /// slower at 64 (`SPEC.md` §17k, §17l). Results do not depend on it (D25). `None`: the
     /// session's pool as it is. Default `Some(`[`MG_DEFAULT_MAX_THREADS`]`)`.
     pub max_threads: Option<usize>,
+    /// Warm starts for the solves of the constraint projection (`a = 0`, Eq. 23; `SPEC.md`
+    /// §17t): every such solve of one step (one [`MultigridSaddle`]) is kept, and the next one
+    /// starts from the combination of the kept solutions whose right sides fit its own best (least
+    /// squares), then iterates to the same residual and energy targets as a cold solve
+    /// ([`vcycle::Reference`]). The trials of a line search have nearly proportional violations
+    /// (`Φ(γ − τp) ≈ τ² Φ₂`), so the later solves of a step start close to their solution. `false`:
+    /// every solve from zero (before `SPEC.md` §17t).
+    pub recycle_projections: bool,
 }
+
+/// Right sides and solutions kept by [`MgOptions::recycle_projections`] (per step).
+pub const RECYCLE_MAX_VECTORS: usize = 8;
 
 /// Default of [`MgOptions::max_threads`] (measured, `SPEC.md` §17l).
 pub const MG_DEFAULT_MAX_THREADS: usize = 16;
@@ -163,6 +174,7 @@ impl Default for MgOptions {
             failure_residual: 1e-2,
             energy_check: true,
             max_threads: Some(MG_DEFAULT_MAX_THREADS),
+            recycle_projections: true,
         }
     }
 }
@@ -728,6 +740,9 @@ pub struct MultigridSaddle {
     c: SparseMatrix,
     ct: SparseMatrix,
     last: Vec<CycleReport>,
+    /// Orthonormal right sides `q_j` (constraint space) of the projection solves so far, with
+    /// `x_j`, the same combinations of their solutions ([`MgOptions::recycle_projections`]).
+    recycled: Vec<(Vec<f64>, Vec<f64>)>,
 }
 
 impl MultigridSaddle {
@@ -748,6 +763,7 @@ impl MultigridSaddle {
             c: input.jacobian.clone(),
             ct: input.jacobian.transpose(),
             last: Vec::new(),
+            recycled: Vec::new(),
         })
     }
 
@@ -799,31 +815,116 @@ impl SaddleSolver for MultigridSaddle {
         let failure = self.options.failure_residual;
         let energy_check = self.options.energy_check;
         let mut reports = Vec::new();
-        let x = p0.solve_with_kernel_solver(
-            |v| level0.apply_metric(v),
-            |r| {
-                let pr = p0.project(r)?;
-                let (y, rep) = vcycle::solve_with_energy_check(h, &pr, &cycle, energy_check)?;
-                if !rep.converged && rep.final_residual() > failure {
-                    // Grown since the full-multigrid start: diverged; otherwise stagnated.
-                    let first = rep.residuals.first().copied().unwrap_or(0.0);
-                    return Err(if rep.final_residual() > first {
-                        RcError::MultigridDiverged {
-                            residuals: rep.residuals,
-                        }
-                    } else {
-                        RcError::MultigridNotConverged {
-                            residuals: rep.residuals,
-                            failure_residual: failure,
-                        }
-                    });
+        let kernel_solve = |pr: &[f64],
+                            reference: Option<vcycle::Reference<'_>>,
+                            reports: &mut Vec<CycleReport>|
+         -> Result<Vec<f64>, RcError> {
+            let (y, rep) = vcycle::solve_with_reference(h, pr, &cycle, energy_check, reference)?;
+            if !rep.converged && rep.final_residual() > failure {
+                // Grown since the full-multigrid start: diverged; otherwise stagnated.
+                let first = rep.residuals.first().copied().unwrap_or(0.0);
+                return Err(if rep.final_residual() > first {
+                    RcError::MultigridDiverged {
+                        residuals: rep.residuals,
+                    }
+                } else {
+                    RcError::MultigridNotConverged {
+                        residuals: rep.residuals,
+                        failure_residual: failure,
+                    }
+                });
+            }
+            reports.push(rep);
+            p0.project(&y)
+        };
+        let projection = a.iter().all(|v| *v == 0.0) && b.iter().any(|v| *v != 0.0);
+        let recycle = projection && self.options.recycle_projections;
+        let x = if recycle && !self.recycled.is_empty() {
+            // Eq. 33 from a warm start (`SPEC.md` §17t). Cold: z = C†b, kernel right side
+            // P(−Ā z). Warm: x₀ = Σ (q_j·b) x_j, z' = x₀ + C†(b − C x₀), right side P(−Ā z');
+            // x = z' + y' and x = z + y differ only in the split, so the cold problem's residual
+            // and energy are the targets.
+            let z = p0.pseudo_inverse(b)?;
+            let b_cold = p0.project(
+                &level0
+                    .apply_metric(&z)
+                    .iter()
+                    .map(|v| -v)
+                    .collect::<Vec<_>>(),
+            )?;
+            let mut x0 = vec![0.0; a.len()];
+            for (q, xq) in &self.recycled {
+                let c: f64 = q.iter().zip(b).map(|(p, r)| p * r).sum();
+                for (xi, v) in x0.iter_mut().zip(xq) {
+                    *xi += c * v;
                 }
-                reports.push(rep);
-                p0.project(&y)
-            },
-            a,
-            b,
-        )?;
+            }
+            let mut cx0 = vec![0.0; b.len()];
+            self.c
+                .mul_vec(&x0, &mut cx0)
+                .map_err(|e| sparse_error(e, "C"))?;
+            let rb: Vec<f64> = b.iter().zip(&cx0).map(|(p, q)| p - q).collect();
+            let zr = p0.pseudo_inverse(&rb)?;
+            let zw: Vec<f64> = x0.iter().zip(&zr).map(|(p, q)| p + q).collect();
+            let b_warm = p0.project(
+                &level0
+                    .apply_metric(&zw)
+                    .iter()
+                    .map(|v| -v)
+                    .collect::<Vec<_>>(),
+            )?;
+            let (cold, warm) = (
+                b_cold.iter().map(|v| v * v).sum::<f64>().sqrt(),
+                b_warm.iter().map(|v| v * v).sum::<f64>().sqrt(),
+            );
+            if warm < cold {
+                // y_cold = y' + (z' − z).
+                let offset: f64 = b_cold
+                    .iter()
+                    .zip(zw.iter().zip(&z))
+                    .map(|(bc, (p, q))| bc * (p - q))
+                    .sum();
+                let reference = vcycle::Reference {
+                    norm: cold,
+                    b: &b_cold,
+                    offset,
+                };
+                let y = kernel_solve(&b_warm, Some(reference), &mut reports)?;
+                zw.iter().zip(&y).map(|(p, q)| p + q).collect()
+            } else {
+                let y = kernel_solve(&b_cold, None, &mut reports)?;
+                z.iter().zip(&y).map(|(p, q)| p + q).collect()
+            }
+        } else {
+            p0.solve_with_kernel_solver(
+                |v| level0.apply_metric(v),
+                |r| kernel_solve(&p0.project(r)?, None, &mut reports),
+                a,
+                b,
+            )?
+        };
+        if recycle && self.recycled.len() < RECYCLE_MAX_VECTORS {
+            // Modified Gram–Schmidt of b against the kept right sides, the same combination of
+            // the solutions (fixed order: deterministic).
+            let mut w = b.to_vec();
+            let mut xw = x.clone();
+            for (q, xq) in &self.recycled {
+                let c: f64 = q.iter().zip(&w).map(|(p, r)| p * r).sum();
+                for (wi, qi) in w.iter_mut().zip(q) {
+                    *wi -= c * qi;
+                }
+                for (xi, v) in xw.iter_mut().zip(xq) {
+                    *xi -= c * v;
+                }
+            }
+            let nb = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let nw = w.iter().map(|v| v * v).sum::<f64>().sqrt();
+            if nw > 1e-6 * nb && nw.is_finite() {
+                w.iter_mut().for_each(|v| *v /= nw);
+                xw.iter_mut().for_each(|v| *v /= nw);
+                self.recycled.push((w, xw));
+            }
+        }
         let ax = level0.apply_metric(&x);
         let resid: Vec<f64> = a.iter().zip(&ax).map(|(p, q)| p - q).collect();
         let mut cr = vec![0.0; self.c.nrows()];

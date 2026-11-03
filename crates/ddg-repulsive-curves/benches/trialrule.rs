@@ -5,6 +5,7 @@
 //!
 //! ```text
 //! cargo bench --bench trialrule -- --knot PATH [--soc 0|1] [--polish F] [--abort 0|1] [--steps 100] [--threads 4]
+//!     [--library-defaults 1 [--backoff 0]]
 //! ```
 //!
 //! Prints `TRAJ iteration seconds energy |g| trials solves backend` per step (seconds without the
@@ -73,20 +74,35 @@ fn main() {
     let abort = get(&a, "abort", 0usize) != 0;
     let threads: usize = get(&a, "threads", 4);
     let (net, pos) = read_curve_obj(&path).expect("knot file");
-    let opts = FlowOptions {
-        exponents: Exponents::new(3.0, 6.0).unwrap(),
-        projection: ProjectionOptions {
-            tolerance: Tolerance::Absolute(1e-4),
-            max_iterations: 3,
-        },
-        second_order_correction: soc,
-        newton_polish: (polish > 0.0).then_some(polish),
-        projection_early_abort: abort,
-        max_iterations: steps,
-        record_path: true,
-        threads: Some(threads),
-        dense_threads: Some(threads),
-        ..FlowOptions::default()
+    // --library-defaults 1: FlowOptions::default() (only the step cap, the threads and the
+    // path for the audit set), the check of SPEC §17t; the flags above are then ignored.
+    let library = get(&a, "library-defaults", 0usize) != 0;
+    let opts = if library {
+        FlowOptions {
+            max_iterations: steps,
+            record_path: true,
+            threads: Some(threads),
+            dense_threads: Some(threads),
+            // --backoff 0: without the growth back-off (SPEC §17t)
+            growth_backoff: get(&a, "backoff", 1usize) != 0,
+            ..FlowOptions::default()
+        }
+    } else {
+        FlowOptions {
+            exponents: Exponents::new(3.0, 6.0).unwrap(),
+            projection: ProjectionOptions {
+                tolerance: Tolerance::Absolute(1e-4),
+                max_iterations: 3,
+            },
+            second_order_correction: soc,
+            newton_polish: (polish > 0.0).then_some(polish),
+            projection_early_abort: abort,
+            max_iterations: steps,
+            record_path: true,
+            threads: Some(threads),
+            dense_threads: Some(threads),
+            ..FlowOptions::default()
+        }
     };
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
