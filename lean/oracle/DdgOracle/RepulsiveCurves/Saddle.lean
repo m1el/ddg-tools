@@ -26,6 +26,9 @@ structure Saddle where
   pivotRatio : Float
   /-- infinity-norm condition number of the equilibrated saddle matrix (explicit inverse) -/
   cond : Float
+  /-- unknowns held by a `Point` row (a single unit Jacobian entry): their direction component is
+  exactly zero -/
+  pinned : Array Nat := #[]
 
 /-- Assemble and factor `[Ā Cᵀ; C 0]`. -/
 def Saddle.build (nv : Nat) (coords : Array Nat) (a : FloatArray) (rows : Array Row) : Except String Saddle := do
@@ -97,7 +100,15 @@ def Saddle.build (nv : Nat) (coords : Array Nat) (a : FloatArray) (rows : Array 
         if p < pmin then pmin := p
       ratio := pmin / pmax
     if !(ratio > 1e-13) then throw "SingularSaddle: the equilibrated saddle matrix has a pivot below 1e-13 of the largest"
-    return { nd, k, coords, c, lu, pivotRatio := ratio, cond }
+    let mut pinned : Array Nat := #[]
+    for r in rows do
+      if r.ents.size == 1 then
+        let (v, ax, w) := r.ents[0]!
+        if w == 1.0 then
+          match coords.findIdx? (· == ax) with
+          | some s => pinned := pinned.push (v * nc + s)
+          | none => pure ()
+    return { nd, k, coords, c, lu, pivotRatio := ratio, cond, pinned }
 
 /-- Solution `(x, λ)` of `[Ā Cᵀ; C 0] (x, λ) = (a, b)`. -/
 def Saddle.solve (s : Saddle) (a b : FloatArray) : FloatArray × FloatArray := Id.run do
@@ -143,7 +154,11 @@ structure GradResult where
 /-- `[Ā Cᵀ; C 0] (g̃, λ) = (dFᵀ, 0)` (SPEC §6.1). -/
 def projectedGradient (s : Saddle) (dE : Array V3) : GradResult :=
   let a := gather s.coords dE
-  let (x, lam) := s.solve a (zeros s.k)
+  let (x0, lam) := s.solve a (zeros s.k)
+  -- a pinned unknown's exact value is 0; the LU leaves rounding noise (~1e-17) there, which would
+  -- make a trial "not exactly on" its point target (SPEC §6.2: the projection step is skipped only
+  -- when Φ = 0 exactly)
+  let x := s.pinned.foldl (fun (x : FloatArray) i => x.set! i 0.0) x0
   let gnorm := Float.sqrt (x.foldl (fun acc v => acc + v * v) 0.0)
   let dfg := Id.run do
     let mut t : Float := 0.0

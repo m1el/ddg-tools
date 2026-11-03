@@ -57,7 +57,7 @@ use std::time::{Duration, Instant};
 use ddg_core::sparse::SparseMatrix;
 
 use crate::ccd::{CcdOptions, CcdReport, CollisionObstacle, PreparedObstacle, first_contact};
-use crate::constraints::{Constraint, ConstraintSet, default_constraints};
+use crate::constraints::{Constraint, ConstraintSet, ResolvedConstraint, default_constraints};
 use crate::energy::barnes_hut::{BhTree, InteractionLists};
 use crate::energy::exact::{energy_and_differential, energy_only, make_pool};
 use crate::energy::near_pair::{self, NearPairStats};
@@ -1730,7 +1730,30 @@ impl Session {
         let t = Instant::now();
         let masses = self.network.dual_lengths(&self.positions);
         let (direction, slope, gradient_norm, gradient_mass_norm, linear, soft_report) = if !soft {
-            let pg = projected_gradient(solver.as_mut(), self.layout, &df)?;
+            let mut pg = projected_gradient(solver.as_mut(), self.layout, &df)?;
+            // A `Point`-pinned vertex does not move: its exact direction is 0, the solve leaves
+            // rounding noise (~1e-17) there. Without this, whether a trial is "exactly" on its
+            // point target (SPEC §6.2: no projection step at Φ = 0) depended on that noise.
+            let mut pinned = false;
+            for c in self.constraints.constraints() {
+                if let ResolvedConstraint::Point { vertex, .. } = c {
+                    for &ax in self.layout.coords() {
+                        pg.direction[*vertex as usize][ax] = 0.0;
+                    }
+                    pinned = true;
+                }
+            }
+            if pinned {
+                let x = self.layout.gather(&pg.direction);
+                pg.gradient_norm = x.iter().map(|v| v * v).sum::<f64>().sqrt();
+                pg.sobolev_norm_sq = self
+                    .layout
+                    .gather(&df)
+                    .iter()
+                    .zip(&x)
+                    .map(|(p, q)| p * q)
+                    .sum();
+            }
             let mn = mass_norm(&pg.direction, &masses);
             (
                 pg.direction,
