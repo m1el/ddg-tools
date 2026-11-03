@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo bench --bench trialrule -- --knot PATH [--soc 0|1] [--polish F] [--abort 0|1] [--steps 100] [--threads 4]
-//!     [--library-defaults 1]
+//!     [--library-defaults 1 [--backoff 0]]
 //! ```
 //!
 //! Prints `TRAJ iteration seconds energy |g| trials solves backend` per step (seconds without the
@@ -83,6 +83,8 @@ fn main() {
             record_path: true,
             threads: Some(threads),
             dense_threads: Some(threads),
+            // --backoff 0: without the growth back-off (SPEC §17t)
+            growth_backoff: get(&a, "backoff", 1usize) != 0,
             ..FlowOptions::default()
         }
     } else {

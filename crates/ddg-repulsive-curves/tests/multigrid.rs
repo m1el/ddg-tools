@@ -985,6 +985,69 @@ fn bitwise_identical_at_1_7_and_64_threads() {
     }
 }
 
+/// The warm starts of the projection solves (`SPEC.md` §17t, `MgOptions::recycle_projections`)
+/// meet the accuracy of a cold solve: the same linearized constraints to rounding, a solution
+/// within the solver tolerance of the cold one, fewer cycles, and bitwise the same at 1 and 7
+/// threads.
+#[test]
+fn recycled_projection_solves_meet_the_cold_accuracy_with_fewer_cycles() {
+    let (net, pos) = trefoil(600);
+    let pr = problem(net, pos, Exponents::default(), &default_constraints());
+    let cold_opts = MgOptions {
+        recycle_projections: false,
+        ..mg_options(60, 0.25)
+    };
+    let warm_opts = mg_options(60, 0.25);
+    assert!(warm_opts.recycle_projections);
+    // Projection right sides of the kind a line search produces: b₂ ≈ b₁/4 plus a little.
+    let b1: Vec<f64> = rand_vec(pr.c.nrows(), 21)
+        .iter()
+        .map(|v| 1e-3 * v)
+        .collect();
+    let noise = rand_vec(pr.c.nrows(), 22);
+    let b2: Vec<f64> = b1
+        .iter()
+        .zip(&noise)
+        .map(|(p, q)| 0.25 * p + 1e-5 * q)
+        .collect();
+    let zero = vec![0.0; pr.c.ncols()];
+    let mut results = Vec::new();
+    for threads in [1, 7] {
+        let mut cold = mg_solver(&pr, threads, cold_opts);
+        let mut warm = mg_solver(&pr, threads, warm_opts);
+        let c1 = cold.solve(&zero, &b1).unwrap();
+        let c2 = cold.solve(&zero, &b2).unwrap();
+        let w1 = warm.solve(&zero, &b1).unwrap();
+        let w2 = warm.solve(&zero, &b2).unwrap();
+        // The first solve has nothing to start from: identical to the cold one.
+        assert!(w1.x == c1.x, "first projection solve differs");
+        let err = rel_err(&w2.x, &c2.x);
+        eprintln!(
+            "recycled projection: cycles {} (cold {}), x vs cold {:.2e}",
+            w2.report.iterations, c2.report.iterations, err
+        );
+        assert!(err > 0.0, "the kept solve was not used");
+        assert!(err <= 1e-2, "warm x differs from cold by {err:e}");
+        assert!(w2.report.iterations < c2.report.iterations);
+        let cx = mul(&pr.c, &w2.x);
+        let d: Vec<f64> = cx.iter().zip(&b2).map(|(p, q)| p - q).collect();
+        assert!(
+            norm(&d) <= 1e-12 * norm(&b2).max(norm(&w2.x)),
+            "C x - b {:e}",
+            norm(&d)
+        );
+        // A direction solve (a ≠ 0) is not recycled: identical to the cold one.
+        let gw = projected_gradient(&mut warm, pr.set.layout(), &pr.diff).unwrap();
+        let gc = projected_gradient(&mut cold, pr.set.layout(), &pr.diff).unwrap();
+        assert!(gw.direction == gc.direction);
+        results.push(w2.x);
+    }
+    assert!(
+        results[0] == results[1],
+        "warm starts depend on the thread count"
+    );
+}
+
 #[test]
 fn bad_options_and_inputs_are_errors_not_panics() {
     let (net, pos) = trefoil(80);

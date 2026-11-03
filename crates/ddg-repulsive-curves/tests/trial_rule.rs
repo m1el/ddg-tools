@@ -3,8 +3,8 @@
 
 use ddg_repulsive_curves::ccd::path_contact;
 use ddg_repulsive_curves::{
-    Backend, BhOptions, CcdOptions, CcdReport, CurveNetwork, EnergyEval, FlowOptions, MgOptions,
-    Session, Solver, StepStatus,
+    Backend, BhOptions, CcdOptions, CcdReport, CurveNetwork, EnergyEval, FlowOptions,
+    GROWTH_BACKOFF_MAX, MgOptions, Session, Solver, StepStatus, TrialOutcome,
 };
 
 type P = [f64; 3];
@@ -545,4 +545,63 @@ fn early_abort_stops_hopeless_projections_only() {
         }
     }
     assert!(saw_abort, "no trial was stopped early");
+}
+
+/// The growth back-off of `SPEC.md` §17t: after a step whose grown first trial was rejected, the
+/// next steps start at the previous accepted step size (1, then 2, 4, 8 steps after further
+/// rejections), growth resumes after the wait; every accepted step keeps the constraints; without
+/// the back-off every step tries `min(⅔ τ_max, 2 τ_prev)` first.
+#[test]
+fn growth_backoff_holds_the_start_after_a_rejected_growth() {
+    for backoff in [true, false] {
+        let o = FlowOptions {
+            growth_backoff: backoff,
+            ..options(Solver::Multigrid(small_mg()), 4)
+        };
+        let (net, pos) = trefoil(150);
+        let mut s = Session::new(net, pos, o).unwrap();
+        let (mut prev_tau, mut wait, mut len, mut held, mut rejected) = (None, 0u32, 0u32, 0, 0);
+        for _ in 0..40 {
+            let r = s.step().unwrap();
+            if r.status != StepStatus::Accepted {
+                break;
+            }
+            let tol = 1e-4 * s.mean_edge_length0();
+            assert!(r.max_violation <= tol * (1.0 + 1e-12));
+            if let Some(p) = prev_tau {
+                let cap = r.tau_max.unwrap() * 2.0 / 3.0;
+                if backoff && wait > 0 {
+                    assert!(
+                        r.tau_start <= p * (1.0 + 1e-12),
+                        "step {}: held start {:e} above τ_prev {p:e}",
+                        r.iteration,
+                        r.tau_start
+                    );
+                    wait -= 1;
+                    held += 1;
+                } else {
+                    let want = cap.min(2.0 * p);
+                    assert!(
+                        (r.tau_start - want).abs() <= 1e-12 * want,
+                        "step {}: start {:e}, expected {want:e}",
+                        r.iteration,
+                        r.tau_start
+                    );
+                    if r.tau_start > p && r.trials[0].outcome != TrialOutcome::Accepted {
+                        rejected += 1;
+                        len = (2 * len).clamp(1, GROWTH_BACKOFF_MAX);
+                        wait = len;
+                    } else if r.tau_start > p {
+                        len = 0;
+                    }
+                }
+            }
+            prev_tau = Some(r.tau);
+        }
+        assert!(
+            rejected > 0,
+            "no grown first trial was rejected (backoff {backoff})"
+        );
+        assert_eq!(held > 0, backoff);
+    }
 }
