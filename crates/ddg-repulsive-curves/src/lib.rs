@@ -104,8 +104,8 @@ pub use step::{
     Backend, BarnesHutEnergy, Control, DEFAULT_AUTO_DENSE_MAX_VERTICES,
     DEFAULT_DENSE_FALLBACK_MAX_VERTICES, DEFAULT_DENSE_THREADS, DEFAULT_MIN_EDGE_LENGTH_RATIO,
     DEFAULT_NEWTON_POLISH, DirectSolvers, EnergyModel, ExactEnergy, FlowOptions, FlowReport,
-    FlowResult, PenaltyTerm, RetargetReport, RetargetStatus, Session, Solver, SolverFactory,
-    SolverFallback, SolverRequest, StepReport, Timings, flow, soft_options,
+    FlowResult, GROWTH_BACKOFF_MAX, PenaltyTerm, RetargetReport, RetargetStatus, Session, Solver,
+    SolverFactory, SolverFallback, SolverRequest, StepReport, Timings, flow, soft_options,
 };
 pub use subdivide::{SubdivisionMap, subdivide};
 pub use surfaces::{
