@@ -224,7 +224,9 @@ fn symmetric_kron_apply<'m>(
     x: &[f64],
 ) -> Vec<f64> {
     let mut y = vec![0.0; n * d];
-    let cols: Vec<Vec<f64>> = (0..d).map(|s| (0..n).map(|w| x[w * d + s]).collect()).collect();
+    let cols: Vec<Vec<f64>> = (0..d)
+        .map(|s| (0..n).map(|w| x[w * d + s]).collect())
+        .collect();
     pool.install(|| match d {
         3 => {
             let xs = [&cols[0][..], &cols[1][..], &cols[2][..]];
@@ -359,15 +361,25 @@ impl DenseSaddle {
     /// `Ā x` (`A ⊗ I_d` times an interleaved vector), parallel over vertices, fixed order.
     pub fn apply_metric(&self, x: &[f64]) -> Vec<f64> {
         // A is symmetric and row-major: row v is contiguous.
-        symmetric_kron_apply(&self.pool, self.n_vertices, self.layout.dim(), |v| self.a.row(v), x)
+        symmetric_kron_apply(
+            &self.pool,
+            self.n_vertices,
+            self.layout.dim(),
+            |v| self.a.row(v),
+            x,
+        )
     }
 
     /// `(M⁻¹ ⊗ I_d) x`, parallel over vertices, fixed order.
     fn apply_minv(&self, f: &SchurFactor, x: &[f64]) -> Vec<f64> {
         // M⁻¹ is symmetric: row v = column v (contiguous).
-        symmetric_kron_apply(&self.pool, self.n_vertices, self.layout.dim(), |v| {
-            f.minv.col_as_slice(v)
-        }, x)
+        symmetric_kron_apply(
+            &self.pool,
+            self.n_vertices,
+            self.layout.dim(),
+            |v| f.minv.col_as_slice(v),
+            x,
+        )
     }
 
     /// One solve of the Schur system (module docs), without refinement.

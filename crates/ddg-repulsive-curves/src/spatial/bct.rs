@@ -181,6 +181,59 @@ enum Class {
     Split,
 }
 
+/// The near-field part of one row of the product: `out[c] += Σ_p val_p[map[c]] ψ_{col_p}[c]`,
+/// summed over `p` in order for every channel (the order of the scalar loop, so the result is
+/// bitwise the same). The kernel values of an entry are first spread over the channels, so the
+/// channel loop is a contiguous multiply-add the compiler vectorizes; on x86-64 with AVX the
+/// same code runs with 4-wide vectors (no fused multiply-add: identical rounding).
+#[inline]
+fn near_row<const C: usize, const N: usize>(
+    out: &mut [f64; C],
+    map: &[usize; C],
+    val: &[[f64; N]],
+    col: &[u32],
+    psi: &[[f64; C]],
+) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if std::arch::is_x86_feature_detected!("avx") {
+            // SAFETY: AVX is available (checked at run time).
+            unsafe { near_row_avx(out, map, val, col, psi) };
+            return;
+        }
+    }
+    near_row_generic(out, map, val, col, psi);
+}
+
+#[inline(always)]
+fn near_row_generic<const C: usize, const N: usize>(
+    out: &mut [f64; C],
+    map: &[usize; C],
+    val: &[[f64; N]],
+    col: &[u32],
+    psi: &[[f64; C]],
+) {
+    for (k, &j) in val.iter().zip(col) {
+        let x = &psi[j as usize];
+        let kv: [f64; C] = std::array::from_fn(|c| k[map[c]]);
+        for c in 0..C {
+            out[c] += kv[c] * x[c];
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx")]
+unsafe fn near_row_avx<const C: usize, const N: usize>(
+    out: &mut [f64; C],
+    map: &[usize; C],
+    val: &[[f64; N]],
+    col: &[u32],
+    psi: &[[f64; C]],
+) {
+    near_row_generic(out, map, val, col, psi);
+}
+
 impl<const N: usize> BlockClusterTree<N> {
     /// Builds the block tree of `bvh` for `kernel`, precomputes the far-field coefficients, the
     /// near-field entries and `K𝟙`, on `pool`. Bitwise independent of the pool size (D25).
@@ -529,12 +582,13 @@ impl<const N: usize> BlockClusterTree<N> {
                     for c in 0..C {
                         out[c] = w * g[c];
                     }
-                    for p in self.near_ptr[i]..self.near_ptr[i + 1] {
-                        let (k, x) = (&self.near_val[p], &psi[self.near_col[p] as usize]);
-                        for c in 0..C {
-                            out[c] += k[map[c]] * x[c];
-                        }
-                    }
+                    near_row(
+                        &mut out,
+                        map,
+                        &self.near_val[self.near_ptr[i]..self.near_ptr[i + 1]],
+                        &self.near_col[self.near_ptr[i]..self.near_ptr[i + 1]],
+                        psi,
+                    );
                     out
                 })
                 .collect()
