@@ -39,7 +39,8 @@
 #
 # Every Blender call uses --factory-startup and the scratch user directory; the real user
 # configuration is never read or written. Logs: runs_tmp/blender-test-*.log.
-# Environment: BLENDER (default: blender), CARGO_TARGET_DIR (default: target-py).
+# Environment: BLENDER (default: blender), CARGO_TARGET_DIR (default: target-py). DDG_WHEEL_CUDA=1
+# tests the extension with the CUDA wheel (dist/blender-cuda/); the GPU tests skip without a GPU.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/blender-common.sh"
 
@@ -59,7 +60,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-zip="$root/dist/blender/ddg_uv_unwrap-$(ddg_version).zip"
+zip="$root/dist/blender${DDG_WHEEL_CUDA:+-cuda}/ddg_uv_unwrap-$(ddg_version).zip"
 if [ "$build" = 1 ]; then
     zip="$("$root/scripts/blender-build-extension.sh" | tail -n 1)"
 fi

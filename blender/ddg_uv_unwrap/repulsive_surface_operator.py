@@ -68,6 +68,42 @@ MODE_ITEMS = [
     ('ATTRACT', "Attract", "Empties attract the surface (an implicit attractor)"),
 ]
 
+DEVICE_ITEMS = [
+    ('CPU', "CPU", "Run everything on the CPU (the reference; the default)"),
+    ('CUDA', "CUDA", "Run the hierarchical products and the Barnes-Hut energy on an NVIDIA GPU; "
+     "the flow fails with a message if no usable GPU is found"),
+    ('AUTO', "Auto", "Use an NVIDIA GPU when one is usable, the CPU otherwise"),
+]
+DETERMINISM_ITEMS = [
+    ('RUN_TO_RUN', "Run to Run", "Bitwise the same result on every run (the default); within "
+     "round-off of the CPU result"),
+    ('MATCH_CPU', "Match CPU", "Bit for bit the CPU result (integer exponents; slower)"),
+]
+
+_GPU_INFO = []
+
+
+def gpu_info(refresh=False):
+    """``ddg_tools.gpu_info()`` (cached: it opens the driver), or a dict saying the module is
+    too old or cannot be loaded. Keys: ``cuda_compiled``, ``available``, ``devices``,
+    ``reason``."""
+    if refresh or not _GPU_INFO:
+        try:
+            info = core.native().gpu_info()
+        except (core.UnwrapFailed, AttributeError) as ex:
+            info = {"cuda_compiled": False, "available": False, "devices": [],
+                    "reason": "the native module has no GPU support information ({})".format(ex)}
+        _GPU_INFO[:] = [info]
+    return _GPU_INFO[0]
+
+
+def device_text(device, name):
+    """'CPU' or 'CUDA (name)' for a step report's ``device`` and ``device_name``."""
+    if device == "cuda":
+        return "CUDA ({})".format(name) if name else "CUDA"
+    return "CPU"
+
+
 STATUS_LABELS = {
     "running": "running",
     "converged": "converged",
@@ -177,6 +213,15 @@ def option_properties():
         "steps": IntProperty(name="Steps", default=20, min=0, soft_max=500,
                              description="Steps to take; 0: until convergence (at most the "
                                          "step limit)"),
+        "device": EnumProperty(
+            name="Device", items=DEVICE_ITEMS, default='CPU',
+            description="Where the heavy products of the flow run. CUDA needs the extension to be "
+                        "built with CUDA support and an NVIDIA GPU with its driver"),
+        "cuda_ordinal": IntProperty(name="GPU Index", default=0, min=0, soft_max=8,
+                                    description="Which CUDA device to use (0: the first)"),
+        "gpu_determinism": EnumProperty(
+            name="Determinism", items=DETERMINISM_ITEMS, default='RUN_TO_RUN',
+            description="How reproducible the GPU result is"),
         "threads": IntProperty(name="Threads", default=0, min=0, soft_max=64,
                                description="Native threads (0: the library's choice)"),
     }
@@ -224,6 +269,10 @@ def session_options(settings, surface, penalties, steps=None, ccd=None):
     )
     if settings.threads > 0:
         kwargs["threads"] = settings.threads
+    if settings.device != 'CPU':
+        kwargs["device"] = settings.device.lower()
+        kwargs["cuda_ordinal"] = settings.cuda_ordinal
+        kwargs["gpu_determinism"] = settings.gpu_determinism.lower()
     constraints = []
     if settings.barycenter == 'ON' or (settings.barycenter == 'AUTO' and not surface.pinned):
         constraints.append({"type": "barycenter"})
@@ -291,9 +340,10 @@ def status_text(status):
 
 def summary(stats):
     """One line for the status bar."""
-    return "{} steps, energy {:.6g} -> {:.6g}, {} ({:.2f} s native, {:.2f} s Blender)".format(
+    return "{} steps, energy {:.6g} -> {:.6g}, {} ({:.2f} s native, {:.2f} s Blender), on {}".format(
         stats["steps"], stats["energy_before"], stats["energy_after"],
-        status_text(stats["status"]), stats["seconds_native"], stats["seconds_blender"])
+        status_text(stats["status"]), stats["seconds_native"], stats["seconds_blender"],
+        stats.get("device", "CPU"))
 
 
 def _write_snapshot(surface, snap):
@@ -336,6 +386,7 @@ def flow_object(obj, settings, depsgraph, *, steps=None, progress=None):
             "n_vertices": len(snap["positions"]) // 3, "n_faces": len(snap["faces"]) // 3,
             "seconds_native": t2 - t1, "seconds_blender": (t1 - t0) + (perf_counter() - t2),
             "description": surface.description,
+            "device": device_text(last.get("device"), last.get("device_name")),
         }
     except Exception:
         # nothing was written before the failure, except possibly by write itself
@@ -364,6 +415,7 @@ class LiveFlow:
         self.surface = surface
         self.session = session
         self.energy0 = session.energy
+        self.settings_device = "CPU"
         self.thread = None
         self.thread_done = False
         self.applied = -1
@@ -377,7 +429,9 @@ class LiveFlow:
     @classmethod
     def create(cls, obj, settings, depsgraph):
         surface, session = make_session(obj, settings, depsgraph)
-        return cls(surface, session)
+        flow = cls(surface, session)
+        flow.settings_device = {'CPU': "CPU", 'CUDA': "CUDA", 'AUTO': "Auto"}[settings.device]
+        return flow
 
     # -- thread
 
@@ -437,6 +491,8 @@ class LiveFlow:
         if gradient is not None:
             text += "   gradient {:.3g}".format(gradient)
         text += "   {}".format(status_text(status))
+        if self.last_report:
+            text += "   on {}".format(self.device_text())
         return text + "   [Enter / right click: accept, Esc: cancel]"
 
     def finish(self):
@@ -459,7 +515,16 @@ class LiveFlow:
             "n_vertices": len(snap["positions"]) // 3, "n_faces": len(snap["faces"]) // 3,
             "seconds_native": self.native_seconds, "seconds_blender": self.blender_seconds,
             "description": self.surface.description,
+            "device": self.device_text(),
         }
+
+    def device_text(self):
+        """'CPU' or 'CUDA (name)': the device of the last completed step (the session's
+        setting before the first one)."""
+        report = self.last_report
+        if report:
+            return device_text(report.get("device"), report.get("device_name"))
+        return self.settings_device
 
     def cancel(self):
         """Stops and puts the mesh back exactly as it was."""
@@ -539,6 +604,24 @@ def draw_advanced(layout, settings):
     layout.use_property_decorate = False
     layout.prop(settings, "metric")
     layout.prop(settings, "barycenter_shift")
+    box = layout.box()
+    box.label(text="GPU")
+    info = gpu_info()
+    col = box.column()
+    col.enabled = bool(info["available"])
+    col.prop(settings, "device")
+    sub = col.column()
+    sub.active = settings.device != 'CPU'
+    sub.prop(settings, "cuda_ordinal")
+    sub.prop(settings, "gpu_determinism")
+    if info["available"]:
+        names = ", ".join("{}: {}".format(d["ordinal"], d["name"]) for d in info["devices"])
+        box.label(text=names, icon='INFO')
+    else:
+        box.label(text="CUDA is not available:", icon='ERROR')
+        box.label(text=info["reason"] or "no usable GPU")
+        if not info["cuda_compiled"]:
+            box.label(text="(Build the extension with DDG_WHEEL_CUDA=1.)")
 
 
 def _report_warnings(operator, warnings):
