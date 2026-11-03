@@ -602,6 +602,12 @@ search, or more than 1.5× slower to the 1.1×-reference energy, the numbers go 
 The start is a `StartRule` (§17f): `TwoThirdsTauMax` (the paper's) or `GrowPrevious { factor }`,
 `τ₀ = min(⅔ τ_max, factor · τ_prev)` (the paper's rule on the first step). Both keep every trial
 bounded by `τ_max` and checked by the CCD. **The default is `GrowPrevious { factor: 2 }`** (§17f).
+**Growth back-off (default, §17t; not in the paper).** `FlowOptions::growth_backoff`: after a step
+whose first trial was grown beyond `τ_prev` and rejected, the next `w` steps start at
+`min(⅔ τ_max, τ_prev)`; `w = 1` after the first such rejection, doubled after each further one
+(at most `GROWTH_BACKOFF_MAX = 8`), back to 0 once a grown first trial is accepted. It only
+lowers the first trial of some steps; every trial is still projected, CCD-checked and tested by
+Armijo, so the guarantees of this section are unchanged.
 
 ### 7.4 Continuous collision detection (D11)
 
@@ -721,7 +727,11 @@ remaining iterations use flexible CG with the V-cycle as preconditioner (Notay 2
 [formula: rc-multigrid]
 
 **Uses.** Gradient: Eq. 30 with `a = dFᵀ`, `g̃ = P y`. Projection: Eq. 33, one multigrid solve
-per chord iteration (no factorization to reuse; Sec. 7.4).
+per chord iteration (no factorization to reuse; Sec. 7.4). **Warm starts (default, §17t):**
+the projection solves of one step keep their right sides (orthonormalized) and solutions; the
+next one starts from `x₀ + C†(b − C x₀)`, `x₀` the least-squares combination of the kept
+solutions, and iterates until the residual and the energy estimate meet the targets of the cold
+solve (`MgOptions::recycle_projections`; `vcycle::solve_with_reference`).
 
 ### 8.5 Back ends
 
@@ -733,7 +743,8 @@ session's start and again after each live subdivision. Dense solve (§17l): the 
 method of §17b, a Cholesky factorization of `A + ρ u uᵀ` (`u = 𝟙/√|V|`) and its inverse, the
 `k × k` Schur complement `C (M⁻¹ ⊗ I₃) Cᵀ` (Cholesky) and a `3 × 3` block for the translations,
 one step of iterative refinement per solve (`DenseMethod::Schur`, about 30× fewer flops than the
-LU); it falls back to one LU with partial pivoting (`faer`, multithreaded) of the `(3|V| + k)`
+LU; the products with `M⁻¹` and `A` run as contiguous dot products in fixed lanes, `S` is
+assembled in its lower triangle only, §17t); it falls back to one LU with partial pivoting (`faer`, multithreaded) of the `(3|V| + k)`
 saddle matrix (`DenseMethod::Lu`) when a Cholesky factor fails or is nearly singular, so singular
 saddles are reported as before. The factorization is reused for Eq. 22 and every chord
 iteration. The L², H¹, H² metrics use a sparse LU of their saddle matrices (`ddg_core::sparse`).
@@ -761,7 +772,8 @@ pub struct BhOptions { pub theta_x: f64, pub theta_t: f64, pub leaf_size: usize 
 pub struct BctOptions { pub theta_x: f64, pub theta_t: f64, pub leaf_pairs: usize }
 pub struct MgOptions { pub bct: BctOptions, pub coarsest_vertices: usize, pub max_levels: usize,
                        pub smoothing_steps: usize, pub tolerance: f64, pub max_cycles: usize,
-                       /* … §17g options … */ pub max_threads: Option<usize> }   // default Some(16) (§17l)
+                       /* … §17g options … */ pub max_threads: Option<usize>,   // default Some(16) (§17l)
+                       pub recycle_projections: bool }                         // default true (§17t)
 pub enum DenseMethod { Schur, Lu }                        // DenseSaddle::with_method; default Schur (§17l)
 pub enum EnergyEval { Exact, BarnesHut(BhOptions) }
 pub enum Solver { Dense, Multigrid(MgOptions), Custom(Arc<dyn SolverFactory>) }
@@ -811,6 +823,9 @@ pub struct FlowOptions {
     pub second_order_correction: bool,                 // default false; trials γ − τp + τ²q (§17l)
     pub newton_polish: Option<f64>,                    // default Some(100); Newton steps below 100 tol (§17l)
     pub projection_early_abort: bool,                  // default true; rate test of the chord projection (§17l)
+    pub stuck_projected_reference: bool,               // default false (§17p)
+    pub stuck_retry_chord: bool,                       // default true (§17p, §18 Q10)
+    pub growth_backoff: bool,                          // default true; back-off of the grow-previous start (§17t)
 }
 
 pub struct EnergyReport { pub energy: f64, pub penalties: Vec<f64>, pub differential: Vec<[f64; 3]>,
@@ -943,6 +958,8 @@ end-to-end table script (§14.5).
 | BCT | `theta_x 0.5, theta_t 0.5, leaf_pairs 64` | reference `sep = 1.0` on `diag/(d − r)` ≈ `r/d ≲ 0.5`; measured as above |
 | multigrid | coarsest 512 vertices, 20 levels max, 12+12 CG smoothing (24 in the start), FCG, tol 1e-3, 20 cycles | paper B.3.1 (≤ 6 V-cycles to 1e-3); 512 vertices = a small dense coarsest solve, milliseconds; 12+12 with FCG measured in WP6 |
 | multigrid BCT | `theta_x 0.25, theta_t 2` (position-only admissibility), `leaf_pairs 64` | §17l: the reference's rule; `theta_t 0.25` leaves the trees of the perturbed knot nearly dense; direction error against dense 2e-3–8.5e-3 (< 1e-2 of §13.4), 2.3–2.8× faster on knot 96 |
+| growth back-off | `growth_backoff true` (hold the start at `τ_prev` for 1, 2, 4, 8 steps after a rejected grown trial) | §17t: fewer rejected first trials, the same or lower energies at fixed steps on the 24-knot subset |
+| projection warm starts | `MgOptions::recycle_projections true` | §17t: the projection solves of a step start from the earlier ones', with the cold solve's targets |
 | multigrid threads | `max_threads Some(16)` | §17l: the hierarchy's products and projections stop gaining past 8–16 threads and get slower at 64 (§17k); results do not depend on it |
 | dense solver | Schur complement, LU fallback | §17l: same solutions as the LU to 1e-13 relative, residual as small or smaller, bitwise across thread counts, 15× faster at 2048 vertices on one thread |
 | back end | `Auto { dense_max_vertices: 2500 }` | measured alone in §17l (Schur dense solve): exact + dense and BH + multigrid cost the same per step at about 2000 vertices (8 threads) and 3000 (64 threads); exact + dense is the reference computation and wins the tie (§17k had 1500 with the LU, §17h 2000 under load) |
