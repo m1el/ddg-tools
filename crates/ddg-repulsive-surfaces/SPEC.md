@@ -1177,6 +1177,21 @@ Rounds (≤ 3 agents; timed work alone at the end):
   shape (both programs agree on it, `NOTES-FIDELITY.md`), and g = 8, 10, 11 end elongated — not the
   paper's polyhedral symmetries for those genera (one start per genus; the linear start may lead to
   a different local minimizer).
+* **Genus 11 and the dodecahedron (`NOTES-DODECA.md`, `examples/dodeca.rs`, `runs_tmp/dodeca/`):**
+  the authors' program does not reach the dodecahedron from our linear row of handles either; it
+  ends in the same lumpy, elongated shape class as ours. A start around the edge skeleton of a regular
+  dodecahedron (30 − 20 + 1 = 11 handles) settles in both programs into a near-dodecahedral shape
+  with lower energy and is stable under perturbation. Exact energy at equal area (173.43), final /
+  polished (300 more steps without remeshing): ours row 82.63 / 71.48, reference row 80.37 / 71.59,
+  ours dodecahedral 75.9–76.2 / 68.24, reference dodecahedral 75.15 / 68.27 — the two programs agree
+  to 0.15 % once polished, and the dodecahedron is 4.5 % (polished) to 8 % below the row result.
+  No row-type start reached it (8 perturbed rows, a ladder of 11 rings and 2 perturbed ladders with
+  ours; the ladder and 2 perturbed rows with the reference, which blew up above 1e6 on the two
+  strongest perturbations while ours untangled them). `reference_compat`, `θ = 0.25` and long runs do
+  not change the outcome: no setting of either program decides it. Fig. 15's g = 11 shape most likely
+  came from a different (symmetric) start; the paper gives no start mesh or step count. Remeshing
+  every step stretches the dodecahedral states by 7–9 % along a wandering axis in both programs;
+  polishing removes most of it (moments within 0.8 % for the reference, 2 % for ours).
 * **Showcase (2026-11-02, `showcase/repulsive-surfaces/render.py`, `showcase/README.md`):** the Fig. 16
   sheet is from the rerun; the genus sheet uses WP15's 800-step frames (g = 3, 7–11 not converged; the
   converged g = 3 run of the fidelity study kept no frames); the handle-off-the-pole isotopy (Fig. 18)
