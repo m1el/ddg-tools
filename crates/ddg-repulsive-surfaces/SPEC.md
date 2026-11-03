@@ -537,6 +537,26 @@ a test.
 Threads: `FlowOptions::threads` (explicit pool); results bitwise identical for any thread count
 (a test at 1, 3, 8 threads).
 
+### 8.5 GPU back end (optional; GPU-1, 2026-11-03)
+
+Cargo feature `cuda` (off by default; `cudarc` with the CUDA driver and NVRTC opened at run time,
+kernels in `src/gpu/kernels.cu` compiled for the device on first use). `HierarchicalOptions::device:
+Device` = `Cpu` (default) | `Cuda(CudaOptions { ordinal, determinism })` | `Auto(..)`; `Cuda` is
+`RsError::Gpu` when not usable (no feature, driver, device or NVRTC), `Auto` falls back to the CPU.
+A `Session` opens one `GpuContext` and passes it explicitly; no global state. On the GPU: the
+products of `B̃`, `B̃⁰` with `O_diag` and of the vertex-pair `L̃^V_{2−s}` (§8.3), the near fields
+and `H̃a` (level 1), the Barnes–Hut energy and exact gradient (§3.4, §8.2). On the CPU: GMRES,
+`L′` and its solves, tree structures and far coefficients, constraints, CCD, remeshing; the face-pair
+`L_{2−s}` and the obstacles' evaluators. Determinism: every kernel is one thread per output in the
+CPU's operation order, gathers only; level 1 (`RunToRun`, default) is bitwise reproducible on any
+device; level 2 (`MatchCpu`: `--fmad=false`, CPU-built near fields, Barnes–Hut on the device only
+for integer `α`, `β`) is bitwise the CPU flow. Measured (RTX 4080, 4 CPU threads): products
+10–12× the CPU at 4 threads (6.4–9× at 16), whole steps 1.5–2.1× (Fig. 13 suite; 45k figure-8
+tunnel 3.2 → 1.5 s, 135k 11.3 → 5.6 s), GMRES iterations unchanged; the `L′` solves are then
+32–43 % of a step.
+
+Binding: `cudarc` + NVRTC; NVIDIA's own Rust CUDA work (cuda-oxide, cutile-rs) was checked first at the user's request and needs a CUDA 13 toolkit, a pinned toolchain with a custom compiler backend and LLVM 21 — not available here and outside the workspace's stable-Rust rule (`NOTES-GPU.md`). Next steps: a GPU-friendly preconditioner (the `L′` back-substitutions are then the largest share), parallel remeshing, `Device` in Python and Blender.
+
 ## 9. Public API
 
 ### 9.1 Rust (`ddg_repulsive_surfaces`)
@@ -745,6 +765,7 @@ internal error with the step's data (never silently repaired).
 | D28 | AQP | Kovalsky et al. 2016 | κ = 100 fixed, current Laplacian, no safeguards | κ = 100, current Laplacian (remeshing changes the rest pose), momentum reset on energy increase and remeshing |
 | D29 | stop rule | — | iteration/time limit only | + energy stall (§7.4) |
 | D30 | shared code | — | — | depend on `ddg-repulsive-curves` (its SPEC §16 had proposed extracting a shared crate; the generic parts are public and stable, so we use them in place and do not edit that verified crate) |
+| D34 | GPU acceleration | — | — (CPU only) | optional `cuda` feature, explicit `Device`; products, near fields, Barnes–Hut on the device; level 1 bitwise reproducible, level 2 bitwise the CPU (§8.5) |
 | D33 | preconditioner form | `L′⁻¹ L_{2−s} L′⁻¹` | same, multipliers zeroed | augmented `L′⁻¹ [[L_{2−s}, C_Qᵀ],[C_Q, 0]] L′⁻¹` (§6.3); printed form as reference mode |
 | D32 | preconditioner's `L_{2−s}` | face form | face form, left GMRES | vertex pairs (§6.3); face form as reference mode |
 | D31 | Fig. 12 meshes | not published | not in the repo | generated analogues at the paper's face counts (§14.4), recorded as such |
@@ -961,6 +982,9 @@ Per-step time at 4 threads on the 14 Fig. 13 models (or analogues at the same fa
 least as fast as the paper (≈ linear, ≈ 2.5 s/step at 45k faces on a Threadripper 3990X); plus
 thread scaling (1–64) and a breakdown (BVH, energy, gradient, factor, GMRES products, line search,
 remesh). Benches are plain `harness = false` mains printing CSV, run alone.
+
+With `Device::Cuda` (RTX 4080, GPU-1) all 14 Fig. 13 models are below the paper's times
+(0.11–1.44 s/step), the 45k figure-8 tunnel 1.44–1.58 s against the paper's ≈ 2.7 s.
 
 ### 14.6 Blender end-to-end
 
