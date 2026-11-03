@@ -624,7 +624,8 @@ fn preconditioner_matches_cpu() {
         component: None,
         target: None,
     };
-    let cases: Vec<(&str, Surface, Vec<[f64; 3]>, Vec<Constraint>, BarycenterMode)> = {
+    type Case<'a> = (&'a str, Surface, Vec<[f64; 3]>, Vec<Constraint>, BarycenterMode);
+    let cases: Vec<Case> = {
         let (s, p) = mesh(3000, 1);
         let (s2, p2) = two_tori(3000);
         let pins = Constraint::Pins {

@@ -218,6 +218,21 @@ pub fn run(
 ) -> R<(Outcome, Session, Frames)> {
     opts.threads = Some(cfg.threads);
     opts.max_iterations = cfg.n(opts.max_iterations);
+    // GPU-2 regression runs: RS_DEVICE=L1|L2 runs the hierarchical back end on CUDA device 0 at
+    // that determinism level; RS_TRIANGULAR=faer uses faer's L' solves (NOTES-GPU2.md).
+    if let ddg_repulsive_surfaces::Backend::Auto { hierarchical: h, .. } | ddg_repulsive_surfaces::Backend::Hierarchical(h) =
+        &mut opts.backend
+    {
+        use ddg_repulsive_surfaces::gpu::{CudaOptions, Determinism, Device};
+        match std::env::var("RS_DEVICE").as_deref() {
+            Ok("L1") => h.device = Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::RunToRun }),
+            Ok("L2") => h.device = Device::Cuda(CudaOptions { ordinal: 0, determinism: Determinism::MatchCpu }),
+            _ => {}
+        }
+        if std::env::var("RS_TRIANGULAR").as_deref() == Ok("faer") {
+            h.preconditioner.triangular = ddg_repulsive_surfaces::solve::precond::TriangularSolve::Faer;
+        }
+    }
     let (a0, v0) = area_volume(surface.faces(), &positions);
     let faces0 = surface.n_faces();
     let io = |p: &Path, e: std::io::Error| RsError::Io { path: p.display().to_string(), message: e.to_string() };
