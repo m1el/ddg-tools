@@ -123,6 +123,8 @@ pub struct Timings {
     pub fractional_tree: f64,
     /// Part of `factor`: assembly and sparse `LDLᵀ` of the preconditioner's `L′`.
     pub lprime: f64,
+    /// Part of `factor`: the uploads of the trees to the GPU (`NOTES-GPU.md`; 0 on the CPU).
+    pub gpu_upload: f64,
     /// The Schur columns and the direction (GMRES or back substitutions).
     pub solve: f64,
     /// Part of `solve`: the applications of the preconditioner (hierarchical back end).
@@ -280,6 +282,8 @@ pub struct Session {
     eff: FlowOptions,
     mode: BarycenterMode,
     pool: Arc<rayon::ThreadPool>,
+    /// The GPU of `HierarchicalOptions::device`, opened once per session (`NOTES-GPU.md`).
+    gpu: Option<Arc<crate::gpu::GpuContext>>,
     surface: Surface,
     positions: Vec<[f64; 3]>,
     penalties: Vec<Penalty>,
@@ -376,6 +380,10 @@ impl Session {
             p.validate(&surface)?;
         }
         let pool = Arc::new(make_pool(eff.threads)?);
+        let gpu = match eff.backend {
+            crate::Backend::Hierarchical(h) | crate::Backend::Auto { hierarchical: h, .. } => h.device.resolve()?,
+            crate::Backend::Dense => None,
+        };
         let mode = eff.resolved_barycenter_mode();
         let set = ConstraintSet::new(&surface, &positions, &eff.constraints, mode)?;
         // Resolve: explicit targets per row group.
@@ -520,6 +528,7 @@ impl Session {
             eff,
             mode,
             pool,
+            gpu,
             face_origin: (0..surface.n_faces() as u32).collect(),
             surface,
             positions,
@@ -569,6 +578,7 @@ impl Session {
             self.eff.energy_eval,
             self.eff.tp_weight,
             &self.penalties,
+            self.gpu.as_ref(),
         )
     }
 
@@ -819,6 +829,7 @@ impl Session {
             &eff.backend,
             obj.bh_tree().map(|t| t.face_tree()),
             bh_leaf,
+            self.gpu.as_ref(),
         )?;
         seconds.factor += t.elapsed().as_secs_f64();
         let t = Instant::now();
@@ -1079,6 +1090,7 @@ impl Session {
             seconds.fractional_tree = t[1];
             seconds.lprime = t[2];
             seconds.preconditioner = t[3];
+            seconds.gpu_upload = t[4];
         }
         let mut dropped_rows: Vec<usize> = set.dropped_rows().to_vec();
         dropped_rows.extend(proj.dropped_rows.iter().copied());

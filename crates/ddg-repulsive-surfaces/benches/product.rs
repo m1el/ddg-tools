@@ -9,6 +9,11 @@
 //! ```
 //!
 //! `SPEC`: `torus:FACES` (default `torus:45000`) or an OBJ path. Times are the median of `reps`.
+//!
+//! `--gpu` (needs `--features cuda` and a device, `NOTES-GPU.md`) adds one row per determinism
+//! level after the CPU rows: the upload of the metric tree, the GPU products with 1–4 vectors,
+//! the upload of the vertex tree and its products with 1–2 vectors, and the CPU vertex products
+//! at the last thread count for comparison (prefix `gpu-L1` / `gpu-L2`).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,6 +22,7 @@ use ddg_core::generators::{perturb, torus};
 use ddg_repulsive_surfaces::constraints::{BarycenterMode, Constraint, ConstraintSet};
 use ddg_repulsive_surfaces::energy::exact::make_pool;
 use ddg_repulsive_surfaces::geometry::mean_edge_length;
+use ddg_repulsive_surfaces::gpu::{CudaOptions, Determinism, GpuContext};
 use ddg_repulsive_surfaces::metric::hierarchical::{ClusterTreeOptions, FaceMetricTree, VertexFractionalTree};
 use ddg_repulsive_surfaces::solve::LinearOperator;
 use ddg_repulsive_surfaces::solve::Preconditioner;
@@ -55,6 +61,7 @@ fn main() {
     let mut mesh = "torus:45000".to_string();
     let mut threads = vec![1usize, 4, 16];
     let mut reps = 5;
+    let mut gpu = false;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -63,6 +70,7 @@ fn main() {
                  vertex_tree_ms,precond_build_ms,precond1_ms,precond2_ms"
             ),
             "--bench" => {}
+            "--gpu" => gpu = true,
             "--mesh" => {
                 mesh = argv[i + 1].clone();
                 i += 1;
@@ -93,6 +101,7 @@ fn main() {
     )
     .expect("constraints");
     let cq = set.jacobian(&p, &set.positional_rows()).expect("jacobian");
+    let mut last = None;
     for &t in &threads {
         let pool = Arc::new(make_pool(Some(t)).expect("pool"));
         let opts = ClusterTreeOptions::default();
@@ -154,5 +163,76 @@ fn main() {
             pre[0],
             pre[1]
         );
+        last = Some((pool, tree));
+    }
+    if gpu {
+        let (pool, tree) = last.expect("at least one thread count");
+        println!(
+            "gpu,faces,level,upload_ms,product1_ms,product2_ms,product3_ms,product4_ms,vertex_upload_ms,\
+             vertex1_ms,vertex2_ms,cpu_vertex1_ms,cpu_vertex2_ms,max_rel_diff_product2"
+        );
+        let vt = VertexFractionalTree::for_surface(&pool, &s, &p, 2.0 - ex.s(), &ClusterTreeOptions::default())
+            .expect("vertex tree");
+        let mut cpu_v = [0.0; 2];
+        for (k, ck) in cpu_v.iter_mut().enumerate() {
+            let xr: Vec<&[f64]> = xs[..=k].iter().map(Vec::as_slice).collect();
+            let mut ys: Vec<Vec<f64>> = vec![vec![0.0; nd]; k + 1];
+            *ck = median_ms(reps, || {
+                let mut yr: Vec<&mut [f64]> = ys.iter_mut().map(Vec::as_mut_slice).collect();
+                vt.apply_batch(&pool, &xr, &mut yr).expect("vertex product");
+            });
+        }
+        let xr2: Vec<&[f64]> = xs[..2].iter().map(Vec::as_slice).collect();
+        let mut cpu_y = vec![vec![0.0; nd]; 2];
+        {
+            let mut yr: Vec<&mut [f64]> = cpu_y.iter_mut().map(Vec::as_mut_slice).collect();
+            tree.apply_batch(&pool, 1.0, 1.0, None, &xr2, &mut yr).expect("product");
+        }
+        for (name, det) in [("gpu-L1", Determinism::RunToRun), ("gpu-L2", Determinism::MatchCpu)] {
+            let ctx = GpuContext::new(&CudaOptions { ordinal: 0, determinism: det }).unwrap_or_else(|e| panic!("{e}"));
+            let mut dev = None;
+            let up = median_ms(reps.min(3), || dev = Some(tree.upload(&ctx, None).expect("upload")));
+            let dev = dev.expect("uploaded");
+            let mut prod = [0.0; 4];
+            for (k, pk) in prod.iter_mut().enumerate() {
+                let xr: Vec<&[f64]> = xs[..=k].iter().map(Vec::as_slice).collect();
+                let mut ys: Vec<Vec<f64>> = vec![vec![0.0; nd]; k + 1];
+                *pk = median_ms(reps, || {
+                    let mut yr: Vec<&mut [f64]> = ys.iter_mut().map(Vec::as_mut_slice).collect();
+                    dev.apply_batch(1.0, 1.0, &xr, &mut yr).expect("gpu product");
+                });
+            }
+            let mut gy = vec![vec![0.0; nd]; 2];
+            {
+                let mut yr: Vec<&mut [f64]> = gy.iter_mut().map(Vec::as_mut_slice).collect();
+                dev.apply_batch(1.0, 1.0, &xr2, &mut yr).expect("gpu product");
+            }
+            let scale = cpu_y.iter().flatten().fold(0.0f64, |m, v| m.max(v.abs()));
+            let diff = gy.iter().flatten().zip(cpu_y.iter().flatten()).fold(0.0f64, |m, (a, b)| m.max((a - b).abs())) / scale;
+            let mut vdev = None;
+            let vup = median_ms(reps.min(3), || vdev = Some(vt.upload(&ctx).expect("vertex upload")));
+            let vdev = vdev.expect("uploaded");
+            let mut vp = [0.0; 2];
+            for (k, pk) in vp.iter_mut().enumerate() {
+                let xr: Vec<&[f64]> = xs[..=k].iter().map(Vec::as_slice).collect();
+                let mut ys: Vec<Vec<f64>> = vec![vec![0.0; nd]; k + 1];
+                *pk = median_ms(reps, || {
+                    let mut yr: Vec<&mut [f64]> = ys.iter_mut().map(Vec::as_mut_slice).collect();
+                    vdev.apply_batch(&xr, &mut yr).expect("gpu vertex product");
+                });
+            }
+            println!(
+                "{name},{},{det:?},{up:.1},{:.2},{:.2},{:.2},{:.2},{vup:.1},{:.2},{:.2},{:.2},{:.2},{diff:.2e}",
+                s.n_faces(),
+                prod[0],
+                prod[1],
+                prod[2],
+                prod[3],
+                vp[0],
+                vp[1],
+                cpu_v[0],
+                cpu_v[1]
+            );
+        }
     }
 }

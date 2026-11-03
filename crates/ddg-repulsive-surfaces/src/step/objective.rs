@@ -77,12 +77,17 @@ impl<'a> Objective<'a> {
         eval: EnergyEval,
         tp_weight: f64,
         penalties: &'a [Penalty],
+        gpu: Option<&Arc<crate::gpu::GpuContext>>,
     ) -> Result<Objective<'a>, RsError> {
         let t0 = std::time::Instant::now();
         let tp = match (energy, eval) {
             (Energy::TangentPoint, EnergyEval::Exact) => TpEval::Exact,
             (Energy::TangentPoint, EnergyEval::BarnesHut(o)) => {
-                TpEval::Bh(Box::new(BhTree::build(pool, surface, positions, o)?))
+                let mut t = BhTree::build(pool, surface, positions, o)?;
+                if let Some(g) = gpu {
+                    t.attach_gpu(g)?;
+                }
+                TpEval::Bh(Box::new(t))
             }
             _ => TpEval::None,
         };
@@ -168,7 +173,7 @@ impl<'a> Objective<'a> {
                     let ev = tree.energy_and_differential(pool, &self.exponents)?;
                     (ev.energy, Some(ev.differential))
                 } else {
-                    (tree.energy(pool, &self.exponents), None)
+                    (tree.try_energy(pool, &self.exponents)?, None)
                 }
             }
             (TpEval::None, Energy::Coulomb { alpha }) => {

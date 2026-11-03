@@ -44,6 +44,7 @@ pub mod energy;
 pub mod error;
 pub mod generate;
 pub mod geometry;
+pub mod gpu;
 pub mod implicit;
 pub mod io;
 pub mod kernel;

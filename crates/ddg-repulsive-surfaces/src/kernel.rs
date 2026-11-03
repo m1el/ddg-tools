@@ -138,6 +138,12 @@ impl Exponents {
         4.0 + self.alpha - self.beta
     }
 
+    /// `(α, β)` as integers when they are (the kernels then use [`ipow`]; the GPU back end
+    /// reproduces those operations bit for bit, `NOTES-GPU.md`).
+    pub(crate) fn int_exponents(&self) -> (Option<u32>, Option<u32>) {
+        (self.alpha_int, self.beta_int)
+    }
+
     /// `(|ν|^α, sign(ν)|ν|^{α−1})`.
     #[inline(always)]
     fn nu_powers(&self, nu: f64) -> (f64, f64) {

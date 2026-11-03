@@ -13,6 +13,13 @@ ddg-core = { path = "../ddg-core" }
 ddg-repulsive-curves = { path = "../ddg-repulsive-curves" }
 faer = { version = "0.24.4", default-features = false, features = ["std", "rayon", "sparse-linalg"] }
 rayon = "1.10"
+# GPU back end (`NOTES-GPU.md`): the CUDA driver and NVRTC are opened at run time (`dynamic-loading`),
+# so building with `--features cuda` needs no CUDA installation; running needs a driver and libnvrtc 12.
+cudarc = { version = "0.19.10", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12040"] }
+
+[features]
+# The CUDA back end of the hierarchical products (off by default; the CPU path is the reference).
+cuda = ["dep:cudarc"]
 
 [[bench]]
 name = "ccd"

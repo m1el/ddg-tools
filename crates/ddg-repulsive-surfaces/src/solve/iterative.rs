@@ -38,6 +38,7 @@ use super::precond::{PreconditionerOptions, SparsePreconditioner};
 use super::SaddleSolver;
 use crate::error::RsError;
 use crate::geometry::{FaceGeometry, cotan_stiffness, vertex_areas};
+use crate::gpu::{Device, GpuContext, GpuFaceMetric};
 use crate::kernel::Exponents;
 use crate::metric::dense::{dense_metric, willmore_matrix};
 use crate::metric::hierarchical::{ClusterTreeOptions, FaceMetricTree};
@@ -131,6 +132,9 @@ pub struct HierarchicalOperator {
     obstacle: Option<FaceDiagonal>,
     c: SparseMatrix,
     ct: SparseMatrix,
+    /// The GPU copy of `tree` with the obstacle diagonal ([`HierarchicalOperator::with_gpu`]).
+    gpu: Option<GpuFaceMetric>,
+    upload_seconds: f64,
     applications: AtomicUsize,
     nanos: AtomicU64,
 }
@@ -188,9 +192,33 @@ impl HierarchicalOperator {
             obstacle,
             c: c.clone(),
             ct: c.transpose(),
+            gpu: None,
+            upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
             nanos: AtomicU64::new(0),
         })
+    }
+
+    /// Runs the metric's tree products on the GPU of `gpu` (uploads the tree and the obstacle
+    /// diagonal; `NOTES-GPU.md`). The Willmore term and the constraint rows stay on the CPU.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn with_gpu(mut self, gpu: &Arc<GpuContext>) -> Result<HierarchicalOperator, RsError> {
+        let t0 = Instant::now();
+        self.gpu = Some(self.tree.upload(gpu, self.obstacle.as_ref())?);
+        self.upload_seconds = t0.elapsed().as_secs_f64();
+        Ok(self)
+    }
+
+    /// Whether the tree products run on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        self.gpu.is_some()
+    }
+
+    /// Seconds of the GPU upload (0 on the CPU).
+    pub fn upload_seconds(&self) -> f64 {
+        self.upload_seconds
     }
 
     /// The metric tree.
@@ -224,14 +252,17 @@ impl HierarchicalOperator {
     /// [`RsError::InvalidOption`] for wrong lengths.
     pub fn apply_metric(&self, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
         let w = self.weights.tp_weight;
-        self.tree.apply(
-            &self.pool,
-            w,
-            w * self.weights.c_lo(),
-            self.obstacle.as_ref(),
-            x,
-            y,
-        )?;
+        match &self.gpu {
+            Some(g) => g.apply_batch(w, w * self.weights.c_lo(), &[x], &mut [y])?,
+            None => self.tree.apply(
+                &self.pool,
+                w,
+                w * self.weights.c_lo(),
+                self.obstacle.as_ref(),
+                x,
+                y,
+            )?,
+        }
         if let Some(m) = &self.willmore {
             add_kron3(m, x, y);
         }
@@ -265,14 +296,17 @@ impl LinearOperator for HierarchicalOperator {
             let xp: Vec<&[f64]> = xs.iter().map(|x| &x[..nd]).collect();
             let mut yp: Vec<&mut [f64]> = ys.iter_mut().map(|y| &mut y[..nd]).collect();
             let w = self.weights.tp_weight;
-            self.tree.apply_batch(
-                &self.pool,
-                w,
-                w * self.weights.c_lo(),
-                self.obstacle.as_ref(),
-                &xp,
-                &mut yp,
-            )?;
+            match &self.gpu {
+                Some(g) => g.apply_batch(w, w * self.weights.c_lo(), &xp, &mut yp)?,
+                None => self.tree.apply_batch(
+                    &self.pool,
+                    w,
+                    w * self.weights.c_lo(),
+                    self.obstacle.as_ref(),
+                    &xp,
+                    &mut yp,
+                )?,
+            }
         }
         for (x, y) in xs.iter().zip(ys.iter_mut()) {
             let (xp, xl) = x.split_at(nd);
@@ -329,6 +363,9 @@ pub struct HierarchicalOptions {
     /// [`obstacle_vertex_matrix`]) to the preconditioner's Laplacian block (default `false`,
     /// `NOTES-WP17.md`).
     pub obstacle_in_preconditioner: bool,
+    /// Where the block-cluster-tree products run (default [`Device::Cpu`]; `NOTES-GPU.md`):
+    /// with a GPU, the products of `B̃`, `B̃⁰` and of the vertex-pair `L̃^V_{2−s}`.
+    pub device: Device,
 }
 
 impl HierarchicalOptions {
@@ -353,6 +390,7 @@ impl Default for HierarchicalOptions {
             preconditioner: PreconditionerOptions::default(),
             willmore_in_preconditioner: false,
             obstacle_in_preconditioner: false,
+            device: Device::Cpu,
         }
     }
 }
@@ -406,11 +444,13 @@ pub type HierarchicalSaddle = GmresSaddle<HierarchicalOperator, SparsePreconditi
 
 /// Builds the hierarchical solver of one step: the face tree (or `face_tree`, which must be of
 /// the same positions, e.g. the Barnes–Hut tree's), the block cluster tree of `B`, `B⁰`, the
-/// operator `A′` with the extras, `L′` (sparse `LDLᵀ`) and the `L_{2−s}` tree.
+/// operator `A′` with the extras, `L′` (sparse `LDLᵀ`) and the `L_{2−s}` tree. A GPU asked
+/// for by `options.device` is opened here ([`Device::resolve`]: a new context per call; a
+/// flow keeps one, [`hierarchical_saddle_with`]).
 ///
 /// # Errors
 /// The errors of [`FaceMetricTree::build`], [`HierarchicalOperator::new`],
-/// [`SparsePreconditioner::new`] and [`GmresSaddle::new`].
+/// [`SparsePreconditioner::new`] and [`GmresSaddle::new`]; [`RsError::Gpu`].
 #[allow(clippy::too_many_arguments)]
 pub fn hierarchical_saddle(
     pool: Arc<rayon::ThreadPool>,
@@ -423,15 +463,71 @@ pub fn hierarchical_saddle(
     options: &HierarchicalOptions,
     face_tree: Option<FaceTree>,
 ) -> Result<HierarchicalSaddle, RsError> {
+    let gpu = options.device.resolve()?;
+    hierarchical_saddle_with(
+        pool,
+        surface,
+        positions,
+        exponents,
+        weights,
+        extras,
+        c_q,
+        options,
+        face_tree,
+        gpu.as_ref(),
+    )
+}
+
+/// [`hierarchical_saddle`] with an open GPU context (`None`: the CPU, whatever
+/// `options.device` says): the metric's and the preconditioner's tree products run on it.
+///
+/// # Errors
+/// As [`hierarchical_saddle`].
+#[allow(clippy::too_many_arguments)]
+pub fn hierarchical_saddle_with(
+    pool: Arc<rayon::ThreadPool>,
+    surface: &Surface,
+    positions: &[[f64; 3]],
+    exponents: &Exponents,
+    weights: &SobolevWeights,
+    extras: &MetricExtras,
+    c_q: &SparseMatrix,
+    options: &HierarchicalOptions,
+    face_tree: Option<FaceTree>,
+    gpu: Option<&Arc<GpuContext>>,
+) -> Result<HierarchicalSaddle, RsError> {
     weights.validate()?;
     options.cluster.validate()?;
-    let tree = match face_tree {
-        Some(t) => {
+    // Level 1 (`RunToRun`): the near fields are evaluated on the GPU; level 2 (`MatchCpu`): built
+    // on the CPU and uploaded, so that every product is the CPU's bit for bit (`NOTES-GPU.md`).
+    let gpu_build = gpu.filter(|g| g.determinism() == crate::gpu::Determinism::RunToRun);
+    let mut gpu_metric = None;
+    let tree = match (face_tree, gpu_build) {
+        (t, Some(g)) => {
+            let geom = FaceGeometry::new(surface, positions)?;
+            let t = match t {
+                Some(t) => t,
+                None => FaceTree::build(surface, positions, &geom, options.cluster.leaf_size)?,
+            };
+            let ops = FaceOperators::from_geometry(surface, positions, geom);
+            let (tree, dev) = FaceMetricTree::build_on_gpu(
+                &pool,
+                t,
+                ops,
+                exponents,
+                &options.cluster,
+                g,
+                extras.obstacle.as_ref(),
+            )?;
+            gpu_metric = Some(dev);
+            tree
+        }
+        (Some(t), None) => {
             let geom = FaceGeometry::new(surface, positions)?;
             let ops = FaceOperators::from_geometry(surface, positions, geom);
             FaceMetricTree::from_parts(&pool, t, ops, exponents, &options.cluster)?
         }
-        None => FaceMetricTree::build(&pool, surface, positions, exponents, &options.cluster)?,
+        (None, None) => FaceMetricTree::build(&pool, surface, positions, exponents, &options.cluster)?,
     };
     let willmore = extras.weighted_willmore(surface, positions, weights)?;
     let mut popts = options.preconditioner;
@@ -455,7 +551,7 @@ pub fn hierarchical_saddle(
             }
         });
     }
-    let mut prec = SparsePreconditioner::with_metric_tree(
+    let mut prec = SparsePreconditioner::with_metric_tree_on(
         pool.clone(),
         surface,
         positions,
@@ -464,9 +560,18 @@ pub fn hierarchical_saddle(
         &popts,
         extra.as_ref(),
         &tree,
+        gpu_build,
     )?
     .with_metric_weight(weights.tp_weight);
-    let op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
+    let mut op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
+    match (gpu_metric, gpu) {
+        (Some(dev), _) => op.gpu = Some(dev),
+        (None, Some(g)) => {
+            op = op.with_gpu(g)?;
+            prec = prec.with_gpu(g)?;
+        }
+        (None, None) => {}
+    }
     prec.attach_coarse(&op, surface, c_q)?;
     let nd = op.n_dofs();
     Ok(GmresSaddle::new(op, prec, nd, options.gmres)?

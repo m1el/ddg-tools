@@ -52,6 +52,7 @@ use rayon::prelude::*;
 
 use super::{FaceDiagonal, FaceOperators};
 use crate::error::RsError;
+use crate::gpu::{GpuContext, GpuFaceMetric, GpuVertexFractional};
 use crate::geometry::v3::{dot, sub};
 use crate::geometry::{FaceGeometry, vertex_areas};
 use crate::kernel::Exponents;
@@ -361,6 +362,116 @@ impl FaceMetricTree {
         })
     }
 
+    /// [`FaceMetricTree::from_parts`] with the near field and `H̃a` computed **on the GPU**
+    /// (determinism level 1 only: the device's `pow` may differ from the CPU's by an ulp;
+    /// `NOTES-GPU.md`): the CPU builds the blocks and the far coefficients
+    /// ([`BlockTree::build_structure`]), the device evaluates the near entries in place. The
+    /// returned tree has no near field on the CPU (its CPU products are an error); the
+    /// [`GpuFaceMetric`] (with the obstacle `diagonal`) does the products.
+    ///
+    /// # Errors
+    /// As [`FaceMetricTree::from_parts`]; [`RsError::Gpu`].
+    pub fn build_on_gpu(
+        pool: &rayon::ThreadPool,
+        face_tree: FaceTree,
+        ops: FaceOperators,
+        exponents: &Exponents,
+        options: &ClusterTreeOptions,
+        gpu: &std::sync::Arc<GpuContext>,
+        diagonal: Option<&FaceDiagonal>,
+    ) -> Result<(FaceMetricTree, GpuFaceMetric), RsError> {
+        let t0 = Instant::now();
+        options.validate()?;
+        if face_tree.n_faces() != ops.n_faces() {
+            return Err(RsError::InvalidOption {
+                name: "face tree",
+                value: format!("{} faces", face_tree.n_faces()),
+                requirement: "the face count of the face operators",
+            });
+        }
+        let empty: &[f64] = &[];
+        let (d_hi, d_lo) = match diagonal {
+            Some(d) => (d.hi.as_slice(), d.lo.as_slice()),
+            None => (empty, empty),
+        };
+        let nf = ops.n_faces();
+        for (name, d) in [("obstacle diagonal hi", d_hi), ("obstacle diagonal lo", d_lo)] {
+            if !d.is_empty() && d.len() != nf {
+                return Err(RsError::InvalidOption {
+                    name,
+                    value: format!("{} entries", d.len()),
+                    requirement: "one entry per face",
+                });
+            }
+        }
+        let kernel = FaceKernels {
+            tree: &face_tree,
+            ops: &ops,
+            chi: options.chi,
+            neg_s: -exponents.s(),
+        };
+        let bct = BlockTree::<2>::build_structure(pool, face_tree.bvh(), &kernel, options.leaf_pairs)?;
+        #[cfg(feature = "cuda")]
+        {
+            let (dtree, ha_perm) = crate::gpu::cuda::gpu_face_tree(
+                gpu,
+                &bct.parts(),
+                bct.order(),
+                &ops.barycenters,
+                &ops.normals,
+                &ops.areas,
+                -exponents.s(),
+            )?;
+            let mut ha = vec![[0.0; 2]; nf];
+            for (p, &s) in bct.order().iter().enumerate() {
+                ha[s as usize] = ha_perm[p];
+            }
+            if let Some(s) = ha.iter().position(|h| !(h[0].is_finite() && h[1].is_finite())) {
+                return Err(coincident_faces(&ops, s));
+            }
+            let incidence = Incidence::new(&ops.faces, ops.n_vertices);
+            let host = crate::gpu::cuda::FaceMetricHost {
+                order: bct.order(),
+                position: bct.position(),
+                faces: &ops.faces,
+                df: &ops.df,
+                areas: &ops.areas,
+                ha_perm: &ha_perm,
+                inc_ptr: &incidence.ptr,
+                inc: &incidence.entries,
+                n_vertices: ops.n_vertices,
+                d_hi,
+                d_lo,
+            };
+            let dev = GpuFaceMetric {
+                inner: crate::gpu::cuda::DeviceFaceMetric::with_tree(gpu, dtree, &host)?,
+            };
+            Ok((
+                FaceMetricTree {
+                    face_tree,
+                    ops,
+                    bct,
+                    ha,
+                    ha_perm,
+                    incidence,
+                    options: *options,
+                    build_seconds: t0.elapsed().as_secs_f64(),
+                },
+                dev,
+            ))
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (gpu, bct, t0);
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
+    }
+
+    /// Whether the near field is on the CPU (not a [`FaceMetricTree::build_on_gpu`] tree).
+    pub fn has_cpu_near_field(&self) -> bool {
+        self.bct.has_near_field()
+    }
+
     /// The face tree.
     pub fn face_tree(&self) -> &FaceTree {
         &self.face_tree
@@ -436,6 +547,12 @@ impl FaceMetricTree {
         ys: &mut [&mut [f64]],
     ) -> Result<(), RsError> {
         let n = 3 * self.ops.n_vertices;
+        if !self.bct.has_near_field() {
+            return Err(RsError::Gpu {
+                operation: "product",
+                detail: "the near field of this metric tree is on the GPU (build_on_gpu); use its GpuFaceMetric".into(),
+            });
+        }
         if xs.len() != ys.len() {
             return Err(RsError::InvalidOption {
                 name: "hierarchical product batch",
@@ -502,6 +619,58 @@ impl FaceMetricTree {
             start += k;
         }
         Ok(())
+    }
+
+    /// Uploads the tree, the face data and the obstacle `diagonal` to the GPU (`NOTES-GPU.md`):
+    /// [`GpuFaceMetric::apply_batch`] then computes [`FaceMetricTree::apply_batch`] on the device
+    /// (bitwise equal at [`crate::gpu::Determinism::MatchCpu`]).
+    ///
+    /// # Errors
+    /// [`RsError::InvalidOption`] for a diagonal of the wrong length; [`RsError::Gpu`].
+    pub fn upload(
+        &self,
+        gpu: &std::sync::Arc<GpuContext>,
+        diagonal: Option<&FaceDiagonal>,
+    ) -> Result<GpuFaceMetric, RsError> {
+        let empty: &[f64] = &[];
+        let (d_hi, d_lo) = match diagonal {
+            Some(d) => (d.hi.as_slice(), d.lo.as_slice()),
+            None => (empty, empty),
+        };
+        let nf = self.ops.n_faces();
+        for (name, d) in [("obstacle diagonal hi", d_hi), ("obstacle diagonal lo", d_lo)] {
+            if !d.is_empty() && d.len() != nf {
+                return Err(RsError::InvalidOption {
+                    name,
+                    value: format!("{} entries", d.len()),
+                    requirement: "one entry per face",
+                });
+            }
+        }
+        #[cfg(feature = "cuda")]
+        {
+            let host = crate::gpu::cuda::FaceMetricHost {
+                order: self.bct.order(),
+                position: self.bct.position(),
+                faces: &self.ops.faces,
+                df: &self.ops.df,
+                areas: &self.ops.areas,
+                ha_perm: &self.ha_perm,
+                inc_ptr: &self.incidence.ptr,
+                inc: &self.incidence.entries,
+                n_vertices: self.ops.n_vertices,
+                d_hi,
+                d_lo,
+            };
+            Ok(GpuFaceMetric {
+                inner: crate::gpu::cuda::DeviceFaceMetric::new(gpu, &self.bct.parts(), &host)?,
+            })
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (gpu, d_hi, d_lo);
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
     }
 
     /// `B̃ x` (`w_hi = 1`, `w_lo = 0`).
@@ -914,6 +1083,125 @@ impl VertexFractionalTree {
         })
     }
 
+    /// [`VertexFractionalTree::build`] with the near field and `H̃a` computed on the GPU
+    /// (level 1; as [`FaceMetricTree::build_on_gpu`]). The returned tree's CPU products are an
+    /// error; the [`GpuVertexFractional`] does them.
+    ///
+    /// # Errors
+    /// As [`VertexFractionalTree::build`]; [`RsError::Gpu`].
+    pub fn build_on_gpu(
+        pool: &rayon::ThreadPool,
+        positions: &[[f64; 3]],
+        mass: &[f64],
+        tau: f64,
+        options: &ClusterTreeOptions,
+        gpu: &std::sync::Arc<GpuContext>,
+    ) -> Result<(VertexFractionalTree, GpuVertexFractional), RsError> {
+        let t0 = Instant::now();
+        let (bct, n) = Self::structure(pool, positions, mass, tau, options)?;
+        #[cfg(feature = "cuda")]
+        {
+            let (dtree, ha_perm) = crate::gpu::cuda::gpu_vertex_tree(
+                gpu,
+                &bct.parts(),
+                bct.order(),
+                positions,
+                mass,
+                -(tau + 1.0),
+            )?;
+            let mut ha = vec![0.0; n];
+            for (p, &v) in bct.order().iter().enumerate() {
+                ha[v as usize] = ha_perm[p];
+            }
+            if let Some(v) = ha.iter().position(|h| !h.is_finite()) {
+                let w = (0..n)
+                    .find(|&w| w != v && positions[w] == positions[v])
+                    .unwrap_or(v);
+                return Err(RsError::InvalidOption {
+                    name: "positions",
+                    value: format!("vertices {} and {} coincide", v.min(w), v.max(w)),
+                    requirement: "distinct vertex positions for the vertex-pair operator",
+                });
+            }
+            let dev = GpuVertexFractional {
+                inner: crate::gpu::cuda::DeviceVertexFractional::with_tree(
+                    gpu,
+                    dtree,
+                    bct.order(),
+                    bct.position(),
+                    mass,
+                    &ha,
+                )?,
+            };
+            Ok((
+                VertexFractionalTree {
+                    bct,
+                    mass: mass.to_vec(),
+                    ha,
+                    build_seconds: t0.elapsed().as_secs_f64(),
+                },
+                dev,
+            ))
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (gpu, bct, n, t0);
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
+    }
+
+    /// The validation, vertex BVH and structure-only block tree of
+    /// [`VertexFractionalTree::build_on_gpu`] (as [`VertexFractionalTree::build`]).
+    fn structure(
+        pool: &rayon::ThreadPool,
+        positions: &[[f64; 3]],
+        mass: &[f64],
+        tau: f64,
+        options: &ClusterTreeOptions,
+    ) -> Result<(BlockTree<1>, usize), RsError> {
+        options.validate()?;
+        let n = positions.len();
+        if !tau.is_finite() || mass.len() != n || n == 0 {
+            return Err(RsError::InvalidOption {
+                name: "vertex fractional operator",
+                value: format!("tau {tau}, {} masses for {n} vertices", mass.len()),
+                requirement: "a finite order and one mass per vertex (at least one vertex)",
+            });
+        }
+        if let Some(v) = mass.iter().position(|m| !(m.is_finite() && *m > 0.0)) {
+            return Err(RsError::InvalidOption {
+                name: "mass",
+                value: format!("vertex {v}: {:e}", mass[v]),
+                requirement: "positive finite vertex areas",
+            });
+        }
+        let elems: Vec<VertexElement> = positions
+            .iter()
+            .zip(mass)
+            .map(|(&p, &m)| VertexElement { p, mass: m })
+            .collect();
+        let bvh = Bvh::build(&elems, options.leaf_size)?;
+        let clusters: Vec<VertexCluster> = bvh
+            .nodes()
+            .iter()
+            .map(|nd| {
+                let c = nd.centroid();
+                VertexCluster {
+                    centroid: c,
+                    bbox: nd.bbox,
+                    radius: farthest_corner_distance(&nd.bbox, c),
+                }
+            })
+            .collect();
+        let kernel = VertexKernel {
+            clusters: &clusters,
+            positions,
+            chi: options.chi,
+            exponent: -(tau + 1.0),
+        };
+        Ok((BlockTree::<1>::build_structure(pool, &bvh, &kernel, options.leaf_pairs)?, n))
+    }
+
     /// [`VertexFractionalTree::build`] with the dual areas of `surface` at `positions`.
     ///
     /// # Errors
@@ -952,6 +1240,32 @@ impl VertexFractionalTree {
         self.apply_batch(pool, &[x], &mut [y])
     }
 
+    /// Uploads the tree to the GPU (`NOTES-GPU.md`): [`GpuVertexFractional::apply_batch`] then
+    /// computes [`VertexFractionalTree::apply_batch`] on the device.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn upload(&self, gpu: &std::sync::Arc<GpuContext>) -> Result<GpuVertexFractional, RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            Ok(GpuVertexFractional {
+                inner: crate::gpu::cuda::DeviceVertexFractional::new(
+                    gpu,
+                    &self.bct.parts(),
+                    self.bct.order(),
+                    self.bct.position(),
+                    &self.mass,
+                    &self.ha,
+                )?,
+            })
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = gpu;
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
+    }
+
     /// [`VertexFractionalTree::apply`] for several vectors through one pass over the tree;
     /// every output is bitwise the one of [`VertexFractionalTree::apply`].
     ///
@@ -964,6 +1278,12 @@ impl VertexFractionalTree {
         ys: &mut [&mut [f64]],
     ) -> Result<(), RsError> {
         let n = 3 * self.mass.len();
+        if !self.bct.has_near_field() {
+            return Err(RsError::Gpu {
+                operation: "product",
+                detail: "the near field of this vertex tree is on the GPU (build_on_gpu); use its GpuVertexFractional".into(),
+            });
+        }
         if xs.len() != ys.len() {
             return Err(RsError::InvalidOption {
                 name: "fractional product batch",
