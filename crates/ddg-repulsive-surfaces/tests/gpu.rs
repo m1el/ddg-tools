@@ -233,6 +233,65 @@ fn gpu_built_near_fields_match_cpu() {
     }
 }
 
+/// Barnes–Hut energy and exact gradient on the GPU: level 2 bitwise equal to the CPU for the
+/// integer exponents (6, 12) and (4, 9) (odd β: the `sqrt` branch), also after a refit; level 1
+/// within round-off and reproducible; non-integer exponents stay on the CPU at level 2 and are
+/// within round-off at level 1.
+#[test]
+fn barnes_hut_matches_cpu() {
+    use ddg_repulsive_surfaces::energy::BhOptions;
+    use ddg_repulsive_surfaces::energy::barnes_hut::BhTree;
+    let Some(g2) = gpu(Determinism::MatchCpu) else { return };
+    let Some(g1) = gpu(Determinism::RunToRun) else { return };
+    let pool = make_pool(Some(3)).unwrap();
+    let bits = |a: &[[f64; 3]], b: &[[f64; 3]]| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| x.to_bits() == y.to_bits());
+    for (faces, seed, theta, ab) in [(3000, 31, 0.5, (6.0, 12.0)), (5000, 32, 0.25, (6.0, 12.0)), (2000, 33, 0.5, (4.0, 9.0)), (2000, 34, 0.0, (6.0, 12.0))] {
+        let (s, p) = mesh(faces, seed);
+        let ex = Exponents::new(ab.0, ab.1).unwrap();
+        let opts = BhOptions { theta, ..BhOptions::default() };
+        let mut cpu = BhTree::build(&pool, &s, &p, opts).unwrap();
+        let mut t2 = cpu.clone();
+        t2.attach_gpu(&g2).unwrap();
+        let mut t1 = cpu.clone();
+        t1.attach_gpu(&g1).unwrap();
+        assert!(t2.on_gpu(&ex) && t1.on_gpu(&ex));
+        let mut q = p.clone();
+        for round in 0..2 {
+            let want = cpu.energy_and_differential(&pool, &ex).unwrap();
+            let got = t2.energy_and_differential(&pool, &ex).unwrap();
+            assert_eq!(want.energy.to_bits(), got.energy.to_bits(), "level 2 energy (faces {faces}, round {round})");
+            assert!(bits(&want.differential, &got.differential), "level 2 differential (faces {faces}, round {round})");
+            assert_eq!(cpu.energy(&pool, &ex).to_bits(), t2.try_energy(&pool, &ex).unwrap().to_bits());
+            let l1 = t1.energy_and_differential(&pool, &ex).unwrap();
+            let l1b = t1.energy_and_differential(&pool, &ex).unwrap();
+            assert!((l1.energy - want.energy).abs() <= 1e-12 * want.energy.abs());
+            let flat_w: Vec<f64> = want.differential.iter().flatten().copied().collect();
+            let flat_1: Vec<f64> = l1.differential.iter().flatten().copied().collect();
+            assert!(max_rel(&flat_1, &flat_w) < 1e-10, "level 1 differential {:e}", max_rel(&flat_1, &flat_w));
+            assert!(bits(&l1.differential, &l1b.differential) && l1.energy.to_bits() == l1b.energy.to_bits());
+            // Refit to moved positions (the line search's trials).
+            for (k, v) in q.iter_mut().enumerate() {
+                v[k % 3] += 1e-3 * ((k as f64) * 0.37).sin();
+            }
+            cpu.refit(&q).unwrap();
+            t2.refit(&q).unwrap();
+            t1.refit(&q).unwrap();
+        }
+    }
+    // Non-integer exponents: CPU path at level 2, GPU (within round-off) at level 1.
+    let (s, p) = mesh(2000, 35);
+    let ex = Exponents::new(5.5, 11.0).unwrap();
+    let cpu = BhTree::build(&pool, &s, &p, BhOptions::default()).unwrap();
+    let mut t2 = cpu.clone();
+    t2.attach_gpu(&g2).unwrap();
+    assert!(!t2.on_gpu(&ex));
+    let mut t1 = cpu.clone();
+    t1.attach_gpu(&g1).unwrap();
+    assert!(t1.on_gpu(&ex));
+    let (a, b) = (cpu.energy(&pool, &ex), t1.try_energy(&pool, &ex).unwrap());
+    assert!((a - b).abs() <= 1e-12 * a.abs(), "{a} vs {b}");
+}
+
 /// The pairwise tree: GPU = CPU bitwise for lengths around powers of two.
 #[test]
 fn pairwise_dot_matches_cpu() {

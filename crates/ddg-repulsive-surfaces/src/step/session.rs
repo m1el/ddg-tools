@@ -578,6 +578,7 @@ impl Session {
             self.eff.energy_eval,
             self.eff.tp_weight,
             &self.penalties,
+            self.gpu.as_ref(),
         )
     }
 

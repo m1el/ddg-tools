@@ -286,3 +286,307 @@ extern "C" __global__ void mul_elems(u64 n, const double* __restrict__ a, const 
     if (i >= n) return;
     out[i] = a[i] * b[i];
 }
+
+// ---------------------------------------------------------------------------------------------
+// Barnes-Hut energy and its exact gradient for frozen lists (src/energy/barnes_hut.rs,
+// BhTree::face_partials / leaf_with_gradient / leaf_energy), split into gathers:
+//   bh_own      one thread per face position: the own partials and the exact rows of its leaf;
+//   bh_node     one thread per lumped entry: (b, u) of the entry;
+//   bh_partner  one thread per partner slot (exact entry, target face): the partner partials;
+//   bh_leaf_energy  one thread per leaf: its energy in the CPU's order;
+//   bh_node_sums    one thread per node: (b_C, u_C) over the transposed lumped list;
+//   bh_final    one thread per face position: own + partner (transposed exact list) + cluster part.
+// The kernel K(X, N; Y) (src/kernel.rs) with the same operations (ipow by binary powering).
+
+struct Exps {
+    double alpha, beta;
+    int alpha_int, beta_int;  // -1: not an integer (pow is used, not bitwise to the CPU)
+};
+
+__device__ __forceinline__ double ipow_(double x, u32 n) {
+    double acc = 1.0;
+    while (n > 0) {
+        if (n & 1u) acc *= x;
+        n >>= 1;
+        if (n > 0) x *= x;
+    }
+    return acc;
+}
+
+__device__ __forceinline__ void nu_powers(const Exps& e, double nu, double* pa, double* sp1) {
+    double a = fabs(nu);
+    double p1 = e.alpha_int >= 0 ? ipow_(a, (u32)e.alpha_int - 1u) : pow(a, e.alpha - 1.0);
+    *pa = p1 * a;
+    *sp1 = copysign(p1, nu);
+}
+
+__device__ __forceinline__ double r_power(const Exps& e, double r2) {
+    if (e.beta_int >= 0) {
+        u32 k = (u32)e.beta_int;
+        if (k % 2 == 0) return 1.0 / ipow_(r2, k / 2);
+        return 1.0 / (ipow_(r2, k / 2) * sqrt(r2));
+    }
+    return pow(r2, -0.5 * e.beta);
+}
+
+__device__ __forceinline__ double k_value(const Exps& e, const double* v, const double* n) {
+    double pa, sp1;
+    nu_powers(e, dot3(n, v), &pa, &sp1);
+    return pa * r_power(e, dot3(v, v));
+}
+
+// value, d_v, d_n of kernel_with_gradient_of_v.
+__device__ __forceinline__ double k_grad(const Exps& e, const double* v, const double* n, double* dv, double* dn) {
+    double r2 = dot3(v, v);
+    double rb = r_power(e, r2);
+    double pa, sp1;
+    nu_powers(e, dot3(n, v), &pa, &sp1);
+    double value = pa * rb;
+    double c_n = e.alpha * sp1 * rb;
+    double s = -e.beta * value / r2;
+    for (int j = 0; j < 3; ++j) {
+        dv[j] = n[j] * c_n + s * v[j];
+        dn[j] = v[j] * c_n;
+    }
+    return value;
+}
+
+// Own partials (d/da, d/dX, d/dN) and the exact rows of the leaf of position ps.
+extern "C" __global__ void bh_own(u32 np, Exps e, const u32* __restrict__ leaf_of, const u32* __restrict__ leaves,
+                                  const u32* __restrict__ nstart, const u32* __restrict__ nend,
+                                  const u32* __restrict__ lumped_off, const u32* __restrict__ lumped,
+                                  const u32* __restrict__ exact_off, const u32* __restrict__ exact,
+                                  const u32* __restrict__ row_off, const double* __restrict__ px,
+                                  const double* __restrict__ pn, const double* __restrict__ pa,
+                                  const double* __restrict__ cl_c, const double* __restrict__ cl_a,
+                                  double* __restrict__ own, double* __restrict__ rows) {
+    u32 ps = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ps >= np) return;
+    u32 k = leaf_of[ps];
+    u32 i = ps - nstart[leaves[k]];
+    const double* xs = px + 3 * (u64)ps;
+    const double* ns = pn + 3 * (u64)ps;
+    double a_s = pa[ps];
+    double o0 = 0.0, o1[3] = {0.0, 0.0, 0.0}, o2[3] = {0.0, 0.0, 0.0};
+    double dv[3], dn[3], v[3];
+    for (u32 q = lumped_off[k]; q < lumped_off[k + 1]; ++q) {
+        u32 c = lumped[q];
+        double ac = cl_a[c];
+        const double* xc = cl_c + 3 * (u64)c;
+        v[0] = xs[0] - xc[0];
+        v[1] = xs[1] - xc[1];
+        v[2] = xs[2] - xc[2];
+        double val = k_grad(e, v, ns, dv, dn);
+        o0 += val * ac;
+        double s = a_s * ac;
+        for (int j = 0; j < 3; ++j) {
+            o1[j] = o1[j] + s * dv[j];
+            o2[j] = o2[j] + s * dn[j];
+        }
+    }
+    for (u32 q = exact_off[k]; q < exact_off[k + 1]; ++q) {
+        u32 c = exact[q];
+        double row = 0.0, dx[3] = {0.0, 0.0, 0.0}, dnn[3] = {0.0, 0.0, 0.0};
+        for (u32 pt = nstart[c]; pt < nend[c]; ++pt) {
+            if (pt == ps) continue;
+            const double* xt = px + 3 * (u64)pt;
+            double a_t = pa[pt];
+            v[0] = xs[0] - xt[0];
+            v[1] = xs[1] - xt[1];
+            v[2] = xs[2] - xt[2];
+            double val = k_grad(e, v, ns, dv, dn);
+            row += a_t * val;
+            for (int j = 0; j < 3; ++j) {
+                dx[j] = dx[j] + a_t * dv[j];
+                dnn[j] = dnn[j] + a_t * dn[j];
+            }
+        }
+        rows[row_off[q] + i] = row;
+        o0 += row;
+        for (int j = 0; j < 3; ++j) {
+            o1[j] = o1[j] + a_s * dx[j];
+            o2[j] = o2[j] + a_s * dnn[j];
+        }
+    }
+    double* o = own + 7 * (u64)ps;
+    o[0] = o0;
+    o[1] = o1[0];
+    o[2] = o1[1];
+    o[3] = o1[2];
+    o[4] = o2[0];
+    o[5] = o2[1];
+    o[6] = o2[2];
+}
+
+// Value only (BhTree::leaf_energy): the exact rows of position ps.
+extern "C" __global__ void bh_rows_value(u32 np, Exps e, const u32* __restrict__ leaf_of, const u32* __restrict__ leaves,
+                                         const u32* __restrict__ nstart, const u32* __restrict__ nend,
+                                         const u32* __restrict__ exact_off, const u32* __restrict__ exact,
+                                         const u32* __restrict__ row_off, const double* __restrict__ px,
+                                         const double* __restrict__ pn, const double* __restrict__ pa,
+                                         double* __restrict__ rows) {
+    u32 ps = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ps >= np) return;
+    u32 k = leaf_of[ps];
+    u32 i = ps - nstart[leaves[k]];
+    const double* xs = px + 3 * (u64)ps;
+    const double* ns = pn + 3 * (u64)ps;
+    double v[3];
+    for (u32 q = exact_off[k]; q < exact_off[k + 1]; ++q) {
+        u32 c = exact[q];
+        double row = 0.0;
+        for (u32 pt = nstart[c]; pt < nend[c]; ++pt) {
+            if (pt == ps) continue;
+            const double* xt = px + 3 * (u64)pt;
+            v[0] = xs[0] - xt[0];
+            v[1] = xs[1] - xt[1];
+            v[2] = xs[2] - xt[2];
+            row += pa[pt] * k_value(e, v, ns);
+        }
+        rows[row_off[q] + i] = row;
+    }
+}
+
+// (b, u) of every lumped entry; grad = 0: b only.
+extern "C" __global__ void bh_node(u32 n_lumped, Exps e, u32 grad, const u32* __restrict__ lumped_leaf,
+                                   const u32* __restrict__ lumped, const u32* __restrict__ leaves,
+                                   const u32* __restrict__ nstart, const u32* __restrict__ nend,
+                                   const double* __restrict__ px, const double* __restrict__ pn,
+                                   const double* __restrict__ pa, const double* __restrict__ cl_c,
+                                   double* __restrict__ node) {
+    u32 q = blockIdx.x * blockDim.x + threadIdx.x;
+    if (q >= n_lumped) return;
+    u32 l = leaves[lumped_leaf[q]];
+    const double* xc = cl_c + 3 * (u64)lumped[q];
+    double b = 0.0, u[3] = {0.0, 0.0, 0.0}, dv[3], dn[3], v[3];
+    for (u32 ps = nstart[l]; ps < nend[l]; ++ps) {
+        const double* xs = px + 3 * (u64)ps;
+        double a_s = pa[ps];
+        v[0] = xs[0] - xc[0];
+        v[1] = xs[1] - xc[1];
+        v[2] = xs[2] - xc[2];
+        if (grad) {
+            double val = k_grad(e, v, pn + 3 * (u64)ps, dv, dn);
+            b += a_s * val;
+            for (int j = 0; j < 3; ++j) u[j] = u[j] + -a_s * dv[j];
+        } else {
+            b += a_s * k_value(e, v, pn + 3 * (u64)ps);
+        }
+    }
+    double* o = node + 4 * (u64)q;
+    o[0] = b;
+    o[1] = u[0];
+    o[2] = u[1];
+    o[3] = u[2];
+}
+
+// Partner partials (d/da_T, d/dX_T) of slot t = (exact entry q, target j).
+extern "C" __global__ void bh_partner(u32 n_slots, Exps e, const u32* __restrict__ slot_entry,
+                                      const u32* __restrict__ partner_off, const u32* __restrict__ exact_leaf,
+                                      const u32* __restrict__ exact, const u32* __restrict__ leaves,
+                                      const u32* __restrict__ nstart, const u32* __restrict__ nend,
+                                      const double* __restrict__ px, const double* __restrict__ pn,
+                                      const double* __restrict__ pa, double* __restrict__ partner) {
+    u32 t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n_slots) return;
+    u32 q = slot_entry[t];
+    u32 pt = nstart[exact[q]] + (t - partner_off[q]);
+    u32 l = leaves[exact_leaf[q]];
+    const double* xt = px + 3 * (u64)pt;
+    double a_t = pa[pt];
+    double p0 = 0.0, p1[3] = {0.0, 0.0, 0.0}, dv[3], dn[3], v[3];
+    for (u32 ps = nstart[l]; ps < nend[l]; ++ps) {
+        if (ps == pt) continue;
+        const double* xs = px + 3 * (u64)ps;
+        double a_s = pa[ps];
+        v[0] = xs[0] - xt[0];
+        v[1] = xs[1] - xt[1];
+        v[2] = xs[2] - xt[2];
+        double val = k_grad(e, v, pn + 3 * (u64)ps, dv, dn);
+        p0 += a_s * val;
+        double s = -a_s * a_t;
+        for (int j = 0; j < 3; ++j) p1[j] = p1[j] + s * dv[j];
+    }
+    double* o = partner + 4 * (u64)t;
+    o[0] = p0;
+    o[1] = p1[0];
+    o[2] = p1[1];
+    o[3] = p1[2];
+}
+
+// The energy of every leaf: lumped entries (b * A_C), then the exact rows (a_S * row).
+extern "C" __global__ void bh_leaf_energy(u32 nl, const u32* __restrict__ leaves, const u32* __restrict__ nstart,
+                                          const u32* __restrict__ nend, const u32* __restrict__ lumped_off,
+                                          const u32* __restrict__ lumped, const u32* __restrict__ exact_off,
+                                          const u32* __restrict__ row_off, const double* __restrict__ node,
+                                          const double* __restrict__ cl_a, const double* __restrict__ pa,
+                                          const double* __restrict__ rows, double* __restrict__ out) {
+    u32 k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k >= nl) return;
+    u32 l = leaves[k];
+    u32 s0 = nstart[l], ns = nend[l] - s0;
+    double en = 0.0;
+    for (u32 q = lumped_off[k]; q < lumped_off[k + 1]; ++q) en += node[4 * (u64)q] * cl_a[lumped[q]];
+    for (u32 q = exact_off[k]; q < exact_off[k + 1]; ++q)
+        for (u32 i = 0; i < ns; ++i) en += pa[s0 + i] * rows[row_off[q] + i];
+    out[k] = en;
+}
+
+// (b_C, u_C) per node over the transposed lumped list (increasing entry).
+extern "C" __global__ void bh_node_sums(u32 nn, const u32* __restrict__ lt_off, const u32* __restrict__ lt,
+                                        const double* __restrict__ node, double* __restrict__ sums) {
+    u32 n = blockIdx.x * blockDim.x + threadIdx.x;
+    if (n >= nn) return;
+    double b = 0.0, u0 = 0.0, u1 = 0.0, u2 = 0.0;
+    for (u32 i = lt_off[n]; i < lt_off[n + 1]; ++i) {
+        const double* t = node + 4 * (u64)lt[i];
+        b += t[0];
+        u0 = u0 + 1.0 * t[1];
+        u1 = u1 + 1.0 * t[2];
+        u2 = u2 + 1.0 * t[3];
+    }
+    double* o = sums + 4 * (u64)n;
+    o[0] = b;
+    o[1] = u0;
+    o[2] = u1;
+    o[3] = u2;
+}
+
+// Per face: own + partner blocks (transposed exact list) + cluster part; out[7 f] by face f.
+extern "C" __global__ void bh_final(u32 np, const u32* __restrict__ leaf_of, const u32* __restrict__ leaves,
+                                    const u32* __restrict__ nstart, const u32* __restrict__ et_off,
+                                    const u32* __restrict__ et, const u32* __restrict__ partner_off,
+                                    const double* __restrict__ own, const double* __restrict__ partner,
+                                    const double* __restrict__ beta, const double* __restrict__ ubig,
+                                    const double* __restrict__ cl_c, const double* __restrict__ px,
+                                    const double* __restrict__ pa, const u32* __restrict__ order,
+                                    double* __restrict__ out) {
+    u32 ps = blockIdx.x * blockDim.x + threadIdx.x;
+    if (ps >= np) return;
+    u32 k = leaf_of[ps];
+    u32 c = leaves[k];
+    u32 t = ps - nstart[c];
+    const double* o = own + 7 * (u64)ps;
+    double r0 = o[0], r1[3] = {o[1], o[2], o[3]};
+    for (u32 i = et_off[k]; i < et_off[k + 1]; ++i) {
+        const double* p = partner + 4 * ((u64)partner_off[et[i]] + t);
+        r0 += p[0];
+        r1[0] = r1[0] + 1.0 * p[1];
+        r1[1] = r1[1] + 1.0 * p[2];
+        r1[2] = r1[2] + 1.0 * p[3];
+    }
+    const double* xc = cl_c + 3 * (u64)c;
+    const double* x = px + 3 * (u64)ps;
+    const double* U = ubig + 3 * (u64)c;
+    double d[3] = {x[0] - xc[0], x[1] - xc[1], x[2] - xc[2]};
+    r0 += beta[c] + dot3(U, d);
+    double a = pa[ps];
+    double* w = out + 7 * (u64)order[ps];
+    w[0] = r0;
+    w[1] = r1[0] + a * U[0];
+    w[2] = r1[1] + a * U[1];
+    w[3] = r1[2] + a * U[2];
+    w[4] = o[4];
+    w[5] = o[5];
+    w[6] = o[6];
+}

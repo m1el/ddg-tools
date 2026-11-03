@@ -328,3 +328,17 @@ impl GpuVertexFractional {
         }
     }
 }
+
+/// A Barnes–Hut tree's frozen lists on the device ([`crate::energy::barnes_hut::BhTree::attach_gpu`]).
+pub(crate) struct GpuBh {
+    #[cfg(feature = "cuda")]
+    pub(crate) inner: cuda::DeviceBh,
+    #[cfg(not(feature = "cuda"))]
+    _never: std::convert::Infallible,
+}
+
+impl std::fmt::Debug for GpuBh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GpuBh")
+    }
+}

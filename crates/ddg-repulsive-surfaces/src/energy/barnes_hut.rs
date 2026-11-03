@@ -122,6 +122,8 @@ pub struct BhTree {
     /// The face data in BVH order (`tree.bvh().order()`), so that a leaf's faces are contiguous
     /// in memory (the same values as `geom`).
     packed: Vec<Packed>,
+    /// The lists on the GPU ([`BhTree::attach_gpu`]); with the determinism level.
+    gpu: Option<(std::sync::Arc<crate::gpu::GpuBh>, crate::gpu::Determinism)>,
 }
 
 /// Barycenter, normal and area of a face, stored in BVH order.
@@ -188,6 +190,7 @@ impl BhTree {
             tree,
             lists,
             packed,
+            gpu: None,
         })
     }
 
@@ -250,6 +253,112 @@ impl BhTree {
         &self.positions
     }
 
+    /// Evaluates [`BhTree::try_energy`] and [`BhTree::energy_and_differential`] on the GPU of
+    /// `gpu` from now on (uploads the frozen lists; the face data and the node aggregates go up
+    /// per evaluation, so [`BhTree::refit`] needs nothing more; `NOTES-GPU.md`). The kernels
+    /// repeat the CPU's operations in its order: bitwise equal at
+    /// [`crate::gpu::Determinism::MatchCpu`] for integer exponents; at that level non-integer
+    /// exponents (whose `powf` the device cannot reproduce) keep the CPU path.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn attach_gpu(&mut self, gpu: &std::sync::Arc<crate::gpu::GpuContext>) -> Result<(), RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            let tree = &self.tree;
+            let nodes = tree.bvh().nodes();
+            let nstart: Vec<u32> = nodes.iter().map(|n| n.start).collect();
+            let nend: Vec<u32> = nodes.iter().map(|n| n.end).collect();
+            let mut leaf_of = vec![0u32; self.faces.len()];
+            for (k, &l) in tree.leaves().iter().enumerate() {
+                for p in nstart[l as usize]..nend[l as usize] {
+                    leaf_of[p as usize] = k as u32;
+                }
+            }
+            let l = &self.lists;
+            let host = crate::gpu::cuda::BhHost {
+                leaf_of: &leaf_of,
+                leaves: tree.leaves(),
+                nstart: &nstart,
+                nend: &nend,
+                lumped_off: &l.lumped_off,
+                lumped: &l.lumped,
+                exact_off: &l.exact_off,
+                exact: &l.exact,
+                partner_off: &l.partner_off,
+                lumped_t_off: &l.lumped_t_off,
+                lumped_t: &l.lumped_t,
+                exact_t_off: &l.exact_t_off,
+                exact_t: &l.exact_t,
+                order: tree.bvh().order(),
+            };
+            let dev = crate::gpu::cuda::DeviceBh::new(gpu, &host)?;
+            self.gpu = Some((std::sync::Arc::new(crate::gpu::GpuBh { inner: dev }), gpu.determinism()));
+            Ok(())
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = gpu;
+            Err(RsError::Gpu {
+                operation: "upload",
+                detail: "built without the `cuda` feature".into(),
+            })
+        }
+    }
+
+    /// Whether the evaluations run on the GPU (for exponents `e`).
+    pub fn on_gpu(&self, e: &Exponents) -> bool {
+        match &self.gpu {
+            None => false,
+            Some((_, d)) => {
+                let (a, b) = e.int_exponents();
+                *d == crate::gpu::Determinism::RunToRun || (a.is_some() && b.is_some())
+            }
+        }
+    }
+
+    /// The face data and cluster aggregates as flat arrays (BVH positions, nodes).
+    #[cfg(feature = "cuda")]
+    fn device_inputs(&self) -> [Vec<f64>; 5] {
+        let pk = &self.packed;
+        let px = pk.iter().flat_map(|p| p.x).collect();
+        let pn = pk.iter().flat_map(|p| p.n).collect();
+        let pa = pk.iter().map(|p| p.a).collect();
+        let cl = self.tree.clusters();
+        let cc = cl.iter().flat_map(|c| c.centroid).collect();
+        let ca = cl.iter().map(|c| c.area).collect();
+        [px, pn, pa, cc, ca]
+    }
+
+    #[cfg(feature = "cuda")]
+    fn exps(e: &Exponents) -> crate::gpu::cuda::Exps {
+        let (a, b) = e.int_exponents();
+        crate::gpu::cuda::Exps {
+            alpha: e.alpha(),
+            beta: e.beta(),
+            alpha_int: a.map_or(-1, |x| x as i32),
+            beta_int: b.map_or(-1, |x| x as i32),
+        }
+    }
+
+    /// [`BhTree::energy`], on the GPU if one is attached ([`BhTree::attach_gpu`]).
+    ///
+    /// [formula: rs-bh-energy]
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`] on a device failure.
+    pub fn try_energy(&self, pool: &rayon::ThreadPool, e: &Exponents) -> Result<f64, RsError> {
+        #[cfg(feature = "cuda")]
+        if self.on_gpu(e)
+            && let Some((g, _)) = &self.gpu
+        {
+            let [px, pn, pa, cc, ca] = self.device_inputs();
+            let per_leaf = g.inner.energy(Self::exps(e), &px, &pn, &pa, &cc, &ca)?;
+            return Ok(per_leaf.iter().sum());
+        }
+        Ok(self.energy(pool, e))
+    }
+
     /// `Ẽ` at the current positions on the frozen lists. May be non-finite (degenerate faces,
     /// coincident barycenters): the caller decides (a line search rejects the trial).
     ///
@@ -280,7 +389,7 @@ impl BhTree {
         pool: &rayon::ThreadPool,
         e: &Exponents,
     ) -> Result<EnergyEvaluation, RsError> {
-        let (energy, d_area, d_bary, d_normal) = self.face_partials(pool, e);
+        let (energy, d_area, d_bary, d_normal) = self.try_face_partials(pool, e)?;
         let differential = pull_back_faces(
             &self.faces,
             self.n_vertices,
@@ -300,6 +409,65 @@ impl BhTree {
             pairs_exact: self.lists.pairs_exact,
             nodes_lumped: self.lists.n_lumped(),
         })
+    }
+
+    /// [`BhTree::face_partials`], on the GPU if one is attached ([`BhTree::attach_gpu`]).
+    ///
+    /// [formula: rs-bh-aggregate-adjoint]
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`] on a device failure.
+    #[allow(clippy::type_complexity)]
+    pub fn try_face_partials(
+        &self,
+        pool: &rayon::ThreadPool,
+        e: &Exponents,
+    ) -> Result<(f64, Vec<f64>, Vec<[f64; 3]>, Vec<[f64; 3]>), RsError> {
+        #[cfg(feature = "cuda")]
+        if self.on_gpu(e)
+            && let Some((g, _)) = &self.gpu
+        {
+            let tree = &self.tree;
+            let clusters = tree.clusters();
+            let nodes = tree.bvh().nodes();
+            let nn = clusters.len();
+            // The CPU's downward pass (step 3 of face_partials) on the node sums.
+            let downward = |sums: &[f64]| -> (Vec<f64>, Vec<f64>) {
+                let su = |n: usize| [sums[4 * n + 1], sums[4 * n + 2], sums[4 * n + 3]];
+                let mut beta = vec![0.0; nn];
+                let mut ubig = vec![[0.0; 3]; nn];
+                if nn > 0 {
+                    beta[0] = sums[0];
+                    ubig[0] = su(0);
+                }
+                for (n, node) in nodes.iter().enumerate() {
+                    if node.is_leaf() {
+                        continue;
+                    }
+                    for c in [n + 1, node.right as usize] {
+                        let shift = sub(clusters[c].centroid, clusters[n].centroid);
+                        beta[c] = beta[n] + dot(ubig[n], shift) + sums[4 * c];
+                        ubig[c] = axpy(ubig[n], 1.0, su(c));
+                    }
+                }
+                (beta, ubig.into_iter().flatten().collect())
+            };
+            let [px, pn, pa, cc, ca] = self.device_inputs();
+            let (per_leaf, d) = g.inner.partials(Self::exps(e), &px, &pn, &pa, &cc, &ca, downward)?;
+            let energy: f64 = per_leaf.iter().sum();
+            let nf = self.faces.len();
+            let mut d_area = vec![0.0; nf];
+            let mut d_bary = vec![[0.0; 3]; nf];
+            let mut d_normal = vec![[0.0; 3]; nf];
+            for f in 0..nf {
+                let r = &d[7 * f..7 * f + 7];
+                d_area[f] = r[0];
+                d_bary[f] = [r[1], r[2], r[3]];
+                d_normal[f] = [r[4], r[5], r[6]];
+            }
+            return Ok((energy, d_area, d_bary, d_normal));
+        }
+        Ok(self.face_partials(pool, e))
     }
 
     /// `Ẽ` and its per-face partials `(∂Ẽ/∂a_S, ∂Ẽ/∂X_S, ∂Ẽ/∂N_S)` (all paths: own, partner,

@@ -51,6 +51,13 @@ pub(crate) struct Kernels {
     mul_elems: CudaFunction,
     near_fill_face: CudaFunction,
     near_fill_vertex: CudaFunction,
+    bh_own: CudaFunction,
+    bh_rows_value: CudaFunction,
+    bh_node: CudaFunction,
+    bh_partner: CudaFunction,
+    bh_leaf_energy: CudaFunction,
+    bh_node_sums: CudaFunction,
+    bh_final: CudaFunction,
 }
 
 /// A device, its stream and the kernels.
@@ -113,6 +120,13 @@ impl CudaBackend {
             mul_elems: f("mul_elems")?,
             near_fill_face: f("near_fill_face")?,
             near_fill_vertex: f("near_fill_vertex")?,
+            bh_own: f("bh_own")?,
+            bh_rows_value: f("bh_rows_value")?,
+            bh_node: f("bh_node")?,
+            bh_partner: f("bh_partner")?,
+            bh_leaf_energy: f("bh_leaf_energy")?,
+            bh_node_sums: f("bh_node_sums")?,
+            bh_final: f("bh_final")?,
         };
         let stream = ctx.default_stream();
         Ok(CudaBackend {
@@ -769,4 +783,332 @@ pub(crate) fn gpu_vertex_tree(
     let mut host = vec![0.0; n];
     g.download(&ha, &mut host)?;
     Ok((t, host))
+}
+
+/// The exponents as the kernels take them (`struct Exps` of `kernels.cu`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Exps {
+    pub alpha: f64,
+    pub beta: f64,
+    /// `-1`: not an integer.
+    pub alpha_int: i32,
+    pub beta_int: i32,
+}
+
+// SAFETY: plain `repr(C)` data matching `struct Exps` in `kernels.cu`.
+unsafe impl DeviceRepr for Exps {}
+
+/// The host arrays of a Barnes–Hut tree and its frozen lists (`BhTree`), in BVH positions.
+pub(crate) struct BhHost<'a> {
+    pub leaf_of: &'a [u32],
+    pub leaves: &'a [u32],
+    pub nstart: &'a [u32],
+    pub nend: &'a [u32],
+    pub lumped_off: &'a [usize],
+    pub lumped: &'a [u32],
+    pub exact_off: &'a [usize],
+    pub exact: &'a [u32],
+    pub partner_off: &'a [usize],
+    pub lumped_t_off: &'a [usize],
+    pub lumped_t: &'a [u32],
+    pub exact_t_off: &'a [usize],
+    pub exact_t: &'a [u32],
+    pub order: &'a [u32],
+}
+
+/// A Barnes–Hut tree's lists on the device (uploaded once per build; the face data and the
+/// cluster aggregates are uploaded per evaluation).
+pub(crate) struct DeviceBh {
+    gpu: Arc<GpuContext>,
+    np: u32,
+    nl: u32,
+    nn: u32,
+    n_lumped: u32,
+    n_slots: u32,
+    n_rows: usize,
+    leaf_of: CudaSlice<u32>,
+    leaves: CudaSlice<u32>,
+    nstart: CudaSlice<u32>,
+    nend: CudaSlice<u32>,
+    lumped_off: CudaSlice<u32>,
+    lumped: CudaSlice<u32>,
+    lumped_leaf: CudaSlice<u32>,
+    exact_off: CudaSlice<u32>,
+    exact: CudaSlice<u32>,
+    exact_leaf: CudaSlice<u32>,
+    row_off: CudaSlice<u32>,
+    partner_off: CudaSlice<u32>,
+    slot_entry: CudaSlice<u32>,
+    lt_off: CudaSlice<u32>,
+    lt: CudaSlice<u32>,
+    et_off: CudaSlice<u32>,
+    et: CudaSlice<u32>,
+    order: CudaSlice<u32>,
+}
+
+/// The device face data of one evaluation.
+struct BhFaces {
+    px: CudaSlice<f64>,
+    pn: CudaSlice<f64>,
+    pa: CudaSlice<f64>,
+    cl_c: CudaSlice<f64>,
+    cl_a: CudaSlice<f64>,
+}
+
+impl DeviceBh {
+    pub(crate) fn new(gpu: &Arc<GpuContext>, h: &BhHost<'_>) -> Result<DeviceBh, RsError> {
+        let g = &gpu.inner;
+        let nl = h.leaves.len();
+        let n_exact = h.exact.len();
+        let mut lumped_leaf = vec![0u32; h.lumped.len()];
+        let mut exact_leaf = vec![0u32; n_exact];
+        let mut row_off = vec![0usize; n_exact + 1];
+        for k in 0..nl {
+            let ns = (h.nend[h.leaves[k] as usize] - h.nstart[h.leaves[k] as usize]) as usize;
+            for q in h.lumped_off[k]..h.lumped_off[k + 1] {
+                lumped_leaf[q] = k as u32;
+            }
+            for q in h.exact_off[k]..h.exact_off[k + 1] {
+                exact_leaf[q] = k as u32;
+                row_off[q + 1] = row_off[q] + ns;
+            }
+        }
+        let n_slots = *h.partner_off.last().unwrap_or(&0);
+        let mut slot_entry = vec![0u32; n_slots];
+        for q in 0..n_exact {
+            for t in h.partner_off[q]..h.partner_off[q + 1] {
+                slot_entry[t] = q as u32;
+            }
+        }
+        let u = |v: &[usize], w: &'static str| -> Result<CudaSlice<u32>, RsError> { g.upload(&to_u32(v, w)?, 0) };
+        Ok(DeviceBh {
+            gpu: gpu.clone(),
+            np: h.leaf_of.len() as u32,
+            nl: nl as u32,
+            nn: h.nstart.len() as u32,
+            n_lumped: h.lumped.len() as u32,
+            n_slots: u32::try_from(n_slots).map_err(|_| RsError::Gpu {
+                operation: "upload",
+                detail: format!("{n_slots} partner slots do not fit 32 bits"),
+            })?,
+            n_rows: row_off[n_exact],
+            leaf_of: g.upload(h.leaf_of, 0)?,
+            leaves: g.upload(h.leaves, 0)?,
+            nstart: g.upload(h.nstart, 0)?,
+            nend: g.upload(h.nend, 0)?,
+            lumped_off: u(h.lumped_off, "lumped offsets")?,
+            lumped: g.upload(h.lumped, 0)?,
+            lumped_leaf: g.upload(&lumped_leaf, 0)?,
+            exact_off: u(h.exact_off, "exact offsets")?,
+            exact: g.upload(h.exact, 0)?,
+            exact_leaf: g.upload(&exact_leaf, 0)?,
+            row_off: u(&row_off, "row offsets")?,
+            partner_off: u(h.partner_off, "partner offsets")?,
+            slot_entry: g.upload(&slot_entry, 0)?,
+            lt_off: u(h.lumped_t_off, "lumped transpose")?,
+            lt: g.upload(h.lumped_t, 0)?,
+            et_off: u(h.exact_t_off, "exact transpose")?,
+            et: g.upload(h.exact_t, 0)?,
+            order: g.upload(h.order, 0)?,
+        })
+    }
+
+    fn faces(&self, px: &[f64], pn: &[f64], pa: &[f64], cl_c: &[f64], cl_a: &[f64]) -> Result<BhFaces, RsError> {
+        let g = &self.gpu.inner;
+        Ok(BhFaces {
+            px: g.upload(px, 0.0)?,
+            pn: g.upload(pn, 0.0)?,
+            pa: g.upload(pa, 0.0)?,
+            cl_c: g.upload(cl_c, 0.0)?,
+            cl_a: g.upload(cl_a, 0.0)?,
+        })
+    }
+
+    fn leaf_energies(&self, f: &BhFaces, node: &CudaSlice<f64>, rows: &CudaSlice<f64>) -> Result<Vec<f64>, RsError> {
+        let g = &self.gpu.inner;
+        let mut out = g.alloc(self.nl as usize)?;
+        unsafe {
+            g.stream
+                .launch_builder(&g.k.bh_leaf_energy)
+                .arg(&self.nl)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.nend)
+                .arg(&self.lumped_off)
+                .arg(&self.lumped)
+                .arg(&self.exact_off)
+                .arg(&self.row_off)
+                .arg(node)
+                .arg(&f.cl_a)
+                .arg(&f.pa)
+                .arg(rows)
+                .arg(&mut out)
+                .launch(cfg(self.nl as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        let mut host = vec![0.0; self.nl as usize];
+        g.download(&out, &mut host)?;
+        Ok(host)
+    }
+
+    fn node_terms(&self, e: Exps, grad: bool, f: &BhFaces) -> Result<CudaSlice<f64>, RsError> {
+        let g = &self.gpu.inner;
+        let mut node = g.alloc(4 * self.n_lumped as usize)?;
+        let gr = grad as u32;
+        unsafe {
+            g.stream
+                .launch_builder(&g.k.bh_node)
+                .arg(&self.n_lumped)
+                .arg(&e)
+                .arg(&gr)
+                .arg(&self.lumped_leaf)
+                .arg(&self.lumped)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.nend)
+                .arg(&f.px)
+                .arg(&f.pn)
+                .arg(&f.pa)
+                .arg(&f.cl_c)
+                .arg(&mut node)
+                .launch(cfg(self.n_lumped as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        Ok(node)
+    }
+
+    /// `BhTree::energy`: the per-leaf energies (summed by the caller in leaf order).
+    pub(crate) fn energy(&self, e: Exps, px: &[f64], pn: &[f64], pa: &[f64], cl_c: &[f64], cl_a: &[f64]) -> Result<Vec<f64>, RsError> {
+        let g = &self.gpu.inner;
+        let f = self.faces(px, pn, pa, cl_c, cl_a)?;
+        let node = self.node_terms(e, false, &f)?;
+        let mut rows = g.alloc(self.n_rows)?;
+        unsafe {
+            g.stream
+                .launch_builder(&g.k.bh_rows_value)
+                .arg(&self.np)
+                .arg(&e)
+                .arg(&self.leaf_of)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.nend)
+                .arg(&self.exact_off)
+                .arg(&self.exact)
+                .arg(&self.row_off)
+                .arg(&f.px)
+                .arg(&f.pn)
+                .arg(&f.pa)
+                .arg(&mut rows)
+                .launch(cfg(self.np as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        self.leaf_energies(&f, &node, &rows)
+    }
+
+    /// `BhTree::face_partials`: the per-leaf energies and `[∂/∂a, ∂/∂X, ∂/∂N]` per face
+    /// (original order, 7 values each). `downward` maps the node sums `(b_C, u_C)` (4 per node)
+    /// to `(β, U)` (1 and 3 per node), the CPU's downward pass.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    pub(crate) fn partials(
+        &self,
+        e: Exps,
+        px: &[f64],
+        pn: &[f64],
+        pa: &[f64],
+        cl_c: &[f64],
+        cl_a: &[f64],
+        downward: impl FnOnce(&[f64]) -> (Vec<f64>, Vec<f64>),
+    ) -> Result<(Vec<f64>, Vec<f64>), RsError> {
+        let g = &self.gpu.inner;
+        let s = &g.stream;
+        let f = self.faces(px, pn, pa, cl_c, cl_a)?;
+        let mut own = g.alloc(7 * self.np as usize)?;
+        let mut rows = g.alloc(self.n_rows)?;
+        unsafe {
+            s.launch_builder(&g.k.bh_own)
+                .arg(&self.np)
+                .arg(&e)
+                .arg(&self.leaf_of)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.nend)
+                .arg(&self.lumped_off)
+                .arg(&self.lumped)
+                .arg(&self.exact_off)
+                .arg(&self.exact)
+                .arg(&self.row_off)
+                .arg(&f.px)
+                .arg(&f.pn)
+                .arg(&f.pa)
+                .arg(&f.cl_c)
+                .arg(&f.cl_a)
+                .arg(&mut own)
+                .arg(&mut rows)
+                .launch(cfg(self.np as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        let node = self.node_terms(e, true, &f)?;
+        let mut partner = g.alloc(4 * self.n_slots as usize)?;
+        unsafe {
+            s.launch_builder(&g.k.bh_partner)
+                .arg(&self.n_slots)
+                .arg(&e)
+                .arg(&self.slot_entry)
+                .arg(&self.partner_off)
+                .arg(&self.exact_leaf)
+                .arg(&self.exact)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.nend)
+                .arg(&f.px)
+                .arg(&f.pn)
+                .arg(&f.pa)
+                .arg(&mut partner)
+                .launch(cfg(self.n_slots as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        let mut sums = g.alloc(4 * self.nn as usize)?;
+        unsafe {
+            s.launch_builder(&g.k.bh_node_sums)
+                .arg(&self.nn)
+                .arg(&self.lt_off)
+                .arg(&self.lt)
+                .arg(&node)
+                .arg(&mut sums)
+                .launch(cfg(self.nn as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        let energies = self.leaf_energies(&f, &node, &rows)?;
+        let mut sums_h = vec![0.0; 4 * self.nn as usize];
+        g.download(&sums, &mut sums_h)?;
+        let (beta, ubig) = downward(&sums_h);
+        let d_beta = g.upload(&beta, 0.0)?;
+        let d_ubig = g.upload(&ubig, 0.0)?;
+        let mut out = g.alloc(7 * self.np as usize)?;
+        unsafe {
+            s.launch_builder(&g.k.bh_final)
+                .arg(&self.np)
+                .arg(&self.leaf_of)
+                .arg(&self.leaves)
+                .arg(&self.nstart)
+                .arg(&self.et_off)
+                .arg(&self.et)
+                .arg(&self.partner_off)
+                .arg(&own)
+                .arg(&partner)
+                .arg(&d_beta)
+                .arg(&d_ubig)
+                .arg(&f.cl_c)
+                .arg(&f.px)
+                .arg(&f.pa)
+                .arg(&self.order)
+                .arg(&mut out)
+                .launch(cfg(self.np as u64)?)
+        }
+        .map_err(gpu_err("barnes-hut"))?;
+        let mut host = vec![0.0; 7 * self.np as usize];
+        g.download(&out, &mut host)?;
+        Ok((energies, host))
+    }
 }
