@@ -19,6 +19,10 @@ crate-type = ["cdylib", "rlib"]
 default = []
 # The PyO3 glue (`src/python.rs`). maturin enables it through `pyproject.toml`.
 python = ["dep:pyo3"]
+# The CUDA back end of the Repulsive Surfaces flow (`device="cuda"` / `"auto"`): forwards to
+# ddg-repulsive-surfaces/cuda. Off by default, so the default wheel is unchanged. Nothing CUDA is
+# needed to build; the wheel loads the driver and libnvrtc.so.12 when a device is requested.
+cuda = ["ddg-repulsive-surfaces/cuda"]
 
 [dependencies]
 ddg-core = { path = "../ddg-core" }

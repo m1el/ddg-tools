@@ -12,13 +12,18 @@
 #   Python 3.12 without numpy  one in between, same binary
 #
 # The same wheel file is used for all three (stable ABI). Logs: runs_tmp/py-test-*.log.
-# Environment: DDG_PY_TEST_MATRIX overrides the list, e.g. "3.13: 3.13:numpy".
+# Environment: DDG_PY_TEST_MATRIX overrides the list, e.g. "3.13: 3.13:numpy". DDG_WHEEL_CUDA=1
+# tests the CUDA wheel (dist/wheels-cuda/, logs runs_tmp/py-test-cuda-*.log); the GPU tests run
+# when a device is usable, e.g. DDG_WHEEL_CUDA=1 DDG_PY_TEST_MATRIX="3.11:numpy" scripts/py-test.sh.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/blender-common.sh"
 
+wheels=wheels
+tag=""
+if [ "${DDG_WHEEL_CUDA:-0}" = 1 ]; then wheels=wheels-cuda; tag="cuda-"; fi
 if [ "${1:-}" = "--no-build" ]; then
-    wheel="$(ls -t "$root"/dist/wheels/ddg_tools-"$(ddg_version)"-*.whl 2>/dev/null | head -n 1)"
-    [ -n "$wheel" ] || { echo "no wheel in dist/wheels; run without --no-build" >&2; exit 1; }
+    wheel="$(ls -t "$root"/dist/$wheels/ddg_tools-"$(ddg_version)"-*.whl 2>/dev/null | head -n 1)"
+    [ -n "$wheel" ] || { echo "no wheel in dist/$wheels; run without --no-build" >&2; exit 1; }
 else
     wheel="$("$root/scripts/py-build-wheel.sh" | tail -n 1)"
 fi
@@ -31,7 +36,7 @@ for entry in $matrix; do
     extra="${entry#*:}"
     with=(--with "$wheel")
     [ -z "$extra" ] || with+=(--with "$extra")
-    log="$root/runs_tmp/py-test-$python${extra:+-$extra}.log"
+    log="$root/runs_tmp/py-test-$tag$python${extra:+-$extra}.log"
     # --refresh-package: never test a stale copy of a wheel that was rebuilt under the same name.
     # -I and a neutral working directory keep the repository out of the import path.
     if (cd "$root/runs_tmp" && for test in test_ddg_tools test_cut_session test_intrinsic_apps test_intrinsic_simplification test_integer_coords test_sphere test_intrinsic_vector test_developability test_repulsive test_repulsive_surfaces test_flip_geodesics; do

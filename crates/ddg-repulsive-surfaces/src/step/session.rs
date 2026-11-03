@@ -607,6 +607,12 @@ impl Session {
         self.status.clone()
     }
 
+    /// The name of the CUDA device this session opened (`None`: the CPU runs everything;
+    /// `NOTES-GPU.md`).
+    pub fn gpu_device_name(&self) -> Option<String> {
+        self.gpu.as_ref().map(|g| g.device_name())
+    }
+
     /// The options as given.
     pub fn options(&self) -> &FlowOptions {
         &self.options

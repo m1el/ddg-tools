@@ -89,6 +89,40 @@ pub const fn cuda_compiled() -> bool {
     cfg!(feature = "cuda")
 }
 
+/// One CUDA device as the driver reports it ([`devices`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuDeviceInfo {
+    /// The device ordinal (what [`CudaOptions::ordinal`] takes).
+    pub ordinal: usize,
+    /// The device's name.
+    pub name: String,
+    /// The compute capability `(major, minor)`.
+    pub compute_capability: (i32, i32),
+    /// Total device memory in bytes.
+    pub total_memory: u64,
+}
+
+/// The CUDA devices the driver reports (opens the driver, not NVRTC; compiles nothing).
+///
+/// # Errors
+/// [`RsError::Gpu`]: built without the `cuda` feature, or the driver cannot be loaded or
+/// initialised.
+pub fn devices() -> Result<Vec<GpuDeviceInfo>, RsError> {
+    #[cfg(feature = "cuda")]
+    {
+        cuda::enumerate()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        Err(RsError::Gpu {
+            operation: "context",
+            detail: "ddg-repulsive-surfaces was built without the `cuda` feature \
+                     (cargo build --features cuda)"
+                .into(),
+        })
+    }
+}
+
 /// A CUDA context with the compiled kernels (module docs). Shared through `Arc`.
 pub struct GpuContext {
     #[cfg(feature = "cuda")]

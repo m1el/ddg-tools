@@ -1264,6 +1264,22 @@ class RepulsiveSurfaceHandle:
     """An opaque penalty or obstacle produced by ``repulsive_surface_scene``; pass it back in
     ``penalties`` or ``ccd_obstacles``."""
 
+def gpu_info() -> GpuInfo:
+    """What this wheel and machine offer for ``device``: whether the wheel was built with CUDA
+    support, and the devices found (or why none is usable). Never raises."""
+
+class GpuDevice(TypedDict):
+    ordinal: int
+    name: str
+    compute_capability: str
+    memory_bytes: int
+
+class GpuInfo(TypedDict):
+    cuda_compiled: bool
+    available: bool
+    devices: list[GpuDevice]
+    reason: str | None
+
 def repulsive_surface_defaults() -> dict[str, object]:
     """The defaults of all options, read from the Rust library; the stubs below equal them.
     Passing the dict back as keywords gives the default flow."""
@@ -1292,7 +1308,9 @@ class RepulsiveSurfaceSession:
 
     Options (``repulsive_surface_defaults()`` lists them): ``alpha``, ``beta``; ``energy``,
     ``tp_weight``; ``metric`` (``low_order``, ``l2_kind``); ``backend`` / ``energy_eval`` with
-    ``theta``, ``chi``, ``dense_max_faces`` and ``gmres_*``; ``method`` (the comparison optimizers
+    ``theta``, ``chi``, ``dense_max_faces`` and ``gmres_*``; ``device`` (``"cpu"``, ``"cuda"``,
+    ``"auto"``; ``cuda_ordinal``, ``gpu_determinism``; ``gpu_info()`` says what the wheel offers;
+    every step report names the device that ran); ``method`` (the comparison optimizers
     are parsed, the library does not run them yet); ``constraints`` (list of dicts; default the
     barycenter) or the shorthands ``pins`` (+ ``pin_targets``, ``pin_move``, ``pin_move_steps``)
     and ``barycenter``; ``penalties`` (list of dicts) and ``ccd_obstacles``; the line search
@@ -1327,6 +1345,9 @@ class RepulsiveSurfaceSession:
         gmres_tolerance: float = 0.001,
         gmres_max_iterations: int = 200,
         gmres_side: Literal["right", "left"] = "right",
+        device: Literal["cpu", "cuda", "auto"] = "cpu",
+        cuda_ordinal: int = 0,
+        gpu_determinism: Literal["run_to_run", "match_cpu"] = "run_to_run",
         method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
         aqp_kappa: float = 100.0,
         lbfgs_memory: int = 10,
@@ -1441,6 +1462,9 @@ def repulsive_surface_flow(
     gmres_tolerance: float = 0.001,
     gmres_max_iterations: int = 200,
     gmres_side: Literal["right", "left"] = "right",
+    device: Literal["cpu", "cuda", "auto"] = "cpu",
+    cuda_ordinal: int = 0,
+    gpu_determinism: Literal["run_to_run", "match_cpu"] = "run_to_run",
     method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
     aqp_kappa: float = 100.0,
     lbfgs_memory: int = 10,
@@ -1517,6 +1541,9 @@ def surface_energy(
     gmres_tolerance: float = 0.001,
     gmres_max_iterations: int = 200,
     gmres_side: Literal["right", "left"] = "right",
+    device: Literal["cpu", "cuda", "auto"] = "cpu",
+    cuda_ordinal: int = 0,
+    gpu_determinism: Literal["run_to_run", "match_cpu"] = "run_to_run",
     method: Literal["projected_gradient", "aqp", "h1_lbfgs", "bcqn"] = "projected_gradient",
     aqp_kappa: float = 100.0,
     lbfgs_memory: int = 10,

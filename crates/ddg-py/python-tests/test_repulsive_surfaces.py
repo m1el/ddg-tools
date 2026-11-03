@@ -531,6 +531,116 @@ class Options(unittest.TestCase):
         self.assertEqual(c[0].tobytes(), d[0].tobytes())
 
 
+class Gpu(unittest.TestCase):
+    """The `device` options: `gpu_info()`, the CPU default, "auto" on any wheel, "cuda" without a
+    usable GPU, and (CUDA wheel with a GPU) the agreement of the device with the CPU."""
+
+    INFO = ddg_tools.gpu_info()
+    HAVE_GPU = INFO["cuda_compiled"] and INFO["available"]
+    # The hierarchical back end is what runs on the device (the dense one has no products).
+    FLOW = {"backend": "hierarchical", "threads": 2}
+
+    def flow(self, steps=4, mesh=TORUS, **options):
+        p, f = mesh
+        return ddg_tools.repulsive_surface_flow(p, f, steps=steps, **{**self.FLOW, **options})
+
+    def test_defaults(self):
+        d = ddg_tools.repulsive_surface_defaults()
+        self.assertEqual((d["device"], d["cuda_ordinal"], d["gpu_determinism"]),
+                         ("cpu", 0, "run_to_run"))
+
+    def test_gpu_info(self):
+        i = self.INFO
+        self.assertEqual(set(i), {"cuda_compiled", "available", "devices", "reason"})
+        self.assertIsInstance(i["cuda_compiled"], bool)
+        if i["available"]:
+            self.assertTrue(i["cuda_compiled"])
+            self.assertIsNone(i["reason"])
+            d = i["devices"][0]
+            self.assertEqual(d["ordinal"], 0)
+            self.assertIsInstance(d["name"], str)
+            self.assertRegex(d["compute_capability"], r"^\d+\.\d+$")
+            self.assertGreater(d["memory_bytes"], 0)
+        else:
+            self.assertEqual(i["devices"], [])
+            self.assertIsInstance(i["reason"], str)
+        if not i["cuda_compiled"]:
+            self.assertIn("cuda", i["reason"])
+
+    def test_cpu_report_names_the_device(self):
+        _, _, r = self.flow(steps=1)
+        self.assertEqual(r["steps"][0]["device"], "cpu")
+        self.assertIsNone(r["steps"][0]["device_name"])
+
+    def test_auto_works_on_any_wheel(self):
+        _, _, r = self.flow(steps=2, device="auto")
+        step = r["steps"][0]
+        if self.HAVE_GPU:
+            self.assertEqual(step["device"], "cuda")
+            self.assertIn(self.INFO["devices"][0]["name"], step["device_name"])
+        else:
+            self.assertEqual(step["device"], "cpu")
+        s = ddg_tools.RepulsiveSurfaceSession(*TORUS, device="auto", **self.FLOW)
+        self.assertEqual(s.step()["device"], step["device"])
+        # a device that does not exist: "auto" falls back, it does not raise
+        _, _, r = self.flow(steps=1, device="auto", cuda_ordinal=99)
+        self.assertEqual(r["steps"][0]["device"], "cpu")
+
+    def test_cuda_without_a_usable_gpu_is_a_clear_error(self):
+        if self.HAVE_GPU:
+            with self.assertRaises(ddg_tools.RepulsiveSurfaceInputError) as c:
+                self.flow(steps=1, device="cuda", cuda_ordinal=99)
+            self.assertIn("GPU", str(c.exception))
+            return
+        with self.assertRaises(ddg_tools.RepulsiveSurfaceInputError) as c:
+            self.flow(steps=1, device="cuda")
+        self.assertIsInstance(c.exception, ValueError)
+        self.assertIn("GPU", str(c.exception))
+        with self.assertRaises(ddg_tools.RepulsiveSurfaceInputError):
+            ddg_tools.RepulsiveSurfaceSession(*TORUS, device="cuda", **self.FLOW)
+
+    def test_bad_values_are_named(self):
+        for kw in ({"device": "tpu"}, {"gpu_determinism": "exact"}, {"cuda_ordinal": -1}):
+            with self.assertRaises(ddg_tools.RepulsiveSurfaceInputError) as c:
+                self.flow(steps=1, **kw)
+            self.assertIn(next(iter(kw)), str(c.exception))
+
+    def test_surface_energy_accepts_the_options(self):
+        p, f = SPHERE
+        a = ddg_tools.surface_energy(p, f, device="auto", cuda_ordinal=0, gpu_determinism="match_cpu")
+        b = ddg_tools.surface_energy(p, f)
+        self.assertEqual(a[0], b[0])
+
+    @unittest.skipUnless(HAVE_GPU, "needs a wheel built with CUDA and a usable GPU")
+    def test_cuda_matches_cpu_and_is_reproducible(self):
+        cpu = self.flow()
+        run_to_run = self.flow(device="cuda")
+        again = self.flow(device="cuda")
+        match_cpu = self.flow(device="cuda", gpu_determinism="match_cpu")
+        self.assertEqual(run_to_run[2]["steps"][0]["device"], "cuda")
+        # two GPU runs are bitwise identical
+        self.assertEqual(run_to_run[0].tobytes(), again[0].tobytes())
+        self.assertEqual(run_to_run[1].tobytes(), again[1].tobytes())
+        # run_to_run: the CPU flow to round-off (FMA contraction)
+        self.assertEqual(run_to_run[1].tobytes(), cpu[1].tobytes())
+        scale = max(abs(x) for x in cpu[0])
+        err = max(abs(a - b) for a, b in zip(run_to_run[0], cpu[0]))
+        self.assertLess(err, 1e-8 * scale)
+        e_cpu = cpu[2]["energy_final"]
+        self.assertLess(abs(run_to_run[2]["energy_final"] - e_cpu), 1e-8 * abs(e_cpu))
+        # match_cpu: bit for bit
+        self.assertEqual(match_cpu[0].tobytes(), cpu[0].tobytes())
+        self.assertEqual(match_cpu[1].tobytes(), cpu[1].tobytes())
+        self.assertEqual(match_cpu[2]["energy_final"], e_cpu)
+
+    @unittest.skipUnless(HAVE_GPU, "needs a wheel built with CUDA and a usable GPU")
+    def test_cuda_session_reports_the_device(self):
+        s = ddg_tools.RepulsiveSurfaceSession(*TORUS, device="cuda", cuda_ordinal=0, **self.FLOW)
+        r = s.step()
+        self.assertEqual(r["device"], "cuda")
+        self.assertIn(self.INFO["devices"][0]["name"], r["device_name"])
+
+
 class Errors(unittest.TestCase):
     def assertInput(self, *args, message=None, **kwargs):
         with self.assertRaises(ddg_tools.RepulsiveSurfaceInputError) as cm:
