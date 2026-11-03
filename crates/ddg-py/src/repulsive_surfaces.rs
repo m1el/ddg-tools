@@ -1479,6 +1479,12 @@ pub fn step_val(r: &StepReport, session_status: &Status, device: Option<&str>) -
         ("session_status", Val::s(status_name(session_status))),
         ("device", Val::s(if device.is_some() { "cuda" } else { "cpu" })),
         ("device_name", device.map_or(Val::None, Val::s)),
+        // Where the metric solve ran: the GPU only accelerates the hierarchical (GMRES) path; the
+        // dense back end (below `dense_max_faces`) solves on the CPU even when a GPU is open.
+        (
+            "metric_device",
+            Val::s(if device.is_some() && r.linear.solver == "gmres" { "cuda" } else { "cpu" }),
+        ),
         ("n_vertices", Val::uint(r.vertices)),
         ("n_faces", Val::uint(r.faces)),
         ("energy_before", Val::Float(r.energy_before)),

@@ -97,10 +97,14 @@ def gpu_info(refresh=False):
     return _GPU_INFO[0]
 
 
-def device_text(device, name):
-    """'CPU' or 'CUDA (name)' for a step report's ``device`` and ``device_name``."""
+def device_text(device, name, metric_device=None):
+    """'CPU' or 'CUDA (name)' for a step report's ``device`` and ``device_name``; when the GPU is
+    open but the metric was solved by the dense back end on the CPU (small meshes), says so."""
     if device == "cuda":
-        return "CUDA ({})".format(name) if name else "CUDA"
+        text = "CUDA ({})".format(name) if name else "CUDA"
+        if metric_device == "cpu":
+            text += ", dense metric on CPU"
+        return text
     return "CPU"
 
 
@@ -386,7 +390,8 @@ def flow_object(obj, settings, depsgraph, *, steps=None, progress=None):
             "n_vertices": len(snap["positions"]) // 3, "n_faces": len(snap["faces"]) // 3,
             "seconds_native": t2 - t1, "seconds_blender": (t1 - t0) + (perf_counter() - t2),
             "description": surface.description,
-            "device": device_text(last.get("device"), last.get("device_name")),
+            "device": device_text(last.get("device"), last.get("device_name"),
+                                  last.get("metric_device")),
         }
     except Exception:
         # nothing was written before the failure, except possibly by write itself
@@ -523,7 +528,8 @@ class LiveFlow:
         setting before the first one)."""
         report = self.last_report
         if report:
-            return device_text(report.get("device"), report.get("device_name"))
+            return device_text(report.get("device"), report.get("device_name"),
+                               report.get("metric_device"))
         return self.settings_device
 
     def cancel(self):

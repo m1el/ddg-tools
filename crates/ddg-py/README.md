@@ -815,8 +815,10 @@ energy, differential = ddg_tools.curve_energy(positions, edges, alpha=3, beta=6)
   ...") or `"auto"` (the GPU if usable, else the CPU; never raises for that reason);
   `cuda_ordinal=0`; `gpu_determinism="run_to_run"` (default: bitwise reproducible from run to
   run, within round-off of the CPU) or `"match_cpu"` (bit for bit the CPU flow for integer
-  exponents; slower). The step report has `device` (`"cpu"` or `"cuda"`: what ran) and
-  `device_name`. `ddg_tools.gpu_info()` returns `{cuda_compiled, available, devices: [{ordinal,
+  exponents; slower). The step report has `device` (`"cuda"` when the session opened a GPU:
+  the Barnes–Hut energy runs there), `device_name`, and `metric_device` (`"cuda"` only when the
+  metric was solved by the hierarchical GMRES path on the GPU; meshes below `dense_max_faces`,
+  1000 by default, use the dense CPU solver, so `metric_device` is `"cpu"` there). `ddg_tools.gpu_info()` returns `{cuda_compiled, available, devices: [{ordinal,
   name, compute_capability, memory_bytes}], reason}` and never raises. `surface_energy` accepts
   the options and ignores them (it always runs on the CPU). The default wheel has no CUDA code;
   build the CUDA wheel with `DDG_WHEEL_CUDA=1 scripts/py-build-wheel.sh` (cargo feature `cuda`;
@@ -924,7 +926,7 @@ positions, faces, options = ddg_tools.repulsive_surface_scene("scene.txt")  # th
   `options["ccd_obstacles"]`; everything else is plain values that can be edited. Normal
   constraints (`constrain normals`) are not supported by the library.
 * **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"cancelled"`),
-  `session_status`, `device`, `device_name`, `n_vertices`, `n_faces`, `energy_before`, `energy_after`,
+  `session_status`, `device`, `device_name`, `metric_device`, `n_vertices`, `n_faces`, `energy_before`, `energy_after`,
   `tangent_point_after`, `penalties_after`, `gradient_norm`, `sobolev_norm_sq`, `tau`, `tau0`,
   `tau_ccd`, `halvings`, `newton_steps`, `projection`, `max_violation`, `dropped_rows`,
   `linear` (solver, iterations, residual), `remesh` (splits, collapses, flips, ...), `seconds`
