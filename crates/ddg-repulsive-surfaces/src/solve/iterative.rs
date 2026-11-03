@@ -498,13 +498,36 @@ pub fn hierarchical_saddle_with(
 ) -> Result<HierarchicalSaddle, RsError> {
     weights.validate()?;
     options.cluster.validate()?;
-    let tree = match face_tree {
-        Some(t) => {
+    // Level 1 (`RunToRun`): the near fields are evaluated on the GPU; level 2 (`MatchCpu`): built
+    // on the CPU and uploaded, so that every product is the CPU's bit for bit (`NOTES-GPU.md`).
+    let gpu_build = gpu.filter(|g| g.determinism() == crate::gpu::Determinism::RunToRun);
+    let mut gpu_metric = None;
+    let tree = match (face_tree, gpu_build) {
+        (t, Some(g)) => {
+            let geom = FaceGeometry::new(surface, positions)?;
+            let t = match t {
+                Some(t) => t,
+                None => FaceTree::build(surface, positions, &geom, options.cluster.leaf_size)?,
+            };
+            let ops = FaceOperators::from_geometry(surface, positions, geom);
+            let (tree, dev) = FaceMetricTree::build_on_gpu(
+                &pool,
+                t,
+                ops,
+                exponents,
+                &options.cluster,
+                g,
+                extras.obstacle.as_ref(),
+            )?;
+            gpu_metric = Some(dev);
+            tree
+        }
+        (Some(t), None) => {
             let geom = FaceGeometry::new(surface, positions)?;
             let ops = FaceOperators::from_geometry(surface, positions, geom);
             FaceMetricTree::from_parts(&pool, t, ops, exponents, &options.cluster)?
         }
-        None => FaceMetricTree::build(&pool, surface, positions, exponents, &options.cluster)?,
+        (None, None) => FaceMetricTree::build(&pool, surface, positions, exponents, &options.cluster)?,
     };
     let willmore = extras.weighted_willmore(surface, positions, weights)?;
     let mut popts = options.preconditioner;
@@ -528,7 +551,7 @@ pub fn hierarchical_saddle_with(
             }
         });
     }
-    let mut prec = SparsePreconditioner::with_metric_tree(
+    let mut prec = SparsePreconditioner::with_metric_tree_on(
         pool.clone(),
         surface,
         positions,
@@ -537,12 +560,17 @@ pub fn hierarchical_saddle_with(
         &popts,
         extra.as_ref(),
         &tree,
+        gpu_build,
     )?
     .with_metric_weight(weights.tp_weight);
     let mut op = HierarchicalOperator::new(pool.clone(), tree, weights, willmore, extras.obstacle.clone(), c_q)?;
-    if let Some(g) = gpu {
-        op = op.with_gpu(g)?;
-        prec = prec.with_gpu(g)?;
+    match (gpu_metric, gpu) {
+        (Some(dev), _) => op.gpu = Some(dev),
+        (None, Some(g)) => {
+            op = op.with_gpu(g)?;
+            prec = prec.with_gpu(g)?;
+        }
+        (None, None) => {}
     }
     prec.attach_coarse(&op, surface, c_q)?;
     let nd = op.n_dofs();

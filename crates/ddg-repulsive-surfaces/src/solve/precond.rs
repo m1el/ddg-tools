@@ -599,6 +599,26 @@ impl SparsePreconditioner {
         extra_laplacian: Option<&SparseMatrix>,
         faces: Option<(&FaceTree, &FaceOperators)>,
     ) -> Result<SparsePreconditioner, RsError> {
+        Self::new_on(pool, surface, positions, exponents, c, options, extra_laplacian, faces, None)
+    }
+
+    /// [`SparsePreconditioner::new`], with the vertex-pair tree's near field evaluated on the GPU
+    /// `gpu_build` (level 1, `NOTES-GPU.md`; its products then run there).
+    ///
+    /// # Errors
+    /// As [`SparsePreconditioner::new`]; [`RsError::Gpu`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_on(
+        pool: Arc<rayon::ThreadPool>,
+        surface: &Surface,
+        positions: &[[f64; 3]],
+        exponents: &Exponents,
+        c: &SparseMatrix,
+        options: &PreconditionerOptions,
+        extra_laplacian: Option<&SparseMatrix>,
+        faces: Option<(&FaceTree, &FaceOperators)>,
+        gpu_build: Option<&Arc<crate::gpu::GpuContext>>,
+    ) -> Result<SparsePreconditioner, RsError> {
         options.validate()?;
         let geom = FaceGeometry::new(surface, positions)?;
         let nv = surface.n_vertices();
@@ -630,15 +650,21 @@ impl SparsePreconditioner {
         let lprime = LaplacianSaddle::new(&k, c)?;
         let t0 = Instant::now();
         let tau = 2.0 - exponents.s();
-        let fractional = match options.fractional {
-            FractionalForm::VertexPairs => FractionalFactor::Vertices(VertexFractionalTree::build(
+        let mut gpu_fractional = None;
+        let fractional = match (options.fractional, gpu_build) {
+            (FractionalForm::VertexPairs, Some(g)) => {
+                let (t, dev) = VertexFractionalTree::build_on_gpu(&pool, positions, &mass, tau, &options.cluster, g)?;
+                gpu_fractional = Some(dev);
+                FractionalFactor::Vertices(t)
+            }
+            (FractionalForm::VertexPairs, None) => FractionalFactor::Vertices(VertexFractionalTree::build(
                 &pool,
                 positions,
                 &mass,
                 tau,
                 &options.cluster,
             )?),
-            FractionalForm::FacePairs => {
+            (FractionalForm::FacePairs, _) => {
                 let tree = match faces {
                     Some((t, ops)) => FaceFractionalTree::build(&pool, t, ops, tau, &options.cluster)?,
                     None => {
@@ -667,7 +693,7 @@ impl SparsePreconditioner {
             eps,
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
-            gpu_fractional: None,
+            gpu_fractional,
             upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
             nanos: AtomicU64::new(0),
@@ -699,6 +725,36 @@ impl SparsePreconditioner {
             options,
             extra_laplacian,
             Some((tree.face_tree(), tree.operators())),
+        )
+    }
+
+    /// [`SparsePreconditioner::with_metric_tree`] with the vertex-pair near field on the GPU
+    /// `gpu_build` ([`SparsePreconditioner::new_on`]).
+    ///
+    /// # Errors
+    /// As [`SparsePreconditioner::new_on`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_metric_tree_on(
+        pool: Arc<rayon::ThreadPool>,
+        surface: &Surface,
+        positions: &[[f64; 3]],
+        exponents: &Exponents,
+        c: &SparseMatrix,
+        options: &PreconditionerOptions,
+        extra_laplacian: Option<&SparseMatrix>,
+        tree: &FaceMetricTree,
+        gpu_build: Option<&Arc<crate::gpu::GpuContext>>,
+    ) -> Result<SparsePreconditioner, RsError> {
+        Self::new_on(
+            pool,
+            surface,
+            positions,
+            exponents,
+            c,
+            options,
+            extra_laplacian,
+            Some((tree.face_tree(), tree.operators())),
+            gpu_build,
         )
     }
 

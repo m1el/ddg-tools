@@ -49,6 +49,8 @@ pub(crate) struct Kernels {
     vertex_out: CudaFunction,
     pairwise_level: CudaFunction,
     mul_elems: CudaFunction,
+    near_fill_face: CudaFunction,
+    near_fill_vertex: CudaFunction,
 }
 
 /// A device, its stream and the kernels.
@@ -109,6 +111,8 @@ impl CudaBackend {
             vertex_out: f("vertex_out")?,
             pairwise_level: f("pairwise_level")?,
             mul_elems: f("mul_elems")?,
+            near_fill_face: f("near_fill_face")?,
+            near_fill_vertex: f("near_fill_vertex")?,
         };
         let stream = ctx.default_stream();
         Ok(CudaBackend {
@@ -211,6 +215,9 @@ pub(crate) struct DeviceBlockTree {
     near_col: CudaSlice<u32>,
     near_off: CudaSlice<u64>,
     near_val: CudaSlice<f64>,
+    /// The row node of every near block (for the device-side fill).
+    block_row: CudaSlice<u32>,
+    n_blocks: u32,
     /// Bytes on the device.
     pub(crate) bytes: usize,
 }
@@ -261,8 +268,20 @@ impl DeviceBlockTree {
         let far_coef = flat(p.far_coef);
         let near_val = flat(p.near_val);
         let near_off: Vec<u64> = p.near_off.iter().map(|&x| x as u64).collect();
-        let bytes = 8 * (far_coef.len() + near_val.len() + near_off.len() + n)
-            + 4 * (5 * n_nodes + p.chain.len() + p.far_col.len() + p.near_col.len() + 2 * n);
+        let mut block_row = vec![0u32; p.near_col.len()];
+        for a in 0..n_nodes {
+            for q in p.near_ptr[a]..p.near_ptr[a + 1] {
+                block_row[q] = a as u32;
+            }
+        }
+        let bytes = 8 * (far_coef.len() + N * p.near_total + near_off.len() + n)
+            + 4 * (5 * n_nodes + p.chain.len() + p.far_col.len() + 2 * p.near_col.len() + 2 * n);
+        // The near entries: uploaded, or allocated for a device-side fill (structure-only tree).
+        let near_dev = if near_val.len() == N * p.near_total {
+            g.upload(near_val, 0.0)?
+        } else {
+            g.alloc(N * p.near_total)?
+        };
         Ok(DeviceBlockTree {
             n: n as u32,
             n_nodes: n_nodes as u32,
@@ -284,9 +303,62 @@ impl DeviceBlockTree {
             near_ptr: g.upload(&to_u32(p.near_ptr, "near pointer")?, 0)?,
             near_col: g.upload(p.near_col, 0)?,
             near_off: g.upload(&near_off, 0)?,
-            near_val: g.upload(near_val, 0.0)?,
+            near_val: near_dev,
+            n_blocks: block_row.len() as u32,
+            block_row: g.upload(&block_row, 0)?,
             bytes,
         })
+    }
+
+    /// Fills the near entries of the face kernels `[h_hi, h_lo]` on the device (level 1).
+    fn fill_face(&mut self, g: &CudaBackend, order: &CudaSlice<u32>, bary: &CudaSlice<f64>, normal: &CudaSlice<f64>, neg_s: f64) -> Result<(), RsError> {
+        if self.n_blocks == 0 {
+            return Ok(());
+        }
+        let cfg = LaunchConfig { grid_dim: (self.n_blocks, 1, 1), block_dim: (64, 1, 1), shared_mem_bytes: 0 };
+        unsafe {
+            g.stream
+                .launch_builder(&g.k.near_fill_face)
+                .arg(&self.n_blocks)
+                .arg(&self.block_row)
+                .arg(&self.near_col)
+                .arg(&self.near_off)
+                .arg(&self.start)
+                .arg(&self.end)
+                .arg(order)
+                .arg(bary)
+                .arg(normal)
+                .arg(&neg_s)
+                .arg(&mut self.near_val)
+                .launch(cfg)
+        }
+        .map_err(gpu_err("near field"))?;
+        Ok(())
+    }
+
+    /// Fills the near entries of the vertex kernel `|f_v − f_w|^{2·exponent}` on the device.
+    fn fill_vertex(&mut self, g: &CudaBackend, order: &CudaSlice<u32>, pos: &CudaSlice<f64>, exponent: f64) -> Result<(), RsError> {
+        if self.n_blocks == 0 {
+            return Ok(());
+        }
+        let cfg = LaunchConfig { grid_dim: (self.n_blocks, 1, 1), block_dim: (64, 1, 1), shared_mem_bytes: 0 };
+        unsafe {
+            g.stream
+                .launch_builder(&g.k.near_fill_vertex)
+                .arg(&self.n_blocks)
+                .arg(&self.block_row)
+                .arg(&self.near_col)
+                .arg(&self.near_off)
+                .arg(&self.start)
+                .arg(&self.end)
+                .arg(order)
+                .arg(pos)
+                .arg(&exponent)
+                .arg(&mut self.near_val)
+                .launch(cfg)
+        }
+        .map_err(gpu_err("near field"))?;
+        Ok(())
     }
 
     /// `H̃ ψ` for `C` channels (channels `< h` on kernel 0, the others on kernel `N − 1`), all in
@@ -406,6 +478,12 @@ pub(crate) struct DeviceFaceMetric {
 
 impl DeviceFaceMetric {
     pub(crate) fn new(gpu: &Arc<GpuContext>, tree: &BlockTreeParts<'_, 2>, h: &FaceMetricHost<'_>) -> Result<Self, RsError> {
+        let t = DeviceBlockTree::upload(&gpu.inner, tree, h.faces.len())?;
+        Self::with_tree(gpu, t, h)
+    }
+
+    /// With a block tree already on the device ([`gpu_face_tree`]).
+    pub(crate) fn with_tree(gpu: &Arc<GpuContext>, tree: DeviceBlockTree, h: &FaceMetricHost<'_>) -> Result<Self, RsError> {
         let g = &gpu.inner;
         let nf = h.faces.len();
         let faces: Vec<u32> = h.faces.iter().flatten().copied().collect();
@@ -415,7 +493,7 @@ impl DeviceFaceMetric {
         let inc_corner: Vec<u8> = h.inc.iter().map(|e| e.1).collect();
         Ok(DeviceFaceMetric {
             gpu: gpu.clone(),
-            tree: DeviceBlockTree::upload(g, tree, nf)?,
+            tree,
             nf: nf as u32,
             nv: h.n_vertices as u32,
             order: g.upload(h.order, 0)?,
@@ -556,10 +634,23 @@ impl DeviceVertexFractional {
         mass: &[f64],
         ha: &[f64],
     ) -> Result<Self, RsError> {
+        let t = DeviceBlockTree::upload(&gpu.inner, tree, mass.len())?;
+        Self::with_tree(gpu, t, order, position, mass, ha)
+    }
+
+    /// With a block tree already on the device ([`gpu_vertex_tree`]).
+    pub(crate) fn with_tree(
+        gpu: &Arc<GpuContext>,
+        tree: DeviceBlockTree,
+        order: &[u32],
+        position: &[u32],
+        mass: &[f64],
+        ha: &[f64],
+    ) -> Result<Self, RsError> {
         let g = &gpu.inner;
         Ok(DeviceVertexFractional {
             gpu: gpu.clone(),
-            tree: DeviceBlockTree::upload(g, tree, mass.len())?,
+            tree,
             n: mass.len() as u32,
             order: g.upload(order, 0)?,
             position: g.upload(position, 0)?,
@@ -627,4 +718,55 @@ impl DeviceVertexFractional {
         }
         Ok(())
     }
+}
+
+/// A structure-only face block tree ([`crate::spatial::block_tree::BlockTree::build_structure`])
+/// completed on the device: the near entries of `[h_hi, h_lo]` from the face data (`bary`,
+/// `normal` per face, original order) and `H̃a` (returned in BVH order, `[h_hi, h_lo]`).
+pub(crate) fn gpu_face_tree(
+    gpu: &Arc<GpuContext>,
+    parts: &BlockTreeParts<'_, 2>,
+    order: &[u32],
+    bary: &[[f64; 3]],
+    normal: &[[f64; 3]],
+    areas: &[f64],
+    neg_s: f64,
+) -> Result<(DeviceBlockTree, Vec<[f64; 2]>), RsError> {
+    let g = &gpu.inner;
+    let n = order.len();
+    let mut t = DeviceBlockTree::upload(g, parts, n)?;
+    let d_order = g.upload(order, 0)?;
+    let d_bary = g.upload(flat(bary), 0.0)?;
+    let d_normal = g.upload(flat(normal), 0.0)?;
+    t.fill_face(g, &d_order, &d_bary, &d_normal, neg_s)?;
+    let psi: Vec<f64> = order.iter().flat_map(|&s| [areas[s as usize]; 2]).collect();
+    let d_psi = g.upload(&psi, 0.0)?;
+    let ha = t.multiply(g, 2, 1, &d_psi)?;
+    let mut host = vec![0.0; 2 * n];
+    g.download(&ha, &mut host)?;
+    Ok((t, host.chunks_exact(2).map(|c| [c[0], c[1]]).collect()))
+}
+
+/// As [`gpu_face_tree`] for the vertex kernel (`pos` per vertex, original order); `H̃a` in BVH
+/// order.
+pub(crate) fn gpu_vertex_tree(
+    gpu: &Arc<GpuContext>,
+    parts: &BlockTreeParts<'_, 1>,
+    order: &[u32],
+    pos: &[[f64; 3]],
+    mass: &[f64],
+    exponent: f64,
+) -> Result<(DeviceBlockTree, Vec<f64>), RsError> {
+    let g = &gpu.inner;
+    let n = order.len();
+    let mut t = DeviceBlockTree::upload(g, parts, n)?;
+    let d_order = g.upload(order, 0)?;
+    let d_pos = g.upload(flat(pos), 0.0)?;
+    t.fill_vertex(g, &d_order, &d_pos, exponent)?;
+    let psi: Vec<f64> = order.iter().map(|&v| mass[v as usize]).collect();
+    let d_psi = g.upload(&psi, 0.0)?;
+    let ha = t.multiply(g, 1, 1, &d_psi)?;
+    let mut host = vec![0.0; n];
+    g.download(&ha, &mut host)?;
+    Ok((t, host))
 }

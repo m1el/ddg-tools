@@ -162,6 +162,77 @@ fn vertex_fractional_products_match_cpu() {
     }
 }
 
+/// Level 1's device-built near fields (`build_on_gpu`): `H̃a` and the products within round-off
+/// of the CPU-built trees (the device `pow` differs by ulps), bitwise reproducible; the
+/// structure-only CPU trees refuse CPU products.
+#[test]
+fn gpu_built_near_fields_match_cpu() {
+    use ddg_repulsive_surfaces::geometry::{FaceGeometry, vertex_areas};
+    use ddg_repulsive_surfaces::metric::FaceOperators;
+    use ddg_repulsive_surfaces::spatial::FaceTree;
+    let Some(g1) = gpu(Determinism::RunToRun) else { return };
+    let pool = make_pool(Some(3)).unwrap();
+    let ex = Exponents::default();
+    for (faces, seed, chi) in [(3000, 21, 0.5), (6000, 22, 0.5), (1200, 23, 0.0)] {
+        let (s, p) = mesh(faces, seed);
+        let opts = ClusterTreeOptions { chi, ..Default::default() };
+        let cpu = FaceMetricTree::build(&pool, &s, &p, &ex, &opts).unwrap();
+        let geom = FaceGeometry::new(&s, &p).unwrap();
+        let ft = FaceTree::build(&s, &p, &geom, opts.leaf_size).unwrap();
+        let ops = FaceOperators::from_geometry(&s, &p, geom);
+        let diag = cases(s.n_faces()).pop().unwrap().diag;
+        let (gt, dev) = FaceMetricTree::build_on_gpu(&pool, ft, ops, &ex, &opts, &g1, diag.as_ref()).unwrap();
+        assert!(!gt.has_cpu_near_field());
+        for (a, b) in gt.kernel_times_areas().iter().zip(cpu.kernel_times_areas()) {
+            for k in 0..2 {
+                assert!((a[k] - b[k]).abs() <= 1e-13 * b[k].abs(), "H~a {a:?} vs {b:?}");
+            }
+        }
+        let nd = 3 * s.n_vertices();
+        let xs = vectors(nd, 2, seed as usize);
+        let xr: Vec<&[f64]> = xs.iter().map(Vec::as_slice).collect();
+        let mut want = vec![vec![0.0; nd]; 2];
+        {
+            let mut yr: Vec<&mut [f64]> = want.iter_mut().map(Vec::as_mut_slice).collect();
+            cpu.apply_batch(&pool, 1.0, 0.7, diag.as_ref(), &xr, &mut yr).unwrap();
+        }
+        let run = || {
+            let mut ys = vec![vec![0.0; nd]; 2];
+            let mut yr: Vec<&mut [f64]> = ys.iter_mut().map(Vec::as_mut_slice).collect();
+            dev.apply_batch(1.0, 0.7, &xr, &mut yr).unwrap();
+            ys
+        };
+        let (y, y2) = (run(), run());
+        for q in 0..2 {
+            let e = max_rel(&y[q], &want[q]);
+            assert!(e < 1e-11, "faces {faces}: device-built product error {e:e}");
+            assert!(y[q].iter().zip(&y2[q]).all(|(a, b)| a.to_bits() == b.to_bits()));
+        }
+        let mut out = vec![vec![0.0; nd]; 1];
+        let mut yr: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+        assert!(gt.apply_batch(&pool, 1.0, 0.7, None, &xr[..1], &mut yr).is_err());
+        // The vertex-pair operator.
+        let mass = vertex_areas(&s, &FaceGeometry::new(&s, &p).unwrap().areas);
+        let tau = 2.0 - ex.s();
+        let vc = VertexFractionalTree::build(&pool, &p, &mass, tau, &opts).unwrap();
+        let (_, vd) = VertexFractionalTree::build_on_gpu(&pool, &p, &mass, tau, &opts, &g1).unwrap();
+        let mut vw = vec![vec![0.0; nd]; 2];
+        {
+            let mut yr: Vec<&mut [f64]> = vw.iter_mut().map(Vec::as_mut_slice).collect();
+            vc.apply_batch(&pool, &xr, &mut yr).unwrap();
+        }
+        let mut vy = vec![vec![0.0; nd]; 2];
+        {
+            let mut yr: Vec<&mut [f64]> = vy.iter_mut().map(Vec::as_mut_slice).collect();
+            vd.apply_batch(&xr, &mut yr).unwrap();
+        }
+        for q in 0..2 {
+            let e = max_rel(&vy[q], &vw[q]);
+            assert!(e < 1e-11, "faces {faces}: device-built vertex product error {e:e}");
+        }
+    }
+}
+
 /// The pairwise tree: GPU = CPU bitwise for lengths around powers of two.
 #[test]
 fn pairwise_dot_matches_cpu() {

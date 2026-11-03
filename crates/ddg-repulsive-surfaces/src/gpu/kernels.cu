@@ -204,6 +204,70 @@ extern "C" __global__ void vertex_out(u32 n, u32 nb, u32 C, u64 nd, const u32* _
     ys[q * nd + rem] = 2.0 * a * (ha[v] * xs[q * nd + rem] - hx[(u64)position[v] * C + 3 * q + k]);
 }
 
+// Near-field entries built on the device (level 1 only: pow() is CUDA's, not the CPU libm's, so the
+// values may differ from the CPU's by an ulp). One CUDA block per near block q; the kernel of an
+// element pair is evaluated for (min, max) as on the CPU (FaceKernels::near, VertexKernel::near), so
+// mirrored blocks are exact transposes; the diagonal of a block (a, a) is 0 (never read).
+__device__ __forceinline__ double dot3(const double* a, const double* b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+extern "C" __global__ void near_fill_face(u32 n_blocks, const u32* __restrict__ block_row,
+                                          const u32* __restrict__ near_col, const u64* __restrict__ near_off,
+                                          const u32* __restrict__ start, const u32* __restrict__ end,
+                                          const u32* __restrict__ order, const double* __restrict__ bary,
+                                          const double* __restrict__ normal, double neg_s,
+                                          double* __restrict__ near_val) {
+    u32 q = blockIdx.x;
+    if (q >= n_blocks) return;
+    u32 a = block_row[q], b = near_col[q];
+    u32 sa = start[a], ra = end[a] - sa, sb = start[b], cb = end[b] - sb;
+    double* blk = near_val + 2 * near_off[q];
+    for (u32 e = threadIdx.x; e < ra * cb; e += blockDim.x) {
+        u32 r = e / cb, c = e % cb;
+        double h0 = 0.0, h1 = 0.0;
+        if (!(a == b && r == c)) {
+            u32 i = order[sa + r], j = order[sb + c];
+            u32 lo = i < j ? i : j, hi = i < j ? j : i;
+            const double* xl = bary + 3 * (u64)lo;
+            const double* xh = bary + 3 * (u64)hi;
+            double d[3] = {xl[0] - xh[0], xl[1] - xh[1], xl[2] - xh[2]};
+            double ns = dot3(normal + 3 * (u64)lo, d);
+            double nt = dot3(normal + 3 * (u64)hi, d);
+            double r2 = dot3(d, d);
+            h0 = pow(r2, neg_s);
+            h1 = 0.5 * (ns * ns + nt * nt) / (r2 * r2) * h0;
+        }
+        blk[2 * (u64)e] = h0;
+        blk[2 * (u64)e + 1] = h1;
+    }
+}
+
+extern "C" __global__ void near_fill_vertex(u32 n_blocks, const u32* __restrict__ block_row,
+                                            const u32* __restrict__ near_col, const u64* __restrict__ near_off,
+                                            const u32* __restrict__ start, const u32* __restrict__ end,
+                                            const u32* __restrict__ order, const double* __restrict__ pos,
+                                            double exponent, double* __restrict__ near_val) {
+    u32 q = blockIdx.x;
+    if (q >= n_blocks) return;
+    u32 a = block_row[q], b = near_col[q];
+    u32 sa = start[a], ra = end[a] - sa, sb = start[b], cb = end[b] - sb;
+    double* blk = near_val + near_off[q];
+    for (u32 e = threadIdx.x; e < ra * cb; e += blockDim.x) {
+        u32 r = e / cb, c = e % cb;
+        double h = 0.0;
+        if (!(a == b && r == c)) {
+            u32 i = order[sa + r], j = order[sb + c];
+            u32 lo = i < j ? i : j, hi = i < j ? j : i;
+            const double* xl = pos + 3 * (u64)lo;
+            const double* xh = pos + 3 * (u64)hi;
+            double d[3] = {xl[0] - xh[0], xl[1] - xh[1], xl[2] - xh[2]};
+            h = pow(dot3(d, d), exponent);
+        }
+        blk[e] = h;
+    }
+}
+
 // The fixed-shape pairwise reduction (determinism, NOTES-GPU.md): out[i] = in[2i] + in[2i+1] over a
 // zero-padded input of even length 2 * n_out (in[j] for j >= n_in is read as +0.0).
 extern "C" __global__ void pairwise_level(u64 n_in, u64 n_out, const double* __restrict__ in,

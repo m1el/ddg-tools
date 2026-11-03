@@ -54,6 +54,7 @@ pub(crate) struct BlockTreeParts<'a, const N: usize> {
     pub near_col: &'a [u32],
     pub near_off: &'a [usize],
     pub near_val: &'a [[f64; N]],
+    pub near_total: usize,
 }
 
 /// A block cluster tree of `N` symmetric kernels (module docs).
@@ -81,6 +82,8 @@ pub struct BlockTree<const N: usize> {
     near_col: Vec<u32>,
     near_off: Vec<usize>,
     near_val: Vec<[f64; N]>,
+    /// Number of near entries (`near_val.len()` unless built by [`BlockTree::build_structure`]).
+    near_total: usize,
     /// `K_k 𝟙` per element (original order).
     row_sums: Vec<[f64; N]>,
     stats: BctStats,
@@ -99,6 +102,36 @@ impl<const N: usize> BlockTree<N> {
         bvh: &Bvh<3>,
         kernel: &K,
         leaf_pairs: usize,
+    ) -> Result<Self, RsError> {
+        Self::build_impl(pool, bvh, kernel, leaf_pairs, true)
+    }
+
+    /// [`BlockTree::build`] without the near entries and `K𝟙` (the blocks, their storage
+    /// offsets and the far coefficients only): for a near field computed elsewhere (the GPU,
+    /// `NOTES-GPU.md`). Products with such a tree are an error ([`BlockTree::has_near_field`]).
+    ///
+    /// # Errors
+    /// As [`BlockTree::build`].
+    pub fn build_structure<K: ClusterKernel<N>>(
+        pool: &rayon::ThreadPool,
+        bvh: &Bvh<3>,
+        kernel: &K,
+        leaf_pairs: usize,
+    ) -> Result<Self, RsError> {
+        Self::build_impl(pool, bvh, kernel, leaf_pairs, false)
+    }
+
+    /// Whether the near entries are stored (not a [`BlockTree::build_structure`] tree).
+    pub fn has_near_field(&self) -> bool {
+        self.near_val.len() == self.near_total
+    }
+
+    fn build_impl<K: ClusterKernel<N>>(
+        pool: &rayon::ThreadPool,
+        bvh: &Bvh<3>,
+        kernel: &K,
+        leaf_pairs: usize,
+        fill: bool,
     ) -> Result<Self, RsError> {
         let t0 = Instant::now();
         let nodes = bvh.nodes();
@@ -212,6 +245,10 @@ impl<const N: usize> BlockTree<N> {
                 total += len(a) * len(b);
             }
         }
+        let near_total = total;
+        let near_val: Vec<[f64; N]> = if !fill {
+            Vec::new()
+        } else {
         // (a, b) → block index, for the mirrors.
         let mut keys: Vec<(u64, u32)> = (0..n_blocks)
             .map(|q| (((block_row[q] as u64) << 32) | near_col[q] as u64, q as u32))
@@ -297,6 +334,8 @@ impl<const N: usize> BlockTree<N> {
                 });
             });
         }
+        near_val
+        };
         // Entries that are not structurally zero (all of them for the surface kernels).
         let near_entries: usize = near_blocks
             .iter()
@@ -357,15 +396,18 @@ impl<const N: usize> BlockTree<N> {
             near_col,
             near_off,
             near_val,
+            near_total,
             row_sums: Vec::new(),
             stats,
             build_seconds: 0.0,
         };
-        let mut map = [0usize; N];
-        for (k, m) in map.iter_mut().enumerate() {
-            *m = k;
+        if fill {
+            let mut map = [0usize; N];
+            for (k, m) in map.iter_mut().enumerate() {
+                *m = k;
+            }
+            tree.row_sums = tree.multiply(pool, &map, &vec![[1.0; N]; n])?;
         }
-        tree.row_sums = tree.multiply(pool, &map, &vec![[1.0; N]; n])?;
         tree.build_seconds = t0.elapsed().as_secs_f64();
         Ok(tree)
     }
@@ -418,6 +460,7 @@ impl<const N: usize> BlockTree<N> {
             near_col: &self.near_col,
             near_off: &self.near_off,
             near_val: &self.near_val,
+            near_total: self.near_total,
         }
     }
 
@@ -455,6 +498,12 @@ impl<const N: usize> BlockTree<N> {
     }
 
     fn check<const C: usize>(&self, map: &[usize; C], psi: &[[f64; C]]) -> Result<(), RsError> {
+        if !self.has_near_field() {
+            return Err(RsError::Gpu {
+                operation: "product",
+                detail: "this block tree's near field was built on the GPU; use the GPU product".into(),
+            });
+        }
         if psi.len() != self.n_elements() {
             return Err(RsError::InvalidOption {
                 name: "block tree argument",
