@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg};
+use cudarc::driver::{
+    CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PushKernelArg,
+};
 use cudarc::nvrtc::{CompileOptions, compile_ptx_with_opts};
 
 use super::{CudaOptions, Determinism, GpuContext};
@@ -152,7 +154,9 @@ impl CudaBackend {
     }
 
     fn download(&self, d: &CudaSlice<f64>, out: &mut [f64]) -> Result<(), RsError> {
-        self.stream.memcpy_dtoh(d, out).map_err(gpu_err("download"))?;
+        self.stream
+            .memcpy_dtoh(d, out)
+            .map_err(gpu_err("download"))?;
         self.stream.synchronize().map_err(gpu_err("download"))
     }
 
@@ -199,7 +203,9 @@ impl CudaBackend {
             len = n_out;
         }
         let mut out = [0.0f64];
-        self.stream.memcpy_dtoh(&cur.slice(0..1), &mut out).map_err(gpu_err("download"))?;
+        self.stream
+            .memcpy_dtoh(&cur.slice(0..1), &mut out)
+            .map_err(gpu_err("download"))?;
         self.stream.synchronize().map_err(gpu_err("download"))?;
         Ok(out[0])
     }
@@ -254,7 +260,11 @@ fn flat<const N: usize>(v: &[[f64; N]]) -> &[f64] {
 }
 
 impl DeviceBlockTree {
-    pub(crate) fn upload<const N: usize>(g: &CudaBackend, p: &BlockTreeParts<'_, N>, n: usize) -> Result<Self, RsError> {
+    pub(crate) fn upload<const N: usize>(
+        g: &CudaBackend,
+        p: &BlockTreeParts<'_, N>,
+        n: usize,
+    ) -> Result<Self, RsError> {
         let n_nodes = p.start.len();
         // Depths (pre-order: children after parents) and the internal nodes per depth.
         let mut depth = vec![0u32; n_nodes];
@@ -270,7 +280,9 @@ impl DeviceBlockTree {
         let mut levels = Vec::new();
         let mut level_ptr = vec![0usize];
         for d in (0..=max_depth).rev() {
-            levels.extend((0..n_nodes as u32).filter(|&a| p.right[a as usize] != 0 && depth[a as usize] == d));
+            levels.extend(
+                (0..n_nodes as u32).filter(|&a| p.right[a as usize] != 0 && depth[a as usize] == d),
+            );
             level_ptr.push(levels.len());
         }
         let mut leaf_of = vec![0u32; n];
@@ -325,11 +337,22 @@ impl DeviceBlockTree {
     }
 
     /// Fills the near entries of the face kernels `[h_hi, h_lo]` on the device (level 1).
-    fn fill_face(&mut self, g: &CudaBackend, order: &CudaSlice<u32>, bary: &CudaSlice<f64>, normal: &CudaSlice<f64>, neg_s: f64) -> Result<(), RsError> {
+    fn fill_face(
+        &mut self,
+        g: &CudaBackend,
+        order: &CudaSlice<u32>,
+        bary: &CudaSlice<f64>,
+        normal: &CudaSlice<f64>,
+        neg_s: f64,
+    ) -> Result<(), RsError> {
         if self.n_blocks == 0 {
             return Ok(());
         }
-        let cfg = LaunchConfig { grid_dim: (self.n_blocks, 1, 1), block_dim: (64, 1, 1), shared_mem_bytes: 0 };
+        let cfg = LaunchConfig {
+            grid_dim: (self.n_blocks, 1, 1),
+            block_dim: (64, 1, 1),
+            shared_mem_bytes: 0,
+        };
         unsafe {
             g.stream
                 .launch_builder(&g.k.near_fill_face)
@@ -351,11 +374,21 @@ impl DeviceBlockTree {
     }
 
     /// Fills the near entries of the vertex kernel `|f_v − f_w|^{2·exponent}` on the device.
-    fn fill_vertex(&mut self, g: &CudaBackend, order: &CudaSlice<u32>, pos: &CudaSlice<f64>, exponent: f64) -> Result<(), RsError> {
+    fn fill_vertex(
+        &mut self,
+        g: &CudaBackend,
+        order: &CudaSlice<u32>,
+        pos: &CudaSlice<f64>,
+        exponent: f64,
+    ) -> Result<(), RsError> {
         if self.n_blocks == 0 {
             return Ok(());
         }
-        let cfg = LaunchConfig { grid_dim: (self.n_blocks, 1, 1), block_dim: (64, 1, 1), shared_mem_bytes: 0 };
+        let cfg = LaunchConfig {
+            grid_dim: (self.n_blocks, 1, 1),
+            block_dim: (64, 1, 1),
+            shared_mem_bytes: 0,
+        };
         unsafe {
             g.stream
                 .launch_builder(&g.k.near_fill_vertex)
@@ -377,7 +410,13 @@ impl DeviceBlockTree {
 
     /// `H̃ ψ` for `C` channels (channels `< h` on kernel 0, the others on kernel `N − 1`), all in
     /// BVH order (`BlockTree::multiply_split`).
-    pub(crate) fn multiply(&self, g: &CudaBackend, c: u32, h: u32, psi: &CudaSlice<f64>) -> Result<CudaSlice<f64>, RsError> {
+    pub(crate) fn multiply(
+        &self,
+        g: &CudaBackend,
+        c: u32,
+        h: u32,
+        psi: &CudaSlice<f64>,
+    ) -> Result<CudaSlice<f64>, RsError> {
         let s = &g.stream;
         let e = gpu_err("product");
         let cc = c as u64;
@@ -491,13 +530,21 @@ pub(crate) struct DeviceFaceMetric {
 }
 
 impl DeviceFaceMetric {
-    pub(crate) fn new(gpu: &Arc<GpuContext>, tree: &BlockTreeParts<'_, 2>, h: &FaceMetricHost<'_>) -> Result<Self, RsError> {
+    pub(crate) fn new(
+        gpu: &Arc<GpuContext>,
+        tree: &BlockTreeParts<'_, 2>,
+        h: &FaceMetricHost<'_>,
+    ) -> Result<Self, RsError> {
         let t = DeviceBlockTree::upload(&gpu.inner, tree, h.faces.len())?;
         Self::with_tree(gpu, t, h)
     }
 
     /// With a block tree already on the device ([`gpu_face_tree`]).
-    pub(crate) fn with_tree(gpu: &Arc<GpuContext>, tree: DeviceBlockTree, h: &FaceMetricHost<'_>) -> Result<Self, RsError> {
+    pub(crate) fn with_tree(
+        gpu: &Arc<GpuContext>,
+        tree: DeviceBlockTree,
+        h: &FaceMetricHost<'_>,
+    ) -> Result<Self, RsError> {
         let g = &gpu.inner;
         let nf = h.faces.len();
         let faces: Vec<u32> = h.faces.iter().flatten().copied().collect();
@@ -536,7 +583,13 @@ impl DeviceFaceMetric {
     }
 
     /// `FaceMetricTree::apply_batch` with the uploaded diagonal.
-    pub(crate) fn apply_batch(&self, w_hi: f64, w_lo: f64, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
+    pub(crate) fn apply_batch(
+        &self,
+        w_hi: f64,
+        w_lo: f64,
+        xs: &[&[f64]],
+        ys: &mut [&mut [f64]],
+    ) -> Result<(), RsError> {
         let g = &self.gpu.inner;
         let s = &g.stream;
         let nb = xs.len();
@@ -547,7 +600,8 @@ impl DeviceFaceMetric {
         let hi = w_hi != 0.0 || self.has_d_hi;
         let lo = w_lo != 0.0 || self.has_d_lo;
         if !hi && !lo {
-            ys.iter_mut().for_each(|y| y.iter_mut().for_each(|v| *v = 0.0));
+            ys.iter_mut()
+                .for_each(|y| y.iter_mut().for_each(|v| *v = 0.0));
             return Ok(());
         }
         let c = (nb * (9 * hi as usize + 3 * lo as usize)) as u32;
@@ -881,7 +935,9 @@ impl DeviceBh {
                 slot_entry[t] = q as u32;
             }
         }
-        let u = |v: &[usize], w: &'static str| -> Result<CudaSlice<u32>, RsError> { g.upload(&to_u32(v, w)?, 0) };
+        let u = |v: &[usize], w: &'static str| -> Result<CudaSlice<u32>, RsError> {
+            g.upload(&to_u32(v, w)?, 0)
+        };
         Ok(DeviceBh {
             gpu: gpu.clone(),
             np: h.leaf_of.len() as u32,
@@ -914,7 +970,14 @@ impl DeviceBh {
         })
     }
 
-    fn faces(&self, px: &[f64], pn: &[f64], pa: &[f64], cl_c: &[f64], cl_a: &[f64]) -> Result<BhFaces, RsError> {
+    fn faces(
+        &self,
+        px: &[f64],
+        pn: &[f64],
+        pa: &[f64],
+        cl_c: &[f64],
+        cl_a: &[f64],
+    ) -> Result<BhFaces, RsError> {
         let g = &self.gpu.inner;
         Ok(BhFaces {
             px: g.upload(px, 0.0)?,
@@ -925,7 +988,12 @@ impl DeviceBh {
         })
     }
 
-    fn leaf_energies(&self, f: &BhFaces, node: &CudaSlice<f64>, rows: &CudaSlice<f64>) -> Result<Vec<f64>, RsError> {
+    fn leaf_energies(
+        &self,
+        f: &BhFaces,
+        node: &CudaSlice<f64>,
+        rows: &CudaSlice<f64>,
+    ) -> Result<Vec<f64>, RsError> {
         let g = &self.gpu.inner;
         let mut out = g.alloc(self.nl as usize)?;
         unsafe {
@@ -979,7 +1047,15 @@ impl DeviceBh {
     }
 
     /// `BhTree::energy`: the per-leaf energies (summed by the caller in leaf order).
-    pub(crate) fn energy(&self, e: Exps, px: &[f64], pn: &[f64], pa: &[f64], cl_c: &[f64], cl_a: &[f64]) -> Result<Vec<f64>, RsError> {
+    pub(crate) fn energy(
+        &self,
+        e: Exps,
+        px: &[f64],
+        pn: &[f64],
+        pa: &[f64],
+        cl_c: &[f64],
+        cl_a: &[f64],
+    ) -> Result<Vec<f64>, RsError> {
         let g = &self.gpu.inner;
         let f = self.faces(px, pn, pa, cl_c, cl_a)?;
         let node = self.node_terms(e, false, &f)?;

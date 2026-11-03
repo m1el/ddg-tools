@@ -279,7 +279,13 @@ impl GpuFaceMetric {
     ///
     /// # Errors
     /// [`RsError::InvalidOption`] for wrong lengths or non-finite weights; [`RsError::Gpu`].
-    pub fn apply_batch(&self, w_hi: f64, w_lo: f64, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
+    pub fn apply_batch(
+        &self,
+        w_hi: f64,
+        w_lo: f64,
+        xs: &[&[f64]],
+        ys: &mut [&mut [f64]],
+    ) -> Result<(), RsError> {
         check_batch(xs, ys, 3 * self.n_vertices())?;
         if !(w_hi.is_finite() && w_lo.is_finite()) {
             return Err(RsError::InvalidOption {

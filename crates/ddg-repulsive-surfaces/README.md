@@ -113,7 +113,9 @@ driver, no device); `Device::Auto` falls back to the CPU. Results are bitwise re
 run (`RunToRun`); `Determinism::MatchCpu` gives the CPU flow bit for bit (integer exponents), at some
 speed. Running needs an NVIDIA driver and `libnvrtc.so.12`; the step bench takes `--gpu L1|L2`
 (`cargo bench -p ddg-repulsive-surfaces --features cuda --bench step -- --mesh fig12:3 --gpu L1`).
-Design, determinism argument and measurements: [`NOTES-GPU.md`](NOTES-GPU.md).
+Measured on an RTX 4080 with 4 CPU threads: products 10–12× faster than the CPU, whole steps
+1.5–2.1× (45k-face figure-8 tunnel 3.2 → 1.5 s/step, 135k faces 11.3 → 5.6 s), GMRES iterations
+unchanged. Design, determinism argument and measurements: [`NOTES-GPU.md`](NOTES-GPU.md).
 
 ### Python
 
