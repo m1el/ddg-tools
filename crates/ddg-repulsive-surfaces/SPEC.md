@@ -394,6 +394,14 @@ error.
 
   (the multiplier part is zeroed between the two solves; `L′` factored once per step by sparse
   LDLT).
+  `L′` is factored by faer's sparse `LDLᵀ` in the order "AMD of the Laplacian block, then the
+  multipliers", postordered, and solved by `solve::ldlt` in a fixed chunked order (each sum of a
+  triangular solve in chunks of 32 terms summed from zero, chunk sums subtracted in order; forward terms
+  increasing, backward decreasing), the same on the CPU and the GPU (`TriangularSolve::Chunked`, default
+  since GPU-2, 2026-11-03; `Faer` keeps faer's supernodal solves). This was a round-off change of the CPU
+  default (faster: 45k 2.3 vs 3.3 ms, 135k 7.9 vs 16.8 ms per solve): GMRES iterations equal on most
+  Fig. 13 cases and within ±0.6 per step on the rest, no fallbacks; CPU trajectories recorded before it
+  (e.g. the Fig. 16 determinism runs) reproduce bitwise only with `TriangularSolve::Faer`.
 
   **The fractional factor (D32, after WP2).** The paper/reference evaluate `L_{2−s}` as the face
   form of §4.2 (`ū_S − ū_T`, face pairs). Face averaging nearly annihilates high-frequency vertex
@@ -554,6 +562,22 @@ for integer `α`, `β`) is bitwise the CPU flow. Measured (RTX 4080, 4 CPU threa
 10–12× the CPU at 4 threads (6.4–9× at 16), whole steps 1.5–2.1× (Fig. 13 suite; 45k figure-8
 tunnel 3.2 → 1.5 s, 135k 11.3 → 5.6 s), GMRES iterations unchanged; the `L′` solves are then
 32–43 % of a step.
+
+On the GPU also (GPU-2, 2026-11-03, `NOTES-GPU2.md`): the whole fine preconditioner `P⁻¹` — the two
+`L′` solves by a schedule of the elimination tree (leaf subtrees one thread each, chains one block each,
+levels by height/depth), the fractional product and the augmented factor, one upload and one download per
+application (`PreconditionerOptions::gpu_solves`, default on from 7000 vertices; below that the launch
+latency exceeds the CPU's solves). Still on the CPU: GMRES vectors (≈ 5 % of a step; moving them would
+change every CPU flow by round-off for level 2), the factorization and its schedule, the coarse correction,
+trees and far coefficients, constraints, CCD, remeshing. Measured (RTX 4080, 4 CPU threads, outside load
+2–10): preconditioner per step 476 → 179 ms (45k) and 2.2 → 0.56 s (135k); steps 1.35 → 1.09 s (45k
+figure-8 tunnel; CPU 2.83 s at 4 threads, 1.96 s at 16) and 5.07 → 3.43 s (135k; CPU 10.1 / 7.4 s); level 2
+bitwise the CPU on the regression set (Fig. 13, 135k, H with 24 pins, cobblestones, Hopf, Borromean,
+walnut, lung, Klein bottle); level 1 bitwise run to run, iterations within ±1–4 per step of the CPU.
+A preconditioner cheap by construction (FSAI, algebraic multigrid) was not tried: the preconditioner is
+now ≈ 16 % of a step and ≈ 40 % of that is the vertex-pair product, which they would not change
+(estimated gain ≤ 5 %). Remaining CPU shares at 45k / 135k: factor and far coefficients 22 / 24 %,
+remeshing 17 %, Barnes–Hut tree 9 / 10 %, CCD 7 / 6 %, GMRES vectors 5 %, projection 5 / 4 %.
 
 Binding: `cudarc` + NVRTC; NVIDIA's own Rust CUDA work (cuda-oxide, cutile-rs) was checked first at the user's request and needs a CUDA 13 toolkit, a pinned toolchain with a custom compiler backend and LLVM 21 — not available here and outside the workspace's stable-Rust rule (`NOTES-GPU.md`). Next steps: a GPU-friendly preconditioner (the `L′` back-substitutions are then the largest share), parallel remeshing, `Device` in Python and Blender.
 
@@ -765,6 +789,7 @@ internal error with the step's data (never silently repaired).
 | D28 | AQP | Kovalsky et al. 2016 | κ = 100 fixed, current Laplacian, no safeguards | κ = 100, current Laplacian (remeshing changes the rest pose), momentum reset on energy increase and remeshing |
 | D29 | stop rule | — | iteration/time limit only | + energy stall (§7.4) |
 | D30 | shared code | — | — | depend on `ddg-repulsive-curves` (its SPEC §16 had proposed extracting a shared crate; the generic parts are public and stable, so we use them in place and do not edit that verified crate) |
+| D35 | `L′` solves | — | faer supernodal solves | chunked fixed-order solves on CPU and GPU (CPU default changed by round-off), whole preconditioner on the GPU from 7000 vertices (§6.3, §8.5) |
 | D34 | GPU acceleration | — | — (CPU only) | optional `cuda` feature, explicit `Device`; products, near fields, Barnes–Hut on the device; level 1 bitwise reproducible, level 2 bitwise the CPU (§8.5) |
 | D33 | preconditioner form | `L′⁻¹ L_{2−s} L′⁻¹` | same, multipliers zeroed | augmented `L′⁻¹ [[L_{2−s}, C_Qᵀ],[C_Q, 0]] L′⁻¹` (§6.3); printed form as reference mode |
 | D32 | preconditioner's `L_{2−s}` | face form | face form, left GMRES | vertex pairs (§6.3); face form as reference mode |
