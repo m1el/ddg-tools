@@ -827,6 +827,22 @@ attributes and other vertex groups are **dropped**, and the report says so (no a
 transfer, the user's decision); the pin group is rebuilt on the pinned vertices with their
 weights. Cancel restores everything from a backup.
 
+**GPU (Advanced > GPU).** *Device*: CPU (default), CUDA (the flow fails with a message if no usable
+GPU is found) or Auto (the GPU if usable, else the CPU); *GPU Index* (which device) and
+*Determinism* (Run to Run: bitwise reproducible, within round-off of the CPU; Match CPU: bit for bit
+the CPU result, integer exponents, slower). The hierarchical products and the Barnes-Hut energy run
+on an NVIDIA GPU (`crates/ddg-repulsive-surfaces/NOTES-GPU.md`: 2x faster whole steps on large
+meshes; small meshes use the dense CPU back end and gain nothing). The controls are greyed out,
+with the reason underneath, when `ddg_tools.gpu_info()` says the bundled wheel has no CUDA support
+or no device is usable. The operator report ("... on CUDA (NVIDIA GeForce RTX 4080 (compute
+capability 8.9))" or "... on CPU") and the live status line ("... on CUDA (...)") say which device ran.
+**The default extension has no CUDA code.** `DDG_WHEEL_CUDA=1 scripts/blender-build-extension.sh`
+bundles the CUDA wheel (`scripts/py-build-wheel.sh`, cargo feature `cuda`; no CUDA toolkit is
+needed to build) and writes `dist/blender-cuda/ddg_uv_unwrap-<version>.zip`;
+`DDG_WHEEL_CUDA=1 scripts/blender-test.sh` tests it. At run time the machine needs the NVIDIA
+driver and `libnvrtc.so.12` (CUDA 12 runtime libraries). The CUDA wheel is a separate build (same file name as the CPU wheel, another directory), so the
+default extension is unchanged; one extension carrying both wheels is not attempted.
+
 ### Repulsive surface tests
 
 - `blender/tests/test_repulsive_surface.py` (headless): N steps with and without remeshing
@@ -835,7 +851,10 @@ weights. Cancel restores everything from a backup.
   penalties, metrics, mesh obstacles from a collection, implicit empties (repel, attract, shape by
   display type, custom properties), world and local space, CCD off for an intersecting input,
   the live flow through `LiveFlow` (accept; cancel restores the exact original, also after
-  remeshing), bad input. Undo tests skip themselves headless (no undo stack in `-b`).
+  remeshing), bad input, the device setting (round trip, reaches the session, Auto runs and the
+  report names the device, the Advanced panel greyed out and explained without CUDA; with a CUDA
+  wheel and a GPU: Match CPU is bit for bit the CPU result, live status line; skips otherwise).
+  Undo tests skip themselves headless (no undo stack in `-b`).
 - `blender/tests/ui_repulsive_surface.py` (windowed on Xvfb, `--enable-event-simulate`): the
   modal operator with the real timer and events (Cancel, Esc, Accept, Enter, right click), undo
   and redo of the remeshed result, the N-steps operator with Adjust Last Operation.

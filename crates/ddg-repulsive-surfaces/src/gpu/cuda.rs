@@ -62,6 +62,28 @@ pub(crate) struct Kernels {
     bh_final: CudaFunction,
 }
 
+/// The devices the driver reports ([`super::devices`]).
+pub(crate) fn enumerate() -> Result<Vec<super::GpuDeviceInfo>, RsError> {
+    let n = std::panic::catch_unwind(CudaContext::device_count)
+        .map_err(|_| RsError::Gpu {
+            operation: "context",
+            detail: "the CUDA driver library (libcuda.so) could not be loaded".into(),
+        })?
+        .map_err(gpu_err("context"))?;
+    let mut out = Vec::new();
+    for ordinal in 0..usize::try_from(n).unwrap_or(0) {
+        let ctx = CudaContext::new(ordinal).map_err(gpu_err("context"))?;
+        let (major, minor) = ctx.compute_capability().map_err(gpu_err("context"))?;
+        out.push(super::GpuDeviceInfo {
+            ordinal,
+            name: ctx.name().map_err(gpu_err("context"))?,
+            compute_capability: (major, minor),
+            total_memory: ctx.total_mem().map_err(gpu_err("context"))? as u64,
+        });
+    }
+    Ok(out)
+}
+
 /// A device, its stream and the kernels.
 pub(crate) struct CudaBackend {
     #[allow(dead_code)]

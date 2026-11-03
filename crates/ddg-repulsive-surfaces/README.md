@@ -116,6 +116,8 @@ speed. Running needs an NVIDIA driver and `libnvrtc.so.12`; the step bench takes
 Measured on an RTX 4080 with 4 CPU threads: products 10–12× faster than the CPU, whole steps
 1.5–2.1× (45k-face figure-8 tunnel 3.2 → 1.5 s/step, 135k faces 11.3 → 5.6 s), GMRES iterations
 unchanged. Design, determinism argument and measurements: [`NOTES-GPU.md`](NOTES-GPU.md).
+Python (`device="cpu"|"cuda"|"auto"`, `ddg_tools.gpu_info()`, the CUDA wheel) and Blender (Advanced sub-panel): see
+`crates/ddg-py/README.md` and `blender/README.md`.
 
 ### Python
 

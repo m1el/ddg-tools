@@ -11,7 +11,7 @@ stays on the CPU, GMRES vectors, proposed SPEC text, how to resume.
   and 2 with tests (level 2 = the CPU flow bit for bit); benches `--gpu`; measurements below.
 * Not done (by decision, below): GMRES vectors on the GPU; the `L′` back substitutions (a numerical
   change, out of scope); face-pair `L_{2−s}` (reference mode) and the obstacles' cross evaluators on
-  the GPU; Python/Blender exposure of `Device` (`ddg-py`, `blender/` are other paths).
+  the GPU; Python/Blender exposure of `Device` was done afterwards in `ddg-py` and `blender/` (it added `gpu::devices()` and `Session::gpu_device_name()` here).
 
 ## Binding: `cudarc` + NVRTC (not NVIDIA's CUDA Rust), checked 2026-11-03
 

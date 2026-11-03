@@ -38,6 +38,7 @@ use ddg_repulsive_surfaces as rs;
 use rs::implicit::{Cylinder, FramedTorus, ImplicitSurface, Plane, Sphere};
 use rs::penalties::simple::{area_and_gradient, volume_and_gradient};
 use rs::remesh::{EnabledOps, RemeshOptions, RemeshOrder};
+use rs::gpu::{CudaOptions, Determinism, Device};
 use rs::solve::iterative::HierarchicalOptions;
 use rs::{
     ArmijoRule, Backend, BarycenterMode, BhOptions, CcdOptions, Constraint, Control, Energy,
@@ -700,6 +701,9 @@ pub const OPTION_NAMES: &[&str] = &[
     "gmres_tolerance",
     "gmres_max_iterations",
     "gmres_side",
+    "device",
+    "cuda_ordinal",
+    "gpu_determinism",
     "method",
     "aqp_kappa",
     "lbfgs_memory",
@@ -822,6 +826,24 @@ pub fn flow_options(
     let side = d.string("gmres_side", "right")?;
     one_of("gmres_side", side, &["right", "left"])?;
     h.gmres.side = if side == "right" { GmresSide::Right } else { GmresSide::Left };
+    let device = d.string("device", "cpu")?;
+    one_of("device", device, &["cpu", "cuda", "auto"])?;
+    let ordinal = d
+        .get("cuda_ordinal")
+        .map(|v| as_usize("cuda_ordinal", v))
+        .transpose()?
+        .unwrap_or(0);
+    let det = d.string("gpu_determinism", "run_to_run")?;
+    one_of("gpu_determinism", det, &["run_to_run", "match_cpu"])?;
+    let cuda = CudaOptions {
+        ordinal,
+        determinism: if det == "match_cpu" { Determinism::MatchCpu } else { Determinism::RunToRun },
+    };
+    h.device = match device {
+        "cuda" => Device::Cuda(cuda),
+        "auto" => Device::Auto(cuda),
+        _ => Device::Cpu,
+    };
     let dense_max = d
         .get("dense_max_faces")
         .map(|v| as_usize("dense_max_faces", v))
@@ -1188,6 +1210,17 @@ pub fn options_val(o: &FlowOptions) -> Val {
         "gmres_side",
         Val::s(if h.gmres.side == GmresSide::Right { "right" } else { "left" }),
     ));
+    let (device, cuda) = match h.device {
+        Device::Cpu => ("cpu", CudaOptions::default()),
+        Device::Cuda(c) => ("cuda", c),
+        Device::Auto(c) => ("auto", c),
+    };
+    items.push(("device", Val::s(device)));
+    items.push(("cuda_ordinal", Val::uint(cuda.ordinal)));
+    items.push((
+        "gpu_determinism",
+        Val::s(if cuda.determinism == Determinism::MatchCpu { "match_cpu" } else { "run_to_run" }),
+    ));
     let (method, kappa, memory, variant) = match o.method {
         Method::ProjectedGradient => ("projected_gradient", DEFAULT_AQP_KAPPA, DEFAULT_LBFGS_MEMORY, LbfgsVariant::Standard),
         Method::Aqp { kappa } => ("aqp", kappa, DEFAULT_LBFGS_MEMORY, LbfgsVariant::Standard),
@@ -1402,7 +1435,7 @@ pub fn status_name(s: &Status) -> &'static str {
 
 /// The report of one step as a dict (`status`: the outcome of the step, `session_status`: that
 /// of the session after it).
-pub fn step_val(r: &StepReport, session_status: &Status) -> Val {
+pub fn step_val(r: &StepReport, session_status: &Status, device: Option<&str>) -> Val {
     let solves = r.linear.solves.len();
     let linear = Val::dict(vec![
         ("solver", Val::s(r.linear.solver)),
@@ -1444,6 +1477,8 @@ pub fn step_val(r: &StepReport, session_status: &Status) -> Val {
             }),
         ),
         ("session_status", Val::s(status_name(session_status))),
+        ("device", Val::s(if device.is_some() { "cuda" } else { "cpu" })),
+        ("device_name", device.map_or(Val::None, Val::s)),
         ("n_vertices", Val::uint(r.vertices)),
         ("n_faces", Val::uint(r.faces)),
         ("energy_before", Val::Float(r.energy_before)),
@@ -1693,7 +1728,7 @@ impl Engine {
         match s.step() {
             Ok(report) => {
                 let status = s.status();
-                let val = step_val(&report, &status);
+                let val = step_val(&report, &status, s.gpu_device_name().as_deref());
                 let mut snap = make_snapshot(&s);
                 snap.last_report = Some(val.clone());
                 *self.snap()? = snap;
@@ -1815,10 +1850,11 @@ pub fn flow_once(
     let surface = make_surface(&positions, faces)?;
     let flow = flow_options(options, &surface, &positions)?;
     let mut session = Session::new(surface, positions, flow)?;
+    let device = session.gpu_device_name();
     let mut cb = |r: &StepReport| {
         let go = progress
             .as_mut()
-            .is_none_or(|p| p(&step_val(r, &Status::Running)));
+            .is_none_or(|p| p(&step_val(r, &Status::Running, device.as_deref())));
         if go { Control::Continue } else { Control::Stop }
     };
     let r = session.run(Some(&mut cb))?;
@@ -1838,7 +1874,7 @@ pub fn flow_once(
         ("seconds", Val::Float(r.seconds)),
         (
             "steps",
-            Val::List(r.steps.iter().map(|s| step_val(s, &r.status)).collect()),
+            Val::List(r.steps.iter().map(|s| step_val(s, &r.status, device.as_deref())).collect()),
         ),
     ]);
     Ok(FlowOutput {
@@ -1848,6 +1884,43 @@ pub fn flow_once(
         pinned: session.pinned().to_vec(),
         report,
     })
+}
+
+/// What this build and machine offer for the `device` option: `cuda_compiled` (the wheel was
+/// built with the `cuda` feature), `available` (a device can be opened), `devices` (a list of
+/// `{ordinal, name, compute_capability, memory_bytes}`) and `reason` (why none is usable, or
+/// `None`). Opens the driver only; compiles nothing.
+pub fn gpu_info() -> Val {
+    let compiled = rs::gpu::cuda_compiled();
+    let (devices, reason) = match rs::gpu::devices() {
+        Ok(d) if d.is_empty() => (Vec::new(), Some("the CUDA driver reports no device".to_owned())),
+        Ok(d) => (d, None),
+        Err(e) => (Vec::new(), Some(e.to_string())),
+    };
+    Val::dict(vec![
+        ("cuda_compiled", Val::Bool(compiled)),
+        ("available", Val::Bool(compiled && !devices.is_empty())),
+        (
+            "devices",
+            Val::List(
+                devices
+                    .iter()
+                    .map(|d| {
+                        Val::dict(vec![
+                            ("ordinal", Val::uint(d.ordinal)),
+                            ("name", Val::s(&d.name)),
+                            (
+                                "compute_capability",
+                                Val::s(&format!("{}.{}", d.compute_capability.0, d.compute_capability.1)),
+                            ),
+                            ("memory_bytes", Val::Int(d.total_memory as i64)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        ("reason", reason.map_or(Val::None, |r| Val::s(&r))),
+    ])
 }
 
 /// The tangent-point energy with the penalties of the options, and the differential of the

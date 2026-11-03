@@ -809,6 +809,21 @@ energy, differential = ddg_tools.curve_energy(positions, edges, alpha=3, beta=6)
   `back_projection`, `second_order_correction`, `newton_polish` (`None`: chord method),
   `projection_early_abort`, `stuck_projected_reference`, `stuck_retry_chord`; `mg_max_threads`
   (`None`: no cap on the multigrid pool). `time_limit` is honoured by `run` only, not by `step`.
+* **GPU (`device`).** The hierarchical products and the Barnes-Hut energy of the flow can run on an
+  NVIDIA GPU (`NOTES-GPU.md` of the crate). `device="cpu"` (default), `"cuda"` (an error if the
+  wheel has no CUDA support or no device is usable: `RepulsiveSurfaceInputError`, "GPU back end,
+  ...") or `"auto"` (the GPU if usable, else the CPU; never raises for that reason);
+  `cuda_ordinal=0`; `gpu_determinism="run_to_run"` (default: bitwise reproducible from run to
+  run, within round-off of the CPU) or `"match_cpu"` (bit for bit the CPU flow for integer
+  exponents; slower). The step report has `device` (`"cpu"` or `"cuda"`: what ran) and
+  `device_name`. `ddg_tools.gpu_info()` returns `{cuda_compiled, available, devices: [{ordinal,
+  name, compute_capability, memory_bytes}], reason}` and never raises. `surface_energy` accepts
+  the options and ignores them (it always runs on the CPU). The default wheel has no CUDA code;
+  build the CUDA wheel with `DDG_WHEEL_CUDA=1 scripts/py-build-wheel.sh` (cargo feature `cuda`;
+  no CUDA toolkit is needed to build, the wheel loads the driver and `libnvrtc.so.12` when a
+  device is asked for). The products live in the hierarchical
+  back end (`backend="hierarchical"`, or `"auto"` above `dense_max_faces`); `device` in the report
+  names the context the session opened.
 * **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"converged"`,
   `"retarget_stalled"`, `"cancelled"`), `session_status`, `n_vertices`, `n_edges`,
   `energy_before`, `energy_after`, `tangent_point_after`, `penalties_after`, `gradient_norm`,
@@ -909,7 +924,7 @@ positions, faces, options = ddg_tools.repulsive_surface_scene("scene.txt")  # th
   `options["ccd_obstacles"]`; everything else is plain values that can be edited. Normal
   constraints (`constrain normals`) are not supported by the library.
 * **Step report** keys: `iteration`, `status` (`"accepted"`, `"stuck"`, `"cancelled"`),
-  `session_status`, `n_vertices`, `n_faces`, `energy_before`, `energy_after`,
+  `session_status`, `device`, `device_name`, `n_vertices`, `n_faces`, `energy_before`, `energy_after`,
   `tangent_point_after`, `penalties_after`, `gradient_norm`, `sobolev_norm_sq`, `tau`, `tau0`,
   `tau_ccd`, `halvings`, `newton_steps`, `projection`, `max_violation`, `dropped_rows`,
   `linear` (solver, iterations, residual), `remesh` (splits, collapses, flips, ...), `seconds`
@@ -994,6 +1009,10 @@ scripts/py-test.sh              # builds the wheel, tests it under Python 3.11+n
 
 `scripts/py-test.sh` installs the wheel into throw-away environments with `uv run`; the test
 files `test_ddg_tools.py` and `test_cut_session.py` check that the module it imported is the wheel that was just built.
+
+`DDG_WHEEL_CUDA=1` builds (and, with `scripts/py-test.sh`, tests) the wheel with the `cuda` feature
+into `dist/wheels-cuda/`; the GPU tests skip unless the wheel has CUDA support and a device is
+usable, e.g. `DDG_WHEEL_CUDA=1 DDG_PY_TEST_MATRIX="3.11:numpy" scripts/py-test.sh`.
 
 The Blender side is built and tested with `scripts/blender-test.sh`; see `blender/README.md`.
 

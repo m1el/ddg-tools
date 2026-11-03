@@ -748,6 +748,135 @@ def bad_options_and_modifiers():
     assert "shape keys" in message_for(obj)
 
 
+# ----------------------------------------------------------------------------------------------
+# The device (CPU / CUDA / Auto)
+
+
+def gpu_available():
+    return bool(op().gpu_info()["available"])
+
+
+@test
+def device_settings_round_trip_and_reach_the_session():
+    props = bpy.ops.object.ddg_repulsive_surface_flow.get_rna_type().properties
+    for name in ("device", "cuda_ordinal", "gpu_determinism"):
+        assert name in props, name
+    s = settings()
+    assert (s.device, s.cuda_ordinal, s.gpu_determinism) == ('CPU', 0, 'RUN_TO_RUN')
+    s.device, s.cuda_ordinal, s.gpu_determinism = 'AUTO', 0, 'MATCH_CPU'
+    assert (s.device, s.gpu_determinism) == ('AUTO', 'MATCH_CPU')
+    obj = sphere()
+    surface = io().read_object(obj, bpy.context.evaluated_depsgraph_get(), space=s.space,
+                               pin_group=s.pin_group)
+    kwargs = op().session_options(s, surface, [])
+    surface.discard_backup()
+    assert (kwargs["device"], kwargs["cuda_ordinal"], kwargs["gpu_determinism"]) == \
+        ("auto", 0, "match_cpu"), kwargs
+    s.property_unset("device")
+    s.property_unset("gpu_determinism")
+    surface = io().read_object(obj, bpy.context.evaluated_depsgraph_get(), space=s.space,
+                               pin_group=s.pin_group)
+    assert "device" not in op().session_options(s, surface, [])
+    surface.discard_backup()
+
+
+@test
+def gpu_info_has_the_documented_keys():
+    info = op().gpu_info()
+    assert set(info) == {"cuda_compiled", "available", "devices", "reason"}, info
+    if not info["available"]:
+        assert info["reason"], info
+
+
+@test
+def auto_device_runs_and_the_report_says_which_device_ran():
+    obj = sphere()
+    stats = flow(obj, steps=2, remesh=False, device='AUTO')
+    assert stats["steps"] == 2 and stats["energy_after"] < stats["energy_before"], stats
+    expected = "CUDA" if gpu_available() else "CPU"
+    assert stats["device"].startswith(expected), stats["device"]
+    assert "on " + stats["device"] in op().summary(stats), op().summary(stats)
+    reset()
+    obj = sphere()
+    assert flow(obj, steps=1, remesh=False)["device"] == "CPU"
+
+
+@test
+def cuda_device_without_a_gpu_is_refused_with_a_message():
+    if gpu_available():
+        raise Skip("a GPU is usable here")
+    obj = sphere()
+    text = message_for(obj, device='CUDA')
+    assert text is not None and "GPU" in text and "sphere" in text, text
+
+
+@test
+def cuda_device_runs_and_matches_the_cpu():
+    if not gpu_available():
+        raise Skip("no CUDA-capable wheel or no usable GPU")
+    obj = sphere(subdivisions=3)
+    stats_cpu = flow(obj, steps=3, remesh=False, device='CPU', threads=2)
+    cpu = coords(obj)
+    reset()
+    obj = sphere(subdivisions=3)
+    stats = flow(obj, steps=3, remesh=False, device='CUDA', gpu_determinism='MATCH_CPU', threads=2)
+    assert stats["device"].startswith("CUDA ("), stats["device"]
+    assert coords(obj) == cpu, "Match CPU: bit for bit the CPU result"
+    assert stats["energy_after"] == stats_cpu["energy_after"]
+    flow_ = live(obj, remesh=False, device='CUDA')
+    flow_.start()
+    wait_for(flow_, 2)
+    assert flow_.error is None
+    assert "on CUDA" in flow_.status_line(), flow_.status_line()
+    assert flow_.finish()["device"].startswith("CUDA")
+
+
+@test
+def live_status_line_names_the_device():
+    obj = sphere()
+    flow_ = live(obj, remesh=False)
+    flow_.start()
+    wait_for(flow_, 1)
+    line = flow_.status_line()
+    flow_.finish()
+    assert "on CPU" in line, line
+
+
+class FakeLayout:
+    """Records what ``draw_advanced`` draws: (property, enabled, text lines)."""
+
+    def __init__(self, log=None):
+        self.log = log if log is not None else {"props": {}, "labels": []}
+        self.enabled = True
+        self.active = True
+
+    def prop(self, _data, name, **_kw):
+        self.log["props"][name] = self.enabled
+
+    def label(self, text="", **_kw):
+        self.log["labels"].append(text)
+
+    def box(self):
+        return FakeLayout(self.log)
+
+    column = row = box
+
+
+@test
+def advanced_panel_greys_the_device_out_without_cuda_and_says_why():
+    info = op().gpu_info()
+    layout = FakeLayout()
+    op().draw_advanced(layout, settings())
+    props = layout.log["props"]
+    assert "device" in props and "gpu_determinism" in props, props
+    assert props["device"] == bool(info["available"]), (props, info)
+    text = " ".join(layout.log["labels"])
+    if info["available"]:
+        assert info["devices"][0]["name"] in text, text
+    else:
+        assert "not available" in text and info["reason"] in text, text
+
+
 def main():
     global ARGS, OPTIONS
     parser = argparse.ArgumentParser()

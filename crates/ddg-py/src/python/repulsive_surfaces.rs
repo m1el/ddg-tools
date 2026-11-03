@@ -44,6 +44,7 @@ pub(super) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(repulsive_surface_flow, m)?)?;
     m.add_function(wrap_pyfunction!(surface_energy, m)?)?;
     m.add_function(wrap_pyfunction!(repulsive_surface_defaults, m)?)?;
+    m.add_function(wrap_pyfunction!(gpu_info, m)?)?;
     m.add_function(wrap_pyfunction!(repulsive_surface_scene, m)?)?;
     Ok(())
 }
@@ -677,6 +678,16 @@ fn surface_energy<'py>(
 #[pyfunction]
 fn repulsive_surface_defaults(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     dict(py, &crate::repulsive_surfaces::defaults())
+}
+
+/// What this wheel and machine offer for the `device` option of the Repulsive Surfaces flow, as
+/// a dict: `cuda_compiled` (the wheel was built with CUDA support), `available` (a CUDA device
+/// can be opened), `devices` (a list of dicts `ordinal`, `name`, `compute_capability`,
+/// `memory_bytes`) and `reason` (why no device is usable, or None). Never raises.
+#[pyfunction]
+fn gpu_info(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
+    let v = py.detach(crate::repulsive_surfaces::gpu_info);
+    dict(py, &v)
 }
 
 /// Loads a scene file of the reference program (repel_mesh, constrain, minimize, obstacle,
