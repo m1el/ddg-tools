@@ -306,6 +306,42 @@ pub fn solve_with_energy_check<H: Hierarchy + ?Sized>(
     options: &CycleOptions,
     energy_check: bool,
 ) -> Result<(Vec<f64>, CycleReport), RcError> {
+    solve_with_reference(h, b, options, energy_check, None)
+}
+
+/// The cold problem a warm-started solve is measured against ([`solve_with_reference`]).
+///
+/// A warm start replaces `H x = b_cold` by `H x' = b` with `x = x' + s` for a known shift `s`
+/// (so `b = b_cold − H s`); the error of `x` and of `x'` is the same vector, and so is the
+/// residual. Measuring the residual against `‖b_cold‖` and the energy against `b_coldᵀ x` keeps
+/// the stopping rule of the cold solve exactly (`SPEC.md` §17t).
+#[derive(Debug, Clone, Copy)]
+pub struct Reference<'a> {
+    /// `‖b_cold‖`: residuals are relative to it.
+    pub norm: f64,
+    /// `b_cold`, for the energy check's `b_coldᵀ x = b_coldᵀ (x' + s)`.
+    pub b: &'a [f64],
+    /// `b_coldᵀ s`.
+    pub offset: f64,
+}
+
+/// [`solve_with_energy_check`] for a warm-started problem: residuals relative to
+/// `reference.norm`, the energy estimate `‖x*‖²_H ≈ reference.b · x + reference.offset`; when
+/// the right side is already within the tolerance of the reference, the full-multigrid start is
+/// skipped (the iteration starts from zero and the energy check decides). `None`: the cold
+/// solve.
+///
+/// [formula: rc-multigrid]
+///
+/// # Errors
+/// As [`solve`].
+pub fn solve_with_reference<H: Hierarchy + ?Sized>(
+    h: &H,
+    b: &[f64],
+    options: &CycleOptions,
+    energy_check: bool,
+    reference: Option<Reference<'_>>,
+) -> Result<(Vec<f64>, CycleReport), RcError> {
     check_options(options)?;
     if h.n_levels() == 0 || b.len() != h.len(0) {
         return Err(RcError::InvalidOption {
@@ -315,17 +351,31 @@ pub fn solve_with_energy_check<H: Hierarchy + ?Sized>(
         });
     }
     let mut report = CycleReport::default();
-    let bn = norm(b);
-    if bn == 0.0 {
+    let own = norm(b);
+    if own == 0.0 {
         report.converged = true;
         report.residuals.push(0.0);
         return Ok((vec![0.0; b.len()], report));
     }
+    let bn = match reference {
+        Some(r) if r.norm > 0.0 && r.norm.is_finite() => r.norm,
+        _ => own,
+    };
+    // ‖x*‖²_H, estimated from the current iterate (the cold problem's when warm-started).
+    let energy = |x: &[f64]| match reference {
+        Some(r) => dot(r.b, x) + r.offset,
+        None => dot(b, x),
+    };
     let diverged = |report: &CycleReport| RcError::MultigridDiverged {
         residuals: report.residuals.clone(),
     };
-    let mut x = full_multigrid_start(h, b, options.initial_smoothing_steps)?;
-    let mut r = sub(b, &h.apply(0, &x)?);
+    let (mut x, mut r) = if reference.is_some() && own <= options.tolerance * bn {
+        (vec![0.0; b.len()], b.to_vec())
+    } else {
+        let x = full_multigrid_start(h, b, options.initial_smoothing_steps)?;
+        let r = sub(b, &h.apply(0, &x)?);
+        (x, r)
+    };
     let mut rel = norm(&r) / bn;
     report.residuals.push(rel);
     if !rel.is_finite() {
@@ -368,7 +418,7 @@ pub fn solve_with_energy_check<H: Hierarchy + ?Sized>(
         {
             let z = v_cycle(h, 0, &r, None, nu)?;
             if energy_check {
-                energy_ok = dot(&r, &z) <= tol2 * dot(b, &x).max(0.0);
+                energy_ok = dot(&r, &z) <= tol2 * energy(&x).max(0.0);
                 if energy_ok && rel <= options.tolerance {
                     break;
                 }
