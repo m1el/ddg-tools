@@ -507,7 +507,7 @@ with `Ā` and `C` frozen at `γ` (a chord method: the paper's "approximation of 
 which lets the dense back end reuse one factorization for Eq. 22 and every iteration, Sec. 7.4).
 Each iteration gives the `Ā`-smallest `x` solving the linearized constraints (proved). Success
 when every row is within its tolerance (§5.1) after at least one iteration (a trial already
-within the tolerance is projected once too, unless `Φ = 0` exactly; §17l, found by WP12b).
+within the tolerance is projected once too, unless `Φ = 0` exactly; §17l, found by WP12b). The direction at a `Point`-pinned coordinate is set to exactly 0, so a trial that moves only pinned vertices is exactly on its targets; no other tolerance enters this test (2026-11-03: otherwise the decision hung on rounding noise of the saddle solve, 40 of 4000 oracle fuzz cases disagreed).
 **Departure from the paper (§17l, default):** once the largest relative violation is at most
 `FlowOptions::newton_polish` (100) times its tolerance, the remaining iterations are Newton steps
 with the Jacobian at the iterate and the lumped-mass metric (`x = M⁻¹Cᵀ(CM⁻¹Cᵀ)⁻¹(−Φ)`, a sparse
