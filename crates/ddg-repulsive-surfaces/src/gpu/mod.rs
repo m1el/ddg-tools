@@ -30,6 +30,8 @@ use crate::error::RsError;
 
 #[cfg(feature = "cuda")]
 pub(crate) mod cuda;
+#[cfg(feature = "cuda")]
+pub(crate) mod cuda_precond;
 
 /// How bitwise reproducible GPU results are (module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -361,6 +363,128 @@ impl GpuVertexFractional {
         #[cfg(feature = "cuda")]
         {
             self.inner.apply_batch(xs, ys)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            match self._never {}
+        }
+    }
+}
+
+/// The fine preconditioner of [`crate::solve::precond::SparsePreconditioner`] on the device
+/// (GPU-2, `NOTES-GPU2.md`): the `L′` solves in the chunked order of [`crate::solve::ldlt`], the
+/// vertex-pair fractional product and the augmented middle factor; one upload and one download per
+/// application.
+pub struct GpuPreconditioner {
+    #[cfg(feature = "cuda")]
+    pub(crate) inner: cuda_precond::DevicePreconditioner,
+    #[cfg(not(feature = "cuda"))]
+    pub(crate) _never: std::convert::Infallible,
+}
+
+impl std::fmt::Debug for GpuPreconditioner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GpuPreconditioner")
+    }
+}
+
+impl GpuPreconditioner {
+    /// Uploads the factor `l` of `L′` with its schedule, the Laplacian block `k` and the form.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`]; [`RsError::InvalidOption`] for a factor without a GPU schedule.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        gpu: &Arc<GpuContext>,
+        l: &crate::solve::ldlt::SimplicialLdlt,
+        per_axis: bool,
+        n_vertices: usize,
+        n_constraints: usize,
+        k: &ddg_core::SparseMatrix,
+        augmented: bool,
+        scale: f64,
+    ) -> Result<GpuPreconditioner, RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            let schedule = l.schedule()?;
+            Ok(GpuPreconditioner {
+                inner: cuda_precond::DevicePreconditioner::new(
+                    gpu,
+                    &cuda_precond::PrecHost {
+                        factor: l,
+                        schedule: &schedule,
+                        per_axis,
+                        n_vertices,
+                        n_constraints,
+                        k_ptr: k.col_ptr(),
+                        k_idx: k.row_idx(),
+                        k_val: k.values(),
+                        augmented,
+                        scale,
+                    },
+                )?,
+            })
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (l, per_axis, n_vertices, n_constraints, k, augmented, scale);
+            match gpu._never {}
+        }
+    }
+
+    /// `P⁻¹ r` (without the coarse correction) for every `r`, with the fractional product of
+    /// `frac`.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub(crate) fn apply_many(&self, frac: &GpuVertexFractional, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            self.inner.apply_many(&frac.inner, rs)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (frac, rs);
+            match self._never {}
+        }
+    }
+
+    /// Diagnostics (`examples/gpu2_precond.rs`): seconds of one `L′` solve of `rs`, split as
+    /// [gather + scatter, partials, forward chains, backward chains] with a synchronization after
+    /// every launch, and the unsynchronized solve.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn profile_solve(&self, rs: &[&[f64]]) -> Result<([f64; 4], f64), RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            self.inner.profile_solve(rs)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = rs;
+            match self._never {}
+        }
+    }
+
+    /// Sets the factor applied to `L_{2−s}` in the augmented form.
+    pub(crate) fn set_scale(&mut self, scale: f64) {
+        #[cfg(feature = "cuda")]
+        {
+            self.inner.scale = scale;
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = scale;
+            match self._never {}
+        }
+    }
+
+    /// Bytes on the device (factor, schedule, `K`).
+    pub fn device_bytes(&self) -> usize {
+        #[cfg(feature = "cuda")]
+        {
+            self.inner.bytes
         }
         #[cfg(not(feature = "cuda"))]
         {

@@ -18,6 +18,7 @@ pub mod coarse;
 pub mod dense;
 pub mod gmres;
 pub mod iterative;
+pub mod ldlt;
 pub mod precond;
 pub mod schur;
 

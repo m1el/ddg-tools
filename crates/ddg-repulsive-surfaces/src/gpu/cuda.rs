@@ -16,14 +16,14 @@ use crate::spatial::block_tree::BlockTreeParts;
 const SOURCE: &str = include_str!("kernels.cu");
 const BLOCK: u32 = 256;
 
-fn gpu_err(operation: &'static str) -> impl FnOnce(cudarc::driver::DriverError) -> RsError {
+pub(crate) fn gpu_err(operation: &'static str) -> impl FnOnce(cudarc::driver::DriverError) -> RsError {
     move |e| RsError::Gpu {
         operation,
         detail: format!("{e:?}"),
     }
 }
 
-fn cfg(n: u64) -> Result<LaunchConfig, RsError> {
+pub(crate) fn cfg(n: u64) -> Result<LaunchConfig, RsError> {
     let blocks = n.div_ceil(BLOCK as u64);
     if blocks > i32::MAX as u64 {
         return Err(RsError::Gpu {
@@ -60,6 +60,14 @@ pub(crate) struct Kernels {
     bh_leaf_energy: CudaFunction,
     bh_node_sums: CudaFunction,
     bh_final: CudaFunction,
+    pub(crate) ldl_gather: CudaFunction,
+    pub(crate) ldl_scatter: CudaFunction,
+    pub(crate) ldl_partials: CudaFunction,
+    pub(crate) ldl_chains: CudaFunction,
+    pub(crate) ldl_leaves: CudaFunction,
+    pub(crate) prec_aug: CudaFunction,
+    pub(crate) vec_add: CudaFunction,
+    pub(crate) vec_zero: CudaFunction,
 }
 
 /// The devices the driver reports ([`super::devices`]).
@@ -89,7 +97,7 @@ pub(crate) struct CudaBackend {
     #[allow(dead_code)]
     ctx: Arc<CudaContext>,
     pub(crate) stream: Arc<CudaStream>,
-    k: Kernels,
+    pub(crate) k: Kernels,
     pub(crate) name: String,
     pub(crate) determinism: Determinism,
 }
@@ -151,6 +159,14 @@ impl CudaBackend {
             bh_leaf_energy: f("bh_leaf_energy")?,
             bh_node_sums: f("bh_node_sums")?,
             bh_final: f("bh_final")?,
+            ldl_gather: f("ldl_gather")?,
+            ldl_scatter: f("ldl_scatter")?,
+            ldl_partials: f("ldl_partials")?,
+            ldl_chains: f("ldl_chains")?,
+            ldl_leaves: f("ldl_leaves")?,
+            prec_aug: f("prec_aug")?,
+            vec_add: f("vec_add")?,
+            vec_zero: f("vec_zero")?,
         };
         let stream = ctx.default_stream();
         Ok(CudaBackend {
@@ -163,19 +179,19 @@ impl CudaBackend {
     }
 
     /// Uploads `v` (a one-element `dummy` if empty: zero-size allocations are not allowed).
-    fn upload<T: DeviceRepr + Copy>(&self, v: &[T], dummy: T) -> Result<CudaSlice<T>, RsError> {
+    pub(crate) fn upload<T: DeviceRepr + Copy>(&self, v: &[T], dummy: T) -> Result<CudaSlice<T>, RsError> {
         if v.is_empty() {
             return self.stream.clone_htod(&[dummy]).map_err(gpu_err("upload"));
         }
         self.stream.clone_htod(v).map_err(gpu_err("upload"))
     }
 
-    fn alloc(&self, n: usize) -> Result<CudaSlice<f64>, RsError> {
+    pub(crate) fn alloc(&self, n: usize) -> Result<CudaSlice<f64>, RsError> {
         // SAFETY: every buffer allocated here is fully written by a kernel before it is read.
         unsafe { self.stream.alloc::<f64>(n.max(1)) }.map_err(gpu_err("alloc"))
     }
 
-    fn download(&self, d: &CudaSlice<f64>, out: &mut [f64]) -> Result<(), RsError> {
+    pub(crate) fn download(&self, d: &CudaSlice<f64>, out: &mut [f64]) -> Result<(), RsError> {
         self.stream
             .memcpy_dtoh(d, out)
             .map_err(gpu_err("download"))?;
@@ -756,56 +772,69 @@ impl DeviceVertexFractional {
     /// `VertexFractionalTree::apply_batch`.
     pub(crate) fn apply_batch(&self, xs: &[&[f64]], ys: &mut [&mut [f64]]) -> Result<(), RsError> {
         let g = &self.gpu.inner;
-        let s = &g.stream;
         let nb = xs.len();
         if nb == 0 {
             return Ok(());
         }
         let nd = 3 * self.n as usize;
-        let c = 3 * nb as u32;
         let mut xh = Vec::with_capacity(nb * nd);
         for x in xs {
             xh.extend_from_slice(x);
         }
         let dx = g.upload(&xh, 0.0)?;
+        let mut dy = g.alloc(nb * nd)?;
+        self.apply_device(&dx, nd as u64, nb, &mut dy)?;
+        let mut yh = vec![0.0; nb * nd];
+        g.download(&dy, &mut yh)?;
+        for (q, y) in ys.iter_mut().enumerate() {
+            y.copy_from_slice(&yh[q * nd..(q + 1) * nd]);
+        }
+        Ok(())
+    }
+
+    /// The product on device vectors: `nb` vectors at stride `stride` (`≥ 3|V|`) in `dx`; the first
+    /// `3|V|` entries of each vector of `dy` (same stride) are written, the rest is left alone.
+    pub(crate) fn apply_device(
+        &self,
+        dx: &CudaSlice<f64>,
+        stride: u64,
+        nb: usize,
+        dy: &mut CudaSlice<f64>,
+    ) -> Result<(), RsError> {
+        let g = &self.gpu.inner;
+        let s = &g.stream;
+        let c = 3 * nb as u32;
         let total = self.n as u64 * c as u64;
         let mut psi = g.alloc(total as usize)?;
-        let ndu = nd as u64;
         unsafe {
             s.launch_builder(&g.k.vertex_psi)
                 .arg(&self.n)
                 .arg(&c)
-                .arg(&ndu)
+                .arg(&stride)
                 .arg(&self.order)
                 .arg(&self.mass)
-                .arg(&dx)
+                .arg(dx)
                 .arg(&mut psi)
                 .launch(cfg(total)?)
         }
         .map_err(gpu_err("product"))?;
         let hx = self.tree.multiply(g, c, c, &psi)?;
-        let mut dy = g.alloc(nb * nd)?;
         let nbu = nb as u32;
         unsafe {
             s.launch_builder(&g.k.vertex_out)
                 .arg(&self.n)
                 .arg(&nbu)
                 .arg(&c)
-                .arg(&ndu)
+                .arg(&stride)
                 .arg(&self.position)
                 .arg(&self.mass)
                 .arg(&self.ha)
-                .arg(&dx)
+                .arg(dx)
                 .arg(&hx)
-                .arg(&mut dy)
-                .launch(cfg(nb as u64 * nd as u64)?)
+                .arg(dy)
+                .launch(cfg(nb as u64 * 3 * self.n as u64)?)
         }
         .map_err(gpu_err("product"))?;
-        let mut yh = vec![0.0; nb * nd];
-        g.download(&dy, &mut yh)?;
-        for (q, y) in ys.iter_mut().enumerate() {
-            y.copy_from_slice(&yh[q * nd..(q + 1) * nd]);
-        }
         Ok(())
     }
 }

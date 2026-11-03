@@ -134,12 +134,29 @@ pub fn translations_fixed_per_component(surface: &Surface, c: &SparseMatrix) -> 
     fixed.iter().all(|&f| f)
 }
 
+/// How `L′` is factored and solved (`NOTES-GPU2.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TriangularSolve {
+    /// [`super::ldlt::SimplicialLdlt`]: faer's factor read out, solves in the fixed chunked order
+    /// of [`super::ldlt`] (default; the GPU reproduces it bit for bit, GPU-2).
+    #[default]
+    Chunked,
+    /// `ddg_core::sparse` (faer's supernodal solves; GPU-1 and before).
+    Faer,
+}
+
+#[derive(Debug)]
+enum LFactor {
+    Faer(Factorization),
+    Chunked(super::ldlt::SimplicialLdlt),
+}
+
 /// The factored `L′ = [[K ⊗ I₃, C_Qᵀ], [C_Q, 0]]` of one step (module docs), `K` the sparse
 /// symmetric positive definite Laplacian block (`|V| × |V|`).
 #[derive(Debug)]
 pub struct LaplacianSaddle {
     matrix: SparseMatrix,
-    factor: Factorization,
+    factor: LFactor,
     /// `Some(k₁)` for the per-axis factorization of size `|V| + k₁`.
     per_axis: Option<usize>,
     n_vertices: usize,
@@ -157,6 +174,14 @@ impl LaplacianSaddle {
     /// [`RsError::InvalidOption`] for mismatched sizes; [`RsError::SingularSaddle`] if the
     /// factorization breaks down (a zero pivot: `K` not positive definite or dependent rows).
     pub fn new(k: &SparseMatrix, c: &SparseMatrix) -> Result<LaplacianSaddle, RsError> {
+        Self::new_with(k, c, TriangularSolve::default())
+    }
+
+    /// [`LaplacianSaddle::new`] with the factorization `kind`.
+    ///
+    /// # Errors
+    /// As [`LaplacianSaddle::new`].
+    pub fn new_with(k: &SparseMatrix, c: &SparseMatrix, kind: TriangularSolve) -> Result<LaplacianSaddle, RsError> {
         let t0 = Instant::now();
         let nv = k.nrows();
         if k.ncols() != nv || c.ncols() != 3 * nv {
@@ -206,11 +231,18 @@ impl LaplacianSaddle {
                 (m, order, None)
             }
         };
-        let symbolic = Symbolic::analyze_with_order(&matrix, Method::Ldlt, EliminationOrder::Custom(&order))
-            .map_err(|e| sparse_error(e, "preconditioner analysis"))?;
-        let factor = symbolic
-            .factor(&matrix, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner factorization"))?;
+        let factor = match kind {
+            TriangularSolve::Chunked => LFactor::Chunked(super::ldlt::SimplicialLdlt::factor(&matrix, &order)?),
+            TriangularSolve::Faer => {
+                let symbolic = Symbolic::analyze_with_order(&matrix, Method::Ldlt, EliminationOrder::Custom(&order))
+                    .map_err(|e| sparse_error(e, "preconditioner analysis"))?;
+                LFactor::Faer(
+                    symbolic
+                        .factor(&matrix, Parallelism::Sequential)
+                        .map_err(|e| sparse_error(e, "preconditioner factorization"))?,
+                )
+            }
+        };
         Ok(LaplacianSaddle {
             matrix,
             factor,
@@ -242,14 +274,56 @@ impl LaplacianSaddle {
         &self.matrix
     }
 
+    /// The chunked-order factor ([`TriangularSolve::Chunked`]), if that is the one in use.
+    pub fn chunked_factor(&self) -> Option<&super::ldlt::SimplicialLdlt> {
+        match &self.factor {
+            LFactor::Chunked(f) => Some(f),
+            LFactor::Faer(_) => None,
+        }
+    }
+
+    /// `|V|`.
+    pub fn n_vertices(&self) -> usize {
+        self.n_vertices
+    }
+
+    /// `k_Q`.
+    pub fn n_constraints(&self) -> usize {
+        self.n_constraints
+    }
+
+    /// Solves `M X = B` in place (`ncols` columns of `M`'s dimension, stacked), by the factor.
+    fn factor_solve(&self, x: &mut [f64], ncols: usize) -> Result<(), RsError> {
+        match &self.factor {
+            LFactor::Faer(f) => f
+                .solve_many_in_place(x, ncols, Parallelism::Sequential)
+                .map_err(|e| sparse_error(e, "preconditioner solve")),
+            LFactor::Chunked(f) => {
+                let n = f.dim();
+                let perm = f.perm();
+                let mut xr = vec![0.0; n * ncols];
+                for (new, &old) in perm.iter().enumerate() {
+                    for c in 0..ncols {
+                        xr[new * ncols + c] = x[c * n + old as usize];
+                    }
+                }
+                f.solve_rows(&mut xr, ncols)?;
+                for (new, &old) in perm.iter().enumerate() {
+                    for c in 0..ncols {
+                        x[c * n + old as usize] = xr[new * ncols + c];
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Solves `M X = B` for `ncols` stacked columns at once (one pass over the factor for all
     /// of them) with one refinement step.
     fn solve_block(&self, b: &[f64], ncols: usize, refine: bool) -> Result<Vec<f64>, RsError> {
         let n = self.matrix.nrows();
         let mut x = b.to_vec();
-        self.factor
-            .solve_many_in_place(&mut x, ncols, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner solve"))?;
+        self.factor_solve(&mut x, ncols)?;
         if !refine {
             return Ok(x);
         }
@@ -263,9 +337,7 @@ impl LaplacianSaddle {
         for (ri, bi) in r.iter_mut().zip(b) {
             *ri = bi - *ri;
         }
-        self.factor
-            .solve_many_in_place(&mut r, ncols, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner solve"))?;
+        self.factor_solve(&mut r, ncols)?;
         for (xi, di) in x.iter_mut().zip(&r) {
             *xi += di;
         }
@@ -414,7 +486,21 @@ pub struct PreconditionerOptions {
     /// changed neither the GMRES iteration counts nor the solutions beyond the GMRES tolerance,
     /// `NOTES-WP17.md`). [`LaplacianSaddle::solve`] always refines.
     pub refine: bool,
+    /// How `L′` is factored and solved (default [`TriangularSolve::Chunked`], GPU-2).
+    pub triangular: TriangularSolve,
+    /// With a GPU: run the whole fine preconditioner there (the `L′` solves too; default `true`;
+    /// needs [`TriangularSolve::Chunked`], vertex pairs and `refine = false`, else only the
+    /// fractional product runs on the GPU as in GPU-1). Bitwise the CPU's at determinism level 2.
+    pub gpu_solves: bool,
+    /// The smallest `|V|` for which [`PreconditionerOptions::gpu_solves`] applies (default
+    /// [`GPU_SOLVES_MIN_VERTICES`]): below it the latency of the GPU solves (one launch per level of
+    /// the elimination tree) exceeds the CPU's solves (`NOTES-GPU2.md`, Fig. 13 suite).
+    pub gpu_solves_min_vertices: usize,
 }
+
+/// The default of [`PreconditionerOptions::gpu_solves_min_vertices`]: measured crossover of the
+/// Fig. 13 suite between 10k and 16k faces (`NOTES-GPU2.md`).
+pub const GPU_SOLVES_MIN_VERTICES: usize = 7000;
 
 /// The scale of the fractional factor in the augmented preconditioner (`SPEC.md` §6.3,
 /// `NOTES-SOLVERFIX.md`).
@@ -488,6 +574,9 @@ impl Default for PreconditionerOptions {
             scale: FractionalScale::Symbol,
             coarse: true,
             refine: false,
+            triangular: TriangularSolve::Chunked,
+            gpu_solves: true,
+            gpu_solves_min_vertices: GPU_SOLVES_MIN_VERTICES,
         }
     }
 }
@@ -571,6 +660,11 @@ pub struct SparsePreconditioner {
     fractional_seconds: f64,
     /// The GPU copy of the vertex-pair tree ([`SparsePreconditioner::with_gpu`]).
     gpu_fractional: Option<crate::gpu::GpuVertexFractional>,
+    /// Whether [`PreconditionerOptions::gpu_solves`] asked for the solves on the GPU (and the
+    /// mesh is large enough, [`PreconditionerOptions::gpu_solves_min_vertices`]).
+    gpu_solves: bool,
+    /// The fine preconditioner on the GPU (GPU-2).
+    gpu_prec: Option<crate::gpu::GpuPreconditioner>,
     upload_seconds: f64,
     applications: AtomicUsize,
     nanos: AtomicU64,
@@ -647,7 +741,7 @@ impl SparsePreconditioner {
         }
         let k = SparseMatrix::from_triplets(nv, nv, &trip)
             .map_err(|e| sparse_error(e, "preconditioner Laplacian"))?;
-        let lprime = LaplacianSaddle::new(&k, c)?;
+        let lprime = LaplacianSaddle::new_with(&k, c, options.triangular)?;
         let t0 = Instant::now();
         let tau = 2.0 - exponents.s();
         let mut gpu_fractional = None;
@@ -680,7 +774,7 @@ impl SparsePreconditioner {
             FractionalScale::Symbol => 1.0 / fractional_symbol_ratio(exponents),
             FractionalScale::Unit => 1.0,
         };
-        Ok(SparsePreconditioner {
+        let mut sp = SparsePreconditioner {
             pool,
             lprime,
             laplacian: k,
@@ -694,10 +788,51 @@ impl SparsePreconditioner {
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
             gpu_fractional,
+            gpu_solves: options.gpu_solves && nv >= options.gpu_solves_min_vertices,
+            gpu_prec: None,
             upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
             nanos: AtomicU64::new(0),
-        })
+        };
+        if let Some(g) = gpu_build {
+            sp.attach_gpu_solves(g)?;
+        }
+        Ok(sp)
+    }
+
+    /// Uploads `L′` with its schedule and `K` for [`PreconditionerOptions::gpu_solves`], if the
+    /// configuration allows it (module docs of [`crate::gpu`], `NOTES-GPU2.md`).
+    fn attach_gpu_solves(&mut self, gpu: &Arc<crate::gpu::GpuContext>) -> Result<(), RsError> {
+        self.gpu_prec = None;
+        if !self.gpu_solves || self.refine || self.gpu_fractional.is_none() {
+            return Ok(());
+        }
+        let Some(l) = self.lprime.chunked_factor() else {
+            return Ok(());
+        };
+        let t0 = Instant::now();
+        self.gpu_prec = Some(crate::gpu::GpuPreconditioner::new(
+            gpu,
+            l,
+            self.lprime.is_per_axis(),
+            self.lprime.n_vertices,
+            self.lprime.n_constraints,
+            &self.laplacian,
+            self.form == PreconditionerForm::Augmented,
+            self.fractional_scale,
+        )?);
+        self.upload_seconds += t0.elapsed().as_secs_f64();
+        Ok(())
+    }
+
+    /// The fine preconditioner on the GPU, if in use.
+    pub fn gpu_preconditioner(&self) -> Option<&crate::gpu::GpuPreconditioner> {
+        self.gpu_prec.as_ref()
+    }
+
+    /// Whether the `L′` solves run on the GPU.
+    pub fn solves_on_gpu(&self) -> bool {
+        self.gpu_prec.is_some()
     }
 
     /// As [`SparsePreconditioner::new`], reusing the face tree of a [`FaceMetricTree`] for
@@ -764,6 +899,9 @@ impl SparsePreconditioner {
     pub fn with_metric_weight(mut self, tp_weight: f64) -> Self {
         if tp_weight.is_finite() && tp_weight > 0.0 && self.fractional_scale != 1.0 {
             self.fractional_scale /= tp_weight;
+            if let Some(g) = &mut self.gpu_prec {
+                g.set_scale(self.fractional_scale);
+            }
         }
         self
     }
@@ -780,6 +918,7 @@ impl SparsePreconditioner {
             self.gpu_fractional = Some(t.upload(gpu)?);
             self.upload_seconds = t0.elapsed().as_secs_f64();
         }
+        self.attach_gpu_solves(gpu)?;
         Ok(self)
     }
 
@@ -885,6 +1024,9 @@ impl SparsePreconditioner {
 
     /// `P⁻¹ r` for several vectors without the coarse correction.
     fn apply_fine(&self, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
+        if let (Some(g), Some(f)) = (&self.gpu_prec, &self.gpu_fractional) {
+            return g.apply_many(f, rs);
+        }
         let nd = 3 * self.lprime.n_vertices;
         let ys = self.lprime.solve_many_on(Some(&self.pool), rs, self.refine)?;
         let mut vs: Vec<Vec<f64>> = rs.iter().map(|r| vec![0.0; r.len()]).collect();
