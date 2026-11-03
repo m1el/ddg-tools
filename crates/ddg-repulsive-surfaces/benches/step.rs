@@ -10,6 +10,9 @@
 //! `--gpu L1|L2` runs the tree products on CUDA device 0 at determinism level 1 or 2
 //! (`NOTES-GPU.md`; needs `--features cuda`); the last columns name the device and the upload time.
 //!
+//! `--no-gpu-solves` keeps the `L′` solves on the CPU with a GPU (GPU-1's split); `--faer` uses
+//! faer's supernodal `L′` solves instead of the chunked ones (`NOTES-GPU2.md`).
+//!
 //! `--log PATH` writes every step (`step::csv_line`, all steps including the warm-up) to a CSV.
 //!
 //! `SPEC`: `genus:G:FACES`, `handcuffs:K:FACES`, `tunnel8:FACES`, `tunnel3:FACES`, `fig12:I`,
@@ -53,6 +56,8 @@ struct Args {
     log: Option<PathBuf>,
     obstacle_prec: bool,
     gpu: Option<Determinism>,
+    no_gpu_solves: bool,
+    faer: bool,
 }
 
 fn parse_args() -> Args {
@@ -72,6 +77,8 @@ fn parse_args() -> Args {
         log: None,
         obstacle_prec: false,
         gpu: None,
+        no_gpu_solves: false,
+        faer: false,
     };
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -119,6 +126,8 @@ fn parse_args() -> Args {
                 i += 1;
             }
             "--obstacle-prec" => a.obstacle_prec = true,
+            "--no-gpu-solves" => a.no_gpu_solves = true,
+            "--faer" => a.faer = true,
             "--log" => {
                 a.log = Some(PathBuf::from(next(i)));
                 i += 1;
@@ -295,6 +304,12 @@ fn run_case(name: &str, spec: &str, a: &Args) {
         }
         if let Some(d) = a.gpu {
             h.device = Device::Cuda(CudaOptions { ordinal: 0, determinism: d });
+        }
+        if a.no_gpu_solves {
+            h.preconditioner.gpu_solves = false;
+        }
+        if a.faer {
+            h.preconditioner.triangular = ddg_repulsive_surfaces::solve::precond::TriangularSolve::Faer;
         }
     }
     if a.no_lo {

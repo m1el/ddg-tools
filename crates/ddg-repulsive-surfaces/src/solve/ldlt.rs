@@ -393,6 +393,21 @@ impl SimplicialLdlt {
     }
 }
 
+/// `x_j − Σ` over the terms `ptr[j] .. ptr[j + 1]` of `idx`/`val` in chunks (module docs), for
+/// column `c` of the `n × m` row-major `x` (`ldl_leaves`).
+fn leaf_term(x: &[f64], m: usize, c: usize, j: usize, ptr: &[usize], idx: &[u32], val: &[f64]) -> f64 {
+    let mut s = x[j * m + c];
+    let (p0, p1) = (ptr[j], ptr[j + 1]);
+    for (ks, ls) in idx[p0..p1].chunks(CHUNK).zip(val[p0..p1].chunks(CHUNK)) {
+        let mut cur = 0.0;
+        for (&k, &l) in ks.iter().zip(ls) {
+            cur += l * x[k as usize * m + c];
+        }
+        s -= cur;
+    }
+    s
+}
+
 /// Elimination tree of `P A Pᵀ` (`pinv[old] = new`, `order[new] = old`).
 fn etree(a: &SparseMatrix, order: &[u32], pinv: &[u32]) -> Vec<u32> {
     let n = a.nrows();
@@ -460,6 +475,8 @@ fn postorder(parent: &[u32]) -> Vec<u32> {
 pub const MAX_CHAIN: usize = 1024;
 /// Rows per thread of a chain block (`kernels.cu` `LDL_ITEMS`).
 pub const CHAIN_ITEMS: usize = 4;
+/// Largest subtree solved by one thread (`ldl_leaves`; [`LdltSchedule`]).
+pub const LEAF_MAX: usize = 32;
 
 /// One sweep (forward or backward) of [`LdltSchedule`].
 #[derive(Debug, Clone, Default)]
@@ -476,8 +493,13 @@ pub struct Sweep {
     pub slot_row: Vec<u32>,
     /// Chunk index of a slot within its row.
     pub slot_chunk: Vec<u32>,
+    /// Terms of a slot's chunk (`CHUNK`, or fewer for the chunk that continues into the chain).
+    pub slot_len: Vec<u32>,
     /// Per row: the number of leading chunks whose terms all lie outside the row's chain.
     pub nfull: Vec<u32>,
+    /// Per row: the terms outside the chain after those chunks (`< CHUNK`); when not zero, their
+    /// partial sum has a slot of its own (right after the full chunks) that the chain continues.
+    pub nmix: Vec<u32>,
     /// Per row: the slot of its first chunk.
     pub slot_base: Vec<u32>,
 }
@@ -485,13 +507,21 @@ pub struct Sweep {
 /// The GPU schedule of the solves of a [`SimplicialLdlt`] (`NOTES-GPU2.md`): the elimination tree
 /// cut into chains (index ranges `j, j + 1, …` with `parent(j) = j + 1` and `j + 1` having no other
 /// child; at most [`MAX_CHAIN`] long), grouped into levels (forward: by height, every chain after
-/// the chains it reads; backward: by depth). Per level the chunks of terms from earlier levels are
+/// the chains it reads; backward: by depth). The bottom of the tree, whole subtrees of at most
+/// [`LEAF_MAX`] nodes, is solved first (forward) or last (backward) by one thread per subtree in
+/// index order. Per level the chunks of terms from earlier levels are
 /// summed in parallel (`ldl_partials`), then one block per chain runs the chain in sequence
 /// (`ldl_chains`), adding the in-chain terms as they become known. The result is that of
 /// [`SimplicialLdlt::solve_rows`] bit for bit ([`SimplicialLdlt::solve_scheduled`] runs the same
 /// schedule on the CPU).
 #[derive(Debug, Clone)]
 pub struct LdltSchedule {
+    /// The leaf subtrees (`sub_start[t] .. sub_end[t]`, index ranges): whole subtrees of at most
+    /// [`LEAF_MAX`] nodes, each solved by one thread in sequence (`ldl_leaves`) before the chains
+    /// (forward) or after them (backward).
+    pub sub_start: Vec<u32>,
+    /// One past the last index of every leaf subtree.
+    pub sub_end: Vec<u32>,
     /// First index of every chain.
     pub chain_start: Vec<u32>,
     /// One past the last index of every chain.
@@ -525,7 +555,7 @@ fn group(levels: &[usize], nlev: usize, chain_len: &[usize]) -> (Vec<usize>, Vec
     let block = (0..nlev)
         .map(|l| {
             let longest = chains[ptr[l]..ptr[l + 1]].iter().map(|&c| chain_len[c as usize]).max().unwrap_or(1);
-            (longest.div_ceil(CHAIN_ITEMS).div_ceil(32) * 32).clamp(32, 256) as u32
+            (longest.div_ceil(32) * 32).clamp(32, 256) as u32
         })
         .collect();
     (ptr, chains, block)
@@ -538,29 +568,64 @@ impl SimplicialLdlt {
     /// [`RsError::InvalidOption`] if an entry of `L` does not respect the tree (a factor whose
     /// pattern is not closed; not expected from a Cholesky factorization).
     pub fn schedule(&self) -> Result<LdltSchedule, RsError> {
+        self.schedule_with(LEAF_MAX)
+    }
+
+    /// [`SimplicialLdlt::schedule`] with leaf subtrees of at most `leaf_max` nodes (0: none).
+    ///
+    /// # Errors
+    /// As [`SimplicialLdlt::schedule`].
+    pub fn schedule_with(&self, leaf_max: usize) -> Result<LdltSchedule, RsError> {
         let n = self.n;
+        let parent = &self.parent;
+        // Leaf subtrees: maximal subtrees of at most `leaf_max` nodes that are index ranges.
+        let mut size = vec![1usize; n];
+        for j in 0..n {
+            if parent[j] != NONE {
+                size[parent[j] as usize] += size[j];
+            }
+        }
+        let mut sub_of = vec![NONE; n];
+        let (mut sub_start, mut sub_end) = (Vec::new(), Vec::new());
+        for r in 0..n {
+            let p = parent[r];
+            if leaf_max == 0 || size[r] > leaf_max || (p != NONE && size[p as usize] <= leaf_max) {
+                continue;
+            }
+            let lo = r + 1 - size[r];
+            if (lo..r).all(|j| parent[j] != NONE && parent[j] as usize > j && parent[j] as usize <= r) {
+                for t in &mut sub_of[lo..=r] {
+                    *t = sub_start.len() as u32;
+                }
+                sub_start.push(lo as u32);
+                sub_end.push(r as u32 + 1);
+            }
+        }
+        let upper = |j: usize| sub_of[j] == NONE;
         let mut nchild = vec![0u32; n];
-        for &p in &self.parent {
-            if p != NONE {
-                nchild[p as usize] += 1;
+        for j in 0..n {
+            if upper(j) && parent[j] != NONE {
+                nchild[parent[j] as usize] += 1;
             }
         }
         let mut chain_start: Vec<u32> = Vec::new();
-        let mut chain_of = vec![0u32; n];
-        for j in 0..n {
+        let mut chain_end: Vec<u32> = Vec::new();
+        let mut chain_of = vec![NONE; n];
+        for j in (0..n).filter(|&j| upper(j)) {
             let joined = j > 0
-                && self.parent[j - 1] == j as u32
+                && upper(j - 1)
+                && parent[j - 1] == j as u32
                 && nchild[j] == 1
                 && j - (*chain_start.last().expect("a chain") as usize) < MAX_CHAIN;
-            if !joined {
+            if joined {
+                *chain_end.last_mut().expect("a chain") = j as u32 + 1;
+            } else {
                 chain_start.push(j as u32);
+                chain_end.push(j as u32 + 1);
             }
             chain_of[j] = (chain_start.len() - 1) as u32;
         }
         let nch = chain_start.len();
-        let chain_end: Vec<u32> = (0..nch)
-            .map(|c| chain_start.get(c + 1).copied().unwrap_or(n as u32))
-            .collect();
         let chain_len: Vec<usize> = (0..nch).map(|c| (chain_end[c] - chain_start[c]) as usize).collect();
         let parent_chain = |c: usize| -> Option<usize> {
             let p = self.parent[chain_end[c] as usize - 1];
@@ -581,8 +646,16 @@ impl SimplicialLdlt {
         for j in 0..n {
             for p in self.lp[j]..self.lp[j + 1] {
                 let i = self.li[p] as usize;
-                let (ci, cj) = (chain_of[i] as usize, chain_of[j] as usize);
-                if ci != cj && !(height[cj] < height[ci] && depth[ci] < depth[cj]) {
+                let ok = match (upper(i), upper(j)) {
+                    (false, false) => sub_of[i] == sub_of[j],
+                    (true, false) => true,
+                    (false, true) => false,
+                    (true, true) => {
+                        let (ci, cj) = (chain_of[i] as usize, chain_of[j] as usize);
+                        ci == cj || (height[cj] < height[ci] && depth[ci] < depth[cj])
+                    }
+                };
+                if !ok {
                     return Err(RsError::InvalidOption {
                         name: "LDLT schedule",
                         value: format!("entry ({i}, {j}) of L"),
@@ -597,6 +670,8 @@ impl SimplicialLdlt {
         for (levels, nlev, fwd) in [(&height, nlev_h, true), (&depth, nlev_d, false)] {
             let (level_ptr, chains, level_block) = group(levels, nlev, &chain_len);
             let mut nfull = vec![0u32; n];
+            let mut nmix = vec![0u32; n];
+            let mut slot_len = Vec::new();
             let mut slot_base = vec![0u32; n];
             let mut slot_ptr = vec![0usize];
             let mut slot_row = Vec::new();
@@ -613,10 +688,17 @@ impl SimplicialLdlt {
                         };
                         let nf = n_ext / CHUNK;
                         nfull[iu] = nf as u32;
+                        nmix[iu] = (n_ext % CHUNK) as u32;
                         slot_base[iu] = slot_row.len() as u32;
                         for q in 0..nf {
                             slot_row.push(i);
                             slot_chunk.push(q as u32);
+                            slot_len.push(CHUNK as u32);
+                        }
+                        if n_ext % CHUNK > 0 {
+                            slot_row.push(i);
+                            slot_chunk.push(nf as u32);
+                            slot_len.push((n_ext % CHUNK) as u32);
                         }
                     }
                 }
@@ -629,7 +711,9 @@ impl SimplicialLdlt {
                 slot_ptr,
                 slot_row,
                 slot_chunk,
+                slot_len,
                 nfull,
+                nmix,
                 slot_base,
             });
         }
@@ -652,6 +736,8 @@ impl SimplicialLdlt {
         }
         let n_slots = (fwd.slot_row.len(), bwd.slot_row.len());
         Ok(LdltSchedule {
+            sub_start,
+            sub_end,
             chain_start,
             chain_end,
             fwd,
@@ -685,6 +771,18 @@ impl SimplicialLdlt {
                 (&s.bwd, &self.lp, &s.ci, &s.cx)
             };
             let mut part = vec![0.0; sw.slot_row.len() * m];
+            // ldl_leaves (forward: first)
+            if fwd {
+                for (&a, &b) in s.sub_start.iter().zip(&s.sub_end) {
+                    for c in 0..m {
+                        for j in a as usize..b as usize {
+                            let sv = leaf_term(&w, m, c, j, ptr, idx, val);
+                            w[j * m + c] = sv;
+                            z[j * m + c] = sv / self.d[j];
+                        }
+                    }
+                }
+            }
             for l in 0..sw.level_ptr.len() - 1 {
                 let data = &mut w;
                 // ldl_partials
@@ -693,7 +791,7 @@ impl SimplicialLdlt {
                     let p0 = ptr[row] + sw.slot_chunk[slot] as usize * CHUNK;
                     for c in 0..m {
                         let mut cur = 0.0;
-                        for p in p0..p0 + CHUNK {
+                        for p in p0..p0 + sw.slot_len[slot] as usize {
                             cur += val[p] * data[idx[p] as usize * m + c];
                         }
                         part[slot * m + c] = cur;
@@ -710,16 +808,9 @@ impl SimplicialLdlt {
                                 for q in 0..nf {
                                     sv -= part[(base + q) * m + c];
                                 }
-                                let (mut p, e) = (ptr[i] + nf * CHUNK, ptr[i + 1]);
-                                let (mut cu, mut cn) = (0.0, 0);
-                                while p < e && {
-                                    let k = idx[p] as usize;
-                                    if fwd { k < c0 } else { k >= c1 }
-                                } {
-                                    cu += val[p] * data[idx[p] as usize * m + c];
-                                    cn += 1;
-                                    p += 1;
-                                }
+                                let nm = sw.nmix[i] as usize;
+                                let (p, e) = (ptr[i] + nf * CHUNK + nm, ptr[i + 1]);
+                                let (cu, cn) = if nm > 0 { (part[(base + nf) * m + c], nm) } else { (0.0, 0) };
                                 (sv, cu, cn, p, e)
                             })
                             .collect();
@@ -747,6 +838,16 @@ impl SimplicialLdlt {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            // ldl_leaves (backward: last)
+            if !fwd {
+                for (&a, &b) in s.sub_start.iter().zip(&s.sub_end) {
+                    for c in 0..m {
+                        for j in (a as usize..b as usize).rev() {
+                            w[j * m + c] = leaf_term(&w, m, c, j, ptr, idx, val);
                         }
                     }
                 }
@@ -852,14 +953,17 @@ mod tests {
         let amd = ddg_core::sparse::fill_reducing_ordering(&a.submatrix(&kb, &kb).unwrap()).unwrap();
         let order: Vec<u32> = amd.into_iter().chain([nv as u32, nv as u32 + 1]).collect();
         let f = SimplicialLdlt::factor(&a, &order).unwrap();
-        let sched = f.schedule().unwrap();
-        assert!(sched.fwd.level_ptr.len() > 5);
-        for m in [1usize, 3, 6] {
-            let b: Vec<f64> = (0..n * m).map(|i| ((i * 7919) % 1013) as f64 / 500.0 - 1.0).collect();
-            let (mut x1, mut x2) = (b.clone(), b.clone());
-            f.solve_rows(&mut x1, m).unwrap();
-            f.solve_scheduled(&sched, &mut x2, m).unwrap();
-            assert!(x1.iter().zip(&x2).all(|(u, v)| u.to_bits() == v.to_bits()), "m = {m}");
+        for leaf_max in [0usize, 8, LEAF_MAX] {
+            let sched = f.schedule_with(leaf_max).unwrap();
+            assert!(sched.fwd.level_ptr.len() > 5);
+            assert_eq!(sched.sub_start.is_empty(), leaf_max == 0);
+            for m in [1usize, 3, 6] {
+                let b: Vec<f64> = (0..n * m).map(|i| ((i * 7919) % 1013) as f64 / 500.0 - 1.0).collect();
+                let (mut x1, mut x2) = (b.clone(), b.clone());
+                f.solve_rows(&mut x1, m).unwrap();
+                f.solve_scheduled(&sched, &mut x2, m).unwrap();
+                assert!(x1.iter().zip(&x2).all(|(u, v)| u.to_bits() == v.to_bits()), "m = {m}, leaves {leaf_max}");
+            }
         }
     }
 }

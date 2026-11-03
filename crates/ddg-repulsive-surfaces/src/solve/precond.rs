@@ -815,6 +815,11 @@ impl SparsePreconditioner {
         Ok(())
     }
 
+    /// The fine preconditioner on the GPU, if in use.
+    pub fn gpu_preconditioner(&self) -> Option<&crate::gpu::GpuPreconditioner> {
+        self.gpu_prec.as_ref()
+    }
+
     /// Whether the `L′` solves run on the GPU.
     pub fn solves_on_gpu(&self) -> bool {
         self.gpu_prec.is_some()

@@ -30,7 +30,9 @@ struct DeviceSweep {
     chains: CudaSlice<u32>,
     slot_row: CudaSlice<u32>,
     slot_chunk: CudaSlice<u32>,
+    slot_len: CudaSlice<u32>,
     nfull: CudaSlice<u32>,
+    nmix: CudaSlice<u32>,
     slot_base: CudaSlice<u32>,
 }
 
@@ -43,7 +45,9 @@ impl DeviceSweep {
             chains: g.upload(&s.chains, 0)?,
             slot_row: g.upload(&s.slot_row, 0)?,
             slot_chunk: g.upload(&s.slot_chunk, 0)?,
+            slot_len: g.upload(&s.slot_len, 0)?,
             nfull: g.upload(&s.nfull, 0)?,
+            nmix: g.upload(&s.nmix, 0)?,
             slot_base: g.upload(&s.slot_base, 0)?,
         })
     }
@@ -64,6 +68,9 @@ pub(crate) struct DeviceLdlt {
     d: CudaSlice<f64>,
     cstart: CudaSlice<u32>,
     cend: CudaSlice<u32>,
+    nsub: u32,
+    sub_start: CudaSlice<u32>,
+    sub_end: CudaSlice<u32>,
     fwd: DeviceSweep,
     bwd: DeviceSweep,
     max_slots: usize,
@@ -93,6 +100,9 @@ impl DeviceLdlt {
             d: g.upload(f.diagonal(), 0.0)?,
             cstart: g.upload(&s.chain_start, 0)?,
             cend: g.upload(&s.chain_end, 0)?,
+            nsub: s.sub_start.len() as u32,
+            sub_start: g.upload(&s.sub_start, 0)?,
+            sub_end: g.upload(&s.sub_end, 0)?,
             fwd: DeviceSweep::upload(g, &s.fwd)?,
             bwd: DeviceSweep::upload(g, &s.bwd)?,
             max_slots: s.n_slots.0.max(s.n_slots.1),
@@ -108,9 +118,23 @@ impl DeviceLdlt {
         nb: usize,
         dim: u64,
         dst: &mut CudaSlice<f64>,
+        mut timing: Option<&mut [f64; 4]>,
     ) -> Result<(), RsError> {
         let st = &g.stream;
         let e = || gpu_err("preconditioner solve");
+        // Diagnostics (`timing`): synchronize after every launch and add its wall time to
+        // [gather + scatter, partials, forward chains, backward chains].
+        let mut t0 = std::time::Instant::now();
+        let mut tick = |slot: usize| -> Result<(), RsError> {
+            if let Some(t) = timing.as_deref_mut() {
+                st.synchronize().map_err(gpu_err("preconditioner solve"))?;
+                let dt = t0.elapsed().as_secs_f64();
+                t[slot] += dt;
+                t0 = std::time::Instant::now();
+            }
+            Ok(())
+        };
+        tick(0)?;
         let m = if self.per_axis { 3 * nb as u32 } else { nb as u32 };
         let total = self.n as u64 * m as u64;
         let pa = u32::from(self.per_axis);
@@ -130,6 +154,7 @@ impl DeviceLdlt {
                 .launch(cfg(total)?)
         }
         .map_err(e())?;
+        tick(0)?;
         for fwd in [true, false] {
             let (sw, ptr, idx, val) = if fwd {
                 (&self.fwd, &self.rp, &self.rj, &self.rx)
@@ -137,6 +162,32 @@ impl DeviceLdlt {
                 (&self.bwd, &self.lp, &self.ci, &self.cx)
             };
             let fwd_u = u32::from(fwd);
+            let leaves = |data: &mut CudaSlice<f64>, zz: &mut CudaSlice<f64>| -> Result<(), RsError> {
+                if self.nsub == 0 {
+                    return Ok(());
+                }
+                unsafe {
+                    st.launch_builder(&g.k.ldl_leaves)
+                        .arg(&fwd_u)
+                        .arg(&self.nsub)
+                        .arg(&m)
+                        .arg(&self.sub_start)
+                        .arg(&self.sub_end)
+                        .arg(ptr)
+                        .arg(idx)
+                        .arg(val)
+                        .arg(&self.d)
+                        .arg(data)
+                        .arg(zz)
+                        .launch(cfg(self.nsub as u64 * m as u64)?)
+                }
+                .map_err(gpu_err("preconditioner solve"))?;
+                Ok(())
+            };
+            if fwd {
+                leaves(&mut x, &mut z)?;
+                tick(0)?;
+            }
             for l in 0..sw.level_ptr.len() - 1 {
                 let count = (sw.slot_ptr[l + 1] - sw.slot_ptr[l]) as u32;
                 let data = if fwd { &mut x } else { &mut z };
@@ -149,6 +200,7 @@ impl DeviceLdlt {
                             .arg(&off)
                             .arg(&sw.slot_row)
                             .arg(&sw.slot_chunk)
+                            .arg(&sw.slot_len)
                             .arg(ptr)
                             .arg(idx)
                             .arg(val)
@@ -157,6 +209,7 @@ impl DeviceLdlt {
                             .launch(cfg(count as u64 * m as u64)?)
                     }
                     .map_err(e())?;
+                    tick(1)?;
                 }
                 let nch = (sw.level_ptr[l + 1] - sw.level_ptr[l]) as u32;
                 if nch == 0 {
@@ -180,6 +233,7 @@ impl DeviceLdlt {
                             .arg(idx)
                             .arg(val)
                             .arg(&sw.nfull)
+                            .arg(&sw.nmix)
                             .arg(&sw.slot_base)
                             .arg(&part)
                             .arg(&self.d)
@@ -188,6 +242,7 @@ impl DeviceLdlt {
                             .launch(lc)
                     }
                     .map_err(e())?;
+                    tick(2)?;
                 } else {
                     unsafe {
                         st.launch_builder(&g.k.ldl_chains)
@@ -200,6 +255,7 @@ impl DeviceLdlt {
                             .arg(idx)
                             .arg(val)
                             .arg(&sw.nfull)
+                            .arg(&sw.nmix)
                             .arg(&sw.slot_base)
                             .arg(&part)
                             .arg(&self.d)
@@ -208,7 +264,12 @@ impl DeviceLdlt {
                             .launch(lc)
                     }
                     .map_err(e())?;
+                    tick(3)?;
                 }
+            }
+            if !fwd {
+                leaves(&mut z, &mut x)?;
+                tick(3)?;
             }
         }
         unsafe {
@@ -224,6 +285,7 @@ impl DeviceLdlt {
                 .launch(cfg(total)?)
         }
         .map_err(e())?;
+        tick(0)?;
         Ok(())
     }
 }
@@ -279,6 +341,28 @@ impl DevicePreconditioner {
         })
     }
 
+    /// Diagnostics: seconds of one `L′` solve of `rs` split as
+    /// [gather + scatter, partials, forward chains, backward chains] (synchronized after every
+    /// launch, so the sum exceeds an unsynchronized solve), and of the unsynchronized solve.
+    pub(crate) fn profile_solve(&self, rs: &[&[f64]]) -> Result<([f64; 4], f64), RsError> {
+        let g = &self.gpu.inner;
+        let nb = rs.len();
+        let dim = self.dim;
+        let mut h = Vec::with_capacity(nb * dim);
+        for r in rs {
+            h.extend_from_slice(r);
+        }
+        let dr = g.upload(&h, 0.0)?;
+        let mut y = g.alloc(nb * dim)?;
+        let mut t = [0.0; 4];
+        self.ldlt.solve(g, &dr, nb, dim as u64, &mut y, Some(&mut t))?;
+        g.stream.synchronize().map_err(gpu_err("profile"))?;
+        let t0 = std::time::Instant::now();
+        self.ldlt.solve(g, &dr, nb, dim as u64, &mut y, None)?;
+        g.stream.synchronize().map_err(gpu_err("profile"))?;
+        Ok((t, t0.elapsed().as_secs_f64()))
+    }
+
     /// `P⁻¹ r` for every `r` of `rs` (the fine part of `SparsePreconditioner::apply_many`).
     pub(crate) fn apply_many(&self, frac: &DeviceVertexFractional, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
         let g = &self.gpu.inner;
@@ -295,7 +379,7 @@ impl DevicePreconditioner {
         let dr = g.upload(&h, 0.0)?;
         let total = (nb * dim) as u64;
         let mut y = g.alloc(nb * dim)?;
-        self.ldlt.solve(g, &dr, nb, dim as u64, &mut y)?;
+        self.ldlt.solve(g, &dr, nb, dim as u64, &mut y, None)?;
         let mut v = g.alloc(nb * dim)?;
         unsafe {
             st.launch_builder(&g.k.vec_zero)
@@ -326,7 +410,7 @@ impl DevicePreconditioner {
             .map_err(gpu_err("preconditioner"))?;
         }
         let mut z = g.alloc(nb * dim)?;
-        self.ldlt.solve(g, &v, nb, dim as u64, &mut z)?;
+        self.ldlt.solve(g, &v, nb, dim as u64, &mut z, None)?;
         if self.augmented {
             unsafe {
                 st.launch_builder(&g.k.vec_add)

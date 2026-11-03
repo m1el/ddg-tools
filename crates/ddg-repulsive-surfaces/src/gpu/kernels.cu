@@ -634,7 +634,8 @@ extern "C" __global__ void ldl_scatter(u32 n, u32 m, u32 per_axis, u32 nv, u64 d
 }
 
 extern "C" __global__ void ldl_partials(u32 count, u32 m, u32 slot_off, const u32* __restrict__ slot_row,
-                                        const u32* __restrict__ slot_chunk, const u32* __restrict__ ptr,
+                                        const u32* __restrict__ slot_chunk, const u32* __restrict__ slot_len,
+                                        const u32* __restrict__ ptr,
                                         const u32* __restrict__ idx, const double* __restrict__ val,
                                         const double* __restrict__ x, double* __restrict__ part) {
     u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
@@ -642,7 +643,8 @@ extern "C" __global__ void ldl_partials(u32 count, u32 m, u32 slot_off, const u3
     u32 s = slot_off + (u32)(t / m), c = (u32)(t % m);
     u32 p0 = ptr[slot_row[s]] + slot_chunk[s] * LDL_CHUNK;
     double cur = 0.0;
-    for (u32 p = p0; p < p0 + LDL_CHUNK; ++p) cur += val[p] * x[(u64)idx[p] * m + c];
+    u32 p1 = p0 + slot_len[s];
+    for (u32 p = p0; p < p1; ++p) cur += val[p] * x[(u64)idx[p] * m + c];
     part[(u64)s * m + c] = cur;
 }
 
@@ -653,7 +655,7 @@ extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ ch
                                       const u32* __restrict__ cstart, const u32* __restrict__ cend,
                                       const u32* __restrict__ ptr, const u32* __restrict__ idx,
                                       const double* __restrict__ val, const u32* __restrict__ nfull,
-                                      const u32* __restrict__ slot_base, const double* __restrict__ part,
+                                      const u32* __restrict__ nmix, const u32* __restrict__ slot_base, const double* __restrict__ part,
                                       const double* __restrict__ d, double* __restrict__ x, double* __restrict__ z) {
     __shared__ double xs[LDL_MAXC];
     u32 ch = chains[blockIdx.x];
@@ -676,22 +678,28 @@ extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ ch
             double sv = x[(u64)i * m + c];
             u32 nf = nfull[i], base = slot_base[i];
             for (u32 q = 0; q < nf; ++q) sv -= part[(u64)(base + q) * m + c];
-            u32 p = ptr[i] + nf * LDL_CHUNK, e = ptr[i + 1];
-            double cu = 0.0;
-            u32 cn = 0;
-            while (p < e) {
-                u32 kk = idx[p];
-                if (fwd ? (kk >= c0) : (kk < c1)) break;
-                cu += val[p] * x[(u64)kk * m + c];
-                ++cn;
-                ++p;
-            }
+            u32 nm = nmix[i];
+            u32 p = ptr[i] + nf * LDL_CHUNK + nm, e = ptr[i + 1];
+            double cu = nm > 0 ? part[(u64)(base + nf) * m + c] : 0.0;
+            u32 cn = nm;
             s[k] = sv;
             cur[k] = cu;
             cnt[k] = cn;
             pp[k] = p;
             pe[k] = e;
         }
+    }
+    // The next two in-chain terms of every item, prefetched (index, value): the loop below
+    // touches only registers and shared memory (and the loads two terms ahead); the results are
+    // written after it.
+    u32 nk[LDL_ITEMS], nk2[LDL_ITEMS];
+    double nval[LDL_ITEMS], nval2[LDL_ITEMS];
+#pragma unroll
+    for (u32 k = 0; k < LDL_ITEMS; ++k) {
+        nk[k] = pp[k] < pe[k] ? idx[pp[k]] : 0xffffffffu;
+        nval[k] = pp[k] < pe[k] ? val[pp[k]] : 0.0;
+        nk2[k] = pp[k] + 1 < pe[k] ? idx[pp[k] + 1] : 0xffffffffu;
+        nval2[k] = pp[k] + 1 < pe[k] ? val[pp[k] + 1] : 0.0;
     }
     for (u32 step = 0; step < len; ++step) {
         u32 j = fwd ? c0 + step : c1 - 1 - step;
@@ -703,8 +711,6 @@ extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ ch
                 if (k == kown) {
                     double sv = s[k];
                     if (cnt[k] > 0) sv -= cur[k];
-                    x[(u64)j * m + c] = sv;
-                    if (fwd) z[(u64)j * m + c] = sv / d[j];
                     xs[r] = sv;
                 }
             }
@@ -713,8 +719,8 @@ extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ ch
         double xj = xs[r];
 #pragma unroll
         for (u32 k = 0; k < LDL_ITEMS; ++k) {
-            if (pp[k] < pe[k] && idx[pp[k]] == j) {
-                cur[k] += val[pp[k]] * xj;
+            if (nk[k] == j) {
+                cur[k] += nval[k] * xj;
                 ++cnt[k];
                 ++pp[k];
                 if (cnt[k] == LDL_CHUNK) {
@@ -722,8 +728,48 @@ extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ ch
                     cur[k] = 0.0;
                     cnt[k] = 0;
                 }
+                nk[k] = nk2[k];
+                nval[k] = nval2[k];
+                nk2[k] = pp[k] + 1 < pe[k] ? idx[pp[k] + 1] : 0xffffffffu;
+                nval2[k] = pp[k] + 1 < pe[k] ? val[pp[k] + 1] : 0.0;
             }
         }
+    }
+#pragma unroll
+    for (u32 k = 0; k < LDL_ITEMS; ++k) {
+        u32 r = tid + k * B;
+        if (r < len) {
+            u32 i = c0 + r;
+            double sv = xs[r];
+            x[(u64)i * m + c] = sv;
+            if (fwd) z[(u64)i * m + c] = sv / d[i];
+        }
+    }
+}
+
+// The leaf subtrees (LdltSchedule::sub_start/sub_end): one thread per (subtree, column) solves the
+// subtree's rows in index order (forward, before the chains) or its columns in reverse order
+// (backward, after the chains), each sum in chunks as everywhere (SimplicialLdlt::solve_rows).
+extern "C" __global__ void ldl_leaves(u32 fwd, u32 nsub, u32 m, const u32* __restrict__ sub_start,
+                                      const u32* __restrict__ sub_end, const u32* __restrict__ ptr,
+                                      const u32* __restrict__ idx, const double* __restrict__ val,
+                                      const double* __restrict__ d, double* __restrict__ x, double* __restrict__ z) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (u64)nsub * m) return;
+    u32 sub = (u32)(t / m), c = (u32)(t % m);
+    u32 a = sub_start[sub], b = sub_end[sub];
+    for (u32 step = 0; step < b - a; ++step) {
+        u32 j = fwd ? a + step : b - 1 - step;
+        double sv = x[(u64)j * m + c];
+        u32 p1 = ptr[j + 1];
+        for (u32 p = ptr[j]; p < p1; p += LDL_CHUNK) {
+            u32 e = p + LDL_CHUNK < p1 ? p + LDL_CHUNK : p1;
+            double cur = 0.0;
+            for (u32 q = p; q < e; ++q) cur += val[q] * x[(u64)idx[q] * m + c];
+            sv -= cur;
+        }
+        x[(u64)j * m + c] = sv;
+        if (fwd) z[(u64)j * m + c] = sv / d[j];
     }
 }
 
@@ -758,3 +804,4 @@ extern "C" __global__ void vec_zero(u64 n, double* __restrict__ v) {
     if (t >= n) return;
     v[t] = 0.0;
 }
+

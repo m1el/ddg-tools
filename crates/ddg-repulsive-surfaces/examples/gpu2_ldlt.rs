@@ -87,46 +87,27 @@ fn main() {
         sym.info()
     );
     println!("{:?}", f.stats());
-    // Chains: j and j+1 in one chain iff parent(j) = j+1 and j+1 has one child.
-    let par = f.parent();
-    let mut nchild = vec![0u32; n];
-    for &q in par {
-        if q != u32::MAX {
-            nchild[q as usize] += 1;
-        }
+    // The GPU schedule.
+    let sched = f.schedule().unwrap();
+    let in_sub: usize = sched.sub_start.iter().zip(&sched.sub_end).map(|(a, b)| (b - a) as usize).sum();
+    println!(
+        "schedule: {} leaf subtrees ({} nodes), {} chains, {} forward / {} backward levels, slots {:?}",
+        sched.sub_start.len(),
+        in_sub,
+        sched.chain_start.len(),
+        sched.fwd.level_ptr.len() - 1,
+        sched.bwd.level_ptr.len() - 1,
+        sched.n_slots
+    );
+    let sw = &sched.fwd;
+    let mut crit = 0;
+    for l in 0..sw.level_ptr.len() - 1 {
+        let ch = &sw.chains[sw.level_ptr[l]..sw.level_ptr[l + 1]];
+        let longest = ch.iter().map(|&c| (sched.chain_end[c as usize] - sched.chain_start[c as usize]) as usize).max().unwrap_or(0);
+        crit += longest;
+        println!("  forward level {l}: {} chains, longest {longest}, block {}, slots {}", ch.len(), sw.level_block[l], sw.slot_ptr[l + 1] - sw.slot_ptr[l]);
     }
-    let mut chain_of = vec![0u32; n];
-    let mut starts = vec![0usize];
-    for j in 1..n {
-        let joined = par[j - 1] == j as u32 && nchild[j] == 1;
-        if !joined {
-            starts.push(j);
-        }
-        chain_of[j] = (starts.len() - 1) as u32;
-    }
-    let nch = starts.len();
-    starts.push(n);
-    let mut level = vec![0usize; nch];
-    for c in 0..nch {
-        let top = starts[c + 1] - 1;
-        let q = par[top];
-        if q != u32::MAX {
-            let pc = chain_of[q as usize] as usize;
-            level[pc] = level[pc].max(level[c] + 1);
-        }
-    }
-    let nlev = level.iter().max().unwrap() + 1;
-    let mut width = vec![0usize; nlev];
-    let mut longest = vec![0usize; nlev];
-    for c in 0..nch {
-        width[level[c]] += 1;
-        longest[level[c]] = longest[level[c]].max(starts[c + 1] - starts[c]);
-    }
-    let crit: usize = longest.iter().sum();
-    println!("chains {nch}, chain levels {nlev}, sum of longest chain per level {crit}");
-    for l in 0..nlev {
-        println!("  level {l}: {} chains, longest {}", width[l], longest[l]);
-    }
+    println!("  sum of the longest chain per level: {crit}");
     // Solve times, 3 columns (one vector), own vs faer, and the difference.
     let m = 3;
     let b: Vec<f64> = (0..n * m).map(|i| ((i * 7919) % 1000) as f64 / 500.0 - 1.0).collect();

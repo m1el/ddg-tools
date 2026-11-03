@@ -449,6 +449,24 @@ impl GpuPreconditioner {
         }
     }
 
+    /// Diagnostics (`examples/gpu2_precond.rs`): seconds of one `L′` solve of `rs`, split as
+    /// [gather + scatter, partials, forward chains, backward chains] with a synchronization after
+    /// every launch, and the unsynchronized solve.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn profile_solve(&self, rs: &[&[f64]]) -> Result<([f64; 4], f64), RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            self.inner.profile_solve(rs)
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = rs;
+            match self._never {}
+        }
+    }
+
     /// Sets the factor applied to `L_{2−s}` in the augmented form.
     pub(crate) fn set_scale(&mut self, scale: f64) {
         #[cfg(feature = "cuda")]
