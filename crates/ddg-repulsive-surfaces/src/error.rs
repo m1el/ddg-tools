@@ -213,6 +213,14 @@ pub enum RsError {
         /// What went wrong, with the data needed to reproduce it.
         detail: String,
     },
+    /// The GPU back end (`NOTES-GPU.md`) was requested but is not available (the crate was built
+    /// without the `cuda` feature, no driver, no device, NVRTC missing), or a GPU operation failed.
+    Gpu {
+        /// The operation: e.g. "context", "compile", "upload", "product".
+        operation: &'static str,
+        /// What went wrong (the driver's or NVRTC's message).
+        detail: String,
+    },
 }
 
 fn write_list(f: &mut fmt::Formatter<'_>, items: &[u32]) -> fmt::Result {
@@ -363,6 +371,7 @@ impl fmt::Display for RsError {
             Curves(e) => write!(f, "{e}"),
             Cancelled => write!(f, "cancelled"),
             Internal { what, detail } => write!(f, "internal error in {what}: {detail}"),
+            Gpu { operation, detail } => write!(f, "GPU back end, {operation}: {detail}"),
         }
     }
 }

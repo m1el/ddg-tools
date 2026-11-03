@@ -37,6 +37,25 @@ enum Class {
     Split,
 }
 
+/// Borrowed arrays of a [`BlockTree`] (its private layout, for the GPU upload).
+#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+pub(crate) struct BlockTreeParts<'a, const N: usize> {
+    pub start: &'a [u32],
+    pub end: &'a [u32],
+    pub right: &'a [u32],
+    pub leaves: &'a [u32],
+    pub chain_ptr: &'a [usize],
+    pub chain: &'a [u32],
+    pub weight: &'a [f64],
+    pub far_ptr: &'a [usize],
+    pub far_col: &'a [u32],
+    pub far_coef: &'a [[f64; N]],
+    pub near_ptr: &'a [usize],
+    pub near_col: &'a [u32],
+    pub near_off: &'a [usize],
+    pub near_val: &'a [[f64; N]],
+}
+
 /// A block cluster tree of `N` symmetric kernels (module docs).
 #[derive(Debug, Clone)]
 pub struct BlockTree<const N: usize> {
@@ -379,6 +398,27 @@ impl<const N: usize> BlockTree<N> {
     /// `K_k 𝟙` per element (original order).
     pub fn row_sums(&self) -> &[[f64; N]] {
         &self.row_sums
+    }
+
+    /// The arrays of the tree, for the GPU upload (`crate::gpu`).
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub(crate) fn parts(&self) -> BlockTreeParts<'_, N> {
+        BlockTreeParts {
+            start: &self.start,
+            end: &self.end,
+            right: &self.right,
+            leaves: &self.leaves,
+            chain_ptr: &self.chain_ptr,
+            chain: &self.chain,
+            weight: &self.weight,
+            far_ptr: &self.far_ptr,
+            far_col: &self.far_col,
+            far_coef: &self.far_coef,
+            near_ptr: &self.near_ptr,
+            near_col: &self.near_col,
+            near_off: &self.near_off,
+            near_val: &self.near_val,
+        }
     }
 
     /// `φ = K ψ` (original element order), channel `c` with kernel `map[c]`.

@@ -52,6 +52,7 @@ use rayon::prelude::*;
 
 use super::{FaceDiagonal, FaceOperators};
 use crate::error::RsError;
+use crate::gpu::{GpuContext, GpuFaceMetric, GpuVertexFractional};
 use crate::geometry::v3::{dot, sub};
 use crate::geometry::{FaceGeometry, vertex_areas};
 use crate::kernel::Exponents;
@@ -504,6 +505,58 @@ impl FaceMetricTree {
         Ok(())
     }
 
+    /// Uploads the tree, the face data and the obstacle `diagonal` to the GPU (`NOTES-GPU.md`):
+    /// [`GpuFaceMetric::apply_batch`] then computes [`FaceMetricTree::apply_batch`] on the device
+    /// (bitwise equal at [`crate::gpu::Determinism::MatchCpu`]).
+    ///
+    /// # Errors
+    /// [`RsError::InvalidOption`] for a diagonal of the wrong length; [`RsError::Gpu`].
+    pub fn upload(
+        &self,
+        gpu: &std::sync::Arc<GpuContext>,
+        diagonal: Option<&FaceDiagonal>,
+    ) -> Result<GpuFaceMetric, RsError> {
+        let empty: &[f64] = &[];
+        let (d_hi, d_lo) = match diagonal {
+            Some(d) => (d.hi.as_slice(), d.lo.as_slice()),
+            None => (empty, empty),
+        };
+        let nf = self.ops.n_faces();
+        for (name, d) in [("obstacle diagonal hi", d_hi), ("obstacle diagonal lo", d_lo)] {
+            if !d.is_empty() && d.len() != nf {
+                return Err(RsError::InvalidOption {
+                    name,
+                    value: format!("{} entries", d.len()),
+                    requirement: "one entry per face",
+                });
+            }
+        }
+        #[cfg(feature = "cuda")]
+        {
+            let host = crate::gpu::cuda::FaceMetricHost {
+                order: self.bct.order(),
+                position: self.bct.position(),
+                faces: &self.ops.faces,
+                df: &self.ops.df,
+                areas: &self.ops.areas,
+                ha_perm: &self.ha_perm,
+                inc_ptr: &self.incidence.ptr,
+                inc: &self.incidence.entries,
+                n_vertices: self.ops.n_vertices,
+                d_hi,
+                d_lo,
+            };
+            Ok(GpuFaceMetric {
+                inner: crate::gpu::cuda::DeviceFaceMetric::new(gpu, &self.bct.parts(), &host)?,
+            })
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = (gpu, d_hi, d_lo);
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
+    }
+
     /// `B̃ x` (`w_hi = 1`, `w_lo = 0`).
     ///
     /// # Errors
@@ -950,6 +1003,32 @@ impl VertexFractionalTree {
     /// [`RsError::InvalidOption`] for wrong lengths.
     pub fn apply(&self, pool: &rayon::ThreadPool, x: &[f64], y: &mut [f64]) -> Result<(), RsError> {
         self.apply_batch(pool, &[x], &mut [y])
+    }
+
+    /// Uploads the tree to the GPU (`NOTES-GPU.md`): [`GpuVertexFractional::apply_batch`] then
+    /// computes [`VertexFractionalTree::apply_batch`] on the device.
+    ///
+    /// # Errors
+    /// [`RsError::Gpu`].
+    pub fn upload(&self, gpu: &std::sync::Arc<GpuContext>) -> Result<GpuVertexFractional, RsError> {
+        #[cfg(feature = "cuda")]
+        {
+            Ok(GpuVertexFractional {
+                inner: crate::gpu::cuda::DeviceVertexFractional::new(
+                    gpu,
+                    &self.bct.parts(),
+                    self.bct.order(),
+                    self.bct.position(),
+                    &self.mass,
+                    &self.ha,
+                )?,
+            })
+        }
+        #[cfg(not(feature = "cuda"))]
+        {
+            let _ = gpu;
+            Err(RsError::Gpu { operation: "upload", detail: "built without the `cuda` feature".into() })
+        }
     }
 
     /// [`VertexFractionalTree::apply`] for several vectors through one pass over the tree;
