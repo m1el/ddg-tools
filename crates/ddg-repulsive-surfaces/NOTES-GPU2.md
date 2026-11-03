@@ -21,8 +21,9 @@ regression set, what is left on the CPU, stage 2 and GMRES decisions, proposed S
     vertex-pair fractional product on device vectors (GPU-1's tree, `apply_device`), augmented middle
     factor, second `L′` solve, `z += y`, scatter; one upload and one download per application. The coarse
     correction (several components, global barycenter) stays on the host around it.
-    `PreconditionerOptions::gpu_solves` (default `true`) switches it; with `refine = true`, face pairs or
-    `TriangularSolve::Faer` the GPU-1 split is used.
+    `PreconditionerOptions::gpu_solves` (default `true`) switches it, from `gpu_solves_min_vertices`
+    (default 7000, ≈ 14k faces; measured crossover below); with `refine = true`, face pairs,
+    `TriangularSolve::Faer` or a smaller mesh the GPU-1 split is used.
   * Bench flags `--no-gpu-solves`, `--faer` (`benches/step.rs`); `RS_DEVICE=L1|L2`,
     `RS_TRIANGULAR=faer` for `examples/apps`; `examples/gpu2_ldlt.rs` (factor structure, schedule, CPU
     solve times), `examples/gpu2_precond.rs` (one application: CPU, GPU-1 split, GPU-2; `L′` solve
@@ -136,6 +137,33 @@ tree, latency bound), vertex-pair product ≈ 2 ms (GPU-1's kernel), the rest tr
 | **GPU-2 L1** | **3432** | **563** | 1154 | 64.4 |
 | GPU-2 L2 (= CPU bit for bit) | 4446 | 547 | 1364 | 64.2 |
 
+**Fig. 13 suite** (`timedB/fig13_*.log`; 4 threads, warm-up 2, mean of 5; CPU, GPU-1 split, GPU-2 L1
+back to back, load 8.6 → 1.8; seconds per step; GPU-2 here with the GPU solves at every size):
+
+| # | model | faces | CPU | GPU-1 split | GPU-2 L1 | vs GPU-1 | vs CPU | its CPU / L1 | precond ms GPU-1 → GPU-2 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | triple torus | 6,200 | 0.189 | 0.103 | 0.113 | 0.91× | 1.66× | 17.4 / 17.4 | 11.7 → 17.4 |
+| 2 | moving bars | 10,688 | 0.331 | 0.189 | 0.197 | 0.96× | 1.68× | 17.2 / 17.2 | 17.2 → 20.4 |
+| 3 | broken figure-8 | 11,740 | 0.470 | 0.257 | 0.289 | 0.89× | 1.63× | 38.4 / 38.4 | 37.7 → 65.7 |
+| 4 | punctured torus | 9,886 | 0.372 | 0.194 | 0.189 | 1.02× | 1.97× | 36.6 / 36.6 | 46.5 → 37.3 |
+| 5 | handcuffs | 10,960 | 0.368 | 0.201 | 0.208 | 0.96× | 1.77× | 22.2 / 22.2 | 23.5 → 28.6 |
+| 6 | 2×-wound handcuffs | 16,020 | 0.685 | 0.355 | 0.330 | 1.08× | 2.08× | 31.6 / 31.8 | 53.6 → 40.6 |
+| 7 | point cloud | 20,480 | 0.665 | 0.418 | 0.401 | 1.04× | 1.66× | 14.6 / 14.6 | 45.5 → 24.6 |
+| 8 | nested cages | 20,480 | 0.741 | 0.473 | 0.460 | 1.03× | 1.61× | 13.2 / 13.2 | 42.9 → 25.8 |
+| 9 | walnut slab | 23,328 | 0.701 | 0.421 | 0.399 | 1.06× | 1.76× | 12.6 / 12.6 | 53.9 → 26.9 |
+| 10 | trefoil tunnel | 23,344 | 1.015 | 0.532 | 0.467 | 1.14× | 2.17× | 38.8 / 39.0 | 145.3 → 81.1 |
+| 11 | 6×-wound handcuffs | 21,640 | 1.283 | 0.579 | 0.543 | 1.06× | 2.36× | 62.2 / 63.0 | 116.0 → 94.7 |
+| 12 | double torus | 35,454 | 1.649 | 0.826 | 0.769 | 1.07× | 2.14× | 31.2 / 31.2 | 112.0 → 83.2 |
+| 13 | keys | 37,312 | 1.360 | 0.659 | 0.607 | 1.09× | 2.24× | 18.6 / 18.6 | 117.4 → 52.5 |
+| 14 | figure-8 tunnel | 44,848 | 2.793 | 1.369 | 1.110 | 1.23× | 2.52× | 59.2 / 59.4 | 487.3 → 179.3 |
+
+Below ≈ 12k faces the GPU solves lose to the CPU's (their cost is the latency of ≈ 100 launches per
+solve, nearly independent of the size; a 6k-face factor solves in well under a millisecond on the CPU).
+Hence `PreconditionerOptions::gpu_solves_min_vertices` (default `GPU_SOLVES_MIN_VERTICES = 7000`,
+≈ 14k faces): below it the fractional product runs on the GPU and the chunked solves on the CPU (GPU-1's
+split with the faster CPU solves), so cases 1–5 keep GPU-1's times; level 2 is unaffected (both paths
+compute the same bits).
+
 Against GPU-1: the preconditioner 2.7× (45k) and 3.9× (135k) faster per step, whole steps 1.24× (45k,
 1.35 → 1.09 s) and 1.48× (135k, 5.07 → 3.43 s). Against the CPU: 45k 2.6× (4 threads) / 1.8× (16), 135k
 3.0× / 2.1×. The chunked solves also speed up the CPU itself (45k precond 548 → 418 ms, 135k step
@@ -143,7 +171,8 @@ Against GPU-1: the preconditioner 2.7× (45k) and 3.9× (135k) faster per step, 
 
 ## Regression set (iterations, fallbacks, energies; `runs_tmp/gpu2/reg/`, 20 steps unless said)
 
-Per-step GMRES iterations summed (mean per step); `=` means identical every step to the CPU default.
+Per-step GMRES iterations summed (mean per step); `=` means identical every step to the CPU default. Run before the
+size threshold existed, i.e. with the GPU solves at every size (the strictest case for them).
 
 | case | CPU (chunked) | CPU faer | GPU-2 L1 | GPU-2 L2 | fallbacks |
 |---|---|---|---|---|---|
@@ -203,7 +232,8 @@ LDLT)":
 > On the GPU also (GPU-2): the whole fine preconditioner `P⁻¹` — the two `L′` solves by a schedule of
 > the elimination tree (leaf subtrees one thread each, chains one block each, levels by height/depth;
 > chunk sums from earlier levels in parallel), the fractional product and the augmented factor, one
-> upload and one download per application (`PreconditionerOptions::gpu_solves`, default on). On the CPU:
+> upload and one download per application (`PreconditionerOptions::gpu_solves`, default on from 7000
+> vertices; below, the launch latency of the solves exceeds the CPU's solves). On the CPU:
 > GMRES, the factorization of `L′` and its schedule, the coarse correction, tree structures and far
 > coefficients, constraints, CCD, remeshing; the face-pair `L_{2−s}` and the obstacles' evaluators.
 > Measured (RTX 4080, 4 CPU threads): preconditioner per step 2.7× (45k) / 3.9× (135k) faster than GPU-1,

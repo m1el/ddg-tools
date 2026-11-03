@@ -489,9 +489,14 @@ fn flow(device: Device, steps: usize, faces: usize) -> Trajectory {
                 target: None,
             },
         ],
-        backend: Backend::Hierarchical(HierarchicalOptions {
-            device,
-            ..HierarchicalOptions::default()
+        backend: Backend::Hierarchical({
+            let mut h = HierarchicalOptions {
+                device,
+                ..HierarchicalOptions::default()
+            };
+            // The GPU solves at this size too (the default leaves them to the CPU below 7000 vertices).
+            h.preconditioner.gpu_solves_min_vertices = 0;
+            h
         }),
         threads: Some(3),
         stop: StopRule::Off,
@@ -646,6 +651,7 @@ fn preconditioner_matches_cpu() {
         for form in [PreconditionerForm::Augmented, PreconditionerForm::Congruence] {
             let o = PreconditionerOptions {
                 form,
+                gpu_solves_min_vertices: 0,
                 ..Default::default()
             };
             let build = || SparsePreconditioner::new(pool.clone(), s, p, &e, &cq, &o, None, None).unwrap();

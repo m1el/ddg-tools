@@ -492,7 +492,15 @@ pub struct PreconditionerOptions {
     /// needs [`TriangularSolve::Chunked`], vertex pairs and `refine = false`, else only the
     /// fractional product runs on the GPU as in GPU-1). Bitwise the CPU's at determinism level 2.
     pub gpu_solves: bool,
+    /// The smallest `|V|` for which [`PreconditionerOptions::gpu_solves`] applies (default
+    /// [`GPU_SOLVES_MIN_VERTICES`]): below it the latency of the GPU solves (one launch per level of
+    /// the elimination tree) exceeds the CPU's solves (`NOTES-GPU2.md`, Fig. 13 suite).
+    pub gpu_solves_min_vertices: usize,
 }
+
+/// The default of [`PreconditionerOptions::gpu_solves_min_vertices`]: measured crossover of the
+/// Fig. 13 suite between 10k and 16k faces (`NOTES-GPU2.md`).
+pub const GPU_SOLVES_MIN_VERTICES: usize = 7000;
 
 /// The scale of the fractional factor in the augmented preconditioner (`SPEC.md` §6.3,
 /// `NOTES-SOLVERFIX.md`).
@@ -568,6 +576,7 @@ impl Default for PreconditionerOptions {
             refine: false,
             triangular: TriangularSolve::Chunked,
             gpu_solves: true,
+            gpu_solves_min_vertices: GPU_SOLVES_MIN_VERTICES,
         }
     }
 }
@@ -651,7 +660,8 @@ pub struct SparsePreconditioner {
     fractional_seconds: f64,
     /// The GPU copy of the vertex-pair tree ([`SparsePreconditioner::with_gpu`]).
     gpu_fractional: Option<crate::gpu::GpuVertexFractional>,
-    /// Whether [`PreconditionerOptions::gpu_solves`] asked for the solves on the GPU.
+    /// Whether [`PreconditionerOptions::gpu_solves`] asked for the solves on the GPU (and the
+    /// mesh is large enough, [`PreconditionerOptions::gpu_solves_min_vertices`]).
     gpu_solves: bool,
     /// The fine preconditioner on the GPU (GPU-2).
     gpu_prec: Option<crate::gpu::GpuPreconditioner>,
@@ -778,7 +788,7 @@ impl SparsePreconditioner {
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
             gpu_fractional,
-            gpu_solves: options.gpu_solves,
+            gpu_solves: options.gpu_solves && nv >= options.gpu_solves_min_vertices,
             gpu_prec: None,
             upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
