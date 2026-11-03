@@ -8,8 +8,8 @@
 //! dodeca flow OBJ --out DIR [--threads T] [--max-steps S] [--window W] [--rel R] [--frame-every K]
 //!                 [--perturb EPS --seed N] [--compat] [--no-ccd] [--armijo-ref] [--start-ref]
 //!                 [--precond-ref] [--gmres-left] [--gmres-tol X] [--theta X] [--smooth-first]
-//!                 [--bary global|percomp] [--newton1] [--no-remesh]
-//!     Area + barycenter constraints, defaults unless stated; the stop rule of `ishii genus` (mean F over the
+//!                 [--bary global|percomp] [--newton1] [--no-remesh] [--no-area]
+//!     Area + barycenter constraints (`--no-area`: barycenter only), defaults unless stated; the stop rule of `ishii genus` (mean F over the
 //!     last W = 200 steps within R = 1e-5 relative of the W before; cap S = 8000). Writes DIR/steps.csv,
 //!     DIR/frame_NNNNN.obj (every K = 100), DIR/final.obj; prints PROGRESS every 25 steps and SYM (moments,
 //!     Q2 Q4 Q6) every 100.
@@ -17,6 +17,10 @@
 //!     then rescaled to the input area.
 //! dodeca ladder ROW_OBJ OUT_OBJ [--radius R] [--faces F]
 //!     A row of 11 rings (tube of radius R = 0.22 around the ladder graph with 12 rungs, unit spacing),
+//!     scaled to the area of ROW_OBJ.
+//! dodeca chain ROW_OBJ OUT_OBJ [--hole H] [--outer D] [--waist W] [--rings N] [--faces F]
+//!     The paper video's genus-11 start: N = 11 round tori (outer diameter D = 0.86, hole H = 0.3, in units of
+//!     the ring spacing) in a row, fused by a smooth union with a neck W = 0.3 wide; about F = 12000 faces,
 //!     scaled to the area of ROW_OBJ.
 //! dodeca perturb IN_OBJ OUT_OBJ --perturb EPS --seed N
 //!     The perturbed start of `flow --perturb EPS --seed N`, as OBJ.
@@ -168,6 +172,52 @@ fn cmd_gen(row: &str, out: &str, faces: usize, radius: f64) {
     );
 }
 
+/// The paper video's genus-11 start (2:22.5): a chain of `n` round tori (axis z) along the x axis at unit
+/// spacing, outer diameter `outer`, hole (throat) diameter `hole`, so major radius (outer + hole) / 4 and tube
+/// radius (outer − hole) / 4; neighbours are fused by a smooth union whose blend width is chosen so the neck
+/// between two rings is `waist` wide (in y, at the mid-plane x = 1/2). Meshed by marching tetrahedra with
+/// about `faces` triangles and scaled to the area of ROW_OBJ.
+fn cmd_chain(row: &str, out: &str, hole: f64, outer: f64, waist: f64, n: usize, faces: usize) {
+    use ddg_repulsive_surfaces::generate::field::{Field, smooth_min};
+    use ddg_repulsive_surfaces::generate::tetra::mesh_with_faces;
+    let (s0, x0) = read_obj(row).unwrap();
+    let (a0, _) = apps::area_volume(s0.faces(), &x0);
+    let (big, r) = ((outer + hole) / 4.0, (outer - hole) / 4.0);
+    // neck: at (1/2, waist/2, 0) the blended field is 0: d - k/4 = 0 (both tori at the same distance d)
+    let d = ((0.25 + waist * waist / 4.0).sqrt() - big) - r;
+    let k = (4.0 * d).max(0.0);
+    let cx: Vec<f64> = (0..n).map(|i| i as f64 - (n as f64 - 1.0) / 2.0).collect();
+    let cxf = cx.clone();
+    let f: Field = std::sync::Arc::new(move |p: P| {
+        let mut v = f64::INFINITY;
+        for &c in &cxf {
+            let rho = ((p[0] - c).powi(2) + p[1] * p[1]).sqrt();
+            let t = ((rho - big).powi(2) + p[2] * p[2]).sqrt() - r;
+            v = if v.is_finite() { smooth_min(v, t, k) } else { t };
+        }
+        v
+    });
+    let m = 0.25;
+    let hx = cx[n - 1] + outer / 2.0 + m;
+    let hy = outer / 2.0 + m;
+    let hz = r + k / 4.0 + m;
+    let mesh = mesh_with_faces(&f, [-hx, -hy, -hz], [hx, hy, hz], faces).unwrap();
+    let sc = (a0 / mesh.area()).sqrt();
+    let mesh = mesh.transformed(sc, [0.0; 3]);
+    let s = mesh.surface().unwrap();
+    let inter = ccd::intersects(&s, &mesh.positions).unwrap();
+    write_obj(out, &s, &mesh.positions).unwrap();
+    println!(
+        "CHAIN {out} rings={n} hole={hole} outer={outer} waist={waist} R={big:.4} r={r:.4} blend={k:.4} faces={} \
+         components={} genus={} area={:.6} (row {a0:.6}) scale={sc:.4} intersects={inter} {}",
+        s.n_faces(),
+        s.n_components(),
+        1 - s.euler_characteristic() / 2,
+        mesh.area(),
+        sym_line(s.faces(), &mesh.positions)
+    );
+}
+
 fn cmd_measure(paths: &[String], area: Option<f64>, threads: usize) {
     for p in paths {
         let (s, x) = read_obj(p).unwrap();
@@ -245,6 +295,9 @@ fn cmd_flow(path: &str, a: &FlowArgs, args: &[String]) {
         ],
         ..FlowOptions::default()
     };
+    if has("--no-area") {
+        o.constraints.retain(|c| !matches!(c, Constraint::Area { .. }));
+    }
     o.reference_compat = has("--compat");
     if has("--no-ccd") {
         o.line_search.ccd = None;
@@ -378,6 +431,15 @@ fn main() {
             write_obj(&args[2], &s, &m.positions).unwrap();
             println!("LADDER {} faces={} genus={} area={:.6} intersects={}", args[2], s.n_faces(), 1 - s.euler_characteristic() / 2, m.area(), ccd::intersects(&s, &m.positions).unwrap());
         }
+        Some("chain") => cmd_chain(
+            &args[1],
+            &args[2],
+            get("--hole").map_or(0.3, |v| v.parse().unwrap()),
+            get("--outer").map_or(0.86, |v| v.parse().unwrap()),
+            get("--waist").map_or(0.3, |v| v.parse().unwrap()),
+            get("--rings").map_or(11, |v| v.parse().unwrap()),
+            get("--faces").map_or(12000, |v| v.parse().unwrap()),
+        ),
         Some("perturb") => {
             // the start of `flow --perturb EPS --seed N`, written as OBJ (for the reference program)
             let (s, mut x) = read_obj(&args[1]).unwrap();
