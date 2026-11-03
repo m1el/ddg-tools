@@ -590,3 +590,171 @@ extern "C" __global__ void bh_final(u32 np, const u32* __restrict__ leaf_of, con
     w[5] = o[5];
     w[6] = o[6];
 }
+
+// ---------------------------------------------------------------------------------------------
+// GPU-2: the preconditioner's L' solves (src/solve/ldlt.rs; SimplicialLdlt::solve_scheduled is the
+// CPU emulation of exactly these kernels). X is n x m row-major in the factor's numbering.
+// Sums of a row (forward: L by rows, columns increasing; backward: L by columns, rows decreasing)
+// are cut into chunks of LDL_CHUNK terms, each summed from 0.0 in order, the chunk sums subtracted
+// in order. ldl_partials computes, per level, the leading chunks of terms from earlier levels (one
+// thread per (chunk, column)); ldl_chains then runs every chain of the level in sequence (one block
+// per (chain, column), one row per thread and item): the remaining earlier-level terms first, then
+// the in-chain terms as each value becomes final (one __syncthreads per chain node).
+
+#define LDL_CHUNK 32
+#define LDL_ITEMS 4
+#define LDL_MAXC 1024
+
+// Interleaved preconditioner vectors (dim = 3 nv + kQ each, nb of them) <-> the factor's columns.
+// Per axis (m = 3 nb, column 3q + axis): factor row r is vertex/multiplier old = perm[r] of axis.
+// Otherwise (m = nb): factor row r is unknown perm[r].
+__device__ __forceinline__ u64 ldl_src(u32 old, u32 c, u32 per_axis, u32 nv, u64 dim) {
+    if (per_axis) {
+        u32 q = c / 3, a = c % 3;
+        u64 idx = old < nv ? 3 * (u64)old + a : 3 * (u64)nv + 3 * (u64)(old - nv) + a;
+        return q * dim + idx;
+    }
+    return (u64)c * dim + old;
+}
+
+extern "C" __global__ void ldl_gather(u32 n, u32 m, u32 per_axis, u32 nv, u64 dim, const u32* __restrict__ perm,
+                                      const double* __restrict__ src, double* __restrict__ dst) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (u64)n * m) return;
+    u32 r = (u32)(t / m), c = (u32)(t % m);
+    dst[t] = src[ldl_src(perm[r], c, per_axis, nv, dim)];
+}
+
+extern "C" __global__ void ldl_scatter(u32 n, u32 m, u32 per_axis, u32 nv, u64 dim, const u32* __restrict__ perm,
+                                       const double* __restrict__ src, double* __restrict__ dst) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (u64)n * m) return;
+    u32 r = (u32)(t / m), c = (u32)(t % m);
+    dst[ldl_src(perm[r], c, per_axis, nv, dim)] = src[t];
+}
+
+extern "C" __global__ void ldl_partials(u32 count, u32 m, u32 slot_off, const u32* __restrict__ slot_row,
+                                        const u32* __restrict__ slot_chunk, const u32* __restrict__ ptr,
+                                        const u32* __restrict__ idx, const double* __restrict__ val,
+                                        const double* __restrict__ x, double* __restrict__ part) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (u64)count * m) return;
+    u32 s = slot_off + (u32)(t / m), c = (u32)(t % m);
+    u32 p0 = ptr[slot_row[s]] + slot_chunk[s] * LDL_CHUNK;
+    double cur = 0.0;
+    for (u32 p = p0; p < p0 + LDL_CHUNK; ++p) cur += val[p] * x[(u64)idx[p] * m + c];
+    part[(u64)s * m + c] = cur;
+}
+
+// fwd = 1: rows ascending, earlier-level terms are k < c0; the final value y_j goes to x and
+// y_j / d_j to z. fwd = 0: columns descending (x is the backward sweep's vector, in place),
+// earlier-level terms are i >= c1; z, d unused.
+extern "C" __global__ void ldl_chains(u32 fwd, u32 m, const u32* __restrict__ chains,
+                                      const u32* __restrict__ cstart, const u32* __restrict__ cend,
+                                      const u32* __restrict__ ptr, const u32* __restrict__ idx,
+                                      const double* __restrict__ val, const u32* __restrict__ nfull,
+                                      const u32* __restrict__ slot_base, const double* __restrict__ part,
+                                      const double* __restrict__ d, double* __restrict__ x, double* __restrict__ z) {
+    __shared__ double xs[LDL_MAXC];
+    u32 ch = chains[blockIdx.x];
+    u32 c = blockIdx.y;
+    u32 c0 = cstart[ch], c1 = cend[ch];
+    u32 len = c1 - c0;
+    u32 B = blockDim.x, tid = threadIdx.x;
+    double s[LDL_ITEMS], cur[LDL_ITEMS];
+    u32 cnt[LDL_ITEMS], pp[LDL_ITEMS], pe[LDL_ITEMS];
+#pragma unroll
+    for (u32 k = 0; k < LDL_ITEMS; ++k) {
+        u32 r = tid + k * B;
+        s[k] = 0.0;
+        cur[k] = 0.0;
+        cnt[k] = 0;
+        pp[k] = 0;
+        pe[k] = 0;
+        if (r < len) {
+            u32 i = c0 + r;
+            double sv = x[(u64)i * m + c];
+            u32 nf = nfull[i], base = slot_base[i];
+            for (u32 q = 0; q < nf; ++q) sv -= part[(u64)(base + q) * m + c];
+            u32 p = ptr[i] + nf * LDL_CHUNK, e = ptr[i + 1];
+            double cu = 0.0;
+            u32 cn = 0;
+            while (p < e) {
+                u32 kk = idx[p];
+                if (fwd ? (kk >= c0) : (kk < c1)) break;
+                cu += val[p] * x[(u64)kk * m + c];
+                ++cn;
+                ++p;
+            }
+            s[k] = sv;
+            cur[k] = cu;
+            cnt[k] = cn;
+            pp[k] = p;
+            pe[k] = e;
+        }
+    }
+    for (u32 step = 0; step < len; ++step) {
+        u32 j = fwd ? c0 + step : c1 - 1 - step;
+        u32 r = j - c0;
+        if (tid == r % B) {
+            u32 kown = r / B;
+#pragma unroll
+            for (u32 k = 0; k < LDL_ITEMS; ++k) {
+                if (k == kown) {
+                    double sv = s[k];
+                    if (cnt[k] > 0) sv -= cur[k];
+                    x[(u64)j * m + c] = sv;
+                    if (fwd) z[(u64)j * m + c] = sv / d[j];
+                    xs[r] = sv;
+                }
+            }
+        }
+        __syncthreads();
+        double xj = xs[r];
+#pragma unroll
+        for (u32 k = 0; k < LDL_ITEMS; ++k) {
+            if (pp[k] < pe[k] && idx[pp[k]] == j) {
+                cur[k] += val[pp[k]] * xj;
+                ++cnt[k];
+                ++pp[k];
+                if (cnt[k] == LDL_CHUNK) {
+                    s[k] -= cur[k];
+                    cur[k] = 0.0;
+                    cnt[k] = 0;
+                }
+            }
+        }
+    }
+}
+
+// The augmented middle factor (SparsePreconditioner::apply_fine): v = scale * v (if scaled),
+// v[3j + a] -= sum_p K[p] y[3 row(p) + a] over column j of K in order. One thread per (q, j, a).
+extern "C" __global__ void prec_aug(u32 nv, u32 nb, u64 dim, u32 scaled, double scale, const u32* __restrict__ kp,
+                                    const u32* __restrict__ ki, const double* __restrict__ kx,
+                                    const double* __restrict__ y, double* __restrict__ v) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (u64)nb * 3 * nv) return;
+    u32 q = (u32)(t / (3 * (u64)nv));
+    u32 rem = (u32)(t % (3 * (u64)nv));
+    u32 j = rem / 3, a = rem % 3;
+    const double* yq = y + q * dim;
+    double acc = 0.0;
+    for (u32 p = kp[j]; p < kp[j + 1]; ++p) acc += kx[p] * yq[3 * (u64)ki[p] + a];
+    double vv = v[q * dim + rem];
+    if (scaled) vv *= scale;
+    v[q * dim + rem] = vv - acc;
+}
+
+// z += y over n entries.
+extern "C" __global__ void vec_add(u64 n, const double* __restrict__ y, double* __restrict__ z) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n) return;
+    z[t] = z[t] + y[t];
+}
+
+// v = 0 over n entries.
+extern "C" __global__ void vec_zero(u64 n, double* __restrict__ v) {
+    u64 t = (u64)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n) return;
+    v[t] = 0.0;
+}

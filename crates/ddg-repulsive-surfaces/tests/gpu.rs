@@ -592,3 +592,90 @@ fn flow_trajectories_match_cpu() {
         f64::from_bits(l1.energies[steps - 1])
     );
 }
+
+/// Two perturbed tori side by side (two components).
+fn two_tori(faces: usize) -> (Surface, Vec<[f64; 3]>) {
+    let (s1, p1) = mesh(faces / 2, 3);
+    let (_, p2) = mesh(faces / 2, 5);
+    let nv = p1.len() as u32;
+    let mut f: Vec<[u32; 3]> = s1.faces().to_vec();
+    f.extend(s1.faces().iter().map(|t| [t[0] + nv, t[1] + nv, t[2] + nv]));
+    let mut p = p1;
+    p.extend(p2.iter().map(|q| [q[0] + 5.0, q[1], q[2]]));
+    (Surface::new(p.len(), f).unwrap(), p)
+}
+
+/// GPU-2: the whole fine preconditioner (the `L′` solves in the chunked order, the fractional
+/// product, the augmented factor) on the device: bitwise the CPU's at level 2, within round-off and
+/// bitwise reproducible at level 1; for one and several components, pins, both forms, batches.
+#[test]
+fn preconditioner_matches_cpu() {
+    use ddg_repulsive_surfaces::constraints::{BarycenterMode, Constraint, ConstraintSet};
+    use ddg_repulsive_surfaces::solve::Preconditioner;
+    use ddg_repulsive_surfaces::solve::precond::{
+        PreconditionerForm, PreconditionerOptions, SparsePreconditioner,
+    };
+    let (Some(g2), Some(g1)) = (gpu(Determinism::MatchCpu), gpu(Determinism::RunToRun)) else {
+        return;
+    };
+    let pool = Arc::new(make_pool(Some(3)).unwrap());
+    let e = Exponents::default();
+    let bary = Constraint::Barycenter {
+        component: None,
+        target: None,
+    };
+    let cases: Vec<(&str, Surface, Vec<[f64; 3]>, Vec<Constraint>, BarycenterMode)> = {
+        let (s, p) = mesh(3000, 1);
+        let (s2, p2) = two_tori(3000);
+        let pins = Constraint::Pins {
+            vertices: (0..12).map(|k| 37 * k).collect(),
+            targets: None,
+        };
+        vec![
+            ("torus", s.clone(), p.clone(), vec![bary.clone()], BarycenterMode::PerComponent),
+            ("pins", s, p, vec![bary.clone(), pins], BarycenterMode::PerComponent),
+            ("two tori", s2.clone(), p2.clone(), vec![bary.clone()], BarycenterMode::PerComponent),
+            ("two tori global", s2, p2, vec![bary.clone()], BarycenterMode::Global),
+        ]
+    };
+    let mut worst = 0.0f64;
+    for (name, s, p, cons, mode) in &cases {
+        let set = ConstraintSet::new(s, p, cons, *mode).unwrap();
+        let cq = set.jacobian(p, &set.positional_rows()).unwrap();
+        for form in [PreconditionerForm::Augmented, PreconditionerForm::Congruence] {
+            let o = PreconditionerOptions {
+                form,
+                ..Default::default()
+            };
+            let build = || SparsePreconditioner::new(pool.clone(), s, p, &e, &cq, &o, None, None).unwrap();
+            let cpu = build().with_metric_weight(0.7);
+            let l2 = build().with_metric_weight(0.7).with_gpu(&g2).unwrap();
+            let l1 = build().with_metric_weight(0.7).with_gpu(&g1).unwrap();
+            assert!(l2.solves_on_gpu() && l1.solves_on_gpu() && !cpu.solves_on_gpu());
+            let n = cpu.dim();
+            for nb in [1usize, 2, 4] {
+                let rs = vectors(n, nb, 7 * nb);
+                let rr: Vec<&[f64]> = rs.iter().map(Vec::as_slice).collect();
+                let zc = cpu.apply_many(&rr).unwrap();
+                let z2 = l2.apply_many(&rr).unwrap();
+                let z1 = l1.apply_many(&rr).unwrap();
+                let z1b = l1.apply_many(&rr).unwrap();
+                for q in 0..nb {
+                    assert!(
+                        zc[q].iter().zip(&z2[q]).all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{name} {form:?} batch {nb}: level 2 differs ({:.2e})",
+                        max_rel(&z2[q], &zc[q])
+                    );
+                    assert!(z1[q].iter().zip(&z1b[q]).all(|(a, b)| a.to_bits() == b.to_bits()));
+                    let r = max_rel(&z1[q], &zc[q]);
+                    assert!(r < 1e-6, "{name} {form:?} batch {nb}: level 1 {r:.2e}");
+                    worst = worst.max(r);
+                }
+                // A vector's result does not depend on the batch.
+                let single = l2.apply_many(&rr[..1]).unwrap();
+                assert!(single[0].iter().zip(&z2[0]).all(|(a, b)| a.to_bits() == b.to_bits()));
+            }
+        }
+    }
+    eprintln!("level 1 against the CPU: max relative difference {worst:.2e}");
+}

@@ -486,6 +486,12 @@ pub struct PreconditionerOptions {
     /// changed neither the GMRES iteration counts nor the solutions beyond the GMRES tolerance,
     /// `NOTES-WP17.md`). [`LaplacianSaddle::solve`] always refines.
     pub refine: bool,
+    /// How `L′` is factored and solved (default [`TriangularSolve::Chunked`], GPU-2).
+    pub triangular: TriangularSolve,
+    /// With a GPU: run the whole fine preconditioner there (the `L′` solves too; default `true`;
+    /// needs [`TriangularSolve::Chunked`], vertex pairs and `refine = false`, else only the
+    /// fractional product runs on the GPU as in GPU-1). Bitwise the CPU's at determinism level 2.
+    pub gpu_solves: bool,
 }
 
 /// The scale of the fractional factor in the augmented preconditioner (`SPEC.md` §6.3,
@@ -560,6 +566,8 @@ impl Default for PreconditionerOptions {
             scale: FractionalScale::Symbol,
             coarse: true,
             refine: false,
+            triangular: TriangularSolve::Chunked,
+            gpu_solves: true,
         }
     }
 }
@@ -643,6 +651,10 @@ pub struct SparsePreconditioner {
     fractional_seconds: f64,
     /// The GPU copy of the vertex-pair tree ([`SparsePreconditioner::with_gpu`]).
     gpu_fractional: Option<crate::gpu::GpuVertexFractional>,
+    /// Whether [`PreconditionerOptions::gpu_solves`] asked for the solves on the GPU.
+    gpu_solves: bool,
+    /// The fine preconditioner on the GPU (GPU-2).
+    gpu_prec: Option<crate::gpu::GpuPreconditioner>,
     upload_seconds: f64,
     applications: AtomicUsize,
     nanos: AtomicU64,
@@ -719,7 +731,7 @@ impl SparsePreconditioner {
         }
         let k = SparseMatrix::from_triplets(nv, nv, &trip)
             .map_err(|e| sparse_error(e, "preconditioner Laplacian"))?;
-        let lprime = LaplacianSaddle::new(&k, c)?;
+        let lprime = LaplacianSaddle::new_with(&k, c, options.triangular)?;
         let t0 = Instant::now();
         let tau = 2.0 - exponents.s();
         let mut gpu_fractional = None;
@@ -752,7 +764,7 @@ impl SparsePreconditioner {
             FractionalScale::Symbol => 1.0 / fractional_symbol_ratio(exponents),
             FractionalScale::Unit => 1.0,
         };
-        Ok(SparsePreconditioner {
+        let mut sp = SparsePreconditioner {
             pool,
             lprime,
             laplacian: k,
@@ -766,10 +778,46 @@ impl SparsePreconditioner {
             multi,
             fractional_seconds: t0.elapsed().as_secs_f64(),
             gpu_fractional,
+            gpu_solves: options.gpu_solves,
+            gpu_prec: None,
             upload_seconds: 0.0,
             applications: AtomicUsize::new(0),
             nanos: AtomicU64::new(0),
-        })
+        };
+        if let Some(g) = gpu_build {
+            sp.attach_gpu_solves(g)?;
+        }
+        Ok(sp)
+    }
+
+    /// Uploads `L′` with its schedule and `K` for [`PreconditionerOptions::gpu_solves`], if the
+    /// configuration allows it (module docs of [`crate::gpu`], `NOTES-GPU2.md`).
+    fn attach_gpu_solves(&mut self, gpu: &Arc<crate::gpu::GpuContext>) -> Result<(), RsError> {
+        self.gpu_prec = None;
+        if !self.gpu_solves || self.refine || self.gpu_fractional.is_none() {
+            return Ok(());
+        }
+        let Some(l) = self.lprime.chunked_factor() else {
+            return Ok(());
+        };
+        let t0 = Instant::now();
+        self.gpu_prec = Some(crate::gpu::GpuPreconditioner::new(
+            gpu,
+            l,
+            self.lprime.is_per_axis(),
+            self.lprime.n_vertices,
+            self.lprime.n_constraints,
+            &self.laplacian,
+            self.form == PreconditionerForm::Augmented,
+            self.fractional_scale,
+        )?);
+        self.upload_seconds += t0.elapsed().as_secs_f64();
+        Ok(())
+    }
+
+    /// Whether the `L′` solves run on the GPU.
+    pub fn solves_on_gpu(&self) -> bool {
+        self.gpu_prec.is_some()
     }
 
     /// As [`SparsePreconditioner::new`], reusing the face tree of a [`FaceMetricTree`] for
@@ -836,6 +884,9 @@ impl SparsePreconditioner {
     pub fn with_metric_weight(mut self, tp_weight: f64) -> Self {
         if tp_weight.is_finite() && tp_weight > 0.0 && self.fractional_scale != 1.0 {
             self.fractional_scale /= tp_weight;
+            if let Some(g) = &mut self.gpu_prec {
+                g.set_scale(self.fractional_scale);
+            }
         }
         self
     }
@@ -852,6 +903,7 @@ impl SparsePreconditioner {
             self.gpu_fractional = Some(t.upload(gpu)?);
             self.upload_seconds = t0.elapsed().as_secs_f64();
         }
+        self.attach_gpu_solves(gpu)?;
         Ok(self)
     }
 
@@ -957,6 +1009,9 @@ impl SparsePreconditioner {
 
     /// `P⁻¹ r` for several vectors without the coarse correction.
     fn apply_fine(&self, rs: &[&[f64]]) -> Result<Vec<Vec<f64>>, RsError> {
+        if let (Some(g), Some(f)) = (&self.gpu_prec, &self.gpu_fractional) {
+            return g.apply_many(f, rs);
+        }
         let nd = 3 * self.lprime.n_vertices;
         let ys = self.lprime.solve_many_on(Some(&self.pool), rs, self.refine)?;
         let mut vs: Vec<Vec<f64>> = rs.iter().map(|r| vec![0.0; r.len()]).collect();
