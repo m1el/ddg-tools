@@ -1868,6 +1868,8 @@ test against the authors' program on this scene, WP15, would show it).
 ## 17k. Benchmarks (WP14, 2026-10-26)
 
 *(After WP14b — Schur dense solve, Newton polish, early abort, position-only multigrid trees, capped multigrid pool — the gate passes everywhere, the knot included, and `Backend::Auto` is 2500: §17l.)*
+*(Timings of record after the speed-ups of 2026-11-03 — dense products, warm-started projection
+solves, block cluster tree near field, growth back-off — are in §17t.)*
 
 Benches: `benches/fig20.rs` (one flow configuration per call, one CSV row), `benches/threads.rs`
 (every component at 1…64 threads with efficiency and a bitwise check), `benches/components.rs` (one
@@ -3596,6 +3598,185 @@ One thread against 64 threads: for hs-pg, the median phase-A time over the time 
 **Summary.** Q11 keeps every fix of Q10 (no stuck or floor ends). It puts the hard flows back on
 §17n's results and keeps most of Q10's gain on the soft flows. These are the evaluation's results
 of record. §17n and §17q remain for comparison.
+
+## 17t. Speed-ups of the dense solve and the multigrid projections (2026-11-03)
+
+Work package after §17k/§17l: make the dense saddle solve and the line-search projections of the
+multigrid back end cheaper, keeping every guarantee (constraints within their tolerance at every
+accepted step, the CCD-checked path, bitwise results across thread counts). Logs, CSVs and
+scripts: `runs_tmp/rcspeed/` (`diag/`, `ab1/`–`ab4/` paired A/B runs, `knots24/`,
+`fig20-gate.csv`, `fig20-threads.csv`, `threads-bitwise.csv`); working notes
+`NOTES-SPEED.md`. "Before" is the tip 4fb4c8e (binaries `runs_tmp/rcspeed/bin/*-before`).
+
+### What dominated before (confirmed)
+
+The Schur-complement solve of §17b is already the one used (§17l item 5): `DenseSaddle::new`
+factors by `DenseMethod::Schur`, for `Backend::Auto` and for Fig. 20's Barnes–Hut + dense alike;
+the LU of §17k (87–96 % of an iteration) is only the fallback. Traces (`--trace 1`, 1 thread):
+
+* **Barnes–Hut + dense, Freedman 4000:** 6.46 s per iteration; metric 4.22 s (65 %): Gram 1.25 s,
+  Schur factorization 2.57 s (Cholesky of `M` 0.49, its inverse 1.00, `S` assembly 0.41,
+  Cholesky of `S` 0.46); projections 0.86 s (3 solves of 0.29 s); direction solve 0.30 s. A
+  solve was latency bound: strided dot products over the interleaved vector, twice per solve
+  and twice more for the refinement step.
+* **Multigrid, Freedman 16000:** 5.3 s per iteration; direction solve 26 %, energy 21 %,
+  projections 26 % (since §17l mostly Newton-polish steps, 0.25–0.8 s; the 60–80 % of §17k are
+  gone on this curve).
+* **Multigrid, knot 96 at 8192:** 29–41 s per iteration, **projections 59–65 %**: 4–5 multigrid
+  solves of 4–5 s per step; the first trial (`2 τ_prev`) is given up after one chord solve almost
+  every step. 43 % of the whole run is the near field of the level-0 block cluster tree product
+  (perf, knot 2048).
+
+### Changes
+
+1. **Dense products** (`solve/dense.rs`, `symmetric_kron_apply`): `(M⁻¹ ⊗ I_d) x` and
+   `(A ⊗ I_d) x` separate the coordinates of `x`, then one pass of contiguous dot products per
+   row in 8 fixed lanes (vectorizable; every entry summed in the same order at every thread
+   count). One solve with refinement at 4000 vertices: 0.30 → 0.10 s.
+2. **`S = C M̄⁻¹ Cᵀ`** keeps `g = M̄⁻¹ cᵢᵀ` per coordinate (contiguous axpys) and fills the lower
+   triangle only; faer's Cholesky reads nothing else, and the strict upper triangle starts as NaN,
+   so a reader would fail the pivot check and fall back to the LU instead of giving a wrong factor
+   (`tests/dense_schur.rs` checks that the Schur method is kept). Factorization at 4000, 1 thread:
+   2.57 → 2.25 s (16 threads 0.78 → 0.73 s). Not changed: the explicit inverse (every entry of
+   `M⁻¹` enters `S`; the flop count `≈ n³ + k³/3` is the floor of this formulation), the
+   refinement step.
+3. **Block cluster tree near field** (`spatial/bct.rs`, `near_row`): the kernel values of an
+   entry are spread over the channels, then one contiguous multiply-add per channel, AVX by
+   runtime detection, no fused multiply-add, the sum over entries in the same order: the product
+   is **bitwise identical** (result hash unchanged; `ddg-repulsive-surfaces` uses the same tree).
+   One product, knot 96 at 8192 (`theta_t 0.5`): 70 → 60 ms; a multigrid solve 5.06 → 4.44 s.
+4. **Warm starts of the projection solves** (`MgOptions::recycle_projections`, default `true`,
+   §8.4): the projection solves (`a = 0`) of one step keep `(b, x)`, orthonormalized by modified
+   Gram–Schmidt (at most 8); a new solve starts from `z' = x₀ + C†(b − C x₀)`, `x₀` the
+   least-squares combination of the kept solutions, if that gives a smaller kernel right side
+   than the cold `z = C†b`. `x = z' + y'` and `x = z + y` differ only in the split, so the
+   iteration stops on the **cold problem's** residual `‖P(−Ā x)‖ ≤ tol ‖P Ā C†b‖` and energy
+   estimate (`vcycle::Reference`, `solve_with_reference`); `C x = b` holds to rounding either
+   way. The trials of a line search have nearly proportional violations (`Φ(γ − τp) ≈ τ² Φ₂`),
+   so the later solves of a step need about half the cycles; every solve still pays the
+   full-multigrid start. Paired, 1 thread: projections per step knot 8192 18.9 → 15.5 s,
+   knot 2048 −14 %, Freedman 2000 0.61 → 0.46 s. Test
+   `recycled_projection_solves_meet_the_cold_accuracy_with_fewer_cycles`.
+5. **Growth back-off of the start rule** (`FlowOptions::growth_backoff`, default `true`, §7.2;
+   not in the paper): after a step whose grown first trial (`> τ_prev`) was rejected, the next
+   1, 2, 4, 8 steps start at `min(⅔ τ_max, τ_prev)`; a grown trial that is accepted resets it.
+   In constant-τ phases every step used to begin with a rejected `2 τ_prev` trial
+   (`[1:1:MaxIterations 0.5:4:ok]` on the knot, `[1:2:armijo 0.5:2:ok]` on Freedman). It only
+   lowers some first trials; every trial is projected, CCD-checked and tested by Armijo as
+   before. Test `growth_backoff_holds_the_start_after_a_rejected_growth`.
+6. Tried and dropped: a warm start of the direction solve from the previous step's direction
+   (projected, Galerkin-scaled). Its Euclidean residual was larger than the cold one on
+   Freedman 8000/16000 and knot 4096 (the rough part of the direction changes every step), and
+   forcing it left the cycles at 2 and the time unchanged. Not done: predicting the chord rate to
+   skip a trial before its first solve (the back-off removes most such trials without a model); a
+   closed-form correction for linear rows (all default rows are nonlinear; the barycenter is
+   length-weighted, D6).
+
+### The 24-knot subset (§18 Q7), 200 steps, library defaults
+
+`benches/trialrule.rs --library-defaults 1 --steps 200 --threads 1` on the 24 knots of the
+evaluation's subset (12 Knot128, 12 Trefoil100; 1509–3060 vertices, `Backend::Auto`: exact +
+dense on 20, Barnes–Hut + multigrid on knot0072, trefoil0018, 0031, 0080), three variants: before
+(4fb4c8e), after, after with `growth_backoff: false`; CCD audit of every accepted path (gap 1e-6,
+1e5 advances). 72 jobs, 36 at a time, the three variants of a knot side by side (load 35–50 from
+these jobs; the 1-thread times are paired, not absolute). `runs_tmp/rcspeed/knots24/`,
+`knots24-summary.txt`.
+
+* **Guarantees:** no stuck step, no isotopy violation, every accepted step within the
+  tolerance, in all 72 runs.
+* **Without the back-off** the trajectories are those of before up to rounding (the dense
+  products and the warm starts change the last bits): relative energy difference at steps
+  25/50/100/150/200 median 0 (|median| ≤ 2e-8); single knots drift apart later as rounding
+  differences grow along a flow (largest at step 200: trefoil0031 −12 %, trefoil0043 +2 %; both
+  on the same plateaus at shifted steps).
+* **With the back-off (the default):** trials per step 1.93 → 1.45, projection solves per step
+  1.21 → 0.77; seconds per step paired 0.889× (0.74–0.93) of before (without the back-off
+  0.937×). Energy at fixed steps: median relative difference −9e-5 at step 200 (lower in 16/24,
+  mean |.| 1 %, largest +9 % trefoil0080 and +5 % trefoil0043, −5 % knot0072): the same
+  plateaus, reached a few steps earlier or later. **At equal wall time** (the earliest of the
+  three variants' times of step 200) the energy is lower than before on 23 of 24 knots (the 24th
+  +5e-5), median −0.37 %; on the multigrid knots far lower (trefoil0018 at 241 s: 14.2 → 0.789;
+  trefoil0031 at 410 s: 7.88 → 0.991; knot0072 at 1250 s: 46.9 → 29.2).
+
+**Decision (defaults):** `recycle_projections = true` (same stopping targets as a cold solve,
+fewer cycles) and `growth_backoff = true` (as reliable: no stuck step, no isotopy violation;
+fewer trials; lower energy at equal time on 23/24 knots, the 24th equal to 5e-5). Both are
+off-switchable. Neither is exposed in Python (`ddg-py` and Blender take the defaults).
+The evaluation's results of record (§17s) predate both.
+
+### Fig. 20, 1 thread, before / after
+
+Freedman–He–Wang resampled ((2, 4.5)) and knot 96 ((3, 6)), 1 thread (main and dense pool),
+mean seconds per iteration over the first 20 steps (the 240 s budget of §17k for Freedman; the
+knot runs all 20 steps), `benches/fig20.rs` with the library defaults; before and after run one
+after the other for each configuration (`runs_tmp/rcspeed/fig20-gate.csv`). The machine was alone
+(1-minute load 1.0–3.9) except: another agent's benchmark (about 3 cores) until 07:04 (the
+Exact 1000 pair and the first Barnes–Hut 2000 run), and another agent's test build and tests
+(load up to 20) from 07:07:30 to 07:09:30, which overlapped the Barnes–Hut 4000 "after" run and
+the Multigrid 2000 pair; those two pairs (²) were run again alone at 08:00
+(`fig20-gate2.csv`, loads 1.1–1.7 apart from the start of the first run at 5.2 falling to 1.7). The
+§17l column is the result of record before this package (its knot values: 20-step means);
+"before" is the same code measured now. Columns `metric` … `projection` are seconds per
+iteration, before → after.
+
+| configuration | n | paper | §17l | before | after | after / before | metric | solve | projection | projection solves / step |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Exact | 1000 | ≈ 6 | 0.756 | 0.716 | 0.639 | 0.89 | 0.133 → 0.118 | 0.0191 → 0.0071 | 0.04 → 0.015 | 1.85 → 1.50 |
+| Exact | 4000 | ≈ 145 | 13.9 | 13.1 (18 steps) | 11.9 | 0.91 | 3.76 → 3.56 | 0.283 → 0.102 | 0.589 → 0.192 | 1.94 → 1.50 |
+| Barnes–Hut + dense | 2000 | ≈ 10 | 1.84 | 1.82 | 1.52 | 0.84 | 0.64 → 0.573 | 0.0734 → 0.0266 | 0.161 → 0.0461 | 2.00 → 1.30 |
+| Barnes–Hut + dense | 4000 | ≈ 60 | 5.90 | 5.76 | 4.91 ² | 0.85 | 3.92 → 3.61 | 0.288 → 0.106 | 0.556 → 0.191 | 1.75 → 1.40 |
+| Multigrid | 2000 | ≈ 6 | 1.74 | 1.7 | 1.39 ² | 0.82 | 0.0638 → 0.0623 | 0.226 → 0.195 | 0.48 → 0.282 | 2.05 → 1.60 |
+| Multigrid | 8000 | ≈ 25 | 3.67 | 3.44 | 2.96 | 0.86 | 0.17 → 0.158 | 0.676 → 0.622 | 1.29 → 0.974 | 1.75 → 1.55 |
+| Multigrid | 16000 | ≈ 57 | 5.19 | 4.95 | 4.48 | 0.90 | 0.309 → 0.313 | 1.3 → 1.22 | 1.17 → 0.774 | 0.60 → 0.40 |
+| Multigrid without projection | 2000 | ≈ 3 | 1.33 | 1.27 | 1.15 | 0.91 | 0.0648 → 0.0621 | 0.221 → 0.187 | 0 → 0 | 0.00 → 0.00 |
+| Multigrid without projection | 16000 | ≈ 38 | 4.09 | 3.93 | 3.7 | 0.94 | 0.313 → 0.306 | 1.29 → 1.22 | 0 → 0 | 0.00 → 0.00 |
+| Multigrid, knot 96 (3, 6) | 2048 | ≈ 6 (2000) | 2.45 | 2.31 | 1.82 | 0.79 | 0.0821 → 0.0796 | 0.399 → 0.363 | 1.07 → 0.635 | 2.70 → 1.95 |
+| Multigrid, knot 96 (3, 6) | 8192 | ≈ 25 (8000) | 18.5 | 17.1 | 14.6 | 0.85 | 0.389 → 0.401 | 2.81 → 2.73 | 9.11 → 6.27 | 3.10 → 2.45 |
+| Multigrid, knot 96 (3, 6) | 16384 | ≈ 57 (16000) | 33.0 | 28.5 | 22.9 | 0.80 | 0.746 → 0.759 | 5.13 → 4.9 | 15.5 → 9.98 | 3.00 → 2.20 |
+
+Every configuration is faster: the dense ones by 9–16 % (each dense solve 2.7–2.8× faster; the
+Gram matrix and the factorization, now 3.6 of 4.9 s at Barnes–Hut 4000, are the floor of this
+formulation), the multigrid ones by 6–21 % (fewer projection solves per step from the back-off,
+fewer cycles per projection solve from the warm starts; Freedman 16000's projections are mostly
+Newton-polish steps). Barnes–Hut + dense at 4000 is now 4.9 s against the paper's ≈ 60 s; every
+row stays below the paper's Fig. 20, the knot included (14.6 s at 8192 against ≈ 25 s at 8000,
+22.9 s at 16384 against ≈ 57 s at 16000).
+
+### Thread scaling at 16k
+
+Freedman resampled to 16000, multigrid, 10 steps per run (the 1-thread row is the gate's 20
+steps), main pool `T` threads, dense pool `min(16, T)`, multigrid pool capped at 16 (§17l);
+before and after interleaved, machine alone (`fig20-threads.csv`):
+
+| threads (dense pool) | before | after | after / before |
+|---|---:|---:|---:|
+| 1 (the gate, 20 steps) | 4.95 | 4.48 | 0.90 |
+| 4 (4) | 2.46 | 2.34 | 0.95 |
+| 8 (8) | 2.14 | 2.01 | 0.94 |
+| 16 (16) | 2.02 | 1.89 | 0.94 |
+| 32 (16) | 1.97 | 1.86 | 0.94 |
+| 64 (16) | 1.96 | 1.85 | 0.94 |
+
+The gain is 5–6 % at every thread count: the near-field change and the warm starts save work that
+is spread over the pool, the back-off saves trials. Scaling is unchanged (2.4× at 64 threads
+against 1; the hierarchy's sequential parts of §17l item 4 remain).
+
+**Bitwise across thread counts** (`benches/threads.rs --sizes 2048,8192 --threads 1,4,16,64
+--components schur,bct-product,mg-solve`, `threads-bitwise.csv`): every row has the result hash of
+its 1-thread row (Schur factorization and solve, block cluster tree product, multigrid solve).
+The flow tests that compare results at several thread counts pass, and the recycled solves are
+checked at 1 and 7 threads by their own test.
+
+### Open
+
+* The multigrid solve's full-multigrid start (about one V-cycle) is paid by every solve,
+  warm or not; skipping it for warm starts did not pay in the A/B (the warm residual is rarely
+  below the tolerance).
+* The fuzz replay against the Lean oracle (`tests/oracle.rs --ignored`, 4000 cases, seed 7,
+  with the main checkout's oracle binary) reports 40 disagreements of one kind before and after
+  this package alike ("accepted after 0 iterations here, after 1 in the oracle"): a trial the
+  crate accepts without a projection step where the oracle takes one. Not caused here; not
+  investigated. The fixture replay passes.
 
 ## 18. The user's decisions (2026-10-26)
 

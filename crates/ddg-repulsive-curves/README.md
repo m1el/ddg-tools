@@ -14,7 +14,8 @@ multigrid acceleration of the paper's Appendix B.
 * every discrete formula with its equation number and `rc-` formula id;
 * where the paper or the reference code is wrong or silent, and what we do (decisions D1–D30);
 * the API and the defaults;
-* the measurements, in §17 (§17s holds the evaluation's results of record);
+* the measurements, in §17 (§17s holds the evaluation's results of record; §17t the timings of
+  record after the speed-ups of 2026-11-03, which postdate §17s);
 * the user's decisions, in §18.
 
 Python bindings: `ddg_tools.RepulsiveSession` and `repulsive_flow` (`crates/ddg-py`). Blender:
@@ -54,7 +55,13 @@ All runs are deterministic: the same results at any thread count (D25). Bad inpu
   (`projection_early_abort`). Measured separately on 24 knots, the polish takes 0.69× the time
   to 1.1 E* of the chord method, and the early abort 0.76× (§17l).
   A search that gets stuck with the polish is repeated with the paper's chord steps
-  (`stuck_retry_chord`, §17p).
+  (`stuck_retry_chord`, §17p). The multigrid solves of one step's projections start from the
+  earlier ones' solutions, with the stopping targets of a cold solve
+  (`MgOptions::recycle_projections`, §17t).
+* **Growth back-off of the line search** (`growth_backoff`, §17t). After a step whose grown first
+  trial (`2 τ_prev`) was rejected, the next 1, 2, 4, 8 steps start at `τ_prev`. On the
+  evaluation's 24-knot subset: 1.93 → 1.45 trials per step, lower energy at equal wall time on
+  23 of 24 knots, no stuck step, no isotopy violation.
 * **Edge-collapse guard** (`min_edge_length_ratio`, §17j). A step that would shrink an edge
   below `1e-3` of the mean edge length fails with a named error, before the metric becomes
   singular.
@@ -149,24 +156,30 @@ frames at equal wall-clock intervals.
 ## Benchmarks
 
 `cargo bench --bench fig20|threads|components|projdiag|trialrule` (`benches/`, results and method
-in `SPEC.md` §17k and §17l). Mean seconds per iteration of a running flow (Freedman–He–Wang
+in `SPEC.md` §17k, §17l and §17t). Mean seconds per iteration of a running flow (Freedman–He–Wang
 resampled to the paper's sizes, (2, 4.5), barycenter + edge lengths), 1 thread, machine alone,
-against the values read from the paper's Fig. 20:
+against the values read from the paper's Fig. 20. Results of record of 2026-11-03 (§17t; before
+the speed-ups of §17t in brackets, measured the same day):
 
 | configuration | n | paper | this crate |
 |---|---:|---:|---:|
-| Exact | 1000 / 4000 | 6 / 145 s | 0.76 / 13.9 s |
-| Barnes–Hut + dense | 2000 / 4000 | 10 / 60 s | 1.8 / 5.9 s |
-| Multigrid | 2000 / 8000 / 16000 | 6 / 25 / 57 s | 1.7 / 3.7 / 5.2 s |
-| Multigrid without projection | 2000 / 16000 | 3 / 38 s | 1.3 / 4.1 s |
-| Multigrid, knot 96 ((3, 6)) | 2048 / 8192 / 16384 | 6 / 25 / 57 s (the paper's curve) | 2.5 / 18.5 / 33.0 s (20 steps) |
+| Exact | 1000 / 4000 | 6 / 145 s | 0.64 / 11.9 s (0.72 / 13.1) |
+| Barnes–Hut + dense | 2000 / 4000 | 10 / 60 s | 1.5 / 4.9 s (1.8 / 5.8) |
+| Multigrid | 2000 / 8000 / 16000 | 6 / 25 / 57 s | 1.4 / 3.0 / 4.5 s (1.7 / 3.4 / 5.0) |
+| Multigrid without projection | 2000 / 16000 | 3 / 38 s | 1.2 / 3.7 s (1.3 / 3.9) |
+| Multigrid, knot 96 ((3, 6)) | 2048 / 8192 / 16384 | 6 / 25 / 57 s (the paper's curve) | 1.8 / 14.6 / 22.9 s (2.3 / 17.1 / 28.5; 20 steps) |
 
 The dense solve is a Schur complement of `A + ρ𝟙𝟙ᵀ` (about 30× fewer flops than the LU of the
-whole saddle matrix); the line search's projection finishes with Newton steps below 100 times the
-tolerance and gives up early on trials whose chord iteration cannot converge (both measured on 24
-knots, `SPEC.md` §17l; the paper's projection is `newton_polish: None`,
-`projection_early_abort: false`). `Backend::Auto` switches from exact + dense to Barnes–Hut +
-multigrid above 2500 vertices (measured crossover 2000 at 8 threads, 3000 at 64).
+whole saddle matrix), with its products as contiguous fixed-lane dot products; the line search's
+projection finishes with Newton steps below 100 times the tolerance and gives up early on trials
+whose chord iteration cannot converge (both measured on 24 knots, `SPEC.md` §17l; the paper's
+projection is `newton_polish: None`, `projection_early_abort: false`). The multigrid solves of a
+step's projections are warm-started from each other (`MgOptions::recycle_projections`), and the
+start of the line search backs off after a rejected growth (`growth_backoff`; §17t).
+`Backend::Auto` switches from exact + dense to Barnes–Hut + multigrid above 2500 vertices
+(measured crossover 2000 at 8 threads, 3000 at 64; not re-measured after §17t, which made both
+sides 6–21 % faster). At 16000 vertices the multigrid flow takes 1.85 s per iteration at 64
+threads (1.96 before §17t).
 
 These timings predate the near-pair default. On these curves no pair is near, and the pass costs
 0.3–1.7 % of an iteration (`benches/nearpair.rs`, `SPEC.md` §17o).

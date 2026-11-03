@@ -69,3 +69,11 @@ Paired A/B runs (1 thread each, all jobs at the same time, diagnostic only; `ab1
 * Not done: predicting the chord rate to skip a trial before its first solve (the back-off
   removes most of those trials with no model); a cheaper correction for linear rows (the
   default rows are all nonlinear: the barycenter is length-weighted, D6).
+
+## 4. Results of record
+
+In `SPEC.md` §17t (Fig. 20 before/after, 24-knot subset, thread scaling, bitwise check) and the
+README. Summary: every Fig. 20 configuration 6–21 % faster on one thread (Barnes–Hut + dense 4000
+5.76 → 4.91 s, knot 16384 28.5 → 22.9 s), 5–6 % at 4–64 threads; 24 knots × 200 steps: no stuck
+step or isotopy violation, trials per step 1.93 → 1.45, lower energy at equal wall time on 23/24.
+Defaults: `recycle_projections = true`, `growth_backoff = true`.
