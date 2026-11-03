@@ -134,12 +134,29 @@ pub fn translations_fixed_per_component(surface: &Surface, c: &SparseMatrix) -> 
     fixed.iter().all(|&f| f)
 }
 
+/// How `L′` is factored and solved (`NOTES-GPU2.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TriangularSolve {
+    /// [`super::ldlt::SimplicialLdlt`]: faer's factor read out, solves in the fixed chunked order
+    /// of [`super::ldlt`] (default; the GPU reproduces it bit for bit, GPU-2).
+    #[default]
+    Chunked,
+    /// `ddg_core::sparse` (faer's supernodal solves; GPU-1 and before).
+    Faer,
+}
+
+#[derive(Debug)]
+enum LFactor {
+    Faer(Factorization),
+    Chunked(super::ldlt::SimplicialLdlt),
+}
+
 /// The factored `L′ = [[K ⊗ I₃, C_Qᵀ], [C_Q, 0]]` of one step (module docs), `K` the sparse
 /// symmetric positive definite Laplacian block (`|V| × |V|`).
 #[derive(Debug)]
 pub struct LaplacianSaddle {
     matrix: SparseMatrix,
-    factor: Factorization,
+    factor: LFactor,
     /// `Some(k₁)` for the per-axis factorization of size `|V| + k₁`.
     per_axis: Option<usize>,
     n_vertices: usize,
@@ -157,6 +174,14 @@ impl LaplacianSaddle {
     /// [`RsError::InvalidOption`] for mismatched sizes; [`RsError::SingularSaddle`] if the
     /// factorization breaks down (a zero pivot: `K` not positive definite or dependent rows).
     pub fn new(k: &SparseMatrix, c: &SparseMatrix) -> Result<LaplacianSaddle, RsError> {
+        Self::new_with(k, c, TriangularSolve::default())
+    }
+
+    /// [`LaplacianSaddle::new`] with the factorization `kind`.
+    ///
+    /// # Errors
+    /// As [`LaplacianSaddle::new`].
+    pub fn new_with(k: &SparseMatrix, c: &SparseMatrix, kind: TriangularSolve) -> Result<LaplacianSaddle, RsError> {
         let t0 = Instant::now();
         let nv = k.nrows();
         if k.ncols() != nv || c.ncols() != 3 * nv {
@@ -206,11 +231,18 @@ impl LaplacianSaddle {
                 (m, order, None)
             }
         };
-        let symbolic = Symbolic::analyze_with_order(&matrix, Method::Ldlt, EliminationOrder::Custom(&order))
-            .map_err(|e| sparse_error(e, "preconditioner analysis"))?;
-        let factor = symbolic
-            .factor(&matrix, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner factorization"))?;
+        let factor = match kind {
+            TriangularSolve::Chunked => LFactor::Chunked(super::ldlt::SimplicialLdlt::factor(&matrix, &order)?),
+            TriangularSolve::Faer => {
+                let symbolic = Symbolic::analyze_with_order(&matrix, Method::Ldlt, EliminationOrder::Custom(&order))
+                    .map_err(|e| sparse_error(e, "preconditioner analysis"))?;
+                LFactor::Faer(
+                    symbolic
+                        .factor(&matrix, Parallelism::Sequential)
+                        .map_err(|e| sparse_error(e, "preconditioner factorization"))?,
+                )
+            }
+        };
         Ok(LaplacianSaddle {
             matrix,
             factor,
@@ -242,14 +274,56 @@ impl LaplacianSaddle {
         &self.matrix
     }
 
+    /// The chunked-order factor ([`TriangularSolve::Chunked`]), if that is the one in use.
+    pub fn chunked_factor(&self) -> Option<&super::ldlt::SimplicialLdlt> {
+        match &self.factor {
+            LFactor::Chunked(f) => Some(f),
+            LFactor::Faer(_) => None,
+        }
+    }
+
+    /// `|V|`.
+    pub fn n_vertices(&self) -> usize {
+        self.n_vertices
+    }
+
+    /// `k_Q`.
+    pub fn n_constraints(&self) -> usize {
+        self.n_constraints
+    }
+
+    /// Solves `M X = B` in place (`ncols` columns of `M`'s dimension, stacked), by the factor.
+    fn factor_solve(&self, x: &mut [f64], ncols: usize) -> Result<(), RsError> {
+        match &self.factor {
+            LFactor::Faer(f) => f
+                .solve_many_in_place(x, ncols, Parallelism::Sequential)
+                .map_err(|e| sparse_error(e, "preconditioner solve")),
+            LFactor::Chunked(f) => {
+                let n = f.dim();
+                let perm = f.perm();
+                let mut xr = vec![0.0; n * ncols];
+                for (new, &old) in perm.iter().enumerate() {
+                    for c in 0..ncols {
+                        xr[new * ncols + c] = x[c * n + old as usize];
+                    }
+                }
+                f.solve_rows(&mut xr, ncols)?;
+                for (new, &old) in perm.iter().enumerate() {
+                    for c in 0..ncols {
+                        x[c * n + old as usize] = xr[new * ncols + c];
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Solves `M X = B` for `ncols` stacked columns at once (one pass over the factor for all
     /// of them) with one refinement step.
     fn solve_block(&self, b: &[f64], ncols: usize, refine: bool) -> Result<Vec<f64>, RsError> {
         let n = self.matrix.nrows();
         let mut x = b.to_vec();
-        self.factor
-            .solve_many_in_place(&mut x, ncols, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner solve"))?;
+        self.factor_solve(&mut x, ncols)?;
         if !refine {
             return Ok(x);
         }
@@ -263,9 +337,7 @@ impl LaplacianSaddle {
         for (ri, bi) in r.iter_mut().zip(b) {
             *ri = bi - *ri;
         }
-        self.factor
-            .solve_many_in_place(&mut r, ncols, Parallelism::Sequential)
-            .map_err(|e| sparse_error(e, "preconditioner solve"))?;
+        self.factor_solve(&mut r, ncols)?;
         for (xi, di) in x.iter_mut().zip(&r) {
             *xi += di;
         }
