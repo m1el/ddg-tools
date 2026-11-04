@@ -261,6 +261,165 @@ theorem blend_gradient_exact [Nonempty ι] (p : ι → V3) {g : ι → V3 → �
     ring
   · simp [blend]
 
+/-! ## The Laplacian (App. D, with our `Δg`) -/
+
+/-- `F` has divergence `d` at `x`: `F` is differentiable at `x` and the trace of its derivative
+is `d`. -/
+def HasDiv (F : V3 → V3) (d : ℝ) (x : V3) : Prop :=
+  ∃ D : V3 →L[ℝ] V3, HasFDerivAt F D x ∧ trace3 D = d
+
+theorem trace3_sum (D : ι → V3 →L[ℝ] V3) : trace3 (∑ i, D i) = ∑ i, trace3 (D i) := by
+  simp only [trace3, ContinuousLinearMap.sum_apply, Finset.sum_apply]
+  exact Finset.sum_comm
+
+theorem HasDiv.add {F G : V3 → V3} {d1 d2 : ℝ} {x : V3} (h1 : HasDiv F d1 x) (h2 : HasDiv G d2 x) :
+    HasDiv (fun y => F y + G y) (d1 + d2) x := by
+  obtain ⟨D1, hD1, t1⟩ := h1
+  obtain ⟨D2, hD2, t2⟩ := h2
+  exact ⟨D1 + D2, hD1.add hD2, by rw [trace3_add, t1, t2]⟩
+
+theorem HasDiv.sum {F : ι → V3 → V3} {d : ι → ℝ} {x : V3} (h : ∀ i, HasDiv (F i) (d i) x) :
+    HasDiv (fun y => ∑ i, F i y) (∑ i, d i) x := by
+  choose D hD ht using h
+  refine ⟨∑ i, D i, ?_, by rw [trace3_sum]; exact Finset.sum_congr rfl fun i _ => ht i⟩
+  have := HasFDerivAt.sum (u := Finset.univ) (fun i _ => hD i)
+  refine this.congr_of_eventuallyEq (Filter.Eventually.of_forall fun y => ?_)
+  simp
+
+/-- Product rule: `div(c F) = c div F + ∇c·F`. -/
+theorem HasDiv.smul {c : V3 → ℝ} {gc : V3} {F : V3 → V3} {d : ℝ} {x : V3}
+    (hc : HasFDerivAt c (dualOf gc) x) (h : HasDiv F d x) :
+    HasDiv (fun y => c y • F y) (c x * d + gc ⬝ᵥ F x) x := by
+  obtain ⟨D, hD, t⟩ := h
+  refine ⟨c x • D + (dualOf gc).smulRight (F x), hc.smul hD, ?_⟩
+  rw [trace3_add, trace3_smul, trace3_smulRight, t, dualOf_apply]
+
+theorem HasDiv.const_smul {F : V3 → V3} {d : ℝ} {x : V3} (k : ℝ) (h : HasDiv F d x) :
+    HasDiv (fun y => k • F y) (k * d) x := by
+  have := HasDiv.smul (hasFDerivAt_const k x |>.congr_fderiv (by ext; simp) :
+    HasFDerivAt (fun _ => k) (dualOf 0) x) h
+  simpa using this
+
+/-- `div r̂ = 2/ρ` in `ℝ³` (`(d − 1)/ρ` with `d = 3`). -/
+theorem hasDiv_rhat {p x : V3} (hx : x ≠ p) : HasDiv (rhat p) (2 / vnorm (x - p)) x := by
+  have hρ : 0 < vnorm (x - p) := vnorm_pos_iff.mpr (sub_ne_zero.mpr hx)
+  have hid : HasDiv (fun y => y - p) 3 x :=
+    ⟨ContinuousLinearMap.id ℝ V3, (hasFDerivAt_id x).sub_const p, trace3_id⟩
+  have hinv := hasFDerivAt_inv_comp (hasFDerivAt_dist hx) hρ.ne'
+  have hinv' : HasFDerivAt (fun y => (vnorm (y - p))⁻¹)
+      (dualOf (-(vnorm (x - p) ^ 2)⁻¹ • rhat p x)) x := by
+    refine hinv.congr_fderiv ?_; ext v; simp [smul_dotProduct]
+  have := HasDiv.smul hinv' hid
+  have e : 2 / vnorm (x - p) = (vnorm (x - p))⁻¹ * 3 +
+      (-(vnorm (x - p) ^ 2)⁻¹ • rhat p x) ⬝ᵥ (x - p) := by
+    simp only [rhat, smul_dotProduct, smul_eq_mul]
+    rw [← vnorm_mul_self]
+    field_simp
+    ring
+  rw [e]
+  exact this
+
+/-- The frozen blend gradient field `F = A + φB` (`blend_gradient`) as a function of `x`. -/
+def blendGradField (p : ι → V3) (g : ι → V3 → ℝ) (Gf : ι → V3 → V3) (lam σ : ℝ) (y : V3) : V3 :=
+  (∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)))⁻¹ •
+      ∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)) • (Gf i y - (lam * g i y) • rhat (p i) y) +
+    blend (fun _ => 1) p g lam σ y •
+      ((lam * (∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)))⁻¹) •
+        ∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)) • rhat (p i) y)
+
+/-- **The Laplacian of the blend** (App. D, with frozen `λ, σ` and our `Δg_i`): if every
+`∇g_i = Gf_i` has divergence `Δg_i` at `x` (off the data points), then the gradient field
+`F = A + φB` of `blend_gradient` has divergence
+`Σ w(Δg − 2λ r̂·∇g + λ g(λ − 2/ρ))/W + A·B + F·B + φ(λ Σ w(2/ρ − λ)/W + B·B)`.
+
+[formula: pat-blend-laplacian] -/
+theorem blend_laplacian [Nonempty ι] (p : ι → V3) {g : ι → V3 → ℝ} {Gf : ι → V3 → V3}
+    {Lg : ι → ℝ} (lam σ : ℝ) {x : V3} (hx : ∀ i, x ≠ p i)
+    (hg : ∀ i, HasFDerivAt (g i) (dualOf (Gf i x)) x) (hG : ∀ i, HasDiv (Gf i) (Lg i) x) :
+    let w := fun i => Real.exp (-lam * (vnorm (x - p i) - σ))
+    let W := ∑ i, w i
+    let A := W⁻¹ • ∑ i, w i • (Gf i x - (lam * g i x) • rhat (p i) x)
+    let B := (lam * W⁻¹) • ∑ i, w i • rhat (p i) x
+    let φ := blend (fun _ => 1) p g lam σ x
+    HasDiv (blendGradField p g Gf lam σ)
+      ((∑ i, w i * (Lg i - 2 * lam * (rhat (p i) x ⬝ᵥ Gf i x) +
+          g i x * lam * (lam - 2 / vnorm (x - p i)))) / W + A ⬝ᵥ B +
+        blendGradField p g Gf lam σ x ⬝ᵥ B +
+        φ * (lam * (∑ i, w i * (2 / vnorm (x - p i) - lam)) / W + B ⬝ᵥ B)) x := by
+  intro w W A B φ
+  have hρ : ∀ i, 0 < vnorm (x - p i) := fun i => vnorm_pos_iff.mpr (sub_ne_zero.mpr (hx i))
+  have hr1 : ∀ i, rhat (p i) x ⬝ᵥ rhat (p i) x = 1 := by
+    intro i; rw [rhat]; exact RC.unit_dot_self (sub_ne_zero.mpr (hx i))
+  -- weights
+  have hw : ∀ i, HasFDerivAt (fun y => Real.exp (-lam * (vnorm (y - p i) - σ)))
+      (dualOf ((-lam * w i) • rhat (p i) x)) x := by
+    intro i
+    refine ((((hasFDerivAt_dist (hx i)).sub_const σ).const_mul (-lam)).exp).congr_fderiv ?_
+    ext v; simp [smul_dotProduct, w]; ring
+  have hW : HasFDerivAt (fun y => ∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)))
+      (dualOf (∑ i, (-lam * w i) • rhat (p i) x)) x := hasFDerivAt_sum_grad hw
+  have hW0 : W ≠ 0 := (Finset.sum_pos (fun i _ => Real.exp_pos _) Finset.univ_nonempty).ne'
+  have hWi : HasFDerivAt (fun y => (∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)))⁻¹)
+      (dualOf ((-(W ^ 2)⁻¹) • ∑ i, (-lam * w i) • rhat (p i) x)) x := by
+    refine (hasFDerivAt_inv_comp hW hW0).congr_fderiv ?_; ext v; simp [smul_dotProduct, W, w]
+  have hgi : ∀ i, HasFDerivAt (fun y => lam * g i y) (dualOf (lam • Gf i x)) x := by
+    intro i; refine ((hg i).const_mul lam).congr_fderiv ?_; ext v; simp [smul_dotProduct]
+  -- the divergence of the two sums
+  have hSA : HasDiv (fun y => ∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)) •
+      (Gf i y - (lam * g i y) • rhat (p i) y))
+      (∑ i, (w i * (Lg i + (-(lam * g i x * (2 / vnorm (x - p i))) +
+        -((lam • Gf i x) ⬝ᵥ rhat (p i) x))) +
+        ((-lam * w i) • rhat (p i) x) ⬝ᵥ (Gf i x - (lam * g i x) • rhat (p i) x))) x := by
+    refine HasDiv.sum fun i => HasDiv.smul (hw i) ?_
+    have h2 := HasDiv.smul (hgi i) (hasDiv_rhat (hx i))
+    have h3 := (hG i).add (h2.const_smul (-1))
+    convert h3 using 1
+    · funext y; simp [sub_eq_add_neg]
+    · ring
+  have hSB : HasDiv (fun y => ∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)) • rhat (p i) y)
+      (∑ i, (w i * (2 / vnorm (x - p i)) + ((-lam * w i) • rhat (p i) x) ⬝ᵥ rhat (p i) x)) x :=
+    HasDiv.sum fun i => HasDiv.smul (hw i) (hasDiv_rhat (hx i))
+  have hφ := blend_gradient p (g := g) (G := fun i => Gf i x) lam σ hx hg
+  have h1 := HasDiv.smul hWi hSA
+  have hlW : HasFDerivAt (fun y => lam * (∑ i, Real.exp (-lam * (vnorm (y - p i) - σ)))⁻¹)
+      (dualOf (lam • ((-(W ^ 2)⁻¹) • ∑ i, (-lam * w i) • rhat (p i) x))) x := by
+    refine (hWi.const_mul lam).congr_fderiv ?_; ext v; simp [smul_dotProduct]
+  have h2 := HasDiv.smul hφ (HasDiv.smul hlW hSB)
+  have h := h1.add h2
+  convert h using 1
+  · funext y; rfl
+  -- the algebra of App. D
+  set SA := ∑ i, w i • (Gf i x - (lam * g i x) • rhat (p i) x) with hSAdef
+  set SB := ∑ i, w i • rhat (p i) x with hSBdef
+  have eA : ∑ i, (w i * (Lg i + (-(lam * g i x * (2 / vnorm (x - p i))) +
+        -((lam • Gf i x) ⬝ᵥ rhat (p i) x))) +
+        ((-lam * w i) • rhat (p i) x) ⬝ᵥ (Gf i x - (lam * g i x) • rhat (p i) x)) =
+      ∑ i, w i * (Lg i - 2 * lam * (rhat (p i) x ⬝ᵥ Gf i x) +
+        g i x * lam * (lam - 2 / vnorm (x - p i))) := by
+    refine Finset.sum_congr rfl fun i _ => ?_
+    simp only [smul_dotProduct, dotProduct_sub, dotProduct_smul, hr1, smul_eq_mul,
+      dotProduct_comm (Gf i x) (rhat (p i) x)]
+    ring
+  have eB : ∑ i, (w i * (2 / vnorm (x - p i)) + ((-lam * w i) • rhat (p i) x) ⬝ᵥ rhat (p i) x) =
+      ∑ i, w i * (2 / vnorm (x - p i) - lam) := by
+    refine Finset.sum_congr rfl fun i _ => ?_
+    simp only [smul_dotProduct, hr1, smul_eq_mul]; ring
+  have eN : ∑ i, (-lam * w i) • rhat (p i) x = (-lam) • SB := by
+    rw [hSBdef, Finset.smul_sum]
+    exact Finset.sum_congr rfl fun i _ => by rw [smul_smul]
+  change _ = W⁻¹ * _ + _ + (_ + _)
+  rw [eA, eN]
+  have hW' : (∑ i, Real.exp (-lam * (vnorm (x - p i) - σ))) = W := rfl
+  have hφ' : blend (fun _ => 1) p g lam σ x = φ := rfl
+  have hF : blendGradField p g Gf lam σ x = W⁻¹ • SA + φ • ((lam * W⁻¹) • SB) := rfl
+  have hA : A = W⁻¹ • SA := rfl
+  have hB : B = (lam * W⁻¹) • SB := rfl
+  rw [hW', hφ', hF, eB, hA, hB]
+  simp only [smul_dotProduct, dotProduct_smul, add_dotProduct, dotProduct_add, smul_eq_mul,
+    dotProduct_comm SB SA]
+  field_simp
+  ring
+
 end PAT
 
 end DdgProofs
