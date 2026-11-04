@@ -12,9 +12,8 @@ Timings therefore carry that load. Accuracy numbers do not depend on it, because
 deterministic.
 
 **Status.** Complete: the 315-shape accuracy run (all methods), the sign-rule study, the §16.3
-sweep, the black-box comparison (`COMPARISON.md`) and Fig. 7. Partial: the continuity study (7 of
-the planned clouds; the rest are running), Fig. 29 (110k and 880k points; 7.3M is running) and
-orientation (queued behind continuity under the thread cap). These sections say what they cover and
+sweep, the black-box comparison (`COMPARISON.md`), the continuity study (32 clouds) and Fig. 7.
+Partial: Fig. 29 (110k and 880k points; 7.3M is running) and orientation (running). These sections say what they cover and
 will be extended. Everything is reproducible with `scripts/pat_eval.sh`.
 
 ## Recommendations for the user
@@ -34,10 +33,10 @@ These are recommendations only; no crate default was changed.
 2. **Evaluation rule: keep 32-NN `PerQuery` as the fast default, and offer `All` (or, better, a
    subsampled far field) as the accuracy option.** `All` is better on every criterion we measured:
    grid MAE 0.0201 vs 0.0207, band MAE 0.0164 vs 0.0170, eikonality 0.028 vs 0.040, catastrophic
-   failures 20 vs 22, max |Δφ|/h at 256³ of 4.8 vs 24 (median), and 8 vs 17 zero-level components
-   on 6 clouds with 6 true components. It costs O(n) per query (4.4× the 32-NN grid time at 512
+   failures 20 vs 22, max |Δφ|/h at 256³ of 4.2 vs 17 (median), and zero-level components at 256³
+   of 33 vs 91 on 27 clouds with 37 true components (detached: 2 vs 20). It costs O(n) per query (4.4× the 32-NN grid time at 512
    points). Do **not** adopt the paper's λ = 10³/D with radius 2C/λ: it is worst on every criterion
-   (eikonality 0.054, 108 zero-level components where the truth has 7). Do **not** adopt the tapered
+   (eikonality 0.054; 328 zero-level components, 177 detached, where the truth has 37). Do **not** adopt the tapered
    kNN: it changes nothing measurable (see "Continuity").
 3. **C: 32 is at least as good as 64** in the §16.3 sweep (MAE 0.0213 vs 0.0218, eikonality 0.039
    vs 0.046); `All` with C = 32 is best overall (MAE 0.0209, eikonality 0.030). The differences are
@@ -322,8 +321,10 @@ measured here.
 
 ## Continuity per evaluation rule (WP6 resolution 1)
 
-*Partial: 7 golden clouds (5 with a truth mesh) at 64/128/256³. The 512-point clouds of the four
-datasets are running and will be added.*
+The cloud set: 32 in all. The 12 golden clouds (512–12,917 points; truth for 8 of them) and 5 shapes
+at 512 points from each of ABC (unseen validation shapes), blobs, Thingi10K and the analytic set.
+Each is evaluated at 64, 128 and 256³. `All` at 256³ was skipped for the 3 clouds with more than
+2048 points (cost).
 
 For each rule, on grids `linspace(−1, 1, n)³`, we measure:
 - the jump statistic: |Δφ|/h along every grid edge, as max, p99.9, and the fraction of edges above 5;
@@ -332,27 +333,29 @@ For each rule, on grids `linspace(−1, 1, n)³`, we measure:
   compared with the truth meshed the same way. A component is *detached* if none of its vertices lies
   within 2h of the true surface.
 
-At 256³, on the 6 clouds with a truth and all four rules:
+At 256³, on the 27 clouds that have a truth and all four rules:
 
-| rule | max |Δφ|/h (median / worst) | p99.9 | eikonality | MAE | band MAE | MC components (truth: 6) | detached |
-|---|---|---|---|---|---|---|---|---|
-| 32-NN `PerQuery` (default) | 23.9 / 60.2 | 1.95 | 0.044 | 0.0159 | 0.0159 | 17 | 8 |
-| paper λ + radius | 29.9 / 133.0 | 4.05 | 0.069 | 0.0161 | 0.0160 | 89 | 62 |
-| all points | 4.8 / 20.6 | 1.20 | 0.031 | 0.0164 | 0.0156 | 8 | 1 |
-| tapered 32-NN (ours) | 24.3 / 62.2 | 1.98 | 0.044 | 0.0159 | 0.0159 | 17 | 8 |
+| rule | max |Δφ|/h (median / worst) | p99.9 | edges > 5 (‰) | eikonality | MAE | band MAE | MC components (truth: 37) | detached |
+|---|---|---|---|---|---|---|---|---|---|
+| 32-NN `PerQuery` (default) | 17.4 / 68.9 | 2.09 | 0.60 | 0.039 | 0.0145 | 0.0130 | 91 | 20 |
+| paper λ + radius | 26.2 / 133.0 | 4.72 | 1.53 | 0.066 | 0.0149 | 0.0132 | 328 | 177 |
+| all points | 4.2 / 24.1 | 1.21 | 0.10 | 0.024 | 0.0143 | 0.0126 | 33 | 2 |
+| tapered 32-NN (ours) | 17.5 / 71.0 | 2.13 | 0.61 | 0.039 | 0.0145 | 0.0130 | 94 | 21 |
 
-These rows come from `report/tables.md`, restricted to clouds that have all four rules. The worst
-cloud is ABC0_6, a thin plate: 11 / 79 / 3 / 11 components. The median max slope grows like 1/h for
-the kNN rules (6.3 → 12.7 → 23.9 at 64/128/256) and slowly for `All` (3.3 → 4.3 → 4.8). At 64³ the
-components are 21 / 31 / 14 / 21, at 128³ 22 / 34 / 12 / 20 (truth 6).
+The median max slope grows like 1/h for the kNN rules (4.9 → 9.8 → 17.4 at 64/128/256) and much
+more slowly for `All` (2.8 → 3.8 → 4.2). Detached components at 64/128/256: 32-NN 9/19/20, paper
+16/50/177, all 3/4/2, taper 9/17/21. Extra components appear on thin CAD plates and Thingi models;
+for example `thingi117647` (truth 1) gets 8 with 32-NN, 48 with the paper rule, 1 with `All`.
+Per-cloud tables: `runs_tmp/pat-wp14/report/tables.md`.
 
 **Mechanism: the orchestrator's hypothesis (far-field kNN swaps) is refuted as the cause of the large
 slopes.** Three measurements:
-1. *The steepest edges are continuous.* For the 40 steepest edges of each cloud at 256³, we bisected
-   φ along the edge 50 times. On every edge of every cloud, for both the kNN and the radius rule, the
-   remaining difference is ≤ 2e-13, so there is no discontinuity. On 75–100 % of these edges the
-   neighbor set is the same at both ends (100 % on every cloud except holey-bunny). They lie mostly
-   in the far field (median ρ_min/σ_x 0.6–1.9 per cloud; median |φ_true| 0.03–0.5).
+1. *The steepest edges are continuous.* For the 40 steepest edges of each of the 32 clouds at 256³,
+   we bisected φ along the edge 50 times. On every edge of every cloud, for both the kNN and the
+   radius rule, the remaining difference is ≤ 2e-13, so there is no discontinuity. On 30 of 32 clouds
+   the neighbor set is the same at both ends of every one of these edges (holey-bunny 25 % differ,
+   one other cloud 2.5 %). They lie mostly in the far field (median ρ_min/σ_x 0.6–1.9 per cloud;
+   median |φ_true| 0.005–0.5).
 2. *The real kNN-swap jumps are small.* `eval swaps` samples 20,000 random edges of the 256³ grid.
    On each of the 5,500–13,500 edges whose 32-NN set changes, it bisects to the swap (1e-13) and
    measures |φ⁺ − φ⁻|:
@@ -384,7 +387,7 @@ slopes.** Three measurements:
 - The tapered kNN (continuous by construction) changes nothing measurable: same slopes, error,
   components and eikonality. We do not recommend it.
 - What helps is a **smaller λ in the far field**: `All` (σ_x global) or C = 32. Both cut the spurious
-  components (17 → 8 at 256³) and the slopes.
+  components (91 → 33 at 256³, truth 37; detached 20 → 2) and the slopes.
 - The paper's constant λ = 10³/D is the extreme case, with λ much larger than C/σ_x far away. It is
   the worst rule: 89 components.
 - §8.6's Lipschitz bound really is only a heuristic. Slopes up to ~100 occur with the default rule,
