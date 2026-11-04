@@ -63,6 +63,9 @@ pub struct ClampFlags {
     pub saddle: bool,
     /// A principal curvature is exactly zero (see [`SignRule`]).
     pub zero: bool,
+    /// Under [`EigenRule::Robust`]: the complemented eigenvector differs from the reference's
+    /// `(v1 ∓ disc, v2)` by more than 1e-6 in direction (`|sin|`), i.e. the rule changed the fit.
+    pub eigen_switched: bool,
 }
 
 /// The intermediate quantities of one fit (orientation, diagnostics).
@@ -109,6 +112,42 @@ pub enum SignRule {
     Geometric,
 }
 
+/// How the generalized eigenvector pair of `(II, I)` is formed.
+///
+/// **Reference** (default, parity): `ev± = (v1 ± disc, v2)`. One of the two cancels when
+/// `|v2| ≪ |v1|` (`disc² − v1² = O(v2²)`): `ev₋` for `v1 > 0`, `ev₊` for `v1 < 0`. At `v2 = 0` it is
+/// the zero vector, the 1e-10 clamp then returns the *other* eigenvector and both curvatures come
+/// out equal (NOTES-WP2.md item 1). In f64 this does not happen on real data; in f32 (training) the
+/// radii lose digits below `|v2/v1| ≈ 3e-4` and are wrong by 0.4–0.75 below `3e-7` (NOTES-WP7.md).
+///
+/// **Robust** (ours): keep the non-cancelling vector of the pair (`ev₊` for `v1 ≥ 0`, else `ev₋`) and
+/// take the other as its `I`-orthogonal complement `J·I·e` (`J` the rotation by 90°): the
+/// eigenvectors of the symmetric pencil `(II, I)` are `I`-orthogonal, so this is exact whenever the
+/// curvatures differ, needs no clamp, and both forms agree (up to sign) at the switch `v1 = 0`, so
+/// tori and their derivatives are continuous there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EigenRule {
+    /// The reference's pair (as trained).
+    #[default]
+    Reference,
+    /// The non-cancelling vector and its `I`-orthogonal complement.
+    Robust,
+}
+
+/// The robust eigenvector pair `(ev₊, ev₋)` (unnormalized) of [`EigenRule::Robust`].
+///
+/// [formula: pat-principal-pair]
+pub fn robust_pair(v1: f64, v2: f64, disc: f64, i: [f64; 3]) -> ([f64; 2], [f64; 2]) {
+    let comp = |e: [f64; 2]| [-(i[1] * e[0] + i[2] * e[1]), i[0] * e[0] + i[1] * e[1]];
+    if v1 >= 0.0 {
+        let e = [v1 + disc, v2];
+        (e, comp(e))
+    } else {
+        let e = [v1 - disc, v2];
+        (comp(e), e)
+    }
+}
+
 /// Options of [`fit_tori`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FitOptions {
@@ -119,13 +158,15 @@ pub struct FitOptions {
     pub curvature_floor: f64,
     /// Sign and center rule (see [`SignRule`]).
     pub sign_rule: SignRule,
+    /// Eigenvector rule (see [`EigenRule`]).
+    pub eigen_rule: EigenRule,
     /// Threads (`None`: all cores). An explicit pool; results do not depend on it.
     pub threads: Option<usize>,
 }
 
 impl Default for FitOptions {
     fn default() -> Self {
-        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, sign_rule: SignRule::Reference, threads: None }
+        FitOptions { eig_eps: 1e-10, curvature_floor: 1e-10, sign_rule: SignRule::Reference, eigen_rule: EigenRule::Reference, threads: None }
     }
 }
 
@@ -147,6 +188,8 @@ pub struct FitReport {
     pub saddle: usize,
     /// Points with an exactly zero principal curvature (see [`SignRule`]).
     pub zero_curvature: usize,
+    /// Points where [`EigenRule::Robust`] changed the eigenvector (see [`ClampFlags::eigen_switched`]).
+    pub eigen_switched: usize,
     /// Points with a non-finite torus (an error is returned when non-empty).
     pub nonfinite: Vec<u32>,
     /// Neighborhoods with fewer than the model's `k` tokens (`n < k`).
@@ -307,8 +350,18 @@ pub fn fit_torus(p: [f64; 3], n: [f64; 3], a: [f64; 6], opts: &FitOptions) -> (T
         clamps.eigvec = true;
     }
     ev_neg_1 = sign_pos(ev_neg_1) * ev_neg_1.abs().max(eps);
-    let mut ev_pos = [ev_pos_0, v2];
-    let mut ev_neg = [v1 - disc, ev_neg_1];
+    let (mut ev_pos, mut ev_neg) = match opts.eigen_rule {
+        EigenRule::Reference => ([ev_pos_0, v2], [v1 - disc, ev_neg_1]),
+        EigenRule::Robust => {
+            clamps.eigvec = false;
+            let (p, q) = robust_pair(v1, v2, disc, i);
+            // the reference's vector that the rule replaced, for the counter
+            let (old, new) = if v1 >= 0.0 { ([v1 - disc, ev_neg_1], q) } else { ([ev_pos_0, v2], p) };
+            let (lo, ln) = ((old[0] * old[0] + old[1] * old[1]).sqrt(), (new[0] * new[0] + new[1] * new[1]).sqrt());
+            clamps.eigen_switched = ((old[0] * new[1] - old[1] * new[0]) / (lo * ln)).abs() > 1e-6;
+            (p, q)
+        }
+    };
     let lp = (ev_pos[0] * ev_pos[0] + ev_pos[1] * ev_pos[1]).sqrt();
     let lq = (ev_neg[0] * ev_neg[0] + ev_neg[1] * ev_neg[1]).sqrt();
     ev_pos = [ev_pos[0] / lp, ev_pos[1] / lp];
@@ -431,6 +484,7 @@ pub fn fit_tori_with(
         report.saddle += cf.saddle as usize;
         report.clamped_curvature += cf.curvature as usize;
         report.zero_curvature += cf.zero as usize;
+        report.eigen_switched += cf.eigen_switched as usize;
         let finite = t.center.iter().chain(t.axis.iter()).all(|x| x.is_finite()) && t.major.is_finite() && t.minor.is_finite();
         if !finite {
             report.nonfinite.push(i as u32);

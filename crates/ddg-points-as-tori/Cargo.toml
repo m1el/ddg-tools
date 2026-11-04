@@ -15,11 +15,16 @@ default = ["bundled-weights"]
 bundled-weights = []
 # GPU inference and our NVRTC kernels (WP4 adds its dependencies).
 cuda = []
-# Training (WP7 adds autodiff and the npz reader).
-train = []
+# Training (SPEC.md §10): burn autodiff + optimizers, the compressed-npz reader, the seeded query
+# RNG and the curriculum file parser.
+train = ["burn/autodiff", "burn/optim", "dep:zip", "dep:rand_chacha", "dep:toml"]
 
 [dependencies]
 burn = { version = "=0.22.1", default-features = false, features = ["std", "flex", "simd"] }
 gemm = { version = "0.19", default-features = false, features = ["std"] }
 rayon = "1.10"
 safetensors = { version = "0.6", default-features = false, features = ["std"] }
+# Training only (feature `train`): pure-Rust deflate for the training npz files, ChaCha8 (D22), TOML.
+zip = { version = "0.6", optional = true, default-features = false, features = ["deflate"] }
+rand_chacha = { version = "0.9", optional = true, default-features = false, features = ["std"] }
+toml = { version = "1", optional = true, default-features = false, features = ["std", "parse"] }

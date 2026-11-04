@@ -1,0 +1,69 @@
+# The reference's training curriculum (points-as-tori `training/train.py`, `train()`; MIT License,
+# Copyright (c) 2026 Nicole Feng), as data. NOTES-REFERENCE.md §9.3; SPEC.md §10.1.
+#
+# Paths are relative to the unpacked training data (`PAT_training_data/PAT_training_data/`). A `*`
+# matches within a file name; each pattern's matches are sorted by name (the reference's phases 1–4
+# use unsorted `glob`, so their file order depended on the file system).
+#
+# Every phase starts from the previous phase's weights with a fresh optimizer; the learning rate rises
+# linearly from 0 over `warmup` steps and then stays at `lr` (the reference's cosine runs over 1e8
+# steps; `Schedule::Cosine` decays over the phase instead, D21). Steps per shape: ceil(2048 / batch_rows),
+# each running the network on the whole cloud. Step counts are for the full data (497,858 in all).
+
+validation = "ABC17_validation_3.npz"
+
+# Not in the paper: 64 epochs on one blob at a high rate (4,096 steps).
+[[phase]]
+name = "pretrain"
+files = ["pretraining_blob.npz"]
+epochs = 64
+lr = 1e-3
+warmup = 0
+batch_rows = 32
+init = "scratch"
+
+# Nicely sampled blobs: 2000 shapes, 96,000 steps.
+[[phase]]
+name = "phase0"
+files = ["nice/blobs_train_mode0*.npz"]
+epochs = 24
+lr = 1e-5
+warmup = 100
+batch_rows = 1024
+
+# Blobs and ABC17 interleaved; the reference's `zip` truncates to 4 + 4 files: 4000 shapes, 64,000 steps.
+[[phase]]
+name = "phase1"
+files = ["nice/blobs_train_mode0*.npz", "nice/ABC17_train_mode0_*.npz"]
+interleave = true
+epochs = 8
+lr = 1e-5
+warmup = 1000
+batch_rows = 1024
+
+# Blobs, all ABC17, ABC2: 7459 shapes, 119,344 steps.
+[[phase]]
+name = "phase2"
+files = ["nice/blobs_train_mode0*.npz", "nice/ABC17_train_mode0_*.npz", "nice/ABC2_train_mode0_*.npz"]
+epochs = 8
+lr = 1e-6
+warmup = 1000
+batch_rows = 1024
+
+# Blobs and every nice ABC chunk (2, 17, 55, 58): 12459 shapes, 124,590 steps.
+[[phase]]
+name = "phase3"
+files = ["nice/blobs_train_mode0*.npz", "nice/ABC*_train_mode0_*.npz"]
+epochs = 5
+lr = 1e-6
+warmup = 1000
+batch_rows = 1024
+
+# Everything, plus the simulated scans (3,588 padded clouds): 22457 shapes, 89,828 steps.
+[[phase]]
+name = "phase4"
+files = ["nice/blobs_train_mode0*.npz", "nice/ABC*_train_mode0_*.npz", "simulated/blobs_train_mode*.npz", "simulated/ABC*_train_mode*.npz"]
+epochs = 2
+lr = 1e-7
+warmup = 1000
+batch_rows = 1024
