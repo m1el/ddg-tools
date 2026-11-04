@@ -65,3 +65,4 @@ import DdgProofs.RepulsiveCurves
 import DdgProofs.RepulsiveSurfaces
 import DdgProofs.IntegerCoords
 import DdgProofs.IntrinsicSimplification
+import DdgProofs.PointsAsTori

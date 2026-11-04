@@ -2340,6 +2340,192 @@ and the id is proved (`RS.aug_precond_props`, the default augmented form of D33;
 
 ---
 
+## Points as Tori
+
+"PAT paper" is N. Feng, I. Gkioulekas, K. Crane, *Points as Tori: Fast Pointwise Signed Distance
+for Point Clouds*, ACM TOG 45(4), Article 53, 2026 (<https://doi.org/10.1145/3811385>); section,
+equation and figure numbers are the paper's. The contract is `crates/ddg-points-as-tori/SPEC.md`
+("SPEC", formula table §13); "N§k" is the reference survey `crates/ddg-points-as-tori/NOTES-REFERENCE.md`.
+
+**What the machine-checked part covers, and what it does not.** Machine-checked
+(`DdgProofs/PointsAsTori/*.lean`, namespace `DdgProofs.PAT`): the neighborhood scale (the median
+and its homogeneity), the reference frame rule on both branches, the translation and scale
+invariance of the features; the Monge patch, its fundamental forms, `H` and `K` of Eq. 19, the
+eigenvector pair of the reference and Eq. 20, the Rayleigh quotients, the principal directions and
+Eq. 21; the radii, the sign rule Eq. 22, the axis, and the scale covariance of the whole fit; the
+torus SDF as the Euclidean distance to the torus (for `R ≥ |r|`; a lower bound for spindle tori),
+its gradient and Laplacian off the axis and the core circle, the stable form; the contact of the
+fitted torus with the patch (value, normal and the torus's principal curvatures, including the
+cases where the paper's construction fails, below); the blend's shift invariance, weight range,
+convexity, frozen and exact gradients (App. D) and its Laplacian; and the further ids listed in
+SPEC §13 as proved, in the files named there. **Not** machine-checked: the entries below; the
+network and everything learned; neighbor search; the clamps of D9 beyond the statements in
+`Fitting.lean`; the one-sided rules on the singular sets (D12); floating-point rounding.
+
+**Findings while proving (reported to the SPEC owner, SPEC not edited here).**
+1. *Saddle tori are mirrored.* With the paper's center `c = Q*(0,0) − sign(T)/|κmin| n*(0,0)` and
+   Eq. 22, the torus's principal curvatures at `o = Q*(0,0)` w.r.t. `n*` are `(κmax, κmin)` only
+   for `κmin κmax > 0`; for saddles they are `(−κmax, −κmin)`, and the SDF gradient at `o` is
+   `−n*` (`PAT.torus_contact_curvatures`, `PAT.torus_contact_normal`). The center
+   `c = o + n*/κmin` (with the same radii and Eq. 22 for the SDF sign) osculates in all cases with
+   `∇g(o) = +n*`. The reference code (`torus_distance.cpp:781-807`) is the paper's, and the
+   pretrained network was trained with it, so inference keeps the paper's rule.
+2. *Degenerate eigenvector pair.* `(v1 ± √Δ, v2)` vanishes for one sign whenever `v2 = 0`,
+   `v1 ≠ 0`, e.g. `a10 = a01 = a11 = 0`, `a20 ≠ a02` (`PAT.principal_pair_degenerate`); the
+   reference's `1e-10` clamp then returns the other eigenvector twice.
+3. *Contact needs `κ₊κ₋ ≠ 0`.* With `sgn(0) = 0` (D9), an exact zero curvature puts `o` on the
+   core circle: `g(o) = −sgn(τ r)|r| ≠ 0` (`PAT.torus_contact_fails_sign_zero`).
+4. *Weight range.* The weights are in `[e^{−C}, e^{C}]` and `W ≥ |𝒩| e^{−C}`
+   (`PAT.blend_weight_range`, `PAT.blend_weight_sum_pos`); the nearest point's weight is `≥ 1` only
+   when `ρ_min ≤ σ`, not in general as SPEC §7.4 says.
+
+### [formula: pat-network] The network architecture
+
+- **Statement.** The coefficient network is the stack of SPEC §6.1: per-point MLP embedding, eight
+  pre-norm transformer blocks (multi-head self-attention and an MLP, residual connections, layer
+  normalization) and a linear read-out of the first token (PAT paper Sec. 4.3, Fig. 15; N§2).
+- **Reference.** A. Vaswani et al., *Attention is all you need*, NeurIPS 2017; J. L. Ba,
+  J. R. Kiros, G. E. Hinton, *Layer normalization*, arXiv:1607.06450, 2016; the Flax
+  `nnx.MultiHeadAttention` and `nnx.LayerNorm` modules used by the reference (N§2.3).
+- **Source check.** PAT paper Sec. 4.3 and N§2 read; the cited articles were not re-read.
+- **Why not formalized.** It is a definition of a learned function, not a mathematical claim; its
+  output has no property beyond being six real numbers. Correctness of the port is a parity
+  question (SPEC §15.1 item 4).
+- **What depends on it.** The coefficients `a`. Every proved statement downstream holds for any
+  coefficients.
+
+### [formula: pat-laplace-method] Laplace's method and the self-normalized limit
+
+- **Statement.** For continuous `h > 0` and twice-differentiable `φ` with a unique minimizer `x*` on
+  `Ω`, `∫_Ω h e^{−λφ} ~ (2π/λ)^{d/2} det(∇²φ(x*))^{−1/2} h(x*) e^{−λφ(x*)}` as `λ → ∞` (Eq. 15), so
+  `−(1/λ) log ∫ h e^{−λ|x − z|} dA(z) → min_z |x − z|` (Eq. 16) and the self-normalized average
+  `∫ g e^{−λ|x−z|} / ∫ e^{−λ|x−z|}` (Eq. 17) tends to `g` at the closest point.
+- **Reference.** PAT paper Sec. 2.2, Eq. 15–17; L. C. Evans, *Partial Differential Equations*, AMS
+  1998, §4.5; C. M. Bender, S. A. Orszag, *Advanced Mathematical Methods for Scientists and
+  Engineers I*, Springer 1999, §6.4.
+- **Source check.** PAT paper Sec. 2.2 read; Evans and Bender–Orszag not re-read.
+- **Why not formalized.** Asymptotic analysis of integrals over surfaces; Mathlib has no Laplace
+  method for surface integrals. The library evaluates the discrete sum (Eq. 25) and needs only its
+  exact algebra (`pat-blend-*`, proved).
+- **What depends on it.** Only the motivation for Eq. 25 and the choice of large `λ`.
+
+### [formula: pat-signed-hopf-cole] The signed Hopf–Cole transformation
+
+- **Statement.** The screened Poisson problems of Sec. 2 (Eq. 8–14) and their boundary-integral
+  forms give, through `u = −(1/λ) log w` (signed), an approximation of the signed distance that
+  converges as `λ → ∞`; App. A derives the boundary conditions and the link to winding numbers,
+  App. B the convergence.
+- **Reference.** PAT paper Sec. 2.1, Eq. 8–14, App. A–B; Y. Lipman, *Phase transitions, distance
+  functions, and implicit neural representations*, ICML 2021 (arXiv:2106.07689); S. R. S.
+  Varadhan, *On the behavior of the fundamental solution of the heat equation with variable
+  coefficients*, Comm. Pure Appl. Math. 20, 1967.
+- **Source check.** PAT paper Sec. 2.1 and the statements of App. A–B read; Lipman and Varadhan not
+  re-read.
+- **Why not formalized.** PDE theory on domains with boundary (potentials, jump conditions,
+  viscosity limits) that Mathlib does not have.
+- **What depends on it.** Nothing computed: the theory motivates the method. SHC (Eq. 28) is the
+  discretization of Eq. 14 and its algebra is proved (`pat-shc`).
+
+### [formula: pat-winding-dipole] The point-cloud winding number as a sum of dipoles
+
+- **Statement.** For an oriented point cloud with areas `A_i`, the generalized winding number is
+  `w(x) = Σ_i A_i ⟨n_i, p_i − x⟩ / (4π |p_i − x|³)`, the discretization of the solid-angle
+  (double-layer) integral; `w ≈ 1` inside and `≈ 0` outside a closed well-sampled surface.
+- **Reference.** G. Barill, N. Dickson, R. Schmidt, D. I. W. Levin, A. Jacobson, *Fast winding
+  numbers for soups and clouds*, ACM TOG 37(4), 2018, Sec. 3, Eq. 6; A. Jacobson, L. Kavan,
+  O. Sorkine-Hornung, *Robust inside-outside segmentation using generalized winding numbers*,
+  ACM TOG 32(4), 2013.
+- **Source check.** Not re-read (the formula as in SPEC §9 and N§7.6).
+- **Why not formalized.** The approximation property (a quadrature of the solid angle) is
+  analytic; the per-term kernel is the dipole `−n·∇G` of `G = 1/(4π|y|)`, whose derivatives are
+  proved under `pat-fwn-expansion`.
+- **What depends on it.** The GWN baseline and the sign of the mesh ground truth (SPEC §9).
+
+### [formula: pat-point-area] Point areas of Barill et al.
+
+- **Statement.** The area of `p_i` is the area of its Voronoi cell in the Delaunay triangulation of
+  its `k` nearest neighbors projected to the tangent plane.
+- **Reference.** Barill et al. 2018 (above), Sec. 5.
+- **Source check.** Not re-read.
+- **Why not formalized.** A heuristic quadrature weight; no exact property is claimed.
+- **What depends on it.** The area weights of GWN, FWN, SHC and SSPD (baselines only).
+
+### [formula: pat-regularized-wn] The regularized winding number
+
+- **Statement.** The dipole kernel multiplied by `S(t) = erf t − (2t/√π) e^{−t²}`, `t = ρ/ε`, is
+  smooth at `ρ = 0` and equals the dipole kernel up to `O(e^{−t²})` (the field of a Gaussian
+  smoothed dipole).
+- **Reference.** H. Chen, B. Miller, I. Gkioulekas, *3D reconstruction with fast dipole sums*,
+  ACM TOG 43(6), Article 192, 2024 (PAT paper "Chen et al. 2024a").
+- **Source check.** Not re-read.
+- **Why not formalized.** A smoothing heuristic for a baseline; the statement is analytic.
+- **What depends on it.** The regularized-WN baseline only.
+
+### [formula: pat-lse] LogSumExp distance
+
+- **Statement.** `d_λ(x) = −(1/λ) log Σ_i e^{−λ|x − p_i|}` satisfies
+  `min_i |x − p_i| − (log n)/λ ≤ d_λ(x) ≤ min_i |x − p_i|`, a smooth unsigned distance.
+- **Reference.** A. Madan, D. I. W. Levin, *Fast evaluation of smooth distance constraints on
+  co-dimensional geometry*, ACM TOG 41(4), 2022; P. Blanchard, D. J. Higham, N. J. Higham,
+  *Accurately computing the log-sum-exp and softmax functions*, IMA J. Numer. Anal. 41(4), 2021
+  (the shift).
+- **Source check.** Not re-read.
+- **Why not formalized.** Baseline only; the bound is elementary but nothing in the library relies
+  on it. The shift invariance is the same algebra as `pat-blend-shift` (proved).
+- **What depends on it.** The LSE baseline only.
+
+### [formula: pat-adam] Adam
+
+- **Statement.** `m ← β₁m + (1−β₁)g`, `v ← β₂v + (1−β₂)g²`, `θ ← θ − η m̂/(√v̂ + ε)` with bias
+  corrections `m̂ = m/(1−β₁ᵗ)`, `v̂ = v/(1−β₂ᵗ)`.
+- **Reference.** D. P. Kingma, J. Ba, *Adam: a method for stochastic optimization*, ICLR 2015
+  (arXiv:1412.6980).
+- **Source check.** Not re-read; the update is the framework's.
+- **Why not formalized.** An optimizer heuristic with no convergence claim used here.
+- **What depends on it.** Training (SPEC §10) only.
+
+### [formula: pat-offset] Offsets and constructive solid geometry of SDFs
+
+- **Statement.** For an exact SDF `φ` of a set `Ω`, the level set `{φ = c}` is the boundary of the
+  `c`-offset of `Ω` (`c > 0`) or of its erosion (`c < 0`), and `φ − c` is its exact SDF on the side
+  away from the medial axis. `min(φ_A, φ_B)` is the exact SDF of `A ∪ B` outside the union and a
+  bound inside; `max` likewise for intersections (Ricci). The approximate `φ` of Eq. 25 inherits
+  these only approximately.
+- **Reference.** A. Ricci, *A constructive geometry for computer graphics*, The Computer Journal
+  16(2), 1973; I. Quilez, *distance functions*, <https://iquilezles.org/articles/distfunctions/>.
+- **Source check.** Not re-read.
+- **Why not formalized.** The exact-SDF statements concern sets and their metric projections; the
+  library applies them to an approximate field. The elementary part is proved under
+  `pat-boolean` (the sign rules and the preservation of 1-Lipschitz bounds by `min`/`max`).
+- **What depends on it.** The offsets, Booleans and morphology applications (SPEC §8.1–8.3), which
+  report the field they compute and claim no exactness.
+
+### [formula: pat-quilez-2d] The 2D analytic SDFs
+
+- **Statement.** The sixteen 2D SDFs of SPEC §11 (circle, pie, arc, segment, vesica, box, cross,
+  isosceles triangle, triangle, hexagon, ellipse, heart, pentagon, moon, trapezoid, quad) are the
+  exact signed distances to their shapes, with the stated gradients.
+- **Reference.** I. Quilez, *2D distance and gradient functions*, 2019,
+  <https://iquilezles.org/articles/distgradfunctions2d/>; PAT paper App. E.
+- **Source check.** Not re-read.
+- **Why not formalized.** Sixteen case analyses of planar nearest points; they are test data, and
+  the Rust tests check them against brute-force distances to dense boundary samples.
+- **What depends on it.** The analytic test shapes (SPEC §11) and their ground truth. The lifting
+  to 3D (revolution, extrusion) and its gradients are proved (`pat-revolution`,
+  `pat-extrusion`, `pat-extrusion-gradient`); their exactness given exact 2D SDFs is cited here
+  (Quilez, *distance functions*, above).
+
+### Not formalized for proved ids (cross-references)
+
+- `pat-fwn-expansion`: the derivatives of `G(y) = 1/(4π|y|)` used by the order-0/1/2 terms are
+  proved; the error bound of the truncated expansion for `β`-admissible clusters is Barill et al.
+  2018, Sec. 4 (not re-read), and the octree is not covered.
+- `pat-torus-sdf`: for `R < |r|` (spindle tori) only the lower bound `|g(x)| ≤ dist(x, T)` is
+  proved; Eq. 23 is then the distance to the tube of the generating circle (Quilez 2025,
+  *3D distance and gradient functions*).
+
+---
+
 ## Out of scope of this package
 
 The end-to-end pipeline (`crates/ddg-uv`: charts, packing), the Python bindings and the Blender
