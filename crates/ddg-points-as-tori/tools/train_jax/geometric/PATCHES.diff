@@ -1,0 +1,14 @@
+# Geometric sign-rule probe: the one change to the authors' JAX torus fit (used by the training loss).
+# train.py carries the same checkpoint/resume/progress patch as ../pat-train-jax/PATCHES.diff (src/train.py is a copy).
+--- a/src/pointsastori/network.py
++++ b/src/pointsastori/network.py
+@@ -317,6 +317,9 @@
+ 
+ 		# Torus center
+ 		center = p_i + a00 * n_i - (s / abs_kappa_min) * normal
++		# Geometric sign rule (ddg-tools SignRule::Geometric): at a saddle (det II < 0) put the centre on the
++		# osculating side, o + n*/kappa_min, by reflecting it through the contact point o = p + a00 n.
++		center = jnp.where(4.0 * a20 * a02 - a11 * a11 < 0.0, 2.0 * (p_i + a00 * n_i) - center, center)
+ 
+ 		# Torus axis (u = normal × v_min, normalized)
+ 		u = jnp.cross(normal, v_min)

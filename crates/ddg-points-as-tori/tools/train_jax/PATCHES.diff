@@ -1,0 +1,195 @@
+--- a/training/train.py
++++ b/training/train.py
+@@ -5,6 +5,62 @@
+ from mesh_data import *
+ from mesh_sampling_jax import *
+ 
++# --- PAT-JAX patch (ddg-tools runs_tmp/pat-train-jax): periodic checkpoints, resume, progress lines. ---
++# Nothing below changes the training math, data order, RNG keys or hyperparameters.
++PAT_RESUME_DIR = os.environ.get('PAT_RESUME_DIR', 'checkpoints/')
++PAT_CKPT_SECONDS = float(os.environ.get('PAT_CKPT_SECONDS', '900'))
++PAT_LOG_EVERY = int(os.environ.get('PAT_LOG_EVERY', '50'))
++PAT_MAX_STEPS = int(os.environ.get('PAT_MAX_STEPS', '0'))  # > 0: checkpoint and stop the phase (tests only)
++PAT_CURRICULUM = []  # [(final_save_filepath, n_steps), ...], set by the driver (global step and ETA)
++PAT_COMPILES = {'n': 0, 's': 0.0, 'hits': 0}  # compile counter, maintained by the driver's jax.monitoring listener
++
++
++class PatStopPhase(Exception):
++	pass
++
++
++def _pat_flatten(state, prefix):
++	out = {}
++	for path, x in jax.tree_util.tree_flatten_with_path(state)[0]:
++		k = jax.tree_util.keystr(path)
++		if jax.dtypes.issubdtype(x.dtype, jax.dtypes.prng_key):
++			out[prefix + 'key:' + k] = np.asarray(jax.random.key_data(x))
++		else:
++			out[prefix + 'arr:' + k] = np.asarray(x)
++	return out
++
++
++def _pat_restore(obj, saved, prefix):
++	leaves, treedef = jax.tree_util.tree_flatten_with_path(nnx.state(obj))
++	new = []
++	for path, x in leaves:
++		k = jax.tree_util.keystr(path)
++		if jax.dtypes.issubdtype(x.dtype, jax.dtypes.prng_key):
++			new.append(jax.random.wrap_key_data(jnp.asarray(saved[prefix + 'key:' + k]), impl=jax.random.key_impl(x)))
++		else:
++			a = saved[prefix + 'arr:' + k]
++			assert a.shape == x.shape and a.dtype == x.dtype, f'checkpoint mismatch at {prefix}{k}'
++			new.append(jnp.asarray(a))
++	nnx.update(obj, jax.tree_util.tree_unflatten(treedef, [x for x in new]))
++
++
++def _pat_save(tag, model, optimizer, cursor, lists):
++	os.makedirs(PAT_RESUME_DIR, exist_ok=True)
++	d = {}
++	d.update(_pat_flatten(nnx.state(model), 'model/'))
++	d.update(_pat_flatten(nnx.state(optimizer), 'opt/'))
++	for k, v in cursor.items():
++		d['cursor/' + k] = np.asarray(v, dtype=np.int64)
++	for k, v in lists.items():
++		d['list/' + k] = np.asarray([np.asarray(x) for x in v], dtype=np.float32).reshape(-1)
++	path = os.path.join(PAT_RESUME_DIR, tag + '.npz')
++	tmp = os.path.join(PAT_RESUME_DIR, tag + '.tmp.npz')
++	np.savez(tmp, **d)
++	if os.path.exists(path):
++		os.replace(path, os.path.join(PAT_RESUME_DIR, tag + '.prev.npz'))
++	os.replace(tmp, path)
++	print(f'[PAT] checkpoint {path}: ' + ' '.join(f'{k}={v}' for k, v in cursor.items()), flush=True)
++
+ 
+ def load_mesh_training_data(filepath):
+ 	"""
+@@ -446,6 +502,53 @@
+ 	num_training_datasets = len(all_training_data)
+ 	np.random.seed(seed)
+ 
++	# PAT patch: resume from this phase's checkpoint (model + Adam state + cursor + logged losses).
++	pat_tag = final_save_filepath
++	pat_path = os.path.join(PAT_RESUME_DIR, pat_tag + '.npz')
++	pat_resume = None
++	pat_step = 0
++	pat_start_epoch, pat_start_i = 0, 0
++	pat_phase_total = num_epochs * sum(
++		(all_training_data[d][0].shape[1] + batch_size - 1) // batch_size for d, _ in all_shape_indices
++	)
++	pat_before = 0
++	for t, n in PAT_CURRICULUM:
++		if t == pat_tag:
++			break
++		pat_before += n
++	pat_all = sum(n for _, n in PAT_CURRICULUM) or pat_phase_total
++	pat_schedule = optax.warmup_cosine_decay_schedule(
++		init_value=0.0, peak_value=learning_rate, warmup_steps=warmup_steps, decay_steps=total_steps,
++		end_value=learning_rate * 0.01,
++	)
++
++	def pat_lists(e_l, e_d, e_e):
++		return {
++			'epoch_losses': e_l, 'epoch_distance_losses': e_d, 'epoch_eikonality_losses': e_e,
++			'all_train_losses': all_train_losses, 'all_distance_losses': all_distance_losses,
++			'all_eikonality_losses': all_eikonality_losses, 'validation_losses': validation_losses,
++			'validation_epochs': validation_epochs,
++		}
++
++	if os.path.exists(pat_path):
++		pat_resume = dict(np.load(pat_path))
++		_pat_restore(model, pat_resume, 'model/')
++		_pat_restore(optimizer, pat_resume, 'opt/')
++		pat_start_epoch = int(pat_resume['cursor/epoch'])
++		pat_start_i = int(pat_resume['cursor/next_shape'])
++		pat_step = int(pat_resume['cursor/phase_step'])
++		for name in ['all_train_losses', 'all_distance_losses', 'all_eikonality_losses', 'validation_losses']:
++			pat_lists([], [], [])[name].extend(np.float32(x) for x in pat_resume['list/' + name])
++		validation_epochs.extend(int(x) for x in pat_resume['list/validation_epochs'])
++		print(
++			f'[PAT] resumed {pat_tag} from {pat_path}: epoch {pat_start_epoch} next shape {pat_start_i} '
++			f'phase step {pat_step}/{pat_phase_total}',
++			flush=True,
++		)
++	pat_last_ckpt = time.time()
++	pat_last_log_t, pat_last_log_step = time.time(), pat_step
++	print(f'[PAT] phase {pat_tag}: {pat_phase_total} steps, global offset {pat_before}, curriculum {pat_all}', flush=True)
++
+ 	for epoch in range(num_epochs):
+ 		epoch_key = jax.random.fold_in(key, epoch)  # deterministic key per epoch
+ 
+@@ -457,7 +560,20 @@
+ 		# Shuffle all shapes across all datasets together
+ 		shuffled_indices = np.random.permutation(total_shapes)
+ 
++		# PAT patch: skip finished epochs (the permutation above is still drawn, so the order stays the same).
++		if pat_resume is not None and epoch < pat_start_epoch:
++			continue
++		pat_skip = 0
++		if pat_resume is not None and epoch == pat_start_epoch:
++			pat_skip = pat_start_i
++			epoch_losses.extend(np.float32(x) for x in pat_resume['list/epoch_losses'])
++			epoch_distance_losses.extend(np.float32(x) for x in pat_resume['list/epoch_distance_losses'])
++			epoch_eikonality_losses.extend(np.float32(x) for x in pat_resume['list/epoch_eikonality_losses'])
++			total_num_batches = int(pat_resume['cursor/total_num_batches'])
++
+ 		for i, global_idx in enumerate(shuffled_indices):
++			if i < pat_skip:
++				continue
+ 			dataset_idx, shape_idx = all_shape_indices[global_idx]
+ 
+ 			# Get data arrays for this dataset
+@@ -530,6 +646,26 @@
+ 				batch_distance_losses_list.append(loss_dict['distance_loss'])
+ 				batch_eikonality_losses_list.append(loss_dict['eikonality_loss'])
+ 
++				# PAT patch: progress line (synchronizes on this step's loss every PAT_LOG_EVERY steps).
++				pat_step += 1
++				if pat_step % PAT_LOG_EVERY == 0:
++					l, ld, le = float(loss), float(loss_dict['distance_loss']), float(loss_dict['eikonality_loss'])
++					now = time.time()
++					sps = (now - pat_last_log_t) / max(pat_step - pat_last_log_step, 1)
++					pat_last_log_t, pat_last_log_step = now, pat_step
++					g = pat_before + pat_step
++					mem = jax.devices()[0].memory_stats() or {}
++					print(
++						f'[PAT] {time.strftime("%Y-%m-%dT%H:%M:%S")} phase {pat_tag} epoch {epoch}/{num_epochs} '
++						f'shape {i}/{total_shapes} step {pat_step}/{pat_phase_total} global {g}/{pat_all} '
++						f'loss {l:.6f} d {ld:.6f} e {le:.6f} lr {float(pat_schedule(pat_step - 1)):.3e} '
++						f'{sps:.4f} s/step eta_phase {(pat_phase_total - pat_step) * sps / 3600:.2f} h '
++						f'eta_total {(pat_all - g) * sps / 3600:.2f} h '
++						f'peak_mem {mem.get("peak_bytes_in_use", 0) / 2**30:.2f} GiB '
++						f'compiles {PAT_COMPILES["n"]} ({PAT_COMPILES["s"]:.0f} s, cache hits {PAT_COMPILES["hits"]})',
++						flush=True,
++					)
++
+ 			# Accumulate losses for this shape
+ 			epoch_losses.extend(batch_losses_list)
+ 			epoch_distance_losses.extend(batch_distance_losses_list)
+@@ -552,6 +688,15 @@
+ 					f'eikonality = {epoch_eikonality_loss:.6f}'
+ 				)
+ 
++			# PAT patch: periodic checkpoint at shape boundaries.
++			pat_stop = PAT_MAX_STEPS > 0 and pat_step >= PAT_MAX_STEPS
++			if time.time() - pat_last_ckpt > PAT_CKPT_SECONDS or pat_stop:
++				cursor = {'epoch': epoch, 'next_shape': i + 1, 'phase_step': pat_step, 'total_num_batches': total_num_batches}
++				_pat_save(pat_tag, model, optimizer, cursor, pat_lists(epoch_losses, epoch_distance_losses, epoch_eikonality_losses))
++				pat_last_ckpt = time.time()
++				if pat_stop:
++					raise PatStopPhase(f'{pat_tag}: stopped after {pat_step} steps (PAT_MAX_STEPS)')
++
+ 		# Compute epoch averages
+ 		epoch_train_loss = np.sum(epoch_losses) / total_num_batches
+ 		epoch_distance_loss = np.sum(epoch_distance_losses) / total_num_batches
+@@ -650,6 +795,11 @@
+ 					f'{"eikonality:":<{LABEL_WIDTH}}{val_eikonality_loss:<{VALUE_WIDTH}.6f}'
+ 				)
+ 
++		# PAT patch: checkpoint at every epoch end (after their save and validation).
++		cursor = {'epoch': epoch + 1, 'next_shape': 0, 'phase_step': pat_step, 'total_num_batches': 0}
++		_pat_save(pat_tag, model, optimizer, cursor, pat_lists([], [], []))
++		pat_last_ckpt = time.time()
++
+ 	t1 = time.time()
+ 	print(f'Total training time: {t1 - t0:.2f} s')
+ 
