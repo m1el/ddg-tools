@@ -5,8 +5,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-rust-version.workspace = true
+rust-version = "1.95"
 
 # Dependencies are set by WP1 (SPEC.md §17). The ported reference code and the converted pretrained
 # weights keep their notice in `LICENSES/points-as-tori-MIT.txt`.
+[features]
+default = ["bundled-weights"]
+# Embed `weights/pat-reference.safetensors` (the authors' MIT weights, converted) with `include_bytes!`.
+bundled-weights = []
+# GPU inference and our NVRTC kernels (WP4 adds its dependencies).
+cuda = []
+# Training (WP7 adds autodiff and the npz reader).
+train = []
+
 [dependencies]
+burn = { version = "=0.22.1", default-features = false, features = ["std", "flex", "simd"] }
+gemm = { version = "0.19", default-features = false, features = ["std"] }
+rayon = "1.10"
+safetensors = { version = "0.6", default-features = false, features = ["std"] }
