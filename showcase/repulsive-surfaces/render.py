@@ -22,6 +22,9 @@ A *layer*:
                                 bounding diagonal, "index": [subset], "color")
   {"cylinder": {"r":, "z0":, "z1":, "center": [x, y]}}   an axis-parallel (z) cylinder
   {"box": {"center": [x, y, z], "half": [hx, hy, hz]}}   a box
+  {"torus": {"R":, "r":, "center": [x, y, z]}}           a torus with the z axis as its axis
+anim specs may set "track": true: every frame is normalised to the same size on its own (a zoom that
+follows the shape; the camera is fitted to the union of the normalised frames).
 The scenes are z up (the reference's applications are written that way); nothing is rotated.
 """
 
@@ -92,6 +95,23 @@ def cylinder_mesh(r, z0, z1, cx, cy, n=48):
     return V, np.array(F)
 
 
+def torus_mesh(R, r, cx=0.0, cy=0.0, cz=0.0, n=96, m=32):
+    u = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    v = np.linspace(0, 2 * np.pi, m, endpoint=False)
+    U, Vv = np.meshgrid(u, v, indexing="ij")
+    X = (R + r * np.cos(Vv)) * np.cos(U) + cx
+    Y = (R + r * np.cos(Vv)) * np.sin(U) + cy
+    Z = r * np.sin(Vv) + cz
+    V = np.stack([X, Y, Z], -1).reshape(-1, 3)
+    F = []
+    for i in range(n):
+        for j in range(m):
+            a, b = i * m + j, ((i + 1) % n) * m + j
+            c, d = ((i + 1) % n) * m + (j + 1) % m, i * m + (j + 1) % m
+            F += [[a, b, c], [a, c, d]]
+    return V, np.array(F)
+
+
 def box_mesh(c, h):
     c, h = np.asarray(c, float), np.asarray(h, float)
     V = np.array([[sx, sy, sz] for sz in (-1, 1) for sy in (-1, 1) for sx in (-1, 1)], float) * h + c
@@ -121,6 +141,10 @@ class Layer:
         elif "cylinder" in d:
             c = d["cylinder"]
             self.V, self.F = cylinder_mesh(c["r"], c["z0"], c["z1"], *c.get("center", [0, 0]))
+            self.kind = "mesh"
+        elif "torus" in d:
+            t = d["torus"]
+            self.V, self.F = torus_mesh(t["R"], t["r"], *t.get("center", [0, 0, 0]))
             self.kind = "mesh"
         elif "box" in d:
             self.V, self.F = box_mesh(d["box"]["center"], d["box"]["half"])
@@ -246,14 +270,20 @@ def main():
         H = int(a[4]) if len(a) > 4 else 720
         panels = [load_panel(p, cache) for p in spec["panels"]]
         allpts = np.concatenate([framed_points(ls) for ls in panels])
-        norm = make_norm(allpts)
+        if spec.get("track"):
+            norms = [make_norm(framed_points(ls)) for ls in panels]
+            allpts = np.concatenate([(framed_points(ls) + n[1]) * n[0] for ls, n in zip(panels, norms)])
+            norm = (1.0, np.zeros(3))
+        else:
+            norms = None
+            norm = make_norm(allpts)
         new_scene(W, H, int(os.environ.get("RS_SAMPLES", 64)))
         studio_and_camera((allpts + norm[1]) * norm[0], spec, spec.get("margin", 1.1))
 
         def update(i):
             clear_geometry()
             for k, l in enumerate(panels[i]):
-                l.add(norm, k)
+                l.add(norms[i] if norms else norm, k)
 
         B.render_frames(name, len(panels), update)
     else:

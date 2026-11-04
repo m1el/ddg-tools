@@ -29,3 +29,6 @@ rotated frames in reverse order. Results and open problems: `crates/ddg-repulsiv
 | `envelopes` | Fig. 24 | nested envelopes, volume x1.15 per level, previous level as obstacle, coarser each level |
 | `walnut`, `cobblestones` | Fig. 25 | area growth inside a shell; 14 spheres growing inside a slab |
 | `subcritical`, `klein` | Fig. 26 | exponents below the critical ones with `low_order: false` |
+
+Videos: `make_videos.py` (same renderer; tiles several runs on one step axis, `track` zooms to each frame's shape):
+`uv run showcase/repulsive-surfaces/make_videos.py [dodeca genus genus_plane envelopes shrinkwrap h_pins slideoff cobblestones klein spindles eversion]`.
