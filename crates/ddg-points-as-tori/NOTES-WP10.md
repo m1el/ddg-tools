@@ -159,6 +159,50 @@ prove) that their pretraining ended in a similar state and phase 0 (lr 1e-5) mov
 intervened; the phase-0 validation curve will tell. If phase 0 does not recover the distance term, a rerun of
 pretraining at a lower lr (a deviation from the recipe) is the proposal.
 
+## 5c. Optimization round (user decision "optimize first, then run", 05:40–05:57)
+
+The run was stopped right after its step-2,880 checkpoint (05:39; checkpoint backed up in
+`runs_tmp/pat-train/saved-step2880/` with SHA256SUMS, and verified by resuming it for one step).
+
+**What changed** (commits `801b3c9` → `d9f1606`):
+1. **CUDA graphs** for the network batches (`gpu.rs`, `burn::tensor::capture` / `Graph::replay`, burn 0.22.1 on
+   CubeCL's hardware graphs). Pass 2 (forward, no tape) and pass 4 (forward with tape + backward + the 40 parameter
+   gradients) of one fixed-shape batch are captured once per thread (warmup ×3, then capture; ~2 s) and replayed
+   per batch: ~1,500 launches become one. The parameters live in uniquely owned stable buffers that are written in
+   place (`slice_assign` on a refcount-1 tensor) from the current `NetParams` before each pass; features, output
+   weights and the pad mask likewise. Graphs are keyed by device, architecture, batch shapes and mask presence
+   (padded clouds get their own pair). `StepOptions::gpu_graphs` (default true), `--no-graphs`.
+   Check: `graph_replay_matches_eager` (replays with changed inputs and parameters equal the eager closure
+   bitwise).
+2. **Flat-parameter training forward** (`forward_flat`, the same ops as `forward_split`; bitwise equal on the GPU to
+   the previous binary with graphs off; `PatNet` equality in f64 kept).
+3. One device-side finiteness test of the gradients (`Σ 0·g` per tensor, one read-back) instead of 40 read-backs.
+4. Shapes re-chosen with graphs on: network batch 256 (512: bwd 0.255 vs 0.197 s), untaped forward batch 256
+   (1024: 0.095 s vs 0.048 s; 2048: 0.112 s), loss pair chunk 2¹⁹ (2¹⁸: 0.08 s, 2²⁰: 0.08 s, 2¹⁹: **0.065 s**,
+   2²²: 0.16 s).
+5. `t_wait` in `log.jsonl`: seconds the loop waited for the preparer.
+
+Tried and not kept: larger batches (above); more fusion (no knob beyond `max_ops = 64`); our own fused
+attention/LayerNorm kernels (not reachable through burn's dispatch API without the device buffers; the attention
+softmax is the largest remaining fused kernel, ~0.8 ms per layer per batch).
+
+**Measured** (phase-0 shape, `bench`, load 24–30 with WP14 at ≤ 24 threads, nice 19):
+
+| binary | fwd | loss | bwd | update | step | GPU memory |
+|---|---|---|---|---|---|---|
+| `801b3c9` (the run's, eager, forward 1024, chunk 2²⁰) | 0.095 | 0.080 | 0.240 | 0.016 | **0.44** | 7.1 GB |
+| `d9f1606` (graphs, forward 256, chunk 2¹⁹) | 0.048 | 0.065 | 0.197 | 0.018 | **0.34** | 4.2 GB |
+
+In the training loop from the same checkpoint (160 pretraining steps, load ~25): **0.495 → 0.301 s/step (−39 %)**,
+mean `t_wait` 3 ms. Loss curves from the same checkpoint: step 1 equal to 1.7e-10 relative, then median 3.8e-3, max
+2.0e-2 relative per step over 160 steps (TF32-level separation of the trajectories, as GPU vs CPU in §4); mean loss
+0.2698 vs 0.2694. The new binary resumes the old binary's checkpoints. Run to run: bitwise (bench, 2 × 8 steps; the
+loop, 80 steps from the same checkpoint). Tests: `tests/train.rs` (16, FD checks), the GPU unit tests,
+`graph_replay_matches_eager`, `tests/gpu.rs` (12): pass.
+
+The bits of `d9f1606` differ from `801b3c9`'s (burn-fusion segments a captured closure differently from the eager
+stream), within the TF32 standard above.
+
 ## 6. SPEC proposals (nothing applied to SPEC.md)
 
 1. §18 WP4 item 1: the Tf32 coefficient tolerance is 3e-3·(1 + |a|) (raw outputs 2e-4); above.
@@ -167,11 +211,10 @@ pretraining at a lower lr (a deviation from the recipe) is the proposal.
    reductions and `sum_dim` only, and GPU training is bitwise run to run and resumes bitwise; D4's "bitwise run
    to run" therefore holds for training as well, with the caveat that the bits depend on the network batch
    shape (256 by default).
-3. §10.4 "expected time": replace "≈ 30–35 h (TF32)" by the measured 0.41 s GPU time per step (≈ 57 h) on a
-   quiet host and ≈ 0.6 s per step (≈ 83 h) with the machine loaded; the bound is burn's per-op dispatch
-   (13k launches per step) plus the backward's reductions. Further speed needs fewer launches (fused attention
-   and LayerNorm kernels, or a hand-written training kernel per layer), which departs from "the network in the
-   framework" (D2); not done.
+3. §10.4 "expected time": replace "≈ 30–35 h (TF32)" by the measured ≈ 0.30–0.34 s per step with CUDA graphs
+   (≈ 42–47 h for the curriculum) when other agents keep to ≤ 24 threads; without graphs the bound was burn's
+   per-op dispatch (13k launches per step). Further speed needs our own fused attention/LayerNorm kernels in the
+   training graph, which departs from "the network in the framework" (D2); not done.
 4. §10 / D19: `TrainOptions::validate_every_steps` (above), so that validating per epoch does not double the
    pretraining phase (64 epochs of 64 steps, ~40 s each).
 

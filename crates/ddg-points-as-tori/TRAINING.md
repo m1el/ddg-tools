@@ -16,11 +16,11 @@ crate's port of their training code (`src/train/`, MIT, Copyright (c) 2026 Nicol
 | data rules | normals normalized at load (D23), the network on valid rows with an attention pad mask (D19), all-padding slices skipped |
 | schedule | the code's (`Schedule::Code`: linear warmup, then constant; D21), Adam β 0.9/0.999, ε 1e-8 |
 | seed | 42 (data order, queries, initialization; D22) |
-| device | CUDA 0 (RTX 4080), TF32 matmuls (user decision 2026-11-04), network batch 256 neighborhoods (taped passes), 1024 (untaped forward) |
+| device | CUDA 0 (RTX 4080), TF32 matmuls (user decision 2026-11-04), network batches of 256 neighborhoods replayed as CUDA graphs, loss chunks of 2¹⁹ padded pairs |
 | checkpoints | every 2,000 steps (at the next shape boundary), at every epoch end and every phase end |
 | validation | `ABC17_validation_3.npz` with unit normals, at epoch ends once 1,000 steps passed since the last one, and at every phase end |
 | output | `/var/data/discrete-geometry/ddg-tools/runs_tmp/pat-train/` |
-| code | commit `801b3c9` (binary frozen as `runs_tmp/pat-train/bin/train-801b3c9`); steps 1–576 ran with `7527474` (the same math without `--forward-batch`) |
+| code | commit `d9f1606` (binary frozen as `runs_tmp/pat-train/bin/train-d9f1606`) from step 2,881; steps 1–576 ran with `7527474`, 577–2,880 with `801b3c9` (same math, eager launches; NOTES-WP10 §5c) |
 
 | phase | files | epochs | steps | lr | rows per step |
 |---|---|---|---|---|---|
@@ -34,7 +34,8 @@ crate's port of their training code (`src/train/`, MIT, Copyright (c) 2026 Nicol
 ### Exact command
 
 Started 2026-11-04 05:03 UTC; stopped twice for short A/B measurements of the batch shapes and restarted from
-its checkpoints (05:06 from step 64; 05:16 from step 576 with the `--forward-batch 1024` binary); detached, at normal priority, through `runs_tmp/pat-train/run.sh`, which restarts the trainer after a failure
+its checkpoints (05:06 from step 64; 05:16 from step 576); stopped at 05:39 after the step-2,880 checkpoint for the
+optimization round (NOTES-WP10 §5c) and resumed at 05:57 from that checkpoint with `d9f1606`; detached, at normal priority, through `runs_tmp/pat-train/run.sh`, which restarts the trainer after a failure
 (up to 30 times, 2 minutes apart; every start resumes from the last checkpoint):
 
 ```bash
@@ -44,13 +45,13 @@ cargo build --release -p ddg-points-as-tori --features train,cuda --example trai
 OUT=/var/data/discrete-geometry/ddg-tools/runs_tmp/pat-train
 mkdir -p $OUT/bin && cp target-pat10/release/examples/train $OUT/bin/train-$(git rev-parse --short HEAD)
 # run.sh loops over:
-#   $OUT/bin/train-801b3c9 run --out $OUT --device cuda:0 --seed 42 --sign reference --eigen robust \
-#       --schedule code --checkpoint-every 2000 --validate-every 1000 --forward-batch 1024 >> $OUT/train.log 2>&1
+#   $OUT/bin/train-d9f1606 run --out $OUT --device cuda:0 --seed 42 --sign reference --eigen robust \
+#       --schedule code --checkpoint-every 2000 --validate-every 1000 >> $OUT/train.log 2>&1
 cd $OUT && setsid nohup ./run.sh > /dev/null 2>&1 < /dev/null &
 setsid nohup timeout 5d nvidia-smi dmon -s um -d 10 -o T > $OUT/dmon.log 2>&1 < /dev/null &
 ```
 
-PIDs are in `runs_tmp/pat-train/PIDS` (wrapper 144488, trainer 144491, dmon 7298 at the time of writing).
+PIDs are in `runs_tmp/pat-train/PIDS` (wrapper 273555, trainer 273558, dmon 7298 at the time of writing).
 Before launching, the GPU was checked for other users (`nvidia-smi --query-compute-apps=pid,process_name,used_memory
 --format=csv`): the run was started only when no `blender` process of the render agent was on the GPU.
 
@@ -60,8 +61,9 @@ Before launching, the GPU was checked for other users (`nvidia-smi --query-compu
   two terms, learning rate, pairs, network rows, seconds of forward/loss/backward/update, a naive ETA), every
   validation, `=== start` / `=== exit` lines of the wrapper.
 - `runs_tmp/pat-train/log.jsonl`: one JSON line per step (`phase, phase_name, epoch, step, shape, row, lr, loss,
-  distance, eikonal, queries, pairs, rows_fwd, rows_bwd, t_prep, t_plan, t_fwd, t_loss, t_bwd, t_upd,
-  skipped`) and one per validation (`val_distance`, `val_eikonal`). After a resume the steps after the
+  distance, eikonal, queries, pairs, rows_fwd, rows_bwd, t_prep, t_plan, t_fwd, t_loss, t_bwd, t_upd, t_wait`
+  (from step 2,881: seconds the loop waited for the prefetched data; > 0 means the host is the bound),
+  `skipped`) and one per validation (`val_distance`, `val_eikonal`). After a resume the steps after the
   checkpoint appear again (bitwise identical values, measured); later lines supersede earlier ones.
 - `runs_tmp/pat-train/dmon.log`: `nvidia-smi dmon -s um` every 10 s (SM and memory-bandwidth %, frame-buffer MB).
 - Quick looks:
@@ -100,9 +102,9 @@ run is bitwise identical to an uninterrupted one on the same GPU and binary (tes
 64 + 64 resumed, all losses, weights and moments bitwise equal; and the live run's replayed steps after its
 restart). At most the work since the last checkpoint (≤ 2,000 steps ≈ 20 min) is repeated.
 
-`--network-batch 512` is ~15 % faster while the host is loaded (fewer kernel launches) but uses 12.5 GB of GPU
-memory instead of 8.2 GB; switch to it (stop, restart with the option added to `run.sh`) only when no other
-process needs the GPU. It changes the bits from then on (round-off), not the math.
+With CUDA graphs (default) the network batches cost one launch each, so larger batches no longer help (512 is
+slower); `--no-graphs` launches op by op (the earlier binaries' path). Changing batch shapes or graphs changes the
+bits from then on (round-off), not the math. A saved copy of the step-2,880 checkpoint is in `saved-step2880/`.
 
 ## Results and export
 
@@ -113,7 +115,7 @@ item 6: they stay there until they match or beat the authors' weights on §16.2)
 
 ```bash
 cd /var/data/discrete-geometry/ddg-tools
-./runs_tmp/pat-train/bin/train-801b3c9 export --from runs_tmp/pat-train/final.safetensors \
+./runs_tmp/pat-train/bin/train-d9f1606 export --from runs_tmp/pat-train/final.safetensors \
     --to data/points-as-tori/retrained-2026-11-seed42.safetensors
 # or a phase: --from runs_tmp/pat-train/phase-phase2.safetensors; or the latest checkpoint: --from runs_tmp/pat-train
 ```
@@ -127,8 +129,12 @@ and is not comparable (NOTES-WP7: 0.99 / 10.6 vs 0.0195 / 0.296 for their weight
 
 ## Timing and expected end
 
-Measured in the run: pretraining 0.6–0.8 s per step with the host at load 75–110 (other agents' jobs at nice 19;
-the GPU at 22–31 % SM, bound by burn's per-op host dispatch, NOTES-WP10 §5). On a quiet host the GPU time is
-0.41 s per step.
+| binary | condition | s/step |
+|---|---|---|
+| `801b3c9` (eager) | load 75–140 (other agents' jobs at nice 19) | 0.6–0.95 (GPU 22–31 % busy: host dispatch bound) |
+| `801b3c9` (eager) | load ~25 | 0.44–0.50 |
+| `d9f1606` (CUDA graphs) | load ~25 (WP14 ≤ 24 threads) | **0.30** (pretraining), **0.34** (phase-0 shape, bench) |
 
-**Expected end** (497,858 steps): see the status line below, updated from the run's own step rate.
+**Expected end:** 494,978 steps after step 2,880 at ≈ 0.34 s/step ≈ **47 h**, i.e. about **2026-11-06 05:00 UTC**
+if other agents stay within ~24 threads in total; more outside load lengthens it (graphs remove most of the
+dispatch sensitivity, but the preparer needs ~20–30 threads in phases 0–4: watch `t_wait`).
