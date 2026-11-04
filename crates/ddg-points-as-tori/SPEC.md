@@ -1303,3 +1303,14 @@ proposals accepted).**
    make `Morph::levels` public; `morphology()` returns the sampled cloud with the field;
    `TorusField` accessors for the cloud/normals hash; a sign-rule marker in the tori export.
    The bindings work around all of these today.
+
+**Resolutions after the Blender operator (WP13, 2026-11-04; accepted).**
+1. `object.ddg_points_as_tori` (DDG sidebar > Points as Tori). Normals are read, in order, from
+   the `normal` point attribute (Blender 5.0.1's PLY importer), a named attribute, `nx/ny/nz`,
+   custom normals, or the vertex normals of a mesh with faces. Orient Normals writes back to the
+   same source.
+2. Tori cache key: BLAKE2 of world-space positions, normals and the sign rule. Memory holds the
+   last 4 clouds; the sidecar is `<blend>.pat/<hash>-<sign>.tori`. Moving the object rebuilds.
+3. Open (crate items for WP15): no progress/cancel hook in the native calls (a cancelled build
+   finishes in the background); `reconstruct` sets no `eval_report`; `smooth = 0` is an error in
+   the library (the panel maps 0 to None).
