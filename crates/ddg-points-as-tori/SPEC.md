@@ -753,7 +753,9 @@ This is exact (the loss depends on θ only through `a`) and fits 16 GB.
 **Expected time** (RTX 4080).
 - ≈ 1.34 TFLOP per step network forward + backward, plus ≈ 0.15 TFLOP blend, plus ground truth
   amortized: about 70–120 ms per step at 40–60 % of f32 peak with fused blend kernels.
-- About 10–17 h for the ≈ 498k steps of the curriculum.
+- About 10–17 h for the ≈ 498k steps of the curriculum (estimate; **measured by WP10: ≈ 0.48–0.52 s per
+  phase-0 step with CUDA graphs, fixed loss shapes and GPU ground truth, ≈ 66–71 h**; the bound is GPU time
+  plus host contention, further speed needs own fused attention kernels outside burn, not done).
 - With an unfused framework blend (materialized `1024 × 120 × 2048` tensors, ≈ 1 GB each) closer
   to the paper's 0.33 s per step, i.e. ≈ 45 h.
 - The blend and ground truth may be written as custom CubeCL/NVRTC kernels if the framework's ops
@@ -1262,7 +1264,7 @@ proposals accepted).**
    (1M points 26.6 s, meets the paper's ~40 s; the authors' own GPU path differs from their CPU
    path by ~1e-4, consistent with TF32). `GpuMatmul::Split3` (exact 3×TF32 split, raw outputs
    ≤ 3.8e-7 and coefficients ≤ 3.9e-6·(1+|a|) from the CPU; 1M 67.7 s) is the option for
-   CPU-agreeing results. D4's GPU tolerance is per mode: Tf32 ≈ 2e-4 on coefficients (its effect
+   CPU-agreeing results. D4's GPU tolerance is per mode: Tf32 ≈ 2e-4 on raw outputs, i.e. 3e-3·(1+|a|) on coefficients after the 1/σ scaling (WP10; its effect
    on φ measured and documented by WP14/WP16), Split3 1e-5. "Retrained weights evaluated with
    f32-accurate inference" above means Split3 or CPU for the comparison tables.
 2. burn-cuda with fusion is bitwise run to run and independent of the batch size (1–4096);
@@ -1338,3 +1340,25 @@ accepted).**
    (measured at load ≈ 13). The blend is level 2 by construction; **the GPU bitwise tests
    (`pat_exp_bitwise_host_device`, `blend_bitwise_cpu_gpu`) run after the training run frees the
    GPU** (WP16).
+
+**Resolutions after GPU training (WP10, 2026-11-04; `NOTES-WP10.md`, `TRAINING.md`; accepted).**
+1. **User decision 2026-11-04: optimize first, then run.** Phase-0 step 0.90 → 0.48 s (−47 %): burn's CUDA-graph
+   capture/replay of the fixed-shape network batches (forward and forward+backward), loss chunk shapes on a fixed
+   ladder (burn-fusion no longer re-explores each step), ground-truth winding numbers on the GPU (f64 NVRTC, CPU
+   operation order, no FMA; bitwise equal to the CPU on 1.47M queries), one device-side finiteness check.
+   Own fused attention/LayerNorm kernels are not reachable through burn's dispatch and are not done.
+2. Determinism (answers WP7 item 9 / D4): burn-cubecl's `select` backward is serial without atomics (too slow);
+   `gather` backward and full `sum()` are atomic. The GPU loss uses detached gathers, transposed gather
+   reductions and `sum_dim` only. GPU training is bitwise run to run, across processes and across resume
+   (weights and Adam moments). The bits depend on the network batch shape (256) and the binary.
+3. GPU vs CPU: one step agrees in loss to ≤ 4e-6 and in gradients at TF32 level (cosine ≥ 0.998); `∂L/∂a`
+   alone to 8.9e-6 with `EigenRule::Robust`. Against the previous binary the loss curves differ at TF32 level
+   (median 3.8e-3 per step); old checkpoints load.
+4. `TrainOptions::validate_every_steps` (pretraining validates without doubling its time).
+5. The long run: seed 42, `SignRule::Reference`, `EigenRule::Robust`, unit normals, D19, D21; resumed 06:30
+   UTC from the phase-0 start (step 4,096) with `train-d7a8200`, `runs_tmp/pat-train/`. Validation
+   0.0919/0.2301 (distance/eikonal) after pretraining, 0.0890/0.2036 after the first phase-0 epoch.
+   Pretraining's distance term jumped 0.04 → 0.14 at step ~810 (lr 1e-3), as in WP7's CPU run and as the
+   authors' own `_pretrained.pkl` suggests (0.097 there); if phase 0 does not bring it down, rerunning
+   pretraining at a lower lr is the fallback (a deviation from the recipe). A `Geometric`-rule run is deferred
+   until WP14 shows the sign rule matters.
