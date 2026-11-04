@@ -8,7 +8,7 @@ SPEC change proposals, open items, and how to resume.
 
 | file | content |
 |---|---|
-| `examples/eval.rs` | `prepare` (datasets), `case` (64³ errors of every method, black-box comparison, slices), `continuity` (jump statistic, error, eikonality, MC components per rule at 64/128/256, mechanism at the top edges), `orient` (Fig. 27 at 10 and 30 iterations), `swaps` (size of the real kNN-swap discontinuities), `profile` (width of the steep transitions), `gpu` (TF32 vs Split3, needs `--features cuda` and a free GPU), `selfint` (the Thingi10K self-intersection test on single meshes) |
+| `examples/eval.rs` | `curv` (predicted vs true principal curvatures), `prepare` (datasets), `case` (64³ errors of every method, black-box comparison, slices), `continuity` (jump statistic, error, eikonality, MC components per rule at 64/128/256, mechanism at the top edges), `orient` (Fig. 27 at 10 and 30 iterations), `swaps` (size of the real kNN-swap discontinuities), `profile` (width of the steep transitions), `gpu` (TF32 vs Split3, needs `--features cuda` and a free GPU), `selfint` (the Thingi10K self-intersection test on single meshes) |
 | `examples/density.rs` | Fig. 7 / Fig. 29 study |
 | `examples/eval_util/util.rs` | npy writer, grids, metrics, jump statistic, JSON writer, `TaperField` (tapered kNN, ours, example code only), self-intersection test |
 | `scripts/pat_eval.sh` | the whole pipeline by stage |
@@ -43,7 +43,16 @@ Work directory (gitignored): `runs_tmp/pat-wp14/` (`cases/<dataset>/<case>/` wit
    disagree (`Δg` up to 0.5). Its slope is ≈ `λ_x Δg` (measured up to 90). The `All` rule has `σ_x` ≈ half
    the cloud diameter, hence smaller `λ_x` and bounded slopes." The tapered kNN of the WP6 proposal does
    not change the measures (it removes only the tiny swap jumps) and is not recommended.
-4. **§16.3 "Tracer safety"** was not measured (WP11's tracer; a timed study for WP16). ε was measured by
+4. **New finding for §7.1/§10 (the released weights): the tori are near-spheres.** At every input point
+   of the 70 App. E shapes, the predicted |κmin|/|κmax| has a median of 0.89–0.95 (true value 0 on
+   cylinders and extrusions). On saddle surfaces (35–69 % saddle area) the network predicts no saddle
+   at all. The authors' golden tori are 97.6–100 % spindle tori (R < |r|), 81–100 % with R < |r|/4.
+   So `SignRule` matters only on the rare predicted saddles (51 of 258,478 points), where Geometric
+   is better on every cloud. Proposal: §18 records that the released network is effectively
+   "points as spheres", that the `SignRule` default can follow geometry (Geometric) without
+   measurable risk, and that WP10's comparison should report the anisotropy and saddle statistics
+   of the retrained model (`eval curv <case>`).
+5. **§16.3 "Tracer safety" was not measured (WP11's tracer; a timed study for WP16). ε was measured by
    WP9a (flat); not repeated.
 
 ## Open items
