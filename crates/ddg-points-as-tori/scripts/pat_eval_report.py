@@ -106,7 +106,7 @@ def main():
         if data[ds]:
             T.append(headline(data[ds], label))
     allres = sum((data[d] for d in ('abc', 'blobs', 'thingi', 'analytic')), [])
-    T.append(headline(allres, 'all four datasets (315 shapes)'))
+    T.append(headline(allres, f'all four datasets ({len(allres)} shapes)'))
     # PAT vs GWN-sign + distance, per shape
     rows = []
     for ds, label in DATASETS[:4]:

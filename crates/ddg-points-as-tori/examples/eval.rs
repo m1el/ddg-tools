@@ -50,6 +50,8 @@ fn main() {
         Some("orient") => orient(&args[1..]),
         Some("selfint") => selfint(&args[1..]),
         Some("gpu") => gpu(&args[1..]),
+        Some("swaps") => swaps(&args[1..]),
+        Some("profile") => profile(&args[1..]),
         _ => Err("usage: eval prepare|case|continuity|orient ... (see the file header)".into()),
     };
     if let Err(e) = r {
@@ -1238,5 +1240,165 @@ fn gpu(a: &[String]) -> R<()> {
         std::fs::write(dir.join("gpu.json"), j.finish()).map_err(err)?;
         println!("{d}: {}", j.finish());
     }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ kNN swap jumps
+
+/// `eval swaps <case-dir> [--threads T] [--edges N] [--rule knn32|paper]`: the size of the actual
+/// discontinuities of the blend where the neighbor set changes. Samples `N` random grid edges of
+/// the 256³ grid; on each edge whose two endpoints have different neighbor sets, bisects on "set
+/// equals the set at the left end" to an interval of 1e-13 and records `|φ(x⁺) − φ(x⁻)|`, the
+/// weight share of the entering/leaving point and ρ_min/σ there. Writes `<case>/swaps.json`.
+fn swaps(a: &[String]) -> R<()> {
+    let a = parse(a);
+    let dir = PathBuf::from(a.pos(0, "case-dir")?);
+    let th = threads(&a)?;
+    let ne: usize = a.get("edges", 20000)?;
+    let rule: String = a.get("rule", "knn32".to_string())?;
+    let cloud = load_cloud(&dir)?;
+    let model = Model::reference().map_err(err)?;
+    let (knn, _) = PointsAsTori::build(&cloud, &model, &BuildOptions::default().with_threads(th)).map_err(err)?;
+    let f = if rule == "paper" {
+        let (po, _) = TorusField::paper_options(&cloud, th).map_err(err)?;
+        TorusField::new(&cloud, knn.tori().clone(), po).map_err(err)?
+    } else {
+        knn
+    };
+    let n = 256;
+    let h = 2.0 / (n - 1) as f64;
+    let ax = axis(n);
+    let mut rng = Rng::new(name_seed(&dir.display().to_string()));
+    let set = |x: [f64; 3]| -> R<Vec<u32>> {
+        let (_, mut s) = f.blend_at(x, BlendWant::Distance).map_err(err)?;
+        s.sort_unstable();
+        Ok(s)
+    };
+    let mut jumps = Vec::new();
+    let mut rows = Vec::new();
+    let mut changed = 0;
+    for _ in 0..ne {
+        let x0 = [ax[rng.below(n)], ax[rng.below(n)], ax[rng.below(n)]];
+        let axn = rng.below(3);
+        if x0[axn] + h > 1.0 + 1e-12 {
+            continue;
+        }
+        let p = |s: f64| {
+            let mut x = x0;
+            x[axn] += s * h;
+            x
+        };
+        let s0 = set(p(0.0))?;
+        if set(p(1.0))? == s0 {
+            continue;
+        }
+        changed += 1;
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        while (hi - lo) * h > 1e-13 {
+            let m = 0.5 * (lo + hi);
+            if set(p(m))? == s0 {
+                lo = m;
+            } else {
+                hi = m;
+            }
+        }
+        let (xl, xh) = (p(lo), p(hi));
+        let (bl, _) = f.blend_at(xl, BlendWant::Distance).map_err(err)?;
+        let (bh, sh) = f.blend_at(xh, BlendWant::Distance).map_err(err)?;
+        let j = (bh.distance - bl.distance).abs();
+        let rmin = sh.iter().map(|&i| dist(xh, f.positions()[i as usize])).fold(f64::INFINITY, f64::min);
+        jumps.push(j);
+        if rows.len() < 2000 {
+            rows.push((j, rmin / bh.sigma, rmin));
+        }
+    }
+    let mut js = jumps.clone();
+    let mut far: Vec<f64> = rows.iter().map(|r| r.1).collect();
+    let mx = js.iter().copied().fold(0.0, f64::max);
+    let out = Json::new()
+        .str("case", &dir.display().to_string())
+        .str("rule", &rule)
+        .int("edges_sampled", ne as i64)
+        .int("edges_with_set_change", changed as i64)
+        .num("jump_max", mx)
+        .num("jump_p50", quantile(&mut js, 0.5))
+        .num("jump_p99", quantile(&mut js, 0.99))
+        .num("jump_over_h_max", mx / h)
+        .num("rho_min_over_sigma_median", quantile(&mut far, 0.5))
+        .num("rho_min_over_sigma_max", far.iter().copied().fold(0.0, f64::max))
+        .int("jumps_over_1e-6", jumps.iter().filter(|&&x| x > 1e-6).count() as i64)
+        .int("jumps_over_1e-3", jumps.iter().filter(|&&x| x > 1e-3).count() as i64)
+        .finish();
+    std::fs::write(dir.join(format!("swaps-{rule}.json")), &out).map_err(err)?;
+    println!("{out}");
+    Ok(())
+}
+
+// ------------------------------------------------------------------ transition profiles
+
+/// `eval profile <case-dir> [--threads T] [--res 256] [--top 20] [--rule knn32|all|paper]`: φ
+/// sampled at 4001 points along each of the steepest grid edges; reports the 10–90 % width of the
+/// change, the steepest sampled slope, and `σ_x/C` (the scale of the exponential weights) at the
+/// steepest point. Writes `<case>/profile-<rule>.json`.
+fn profile(a: &[String]) -> R<()> {
+    let a = parse(a);
+    let dir = PathBuf::from(a.pos(0, "case-dir")?);
+    let th = threads(&a)?;
+    let n: usize = a.get("res", 256)?;
+    let top: usize = a.get("top", 20)?;
+    let rule: String = a.get("rule", "knn32".to_string())?;
+    let cloud = load_cloud(&dir)?;
+    let model = Model::reference().map_err(err)?;
+    let (knn, _) = PointsAsTori::build(&cloud, &model, &BuildOptions::default().with_threads(th)).map_err(err)?;
+    let f = match rule.as_str() {
+        "paper" => TorusField::new(&cloud, knn.tori().clone(), TorusField::paper_options(&cloud, th).map_err(err)?.0).map_err(err)?,
+        "all" => TorusField::new(&cloud, knn.tori().clone(), EvalOptions { neighborhood: Neighborhood::All, threads: th, ..Default::default() }).map_err(err)?,
+        _ => knn,
+    };
+    let xs = grid(n);
+    let (phi, _) = pat_eval(&f, &xs)?;
+    let jp = jumps(n, &phi, top);
+    let h = 2.0 / (n - 1) as f64;
+    let ax = axis(n);
+    let mut rows = Vec::new();
+    let mut ratio = Vec::new();
+    for &(slope, ia, axn) in &jp.top {
+        let x0 = [ax[ia / (n * n)], ax[(ia / n) % n], ax[ia % n]];
+        let m = 4000;
+        let vals: Vec<f64> = (0..=m)
+            .map(|t| {
+                let mut x = x0;
+                x[axn] += h * t as f64 / m as f64;
+                f.distance(x).unwrap_or(f64::NAN)
+            })
+            .collect();
+        let (v0, v1) = (vals[0], vals[m]);
+        let d = v1 - v0;
+        let frac = |p: f64| vals.iter().position(|&v| (v - v0) / d >= p).unwrap_or(m) as f64 / m as f64 * h;
+        let width = (frac(0.9) - frac(0.1)).abs();
+        let (mut smax, mut at) = (0.0, 0);
+        for t in 0..m {
+            let s = (vals[t + 1] - vals[t]).abs() / (h / m as f64);
+            if s > smax {
+                smax = s;
+                at = t;
+            }
+        }
+        let mut xs_ = x0;
+        xs_[axn] += h * at as f64 / m as f64;
+        let (b, _) = f.blend_at(xs_, BlendWant::Distance).map_err(err)?;
+        let scale = 1.0 / b.lambda;
+        ratio.push(width / scale);
+        rows.push(Json::new().num("grid_slope", slope).num("delta", d).num("width_10_90", width).num("max_slope_sampled", smax).num("one_over_lambda", scale).num("sigma", b.sigma).finish());
+    }
+    let out = Json::new()
+        .str("case", &dir.display().to_string())
+        .str("rule", &rule)
+        .int("res", n as i64)
+        .num("width_over_inv_lambda_median", quantile(&mut ratio, 0.5))
+        .raw("rows", &jarr(&rows))
+        .finish();
+    std::fs::write(dir.join(format!("profile-{rule}.json")), &out).map_err(err)?;
+    println!("{out}");
     Ok(())
 }
