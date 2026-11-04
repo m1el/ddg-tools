@@ -5,10 +5,15 @@
 //! 1. **Narrow band.** The grid is cut into blocks of `B³` cells (default 8, "masking voxels not
 //!    within 8 voxels of the contour", paper Sec. 5.3). `φ − iso` is evaluated at the block
 //!    corners; a block is skipped when some corner has `|φ − iso| > L · diag`, where `diag` is the
-//!    block's diagonal and `L` the Lipschitz bound (default **1.5**: the blend is not exactly
+//!    block's diagonal and `L` the Lipschitz bound (default **2.0**: the blend is not exactly
 //!    1-Lipschitz, `‖∇φ‖` is 1 up to a modest excess; the report states the bound used and
 //!    measures the largest slope `|Δφ|/h` seen along evaluated grid edges). All grid values of
-//!    the remaining blocks are then evaluated in large batches.
+//!    the remaining blocks are then evaluated in large batches. **Growth:** a kept block whose
+//!    face towards a skipped neighbour has a sign change keeps that neighbour too (repeated), so
+//!    a bound that is too small can only lose isolated pieces of the surface that lie wholly in
+//!    skipped blocks, never leave cracks. (The fitted blend has `‖∇φ‖` well above 1 in places,
+//!    measured slopes of 5–50 per grid edge near jumps of the evaluation neighborhood on the
+//!    reference clouds, so the bound is a heuristic; see `NOTES-WP6.md`.)
 //! 2. **Cells.** A cell is *inside* at a corner where `φ − iso < 0` (zero counts as outside).
 //!    Instead of a 256-entry table the crossing polygons are built from the faces: every face
 //!    with two crossings gives one segment, a face with four crossings (the ambiguous case) is
@@ -84,7 +89,7 @@ impl Default for McOptions {
             bbox: None,
             resolution: Resolution::Longest(64),
             isovalue: 0.0,
-            band: Band::Lipschitz { bound: 1.5, block: 8 },
+            band: Band::Lipschitz { bound: 2.0, block: 8 },
             refine_steps: 0,
             normals: false,
             check_mesh: true,
@@ -163,6 +168,10 @@ pub struct McReport {
     pub origin: [f64; 3],
     /// Blocks in total.
     pub blocks: usize,
+    /// Blocks added by the growth rule (surface crossing into a skipped neighbour) and the rounds it took.
+    pub blocks_grown: usize,
+    /// Evaluation rounds of the narrow band (1: no growth).
+    pub band_rounds: usize,
     /// Blocks kept by the narrow band.
     pub blocks_active: usize,
     /// Cells in the kept blocks (the cells visited).
@@ -563,6 +572,26 @@ fn process_block(grid: &Grid, vals: &[f64], edge_limit: u64, lo: [usize; 3], hi:
     out
 }
 
+/// Is the box `[lo, hi]` inside the union of the balls (sufficient test: some single ball covers it,
+/// or all eight octants are covered, down to `depth` levels)?
+fn covered(lo: [f64; 3], hi: [f64; 3], balls: &[([f64; 3], f64)], depth: usize) -> bool {
+    for (c, r) in balls {
+        let far2: f64 = (0..3).map(|a| (c[a] - lo[a]).abs().max((c[a] - hi[a]).abs()).powi(2)).sum();
+        if far2 <= r * r {
+            return true;
+        }
+    }
+    if depth == 0 {
+        return false;
+    }
+    let mid = [0, 1, 2].map(|a| 0.5 * (lo[a] + hi[a]));
+    (0..8).all(|o| {
+        let l = [0, 1, 2].map(|a| if (o >> a) & 1 == 1 { mid[a] } else { lo[a] });
+        let h = [0, 1, 2].map(|a| if (o >> a) & 1 == 1 { hi[a] } else { mid[a] });
+        covered(l, h, balls, depth - 1)
+    })
+}
+
 /// Extract `{φ = isovalue}` from `field`.
 ///
 /// Returns the welded triangle mesh (outward oriented) and a report. The mesh is closed except
@@ -648,54 +677,116 @@ pub fn marching_cubes(field: &dyn ImplicitField, opts: &McOptions) -> Result<(Mc
     for bz in 0..nb[2] {
         for by in 0..nb[1] {
             for bx in 0..nb[0] {
-                let b = [bx, by, bz];
-                let keep = match bound {
-                    None => true,
-                    Some(l) => {
-                        let size = [0, 1, 2].map(|a| (coarse_idx(a, b[a] + 1) - coarse_idx(a, b[a])) as f64 * grid.h[a]);
-                        let diag = (size[0] * size[0] + size[1] * size[1] + size[2] * size[2]).sqrt();
-                        let mut ok = true;
-                        for c in 0..8 {
-                            let o = corner_offset(c);
-                            let g = grid.gp(coarse_idx(0, bx + o[0]), coarse_idx(1, by + o[1]), coarse_idx(2, bz + o[2]));
-                            if vals[g].abs() > l * diag {
-                                ok = false;
+                active.push([bx, by, bz]);
+            }
+        }
+    }
+    if let Some(l) = bound {
+        let keep: Vec<bool> = pool.install(|| {
+            active
+                .par_iter()
+                .map(|b| {
+                    // The surface cannot lie within |v_c|/L of a corner c; the block is skipped
+                    // when these balls cover it (checked on the block and on two levels of octants).
+                    let lo = [0, 1, 2].map(|a| grid.lo[a] + coarse_idx(a, b[a]) as f64 * grid.h[a]);
+                    let hi = [0, 1, 2].map(|a| grid.lo[a] + coarse_idx(a, b[a] + 1) as f64 * grid.h[a]);
+                    let balls: [([f64; 3], f64); 8] = std::array::from_fn(|c| {
+                        let o = corner_offset(c);
+                        let g = grid.gp(coarse_idx(0, b[0] + o[0]), coarse_idx(1, b[1] + o[1]), coarse_idx(2, b[2] + o[2]));
+                        let centre = [0, 1, 2].map(|a| if o[a] == 1 { hi[a] } else { lo[a] });
+                        (centre, vals[g].abs() / l)
+                    });
+                    !covered(lo, hi, &balls, 2)
+                })
+                .collect()
+        });
+        let mut i = 0;
+        active.retain(|_| {
+            i += 1;
+            keep[i - 1]
+        });
+    }
+    let block_range = |b: [usize; 3]| ([0, 1, 2].map(|a| coarse_idx(a, b[a])), [0, 1, 2].map(|a| coarse_idx(a, b[a] + 1)));
+    let bindex = |b: [usize; 3]| b[0] + nb[0] * (b[1] + nb[1] * b[2]);
+    let mut is_active = vec![false; n_blocks];
+    for b in &active {
+        is_active[bindex(*b)] = true;
+    }
+    // Fine values of the kept blocks, then growth: a kept block whose face towards a skipped
+    // neighbour has a sign change continues the surface into that neighbour, so the neighbour is
+    // kept as well (repeat). The Lipschitz bound therefore only decides which *isolated* pieces of
+    // the surface can be missed; the surface that is found has no cracks except at the box.
+    let t_band = Instant::now();
+    let mut newly: Vec<[usize; 3]> = active.clone();
+    let mut band_rounds = 0usize;
+    let mut blocks_grown = 0usize;
+    while !newly.is_empty() {
+        band_rounds += 1;
+        let mut todo: Vec<usize> = Vec::new();
+        for b in &newly {
+            let (lo, hi) = block_range(*b);
+            for k in lo[2]..=hi[2] {
+                for j in lo[1]..=hi[1] {
+                    for i in lo[0]..=hi[0] {
+                        let g = grid.gp(i, j, k);
+                        if vals[g].is_nan() {
+                            vals[g] = f64::INFINITY;
+                            todo.push(g);
+                        }
+                    }
+                }
+            }
+        }
+        evaluate_points(f, &grid, &todo, &mut vals, &pool)?;
+        grid_values += todo.len();
+        let mut grow: Vec<[usize; 3]> = Vec::new();
+        if bound.is_some() {
+            for b in &newly {
+                let (lo, hi) = block_range(*b);
+                for axis in 0..3 {
+                    for side in 0..2 {
+                        let nbk = if side == 0 { b[axis].checked_sub(1) } else { Some(b[axis] + 1).filter(|v| *v < nb[axis]) };
+                        let Some(nbk) = nbk else { continue };
+                        let mut nbb = *b;
+                        nbb[axis] = nbk;
+                        if is_active[bindex(nbb)] {
+                            continue;
+                        }
+                        // sign change on the face?
+                        let fixed = if side == 0 { lo[axis] } else { hi[axis] };
+                        let (u, v) = ((axis + 1) % 3, (axis + 2) % 3);
+                        let mut any_neg = false;
+                        let mut any_pos = false;
+                        for iv in lo[v]..=hi[v] {
+                            for iu in lo[u]..=hi[u] {
+                                let mut ijk = [0; 3];
+                                ijk[axis] = fixed;
+                                ijk[u] = iu;
+                                ijk[v] = iv;
+                                if vals[grid.gp(ijk[0], ijk[1], ijk[2])] < 0.0 {
+                                    any_neg = true;
+                                } else {
+                                    any_pos = true;
+                                }
                             }
                         }
-                        ok
+                        if any_neg && any_pos {
+                            is_active[bindex(nbb)] = true;
+                            grow.push(nbb);
+                        }
                     }
-                };
-                if keep {
-                    active.push(b);
                 }
             }
         }
+        blocks_grown += grow.len();
+        newly = grow;
     }
-    let ranges: Vec<([usize; 3], [usize; 3])> = active
-        .iter()
-        .map(|b| ([0, 1, 2].map(|a| coarse_idx(a, b[a])), [0, 1, 2].map(|a| coarse_idx(a, b[a] + 1))))
+    let ranges: Vec<([usize; 3], [usize; 3])> = (0..n_blocks)
+        .filter(|bi| is_active[*bi])
+        .map(|bi| block_range([bi % nb[0], (bi / nb[0]) % nb[1], bi / (nb[0] * nb[1])]))
         .collect();
     let cells_visited: usize = ranges.iter().map(|(lo, hi)| (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])).sum();
-
-    // fine values of the kept blocks
-    let mut todo: Vec<usize> = Vec::new();
-    for (lo, hi) in &ranges {
-        for k in lo[2]..=hi[2] {
-            for j in lo[1]..=hi[1] {
-                for i in lo[0]..=hi[0] {
-                    let g = grid.gp(i, j, k);
-                    if vals[g].is_nan() {
-                        vals[g] = f64::INFINITY;
-                        todo.push(g);
-                    }
-                }
-            }
-        }
-    }
-    let t_band = Instant::now();
-    evaluate_points(f, &grid, &todo, &mut vals, &pool)?;
-    grid_values += todo.len();
-    drop((coarse, todo));
+    drop(coarse);
     let t_eval = Instant::now();
 
     // cells
@@ -788,6 +879,8 @@ pub fn marching_cubes(field: &dyn ImplicitField, opts: &McOptions) -> Result<(Mc
         spacing: grid.h,
         origin: grid.lo,
         blocks: n_blocks,
+        blocks_grown,
+        band_rounds,
         blocks_active: ranges.len(),
         cells_visited,
         cells_crossing: crossing,

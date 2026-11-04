@@ -157,7 +157,7 @@ fn narrow_band_equals_dense_and_is_sparse() {
     };
     assert_eq!(sorted(&md), sorted(&mb));
     assert!(rb.grid_values * 4 < rd.grid_values * 3, "{} vs {}", rb.grid_values, rd.grid_values);
-    assert_eq!(rb.lipschitz_bound, Some(1.5));
+    assert_eq!(rb.lipschitz_bound, Some(2.0));
     assert!(rb.max_edge_slope <= 1.0 + 1e-9);
 }
 
@@ -350,4 +350,17 @@ fn offset_isovalue_gives_the_offset_sphere() {
     let (m, rep) = marching_cubes(&s, &McOptions { isovalue: 0.15, refine_steps: 2, ..opts(48) }).unwrap();
     assert_eq!(manifold(&rep), (0, 2, 1));
     assert!(m.positions.iter().all(|p| (s.distance(*p).unwrap() - 0.15).abs() < 1e-6));
+}
+
+#[test]
+fn growth_repairs_a_too_small_bound() {
+    // With L = 0.7 the first pass skips blocks that contain the surface; the growth rule must
+    // still deliver the whole connected surface (same vertices and faces as the dense grid).
+    let t = Torus(0.6, 0.2);
+    let (md, _) = marching_cubes(&t, &McOptions { band: Band::Dense, ..opts(64) }).unwrap();
+    let (mb, rb) = marching_cubes(&t, &McOptions { band: Band::Lipschitz { bound: 0.7, block: 8 }, ..opts(64) }).unwrap();
+    assert_eq!(manifold(&rb), (0, 0, 1));
+    assert_eq!(md.positions, mb.positions);
+    assert_eq!(md.faces.len(), mb.faces.len());
+    assert!(rb.band_rounds >= 2 && rb.blocks_grown > 0, "{} rounds, {} grown", rb.band_rounds, rb.blocks_grown);
 }
