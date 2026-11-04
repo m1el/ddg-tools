@@ -1422,3 +1422,9 @@ Our crate equals their program on these inputs (N 7.6e-7, E-ref 1.9e-12). Found 
 forms (a11 = 0) make `EigenRule::Reference` fit a sphere in both programs (`Robust` is correct); the authors'
 `winding_number` returns minus the usual GWN.
 
+**User decision 2026-11-04 (afternoon): abort the burn retraining; retrain with the authors' own training code
+and setup** (JAX `training/train.py`, their curriculum and quirks, on this RTX 4080; `TRAINING-JAX.md`,
+`runs_tmp/pat-train-jax/`). The burn run stopped at step ≈ 67k (phase 0, validation 0.0886/0.167); its
+checkpoints stay in `runs_tmp/pat-train/`. The burn trainer (`src/train/*`) stays in the crate (FD-verified,
+loss = JAX within 7e-6). The Geometric probe is re-prepared on the authors' code (one-line center fix).
+
