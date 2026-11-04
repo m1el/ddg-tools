@@ -19,7 +19,7 @@ fn main() {
     while p.len() < n {
         let v = [lcg(&mut s) * 2.0 - 1.0, lcg(&mut s) * 2.0 - 1.0, lcg(&mut s) * 2.0 - 1.0];
         let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-        if l > 1.0 || l < 0.1 {
+        if !(0.1..=1.0).contains(&l) {
             continue;
         }
         let u = [v[0] / l, v[1] / l, v[2] / l];

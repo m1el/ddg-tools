@@ -19,11 +19,11 @@
 //! `x < −745.1332191019412` → +0, `−∞` → 0, `+∞` → +∞, `exp(0) = 1`.
 
 /// `1/ln 2`.
-const LOG2E: f64 = 1.442_695_040_888_963_4;
+const LOG2E: f64 = std::f64::consts::LOG2_E;
 /// High part of `ln 2` (fdlibm's `ln2HI`: 21 trailing zero bits).
-const LN2_HI: f64 = 6.931_471_803_691_238_164_90e-1;
+const LN2_HI: f64 = f64::from_bits(0x3fe6_2e42_fee0_0000);
 /// Low part: `ln 2 − LN2_HI`.
-const LN2_LO: f64 = 1.908_214_929_270_587_700_02e-10;
+const LN2_LO: f64 = f64::from_bits(0x3dea_39ef_3579_3c76);
 /// Largest argument with a finite result.
 const X_MAX: f64 = 709.782_712_893_384;
 /// Smallest argument with a non-zero result (below it `exp` rounds to 0).

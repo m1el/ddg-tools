@@ -312,7 +312,7 @@ fn regularized_winding_number_s_and_limit() {
     // S(t) = erf t − (2t/√π) e^{−t²}; erf(1), erf(2), erf(3) from tables
     let erf = [(1.0, 0.842_700_792_949_714_9), (2.0, 0.995_322_265_018_952_7), (3.0, 0.999_977_909_503_001_4)];
     for (t, e) in erf {
-        let s_ref = e - 2.0 * t / PI.sqrt() * (-(t * t) as f64).exp();
+        let s_ref = e - 2.0 * t / PI.sqrt() * (-(t * t)).exp();
         assert!((regularization_s(t) - s_ref).abs() < 1e-14, "S({t}) = {} vs {s_ref}", regularization_s(t));
     }
     // continuity across the series / continued-fraction switch at t² = 5/2
@@ -398,11 +398,9 @@ fn kernel_sphere_values_and_shift_invariance() {
         .unwrap();
     let x = [0.1, 0.2, 0.6];
     let (mut num, mut den) = (0.0, 0.0);
-    for i in 0..cloud.len() {
-        let p = cloud.positions()[i];
+    for ((p, n), ai) in cloud.positions().iter().zip(cloud.normals()).zip(&a) {
         let d = [x[0] - p[0], x[1] - p[1], x[2] - p[2]];
-        let e = a[i] * (-lam * norm(d)).exp();
-        let n = cloud.normals()[i];
+        let e = ai * (-lam * norm(d)).exp();
         num += e * (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
         den += e;
     }
