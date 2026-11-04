@@ -16,6 +16,9 @@
 //! Every method runs on the CPU (the GPU belongs to the training run). Bad input is reported as an
 //! error message and a non-zero exit code, never a panic.
 
+// NaN-rejecting comparisons (`!(x > 0.0)`) are intended.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 #[path = "eval_util/util.rs"]
 mod util;
 
@@ -151,7 +154,9 @@ impl Meta {
     }
 }
 
-fn write_case(dir: &Path, p: &[[f64; 3]], n: &[[f64; 3]], mesh: Option<(&[[f64; 3]], &[[u32; 3]])>, meta: &Meta) -> R<()> {
+type MeshRef<'a> = Option<(&'a [[f64; 3]], &'a [[u32; 3]])>;
+
+fn write_case(dir: &Path, p: &[[f64; 3]], n: &[[f64; 3]], mesh: MeshRef<'_>, meta: &Meta) -> R<()> {
     std::fs::create_dir_all(dir).map_err(err)?;
     write3(&dir.join("points.npy"), p)?;
     write3(&dir.join("normals.npy"), n)?;
@@ -877,10 +882,10 @@ fn components(m: &McMesh, truth: Option<&[f64]>) -> Vec<(f64, f64, usize)> {
         e.2 += 1;
     }
     if let Some(t) = truth {
-        for v in 0..nv {
+        for (v, tv) in t.iter().enumerate().take(nv) {
             let r = find(&mut parent, v as u32);
             if let Some(e) = acc.get_mut(&r) {
-                e.1 = e.1.min(t[v].abs());
+                e.1 = e.1.min(tv.abs());
             }
         }
     }
@@ -998,10 +1003,11 @@ fn continuity(a: &[String]) -> R<()> {
                 j.int("mc_chi", euler_characteristic).int("mc_boundary", boundary_edges as i64);
             }
             // mechanism: the largest jumps of the kNN and radius rules
-            if matches!(*lab, "knn32" | "paper") && n == *res.iter().max().unwrap_or(&n) {
-                if let Rule::Pat(f) = rule {
-                    j.raw("mechanism", &mechanism(f, &knn, n, &jp.top, &truth)?);
-                }
+            if matches!(*lab, "knn32" | "paper")
+                && n == *res.iter().max().unwrap_or(&n)
+                && let Rule::Pat(f) = rule
+            {
+                j.raw("mechanism", &mechanism(f, &knn, n, &jp.top, &truth)?);
             }
             rj.raw(lab, &j.finish());
             eprintln!("{} {lab} n={n}: max slope {:.2} ({:.1}s)", dir.display(), jp.max, t.elapsed().as_secs_f64());

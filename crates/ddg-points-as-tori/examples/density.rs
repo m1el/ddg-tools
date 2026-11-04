@@ -14,6 +14,9 @@
 //! marching cubes (`--mc`, OBJ written to the output directory), and `plane × plane` SDF values on
 //! the mid-plane `z = 0` (`slices.npy`, truth first) for the figures. Writes `density.json`.
 
+// NaN-rejecting comparisons (`!(x > 0.0)`) are intended.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 #[path = "eval_util/util.rs"]
 mod util;
 
