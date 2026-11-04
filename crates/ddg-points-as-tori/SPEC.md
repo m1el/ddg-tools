@@ -1256,3 +1256,39 @@ proposals accepted).**
    GPU is never idle; matmul precision — **user decision 2026-11-04: TF32** for training (≈ 30–35 h
    estimated; JAX's default f32 matmul on Ampere/Ada is TF32, so likely what the authors used).
    Retrained weights are evaluated with the usual f32-accurate inference.
+
+**Resolutions after the CUDA back end (WP4, 2026-11-04; `NOTES-GPU.md`).**
+1. **GPU inference precision — user decision 2026-11-04: `GpuMatmul::Tf32` is the default**
+   (1M points 26.6 s, meets the paper's ~40 s; the authors' own GPU path differs from their CPU
+   path by ~1e-4, consistent with TF32). `GpuMatmul::Split3` (exact 3×TF32 split, raw outputs
+   ≤ 3.8e-7 and coefficients ≤ 3.9e-6·(1+|a|) from the CPU; 1M 67.7 s) is the option for
+   CPU-agreeing results. D4's GPU tolerance is per mode: Tf32 ≈ 2e-4 on coefficients (its effect
+   on φ measured and documented by WP14/WP16), Split3 1e-5. "Retrained weights evaluated with
+   f32-accurate inference" above means Split3 or CPU for the comparison tables.
+2. burn-cuda with fusion is bitwise run to run and independent of the batch size (1–4096);
+   `GPU_BATCH = 256`; candle is not used.
+3. Level 2 (GPU bitwise = CPU) holds for kNN, fitting neighborhoods, fit, per-torus SDF. The blend
+   is level 1: CUDA `exp` differs from glibc's by ≤ 1 ulp on 6.2 % of arguments. Accepted proposal:
+   a crate-owned `exp` used by both CPU and GPU, making the blend level 2 (queued as WP4b; measure
+   the CPU cost; it changes CPU blend bits by round-off, so the golden parity tolerances apply).
+4. §7.3 `F32Stable` expands around the data point `p_i` (both cancellations removed); WP2's
+   `torus_sdf_stable` needs generalizing (drop `(o−c)·u = 0`, add the `‖d‖² − r²` step) — WP15.
+   Laplacians in f32 are poor (up to 0.33): use f64.
+5. kNN and fit in `build` stay on the CPU (measured as fast or faster); GPU kNN only for k ≤ 128.
+6. **Utilization (user's observation):** the spiky GPU use was burn's per-op host dispatch
+   starved by other CPU load (3 dispatch threads at 80–90 %); on a quiet host 95–96 % SM (Split3),
+   88–91 % (TF32). Rule for long GPU runs (WP10): other agents run heavy CPU jobs under
+   `nice -n 19` while a GPU run is in progress.
+7. Single-point queries stay on the CPU (9.8e-6 s vs 2.9e-4 s for a one-query GPU batch).
+
+**Resolutions after orientation and classical 2D (WP9a, 2026-11-04; `NOTES-WP9a.md`; accepted).**
+1. Orientation, Fig. 27 protocol (30 % flipped, 10 iterations, ε = 1/σ_i): mean residual 1.18 %
+   over 11 clouds (median 0; paper 0.3 %); thin/high-curvature clouds are worse (femur 6.6 %,
+   arc extrusion 3.2 %, snail 2.0 %, still flipping at iteration 10). ε in [0.25, 4]/σ is flat;
+   ε = 1/σ_i stays the default. `max_iterations` stays 10 (paper); WP14 reports 10 and 30.
+2. The final count of `⟨n_i, ∇φ(p_i)⟩ < 0` is not a correctness measure (self-consistent wrong
+   patches); tests use the flipped fraction against the truth.
+3. 2D line rule is dimensionless: line iff `|κ| σ_i < 1e-6` (`Fit2dOptions::line_threshold`).
+   Classical fit defaults: k = 16, Gaussian bandwidth 0.6 d_k.
+4. Learned 2D predictor plugs in through `QuadraticPredictor` (`Pat2d::build`), coefficients
+   in world units in the frame `t = (−n_y, n_x)`, `n` (WP9b).
