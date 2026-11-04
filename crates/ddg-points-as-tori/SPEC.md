@@ -1427,4 +1427,10 @@ and setup** (JAX `training/train.py`, their curriculum and quirks, on this RTX 4
 `runs_tmp/pat-train-jax/`). The burn run stopped at step ≈ 67k (phase 0, validation 0.0886/0.167); its
 checkpoints stay in `runs_tmp/pat-train/`. The burn trainer (`src/train/*`) stays in the crate (FD-verified,
 loss = JAX within 7e-6). The Geometric probe is re-prepared on the authors' code (one-line center fix).
+Status (authors' trainer, 2026-11-04; `TRAINING-JAX.md`, 3cdd376/f246e54): their `train()` with an additive
+checkpoint/resume patch (npz, every 15 min; resume bitwise in deterministic mode), the persistent JAX compile
+cache, `XLA_PYTHON_CLIENT_MEM_FRACTION=0.97` (16 GB card). Pretraining 0.17 s/step (no distance jump at step
+~810, unlike burn), phase 0 0.39 s/step (memory-bandwidth bound), end ≈ 2026-11-06 21:30–22:00 UTC. Compiles: 51,
+all before step 10, none afterwards. The Geometric probe (one-line center fix in their JAX fit; pretrain + phase 0,
+≈ 11 h) is chained to start when the run ends (`runs_tmp/pat-train-jax-geo/chain.sh`).
 
