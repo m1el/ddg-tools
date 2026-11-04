@@ -43,7 +43,17 @@ fn is_type_error(e: &PyErr, py: Python<'_>) -> bool {
 
 /// Reals from a buffer, or from a (nested) Python sequence of numbers.
 fn nums(name: &'static str, obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
-    match reals(name, obj, 1, "number") {
+    // flat buffers, or (n, 3) / (n, 2) ones
+    let mut first = None;
+    for width in [1, 3, 2] {
+        match reals(name, obj, width, "number") {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                first.get_or_insert(e);
+            }
+        }
+    }
+    match Err::<Vec<f64>, PyErr>(first.unwrap_or_else(|| bad(name, "unreadable"))) {
         Ok(v) => Ok(v),
         Err(e) if is_type_error(&e, obj.py()) => {
             let flat: Vec<f64> = if let Ok(v) = obj.extract::<Vec<f64>>() {
@@ -61,7 +71,16 @@ fn nums(name: &'static str, obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
 
 /// Indices from a buffer, or from a (nested) sequence of integers.
 fn idx(name: &'static str, obj: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
-    match indices(name, obj, 1, "index") {
+    let mut first = None;
+    for width in [1, 3] {
+        match indices(name, obj, width, "index") {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                first.get_or_insert(e);
+            }
+        }
+    }
+    match Err::<Vec<u32>, PyErr>(first.unwrap_or_else(|| bad(name, "unreadable"))) {
         Ok(v) => Ok(v),
         Err(e) if is_type_error(&e, obj.py()) => {
             let flat: Vec<i64> = if let Ok(v) = obj.extract::<Vec<i64>>() {

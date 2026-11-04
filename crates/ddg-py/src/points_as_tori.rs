@@ -1280,3 +1280,43 @@ impl PredictOptionsDefaults {
         ("tf32", if FeatureOrder::default() == FeatureOrder::DifferenceFirst { "difference_first" } else { "reference" })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_and_mistyped_options_are_rejected() {
+        let mut kw = Kw::new(vec![("device".into(), O::Str("cpu".into())), ("bogus".into(), O::Int(1))]);
+        parse_build(&mut kw, false).unwrap();
+        assert!(kw.finish("x").unwrap_err().0.contains("bogus"));
+        let mut kw = Kw::new(vec![("sign_rule".into(), O::Str("nope".into()))]);
+        assert!(parse_build(&mut kw, false).unwrap_err().0.contains("not one of"));
+        let mut kw = Kw::new(vec![("threads".into(), O::Int(0))]);
+        assert!(parse_build(&mut kw, false).is_err());
+    }
+
+    #[test]
+    fn a_small_cloud_builds_and_round_trips_the_tori() {
+        let n = 200;
+        let (mut p, mut nr) = (vec![], vec![]);
+        for i in 0..n {
+            let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
+            let r = (1.0 - z * z).sqrt();
+            let a = 2.399963 * i as f64;
+            let d = [r * a.cos(), r * a.sin(), z];
+            nr.extend(d);
+            p.extend(d.iter().map(|c| 0.5 * c));
+        }
+        let spec = parse_build(&mut Kw::default(), false).unwrap();
+        let f = Pat::build(&p, &nr, &spec).unwrap();
+        let (d, _, _) = f.evaluate(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], true, false, false).unwrap();
+        assert!(d[0] < -0.3 && (d[1] - 0.5).abs() < 0.05, "{d:?}");
+        let t = export_tori(f.tori());
+        let back = import_tori(&t.centers, &t.axes, &t.major, &t.minor).unwrap();
+        let g = Pat::from_tori(&p, &nr, back, &spec).unwrap();
+        let (e, _, _) = g.evaluate(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], true, false, false).unwrap();
+        assert!((e[0] - d[0]).abs() < 1e-8);
+        assert!(matches!(defaults(), V::D(_)));
+    }
+}

@@ -2060,3 +2060,211 @@ def qem_simplify(
 ) -> QemResult:
     """Quadric error metric simplification (Garland, Heckbert 1997), the paper's extrinsic
     baseline, with the closest-point projection of every input vertex."""
+
+# ---------------------------------------------------------------------------------------------
+# Points as Tori (Feng, Gkioulekas, Crane, ACM TOG 45(4), 2026)
+#
+# Everything below is also the submodule ``ddg_tools.points_as_tori`` under short names
+# (``PointsAsTori``, ``CsgField``, ``MeshTruth``, ``Pat2d``, ``PointsAsToriError`` and the
+# ``pat_*`` functions without the prefix). Points, normals and queries are flat or (n, 3)
+# C-contiguous buffers (float32/float64, numpy arrays included); results are flat
+# ``array('d')`` (``numpy.asarray(a).reshape(-1, 3)`` for rows) and plain dicts. The GIL is
+# released in every long call.
+# ---------------------------------------------------------------------------------------------
+
+PatNeighborhood: TypeAlias = Literal["knn", "all", "radius"]
+PatLambdaRule: TypeAlias = Literal["per_query", "constant", "paper"]
+PatDevice: TypeAlias = Literal["cpu", "cuda", "auto"]
+
+class PointsAsToriError(DdgError, ValueError):
+    """A Points as Tori call failed (invalid argument or option, a cloud that does not validate, a
+    degenerate query, no GPU, ...). The message is the library's."""
+
+@final
+class PointsAsTori:
+    """Signed distance to an oriented point cloud by blending one fitted torus per point.
+
+    Building runs the network (bundled weights, or ``weights=<safetensors path>``) and fits the
+    tori. ``φ < 0`` inside. ``paper=True`` selects the paper's Sec. 4.2 evaluation (constant
+    λ = 1e3/D, radius 2C/λ). ``device="cuda"`` runs the network and the batch evaluation on the GPU
+    (wheel built with CUDA); ``gpu_matmul="tf32"`` is the fast default, ``"split3"`` agrees with
+    the CPU to ~1e-6. ``area_weights`` is None, ``"barill"`` or one weight per point.
+    """
+
+    def __init__(
+        self,
+        points: Buffer,
+        normals: Buffer,
+        *,
+        normal_policy: Literal["require_unit", "normalize"] = "require_unit",
+        normal_tol: float = 1e-6,
+        weights: str | None = None,
+        device: PatDevice = "cpu",
+        cuda_ordinal: int = 0,
+        threads: int | None = None,
+        gpu_matmul: Literal["tf32", "split3"] = "tf32",
+        feature_order: Literal["difference_first", "reference"] = "difference_first",
+        sign_rule: Literal["reference", "geometric"] = "reference",
+        eigen_rule: Literal["reference", "robust"] = "reference",
+        k: int | None = None,
+        paper: bool = False,
+        area_weights: Buffer | Literal["barill"] | None = None,
+        neighborhood: PatNeighborhood = "knn",
+        knn_k: int = 32,
+        radius: float | None = None,
+        radius_fallback_k: int | None = None,
+        lambda_rule: PatLambdaRule = "per_query",
+        lambda_c: float | None = 64.0,
+        lambda_value: float | None = None,
+        paper_factor: float | None = None,
+        paper_k_mean: int | None = None,
+        gradient: Literal["frozen", "exact"] = "frozen",
+        isovalue: float = 0.0,
+        precision: Literal["f64", "f32_stable"] = "f64",
+    ) -> None: ...
+    @property
+    def n(self) -> int: ...
+    @property
+    def points(self) -> array[float]: ...
+    @property
+    def normals(self) -> array[float]: ...
+    def signed_distance(self, queries: Buffer) -> array[float]: ...
+    def distance(self, queries: Buffer) -> array[float]:
+        """Alias of ``signed_distance``."""
+    def gradient(self, queries: Buffer) -> array[float]: ...
+    def distance_and_gradient(self, queries: Buffer) -> tuple[array[float], array[float]]: ...
+    def laplacian(self, queries: Buffer) -> array[float]: ...
+    def save_tori(self, path: str) -> None:
+        """Our binary tori file, tied to the cloud by a hash (``load_tori`` checks it)."""
+    def export_tori(self) -> dict[str, array[float]]:
+        """The authors' layout: ``centers`` (3n), ``axes`` (2n angles theta, phi), ``major``
+        (n), ``minor`` (n, signed)."""
+    @property
+    def tori(self) -> dict[str, array[float]]:
+        """``export_tori()`` plus ``axis_vectors`` (3n), ``sigma`` (n), ``coefficients`` (6n)."""
+    @property
+    def build_report(self) -> dict[str, object] | None: ...
+    @property
+    def eval_report(self) -> dict[str, object] | None: ...
+    @property
+    def cloud_report(self) -> dict[str, object]: ...
+    @property
+    def options(self) -> dict[str, object]: ...
+    def with_options(self, **options: object) -> PointsAsTori:
+        """The same tori with other evaluation options."""
+    def reconstruct(
+        self,
+        level: float | None = None,
+        resolution: int | Buffer | None = None,
+        bbox: Buffer | None = None,
+        **options: object,
+    ) -> tuple[array[float], array[int]] | tuple[object, ...]:
+        """Marching cubes on ``φ = level`` (default 0): ``(vertices, faces)``; ``normals=True``
+        appends vertex normals, ``return_report=True`` appends the report. Options: ``band``
+        (``"lipschitz"``/``"dense"``), ``lipschitz``, ``block``, ``refine_steps``,
+        ``check_mesh``, ``threads``."""
+    def sample_level_set(
+        self, level: float | None = None, count: int | None = None, **options: object
+    ) -> tuple[array[float], array[float]] | tuple[object, ...]: ...
+    def offset(self, c: float) -> PatCsgField: ...
+    def union(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+    def intersect(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+    def subtract(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+
+@final
+class PatCsgField:
+    """A Boolean or offset of fields; evaluates and reconstructs like ``PointsAsTori``."""
+
+    def signed_distance(self, queries: Buffer) -> array[float]: ...
+    def gradient(self, queries: Buffer) -> array[float]: ...
+    def distance_and_gradient(self, queries: Buffer) -> tuple[array[float], array[float]]: ...
+    @property
+    def bbox(self) -> array[float]: ...
+    def reconstruct(
+        self,
+        level: float | None = None,
+        resolution: int | Buffer | None = None,
+        bbox: Buffer | None = None,
+        **options: object,
+    ) -> tuple[object, ...]: ...
+    def sample_level_set(
+        self, level: float | None = None, count: int | None = None, **options: object
+    ) -> tuple[object, ...]: ...
+    def offset(self, c: float) -> PatCsgField: ...
+    def union(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+    def intersect(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+    def subtract(self, other: PointsAsTori | PatCsgField, smooth: float | None = None) -> PatCsgField: ...
+
+@final
+class PatMeshTruth:
+    """Exact signed distance to a closed triangle mesh (closest point on a BVH, winding number
+    sign). Options: ``sign`` (``"auto"``/``"exact"``/``"fast"``), ``beta``, ``threshold``,
+    ``require_closed``, ``threads``."""
+
+    def __init__(self, vertices: Buffer, faces: Buffer, **options: object) -> None: ...
+    @property
+    def mesh_report(self) -> dict[str, object]: ...
+    def signed_distance(self, queries: Buffer) -> array[float]: ...
+    def evaluate(self, queries: Buffer) -> tuple[array[float], array[float]]:
+        """``(signed distance, winding number)``."""
+
+@final
+class Pat2d:
+    """The classical 2D variant: a circle per point from a weighted quadratic fit (``fit_k``,
+    ``bandwidth``), blended like the tori. Points and normals have 2 numbers per row."""
+
+    def __init__(self, points: Buffer, normals: Buffer, **options: object) -> None: ...
+    @property
+    def build_report(self) -> dict[str, object]: ...
+    def signed_distance(self, queries: Buffer) -> array[float]: ...
+    def distance_and_gradient(self, queries: Buffer) -> tuple[array[float], array[float]]: ...
+    def contours(
+        self, bbox: Buffer, nx: int, ny: int, level: float = 0.0
+    ) -> list[tuple[array[float], bool]]: ...
+
+def pat_load_tori(path: str, points: Buffer, normals: Buffer, **options: object) -> PointsAsTori:
+    """A field from a ``save_tori`` file and its cloud (a different cloud is an error)."""
+
+def pat_from_tori_dict(
+    points: Buffer, normals: Buffer, tori: dict[str, Buffer], **options: object
+) -> PointsAsTori:
+    """A field from the authors' tori layout (``export_tori()``)."""
+
+def pat_boolean(
+    a: PointsAsTori | PatCsgField,
+    b: PointsAsTori | PatCsgField,
+    op: Literal["union", "intersect", "subtract"],
+    smooth: float | None = None,
+) -> PatCsgField: ...
+def pat_offset(a: PointsAsTori | PatCsgField, c: float) -> PatCsgField: ...
+def pat_reconstruct(
+    field: PointsAsTori | PatCsgField,
+    level: float | None = None,
+    resolution: int | Buffer | None = None,
+    bbox: Buffer | None = None,
+    **options: object,
+) -> tuple[object, ...]: ...
+def pat_sample_level_set(
+    field: PointsAsTori | PatCsgField, level: float | None = None, count: int | None = None, **options: object
+) -> tuple[object, ...]: ...
+def pat_morphology(
+    field: PointsAsTori | PatCsgField,
+    op: Literal["erode", "dilate", "open", "close"],
+    radius: float,
+    **options: object,
+) -> tuple[PointsAsTori, dict[str, object]]: ...
+def pat_orient_normals(
+    points: Buffer, normals: Buffer, **options: object
+) -> tuple[array[float], dict[str, object]]:
+    """Flip normals by the iteration of Fig. 27 (``vote_k``, ``epsilon_scale``/``epsilon``,
+    ``max_iterations``, plus the ``PointsAsTori`` options)."""
+
+def pat_point_areas(points: Buffer, normals: Buffer, **options: object) -> array[float] | tuple[array[float], dict[str, object]]: ...
+def pat_gwn(points: Buffer, normals: Buffer, queries: Buffer, **options: object) -> array[float] | tuple[array[float], dict[str, object]]: ...
+def pat_fwn(points: Buffer, normals: Buffer, queries: Buffer, **options: object) -> array[float] | tuple[array[float], dict[str, object]]: ...
+def pat_fwn_mesh(vertices: Buffer, faces: Buffer, queries: Buffer, **options: object) -> array[float] | tuple[array[float], dict[str, object]]: ...
+def pat_shc(points: Buffer, normals: Buffer, queries: Buffer, gradient: bool = False, **options: object) -> array[float] | tuple[object, ...]: ...
+def pat_sspd(points: Buffer, normals: Buffer, queries: Buffer, gradient: bool = False, **options: object) -> array[float] | tuple[object, ...]: ...
+def pat_lse(points: Buffer, normals: Buffer, queries: Buffer, gradient: bool = False, **options: object) -> array[float] | tuple[object, ...]: ...
+def pat_defaults() -> dict[str, object]:
+    """The defaults of the ``PointsAsTori`` options, read from the library."""

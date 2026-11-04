@@ -940,6 +940,61 @@ the defaults equal the library's): `src/repulsive_surfaces.rs`; tests of the whe
 `python-tests/test_repulsive_surfaces.py` (which also checks the `.pyi` defaults against
 `repulsive_surface_defaults()`).
 
+## Points as Tori: `PointsAsTori` and friends
+
+Signed distance to an oriented point cloud by blending one fitted torus per point (Nicole Feng,
+Ioannis Gkioulekas, Keenan Crane, *Points as Tori*, ACM TOG 45(4), 2026; crate
+`ddg-points-as-tori`, `SPEC.md` there). Everything is in the submodule `ddg_tools.points_as_tori`
+(`from ddg_tools import points_as_tori as pat`) and, with the prefix `pat_` for functions and
+`Pat` for two classes, directly in `ddg_tools`. The bundled network weights (the authors', MIT)
+add 6.4 MB to the wheel. Arrays go in as flat or `(n, 3)` buffers (numpy arrays included) and come
+out as flat `array('d')` (`numpy.asarray(a).reshape(-1, 3)` for rows); reports are dicts; the GIL
+is released in every long call; all failures raise `PointsAsToriError` (a `ValueError` and a
+`DdgError`) with the library's message.
+
+```python
+f = pat.PointsAsTori(points, normals)               # builds the tori (CPU; device="cuda"/"auto" on a CUDA wheel)
+d = f.signed_distance(queries)                      # negative inside
+d, g = f.distance_and_gradient(queries); lap = f.laplacian(queries)
+verts, faces = f.reconstruct(0.0, 128)              # marching cubes: level, resolution, bbox=(min xyz, max xyz)
+f.save_tori("a.tori"); g = pat.load_tori("a.tori", points, normals)   # tied to the cloud by a hash
+t = f.export_tori()                                 # the authors' layout: centers, axes (angles), major, minor
+h = pat.boolean(f, other, "union"); h = f.offset(0.05)  # CsgField: same evaluation and reconstruction methods
+```
+
+* **Options** (keywords of the constructor; `pat_defaults()` lists them and the stub test checks
+  them): `device` (`"cpu"`, `"cuda"`, `"auto"`), `cuda_ordinal`, `threads`, `gpu_matmul`
+  (`"tf32"` default, `"split3"` agrees with the CPU to ~1e-6), `feature_order`, `sign_rule`
+  (`"reference"`, `"geometric"`), `eigen_rule` (`"reference"`, `"robust"`), `k`, `weights`
+  (a safetensors file), `normal_policy` (`"require_unit"`, `"normalize"`), and the evaluation
+  rule: `neighborhood` (`"knn"` with `knn_k`, `"all"`, `"radius"` with `radius`), `lambda_rule`
+  (`"per_query"` with `lambda_c`, `"constant"` with `lambda_value`, `"paper"`), `paper=True` (the
+  Sec. 4.2 configuration), `gradient` (`"frozen"`, `"exact"`), `isovalue`, `precision`
+  (`"f64"`, `"f32_stable"` on the GPU), `area_weights` (None, `"barill"` or an array).
+  `f.with_options(...)` re-evaluates the same tori with other evaluation options.
+* **Reports**: `build_report` (timings, devices, fit counters), `eval_report` (the last
+  evaluation), `cloud_report`, `options`. `return_report=True` appends the report to the result of
+  `reconstruct`, `sample_level_set` and the baselines.
+* **Applications**: `pat.reconstruct` / `f.reconstruct` (`band`, `lipschitz`, `block`,
+  `refine_steps`, `normals=True`), `pat.boolean(a, b, op, smooth=None)`, `pat.offset`,
+  `pat.sample_level_set(field, level, count, seed=...)`, `pat.morphology(field, "erode" | "dilate"
+  | "open" | "close", radius)` (returns a new `PointsAsTori` and a report), `pat.orient_normals`
+  (Fig. 27), `Pat2d` (the classical 2D variant: circles from a local quadratic fit).
+* **Baselines** for evaluation scripts: `point_areas` (Barill), `gwn` (`regularization=eps`), `fwn`
+  and `fwn_mesh` (Barill's hierarchical winding number), `shc`, `sspd`, `lse` (`gradient=True`
+  adds the gradients; `shc_zero_value` as in the Rust crate), and `MeshTruth(vertices, faces)`:
+  the exact signed distance to a closed triangle mesh.
+* **Determinism**: results do not depend on `threads` (bitwise, tested). On the GPU they are
+  bitwise repeatable on the same device; against the CPU `tf32` is within ~2e-4 on the
+  coefficients.
+* `gpu_info()` is the one of the repulsive-surfaces flow. The wheel built with `DDG_WHEEL_CUDA=1`
+  (`--features cuda`) now carries the CUDA back ends of both crates.
+
+Glue: `src/python/points_as_tori.rs`; logic (pure Rust): `src/points_as_tori.rs`; tests of the
+wheel: `python-tests/test_points_as_tori.py` (parity with the authors' program on the golden
+clouds of `runs_tmp/pat-ref/` when present, round trips, errors, reconstruction, CSG, morphology,
+orientation, baselines, determinism, the `.pyi` defaults).
+
 ## What `unwrap` does
 
 `src/pipeline.rs`, function `run_pipeline`, is the only call into a pipeline: it hands the
@@ -980,6 +1035,7 @@ assembles the report. New options become fields of `UnwrapOptions` and keyword a
 | `src/measure.rs` | distortion measured on the result |
 | `src/pack.rs` | packing charts into the unit square |
 | `src/python.rs`, `src/python/cut.rs`, `src/python/sphere.rs`, `src/python/developability.rs` | the PyO3 glue (cargo feature `python`) |
+| `src/points_as_tori.rs`, `src/python/points_as_tori.rs` | Points as Tori: logic over `ddg-points-as-tori` (pure Rust) and its PyO3 glue |
 | `ddg_tools.pyi` | type stubs, shipped in the wheel |
 | `python-tests/` | tests of the built wheel |
 
@@ -1021,6 +1077,10 @@ The Blender side is built and tested with `scripts/blender-test.sh`; see `blende
 ## References
 
 This crate contains no algorithm of its own. The pipeline it calls (`ddg-uv`) implements
+
+- Nicole Feng, Ioannis Gkioulekas, Keenan Crane. *Points as Tori: Fast Pointwise Signed Distance
+  for Point Clouds.* ACM Transactions on Graphics 45(4), 2026. <https://doi.org/10.1145/3811385>
+  (`PointsAsTori`, through `ddg-points-as-tori`; the authors' MIT reference code and weights)
 
 - Yousuf Soliman, Dejan Slepčev, Keenan Crane. *Optimal Cone Singularities for Conformal
   Flattening.* ACM Transactions on Graphics 37(4), 2018.
