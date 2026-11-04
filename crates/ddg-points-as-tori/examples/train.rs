@@ -417,7 +417,8 @@ fn compare_step(a: &Args, file: &str, batch: usize) -> Result<(), PatError> {
         let t = std::time::Instant::now();
         let g = step_planned(&NetParams::from_model(&model, &gpu), &gpu, &prep, &sp, &og, true)?;
         let tg = t.elapsed().as_secs_f64();
-        let flat = |o: &ddg_points_as_tori::train::StepOut| -> Vec<f64> { o.grads.as_ref().map(|g| g.iter().flat_map(|t| t.to_f64()).collect()).unwrap_or_default() };
+        let flat =
+            |o: &ddg_points_as_tori::train::StepOut| -> Vec<f64> { o.grads.as_ref().map(|g| g.iter().flat_map(|t| t.to_f64()).collect()).unwrap_or_default() };
         let (gc, gg) = (flat(&c), flat(&g));
         let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
         let diff: Vec<f64> = gc.iter().zip(&gg).map(|(x, y)| x - y).collect();

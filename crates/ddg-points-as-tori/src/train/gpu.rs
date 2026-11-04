@@ -22,7 +22,7 @@
 //! summed on the host in f64, as on the CPU.
 
 use super::loss::{BlendPlan, CloudFit, LossOptions, LossValue};
-use super::net::{NetParams, PT, forward};
+use super::net::{NetParams, PT};
 use super::step::{PreparedShape, StepOptions, scale_raw, select_rows};
 use super::tfit::{Ctx, FitGeometry, fit_tensor, to_f64};
 use crate::PatError;
@@ -351,6 +351,114 @@ pub fn loss_and_grad(
     Ok((val, grad))
 }
 
+/// Row groups of the training forward ([`forward_split`]); `PAT_ROW_GROUPS` overrides it
+/// (measurements).
+pub const ROW_GROUPS: usize = 64;
+
+fn row_groups() -> usize {
+    std::env::var("PAT_ROW_GROUPS").ok().and_then(|v| v.parse().ok()).filter(|&g| g > 0).unwrap_or(ROW_GROUPS)
+}
+
+/// A per-column parameter `[c]` broadcast over `[g, rows, c]` through `[g, 1, c]`: its gradient
+/// is then reduced in two short stages (over the rows of each group by the broadcast, over the
+/// groups by `expand`'s backward), each with many parallel units. Reducing the `[16384, c]`
+/// gradient over its leading axis in one go, as burn does for a bias or a LayerNorm scale, runs
+/// CubeCL's unit strategy on `c/4` threads that each walk all rows (0.24–0.9 ms per parameter,
+/// measured; NOTES-WP10.md).
+fn bcast(p: Tensor<1>, g: usize) -> Tensor<3> {
+    let c = p.dims()[0];
+    p.reshape([1, 1, c]).expand([g, 1, c])
+}
+
+fn groups_for(n: usize, groups: usize) -> usize {
+    if groups > 1 && n.is_multiple_of(groups) { groups } else { 1 }
+}
+
+/// `x W + b` for `x` `[n, din]` as a matmul broadcast over `g` row groups
+/// (`[g, n/g, din] · [1, din, dout]`), so that the weight gradient is `g` partial products summed
+/// by a short reduction (a split-K by hand; burn's folded `[din, n]·[n, dout]` weight gradient runs
+/// on a few SMs at these shapes), and the bias through [`bcast`].
+fn lin_split(x: Tensor<2>, l: &burn::nn::Linear, groups: usize) -> Tensor<2> {
+    let [n, din] = x.dims();
+    let w = l.weight.val();
+    let dout = w.dims()[1];
+    let g = groups_for(n, groups);
+    let y = x.reshape([g, n / g, din]).matmul(w.unsqueeze::<3>());
+    match &l.bias {
+        Some(b) => (y + bcast(b.val(), g)).reshape([n, dout]),
+        None => y.reshape([n, dout]),
+    }
+}
+
+/// burn's LayerNorm (the backend's default `layer_norm`: mean, centered, two-pass variance,
+/// `√(var + ε)`, scale, shift; the same operations) on `x` `[n, e]` viewed as `[g, n/g, e]`, with
+/// the scale and shift through [`bcast`].
+fn ln_split(x: Tensor<2>, ln: &burn::nn::LayerNorm, groups: usize) -> Tensor<2> {
+    let [n, e] = x.dims();
+    let g = groups_for(n, groups);
+    let x = x.reshape([g, n / g, e]);
+    let mean = x.clone().mean_dim(2);
+    let c = x - mean;
+    let var = (c.clone() * c.clone()).mean_dim(2);
+    let y = c / (var + crate::network::LAYER_NORM_EPS).sqrt() * bcast(ln.gamma.val(), g);
+    let y = match &ln.beta {
+        Some(b) => y + bcast(b.val(), g),
+        None => y,
+    };
+    y.reshape([n, e])
+}
+
+/// The network of [`crate::network::burn::PatNet::forward`] (same parameters, same operations up to
+/// round-off: pre-LN blocks, attention scores divided by `√d_k` after the product, padded keys
+/// filled with burn's `−1e4`, softmax, GELU-tanh) with the linears and norms of [`lin_split`] and
+/// [`ln_split`] on `[groups, rows, ·]` views, whose parameter gradients reduce fast on the GPU.
+/// Raw outputs `[B, 6]` of features `[B, T, 6]`.
+///
+/// [formula: pat-network]
+pub fn forward_split(
+    net: &crate::network::burn::PatNet,
+    heads: usize,
+    x: Tensor<3>,
+    mask_pad: Option<Tensor<2, burn::tensor::Bool>>,
+    groups: usize,
+) -> Tensor<2> {
+    use burn::tensor::activation::{gelu_approximate, softmax};
+    let [b, t, c] = x.dims();
+    let n = b * t;
+    let g = groups;
+    let h0 = lin_split(x.reshape([n, c]), &net.input, g);
+    let e = h0.dims()[1];
+    let d = e / heads;
+    let mut h = ln_split(h0, &net.input_norm, g);
+    let mask = mask_pad.map(|m| m.reshape([b, 1, 1, t]));
+    for blk in &net.blocks {
+        let a = ln_split(h.clone(), &blk.norm1, g);
+        let split = |y: Tensor<2>| y.reshape([b, t, heads, d]).swap_dims(1, 2);
+        let q = split(lin_split(a.clone(), &blk.attention.query, g));
+        let k = split(lin_split(a.clone(), &blk.attention.key, g));
+        let v = split(lin_split(a, &blk.attention.value, g));
+        let mut sc = q.matmul(k.transpose()).div_scalar((d as f32).sqrt());
+        if let Some(m) = &mask {
+            sc = sc.mask_fill(m.clone(), -1.0e4);
+        }
+        let ctx = softmax(sc, 3).matmul(v).swap_dims(1, 2).reshape([n, e]);
+        h = h + lin_split(ctx, &blk.attention.output, g);
+        let f = ln_split(h.clone(), &blk.norm2, g);
+        h = h + lin_split(gelu_approximate(lin_split(f, &blk.ffn1, g)), &blk.ffn2, g);
+    }
+    let h = ln_split(h, &net.final_norm, g);
+    let center = h.reshape([b, t, e]).narrow(1, 0, 1).reshape([b, e]);
+    lin_split(center, &net.head, 1)
+}
+
+/// [`super::net::forward`] through [`forward_split`].
+fn forward_rows(net: &crate::network::burn::PatNet, heads: usize, ctx: &Ctx, f: &super::net::RowFeatures, lo: usize, hi: usize) -> Tensor<2> {
+    let (k, b) = (f.k, hi - lo);
+    let x = ctx.t3(f.feats[lo * k * 6..hi * k * 6].to_vec(), [b, k, 6]);
+    let mask = f.pad.as_ref().map(|p| Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(p[lo * k..hi * k].to_vec(), [b, k]), &ctx.dev));
+    forward_split(net, heads, x, mask, row_groups())
+}
+
 /// `sel` padded to a multiple of `batch` with copies of its first row, and the batch count.
 fn padded(sel: &[u32], batch: usize) -> (Vec<u32>, usize) {
     let nb = sel.len().div_ceil(batch);
@@ -372,7 +480,7 @@ pub fn coefficients(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[
         let (net, _) = params.build(ctx, false)?;
         let mut raw = Vec::with_capacity(6 * rows.len());
         for b in 0..nb {
-            raw.extend(to_f64(forward(&net, ctx, &sub, b * batch, (b + 1) * batch)));
+            raw.extend(to_f64(forward_rows(&net, params.cfg.heads, ctx, &sub, b * batch, (b + 1) * batch)));
         }
         Ok(raw)
     }))
@@ -397,7 +505,7 @@ pub fn backprop(params: &NetParams, ctx: &Ctx, prep: &PreparedShape, sel: &[u32]
         let mut acc: Option<Vec<PT>> = None;
         for b in 0..nb {
             let (lo, hi) = (b * batch, (b + 1) * batch);
-            let y = forward(&net, ctx, &sub, lo, hi);
+            let y = forward_rows(&net, params.cfg.heads, ctx, &sub, lo, hi);
             let wt = ctx.t2(w[6 * lo..6 * hi].to_vec(), [batch, 6]);
             let grads = (y * wt).sum_dim(1).sum_dim(0).backward();
             let g: Vec<PT> = leaves
@@ -518,9 +626,273 @@ mod tests {
             let gmax = gc.iter().fold(0f64, |m, x| m.max(x.abs()));
             let dmax = gc.iter().zip(&gg).fold(0f64, |m, (x, y)| m.max((x - y).abs()));
             let rl = (vc.loss - vg.loss).abs() / vc.loss;
-            eprintln!("{sign:?}/{eigen:?}: loss CPU {} GPU {} (rel {rl:.2e}), ∂L/∂a max|Δ|/max|g| {:.2e}, {} pairs", vc.loss, vg.loss, dmax / gmax, plan.pairs());
+            eprintln!(
+                "{sign:?}/{eigen:?}: loss CPU {} GPU {} (rel {rl:.2e}), ∂L/∂a max|Δ|/max|g| {:.2e}, {} pairs",
+                vc.loss,
+                vg.loss,
+                dmax / gmax,
+                plan.pairs()
+            );
             assert!(rl < 1e-5 && dmax / gmax < tol, "GPU loss differs from the CPU");
             assert_eq!(vc.nonfinite, vg.nonfinite);
+        }
+    }
+
+    /// Forward + backward time of the network's parts at the training batch shape (measurement).
+    #[test]
+    #[ignore]
+    fn profile_network_parts() {
+        use burn::nn::LayerNormConfig;
+        use burn::tensor::activation::{gelu_approximate, softmax};
+        let Ok(ctx) = cuda_ctx(0) else { return };
+        let b: usize = std::env::var("PAT_B").ok().and_then(|v| v.parse().ok()).unwrap_or(256);
+        let (t, e, h, m) = (64usize, 128usize, 8usize, 512usize);
+        let d = e / h;
+        let mut s = 1u64;
+        let mut rnd = |n: usize| -> Vec<f32> { (0..n).map(|_| (lcg(&mut s) - 0.5) as f32).collect() };
+        let x0 = Tensor::<3>::from_data(TensorData::new(rnd(b * t * e), [b, t, e]), &ctx.dev);
+        let w_e = Tensor::<2>::from_data(TensorData::new(rnd(e * e), [e, e]), &ctx.dev);
+        let w_m = Tensor::<2>::from_data(TensorData::new(rnd(e * m), [e, m]), &ctx.dev);
+        let time = |name: &str, f: &dyn Fn(Tensor<3>) -> Tensor<3>| {
+            for rep in 0..3 {
+                let t0 = std::time::Instant::now();
+                for _ in 0..8 {
+                    let x = x0.clone().autodiff().require_grad();
+                    let y = f(x.clone());
+                    let g = y.sum_dim(2).sum_dim(1).sum_dim(0).backward();
+                    let _ = x.grad(&g).map(|g| g.slice([0..1, 0..1, 0..1]).into_data());
+                }
+                if rep == 2 {
+                    eprintln!("{name}: {:.2} ms per batch of {b} (fwd + bwd)", t0.elapsed().as_secs_f64() * 1e3 / 8.0);
+                }
+            }
+        };
+        // reductions over the leading rows (bias and LayerNorm parameter gradients)
+        for cols in [128usize, 512] {
+            let g = Tensor::<2>::from_data(TensorData::new(rnd(b * t * cols), [b * t, cols]), &ctx.dev);
+            let g3 = g.clone().reshape([b, t, cols]);
+            let variants: Vec<(&str, Box<dyn Fn() -> Tensor<2>>)> = vec![
+                ("sum_dim(0)", Box::new(|| g.clone().sum_dim(0))),
+                ("[B,T,C] sum_dim(0).sum_dim(1)", Box::new(|| g3.clone().sum_dim(0).sum_dim(1).reshape([1, cols]))),
+                ("swap_dims then sum_dim(1)", Box::new(|| g.clone().swap_dims(0, 1).sum_dim(1).reshape([1, cols]))),
+                ("contiguous transpose then sum_dim(1)", Box::new(|| (g.clone().swap_dims(0, 1) * 1.0).sum_dim(1).reshape([1, cols]))),
+                (
+                    "[128, N/128, C] sum_dim(1) then sum_dim(0)",
+                    Box::new(|| g.clone().reshape([128, b * t / 128, cols]).sum_dim(1).sum_dim(0).reshape([1, cols])),
+                ),
+            ];
+            for (name, f) in &variants {
+                let _ = f().into_data();
+                let t0 = std::time::Instant::now();
+                for _ in 0..20 {
+                    let _ = f().into_data();
+                }
+                eprintln!("reduce [{}, {cols}] {name}: {:.3} ms", b * t, t0.elapsed().as_secs_f64() * 1e3 / 20.0);
+            }
+        }
+        // the whole network, parameters tracked (as pass 4) and not
+        let params = NetParams::from_model(&crate::Model::reference().unwrap(), &ctx);
+        for track in [false, true] {
+            let (net, leaves) = params.build(&ctx, track).unwrap();
+            let feats = Tensor::<3>::from_data(TensorData::new(rnd(b * t * 6), [b, t, 6]), &ctx.dev);
+            for rep in 0..3 {
+                let t0 = std::time::Instant::now();
+                for _ in 0..8 {
+                    let x = feats.clone().autodiff().require_grad();
+                    let y = if std::env::var_os("PAT_SPLIT").is_some() {
+                        forward_split(&net, 8, x.clone(), None, ROW_GROUPS)
+                    } else {
+                        net.forward(x.clone(), None)
+                    };
+                    let g = y.sum_dim(1).sum_dim(0).backward();
+                    let gx = x.grad(&g).map(|g| g.slice([0..1, 0..1, 0..1]).into_data());
+                    if track && let Some(PT::D2(t)) = leaves.first() {
+                        let _ = t.grad(&g).map(|g| g.slice([0..1, 0..1]).into_data());
+                    }
+                    let _ = gx;
+                }
+                if rep == 2 {
+                    eprintln!("network (params tracked: {track}): {:.2} ms per batch of {b} (fwd + bwd)", t0.elapsed().as_secs_f64() * 1e3 / 8.0);
+                }
+            }
+            if track {
+                continue;
+            }
+            let t0 = std::time::Instant::now();
+            for _ in 0..8 {
+                let y = net.forward(feats.clone(), None);
+                let _ = y.slice([0..1, 0..1]).into_data();
+            }
+            eprintln!("network forward only: {:.2} ms per batch of {b}", t0.elapsed().as_secs_f64() * 1e3 / 8.0);
+        }
+        // bias adds with tracked biases, 8 in a row, several formulations
+        for (name, mode) in [("x + b[1,E]", 0), ("grouped [32, N/32, E] + b", 1), ("x + b, b untracked", 2), ("(x + b) then * 1.0001", 3)] {
+            let bs: Vec<Tensor<1>> = (0..8)
+                .map(|_| {
+                    let b0 = Tensor::<1>::from_data(TensorData::new(rnd(e), [e]), &ctx.dev);
+                    if mode == 2 { b0 } else { b0.autodiff().require_grad() }
+                })
+                .collect();
+            for rep in 0..3 {
+                let t0 = std::time::Instant::now();
+                for _ in 0..8 {
+                    let x = x0.clone().reshape([b * t, e]).autodiff().require_grad();
+                    let mut y = x.clone();
+                    for bb in &bs {
+                        y = match mode {
+                            1 => (y.reshape([32, b * t / 32, e]) + bb.clone().unsqueeze::<3>()).reshape([b * t, e]),
+                            3 => (y + bb.clone().unsqueeze::<2>()).mul_scalar(1.0001),
+                            _ => y + bb.clone().unsqueeze::<2>(),
+                        };
+                    }
+                    let g = y.sum_dim(1).sum_dim(0).backward();
+                    let _ = x.grad(&g).map(|g| g.slice([0..1, 0..1]).into_data());
+                }
+                if rep == 2 {
+                    eprintln!("8 bias adds, {name}: {:.2} ms per batch of {b} (fwd + bwd)", t0.elapsed().as_secs_f64() * 1e3 / 8.0);
+                }
+            }
+        }
+        // the network with one category of parameters tracked
+        for cat in ["linear weights", "linear biases", "norm params", "attention q/k/v/o", "ffn", "head+input"] {
+            let (mut net, _) = params.build(&ctx, false).unwrap();
+            let tr2 = |p: &mut burn::module::Param<Tensor<2>>| *p = burn::module::Param::from_tensor(p.val().autodiff().require_grad());
+            let tr1 = |p: &mut burn::module::Param<Tensor<1>>| *p = burn::module::Param::from_tensor(p.val().autodiff().require_grad());
+            let lin = |l: &mut burn::nn::Linear, w: bool, bias: bool| {
+                if w {
+                    tr2(&mut l.weight);
+                }
+                if bias && let Some(b) = l.bias.as_mut() {
+                    tr1(b);
+                }
+            };
+            let (w, bi) = (cat == "linear weights", cat == "linear biases");
+            for blk in &mut net.blocks {
+                let att = cat == "attention q/k/v/o";
+                let ffn = cat == "ffn";
+                for l in [&mut blk.attention.query, &mut blk.attention.key, &mut blk.attention.value, &mut blk.attention.output] {
+                    lin(l, w || att, bi || att);
+                }
+                for l in [&mut blk.ffn1, &mut blk.ffn2] {
+                    lin(l, w || ffn, bi || ffn);
+                }
+                if cat == "norm params" {
+                    for n in [&mut blk.norm1, &mut blk.norm2] {
+                        tr1(&mut n.gamma);
+                        if let Some(b) = n.beta.as_mut() {
+                            tr1(b);
+                        }
+                    }
+                }
+            }
+            if cat == "head+input" {
+                lin(&mut net.head, true, true);
+                lin(&mut net.input, true, true);
+            }
+            let feats = Tensor::<3>::from_data(TensorData::new(rnd(b * t * 6), [b, t, 6]), &ctx.dev);
+            for rep in 0..3 {
+                let t0 = std::time::Instant::now();
+                for _ in 0..8 {
+                    let x = feats.clone().autodiff().require_grad();
+                    let y = net.forward(x.clone(), None);
+                    let g = y.sum_dim(1).sum_dim(0).backward();
+                    let _ = x.grad(&g).map(|g| g.slice([0..1, 0..1, 0..1]).into_data());
+                }
+                if rep == 2 {
+                    eprintln!("network, tracked {cat}: {:.2} ms per batch of {b} (fwd + bwd)", t0.elapsed().as_secs_f64() * 1e3 / 8.0);
+                }
+            }
+        }
+        let mut lnt = LayerNormConfig::new(e).init(&ctx.dev);
+        lnt.gamma = burn::module::Param::from_tensor(lnt.gamma.val().autodiff().require_grad());
+        lnt.beta = lnt.beta.map(|b| burn::module::Param::from_tensor(b.val().autodiff().require_grad()));
+        time("LayerNorm x17, gamma/beta tracked", &|x| {
+            let mut x = x;
+            for _ in 0..17 {
+                x = lnt.forward(x);
+            }
+            x
+        });
+        let ln = LayerNormConfig::new(e).init(&ctx.dev);
+        time("LayerNorm x17", &|x| {
+            let mut x = x;
+            for _ in 0..17 {
+                x = ln.forward(x);
+            }
+            x
+        });
+        time("linear E->E x8", &|x| {
+            let mut x = x;
+            for _ in 0..8 {
+                x = x.matmul(w_e.clone().unsqueeze::<3>());
+            }
+            x
+        });
+        time("ffn E->M gelu M->E x8", &|x| {
+            let mut x = x;
+            for _ in 0..8 {
+                x = gelu_approximate(x.matmul(w_m.clone().unsqueeze::<3>())).matmul(w_m.clone().transpose().unsqueeze::<3>());
+            }
+            x
+        });
+        time("gelu on [B,T,M] x8", &|x| {
+            let mut y = x.matmul(w_m.clone().unsqueeze::<3>());
+            for _ in 0..8 {
+                y = gelu_approximate(y);
+            }
+            y.matmul(w_m.clone().transpose().unsqueeze::<3>())
+        });
+        time("attention core x8", &|x| {
+            let mut x = x;
+            for _ in 0..8 {
+                let q = x.clone().reshape([b, t, h, d]).swap_dims(1, 2);
+                let sc = q.clone().matmul(q.clone().transpose()).div_scalar((d as f32).sqrt());
+                let w = softmax(sc, 3);
+                x = w.matmul(q).swap_dims(1, 2).reshape([b, t, e]);
+            }
+            x
+        });
+    }
+
+    /// [`forward_split`] equals [`crate::network::burn::PatNet::forward`] (f64 on the CPU), outputs
+    /// and parameter gradients, with and without a pad mask.
+    #[test]
+    fn forward_split_equals_patnet() {
+        let ctx = Ctx { dev: crate::network::burn::cpu_device(), dtype: DType::F64 };
+        let cfg = crate::ModelConfig { embed: 16, layers: 2, heads: 2, mlp: 32, k: 8, n_freq: 0 };
+        let mut params = NetParams::init(&cfg, 5, &ctx);
+        // a non-trivial head (the init's head kernel is zero) and LayerNorm parameters
+        let mut s = 11u64;
+        params = params
+            .with_values(params.items.iter().map(|p| p.value.like(p.value.to_f64().iter().map(|v| v + 0.3 * (lcg(&mut s) - 0.5)).collect(), &ctx)).collect());
+        let (b, t) = (8usize, 8usize);
+        let feats: Vec<f64> = (0..b * t * 6).map(|_| lcg(&mut s) - 0.5).collect();
+        let pad: Vec<bool> = (0..b * t).map(|i| i % t >= t - (i / t) % 3).collect();
+        for mask in [false, true] {
+            let mk = || mask.then(|| Tensor::<2, burn::tensor::Bool>::from_data(TensorData::new(pad.clone(), [b, t]), &ctx.dev));
+            let run = |split: bool| -> (Vec<f64>, Vec<f64>) {
+                let (net, leaves) = params.build(&ctx, true).unwrap();
+                let x = ctx.t3(feats.clone(), [b, t, 6]);
+                let y = if split { forward_split(&net, cfg.heads, x, mk(), 4) } else { net.forward(x, mk()) };
+                let w = ctx.t2((0..b * 6).map(|i| (i % 7) as f64 - 3.0).collect(), [b, 6]);
+                let yv = to_f64(y.clone());
+                let g = (y * w).sum_dim(1).sum_dim(0).backward();
+                let gv = leaves
+                    .iter()
+                    .flat_map(|l| match l {
+                        PT::D1(t) => to_f64(t.grad(&g).unwrap()),
+                        PT::D2(t) => to_f64(t.grad(&g).unwrap()),
+                    })
+                    .collect();
+                (yv, gv)
+            };
+            let (y0, g0) = run(false);
+            let (y1, g1) = run(true);
+            let dy = y0.iter().zip(&y1).fold(0f64, |m, (a, b)| m.max((a - b).abs()));
+            let gmax = g0.iter().fold(0f64, |m, a| m.max(a.abs()));
+            let dg = g0.iter().zip(&g1).fold(0f64, |m, (a, b)| m.max((a - b).abs()));
+            eprintln!("mask {mask}: outputs max |Δ| {dy:.2e}, gradients max |Δ|/max|g| {:.2e}", dg / gmax);
+            assert!(dy < 1e-12 && dg / gmax < 1e-12, "forward_split differs from PatNet");
         }
     }
 }
