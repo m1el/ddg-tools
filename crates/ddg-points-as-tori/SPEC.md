@@ -1411,3 +1411,14 @@ accepted).**
    render on the CPU. CPU images are bitwise identical at any thread count; the GPU test
    (`tests/render_gpu.rs`) runs in WP16.
 
+**Saddle demonstration (user request 2026-11-04; `SADDLE-DEMO.md`, 45d0435; accepted).** Fat torus (28.8 % saddle;
+uniform, 80 % inner, inner half only) and a hyperboloid spool (47 %), headline numbers from the authors' program
+unmodified. (1) The released network predicts 0 saddle tori on all 8 clouds (100 % spindle, R/|r| ≈ 0.09) but its
+field is as accurate at saddles as at convex points; it loses precision (faceted zero set, band error 13–81× that
+of correct tori), not correctness. (2) Exact forms through the authors' fit turn 100 % of saddle tori inside out:
+φ ≈ −φ_true near saddles, spurious solids in the hole/waist (Hausdorff 0.71–0.81). (3) The one-line center fix
+(= our `Geometric`, to 2e-12) makes the exact-form field essentially exact (band MAE ≤ 5e-4 at 512 points).
+Our crate equals their program on these inputs (N 7.6e-7, E-ref 1.9e-12). Found on the way: frame-aligned exact
+forms (a11 = 0) make `EigenRule::Reference` fit a sphere in both programs (`Robust` is correct); the authors'
+`winding_number` returns minus the usual GWN.
+
