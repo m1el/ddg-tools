@@ -1198,3 +1198,28 @@ proposals"; all accepted by the orchestrator).** These override §5, §7 and §1
 6. `SignRule` default is still open: the network predicted saddles only on femur (4/3897;
    Geometric marginally better). WP14 adds clouds with saddles and meshes (e.g. Thingi10K
    samples, analytic saddle shapes from WP8).
+
+**Resolutions after marching cubes and applications (WP6, 2026-11-04; `NOTES-WP6.md`;
+proposals accepted).**
+1. **The released blend is discontinuous.** The largest `|Δφ|/h` along grid edges grows like
+   `1/h` (bunny 24/48/99 at 64/128/256). Likely mechanism (orchestrator, to be confirmed in WP14):
+   with the default 32-NN neighborhood, σ_x and λ_x are continuous (k-th NN distance), but a point
+   entering or leaving the set jumps in weight. Near the surface (`ρ_min ≪ σ`) the jump is
+   ~e^{−C}. In the far field all 32 weights are similar, so a swap moves φ by up to ~1/32 of
+   `g_new − g_old`. Our field equals the authors' to 2.6e-7, so this is the published method's
+   behavior, not the port's. Consequences:
+   - §8.6's Lipschitz bound is a heuristic (default 2), and MC uses WP6's growth rule (a kept
+     block whose face toward a skipped neighbor has a sign change keeps that neighbor).
+   - WP14 measures, per evaluation rule (`Knn32`/PerQuery default, `PaperHeuristic` radius,
+     `All`): the jump statistic, grid error, narrow-band error, eikonality, and the closed
+     components of the zero level set against the truth mesh. Femur has 3/6/24 components at
+     64/128/256 and the bunny 18, so spurious components are likely related. If a continuous
+     rule is better on these measures, it becomes a candidate default (a decision for the user).
+   - An optional continuous kNN variant (weights tapered to zero at the k-th neighbor, ours) may
+     be added for this comparison. It is not on by default.
+2. MC builds crossing polygons from faces, with no 256-entry table; fans with a diagonal on a
+   cube face are forbidden, and a centroid star is the fallback. `refine_steps` of safeguarded
+   Newton along edges.
+3. `Csg::Leaf(Arc<dyn ImplicitField>)`, so baselines can be CSG leaves.
+4. The grid is stored densely (256³ = 136 MB; limit 2^29 points). A sparse/banded store is an open
+   item if the Blender operator needs 512³+.
