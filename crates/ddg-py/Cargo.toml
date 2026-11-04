@@ -22,7 +22,7 @@ python = ["dep:pyo3"]
 # The CUDA back end of the Repulsive Surfaces flow (`device="cuda"` / `"auto"`): forwards to
 # ddg-repulsive-surfaces/cuda. Off by default, so the default wheel is unchanged. Nothing CUDA is
 # needed to build; the wheel loads the driver and libnvrtc.so.12 when a device is requested.
-cuda = ["ddg-repulsive-surfaces/cuda"]
+cuda = ["ddg-repulsive-surfaces/cuda", "ddg-points-as-tori/cuda"]
 
 [dependencies]
 ddg-core = { path = "../ddg-core" }
@@ -55,4 +55,7 @@ ddg-intrinsic-simplification = { path = "../ddg-intrinsic-simplification" }
 # Repulsive Surfaces (Yu, Brakensiek, Schumacher, Crane 2021): tangent-point energy, fractional Sobolev
 # flow, constraints, penalties, obstacles and remeshing for triangle meshes (src/repulsive_surfaces.rs).
 ddg-repulsive-surfaces = { path = "../ddg-repulsive-surfaces" }
+# Points as Tori (Feng, Gkioulekas, Crane 2026): signed distance to oriented point clouds by blending fitted
+# tori; baselines, marching cubes, CSG, morphology, orientation, 2D variant (src/points_as_tori.rs).
+ddg-points-as-tori = { path = "../ddg-points-as-tori" }
 pyo3 = { version = "0.29", optional = true, features = ["abi3-py311"] }

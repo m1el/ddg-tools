@@ -26,6 +26,8 @@
 //!   Schumacher, Crane, *Repulsive Curves* (ACM TOG 40(2), 2021) on curve networks.
 //! * [`repulsive_surfaces`] — `RepulsiveSurfaceSession`, `repulsive_surface_flow`, `surface_energy`: the
 //!   flow of Yu, Brakensiek, Schumacher, Crane, *Repulsive Surfaces* (ACM TOG 40(6), 2021) on triangle meshes.
+//! * [`points_as_tori`] — `PointsAsTori`, marching cubes, CSG, morphology, orientation, baselines, mesh
+//!   truth and the classical 2D variant of Feng, Gkioulekas, Crane, *Points as Tori* (ACM TOG 45(4), 2026).
 //! * [`flip_geodesics`] — `geodesic_path`, `geodesic_network`, `geodesic_bezier`: the edge-flip
 //!   geodesics of Sharp and Crane (ACM TOG 39(6), 2020) on either representation.
 //! * [`simplification`] — `simplify`, `build_hierarchy`, `qem_simplify`: surface simplification with
@@ -63,6 +65,7 @@ pub mod intrinsic_vector;
 pub mod measure;
 pub mod pack;
 pub mod pipeline;
+pub mod points_as_tori;
 pub mod repulsive;
 pub mod repulsive_surfaces;
 pub mod simplification;
